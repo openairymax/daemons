@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libsqlite3-dev libcjson-dev libyaml-dev libcurl4-openssl-dev libssl-dev
+
+      - name: License check
+        run: |
+          if [ -f "LICENSE" ]; then
+            echo "[OK] LICENSE present"
+          else
+            echo "[NO] LICENSE missing" && exit 1
+          fi
+
+      - name: README check
+        run: |
+          if [ -f "README.md" ] || [ -f "README_zh.md" ]; then
+            echo "[OK] README present"
+          else
+            echo "[WARN] README missing"
+          fi
+
+      - name: NOTICE check
+        run: |
+          if [ -f "NOTICE" ]; then
+            echo "[OK] NOTICE present"
+          else
+            echo "[WARN] NOTICE missing"
+          fi
+
+      - name: Source structure check (daemons)
+        run: |
+          echo "[INFO] daemons leaf repo — 12 runtime daemons (gateway_d/llm_d/tool_d/sched_d/market_d/monit_d/channel_d/info_d/notify_d/observe_d/hook_d/plugin_d)"
+          echo "[INFO] C/H files: $(find . -name '*.c' -o -name '*.h' | wc -l)"
+          echo "[INFO] Daemon modules:"
+          for d in gateway_d llm_d tool_d sched_d market_d monit_d channel_d info_d notify_d observe_d hook_d plugin_d common; do
+            if [ -d "$d" ]; then
+              echo "  [OK] $d/"
+            fi
+          done
+
+      - name: SPDX-License-Identifier check
+        run: |
+          bad=$(grep -rl "SPDX-License-Identifier" --include="*.c" --include="*.h" . 2>/dev/null | \
+                xargs grep -L "AGPL-3.0-or-later\|Apache-2.0\|LicenseRef-SPHARX" 2>/dev/null | wc -l)
+          if [ "$bad" -gt 0 ]; then
+            echo "[WARN] $bad file(s) with non-standard SPDX tag"
+          else
+            echo "[OK] All SPDX tags compliant"
+          fi
