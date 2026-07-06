@@ -1,223 +1,278 @@
-# Daemon — AgentRT 用户态服务层
+**Language:** English | [简体中文](README_zh.md)
 
-> **模块路径**: `agentrt/daemons/` | **版本**: v0.1.0
+# Airymax Daemons — Runtime Daemon Services
 
-## 概述
+`agentrt/daemons/`
 
-`agentrt/daemons/` 是 AgentRT 的用户态服务层，由 10+ 个独立进程的守护进程（Daemon）组成，为智能体系统提供完整的后端服务支持。每个守护进程遵循**职责单一原则**，独立运行并通过统一的 IPC 服务总线协作通信，构成一个高可用、可扩展、可插拔的微服务架构。
+**Version:** 0.1.1
+**License:** AGPL-3.0-or-later OR Apache-2.0 (dual-licensed)
+**Branch:** `feature/official-hubs-01`
 
-### 设计目标
+---
 
-- **服务化架构**：每个守护进程独立运行，通过 IPC 通信协作，支持独立部署与扩缩容
-- **职责单一**：每个守护进程只负责一个核心领域，降低耦合度
-- **可插拔**：守护进程可独立部署、升级和替换，不影响其他服务
-- **高可用**：支持主备切换、熔断器保护、故障转移和自动恢复
-- **安全内生**：集成 cupolas 安全框架，所有请求必须验证，零信任架构
-- **协议统一**：所有守护进程通过 JSON-RPC 2.0 协议通信，支持 MCP/A2A/OpenAI API 等协议转换
+## 1. Module Positioning
 
-## 目录结构
+Daemons is the **user-space service layer** of the Airymax agent runtime. It is
+composed of **12 independent daemon processes** that together provide the full
+backend-service substrate for the agent system. Every daemon follows the
+**single-responsibility principle**: it runs as its own process, communicates
+with peers through a unified IPC service bus, and together they form a
+high-availability, scalable, pluggable micro-service architecture sitting on
+top of the Airymax kernel.
+
+Design goals:
+
+- **Service-oriented architecture** — every daemon runs independently and
+  cooperates via IPC; each can be deployed and scaled separately.
+- **Single responsibility** — each daemon owns exactly one core domain,
+  minimizing coupling.
+- **Pluggability** — daemons can be deployed, upgraded, and replaced
+  independently without affecting other services.
+- **High availability** — primary/backup switchover, circuit-breaker
+  protection, failover, and automatic recovery.
+- **Endogenous security** — every daemon links `svc_common`, which
+  transitively links Cupolas; every request is authenticated under a
+  zero-trust model.
+- **Unified protocols** — all daemons communicate over JSON-RPC 2.0, with
+  MCP / A2A / OpenAI-API protocol conversion supported at the gateway.
+
+---
+
+## 2. Directory Structure
 
 ```
 daemons/
-├── CMakeLists.txt          # 顶层构建文件，管理所有子模块
-├── Dockerfile.ci           # CI 环境 Docker 镜像定义
-├── README.md               # 本文件
-├── common/                 # 公共服务库（18+ 组件）
-├── gateway_d/              # API 网关守护进程
-├── llm_d/                  # LLM 服务守护进程
-├── tool_d/                 # 工具执行守护进程
-├── sched_d/                # 任务调度守护进程
-├── market_d/               # 应用市场守护进程
-├── monit_d/                # 监控告警守护进程
-├── channel_d/              # 通信通道守护进程
-├── info_d/                 # 信息服务守护进程
-├── notify_d/               # 通知推送守护进程
-├── observe_d/              # 观测服务守护进程
-├── examples/               # 使用示例
-│   └── example_svc_usage.c
-└── scripts/                # 构建/CI/分析脚本
+├── CMakeLists.txt                 # Top-level build file, manages all sub-modules
+├── Dockerfile.ci                  # CI environment Docker image
+├── README.md                      # This file (English)
+├── README_zh.md                   # Chinese version
+├── LICENSE                        # Dual license texts (AGPL-3.0 + Apache-2.0)
+├── NOTICE                         # Copyright notice
+├── common/                        # Shared service library (svc_common, 18+ components)
+├── gateway_d/                     # API gateway daemon
+├── llm_d/                         # LLM service daemon
+├── tool_d/                        # Tool execution daemon
+├── sched_d/                       # Task scheduler daemon
+├── market_d/                      # Application marketplace daemon
+├── monit_d/                       # Monitoring & alerting daemon
+├── channel_d/                     # Communication channel daemon
+├── info_d/                        # Information service daemon
+├── notify_d/                      # Notification push daemon
+├── observe_d/                     # Observability (OpenTelemetry) daemon
+├── hook_d/                        # Hook daemon (thin shell; core in atoms/coreloopthree)
+├── plugin_d/                      # Plugin daemon
+├── examples/                      # Usage examples (example_svc_usage.c)
+└── scripts/                       # Build / CI / analysis scripts
     ├── ci.sh
     ├── local-ci.sh
     ├── static-analysis.sh
     └── verify-coverage.sh
 ```
 
-## 核心守护进程
+### The 12 Daemons
 
-| 守护进程 | 目录 | 职责 | CMake Target |
-|----------|------|------|-------------|
-| **API 网关** | `gateway_d/` | 外部请求接入，协议转换（HTTP/WS/MCP/A2A/OpenAI API）与路由 | `gateway_d` |
-| **LLM 服务** | `llm_d/` | 大语言模型调用、Token 计数、成本追踪、响应缓存 | `llm_d` |
-| **工具执行** | `tool_d/` | 工具注册/发现、沙箱执行、参数校验、结果缓存 | `tool_d` |
-| **任务调度** | `sched_d/` | 任务分发、4 种调度策略（轮询/加权/优先级/ML） | `sched_d` |
-| **应用市场** | `market_d/` | Agent/Skill/Tool/Template 资源管理、安装、版本控制 | `market_d` |
-| **监控告警** | `monit_d/` | 指标采集、健康检查、告警管理、Agent 死循环检测 | `monit_d` |
-| **通道服务** | `channel_d/` | 通信通道管理与消息路由 | `channel_d` |
-| **信息服务** | `info_d/` | 系统信息查询与状态报告 | `info_d` |
-| **通知服务** | `notify_d/` | 多渠道通知推送（邮件/Slack/Discord） | `notify_d` |
-| **观测服务** | `observe_d/` | OpenTelemetry 可观测性数据采集 | `observe_d` |
-| **公共服务** | `common/` | 共享工具库与兼容层（18+ 组件） | `svc_common` |
+| Daemon | Directory | Responsibility | CMake Target |
+|--------|-----------|----------------|--------------|
+| **API Gateway** | `gateway_d/` | External request intake, protocol conversion (HTTP / WS / MCP / A2A / OpenAI API) and routing | `gateway_d` |
+| **LLM Service** | `llm_d/` | Large-language-model invocation, token counting, cost tracking, response caching | `llm_d` |
+| **Tool Execution** | `tool_d/` | Tool registration / discovery, sandboxed execution, parameter validation, result caching | `tool_d` |
+| **Task Scheduler** | `sched_d/` | Task dispatch with 4 scheduling strategies (round-robin / weighted / priority / ML) | `sched_d` |
+| **Application Marketplace** | `market_d/` | Agent / Skill / Tool / Template resource management, install, versioning | `market_d` |
+| **Monitoring & Alerting** | `monit_d/` | Metric collection, health checks, alert management, agent-infinite-loop detection | `monit_d` |
+| **Channel Service** | `channel_d/` | Communication-channel management and message routing | `channel_d` |
+| **Information Service** | `info_d/` | System information query and status reporting | `info_d` |
+| **Notification Service** | `notify_d/` | Multi-channel notification push (email / Slack / Discord) | `notify_d` |
+| **Observability Service** | `observe_d/` | OpenTelemetry observability data collection | `observe_d` |
+| **Hook Daemon** | `hook_d/` | Thin daemon shell; the hook system core lives in `atoms/coreloopthree/src/hook/` and is obtained by linking `agentrt_coreloopthree` | `hook_d` |
+| **Plugin Daemon** | `plugin_d/` | Plugin lifecycle management and isolation | `plugin_d` |
+| **Shared Library** | `common/` | Shared utility library and compatibility layer (18+ components) — `svc_common` | `svc_common` |
 
-## 架构总览
+### Architecture Overview
 
 ```
 +-------------------------------------------------------------------+
-|                        外部客户端/Agent                              |
+|                  External clients / Agents                         |
 +-------------------------------------------------------------------+
-|   gateway_d (API 网关)                                              |
-|   HTTP/WS/Stdio/MCP/A2A/OpenAI API → JSON-RPC 2.0 → 服务路由       |
+|  gateway_d (API gateway)                                           |
+|  HTTP / WS / Stdio / MCP / A2A / OpenAI API → JSON-RPC 2.0 → route |
 +---+---------------+---------------+---------------+---------------+
     |               |               |               |
 |  +-----------+  +-----------+  +-----------+  +-----------+      |
 |  |  llm_d    |  |  tool_d   |  |  sched_d  |  | market_d  |      |
-|  | LLM 服务   |  | 工具执行   |  | 任务调度   |  | 应用市场   |      |
 |  +-----------+  +-----------+  +-----------+  +-----------+      |
-|               |               |               |               |
 |  +-----------+  +-----------+  +-----------+  +-----------+      |
 |  |  monit_d  |  | channel_d |  |  info_d   |  | notify_d  |      |
-|  | 监控告警   |  | 通道服务   |  | 信息服务   |  | 通知服务   |      |
 |  +-----------+  +-----------+  +-----------+  +-----------+      |
-|               |                                                   |
-|  +-----------+  +--------------------------------------+         |
-|  | observe_d |  |  common (公共服务库 — 18+ 组件)       |         |
-|  | 观测服务   |  |  兼容层/工具库/日志/配置/安全/IPC/指标 |         |
-|  +-----------+  +--------------------------------------+         |
+|  +-----------+  +-----------+  +--------------------------------+ |
+|  | observe_d |  |  hook_d   |  |  plugin_d                      | |
+|  +-----------+  +-----------+  +--------------------------------+ |
+|  +--------------------------------------------------------------+ |
+|  |  common (svc_common — 18+ components, transitively links Cupolas) |
+|  +--------------------------------------------------------------+ |
 +-------------------------------------------------------------------+
-|                         Atom 内核层                                |
+|                    Airymax kernel (atoms)                          |
 +-------------------------------------------------------------------+
 ```
 
-## 通信方式
+---
 
-所有守护进程通过统一的 IPC 服务总线（`ipc_service_bus`）通信，支持多协议消息传递：
+## 3. Upstream / Downstream Dependencies
 
-| 通信方式 | 适用场景 | 延迟 | 协议 |
-|----------|----------|------|------|
-| Unix Socket | 同机守护进程 | < 100μs | JSON-RPC 2.0 |
-| TCP | 跨机守护进程 | < 1ms | JSON-RPC 2.0 |
-| 共享内存 | 高性能数据交换 | < 10μs | 自定义 |
+### Upstream (Daemons depend on)
 
-### IPC 服务总线协议类型
+| Dependency | Source | Purpose |
+|------------|--------|---------|
+| **atoms** | `agentrt/atoms/` | CoreLoopThree (cognition / execution / memory loops), Syscall entry surface, TaskFlow orchestration, Memory primitives — `hook_d` directly links `agentrt_coreloopthree`; every daemon dispatches business logic through `atoms/syscall` |
+| **commons** | `agentrt/commons/` | Logging, config_unified, network, token, cost, observability, cognition, strategy — linked transitively through `svc_common` |
+| **cupolas** | `agentrt/cupolas/` | `svc_common` links Cupolas as `PUBLIC` (`daemon_cupolas_bootstrap.c`), so every daemon automatically inherits Cupolas security — request authentication, input sanitization, audit, sandbox |
+| **protocols** | `agentrt/protocols/` | JSON-RPC 2.0 / AgentsIPC envelope used by the IPC service bus; A2A / MCP adapters used at the gateway boundary |
+| **heapstore** | `agentrt/heapstore/` | Persistence for daemon state — `market_d` / `tool_d` / `llm_d` have dedicated data directories; registry tracks Agent / Skill / Session; token engine budgets LLM usage |
+| **gateway** | `agentrt/gateway/` | `gateway_d` wraps the gateway library and exposes it as a system service |
+| cJSON / libcurl / libyaml / OpenSSL | external | JSON parsing, HTTP client, YAML config, TLS — auto-detected by umbrella CMake |
 
-| 协议 | 说明 |
-|------|------|
-| `IPC_BUS_PROTO_JSON_RPC` | 标准 JSON-RPC 2.0 |
-| `IPC_BUS_PROTO_MCP` | Model Context Protocol |
-| `IPC_BUS_PROTO_A2A` | Agent-to-Agent Protocol |
-| `IPC_BUS_PROTO_OPENAI` | OpenAI API 兼容协议 |
-| `IPC_BUS_PROTO_AUTO` | 自动协议检测 |
+### Downstream (consumers of Daemons)
 
-### IPC 消息类型
+| Consumer | What it uses |
+|----------|--------------|
+| **SDK / Agent applications** | SDK ships daemon client libraries; Agent apps invoke the runtime through the gateway's JSON-RPC 2.0 surface and consume daemon services (LLM, tool, scheduler, marketplace, etc.) |
+| OpenLab applications | OpenLab modules orchestrate daemons through the JSON-RPC 2.0 API |
 
-| 类型 | 说明 |
-|------|------|
-| `IPC_BUS_MSG_REQUEST` | 请求消息 |
-| `IPC_BUS_MSG_RESPONSE` | 响应消息 |
-| `IPC_BUS_MSG_NOTIFICATION` | 通知消息 |
-| `IPC_BUS_MSG_BROADCAST` | 广播消息 |
-| `IPC_BUS_MSG_HEARTBEAT` | 心跳消息 |
-| `IPC_BUS_MSG_DISCOVERY` | 服务发现消息 |
-| `IPC_BUS_MSG_CONTROL` | 控制消息 |
+### Internal Dependency Graph
 
-## 守护进程生命周期
+```
+svc_common  ←  gateway_d  ←  external clients
+          ←  llm_d        ←  gateway_d
+          ←  tool_d       ←  gateway_d, llm_d
+          ←  sched_d      ←  gateway_d
+          ←  market_d     ←  gateway_d
+          ←  monit_d      ←  all daemons (metric reporting)
+          ←  channel_d    ←  gateway_d
+          ←  info_d       ←  gateway_d
+          ←  notify_d     ←  monit_d (alert notifications)
+          ←  observe_d    ←  monit_d (observability)
+          ←  hook_d       ←  sched_d, tool_d (hook injection)
+          ←  plugin_d     ←  market_d, tool_d (plugin lifecycle)
+```
+
+---
+
+## 4. Communication & Lifecycle
+
+### IPC Service Bus
+
+All daemons communicate through the unified `ipc_service_bus`, supporting
+multi-protocol messaging:
+
+| Transport | Scenario | Latency | Protocol |
+|-----------|----------|---------|----------|
+| Unix Socket | Same-machine daemons | < 100 μs | JSON-RPC 2.0 |
+| TCP | Cross-machine daemons | < 1 ms | JSON-RPC 2.0 |
+| Shared memory | High-perf data exchange | < 10 μs | custom |
+
+### Daemon Lifecycle
 
 ```
 INIT → CONFIG_LOAD → SERVICE_REGISTER → IDLE → BUSY → SHUTDOWN
-  ↓        ↓             ↓               ↓      ↓        ↓
-初始化   加载配置    注册到服务发现     等待    处理    优雅关闭
+ init    load cfg      register to SvcDisc   wait    handle   graceful stop
 ```
 
-服务状态枚举（`agentrt_svc_state_t`）：
+Service state enum (`agentrt_svc_state_t`): `NONE / CREATED / INITIALIZING /
+READY / RUNNING / PAUSED / STOPPING / STOPPED / ZOMBIE / ERROR`.
 
-| 状态 | 说明 |
-|------|------|
-| `AGENTRT_SVC_STATE_NONE` | 未初始化 |
-| `AGENTRT_SVC_STATE_CREATED` | 已创建 |
-| `AGENTRT_SVC_STATE_INITIALIZING` | 初始化中 |
-| `AGENTRT_SVC_STATE_READY` | 就绪 |
-| `AGENTRT_SVC_STATE_RUNNING` | 运行中 |
-| `AGENTRT_SVC_STATE_PAUSED` | 已暂停 |
-| `AGENTRT_SVC_STATE_STOPPING` | 停止中 |
-| `AGENTRT_SVC_STATE_STOPPED` | 已停止 |
-| `AGENTRT_SVC_STATE_ZOMBIE` | 僵尸状态 |
-| `AGENTRT_SVC_STATE_ERROR` | 错误状态 |
+---
 
-## 依赖关系
+## 5. Build Instructions
 
-```
-common ← gateway_d ← 外部客户端
-common ← llm_d     ← gateway_d
-common ← tool_d    ← gateway_d, llm_d
-common ← sched_d   ← gateway_d
-common ← market_d  ← gateway_d
-common ← monit_d   ← 所有守护进程（指标上报）
-common ← channel_d ← gateway_d
-common ← info_d    ← gateway_d
-common ← notify_d  ← monit_d（告警通知）
-common ← observe_d ← monit_d（可观测性）
-```
+### Prerequisites
 
-## 构建说明
+- CMake ≥ 3.16
+- C11 compiler (GCC / Clang / MSVC)
+- cJSON library
+- GTest (optional, for unit tests)
+- lcov / genhtml (optional, for coverage reports)
 
-### 前置依赖
-
-- CMake 3.16+
-- C11 编译器（GCC/Clang/MSVC）
-- cJSON 库
-- GTest（可选，用于单元测试）
-- lcov/genhtml（可选，用于覆盖率报告）
-
-### 构建命令
+### Build Commands
 
 ```bash
-# 标准构建
+# Standard build
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 
-# 启用测试
+# Enable tests
 cmake -B build -DBUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build
 
-# 启用覆盖率
+# Enable coverage
 cmake -B build -DBUILD_COVERAGE=ON
 cmake --build build
 cmake --build build --target coverage
 
-# 跨平台构建
+# Cross-platform build
 cmake -B build -DBUILD_ALL_PLATFORMS=ON
 ```
 
-### 构建选项
+### CMake Options
 
-| 选项 | 默认值 | 说明 |
-|------|--------|------|
-| `BUILD_TESTS` | ON | 构建单元测试 |
-| `BUILD_COVERAGE` | OFF | 启用代码覆盖率 |
-| `BUILD_ALL_PLATFORMS` | OFF | 跨平台编译 |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `BUILD_TESTS` | `ON` | Build unit tests |
+| `BUILD_COVERAGE` | `OFF` | Enable code-coverage reporting |
+| `BUILD_ALL_PLATFORMS` | `OFF` | Cross-compile for all platforms |
 
-## 启动方式
+### Build Artifacts
+
+- 12 daemon executables: `gateway_d`, `llm_d`, `tool_d`, `sched_d`,
+  `market_d`, `monit_d`, `channel_d`, `info_d`, `notify_d`, `observe_d`,
+  `hook_d`, `plugin_d` — output to `${CMAKE_BINARY_DIR}/bin/`
+- `svc_common` — shared static library consumed by every daemon
+- Public headers installed under `include/agentrt/`
+
+### Installation
 
 ```bash
-# 启动单个守护进程
-./gateway_d --config gateway_config.json
+cmake --install build --prefix /opt/airymax
+```
 
-# 使用管理器启动所有守护进程
+### Launching
+
+```bash
+# Start a single daemon
+./build/bin/gateway_d --config gateway_config.json
+
+# Start all daemons via the manager
 ./daemon_manager --start-all
 
-# 查看守护进程状态
+# Inspect daemon status
 ./daemon_manager --status
 ```
 
-## CI/CD 脚本
+### CI/CD Scripts
 
-| 脚本 | 用途 |
-|------|------|
-| `scripts/ci.sh` | CI 流水线构建脚本 |
-| `scripts/local-ci.sh` | 本地 CI 模拟脚本 |
-| `scripts/static-analysis.sh` | 静态代码分析 |
-| `scripts/verify-coverage.sh` | 覆盖率验证 |
+| Script | Purpose |
+|--------|---------|
+| `scripts/ci.sh` | CI pipeline build script |
+| `scripts/local-ci.sh` | Local CI simulation |
+| `scripts/static-analysis.sh` | Static code analysis |
+| `scripts/verify-coverage.sh` | Coverage verification |
 
 ---
 
-© 2026 SPHARX Ltd. All Rights Reserved.
+## 6. License
+
+Copyright (c) 2025-2026 SPHARX Ltd. All Rights Reserved.
+
+This module is dual-licensed under the terms of either:
+
+- **GNU Affero General Public License v3.0 or later**
+  ([AGPL-3.0-or-later](https://www.gnu.org/licenses/agpl-3.0.txt)), or
+- **Apache License, Version 2.0**
+  ([Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0.txt))
+
+SPDX-License-Identifier: `AGPL-3.0-or-later OR Apache-2.0`
+
+The full license texts are in the [LICENSE](LICENSE) file; the copyright
+notice is in [NOTICE](NOTICE). You may select either license to comply with.
+The AGPL-3.0-or-later terms apply by default; the Apache-2.0 alternative is
+provided for downstream integration scenarios (e.g., closed-source or
+proprietary distribution) that the AGPL does not accommodate.
