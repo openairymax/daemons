@@ -6,7 +6,7 @@
  */
 
 #include "config_manager.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "safe_string_utils.h"
 
 #include <assert.h>

@@ -10,7 +10,7 @@
 #include "unified_metrics.h"
 
 #include "memory_compat.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "safe_string_utils.h"
 #include "svc_logger.h"
 
@@ -279,7 +279,7 @@ AGENTRT_API int um_register_metric(const char *module_name, const char *name, um
     if (labels)
         safe_strcpy(entry->labels, labels, sizeof(entry->labels));
     entry->type = type;
-    entry->timestamp_ms = agentrt_platform_get_time_ms();
+    entry->timestamp_ms = agentrt_time_ms();
     mod->metric_count++;
 
     g_um.stats.total_registrations++;
@@ -319,7 +319,7 @@ AGENTRT_API int um_increment(const char *module_name, const char *name, uint64_t
 
     entry->value += (double)value;
     entry->count += value;
-    entry->timestamp_ms = agentrt_platform_get_time_ms();
+    entry->timestamp_ms = agentrt_time_ms();
 
     g_um.stats.total_increments++;
 
@@ -352,7 +352,7 @@ AGENTRT_API int um_gauge_set(const char *module_name, const char *name, double v
     }
 
     entry->value = value;
-    entry->timestamp_ms = agentrt_platform_get_time_ms();
+    entry->timestamp_ms = agentrt_time_ms();
 
     g_um.stats.total_updates++;
 
@@ -387,7 +387,7 @@ AGENTRT_API int um_observe(const char *module_name, const char *name, double val
     entry->sum += value;
     entry->count++;
     entry->value = entry->count > 0 ? entry->sum / entry->count : 0;
-    entry->timestamp_ms = agentrt_platform_get_time_ms();
+    entry->timestamp_ms = agentrt_time_ms();
 
     g_um.stats.total_updates++;
 
@@ -616,7 +616,7 @@ AGENTRT_API void um_update_default_metrics(void)
     }
 #endif
 
-    uint64_t uptime __attribute__((unused)) = agentrt_platform_get_time_ms() / 1000;
+    uint64_t uptime __attribute__((unused)) = agentrt_time_ms() / 1000;
     um_increment("system", "process_uptime_seconds", 1);
 }
 

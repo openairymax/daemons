@@ -15,7 +15,7 @@
 #include "daemon_errors.h"
 #include "error.h"
 #include "memory_compat.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "safe_string_utils.h"
 #include "svc_logger.h"
 
@@ -75,7 +75,7 @@ static void transition_state(cb_internal_t *cb, cb_manager_internal_t *mgr, cb_s
         return;
 
     cb->state = new_state;
-    cb->state_changed_at = agentrt_platform_get_time_ms();
+    cb->state_changed_at = agentrt_time_ms();
     cb->stats.state_transitions++;
     cb->stats.last_state_change_time = cb->state_changed_at;
 
@@ -89,7 +89,7 @@ static void transition_state(cb_internal_t *cb, cb_manager_internal_t *mgr, cb_s
         cb->stats.consecutive_successes = 0;
         cb->window_failures = 0;
         cb->window_calls = 0;
-        cb->window_start = agentrt_platform_get_time_ms();
+        cb->window_start = agentrt_time_ms();
     }
 
     cb_event_t event;
@@ -111,7 +111,7 @@ static void transition_state(cb_internal_t *cb, cb_manager_internal_t *mgr, cb_s
 
 static void check_window_reset(cb_internal_t *cb)
 {
-    uint64_t now = agentrt_platform_get_time_ms();
+    uint64_t now = agentrt_time_ms();
     if (cb->config.window_size_ms > 0 && (now - cb->window_start) >= cb->config.window_size_ms) {
         cb->window_start = now;
         cb->window_failures = 0;
@@ -255,8 +255,8 @@ AGENTRT_API circuit_breaker_t cb_create(cb_manager_t manager, const char *name,
 
     cb->failover_config = cb_create_default_failover_config();
     cb->state = CB_STATE_CLOSED;
-    cb->state_changed_at = agentrt_platform_get_time_ms();
-    cb->window_start = agentrt_platform_get_time_ms();
+    cb->state_changed_at = agentrt_time_ms();
+    cb->window_start = agentrt_time_ms();
     cb->manager = mgr;
 
     agentrt_error_t err = agentrt_mutex_init(&cb->mutex);
@@ -335,7 +335,7 @@ AGENTRT_API bool cb_allow_request(circuit_breaker_t breaker)
         return true;
 
     case CB_STATE_OPEN: {
-        uint64_t now = agentrt_platform_get_time_ms();
+        uint64_t now = agentrt_time_ms();
         if (now - cb->state_changed_at >= cb->config.timeout_ms) {
             transition_state(cb, cb->manager, CB_STATE_HALF_OPEN);
             agentrt_mutex_unlock(&cb->mutex);
@@ -380,7 +380,7 @@ AGENTRT_API void cb_record_success(circuit_breaker_t breaker, uint32_t duration_
 
     cb->stats.total_calls++;
     cb->stats.successful_calls++;
-    cb->stats.last_success_time = agentrt_platform_get_time_ms();
+    cb->stats.last_success_time = agentrt_time_ms();
     cb->stats.consecutive_failures = 0;
     cb->stats.consecutive_successes++;
 
@@ -421,7 +421,7 @@ AGENTRT_API void cb_record_failure(circuit_breaker_t breaker, int32_t error_code
 
     cb->stats.total_calls++;
     cb->stats.failed_calls++;
-    cb->stats.last_failure_time = agentrt_platform_get_time_ms();
+    cb->stats.last_failure_time = agentrt_time_ms();
     cb->stats.consecutive_failures++;
     cb->stats.consecutive_successes = 0;
 
@@ -469,7 +469,7 @@ AGENTRT_API void cb_record_timeout(circuit_breaker_t breaker)
     cb->stats.total_calls++;
     cb->stats.timeout_calls++;
     cb->stats.failed_calls++;
-    cb->stats.last_failure_time = agentrt_platform_get_time_ms();
+    cb->stats.last_failure_time = agentrt_time_ms();
     cb->stats.consecutive_failures++;
     cb->stats.consecutive_successes = 0;
 
@@ -558,12 +558,12 @@ AGENTRT_API void cb_reset(circuit_breaker_t breaker)
 
     cb_state_t old = cb->state;
     cb->state = CB_STATE_CLOSED;
-    cb->state_changed_at = agentrt_platform_get_time_ms();
+    cb->state_changed_at = agentrt_time_ms();
     cb->stats.consecutive_failures = 0;
     cb->stats.consecutive_successes = 0;
     cb->window_failures = 0;
     cb->window_calls = 0;
-    cb->window_start = agentrt_platform_get_time_ms();
+    cb->window_start = agentrt_time_ms();
     cb->half_open_calls = 0;
 
     if (old != CB_STATE_CLOSED) {

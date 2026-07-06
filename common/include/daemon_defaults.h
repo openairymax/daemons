@@ -4,103 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file daemon_defaults.h
- * @brief 守护进程共享默认值集中定义
+ * @brief 守护进程共享默认值（重导出）
  *
- * 将分散在各daemon模块中的硬编码超时/重试/缓冲区/端口等默认值
- * 统一到此处，便于全局调整策略和运维配置。
+ * P0.17 阶段 1：实际定义已迁移至 commons/include/agentrt_defaults.h，
+ * 消除 atoms→daemons 编译期反向依赖（IRON-6）。本文件保留为重导出
+ * 兼容头，使 daemons 内部源文件（circuit_breaker.c、api_recovery.c、
+ * svc_auth.c、llm_d/service.c、tool_d/service.c 等）无需立即修改
+ * #include 路径。后续 SP 任务可逐步将 daemons 内部引用改为直接
+ * 引用 agentrt_defaults.h 并删除本兼容头。
  */
 
 #ifndef AGENTRT_DAEMON_DEFAULTS_H
 #define AGENTRT_DAEMON_DEFAULTS_H
 
-/* ========== 超时默认值 ========== */
-
-#define AGENTRT_DEFAULT_TIMEOUT_MS 30000
-#define AGENTRT_DEFAULT_TIMEOUT_SEC 30
-#define AGENTRT_SHUTDOWN_TIMEOUT_MS 5000
-#define AGENTRT_HEALTHCHECK_INTERVAL_MS 5000
-#define AGENTRT_HEARTBEAT_INTERVAL_MS 30000
-#define AGENTRT_SOCKET_ACCEPT_TIMEOUT_MS 5000
-#define AGENTRT_CONNECT_TIMEOUT_MS 10000
-
-/* ========== 重试默认值 ========== */
-
-#define AGENTRT_DEFAULT_MAX_RETRIES 3
-#define AGENTRT_DEFAULT_RETRY_DELAY_MS 100
-#define AGENTRT_DEFAULT_BACKOFF_FACTOR 2
-#define AGENTRT_DEFAULT_JITTER_RATIO 10
-
-/* ========== 缓冲区大小 ========== */
-
-#define AGENTRT_DEFAULT_RECV_BUFFER 65536
-#define AGENTRT_DEFAULT_COMMAND_BUFFER 4096
-#define AGENTRT_DEFAULT_OUTPUT_BUFFER 4096
-#define AGENTRT_MAX_REQUEST_SIZE_HTTP (10 * 1024 * 1024)
-#define AGENTRT_MAX_REQUEST_SIZE_WS (10 * 1024 * 1024)
-#define AGENTRT_MAX_REQUEST_SIZE_STDIO (1 * 1024 * 1024)
-
-/* ========== 并发/线程 ========== */
-
-#define AGENTRT_DEFAULT_MAX_WORKERS 4
-#define AGENTRT_DEFAULT_MAX_CLIENTS 64
-#define AGENTRT_DEFAULT_MAX_CONCURRENT 1000
-#define AGENTRT_DEFAULT_THREAD_POOL_SIZE 8
-
-/* ========== 缓存 ========== */
-
-#define AGENTRT_DEFAULT_CACHE_CAPACITY 1024
-#define AGENTRT_DEFAULT_CACHE_TTL_SEC 3600
-
-/* ========== 端口/路径 ========== */
-
-#define AGENTRT_DEFAULT_HTTP_PORT 8080
-#define AGENTRT_DEFAULT_WS_PORT 8081
-#define AGENTRT_DEFAULT_TOOL_PORT 8082
-#define AGENTRT_DEFAULT_LLM_SOCK_PATH AGENTRT_RUNTIME_DIR "/llm.sock"
-#define AGENTRT_DEFAULT_TOOL_SOCK_PATH AGENTRT_RUNTIME_DIR "/tool.sock"
-
-/* ========== 安全/认证 ========== */
-
-#define AGENTRT_DEFAULT_TOKEN_TTL_SEC 3600
-#define AGENTRT_DEFAULT_REFRESH_THRESHOLD 300
-#define AGENTRT_DEFAULT_RPS_LIMIT 100
-#define AGENTRT_DEFAULT_BURST_SIZE 20
-
-/* ========== 熔断器 ========== */
-
-#define AGENTRT_CB_FAILURE_THRESHOLD 5
-#define AGENTRT_CB_SUCCESS_THRESHOLD 3
-#define AGENTRT_CB_HALF_OPEN_MAX 1
-#define AGENTRT_CB_WINDOW_SIZE_MS 60000
-#define AGENTRT_CB_SLOW_CALL_MS 5000
-#define AGENTRT_CB_SLOW_CALL_RATE_PCT 50
-#define AGENTRT_CB_FAILURE_RATE_PCT 50
-#define AGENTRT_CB_TIMEOUT_MS 30000
-
-/* ========== API恢复 ========== */
-
-#define AGENTRT_API_REC_MAX_RETRY 5
-#define AGENTRT_API_REC_BASE_DELAY_MS 200
-#define AGENTRT_API_REC_BACKOFF_FACTOR 2.0f
-#define AGENTRT_API_REC_JITTER_PCT 10
-#define AGENTRT_API_REC_HEALTH_DECAY 0.9f
-#define AGENTRT_API_REC_HEALTH_PENALTY 0.3f
-#define AGENTRT_API_REC_HEALTH_MIN 0.2f
-#define AGENTRT_API_REC_CONSECUTIVE_DISABLE 5
-
-/* ========== 监控/告警 ========== */
-
-#define AGENTRT_MONITOR_INTERVAL_MS 30000
-#define AGENTRT_ALERT_EVAL_INTERVAL_MS 10000
-#define AGENTRT_ALERT_COOLDOWN_MS 60000
-#define AGENTRT_ALERT_ESCALATION_MS 300000
-#define AGENTRT_ALERT_MAX_NOTIFICATIONS 10
-
-/* ========== 配置 ========== */
-
-#define AGENTRT_CONFIG_WATCH_INTERVAL_MS 5000
-#define AGENTRT_VAULT_AUTO_LOCK_SEC 300
-#define AGENTRT_VAULT_MAX_RETRIES 3
-#define AGENTRT_VAULT_MAX_CHAIN_DEPTH 5
+#include "agentrt_defaults.h"
 
 #endif /* AGENTRT_DAEMON_DEFAULTS_H */

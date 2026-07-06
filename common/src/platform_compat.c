@@ -1,6 +1,6 @@
 /* _GNU_SOURCE: defined via CMakeLists.txt target_compile_definitions (BAN-182) */
 #include "atomic_compat.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "memory_compat.h"
 
 #include <limits.h>

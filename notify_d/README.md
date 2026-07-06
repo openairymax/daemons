@@ -188,4 +188,4 @@ source.onmessage = (event) => console.log('Event:', event.data);
 
 ---
 
-© 2026 SPHARX Ltd. All Rights Reserved.
+© 2025-2026 SPHARX Ltd. All Rights Reserved.

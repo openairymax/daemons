@@ -179,4 +179,4 @@ COVERAGE_TARGET=90 bash scripts/verify-coverage.sh
 
 ---
 
-© 2026 SPHARX Ltd. All Rights Reserved.
+© 2025-2026 SPHARX Ltd. All Rights Reserved.

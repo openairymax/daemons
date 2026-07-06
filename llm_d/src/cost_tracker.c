@@ -7,7 +7,7 @@
  */
 
 #include "cost_tracker.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 
 #include <stdlib.h>
 #include <string.h>

@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "error.h"
+#include "memory_compat.h"
 
 #ifdef __cplusplus
 extern "C" {

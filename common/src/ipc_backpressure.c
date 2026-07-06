@@ -10,6 +10,7 @@
  */
 
 #include "ipc_backpressure.h"
+#include "memory_compat.h"
 #include "svc_logger.h"
 
 #include <stdlib.h>

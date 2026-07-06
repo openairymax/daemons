@@ -7,7 +7,7 @@
  */
 
 #include "daemon_errors.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "scheduler_service.h"
 #include "strategy_interface.h"
 

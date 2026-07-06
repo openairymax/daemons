@@ -9,7 +9,7 @@
 
 #include "alert_manager.h"
 
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "safe_string_utils.h"
 #include "svc_logger.h"
 
@@ -291,7 +291,7 @@ AGENTRT_API int am_fire(const char *name, am_level_t level, const char *message,
     if (existing) {
         if (g_am.config.enable_deduplication) {
             existing->trigger_count++;
-            existing->last_notified = agentrt_platform_get_time_ms();
+            existing->last_notified = agentrt_time_ms();
 
             if (existing->notification_count < g_am.config.max_notifications_per_alert) {
                 dispatch_notifications(existing);
@@ -306,7 +306,7 @@ AGENTRT_API int am_fire(const char *name, am_level_t level, const char *message,
         if (message)
             safe_strcpy(existing->message, message, AM_MAX_MESSAGE_LEN);
         existing->trigger_count++;
-        existing->last_notified = agentrt_platform_get_time_ms();
+        existing->last_notified = agentrt_time_ms();
         dispatch_notifications(existing);
         existing->notification_count++;
 
@@ -331,7 +331,7 @@ AGENTRT_API int am_fire(const char *name, am_level_t level, const char *message,
         safe_strcpy(alert->source, source, sizeof(alert->source));
     if (labels)
         safe_strcpy(alert->labels, labels, sizeof(alert->labels));
-    alert->fired_at = agentrt_platform_get_time_ms();
+    alert->fired_at = agentrt_time_ms();
     alert->trigger_count = 1;
     alert->notification_count = 1;
     g_am.active_alert_count++;
@@ -359,7 +359,7 @@ AGENTRT_API int am_resolve(const char *name)
     }
 
     alert->state = AM_STATE_RESOLVED;
-    alert->resolved_at = agentrt_platform_get_time_ms();
+    alert->resolved_at = agentrt_time_ms();
 
     uint32_t idx = (uint32_t)(alert - g_am.active_alerts);
     if (idx < g_am.active_alert_count - 1) {
@@ -406,7 +406,7 @@ AGENTRT_API int am_evaluate(const char *metric_name, double value)
     agentrt_mutex_lock(&g_am.mutex);
 
     int triggered = 0;
-    uint64_t now = agentrt_platform_get_time_ms();
+    uint64_t now = agentrt_time_ms();
 
     for (uint32_t i = 0; i < g_am.rule_count; i++) {
         am_rule_t *rule = &g_am.rules[i];
@@ -550,7 +550,7 @@ AGENTRT_API int am_evaluate_all(void)
     agentrt_mutex_lock(&g_am.mutex);
 
     int total_triggered = 0;
-    uint64_t now = agentrt_platform_get_time_ms();
+    uint64_t now = agentrt_time_ms();
 
     for (uint32_t i = 0; i < g_am.rule_count; i++) {
         am_rule_t *rule = &g_am.rules[i];

@@ -12,7 +12,7 @@
  */
 
 #include "daemon_errors.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "provider.h"
 #include "svc_logger.h"
 

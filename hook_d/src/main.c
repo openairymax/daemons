@@ -10,7 +10,7 @@
 #include "daemon_bootstrap_ipc.h"
 #include "daemon_cupolas_bootstrap.h"
 #include "logging.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 
 #include <signal.h>

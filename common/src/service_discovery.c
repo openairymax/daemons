@@ -13,7 +13,7 @@
 
 #include "daemon_errors.h"
 #include "memory_compat.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "safe_string_utils.h"
 #include "svc_logger.h"
 
@@ -108,7 +108,7 @@ static bool is_instance_expired(const sd_instance_t *inst, uint32_t expire_ms)
 {
     if (expire_ms == 0)
         return false;
-    uint64_t now = agentrt_platform_get_time_ms();
+    uint64_t now = agentrt_time_ms();
     return (now - inst->last_heartbeat) > expire_ms;
 }
 
@@ -117,7 +117,7 @@ static void expire_stale_instances(sd_internal_t *sd)
     if (!sd->config.enable_auto_expire)
         return;
 
-    uint64_t now = agentrt_platform_get_time_ms();
+    uint64_t now = agentrt_time_ms();
     for (uint32_t i = 0; i < sd->service_count; i++) {
         sd_service_entry_t *entry = &sd->services[i];
         for (uint32_t j = 0; j < entry->instance_count;) {
@@ -418,7 +418,7 @@ AGENTRT_API agentrt_error_t sd_register(service_discovery_t sd_handle, const cha
         if (dependencies)
             safe_strcpy(entry->dependencies, dependencies, SD_MAX_DEPS_LEN);
         entry->active = true;
-        entry->last_updated = agentrt_platform_get_time_ms();
+        entry->last_updated = agentrt_time_ms();
         sd->service_count++;
         sd->stats.registrations++;
     }
@@ -426,10 +426,10 @@ AGENTRT_API agentrt_error_t sd_register(service_discovery_t sd_handle, const cha
     int32_t inst_idx = find_instance_index(entry, instance->instance_id);
     if (inst_idx >= 0) {
         __builtin_memcpy(&entry->instances[inst_idx], instance, sizeof(sd_instance_t));
-        entry->instances[inst_idx].last_heartbeat = agentrt_platform_get_time_ms();
+        entry->instances[inst_idx].last_heartbeat = agentrt_time_ms();
         entry->instances[inst_idx].register_time = entry->instances[inst_idx].register_time > 0
                                                        ? entry->instances[inst_idx].register_time
-                                                       : agentrt_platform_get_time_ms();
+                                                       : agentrt_time_ms();
     } else {
         if (entry->instance_count >= SD_MAX_INSTANCES) {
             agentrt_mutex_unlock(&sd->mutex);
@@ -438,8 +438,8 @@ AGENTRT_API agentrt_error_t sd_register(service_discovery_t sd_handle, const cha
         }
 
         __builtin_memcpy(&entry->instances[entry->instance_count], instance, sizeof(sd_instance_t));
-        entry->instances[entry->instance_count].last_heartbeat = agentrt_platform_get_time_ms();
-        entry->instances[entry->instance_count].register_time = agentrt_platform_get_time_ms();
+        entry->instances[entry->instance_count].last_heartbeat = agentrt_time_ms();
+        entry->instances[entry->instance_count].register_time = agentrt_time_ms();
         entry->instances[entry->instance_count].pid =
 #ifdef _WIN32
             (uint32_t)GetCurrentProcessId();
@@ -449,7 +449,7 @@ AGENTRT_API agentrt_error_t sd_register(service_discovery_t sd_handle, const cha
         entry->instance_count++;
     }
 
-    entry->last_updated = agentrt_platform_get_time_ms();
+    entry->last_updated = agentrt_time_ms();
     sd->stats.active_services = sd->service_count;
     sd->stats.active_instances = 0;
     for (uint32_t i = 0; i < sd->service_count; i++) {
@@ -497,7 +497,7 @@ AGENTRT_API agentrt_error_t sd_deregister(service_discovery_t sd_handle, const c
     }
     __builtin_memset(&entry->instances[entry->instance_count - 1], 0, sizeof(sd_instance_t));
     entry->instance_count--;
-    entry->last_updated = agentrt_platform_get_time_ms();
+    entry->last_updated = agentrt_time_ms();
 
     sd->stats.deregistrations++;
     sd->stats.active_instances = 0;
@@ -533,7 +533,7 @@ AGENTRT_API agentrt_error_t sd_deregister_all(service_discovery_t sd_handle,
     }
 
     sd->services[svc_idx].instance_count = 0;
-    sd->services[svc_idx].last_updated = agentrt_platform_get_time_ms();
+    sd->services[svc_idx].last_updated = agentrt_time_ms();
 
     agentrt_mutex_unlock(&sd->mutex);
 
@@ -739,7 +739,7 @@ AGENTRT_API agentrt_error_t sd_heartbeat(service_discovery_t sd_handle, const ch
         return AGENTRT_ENOENT;
     }
 
-    entry->instances[inst_idx].last_heartbeat = agentrt_platform_get_time_ms();
+    entry->instances[inst_idx].last_heartbeat = agentrt_time_ms();
     sd->stats.heartbeats++;
 
     agentrt_mutex_unlock(&sd->mutex);
@@ -773,8 +773,8 @@ AGENTRT_API agentrt_error_t sd_update_health(service_discovery_t sd_handle,
 
     bool was_healthy = entry->instances[inst_idx].healthy;
     entry->instances[inst_idx].healthy = healthy;
-    entry->instances[inst_idx].last_heartbeat = agentrt_platform_get_time_ms();
-    entry->last_updated = agentrt_platform_get_time_ms();
+    entry->instances[inst_idx].last_heartbeat = agentrt_time_ms();
+    entry->last_updated = agentrt_time_ms();
 
     agentrt_mutex_unlock(&sd->mutex);
 

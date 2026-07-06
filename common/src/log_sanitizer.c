@@ -9,7 +9,7 @@
 #include "atomic_compat.h"
 #include "error.h"
 #include "log_sanitizer.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 
 #include <ctype.h>

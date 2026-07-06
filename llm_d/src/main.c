@@ -26,7 +26,7 @@
 #include "logging.h"
 #include "method_dispatcher.h"
 #include "param_validator.h"
-#include "platform.h"
+#include "daemon_platform_ext.h" /* P0.17 阶段 2: agentrt_socket_* daemons 特有函数 */
 #include "response.h"
 #include "svc_logger.h"
 #include "thread_pool.h"

@@ -20,7 +20,7 @@
 #include "gateway_forward.h"
 #include "gateway_service.h"
 #include "logging.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "svc_common.h"
 #include "svc_config.h"
 #include "svc_logger.h"
@@ -37,6 +37,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <sys/stat.h> /* umask */
+#endif
 
 /* ==================== 全局状态 ==================== */
 

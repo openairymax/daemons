@@ -4,7 +4,7 @@
 #include "atomic_compat.h"
 #include "daemon_errors.h"
 #include "memory_compat.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "string_compat.h"
 
 #include <arpa/inet.h>

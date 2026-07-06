@@ -206,4 +206,4 @@ ctest --test-dir build -R "test_channel_e2e" -V
 
 ---
 
-© 2026 SPHARX Ltd. All Rights Reserved.
+© 2025-2026 SPHARX Ltd. All Rights Reserved.

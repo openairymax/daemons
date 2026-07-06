@@ -25,7 +25,7 @@
 #include "logging.h"
 #include "method_dispatcher.h"
 #include "param_validator.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "scheduler_service.h"
 #include "strategy_interface.h"
 #include "svc_logger.h"

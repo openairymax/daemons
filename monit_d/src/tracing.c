@@ -17,7 +17,7 @@
  */
 
 #include "monitor_service.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 
 #include <stdio.h>

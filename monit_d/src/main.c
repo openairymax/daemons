@@ -25,7 +25,7 @@
 #include "method_dispatcher.h"
 #include "monitor_service.h"
 #include "param_validator.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "prometheus_exporter.h"
 #include "svc_logger.h"
 #include "thread_pool.h"

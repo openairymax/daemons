@@ -7,7 +7,7 @@
  */
 
 #include "agent_registry_core.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 
 #include <stdlib.h>

@@ -8,7 +8,7 @@
 
 #include "cache.h"
 #include "memory_common.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "tool_service.h"
 
 #include <cjson/cJSON.h>

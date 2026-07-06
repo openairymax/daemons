@@ -3,7 +3,7 @@
 #include "atomic_compat.h"
 #include "ipc_service_bus.h"
 #include "memory_compat.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 
 #include <stdio.h>

@@ -10,7 +10,7 @@
 #include "error.h"
 
 #ifdef _WIN32
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 
 typedef struct {

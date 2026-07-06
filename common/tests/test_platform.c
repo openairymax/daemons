@@ -4,7 +4,7 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#include "platform.h"
+#include "daemon_platform_ext.h"
 
 #include <assert.h>
 #include <stdio.h>

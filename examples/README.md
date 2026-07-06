@@ -89,4 +89,4 @@ cl example_svc_usage.c /I./common/include /link svc_common.lib agentrt_common.li
 
 ---
 
-© 2026 SPHARX Ltd. All Rights Reserved.
+© 2025-2026 SPHARX Ltd. All Rights Reserved.
