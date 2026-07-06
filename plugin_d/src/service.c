@@ -17,12 +17,14 @@
  */
 
 #include "plugin_service.h"
-#include "platform.h"
+/* P0.17 阶段 2: service.c 使用 agentrt_dl_* daemons 特有函数，
+ * 需包含 daemon_platform_ext.h 获取声明（commons 版 platform.h 无这些函数）。 */
+#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 #include "sync_compat.h"
 #include "memory_compat.h"
 
-/* dlfcn.h 已由 platform.h 的 agentrt_dl_* 跨平台抽象替代 */
+/* dlfcn.h 已由 daemon_platform_ext.h 的 agentrt_dl_* 跨平台抽象替代 */
 #include <stdio.h>
 #include <string.h>
 #include <time.h>

@@ -13,7 +13,7 @@
 
 #include "daemon_defaults.h"
 #include "error.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "response.h"
 #include "router/llm_router.h"
 #include "service.h"

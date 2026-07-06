@@ -5,7 +5,7 @@
 #include "daemon_cupolas_bootstrap.h"
 #include "logging.h"
 #include "memory_compat.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 
 #include <inttypes.h>

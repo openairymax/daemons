@@ -17,7 +17,7 @@
 
 #include "ipc_bus_helper.h"
 #include "memory_compat.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "safe_string_utils.h"
 #include "svc_logger.h"
 

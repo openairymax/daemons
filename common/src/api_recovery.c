@@ -8,7 +8,7 @@
 
 #include "api_recovery.h"
 #include "daemon_defaults.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 
 #include <math.h>

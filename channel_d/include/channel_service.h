@@ -9,7 +9,7 @@
 #ifndef AGENTRT_CHANNEL_SERVICE_H
 #define AGENTRT_CHANNEL_SERVICE_H
 
-#include "platform.h"
+#include "daemon_platform_ext.h"
 
 #include <stdbool.h>
 #include <stddef.h>

@@ -24,7 +24,7 @@
 #include "market_service.h"
 #include "method_dispatcher.h"
 #include "param_validator.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 #include "thread_pool.h"
 

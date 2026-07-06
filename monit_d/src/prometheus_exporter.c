@@ -14,7 +14,8 @@
 
 #include "prometheus_exporter.h"
 
-#include "platform.h"
+#include "memory_compat.h"
+#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 #include "unified_metrics.h"
 

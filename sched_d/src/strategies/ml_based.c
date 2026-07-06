@@ -9,7 +9,7 @@
 
 #include "../../include/scheduler_service.h"
 #include "../../include/strategy_interface.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 
 #include <math.h>
 #include <stdbool.h>

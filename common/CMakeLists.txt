@@ -107,14 +107,18 @@ elseif(UNIX)
     )
 endif()
 
-# 包含目录 - 兼容层头文件
+# P0.17 IRON-6 跨层耦合禁令修复:
+# commons 权威路径必须声明在 daemons/common/include 之前。
+# CMake 的 INTERFACE_INCLUDE_DIRECTORIES 按声明顺序累加，并传递给所有链接 svc_common
+# 的目标（包括 atoms/coreloopthree 的 agentrt_execution、agentrt_cognition 子目标）。
+# 若 daemons/common/include 在前，atoms 源代码 #include "daemon_bootstrap_ipc.h" 等
+# 会先命中 daemons 重导出兼容头（虽然内部经相对路径到达 commons，但仍构成编译期
+# atoms→daemons 反向依赖）。将 daemons/common/include 移至 commons 路径之后，
+# 确保 atoms 直接解析 commons 权威版本，完全消除 IRON-6 违规。
+# 注意：daemons/common/include 中仍有未迁移的头文件（platform.h/error.h/compat.h/
+# circuit_breaker.h/thread_pool.h 等），daemons 自己的源代码仍可通过此路径解析。
 target_include_directories(svc_common PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include/agentrt>
-)
-
-# 包含 commons 的头文件目录
-target_include_directories(svc_common PUBLIC
+    # commons 权威路径（优先）
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/include>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/compat/include>
     $<BUILD_INTERFACE:${COMMONS_DIR}>
@@ -132,6 +136,14 @@ target_include_directories(svc_common PUBLIC
     # 新增网络和IPC模块
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/network/include>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/ipc/include>
+    # P0.17 阶段 4: service_discovery.h/service_discovery_helper.h/daemon_bootstrap_sd.h
+    # 迁移至 commons/utils/sd/include（daemons 版保留为重导出兼容头）
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/sd/include>
+    # P0.17 阶段 1: daemon_defaults.h 重导出 agentrt_defaults.h（位于 commons/include）
+    $<BUILD_INTERFACE:${COMMONS_DIR}/include>
+    # daemons/common/include 兼容层路径（放最后，避免 atoms 误命中重导出兼容头）
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include/agentrt>
 )
 
 target_include_directories(svc_common PUBLIC
@@ -258,5 +270,7 @@ install(FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_startup.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_event_driver.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_cupolas_bootstrap.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_errors.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_platform_ext.h
     DESTINATION include/agentrt
 )

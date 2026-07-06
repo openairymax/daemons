@@ -135,7 +135,7 @@ static void init_message_header(ipc_bus_message_header_t *header, ipc_bus_msg_ty
     header->version = IPC_BUS_MESSAGE_VERSION;
     header->msg_type = msg_type;
     header->protocol = protocol;
-    header->timestamp = agentrt_platform_get_time_ms();
+    header->timestamp = agentrt_time_ms();
     if (source)
         safe_strcpy(header->source, source, IPC_BUS_SERVICE_ID_LEN);
     if (target)
@@ -369,7 +369,7 @@ AGENTRT_API agentrt_error_t ipc_service_bus_request(ipc_service_bus_t bus_handle
         return AGENTRT_EBUSY;
     }
 
-    uint64_t start_time = agentrt_platform_get_time_ms();
+    uint64_t start_time = agentrt_time_ms();
 
     pending_request_t *pending = &bus->pending[bus->pending_count];
     pending->msg_id = request->header.msg_id;
@@ -430,7 +430,7 @@ AGENTRT_API agentrt_error_t ipc_service_bus_request(ipc_service_bus_t bus_handle
         }
     }
 
-    uint64_t elapsed = agentrt_platform_get_time_ms() - start_time;
+    uint64_t elapsed = agentrt_time_ms() - start_time;
     if (elapsed >= (uint64_t)timeout_ms && !pending->completed) {
         bus->stats.timeouts++;
         bus->pending_count--;
@@ -455,7 +455,7 @@ AGENTRT_API agentrt_error_t ipc_service_bus_request(ipc_service_bus_t bus_handle
 
     bus->pending_count--;
     bus->stats.messages_received++;
-    uint64_t latency = agentrt_platform_get_time_ms() - start_time;
+    uint64_t latency = agentrt_time_ms() - start_time;
     bus->stats.avg_latency_us = bus->stats.avg_latency_us == 0
                                     ? latency * 1000
                                     : (bus->stats.avg_latency_us + latency * 1000) / 2;
@@ -654,7 +654,7 @@ AGENTRT_API agentrt_error_t ipc_service_bus_register_endpoint(ipc_service_bus_t 
     int32_t idx = find_endpoint_index(bus, endpoint->service_name);
     if (idx >= 0) {
         __builtin_memcpy(&bus->endpoints[idx], endpoint, sizeof(ipc_bus_endpoint_t));
-        bus->endpoints[idx].last_heartbeat = agentrt_platform_get_time_ms();
+        bus->endpoints[idx].last_heartbeat = agentrt_time_ms();
         agentrt_mutex_unlock(&bus->mutex);
         LOG_INFO("Endpoint '%s' updated on bus '%s'", endpoint->service_name, bus->name);
         return AGENTRT_SUCCESS;
@@ -666,7 +666,7 @@ AGENTRT_API agentrt_error_t ipc_service_bus_register_endpoint(ipc_service_bus_t 
     }
 
     __builtin_memcpy(&bus->endpoints[bus->endpoint_count], endpoint, sizeof(ipc_bus_endpoint_t));
-    bus->endpoints[bus->endpoint_count].last_heartbeat = agentrt_platform_get_time_ms();
+    bus->endpoints[bus->endpoint_count].last_heartbeat = agentrt_time_ms();
     bus->endpoint_count++;
     bus->stats.active_endpoints = bus->endpoint_count;
 
@@ -826,7 +826,7 @@ AGENTRT_API agentrt_error_t ipc_service_bus_update_endpoint_health(ipc_service_b
 
     bool was_healthy = bus->endpoints[idx].healthy;
     bus->endpoints[idx].healthy = healthy;
-    bus->endpoints[idx].last_heartbeat = agentrt_platform_get_time_ms();
+    bus->endpoints[idx].last_heartbeat = agentrt_time_ms();
 
     agentrt_mutex_unlock(&bus->mutex);
 
@@ -851,7 +851,7 @@ AGENTRT_API ipc_bus_message_t *ipc_bus_message_create(ipc_bus_msg_type_t msg_typ
     }
 
     init_message_header(&msg->header, msg_type, protocol, NULL, NULL);
-    msg->header.msg_id = (uint64_t)agentrt_platform_get_time_ms();
+    msg->header.msg_id = (uint64_t)agentrt_time_ms();
     msg->header.payload_len = (uint32_t)payload_size;
 
     if (payload && payload_size > 0) {

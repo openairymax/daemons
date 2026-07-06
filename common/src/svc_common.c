@@ -20,13 +20,17 @@
  */
 
 #include "svc_common.h"
+/* P0.17 阶段 4: 显式包含 daemon_errors.h 提供 DAEMON_E* 扩展错误码。
+ * commons 版 svc_common.h（经 -I 路径优先解析）不包含 daemon_errors.h，
+ * daemons 内部源文件需显式包含以获取 DAEMON_EINIT/ESTATE/EHEALTH 等别名。 */
+#include "daemon_errors.h"
 
 #include "atomic_compat.h"
 #include "error.h"
 #include "ipc_client.h"
 #include "memory_compat.h"
 #include "memory_stats_reporter.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "safe_string_utils.h"
 #include "svc_logger.h"
 #include "thread_pool.h"
@@ -838,7 +842,7 @@ agentrt_error_t agentrt_service_healthcheck(agentrt_service_t svc)
         agentrt_error_t err = service->iface.healthcheck(svc);
 
         /* 更新健康检查状态 */
-        uint64_t current_time = agentrt_platform_get_time_ms();
+        uint64_t current_time = agentrt_time_ms();
         service->last_healthcheck_time = current_time;
 
         if (err != AGENTRT_SUCCESS) {
@@ -1193,7 +1197,7 @@ agentrt_error_t agentrt_registry_register(agentrt_service_t service,
         if (g_cross_registry.entries[i].service == service) {
             __builtin_memcpy(&g_cross_registry.entries[i].metadata, metadata,
                    sizeof(agentrt_service_metadata_t));
-            g_cross_registry.entries[i].metadata.last_heartbeat = agentrt_platform_get_time_ms();
+            g_cross_registry.entries[i].metadata.last_heartbeat = agentrt_time_ms();
             agentrt_mutex_unlock(&g_cross_registry.mutex);
             LOG_INFO("Service '%s' re-registered in cross-process registry", metadata->name);
             return AGENTRT_SUCCESS;
@@ -1204,7 +1208,7 @@ agentrt_error_t agentrt_registry_register(agentrt_service_t service,
     __builtin_memcpy(&entry->metadata, metadata, sizeof(agentrt_service_metadata_t));
     entry->service = service;
     entry->registered = true;
-    entry->register_time = agentrt_platform_get_time_ms();
+    entry->register_time = agentrt_time_ms();
     entry->metadata.last_heartbeat = entry->register_time;
     g_cross_registry.entry_count++;
 
@@ -1353,7 +1357,7 @@ agentrt_error_t agentrt_registry_heartbeat(agentrt_service_t service)
 
     for (uint32_t i = 0; i < g_cross_registry.entry_count; i++) {
         if (g_cross_registry.entries[i].service == service) {
-            g_cross_registry.entries[i].metadata.last_heartbeat = agentrt_platform_get_time_ms();
+            g_cross_registry.entries[i].metadata.last_heartbeat = agentrt_time_ms();
             g_cross_registry.entries[i].metadata.state = agentrt_service_get_state(service);
             g_cross_registry.entries[i].metadata.healthy =
                 (agentrt_service_healthcheck(service) == AGENTRT_SUCCESS);
@@ -1660,7 +1664,7 @@ static void *monitor_thread_func(void *arg)
             break;
 
         agentrt_error_t err = agentrt_service_healthcheck(mon->service);
-        mon->last_check_time = agentrt_platform_get_time_ms();
+        mon->last_check_time = agentrt_time_ms();
 
         if (err != AGENTRT_SUCCESS) {
             mon->consecutive_failures++;
@@ -1680,7 +1684,7 @@ static void *monitor_thread_func(void *arg)
 
             if (mon->config.auto_restart &&
                 mon->restart_attempts < mon->config.max_restart_attempts) {
-                uint64_t now = agentrt_platform_get_time_ms();
+                uint64_t now = agentrt_time_ms();
                 if (now >= mon->next_restart_time) {
                     mon->restart_attempts++;
                     LOG_INFO("Auto-restarting service '%s' (attempt %u/%u)", svc_name,
@@ -1741,7 +1745,7 @@ agentrt_error_t agentrt_service_monitor_start(agentrt_service_t service,
             g_monitor.services[i].restart_attempts = 0;
             g_monitor.services[i].degraded = false;
             g_monitor.services[i].stop_requested = 0;
-            g_monitor.services[i].last_check_time = agentrt_platform_get_time_ms();
+            g_monitor.services[i].last_check_time = agentrt_time_ms();
             g_monitor.services[i].next_restart_time = 0;
 
             int thread_err = agentrt_thread_create(&g_monitor.services[i].monitor_thread,
@@ -1773,7 +1777,7 @@ agentrt_error_t agentrt_service_monitor_start(agentrt_service_t service,
     mon->active = true;
     mon->consecutive_failures = 0;
     mon->restart_attempts = 0;
-    mon->last_check_time = agentrt_platform_get_time_ms();
+    mon->last_check_time = agentrt_time_ms();
     mon->next_restart_time = 0;
     mon->degraded = false;
     mon->stop_requested = 0;

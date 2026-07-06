@@ -14,7 +14,7 @@
 #include "daemon_security.h"
 #include "error.h"
 #include "executor.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "service.h"
 #include "svc_logger.h"
 #include "tool_approval.h"

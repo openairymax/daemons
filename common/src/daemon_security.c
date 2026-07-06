@@ -31,7 +31,7 @@
 #define SVC_LOG_SECURITY(...) LOG_WARN(__VA_ARGS__)
 #endif
 
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 
 /* pthread.h provided by platform.h — no direct pthread include (CROSS-01) */

@@ -10,7 +10,7 @@
 #include "cache.h"
 #include "config.h"
 #include "executor.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "registry.h"
 #include "tool_service.h"
 #include "validator.h"

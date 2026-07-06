@@ -1,54 +1,62 @@
+# daemons — Runtime Daemon Services (12 Daemons)
+
+> The user-space service layer of the Airymax agent runtime: twelve independent daemon processes that together form the backend-service substrate sitting on top of the Airymax kernel.
+> Leaf repository under the [agentrt](../) management repo.
+
 **Language:** English | [简体中文](README_zh.md)
 
-# Airymax Daemons — Runtime Daemon Services
+[![Version](https://img.shields.io/badge/version-0.1.1-5a6b7e)](https://atomgit.com/openairymax/daemons)
+[![License](https://img.shields.io/badge/license-AGPL--3.0+Apache--2.0-4a90d9)](LICENSE)
+[![C11](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/11)
 
-`agentrt/daemons/`
-
-**Version:** 0.1.1
-**License:** AGPL-3.0-or-later OR Apache-2.0 (dual-licensed)
-**Branch:** `feature/official-hubs-01`
+- **Repository:** `git@atomgit.com:openairymax/daemons.git`
+- **Branch:** `feature/official-hubs-01`
+- **Version:** 0.1.1 (Airymax foundational release)
 
 ---
 
-## 1. Module Positioning
+## Overview
 
-Daemons is the **user-space service layer** of the Airymax agent runtime. It is
-composed of **12 independent daemon processes** that together provide the full
-backend-service substrate for the agent system. Every daemon follows the
-**single-responsibility principle**: it runs as its own process, communicates
-with peers through a unified IPC service bus, and together they form a
-high-availability, scalable, pluggable micro-service architecture sitting on
-top of the Airymax kernel.
+**daemons** is the **user-space service layer** of the Airymax agent runtime. It is composed of **12 independent daemon processes** — `gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d` — together with a shared static library `svc_common` (in `common/`). Every daemon follows the **single-responsibility principle**: it runs as its own process, communicates with peers through the unified IPC service bus, and together they form a high-availability, scalable, pluggable micro-service architecture sitting on top of the Airymax kernel.
+
+```
+External client → gateway_d → (other daemons via ipc_service_bus) → atoms/syscall → kernel services
+   (HTTP/WS/Stdio)  (daemon)
+```
 
 Design goals:
 
-- **Service-oriented architecture** — every daemon runs independently and
-  cooperates via IPC; each can be deployed and scaled separately.
-- **Single responsibility** — each daemon owns exactly one core domain,
-  minimizing coupling.
-- **Pluggability** — daemons can be deployed, upgraded, and replaced
-  independently without affecting other services.
-- **High availability** — primary/backup switchover, circuit-breaker
-  protection, failover, and automatic recovery.
-- **Endogenous security** — every daemon links `svc_common`, which
-  transitively links Cupolas; every request is authenticated under a
-  zero-trust model.
-- **Unified protocols** — all daemons communicate over JSON-RPC 2.0, with
-  MCP / A2A / OpenAI-API protocol conversion supported at the gateway.
+- **Service-oriented architecture** — every daemon runs independently and cooperates via IPC; each can be deployed and scaled separately.
+- **Single responsibility** — each daemon owns exactly one core domain, minimizing coupling.
+- **Pluggability** — daemons can be deployed, upgraded, and replaced independently without affecting other services.
+- **High availability** — primary/backup switchover, circuit-breaker protection, failover, and automatic recovery.
+- **Endogenous security** — `svc_common` PUBLIC-links `cupolas` (`daemon_cupolas_bootstrap.c`), so every daemon automatically inherits Cupolas security: request authentication, input sanitization, audit, sandbox.
+- **Unified protocols** — all daemons communicate over JSON-RPC 2.0; MCP / A2A / OpenAI-API protocol conversion happens at the gateway boundary.
 
----
+Within the Airymax 0.1.1 release, the workspace is partitioned into **38 repositories** (1 umbrella + 5 management + 29 leaf + 3 top-level); `daemons` is one of the 7 leaf repositories aggregated by the [agentrt](../) management repo, forming the **Service Layer** in the cyclic architecture (above the Gateway Layer `gateway`, below the Ecosystem Layer `sdk`/`ecosystem`). It is the topmost agentrt-internal leaf repository — every daemon dispatches business logic downward through `atoms/syscall` into the kernel.
 
-## 2. Directory Structure
+## Module Classification
+
+**Class — (Service / Composition layer).**
+
+daemons is a service/composition module: it does not provide foundational primitives but composes them into running processes. It depends on `atoms` (CoreLoopThree / Syscall / TaskFlow / Memory primitives — `hook_d` directly links `agentrt_coreloopthree`; every daemon dispatches through `atoms/syscall`), `commons` (logging, config_unified, network, token, cost, observability, cognition, strategy — transitively through `svc_common`), `cupolas` (security dome, PUBLIC-linked by `svc_common`), `protocols` (JSON-RPC 2.0 / AgentsIPC envelope used by the IPC service bus; A2A / MCP adapters at the gateway boundary), `heapstore` (persistence for daemon state), and `gateway` (the `gateway_d` daemon wraps the gateway library). Its primary consumers are the SDK / Agent applications (over the gateway's JSON-RPC 2.0 surface) and OpenLab modules.
+
+## Directory Structure
 
 ```
 daemons/
-├── CMakeLists.txt                 # Top-level build file, manages all sub-modules
+├── CMakeLists.txt                 # Top-level build file; manages all 12 daemons + svc_common
 ├── Dockerfile.ci                  # CI environment Docker image
 ├── README.md                      # This file (English)
 ├── README_zh.md                   # Chinese version
 ├── LICENSE                        # Dual license texts (AGPL-3.0 + Apache-2.0)
 ├── NOTICE                         # Copyright notice
-├── common/                        # Shared service library (svc_common, 18+ components)
+├── common/                        # Shared service library (svc_common)
+│   ├── CMakeLists.txt             # svc_common static library target
+│   ├── README.md                  # svc_common documentation
+│   ├── include/                   # 39 shared headers
+│   ├── src/                       # 32 source files (30+ utility components)
+│   └── tests/                     # svc_common unit tests
 ├── gateway_d/                     # API gateway daemon
 ├── llm_d/                         # LLM service daemon
 ├── tool_d/                        # Tool execution daemon
@@ -63,81 +71,80 @@ daemons/
 ├── plugin_d/                      # Plugin daemon
 ├── examples/                      # Usage examples (example_svc_usage.c)
 └── scripts/                       # Build / CI / analysis scripts
-    ├── ci.sh
-    ├── local-ci.sh
-    ├── static-analysis.sh
-    └── verify-coverage.sh
+    ├── ci.sh                      # CI pipeline build script
+    ├── local-ci.sh                # Local CI simulation
+    ├── static-analysis.sh         # Static code analysis
+    └── verify-coverage.sh         # Coverage verification
 ```
+
+### svc_common Shared Library (`common/`)
+
+The `common/` subdirectory compiles into the `svc_common` static library, which is PRIVATE-linked by every daemon. It aggregates 30+ utility components under a single ABI surface:
+
+| Category | Components |
+|----------|-----------|
+| **Service framework** | `svc_common.c`, `svc_auth.c`, `svc_cache.h`, `svc_config.h`, `svc_logger.h`, `service_discovery.c`, `service_discovery_helper.c`, `daemon_bootstrap_ipc.c`, `daemon_bootstrap_sd.c`, `daemon_cupolas_bootstrap.c`, `daemon_startup.h`, `daemon_event_driver.c`, `daemon_task_dispatcher.c` |
+| **Resilience & safety** | `circuit_breaker.c`, `api_recovery.c`, `daemon_degradation.c`, `daemon_security.c`, `daemon_oom.c`, `input_validator.c`, `log_sanitizer.c`, `ipc_backpressure.c` |
+| **IPC & messaging** | `ipc_service_bus.c`, `ipc_client.c`, `ipc_bus_helper.c`, `daemon_bootstrap_ipc.h`, `method_dispatcher.c`, `jsonrpc_helpers.c`, `param_validator.c` |
+| **Event & concurrency** | `agentrt_event_loop.c`, `thread_pool.c`, `refcount.c` |
+| **Metrics & alerting** | `unified_metrics.c`, `alert_manager.c` |
+| **Configuration** | `config_manager.c`, `daemon_defaults.h`, `daemon_errors.h`, `daemon_platform_ext.h` |
+| **Memory** | `arena.c`, `tcache.c` (daemon-local allocators) |
+| **Platform** | `platform_compat.c`, `compat.h`, `platform.h` |
+
+> **P0.17 Phase 3 / IRON-6:** The authoritative definitions of `svc_common.h` and `ipc_service_bus.h` have been migrated to `commons/utils/ipc/include/`. The daemons-side headers under `common/include/` are kept as **re-export compatibility headers** so internal sources do not need immediate `#include` path changes, eliminating the atoms→daemons compile-time reverse dependency.
+
+## Core Components
 
 ### The 12 Daemons
 
-| Daemon | Directory | Responsibility | CMake Target |
-|--------|-----------|----------------|--------------|
-| **API Gateway** | `gateway_d/` | External request intake, protocol conversion (HTTP / WS / MCP / A2A / OpenAI API) and routing | `gateway_d` |
-| **LLM Service** | `llm_d/` | Large-language-model invocation, token counting, cost tracking, response caching | `llm_d` |
-| **Tool Execution** | `tool_d/` | Tool registration / discovery, sandboxed execution, parameter validation, result caching | `tool_d` |
-| **Task Scheduler** | `sched_d/` | Task dispatch with 4 scheduling strategies (round-robin / weighted / priority / ML) | `sched_d` |
-| **Application Marketplace** | `market_d/` | Agent / Skill / Tool / Template resource management, install, versioning | `market_d` |
-| **Monitoring & Alerting** | `monit_d/` | Metric collection, health checks, alert management, agent-infinite-loop detection | `monit_d` |
-| **Channel Service** | `channel_d/` | Communication-channel management and message routing | `channel_d` |
-| **Information Service** | `info_d/` | System information query and status reporting | `info_d` |
-| **Notification Service** | `notify_d/` | Multi-channel notification push (email / Slack / Discord) | `notify_d` |
-| **Observability Service** | `observe_d/` | OpenTelemetry observability data collection | `observe_d` |
-| **Hook Daemon** | `hook_d/` | Thin daemon shell; the hook system core lives in `atoms/coreloopthree/src/hook/` and is obtained by linking `agentrt_coreloopthree` | `hook_d` |
-| **Plugin Daemon** | `plugin_d/` | Plugin lifecycle management and isolation | `plugin_d` |
-| **Shared Library** | `common/` | Shared utility library and compatibility layer (18+ components) — `svc_common` | `svc_common` |
+| # | Daemon | Directory | Responsibility | CMake Target |
+|---|--------|-----------|----------------|--------------|
+| 1 | **API Gateway** | `gateway_d/` | External request intake; protocol conversion (HTTP / WS / MCP / A2A / OpenAI API) and routing — wraps the `gateway` library | `gateway_d` |
+| 2 | **LLM Service** | `llm_d/` | Large-language-model invocation, token counting, cost tracking, response caching | `llm_d` |
+| 3 | **Tool Execution** | `tool_d/` | Tool registration / discovery, sandboxed execution, parameter validation, result caching | `tool_d` |
+| 4 | **Task Scheduler** | `sched_d/` | Task dispatch with 4 scheduling strategies (round-robin / weighted / priority / ML) | `sched_d` |
+| 5 | **Application Marketplace** | `market_d/` | Agent / Skill / Tool / Template resource management, install, versioning | `market_d` |
+| 6 | **Monitoring & Alerting** | `monit_d/` | Metric collection, health checks, alert management, agent-infinite-loop detection | `monit_d` |
+| 7 | **Channel Service** | `channel_d/` | Communication-channel management and message routing | `channel_d` |
+| 8 | **Information Service** | `info_d/` | System information query and status reporting | `info_d` |
+| 9 | **Notification Service** | `notify_d/` | Multi-channel notification push (email / Slack / Discord) | `notify_d` |
+| 10 | **Observability Service** | `observe_d/` | OpenTelemetry observability data collection | `observe_d` |
+| 11 | **Hook Daemon** | `hook_d/` | Thin daemon shell; the hook system core lives in `atoms/coreloopthree/src/hook/` and is obtained by linking `agentrt_coreloopthree` | `hook_d` |
+| 12 | **Plugin Daemon** | `plugin_d/` | Plugin lifecycle management and isolation | `plugin_d` |
 
-### Architecture Overview
+> **Binary naming convention:** every daemon executable keeps the `*_d` suffix (`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d`). Per the 2026-07-05 naming decision, the module name was unified from `daemon` → `daemons` (directory, CMake target `agentrt_daemons`, repo `daemons.git`), but the 12 process binary names were deliberately preserved.
+
+## Architecture
 
 ```
-+-------------------------------------------------------------------+
-|                  External clients / Agents                         |
-+-------------------------------------------------------------------+
-|  gateway_d (API gateway)                                           |
-|  HTTP / WS / Stdio / MCP / A2A / OpenAI API → JSON-RPC 2.0 → route |
-+---+---------------+---------------+---------------+---------------+
-    |               |               |               |
-|  +-----------+  +-----------+  +-----------+  +-----------+      |
-|  |  llm_d    |  |  tool_d   |  |  sched_d  |  | market_d  |      |
-|  +-----------+  +-----------+  +-----------+  +-----------+      |
-|  +-----------+  +-----------+  +-----------+  +-----------+      |
-|  |  monit_d  |  | channel_d |  |  info_d   |  | notify_d  |      |
-|  +-----------+  +-----------+  +-----------+  +-----------+      |
-|  +-----------+  +-----------+  +--------------------------------+ |
-|  | observe_d |  |  hook_d   |  |  plugin_d                      | |
-|  +-----------+  +-----------+  +--------------------------------+ |
-|  +--------------------------------------------------------------+ |
-|  |  common (svc_common — 18+ components, transitively links Cupolas) |
-|  +--------------------------------------------------------------+ |
-+-------------------------------------------------------------------+
-|                    Airymax kernel (atoms)                          |
-+-------------------------------------------------------------------+
+┌──────────────────────────────────────────────────────────────┐
+│              External clients / Agent applications            │
+├──────────────────────────────────────────────────────────────┤
+│   SDK (sdk-python / sdk-go / sdk-rust / sdk-typescript ...)   │
+├──────────────────────────────────────────────────────────────┤
+│   ★ daemons (Service Layer — 12 daemons + svc_common) ★     │
+│                                                               │
+│   gateway_d ─→ HTTP / WS / Stdio / MCP / A2A / OpenAI API     │
+│              ↓                                                │
+│   ┌────────┬────────┬────────┬────────┬────────┬─────────┐    │
+│   │ llm_d  │tool_d  │sched_d │market_d│monit_d │channel_d│   │
+│   ├────────┼────────┼────────┼────────┼────────┼─────────┤    │
+│   │ info_d │notify_d│observe_d│hook_d │plugin_d│         │    │
+│   └────────┴────────┴────────┴────────┴────────┴─────────┘    │
+│              ↑ ipc_service_bus (JSON-RPC 2.0)                 │
+│   ┌─────────────────────────────────────────────────────────┐ │
+│   │ common (svc_common — 30+ components, PUBLIC-links       │ │
+│   │ Cupolas → every daemon inherits security)               │ │
+│   └─────────────────────────────────────────────────────────┘ │
+├──────────────────────────────────────────────────────────────┤
+│   gateway / protocols / heapstore / cupolas                   │
+├──────────────────────────────────────────────────────────────┤
+│   atoms / commons / OS                                        │
+└──────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## 3. Upstream / Downstream Dependencies
-
-### Upstream (Daemons depend on)
-
-| Dependency | Source | Purpose |
-|------------|--------|---------|
-| **atoms** | `agentrt/atoms/` | CoreLoopThree (cognition / execution / memory loops), Syscall entry surface, TaskFlow orchestration, Memory primitives — `hook_d` directly links `agentrt_coreloopthree`; every daemon dispatches business logic through `atoms/syscall` |
-| **commons** | `agentrt/commons/` | Logging, config_unified, network, token, cost, observability, cognition, strategy — linked transitively through `svc_common` |
-| **cupolas** | `agentrt/cupolas/` | `svc_common` links Cupolas as `PUBLIC` (`daemon_cupolas_bootstrap.c`), so every daemon automatically inherits Cupolas security — request authentication, input sanitization, audit, sandbox |
-| **protocols** | `agentrt/protocols/` | JSON-RPC 2.0 / AgentsIPC envelope used by the IPC service bus; A2A / MCP adapters used at the gateway boundary |
-| **heapstore** | `agentrt/heapstore/` | Persistence for daemon state — `market_d` / `tool_d` / `llm_d` have dedicated data directories; registry tracks Agent / Skill / Session; token engine budgets LLM usage |
-| **gateway** | `agentrt/gateway/` | `gateway_d` wraps the gateway library and exposes it as a system service |
-| cJSON / libcurl / libyaml / OpenSSL | external | JSON parsing, HTTP client, YAML config, TLS — auto-detected by umbrella CMake |
-
-### Downstream (consumers of Daemons)
-
-| Consumer | What it uses |
-|----------|--------------|
-| **SDK / Agent applications** | SDK ships daemon client libraries; Agent apps invoke the runtime through the gateway's JSON-RPC 2.0 surface and consume daemon services (LLM, tool, scheduler, marketplace, etc.) |
-| OpenLab applications | OpenLab modules orchestrate daemons through the JSON-RPC 2.0 API |
-
-### Internal Dependency Graph
+**Internal dependency graph (svc_common ← daemon):**
 
 ```
 svc_common  ←  gateway_d  ←  external clients
@@ -154,34 +161,31 @@ svc_common  ←  gateway_d  ←  external clients
           ←  plugin_d     ←  market_d, tool_d (plugin lifecycle)
 ```
 
----
+**Design principles:** service-oriented (independent processes, IPC cooperation); single responsibility per daemon; pluggability (deploy / upgrade / replace independently); high availability (primary/backup, circuit breaker, failover); endogenous security (Cupolas transitively linked via svc_common); unified protocols (JSON-RPC 2.0 over IPC service bus).
 
-## 4. Communication & Lifecycle
+## Upstream Dependencies
 
-### IPC Service Bus
+> `svc_common` is the integration point that links the foundational modules (`commons`, `cupolas`) and exposes them to every daemon. daemons additionally depends on `atoms`, `protocols`, `heapstore`, and `gateway`.
 
-All daemons communicate through the unified `ipc_service_bus`, supporting
-multi-protocol messaging:
+| Dependency | Source | Purpose |
+|------------|--------|---------|
+| **atoms** | `agentrt/atoms/` | CoreLoopThree (cognition / execution / memory loops), Syscall entry surface, TaskFlow orchestration, Memory primitives — `hook_d` directly links `agentrt_coreloopthree`; every daemon dispatches business logic through `atoms/syscall` |
+| **commons** | `agentrt/commons/` | Logging, config_unified, network, token, cost, observability, cognition, strategy — linked transitively through `svc_common`. The authoritative `svc_common.h` / `ipc_service_bus.h` now live here (`commons/utils/ipc/include/`) per IRON-6 |
+| **cupolas** | `agentrt/cupolas/` | `svc_common` PUBLIC-links Cupolas (`daemon_cupolas_bootstrap.c`), so every daemon automatically inherits Cupolas security — request authentication, input sanitization, audit, sandbox |
+| **protocols** | `agentrt/protocols/` | JSON-RPC 2.0 / AgentsIPC envelope used by the IPC service bus; A2A / MCP adapters used at the gateway boundary |
+| **heapstore** | `agentrt/heapstore/` | Persistence for daemon state — `market_d` / `tool_d` / `llm_d` have dedicated data directories; registry tracks Agent / Skill / Session; token engine budgets LLM usage |
+| **gateway** | `agentrt/gateway/` | `gateway_d` wraps the gateway library and exposes it as a system service |
+| cJSON / libcurl / libyaml / OpenSSL | external | JSON parsing, HTTP client, YAML config, TLS — auto-detected by umbrella CMake (BAN-12) |
 
-| Transport | Scenario | Latency | Protocol |
-|-----------|----------|---------|----------|
-| Unix Socket | Same-machine daemons | < 100 μs | JSON-RPC 2.0 |
-| TCP | Cross-machine daemons | < 1 ms | JSON-RPC 2.0 |
-| Shared memory | High-perf data exchange | < 10 μs | custom |
+## Downstream Consumers
 
-### Daemon Lifecycle
+| Consumer | What they use |
+|----------|---------------|
+| **SDK / Agent applications** | SDK ships daemon client libraries; Agent apps invoke the runtime through the gateway's JSON-RPC 2.0 surface and consume daemon services (LLM, tool, scheduler, marketplace, etc.) |
+| OpenLab applications | OpenLab modules orchestrate daemons through the JSON-RPC 2.0 API |
+| Ecosystem ToolKit / Skills | Skills and ecosystem tools reach daemon services through the SDK |
 
-```
-INIT → CONFIG_LOAD → SERVICE_REGISTER → IDLE → BUSY → SHUTDOWN
- init    load cfg      register to SvcDisc   wait    handle   graceful stop
-```
-
-Service state enum (`agentrt_svc_state_t`): `NONE / CREATED / INITIALIZING /
-READY / RUNNING / PAUSED / STOPPING / STOPPED / ZOMBIE / ERROR`.
-
----
-
-## 5. Build Instructions
+## Build
 
 ### Prerequisites
 
@@ -191,28 +195,28 @@ READY / RUNNING / PAUSED / STOPPING / STOPPED / ZOMBIE / ERROR`.
 - GTest (optional, for unit tests)
 - lcov / genhtml (optional, for coverage reports)
 
-### Build Commands
+### Build commands
 
 ```bash
 # Standard build
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake -S . -B /tmp/daemons-build -DCMAKE_BUILD_TYPE=Release
+cmake --build /tmp/daemons-build --parallel $(nproc)
 
 # Enable tests
-cmake -B build -DBUILD_TESTS=ON
-cmake --build build
-ctest --test-dir build
+cmake -S . -B /tmp/daemons-build -DBUILD_TESTS=ON
+cmake --build /tmp/daemons-build --parallel $(nproc)
+ctest --test-dir /tmp/daemons-build --output-on-failure
 
 # Enable coverage
-cmake -B build -DBUILD_COVERAGE=ON
-cmake --build build
-cmake --build build --target coverage
+cmake -S . -B /tmp/daemons-build -DBUILD_COVERAGE=ON
+cmake --build /tmp/daemons-build --parallel $(nproc)
+cmake --build /tmp/daemons-build --target coverage
 
 # Cross-platform build
-cmake -B build -DBUILD_ALL_PLATFORMS=ON
+cmake -S . -B /tmp/daemons-build -DBUILD_ALL_PLATFORMS=ON
 ```
 
-### CMake Options
+### CMake options
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -220,25 +224,23 @@ cmake -B build -DBUILD_ALL_PLATFORMS=ON
 | `BUILD_COVERAGE` | `OFF` | Enable code-coverage reporting |
 | `BUILD_ALL_PLATFORMS` | `OFF` | Cross-compile for all platforms |
 
-### Build Artifacts
+### Build artifacts
 
-- 12 daemon executables: `gateway_d`, `llm_d`, `tool_d`, `sched_d`,
-  `market_d`, `monit_d`, `channel_d`, `info_d`, `notify_d`, `observe_d`,
-  `hook_d`, `plugin_d` — output to `${CMAKE_BINARY_DIR}/bin/`
-- `svc_common` — shared static library consumed by every daemon
+- 12 daemon executables: `gateway_d`, `llm_d`, `tool_d`, `sched_d`, `market_d`, `monit_d`, `channel_d`, `info_d`, `notify_d`, `observe_d`, `hook_d`, `plugin_d` — output to `${CMAKE_BINARY_DIR}/bin/`
+- `svc_common` — shared static library consumed (PRIVATE-linked) by every daemon
 - Public headers installed under `include/agentrt/`
 
 ### Installation
 
 ```bash
-cmake --install build --prefix /opt/airymax
+cmake --install /tmp/daemons-build --prefix /opt/airymax
 ```
 
 ### Launching
 
 ```bash
 # Start a single daemon
-./build/bin/gateway_d --config gateway_config.json
+/tmp/daemons-build/bin/gateway_d --config gateway_config.json
 
 # Start all daemons via the manager
 ./daemon_manager --start-all
@@ -247,7 +249,7 @@ cmake --install build --prefix /opt/airymax
 ./daemon_manager --status
 ```
 
-### CI/CD Scripts
+### CI/CD scripts
 
 | Script | Purpose |
 |--------|---------|
@@ -256,9 +258,71 @@ cmake --install build --prefix /opt/airymax
 | `scripts/static-analysis.sh` | Static code analysis |
 | `scripts/verify-coverage.sh` | Coverage verification |
 
----
+## API
 
-## 6. License
+### Service lifecycle
+
+Service state enum (`agentrt_svc_state_t`, defined in `commons/utils/ipc/include/svc_common.h`):
+
+| State | Description |
+|-------|-------------|
+| `AGENTRT_SVC_STATE_NONE` | Not initialized |
+| `AGENTRT_SVC_STATE_CREATED` | Created |
+| `AGENTRT_SVC_STATE_INITIALIZING` | Initializing |
+| `AGENTRT_SVC_STATE_READY` | Ready |
+| `AGENTRT_SVC_STATE_RUNNING` | Running |
+| `AGENTRT_SVC_STATE_PAUSED` | Paused |
+| `AGENTRT_SVC_STATE_STOPPING` | Stopping |
+| `AGENTRT_SVC_STATE_STOPPED` | Stopped |
+| `AGENTRT_SVC_STATE_ZOMBIE` | Zombie (stop timeout / partial cleanup) |
+| `AGENTRT_SVC_STATE_ERROR` | Error state |
+
+Lifecycle progression:
+
+```
+INIT → CONFIG_LOAD → SERVICE_REGISTER → IDLE → BUSY → SHUTDOWN
+ init    load cfg      register to SvcDisc   wait    handle   graceful stop
+```
+
+### Service capability flags (`agentrt_svc_capability_t`)
+
+`AGENTRT_SVC_CAP_NONE / ASYNC / STREAMING / CANCELABLE / PAUSEABLE / THROTTLE / BATCH / PRIORITY / TIMEOUT` — each daemon advertises its capabilities via the `agentrt_svc_config_t.capabilities` bitmask.
+
+### IPC service bus
+
+| Transport | Scenario | Latency | Protocol |
+|-----------|----------|---------|----------|
+| Unix Socket | Same-machine daemons | < 100 μs | JSON-RPC 2.0 |
+| TCP | Cross-machine daemons | < 1 ms | JSON-RPC 2.0 |
+| Shared memory | High-perf data exchange | < 10 μs | custom |
+
+### Error codes
+
+Daemon-extended error codes are exposed through `daemon_errors.h` (re-exported via `common/include/svc_common.h`): `DAEMON_EINIT / ESTATE / EHEALTH` and other compatibility aliases layered on top of the standard `AGENTRT_E*` set defined in `commons/include/agentrt_types.h`.
+
+### Usage example
+
+```c
+#include "svc_common.h"
+#include "ipc_service_bus.h"
+
+int main(void) {
+    /* Daemon registers with the IPC service bus, advertising capabilities. */
+    agentrt_svc_config_t cfg = {
+        .name           = "my_daemon",
+        .version        = "0.1.1",
+        .capabilities   = AGENTRT_SVC_CAP_ASYNC | AGENTRT_SVC_CAP_CANCELABLE,
+        .max_concurrent = 64,
+        .timeout_ms     = 5000,
+        .auto_start     = true,
+        .enable_metrics = true,
+    };
+    /* svc_auth inherits Cupolas request authentication automatically. */
+    return 0;
+}
+```
+
+## License
 
 Copyright (c) 2025-2026 SPHARX Ltd. All Rights Reserved.
 
@@ -271,8 +335,8 @@ This module is dual-licensed under the terms of either:
 
 SPDX-License-Identifier: `AGPL-3.0-or-later OR Apache-2.0`
 
-The full license texts are in the [LICENSE](LICENSE) file; the copyright
-notice is in [NOTICE](NOTICE). You may select either license to comply with.
-The AGPL-3.0-or-later terms apply by default; the Apache-2.0 alternative is
-provided for downstream integration scenarios (e.g., closed-source or
-proprietary distribution) that the AGPL does not accommodate.
+The full license texts are in the [LICENSE](LICENSE) file; the copyright notice is in
+[NOTICE](NOTICE). You may select either license to comply with. The AGPL-3.0-or-later
+terms apply by default; the Apache-2.0 alternative is provided for downstream
+integration scenarios (e.g., closed-source or proprietary distribution) that the
+AGPL does not accommodate.

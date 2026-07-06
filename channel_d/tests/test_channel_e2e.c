@@ -23,7 +23,7 @@
 #endif
 
 #include "channel_service.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #define TEST_SOCKET_DIR AGENTRT_TMP_DIR "/channel_e2e_test"
 #define TEST_CHANNEL_ID "e2e_test_ch_001"
 #define TEST_CHANNEL_NAME "E2E-TestChannel"

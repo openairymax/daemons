@@ -10,14 +10,16 @@
 #include "config_manager.h"
 
 #include "memory_compat.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "safe_string_utils.h"
 #include "svc_logger.h"
+/* P0.17 阶段 2: commons 版 error.h 已通过 svc_logger.h 间接包含，
+ * 此处包含 daemon_errors.h 获取 daemon 模块扩展错误码（如 AGENTRT_ERR_DAEMON_INIT_FAILED） */
+#include "daemon_errors.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "error.h"
 
 extern char **environ;
 
@@ -102,7 +104,7 @@ static void add_history(const char *key, const char *old_value, const char *new_
         safe_strcpy(rec->old_value, old_value, CM_MAX_VALUE_LEN);
     if (new_value)
         safe_strcpy(rec->new_value, new_value, CM_MAX_VALUE_LEN);
-    rec->timestamp = agentrt_platform_get_time_ms();
+    rec->timestamp = agentrt_time_ms();
     if (source)
         safe_strcpy(rec->source, source, sizeof(rec->source));
 
@@ -269,7 +271,7 @@ AGENTRT_API int cm_set(const char *key, const char *value, const char *source)
         }
 
         entry->version = ++g_cm.global_version;
-        entry->last_modified = agentrt_platform_get_time_ms();
+        entry->last_modified = agentrt_time_ms();
         entry->is_overridden = true;
         if (source)
             safe_strcpy(entry->source, source, sizeof(entry->source));
@@ -296,7 +298,7 @@ AGENTRT_API int cm_set(const char *key, const char *value, const char *source)
     entry->type = CM_TYPE_STRING;
     safe_strcpy(entry->namespace_, "default", CM_MAX_NAMESPACE_LEN);
     entry->version = ++g_cm.global_version;
-    entry->last_modified = agentrt_platform_get_time_ms();
+    entry->last_modified = agentrt_time_ms();
     entry->is_default = false;
     entry->is_overridden = true;
     if (source)

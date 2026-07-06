@@ -7,7 +7,7 @@
 #include "ipc_service_bus.h"
 #include "error.h"
 #include "memory_compat.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 
 #include <assert.h>
 #include <stdio.h>

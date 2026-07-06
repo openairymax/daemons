@@ -405,4 +405,4 @@ if (cb_allow_request(cb)) {
 
 ---
 
-© 2026 SPHARX Ltd. All Rights Reserved.
+© 2025-2026 SPHARX Ltd. All Rights Reserved.

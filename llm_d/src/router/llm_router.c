@@ -17,6 +17,7 @@
 
 #include "router/router_context.h"
 #include "router/router_internal.h"
+#include "memory_compat.h"
 
 /* ==================== 全局路由器上下文 ==================== */
 

@@ -6,7 +6,7 @@
  */
 
 #include "error.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "registry.h"
 #include "svc_logger.h"
 

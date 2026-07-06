@@ -100,15 +100,10 @@
 #define AGENTRT_ERROR_MONITOR_ALERT AGENTRT_ERR_SYS_RESOURCE
 
 /* Daemon 服务层错误码（commons 未定义，daemon 模块扩展）
- * 错误码段：-900 到 -999（G2.2 迁移：原 -600 与 AGENTRT_ERR_MEM_BASE 碰撞，已迁移至 -900 空闲段） */
-#define AGENTRT_ERR_DAEMON_BASE (-900)
-#define AGENTRT_ERR_DAEMON_AUTH_FAIL (AGENTRT_ERR_DAEMON_BASE + 0x01)
-#define AGENTRT_ERR_DAEMON_CONFIG_INVALID (AGENTRT_ERR_DAEMON_BASE + 0x02)
-#define AGENTRT_ERR_DAEMON_INIT_FAILED (AGENTRT_ERR_DAEMON_BASE + 0x03)
-#define AGENTRT_ERR_DAEMON_ALREADY_INIT (AGENTRT_ERR_DAEMON_BASE + 0x04)
-
-/* Daemon 层兼容别名（daemon 模块扩展，非 commons 定义） */
-#define AGENTRT_ERR_ALREADY_INIT AGENTRT_ERR_DAEMON_ALREADY_INIT
+ * P0.17 阶段 2：已迁移至独立的 daemon_errors.h 头文件，
+ * 错误码段从 -900 迁移至 -910（消除与 commons AGENTRT_ERR_PROTOCOL 的冲突）。
+ * daemons 内部源文件可直接 #include "daemon_errors.h" 获取这些错误码。 */
+#include "daemon_errors.h"
 
 /* ==================== 兼容性函数别名 ==================== */
 

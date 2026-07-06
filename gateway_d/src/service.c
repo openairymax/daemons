@@ -6,7 +6,7 @@
  */
 
 #include "gateway_service.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #ifdef GATEWAY_HAS_HTTP
 #include "http_gateway.h"
 #endif

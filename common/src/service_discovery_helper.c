@@ -14,7 +14,7 @@
 #include "service_discovery_helper.h"
 
 #include "memory_compat.h"
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "safe_string_utils.h"
 #include "svc_logger.h"
 
@@ -175,8 +175,8 @@ int sd_helper_register(sd_helper_t *sdh, const char *name, const char *type,
     inst.weight = 100;
     inst.active_connections = 0;
     inst.max_connections = 1024;
-    inst.last_heartbeat = agentrt_platform_get_time_ms();
-    inst.register_time = agentrt_platform_get_time_ms();
+    inst.last_heartbeat = agentrt_time_ms();
+    inst.register_time = agentrt_time_ms();
     inst.pid = 0;
 #ifdef _WIN32
     inst.pid = (uint32_t)GetCurrentProcessId();
@@ -228,8 +228,8 @@ int sd_helper_register_unix(sd_helper_t *sdh, const char *name, const char *type
     inst.weight = 100;
     inst.active_connections = 0;
     inst.max_connections = 1024;
-    inst.last_heartbeat = agentrt_platform_get_time_ms();
-    inst.register_time = agentrt_platform_get_time_ms();
+    inst.last_heartbeat = agentrt_time_ms();
+    inst.register_time = agentrt_time_ms();
     inst.pid = pid;
 
     agentrt_error_t err = sd_register(sdh->sd, name, type, &inst,

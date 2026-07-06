@@ -12,7 +12,7 @@
  * 4. 添加超时和重试机制
  */
 
-#include "platform.h"
+#include "daemon_platform_ext.h"
 #include "svc_common.h"
 #include "svc_config.h"
 

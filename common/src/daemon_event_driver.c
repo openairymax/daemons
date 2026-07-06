@@ -4,6 +4,9 @@
 #include "memory_compat.h"
 #include "method_dispatcher.h"
 #include "svc_logger.h"
+/* P0.17 阶段 2: daemon_event_driver.c 使用 agentrt_socket_* daemons 特有函数，
+ * 需包含 daemon_platform_ext.h 获取声明（commons 版 platform.h 无这些函数）。 */
+#include "daemon_platform_ext.h"
 
 #include <stdlib.h>
 #include <string.h>
