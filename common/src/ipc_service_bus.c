@@ -24,6 +24,8 @@
 #include <string.h>
 #include <time.h>
 #include "error.h"
+/* P0.18.2: 提供 DAEMON_ESTATE 定义（daemon_errors.h:60，映射至 AGENTRT_ERR_SVC_NOT_READY） */
+#include "daemon_errors.h"
 
 /* ==================== 内部常量 ==================== */
 
