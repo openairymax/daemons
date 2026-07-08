@@ -176,7 +176,7 @@ static char *extract_a2a_field(const char *json, const char *field_name)
     if (!val) {
         AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
     }
-    __builtin_memcpy(val, p, len);
+    AGENTRT_MEMCPY(val, p, len);
     val[len] = '\0';
     return val;
 }
@@ -225,19 +225,22 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
         int rc = entry->exec_fn(task_id ? task_id : "unknown", task_type,
                                 input_json ? input_json : "{}", &output, entry->user_data);
 
+        if (rc != 0 || !output) {
+            AGENTRT_LOG_ERROR("task execution failed: task_type=%s, rc=%d", task_type, rc);
+            AGENTRT_FREE(task_type);
+            AGENTRT_FREE(task_id);
+            AGENTRT_FREE(input_json);
+            AGENTRT_FREE(output);
+            handler->error_count++;
+            return AGENTRT_ERR_EXEC_FAIL;
+        }
+
         AGENTRT_FREE(task_type);
         task_type = NULL;
         AGENTRT_FREE(task_id);
         task_id = NULL;
         AGENTRT_FREE(input_json);
         input_json = NULL;
-
-        if (rc != 0 || !output) {
-            AGENTRT_LOG_ERROR("task execution failed: task_type=%s, rc=%d", task_type, rc);
-            AGENTRT_FREE(output);
-            handler->error_count++;
-            return AGENTRT_ERR_EXEC_FAIL;
-        }
 
         const char *resp_fmt = "{\"result\":{\"status\":\"completed\",\"output\":%s}}";
         size_t rlen = snprintf(NULL, 0, resp_fmt, output);
