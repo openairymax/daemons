@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file test_complexity_routing.c
  * @brief llm_d 复杂度评估路由策略验证 (INT-16)

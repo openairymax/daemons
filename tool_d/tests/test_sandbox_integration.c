@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file test_sandbox_integration.c
  * @brief P3.18 (ACC-DT27): tool_d sandbox 集成测试

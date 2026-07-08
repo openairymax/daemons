@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file agent_registry_core.h
  * @brief Agent注册表核心功能接口

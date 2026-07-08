@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file plugin_discovery.c
  * @brief P2.2.1: 插件发现实现 — 扫描目录 + 解析 manifest.yaml

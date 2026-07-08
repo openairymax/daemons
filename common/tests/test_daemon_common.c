@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file test_daemon_common.c
  * @brief daemons/common 模块深度单元测试（P1-C06）
