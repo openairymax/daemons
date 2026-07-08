@@ -30,6 +30,8 @@
 #include "tool_service.h"
 
 #include <cjson/cJSON.h>
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+#include <cjson_helpers.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -256,15 +258,16 @@ static void handle_list(int id, agentrt_socket_t client_fd)
         return;
     }
 
-    cJSON *result = cJSON_Parse(list_json);
-    AGENTRT_FREE(list_json);
-
-    if (!result) {
+    /* P0.18.2: 模式 B — parse + 立即释放 text + 自动释放（JSONRPC_SEND_SUCCESS 内部 Delete） */
+    CJSON_PARSE_GUARD(result, list_json, {
+        AGENTRT_FREE(list_json);
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid JSON from list", id);
         return;
-    }
+    });
+    AGENTRT_FREE(list_json);
 
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    result = NULL; /* JSONRPC_SEND_SUCCESS 已 Delete，防止 CJSON_AUTO_FREE 重复释放 */
 }
 
 /**
@@ -390,13 +393,13 @@ static void handle_client(agentrt_socket_t client_fd)
         return;
     }
 
-    cJSON *req = cJSON_Parse(buffer);
-    if (!req) {
+    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
+    CJSON_PARSE_GUARD(req, buffer, {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR, "Parse error: invalid JSON", -1);
         AGENTRT_FREE(buffer);
         agentrt_socket_close(client_fd);
         return;
-    }
+    });
 
     cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");
     cJSON *method = cJSON_GetObjectItem(req, "method");
@@ -407,7 +410,7 @@ static void handle_client(agentrt_socket_t client_fd)
         !cJSON_IsString(method) || !id) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid Request: missing jsonrpc/method/id",
                            -1);
-        cJSON_Delete(req);
+        /* req 由 CJSON_AUTO_FREE 自动释放 */
         AGENTRT_FREE(buffer);
         agentrt_socket_close(client_fd);
         return;
@@ -419,7 +422,7 @@ static void handle_client(agentrt_socket_t client_fd)
 
     method_dispatcher_dispatch(g_dispatcher, req, jsonrpc_build_error, &client_fd);
 
-    cJSON_Delete(req);
+    /* req 由 CJSON_AUTO_FREE 自动释放 */
     AGENTRT_FREE(buffer);
     agentrt_socket_close(client_fd);
 }
@@ -461,8 +464,9 @@ static int load_daemon_config(const char *config_path)
                     if (read_len == (size_t)len) {
                         content[read_len] = '\0';
 
-                        cJSON *root = cJSON_Parse(content);
-                        if (root) {
+                        /* P0.18.2: 模式 C — 用 do { ... } while (0) + break 配合 CJSON_PARSE_GUARD */
+                        do {
+                            CJSON_PARSE_GUARD(root, content, { break; });
                             cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
                             if (daemon_cfg) {
                                 cJSON *socket_path = cJSON_GetObjectItem(daemon_cfg, "socket_path");
@@ -482,8 +486,8 @@ static int load_daemon_config(const char *config_path)
                                     g_config.max_clients = max_clients->valueint;
                                 }
                             }
-                            cJSON_Delete(root);
-                        }
+                            /* root 由 CJSON_AUTO_FREE 自动释放 */
+                        } while (0);
                     }
                     AGENTRT_FREE(content);
                 }

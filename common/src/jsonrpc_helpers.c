@@ -9,6 +9,8 @@
  */
 
 #include "jsonrpc_helpers.h"
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+#include <cjson_helpers.h>
 #include "svc_logger.h"
 
 #include <stdarg.h>
@@ -71,12 +73,11 @@ int jsonrpc_parse_request(const char *raw, char **out_method, cJSON **out_params
     *out_params = NULL;
     *out_id = 0;
 
-    cJSON *req = cJSON_Parse(raw);
-    if (!req)
-        return JSONRPC_PARSE_ERROR;
+    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
+    CJSON_PARSE_GUARD(req, raw, { return JSONRPC_PARSE_ERROR; });
 
     if (jsonrpc_validate_request(req) != 0) {
-        cJSON_Delete(req);
+        /* req 由 CJSON_AUTO_FREE 自动释放 */
         return JSONRPC_INVALID_REQUEST;
     }
 
@@ -95,7 +96,7 @@ int jsonrpc_parse_request(const char *raw, char **out_method, cJSON **out_params
         *out_id = id_obj->valueint;
     }
 
-    cJSON_Delete(req);
+    /* req 由 CJSON_AUTO_FREE 自动释放 */
     return 0;
 }
 

@@ -12,6 +12,8 @@
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD 宏 */
+#include <cjson_helpers.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -153,23 +155,24 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
     content[read_len] = '\0';
     fclose(f);
 
-    cJSON *root = cJSON_Parse(content);
-    AGENTRT_FREE(content);
-    if (!root) {
+    /* P0.18.2: 模式 B — CJSON_PARSE_GUARD（on_fail 中释放 content） */
+    CJSON_PARSE_GUARD(root, content, {
+        AGENTRT_FREE(content);
         SVC_LOG_WARN("Failed to parse provider config '%s'", config_path);
         return reg;
-    }
+    });
+    AGENTRT_FREE(content);
 
     cJSON *providers_arr = cJSON_GetObjectItem(root, "providers");
     if (!providers_arr || !cJSON_IsArray(providers_arr)) {
-        cJSON_Delete(root);
+        /* root 由 CJSON_AUTO_FREE 自动释放 */
         SVC_LOG_WARN("No 'providers' array in '%s'", config_path);
         return reg;
     }
 
     int n = cJSON_GetArraySize(providers_arr);
     if (n <= 0) {
-        cJSON_Delete(root);
+        /* root 由 CJSON_AUTO_FREE 自动释放 */
         return reg;
     }
 
@@ -186,7 +189,7 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
         (provider_t *)AGENTRT_CALLOC(old_count + new_count + 1, sizeof(provider_t));
     if (!new_provs) {
         agentrt_mutex_unlock(&reg->lock);
-        cJSON_Delete(root);
+        /* root 由 CJSON_AUTO_FREE 自动释放 */
         return reg;
     }
 
@@ -286,7 +289,7 @@ AGENTRT_STRNCPY_TERM(api_key_buf, pkey->valuestring, sizeof(api_key_buf));
 
     agentrt_mutex_unlock(&reg->lock);
 
-    cJSON_Delete(root);
+    /* root 由 CJSON_AUTO_FREE 自动释放 */
     SVC_LOG_INFO("Loaded %zu providers from config '%s'", valid_idx - old_count, config_path);
     return reg;
 }

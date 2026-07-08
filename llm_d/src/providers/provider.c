@@ -17,6 +17,8 @@
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD 宏 */
+#include <cjson_helpers.h>
 #include <curl/curl.h>
 #include <errno.h>
 #include <stdio.h>
@@ -309,18 +311,18 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
         return AGENTRT_ERR_INVALID_PARAM;
     }
 
-    cJSON *root = cJSON_Parse(body);
-    if (!root) {
+    /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + NULL 检查 + 手动 cJSON_Delete */
+    CJSON_PARSE_GUARD(root, body, {
         SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=cjson_parse_error "
                       "STACK: provider_parse_openai_response");
         return AGENTRT_ERR_PARSE_ERROR;
-    }
+    });
 
     llm_response_t *resp = (llm_response_t *)AGENTRT_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {
         SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=oom_resp "
                       "STACK: provider_parse_openai_response");
-        cJSON_Delete(root);
+        /* root 由 CJSON_AUTO_FREE 自动释放 */
         return AGENTRT_ERR_OUT_OF_MEMORY;
     }
 
@@ -348,7 +350,7 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
         if (!resp->choices) {
             SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=oom_choices "
                           "STACK: provider_parse_openai_response");
-            cJSON_Delete(root);
+            /* root 由 CJSON_AUTO_FREE 自动释放 */
             llm_response_free(resp);
             return AGENTRT_ERR_OUT_OF_MEMORY;
         }
@@ -386,7 +388,7 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
             resp->total_tokens = (uint32_t)total->valuedouble;
     }
 
-    cJSON_Delete(root);
+    /* root 由 CJSON_AUTO_FREE 自动释放 */
     *out = resp;
     return AGENTRT_OK;
 }

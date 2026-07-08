@@ -10,6 +10,10 @@
 
 #include "response.h"
 
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏
+ * （response.h 已传递 <cjson/cJSON.h>，cjson_helpers.h 依赖 AGENTRT_HAS_CJSON） */
+#include <cjson_helpers.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -53,14 +57,14 @@ llm_response_t *response_from_json(const char *json)
     if (!json) {
         AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
     }
-    cJSON *root = cJSON_Parse(json);
-    if (!root) {
+    /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + NULL 检查 + 手动 cJSON_Delete */
+    CJSON_PARSE_GUARD(root, json, {
         AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
-    }
+    });
 
     llm_response_t *resp = AGENTRT_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {
-        cJSON_Delete(root);
+        /* root 由 CJSON_AUTO_FREE 自动释放，无需手动 cJSON_Delete */
         AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
     }
 
@@ -107,6 +111,6 @@ llm_response_t *response_from_json(const char *json)
         }
     }
 
-    cJSON_Delete(root);
+    /* root 由 CJSON_AUTO_FREE 自动释放，无需手动 cJSON_Delete(root) */
     return resp;
 }
