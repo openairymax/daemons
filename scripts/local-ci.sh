@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
-# AgentOS daemon CI/CD 本地验证脚本
+# AgentRT daemon CI/CD 本地验证脚本
 # 用于本地验证 CI/CD 流程
 # 包含：构建、测试、静态分析、代码覆盖率
 
@@ -28,7 +28,7 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 echo "=========================================="
-echo "  AgentOS daemon Local CI/CD Validator"
+echo "  AgentRT daemon Local CI/CD Validator"
 echo "=========================================="
 echo ""
 log_info "Build Root: $BACKS_ROOT"
@@ -240,7 +240,7 @@ generate_report() {
     
     {
         echo "========================================"
-        echo "AgentOS Backs模块构建报告"
+        echo "AgentRT Backs模块构建报告"
         echo "========================================"
         echo ""
         echo "构建时间: $(date)"

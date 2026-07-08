@@ -44,7 +44,7 @@ static void market_config_from_common(market_config_t *market_cfg,
     market_cfg->cache_ttl_ms = 300000;
     market_cfg->enable_remote_registry = true;
     market_cfg->enable_auto_update = false;
-    market_cfg->registry_url = AGENTRT_STRDUP("https://registry.agentos.io");
+    market_cfg->registry_url = AGENTRT_STRDUP("https://registry.agentrt.io");
     market_cfg->storage_path = AGENTRT_STRDUP("./market_data");
 }
 

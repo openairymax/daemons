@@ -354,7 +354,7 @@ static void print_usage(const char *prog)
 
 int main(int argc, char **argv)
 {
-    const char *config_path = "agentos/manager/service/sched_d/sched.yaml";
+    const char *config_path = "agentrt/manager/service/sched_d/sched.yaml";
     int use_tcp = 0;
 
     /* 解析命令行参数 */

@@ -421,7 +421,7 @@ static void print_usage(const char *prog)
 
 int main(int argc, char **argv)
 {
-    const char *config_path = "agentos/manager/service/market_d/market.yaml";
+    const char *config_path = "agentrt/manager/service/market_d/market.yaml";
     int use_tcp = 0;
 
     for (int i = 1; i < argc; i++) {

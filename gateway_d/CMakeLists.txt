@@ -107,7 +107,7 @@ target_include_directories(agentrt_gateway_service PUBLIC
     ${GATEWAY_SRC_DIR}
     ${GATEWAY_SRC_DIR}/gateway
     ${GATEWAY_SRC_DIR}/utils
-    # Atom 模块（service.c 引用 "syscalls.h", "agentos.h"）
+    # Atom 模块（service.c 引用 "syscalls.h", "agentrt.h"）
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
     # Daemon 兼容层

@@ -173,7 +173,7 @@ cmake --build build --target observe_d
 
 ```yaml
 scrape_configs:
-  - job_name: 'agentos'
+  - job_name: 'agentrt'
     static_configs:
       - targets: ['localhost:9090']
 ```

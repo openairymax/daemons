@@ -227,7 +227,7 @@ ctest --test-dir build -R "test_market|test_agent_registry|test_skill_registry|t
 ./market_d --config market_config.json
 
 # 指定市场数据目录
-./market_d --data-dir /opt/agentos/market
+./market_d --data-dir /opt/agentrt/market
 
 # 启用自动同步
 ./market_d --sync-interval 3600
@@ -239,7 +239,7 @@ ctest --test-dir build -R "test_market|test_agent_registry|test_skill_registry|t
 #include "daemons/market_d/include/market_service.h"
 
 market_config_t config = {
-    .storage_path = "/opt/agentos/market",
+    .storage_path = "/opt/agentrt/market",
     .sync_interval_ms = 3600000,
     .cache_ttl_ms = 300000,
     .enable_remote_registry = true,

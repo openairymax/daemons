@@ -1,12 +1,12 @@
 # Copyright (c) 2026 SPHARX. All Rights Reserved. "From data intelligence emerges".
-# AgentOS daemon 模块独立构建 CI Docker 镜像
+# AgentRT daemon 模块独立构建 CI Docker 镜像
 # 用于 daemon 模块的独立构建和测试
 
 FROM ubuntu:24.04 AS builder
 
 LABEL maintainer="SPHARX Team <devops@spharx.cn>"
 LABEL version="0.1.0"
-LABEL description="AgentOS daemon Build Environment"
+LABEL description="AgentRT daemon Build Environment"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Shanghai \
@@ -106,13 +106,13 @@ FROM ubuntu:24.04 AS runtime
 
 LABEL maintainer="SPHARX Team <devops@spharx.cn>"
 LABEL version="0.1.0"
-LABEL description="AgentOS daemon Runtime"
+LABEL description="AgentRT daemon Runtime"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Shanghai \
-    AGENTOS_SERVICES_ROOT=/opt/agentos/services \
-    AGENTOS_LOG_DIR=/var/log/agentos \
-    AGENTOS_CONFIG_DIR=/etc/agentos
+    AGENTRT_SERVICES_ROOT=/opt/agentrt/services \
+    AGENTRT_LOG_DIR=/var/log/agentrt \
+    AGENTRT_CONFIG_DIR=/etc/agentrt
 
 WORKDIR /app
 
@@ -124,19 +124,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean
 
 # 从构建阶段复制二进制文件
-COPY --from=builder /opt/agentos/services/bin/* ${AGENTOS_SERVICES_ROOT}/bin/
-COPY --from=builder /opt/agentos/services/lib/* ${AGENTOS_SERVICES_ROOT}/lib/
+COPY --from=builder /opt/agentrt/services/bin/* ${AGENTRT_SERVICES_ROOT}/bin/
+COPY --from=builder /opt/agentrt/services/lib/* ${AGENTRT_SERVICES_ROOT}/lib/
 
 # 创建目录结构
-RUN mkdir -p ${AGENTOS_SERVICES_ROOT}/{bin,lib,etc,var} \
-    && mkdir -p ${AGENTOS_CONFIG_DIR} \
-    && mkdir -p ${AGENTOS_LOG_DIR} \
-    && chmod -R 755 ${AGENTOS_SERVICES_ROOT} \
-    && chmod -R 755 ${AGENTOS_LOG_DIR}
+RUN mkdir -p ${AGENTRT_SERVICES_ROOT}/{bin,lib,etc,var} \
+    && mkdir -p ${AGENTRT_CONFIG_DIR} \
+    && mkdir -p ${AGENTRT_LOG_DIR} \
+    && chmod -R 755 ${AGENTRT_SERVICES_ROOT} \
+    && chmod -R 755 ${AGENTRT_LOG_DIR}
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD pgrep -f 'agentos-' || exit 1
+    CMD pgrep -f 'agentrt-' || exit 1
 
 EXPOSE 8080 8081 8082 8083 8084
 

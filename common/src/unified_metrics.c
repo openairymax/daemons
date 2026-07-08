@@ -94,7 +94,7 @@ AGENTRT_API um_config_t um_create_default_config(void)
 {
     um_config_t config;
     __builtin_memset(&config, 0, sizeof(um_config_t));
-    safe_strcpy(config.service_name, "agentos", sizeof(config.service_name));
+    safe_strcpy(config.service_name, "agentrt", sizeof(config.service_name));
     config.scrape_interval_ms = 15000;
     config.retention_ms = 300000;
     config.enable_default_metrics = true;

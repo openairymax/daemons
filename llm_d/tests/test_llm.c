@@ -20,7 +20,7 @@ int test_create_destroy()
 {
     printf("=== Testing create and destroy ===\n");
 
-    const char *config_path = "agentos/manager/service/llm_d/llm.yaml";
+    const char *config_path = "agentrt/manager/service/llm_d/llm.yaml";
     llm_service_t *service = llm_service_create(config_path);
     if (!service) {
         printf("Failed to create LLM service\n");
@@ -45,7 +45,7 @@ int test_complete_stream()
 {
     printf("=== Testing complete stream ===\n");
 
-    const char *config_path = "agentos/manager/service/llm_d/llm.yaml";
+    const char *config_path = "agentrt/manager/service/llm_d/llm.yaml";
     llm_service_t *service = llm_service_create(config_path);
     if (!service) {
         printf("Failed to create LLM service\n");

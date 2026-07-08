@@ -25,7 +25,7 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 echo "=========================================="
-echo "  AgentOS daemon Coverage Validator"
+echo "  AgentRT daemon Coverage Validator"
 echo "=========================================="
 echo ""
 log_info "Coverage Target: ${COVERAGE_TARGET}%"
@@ -99,7 +99,7 @@ generate_html_report() {
     if [ -f "$REPORT_DIR/coverage/total_coverage.info" ]; then
         genhtml "$REPORT_DIR/coverage/total_coverage.info" \
             --output-directory "$REPORT_DIR/coverage/html" \
-            --title "AgentOS daemon Coverage Report" \
+            --title "AgentRT daemon Coverage Report" \
             --legend \
             --show-details \
             2>/dev/null || true

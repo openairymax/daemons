@@ -36,7 +36,7 @@ static void test_logger_init_shutdown(void)
 {
     SVC_LOG_INFO("  test_logger_init_shutdown...");
 
-    agentrt_logger_config_t config = {.name = "test_agentos",
+    agentrt_logger_config_t config = {.name = "test_agentrt",
                                       .level = (int)LOG_LEVEL_DEBUG,
                                       .targets = NULL,
                                       .target_count = 0,
@@ -80,7 +80,7 @@ static void test_logger_macros(void)
 {
     SVC_LOG_INFO("  test_logger_macros...");
 
-    agentrt_logger_config_t config = {.name = "test_agentos",
+    agentrt_logger_config_t config = {.name = "test_agentrt",
                                       .level = (int)LOG_LEVEL_DEBUG,
                                       .targets = NULL,
                                       .target_count = 0,
