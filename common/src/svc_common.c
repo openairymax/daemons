@@ -1139,7 +1139,7 @@ static struct {
     agentrt_mutex_t mutex;
 } g_cross_registry = {0};
 
-agentrt_error_t agentrt_registry_init(const char *registry_url)
+agentrt_error_t agentrt_cross_registry_init(const char *registry_url)
 {
     if (!registry_url) {
         return AGENTRT_EINVAL;
