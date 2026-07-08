@@ -104,7 +104,7 @@ gw_forward_t *gw_forward_create(const gw_forward_config_t *config)
         return NULL;
     }
 
-    __builtin_memset(&fw->stats, 0, sizeof(fw->stats));
+    AGENTRT_MEMSET(&fw->stats, 0, sizeof(fw->stats));
     fw->initialized = true;
     fw->healthy = true;
 
@@ -315,7 +315,7 @@ static int do_forward(gw_forward_t *fw, gw_fwd_proto_t proto, const char *target
     safe_strcpy(req->header.target, target_daemon, sizeof(req->header.target));
 
     ipc_bus_message_t resp;
-    __builtin_memset(&resp, 0, sizeof(resp));
+    AGENTRT_MEMSET(&resp, 0, sizeof(resp));
 
     int ret = ipc_bus_helper_request(fw->ipc_helper, target_daemon, req, &resp,
                                      fw->config.request_timeout_ms);
@@ -448,7 +448,7 @@ int gw_forward_get_stats(gw_forward_t *fw, gw_forward_stats_t *stats)
 void gw_forward_reset_stats(gw_forward_t *fw)
 {
     if (fw)
-        __builtin_memset(&fw->stats, 0, sizeof(fw->stats));
+        AGENTRT_MEMSET(&fw->stats, 0, sizeof(fw->stats));
 }
 
 bool gw_forward_is_healthy(gw_forward_t *fw)
