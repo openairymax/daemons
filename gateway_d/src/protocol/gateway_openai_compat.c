@@ -412,7 +412,7 @@ static int handle_embeddings(gw_openai_compat_t *compat, const char *body_json,
 static int handle_models_list(gw_openai_compat_t *compat, char **response_json)
 {
     const char *resp = "{\"object\":\"list\",\"data\":["
-                       "{\"id\":\"%s\",\"object\":\"model\",\"owned_by\":\"agentos\"}]}";
+                       "{\"id\":\"%s\",\"object\":\"model\",\"owned_by\":\"agentrt\"}]}";
     size_t len = snprintf(NULL, 0, resp, compat->config.default_model);
     char *buf = (char *)AGENTRT_MALLOC(len + 1);
     if (!buf)

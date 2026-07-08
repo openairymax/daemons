@@ -23,7 +23,7 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 echo "=========================================="
-echo "  AgentOS daemon Static Analysis"
+echo "  AgentRT daemon Static Analysis"
 echo "=========================================="
 echo ""
 
@@ -95,7 +95,7 @@ run_analysis() {
         log_info "生成文本报告..."
         {
             echo "========================================"
-            echo "AgentOS daemon 静态分析报告"
+            echo "AgentRT daemon 静态分析报告"
             echo "========================================"
             echo ""
             echo "生成时间: $(date)"

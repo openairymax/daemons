@@ -231,7 +231,7 @@ ctest --test-dir build -R "test_tool|test_service|test_registry|test_executor|te
 ./tool_d --config tool_config.json
 
 # 指定工具目录
-./tool_d --tool-dir /opt/agentos/tools
+./tool_d --tool-dir /opt/agentrt/tools
 
 # 启用缓存
 ./tool_d --cache-size 1000
@@ -253,7 +253,7 @@ tool_metadata_t meta = {
     .id = "web-search",
     .name = "Web Search",
     .description = "Search the web for information",
-    .executable = "/opt/agentos/tools/web-search",
+    .executable = "/opt/agentrt/tools/web-search",
     .params = params,
     .param_count = 2,
     .timeout_sec = 30,

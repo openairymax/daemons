@@ -491,7 +491,7 @@ static void print_usage(const char *prog)
 
 int main(int argc, char **argv)
 {
-    const char *config_path = "agentos/manager/service/monit_d/monit.yaml";
+    const char *config_path = "agentrt/manager/service/monit_d/monit.yaml";
     int use_tcp = 0;
 
     for (int i = 1; i < argc; i++) {

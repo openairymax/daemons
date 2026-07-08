@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
-# AgentOS Backs模块CI/CD脚本
+# AgentRT Backs模块CI/CD脚本
 # 包含：构建、测试、静态分析、代码覆盖率
 
 set -e
@@ -223,7 +223,7 @@ generate_report() {
     
     {
         echo "========================================"
-        echo "AgentOS Backs模块构建报告"
+        echo "AgentRT Backs模块构建报告"
         echo "========================================"
         echo ""
         echo "构建时间: $(date)"

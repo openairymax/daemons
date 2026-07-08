@@ -578,7 +578,7 @@ int main(int argc, char **argv)
 
     /* 创建工具服务 */
     g_service =
-        tool_service_create(config_path ? config_path : "agentos/manager/service/tool_d/tool.yaml");
+        tool_service_create(config_path ? config_path : "agentrt/manager/service/tool_d/tool.yaml");
     if (!g_service) {
         SVC_LOG_ERROR("Failed to create tool service");
         free_daemon_config();
