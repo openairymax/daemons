@@ -100,7 +100,7 @@ extern "C" {
     static void print_usage_##daemon_name(const char *prog)                           \
     {                                                                                \
         char buf[256];                                                               \
-        fputs("AgentRT " daemon_name " (" daemon_cname ")\n", stdout);                \
+        fputs("AgentRT " #daemon_name " (" #daemon_cname ")\n", stdout);              \
         snprintf(buf, sizeof(buf), "Usage: %s [options]\n\n", prog);                 \
         fputs(buf, stdout);                                                          \
         fputs("Options:\n", stdout);                                                 \
@@ -110,7 +110,7 @@ extern "C" {
         fputs("\n", stdout);                                                         \
         fputs("Examples:\n", stdout);                                                \
         snprintf(buf, sizeof(buf), "  %s --manager "                                  \
-                 AGENTRT_CONFIG_DIR " \"/" daemon_name ".yaml\"\n", prog);             \
+                 AGENTRT_CONFIG_DIR " \"/" #daemon_name ".yaml\"\n", prog);            \
         fputs(buf, stdout);                                                          \
         snprintf(buf, sizeof(buf), "  %s --tcp  # TCP mode on port %d\n",             \
                  prog, DEFAULT_TCP_PORT);                                             \

@@ -230,6 +230,7 @@ char *jsonrpc_build_notification(const char *method, cJSON *params)
 const char *jsonrpc_get_error_message(int code)
 {
     switch (code) {
+    /* JSON-RPC 2.0 标准错误码 */
     case JSONRPC_PARSE_ERROR:
         return "Parse error";
     case JSONRPC_INVALID_REQUEST:
@@ -240,6 +241,15 @@ const char *jsonrpc_get_error_message(int code)
         return "Invalid params";
     case JSONRPC_INTERNAL_ERROR:
         return "Internal error";
+    /* 自定义服务器错误码（-32000 ~ -32099 区间） */
+    case JSONRPC_RATE_LIMITED:
+        return "Rate limit exceeded";
+    case JSONRPC_AUTH_FAILED:
+        return "Authentication failed";
+    case JSONRPC_SESSION_EXPIRED:
+        return "Session expired";
+    case JSONRPC_SERVICE_UNAVAILABLE:
+        return "Service unavailable";
     default:
         return "Unknown error";
     }

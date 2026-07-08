@@ -4,18 +4,15 @@
 #include "error.h"
 /*
  * Copyright (c) 2026 SPHARX. All Rights Reserved.
+ * P0.18.1: daemon_main.h 传递性提供 atomic_compat、daemon_bootstrap_sd/ipc、
+ * daemon_cupolas、daemon_platform_ext、logging、svc_logger 等头文件。
+ * 本守护进程使用自定义 agentrt_event_loop 与采集线程，
+ * 不使用 DAEMON_DECLARE_COMMON 生成的 JSON-RPC 样板。
  */
 
 #include "agentrt_event_loop.h"
-#include "atomic_compat.h"
-#include "daemon_bootstrap_sd.h"
-#include "daemon_bootstrap_ipc.h"
-#include "daemon_cupolas_bootstrap.h"
-#include "logging.h"
-#include "daemon_platform_ext.h"
-#include "svc_logger.h"
+#include "daemon_main.h"
 
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

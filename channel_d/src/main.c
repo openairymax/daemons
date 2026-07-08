@@ -1,65 +1,55 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
-#include "atomic_compat.h"
-#include "channel_service.h"
-#include "daemon_bootstrap_sd.h"
-#include "daemon_bootstrap_ipc.h"
-#include "daemon_cupolas_bootstrap.h"
-#include "logging.h"
 #include "memory_compat.h"
-#include "daemon_platform_ext.h"
-#include "svc_logger.h"
+#include "error.h"
+/*
+ * Copyright (c) 2026 SPHARX. All Rights Reserved.
+ * @file main.c
+ * @brief Channel 守护进程主入口（P0.18.1 样板宏化）
+ */
+
+#include "channel_service.h"
+#include "daemon_main.h"
 
 #include <inttypes.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
-#include "error.h"
 
 #define CHANNEL_D_SOCKET_PATH AGENTRT_RUNTIME_DIR "/channel.sock"
+#define CHANNEL_D_PIPE_PATH   "\\\\.\\pipe\\agentrt_channel"
 
-static atomic_int g_running = 1;
+/* P0.18.1: 使用 DAEMON_DECLARE_COMMON 生成公共样板（信号处理/全局变量/print_usage） */
+DAEMON_DECLARE_COMMON(channel_d, channel, CHANNEL_D_SOCKET_PATH,
+                      CHANNEL_D_PIPE_PATH, 0, 65536)
+
 static channel_service_t *g_svc __attribute__((unused)) = NULL;
-static daemon_bootstrap_sd_t *g_bsd = NULL;
-static daemon_bootstrap_ipc_t *g_bipc = NULL;
-static agentrt_socket_t g_server_fd = AGENTRT_INVALID_SOCKET;
 
-static void signal_handler(int sig __attribute__((unused)))
+/* 销毁服务（daemon_cleanup_standard 回调） */
+static void destroy_service_channel_d(void)
 {
-    atomic_store_explicit(&g_running, 0, memory_order_seq_cst);
-}
-
-static void svc_log_toggle_handler(int sig)
-{
-    (void)sig;
-    static int debug_mode = 0;
-    debug_mode = !debug_mode;
-    log_set_module_level("*", debug_mode ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO);
+    if (g_svc) {
+        channel_service_stop(g_svc);
+        channel_service_destroy(g_svc);
+        g_svc = NULL;
+    }
+    daemon_cupolas_cleanup();
 }
 
 #ifdef _WIN32
-/**
- * @brief Windows 控制台事件处理函数（对齐 gateway_d/src/main.c 模式）
- *
- * Windows 无 POSIX signal() 语义，用 SetConsoleCtrlHandler 接收控制台事件
- * 并复用现有 signal_handler 触发优雅停机。SIGUSR1 在 Windows 无等价控制台
- * 事件，故日志级别热切换在 Windows 暂不可用。
- */
-static BOOL WINAPI console_handler(DWORD fdwCtrlType)
+static BOOL WINAPI console_handler_channel_d(DWORD fdwCtrlType)
 {
     switch (fdwCtrlType) {
     case CTRL_C_EVENT:
     case CTRL_CLOSE_EVENT:
     case CTRL_SHUTDOWN_EVENT:
-        signal_handler((int)fdwCtrlType);
+        signal_handler_channel_d((int)fdwCtrlType);
         return TRUE;
     default:
         return FALSE;
     }
 }
 #endif
+
+/* ==================== 业务逻辑：请求处理 ==================== */
 
 __attribute__((used)) static int handle_service_request(const char *method, const char *params_json,
                                                         char **response_json, void *user_data)
@@ -277,6 +267,8 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
     AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "unknown method");
 }
 
+/* ==================== 主入口 ==================== */
+
 int main(int argc, char *argv[])
 {
     const char *socket_dir = NULL;
@@ -297,72 +289,63 @@ int main(int argc, char *argv[])
 
     /* 跨平台信号处理 */
 #ifdef _WIN32
-    SetConsoleCtrlHandler(console_handler, TRUE);
+    SetConsoleCtrlHandler(console_handler_channel_d, TRUE);
 #else
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-    signal(SIGUSR1, svc_log_toggle_handler);
+    DAEMON_SETUP_SIGNALS(channel_d);
 #endif
 
     agentrt_log_init(NULL);
     atexit(log_cleanup);
 
-    /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("channel_d");
 
     channel_config_t config = CHANNEL_CONFIG_DEFAULTS;
     config.max_channels = max_channels;
     if (socket_dir) {
-AGENTRT_STRNCPY_TERM(config.socket_dir, socket_dir, sizeof(config.socket_dir));
+        AGENTRT_STRNCPY_TERM(config.socket_dir, socket_dir, sizeof(config.socket_dir));
         (config.socket_dir)[sizeof(config.socket_dir) - 1] = '\0';
     }
 
-    channel_service_t *svc = channel_service_create(&config);
-    if (!svc) {
+    g_svc = channel_service_create(&config);
+    if (!g_svc) {
         SVC_LOG_ERROR("Failed to create channel service");
         return 1;
     }
 
-    if (channel_service_start(svc) != 0) {
+    if (channel_service_start(g_svc) != 0) {
         SVC_LOG_ERROR("Failed to start channel service");
-        channel_service_destroy(svc);
+        channel_service_destroy(g_svc);
         return 1;
     }
 
     SVC_LOG_INFO("channel_d started (max_channels=%u, socket_dir=%s)", config.max_channels,
                  config.socket_dir);
 
-    /* 创建 Unix Socket 服务器用于健康检查 */
-    g_server_fd = agentrt_socket_create_unix_server(CHANNEL_D_SOCKET_PATH);
-    if (g_server_fd < 0) {
+    /* 创建 Socket 服务器 */
+    agentrt_socket_t server_fd =
+        daemon_create_server_socket(0, 0, CHANNEL_D_SOCKET_PATH, CHANNEL_D_PIPE_PATH);
+    if (server_fd < 0) {
         SVC_LOG_ERROR("channel_d: failed to create socket at %s", CHANNEL_D_SOCKET_PATH);
-        channel_service_destroy(svc);
+        channel_service_destroy(g_svc);
         return 1;
     }
-    SVC_LOG_INFO("channel_d: listening on %s (fd=%d)", CHANNEL_D_SOCKET_PATH, (int)g_server_fd);
+    SVC_LOG_INFO("channel_d: listening on %s (fd=%d)", CHANNEL_D_SOCKET_PATH, (int)server_fd);
 
-    g_bsd = daemon_bootstrap_sd_start("channel_d", "channel", CHANNEL_D_SOCKET_PATH,
-                                      0, "channel,core", 0);
-    g_bipc = daemon_bootstrap_ipc_start("channel_d", "channel", CHANNEL_D_SOCKET_PATH,
-                                        0, IPC_BUS_PROTO_JSON_RPC);
+    g_bsd_channel_d = daemon_bootstrap_sd_start("channel_d", "channel", CHANNEL_D_SOCKET_PATH,
+                                                  0, "channel,core", 0);
+    g_bipc_channel_d = daemon_bootstrap_ipc_start("channel_d", "channel", CHANNEL_D_SOCKET_PATH,
+                                                   0, IPC_BUS_PROTO_JSON_RPC);
 
-    while (atomic_load_explicit(&g_running, memory_order_acquire)) {
+    while (atomic_load_explicit(&g_running_channel_d, memory_order_acquire)) {
         /* 替代 sleep(1)，允许更快响应关闭信号 */
-        for (int _w = 0; _w < 10 && atomic_load_explicit(&g_running, memory_order_acquire); _w++) {
+        for (int _w = 0; _w < 10 && atomic_load_explicit(&g_running_channel_d, memory_order_acquire); _w++) {
             usleep(100000); /* 100ms */
         }
     }
 
-    daemon_bootstrap_ipc_stop(g_bipc);
-    daemon_bootstrap_sd_stop(g_bsd);
-    if (g_server_fd >= 0) {
-        agentrt_socket_close(g_server_fd);
-        g_server_fd = AGENTRT_INVALID_SOCKET;
-    }
     SVC_LOG_INFO("channel_d shutting down");
-    channel_service_stop(svc);
-    channel_service_destroy(svc);
-    daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
+    daemon_cleanup_standard(g_bipc_channel_d, g_bsd_channel_d, NULL, server_fd,
+                            destroy_service_channel_d, &g_running_lock_channel_d);
     log_cleanup();
     return 0;
 }

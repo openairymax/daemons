@@ -7,45 +7,15 @@
  *
  * @file main.c
  * @brief 市场服务守护进程主入口（遵循 daemon 模块统一规范）
- *
- * 规范遵循:
- * - ARCHITECTURAL_PRINCIPLES.md E-3 资源确定性(成对管理)
- * - ARCHITECTURAL_PRINCIPLES.md E-4 跨平台一致性(platform.h)
- * - ARCHITECTURAL_PRINCIPLES.md E-5 命名语义化(SVC_LOG_*)
- * - ARCHITECTURAL_PRINCIPLES.md E-6 错误可追溯(AGENTRT_ERR_*)
  */
 
-#include "atomic_compat.h"
-#include "daemon_bootstrap_sd.h"
-#include "daemon_bootstrap_ipc.h"
-#include "daemon_cupolas_bootstrap.h"
-#include "jsonrpc_helpers.h"
-#include "logging.h"
+#include "daemon_main.h"
 #include "market_service.h"
-#include "method_dispatcher.h"
 #include "param_validator.h"
-#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 #include "thread_pool.h"
 
-#include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
-#include <cjson_helpers.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <time.h>
-
-/* ==================== 前向声明 ==================== */
-
-static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_search_agents(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_install_agent(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_register_skill(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_search_skills(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_health_check(int id, agentrt_socket_t client_fd);
-static void signal_handler(int signum);
 
 /* ==================== 配置常量 ==================== */
 
@@ -54,14 +24,13 @@ static void signal_handler(int signum);
 #define DEFAULT_TCP_PORT 8082
 #define MAX_BUFFER 65536
 
+/* 生成公共全局变量、信号处理、help、客户端处理等样板 */
+DAEMON_DECLARE_COMMON(market_d, market, DEFAULT_SOCKET_PATH_UNIX,
+                      DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+
 /* ==================== 全局状态 ==================== */
 
 static market_service_t *g_service = NULL;
-static atomic_int g_running = 1;
-static agentrt_mutex_t g_running_lock;
-static method_dispatcher_t *g_dispatcher = NULL; /* 方法分发器 */
-static daemon_bootstrap_sd_t *g_bsd = NULL;
-static daemon_bootstrap_ipc_t *g_bipc = NULL;
 
 /* ==================== 错误码定义 ==================== */
 #define MARKET_ERR_INVALID_PARAM AGENTRT_ERR_INVALID_PARAM
@@ -70,12 +39,14 @@ static daemon_bootstrap_ipc_t *g_bipc = NULL;
 #define MARKET_ERR_ALREADY_EXISTS (AGENTRT_ERR_DAEMON_BASE + 0x20)
 #define MARKET_ERR_INSTALL_FAIL (AGENTRT_ERR_DAEMON_BASE + 0x21)
 
-/* ==================== JSON-RPC 错误码 ==================== */
+/* ==================== 方法处理器包装函数 ==================== */
 
-
-/**
- * @brief 方法处理器包装函数
- */
+static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client_fd);
+static void handle_search_agents(cJSON *params, int id, agentrt_socket_t client_fd);
+static void handle_install_agent(cJSON *params, int id, agentrt_socket_t client_fd);
+static void handle_register_skill(cJSON *params, int id, agentrt_socket_t client_fd);
+static void handle_search_skills(cJSON *params, int id, agentrt_socket_t client_fd);
+static void handle_health_check(int id, agentrt_socket_t client_fd);
 
 static void on_register_agent_method(cJSON *params, int id, void *user_data)
 {
@@ -102,33 +73,36 @@ static void on_search_skills_method(cJSON *params, int id, void *user_data)
     handle_search_skills(params, id, *(agentrt_socket_t *)user_data);
 }
 
-static void on_health_check_method(cJSON *params, int id, void *user_data)
+static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_health_check(id, *(agentrt_socket_t *)user_data);
 }
 
 static int register_rpc_methods(void)
 {
-    g_dispatcher = method_dispatcher_create(16);
-    if (!g_dispatcher) {
+    g_dispatcher_market_d = method_dispatcher_create(16);
+    if (!g_dispatcher_market_d) {
         SVC_LOG_ERROR("Failed to create method dispatcher");
         return AGENTRT_ERR_OUT_OF_MEMORY;
     }
 
-    method_dispatcher_register(g_dispatcher, "register_agent", on_register_agent_method, NULL);
-    method_dispatcher_register(g_dispatcher, "search_agents", on_search_agents_method, NULL);
-    method_dispatcher_register(g_dispatcher, "install_agent", on_install_agent_method, NULL);
-    method_dispatcher_register(g_dispatcher, "register_skill", on_register_skill_method, NULL);
-    method_dispatcher_register(g_dispatcher, "search_skills", on_search_skills_method, NULL);
-    method_dispatcher_register(g_dispatcher, "health_check", on_health_check_method, NULL);
+    method_dispatcher_register(g_dispatcher_market_d, "register_agent", on_register_agent_method, NULL);
+    method_dispatcher_register(g_dispatcher_market_d, "search_agents", on_search_agents_method, NULL);
+    method_dispatcher_register(g_dispatcher_market_d, "install_agent", on_install_agent_method, NULL);
+    method_dispatcher_register(g_dispatcher_market_d, "register_skill", on_register_skill_method, NULL);
+    method_dispatcher_register(g_dispatcher_market_d, "search_skills", on_search_skills_method, NULL);
+    method_dispatcher_register(g_dispatcher_market_d, "health_check", on_health_check_method, NULL);
 
     SVC_LOG_INFO("Registered %d RPC methods", 6);
     return 0;
 }
 
-/**
- * @brief 处理 register_agent 方法
- */
+/* 线程池提交回调：复用生成的 daemon_handle_client_market_d */
+static void handle_client_wrapper(void *arg)
+{
+    daemon_handle_client_market_d((agentrt_socket_t)(uintptr_t)arg, g_dispatcher_market_d);
+}
+
 static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client_fd)
 {
     cJSON *agent_json = jsonrpc_get_object_param(params, "agent");
@@ -164,9 +138,6 @@ static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client
     }
 }
 
-/**
- * @brief 处理 search_agents 方法
- */
 static void handle_search_agents(cJSON *params, int id, agentrt_socket_t client_fd)
 {
     const char *keyword = get_string_field(params, "keyword", "");
@@ -210,9 +181,6 @@ static void handle_search_agents(cJSON *params, int id, agentrt_socket_t client_
     JSONRPC_SEND_SUCCESS(client_fd, arr, id);
 }
 
-/**
- * @brief 处理 install_agent 方法
- */
 static void handle_install_agent(cJSON *params, int id, agentrt_socket_t client_fd)
 {
     const char *aid = get_string_field(params, "agent_id", NULL);
@@ -239,9 +207,6 @@ static void handle_install_agent(cJSON *params, int id, agentrt_socket_t client_
     }
 }
 
-/**
- * @brief 处理 register_skill 方法
- */
 static void handle_register_skill(cJSON *params, int id, agentrt_socket_t client_fd)
 {
     cJSON *skill_json = jsonrpc_get_object_param(params, "skill");
@@ -275,9 +240,6 @@ static void handle_register_skill(cJSON *params, int id, agentrt_socket_t client
     }
 }
 
-/**
- * @brief 处理 search_skills 方法
- */
 static void handle_search_skills(cJSON *params, int id, agentrt_socket_t client_fd)
 {
     const char *keyword = get_string_field(params, "keyword", "");
@@ -316,9 +278,6 @@ static void handle_search_skills(cJSON *params, int id, agentrt_socket_t client_
     JSONRPC_SEND_SUCCESS(client_fd, arr, id);
 }
 
-/**
- * @brief 处理 health_check 方法
- */
 static void handle_health_check(int id, agentrt_socket_t client_fd)
 {
     cJSON *result = cJSON_CreateObject();
@@ -329,94 +288,14 @@ static void handle_health_check(int id, agentrt_socket_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* ==================== 客户端连接处理 ==================== */
+/* ==================== 销毁服务 ==================== */
 
-static void handle_client(agentrt_socket_t client_fd);
-
-static void handle_client_wrapper(void *arg)
+static void destroy_service(void)
 {
-    handle_client((agentrt_socket_t)(uintptr_t)arg);
-}
-
-static void handle_client(agentrt_socket_t client_fd)
-{
-    char buffer[MAX_BUFFER];
-    ssize_t n = agentrt_socket_recv(client_fd, buffer, sizeof(buffer) - 1);
-
-    if (n <= 0) {
-        agentrt_socket_close(client_fd);
-        return;
+    if (g_service) {
+        market_service_destroy(g_service);
+        g_service = NULL;
     }
-    buffer[n] = '\0';
-
-    if ((size_t)n >= sizeof(buffer) - 1) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Request too large", -1);
-        agentrt_socket_close(client_fd);
-        return;
-    }
-
-    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
-    CJSON_PARSE_GUARD(req, buffer, {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR, "Parse error: invalid JSON", -1);
-        agentrt_socket_close(client_fd);
-        return;
-    });
-
-    cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");
-    cJSON *method = cJSON_GetObjectItem(req, "method");
-    (void)cJSON_GetObjectItem(req, "params");
-    cJSON *id = cJSON_GetObjectItem(req, "id");
-
-    if (!cJSON_IsString(jsonrpc) || strcmp(jsonrpc->valuestring, "2.0") != 0 ||
-        !cJSON_IsString(method) || !id) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid Request", -1);
-        /* req 由 CJSON_AUTO_FREE 自动释放 */
-        agentrt_socket_close(client_fd);
-        return;
-    }
-
-    int req_id = cJSON_IsNumber(id) ? id->valueint : 0;
-
-    SVC_LOG_DEBUG("Processing request: method=%s, id=%d", method->valuestring, req_id);
-
-    method_dispatcher_dispatch(g_dispatcher, req, jsonrpc_build_error, &client_fd);
-
-    /* req 由 CJSON_AUTO_FREE 自动释放 */
-    agentrt_socket_close(client_fd);
-}
-
-/* ==================== 帮助信息 ==================== */
-
-static void signal_handler(int signum __attribute__((unused)))
-{
-    atomic_store_explicit(&g_running, 0, memory_order_seq_cst);
-    SVC_LOG_INFO("Received shutdown signal");
-}
-
-static void svc_log_toggle_handler(int sig)
-{
-    (void)sig;
-    static int debug_mode = 0;
-    debug_mode = !debug_mode;
-    log_set_module_level("*", debug_mode ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO);
-}
-
-static void print_usage(const char *prog)
-{
-    char buf[256];
-    fputs("AgentRT Market Daemon\n", stdout);
-    snprintf(buf, sizeof(buf), "Usage: %s [options]\n\n", prog);
-    fputs(buf, stdout);
-    fputs("Options:\n", stdout);
-    fputs("  --manager <path>   Configuration file path\n", stdout);
-    fputs("  --tcp             Use TCP instead of Unix socket\n", stdout);
-    fputs("  --help             Show this help\n", stdout);
-    fputs("\n", stdout);
-    fputs("Examples:\n", stdout);
-    snprintf(buf, sizeof(buf), "  %s --manager AGENTRT_CONFIG_DIR \"/market.yaml\"\n", prog);
-    fputs(buf, stdout);
-    snprintf(buf, sizeof(buf), "  %s --tcp           # Use TCP mode on port 8082\n", prog);
-    fputs(buf, stdout);
 }
 
 /* ==================== 主函数 ==================== */
@@ -426,32 +305,19 @@ int main(int argc, char **argv)
     const char *config_path = "agentrt/manager/service/market_d/market.yaml";
     int use_tcp = 0;
 
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--manager") == 0 && i + 1 < argc) {
-            config_path = argv[++i];
-        } else if (strcmp(argv[i], "--help") == 0) {
-            print_usage(argv[0]);
-            return 0;
-        } else if (strcmp(argv[i], "--tcp") == 0) {
-            use_tcp = 1;
-        } else {
-            SVC_LOG_ERROR("Unknown option: %s", argv[i]);
-            print_usage(argv[0]);
-            return 1;
-        }
-    }
+    /* 解析命令行参数（--manager/--tcp/--help） */
+    int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_market_d);
+    if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
 
     /* 初始化平台层 */
     agentrt_socket_init();
-    agentrt_mutex_init(&g_running_lock);
+    agentrt_mutex_init(&g_running_lock_market_d);
 
+    /* 设置信号处理 */
 #ifdef _WIN32
-    SetConsoleCtrlHandler(console_handler, TRUE);
+    SetConsoleCtrlHandler((PHANDLER_ROUTINE)signal_handler_market_d, TRUE);
 #else
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-    signal(SIGPIPE, SIG_IGN);
-    signal(SIGUSR1, svc_log_toggle_handler);
+    DAEMON_SETUP_SIGNALS(market_d);
 #endif
 
     agentrt_log_init(NULL);
@@ -474,7 +340,7 @@ int main(int argc, char **argv)
     int ret = market_service_create(&config, &g_service);
     if (ret != AGENTRT_SUCCESS || !g_service) {
         SVC_LOG_ERROR("Failed to create market service (error=%d)", ret);
-        agentrt_mutex_destroy(&g_running_lock);
+        agentrt_mutex_destroy(&g_running_lock_market_d);
         agentrt_socket_cleanup();
         return 1;
     }
@@ -482,50 +348,35 @@ int main(int argc, char **argv)
     /* 注册 RPC 方法 */
     if (register_rpc_methods() != 0) {
         SVC_LOG_ERROR("Failed to register RPC methods");
-        market_service_destroy(g_service);
-        agentrt_mutex_destroy(&g_running_lock);
+        destroy_service();
+        agentrt_mutex_destroy(&g_running_lock_market_d);
         agentrt_socket_cleanup();
         return 1;
     }
 
     SVC_LOG_INFO("Market service created successfully");
 
-    /* 创建服务器 Socket */
-    agentrt_socket_t server_fd;
-
-    if (use_tcp) {
-        server_fd = agentrt_socket_create_tcp_server("127.0.0.1", DEFAULT_TCP_PORT);
-        if (server_fd < 0) {
-            SVC_LOG_ERROR("Failed to create TCP server on port %d", DEFAULT_TCP_PORT);
-            market_service_destroy(g_service);
-            agentrt_mutex_destroy(&g_running_lock);
-            agentrt_socket_cleanup();
-            return 1;
-        }
-        SVC_LOG_INFO("Listening on TCP port %d", DEFAULT_TCP_PORT);
-        g_bsd = daemon_bootstrap_sd_start("market_d", "market", "127.0.0.1",
-                                          DEFAULT_TCP_PORT, "market,core", 0);
-        g_bipc = daemon_bootstrap_ipc_start("market_d", "market", "127.0.0.1",
-                                            DEFAULT_TCP_PORT, IPC_BUS_PROTO_JSON_RPC);
-    } else {
-#if defined(AGENTRT_PLATFORM_WINDOWS)
-        server_fd = agentrt_socket_create_named_pipe_server(DEFAULT_SOCKET_PATH_WIN);
-#else
-        server_fd = agentrt_socket_create_unix_server(DEFAULT_SOCKET_PATH_UNIX);
-#endif
-        if (server_fd < 0) {
-            SVC_LOG_ERROR("Failed to create socket at default path");
-            market_service_destroy(g_service);
-            agentrt_mutex_destroy(&g_running_lock);
-            agentrt_socket_cleanup();
-            return 1;
-        }
-        SVC_LOG_INFO("Listening on Unix socket");
-        g_bsd = daemon_bootstrap_sd_start("market_d", "market", DEFAULT_SOCKET_PATH_UNIX,
-                                          0, "market,core", 0);
-        g_bipc = daemon_bootstrap_ipc_start("market_d", "market", DEFAULT_SOCKET_PATH_UNIX,
-                                            0, IPC_BUS_PROTO_JSON_RPC);
+    /* 创建服务器 Socket（TCP/Unix/NamedPipe 统一封装） */
+    agentrt_socket_t server_fd = daemon_create_server_socket(
+        use_tcp, DEFAULT_TCP_PORT, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN);
+    if (server_fd < 0) {
+        SVC_LOG_ERROR("Failed to create server socket");
+        method_dispatcher_destroy(g_dispatcher_market_d);
+        destroy_service();
+        agentrt_mutex_destroy(&g_running_lock_market_d);
+        agentrt_socket_cleanup();
+        return 1;
     }
+    SVC_LOG_INFO(use_tcp ? "Listening on TCP port %d" : "Listening on Unix socket",
+                 DEFAULT_TCP_PORT);
+
+    /* SD/IPC bootstrap */
+    const char *sock_addr = use_tcp ? "127.0.0.1" : DEFAULT_SOCKET_PATH_UNIX;
+    g_bsd_market_d = daemon_bootstrap_sd_start("market_d", "market", sock_addr,
+                                                use_tcp ? DEFAULT_TCP_PORT : 0, "market,core", 0);
+    g_bipc_market_d = daemon_bootstrap_ipc_start("market_d", "market", sock_addr,
+                                                  use_tcp ? DEFAULT_TCP_PORT : 0,
+                                                  IPC_BUS_PROTO_JSON_RPC);
 
     SVC_LOG_INFO("Market service started successfully");
 
@@ -537,34 +388,31 @@ int main(int argc, char **argv)
     thread_pool_t *pool = thread_pool_create(&tp_config);
     if (!pool) {
         SVC_LOG_ERROR("Failed to create thread pool");
+        daemon_bootstrap_ipc_stop(g_bipc_market_d);
+        daemon_bootstrap_sd_stop(g_bsd_market_d);
         agentrt_socket_close(server_fd);
-        market_service_destroy(g_service);
-        agentrt_mutex_destroy(&g_running_lock);
+        method_dispatcher_destroy(g_dispatcher_market_d);
+        destroy_service();
+        agentrt_mutex_destroy(&g_running_lock_market_d);
         agentrt_socket_cleanup();
         return 1;
     }
 
-    /* 主事件循环 */
-    while (atomic_load_explicit(&g_running, memory_order_acquire)) {
+    /* 主事件循环：接受连接并提交线程池并发处理 */
+    while (atomic_load_explicit(&g_running_market_d, memory_order_acquire)) {
         agentrt_socket_t client_fd = agentrt_socket_accept(server_fd, 5000);
         if (client_fd == AGENTRT_INVALID_SOCKET)
             continue;
 
-        /* 并发处理客户端请求 */
         thread_pool_submit(pool, handle_client_wrapper, (void *)(uintptr_t)client_fd);
     }
 
     /* 清理资源 */
-    daemon_bootstrap_ipc_stop(g_bipc);
-    daemon_bootstrap_sd_stop(g_bsd);
-    SVC_LOG_INFO("Market service stopping...");
+    daemon_cleanup_standard(g_bipc_market_d, g_bsd_market_d, NULL, server_fd,
+                           destroy_service, &g_running_lock_market_d);
     thread_pool_destroy(pool);
-    agentrt_socket_close(server_fd);
-    market_service_destroy(g_service);
-    if (g_dispatcher)
-        method_dispatcher_destroy(g_dispatcher);
-    agentrt_mutex_destroy(&g_running_lock);
-    agentrt_socket_cleanup();
+    if (g_dispatcher_market_d)
+        method_dispatcher_destroy(g_dispatcher_market_d);
 
     SVC_LOG_INFO("Market service stopped");
     daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */

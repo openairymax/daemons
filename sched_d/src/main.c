@@ -16,38 +16,14 @@
  */
 
 #include "../../monit_d/include/monitor_service.h"
-#include "atomic_compat.h"
-#include "daemon_bootstrap_sd.h"
-#include "daemon_bootstrap_ipc.h"
-#include "daemon_cupolas_bootstrap.h"
-#include "daemon_event_driver.h"
-#include "jsonrpc_helpers.h"
-#include "logging.h"
-#include "method_dispatcher.h"
+#include "daemon_main.h"
 #include "param_validator.h"
-#include "daemon_platform_ext.h"
 #include "scheduler_service.h"
 #include "strategy_interface.h"
 #include "svc_logger.h"
 #include "thread_pool.h"
 
-#include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
-#include <cjson_helpers.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <time.h>
-
-/* ==================== 前向声明 ==================== */
-
-static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_schedule_task(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_get_stats(int id, agentrt_socket_t client_fd);
-static void handle_health_check(int id, agentrt_socket_t client_fd);
-static void signal_handler(int signum);
-static void handle_client(agentrt_socket_t client_fd);
 
 /* ==================== 配置常量 ==================== */
 
@@ -56,15 +32,13 @@ static void handle_client(agentrt_socket_t client_fd);
 #define DEFAULT_TCP_PORT 8083
 #define MAX_BUFFER 65536
 
+/* 生成公共全局变量、信号处理、help、客户端处理等样板 */
+DAEMON_DECLARE_COMMON(sched_d, scheduler, DEFAULT_SOCKET_PATH_UNIX,
+                      DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+
 /* ==================== 全局状态 ==================== */
 
 static sched_service_t *g_service = NULL;
-static atomic_int g_running = 1;
-static agentrt_mutex_t g_running_lock;
-static method_dispatcher_t *g_dispatcher = NULL;
-static daemon_event_driver_t *g_event_driver = NULL;
-static daemon_bootstrap_sd_t *g_bsd = NULL;
-static daemon_bootstrap_ipc_t *g_bipc = NULL;
 
 /* ==================== 错误码定义（统一使用 AGENTRT_ERR_*） ==================== */
 #define SCHED_ERR_INVALID_PARAM AGENTRT_ERR_INVALID_PARAM
@@ -73,50 +47,31 @@ static daemon_bootstrap_ipc_t *g_bipc = NULL;
 #define SCHED_ERR_INVALID_CONFIG (AGENTRT_ERR_DAEMON_BASE + 0x01)
 #define SCHED_ERR_STRATEGY_FAIL (AGENTRT_ERR_DAEMON_BASE + 0x02)
 
-/* ==================== JSON-RPC 错误码 ==================== */
+/* ==================== 方法处理器包装函数 ==================== */
 
+static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client_fd);
+static void handle_schedule_task(cJSON *params, int id, agentrt_socket_t client_fd);
+static void handle_get_stats(int id, agentrt_socket_t client_fd);
+static void handle_health_check(int id, agentrt_socket_t client_fd);
 
-/**
- * @brief 处理 register_agent 方法
- * @param params 参数对象
- * @param id 请求 ID
- * @param client_fd 客户端描述符
- */
 static void on_register_agent_method(cJSON *params, int id, void *user_data)
 {
     handle_register_agent(params, id, *(agentrt_socket_t *)user_data);
 }
 
-/**
- * @brief 处理 schedule_task 方法
- */
 static void on_schedule_task_method(cJSON *params, int id, void *user_data)
 {
     handle_schedule_task(params, id, *(agentrt_socket_t *)user_data);
 }
 
-/**
- * @brief 处理 get_stats 方法
- */
 static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_get_stats(id, *(agentrt_socket_t *)user_data);
 }
 
-/**
- * @brief 处理 health_check 方法
- */
-static void on_health_check_method(cJSON *params, int id, void *user_data)
+static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
-
     handle_health_check(id, *(agentrt_socket_t *)user_data);
-}
-
-static int sched_on_client(void *service_ctx, agentrt_socket_t client_fd)
-{
-    (void)service_ctx;
-    handle_client(client_fd);
-    return 0;
 }
 
 static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client_fd)
@@ -161,12 +116,6 @@ AGENTRT_STRNCPY_TERM(info.agent_name, aname, sizeof(info.agent_name));
     }
 }
 
-/**
- * @brief 处理 schedule_task 方法
- * @param params 参数对象
- * @param id 请求ID
- * @param client_fd 客户端描述符
- */
 static void handle_schedule_task(cJSON *params, int id, agentrt_socket_t client_fd)
 {
     cJSON *task_json = jsonrpc_get_object_param(params, "task");
@@ -215,11 +164,6 @@ AGENTRT_STRNCPY_TERM(task.task_description, desc, sizeof(task.task_description))
     AGENTRT_FREE(result);
 }
 
-/**
- * @brief 处理 get_stats 方法
- * @param id 请求ID
- * @param client_fd 客户端描述符
- */
 static void handle_get_stats(int id, agentrt_socket_t client_fd)
 {
     void *stats_data = NULL;
@@ -242,11 +186,6 @@ static void handle_get_stats(int id, agentrt_socket_t client_fd)
     report_json = NULL; /* JSONRPC_SEND_SUCCESS 已 Delete，防止 CJSON_AUTO_FREE 重复释放 */
 }
 
-/**
- * @brief 处理 health_check 方法
- * @param id 请求ID
- * @param client_fd 客户端描述符
- */
 static void handle_health_check(int id, agentrt_socket_t client_fd)
 {
     bool healthy = false;
@@ -260,97 +199,14 @@ static void handle_health_check(int id, agentrt_socket_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* ==================== 客户端连接处理 ==================== */
+/* ==================== 销毁服务 ==================== */
 
-/**
- * @brief 处理单个客户端连接
- * @param client_fd 客户端描述符
- */
-static void handle_client(agentrt_socket_t client_fd)
+static void destroy_service(void)
 {
-    char buffer[MAX_BUFFER];
-    ssize_t n = agentrt_socket_recv(client_fd, buffer, sizeof(buffer) - 1);
-
-    if (n <= 0) {
-        agentrt_socket_close(client_fd);
-        return;
+    if (g_service) {
+        sched_service_destroy(g_service);
+        g_service = NULL;
     }
-    buffer[n] = '\0';
-
-    if ((size_t)n >= sizeof(buffer) - 1) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Request too large", -1);
-        agentrt_socket_close(client_fd);
-        return;
-    }
-
-    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
-    CJSON_PARSE_GUARD(req, buffer, {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR, "Parse error: invalid JSON", -1);
-        agentrt_socket_close(client_fd);
-        return;
-    });
-
-    cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");
-    cJSON *method = cJSON_GetObjectItem(req, "method");
-    (void)cJSON_GetObjectItem(req, "params");
-    cJSON *id = cJSON_GetObjectItem(req, "id");
-
-    if (!cJSON_IsString(jsonrpc) || strcmp(jsonrpc->valuestring, "2.0") != 0 ||
-        !cJSON_IsString(method) || !id) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid Request", -1);
-        /* req 由 CJSON_AUTO_FREE 自动释放 */
-        agentrt_socket_close(client_fd);
-        return;
-    }
-
-    int req_id = cJSON_IsNumber(id) ? id->valueint : 0;
-
-    SVC_LOG_DEBUG("Processing request: method=%s, id=%d", method->valuestring, req_id);
-
-    method_dispatcher_dispatch(g_dispatcher, req, jsonrpc_build_error, &client_fd);
-
-    /* req 由 CJSON_AUTO_FREE 自动释放 */
-    agentrt_socket_close(client_fd);
-}
-
-/* ==================== 帮助信息 ==================== */
-
-static void signal_handler(int signum __attribute__((unused)))
-{
-    atomic_store_explicit(&g_running, 0, memory_order_seq_cst);
-    SVC_LOG_INFO("Received shutdown signal");
-    if (g_event_driver)
-        daemon_event_driver_stop(g_event_driver);
-}
-
-static void svc_log_toggle_handler(int sig)
-{
-    (void)sig;
-    static int debug_mode = 0;
-    debug_mode = !debug_mode;
-    log_set_module_level("*", debug_mode ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO);
-}
-
-/**
- * @brief 打印使用说明
- * @param prog 程序名
- */
-static void print_usage(const char *prog)
-{
-    char buf[256];
-    fputs("AgentRT Scheduler Daemon\n", stdout);
-    snprintf(buf, sizeof(buf), "Usage: %s [options]\n\n", prog);
-    fputs(buf, stdout);
-    fputs("Options:\n", stdout);
-    fputs("  --manager <path>   Configuration file path\n", stdout);
-    fputs("  --tcp             Use TCP instead of Unix socket\n", stdout);
-    fputs("  --help             Show this help\n", stdout);
-    fputs("\n", stdout);
-    fputs("Examples:\n", stdout);
-    snprintf(buf, sizeof(buf), "  %s --manager AGENTRT_CONFIG_DIR \"/sched.yaml\"\n", prog);
-    fputs(buf, stdout);
-    snprintf(buf, sizeof(buf), "  %s --tcp           # Use TCP mode on port 8083\n", prog);
-    fputs(buf, stdout);
 }
 
 /* ==================== 主函数 ==================== */
@@ -360,34 +216,19 @@ int main(int argc, char **argv)
     const char *config_path = "agentrt/manager/service/sched_d/sched.yaml";
     int use_tcp = 0;
 
-    /* 解析命令行参数 */
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--manager") == 0 && i + 1 < argc) {
-            config_path = argv[++i];
-        } else if (strcmp(argv[i], "--help") == 0) {
-            print_usage(argv[0]);
-            return 0;
-        } else if (strcmp(argv[i], "--tcp") == 0) {
-            use_tcp = 1;
-        } else {
-            SVC_LOG_ERROR("Unknown option: %s", argv[i]);
-            print_usage(argv[0]);
-            return 1;
-        }
-    }
+    /* 解析命令行参数（--manager/--tcp/--help） */
+    int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_sched_d);
+    if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
 
     /* 初始化平台层 */
     agentrt_socket_init();
-    agentrt_mutex_init(&g_running_lock);
+    agentrt_mutex_init(&g_running_lock_sched_d);
 
     /* 设置信号处理 */
 #ifdef _WIN32
-    SetConsoleCtrlHandler(console_handler, TRUE);
+    SetConsoleCtrlHandler((PHANDLER_ROUTINE)signal_handler_sched_d, TRUE);
 #else
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-    signal(SIGPIPE, SIG_IGN);
-    signal(SIGUSR1, svc_log_toggle_handler);
+    DAEMON_SETUP_SIGNALS(sched_d);
 #endif
 
     agentrt_log_init(NULL);
@@ -410,52 +251,27 @@ int main(int argc, char **argv)
     int ret = sched_service_create(&config, &g_service);
     if (ret != AGENTRT_SUCCESS || !g_service) {
         SVC_LOG_ERROR("Failed to create scheduler service (error=%d)", ret);
-        agentrt_mutex_destroy(&g_running_lock);
+        agentrt_mutex_destroy(&g_running_lock_sched_d);
         agentrt_socket_cleanup();
         return 1;
     }
 
     SVC_LOG_INFO("Scheduler service created with strategy: round_robin");
 
-    /* 创建服务器 Socket */
-    agentrt_socket_t server_fd;
-
-    if (use_tcp) {
-        server_fd = agentrt_socket_create_tcp_server("127.0.0.1", DEFAULT_TCP_PORT);
-        if (server_fd < 0) {
-            SVC_LOG_ERROR("Failed to create TCP server on port %d", DEFAULT_TCP_PORT);
-            sched_service_destroy(g_service);
-            agentrt_mutex_destroy(&g_running_lock);
-            agentrt_socket_cleanup();
-            return 1;
-        }
-        SVC_LOG_INFO("Listening on TCP port %d", DEFAULT_TCP_PORT);
-        g_bsd = daemon_bootstrap_sd_start("sched_d", "scheduler", "127.0.0.1",
-                                          DEFAULT_TCP_PORT, "scheduler,core", 0);
-        g_bipc = daemon_bootstrap_ipc_start("sched_d", "scheduler", "127.0.0.1",
-                                            DEFAULT_TCP_PORT, IPC_BUS_PROTO_JSON_RPC);
-    } else {
-#if defined(AGENTRT_PLATFORM_WINDOWS)
-        server_fd = agentrt_socket_create_named_pipe_server(DEFAULT_SOCKET_PATH_WIN);
-#else
-        server_fd = agentrt_socket_create_unix_server(DEFAULT_SOCKET_PATH_UNIX);
-#endif
-        if (server_fd < 0) {
-            SVC_LOG_ERROR("Failed to create socket at default path");
-            sched_service_destroy(g_service);
-            agentrt_mutex_destroy(&g_running_lock);
-            agentrt_socket_cleanup();
-            return 1;
-        }
-        SVC_LOG_INFO("Listening on Unix socket");
-        g_bsd = daemon_bootstrap_sd_start("sched_d", "scheduler", DEFAULT_SOCKET_PATH_UNIX,
-                                          0, "scheduler,core", 0);
-        g_bipc = daemon_bootstrap_ipc_start("sched_d", "scheduler", DEFAULT_SOCKET_PATH_UNIX,
-                                            0, IPC_BUS_PROTO_JSON_RPC);
+    /* 创建服务器 Socket（TCP/Unix/NamedPipe 统一封装） */
+    agentrt_socket_t server_fd = daemon_create_server_socket(
+        use_tcp, DEFAULT_TCP_PORT, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN);
+    if (server_fd < 0) {
+        SVC_LOG_ERROR("Failed to create server socket");
+        destroy_service();
+        agentrt_mutex_destroy(&g_running_lock_sched_d);
+        agentrt_socket_cleanup();
+        return 1;
     }
+    SVC_LOG_INFO(use_tcp ? "Listening on TCP port %d" : "Listening on Unix socket",
+                 DEFAULT_TCP_PORT);
 
-    SVC_LOG_INFO("Scheduler service started successfully");
-
+    /* 创建事件驱动 + SD/IPC bootstrap */
     daemon_event_config_t ev_config;
     __builtin_memset(&ev_config, 0, sizeof(ev_config));
     ev_config.max_events = 64;
@@ -463,50 +279,47 @@ int main(int argc, char **argv)
     ev_config.thread_pool_max = 8;
     ev_config.thread_pool_queue_size = 256;
     ev_config.use_jsonrpc = true;
-    ev_config.on_client = sched_on_client;
+    ev_config.on_client = daemon_on_client_sched_d;
     ev_config.service_ctx = NULL;
 
-    g_event_driver = daemon_event_driver_create(&ev_config);
-    if (!g_event_driver) {
+    const char *sock_addr = use_tcp ? "127.0.0.1" : DEFAULT_SOCKET_PATH_UNIX;
+    ret = daemon_init_event_driver("sched_d", "scheduler", sock_addr,
+                                   use_tcp ? DEFAULT_TCP_PORT : 0, "scheduler,core", use_tcp,
+                                   &ev_config, &g_event_driver_sched_d, &g_bsd_sched_d,
+                                   &g_bipc_sched_d);
+    if (ret != AGENTRT_SUCCESS || !g_event_driver_sched_d) {
         SVC_LOG_ERROR("Failed to create event driver");
         agentrt_socket_close(server_fd);
-        sched_service_destroy(g_service);
-        agentrt_mutex_destroy(&g_running_lock);
+        destroy_service();
+        agentrt_mutex_destroy(&g_running_lock_sched_d);
         agentrt_socket_cleanup();
         return 1;
     }
 
-    g_dispatcher = daemon_event_driver_get_dispatcher(g_event_driver);
-    method_dispatcher_register(g_dispatcher, "register_agent", on_register_agent_method, NULL);
-    method_dispatcher_register(g_dispatcher, "schedule_task", on_schedule_task_method, NULL);
-    method_dispatcher_register(g_dispatcher, "get_stats", on_get_stats_method, NULL);
-    method_dispatcher_register(g_dispatcher, "health_check", on_health_check_method, NULL);
+    g_dispatcher_sched_d = daemon_event_driver_get_dispatcher(g_event_driver_sched_d);
+    method_dispatcher_register(g_dispatcher_sched_d, "register_agent", on_register_agent_method, NULL);
+    method_dispatcher_register(g_dispatcher_sched_d, "schedule_task", on_schedule_task_method, NULL);
+    method_dispatcher_register(g_dispatcher_sched_d, "get_stats", on_get_stats_method, NULL);
+    method_dispatcher_register(g_dispatcher_sched_d, "health_check", on_health_check_method, NULL);
     SVC_LOG_INFO("Registered %d RPC methods", 4);
 
-    if (daemon_event_driver_add_server_fd(g_event_driver, (int)server_fd) != 0) {
+    if (daemon_event_driver_add_server_fd(g_event_driver_sched_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
-        daemon_event_driver_destroy(g_event_driver);
+        daemon_event_driver_destroy(g_event_driver_sched_d);
         agentrt_socket_close(server_fd);
-        sched_service_destroy(g_service);
-        agentrt_mutex_destroy(&g_running_lock);
+        destroy_service();
+        agentrt_mutex_destroy(&g_running_lock_sched_d);
         agentrt_socket_cleanup();
         return 1;
     }
 
     SVC_LOG_INFO("Scheduler service running (event-driven mode)");
-    daemon_event_driver_run(g_event_driver);
+    daemon_event_driver_run(g_event_driver_sched_d);
 
-    /* 清理资源 */
-    daemon_bootstrap_ipc_stop(g_bipc);
-    daemon_bootstrap_sd_stop(g_bsd);
-    SVC_LOG_INFO("Scheduler service stopping...");
-    daemon_event_driver_destroy(g_event_driver);
-    agentrt_socket_close(server_fd);
-    sched_service_destroy(g_service);
-    agentrt_mutex_destroy(&g_running_lock);
-    agentrt_socket_cleanup();
+    /* 标准资源清理链 */
+    daemon_cleanup_standard(g_bipc_sched_d, g_bsd_sched_d, g_event_driver_sched_d,
+                           server_fd, destroy_service, &g_running_lock_sched_d);
 
-    SVC_LOG_INFO("Scheduler service stopped");
     daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
     log_cleanup();
     return 0;

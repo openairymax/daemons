@@ -1,19 +1,17 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 #include "memory_compat.h"
+#include "error.h"
 /*
  * Copyright (c) 2026 SPHARX. All Rights Reserved.
+ * P0.18.1: daemon_main.h 传递性提供 atomic_compat、daemon_bootstrap_sd/ipc、
+ * daemon_cupolas、daemon_platform_ext、logging、svc_logger 等头文件。
+ * 本守护进程使用自定义 HTTP/Prometheus metrics 服务端与 accept 循环，
+ * 不使用 DAEMON_DECLARE_COMMON 生成的 JSON-RPC 样板。
  */
 
-#include "atomic_compat.h"
-#include "daemon_bootstrap_sd.h"
-#include "daemon_bootstrap_ipc.h"
-#include "daemon_cupolas_bootstrap.h"
-#include "error.h"
-#include "daemon_platform_ext.h"
-#include "svc_logger.h"
+#include "daemon_main.h"
 
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
