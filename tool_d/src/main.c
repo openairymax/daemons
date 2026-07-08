@@ -7,39 +7,15 @@
  *
  * @file main.c
  * @brief Tool 服务守护进程主入口（遵循 daemon 模块统一规范）
- *
- * 规范遵循:
- * - ARCHITECTURAL_PRINCIPLES.md E-3 资源确定性(成对管理)
- * - ARCHITECTURAL_PRINCIPLES.md E-4 跨平台一致性(platform.h)
- * - ARCHITECTURAL_PRINCIPLES.md E-5 命名语义化(SVC_LOG_*)
- * - ARCHITECTURAL_PRINCIPLES.md E-6 错误可追溯(AGENTRT_ERR_*)
  */
 
-#include "atomic_compat.h"
-#include "daemon_bootstrap_sd.h"
-#include "daemon_bootstrap_ipc.h"
-#include "daemon_cupolas_bootstrap.h"
-#include "daemon_event_driver.h"
-#include "jsonrpc_helpers.h"
-#include "logging.h"
-#include "method_dispatcher.h"
+#include "daemon_main.h"
 #include "param_validator.h"
-#include "daemon_platform_ext.h"
 #include "svc_logger.h"
 #include "thread_pool.h"
 #include "tool_service.h"
 
-#include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
-#include <cjson_helpers.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 /* ==================== 配置常量 ==================== */
-
-static void handle_client(agentrt_socket_t client_fd);
 
 #define DEFAULT_SOCKET_PATH_UNIX AGENTRT_RUNTIME_DIR "/tool.sock"
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\agentrt_tool"
@@ -47,15 +23,13 @@ static void handle_client(agentrt_socket_t client_fd);
 #define MAX_BUFFER 65536
 #define MAX_CLIENTS 64
 
+/* 生成公共全局变量、信号处理、help、客户端处理等样板 */
+DAEMON_DECLARE_COMMON(tool_d, tool, DEFAULT_SOCKET_PATH_UNIX,
+                      DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+
 /* ==================== 全局状态 ==================== */
 
 static tool_service_t *g_service = NULL;
-static atomic_int g_running = 1;
-static agentrt_mutex_t g_running_lock;
-static method_dispatcher_t *g_dispatcher = NULL;
-static daemon_event_driver_t *g_event_driver = NULL;
-static daemon_bootstrap_sd_t *g_bsd = NULL;
-static daemon_bootstrap_ipc_t *g_bipc = NULL;
 
 /* 服务配置 */
 typedef struct {
@@ -68,34 +42,15 @@ typedef struct {
 
 static tool_daemon_config_t g_config = {0};
 
-/* ==================== 信号处理 ==================== */
-
-/**
- * @brief 信号处理函数
- * @param sig 信号值
- */
-static void signal_handler(int sig __attribute__((unused)))
-{
-    agentrt_mutex_lock(&g_running_lock);
-    atomic_store_explicit(&g_running, 0, memory_order_seq_cst);
-    agentrt_mutex_unlock(&g_running_lock);
-    if (g_event_driver)
-        daemon_event_driver_stop(g_event_driver);
-}
-
 #ifdef _WIN32
-/**
- * @brief Windows控制台处理函数
- * @param fdwCtrlType 控制信号类型
- * @return TRUE 已处理
- */
+/* Windows 控制台处理：复用 signal_handler_tool_d 触发优雅停机 */
 static BOOL WINAPI console_handler(DWORD fdwCtrlType)
 {
     switch (fdwCtrlType) {
     case CTRL_C_EVENT:
     case CTRL_CLOSE_EVENT:
     case CTRL_SHUTDOWN_EVENT:
-        signal_handler((int)fdwCtrlType);
+        signal_handler_tool_d((int)fdwCtrlType);
         return TRUE;
     default:
         return FALSE;
@@ -103,88 +58,33 @@ static BOOL WINAPI console_handler(DWORD fdwCtrlType)
 }
 #endif
 
-static void svc_log_toggle_handler(int sig)
-{
-    (void)sig;
-    static int debug_mode = 0;
-    debug_mode = !debug_mode;
-    log_set_module_level("*", debug_mode ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO);
-}
-
-/* ==================== JSON-RPC 错误码 ==================== */
-
-
 /* ==================== 请求处理方法 ==================== */
 
-/**
- * @brief 处理 register 方法
- */
 static void handle_register(cJSON *params, int id, agentrt_socket_t fd);
-
-/**
- * @brief 处理 list_tools 方法
- */
 static void handle_list(int id, agentrt_socket_t fd);
-
-/**
- * @brief 处理 get_tool 方法
- */
 static void handle_get(cJSON *params, int id, agentrt_socket_t fd);
-
-/**
- * @brief 处理 execute_tool 方法
- */
 static void handle_execute(cJSON *params, int id, agentrt_socket_t fd);
 
-/**
- * @brief 方法处理器包装函数
- */
-
-/**
- * @brief register 方法的包装器
- */
 static void on_register_method(cJSON *params, int id, void *user_data)
 {
     handle_register(params, id, *(agentrt_socket_t *)user_data);
 }
 
-/**
- * @brief list 方法的包装器
- */
-static void on_list_method(cJSON *params, int id, void *user_data)
+static void on_list_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_list(id, *(agentrt_socket_t *)user_data);
 }
 
-/**
- * @brief get 方法的包装器
- */
 static void on_get_method(cJSON *params, int id, void *user_data)
 {
     handle_get(params, id, *(agentrt_socket_t *)user_data);
 }
 
-/**
- * @brief execute 方法的包装器
- */
 static void on_execute_method(cJSON *params, int id, void *user_data)
 {
     handle_execute(params, id, *(agentrt_socket_t *)user_data);
 }
 
-static int tool_on_client(void *service_ctx, agentrt_socket_t client_fd)
-{
-    (void)service_ctx;
-    handle_client(client_fd);
-    return 0;
-}
-
-/**
- * @brief 处理 register 方法
- * @param params 参数对象
- * @param id 请求 ID
- * @param client_fd 客户端描述符
- */
 static void handle_register(cJSON *params, int id, agentrt_socket_t client_fd)
 {
     cJSON *tool = jsonrpc_get_object_param(params, "tool");
@@ -245,11 +145,6 @@ static void handle_register(cJSON *params, int id, agentrt_socket_t client_fd)
     }
 }
 
-/**
- * @brief 处理 list_tools 方法
- * @param id 请求ID
- * @param client_fd 客户端描述符
- */
 static void handle_list(int id, agentrt_socket_t client_fd)
 {
     char *list_json = tool_service_list(g_service);
@@ -270,12 +165,6 @@ static void handle_list(int id, agentrt_socket_t client_fd)
     result = NULL; /* JSONRPC_SEND_SUCCESS 已 Delete，防止 CJSON_AUTO_FREE 重复释放 */
 }
 
-/**
- * @brief 处理 get_tool 方法
- * @param params 参数对象
- * @param id 请求ID
- * @param client_fd 客户端描述符
- */
 static void handle_get(cJSON *params, int id, agentrt_socket_t client_fd)
 {
     const char *tid = get_string_field(params, "tool_id", NULL);
@@ -316,12 +205,6 @@ static void handle_get(cJSON *params, int id, agentrt_socket_t client_fd)
     tool_metadata_free(meta);
 }
 
-/**
- * @brief 处理 execute_tool 方法
- * @param params 参数对象
- * @param id 请求ID
- * @param client_fd 客户端描述符
- */
 static void handle_execute(cJSON *params, int id, agentrt_socket_t client_fd)
 {
     const char *tid = get_string_field(params, "tool_id", NULL);
@@ -364,76 +247,8 @@ static void handle_execute(cJSON *params, int id, agentrt_socket_t client_fd)
     tool_result_free(res);
 }
 
-/* ==================== 客户端连接处理 ==================== */
-
-/**
- * @brief 处理单个客户端连接
- * @param client_fd 客户端描述符
- */
-static void handle_client(agentrt_socket_t client_fd)
-{
-    char *buffer = (char *)AGENTRT_MALLOC(MAX_BUFFER);
-    if (!buffer) {
-        agentrt_socket_close(client_fd);
-        return;
-    }
-    ssize_t n = agentrt_socket_recv(client_fd, buffer, MAX_BUFFER - 1);
-
-    if (n <= 0) {
-        AGENTRT_FREE(buffer);
-        agentrt_socket_close(client_fd);
-        return;
-    }
-    buffer[n] = '\0';
-
-    if ((size_t)n >= (size_t)(MAX_BUFFER - 1)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Request too large", -1);
-        AGENTRT_FREE(buffer);
-        agentrt_socket_close(client_fd);
-        return;
-    }
-
-    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
-    CJSON_PARSE_GUARD(req, buffer, {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR, "Parse error: invalid JSON", -1);
-        AGENTRT_FREE(buffer);
-        agentrt_socket_close(client_fd);
-        return;
-    });
-
-    cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");
-    cJSON *method = cJSON_GetObjectItem(req, "method");
-    (void)cJSON_GetObjectItem(req, "params");
-    cJSON *id = cJSON_GetObjectItem(req, "id");
-
-    if (!cJSON_IsString(jsonrpc) || strcmp(jsonrpc->valuestring, "2.0") != 0 ||
-        !cJSON_IsString(method) || !id) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid Request: missing jsonrpc/method/id",
-                           -1);
-        /* req 由 CJSON_AUTO_FREE 自动释放 */
-        AGENTRT_FREE(buffer);
-        agentrt_socket_close(client_fd);
-        return;
-    }
-
-    int req_id = cJSON_IsNumber(id) ? id->valueint : 0;
-
-    SVC_LOG_DEBUG("Processing request: method=%s, id=%d", method->valuestring, req_id);
-
-    method_dispatcher_dispatch(g_dispatcher, req, jsonrpc_build_error, &client_fd);
-
-    /* req 由 CJSON_AUTO_FREE 自动释放 */
-    AGENTRT_FREE(buffer);
-    agentrt_socket_close(client_fd);
-}
-
 /* ==================== 配置加载 ==================== */
 
-/**
- * @brief 加载守护进程配置
- * @param config_path 配置文件路径
- * @return 0 成功，非0 失败
- */
 static int load_daemon_config(const char *config_path)
 {
     /* 默认配置 */
@@ -464,7 +279,7 @@ static int load_daemon_config(const char *config_path)
                     if (read_len == (size_t)len) {
                         content[read_len] = '\0';
 
-                        /* P0.18.2: 模式 C — 用 do { ... } while (0) + break 配合 CJSON_PARSE_GUARD */
+                        /* P0.18.2: 模式 C — do { ... } while (0) + break 配合 CJSON_PARSE_GUARD */
                         do {
                             CJSON_PARSE_GUARD(root, content, { break; });
                             cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
@@ -499,9 +314,6 @@ static int load_daemon_config(const char *config_path)
     return 0;
 }
 
-/**
- * @brief 释放配置资源
- */
 static void free_daemon_config(void)
 {
     AGENTRT_FREE(g_config.socket_path);
@@ -509,28 +321,14 @@ static void free_daemon_config(void)
     __builtin_memset(&g_config, 0, sizeof(g_config));
 }
 
-/* ==================== 帮助信息 ==================== */
+/* ==================== 销毁服务 ==================== */
 
-/**
- * @brief 打印使用说明
- * @param prog 程序名
- */
-static void print_usage(const char *prog)
+static void destroy_service(void)
 {
-    char buf[256];
-    fputs("AgentRT Tool Daemon\n", stdout);
-    snprintf(buf, sizeof(buf), "Usage: %s [options]\n\n", prog);
-    fputs(buf, stdout);
-    fputs("Options:\n", stdout);
-    fputs("  --manager <path>   Configuration file path\n", stdout);
-    fputs("  --tcp             Use TCP instead of Unix socket\n", stdout);
-    fputs("  --help             Show this help\n", stdout);
-    fputs("\n", stdout);
-    fputs("Examples:\n", stdout);
-    snprintf(buf, sizeof(buf), "  %s --manager AGENTRT_CONFIG_DIR \"/tool.yaml\"\n", prog);
-    fputs(buf, stdout);
-    snprintf(buf, sizeof(buf), "  %s --tcp           # Use TCP mode on port 8081\n", prog);
-    fputs(buf, stdout);
+    if (g_service) {
+        tool_service_destroy(g_service);
+        g_service = NULL;
+    }
 }
 
 /* ==================== 主函数 ==================== */
@@ -538,35 +336,21 @@ static void print_usage(const char *prog)
 int main(int argc, char **argv)
 {
     const char *config_path = NULL;
+    int use_tcp = 0;
 
-    /* 解析命令行参数 */
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--manager") == 0 && i + 1 < argc) {
-            config_path = argv[++i];
-        } else if (strcmp(argv[i], "--help") == 0) {
-            print_usage(argv[0]);
-            return 0;
-        } else if (strcmp(argv[i], "--tcp") == 0) {
-            g_config.use_tcp = 1;
-        } else {
-            SVC_LOG_ERROR("Unknown option: %s", argv[i]);
-            print_usage(argv[0]);
-            return 1;
-        }
-    }
+    /* 解析命令行参数（--manager/--tcp/--help） */
+    int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_tool_d);
+    if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
 
     /* 初始化平台层 */
     agentrt_socket_init();
-    agentrt_mutex_init(&g_running_lock);
+    agentrt_mutex_init(&g_running_lock_tool_d);
 
     /* 设置信号处理 */
 #ifdef _WIN32
     SetConsoleCtrlHandler(console_handler, TRUE);
 #else
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-    signal(SIGPIPE, SIG_IGN);
-    signal(SIGUSR1, svc_log_toggle_handler);
+    DAEMON_SETUP_SIGNALS(tool_d);
 #endif
 
     agentrt_log_init(NULL);
@@ -575,8 +359,10 @@ int main(int argc, char **argv)
     /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("tool_d");
 
-    /* 加载配置 */
+    /* 加载配置（命令行 --tcp 覆盖配置文件） */
     load_daemon_config(config_path);
+    if (use_tcp)
+        g_config.use_tcp = 1;
 
     SVC_LOG_INFO("Tool service starting, manager=%s", config_path ? config_path : "default");
 
@@ -586,52 +372,26 @@ int main(int argc, char **argv)
     if (!g_service) {
         SVC_LOG_ERROR("Failed to create tool service");
         free_daemon_config();
-        agentrt_mutex_destroy(&g_running_lock);
+        agentrt_mutex_destroy(&g_running_lock_tool_d);
         agentrt_socket_cleanup();
         return 1;
     }
 
-    /* 创建服务器 Socket */
-    agentrt_socket_t server_fd;
-
-    if (g_config.use_tcp) {
-        server_fd = agentrt_socket_create_tcp_server(g_config.tcp_host, g_config.tcp_port);
-        if (server_fd < 0) {
-            SVC_LOG_ERROR("Failed to create TCP server on %s:%d", g_config.tcp_host,
-                          g_config.tcp_port);
-            tool_service_destroy(g_service);
-            free_daemon_config();
-            agentrt_mutex_destroy(&g_running_lock);
-            agentrt_socket_cleanup();
-            return 1;
-        }
-        SVC_LOG_INFO("Listening on TCP %s:%d", g_config.tcp_host, g_config.tcp_port);
-        g_bsd = daemon_bootstrap_sd_start("tool_d", "tool", g_config.tcp_host,
-                                          g_config.tcp_port, "tool,core", 0);
-        g_bipc = daemon_bootstrap_ipc_start("tool_d", "tool", g_config.tcp_host,
-                                            g_config.tcp_port, IPC_BUS_PROTO_JSON_RPC);
-    } else {
-#if defined(AGENTRT_PLATFORM_WINDOWS)
-        server_fd = agentrt_socket_create_named_pipe_server(g_config.socket_path);
-#else
-        server_fd = agentrt_socket_create_unix_server(g_config.socket_path);
-#endif
-        if (server_fd < 0) {
-            SVC_LOG_ERROR("Failed to create socket at %s", g_config.socket_path);
-            tool_service_destroy(g_service);
-            free_daemon_config();
-            agentrt_mutex_destroy(&g_running_lock);
-            agentrt_socket_cleanup();
-            return 1;
-        }
-        SVC_LOG_INFO("Listening on %s", g_config.socket_path);
-        g_bsd = daemon_bootstrap_sd_start("tool_d", "tool", g_config.socket_path,
-                                          0, "tool,core", 0);
-        g_bipc = daemon_bootstrap_ipc_start("tool_d", "tool", g_config.socket_path,
-                                            0, IPC_BUS_PROTO_JSON_RPC);
+    /* 创建服务器 Socket（TCP/Unix/NamedPipe 统一封装） */
+    agentrt_socket_t server_fd = daemon_create_server_socket(
+        g_config.use_tcp, g_config.tcp_port, g_config.socket_path, g_config.socket_path);
+    if (server_fd < 0) {
+        SVC_LOG_ERROR("Failed to create server socket");
+        destroy_service();
+        free_daemon_config();
+        agentrt_mutex_destroy(&g_running_lock_tool_d);
+        agentrt_socket_cleanup();
+        return 1;
     }
+    SVC_LOG_INFO(g_config.use_tcp ? "Listening on TCP %s:%d" : "Listening on %s",
+                 g_config.tcp_host, g_config.tcp_port);
 
-    /* 创建事件驱动框架 */
+    /* 创建事件驱动 + SD/IPC bootstrap */
     daemon_event_config_t ev_config;
     __builtin_memset(&ev_config, 0, sizeof(ev_config));
     ev_config.max_events = 64;
@@ -639,51 +399,49 @@ int main(int argc, char **argv)
     ev_config.thread_pool_max = 8;
     ev_config.thread_pool_queue_size = 256;
     ev_config.use_jsonrpc = true;
-    ev_config.on_client = tool_on_client;
+    ev_config.on_client = daemon_on_client_tool_d;
     ev_config.service_ctx = NULL;
 
-    g_event_driver = daemon_event_driver_create(&ev_config);
-    if (!g_event_driver) {
+    const char *sock_addr = g_config.use_tcp ? g_config.tcp_host : g_config.socket_path;
+    int ret = daemon_init_event_driver("tool_d", "tool", sock_addr,
+                                       g_config.use_tcp ? g_config.tcp_port : 0, "tool,core",
+                                       g_config.use_tcp, &ev_config, &g_event_driver_tool_d,
+                                       &g_bsd_tool_d, &g_bipc_tool_d);
+    if (ret != AGENTRT_SUCCESS || !g_event_driver_tool_d) {
         SVC_LOG_ERROR("Failed to create event driver");
         agentrt_socket_close(server_fd);
-        tool_service_destroy(g_service);
+        destroy_service();
         free_daemon_config();
-        agentrt_mutex_destroy(&g_running_lock);
+        agentrt_mutex_destroy(&g_running_lock_tool_d);
         agentrt_socket_cleanup();
         return 1;
     }
 
-    g_dispatcher = daemon_event_driver_get_dispatcher(g_event_driver);
-    method_dispatcher_register(g_dispatcher, "register", on_register_method, NULL);
-    method_dispatcher_register(g_dispatcher, "list_tools", on_list_method, NULL);
-    method_dispatcher_register(g_dispatcher, "get_tool", on_get_method, NULL);
-    method_dispatcher_register(g_dispatcher, "execute_tool", on_execute_method, NULL);
+    g_dispatcher_tool_d = daemon_event_driver_get_dispatcher(g_event_driver_tool_d);
+    method_dispatcher_register(g_dispatcher_tool_d, "register", on_register_method, NULL);
+    method_dispatcher_register(g_dispatcher_tool_d, "list_tools", on_list_method, NULL);
+    method_dispatcher_register(g_dispatcher_tool_d, "get_tool", on_get_method, NULL);
+    method_dispatcher_register(g_dispatcher_tool_d, "execute_tool", on_execute_method, NULL);
     SVC_LOG_INFO("Registered %d RPC methods", 4);
 
-    if (daemon_event_driver_add_server_fd(g_event_driver, (int)server_fd) != 0) {
+    if (daemon_event_driver_add_server_fd(g_event_driver_tool_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
-        daemon_event_driver_destroy(g_event_driver);
+        daemon_event_driver_destroy(g_event_driver_tool_d);
         agentrt_socket_close(server_fd);
-        tool_service_destroy(g_service);
+        destroy_service();
         free_daemon_config();
-        agentrt_mutex_destroy(&g_running_lock);
+        agentrt_mutex_destroy(&g_running_lock_tool_d);
         agentrt_socket_cleanup();
         return 1;
     }
 
     SVC_LOG_INFO("Tool service running (event-driven mode)");
-    daemon_event_driver_run(g_event_driver);
+    daemon_event_driver_run(g_event_driver_tool_d);
 
-    /* 清理资源 */
-    daemon_bootstrap_ipc_stop(g_bipc);
-    daemon_bootstrap_sd_stop(g_bsd);
-    SVC_LOG_INFO("Tool service stopping...");
-    daemon_event_driver_destroy(g_event_driver);
-    agentrt_socket_close(server_fd);
-    tool_service_destroy(g_service);
+    /* 标准资源清理链 */
+    daemon_cleanup_standard(g_bipc_tool_d, g_bsd_tool_d, g_event_driver_tool_d,
+                           server_fd, destroy_service, &g_running_lock_tool_d);
     free_daemon_config();
-    agentrt_mutex_destroy(&g_running_lock);
-    agentrt_socket_cleanup();
 
     SVC_LOG_INFO("Tool service stopped");
     daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */

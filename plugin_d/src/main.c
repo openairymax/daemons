@@ -2,42 +2,28 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file main.c
- * @brief Plugin 守护进程入口 — P2.2 完整实现
+ * @brief Plugin 守护进程入口 — P2.2 完整实现（P0.18.1 样板宏化）
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
- * 启动流程：
- *   1. 初始化 ServiceDiscovery 自动注册
- *   2. 初始化 IPC Bus 消息路由
- *   3. 初始化插件发现模块
- *   4. 初始化权限校验模块
- *   5. 扫描并自动加载所有插件
- *   6. 进入事件循环
+ * 启动流程：SD 注册 → IPC 路由 → 插件发现 → 权限校验 → 扫描加载 → 事件循环
  */
 
 #include "plugin_service.h"
 #include "plugin_discovery.h"
 #include "plugin_permission.h"
-
-#include "daemon_bootstrap_sd.h"
-#include "daemon_bootstrap_ipc.h"
-#include "daemon_cupolas_bootstrap.h"
+#include "daemon_main.h"
 #include "logger.h"
-#include "daemon_platform_ext.h"
 
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 
 #define PLUGIN_D_SOCKET_PATH AGENTRT_RUNTIME_DIR "/plugin.sock"
+#define PLUGIN_D_PIPE_PATH   "\\\\.\\pipe\\agentrt_plugin"
 
 /* ==================== 全局状态 ==================== */
 
 static volatile bool g_running = true;
 static daemon_bootstrap_sd_t *g_bsd = NULL;
 static daemon_bootstrap_ipc_t *g_bipc = NULL;
-static agentrt_socket_t g_server_fd = AGENTRT_INVALID_SOCKET;
 
 /* ==================== 信号处理 ==================== */
 
@@ -49,12 +35,6 @@ static void signal_handler(int sig)
 }
 
 #ifdef _WIN32
-/**
- * @brief Windows 控制台事件处理函数（对齐 gateway_d/src/main.c 模式）
- *
- * Windows 无 POSIX signal() 语义，用 SetConsoleCtrlHandler 接收控制台事件
- * 并复用现有 signal_handler 触发优雅停机。
- */
 static BOOL WINAPI console_handler(DWORD fdwCtrlType)
 {
     switch (fdwCtrlType) {
@@ -68,6 +48,14 @@ static BOOL WINAPI console_handler(DWORD fdwCtrlType)
     }
 }
 #endif
+
+/* 销毁服务（daemon_cleanup_standard 回调） */
+static void destroy_service_plugin_d(void)
+{
+    plugin_discovery_destroy();
+    plugin_permission_destroy();
+    daemon_cupolas_cleanup();
+}
 
 /* ==================== 主入口 ==================== */
 
@@ -88,21 +76,21 @@ int main(int argc, char *argv[])
     signal(SIGTERM, signal_handler);
 #endif
 
-    /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
+    /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶 */
     daemon_cupolas_init("plugin_d");
 
-    /* 创建 Unix Socket 服务器 */
-    g_server_fd = agentrt_socket_create_unix_server(PLUGIN_D_SOCKET_PATH);
-    if (g_server_fd < 0) {
+    /* 创建 Socket 服务器 */
+    agentrt_socket_t server_fd =
+        daemon_create_server_socket(0, 0, PLUGIN_D_SOCKET_PATH, PLUGIN_D_PIPE_PATH);
+    if (server_fd < 0) {
         AGENTRT_LOG_ERROR("Plugin_d: failed to create socket at %s", PLUGIN_D_SOCKET_PATH);
         return EXIT_FAILURE;
     }
-    AGENTRT_LOG_INFO("Plugin_d: listening on %s (fd=%d)", PLUGIN_D_SOCKET_PATH, (int)g_server_fd);
+    AGENTRT_LOG_INFO("Plugin_d: listening on %s (fd=%d)", PLUGIN_D_SOCKET_PATH, (int)server_fd);
 
     /* P1.7: ServiceDiscovery 自动注册 */
-    g_bsd = daemon_bootstrap_sd_start(
-        "plugin_d", "plugin", PLUGIN_D_SOCKET_PATH,
-        0, "plugin,core", 0);
+    g_bsd = daemon_bootstrap_sd_start("plugin_d", "plugin", PLUGIN_D_SOCKET_PATH,
+                                      0, "plugin,core", 0);
     if (!g_bsd) {
         AGENTRT_LOG_ERROR("Plugin_d: ServiceDiscovery bootstrap failed");
         return EXIT_FAILURE;
@@ -110,9 +98,8 @@ int main(int argc, char *argv[])
     AGENTRT_LOG_INFO("Plugin_d: ServiceDiscovery registered");
 
     /* P1.8: IPC Bus 统一消息路由 */
-    g_bipc = daemon_bootstrap_ipc_start(
-        "plugin_d", "plugin", PLUGIN_D_SOCKET_PATH,
-        0, IPC_BUS_PROTO_JSON_RPC);
+    g_bipc = daemon_bootstrap_ipc_start("plugin_d", "plugin", PLUGIN_D_SOCKET_PATH,
+                                        0, IPC_BUS_PROTO_JSON_RPC);
     if (!g_bipc) {
         AGENTRT_LOG_ERROR("Plugin_d: IPC Bus bootstrap failed");
         daemon_bootstrap_sd_stop(g_bsd);
@@ -210,18 +197,9 @@ int main(int argc, char *argv[])
 
     AGENTRT_LOG_INFO("Plugin_d: Shutting down...");
 
-    /* 清理 */
-    plugin_discovery_destroy();
-    plugin_permission_destroy();
-    daemon_bootstrap_ipc_stop(g_bipc);
-    daemon_bootstrap_sd_stop(g_bsd);
-    if (g_server_fd >= 0) {
-        agentrt_socket_close(g_server_fd);
-        g_server_fd = AGENTRT_INVALID_SOCKET;
-    }
-
-    daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
-
+    /* 清理（使用 daemon_cleanup_standard 统一清理链） */
+    daemon_cleanup_standard(g_bipc, g_bsd, NULL, server_fd,
+                            destroy_service_plugin_d, NULL);
     AGENTRT_LOG_INFO("Plugin_d: Stopped");
     return EXIT_SUCCESS;
 }

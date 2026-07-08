@@ -15,41 +15,15 @@
  * - ARCHITECTURAL_PRINCIPLES.md E-6 错误可追溯(AGENTRT_ERR_*)
  */
 
-#include "atomic_compat.h"
-#include "daemon_bootstrap_sd.h"
-#include "daemon_bootstrap_ipc.h"
-#include "daemon_cupolas_bootstrap.h"
-#include "daemon_errors.h"
-#include "daemon_event_driver.h"
-#include "jsonrpc_helpers.h"
+/* P0.18.1: 引入 daemon_main.h 提供 DAEMON_DECLARE_COMMON/DAEMON_SETUP_SIGNALS/
+ * daemon_parse_args/daemon_create_server_socket/daemon_init_event_driver/daemon_cleanup_standard
+ * 等样板宏与内联辅助函数。daemon_main.h 已传递性包含 atomic_compat.h、daemon_bootstrap_*.h、
+ * daemon_cupolas_bootstrap.h、daemon_event_driver.h、daemon_platform_ext.h、jsonrpc_helpers.h、
+ * logging.h、method_dispatcher.h、svc_logger.h、cjson/cJSON.h、cjson_helpers.h 等头文件，
+ * 故此处仅保留业务逻辑直接依赖的头文件。 */
 #include "llm_service.h"
-#include "logging.h"
-#include "method_dispatcher.h"
-#include "param_validator.h"
-#include "daemon_platform_ext.h" /* P0.17 阶段 2: agentrt_socket_* daemons 特有函数 */
 #include "response.h"
-#include "svc_logger.h"
-#include "thread_pool.h"
-
-#include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
-#include <cjson_helpers.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-/* ==================== 事件驱动适配器 ==================== */
-
-static void handle_client(agentrt_socket_t client_fd);
-
-static int llm_on_client(void *service_ctx, agentrt_socket_t client_fd)
-{
-    (void)service_ctx;
-    handle_client(client_fd);
-    return 0;
-}
+#include "daemon_main.h"
 
 /* ==================== 配置常量 ==================== */
 
@@ -61,15 +35,15 @@ static int llm_on_client(void *service_ctx, agentrt_socket_t client_fd)
 #define MAX_THREADS 8
 #define MAX_MESSAGES_PER_REQUEST 128
 
+/* P0.18.1: 生成公共全局变量（g_running_llm_d 等）、信号处理（signal_handler_llm_d、
+ * svc_log_toggle_handler_llm_d）、print_usage_llm_d、daemon_handle_client_llm_d、
+ * daemon_on_client_llm_d 等样板，消除手工重复代码。 */
+DAEMON_DECLARE_COMMON(llm_d, llm, DEFAULT_SOCKET_PATH_UNIX,
+                      DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+
 /* ==================== 全局状态 ==================== */
 
 static llm_service_t *g_service = NULL;
-static atomic_int g_running = 1;
-static agentrt_mutex_t g_running_lock;
-static method_dispatcher_t *g_dispatcher = NULL;
-static daemon_event_driver_t *g_event_driver = NULL;
-static daemon_bootstrap_sd_t *g_bsd = NULL;
-static daemon_bootstrap_ipc_t *g_bipc = NULL;
 
 /* 服务配置 */
 typedef struct {
@@ -82,27 +56,6 @@ typedef struct {
 } llm_daemon_config_t;
 
 static llm_daemon_config_t g_config = {0};
-
-/* ==================== 信号处理 ==================== */
-
-static void signal_handler(int sig __attribute__((unused)))
-{
-    agentrt_mutex_lock(&g_running_lock);
-    atomic_store_explicit(&g_running, 0, memory_order_seq_cst);
-    agentrt_mutex_unlock(&g_running_lock);
-    if (g_event_driver)
-        daemon_event_driver_stop(g_event_driver);
-}
-
-static void svc_log_toggle_handler(int sig)
-{
-    (void)sig;
-    static int debug_mode = 0;
-    debug_mode = !debug_mode;
-    log_set_module_level("*", debug_mode ? LOG_LEVEL_DEBUG : LOG_LEVEL_WARN);
-}
-
-/* ==================== JSON-RPC 错误码 ==================== */
 
 /* ==================== 请求上下文（线程安全） ==================== */
 
@@ -411,54 +364,6 @@ static char *handle_complete_stream(cJSON *params, int id, agentrt_socket_t clie
     AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
 }
 
-/* ==================== 客户端处理 ==================== */
-
-/**
- * @brief 处理单个客户端连接
- */
-static void handle_client(agentrt_socket_t client_fd)
-{
-    char buffer[MAX_BUFFER];
-    ssize_t n = agentrt_socket_recv(client_fd, buffer, sizeof(buffer) - 1);
-
-    if (n <= 0) {
-        agentrt_socket_close(client_fd);
-        return;
-    }
-    buffer[n] = '\0';
-
-    if ((size_t)n >= sizeof(buffer) - 1) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Request too large", -1);
-        agentrt_socket_close(client_fd);
-        return;
-    }
-
-    /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + NULL 检查 + 手动 cJSON_Delete */
-    CJSON_PARSE_GUARD(req, buffer, {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR, "Parse error", -1);
-        agentrt_socket_close(client_fd);
-        return;
-    });
-
-    cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");
-    cJSON *method = cJSON_GetObjectItem(req, "method");
-    cJSON *params = cJSON_GetObjectItem(req, "params");
-    cJSON *id = cJSON_GetObjectItem(req, "id");
-
-    if (!cJSON_IsString(jsonrpc) || strcmp(jsonrpc->valuestring, "2.0") != 0 ||
-        !cJSON_IsString(method) || !params || !id) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid Request", -1);
-        /* req 由 CJSON_AUTO_FREE 自动释放 */
-        agentrt_socket_close(client_fd);
-        return;
-    }
-
-    method_dispatcher_dispatch(g_dispatcher, req, jsonrpc_build_error, &client_fd);
-
-    /* req 由 CJSON_AUTO_FREE 自动释放 */
-    agentrt_socket_close(client_fd);
-}
-
 /* ==================== 配置加载 ==================== */
 
 /**
@@ -539,42 +444,41 @@ static void free_daemon_config(void)
     __builtin_memset(&g_config, 0, sizeof(g_config));
 }
 
+/* ==================== 销毁服务（daemon_cleanup_standard 回调） ==================== */
+
+static void destroy_service_llm_d(void)
+{
+    if (g_service) {
+        llm_service_destroy(g_service);
+        g_service = NULL;
+    }
+    free_daemon_config();
+}
+
 /* ==================== 主函数 ==================== */
 
 int main(int argc, char **argv)
 {
     const char *config_path = NULL;
+    int use_tcp = 0;
 
-    /* 解析命令行参数 */
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--manager") == 0 && i + 1 < argc) {
-            config_path = argv[++i];
-        } else if (strcmp(argv[i], "--help") == 0) {
-            char buf[256];
-            snprintf(buf, sizeof(buf), "Usage: %s [--manager <path>] [--tcp]\n", argv[0]);
-            fputs(buf, stdout);
-            fputs("  --manager  Configuration file path\n", stdout);
-            fputs("  --tcp     Use TCP instead of Unix socket\n", stdout);
-            return 0;
-        } else if (strcmp(argv[i], "--tcp") == 0) {
-            g_config.use_tcp = 1;
-        }
-    }
+    /* P0.18.1: 统一命令行参数解析（--manager/--tcp/--help） */
+    int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_llm_d);
+    if (parse_rc > 0)
+        return parse_rc == 1 ? 0 : 1;
 
     /* 初始化平台层 */
     agentrt_socket_init();
-    agentrt_mutex_init(&g_running_lock);
+    agentrt_mutex_init(&g_running_lock_llm_d);
 
-    /* 设置信号处理 */
-#if !defined(AGENTRT_PLATFORM_WINDOWS)
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-    signal(SIGPIPE, SIG_IGN);
-    signal(SIGUSR1, svc_log_toggle_handler);
+    /* P0.18.1: 跨平台信号处理设置 */
+#ifdef _WIN32
+    SetConsoleCtrlHandler((PHANDLER_ROUTINE)signal_handler_llm_d, TRUE);
 #else
-    SetConsoleCtrlHandler((PHANDLER_ROUTINE)signal_handler, TRUE);
+    DAEMON_SETUP_SIGNALS(llm_d);
 #endif
 
+    /* 保留初始日志级别 WARN（SIGUSR1 切换在 DEBUG/INFO 间切换，详见生成的 svc_log_toggle_handler_llm_d） */
     agentrt_logger_config_t log_cfg = {0};
     log_cfg.level = (agentrt_log_level_t)LOG_LEVEL_WARN;
     agentrt_log_init(&log_cfg);
@@ -583,8 +487,9 @@ int main(int argc, char **argv)
     /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("llm_d");
 
-    /* 加载配置 */
+    /* 加载配置（配置文件中的 tcp_port 会置位 g_config.use_tcp） */
     load_daemon_config(config_path);
+    use_tcp = use_tcp || g_config.use_tcp;
 
     SVC_LOG_INFO("LLM service starting, manager=%s", config_path ? config_path : "default");
 
@@ -592,50 +497,29 @@ int main(int argc, char **argv)
     g_service = llm_service_create(config_path);
     if (!g_service) {
         SVC_LOG_ERROR("Failed to create service");
-        free_daemon_config();
+        agentrt_mutex_destroy(&g_running_lock_llm_d);
         agentrt_socket_cleanup();
         return 1;
     }
 
-    /* 创建服务器 Socket */
-    agentrt_socket_t server_fd;
-
-    if (g_config.use_tcp) {
-        server_fd = agentrt_socket_create_tcp_server(g_config.tcp_host, g_config.tcp_port);
-        if (server_fd < 0) {
-            SVC_LOG_ERROR("Failed to create TCP server on %s:%d", g_config.tcp_host,
-                          g_config.tcp_port);
-            llm_service_destroy(g_service);
-            free_daemon_config();
-            agentrt_socket_cleanup();
-            return 1;
-        }
-        SVC_LOG_INFO("Listening on TCP %s:%d", g_config.tcp_host, g_config.tcp_port);
-        g_bsd = daemon_bootstrap_sd_start("llm_d", "llm", g_config.tcp_host,
-                                          g_config.tcp_port, "ai,core", 0);
-        g_bipc = daemon_bootstrap_ipc_start("llm_d", "llm", g_config.tcp_host,
-                                            g_config.tcp_port, IPC_BUS_PROTO_JSON_RPC);
-    } else {
-#if defined(AGENTRT_PLATFORM_WINDOWS)
-        server_fd = agentrt_socket_create_named_pipe_server(g_config.socket_path);
-#else
-        server_fd = agentrt_socket_create_unix_server(g_config.socket_path);
-#endif
-        if (server_fd < 0) {
-            SVC_LOG_ERROR("Failed to create socket at %s", g_config.socket_path);
-            llm_service_destroy(g_service);
-            free_daemon_config();
-            agentrt_socket_cleanup();
-            return 1;
-        }
-        SVC_LOG_INFO("Listening on %s", g_config.socket_path);
-        g_bsd = daemon_bootstrap_sd_start("llm_d", "llm", g_config.socket_path,
-                                          0, "ai,core", 0);
-        g_bipc = daemon_bootstrap_ipc_start("llm_d", "llm", g_config.socket_path,
-                                            0, IPC_BUS_PROTO_JSON_RPC);
+    /* P0.18.1: 统一服务器 Socket 创建（TCP/Unix/NamedPipe 封装） */
+    int tcp_port = g_config.tcp_port ? (int)g_config.tcp_port : DEFAULT_TCP_PORT;
+    const char *unix_path = g_config.socket_path ? g_config.socket_path : DEFAULT_SOCKET_PATH_UNIX;
+    agentrt_socket_t server_fd = daemon_create_server_socket(use_tcp, tcp_port, unix_path,
+                                                              DEFAULT_SOCKET_PATH_WIN);
+    if (server_fd < 0) {
+        SVC_LOG_ERROR("Failed to create server socket");
+        destroy_service_llm_d();
+        agentrt_mutex_destroy(&g_running_lock_llm_d);
+        agentrt_socket_cleanup();
+        return 1;
     }
+    if (use_tcp)
+        SVC_LOG_INFO("Listening on TCP port %d", tcp_port);
+    else
+        SVC_LOG_INFO("Listening on %s", unix_path);
 
-    /* 创建事件驱动框架 */
+    /* P0.18.1: 创建事件驱动 + SD/IPC bootstrap（统一封装） */
     daemon_event_config_t ev_config;
     __builtin_memset(&ev_config, 0, sizeof(ev_config));
     ev_config.max_events = 64;
@@ -643,51 +527,45 @@ int main(int argc, char **argv)
     ev_config.thread_pool_max = g_config.max_threads > 0 ? g_config.max_threads : 8;
     ev_config.thread_pool_queue_size = 256;
     ev_config.use_jsonrpc = true;
-    ev_config.on_client = llm_on_client;
+    ev_config.on_client = daemon_on_client_llm_d; /* P0.18.1: 使用生成的客户端处理回调 */
     ev_config.service_ctx = NULL;
 
-    g_event_driver = daemon_event_driver_create(&ev_config);
-    if (!g_event_driver) {
+    const char *sock_addr = use_tcp ? "127.0.0.1" : unix_path;
+    int ret = daemon_init_event_driver("llm_d", "llm", sock_addr,
+                                       use_tcp ? tcp_port : 0, "ai,core", use_tcp,
+                                       &ev_config, &g_event_driver_llm_d, &g_bsd_llm_d,
+                                       &g_bipc_llm_d);
+    if (ret != AGENTRT_SUCCESS || !g_event_driver_llm_d) {
         SVC_LOG_ERROR("Failed to create event driver");
         agentrt_socket_close(server_fd);
-        llm_service_destroy(g_service);
-        free_daemon_config();
-        agentrt_mutex_destroy(&g_running_lock);
+        destroy_service_llm_d();
+        agentrt_mutex_destroy(&g_running_lock_llm_d);
         agentrt_socket_cleanup();
         return 1;
     }
 
-    g_dispatcher = daemon_event_driver_get_dispatcher(g_event_driver);
-    method_dispatcher_register(g_dispatcher, "complete", on_complete_method, NULL);
-    method_dispatcher_register(g_dispatcher, "complete_stream", on_complete_stream_method, NULL);
+    g_dispatcher_llm_d = daemon_event_driver_get_dispatcher(g_event_driver_llm_d);
+    method_dispatcher_register(g_dispatcher_llm_d, "complete", on_complete_method, NULL);
+    method_dispatcher_register(g_dispatcher_llm_d, "complete_stream", on_complete_stream_method, NULL);
     SVC_LOG_INFO("Registered %d RPC methods", 2);
 
-    if (daemon_event_driver_add_server_fd(g_event_driver, (int)server_fd) != 0) {
+    if (daemon_event_driver_add_server_fd(g_event_driver_llm_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
-        daemon_event_driver_destroy(g_event_driver);
+        daemon_event_driver_destroy(g_event_driver_llm_d);
         agentrt_socket_close(server_fd);
-        llm_service_destroy(g_service);
-        free_daemon_config();
-        agentrt_mutex_destroy(&g_running_lock);
+        destroy_service_llm_d();
+        agentrt_mutex_destroy(&g_running_lock_llm_d);
         agentrt_socket_cleanup();
         return 1;
     }
 
     SVC_LOG_INFO("LLM service running (event-driven mode)");
-    daemon_event_driver_run(g_event_driver);
+    daemon_event_driver_run(g_event_driver_llm_d);
 
-    /* 清理 */
-    daemon_bootstrap_ipc_stop(g_bipc);
-    daemon_bootstrap_sd_stop(g_bsd);
-    SVC_LOG_INFO("LLM service stopping...");
-    daemon_event_driver_destroy(g_event_driver);
-    agentrt_socket_close(server_fd);
-    llm_service_destroy(g_service);
-    free_daemon_config();
-    agentrt_mutex_destroy(&g_running_lock);
-    agentrt_socket_cleanup();
+    /* P0.18.1: 标准资源清理链（与 init 相反顺序） */
+    daemon_cleanup_standard(g_bipc_llm_d, g_bsd_llm_d, g_event_driver_llm_d,
+                           server_fd, destroy_service_llm_d, &g_running_lock_llm_d);
 
-    SVC_LOG_INFO("LLM service stopped");
     daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
     log_cleanup();
     return 0;

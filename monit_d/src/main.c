@@ -7,36 +7,15 @@
  *
  * @file main.c
  * @brief 监控服务守护进程主入口（遵循 daemon 模块统一规范）
- *
- * 规范遵循:
- * - ARCHITECTURAL_PRINCIPLES.md E-3 资源确定性(成对管理)
- * - ARCHITECTURAL_PRINCIPLES.md E-4 跨平台一致性(platform.h)
- * - ARCHITECTURAL_PRINCIPLES.md E-5 命名语义化(SVC_LOG_*)
- * - ARCHITECTURAL_PRINCIPLES.md E-6 错误可追溯(AGENTRT_ERR_*)
  */
 
-#include "atomic_compat.h"
-#include "daemon_bootstrap_sd.h"
-#include "daemon_bootstrap_ipc.h"
-#include "daemon_cupolas_bootstrap.h"
-#include "daemon_event_driver.h"
-#include "jsonrpc_helpers.h"
-#include "logging.h"
-#include "method_dispatcher.h"
+#include "daemon_main.h"
 #include "monitor_service.h"
 #include "param_validator.h"
-#include "daemon_platform_ext.h"
 #include "prometheus_exporter.h"
 #include "svc_logger.h"
 #include "thread_pool.h"
 
-#include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
-#include <cjson_helpers.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <time.h>
 
 /* ==================== 配置常量 ==================== */
@@ -46,42 +25,13 @@
 #define DEFAULT_TCP_PORT 9090
 #define MAX_BUFFER 65536
 
+/* 生成公共全局变量、信号处理、help 等样板（handle_client 由本文件自定义以支持 Prometheus） */
+DAEMON_DECLARE_COMMON(monit_d, monitor, DEFAULT_SOCKET_PATH_UNIX,
+                      DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+
 /* ==================== 全局状态 ==================== */
 
 static monitor_service_t *g_service = NULL;
-static atomic_int g_running = 1;
-static agentrt_mutex_t g_running_lock;
-static method_dispatcher_t *g_dispatcher = NULL;
-static daemon_event_driver_t *g_event_driver = NULL;
-static daemon_bootstrap_sd_t *g_bsd = NULL;
-static daemon_bootstrap_ipc_t *g_bipc = NULL;
-
-/* ==================== 信号处理 ==================== */
-
-static void signal_handler(int sig __attribute__((unused)))
-{
-    agentrt_mutex_lock(&g_running_lock);
-    atomic_store_explicit(&g_running, 0, memory_order_seq_cst);
-    agentrt_mutex_unlock(&g_running_lock);
-    if (g_event_driver)
-        daemon_event_driver_stop(g_event_driver);
-}
-
-#ifdef _WIN32
-static BOOL WINAPI console_handler(DWORD ctrl_type __attribute__((unused)))
-{
-    signal_handler(SIGINT);
-    return TRUE;
-}
-#endif
-
-static void svc_log_toggle_handler(int sig)
-{
-    (void)sig;
-    static int debug_mode = 0;
-    debug_mode = !debug_mode;
-    log_set_module_level("*", debug_mode ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO);
-}
 
 /* ==================== 错误码定义（统一使用 AGENTRT_ERR_*） ==================== */
 #define MONIT_ERR_INVALID_PARAM AGENTRT_ERR_INVALID_PARAM
@@ -90,22 +40,16 @@ static void svc_log_toggle_handler(int sig)
 #define MONIT_ERR_INVALID_METRIC (AGENTRT_ERR_DAEMON_BASE + 0x10)
 #define MONIT_ERR_ALERT_FAILED (AGENTRT_ERR_DAEMON_BASE + 0x11)
 
-/* ==================== JSON-RPC 错误码 ==================== */
-
-
 /* ==================== 方法处理器包装函数 ==================== */
 
-/* 前向声明 */
 static void handle_record_metric(cJSON *params, int id, agentrt_socket_t client_fd);
 static void handle_get_metrics(cJSON *params, int id, agentrt_socket_t client_fd);
 static void handle_trigger_alert(cJSON *params, int id, agentrt_socket_t client_fd);
 static void handle_get_alerts(int id, agentrt_socket_t client_fd);
 static void handle_health_check(cJSON *params, int id, agentrt_socket_t client_fd);
 static void handle_generate_report(int id, agentrt_socket_t client_fd);
+static void handle_client(agentrt_socket_t client_fd);
 
-/**
- * @brief 方法处理器包装函数
- */
 static void on_record_metric_method(cJSON *params, int id, void *user_data)
 {
     handle_record_metric(params, id, *(agentrt_socket_t *)user_data);
@@ -136,8 +80,7 @@ static void on_generate_report_method(cJSON *params, int id, void *user_data)
     handle_generate_report(id, *(agentrt_socket_t *)user_data);
 }
 
-static void handle_client(agentrt_socket_t client_fd);
-
+/* monit 自定义 on_client：调用本文件 handle_client（含 Prometheus HTTP 处理） */
 static int monit_on_client(void *service_ctx, agentrt_socket_t client_fd)
 {
     (void)service_ctx;
@@ -165,8 +108,8 @@ static void monit_on_metrics_timer(agentrt_event_loop_t *loop, uint64_t timer_id
     prometheus_gauge_set("agentrt_monit_scrape_errors", (double)scrape_errors);
 
     /* C-L10: 上报 IPC Bus 路由统计（如果有连接） */
-    if (g_bipc) {
-        ipc_bus_helper_t *ibh = daemon_bootstrap_ipc_get_helper(g_bipc);
+    if (g_bipc_monit_d) {
+        ipc_bus_helper_t *ibh = daemon_bootstrap_ipc_get_helper(g_bipc_monit_d);
         if (ibh) {
             uint64_t total_sends = 0, total_routes = 0, route_fallbacks = 0;
             uint64_t send_failures = 0, bp_drops = 0, bp_rejects = 0;
@@ -190,12 +133,6 @@ static void monit_on_metrics_timer(agentrt_event_loop_t *loop, uint64_t timer_id
 
 /* ==================== 请求处理方法 ==================== */
 
-/**
- * @brief 处理 record_metric 方法
- * @param params 参数对象
- * @param id 请求 ID
- * @param client_fd 客户端描述符
- */
 static void handle_record_metric(cJSON *params, int id, agentrt_socket_t client_fd)
 {
     cJSON *metric_json = jsonrpc_get_object_param(params, "metric");
@@ -234,12 +171,6 @@ static void handle_record_metric(cJSON *params, int id, agentrt_socket_t client_
     }
 }
 
-/**
- * @brief 处理 get_metrics 方法
- * @param params 参数对象
- * @param id 请求ID
- * @param client_fd 客户端描述符
- */
 static void handle_get_metrics(cJSON *params, int id, agentrt_socket_t client_fd)
 {
     const char *filter = get_string_field(params, "metric_name", NULL);
@@ -270,12 +201,6 @@ static void handle_get_metrics(cJSON *params, int id, agentrt_socket_t client_fd
     JSONRPC_SEND_SUCCESS(client_fd, arr, id);
 }
 
-/**
- * @brief 处理 trigger_alert 方法
- * @param params 参数对象
- * @param id 请求ID
- * @param client_fd 客户端描述符
- */
 static void handle_trigger_alert(cJSON *params, int id, agentrt_socket_t client_fd)
 {
     cJSON *alert_json = jsonrpc_get_object_param(params, "alert");
@@ -310,11 +235,6 @@ static void handle_trigger_alert(cJSON *params, int id, agentrt_socket_t client_
     }
 }
 
-/**
- * @brief 处理 get_alerts 方法
- * @param id 请求ID
- * @param client_fd 客户端描述符
- */
 static void handle_get_alerts(int id, agentrt_socket_t client_fd)
 {
     alert_info_t **alerts = NULL;
@@ -346,12 +266,6 @@ static void handle_get_alerts(int id, agentrt_socket_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, arr, id);
 }
 
-/**
- * @brief 处理 health_check 方法
- * @param params 参数对象
- * @param id 请求ID
- * @param client_fd 客户端描述符
- */
 static void handle_health_check(cJSON *params, int id, agentrt_socket_t client_fd)
 {
     const char *service_name = get_string_field(params, "service_name", "unknown");
@@ -378,11 +292,6 @@ static void handle_health_check(cJSON *params, int id, agentrt_socket_t client_f
     AGENTRT_FREE(result);
 }
 
-/**
- * @brief 处理 generate_report 方法
- * @param id 请求ID
- * @param client_fd 客户端描述符
- */
 static void handle_generate_report(int id, agentrt_socket_t client_fd)
 {
     char *report = NULL;
@@ -401,12 +310,8 @@ static void handle_generate_report(int id, agentrt_socket_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* ==================== 客户端连接处理 ==================== */
+/* ==================== 客户端连接处理（含 Prometheus HTTP） ==================== */
 
-/**
- * @brief 处理单个客户端连接
- * @param client_fd 客户端描述符
- */
 static void handle_client(agentrt_socket_t client_fd)
 {
     char buffer[MAX_BUFFER];
@@ -459,34 +364,21 @@ static void handle_client(agentrt_socket_t client_fd)
 
     SVC_LOG_DEBUG("Processing request: method=%s, id=%d", method->valuestring, req_id);
 
-    method_dispatcher_dispatch(g_dispatcher, req, jsonrpc_build_error, &client_fd);
+    method_dispatcher_dispatch(g_dispatcher_monit_d, req, jsonrpc_build_error, &client_fd);
 
     /* req 由 CJSON_AUTO_FREE 自动释放 */
     agentrt_socket_close(client_fd);
 }
 
-/* ==================== 帮助信息 ==================== */
+/* ==================== 销毁服务 ==================== */
 
-/**
- * @brief 打印使用说明
- * @param prog 程序名
- */
-static void print_usage(const char *prog)
+static void destroy_service(void)
 {
-    char buf[256];
-    fputs("AgentRT Monitor Daemon\n", stdout);
-    snprintf(buf, sizeof(buf), "Usage: %s [options]\n\n", prog);
-    fputs(buf, stdout);
-    fputs("Options:\n", stdout);
-    fputs("  --manager <path>   Configuration file path\n", stdout);
-    fputs("  --tcp             Use TCP instead of Unix socket\n", stdout);
-    fputs("  --help             Show this help\n", stdout);
-    fputs("\n", stdout);
-    fputs("Examples:\n", stdout);
-    snprintf(buf, sizeof(buf), "  %s --manager AGENTRT_CONFIG_DIR \"/monit.yaml\"\n", prog);
-    fputs(buf, stdout);
-    snprintf(buf, sizeof(buf), "  %s --tcp           # Use TCP mode on port 9090\n", prog);
-    fputs(buf, stdout);
+    prometheus_exporter_shutdown();
+    if (g_service) {
+        monitor_service_destroy(g_service);
+        g_service = NULL;
+    }
 }
 
 /* ==================== 主函数 ==================== */
@@ -496,32 +388,19 @@ int main(int argc, char **argv)
     const char *config_path = "agentrt/manager/service/monit_d/monit.yaml";
     int use_tcp = 0;
 
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--manager") == 0 && i + 1 < argc) {
-            config_path = argv[++i];
-        } else if (strcmp(argv[i], "--help") == 0) {
-            print_usage(argv[0]);
-            return 0;
-        } else if (strcmp(argv[i], "--tcp") == 0) {
-            use_tcp = 1;
-        } else {
-            SVC_LOG_ERROR("Unknown option: %s", argv[i]);
-            print_usage(argv[0]);
-            return 1;
-        }
-    }
+    /* 解析命令行参数（--manager/--tcp/--help） */
+    int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_monit_d);
+    if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
 
     /* 初始化平台层 */
     agentrt_socket_init();
-    agentrt_mutex_init(&g_running_lock);
+    agentrt_mutex_init(&g_running_lock_monit_d);
 
+    /* 设置信号处理 */
 #ifdef _WIN32
-    SetConsoleCtrlHandler(console_handler, TRUE);
+    SetConsoleCtrlHandler((PHANDLER_ROUTINE)signal_handler_monit_d, TRUE);
 #else
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-    signal(SIGPIPE, SIG_IGN);
-    signal(SIGUSR1, svc_log_toggle_handler);
+    DAEMON_SETUP_SIGNALS(monit_d);
 #endif
 
     agentrt_log_init(NULL);
@@ -546,7 +425,7 @@ int main(int argc, char **argv)
     int ret = monitor_service_create(&config, &g_service);
     if (ret != AGENTRT_SUCCESS || !g_service) {
         SVC_LOG_ERROR("Failed to create monitor service (error=%d)", ret);
-        agentrt_mutex_destroy(&g_running_lock);
+        agentrt_mutex_destroy(&g_running_lock_monit_d);
         agentrt_socket_cleanup();
         return 1;
     }
@@ -563,45 +442,20 @@ int main(int argc, char **argv)
         SVC_LOG_ERROR("C-L10: Failed to initialize Prometheus exporter");
     }
 
-    /* 创建服务器 Socket */
-    agentrt_socket_t server_fd;
-
-    if (use_tcp) {
-        server_fd = agentrt_socket_create_tcp_server("127.0.0.1", DEFAULT_TCP_PORT);
-        if (server_fd < 0) {
-            SVC_LOG_ERROR("Failed to create TCP server on port %d", DEFAULT_TCP_PORT);
-            monitor_service_destroy(g_service);
-            agentrt_mutex_destroy(&g_running_lock);
-            agentrt_socket_cleanup();
-            return 1;
-        }
-        SVC_LOG_INFO("Listening on TCP port %d", DEFAULT_TCP_PORT);
-        g_bsd = daemon_bootstrap_sd_start("monit_d", "monitor", "127.0.0.1",
-                                          DEFAULT_TCP_PORT, "monitor,core", 0);
-        g_bipc = daemon_bootstrap_ipc_start("monit_d", "monitor", "127.0.0.1",
-                                            DEFAULT_TCP_PORT, IPC_BUS_PROTO_JSON_RPC);
-    } else {
-#if defined(AGENTRT_PLATFORM_WINDOWS)
-        server_fd = agentrt_socket_create_named_pipe_server(DEFAULT_SOCKET_PATH_WIN);
-#else
-        server_fd = agentrt_socket_create_unix_server(DEFAULT_SOCKET_PATH_UNIX);
-#endif
-        if (server_fd < 0) {
-            SVC_LOG_ERROR("Failed to create socket at default path");
-            monitor_service_destroy(g_service);
-            agentrt_mutex_destroy(&g_running_lock);
-            agentrt_socket_cleanup();
-            return 1;
-        }
-        SVC_LOG_INFO("Listening on Unix socket");
-        g_bsd = daemon_bootstrap_sd_start("monit_d", "monitor", DEFAULT_SOCKET_PATH_UNIX,
-                                          0, "monitor,core", 0);
-        g_bipc = daemon_bootstrap_ipc_start("monit_d", "monitor", DEFAULT_SOCKET_PATH_UNIX,
-                                            0, IPC_BUS_PROTO_JSON_RPC);
+    /* 创建服务器 Socket（TCP/Unix/NamedPipe 统一封装） */
+    agentrt_socket_t server_fd = daemon_create_server_socket(
+        use_tcp, DEFAULT_TCP_PORT, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN);
+    if (server_fd < 0) {
+        SVC_LOG_ERROR("Failed to create server socket");
+        destroy_service();
+        agentrt_mutex_destroy(&g_running_lock_monit_d);
+        agentrt_socket_cleanup();
+        return 1;
     }
+    SVC_LOG_INFO(use_tcp ? "Listening on TCP port %d" : "Listening on Unix socket",
+                 DEFAULT_TCP_PORT);
 
-    SVC_LOG_INFO("Monitor service started successfully");
-
+    /* 创建事件驱动 + SD/IPC bootstrap */
     daemon_event_config_t ev_config;
     __builtin_memset(&ev_config, 0, sizeof(ev_config));
     ev_config.max_events = 64;
@@ -612,53 +466,50 @@ int main(int argc, char **argv)
     ev_config.on_client = monit_on_client;
     ev_config.service_ctx = NULL;
 
-    g_event_driver = daemon_event_driver_create(&ev_config);
-    if (!g_event_driver) {
+    const char *sock_addr = use_tcp ? "127.0.0.1" : DEFAULT_SOCKET_PATH_UNIX;
+    ret = daemon_init_event_driver("monit_d", "monitor", sock_addr,
+                                   use_tcp ? DEFAULT_TCP_PORT : 0, "monitor,core", use_tcp,
+                                   &ev_config, &g_event_driver_monit_d, &g_bsd_monit_d,
+                                   &g_bipc_monit_d);
+    if (ret != AGENTRT_SUCCESS || !g_event_driver_monit_d) {
         SVC_LOG_ERROR("Failed to create event driver");
         agentrt_socket_close(server_fd);
-        monitor_service_destroy(g_service);
-        agentrt_mutex_destroy(&g_running_lock);
+        destroy_service();
+        agentrt_mutex_destroy(&g_running_lock_monit_d);
         agentrt_socket_cleanup();
         return 1;
     }
 
-    g_dispatcher = daemon_event_driver_get_dispatcher(g_event_driver);
-    method_dispatcher_register(g_dispatcher, "record_metric", on_record_metric_method, NULL);
-    method_dispatcher_register(g_dispatcher, "get_metrics", on_get_metrics_method, NULL);
-    method_dispatcher_register(g_dispatcher, "trigger_alert", on_trigger_alert_method, NULL);
-    method_dispatcher_register(g_dispatcher, "get_alerts", on_get_alerts_method, NULL);
-    method_dispatcher_register(g_dispatcher, "health_check", on_health_check_method, NULL);
-    method_dispatcher_register(g_dispatcher, "generate_report", on_generate_report_method, NULL);
+    g_dispatcher_monit_d = daemon_event_driver_get_dispatcher(g_event_driver_monit_d);
+    method_dispatcher_register(g_dispatcher_monit_d, "record_metric", on_record_metric_method, NULL);
+    method_dispatcher_register(g_dispatcher_monit_d, "get_metrics", on_get_metrics_method, NULL);
+    method_dispatcher_register(g_dispatcher_monit_d, "trigger_alert", on_trigger_alert_method, NULL);
+    method_dispatcher_register(g_dispatcher_monit_d, "get_alerts", on_get_alerts_method, NULL);
+    method_dispatcher_register(g_dispatcher_monit_d, "health_check", on_health_check_method, NULL);
+    method_dispatcher_register(g_dispatcher_monit_d, "generate_report", on_generate_report_method, NULL);
     SVC_LOG_INFO("Registered %d RPC methods", 6);
 
     /* C-L10: 注册周期性指标上报定时器（每 30s） */
-    daemon_event_driver_add_timer(g_event_driver, 30000,
+    daemon_event_driver_add_timer(g_event_driver_monit_d, 30000,
                                   monit_on_metrics_timer, NULL);
     SVC_LOG_INFO("C-L10: Metrics report timer registered (30s interval)");
 
-    if (daemon_event_driver_add_server_fd(g_event_driver, (int)server_fd) != 0) {
+    if (daemon_event_driver_add_server_fd(g_event_driver_monit_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
-        daemon_event_driver_destroy(g_event_driver);
+        daemon_event_driver_destroy(g_event_driver_monit_d);
         agentrt_socket_close(server_fd);
-        monitor_service_destroy(g_service);
-        agentrt_mutex_destroy(&g_running_lock);
+        destroy_service();
+        agentrt_mutex_destroy(&g_running_lock_monit_d);
         agentrt_socket_cleanup();
         return 1;
     }
 
     SVC_LOG_INFO("Monitor service running (event-driven mode)");
-    daemon_event_driver_run(g_event_driver);
+    daemon_event_driver_run(g_event_driver_monit_d);
 
-    /* 清理资源 */
-    daemon_bootstrap_ipc_stop(g_bipc);
-    daemon_bootstrap_sd_stop(g_bsd);
-    prometheus_exporter_shutdown();
-    SVC_LOG_INFO("Monitor service stopping...");
-    daemon_event_driver_destroy(g_event_driver);
-    agentrt_socket_close(server_fd);
-    monitor_service_destroy(g_service);
-    agentrt_mutex_destroy(&g_running_lock);
-    agentrt_socket_cleanup();
+    /* 标准资源清理链（destroy_service 内含 prometheus_exporter_shutdown） */
+    daemon_cleanup_standard(g_bipc_monit_d, g_bsd_monit_d, g_event_driver_monit_d,
+                           server_fd, destroy_service, &g_running_lock_monit_d);
 
     SVC_LOG_INFO("Monitor service stopped");
     daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
