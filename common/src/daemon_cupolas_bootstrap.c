@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file daemon_cupolas_bootstrap.c
  * @brief P3.14 (ACC-DT15): daemon 统一 cupolas 安全穹顶引导实现
