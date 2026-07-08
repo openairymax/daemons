@@ -3,6 +3,8 @@
 #include "memory_compat.h"
 
 #include <cjson/cJSON.h>
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD 宏 */
+#include <cjson_helpers.h>
 #include "error.h"
 /**
  * @file deepseek.c
@@ -190,9 +192,8 @@ static int ds_stream_on_chunk(const char *json_line, void *userdata)
 {
     ds_stream_acc_t *acc = (ds_stream_acc_t *)userdata;
 
-    cJSON *root = cJSON_Parse(json_line);
-    if (!root)
-        return 0;
+    /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + NULL 检查 + 手动 cJSON_Delete */
+    CJSON_PARSE_GUARD(root, json_line, { return 0; });
 
     if (!acc->resp_id) {
         cJSON *id = cJSON_GetObjectItem(root, "id");
@@ -251,7 +252,7 @@ static int ds_stream_on_chunk(const char *json_line, void *userdata)
         }
     }
 
-    cJSON_Delete(root);
+    /* root 由 CJSON_AUTO_FREE 自动释放 */
     return 0;
 }
 

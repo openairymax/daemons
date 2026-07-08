@@ -12,6 +12,8 @@
 #include "validator.h"
 
 #include <cjson/cJSON.h>
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+#include <cjson_helpers.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -49,9 +51,8 @@ static int validate_single_param(const char *param_name, const char *schema_str,
     if (!schema_str || !value)
         return 1;
 
-    cJSON *schema = cJSON_Parse(schema_str);
-    if (!schema)
-        return 1;
+    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
+    CJSON_PARSE_GUARD(schema, schema_str, { return 1; });
 
     const char *type_str = NULL;
     cJSON *type_item = cJSON_GetObjectItem(schema, "type");
@@ -156,7 +157,7 @@ static int validate_single_param(const char *param_name, const char *schema_str,
     }
 
 cleanup:
-    cJSON_Delete(schema);
+    /* schema 由 CJSON_AUTO_FREE 自动释放 */
     return valid;
 }
 
@@ -166,11 +167,11 @@ int tool_validator_validate(tool_validator_t *val __attribute__((unused)),
     if (!meta || !params_json)
         return AGENTRT_ERR_INVALID_PARAM;
 
-    cJSON *root = cJSON_Parse(params_json);
-    if (!root) {
+    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
+    CJSON_PARSE_GUARD(root, params_json, {
         SVC_LOG_WARN("Invalid JSON params for tool %s", meta->id);
         return 0;
-    }
+    });
 
     if (meta->param_count > 0 && meta->params) {
         for (size_t i = 0; i < meta->param_count; ++i) {
@@ -180,18 +181,18 @@ int tool_validator_validate(tool_validator_t *val __attribute__((unused)),
 
             if (!item) {
                 SVC_LOG_WARN("Missing required parameter '%s' for tool %s", pname, meta->id);
-                cJSON_Delete(root);
+                /* root 由 CJSON_AUTO_FREE 自动释放 */
                 return 0;
             }
 
             if (!validate_single_param(pname, pschema, item)) {
                 SVC_LOG_WARN("Validation failed for parameter '%s' in tool %s", pname, meta->id);
-                cJSON_Delete(root);
+                /* root 由 CJSON_AUTO_FREE 自动释放 */
                 return 0;
             }
         }
     }
 
-    cJSON_Delete(root);
+    /* root 由 CJSON_AUTO_FREE 自动释放 */
     return 1;
 }

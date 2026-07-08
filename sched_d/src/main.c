@@ -32,6 +32,8 @@
 #include "thread_pool.h"
 
 #include <cjson/cJSON.h>
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+#include <cjson_helpers.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -228,15 +230,16 @@ static void handle_get_stats(int id, agentrt_socket_t client_fd)
         return;
     }
 
-    cJSON *report_json = cJSON_Parse((char *)stats_data);
-    AGENTRT_FREE(stats_data);
-
-    if (!report_json) {
+    /* P0.18.2: 模式 B — parse + 立即释放 text + 自动释放（JSONRPC_SEND_SUCCESS 内部 Delete） */
+    CJSON_PARSE_GUARD(report_json, (char *)stats_data, {
+        AGENTRT_FREE(stats_data);
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid report data", id);
         return;
-    }
+    });
+    AGENTRT_FREE(stats_data);
 
     JSONRPC_SEND_SUCCESS(client_fd, report_json, id);
+    report_json = NULL; /* JSONRPC_SEND_SUCCESS 已 Delete，防止 CJSON_AUTO_FREE 重复释放 */
 }
 
 /**
@@ -280,12 +283,12 @@ static void handle_client(agentrt_socket_t client_fd)
         return;
     }
 
-    cJSON *req = cJSON_Parse(buffer);
-    if (!req) {
+    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
+    CJSON_PARSE_GUARD(req, buffer, {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR, "Parse error: invalid JSON", -1);
         agentrt_socket_close(client_fd);
         return;
-    }
+    });
 
     cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");
     cJSON *method = cJSON_GetObjectItem(req, "method");
@@ -295,7 +298,7 @@ static void handle_client(agentrt_socket_t client_fd)
     if (!cJSON_IsString(jsonrpc) || strcmp(jsonrpc->valuestring, "2.0") != 0 ||
         !cJSON_IsString(method) || !id) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid Request", -1);
-        cJSON_Delete(req);
+        /* req 由 CJSON_AUTO_FREE 自动释放 */
         agentrt_socket_close(client_fd);
         return;
     }
@@ -306,7 +309,7 @@ static void handle_client(agentrt_socket_t client_fd)
 
     method_dispatcher_dispatch(g_dispatcher, req, jsonrpc_build_error, &client_fd);
 
-    cJSON_Delete(req);
+    /* req 由 CJSON_AUTO_FREE 自动释放 */
     agentrt_socket_close(client_fd);
 }
 

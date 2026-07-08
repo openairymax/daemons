@@ -18,6 +18,8 @@
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+#include <cjson_helpers.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -752,14 +754,16 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
     AGENTRT_FREE(payload_padded);
     payload_padded = NULL;
 
-    cJSON *payload = cJSON_Parse((const char *)payload_decoded);
-    AGENTRT_FREE(payload_decoded);
-    payload_decoded = NULL;
-    if (!payload) {
+    /* P0.18.2: 模式 B — parse + 立即释放 text + 自动释放（RAII） */
+    CJSON_PARSE_GUARD(payload, (const char *)payload_decoded, {
+        AGENTRT_FREE(payload_decoded);
+        payload_decoded = NULL;
         result->error_message = "Invalid token payload";
         agentrt_mutex_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
-    }
+    });
+    AGENTRT_FREE(payload_decoded);
+    payload_decoded = NULL;
 
     /* 提取字段 - 必须在 cJSON_Delete 前复制字符串 */
     cJSON *sub = cJSON_GetObjectItem(payload, "sub");
@@ -790,7 +794,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         if (now > exp_time) {
             result->status = AUTH_TOKEN_EXPIRED;
             result->error_message = "Token has expired";
-            cJSON_Delete(payload);
+            /* payload 由 CJSON_AUTO_FREE 自动释放 */
             agentrt_mutex_unlock(&g_jwt.lock);
             return AUTH_TOKEN_EXPIRED;
         }
@@ -803,7 +807,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         char *sig_input = (char *)AGENTRT_MALLOC(sig_input_len + 1);
         if (!sig_input) {
             result->error_message = "Memory allocation failed for signature verification";
-            cJSON_Delete(payload);
+            /* payload 由 CJSON_AUTO_FREE 自动释放 */
             agentrt_mutex_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
@@ -817,7 +821,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         if (!sig_b64) {
             AGENTRT_FREE(sig_input);
             result->error_message = "Memory allocation failed";
-            cJSON_Delete(payload);
+            /* payload 由 CJSON_AUTO_FREE 自动释放 */
             agentrt_mutex_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
@@ -838,7 +842,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
             AGENTRT_FREE(sig_input);
             AGENTRT_FREE(sig_b64);
             result->error_message = "HMAC computation failed";
-            cJSON_Delete(payload);
+            /* payload 由 CJSON_AUTO_FREE 自动释放 */
             agentrt_mutex_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
@@ -849,7 +853,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
             AGENTRT_FREE(sig_input);
             AGENTRT_FREE(sig_b64);
             result->error_message = "Memory allocation failed";
-            cJSON_Delete(payload);
+            /* payload 由 CJSON_AUTO_FREE 自动释放 */
             agentrt_mutex_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
@@ -865,7 +869,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
             AGENTRT_FREE(sig_b64);
             AGENTRT_FREE(sig_padded);
             result->error_message = "Memory allocation failed";
-            cJSON_Delete(payload);
+            /* payload 由 CJSON_AUTO_FREE 自动释放 */
             agentrt_mutex_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
@@ -909,7 +913,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         if (!sig_match) {
             result->status = AUTH_FAILED;
             result->error_message = "Invalid token signature";
-            cJSON_Delete(payload);
+            /* payload 由 CJSON_AUTO_FREE 自动释放 */
             SVC_LOG_WARN("JWT signature verification FAILED for token");
             agentrt_mutex_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
@@ -919,7 +923,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
 
     result->status = AUTH_SUCCESS;
     result->error_message = NULL;
-    cJSON_Delete(payload);
+    /* payload 由 CJSON_AUTO_FREE 自动释放 */
 
     SVC_LOG_DEBUG("JWT token verified for subject=%s",
                   result->subject ? result->subject : "unknown");

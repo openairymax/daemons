@@ -22,6 +22,8 @@
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+#include <cjson_helpers.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -326,8 +328,13 @@ llm_service_t *llm_service_create(const char *config_path)
                     if (yaml_content) {
                         yaml_content[read_len] = '\0';
 
-                        cJSON *root = cJSON_Parse(yaml_content);
-                        if (root) {
+                        /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + if (root) + 手动 cJSON_Delete
+                         * 使用 do { ... } while (0) + break 保持原 if (root) ... else ... 块语义 */
+                        do {
+                            CJSON_PARSE_GUARD(root, yaml_content, {
+                                SVC_LOG_WARN("Failed to parse pricing rules from manager");
+                                break;
+                            });
                             int rule_count = 0;
                             pricing_rule_t *rules = load_pricing_rules(root, &rule_count);
                             if (rules && rule_count > 0) {
@@ -337,10 +344,8 @@ llm_service_t *llm_service_create(const char *config_path)
                             } else if (rules) {
                                 AGENTRT_FREE(rules);
                             }
-                            cJSON_Delete(root);
-                        } else {
-                            SVC_LOG_WARN("Failed to parse pricing rules from manager");
-                        }
+                            /* root 由 CJSON_AUTO_FREE 自动释放 */
+                        } while (0);
                     }
                     AGENTRT_FREE(yaml_content);
                 } else {
@@ -928,14 +933,13 @@ int svc_config_load(const char *config_path, service_config_t *cfg)
     content[read_len] = '\0';
     fclose(f);
 
-    /* 使用 cJSON 解析（配置文件实际上是 JSON） */
-    cJSON *root = cJSON_Parse(content);
-    AGENTRT_FREE(content);
-
-    if (!root) {
+    /* P0.18.2: 模式 B — CJSON_PARSE_GUARD（on_fail 中释放 content） */
+    CJSON_PARSE_GUARD(root, content, {
+        AGENTRT_FREE(content);
         SVC_LOG_WARN("C-L02: SVC: CONFIG-WARN parse failed, STACK: svc_config_load");
         return 0;
-    }
+    });
+    AGENTRT_FREE(content);
 
     /* 提取配置值 */
     cJSON *item;
@@ -968,7 +972,7 @@ int svc_config_load(const char *config_path, service_config_t *cfg)
         }
     }
 
-    cJSON_Delete(root);
+    /* root 由 CJSON_AUTO_FREE 自动释放 */
     return AGENTRT_OK;
 }
 
@@ -1352,23 +1356,24 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
     content[read_len] = '\0';
     fclose(f);
 
-    cJSON *root = cJSON_Parse(content);
-    AGENTRT_FREE(content);
-    if (!root) {
+    /* P0.18.2: 模式 B — CJSON_PARSE_GUARD（on_fail 中释放 content） */
+    CJSON_PARSE_GUARD(root, content, {
+        AGENTRT_FREE(content);
         SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN parse failed, STACK: svc_load_model_config_json");
         return 0;
-    }
+    });
+    AGENTRT_FREE(content);
 
     cJSON *providers_arr = cJSON_GetObjectItem(root, "providers");
     if (!providers_arr || !cJSON_IsArray(providers_arr)) {
-        cJSON_Delete(root);
+        /* root 由 CJSON_AUTO_FREE 自动释放 */
         SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN no providers, STACK: svc_load_model_config_json");
         return 0;
     }
 
     int n = cJSON_GetArraySize(providers_arr);
     if (n <= 0) {
-        cJSON_Delete(root);
+        /* root 由 CJSON_AUTO_FREE 自动释放 */
         return 0;
     }
 
@@ -1376,7 +1381,7 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
         (provider_config_t *)AGENTRT_CALLOC((size_t)n + 1, sizeof(provider_config_t));
     if (!result) {
         SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL calloc, STACK: svc_load_model_config_json");
-        cJSON_Delete(root);
+        /* root 由 CJSON_AUTO_FREE 自动释放 */
         return AGENTRT_ERR_OUT_OF_MEMORY;
     }
 
@@ -1429,7 +1434,7 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
         valid_count++;
     }
 
-    cJSON_Delete(root);
+    /* root 由 CJSON_AUTO_FREE 自动释放 */
     *out_providers = result;
     *out_count = valid_count;
     SVC_LOG_INFO("C-L02: SVC: MODEL-CONFIG-OK providers=%zu, STACK: svc_load_model_config_json", valid_count);

@@ -32,6 +32,8 @@
 #include "thread_pool.h"
 
 #include <cjson/cJSON.h>
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+#include <cjson_helpers.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -346,16 +348,16 @@ static char *handle_complete(cJSON *params, int id)
         return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Failed to serialize response", id);
     }
 
-    cJSON *result = cJSON_Parse(resp_json);
-    AGENTRT_FREE(resp_json);
-
-    if (!result) {
+    /* P0.18.2: 模式 B — CJSON_PARSE_GUARD（on_fail 中释放 resp_json） */
+    CJSON_PARSE_GUARD(result, resp_json, {
+        AGENTRT_FREE(resp_json);
         request_context_destroy(ctx);
         return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Invalid response format", id);
-    }
+    });
+    AGENTRT_FREE(resp_json);
 
     char *success = jsonrpc_build_success(result, id);
-    cJSON_Delete(result);
+    /* result 由 CJSON_AUTO_FREE 自动释放 */
 
     request_context_destroy(ctx);
     return success;
@@ -431,12 +433,12 @@ static void handle_client(agentrt_socket_t client_fd)
         return;
     }
 
-    cJSON *req = cJSON_Parse(buffer);
-    if (!req) {
+    /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + NULL 检查 + 手动 cJSON_Delete */
+    CJSON_PARSE_GUARD(req, buffer, {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR, "Parse error", -1);
         agentrt_socket_close(client_fd);
         return;
-    }
+    });
 
     cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");
     cJSON *method = cJSON_GetObjectItem(req, "method");
@@ -446,14 +448,14 @@ static void handle_client(agentrt_socket_t client_fd)
     if (!cJSON_IsString(jsonrpc) || strcmp(jsonrpc->valuestring, "2.0") != 0 ||
         !cJSON_IsString(method) || !params || !id) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid Request", -1);
-        cJSON_Delete(req);
+        /* req 由 CJSON_AUTO_FREE 自动释放 */
         agentrt_socket_close(client_fd);
         return;
     }
 
     method_dispatcher_dispatch(g_dispatcher, req, jsonrpc_build_error, &client_fd);
 
-    cJSON_Delete(req);
+    /* req 由 CJSON_AUTO_FREE 自动释放 */
     agentrt_socket_close(client_fd);
 }
 
@@ -492,8 +494,10 @@ static int load_daemon_config(const char *config_path)
                 if (nread == (size_t)len) {
                     content[len] = '\0';
 
-                    cJSON *root = cJSON_Parse(content);
-                    if (root) {
+                    /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + if (root) + 手动 cJSON_Delete
+                     * 使用 do { ... } while (0) + break 保持原 if (root) 块语义：解析失败时跳过配置提取 */
+                    do {
+                        CJSON_PARSE_GUARD(root, content, { break; });
                         cJSON *daemon = cJSON_GetObjectItem(root, "daemon");
                         if (daemon) {
                             cJSON *socket_path = cJSON_GetObjectItem(daemon, "socket_path");
@@ -513,8 +517,8 @@ static int load_daemon_config(const char *config_path)
                                 g_config.max_threads = max_threads->valueint;
                             }
                         }
-                        cJSON_Delete(root);
-                    }
+                        /* root 由 CJSON_AUTO_FREE 自动释放（do-while 作用域退出时） */
+                    } while (0);
                 }
                 AGENTRT_FREE(content);
             }

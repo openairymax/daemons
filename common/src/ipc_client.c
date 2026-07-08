@@ -19,6 +19,8 @@
 #include "svc_config.h"
 
 #include <cjson/cJSON.h>
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+#include <cjson_helpers.h>
 #include <curl/curl.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -405,13 +407,16 @@ int svc_rpc_call(const char *method, const char *params, char **out_result, uint
     cJSON_AddStringToObject(root, "method", method);
 
     if (params) {
-        cJSON *params_json = cJSON_Parse(params);
-        if (params_json) {
+        /* P0.18.2: 模式 C — 解析成功则所有权转移至 root，失败则回退为字符串参数 */
+        do {
+            CJSON_PARSE_GUARD(params_json, params, {
+                /* 解析失败，作为字符串参数 */
+                cJSON_AddStringToObject(root, "params", params);
+                break;
+            });
             cJSON_AddItemToObject(root, "params", params_json);
-        } else {
-            /* 如果解析失败，作为字符串参数 */
-            cJSON_AddStringToObject(root, "params", params);
-        }
+            params_json = NULL; /* 所有权转移到 root，防止 CJSON_AUTO_FREE 重复释放 */
+        } while (0);
     }
 
     cJSON_AddNumberToObject(root, "id", (double)agentrt_time_ns());
@@ -450,23 +455,23 @@ int svc_rpc_call(const char *method, const char *params, char **out_result, uint
     }
 
     /* 验证 JSON-RPC 响应格式 */
-    cJSON *resp_json = cJSON_Parse(response.data);
-    if (!resp_json) {
+    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
+    CJSON_PARSE_GUARD(resp_json, response.data, {
         buffer_free(&response);
         pool_release(g_ipc_client, entry);
         return SVC_ERR_RPC;
-    }
+    });
 
     /* 检查是否有错误 */
     cJSON *error = cJSON_GetObjectItem(resp_json, "error");
     if (error) {
-        cJSON_Delete(resp_json);
+        /* resp_json 由 CJSON_AUTO_FREE 自动释放 */
         buffer_free(&response);
         pool_release(g_ipc_client, entry);
         return SVC_ERR_RPC;
     }
 
-    cJSON_Delete(resp_json);
+    /* resp_json 由 CJSON_AUTO_FREE 自动释放 */
 
     /* 返回结果 */
     *out_result = response.data;
