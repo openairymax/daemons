@@ -34,6 +34,8 @@
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+#include <cjson_helpers.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -131,13 +133,13 @@ extern "C" {
             agentrt_socket_close(client_fd);                                         \
             return -1;                                                               \
         }                                                                            \
-        cJSON *req = cJSON_Parse(buffer);                                            \
-        if (!req) {                                                                  \
+        /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */                \
+        CJSON_PARSE_GUARD(req, buffer, {                                             \
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR,                        \
                                "Parse error: invalid JSON", -1);                      \
             agentrt_socket_close(client_fd);                                         \
             return -1;                                                               \
-        }                                                                            \
+        });                                                                          \
         cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");                        \
         cJSON *method = cJSON_GetObjectItem(req, "method");                          \
         cJSON *id = cJSON_GetObjectItem(req, "id");                                  \
@@ -146,7 +148,7 @@ extern "C" {
             !cJSON_IsString(method) || !id) {                                        \
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST,                    \
                                "Invalid Request", -1);                               \
-            cJSON_Delete(req);                                                       \
+            /* req 由 CJSON_AUTO_FREE 自动释放 */                                    \
             agentrt_socket_close(client_fd);                                         \
             return -1;                                                               \
         }                                                                            \
@@ -155,7 +157,7 @@ extern "C" {
                       method->valuestring, req_id);                                   \
         method_dispatcher_dispatch(dispatcher, req, jsonrpc_build_error,              \
                                    &client_fd);                                      \
-        cJSON_Delete(req);                                                           \
+        /* req 由 CJSON_AUTO_FREE 自动释放 */                                        \
         agentrt_socket_close(client_fd);                                             \
         return 0;                                                                    \
     }                                                                                \
