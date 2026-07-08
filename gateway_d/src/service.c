@@ -39,7 +39,7 @@ void gateway_service_get_default_config(gateway_service_config_t *config)
 {
     if (!config)
         return;
-    __builtin_memset(config, 0, sizeof(*config));
+    AGENTRT_MEMSET(config, 0, sizeof(*config));
 
     config->name = "agentrt-gateway";
     config->version = "0.1.0";
@@ -135,7 +135,7 @@ agentrt_error_t gateway_service_create(gateway_service_t *service,
         return AGENTRT_ENOMEM;
     }
     if (config) {
-        __builtin_memcpy(&svc->config, config, sizeof(gateway_service_config_t));
+        AGENTRT_MEMCPY(&svc->config, config, sizeof(gateway_service_config_t));
     } else {
         gateway_service_get_default_config(&svc->config);
     }
@@ -242,7 +242,7 @@ agentrt_error_t gateway_service_get_stats(gateway_service_t service, agentrt_svc
 {
     if (!service || !stats)
         return AGENTRT_EINVAL;
-    __builtin_memset(stats, 0, sizeof(*stats));
+    AGENTRT_MEMSET(stats, 0, sizeof(*stats));
     stats->request_count = service->requests_total;
     stats->error_count = service->requests_failed;
     return AGENTRT_SUCCESS;
