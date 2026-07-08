@@ -114,7 +114,7 @@ void ipc_bus_helper_shutdown(ipc_bus_helper_t *ibh) {
 int ipc_bus_helper_register_channel(ipc_bus_helper_t *ibh,
                                     const char *channel_name,
                                     ipc_bus_proto_t default_protocol) {
-    if (!ibh || !channel_name) return -1;
+    if (!ibh || !channel_name) return AGENTRT_ERR_INVALID_PARAM;
 
     if (ibh->channel_registered) {
         SVC_LOG_WARN("Channel already registered for daemon '%s'", ibh->daemon_name);
