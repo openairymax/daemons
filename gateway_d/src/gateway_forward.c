@@ -274,7 +274,7 @@ static int do_forward(gw_forward_t *fw, gw_fwd_proto_t proto, const char *target
     if (!fw || !out_response || !out_response_len) {
         SVC_LOG_ERROR("C-L11: do_forward invalid params (fw=%p out_resp=%p out_len=%p)",
                       (void *)fw, (void *)out_response, (void *)out_response_len);
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
     }
 
     uint64_t start_us = agentrt_time_ns() / 1000;
@@ -286,7 +286,7 @@ static int do_forward(gw_forward_t *fw, gw_fwd_proto_t proto, const char *target
                       proto_to_string(proto), path ? path : "/", body_len);
         fw->stats.forward_errors++;
         fw->healthy = false;
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     size_t msg_len = strlen(jsonrpc_msg);
@@ -309,7 +309,7 @@ static int do_forward(gw_forward_t *fw, gw_fwd_proto_t proto, const char *target
                       proto_to_string(proto), target_daemon);
         fw->stats.forward_errors++;
         fw->healthy = false;
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     safe_strcpy(req->header.target, target_daemon, sizeof(req->header.target));
@@ -347,7 +347,7 @@ static int do_forward(gw_forward_t *fw, gw_fwd_proto_t proto, const char *target
             *out_response = err_resp;
             *out_response_len = strlen(err_resp);
         }
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     /* 成功：返回目标 daemon 的响应 */
@@ -401,7 +401,7 @@ int gw_forward_request(gw_forward_t *fw, gw_fwd_proto_t proto, const char *metho
 {
     if (!fw || !fw->initialized) {
         SVC_LOG_ERROR("C-L11: gw_forward_request: forwarder not initialized");
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
     }
 
     const char *target = proto_to_target_daemon(fw, proto);
@@ -440,7 +440,7 @@ int gw_forward_openai(gw_forward_t *fw, const char *method, const char *path, co
 int gw_forward_get_stats(gw_forward_t *fw, gw_forward_stats_t *stats)
 {
     if (!fw || !stats)
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
     *stats = fw->stats;
     return 0;
 }
