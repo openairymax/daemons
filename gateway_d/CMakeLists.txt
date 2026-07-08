@@ -200,6 +200,10 @@ set(GATEWAY_LIB_SOURCES
 # 创建 gateway 库对象（不安装，仅供 gateway_d 使用）
 add_library(gateway_lib_obj OBJECT ${GATEWAY_LIB_SOURCES})
 
+# P0.18.2: 启用 cjson_helpers.h 的 AGENTRT_HAS_CJSON 守卫，
+# 使 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 等宏可见（否则被 #ifdef 跳过，宏当作函数调用导致编译错误）。
+target_compile_definitions(gateway_lib_obj PUBLIC AGENTRT_HAS_CJSON)
+
 if(AGENTRT_HAS_LIBWEBSOCKETS)
     set_source_files_properties(
         ${GATEWAY_SRC_DIR}/gateway/ws_gateway.c
