@@ -20,6 +20,8 @@
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
+/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+#include <cjson_helpers.h>
 #include <curl/curl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -132,14 +134,14 @@ static int google_parse_response(const char *body, llm_response_t **out)
         return AGENTRT_ERR_INVALID_PARAM;
     }
 
-    cJSON *root = cJSON_Parse(body);
-    if (!root) {
+    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
+    CJSON_PARSE_GUARD(root, body, {
         return AGENTRT_ERR_PARSE_ERROR;
-    }
+    });
 
     llm_response_t *resp = (llm_response_t *)AGENTRT_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {
-        cJSON_Delete(root);
+        /* root 由 CJSON_AUTO_FREE 自动释放 */
         return AGENTRT_ERR_OUT_OF_MEMORY;
     }
 
@@ -206,7 +208,7 @@ static int google_parse_response(const char *body, llm_response_t **out)
         resp->total_tokens = resp->prompt_tokens + resp->completion_tokens;
     }
 
-    cJSON_Delete(root);
+    /* root 由 CJSON_AUTO_FREE 自动释放 */
     *out = resp;
     return AGENTRT_OK;
 }
@@ -346,9 +348,10 @@ static int gg_feed_sse_data(gg_sse_ctx_t *s, const char *data, size_t data_len)
     if (!data || data_len == 0)
         return 0;
 
-    cJSON *root = cJSON_Parse(data);
-    if (!root)
+    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
+    CJSON_PARSE_GUARD(root, data, {
         return 0;
+    });
 
     cJSON *candidates = cJSON_GetObjectItem(root, "candidates");
     if (cJSON_IsArray(candidates) && cJSON_GetArraySize(candidates) > 0) {
@@ -419,7 +422,7 @@ static int gg_feed_sse_data(gg_sse_ctx_t *s, const char *data, size_t data_len)
         acc->resp_model = AGENTRT_STRDUP(mv->valuestring);
     }
 
-    cJSON_Delete(root);
+    /* root 由 CJSON_AUTO_FREE 自动释放 */
     return 0;
 }
 
