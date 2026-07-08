@@ -226,6 +226,8 @@ target_include_directories(gateway_lib_obj PUBLIC
      ${DAEMON_COMMON_DIR}/src
      ${PROTOCOLS_INCLUDE_DIR}
      ${PROTOCOLS_COMMON_INCLUDE_DIR}
+    # P0.18.2: cJSON 三步曲宏化辅助头文件（cjson_helpers.h）
+    ${COMMONS_DIR}/utils/cjson/include
 )
 endif()
 

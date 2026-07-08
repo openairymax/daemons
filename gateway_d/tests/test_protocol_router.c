@@ -20,13 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* 当独立编译时，error.h 可能未通过头文件链传递到本文件 */
-#ifndef AGENTRT_ERR_NOT_FOUND
-#define AGENTRT_ERR_NOT_FOUND       (-6)
-#endif
-#ifndef AGENTRT_ERR_INVALID_PARAM
-#define AGENTRT_ERR_INVALID_PARAM   (-2)
-#endif
+/* P0.18.4/BAN-304: 错误码统一来自 error.h，消除本地 #define 重复定义。 */
+#include "error.h"
 
 /* ==================== Mock handler ==================== */
 
