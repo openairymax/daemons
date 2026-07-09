@@ -488,12 +488,12 @@ int gw_mcp_server_handle_jsonrpc(gw_mcp_server_t *server, const char *method,
         }
         char *tool_result = NULL;
         int rc = tool->exec_fn(tool_name, tool_args, &tool_result, tool->user_data);
-        AGENTRT_FREE(tool_name);
-        tool_name = NULL;
-        AGENTRT_FREE(tool_args);
-        tool_args = NULL;
         if (rc != 0 || !tool_result) {
             AGENTRT_LOG_ERROR("tool execution failed: tool_name=%s, rc=%d", tool_name, rc);
+            AGENTRT_FREE(tool_name);
+            tool_name = NULL;
+            AGENTRT_FREE(tool_args);
+            tool_args = NULL;
             const char *err = "{\"jsonrpc\":\"2.0\",\"error\":"
                               "{\"code\":-32603,\"message\":\"Tool execution failed\"}}";
             *response_json = AGENTRT_STRDUP(err);
@@ -501,6 +501,10 @@ int gw_mcp_server_handle_jsonrpc(gw_mcp_server_t *server, const char *method,
             server->error_count++;
             return AGENTRT_ERR_EXEC_FAIL;
         }
+        AGENTRT_FREE(tool_name);
+        tool_name = NULL;
+        AGENTRT_FREE(tool_args);
+        tool_args = NULL;
         const char *resp_fmt = "{\"jsonrpc\":\"2.0\",\"result\":{"
                                "\"content\":[{\"type\":\"text\",\"text\":%s}]}}";
         size_t rlen = snprintf(NULL, 0, resp_fmt, tool_result);
