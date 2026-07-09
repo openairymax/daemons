@@ -97,6 +97,7 @@ extern "C" {
         log_set_module_level("*", debug_mode ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO);    \
     }                                                                                \
                                                                                      \
+    __attribute__((unused))                                                              \
     static void print_usage_##daemon_name(const char *prog)                           \
     {                                                                                \
         char buf[256];                                                               \
@@ -117,6 +118,7 @@ extern "C" {
         fputs(buf, stdout);                                                          \
     }                                                                                \
                                                                                      \
+    __attribute__((unused))                                                              \
     static int daemon_handle_client_##daemon_name(                                    \
         agentrt_socket_t client_fd, method_dispatcher_t *dispatcher)                  \
     {                                                                                \
@@ -162,6 +164,7 @@ extern "C" {
         return 0;                                                                    \
     }                                                                                \
                                                                                      \
+    __attribute__((unused))                                                              \
     static int daemon_on_client_##daemon_name(                                        \
         void *service_ctx, agentrt_socket_t client_fd)                                \
     {                                                                                \

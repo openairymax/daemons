@@ -102,8 +102,11 @@ AGENTRT_STRNCPY_TERM(addr.sun_path, endpoint, sizeof(addr.sun_path));
 
 static int create_shm_channel(channel_entry_t *entry, const char *endpoint __attribute__((unused)))
 {
+    /* 拷贝 channel_id 到局部变量，避免 snprintf 源/目标同结构体重叠警告 (-Wrestrict) */
+    char channel_id_copy[sizeof(entry->shm_name)];
+    snprintf(channel_id_copy, sizeof(channel_id_copy), "%s", entry->info.channel_id);
     snprintf(entry->shm_name, sizeof(entry->shm_name), "%s%s", "/agentrt_ch_",
-             entry->info.channel_id);
+             channel_id_copy);
 
     size_t shm_size = entry->info.buffer_size > 0 ? entry->info.buffer_size : 65536;
 
