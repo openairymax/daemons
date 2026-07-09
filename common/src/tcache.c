@@ -70,7 +70,7 @@ static int find_size_class(size_t size)
             return i;
         }
     }
-    return -1; /* 超大对象，不缓存 */
+    return -1; /* BAN-073 exempt: 大小类索引哨兵（未找到匹配类），非错误码 */
 }
 
 /**

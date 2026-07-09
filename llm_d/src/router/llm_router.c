@@ -46,7 +46,7 @@ int llm_router_init(const char *config_path)
 
     if (AGENTRT_MUTEX_INIT(&ctx->mutex, NULL) != 0) {
         AGENTRT_LOG_ERROR("C-L02: LLMRouter: failed to initialize mutex STACK: llm_router_init");
-        return -1;
+        return AGENTRT_ERR_SYS_MUTEX;
     }
 
     /* 初始化成本追踪器 (P3.1.6) */
@@ -62,7 +62,7 @@ int llm_router_init(const char *config_path)
     if (!ctx->cost_tracker) {
         AGENTRT_LOG_ERROR("C-L02: LLMRouter: failed to create cost_tracker STACK: llm_router_init");
         AGENTRT_MUTEX_DESTROY(&ctx->mutex);
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
     AGENTRT_LOG_INFO("C-L02: LLMRouter: cost_tracker initialized with %zu pricing rules",
                      sizeof(default_rules) / sizeof(default_rules[0]));
@@ -124,7 +124,7 @@ int llm_router_register_endpoint(const llm_endpoint_t *endpoint)
 
     if (!endpoint) {
         AGENTRT_LOG_ERROR("C-L02: LLMRouter: register_endpoint called with NULL endpoint STACK: llm_router_register_endpoint");
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
     }
 
     AGENTRT_MUTEX_LOCK(&ctx->mutex);
@@ -135,7 +135,7 @@ int llm_router_register_endpoint(const llm_endpoint_t *endpoint)
                           ctx->endpoint_count, LLM_ROUTER_MAX_ENDPOINTS,
                           endpoint->provider_name, endpoint->model_name);
         AGENTRT_MUTEX_UNLOCK(&ctx->mutex);
-        return -1;
+        return AGENTRT_ERR_OVERFLOW;
     }
 
     AGENTRT_MEMCPY(&ctx->endpoints[ctx->endpoint_count], endpoint,
@@ -161,7 +161,7 @@ int llm_router_unregister_endpoint(const char *provider_name,
 
     if (!provider_name || !model_name) {
         AGENTRT_LOG_ERROR("C-L02: LLMRouter: unregister_endpoint with NULL params STACK: llm_router_unregister_endpoint");
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
     }
 
     AGENTRT_MUTEX_LOCK(&ctx->mutex);
@@ -187,7 +187,7 @@ int llm_router_unregister_endpoint(const char *provider_name,
                      "(total_endpoints=%zu) STACK: llm_router_unregister_endpoint",
                      provider_name, model_name, ctx->endpoint_count);
     AGENTRT_MUTEX_UNLOCK(&ctx->mutex);
-    return -1;
+    return AGENTRT_ERR_NOT_FOUND;
 }
 
 /* ==================== P3.1.5: 统一路由接口 ==================== */
@@ -199,12 +199,12 @@ int llm_router_route(const llm_route_request_t *request,
 
     if (!request || !result) {
         AGENTRT_LOG_ERROR("C-L02: LLMRouter: route called with NULL request or result STACK: llm_router_route");
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
     }
 
     if (!ctx->initialized) {
         AGENTRT_LOG_ERROR("C-L02: LLMRouter: route called before initialization STACK: llm_router_route");
-        return -1;
+        return AGENTRT_ERR_SYS_NOT_INIT;
     }
 
     AGENTRT_MEMSET(result, 0, sizeof(llm_route_result_t));
@@ -312,7 +312,7 @@ int llm_router_get_stats(llm_router_stats_t *stats)
 
     if (!stats) {
         AGENTRT_LOG_ERROR("C-L02: LLMRouter: get_stats called with NULL stats STACK: llm_router_get_stats");
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
     }
 
     AGENTRT_MUTEX_LOCK(&ctx->mutex);
@@ -332,7 +332,7 @@ int llm_router_set_default_strategy(llm_route_strategy_t strategy)
 
     if (strategy >= LLM_ROUTE_COUNT) {
         AGENTRT_LOG_ERROR("C-L02: LLMRouter: invalid strategy %d STACK: llm_router_set_default_strategy", strategy);
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
     }
 
     AGENTRT_MUTEX_LOCK(&ctx->mutex);

@@ -187,7 +187,7 @@ int daemon_bootstrap_ipc_register_handler(daemon_bootstrap_ipc_t *bipc,
                                            ipc_bus_message_handler_t handler,
                                            void *user_data)
 {
-    if (!bipc || !handler) return -1;
+    if (!bipc || !handler) return AGENTRT_ERR_INVALID_PARAM;
     return ipc_bus_helper_register_handler(bipc->ibh, handler, user_data);
 }
 
@@ -195,7 +195,7 @@ int daemon_bootstrap_ipc_send(daemon_bootstrap_ipc_t *bipc,
                                const char *target_service,
                                const void *payload, size_t payload_size)
 {
-    if (!bipc || !target_service || !payload) return -1;
+    if (!bipc || !target_service || !payload) return AGENTRT_ERR_INVALID_PARAM;
 
     SVC_LOG_DEBUG("C-L09: daemon_send [%s] → [%s] payload=%zub",
                   bipc->daemon_name, target_service, payload_size);

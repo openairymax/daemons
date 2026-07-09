@@ -51,7 +51,7 @@ static int win_run_command(const char *prog, const char *const args[])
     char cmdline[2048];
     size_t off = 0;
     int n = snprintf(cmdline, sizeof(cmdline), "\"%s\"", prog);
-    if (n < 0) return -1;
+    if (n < 0) return AGENTRT_ERR_FAIL;
     off = (size_t)n;
     for (size_t i = 0; args && args[i] && off < sizeof(cmdline) - 1; i++) {
         const char *a = args[i];
@@ -71,7 +71,7 @@ static int win_run_command(const char *prog, const char *const args[])
     ZeroMemory(&pi, sizeof(pi));
 
     if (!CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        return -1;
+        return AGENTRT_ERR_EXEC_FAIL;
     }
     WaitForSingleObject(pi.hProcess, INFINITE);
     DWORD code = 1;
@@ -108,7 +108,7 @@ static int recursive_remove(const char *path)
 #ifdef _WIN32
     DWORD attr = GetFileAttributesA(path);
     if (attr == INVALID_FILE_ATTRIBUTES) {
-        return -1; /* 路径不存在 */
+        return AGENTRT_ERR_NOT_FOUND; /* 路径不存在 */
     }
     if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
         /* 文件：清除只读属性后直接删除 */

@@ -36,7 +36,7 @@ int route_least_latency(const llm_route_request_t *request,
         AGENTRT_LOG_WARN("C-L02: Latency: no eligible endpoints "
                 "(caps=0x%x, total_endpoints=%zu) STACK: route_least_latency",
                 request->required_caps, router_ctx_get()->endpoint_count);
-        return -1;
+        return AGENTRT_ERR_NOT_FOUND;  /* BAN-073: 无可用端点 */
     }
 
     AGENTRT_LOG_DEBUG("C-L02: Latency: evaluating %zu endpoints for latency",

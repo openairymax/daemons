@@ -38,7 +38,7 @@ int route_round_robin(const llm_route_request_t *request,
                 request->required_caps,
                 request->preferred_provider[0] ? request->preferred_provider : "any",
                 router_ctx_get()->endpoint_count);
-        return -1;
+        return AGENTRT_ERR_NOT_FOUND;  /* BAN-073: 无可用端点 */
     }
 
     size_t idx = ctx->round_robin_index % eligible_count;

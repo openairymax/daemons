@@ -20,6 +20,7 @@
 /* P0.17 阶段 2: service.c 使用 agentrt_dl_* daemons 特有函数，
  * 需包含 daemon_platform_ext.h 获取声明（commons 版 platform.h 无这些函数）。 */
 #include "daemon_platform_ext.h"
+#include "error.h"
 #include "svc_logger.h"
 #include "sync_compat.h"
 #include "memory_compat.h"
@@ -109,7 +110,7 @@ static int registry_init(void)
 
     AGENTRT_MEMSET(&g_plugin_registry, 0, sizeof(g_plugin_registry));
     if (AGENTRT_RWLOCK_INIT(&g_plugin_registry.rwlock, NULL) != 0)
-        return -1;
+        return AGENTRT_ERR_SYS_MUTEX;
 
     g_plugin_registry.initialized = true;
     return 0;
@@ -120,16 +121,16 @@ static int registry_init(void)
 int plugin_service_load(const char *library_path, const char *config_path,
                         const char **out_name)
 {
-    if (!library_path) return -1;
+    if (!library_path) return AGENTRT_ERR_INVALID_PARAM;
 
     /* 惰性初始化注册表 */
-    if (registry_init() != 0) return -1;
+    if (registry_init() != 0) return AGENTRT_ERR_FAIL;
 
     /* 打开动态库 */
     void *handle = agentrt_dl_open(library_path);
     if (!handle) {
         SVC_LOG_ERROR("P2.2: PluginD: dlopen failed: %s (%s)", library_path, agentrt_dl_error());
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     /* 加载元数据 */
@@ -138,14 +139,14 @@ int plugin_service_load(const char *library_path, const char *config_path,
     PLUGIN_DLSYM_FUNC(handle, "plugin_get_metadata", get_metadata);
     if (!get_metadata) {
         agentrt_dl_close(handle);
-        return -1;
+        return AGENTRT_ERR_NOT_FOUND;
     }
 
     const plugin_metadata_t *metadata = get_metadata();
     if (!metadata || !metadata->name[0]) {
         SVC_LOG_ERROR("P2.2: PluginD: Invalid plugin metadata");
         agentrt_dl_close(handle);
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
     }
 
     /* 检查重名 */
@@ -154,7 +155,7 @@ int plugin_service_load(const char *library_path, const char *config_path,
         AGENTRT_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
         SVC_LOG_WARN("P2.2: PluginD: Plugin already loaded: %s", metadata->name);
         agentrt_dl_close(handle);
-        return -1;
+        return AGENTRT_ERR_ALREADY_EXISTS;
     }
     AGENTRT_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
 
@@ -172,14 +173,14 @@ int plugin_service_load(const char *library_path, const char *config_path,
         SVC_LOG_ERROR("P2.2: PluginD: Missing required symbols (init/destroy) for %s",
                       metadata->name);
         agentrt_dl_close(handle);
-        return -1;
+        return AGENTRT_ERR_NOT_FOUND;
     }
 
     /* 分配插件节点 */
     plugin_node_t *node = (plugin_node_t *)AGENTRT_CALLOC(1, sizeof(plugin_node_t));
     if (!node) {
         agentrt_dl_close(handle);
-        return -1;
+        return AGENTRT_ERR_OUT_OF_MEMORY;
     }
 
     /* 填充描述符 */
@@ -235,7 +236,7 @@ int plugin_service_load(const char *library_path, const char *config_path,
 
 int plugin_service_unload(const char *name)
 {
-    if (!name) return -1;
+    if (!name) return AGENTRT_ERR_INVALID_PARAM;
 
     AGENTRT_RWLOCK_WRLOCK(&g_plugin_registry.rwlock);
 
@@ -270,18 +271,18 @@ int plugin_service_unload(const char *name)
     }
 
     AGENTRT_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
-    return -1;
+    return AGENTRT_ERR_NOT_FOUND;
 }
 
 int plugin_service_start(const char *name)
 {
-    if (!name) return -1;
+    if (!name) return AGENTRT_ERR_INVALID_PARAM;
 
     AGENTRT_RWLOCK_WRLOCK(&g_plugin_registry.rwlock);
     plugin_node_t *node = find_node(name);
     if (!node) {
         AGENTRT_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
-        return -1;
+        return AGENTRT_ERR_NOT_FOUND;
     }
 
     if (node->desc.state == PLUGIN_STATE_RUNNING) {
@@ -291,7 +292,7 @@ int plugin_service_start(const char *name)
 
     if (node->desc.state == PLUGIN_STATE_ERROR) {
         AGENTRT_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
-        return -1;
+        return AGENTRT_ERR_STATE_ERROR;
     }
 
     if (node->desc.start) {
@@ -301,7 +302,7 @@ int plugin_service_start(const char *name)
             node->stats.error_count++;
             AGENTRT_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
             SVC_LOG_ERROR("P2.2: PluginD: Plugin start failed: %s (err=%d)", name, ret);
-            return -1;
+            return AGENTRT_ERR_EXEC_FAIL;
         }
     }
 
@@ -314,13 +315,13 @@ int plugin_service_start(const char *name)
 
 int plugin_service_stop(const char *name)
 {
-    if (!name) return -1;
+    if (!name) return AGENTRT_ERR_INVALID_PARAM;
 
     AGENTRT_RWLOCK_WRLOCK(&g_plugin_registry.rwlock);
     plugin_node_t *node = find_node(name);
     if (!node) {
         AGENTRT_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
-        return -1;
+        return AGENTRT_ERR_NOT_FOUND;
     }
 
     if (node->desc.state != PLUGIN_STATE_RUNNING) {
@@ -349,13 +350,13 @@ int plugin_service_stop(const char *name)
 
 int plugin_service_get_metadata(const char *name, plugin_metadata_t *metadata)
 {
-    if (!name || !metadata) return -1;
+    if (!name || !metadata) return AGENTRT_ERR_INVALID_PARAM;
 
     AGENTRT_RWLOCK_RDLOCK(&g_plugin_registry.rwlock);
     plugin_node_t *node = find_node(name);
     if (!node) {
         AGENTRT_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
-        return -1;
+        return AGENTRT_ERR_NOT_FOUND;
     }
 
     AGENTRT_MEMCPY(metadata, &node->desc.metadata, sizeof(plugin_metadata_t));
@@ -376,13 +377,13 @@ plugin_state_t plugin_service_get_state(const char *name)
 
 int plugin_service_get_stats(const char *name, plugin_stats_t *stats)
 {
-    if (!name || !stats) return -1;
+    if (!name || !stats) return AGENTRT_ERR_INVALID_PARAM;
 
     AGENTRT_RWLOCK_RDLOCK(&g_plugin_registry.rwlock);
     plugin_node_t *node = find_node(name);
     if (!node) {
         AGENTRT_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
-        return -1;
+        return AGENTRT_ERR_NOT_FOUND;
     }
 
     AGENTRT_MEMCPY(stats, &node->stats, sizeof(plugin_stats_t));
@@ -402,7 +403,7 @@ int plugin_service_get_stats(const char *name, plugin_stats_t *stats)
 
 int plugin_service_list(char ***names, size_t *count, int type_filter)
 {
-    if (!names || !count) return -1;
+    if (!names || !count) return AGENTRT_ERR_INVALID_PARAM;
 
     AGENTRT_RWLOCK_RDLOCK(&g_plugin_registry.rwlock);
 
@@ -420,7 +421,7 @@ int plugin_service_list(char ***names, size_t *count, int type_filter)
     char **name_array = (char **)AGENTRT_CALLOC(total, sizeof(char *));
     if (!name_array && total > 0) {
         AGENTRT_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
-        return -1;
+        return AGENTRT_ERR_OUT_OF_MEMORY;
     }
 
     /* 填充名称 */

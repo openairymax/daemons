@@ -104,14 +104,14 @@ int prometheus_exporter_init(const char *service_name)
 
     if (um_init(&config) != 0) {
         SVC_LOG_ERROR("C-L10: Failed to initialize unified metrics for '%s'", g_module_name);
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     /* 注册模块 */
     if (um_register_module(g_module_name, NULL) != 0) {
         SVC_LOG_ERROR("C-L10: Failed to register metrics module '%s'", g_module_name);
         um_shutdown();
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     g_initialized = 1;
@@ -134,7 +134,7 @@ int prometheus_exporter_register_required_metrics(void)
 {
     if (!g_initialized) {
         SVC_LOG_ERROR("C-L10: Prometheus exporter not initialized, cannot register metrics");
-        return -1;
+        return AGENTRT_ERR_SYS_NOT_INIT;
     }
 
     int registered = 0;
@@ -171,15 +171,15 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len,
                                     char **response, size_t *response_len)
 {
     if (!request || !response || !response_len)
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
 
     /* 检测是否为 HTTP GET /metrics 请求 */
     if (request_len < 14)
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
 
     /* 匹配 "GET /metrics" 前缀 */
     if (strncmp(request, "GET /metrics", 12) != 0)
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
 
     SVC_LOG_DEBUG("C-L10: Prometheus scrape request received (scrape #%llu)",
                   (unsigned long long)(g_scrape_count + 1));
@@ -197,7 +197,7 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len,
         size_t buf_size = 256 + body_len;
         char *resp = (char *)AGENTRT_MALLOC(buf_size);
         if (!resp)
-            return -1;
+            return AGENTRT_ERR_OUT_OF_MEMORY;
 
         int header_len = snprintf(resp, buf_size,
                                   "HTTP/1.1 500 Internal Server Error\r\n"
@@ -232,7 +232,7 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len,
     char *resp = (char *)AGENTRT_MALLOC(total_len + 1);
     if (!resp) {
         AGENTRT_FREE(metrics_text);
-        return -1;
+        return AGENTRT_ERR_OUT_OF_MEMORY;
     }
 
     AGENTRT_MEMCPY(resp, header_buf, (size_t)header_len);

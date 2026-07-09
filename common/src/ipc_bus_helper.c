@@ -133,7 +133,7 @@ int ipc_bus_helper_register_channel(ipc_bus_helper_t *ibh,
     if (!ibh->channel) {
         SVC_LOG_ERROR("Failed to create channel '%s' for daemon '%s'",
                       channel_name, ibh->daemon_name);
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     ibh->channel_registered = true;
@@ -149,7 +149,7 @@ int ipc_bus_helper_register_endpoint(ipc_bus_helper_t *ibh,
                                      const ipc_bus_proto_t *protocols,
                                      uint32_t proto_count) {
     if (!ibh || !service_name || !endpoint || !protocols || proto_count == 0)
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
 
     ipc_bus_endpoint_t ep;
     AGENTRT_MEMSET(&ep, 0, sizeof(ep));
@@ -170,7 +170,7 @@ int ipc_bus_helper_register_endpoint(ipc_bus_helper_t *ibh,
     if (err != AGENTRT_SUCCESS) {
         SVC_LOG_ERROR("Failed to register endpoint '%s' for daemon '%s' (err=%d)",
                       service_name, ibh->daemon_name, err);
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     ibh->endpoint_registered = true;
@@ -184,13 +184,13 @@ int ipc_bus_helper_register_endpoint(ipc_bus_helper_t *ibh,
 int ipc_bus_helper_register_handler(ipc_bus_helper_t *ibh,
                                     ipc_bus_message_handler_t handler,
                                     void *user_data) {
-    if (!ibh || !handler) return -1;
+    if (!ibh || !handler) return AGENTRT_ERR_INVALID_PARAM;
 
     agentrt_error_t err = ipc_service_bus_register_handler(ibh->bus, handler, user_data);
     if (err != AGENTRT_SUCCESS) {
         SVC_LOG_ERROR("Failed to register message handler for daemon '%s' (err=%d)",
                       ibh->daemon_name, err);
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     SVC_LOG_INFO("Message handler registered for daemon '%s'", ibh->daemon_name);
@@ -201,14 +201,14 @@ int ipc_bus_helper_register_event_handler(ipc_bus_helper_t *ibh,
                                           const char *event_name,
                                           ipc_bus_event_handler_t handler,
                                           void *user_data) {
-    if (!ibh || !event_name || !handler) return -1;
+    if (!ibh || !event_name || !handler) return AGENTRT_ERR_INVALID_PARAM;
 
     agentrt_error_t err = ipc_service_bus_register_event_handler(
         ibh->bus, event_name, handler, user_data);
     if (err != AGENTRT_SUCCESS) {
         SVC_LOG_ERROR("Failed to register event handler '%s' for daemon '%s' (err=%d)",
                       event_name, ibh->daemon_name, err);
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     SVC_LOG_INFO("Event handler '%s' registered for daemon '%s'",
@@ -221,7 +221,7 @@ int ipc_bus_helper_register_event_handler(ipc_bus_helper_t *ibh,
 int ipc_bus_helper_send(ipc_bus_helper_t *ibh, const char *target_service,
                         ipc_bus_msg_type_t msg_type, ipc_bus_proto_t protocol,
                         const void *payload, size_t payload_size) {
-    if (!ibh || !target_service || !payload) return -1;
+    if (!ibh || !target_service || !payload) return AGENTRT_ERR_INVALID_PARAM;
 
     /* P1.8: 记录路由目标 */
     safe_strcpy(ibh->last_target, target_service, sizeof(ibh->last_target));
@@ -237,7 +237,7 @@ int ipc_bus_helper_send(ipc_bus_helper_t *ibh, const char *target_service,
         ibh->send_failures++;
         SVC_LOG_ERROR("C-L09: Failed to create message [%s] → [%s]",
                       ibh->daemon_name, target_service);
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     /* 设置消息头 */
@@ -260,14 +260,14 @@ int ipc_bus_helper_send(ipc_bus_helper_t *ibh, const char *target_service,
         SVC_LOG_WARN("C-L09: SEND FAILED [%s] → [%s] proto=%s err=%d",
                      ibh->daemon_name, target_service,
                      ipc_bus_proto_to_string(protocol), (int)err);
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 }
 
 int ipc_bus_helper_request(ipc_bus_helper_t *ibh, const char *target_service,
                            const ipc_bus_message_t *request,
                            ipc_bus_message_t *response, uint32_t timeout_ms) {
-    if (!ibh || !target_service || !request || !response) return -1;
+    if (!ibh || !target_service || !request || !response) return AGENTRT_ERR_INVALID_PARAM;
 
     SVC_LOG_DEBUG("C-L09: REQUEST [%s] → [%s] timeout=%ums",
                   ibh->daemon_name, target_service, timeout_ms);
@@ -282,13 +282,13 @@ int ipc_bus_helper_request(ipc_bus_helper_t *ibh, const char *target_service,
     } else {
         SVC_LOG_WARN("C-L09: REQUEST FAILED [%s] → [%s] err=%d",
                      ibh->daemon_name, target_service, (int)err);
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 }
 
 int ipc_bus_helper_broadcast(ipc_bus_helper_t *ibh,
                              const ipc_bus_message_t *message) {
-    if (!ibh || !message) return -1;
+    if (!ibh || !message) return AGENTRT_ERR_INVALID_PARAM;
 
     SVC_LOG_DEBUG("C-L09: BROADCAST [%s] type=%d proto=%s",
                   ibh->daemon_name, (int)message->header.msg_type,
@@ -301,14 +301,14 @@ int ipc_bus_helper_broadcast(ipc_bus_helper_t *ibh,
     } else {
         SVC_LOG_WARN("C-L09: BROADCAST FAILED [%s] err=%d",
                      ibh->daemon_name, (int)err);
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 }
 
 int ipc_bus_helper_notify(ipc_bus_helper_t *ibh, const char *target_service,
                           const void *payload, size_t payload_size,
                           ipc_bus_proto_t protocol) {
-    if (!ibh || !target_service || !payload) return -1;
+    if (!ibh || !target_service || !payload) return AGENTRT_ERR_INVALID_PARAM;
 
     agentrt_error_t err = ipc_service_bus_notify(ibh->bus, target_service,
                                                   payload, payload_size,
@@ -321,7 +321,7 @@ int ipc_bus_helper_notify(ipc_bus_helper_t *ibh, const char *target_service,
 int ipc_bus_helper_route_auto(ipc_bus_helper_t *ibh,
                               const char *target_service,
                               const void *payload, size_t payload_size) {
-    if (!ibh || !target_service || !payload) return -1;
+    if (!ibh || !target_service || !payload) return AGENTRT_ERR_INVALID_PARAM;
 
     ibh->total_routes++;
     SVC_LOG_DEBUG("C-L09: ROUTE-AUTO [%s] → [%s] payload=%zub (route #%llu)",
@@ -397,7 +397,7 @@ int ipc_bus_helper_route_auto(ipc_bus_helper_t *ibh,
     SVC_LOG_ERROR("C-L09: ROUTE FAILED [%s] → [%s] no healthy endpoints available",
                   ibh->daemon_name, target_service);
     ibh->send_failures++;
-    return -1;
+    return AGENTRT_ERR_NOT_FOUND;
 }
 
 int ipc_bus_helper_discover(ipc_bus_helper_t *ibh,
@@ -405,7 +405,7 @@ int ipc_bus_helper_discover(ipc_bus_helper_t *ibh,
                             ipc_bus_proto_t protocol,
                             ipc_bus_endpoint_t *endpoints,
                             uint32_t max_count, uint32_t *found_count) {
-    if (!ibh || !endpoints || !found_count) return -1;
+    if (!ibh || !endpoints || !found_count) return AGENTRT_ERR_INVALID_PARAM;
 
     agentrt_error_t err = ipc_service_bus_discover(ibh->bus, service_name,
                                                     protocol, endpoints,
@@ -428,7 +428,7 @@ bool ipc_bus_helper_is_running(ipc_bus_helper_t *ibh) {
 
 int ipc_bus_helper_enable_backpressure(ipc_bus_helper_t *ibh,
                                        const ipc_bp_config_t *config) {
-    if (!ibh) return -1;
+    if (!ibh) return AGENTRT_ERR_INVALID_PARAM;
 
     /* 已存在则先销毁 */
     if (ibh->bp_ctrl) {
@@ -439,7 +439,7 @@ int ipc_bus_helper_enable_backpressure(ipc_bus_helper_t *ibh,
     if (!ibh->bp_ctrl) {
         SVC_LOG_ERROR("P1.24: Failed to create backpressure controller for '%s'",
                       ibh->daemon_name);
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     SVC_LOG_INFO("P1.24: Backpressure enabled for daemon '%s'", ibh->daemon_name);
@@ -458,7 +458,7 @@ int ipc_bus_helper_send_with_bp(ipc_bus_helper_t *ibh, const char *target,
                                 ipc_bus_msg_type_t msg_type, ipc_bus_proto_t protocol,
                                 const void *payload, size_t payload_size,
                                 bool is_droppable) {
-    if (!ibh || !target || !payload) return -1;
+    if (!ibh || !target || !payload) return AGENTRT_ERR_INVALID_PARAM;
 
     /* 如果未启用背压，直接发送 */
     if (!ibh->bp_ctrl) {
@@ -494,8 +494,8 @@ bool ipc_bus_helper_should_accept_connection(ipc_bus_helper_t *ibh) {
 }
 
 int ipc_bus_helper_get_bp_stats(ipc_bus_helper_t *ibh, ipc_bp_stats_t *out_stats) {
-    if (!ibh || !out_stats) return -1;
-    if (!ibh->bp_ctrl) return -1;
+    if (!ibh || !out_stats) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ibh->bp_ctrl) return AGENTRT_ERR_STATE_ERROR;
 
     ipc_bp_get_stats(ibh->bp_ctrl, out_stats);
     return 0;
@@ -517,7 +517,7 @@ int ipc_bus_helper_get_routing_stats(ipc_bus_helper_t *ibh,
                                      uint64_t *out_send_failures,
                                      uint64_t *out_bp_drops,
                                      uint64_t *out_bp_rejects) {
-    if (!ibh) return -1;
+    if (!ibh) return AGENTRT_ERR_INVALID_PARAM;
 
     if (out_total_sends)      *out_total_sends = ibh->total_sends;
     if (out_total_routes)     *out_total_routes = ibh->total_routes;

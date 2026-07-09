@@ -40,7 +40,7 @@ int route_quality_first(const llm_route_request_t *request,
         AGENTRT_LOG_WARN("C-L02: Quality: no eligible endpoints "
                 "(caps=0x%x, total_endpoints=%zu) STACK: route_quality_first",
                 request->required_caps, router_ctx_get()->endpoint_count);
-        return -1;
+        return AGENTRT_ERR_NOT_FOUND;  /* BAN-073: 无可用端点 */
     }
 
     AGENTRT_LOG_DEBUG("C-L02: Quality: sorting %zu endpoints by quality",

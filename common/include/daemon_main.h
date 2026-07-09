@@ -124,21 +124,21 @@ extern "C" {
         ssize_t n = agentrt_socket_recv(client_fd, buffer, sizeof(buffer) - 1);      \
         if (n <= 0) {                                                                \
             agentrt_socket_close(client_fd);                                         \
-            return -1;                                                               \
+            return AGENTRT_ERR_FAIL;                                                 \
         }                                                                            \
         buffer[n] = '\0';                                                            \
         if ((size_t)n >= sizeof(buffer) - 1) {                                       \
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST,                    \
                                "Request too large", -1);                              \
             agentrt_socket_close(client_fd);                                         \
-            return -1;                                                               \
+            return AGENTRT_ERR_FAIL;                                                 \
         }                                                                            \
         /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */                \
         CJSON_PARSE_GUARD(req, buffer, {                                             \
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR,                        \
                                "Parse error: invalid JSON", -1);                      \
             agentrt_socket_close(client_fd);                                         \
-            return -1;                                                               \
+            return AGENTRT_ERR_FAIL;                                                 \
         });                                                                          \
         cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");                        \
         cJSON *method = cJSON_GetObjectItem(req, "method");                          \
@@ -150,7 +150,7 @@ extern "C" {
                                "Invalid Request", -1);                               \
             /* req 由 CJSON_AUTO_FREE 自动释放 */                                    \
             agentrt_socket_close(client_fd);                                         \
-            return -1;                                                               \
+            return AGENTRT_ERR_FAIL;                                                 \
         }                                                                            \
         int req_id = cJSON_IsNumber(id) ? id->valueint : 0;                          \
         SVC_LOG_DEBUG("Processing request: method=%s, id=%d",                        \

@@ -91,7 +91,7 @@ void plugin_permission_destroy(void)
 int plugin_permission_map_to_guard(const char *permission,
                                    safety_guard_type_t *out_guard)
 {
-    if (!permission || !out_guard) return -1;
+    if (!permission || !out_guard) return AGENTRT_ERR_INVALID_PARAM;
 
     /* 权限字符串 → Cupolas 守卫类型映射 */
     if (strcmp(permission, "file_read") == 0) {
@@ -127,7 +127,7 @@ int plugin_permission_map_to_guard(const char *permission,
     } else {
         AGENTRT_LOG_WARN("PluginPermission: unknown permission '%s'",
                          permission);
-        return -1;
+        return AGENTRT_ERR_NOT_SUPPORTED;
     }
 
     return 0;
@@ -272,14 +272,14 @@ const char *plugin_permission_description(const char *permission)
 int plugin_permission_list_supported(char ***out_permissions,
                                      size_t *out_count)
 {
-    if (!out_permissions || !out_count) return -1;
+    if (!out_permissions || !out_count) return AGENTRT_ERR_INVALID_PARAM;
 
     /* 计数 */
     size_t count = 0;
     while (SUPPORTED_PERMISSIONS[count]) count++;
 
     char **list = (char **)AGENTRT_CALLOC(count, sizeof(char *));
-    if (!list) return -1;
+    if (!list) return AGENTRT_ERR_OUT_OF_MEMORY;
 
     for (size_t i = 0; i < count; i++) {
         list[i] = AGENTRT_STRDUP(SUPPORTED_PERMISSIONS[i]);

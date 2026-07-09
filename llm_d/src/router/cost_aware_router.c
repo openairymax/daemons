@@ -44,7 +44,7 @@ int route_cost_aware(const llm_route_request_t *request,
                          "(caps=0x%x, preferred=%s)",
                          request->required_caps,
                          request->preferred_provider[0] ? request->preferred_provider : "any");
-        return -1;
+        return AGENTRT_ERR_NOT_FOUND;  /* BAN-073: 无可用端点 */
     }
 
     AGENTRT_LOG_DEBUG("C-L02: CostAware: evaluating %zu eligible endpoints", eligible_count);
@@ -117,7 +117,7 @@ int route_cost_aware(const llm_route_request_t *request,
                          "endpoints exceed budget=$%.6f STACK: route_cost_aware",
                          eligible_count, request->max_cost);
     }
-        return -1;
+        return AGENTRT_ERR_NOT_FOUND;  /* BAN-073: 无符合约束端点 */
     }
 
     /* 填充结果 */
