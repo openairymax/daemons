@@ -199,7 +199,7 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
                               const char *params_json,
                               safety_guard_bridge_result_t *result)
 {
-    if (!bridge || !meta) return -1;
+    if (!bridge || !meta) return AGENTRT_ERR_INVALID_PARAM;
 
     /* 初始化结果 */
     if (result) {
@@ -227,7 +227,7 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
             AGENTRT_LOG_WARN("C-L05: SAFETY_GUARD_PERMISSION denied for '%s' by '%s'",
                              tool_name, agent_id);
             bridge->denied_count++;
-            return -1;
+            return AGENTRT_ERR_PERMISSION_DENIED;
         }
         if (result) result->permission_passed = 1;
         guards_executed++;
@@ -251,7 +251,7 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
                              (unsigned long long)bridge->rate_limit_call_count);
             bridge->rate_limited++;
             bridge->denied_count++;
-            return -1;
+            return AGENTRT_ERR_BUSY;
         }
         if (result) result->rate_limit_passed = 1;
         guards_executed++;
@@ -287,7 +287,7 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
                                          token, tool_name);
                         AGENTRT_FREE(patterns_copy);
                         bridge->denied_count++;
-                        return -1;
+                        return AGENTRT_ERR_SEC_VIOLATION;
                     }
                     token = strtok_r(NULL, ",", &saveptr);
                 }
@@ -311,7 +311,7 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
                                  tool_name, params_len,
                                  bridge->config.max_params_size);
                 bridge->denied_count++;
-                return -1;
+                return AGENTRT_ERR_SEC_VIOLATION;
             }
         }
 
@@ -359,7 +359,7 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
             AGENTRT_LOG_WARN("C-L05: SAFETY_GUARD_RESOURCE quota exceeded for '%s'",
                              tool_name);
             bridge->denied_count++;
-            return -1;
+            return AGENTRT_ERR_SEC_QUOTA;
         }
 
         /* 消耗资源配额 */
@@ -409,7 +409,7 @@ int safety_guard_bridge_check_permission(safety_guard_bridge_t *bridge,
                                          const char *tool_name,
                                          const char *action)
 {
-    if (!bridge || !agent_id || !tool_name || !action) return -1;
+    if (!bridge || !agent_id || !tool_name || !action) return AGENTRT_ERR_INVALID_PARAM;
 
     if (!bridge->config.enable_permission_guard) return 0;
 
@@ -424,7 +424,7 @@ int safety_guard_bridge_check_permission(safety_guard_bridge_t *bridge,
 int safety_guard_bridge_check_rate_limit(safety_guard_bridge_t *bridge,
                                          const char *tool_name)
 {
-    if (!bridge || !tool_name) return -1;
+    if (!bridge || !tool_name) return AGENTRT_ERR_INVALID_PARAM;
 
     if (!bridge->config.enable_rate_limit_guard ||
         bridge->config.rate_limit_per_minute == 0) {
@@ -436,7 +436,7 @@ int safety_guard_bridge_check_rate_limit(safety_guard_bridge_t *bridge,
 
     if (bridge->rate_limit_call_count > bridge->config.rate_limit_per_minute) {
         bridge->rate_limited++;
-        return -1;
+        return AGENTRT_ERR_BUSY;
     }
 
     return 0;
@@ -448,7 +448,7 @@ int safety_guard_bridge_filter_content(safety_guard_bridge_t *bridge,
                                        size_t sanitized_size)
 {
     if (!bridge || !params_json || !sanitized_params || sanitized_size == 0) {
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
     }
 
     if (!bridge->config.enable_content_filter) {
@@ -466,7 +466,7 @@ int safety_guard_bridge_filter_content(safety_guard_bridge_t *bridge,
                 while (*token == ' ') token++;
                 if (*token && strstr(params_json, token)) {
                     AGENTRT_FREE(patterns_copy);
-                    return -1;
+                    return AGENTRT_ERR_SEC_VIOLATION;
                 }
                 token = strtok_r(NULL, ",", &saveptr);
             }
@@ -478,7 +478,7 @@ int safety_guard_bridge_filter_content(safety_guard_bridge_t *bridge,
     if (bridge->config.max_params_size > 0) {
         size_t params_len = strlen(params_json);
         if (params_len > bridge->config.max_params_size) {
-            return -1;
+            return AGENTRT_ERR_SEC_VIOLATION;
         }
     }
 
@@ -496,7 +496,7 @@ int safety_guard_bridge_audit_log(safety_guard_bridge_t *bridge,
                                   const char *reason,
                                   const char *agent_id)
 {
-    if (!bridge || !event_type || !tool_name) return -1;
+    if (!bridge || !event_type || !tool_name) return AGENTRT_ERR_INVALID_PARAM;
 
     if (!bridge->config.enable_audit_guard) return 0;
 

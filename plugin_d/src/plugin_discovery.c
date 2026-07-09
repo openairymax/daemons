@@ -170,7 +170,7 @@ int plugin_discovery_parse_manifest(const char *yaml_path,
                                     const char *plugin_dir,
                                     plugin_discovery_result_t *out_result)
 {
-    if (!yaml_path || !out_result) return -1;
+    if (!yaml_path || !out_result) return AGENTRT_ERR_INVALID_PARAM;
 
     __builtin_memset(out_result, 0, sizeof(*out_result));
 
@@ -180,7 +180,7 @@ int plugin_discovery_parse_manifest(const char *yaml_path,
         out_result->valid = false;
         safe_strcpy(out_result->error_reason, "Cannot open manifest file",
                     sizeof(out_result->error_reason));
-        return -1;
+        return AGENTRT_ERR_IO;
     }
 
     char line[512];
@@ -236,7 +236,7 @@ int plugin_discovery_parse_manifest(const char *yaml_path,
                     sizeof(out_result->error_reason));
         AGENTRT_LOG_WARN("PluginDiscovery: invalid manifest '%s': %s",
                          yaml_path, out_result->error_reason);
-        return -1;
+        return AGENTRT_ERR_PARSE_ERROR;
     }
 
     if (out_result->library_path[0] == '\0') {
@@ -244,7 +244,7 @@ int plugin_discovery_parse_manifest(const char *yaml_path,
         safe_strcpy(out_result->error_reason,
                     "Missing required field: library",
                     sizeof(out_result->error_reason));
-        return -1;
+        return AGENTRT_ERR_PARSE_ERROR;
     }
 
     out_result->valid = true;
@@ -262,14 +262,14 @@ int plugin_discovery_parse_manifest(const char *yaml_path,
 int plugin_discovery_scan(plugin_discovery_result_t **out_results,
                           size_t *out_count)
 {
-    if (!out_results || !out_count) return -1;
+    if (!out_results || !out_count) return AGENTRT_ERR_INVALID_PARAM;
 
     *out_results = NULL;
     *out_count = 0;
 
     if (!g_discovery.initialized) {
         AGENTRT_LOG_WARN("PluginDiscovery: not initialized");
-        return -1;
+        return AGENTRT_ERR_SYS_NOT_INIT;
     }
 
     const char *plugins_dir = g_discovery.plugins_dir;
@@ -289,7 +289,7 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results,
     DIR *dir = opendir(plugins_dir);
     if (!dir) {
         AGENTRT_LOG_ERROR("PluginDiscovery: cannot open dir '%s'", plugins_dir);
-        return -1;
+        return AGENTRT_ERR_IO;
     }
 #else
     char win_pattern[PLUGIN_DISCOVERY_MAX_PATH];
@@ -298,7 +298,7 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results,
     HANDLE hFind = FindFirstFileA(win_pattern, &fd);
     if (hFind == INVALID_HANDLE_VALUE) {
         AGENTRT_LOG_ERROR("PluginDiscovery: cannot open dir '%s'", plugins_dir);
-        return -1;
+        return AGENTRT_ERR_IO;
     }
 #endif
 
@@ -312,7 +312,7 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results,
 #else
         FindClose(hFind);
 #endif
-        return -1;
+        return AGENTRT_ERR_OUT_OF_MEMORY;
     }
 
     size_t found = 0;

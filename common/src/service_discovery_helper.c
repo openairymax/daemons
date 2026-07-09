@@ -15,6 +15,7 @@
 
 #include "memory_compat.h"
 #include "daemon_platform_ext.h"
+#include "error.h"
 #include "safe_string_utils.h"
 #include "svc_logger.h"
 
@@ -157,7 +158,7 @@ static void build_instance_id(char *buf, size_t buf_size,
 int sd_helper_register(sd_helper_t *sdh, const char *name, const char *type,
                        const char *host, uint16_t port, const char *tags,
                        uint32_t ttl_ms) {
-    if (!sdh || !name || !type || !host) return -1;
+    if (!sdh || !name || !type || !host) return AGENTRT_ERR_INVALID_PARAM;
 
     char endpoint[SDH_MAX_ENDPOINT_LEN];
     build_endpoint(endpoint, sizeof(endpoint), host, port);
@@ -192,7 +193,7 @@ int sd_helper_register(sd_helper_t *sdh, const char *name, const char *type,
                                       tags ? tags : "", "");
     if (err != AGENTRT_SUCCESS) {
         SVC_LOG_ERROR("Failed to register service '%s' (err=%d)", name, err);
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     /* 保存注册信息 */
@@ -208,7 +209,7 @@ int sd_helper_register(sd_helper_t *sdh, const char *name, const char *type,
 int sd_helper_register_unix(sd_helper_t *sdh, const char *name, const char *type,
                             const char *socket_path, const char *tags,
                             uint32_t ttl_ms) {
-    if (!sdh || !name || !type || !socket_path) return -1;
+    if (!sdh || !name || !type || !socket_path) return AGENTRT_ERR_INVALID_PARAM;
 
     char instance_id[SD_MAX_NAME_LEN];
     uint32_t pid = 0;
@@ -236,7 +237,7 @@ int sd_helper_register_unix(sd_helper_t *sdh, const char *name, const char *type
                                       tags ? tags : "", "");
     if (err != AGENTRT_SUCCESS) {
         SVC_LOG_ERROR("Failed to register Unix service '%s' (err=%d)", name, err);
-        return -1;
+        return AGENTRT_ERR_FAIL;
     }
 
     safe_strcpy(sdh->service_name, name, sizeof(sdh->service_name));
@@ -251,12 +252,12 @@ int sd_helper_register_unix(sd_helper_t *sdh, const char *name, const char *type
 /* ==================== 心跳管理（P1.7.2） ==================== */
 
 int sd_helper_start_heartbeat(sd_helper_t *sdh) {
-    if (!sdh) return -1;
+    if (!sdh) return AGENTRT_ERR_INVALID_PARAM;
     if (sdh->heartbeat_running) return 0; /* 已在运行 */
 
     if (!sdh->registered) {
         SVC_LOG_WARN("Cannot start heartbeat: service not registered");
-        return -1;
+        return AGENTRT_ERR_STATE_ERROR;
     }
 
     sdh->heartbeat_running = true;
@@ -266,7 +267,7 @@ int sd_helper_start_heartbeat(sd_helper_t *sdh) {
                               sd_helper_heartbeat_loop, sdh) != 0) {
         sdh->heartbeat_running = false;
         SVC_LOG_ERROR("Failed to create heartbeat thread");
-        return -1;
+        return AGENTRT_ERR_SYS_THREAD;
     }
 
     SVC_LOG_INFO("Heartbeat started for service '%s'", sdh->service_name);
@@ -287,7 +288,7 @@ void sd_helper_stop_heartbeat(sd_helper_t *sdh) {
 }
 
 int sd_helper_send_heartbeat(sd_helper_t *sdh) {
-    if (!sdh || !sdh->registered) return -1;
+    if (!sdh || !sdh->registered) return AGENTRT_ERR_INVALID_PARAM;
 
     agentrt_error_t err = sd_heartbeat(sdh->sd, sdh->service_name,
                                        sdh->instance_id);
@@ -299,7 +300,7 @@ int sd_helper_send_heartbeat(sd_helper_t *sdh) {
 int sd_helper_find(sd_helper_t *sdh, const char *service_name,
                    sd_instance_t *instances, uint32_t max_count,
                    uint32_t *found_count) {
-    if (!sdh || !service_name || !instances || !found_count) return -1;
+    if (!sdh || !service_name || !instances || !found_count) return AGENTRT_ERR_INVALID_PARAM;
 
     agentrt_error_t err = sd_discover(sdh->sd, service_name,
                                       instances, max_count, found_count);
@@ -318,7 +319,7 @@ int sd_helper_select(sd_helper_t *sdh, const char *service_name,
 int sd_helper_select_with_strategy(sd_helper_t *sdh, const char *service_name,
                                    sd_lb_strategy_t strategy,
                                    sd_instance_t *instance) {
-    if (!sdh || !service_name || !instance) return -1;
+    if (!sdh || !service_name || !instance) return AGENTRT_ERR_INVALID_PARAM;
 
     agentrt_error_t err = sd_select_instance(sdh->sd, service_name,
                                              strategy, instance);

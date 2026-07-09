@@ -96,11 +96,11 @@ static int daemon_oom_on_critical_restore(degradation_handler_t *handler,
 int daemon_oom_register(const daemon_oom_config_t *config)
 {
     if (!config || !config->daemon_name)
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;
 
     if (g_daemons_oom_count >= DAEMON_OOM_MAX_SLOTS) {
         SVC_LOG_ERROR("P1.22: No more daemon OOM slots available");
-        return -1;
+        return AGENTRT_ERR_OVERFLOW;
     }
 
     daemon_oom_ctx_t *ctx = &g_daemons_oom_slots[g_daemons_oom_count];

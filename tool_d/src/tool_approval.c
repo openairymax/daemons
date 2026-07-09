@@ -91,7 +91,7 @@ int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *tool_nam
                                   size_t sanitized_size)
 {
     if (!ctx || !tool_name || !params_json || !sanitized_params || sanitized_size == 0) {
-        return -1;
+        return AGENTRT_ERR_INVALID_PARAM;  /* BAN-073 */
     }
 
     /* 使用 daemon_security 进行参数净化 */
