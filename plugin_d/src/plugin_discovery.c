@@ -316,7 +316,9 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results,
     }
 
     size_t found = 0;
-    int first_entry = 1; /* Windows: FindFirstFile 已获取第一个条目，首次迭代不调 FindNextFile */
+#ifdef _WIN32
+    int first_entry = 1; /* FindFirstFile 已获取第一个条目，首次迭代不调 FindNextFile */
+#endif
 
     while (found < PLUGIN_DISCOVERY_MAX_PLUGINS) {
         const char *d_name;
