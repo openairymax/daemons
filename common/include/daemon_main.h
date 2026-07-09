@@ -110,7 +110,7 @@ extern "C" {
         fputs("\n", stdout);                                                         \
         fputs("Examples:\n", stdout);                                                \
         snprintf(buf, sizeof(buf), "  %s --manager "                                  \
-                 AGENTRT_CONFIG_DIR " \"/" #daemon_name ".yaml\"\n", prog);            \
+                 AGENTRT_CONFIG_DIR "/" #daemon_name ".yaml\n", prog);                  \
         fputs(buf, stdout);                                                          \
         snprintf(buf, sizeof(buf), "  %s --tcp  # TCP mode on port %d\n",             \
                  prog, DEFAULT_TCP_PORT);                                             \
