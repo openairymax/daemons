@@ -310,7 +310,10 @@ static char *handle_complete(cJSON *params, int id)
     AGENTRT_FREE(resp_json);
 
     char *success = jsonrpc_build_success(result, id);
-    /* result 由 CJSON_AUTO_FREE 自动释放 */
+    /* P0.20.8 修复：jsonrpc_build_success 通过 cJSON_AddItemToObject 转移 result 所有权到
+     * root，cJSON_Delete(root) 递归释放了 result。必须置 NULL 防止 CJSON_AUTO_FREE
+     * 清理时 cJSON_Delete(result) double-free。 */
+    result = NULL;
 
     request_context_destroy(ctx);
     return success;

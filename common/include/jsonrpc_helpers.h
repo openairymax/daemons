@@ -86,14 +86,18 @@ AGENTRT_API int jsonrpc_is_batch_request(const char *raw);
 /**
  * @brief 发送 JSON-RPC 成功响应到客户端（自动构建+发送+释放）
  * @param socket 客户端 socket 描述符
- * @param result cJSON 结果对象（函数会自动 Delete）
+ * @param result cJSON 结果对象（所有权转移给 jsonrpc_build_success 内部 root，
+ *                由 cJSON_Delete(root) 递归释放，调用方不可再次释放）
  * @param id 请求 ID
- * @note 替代手动: build_success → send → delete → free 四行组合
+ * @note 替代手动: build_success → send → free 三行组合
+ * @warning jsonrpc_build_success 通过 cJSON_AddItemToObject 将 result 挂到 root 上，
+ *          随后 cJSON_Delete(root) 递归释放了 result。此宏不可再调用 cJSON_Delete(result)，
+ *          否则 double-free。若 result 变量带 CJSON_AUTO_FREE，调用方需在宏后置 result=NULL。
  */
 #define JSONRPC_SEND_SUCCESS(socket, result, id)                       \
     do {                                                               \
         char *_success = jsonrpc_build_success((result), (id));        \
-        cJSON_Delete((result));                                        \
+        /* result 所有权已转移至 jsonrpc_build_success 内部 root 并被释放，不可再 Delete */ \
         if (_success) {                                                \
             agentrt_socket_send((socket), _success, strlen(_success)); \
             AGENTRT_FREE(_success);                                    \
