@@ -10,7 +10,7 @@
  * - ARCHITECTURAL_PRINCIPLES.md E-3 资源确定性(成对管理)
  * - ARCHITECTURAL_PRINCIPLES.md E-4 跨平台一致性(platform.h)
  * - ARCHITECTURAL_PRINCIPLES.md E-5 命名语义化(SVC_LOG_*)
- * - ARCHITECTURAL_PRINCIPLES.md E-6 错误可追溯(AGENTRT_ERR_*)
+ * - ARCHITECTURAL_PRINCIPLES.md E-6 错误可追溯(AIRY_ERR_*)
  */
 
 #include "atomic_compat.h"
@@ -26,7 +26,7 @@
 #include "svc_logger.h"
 #include "error.h"
 
-#ifdef AGENTRT_HAS_PROTOCOLS
+#ifdef AIRY_HAS_PROTOCOLS
 #include "a2a_v03_adapter.h"
 #include "mcp_v1_adapter.h"
 #include "openai_enterprise_adapter.h"
@@ -45,7 +45,7 @@
 
 static gateway_service_t g_service = NULL;
 static atomic_int g_running = 1;
-static agentrt_mutex_t g_running_lock;
+static airy_mtx_t g_running_lock;
 static daemon_bootstrap_sd_t *g_bsd = NULL;
 static daemon_bootstrap_ipc_t *g_bipc = NULL;
 static gw_forward_t *g_forward = NULL; /* C-L11: 协议转发器 */
@@ -57,9 +57,9 @@ static gw_forward_t *g_forward = NULL; /* C-L11: 协议转发器 */
  */
 static void signal_handler(int sig __attribute__((unused)))
 {
-    agentrt_mutex_lock(&g_running_lock);
+    airy_mtx_lock(&g_running_lock);
     atomic_store_explicit(&g_running, 0, memory_order_seq_cst);
-    agentrt_mutex_unlock(&g_running_lock);
+    airy_mtx_unlock(&g_running_lock);
 
     if (g_service) {
         gateway_service_stop(g_service, false);
@@ -112,7 +112,7 @@ static void print_usage(const char *prog)
     fputs("\nExamples:\n", stdout);
     snprintf(buf, sizeof(buf), "  %s -h 127.0.0.1 -p 8080\n", prog);
     fputs(buf, stdout);
-    snprintf(buf, sizeof(buf), "  %s -c AGENTRT_CONFIG_DIR \"/gateway.conf\"\n", prog);
+    snprintf(buf, sizeof(buf), "  %s -c AIRY_CONFIG_DIR \"/gateway.conf\"\n", prog);
     fputs(buf, stdout);
 }
 
@@ -127,10 +127,10 @@ static int parse_args(int argc, char *argv[], gateway_service_config_t *config)
             print_usage(argv[0]);
             exit(0);
         } else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
-            agentrt_error_t err = gateway_service_load_config(config, argv[++i]);
-            if (err != AGENTRT_SUCCESS) {
+            airy_err_t err = gateway_service_load_config(config, argv[++i]);
+            if (err != AIRY_SUCCESS) {
                 SVC_LOG_ERROR("Failed to load config: %s", argv[i]);
-                AGENTRT_ERROR(AGENTRT_ERR_IO, "failed to load config file");
+                AIRY_ERROR(AIRY_ERR_IO, "failed to load config file");
             }
         } else if (strcmp(argv[i], "-h") == 0 && i + 1 < argc) {
             config->http.host = argv[++i];
@@ -149,7 +149,7 @@ static int parse_args(int argc, char *argv[], gateway_service_config_t *config)
             pid_t pid = fork();
             if (pid < 0) {
                 SVC_LOG_ERROR("Failed to fork");
-                AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "fork failed when daemonizing");
+                AIRY_ERROR(AIRY_ERR_UNKNOWN, "fork failed when daemonizing");
             }
             if (pid > 0)
                 exit(0);
@@ -167,7 +167,7 @@ static int parse_args(int argc, char *argv[], gateway_service_config_t *config)
 #endif
         } else {
             SVC_LOG_ERROR("Unknown option: %s", argv[i]);
-            AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "unknown option");
+            AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "unknown option");
         }
     }
     return 0;
@@ -180,8 +180,8 @@ int main(int argc, char *argv[])
     gateway_service_config_t config;
 
     /* E-3 资源确定性: 初始化与清理成对 */
-    agentrt_socket_init();
-    agentrt_mutex_init(&g_running_lock);
+    airy_sock_init();
+    airy_mtx_init(&g_running_lock);
 
     /* 跨平台信号处理 */
 #ifdef _WIN32
@@ -194,34 +194,34 @@ int main(int argc, char *argv[])
     signal(SIGUSR1, svc_log_toggle_handler);
 #endif
 
-    agentrt_log_init(NULL);
+    airy_log_init(NULL);
     atexit(log_cleanup);
 
     /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("gateway_d");
 
     if (parse_args(argc, argv, &config) != 0) {
-        agentrt_mutex_destroy(&g_running_lock);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock);
+        airy_sock_cleanup();
         return 1;
     }
 
     SVC_LOG_INFO("Gateway service starting...");
 
-    agentrt_error_t err = gateway_service_create(&g_service, &config);
-    if (err != AGENTRT_SUCCESS) {
+    airy_err_t err = gateway_service_create(&g_service, &config);
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to create service (err=%d)", err);
         goto cleanup;
     }
 
     err = gateway_service_init(g_service);
-    if (err != AGENTRT_SUCCESS) {
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to init service (err=%d)", err);
         goto cleanup_service;
     }
 
     /* Initialize UnifiedProtocol stack for multi-protocol support */
-#ifdef AGENTRT_HAS_PROTOCOLS
+#ifdef AIRY_HAS_PROTOCOLS
     const protocol_adapter_t *mcp_adapter = mcp_v1_get_adapter();
     if (mcp_adapter) {
         if (mcp_adapter->init(mcp_adapter->context) == 0) {
@@ -249,7 +249,7 @@ int main(int argc, char *argv[])
     }
 
     err = gateway_service_start(g_service);
-    if (err != AGENTRT_SUCCESS) {
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to start service (err=%d)", err);
         goto cleanup_service;
     }
@@ -276,12 +276,12 @@ int main(int argc, char *argv[])
             break;
         }
 
-        agentrt_sleep_ms(1000);
+        airy_sleep_ms(1000);
         loop_count++;
 
         if (config.enable_metrics && (loop_count % HEALTH_CHECK_INTERVAL == 0)) {
-            agentrt_svc_stats_t stats;
-            if (gateway_service_get_stats(g_service, &stats) == AGENTRT_SUCCESS) {
+            airy_svc_stats_t stats;
+            if (gateway_service_get_stats(g_service, &stats) == AIRY_SUCCESS) {
                 SVC_LOG_INFO("Health Check [interval=%ds] "
                              "| concurrent=%u | total_req=%llu "
                              "| errors=%llu | avg_time=%.1fms",
@@ -325,7 +325,7 @@ int main(int argc, char *argv[])
     gateway_service_stop(g_service, false);
 
     /* Cleanup protocol stack */
-#ifdef AGENTRT_HAS_PROTOCOLS
+#ifdef AIRY_HAS_PROTOCOLS
     {
         const protocol_adapter_t *mcp_adapter = mcp_v1_get_adapter();
         if (mcp_adapter && mcp_adapter->destroy) {
@@ -338,8 +338,8 @@ int main(int argc, char *argv[])
 cleanup_service:
     gateway_service_destroy(g_service);
 cleanup:
-    agentrt_mutex_destroy(&g_running_lock);
-    agentrt_socket_cleanup();
+    airy_mtx_destroy(&g_running_lock);
+    airy_sock_cleanup();
 
     SVC_LOG_INFO("Gateway daemon stopped");
     daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */

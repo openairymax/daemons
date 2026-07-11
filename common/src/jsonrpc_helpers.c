@@ -25,7 +25,7 @@ char *jsonrpc_build_error(int code, const char *message, int id)
 
     cJSON *root = cJSON_CreateObject();
     if (!root) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_OUT_OF_MEMORY, "cJSON_CreateObject failed");
+        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "cJSON_CreateObject failed");
     }
 
     cJSON_AddStringToObject(root, "jsonrpc", "2.0");
@@ -67,7 +67,7 @@ char *jsonrpc_build_success_string(const char *result_str, int id)
 int jsonrpc_parse_request(const char *raw, char **out_method, cJSON **out_params, int *out_id)
 {
     if (!raw || !out_method || !out_params || !out_id)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     *out_method = NULL;
     *out_params = NULL;
@@ -83,7 +83,7 @@ int jsonrpc_parse_request(const char *raw, char **out_method, cJSON **out_params
 
     cJSON *method_obj = cJSON_GetObjectItem(req, "method");
     if (method_obj && cJSON_IsString(method_obj)) {
-        *out_method = AGENTRT_STRDUP(method_obj->valuestring);
+        *out_method = AIRY_STRDUP(method_obj->valuestring);
     }
 
     cJSON *params_obj = cJSON_GetObjectItem(req, "params");
@@ -103,7 +103,7 @@ int jsonrpc_parse_request(const char *raw, char **out_method, cJSON **out_params
 int jsonrpc_parse_request_ptr(cJSON *req, char **out_method, cJSON **out_params, int *out_id)
 {
     if (!req || !out_method || !out_params || !out_id)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     *out_method = NULL;
     *out_params = NULL;
@@ -114,7 +114,7 @@ int jsonrpc_parse_request_ptr(cJSON *req, char **out_method, cJSON **out_params,
 
     cJSON *method_obj = cJSON_GetObjectItem(req, "method");
     if (method_obj && cJSON_IsString(method_obj)) {
-        *out_method = AGENTRT_STRDUP(method_obj->valuestring);
+        *out_method = AIRY_STRDUP(method_obj->valuestring);
     }
 
     cJSON *params_obj = cJSON_GetObjectItem(req, "params");
@@ -133,15 +133,15 @@ int jsonrpc_parse_request_ptr(cJSON *req, char **out_method, cJSON **out_params,
 int jsonrpc_validate_request(cJSON *req)
 {
     if (!req)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");
     if (!jsonrpc || !cJSON_IsString(jsonrpc) || strcmp(jsonrpc->valuestring, "2.0") != 0)
-        return AGENTRT_ERR_PARSE_ERROR;
+        return AIRY_ERR_PARSE_ERROR;
 
     cJSON *method = cJSON_GetObjectItem(req, "method");
     if (!method || !cJSON_IsString(method))
-        return AGENTRT_ERR_PARSE_ERROR;
+        return AIRY_ERR_PARSE_ERROR;
 
     return 0;
 }
@@ -179,11 +179,11 @@ int jsonrpc_get_bool_param(cJSON *params, const char *key, int default_value)
 cJSON *jsonrpc_get_array_param(cJSON *params, const char *key)
 {
     if (!params || !key) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "jsonrpc_get_array_param: null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "jsonrpc_get_array_param: null parameter");
     }
     cJSON *item = cJSON_GetObjectItem(params, key);
     if (!item || !cJSON_IsArray(item)) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "jsonrpc_get_array_param: not an array");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "jsonrpc_get_array_param: not an array");
     }
     return item;
 }
@@ -191,11 +191,11 @@ cJSON *jsonrpc_get_array_param(cJSON *params, const char *key)
 cJSON *jsonrpc_get_object_param(cJSON *params, const char *key)
 {
     if (!params || !key) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "jsonrpc_get_object_param: null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "jsonrpc_get_object_param: null parameter");
     }
     cJSON *item = cJSON_GetObjectItem(params, key);
     if (!item || !cJSON_IsObject(item)) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "jsonrpc_get_object_param: not an object");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "jsonrpc_get_object_param: not an object");
     }
     return item;
 }
@@ -213,7 +213,7 @@ char *jsonrpc_build_notification(const char *method, cJSON *params)
     if (!method) {
         if (params)
             cJSON_Delete(params);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     cJSON *root = cJSON_CreateObject();

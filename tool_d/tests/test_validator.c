@@ -36,7 +36,7 @@ static void test_validator_string_type(void)
     assert(validator != NULL);
 
     tool_metadata_t meta;
-    AGENTRT_MEMSET(&meta, 0, sizeof(meta));
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "string_tool";
     meta.name = "String Tool";
     meta.executable = "/usr/bin/echo";
@@ -63,7 +63,7 @@ static void test_validator_number_type(void)
     assert(validator != NULL);
 
     tool_metadata_t meta;
-    AGENTRT_MEMSET(&meta, 0, sizeof(meta));
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "number_tool";
     meta.name = "Number Tool";
     meta.executable = "/usr/bin/echo";
@@ -90,7 +90,7 @@ static void test_validator_object_type(void)
     assert(validator != NULL);
 
     tool_metadata_t meta;
-    AGENTRT_MEMSET(&meta, 0, sizeof(meta));
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "object_tool";
     meta.name = "Object Tool";
     meta.executable = "/usr/bin/echo";

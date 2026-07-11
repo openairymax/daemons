@@ -8,8 +8,8 @@
  * IMP-08: 统一通道服务，支持 SOCKET/SHM 通道类型
  */
 
-#ifndef AGENTRT_CHANNEL_SERVICE_H
-#define AGENTRT_CHANNEL_SERVICE_H
+#ifndef AIRY_RT_CHANNEL_SERVICE_H
+#define AIRY_RT_CHANNEL_SERVICE_H
 
 #include "daemon_platform_ext.h"
 
@@ -71,7 +71,7 @@ typedef struct {
 #define CHANNEL_CONFIG_DEFAULTS                                                                    \
     {                                                                                              \
         .max_channels = CHANNEL_MAX_CHANNELS, .default_buffer_size = 65536, .socket_backlog = 128, \
-        .socket_dir = AGENTRT_TMP_DIR "/channels", .shm_prefix = "/agentrt_ch_",                   \
+        .socket_dir = AIRY_TMP_DIR "/channels", .shm_prefix = "/airy_ch_",                   \
         .idle_timeout_ms = 30000                                                                   \
     }
 
@@ -112,4 +112,4 @@ bool channel_service_is_healthy(channel_service_t *svc);
 }
 #endif
 
-#endif /* AGENTRT_CHANNEL_SERVICE_H */
+#endif /* AIRY_RT_CHANNEL_SERVICE_H */

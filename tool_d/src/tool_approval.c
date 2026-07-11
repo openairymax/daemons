@@ -32,9 +32,9 @@ struct tool_approval_ctx {
 tool_approval_ctx_t *tool_approval_create(const tool_approval_config_t *cfg)
 {
     tool_approval_ctx_t *ctx =
-        (tool_approval_ctx_t *)AGENTRT_CALLOC(1, sizeof(tool_approval_ctx_t));
+        (tool_approval_ctx_t *)AIRY_CALLOC(1, sizeof(tool_approval_ctx_t));
     if (!ctx) {
-        AGENTRT_LOG_ERROR("tool_approval_create: alloc failed");
+        AIRY_LOG_ERROR("tool_approval_create: alloc failed");
         return NULL;
     }
 
@@ -56,7 +56,7 @@ tool_approval_ctx_t *tool_approval_create(const tool_approval_config_t *cfg)
     ctx->sanitized_count = 0;
     ctx->bridge = NULL;
 
-    AGENTRT_LOG_INFO("C-L05: Tool approval context created (safety_guard=%d, audit=%d)",
+    AIRY_LOG_INFO("C-L05: Tool approval context created (safety_guard=%d, audit=%d)",
                      ctx->config.enable_safety_guard_chain,
                      ctx->config.enable_audit_logging);
     return ctx;
@@ -66,11 +66,11 @@ void tool_approval_destroy(tool_approval_ctx_t *ctx)
 {
     if (!ctx)
         return;
-    AGENTRT_LOG_INFO("C-L05: Tool approval destroyed (checks=%llu denied=%llu sanitized=%llu)",
+    AIRY_LOG_INFO("C-L05: Tool approval destroyed (checks=%llu denied=%llu sanitized=%llu)",
                      (unsigned long long)ctx->total_checks,
                      (unsigned long long)ctx->denied_count,
                      (unsigned long long)ctx->sanitized_count);
-    AGENTRT_FREE(ctx);
+    AIRY_FREE(ctx);
 }
 
 /* C-L05: 设置 SafetyGuard 桥接层 */
@@ -80,9 +80,9 @@ void tool_approval_set_safety_guard_bridge(tool_approval_ctx_t *ctx,
     if (!ctx) return;
     ctx->bridge = bridge;
     if (bridge) {
-        AGENTRT_LOG_INFO("C-L05: SafetyGuard bridge attached to approval context");
+        AIRY_LOG_INFO("C-L05: SafetyGuard bridge attached to approval context");
     } else {
-        AGENTRT_LOG_INFO("C-L05: SafetyGuard bridge detached from approval context");
+        AIRY_LOG_INFO("C-L05: SafetyGuard bridge detached from approval context");
     }
 }
 
@@ -91,7 +91,7 @@ int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *tool_nam
                                   size_t sanitized_size)
 {
     if (!ctx || !tool_name || !params_json || !sanitized_params || sanitized_size == 0) {
-        return AGENTRT_ERR_INVALID_PARAM;  /* BAN-073 */
+        return AIRY_ERR_INVALID_PARAM;  /* BAN-073 */
     }
 
     /* 使用 daemon_security 进行参数净化 */
@@ -102,11 +102,11 @@ int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *tool_nam
     if (ret == 0) {
         /* 检查参数是否被修改 */
         if (strcmp(params_json, sanitized_params) != 0) {
-            AGENTRT_LOG_INFO("C-L05: Tool params sanitized for '%s'", tool_name);
+            AIRY_LOG_INFO("C-L05: Tool params sanitized for '%s'", tool_name);
             ctx->sanitized_count++;
         }
     } else {
-        AGENTRT_LOG_WARN("C-L05: Tool param sanitization failed for '%s': ret=%d", tool_name, ret);
+        AIRY_LOG_WARN("C-L05: Tool param sanitization failed for '%s': ret=%d", tool_name, ret);
     }
 
     return ret;
@@ -116,7 +116,7 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
                         const char *params_json, tool_approval_detail_t *detail)
 {
     if (!ctx || !meta) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     /* 初始化详情 */
@@ -141,7 +141,7 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
 
         if (bridge_ret != 0) {
             /* 守卫链拒绝 */
-            AGENTRT_LOG_WARN("C-L05: SafetyGuard bridge denied '%s' for '%s': %s",
+            AIRY_LOG_WARN("C-L05: SafetyGuard bridge denied '%s' for '%s': %s",
                              tool_name, agent_id, bridge_result.denial_reason);
             if (detail) {
                 detail->decision = TOOL_APPROVAL_DENIED;
@@ -167,7 +167,7 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
                                        tool_name, 0, agent_id);
             }
 
-            return AGENTRT_ERR_PERMISSION_DENIED;
+            return AIRY_ERR_PERMISSION_DENIED;
         }
 
         /* 守卫链全部通过 */
@@ -190,7 +190,7 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
                      bridge_result.guard_chain_length, tool_name);
         }
 
-        AGENTRT_LOG_INFO("C-L05: SafetyGuard bridge approved '%s' "
+        AIRY_LOG_INFO("C-L05: SafetyGuard bridge approved '%s' "
                          "(%d/%d guards executed)",
                          tool_name, bridge_result.guards_executed,
                          bridge_result.guard_chain_length);
@@ -227,7 +227,7 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
      * 修正为 `if (perm_ret != 0)` 与 safety_guard_bridge.c L218 保持一致。*/
     int perm_ret = daemon_check_tool_permission(agent_id, tool_name, "execute");
     if (perm_ret != 0) {
-        AGENTRT_LOG_WARN("C-L05: Permission denied for agent='%s' tool='%s' (perm_ret=%d)",
+        AIRY_LOG_WARN("C-L05: Permission denied for agent='%s' tool='%s' (perm_ret=%d)",
                          agent_id, tool_name, perm_ret);
         if (detail) {
             detail->permission_check_passed = 0;
@@ -241,7 +241,7 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
             daemon_audit_log_event("tool_d", "tool_execute_denied",
                                    tool_name, 0, agent_id);
         }
-        return AGENTRT_ERR_PERMISSION_DENIED;
+        return AIRY_ERR_PERMISSION_DENIED;
     }
 
     if (detail) {

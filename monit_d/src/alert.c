@@ -115,17 +115,17 @@ static struct {
     size_t suppression_count;
     grouped_alert_t history[MAX_ALERT_HISTORY];
     size_t history_count;
-    agentrt_mutex_t lock;
+    airy_mtx_t lock;
     int initialized;
 } g_alert_mgr = {0};
 
 int alert_system_init(void)
 {
     if (g_alert_mgr.initialized) {
-        return AGENTRT_SUCCESS;
+        return AIRY_SUCCESS;
     }
 
-    agentrt_mutex_init(&g_alert_mgr.lock);
+    airy_mtx_init(&g_alert_mgr.lock);
     g_alert_mgr.rule_count = 0;
     g_alert_mgr.channel_count = 0;
     g_alert_mgr.suppression_count = 0;
@@ -133,7 +133,7 @@ int alert_system_init(void)
     g_alert_mgr.initialized = 1;
 
     SVC_LOG_INFO("Alert system initialized");
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 void alert_system_shutdown(void)
@@ -142,23 +142,23 @@ void alert_system_shutdown(void)
         return;
     }
 
-    agentrt_mutex_lock(&g_alert_mgr.lock);
+    airy_mtx_lock(&g_alert_mgr.lock);
 
     for (size_t i = 0; i < g_alert_mgr.rule_count; i++) {
-        AGENTRT_FREE(g_alert_mgr.rules[i].rule.threshold.rule_id);
-        AGENTRT_FREE(g_alert_mgr.rules[i].rule.threshold.metric_name);
-        AGENTRT_FREE(g_alert_mgr.rules[i].rule.threshold.message_template);
+        AIRY_FREE(g_alert_mgr.rules[i].rule.threshold.rule_id);
+        AIRY_FREE(g_alert_mgr.rules[i].rule.threshold.metric_name);
+        AIRY_FREE(g_alert_mgr.rules[i].rule.threshold.message_template);
     }
 
     for (size_t i = 0; i < g_alert_mgr.history_count; i++) {
-        AGENTRT_FREE(g_alert_mgr.history[i].alert.alert_id);
-        AGENTRT_FREE(g_alert_mgr.history[i].alert.message);
-        AGENTRT_FREE(g_alert_mgr.history[i].alert.service_name);
-        AGENTRT_FREE(g_alert_mgr.history[i].alert.resource_id);
+        AIRY_FREE(g_alert_mgr.history[i].alert.alert_id);
+        AIRY_FREE(g_alert_mgr.history[i].alert.message);
+        AIRY_FREE(g_alert_mgr.history[i].alert.service_name);
+        AIRY_FREE(g_alert_mgr.history[i].alert.resource_id);
     }
 
     for (size_t i = 0; i < g_alert_mgr.suppression_count; i++) {
-        AGENTRT_FREE(g_alert_mgr.suppressions[i].group_key_pattern);
+        AIRY_FREE(g_alert_mgr.suppressions[i].group_key_pattern);
     }
 
     g_alert_mgr.rule_count = 0;
@@ -167,8 +167,8 @@ void alert_system_shutdown(void)
     g_alert_mgr.history_count = 0;
     g_alert_mgr.initialized = 0;
 
-    agentrt_mutex_unlock(&g_alert_mgr.lock);
-    agentrt_mutex_destroy(&g_alert_mgr.lock);
+    airy_mtx_unlock(&g_alert_mgr.lock);
+    airy_mtx_destroy(&g_alert_mgr.lock);
 }
 
 int alert_add_threshold_rule(const char *rule_id, const char *metric_name, comparison_op_t op,
@@ -176,46 +176,46 @@ int alert_add_threshold_rule(const char *rule_id, const char *metric_name, compa
                              uint32_t consecutive_count)
 {
     if (!rule_id || !metric_name) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (!g_alert_mgr.initialized) {
         alert_system_init();
     }
 
-    agentrt_mutex_lock(&g_alert_mgr.lock);
+    airy_mtx_lock(&g_alert_mgr.lock);
 
     if (g_alert_mgr.rule_count >= MAX_RULES) {
-        agentrt_mutex_unlock(&g_alert_mgr.lock);
-        return AGENTRT_ERR_OVERFLOW;
+        airy_mtx_unlock(&g_alert_mgr.lock);
+        return AIRY_ERR_OVERFLOW;
     }
 
     alert_rule_t *rule = &g_alert_mgr.rules[g_alert_mgr.rule_count];
     rule->type = ALERT_RULE_THRESHOLD;
-    rule->rule.threshold.rule_id = AGENTRT_STRDUP(rule_id);
+    rule->rule.threshold.rule_id = AIRY_STRDUP(rule_id);
     if (!rule->rule.threshold.rule_id) {
-        agentrt_mutex_unlock(&g_alert_mgr.lock);
+        airy_mtx_unlock(&g_alert_mgr.lock);
         SVC_LOG_ERROR("Failed to duplicate rule_id: out of memory");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
-    rule->rule.threshold.metric_name = AGENTRT_STRDUP(metric_name);
+    rule->rule.threshold.metric_name = AIRY_STRDUP(metric_name);
     if (!rule->rule.threshold.metric_name) {
-        AGENTRT_FREE(rule->rule.threshold.rule_id);
-        agentrt_mutex_unlock(&g_alert_mgr.lock);
+        AIRY_FREE(rule->rule.threshold.rule_id);
+        airy_mtx_unlock(&g_alert_mgr.lock);
         SVC_LOG_ERROR("Failed to duplicate metric_name: out of memory");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
     rule->rule.threshold.op = op;
     rule->rule.threshold.threshold = threshold;
     rule->rule.threshold.level = level;
     rule->rule.threshold.message_template =
-        message_template ? AGENTRT_STRDUP(message_template) : NULL;
+        message_template ? AIRY_STRDUP(message_template) : NULL;
     if (message_template && !rule->rule.threshold.message_template) {
-        AGENTRT_FREE(rule->rule.threshold.metric_name);
-        AGENTRT_FREE(rule->rule.threshold.rule_id);
-        agentrt_mutex_unlock(&g_alert_mgr.lock);
+        AIRY_FREE(rule->rule.threshold.metric_name);
+        AIRY_FREE(rule->rule.threshold.rule_id);
+        airy_mtx_unlock(&g_alert_mgr.lock);
         SVC_LOG_ERROR("Failed to duplicate message_template: out of memory");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
     rule->rule.threshold.evaluation_interval_ms = 10000;
     rule->rule.threshold.consecutive_count = consecutive_count > 0 ? consecutive_count : 1;
@@ -223,29 +223,29 @@ int alert_add_threshold_rule(const char *rule_id, const char *metric_name, compa
     rule->rule.threshold.enabled = true;
     g_alert_mgr.rule_count++;
 
-    agentrt_mutex_unlock(&g_alert_mgr.lock);
+    airy_mtx_unlock(&g_alert_mgr.lock);
 
     SVC_LOG_INFO("Alert threshold rule added: %s (metric=%s, threshold=%.2f)", rule_id, metric_name,
                  threshold);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int alert_add_notification_channel(void (*callback)(const alert_info_t *, void *), void *user_data,
                                    alert_level_t min_level)
 {
     if (!callback) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (!g_alert_mgr.initialized) {
         alert_system_init();
     }
 
-    agentrt_mutex_lock(&g_alert_mgr.lock);
+    airy_mtx_lock(&g_alert_mgr.lock);
 
     if (g_alert_mgr.channel_count >= MAX_NOTIFICATION_CHANNELS) {
-        agentrt_mutex_unlock(&g_alert_mgr.lock);
-        return AGENTRT_ERR_OVERFLOW;
+        airy_mtx_unlock(&g_alert_mgr.lock);
+        return AIRY_ERR_OVERFLOW;
     }
 
     notification_channel_t *ch = &g_alert_mgr.channels[g_alert_mgr.channel_count];
@@ -256,8 +256,8 @@ int alert_add_notification_channel(void (*callback)(const alert_info_t *, void *
     ch->enabled = true;
     g_alert_mgr.channel_count++;
 
-    agentrt_mutex_unlock(&g_alert_mgr.lock);
-    return AGENTRT_SUCCESS;
+    airy_mtx_unlock(&g_alert_mgr.lock);
+    return AIRY_SUCCESS;
 }
 
 static bool check_suppression(const alert_info_t *alert)
@@ -313,10 +313,10 @@ static void notify_channels(const alert_info_t *alert)
 static void add_to_history(const alert_info_t *alert)
 {
     if (g_alert_mgr.history_count >= MAX_ALERT_HISTORY) {
-        AGENTRT_FREE(g_alert_mgr.history[0].alert.alert_id);
-        AGENTRT_FREE(g_alert_mgr.history[0].alert.message);
-        AGENTRT_FREE(g_alert_mgr.history[0].alert.service_name);
-        AGENTRT_FREE(g_alert_mgr.history[0].alert.resource_id);
+        AIRY_FREE(g_alert_mgr.history[0].alert.alert_id);
+        AIRY_FREE(g_alert_mgr.history[0].alert.message);
+        AIRY_FREE(g_alert_mgr.history[0].alert.service_name);
+        AIRY_FREE(g_alert_mgr.history[0].alert.resource_id);
         __builtin_memmove(&g_alert_mgr.history[0], &g_alert_mgr.history[1],
                 (g_alert_mgr.history_count - 1) * sizeof(grouped_alert_t));
         g_alert_mgr.history_count--;
@@ -325,30 +325,30 @@ static void add_to_history(const alert_info_t *alert)
     grouped_alert_t *entry = &g_alert_mgr.history[g_alert_mgr.history_count];
     __builtin_memset(entry, 0, sizeof(grouped_alert_t));
 
-    entry->alert.alert_id = alert->alert_id ? AGENTRT_STRDUP(alert->alert_id) : NULL;
+    entry->alert.alert_id = alert->alert_id ? AIRY_STRDUP(alert->alert_id) : NULL;
     if (alert->alert_id && !entry->alert.alert_id) {
         SVC_LOG_ERROR("Failed to duplicate alert_id: out of memory");
         return;
     }
-    entry->alert.message = alert->message ? AGENTRT_STRDUP(alert->message) : NULL;
+    entry->alert.message = alert->message ? AIRY_STRDUP(alert->message) : NULL;
     if (alert->message && !entry->alert.message) {
-        AGENTRT_FREE(entry->alert.alert_id);
+        AIRY_FREE(entry->alert.alert_id);
         SVC_LOG_ERROR("Failed to duplicate alert message: out of memory");
         return;
     }
     entry->alert.level = alert->level;
-    entry->alert.service_name = alert->service_name ? AGENTRT_STRDUP(alert->service_name) : NULL;
+    entry->alert.service_name = alert->service_name ? AIRY_STRDUP(alert->service_name) : NULL;
     if (alert->service_name && !entry->alert.service_name) {
-        AGENTRT_FREE(entry->alert.message);
-        AGENTRT_FREE(entry->alert.alert_id);
+        AIRY_FREE(entry->alert.message);
+        AIRY_FREE(entry->alert.alert_id);
         SVC_LOG_ERROR("Failed to duplicate alert service_name: out of memory");
         return;
     }
-    entry->alert.resource_id = alert->resource_id ? AGENTRT_STRDUP(alert->resource_id) : NULL;
+    entry->alert.resource_id = alert->resource_id ? AIRY_STRDUP(alert->resource_id) : NULL;
     if (alert->resource_id && !entry->alert.resource_id) {
-        AGENTRT_FREE(entry->alert.service_name);
-        AGENTRT_FREE(entry->alert.message);
-        AGENTRT_FREE(entry->alert.alert_id);
+        AIRY_FREE(entry->alert.service_name);
+        AIRY_FREE(entry->alert.message);
+        AIRY_FREE(entry->alert.alert_id);
         SVC_LOG_ERROR("Failed to duplicate alert resource_id: out of memory");
         return;
     }
@@ -368,10 +368,10 @@ static void add_to_history(const alert_info_t *alert)
 int alert_evaluate_metric(const char *metric_name, double value)
 {
     if (!metric_name || !g_alert_mgr.initialized) {
-        return AGENTRT_SUCCESS;
+        return AIRY_SUCCESS;
     }
 
-    agentrt_mutex_lock(&g_alert_mgr.lock);
+    airy_mtx_lock(&g_alert_mgr.lock);
 
     for (size_t i = 0; i < g_alert_mgr.rule_count; i++) {
         alert_rule_t *rule = &g_alert_mgr.rules[i];
@@ -441,30 +441,30 @@ int alert_evaluate_metric(const char *metric_name, double value)
         }
     }
 
-    agentrt_mutex_unlock(&g_alert_mgr.lock);
-    return AGENTRT_SUCCESS;
+    airy_mtx_unlock(&g_alert_mgr.lock);
+    return AIRY_SUCCESS;
 }
 
 int alert_resolve(const char *alert_id)
 {
     if (!alert_id || !g_alert_mgr.initialized) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&g_alert_mgr.lock);
+    airy_mtx_lock(&g_alert_mgr.lock);
 
     for (size_t i = 0; i < g_alert_mgr.history_count; i++) {
         if (g_alert_mgr.history[i].alert.alert_id &&
             strcmp(g_alert_mgr.history[i].alert.alert_id, alert_id) == 0) {
             g_alert_mgr.history[i].alert.is_resolved = true;
-            agentrt_mutex_unlock(&g_alert_mgr.lock);
+            airy_mtx_unlock(&g_alert_mgr.lock);
             SVC_LOG_INFO("Alert resolved: %s", alert_id);
-            return AGENTRT_SUCCESS;
+            return AIRY_SUCCESS;
         }
     }
 
-    agentrt_mutex_unlock(&g_alert_mgr.lock);
-    return AGENTRT_ERR_NOT_FOUND;
+    airy_mtx_unlock(&g_alert_mgr.lock);
+    return AIRY_ERR_NOT_FOUND;
 }
 
 size_t alert_get_unresolved_count(void)
@@ -473,12 +473,12 @@ size_t alert_get_unresolved_count(void)
         return 0;
 
     size_t count = 0;
-    agentrt_mutex_lock(&g_alert_mgr.lock);
+    airy_mtx_lock(&g_alert_mgr.lock);
     for (size_t i = 0; i < g_alert_mgr.history_count; i++) {
         if (!g_alert_mgr.history[i].alert.is_resolved)
             count++;
     }
-    agentrt_mutex_unlock(&g_alert_mgr.lock);
+    airy_mtx_unlock(&g_alert_mgr.lock);
     return count;
 }
 
@@ -488,11 +488,11 @@ size_t alert_get_count_by_level(alert_level_t level)
         return 0;
 
     size_t count = 0;
-    agentrt_mutex_lock(&g_alert_mgr.lock);
+    airy_mtx_lock(&g_alert_mgr.lock);
     for (size_t i = 0; i < g_alert_mgr.history_count; i++) {
         if (g_alert_mgr.history[i].alert.level == level)
             count++;
     }
-    agentrt_mutex_unlock(&g_alert_mgr.lock);
+    airy_mtx_unlock(&g_alert_mgr.lock);
     return count;
 }

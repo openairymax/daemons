@@ -26,7 +26,7 @@
 
 #include "channel_service.h"
 #include "daemon_platform_ext.h"
-#define TEST_SOCKET_DIR AGENTRT_TMP_DIR "/channel_e2e_test"
+#define TEST_SOCKET_DIR AIRY_TMP_DIR "/channel_e2e_test"
 #define TEST_CHANNEL_ID "e2e_test_ch_001"
 #define TEST_CHANNEL_NAME "E2E-TestChannel"
 #define TEST_DATA_PAYLOAD "Hello from E2E test! This is a payload for latency measurement."
@@ -71,7 +71,7 @@ static void test_lifecycle_start_stop(void **state)
 {
     (void)state;
     channel_config_t config = CHANNEL_CONFIG_DEFAULTS;
-    AGENTRT_STRNCPY_TERM(config.socket_dir, TEST_SOCKET_DIR, sizeof(config.socket_dir));
+    AIRY_STRNCPY_TERM(config.socket_dir, TEST_SOCKET_DIR, sizeof(config.socket_dir));
     config.max_channels = 16;
 
     channel_service_t *svc = channel_service_create(&config);
@@ -91,7 +91,7 @@ static void test_lifecycle_double_start(void **state)
 {
     (void)state;
     channel_config_t config = CHANNEL_CONFIG_DEFAULTS;
-    AGENTRT_STRNCPY_TERM(config.socket_dir, TEST_SOCKET_DIR, sizeof(config.socket_dir));
+    AIRY_STRNCPY_TERM(config.socket_dir, TEST_SOCKET_DIR, sizeof(config.socket_dir));
 
     channel_service_t *svc = channel_service_create(&config);
     assert_int_equal(channel_service_start(svc), 0);
@@ -128,7 +128,7 @@ static void test_channel_open_close_socket(void **state)
     (void)state;
     cleanup_test_dir();
     channel_config_t config = CHANNEL_CONFIG_DEFAULTS;
-    AGENTRT_STRNCPY_TERM(config.socket_dir, TEST_SOCKET_DIR, sizeof(config.socket_dir));
+    AIRY_STRNCPY_TERM(config.socket_dir, TEST_SOCKET_DIR, sizeof(config.socket_dir));
     config.max_channels = 16;
 
     channel_service_t *svc = channel_service_create(&config);
@@ -192,7 +192,7 @@ static void test_channel_duplicate_id(void **state)
     (void)state;
     cleanup_test_dir();
     channel_config_t config = CHANNEL_CONFIG_DEFAULTS;
-    AGENTRT_STRNCPY_TERM(config.socket_dir, TEST_SOCKET_DIR, sizeof(config.socket_dir));
+    AIRY_STRNCPY_TERM(config.socket_dir, TEST_SOCKET_DIR, sizeof(config.socket_dir));
     config.max_channels = 16;
 
     channel_service_t *svc = channel_service_create(&config);
@@ -216,7 +216,7 @@ static void test_send_receive_socket_roundtrip(void **state)
 {
     (void)state;
     channel_config_t config = CHANNEL_CONFIG_DEFAULTS;
-    AGENTRT_STRNCPY_TERM(config.socket_dir, TEST_SOCKET_DIR, sizeof(config.socket_dir));
+    AIRY_STRNCPY_TERM(config.socket_dir, TEST_SOCKET_DIR, sizeof(config.socket_dir));
     config.max_channels = 16;
 
     channel_service_t *svc = channel_service_create(&config);
@@ -305,7 +305,7 @@ static void test_latency_stress(void **state)
     (void)state;
     cleanup_test_dir();
     channel_config_t config = CHANNEL_CONFIG_DEFAULTS;
-    AGENTRT_STRNCPY_TERM(config.socket_dir, TEST_SOCKET_DIR, sizeof(config.socket_dir));
+    AIRY_STRNCPY_TERM(config.socket_dir, TEST_SOCKET_DIR, sizeof(config.socket_dir));
     config.max_channels = 32;
 
     channel_service_t *svc = channel_service_create(&config);

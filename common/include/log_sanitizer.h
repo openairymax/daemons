@@ -11,8 +11,8 @@
  * 4. 零拷贝模式（性能优化）
  */
 
-#ifndef AGENTRT_LOG_SANITIZER_H
-#define AGENTRT_LOG_SANITIZER_H
+#ifndef AIRY_RT_LOG_SANITIZER_H
+#define AIRY_RT_LOG_SANITIZER_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -81,4 +81,4 @@ const sensitive_field_t *log_get_default_patterns(size_t *count);
 }
 #endif
 
-#endif /* AGENTRT_LOG_SANITIZER_H */
+#endif /* AIRY_RT_LOG_SANITIZER_H */

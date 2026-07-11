@@ -19,8 +19,8 @@
  *   process_spawn    → SAFETY_GUARD_PROCESS
  */
 
-#ifndef AGENTRT_PLUGIN_PERMISSION_H
-#define AGENTRT_PLUGIN_PERMISSION_H
+#ifndef AIRY_RT_PLUGIN_PERMISSION_H
+#define AIRY_RT_PLUGIN_PERMISSION_H
 
 #include "plugin_service.h"
 #include "safety_guard.h"
@@ -118,4 +118,4 @@ int plugin_permission_list_supported(char ***out_permissions,
 }
 #endif
 
-#endif /* AGENTRT_PLUGIN_PERMISSION_H */
+#endif /* AIRY_RT_PLUGIN_PERMISSION_H */

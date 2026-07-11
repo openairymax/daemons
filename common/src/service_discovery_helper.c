@@ -40,7 +40,7 @@ struct sd_helper_s {
     bool registered;
 
     /* 心跳线程 */
-    agentrt_thread_t heartbeat_thread;  /* 平台线程句柄 */
+    airy_thread_t heartbeat_thread;  /* 平台线程句柄 */
     volatile bool heartbeat_running;
     uint32_t heartbeat_interval_ms;
 };
@@ -55,14 +55,14 @@ static void *sd_helper_heartbeat_loop(void *arg) {
                  sdh->service_name, sdh->heartbeat_interval_ms);
 
     while (sdh->heartbeat_running) {
-        agentrt_sleep_ms(sdh->heartbeat_interval_ms);
+        airy_sleep_ms(sdh->heartbeat_interval_ms);
 
         if (!sdh->heartbeat_running) break;
 
         if (sdh->registered && sdh->service_name[0] != '\0') {
-            agentrt_error_t err = sd_heartbeat(sdh->sd, sdh->service_name,
+            airy_err_t err = sd_heartbeat(sdh->sd, sdh->service_name,
                                                sdh->instance_id);
-            if (err != AGENTRT_SUCCESS) {
+            if (err != AIRY_SUCCESS) {
                 SVC_LOG_WARN("Heartbeat failed for service '%s' (err=%d)",
                              sdh->service_name, err);
             }
@@ -76,7 +76,7 @@ static void *sd_helper_heartbeat_loop(void *arg) {
 /* ==================== 生命周期 ==================== */
 
 sd_helper_t *sd_helper_init(const sd_config_t *config) {
-    sd_helper_t *sdh = (sd_helper_t *)AGENTRT_CALLOC(1, sizeof(sd_helper_t));
+    sd_helper_t *sdh = (sd_helper_t *)AIRY_CALLOC(1, sizeof(sd_helper_t));
     if (!sdh) {
         SVC_LOG_ERROR("Failed to allocate sd_helper_t");
         return NULL;
@@ -84,7 +84,7 @@ sd_helper_t *sd_helper_init(const sd_config_t *config) {
 
     /* 复制或使用默认配置 */
     if (config) {
-        AGENTRT_MEMCPY(&sdh->config, config, sizeof(sd_config_t));
+        AIRY_MEMCPY(&sdh->config, config, sizeof(sd_config_t));
     } else {
         sdh->config = sd_create_default_config();
     }
@@ -95,22 +95,22 @@ sd_helper_t *sd_helper_init(const sd_config_t *config) {
     sdh->sd = sd_create(&sdh->config);
     if (!sdh->sd) {
         SVC_LOG_ERROR("Failed to create service_discovery instance");
-        AGENTRT_FREE(sdh);
+        AIRY_FREE(sdh);
         return NULL;
     }
 
     /* 启动服务发现 */
-    agentrt_error_t err = sd_start(sdh->sd);
-    if (err != AGENTRT_SUCCESS) {
+    airy_err_t err = sd_start(sdh->sd);
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to start service_discovery (err=%d)", err);
         sd_destroy(sdh->sd);
-        AGENTRT_FREE(sdh);
+        AIRY_FREE(sdh);
         return NULL;
     }
 
     sdh->registered = false;
     sdh->heartbeat_running = false;
-    sdh->heartbeat_thread = AGENTRT_INVALID_THREAD;
+    sdh->heartbeat_thread = AIRY_INVALID_THREAD;
 
     SVC_LOG_INFO("Service discovery helper initialized");
     return sdh;
@@ -133,7 +133,7 @@ void sd_helper_shutdown(sd_helper_t *sdh) {
     sd_destroy(sdh->sd);
     sdh->sd = NULL;
 
-    AGENTRT_FREE(sdh);
+    AIRY_FREE(sdh);
     SVC_LOG_INFO("Service discovery helper shutdown complete");
 }
 
@@ -158,7 +158,7 @@ static void build_instance_id(char *buf, size_t buf_size,
 int sd_helper_register(sd_helper_t *sdh, const char *name, const char *type,
                        const char *host, uint16_t port, const char *tags,
                        uint32_t ttl_ms) {
-    if (!sdh || !name || !type || !host) return AGENTRT_ERR_INVALID_PARAM;
+    if (!sdh || !name || !type || !host) return AIRY_ERR_INVALID_PARAM;
 
     char endpoint[SDH_MAX_ENDPOINT_LEN];
     build_endpoint(endpoint, sizeof(endpoint), host, port);
@@ -168,16 +168,16 @@ int sd_helper_register(sd_helper_t *sdh, const char *name, const char *type,
 
     /* 填充实例信息 */
     sd_instance_t inst;
-    AGENTRT_MEMSET(&inst, 0, sizeof(inst));
+    AIRY_MEMSET(&inst, 0, sizeof(inst));
     safe_strcpy(inst.instance_id, instance_id, sizeof(inst.instance_id));
     safe_strcpy(inst.endpoint, endpoint, sizeof(inst.endpoint));
-    inst.state = AGENTRT_SVC_STATE_RUNNING;
+    inst.state = AIRY_SVC_STATE_RUNNING;
     inst.healthy = true;
     inst.weight = 100;
     inst.active_connections = 0;
     inst.max_connections = 1024;
-    inst.last_heartbeat = agentrt_time_ms();
-    inst.register_time = agentrt_time_ms();
+    inst.last_heartbeat = airy_time_ms();
+    inst.register_time = airy_time_ms();
     inst.pid = 0;
 #ifdef _WIN32
     inst.pid = (uint32_t)GetCurrentProcessId();
@@ -189,11 +189,11 @@ int sd_helper_register(sd_helper_t *sdh, const char *name, const char *type,
     uint32_t effective_ttl = ttl_ms > 0 ? ttl_ms : SDH_DEFAULT_TTL_MS;
     (void)effective_ttl; /* TTL 由 sd_config 的 expire_timeout_ms 控制 */
 
-    agentrt_error_t err = sd_register(sdh->sd, name, type, &inst,
+    airy_err_t err = sd_register(sdh->sd, name, type, &inst,
                                       tags ? tags : "", "");
-    if (err != AGENTRT_SUCCESS) {
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to register service '%s' (err=%d)", name, err);
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 
     /* 保存注册信息 */
@@ -209,7 +209,7 @@ int sd_helper_register(sd_helper_t *sdh, const char *name, const char *type,
 int sd_helper_register_unix(sd_helper_t *sdh, const char *name, const char *type,
                             const char *socket_path, const char *tags,
                             uint32_t ttl_ms) {
-    if (!sdh || !name || !type || !socket_path) return AGENTRT_ERR_INVALID_PARAM;
+    if (!sdh || !name || !type || !socket_path) return AIRY_ERR_INVALID_PARAM;
 
     char instance_id[SD_MAX_NAME_LEN];
     uint32_t pid = 0;
@@ -221,23 +221,23 @@ int sd_helper_register_unix(sd_helper_t *sdh, const char *name, const char *type
     snprintf(instance_id, sizeof(instance_id), "%s-%s-%u", name, socket_path, pid);
 
     sd_instance_t inst;
-    AGENTRT_MEMSET(&inst, 0, sizeof(inst));
+    AIRY_MEMSET(&inst, 0, sizeof(inst));
     safe_strcpy(inst.instance_id, instance_id, sizeof(inst.instance_id));
     safe_strcpy(inst.endpoint, socket_path, sizeof(inst.endpoint));
-    inst.state = AGENTRT_SVC_STATE_RUNNING;
+    inst.state = AIRY_SVC_STATE_RUNNING;
     inst.healthy = true;
     inst.weight = 100;
     inst.active_connections = 0;
     inst.max_connections = 1024;
-    inst.last_heartbeat = agentrt_time_ms();
-    inst.register_time = agentrt_time_ms();
+    inst.last_heartbeat = airy_time_ms();
+    inst.register_time = airy_time_ms();
     inst.pid = pid;
 
-    agentrt_error_t err = sd_register(sdh->sd, name, type, &inst,
+    airy_err_t err = sd_register(sdh->sd, name, type, &inst,
                                       tags ? tags : "", "");
-    if (err != AGENTRT_SUCCESS) {
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to register Unix service '%s' (err=%d)", name, err);
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 
     safe_strcpy(sdh->service_name, name, sizeof(sdh->service_name));
@@ -252,22 +252,22 @@ int sd_helper_register_unix(sd_helper_t *sdh, const char *name, const char *type
 /* ==================== 心跳管理（P1.7.2） ==================== */
 
 int sd_helper_start_heartbeat(sd_helper_t *sdh) {
-    if (!sdh) return AGENTRT_ERR_INVALID_PARAM;
+    if (!sdh) return AIRY_ERR_INVALID_PARAM;
     if (sdh->heartbeat_running) return 0; /* 已在运行 */
 
     if (!sdh->registered) {
         SVC_LOG_WARN("Cannot start heartbeat: service not registered");
-        return AGENTRT_ERR_STATE_ERROR;
+        return AIRY_ERR_STATE_ERROR;
     }
 
     sdh->heartbeat_running = true;
 
     /* 创建心跳线程 */
-    if (agentrt_thread_create(&sdh->heartbeat_thread,
+    if (airy_thread_create(&sdh->heartbeat_thread,
                               sd_helper_heartbeat_loop, sdh) != 0) {
         sdh->heartbeat_running = false;
         SVC_LOG_ERROR("Failed to create heartbeat thread");
-        return AGENTRT_ERR_SYS_THREAD;
+        return AIRY_ERR_SYS_THREAD;
     }
 
     SVC_LOG_INFO("Heartbeat started for service '%s'", sdh->service_name);
@@ -279,20 +279,20 @@ void sd_helper_stop_heartbeat(sd_helper_t *sdh) {
 
     sdh->heartbeat_running = false;
 
-    if (sdh->heartbeat_thread != AGENTRT_INVALID_THREAD) {
-        agentrt_thread_join(sdh->heartbeat_thread, NULL);
-        sdh->heartbeat_thread = AGENTRT_INVALID_THREAD;
+    if (sdh->heartbeat_thread != AIRY_INVALID_THREAD) {
+        airy_thread_join(sdh->heartbeat_thread, NULL);
+        sdh->heartbeat_thread = AIRY_INVALID_THREAD;
     }
 
     SVC_LOG_INFO("Heartbeat stopped for service '%s'", sdh->service_name);
 }
 
 int sd_helper_send_heartbeat(sd_helper_t *sdh) {
-    if (!sdh || !sdh->registered) return AGENTRT_ERR_INVALID_PARAM;
+    if (!sdh || !sdh->registered) return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_error_t err = sd_heartbeat(sdh->sd, sdh->service_name,
+    airy_err_t err = sd_heartbeat(sdh->sd, sdh->service_name,
                                        sdh->instance_id);
-    return (err == AGENTRT_SUCCESS) ? 0 : -1;
+    return (err == AIRY_SUCCESS) ? 0 : -1;
 }
 
 /* ==================== 服务发现（P1.7.3） ==================== */
@@ -300,11 +300,11 @@ int sd_helper_send_heartbeat(sd_helper_t *sdh) {
 int sd_helper_find(sd_helper_t *sdh, const char *service_name,
                    sd_instance_t *instances, uint32_t max_count,
                    uint32_t *found_count) {
-    if (!sdh || !service_name || !instances || !found_count) return AGENTRT_ERR_INVALID_PARAM;
+    if (!sdh || !service_name || !instances || !found_count) return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_error_t err = sd_discover(sdh->sd, service_name,
+    airy_err_t err = sd_discover(sdh->sd, service_name,
                                       instances, max_count, found_count);
-    return (err == AGENTRT_SUCCESS) ? 0 : -1;
+    return (err == AIRY_SUCCESS) ? 0 : -1;
 }
 
 /* ==================== 负载均衡选择（P1.7.4） ==================== */
@@ -319,11 +319,11 @@ int sd_helper_select(sd_helper_t *sdh, const char *service_name,
 int sd_helper_select_with_strategy(sd_helper_t *sdh, const char *service_name,
                                    sd_lb_strategy_t strategy,
                                    sd_instance_t *instance) {
-    if (!sdh || !service_name || !instance) return AGENTRT_ERR_INVALID_PARAM;
+    if (!sdh || !service_name || !instance) return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_error_t err = sd_select_instance(sdh->sd, service_name,
+    airy_err_t err = sd_select_instance(sdh->sd, service_name,
                                              strategy, instance);
-    return (err == AGENTRT_SUCCESS) ? 0 : -1;
+    return (err == AIRY_SUCCESS) ? 0 : -1;
 }
 
 /* ==================== 状态查询 ==================== */

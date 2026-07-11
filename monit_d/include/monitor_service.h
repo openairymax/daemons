@@ -7,8 +7,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_MONITOR_SERVICE_H
-#define AGENTRT_MONITOR_SERVICE_H
+#ifndef AIRY_RT_MONITOR_SERVICE_H
+#define AIRY_RT_MONITOR_SERVICE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -399,4 +399,4 @@ int monitor_service_get_active_agents(monitor_service_t *service, char ***agent_
 int monitor_service_reset_loop_detection(monitor_service_t *service,
                                          agent_execution_trace_t *trace);
 
-#endif /* AGENTRT_MONITOR_SERVICE_H */
+#endif /* AIRY_RT_MONITOR_SERVICE_H */

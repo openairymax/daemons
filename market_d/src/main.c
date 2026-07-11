@@ -19,8 +19,8 @@
 
 /* ==================== 配置常量 ==================== */
 
-#define DEFAULT_SOCKET_PATH_UNIX AGENTRT_RUNTIME_DIR "/market.sock"
-#define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\agentrt_market"
+#define DEFAULT_SOCKET_PATH_UNIX AIRY_RUNTIME_DIR "/market.sock"
+#define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_market"
 #define DEFAULT_TCP_PORT 8082
 #define MAX_BUFFER 65536
 
@@ -33,49 +33,49 @@ DAEMON_DECLARE_COMMON(market_d, market, DEFAULT_SOCKET_PATH_UNIX,
 static market_service_t *g_service = NULL;
 
 /* ==================== 错误码定义 ==================== */
-#define MARKET_ERR_INVALID_PARAM AGENTRT_ERR_INVALID_PARAM
-#define MARKET_ERR_OUT_OF_MEMORY AGENTRT_ERR_OUT_OF_MEMORY
-#define MARKET_ERR_NOT_FOUND AGENTRT_ERR_NOT_FOUND
-#define MARKET_ERR_ALREADY_EXISTS (AGENTRT_ERR_DAEMON_BASE + 0x20)
-#define MARKET_ERR_INSTALL_FAIL (AGENTRT_ERR_DAEMON_BASE + 0x21)
+#define MARKET_ERR_INVALID_PARAM AIRY_ERR_INVALID_PARAM
+#define MARKET_ERR_OUT_OF_MEMORY AIRY_ERR_OUT_OF_MEMORY
+#define MARKET_ERR_NOT_FOUND AIRY_ERR_NOT_FOUND
+#define MARKET_ERR_ALREADY_EXISTS (AIRY_ERR_DAEMON_BASE + 0x20)
+#define MARKET_ERR_INSTALL_FAIL (AIRY_ERR_DAEMON_BASE + 0x21)
 
 /* ==================== 方法处理器包装函数 ==================== */
 
-static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_search_agents(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_install_agent(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_register_skill(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_search_skills(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_health_check(int id, agentrt_socket_t client_fd);
+static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_search_agents(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_install_agent(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_register_skill(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_search_skills(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_health_check(int id, airy_sock_t client_fd);
 
 static void on_register_agent_method(cJSON *params, int id, void *user_data)
 {
-    handle_register_agent(params, id, *(agentrt_socket_t *)user_data);
+    handle_register_agent(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_search_agents_method(cJSON *params, int id, void *user_data)
 {
-    handle_search_agents(params, id, *(agentrt_socket_t *)user_data);
+    handle_search_agents(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_install_agent_method(cJSON *params, int id, void *user_data)
 {
-    handle_install_agent(params, id, *(agentrt_socket_t *)user_data);
+    handle_install_agent(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_register_skill_method(cJSON *params, int id, void *user_data)
 {
-    handle_register_skill(params, id, *(agentrt_socket_t *)user_data);
+    handle_register_skill(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_search_skills_method(cJSON *params, int id, void *user_data)
 {
-    handle_search_skills(params, id, *(agentrt_socket_t *)user_data);
+    handle_search_skills(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
-    handle_health_check(id, *(agentrt_socket_t *)user_data);
+    handle_health_check(id, *(airy_sock_t *)user_data);
 }
 
 static int register_rpc_methods(void)
@@ -83,7 +83,7 @@ static int register_rpc_methods(void)
     g_dispatcher_market_d = method_dispatcher_create(16);
     if (!g_dispatcher_market_d) {
         SVC_LOG_ERROR("Failed to create method dispatcher");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     method_dispatcher_register(g_dispatcher_market_d, "register_agent", on_register_agent_method, NULL);
@@ -100,10 +100,10 @@ static int register_rpc_methods(void)
 /* 线程池提交回调：复用生成的 daemon_handle_client_market_d */
 static void handle_client_wrapper(void *arg)
 {
-    daemon_handle_client_market_d((agentrt_socket_t)(uintptr_t)arg, g_dispatcher_market_d);
+    daemon_handle_client_market_d((airy_sock_t)(uintptr_t)arg, g_dispatcher_market_d);
 }
 
-static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *agent_json = jsonrpc_get_object_param(params, "agent");
     if (!agent_json) {
@@ -126,7 +126,7 @@ static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client
 
     int ret = market_service_register_agent(g_service, &info);
 
-    if (ret != AGENTRT_SUCCESS) {
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Register failed", id);
         SVC_LOG_ERROR("Failed to register agent: %s (error=%d)", aid, ret);
     } else {
@@ -138,7 +138,7 @@ static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client
     }
 }
 
-static void handle_search_agents(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_search_agents(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *keyword = get_string_field(params, "keyword", "");
     size_t offset = (size_t)get_double_field(params, "offset", 0.0);
@@ -155,7 +155,7 @@ static void handle_search_agents(cJSON *params, int id, agentrt_socket_t client_
 
     int ret = market_service_search_agents(g_service, &sp, &agents, &count);
 
-    if (ret != AGENTRT_SUCCESS) {
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Search failed", id);
         return;
     }
@@ -176,12 +176,12 @@ static void handle_search_agents(cJSON *params, int id, agentrt_socket_t client_
         cJSON_AddBoolToObject(a, "installed", agents[i]->status == AGENT_STATUS_AVAILABLE);
         cJSON_AddItemToArray(arr, a);
     }
-    AGENTRT_FREE(agents);
+    AIRY_FREE(agents);
 
     JSONRPC_SEND_SUCCESS(client_fd, arr, id);
 }
 
-static void handle_install_agent(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_install_agent(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *aid = get_string_field(params, "agent_id", NULL);
     if (!aid) {
@@ -194,7 +194,7 @@ static void handle_install_agent(cJSON *params, int id, agentrt_socket_t client_
     int ret = market_service_install_agent(g_service, (const install_request_t *)aid,
                                            (install_result_t **)version);
 
-    if (ret != AGENTRT_SUCCESS) {
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Install failed", id);
         SVC_LOG_ERROR("Failed to install agent: %s@%s (error=%d)", aid, version, ret);
     } else {
@@ -207,7 +207,7 @@ static void handle_install_agent(cJSON *params, int id, agentrt_socket_t client_
     }
 }
 
-static void handle_register_skill(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_register_skill(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *skill_json = jsonrpc_get_object_param(params, "skill");
     if (!skill_json) {
@@ -228,7 +228,7 @@ static void handle_register_skill(cJSON *params, int id, agentrt_socket_t client
 
     int ret = market_service_register_skill(g_service, &info);
 
-    if (ret != AGENTRT_SUCCESS) {
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Register failed", id);
         SVC_LOG_ERROR("Failed to register skill: %s (error=%d)", sid, ret);
     } else {
@@ -240,7 +240,7 @@ static void handle_register_skill(cJSON *params, int id, agentrt_socket_t client
     }
 }
 
-static void handle_search_skills(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_search_skills(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *keyword = get_string_field(params, "keyword", "");
 
@@ -255,7 +255,7 @@ static void handle_search_skills(cJSON *params, int id, agentrt_socket_t client_
 
     int ret = market_service_search_skills(g_service, &sp, &skills, &count);
 
-    if (ret != AGENTRT_SUCCESS) {
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Search failed", id);
         return;
     }
@@ -273,12 +273,12 @@ static void handle_search_skills(cJSON *params, int id, agentrt_socket_t client_
             cJSON_AddStringToObject(s, "description", skills[i]->description);
         cJSON_AddItemToArray(arr, s);
     }
-    AGENTRT_FREE(skills);
+    AIRY_FREE(skills);
 
     JSONRPC_SEND_SUCCESS(client_fd, arr, id);
 }
 
-static void handle_health_check(int id, agentrt_socket_t client_fd)
+static void handle_health_check(int id, airy_sock_t client_fd)
 {
     cJSON *result = cJSON_CreateObject();
     cJSON_AddStringToObject(result, "service", "market_d");
@@ -310,8 +310,8 @@ int main(int argc, char **argv)
     if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
 
     /* 初始化平台层 */
-    agentrt_socket_init();
-    agentrt_mutex_init(&g_running_lock_market_d);
+    airy_sock_init();
+    airy_mtx_init(&g_running_lock_market_d);
 
     /* 设置信号处理 */
 #ifdef _WIN32
@@ -320,7 +320,7 @@ int main(int argc, char **argv)
     DAEMON_SETUP_SIGNALS(market_d);
 #endif
 
-    agentrt_log_init(NULL);
+    airy_log_init(NULL);
     atexit(log_cleanup);
 
     /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
@@ -338,10 +338,10 @@ int main(int argc, char **argv)
 
     /* 创建市场服务 */
     int ret = market_service_create(&config, &g_service);
-    if (ret != AGENTRT_SUCCESS || !g_service) {
+    if (ret != AIRY_SUCCESS || !g_service) {
         SVC_LOG_ERROR("Failed to create market service (error=%d)", ret);
-        agentrt_mutex_destroy(&g_running_lock_market_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_market_d);
+        airy_sock_cleanup();
         return 1;
     }
 
@@ -349,22 +349,22 @@ int main(int argc, char **argv)
     if (register_rpc_methods() != 0) {
         SVC_LOG_ERROR("Failed to register RPC methods");
         destroy_service();
-        agentrt_mutex_destroy(&g_running_lock_market_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_market_d);
+        airy_sock_cleanup();
         return 1;
     }
 
     SVC_LOG_INFO("Market service created successfully");
 
     /* 创建服务器 Socket（TCP/Unix/NamedPipe 统一封装） */
-    agentrt_socket_t server_fd = daemon_create_server_socket(
+    airy_sock_t server_fd = daemon_create_server_socket(
         use_tcp, DEFAULT_TCP_PORT, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN);
     if (server_fd < 0) {
         SVC_LOG_ERROR("Failed to create server socket");
         method_dispatcher_destroy(g_dispatcher_market_d);
         destroy_service();
-        agentrt_mutex_destroy(&g_running_lock_market_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_market_d);
+        airy_sock_cleanup();
         return 1;
     }
     SVC_LOG_INFO(use_tcp ? "Listening on TCP port %d" : "Listening on Unix socket",
@@ -390,18 +390,18 @@ int main(int argc, char **argv)
         SVC_LOG_ERROR("Failed to create thread pool");
         daemon_bootstrap_ipc_stop(g_bipc_market_d);
         daemon_bootstrap_sd_stop(g_bsd_market_d);
-        agentrt_socket_close(server_fd);
+        airy_sock_close(server_fd);
         method_dispatcher_destroy(g_dispatcher_market_d);
         destroy_service();
-        agentrt_mutex_destroy(&g_running_lock_market_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_market_d);
+        airy_sock_cleanup();
         return 1;
     }
 
     /* 主事件循环：接受连接并提交线程池并发处理 */
     while (atomic_load_explicit(&g_running_market_d, memory_order_acquire)) {
-        agentrt_socket_t client_fd = agentrt_socket_accept(server_fd, 5000);
-        if (client_fd == AGENTRT_INVALID_SOCKET)
+        airy_sock_t client_fd = airy_sock_accept(server_fd, 5000);
+        if (client_fd == AIRY_INVALID_SOCKET)
             continue;
 
         thread_pool_submit(pool, handle_client_wrapper, (void *)(uintptr_t)client_fd);

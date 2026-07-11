@@ -16,8 +16,8 @@
  * @see service_discovery.h 服务发现
  */
 
-#ifndef AGENTRT_ALERT_MANAGER_H
-#define AGENTRT_ALERT_MANAGER_H
+#ifndef AIRY_RT_ALERT_MANAGER_H
+#define AIRY_RT_ALERT_MANAGER_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -302,4 +302,4 @@ am_config_t am_create_default_config(void);
 }
 #endif
 
-#endif /* AGENTRT_ALERT_MANAGER_H */
+#endif /* AIRY_RT_ALERT_MANAGER_H */

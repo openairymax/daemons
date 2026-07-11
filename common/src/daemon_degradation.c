@@ -53,7 +53,7 @@ static int on_cache_degrade(degradation_handler_t *handler,
     (void)new_level;
 
     degrade_cache_ctx_t *ctx = (degrade_cache_ctx_t *)handler->context;
-    if (!ctx || !ctx->cache_handle) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ctx || !ctx->cache_handle) return AIRY_ERR_INVALID_PARAM;
 
     size_t half_capacity = ctx->original_capacity / 2;
     if (half_capacity < 1) half_capacity = 1;
@@ -76,7 +76,7 @@ static int on_cache_restore(degradation_handler_t *handler,
     (void)new_level;
 
     degrade_cache_ctx_t *ctx = (degrade_cache_ctx_t *)handler->context;
-    if (!ctx || !ctx->cache_handle) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ctx || !ctx->cache_handle) return AIRY_ERR_INVALID_PARAM;
 
     svc_cache_set_capacity((svc_cache_t *)ctx->cache_handle, ctx->original_capacity);
 
@@ -95,9 +95,9 @@ static int on_log_degrade(degradation_handler_t *handler,
     (void)new_level;
 
     degrade_log_ctx_t *ctx = (degrade_log_ctx_t *)handler->context;
-    if (!ctx) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ctx) return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_log_set_level(LOG_LEVEL_ERROR);
+    airy_log_set_level(LOG_LEVEL_ERROR);
     ctx->degraded_log_level = LOG_LEVEL_ERROR;
 
     SVC_LOG_WARN("Log level: raised to ERROR (was level %d)", ctx->original_log_level);
@@ -115,9 +115,9 @@ static int on_log_restore(degradation_handler_t *handler,
     (void)new_level;
 
     degrade_log_ctx_t *ctx = (degrade_log_ctx_t *)handler->context;
-    if (!ctx) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ctx) return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_log_set_level((agentrt_log_level_t)ctx->original_log_level);
+    airy_log_set_level((airy_log_level_t)ctx->original_log_level);
 
     SVC_LOG_WARN("Log level: restored to level %d", ctx->original_log_level);
     return 0;
@@ -134,7 +134,7 @@ static int on_batch_degrade(degradation_handler_t *handler,
     (void)new_level;
 
     degrade_batch_ctx_t *ctx = (degrade_batch_ctx_t *)handler->context;
-    if (!ctx || !ctx->batch_size_ptr) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ctx || !ctx->batch_size_ptr) return AIRY_ERR_INVALID_PARAM;
 
     size_t half = ctx->original_batch_size / 2;
     if (half < 1) half = 1;
@@ -157,7 +157,7 @@ static int on_batch_restore(degradation_handler_t *handler,
     (void)new_level;
 
     degrade_batch_ctx_t *ctx = (degrade_batch_ctx_t *)handler->context;
-    if (!ctx || !ctx->batch_size_ptr) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ctx || !ctx->batch_size_ptr) return AIRY_ERR_INVALID_PARAM;
 
     *ctx->batch_size_ptr = ctx->original_batch_size;
 
@@ -176,7 +176,7 @@ static int on_conn_degrade(degradation_handler_t *handler,
     (void)new_level;
 
     degrade_conn_ctx_t *ctx = (degrade_conn_ctx_t *)handler->context;
-    if (!ctx || !ctx->reject_new_flag) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ctx || !ctx->reject_new_flag) return AIRY_ERR_INVALID_PARAM;
 
     *ctx->reject_new_flag = true;
 
@@ -195,7 +195,7 @@ static int on_conn_restore(degradation_handler_t *handler,
     (void)new_level;
 
     degrade_conn_ctx_t *ctx = (degrade_conn_ctx_t *)handler->context;
-    if (!ctx || !ctx->reject_new_flag) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ctx || !ctx->reject_new_flag) return AIRY_ERR_INVALID_PARAM;
 
     *ctx->reject_new_flag = false;
 
@@ -234,7 +234,7 @@ degradation_handler_t *daemon_degradation_register_cache(
     handler->is_degraded = false;
     handler->next = NULL;
 
-    agentrt_register_degradation(handler);
+    airy_register_degradation(handler);
     return handler;
 }
 
@@ -264,7 +264,7 @@ degradation_handler_t *daemon_degradation_register_log_level(
     handler->is_degraded = false;
     handler->next = NULL;
 
-    agentrt_register_degradation(handler);
+    airy_register_degradation(handler);
     return handler;
 }
 
@@ -295,7 +295,7 @@ degradation_handler_t *daemon_degradation_register_batch(
     handler->is_degraded = false;
     handler->next = NULL;
 
-    agentrt_register_degradation(handler);
+    airy_register_degradation(handler);
     return handler;
 }
 
@@ -324,7 +324,7 @@ degradation_handler_t *daemon_degradation_register_reject_conn(
     handler->is_degraded = false;
     handler->next = NULL;
 
-    agentrt_register_degradation(handler);
+    airy_register_degradation(handler);
     return handler;
 }
 
@@ -353,14 +353,14 @@ degradation_handler_t *daemon_degradation_register_custom(
     handler->is_degraded = false;
     handler->next = NULL;
 
-    agentrt_register_degradation(handler);
+    airy_register_degradation(handler);
     return handler;
 }
 
 void daemon_degradation_unregister_all(void)
 {
     for (int i = 0; i < g_handler_count; i++) {
-        agentrt_unregister_degradation(&g_degradation_handlers[i]);
+        airy_unregister_degradation(&g_degradation_handlers[i]);
     }
     g_handler_count = 0;
 

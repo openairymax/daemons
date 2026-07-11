@@ -104,9 +104,9 @@ static gw_proto_detect_result_t detect_from_body(const char *body)
 
 gw_proto_router_t *gw_proto_router_create(void)
 {
-    gw_proto_router_t *router = (gw_proto_router_t *)AGENTRT_CALLOC(1, sizeof(gw_proto_router_t));
+    gw_proto_router_t *router = (gw_proto_router_t *)AIRY_CALLOC(1, sizeof(gw_proto_router_t));
     if (!router) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     router->adapter_count = 0;
     router->initialized = false;
@@ -124,17 +124,17 @@ void gw_proto_router_destroy(gw_proto_router_t *router)
     if (router->initialized) {
         gw_proto_router_shutdown(router);
     }
-    AGENTRT_FREE(router);
+    AIRY_FREE(router);
 }
 
 int gw_proto_router_init(gw_proto_router_t *router)
 {
     if (!router)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (router->initialized)
         return 0;
 
-    AGENTRT_MEMSET(&router->stats, 0, sizeof(router->stats));
+    AIRY_MEMSET(&router->stats, 0, sizeof(router->stats));
 
     gw_mcp_server_config_t mcp_cfg = GW_MCP_SERVER_CONFIG_DEFAULTS;
     router->mcp_server = gw_mcp_server_create(&mcp_cfg);
@@ -171,7 +171,7 @@ int gw_proto_router_init(gw_proto_router_t *router)
 int gw_proto_router_shutdown(gw_proto_router_t *router)
 {
     if (!router || !router->initialized)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     if (router->mcp_server) {
         gw_mcp_server_shutdown(router->mcp_server);
@@ -216,9 +216,9 @@ int gw_proto_router_register(gw_proto_router_t *router, gw_proto_detect_result_t
                              gw_proto_request_handler_t handler, void *user_data)
 {
     if (!router || !handler)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (router->adapter_count >= GW_PROTO_MAX_ADAPTERS)
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
 
     for (size_t i = 0; i < router->adapter_count; i++) {
         if (router->adapters[i].proto_type == proto_type) {
@@ -248,7 +248,7 @@ find_handler(gw_proto_router_t *router, gw_proto_detect_result_t proto_type, voi
             return router->adapters[i].handler;
         }
     }
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_OVERFLOW, "limit exceeded");
+    AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
 }
 
 /**
@@ -262,32 +262,32 @@ find_handler(gw_proto_router_t *router, gw_proto_detect_result_t proto_type, voi
 static void record_proto_stats(gw_proto_router_stats_t *stats, gw_proto_detect_result_t proto_type)
 {
     const char *name = proto_type_name(proto_type);
-    (void)name; /* Release 模式下 AGENTRT_LOG_DEBUG 为空操作，标记避免未使用警告 */
+    (void)name; /* Release 模式下 AIRY_LOG_DEBUG 为空操作，标记避免未使用警告 */
 
     switch (proto_type) {
     case GW_PROTO_DETECT_MCP:
         stats->mcp_requests++;
-        AGENTRT_LOG_DEBUG("protocol=%-8s count=%llu (mcp_requests)", name,
+        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (mcp_requests)", name,
                           (unsigned long long)stats->mcp_requests);
         break;
     case GW_PROTO_DETECT_A2A:
         stats->a2a_requests++;
-        AGENTRT_LOG_DEBUG("protocol=%-8s count=%llu (a2a_requests)", name,
+        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (a2a_requests)", name,
                           (unsigned long long)stats->a2a_requests);
         break;
     case GW_PROTO_DETECT_OPENAI:
         stats->openai_requests++;
-        AGENTRT_LOG_DEBUG("protocol=%-8s count=%llu (openai_requests)", name,
+        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (openai_requests)", name,
                           (unsigned long long)stats->openai_requests);
         break;
     case GW_PROTO_DETECT_JSONRPC:
         stats->jsonrpc_requests++;
-        AGENTRT_LOG_DEBUG("protocol=%-8s count=%llu (jsonrpc_requests)", name,
+        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (jsonrpc_requests)", name,
                           (unsigned long long)stats->jsonrpc_requests);
         break;
     default:
         stats->unknown_requests++;
-        AGENTRT_LOG_DEBUG("protocol=%-8s count=%llu (unknown_requests)", name,
+        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (unknown_requests)", name,
                           (unsigned long long)stats->unknown_requests);
         break;
     }
@@ -298,7 +298,7 @@ int gw_proto_router_route(gw_proto_router_t *router, gw_proto_detect_result_t pr
                           char **response_json)
 {
     if (!router || !method || !response_json)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     router->stats.total_requests++;
 
@@ -306,18 +306,18 @@ int gw_proto_router_route(gw_proto_router_t *router, gw_proto_detect_result_t pr
     gw_proto_request_handler_t handler = find_handler(router, proto_type, &user_data);
 
     if (!handler) {
-        AGENTRT_LOG_WARN("no handler found for protocol type=%d, route_errors=%llu",
+        AIRY_LOG_WARN("no handler found for protocol type=%d, route_errors=%llu",
                          proto_type, (unsigned long long)router->stats.route_errors);
         router->stats.route_errors++;
         record_proto_stats(&router->stats, proto_type);
-        return AGENTRT_ERR_NOT_FOUND;
+        return AIRY_ERR_NOT_FOUND;
     }
 
     record_proto_stats(&router->stats, proto_type);
 
     int result = handler(method, path, body_json, response_json, user_data);
     if (result != 0) {
-        AGENTRT_LOG_WARN("handler returned error: proto_type=%d, result=%d, path=%s",
+        AIRY_LOG_WARN("handler returned error: proto_type=%d, result=%d, path=%s",
                          proto_type, result, path ? path : "(null)");
         router->stats.route_errors++;
     }
@@ -329,7 +329,7 @@ int gw_proto_router_route_auto(gw_proto_router_t *router, const char *content_ty
                                char **response_json)
 {
     if (!router)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     gw_proto_detect_result_t proto = gw_proto_detect(content_type, path, body_json);
     return gw_proto_router_route(router, proto, method, path, body_json, response_json);
@@ -338,7 +338,7 @@ int gw_proto_router_route_auto(gw_proto_router_t *router, const char *content_ty
 int gw_proto_router_get_stats(gw_proto_router_t *router, gw_proto_router_stats_t *stats)
 {
     if (!router || !stats)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     *stats = router->stats;
     return 0;
 }

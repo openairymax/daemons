@@ -26,8 +26,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef agentrt_error_push_ex
-void agentrt_error_push_ex(int code, const char *file, int line, const char *func, const char *fmt,
+#ifndef airy_err_push_ex
+void airy_err_push_ex(int code, const char *file, int line, const char *func, const char *fmt,
                            ...);
 #endif
 
@@ -51,7 +51,7 @@ typedef struct {
 
 typedef struct {
     CURL *curl;
-    agentrt_mutex_t lock;
+    airy_mtx_t lock;
     int in_use;
     uint64_t last_used;
 } ipc_pool_entry_t;
@@ -61,13 +61,13 @@ typedef struct {
 struct ipc_client {
     char *base_url;
     ipc_pool_entry_t pool[IPC_POOL_SIZE];
-    agentrt_mutex_t pool_lock;
+    airy_mtx_t pool_lock;
     uint32_t default_timeout_ms;
     int initialized;
 };
 
 static struct ipc_client *g_ipc_client = NULL;
-static agentrt_mutex_t g_init_lock = {0};
+static airy_mtx_t g_init_lock = {0};
 static int g_curl_initialized = 0;
 
 /* ==================== 内部函数 ==================== */
@@ -78,9 +78,9 @@ static int g_curl_initialized = 0;
 static int buffer_init(ipc_response_buffer_t *buf)
 {
     buf->capacity = 4096;
-    buf->data = (char *)AGENTRT_MALLOC(buf->capacity);
+    buf->data = (char *)AIRY_MALLOC(buf->capacity);
     if (!buf->data) {
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
     buf->data[0] = '\0';
     buf->size = 0;
@@ -93,7 +93,7 @@ static int buffer_init(ipc_response_buffer_t *buf)
 static void buffer_free(ipc_response_buffer_t *buf)
 {
     if (buf->data) {
-        AGENTRT_FREE(buf->data);
+        AIRY_FREE(buf->data);
         buf->data = NULL;
     }
     buf->size = 0;
@@ -121,7 +121,7 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
             new_capacity = new_size;
         }
 
-        char *new_data = (char *)AGENTRT_REALLOC(buf->data, new_capacity);
+        char *new_data = (char *)AIRY_REALLOC(buf->data, new_capacity);
         if (!new_data) {
             return 0;
         }
@@ -145,7 +145,7 @@ static ipc_pool_entry_t *pool_acquire(struct ipc_client *client)
 {
     ipc_pool_entry_t *entry = NULL;
 
-    agentrt_mutex_lock(&client->pool_lock);
+    airy_mtx_lock(&client->pool_lock);
 
     /* 查找空闲连接 */
     for (int i = 0; i < IPC_POOL_SIZE; i++) {
@@ -156,12 +156,12 @@ static ipc_pool_entry_t *pool_acquire(struct ipc_client *client)
         }
     }
 
-    agentrt_mutex_unlock(&client->pool_lock);
+    airy_mtx_unlock(&client->pool_lock);
 
     /* 如果没有空闲连接，等待并重试 */
     if (!entry) {
         for (int retry = 0; retry < 10; retry++) {
-            agentrt_mutex_lock(&client->pool_lock);
+            airy_mtx_lock(&client->pool_lock);
             for (int i = 0; i < IPC_POOL_SIZE; i++) {
                 if (!client->pool[i].in_use) {
                     entry = &client->pool[i];
@@ -169,14 +169,14 @@ static ipc_pool_entry_t *pool_acquire(struct ipc_client *client)
                     break;
                 }
             }
-            agentrt_mutex_unlock(&client->pool_lock);
+            airy_mtx_unlock(&client->pool_lock);
 
             if (entry)
                 break;
 
             /* 短暂等待 */
-            agentrt_mutex_lock(&client->pool_lock);
-            agentrt_mutex_unlock(&client->pool_lock);
+            airy_mtx_lock(&client->pool_lock);
+            airy_mtx_unlock(&client->pool_lock);
         }
     }
 
@@ -189,10 +189,10 @@ static ipc_pool_entry_t *pool_acquire(struct ipc_client *client)
 static void pool_release(struct ipc_client *client, ipc_pool_entry_t *entry)
 {
     if (entry) {
-        agentrt_mutex_lock(&client->pool_lock);
+        airy_mtx_lock(&client->pool_lock);
         entry->in_use = 0;
-        entry->last_used = agentrt_time_ms();
-        agentrt_mutex_unlock(&client->pool_lock);
+        entry->last_used = airy_time_ms();
+        airy_mtx_unlock(&client->pool_lock);
     }
 }
 
@@ -246,7 +246,7 @@ static int do_rpc_call(ipc_pool_entry_t *entry, const char *base_url, const char
 
         if (retry <= max_retries) {
             uint32_t delay = IPC_RETRY_DELAY_MS * retry;
-            agentrt_sleep_ms(delay);
+            airy_sleep_ms(delay);
         }
     }
 
@@ -258,7 +258,7 @@ static int do_rpc_call(ipc_pool_entry_t *entry, const char *base_url, const char
 /* 本地错误处理宏 */
 #define SVC_ERROR(code, msg)                                                      \
     do {                                                                          \
-        agentrt_error_push_ex((code), __FILE__, __LINE__, __func__, "%s", (msg)); \
+        airy_err_push_ex((code), __FILE__, __LINE__, __func__, "%s", (msg)); \
         return (code);                                                            \
     } while (0)
 
@@ -270,13 +270,13 @@ int svc_ipc_init(const char *baseruntime_url)
         SVC_ERROR(SVC_ERR_INVALID_PARAM, "baseruntime_url is NULL");
     }
 
-    agentrt_mutex_lock(&g_init_lock);
+    airy_mtx_lock(&g_init_lock);
 
     /* 初始化 libcurl（仅一次） */
     if (!g_curl_initialized) {
         CURLcode curl_res = curl_global_init(CURL_GLOBAL_ALL);
         if (curl_res != CURLE_OK) {
-            agentrt_mutex_unlock(&g_init_lock);
+            airy_mtx_unlock(&g_init_lock);
             SVC_ERROR(SVC_ERR_IO, "Failed to initialize libcurl");
         }
         g_curl_initialized = 1;
@@ -284,29 +284,29 @@ int svc_ipc_init(const char *baseruntime_url)
 
     /* 如果已经初始化，直接返回 */
     if (g_ipc_client) {
-        agentrt_mutex_unlock(&g_init_lock);
+        airy_mtx_unlock(&g_init_lock);
         return SVC_OK;
     }
 
     /* 创建客户端上下文 */
-    client = (struct ipc_client *)AGENTRT_CALLOC(1, sizeof(struct ipc_client));
+    client = (struct ipc_client *)AIRY_CALLOC(1, sizeof(struct ipc_client));
     if (!client) {
-        agentrt_mutex_unlock(&g_init_lock);
+        airy_mtx_unlock(&g_init_lock);
         SVC_ERROR(SVC_ERR_OUT_OF_MEMORY, "Failed to allocate IPC client");
     }
 
-    client->base_url = AGENTRT_STRDUP(baseruntime_url);
+    client->base_url = AIRY_STRDUP(baseruntime_url);
     if (!client->base_url) {
-        AGENTRT_FREE(client);
-        agentrt_mutex_unlock(&g_init_lock);
+        AIRY_FREE(client);
+        airy_mtx_unlock(&g_init_lock);
         SVC_ERROR(SVC_ERR_OUT_OF_MEMORY, "Failed to duplicate base URL");
     }
 
     client->default_timeout_ms = IPC_DEFAULT_TIMEOUT_MS;
-    if (agentrt_mutex_init(&client->pool_lock) != 0) {
-        AGENTRT_FREE(client->base_url);
-        AGENTRT_FREE(client);
-        agentrt_mutex_unlock(&g_init_lock);
+    if (airy_mtx_init(&client->pool_lock) != 0) {
+        AIRY_FREE(client->base_url);
+        AIRY_FREE(client);
+        airy_mtx_unlock(&g_init_lock);
         SVC_ERROR(SVC_ERR_OUT_OF_MEMORY, "Failed to initialize pool mutex");
     }
 
@@ -316,14 +316,14 @@ int svc_ipc_init(const char *baseruntime_url)
         client->pool[i].curl = curl_easy_init();
         if (!client->pool[i].curl) {
             /* 记录错误并清理 */
-            agentrt_error_push_ex(SVC_ERR_OUT_OF_MEMORY, __FILE__, __LINE__, __func__,
+            airy_err_push_ex(SVC_ERR_OUT_OF_MEMORY, __FILE__, __LINE__, __func__,
                                   "Failed to initialize CURL handle %d", i);
             break;
         }
-        if (agentrt_mutex_init(&client->pool[i].lock) != 0) {
+        if (airy_mtx_init(&client->pool[i].lock) != 0) {
             curl_easy_cleanup(client->pool[i].curl);
             client->pool[i].curl = NULL;
-            agentrt_error_push_ex(SVC_ERR_OUT_OF_MEMORY, __FILE__, __LINE__, __func__,
+            airy_err_push_ex(SVC_ERR_OUT_OF_MEMORY, __FILE__, __LINE__, __func__,
                                   "Failed to initialize pool entry mutex %d", i);
             break;
         }
@@ -338,19 +338,19 @@ int svc_ipc_init(const char *baseruntime_url)
             if (client->pool[j].curl) {
                 curl_easy_cleanup(client->pool[j].curl);
             }
-            agentrt_mutex_destroy(&client->pool[j].lock);
+            airy_mtx_destroy(&client->pool[j].lock);
         }
-        agentrt_mutex_destroy(&client->pool_lock);
-        AGENTRT_FREE(client->base_url);
-        AGENTRT_FREE(client);
-        agentrt_mutex_unlock(&g_init_lock);
+        airy_mtx_destroy(&client->pool_lock);
+        AIRY_FREE(client->base_url);
+        AIRY_FREE(client);
+        airy_mtx_unlock(&g_init_lock);
         return SVC_ERR_OUT_OF_MEMORY;
     }
 
     client->initialized = 1;
     g_ipc_client = client;
 
-    agentrt_mutex_unlock(&g_init_lock);
+    airy_mtx_unlock(&g_init_lock);
     return SVC_OK;
 }
 
@@ -358,7 +358,7 @@ int svc_ipc_init(const char *baseruntime_url)
 
 void svc_ipc_cleanup(void)
 {
-    agentrt_mutex_lock(&g_init_lock);
+    airy_mtx_lock(&g_init_lock);
 
     if (g_ipc_client) {
         /* 清理连接池 */
@@ -366,12 +366,12 @@ void svc_ipc_cleanup(void)
             if (g_ipc_client->pool[i].curl) {
                 curl_easy_cleanup(g_ipc_client->pool[i].curl);
             }
-            agentrt_mutex_destroy(&g_ipc_client->pool[i].lock);
+            airy_mtx_destroy(&g_ipc_client->pool[i].lock);
         }
 
-        agentrt_mutex_destroy(&g_ipc_client->pool_lock);
-        AGENTRT_FREE(g_ipc_client->base_url);
-        AGENTRT_FREE(g_ipc_client);
+        airy_mtx_destroy(&g_ipc_client->pool_lock);
+        AIRY_FREE(g_ipc_client->base_url);
+        AIRY_FREE(g_ipc_client);
         g_ipc_client = NULL;
     }
 
@@ -380,7 +380,7 @@ void svc_ipc_cleanup(void)
         g_curl_initialized = 0;
     }
 
-    agentrt_mutex_unlock(&g_init_lock);
+    airy_mtx_unlock(&g_init_lock);
 }
 
 int svc_rpc_call(const char *method, const char *params, char **out_result, uint32_t timeout_ms)
@@ -419,7 +419,7 @@ int svc_rpc_call(const char *method, const char *params, char **out_result, uint
         } while (0);
     }
 
-    cJSON_AddNumberToObject(root, "id", (double)agentrt_time_ns());
+    cJSON_AddNumberToObject(root, "id", (double)airy_time_ns());
 
     char *request = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -432,7 +432,7 @@ int svc_rpc_call(const char *method, const char *params, char **out_result, uint
     /* 初始化响应缓冲区 */
     ipc_response_buffer_t response;
     if (buffer_init(&response) != 0) {
-        AGENTRT_FREE(request);
+        AIRY_FREE(request);
         pool_release(g_ipc_client, entry);
         return SVC_ERR_OUT_OF_MEMORY;
     }
@@ -445,7 +445,7 @@ int svc_rpc_call(const char *method, const char *params, char **out_result, uint
     int ret =
         do_rpc_call(entry, g_ipc_client->base_url, request, &response, timeout_ms, IPC_MAX_RETRIES);
 
-    AGENTRT_FREE(request);
+    AIRY_FREE(request);
     request = NULL;
 
     if (ret != SVC_OK) {
@@ -509,13 +509,13 @@ int svc_ipc_get_pool_status(int *total, int *available)
 
     if (available) {
         *available = 0;
-        agentrt_mutex_lock(&g_ipc_client->pool_lock);
+        airy_mtx_lock(&g_ipc_client->pool_lock);
         for (int i = 0; i < IPC_POOL_SIZE; i++) {
             if (!g_ipc_client->pool[i].in_use) {
                 (*available)++;
             }
         }
-        agentrt_mutex_unlock(&g_ipc_client->pool_lock);
+        airy_mtx_unlock(&g_ipc_client->pool_lock);
     }
 
     return SVC_OK;

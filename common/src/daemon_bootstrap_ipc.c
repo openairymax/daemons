@@ -51,14 +51,14 @@ daemon_bootstrap_ipc_t *daemon_bootstrap_ipc_start(const char *daemon_name,
     }
 
     daemon_bootstrap_ipc_t *bipc =
-        (daemon_bootstrap_ipc_t *)AGENTRT_CALLOC(1, sizeof(daemon_bootstrap_ipc_t));
+        (daemon_bootstrap_ipc_t *)AIRY_CALLOC(1, sizeof(daemon_bootstrap_ipc_t));
     if (!bipc) return NULL;
 
     /* 初始化 IPC Bus helper */
     bipc->ibh = ipc_bus_helper_init(daemon_name, NULL);
     if (!bipc->ibh) {
         SVC_LOG_ERROR("daemon_bootstrap_ipc_start: init failed for '%s'", daemon_name);
-        AGENTRT_FREE(bipc);
+        AIRY_FREE(bipc);
         return NULL;
     }
 
@@ -66,7 +66,7 @@ daemon_bootstrap_ipc_t *daemon_bootstrap_ipc_start(const char *daemon_name,
     if (ipc_bus_helper_register_channel(bipc->ibh, channel_name, protocol) != 0) {
         SVC_LOG_ERROR("daemon_bootstrap_ipc_start: channel register failed for '%s'", daemon_name);
         ipc_bus_helper_shutdown(bipc->ibh);
-        AGENTRT_FREE(bipc);
+        AIRY_FREE(bipc);
         return NULL;
     }
 
@@ -82,8 +82,8 @@ daemon_bootstrap_ipc_t *daemon_bootstrap_ipc_start(const char *daemon_name,
         /* 非致命 — 通道已注册即可接收消息 */
     }
 
-    AGENTRT_STRNCPY_TERM(bipc->daemon_name, daemon_name, sizeof(bipc->daemon_name) - 1);
-    AGENTRT_STRNCPY_TERM(bipc->channel_name, channel_name, sizeof(bipc->channel_name) - 1);
+    AIRY_STRNCPY_TERM(bipc->daemon_name, daemon_name, sizeof(bipc->daemon_name) - 1);
+    AIRY_STRNCPY_TERM(bipc->channel_name, channel_name, sizeof(bipc->channel_name) - 1);
     bipc->protocol = protocol;
     bipc->running = true;
 
@@ -121,19 +121,19 @@ daemon_bootstrap_ipc_t *daemon_bootstrap_ipc_start_unix(const char *daemon_name,
     }
 
     daemon_bootstrap_ipc_t *bipc =
-        (daemon_bootstrap_ipc_t *)AGENTRT_CALLOC(1, sizeof(daemon_bootstrap_ipc_t));
+        (daemon_bootstrap_ipc_t *)AIRY_CALLOC(1, sizeof(daemon_bootstrap_ipc_t));
     if (!bipc) return NULL;
 
     bipc->ibh = ipc_bus_helper_init(daemon_name, NULL);
     if (!bipc->ibh) {
         SVC_LOG_ERROR("daemon_bootstrap_ipc_start_unix: init failed for '%s'", daemon_name);
-        AGENTRT_FREE(bipc);
+        AIRY_FREE(bipc);
         return NULL;
     }
 
     if (ipc_bus_helper_register_channel(bipc->ibh, channel_name, protocol) != 0) {
         ipc_bus_helper_shutdown(bipc->ibh);
-        AGENTRT_FREE(bipc);
+        AIRY_FREE(bipc);
         return NULL;
     }
 
@@ -141,8 +141,8 @@ daemon_bootstrap_ipc_t *daemon_bootstrap_ipc_start_unix(const char *daemon_name,
     ipc_bus_helper_register_endpoint(bipc->ibh, daemon_name, socket_path,
                                       protos, 1);
 
-    AGENTRT_STRNCPY_TERM(bipc->daemon_name, daemon_name, sizeof(bipc->daemon_name) - 1);
-    AGENTRT_STRNCPY_TERM(bipc->channel_name, channel_name, sizeof(bipc->channel_name) - 1);
+    AIRY_STRNCPY_TERM(bipc->daemon_name, daemon_name, sizeof(bipc->daemon_name) - 1);
+    AIRY_STRNCPY_TERM(bipc->channel_name, channel_name, sizeof(bipc->channel_name) - 1);
     bipc->protocol = protocol;
     bipc->running = true;
 
@@ -180,14 +180,14 @@ void daemon_bootstrap_ipc_stop(daemon_bootstrap_ipc_t *bipc)
     }
 
     bipc->running = false;
-    AGENTRT_FREE(bipc);
+    AIRY_FREE(bipc);
 }
 
 int daemon_bootstrap_ipc_register_handler(daemon_bootstrap_ipc_t *bipc,
                                            ipc_bus_message_handler_t handler,
                                            void *user_data)
 {
-    if (!bipc || !handler) return AGENTRT_ERR_INVALID_PARAM;
+    if (!bipc || !handler) return AIRY_ERR_INVALID_PARAM;
     return ipc_bus_helper_register_handler(bipc->ibh, handler, user_data);
 }
 
@@ -195,7 +195,7 @@ int daemon_bootstrap_ipc_send(daemon_bootstrap_ipc_t *bipc,
                                const char *target_service,
                                const void *payload, size_t payload_size)
 {
-    if (!bipc || !target_service || !payload) return AGENTRT_ERR_INVALID_PARAM;
+    if (!bipc || !target_service || !payload) return AIRY_ERR_INVALID_PARAM;
 
     SVC_LOG_DEBUG("C-L09: daemon_send [%s] → [%s] payload=%zub",
                   bipc->daemon_name, target_service, payload_size);

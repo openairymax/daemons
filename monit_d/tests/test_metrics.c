@@ -40,7 +40,7 @@ static void test_monitor_record_metric(void)
     assert(ret == 0);
 
     metric_info_t metric;
-    AGENTRT_MEMSET(&metric, 0, sizeof(metric));
+    AIRY_MEMSET(&metric, 0, sizeof(metric));
     metric.name = "test_counter";
     metric.description = "Test counter metric";
     metric.type = METRIC_TYPE_COUNTER;
@@ -63,7 +63,7 @@ static void test_monitor_gauge_metric(void)
     assert(ret == 0);
 
     metric_info_t metric;
-    AGENTRT_MEMSET(&metric, 0, sizeof(metric));
+    AIRY_MEMSET(&metric, 0, sizeof(metric));
     metric.name = "memory_usage_bytes";
     metric.description = "Memory usage";
     metric.type = METRIC_TYPE_GAUGE;
@@ -86,7 +86,7 @@ static void test_monitor_histogram_metric(void)
     assert(ret == 0);
 
     metric_info_t metric;
-    AGENTRT_MEMSET(&metric, 0, sizeof(metric));
+    AIRY_MEMSET(&metric, 0, sizeof(metric));
     metric.name = "request_duration_ms";
     metric.description = "Request duration histogram";
     metric.type = METRIC_TYPE_HISTOGRAM;
@@ -109,7 +109,7 @@ static void test_monitor_get_metrics(void)
     assert(ret == 0);
 
     metric_info_t metric;
-    AGENTRT_MEMSET(&metric, 0, sizeof(metric));
+    AIRY_MEMSET(&metric, 0, sizeof(metric));
     metric.name = "requests_total";
     metric.description = "Total requests";
     metric.type = METRIC_TYPE_COUNTER;
@@ -125,7 +125,7 @@ static void test_monitor_get_metrics(void)
     }
 
     /* 释放 monitor_service_get_metrics 返回的数组 */
-    AGENTRT_FREE(metrics);
+    AIRY_FREE(metrics);
 
     monitor_service_destroy(svc);
 
@@ -142,7 +142,7 @@ static void test_monitor_labels(void)
 
     char *labels[] = {"service:llm_d", "model:gpt-4"};
     metric_info_t metric;
-    AGENTRT_MEMSET(&metric, 0, sizeof(metric));
+    AIRY_MEMSET(&metric, 0, sizeof(metric));
     metric.name = "api_calls";
     metric.description = "API calls";
     metric.type = METRIC_TYPE_COUNTER;

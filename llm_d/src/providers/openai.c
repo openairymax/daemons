@@ -49,7 +49,7 @@
 /* ---------- 速率限制器状态 ---------- */
 
 typedef struct {
-    agentrt_mutex_t lock;
+    airy_mtx_t lock;
     time_t rpm_window_start; /* RPM窗口起始时间 */
     int rpm_count;           /* 当前窗口内请求数 */
     int rpm_limit;           /* RPM限制 */
@@ -72,7 +72,7 @@ typedef struct {
 
 static void openai_rl_init(openai_rate_limiter_t *rl)
 {
-    agentrt_mutex_init(&rl->lock);
+    airy_mtx_init(&rl->lock);
     rl->rpm_window_start = time(NULL);
     rl->rpm_count = 0;
     rl->rpm_limit = OPENAI_DEFAULT_RPM;
@@ -86,13 +86,13 @@ static void openai_rl_init(openai_rate_limiter_t *rl)
 
 static void openai_rl_destroy(openai_rate_limiter_t *rl)
 {
-    agentrt_mutex_destroy(&rl->lock);
+    airy_mtx_destroy(&rl->lock);
 }
 
 static int openai_rl_check_rpm(openai_rate_limiter_t *rl)
 {
     time_t now = time(NULL);
-    agentrt_mutex_lock(&rl->lock);
+    airy_mtx_lock(&rl->lock);
 
     if (now - rl->rpm_window_start >= 60) {
         rl->rpm_count = 0;
@@ -100,19 +100,19 @@ static int openai_rl_check_rpm(openai_rate_limiter_t *rl)
     }
 
     if (rl->rpm_count >= rl->rpm_limit) {
-        agentrt_mutex_unlock(&rl->lock);
-        return AGENTRT_ERR_LLM_RATE_LIMIT;
+        airy_mtx_unlock(&rl->lock);
+        return AIRY_ERR_LLM_RATE_LIMIT;
     }
 
     rl->rpm_count++;
-    agentrt_mutex_unlock(&rl->lock);
+    airy_mtx_unlock(&rl->lock);
     return 0;
 }
 
 static int __attribute__((unused)) openai_rl_check_tpm(openai_rate_limiter_t *rl, int tokens)
 {
     time_t now = time(NULL);
-    agentrt_mutex_lock(&rl->lock);
+    airy_mtx_lock(&rl->lock);
 
     if (now - rl->tpm_window_start >= 60) {
         rl->tpm_count = 0;
@@ -120,19 +120,19 @@ static int __attribute__((unused)) openai_rl_check_tpm(openai_rate_limiter_t *rl
     }
 
     if (rl->tpm_count + tokens > rl->tpm_limit) {
-        agentrt_mutex_unlock(&rl->lock);
-        return AGENTRT_ERR_LLM_RATE_LIMIT;
+        airy_mtx_unlock(&rl->lock);
+        return AIRY_ERR_LLM_RATE_LIMIT;
     }
 
     rl->tpm_count += tokens;
-    agentrt_mutex_unlock(&rl->lock);
+    airy_mtx_unlock(&rl->lock);
     return 0;
 }
 
 static void openai_rl_record_429(openai_rate_limiter_t *rl, int retry_after)
 {
     time_t now = time(NULL);
-    agentrt_mutex_lock(&rl->lock);
+    airy_mtx_lock(&rl->lock);
 
     rl->last_429_time = now;
     rl->consecutive_429s++;
@@ -142,12 +142,12 @@ static void openai_rl_record_429(openai_rate_limiter_t *rl, int retry_after)
         rl->retry_after_sec = 0;
     }
 
-    agentrt_mutex_unlock(&rl->lock);
+    airy_mtx_unlock(&rl->lock);
 }
 
 static int openai_rl_get_wait_ms(openai_rate_limiter_t *rl, int attempt)
 {
-    agentrt_mutex_lock(&rl->lock);
+    airy_mtx_lock(&rl->lock);
 
     int wait_ms;
 
@@ -160,20 +160,20 @@ static int openai_rl_get_wait_ms(openai_rate_limiter_t *rl, int attempt)
             base_delay = OPENAI_MAX_DELAY_MS;
 
         double jitter =
-            ((double)agentrt_random_uint32(0, 99) / 100.0) * base_delay * OPENAI_JITTER_FACTOR;
+            ((double)airy_random_uint32(0, 99) / 100.0) * base_delay * OPENAI_JITTER_FACTOR;
         wait_ms = (int)((double)base_delay + jitter);
     }
 
-    agentrt_mutex_unlock(&rl->lock);
+    airy_mtx_unlock(&rl->lock);
     return wait_ms;
 }
 
 static void openai_rl_reset_429(openai_rate_limiter_t *rl)
 {
-    agentrt_mutex_lock(&rl->lock);
+    airy_mtx_lock(&rl->lock);
     rl->consecutive_429s = 0;
     rl->retry_after_sec = 0;
-    agentrt_mutex_unlock(&rl->lock);
+    airy_mtx_unlock(&rl->lock);
 }
 
 /* ========== HTTP 429 Retry-After 解析 ========== */
@@ -230,9 +230,9 @@ static int openai_http_request_with_retry(openai_ctx_t *ctx, const char *url,
         ret = provider_http_post(url, headers, body, ctx->base.timeout_sec, 0, out_response,
                                  out_http_code);
 
-        if (ret == AGENTRT_OK && *out_http_code == 200) {
+        if (ret == AIRY_OK && *out_http_code == 200) {
             openai_rl_reset_429(&ctx->rl);
-            return AGENTRT_OK;
+            return AIRY_OK;
         }
 
         if (*out_http_code == 429) {
@@ -280,7 +280,7 @@ static int openai_http_request_with_retry(openai_ctx_t *ctx, const char *url,
         break;
     }
 
-    return AGENTRT_ERR_IO;
+    return AIRY_ERR_IO;
 }
 
 /* ---------- 生命周期 ---------- */
@@ -290,10 +290,10 @@ static provider_ctx_t *openai_init(const char *name __attribute__((unused)), con
                                    double timeout_sec, int max_retries)
 {
 
-    openai_ctx_t *ctx = (openai_ctx_t *)AGENTRT_CALLOC(1, sizeof(openai_ctx_t));
+    openai_ctx_t *ctx = (openai_ctx_t *)AIRY_CALLOC(1, sizeof(openai_ctx_t));
     if (!ctx) {
         SVC_LOG_ERROR("C-L02: OPENAI: INIT-FAIL reason=oom STACK: openai_init");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     provider_base_init(&ctx->base, api_key, api_base, organization, timeout_sec, max_retries,
@@ -301,7 +301,7 @@ static provider_ctx_t *openai_init(const char *name __attribute__((unused)), con
 
     openai_rl_init(&ctx->rl);
 
-    agentrt_random_init();
+    airy_random_init();
 
     SVC_LOG_INFO("C-L02: OPENAI: INIT api_base=%s timeout=%.1fs retries=%d has_api_key=%d "
                  "RPM=%d TPM=%ld",
@@ -318,7 +318,7 @@ static void openai_destroy(provider_ctx_t *ctx_ptr)
         openai_ctx_t *ctx = (openai_ctx_t *)ctx_ptr;
         SVC_LOG_INFO("C-L02: OPENAI: DESTROY ctx=%p", (void *)ctx_ptr);
         openai_rl_destroy(&ctx->rl);
-        AGENTRT_FREE(ctx_ptr);
+        AIRY_FREE(ctx_ptr);
     }
 }
 
@@ -328,7 +328,7 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
                            llm_response_t **out_response)
 {
     if (!ctx_ptr || !manager || !out_response) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     openai_ctx_t *ctx = (openai_ctx_t *)ctx_ptr;
@@ -339,7 +339,7 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
         SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s reason=build_request_oom "
                       "STACK: openai_complete",
                       manager->model ? manager->model : OPENAI_DEFAULT_MODEL);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     const char *model = manager->model && manager->model[0] ? manager->model : OPENAI_DEFAULT_MODEL;
@@ -365,9 +365,9 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     int ret = openai_http_request_with_retry(ctx, url, headers, req_body, &http_code, &http_resp);
 
     curl_slist_free_all(headers);
-    AGENTRT_FREE(req_body);
+    AIRY_FREE(req_body);
 
-    if (ret != AGENTRT_OK) {
+    if (ret != AIRY_OK) {
         if (http_code == 429) {
             SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld "
                           "DIAGNOSIS=rate_limit_exhausted",
@@ -385,7 +385,7 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     ret = provider_parse_openai_response(http_resp->data, out_response);
     provider_http_resp_free(http_resp);
 
-    if (ret == AGENTRT_OK && *out_response) {
+    if (ret == AIRY_OK && *out_response) {
         SVC_LOG_INFO("C-L02: OPENAI: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
                      "http_code=%ld",
                      (*out_response)->model ? (*out_response)->model : model,
@@ -424,14 +424,14 @@ static int oai_stream_on_chunk(const char *json_line, void *userdata)
     if (!acc->resp_id) {
         cJSON *id = cJSON_GetObjectItem(root, "id");
         if (cJSON_IsString(id) && id->valuestring) {
-            acc->resp_id = AGENTRT_STRDUP(id->valuestring);
+            acc->resp_id = AIRY_STRDUP(id->valuestring);
         }
     }
 
     if (!acc->resp_model) {
         cJSON *model = cJSON_GetObjectItem(root, "model");
         if (cJSON_IsString(model) && model->valuestring) {
-            acc->resp_model = AGENTRT_STRDUP(model->valuestring);
+            acc->resp_model = AIRY_STRDUP(model->valuestring);
         }
     }
 
@@ -460,7 +460,7 @@ static int oai_stream_on_chunk(const char *json_line, void *userdata)
                         size_t new_cap = acc->acc_cap * 2;
                         while (new_cap < needed)
                             new_cap *= 2;
-                        char *ptr = (char *)AGENTRT_REALLOC(acc->acc_content, new_cap);
+                        char *ptr = (char *)AIRY_REALLOC(acc->acc_content, new_cap);
                         if (ptr) {
                             acc->acc_content = ptr;
                             acc->acc_cap = new_cap;
@@ -477,8 +477,8 @@ static int oai_stream_on_chunk(const char *json_line, void *userdata)
 
         cJSON *fr = cJSON_GetObjectItem(choice, "finish_reason");
         if (cJSON_IsString(fr) && fr->valuestring && strcmp(fr->valuestring, "null") != 0) {
-            AGENTRT_FREE(acc->finish_reason);
-            acc->finish_reason = AGENTRT_STRDUP(fr->valuestring);
+            AIRY_FREE(acc->finish_reason);
+            acc->finish_reason = AIRY_STRDUP(fr->valuestring);
         }
     }
 
@@ -488,29 +488,29 @@ static int oai_stream_on_chunk(const char *json_line, void *userdata)
 
 static llm_response_t *oai_build_stream_response(oai_stream_acc_t *acc)
 {
-    llm_response_t *resp = (llm_response_t *)AGENTRT_CALLOC(1, sizeof(llm_response_t));
+    llm_response_t *resp = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     if (acc->resp_id)
         resp->id = acc->resp_id;
     else
-        resp->id = AGENTRT_STRDUP("");
+        resp->id = AIRY_STRDUP("");
     acc->resp_id = NULL;
 
     if (acc->resp_model)
         resp->model = acc->resp_model;
     else
-        resp->model = AGENTRT_STRDUP("unknown");
+        resp->model = AIRY_STRDUP("unknown");
     acc->resp_model = NULL;
 
     resp->created = acc->resp_created;
 
-    resp->choices = (llm_message_t *)AGENTRT_CALLOC(1, sizeof(llm_message_t));
+    resp->choices = (llm_message_t *)AIRY_CALLOC(1, sizeof(llm_message_t));
     if (resp->choices) {
         resp->choice_count = 1;
-        resp->choices[0].role = AGENTRT_STRDUP("assistant");
+        resp->choices[0].role = AIRY_STRDUP("assistant");
         resp->choices[0].content = acc->acc_content;
         acc->acc_content = NULL;
     } else {
@@ -521,7 +521,7 @@ static llm_response_t *oai_build_stream_response(oai_stream_acc_t *acc)
         resp->finish_reason = acc->finish_reason;
         acc->finish_reason = NULL;
     } else {
-        resp->finish_reason = AGENTRT_STRDUP("stop");
+        resp->finish_reason = AIRY_STRDUP("stop");
     }
 
     return resp;
@@ -532,7 +532,7 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
                                   llm_response_t **out_response)
 {
     if (!ctx_ptr || !manager || !callback) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     openai_ctx_t *ctx = (openai_ctx_t *)ctx_ptr;
@@ -546,7 +546,7 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
         SVC_LOG_ERROR("C-L02: OPENAI: STREAM-FAIL model=%s reason=build_request_oom "
                       "STACK: openai_complete_stream",
                       manager->model ? manager->model : OPENAI_DEFAULT_MODEL);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     const char *model = manager->model && manager->model[0] ? manager->model : OPENAI_DEFAULT_MODEL;
@@ -569,16 +569,16 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     acc.user_cb = callback;
     acc.user_data = user_data;
     acc.acc_cap = 4096;
-    acc.acc_content = (char *)AGENTRT_MALLOC(acc.acc_cap);
+    acc.acc_content = (char *)AIRY_MALLOC(acc.acc_cap);
 
     long http_code = 0;
     int ret = provider_http_post_stream(url, headers, req_body, base->timeout_sec,
                                         oai_stream_on_chunk, &acc, &http_code);
 
     curl_slist_free_all(headers);
-    AGENTRT_FREE(req_body);
+    AIRY_FREE(req_body);
 
-    if (ret != AGENTRT_OK) {
+    if (ret != AIRY_OK) {
         if (http_code == 429) {
             SVC_LOG_ERROR("C-L02: OPENAI: STREAM-FAIL model=%s http_code=%ld "
                           "DIAGNOSIS=rate_limit_exhausted",
@@ -588,18 +588,18 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
                           "DIAGNOSIS=http_stream_error",
                           model, http_code);
         }
-        AGENTRT_FREE(acc.acc_content);
-        AGENTRT_FREE(acc.resp_id);
-        AGENTRT_FREE(acc.resp_model);
-        AGENTRT_FREE(acc.finish_reason);
+        AIRY_FREE(acc.acc_content);
+        AIRY_FREE(acc.resp_id);
+        AIRY_FREE(acc.resp_model);
+        AIRY_FREE(acc.finish_reason);
         return ret;
     }
 
     llm_response_t *resp = oai_build_stream_response(&acc);
-    AGENTRT_FREE(acc.acc_content);
-    AGENTRT_FREE(acc.resp_id);
-    AGENTRT_FREE(acc.resp_model);
-    AGENTRT_FREE(acc.finish_reason);
+    AIRY_FREE(acc.acc_content);
+    AIRY_FREE(acc.resp_id);
+    AIRY_FREE(acc.resp_model);
+    AIRY_FREE(acc.finish_reason);
 
     if (resp) {
         SVC_LOG_INFO("C-L02: OPENAI: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
@@ -618,7 +618,7 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
         llm_response_free(resp);
     }
 
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 /* ---------- 操作表 ---------- */

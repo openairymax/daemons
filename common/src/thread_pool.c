@@ -19,14 +19,14 @@ typedef struct task_node {
 
 struct thread_pool_s {
     thread_pool_config_t config;
-    agentrt_thread_t *threads;
+    airy_thread_t *threads;
     uint32_t thread_count;
     task_node_t *queue_head;
     task_node_t *queue_tail;
     uint32_t queue_count;
     uint32_t active_count;
-    agentrt_mutex_t lock;
-    agentrt_cond_t notify;
+    airy_mtx_t lock;
+    airy_cond_t notify;
     bool running;
     bool shutdown;
 };
@@ -36,14 +36,14 @@ static void *worker_thread_func(void *arg)
     thread_pool_t *pool = (thread_pool_t *)arg;
 
     while (true) {
-        agentrt_mutex_lock(&pool->lock);
+        airy_mtx_lock(&pool->lock);
 
         while (pool->queue_count == 0 && !pool->shutdown) {
-            agentrt_cond_wait(&pool->notify, &pool->lock);
+            airy_cond_wait(&pool->notify, &pool->lock);
         }
 
         if (pool->shutdown && pool->queue_count == 0) {
-            agentrt_mutex_unlock(&pool->lock);
+            airy_mtx_unlock(&pool->lock);
             break;
         }
 
@@ -56,15 +56,15 @@ static void *worker_thread_func(void *arg)
             pool->active_count++;
         }
 
-        agentrt_mutex_unlock(&pool->lock);
+        airy_mtx_unlock(&pool->lock);
 
         if (task) {
             task->fn(task->arg);
-            AGENTRT_FREE(task);
+            AIRY_FREE(task);
 
-            agentrt_mutex_lock(&pool->lock);
+            airy_mtx_lock(&pool->lock);
             pool->active_count--;
-            agentrt_mutex_unlock(&pool->lock);
+            airy_mtx_unlock(&pool->lock);
         }
     }
 
@@ -73,10 +73,10 @@ static void *worker_thread_func(void *arg)
 
 thread_pool_t *thread_pool_create(const thread_pool_config_t *config)
 {
-    thread_pool_t *pool = (thread_pool_t *)AGENTRT_CALLOC(1, sizeof(thread_pool_t));
+    thread_pool_t *pool = (thread_pool_t *)AIRY_CALLOC(1, sizeof(thread_pool_t));
     if (!pool) {
         SVC_LOG_ERROR("thread_pool_create: memory allocation failed for pool");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     if (config) {
@@ -91,15 +91,15 @@ thread_pool_t *thread_pool_create(const thread_pool_config_t *config)
     }
 
     pool->threads =
-        (agentrt_thread_t *)AGENTRT_CALLOC(pool->config.max_threads, sizeof(agentrt_thread_t));
+        (airy_thread_t *)AIRY_CALLOC(pool->config.max_threads, sizeof(airy_thread_t));
     if (!pool->threads) {
         SVC_LOG_ERROR("thread_pool_create: memory allocation failed for threads array (max_threads=%u)", pool->config.max_threads);
-        AGENTRT_FREE(pool);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_FREE(pool);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    agentrt_mutex_init(&pool->lock);
-    agentrt_cond_init(&pool->notify);
+    airy_mtx_init(&pool->lock);
+    airy_cond_init(&pool->notify);
 
     pool->queue_head = NULL;
     pool->queue_tail = NULL;
@@ -115,7 +115,7 @@ thread_pool_t *thread_pool_create(const thread_pool_config_t *config)
         num_threads = pool->config.max_threads;
 
     for (uint32_t i = 0; i < num_threads; i++) {
-        int rc = agentrt_thread_create(&pool->threads[i], worker_thread_func, pool);
+        int rc = airy_thread_create(&pool->threads[i], worker_thread_func, pool);
         if (rc == 0) {
             pool->thread_count++;
         } else {
@@ -125,11 +125,11 @@ thread_pool_t *thread_pool_create(const thread_pool_config_t *config)
 
     if (pool->thread_count == 0) {
         SVC_LOG_ERROR("thread_pool_create: all thread creations failed (attempted=%u)", num_threads);
-        agentrt_mutex_destroy(&pool->lock);
-        agentrt_cond_destroy(&pool->notify);
-        AGENTRT_FREE(pool->threads);
-        AGENTRT_FREE(pool);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_OVERFLOW, "limit exceeded");
+        airy_mtx_destroy(&pool->lock);
+        airy_cond_destroy(&pool->notify);
+        AIRY_FREE(pool->threads);
+        AIRY_FREE(pool);
+        AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
     }
 
     return pool;
@@ -140,63 +140,63 @@ void thread_pool_destroy(thread_pool_t *pool)
     if (!pool)
         return;
 
-    agentrt_mutex_lock(&pool->lock);
+    airy_mtx_lock(&pool->lock);
     pool->shutdown = true;
-    agentrt_cond_broadcast(&pool->notify);
-    agentrt_mutex_unlock(&pool->lock);
+    airy_cond_broadcast(&pool->notify);
+    airy_mtx_unlock(&pool->lock);
 
     for (uint32_t i = 0; i < pool->thread_count; i++) {
-        agentrt_thread_join(pool->threads[i], NULL);
+        airy_thread_join(pool->threads[i], NULL);
     }
 
     task_node_t *node = pool->queue_head;
     while (node) {
         task_node_t *next = node->next;
-        AGENTRT_FREE(node);
+        AIRY_FREE(node);
         node = next;
     }
 
-    agentrt_mutex_destroy(&pool->lock);
-    agentrt_cond_destroy(&pool->notify);
-    AGENTRT_FREE(pool->threads);
-    AGENTRT_FREE(pool);
+    airy_mtx_destroy(&pool->lock);
+    airy_cond_destroy(&pool->notify);
+    AIRY_FREE(pool->threads);
+    AIRY_FREE(pool);
 }
 
 int thread_pool_submit(thread_pool_t *pool, thread_task_fn_t task, void *arg)
 {
     if (!pool || !task) {
         SVC_LOG_ERROR("thread_pool_submit: null parameter pool=%p task=%p", (void *)pool, (void *)(uintptr_t)task);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     if (!pool->running) {
         SVC_LOG_ERROR("thread_pool_submit: pool not running");
-        return AGENTRT_ERR_UNKNOWN;
+        return AIRY_ERR_UNKNOWN;
     }
 
-    task_node_t *node = (task_node_t *)AGENTRT_CALLOC(1, sizeof(task_node_t));
+    task_node_t *node = (task_node_t *)AIRY_CALLOC(1, sizeof(task_node_t));
     if (!node) {
         SVC_LOG_ERROR("thread_pool_submit: memory allocation failed for task node");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     node->fn = task;
     node->arg = arg;
     node->next = NULL;
 
-    agentrt_mutex_lock(&pool->lock);
+    airy_mtx_lock(&pool->lock);
 
     if (pool->shutdown) {
-        agentrt_mutex_unlock(&pool->lock);
-        AGENTRT_FREE(node);
+        airy_mtx_unlock(&pool->lock);
+        AIRY_FREE(node);
         SVC_LOG_WARN("thread_pool_submit: pool is shutting down");
-        return AGENTRT_ERR_UNKNOWN;
+        return AIRY_ERR_UNKNOWN;
     }
 
     if (pool->queue_count >= pool->config.queue_size) {
-        agentrt_mutex_unlock(&pool->lock);
-        AGENTRT_FREE(node);
+        airy_mtx_unlock(&pool->lock);
+        AIRY_FREE(node);
         SVC_LOG_WARN("thread_pool_submit: queue full queue_count=%u queue_size=%u", pool->queue_count, pool->config.queue_size);
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
     }
 
     if (pool->queue_tail) {
@@ -207,8 +207,8 @@ int thread_pool_submit(thread_pool_t *pool, thread_task_fn_t task, void *arg)
     pool->queue_tail = node;
     pool->queue_count++;
 
-    agentrt_cond_signal(&pool->notify);
-    agentrt_mutex_unlock(&pool->lock);
+    airy_cond_signal(&pool->notify);
+    airy_mtx_unlock(&pool->lock);
 
     return 0;
 }
@@ -219,9 +219,9 @@ uint32_t thread_pool_active_count(thread_pool_t *pool)
         SVC_LOG_ERROR("thread_pool_active_count: null pool parameter");
         return 0;
     }
-    agentrt_mutex_lock(&pool->lock);
+    airy_mtx_lock(&pool->lock);
     uint32_t count = pool->active_count;
-    agentrt_mutex_unlock(&pool->lock);
+    airy_mtx_unlock(&pool->lock);
     return count;
 }
 
@@ -231,9 +231,9 @@ uint32_t thread_pool_pending_count(thread_pool_t *pool)
         SVC_LOG_ERROR("thread_pool_pending_count: null pool parameter");
         return 0;
     }
-    agentrt_mutex_lock(&pool->lock);
+    airy_mtx_lock(&pool->lock);
     uint32_t count = pool->queue_count;
-    agentrt_mutex_unlock(&pool->lock);
+    airy_mtx_unlock(&pool->lock);
     return count;
 }
 

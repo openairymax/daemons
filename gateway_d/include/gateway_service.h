@@ -20,8 +20,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_DAEMON_GATEWAY_SERVICE_H
-#define AGENTRT_DAEMON_GATEWAY_SERVICE_H
+#ifndef AIRY_RT_DAEMON_GATEWAY_SERVICE_H
+#define AIRY_RT_DAEMON_GATEWAY_SERVICE_H
 
 #include "svc_common.h"
 
@@ -86,38 +86,38 @@ typedef struct gateway_service_s *gateway_service_t;
  * @brief 创建网关服务
  * @param[out] service 服务句柄输出
  * @param[in] config 服务配置
- * @return AGENTRT_SUCCESS 成功
+ * @return AIRY_SUCCESS 成功
  */
-AGENTRT_API agentrt_error_t gateway_service_create(gateway_service_t *service,
+AIRY_API airy_err_t gateway_service_create(gateway_service_t *service,
                                                    const gateway_service_config_t *config);
 
 /**
  * @brief 销毁网关服务
  * @param[in] service 服务句柄
  */
-AGENTRT_API void gateway_service_destroy(gateway_service_t service);
+AIRY_API void gateway_service_destroy(gateway_service_t service);
 
 /**
  * @brief 初始化网关服务
  * @param[in] service 服务句柄
- * @return AGENTRT_SUCCESS 成功
+ * @return AIRY_SUCCESS 成功
  */
-AGENTRT_API agentrt_error_t gateway_service_init(gateway_service_t service);
+AIRY_API airy_err_t gateway_service_init(gateway_service_t service);
 
 /**
  * @brief 启动网关服务
  * @param[in] service 服务句柄
- * @return AGENTRT_SUCCESS 成功
+ * @return AIRY_SUCCESS 成功
  */
-AGENTRT_API agentrt_error_t gateway_service_start(gateway_service_t service);
+AIRY_API airy_err_t gateway_service_start(gateway_service_t service);
 
 /**
  * @brief 停止网关服务
  * @param[in] service 服务句柄
  * @param[in] force 是否强制停止
- * @return AGENTRT_SUCCESS 成功
+ * @return AIRY_SUCCESS 成功
  */
-AGENTRT_API agentrt_error_t gateway_service_stop(gateway_service_t service, bool force);
+AIRY_API airy_err_t gateway_service_stop(gateway_service_t service, bool force);
 
 /* ==================== 状态查询 ==================== */
 
@@ -126,30 +126,30 @@ AGENTRT_API agentrt_error_t gateway_service_stop(gateway_service_t service, bool
  * @param[in] service 服务句柄
  * @return 服务状态
  */
-AGENTRT_API agentrt_svc_state_t gateway_service_get_state(gateway_service_t service);
+AIRY_API airy_svc_state_t gateway_service_get_state(gateway_service_t service);
 
 /**
  * @brief 检查服务是否运行中
  * @param[in] service 服务句柄
  * @return true 运行中
  */
-AGENTRT_API bool gateway_service_is_running(gateway_service_t service);
+AIRY_API bool gateway_service_is_running(gateway_service_t service);
 
 /**
  * @brief 获取服务统计信息
  * @param[in] service 服务句柄
  * @param[out] stats 统计信息输出
- * @return AGENTRT_SUCCESS 成功
+ * @return AIRY_SUCCESS 成功
  */
-AGENTRT_API agentrt_error_t gateway_service_get_stats(gateway_service_t service,
-                                                      agentrt_svc_stats_t *stats);
+AIRY_API airy_err_t gateway_service_get_stats(gateway_service_t service,
+                                                      airy_svc_stats_t *stats);
 
 /**
  * @brief 执行健康检查
  * @param[in] service 服务句柄
- * @return AGENTRT_SUCCESS 健康
+ * @return AIRY_SUCCESS 健康
  */
-AGENTRT_API agentrt_error_t gateway_service_healthcheck(gateway_service_t service);
+AIRY_API airy_err_t gateway_service_healthcheck(gateway_service_t service);
 
 /* ==================== 配置管理 ==================== */
 
@@ -157,19 +157,19 @@ AGENTRT_API agentrt_error_t gateway_service_healthcheck(gateway_service_t servic
  * @brief 从配置文件加载配置
  * @param[out] config 配置输出
  * @param[in] config_path 配置文件路径
- * @return AGENTRT_SUCCESS 成功
+ * @return AIRY_SUCCESS 成功
  */
-AGENTRT_API agentrt_error_t gateway_service_load_config(gateway_service_config_t *config,
+AIRY_API airy_err_t gateway_service_load_config(gateway_service_config_t *config,
                                                         const char *config_path);
 
 /**
  * @brief 获取默认配置
  * @param[out] config 配置输出
  */
-AGENTRT_API void gateway_service_get_default_config(gateway_service_config_t *config);
+AIRY_API void gateway_service_get_default_config(gateway_service_config_t *config);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* AGENTRT_DAEMON_GATEWAY_SERVICE_H */
+#endif /* AIRY_RT_DAEMON_GATEWAY_SERVICE_H */

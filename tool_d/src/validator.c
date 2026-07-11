@@ -28,7 +28,7 @@ struct tool_validator {
 
 tool_validator_t *tool_validator_create(void)
 {
-    tool_validator_t *val = AGENTRT_CALLOC(1, sizeof(tool_validator_t));
+    tool_validator_t *val = AIRY_CALLOC(1, sizeof(tool_validator_t));
     if (val)
         val->strict_mode = 1;
     return val;
@@ -36,7 +36,7 @@ tool_validator_t *tool_validator_create(void)
 
 void tool_validator_destroy(tool_validator_t *val)
 {
-    AGENTRT_FREE(val);
+    AIRY_FREE(val);
 }
 
 static int validate_type_mismatch(const char *param_name, const char *expected, const char *actual)
@@ -165,7 +165,7 @@ int tool_validator_validate(tool_validator_t *val __attribute__((unused)),
                             const tool_metadata_t *meta, const char *params_json)
 {
     if (!meta || !params_json)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
     CJSON_PARSE_GUARD(root, params_json, {

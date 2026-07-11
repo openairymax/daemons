@@ -25,19 +25,19 @@ set(PLUGIN_D_SOURCES
 
 add_executable(plugin_d ${PLUGIN_D_SOURCES})
 
-target_compile_definitions(plugin_d PRIVATE AGENTRT_ENABLE_V2_API=1)
+target_compile_definitions(plugin_d PRIVATE AIRY_ENABLE_V2_API=1)
 
 if(WIN32)
     target_compile_definitions(plugin_d PRIVATE
-        AGENTRT_PLATFORM_WINDOWS=1
+        AIRY_PLATFORM_WINDOWS=1
         WIN32_LEAN_AND_MEAN
         NOMINMAX
         _CRT_SECURE_NO_WARNINGS
     )
-    target_link_libraries(plugin_d PRIVATE agentrt_common ws2_32 bcrypt)
+    target_link_libraries(plugin_d PRIVATE airy_common ws2_32 bcrypt)
 elseif(UNIX)
     target_link_libraries(plugin_d PRIVATE
-        agentrt_common Threads::Threads agentrt_platform_libs dl)
+        airy_common Threads::Threads airy_platform_libs dl)
 endif()
 
 target_include_directories(plugin_d PRIVATE

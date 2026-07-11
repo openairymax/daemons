@@ -21,11 +21,11 @@ extern "C" {
 
 /* ==================== 错误码兼容 ==================== */
 
-#define SVC_OK AGENTRT_OK
-#define SVC_ERR_INVALID_PARAM AGENTRT_ERR_INVALID_PARAM
-#define SVC_ERR_IO AGENTRT_ERR_IO
-#define SVC_ERR_OUT_OF_MEMORY AGENTRT_ERR_OUT_OF_MEMORY
-#define SVC_ERR_PARSE_ERROR AGENTRT_ERR_PARSE_ERROR
+#define SVC_OK AIRY_OK
+#define SVC_ERR_INVALID_PARAM AIRY_ERR_INVALID_PARAM
+#define SVC_ERR_IO AIRY_ERR_IO
+#define SVC_ERR_OUT_OF_MEMORY AIRY_ERR_OUT_OF_MEMORY
+#define SVC_ERR_PARSE_ERROR AIRY_ERR_PARSE_ERROR
 #define SVC_ERR_RPC (-5001)
 
 /* ==================== 类型兼容 ==================== */
@@ -45,18 +45,18 @@ static inline int svc_config_load(const char *path __attribute__((unused)),
         return SVC_ERR_INVALID_PARAM;
 
     *out_config = NULL;
-    svc_config_t *cfg = (svc_config_t *)AGENTRT_CALLOC(1, sizeof(svc_config_t));
+    svc_config_t *cfg = (svc_config_t *)AIRY_CALLOC(1, sizeof(svc_config_t));
     if (!cfg)
         return SVC_ERR_OUT_OF_MEMORY;
 
-    cfg->service_name = AGENTRT_STRDUP("agentrt-service");
-    cfg->listen_addr = AGENTRT_STRDUP(":8080");
+    cfg->service_name = AIRY_STRDUP("agentrt-service");
+    cfg->listen_addr = AIRY_STRDUP(":8080");
     cfg->log_level = 3;
 
     if (!cfg->service_name || !cfg->listen_addr) {
-        AGENTRT_FREE(cfg->service_name);
-        AGENTRT_FREE(cfg->listen_addr);
-        AGENTRT_FREE(cfg);
+        AIRY_FREE(cfg->service_name);
+        AIRY_FREE(cfg->listen_addr);
+        AIRY_FREE(cfg);
         return SVC_ERR_OUT_OF_MEMORY;
     }
 
@@ -68,9 +68,9 @@ static inline void svc_config_free(svc_config_t *config)
 {
     if (!config)
         return;
-    AGENTRT_FREE(config->service_name);
-    AGENTRT_FREE(config->listen_addr);
-    AGENTRT_FREE(config);
+    AIRY_FREE(config->service_name);
+    AIRY_FREE(config->listen_addr);
+    AIRY_FREE(config);
 }
 
 static inline const char *svc_config_get_name(const svc_config_t *config)

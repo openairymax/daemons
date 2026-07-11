@@ -12,13 +12,13 @@ option(BUILD_COVERAGE "Build with code coverage" OFF)
 # 查找依赖
 # Threads found by root CMakeLists.txt
 # PkgConfig found by root CMakeLists.txt
-# cJSON found by root CMakeLists.txt (AGENTRT_HAS_CJSON)
-# CURL found by root CMakeLists.txt (AGENTRT_HAS_CURL)
-if(NOT AGENTRT_HAS_CURL)
-    agentrt_print_warn("libcurl not found, LLM remote API features may be limited")
+# cJSON found by root CMakeLists.txt (AIRY_HAS_CJSON)
+# CURL found by root CMakeLists.txt (AIRY_HAS_CURL)
+if(NOT AIRY_HAS_CURL)
+    airy_print_warn("libcurl not found, LLM remote API features may be limited")
 endif()
-if(NOT AGENTRT_HAS_CJSON)
-    agentrt_print_warn("libcjson not found, JSON features may be limited")
+if(NOT AIRY_HAS_CJSON)
+    airy_print_warn("libcjson not found, JSON features may be limited")
 endif()
 
 # ==================== 路径设置 ====================
@@ -55,25 +55,25 @@ set(LLM_SERVICE_SOURCES
     src/llm_svc_adapter.c
 )
 
-add_library(agentrt_llm_service STATIC ${LLM_SERVICE_SOURCES})
+add_library(airy_llm_service STATIC ${LLM_SERVICE_SOURCES})
 
 # 平台特定配置
 if(WIN32)
-    target_compile_definitions(agentrt_llm_service PRIVATE
-        AGENTRT_PLATFORM_WINDOWS=1
+    target_compile_definitions(airy_llm_service PRIVATE
+        AIRY_PLATFORM_WINDOWS=1
         WIN32_LEAN_AND_MEAN
         NOMINMAX
         _CRT_SECURE_NO_WARNINGS
     )
 elseif(UNIX)
-    target_compile_definitions(agentrt_llm_service PRIVATE
-        AGENTRT_PLATFORM_LINUX=1
+    target_compile_definitions(airy_llm_service PRIVATE
+        AIRY_PLATFORM_LINUX=1
         _GNU_SOURCE
     )
 endif()
 
 # 包含目录 - 兼容层和 commons
-target_include_directories(agentrt_llm_service PUBLIC
+target_include_directories(airy_llm_service PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${DAEMON_COMMON_INCLUDE_DIR}
@@ -91,44 +91,44 @@ target_include_directories(agentrt_llm_service PUBLIC
     ${COMMONS_INCLUDE_DIR}/utils/ipc/include
 )
 
-target_include_directories(agentrt_llm_service PRIVATE
+target_include_directories(airy_llm_service PRIVATE
     ${CURL_INCLUDE_DIRS}
     ${CJSON_INCLUDE_DIRS}
     ${YAML_INCLUDE_DIRS}
 )
 
 # 链接库：svc_common 提供 daemon 公共层 + commons 传递依赖
-target_link_libraries(agentrt_llm_service PUBLIC svc_common)
+target_link_libraries(airy_llm_service PUBLIC svc_common)
 
-if(AGENTRT_HAS_CURL)
+if(AIRY_HAS_CURL)
     if(CURL_FOUND AND CURL_LIBRARIES)
-        target_link_libraries(agentrt_llm_service PUBLIC ${CURL_LIBRARIES})
+        target_link_libraries(airy_llm_service PUBLIC ${CURL_LIBRARIES})
     elseif(LIBCURL_FOUND AND LIBCURL_LIBRARIES)
-        target_link_libraries(agentrt_llm_service PUBLIC ${LIBCURL_LIBRARIES})
+        target_link_libraries(airy_llm_service PUBLIC ${LIBCURL_LIBRARIES})
     endif()
 endif()
-if(AGENTRT_HAS_CJSON)
+if(AIRY_HAS_CJSON)
     if(cJSON_FOUND)
-        target_link_libraries(agentrt_llm_service PUBLIC cjson)
+        target_link_libraries(airy_llm_service PUBLIC cjson)
     elseif(CJSON_FOUND AND CJSON_LIBRARIES)
-        target_link_libraries(agentrt_llm_service PUBLIC ${CJSON_LIBRARIES})
+        target_link_libraries(airy_llm_service PUBLIC ${CJSON_LIBRARIES})
     endif()
 endif()
-if(AGENTRT_HAS_YAML AND YAML_FOUND AND YAML_LIBRARIES)
-    target_link_libraries(agentrt_llm_service PUBLIC ${YAML_LIBRARIES})
+if(AIRY_HAS_YAML AND YAML_FOUND AND YAML_LIBRARIES)
+    target_link_libraries(airy_llm_service PUBLIC ${YAML_LIBRARIES})
 endif()
 
 if(UNIX)
-    target_link_libraries(agentrt_llm_service PUBLIC Threads::Threads agentrt_platform_libs)
+    target_link_libraries(airy_llm_service PUBLIC Threads::Threads airy_platform_libs)
 endif()
 
 # 编译选项
 if(BUILD_COVERAGE)
-    target_compile_options(agentrt_llm_service PRIVATE
+    target_compile_options(airy_llm_service PRIVATE
         -Wall -Wextra -Wpedantic -fprofile-arcs -ftest-coverage -g -O0
     )
 else()
-    target_compile_options(agentrt_llm_service PRIVATE
+    target_compile_options(airy_llm_service PRIVATE
         -Wall -Wextra -Wpedantic
         -Werror=implicit-function-declaration
         -Werror=return-type
@@ -138,21 +138,21 @@ else()
 endif()
 
 # ==================== LLM daemon 可执行文件 ====================
-# main.c 仅属于 daemon 可执行文件；llm_svc_adapter.c 已纳入 agentrt_llm_service 库
+# main.c 仅属于 daemon 可执行文件；llm_svc_adapter.c 已纳入 airy_llm_service 库
 add_executable(llm_d
     src/main.c
 )
 
 if(WIN32)
     target_compile_definitions(llm_d PRIVATE
-        AGENTRT_PLATFORM_WINDOWS=1
+        AIRY_PLATFORM_WINDOWS=1
         WIN32_LEAN_AND_MEAN
         NOMINAX
         _CRT_SECURE_NO_WARNINGS
     )
     target_link_libraries(llm_d PRIVATE ws2_32 bcrypt)
 elseif(UNIX)
-    target_link_libraries(llm_d PRIVATE Threads::Threads agentrt_platform_libs)
+    target_link_libraries(llm_d PRIVATE Threads::Threads airy_platform_libs)
 endif()
 
 target_include_directories(llm_d PRIVATE
@@ -180,12 +180,12 @@ target_include_directories(llm_d PRIVATE
 if(NOT MSVC AND NOT APPLE)
     target_link_libraries(llm_d PRIVATE
         "-Wl,--start-group"
-        agentrt_llm_service
+        airy_llm_service
         "-Wl,--end-group"
         Threads::Threads
     )
 else()
-    target_link_libraries(llm_d PRIVATE agentrt_llm_service Threads::Threads)
+    target_link_libraries(llm_d PRIVATE airy_llm_service Threads::Threads)
 endif()
 
 if(BUILD_COVERAGE)

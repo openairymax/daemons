@@ -38,9 +38,9 @@ typedef struct {
  */
 int monitor_create(void **data)
 {
-    monitor_data_t *md = (monitor_data_t *)AGENTRT_MALLOC(sizeof(monitor_data_t));
+    monitor_data_t *md = (monitor_data_t *)AIRY_MALLOC(sizeof(monitor_data_t));
     if (!md) {
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     md->total_tasks = 0;
@@ -67,7 +67,7 @@ int monitor_destroy(void *data)
         return 0;
     }
 
-    AGENTRT_FREE(data);
+    AIRY_FREE(data);
     return 0;
 }
 
@@ -81,7 +81,7 @@ int monitor_destroy(void *data)
 int monitor_record_task(void *data, bool success, uint32_t execution_time_ms)
 {
     if (!data) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     monitor_data_t *md = (monitor_data_t *)data;
@@ -107,7 +107,7 @@ int monitor_record_task(void *data, bool success, uint32_t execution_time_ms)
 int monitor_update_agent_status(void *data, size_t available_count, size_t total_count)
 {
     if (!data) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     monitor_data_t *md = (monitor_data_t *)data;
@@ -126,7 +126,7 @@ int monitor_update_agent_status(void *data, size_t available_count, size_t total
 int monitor_health_check(void *data, bool *health_status)
 {
     if (!data || !health_status) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     monitor_data_t *md = (monitor_data_t *)data;
@@ -169,15 +169,15 @@ int monitor_health_check(void *data, bool *health_status)
 int monitor_get_stats(void *data, void **stats)
 {
     if (!data || !stats) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     monitor_data_t *md = (monitor_data_t *)data;
 
     // 创建统计信息字符串
-    char *stats_str = (char *)AGENTRT_MALLOC(512);
+    char *stats_str = (char *)AIRY_MALLOC(512);
     if (!stats_str) {
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     float avg_execution_time = 0.0f;
@@ -216,7 +216,7 @@ int monitor_get_stats(void *data, void **stats)
 int monitor_generate_report(void *data)
 {
     if (!data) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     monitor_data_t *md = (monitor_data_t *)data;
@@ -227,7 +227,7 @@ int monitor_generate_report(void *data)
         SVC_LOG_INFO("=== Scheduler Stats Report ===");
         SVC_LOG_INFO("%s", (char *)stats);
         SVC_LOG_INFO("=============================");
-        AGENTRT_FREE(stats);
+        AIRY_FREE(stats);
     }
 
     // 更新最后报告时间

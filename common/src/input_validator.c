@@ -18,9 +18,9 @@
 
 validation_result_t *validator_create(void)
 {
-    validation_result_t *v = (validation_result_t *)AGENTRT_CALLOC(1, sizeof(validation_result_t));
+    validation_result_t *v = (validation_result_t *)AIRY_CALLOC(1, sizeof(validation_result_t));
     if (!v) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     v->valid = 1;
     v->rule_count = 0;
@@ -32,20 +32,20 @@ void validator_destroy(validation_result_t *v)
     if (!v)
         return;
     for (int i = 0; i < v->rule_count; i++) {
-        AGENTRT_FREE(v->rules[i].field_name);
+        AIRY_FREE(v->rules[i].field_name);
     }
-    AGENTRT_FREE(v->error_message);
-    AGENTRT_FREE(v->error_field);
-    AGENTRT_FREE(v);
+    AIRY_FREE(v->error_message);
+    AIRY_FREE(v->error_field);
+    AIRY_FREE(v);
 }
 
 int validator_add_rule(validation_result_t *validator, const validation_rule_t *rule)
 {
     if (!validator || !rule) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "input_validator: null input");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "input_validator: null input");
     }
     if (validator->rule_count >= MAX_RULES) {
-        AGENTRT_ERROR(AGENTRT_ERR_OVERFLOW, "input_validator: input too long");
+        AIRY_ERROR(AIRY_ERR_OVERFLOW, "input_validator: input too long");
     }
 
     validation_rule_t *r = &validator->rules[validator->rule_count];
@@ -55,9 +55,9 @@ int validator_add_rule(validation_result_t *validator, const validation_rule_t *
     r->min_len = rule->min_len;
     r->max_len = rule->max_len;
     if (rule->field_name) {
-        r->field_name = AGENTRT_STRDUP(rule->field_name);
+        r->field_name = AIRY_STRDUP(rule->field_name);
         if (!r->field_name) {
-            AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "input_validator: malloc failed");
+            AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "input_validator: malloc failed");
         }
     }
     r->pattern = rule->pattern;
@@ -70,15 +70,15 @@ int security_check_string(const char *input, unsigned int flags, char **out_viol
 {
     if (!input) {
         if (out_violation)
-            *out_violation = AGENTRT_STRDUP("NULL input");
-        AGENTRT_ERROR(AGENTRT_ERR_NULL_POINTER, "input_validator: null pointer");
+            *out_violation = AIRY_STRDUP("NULL input");
+        AIRY_ERROR(AIRY_ERR_NULL_POINTER, "input_validator: null pointer");
     }
 
     size_t len = strlen(input);
     if (len == 0) {
         if (out_violation)
-            *out_violation = AGENTRT_STRDUP("Empty string");
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "input_validator: invalid length");
+            *out_violation = AIRY_STRDUP("Empty string");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "input_validator: invalid length");
     }
 
     if (flags & 0x01) {
@@ -89,9 +89,9 @@ int security_check_string(const char *input, unsigned int flags, char **out_viol
                 if (out_violation) {
                     char err[256];
                     snprintf(err, sizeof(err), "SQL injection pattern: %s", sql_patterns[i]);
-                    *out_violation = AGENTRT_STRDUP(err);
+                    *out_violation = AIRY_STRDUP(err);
                 }
-                AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "input_validator: contains null byte");
+                AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "input_validator: contains null byte");
             }
         }
     }
@@ -100,8 +100,8 @@ int security_check_string(const char *input, unsigned int flags, char **out_viol
         if (strstr(input, "<script") || strstr(input, "javascript:") || strstr(input, "onerror=") ||
             strstr(input, "onload=")) {
             if (out_violation)
-                *out_violation = AGENTRT_STRDUP("XSS pattern detected");
-            AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "input_validator: contains control chars");
+                *out_violation = AIRY_STRDUP("XSS pattern detected");
+            AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "input_validator: contains control chars");
         }
     }
 
@@ -110,8 +110,8 @@ int security_check_string(const char *input, unsigned int flags, char **out_viol
             unsigned char c = (unsigned char)input[i];
             if (c < 0x20 && c != '\t' && c != '\n' && c != '\r') {
                 if (out_violation)
-                    *out_violation = AGENTRT_STRDUP("Control character detected");
-                AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "input_validator: SQL injection pattern");
+                    *out_violation = AIRY_STRDUP("Control character detected");
+                AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "input_validator: SQL injection pattern");
             }
         }
     }
@@ -119,8 +119,8 @@ int security_check_string(const char *input, unsigned int flags, char **out_viol
     if (flags & 0x08) {
         if (strstr(input, "../") || strstr(input, "..\\") || strstr(input, "%2e%2e")) {
             if (out_violation)
-                *out_violation = AGENTRT_STRDUP("Path traversal pattern");
-            AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "input_validator: XSS pattern");
+                *out_violation = AIRY_STRDUP("Path traversal pattern");
+            AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "input_validator: XSS pattern");
         }
     }
 
@@ -139,12 +139,12 @@ static int apply_single_rule(const validation_rule_t *rule, const cJSON *data, c
         if (!item) {
             if (out_error) {
                 size_t len = 32 + (rule->field_name ? strlen(rule->field_name) : 0);
-                *out_error = (char *)AGENTRT_MALLOC(len);
+                *out_error = (char *)AIRY_MALLOC(len);
                 if (*out_error)
                     snprintf(*out_error, len, "Missing required field: %s",
                              rule->field_name ? rule->field_name : "?");
             }
-            AGENTRT_ERROR(AGENTRT_ERR_NOT_FOUND, "input_validator: string not valid");
+            AIRY_ERROR(AIRY_ERR_NOT_FOUND, "input_validator: string not valid");
         }
         break;
 
@@ -152,32 +152,32 @@ static int apply_single_rule(const validation_rule_t *rule, const cJSON *data, c
         if (item && !cJSON_IsString(item)) {
             if (out_error) {
                 size_t len = 48 + (rule->field_name ? strlen(rule->field_name) : 0);
-                *out_error = (char *)AGENTRT_MALLOC(len);
+                *out_error = (char *)AIRY_MALLOC(len);
                 if (*out_error)
                     snprintf(*out_error, len, "Field '%s' must be a string",
                              rule->field_name ? rule->field_name : "?");
             }
-            return AGENTRT_ERR_INVALID_PARAM;
+            return AIRY_ERR_INVALID_PARAM;
         }
         if (item && cJSON_IsString(item)) {
             size_t slen = strlen(item->valuestring);
             if (rule->min_len > 0 && slen < rule->min_len) {
                 if (out_error) {
-                    *out_error = (char *)AGENTRT_MALLOC(128);
+                    *out_error = (char *)AIRY_MALLOC(128);
                     if (*out_error)
                         snprintf(*out_error, 128, "Field '%s' too short (min %zu, got %zu)",
                                  rule->field_name ? rule->field_name : "?", rule->min_len, slen);
                 }
-                return AGENTRT_ERR_INVALID_PARAM;
+                return AIRY_ERR_INVALID_PARAM;
             }
             if (rule->max_len > 0 && slen > rule->max_len) {
                 if (out_error) {
-                    *out_error = (char *)AGENTRT_MALLOC(128);
+                    *out_error = (char *)AIRY_MALLOC(128);
                     if (*out_error)
                         snprintf(*out_error, 128, "Field '%s' too long (max %zu, got %zu)",
                                  rule->field_name ? rule->field_name : "?", rule->max_len, slen);
                 }
-                return AGENTRT_ERR_INVALID_PARAM;
+                return AIRY_ERR_INVALID_PARAM;
             }
         }
         break;
@@ -186,12 +186,12 @@ static int apply_single_rule(const validation_rule_t *rule, const cJSON *data, c
         if (item && !cJSON_IsNumber(item)) {
             if (out_error) {
                 size_t len = 48 + (rule->field_name ? strlen(rule->field_name) : 0);
-                *out_error = (char *)AGENTRT_MALLOC(len);
+                *out_error = (char *)AIRY_MALLOC(len);
                 if (*out_error)
                     snprintf(*out_error, len, "Field '%s' must be a number",
                              rule->field_name ? rule->field_name : "?");
             }
-            return AGENTRT_ERR_INVALID_PARAM;
+            return AIRY_ERR_INVALID_PARAM;
         }
         break;
 
@@ -199,12 +199,12 @@ static int apply_single_rule(const validation_rule_t *rule, const cJSON *data, c
         if (item && cJSON_IsString(item) && rule->pattern) {
             if (item->valuestring && !strstr(item->valuestring, rule->pattern)) {
                 if (out_error) {
-                    *out_error = (char *)AGENTRT_MALLOC(128);
+                    *out_error = (char *)AIRY_MALLOC(128);
                     if (*out_error)
                         snprintf(*out_error, 128, "Field '%s' pattern mismatch",
                                  rule->field_name ? rule->field_name : "?");
                 }
-                return AGENTRT_ERR_INVALID_PARAM;
+                return AIRY_ERR_INVALID_PARAM;
             }
         }
         break;
@@ -235,18 +235,18 @@ static int apply_single_rule(const validation_rule_t *rule, const cJSON *data, c
 validation_result_t *validator_validate(validation_result_t *v, const cJSON *data)
 {
     if (!v) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     if (!data) {
         v->valid = 0;
-        v->error_message = AGENTRT_STRDUP("No data provided for validation");
+        v->error_message = AIRY_STRDUP("No data provided for validation");
         return v;
     }
 
     v->valid = 1;
-    AGENTRT_FREE(v->error_message);
+    AIRY_FREE(v->error_message);
     v->error_message = NULL;
-    AGENTRT_FREE(v->error_field);
+    AIRY_FREE(v->error_field);
     v->error_field = NULL;
 
     for (int i = 0; i < v->rule_count; i++) {
@@ -257,7 +257,7 @@ validation_result_t *validator_validate(validation_result_t *v, const cJSON *dat
             if (err) {
                 v->error_message = err;
                 if (v->rules[i].field_name)
-                    v->error_field = AGENTRT_STRDUP(v->rules[i].field_name);
+                    v->error_field = AIRY_STRDUP(v->rules[i].field_name);
             }
             break;
         }
@@ -270,8 +270,8 @@ int validate_required_field(const cJSON *obj, const char *field, char **out_erro
 {
     if (!obj || !field) {
         if (out_error)
-            *out_error = AGENTRT_STRDUP("Invalid parameters");
-        return AGENTRT_ERR_INVALID_PARAM;
+            *out_error = AIRY_STRDUP("Invalid parameters");
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     cJSON *item = cJSON_GetObjectItem(obj, field);
@@ -279,9 +279,9 @@ int validate_required_field(const cJSON *obj, const char *field, char **out_erro
         if (out_error) {
             char err[256];
             snprintf(err, sizeof(err), "Missing required field: %s", field);
-            *out_error = AGENTRT_STRDUP(err);
+            *out_error = AIRY_STRDUP(err);
         }
-        return AGENTRT_ERR_NOT_FOUND;
+        return AIRY_ERR_NOT_FOUND;
     }
 
     return 0;
@@ -292,21 +292,21 @@ int validate_string_field(const cJSON *obj, const char *field, size_t min_len, s
 {
     if (!obj || !field) {
         if (out_error)
-            *out_error = AGENTRT_STRDUP("Invalid parameters");
-        return AGENTRT_ERR_INVALID_PARAM;
+            *out_error = AIRY_STRDUP("Invalid parameters");
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     cJSON *item = cJSON_GetObjectItem(obj, field);
     if (!item) {
         if (out_error)
-            *out_error = AGENTRT_STRDUP("Field not found");
-        return AGENTRT_ERR_NOT_FOUND;
+            *out_error = AIRY_STRDUP("Field not found");
+        return AIRY_ERR_NOT_FOUND;
     }
 
     if (!cJSON_IsString(item)) {
         if (out_error)
-            *out_error = AGENTRT_STRDUP("Field is not a string");
-        return AGENTRT_ERR_INVALID_PARAM;
+            *out_error = AIRY_STRDUP("Field is not a string");
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     size_t len = strlen(item->valuestring);
@@ -314,18 +314,18 @@ int validate_string_field(const cJSON *obj, const char *field, size_t min_len, s
         if (out_error) {
             char err[256];
             snprintf(err, sizeof(err), "Field too short (min %zu)", min_len);
-            *out_error = AGENTRT_STRDUP(err);
+            *out_error = AIRY_STRDUP(err);
         }
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (max_len > 0 && len > max_len) {
         if (out_error) {
             char err[256];
             snprintf(err, sizeof(err), "Field too long (max %zu)", max_len);
-            *out_error = AGENTRT_STRDUP(err);
+            *out_error = AIRY_STRDUP(err);
         }
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     return 0;
@@ -336,8 +336,8 @@ int validate_sanitized_string(const cJSON *obj, const char *field, unsigned int 
 {
     if (!obj || !field) {
         if (out_error)
-            *out_error = AGENTRT_STRDUP("Invalid parameters");
-        return AGENTRT_ERR_INVALID_PARAM;
+            *out_error = AIRY_STRDUP("Invalid parameters");
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     cJSON *item = cJSON_GetObjectItem(obj, field);
@@ -345,18 +345,18 @@ int validate_sanitized_string(const cJSON *obj, const char *field, unsigned int 
         if (out_error) {
             char err[256];
             snprintf(err, sizeof(err), "Missing field: %s", field);
-            *out_error = AGENTRT_STRDUP(err);
+            *out_error = AIRY_STRDUP(err);
         }
-        return AGENTRT_ERR_NOT_FOUND;
+        return AIRY_ERR_NOT_FOUND;
     }
 
     if (!cJSON_IsString(item)) {
         if (out_error) {
             char err[256];
             snprintf(err, sizeof(err), "Field '%s' is not a string", field);
-            *out_error = AGENTRT_STRDUP(err);
+            *out_error = AIRY_STRDUP(err);
         }
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (sanitize_flags == 0)
@@ -369,12 +369,12 @@ int validate_sanitized_string(const cJSON *obj, const char *field, unsigned int 
             char err[512];
             snprintf(err, sizeof(err), "Field '%s' failed sanitization: %s", field,
                      violation ? violation : "unknown violation");
-            *out_error = AGENTRT_STRDUP(err);
+            *out_error = AIRY_STRDUP(err);
         }
-        AGENTRT_FREE(violation);
+        AIRY_FREE(violation);
         return ret;
     }
 
-    AGENTRT_FREE(violation);
+    AIRY_FREE(violation);
     return 0;
 }

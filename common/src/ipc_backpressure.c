@@ -63,7 +63,7 @@ static ipc_bp_level_t compute_level(size_t depth, size_t capacity,
 
 ipc_bp_controller_t *ipc_bp_create(const ipc_bp_config_t *config)
 {
-    ipc_bp_controller_t *ctrl = (ipc_bp_controller_t *)AGENTRT_CALLOC(1, sizeof(*ctrl));
+    ipc_bp_controller_t *ctrl = (ipc_bp_controller_t *)AIRY_CALLOC(1, sizeof(*ctrl));
     if (!ctrl) {
         SVC_LOG_ERROR("C-L02: BP: CREATE-FAIL reason=oom");
         return NULL;
@@ -106,7 +106,7 @@ void ipc_bp_destroy(ipc_bp_controller_t *ctrl)
                  (size_t)ctrl->stats.total_sent,
                  (size_t)ctrl->stats.total_dropped,
                  (size_t)ctrl->stats.total_rejected);
-    AGENTRT_FREE(ctrl);
+    AIRY_FREE(ctrl);
 }
 
 ipc_bp_level_t ipc_bp_update(ipc_bp_controller_t *ctrl, size_t current_depth)

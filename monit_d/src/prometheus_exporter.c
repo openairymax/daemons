@@ -28,28 +28,28 @@
 /* --- 核心可观测性指标 (Section 16.1) --- */
 static const char *REQUIRED_METRICS[][5] = {
     /* {name, type, help, labels} */
-    {"agentrt_cognition_latency_ms", "histogram", "Cognitive phase latency in milliseconds",
+    {"airy_cognition_latency_ms", "histogram", "Cognitive phase latency in milliseconds",
      "agent_id"},
-    {"agentrt_llm_request_duration_ms", "histogram", "LLM request duration in milliseconds",
+    {"airy_llm_request_duration_ms", "histogram", "LLM request duration in milliseconds",
      "provider,model"},
-    {"agentrt_llm_cost_usd_total", "counter", "Total LLM cost in USD", "provider"},
-    {"agentrt_tool_call_total", "counter", "Total tool call count", "tool_name,status"},
-    {"agentrt_memory_operations_total", "counter", "Total memory operations count",
+    {"airy_llm_cost_usd_total", "counter", "Total LLM cost in USD", "provider"},
+    {"airy_tool_call_total", "counter", "Total tool call count", "tool_name,status"},
+    {"airy_memory_operations_total", "counter", "Total memory operations count",
      "layer,operation"},
-    {"agentrt_hook_execution_ms", "histogram", "Hook execution latency in milliseconds",
+    {"airy_hook_execution_ms", "histogram", "Hook execution latency in milliseconds",
      "hook_name,event"},
-    {"agentrt_connection_health", "gauge", "Connection line health status (0=down, 1=up)",
+    {"airy_connection_health", "gauge", "Connection line health status (0=down, 1=up)",
      "connection_id"},
-    {"agentrt_plugin_lifecycle_total", "counter", "Plugin lifecycle events total",
+    {"airy_plugin_lifecycle_total", "counter", "Plugin lifecycle events total",
      "plugin_name,event"},
-    {"agentrt_llm_retry_total", "counter", "Total LLM retry count", "provider,error_category"},
-    {"agentrt_config_reload_total", "counter", "Total config reload count", "status"},
+    {"airy_llm_retry_total", "counter", "Total LLM retry count", "provider,error_category"},
+    {"airy_config_reload_total", "counter", "Total config reload count", "status"},
 
     /* --- 内存可观测性指标 --- */
-    {"agentrt_memory_rss_bytes", "gauge", "Resident memory size in bytes", ""},
-    {"agentrt_memory_heap_bytes", "gauge", "Heap memory usage in bytes", ""},
-    {"agentrt_memory_pool_utilization", "gauge", "Memory pool utilization (0.0~1.0)", ""},
-    {"agentrt_oom_events_total", "counter", "Total OOM event count", "level"},
+    {"airy_memory_rss_bytes", "gauge", "Resident memory size in bytes", ""},
+    {"airy_memory_heap_bytes", "gauge", "Heap memory usage in bytes", ""},
+    {"airy_memory_pool_utilization", "gauge", "Memory pool utilization (0.0~1.0)", ""},
+    {"airy_oom_events_total", "counter", "Total OOM event count", "level"},
 };
 
 #define REQUIRED_METRICS_COUNT                                                \
@@ -93,25 +93,25 @@ int prometheus_exporter_init(const char *service_name)
 
     /* 设置模块名称 */
     if (service_name && service_name[0]) {
-        AGENTRT_STRNCPY_TERM(g_module_name, service_name, sizeof(g_module_name));
+        AIRY_STRNCPY_TERM(g_module_name, service_name, sizeof(g_module_name));
     }
 
     /* 初始化统一指标收集器 */
     um_config_t config = um_create_default_config();
-    AGENTRT_STRNCPY_TERM(config.service_name, g_module_name, sizeof(config.service_name));
+    AIRY_STRNCPY_TERM(config.service_name, g_module_name, sizeof(config.service_name));
     config.enable_default_metrics = true;
     config.scrape_interval_ms = 15000;  /* 15s scrape interval */
 
     if (um_init(&config) != 0) {
         SVC_LOG_ERROR("C-L10: Failed to initialize unified metrics for '%s'", g_module_name);
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 
     /* 注册模块 */
     if (um_register_module(g_module_name, NULL) != 0) {
         SVC_LOG_ERROR("C-L10: Failed to register metrics module '%s'", g_module_name);
         um_shutdown();
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 
     g_initialized = 1;
@@ -134,7 +134,7 @@ int prometheus_exporter_register_required_metrics(void)
 {
     if (!g_initialized) {
         SVC_LOG_ERROR("C-L10: Prometheus exporter not initialized, cannot register metrics");
-        return AGENTRT_ERR_SYS_NOT_INIT;
+        return AIRY_ERR_SYS_NOT_INIT;
     }
 
     int registered = 0;
@@ -171,15 +171,15 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len,
                                     char **response, size_t *response_len)
 {
     if (!request || !response || !response_len)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     /* 检测是否为 HTTP GET /metrics 请求 */
     if (request_len < 14)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     /* 匹配 "GET /metrics" 前缀 */
     if (strncmp(request, "GET /metrics", 12) != 0)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     SVC_LOG_DEBUG("C-L10: Prometheus scrape request received (scrape #%llu)",
                   (unsigned long long)(g_scrape_count + 1));
@@ -195,9 +195,9 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len,
         size_t body_len = strlen(err_body);
 
         size_t buf_size = 256 + body_len;
-        char *resp = (char *)AGENTRT_MALLOC(buf_size);
+        char *resp = (char *)AIRY_MALLOC(buf_size);
         if (!resp)
-            return AGENTRT_ERR_OUT_OF_MEMORY;
+            return AIRY_ERR_OUT_OF_MEMORY;
 
         int header_len = snprintf(resp, buf_size,
                                   "HTTP/1.1 500 Internal Server Error\r\n"
@@ -206,7 +206,7 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len,
                                   "Connection: close\r\n"
                                   "\r\n",
                                   body_len);
-        AGENTRT_MEMCPY(resp + header_len, err_body, body_len);
+        AIRY_MEMCPY(resp + header_len, err_body, body_len);
         *response = resp;
         *response_len = (size_t)header_len + body_len;
         return 0;
@@ -229,17 +229,17 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len,
                               metrics_len);
 
     size_t total_len = (size_t)header_len + metrics_len;
-    char *resp = (char *)AGENTRT_MALLOC(total_len + 1);
+    char *resp = (char *)AIRY_MALLOC(total_len + 1);
     if (!resp) {
-        AGENTRT_FREE(metrics_text);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        AIRY_FREE(metrics_text);
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    AGENTRT_MEMCPY(resp, header_buf, (size_t)header_len);
-    AGENTRT_MEMCPY(resp + header_len, metrics_text, metrics_len);
+    AIRY_MEMCPY(resp, header_buf, (size_t)header_len);
+    AIRY_MEMCPY(resp + header_len, metrics_text, metrics_len);
     resp[total_len] = '\0';
 
-    AGENTRT_FREE(metrics_text);
+    AIRY_FREE(metrics_text);
 
     *response = resp;
     *response_len = total_len;
@@ -280,8 +280,8 @@ char *prometheus_exporter_get_metrics(void)
     um_update_default_metrics();
 
     /* C-L10: 更新 scrape 统计指标 */
-    prometheus_gauge_set("agentrt_monit_scrape_count", (double)g_scrape_count);
-    prometheus_gauge_set("agentrt_monit_scrape_errors", (double)g_scrape_errors);
+    prometheus_gauge_set("airy_monit_scrape_count", (double)g_scrape_count);
+    prometheus_gauge_set("airy_monit_scrape_errors", (double)g_scrape_errors);
 
     /* 导出 Prometheus 格式 */
     char *result = um_export_prometheus_module(g_module_name);

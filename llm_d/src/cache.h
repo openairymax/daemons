@@ -6,8 +6,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_LLM_CACHE_H
-#define AGENTRT_LLM_CACHE_H
+#ifndef AIRY_RT_LLM_CACHE_H
+#define AIRY_RT_LLM_CACHE_H
 
 #include <stddef.h>
 
@@ -30,4 +30,4 @@ size_t llm_cache_capacity(llm_cache_t *cache);
 }
 #endif
 
-#endif /* AGENTRT_LLM_CACHE_H */
+#endif /* AIRY_RT_LLM_CACHE_H */

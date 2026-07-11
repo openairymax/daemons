@@ -6,8 +6,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_LLM_RESPONSE_H
-#define AGENTRT_LLM_RESPONSE_H
+#ifndef AIRY_RT_LLM_RESPONSE_H
+#define AIRY_RT_LLM_RESPONSE_H
 
 #include "llm_service.h"
 
@@ -24,4 +24,4 @@ llm_response_t *response_from_json(const char *json);
 }
 #endif
 
-#endif /* AGENTRT_LLM_RESPONSE_H */
+#endif /* AIRY_RT_LLM_RESPONSE_H */

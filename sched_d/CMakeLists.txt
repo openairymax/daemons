@@ -8,9 +8,9 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # 查找依赖
 # Threads found by root CMakeLists.txt
 # PkgConfig found by root CMakeLists.txt
-# cJSON found by root CMakeLists.txt (AGENTRT_HAS_CJSON)
-if(NOT AGENTRT_HAS_CJSON)
-    agentrt_print_warn("libcjson not found, JSON features may be limited")
+# cJSON found by root CMakeLists.txt (AIRY_HAS_CJSON)
+if(NOT AIRY_HAS_CJSON)
+    airy_print_warn("libcjson not found, JSON features may be limited")
 endif()
 
 # ==================== 路径设置 ====================
@@ -40,21 +40,21 @@ add_executable(sched_d ${SCHED_D_SOURCES})
 # 平台特定配置
 if(WIN32)
     target_compile_definitions(sched_d PRIVATE
-        AGENTRT_PLATFORM_WINDOWS=1
+        AIRY_PLATFORM_WINDOWS=1
         WIN32_LEAN_AND_MEAN
         NOMINMAX
         _CRT_SECURE_NO_WARNINGS
     )
     target_link_libraries(sched_d PRIVATE
-        agentrt_common
+        airy_common
         ws2_32
         bcrypt
     )
 elseif(UNIX)
     target_link_libraries(sched_d PRIVATE
-        agentrt_common
+        airy_common
         Threads::Threads
-        agentrt_platform_libs
+        airy_platform_libs
         m
     )
 endif()

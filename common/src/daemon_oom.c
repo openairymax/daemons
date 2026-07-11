@@ -96,17 +96,17 @@ static int daemon_oom_on_critical_restore(degradation_handler_t *handler,
 int daemon_oom_register(const daemon_oom_config_t *config)
 {
     if (!config || !config->daemon_name)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     if (g_daemons_oom_count >= DAEMON_OOM_MAX_SLOTS) {
         SVC_LOG_ERROR("P1.22: No more daemon OOM slots available");
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
     }
 
     daemon_oom_ctx_t *ctx = &g_daemons_oom_slots[g_daemons_oom_count];
-    AGENTRT_MEMSET(ctx, 0, sizeof(*ctx));
+    AIRY_MEMSET(ctx, 0, sizeof(*ctx));
 
-    AGENTRT_STRNCPY_TERM(ctx->daemon_name, config->daemon_name, sizeof(ctx->daemon_name) - 1);
+    AIRY_STRNCPY_TERM(ctx->daemon_name, config->daemon_name, sizeof(ctx->daemon_name) - 1);
     ctx->drop_cache_on_warning = config->drop_cache_on_warning;
     ctx->reject_requests_on_critical = config->reject_requests_on_critical;
     ctx->user_context = config->user_context;
@@ -119,8 +119,8 @@ int daemon_oom_register(const daemon_oom_config_t *config)
     ctx->warning_handler.on_restore = daemon_oom_on_warning_restore;
     ctx->warning_handler.context = ctx;
 
-    agentrt_error_t err = agentrt_register_degradation(&ctx->warning_handler);
-    if (err != AGENTRT_SUCCESS) {
+    airy_err_t err = airy_register_degradation(&ctx->warning_handler);
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_WARN("P1.22: [%s] WARNING handler registration failed (err=%d)",
                      config->daemon_name, err);
     }
@@ -133,8 +133,8 @@ int daemon_oom_register(const daemon_oom_config_t *config)
     ctx->critical_handler.on_restore = daemon_oom_on_critical_restore;
     ctx->critical_handler.context = ctx;
 
-    err = agentrt_register_degradation(&ctx->critical_handler);
-    if (err != AGENTRT_SUCCESS) {
+    err = airy_register_degradation(&ctx->critical_handler);
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_WARN("P1.22: [%s] CRITICAL handler registration failed (err=%d)",
                      config->daemon_name, err);
     }
@@ -155,8 +155,8 @@ void daemon_oom_unregister(const char *daemon_name)
 
     for (int i = 0; i < g_daemons_oom_count; i++) {
         if (strcmp(g_daemons_oom_slots[i].daemon_name, daemon_name) == 0) {
-            agentrt_unregister_degradation(&g_daemons_oom_slots[i].warning_handler);
-            agentrt_unregister_degradation(&g_daemons_oom_slots[i].critical_handler);
+            airy_unregister_degradation(&g_daemons_oom_slots[i].warning_handler);
+            airy_unregister_degradation(&g_daemons_oom_slots[i].critical_handler);
             SVC_LOG_INFO("P1.22: [%s] OOM callbacks unregistered", daemon_name);
             return;
         }

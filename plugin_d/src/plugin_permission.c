@@ -63,13 +63,13 @@ int plugin_permission_init(const plugin_permission_config_t *config)
     /* 初始化 SafetyGuard 上下文 */
     g_permission.guard_ctx = safety_guard_create();
     if (!g_permission.guard_ctx) {
-        AGENTRT_LOG_WARN("PluginPermission: safety_guard_create failed, "
+        AIRY_LOG_WARN("PluginPermission: safety_guard_create failed, "
                          "permission checks will be local-only");
     }
 
     g_permission.initialized = true;
 
-    AGENTRT_LOG_INFO("PluginPermission: initialized (strict=%d, audit=%d)",
+    AIRY_LOG_INFO("PluginPermission: initialized (strict=%d, audit=%d)",
                      g_permission.config.enable_strict_mode,
                      g_permission.config.enable_audit_log);
     return 0;
@@ -82,7 +82,7 @@ void plugin_permission_destroy(void)
         g_permission.guard_ctx = NULL;
     }
 
-    AGENTRT_LOG_INFO("PluginPermission: destroyed");
+    AIRY_LOG_INFO("PluginPermission: destroyed");
     g_permission.initialized = false;
 }
 
@@ -91,7 +91,7 @@ void plugin_permission_destroy(void)
 int plugin_permission_map_to_guard(const char *permission,
                                    safety_guard_type_t *out_guard)
 {
-    if (!permission || !out_guard) return AGENTRT_ERR_INVALID_PARAM;
+    if (!permission || !out_guard) return AIRY_ERR_INVALID_PARAM;
 
     /* 权限字符串 → Cupolas 守卫类型映射 */
     if (strcmp(permission, "file_read") == 0) {
@@ -125,9 +125,9 @@ int plugin_permission_map_to_guard(const char *permission,
     } else if (strcmp(permission, "audit_trigger") == 0) {
         *out_guard = SAFETY_GUARD_AUDIT;
     } else {
-        AGENTRT_LOG_WARN("PluginPermission: unknown permission '%s'",
+        AIRY_LOG_WARN("PluginPermission: unknown permission '%s'",
                          permission);
-        return AGENTRT_ERR_NOT_SUPPORTED;
+        return AIRY_ERR_NOT_SUPPORTED;
     }
 
     return 0;
@@ -149,7 +149,7 @@ plugin_permission_result_t plugin_permission_check(
                 safe_strcpy(out_denied, "no permissions declared",
                             out_denied_size);
             }
-            AGENTRT_LOG_WARN("PluginPermission: plugin '%s' has no permissions "
+            AIRY_LOG_WARN("PluginPermission: plugin '%s' has no permissions "
                              "(strict mode)", plugin_name);
             return PLUGIN_PERM_DENIED;
         }
@@ -174,7 +174,7 @@ plugin_permission_result_t plugin_permission_check(
 
         if (map_ret != 0) {
             /* 未知权限 */
-            AGENTRT_LOG_WARN("PluginPermission: plugin '%s' declares unknown "
+            AIRY_LOG_WARN("PluginPermission: plugin '%s' declares unknown "
                              "permission '%s'", plugin_name, perm);
             if (g_permission.config.enable_strict_mode) {
                 overall = PLUGIN_PERM_UNKNOWN;
@@ -198,7 +198,7 @@ plugin_permission_result_t plugin_permission_check(
                 &allowed);
 
             if (check_ret != 0 || !allowed) {
-                AGENTRT_LOG_WARN("PluginPermission: permission '%s' denied "
+                AIRY_LOG_WARN("PluginPermission: permission '%s' denied "
                                  "for plugin '%s'", perm, plugin_name);
                 overall = PLUGIN_PERM_DENIED;
                 if (denied_offset < sizeof(denied_list) - 1) {
@@ -208,7 +208,7 @@ plugin_permission_result_t plugin_permission_check(
                         "%s%s", denied_offset > 0 ? "," : "", perm);
                 }
             } else {
-                AGENTRT_LOG_DEBUG("PluginPermission: permission '%s' allowed "
+                AIRY_LOG_DEBUG("PluginPermission: permission '%s' allowed "
                                   "for plugin '%s'", perm, plugin_name);
             }
         }
@@ -219,7 +219,7 @@ plugin_permission_result_t plugin_permission_check(
     }
 
     if (overall != PLUGIN_PERM_ALLOWED && g_permission.config.enable_audit_log) {
-        AGENTRT_LOG_INFO("PluginPermission: AUDIT plugin='%s' result=%d "
+        AIRY_LOG_INFO("PluginPermission: AUDIT plugin='%s' result=%d "
                          "denied='%s'",
                          plugin_name, overall, denied_list);
     }
@@ -272,17 +272,17 @@ const char *plugin_permission_description(const char *permission)
 int plugin_permission_list_supported(char ***out_permissions,
                                      size_t *out_count)
 {
-    if (!out_permissions || !out_count) return AGENTRT_ERR_INVALID_PARAM;
+    if (!out_permissions || !out_count) return AIRY_ERR_INVALID_PARAM;
 
     /* 计数 */
     size_t count = 0;
     while (SUPPORTED_PERMISSIONS[count]) count++;
 
-    char **list = (char **)AGENTRT_CALLOC(count, sizeof(char *));
-    if (!list) return AGENTRT_ERR_OUT_OF_MEMORY;
+    char **list = (char **)AIRY_CALLOC(count, sizeof(char *));
+    if (!list) return AIRY_ERR_OUT_OF_MEMORY;
 
     for (size_t i = 0; i < count; i++) {
-        list[i] = AGENTRT_STRDUP(SUPPORTED_PERMISSIONS[i]);
+        list[i] = AIRY_STRDUP(SUPPORTED_PERMISSIONS[i]);
     }
 
     *out_permissions = list;

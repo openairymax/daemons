@@ -1,7 +1,7 @@
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
 
 # 测试代码豁免 BAN 严格合规：测试允许使用裸 malloc/free/memset 等函数
-add_compile_definitions(AGENTRT_COMPLIANCE_IMPL)
+add_compile_definitions(AIRY_COMPLIANCE_IMPL)
 # LLM 服务单元测试构建文件 (TeamC)
 
 
@@ -75,13 +75,13 @@ foreach(TEST_SRC ${LLM_TEST_SOURCES})
         Threads::Threads
     )
 
-    # cJSON found by root CMakeLists.txt (AGENTRT_HAS_CJSON)
-    if(AGENTRT_HAS_CJSON)
+    # cJSON found by root CMakeLists.txt (AIRY_HAS_CJSON)
+    if(AIRY_HAS_CJSON)
         target_link_libraries(test_llm_${TEST_NAME} PRIVATE cjson)
     endif()
 
-    # CURL found by root CMakeLists.txt (AGENTRT_HAS_CURL)
-    if(AGENTRT_HAS_CURL)
+    # CURL found by root CMakeLists.txt (AIRY_HAS_CURL)
+    if(AIRY_HAS_CURL)
         target_include_directories(test_llm_${TEST_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
         target_link_libraries(test_llm_${TEST_NAME} PRIVATE ${CURL_LIBRARIES})
     endif()

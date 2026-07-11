@@ -30,7 +30,7 @@
 static const char *resolve_api_key(const char *api_key)
 {
     if (!api_key || api_key[0] == '\0') {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     if (strncmp(api_key, "env:", 4) == 0) {
@@ -40,7 +40,7 @@ static const char *resolve_api_key(const char *api_key)
             return env_val;
         }
         SVC_LOG_WARN("Environment variable '%s' not set or empty", env_name);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
     }
 
     return api_key;
@@ -49,7 +49,7 @@ static const char *resolve_api_key(const char *api_key)
 static const char *fallback_env_key(const char *provider_name)
 {
     if (!provider_name) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     if (strcmp(provider_name, "openai") == 0)
         return getenv("OPENAI_API_KEY");
@@ -59,13 +59,13 @@ static const char *fallback_env_key(const char *provider_name)
         return getenv("DEEPSEEK_API_KEY");
     if (strcmp(provider_name, "google") == 0)
         return getenv("GOOGLE_AI_API_KEY");
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
 static const char *guess_provider_from_url(const char *url)
 {
     if (!url) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     if (strstr(url, "openai.com"))
         return "openai";
@@ -75,7 +75,7 @@ static const char *guess_provider_from_url(const char *url)
         return "deepseek";
     if (strstr(url, "googleapis.com"))
         return "google";
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
 void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, const char *api_base,
@@ -132,8 +132,8 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, cons
 void provider_http_resp_free(provider_http_resp_t *resp)
 {
     if (resp) {
-        AGENTRT_FREE(resp->data);
-        AGENTRT_FREE(resp);
+        AIRY_FREE(resp->data);
+        AIRY_FREE(resp);
     }
 }
 
@@ -150,7 +150,7 @@ static size_t http_write_callback(void *contents, size_t size, size_t nmemb, voi
         if (new_cap < new_size)
             new_cap = new_size;
 
-        char *ptr = (char *)AGENTRT_REALLOC(mem->data, new_cap);
+        char *ptr = (char *)AIRY_REALLOC(mem->data, new_cap);
         if (!ptr)
             return 0;
 
@@ -172,13 +172,13 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
 {
     if (!url || !body || !out_response || !out_http_code) {
         errno = EINVAL;
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     provider_http_resp_t *resp =
-        (provider_http_resp_t *)AGENTRT_CALLOC(1, sizeof(provider_http_resp_t));
+        (provider_http_resp_t *)AIRY_CALLOC(1, sizeof(provider_http_resp_t));
     if (!resp)
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
 
     CURL *curl = NULL;
     int retry = 0;
@@ -193,7 +193,7 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
                           "STACK: provider_http_post curl_easy_init",
                           url, errno, retry, max_retries);
             provider_http_resp_free(resp);
-            return AGENTRT_ERR_UNKNOWN;
+            return AIRY_ERR_UNKNOWN;
         }
 
         curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -222,7 +222,7 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
         retry++;
         curl_easy_cleanup(curl);
         if (retry <= max_retries) {
-            AGENTRT_FREE(resp->data);
+            AIRY_FREE(resp->data);
             resp->data = NULL;
             resp->size = 0;
             resp->capacity = 0;
@@ -231,12 +231,12 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
 
     if (success != 0) {
         provider_http_resp_free(resp);
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
     *out_response = resp;
     *out_http_code = http_code;
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 /* ---------- 通用请求构建 ---------- */
@@ -244,14 +244,14 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
 char *provider_build_openai_request(const llm_request_config_t *manager, const char *default_model)
 {
     if (!manager) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     cJSON *root = cJSON_CreateObject();
     if (!root) {
         SVC_LOG_ERROR("C-L02: PROVIDER: REQUEST-BUILD-FAIL reason=oom_root "
                       "STACK: provider_build_openai_request");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     const char *model = manager->model && manager->model[0] ? manager->model : default_model;
@@ -308,32 +308,32 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
 int provider_parse_openai_response(const char *body, llm_response_t **out)
 {
     if (!body || !out) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + NULL 检查 + 手动 cJSON_Delete */
     CJSON_PARSE_GUARD(root, body, {
         SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=cjson_parse_error "
                       "STACK: provider_parse_openai_response");
-        return AGENTRT_ERR_PARSE_ERROR;
+        return AIRY_ERR_PARSE_ERROR;
     });
 
-    llm_response_t *resp = (llm_response_t *)AGENTRT_CALLOC(1, sizeof(llm_response_t));
+    llm_response_t *resp = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {
         SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=oom_resp "
                       "STACK: provider_parse_openai_response");
         /* root 由 CJSON_AUTO_FREE 自动释放 */
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     cJSON *id = cJSON_GetObjectItem(root, "id");
     if (cJSON_IsString(id) && id->valuestring) {
-        resp->id = AGENTRT_STRDUP(id->valuestring);
+        resp->id = AIRY_STRDUP(id->valuestring);
     }
 
     cJSON *model = cJSON_GetObjectItem(root, "model");
     if (cJSON_IsString(model) && model->valuestring) {
-        resp->model = AGENTRT_STRDUP(model->valuestring);
+        resp->model = AIRY_STRDUP(model->valuestring);
     }
 
     cJSON *created = cJSON_GetObjectItem(root, "created");
@@ -345,14 +345,14 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
     if (cJSON_IsArray(choices)) {
         int size = cJSON_GetArraySize(choices);
         resp->choice_count = (size_t)size;
-        resp->choices = (llm_message_t *)AGENTRT_CALLOC((size_t)size, sizeof(llm_message_t));
+        resp->choices = (llm_message_t *)AIRY_CALLOC((size_t)size, sizeof(llm_message_t));
 
         if (!resp->choices) {
             SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=oom_choices "
                           "STACK: provider_parse_openai_response");
             /* root 由 CJSON_AUTO_FREE 自动释放 */
             llm_response_free(resp);
-            return AGENTRT_ERR_OUT_OF_MEMORY;
+            return AIRY_ERR_OUT_OF_MEMORY;
         }
 
         for (int i = 0; i < size; ++i) {
@@ -362,15 +362,15 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
                 cJSON *role = cJSON_GetObjectItem(message, "role");
                 cJSON *content = cJSON_GetObjectItem(message, "content");
                 if (cJSON_IsString(role) && role->valuestring) {
-                    resp->choices[i].role = AGENTRT_STRDUP(role->valuestring);
+                    resp->choices[i].role = AIRY_STRDUP(role->valuestring);
                 }
                 if (cJSON_IsString(content) && content->valuestring) {
-                    resp->choices[i].content = AGENTRT_STRDUP(content->valuestring);
+                    resp->choices[i].content = AIRY_STRDUP(content->valuestring);
                 }
             }
             cJSON *finish = cJSON_GetObjectItem(choice, "finish_reason");
             if (cJSON_IsString(finish) && finish->valuestring && !resp->finish_reason) {
-                resp->finish_reason = AGENTRT_STRDUP(finish->valuestring);
+                resp->finish_reason = AIRY_STRDUP(finish->valuestring);
             }
         }
     }
@@ -390,7 +390,7 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
 
     /* root 由 CJSON_AUTO_FREE 自动释放 */
     *out = resp;
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 /* ========== SSE 流式传输实现 ========== */
@@ -408,7 +408,7 @@ static void sse_ctx_init(sse_stream_ctx_t *sse, provider_stream_chunk_cb_t cb, v
 {
     __builtin_memset(sse, 0, sizeof(*sse));
     sse->line_cap = 4096;
-    sse->line_buf = (char *)AGENTRT_MALLOC(sse->line_cap);
+    sse->line_buf = (char *)AIRY_MALLOC(sse->line_cap);
     if (!sse->line_buf) {
         SVC_LOG_ERROR("C-L02: PROVIDER: SSE-INIT-FAIL reason=oom cap=%zu "
                       "STACK: sse_ctx_init",
@@ -421,7 +421,7 @@ static void sse_ctx_init(sse_stream_ctx_t *sse, provider_stream_chunk_cb_t cb, v
 static void sse_ctx_destroy(sse_stream_ctx_t *sse)
 {
     if (sse) {
-        AGENTRT_FREE(sse->line_buf);
+        AIRY_FREE(sse->line_buf);
         sse->line_buf = NULL;
     }
 }
@@ -443,12 +443,12 @@ static int sse_feed_line(sse_stream_ctx_t *sse, const char *line, size_t len)
         }
 
         if (sse->on_chunk) {
-            char *tmp = (char *)AGENTRT_MALLOC(data_len + 1);
+            char *tmp = (char *)AIRY_MALLOC(data_len + 1);
             if (tmp) {
                 __builtin_memcpy(tmp, data_start, data_len);
                 tmp[data_len] = '\0';
                 int ret = sse->on_chunk(tmp, sse->chunk_user_data);
-                AGENTRT_FREE(tmp);
+                AIRY_FREE(tmp);
                 if (ret != 0) {
                     sse->cancelled = 1;
                     return ret;
@@ -508,7 +508,7 @@ static size_t sse_write_callback(void *contents, size_t size, size_t nmemb, void
         size_t new_cap = sse->line_cap * 2;
         while (new_cap < needed)
             new_cap *= 2;
-        char *ptr = (char *)AGENTRT_REALLOC(sse->line_buf, new_cap);
+        char *ptr = (char *)AIRY_REALLOC(sse->line_buf, new_cap);
         if (!ptr)
             return 0;
         sse->line_buf = ptr;
@@ -532,13 +532,13 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
 {
     if (!url || !body || !on_chunk || !out_http_code) {
         errno = EINVAL;
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     sse_stream_ctx_t sse;
     sse_ctx_init(&sse, on_chunk, chunk_user_data);
     if (!sse.line_buf) {
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     CURL *curl = curl_easy_init();
@@ -547,7 +547,7 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
         SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d "
                       "STACK: provider_http_post_stream curl_easy_init",
                       url, errno);
-        return AGENTRT_ERR_UNKNOWN;
+        return AIRY_ERR_UNKNOWN;
     }
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -577,8 +577,8 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
     if (res != CURLE_OK) {
         SVC_LOG_WARN("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d curl_error=%s", url, errno,
                  curl_easy_strerror(res));
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
-    return AGENTRT_OK;
+    return AIRY_OK;
 }

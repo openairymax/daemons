@@ -25,7 +25,7 @@ static void test_agent_trace_create(void)
     assert(ret == 0);
 
     loop_detection_config_t loop_cfg;
-    AGENTRT_MEMSET(&loop_cfg, 0, sizeof(loop_cfg));
+    AIRY_MEMSET(&loop_cfg, 0, sizeof(loop_cfg));
     loop_cfg.mode = LOOP_DETECTION_TIME_BASED;
     loop_cfg.max_execution_time_ms = 60000;
     loop_cfg.max_loop_iterations = 100;
@@ -56,7 +56,7 @@ static void test_agent_state_update(void)
     assert(ret == 0);
 
     loop_detection_config_t loop_cfg;
-    AGENTRT_MEMSET(&loop_cfg, 0, sizeof(loop_cfg));
+    AIRY_MEMSET(&loop_cfg, 0, sizeof(loop_cfg));
     loop_cfg.mode = LOOP_DETECTION_TIME_BASED;
     loop_cfg.max_execution_time_ms = 60000;
 
@@ -89,7 +89,7 @@ static void test_agent_loop_detection(void)
     assert(ret == 0);
 
     loop_detection_config_t loop_cfg;
-    AGENTRT_MEMSET(&loop_cfg, 0, sizeof(loop_cfg));
+    AIRY_MEMSET(&loop_cfg, 0, sizeof(loop_cfg));
     loop_cfg.mode = LOOP_DETECTION_PATTERN_BASED;
     loop_cfg.max_loop_iterations = 3;
     loop_cfg.pattern_window_size = 5;
@@ -128,7 +128,7 @@ static void test_agent_trace_export(void)
     assert(ret == 0);
 
     loop_detection_config_t loop_cfg;
-    AGENTRT_MEMSET(&loop_cfg, 0, sizeof(loop_cfg));
+    AIRY_MEMSET(&loop_cfg, 0, sizeof(loop_cfg));
     loop_cfg.mode = LOOP_DETECTION_TIME_BASED;
     loop_cfg.max_execution_time_ms = 60000;
 
@@ -170,9 +170,9 @@ static void test_agent_active_agents(void)
         printf("    Active agents: %zu\n", count);
         if (agent_ids) {
             for (size_t i = 0; i < count; i++) {
-                AGENTRT_FREE(agent_ids[i]);
+                AIRY_FREE(agent_ids[i]);
             }
-            AGENTRT_FREE(agent_ids);
+            AIRY_FREE(agent_ids);
         }
     }
 

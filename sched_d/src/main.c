@@ -12,7 +12,7 @@
  * - ARCHITECTURAL_PRINCIPLES.md E-3 资源确定性(成对管理)
  * - ARCHITECTURAL_PRINCIPLES.md E-4 跨平台一致性(platform.h)
  * - ARCHITECTURAL_PRINCIPLES.md E-5 命名语义化(SVC_LOG_*)
- * - ARCHITECTURAL_PRINCIPLES.md E-6 错误可追溯(AGENTRT_ERR_*)
+ * - ARCHITECTURAL_PRINCIPLES.md E-6 错误可追溯(AIRY_ERR_*)
  */
 
 #include "../../monit_d/include/monitor_service.h"
@@ -27,8 +27,8 @@
 
 /* ==================== 配置常量 ==================== */
 
-#define DEFAULT_SOCKET_PATH_UNIX AGENTRT_RUNTIME_DIR "/sched.sock"
-#define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\agentrt_sched"
+#define DEFAULT_SOCKET_PATH_UNIX AIRY_RUNTIME_DIR "/sched.sock"
+#define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_sched"
 #define DEFAULT_TCP_PORT 8083
 #define MAX_BUFFER 65536
 
@@ -40,41 +40,41 @@ DAEMON_DECLARE_COMMON(sched_d, scheduler, DEFAULT_SOCKET_PATH_UNIX,
 
 static sched_service_t *g_service = NULL;
 
-/* ==================== 错误码定义（统一使用 AGENTRT_ERR_*） ==================== */
-#define SCHED_ERR_INVALID_PARAM AGENTRT_ERR_INVALID_PARAM
-#define SCHED_ERR_OUT_OF_MEMORY AGENTRT_ERR_OUT_OF_MEMORY
-#define SCHED_ERR_NOT_FOUND AGENTRT_ERR_NOT_FOUND
-#define SCHED_ERR_INVALID_CONFIG (AGENTRT_ERR_DAEMON_BASE + 0x01)
-#define SCHED_ERR_STRATEGY_FAIL (AGENTRT_ERR_DAEMON_BASE + 0x02)
+/* ==================== 错误码定义（统一使用 AIRY_ERR_*） ==================== */
+#define SCHED_ERR_INVALID_PARAM AIRY_ERR_INVALID_PARAM
+#define SCHED_ERR_OUT_OF_MEMORY AIRY_ERR_OUT_OF_MEMORY
+#define SCHED_ERR_NOT_FOUND AIRY_ERR_NOT_FOUND
+#define SCHED_ERR_INVALID_CONFIG (AIRY_ERR_DAEMON_BASE + 0x01)
+#define SCHED_ERR_STRATEGY_FAIL (AIRY_ERR_DAEMON_BASE + 0x02)
 
 /* ==================== 方法处理器包装函数 ==================== */
 
-static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_schedule_task(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_get_stats(int id, agentrt_socket_t client_fd);
-static void handle_health_check(int id, agentrt_socket_t client_fd);
+static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_get_stats(int id, airy_sock_t client_fd);
+static void handle_health_check(int id, airy_sock_t client_fd);
 
 static void on_register_agent_method(cJSON *params, int id, void *user_data)
 {
-    handle_register_agent(params, id, *(agentrt_socket_t *)user_data);
+    handle_register_agent(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_schedule_task_method(cJSON *params, int id, void *user_data)
 {
-    handle_schedule_task(params, id, *(agentrt_socket_t *)user_data);
+    handle_schedule_task(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
-    handle_get_stats(id, *(agentrt_socket_t *)user_data);
+    handle_get_stats(id, *(airy_sock_t *)user_data);
 }
 
 static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
-    handle_health_check(id, *(agentrt_socket_t *)user_data);
+    handle_health_check(id, *(airy_sock_t *)user_data);
 }
 
-static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *agent_json = jsonrpc_get_object_param(params, "agent");
     if (!agent_json) {
@@ -89,11 +89,11 @@ static void handle_register_agent(cJSON *params, int id, agentrt_socket_t client
         return;
     }
 
-AGENTRT_STRNCPY_TERM(info.agent_id, aid, sizeof(info.agent_id));
+AIRY_STRNCPY_TERM(info.agent_id, aid, sizeof(info.agent_id));
     (info.agent_id)[sizeof(info.agent_id) - 1] = '\0';
     const char *aname = get_string_field(agent_json, "agent_name", NULL);
     if (aname)
-AGENTRT_STRNCPY_TERM(info.agent_name, aname, sizeof(info.agent_name));
+AIRY_STRNCPY_TERM(info.agent_name, aname, sizeof(info.agent_name));
         (info.agent_name)[sizeof(info.agent_name) - 1] = '\0';
 
     info.load_factor = get_double_field(agent_json, "load_factor", 0.0);
@@ -104,7 +104,7 @@ AGENTRT_STRNCPY_TERM(info.agent_name, aname, sizeof(info.agent_name));
 
     int ret = sched_service_register_agent(g_service, &info);
 
-    if (ret != AGENTRT_SUCCESS) {
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Register failed", id);
         SVC_LOG_ERROR("Failed to register agent: %s (error=%d)", info.agent_id, ret);
     } else {
@@ -116,7 +116,7 @@ AGENTRT_STRNCPY_TERM(info.agent_name, aname, sizeof(info.agent_name));
     }
 }
 
-static void handle_schedule_task(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *task_json = jsonrpc_get_object_param(params, "task");
     if (!task_json) {
@@ -131,12 +131,12 @@ static void handle_schedule_task(cJSON *params, int id, agentrt_socket_t client_
         return;
     }
 
-AGENTRT_STRNCPY_TERM(task.task_id, tid, sizeof(task.task_id));
+AIRY_STRNCPY_TERM(task.task_id, tid, sizeof(task.task_id));
     (task.task_id)[sizeof(task.task_id) - 1] = '\0';
 
     const char *desc = get_string_field(task_json, "task_description", NULL);
     if (desc)
-AGENTRT_STRNCPY_TERM(task.task_description, desc, sizeof(task.task_description));
+AIRY_STRNCPY_TERM(task.task_description, desc, sizeof(task.task_description));
         (task.task_description)[sizeof(task.task_description) - 1] = '\0';
 
     task.priority = get_int_field(task_json, "priority", 0);
@@ -145,7 +145,7 @@ AGENTRT_STRNCPY_TERM(task.task_description, desc, sizeof(task.task_description))
     sched_result_t *result = NULL;
     int ret = sched_service_schedule_task(g_service, &task, &result);
 
-    if (ret != AGENTRT_SUCCESS || !result) {
+    if (ret != AIRY_SUCCESS || !result) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Schedule failed", id);
         SVC_LOG_ERROR("Task scheduling failed: %s (error=%d)", task.task_id, ret);
         return;
@@ -160,33 +160,33 @@ AGENTRT_STRNCPY_TERM(task.task_description, desc, sizeof(task.task_description))
     SVC_LOG_INFO("Task scheduled: %s -> Agent: %s (Confidence: %.2f)", task.task_id,
                  result->selected_agent_id, result->confidence);
 
-    AGENTRT_FREE(result->selected_agent_id);
-    AGENTRT_FREE(result);
+    AIRY_FREE(result->selected_agent_id);
+    AIRY_FREE(result);
 }
 
-static void handle_get_stats(int id, agentrt_socket_t client_fd)
+static void handle_get_stats(int id, airy_sock_t client_fd)
 {
     void *stats_data = NULL;
     int ret = sched_service_get_stats(g_service, &stats_data);
 
-    if (ret != AGENTRT_SUCCESS || !stats_data) {
+    if (ret != AIRY_SUCCESS || !stats_data) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Get stats failed", id);
         return;
     }
 
     /* P0.18.2: 模式 B — parse + 立即释放 text + 自动释放（JSONRPC_SEND_SUCCESS 内部 Delete） */
     CJSON_PARSE_GUARD(report_json, (char *)stats_data, {
-        AGENTRT_FREE(stats_data);
+        AIRY_FREE(stats_data);
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid report data", id);
         return;
     });
-    AGENTRT_FREE(stats_data);
+    AIRY_FREE(stats_data);
 
     JSONRPC_SEND_SUCCESS(client_fd, report_json, id);
     report_json = NULL; /* JSONRPC_SEND_SUCCESS 已 Delete，防止 CJSON_AUTO_FREE 重复释放 */
 }
 
-static void handle_health_check(int id, agentrt_socket_t client_fd)
+static void handle_health_check(int id, airy_sock_t client_fd)
 {
     bool healthy = false;
     (void)sched_service_health_check(g_service, &healthy);
@@ -221,8 +221,8 @@ int main(int argc, char **argv)
     if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
 
     /* 初始化平台层 */
-    agentrt_socket_init();
-    agentrt_mutex_init(&g_running_lock_sched_d);
+    airy_sock_init();
+    airy_mtx_init(&g_running_lock_sched_d);
 
     /* 设置信号处理 */
 #ifdef _WIN32
@@ -231,7 +231,7 @@ int main(int argc, char **argv)
     DAEMON_SETUP_SIGNALS(sched_d);
 #endif
 
-    agentrt_log_init(NULL);
+    airy_log_init(NULL);
     atexit(log_cleanup);
 
     /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
@@ -249,23 +249,23 @@ int main(int argc, char **argv)
 
     /* 创建调度服务 */
     int ret = sched_service_create(&config, &g_service);
-    if (ret != AGENTRT_SUCCESS || !g_service) {
+    if (ret != AIRY_SUCCESS || !g_service) {
         SVC_LOG_ERROR("Failed to create scheduler service (error=%d)", ret);
-        agentrt_mutex_destroy(&g_running_lock_sched_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_sched_d);
+        airy_sock_cleanup();
         return 1;
     }
 
     SVC_LOG_INFO("Scheduler service created with strategy: round_robin");
 
     /* 创建服务器 Socket（TCP/Unix/NamedPipe 统一封装） */
-    agentrt_socket_t server_fd = daemon_create_server_socket(
+    airy_sock_t server_fd = daemon_create_server_socket(
         use_tcp, DEFAULT_TCP_PORT, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN);
     if (server_fd < 0) {
         SVC_LOG_ERROR("Failed to create server socket");
         destroy_service();
-        agentrt_mutex_destroy(&g_running_lock_sched_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_sched_d);
+        airy_sock_cleanup();
         return 1;
     }
     SVC_LOG_INFO(use_tcp ? "Listening on TCP port %d" : "Listening on Unix socket",
@@ -287,12 +287,12 @@ int main(int argc, char **argv)
                                    use_tcp ? DEFAULT_TCP_PORT : 0, "scheduler,core", use_tcp,
                                    &ev_config, &g_event_driver_sched_d, &g_bsd_sched_d,
                                    &g_bipc_sched_d);
-    if (ret != AGENTRT_SUCCESS || !g_event_driver_sched_d) {
+    if (ret != AIRY_SUCCESS || !g_event_driver_sched_d) {
         SVC_LOG_ERROR("Failed to create event driver");
-        agentrt_socket_close(server_fd);
+        airy_sock_close(server_fd);
         destroy_service();
-        agentrt_mutex_destroy(&g_running_lock_sched_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_sched_d);
+        airy_sock_cleanup();
         return 1;
     }
 
@@ -306,10 +306,10 @@ int main(int argc, char **argv)
     if (daemon_event_driver_add_server_fd(g_event_driver_sched_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
         daemon_event_driver_destroy(g_event_driver_sched_d);
-        agentrt_socket_close(server_fd);
+        airy_sock_close(server_fd);
         destroy_service();
-        agentrt_mutex_destroy(&g_running_lock_sched_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_sched_d);
+        airy_sock_cleanup();
         return 1;
     }
 

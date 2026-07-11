@@ -15,8 +15,8 @@
  * @see svc_common.h 服务管理框架
  */
 
-#ifndef AGENTRT_CONFIG_MANAGER_H
-#define AGENTRT_CONFIG_MANAGER_H
+#ifndef AIRY_RT_CONFIG_MANAGER_H
+#define AIRY_RT_CONFIG_MANAGER_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -178,7 +178,7 @@ int cm_load_json(const char *path, const char *namespace_);
 
 /**
  * @brief 从环境变量加载配置
- * @param prefix 环境变量前缀（如"AGENTRT_"）
+ * @param prefix 环境变量前缀（如"AIRY_"）
  * @param namespace_ 命名空间
  * @return 加载的配置项数量
  */
@@ -301,4 +301,4 @@ cm_config_t cm_create_default_config(void);
 }
 #endif
 
-#endif /* AGENTRT_CONFIG_MANAGER_H */
+#endif /* AIRY_RT_CONFIG_MANAGER_H */

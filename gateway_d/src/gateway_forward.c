@@ -84,7 +84,7 @@ static const char *proto_to_channel(gw_forward_t *fw, gw_fwd_proto_t proto)
 
 gw_forward_t *gw_forward_create(const gw_forward_config_t *config)
 {
-    gw_forward_t *fw = (gw_forward_t *)AGENTRT_CALLOC(1, sizeof(gw_forward_t));
+    gw_forward_t *fw = (gw_forward_t *)AIRY_CALLOC(1, sizeof(gw_forward_t));
     if (!fw) {
         SVC_LOG_ERROR("C-L11: gw_forward_create OOM");
         return NULL;
@@ -100,11 +100,11 @@ gw_forward_t *gw_forward_create(const gw_forward_config_t *config)
     fw->ipc_helper = ipc_bus_helper_init("gateway_d", NULL);
     if (!fw->ipc_helper) {
         SVC_LOG_ERROR("C-L11: Failed to init IPC Bus helper for gateway forwarding");
-        AGENTRT_FREE(fw);
+        AIRY_FREE(fw);
         return NULL;
     }
 
-    AGENTRT_MEMSET(&fw->stats, 0, sizeof(fw->stats));
+    AIRY_MEMSET(&fw->stats, 0, sizeof(fw->stats));
     fw->initialized = true;
     fw->healthy = true;
 
@@ -126,7 +126,7 @@ void gw_forward_destroy(gw_forward_t *fw)
     }
     fw->initialized = false;
     fw->healthy = false;
-    AGENTRT_FREE(fw);
+    AIRY_FREE(fw);
     SVC_LOG_INFO("C-L11: Gateway forwarder destroyed");
 }
 
@@ -238,7 +238,7 @@ static char *build_jsonrpc_forward(const char *method, const char *path, const c
 {
     (void)body_len;
     size_t buf_size = 4096 + (body ? strlen(body) : 0);
-    char *msg = (char *)AGENTRT_MALLOC(buf_size);
+    char *msg = (char *)AIRY_MALLOC(buf_size);
     if (!msg)
         return NULL;
 
@@ -257,7 +257,7 @@ static char *build_jsonrpc_forward(const char *method, const char *path, const c
     }
 
     if (written < 0 || (size_t)written >= buf_size) {
-        AGENTRT_FREE(msg);
+        AIRY_FREE(msg);
         return NULL;
     }
 
@@ -274,10 +274,10 @@ static int do_forward(gw_forward_t *fw, gw_fwd_proto_t proto, const char *target
     if (!fw || !out_response || !out_response_len) {
         SVC_LOG_ERROR("C-L11: do_forward invalid params (fw=%p out_resp=%p out_len=%p)",
                       (void *)fw, (void *)out_response, (void *)out_response_len);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    uint64_t start_us = agentrt_time_ns() / 1000;
+    uint64_t start_us = airy_time_ns() / 1000;
 
     /* 构建 JSON-RPC 转发消息 */
     char *jsonrpc_msg = build_jsonrpc_forward(method, path, body, body_len);
@@ -286,7 +286,7 @@ static int do_forward(gw_forward_t *fw, gw_fwd_proto_t proto, const char *target
                       proto_to_string(proto), path ? path : "/", body_len);
         fw->stats.forward_errors++;
         fw->healthy = false;
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 
     size_t msg_len = strlen(jsonrpc_msg);
@@ -302,20 +302,20 @@ static int do_forward(gw_forward_t *fw, gw_fwd_proto_t proto, const char *target
                                                      IPC_BUS_PROTO_JSON_RPC,
                                                      jsonrpc_msg,
                                                      msg_len);
-    AGENTRT_FREE(jsonrpc_msg);
+    AIRY_FREE(jsonrpc_msg);
 
     if (!req) {
         SVC_LOG_ERROR("C-L11: Failed to create IPC request message for %s → %s",
                       proto_to_string(proto), target_daemon);
         fw->stats.forward_errors++;
         fw->healthy = false;
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 
     safe_strcpy(req->header.target, target_daemon, sizeof(req->header.target));
 
     ipc_bus_message_t resp;
-    AGENTRT_MEMSET(&resp, 0, sizeof(resp));
+    AIRY_MEMSET(&resp, 0, sizeof(resp));
 
     int ret = ipc_bus_helper_request(fw->ipc_helper, target_daemon, req, &resp,
                                      fw->config.request_timeout_ms);
@@ -341,20 +341,20 @@ static int do_forward(gw_forward_t *fw, gw_fwd_proto_t proto, const char *target
         /* 返回错误响应 */
         const char *err_fmt = "{\"error\":{\"code\":%d,\"message\":\"Forward to %s failed: %s\"}}";
         size_t err_len = snprintf(NULL, 0, err_fmt, ret, target_daemon, err_reason) + 1;
-        char *err_resp = (char *)AGENTRT_MALLOC(err_len);
+        char *err_resp = (char *)AIRY_MALLOC(err_len);
         if (err_resp) {
             snprintf(err_resp, err_len, err_fmt, ret, target_daemon, err_reason);
             *out_response = err_resp;
             *out_response_len = strlen(err_resp);
         }
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 
     /* 成功：返回目标 daemon 的响应 */
     *out_response = (char *)resp.payload;
     *out_response_len = resp.payload_size;
 
-    uint64_t latency_us = agentrt_time_ns() / 1000 - start_us;
+    uint64_t latency_us = airy_time_ns() / 1000 - start_us;
 
     fw->stats.total_forwarded++;
     if (proto < GW_FWD_PROTO_COUNT)
@@ -401,7 +401,7 @@ int gw_forward_request(gw_forward_t *fw, gw_fwd_proto_t proto, const char *metho
 {
     if (!fw || !fw->initialized) {
         SVC_LOG_ERROR("C-L11: gw_forward_request: forwarder not initialized");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     const char *target = proto_to_target_daemon(fw, proto);
@@ -440,7 +440,7 @@ int gw_forward_openai(gw_forward_t *fw, const char *method, const char *path, co
 int gw_forward_get_stats(gw_forward_t *fw, gw_forward_stats_t *stats)
 {
     if (!fw || !stats)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     *stats = fw->stats;
     return 0;
 }
@@ -448,7 +448,7 @@ int gw_forward_get_stats(gw_forward_t *fw, gw_forward_stats_t *stats)
 void gw_forward_reset_stats(gw_forward_t *fw)
 {
     if (fw)
-        AGENTRT_MEMSET(&fw->stats, 0, sizeof(fw->stats));
+        AIRY_MEMSET(&fw->stats, 0, sizeof(fw->stats));
 }
 
 bool gw_forward_is_healthy(gw_forward_t *fw)

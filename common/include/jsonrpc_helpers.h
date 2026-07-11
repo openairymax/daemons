@@ -8,8 +8,8 @@
  * @date 2026-04-04
  */
 
-#ifndef AGENTRT_JSONRPC_HELPERS_H
-#define AGENTRT_JSONRPC_HELPERS_H
+#ifndef AIRY_RT_JSONRPC_HELPERS_H
+#define AIRY_RT_JSONRPC_HELPERS_H
 
 #include <cjson/cJSON.h>
 #include <stddef.h>
@@ -17,13 +17,13 @@
 
 #include "error.h"
 
-#ifndef AGENTRT_API
-#if defined(_WIN32) && defined(AGENTRT_BUILD_DLL)
-#define AGENTRT_API __declspec(dllexport)
+#ifndef AIRY_API
+#if defined(_WIN32) && defined(AIRY_BUILD_DLL)
+#define AIRY_API __declspec(dllexport)
 #elif defined(_WIN32)
-#define AGENTRT_API __declspec(dllimport)
+#define AIRY_API __declspec(dllimport)
 #else
-#define AGENTRT_API __attribute__((visibility("default")))
+#define AIRY_API __attribute__((visibility("default")))
 #endif
 #endif
 
@@ -44,25 +44,25 @@ extern "C" {
 #define JSONRPC_SESSION_EXPIRED (-32003)
 #define JSONRPC_SERVICE_UNAVAILABLE (-32004)
 
-AGENTRT_API char *jsonrpc_build_error(int code, const char *message, int id);
-AGENTRT_API char *jsonrpc_build_success(cJSON *result, int id);
-AGENTRT_API char *jsonrpc_build_success_string(const char *result_str, int id);
-AGENTRT_API int jsonrpc_parse_request(const char *raw, char **out_method, cJSON **out_params,
+AIRY_API char *jsonrpc_build_error(int code, const char *message, int id);
+AIRY_API char *jsonrpc_build_success(cJSON *result, int id);
+AIRY_API char *jsonrpc_build_success_string(const char *result_str, int id);
+AIRY_API int jsonrpc_parse_request(const char *raw, char **out_method, cJSON **out_params,
                                       int *out_id);
-AGENTRT_API int jsonrpc_parse_request_ptr(cJSON *req, char **out_method, cJSON **out_params,
+AIRY_API int jsonrpc_parse_request_ptr(cJSON *req, char **out_method, cJSON **out_params,
                                           int *out_id);
-AGENTRT_API int jsonrpc_validate_request(cJSON *req);
-AGENTRT_API const char *jsonrpc_get_string_param(cJSON *params, const char *key,
+AIRY_API int jsonrpc_validate_request(cJSON *req);
+AIRY_API const char *jsonrpc_get_string_param(cJSON *params, const char *key,
                                                  const char *default_value);
-AGENTRT_API int jsonrpc_get_int_param(cJSON *params, const char *key, int default_value);
-AGENTRT_API int jsonrpc_get_bool_param(cJSON *params, const char *key, int default_value);
-AGENTRT_API cJSON *jsonrpc_get_array_param(cJSON *params, const char *key);
-AGENTRT_API cJSON *jsonrpc_get_object_param(cJSON *params, const char *key);
-AGENTRT_API int jsonrpc_is_notification(cJSON *req);
-AGENTRT_API char *jsonrpc_build_notification(const char *method, cJSON *params);
-AGENTRT_API const char *jsonrpc_get_error_message(int code);
-AGENTRT_API char *jsonrpc_build_error_with_data(int code, const char *message, cJSON *data, int id);
-AGENTRT_API int jsonrpc_is_batch_request(const char *raw);
+AIRY_API int jsonrpc_get_int_param(cJSON *params, const char *key, int default_value);
+AIRY_API int jsonrpc_get_bool_param(cJSON *params, const char *key, int default_value);
+AIRY_API cJSON *jsonrpc_get_array_param(cJSON *params, const char *key);
+AIRY_API cJSON *jsonrpc_get_object_param(cJSON *params, const char *key);
+AIRY_API int jsonrpc_is_notification(cJSON *req);
+AIRY_API char *jsonrpc_build_notification(const char *method, cJSON *params);
+AIRY_API const char *jsonrpc_get_error_message(int code);
+AIRY_API char *jsonrpc_build_error_with_data(int code, const char *message, cJSON *data, int id);
+AIRY_API int jsonrpc_is_batch_request(const char *raw);
 
 /* ==================== 响应发送辅助宏（消除重复代码） ==================== */
 
@@ -78,8 +78,8 @@ AGENTRT_API int jsonrpc_is_batch_request(const char *raw);
     do {                                                                 \
         char *_err = jsonrpc_build_error((error_code), (message), (id)); \
         if (_err) {                                                      \
-            agentrt_socket_send((socket), _err, strlen(_err));           \
-            AGENTRT_FREE(_err);                                          \
+            airy_sock_send((socket), _err, strlen(_err));           \
+            AIRY_FREE(_err);                                          \
         }                                                                \
     } while (0)
 
@@ -99,8 +99,8 @@ AGENTRT_API int jsonrpc_is_batch_request(const char *raw);
         char *_success = jsonrpc_build_success((result), (id));        \
         /* result 所有权已转移至 jsonrpc_build_success 内部 root 并被释放，不可再 Delete */ \
         if (_success) {                                                \
-            agentrt_socket_send((socket), _success, strlen(_success)); \
-            AGENTRT_FREE(_success);                                    \
+            airy_sock_send((socket), _success, strlen(_success)); \
+            AIRY_FREE(_success);                                    \
         }                                                              \
     } while (0)
 
@@ -108,4 +108,4 @@ AGENTRT_API int jsonrpc_is_batch_request(const char *raw);
 }
 #endif
 
-#endif /* AGENTRT_JSONRPC_HELPERS_H */
+#endif /* AIRY_RT_JSONRPC_HELPERS_H */

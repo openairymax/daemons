@@ -33,13 +33,13 @@ int route_least_latency(const llm_route_request_t *request,
                                                  LLM_ROUTER_MAX_ENDPOINTS);
 
     if (eligible_count == 0) {
-        AGENTRT_LOG_WARN("C-L02: Latency: no eligible endpoints "
+        AIRY_LOG_WARN("C-L02: Latency: no eligible endpoints "
                 "(caps=0x%x, total_endpoints=%zu) STACK: route_least_latency",
                 request->required_caps, router_ctx_get()->endpoint_count);
-        return AGENTRT_ERR_NOT_FOUND;  /* BAN-073: 无可用端点 */
+        return AIRY_ERR_NOT_FOUND;  /* BAN-073: 无可用端点 */
     }
 
-    AGENTRT_LOG_DEBUG("C-L02: Latency: evaluating %zu endpoints for latency",
+    AIRY_LOG_DEBUG("C-L02: Latency: evaluating %zu endpoints for latency",
                       eligible_count);
 
     /* 选择延迟最低的端点 */
@@ -47,7 +47,7 @@ int route_least_latency(const llm_route_request_t *request,
     uint32_t best_latency = UINT32_MAX;
 
     for (size_t i = 0; i < eligible_count; i++) {
-        AGENTRT_LOG_DEBUG("C-L02: Latency: endpoint[%zu] %s/%s latency=%ums",
+        AIRY_LOG_DEBUG("C-L02: Latency: endpoint[%zu] %s/%s latency=%ums",
                           i, eligible[i]->provider_name, eligible[i]->model_name,
                           eligible[i]->avg_latency_ms);
 
@@ -66,7 +66,7 @@ int route_least_latency(const llm_route_request_t *request,
             if (eligible[i]->avg_latency_ms > max_lat)
                 max_lat = eligible[i]->avg_latency_ms;
         }
-        AGENTRT_LOG_DEBUG("C-L02: Latency: latency range min=%ums max=%ums "
+        AIRY_LOG_DEBUG("C-L02: Latency: latency range min=%ums max=%ums "
                           "across %zu endpoints",
                           min_lat, max_lat, eligible_count);
     }
@@ -90,7 +90,7 @@ int route_least_latency(const llm_route_request_t *request,
         }
         if (second_best != UINT32_MAX) {
             router_set_fallback(result, eligible[fallback_idx]);
-            AGENTRT_LOG_DEBUG("C-L02: Latency: fallback set to %s/%s "
+            AIRY_LOG_DEBUG("C-L02: Latency: fallback set to %s/%s "
                               "(latency=%ums)",
                               eligible[fallback_idx]->provider_name,
                               eligible[fallback_idx]->model_name,
@@ -98,7 +98,7 @@ int route_least_latency(const llm_route_request_t *request,
         }
     }
 
-    AGENTRT_LOG_INFO("C-L02: Latency: selected %s/%s latency=%ums",
+    AIRY_LOG_INFO("C-L02: Latency: selected %s/%s latency=%ums",
                      ep->provider_name, ep->model_name, best_latency);
 
     return 0;

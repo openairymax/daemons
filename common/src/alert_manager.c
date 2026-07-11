@@ -41,7 +41,7 @@ static struct {
     am_callback_entry_t callbacks[AM_MAX_CALLBACKS];
     uint32_t callback_count;
     bool initialized;
-    agentrt_mutex_t mutex;
+    airy_mtx_t mutex;
     struct {
         char name[128];
         double value;
@@ -65,7 +65,7 @@ static am_alert_t *find_active_alert(const char *name)
         if (strcmp(g_am.active_alerts[i].name, name) == 0)
             return &g_am.active_alerts[i];
     }
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_OVERFLOW, "limit exceeded");
+    AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
 }
 
 static am_rule_t *find_rule(const char *name)
@@ -74,7 +74,7 @@ static am_rule_t *find_rule(const char *name)
         if (strcmp(g_am.rules[i].name, name) == 0)
             return &g_am.rules[i];
     }
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_OVERFLOW, "limit exceeded");
+    AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
 }
 
 static bool evaluate_condition(double value, am_comparison_t op, double threshold)
@@ -137,7 +137,7 @@ static void dispatch_notifications(const am_alert_t *alert)
 
 /* ==================== 公共API实现 ==================== */
 
-AGENTRT_API am_config_t am_create_default_config(void)
+AIRY_API am_config_t am_create_default_config(void)
 {
     am_config_t config;
     __builtin_memset(&config, 0, sizeof(am_config_t));
@@ -150,7 +150,7 @@ AGENTRT_API am_config_t am_create_default_config(void)
     return config;
 }
 
-AGENTRT_API int am_init(const am_config_t *config)
+AIRY_API int am_init(const am_config_t *config)
 {
     if (g_am.initialized)
         return 0;
@@ -161,9 +161,9 @@ AGENTRT_API int am_init(const am_config_t *config)
         g_am.config = am_create_default_config();
     }
 
-    agentrt_error_t err = agentrt_mutex_init(&g_am.mutex);
-    if (err != AGENTRT_SUCCESS)
-        return AGENTRT_ERR_UNKNOWN;
+    airy_err_t err = airy_mtx_init(&g_am.mutex);
+    if (err != AIRY_SUCCESS)
+        return AIRY_ERR_UNKNOWN;
 
     __builtin_memset(g_am.rules, 0, sizeof(g_am.rules));
     g_am.rule_count = 0;
@@ -186,59 +186,59 @@ AGENTRT_API int am_init(const am_config_t *config)
     return 0;
 }
 
-AGENTRT_API void am_shutdown(void)
+AIRY_API void am_shutdown(void)
 {
     if (!g_am.initialized)
         return;
 
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
     g_am.initialized = false;
-    agentrt_mutex_unlock(&g_am.mutex);
+    airy_mtx_unlock(&g_am.mutex);
 
-    agentrt_mutex_destroy(&g_am.mutex);
+    airy_mtx_destroy(&g_am.mutex);
 
     LOG_INFO("Alert manager shutdown");
 }
 
 /* ==================== 规则管理 ==================== */
 
-AGENTRT_API int am_add_rule(const am_rule_t *rule)
+AIRY_API int am_add_rule(const am_rule_t *rule)
 {
     if (!rule)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (!g_am.initialized)
         am_init(NULL);
 
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
 
     if (find_rule(rule->name)) {
         am_rule_t *existing = find_rule(rule->name);
         __builtin_memcpy(existing, rule, sizeof(am_rule_t));
-        agentrt_mutex_unlock(&g_am.mutex);
+        airy_mtx_unlock(&g_am.mutex);
         return 0;
     }
 
     if (g_am.rule_count >= AM_MAX_RULES) {
-        agentrt_mutex_unlock(&g_am.mutex);
-        return AGENTRT_ERR_OVERFLOW;
+        airy_mtx_unlock(&g_am.mutex);
+        return AIRY_ERR_OVERFLOW;
     }
 
     __builtin_memcpy(&g_am.rules[g_am.rule_count], rule, sizeof(am_rule_t));
     g_am.rule_count++;
 
-    agentrt_mutex_unlock(&g_am.mutex);
+    airy_mtx_unlock(&g_am.mutex);
 
     LOG_INFO("Alert rule added: %s (type=%d, level=%s)", rule->name, rule->type,
              am_level_to_string(rule->level));
     return 0;
 }
 
-AGENTRT_API int am_remove_rule(const char *name)
+AIRY_API int am_remove_rule(const char *name)
 {
     if (!name)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
 
     for (uint32_t i = 0; i < g_am.rule_count; i++) {
         if (strcmp(g_am.rules[i].name, name) == 0) {
@@ -247,58 +247,58 @@ AGENTRT_API int am_remove_rule(const char *name)
             }
             __builtin_memset(&g_am.rules[g_am.rule_count - 1], 0, sizeof(am_rule_t));
             g_am.rule_count--;
-            agentrt_mutex_unlock(&g_am.mutex);
+            airy_mtx_unlock(&g_am.mutex);
             return 0;
         }
     }
 
-    agentrt_mutex_unlock(&g_am.mutex);
-    return AGENTRT_ERR_NOT_FOUND;
+    airy_mtx_unlock(&g_am.mutex);
+    return AIRY_ERR_NOT_FOUND;
 }
 
-AGENTRT_API int am_set_rule_enabled(const char *name, bool enabled)
+AIRY_API int am_set_rule_enabled(const char *name, bool enabled)
 {
     if (!name)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
 
     am_rule_t *rule = find_rule(name);
     if (!rule) {
-        agentrt_mutex_unlock(&g_am.mutex);
-        return AGENTRT_ERR_NOT_FOUND;
+        airy_mtx_unlock(&g_am.mutex);
+        return AIRY_ERR_NOT_FOUND;
     }
 
     rule->enabled = enabled;
-    agentrt_mutex_unlock(&g_am.mutex);
+    airy_mtx_unlock(&g_am.mutex);
 
     return 0;
 }
 
 /* ==================== 告警触发 ==================== */
 
-AGENTRT_API int am_fire(const char *name, am_level_t level, const char *message, const char *source,
+AIRY_API int am_fire(const char *name, am_level_t level, const char *message, const char *source,
                         const char *labels)
 {
     if (!name)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (!g_am.initialized)
         am_init(NULL);
 
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
 
     am_alert_t *existing = find_active_alert(name);
     if (existing) {
         if (g_am.config.enable_deduplication) {
             existing->trigger_count++;
-            existing->last_notified = agentrt_time_ms();
+            existing->last_notified = airy_time_ms();
 
             if (existing->notification_count < g_am.config.max_notifications_per_alert) {
                 dispatch_notifications(existing);
                 existing->notification_count++;
             }
 
-            agentrt_mutex_unlock(&g_am.mutex);
+            airy_mtx_unlock(&g_am.mutex);
             return 0;
         }
 
@@ -306,18 +306,18 @@ AGENTRT_API int am_fire(const char *name, am_level_t level, const char *message,
         if (message)
             safe_strcpy(existing->message, message, AM_MAX_MESSAGE_LEN);
         existing->trigger_count++;
-        existing->last_notified = agentrt_time_ms();
+        existing->last_notified = airy_time_ms();
         dispatch_notifications(existing);
         existing->notification_count++;
 
-        agentrt_mutex_unlock(&g_am.mutex);
+        airy_mtx_unlock(&g_am.mutex);
         return 0;
     }
 
     if (g_am.active_alert_count >= AM_MAX_ACTIVE_ALERTS) {
-        agentrt_mutex_unlock(&g_am.mutex);
+        airy_mtx_unlock(&g_am.mutex);
         LOG_ERROR("Max active alerts reached");
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
     }
 
     am_alert_t *alert = &g_am.active_alerts[g_am.active_alert_count];
@@ -331,35 +331,35 @@ AGENTRT_API int am_fire(const char *name, am_level_t level, const char *message,
         safe_strcpy(alert->source, source, sizeof(alert->source));
     if (labels)
         safe_strcpy(alert->labels, labels, sizeof(alert->labels));
-    alert->fired_at = agentrt_time_ms();
+    alert->fired_at = airy_time_ms();
     alert->trigger_count = 1;
     alert->notification_count = 1;
     g_am.active_alert_count++;
 
     dispatch_notifications(alert);
 
-    agentrt_mutex_unlock(&g_am.mutex);
+    airy_mtx_unlock(&g_am.mutex);
 
     LOG_WARN("Alert fired: %s [%s] - %s", name, am_level_to_string(level),
              message ? message : "no message");
     return 0;
 }
 
-AGENTRT_API int am_resolve(const char *name)
+AIRY_API int am_resolve(const char *name)
 {
     if (!name)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
 
     am_alert_t *alert = find_active_alert(name);
     if (!alert) {
-        agentrt_mutex_unlock(&g_am.mutex);
-        return AGENTRT_ERR_NOT_FOUND;
+        airy_mtx_unlock(&g_am.mutex);
+        return AIRY_ERR_NOT_FOUND;
     }
 
     alert->state = AM_STATE_RESOLVED;
-    alert->resolved_at = agentrt_time_ms();
+    alert->resolved_at = airy_time_ms();
 
     uint32_t idx = (uint32_t)(alert - g_am.active_alerts);
     if (idx < g_am.active_alert_count - 1) {
@@ -368,29 +368,29 @@ AGENTRT_API int am_resolve(const char *name)
     __builtin_memset(&g_am.active_alerts[g_am.active_alert_count - 1], 0, sizeof(am_alert_t));
     g_am.active_alert_count--;
 
-    agentrt_mutex_unlock(&g_am.mutex);
+    airy_mtx_unlock(&g_am.mutex);
 
     LOG_INFO("Alert resolved: %s", name);
     return 0;
 }
 
-AGENTRT_API int am_acknowledge(const char *name)
+AIRY_API int am_acknowledge(const char *name)
 {
     if (!name)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
 
     am_alert_t *alert = find_active_alert(name);
     if (!alert) {
-        agentrt_mutex_unlock(&g_am.mutex);
-        return AGENTRT_ERR_NOT_FOUND;
+        airy_mtx_unlock(&g_am.mutex);
+        return AIRY_ERR_NOT_FOUND;
     }
 
     alert->acknowledged = true;
     alert->state = AM_STATE_ACKNOWLEDGED;
 
-    agentrt_mutex_unlock(&g_am.mutex);
+    airy_mtx_unlock(&g_am.mutex);
 
     LOG_INFO("Alert acknowledged: %s", name);
     return 0;
@@ -398,15 +398,15 @@ AGENTRT_API int am_acknowledge(const char *name)
 
 /* ==================== 指标评估 ==================== */
 
-AGENTRT_API int am_evaluate(const char *metric_name, double value)
+AIRY_API int am_evaluate(const char *metric_name, double value)
 {
     if (!metric_name)
         return 0;
 
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
 
     int triggered = 0;
-    uint64_t now = agentrt_time_ms();
+    uint64_t now = airy_time_ms();
 
     for (uint32_t i = 0; i < g_am.rule_count; i++) {
         am_rule_t *rule = &g_am.rules[i];
@@ -453,23 +453,23 @@ AGENTRT_API int am_evaluate(const char *metric_name, double value)
                 existing->trigger_count++;
                 existing->last_notified = now;
             } else {
-                agentrt_mutex_unlock(&g_am.mutex);
+                airy_mtx_unlock(&g_am.mutex);
                 am_fire(rule->name, rule->level, message, "rule_engine", metric_name);
-                agentrt_mutex_lock(&g_am.mutex);
+                airy_mtx_lock(&g_am.mutex);
             }
         }
     }
 
-    agentrt_mutex_unlock(&g_am.mutex);
+    airy_mtx_unlock(&g_am.mutex);
     return triggered;
 }
 
-AGENTRT_API int am_record_metric(const char *metric_name, double value)
+AIRY_API int am_record_metric(const char *metric_name, double value)
 {
     if (!metric_name)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
 
     for (uint32_t i = 0; i < g_am.metric_count; i++) {
         if (strcmp(g_am.latest_metrics[i].name, metric_name) == 0) {
@@ -480,23 +480,23 @@ AGENTRT_API int am_record_metric(const char *metric_name, double value)
                 g_am.metric_history[i].count++;
             else
                 g_am.metric_history[i].head = (g_am.metric_history[i].head + 1) % 8;
-            agentrt_mutex_unlock(&g_am.mutex);
+            airy_mtx_unlock(&g_am.mutex);
             return 0;
         }
     }
 
     if (g_am.metric_count < AM_MAX_RULES) {
-        AGENTRT_STRNCPY_TERM(g_am.latest_metrics[g_am.metric_count].name, metric_name, sizeof(g_am.latest_metrics[g_am.metric_count].name));
+        AIRY_STRNCPY_TERM(g_am.latest_metrics[g_am.metric_count].name, metric_name, sizeof(g_am.latest_metrics[g_am.metric_count].name));
         g_am.latest_metrics[g_am.metric_count].value = value;
 
-        AGENTRT_STRNCPY_TERM(g_am.metric_history[g_am.metric_count].name, metric_name, sizeof(g_am.metric_history[g_am.metric_count].name));
+        AIRY_STRNCPY_TERM(g_am.metric_history[g_am.metric_count].name, metric_name, sizeof(g_am.metric_history[g_am.metric_count].name));
         g_am.metric_history[g_am.metric_count].values[0] = value;
         g_am.metric_history[g_am.metric_count].count = 1;
         g_am.metric_history[g_am.metric_count].head = 0;
         g_am.metric_count++;
     }
 
-    agentrt_mutex_unlock(&g_am.mutex);
+    airy_mtx_unlock(&g_am.mutex);
     return 0;
 }
 
@@ -545,12 +545,12 @@ static bool evaluate_trend(const char *metric_name, am_comparison_t op, double t
     return false;
 }
 
-AGENTRT_API int am_evaluate_all(void)
+AIRY_API int am_evaluate_all(void)
 {
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
 
     int total_triggered = 0;
-    uint64_t now = agentrt_time_ms();
+    uint64_t now = airy_time_ms();
 
     for (uint32_t i = 0; i < g_am.rule_count; i++) {
         am_rule_t *rule = &g_am.rules[i];
@@ -563,52 +563,52 @@ AGENTRT_API int am_evaluate_all(void)
 
         if (rule->metric_name[0] != '\0') {
             double value = am_get_latest_metric_value(rule->metric_name);
-            agentrt_mutex_unlock(&g_am.mutex);
+            airy_mtx_unlock(&g_am.mutex);
             int result = am_evaluate(rule->metric_name, value);
-            agentrt_mutex_lock(&g_am.mutex);
+            airy_mtx_lock(&g_am.mutex);
             if (result > 0)
                 total_triggered += result;
         }
     }
 
-    agentrt_mutex_unlock(&g_am.mutex);
+    airy_mtx_unlock(&g_am.mutex);
     return total_triggered;
 }
 
 /* ==================== 通知通道 ==================== */
 
-AGENTRT_API int am_register_channel(const am_channel_t *channel)
+AIRY_API int am_register_channel(const am_channel_t *channel)
 {
     if (!channel)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
 
     if (g_am.channel_count >= AM_MAX_CHANNELS) {
-        agentrt_mutex_unlock(&g_am.mutex);
-        return AGENTRT_ERR_OVERFLOW;
+        airy_mtx_unlock(&g_am.mutex);
+        return AIRY_ERR_OVERFLOW;
     }
 
     __builtin_memcpy(&g_am.channels[g_am.channel_count], channel, sizeof(am_channel_t));
     g_am.channel_count++;
 
-    agentrt_mutex_unlock(&g_am.mutex);
+    airy_mtx_unlock(&g_am.mutex);
 
     LOG_INFO("Alert channel registered: %s (type=%d)", channel->name, channel->type);
     return 0;
 }
 
-AGENTRT_API int am_register_callback(am_alert_callback_t callback, void *user_data,
+AIRY_API int am_register_callback(am_alert_callback_t callback, void *user_data,
                                      am_level_t min_level)
 {
     if (!callback)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
 
     if (g_am.callback_count >= AM_MAX_CALLBACKS) {
-        agentrt_mutex_unlock(&g_am.mutex);
-        return AGENTRT_ERR_OVERFLOW;
+        airy_mtx_unlock(&g_am.mutex);
+        return AIRY_ERR_OVERFLOW;
     }
 
     g_am.callbacks[g_am.callback_count].callback = callback;
@@ -616,35 +616,35 @@ AGENTRT_API int am_register_callback(am_alert_callback_t callback, void *user_da
     g_am.callbacks[g_am.callback_count].min_level = min_level;
     g_am.callback_count++;
 
-    agentrt_mutex_unlock(&g_am.mutex);
+    airy_mtx_unlock(&g_am.mutex);
 
     return 0;
 }
 
 /* ==================== 查询 ==================== */
 
-AGENTRT_API int am_get_active_alerts(am_alert_t *alerts, uint32_t max_count, uint32_t *found_count)
+AIRY_API int am_get_active_alerts(am_alert_t *alerts, uint32_t max_count, uint32_t *found_count)
 {
     if (!alerts || !found_count)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
 
     uint32_t count = g_am.active_alert_count < max_count ? g_am.active_alert_count : max_count;
     __builtin_memcpy(alerts, g_am.active_alerts, count * sizeof(am_alert_t));
     *found_count = count;
 
-    agentrt_mutex_unlock(&g_am.mutex);
+    airy_mtx_unlock(&g_am.mutex);
     return 0;
 }
 
-AGENTRT_API int am_get_alerts_by_level(am_level_t level, am_alert_t *alerts, uint32_t max_count,
+AIRY_API int am_get_alerts_by_level(am_level_t level, am_alert_t *alerts, uint32_t max_count,
                                        uint32_t *found_count)
 {
     if (!alerts || !found_count)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_am.mutex);
+    airy_mtx_lock(&g_am.mutex);
 
     uint32_t count = 0;
     for (uint32_t i = 0; i < g_am.active_alert_count && count < max_count; i++) {
@@ -655,18 +655,18 @@ AGENTRT_API int am_get_alerts_by_level(am_level_t level, am_alert_t *alerts, uin
     }
     *found_count = count;
 
-    agentrt_mutex_unlock(&g_am.mutex);
+    airy_mtx_unlock(&g_am.mutex);
     return 0;
 }
 
-AGENTRT_API uint32_t am_active_alert_count(void)
+AIRY_API uint32_t am_active_alert_count(void)
 {
     return g_am.active_alert_count;
 }
 
 /* ==================== 工具函数 ==================== */
 
-AGENTRT_API const char *am_level_to_string(am_level_t level)
+AIRY_API const char *am_level_to_string(am_level_t level)
 {
     static const char *level_strings[] = {"INFO", "WARNING", "CRITICAL", "EMERGENCY"};
     if (level < 0 || level > AM_LEVEL_EMERGENCY)
@@ -674,7 +674,7 @@ AGENTRT_API const char *am_level_to_string(am_level_t level)
     return level_strings[level];
 }
 
-AGENTRT_API const char *am_state_to_string(am_state_t state)
+AIRY_API const char *am_state_to_string(am_state_t state)
 {
     static const char *state_strings[] = {"PENDING", "FIRING", "RESOLVED", "SUPPRESSED",
                                           "ACKNOWLEDGED"};

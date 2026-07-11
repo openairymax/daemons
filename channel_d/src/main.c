@@ -14,8 +14,8 @@
 #include <inttypes.h>
 #include <unistd.h>
 
-#define CHANNEL_D_SOCKET_PATH AGENTRT_RUNTIME_DIR "/channel.sock"
-#define CHANNEL_D_PIPE_PATH   "\\\\.\\pipe\\agentrt_channel"
+#define CHANNEL_D_SOCKET_PATH AIRY_RUNTIME_DIR "/channel.sock"
+#define CHANNEL_D_PIPE_PATH   "\\\\.\\pipe\\airy_channel"
 
 /* P0.18.1: 使用 DAEMON_DECLARE_COMMON 生成公共样板（信号处理/全局变量/print_usage） */
 DAEMON_DECLARE_COMMON(channel_d, channel, CHANNEL_D_SOCKET_PATH,
@@ -56,7 +56,7 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
 {
     channel_service_t *svc = (channel_service_t *)user_data;
     if (!svc || !method || !response_json) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     if (strcmp(method, "ping") == 0) {
@@ -65,7 +65,7 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
             bool healthy = channel_service_is_healthy(svc);
             char buf[128];
             snprintf(buf, sizeof(buf), "{\"status\":\"%s\"}", healthy ? "ok" : "degraded");
-            *response_json = AGENTRT_STRDUP(buf);
+            *response_json = AIRY_STRDUP(buf);
             return 0;
         }
         char id[128] = {0};
@@ -86,16 +86,16 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
             char err[256];
             snprintf(err, sizeof(err), "{\"error\":\"ping failed: %d\",\"latency_ms\":%lld}", rc,
                      (long long)latency_ms);
-            *response_json = AGENTRT_STRDUP(err);
-            AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "channel_service_ping failed");
+            *response_json = AIRY_STRDUP(err);
+            AIRY_ERROR(AIRY_ERR_UNKNOWN, "channel_service_ping failed");
         }
         size_t sz =
             snprintf(NULL, 0, "{\"status\":\"ok\",\"channel_id\":\"%s\",\"latency_ms\":%lld}", id,
                      (long long)latency_ms) +
             1;
-        char *buf = (char *)AGENTRT_MALLOC(sz);
+        char *buf = (char *)AIRY_MALLOC(sz);
         if (!buf) {
-            AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "malloc failed for ping response buffer");
+            AIRY_ERROR(AIRY_ERR_UNKNOWN, "malloc failed for ping response buffer");
         }
         snprintf(buf, sz, "{\"status\":\"ok\",\"channel_id\":\"%s\",\"latency_ms\":%lld}", id,
                  (long long)latency_ms);
@@ -108,14 +108,14 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
         size_t count = 0;
         int rc = channel_service_list(svc, info_list, CHANNEL_MAX_CHANNELS, &count);
         if (rc != 0) {
-            *response_json = AGENTRT_STRDUP("{\"error\":\"list failed\"}");
-            AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "channel_service_list failed");
+            *response_json = AIRY_STRDUP("{\"error\":\"list failed\"}");
+            AIRY_ERROR(AIRY_ERR_UNKNOWN, "channel_service_list failed");
         }
 
         size_t buf_size = 4096 + count * 1024;
-        char *buf = (char *)AGENTRT_MALLOC(buf_size);
+        char *buf = (char *)AIRY_MALLOC(buf_size);
         if (!buf) {
-            AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "malloc failed for list response buffer");
+            AIRY_ERROR(AIRY_ERR_UNKNOWN, "malloc failed for list response buffer");
         }
 
         size_t pos = 0;
@@ -141,8 +141,8 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
         const char *type_start = strstr(params_json, "\"type\"");
 
         if (!id_start || !name_start) {
-            *response_json = AGENTRT_STRDUP("{\"error\":\"missing id or name\"}");
-            AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "missing id or name in open request");
+            *response_json = AIRY_STRDUP("{\"error\":\"missing id or name\"}");
+            AIRY_ERROR(AIRY_ERR_UNKNOWN, "missing id or name in open request");
         }
 
         char id[128] = {0}, name[256] = {0};
@@ -184,19 +184,19 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
         if (rc != 0) {
             char err[256];
             snprintf(err, sizeof(err), "{\"error\":\"open failed: %d\"}", rc);
-            *response_json = AGENTRT_STRDUP(err);
-            AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "channel_service_open failed");
+            *response_json = AIRY_STRDUP(err);
+            AIRY_ERROR(AIRY_ERR_UNKNOWN, "channel_service_open failed");
         }
 
-        *response_json = AGENTRT_STRDUP("{\"status\":\"opened\"}");
+        *response_json = AIRY_STRDUP("{\"status\":\"opened\"}");
         return 0;
     }
 
     if (strcmp(method, "close") == 0) {
         const char *id_start = strstr(params_json, "\"id\"");
         if (!id_start) {
-            *response_json = AGENTRT_STRDUP("{\"error\":\"missing id\"}");
-            AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "missing id in close request");
+            *response_json = AIRY_STRDUP("{\"error\":\"missing id\"}");
+            AIRY_ERROR(AIRY_ERR_UNKNOWN, "missing id in close request");
         }
         char id[128] = {0};
         const char *p = strchr(id_start + 4, '"');
@@ -213,10 +213,10 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
 
         int rc = channel_service_close(svc, id);
         if (rc != 0) {
-            *response_json = AGENTRT_STRDUP("{\"error\":\"close failed\"}");
-            AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "channel_service_close failed");
+            *response_json = AIRY_STRDUP("{\"error\":\"close failed\"}");
+            AIRY_ERROR(AIRY_ERR_UNKNOWN, "channel_service_close failed");
         }
-        *response_json = AGENTRT_STRDUP("{\"status\":\"closed\"}");
+        *response_json = AIRY_STRDUP("{\"status\":\"closed\"}");
         return 0;
     }
 
@@ -224,8 +224,8 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
         const char *id_start = strstr(params_json, "\"id\"");
         const char *data_start = strstr(params_json, "\"data\"");
         if (!id_start || !data_start) {
-            *response_json = AGENTRT_STRDUP("{\"error\":\"missing id or data\"}");
-            AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "missing id or data in send request");
+            *response_json = AIRY_STRDUP("{\"error\":\"missing id or data\"}");
+            AIRY_ERROR(AIRY_ERR_UNKNOWN, "missing id or data in send request");
         }
         char id[128] = {0};
         const char *p = strchr(id_start + 4, '"');
@@ -249,22 +249,22 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
             if (rc != 0) {
                 char err[256];
                 snprintf(err, sizeof(err), "{\"error\":\"send failed: %d\"}", rc);
-                *response_json = AGENTRT_STRDUP(err);
-                AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "channel_service_send failed");
+                *response_json = AIRY_STRDUP(err);
+                AIRY_ERROR(AIRY_ERR_UNKNOWN, "channel_service_send failed");
             }
         }
-        *response_json = AGENTRT_STRDUP("{\"status\":\"sent\"}");
+        *response_json = AIRY_STRDUP("{\"status\":\"sent\"}");
         return 0;
     }
 
     if (strcmp(method, "health") == 0) {
         bool healthy = channel_service_is_healthy(svc);
-        *response_json = AGENTRT_STRDUP(healthy ? "{\"healthy\":true}" : "{\"healthy\":false}");
+        *response_json = AIRY_STRDUP(healthy ? "{\"healthy\":true}" : "{\"healthy\":false}");
         return 0;
     }
 
-    *response_json = AGENTRT_STRDUP("{\"error\":\"unknown method\"}");
-    AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "unknown method");
+    *response_json = AIRY_STRDUP("{\"error\":\"unknown method\"}");
+    AIRY_ERROR(AIRY_ERR_UNKNOWN, "unknown method");
 }
 
 /* ==================== 主入口 ==================== */
@@ -294,7 +294,7 @@ int main(int argc, char *argv[])
     DAEMON_SETUP_SIGNALS(channel_d);
 #endif
 
-    agentrt_log_init(NULL);
+    airy_log_init(NULL);
     atexit(log_cleanup);
 
     daemon_cupolas_init("channel_d");
@@ -302,7 +302,7 @@ int main(int argc, char *argv[])
     channel_config_t config = CHANNEL_CONFIG_DEFAULTS;
     config.max_channels = max_channels;
     if (socket_dir) {
-        AGENTRT_STRNCPY_TERM(config.socket_dir, socket_dir, sizeof(config.socket_dir));
+        AIRY_STRNCPY_TERM(config.socket_dir, socket_dir, sizeof(config.socket_dir));
         (config.socket_dir)[sizeof(config.socket_dir) - 1] = '\0';
     }
 
@@ -322,7 +322,7 @@ int main(int argc, char *argv[])
                  config.socket_dir);
 
     /* 创建 Socket 服务器 */
-    agentrt_socket_t server_fd =
+    airy_sock_t server_fd =
         daemon_create_server_socket(0, 0, CHANNEL_D_SOCKET_PATH, CHANNEL_D_PIPE_PATH);
     if (server_fd < 0) {
         SVC_LOG_ERROR("channel_d: failed to create socket at %s", CHANNEL_D_SOCKET_PATH);

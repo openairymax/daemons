@@ -17,9 +17,9 @@
  * @see daemon_platform_ext.h                         (daemons 特有扩展)
  */
 
-#ifndef AGENTRT_DAEMON_COMMON_PLATFORM_H
-#define AGENTRT_DAEMON_COMMON_PLATFORM_H
+#ifndef AIRY_RT_DAEMON_COMMON_PLATFORM_H
+#define AIRY_RT_DAEMON_COMMON_PLATFORM_H
 
 #include "daemon_platform_ext.h"
 
-#endif /* AGENTRT_DAEMON_COMMON_PLATFORM_H */
+#endif /* AIRY_RT_DAEMON_COMMON_PLATFORM_H */

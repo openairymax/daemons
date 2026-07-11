@@ -23,7 +23,7 @@ static int tests_passed = 0;
 static void test_init_null_config(void)
 {
     TEST("Init with NULL config");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     int ret = daemon_security_init(NULL, &err);
     ASSERT(ret == 0, "init with NULL config should succeed");
@@ -34,7 +34,7 @@ static void test_init_null_config(void)
 static void test_double_init(void)
 {
     TEST("Double init is idempotent");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     int ret = daemon_security_init(NULL, &err);
     ASSERT(ret == 0, "first init");
@@ -55,7 +55,7 @@ static void test_shutdown_without_init(void)
 static void test_sanitize_llm_input_normal(void)
 {
     TEST("Sanitize LLM input - normal text");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -73,7 +73,7 @@ static void test_sanitize_llm_input_normal(void)
 static void test_sanitize_llm_input_dangerous(void)
 {
     TEST("Sanitize LLM input - dangerous pattern");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -91,7 +91,7 @@ static void test_sanitize_llm_input_dangerous(void)
 static void test_sanitize_llm_input_null_params(void)
 {
     TEST("Sanitize LLM input - null params rejected");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -112,7 +112,7 @@ static void test_sanitize_llm_input_null_params(void)
 static void test_sanitize_tool_params_normal(void)
 {
     TEST("Sanitize tool params - normal");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -131,7 +131,7 @@ static void test_sanitize_tool_params_normal(void)
 static void test_sanitize_tool_params_dangerous(void)
 {
     TEST("Sanitize tool params - dangerous pattern");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -149,7 +149,7 @@ static void test_sanitize_tool_params_dangerous(void)
 static void test_sanitize_tool_params_null(void)
 {
     TEST("Sanitize tool params - null params rejected");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -167,7 +167,7 @@ static void test_sanitize_tool_params_null(void)
 static void test_check_tool_permission_no_acl(void)
 {
     TEST("Check tool permission - no ACL entry denies");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -181,7 +181,7 @@ static void test_check_tool_permission_no_acl(void)
 static void test_check_tool_permission_null_params(void)
 {
     TEST("Check tool permission - null params denied");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -201,7 +201,7 @@ static void test_check_tool_permission_null_params(void)
 static void test_check_llm_permission_no_acl(void)
 {
     TEST("Check LLM permission - no ACL entry denies");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -215,7 +215,7 @@ static void test_check_llm_permission_no_acl(void)
 static void test_verify_package_signature_not_found(void)
 {
     TEST("Verify package signature - file not found");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -231,7 +231,7 @@ static void test_verify_package_signature_not_found(void)
 static void test_verify_package_signature_null(void)
 {
     TEST("Verify package signature - null params rejected");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -249,7 +249,7 @@ static void test_verify_package_signature_null(void)
 static void test_store_and_retrieve_credential(void)
 {
     TEST("Store and retrieve credential");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -272,7 +272,7 @@ static void test_store_and_retrieve_credential(void)
 static void test_retrieve_nonexistent_credential(void)
 {
     TEST("Retrieve nonexistent credential");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -288,7 +288,7 @@ static void test_retrieve_nonexistent_credential(void)
 static void test_store_credential_null_params(void)
 {
     TEST("Store credential - null params rejected");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -312,7 +312,7 @@ static void test_store_credential_null_params(void)
 static void test_audit_log_event(void)
 {
     TEST("Audit log event");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -329,7 +329,7 @@ static void test_audit_log_event(void)
 static void test_audit_log_event_null_params(void)
 {
     TEST("Audit log event - null params handled");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -346,7 +346,7 @@ static void test_audit_log_event_null_params(void)
 static void test_get_status(void)
 {
     TEST("Get security status");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -363,7 +363,7 @@ static void test_get_status(void)
 static void test_get_status_null_params(void)
 {
     TEST("Get security status - null params rejected");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -404,7 +404,7 @@ static void test_init_with_config(void)
     cfg.enable_vault = true;
     cfg.enable_audit_logging = true;
 
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     int ret = daemon_security_init(&cfg, &err);
     ASSERT(ret == 0, "init with config should succeed");
@@ -421,7 +421,7 @@ static void test_init_with_config(void)
 static void test_store_credential_overwrite(void)
 {
     TEST("Store credential overwrite existing");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -449,7 +449,7 @@ static void test_store_credential_overwrite(void)
 static void test_credential_access_control(void)
 {
     TEST("Credential access control - wrong agent denied");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
@@ -473,7 +473,7 @@ static void test_credential_access_control(void)
 static void test_sanitize_llm_input_special_chars(void)
 {
     TEST("Sanitize LLM input - tab chars stripped");
-    agentrt_error_t err;
+    airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 

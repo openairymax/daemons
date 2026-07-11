@@ -30,14 +30,14 @@ static _Atomic uint64_t g_current_live = 0;
 void *refcount_alloc(size_t size, void (*deleter)(void *object))
 {
     if (size < sizeof(refcounted_t)) {
-        AGENTRT_LOG_ERROR("Refcount: size %zu too small (min %zu)",
+        AIRY_LOG_ERROR("Refcount: size %zu too small (min %zu)",
                           size, sizeof(refcounted_t));
         return NULL;
     }
 
-    void *ptr = AGENTRT_CALLOC(1, size);
+    void *ptr = AIRY_CALLOC(1, size);
     if (!ptr) {
-        AGENTRT_LOG_ERROR("Refcount: OOM allocating %zu bytes", size);
+        AIRY_LOG_ERROR("Refcount: OOM allocating %zu bytes", size);
         return NULL;
     }
 
@@ -62,7 +62,7 @@ uint32_t refcount_retain(refcounted_t *rc)
 
     if (old == 0) {
         /* 从 0 增加是错误状态 — use-after-free */
-        AGENTRT_LOG_ERROR("Refcount: retain on freed object (type=%s, "
+        AIRY_LOG_ERROR("Refcount: retain on freed object (type=%s, "
                           "old=%u, new=%u)",
                           rc->type_name ? rc->type_name : "unknown",
                           old, new_count);
@@ -70,7 +70,7 @@ uint32_t refcount_retain(refcounted_t *rc)
         return 0;
     }
 
-    AGENTRT_LOG_TRACE("Refcount: retain (type=%s, %u → %u, "
+    AIRY_LOG_TRACE("Refcount: retain (type=%s, %u → %u, "
                       "live=%llu)",
                       rc->type_name ? rc->type_name : "unknown",
                       old, new_count,
@@ -87,7 +87,7 @@ uint32_t refcount_release(refcounted_t *rc)
     uint32_t old = atomic_fetch_sub_explicit(&rc->refcount, 1,
                                              memory_order_acq_rel);
     if (old == 0) {
-        AGENTRT_LOG_ERROR("Refcount: double-free on object (type=%s, "
+        AIRY_LOG_ERROR("Refcount: double-free on object (type=%s, "
                           "live=%llu)",
                           rc->type_name ? rc->type_name : "unknown",
                           (unsigned long long)atomic_load_explicit(
@@ -97,7 +97,7 @@ uint32_t refcount_release(refcounted_t *rc)
 
     uint32_t new_count = old - 1;
 
-    AGENTRT_LOG_TRACE("Refcount: release (type=%s, %u → %u, "
+    AIRY_LOG_TRACE("Refcount: release (type=%s, %u → %u, "
                       "live=%llu)",
                       rc->type_name ? rc->type_name : "unknown",
                       old, new_count,
@@ -106,7 +106,7 @@ uint32_t refcount_release(refcounted_t *rc)
 
     if (new_count == 0) {
         /* 引用计数归零，调用 deleter */
-        AGENTRT_LOG_DEBUG("Refcount: object freed (type=%s, "
+        AIRY_LOG_DEBUG("Refcount: object freed (type=%s, "
                           "total_allocs=%llu, total_frees=%llu, live=%llu)",
                           rc->type_name ? rc->type_name : "unknown",
                           (unsigned long long)atomic_load_explicit(
@@ -119,7 +119,7 @@ uint32_t refcount_release(refcounted_t *rc)
         if (rc->deleter) {
             rc->deleter(rc);
         } else {
-            AGENTRT_FREE(rc);
+            AIRY_FREE(rc);
         }
 
         atomic_fetch_add_explicit(&g_total_frees, 1, memory_order_relaxed);

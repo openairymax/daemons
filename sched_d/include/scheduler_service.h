@@ -7,8 +7,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_SCHEDULER_SERVICE_H
-#define AGENTRT_SCHEDULER_SERVICE_H
+#ifndef AIRY_RT_SCHEDULER_SERVICE_H
+#define AIRY_RT_SCHEDULER_SERVICE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -159,4 +159,4 @@ int sched_service_health_check(sched_service_t *service, bool *health_status);
  */
 int sched_service_reload_config(sched_service_t *service, const sched_config_t *manager);
 
-#endif /* AGENTRT_SCHEDULER_SERVICE_H */
+#endif /* AIRY_RT_SCHEDULER_SERVICE_H */

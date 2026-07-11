@@ -17,8 +17,8 @@
 
 /* ==================== 配置常量 ==================== */
 
-#define DEFAULT_SOCKET_PATH_UNIX AGENTRT_RUNTIME_DIR "/tool.sock"
-#define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\agentrt_tool"
+#define DEFAULT_SOCKET_PATH_UNIX AIRY_RUNTIME_DIR "/tool.sock"
+#define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_tool"
 #define DEFAULT_TCP_PORT 8081
 #define MAX_BUFFER 65536
 #define MAX_CLIENTS 64
@@ -60,32 +60,32 @@ static BOOL WINAPI console_handler(DWORD fdwCtrlType)
 
 /* ==================== 请求处理方法 ==================== */
 
-static void handle_register(cJSON *params, int id, agentrt_socket_t fd);
-static void handle_list(int id, agentrt_socket_t fd);
-static void handle_get(cJSON *params, int id, agentrt_socket_t fd);
-static void handle_execute(cJSON *params, int id, agentrt_socket_t fd);
+static void handle_register(cJSON *params, int id, airy_sock_t fd);
+static void handle_list(int id, airy_sock_t fd);
+static void handle_get(cJSON *params, int id, airy_sock_t fd);
+static void handle_execute(cJSON *params, int id, airy_sock_t fd);
 
 static void on_register_method(cJSON *params, int id, void *user_data)
 {
-    handle_register(params, id, *(agentrt_socket_t *)user_data);
+    handle_register(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_list_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
-    handle_list(id, *(agentrt_socket_t *)user_data);
+    handle_list(id, *(airy_sock_t *)user_data);
 }
 
 static void on_get_method(cJSON *params, int id, void *user_data)
 {
-    handle_get(params, id, *(agentrt_socket_t *)user_data);
+    handle_get(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_execute_method(cJSON *params, int id, void *user_data)
 {
-    handle_execute(params, id, *(agentrt_socket_t *)user_data);
+    handle_execute(params, id, *(airy_sock_t *)user_data);
 }
 
-static void handle_register(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_register(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *tool = jsonrpc_get_object_param(params, "tool");
     if (!tool) {
@@ -117,7 +117,7 @@ static void handle_register(cJSON *params, int id, agentrt_socket_t client_fd)
     cJSON *params_arr = cJSON_GetObjectItem(tool, "params");
     if (cJSON_IsArray(params_arr)) {
         size_t cnt = cJSON_GetArraySize(params_arr);
-        tool_param_t *p = (tool_param_t *)AGENTRT_CALLOC(cnt, sizeof(tool_param_t));
+        tool_param_t *p = (tool_param_t *)AIRY_CALLOC(cnt, sizeof(tool_param_t));
         if (p) {
             for (size_t i = 0; i < cnt; ++i) {
                 cJSON *item = cJSON_GetArrayItem(params_arr, i);
@@ -134,9 +134,9 @@ static void handle_register(cJSON *params, int id, agentrt_socket_t client_fd)
     }
 
     int ret = tool_service_register(g_service, &meta);
-    AGENTRT_FREE((void *)meta.params);
+    AIRY_FREE((void *)meta.params);
 
-    if (ret != AGENTRT_SUCCESS) {
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Register failed", id);
         SVC_LOG_ERROR("Failed to register tool: %s (error=%d)", meta.id, ret);
     } else {
@@ -145,7 +145,7 @@ static void handle_register(cJSON *params, int id, agentrt_socket_t client_fd)
     }
 }
 
-static void handle_list(int id, agentrt_socket_t client_fd)
+static void handle_list(int id, airy_sock_t client_fd)
 {
     char *list_json = tool_service_list(g_service);
     if (!list_json) {
@@ -155,17 +155,17 @@ static void handle_list(int id, agentrt_socket_t client_fd)
 
     /* P0.18.2: 模式 B — parse + 立即释放 text + 自动释放（JSONRPC_SEND_SUCCESS 内部 Delete） */
     CJSON_PARSE_GUARD(result, list_json, {
-        AGENTRT_FREE(list_json);
+        AIRY_FREE(list_json);
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid JSON from list", id);
         return;
     });
-    AGENTRT_FREE(list_json);
+    AIRY_FREE(list_json);
 
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
     result = NULL; /* JSONRPC_SEND_SUCCESS 已 Delete，防止 CJSON_AUTO_FREE 重复释放 */
 }
 
-static void handle_get(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_get(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *tid = get_string_field(params, "tool_id", NULL);
     if (!tid) {
@@ -205,7 +205,7 @@ static void handle_get(cJSON *params, int id, agentrt_socket_t client_fd)
     tool_metadata_free(meta);
 }
 
-static void handle_execute(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *tid = get_string_field(params, "tool_id", NULL);
     cJSON *jparams = jsonrpc_get_object_param(params, "params");
@@ -226,9 +226,9 @@ static void handle_execute(cJSON *params, int id, agentrt_socket_t client_fd)
 
     tool_result_t *res = NULL;
     int ret = tool_service_execute(g_service, &req, &res);
-    AGENTRT_FREE((void *)params_json);
+    AIRY_FREE((void *)params_json);
 
-    if (ret != AGENTRT_SUCCESS || !res) {
+    if (ret != AIRY_SUCCESS || !res) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Execution failed", id);
         SVC_LOG_ERROR("Tool execution failed: %s (error=%d)", tid, ret);
         return;
@@ -255,12 +255,12 @@ static int load_daemon_config(const char *config_path)
     g_config.use_tcp = 0;
     g_config.max_clients = MAX_CLIENTS;
 
-#if defined(AGENTRT_PLATFORM_WINDOWS)
-    g_config.socket_path = AGENTRT_STRDUP(DEFAULT_SOCKET_PATH_WIN);
-    g_config.tcp_host = AGENTRT_STRDUP("127.0.0.1");
+#if defined(AIRY_PLATFORM_WINDOWS)
+    g_config.socket_path = AIRY_STRDUP(DEFAULT_SOCKET_PATH_WIN);
+    g_config.tcp_host = AIRY_STRDUP("127.0.0.1");
 #else
-    g_config.socket_path = AGENTRT_STRDUP(DEFAULT_SOCKET_PATH_UNIX);
-    g_config.tcp_host = AGENTRT_STRDUP("127.0.0.1");
+    g_config.socket_path = AIRY_STRDUP(DEFAULT_SOCKET_PATH_UNIX);
+    g_config.tcp_host = AIRY_STRDUP("127.0.0.1");
 #endif
     g_config.tcp_port = DEFAULT_TCP_PORT;
 
@@ -273,7 +273,7 @@ static int load_daemon_config(const char *config_path)
             fseek(f, 0, SEEK_SET);
 
             if (len > 0 && len < 1024 * 1024) { /* 限制配置文件大小为 1MB */
-                char *content = (char *)AGENTRT_MALLOC((size_t)len + 1);
+                char *content = (char *)AIRY_MALLOC((size_t)len + 1);
                 if (content) {
                     size_t read_len = fread(content, 1, (size_t)len, f);
                     if (read_len == (size_t)len) {
@@ -286,8 +286,8 @@ static int load_daemon_config(const char *config_path)
                             if (daemon_cfg) {
                                 cJSON *socket_path = cJSON_GetObjectItem(daemon_cfg, "socket_path");
                                 if (cJSON_IsString(socket_path)) {
-                                    AGENTRT_FREE(g_config.socket_path);
-                                    g_config.socket_path = AGENTRT_STRDUP(socket_path->valuestring);
+                                    AIRY_FREE(g_config.socket_path);
+                                    g_config.socket_path = AIRY_STRDUP(socket_path->valuestring);
                                 }
 
                                 cJSON *tcp_port = cJSON_GetObjectItem(daemon_cfg, "tcp_port");
@@ -304,7 +304,7 @@ static int load_daemon_config(const char *config_path)
                             /* root 由 CJSON_AUTO_FREE 自动释放 */
                         } while (0);
                     }
-                    AGENTRT_FREE(content);
+                    AIRY_FREE(content);
                 }
             }
             fclose(f);
@@ -316,8 +316,8 @@ static int load_daemon_config(const char *config_path)
 
 static void free_daemon_config(void)
 {
-    AGENTRT_FREE(g_config.socket_path);
-    AGENTRT_FREE(g_config.tcp_host);
+    AIRY_FREE(g_config.socket_path);
+    AIRY_FREE(g_config.tcp_host);
     __builtin_memset(&g_config, 0, sizeof(g_config));
 }
 
@@ -343,8 +343,8 @@ int main(int argc, char **argv)
     if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
 
     /* 初始化平台层 */
-    agentrt_socket_init();
-    agentrt_mutex_init(&g_running_lock_tool_d);
+    airy_sock_init();
+    airy_mtx_init(&g_running_lock_tool_d);
 
     /* 设置信号处理 */
 #ifdef _WIN32
@@ -353,7 +353,7 @@ int main(int argc, char **argv)
     DAEMON_SETUP_SIGNALS(tool_d);
 #endif
 
-    agentrt_log_init(NULL);
+    airy_log_init(NULL);
     atexit(log_cleanup);
 
     /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
@@ -372,20 +372,20 @@ int main(int argc, char **argv)
     if (!g_service) {
         SVC_LOG_ERROR("Failed to create tool service");
         free_daemon_config();
-        agentrt_mutex_destroy(&g_running_lock_tool_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_tool_d);
+        airy_sock_cleanup();
         return 1;
     }
 
     /* 创建服务器 Socket（TCP/Unix/NamedPipe 统一封装） */
-    agentrt_socket_t server_fd = daemon_create_server_socket(
+    airy_sock_t server_fd = daemon_create_server_socket(
         g_config.use_tcp, g_config.tcp_port, g_config.socket_path, g_config.socket_path);
     if (server_fd < 0) {
         SVC_LOG_ERROR("Failed to create server socket");
         destroy_service();
         free_daemon_config();
-        agentrt_mutex_destroy(&g_running_lock_tool_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_tool_d);
+        airy_sock_cleanup();
         return 1;
     }
     SVC_LOG_INFO(g_config.use_tcp ? "Listening on TCP %s:%d" : "Listening on %s",
@@ -407,13 +407,13 @@ int main(int argc, char **argv)
                                        g_config.use_tcp ? g_config.tcp_port : 0, "tool,core",
                                        g_config.use_tcp, &ev_config, &g_event_driver_tool_d,
                                        &g_bsd_tool_d, &g_bipc_tool_d);
-    if (ret != AGENTRT_SUCCESS || !g_event_driver_tool_d) {
+    if (ret != AIRY_SUCCESS || !g_event_driver_tool_d) {
         SVC_LOG_ERROR("Failed to create event driver");
-        agentrt_socket_close(server_fd);
+        airy_sock_close(server_fd);
         destroy_service();
         free_daemon_config();
-        agentrt_mutex_destroy(&g_running_lock_tool_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_tool_d);
+        airy_sock_cleanup();
         return 1;
     }
 
@@ -427,11 +427,11 @@ int main(int argc, char **argv)
     if (daemon_event_driver_add_server_fd(g_event_driver_tool_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
         daemon_event_driver_destroy(g_event_driver_tool_d);
-        agentrt_socket_close(server_fd);
+        airy_sock_close(server_fd);
         destroy_service();
         free_daemon_config();
-        agentrt_mutex_destroy(&g_running_lock_tool_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_tool_d);
+        airy_sock_cleanup();
         return 1;
     }
 

@@ -11,10 +11,10 @@
  * @see commons/utils/ipc/include/ipc_service_bus.h (commons 权威版本)
  */
 
-#ifndef AGENTRT_DAEMON_COMMON_IPC_SERVICE_BUS_H
-#define AGENTRT_DAEMON_COMMON_IPC_SERVICE_BUS_H
+#ifndef AIRY_RT_DAEMON_COMMON_IPC_SERVICE_BUS_H
+#define AIRY_RT_DAEMON_COMMON_IPC_SERVICE_BUS_H
 
 /* 使用相对路径避免找到 daemons 自身的 ipc_service_bus.h（递归包含） */
 #include "../../../commons/utils/ipc/include/ipc_service_bus.h"
 
-#endif /* AGENTRT_DAEMON_COMMON_IPC_SERVICE_BUS_H */
+#endif /* AIRY_RT_DAEMON_COMMON_IPC_SERVICE_BUS_H */

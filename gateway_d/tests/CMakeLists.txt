@@ -1,7 +1,7 @@
 # Gateway Daemon Tests (TeamC)
 
 # 测试代码豁免 BAN 严格合规：测试允许使用裸 malloc/free/memset 等函数
-add_compile_definitions(AGENTRT_COMPLIANCE_IMPL)
+add_compile_definitions(AIRY_COMPLIANCE_IMPL)
 # Copyright (C) 2026 SPHARX. All Rights Reserved.
 
 
@@ -71,11 +71,11 @@ foreach(TEST_SRC ${TEST_SOURCES})
             Threads::Threads
     )
 
-    if(AGENTRT_HAS_CJSON AND TARGET gateway_lib_obj AND AGENTRT_HAS_MICROHTTPD)
+    if(AIRY_HAS_CJSON AND TARGET gateway_lib_obj AND AIRY_HAS_MICROHTTPD)
         target_link_libraries(${TEST_NAME} PRIVATE $<TARGET_OBJECTS:gateway_lib_obj>)
     endif()
 
-    if(AGENTRT_HAS_MICROHTTPD)
+    if(AIRY_HAS_MICROHTTPD)
         if(libmicrohttpd_FOUND)
             target_link_libraries(${TEST_NAME} PRIVATE microhttpd)
         elseif(MICROHTTPD_FOUND)
@@ -84,7 +84,7 @@ foreach(TEST_SRC ${TEST_SOURCES})
         endif()
     endif()
 
-    if(AGENTRT_HAS_LIBWEBSOCKETS)
+    if(AIRY_HAS_LIBWEBSOCKETS)
         if(libwebsockets_FOUND)
             target_link_libraries(${TEST_NAME} PRIVATE websockets)
         elseif(LIBWEBSOCKETS_FOUND)

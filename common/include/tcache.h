@@ -17,8 +17,8 @@
  * @see arena.h  Arena 线性分配器
  */
 
-#ifndef AGENTRT_TCACHE_H
-#define AGENTRT_TCACHE_H
+#ifndef AIRY_RT_TCACHE_H
+#define AIRY_RT_TCACHE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -152,4 +152,4 @@ size_t tcache_cached_bytes(tcache_t *tc);
 }
 #endif
 
-#endif /* AGENTRT_TCACHE_H */
+#endif /* AIRY_RT_TCACHE_H */

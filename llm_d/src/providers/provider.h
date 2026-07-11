@@ -6,8 +6,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_LLM_PROVIDER_H
-#define AGENTRT_LLM_PROVIDER_H
+#ifndef AIRY_RT_LLM_PROVIDER_H
+#define AIRY_RT_LLM_PROVIDER_H
 
 #include "llm_service.h"
 
@@ -86,4 +86,4 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
 }
 #endif
 
-#endif /* AGENTRT_LLM_PROVIDER_H */
+#endif /* AIRY_RT_LLM_PROVIDER_H */

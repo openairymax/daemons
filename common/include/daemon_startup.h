@@ -38,8 +38,8 @@
  *              ┘
  */
 
-#ifndef AGENTRT_DAEMON_STARTUP_H
-#define AGENTRT_DAEMON_STARTUP_H
+#ifndef AIRY_RT_DAEMON_STARTUP_H
+#define AIRY_RT_DAEMON_STARTUP_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -50,32 +50,32 @@ extern "C" {
 
 /* ==================== 常量 ==================== */
 
-#define AGENTRT_DAEMON_COUNT     12
-#define AGENTRT_MAX_DEPS_PER_DAEMON 4
-#define AGENTRT_MAX_LAYERS       5
+#define AIRY_DAEMON_COUNT     12
+#define AIRY_MAX_DEPS_PER_DAEMON 4
+#define AIRY_MAX_LAYERS       5
 
 /* ==================== daemon 标识 ==================== */
 
 typedef enum {
-    AGENTRT_DAEMON_MONIT   = 0,
-    AGENTRT_DAEMON_OBSERVE = 1,
-    AGENTRT_DAEMON_INFO    = 2,
-    AGENTRT_DAEMON_NOTIFY  = 3,
-    AGENTRT_DAEMON_SCHED   = 4,
-    AGENTRT_DAEMON_CHANNEL = 5,
-    AGENTRT_DAEMON_LLM     = 6,
-    AGENTRT_DAEMON_TOOL    = 7,
-    AGENTRT_DAEMON_HOOK    = 8,
-    AGENTRT_DAEMON_PLUGIN  = 9,
-    AGENTRT_DAEMON_MARKET  = 10,
-    AGENTRT_DAEMON_GATEWAY = 11,
-    AGENTRT_DAEMON_INVALID = -1
-} agentrt_daemon_id_t;
+    AIRY_DAEMON_MONIT   = 0,
+    AIRY_DAEMON_OBSERVE = 1,
+    AIRY_DAEMON_INFO    = 2,
+    AIRY_DAEMON_NOTIFY  = 3,
+    AIRY_DAEMON_SCHED   = 4,
+    AIRY_DAEMON_CHANNEL = 5,
+    AIRY_DAEMON_LLM     = 6,
+    AIRY_DAEMON_TOOL    = 7,
+    AIRY_DAEMON_HOOK    = 8,
+    AIRY_DAEMON_PLUGIN  = 9,
+    AIRY_DAEMON_MARKET  = 10,
+    AIRY_DAEMON_GATEWAY = 11,
+    AIRY_DAEMON_INVALID = -1
+} airy_daemon_id_t;
 
 /* ==================== daemon 启动描述 ==================== */
 
 typedef struct {
-    agentrt_daemon_id_t id;          /**< daemon 标识 */
+    airy_daemon_id_t id;          /**< daemon 标识 */
     const char *name;                /**< 进程名 (e.g. "gateway_d") */
     const char *service_type;        /**< 服务发现类型 (e.g. "gateway") */
     uint32_t layer;                  /**< 启动层级 (0=最先) */
@@ -83,8 +83,8 @@ typedef struct {
     uint32_t health_interval_ms;     /**< 健康检查轮询间隔 */
     uint16_t default_port;           /**< 默认端口 (0=Unix Socket) */
     int dep_count;                   /**< 依赖数量 */
-    agentrt_daemon_id_t deps[AGENTRT_MAX_DEPS_PER_DAEMON]; /**< 依赖列表 */
-} agentrt_daemon_desc_t;
+    airy_daemon_id_t deps[AIRY_MAX_DEPS_PER_DAEMON]; /**< 依赖列表 */
+} airy_daemon_desc_t;
 
 /* ==================== DAG 表 ==================== */
 
@@ -94,10 +94,10 @@ typedef struct {
  * 启动编排器遍历此表，同 layer 内可并行启动，
  * 跨 layer 必须等待前一层所有 daemon 健康检查通过。
  */
-static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = {
+static const airy_daemon_desc_t airy_daemon_table[AIRY_DAEMON_COUNT] = {
     /* --- Layer 0: 基础设施 --- */
-    [AGENTRT_DAEMON_MONIT] = {
-        .id = AGENTRT_DAEMON_MONIT,
+    [AIRY_DAEMON_MONIT] = {
+        .id = AIRY_DAEMON_MONIT,
         .name = "monit_d",
         .service_type = "monitor",
         .layer = 0,
@@ -107,8 +107,8 @@ static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = 
         .dep_count = 0,
         .deps = {0},
     },
-    [AGENTRT_DAEMON_OBSERVE] = {
-        .id = AGENTRT_DAEMON_OBSERVE,
+    [AIRY_DAEMON_OBSERVE] = {
+        .id = AIRY_DAEMON_OBSERVE,
         .name = "observe_d",
         .service_type = "observability",
         .layer = 0,
@@ -118,8 +118,8 @@ static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = 
         .dep_count = 0,
         .deps = {0},
     },
-    [AGENTRT_DAEMON_INFO] = {
-        .id = AGENTRT_DAEMON_INFO,
+    [AIRY_DAEMON_INFO] = {
+        .id = AIRY_DAEMON_INFO,
         .name = "info_d",
         .service_type = "info",
         .layer = 0,
@@ -129,8 +129,8 @@ static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = 
         .dep_count = 0,
         .deps = {0},
     },
-    [AGENTRT_DAEMON_NOTIFY] = {
-        .id = AGENTRT_DAEMON_NOTIFY,
+    [AIRY_DAEMON_NOTIFY] = {
+        .id = AIRY_DAEMON_NOTIFY,
         .name = "notify_d",
         .service_type = "notification",
         .layer = 0,
@@ -142,8 +142,8 @@ static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = 
     },
 
     /* --- Layer 1: 核心服务 --- */
-    [AGENTRT_DAEMON_SCHED] = {
-        .id = AGENTRT_DAEMON_SCHED,
+    [AIRY_DAEMON_SCHED] = {
+        .id = AIRY_DAEMON_SCHED,
         .name = "sched_d",
         .service_type = "scheduler",
         .layer = 1,
@@ -151,10 +151,10 @@ static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = 
         .health_interval_ms = 500,
         .default_port = 0,
         .dep_count = 1,
-        .deps = { AGENTRT_DAEMON_OBSERVE },
+        .deps = { AIRY_DAEMON_OBSERVE },
     },
-    [AGENTRT_DAEMON_CHANNEL] = {
-        .id = AGENTRT_DAEMON_CHANNEL,
+    [AIRY_DAEMON_CHANNEL] = {
+        .id = AIRY_DAEMON_CHANNEL,
         .name = "channel_d",
         .service_type = "channel",
         .layer = 1,
@@ -162,12 +162,12 @@ static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = 
         .health_interval_ms = 500,
         .default_port = 0,
         .dep_count = 1,
-        .deps = { AGENTRT_DAEMON_NOTIFY },
+        .deps = { AIRY_DAEMON_NOTIFY },
     },
 
     /* --- Layer 2: Agent 服务 --- */
-    [AGENTRT_DAEMON_LLM] = {
-        .id = AGENTRT_DAEMON_LLM,
+    [AIRY_DAEMON_LLM] = {
+        .id = AIRY_DAEMON_LLM,
         .name = "llm_d",
         .service_type = "llm",
         .layer = 2,
@@ -175,10 +175,10 @@ static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = 
         .health_interval_ms = 1000,
         .default_port = 0,
         .dep_count = 1,
-        .deps = { AGENTRT_DAEMON_SCHED },
+        .deps = { AIRY_DAEMON_SCHED },
     },
-    [AGENTRT_DAEMON_TOOL] = {
-        .id = AGENTRT_DAEMON_TOOL,
+    [AIRY_DAEMON_TOOL] = {
+        .id = AIRY_DAEMON_TOOL,
         .name = "tool_d",
         .service_type = "tool",
         .layer = 2,
@@ -186,10 +186,10 @@ static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = 
         .health_interval_ms = 1000,
         .default_port = 8082,
         .dep_count = 2,
-        .deps = { AGENTRT_DAEMON_LLM, AGENTRT_DAEMON_SCHED },
+        .deps = { AIRY_DAEMON_LLM, AIRY_DAEMON_SCHED },
     },
-    [AGENTRT_DAEMON_HOOK] = {
-        .id = AGENTRT_DAEMON_HOOK,
+    [AIRY_DAEMON_HOOK] = {
+        .id = AIRY_DAEMON_HOOK,
         .name = "hook_d",
         .service_type = "hook",
         .layer = 2,
@@ -197,10 +197,10 @@ static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = 
         .health_interval_ms = 500,
         .default_port = 0,
         .dep_count = 1,
-        .deps = { AGENTRT_DAEMON_TOOL },
+        .deps = { AIRY_DAEMON_TOOL },
     },
-    [AGENTRT_DAEMON_PLUGIN] = {
-        .id = AGENTRT_DAEMON_PLUGIN,
+    [AIRY_DAEMON_PLUGIN] = {
+        .id = AIRY_DAEMON_PLUGIN,
         .name = "plugin_d",
         .service_type = "plugin",
         .layer = 2,
@@ -208,12 +208,12 @@ static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = 
         .health_interval_ms = 1000,
         .default_port = 0,
         .dep_count = 2,
-        .deps = { AGENTRT_DAEMON_TOOL, AGENTRT_DAEMON_HOOK },
+        .deps = { AIRY_DAEMON_TOOL, AIRY_DAEMON_HOOK },
     },
 
     /* --- Layer 3: 业务服务 --- */
-    [AGENTRT_DAEMON_MARKET] = {
-        .id = AGENTRT_DAEMON_MARKET,
+    [AIRY_DAEMON_MARKET] = {
+        .id = AIRY_DAEMON_MARKET,
         .name = "market_d",
         .service_type = "marketplace",
         .layer = 3,
@@ -221,12 +221,12 @@ static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = 
         .health_interval_ms = 1000,
         .default_port = 0,
         .dep_count = 1,
-        .deps = { AGENTRT_DAEMON_PLUGIN },
+        .deps = { AIRY_DAEMON_PLUGIN },
     },
 
     /* --- Layer 4: 网关 --- */
-    [AGENTRT_DAEMON_GATEWAY] = {
-        .id = AGENTRT_DAEMON_GATEWAY,
+    [AIRY_DAEMON_GATEWAY] = {
+        .id = AIRY_DAEMON_GATEWAY,
         .name = "gateway_d",
         .service_type = "gateway",
         .layer = 4,
@@ -234,7 +234,7 @@ static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = 
         .health_interval_ms = 1000,
         .default_port = 8080,
         .dep_count = 3,
-        .deps = { AGENTRT_DAEMON_LLM, AGENTRT_DAEMON_TOOL, AGENTRT_DAEMON_MARKET },
+        .deps = { AIRY_DAEMON_LLM, AIRY_DAEMON_TOOL, AIRY_DAEMON_MARKET },
     },
 };
 
@@ -245,13 +245,13 @@ static const agentrt_daemon_desc_t agentrt_daemon_table[AGENTRT_DAEMON_COUNT] = 
  * @param name daemon 进程名 (e.g. "gateway_d")
  * @return 描述指针，未找到返回 NULL
  */
-static inline const agentrt_daemon_desc_t *agentrt_daemon_find_by_name(const char *name)
+static inline const airy_daemon_desc_t *airy_daemon_find_by_name(const char *name)
 {
     if (!name) return NULL;
-    for (int i = 0; i < AGENTRT_DAEMON_COUNT; i++) {
-        if (agentrt_daemon_table[i].name &&
-            __builtin_strcmp(agentrt_daemon_table[i].name, name) == 0) {
-            return &agentrt_daemon_table[i];
+    for (int i = 0; i < AIRY_DAEMON_COUNT; i++) {
+        if (airy_daemon_table[i].name &&
+            __builtin_strcmp(airy_daemon_table[i].name, name) == 0) {
+            return &airy_daemon_table[i];
         }
     }
     return NULL;
@@ -260,11 +260,11 @@ static inline const agentrt_daemon_desc_t *agentrt_daemon_find_by_name(const cha
 /**
  * @brief 获取指定 layer 的 daemon 数量
  */
-static inline int agentrt_daemon_count_in_layer(uint32_t layer)
+static inline int airy_daemon_count_in_layer(uint32_t layer)
 {
     int count = 0;
-    for (int i = 0; i < AGENTRT_DAEMON_COUNT; i++) {
-        if (agentrt_daemon_table[i].layer == layer)
+    for (int i = 0; i < AIRY_DAEMON_COUNT; i++) {
+        if (airy_daemon_table[i].layer == layer)
             count++;
     }
     return count;
@@ -273,12 +273,12 @@ static inline int agentrt_daemon_count_in_layer(uint32_t layer)
 /**
  * @brief 获取最大 layer 值
  */
-static inline uint32_t agentrt_daemon_max_layer(void)
+static inline uint32_t airy_daemon_max_layer(void)
 {
     uint32_t max_l = 0;
-    for (int i = 0; i < AGENTRT_DAEMON_COUNT; i++) {
-        if (agentrt_daemon_table[i].layer > max_l)
-            max_l = agentrt_daemon_table[i].layer;
+    for (int i = 0; i < AIRY_DAEMON_COUNT; i++) {
+        if (airy_daemon_table[i].layer > max_l)
+            max_l = airy_daemon_table[i].layer;
     }
     return max_l;
 }
@@ -287,4 +287,4 @@ static inline uint32_t agentrt_daemon_max_layer(void)
 }
 #endif
 
-#endif /* AGENTRT_DAEMON_STARTUP_H */
+#endif /* AIRY_RT_DAEMON_STARTUP_H */

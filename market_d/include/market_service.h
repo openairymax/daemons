@@ -7,8 +7,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_MARKET_SERVICE_H
-#define AGENTRT_MARKET_SERVICE_H
+#ifndef AIRY_RT_MARKET_SERVICE_H
+#define AIRY_RT_MARKET_SERVICE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -269,4 +269,4 @@ int market_service_reload_config(market_service_t *service, const market_config_
  */
 int market_service_sync_registry(market_service_t *service);
 
-#endif /* AGENTRT_MARKET_SERVICE_H */
+#endif /* AIRY_RT_MARKET_SERVICE_H */

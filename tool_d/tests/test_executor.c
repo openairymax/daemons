@@ -51,7 +51,7 @@ static void test_executor_run(void)
     assert(exec != NULL);
 
     tool_metadata_t meta;
-    AGENTRT_MEMSET(&meta, 0, sizeof(meta));
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "test_echo";
     meta.name = "echo_test";
     meta.executable = "/usr/bin/echo";
@@ -84,7 +84,7 @@ static void test_executor_run_async(void)
     assert(exec != NULL);
 
     tool_metadata_t meta;
-    AGENTRT_MEMSET(&meta, 0, sizeof(meta));
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "test_echo_async";
     meta.name = "echo_async";
     meta.executable = "/usr/bin/echo";

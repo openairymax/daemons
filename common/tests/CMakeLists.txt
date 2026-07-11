@@ -1,7 +1,7 @@
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
 
 # 测试代码豁免 BAN 严格合规：测试允许使用裸 malloc/free/memset 等函数
-add_compile_definitions(AGENTRT_COMPLIANCE_IMPL)
+add_compile_definitions(AIRY_COMPLIANCE_IMPL)
 # agentrt/daemons/common 单元测试 (TeamC)
 # 对齐: 看板v14.0 C-W1-003 / 规范手册v13.0 TEST-01~06
 
@@ -27,7 +27,7 @@ set(TEST_SOURCES
     test_log_sanitizer.c
     test_thread_pool.c
     test_daemon_security.c
-    test_agentrt_event_loop.c
+    test_airy_event_loop.c
     test_api_recovery.c
     test_service_discovery.c
 )
@@ -55,19 +55,19 @@ foreach(TEST_SRC ${TEST_SOURCES})
         Threads::Threads
     )
     
-    # cJSON found by root CMakeLists.txt (AGENTRT_HAS_CJSON)
-    if(AGENTRT_HAS_CJSON)
+    # cJSON found by root CMakeLists.txt (AIRY_HAS_CJSON)
+    if(AIRY_HAS_CJSON)
         target_link_libraries(${TARGET_NAME} PRIVATE cjson)
     endif()
     
-    # CURL found by root CMakeLists.txt (AGENTRT_HAS_CURL)
-    if(AGENTRT_HAS_CURL)
+    # CURL found by root CMakeLists.txt (AIRY_HAS_CURL)
+    if(AIRY_HAS_CURL)
         target_include_directories(${TARGET_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
         target_link_libraries(${TARGET_NAME} PRIVATE ${CURL_LIBRARIES})
     endif()
     
-    # OpenSSL found by root CMakeLists.txt (AGENTRT_HAS_OPENSSL)
-    if(AGENTRT_HAS_OPENSSL AND OPENSSL_FOUND)
+    # OpenSSL found by root CMakeLists.txt (AIRY_HAS_OPENSSL)
+    if(AIRY_HAS_OPENSSL AND OPENSSL_FOUND)
         target_link_libraries(${TARGET_NAME} PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     endif()
     
@@ -78,10 +78,10 @@ foreach(TEST_SRC ${TEST_SOURCES})
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     
-    agentrt_print_ok("  [test] ${TARGET_NAME}: configured")
+    airy_print_ok("  [test] ${TARGET_NAME}: configured")
 endforeach()
 
-agentrt_print_info("  svc_common_tests: ${TEST_SOURCES}")
+airy_print_info("  svc_common_tests: ${TEST_SOURCES}")
 
 # ===== P1-C06 深度单元测试 (test_daemon_common.c) =====
 add_executable(svc_test_daemon_common test_daemon_common.c)
@@ -98,18 +98,18 @@ target_link_libraries(svc_test_daemon_common PRIVATE
     Threads::Threads
 )
 
-# cJSON found by root CMakeLists.txt (AGENTRT_HAS_CJSON)
-if(AGENTRT_HAS_CJSON)
+# cJSON found by root CMakeLists.txt (AIRY_HAS_CJSON)
+if(AIRY_HAS_CJSON)
     target_link_libraries(svc_test_daemon_common PRIVATE cjson)
 endif()
 
-# CURL found by root CMakeLists.txt (AGENTRT_HAS_CURL)
-if(AGENTRT_HAS_CURL)
+# CURL found by root CMakeLists.txt (AIRY_HAS_CURL)
+if(AIRY_HAS_CURL)
     target_include_directories(svc_test_daemon_common PRIVATE ${CURL_INCLUDE_DIRS})
     target_link_libraries(svc_test_daemon_common PRIVATE ${CURL_LIBRARIES})
 endif()
 
-if(AGENTRT_HAS_OPENSSL AND OPENSSL_FOUND)
+if(AIRY_HAS_OPENSSL AND OPENSSL_FOUND)
     target_link_libraries(svc_test_daemon_common PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
@@ -120,7 +120,7 @@ target_compile_options(svc_test_daemon_common PRIVATE
 add_test(NAME svc_test_daemon_common COMMAND svc_test_daemon_common
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
-agentrt_print_ok("  [test] svc_test_daemon_common: P1-C06 deep unit tests configured")
+airy_print_ok("  [test] svc_test_daemon_common: P1-C06 deep unit tests configured")
 
 # ===== Checkpoint Unit Tests (test_checkpoint.c) =====
 add_executable(svc_test_checkpoint test_checkpoint.c)
@@ -141,16 +141,16 @@ target_link_libraries(svc_test_checkpoint PRIVATE
     Threads::Threads
 )
 
-if(AGENTRT_HAS_CJSON)
+if(AIRY_HAS_CJSON)
     target_link_libraries(svc_test_checkpoint PRIVATE cjson)
 endif()
 
-if(AGENTRT_HAS_CURL)
+if(AIRY_HAS_CURL)
     target_include_directories(svc_test_checkpoint PRIVATE ${CURL_INCLUDE_DIRS})
     target_link_libraries(svc_test_checkpoint PRIVATE ${CURL_LIBRARIES})
 endif()
 
-if(AGENTRT_HAS_OPENSSL AND OPENSSL_FOUND)
+if(AIRY_HAS_OPENSSL AND OPENSSL_FOUND)
     target_link_libraries(svc_test_checkpoint PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
@@ -161,7 +161,7 @@ target_compile_options(svc_test_checkpoint PRIVATE
 add_test(NAME svc_test_checkpoint COMMAND svc_test_checkpoint
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
-agentrt_print_ok("  [test] svc_test_checkpoint: configured")
+airy_print_ok("  [test] svc_test_checkpoint: configured")
 
 # ===== P1.24.4 IPC Backpressure Unit Tests (test_ipc_backpressure.c) =====
 add_executable(svc_test_ipc_backpressure test_ipc_backpressure.c)
@@ -182,16 +182,16 @@ target_link_libraries(svc_test_ipc_backpressure PRIVATE
     Threads::Threads
 )
 
-if(AGENTRT_HAS_CJSON)
+if(AIRY_HAS_CJSON)
     target_link_libraries(svc_test_ipc_backpressure PRIVATE cjson)
 endif()
 
-if(AGENTRT_HAS_CURL)
+if(AIRY_HAS_CURL)
     target_include_directories(svc_test_ipc_backpressure PRIVATE ${CURL_INCLUDE_DIRS})
     target_link_libraries(svc_test_ipc_backpressure PRIVATE ${CURL_LIBRARIES})
 endif()
 
-if(AGENTRT_HAS_OPENSSL AND OPENSSL_FOUND)
+if(AIRY_HAS_OPENSSL AND OPENSSL_FOUND)
     target_link_libraries(svc_test_ipc_backpressure PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
@@ -202,4 +202,4 @@ target_compile_options(svc_test_ipc_backpressure PRIVATE
 add_test(NAME svc_test_ipc_backpressure COMMAND svc_test_ipc_backpressure
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
-agentrt_print_ok("  [test] svc_test_ipc_backpressure: P1.24.4 configured")
+airy_print_ok("  [test] svc_test_ipc_backpressure: P1.24.4 configured")

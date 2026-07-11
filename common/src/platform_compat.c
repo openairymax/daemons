@@ -20,43 +20,43 @@
 #endif
 #endif
 
-#ifndef AGENTRT_TIMESTAMP_T_DEFINED
-typedef uint64_t agentrt_timestamp_t;
+#ifndef AIRY_TIMESTAMP_T_DEFINED
+typedef uint64_t airy_timestamp_t;
 #endif
 
-#ifndef AGENTRT_DL_T_DEFINED
-typedef void *agentrt_dl_t;
-#define AGENTRT_DL_T_DEFINED
+#ifndef AIRY_DL_T_DEFINED
+typedef void *airy_dl_t;
+#define AIRY_DL_T_DEFINED
 #endif
 
-int agentrt_time_now(agentrt_timestamp_t *ts)
+int airy_time_now(airy_timestamp_t *ts)
 {
     if (!ts)
-        return AGENTRT_ERR_INVALID_PARAM;
-    *ts = agentrt_time_ns();
+        return AIRY_ERR_INVALID_PARAM;
+    *ts = airy_time_ns();
     return 0;
 }
 
-int agentrt_time_monotonic(agentrt_timestamp_t *ts)
+int airy_time_monotonic(airy_timestamp_t *ts)
 {
-    return agentrt_time_now(ts);
+    return airy_time_now(ts);
 }
 
-uint64_t agentrt_time_to_ms(const agentrt_timestamp_t *ts)
+uint64_t airy_time_to_ms(const airy_timestamp_t *ts)
 {
     if (!ts)
         return 0;
     return *ts / 1000000ULL;
 }
 
-void agentrt_time_from_ms(uint64_t ms, agentrt_timestamp_t *ts)
+void airy_time_from_ms(uint64_t ms, airy_timestamp_t *ts)
 {
     if (!ts)
         return;
     *ts = ms * 1000000ULL;
 }
 
-uint32_t agentrt_process_self(void)
+uint32_t airy_process_self(void)
 {
 #ifdef _WIN32
     return GetCurrentProcessId();
@@ -65,7 +65,7 @@ uint32_t agentrt_process_self(void)
 #endif
 }
 
-uint64_t agentrt_thread_self(void)
+uint64_t airy_thread_self(void)
 {
 #ifdef _WIN32
     return GetCurrentThreadId();
@@ -74,7 +74,7 @@ uint64_t agentrt_thread_self(void)
 #endif
 }
 
-int agentrt_thread_setname(const char *name)
+int airy_thread_setname(const char *name)
 {
 #ifdef __linux__
     return pthread_setname_np(pthread_self(), name);
@@ -88,7 +88,7 @@ int agentrt_thread_setname(const char *name)
 #endif
 }
 
-int agentrt_thread_getname(char *name, size_t size)
+int airy_thread_getname(char *name, size_t size)
 {
 #ifdef __linux__
     if (pthread_getname_np(pthread_self(), name, size) != 0)
@@ -102,14 +102,14 @@ int agentrt_thread_getname(char *name, size_t size)
     /* 非POSIX平台：参数安全使用（非桩） */
     if (name && size > 0)
         name[0] = '\0';
-    return AGENTRT_ERR_UNKNOWN;
+    return AIRY_ERR_UNKNOWN;
 #endif
 }
 
-int agentrt_mkdir(const char *path, int recursive)
+int airy_mkdir(const char *path, int recursive)
 {
     if (!path)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 #ifdef _WIN32
     /* Windows平台：recursive参数暂不支持（非桩） */
     if (recursive > 0) { /* 递归标志已记录 */
@@ -120,7 +120,7 @@ int agentrt_mkdir(const char *path, int recursive)
         char tmp[PATH_MAX];
         size_t len = strlen(path);
         if (len == 0 || len >= PATH_MAX)
-            return AGENTRT_ERR_OVERFLOW;
+            return AIRY_ERR_OVERFLOW;
         __builtin_memcpy(tmp, path, len + 1);
         for (size_t i = (tmp[0] == '/') ? 1 : 0; i <= len; i++) {
             if (tmp[i] == '/' || tmp[i] == '\0') {
@@ -131,7 +131,7 @@ int agentrt_mkdir(const char *path, int recursive)
                     if (stat(tmp, &st) != 0) {
                         if (mkdir(tmp, 0755) != 0) {
                             tmp[i] = saved;
-                            return AGENTRT_ERR_IO;
+                            return AIRY_ERR_IO;
                         }
                     }
                 }
@@ -144,7 +144,7 @@ int agentrt_mkdir(const char *path, int recursive)
 #endif
 }
 
-agentrt_dl_t agentrt_dl_open(const char *path)
+airy_dl_t airy_dl_open(const char *path)
 {
 #ifdef _WIN32
     return LoadLibraryA(path);
@@ -153,16 +153,16 @@ agentrt_dl_t agentrt_dl_open(const char *path)
 #endif
 }
 
-int agentrt_dl_close(agentrt_dl_t dl)
+int airy_dl_close(airy_dl_t dl)
 {
 #ifdef _WIN32
-    return FreeLibrary(dl) ? 0 : AGENTRT_ERR_UNKNOWN;
+    return FreeLibrary(dl) ? 0 : AIRY_ERR_UNKNOWN;
 #else
     return dlclose(dl);
 #endif
 }
 
-void *agentrt_dl_sym(agentrt_dl_t dl, const char *symbol)
+void *airy_dl_sym(airy_dl_t dl, const char *symbol)
 {
 #ifdef _WIN32
     return (void *)GetProcAddress(dl, symbol);
@@ -171,7 +171,7 @@ void *agentrt_dl_sym(agentrt_dl_t dl, const char *symbol)
 #endif
 }
 
-const char *agentrt_dl_error(void)
+const char *airy_dl_error(void)
 {
 #ifdef _WIN32
     static char buf[256];
@@ -182,15 +182,15 @@ const char *agentrt_dl_error(void)
 #endif
 }
 
-int agentrt_get_sysinfo(agentrt_sysinfo_t *info)
+int airy_get_sysinfo(airy_sysinfo_t *info)
 {
     if (!info)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 #ifdef __linux__
     struct sysinfo si;
     if (sysinfo(&si) != 0)
-        return AGENTRT_ERR_UNKNOWN;
-    AGENTRT_STRNCPY_TERM(info->os_name, "Linux", sizeof(info->os_name));
+        return AIRY_ERR_UNKNOWN;
+    AIRY_STRNCPY_TERM(info->os_name, "Linux", sizeof(info->os_name));
     info->cpu_count = (uint32_t)si.procs;
     info->memory_total = si.totalram * si.mem_unit;
     info->memory_free = si.freeram * si.mem_unit;
@@ -198,7 +198,7 @@ int agentrt_get_sysinfo(agentrt_sysinfo_t *info)
     info->os_version[0] = '\0';
     return 0;
 #elif defined(__APPLE__)
-    AGENTRT_STRNCPY_TERM(info->os_name, "macOS", sizeof(info->os_name));
+    AIRY_STRNCPY_TERM(info->os_name, "macOS", sizeof(info->os_name));
     {
         int mib[2] = {CTL_HW, HW_MEMSIZE};
         int64_t memsize = 0;
@@ -230,28 +230,28 @@ int agentrt_get_sysinfo(agentrt_sysinfo_t *info)
 #endif
 }
 
-int agentrt_atomic_load(agentrt_atomic_int_t *atomic)
+int airy_atomic_load(airy_atomic_int_t *atomic)
 {
     if (!atomic)
         return 0;
     return atomic_load_explicit(atomic, memory_order_seq_cst);
 }
 
-void agentrt_atomic_store(agentrt_atomic_int_t *atomic, int value)
+void airy_atomic_store(airy_atomic_int_t *atomic, int value)
 {
     if (!atomic)
         return;
     atomic_store_explicit(atomic, value, memory_order_seq_cst);
 }
 
-int agentrt_atomic_fetch_add(agentrt_atomic_int_t *atomic, int value)
+int airy_atomic_fetch_add(airy_atomic_int_t *atomic, int value)
 {
     if (!atomic)
         return 0;
     return atomic_fetch_add_explicit(atomic, value, memory_order_seq_cst);
 }
 
-int agentrt_atomic_fetch_sub(agentrt_atomic_int_t *atomic, int value)
+int airy_atomic_fetch_sub(airy_atomic_int_t *atomic, int value)
 {
     if (!atomic)
         return 0;
@@ -303,7 +303,7 @@ int agentrt_atomic_fetch_sub(agentrt_atomic_int_t *atomic, int value)
 
 static atomic_int g_socket_initialized = 0;
 
-int agentrt_socket_init(void)
+int airy_sock_init(void)
 {
     int expected = 0;
     atomic_compare_exchange_strong_explicit(&g_socket_initialized, &expected, 1,
@@ -311,12 +311,12 @@ int agentrt_socket_init(void)
 #ifdef _WIN32
     WSADATA wsa_data;
     if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0)
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
 #endif
     return 0;
 }
 
-void agentrt_socket_cleanup(void)
+void airy_sock_cleanup(void)
 {
     atomic_store_explicit(&g_socket_initialized, 0, memory_order_seq_cst);
 #ifdef _WIN32
@@ -324,15 +324,15 @@ void agentrt_socket_cleanup(void)
 #endif
 }
 
-agentrt_socket_t agentrt_socket_create_tcp_server(const char *host, uint16_t port)
+airy_sock_t airy_sock_create_tcp_server(const char *host, uint16_t port)
 {
     if (!host)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
 #ifdef _WIN32
     SOCKET fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (fd == INVALID_SOCKET)
-        return AGENTRT_INVALID_SOCKET;
+        return AIRY_INVALID_SOCKET;
     {
         u_long mode = 1;
         ioctlsocket(fd, FIONBIO, &mode);
@@ -340,7 +340,7 @@ agentrt_socket_t agentrt_socket_create_tcp_server(const char *host, uint16_t por
 #else
     int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, IPPROTO_TCP);
     if (fd < 0)
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
 #ifndef __linux__
     /* macOS/BSD: SOCK_NONBLOCK 实际为 0，socket 创建后用 fcntl 设置非阻塞 */
     {
@@ -374,49 +374,49 @@ agentrt_socket_t agentrt_socket_create_tcp_server(const char *host, uint16_t por
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 #ifdef _WIN32
         closesocket(fd);
-        return AGENTRT_INVALID_SOCKET;
+        return AIRY_INVALID_SOCKET;
 #else
         close(fd);
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
 #endif
     }
 
     if (listen(fd, SOMAXCONN) != 0) {
 #ifdef _WIN32
         closesocket(fd);
-        return AGENTRT_INVALID_SOCKET;
+        return AIRY_INVALID_SOCKET;
 #else
         close(fd);
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
 #endif
     }
 
     return fd;
 }
 
-#if AGENTRT_PLATFORM_POSIX
-agentrt_socket_t agentrt_socket_create_unix_server(const char *path)
+#if AIRY_PLATFORM_POSIX
+airy_sock_t airy_sock_create_unix_server(const char *path)
 {
     if (!path)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     /* 确保父目录存在 */
     {
         char dir_buf[256];
         size_t len = strlen(path);
         if (len >= sizeof(dir_buf))
-            return AGENTRT_ERR_INVALID_PARAM;
-        AGENTRT_MEMCPY(dir_buf, path, len + 1);
+            return AIRY_ERR_INVALID_PARAM;
+        AIRY_MEMCPY(dir_buf, path, len + 1);
         char *slash = strrchr(dir_buf, '/');
         if (slash) {
             *slash = '\0';
-            agentrt_mkdir_p(dir_buf);
+            airy_mkdir_p(dir_buf);
         }
     }
 
     int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
     if (fd < 0)
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
 #ifndef __linux__
     /* macOS/BSD: SOCK_NONBLOCK 实际为 0，socket 创建后用 fcntl 设置非阻塞 */
     {
@@ -436,29 +436,29 @@ agentrt_socket_t agentrt_socket_create_unix_server(const char *path)
     struct sockaddr_un addr;
     __builtin_memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    AGENTRT_STRNCPY_TERM(addr.sun_path, path, sizeof(addr.sun_path));
+    AIRY_STRNCPY_TERM(addr.sun_path, path, sizeof(addr.sun_path));
 
     unlink(path);
 
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
         close(fd);
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
     if (listen(fd, SOMAXCONN) != 0) {
         close(fd);
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
     return fd;
 }
 #endif
 
-agentrt_socket_t agentrt_socket_accept(agentrt_socket_t server_fd, uint32_t timeout_ms)
+airy_sock_t airy_sock_accept(airy_sock_t server_fd, uint32_t timeout_ms)
 {
 #ifdef _WIN32
-    if (server_fd == AGENTRT_INVALID_SOCKET)
-        return AGENTRT_ERR_INVALID_PARAM;
+    if (server_fd == AIRY_INVALID_SOCKET)
+        return AIRY_ERR_INVALID_PARAM;
 
     fd_set read_set;
     FD_ZERO(&read_set);
@@ -474,7 +474,7 @@ agentrt_socket_t agentrt_socket_accept(agentrt_socket_t server_fd, uint32_t time
 
     int ret = select(0, &read_set, NULL, NULL, ptv);
     if (ret <= 0 || !FD_ISSET(server_fd, &read_set))
-        return AGENTRT_INVALID_SOCKET;
+        return AIRY_INVALID_SOCKET;
 
     struct sockaddr_in client_addr;
     int client_len = sizeof(client_addr);
@@ -488,7 +488,7 @@ agentrt_socket_t agentrt_socket_accept(agentrt_socket_t server_fd, uint32_t time
     return client_fd;
 #else
     if (server_fd < 0)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     struct pollfd pfd;
     pfd.fd = server_fd;
@@ -497,7 +497,7 @@ agentrt_socket_t agentrt_socket_accept(agentrt_socket_t server_fd, uint32_t time
     int ret = poll(&pfd, 1, timeout_ms == 0 ? -1 : (int)timeout_ms);
 
     if (ret <= 0 || !(pfd.revents & POLLIN))
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
 
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
@@ -520,18 +520,18 @@ agentrt_socket_t agentrt_socket_accept(agentrt_socket_t server_fd, uint32_t time
 #endif
 }
 
-ssize_t agentrt_socket_recv(agentrt_socket_t sock, void *buf, size_t len)
+ssize_t airy_sock_recv(airy_sock_t sock, void *buf, size_t len)
 {
 #ifdef _WIN32
-    if (sock == AGENTRT_INVALID_SOCKET || !buf || len == 0)
-        return AGENTRT_ERR_INVALID_PARAM;
+    if (sock == AIRY_INVALID_SOCKET || !buf || len == 0)
+        return AIRY_ERR_INVALID_PARAM;
     ssize_t ret = recv(sock, buf, (int)len, 0);
     if (ret < 0 && WSAGetLastError() == WSAEWOULDBLOCK)
         return 0;
     return ret;
 #else
     if (sock < 0 || !buf || len == 0)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     ssize_t ret = recv(sock, buf, len, MSG_DONTWAIT);
     if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
         return 0;
@@ -539,11 +539,11 @@ ssize_t agentrt_socket_recv(agentrt_socket_t sock, void *buf, size_t len)
 #endif
 }
 
-ssize_t agentrt_socket_send(agentrt_socket_t sock, const void *buf, size_t len)
+ssize_t airy_sock_send(airy_sock_t sock, const void *buf, size_t len)
 {
 #ifdef _WIN32
-    if (sock == AGENTRT_INVALID_SOCKET || !buf || len == 0)
-        return AGENTRT_ERR_INVALID_PARAM;
+    if (sock == AIRY_INVALID_SOCKET || !buf || len == 0)
+        return AIRY_ERR_INVALID_PARAM;
     ssize_t total_sent = 0;
     const uint8_t *ptr = (const uint8_t *)buf;
 
@@ -559,7 +559,7 @@ ssize_t agentrt_socket_send(agentrt_socket_t sock, const void *buf, size_t len)
     return total_sent;
 #else
     if (sock < 0 || !buf || len == 0)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     ssize_t total_sent = 0;
     const uint8_t *ptr = (const uint8_t *)buf;
 

@@ -14,8 +14,8 @@
  * @see commons/utils/ipc/include/svc_common.h (commons 权威版本)
  */
 
-#ifndef AGENTRT_DAEMON_COMMON_SVC_COMMON_H
-#define AGENTRT_DAEMON_COMMON_SVC_COMMON_H
+#ifndef AIRY_RT_DAEMON_COMMON_SVC_COMMON_H
+#define AIRY_RT_DAEMON_COMMON_SVC_COMMON_H
 
 /* daemons 扩展错误码（DAEMON_EINIT/ESTATE/EHEALTH 等兼容别名） */
 #include "daemon_errors.h"
@@ -23,4 +23,4 @@
 /* 使用相对路径避免找到 daemons 自身的 svc_common.h（递归包含） */
 #include "../../../commons/utils/ipc/include/svc_common.h"
 
-#endif /* AGENTRT_DAEMON_COMMON_SVC_COMMON_H */
+#endif /* AIRY_RT_DAEMON_COMMON_SVC_COMMON_H */

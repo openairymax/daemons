@@ -14,7 +14,7 @@
 #include "safe_string_utils.h"
 #include "svc_logger.h"
 /* P0.17 阶段 2: commons 版 error.h 已通过 svc_logger.h 间接包含，
- * 此处包含 daemon_errors.h 获取 daemon 模块扩展错误码（如 AGENTRT_ERR_DAEMON_INIT_FAILED） */
+ * 此处包含 daemon_errors.h 获取 daemon 模块扩展错误码（如 AIRY_ERR_DAEMON_INIT_FAILED） */
 #include "daemon_errors.h"
 
 #include <stdio.h>
@@ -53,7 +53,7 @@ static struct {
     uint32_t validator_count;
     uint64_t global_version;
     bool initialized;
-    agentrt_mutex_t mutex;
+    airy_mtx_t mutex;
 } g_cm = {0};
 
 /* ==================== 辅助函数 ==================== */
@@ -64,7 +64,7 @@ static cm_entry_t *find_entry(const char *key)
         if (strcmp(g_cm.entries[i].key, key) == 0)
             return &g_cm.entries[i];
     }
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_OVERFLOW, "limit exceeded");
+    AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
 }
 
 static bool pattern_matches(const char *pattern, const char *key)
@@ -104,7 +104,7 @@ static void add_history(const char *key, const char *old_value, const char *new_
         safe_strcpy(rec->old_value, old_value, CM_MAX_VALUE_LEN);
     if (new_value)
         safe_strcpy(rec->new_value, new_value, CM_MAX_VALUE_LEN);
-    rec->timestamp = agentrt_time_ms();
+    rec->timestamp = airy_time_ms();
     if (source)
         safe_strcpy(rec->source, source, sizeof(rec->source));
 
@@ -138,7 +138,7 @@ static bool validate_value(const char *key, const char *value)
 
 /* ==================== 公共API实现 ==================== */
 
-AGENTRT_API cm_config_t cm_create_default_config(void)
+AIRY_API cm_config_t cm_create_default_config(void)
 {
     cm_config_t config;
     __builtin_memset(&config, 0, sizeof(cm_config_t));
@@ -152,7 +152,7 @@ AGENTRT_API cm_config_t cm_create_default_config(void)
     return config;
 }
 
-AGENTRT_API int cm_init(const cm_config_t *config)
+AIRY_API int cm_init(const cm_config_t *config)
 {
     if (g_cm.initialized)
         return 0;
@@ -165,56 +165,56 @@ AGENTRT_API int cm_init(const cm_config_t *config)
         g_cm.config = cm_create_default_config();
     }
 
-    agentrt_error_t err = agentrt_mutex_init(&g_cm.mutex);
-    if (err != AGENTRT_SUCCESS) {
-        agentrt_error_push_ex(AGENTRT_ERR_DAEMON_INIT_FAILED, __FILE__, __LINE__, __func__,
+    airy_err_t err = airy_mtx_init(&g_cm.mutex);
+    if (err != AIRY_SUCCESS) {
+        airy_err_push_ex(AIRY_ERR_DAEMON_INIT_FAILED, __FILE__, __LINE__, __func__,
                               "mutex init failed (err=%d)", err);
-        return AGENTRT_ERR_UNKNOWN;
+        return AIRY_ERR_UNKNOWN;
     }
 
     g_cm.global_version = 1;
     g_cm.initialized = true;
 
-    cm_load_env("AGENTRT_", "env");
+    cm_load_env("AIRY_", "env");
 
     LOG_INFO("Config manager initialized (env=%s, base_path=%s)", g_cm.config.environment,
              g_cm.config.base_path);
     return 0;
 }
 
-AGENTRT_API void cm_shutdown(void)
+AIRY_API void cm_shutdown(void)
 {
     if (!g_cm.initialized)
         return;
 
-    agentrt_mutex_lock(&g_cm.mutex);
+    airy_mtx_lock(&g_cm.mutex);
     g_cm.initialized = false;
-    agentrt_mutex_unlock(&g_cm.mutex);
+    airy_mtx_unlock(&g_cm.mutex);
 
-    agentrt_mutex_destroy(&g_cm.mutex);
+    airy_mtx_destroy(&g_cm.mutex);
 
     LOG_INFO("Config manager shutdown");
 }
 
 /* ==================== 配置读写 ==================== */
 
-AGENTRT_API const char *cm_get(const char *key, const char *default_value)
+AIRY_API const char *cm_get(const char *key, const char *default_value)
 {
     if (!key)
         return default_value;
     if (!g_cm.initialized)
         cm_init(NULL);
 
-    agentrt_mutex_lock(&g_cm.mutex);
+    airy_mtx_lock(&g_cm.mutex);
 
     cm_entry_t *entry = find_entry(key);
     const char *result = entry ? entry->value : default_value;
 
-    agentrt_mutex_unlock(&g_cm.mutex);
+    airy_mtx_unlock(&g_cm.mutex);
     return result;
 }
 
-AGENTRT_API int64_t cm_get_int(const char *key, int64_t default_value)
+AIRY_API int64_t cm_get_int(const char *key, int64_t default_value)
 {
     const char *val = cm_get(key, NULL);
     if (!val)
@@ -222,7 +222,7 @@ AGENTRT_API int64_t cm_get_int(const char *key, int64_t default_value)
     return strtoll(val, NULL, 10);
 }
 
-AGENTRT_API double cm_get_double(const char *key, double default_value)
+AIRY_API double cm_get_double(const char *key, double default_value)
 {
     const char *val = cm_get(key, NULL);
     if (!val)
@@ -230,7 +230,7 @@ AGENTRT_API double cm_get_double(const char *key, double default_value)
     return strtod(val, NULL);
 }
 
-AGENTRT_API bool cm_get_bool(const char *key, bool default_value)
+AIRY_API bool cm_get_bool(const char *key, bool default_value)
 {
     const char *val = cm_get(key, NULL);
     if (!val)
@@ -244,18 +244,18 @@ AGENTRT_API bool cm_get_bool(const char *key, bool default_value)
     return default_value;
 }
 
-AGENTRT_API int cm_set(const char *key, const char *value, const char *source)
+AIRY_API int cm_set(const char *key, const char *value, const char *source)
 {
     if (!key)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (!g_cm.initialized)
         cm_init(NULL);
 
-    agentrt_mutex_lock(&g_cm.mutex);
+    airy_mtx_lock(&g_cm.mutex);
 
     if (g_cm.config.enable_validation && !validate_value(key, value)) {
-        agentrt_mutex_unlock(&g_cm.mutex);
-        return AGENTRT_ERR_INVALID_PARAM;
+        airy_mtx_unlock(&g_cm.mutex);
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     cm_entry_t *entry = find_entry(key);
@@ -271,23 +271,23 @@ AGENTRT_API int cm_set(const char *key, const char *value, const char *source)
         }
 
         entry->version = ++g_cm.global_version;
-        entry->last_modified = agentrt_time_ms();
+        entry->last_modified = airy_time_ms();
         entry->is_overridden = true;
         if (source)
             safe_strcpy(entry->source, source, sizeof(entry->source));
 
         add_history(key, old_value, value, source);
 
-        agentrt_mutex_unlock(&g_cm.mutex);
+        airy_mtx_unlock(&g_cm.mutex);
         notify_watchers(key, old_value, value);
         return 0;
     }
 
     if (g_cm.entry_count >= CM_MAX_ENTRIES) {
-        agentrt_mutex_unlock(&g_cm.mutex);
-        agentrt_error_push_ex(AGENTRT_ERR_STATE_ERROR, __FILE__, __LINE__, __func__,
+        airy_mtx_unlock(&g_cm.mutex);
+        airy_err_push_ex(AIRY_ERR_STATE_ERROR, __FILE__, __LINE__, __func__,
                               "entry_count overflow: %u >= %u", g_cm.entry_count, CM_MAX_ENTRIES);
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
     }
 
     entry = &g_cm.entries[g_cm.entry_count];
@@ -298,7 +298,7 @@ AGENTRT_API int cm_set(const char *key, const char *value, const char *source)
     entry->type = CM_TYPE_STRING;
     safe_strcpy(entry->namespace_, "default", CM_MAX_NAMESPACE_LEN);
     entry->version = ++g_cm.global_version;
-    entry->last_modified = agentrt_time_ms();
+    entry->last_modified = airy_time_ms();
     entry->is_default = false;
     entry->is_overridden = true;
     if (source)
@@ -307,16 +307,16 @@ AGENTRT_API int cm_set(const char *key, const char *value, const char *source)
 
     add_history(key, "", value, source);
 
-    agentrt_mutex_unlock(&g_cm.mutex);
+    airy_mtx_unlock(&g_cm.mutex);
     notify_watchers(key, "", value);
     return 0;
 }
 
-AGENTRT_API int cm_set_namespaced(const char *namespace_, const char *key, const char *value,
+AIRY_API int cm_set_namespaced(const char *namespace_, const char *key, const char *value,
                                   const char *source)
 {
     if (!namespace_ || !key)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     char full_key[CM_MAX_KEY_LEN + CM_MAX_NAMESPACE_LEN + 2];
     snprintf(full_key, sizeof(full_key), "%s.%s", namespace_, key);
@@ -325,17 +325,17 @@ AGENTRT_API int cm_set_namespaced(const char *namespace_, const char *key, const
 
 /* ==================== 配置加载 ==================== */
 
-AGENTRT_API int cm_load_json(const char *path, const char *namespace_)
+AIRY_API int cm_load_json(const char *path, const char *namespace_)
 {
     if (!path)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (!g_cm.initialized)
         cm_init(NULL);
 
     FILE *fp = fopen(path, "rb");
     if (!fp) {
         LOG_WARN("Config file not found: %s", path);
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
     fseek(fp, 0, SEEK_END);
@@ -344,20 +344,20 @@ AGENTRT_API int cm_load_json(const char *path, const char *namespace_)
 
     if (file_size <= 0 || file_size > 1024 * 1024) {
         fclose(fp);
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
-    char *data = (char *)AGENTRT_MALLOC(file_size + 1);
+    char *data = (char *)AIRY_MALLOC(file_size + 1);
     if (!data) {
         fclose(fp);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     size_t bytes_read = fread(data, 1, file_size, fp);
     fclose(fp);
     if (bytes_read != (size_t)file_size) {
-        AGENTRT_FREE(data);
-        return AGENTRT_ERR_IO;
+        AIRY_FREE(data);
+        return AIRY_ERR_IO;
     }
     data[bytes_read] = '\0';
 
@@ -419,7 +419,7 @@ AGENTRT_API int cm_load_json(const char *path, const char *namespace_)
         line = strtok_r(NULL, "\n", &saveptr);
     }
 
-    AGENTRT_FREE(data);
+    AIRY_FREE(data);
     data = NULL;
 
     LOG_INFO("Loaded %d config entries from %s (namespace=%s)", count, path,
@@ -427,7 +427,7 @@ AGENTRT_API int cm_load_json(const char *path, const char *namespace_)
     return count;
 }
 
-AGENTRT_API int cm_load_env(const char *prefix, const char *namespace_)
+AIRY_API int cm_load_env(const char *prefix, const char *namespace_)
 {
     if (!prefix)
         return 0;
@@ -492,7 +492,7 @@ AGENTRT_API int cm_load_env(const char *prefix, const char *namespace_)
     return count;
 }
 
-AGENTRT_API int cm_load_args(int argc, char **argv)
+AIRY_API int cm_load_args(int argc, char **argv)
 {
     if (!argv)
         return 0;
@@ -523,18 +523,18 @@ AGENTRT_API int cm_load_args(int argc, char **argv)
 
 /* ==================== 配置监视与热更新 ==================== */
 
-AGENTRT_API int cm_watch(const char *key_pattern, cm_change_callback_t callback, void *user_data)
+AIRY_API int cm_watch(const char *key_pattern, cm_change_callback_t callback, void *user_data)
 {
     if (!callback)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (!g_cm.initialized)
         cm_init(NULL);
 
-    agentrt_mutex_lock(&g_cm.mutex);
+    airy_mtx_lock(&g_cm.mutex);
 
     if (g_cm.watcher_count >= CM_MAX_WATCHERS) {
-        agentrt_mutex_unlock(&g_cm.mutex);
-        return AGENTRT_ERR_OVERFLOW;
+        airy_mtx_unlock(&g_cm.mutex);
+        return AIRY_ERR_OVERFLOW;
     }
 
     cm_watcher_t *w = &g_cm.watchers[g_cm.watcher_count];
@@ -546,17 +546,17 @@ AGENTRT_API int cm_watch(const char *key_pattern, cm_change_callback_t callback,
     w->user_data = user_data;
     g_cm.watcher_count++;
 
-    agentrt_mutex_unlock(&g_cm.mutex);
+    airy_mtx_unlock(&g_cm.mutex);
 
     return 0;
 }
 
-AGENTRT_API int cm_unwatch(const char *key_pattern, cm_change_callback_t callback)
+AIRY_API int cm_unwatch(const char *key_pattern, cm_change_callback_t callback)
 {
     if (!callback)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_cm.mutex);
+    airy_mtx_lock(&g_cm.mutex);
 
     for (uint32_t i = 0; i < g_cm.watcher_count; i++) {
         if (g_cm.watchers[i].callback == callback &&
@@ -570,14 +570,14 @@ AGENTRT_API int cm_unwatch(const char *key_pattern, cm_change_callback_t callbac
         }
     }
 
-    agentrt_mutex_unlock(&g_cm.mutex);
+    airy_mtx_unlock(&g_cm.mutex);
     return 0;
 }
 
-AGENTRT_API int cm_reload(void)
+AIRY_API int cm_reload(void)
 {
     if (!g_cm.initialized)
-        return AGENTRT_ERR_UNKNOWN;
+        return AIRY_ERR_UNKNOWN;
 
     LOG_INFO("Config reload triggered");
     return cm_load_json(g_cm.config.base_path[0] ? g_cm.config.base_path : "./config", NULL);
@@ -585,16 +585,16 @@ AGENTRT_API int cm_reload(void)
 
 /* ==================== 配置校验 ==================== */
 
-AGENTRT_API int cm_register_validator(const char *key_pattern, cm_validator_t validator)
+AIRY_API int cm_register_validator(const char *key_pattern, cm_validator_t validator)
 {
     if (!validator)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_cm.mutex);
+    airy_mtx_lock(&g_cm.mutex);
 
     if (g_cm.validator_count >= CM_MAX_VALIDATORS) {
-        agentrt_mutex_unlock(&g_cm.mutex);
-        return AGENTRT_ERR_OVERFLOW;
+        airy_mtx_unlock(&g_cm.mutex);
+        return AIRY_ERR_OVERFLOW;
     }
 
     cm_validator_entry_t *v = &g_cm.validators[g_cm.validator_count];
@@ -605,15 +605,15 @@ AGENTRT_API int cm_register_validator(const char *key_pattern, cm_validator_t va
     v->validator = validator;
     g_cm.validator_count++;
 
-    agentrt_mutex_unlock(&g_cm.mutex);
+    airy_mtx_unlock(&g_cm.mutex);
     return 0;
 }
 
-AGENTRT_API int cm_validate_all(void)
+AIRY_API int cm_validate_all(void)
 {
     int failures = 0;
 
-    agentrt_mutex_lock(&g_cm.mutex);
+    airy_mtx_lock(&g_cm.mutex);
 
     for (uint32_t i = 0; i < g_cm.entry_count; i++) {
         if (!validate_value(g_cm.entries[i].key, g_cm.entries[i].value)) {
@@ -621,19 +621,19 @@ AGENTRT_API int cm_validate_all(void)
         }
     }
 
-    agentrt_mutex_unlock(&g_cm.mutex);
+    airy_mtx_unlock(&g_cm.mutex);
     return failures;
 }
 
 /* ==================== 版本控制 ==================== */
 
-AGENTRT_API int cm_get_history(const char *key, cm_change_record_t *records, uint32_t max_count,
+AIRY_API int cm_get_history(const char *key, cm_change_record_t *records, uint32_t max_count,
                                uint32_t *found_count)
 {
     if (!records || !found_count)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_cm.mutex);
+    airy_mtx_lock(&g_cm.mutex);
 
     uint32_t count = 0;
     for (uint32_t i = 0; i < g_cm.history_count && count < max_count; i++) {
@@ -648,16 +648,16 @@ AGENTRT_API int cm_get_history(const char *key, cm_change_record_t *records, uin
     }
 
     *found_count = count;
-    agentrt_mutex_unlock(&g_cm.mutex);
+    airy_mtx_unlock(&g_cm.mutex);
     return 0;
 }
 
-AGENTRT_API int cm_rollback(const char *key, uint64_t version)
+AIRY_API int cm_rollback(const char *key, uint64_t version)
 {
     if (!key)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_cm.mutex);
+    airy_mtx_lock(&g_cm.mutex);
 
     for (uint32_t i = 0; i < g_cm.history_count; i++) {
         uint32_t idx = (g_cm.history_head + CM_MAX_HISTORY - 1 - i) % CM_MAX_HISTORY;
@@ -665,31 +665,31 @@ AGENTRT_API int cm_rollback(const char *key, uint64_t version)
 
         if (strcmp(rec->key, key) == 0) {
             if (version == 0 || rec->timestamp == version) {
-                agentrt_mutex_unlock(&g_cm.mutex);
+                airy_mtx_unlock(&g_cm.mutex);
                 return cm_set(key, rec->old_value, "rollback");
             }
         }
     }
 
-    agentrt_mutex_unlock(&g_cm.mutex);
-    return AGENTRT_ERR_NOT_FOUND;
+    airy_mtx_unlock(&g_cm.mutex);
+    return AIRY_ERR_NOT_FOUND;
 }
 
-AGENTRT_API const char *cm_get_environment(void)
+AIRY_API const char *cm_get_environment(void)
 {
     if (!g_cm.initialized)
         return "unknown";
     return g_cm.config.environment;
 }
 
-AGENTRT_API int cm_set_environment(const char *env)
+AIRY_API int cm_set_environment(const char *env)
 {
     if (!env)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_mutex_lock(&g_cm.mutex);
+    airy_mtx_lock(&g_cm.mutex);
     safe_strcpy(g_cm.config.environment, env, sizeof(g_cm.config.environment));
-    agentrt_mutex_unlock(&g_cm.mutex);
+    airy_mtx_unlock(&g_cm.mutex);
 
     cm_load_environment_config(env);
 
@@ -697,10 +697,10 @@ AGENTRT_API int cm_set_environment(const char *env)
     return 0;
 }
 
-AGENTRT_API int cm_load_environment_config(const char *env)
+AIRY_API int cm_load_environment_config(const char *env)
 {
     if (!env)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-truncation"
@@ -721,19 +721,19 @@ AGENTRT_API int cm_load_environment_config(const char *env)
 
 /* ==================== 导出 ==================== */
 
-AGENTRT_API char *cm_export_json(const char *namespace_)
+AIRY_API char *cm_export_json(const char *namespace_)
 {
     if (!g_cm.initialized) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
-    agentrt_mutex_lock(&g_cm.mutex);
+    airy_mtx_lock(&g_cm.mutex);
 
     size_t buf_size = 8192;
-    char *buf = (char *)AGENTRT_MALLOC(buf_size);
+    char *buf = (char *)AIRY_MALLOC(buf_size);
     if (!buf) {
-        agentrt_mutex_unlock(&g_cm.mutex);
-        agentrt_error_push_ex(AGENTRT_ERR_OUT_OF_MEMORY, __FILE__, __LINE__, __func__,
+        airy_mtx_unlock(&g_cm.mutex);
+        airy_err_push_ex(AIRY_ERR_OUT_OF_MEMORY, __FILE__, __LINE__, __func__,
                               "cm_export_json alloc failed");
         return NULL;
     }
@@ -760,11 +760,11 @@ AGENTRT_API char *cm_export_json(const char *namespace_)
 
     pos += snprintf(buf + pos, buf_size - pos, "}}");
 
-    agentrt_mutex_unlock(&g_cm.mutex);
+    airy_mtx_unlock(&g_cm.mutex);
     return buf;
 }
 
-AGENTRT_API uint32_t cm_entry_count(void)
+AIRY_API uint32_t cm_entry_count(void)
 {
     return g_cm.entry_count;
 }

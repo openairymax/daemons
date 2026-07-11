@@ -45,11 +45,11 @@ static provider_ctx_t *local_init(const char *name __attribute__((unused)),
                                   double timeout_sec, int max_retries)
 {
 
-    local_ctx_t *ctx = (local_ctx_t *)AGENTRT_CALLOC(1, sizeof(local_ctx_t));
+    local_ctx_t *ctx = (local_ctx_t *)AIRY_CALLOC(1, sizeof(local_ctx_t));
     if (!ctx) {
         SVC_LOG_ERROR("C-L02: LOCAL: INIT-FAIL — OOM allocating ctx (size=%zu)",
                       sizeof(local_ctx_t));
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     double timeout = timeout_sec > 0 ? timeout_sec : LOCAL_DEFAULT_TIMEOUT;
@@ -68,7 +68,7 @@ static void local_destroy(provider_ctx_t *ctx_ptr)
 {
     if (ctx_ptr) {
         SVC_LOG_DEBUG("C-L02: LOCAL: DESTROY ctx=%p", (void *)ctx_ptr);
-        AGENTRT_FREE(ctx_ptr);
+        AIRY_FREE(ctx_ptr);
     }
 }
 
@@ -81,7 +81,7 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
         SVC_LOG_ERROR("C-L02: LOCAL: COMPLETE-FAIL — invalid params "
                       "ctx=%p manager=%p out=%p",
                       (void *)ctx_ptr, (void *)manager, (void *)out_response);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     local_ctx_t *ctx = (local_ctx_t *)ctx_ptr;
@@ -98,7 +98,7 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: LOCAL: COMPLETE-FAIL — request body build failed (OOM) "
                       "model=%s", model);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     size_t req_body_len = strlen(req_body);
@@ -120,9 +120,9 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
                                  &http_resp, &http_code);
 
     curl_slist_free_all(headers);
-    AGENTRT_FREE(req_body);
+    AIRY_FREE(req_body);
 
-    if (ret != AGENTRT_OK) {
+    if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: LOCAL: COMPLETE-FAIL — HTTP request failed "
                       "url=%s http_code=%ld ret=%d timeout=%.1fs "
                       "STACK: provider_http_post() → local_complete()",
@@ -143,7 +143,7 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
                       (http_code == 503) ? "local service unavailable — check if model server is running" :
                       "check local endpoint URL and model server status");
         provider_http_resp_free(http_resp);
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
     size_t resp_body_len = http_resp ? strlen(http_resp->data) : 0;
@@ -151,7 +151,7 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
                   http_code, resp_body_len);
 
     ret = provider_parse_openai_response(http_resp->data, out_response);
-    if (ret != AGENTRT_OK) {
+    if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: LOCAL: COMPLETE-FAIL — response parse failed "
                       "ret=%d resp_body_len=%zu "
                       "STACK: provider_parse_openai_response() → local_complete()",
@@ -195,13 +195,13 @@ static int loc_stream_on_chunk(const char *json_line, void *userdata)
     if (!acc->resp_id) {
         cJSON *id = cJSON_GetObjectItem(root, "id");
         if (cJSON_IsString(id) && id->valuestring)
-            acc->resp_id = AGENTRT_STRDUP(id->valuestring);
+            acc->resp_id = AIRY_STRDUP(id->valuestring);
     }
 
     if (!acc->resp_model) {
         cJSON *model = cJSON_GetObjectItem(root, "model");
         if (cJSON_IsString(model) && model->valuestring)
-            acc->resp_model = AGENTRT_STRDUP(model->valuestring);
+            acc->resp_model = AIRY_STRDUP(model->valuestring);
     }
 
     cJSON *created = cJSON_GetObjectItem(root, "created");
@@ -227,7 +227,7 @@ static int loc_stream_on_chunk(const char *json_line, void *userdata)
                         size_t new_cap = acc->acc_cap * 2;
                         while (new_cap < needed)
                             new_cap *= 2;
-                        char *ptr = (char *)AGENTRT_REALLOC(acc->acc_content, new_cap);
+                        char *ptr = (char *)AIRY_REALLOC(acc->acc_content, new_cap);
                         if (ptr) {
                             acc->acc_content = ptr;
                             acc->acc_cap = new_cap;
@@ -244,8 +244,8 @@ static int loc_stream_on_chunk(const char *json_line, void *userdata)
 
         cJSON *fr = cJSON_GetObjectItem(choice, "finish_reason");
         if (cJSON_IsString(fr) && fr->valuestring && strcmp(fr->valuestring, "null") != 0) {
-            AGENTRT_FREE(acc->finish_reason);
-            acc->finish_reason = AGENTRT_STRDUP(fr->valuestring);
+            AIRY_FREE(acc->finish_reason);
+            acc->finish_reason = AIRY_STRDUP(fr->valuestring);
         }
     }
 
@@ -255,26 +255,26 @@ static int loc_stream_on_chunk(const char *json_line, void *userdata)
 
 static llm_response_t *loc_build_stream_response(loc_stream_acc_t *acc)
 {
-    llm_response_t *resp = (llm_response_t *)AGENTRT_CALLOC(1, sizeof(llm_response_t));
+    llm_response_t *resp = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
-    resp->id = acc->resp_id ? acc->resp_id : AGENTRT_STRDUP("");
+    resp->id = acc->resp_id ? acc->resp_id : AIRY_STRDUP("");
     acc->resp_id = NULL;
-    resp->model = acc->resp_model ? acc->resp_model : AGENTRT_STRDUP("unknown");
+    resp->model = acc->resp_model ? acc->resp_model : AIRY_STRDUP("unknown");
     acc->resp_model = NULL;
     resp->created = acc->resp_created;
-    resp->choices = (llm_message_t *)AGENTRT_CALLOC(1, sizeof(llm_message_t));
+    resp->choices = (llm_message_t *)AIRY_CALLOC(1, sizeof(llm_message_t));
     if (resp->choices) {
         resp->choice_count = 1;
-        resp->choices[0].role = AGENTRT_STRDUP("assistant");
+        resp->choices[0].role = AIRY_STRDUP("assistant");
         resp->choices[0].content = acc->acc_content;
         acc->acc_content = NULL;
     } else {
         resp->choice_count = 0;
     }
-    resp->finish_reason = acc->finish_reason ? acc->finish_reason : AGENTRT_STRDUP("stop");
+    resp->finish_reason = acc->finish_reason ? acc->finish_reason : AIRY_STRDUP("stop");
     acc->finish_reason = NULL;
     return resp;
 }
@@ -287,7 +287,7 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
         SVC_LOG_ERROR("C-L02: LOCAL: STREAM-FAIL — invalid params "
                       "ctx=%p manager=%p callback=%p",
                       (void *)ctx_ptr, (void *)manager, (void *)(uintptr_t)callback);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     local_ctx_t *ctx = (local_ctx_t *)ctx_ptr;
@@ -306,7 +306,7 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: LOCAL: STREAM-FAIL — request body build failed (OOM) "
                       "model=%s", model);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     char url[1024];
@@ -320,7 +320,7 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
     acc.user_cb = callback;
     acc.user_data = user_data;
     acc.acc_cap = 4096;
-    acc.acc_content = (char *)AGENTRT_MALLOC(acc.acc_cap);
+    acc.acc_content = (char *)AIRY_MALLOC(acc.acc_cap);
 
     SVC_LOG_DEBUG("C-L02: LOCAL: STREAM-HTTP-POST url=%s body_len=%zu timeout=%.1fs "
                   "(no auth, local endpoint)",
@@ -331,25 +331,25 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
                                         loc_stream_on_chunk, &acc, &http_code);
 
     curl_slist_free_all(headers);
-    AGENTRT_FREE(req_body);
+    AIRY_FREE(req_body);
 
-    if (ret != AGENTRT_OK) {
+    if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: LOCAL: STREAM-FAIL — HTTP stream error "
                       "url=%s http_code=%ld ret=%d timeout=%.1fs "
                       "STACK: provider_http_post_stream() → local_complete_stream()",
                       url, http_code, ret, base->timeout_sec);
-        AGENTRT_FREE(acc.acc_content);
-        AGENTRT_FREE(acc.resp_id);
-        AGENTRT_FREE(acc.resp_model);
-        AGENTRT_FREE(acc.finish_reason);
+        AIRY_FREE(acc.acc_content);
+        AIRY_FREE(acc.resp_id);
+        AIRY_FREE(acc.resp_model);
+        AIRY_FREE(acc.finish_reason);
         return ret;
     }
 
     llm_response_t *resp = loc_build_stream_response(&acc);
-    AGENTRT_FREE(acc.acc_content);
-    AGENTRT_FREE(acc.resp_id);
-    AGENTRT_FREE(acc.resp_model);
-    AGENTRT_FREE(acc.finish_reason);
+    AIRY_FREE(acc.acc_content);
+    AIRY_FREE(acc.resp_id);
+    AIRY_FREE(acc.resp_model);
+    AIRY_FREE(acc.finish_reason);
 
     if (resp) {
         SVC_LOG_INFO("C-L02: LOCAL: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
@@ -367,7 +367,7 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
     else if (resp)
         llm_response_free(resp);
 
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 /* ---------- 操作表 ---------- */

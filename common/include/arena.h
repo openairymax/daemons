@@ -18,8 +18,8 @@
  * @see tcache.h  per-thread 缓存层
  */
 
-#ifndef AGENTRT_ARENA_H
-#define AGENTRT_ARENA_H
+#ifndef AIRY_RT_ARENA_H
+#define AIRY_RT_ARENA_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -164,4 +164,4 @@ size_t arena_available(arena_t *arena);
 }
 #endif
 
-#endif /* AGENTRT_ARENA_H */
+#endif /* AIRY_RT_ARENA_H */

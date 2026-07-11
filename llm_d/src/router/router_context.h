@@ -8,8 +8,8 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  */
 
-#ifndef AGENTRT_LLM_ROUTER_CONTEXT_H
-#define AGENTRT_LLM_ROUTER_CONTEXT_H
+#ifndef AIRY_RT_LLM_ROUTER_CONTEXT_H
+#define AIRY_RT_LLM_ROUTER_CONTEXT_H
 
 #include "router/llm_router.h"
 #include "cost_tracker.h"
@@ -41,7 +41,7 @@ typedef struct {
     llm_router_stats_t stats;
     cost_tracker_t *cost_tracker;
     token_counter_t *token_counter;
-    agentrt_mutex_t mutex;  /* platform.h 的 mutex 类型（通过 types.h→platform.h 包含）*/
+    airy_mtx_t mutex;  /* platform.h 的 mutex 类型（通过 types.h→platform.h 包含）*/
     bool initialized;
 
     /* P3.1.2: 轮询计数器 */
@@ -118,11 +118,11 @@ static inline void router_fill_result(llm_route_result_t *result,
                                        size_t input_tokens,
                                        size_t output_tokens)
 {
-    AGENTRT_STRNCPY_TERM(result->provider_name, ep->provider_name,
+    AIRY_STRNCPY_TERM(result->provider_name, ep->provider_name,
                          sizeof(result->provider_name));
-    AGENTRT_STRNCPY_TERM(result->model_name, ep->model_name,
+    AIRY_STRNCPY_TERM(result->model_name, ep->model_name,
                          sizeof(result->model_name));
-    AGENTRT_STRNCPY_TERM(result->endpoint, ep->endpoint,
+    AIRY_STRNCPY_TERM(result->endpoint, ep->endpoint,
                          sizeof(result->endpoint));
     result->estimated_cost = router_estimate_cost(ep, input_tokens, output_tokens);
     result->estimated_latency_ms = ep->avg_latency_ms;
@@ -137,10 +137,10 @@ static inline void router_set_fallback(llm_route_result_t *result,
                                         const llm_endpoint_t *fallback)
 {
     if (!fallback) return;
-    AGENTRT_STRNCPY_TERM(result->fallback_provider,
+    AIRY_STRNCPY_TERM(result->fallback_provider,
                          fallback->provider_name,
                          sizeof(result->fallback_provider));
-    AGENTRT_STRNCPY_TERM(result->fallback_model,
+    AIRY_STRNCPY_TERM(result->fallback_model,
                          fallback->model_name,
                          sizeof(result->fallback_model));
 }
@@ -149,4 +149,4 @@ static inline void router_set_fallback(llm_route_result_t *result,
 }
 #endif
 
-#endif /* AGENTRT_LLM_ROUTER_CONTEXT_H */
+#endif /* AIRY_RT_LLM_ROUTER_CONTEXT_H */

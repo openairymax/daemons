@@ -11,7 +11,7 @@
 #include "response.h"
 
 /* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏
- * （response.h 已传递 <cjson/cJSON.h>，cjson_helpers.h 依赖 AGENTRT_HAS_CJSON） */
+ * （response.h 已传递 <cjson/cJSON.h>，cjson_helpers.h 依赖 AIRY_HAS_CJSON） */
 #include <cjson_helpers.h>
 
 #include <stdlib.h>
@@ -20,11 +20,11 @@
 char *response_to_json(const llm_response_t *resp)
 {
     if (!resp) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     cJSON *root = cJSON_CreateObject();
     if (!root) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     if (resp->id)
@@ -55,26 +55,26 @@ char *response_to_json(const llm_response_t *resp)
 llm_response_t *response_from_json(const char *json)
 {
     if (!json) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + NULL 检查 + 手动 cJSON_Delete */
     CJSON_PARSE_GUARD(root, json, {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     });
 
-    llm_response_t *resp = AGENTRT_CALLOC(1, sizeof(llm_response_t));
+    llm_response_t *resp = AIRY_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {
         /* root 由 CJSON_AUTO_FREE 自动释放，无需手动 cJSON_Delete */
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     cJSON *id = cJSON_GetObjectItem(root, "id");
     if (cJSON_IsString(id))
-        resp->id = AGENTRT_STRDUP(id->valuestring);
+        resp->id = AIRY_STRDUP(id->valuestring);
 
     cJSON *model = cJSON_GetObjectItem(root, "model");
     if (cJSON_IsString(model))
-        resp->model = AGENTRT_STRDUP(model->valuestring);
+        resp->model = AIRY_STRDUP(model->valuestring);
 
     cJSON *created = cJSON_GetObjectItem(root, "created");
     if (cJSON_IsNumber(created))
@@ -94,20 +94,20 @@ llm_response_t *response_from_json(const char *json)
 
     cJSON *finish_reason = cJSON_GetObjectItem(root, "finish_reason");
     if (cJSON_IsString(finish_reason))
-        resp->finish_reason = AGENTRT_STRDUP(finish_reason->valuestring);
+        resp->finish_reason = AIRY_STRDUP(finish_reason->valuestring);
 
     cJSON *choices = cJSON_GetObjectItem(root, "choices");
     if (cJSON_IsArray(choices)) {
         resp->choice_count = cJSON_GetArraySize(choices);
-        resp->choices = AGENTRT_CALLOC(resp->choice_count, sizeof(llm_message_t));
+        resp->choices = AIRY_CALLOC(resp->choice_count, sizeof(llm_message_t));
         for (size_t i = 0; i < resp->choice_count; ++i) {
             cJSON *choice = cJSON_GetArrayItem(choices, i);
             cJSON *role = cJSON_GetObjectItem(choice, "role");
             cJSON *content = cJSON_GetObjectItem(choice, "content");
             if (cJSON_IsString(role))
-                resp->choices[i].role = AGENTRT_STRDUP(role->valuestring);
+                resp->choices[i].role = AIRY_STRDUP(role->valuestring);
             if (cJSON_IsString(content))
-                resp->choices[i].content = AGENTRT_STRDUP(content->valuestring);
+                resp->choices[i].content = AIRY_STRDUP(content->valuestring);
         }
     }
 

@@ -19,8 +19,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_DAEMON_GATEWAY_SVC_ADAPTER_H
-#define AGENTRT_DAEMON_GATEWAY_SVC_ADAPTER_H
+#ifndef AIRY_RT_DAEMON_GATEWAY_SVC_ADAPTER_H
+#define AIRY_RT_DAEMON_GATEWAY_SVC_ADAPTER_H
 
 #include "gateway_service.h"
 #include "svc_common.h"
@@ -36,39 +36,39 @@ extern "C" {
 /**
  * @brief 创建网关服务适配器
  *
- * 创建一个新的网关服务适配器实例，该实例实现了agentrt_service_t接口，
+ * 创建一个新的网关服务适配器实例，该实例实现了airy_svc_t接口，
  * 可以通过统一的AgentRT服务管理框架进行管理。
  *
  * @param[out] out_service 输出服务句柄
  * @param[in] config 通用服务配置（可为NULL，使用默认配置）
- * @return AGENTRT_SUCCESS 成功，其他值为错误码
+ * @return AIRY_SUCCESS 成功，其他值为错误码
  *
  * @threadsafe 否（需在单线程环境下调用）
  * @reentrant 是
  *
  * @example
  * @code
- * agentrt_service_t svc = NULL;
- * agentrt_svc_config_t config = {
+ * airy_svc_t svc = NULL;
+ * airy_svc_config_t config = {
  *     .name = "gateway_service",
  *     .version = "1.0.0",
- *     .capabilities = AGENTRT_SVC_CAP_ASYNC | AGENTRT_SVC_CAP_STREAMING,
+ *     .capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_STREAMING,
  *     .max_concurrent = 1000,
  *     .timeout_ms = 30000,
  *     .auto_start = true,
  *     .enable_metrics = true
  * };
  *
- * agentrt_error_t err = gateway_service_adapter_create(&svc, &config);
- * if (err == AGENTRT_SUCCESS) {
- *     // 使用agentrt_service_*函数管理服务
- *     agentrt_service_init(svc);
- *     agentrt_service_start(svc);
+ * airy_err_t err = gateway_service_adapter_create(&svc, &config);
+ * if (err == AIRY_SUCCESS) {
+ *     // 使用airy_svc_*函数管理服务
+ *     airy_svc_init(svc);
+ *     airy_svc_start(svc);
  * }
  * @endcode
  */
-AGENTRT_API agentrt_error_t gateway_service_adapter_create(agentrt_service_t *out_service,
-                                                           const agentrt_svc_config_t *config);
+AIRY_API airy_err_t gateway_service_adapter_create(airy_svc_t *out_service,
+                                                           const airy_svc_config_t *config);
 
 /**
  * @brief 将现有网关服务包装为适配器
@@ -79,7 +79,7 @@ AGENTRT_API agentrt_error_t gateway_service_adapter_create(agentrt_service_t *ou
  * @param[out] out_service 输出服务句柄
  * @param[in] gateway_svc 原始网关服务句柄
  * @param[in] config 通用服务配置（可为NULL，使用默认配置）
- * @return AGENTRT_SUCCESS 成功，其他值为错误码
+ * @return AIRY_SUCCESS 成功，其他值为错误码
  *
  * @warning 包装后，原始服务句柄的生命周期由适配器管理，
  *          不应再调用gateway_service_destroy等函数。
@@ -87,9 +87,9 @@ AGENTRT_API agentrt_error_t gateway_service_adapter_create(agentrt_service_t *ou
  * @threadsafe 否
  * @reentrant 是
  */
-AGENTRT_API agentrt_error_t gateway_service_adapter_wrap(agentrt_service_t *out_service,
+AIRY_API airy_err_t gateway_service_adapter_wrap(airy_svc_t *out_service,
                                                          gateway_service_t gateway_svc,
-                                                         const agentrt_svc_config_t *config);
+                                                         const airy_svc_config_t *config);
 
 /**
  * @brief 获取原始网关服务句柄
@@ -103,7 +103,7 @@ AGENTRT_API agentrt_error_t gateway_service_adapter_wrap(agentrt_service_t *out_
  * @threadsafe 是（前提是服务状态不变）
  * @reentrant 是
  */
-AGENTRT_API gateway_service_t gateway_service_adapter_get_original(agentrt_service_t service);
+AIRY_API gateway_service_t gateway_service_adapter_get_original(airy_svc_t service);
 
 /* ==================== 适配器生命周期管理 ==================== */
 
@@ -114,12 +114,12 @@ AGENTRT_API gateway_service_t gateway_service_adapter_get_original(agentrt_servi
  * 如果使用gateway_service_adapter_wrap创建适配器，此函数无操作。
  *
  * @param service 适配器服务句柄
- * @return AGENTRT_SUCCESS 成功，其他值为错误码
+ * @return AIRY_SUCCESS 成功，其他值为错误码
  *
  * @threadsafe 否
  * @reentrant 否
  */
-AGENTRT_API agentrt_error_t gateway_service_adapter_init(agentrt_service_t service);
+AIRY_API airy_err_t gateway_service_adapter_init(airy_svc_t service);
 
 /**
  * @brief 适配器服务启动
@@ -127,12 +127,12 @@ AGENTRT_API agentrt_error_t gateway_service_adapter_init(agentrt_service_t servi
  * 启动底层网关服务。
  *
  * @param service 适配器服务句柄
- * @return AGENTRT_SUCCESS 成功，其他值为错误码
+ * @return AIRY_SUCCESS 成功，其他值为错误码
  *
  * @threadsafe 否
  * @reentrant 否
  */
-AGENTRT_API agentrt_error_t gateway_service_adapter_start(agentrt_service_t service);
+AIRY_API airy_err_t gateway_service_adapter_start(airy_svc_t service);
 
 /**
  * @brief 适配器服务停止
@@ -141,12 +141,12 @@ AGENTRT_API agentrt_error_t gateway_service_adapter_start(agentrt_service_t serv
  *
  * @param service 适配器服务句柄
  * @param force 是否强制停止
- * @return AGENTRT_SUCCESS 成功，其他值为错误码
+ * @return AIRY_SUCCESS 成功，其他值为错误码
  *
  * @threadsafe 是（底层网关服务需支持并发停止）
  * @reentrant 否
  */
-AGENTRT_API agentrt_error_t gateway_service_adapter_stop(agentrt_service_t service, bool force);
+AIRY_API airy_err_t gateway_service_adapter_stop(airy_svc_t service, bool force);
 
 /**
  * @brief 适配器服务销毁
@@ -158,7 +158,7 @@ AGENTRT_API agentrt_error_t gateway_service_adapter_stop(agentrt_service_t servi
  * @threadsafe 否
  * @reentrant 否
  */
-AGENTRT_API void gateway_service_adapter_destroy(agentrt_service_t service);
+AIRY_API void gateway_service_adapter_destroy(airy_svc_t service);
 
 /**
  * @brief 适配器服务健康检查
@@ -166,12 +166,12 @@ AGENTRT_API void gateway_service_adapter_destroy(agentrt_service_t service);
  * 执行底层网关服务的健康检查。
  *
  * @param service 适配器服务句柄
- * @return AGENTRT_SUCCESS 健康，其他值为不健康
+ * @return AIRY_SUCCESS 健康，其他值为不健康
  *
  * @threadsafe 是
  * @reentrant 是
  */
-AGENTRT_API agentrt_error_t gateway_service_adapter_healthcheck(agentrt_service_t service);
+AIRY_API airy_err_t gateway_service_adapter_healthcheck(airy_svc_t service);
 
 /* ==================== 服务状态查询 ==================== */
 
@@ -186,7 +186,7 @@ AGENTRT_API agentrt_error_t gateway_service_adapter_healthcheck(agentrt_service_
  * @threadsafe 是
  * @reentrant 是
  */
-AGENTRT_API agentrt_svc_state_t gateway_service_adapter_get_state(agentrt_service_t service);
+AIRY_API airy_svc_state_t gateway_service_adapter_get_state(airy_svc_t service);
 
 /**
  * @brief 检查适配器服务是否运行中
@@ -199,7 +199,7 @@ AGENTRT_API agentrt_svc_state_t gateway_service_adapter_get_state(agentrt_servic
  * @threadsafe 是
  * @reentrant 是
  */
-AGENTRT_API bool gateway_service_adapter_is_running(agentrt_service_t service);
+AIRY_API bool gateway_service_adapter_is_running(airy_svc_t service);
 
 /**
  * @brief 获取适配器服务统计信息
@@ -208,20 +208,20 @@ AGENTRT_API bool gateway_service_adapter_is_running(agentrt_service_t service);
  *
  * @param service 适配器服务句柄
  * @param stats 统计信息输出
- * @return AGENTRT_SUCCESS 成功，其他值为错误码
+ * @return AIRY_SUCCESS 成功，其他值为错误码
  *
  * @threadsafe 是
  * @reentrant 是
  */
-AGENTRT_API agentrt_error_t gateway_service_adapter_get_stats(agentrt_service_t service,
-                                                              agentrt_svc_stats_t *stats);
+AIRY_API airy_err_t gateway_service_adapter_get_stats(airy_svc_t service,
+                                                              airy_svc_stats_t *stats);
 
 /* ==================== 工具函数 ==================== */
 
 /**
  * @brief 创建网关服务适配器接口
  *
- * 返回网关服务的标准适配器接口，可用于agentrt_service_create函数。
+ * 返回网关服务的标准适配器接口，可用于airy_svc_create函数。
  * 此函数主要用于高级用法，通常使用gateway_service_adapter_create即可。
  *
  * @return 网关服务适配器接口结构体
@@ -229,7 +229,7 @@ AGENTRT_API agentrt_error_t gateway_service_adapter_get_stats(agentrt_service_t 
  * @threadsafe 是
  * @reentrant 是
  */
-AGENTRT_API const agentrt_svc_interface_t *gateway_service_adapter_get_interface(void);
+AIRY_API const airy_svc_interface_t *gateway_service_adapter_get_interface(void);
 
 /**
  * @brief 检查是否支持特定网关类型
@@ -243,7 +243,7 @@ AGENTRT_API const agentrt_svc_interface_t *gateway_service_adapter_get_interface
  * @threadsafe 是
  * @reentrant 是
  */
-AGENTRT_API bool gateway_service_adapter_supports_type(agentrt_service_t service,
+AIRY_API bool gateway_service_adapter_supports_type(airy_svc_t service,
                                                        gateway_daemon_type_t type);
 
 /**
@@ -255,12 +255,12 @@ AGENTRT_API bool gateway_service_adapter_supports_type(agentrt_service_t service
  * @param service 适配器服务句柄
  * @param type 网关类型
  * @param enabled 是否启用
- * @return AGENTRT_SUCCESS 成功，其他值为错误码
+ * @return AIRY_SUCCESS 成功，其他值为错误码
  *
  * @threadsafe 否
  * @reentrant 否
  */
-AGENTRT_API agentrt_error_t gateway_service_adapter_set_type_enabled(agentrt_service_t service,
+AIRY_API airy_err_t gateway_service_adapter_set_type_enabled(airy_svc_t service,
                                                                      gateway_daemon_type_t type,
                                                                      bool enabled);
 
@@ -273,13 +273,13 @@ AGENTRT_API agentrt_error_t gateway_service_adapter_set_type_enabled(agentrt_ser
  *
  * @param[out] out_service 输出服务句柄
  * @param config_path 配置文件路径
- * @return AGENTRT_SUCCESS 成功，其他值为错误码
+ * @return AIRY_SUCCESS 成功，其他值为错误码
  *
  * @threadsafe 否
  * @reentrant 是
  */
-AGENTRT_API agentrt_error_t
-gateway_service_adapter_create_from_config(agentrt_service_t *out_service, const char *config_path);
+AIRY_API airy_err_t
+gateway_service_adapter_create_from_config(airy_svc_t *out_service, const char *config_path);
 
 /**
  * @brief 重新加载适配器配置
@@ -289,12 +289,12 @@ gateway_service_adapter_create_from_config(agentrt_service_t *out_service, const
  *
  * @param service 适配器服务句柄
  * @param config_path 配置文件路径
- * @return AGENTRT_SUCCESS 成功，其他值为错误码
+ * @return AIRY_SUCCESS 成功，其他值为错误码
  *
  * @threadsafe 否
  * @reentrant 否
  */
-AGENTRT_API agentrt_error_t gateway_service_adapter_reload_config(agentrt_service_t service,
+AIRY_API airy_err_t gateway_service_adapter_reload_config(airy_svc_t service,
                                                                   const char *config_path);
 
 /* ==================== 适配器注册 ==================== */
@@ -305,12 +305,12 @@ AGENTRT_API agentrt_error_t gateway_service_adapter_reload_config(agentrt_servic
  * 将网关服务适配器注册到全局服务注册表中，使其可以通过服务发现机制访问。
  *
  * @param service 适配器服务句柄
- * @return AGENTRT_SUCCESS 成功，其他值为错误码
+ * @return AIRY_SUCCESS 成功，其他值为错误码
  *
  * @threadsafe 是
  * @reentrant 是
  */
-AGENTRT_API agentrt_error_t gateway_service_adapter_register(agentrt_service_t service);
+AIRY_API airy_err_t gateway_service_adapter_register(airy_svc_t service);
 
 /**
  * @brief 从服务注册表注销网关服务适配器
@@ -318,15 +318,15 @@ AGENTRT_API agentrt_error_t gateway_service_adapter_register(agentrt_service_t s
  * 从全局服务注册表中注销网关服务适配器。
  *
  * @param service 适配器服务句柄
- * @return AGENTRT_SUCCESS 成功，其他值为错误码
+ * @return AIRY_SUCCESS 成功，其他值为错误码
  *
  * @threadsafe 是
  * @reentrant 是
  */
-AGENTRT_API agentrt_error_t gateway_service_adapter_unregister(agentrt_service_t service);
+AIRY_API airy_err_t gateway_service_adapter_unregister(airy_svc_t service);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* AGENTRT_DAEMON_GATEWAY_SVC_ADAPTER_H */
+#endif /* AIRY_RT_DAEMON_GATEWAY_SVC_ADAPTER_H */

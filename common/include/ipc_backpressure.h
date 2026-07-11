@@ -8,9 +8,9 @@
  * 本文件仅作为向后兼容的重导出层。
  */
 
-#ifndef AGENTRT_DAEMON_COMMON_IPC_BACKPRESSURE_H
-#define AGENTRT_DAEMON_COMMON_IPC_BACKPRESSURE_H
+#ifndef AIRY_RT_DAEMON_COMMON_IPC_BACKPRESSURE_H
+#define AIRY_RT_DAEMON_COMMON_IPC_BACKPRESSURE_H
 
 #include "../../../commons/utils/ipc/include/ipc_backpressure.h"
 
-#endif /* AGENTRT_DAEMON_COMMON_IPC_BACKPRESSURE_H */
+#endif /* AIRY_RT_DAEMON_COMMON_IPC_BACKPRESSURE_H */

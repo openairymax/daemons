@@ -95,7 +95,7 @@ static void test_add_credential_null_pool(void)
 {
     TEST("Add credential to NULL pool");
     int ret = api_rec_add_credential(NULL, "sk-key");
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "should return INVALID_PARAM");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "should return INVALID_PARAM");
     PASS();
 }
 
@@ -106,7 +106,7 @@ static void test_add_credential_null_key(void)
     ASSERT(pool != NULL, "create pool");
 
     int ret = api_rec_add_credential(pool, NULL);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "should return INVALID_PARAM");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "should return INVALID_PARAM");
 
     api_rec_pool_destroy(pool);
     PASS();
@@ -128,7 +128,7 @@ static void test_add_credential_overflow(void)
     ASSERT(pool->cred_count == API_REC_MAX_CREDENTIALS, "cred_count should be at max");
 
     ret = api_rec_add_credential(pool, "sk-one-too-many");
-    ASSERT(ret == AGENTRT_ERR_OVERFLOW, "should return OVERFLOW when full");
+    ASSERT(ret == AIRY_ERR_OVERFLOW, "should return OVERFLOW when full");
 
     api_rec_pool_destroy(pool);
     PASS();
@@ -165,7 +165,7 @@ static void test_remove_credential_null_pool(void)
 {
     TEST("Remove credential from NULL pool");
     int ret = api_rec_remove_credential(NULL, 0);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "should return INVALID_PARAM");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "should return INVALID_PARAM");
     PASS();
 }
 
@@ -179,10 +179,10 @@ static void test_remove_credential_out_of_range(void)
     ASSERT(pool->cred_count == 1, "should have 1 credential");
 
     int ret = api_rec_remove_credential(pool, 5);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "should return INVALID_PARAM for out of range");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "should return INVALID_PARAM for out of range");
 
     ret = api_rec_remove_credential(pool, 1);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "should return INVALID_PARAM for index == count");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "should return INVALID_PARAM for index == count");
 
     api_rec_pool_destroy(pool);
     PASS();
@@ -285,7 +285,7 @@ static void test_mark_cred_success_null_pool(void)
 {
     TEST("Mark cred success on NULL pool");
     int ret = api_rec_mark_cred_success(NULL);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "should return INVALID_PARAM");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "should return INVALID_PARAM");
     PASS();
 }
 
@@ -293,7 +293,7 @@ static void test_mark_cred_failure_null_pool(void)
 {
     TEST("Mark cred failure on NULL pool");
     int ret = api_rec_mark_cred_failure(NULL, API_REC_ERR_NETWORK);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "should return INVALID_PARAM");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "should return INVALID_PARAM");
     PASS();
 }
 
@@ -304,10 +304,10 @@ static void test_mark_cred_empty_pool(void)
     ASSERT(pool != NULL, "create pool");
 
     int ret = api_rec_mark_cred_success(pool);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "mark success on empty should fail");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "mark success on empty should fail");
 
     ret = api_rec_mark_cred_failure(pool, API_REC_ERR_NETWORK);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "mark failure on empty should fail");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "mark failure on empty should fail");
 
     api_rec_pool_destroy(pool);
     PASS();
@@ -384,7 +384,7 @@ static void test_add_fallback_model_null_pool(void)
 {
     TEST("Add fallback model to NULL pool");
     int ret = api_rec_add_fallback_model(NULL, "gpt-4", 1.0f, 1);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "should return INVALID_PARAM");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "should return INVALID_PARAM");
     PASS();
 }
 
@@ -395,7 +395,7 @@ static void test_add_fallback_model_null_name(void)
     ASSERT(pool != NULL, "create pool");
 
     int ret = api_rec_add_fallback_model(pool, NULL, 1.0f, 1);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "should return INVALID_PARAM");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "should return INVALID_PARAM");
 
     api_rec_pool_destroy(pool);
     PASS();
@@ -417,7 +417,7 @@ static void test_add_fallback_model_overflow(void)
     ASSERT(pool->fallback_count == API_REC_MAX_FALLBACK_MODELS, "should be at max");
 
     ret = api_rec_add_fallback_model(pool, "one-too-many", 1.0f, 99);
-    ASSERT(ret == AGENTRT_ERR_OVERFLOW, "should return OVERFLOW when full");
+    ASSERT(ret == AIRY_ERR_OVERFLOW, "should return OVERFLOW when full");
 
     api_rec_pool_destroy(pool);
     PASS();
@@ -493,7 +493,7 @@ static void test_degrade_null_pool(void)
 {
     TEST("Degrade on NULL pool");
     int ret = api_rec_degrade(NULL);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "should return INVALID_PARAM");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "should return INVALID_PARAM");
     PASS();
 }
 
@@ -501,7 +501,7 @@ static void test_upgrade_null_pool(void)
 {
     TEST("Upgrade on NULL pool");
     int ret = api_rec_upgrade(NULL);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "should return INVALID_PARAM");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "should return INVALID_PARAM");
     PASS();
 }
 
@@ -571,7 +571,7 @@ static void test_set_retry_config_null_pool(void)
 {
     TEST("Set retry config on NULL pool");
     int ret = api_rec_set_retry_config(NULL, 3, 500, 2.0f, 0.1f);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "should return INVALID_PARAM");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "should return INVALID_PARAM");
     PASS();
 }
 
@@ -622,7 +622,7 @@ static void test_bind_circuit_breaker_null_pool(void)
     TEST("Bind circuit breaker to NULL pool");
     int dummy_cb = 42;
     int ret = api_rec_bind_circuit_breaker(NULL, &dummy_cb);
-    ASSERT(ret == AGENTRT_ERR_INVALID_PARAM, "should return INVALID_PARAM");
+    ASSERT(ret == AIRY_ERR_INVALID_PARAM, "should return INVALID_PARAM");
     PASS();
 }
 

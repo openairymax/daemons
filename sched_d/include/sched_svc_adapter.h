@@ -9,8 +9,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_DAEMON_SCHED_SVC_ADAPTER_H
-#define AGENTRT_DAEMON_SCHED_SVC_ADAPTER_H
+#ifndef AIRY_RT_DAEMON_SCHED_SVC_ADAPTER_H
+#define AIRY_RT_DAEMON_SCHED_SVC_ADAPTER_H
 
 #include "scheduler_service.h"
 #include "svc_common.h"
@@ -21,25 +21,25 @@
 extern "C" {
 #endif
 
-AGENTRT_API agentrt_error_t sched_service_adapter_create(agentrt_service_t *out_service,
-                                                         const agentrt_svc_config_t *config);
+AIRY_API airy_err_t sched_service_adapter_create(airy_svc_t *out_service,
+                                                         const airy_svc_config_t *config);
 
-AGENTRT_API agentrt_error_t sched_service_adapter_wrap(agentrt_service_t *out_service,
+AIRY_API airy_err_t sched_service_adapter_wrap(airy_svc_t *out_service,
                                                        sched_service_t sched_svc,
-                                                       const agentrt_svc_config_t *config);
+                                                       const airy_svc_config_t *config);
 
-AGENTRT_API sched_service_t sched_service_adapter_get_original(agentrt_service_t service);
+AIRY_API sched_service_t sched_service_adapter_get_original(airy_svc_t service);
 
-AGENTRT_API agentrt_error_t sched_service_adapter_init(agentrt_service_t service);
-AGENTRT_API agentrt_error_t sched_service_adapter_start(agentrt_service_t service);
-AGENTRT_API agentrt_error_t sched_service_adapter_stop(agentrt_service_t service, bool force);
-AGENTRT_API void sched_service_adapter_destroy(agentrt_service_t service);
-AGENTRT_API agentrt_error_t sched_service_adapter_healthcheck(agentrt_service_t service);
+AIRY_API airy_err_t sched_service_adapter_init(airy_svc_t service);
+AIRY_API airy_err_t sched_service_adapter_start(airy_svc_t service);
+AIRY_API airy_err_t sched_service_adapter_stop(airy_svc_t service, bool force);
+AIRY_API void sched_service_adapter_destroy(airy_svc_t service);
+AIRY_API airy_err_t sched_service_adapter_healthcheck(airy_svc_t service);
 
-AGENTRT_API const agentrt_svc_interface_t *sched_service_adapter_get_interface(void);
+AIRY_API const airy_svc_interface_t *sched_service_adapter_get_interface(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* AGENTRT_DAEMON_SCHED_SVC_ADAPTER_H */
+#endif /* AIRY_RT_DAEMON_SCHED_SVC_ADAPTER_H */

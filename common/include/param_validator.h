@@ -5,8 +5,8 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  */
 
-#ifndef AGENTRT_PARAM_VALIDATOR_H
-#define AGENTRT_PARAM_VALIDATOR_H
+#ifndef AIRY_RT_PARAM_VALIDATOR_H
+#define AIRY_RT_PARAM_VALIDATOR_H
 
 #include <cjson/cJSON.h>
 #include <stdbool.h>
@@ -121,4 +121,4 @@ int validate_jsonrpc_request(cJSON *req, cJSON **jsonrpc, cJSON **method, cJSON 
 }
 #endif
 
-#endif /* AGENTRT_PARAM_VALIDATOR_H */
+#endif /* AIRY_RT_PARAM_VALIDATOR_H */

@@ -20,7 +20,7 @@
 #ifndef DAEMON_DEGRADATION_H
 #define DAEMON_DEGRADATION_H
 
-#include "agentrt.h"
+#include "airy_rt.h"
 #include "oom_handler.h"
 
 #include <stdbool.h>

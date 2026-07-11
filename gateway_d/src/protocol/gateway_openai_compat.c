@@ -33,9 +33,9 @@ static int handle_openai_request(const char *method, const char *path, const cha
 gw_openai_compat_t *gw_openai_compat_create(const gw_openai_compat_config_t *config)
 {
     gw_openai_compat_t *compat =
-        (gw_openai_compat_t *)AGENTRT_CALLOC(1, sizeof(gw_openai_compat_t));
+        (gw_openai_compat_t *)AIRY_CALLOC(1, sizeof(gw_openai_compat_t));
     if (!compat) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     if (config) {
         compat->config = *config;
@@ -53,13 +53,13 @@ void gw_openai_compat_destroy(gw_openai_compat_t *compat)
     if (compat->initialized) {
         gw_openai_compat_shutdown(compat);
     }
-    AGENTRT_FREE(compat);
+    AIRY_FREE(compat);
 }
 
 int gw_openai_compat_init(gw_openai_compat_t *compat)
 {
     if (!compat)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (compat->initialized)
         return 0;
     compat->initialized = true;
@@ -75,7 +75,7 @@ int gw_openai_compat_init(gw_openai_compat_t *compat)
 int gw_openai_compat_shutdown(gw_openai_compat_t *compat)
 {
     if (!compat || !compat->initialized)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     compat->initialized = false;
     compat->healthy = false;
     return 0;
@@ -85,7 +85,7 @@ int gw_openai_compat_set_llm_call(gw_openai_compat_t *compat, gw_openai_llm_call
                                   void *user_data)
 {
     if (!compat || !fn)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     compat->llm_call_fn = fn;
     compat->llm_call_data = user_data;
     return 0;
@@ -95,7 +95,7 @@ int gw_openai_compat_set_embed_fn(gw_openai_compat_t *compat, gw_openai_embed_fn
                                   void *user_data)
 {
     if (!compat || !fn)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     compat->embed_fn = fn;
     compat->embed_data = user_data;
     return 0;
@@ -118,36 +118,36 @@ static bool check_rate_limit(gw_openai_compat_t *compat)
 static char *extract_json_field_string(const char *json, const char *field)
 {
     if (!json || !field) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     size_t flen = strlen(field) + 4;
-    char *key = (char *)AGENTRT_MALLOC(flen);
+    char *key = (char *)AIRY_MALLOC(flen);
     if (!key) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     snprintf(key, flen, "\"%s\"", field);
     const char *p = strstr(json, key);
-    AGENTRT_FREE(key);
+    AIRY_FREE(key);
     if (!p) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     p += strlen(field) + 3;
     while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
         p++;
     if (*p != '"') {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     p++;
     const char *end = strchr(p, '"');
     if (!end) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     size_t len = (size_t)(end - p);
-    char *val = (char *)AGENTRT_MALLOC(len + 1);
+    char *val = (char *)AIRY_MALLOC(len + 1);
     if (!val) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
-    AGENTRT_MEMCPY(val, p, len);
+    AIRY_MEMCPY(val, p, len);
     val[len] = '\0';
     return val;
 }
@@ -157,12 +157,12 @@ static double extract_json_field_number(const char *json, const char *field, dou
     if (!json || !field)
         return default_val;
     size_t flen = strlen(field) + 4;
-    char *key = (char *)AGENTRT_MALLOC(flen);
+    char *key = (char *)AIRY_MALLOC(flen);
     if (!key)
         return default_val;
     snprintf(key, flen, "\"%s\"", field);
     const char *p = strstr(json, key);
-    AGENTRT_FREE(key);
+    AIRY_FREE(key);
     if (!p)
         return default_val;
     p += strlen(field) + 3;
@@ -180,12 +180,12 @@ static int extract_json_field_int(const char *json, const char *field, int defau
     if (!json || !field)
         return default_val;
     size_t flen = strlen(field) + 4;
-    char *key = (char *)AGENTRT_MALLOC(flen);
+    char *key = (char *)AIRY_MALLOC(flen);
     if (!key)
         return default_val;
     snprintf(key, flen, "\"%s\"", field);
     const char *p = strstr(json, key);
-    AGENTRT_FREE(key);
+    AIRY_FREE(key);
     key = NULL;
     if (!p)
         return default_val;
@@ -202,18 +202,18 @@ static int extract_json_field_int(const char *json, const char *field, int defau
 static char *extract_messages_array(const char *json)
 {
     if (!json) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     const char *key = "\"messages\"";
     const char *p = strstr(json, key);
     if (!p) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     p += strlen(key);
     while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
         p++;
     if (*p != '[') {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     const char *start = p;
     int depth = 0;
@@ -225,11 +225,11 @@ static char *extract_messages_array(const char *json)
             if (depth == 0) {
                 p++;
                 size_t len = (size_t)(p - start);
-                char *arr = (char *)AGENTRT_MALLOC(len + 1);
+                char *arr = (char *)AIRY_MALLOC(len + 1);
                 if (!arr) {
-                    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+                    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
                 }
-                AGENTRT_MEMCPY(arr, start, len);
+                AIRY_MEMCPY(arr, start, len);
                 arr[len] = '\0';
                 return arr;
             }
@@ -242,7 +242,7 @@ static char *extract_messages_array(const char *json)
 static char *extract_functions_array(const char *json)
 {
     if (!json) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     const char *key = "\"functions\"";
     const char *p = strstr(json, key);
@@ -251,13 +251,13 @@ static char *extract_functions_array(const char *json)
         p = strstr(json, key);
     }
     if (!p) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     p += strlen(key);
     while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
         p++;
     if (*p != '[') {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     const char *start = p;
     int depth = 0;
@@ -269,11 +269,11 @@ static char *extract_functions_array(const char *json)
             if (depth == 0) {
                 p++;
                 size_t len = (size_t)(p - start);
-                char *arr = (char *)AGENTRT_MALLOC(len + 1);
+                char *arr = (char *)AIRY_MALLOC(len + 1);
                 if (!arr) {
-                    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+                    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
                 }
-                AGENTRT_MEMCPY(arr, start, len);
+                AIRY_MEMCPY(arr, start, len);
                 arr[len] = '\0';
                 return arr;
             }
@@ -287,20 +287,20 @@ static int handle_chat_completions(gw_openai_compat_t *compat, const char *body_
                                    char **response_json)
 {
     if (!compat->llm_call_fn) {
-        AGENTRT_LOG_ERROR("no LLM backend configured for chat completions");
-        *response_json = AGENTRT_STRDUP("{\"error\":{\"message\":\"No LLM backend configured\","
+        AIRY_LOG_ERROR("no LLM backend configured for chat completions");
+        *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"No LLM backend configured\","
                                         "\"type\":\"server_error\",\"code\":503}}");
         compat->error_count++;
-        return AGENTRT_ERR_NULL_POINTER;
+        return AIRY_ERR_NULL_POINTER;
     }
 
     if (!check_rate_limit(compat)) {
-        AGENTRT_LOG_WARN("rate limit exceeded: window_requests=%u, limit=%u",
+        AIRY_LOG_WARN("rate limit exceeded: window_requests=%u, limit=%u",
                          compat->window_requests, compat->config.rate_limit_rpm);
-        *response_json = AGENTRT_STRDUP("{\"error\":{\"message\":\"Rate limit exceeded\","
+        *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"Rate limit exceeded\","
                                         "\"type\":\"rate_limit_error\",\"code\":429}}");
         compat->error_count++;
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
     }
 
     char *model = extract_json_field_string(body_json, "model");
@@ -317,18 +317,18 @@ static int handle_chat_completions(gw_openai_compat_t *compat, const char *body_
                                  messages ? messages : "[]", functions ? functions : NULL,
                                  temperature, max_tokens, &llm_response, compat->llm_call_data);
 
-    AGENTRT_FREE(model);
-    AGENTRT_FREE(messages);
-    AGENTRT_FREE(functions);
+    AIRY_FREE(model);
+    AIRY_FREE(messages);
+    AIRY_FREE(functions);
 
     if (rc != 0 || !llm_response) {
-        AGENTRT_LOG_ERROR("LLM call failed: model=%s, rc=%d",
+        AIRY_LOG_ERROR("LLM call failed: model=%s, rc=%d",
                           model ? model : compat->config.default_model, rc);
-        AGENTRT_FREE(llm_response);
-        *response_json = AGENTRT_STRDUP("{\"error\":{\"message\":\"LLM call failed\","
+        AIRY_FREE(llm_response);
+        *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"LLM call failed\","
                                         "\"type\":\"server_error\",\"code\":500}}");
         compat->error_count++;
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
     *response_json = llm_response;
@@ -340,12 +340,12 @@ static int handle_embeddings(gw_openai_compat_t *compat, const char *body_json,
                              char **response_json)
 {
     if (!compat->embed_fn) {
-        AGENTRT_LOG_ERROR("no embedding backend configured for embeddings endpoint");
+        AIRY_LOG_ERROR("no embedding backend configured for embeddings endpoint");
         *response_json =
-            AGENTRT_STRDUP("{\"error\":{\"message\":\"No embedding backend configured\","
+            AIRY_STRDUP("{\"error\":{\"message\":\"No embedding backend configured\","
                            "\"type\":\"server_error\",\"code\":503}}");
         compat->error_count++;
-        return AGENTRT_ERR_NULL_POINTER;
+        return AIRY_ERR_NULL_POINTER;
     }
 
     char *model = extract_json_field_string(body_json, "model");
@@ -378,9 +378,9 @@ static int handle_embeddings(gw_openai_compat_t *compat, const char *body_json,
                     input_start = end + 1;
             }
             size_t len = (size_t)(input_start - start);
-            input_json = (char *)AGENTRT_MALLOC(len + 1);
+            input_json = (char *)AIRY_MALLOC(len + 1);
             if (input_json) {
-                AGENTRT_MEMCPY(input_json, start, len);
+                AIRY_MEMCPY(input_json, start, len);
                 input_json[len] = '\0';
             }
         }
@@ -390,19 +390,19 @@ static int handle_embeddings(gw_openai_compat_t *compat, const char *body_json,
     int rc = compat->embed_fn(model ? model : "text-embedding-ada-002",
                               input_json ? input_json : "[]", &embed_response, compat->embed_data);
 
-    AGENTRT_FREE(model);
+    AIRY_FREE(model);
     model = NULL;
-    AGENTRT_FREE(input_json);
+    AIRY_FREE(input_json);
     input_json = NULL;
 
     if (rc != 0 || !embed_response) {
-        AGENTRT_LOG_ERROR("embedding call failed: model=%s, rc=%d",
+        AIRY_LOG_ERROR("embedding call failed: model=%s, rc=%d",
                           model ? model : "text-embedding-ada-002", rc);
-        AGENTRT_FREE(embed_response);
-        *response_json = AGENTRT_STRDUP("{\"error\":{\"message\":\"Embedding failed\","
+        AIRY_FREE(embed_response);
+        *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"Embedding failed\","
                                         "\"type\":\"server_error\",\"code\":500}}");
         compat->error_count++;
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
     *response_json = embed_response;
@@ -414,9 +414,9 @@ static int handle_models_list(gw_openai_compat_t *compat, char **response_json)
     const char *resp = "{\"object\":\"list\",\"data\":["
                        "{\"id\":\"%s\",\"object\":\"model\",\"owned_by\":\"agentrt\"}]}";
     size_t len = snprintf(NULL, 0, resp, compat->config.default_model);
-    char *buf = (char *)AGENTRT_MALLOC(len + 1);
+    char *buf = (char *)AIRY_MALLOC(len + 1);
     if (!buf)
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     snprintf(buf, len + 1, resp, compat->config.default_model);
     *response_json = buf;
     return 0;
@@ -426,7 +426,7 @@ int gw_openai_compat_handle_request(gw_openai_compat_t *compat, const char *meth
                                     const char *path, const char *body_json, char **response_json)
 {
     if (!compat || !response_json)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     compat->request_count++;
 
     if (!method)
@@ -439,10 +439,10 @@ int gw_openai_compat_handle_request(gw_openai_compat_t *compat, const char *meth
     if (path && (strcmp(path, "/v1/chat/completions") == 0 ||
                  strcmp(path, "/openai/v1/chat/completions") == 0)) {
         if (!body_json) {
-            *response_json = AGENTRT_STRDUP("{\"error\":{\"message\":\"Empty body\","
+            *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"Empty body\","
                                             "\"type\":\"invalid_request_error\",\"code\":400}}");
             compat->error_count++;
-            return AGENTRT_ERR_INVALID_PARAM;
+            return AIRY_ERR_INVALID_PARAM;
         }
         return handle_chat_completions(compat, body_json, response_json);
     }
@@ -450,10 +450,10 @@ int gw_openai_compat_handle_request(gw_openai_compat_t *compat, const char *meth
     if (path &&
         (strcmp(path, "/v1/embeddings") == 0 || strcmp(path, "/openai/v1/embeddings") == 0)) {
         if (!body_json) {
-            *response_json = AGENTRT_STRDUP("{\"error\":{\"message\":\"Empty body\","
+            *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"Empty body\","
                                             "\"type\":\"invalid_request_error\",\"code\":400}}");
             compat->error_count++;
-            return AGENTRT_ERR_INVALID_PARAM;
+            return AIRY_ERR_INVALID_PARAM;
         }
         return handle_embeddings(compat, body_json, response_json);
     }
@@ -462,10 +462,10 @@ int gw_openai_compat_handle_request(gw_openai_compat_t *compat, const char *meth
         return handle_chat_completions(compat, body_json, response_json);
     }
 
-    *response_json = AGENTRT_STRDUP("{\"error\":{\"message\":\"Unknown OpenAI endpoint\","
+    *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"Unknown OpenAI endpoint\","
                                     "\"type\":\"invalid_request_error\",\"code\":404}}");
     compat->error_count++;
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 static int handle_openai_request(const char *method, const char *path, const char *body_json,
@@ -473,14 +473,14 @@ static int handle_openai_request(const char *method, const char *path, const cha
 {
     gw_openai_compat_t *compat = (gw_openai_compat_t *)user_data;
     if (!compat)
-        return AGENTRT_ERR_NULL_POINTER;
+        return AIRY_ERR_NULL_POINTER;
     return gw_openai_compat_handle_request(compat, method, path, body_json, response_json);
 }
 
 gw_proto_request_handler_t gw_openai_compat_get_handler(gw_openai_compat_t *compat)
 {
     if (!compat) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     return handle_openai_request;
 }

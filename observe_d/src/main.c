@@ -27,7 +27,7 @@
 #define OBSERVE_D_DEFAULT_PORT 8085
 #define OBSERVE_D_METRICS_PORT 9090
 #define OBSERVE_D_MAX_BUFFER 65536
-#define OBSERVE_D_DEFAULT_SOCKET AGENTRT_RUNTIME_DIR "/observe.sock"
+#define OBSERVE_D_DEFAULT_SOCKET AIRY_RUNTIME_DIR "/observe.sock"
 #define OBSERVE_D_MAX_METRICS 256
 #define OBSERVE_D_HTTP_BACKLOG 16
 
@@ -43,10 +43,10 @@ typedef struct {
 } observe_metric_t;
 
 typedef struct {
-    agentrt_socket_t server_fd;
-    agentrt_socket_t http_fd;
-    agentrt_mutex_t lock;
-    agentrt_thread_t http_thread;
+    airy_sock_t server_fd;
+    airy_sock_t http_fd;
+    airy_mtx_t lock;
+    airy_thread_t http_thread;
     atomic_int running;
     atomic_int http_running;
     atomic_int force_stop;
@@ -81,15 +81,15 @@ static observe_metric_t *observe_d_find_or_create_metric(observe_d_service_t *sv
     }
 
     if (svc->metric_count >= OBSERVE_D_MAX_METRICS) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_OVERFLOW, "limit exceeded");
+        AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
         }
 
     observe_metric_t *m = &svc->metrics[svc->metric_count];
-    m->name = AGENTRT_STRDUP(name);
-    m->help = AGENTRT_STRDUP(name);
+    m->name = AIRY_STRDUP(name);
+    m->help = AIRY_STRDUP(name);
     m->type = OBSERVE_METRIC_GAUGE;
     m->value = 0.0;
-    m->unit = AGENTRT_STRDUP("count");
+    m->unit = AIRY_STRDUP("count");
     m->updated_at = (uint64_t)time(NULL);
     svc->metric_count++;
     return m;
@@ -99,14 +99,14 @@ static int observe_d_record_metric(observe_d_service_t *svc, const char *name, d
                                    const char *unit, observe_metric_type_t type)
 {
     if (!svc || !name) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "null svc or name");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null svc or name");
     }
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     observe_metric_t *m = observe_d_find_or_create_metric(svc, name);
     if (!m) {
-        agentrt_mutex_unlock(&svc->lock);
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "metric slot exhausted");
+        airy_mtx_unlock(&svc->lock);
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "metric slot exhausted");
     }
 
     if (type == OBSERVE_METRIC_COUNTER)
@@ -117,21 +117,21 @@ static int observe_d_record_metric(observe_d_service_t *svc, const char *name, d
     m->type = type;
     m->updated_at = (uint64_t)time(NULL);
     if (unit) {
-        AGENTRT_FREE(m->unit);
-        m->unit = AGENTRT_STRDUP(unit);
+        AIRY_FREE(m->unit);
+        m->unit = AIRY_STRDUP(unit);
     }
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
     return 0;
 }
 
 static int observe_d_format_prometheus(observe_d_service_t *svc, char *buffer, size_t buffer_size)
 {
     if (!svc || !buffer || buffer_size < 128) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "null param or buffer too small");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null param or buffer too small");
     }
 
     int off = 0;
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
 
     for (size_t i = 0; i < svc->metric_count && off < (int)(buffer_size - 256); i++) {
         observe_metric_t *m = &svc->metrics[i];
@@ -150,17 +150,17 @@ static int observe_d_format_prometheus(observe_d_service_t *svc, char *buffer, s
             off += added;
     }
 
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
     return off;
 }
 
-static int observe_d_handle_http_request(observe_d_service_t *svc, agentrt_socket_t client_fd)
+static int observe_d_handle_http_request(observe_d_service_t *svc, airy_sock_t client_fd)
 {
     char buffer[OBSERVE_D_MAX_BUFFER];
-    ssize_t n = agentrt_socket_recv(client_fd, buffer, sizeof(buffer) - 1);
+    ssize_t n = airy_sock_recv(client_fd, buffer, sizeof(buffer) - 1);
     if (n <= 0) {
-        agentrt_socket_close(client_fd);
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "recv failed or connection closed");
+        airy_sock_close(client_fd);
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "recv failed or connection closed");
     }
     buffer[n] = '\0';
 
@@ -184,9 +184,9 @@ static int observe_d_handle_http_request(observe_d_service_t *svc, agentrt_socke
                                   "\r\n",
                                   metrics_len > 0 ? metrics_len : 0);
 
-        agentrt_socket_send(client_fd, header, (size_t)header_len);
+        airy_sock_send(client_fd, header, (size_t)header_len);
         if (metrics_len > 0)
-            agentrt_socket_send(client_fd, metrics_buf, (size_t)metrics_len);
+            airy_sock_send(client_fd, metrics_buf, (size_t)metrics_len);
     } else if (is_health) {
         uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
         char health_buf[512];
@@ -221,7 +221,7 @@ static int observe_d_handle_http_request(observe_d_service_t *svc, agentrt_socke
                           (unsigned long long)uptime, svc->metric_count),
             (unsigned long long)uptime, svc->metric_count);
 
-        agentrt_socket_send(client_fd, final_buf, (size_t)final_len);
+        airy_sock_send(client_fd, final_buf, (size_t)final_len);
     } else {
         const char *not_found = "HTTP/1.1 404 Not Found\r\n"
                                 "Content-Type: text/plain\r\n"
@@ -229,10 +229,10 @@ static int observe_d_handle_http_request(observe_d_service_t *svc, agentrt_socke
                                 "Connection: close\r\n"
                                 "\r\n"
                                 "Not Found";
-        agentrt_socket_send(client_fd, not_found, strlen(not_found));
+        airy_sock_send(client_fd, not_found, strlen(not_found));
     }
 
-    agentrt_socket_close(client_fd);
+    airy_sock_close(client_fd);
     return 0;
 }
 
@@ -248,13 +248,13 @@ static void *observe_d_http_loop(void *arg)
 #ifdef _WIN32
         return 1;
 #else
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
 #endif
     }
 
     while (svc->http_running) {
-        agentrt_socket_t client = agentrt_socket_accept(svc->http_fd, 1000);
-        if (client != AGENTRT_INVALID_SOCKET) {
+        airy_sock_t client = airy_sock_accept(svc->http_fd, 1000);
+        if (client != AIRY_INVALID_SOCKET) {
             observe_d_handle_http_request(svc, client);
         }
     }
@@ -262,46 +262,46 @@ static void *observe_d_http_loop(void *arg)
 #ifdef _WIN32
     return 0;
 #else
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 #endif
 }
 
 static int observe_d_init(observe_d_service_t *svc, int port, const char *sock)
 {
     if (!svc)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     __builtin_memset(svc, 0, sizeof(*svc));
     svc->tcp_port = port > 0 ? port : OBSERVE_D_DEFAULT_PORT;
     svc->metrics_port = OBSERVE_D_METRICS_PORT;
-    svc->socket_path = sock ? AGENTRT_STRDUP(sock) : AGENTRT_STRDUP(OBSERVE_D_DEFAULT_SOCKET);
+    svc->socket_path = sock ? AIRY_STRDUP(sock) : AIRY_STRDUP(OBSERVE_D_DEFAULT_SOCKET);
     svc->start_time = (uint64_t)time(NULL);
 
-    agentrt_mutex_init(&svc->lock);
-    agentrt_socket_init();
+    airy_mtx_init(&svc->lock);
+    airy_sock_init();
 
-    observe_d_record_metric(svc, "agentrt_observe_requests_total", 0.0, "count",
+    observe_d_record_metric(svc, "airy_observe_requests_total", 0.0, "count",
                             OBSERVE_METRIC_COUNTER);
-    observe_d_record_metric(svc, "agentrt_observe_errors_total", 0.0, "count",
+    observe_d_record_metric(svc, "airy_observe_errors_total", 0.0, "count",
                             OBSERVE_METRIC_COUNTER);
-    observe_d_record_metric(svc, "agentrt_observe_http_requests_total", 0.0, "count",
+    observe_d_record_metric(svc, "airy_observe_http_requests_total", 0.0, "count",
                             OBSERVE_METRIC_COUNTER);
-    observe_d_record_metric(svc, "agentrt_observe_metrics_count", 0.0, "count",
+    observe_d_record_metric(svc, "airy_observe_metrics_count", 0.0, "count",
                             OBSERVE_METRIC_GAUGE);
-    observe_d_record_metric(svc, "agentrt_observe_uptime_seconds", 0.0, "seconds",
+    observe_d_record_metric(svc, "airy_observe_uptime_seconds", 0.0, "seconds",
                             OBSERVE_METRIC_GAUGE);
 
     SVC_LOG_INFO("observe_d: init complete (prometheus_port=%d)", svc->metrics_port);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 static int observe_d_start_http_server(observe_d_service_t *svc)
 {
 #ifndef _WIN32
     svc->http_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (svc->http_fd == AGENTRT_INVALID_SOCKET) {
+    if (svc->http_fd == AIRY_INVALID_SOCKET) {
         SVC_LOG_ERROR("observe_d: failed to create HTTP socket");
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "failed to create HTTP socket");
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to create HTTP socket");
     }
 
     int reuse = 1;
@@ -315,20 +315,20 @@ static int observe_d_start_http_server(observe_d_service_t *svc)
 
     if (bind(svc->http_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         SVC_LOG_ERROR("observe_d: failed to bind HTTP port %d", svc->metrics_port);
-        agentrt_socket_close(svc->http_fd);
-        svc->http_fd = AGENTRT_INVALID_SOCKET;
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "failed to bind HTTP port");
+        airy_sock_close(svc->http_fd);
+        svc->http_fd = AIRY_INVALID_SOCKET;
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to bind HTTP port");
     }
 
     if (listen(svc->http_fd, OBSERVE_D_HTTP_BACKLOG) < 0) {
         SVC_LOG_ERROR("observe_d: failed to listen on HTTP port %d", svc->metrics_port);
-        agentrt_socket_close(svc->http_fd);
-        svc->http_fd = AGENTRT_INVALID_SOCKET;
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "failed to listen on HTTP port");
+        airy_sock_close(svc->http_fd);
+        svc->http_fd = AIRY_INVALID_SOCKET;
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to listen on HTTP port");
     }
 
     svc->http_running = 1;
-    agentrt_thread_create(&svc->http_thread, observe_d_http_loop, svc);
+    airy_thread_create(&svc->http_thread, observe_d_http_loop, svc);
 
     SVC_LOG_INFO("observe_d: prometheus metrics endpoint started on :%d/metrics",
                  svc->metrics_port);
@@ -343,13 +343,13 @@ static int observe_d_stop_http_server(observe_d_service_t *svc, int force)
 {
     svc->http_running = 0;
 
-    if (svc->http_fd != AGENTRT_INVALID_SOCKET) {
-        agentrt_socket_close(svc->http_fd);
-        svc->http_fd = AGENTRT_INVALID_SOCKET;
+    if (svc->http_fd != AIRY_INVALID_SOCKET) {
+        airy_sock_close(svc->http_fd);
+        svc->http_fd = AIRY_INVALID_SOCKET;
     }
 
     if (!force) {
-        agentrt_thread_join(svc->http_thread, NULL);
+        airy_thread_join(svc->http_thread, NULL);
     }
 
     SVC_LOG_INFO("observe_d: prometheus endpoint stopped (force=%d)", force);
@@ -359,20 +359,20 @@ static int observe_d_stop_http_server(observe_d_service_t *svc, int force)
 static int observe_d_start(observe_d_service_t *svc)
 {
     if (!svc) {
-        AGENTRT_ERROR(AGENTRT_EINVAL, "null svc");
+        AIRY_ERROR(AIRY_EINVAL, "null svc");
     }
 
 #ifndef _WIN32
-    svc->server_fd = agentrt_socket_create_unix_server(svc->socket_path);
+    svc->server_fd = airy_sock_create_unix_server(svc->socket_path);
     if (svc->server_fd < 0) {
         SVC_LOG_ERROR("observe_d: failed to create socket at %s", svc->socket_path);
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "failed to create unix socket");
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to create unix socket");
     }
 #else
-    svc->server_fd = agentrt_socket_create_tcp_server("127.0.0.1", (uint16_t)svc->tcp_port);
+    svc->server_fd = airy_sock_create_tcp_server("127.0.0.1", (uint16_t)svc->tcp_port);
     if (svc->server_fd < 0) {
         SVC_LOG_ERROR("observe_d: failed to create TCP server");
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "failed to create TCP server");
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to create TCP server");
     }
 #endif
 
@@ -382,25 +382,25 @@ static int observe_d_start(observe_d_service_t *svc)
     observe_d_start_http_server(svc);
 
     SVC_LOG_INFO("observe_d: service started");
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 static int observe_d_stop(observe_d_service_t *svc, int force)
 {
     if (!svc)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     svc->running = 0;
     if (force)
         svc->force_stop = 1;
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     observe_d_stop_http_server(svc, force);
 
-    if (svc->server_fd != AGENTRT_INVALID_SOCKET) {
-        agentrt_socket_close(svc->server_fd);
-        svc->server_fd = AGENTRT_INVALID_SOCKET;
+    if (svc->server_fd != AIRY_INVALID_SOCKET) {
+        airy_sock_close(svc->server_fd);
+        svc->server_fd = AIRY_INVALID_SOCKET;
     }
 
     if (force) {
@@ -410,33 +410,33 @@ static int observe_d_stop(observe_d_service_t *svc, int force)
     }
 
     SVC_LOG_INFO("observe_d: service stopped (force=%d)", force);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 static int observe_d_destroy(observe_d_service_t *svc)
 {
     if (!svc)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
-    if (svc->http_fd != AGENTRT_INVALID_SOCKET) {
-        agentrt_socket_close(svc->http_fd);
-        svc->http_fd = AGENTRT_INVALID_SOCKET;
+    if (svc->http_fd != AIRY_INVALID_SOCKET) {
+        airy_sock_close(svc->http_fd);
+        svc->http_fd = AIRY_INVALID_SOCKET;
     }
 
     for (size_t i = 0; i < svc->metric_count; i++) {
-        AGENTRT_FREE(svc->metrics[i].name);
-        AGENTRT_FREE(svc->metrics[i].help);
-        AGENTRT_FREE(svc->metrics[i].unit);
+        AIRY_FREE(svc->metrics[i].name);
+        AIRY_FREE(svc->metrics[i].help);
+        AIRY_FREE(svc->metrics[i].unit);
     }
-    if (svc->server_fd != AGENTRT_INVALID_SOCKET) {
-        agentrt_socket_close(svc->server_fd);
+    if (svc->server_fd != AIRY_INVALID_SOCKET) {
+        airy_sock_close(svc->server_fd);
     }
-    agentrt_socket_cleanup();
-    agentrt_mutex_destroy(&svc->lock);
-    AGENTRT_FREE(svc->socket_path);
+    airy_sock_cleanup();
+    airy_mtx_destroy(&svc->lock);
+    AIRY_FREE(svc->socket_path);
     __builtin_memset(svc, 0, sizeof(*svc));
     SVC_LOG_INFO("observe_d: service destroyed");
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 static int observe_d_healthcheck(observe_d_service_t *svc)
@@ -447,38 +447,38 @@ static int observe_d_healthcheck(observe_d_service_t *svc)
         return 0;
 
 #ifndef _WIN32
-    return (svc->http_fd != AGENTRT_INVALID_SOCKET && svc->http_running) ? 1 : 0;
+    return (svc->http_fd != AIRY_INVALID_SOCKET && svc->http_running) ? 1 : 0;
 #else
     return svc->running ? 1 : 0;
 #endif
 }
 
-static void observe_d_handle_request(observe_d_service_t *svc, agentrt_socket_t client_fd)
+static void observe_d_handle_request(observe_d_service_t *svc, airy_sock_t client_fd)
 {
     char buffer[OBSERVE_D_MAX_BUFFER];
-    ssize_t n = agentrt_socket_recv(client_fd, buffer, sizeof(buffer) - 1);
+    ssize_t n = airy_sock_recv(client_fd, buffer, sizeof(buffer) - 1);
     if (n <= 0) {
-        agentrt_socket_close(client_fd);
+        airy_sock_close(client_fd);
         return;
     }
     buffer[n] = '\0';
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     svc->observe_count++;
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
-    observe_d_record_metric(svc, "agentrt_observe_requests_total", 1.0, "count",
+    observe_d_record_metric(svc, "airy_observe_requests_total", 1.0, "count",
                             OBSERVE_METRIC_COUNTER);
 
     int healthy = observe_d_healthcheck(svc);
     uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
 
-    observe_d_record_metric(svc, "agentrt_observe_uptime_seconds", (double)uptime, "seconds",
+    observe_d_record_metric(svc, "airy_observe_uptime_seconds", (double)uptime, "seconds",
                             OBSERVE_METRIC_GAUGE);
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     size_t mcount = svc->metric_count;
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     char response[4096];
     snprintf(response, sizeof(response),
@@ -499,8 +499,8 @@ static void observe_d_handle_request(observe_d_service_t *svc, agentrt_socket_t 
              (unsigned long long)svc->http_request_count, (unsigned long long)uptime,
              healthy ? "true" : "false", svc->metrics_port);
 
-    agentrt_socket_send(client_fd, response, strlen(response));
-    agentrt_socket_close(client_fd);
+    airy_sock_send(client_fd, response, strlen(response));
+    airy_sock_close(client_fd);
 }
 
 int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
@@ -512,16 +512,16 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     signal(SIGPIPE, SIG_IGN);
 #endif
 
-    agentrt_log_init(NULL);
-    atexit(agentrt_log_shutdown);
+    airy_log_init(NULL);
+    atexit(airy_log_shutdown);
 
     /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("observe_d");
 
     if (observe_d_init(&g_service, OBSERVE_D_DEFAULT_PORT, OBSERVE_D_DEFAULT_SOCKET) !=
-        AGENTRT_SUCCESS)
+        AIRY_SUCCESS)
         return 1;
-    if (observe_d_start(&g_service) != AGENTRT_SUCCESS) {
+    if (observe_d_start(&g_service) != AIRY_SUCCESS) {
         observe_d_destroy(&g_service);
         return 1;
     }
@@ -532,8 +532,8 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
                                         0, IPC_BUS_PROTO_JSON_RPC);
 
     while (!g_shutdown && g_service.running) {
-        agentrt_socket_t client = agentrt_socket_accept(g_service.server_fd, 1000);
-        if (client != AGENTRT_INVALID_SOCKET) {
+        airy_sock_t client = airy_sock_accept(g_service.server_fd, 1000);
+        if (client != AIRY_INVALID_SOCKET) {
             observe_d_handle_request(&g_service, client);
         }
     }

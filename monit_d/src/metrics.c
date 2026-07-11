@@ -87,7 +87,7 @@ typedef struct {
     metric_series_t series[MAX_SERIES_PER_METRIC];
     size_t series_count;
     histogram_data_t histogram;
-    agentrt_mutex_t lock;
+    airy_mtx_t lock;
     int initialized;
 } metric_t;
 
@@ -96,7 +96,7 @@ typedef struct {
 typedef struct {
     metric_t metrics[MAX_METRICS];
     size_t metric_count;
-    agentrt_mutex_t global_lock;
+    airy_mtx_t global_lock;
     uint64_t export_interval_ms;
     uint64_t retention_seconds;
     int initialized;
@@ -116,7 +116,7 @@ static int find_metric_index(const char *name)
             return (int)i;
         }
     }
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 /**
@@ -148,7 +148,7 @@ static int find_series_index(metric_t *metric, const metric_label_t *labels, siz
         if (match)
             return (int)i;
     }
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 /**
@@ -157,35 +157,35 @@ static int find_series_index(metric_t *metric, const metric_label_t *labels, siz
 static int create_series(metric_t *metric, const metric_label_t *labels, size_t label_count)
 {
     if (metric->series_count >= MAX_SERIES_PER_METRIC) {
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
     }
 
     metric_series_t *series = &metric->series[metric->series_count];
     series->label_count = label_count;
 
     for (size_t i = 0; i < label_count; i++) {
-        series->labels[i].key = AGENTRT_STRDUP(labels[i].key);
+        series->labels[i].key = AIRY_STRDUP(labels[i].key);
         if (!series->labels[i].key) {
             /* 回滚已分配的标签 */
             for (size_t k = 0; k < i; k++) {
-                AGENTRT_FREE(series->labels[k].key);
-                AGENTRT_FREE(series->labels[k].value);
+                AIRY_FREE(series->labels[k].key);
+                AIRY_FREE(series->labels[k].value);
             }
-            return AGENTRT_ERR_OUT_OF_MEMORY;
+            return AIRY_ERR_OUT_OF_MEMORY;
         }
-        series->labels[i].value = AGENTRT_STRDUP(labels[i].value);
+        series->labels[i].value = AIRY_STRDUP(labels[i].value);
         if (!series->labels[i].value) {
-            AGENTRT_FREE(series->labels[i].key);
+            AIRY_FREE(series->labels[i].key);
             for (size_t k = 0; k < i; k++) {
-                AGENTRT_FREE(series->labels[k].key);
-                AGENTRT_FREE(series->labels[k].value);
+                AIRY_FREE(series->labels[k].key);
+                AIRY_FREE(series->labels[k].value);
             }
-            return AGENTRT_ERR_OUT_OF_MEMORY;
+            return AIRY_ERR_OUT_OF_MEMORY;
         }
     }
 
     series->value = 0.0;
-    series->timestamp = agentrt_time_ms();
+    series->timestamp = airy_time_ms();
     series->update_count = 0;
 
     metric->series_count++;
@@ -231,10 +231,10 @@ static void format_labels(char *buf, size_t buf_size, const metric_label_t *labe
 int metrics_init(const metrics_config_t *manager)
 {
     if (g_metrics.initialized) {
-        return AGENTRT_OK;
+        return AIRY_OK;
     }
 
-    agentrt_mutex_init(&g_metrics.global_lock);
+    airy_mtx_init(&g_metrics.global_lock);
 
     g_metrics.metric_count = 0;
     g_metrics.export_interval_ms =
@@ -243,11 +243,11 @@ int metrics_init(const metrics_config_t *manager)
 
     /* 初始化所有指标的互斥锁 */
     for (size_t i = 0; i < MAX_METRICS; i++) {
-        agentrt_mutex_init(&g_metrics.metrics[i].lock);
+        airy_mtx_init(&g_metrics.metrics[i].lock);
     }
 
     g_metrics.initialized = 1;
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 /**
@@ -259,41 +259,41 @@ void metrics_shutdown(void)
         return;
     }
 
-    agentrt_mutex_lock(&g_metrics.global_lock);
+    airy_mtx_lock(&g_metrics.global_lock);
 
     /* 释放所有指标 */
     for (size_t i = 0; i < g_metrics.metric_count; i++) {
         metric_t *metric = &g_metrics.metrics[i];
 
-        agentrt_mutex_lock(&metric->lock);
+        airy_mtx_lock(&metric->lock);
 
-        AGENTRT_FREE(metric->name);
-        AGENTRT_FREE(metric->description);
-        AGENTRT_FREE(metric->unit);
+        AIRY_FREE(metric->name);
+        AIRY_FREE(metric->description);
+        AIRY_FREE(metric->unit);
 
         /* 释放时间序列 */
         for (size_t j = 0; j < metric->series_count; j++) {
             metric_series_t *series = &metric->series[j];
             for (size_t k = 0; k < series->label_count; k++) {
-                AGENTRT_FREE(series->labels[k].key);
-                AGENTRT_FREE(series->labels[k].value);
+                AIRY_FREE(series->labels[k].key);
+                AIRY_FREE(series->labels[k].value);
             }
         }
 
         /* 释放直方图桶 */
         if (metric->histogram.buckets) {
-            AGENTRT_FREE(metric->histogram.buckets);
+            AIRY_FREE(metric->histogram.buckets);
         }
 
-        agentrt_mutex_unlock(&metric->lock);
-        agentrt_mutex_destroy(&metric->lock);
+        airy_mtx_unlock(&metric->lock);
+        airy_mtx_destroy(&metric->lock);
     }
 
     g_metrics.metric_count = 0;
     g_metrics.initialized = 0;
 
-    agentrt_mutex_unlock(&g_metrics.global_lock);
-    agentrt_mutex_destroy(&g_metrics.global_lock);
+    airy_mtx_unlock(&g_metrics.global_lock);
+    airy_mtx_destroy(&g_metrics.global_lock);
 }
 
 /**
@@ -303,46 +303,46 @@ int metrics_register(const char *name, const char *description, const char *unit
                      metric_type_t type, const double *histogram_buckets, size_t bucket_count)
 {
     if (!name) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "name is NULL");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "name is NULL");
     }
 
     if (!g_metrics.initialized) {
-        AGENTRT_ERROR(AGENTRT_ERR_STATE_ERROR, "Metrics system not initialized");
+        AIRY_ERROR(AIRY_ERR_STATE_ERROR, "Metrics system not initialized");
     }
 
-    agentrt_mutex_lock(&g_metrics.global_lock);
+    airy_mtx_lock(&g_metrics.global_lock);
 
     /* 检查是否已存在 */
     if (find_metric_index(name) >= 0) {
-        agentrt_mutex_unlock(&g_metrics.global_lock);
-        AGENTRT_ERROR(AGENTRT_ERR_ALREADY_EXISTS, "Metric already exists");
+        airy_mtx_unlock(&g_metrics.global_lock);
+        AIRY_ERROR(AIRY_ERR_ALREADY_EXISTS, "Metric already exists");
     }
 
     /* 检查容量 */
     if (g_metrics.metric_count >= MAX_METRICS) {
-        agentrt_mutex_unlock(&g_metrics.global_lock);
-        AGENTRT_ERROR(AGENTRT_ERR_OVERFLOW, "Too many metrics");
+        airy_mtx_unlock(&g_metrics.global_lock);
+        AIRY_ERROR(AIRY_ERR_OVERFLOW, "Too many metrics");
     }
 
     /* 创建指标 */
     metric_t *metric = &g_metrics.metrics[g_metrics.metric_count];
-    metric->name = AGENTRT_STRDUP(name);
+    metric->name = AIRY_STRDUP(name);
     if (!metric->name) {
-        agentrt_mutex_unlock(&g_metrics.global_lock);
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "Failed to duplicate metric name");
+        airy_mtx_unlock(&g_metrics.global_lock);
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "Failed to duplicate metric name");
     }
-    metric->description = description ? AGENTRT_STRDUP(description) : NULL;
+    metric->description = description ? AIRY_STRDUP(description) : NULL;
     if (description && !metric->description) {
-        AGENTRT_FREE(metric->name);
-        agentrt_mutex_unlock(&g_metrics.global_lock);
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "Failed to duplicate metric description");
+        AIRY_FREE(metric->name);
+        airy_mtx_unlock(&g_metrics.global_lock);
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "Failed to duplicate metric description");
     }
-    metric->unit = unit ? AGENTRT_STRDUP(unit) : NULL;
+    metric->unit = unit ? AIRY_STRDUP(unit) : NULL;
     if (unit && !metric->unit) {
-        AGENTRT_FREE(metric->description);
-        AGENTRT_FREE(metric->name);
-        agentrt_mutex_unlock(&g_metrics.global_lock);
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "Failed to duplicate metric unit");
+        AIRY_FREE(metric->description);
+        AIRY_FREE(metric->name);
+        airy_mtx_unlock(&g_metrics.global_lock);
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "Failed to duplicate metric unit");
     }
     metric->type = type;
     metric->series_count = 0;
@@ -351,7 +351,7 @@ int metrics_register(const char *name, const char *description, const char *unit
     /* 初始化直方图 */
     if (type == METRIC_TYPE_HISTOGRAM && histogram_buckets && bucket_count > 0) {
         metric->histogram.buckets =
-            (histogram_bucket_t *)AGENTRT_MALLOC(sizeof(histogram_bucket_t) * bucket_count);
+            (histogram_bucket_t *)AIRY_MALLOC(sizeof(histogram_bucket_t) * bucket_count);
         if (metric->histogram.buckets) {
             for (size_t i = 0; i < bucket_count; i++) {
                 metric->histogram.buckets[i].boundary = histogram_buckets[i];
@@ -365,8 +365,8 @@ int metrics_register(const char *name, const char *description, const char *unit
 
     g_metrics.metric_count++;
 
-    agentrt_mutex_unlock(&g_metrics.global_lock);
-    return AGENTRT_OK;
+    airy_mtx_unlock(&g_metrics.global_lock);
+    return AIRY_OK;
 }
 
 /**
@@ -375,20 +375,20 @@ int metrics_register(const char *name, const char *description, const char *unit
 int metrics_counter_inc(const char *name, const metric_label_t *labels, size_t label_count)
 {
     if (!name || !g_metrics.initialized) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&g_metrics.global_lock);
+    airy_mtx_lock(&g_metrics.global_lock);
 
     int idx = find_metric_index(name);
     if (idx < 0) {
-        agentrt_mutex_unlock(&g_metrics.global_lock);
-        return AGENTRT_ERR_NOT_FOUND;
+        airy_mtx_unlock(&g_metrics.global_lock);
+        return AIRY_ERR_NOT_FOUND;
     }
 
     metric_t *metric = &g_metrics.metrics[idx];
-    agentrt_mutex_lock(&metric->lock);
-    agentrt_mutex_unlock(&g_metrics.global_lock);
+    airy_mtx_lock(&metric->lock);
+    airy_mtx_unlock(&g_metrics.global_lock);
 
     /* 查找或创建时间序列 */
     int series_idx = find_series_index(metric, labels, label_count);
@@ -398,12 +398,12 @@ int metrics_counter_inc(const char *name, const metric_label_t *labels, size_t l
 
     if (series_idx >= 0) {
         metric->series[series_idx].value += 1.0;
-        metric->series[series_idx].timestamp = agentrt_time_ms();
+        metric->series[series_idx].timestamp = airy_time_ms();
         metric->series[series_idx].update_count++;
     }
 
-    agentrt_mutex_unlock(&metric->lock);
-    return AGENTRT_OK;
+    airy_mtx_unlock(&metric->lock);
+    return AIRY_OK;
 }
 
 /**
@@ -413,20 +413,20 @@ int metrics_counter_add(const char *name, double value, const metric_label_t *la
                         size_t label_count)
 {
     if (!name || value < 0 || !g_metrics.initialized) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&g_metrics.global_lock);
+    airy_mtx_lock(&g_metrics.global_lock);
 
     int idx = find_metric_index(name);
     if (idx < 0) {
-        agentrt_mutex_unlock(&g_metrics.global_lock);
-        return AGENTRT_ERR_NOT_FOUND;
+        airy_mtx_unlock(&g_metrics.global_lock);
+        return AIRY_ERR_NOT_FOUND;
     }
 
     metric_t *metric = &g_metrics.metrics[idx];
-    agentrt_mutex_lock(&metric->lock);
-    agentrt_mutex_unlock(&g_metrics.global_lock);
+    airy_mtx_lock(&metric->lock);
+    airy_mtx_unlock(&g_metrics.global_lock);
 
     int series_idx = find_series_index(metric, labels, label_count);
     if (series_idx < 0) {
@@ -435,12 +435,12 @@ int metrics_counter_add(const char *name, double value, const metric_label_t *la
 
     if (series_idx >= 0) {
         metric->series[series_idx].value += value;
-        metric->series[series_idx].timestamp = agentrt_time_ms();
+        metric->series[series_idx].timestamp = airy_time_ms();
         metric->series[series_idx].update_count++;
     }
 
-    agentrt_mutex_unlock(&metric->lock);
-    return AGENTRT_OK;
+    airy_mtx_unlock(&metric->lock);
+    return AIRY_OK;
 }
 
 /**
@@ -450,20 +450,20 @@ int metrics_gauge_set(const char *name, double value, const metric_label_t *labe
                       size_t label_count)
 {
     if (!name || !g_metrics.initialized) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&g_metrics.global_lock);
+    airy_mtx_lock(&g_metrics.global_lock);
 
     int idx = find_metric_index(name);
     if (idx < 0) {
-        agentrt_mutex_unlock(&g_metrics.global_lock);
-        return AGENTRT_ERR_NOT_FOUND;
+        airy_mtx_unlock(&g_metrics.global_lock);
+        return AIRY_ERR_NOT_FOUND;
     }
 
     metric_t *metric = &g_metrics.metrics[idx];
-    agentrt_mutex_lock(&metric->lock);
-    agentrt_mutex_unlock(&g_metrics.global_lock);
+    airy_mtx_lock(&metric->lock);
+    airy_mtx_unlock(&g_metrics.global_lock);
 
     int series_idx = find_series_index(metric, labels, label_count);
     if (series_idx < 0) {
@@ -472,12 +472,12 @@ int metrics_gauge_set(const char *name, double value, const metric_label_t *labe
 
     if (series_idx >= 0) {
         metric->series[series_idx].value = value;
-        metric->series[series_idx].timestamp = agentrt_time_ms();
+        metric->series[series_idx].timestamp = airy_time_ms();
         metric->series[series_idx].update_count++;
     }
 
-    agentrt_mutex_unlock(&metric->lock);
-    return AGENTRT_OK;
+    airy_mtx_unlock(&metric->lock);
+    return AIRY_OK;
 }
 
 /**
@@ -487,20 +487,20 @@ int metrics_histogram_observe(const char *name, double value, const metric_label
                               size_t label_count)
 {
     if (!name || !g_metrics.initialized) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&g_metrics.global_lock);
+    airy_mtx_lock(&g_metrics.global_lock);
 
     int idx = find_metric_index(name);
     if (idx < 0) {
-        agentrt_mutex_unlock(&g_metrics.global_lock);
-        return AGENTRT_ERR_NOT_FOUND;
+        airy_mtx_unlock(&g_metrics.global_lock);
+        return AIRY_ERR_NOT_FOUND;
     }
 
     metric_t *metric = &g_metrics.metrics[idx];
-    agentrt_mutex_lock(&metric->lock);
-    agentrt_mutex_unlock(&g_metrics.global_lock);
+    airy_mtx_lock(&metric->lock);
+    airy_mtx_unlock(&g_metrics.global_lock);
 
     /* 更新直方图桶 */
     for (size_t i = 0; i < metric->histogram.bucket_count; i++) {
@@ -520,12 +520,12 @@ int metrics_histogram_observe(const char *name, double value, const metric_label
 
     if (series_idx >= 0) {
         metric->series[series_idx].value = value;
-        metric->series[series_idx].timestamp = agentrt_time_ms();
+        metric->series[series_idx].timestamp = airy_time_ms();
         metric->series[series_idx].update_count++;
     }
 
-    agentrt_mutex_unlock(&metric->lock);
-    return AGENTRT_OK;
+    airy_mtx_unlock(&metric->lock);
+    return AIRY_OK;
 }
 
 /**
@@ -534,22 +534,22 @@ int metrics_histogram_observe(const char *name, double value, const metric_label
 char *metrics_export_prometheus(void)
 {
     if (!g_metrics.initialized) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     size_t buf_size = 64 * 1024; /* 64KB */
-    char *buf = (char *)AGENTRT_MALLOC(buf_size);
+    char *buf = (char *)AIRY_MALLOC(buf_size);
     if (!buf) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null buffer");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null buffer");
     }
 
     size_t pos = 0;
 
-    agentrt_mutex_lock(&g_metrics.global_lock);
+    airy_mtx_lock(&g_metrics.global_lock);
 
     for (size_t i = 0; i < g_metrics.metric_count && pos < buf_size - 1024; i++) {
         metric_t *metric = &g_metrics.metrics[i];
-        agentrt_mutex_lock(&metric->lock);
+        airy_mtx_lock(&metric->lock);
 
         /* 写入 HELP 注释 */
         if (metric->description) {
@@ -606,10 +606,10 @@ char *metrics_export_prometheus(void)
 
         pos += snprintf(buf + pos, buf_size - pos, "\n");
 
-        agentrt_mutex_unlock(&metric->lock);
+        airy_mtx_unlock(&metric->lock);
     }
 
-    agentrt_mutex_unlock(&g_metrics.global_lock);
+    airy_mtx_unlock(&g_metrics.global_lock);
 
     return buf;
 }
@@ -621,31 +621,31 @@ int metrics_get_value(const char *name, const metric_label_t *labels, size_t lab
                       double *value)
 {
     if (!name || !value || !g_metrics.initialized) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&g_metrics.global_lock);
+    airy_mtx_lock(&g_metrics.global_lock);
 
     int idx = find_metric_index(name);
     if (idx < 0) {
-        agentrt_mutex_unlock(&g_metrics.global_lock);
-        return AGENTRT_ERR_NOT_FOUND;
+        airy_mtx_unlock(&g_metrics.global_lock);
+        return AIRY_ERR_NOT_FOUND;
     }
 
     metric_t *metric = &g_metrics.metrics[idx];
-    agentrt_mutex_lock(&metric->lock);
-    agentrt_mutex_unlock(&g_metrics.global_lock);
+    airy_mtx_lock(&metric->lock);
+    airy_mtx_unlock(&g_metrics.global_lock);
 
     int series_idx = find_series_index(metric, labels, label_count);
     if (series_idx < 0) {
-        agentrt_mutex_unlock(&metric->lock);
-        return AGENTRT_ERR_NOT_FOUND;
+        airy_mtx_unlock(&metric->lock);
+        return AIRY_ERR_NOT_FOUND;
     }
 
     *value = metric->series[series_idx].value;
 
-    agentrt_mutex_unlock(&metric->lock);
-    return AGENTRT_OK;
+    airy_mtx_unlock(&metric->lock);
+    return AIRY_OK;
 }
 
 /**
@@ -665,20 +665,20 @@ size_t metrics_get_series_count(const char *name)
         return 0;
     }
 
-    agentrt_mutex_lock(&g_metrics.global_lock);
+    airy_mtx_lock(&g_metrics.global_lock);
 
     int idx = find_metric_index(name);
     if (idx < 0) {
-        agentrt_mutex_unlock(&g_metrics.global_lock);
+        airy_mtx_unlock(&g_metrics.global_lock);
         return 0;
     }
 
     metric_t *metric = &g_metrics.metrics[idx];
-    agentrt_mutex_lock(&metric->lock);
-    agentrt_mutex_unlock(&g_metrics.global_lock);
+    airy_mtx_lock(&metric->lock);
+    airy_mtx_unlock(&g_metrics.global_lock);
 
     size_t count = metric->series_count;
 
-    agentrt_mutex_unlock(&metric->lock);
+    airy_mtx_unlock(&metric->lock);
     return count;
 }

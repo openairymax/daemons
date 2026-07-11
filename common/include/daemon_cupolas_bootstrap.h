@@ -9,7 +9,7 @@
  * 避免在 12 个 main.c 中重复代码。
  *
  * 调用契约：
- *   - main() 中 agentrt_log_init() 之后、socket/service 创建之前调用 daemon_cupolas_init()
+ *   - main() 中 airy_log_init() 之后、socket/service 创建之前调用 daemon_cupolas_init()
  *   - main() 退出前调用 daemon_cupolas_cleanup()
  *   - init 失败时已自动清理，无需再调 cleanup
  *
@@ -21,10 +21,10 @@
  *   - 重复调用 init 是幂等的（cupolas_init 内部有守卫）
  */
 
-#ifndef AGENTRT_DAEMON_CUPOLAS_BOOTSTRAP_H
-#define AGENTRT_DAEMON_CUPOLAS_BOOTSTRAP_H
+#ifndef AIRY_RT_DAEMON_CUPOLAS_BOOTSTRAP_H
+#define AIRY_RT_DAEMON_CUPOLAS_BOOTSTRAP_H
 
-#include "error.h" /* agentrt_error_t */
+#include "error.h" /* airy_err_t */
 
 #ifdef __cplusplus
 extern "C"
@@ -34,15 +34,15 @@ extern "C"
     /**
      * @brief 初始化 cupolas 安全穹顶（统一引导）
      *
-     * 在 daemon main() 中 agentrt_log_init() 之后调用。
+     * 在 daemon main() 中 airy_log_init() 之后调用。
      * 初始化 permission_engine、sanitizer、audit_logger 三大子模块。
      *
      * @param daemon_name daemon 名称（如 "tool_d"、"llm_d"），用于审计日志标识
-     * @return AGENTRT_SUCCESS 成功；错误码失败（FATAL 日志已记录）
+     * @return AIRY_SUCCESS 成功；错误码失败（FATAL 日志已记录）
      *
      * @ownership daemon_name: BORROW (调用方保留所有权)
      */
-    agentrt_error_t daemon_cupolas_init(const char *daemon_name);
+    airy_err_t daemon_cupolas_init(const char *daemon_name);
 
     /**
      * @brief 清理 cupolas 安全穹顶
@@ -56,4 +56,4 @@ extern "C"
 }
 #endif
 
-#endif /* AGENTRT_DAEMON_CUPOLAS_BOOTSTRAP_H */
+#endif /* AIRY_RT_DAEMON_CUPOLAS_BOOTSTRAP_H */

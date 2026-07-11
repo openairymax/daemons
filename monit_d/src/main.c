@@ -20,8 +20,8 @@
 
 /* ==================== 配置常量 ==================== */
 
-#define DEFAULT_SOCKET_PATH_UNIX AGENTRT_RUNTIME_DIR "/monit.sock"
-#define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\agentrt_monit"
+#define DEFAULT_SOCKET_PATH_UNIX AIRY_RUNTIME_DIR "/monit.sock"
+#define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_monit"
 #define DEFAULT_TCP_PORT 9090
 #define MAX_BUFFER 65536
 
@@ -33,55 +33,55 @@ DAEMON_DECLARE_COMMON(monit_d, monitor, DEFAULT_SOCKET_PATH_UNIX,
 
 static monitor_service_t *g_service = NULL;
 
-/* ==================== 错误码定义（统一使用 AGENTRT_ERR_*） ==================== */
-#define MONIT_ERR_INVALID_PARAM AGENTRT_ERR_INVALID_PARAM
-#define MONIT_ERR_OUT_OF_MEMORY AGENTRT_ERR_OUT_OF_MEMORY
-#define MONIT_ERR_NOT_FOUND AGENTRT_ERR_NOT_FOUND
-#define MONIT_ERR_INVALID_METRIC (AGENTRT_ERR_DAEMON_BASE + 0x10)
-#define MONIT_ERR_ALERT_FAILED (AGENTRT_ERR_DAEMON_BASE + 0x11)
+/* ==================== 错误码定义（统一使用 AIRY_ERR_*） ==================== */
+#define MONIT_ERR_INVALID_PARAM AIRY_ERR_INVALID_PARAM
+#define MONIT_ERR_OUT_OF_MEMORY AIRY_ERR_OUT_OF_MEMORY
+#define MONIT_ERR_NOT_FOUND AIRY_ERR_NOT_FOUND
+#define MONIT_ERR_INVALID_METRIC (AIRY_ERR_DAEMON_BASE + 0x10)
+#define MONIT_ERR_ALERT_FAILED (AIRY_ERR_DAEMON_BASE + 0x11)
 
 /* ==================== 方法处理器包装函数 ==================== */
 
-static void handle_record_metric(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_get_metrics(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_trigger_alert(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_get_alerts(int id, agentrt_socket_t client_fd);
-static void handle_health_check(cJSON *params, int id, agentrt_socket_t client_fd);
-static void handle_generate_report(int id, agentrt_socket_t client_fd);
-static void handle_client(agentrt_socket_t client_fd);
+static void handle_record_metric(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_get_metrics(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_trigger_alert(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_get_alerts(int id, airy_sock_t client_fd);
+static void handle_health_check(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_generate_report(int id, airy_sock_t client_fd);
+static void handle_client(airy_sock_t client_fd);
 
 static void on_record_metric_method(cJSON *params, int id, void *user_data)
 {
-    handle_record_metric(params, id, *(agentrt_socket_t *)user_data);
+    handle_record_metric(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_get_metrics_method(cJSON *params, int id, void *user_data)
 {
-    handle_get_metrics(params, id, *(agentrt_socket_t *)user_data);
+    handle_get_metrics(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_trigger_alert_method(cJSON *params, int id, void *user_data)
 {
-    handle_trigger_alert(params, id, *(agentrt_socket_t *)user_data);
+    handle_trigger_alert(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_get_alerts_method(cJSON *params, int id, void *user_data)
 {
-    handle_get_alerts(id, *(agentrt_socket_t *)user_data);
+    handle_get_alerts(id, *(airy_sock_t *)user_data);
 }
 
 static void on_health_check_method(cJSON *params, int id, void *user_data)
 {
-    handle_health_check(params, id, *(agentrt_socket_t *)user_data);
+    handle_health_check(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_generate_report_method(cJSON *params, int id, void *user_data)
 {
-    handle_generate_report(id, *(agentrt_socket_t *)user_data);
+    handle_generate_report(id, *(airy_sock_t *)user_data);
 }
 
 /* monit 自定义 on_client：调用本文件 handle_client（含 Prometheus HTTP 处理） */
-static int monit_on_client(void *service_ctx, agentrt_socket_t client_fd)
+static int monit_on_client(void *service_ctx, airy_sock_t client_fd)
 {
     (void)service_ctx;
     handle_client(client_fd);
@@ -89,7 +89,7 @@ static int monit_on_client(void *service_ctx, agentrt_socket_t client_fd)
 }
 
 /* C-L10: 周期性指标上报定时器回调 */
-static void monit_on_metrics_timer(agentrt_event_loop_t *loop, uint64_t timer_id,
+static void monit_on_metrics_timer(airy_event_loop_t *loop, uint64_t timer_id,
                                    void *user_data)
 {
     (void)loop;
@@ -104,8 +104,8 @@ static void monit_on_metrics_timer(agentrt_event_loop_t *loop, uint64_t timer_id
                  (unsigned long long)scrape_errors);
 
     /* C-L10: 更新 scrape 指标到 Prometheus */
-    prometheus_gauge_set("agentrt_monit_scrape_count", (double)scrape_count);
-    prometheus_gauge_set("agentrt_monit_scrape_errors", (double)scrape_errors);
+    prometheus_gauge_set("airy_monit_scrape_count", (double)scrape_count);
+    prometheus_gauge_set("airy_monit_scrape_errors", (double)scrape_errors);
 
     /* C-L10: 上报 IPC Bus 路由统计（如果有连接） */
     if (g_bipc_monit_d) {
@@ -133,7 +133,7 @@ static void monit_on_metrics_timer(agentrt_event_loop_t *loop, uint64_t timer_id
 
 /* ==================== 请求处理方法 ==================== */
 
-static void handle_record_metric(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_record_metric(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *metric_json = jsonrpc_get_object_param(params, "metric");
     if (!metric_json) {
@@ -148,7 +148,7 @@ static void handle_record_metric(cJSON *params, int id, agentrt_socket_t client_
         return;
     }
 
-    metric.name = AGENTRT_STRDUP(mname);
+    metric.name = AIRY_STRDUP(mname);
     metric.description = (char *)get_string_field(metric_json, "description", NULL);
     metric.type = (metric_type_t)get_int_field(metric_json, "type", 0);
     metric.value = get_double_field(metric_json, "value", 0.0);
@@ -157,9 +157,9 @@ static void handle_record_metric(cJSON *params, int id, agentrt_socket_t client_
 
     int ret = monitor_service_record_metric(g_service, &metric);
 
-    AGENTRT_FREE((void *)metric.name);
+    AIRY_FREE((void *)metric.name);
 
-    if (ret != AGENTRT_SUCCESS) {
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Record metric failed", id);
         SVC_LOG_ERROR("Failed to record metric: %s (error=%d)", mname, ret);
     } else {
@@ -171,7 +171,7 @@ static void handle_record_metric(cJSON *params, int id, agentrt_socket_t client_
     }
 }
 
-static void handle_get_metrics(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_get_metrics(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *filter = get_string_field(params, "metric_name", NULL);
 
@@ -179,7 +179,7 @@ static void handle_get_metrics(cJSON *params, int id, agentrt_socket_t client_fd
     size_t count = 0;
     int ret = monitor_service_get_metrics(g_service, filter, &metrics, &count);
 
-    if (ret != AGENTRT_SUCCESS) {
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Get metrics failed", id);
         return;
     }
@@ -196,12 +196,12 @@ static void handle_get_metrics(cJSON *params, int id, agentrt_socket_t client_fd
         cJSON_AddItemToArray(arr, m);
     }
 
-    AGENTRT_FREE(metrics);
+    AIRY_FREE(metrics);
 
     JSONRPC_SEND_SUCCESS(client_fd, arr, id);
 }
 
-static void handle_trigger_alert(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_trigger_alert(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *alert_json = jsonrpc_get_object_param(params, "alert");
     if (!alert_json) {
@@ -222,7 +222,7 @@ static void handle_trigger_alert(cJSON *params, int id, agentrt_socket_t client_
     int ret = monitor_service_trigger_alert(g_service, &alert);
     const char *alert_id = alert.alert_id ? alert.alert_id : "unknown";
 
-    if (ret != AGENTRT_SUCCESS) {
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Trigger alert failed", id);
         SVC_LOG_ERROR("Failed to trigger alert: %s (error=%d)", alert_id, ret);
     } else {
@@ -235,13 +235,13 @@ static void handle_trigger_alert(cJSON *params, int id, agentrt_socket_t client_
     }
 }
 
-static void handle_get_alerts(int id, agentrt_socket_t client_fd)
+static void handle_get_alerts(int id, airy_sock_t client_fd)
 {
     alert_info_t **alerts = NULL;
     size_t count = 0;
     int ret = monitor_service_get_alerts(g_service, &alerts, &count);
 
-    if (ret != AGENTRT_SUCCESS) {
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Get alerts failed", id);
         return;
     }
@@ -261,19 +261,19 @@ static void handle_get_alerts(int id, agentrt_socket_t client_fd)
         cJSON_AddItemToArray(arr, a);
     }
 
-    AGENTRT_FREE(alerts);
+    AIRY_FREE(alerts);
 
     JSONRPC_SEND_SUCCESS(client_fd, arr, id);
 }
 
-static void handle_health_check(cJSON *params, int id, agentrt_socket_t client_fd)
+static void handle_health_check(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *service_name = get_string_field(params, "service_name", "unknown");
 
     health_check_result_t *result = NULL;
     int ret = monitor_service_health_check(g_service, service_name, &result);
 
-    if (ret != AGENTRT_SUCCESS || !result) {
+    if (ret != AIRY_SUCCESS || !result) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Health check failed", id);
         return;
     }
@@ -287,17 +287,17 @@ static void handle_health_check(cJSON *params, int id, agentrt_socket_t client_f
 
     JSONRPC_SEND_SUCCESS(client_fd, res_obj, id);
 
-    AGENTRT_FREE(result->service_name);
-    AGENTRT_FREE(result->status_message);
-    AGENTRT_FREE(result);
+    AIRY_FREE(result->service_name);
+    AIRY_FREE(result->status_message);
+    AIRY_FREE(result);
 }
 
-static void handle_generate_report(int id, agentrt_socket_t client_fd)
+static void handle_generate_report(int id, airy_sock_t client_fd)
 {
     char *report = NULL;
     int ret = monitor_service_generate_report(g_service, &report);
 
-    if (ret != AGENTRT_SUCCESS || !report) {
+    if (ret != AIRY_SUCCESS || !report) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Generate report failed", id);
         return;
     }
@@ -305,27 +305,27 @@ static void handle_generate_report(int id, agentrt_socket_t client_fd)
     cJSON *result = cJSON_CreateObject();
     cJSON_AddStringToObject(result, "report", report);
     cJSON_AddNumberToObject(result, "generated_at", (double)(uint64_t)time(NULL) * 1000);
-    AGENTRT_FREE(report);
+    AIRY_FREE(report);
 
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
 /* ==================== 客户端连接处理（含 Prometheus HTTP） ==================== */
 
-static void handle_client(agentrt_socket_t client_fd)
+static void handle_client(airy_sock_t client_fd)
 {
     char buffer[MAX_BUFFER];
-    ssize_t n = agentrt_socket_recv(client_fd, buffer, sizeof(buffer) - 1);
+    ssize_t n = airy_sock_recv(client_fd, buffer, sizeof(buffer) - 1);
 
     if (n <= 0) {
-        agentrt_socket_close(client_fd);
+        airy_sock_close(client_fd);
         return;
     }
     buffer[n] = '\0';
 
     if ((size_t)n >= sizeof(buffer) - 1) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Request too large", -1);
-        agentrt_socket_close(client_fd);
+        airy_sock_close(client_fd);
         return;
     }
 
@@ -334,16 +334,16 @@ static void handle_client(agentrt_socket_t client_fd)
     size_t http_response_len = 0;
     if (prometheus_exporter_handle_http(buffer, (size_t)n, &http_response,
                                         &http_response_len) == 0) {
-        agentrt_socket_send(client_fd, http_response, http_response_len);
-        AGENTRT_FREE(http_response);
-        agentrt_socket_close(client_fd);
+        airy_sock_send(client_fd, http_response, http_response_len);
+        AIRY_FREE(http_response);
+        airy_sock_close(client_fd);
         return;
     }
 
     /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
     CJSON_PARSE_GUARD(req, buffer, {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR, "Parse error: invalid JSON", -1);
-        agentrt_socket_close(client_fd);
+        airy_sock_close(client_fd);
         return;
     });
 
@@ -356,7 +356,7 @@ static void handle_client(agentrt_socket_t client_fd)
         !cJSON_IsString(method) || !id) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid Request", -1);
         /* req 由 CJSON_AUTO_FREE 自动释放 */
-        agentrt_socket_close(client_fd);
+        airy_sock_close(client_fd);
         return;
     }
 
@@ -367,7 +367,7 @@ static void handle_client(agentrt_socket_t client_fd)
     method_dispatcher_dispatch(g_dispatcher_monit_d, req, jsonrpc_build_error, &client_fd);
 
     /* req 由 CJSON_AUTO_FREE 自动释放 */
-    agentrt_socket_close(client_fd);
+    airy_sock_close(client_fd);
 }
 
 /* ==================== 销毁服务 ==================== */
@@ -393,8 +393,8 @@ int main(int argc, char **argv)
     if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
 
     /* 初始化平台层 */
-    agentrt_socket_init();
-    agentrt_mutex_init(&g_running_lock_monit_d);
+    airy_sock_init();
+    airy_mtx_init(&g_running_lock_monit_d);
 
     /* 设置信号处理 */
 #ifdef _WIN32
@@ -403,7 +403,7 @@ int main(int argc, char **argv)
     DAEMON_SETUP_SIGNALS(monit_d);
 #endif
 
-    agentrt_log_init(NULL);
+    airy_log_init(NULL);
     atexit(log_cleanup);
 
     /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
@@ -423,10 +423,10 @@ int main(int argc, char **argv)
 
     /* 创建监控服务 */
     int ret = monitor_service_create(&config, &g_service);
-    if (ret != AGENTRT_SUCCESS || !g_service) {
+    if (ret != AIRY_SUCCESS || !g_service) {
         SVC_LOG_ERROR("Failed to create monitor service (error=%d)", ret);
-        agentrt_mutex_destroy(&g_running_lock_monit_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_monit_d);
+        airy_sock_cleanup();
         return 1;
     }
 
@@ -443,13 +443,13 @@ int main(int argc, char **argv)
     }
 
     /* 创建服务器 Socket（TCP/Unix/NamedPipe 统一封装） */
-    agentrt_socket_t server_fd = daemon_create_server_socket(
+    airy_sock_t server_fd = daemon_create_server_socket(
         use_tcp, DEFAULT_TCP_PORT, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN);
     if (server_fd < 0) {
         SVC_LOG_ERROR("Failed to create server socket");
         destroy_service();
-        agentrt_mutex_destroy(&g_running_lock_monit_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_monit_d);
+        airy_sock_cleanup();
         return 1;
     }
     SVC_LOG_INFO(use_tcp ? "Listening on TCP port %d" : "Listening on Unix socket",
@@ -471,12 +471,12 @@ int main(int argc, char **argv)
                                    use_tcp ? DEFAULT_TCP_PORT : 0, "monitor,core", use_tcp,
                                    &ev_config, &g_event_driver_monit_d, &g_bsd_monit_d,
                                    &g_bipc_monit_d);
-    if (ret != AGENTRT_SUCCESS || !g_event_driver_monit_d) {
+    if (ret != AIRY_SUCCESS || !g_event_driver_monit_d) {
         SVC_LOG_ERROR("Failed to create event driver");
-        agentrt_socket_close(server_fd);
+        airy_sock_close(server_fd);
         destroy_service();
-        agentrt_mutex_destroy(&g_running_lock_monit_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_monit_d);
+        airy_sock_cleanup();
         return 1;
     }
 
@@ -497,10 +497,10 @@ int main(int argc, char **argv)
     if (daemon_event_driver_add_server_fd(g_event_driver_monit_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
         daemon_event_driver_destroy(g_event_driver_monit_d);
-        agentrt_socket_close(server_fd);
+        airy_sock_close(server_fd);
         destroy_service();
-        agentrt_mutex_destroy(&g_running_lock_monit_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_monit_d);
+        airy_sock_cleanup();
         return 1;
     }
 

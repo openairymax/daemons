@@ -8,9 +8,9 @@
  * 本文件仅作为向后兼容的重导出层。
  */
 
-#ifndef AGENTRT_DAEMON_COMMON_REFCOUNT_H
-#define AGENTRT_DAEMON_COMMON_REFCOUNT_H
+#ifndef AIRY_RT_DAEMON_COMMON_REFCOUNT_H
+#define AIRY_RT_DAEMON_COMMON_REFCOUNT_H
 
 #include "../../../commons/utils/memory/include/refcount.h"
 
-#endif /* AGENTRT_DAEMON_COMMON_REFCOUNT_H */
+#endif /* AIRY_RT_DAEMON_COMMON_REFCOUNT_H */

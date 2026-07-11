@@ -34,7 +34,7 @@ typedef struct cache_entry {
 
 typedef struct cache_bucket {
     cache_entry_t *head;
-    agentrt_mutex_t lock;
+    airy_mtx_t lock;
 } cache_bucket_t;
 
 struct tool_cache {
@@ -44,7 +44,7 @@ struct tool_cache {
     size_t capacity;
     size_t size;
     int ttl_sec;
-    agentrt_mutex_t lru_lock;
+    airy_mtx_t lru_lock;
 };
 
 static unsigned int hash_key(const char *key)
@@ -59,7 +59,7 @@ static cache_entry_t *entry_create(const char *key, const char *value)
 {
     cache_entry_t *e = memory_safe_alloc(sizeof(cache_entry_t));
     if (!e) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     e->key = memory_safe_strdup(key);
     e->value = memory_safe_strdup(value);
@@ -67,7 +67,7 @@ static cache_entry_t *entry_create(const char *key, const char *value)
         memory_safe_free(e->key);
         memory_safe_free(e->value);
         memory_safe_free(e);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     e->timestamp = time(NULL);
     e->prev = e->next = e->hnext = NULL;
@@ -111,15 +111,15 @@ static void lru_move_to_head(tool_cache_t *cache, cache_entry_t *e)
 
 static void evict_lru(tool_cache_t *cache)
 {
-    agentrt_mutex_lock(&cache->lru_lock);
+    airy_mtx_lock(&cache->lru_lock);
     if (!cache->lru_tail) {
-        agentrt_mutex_unlock(&cache->lru_lock);
+        airy_mtx_unlock(&cache->lru_lock);
         return;
     }
     cache_entry_t *victim = cache->lru_tail;
     unsigned int idx = hash_key(victim->key);
 
-    agentrt_mutex_lock(&cache->buckets[idx].lock);
+    airy_mtx_lock(&cache->buckets[idx].lock);
     cache_entry_t **p = &cache->buckets[idx].head;
     while (*p) {
         if (*p == victim) {
@@ -128,25 +128,25 @@ static void evict_lru(tool_cache_t *cache)
         }
         p = &(*p)->hnext;
     }
-    agentrt_mutex_unlock(&cache->buckets[idx].lock);
+    airy_mtx_unlock(&cache->buckets[idx].lock);
 
     lru_remove(cache, victim);
     entry_memory_safe_free(victim);
     cache->size--;
-    agentrt_mutex_unlock(&cache->lru_lock);
+    airy_mtx_unlock(&cache->lru_lock);
 }
 
 tool_cache_t *tool_cache_create(size_t capacity, int ttl_sec)
 {
-    tool_cache_t *cache = AGENTRT_CALLOC(1, sizeof(tool_cache_t));
+    tool_cache_t *cache = AIRY_CALLOC(1, sizeof(tool_cache_t));
     if (!cache) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     cache->capacity = capacity;
     cache->ttl_sec = ttl_sec;
-    agentrt_mutex_init(&cache->lru_lock);
+    airy_mtx_init(&cache->lru_lock);
     for (int i = 0; i < HASH_SIZE; ++i)
-        agentrt_mutex_init(&cache->buckets[i].lock);
+        airy_mtx_init(&cache->buckets[i].lock);
     return cache;
 }
 
@@ -155,35 +155,35 @@ void tool_cache_destroy(tool_cache_t *cache)
     if (!cache)
         return;
     for (int i = 0; i < HASH_SIZE; ++i) {
-        agentrt_mutex_lock(&cache->buckets[i].lock);
+        airy_mtx_lock(&cache->buckets[i].lock);
         cache_entry_t *e = cache->buckets[i].head;
         while (e) {
             cache_entry_t *next = e->hnext;
             entry_memory_safe_free(e);
             e = next;
         }
-        agentrt_mutex_unlock(&cache->buckets[i].lock);
-        agentrt_mutex_destroy(&cache->buckets[i].lock);
+        airy_mtx_unlock(&cache->buckets[i].lock);
+        airy_mtx_destroy(&cache->buckets[i].lock);
     }
-    agentrt_mutex_destroy(&cache->lru_lock);
+    airy_mtx_destroy(&cache->lru_lock);
     memory_safe_free(cache);
 }
 
 int tool_cache_get(tool_cache_t *cache, const char *key, char **out_value)
 {
     if (!cache || !key || !out_value)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     *out_value = NULL;
 
     unsigned int idx = hash_key(key);
-    agentrt_mutex_lock(&cache->buckets[idx].lock);
+    airy_mtx_lock(&cache->buckets[idx].lock);
     cache_entry_t *e = cache->buckets[idx].head;
     while (e) {
         if (strcmp(e->key, key) == 0)
             break;
         e = e->hnext;
     }
-    agentrt_mutex_unlock(&cache->buckets[idx].lock);
+    airy_mtx_unlock(&cache->buckets[idx].lock);
 
     if (!e)
         return 0;
@@ -193,9 +193,9 @@ int tool_cache_get(tool_cache_t *cache, const char *key, char **out_value)
         return 0;
     }
 
-    agentrt_mutex_lock(&cache->lru_lock);
+    airy_mtx_lock(&cache->lru_lock);
     lru_move_to_head(cache, e);
-    agentrt_mutex_unlock(&cache->lru_lock);
+    airy_mtx_unlock(&cache->lru_lock);
 
     *out_value = memory_safe_strdup(e->value);
     return 1;
@@ -209,43 +209,43 @@ void tool_cache_put(tool_cache_t *cache, const char *key, const char *value)
         return;
 
     unsigned int idx = hash_key(key);
-    agentrt_mutex_lock(&cache->buckets[idx].lock);
+    airy_mtx_lock(&cache->buckets[idx].lock);
 
     cache_entry_t **p = &cache->buckets[idx].head;
     while (*p) {
         if (strcmp((*p)->key, key) == 0) {
             cache_entry_t *e = *p;
             *p = e->hnext;
-            agentrt_mutex_unlock(&cache->buckets[idx].lock);
+            airy_mtx_unlock(&cache->buckets[idx].lock);
 
-            agentrt_mutex_lock(&cache->lru_lock);
+            airy_mtx_lock(&cache->lru_lock);
             lru_remove(cache, e);
             cache->size--;
-            agentrt_mutex_unlock(&cache->lru_lock);
+            airy_mtx_unlock(&cache->lru_lock);
 
             entry_memory_safe_free(e);
-            agentrt_mutex_lock(&cache->buckets[idx].lock);
+            airy_mtx_lock(&cache->buckets[idx].lock);
             break;
         }
         p = &(*p)->hnext;
     }
 
     if (!value) {
-        agentrt_mutex_unlock(&cache->buckets[idx].lock);
+        airy_mtx_unlock(&cache->buckets[idx].lock);
         return;
     }
 
     cache_entry_t *e = entry_create(key, value);
     if (!e) {
-        agentrt_mutex_unlock(&cache->buckets[idx].lock);
+        airy_mtx_unlock(&cache->buckets[idx].lock);
         return;
     }
 
     e->hnext = cache->buckets[idx].head;
     cache->buckets[idx].head = e;
-    agentrt_mutex_unlock(&cache->buckets[idx].lock);
+    airy_mtx_unlock(&cache->buckets[idx].lock);
 
-    agentrt_mutex_lock(&cache->lru_lock);
+    airy_mtx_lock(&cache->lru_lock);
     e->next = cache->lru_head;
     if (cache->lru_head)
         cache->lru_head->prev = e;
@@ -253,7 +253,7 @@ void tool_cache_put(tool_cache_t *cache, const char *key, const char *value)
     if (!cache->lru_tail)
         cache->lru_tail = e;
     cache->size++;
-    agentrt_mutex_unlock(&cache->lru_lock);
+    airy_mtx_unlock(&cache->lru_lock);
 
     if (cache->size > cache->capacity) {
         evict_lru(cache);
@@ -266,7 +266,7 @@ void tool_cache_clear(tool_cache_t *cache)
         return;
 
     for (int i = 0; i < HASH_SIZE; ++i) {
-        agentrt_mutex_lock(&cache->buckets[i].lock);
+        airy_mtx_lock(&cache->buckets[i].lock);
         cache_entry_t *e = cache->buckets[i].head;
         while (e) {
             cache_entry_t *next = e->hnext;
@@ -274,20 +274,20 @@ void tool_cache_clear(tool_cache_t *cache)
             e = next;
         }
         cache->buckets[i].head = NULL;
-        agentrt_mutex_unlock(&cache->buckets[i].lock);
+        airy_mtx_unlock(&cache->buckets[i].lock);
     }
 
-    agentrt_mutex_lock(&cache->lru_lock);
+    airy_mtx_lock(&cache->lru_lock);
     cache->lru_head = NULL;
     cache->lru_tail = NULL;
     cache->size = 0;
-    agentrt_mutex_unlock(&cache->lru_lock);
+    airy_mtx_unlock(&cache->lru_lock);
 }
 
 char *tool_cache_key(const char *tool_id, const char *params_json)
 {
     if (!tool_id || !params_json) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     size_t tool_id_len = strlen(tool_id);
@@ -296,7 +296,7 @@ char *tool_cache_key(const char *tool_id, const char *params_json)
 
     char *key = memory_safe_alloc(len);
     if (!key) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     snprintf(key, len, "%s|%s", tool_id, params_json);
@@ -307,12 +307,12 @@ tool_result_t *tool_result_from_json(const char *json)
 {
     /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
     CJSON_PARSE_GUARD(root, json, {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     });
-    tool_result_t *res = AGENTRT_CALLOC(1, sizeof(tool_result_t));
+    tool_result_t *res = AIRY_CALLOC(1, sizeof(tool_result_t));
     if (!res) {
         /* root 由 CJSON_AUTO_FREE 自动释放 */
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     cJSON *success = cJSON_GetObjectItem(root, "success");
     if (cJSON_IsNumber(success))

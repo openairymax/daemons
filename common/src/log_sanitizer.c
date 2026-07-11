@@ -29,7 +29,7 @@ static const sensitive_field_t default_patterns[] = {
 static sensitive_field_t *g_patterns = NULL;
 static size_t g_pattern_count = 0;
 static size_t g_pattern_capacity = 0;
-static agentrt_mutex_t g_mutex;
+static airy_mtx_t g_mutex;
 static atomic_int g_mutex_initialized = 0;
 
 static void ensure_mutex_init(void)
@@ -37,7 +37,7 @@ static void ensure_mutex_init(void)
     int expected = 0;
     if (atomic_compare_exchange_strong_explicit(&g_mutex_initialized, &expected, 1,
                                                 memory_order_seq_cst, memory_order_seq_cst)) {
-        agentrt_mutex_init(&g_mutex);
+        airy_mtx_init(&g_mutex);
     }
 }
 static atomic_int g_initialized = 0;
@@ -55,17 +55,17 @@ static void ensure_initialized(void)
         return;
 
     ensure_mutex_init();
-    agentrt_mutex_lock(&g_mutex);
+    airy_mtx_lock(&g_mutex);
     if (g_initialized) {
-        agentrt_mutex_unlock(&g_mutex);
+        airy_mtx_unlock(&g_mutex);
         return;
     }
 
     g_pattern_capacity = 32;
-    g_patterns = AGENTRT_CALLOC(g_pattern_capacity, sizeof(sensitive_field_t));
+    g_patterns = AIRY_CALLOC(g_pattern_capacity, sizeof(sensitive_field_t));
     if (!g_patterns) {
         SVC_LOG_ERROR("C-L02: SANITIZER: ALLOC-FAIL capacity=%zu", g_pattern_capacity);
-        agentrt_mutex_unlock(&g_mutex);
+        airy_mtx_unlock(&g_mutex);
         return;
     }
 
@@ -74,7 +74,7 @@ static void ensure_initialized(void)
     }
 
     g_initialized = 1;
-    agentrt_mutex_unlock(&g_mutex);
+    airy_mtx_unlock(&g_mutex);
 }
 
 /**
@@ -83,14 +83,14 @@ static void ensure_initialized(void)
 static const char *log_strcasestr(const char *haystack, const char *needle)
 {
     if (!haystack || !needle) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     size_t haystack_len = strlen(haystack);
     size_t needle_len = strlen(needle);
 
     if (needle_len > haystack_len) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     for (size_t i = 0; i <= haystack_len - needle_len; i++) {
@@ -104,7 +104,7 @@ static const char *log_strcasestr(const char *haystack, const char *needle)
         if (match)
             return &haystack[i];
     }
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
 /**
@@ -133,7 +133,7 @@ static const char *find_pattern(const char *message, const sensitive_field_t *pa
 
         return pos;
     }
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
 /**
@@ -142,7 +142,7 @@ static const char *find_pattern(const char *message, const sensitive_field_t *pa
 static const char *find_value_end(const char *value_start)
 {
     if (!value_start || !*value_start) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     char quote = 0;
@@ -172,7 +172,7 @@ static int sanitize_core(const char *message, char *buffer, size_t buffer_size)
 {
     if (!message || !buffer || buffer_size == 0) {
         SVC_LOG_ERROR("C-L02: SANITIZER: SANITIZE-FAIL reason=invalid_param");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     ensure_initialized();
@@ -212,7 +212,7 @@ static int sanitize_core(const char *message, char *buffer, size_t buffer_size)
                     *out = '\0';
                     SVC_LOG_ERROR("C-L02: SANITIZER: SANITIZE-FAIL reason=overflow buffer_size=%zu needed=%zu",
                                   buffer_size, needed);
-                    return AGENTRT_ERR_OVERFLOW;
+                    return AIRY_ERR_OVERFLOW;
                 }
 
                 /* 写入字段名 */
@@ -246,14 +246,14 @@ static int sanitize_core(const char *message, char *buffer, size_t buffer_size)
 void log_sanitizer_init(size_t max_fields)
 {
     ensure_mutex_init();
-    agentrt_mutex_lock(&g_mutex);
+    airy_mtx_lock(&g_mutex);
 
     if (g_patterns) {
-        AGENTRT_FREE(g_patterns);
+        AIRY_FREE(g_patterns);
     }
 
     g_pattern_capacity = max_fields > 0 ? max_fields : 32;
-    g_patterns = AGENTRT_CALLOC(g_pattern_capacity, sizeof(sensitive_field_t));
+    g_patterns = AIRY_CALLOC(g_pattern_capacity, sizeof(sensitive_field_t));
     g_pattern_count = 0;
 
     for (size_t i = 0; i < sizeof(default_patterns) / sizeof(default_patterns[0]); i++) {
@@ -263,7 +263,7 @@ void log_sanitizer_init(size_t max_fields)
     }
 
     g_initialized = 1;
-    agentrt_mutex_unlock(&g_mutex);
+    airy_mtx_unlock(&g_mutex);
 
     SVC_LOG_INFO("C-L02: SANITIZER: INIT count=%zu capacity=%zu", g_pattern_count, g_pattern_capacity);
 }
@@ -271,18 +271,18 @@ void log_sanitizer_init(size_t max_fields)
 void log_sanitizer_destroy(void)
 {
     ensure_mutex_init();
-    agentrt_mutex_lock(&g_mutex);
+    airy_mtx_lock(&g_mutex);
 
     if (g_patterns) {
-        AGENTRT_FREE(g_patterns);
+        AIRY_FREE(g_patterns);
         g_patterns = NULL;
     }
     g_pattern_count = 0;
     g_pattern_capacity = 0;
     g_initialized = 0;
 
-    agentrt_mutex_unlock(&g_mutex);
-    agentrt_mutex_destroy(&g_mutex);
+    airy_mtx_unlock(&g_mutex);
+    airy_mtx_destroy(&g_mutex);
     g_mutex_initialized = 0;
     SVC_LOG_INFO("C-L02: SANITIZER: DESTROY");
 }
@@ -293,13 +293,13 @@ bool log_sanitizer_add_pattern(const char *pattern, const char *replacement)
         return false;
 
     ensure_mutex_init();
-    agentrt_mutex_lock(&g_mutex);
+    airy_mtx_lock(&g_mutex);
     ensure_initialized();
 
     if (g_pattern_count >= g_pattern_capacity) {
         SVC_LOG_ERROR("C-L02: SANITIZER: ADD-PATTERN-FAIL pattern=%s count=%zu capacity=%zu",
                       pattern, g_pattern_count, g_pattern_capacity);
-        agentrt_mutex_unlock(&g_mutex);
+        airy_mtx_unlock(&g_mutex);
         return false;
     }
 
@@ -307,7 +307,7 @@ bool log_sanitizer_add_pattern(const char *pattern, const char *replacement)
     g_patterns[g_pattern_count].replacement = replacement ? replacement : DEFAULT_REPLACEMENT;
     g_pattern_count++;
 
-    agentrt_mutex_unlock(&g_mutex);
+    airy_mtx_unlock(&g_mutex);
     return true;
 }
 
@@ -319,7 +319,7 @@ int log_sanitize(const char *message, char *buffer, size_t buffer_size)
 char *log_sanitize_dup(const char *message)
 {
     if (!message) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     /* 预分配缓冲区 */
@@ -327,18 +327,18 @@ char *log_sanitize_dup(const char *message)
     if (alloc_size < MAX_LINE_LENGTH)
         alloc_size = MAX_LINE_LENGTH;
 
-    char *buffer = AGENTRT_MALLOC(alloc_size);
+    char *buffer = AIRY_MALLOC(alloc_size);
     if (!buffer) {
         SVC_LOG_ERROR("C-L02: SANITIZER: DUP-FAIL reason=alloc alloc_size=%zu", alloc_size);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     int result = sanitize_core(message, buffer, alloc_size);
     if (result < 0) {
         SVC_LOG_ERROR("C-L02: SANITIZER: SANITIZE-FAIL reason=sanitize_core_error result=%d alloc_size=%zu",
                       result, alloc_size);
-        AGENTRT_FREE(buffer);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_FREE(buffer);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     return buffer;

@@ -6,8 +6,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_LLM_SERVICE_INTERNAL_H
-#define AGENTRT_LLM_SERVICE_INTERNAL_H
+#ifndef AIRY_RT_LLM_SERVICE_INTERNAL_H
+#define AIRY_RT_LLM_SERVICE_INTERNAL_H
 
 #include "cache.h"
 #include "cost_tracker.h"
@@ -21,9 +21,9 @@ struct llm_service {
     llm_cache_t *cache;
     cost_tracker_t *cost;
     token_counter_t *token_counter;
-    agentrt_mutex_t lock; /* 保护 registry 和 cost 等 */
+    airy_mtx_t lock; /* 保护 registry 和 cost 等 */
     void *rules;
     size_t rule_count;
 };
 
-#endif /* AGENTRT_LLM_SERVICE_INTERNAL_H */
+#endif /* AIRY_RT_LLM_SERVICE_INTERNAL_H */

@@ -20,8 +20,8 @@
  * @see ARCHITECTURAL_PRINCIPLES.md E-3~E-6
  */
 
-#ifndef AGENTRT_DAEMON_MAIN_H
-#define AGENTRT_DAEMON_MAIN_H
+#ifndef AIRY_RT_DAEMON_MAIN_H
+#define AIRY_RT_DAEMON_MAIN_H
 
 #include "daemon_bootstrap_ipc.h"
 #include "daemon_bootstrap_sd.h"
@@ -56,7 +56,7 @@ extern "C" {
  *
  * 生成变量：
  *   - static atomic_int g_running = 1
- *   - static agentrt_mutex_t g_running_lock
+ *   - static airy_mtx_t g_running_lock
  *   - static method_dispatcher_t *g_dispatcher = NULL
  *   - static daemon_event_driver_t *g_event_driver = NULL
  *   - static daemon_bootstrap_sd_t *g_bsd = NULL
@@ -67,13 +67,13 @@ extern "C" {
  *   - static void svc_log_toggle_handler(int sig)
  *   - static void print_usage(const char *prog, const char *service_name)
  *   - static int daemon_handle_client(daemon_event_driver_t *driver,
- *         agentrt_socket_t client_fd, method_dispatcher_t *dispatcher)
+ *         airy_sock_t client_fd, method_dispatcher_t *dispatcher)
  */
 #define DAEMON_DECLARE_COMMON(daemon_name, daemon_cname, DEFAULT_SOCKET_PATH_UNIX,   \
                               DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER) \
                                                                                      \
     static atomic_int g_running_##daemon_name = 1;                                   \
-    static agentrt_mutex_t g_running_lock_##daemon_name;                              \
+    static airy_mtx_t g_running_lock_##daemon_name;                              \
     static method_dispatcher_t *g_dispatcher_##daemon_name = NULL;                    \
     static daemon_event_driver_t *g_event_driver_##daemon_name = NULL;                \
     static daemon_bootstrap_sd_t *g_bsd_##daemon_name = NULL;                         \
@@ -82,9 +82,9 @@ extern "C" {
     static void signal_handler_##daemon_name(int sig)                                 \
     {                                                                                \
         (void)sig;                                                                   \
-        agentrt_mutex_lock(&g_running_lock_##daemon_name);                            \
+        airy_mtx_lock(&g_running_lock_##daemon_name);                            \
         atomic_store_explicit(&g_running_##daemon_name, 0, memory_order_seq_cst);     \
-        agentrt_mutex_unlock(&g_running_lock_##daemon_name);                          \
+        airy_mtx_unlock(&g_running_lock_##daemon_name);                          \
         if (g_event_driver_##daemon_name)                                             \
             daemon_event_driver_stop(g_event_driver_##daemon_name);                   \
     }                                                                                \
@@ -111,7 +111,7 @@ extern "C" {
         fputs("\n", stdout);                                                         \
         fputs("Examples:\n", stdout);                                                \
         snprintf(buf, sizeof(buf), "  %s --manager "                                  \
-                 AGENTRT_CONFIG_DIR "/" #daemon_name ".yaml\n", prog);                  \
+                 AIRY_CONFIG_DIR "/" #daemon_name ".yaml\n", prog);                  \
         fputs(buf, stdout);                                                          \
         snprintf(buf, sizeof(buf), "  %s --tcp  # TCP mode on port %d\n",             \
                  prog, DEFAULT_TCP_PORT);                                             \
@@ -120,27 +120,27 @@ extern "C" {
                                                                                      \
     __attribute__((unused))                                                              \
     static int daemon_handle_client_##daemon_name(                                    \
-        agentrt_socket_t client_fd, method_dispatcher_t *dispatcher)                  \
+        airy_sock_t client_fd, method_dispatcher_t *dispatcher)                  \
     {                                                                                \
         char buffer[MAX_BUFFER];                                                     \
-        ssize_t n = agentrt_socket_recv(client_fd, buffer, sizeof(buffer) - 1);      \
+        ssize_t n = airy_sock_recv(client_fd, buffer, sizeof(buffer) - 1);      \
         if (n <= 0) {                                                                \
-            agentrt_socket_close(client_fd);                                         \
-            return AGENTRT_ERR_FAIL;                                                 \
+            airy_sock_close(client_fd);                                         \
+            return AIRY_ERR_FAIL;                                                 \
         }                                                                            \
         buffer[n] = '\0';                                                            \
         if ((size_t)n >= sizeof(buffer) - 1) {                                       \
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST,                    \
                                "Request too large", -1);                              \
-            agentrt_socket_close(client_fd);                                         \
-            return AGENTRT_ERR_FAIL;                                                 \
+            airy_sock_close(client_fd);                                         \
+            return AIRY_ERR_FAIL;                                                 \
         }                                                                            \
         /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */                \
         CJSON_PARSE_GUARD(req, buffer, {                                             \
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR,                        \
                                "Parse error: invalid JSON", -1);                      \
-            agentrt_socket_close(client_fd);                                         \
-            return AGENTRT_ERR_FAIL;                                                 \
+            airy_sock_close(client_fd);                                         \
+            return AIRY_ERR_FAIL;                                                 \
         });                                                                          \
         cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");                        \
         cJSON *method = cJSON_GetObjectItem(req, "method");                          \
@@ -151,8 +151,8 @@ extern "C" {
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST,                    \
                                "Invalid Request", -1);                               \
             /* req 由 CJSON_AUTO_FREE 自动释放 */                                    \
-            agentrt_socket_close(client_fd);                                         \
-            return AGENTRT_ERR_FAIL;                                                 \
+            airy_sock_close(client_fd);                                         \
+            return AIRY_ERR_FAIL;                                                 \
         }                                                                            \
         int req_id = cJSON_IsNumber(id) ? id->valueint : 0;                          \
         SVC_LOG_DEBUG("Processing request: method=%s, id=%d",                        \
@@ -160,13 +160,13 @@ extern "C" {
         method_dispatcher_dispatch(dispatcher, req, jsonrpc_build_error,              \
                                    &client_fd);                                      \
         /* req 由 CJSON_AUTO_FREE 自动释放 */                                        \
-        agentrt_socket_close(client_fd);                                             \
+        airy_sock_close(client_fd);                                             \
         return 0;                                                                    \
     }                                                                                \
                                                                                      \
     __attribute__((unused))                                                              \
     static int daemon_on_client_##daemon_name(                                        \
-        void *service_ctx, agentrt_socket_t client_fd)                                \
+        void *service_ctx, airy_sock_t client_fd)                                \
     {                                                                                \
         (void)service_ctx;                                                           \
         return daemon_handle_client_##daemon_name(client_fd,                           \
@@ -236,19 +236,19 @@ static inline int daemon_parse_args(int argc, char **argv,
  * @param win_pipe    Windows Named Pipe 路径
  * @return            成功返回 socket fd，失败返回 < 0
  */
-static inline agentrt_socket_t daemon_create_server_socket(
+static inline airy_sock_t daemon_create_server_socket(
     int use_tcp, int tcp_port,
     const char *unix_path, const char *win_pipe)
 {
     if (use_tcp) {
-        return agentrt_socket_create_tcp_server("127.0.0.1", tcp_port);
+        return airy_sock_create_tcp_server("127.0.0.1", tcp_port);
     }
-#if defined(AGENTRT_PLATFORM_WINDOWS)
+#if defined(AIRY_PLATFORM_WINDOWS)
     (void)unix_path;
-    return agentrt_socket_create_named_pipe_server(win_pipe);
+    return airy_sock_create_named_pipe_server(win_pipe);
 #else
     (void)win_pipe;
-    return agentrt_socket_create_unix_server(unix_path);
+    return airy_sock_create_unix_server(unix_path);
 #endif
 }
 
@@ -266,7 +266,7 @@ static inline agentrt_socket_t daemon_create_server_socket(
  * @param p_event_driver 输出：事件驱动实例
  * @param p_bsd        输出：SD bootstrap 实例
  * @param p_bipc       输出：IPC bootstrap 实例
- * @return             AGENTRT_SUCCESS 或错误码
+ * @return             AIRY_SUCCESS 或错误码
  */
 static inline int daemon_init_event_driver(
     const char *daemon_name,
@@ -296,11 +296,11 @@ static inline int daemon_init_event_driver(
     }
 
     /* 事件驱动 */
-    if (!ev_config || !p_event_driver) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ev_config || !p_event_driver) return AIRY_ERR_INVALID_PARAM;
     *p_event_driver = daemon_event_driver_create(ev_config);
-    if (!*p_event_driver) return AGENTRT_ERR_OUT_OF_MEMORY;
+    if (!*p_event_driver) return AIRY_ERR_OUT_OF_MEMORY;
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 
@@ -314,19 +314,19 @@ static inline void daemon_cleanup_standard(
     daemon_bootstrap_ipc_t *bipc,
     daemon_bootstrap_sd_t *bsd,
     daemon_event_driver_t *event_driver,
-    agentrt_socket_t server_fd,
+    airy_sock_t server_fd,
     void (*destroy_service)(void),
-    agentrt_mutex_t *running_lock)
+    airy_mtx_t *running_lock)
 {
     SVC_LOG_INFO("Service stopping...");
 
     if (bipc)  daemon_bootstrap_ipc_stop(bipc);
     if (bsd)   daemon_bootstrap_sd_stop(bsd);
     if (event_driver) daemon_event_driver_destroy(event_driver);
-    if (server_fd >= 0) agentrt_socket_close(server_fd);
+    if (server_fd >= 0) airy_sock_close(server_fd);
     if (destroy_service) destroy_service();
-    if (running_lock) agentrt_mutex_destroy(running_lock);
-    agentrt_socket_cleanup();
+    if (running_lock) airy_mtx_destroy(running_lock);
+    airy_sock_cleanup();
 
     SVC_LOG_INFO("Service stopped");
 }
@@ -336,4 +336,4 @@ static inline void daemon_cleanup_standard(
 }
 #endif
 
-#endif /* AGENTRT_DAEMON_MAIN_H */
+#endif /* AIRY_RT_DAEMON_MAIN_H */

@@ -28,7 +28,7 @@ extern const provider_ops_t local_ops;
 
 struct provider_registry {
     provider_t *providers;
-    agentrt_mutex_t lock;
+    airy_mtx_t lock;
 };
 
 static const provider_ops_t *get_ops_by_name(const char *name)
@@ -43,25 +43,25 @@ static const provider_ops_t *get_ops_by_name(const char *name)
         return &google_ops;
     if (strcmp(name, "local") == 0)
         return &local_ops;
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
 provider_registry_t *provider_registry_create(const service_config_t *cfg)
 {
-    provider_registry_t *reg = AGENTRT_CALLOC(1, sizeof(provider_registry_t));
+    provider_registry_t *reg = AIRY_CALLOC(1, sizeof(provider_registry_t));
     if (!reg) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
-    agentrt_mutex_init(&reg->lock);
+    airy_mtx_init(&reg->lock);
 
     size_t count = cfg->provider_count;
     if (count == 0 || !cfg->providers)
         return reg;
 
-    reg->providers = AGENTRT_CALLOC(count + 1, sizeof(provider_t));
+    reg->providers = AIRY_CALLOC(count + 1, sizeof(provider_t));
     if (!reg->providers) {
-        AGENTRT_FREE(reg);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_FREE(reg);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     for (size_t i = 0; i < count; ++i) {
@@ -84,15 +84,15 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
         if (pcfg->models) {
             while (pcfg->models[model_cnt])
                 model_cnt++;
-            models = AGENTRT_CALLOC(model_cnt + 1, sizeof(*models));
+            models = AIRY_CALLOC(model_cnt + 1, sizeof(*models));
             if (models) {
                 for (size_t j = 0; j < model_cnt; ++j) {
-                    models[j] = AGENTRT_STRDUP(pcfg->models[j]);
+                    models[j] = AIRY_STRDUP(pcfg->models[j]);
                     if (!models[j]) {
                         SVC_LOG_ERROR("Failed to duplicate model name: out of memory");
                         for (size_t k = 0; k < j; ++k)
-                            AGENTRT_FREE(models[k]);
-                        AGENTRT_FREE(models);
+                            AIRY_FREE(models[k]);
+                        AIRY_FREE(models);
                         models = NULL;
                         break;
                     }
@@ -100,13 +100,13 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
             }
         }
 
-        reg->providers[i].name = AGENTRT_STRDUP(pcfg->name);
+        reg->providers[i].name = AIRY_STRDUP(pcfg->name);
         if (!reg->providers[i].name) {
             SVC_LOG_ERROR("Failed to duplicate provider name: out of memory");
             if (models) {
                 for (size_t j = 0; models[j]; ++j)
-                    AGENTRT_FREE(models[j]);
-                AGENTRT_FREE(models);
+                    AIRY_FREE(models[j]);
+                AIRY_FREE(models);
             }
             ops->destroy(ctx);
             continue;
@@ -124,7 +124,7 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
 {
     provider_registry_t *reg = provider_registry_create(cfg);
     if (!reg) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     if (!config_path)
@@ -145,7 +145,7 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
         return reg;
     }
 
-    char *content = (char *)AGENTRT_MALLOC((size_t)len + 1);
+    char *content = (char *)AIRY_MALLOC((size_t)len + 1);
     if (!content) {
         fclose(f);
         return reg;
@@ -157,11 +157,11 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
 
     /* P0.18.2: 模式 B — CJSON_PARSE_GUARD（on_fail 中释放 content） */
     CJSON_PARSE_GUARD(root, content, {
-        AGENTRT_FREE(content);
+        AIRY_FREE(content);
         SVC_LOG_WARN("Failed to parse provider config '%s'", config_path);
         return reg;
     });
-    AGENTRT_FREE(content);
+    AIRY_FREE(content);
 
     cJSON *providers_arr = cJSON_GetObjectItem(root, "providers");
     if (!providers_arr || !cJSON_IsArray(providers_arr)) {
@@ -176,7 +176,7 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
         return reg;
     }
 
-    agentrt_mutex_lock(&reg->lock);
+    airy_mtx_lock(&reg->lock);
 
     size_t old_count = 0;
     if (reg->providers) {
@@ -186,16 +186,16 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
 
     size_t new_count = (size_t)n;
     provider_t *new_provs =
-        (provider_t *)AGENTRT_CALLOC(old_count + new_count + 1, sizeof(provider_t));
+        (provider_t *)AIRY_CALLOC(old_count + new_count + 1, sizeof(provider_t));
     if (!new_provs) {
-        agentrt_mutex_unlock(&reg->lock);
+        airy_mtx_unlock(&reg->lock);
         /* root 由 CJSON_AUTO_FREE 自动释放 */
         return reg;
     }
 
     if (reg->providers) {
         __builtin_memcpy(new_provs, reg->providers, old_count * sizeof(provider_t));
-        AGENTRT_FREE(reg->providers);
+        AIRY_FREE(reg->providers);
     }
     reg->providers = new_provs;
 
@@ -224,14 +224,14 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
         if (cJSON_IsString(pkey_env) && pkey_env->valuestring[0]) {
             const char *env_val = getenv(pkey_env->valuestring);
             if (env_val && env_val[0]) {
-AGENTRT_STRNCPY_TERM(api_key_buf, env_val, sizeof(api_key_buf));
+AIRY_STRNCPY_TERM(api_key_buf, env_val, sizeof(api_key_buf));
                 (api_key_buf)[sizeof(api_key_buf) - 1] = '\0';
             } else {
                 SVC_LOG_WARN("Env var '%s' not set for provider '%s'", pkey_env->valuestring,
                              name_str);
             }
         } else if (cJSON_IsString(pkey) && pkey->valuestring[0]) {
-AGENTRT_STRNCPY_TERM(api_key_buf, pkey->valuestring, sizeof(api_key_buf));
+AIRY_STRNCPY_TERM(api_key_buf, pkey->valuestring, sizeof(api_key_buf));
             (api_key_buf)[sizeof(api_key_buf) - 1] = '\0';
         }
 
@@ -249,17 +249,17 @@ AGENTRT_STRNCPY_TERM(api_key_buf, pkey->valuestring, sizeof(api_key_buf));
         char **models = NULL;
         if (cJSON_IsArray(pmodels)) {
             int mcount = cJSON_GetArraySize(pmodels);
-            models = (char **)AGENTRT_CALLOC((size_t)mcount + 1, sizeof(char *));
+            models = (char **)AIRY_CALLOC((size_t)mcount + 1, sizeof(char *));
             if (models) {
                 for (int j = 0; j < mcount; ++j) {
                     cJSON *mitem = cJSON_GetArrayItem(pmodels, j);
                     if (cJSON_IsString(mitem)) {
-                        models[j] = AGENTRT_STRDUP(mitem->valuestring);
+                        models[j] = AIRY_STRDUP(mitem->valuestring);
                         if (!models[j]) {
                             SVC_LOG_ERROR("Failed to duplicate model name: out of memory");
                             for (int k = 0; k < j; ++k)
-                                AGENTRT_FREE(models[k]);
-                            AGENTRT_FREE(models);
+                                AIRY_FREE(models[k]);
+                            AIRY_FREE(models);
                             models = NULL;
                             break;
                         }
@@ -270,13 +270,13 @@ AGENTRT_STRNCPY_TERM(api_key_buf, pkey->valuestring, sizeof(api_key_buf));
             }
         }
 
-        reg->providers[valid_idx].name = AGENTRT_STRDUP(name_str);
+        reg->providers[valid_idx].name = AIRY_STRDUP(name_str);
         if (!reg->providers[valid_idx].name) {
             SVC_LOG_ERROR("Failed to duplicate provider name: out of memory");
             if (models) {
                 for (int j = 0; models[j]; ++j)
-                    AGENTRT_FREE(models[j]);
-                AGENTRT_FREE(models);
+                    AIRY_FREE(models[j]);
+                AIRY_FREE(models);
             }
             ops->destroy(ctx);
             continue;
@@ -287,7 +287,7 @@ AGENTRT_STRNCPY_TERM(api_key_buf, pkey->valuestring, sizeof(api_key_buf));
         valid_idx++;
     }
 
-    agentrt_mutex_unlock(&reg->lock);
+    airy_mtx_unlock(&reg->lock);
 
     /* root 由 CJSON_AUTO_FREE 自动释放 */
     SVC_LOG_INFO("Loaded %zu providers from config '%s'", valid_idx - old_count, config_path);
@@ -298,47 +298,47 @@ void provider_registry_destroy(provider_registry_t *reg)
 {
     if (!reg)
         return;
-    agentrt_mutex_lock(&reg->lock);
+    airy_mtx_lock(&reg->lock);
     if (reg->providers) {
         for (provider_t *p = reg->providers; p->name; ++p) {
             p->ops->destroy(p->ctx);
-            AGENTRT_FREE((void *)p->name);
+            AIRY_FREE((void *)p->name);
             if (p->models) {
                 for (char **m = p->models; *m; ++m)
-                    AGENTRT_FREE(*m);
-                AGENTRT_FREE(p->models);
+                    AIRY_FREE(*m);
+                AIRY_FREE(p->models);
             }
         }
-        AGENTRT_FREE(reg->providers);
+        AIRY_FREE(reg->providers);
         reg->providers = NULL;
     }
-    agentrt_mutex_unlock(&reg->lock);
-    agentrt_mutex_destroy(&reg->lock);
-    AGENTRT_FREE(reg);
+    airy_mtx_unlock(&reg->lock);
+    airy_mtx_destroy(&reg->lock);
+    AIRY_FREE(reg);
 }
 
 const provider_t *provider_registry_find(provider_registry_t *reg, const char *model)
 {
     if (!reg) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
-    agentrt_mutex_lock(&reg->lock);
+    airy_mtx_lock(&reg->lock);
     if (!reg->providers) {
-        agentrt_mutex_unlock(&reg->lock);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        airy_mtx_unlock(&reg->lock);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     for (provider_t *p = reg->providers; p->name; ++p) {
         if (!p->models)
             continue;
         for (char **m = p->models; *m; ++m) {
             if (strcmp(*m, model) == 0) {
-                agentrt_mutex_unlock(&reg->lock);
+                airy_mtx_unlock(&reg->lock);
                 return p;
             }
         }
     }
-    agentrt_mutex_unlock(&reg->lock);
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+    airy_mtx_unlock(&reg->lock);
+    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
 int provider_registry_enumerate(provider_registry_t *reg,
@@ -350,9 +350,9 @@ int provider_registry_enumerate(provider_registry_t *reg,
         return 0;
     }
 
-    agentrt_mutex_lock(&reg->lock);
+    airy_mtx_lock(&reg->lock);
     if (!reg->providers) {
-        agentrt_mutex_unlock(&reg->lock);
+        airy_mtx_unlock(&reg->lock);
         return 0;
     }
 
@@ -375,6 +375,6 @@ int provider_registry_enumerate(provider_registry_t *reg,
             break;
     }
 
-    agentrt_mutex_unlock(&reg->lock);
+    airy_mtx_unlock(&reg->lock);
     return short_circuit;
 }

@@ -2,7 +2,7 @@
 # Hook 守护进程构建文件
 # SP04: hook 系统核心（9 个 .c + 7 个 .h）已迁移到 atoms/coreloopthree/src/hook/
 #       和 atoms/coreloopthree/include/。hook_d 退化为仅含 main.c 的薄 daemon 壳，
-#       hook 系统通过 link agentrt_coreloopthree 获取。
+#       hook 系统通过 link airy_coreloopthree 获取。
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -19,17 +19,17 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== Hook daemon 可执行文件 ====================
 # SP04: hook 系统核心（hook_registry/executor/interceptor/timeout/handlers）
-# 已迁移到 atoms/coreloopthree/src/hook/，通过 link agentrt_coreloopthree 获取。
+# 已迁移到 atoms/coreloopthree/src/hook/，通过 link airy_coreloopthree 获取。
 # hook_d 仅保留 main.c（daemon 进程入口：socket + SD + IPC + cupolas 守护进程生命周期）。
 add_executable(hook_d
     src/main.c
 )
 
-target_compile_definitions(hook_d PRIVATE AGENTRT_ENABLE_V2_API=1)
+target_compile_definitions(hook_d PRIVATE AIRY_ENABLE_V2_API=1)
 
 if(WIN32)
     target_compile_definitions(hook_d PRIVATE
-        AGENTRT_PLATFORM_WINDOWS=1
+        AIRY_PLATFORM_WINDOWS=1
         WIN32_LEAN_AND_MEAN
         NOMINMAX
         _CRT_SECURE_NO_WARNINGS
@@ -37,10 +37,10 @@ if(WIN32)
     target_link_libraries(hook_d PRIVATE ws2_32 bcrypt)
 elseif(UNIX)
     target_compile_definitions(hook_d PRIVATE
-        AGENTRT_PLATFORM_LINUX=1
+        AIRY_PLATFORM_LINUX=1
         _GNU_SOURCE
     )
-    target_link_libraries(hook_d PRIVATE Threads::Threads agentrt_platform_libs)
+    target_link_libraries(hook_d PRIVATE Threads::Threads airy_platform_libs)
 endif()
 
 target_include_directories(hook_d PRIVATE
@@ -64,26 +64,26 @@ target_include_directories(hook_d PRIVATE
 )
 
 # 链接策略：LTO + ASan 下使用 --start-group/--end-group 避免符号扫描遗漏
-# SP04: agentrt_hook_service 已删除，改为 link agentrt_coreloopthree（含 hook 系统核心）
+# SP04: airy_hook_service 已删除，改为 link airy_coreloopthree（含 hook 系统核心）
 if(NOT MSVC AND NOT APPLE)
     target_link_libraries(hook_d PRIVATE
         "-Wl,--start-group"
-        agentrt_coreloopthree
+        airy_coreloopthree
         svc_common
         cupolas
         "-Wl,--end-group"
         Threads::Threads
     )
 else()
-    target_link_libraries(hook_d PRIVATE agentrt_coreloopthree svc_common cupolas Threads::Threads)
+    target_link_libraries(hook_d PRIVATE airy_coreloopthree svc_common cupolas Threads::Threads)
 endif()
 
-if(AGENTRT_HAS_YAML AND YAML_FOUND AND YAML_LIBRARIES)
+if(AIRY_HAS_YAML AND YAML_FOUND AND YAML_LIBRARIES)
     target_link_libraries(hook_d PRIVATE ${YAML_LIBRARIES})
 endif()
 
-if(AGENTRT_HAS_CURL)
-    target_compile_definitions(hook_d PRIVATE AGENTRT_HAS_CURL=1)
+if(AIRY_HAS_CURL)
+    target_compile_definitions(hook_d PRIVATE AIRY_HAS_CURL=1)
     if(CURL_INCLUDE_DIRS)
         target_include_directories(hook_d PRIVATE ${CURL_INCLUDE_DIRS})
     endif()

@@ -8,10 +8,10 @@
  *
  * 注意：本头文件与 atoms/coreloopthree/src/cognition/dispatch/parallel_dispatcher.h
  * 同名但职责完全不同（后者为认知层工具调度，字段为 tool_name/arguments/elapsed_ns）。
- * 为消除 include guard 冲突，本头文件使用 AGENTRT_DAEMON_TASK_DISPATCHER_H 守卫。
+ * 为消除 include guard 冲突，本头文件使用 AIRY_DAEMON_TASK_DISPATCHER_H 守卫。
  */
-#ifndef AGENTRT_DAEMON_TASK_DISPATCHER_H
-#define AGENTRT_DAEMON_TASK_DISPATCHER_H
+#ifndef AIRY_RT_DAEMON_TASK_DISPATCHER_H
+#define AIRY_RT_DAEMON_TASK_DISPATCHER_H
 
 #include "thread_pool.h"
 
@@ -78,4 +78,4 @@ void parallel_task_free(parallel_task_t *task);
 }
 #endif
 
-#endif /* AGENTRT_DAEMON_TASK_DISPATCHER_H */
+#endif /* AIRY_RT_DAEMON_TASK_DISPATCHER_H */

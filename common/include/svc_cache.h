@@ -147,7 +147,7 @@ static inline bool svc_cache_contains(svc_cache_t *cache, const char *key)
     int result = cache_get(cache, key, &value);
     if (result == 1 && value) {
         /* 注意：cache_get 会复制值，需要释放 */
-        AGENTRT_FREE(value);
+        AIRY_FREE(value);
         return true;
     }
     return false;
