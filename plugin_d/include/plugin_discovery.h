@@ -16,7 +16,7 @@
  *   description: My plugin description
  *   type: tool_provider
  *   api_version: 1
- *   min_agentrt_version: 0.1.1
+ *   min_airy_version: 0.1.1
  *   library: libmy_plugin.so
  *   permissions:
  *     - file_read
@@ -27,8 +27,8 @@
  * @endcode
  */
 
-#ifndef AGENTRT_PLUGIN_DISCOVERY_H
-#define AGENTRT_PLUGIN_DISCOVERY_H
+#ifndef AIRY_RT_PLUGIN_DISCOVERY_H
+#define AIRY_RT_PLUGIN_DISCOVERY_H
 
 #include "plugin_service.h"
 
@@ -55,7 +55,7 @@ typedef struct {
     char description[256];                  /**< 描述 */
     plugin_type_t type;                     /**< 插件类型 */
     uint32_t api_version;                   /**< API 版本 */
-    uint32_t min_agentrt_version;           /**< 最低版本要求 */
+    uint32_t min_airy_version;           /**< 最低版本要求 */
     char library_path[PLUGIN_DISCOVERY_MAX_PATH];  /**< 动态库路径 */
     char config_path[PLUGIN_DISCOVERY_MAX_PATH];   /**< 配置文件路径 */
     char permissions[PLUGIN_DISCOVERY_MAX_PERMISSIONS][64]; /**< 权限声明 */
@@ -143,4 +143,4 @@ void plugin_discovery_free_results(plugin_discovery_result_t *results,
 }
 #endif
 
-#endif /* AGENTRT_PLUGIN_DISCOVERY_H */
+#endif /* AIRY_RT_PLUGIN_DISCOVERY_H */

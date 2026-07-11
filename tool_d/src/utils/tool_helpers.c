@@ -48,10 +48,10 @@ size_t tool_sanitize_name(const char *src, char *dst, size_t dst_size)
 int tool_parse_version(const char *version_str, int *major, int *minor, int *patch)
 {
     if (!version_str)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     int m = 0, n = 0, p = 0;
     char ver_copy[64];
-    AGENTRT_STRNCPY_TERM(ver_copy, version_str, sizeof(ver_copy));
+    AIRY_STRNCPY_TERM(ver_copy, version_str, sizeof(ver_copy));
     ver_copy[sizeof(ver_copy) - 1] = '\0';
     char *saveptr = NULL;
     char *tok_m = strtok_r(ver_copy, ".", &saveptr);
@@ -62,7 +62,7 @@ int tool_parse_version(const char *version_str, int *major, int *minor, int *pat
     if (tok_n) { n = (int)strtol(tok_n, NULL, 10); fields++; }
     if (tok_p) { p = (int)strtol(tok_p, NULL, 10); fields++; }
     if (fields < 1)
-        return AGENTRT_ERR_PARSE_ERROR;
+        return AIRY_ERR_PARSE_ERROR;
     if (major)
         *major = m;
     if (minor)

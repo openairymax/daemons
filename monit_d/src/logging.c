@@ -76,15 +76,15 @@ static struct {
     ring_entry_t ring[MAX_RING_BUFFER_ENTRIES];
     size_t write_idx;
     size_t entry_count;
-    agentrt_mutex_t ring_lock;
+    airy_mtx_t ring_lock;
 
     output_target_t targets[MAX_OUTPUT_TARGETS];
     size_t target_count;
-    agentrt_mutex_t target_lock;
+    airy_mtx_t target_lock;
 
     context_field_t global_context[MAX_CONTEXT_FIELDS];
     size_t global_context_count;
-    agentrt_mutex_t context_lock;
+    airy_mtx_t context_lock;
 
     log_level_t min_level;
     int initialized;
@@ -95,12 +95,12 @@ static const char *level_names[] = {"DEBUG", "INFO", "WARNING", "ERROR", "FATAL"
 int structured_log_init(log_level_t min_level)
 {
     if (g_structured_log.initialized) {
-        return AGENTRT_SUCCESS;
+        return AIRY_SUCCESS;
     }
 
-    agentrt_mutex_init(&g_structured_log.ring_lock);
-    agentrt_mutex_init(&g_structured_log.target_lock);
-    agentrt_mutex_init(&g_structured_log.context_lock);
+    airy_mtx_init(&g_structured_log.ring_lock);
+    airy_mtx_init(&g_structured_log.target_lock);
+    airy_mtx_init(&g_structured_log.context_lock);
 
     g_structured_log.write_idx = 0;
     g_structured_log.entry_count = 0;
@@ -109,7 +109,7 @@ int structured_log_init(log_level_t min_level)
     g_structured_log.min_level = min_level;
     g_structured_log.initialized = 1;
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 void structured_log_shutdown(void)
@@ -117,7 +117,7 @@ void structured_log_shutdown(void)
     if (!g_structured_log.initialized)
         return;
 
-    agentrt_mutex_lock(&g_structured_log.target_lock);
+    airy_mtx_lock(&g_structured_log.target_lock);
     for (size_t i = 0; i < g_structured_log.target_count; i++) {
         if (g_structured_log.targets[i].type == TARGET_FILE &&
             g_structured_log.targets[i].config.file.fp) {
@@ -126,11 +126,11 @@ void structured_log_shutdown(void)
         }
     }
     g_structured_log.target_count = 0;
-    agentrt_mutex_unlock(&g_structured_log.target_lock);
+    airy_mtx_unlock(&g_structured_log.target_lock);
 
-    agentrt_mutex_destroy(&g_structured_log.ring_lock);
-    agentrt_mutex_destroy(&g_structured_log.target_lock);
-    agentrt_mutex_destroy(&g_structured_log.context_lock);
+    airy_mtx_destroy(&g_structured_log.ring_lock);
+    airy_mtx_destroy(&g_structured_log.target_lock);
+    airy_mtx_destroy(&g_structured_log.context_lock);
 
     g_structured_log.initialized = 0;
 }
@@ -139,53 +139,53 @@ int structured_log_add_file_target(const char *path, log_level_t min_level, uint
                                    uint32_t max_rotations)
 {
     if (!path)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (!g_structured_log.initialized)
         structured_log_init(LOG_LEVEL_INFO);
 
-    agentrt_mutex_lock(&g_structured_log.target_lock);
+    airy_mtx_lock(&g_structured_log.target_lock);
 
     if (g_structured_log.target_count >= MAX_OUTPUT_TARGETS) {
-        agentrt_mutex_unlock(&g_structured_log.target_lock);
-        return AGENTRT_ERR_OVERFLOW;
+        airy_mtx_unlock(&g_structured_log.target_lock);
+        return AIRY_ERR_OVERFLOW;
     }
 
     output_target_t *target = &g_structured_log.targets[g_structured_log.target_count];
     target->type = TARGET_FILE;
     target->min_level = min_level;
     target->enabled = true;
-AGENTRT_STRNCPY_TERM(target->config.file.path, path, sizeof(target->config.file.path));
+AIRY_STRNCPY_TERM(target->config.file.path, path, sizeof(target->config.file.path));
     target->config.file.max_size_bytes = max_size_bytes > 0 ? max_size_bytes : 100 * 1024 * 1024;
     target->config.file.max_rotations = max_rotations > 0 ? max_rotations : 5;
     target->config.file.current_size = 0;
 
     target->config.file.fp = fopen(path, "a");
     if (!target->config.file.fp) {
-        agentrt_mutex_unlock(&g_structured_log.target_lock);
+        airy_mtx_unlock(&g_structured_log.target_lock);
         SVC_LOG_ERROR("Failed to open log file: %s", path);
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
     g_structured_log.target_count++;
-    agentrt_mutex_unlock(&g_structured_log.target_lock);
+    airy_mtx_unlock(&g_structured_log.target_lock);
 
     SVC_LOG_INFO("Structured log file target added: %s", path);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int structured_log_add_callback_target(void (*callback)(const char *json_line, void *user_data),
                                        void *user_data, log_level_t min_level)
 {
     if (!callback)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (!g_structured_log.initialized)
         structured_log_init(LOG_LEVEL_INFO);
 
-    agentrt_mutex_lock(&g_structured_log.target_lock);
+    airy_mtx_lock(&g_structured_log.target_lock);
 
     if (g_structured_log.target_count >= MAX_OUTPUT_TARGETS) {
-        agentrt_mutex_unlock(&g_structured_log.target_lock);
-        return AGENTRT_ERR_OVERFLOW;
+        airy_mtx_unlock(&g_structured_log.target_lock);
+        return AIRY_ERR_OVERFLOW;
     }
 
     output_target_t *target = &g_structured_log.targets[g_structured_log.target_count];
@@ -196,41 +196,41 @@ int structured_log_add_callback_target(void (*callback)(const char *json_line, v
     target->config.callback.user_data = user_data;
 
     g_structured_log.target_count++;
-    agentrt_mutex_unlock(&g_structured_log.target_lock);
+    airy_mtx_unlock(&g_structured_log.target_lock);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int structured_log_set_context(const char *key, const char *value)
 {
     if (!key || !value)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (!g_structured_log.initialized)
         structured_log_init(LOG_LEVEL_INFO);
 
-    agentrt_mutex_lock(&g_structured_log.context_lock);
+    airy_mtx_lock(&g_structured_log.context_lock);
 
     for (size_t i = 0; i < g_structured_log.global_context_count; i++) {
         if (strcmp(g_structured_log.global_context[i].key, key) == 0) {
-AGENTRT_STRNCPY_TERM(g_structured_log.global_context[i].value, value, MAX_FIELD_VALUE_LEN);
-            agentrt_mutex_unlock(&g_structured_log.context_lock);
-            return AGENTRT_SUCCESS;
+AIRY_STRNCPY_TERM(g_structured_log.global_context[i].value, value, MAX_FIELD_VALUE_LEN);
+            airy_mtx_unlock(&g_structured_log.context_lock);
+            return AIRY_SUCCESS;
         }
     }
 
     if (g_structured_log.global_context_count >= MAX_CONTEXT_FIELDS) {
-        agentrt_mutex_unlock(&g_structured_log.context_lock);
-        return AGENTRT_ERR_OVERFLOW;
+        airy_mtx_unlock(&g_structured_log.context_lock);
+        return AIRY_ERR_OVERFLOW;
     }
 
     context_field_t *field =
         &g_structured_log.global_context[g_structured_log.global_context_count];
-AGENTRT_STRNCPY_TERM(field->key, key, MAX_FIELD_KEY_LEN);
-    AGENTRT_STRNCPY_TERM(field->value, value, MAX_FIELD_VALUE_LEN);
+AIRY_STRNCPY_TERM(field->key, key, MAX_FIELD_KEY_LEN);
+    AIRY_STRNCPY_TERM(field->value, value, MAX_FIELD_VALUE_LEN);
     g_structured_log.global_context_count++;
 
-    agentrt_mutex_unlock(&g_structured_log.context_lock);
-    return AGENTRT_SUCCESS;
+    airy_mtx_unlock(&g_structured_log.context_lock);
+    return AIRY_SUCCESS;
 }
 
 static void format_json_log(const ring_entry_t *entry, char *buf, size_t buf_size)
@@ -269,7 +269,7 @@ static void dispatch_to_targets(const ring_entry_t *entry)
     char json_buf[MAX_LOG_MESSAGE_LEN + 1024];
     format_json_log(entry, json_buf, sizeof(json_buf));
 
-    agentrt_mutex_lock(&g_structured_log.target_lock);
+    airy_mtx_lock(&g_structured_log.target_lock);
 
     for (size_t i = 0; i < g_structured_log.target_count; i++) {
         output_target_t *target = &g_structured_log.targets[i];
@@ -303,68 +303,68 @@ static void dispatch_to_targets(const ring_entry_t *entry)
         }
     }
 
-    agentrt_mutex_unlock(&g_structured_log.target_lock);
+    airy_mtx_unlock(&g_structured_log.target_lock);
 }
 
 int structured_log_write(log_level_t level, const char *service_name, const char *file, int line,
                          const char *function, const char *message)
 {
     if (!message)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (!g_structured_log.initialized)
         structured_log_init(LOG_LEVEL_INFO);
 
     if (level < g_structured_log.min_level) {
-        return AGENTRT_SUCCESS;
+        return AIRY_SUCCESS;
     }
 
     ring_entry_t entry = {0};
     entry.level = level;
     entry.timestamp = (uint64_t)time(NULL) * 1000;
-AGENTRT_STRNCPY_TERM(entry.message, message, MAX_LOG_MESSAGE_LEN);
+AIRY_STRNCPY_TERM(entry.message, message, MAX_LOG_MESSAGE_LEN);
     if (service_name)
-AGENTRT_STRNCPY_TERM(entry.service_name, service_name, sizeof(entry.service_name));
-        AGENTRT_STRNCPY_TERM(entry.file, file, sizeof(entry.file));
+AIRY_STRNCPY_TERM(entry.service_name, service_name, sizeof(entry.service_name));
+        AIRY_STRNCPY_TERM(entry.file, file, sizeof(entry.file));
         (entry.file)[sizeof(entry.file) - 1] = '\0';
     entry.line = line;
     if (function)
 __builtin_strncpy(entry.function, function, sizeof(entry.function)-1);
         (entry.function)[sizeof(entry.function) - 1] = '\0';
 
-    agentrt_mutex_lock(&g_structured_log.context_lock);
+    airy_mtx_lock(&g_structured_log.context_lock);
     entry.context_count = g_structured_log.global_context_count < MAX_CONTEXT_FIELDS
                               ? g_structured_log.global_context_count
                               : MAX_CONTEXT_FIELDS;
     __builtin_memcpy(entry.context, g_structured_log.global_context,
            entry.context_count * sizeof(context_field_t));
-    agentrt_mutex_unlock(&g_structured_log.context_lock);
+    airy_mtx_unlock(&g_structured_log.context_lock);
 
-    agentrt_mutex_lock(&g_structured_log.ring_lock);
+    airy_mtx_lock(&g_structured_log.ring_lock);
     size_t idx = g_structured_log.write_idx % MAX_RING_BUFFER_ENTRIES;
     g_structured_log.ring[idx] = entry;
     g_structured_log.write_idx++;
     if (g_structured_log.entry_count < MAX_RING_BUFFER_ENTRIES) {
         g_structured_log.entry_count++;
     }
-    agentrt_mutex_unlock(&g_structured_log.ring_lock);
+    airy_mtx_unlock(&g_structured_log.ring_lock);
 
     dispatch_to_targets(&entry);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int structured_log_query(log_level_t level_filter, const char *service_filter, uint64_t start_time,
                          uint64_t end_time, char ***results, size_t *count)
 {
     if (!results || !count)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (!g_structured_log.initialized) {
         *results = NULL;
         *count = 0;
-        return AGENTRT_SUCCESS;
+        return AIRY_SUCCESS;
     }
 
-    agentrt_mutex_lock(&g_structured_log.ring_lock);
+    airy_mtx_lock(&g_structured_log.ring_lock);
 
     size_t match_count = 0;
     for (size_t i = 0; i < g_structured_log.entry_count; i++) {
@@ -388,11 +388,11 @@ int structured_log_query(log_level_t level_filter, const char *service_filter, u
     if (match_count == 0) {
         *results = NULL;
         *count = 0;
-        agentrt_mutex_unlock(&g_structured_log.ring_lock);
-        return AGENTRT_SUCCESS;
+        airy_mtx_unlock(&g_structured_log.ring_lock);
+        return AIRY_SUCCESS;
     }
 
-    char **res = (char **)AGENTRT_CALLOC(match_count, sizeof(char *));
+    char **res = (char **)AIRY_CALLOC(match_count, sizeof(char *));
     size_t idx_out = 0;
 
     for (size_t i = 0; i < g_structured_log.entry_count && idx_out < match_count; i++) {
@@ -410,7 +410,7 @@ int structured_log_query(log_level_t level_filter, const char *service_filter, u
         if (end_time > 0 && entry->timestamp > end_time)
             continue;
 
-        char *json = (char *)AGENTRT_MALLOC(MAX_LOG_MESSAGE_LEN + 1024);
+        char *json = (char *)AIRY_MALLOC(MAX_LOG_MESSAGE_LEN + 1024);
         if (json) {
             format_json_log(entry, json, MAX_LOG_MESSAGE_LEN + 1024);
             res[idx_out++] = json;
@@ -420,8 +420,8 @@ int structured_log_query(log_level_t level_filter, const char *service_filter, u
     *results = res;
     *count = idx_out;
 
-    agentrt_mutex_unlock(&g_structured_log.ring_lock);
-    return AGENTRT_SUCCESS;
+    airy_mtx_unlock(&g_structured_log.ring_lock);
+    return AIRY_SUCCESS;
 }
 
 size_t structured_log_get_entry_count(void)
@@ -436,7 +436,7 @@ void structured_log_free_results(char **results, size_t count)
     if (!results)
         return;
     for (size_t i = 0; i < count; i++) {
-        AGENTRT_FREE(results[i]);
+        AIRY_FREE(results[i]);
     }
-    AGENTRT_FREE(results);
+    AIRY_FREE(results);
 }

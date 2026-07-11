@@ -26,7 +26,7 @@
 
 #define NOTIFY_D_DEFAULT_PORT 8084
 #define NOTIFY_D_MAX_BUFFER 65536
-#define NOTIFY_D_DEFAULT_SOCKET AGENTRT_RUNTIME_DIR "/notify.sock"
+#define NOTIFY_D_DEFAULT_SOCKET AIRY_RUNTIME_DIR "/notify.sock"
 #define NOTIFY_D_MAX_PENDING 1024
 #define NOTIFY_D_MAX_CLIENTS 128
 #define NOTIFY_D_WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -38,7 +38,7 @@ typedef enum {
 } notify_client_type_t;
 
 typedef struct {
-    agentrt_socket_t fd;
+    airy_sock_t fd;
     notify_client_type_t type;
     char *channel;
     uint64_t connected_at;
@@ -56,9 +56,9 @@ typedef struct {
 } notify_event_t;
 
 typedef struct {
-    agentrt_socket_t server_fd;
-    agentrt_mutex_t lock;
-    agentrt_thread_t event_thread;
+    airy_sock_t server_fd;
+    airy_mtx_t lock;
+    airy_thread_t event_thread;
     atomic_int running;
     atomic_int event_running;
     atomic_int force_stop;
@@ -89,7 +89,7 @@ static void notify_d_signal_handler(int sig)
 static int notify_d_compute_ws_accept_key(const char *client_key, char *out_key, size_t out_size)
 {
     if (!client_key || !out_key || out_size < 64) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     char combined[256];
@@ -103,9 +103,9 @@ static int notify_d_compute_ws_accept_key(const char *client_key, char *out_key,
 
     size_t msg_len = strlen(combined);
     size_t padded_len = ((msg_len + 8) / 64 + 1) * 64;
-    unsigned char *padded = (unsigned char *)AGENTRT_CALLOC(1, padded_len);
+    unsigned char *padded = (unsigned char *)AIRY_CALLOC(1, padded_len);
     if (!padded) {
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "calloc failed for SHA1 padded buffer");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "calloc failed for SHA1 padded buffer");
     }
     __builtin_memcpy(padded, combined, msg_len);
     padded[msg_len] = 0x80;
@@ -155,7 +155,7 @@ static int notify_d_compute_ws_accept_key(const char *client_key, char *out_key,
         h3 += d;
         h4 += e;
     }
-    AGENTRT_FREE(padded);
+    AIRY_FREE(padded);
     padded = NULL;
 
     sha1[0] = (unsigned char)(h0 >> 24);
@@ -209,26 +209,26 @@ static int notify_d_handle_ws_upgrade(notify_d_service_t *svc, notify_client_t *
     const char *key_tag = "Sec-WebSocket-Key: ";
     const char *key_start = strstr(request, key_tag);
     if (!key_start) {
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "missing Sec-WebSocket-Key header");
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "missing Sec-WebSocket-Key header");
     }
     key_start += strlen(key_tag);
 
     const char *key_end = strstr(key_start, "\r\n");
     if (!key_end) {
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "Sec-WebSocket-Key value not terminated by CRLF");
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "Sec-WebSocket-Key value not terminated by CRLF");
     }
 
     char client_key[256];
     size_t key_len = (size_t)(key_end - key_start);
     if (key_len >= sizeof(client_key)) {
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "Sec-WebSocket-Key too long");
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "Sec-WebSocket-Key too long");
     }
     __builtin_memcpy(client_key, key_start, key_len);
     client_key[key_len] = '\0';
 
     char accept_key[64];
     if (notify_d_compute_ws_accept_key(client_key, accept_key, sizeof(accept_key)) != 0) {
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "failed to compute WebSocket accept key");
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to compute WebSocket accept key");
     }
 
     char response[1024];
@@ -240,8 +240,8 @@ static int notify_d_handle_ws_upgrade(notify_d_service_t *svc, notify_client_t *
                             "\r\n",
                             accept_key);
 
-    if (agentrt_socket_send(client->fd, response, (size_t)resp_len) <= 0) {
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "failed to send WebSocket 101 response");
+    if (airy_sock_send(client->fd, response, (size_t)resp_len) <= 0) {
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to send WebSocket 101 response");
     }
 
     client->type = NOTIFY_CLIENT_WEBSOCKET;
@@ -251,8 +251,8 @@ static int notify_d_handle_ws_upgrade(notify_d_service_t *svc, notify_client_t *
 
 static int notify_d_send_ws_frame(notify_client_t *client, const char *payload, size_t payload_len)
 {
-    if (!client || !payload || client->fd == AGENTRT_INVALID_SOCKET) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "null parameter or invalid socket");
+    if (!client || !payload || client->fd == AIRY_INVALID_SOCKET) {
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null parameter or invalid socket");
     }
 
     unsigned char frame[10];
@@ -273,11 +273,11 @@ static int notify_d_send_ws_frame(notify_client_t *client, const char *payload, 
         header_len = 10;
     }
 
-    if (agentrt_socket_send(client->fd, (const char *)frame, header_len) <= 0) {
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "failed to send WS frame header");
+    if (airy_sock_send(client->fd, (const char *)frame, header_len) <= 0) {
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to send WS frame header");
     }
-    if (agentrt_socket_send(client->fd, payload, payload_len) <= 0) {
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "failed to send WS frame payload");
+    if (airy_sock_send(client->fd, payload, payload_len) <= 0) {
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to send WS frame payload");
     }
 
     return 0;
@@ -286,7 +286,7 @@ static int notify_d_send_ws_frame(notify_client_t *client, const char *payload, 
 static int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *event)
 {
     if (!svc || !event) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     char json_msg[8192];
@@ -321,14 +321,14 @@ static int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_
             client->messages_sent++;
             broadcast_count++;
         } else if (client->type == NOTIFY_CLIENT_SOCKET) {
-            agentrt_socket_send(client->fd, json_msg, (size_t)msg_len);
+            airy_sock_send(client->fd, json_msg, (size_t)msg_len);
             client->messages_sent++;
             broadcast_count++;
         } else if (client->type == NOTIFY_CLIENT_SSE) {
             char sse_msg[8448];
             int sse_len = snprintf(sse_msg, sizeof(sse_msg), "event: %s\ndata: %s\n\n",
                                    event->event_type ? event->event_type : "message", json_msg);
-            agentrt_socket_send(client->fd, sse_msg, (size_t)sse_len);
+            airy_sock_send(client->fd, sse_msg, (size_t)sse_len);
             client->messages_sent++;
             broadcast_count++;
         }
@@ -347,30 +347,30 @@ static DWORD WINAPI notify_d_event_loop(LPVOID arg)
     notify_d_service_t *svc = (notify_d_service_t *)arg;
     if (!svc) {
 #ifndef _WIN32
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
 #else
         return 1;
 #endif
     }
 
     while (svc->event_running) {
-        agentrt_mutex_lock(&svc->lock);
+        airy_mtx_lock(&svc->lock);
 
         if (svc->pending_count > 0) {
             notify_event_t *event = svc->pending[svc->pending_head];
             svc->pending_head = (svc->pending_head + 1) % NOTIFY_D_MAX_PENDING;
             svc->pending_count--;
 
-            agentrt_mutex_unlock(&svc->lock);
+            airy_mtx_unlock(&svc->lock);
 
             notify_d_broadcast_event(svc, event);
 
-            AGENTRT_FREE(event->message);
-            AGENTRT_FREE(event->channel);
-            AGENTRT_FREE(event->event_type);
-            AGENTRT_FREE(event);
+            AIRY_FREE(event->message);
+            AIRY_FREE(event->channel);
+            AIRY_FREE(event->event_type);
+            AIRY_FREE(event);
         } else {
-            agentrt_mutex_unlock(&svc->lock);
+            airy_mtx_unlock(&svc->lock);
 #ifndef _WIN32
             /* 替代 sleep(1)，允许更快响应关闭信号 */
             for (int _w = 0; _w < 10 && svc->event_running; _w++) {
@@ -396,20 +396,20 @@ static int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char
                             const char *event_type)
 {
     if (!svc || !msg) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     if (svc->pending_count >= NOTIFY_D_MAX_PENDING) {
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "pending queue full");
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "pending queue full");
     }
 
-    notify_event_t *event = (notify_event_t *)AGENTRT_CALLOC(1, sizeof(notify_event_t));
+    notify_event_t *event = (notify_event_t *)AIRY_CALLOC(1, sizeof(notify_event_t));
     if (!event) {
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "calloc failed for notify_event_t");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "calloc failed for notify_event_t");
     }
 
-    event->message = AGENTRT_STRDUP(msg);
-    event->channel = channel ? AGENTRT_STRDUP(channel) : AGENTRT_STRDUP("default");
-    event->event_type = event_type ? AGENTRT_STRDUP(event_type) : AGENTRT_STRDUP("message");
+    event->message = AIRY_STRDUP(msg);
+    event->channel = channel ? AIRY_STRDUP(channel) : AIRY_STRDUP("default");
+    event->event_type = event_type ? AIRY_STRDUP(event_type) : AIRY_STRDUP("message");
     event->timestamp = (uint64_t)time(NULL);
 
     svc->pending[svc->pending_tail] = event;
@@ -427,44 +427,44 @@ static notify_client_t *notify_d_find_client_slot(notify_d_service_t *svc)
     }
     if (svc->client_count < NOTIFY_D_MAX_CLIENTS)
         return &svc->clients[svc->client_count];
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+    AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
 }
 
 static int notify_d_init(notify_d_service_t *svc, int port, const char *sock)
 {
     if (!svc) {
-        AGENTRT_ERROR(AGENTRT_EINVAL, "svc is NULL");
+        AIRY_ERROR(AIRY_EINVAL, "svc is NULL");
     }
 
     __builtin_memset(svc, 0, sizeof(*svc));
     svc->tcp_port = port > 0 ? port : NOTIFY_D_DEFAULT_PORT;
-    svc->socket_path = sock ? AGENTRT_STRDUP(sock) : AGENTRT_STRDUP(NOTIFY_D_DEFAULT_SOCKET);
+    svc->socket_path = sock ? AIRY_STRDUP(sock) : AIRY_STRDUP(NOTIFY_D_DEFAULT_SOCKET);
     svc->start_time = (uint64_t)time(NULL);
 
-    agentrt_mutex_init(&svc->lock);
-    agentrt_socket_init();
+    airy_mtx_init(&svc->lock);
+    airy_sock_init();
 
     SVC_LOG_INFO("notify_d: init complete (max_clients=%d)", NOTIFY_D_MAX_CLIENTS);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 static int notify_d_start(notify_d_service_t *svc)
 {
     if (!svc) {
-        AGENTRT_ERROR(AGENTRT_EINVAL, "svc is NULL");
+        AIRY_ERROR(AIRY_EINVAL, "svc is NULL");
     }
 
 #ifndef _WIN32
-    svc->server_fd = agentrt_socket_create_unix_server(svc->socket_path);
+    svc->server_fd = airy_sock_create_unix_server(svc->socket_path);
     if (svc->server_fd < 0) {
         SVC_LOG_ERROR("notify_d: failed to create socket at %s", svc->socket_path);
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "failed to create unix socket");
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to create unix socket");
     }
 #else
-    svc->server_fd = agentrt_socket_create_tcp_server("127.0.0.1", (uint16_t)svc->tcp_port);
+    svc->server_fd = airy_sock_create_tcp_server("127.0.0.1", (uint16_t)svc->tcp_port);
     if (svc->server_fd < 0) {
         SVC_LOG_ERROR("notify_d: failed to create TCP server");
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "failed to create TCP server");
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to create TCP server");
     }
 #endif
 
@@ -472,34 +472,34 @@ static int notify_d_start(notify_d_service_t *svc)
     svc->event_running = 1;
     svc->force_stop = 0;
 
-    agentrt_thread_create(&svc->event_thread, notify_d_event_loop, svc);
+    airy_thread_create(&svc->event_thread, notify_d_event_loop, svc);
 
     SVC_LOG_INFO("notify_d: service started (event_loop=active)");
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 static int notify_d_stop(notify_d_service_t *svc, int force)
 {
     if (!svc) {
-        AGENTRT_ERROR(AGENTRT_EINVAL, "svc is NULL");
+        AIRY_ERROR(AIRY_EINVAL, "svc is NULL");
     }
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     svc->running = 0;
     svc->event_running = 0;
     if (force)
         svc->force_stop = 1;
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     if (!force) {
-        agentrt_thread_join(svc->event_thread, NULL);
+        airy_thread_join(svc->event_thread, NULL);
     }
 
     for (size_t i = 0; i < svc->client_count; i++) {
-        if (svc->clients[i].active && svc->clients[i].fd != AGENTRT_INVALID_SOCKET) {
+        if (svc->clients[i].active && svc->clients[i].fd != AIRY_INVALID_SOCKET) {
             if (force) {
-                agentrt_socket_close(svc->clients[i].fd);
-                svc->clients[i].fd = AGENTRT_INVALID_SOCKET;
+                airy_sock_close(svc->clients[i].fd);
+                svc->clients[i].fd = AIRY_INVALID_SOCKET;
                 svc->clients[i].active = 0;
             }
         }
@@ -508,19 +508,19 @@ static int notify_d_stop(notify_d_service_t *svc, int force)
     if (force) {
         for (size_t i = 0; i < svc->pending_count; i++) {
             size_t idx = (svc->pending_head + i) % NOTIFY_D_MAX_PENDING;
-            AGENTRT_FREE(svc->pending[idx]->message);
-            AGENTRT_FREE(svc->pending[idx]->channel);
-            AGENTRT_FREE(svc->pending[idx]->event_type);
-            AGENTRT_FREE(svc->pending[idx]);
+            AIRY_FREE(svc->pending[idx]->message);
+            AIRY_FREE(svc->pending[idx]->channel);
+            AIRY_FREE(svc->pending[idx]->event_type);
+            AIRY_FREE(svc->pending[idx]);
         }
         svc->pending_count = 0;
         svc->pending_head = 0;
         svc->pending_tail = 0;
     }
 
-    if (svc->server_fd != AGENTRT_INVALID_SOCKET) {
-        agentrt_socket_close(svc->server_fd);
-        svc->server_fd = AGENTRT_INVALID_SOCKET;
+    if (svc->server_fd != AIRY_INVALID_SOCKET) {
+        airy_sock_close(svc->server_fd);
+        svc->server_fd = AIRY_INVALID_SOCKET;
     }
 
     if (force) {
@@ -531,26 +531,26 @@ static int notify_d_stop(notify_d_service_t *svc, int force)
 
     SVC_LOG_INFO("notify_d: service stopped (force=%d, pending=%zu, clients=%zu)", force,
                  svc->pending_count, svc->client_count);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 static int notify_d_destroy(notify_d_service_t *svc)
 {
     if (!svc) {
-        AGENTRT_ERROR(AGENTRT_EINVAL, "svc is NULL");
+        AIRY_ERROR(AIRY_EINVAL, "svc is NULL");
     }
 
     notify_d_stop(svc, 1);
 
     for (size_t i = 0; i < svc->client_count; i++) {
-        AGENTRT_FREE(svc->clients[i].channel);
+        AIRY_FREE(svc->clients[i].channel);
     }
-    agentrt_socket_cleanup();
-    agentrt_mutex_destroy(&svc->lock);
-    AGENTRT_FREE(svc->socket_path);
+    airy_sock_cleanup();
+    airy_mtx_destroy(&svc->lock);
+    AIRY_FREE(svc->socket_path);
     __builtin_memset(svc, 0, sizeof(*svc));
     SVC_LOG_INFO("notify_d: service destroyed");
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 static int notify_d_healthcheck(notify_d_service_t *svc)
@@ -558,7 +558,7 @@ static int notify_d_healthcheck(notify_d_service_t *svc)
     if (!svc)
         return 0;
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     int healthy = svc->running && svc->event_running ? 1 : 0;
     size_t active_clients = 0;
     for (size_t i = 0; i < svc->client_count; i++) {
@@ -568,7 +568,7 @@ static int notify_d_healthcheck(notify_d_service_t *svc)
     size_t pending = svc->pending_count;
     size_t error_count = svc->error_count;
     size_t notified_count = svc->notified_count;
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     if (pending >= NOTIFY_D_MAX_PENDING)
         healthy = 0;
@@ -578,17 +578,17 @@ static int notify_d_healthcheck(notify_d_service_t *svc)
     return healthy;
 }
 
-static void notify_d_handle_request(notify_d_service_t *svc, agentrt_socket_t client_fd)
+static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_fd)
 {
     char buffer[NOTIFY_D_MAX_BUFFER];
-    ssize_t n = agentrt_socket_recv(client_fd, buffer, sizeof(buffer) - 1);
+    ssize_t n = airy_sock_recv(client_fd, buffer, sizeof(buffer) - 1);
     if (n <= 0) {
-        agentrt_socket_close(client_fd);
+        airy_sock_close(client_fd);
         return;
     }
     buffer[n] = '\0';
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
 
     int is_upgrade = (strstr(buffer, "Upgrade: websocket") != NULL ||
                       strstr(buffer, "Upgrade: WebSocket") != NULL);
@@ -596,10 +596,10 @@ static void notify_d_handle_request(notify_d_service_t *svc, agentrt_socket_t cl
 
     notify_client_t *client = notify_d_find_client_slot(svc);
     if (!client) {
-        agentrt_mutex_unlock(&svc->lock);
+        airy_mtx_unlock(&svc->lock);
         const char *busy = "{\"error\":\"max_clients_reached\"}";
-        agentrt_socket_send(client_fd, busy, strlen(busy));
-        agentrt_socket_close(client_fd);
+        airy_sock_send(client_fd, busy, strlen(busy));
+        airy_sock_close(client_fd);
         return;
     }
 
@@ -616,7 +616,7 @@ static void notify_d_handle_request(notify_d_service_t *svc, agentrt_socket_t cl
                                   "Cache-Control: no-cache\r\n"
                                   "Connection: keep-alive\r\n"
                                   "\r\n";
-        agentrt_socket_send(client_fd, sse_headers, strlen(sse_headers));
+        airy_sock_send(client_fd, sse_headers, strlen(sse_headers));
         client->handshake_done = 1;
         svc->client_count++;
     } else if (is_upgrade) {
@@ -625,8 +625,8 @@ static void notify_d_handle_request(notify_d_service_t *svc, agentrt_socket_t cl
             svc->client_count++;
         } else {
             client->active = 0;
-            agentrt_mutex_unlock(&svc->lock);
-            agentrt_socket_close(client_fd);
+            airy_mtx_unlock(&svc->lock);
+            airy_sock_close(client_fd);
             return;
         }
     } else {
@@ -639,7 +639,7 @@ static void notify_d_handle_request(notify_d_service_t *svc, agentrt_socket_t cl
             const char *che = strstr(ch + strlen(channel_hdr), "\r\n");
             if (che) {
                 size_t clen = (size_t)(che - (ch + strlen(channel_hdr)));
-                char *cn = (char *)AGENTRT_MALLOC(clen + 1);
+                char *cn = (char *)AIRY_MALLOC(clen + 1);
                 if (cn) {
                     __builtin_memcpy(cn, ch + strlen(channel_hdr), clen);
                     cn[clen] = '\0';
@@ -647,9 +647,9 @@ static void notify_d_handle_request(notify_d_service_t *svc, agentrt_socket_t cl
                 }
             }
         }
-        client->channel = AGENTRT_STRDUP(channel);
+        client->channel = AIRY_STRDUP(channel);
         if (strcmp(channel, "inbound") != 0)
-            AGENTRT_FREE((void *)channel);
+            AIRY_FREE((void *)channel);
         svc->client_count++;
 
         int ret = notify_d_enqueue(svc, buffer, client->channel, NULL);
@@ -668,7 +668,7 @@ static void notify_d_handle_request(notify_d_service_t *svc, agentrt_socket_t cl
     }
 
     size_t depth = svc->pending_count;
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     if (client->type == NOTIFY_CLIENT_SOCKET) {
         char response[4096];
@@ -686,13 +686,13 @@ static void notify_d_handle_request(notify_d_service_t *svc, agentrt_socket_t cl
                  (unsigned long long)svc->notified_count, depth, active_clients,
                  (unsigned long long)uptime, notify_d_healthcheck(svc) ? "true" : "false");
 
-        agentrt_socket_send(client_fd, response, strlen(response));
-        agentrt_socket_close(client_fd);
+        airy_sock_send(client_fd, response, strlen(response));
+        airy_sock_close(client_fd);
 
-        agentrt_mutex_lock(&svc->lock);
+        airy_mtx_lock(&svc->lock);
         client->active = 0;
-        client->fd = AGENTRT_INVALID_SOCKET;
-        agentrt_mutex_unlock(&svc->lock);
+        client->fd = AIRY_INVALID_SOCKET;
+        airy_mtx_unlock(&svc->lock);
     }
 }
 
@@ -705,16 +705,16 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     signal(SIGPIPE, SIG_IGN);
 #endif
 
-    agentrt_log_init(NULL);
+    airy_log_init(NULL);
     atexit(log_cleanup);
 
     /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("notify_d");
 
     if (notify_d_init(&g_service, NOTIFY_D_DEFAULT_PORT, NOTIFY_D_DEFAULT_SOCKET) !=
-        AGENTRT_SUCCESS)
+        AIRY_SUCCESS)
         return 1;
-    if (notify_d_start(&g_service) != AGENTRT_SUCCESS) {
+    if (notify_d_start(&g_service) != AIRY_SUCCESS) {
         notify_d_destroy(&g_service);
         return 1;
     }
@@ -725,8 +725,8 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
                                         0, IPC_BUS_PROTO_JSON_RPC);
 
     while (!g_shutdown && g_service.running) {
-        agentrt_socket_t client = agentrt_socket_accept(g_service.server_fd, 1000);
-        if (client != AGENTRT_INVALID_SOCKET) {
+        airy_sock_t client = airy_sock_accept(g_service.server_fd, 1000);
+        if (client != AIRY_INVALID_SOCKET) {
             notify_d_handle_request(&g_service, client);
         }
     }

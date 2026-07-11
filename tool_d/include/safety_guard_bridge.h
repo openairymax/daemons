@@ -18,8 +18,8 @@
  *   SAFETY_GUARD_AUDIT        → 审计日志记录
  */
 
-#ifndef AGENTRT_SAFETY_GUARD_BRIDGE_H
-#define AGENTRT_SAFETY_GUARD_BRIDGE_H
+#ifndef AIRY_RT_SAFETY_GUARD_BRIDGE_H
+#define AIRY_RT_SAFETY_GUARD_BRIDGE_H
 
 #include "tool_approval.h"
 
@@ -179,4 +179,4 @@ void safety_guard_bridge_get_stats(safety_guard_bridge_t *bridge,
 }
 #endif
 
-#endif /* AGENTRT_SAFETY_GUARD_BRIDGE_H */
+#endif /* AIRY_RT_SAFETY_GUARD_BRIDGE_H */

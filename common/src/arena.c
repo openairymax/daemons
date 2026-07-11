@@ -84,19 +84,19 @@ static inline uint8_t *block_data(arena_block_t *block)
 static arena_block_t *arena_block_create(size_t capacity, size_t alignment)
 {
     size_t total_size = BLOCK_HEADER_SIZE + capacity;
-    AGENTRT_LOG_DEBUG("Arena: allocating new block (capacity=%zu, total=%zu, "
+    AIRY_LOG_DEBUG("Arena: allocating new block (capacity=%zu, total=%zu, "
                       "alignment=%zu)",
                       capacity, total_size, alignment);
 
-    arena_block_t *block = (arena_block_t *)AGENTRT_MALLOC(total_size);
+    arena_block_t *block = (arena_block_t *)AIRY_MALLOC(total_size);
     if (!block) {
-        AGENTRT_LOG_ERROR("Arena: failed to allocate block of %zu bytes "
+        AIRY_LOG_ERROR("Arena: failed to allocate block of %zu bytes "
                           "(capacity=%zu, alignment=%zu)",
                           total_size, capacity, alignment);
         return NULL;
     }
 
-    AGENTRT_LOG_DEBUG("Arena: block allocated at %p (data_start=%p, "
+    AIRY_LOG_DEBUG("Arena: block allocated at %p (data_start=%p, "
                       "data_end=%p)",
                       (void *)block,
                       (void *)((uint8_t *)block + BLOCK_HEADER_SIZE),
@@ -122,7 +122,7 @@ static void *arena_block_alloc(arena_block_t *block, size_t size,
 
     if (aligned_offset + size > block->capacity) {
         /* 空间不足 — 记录详细诊断信息 */
-        AGENTRT_LOG_DEBUG("Arena: block %p full (requested=%zu, capacity=%zu, "
+        AIRY_LOG_DEBUG("Arena: block %p full (requested=%zu, capacity=%zu, "
                           "offset=%zu, aligned_offset=%zu, remaining=%zu)",
                           (void *)block, size, block->capacity,
                           block->offset, aligned_offset,
@@ -134,7 +134,7 @@ static void *arena_block_alloc(arena_block_t *block, size_t size,
     size_t prev_offset = block->offset;
     block->offset = aligned_offset + size;
 
-    AGENTRT_LOG_TRACE("Arena: block_alloc %p (size=%zu, align=%zu, "
+    AIRY_LOG_TRACE("Arena: block_alloc %p (size=%zu, align=%zu, "
                       "offset %zu→%zu, ptr=%p, remaining=%zu)",
                       (void *)block, size, effective_alignment,
                       prev_offset, block->offset, ptr,
@@ -147,9 +147,9 @@ static void *arena_block_alloc(arena_block_t *block, size_t size,
 
 arena_t *arena_create(const arena_config_t *config)
 {
-    arena_t *arena = (arena_t *)AGENTRT_CALLOC(1, sizeof(arena_t));
+    arena_t *arena = (arena_t *)AIRY_CALLOC(1, sizeof(arena_t));
     if (!arena) {
-        AGENTRT_LOG_ERROR("Arena: OOM creating arena");
+        AIRY_LOG_ERROR("Arena: OOM creating arena");
         return NULL;
     }
 
@@ -163,7 +163,7 @@ arena_t *arena_create(const arena_config_t *config)
     arena->head = arena_block_create(arena->config.block_size,
                                      arena->config.alignment);
     if (!arena->head) {
-        AGENTRT_FREE(arena);
+        AIRY_FREE(arena);
         return NULL;
     }
 
@@ -173,7 +173,7 @@ arena_t *arena_create(const arena_config_t *config)
     arena->current_usage = 0;
     arena->peak_usage = 0;
 
-    AGENTRT_LOG_DEBUG("Arena: created (block_size=%zu, alignment=%zu)",
+    AIRY_LOG_DEBUG("Arena: created (block_size=%zu, alignment=%zu)",
                       arena->config.block_size, arena->config.alignment);
     return arena;
 }
@@ -190,20 +190,20 @@ void arena_destroy(arena_t *arena)
         arena_block_t *next = block->next;
         size_t block_bytes = BLOCK_HEADER_SIZE + block->capacity;
         total_bytes += block_bytes;
-        AGENTRT_LOG_TRACE("Arena: destroy freeing block %p (capacity=%zu, "
+        AIRY_LOG_TRACE("Arena: destroy freeing block %p (capacity=%zu, "
                           "used=%zu/%zu)",
                           (void *)block, block->capacity,
                           block->offset, block->capacity);
-        AGENTRT_FREE(block);
+        AIRY_FREE(block);
         block = next;
         block_count++;
     }
 
-    AGENTRT_LOG_INFO("Arena: destroyed (blocks=%zu, total_bytes=%zu, "
+    AIRY_LOG_INFO("Arena: destroyed (blocks=%zu, total_bytes=%zu, "
                      "peak=%zu, total_allocated=%zu)",
                      block_count, total_bytes,
                      arena->peak_usage, arena->total_allocated);
-    AGENTRT_FREE(arena);
+    AIRY_FREE(arena);
 }
 
 /* ==================== 分配操作实现 ==================== */
@@ -217,7 +217,7 @@ void *arena_alloc_aligned(arena_t *arena, size_t size, size_t alignment)
 {
     if (!arena || size == 0) {
         if (!arena) {
-            AGENTRT_LOG_ERROR("Arena: arena_alloc_aligned called with NULL arena");
+            AIRY_LOG_ERROR("Arena: arena_alloc_aligned called with NULL arena");
         }
         return NULL;
     }
@@ -229,7 +229,7 @@ void *arena_alloc_aligned(arena_t *arena, size_t size, size_t alignment)
         arena->total_allocated += size;
         if (arena->current_usage > arena->peak_usage) {
             arena->peak_usage = arena->current_usage;
-            AGENTRT_LOG_DEBUG("Arena: new peak usage %zu bytes (blocks=%zu, "
+            AIRY_LOG_DEBUG("Arena: new peak usage %zu bytes (blocks=%zu, "
                               "alloc_count=%zu)",
                               arena->peak_usage, arena->total_blocks,
                               arena->total_allocated);
@@ -240,13 +240,13 @@ void *arena_alloc_aligned(arena_t *arena, size_t size, size_t alignment)
     /* 当前区块空间不足，创建新区块 */
     size_t new_block_size = arena->config.block_size;
     if (size > new_block_size) {
-        AGENTRT_LOG_INFO("Arena: request %zu exceeds default block_size %zu, "
+        AIRY_LOG_INFO("Arena: request %zu exceeds default block_size %zu, "
                          "creating oversized block",
                          size, new_block_size);
         new_block_size = size + BLOCK_HEADER_SIZE + alignment;
     }
 
-    AGENTRT_LOG_DEBUG("Arena: extending chain (current_block=%zu/%zu used, "
+    AIRY_LOG_DEBUG("Arena: extending chain (current_block=%zu/%zu used, "
                       "new_block_size=%zu, total_blocks_before=%zu)",
                       arena->current->offset, arena->current->capacity,
                       new_block_size, arena->total_blocks);
@@ -254,7 +254,7 @@ void *arena_alloc_aligned(arena_t *arena, size_t size, size_t alignment)
     arena_block_t *new_block = arena_block_create(new_block_size,
                                                   arena->config.alignment);
     if (!new_block) {
-        AGENTRT_LOG_ERROR("Arena: failed to extend, requested %zu bytes "
+        AIRY_LOG_ERROR("Arena: failed to extend, requested %zu bytes "
                           "(arena_total=%zu, blocks=%zu, peak=%zu)",
                           size, arena->total_allocated,
                           arena->total_blocks, arena->peak_usage);
@@ -266,7 +266,7 @@ void *arena_alloc_aligned(arena_t *arena, size_t size, size_t alignment)
     arena->current = new_block;
     arena->total_blocks++;
 
-    AGENTRT_LOG_DEBUG("Arena: chain extended → block #%zu (capacity=%zu, "
+    AIRY_LOG_DEBUG("Arena: chain extended → block #%zu (capacity=%zu, "
                       "total_blocks=%zu)",
                       arena->total_blocks, new_block_size,
                       arena->total_blocks);
@@ -280,7 +280,7 @@ void *arena_alloc_aligned(arena_t *arena, size_t size, size_t alignment)
             arena->peak_usage = arena->current_usage;
         }
     } else {
-        AGENTRT_LOG_ERROR("Arena: BUG — block_alloc failed in new block "
+        AIRY_LOG_ERROR("Arena: BUG — block_alloc failed in new block "
                           "(size=%zu, capacity=%zu)",
                           size, new_block_size);
     }
@@ -316,7 +316,7 @@ void arena_reset(arena_t *arena)
     arena->current = arena->head;
     arena->current_usage = 0;
 
-    AGENTRT_LOG_INFO("Arena: reset (blocks=%zu, usage_before=%zu, "
+    AIRY_LOG_INFO("Arena: reset (blocks=%zu, usage_before=%zu, "
                      "peak=%zu, reclaimed=%zu bytes)",
                      blocks_before, usage_before, peak_before, usage_before);
 }
@@ -341,7 +341,7 @@ void arena_rollback(arena_t *arena, arena_mark_t mark)
 {
     if (!arena || !mark.block_start) {
         if (!arena) {
-            AGENTRT_LOG_WARN("Arena: rollback called with NULL arena");
+            AIRY_LOG_WARN("Arena: rollback called with NULL arena");
         }
         return;
     }
@@ -358,9 +358,9 @@ void arena_rollback(arena_t *arena, arena_mark_t mark)
     while (block) {
         arena_block_t *next = block->next;
         freed_bytes += BLOCK_HEADER_SIZE + block->capacity;
-        AGENTRT_LOG_DEBUG("Arena: rollback freeing block %p (capacity=%zu)",
+        AIRY_LOG_DEBUG("Arena: rollback freeing block %p (capacity=%zu)",
                           (void *)block, block->capacity);
-        AGENTRT_FREE(block);
+        AIRY_FREE(block);
         block = next;
         arena->total_blocks--;
         freed_blocks++;
@@ -381,7 +381,7 @@ void arena_rollback(arena_t *arena, arena_mark_t mark)
     }
     arena->current_usage = usage;
 
-    AGENTRT_LOG_INFO("Arena: rollback → block #%zu (offset=%zu) "
+    AIRY_LOG_INFO("Arena: rollback → block #%zu (offset=%zu) "
                      "(freed_blocks=%zu, freed_bytes=%zu, "
                      "usage_before=%zu → usage_after=%zu, "
                      "blocks_before=%zu → blocks_after=%zu)",

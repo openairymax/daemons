@@ -39,7 +39,7 @@ void gateway_service_get_default_config(gateway_service_config_t *config)
 {
     if (!config)
         return;
-    AGENTRT_MEMSET(config, 0, sizeof(*config));
+    AIRY_MEMSET(config, 0, sizeof(*config));
 
     config->name = "agentrt-gateway";
     config->version = "0.1.0";
@@ -68,18 +68,18 @@ void gateway_service_get_default_config(gateway_service_config_t *config)
     config->shutdown_timeout_ms = 5000;
 }
 
-agentrt_error_t gateway_service_load_config(gateway_service_config_t *config,
+airy_err_t gateway_service_load_config(gateway_service_config_t *config,
                                             const char *config_path)
 {
     if (!config)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
     gateway_service_get_default_config(config);
     if (!config_path || config_path[0] == '\0')
-        return AGENTRT_SUCCESS;
+        return AIRY_SUCCESS;
 
     FILE *f = fopen(config_path, "r");
     if (!f)
-        return AGENTRT_SUCCESS;
+        return AIRY_SUCCESS;
 
     char line[512];
     while (fgets(line, sizeof(line), f)) {
@@ -103,8 +103,8 @@ agentrt_error_t gateway_service_load_config(gateway_service_config_t *config,
         if (strcmp(key, "http.port") == 0) {
             config->http.port = (uint16_t)strtol(val, NULL, 10);
         } else if (strcmp(key, "http.host") == 0) {
-            AGENTRT_FREE((void *)config->http.host);
-            config->http.host = AGENTRT_STRDUP(val);
+            AIRY_FREE((void *)config->http.host);
+            config->http.host = AIRY_STRDUP(val);
         } else if (strcmp(key, "http.enabled") == 0) {
             config->http.enabled = (strcmp(val, "true") == 0 || strcmp(val, "1") == 0);
         } else if (strcmp(key, "stdio.max_request_size") == 0) {
@@ -121,27 +121,27 @@ agentrt_error_t gateway_service_load_config(gateway_service_config_t *config,
     }
 
     fclose(f);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-agentrt_error_t gateway_service_create(gateway_service_t *service,
+airy_err_t gateway_service_create(gateway_service_t *service,
                                        const gateway_service_config_t *config)
 {
     if (!service)
-        return AGENTRT_EINVAL;
-    gateway_service_t svc = (gateway_service_t)AGENTRT_CALLOC(1, sizeof(struct gateway_service_s));
+        return AIRY_EINVAL;
+    gateway_service_t svc = (gateway_service_t)AIRY_CALLOC(1, sizeof(struct gateway_service_s));
     if (!svc) {
-        AGENTRT_LOG_ERROR("service allocation failed, size=%zu", sizeof(struct gateway_service_s));
-        return AGENTRT_ENOMEM;
+        AIRY_LOG_ERROR("service allocation failed, size=%zu", sizeof(struct gateway_service_s));
+        return AIRY_ENOMEM;
     }
     if (config) {
-        AGENTRT_MEMCPY(&svc->config, config, sizeof(gateway_service_config_t));
+        AIRY_MEMCPY(&svc->config, config, sizeof(gateway_service_config_t));
     } else {
         gateway_service_get_default_config(&svc->config);
     }
     svc->state = GW_STATE_CREATED;
     *service = svc;
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 void gateway_service_destroy(gateway_service_t service)
@@ -156,28 +156,28 @@ void gateway_service_destroy(gateway_service_t service)
         gateway_destroy(service->http_gateway);
     }
 #endif
-    AGENTRT_FREE(service);
+    AIRY_FREE(service);
 }
 
-agentrt_error_t gateway_service_init(gateway_service_t service)
+airy_err_t gateway_service_init(gateway_service_t service)
 {
     if (!service)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
     if (service->state != GW_STATE_CREATED)
-        return AGENTRT_EPERM;
+        return AIRY_EPERM;
     service->state = GW_STATE_INITIALIZED;
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-agentrt_error_t gateway_service_start(gateway_service_t service)
+airy_err_t gateway_service_start(gateway_service_t service)
 {
     if (!service)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
     if (service->state == GW_STATE_RUNNING)
-        return AGENTRT_SUCCESS;
+        return AIRY_SUCCESS;
     if (service->state != GW_STATE_INITIALIZED && service->state != GW_STATE_STOPPED) {
-        AGENTRT_LOG_ERROR("service start rejected: invalid state=%d", service->state);
-        return AGENTRT_EPERM;
+        AIRY_LOG_ERROR("service start rejected: invalid state=%d", service->state);
+        return AIRY_EPERM;
     }
     service->state = GW_STATE_RUNNING;
 
@@ -186,23 +186,23 @@ agentrt_error_t gateway_service_start(gateway_service_t service)
         service->http_gateway =
             http_gateway_create(service->config.http.host, service->config.http.port);
         if (!service->http_gateway) {
-            AGENTRT_LOG_ERROR("http_gateway_create failed: host=%s, port=%d",
+            AIRY_LOG_ERROR("http_gateway_create failed: host=%s, port=%d",
                               service->config.http.host, service->config.http.port);
             service->state = GW_STATE_STOPPED;
-            return AGENTRT_ENOMEM;
+            return AIRY_ENOMEM;
         }
         gateway_start(service->http_gateway);
     }
 #endif
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-agentrt_error_t gateway_service_stop(gateway_service_t service, bool force __attribute__((unused)))
+airy_err_t gateway_service_stop(gateway_service_t service, bool force __attribute__((unused)))
 {
     if (!service)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
     if (service->state != GW_STATE_RUNNING)
-        return AGENTRT_SUCCESS;
+        return AIRY_SUCCESS;
 #ifdef GATEWAY_HAS_HTTP
     if (service->http_gateway) {
         gateway_destroy(service->http_gateway);
@@ -210,24 +210,24 @@ agentrt_error_t gateway_service_stop(gateway_service_t service, bool force __att
     }
 #endif
     service->state = GW_STATE_STOPPED;
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-agentrt_svc_state_t gateway_service_get_state(gateway_service_t service)
+airy_svc_state_t gateway_service_get_state(gateway_service_t service)
 {
     if (!service)
-        return AGENTRT_SVC_STATE_NONE;
+        return AIRY_SVC_STATE_NONE;
     switch (service->state) {
     case GW_STATE_CREATED:
-        return AGENTRT_SVC_STATE_CREATED;
+        return AIRY_SVC_STATE_CREATED;
     case GW_STATE_INITIALIZED:
-        return AGENTRT_SVC_STATE_READY;
+        return AIRY_SVC_STATE_READY;
     case GW_STATE_RUNNING:
-        return AGENTRT_SVC_STATE_RUNNING;
+        return AIRY_SVC_STATE_RUNNING;
     case GW_STATE_STOPPED:
-        return AGENTRT_SVC_STATE_STOPPED;
+        return AIRY_SVC_STATE_STOPPED;
     default:
-        return AGENTRT_SVC_STATE_ERROR;
+        return AIRY_SVC_STATE_ERROR;
     }
 }
 
@@ -238,19 +238,19 @@ bool gateway_service_is_running(gateway_service_t service)
     return service->state == GW_STATE_RUNNING;
 }
 
-agentrt_error_t gateway_service_get_stats(gateway_service_t service, agentrt_svc_stats_t *stats)
+airy_err_t gateway_service_get_stats(gateway_service_t service, airy_svc_stats_t *stats)
 {
     if (!service || !stats)
-        return AGENTRT_EINVAL;
-    AGENTRT_MEMSET(stats, 0, sizeof(*stats));
+        return AIRY_EINVAL;
+    AIRY_MEMSET(stats, 0, sizeof(*stats));
     stats->request_count = service->requests_total;
     stats->error_count = service->requests_failed;
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-agentrt_error_t gateway_service_healthcheck(gateway_service_t service)
+airy_err_t gateway_service_healthcheck(gateway_service_t service)
 {
     if (!service)
-        return AGENTRT_EINVAL;
-    return (service->state == GW_STATE_RUNNING) ? AGENTRT_SUCCESS : AGENTRT_EALREADY;
+        return AIRY_EINVAL;
+    return (service->state == GW_STATE_RUNNING) ? AIRY_SUCCESS : AIRY_EALREADY;
 }

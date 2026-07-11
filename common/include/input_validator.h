@@ -6,8 +6,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_INPUT_VALIDATOR_H
-#define AGENTRT_INPUT_VALIDATOR_H
+#ifndef AIRY_RT_INPUT_VALIDATOR_H
+#define AIRY_RT_INPUT_VALIDATOR_H
 
 #include <cjson/cJSON.h>
 #include <stdbool.h>
@@ -64,4 +64,4 @@ int security_check_string(const char *input, unsigned int flags, char **out_viol
 }
 #endif
 
-#endif /* AGENTRT_INPUT_VALIDATOR_H */
+#endif /* AIRY_RT_INPUT_VALIDATOR_H */

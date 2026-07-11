@@ -11,19 +11,19 @@
  * @see commons/utils/logging/include/svc_logger.h
  */
 
-#ifndef AGENTRT_DAEMON_COMMON_SVC_LOGGER_H
-#define AGENTRT_DAEMON_COMMON_SVC_LOGGER_H
+#ifndef AIRY_RT_DAEMON_COMMON_SVC_LOGGER_H
+#define AIRY_RT_DAEMON_COMMON_SVC_LOGGER_H
 
 /* P0.17 阶段 2: 包含 daemon 扩展错误码（DAEMON_EINIT/ESTATE/EHEALTH 等）。
  * 迁移前 daemons 版 svc_logger.h 间接包含 daemons 版 error.h 提供这些错误码，
  * 迁移后 commons 版 svc_logger.h 不再包含 daemons 版 error.h，需在此显式包含。 */
 #include "daemon_errors.h"
 
-/* P0.17 阶段 2: 需要 daemons 特有函数声明（agentrt_dl_*、agentrt_socket_* 等）
+/* P0.17 阶段 2: 需要 daemons 特有函数声明（airy_dl_*、airy_sock_* 等）
  * 的源文件应直接 #include "daemon_platform_ext.h"，不通过 svc_logger.h 间接获取。
  * 参见 daemon_platform_ext.h 了解 daemons 特有平台扩展声明。 */
 
 /* 使用相对路径避免找到 daemons 自身的 svc_logger.h（递归包含） */
 #include "../../../commons/utils/logging/include/svc_logger.h"
 
-#endif /* AGENTRT_DAEMON_COMMON_SVC_LOGGER_H */
+#endif /* AIRY_RT_DAEMON_COMMON_SVC_LOGGER_H */

@@ -30,7 +30,7 @@ static int dummy_handler(ipc_bus_channel_t channel,
     (void)channel;
     (void)message;
     (void)user_data;
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 static int dummy_handler2(ipc_bus_channel_t channel,
@@ -39,7 +39,7 @@ static int dummy_handler2(ipc_bus_channel_t channel,
     (void)channel;
     (void)message;
     (void)user_data;
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 static void test_ipc_bus_create_null_name(void)
@@ -80,13 +80,13 @@ static void test_ipc_bus_start_stop(void)
     ipc_service_bus_t bus = ipc_service_bus_create("start_stop_bus", NULL);
     assert(bus != NULL);
 
-    agentrt_error_t ret = ipc_service_bus_start(bus);
+    airy_err_t ret = ipc_service_bus_start(bus);
     (void)ret;
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
     assert(ipc_service_bus_is_running(bus) == true);
 
     ret = ipc_service_bus_stop(bus);
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
     assert(ipc_service_bus_is_running(bus) == false);
 
     ipc_service_bus_destroy(bus);
@@ -101,12 +101,12 @@ static void test_ipc_bus_double_start(void)
     ipc_service_bus_t bus = ipc_service_bus_create("double_start_bus", NULL);
     assert(bus != NULL);
 
-    agentrt_error_t ret = ipc_service_bus_start(bus);
+    airy_err_t ret = ipc_service_bus_start(bus);
     (void)ret;
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
 
     ret = ipc_service_bus_start(bus);
-    assert(ret == AGENTRT_OK || ret == AGENTRT_EBUSY);  /* 幂等或已运行 */
+    assert(ret == AIRY_OK || ret == AIRY_EBUSY);  /* 幂等或已运行 */
 
     ipc_service_bus_stop(bus);
     ipc_service_bus_destroy(bus);
@@ -163,12 +163,12 @@ static void test_ipc_bus_register_handler(void)
     ipc_service_bus_t bus = ipc_service_bus_create("handler_bus", NULL);
     assert(bus != NULL);
 
-    agentrt_error_t ret = ipc_service_bus_register_handler(bus, dummy_handler, (void *)0x1);
+    airy_err_t ret = ipc_service_bus_register_handler(bus, dummy_handler, (void *)0x1);
     (void)ret;
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
 
     ret = ipc_service_bus_unregister_handler(bus, dummy_handler);
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
 
     ipc_service_bus_destroy(bus);
 
@@ -182,15 +182,15 @@ static void test_ipc_bus_unregister_handler(void)
     ipc_service_bus_t bus = ipc_service_bus_create("unreg_bus", NULL);
     assert(bus != NULL);
 
-    agentrt_error_t ret = ipc_service_bus_register_handler(bus, dummy_handler, NULL);
+    airy_err_t ret = ipc_service_bus_register_handler(bus, dummy_handler, NULL);
     (void)ret;
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
 
     ret = ipc_service_bus_unregister_handler(bus, dummy_handler);
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
 
     ret = ipc_service_bus_unregister_handler(bus, dummy_handler);
-    assert(ret == AGENTRT_OK || ret == AGENTRT_ENOENT);  /* 成功或已不存在 */
+    assert(ret == AIRY_OK || ret == AIRY_ENOENT);  /* 成功或已不存在 */
 
     ipc_service_bus_destroy(bus);
 
@@ -248,18 +248,18 @@ static void test_ipc_bus_stats(void)
     ipc_bus_stats_t stats;
     memset(&stats, 0, sizeof(stats));
 
-    agentrt_error_t ret = ipc_service_bus_get_stats(bus, &stats);
+    airy_err_t ret = ipc_service_bus_get_stats(bus, &stats);
     (void)ret;
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
     assert(stats.messages_sent == 0);
     assert(stats.messages_received == 0);
     assert(stats.errors == 0);
 
     ret = ipc_service_bus_reset_stats(bus);
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
 
     ret = ipc_service_bus_get_stats(NULL, &stats);
-    assert(ret != AGENTRT_OK);
+    assert(ret != AIRY_OK);
 
     ipc_service_bus_destroy(bus);
 
@@ -275,12 +275,12 @@ static void test_ipc_bus_max_handlers(void)
 
 #define MAX_HANDLER_TEST_COUNT 256
 
-    agentrt_error_t ret;
+    airy_err_t ret;
     int registered = 0;
 
     for (int i = 0; i < MAX_HANDLER_TEST_COUNT; i++) {
         ret = ipc_service_bus_register_handler(bus, dummy_handler, (void *)(intptr_t)(i + 1));
-        if (ret != AGENTRT_OK) {
+        if (ret != AIRY_OK) {
             break;
         }
         registered++;
@@ -290,7 +290,7 @@ static void test_ipc_bus_max_handlers(void)
 
     for (int i = 0; i < registered; i++) {
         ret = ipc_service_bus_unregister_handler(bus, dummy_handler);
-        assert(ret == AGENTRT_OK);
+        assert(ret == AIRY_OK);
     }
 
     ipc_service_bus_destroy(bus);
@@ -315,31 +315,31 @@ static void test_ipc_bus_lifecycle_full(void)
     ipc_bus_channel_t channel = ipc_bus_channel_create(bus, &ch_cfg);
     assert(channel != NULL);
 
-    agentrt_error_t ret = ipc_service_bus_register_handler(bus, dummy_handler, NULL);
+    airy_err_t ret = ipc_service_bus_register_handler(bus, dummy_handler, NULL);
     (void)ret;
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
 
     ret = ipc_service_bus_register_handler(bus, dummy_handler2, (void *)0xDEAD);
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
 
     ret = ipc_service_bus_start(bus);
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
     assert(ipc_service_bus_is_running(bus) == true);
 
     ipc_bus_stats_t stats;
     memset(&stats, 0, sizeof(stats));
     ret = ipc_service_bus_get_stats(bus, &stats);
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
 
     ret = ipc_service_bus_stop(bus);
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
     assert(ipc_service_bus_is_running(bus) == false);
 
     ret = ipc_service_bus_unregister_handler(bus, dummy_handler2);
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
 
     ret = ipc_service_bus_unregister_handler(bus, dummy_handler);
-    assert(ret == AGENTRT_OK);
+    assert(ret == AIRY_OK);
 
     ipc_bus_channel_destroy(channel);
     ipc_service_bus_destroy(bus);
@@ -354,8 +354,8 @@ static void test_ipc_bus_destroy_while_running(void)
     ipc_service_bus_t bus = ipc_service_bus_create("running_destroy_bus", NULL);
     assert(bus != NULL);
 
-    agentrt_error_t ret = ipc_service_bus_start(bus);
-    assert(ret == AGENTRT_OK);
+    airy_err_t ret = ipc_service_bus_start(bus);
+    assert(ret == AIRY_OK);
     assert(ipc_service_bus_is_running(bus) == true);
 
     ipc_service_bus_destroy(bus);

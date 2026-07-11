@@ -35,7 +35,7 @@ daemon_bootstrap_sd_t *daemon_bootstrap_sd_start(const char *name, const char *t
     }
 
     daemon_bootstrap_sd_t *bsd =
-        (daemon_bootstrap_sd_t *)AGENTRT_CALLOC(1, sizeof(daemon_bootstrap_sd_t));
+        (daemon_bootstrap_sd_t *)AIRY_CALLOC(1, sizeof(daemon_bootstrap_sd_t));
     if (!bsd) {
         SVC_LOG_ERROR("daemon_bootstrap_sd_start: OOM");
         return NULL;
@@ -45,7 +45,7 @@ daemon_bootstrap_sd_t *daemon_bootstrap_sd_start(const char *name, const char *t
     bsd->sdh = sd_helper_init(NULL);
     if (!bsd->sdh) {
         SVC_LOG_ERROR("daemon_bootstrap_sd_start: sd_helper_init failed for '%s'", name);
-        AGENTRT_FREE(bsd);
+        AIRY_FREE(bsd);
         return NULL;
     }
 
@@ -55,7 +55,7 @@ daemon_bootstrap_sd_t *daemon_bootstrap_sd_start(const char *name, const char *t
             SVC_LOG_ERROR("daemon_bootstrap_sd_start: register failed for '%s' (%s:%u)",
                           name, host, port);
             sd_helper_shutdown(bsd->sdh);
-            AGENTRT_FREE(bsd);
+            AIRY_FREE(bsd);
             return NULL;
         }
     } else {
@@ -64,7 +64,7 @@ daemon_bootstrap_sd_t *daemon_bootstrap_sd_start(const char *name, const char *t
         if (sd_helper_register_unix(bsd->sdh, name, type, sock, tags, ttl_ms) != 0) {
             SVC_LOG_ERROR("daemon_bootstrap_sd_start: unix register failed for '%s'", name);
             sd_helper_shutdown(bsd->sdh);
-            AGENTRT_FREE(bsd);
+            AIRY_FREE(bsd);
             return NULL;
         }
     }
@@ -75,7 +75,7 @@ daemon_bootstrap_sd_t *daemon_bootstrap_sd_start(const char *name, const char *t
         /* 非致命，继续运行 */
     }
 
-    AGENTRT_STRNCPY_TERM(bsd->service_name, name, sizeof(bsd->service_name) - 1);
+    AIRY_STRNCPY_TERM(bsd->service_name, name, sizeof(bsd->service_name) - 1);
     bsd->service_name[sizeof(bsd->service_name) - 1] = '\0';
     bsd->running = true;
 
@@ -93,20 +93,20 @@ daemon_bootstrap_sd_t *daemon_bootstrap_sd_start_unix(const char *name, const ch
     }
 
     daemon_bootstrap_sd_t *bsd =
-        (daemon_bootstrap_sd_t *)AGENTRT_CALLOC(1, sizeof(daemon_bootstrap_sd_t));
+        (daemon_bootstrap_sd_t *)AIRY_CALLOC(1, sizeof(daemon_bootstrap_sd_t));
     if (!bsd) return NULL;
 
     bsd->sdh = sd_helper_init(NULL);
     if (!bsd->sdh) {
         SVC_LOG_ERROR("daemon_bootstrap_sd_start_unix: init failed for '%s'", name);
-        AGENTRT_FREE(bsd);
+        AIRY_FREE(bsd);
         return NULL;
     }
 
     if (sd_helper_register_unix(bsd->sdh, name, type, socket_path, tags, ttl_ms) != 0) {
         SVC_LOG_ERROR("daemon_bootstrap_sd_start_unix: register failed for '%s'", name);
         sd_helper_shutdown(bsd->sdh);
-        AGENTRT_FREE(bsd);
+        AIRY_FREE(bsd);
         return NULL;
     }
 
@@ -114,7 +114,7 @@ daemon_bootstrap_sd_t *daemon_bootstrap_sd_start_unix(const char *name, const ch
         SVC_LOG_WARN("daemon_bootstrap_sd_start_unix: heartbeat start failed for '%s'", name);
     }
 
-    AGENTRT_STRNCPY_TERM(bsd->service_name, name, sizeof(bsd->service_name) - 1);
+    AIRY_STRNCPY_TERM(bsd->service_name, name, sizeof(bsd->service_name) - 1);
     bsd->service_name[sizeof(bsd->service_name) - 1] = '\0';
     bsd->running = true;
 
@@ -134,7 +134,7 @@ void daemon_bootstrap_sd_stop(daemon_bootstrap_sd_t *bsd)
     }
 
     bsd->running = false;
-    AGENTRT_FREE(bsd);
+    AIRY_FREE(bsd);
 }
 
 sd_helper_t *daemon_bootstrap_sd_get_helper(daemon_bootstrap_sd_t *bsd)

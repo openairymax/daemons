@@ -135,7 +135,7 @@ static void test_stats_without_handler(void)
         for (int j = 0; j < N; j++) {
             char *resp = NULL;
             int rc = gw_proto_router_route(router, pt, "GET", "/test", "{}", &resp);
-            assert(rc == AGENTRT_ERR_NOT_FOUND);
+            assert(rc == AIRY_ERR_NOT_FOUND);
             (void)rc;
         }
     }
@@ -222,10 +222,10 @@ static void test_invalid_params(void)
     int rc;
 
     rc = gw_proto_router_route(NULL, GW_PROTO_DETECT_MCP, "GET", "/t", "{}", NULL);
-    assert(rc == AGENTRT_ERR_INVALID_PARAM);
+    assert(rc == AIRY_ERR_INVALID_PARAM);
 
     rc = gw_proto_router_route(router, GW_PROTO_DETECT_MCP, NULL, "/t", "{}", NULL);
-    assert(rc == AGENTRT_ERR_INVALID_PARAM);
+    assert(rc == AIRY_ERR_INVALID_PARAM);
     (void)rc;
 
     printf("  >>> PASSED\n");

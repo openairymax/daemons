@@ -51,7 +51,7 @@ static int win_run_command(const char *prog, const char *const args[])
     char cmdline[2048];
     size_t off = 0;
     int n = snprintf(cmdline, sizeof(cmdline), "\"%s\"", prog);
-    if (n < 0) return AGENTRT_ERR_FAIL;
+    if (n < 0) return AIRY_ERR_FAIL;
     off = (size_t)n;
     for (size_t i = 0; args && args[i] && off < sizeof(cmdline) - 1; i++) {
         const char *a = args[i];
@@ -71,7 +71,7 @@ static int win_run_command(const char *prog, const char *const args[])
     ZeroMemory(&pi, sizeof(pi));
 
     if (!CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        return AGENTRT_ERR_EXEC_FAIL;
+        return AIRY_ERR_EXEC_FAIL;
     }
     WaitForSingleObject(pi.hProcess, INFINITE);
     DWORD code = 1;
@@ -108,7 +108,7 @@ static int recursive_remove(const char *path)
 #ifdef _WIN32
     DWORD attr = GetFileAttributesA(path);
     if (attr == INVALID_FILE_ATTRIBUTES) {
-        return AGENTRT_ERR_NOT_FOUND; /* 路径不存在 */
+        return AIRY_ERR_NOT_FOUND; /* 路径不存在 */
     }
     if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
         /* 文件：清除只读属性后直接删除 */
@@ -187,7 +187,7 @@ int market_service_create(const market_config_t *config, market_service_t **serv
     market_config_t default_cfg;
     if (!service) {
         SVC_LOG_ERROR("market_service_create: NULL service output parameter");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     if (!config) {
         __builtin_memset(&default_cfg, 0, sizeof(default_cfg));
@@ -196,16 +196,16 @@ int market_service_create(const market_config_t *config, market_service_t **serv
         config = &default_cfg;
     }
 
-    market_service_t *svc = (market_service_t *)AGENTRT_CALLOC(1, sizeof(market_service_t));
+    market_service_t *svc = (market_service_t *)AIRY_CALLOC(1, sizeof(market_service_t));
     if (!svc) {
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate service struct");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate service struct");
     }
 
     __builtin_memcpy(&svc->config, config, sizeof(market_config_t));
     if (config->registry_url)
-        svc->config.registry_url = AGENTRT_STRDUP(config->registry_url);
+        svc->config.registry_url = AIRY_STRDUP(config->registry_url);
     if (config->storage_path)
-        svc->config.storage_path = AGENTRT_STRDUP(config->storage_path);
+        svc->config.storage_path = AIRY_STRDUP(config->storage_path);
 
     svc->initialized = 1;
     *service = svc;
@@ -216,38 +216,38 @@ int market_service_destroy(market_service_t *service)
 {
     if (!service) {
         SVC_LOG_ERROR("market_service_destroy: NULL service parameter");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     for (size_t i = 0; i < service->agent_count; i++) {
         if (service->agents[i]) {
-            AGENTRT_FREE(service->agents[i]->agent_id);
-            AGENTRT_FREE(service->agents[i]->name);
-            AGENTRT_FREE(service->agents[i]->version);
-            AGENTRT_FREE(service->agents[i]->description);
-            AGENTRT_FREE(service->agents[i]->author);
-            AGENTRT_FREE(service->agents[i]->repository);
-            AGENTRT_FREE(service->agents[i]->dependencies);
-            AGENTRT_FREE(service->agents[i]);
+            AIRY_FREE(service->agents[i]->agent_id);
+            AIRY_FREE(service->agents[i]->name);
+            AIRY_FREE(service->agents[i]->version);
+            AIRY_FREE(service->agents[i]->description);
+            AIRY_FREE(service->agents[i]->author);
+            AIRY_FREE(service->agents[i]->repository);
+            AIRY_FREE(service->agents[i]->dependencies);
+            AIRY_FREE(service->agents[i]);
         }
     }
 
     for (size_t i = 0; i < service->skill_count; i++) {
         if (service->skills[i]) {
-            AGENTRT_FREE(service->skills[i]->skill_id);
-            AGENTRT_FREE(service->skills[i]->name);
-            AGENTRT_FREE(service->skills[i]->version);
-            AGENTRT_FREE(service->skills[i]->description);
-            AGENTRT_FREE(service->skills[i]->author);
-            AGENTRT_FREE(service->skills[i]->repository);
-            AGENTRT_FREE(service->skills[i]->dependencies);
-            AGENTRT_FREE(service->skills[i]);
+            AIRY_FREE(service->skills[i]->skill_id);
+            AIRY_FREE(service->skills[i]->name);
+            AIRY_FREE(service->skills[i]->version);
+            AIRY_FREE(service->skills[i]->description);
+            AIRY_FREE(service->skills[i]->author);
+            AIRY_FREE(service->skills[i]->repository);
+            AIRY_FREE(service->skills[i]->dependencies);
+            AIRY_FREE(service->skills[i]);
         }
     }
 
-    AGENTRT_FREE((void *)service->config.registry_url);
-    AGENTRT_FREE((void *)service->config.storage_path);
-    AGENTRT_FREE(service);
+    AIRY_FREE((void *)service->config.registry_url);
+    AIRY_FREE((void *)service->config.storage_path);
+    AIRY_FREE(service);
     return 0;
 }
 
@@ -255,41 +255,41 @@ int market_service_register_agent(market_service_t *service, const agent_info_t 
 {
     if (!service || !agent_info || !service->initialized) {
         SVC_LOG_ERROR("market_service_register_agent: NULL parameter or not initialized (service=%p, agent_info=%p, initialized=%d)", (const void *)service, (const void *)agent_info, service ? service->initialized : -1);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     if (service->agent_count >= MAX_AGENTS) {
         SVC_LOG_ERROR("market_service_register_agent: max agents exceeded (count=%zu, max=%d)", service->agent_count, MAX_AGENTS);
-        AGENTRT_ERROR(AGENTRT_ERR_OVERFLOW, "max agents exceeded");
+        AIRY_ERROR(AIRY_ERR_OVERFLOW, "max agents exceeded");
     }
 
     for (size_t i = 0; i < service->agent_count; i++) {
         if (strcmp(service->agents[i]->agent_id, agent_info->agent_id) == 0) {
-            AGENTRT_FREE(service->agents[i]->name);
+            AIRY_FREE(service->agents[i]->name);
             service->agents[i]->name = NULL;
-            AGENTRT_FREE(service->agents[i]->version);
+            AIRY_FREE(service->agents[i]->version);
             service->agents[i]->version = NULL;
-            AGENTRT_FREE(service->agents[i]->description);
+            AIRY_FREE(service->agents[i]->description);
             service->agents[i]->description = NULL;
-            AGENTRT_FREE(service->agents[i]->author);
+            AIRY_FREE(service->agents[i]->author);
             service->agents[i]->author = NULL;
-            AGENTRT_FREE(service->agents[i]->repository);
+            AIRY_FREE(service->agents[i]->repository);
             service->agents[i]->repository = NULL;
-            AGENTRT_FREE(service->agents[i]->dependencies);
+            AIRY_FREE(service->agents[i]->dependencies);
             service->agents[i]->dependencies = NULL;
 
-            service->agents[i]->name = agent_info->name ? AGENTRT_STRDUP(agent_info->name) : NULL;
+            service->agents[i]->name = agent_info->name ? AIRY_STRDUP(agent_info->name) : NULL;
             service->agents[i]->version =
-                agent_info->version ? AGENTRT_STRDUP(agent_info->version) : NULL;
+                agent_info->version ? AIRY_STRDUP(agent_info->version) : NULL;
             service->agents[i]->description =
-                agent_info->description ? AGENTRT_STRDUP(agent_info->description) : NULL;
+                agent_info->description ? AIRY_STRDUP(agent_info->description) : NULL;
             service->agents[i]->type = agent_info->type;
             service->agents[i]->status = agent_info->status;
             service->agents[i]->author =
-                agent_info->author ? AGENTRT_STRDUP(agent_info->author) : NULL;
+                agent_info->author ? AIRY_STRDUP(agent_info->author) : NULL;
             service->agents[i]->repository =
-                agent_info->repository ? AGENTRT_STRDUP(agent_info->repository) : NULL;
+                agent_info->repository ? AIRY_STRDUP(agent_info->repository) : NULL;
             service->agents[i]->dependencies =
-                agent_info->dependencies ? AGENTRT_STRDUP(agent_info->dependencies) : NULL;
+                agent_info->dependencies ? AIRY_STRDUP(agent_info->dependencies) : NULL;
             service->agents[i]->rating = agent_info->rating;
             service->agents[i]->download_count = agent_info->download_count;
             service->agents[i]->last_updated = (uint64_t)time(NULL);
@@ -297,34 +297,34 @@ int market_service_register_agent(market_service_t *service, const agent_info_t 
         }
     }
 
-    agent_info_t *new_agent = (agent_info_t *)AGENTRT_CALLOC(1, sizeof(agent_info_t));
+    agent_info_t *new_agent = (agent_info_t *)AIRY_CALLOC(1, sizeof(agent_info_t));
     if (!new_agent) {
         SVC_LOG_ERROR("market_service_register_agent: calloc failed for new agent entry");
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate agent entry");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate agent entry");
     }
 
-    new_agent->agent_id = agent_info->agent_id ? AGENTRT_STRDUP(agent_info->agent_id) : NULL;
-    new_agent->name = agent_info->name ? AGENTRT_STRDUP(agent_info->name) : NULL;
-    new_agent->version = agent_info->version ? AGENTRT_STRDUP(agent_info->version) : NULL;
+    new_agent->agent_id = agent_info->agent_id ? AIRY_STRDUP(agent_info->agent_id) : NULL;
+    new_agent->name = agent_info->name ? AIRY_STRDUP(agent_info->name) : NULL;
+    new_agent->version = agent_info->version ? AIRY_STRDUP(agent_info->version) : NULL;
     new_agent->description =
-        agent_info->description ? AGENTRT_STRDUP(agent_info->description) : NULL;
+        agent_info->description ? AIRY_STRDUP(agent_info->description) : NULL;
     new_agent->type = agent_info->type;
     new_agent->status = agent_info->status;
-    new_agent->author = agent_info->author ? AGENTRT_STRDUP(agent_info->author) : NULL;
-    new_agent->repository = agent_info->repository ? AGENTRT_STRDUP(agent_info->repository) : NULL;
+    new_agent->author = agent_info->author ? AIRY_STRDUP(agent_info->author) : NULL;
+    new_agent->repository = agent_info->repository ? AIRY_STRDUP(agent_info->repository) : NULL;
     new_agent->dependencies =
-        agent_info->dependencies ? AGENTRT_STRDUP(agent_info->dependencies) : NULL;
+        agent_info->dependencies ? AIRY_STRDUP(agent_info->dependencies) : NULL;
     if (!new_agent->agent_id || !new_agent->name || !new_agent->version) {
         SVC_LOG_ERROR("market_service_register_agent: strdup failed for required agent fields (agent_id=%p, name=%p, version=%p)", (const void *)new_agent->agent_id, (const void *)new_agent->name, (const void *)new_agent->version);
-        AGENTRT_FREE(new_agent->agent_id);
-        AGENTRT_FREE(new_agent->name);
-        AGENTRT_FREE(new_agent->version);
-        AGENTRT_FREE(new_agent->description);
-        AGENTRT_FREE(new_agent->author);
-        AGENTRT_FREE(new_agent->repository);
-        AGENTRT_FREE(new_agent->dependencies);
-        AGENTRT_FREE(new_agent);
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate agent required fields");
+        AIRY_FREE(new_agent->agent_id);
+        AIRY_FREE(new_agent->name);
+        AIRY_FREE(new_agent->version);
+        AIRY_FREE(new_agent->description);
+        AIRY_FREE(new_agent->author);
+        AIRY_FREE(new_agent->repository);
+        AIRY_FREE(new_agent->dependencies);
+        AIRY_FREE(new_agent);
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate agent required fields");
     }
     new_agent->rating = agent_info->rating;
     new_agent->download_count = agent_info->download_count;
@@ -338,40 +338,40 @@ int market_service_register_skill(market_service_t *service, const skill_info_t 
 {
     if (!service || !skill_info || !service->initialized) {
         SVC_LOG_ERROR("market_service_register_skill: NULL parameter or not initialized (service=%p, skill_info=%p, initialized=%d)", (const void *)service, (const void *)skill_info, service ? service->initialized : -1);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     if (service->skill_count >= MAX_SKILLS) {
         SVC_LOG_ERROR("market_service_register_skill: max skills exceeded (count=%zu, max=%d)", service->skill_count, MAX_SKILLS);
-        AGENTRT_ERROR(AGENTRT_ERR_OVERFLOW, "max skills exceeded");
+        AIRY_ERROR(AIRY_ERR_OVERFLOW, "max skills exceeded");
     }
 
     for (size_t i = 0; i < service->skill_count; i++) {
         if (strcmp(service->skills[i]->skill_id, skill_info->skill_id) == 0) {
-            AGENTRT_FREE(service->skills[i]->name);
+            AIRY_FREE(service->skills[i]->name);
             service->skills[i]->name = NULL;
-            AGENTRT_FREE(service->skills[i]->version);
+            AIRY_FREE(service->skills[i]->version);
             service->skills[i]->version = NULL;
-            AGENTRT_FREE(service->skills[i]->description);
+            AIRY_FREE(service->skills[i]->description);
             service->skills[i]->description = NULL;
-            AGENTRT_FREE(service->skills[i]->author);
+            AIRY_FREE(service->skills[i]->author);
             service->skills[i]->author = NULL;
-            AGENTRT_FREE(service->skills[i]->repository);
+            AIRY_FREE(service->skills[i]->repository);
             service->skills[i]->repository = NULL;
-            AGENTRT_FREE(service->skills[i]->dependencies);
+            AIRY_FREE(service->skills[i]->dependencies);
             service->skills[i]->dependencies = NULL;
 
-            service->skills[i]->name = skill_info->name ? AGENTRT_STRDUP(skill_info->name) : NULL;
+            service->skills[i]->name = skill_info->name ? AIRY_STRDUP(skill_info->name) : NULL;
             service->skills[i]->version =
-                skill_info->version ? AGENTRT_STRDUP(skill_info->version) : NULL;
+                skill_info->version ? AIRY_STRDUP(skill_info->version) : NULL;
             service->skills[i]->description =
-                skill_info->description ? AGENTRT_STRDUP(skill_info->description) : NULL;
+                skill_info->description ? AIRY_STRDUP(skill_info->description) : NULL;
             service->skills[i]->type = skill_info->type;
             service->skills[i]->author =
-                skill_info->author ? AGENTRT_STRDUP(skill_info->author) : NULL;
+                skill_info->author ? AIRY_STRDUP(skill_info->author) : NULL;
             service->skills[i]->repository =
-                skill_info->repository ? AGENTRT_STRDUP(skill_info->repository) : NULL;
+                skill_info->repository ? AIRY_STRDUP(skill_info->repository) : NULL;
             service->skills[i]->dependencies =
-                skill_info->dependencies ? AGENTRT_STRDUP(skill_info->dependencies) : NULL;
+                skill_info->dependencies ? AIRY_STRDUP(skill_info->dependencies) : NULL;
             service->skills[i]->rating = skill_info->rating;
             service->skills[i]->download_count = skill_info->download_count;
             service->skills[i]->last_updated = (uint64_t)time(NULL);
@@ -379,31 +379,31 @@ int market_service_register_skill(market_service_t *service, const skill_info_t 
         }
     }
 
-    skill_info_t *new_skill = (skill_info_t *)AGENTRT_CALLOC(1, sizeof(skill_info_t));
+    skill_info_t *new_skill = (skill_info_t *)AIRY_CALLOC(1, sizeof(skill_info_t));
     if (!new_skill) {
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate skill entry");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate skill entry");
     }
 
-    new_skill->skill_id = skill_info->skill_id ? AGENTRT_STRDUP(skill_info->skill_id) : NULL;
-    new_skill->name = skill_info->name ? AGENTRT_STRDUP(skill_info->name) : NULL;
-    new_skill->version = skill_info->version ? AGENTRT_STRDUP(skill_info->version) : NULL;
+    new_skill->skill_id = skill_info->skill_id ? AIRY_STRDUP(skill_info->skill_id) : NULL;
+    new_skill->name = skill_info->name ? AIRY_STRDUP(skill_info->name) : NULL;
+    new_skill->version = skill_info->version ? AIRY_STRDUP(skill_info->version) : NULL;
     new_skill->description =
-        skill_info->description ? AGENTRT_STRDUP(skill_info->description) : NULL;
+        skill_info->description ? AIRY_STRDUP(skill_info->description) : NULL;
     new_skill->type = skill_info->type;
-    new_skill->author = skill_info->author ? AGENTRT_STRDUP(skill_info->author) : NULL;
-    new_skill->repository = skill_info->repository ? AGENTRT_STRDUP(skill_info->repository) : NULL;
+    new_skill->author = skill_info->author ? AIRY_STRDUP(skill_info->author) : NULL;
+    new_skill->repository = skill_info->repository ? AIRY_STRDUP(skill_info->repository) : NULL;
     new_skill->dependencies =
-        skill_info->dependencies ? AGENTRT_STRDUP(skill_info->dependencies) : NULL;
+        skill_info->dependencies ? AIRY_STRDUP(skill_info->dependencies) : NULL;
     if (!new_skill->skill_id || !new_skill->name || !new_skill->version) {
-        AGENTRT_FREE(new_skill->skill_id);
-        AGENTRT_FREE(new_skill->name);
-        AGENTRT_FREE(new_skill->version);
-        AGENTRT_FREE(new_skill->description);
-        AGENTRT_FREE(new_skill->author);
-        AGENTRT_FREE(new_skill->repository);
-        AGENTRT_FREE(new_skill->dependencies);
-        AGENTRT_FREE(new_skill);
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate skill required fields");
+        AIRY_FREE(new_skill->skill_id);
+        AIRY_FREE(new_skill->name);
+        AIRY_FREE(new_skill->version);
+        AIRY_FREE(new_skill->description);
+        AIRY_FREE(new_skill->author);
+        AIRY_FREE(new_skill->repository);
+        AIRY_FREE(new_skill->dependencies);
+        AIRY_FREE(new_skill);
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate skill required fields");
     }
     new_skill->rating = skill_info->rating;
     new_skill->download_count = skill_info->download_count;
@@ -418,14 +418,14 @@ int market_service_search_agents(market_service_t *service, const search_params_
 {
     if (!service || !params || !agents || !count || !service->initialized) {
         SVC_LOG_ERROR("market_service_search_agents: NULL parameter or not initialized (service=%p, params=%p, agents=%p, count=%p, initialized=%d)", (const void *)service, (const void *)params, (const void *)agents, (const void *)count, service ? service->initialized : -1);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     size_t results_size = 16;
-    agent_info_t **results = (agent_info_t **)AGENTRT_MALLOC(sizeof(agent_info_t *) * results_size);
+    agent_info_t **results = (agent_info_t **)AIRY_MALLOC(sizeof(agent_info_t *) * results_size);
     if (!results) {
         SVC_LOG_ERROR("market_service_search_agents: malloc failed for search results");
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate search results");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate search results");
     }
 
     size_t found = 0;
@@ -442,11 +442,11 @@ int market_service_search_agents(market_service_t *service, const search_params_
         if (found >= results_size) {
             results_size *= 2;
             agent_info_t **tmp =
-                (agent_info_t **)AGENTRT_REALLOC(results, sizeof(agent_info_t *) * results_size);
+                (agent_info_t **)AIRY_REALLOC(results, sizeof(agent_info_t *) * results_size);
             if (!tmp) {
                 SVC_LOG_ERROR("market_service_search_agents: realloc failed for search results (results_size=%zu)", results_size);
-                AGENTRT_FREE(results);
-                AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to resize search results");
+                AIRY_FREE(results);
+                AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to resize search results");
             }
             results = tmp;
         }
@@ -465,12 +465,12 @@ int market_service_search_skills(market_service_t *service, const search_params_
                                  skill_info_t ***skills, size_t *count)
 {
     if (!service || !params || !skills || !count || !service->initialized)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     size_t results_size = 16;
-    skill_info_t **results = (skill_info_t **)AGENTRT_MALLOC(sizeof(skill_info_t *) * results_size);
+    skill_info_t **results = (skill_info_t **)AIRY_MALLOC(sizeof(skill_info_t *) * results_size);
     if (!results) {
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate skill search results");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate skill search results");
     }
 
     size_t found = 0;
@@ -487,10 +487,10 @@ int market_service_search_skills(market_service_t *service, const search_params_
         if (found >= results_size) {
             results_size *= 2;
             skill_info_t **tmp =
-                (skill_info_t **)AGENTRT_REALLOC(results, sizeof(skill_info_t *) * results_size);
+                (skill_info_t **)AIRY_REALLOC(results, sizeof(skill_info_t *) * results_size);
             if (!tmp) {
-                AGENTRT_FREE(results);
-                AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to resize skill search results");
+                AIRY_FREE(results);
+                AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to resize skill search results");
             }
             results = tmp;
         }
@@ -510,17 +510,17 @@ int market_service_install_agent(market_service_t *service, const install_reques
 {
     if (!service || !request || !result || !service->initialized) {
         SVC_LOG_ERROR("market_service_install_agent: NULL parameter or not initialized (service=%p, request=%p, result=%p, initialized=%d)", (const void *)service, (const void *)request, (const void *)result, service ? service->initialized : -1);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     if (!is_safe_path_component(request->id)) {
         SVC_LOG_ERROR("market_service_install_agent: unsafe path component in install request id (id=%s)", request->id ? request->id : "NULL");
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "install request id is unsafe");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "install request id is unsafe");
     }
 
-    install_result_t *res = (install_result_t *)AGENTRT_CALLOC(1, sizeof(install_result_t));
+    install_result_t *res = (install_result_t *)AIRY_CALLOC(1, sizeof(install_result_t));
     if (!res) {
         SVC_LOG_ERROR("market_service_install_agent: calloc failed for install result");
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate install result");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate install result");
     }
 
     agent_info_t *target = NULL;
@@ -533,7 +533,7 @@ int market_service_install_agent(market_service_t *service, const install_reques
 
     if (!target) {
         res->success = false;
-        res->message = AGENTRT_STRDUP("Agent not found");
+        res->message = AIRY_STRDUP("Agent not found");
         res->error_code = -3;
         *result = res;
         return 0;
@@ -551,7 +551,7 @@ int market_service_install_agent(market_service_t *service, const install_reques
         if (mkret != 0 && errno != EEXIST) {
             SVC_LOG_ERROR("market_service_install_agent: mkdir failed for install directory (path=%s, errno=%d)", install_dir, errno);
             res->success = false;
-            res->message = AGENTRT_STRDUP("Failed to create install directory");
+            res->message = AIRY_STRDUP("Failed to create install directory");
             res->error_code = -4;
             *result = res;
             return 0;
@@ -644,9 +644,9 @@ int market_service_install_agent(market_service_t *service, const install_reques
     target->download_count++;
 
     res->success = true;
-    res->message = AGENTRT_STRDUP("Agent installed successfully");
-    res->installed_version = AGENTRT_STRDUP(request->version ? request->version : target->version);
-    res->install_path = AGENTRT_STRDUP(install_dir);
+    res->message = AIRY_STRDUP("Agent installed successfully");
+    res->installed_version = AIRY_STRDUP(request->version ? request->version : target->version);
+    res->install_path = AIRY_STRDUP(install_dir);
     res->error_code = 0;
 
     *result = res;
@@ -658,13 +658,13 @@ int market_service_install_skill(market_service_t *service, const install_reques
 {
     if (!service || !request || !result || !service->initialized) {
         SVC_LOG_ERROR("market_service_install_skill: NULL parameter or not initialized (service=%p, request=%p, result=%p, initialized=%d)", (const void *)service, (const void *)request, (const void *)result, service ? service->initialized : -1);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    install_result_t *res = (install_result_t *)AGENTRT_CALLOC(1, sizeof(install_result_t));
+    install_result_t *res = (install_result_t *)AIRY_CALLOC(1, sizeof(install_result_t));
     if (!res) {
         SVC_LOG_ERROR("market_service_install_skill: calloc failed for skill install result");
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate skill install result");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate skill install result");
     }
 
     skill_info_t *target = NULL;
@@ -677,7 +677,7 @@ int market_service_install_skill(market_service_t *service, const install_reques
 
     if (!target) {
         res->success = false;
-        res->message = AGENTRT_STRDUP("Skill not found");
+        res->message = AIRY_STRDUP("Skill not found");
         res->error_code = -3;
         *result = res;
         return 0;
@@ -686,9 +686,9 @@ int market_service_install_skill(market_service_t *service, const install_reques
     target->download_count++;
 
     res->success = true;
-    res->message = AGENTRT_STRDUP("Skill installed successfully");
-    res->installed_version = AGENTRT_STRDUP(request->version ? request->version : target->version);
-    res->install_path = AGENTRT_STRDUP(request->install_path ? request->install_path : "./skills");
+    res->message = AIRY_STRDUP("Skill installed successfully");
+    res->installed_version = AIRY_STRDUP(request->version ? request->version : target->version);
+    res->install_path = AIRY_STRDUP(request->install_path ? request->install_path : "./skills");
     res->error_code = 0;
 
     *result = res;
@@ -699,11 +699,11 @@ int market_service_uninstall_agent(market_service_t *service, const char *agent_
 {
     if (!service || !agent_id || !service->initialized) {
         SVC_LOG_ERROR("market_service_uninstall_agent: NULL parameter or not initialized (service=%p, agent_id=%p, initialized=%d)", (const void *)service, (const void *)agent_id, service ? service->initialized : -1);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     if (!is_safe_path_component(agent_id)) {
         SVC_LOG_ERROR("market_service_uninstall_agent: unsafe path component in agent_id (agent_id=%s)", agent_id);
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "agent_id is unsafe path component");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "agent_id is unsafe path component");
     }
 
     for (size_t i = 0; i < service->agent_count; i++) {
@@ -723,24 +723,24 @@ int market_service_uninstall_agent(market_service_t *service, const char *agent_
             return 0;
         }
     }
-    AGENTRT_ERROR(AGENTRT_ERR_NOT_FOUND, "agent not found for uninstall");
+    AIRY_ERROR(AIRY_ERR_NOT_FOUND, "agent not found for uninstall");
 }
 
 int market_service_uninstall_skill(market_service_t *service, const char *skill_id)
 {
     if (!service || !skill_id || !service->initialized)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     for (size_t i = 0; i < service->skill_count; i++) {
         if (strcmp(service->skills[i]->skill_id, skill_id) == 0) {
-            AGENTRT_FREE(service->skills[i]->skill_id);
-            AGENTRT_FREE(service->skills[i]->name);
-            AGENTRT_FREE(service->skills[i]->version);
-            AGENTRT_FREE(service->skills[i]->description);
-            AGENTRT_FREE(service->skills[i]->author);
-            AGENTRT_FREE(service->skills[i]->repository);
-            AGENTRT_FREE(service->skills[i]->dependencies);
-            AGENTRT_FREE(service->skills[i]);
+            AIRY_FREE(service->skills[i]->skill_id);
+            AIRY_FREE(service->skills[i]->name);
+            AIRY_FREE(service->skills[i]->version);
+            AIRY_FREE(service->skills[i]->description);
+            AIRY_FREE(service->skills[i]->author);
+            AIRY_FREE(service->skills[i]->repository);
+            AIRY_FREE(service->skills[i]->dependencies);
+            AIRY_FREE(service->skills[i]);
 
             for (size_t j = i; j < service->skill_count - 1; j++) {
                 service->skills[j] = service->skills[j + 1];
@@ -749,19 +749,19 @@ int market_service_uninstall_skill(market_service_t *service, const char *skill_
             return 0;
         }
     }
-    AGENTRT_ERROR(AGENTRT_ERR_NOT_FOUND, "skill not found for uninstall");
+    AIRY_ERROR(AIRY_ERR_NOT_FOUND, "skill not found for uninstall");
 }
 
 int market_service_get_installed_agents(market_service_t *service, agent_info_t ***agents,
                                         size_t *count)
 {
     if (!service || !agents || !count || !service->initialized)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     size_t results_size = 16;
-    agent_info_t **results = (agent_info_t **)AGENTRT_MALLOC(sizeof(agent_info_t *) * results_size);
+    agent_info_t **results = (agent_info_t **)AIRY_MALLOC(sizeof(agent_info_t *) * results_size);
     if (!results) {
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate installed agents list");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate installed agents list");
     }
 
     size_t found = 0;
@@ -771,11 +771,11 @@ int market_service_get_installed_agents(market_service_t *service, agent_info_t 
 
             if (found >= results_size) {
                 results_size *= 2;
-                agent_info_t **tmp = (agent_info_t **)AGENTRT_REALLOC(
+                agent_info_t **tmp = (agent_info_t **)AIRY_REALLOC(
                     results, sizeof(agent_info_t *) * results_size);
                 if (!tmp) {
-                    AGENTRT_FREE(results);
-                    AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY,
+                    AIRY_FREE(results);
+                    AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY,
                                   "failed to resize installed agents list");
                 }
                 results = tmp;
@@ -794,12 +794,12 @@ int market_service_get_installed_skills(market_service_t *service, skill_info_t 
                                         size_t *count)
 {
     if (!service || !skills || !count || !service->initialized)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     size_t results_size = 16;
-    skill_info_t **results = (skill_info_t **)AGENTRT_MALLOC(sizeof(skill_info_t *) * results_size);
+    skill_info_t **results = (skill_info_t **)AIRY_MALLOC(sizeof(skill_info_t *) * results_size);
     if (!results) {
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate installed skills list");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate installed skills list");
     }
 
     size_t found = 0;
@@ -807,10 +807,10 @@ int market_service_get_installed_skills(market_service_t *service, skill_info_t 
         if (found >= results_size) {
             results_size *= 2;
             skill_info_t **tmp =
-                (skill_info_t **)AGENTRT_REALLOC(results, sizeof(skill_info_t *) * results_size);
+                (skill_info_t **)AIRY_REALLOC(results, sizeof(skill_info_t *) * results_size);
             if (!tmp) {
-                AGENTRT_FREE(results);
-                AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to resize installed skills list");
+                AIRY_FREE(results);
+                AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to resize installed skills list");
             }
             results = tmp;
         }
@@ -827,32 +827,32 @@ int market_service_check_update(market_service_t *service, const char *id, bool 
                                 char **latest_version)
 {
     if (!service || !id || !has_update || !latest_version || !service->initialized)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     *has_update = false;
 
     for (size_t i = 0; i < service->agent_count; i++) {
         if (strcmp(service->agents[i]->agent_id, id) == 0) {
-            *latest_version = AGENTRT_STRDUP(service->agents[i]->version);
+            *latest_version = AIRY_STRDUP(service->agents[i]->version);
             return 0;
         }
     }
 
     for (size_t i = 0; i < service->skill_count; i++) {
         if (strcmp(service->skills[i]->skill_id, id) == 0) {
-            *latest_version = AGENTRT_STRDUP(service->skills[i]->version);
+            *latest_version = AIRY_STRDUP(service->skills[i]->version);
             return 0;
         }
     }
 
     *latest_version = NULL;
-    AGENTRT_ERROR(AGENTRT_ERR_NOT_FOUND, "update check: id not found");
+    AIRY_ERROR(AIRY_ERR_NOT_FOUND, "update check: id not found");
 }
 
 int market_service_reload_config(market_service_t *service, const market_config_t *config)
 {
     if (!service || !config || !service->initialized)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     // Save old owned pointers
     char *old_url = (char *)service->config.registry_url;
@@ -867,25 +867,25 @@ int market_service_reload_config(market_service_t *service, const market_config_
     }
 
     // Replace pointer fields with our own copies
-    char *new_url = config->registry_url ? AGENTRT_STRDUP(config->registry_url) : NULL;
-    char *new_path = config->storage_path ? AGENTRT_STRDUP(config->storage_path) : NULL;
+    char *new_url = config->registry_url ? AIRY_STRDUP(config->registry_url) : NULL;
+    char *new_path = config->storage_path ? AIRY_STRDUP(config->storage_path) : NULL;
 
     if (config->registry_url && !new_url) {
-        AGENTRT_FREE(new_path);
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate registry_url");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        AIRY_FREE(new_path);
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate registry_url");
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
     if (config->storage_path && !new_path) {
-        AGENTRT_FREE(new_url);
+        AIRY_FREE(new_url);
         service->config.registry_url = new_url;
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate storage_path");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate storage_path");
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     service->config.registry_url = new_url;
     service->config.storage_path = new_path;
-    AGENTRT_FREE(old_url);
-    AGENTRT_FREE(old_path);
+    AIRY_FREE(old_url);
+    AIRY_FREE(old_path);
 
     return 0;
 }
@@ -893,7 +893,7 @@ int market_service_reload_config(market_service_t *service, const market_config_
 int market_service_sync_registry(market_service_t *service)
 {
     if (!service || !service->initialized)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     if (!service->config.enable_remote_registry) {
         return 0;
@@ -905,12 +905,12 @@ int market_service_sync_registry(market_service_t *service)
     }
 
     const char *storage =
-        service->config.storage_path ? service->config.storage_path : AGENTRT_CACHE_DIR;
+        service->config.storage_path ? service->config.storage_path : AIRY_CACHE_DIR;
 
     {
         size_t pos = 0;
         char tmp[1024];
-AGENTRT_STRNCPY_TERM(tmp, storage, sizeof(tmp));
+AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
         (tmp)[sizeof(tmp) - 1] = '\0';
         tmp[sizeof(tmp) - 1] = '\0';
         while (tmp[pos]) {
@@ -967,7 +967,7 @@ AGENTRT_STRNCPY_TERM(tmp, storage, sizeof(tmp));
         }
     } else {
         SVC_LOG_WARN("Sync registry: fork failed: %s", strerror(errno));
-        AGENTRT_ERROR(AGENTRT_ERR_IO, "fork failed during sync");
+        AIRY_ERROR(AIRY_ERR_IO, "fork failed during sync");
     }
 #endif
 
@@ -987,17 +987,17 @@ AGENTRT_STRNCPY_TERM(tmp, storage, sizeof(tmp));
         return 0;
     }
 
-    char *idx_data = (char *)AGENTRT_MALLOC((size_t)fsize + 1);
+    char *idx_data = (char *)AIRY_MALLOC((size_t)fsize + 1);
     if (!idx_data) {
         fclose(idx_fp);
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate index buffer");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate index buffer");
     }
     size_t nread = fread(idx_data, 1, (size_t)fsize, idx_fp);
     if (nread != (size_t)fsize) {
-        AGENTRT_FREE(idx_data);
+        AIRY_FREE(idx_data);
         idx_data = NULL;
         fclose(idx_fp);
-        AGENTRT_ERROR(AGENTRT_ERR_IO, "fread index file failed");
+        AIRY_ERROR(AIRY_ERR_IO, "fread index file failed");
     }
     idx_data[nread] = '\0';
     fclose(idx_fp);
@@ -1030,11 +1030,11 @@ AGENTRT_STRNCPY_TERM(tmp, storage, sizeof(tmp));
             }
 
             if (!already_exists && service->agent_count < MAX_AGENTS) {
-                agent_info_t *new_agent = (agent_info_t *)AGENTRT_CALLOC(1, sizeof(agent_info_t));
+                agent_info_t *new_agent = (agent_info_t *)AIRY_CALLOC(1, sizeof(agent_info_t));
                 if (new_agent) {
-                    new_agent->agent_id = AGENTRT_STRDUP(found_id);
-                    new_agent->name = AGENTRT_STRDUP(found_id);
-                    new_agent->version = AGENTRT_STRDUP("latest");
+                    new_agent->agent_id = AIRY_STRDUP(found_id);
+                    new_agent->name = AIRY_STRDUP(found_id);
+                    new_agent->version = AIRY_STRDUP("latest");
                     new_agent->status = AGENT_STATUS_AVAILABLE;
                     service->agents[service->agent_count++] = new_agent;
                     synced++;
@@ -1045,7 +1045,7 @@ AGENTRT_STRNCPY_TERM(tmp, storage, sizeof(tmp));
         entry = strstr(id_end + 1, "\"agent_id\"");
     }
 
-    AGENTRT_FREE(idx_data);
+    AIRY_FREE(idx_data);
     idx_data = NULL;
     SVC_LOG_INFO("Sync registry: synced %d new agents from %s", synced, url);
     return 0;

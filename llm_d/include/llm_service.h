@@ -6,8 +6,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_LLM_SERVICE_H
-#define AGENTRT_LLM_SERVICE_H
+#ifndef AIRY_RT_LLM_SERVICE_H
+#define AIRY_RT_LLM_SERVICE_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -78,4 +78,4 @@ int llm_service_stats(llm_service_t *svc, char **out_json);
 }
 #endif
 
-#endif /* AGENTRT_LLM_SERVICE_H */
+#endif /* AIRY_RT_LLM_SERVICE_H */

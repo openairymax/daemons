@@ -26,7 +26,7 @@ struct cost_tracker {
     pricing_rule_t *rules;
     int rule_count;
     model_cost_t *models;
-    agentrt_mutex_t lock;
+    airy_mtx_t lock;
 };
 
 static int match_rule(const char *model, const pricing_rule_t *rule)
@@ -56,20 +56,20 @@ static void get_price(const cost_tracker_t *ct, const char *model, double *input
 
 cost_tracker_t *cost_tracker_create(const pricing_rule_t *rules, int rule_count)
 {
-    cost_tracker_t *ct = AGENTRT_CALLOC(1, sizeof(cost_tracker_t));
+    cost_tracker_t *ct = AIRY_CALLOC(1, sizeof(cost_tracker_t));
     if (!ct) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     if (rule_count > 0) {
         SAFE_MALLOC_ARRAY(ct->rules, rule_count, sizeof(pricing_rule_t));
         if (!ct->rules) {
-            AGENTRT_FREE(ct);
-            AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+            AIRY_FREE(ct);
+            AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
         __builtin_memcpy(ct->rules, rules, rule_count * sizeof(pricing_rule_t));
         ct->rule_count = rule_count;
     }
-    agentrt_mutex_init(&ct->lock);
+    airy_mtx_init(&ct->lock);
     return ct;
 }
 
@@ -77,18 +77,18 @@ void cost_tracker_destroy(cost_tracker_t *ct)
 {
     if (!ct)
         return;
-    agentrt_mutex_lock(&ct->lock);
+    airy_mtx_lock(&ct->lock);
     model_cost_t *m = ct->models;
     while (m) {
         model_cost_t *next = m->next;
-        AGENTRT_FREE(m->model);
-        AGENTRT_FREE(m);
+        AIRY_FREE(m->model);
+        AIRY_FREE(m);
         m = next;
     }
-    agentrt_mutex_unlock(&ct->lock);
-    agentrt_mutex_destroy(&ct->lock);
-    AGENTRT_FREE(ct->rules);
-    AGENTRT_FREE(ct);
+    airy_mtx_unlock(&ct->lock);
+    airy_mtx_destroy(&ct->lock);
+    AIRY_FREE(ct->rules);
+    AIRY_FREE(ct);
 }
 
 void cost_tracker_add(cost_tracker_t *ct, const char *model, uint32_t prompt_tokens,
@@ -96,7 +96,7 @@ void cost_tracker_add(cost_tracker_t *ct, const char *model, uint32_t prompt_tok
 {
     if (!ct || !model)
         return;
-    agentrt_mutex_lock(&ct->lock);
+    airy_mtx_lock(&ct->lock);
     model_cost_t *m = ct->models;
     while (m) {
         if (strcmp(m->model, model) == 0)
@@ -104,12 +104,12 @@ void cost_tracker_add(cost_tracker_t *ct, const char *model, uint32_t prompt_tok
         m = m->next;
     }
     if (!m) {
-        m = AGENTRT_CALLOC(1, sizeof(model_cost_t));
+        m = AIRY_CALLOC(1, sizeof(model_cost_t));
         if (!m) {
-            agentrt_mutex_unlock(&ct->lock);
+            airy_mtx_unlock(&ct->lock);
             return;
         }
-        m->model = AGENTRT_STRDUP(model);
+        m->model = AIRY_STRDUP(model);
         m->next = ct->models;
         ct->models = m;
     }
@@ -119,14 +119,14 @@ void cost_tracker_add(cost_tracker_t *ct, const char *model, uint32_t prompt_tok
     double in_price, out_price;
     get_price(ct, model, &in_price, &out_price);
     m->cost_usd += (prompt_tokens / 1000.0) * in_price + (completion_tokens / 1000.0) * out_price;
-    agentrt_mutex_unlock(&ct->lock);
+    airy_mtx_unlock(&ct->lock);
 }
 
 cJSON *cost_tracker_export(cost_tracker_t *ct)
 {
     if (!ct)
         return cJSON_CreateObject();
-    agentrt_mutex_lock(&ct->lock);
+    airy_mtx_lock(&ct->lock);
     cJSON *root = cJSON_CreateObject();
     cJSON *arr = cJSON_CreateArray();
     model_cost_t *m = ct->models;
@@ -140,6 +140,6 @@ cJSON *cost_tracker_export(cost_tracker_t *ct)
         m = m->next;
     }
     cJSON_AddItemToObject(root, "models", arr);
-    agentrt_mutex_unlock(&ct->lock);
+    airy_mtx_unlock(&ct->lock);
     return root;
 }

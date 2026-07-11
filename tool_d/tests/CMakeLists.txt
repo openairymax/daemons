@@ -1,7 +1,7 @@
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
 
 # 测试代码豁免 BAN 严格合规：测试允许使用裸 malloc/free/memset 等函数
-add_compile_definitions(AGENTRT_COMPLIANCE_IMPL)
+add_compile_definitions(AIRY_COMPLIANCE_IMPL)
 # Tool 服务单元测试构建文件 (TeamC)
 
 
@@ -20,8 +20,8 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/safety_guard_bridge.c
 )
 
-# YAML found by root CMakeLists.txt (AGENTRT_HAS_YAML)
-if(AGENTRT_HAS_YAML)
+# YAML found by root CMakeLists.txt (AIRY_HAS_YAML)
+if(AIRY_HAS_YAML)
     list(APPEND TOOL_IMPL_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/../src/config.c)
 endif()
 
@@ -61,37 +61,37 @@ foreach(TEST_SRC ${TOOL_TEST_SOURCES})
 
     target_include_directories(test_tool_${TEST_NAME} PRIVATE ${TOOL_COMMON_INCLUDES})
 
-    # P3.18 (ACC-DT27): executor.c 调用 sandbox API（agentrt_sandbox_*），
-    # 需链接 agentrt_syscall。agentrt_syscall PUBLIC 依赖 agentrt_coreloopthree，
+    # P3.18 (ACC-DT27): executor.c 调用 sandbox API（airy_sandbox_*），
+    # 需链接 airy_syscall。airy_syscall PUBLIC 依赖 airy_coreloopthree，
     # 后者引用 cognition/llm_service/checkpoint/hook_d 等符号，需完整传递依赖。
-    # 仿照 test_syscall_extended 配置，但不链接 agentrt_tool_service（避免与
+    # 仿照 test_syscall_extended 配置，但不链接 airy_tool_service（避免与
     # TOOL_IMPL_SOURCES 中的 executor.c/service.c 等重复符号）。
     target_link_libraries(test_tool_${TEST_NAME} PRIVATE
         svc_common
         cupolas
-        agentrt_syscall
+        airy_syscall
         -Wl,--whole-archive
-        agentrt_coreloopthree
+        airy_coreloopthree
         -Wl,--no-whole-archive
-        agentrt_cognition
-        agentrt_execution
-        agentrt_core
-        agentrt_memory
-        agentrt_atoms
-        agentrt_common
-        agentrt_llm_service
+        airy_cognition
+        airy_execution
+        airy_core
+        airy_memory
+        airy_atoms
+        airy_common
+        airy_llm_service
         Threads::Threads
         uuid
-        agentrt_platform_libs
+        airy_platform_libs
         m
     )
 
-    # cJSON found by root CMakeLists.txt (AGENTRT_HAS_CJSON)
-    if(AGENTRT_HAS_CJSON)
+    # cJSON found by root CMakeLists.txt (AIRY_HAS_CJSON)
+    if(AIRY_HAS_CJSON)
         target_link_libraries(test_tool_${TEST_NAME} PRIVATE cjson)
     endif()
 
-    if(AGENTRT_HAS_YAML)
+    if(AIRY_HAS_YAML)
         target_link_libraries(test_tool_${TEST_NAME} PRIVATE yaml)
     endif()
 
@@ -99,7 +99,7 @@ foreach(TEST_SRC ${TOOL_TEST_SOURCES})
 
     # C-L05: 启用 Cupolas SafetyGuard V2 API
     target_compile_definitions(test_tool_${TEST_NAME} PRIVATE
-        AGENTRT_ENABLE_V2_API=1
+        AIRY_ENABLE_V2_API=1
     )
 
     add_test(NAME tool_d_${TEST_NAME} COMMAND test_tool_${TEST_NAME}

@@ -6,7 +6,7 @@
 #include "memory_compat.h"
 #include "method_dispatcher.h"
 #include "svc_logger.h"
-/* P0.17 阶段 2: daemon_event_driver.c 使用 agentrt_socket_* daemons 特有函数，
+/* P0.17 阶段 2: daemon_event_driver.c 使用 airy_sock_* daemons 特有函数，
  * 需包含 daemon_platform_ext.h 获取声明（commons 版 platform.h 无这些函数）。 */
 #include "daemon_platform_ext.h"
 
@@ -15,7 +15,7 @@
 #include "error.h"
 
 struct daemon_event_driver {
-    agentrt_event_loop_t *loop;
+    airy_event_loop_t *loop;
     thread_pool_t *pool;
     method_dispatcher_t *dispatcher;
     daemon_on_client_cb on_client;
@@ -28,22 +28,22 @@ struct daemon_event_driver {
 
 static void socket_close_wrapper(void *arg)
 {
-    agentrt_socket_close((agentrt_socket_t)(uintptr_t)arg);
+    airy_sock_close((airy_sock_t)(uintptr_t)arg);
 }
 
 static int on_server_fd_event(int fd, uint32_t events, void *user_data)
 {
     daemon_event_driver_t *driver = (daemon_event_driver_t *)user_data;
     if (!driver)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    if (!(events & AGENTRT_EVENT_TYPE_READ))
+    if (!(events & AIRY_EVENT_TYPE_READ))
         return 0;
 
     int first = 1;
     while (1) {
-        agentrt_socket_t client_fd = agentrt_socket_accept(fd, 0);
-        if (client_fd == AGENTRT_INVALID_SOCKET) {
+        airy_sock_t client_fd = airy_sock_accept(fd, 0);
+        if (client_fd == AIRY_INVALID_SOCKET) {
             if (first) {
                 SVC_LOG_ERROR("C-L02: EVENT-DRIVER: CLIENT-ERROR accept failed on fd=%d", fd);
             }
@@ -57,7 +57,7 @@ static int on_server_fd_event(int fd, uint32_t events, void *user_data)
         } else if (driver->pool) {
             thread_pool_submit(driver->pool, socket_close_wrapper, (void *)(uintptr_t)client_fd);
         } else {
-            agentrt_socket_close(client_fd);
+            airy_sock_close(client_fd);
         }
         first = 0;
     }
@@ -65,7 +65,7 @@ static int on_server_fd_event(int fd, uint32_t events, void *user_data)
     return 0;
 }
 
-static void on_health_timer(agentrt_event_loop_t *loop, uint64_t timer_id, void *user_data)
+static void on_health_timer(airy_event_loop_t *loop, uint64_t timer_id, void *user_data)
 {
     (void)loop;
     (void)timer_id;
@@ -80,22 +80,22 @@ daemon_event_driver_t *daemon_event_driver_create(const daemon_event_config_t *c
 {
     if (!config) {
         SVC_LOG_ERROR("C-L02: EVENT-DRIVER: CREATE-FAIL null config, STACK: daemon_event_driver_create");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     daemon_event_driver_t *driver =
-        (daemon_event_driver_t *)AGENTRT_CALLOC(1, sizeof(daemon_event_driver_t));
+        (daemon_event_driver_t *)AIRY_CALLOC(1, sizeof(daemon_event_driver_t));
     if (!driver) {
         SVC_LOG_ERROR("C-L02: EVENT-DRIVER: CREATE-FAIL alloc driver, STACK: daemon_event_driver_create");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     int max_events = config->max_events > 0 ? config->max_events : 64;
-    driver->loop = agentrt_event_loop_create(max_events);
+    driver->loop = airy_event_loop_create(max_events);
     if (!driver->loop) {
         SVC_LOG_ERROR("C-L02: EVENT-DRIVER: CREATE-FAIL loop, STACK: daemon_event_driver_create");
-        AGENTRT_FREE(driver);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_FREE(driver);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     if (config->thread_pool_max > 0) {
@@ -118,9 +118,9 @@ daemon_event_driver_t *daemon_event_driver_create(const daemon_event_config_t *c
             SVC_LOG_ERROR("C-L02: EVENT-DRIVER: CREATE-FAIL dispatcher, STACK: daemon_event_driver_create");
             if (driver->pool)
                 thread_pool_destroy(driver->pool);
-            agentrt_event_loop_destroy(driver->loop);
-            AGENTRT_FREE(driver);
-            AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+            airy_event_loop_destroy(driver->loop);
+            AIRY_FREE(driver);
+            AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
     }
 
@@ -134,7 +134,7 @@ daemon_event_driver_t *daemon_event_driver_create(const daemon_event_config_t *c
     if (config->on_timer) {
         uint64_t interval_ms = (uint64_t)driver->health_check_interval_sec * 1000;
         driver->health_timer_id =
-            agentrt_event_loop_add_timer(driver->loop, interval_ms, on_health_timer, driver);
+            airy_event_loop_add_timer(driver->loop, interval_ms, on_health_timer, driver);
     }
 
     SVC_LOG_INFO("C-L02: EVENT-DRIVER: CREATE-OK max_events=%d pool=%s jsonrpc=%s health_check_interval=%ds",
@@ -154,47 +154,47 @@ void daemon_event_driver_destroy(daemon_event_driver_t *driver)
     if (driver->dispatcher)
         method_dispatcher_destroy(driver->dispatcher);
     if (driver->loop)
-        agentrt_event_loop_destroy(driver->loop);
-    AGENTRT_FREE(driver);
+        airy_event_loop_destroy(driver->loop);
+    AIRY_FREE(driver);
 }
 
 int daemon_event_driver_add_server_fd(daemon_event_driver_t *driver, int fd)
 {
     if (!driver || fd < 0)
-        return AGENTRT_ERR_INVALID_PARAM;
-    return agentrt_event_loop_add_fd_lt(driver->loop, fd, AGENTRT_EVENT_TYPE_READ,
+        return AIRY_ERR_INVALID_PARAM;
+    return airy_event_loop_add_fd_lt(driver->loop, fd, AIRY_EVENT_TYPE_READ,
                                         on_server_fd_event, driver);
 }
 
 int daemon_event_driver_add_fd(daemon_event_driver_t *driver, int fd, uint32_t events,
-                               agentrt_event_callback_t cb, void *user_data)
+                               airy_event_callback_t cb, void *user_data)
 {
     if (!driver || fd < 0 || !cb)
-        return AGENTRT_ERR_INVALID_PARAM;
-    return agentrt_event_loop_add_fd(driver->loop, fd, events, cb, user_data);
+        return AIRY_ERR_INVALID_PARAM;
+    return airy_event_loop_add_fd(driver->loop, fd, events, cb, user_data);
 }
 
 uint64_t daemon_event_driver_add_timer(daemon_event_driver_t *driver, uint64_t interval_ms,
-                                       agentrt_timer_callback_t cb, void *user_data)
+                                       airy_timer_callback_t cb, void *user_data)
 {
     if (!driver || !cb)
         return 0;
-    return agentrt_event_loop_add_timer(driver->loop, interval_ms, cb, user_data);
+    return airy_event_loop_add_timer(driver->loop, interval_ms, cb, user_data);
 }
 
 int daemon_event_driver_cancel_timer(daemon_event_driver_t *driver, uint64_t timer_id)
 {
     if (!driver)
-        return AGENTRT_ERR_INVALID_PARAM;
-    return agentrt_event_loop_cancel_timer(driver->loop, timer_id);
+        return AIRY_ERR_INVALID_PARAM;
+    return airy_event_loop_cancel_timer(driver->loop, timer_id);
 }
 
 int daemon_event_driver_run(daemon_event_driver_t *driver)
 {
     if (!driver)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     SVC_LOG_INFO("C-L02: EVENT-DRIVER: RUN");
-    return agentrt_event_loop_run(driver->loop);
+    return airy_event_loop_run(driver->loop);
 }
 
 void daemon_event_driver_stop(daemon_event_driver_t *driver)
@@ -202,10 +202,10 @@ void daemon_event_driver_stop(daemon_event_driver_t *driver)
     if (!driver)
         return;
     SVC_LOG_INFO("C-L02: EVENT-DRIVER: STOP");
-    agentrt_event_loop_stop(driver->loop);
+    airy_event_loop_stop(driver->loop);
 }
 
-agentrt_event_loop_t *daemon_event_driver_get_loop(daemon_event_driver_t *driver)
+airy_event_loop_t *daemon_event_driver_get_loop(daemon_event_driver_t *driver)
 {
     return driver ? driver->loop : NULL;
 }

@@ -51,7 +51,7 @@ ipc_bus_helper_t *ipc_bus_helper_init(const char *daemon_name,
         return NULL;
     }
 
-    ipc_bus_helper_t *ibh = (ipc_bus_helper_t *)AGENTRT_CALLOC(1, sizeof(ipc_bus_helper_t));
+    ipc_bus_helper_t *ibh = (ipc_bus_helper_t *)AIRY_CALLOC(1, sizeof(ipc_bus_helper_t));
     if (!ibh) {
         SVC_LOG_ERROR("ipc_bus_helper_init: failed to allocate");
         return NULL;
@@ -66,16 +66,16 @@ ipc_bus_helper_t *ipc_bus_helper_init(const char *daemon_name,
     ibh->bus = ipc_service_bus_create(bus_name, config);
     if (!ibh->bus) {
         SVC_LOG_ERROR("Failed to create IPC bus '%s'", bus_name);
-        AGENTRT_FREE(ibh);
+        AIRY_FREE(ibh);
         return NULL;
     }
 
     /* 启动 IPC Bus */
-    agentrt_error_t err = ipc_service_bus_start(ibh->bus);
-    if (err != AGENTRT_SUCCESS) {
+    airy_err_t err = ipc_service_bus_start(ibh->bus);
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to start IPC bus '%s' (err=%d)", bus_name, err);
         ipc_service_bus_destroy(ibh->bus);
-        AGENTRT_FREE(ibh);
+        AIRY_FREE(ibh);
         return NULL;
     }
 
@@ -106,7 +106,7 @@ void ipc_bus_helper_shutdown(ipc_bus_helper_t *ibh) {
     }
 
     SVC_LOG_INFO("IPC bus helper shutdown for daemon '%s'", ibh->daemon_name);
-    AGENTRT_FREE(ibh);
+    AIRY_FREE(ibh);
 }
 
 /* ==================== 通道注册（P1.8.1） ==================== */
@@ -114,7 +114,7 @@ void ipc_bus_helper_shutdown(ipc_bus_helper_t *ibh) {
 int ipc_bus_helper_register_channel(ipc_bus_helper_t *ibh,
                                     const char *channel_name,
                                     ipc_bus_proto_t default_protocol) {
-    if (!ibh || !channel_name) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ibh || !channel_name) return AIRY_ERR_INVALID_PARAM;
 
     if (ibh->channel_registered) {
         SVC_LOG_WARN("Channel already registered for daemon '%s'", ibh->daemon_name);
@@ -122,7 +122,7 @@ int ipc_bus_helper_register_channel(ipc_bus_helper_t *ibh,
     }
 
     ipc_bus_channel_config_t ch_config;
-    AGENTRT_MEMSET(&ch_config, 0, sizeof(ch_config));
+    AIRY_MEMSET(&ch_config, 0, sizeof(ch_config));
     safe_strcpy(ch_config.name, channel_name, sizeof(ch_config.name));
     ch_config.default_protocol = default_protocol;
     ch_config.timeout_ms = IPC_BUS_DEFAULT_TIMEOUT_MS;
@@ -133,7 +133,7 @@ int ipc_bus_helper_register_channel(ipc_bus_helper_t *ibh,
     if (!ibh->channel) {
         SVC_LOG_ERROR("Failed to create channel '%s' for daemon '%s'",
                       channel_name, ibh->daemon_name);
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 
     ibh->channel_registered = true;
@@ -149,10 +149,10 @@ int ipc_bus_helper_register_endpoint(ipc_bus_helper_t *ibh,
                                      const ipc_bus_proto_t *protocols,
                                      uint32_t proto_count) {
     if (!ibh || !service_name || !endpoint || !protocols || proto_count == 0)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     ipc_bus_endpoint_t ep;
-    AGENTRT_MEMSET(&ep, 0, sizeof(ep));
+    AIRY_MEMSET(&ep, 0, sizeof(ep));
     safe_strcpy(ep.service_name, service_name, sizeof(ep.service_name));
     safe_strcpy(ep.endpoint, endpoint, sizeof(ep.endpoint));
     ep.healthy = true;
@@ -166,11 +166,11 @@ int ipc_bus_helper_register_endpoint(ipc_bus_helper_t *ibh,
         ep.supported_protocols[i] = protocols[i];
     }
 
-    agentrt_error_t err = ipc_service_bus_register_endpoint(ibh->bus, &ep);
-    if (err != AGENTRT_SUCCESS) {
+    airy_err_t err = ipc_service_bus_register_endpoint(ibh->bus, &ep);
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to register endpoint '%s' for daemon '%s' (err=%d)",
                       service_name, ibh->daemon_name, err);
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 
     ibh->endpoint_registered = true;
@@ -184,13 +184,13 @@ int ipc_bus_helper_register_endpoint(ipc_bus_helper_t *ibh,
 int ipc_bus_helper_register_handler(ipc_bus_helper_t *ibh,
                                     ipc_bus_message_handler_t handler,
                                     void *user_data) {
-    if (!ibh || !handler) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ibh || !handler) return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_error_t err = ipc_service_bus_register_handler(ibh->bus, handler, user_data);
-    if (err != AGENTRT_SUCCESS) {
+    airy_err_t err = ipc_service_bus_register_handler(ibh->bus, handler, user_data);
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to register message handler for daemon '%s' (err=%d)",
                       ibh->daemon_name, err);
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 
     SVC_LOG_INFO("Message handler registered for daemon '%s'", ibh->daemon_name);
@@ -201,14 +201,14 @@ int ipc_bus_helper_register_event_handler(ipc_bus_helper_t *ibh,
                                           const char *event_name,
                                           ipc_bus_event_handler_t handler,
                                           void *user_data) {
-    if (!ibh || !event_name || !handler) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ibh || !event_name || !handler) return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_error_t err = ipc_service_bus_register_event_handler(
+    airy_err_t err = ipc_service_bus_register_event_handler(
         ibh->bus, event_name, handler, user_data);
-    if (err != AGENTRT_SUCCESS) {
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to register event handler '%s' for daemon '%s' (err=%d)",
                       event_name, ibh->daemon_name, err);
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 
     SVC_LOG_INFO("Event handler '%s' registered for daemon '%s'",
@@ -221,7 +221,7 @@ int ipc_bus_helper_register_event_handler(ipc_bus_helper_t *ibh,
 int ipc_bus_helper_send(ipc_bus_helper_t *ibh, const char *target_service,
                         ipc_bus_msg_type_t msg_type, ipc_bus_proto_t protocol,
                         const void *payload, size_t payload_size) {
-    if (!ibh || !target_service || !payload) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ibh || !target_service || !payload) return AIRY_ERR_INVALID_PARAM;
 
     /* P1.8: 记录路由目标 */
     safe_strcpy(ibh->last_target, target_service, sizeof(ibh->last_target));
@@ -237,7 +237,7 @@ int ipc_bus_helper_send(ipc_bus_helper_t *ibh, const char *target_service,
         ibh->send_failures++;
         SVC_LOG_ERROR("C-L09: Failed to create message [%s] → [%s]",
                       ibh->daemon_name, target_service);
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 
     /* 设置消息头 */
@@ -246,10 +246,10 @@ int ipc_bus_helper_send(ipc_bus_helper_t *ibh, const char *target_service,
     safe_strcpy(msg->header.target, target_service,
                 sizeof(msg->header.target));
 
-    agentrt_error_t err = ipc_service_bus_send(ibh->bus, target_service, msg);
+    airy_err_t err = ipc_service_bus_send(ibh->bus, target_service, msg);
     ipc_bus_message_free(msg);
 
-    if (err == AGENTRT_SUCCESS) {
+    if (err == AIRY_SUCCESS) {
         ibh->total_sends++;
         SVC_LOG_DEBUG("C-L09: SEND OK [%s] → [%s] proto=%s",
                       ibh->daemon_name, target_service,
@@ -260,60 +260,60 @@ int ipc_bus_helper_send(ipc_bus_helper_t *ibh, const char *target_service,
         SVC_LOG_WARN("C-L09: SEND FAILED [%s] → [%s] proto=%s err=%d",
                      ibh->daemon_name, target_service,
                      ipc_bus_proto_to_string(protocol), (int)err);
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 }
 
 int ipc_bus_helper_request(ipc_bus_helper_t *ibh, const char *target_service,
                            const ipc_bus_message_t *request,
                            ipc_bus_message_t *response, uint32_t timeout_ms) {
-    if (!ibh || !target_service || !request || !response) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ibh || !target_service || !request || !response) return AIRY_ERR_INVALID_PARAM;
 
     SVC_LOG_DEBUG("C-L09: REQUEST [%s] → [%s] timeout=%ums",
                   ibh->daemon_name, target_service, timeout_ms);
 
-    agentrt_error_t err = ipc_service_bus_request(ibh->bus, target_service,
+    airy_err_t err = ipc_service_bus_request(ibh->bus, target_service,
                                                    request, response,
                                                    timeout_ms);
-    if (err == AGENTRT_SUCCESS) {
+    if (err == AIRY_SUCCESS) {
         SVC_LOG_DEBUG("C-L09: REQUEST OK [%s] → [%s]",
                       ibh->daemon_name, target_service);
         return 0;
     } else {
         SVC_LOG_WARN("C-L09: REQUEST FAILED [%s] → [%s] err=%d",
                      ibh->daemon_name, target_service, (int)err);
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 }
 
 int ipc_bus_helper_broadcast(ipc_bus_helper_t *ibh,
                              const ipc_bus_message_t *message) {
-    if (!ibh || !message) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ibh || !message) return AIRY_ERR_INVALID_PARAM;
 
     SVC_LOG_DEBUG("C-L09: BROADCAST [%s] type=%d proto=%s",
                   ibh->daemon_name, (int)message->header.msg_type,
                   ipc_bus_proto_to_string(message->header.protocol));
 
-    agentrt_error_t err = ipc_service_bus_broadcast(ibh->bus, message);
-    if (err == AGENTRT_SUCCESS) {
+    airy_err_t err = ipc_service_bus_broadcast(ibh->bus, message);
+    if (err == AIRY_SUCCESS) {
         SVC_LOG_DEBUG("C-L09: BROADCAST OK [%s]", ibh->daemon_name);
         return 0;
     } else {
         SVC_LOG_WARN("C-L09: BROADCAST FAILED [%s] err=%d",
                      ibh->daemon_name, (int)err);
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 }
 
 int ipc_bus_helper_notify(ipc_bus_helper_t *ibh, const char *target_service,
                           const void *payload, size_t payload_size,
                           ipc_bus_proto_t protocol) {
-    if (!ibh || !target_service || !payload) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ibh || !target_service || !payload) return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_error_t err = ipc_service_bus_notify(ibh->bus, target_service,
+    airy_err_t err = ipc_service_bus_notify(ibh->bus, target_service,
                                                   payload, payload_size,
                                                   protocol);
-    return (err == AGENTRT_SUCCESS) ? 0 : -1;
+    return (err == AIRY_SUCCESS) ? 0 : -1;
 }
 
 /* ==================== 协议透明路由（P1.8.4） ==================== */
@@ -321,7 +321,7 @@ int ipc_bus_helper_notify(ipc_bus_helper_t *ibh, const char *target_service,
 int ipc_bus_helper_route_auto(ipc_bus_helper_t *ibh,
                               const char *target_service,
                               const void *payload, size_t payload_size) {
-    if (!ibh || !target_service || !payload) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ibh || !target_service || !payload) return AIRY_ERR_INVALID_PARAM;
 
     ibh->total_routes++;
     SVC_LOG_DEBUG("C-L09: ROUTE-AUTO [%s] → [%s] payload=%zub (route #%llu)",
@@ -341,10 +341,10 @@ int ipc_bus_helper_route_auto(ipc_bus_helper_t *ibh,
     ipc_bus_endpoint_t endpoints[8];
     uint32_t found = 0;
 
-    agentrt_error_t err = ipc_service_bus_discover(ibh->bus, target_service,
+    airy_err_t err = ipc_service_bus_discover(ibh->bus, target_service,
                                                     IPC_BUS_PROTO_AUTO,
                                                     endpoints, 8, &found);
-    if (err != AGENTRT_SUCCESS || found == 0) {
+    if (err != AIRY_SUCCESS || found == 0) {
         SVC_LOG_WARN("C-L09: No endpoints found for '%s', trying direct send (fallback)",
                      target_service);
         ibh->route_fallbacks++;
@@ -397,7 +397,7 @@ int ipc_bus_helper_route_auto(ipc_bus_helper_t *ibh,
     SVC_LOG_ERROR("C-L09: ROUTE FAILED [%s] → [%s] no healthy endpoints available",
                   ibh->daemon_name, target_service);
     ibh->send_failures++;
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 int ipc_bus_helper_discover(ipc_bus_helper_t *ibh,
@@ -405,12 +405,12 @@ int ipc_bus_helper_discover(ipc_bus_helper_t *ibh,
                             ipc_bus_proto_t protocol,
                             ipc_bus_endpoint_t *endpoints,
                             uint32_t max_count, uint32_t *found_count) {
-    if (!ibh || !endpoints || !found_count) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ibh || !endpoints || !found_count) return AIRY_ERR_INVALID_PARAM;
 
-    agentrt_error_t err = ipc_service_bus_discover(ibh->bus, service_name,
+    airy_err_t err = ipc_service_bus_discover(ibh->bus, service_name,
                                                     protocol, endpoints,
                                                     max_count, found_count);
-    return (err == AGENTRT_SUCCESS) ? 0 : -1;
+    return (err == AIRY_SUCCESS) ? 0 : -1;
 }
 
 /* ==================== 状态查询 ==================== */
@@ -428,7 +428,7 @@ bool ipc_bus_helper_is_running(ipc_bus_helper_t *ibh) {
 
 int ipc_bus_helper_enable_backpressure(ipc_bus_helper_t *ibh,
                                        const ipc_bp_config_t *config) {
-    if (!ibh) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ibh) return AIRY_ERR_INVALID_PARAM;
 
     /* 已存在则先销毁 */
     if (ibh->bp_ctrl) {
@@ -439,7 +439,7 @@ int ipc_bus_helper_enable_backpressure(ipc_bus_helper_t *ibh,
     if (!ibh->bp_ctrl) {
         SVC_LOG_ERROR("P1.24: Failed to create backpressure controller for '%s'",
                       ibh->daemon_name);
-        return AGENTRT_ERR_FAIL;
+        return AIRY_ERR_FAIL;
     }
 
     SVC_LOG_INFO("P1.24: Backpressure enabled for daemon '%s'", ibh->daemon_name);
@@ -458,7 +458,7 @@ int ipc_bus_helper_send_with_bp(ipc_bus_helper_t *ibh, const char *target,
                                 ipc_bus_msg_type_t msg_type, ipc_bus_proto_t protocol,
                                 const void *payload, size_t payload_size,
                                 bool is_droppable) {
-    if (!ibh || !target || !payload) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ibh || !target || !payload) return AIRY_ERR_INVALID_PARAM;
 
     /* 如果未启用背压，直接发送 */
     if (!ibh->bp_ctrl) {
@@ -494,8 +494,8 @@ bool ipc_bus_helper_should_accept_connection(ipc_bus_helper_t *ibh) {
 }
 
 int ipc_bus_helper_get_bp_stats(ipc_bus_helper_t *ibh, ipc_bp_stats_t *out_stats) {
-    if (!ibh || !out_stats) return AGENTRT_ERR_INVALID_PARAM;
-    if (!ibh->bp_ctrl) return AGENTRT_ERR_STATE_ERROR;
+    if (!ibh || !out_stats) return AIRY_ERR_INVALID_PARAM;
+    if (!ibh->bp_ctrl) return AIRY_ERR_STATE_ERROR;
 
     ipc_bp_get_stats(ibh->bp_ctrl, out_stats);
     return 0;
@@ -517,7 +517,7 @@ int ipc_bus_helper_get_routing_stats(ipc_bus_helper_t *ibh,
                                      uint64_t *out_send_failures,
                                      uint64_t *out_bp_drops,
                                      uint64_t *out_bp_rejects) {
-    if (!ibh) return AGENTRT_ERR_INVALID_PARAM;
+    if (!ibh) return AIRY_ERR_INVALID_PARAM;
 
     if (out_total_sends)      *out_total_sends = ibh->total_sends;
     if (out_total_routes)     *out_total_routes = ibh->total_routes;

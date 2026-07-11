@@ -119,11 +119,11 @@ static void record_prediction(ml_based_data_t *mld, const char *agent_id, float 
     size_t idx = mld->history_count % HISTORY_WINDOW;
     ml_history_entry_t *entry = &mld->history[idx];
 
-    AGENTRT_FREE(entry->agent_id);
+    AIRY_FREE(entry->agent_id);
     entry->task_id = mld->total_predictions + 1;
     mld->total_predictions++;
-    entry->timestamp = (time_t)(agentrt_time_ms() / 1000ULL);
-    entry->agent_id = AGENTRT_STRDUP(agent_id);
+    entry->timestamp = (time_t)(airy_time_ms() / 1000ULL);
+    entry->agent_id = AIRY_STRDUP(agent_id);
     entry->predicted_score = pred_score;
     entry->actual_score = success ? 1.0f : 0.0f;
     entry->response_time_ms = resp_time_ms;
@@ -143,21 +143,21 @@ static void record_prediction(ml_based_data_t *mld, const char *agent_id, float 
 static int ml_based_create(const sched_config_t *manager, void **data)
 {
     if (!manager || !data)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    ml_based_data_t *mld = (ml_based_data_t *)AGENTRT_CALLOC(1, sizeof(ml_based_data_t));
+    ml_based_data_t *mld = (ml_based_data_t *)AIRY_CALLOC(1, sizeof(ml_based_data_t));
     if (!mld)
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
 
     mld->max_agents = manager->max_agents > 0 ? manager->max_agents : 128;
-    mld->agents = (agent_info_t **)AGENTRT_CALLOC(mld->max_agents, sizeof(agent_info_t *));
+    mld->agents = (agent_info_t **)AIRY_CALLOC(mld->max_agents, sizeof(agent_info_t *));
     if (!mld->agents) {
-        AGENTRT_FREE(mld);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        AIRY_FREE(mld);
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     mld->agent_count = 0;
-    mld->model_path = manager->ml_model_path ? AGENTRT_STRDUP(manager->ml_model_path) : NULL;
+    mld->model_path = manager->ml_model_path ? AIRY_STRDUP(manager->ml_model_path) : NULL;
     mld->model_loaded = false;
     mld->total_predictions = 0;
     mld->correct_predictions = 0;
@@ -185,7 +185,7 @@ static int ml_based_create(const sched_config_t *manager, void **data)
             size_t bytes_read = fread(&file_header, sizeof(ml_model_header_t), 1, model_file);
             fclose(model_file);
 
-            mld->model = AGENTRT_CALLOC(1, sizeof(ml_model_header_t));
+            mld->model = AIRY_CALLOC(1, sizeof(ml_model_header_t));
             if (mld->model) {
                 ml_model_header_t *header = (ml_model_header_t *)mld->model;
                 if (bytes_read == 1 && file_header.magic == 0x4D4C4F53 &&
@@ -234,39 +234,39 @@ static int ml_based_destroy(void *data)
 
     for (size_t i = 0; i < mld->agent_count; i++) {
         if (mld->agents[i]) {
-            AGENTRT_FREE(mld->agents[i]->agent_id);
-            AGENTRT_FREE(mld->agents[i]->agent_name);
-            AGENTRT_FREE(mld->agents[i]);
+            AIRY_FREE(mld->agents[i]->agent_id);
+            AIRY_FREE(mld->agents[i]->agent_name);
+            AIRY_FREE(mld->agents[i]);
         }
     }
-    AGENTRT_FREE(mld->agents);
+    AIRY_FREE(mld->agents);
 
     for (size_t i = 0; i < HISTORY_WINDOW; i++) {
-        AGENTRT_FREE(mld->history[i].agent_id);
+        AIRY_FREE(mld->history[i].agent_id);
     }
 
-    AGENTRT_FREE(mld->model_path);
-    AGENTRT_FREE(mld->model);
-    AGENTRT_FREE(mld);
+    AIRY_FREE(mld->model_path);
+    AIRY_FREE(mld->model);
+    AIRY_FREE(mld);
     return 0;
 }
 
 static int ml_based_register_agent(void *data, const agent_info_t *agent_info)
 {
     if (!data || !agent_info)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     ml_based_data_t *mld = (ml_based_data_t *)data;
 
     if (mld->agent_count >= mld->max_agents)
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
 
     for (size_t i = 0; i < mld->agent_count; i++) {
         if (strcmp(mld->agents[i]->agent_id, agent_info->agent_id) == 0) {
-            AGENTRT_FREE(mld->agents[i]->agent_id);
-            AGENTRT_FREE(mld->agents[i]->agent_name);
-            mld->agents[i]->agent_id = AGENTRT_STRDUP(agent_info->agent_id);
-            mld->agents[i]->agent_name = AGENTRT_STRDUP(agent_info->agent_name);
+            AIRY_FREE(mld->agents[i]->agent_id);
+            AIRY_FREE(mld->agents[i]->agent_name);
+            mld->agents[i]->agent_id = AIRY_STRDUP(agent_info->agent_id);
+            mld->agents[i]->agent_name = AIRY_STRDUP(agent_info->agent_name);
             mld->agents[i]->load_factor = agent_info->load_factor;
             mld->agents[i]->success_rate = agent_info->success_rate;
             mld->agents[i]->avg_response_time_ms = agent_info->avg_response_time_ms;
@@ -276,12 +276,12 @@ static int ml_based_register_agent(void *data, const agent_info_t *agent_info)
         }
     }
 
-    agent_info_t *new_agent = (agent_info_t *)AGENTRT_CALLOC(1, sizeof(agent_info_t));
+    agent_info_t *new_agent = (agent_info_t *)AIRY_CALLOC(1, sizeof(agent_info_t));
     if (!new_agent)
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
 
-    new_agent->agent_id = AGENTRT_STRDUP(agent_info->agent_id);
-    new_agent->agent_name = AGENTRT_STRDUP(agent_info->agent_name);
+    new_agent->agent_id = AIRY_STRDUP(agent_info->agent_id);
+    new_agent->agent_name = AIRY_STRDUP(agent_info->agent_name);
     new_agent->load_factor = agent_info->load_factor;
     new_agent->success_rate = agent_info->success_rate;
     new_agent->avg_response_time_ms = agent_info->avg_response_time_ms;
@@ -295,15 +295,15 @@ static int ml_based_register_agent(void *data, const agent_info_t *agent_info)
 static int ml_based_unregister_agent(void *data, const char *agent_id)
 {
     if (!data || !agent_id)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     ml_based_data_t *mld = (ml_based_data_t *)data;
 
     for (size_t i = 0; i < mld->agent_count; i++) {
         if (strcmp(mld->agents[i]->agent_id, agent_id) == 0) {
-            AGENTRT_FREE(mld->agents[i]->agent_id);
-            AGENTRT_FREE(mld->agents[i]->agent_name);
-            AGENTRT_FREE(mld->agents[i]);
+            AIRY_FREE(mld->agents[i]->agent_id);
+            AIRY_FREE(mld->agents[i]->agent_name);
+            AIRY_FREE(mld->agents[i]);
             for (size_t j = i; j < mld->agent_count - 1; j++) {
                 mld->agents[j] = mld->agents[j + 1];
             }
@@ -311,7 +311,7 @@ static int ml_based_unregister_agent(void *data, const char *agent_id)
             return 0;
         }
     }
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 static int ml_based_update_agent_status(void *data, const agent_info_t *agent_info)
@@ -322,12 +322,12 @@ static int ml_based_update_agent_status(void *data, const agent_info_t *agent_in
 static int ml_based_schedule(void *data, const task_info_t *task_info, sched_result_t **result)
 {
     if (!data || !task_info || !result)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     ml_based_data_t *mld = (ml_based_data_t *)data;
 
     if (mld->agent_count == 0)
-        return AGENTRT_ERR_NOT_FOUND;
+        return AIRY_ERR_NOT_FOUND;
 
     agent_info_t *best_agent = NULL;
     float best_score = -1.0f;
@@ -349,13 +349,13 @@ static int ml_based_schedule(void *data, const task_info_t *task_info, sched_res
     }
 
     if (!best_agent)
-        return AGENTRT_ERR_NOT_FOUND;
+        return AIRY_ERR_NOT_FOUND;
 
-    sched_result_t *res = (sched_result_t *)AGENTRT_CALLOC(1, sizeof(sched_result_t));
+    sched_result_t *res = (sched_result_t *)AIRY_CALLOC(1, sizeof(sched_result_t));
     if (!res)
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
 
-    res->selected_agent_id = AGENTRT_STRDUP(best_agent->agent_id);
+    res->selected_agent_id = AIRY_STRDUP(best_agent->agent_id);
     res->confidence = fminf(best_score, 1.0f);
     res->estimated_time_ms =
         (uint32_t)(best_agent->avg_response_time_ms * (1.0f + best_agent->load_factor));

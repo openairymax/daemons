@@ -73,9 +73,9 @@ static void bridge_config_defaults(safety_guard_bridge_config_t *cfg)
 safety_guard_bridge_t *safety_guard_bridge_create(const safety_guard_bridge_config_t *config)
 {
     safety_guard_bridge_t *bridge =
-        (safety_guard_bridge_t *)AGENTRT_CALLOC(1, sizeof(safety_guard_bridge_t));
+        (safety_guard_bridge_t *)AIRY_CALLOC(1, sizeof(safety_guard_bridge_t));
     if (!bridge) {
-        AGENTRT_LOG_ERROR("C-L05: safety_guard_bridge_create: OOM");
+        AIRY_LOG_ERROR("C-L05: safety_guard_bridge_create: OOM");
         return NULL;
     }
 
@@ -95,7 +95,7 @@ safety_guard_bridge_t *safety_guard_bridge_create(const safety_guard_bridge_conf
     /* 初始化 Cupolas SafetyGuard 上下文 */
     bridge->guard_ctx = safety_guard_create();
     if (!bridge->guard_ctx) {
-        AGENTRT_LOG_WARN("C-L05: safety_guard_create failed, "
+        AIRY_LOG_WARN("C-L05: safety_guard_create failed, "
                          "guard checks will be skipped");
         /* 非致命 — 降级为仅本地安全检查 */
     }
@@ -109,7 +109,7 @@ safety_guard_bridge_t *safety_guard_bridge_create(const safety_guard_bridge_conf
     bridge->rate_limited = 0;
     bridge->initialized = true;
 
-    AGENTRT_LOG_INFO("C-L05: SafetyGuard bridge created (permission=%d, rate_limit=%d, "
+    AIRY_LOG_INFO("C-L05: SafetyGuard bridge created (permission=%d, rate_limit=%d, "
                      "content_filter=%d, input_san=%d, resource=%d, audit=%d, rate_limit/min=%u)",
                      bridge->config.enable_permission_guard,
                      bridge->config.enable_rate_limit_guard,
@@ -125,7 +125,7 @@ void safety_guard_bridge_destroy(safety_guard_bridge_t *bridge)
 {
     if (!bridge) return;
 
-    AGENTRT_LOG_INFO("C-L05: SafetyGuard bridge destroyed "
+    AIRY_LOG_INFO("C-L05: SafetyGuard bridge destroyed "
                      "(checks=%llu denied=%llu rate_limited=%llu)",
                      (unsigned long long)bridge->total_checks,
                      (unsigned long long)bridge->denied_count,
@@ -136,7 +136,7 @@ void safety_guard_bridge_destroy(safety_guard_bridge_t *bridge)
         bridge->guard_ctx = NULL;
     }
 
-    AGENTRT_FREE(bridge);
+    AIRY_FREE(bridge);
 }
 
 /* ==================== 内部辅助函数 ==================== */
@@ -199,7 +199,7 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
                               const char *params_json,
                               safety_guard_bridge_result_t *result)
 {
-    if (!bridge || !meta) return AGENTRT_ERR_INVALID_PARAM;
+    if (!bridge || !meta) return AIRY_ERR_INVALID_PARAM;
 
     /* 初始化结果 */
     if (result) {
@@ -224,10 +224,10 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
                          "Permission denied: agent '%s' cannot execute '%s'",
                          agent_id, tool_name);
             }
-            AGENTRT_LOG_WARN("C-L05: SAFETY_GUARD_PERMISSION denied for '%s' by '%s'",
+            AIRY_LOG_WARN("C-L05: SAFETY_GUARD_PERMISSION denied for '%s' by '%s'",
                              tool_name, agent_id);
             bridge->denied_count++;
-            return AGENTRT_ERR_PERMISSION_DENIED;
+            return AIRY_ERR_PERMISSION_DENIED;
         }
         if (result) result->permission_passed = 1;
         guards_executed++;
@@ -246,12 +246,12 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
                          "Rate limit exceeded: %u/min for tool '%s'",
                          bridge->config.rate_limit_per_minute, tool_name);
             }
-            AGENTRT_LOG_WARN("C-L05: SAFETY_GUARD_RATE_LIMIT exceeded for '%s' "
+            AIRY_LOG_WARN("C-L05: SAFETY_GUARD_RATE_LIMIT exceeded for '%s' "
                              "(%llu calls)", tool_name,
                              (unsigned long long)bridge->rate_limit_call_count);
             bridge->rate_limited++;
             bridge->denied_count++;
-            return AGENTRT_ERR_BUSY;
+            return AIRY_ERR_BUSY;
         }
         if (result) result->rate_limit_passed = 1;
         guards_executed++;
@@ -266,7 +266,7 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
 
         /* 检查禁止的模式 */
         if (bridge->config.denied_patterns && bridge->config.denied_patterns[0]) {
-            char *patterns_copy = AGENTRT_STRDUP(bridge->config.denied_patterns);
+            char *patterns_copy = AIRY_STRDUP(bridge->config.denied_patterns);
             if (patterns_copy) {
                 char *saveptr = NULL;
                 char *token = strtok_r(patterns_copy, ",", &saveptr);
@@ -282,16 +282,16 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
                                      "in tool '%s' params",
                                      token, tool_name);
                         }
-                        AGENTRT_LOG_WARN("C-L05: SAFETY_GUARD_CONTENT_FILTER "
+                        AIRY_LOG_WARN("C-L05: SAFETY_GUARD_CONTENT_FILTER "
                                          "denied pattern '%s' for '%s'",
                                          token, tool_name);
-                        AGENTRT_FREE(patterns_copy);
+                        AIRY_FREE(patterns_copy);
                         bridge->denied_count++;
-                        return AGENTRT_ERR_SEC_VIOLATION;
+                        return AIRY_ERR_SEC_VIOLATION;
                     }
                     token = strtok_r(NULL, ",", &saveptr);
                 }
-                AGENTRT_FREE(patterns_copy);
+                AIRY_FREE(patterns_copy);
             }
         }
 
@@ -306,12 +306,12 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
                              "for tool '%s'",
                              params_len, bridge->config.max_params_size, tool_name);
                 }
-                AGENTRT_LOG_WARN("C-L05: SAFETY_GUARD_CONTENT_FILTER size limit "
+                AIRY_LOG_WARN("C-L05: SAFETY_GUARD_CONTENT_FILTER size limit "
                                  "exceeded for '%s' (%zu > %u)",
                                  tool_name, params_len,
                                  bridge->config.max_params_size);
                 bridge->denied_count++;
-                return AGENTRT_ERR_SEC_VIOLATION;
+                return AIRY_ERR_SEC_VIOLATION;
             }
         }
 
@@ -356,10 +356,10 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
                 snprintf(result->denial_reason, sizeof(result->denial_reason),
                          "Resource quota exceeded for tool '%s'", tool_name);
             }
-            AGENTRT_LOG_WARN("C-L05: SAFETY_GUARD_RESOURCE quota exceeded for '%s'",
+            AIRY_LOG_WARN("C-L05: SAFETY_GUARD_RESOURCE quota exceeded for '%s'",
                              tool_name);
             bridge->denied_count++;
-            return AGENTRT_ERR_SEC_QUOTA;
+            return AIRY_ERR_SEC_QUOTA;
         }
 
         /* 消耗资源配额 */
@@ -409,13 +409,13 @@ int safety_guard_bridge_check_permission(safety_guard_bridge_t *bridge,
                                          const char *tool_name,
                                          const char *action)
 {
-    if (!bridge || !agent_id || !tool_name || !action) return AGENTRT_ERR_INVALID_PARAM;
+    if (!bridge || !agent_id || !tool_name || !action) return AIRY_ERR_INVALID_PARAM;
 
     if (!bridge->config.enable_permission_guard) return 0;
 
     int ret = daemon_check_tool_permission(agent_id, tool_name, action);
     if (ret != 0) {
-        AGENTRT_LOG_WARN("C-L05: Permission check failed for '%s' on '%s' (action=%s)",
+        AIRY_LOG_WARN("C-L05: Permission check failed for '%s' on '%s' (action=%s)",
                          agent_id, tool_name, action);
     }
     return ret;
@@ -424,7 +424,7 @@ int safety_guard_bridge_check_permission(safety_guard_bridge_t *bridge,
 int safety_guard_bridge_check_rate_limit(safety_guard_bridge_t *bridge,
                                          const char *tool_name)
 {
-    if (!bridge || !tool_name) return AGENTRT_ERR_INVALID_PARAM;
+    if (!bridge || !tool_name) return AIRY_ERR_INVALID_PARAM;
 
     if (!bridge->config.enable_rate_limit_guard ||
         bridge->config.rate_limit_per_minute == 0) {
@@ -436,7 +436,7 @@ int safety_guard_bridge_check_rate_limit(safety_guard_bridge_t *bridge,
 
     if (bridge->rate_limit_call_count > bridge->config.rate_limit_per_minute) {
         bridge->rate_limited++;
-        return AGENTRT_ERR_BUSY;
+        return AIRY_ERR_BUSY;
     }
 
     return 0;
@@ -448,7 +448,7 @@ int safety_guard_bridge_filter_content(safety_guard_bridge_t *bridge,
                                        size_t sanitized_size)
 {
     if (!bridge || !params_json || !sanitized_params || sanitized_size == 0) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (!bridge->config.enable_content_filter) {
@@ -458,19 +458,19 @@ int safety_guard_bridge_filter_content(safety_guard_bridge_t *bridge,
 
     /* 检查禁止模式 */
     if (bridge->config.denied_patterns && bridge->config.denied_patterns[0]) {
-        char *patterns_copy = AGENTRT_STRDUP(bridge->config.denied_patterns);
+        char *patterns_copy = AIRY_STRDUP(bridge->config.denied_patterns);
         if (patterns_copy) {
             char *saveptr = NULL;
             char *token = strtok_r(patterns_copy, ",", &saveptr);
             while (token) {
                 while (*token == ' ') token++;
                 if (*token && strstr(params_json, token)) {
-                    AGENTRT_FREE(patterns_copy);
-                    return AGENTRT_ERR_SEC_VIOLATION;
+                    AIRY_FREE(patterns_copy);
+                    return AIRY_ERR_SEC_VIOLATION;
                 }
                 token = strtok_r(NULL, ",", &saveptr);
             }
-            AGENTRT_FREE(patterns_copy);
+            AIRY_FREE(patterns_copy);
         }
     }
 
@@ -478,7 +478,7 @@ int safety_guard_bridge_filter_content(safety_guard_bridge_t *bridge,
     if (bridge->config.max_params_size > 0) {
         size_t params_len = strlen(params_json);
         if (params_len > bridge->config.max_params_size) {
-            return AGENTRT_ERR_SEC_VIOLATION;
+            return AIRY_ERR_SEC_VIOLATION;
         }
     }
 
@@ -496,7 +496,7 @@ int safety_guard_bridge_audit_log(safety_guard_bridge_t *bridge,
                                   const char *reason,
                                   const char *agent_id)
 {
-    if (!bridge || !event_type || !tool_name) return AGENTRT_ERR_INVALID_PARAM;
+    if (!bridge || !event_type || !tool_name) return AIRY_ERR_INVALID_PARAM;
 
     if (!bridge->config.enable_audit_guard) return 0;
 

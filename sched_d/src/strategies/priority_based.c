@@ -39,16 +39,16 @@ typedef struct {
 static int priority_based_create(const sched_config_t *manager, void **data)
 {
     priority_based_data_t *pbd =
-        (priority_based_data_t *)AGENTRT_MALLOC(sizeof(priority_based_data_t));
+        (priority_based_data_t *)AIRY_MALLOC(sizeof(priority_based_data_t));
     if (!pbd) {
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     pbd->max_agents = manager->max_agents;
-    pbd->agents = (agent_info_t **)AGENTRT_MALLOC(sizeof(agent_info_t *) * pbd->max_agents);
+    pbd->agents = (agent_info_t **)AIRY_MALLOC(sizeof(agent_info_t *) * pbd->max_agents);
     if (!pbd->agents) {
-        AGENTRT_FREE(pbd);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        AIRY_FREE(pbd);
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     pbd->agent_count = 0;
@@ -83,19 +83,19 @@ static int priority_based_destroy(void *data)
     if (pbd->agents) {
         for (size_t i = 0; i < pbd->agent_count; i++) {
             if (pbd->agents[i]) {
-                AGENTRT_FREE(pbd->agents[i]->agent_id);
-                AGENTRT_FREE(pbd->agents[i]->agent_name);
-                AGENTRT_FREE(pbd->agents[i]);
+                AIRY_FREE(pbd->agents[i]->agent_id);
+                AIRY_FREE(pbd->agents[i]->agent_name);
+                AIRY_FREE(pbd->agents[i]);
             }
         }
-        AGENTRT_FREE(pbd->agents);
+        AIRY_FREE(pbd->agents);
     }
 
     if (pbd->priority_weights) {
-        AGENTRT_FREE(pbd->priority_weights);
+        AIRY_FREE(pbd->priority_weights);
     }
 
-    AGENTRT_FREE(pbd);
+    AIRY_FREE(pbd);
     return 0;
 }
 
@@ -108,30 +108,30 @@ static int priority_based_destroy(void *data)
 static int priority_based_register_agent(void *data, const agent_info_t *agent_info)
 {
     if (!data || !agent_info) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     priority_based_data_t *pbd = (priority_based_data_t *)data;
 
     if (pbd->agent_count >= pbd->max_agents) {
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
     }
 
     // 检查是否已存在
     for (size_t i = 0; i < pbd->agent_count; i++) {
         if (strcmp(pbd->agents[i]->agent_id, agent_info->agent_id) == 0) {
             // 更新现有 Agent
-            AGENTRT_FREE(pbd->agents[i]->agent_id);
-            AGENTRT_FREE(pbd->agents[i]->agent_name);
+            AIRY_FREE(pbd->agents[i]->agent_id);
+            AIRY_FREE(pbd->agents[i]->agent_name);
 
-            pbd->agents[i]->agent_id = AGENTRT_STRDUP(agent_info->agent_id);
-            pbd->agents[i]->agent_name = AGENTRT_STRDUP(agent_info->agent_name);
+            pbd->agents[i]->agent_id = AIRY_STRDUP(agent_info->agent_id);
+            pbd->agents[i]->agent_name = AIRY_STRDUP(agent_info->agent_name);
             if (!pbd->agents[i]->agent_id || !pbd->agents[i]->agent_name) {
-                AGENTRT_FREE(pbd->agents[i]->agent_id);
-                AGENTRT_FREE(pbd->agents[i]->agent_name);
+                AIRY_FREE(pbd->agents[i]->agent_id);
+                AIRY_FREE(pbd->agents[i]->agent_name);
                 pbd->agents[i]->agent_id = NULL;
                 pbd->agents[i]->agent_name = NULL;
-                return AGENTRT_ERR_OUT_OF_MEMORY;
+                return AIRY_ERR_OUT_OF_MEMORY;
             }
             pbd->agents[i]->load_factor = agent_info->load_factor;
             pbd->agents[i]->success_rate = agent_info->success_rate;
@@ -144,18 +144,18 @@ static int priority_based_register_agent(void *data, const agent_info_t *agent_i
     }
 
     // 添加新 Agent
-    agent_info_t *new_agent = (agent_info_t *)AGENTRT_MALLOC(sizeof(agent_info_t));
+    agent_info_t *new_agent = (agent_info_t *)AIRY_MALLOC(sizeof(agent_info_t));
     if (!new_agent) {
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    new_agent->agent_id = AGENTRT_STRDUP(agent_info->agent_id);
-    new_agent->agent_name = AGENTRT_STRDUP(agent_info->agent_name);
+    new_agent->agent_id = AIRY_STRDUP(agent_info->agent_id);
+    new_agent->agent_name = AIRY_STRDUP(agent_info->agent_name);
     if (!new_agent->agent_id || !new_agent->agent_name) {
-        AGENTRT_FREE(new_agent->agent_id);
-        AGENTRT_FREE(new_agent->agent_name);
-        AGENTRT_FREE(new_agent);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        AIRY_FREE(new_agent->agent_id);
+        AIRY_FREE(new_agent->agent_name);
+        AIRY_FREE(new_agent);
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
     new_agent->load_factor = agent_info->load_factor;
     new_agent->success_rate = agent_info->success_rate;
@@ -176,7 +176,7 @@ static int priority_based_register_agent(void *data, const agent_info_t *agent_i
 static int priority_based_unregister_agent(void *data, const char *agent_id)
 {
     if (!data || !agent_id) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     priority_based_data_t *pbd = (priority_based_data_t *)data;
@@ -184,9 +184,9 @@ static int priority_based_unregister_agent(void *data, const char *agent_id)
     for (size_t i = 0; i < pbd->agent_count; i++) {
         if (strcmp(pbd->agents[i]->agent_id, agent_id) == 0) {
             // 释放 Agent 资源
-            AGENTRT_FREE(pbd->agents[i]->agent_id);
-            AGENTRT_FREE(pbd->agents[i]->agent_name);
-            AGENTRT_FREE(pbd->agents[i]);
+            AIRY_FREE(pbd->agents[i]->agent_id);
+            AIRY_FREE(pbd->agents[i]->agent_name);
+            AIRY_FREE(pbd->agents[i]);
 
             // 移动剩余 Agent
             for (size_t j = i; j < pbd->agent_count - 1; j++) {
@@ -198,7 +198,7 @@ static int priority_based_unregister_agent(void *data, const char *agent_id)
         }
     }
 
-    return AGENTRT_ERR_NOT_FOUND;  // Agent 不存在
+    return AIRY_ERR_NOT_FOUND;  // Agent 不存在
 }
 
 /**
@@ -223,7 +223,7 @@ static float calculate_match_score(const agent_info_t *agent, const task_info_t 
                                    float priority_weight)
 {
     if (!agent->is_available || agent->load_factor >= 0.9) {
-        return AGENTRT_EINVAL;  // 不可用或负载过高
+        return AIRY_EINVAL;  // 不可用或负载过高
     }
 
     float score = 0.0f;
@@ -258,13 +258,13 @@ static int priority_based_schedule(void *data, const task_info_t *task_info,
                                    sched_result_t **result)
 {
     if (!data || !task_info || !result) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     priority_based_data_t *pbd = (priority_based_data_t *)data;
 
     if (pbd->agent_count == 0) {
-        return AGENTRT_ERR_NOT_FOUND;  // 无可用 Agent
+        return AIRY_ERR_NOT_FOUND;  // 无可用 Agent
     }
 
     // 获取任务优先级（假设task_info中有priority字段）
@@ -299,16 +299,16 @@ static int priority_based_schedule(void *data, const task_info_t *task_info,
     }
 
     if (!best_agent) {
-        return AGENTRT_ERR_NOT_FOUND;  // 无可用 Agent
+        return AIRY_ERR_NOT_FOUND;  // 无可用 Agent
     }
 
     // 创建调度结果
-    sched_result_t *res = (sched_result_t *)AGENTRT_MALLOC(sizeof(sched_result_t));
+    sched_result_t *res = (sched_result_t *)AIRY_MALLOC(sizeof(sched_result_t));
     if (!res) {
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    res->selected_agent_id = AGENTRT_STRDUP(best_agent->agent_id);
+    res->selected_agent_id = AIRY_STRDUP(best_agent->agent_id);
     res->confidence = best_score;
     res->estimated_time_ms = best_agent->avg_response_time_ms;
 

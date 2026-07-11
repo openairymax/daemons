@@ -8,9 +8,9 @@
  * 本文件仅作为向后兼容的重导出层。
  */
 
-#ifndef AGENTRT_DAEMON_COMMON_CIRCUIT_BREAKER_H
-#define AGENTRT_DAEMON_COMMON_CIRCUIT_BREAKER_H
+#ifndef AIRY_RT_DAEMON_COMMON_CIRCUIT_BREAKER_H
+#define AIRY_RT_DAEMON_COMMON_CIRCUIT_BREAKER_H
 
 #include "../../../commons/utils/ipc/include/circuit_breaker.h"
 
-#endif /* AGENTRT_DAEMON_COMMON_CIRCUIT_BREAKER_H */
+#endif /* AIRY_RT_DAEMON_COMMON_CIRCUIT_BREAKER_H */

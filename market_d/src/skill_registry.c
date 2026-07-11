@@ -19,7 +19,7 @@
 int skill_registry_register(market_service_t *service, const skill_info_t *skill_info)
 {
     if (!service || !skill_info) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     return market_service_register_skill(service, skill_info);
 }
@@ -27,7 +27,7 @@ int skill_registry_register(market_service_t *service, const skill_info_t *skill
 skill_info_t *skill_registry_find(market_service_t *service, const char *skill_id)
 {
     if (!service || !skill_id) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     search_params_t params = {0};
@@ -38,18 +38,18 @@ skill_info_t *skill_registry_find(market_service_t *service, const char *skill_i
     size_t count = 0;
     int ret = market_service_search_skills(service, &params, &results, &count);
     if (ret != 0 || count == 0 || !results) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
     }
 
     skill_info_t *found = results[0];
-    AGENTRT_FREE(results);
+    AIRY_FREE(results);
     return found;
 }
 
 int skill_registry_remove(market_service_t *service, const char *skill_id)
 {
     if (!service || !skill_id) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     return market_service_uninstall_skill(service, skill_id);
 }
@@ -57,7 +57,7 @@ int skill_registry_remove(market_service_t *service, const char *skill_id)
 int skill_registry_list(market_service_t *service, skill_info_t ***skills, size_t *count)
 {
     if (!service || !skills || !count) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     return market_service_get_installed_skills(service, skills, count);
 }

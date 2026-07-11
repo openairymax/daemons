@@ -33,10 +33,10 @@
 #define MAX_APIKEY_SIZE 128
 #define MAX_CLIENTS 1024
 
-#define DEFAULT_TOKEN_TTL AGENTRT_DEFAULT_TOKEN_TTL_SEC
-#define DEFAULT_REFRESH_THRESHOLD AGENTRT_DEFAULT_REFRESH_THRESHOLD
-#define DEFAULT_RPS AGENTRT_DEFAULT_RPS_LIMIT
-#define DEFAULT_BURST_SIZE AGENTRT_DEFAULT_BURST_SIZE
+#define DEFAULT_TOKEN_TTL AIRY_DEFAULT_TOKEN_TTL_SEC
+#define DEFAULT_REFRESH_THRESHOLD AIRY_DEFAULT_REFRESH_THRESHOLD
+#define DEFAULT_RPS AIRY_DEFAULT_RPS_LIMIT
+#define DEFAULT_BURST_SIZE AIRY_DEFAULT_BURST_SIZE
 #define TOKEN_PREFIX "agentrt."
 #define BEARER_PREFIX "Bearer "
 #define APIKEY_PREFIX "ApiKey "
@@ -45,7 +45,7 @@
 
 static struct {
     jwt_config_t config;
-    agentrt_mutex_t lock;
+    airy_mtx_t lock;
     int initialized;
     char subject_buf[MAX_SUBJECT_SIZE]; /**< JWT 验证结果字符串缓冲 */
     char role_buf[MAX_ROLE_SIZE];       /**< JWT 验证角色缓冲 */
@@ -57,7 +57,7 @@ static struct {
     apikey_config_t config;
     char **keys;
     size_t capacity;
-    agentrt_mutex_t lock;
+    airy_mtx_t lock;
     int initialized;
     char subject_buf[512];
 } g_apikey = {.initialized = 0};
@@ -79,7 +79,7 @@ typedef struct rate_limit_entry {
 static struct {
     rate_limit_config_t config;
     rate_limit_entry_t entries[MAX_CLIENTS];
-    agentrt_mutex_t lock;
+    airy_mtx_t lock;
     int initialized;
 } g_ratelimit = {.initialized = 0};
 
@@ -98,12 +98,12 @@ static int base64_encode(const uint8_t *data, size_t len, char *output, size_t *
     static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     if (!data || !output || !out_len || len == 0) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "base64_encode: null parameter");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "base64_encode: null parameter");
     }
 
     size_t needed = ((len + 2) / 3) * 4;
     if (*out_len < needed + 1) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "base64_encode: output buffer too small");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "base64_encode: output buffer too small");
     }
 
     size_t i = 0, j = 0;
@@ -130,7 +130,7 @@ static int base64_encode(const uint8_t *data, size_t len, char *output, size_t *
     output[j] = '\0';
     *out_len = j;
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 /* ==================== HMAC-SHA256 实现（三模式条件编译） ==================== */
@@ -245,7 +245,7 @@ static void __attribute__((unused)) hmac_builtin(const char *key, const char *me
         return;
     }
     size_t new_len = ((msg_len + 8) / 64 + 1) * 64;
-    unsigned char *msg = (unsigned char *)AGENTRT_CALLOC(new_len + 64, 1);
+    unsigned char *msg = (unsigned char *)AIRY_CALLOC(new_len + 64, 1);
     if (!msg) {
         *out_len = 0;
         return;
@@ -296,7 +296,7 @@ static void __attribute__((unused)) hmac_builtin(const char *key, const char *me
         h[7] += hh;
     }
 
-    AGENTRT_FREE(msg);
+    AIRY_FREE(msg);
     msg = NULL;
     size_t key_len = strlen(key);
     unsigned char k_ipad[64], k_opad[64];
@@ -310,9 +310,9 @@ static void __attribute__((unused)) hmac_builtin(const char *key, const char *me
         size_t padded_len = 64 * 2;
         if (key_len + 1 + 8 > padded_len)
             padded_len = ((key_len + 1 + 8 + 63) / 64) * 64;
-        unsigned char *km = AGENTRT_CALLOC(padded_len, 1);
+        unsigned char *km = AIRY_CALLOC(padded_len, 1);
         if (!km) {
-            AGENTRT_FREE(msg);
+            AIRY_FREE(msg);
             return;
         }
         __builtin_memcpy(km, key, key_len);
@@ -354,7 +354,7 @@ static void __attribute__((unused)) hmac_builtin(const char *key, const char *me
             kh[6] += wg;
             kh[7] += whh;
         }
-        AGENTRT_FREE(km);
+        AIRY_FREE(km);
         km = NULL;
         for (int i = 0; i < 8; i++) {
             k_ipad[i * 4] = (kh[i] >> 24) & 0xFF;
@@ -378,9 +378,9 @@ static void __attribute__((unused)) hmac_builtin(const char *key, const char *me
     /* Inner hash - 正确处理多块 */
     size_t ilen = 64 + msg_len;
     size_t inner_padded = ((ilen + 8) / 64 + 1) * 64;
-    unsigned char *inner = AGENTRT_CALLOC(inner_padded + 64, 1);
+    unsigned char *inner = AIRY_CALLOC(inner_padded + 64, 1);
     if (!inner) {
-        AGENTRT_FREE(msg);
+        AIRY_FREE(msg);
         return;
     }
     __builtin_memcpy(inner, k_ipad, 64);
@@ -430,13 +430,13 @@ static void __attribute__((unused)) hmac_builtin(const char *key, const char *me
         ih[6] += g;
         ih[7] += hh;
     }
-    AGENTRT_FREE(inner);
+    AIRY_FREE(inner);
     inner = NULL;
 
     /* Outer hash - 正确处理多块 */
     size_t olen = 64 + 32;
     size_t outer_padded = ((olen + 8) / 64 + 1) * 64;
-    unsigned char *outer = AGENTRT_CALLOC(outer_padded + 64, 1);
+    unsigned char *outer = AIRY_CALLOC(outer_padded + 64, 1);
     if (!outer) {
         return;
     }
@@ -497,7 +497,7 @@ static void __attribute__((unused)) hmac_builtin(const char *key, const char *me
     for (size_t i = 0; i < *out_len; i++)
         output[i] = (oh[i / 4] >> ((3 - (i % 4)) * 8)) & 0xFF;
 
-    AGENTRT_FREE(outer);
+    AIRY_FREE(outer);
     outer = NULL;
 
 #undef ROTRIGHT
@@ -518,16 +518,16 @@ static void __attribute__((unused)) hmac_builtin(const char *key, const char *me
 
 int auth_jwt_init(const jwt_config_t *config)
 {
-    agentrt_mutex_lock(&g_jwt.lock);
+    airy_mtx_lock(&g_jwt.lock);
 
     if (g_jwt.initialized) {
-        agentrt_mutex_unlock(&g_jwt.lock);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_SUCCESS;
     }
 
     if (!config || !config->secret || config->secret_len == 0) {
         SVC_LOG_ERROR("JWT init: invalid config");
-        agentrt_mutex_unlock(&g_jwt.lock);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
     }
 
@@ -547,11 +547,11 @@ int auth_jwt_init(const jwt_config_t *config)
     g_hmac_impl = hmac_builtin;
 #endif
 
-    agentrt_mutex_init(&g_jwt.lock);
+    airy_mtx_init(&g_jwt.lock);
     g_jwt.initialized = 1;
     SVC_LOG_INFO("JWT authentication module initialized (TTL=%llu sec, HMAC=%s)",
                  (unsigned long long)g_jwt.config.token_ttl_sec, HMAC_IMPL_NAME);
-    agentrt_mutex_unlock(&g_jwt.lock);
+    airy_mtx_unlock(&g_jwt.lock);
     return AUTH_SUCCESS;
 }
 
@@ -561,12 +561,12 @@ int auth_jwt_generate_token(const char *subject, const char *role, char **out_to
         return AUTH_TOKEN_INVALID;
     }
 
-    agentrt_mutex_lock(&g_jwt.lock);
+    airy_mtx_lock(&g_jwt.lock);
 
     if (strlen(subject) > MAX_SUBJECT_SIZE) {
         SVC_LOG_ERROR("JWT generate: subject too long");
-        agentrt_mutex_unlock(&g_jwt.lock);
-        AGENTRT_ERROR(AUTH_TOKEN_INVALID, "JWT generate: subject too long");
+        airy_mtx_unlock(&g_jwt.lock);
+        AIRY_ERROR(AUTH_TOKEN_INVALID, "JWT generate: subject too long");
     }
 
     /* 构建 Header: {"alg":"HS256","typ":"JWT"} */
@@ -586,30 +586,30 @@ int auth_jwt_generate_token(const char *subject, const char *role, char **out_to
     cJSON_Delete(payload);
 
     if (!payload_json) {
-        agentrt_mutex_unlock(&g_jwt.lock);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
     }
 
     /* Base64 编码 Payload */
     size_t payload_b64_size = strlen(payload_json) * 2 + 100;
-    char *payload_b64 = (char *)AGENTRT_MALLOC(payload_b64_size);
+    char *payload_b64 = (char *)AIRY_MALLOC(payload_b64_size);
     if (!payload_b64) {
-        AGENTRT_FREE(payload_json);
-        agentrt_mutex_unlock(&g_jwt.lock);
+        AIRY_FREE(payload_json);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
     }
 
     base64_encode((const uint8_t *)payload_json, strlen(payload_json), payload_b64,
                   &payload_b64_size);
-    AGENTRT_FREE(payload_json);
+    AIRY_FREE(payload_json);
     payload_json = NULL;
 
     /* 构建签名部分 */
     size_t sign_input_size = strlen(header_b64) + 1 + payload_b64_size + 100;
-    char *sign_input = (char *)AGENTRT_MALLOC(sign_input_size);
+    char *sign_input = (char *)AIRY_MALLOC(sign_input_size);
     if (!sign_input) {
-        AGENTRT_FREE(payload_b64);
-        agentrt_mutex_unlock(&g_jwt.lock);
+        AIRY_FREE(payload_b64);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
     }
     snprintf(sign_input, sign_input_size, "%s.%s", header_b64, payload_b64);
@@ -618,46 +618,46 @@ int auth_jwt_generate_token(const char *subject, const char *role, char **out_to
     size_t hmac_len = sizeof(hmac_output);
     g_hmac_impl(g_jwt.config.secret, sign_input, hmac_output, &hmac_len);
     if (hmac_len == 0) {
-        AGENTRT_FREE(sign_input);
-        AGENTRT_FREE(payload_b64);
-        agentrt_mutex_unlock(&g_jwt.lock);
+        AIRY_FREE(sign_input);
+        AIRY_FREE(payload_b64);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
     }
 
     size_t sig_b64_size = 128;
-    char *sig_b64 = (char *)AGENTRT_MALLOC(sig_b64_size);
+    char *sig_b64 = (char *)AIRY_MALLOC(sig_b64_size);
     if (!sig_b64) {
-        AGENTRT_FREE(sign_input);
-        AGENTRT_FREE(payload_b64);
-        agentrt_mutex_unlock(&g_jwt.lock);
+        AIRY_FREE(sign_input);
+        AIRY_FREE(payload_b64);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
     }
-    if (base64_encode(hmac_output, hmac_len, sig_b64, &sig_b64_size) != AGENTRT_SUCCESS) {
-        AGENTRT_FREE(sign_input);
-        AGENTRT_FREE(sig_b64);
-        AGENTRT_FREE(payload_b64);
-        agentrt_mutex_unlock(&g_jwt.lock);
+    if (base64_encode(hmac_output, hmac_len, sig_b64, &sig_b64_size) != AIRY_SUCCESS) {
+        AIRY_FREE(sign_input);
+        AIRY_FREE(sig_b64);
+        AIRY_FREE(payload_b64);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
     }
 
     /* 组合 Token */
     size_t token_size = sign_input_size + sig_b64_size + 10;
-    *out_token = (char *)AGENTRT_MALLOC(token_size);
+    *out_token = (char *)AIRY_MALLOC(token_size);
     if (!*out_token) {
-        AGENTRT_FREE(sign_input);
-        AGENTRT_FREE(sig_b64);
-        AGENTRT_FREE(payload_b64);
-        agentrt_mutex_unlock(&g_jwt.lock);
+        AIRY_FREE(sign_input);
+        AIRY_FREE(sig_b64);
+        AIRY_FREE(payload_b64);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
     }
     snprintf(*out_token, token_size, "%s.%s", sign_input, sig_b64);
 
-    AGENTRT_FREE(sign_input);
-    AGENTRT_FREE(payload_b64);
-    AGENTRT_FREE(sig_b64);
+    AIRY_FREE(sign_input);
+    AIRY_FREE(payload_b64);
+    AIRY_FREE(sig_b64);
 
     SVC_LOG_DEBUG("JWT token generated for subject=%s", subject);
-    agentrt_mutex_unlock(&g_jwt.lock);
+    airy_mtx_unlock(&g_jwt.lock);
     return AUTH_SUCCESS;
 }
 
@@ -667,7 +667,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         return AUTH_TOKEN_INVALID;
     }
 
-    agentrt_mutex_lock(&g_jwt.lock);
+    airy_mtx_lock(&g_jwt.lock);
 
     __builtin_memset(result, 0, sizeof(auth_result_t));
     result->status = AUTH_FAILED;
@@ -689,15 +689,15 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
     const char *dot2 = dot1 ? strchr(dot1 + 1, '.') : NULL;
     if (!dot1 || !dot2) {
         result->error_message = "Invalid token format";
-        agentrt_mutex_unlock(&g_jwt.lock);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
     }
 
     /* 解析 Payload */
     size_t payload_len = (size_t)(dot2 - dot1 - 1);
-    char *payload_b64 = (char *)AGENTRT_MALLOC(payload_len + 1);
+    char *payload_b64 = (char *)AIRY_MALLOC(payload_len + 1);
     if (!payload_b64) {
-        agentrt_mutex_unlock(&g_jwt.lock);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
     }
     __builtin_memcpy(payload_b64, dot1 + 1, payload_len);
@@ -714,26 +714,26 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
     /* 补齐 padding（标准 Base64 必须是 4 的倍数） */
     size_t pad = (4 - (payload_len % 4)) % 4;
     size_t b64_total_len = payload_len + pad;
-    char *payload_padded = (char *)AGENTRT_MALLOC(b64_total_len + 1);
+    char *payload_padded = (char *)AIRY_MALLOC(b64_total_len + 1);
     if (!payload_padded) {
-        AGENTRT_FREE(payload_b64);
-        agentrt_mutex_unlock(&g_jwt.lock);
+        AIRY_FREE(payload_b64);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
     }
     __builtin_memcpy(payload_padded, payload_b64, payload_len);
     for (size_t i = 0; i < pad; i++)
         payload_padded[payload_len + i] = '=';
     payload_padded[b64_total_len] = '\0';
-    AGENTRT_FREE(payload_b64);
+    AIRY_FREE(payload_b64);
     payload_b64 = NULL;
 
     /* Base64 解码 */
 
     size_t decoded_max = (b64_total_len / 4) * 3 + 4;
-    unsigned char *payload_decoded = (unsigned char *)AGENTRT_MALLOC(decoded_max);
+    unsigned char *payload_decoded = (unsigned char *)AIRY_MALLOC(decoded_max);
     if (!payload_decoded) {
-        AGENTRT_FREE(payload_padded);
-        agentrt_mutex_unlock(&g_jwt.lock);
+        AIRY_FREE(payload_padded);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
     }
 
@@ -751,18 +751,18 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
             payload_decoded[out_idx++] = (unsigned char)(((c & 0x03) << 6) | d);
     }
     payload_decoded[out_idx] = '\0';
-    AGENTRT_FREE(payload_padded);
+    AIRY_FREE(payload_padded);
     payload_padded = NULL;
 
     /* P0.18.2: 模式 B — parse + 立即释放 text + 自动释放（RAII） */
     CJSON_PARSE_GUARD(payload, (const char *)payload_decoded, {
-        AGENTRT_FREE(payload_decoded);
+        AIRY_FREE(payload_decoded);
         payload_decoded = NULL;
         result->error_message = "Invalid token payload";
-        agentrt_mutex_unlock(&g_jwt.lock);
+        airy_mtx_unlock(&g_jwt.lock);
         return AUTH_TOKEN_INVALID;
     });
-    AGENTRT_FREE(payload_decoded);
+    AIRY_FREE(payload_decoded);
     payload_decoded = NULL;
 
     /* 提取字段 - 必须在 cJSON_Delete 前复制字符串 */
@@ -771,7 +771,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
     cJSON *exp = cJSON_GetObjectItem(payload, "exp");
 
     if (cJSON_IsString(sub)) {
-        AGENTRT_STRNCPY_TERM(g_jwt.subject_buf, sub->valuestring, MAX_SUBJECT_SIZE);
+        AIRY_STRNCPY_TERM(g_jwt.subject_buf, sub->valuestring, MAX_SUBJECT_SIZE);
         g_jwt.subject_buf[MAX_SUBJECT_SIZE - 1] = '\0';
         if (strlen(sub->valuestring) >= MAX_SUBJECT_SIZE) {
             SVC_LOG_WARN("JWT subject truncated to %d chars: original length=%zu", MAX_SUBJECT_SIZE,
@@ -780,7 +780,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         result->subject = g_jwt.subject_buf;
     }
     if (cJSON_IsString(role)) {
-        AGENTRT_STRNCPY_TERM(g_jwt.role_buf, role->valuestring, MAX_ROLE_SIZE);
+        AIRY_STRNCPY_TERM(g_jwt.role_buf, role->valuestring, MAX_ROLE_SIZE);
         g_jwt.role_buf[MAX_ROLE_SIZE - 1] = '\0';
         result->role = g_jwt.role_buf;
     }
@@ -795,7 +795,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
             result->status = AUTH_TOKEN_EXPIRED;
             result->error_message = "Token has expired";
             /* payload 由 CJSON_AUTO_FREE 自动释放 */
-            agentrt_mutex_unlock(&g_jwt.lock);
+            airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_EXPIRED;
         }
     }
@@ -804,11 +804,11 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
     {
         size_t header_len = (size_t)(dot1 - token);
         size_t sig_input_len = header_len + 1 + payload_len;
-        char *sig_input = (char *)AGENTRT_MALLOC(sig_input_len + 1);
+        char *sig_input = (char *)AIRY_MALLOC(sig_input_len + 1);
         if (!sig_input) {
             result->error_message = "Memory allocation failed for signature verification";
             /* payload 由 CJSON_AUTO_FREE 自动释放 */
-            agentrt_mutex_unlock(&g_jwt.lock);
+            airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
         __builtin_memcpy(sig_input, token, header_len);
@@ -817,12 +817,12 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         sig_input[sig_input_len] = '\0';
 
         size_t sig_b64_len = strlen(dot2 + 1);
-        char *sig_b64 = (char *)AGENTRT_MALLOC(sig_b64_len + 1);
+        char *sig_b64 = (char *)AIRY_MALLOC(sig_b64_len + 1);
         if (!sig_b64) {
-            AGENTRT_FREE(sig_input);
+            AIRY_FREE(sig_input);
             result->error_message = "Memory allocation failed";
             /* payload 由 CJSON_AUTO_FREE 自动释放 */
-            agentrt_mutex_unlock(&g_jwt.lock);
+            airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
         __builtin_memcpy(sig_b64, dot2 + 1, sig_b64_len);
@@ -839,22 +839,22 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         uint8_t computed_hmac[32] = {0};
         g_hmac_impl(g_jwt.config.secret, sig_input, computed_hmac, &expected_sig_len);
         if (expected_sig_len == 0) {
-            AGENTRT_FREE(sig_input);
-            AGENTRT_FREE(sig_b64);
+            AIRY_FREE(sig_input);
+            AIRY_FREE(sig_b64);
             result->error_message = "HMAC computation failed";
             /* payload 由 CJSON_AUTO_FREE 自动释放 */
-            agentrt_mutex_unlock(&g_jwt.lock);
+            airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
 
         size_t sig_padded_len = sig_b64_len + ((4 - (sig_b64_len % 4)) % 4);
-        char *sig_padded = (char *)AGENTRT_MALLOC(sig_padded_len + 1);
+        char *sig_padded = (char *)AIRY_MALLOC(sig_padded_len + 1);
         if (!sig_padded) {
-            AGENTRT_FREE(sig_input);
-            AGENTRT_FREE(sig_b64);
+            AIRY_FREE(sig_input);
+            AIRY_FREE(sig_b64);
             result->error_message = "Memory allocation failed";
             /* payload 由 CJSON_AUTO_FREE 自动释放 */
-            agentrt_mutex_unlock(&g_jwt.lock);
+            airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
         __builtin_memcpy(sig_padded, sig_b64, sig_b64_len);
@@ -863,14 +863,14 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
             sig_padded[sig_b64_len + i] = '=';
         sig_padded[sig_padded_len] = '\0';
 
-        unsigned char *provided_sig = (unsigned char *)AGENTRT_MALLOC(32);
+        unsigned char *provided_sig = (unsigned char *)AIRY_MALLOC(32);
         if (!provided_sig) {
-            AGENTRT_FREE(sig_input);
-            AGENTRT_FREE(sig_b64);
-            AGENTRT_FREE(sig_padded);
+            AIRY_FREE(sig_input);
+            AIRY_FREE(sig_b64);
+            AIRY_FREE(sig_padded);
             result->error_message = "Memory allocation failed";
             /* payload 由 CJSON_AUTO_FREE 自动释放 */
-            agentrt_mutex_unlock(&g_jwt.lock);
+            airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
         __builtin_memset(provided_sig, 0, 32);
@@ -901,13 +901,13 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
             sig_match = (acc == 0);
         }
 
-        AGENTRT_FREE(sig_input);
+        AIRY_FREE(sig_input);
         sig_input = NULL;
-        AGENTRT_FREE(sig_b64);
+        AIRY_FREE(sig_b64);
         sig_b64 = NULL;
-        AGENTRT_FREE(sig_padded);
+        AIRY_FREE(sig_padded);
         sig_padded = NULL;
-        AGENTRT_FREE(provided_sig);
+        AIRY_FREE(provided_sig);
         provided_sig = NULL;
 
         if (!sig_match) {
@@ -915,7 +915,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
             result->error_message = "Invalid token signature";
             /* payload 由 CJSON_AUTO_FREE 自动释放 */
             SVC_LOG_WARN("JWT signature verification FAILED for token");
-            agentrt_mutex_unlock(&g_jwt.lock);
+            airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
     }
@@ -927,7 +927,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
 
     SVC_LOG_DEBUG("JWT token verified for subject=%s",
                   result->subject ? result->subject : "unknown");
-    agentrt_mutex_unlock(&g_jwt.lock);
+    airy_mtx_unlock(&g_jwt.lock);
     return AUTH_SUCCESS;
 }
 
@@ -948,7 +948,7 @@ int auth_jwt_refresh_token(const char *old_token, char **out_new_token)
 
 void auth_jwt_cleanup(void)
 {
-    agentrt_mutex_lock(&g_jwt.lock);
+    airy_mtx_lock(&g_jwt.lock);
     if (g_jwt.initialized) {
         g_hmac_impl = NULL;
         g_jwt.initialized = 0;
@@ -957,8 +957,8 @@ void auth_jwt_cleanup(void)
         __builtin_memset(g_jwt.role_buf, 0, sizeof(g_jwt.role_buf));
         SVC_LOG_INFO("JWT authentication module cleaned up");
     }
-    agentrt_mutex_unlock(&g_jwt.lock);
-    agentrt_mutex_destroy(&g_jwt.lock);
+    airy_mtx_unlock(&g_jwt.lock);
+    airy_mtx_destroy(&g_jwt.lock);
 }
 
 /* ==================== API Key 实现 ==================== */
@@ -966,9 +966,9 @@ void auth_jwt_cleanup(void)
 int auth_apikey_init(const apikey_config_t *config)
 {
     if (g_apikey.initialized)
-        return AGENTRT_ERR_ALREADY_INIT;
+        return AIRY_ERR_ALREADY_INIT;
 
-    agentrt_mutex_init(&g_apikey.lock);
+    airy_mtx_init(&g_apikey.lock);
 
     if (config) {
         __builtin_memcpy(&g_apikey.config, config, sizeof(apikey_config_t));
@@ -976,11 +976,11 @@ int auth_apikey_init(const apikey_config_t *config)
         /* 复制允许的 Key 列表 */
         if (config->allowed_keys && config->key_count > 0) {
             g_apikey.capacity = config->key_count + 10;
-            g_apikey.keys = (char **)AGENTRT_CALLOC(g_apikey.capacity, sizeof(*g_apikey.keys));
+            g_apikey.keys = (char **)AIRY_CALLOC(g_apikey.capacity, sizeof(*g_apikey.keys));
             if (g_apikey.keys) {
                 for (size_t i = 0; i < config->key_count; i++) {
                     if (config->allowed_keys[i]) {
-                        g_apikey.keys[i] = AGENTRT_STRDUP(config->allowed_keys[i]);
+                        g_apikey.keys[i] = AIRY_STRDUP(config->allowed_keys[i]);
                         g_apikey.config.key_count++;
                     }
                 }
@@ -990,7 +990,7 @@ int auth_apikey_init(const apikey_config_t *config)
         /* 默认空配置 */
         __builtin_memset(&g_apikey.config, 0, sizeof(apikey_config_t));
         g_apikey.capacity = 10;
-        g_apikey.keys = (char **)AGENTRT_CALLOC(g_apikey.capacity, sizeof(*g_apikey.keys));
+        g_apikey.keys = (char **)AIRY_CALLOC(g_apikey.capacity, sizeof(*g_apikey.keys));
         if (!g_apikey.keys) {
             g_apikey.capacity = 0;
             return AUTH_FAILED;
@@ -1012,26 +1012,26 @@ int auth_apikey_verify(const char *api_key, auth_result_t *result)
     result->status = AUTH_FAILED;
     result->error_message = "API Key invalid";
 
-    agentrt_mutex_lock(&g_apikey.lock);
+    airy_mtx_lock(&g_apikey.lock);
 
     for (size_t i = 0; i < g_apikey.config.key_count; i++) {
         if (g_apikey.keys[i] && strcmp(api_key, g_apikey.keys[i]) == 0) {
 
             result->status = AUTH_SUCCESS;
             result->error_message = NULL;
-            AGENTRT_STRNCPY_TERM(g_apikey.subject_buf, api_key, sizeof(g_apikey.subject_buf));
+            AIRY_STRNCPY_TERM(g_apikey.subject_buf, api_key, sizeof(g_apikey.subject_buf));
             (g_apikey.subject_buf)[sizeof(g_apikey.subject_buf) - 1] = '\0';
             g_apikey.subject_buf[sizeof(g_apikey.subject_buf) - 1] = '\0';
             result->subject = g_apikey.subject_buf;
             result->role = "api_user";
 
-            agentrt_mutex_unlock(&g_apikey.lock);
+            airy_mtx_unlock(&g_apikey.lock);
             SVC_LOG_DEBUG("API Key verified successfully");
             return AUTH_SUCCESS;
         }
     }
 
-    agentrt_mutex_unlock(&g_apikey.lock);
+    airy_mtx_unlock(&g_apikey.lock);
     SVC_LOG_WARN("API Key verification failed");
     return AUTH_APIKEY_INVALID;
 }
@@ -1042,30 +1042,30 @@ int auth_apikey_add(const char *new_key)
         return AUTH_APIKEY_INVALID;
     }
 
-    agentrt_mutex_lock(&g_apikey.lock);
+    airy_mtx_lock(&g_apikey.lock);
 
     /* 检查是否已存在 */
     for (size_t i = 0; i < g_apikey.config.key_count; i++) {
         if (g_apikey.keys[i] && strcmp(new_key, g_apikey.keys[i]) == 0) {
-            agentrt_mutex_unlock(&g_apikey.lock);
-            return AGENTRT_ERR_ALREADY_EXISTS;
+            airy_mtx_unlock(&g_apikey.lock);
+            return AIRY_ERR_ALREADY_EXISTS;
         }
     }
 
     /* 扩容检查 */
     if (g_apikey.config.key_count >= g_apikey.capacity) {
         size_t new_cap = g_apikey.capacity * 2;
-        char **new_keys = (char **)AGENTRT_REALLOC(g_apikey.keys, new_cap * sizeof(*g_apikey.keys));
+        char **new_keys = (char **)AIRY_REALLOC(g_apikey.keys, new_cap * sizeof(*g_apikey.keys));
         if (!new_keys) {
-            agentrt_mutex_unlock(&g_apikey.lock);
-            return AGENTRT_ERR_OUT_OF_MEMORY;
+            airy_mtx_unlock(&g_apikey.lock);
+            return AIRY_ERR_OUT_OF_MEMORY;
         }
         g_apikey.keys = new_keys;
         g_apikey.capacity = new_cap;
     }
 
-    g_apikey.keys[g_apikey.config.key_count++] = AGENTRT_STRDUP(new_key);
-    agentrt_mutex_unlock(&g_apikey.lock);
+    g_apikey.keys[g_apikey.config.key_count++] = AIRY_STRDUP(new_key);
+    airy_mtx_unlock(&g_apikey.lock);
 
     SVC_LOG_INFO("New API Key added (total=%zu)", g_apikey.config.key_count);
     return AUTH_SUCCESS;
@@ -1077,11 +1077,11 @@ int auth_apikey_remove(const char *key)
         return AUTH_APIKEY_INVALID;
     }
 
-    agentrt_mutex_lock(&g_apikey.lock);
+    airy_mtx_lock(&g_apikey.lock);
 
     for (size_t i = 0; i < g_apikey.config.key_count; i++) {
         if (g_apikey.keys[i] && strcmp(key, g_apikey.keys[i]) == 0) {
-            AGENTRT_FREE(g_apikey.keys[i]);
+            AIRY_FREE(g_apikey.keys[i]);
             g_apikey.keys[i] = NULL;
 
             /* 压缩数组: 将后续元素前移，消除空洞 */
@@ -1091,30 +1091,30 @@ int auth_apikey_remove(const char *key)
             g_apikey.keys[g_apikey.config.key_count - 1] = NULL;
             g_apikey.config.key_count--;
 
-            agentrt_mutex_unlock(&g_apikey.lock);
+            airy_mtx_unlock(&g_apikey.lock);
             SVC_LOG_INFO("API Key removed (remaining=%zu)", g_apikey.config.key_count);
             return AUTH_SUCCESS;
         }
     }
 
-    agentrt_mutex_unlock(&g_apikey.lock);
+    airy_mtx_unlock(&g_apikey.lock);
     return AUTH_APIKEY_INVALID;
 }
 
 void auth_apikey_cleanup(void)
 {
     if (g_apikey.initialized) {
-        agentrt_mutex_lock(&g_apikey.lock);
+        airy_mtx_lock(&g_apikey.lock);
         if (g_apikey.keys) {
             for (size_t i = 0; i < g_apikey.config.key_count; i++) {
-                AGENTRT_FREE(g_apikey.keys[i]);
+                AIRY_FREE(g_apikey.keys[i]);
             }
-            AGENTRT_FREE(g_apikey.keys);
+            AIRY_FREE(g_apikey.keys);
             g_apikey.keys = NULL;
         }
         g_apikey.config.key_count = 0;
-        agentrt_mutex_unlock(&g_apikey.lock);
-        agentrt_mutex_destroy(&g_apikey.lock);
+        airy_mtx_unlock(&g_apikey.lock);
+        airy_mtx_destroy(&g_apikey.lock);
         g_apikey.initialized = 0;
         SVC_LOG_INFO("API Key verification module cleaned up");
     }
@@ -1125,9 +1125,9 @@ void auth_apikey_cleanup(void)
 int auth_ratelimit_init(const rate_limit_config_t *config)
 {
     if (g_ratelimit.initialized)
-        return AGENTRT_ERR_ALREADY_INIT;
+        return AIRY_ERR_ALREADY_INIT;
 
-    agentrt_mutex_init(&g_ratelimit.lock);
+    airy_mtx_init(&g_ratelimit.lock);
 
     if (config) {
         __builtin_memcpy(&g_ratelimit.config, config, sizeof(rate_limit_config_t));
@@ -1155,7 +1155,7 @@ int auth_ratelimit_check(const char *client_id)
         return AUTH_RATE_LIMIT_EXCEEDED;
     }
 
-    agentrt_mutex_lock(&g_ratelimit.lock);
+    airy_mtx_lock(&g_ratelimit.lock);
 
     time_t now = time(NULL);
     rate_limit_entry_t *entry = NULL;
@@ -1177,7 +1177,7 @@ int auth_ratelimit_check(const char *client_id)
     /* 创建新条目 */
     if (!entry && free_slot != SIZE_MAX) {
         entry = &g_ratelimit.entries[free_slot];
-        AGENTRT_STRNCPY_TERM(entry->client_id, client_id, sizeof(entry->client_id));
+        AIRY_STRNCPY_TERM(entry->client_id, client_id, sizeof(entry->client_id));
         entry->client_id[sizeof(entry->client_id) - 1] = '\0';
         entry->max_tokens = (double)g_ratelimit.config.burst_size;
         entry->tokens = entry->max_tokens;
@@ -1201,7 +1201,7 @@ int auth_ratelimit_check(const char *client_id)
         /* 复用最老条目 */
         entry = &g_ratelimit.entries[oldest_idx];
         SVC_LOG_DEBUG("Rate limit: evicting stale client: %s", entry->client_id);
-        AGENTRT_STRNCPY_TERM(entry->client_id, client_id, sizeof(entry->client_id));
+        AIRY_STRNCPY_TERM(entry->client_id, client_id, sizeof(entry->client_id));
         entry->client_id[sizeof(entry->client_id) - 1] = '\0';
         entry->max_tokens = (double)g_ratelimit.config.burst_size;
         entry->tokens = entry->max_tokens; /* 重置令牌，不继承旧值 */
@@ -1220,11 +1220,11 @@ int auth_ratelimit_check(const char *client_id)
     /* 检查是否有可用令牌 */
     if (entry->tokens >= 1.0) {
         entry->tokens -= 1.0;
-        agentrt_mutex_unlock(&g_ratelimit.lock);
+        airy_mtx_unlock(&g_ratelimit.lock);
         return AUTH_SUCCESS;
     }
 
-    agentrt_mutex_unlock(&g_ratelimit.lock);
+    airy_mtx_unlock(&g_ratelimit.lock);
     SVC_LOG_DEBUG("Rate limit exceeded for client: %s", client_id);
     return AUTH_RATE_LIMIT_EXCEEDED;
 }
@@ -1235,7 +1235,7 @@ int auth_ratelimit_reset(const char *client_id)
         return AUTH_RATE_LIMIT_EXCEEDED;
     }
 
-    agentrt_mutex_lock(&g_ratelimit.lock);
+    airy_mtx_lock(&g_ratelimit.lock);
 
     for (size_t i = 0; i < g_ratelimit.config.max_clients; i++) {
         if (g_ratelimit.entries[i].active &&
@@ -1243,12 +1243,12 @@ int auth_ratelimit_reset(const char *client_id)
                     sizeof(g_ratelimit.entries[i].client_id) - 1) == 0) {
             g_ratelimit.entries[i].tokens = g_ratelimit.entries[i].max_tokens;
             g_ratelimit.entries[i].last_update = time(NULL);
-            agentrt_mutex_unlock(&g_ratelimit.lock);
+            airy_mtx_unlock(&g_ratelimit.lock);
             return AUTH_SUCCESS;
         }
     }
 
-    agentrt_mutex_unlock(&g_ratelimit.lock);
+    airy_mtx_unlock(&g_ratelimit.lock);
     return AUTH_SUCCESS;
 }
 
@@ -1258,7 +1258,7 @@ int auth_ratelimit_get_stats(const char *client_id, uint32_t *remaining, int64_t
         return AUTH_RATE_LIMIT_EXCEEDED;
     }
 
-    agentrt_mutex_lock(&g_ratelimit.lock);
+    airy_mtx_lock(&g_ratelimit.lock);
 
     for (size_t i = 0; i < g_ratelimit.config.max_clients; i++) {
         if (g_ratelimit.entries[i].active &&
@@ -1268,22 +1268,22 @@ int auth_ratelimit_get_stats(const char *client_id, uint32_t *remaining, int64_t
             if (reset_time) {
                 *reset_time = (int64_t)g_ratelimit.entries[i].last_update * 1000;
             }
-            agentrt_mutex_unlock(&g_ratelimit.lock);
+            airy_mtx_unlock(&g_ratelimit.lock);
             return AUTH_SUCCESS;
         }
     }
 
-    agentrt_mutex_unlock(&g_ratelimit.lock);
+    airy_mtx_unlock(&g_ratelimit.lock);
     return AUTH_RATE_LIMIT_EXCEEDED;
 }
 
 void auth_ratelimit_cleanup(void)
 {
     if (g_ratelimit.initialized) {
-        agentrt_mutex_lock(&g_ratelimit.lock);
+        airy_mtx_lock(&g_ratelimit.lock);
         __builtin_memset(g_ratelimit.entries, 0, sizeof(g_ratelimit.entries));
-        agentrt_mutex_unlock(&g_ratelimit.lock);
-        agentrt_mutex_destroy(&g_ratelimit.lock);
+        airy_mtx_unlock(&g_ratelimit.lock);
+        airy_mtx_destroy(&g_ratelimit.lock);
         g_ratelimit.initialized = 0;
         SVC_LOG_INFO("Rate limiter cleaned up");
     }

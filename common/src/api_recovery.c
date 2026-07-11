@@ -23,14 +23,14 @@
 
 static uint64_t rec_timestamp_ms(void)
 {
-    return agentrt_time_ms();
+    return airy_time_ms();
 }
 
 static double rec_jitter(float ratio)
 {
     if (ratio <= 0.0f)
         return 0.0;
-    double r = (double)agentrt_random_uint32(0, RAND_MAX) / (double)RAND_MAX * 2.0 - 1.0;
+    double r = (double)airy_random_uint32(0, RAND_MAX) / (double)RAND_MAX * 2.0 - 1.0;
     return r * ratio;
 }
 
@@ -45,7 +45,7 @@ static void rec_update_cred_health(api_rec_credential_t *cred, bool success)
         cred->last_success_time = now;
         cred->consecutive_failures = 0;
 
-        double decay = AGENTRT_API_REC_HEALTH_DECAY;
+        double decay = AIRY_API_REC_HEALTH_DECAY;
         cred->health_score = cred->health_score * decay + (1.0 - decay) * 1.0;
         if (cred->health_score > 1.0)
             cred->health_score = 1.0;
@@ -54,12 +54,12 @@ static void rec_update_cred_health(api_rec_credential_t *cred, bool success)
         cred->consecutive_failures++;
         cred->total_failures++;
 
-        double penalty = AGENTRT_API_REC_HEALTH_PENALTY;
+        double penalty = AIRY_API_REC_HEALTH_PENALTY;
         cred->health_score = cred->health_score * (1.0 - penalty);
         if (cred->health_score < 0.0)
             cred->health_score = 0.0;
 
-        if (cred->consecutive_failures >= AGENTRT_API_REC_CONSECUTIVE_DISABLE) {
+        if (cred->consecutive_failures >= AIRY_API_REC_CONSECUTIVE_DISABLE) {
             cred->is_valid = false;
         }
     }
@@ -82,13 +82,13 @@ static api_rec_error_code_t classify_http_error(long http_code)
 
 api_rec_pool_t *api_rec_pool_create(const char *name)
 {
-    api_rec_pool_t *pool = AGENTRT_CALLOC(1, sizeof(api_rec_pool_t));
+    api_rec_pool_t *pool = AIRY_CALLOC(1, sizeof(api_rec_pool_t));
     if (!pool) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     if (name) {
-AGENTRT_STRNCPY_TERM(pool->name, name, sizeof(pool->name));
+AIRY_STRNCPY_TERM(pool->name, name, sizeof(pool->name));
         pool->name[sizeof(pool->name) - 1] = '\0';
     }
 
@@ -100,15 +100,15 @@ AGENTRT_STRNCPY_TERM(pool->name, name, sizeof(pool->name));
 
     pool->max_retries = API_REC_MAX_RETRY;
     pool->base_delay_ms = API_REC_DEFAULT_BASE_DELAY_MS;
-    pool->backoff_factor = AGENTRT_API_REC_BACKOFF_FACTOR;
-    pool->jitter_ratio = AGENTRT_API_REC_JITTER_PCT / 100.0f;
+    pool->backoff_factor = AIRY_API_REC_BACKOFF_FACTOR;
+    pool->jitter_ratio = AIRY_API_REC_JITTER_PCT / 100.0f;
 
     pool->total_calls = 0;
     pool->recovered_calls = 0;
     pool->failed_calls = 0;
     pool->recovery_rate = 0.0;
 
-    agentrt_random_init();
+    airy_random_init();
 
     SVC_LOG_INFO("API recovery pool created: %s", name ? name : "(unnamed)");
     return pool;
@@ -121,7 +121,7 @@ void api_rec_pool_destroy(api_rec_pool_t *pool)
     SVC_LOG_INFO("API recovery pool destroyed: %s (calls=%llu recovered=%llu rate=%.1f%%)",
                  pool->name, (unsigned long long)pool->total_calls,
                  (unsigned long long)pool->recovered_calls, pool->recovery_rate * 100.0);
-    AGENTRT_FREE(pool);
+    AIRY_FREE(pool);
 }
 
 /* ==================== Credential Pool ==================== */
@@ -129,9 +129,9 @@ void api_rec_pool_destroy(api_rec_pool_t *pool)
 int api_rec_add_credential(api_rec_pool_t *pool, const char *api_key)
 {
     if (!pool || !api_key)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (pool->cred_count >= API_REC_MAX_CREDENTIALS)
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
 
     size_t idx = pool->cred_count++;
     api_rec_credential_t *cred = &pool->credentials[idx];
@@ -152,7 +152,7 @@ int api_rec_add_credential(api_rec_pool_t *pool, const char *api_key)
 int api_rec_remove_credential(api_rec_pool_t *pool, size_t index)
 {
     if (!pool || index >= pool->cred_count)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     for (size_t i = index; i < pool->cred_count - 1; i++) {
         pool->credentials[i] = pool->credentials[i + 1];
@@ -170,7 +170,7 @@ int api_rec_remove_credential(api_rec_pool_t *pool, size_t index)
 const char *api_rec_next_credential(api_rec_pool_t *pool)
 {
     if (!pool || pool->cred_count == 0) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     size_t attempts = 0;
@@ -179,7 +179,7 @@ const char *api_rec_next_credential(api_rec_pool_t *pool)
     do {
         api_rec_credential_t *cred = &pool->credentials[pool->cred_index];
 
-        if (cred->is_valid && cred->health_score > AGENTRT_API_REC_HEALTH_MIN) {
+        if (cred->is_valid && cred->health_score > AIRY_API_REC_HEALTH_MIN) {
             const char *key = cred->key;
             pool->cred_index = (pool->cred_index + 1) % pool->cred_count;
             return key;
@@ -207,7 +207,7 @@ const char *api_rec_next_credential(api_rec_pool_t *pool)
 int api_rec_mark_cred_success(api_rec_pool_t *pool)
 {
     if (!pool || pool->cred_count == 0)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     size_t last_idx = (pool->cred_index == 0) ? pool->cred_count - 1 : pool->cred_index - 1;
     rec_update_cred_health(&pool->credentials[last_idx], true);
     return 0;
@@ -216,7 +216,7 @@ int api_rec_mark_cred_success(api_rec_pool_t *pool)
 int api_rec_mark_cred_failure(api_rec_pool_t *pool, api_rec_error_code_t err)
 {
     if (!pool || pool->cred_count == 0)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     size_t last_idx = (pool->cred_index == 0) ? pool->cred_count - 1 : pool->cred_index - 1;
 
@@ -238,7 +238,7 @@ int api_rec_mark_cred_failure(api_rec_pool_t *pool, api_rec_error_code_t err)
 double api_rec_cred_health(const api_rec_pool_t *pool, size_t index)
 {
     if (!pool || index >= pool->cred_count)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
     return pool->credentials[index].health_score;
 }
 
@@ -248,9 +248,9 @@ int api_rec_add_fallback_model(api_rec_pool_t *pool, const char *model, float co
                                int priority)
 {
     if (!pool || !model)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (pool->fallback_count >= API_REC_MAX_FALLBACK_MODELS)
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
 
     size_t idx = pool->fallback_count++;
     api_rec_model_t *m = &pool->fallback_models[idx];
@@ -273,7 +273,7 @@ int api_rec_add_fallback_model(api_rec_pool_t *pool, const char *model, float co
 const char *api_rec_current_model(api_rec_pool_t *pool)
 {
     if (!pool) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     if (pool->current_level == API_REC_DEGRADE_NONE ||
@@ -287,7 +287,7 @@ const char *api_rec_current_model(api_rec_pool_t *pool)
 int api_rec_degrade(api_rec_pool_t *pool)
 {
     if (!pool)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (pool->current_fallback_idx < pool->fallback_count) {
         pool->current_fallback_idx++;
         if (pool->current_fallback_idx >= pool->fallback_count) {
@@ -310,7 +310,7 @@ int api_rec_degrade(api_rec_pool_t *pool)
 int api_rec_upgrade(api_rec_pool_t *pool)
 {
     if (!pool)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (pool->current_fallback_idx > 0) {
         pool->current_fallback_idx--;
         pool->current_level =
@@ -332,7 +332,7 @@ int api_rec_set_retry_config(api_rec_pool_t *pool, uint32_t max_retries, uint32_
                              float backoff_factor, float jitter_ratio)
 {
     if (!pool)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     pool->max_retries = max_retries > 0 ? max_retries : API_REC_MAX_RETRY;
     pool->base_delay_ms = base_delay_ms > 0 ? base_delay_ms : API_REC_DEFAULT_BASE_DELAY_MS;
     pool->backoff_factor = backoff_factor > 1.0f ? backoff_factor : 2.0f;
@@ -345,7 +345,7 @@ int api_rec_set_retry_config(api_rec_pool_t *pool, uint32_t max_retries, uint32_
 int api_rec_bind_circuit_breaker(api_rec_pool_t *pool, void *breaker)
 {
     if (!pool)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     pool->cb_breaker = breaker;
     return 0;
 }
@@ -357,7 +357,7 @@ int api_rec_execute_with_recovery(api_rec_pool_t *pool, api_rec_request_fn reque
                                   long *out_http_code, api_rec_result_t *out_result)
 {
     if (!pool || !request_fn || !url || !body || !out_response)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (out_result)
         __builtin_memset(out_result, 0, sizeof(*out_result));
 
@@ -411,7 +411,7 @@ int api_rec_execute_with_recovery(api_rec_pool_t *pool, api_rec_request_fn reque
             }
         }
 
-        AGENTRT_FREE(resp_body);
+        AIRY_FREE(resp_body);
         resp_body = NULL;
         http_code = 0;
 
@@ -467,7 +467,7 @@ done:
         }
         ret = 0;
     } else {
-        AGENTRT_FREE(resp_body);
+        AIRY_FREE(resp_body);
         pool->failed_calls++;
         if (out_result) {
             if (!out_result->rec_code)

@@ -6,8 +6,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_AGENT_REGISTRY_CORE_H
-#define AGENTRT_AGENT_REGISTRY_CORE_H
+#ifndef AIRY_RT_AGENT_REGISTRY_CORE_H
+#define AIRY_RT_AGENT_REGISTRY_CORE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -78,4 +78,4 @@ size_t agent_registry_core_search(agent_registry_t *registry, const char *query,
 }
 #endif
 
-#endif /* AGENTRT_AGENT_REGISTRY_CORE_H */
+#endif /* AIRY_RT_AGENT_REGISTRY_CORE_H */

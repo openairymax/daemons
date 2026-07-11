@@ -10,8 +10,8 @@
  * WARNING 级丢弃缓存，CRITICAL 级拒绝请求。
  */
 
-#ifndef AGENTRT_DAEMON_OOM_H
-#define AGENTRT_DAEMON_OOM_H
+#ifndef AIRY_RT_DAEMON_OOM_H
+#define AIRY_RT_DAEMON_OOM_H
 
 #include "oom_handler.h"
 
@@ -54,4 +54,4 @@ void daemon_oom_unregister(const char *daemon_name);
 }
 #endif
 
-#endif /* AGENTRT_DAEMON_OOM_H */
+#endif /* AIRY_RT_DAEMON_OOM_H */

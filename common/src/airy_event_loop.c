@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
-#include "agentrt_event_loop.h"
+#include "airy_event_loop.h"
 
 #include "daemon_errors.h"
 #include "memory_compat.h"
@@ -19,7 +19,7 @@ typedef struct {
     uint64_t id;
     uint64_t interval_ms;
     uint64_t next_fire_ms;
-    agentrt_timer_callback_t cb;
+    airy_timer_callback_t cb;
     void *user_data;
     bool active;
 } timer_entry_t;
@@ -28,19 +28,19 @@ typedef struct {
     SOCKET fd;
     WSAEVENT wsa_event;
     uint32_t events;
-    agentrt_event_callback_t cb;
+    airy_event_callback_t cb;
     void *user_data;
     bool level_triggered;
     bool in_use;
 } fd_entry_t;
 
-struct agentrt_event_loop {
+struct airy_event_loop {
     fd_entry_t *fd_entries;
     int fd_count;
     int fd_capacity;
     int max_events;
     HANDLE wakeup_event;
-    timer_entry_t timers[AGENTRT_EVENT_LOOP_MAX_TIMERS];
+    timer_entry_t timers[AIRY_EVENT_LOOP_MAX_TIMERS];
     uint64_t next_timer_id;
     uint64_t current_time_ms;
     volatile bool running;
@@ -49,24 +49,24 @@ struct agentrt_event_loop {
 
 static uint64_t get_time_ms(void)
 {
-    return agentrt_time_ms();
+    return airy_time_ms();
 }
 
-static int find_fd_entry(agentrt_event_loop_t *loop, SOCKET sock)
+static int find_fd_entry(airy_event_loop_t *loop, SOCKET sock)
 {
     for (int i = 0; i < loop->fd_capacity; i++) {
         if (loop->fd_entries[i].in_use && loop->fd_entries[i].fd == sock)
             return i;
     }
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 static long events_to_wsa(uint32_t events)
 {
     long wsa = 0;
-    if (events & AGENTRT_EVENT_TYPE_READ)
+    if (events & AIRY_EVENT_TYPE_READ)
         wsa |= FD_READ | FD_ACCEPT | FD_CLOSE;
-    if (events & AGENTRT_EVENT_TYPE_WRITE)
+    if (events & AIRY_EVENT_TYPE_WRITE)
         wsa |= FD_WRITE | FD_CONNECT;
     return wsa;
 }
@@ -75,17 +75,17 @@ static uint32_t wsa_to_events(long wsa_events)
 {
     uint32_t ev = 0;
     if (wsa_events & (FD_READ | FD_ACCEPT | FD_CLOSE))
-        ev |= AGENTRT_EVENT_TYPE_READ;
+        ev |= AIRY_EVENT_TYPE_READ;
     if (wsa_events & (FD_WRITE | FD_CONNECT))
-        ev |= AGENTRT_EVENT_TYPE_WRITE;
+        ev |= AIRY_EVENT_TYPE_WRITE;
     return ev;
 }
 
-static int add_fd_internal(agentrt_event_loop_t *loop, int fd, uint32_t events,
-                           agentrt_event_callback_t cb, void *user_data, bool level_triggered)
+static int add_fd_internal(airy_event_loop_t *loop, int fd, uint32_t events,
+                           airy_event_callback_t cb, void *user_data, bool level_triggered)
 {
     if (!loop || fd < 0 || !cb)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     SOCKET sock = (SOCKET)fd;
     int idx = find_fd_entry(loop, sock);
@@ -99,14 +99,14 @@ static int add_fd_internal(agentrt_event_loop_t *loop, int fd, uint32_t events,
         long wsa_events = events_to_wsa(events);
         if (WSAEventSelect(sock, loop->fd_entries[idx].wsa_event, wsa_events) != 0) {
             LOG_DEBUG("WSAEventSelect MOD failed for fd=%d: %d", fd, WSAGetLastError());
-            return AGENTRT_ERR_IO;
+            return AIRY_ERR_IO;
         }
         return 0;
     }
 
     if (loop->fd_count >= loop->fd_capacity) {
         LOG_DEBUG("fd capacity reached (%d), cannot add fd=%d", loop->fd_capacity, fd);
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
     }
 
     int free_idx = -1;
@@ -117,20 +117,20 @@ static int add_fd_internal(agentrt_event_loop_t *loop, int fd, uint32_t events,
         }
     }
     if (free_idx < 0) {
-        AGENTRT_ERROR(AGENTRT_ERR_NOT_FOUND, "no free fd slot available");
+        AIRY_ERROR(AIRY_ERR_NOT_FOUND, "no free fd slot available");
     }
 
     WSAEVENT wsa_event = WSACreateEvent();
     if (wsa_event == WSA_INVALID_EVENT) {
         LOG_DEBUG("WSACreateEvent failed for fd=%d: %d", fd, WSAGetLastError());
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
     long wsa_events = events_to_wsa(events);
     if (WSAEventSelect(sock, wsa_event, wsa_events) != 0) {
         LOG_DEBUG("WSAEventSelect ADD failed for fd=%d: %d", fd, WSAGetLastError());
         WSACloseEvent(wsa_event);
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
     loop->fd_entries[free_idx].fd = sock;
@@ -145,41 +145,41 @@ static int add_fd_internal(agentrt_event_loop_t *loop, int fd, uint32_t events,
     return 0;
 }
 
-agentrt_event_loop_t *agentrt_event_loop_create(int max_events)
+airy_event_loop_t *airy_event_loop_create(int max_events)
 {
-    agentrt_event_loop_t *loop =
-        (agentrt_event_loop_t *)AGENTRT_CALLOC(1, sizeof(agentrt_event_loop_t));
+    airy_event_loop_t *loop =
+        (airy_event_loop_t *)AIRY_CALLOC(1, sizeof(airy_event_loop_t));
     if (!loop) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     if (max_events <= 0)
-        max_events = AGENTRT_EVENT_LOOP_MAX_EVENTS;
+        max_events = AIRY_EVENT_LOOP_MAX_EVENTS;
 
     loop->max_events = max_events;
     loop->fd_capacity = max_events;
-    loop->fd_entries = (fd_entry_t *)AGENTRT_CALLOC((size_t)max_events, sizeof(fd_entry_t));
+    loop->fd_entries = (fd_entry_t *)AIRY_CALLOC((size_t)max_events, sizeof(fd_entry_t));
     if (!loop->fd_entries) {
-        AGENTRT_FREE(loop);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_FREE(loop);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     loop->wakeup_event = CreateEventW(NULL, TRUE, FALSE, NULL);
     if (!loop->wakeup_event) {
-        AGENTRT_FREE(loop->fd_entries);
-        AGENTRT_FREE(loop);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_FREE(loop->fd_entries);
+        AIRY_FREE(loop);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     loop->next_timer_id = 1;
-    for (int i = 0; i < AGENTRT_EVENT_LOOP_MAX_TIMERS; i++)
+    for (int i = 0; i < AIRY_EVENT_LOOP_MAX_TIMERS; i++)
         loop->timers[i].active = false;
 
     LOG_DEBUG("Event loop created (max_events=%d)", max_events);
     return loop;
 }
 
-void agentrt_event_loop_destroy(agentrt_event_loop_t *loop)
+void airy_event_loop_destroy(airy_event_loop_t *loop)
 {
     if (!loop)
         return;
@@ -191,42 +191,42 @@ void agentrt_event_loop_destroy(agentrt_event_loop_t *loop)
     }
     if (loop->wakeup_event)
         CloseHandle(loop->wakeup_event);
-    AGENTRT_FREE(loop->fd_entries);
-    AGENTRT_FREE(loop);
+    AIRY_FREE(loop->fd_entries);
+    AIRY_FREE(loop);
 }
 
-int agentrt_event_loop_add_fd(agentrt_event_loop_t *loop, int fd, uint32_t events,
-                              agentrt_event_callback_t cb, void *user_data)
+int airy_event_loop_add_fd(airy_event_loop_t *loop, int fd, uint32_t events,
+                              airy_event_callback_t cb, void *user_data)
 {
     return add_fd_internal(loop, fd, events, cb, user_data, false);
 }
 
-int agentrt_event_loop_add_fd_lt(agentrt_event_loop_t *loop, int fd, uint32_t events,
-                                 agentrt_event_callback_t cb, void *user_data)
+int airy_event_loop_add_fd_lt(airy_event_loop_t *loop, int fd, uint32_t events,
+                                 airy_event_callback_t cb, void *user_data)
 {
     return add_fd_internal(loop, fd, events, cb, user_data, true);
 }
 
-int agentrt_event_loop_mod_fd(agentrt_event_loop_t *loop, int fd, uint32_t events)
+int airy_event_loop_mod_fd(airy_event_loop_t *loop, int fd, uint32_t events)
 {
     if (!loop || fd < 0)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     SOCKET sock = (SOCKET)fd;
     int idx = find_fd_entry(loop, sock);
     if (idx < 0) {
-        AGENTRT_ERROR(AGENTRT_ERR_NOT_FOUND, "fd not found for modify");
+        AIRY_ERROR(AIRY_ERR_NOT_FOUND, "fd not found for modify");
     }
 
     long wsa_events = events_to_wsa(events);
     if (WSAEventSelect(sock, loop->fd_entries[idx].wsa_event, wsa_events) != 0) {
         LOG_DEBUG("WSAEventSelect MOD failed for fd=%d: %d", fd, WSAGetLastError());
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
     loop->fd_entries[idx].events = events;
     return 0;
 }
 
-void agentrt_event_loop_remove_fd(agentrt_event_loop_t *loop, int fd)
+void airy_event_loop_remove_fd(airy_event_loop_t *loop, int fd)
 {
     if (!loop || fd < 0)
         return;
@@ -241,12 +241,12 @@ void agentrt_event_loop_remove_fd(agentrt_event_loop_t *loop, int fd)
     loop->fd_count--;
 }
 
-uint64_t agentrt_event_loop_add_timer(agentrt_event_loop_t *loop, uint64_t interval_ms,
-                                      agentrt_timer_callback_t cb, void *user_data)
+uint64_t airy_event_loop_add_timer(airy_event_loop_t *loop, uint64_t interval_ms,
+                                      airy_timer_callback_t cb, void *user_data)
 {
     if (!loop || !cb)
         return 0;
-    for (int i = 0; i < AGENTRT_EVENT_LOOP_MAX_TIMERS; i++) {
+    for (int i = 0; i < AIRY_EVENT_LOOP_MAX_TIMERS; i++) {
         if (!loop->timers[i].active) {
             loop->timers[i].id = loop->next_timer_id++;
             loop->timers[i].interval_ms = interval_ms;
@@ -260,23 +260,23 @@ uint64_t agentrt_event_loop_add_timer(agentrt_event_loop_t *loop, uint64_t inter
     return 0;
 }
 
-int agentrt_event_loop_cancel_timer(agentrt_event_loop_t *loop, uint64_t timer_id)
+int airy_event_loop_cancel_timer(airy_event_loop_t *loop, uint64_t timer_id)
 {
     if (!loop || timer_id == 0)
-        return AGENTRT_ERR_INVALID_PARAM;
-    for (int i = 0; i < AGENTRT_EVENT_LOOP_MAX_TIMERS; i++) {
+        return AIRY_ERR_INVALID_PARAM;
+    for (int i = 0; i < AIRY_EVENT_LOOP_MAX_TIMERS; i++) {
         if (loop->timers[i].active && loop->timers[i].id == timer_id) {
             loop->timers[i].active = false;
             return 0;
         }
     }
-    AGENTRT_ERROR(AGENTRT_ERR_NOT_FOUND, "timer not found");
+    AIRY_ERROR(AIRY_ERR_NOT_FOUND, "timer not found");
 }
 
-static void process_timers(agentrt_event_loop_t *loop)
+static void process_timers(airy_event_loop_t *loop)
 {
     loop->current_time_ms = get_time_ms();
-    for (int i = 0; i < AGENTRT_EVENT_LOOP_MAX_TIMERS; i++) {
+    for (int i = 0; i < AIRY_EVENT_LOOP_MAX_TIMERS; i++) {
         if (loop->timers[i].active && loop->current_time_ms >= loop->timers[i].next_fire_ms) {
             loop->timers[i].cb(loop, loop->timers[i].id, loop->timers[i].user_data);
             if (loop->timers[i].active)
@@ -285,10 +285,10 @@ static void process_timers(agentrt_event_loop_t *loop)
     }
 }
 
-int agentrt_event_loop_run(agentrt_event_loop_t *loop)
+int airy_event_loop_run(airy_event_loop_t *loop)
 {
     if (!loop)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     loop->running = true;
     loop->stop_requested = false;
@@ -347,7 +347,7 @@ int agentrt_event_loop_run(agentrt_event_loop_t *loop)
 
             uint32_t user_events = wsa_to_events(net_events.lNetworkEvents);
             if (net_events.lNetworkEvents & FD_CLOSE)
-                user_events |= AGENTRT_EVENT_TYPE_READ;
+                user_events |= AIRY_EVENT_TYPE_READ;
 
             if (user_events && loop->fd_entries[fi].cb) {
                 loop->fd_entries[fi].cb((int)loop->fd_entries[fi].fd, user_events,
@@ -361,7 +361,7 @@ int agentrt_event_loop_run(agentrt_event_loop_t *loop)
     return 0;
 }
 
-void agentrt_event_loop_stop(agentrt_event_loop_t *loop)
+void airy_event_loop_stop(airy_event_loop_t *loop)
 {
     if (!loop)
         return;
@@ -370,17 +370,17 @@ void agentrt_event_loop_stop(agentrt_event_loop_t *loop)
         SetEvent(loop->wakeup_event);
 }
 
-int agentrt_event_loop_wakeup(agentrt_event_loop_t *loop)
+int airy_event_loop_wakeup(airy_event_loop_t *loop)
 {
     if (!loop || !loop->wakeup_event)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (!SetEvent(loop->wakeup_event)) {
-        AGENTRT_ERROR(AGENTRT_ERR_IO, "wakeup SetEvent failed");
+        AIRY_ERROR(AIRY_ERR_IO, "wakeup SetEvent failed");
     }
     return 0;
 }
 
-int agentrt_event_loop_get_fd_count(agentrt_event_loop_t *loop)
+int airy_event_loop_get_fd_count(airy_event_loop_t *loop)
 {
     if (!loop)
         return 0;
@@ -401,7 +401,7 @@ typedef struct {
     uint64_t id;
     uint64_t interval_ms;
     uint64_t next_fire_ms;
-    agentrt_timer_callback_t cb;
+    airy_timer_callback_t cb;
     void *user_data;
     bool active;
 } timer_entry_t;
@@ -409,18 +409,18 @@ typedef struct {
 typedef struct {
     int fd;
     uint32_t events;
-    agentrt_event_callback_t cb;
+    airy_event_callback_t cb;
     void *user_data;
     bool level_triggered;
 } fd_entry_t;
 
-struct agentrt_event_loop {
+struct airy_event_loop {
     int epoll_fd;
     int wakeup_fd;
     int max_events;
     struct epoll_event *epoll_events;
     fd_entry_t *fd_entries;
-    timer_entry_t timers[AGENTRT_EVENT_LOOP_MAX_TIMERS];
+    timer_entry_t timers[AIRY_EVENT_LOOP_MAX_TIMERS];
     uint64_t next_timer_id;
     uint64_t current_time_ms;
     volatile bool running;
@@ -434,23 +434,23 @@ static uint64_t get_time_ms(void)
     return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }
 
-static int add_fd_internal(agentrt_event_loop_t *loop, int fd, uint32_t events,
-                           agentrt_event_callback_t cb, void *user_data, bool level_triggered)
+static int add_fd_internal(airy_event_loop_t *loop, int fd, uint32_t events,
+                           airy_event_callback_t cb, void *user_data, bool level_triggered)
 {
     if (!loop || fd < 0 || !cb)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (fd >= loop->max_events) {
         LOG_DEBUG("fd=%d exceeds max_events=%d, cannot track callback", fd, loop->max_events);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     struct epoll_event ev;
     __builtin_memset(&ev, 0, sizeof(ev));
     ev.data.fd = fd;
 
-    if (events & AGENTRT_EVENT_TYPE_READ)
+    if (events & AIRY_EVENT_TYPE_READ)
         ev.events |= EPOLLIN;
-    if (events & AGENTRT_EVENT_TYPE_WRITE)
+    if (events & AIRY_EVENT_TYPE_WRITE)
         ev.events |= EPOLLOUT;
     if (!level_triggered)
         ev.events |= EPOLLET;
@@ -459,11 +459,11 @@ static int add_fd_internal(agentrt_event_loop_t *loop, int fd, uint32_t events,
         if (errno == EEXIST) {
             if (epoll_ctl(loop->epoll_fd, EPOLL_CTL_MOD, fd, &ev) < 0) {
                 LOG_DEBUG("epoll_ctl MOD failed for fd=%d: %s", fd, strerror(errno));
-                return AGENTRT_ERR_IO;
+                return AIRY_ERR_IO;
             }
         } else {
             LOG_DEBUG("epoll_ctl ADD failed for fd=%d: %s", fd, strerror(errno));
-            return AGENTRT_ERR_IO;
+            return AIRY_ERR_IO;
         }
     }
 
@@ -476,34 +476,34 @@ static int add_fd_internal(agentrt_event_loop_t *loop, int fd, uint32_t events,
     return 0;
 }
 
-agentrt_event_loop_t *agentrt_event_loop_create(int max_events)
+airy_event_loop_t *airy_event_loop_create(int max_events)
 {
-    agentrt_event_loop_t *loop =
-        (agentrt_event_loop_t *)AGENTRT_CALLOC(1, sizeof(agentrt_event_loop_t));
+    airy_event_loop_t *loop =
+        (airy_event_loop_t *)AIRY_CALLOC(1, sizeof(airy_event_loop_t));
     if (!loop) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     if (max_events <= 0)
-        max_events = AGENTRT_EVENT_LOOP_MAX_EVENTS;
+        max_events = AIRY_EVENT_LOOP_MAX_EVENTS;
 
     loop->epoll_fd = epoll_create1(EPOLL_CLOEXEC);
     if (loop->epoll_fd < 0) {
-        AGENTRT_FREE(loop);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_OVERFLOW, "limit exceeded");
+        AIRY_FREE(loop);
+        AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
     }
 
     loop->max_events = max_events;
     loop->epoll_events =
-        (struct epoll_event *)AGENTRT_CALLOC((size_t)max_events, sizeof(struct epoll_event));
-    loop->fd_entries = (fd_entry_t *)AGENTRT_CALLOC((size_t)max_events, sizeof(fd_entry_t));
+        (struct epoll_event *)AIRY_CALLOC((size_t)max_events, sizeof(struct epoll_event));
+    loop->fd_entries = (fd_entry_t *)AIRY_CALLOC((size_t)max_events, sizeof(fd_entry_t));
 
     if (!loop->epoll_events || !loop->fd_entries) {
         close(loop->epoll_fd);
-        AGENTRT_FREE(loop->epoll_events);
-        AGENTRT_FREE(loop->fd_entries);
-        AGENTRT_FREE(loop);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_FREE(loop->epoll_events);
+        AIRY_FREE(loop->fd_entries);
+        AIRY_FREE(loop);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     loop->wakeup_fd = -1;
@@ -522,7 +522,7 @@ agentrt_event_loop_t *agentrt_event_loop_create(int max_events)
 #endif
 
     loop->next_timer_id = 1;
-    for (int i = 0; i < AGENTRT_EVENT_LOOP_MAX_TIMERS; i++) {
+    for (int i = 0; i < AIRY_EVENT_LOOP_MAX_TIMERS; i++) {
         loop->timers[i].active = false;
     }
 
@@ -531,42 +531,42 @@ agentrt_event_loop_t *agentrt_event_loop_create(int max_events)
     return loop;
 }
 
-void agentrt_event_loop_destroy(agentrt_event_loop_t *loop)
+void airy_event_loop_destroy(airy_event_loop_t *loop)
 {
     if (!loop)
         return;
     if (loop->wakeup_fd >= 0)
         close(loop->wakeup_fd);
     close(loop->epoll_fd);
-    AGENTRT_FREE(loop->epoll_events);
-    AGENTRT_FREE(loop->fd_entries);
-    AGENTRT_FREE(loop);
+    AIRY_FREE(loop->epoll_events);
+    AIRY_FREE(loop->fd_entries);
+    AIRY_FREE(loop);
 }
 
-int agentrt_event_loop_add_fd(agentrt_event_loop_t *loop, int fd, uint32_t events,
-                              agentrt_event_callback_t cb, void *user_data)
+int airy_event_loop_add_fd(airy_event_loop_t *loop, int fd, uint32_t events,
+                              airy_event_callback_t cb, void *user_data)
 {
     return add_fd_internal(loop, fd, events, cb, user_data, false);
 }
 
-int agentrt_event_loop_add_fd_lt(agentrt_event_loop_t *loop, int fd, uint32_t events,
-                                 agentrt_event_callback_t cb, void *user_data)
+int airy_event_loop_add_fd_lt(airy_event_loop_t *loop, int fd, uint32_t events,
+                                 airy_event_callback_t cb, void *user_data)
 {
     return add_fd_internal(loop, fd, events, cb, user_data, true);
 }
 
-int agentrt_event_loop_mod_fd(agentrt_event_loop_t *loop, int fd, uint32_t events)
+int airy_event_loop_mod_fd(airy_event_loop_t *loop, int fd, uint32_t events)
 {
     if (!loop || fd < 0 || fd >= loop->max_events)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     struct epoll_event ev;
     __builtin_memset(&ev, 0, sizeof(ev));
     ev.data.fd = fd;
 
-    if (events & AGENTRT_EVENT_TYPE_READ)
+    if (events & AIRY_EVENT_TYPE_READ)
         ev.events |= EPOLLIN;
-    if (events & AGENTRT_EVENT_TYPE_WRITE)
+    if (events & AIRY_EVENT_TYPE_WRITE)
         ev.events |= EPOLLOUT;
 
     if (fd < loop->max_events && !loop->fd_entries[fd].level_triggered) {
@@ -574,14 +574,14 @@ int agentrt_event_loop_mod_fd(agentrt_event_loop_t *loop, int fd, uint32_t event
     }
 
     if (epoll_ctl(loop->epoll_fd, EPOLL_CTL_MOD, fd, &ev) < 0) {
-        AGENTRT_ERROR(AGENTRT_ERR_IO, "epoll_ctl MOD failed");
+        AIRY_ERROR(AIRY_ERR_IO, "epoll_ctl MOD failed");
     }
 
     loop->fd_entries[fd].events = events;
     return 0;
 }
 
-void agentrt_event_loop_remove_fd(agentrt_event_loop_t *loop, int fd)
+void airy_event_loop_remove_fd(airy_event_loop_t *loop, int fd)
 {
     if (!loop || fd < 0 || fd >= loop->max_events)
         return;
@@ -589,13 +589,13 @@ void agentrt_event_loop_remove_fd(agentrt_event_loop_t *loop, int fd)
     __builtin_memset(&loop->fd_entries[fd], 0, sizeof(fd_entry_t));
 }
 
-uint64_t agentrt_event_loop_add_timer(agentrt_event_loop_t *loop, uint64_t interval_ms,
-                                      agentrt_timer_callback_t cb, void *user_data)
+uint64_t airy_event_loop_add_timer(airy_event_loop_t *loop, uint64_t interval_ms,
+                                      airy_timer_callback_t cb, void *user_data)
 {
     if (!loop || !cb)
         return 0;
 
-    for (int i = 0; i < AGENTRT_EVENT_LOOP_MAX_TIMERS; i++) {
+    for (int i = 0; i < AIRY_EVENT_LOOP_MAX_TIMERS; i++) {
         if (!loop->timers[i].active) {
             loop->timers[i].id = loop->next_timer_id++;
             loop->timers[i].interval_ms = interval_ms;
@@ -609,25 +609,25 @@ uint64_t agentrt_event_loop_add_timer(agentrt_event_loop_t *loop, uint64_t inter
     return 0;
 }
 
-int agentrt_event_loop_cancel_timer(agentrt_event_loop_t *loop, uint64_t timer_id)
+int airy_event_loop_cancel_timer(airy_event_loop_t *loop, uint64_t timer_id)
 {
     if (!loop || timer_id == 0)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
-    for (int i = 0; i < AGENTRT_EVENT_LOOP_MAX_TIMERS; i++) {
+    for (int i = 0; i < AIRY_EVENT_LOOP_MAX_TIMERS; i++) {
         if (loop->timers[i].active && loop->timers[i].id == timer_id) {
             loop->timers[i].active = false;
             return 0;
         }
     }
-    AGENTRT_ERROR(AGENTRT_ERR_NOT_FOUND, "timer not found");
+    AIRY_ERROR(AIRY_ERR_NOT_FOUND, "timer not found");
 }
 
-static void process_timers(agentrt_event_loop_t *loop)
+static void process_timers(airy_event_loop_t *loop)
 {
     loop->current_time_ms = get_time_ms();
 
-    for (int i = 0; i < AGENTRT_EVENT_LOOP_MAX_TIMERS; i++) {
+    for (int i = 0; i < AIRY_EVENT_LOOP_MAX_TIMERS; i++) {
         if (loop->timers[i].active && loop->current_time_ms >= loop->timers[i].next_fire_ms) {
             loop->timers[i].cb(loop, loop->timers[i].id, loop->timers[i].user_data);
             if (loop->timers[i].active) {
@@ -637,10 +637,10 @@ static void process_timers(agentrt_event_loop_t *loop)
     }
 }
 
-int agentrt_event_loop_run(agentrt_event_loop_t *loop)
+int airy_event_loop_run(airy_event_loop_t *loop)
 {
     if (!loop)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     loop->running = true;
     loop->stop_requested = false;
@@ -664,9 +664,9 @@ int agentrt_event_loop_run(agentrt_event_loop_t *loop)
 
             uint32_t user_events = 0;
             if (revents & (EPOLLIN | EPOLLHUP | EPOLLERR))
-                user_events |= AGENTRT_EVENT_TYPE_READ;
+                user_events |= AIRY_EVENT_TYPE_READ;
             if (revents & EPOLLOUT)
-                user_events |= AGENTRT_EVENT_TYPE_WRITE;
+                user_events |= AIRY_EVENT_TYPE_WRITE;
 
             if (fd >= 0 && fd < loop->max_events && loop->fd_entries[fd].cb) {
                 loop->fd_entries[fd].cb(fd, user_events, loop->fd_entries[fd].user_data);
@@ -681,7 +681,7 @@ int agentrt_event_loop_run(agentrt_event_loop_t *loop)
     return 0;
 }
 
-void agentrt_event_loop_stop(agentrt_event_loop_t *loop)
+void airy_event_loop_stop(airy_event_loop_t *loop)
 {
     if (!loop)
         return;
@@ -695,18 +695,18 @@ void agentrt_event_loop_stop(agentrt_event_loop_t *loop)
     }
 }
 
-int agentrt_event_loop_wakeup(agentrt_event_loop_t *loop)
+int airy_event_loop_wakeup(airy_event_loop_t *loop)
 {
     if (!loop || loop->wakeup_fd < 0)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     uint64_t val = 1;
     if (write(loop->wakeup_fd, &val, sizeof(val)) < 0) {
-        AGENTRT_ERROR(AGENTRT_ERR_IO, "wakeup write failed");
+        AIRY_ERROR(AIRY_ERR_IO, "wakeup write failed");
     }
     return 0;
 }
 
-int agentrt_event_loop_get_fd_count(agentrt_event_loop_t *loop)
+int airy_event_loop_get_fd_count(airy_event_loop_t *loop)
 {
     if (!loop)
         return 0;

@@ -24,7 +24,7 @@ static void test_market_register_skill(void)
     assert(ret == 0 && svc != NULL);
 
     skill_info_t info;
-    AGENTRT_MEMSET(&info, 0, sizeof(info));
+    AIRY_MEMSET(&info, 0, sizeof(info));
     info.skill_id = "test_skill_001";
     info.name = "Test Skill";
     info.version = "1.0.0";
@@ -48,7 +48,7 @@ static void test_market_search_skills(void)
     assert(ret == 0 && svc != NULL);
 
     skill_info_t info;
-    AGENTRT_MEMSET(&info, 0, sizeof(info));
+    AIRY_MEMSET(&info, 0, sizeof(info));
     info.skill_id = "search_test_skill";
     info.name = "Search Test Skill";
     info.version = "1.0.0";
@@ -57,7 +57,7 @@ static void test_market_search_skills(void)
     market_service_register_skill(svc, &info);
 
     search_params_t params;
-    AGENTRT_MEMSET(&params, 0, sizeof(params));
+    AIRY_MEMSET(&params, 0, sizeof(params));
     params.query = "Search Test";
 
     skill_info_t **skills = NULL;
@@ -84,14 +84,14 @@ static void test_market_get_installed_skills(void)
     assert(ret == 0 && svc != NULL);
 
     skill_info_t info1;
-    AGENTRT_MEMSET(&info1, 0, sizeof(info1));
+    AIRY_MEMSET(&info1, 0, sizeof(info1));
     info1.skill_id = "installed_skill_1";
     info1.name = "Installed Skill 1";
     info1.version = "1.0.0";
     info1.type = SKILL_TYPE_TOOL;
 
     skill_info_t info2;
-    AGENTRT_MEMSET(&info2, 0, sizeof(info2));
+    AIRY_MEMSET(&info2, 0, sizeof(info2));
     info2.skill_id = "installed_skill_2";
     info2.name = "Installed Skill 2";
     info2.version = "2.0.0";
@@ -122,7 +122,7 @@ static void test_market_uninstall_skill(void)
     assert(ret == 0 && svc != NULL);
 
     skill_info_t info;
-    AGENTRT_MEMSET(&info, 0, sizeof(info));
+    AIRY_MEMSET(&info, 0, sizeof(info));
     info.skill_id = "uninstall_test_skill";
     info.name = "Uninstall Test Skill";
     info.version = "1.0.0";
@@ -147,7 +147,7 @@ static void test_market_install_skill(void)
     assert(ret == 0 && svc != NULL);
 
     install_request_t request;
-    AGENTRT_MEMSET(&request, 0, sizeof(request));
+    AIRY_MEMSET(&request, 0, sizeof(request));
     request.id = "install_test_skill";
     request.version = "1.0.0";
 

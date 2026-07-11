@@ -108,26 +108,26 @@ typedef struct daemon_security_config {
  * @code
  * daemon_security_config_t sec_config = {
  *     .sanitize_level = SANITIZE_LEVEL_STRICT,
- *     .sanitizer_rules_path = AGENTRT_CONFIG_DIR "/cupolas/sanitizer_rules.yaml",
- *     .permission_rules_path = AGENTRT_CONFIG_DIR "/cupolas/permission_rules.yaml",
+ *     .sanitizer_rules_path = AIRY_CONFIG_DIR "/cupolas/sanitizer_rules.yaml",
+ *     .permission_rules_path = AIRY_CONFIG_DIR "/cupolas/permission_rules.yaml",
  *     .enable_permission_cache = true,
  *     .enable_signature_verification = true,
- *     .trusted_ca_path = AGENTRT_CONFIG_DIR "/cupolas/ca",
+ *     .trusted_ca_path = AIRY_CONFIG_DIR "/cupolas/ca",
  *     .expected_signer = "SPHARX Trusted Signer",
  *     .enable_vault = true,
- *     .vault_storage_path = AGENTRT_CACHE_DIR "/cupolas/vault",
+ *     .vault_storage_path = AIRY_CACHE_DIR "/cupolas/vault",
  *     .enable_audit_logging = true,
- *     .audit_log_dir = AGENTRT_LOG_DIR "/cupolas"
+ *     .audit_log_dir = AIRY_LOG_DIR "/cupolas"
  * };
  *
- * agentrt_error_t error;
+ * airy_err_t error;
  * int ret = daemon_security_init(&sec_config, &error);
  * if (ret != 0) {
  *     fprintf(stderr, "Security init failed: %s\n", error.message);
  * }
  * @endcode
  */
-int daemon_security_init(const daemon_security_config_t *config, agentrt_error_t *error);
+int daemon_security_init(const daemon_security_config_t *config, airy_err_t *error);
 
 /**
  * @brief Shutdown daemon security layer
@@ -234,7 +234,7 @@ int daemon_sanitize_tool_params(const char *tool_name, const char *params, char 
  * Example usage:
  * @code
  * if (daemon_check_tool_permission("agent-001", "file_read", "execute") != 0) {
- *     return AGENTRT_ERR_PERMISSION_DENIED;
+ *     return AIRY_ERR_PERMISSION_DENIED;
  * }
  * // Proceed with tool execution
  * @endcode
@@ -407,7 +407,7 @@ int daemon_security_get_status(int *sanitizer_status, int *permission_status, in
  * @param[in] resource Resource name: tool_name for tool checks, model_name for LLM checks
  *                     (max 127 chars, NUL-terminated)
  * @param[in] allowed  true to grant permission, false to explicitly deny
- * @return 0 on success, negative on failure (AGENTRT_ERR_INVALID_PARAM / AGENTRT_ERR_OUT_OF_MEMORY)
+ * @return 0 on success, negative on failure (AIRY_ERR_INVALID_PARAM / AIRY_ERR_OUT_OF_MEMORY)
  *
  * @note Thread-safe: Safe to call from multiple threads concurrently
  * @reentrant Yes

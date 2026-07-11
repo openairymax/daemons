@@ -10,8 +10,8 @@
  * 包含 14 项必需指标的注册和导出。
  */
 
-#ifndef AGENTRT_PROMETHEUS_EXPORTER_H
-#define AGENTRT_PROMETHEUS_EXPORTER_H
+#ifndef AIRY_RT_PROMETHEUS_EXPORTER_H
+#define AIRY_RT_PROMETHEUS_EXPORTER_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -101,4 +101,4 @@ void prometheus_exporter_get_scrape_stats(uint64_t *out_count, uint64_t *out_err
 }
 #endif
 
-#endif /* AGENTRT_PROMETHEUS_EXPORTER_H */
+#endif /* AIRY_RT_PROMETHEUS_EXPORTER_H */

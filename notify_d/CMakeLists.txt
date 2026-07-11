@@ -20,20 +20,20 @@ add_executable(notify_d ${NOTIFY_D_SOURCES})
 
 if(WIN32)
     target_compile_definitions(notify_d PRIVATE
-        AGENTRT_PLATFORM_WINDOWS=1
+        AIRY_PLATFORM_WINDOWS=1
         WIN32_LEAN_AND_MEAN
         NOMINMAX
         _CRT_SECURE_NO_WARNINGS
     )
     target_link_libraries(notify_d PRIVATE
-        agentrt_common
+        airy_common
         ws2_32
     )
 elseif(UNIX)
     target_link_libraries(notify_d PRIVATE
-        agentrt_common
+        airy_common
         Threads::Threads
-        agentrt_platform_libs
+        airy_platform_libs
     )
 endif()
 

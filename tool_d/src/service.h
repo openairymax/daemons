@@ -23,7 +23,7 @@ struct tool_service {
     tool_validator_t *validator;
     tool_cache_t *cache;
     tool_config_t *manager;
-    agentrt_mutex_t lock;
+    airy_mtx_t lock;
 };
 
 #endif /* TOOL_SERVICE_INTERNAL_H */

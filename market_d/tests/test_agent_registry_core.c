@@ -61,8 +61,8 @@ static int test_add_get_agent(void)
     agent_registry_init(reg, NULL);
 
     agent_entry_t entry = {0};
-    AGENTRT_STRNCPY_TERM(entry.id, "test-agent-001", sizeof(entry.id));
-    AGENTRT_STRNCPY_TERM(entry.name, "Test Agent", sizeof(entry.name));
+    AIRY_STRNCPY_TERM(entry.id, "test-agent-001", sizeof(entry.id));
+    AIRY_STRNCPY_TERM(entry.name, "Test Agent", sizeof(entry.name));
     entry.description = strdup("A test agent for unit testing");
     entry.author = strdup("Test Author");
     entry.verified = 1;
@@ -104,8 +104,8 @@ static int test_remove_agent(void)
     agent_registry_init(reg, NULL);
 
     agent_entry_t entry = {0};
-    AGENTRT_STRNCPY_TERM(entry.id, "test-agent-002", sizeof(entry.id));
-    AGENTRT_STRNCPY_TERM(entry.name, "Test Agent 2", sizeof(entry.name));
+    AIRY_STRNCPY_TERM(entry.id, "test-agent-002", sizeof(entry.id));
+    AIRY_STRNCPY_TERM(entry.name, "Test Agent 2", sizeof(entry.name));
     entry.description = strdup("Another test agent");
     entry.author = strdup("Test Author");
 
@@ -142,8 +142,8 @@ static int test_list_agents(void)
         char id[64], name[64];
         snprintf(id, sizeof(id), "agent-%03d", i);
         snprintf(name, sizeof(name), "Agent %d", i);
-        AGENTRT_STRNCPY_TERM(entry.id, id, sizeof(entry.id));
-        AGENTRT_STRNCPY_TERM(entry.name, name, sizeof(entry.name));
+        AIRY_STRNCPY_TERM(entry.id, id, sizeof(entry.id));
+        AIRY_STRNCPY_TERM(entry.name, name, sizeof(entry.name));
         entry.author = strdup("Test");
         agent_registry_add(reg, &entry);
         free(entry.author);
@@ -170,8 +170,8 @@ static int test_search_by_tag(void)
     agent_registry_init(reg, NULL);
 
     agent_entry_t entry = {0};
-    AGENTRT_STRNCPY_TERM(entry.id, "search-test-agent", sizeof(entry.id));
-    AGENTRT_STRNCPY_TERM(entry.name, "Search Test Agent", sizeof(entry.name));
+    AIRY_STRNCPY_TERM(entry.id, "search-test-agent", sizeof(entry.id));
+    AIRY_STRNCPY_TERM(entry.name, "Search Test Agent", sizeof(entry.name));
     entry.author = strdup("Test");
 
     agent_registry_add(reg, &entry);
@@ -192,8 +192,8 @@ static int test_search(void)
     agent_registry_init(reg, NULL);
 
     agent_entry_t entry = {0};
-    AGENTRT_STRNCPY_TERM(entry.id, "searchable-agent", sizeof(entry.id));
-    AGENTRT_STRNCPY_TERM(entry.name, "Searchable Agent", sizeof(entry.name));
+    AIRY_STRNCPY_TERM(entry.id, "searchable-agent", sizeof(entry.id));
+    AIRY_STRNCPY_TERM(entry.name, "Searchable Agent", sizeof(entry.name));
     entry.description = strdup("This agent is searchable by text");
     entry.author = strdup("Test");
 
@@ -231,8 +231,8 @@ static int test_count(void)
         agent_entry_t entry = {0};
         char id[64];
         snprintf(id, sizeof(id), "count-test-%d", i);
-        AGENTRT_STRNCPY_TERM(entry.id, id, sizeof(entry.id));
-        AGENTRT_STRNCPY_TERM(entry.name, "Count Test", sizeof(entry.name));
+        AIRY_STRNCPY_TERM(entry.id, id, sizeof(entry.id));
+        AIRY_STRNCPY_TERM(entry.name, "Count Test", sizeof(entry.name));
         entry.author = strdup("Test");
         agent_registry_add(reg, &entry);
         free(entry.author);
@@ -256,8 +256,8 @@ static int test_add_version(void)
     agent_registry_init(reg, NULL);
 
     agent_entry_t entry = {0};
-    AGENTRT_STRNCPY_TERM(entry.id, "version-test-agent", sizeof(entry.id));
-    AGENTRT_STRNCPY_TERM(entry.name, "Version Test Agent", sizeof(entry.name));
+    AIRY_STRNCPY_TERM(entry.id, "version-test-agent", sizeof(entry.id));
+    AIRY_STRNCPY_TERM(entry.name, "Version Test Agent", sizeof(entry.name));
     entry.author = strdup("Test");
     agent_registry_add(reg, &entry);
     free(entry.author);
@@ -292,7 +292,7 @@ static int test_invalid_params(void)
     agent_registry_init(reg, NULL);
 
     agent_entry_t entry = {0};
-    AGENTRT_STRNCPY_TERM(entry.name, "No ID Agent", sizeof(entry.name));
+    AIRY_STRNCPY_TERM(entry.name, "No ID Agent", sizeof(entry.name));
 
     if (agent_registry_add(NULL, &entry) == 0) {
         agent_registry_shutdown(reg);

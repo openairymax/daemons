@@ -14,8 +14,8 @@
 #include <errno.h>
 #include <unistd.h>
 
-#define HOOK_D_SOCKET_PATH AGENTRT_RUNTIME_DIR "/hook.sock"
-#define HOOK_D_PIPE_PATH   "\\\\.\\pipe\\agentrt_hook"
+#define HOOK_D_SOCKET_PATH AIRY_RUNTIME_DIR "/hook.sock"
+#define HOOK_D_PIPE_PATH   "\\\\.\\pipe\\airy_hook"
 
 /* P0.18.1: 使用 DAEMON_DECLARE_COMMON 生成公共样板（信号处理/全局变量/print_usage） */
 DAEMON_DECLARE_COMMON(hook_d, hook, HOOK_D_SOCKET_PATH, HOOK_D_PIPE_PATH, 0, 4096)
@@ -47,8 +47,8 @@ int main(int argc, char *argv[])
     (void)argc;
     (void)argv;
 
-    agentrt_socket_init();
-    agentrt_mutex_init(&g_running_lock_hook_d);
+    airy_sock_init();
+    airy_mtx_init(&g_running_lock_hook_d);
 
     /* 跨平台信号处理 */
 #ifdef _WIN32
@@ -57,7 +57,7 @@ int main(int argc, char *argv[])
     DAEMON_SETUP_SIGNALS(hook_d);
 #endif
 
-    agentrt_log_init(NULL);
+    airy_log_init(NULL);
     atexit(log_cleanup);
 
     /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶 */
@@ -65,7 +65,7 @@ int main(int argc, char *argv[])
     SVC_LOG_INFO("hook_d: starting");
 
     /* 创建 Socket 服务器 */
-    agentrt_socket_t server_fd =
+    airy_sock_t server_fd =
         daemon_create_server_socket(0, 0, HOOK_D_SOCKET_PATH, HOOK_D_PIPE_PATH);
     if (server_fd < 0) {
         SVC_LOG_ERROR("P2.1: HookD: failed to create socket at %s (errno=%d: %s)",

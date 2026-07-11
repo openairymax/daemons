@@ -18,19 +18,19 @@ static int g_cupolas_initialized = 0;
 
 /* ==================== 实现 ==================== */
 
-agentrt_error_t daemon_cupolas_init(const char *daemon_name)
+airy_err_t daemon_cupolas_init(const char *daemon_name)
 {
     if (!daemon_name)
     {
         SVC_LOG_ERROR("daemon_cupolas_init: NULL daemon_name");
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
     }
 
     /* 幂等：已初始化则直接返回成功 */
     if (g_cupolas_initialized)
     {
         SVC_LOG_DEBUG("daemon_cupolas_init: cupolas already initialized (daemon=%s)", daemon_name);
-        return AGENTRT_SUCCESS;
+        return AIRY_SUCCESS;
     }
 
     /* P3.15 ACC-DT16: 显式初始化 daemon_security 层（非 NULL config）。
@@ -49,9 +49,9 @@ agentrt_error_t daemon_cupolas_init(const char *daemon_name)
     sec_config.enable_vault               = true;
     sec_config.vault_storage_path         = NULL;
     sec_config.enable_audit_logging       = true;
-    sec_config.audit_log_dir              = NULL; /* 使用默认 AGENTRT_LOG_DIR */
+    sec_config.audit_log_dir              = NULL; /* 使用默认 AIRY_LOG_DIR */
 
-    agentrt_error_t sec_err = AGENTRT_OK;
+    airy_err_t sec_err = AIRY_OK;
     int sec_rc = daemon_security_init(&sec_config, &sec_err);
     if (sec_rc != 0)
     {
@@ -62,7 +62,7 @@ agentrt_error_t daemon_cupolas_init(const char *daemon_name)
         /* 非致命：继续初始化 cupolas，由各 service 层 fail-closed 拦截 */
     }
 
-    agentrt_error_t cupolas_err = AGENTRT_OK;
+    airy_err_t cupolas_err = AIRY_OK;
     int             rc          = cupolas_init(NULL, &cupolas_err);
     if (rc != 0)
     {
@@ -77,7 +77,7 @@ agentrt_error_t daemon_cupolas_init(const char *daemon_name)
     SVC_LOG_INFO("daemon_cupolas_init: cupolas security dome initialized for '%s' "
                  "(permission_engine + sanitizer + audit_logger + daemon_security)",
                  daemon_name);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 void daemon_cupolas_cleanup(void)

@@ -40,7 +40,7 @@ static void test_alert_trigger(void)
     assert(ret == 0);
 
     alert_info_t alert;
-    AGENTRT_MEMSET(&alert, 0, sizeof(alert));
+    AIRY_MEMSET(&alert, 0, sizeof(alert));
     alert.alert_id = "test_alert_001";
     alert.message = "CPU usage exceeded threshold";
     alert.level = ALERT_LEVEL_WARNING;
@@ -77,7 +77,7 @@ static void test_alert_resolve(void)
     assert(ret == 0);
 
     alert_info_t alert;
-    AGENTRT_MEMSET(&alert, 0, sizeof(alert));
+    AIRY_MEMSET(&alert, 0, sizeof(alert));
     alert.alert_id = "resolve_test_001";
     alert.message = "Memory usage high";
     alert.level = ALERT_LEVEL_ERROR;
@@ -104,7 +104,7 @@ static void test_alert_get_alerts(void)
     assert(ret == 0);
 
     alert_info_t alert;
-    AGENTRT_MEMSET(&alert, 0, sizeof(alert));
+    AIRY_MEMSET(&alert, 0, sizeof(alert));
     alert.alert_id = "get_test_001";
     alert.message = "Test alert";
     alert.level = ALERT_LEVEL_WARNING;
@@ -123,9 +123,9 @@ static void test_alert_get_alerts(void)
     /* 释放 monitor_service_get_alerts 返回的数组 */
     if (alerts) {
         for (size_t i = 0; i < count; i++) {
-            AGENTRT_FREE(alerts[i]);
+            AIRY_FREE(alerts[i]);
         }
-        AGENTRT_FREE(alerts);
+        AIRY_FREE(alerts);
     }
 
     monitor_service_destroy(svc);

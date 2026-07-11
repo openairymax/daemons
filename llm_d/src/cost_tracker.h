@@ -6,8 +6,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_LLM_COST_TRACKER_H
-#define AGENTRT_LLM_COST_TRACKER_H
+#ifndef AIRY_RT_LLM_COST_TRACKER_H
+#define AIRY_RT_LLM_COST_TRACKER_H
 
 #include <cjson/cJSON.h>
 #include <stdint.h>
@@ -34,4 +34,4 @@ cJSON *cost_tracker_export(cost_tracker_t *ct);
 }
 #endif
 
-#endif /* AGENTRT_LLM_COST_TRACKER_H */
+#endif /* AIRY_RT_LLM_COST_TRACKER_H */

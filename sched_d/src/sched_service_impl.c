@@ -32,18 +32,18 @@ int sched_service_create(const sched_config_t *config, sched_service_t **service
 {
     if (!config || !service) {
         SVC_LOG_ERROR("sched_service_create: NULL parameter (config=%p, service=%p)", (const void *)config, (const void *)service);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    sched_service_t *svc = (sched_service_t *)AGENTRT_CALLOC(1, sizeof(sched_service_t));
+    sched_service_t *svc = (sched_service_t *)AIRY_CALLOC(1, sizeof(sched_service_t));
     if (!svc) {
         SVC_LOG_ERROR("sched_service_create: calloc failed for service");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     __builtin_memcpy(&svc->config, config, sizeof(sched_config_t));
     if (config->ml_model_path)
-        svc->config.ml_model_path = AGENTRT_STRDUP(config->ml_model_path);
+        svc->config.ml_model_path = AIRY_STRDUP(config->ml_model_path);
 
     svc->initialized = 1;
     *service = svc;
@@ -54,19 +54,19 @@ int sched_service_destroy(sched_service_t *service)
 {
     if (!service) {
         SVC_LOG_ERROR("sched_service_destroy: NULL service parameter");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     for (size_t i = 0; i < service->agent_count; i++) {
         if (service->agents[i]) {
-            AGENTRT_FREE(service->agents[i]->agent_id);
-            AGENTRT_FREE(service->agents[i]->agent_name);
-            AGENTRT_FREE(service->agents[i]);
+            AIRY_FREE(service->agents[i]->agent_id);
+            AIRY_FREE(service->agents[i]->agent_name);
+            AIRY_FREE(service->agents[i]);
         }
     }
 
-    AGENTRT_FREE((void *)service->config.ml_model_path);
-    AGENTRT_FREE(service);
+    AIRY_FREE((void *)service->config.ml_model_path);
+    AIRY_FREE(service);
     return 0;
 }
 
@@ -74,11 +74,11 @@ int sched_service_register_agent(sched_service_t *service, const agent_info_t *a
 {
     if (!service || !agent_info || !service->initialized) {
         SVC_LOG_ERROR("sched_service_register_agent: NULL parameter or not initialized (service=%p, agent_info=%p, initialized=%d)", (const void *)service, (const void *)agent_info, service ? service->initialized : -1);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     if (service->agent_count >= MAX_AGENTS) {
         SVC_LOG_ERROR("sched_service_register_agent: max agents exceeded (count=%zu, max=%d)", service->agent_count, MAX_AGENTS);
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
     }
 
     for (size_t i = 0; i < service->agent_count; i++) {
@@ -92,26 +92,26 @@ int sched_service_register_agent(sched_service_t *service, const agent_info_t *a
         }
     }
 
-    agent_info_t *new_agent = (agent_info_t *)AGENTRT_CALLOC(1, sizeof(agent_info_t));
+    agent_info_t *new_agent = (agent_info_t *)AIRY_CALLOC(1, sizeof(agent_info_t));
     if (!new_agent) {
         SVC_LOG_ERROR("sched_service_register_agent: calloc failed for new agent");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     if (!agent_info->agent_id) {
         SVC_LOG_ERROR("sched_service_register_agent: agent_info->agent_id is NULL");
-        AGENTRT_FREE(new_agent);
-        return AGENTRT_ERR_INVALID_PARAM;
+        AIRY_FREE(new_agent);
+        return AIRY_ERR_INVALID_PARAM;
     }
-    new_agent->agent_id = AGENTRT_STRDUP(agent_info->agent_id);
+    new_agent->agent_id = AIRY_STRDUP(agent_info->agent_id);
     new_agent->agent_name =
-        agent_info->agent_name ? AGENTRT_STRDUP(agent_info->agent_name) : AGENTRT_STRDUP("");
+        agent_info->agent_name ? AIRY_STRDUP(agent_info->agent_name) : AIRY_STRDUP("");
     if (!new_agent->agent_id || !new_agent->agent_name) {
         SVC_LOG_ERROR("sched_service_register_agent: strdup failed for agent fields (agent_id=%p, agent_name=%p)", (const void *)new_agent->agent_id, (const void *)new_agent->agent_name);
-        AGENTRT_FREE(new_agent->agent_id);
-        AGENTRT_FREE(new_agent->agent_name);
-        AGENTRT_FREE(new_agent);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        AIRY_FREE(new_agent->agent_id);
+        AIRY_FREE(new_agent->agent_name);
+        AIRY_FREE(new_agent);
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
     new_agent->load_factor = agent_info->load_factor;
     new_agent->success_rate = agent_info->success_rate;
@@ -127,14 +127,14 @@ int sched_service_unregister_agent(sched_service_t *service, const char *agent_i
 {
     if (!service || !agent_id || !service->initialized) {
         SVC_LOG_ERROR("sched_service_unregister_agent: NULL parameter or not initialized (service=%p, agent_id=%p, initialized=%d)", (const void *)service, (const void *)agent_id, service ? service->initialized : -1);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     for (size_t i = 0; i < service->agent_count; i++) {
         if (strcmp(service->agents[i]->agent_id, agent_id) == 0) {
-            AGENTRT_FREE(service->agents[i]->agent_id);
-            AGENTRT_FREE(service->agents[i]->agent_name);
-            AGENTRT_FREE(service->agents[i]);
+            AIRY_FREE(service->agents[i]->agent_id);
+            AIRY_FREE(service->agents[i]->agent_name);
+            AIRY_FREE(service->agents[i]);
 
             for (size_t j = i; j < service->agent_count - 1; j++) {
                 service->agents[j] = service->agents[j + 1];
@@ -144,14 +144,14 @@ int sched_service_unregister_agent(sched_service_t *service, const char *agent_i
         }
     }
     SVC_LOG_ERROR("sched_service_unregister_agent: agent not found (agent_id=%s)", agent_id ? agent_id : "NULL");
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 int sched_service_update_agent_status(sched_service_t *service, const agent_info_t *agent_info)
 {
     if (!service || !agent_info || !service->initialized) {
         SVC_LOG_ERROR("sched_service_update_agent_status: NULL parameter or not initialized (service=%p, agent_info=%p, initialized=%d)", (const void *)service, (const void *)agent_info, service ? service->initialized : -1);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     for (size_t i = 0; i < service->agent_count; i++) {
@@ -165,7 +165,7 @@ int sched_service_update_agent_status(sched_service_t *service, const agent_info
         }
     }
     SVC_LOG_ERROR("sched_service_update_agent_status: agent not found (agent_id=%s)", agent_info->agent_id ? agent_info->agent_id : "NULL");
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 int sched_service_schedule_task(sched_service_t *service, const task_info_t *task_info,
@@ -173,13 +173,13 @@ int sched_service_schedule_task(sched_service_t *service, const task_info_t *tas
 {
     if (!service || !task_info || !result || !service->initialized) {
         SVC_LOG_ERROR("sched_service_schedule_task: NULL parameter or not initialized (service=%p, task_info=%p, result=%p, initialized=%d)", (const void *)service, (const void *)task_info, (const void *)result, service ? service->initialized : -1);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    sched_result_t *res = (sched_result_t *)AGENTRT_CALLOC(1, sizeof(sched_result_t));
+    sched_result_t *res = (sched_result_t *)AIRY_CALLOC(1, sizeof(sched_result_t));
     if (!res) {
         SVC_LOG_ERROR("sched_service_schedule_task: calloc failed for result");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     agent_info_t *best_agent = NULL;
@@ -223,7 +223,7 @@ int sched_service_schedule_task(sched_service_t *service, const task_info_t *tas
     service->total_tasks_scheduled++;
 
     if (best_agent) {
-        res->selected_agent_id = AGENTRT_STRDUP(best_agent->agent_id);
+        res->selected_agent_id = AIRY_STRDUP(best_agent->agent_id);
         res->confidence = best_score > 0 ? (best_score > 1.0f ? 1.0f : best_score) : 0.5f;
         res->estimated_time_ms = best_agent->avg_response_time_ms;
         service->total_success++;
@@ -242,13 +242,13 @@ int sched_service_get_stats(sched_service_t *service, void **stats)
 {
     if (!service || !stats || !service->initialized) {
         SVC_LOG_ERROR("sched_service_get_stats: NULL parameter or not initialized (service=%p, stats=%p, initialized=%d)", (const void *)service, (const void *)stats, service ? service->initialized : -1);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    char *json_stats = (char *)AGENTRT_MALLOC(512);
+    char *json_stats = (char *)AIRY_MALLOC(512);
     if (!json_stats) {
         SVC_LOG_ERROR("sched_service_get_stats: malloc failed for stats JSON");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     snprintf(json_stats, 512,
@@ -267,7 +267,7 @@ int sched_service_health_check(sched_service_t *service, bool *health_status)
 {
     if (!service || !health_status || !service->initialized) {
         SVC_LOG_ERROR("sched_service_health_check: NULL parameter or not initialized (service=%p, health_status=%p, initialized=%d)", (const void *)service, (const void *)health_status, service ? service->initialized : -1);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     bool all_healthy = true;
@@ -286,18 +286,18 @@ int sched_service_reload_config(sched_service_t *service, const sched_config_t *
 {
     if (!service || !config || !service->initialized) {
         SVC_LOG_ERROR("sched_service_reload_config: NULL parameter or not initialized (service=%p, config=%p, initialized=%d)", (const void *)service, (const void *)config, service ? service->initialized : -1);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    AGENTRT_FREE((void *)service->config.ml_model_path);
+    AIRY_FREE((void *)service->config.ml_model_path);
     service->config.ml_model_path = NULL;
 
     __builtin_memcpy(&service->config, config, sizeof(sched_config_t));
     if (config->ml_model_path) {
-        service->config.ml_model_path = AGENTRT_STRDUP(config->ml_model_path);
+        service->config.ml_model_path = AIRY_STRDUP(config->ml_model_path);
         if (!service->config.ml_model_path) {
             SVC_LOG_ERROR("sched_service_reload_config: strdup failed for ml_model_path (path=%s)", config->ml_model_path ? config->ml_model_path : "NULL");
-            return AGENTRT_ERR_OUT_OF_MEMORY;
+            return AIRY_ERR_OUT_OF_MEMORY;
         }
     }
 

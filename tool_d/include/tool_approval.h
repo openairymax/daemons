@@ -15,8 +15,8 @@
  *   4. 审计记录 (daemon_audit_log_event)
  */
 
-#ifndef AGENTRT_TOOL_APPROVAL_H
-#define AGENTRT_TOOL_APPROVAL_H
+#ifndef AIRY_RT_TOOL_APPROVAL_H
+#define AIRY_RT_TOOL_APPROVAL_H
 
 #include "tool_service.h"
 
@@ -157,4 +157,4 @@ void tool_approval_set_safety_guard_bridge(tool_approval_ctx_t *ctx,
 }
 #endif
 
-#endif /* AGENTRT_TOOL_APPROVAL_H */
+#endif /* AIRY_RT_TOOL_APPROVAL_H */

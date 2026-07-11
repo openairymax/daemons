@@ -18,11 +18,11 @@ static void test_platform_detection(void)
 {
     printf("  test_platform_detection...\n");
 
-#if defined(AGENTRT_PLATFORM_WINDOWS)
+#if defined(AIRY_PLATFORM_WINDOWS)
     printf("    Running on Windows\n");
-#elif defined(AGENTRT_PLATFORM_LINUX)
+#elif defined(AIRY_PLATFORM_LINUX)
     printf("    Running on Linux\n");
-#elif defined(AGENTRT_PLATFORM_MACOS)
+#elif defined(AIRY_PLATFORM_MACOS)
     printf("    Running on macOS\n");
 #else
     printf("    Unknown platform\n");
@@ -36,26 +36,26 @@ static void test_mutex_operations(void)
 {
     printf("  test_mutex_operations...\n");
 
-    agentrt_mutex_t mutex;
-    int ret __attribute__((unused)) = agentrt_mutex_init(&mutex);
+    airy_mtx_t mutex;
+    int ret __attribute__((unused)) = airy_mtx_init(&mutex);
     assert(ret == 0);
 
-    ret = agentrt_mutex_lock(&mutex);
+    ret = airy_mtx_lock(&mutex);
     assert(ret == 0);
 
-    ret = agentrt_mutex_trylock(&mutex);
+    ret = airy_mtx_trylock(&mutex);
     assert(ret == 0);  /* recursive mutex: same thread can relock */
 
-    ret = agentrt_mutex_unlock(&mutex);
+    ret = airy_mtx_unlock(&mutex);
     assert(ret == 0);  /* unlock the extra recursive lock */
 
-    ret = agentrt_mutex_lock(&mutex);  /* relock for later unlock test */
+    ret = airy_mtx_lock(&mutex);  /* relock for later unlock test */
     assert(ret == 0);
 
-    ret = agentrt_mutex_unlock(&mutex);
+    ret = airy_mtx_unlock(&mutex);
     assert(ret == 0);
 
-    agentrt_mutex_destroy(&mutex);
+    airy_mtx_destroy(&mutex);
     assert(ret == 0);
 
     printf("    PASSED\n");
@@ -65,8 +65,8 @@ static void test_time_operations(void)
 {
     printf("  test_time_operations...\n");
 
-    uint64_t ns = agentrt_time_ns();
-    uint64_t ms = agentrt_time_ms();
+    uint64_t ns = airy_time_ns();
+    uint64_t ms = airy_time_ms();
     assert(ns > 0);
     assert(ms > 0);
     assert(ns >= ms * 1000000);
@@ -78,14 +78,14 @@ static void test_random_operations(void)
 {
     printf("  test_random_operations...\n");
 
-    agentrt_random_init();
+    airy_random_init();
 
-    uint32_t r1 = agentrt_random_uint32(1, 100);
-    uint32_t r2 = agentrt_random_uint32(1, 100);
+    uint32_t r1 = airy_random_uint32(1, 100);
+    uint32_t r2 = airy_random_uint32(1, 100);
     assert(r1 >= 1 && r1 <= 100);
     assert(r2 >= 1 && r2 <= 100);
 
-    float rf = agentrt_random_float();
+    float rf = airy_random_float();
     assert(rf >= 0.0f && rf <= 1.0f);
 
     printf("    PASSED\n");
@@ -95,8 +95,8 @@ static void test_file_operations(void)
 {
     printf("  test_file_operations...\n");
 
-    assert(agentrt_file_exists(".") == 1);
-    assert(agentrt_file_exists("/nonexistent/path") == 0);
+    assert(airy_file_exists(".") == 1);
+    assert(airy_file_exists("/nonexistent/path") == 0);
 
     printf("    PASSED\n");
 }
@@ -108,11 +108,11 @@ static void test_strlcpy(void)
     char dest[32];
     const char *src = "Hello, AgentRT!";
 
-    agentrt_strlcpy(dest, src, sizeof(dest));
+    airy_strlcpy(dest, src, sizeof(dest));
     assert(strcmp(dest, src) == 0);
 
     char dest2[8];
-    agentrt_strlcpy(dest2, src, sizeof(dest2));
+    airy_strlcpy(dest2, src, sizeof(dest2));
     assert(strlen(dest2) >= 3);
 
     printf("    PASSED\n");

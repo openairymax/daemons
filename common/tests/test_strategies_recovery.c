@@ -542,24 +542,24 @@ static void test_err_migration_no_return_neg1(void)
 {
     printf("  [18] test_err_migration_no_return_neg1 (ERR-02/ERR-03 migration)...\n");
 
-    assert(AGENTRT_SUCCESS == 0);
-    assert(AGENTRT_OK == 0);
+    assert(AIRY_SUCCESS == 0);
+    assert(AIRY_OK == 0);
 
     /* 验证 ERR_UNKNOWN == -1 （传统未知错误码） */
-    assert(AGENTRT_ERR_UNKNOWN < 0);
+    assert(AIRY_ERR_UNKNOWN < 0);
 
     /* 验证 E* 别名映射到 ERR* 系列 */
-    assert(AGENTRT_EINVAL != 0);
-    assert(AGENTRT_ENOMEM != 0);
-    assert(AGENTRT_ENOENT != 0);
+    assert(AIRY_EINVAL != 0);
+    assert(AIRY_ENOMEM != 0);
+    assert(AIRY_ENOENT != 0);
 
     /* 验证没有错误码使用 -1 作为返回值（ERR-02 合规） */
-    assert(AGENTRT_ERR_INVALID_PARAM != (-1));
-    assert(AGENTRT_ERR_OUT_OF_MEMORY != (-1));
+    assert(AIRY_ERR_INVALID_PARAM != (-1));
+    assert(AIRY_ERR_OUT_OF_MEMORY != (-1));
 
     /* 验证 strerror 可用 */
-    const char *s_unknown = agentrt_error_str(AGENTRT_ERR_UNKNOWN);
-    const char *s_inval = agentrt_error_str(AGENTRT_ERR_INVALID_PARAM);
+    const char *s_unknown = airy_err_str(AIRY_ERR_UNKNOWN);
+    const char *s_inval = airy_err_str(AIRY_ERR_INVALID_PARAM);
     assert(s_unknown != NULL);
     assert(s_inval != NULL);
     assert(strlen(s_unknown) > 0);

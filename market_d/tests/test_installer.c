@@ -24,7 +24,7 @@ static void test_installer_agent_install_uninstall(void)
     assert(ret == 0 && svc != NULL);
 
     agent_info_t info;
-    AGENTRT_MEMSET(&info, 0, sizeof(info));
+    AIRY_MEMSET(&info, 0, sizeof(info));
     info.agent_id = "install_test_agent";
     info.name = "Install Test Agent";
     info.version = "1.0.0";
@@ -33,7 +33,7 @@ static void test_installer_agent_install_uninstall(void)
     market_service_register_agent(svc, &info);
 
     install_request_t request;
-    AGENTRT_MEMSET(&request, 0, sizeof(request));
+    AIRY_MEMSET(&request, 0, sizeof(request));
     request.id = "install_test_agent";
     request.version = "1.0.0";
 
@@ -64,7 +64,7 @@ static void test_installer_skill_install_uninstall(void)
     assert(ret == 0 && svc != NULL);
 
     skill_info_t info;
-    AGENTRT_MEMSET(&info, 0, sizeof(info));
+    AIRY_MEMSET(&info, 0, sizeof(info));
     info.skill_id = "install_test_skill";
     info.name = "Install Test Skill";
     info.version = "1.0.0";
@@ -73,7 +73,7 @@ static void test_installer_skill_install_uninstall(void)
     market_service_register_skill(svc, &info);
 
     install_request_t request;
-    AGENTRT_MEMSET(&request, 0, sizeof(request));
+    AIRY_MEMSET(&request, 0, sizeof(request));
     request.id = "install_test_skill";
     request.force_update = true;
 
@@ -148,7 +148,7 @@ static void test_installer_reload_config(void)
     assert(ret == 0 && svc != NULL);
 
     market_config_t new_config;
-    AGENTRT_MEMSET(&new_config, 0, sizeof(new_config));
+    AIRY_MEMSET(&new_config, 0, sizeof(new_config));
     new_config.sync_interval_ms = 60000;
     new_config.cache_ttl_ms = 300000;
 

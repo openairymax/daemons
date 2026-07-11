@@ -64,20 +64,20 @@ struct monitor_service {
 
     alert_entry_t alerts[MAX_ALERTS];
     size_t alert_count;
-    agentrt_mutex_t alert_lock;
+    airy_mtx_t alert_lock;
 
     log_entry_t logs[MAX_LOG_ENTRIES];
     size_t log_count;
     size_t log_write_idx;
-    agentrt_mutex_t log_lock;
+    airy_mtx_t log_lock;
 
     trace_entry_t traces[MAX_TRACES];
     size_t trace_count;
-    agentrt_mutex_t trace_lock;
+    airy_mtx_t trace_lock;
 
     metric_info_t *metric_cache[MAX_METRICS];
     size_t metric_cache_count;
-    agentrt_mutex_t metric_lock;
+    airy_mtx_t metric_lock;
 
     int initialized;
     int running;
@@ -85,35 +85,35 @@ struct monitor_service {
 
 static uint64_t get_timestamp_ms(void)
 {
-    return agentrt_time_ms();
+    return airy_time_ms();
 }
 
 int monitor_service_create(const monitor_config_t *config, monitor_service_t **service)
 {
     if (!service) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    monitor_service_t *svc = (monitor_service_t *)AGENTRT_CALLOC(1, sizeof(monitor_service_t));
+    monitor_service_t *svc = (monitor_service_t *)AIRY_CALLOC(1, sizeof(monitor_service_t));
     if (!svc) {
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate monitor service");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate monitor service");
     }
 
     if (config) {
         __builtin_memcpy(&svc->config, config, sizeof(monitor_config_t));
         if (config->log_file_path) {
-            svc->config.log_file_path = AGENTRT_STRDUP(config->log_file_path);
+            svc->config.log_file_path = AIRY_STRDUP(config->log_file_path);
             if (!svc->config.log_file_path) {
-                AGENTRT_FREE(svc);
-                AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate log_file_path");
+                AIRY_FREE(svc);
+                AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate log_file_path");
             }
         }
         if (config->metrics_storage_path) {
-            svc->config.metrics_storage_path = AGENTRT_STRDUP(config->metrics_storage_path);
+            svc->config.metrics_storage_path = AIRY_STRDUP(config->metrics_storage_path);
             if (!svc->config.metrics_storage_path) {
-                AGENTRT_FREE(svc->config.log_file_path);
-                AGENTRT_FREE(svc);
-                AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate metrics_storage_path");
+                AIRY_FREE(svc->config.log_file_path);
+                AIRY_FREE(svc);
+                AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate metrics_storage_path");
             }
         }
     } else {
@@ -121,25 +121,25 @@ int monitor_service_create(const monitor_config_t *config, monitor_service_t **s
         svc->config.health_check_interval_ms = 10000;
         svc->config.log_flush_interval_ms = 30000;
         svc->config.alert_check_interval_ms = 5000;
-        svc->config.log_file_path = AGENTRT_STRDUP("monitor.log");
+        svc->config.log_file_path = AIRY_STRDUP("monitor.log");
         if (!svc->config.log_file_path) {
-            AGENTRT_FREE(svc);
-            AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate default log_file_path");
+            AIRY_FREE(svc);
+            AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate default log_file_path");
         }
-        svc->config.metrics_storage_path = AGENTRT_STRDUP("metrics");
+        svc->config.metrics_storage_path = AIRY_STRDUP("metrics");
         if (!svc->config.metrics_storage_path) {
-            AGENTRT_FREE(svc->config.log_file_path);
-            AGENTRT_FREE(svc);
-            AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate default metrics_storage_path");
+            AIRY_FREE(svc->config.log_file_path);
+            AIRY_FREE(svc);
+            AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate default metrics_storage_path");
         }
         svc->config.enable_tracing = true;
         svc->config.enable_alerting = true;
     }
 
-    agentrt_mutex_init(&svc->alert_lock);
-    agentrt_mutex_init(&svc->log_lock);
-    agentrt_mutex_init(&svc->trace_lock);
-    agentrt_mutex_init(&svc->metric_lock);
+    airy_mtx_init(&svc->alert_lock);
+    airy_mtx_init(&svc->log_lock);
+    airy_mtx_init(&svc->trace_lock);
+    airy_mtx_init(&svc->metric_lock);
 
     svc->alert_count = 0;
     svc->log_count = 0;
@@ -155,92 +155,92 @@ int monitor_service_create(const monitor_config_t *config, monitor_service_t **s
                  svc->config.metrics_collection_interval_ms,
                  svc->config.enable_tracing ? "on" : "off",
                  svc->config.enable_alerting ? "on" : "off");
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_destroy(monitor_service_t *service)
 {
     if (!service) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&service->alert_lock);
+    airy_mtx_lock(&service->alert_lock);
     for (size_t i = 0; i < service->alert_count; i++) {
-        AGENTRT_FREE(service->alerts[i].alert_id);
-        AGENTRT_FREE(service->alerts[i].message);
-        AGENTRT_FREE(service->alerts[i].service_name);
-        AGENTRT_FREE(service->alerts[i].resource_id);
+        AIRY_FREE(service->alerts[i].alert_id);
+        AIRY_FREE(service->alerts[i].message);
+        AIRY_FREE(service->alerts[i].service_name);
+        AIRY_FREE(service->alerts[i].resource_id);
     }
-    agentrt_mutex_unlock(&service->alert_lock);
-    agentrt_mutex_destroy(&service->alert_lock);
+    airy_mtx_unlock(&service->alert_lock);
+    airy_mtx_destroy(&service->alert_lock);
 
-    agentrt_mutex_lock(&service->log_lock);
+    airy_mtx_lock(&service->log_lock);
     for (size_t i = 0; i < service->log_count; i++) {
         size_t idx = (service->log_write_idx - service->log_count + i) % MAX_LOG_ENTRIES;
-        AGENTRT_FREE(service->logs[idx].message);
-        AGENTRT_FREE(service->logs[idx].service_name);
-        AGENTRT_FREE(service->logs[idx].file);
-        AGENTRT_FREE(service->logs[idx].function);
+        AIRY_FREE(service->logs[idx].message);
+        AIRY_FREE(service->logs[idx].service_name);
+        AIRY_FREE(service->logs[idx].file);
+        AIRY_FREE(service->logs[idx].function);
     }
-    agentrt_mutex_unlock(&service->log_lock);
-    agentrt_mutex_destroy(&service->log_lock);
+    airy_mtx_unlock(&service->log_lock);
+    airy_mtx_destroy(&service->log_lock);
 
-    agentrt_mutex_lock(&service->trace_lock);
+    airy_mtx_lock(&service->trace_lock);
     for (size_t i = 0; i < service->trace_count; i++) {
-        AGENTRT_FREE(service->traces[i].trace_id);
-        AGENTRT_FREE(service->traces[i].operation_name);
-        AGENTRT_FREE(service->traces[i].service_name);
+        AIRY_FREE(service->traces[i].trace_id);
+        AIRY_FREE(service->traces[i].operation_name);
+        AIRY_FREE(service->traces[i].service_name);
     }
-    agentrt_mutex_unlock(&service->trace_lock);
-    agentrt_mutex_destroy(&service->trace_lock);
+    airy_mtx_unlock(&service->trace_lock);
+    airy_mtx_destroy(&service->trace_lock);
 
-    agentrt_mutex_lock(&service->metric_lock);
+    airy_mtx_lock(&service->metric_lock);
     for (size_t i = 0; i < service->metric_cache_count; i++) {
         if (service->metric_cache[i]) {
-            AGENTRT_FREE(service->metric_cache[i]->name);
-            AGENTRT_FREE(service->metric_cache[i]->description);
-            AGENTRT_FREE(service->metric_cache[i]);
+            AIRY_FREE(service->metric_cache[i]->name);
+            AIRY_FREE(service->metric_cache[i]->description);
+            AIRY_FREE(service->metric_cache[i]);
         }
     }
-    agentrt_mutex_unlock(&service->metric_lock);
-    agentrt_mutex_destroy(&service->metric_lock);
+    airy_mtx_unlock(&service->metric_lock);
+    airy_mtx_destroy(&service->metric_lock);
 
-    AGENTRT_FREE(service->config.log_file_path);
-    AGENTRT_FREE(service->config.metrics_storage_path);
+    AIRY_FREE(service->config.log_file_path);
+    AIRY_FREE(service->config.metrics_storage_path);
 
     service->initialized = 0;
-    AGENTRT_FREE(service);
+    AIRY_FREE(service);
 
     SVC_LOG_INFO("Monitor service destroyed");
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_record_metric(monitor_service_t *service, const metric_info_t *metric)
 {
     if (!service || !metric) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&service->metric_lock);
+    airy_mtx_lock(&service->metric_lock);
 
     if (service->metric_cache_count < MAX_METRICS) {
-        metric_info_t *entry = (metric_info_t *)AGENTRT_CALLOC(1, sizeof(metric_info_t));
+        metric_info_t *entry = (metric_info_t *)AIRY_CALLOC(1, sizeof(metric_info_t));
         if (!entry) {
-            agentrt_mutex_unlock(&service->metric_lock);
-            return AGENTRT_ENOMEM;
+            airy_mtx_unlock(&service->metric_lock);
+            return AIRY_ENOMEM;
         }
-        entry->name = metric->name ? AGENTRT_STRDUP(metric->name) : NULL;
+        entry->name = metric->name ? AIRY_STRDUP(metric->name) : NULL;
         if (metric->name && !entry->name) {
-            AGENTRT_FREE(entry);
-            agentrt_mutex_unlock(&service->metric_lock);
-            return AGENTRT_ENOMEM;
+            AIRY_FREE(entry);
+            airy_mtx_unlock(&service->metric_lock);
+            return AIRY_ENOMEM;
         }
-        entry->description = metric->description ? AGENTRT_STRDUP(metric->description) : NULL;
+        entry->description = metric->description ? AIRY_STRDUP(metric->description) : NULL;
         if (metric->description && !entry->description) {
-            AGENTRT_FREE(entry->name);
-            AGENTRT_FREE(entry);
-            agentrt_mutex_unlock(&service->metric_lock);
-            return AGENTRT_ENOMEM;
+            AIRY_FREE(entry->name);
+            AIRY_FREE(entry);
+            airy_mtx_unlock(&service->metric_lock);
+            return AIRY_ENOMEM;
         }
         entry->type = metric->type;
         entry->value = metric->value;
@@ -248,31 +248,31 @@ int monitor_service_record_metric(monitor_service_t *service, const metric_info_
         service->metric_cache[service->metric_cache_count++] = entry;
     }
 
-    agentrt_mutex_unlock(&service->metric_lock);
-    return AGENTRT_SUCCESS;
+    airy_mtx_unlock(&service->metric_lock);
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_log(monitor_service_t *service, const log_info_t *log)
 {
     if (!service || !log) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&service->log_lock);
+    airy_mtx_lock(&service->log_lock);
 
     size_t idx = service->log_write_idx % MAX_LOG_ENTRIES;
 
-    AGENTRT_FREE(service->logs[idx].message);
-    AGENTRT_FREE(service->logs[idx].service_name);
-    AGENTRT_FREE(service->logs[idx].file);
-    AGENTRT_FREE(service->logs[idx].function);
+    AIRY_FREE(service->logs[idx].message);
+    AIRY_FREE(service->logs[idx].service_name);
+    AIRY_FREE(service->logs[idx].file);
+    AIRY_FREE(service->logs[idx].function);
 
     service->logs[idx].level = log->level;
-    service->logs[idx].message = log->message ? AGENTRT_STRDUP(log->message) : NULL;
-    service->logs[idx].service_name = log->service_name ? AGENTRT_STRDUP(log->service_name) : NULL;
-    service->logs[idx].file = log->file ? AGENTRT_STRDUP(log->file) : NULL;
+    service->logs[idx].message = log->message ? AIRY_STRDUP(log->message) : NULL;
+    service->logs[idx].service_name = log->service_name ? AIRY_STRDUP(log->service_name) : NULL;
+    service->logs[idx].file = log->file ? AIRY_STRDUP(log->file) : NULL;
     service->logs[idx].line = log->line;
-    service->logs[idx].function = log->function ? AGENTRT_STRDUP(log->function) : NULL;
+    service->logs[idx].function = log->function ? AIRY_STRDUP(log->function) : NULL;
     service->logs[idx].timestamp = log->timestamp ? log->timestamp : get_timestamp_ms();
 
     service->log_write_idx++;
@@ -280,119 +280,119 @@ int monitor_service_log(monitor_service_t *service, const log_info_t *log)
         service->log_count++;
     }
 
-    agentrt_mutex_unlock(&service->log_lock);
-    return AGENTRT_SUCCESS;
+    airy_mtx_unlock(&service->log_lock);
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_trigger_alert(monitor_service_t *service, const alert_info_t *alert)
 {
     if (!service || !alert) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&service->alert_lock);
+    airy_mtx_lock(&service->alert_lock);
 
     if (service->alert_count >= MAX_ALERTS) {
-        AGENTRT_FREE(service->alerts[0].alert_id);
-        AGENTRT_FREE(service->alerts[0].message);
-        AGENTRT_FREE(service->alerts[0].service_name);
-        AGENTRT_FREE(service->alerts[0].resource_id);
+        AIRY_FREE(service->alerts[0].alert_id);
+        AIRY_FREE(service->alerts[0].message);
+        AIRY_FREE(service->alerts[0].service_name);
+        AIRY_FREE(service->alerts[0].resource_id);
         __builtin_memmove(&service->alerts[0], &service->alerts[1],
                 (service->alert_count - 1) * sizeof(alert_entry_t));
         service->alert_count--;
     }
 
     alert_entry_t *entry = &service->alerts[service->alert_count];
-    entry->alert_id = alert->alert_id ? AGENTRT_STRDUP(alert->alert_id) : NULL;
-    entry->message = alert->message ? AGENTRT_STRDUP(alert->message) : NULL;
+    entry->alert_id = alert->alert_id ? AIRY_STRDUP(alert->alert_id) : NULL;
+    entry->message = alert->message ? AIRY_STRDUP(alert->message) : NULL;
     entry->level = alert->level;
-    entry->service_name = alert->service_name ? AGENTRT_STRDUP(alert->service_name) : NULL;
-    entry->resource_id = alert->resource_id ? AGENTRT_STRDUP(alert->resource_id) : NULL;
+    entry->service_name = alert->service_name ? AIRY_STRDUP(alert->service_name) : NULL;
+    entry->resource_id = alert->resource_id ? AIRY_STRDUP(alert->resource_id) : NULL;
     entry->timestamp = alert->timestamp ? alert->timestamp : get_timestamp_ms();
     entry->is_resolved = false;
     service->alert_count++;
 
-    agentrt_mutex_unlock(&service->alert_lock);
+    airy_mtx_unlock(&service->alert_lock);
 
     const char *level_str[] = {"INFO", "WARNING", "ERROR", "CRITICAL"};
     SVC_LOG_WARN("Alert triggered: [%s] %s (service=%s)",
                  level_str[alert->level < ALERT_LEVEL_COUNT ? alert->level : 0],
                  alert->message ? alert->message : "N/A",
                  alert->service_name ? alert->service_name : "N/A");
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_resolve_alert(monitor_service_t *service, const char *alert_id)
 {
     if (!service || !alert_id) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&service->alert_lock);
+    airy_mtx_lock(&service->alert_lock);
 
     for (size_t i = 0; i < service->alert_count; i++) {
         if (service->alerts[i].alert_id && strcmp(service->alerts[i].alert_id, alert_id) == 0) {
             service->alerts[i].is_resolved = true;
-            agentrt_mutex_unlock(&service->alert_lock);
+            airy_mtx_unlock(&service->alert_lock);
             SVC_LOG_INFO("Alert resolved: %s", alert_id);
-            return AGENTRT_SUCCESS;
+            return AIRY_SUCCESS;
         }
     }
 
-    agentrt_mutex_unlock(&service->alert_lock);
-    AGENTRT_ERROR(AGENTRT_ERR_NOT_FOUND, "alert not found");
+    airy_mtx_unlock(&service->alert_lock);
+    AIRY_ERROR(AIRY_ERR_NOT_FOUND, "alert not found");
 }
 
 int monitor_service_health_check(monitor_service_t *service, const char *service_name,
                                  health_check_result_t **result)
 {
     if (!service || !result) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     health_check_result_t *hr =
-        (health_check_result_t *)AGENTRT_CALLOC(1, sizeof(health_check_result_t));
+        (health_check_result_t *)AIRY_CALLOC(1, sizeof(health_check_result_t));
     if (!hr) {
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate health check result");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate health check result");
     }
 
     hr->service_name =
-        service_name ? AGENTRT_STRDUP(service_name) : AGENTRT_STRDUP("monitor_service");
+        service_name ? AIRY_STRDUP(service_name) : AIRY_STRDUP("monitor_service");
     hr->is_healthy = service->initialized ? true : false;
     hr->timestamp = get_timestamp_ms();
     hr->error_code = 0;
 
-    agentrt_mutex_lock(&service->alert_lock);
+    airy_mtx_lock(&service->alert_lock);
     size_t unresolved_critical = 0;
     for (size_t i = 0; i < service->alert_count; i++) {
         if (!service->alerts[i].is_resolved && service->alerts[i].level >= ALERT_LEVEL_ERROR) {
             unresolved_critical++;
         }
     }
-    agentrt_mutex_unlock(&service->alert_lock);
+    airy_mtx_unlock(&service->alert_lock);
 
     if (unresolved_critical > 5) {
         hr->is_healthy = false;
-        hr->status_message = AGENTRT_STRDUP("Too many unresolved critical alerts");
+        hr->status_message = AIRY_STRDUP("Too many unresolved critical alerts");
         hr->error_code = 1;
     } else if (unresolved_critical > 0) {
-        hr->status_message = AGENTRT_STRDUP("Some unresolved alerts present");
+        hr->status_message = AIRY_STRDUP("Some unresolved alerts present");
     } else {
-        hr->status_message = AGENTRT_STRDUP("Healthy");
+        hr->status_message = AIRY_STRDUP("Healthy");
     }
 
     *result = hr;
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_get_metrics(monitor_service_t *service, const char *metric_name,
                                 metric_info_t ***metrics, size_t *count)
 {
     if (!service || !metrics || !count) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&service->metric_lock);
+    airy_mtx_lock(&service->metric_lock);
 
     size_t result_count = 0;
     for (size_t i = 0; i < service->metric_cache_count; i++) {
@@ -405,15 +405,15 @@ int monitor_service_get_metrics(monitor_service_t *service, const char *metric_n
     if (result_count == 0) {
         *metrics = NULL;
         *count = 0;
-        agentrt_mutex_unlock(&service->metric_lock);
-        return AGENTRT_SUCCESS;
+        airy_mtx_unlock(&service->metric_lock);
+        return AIRY_SUCCESS;
     }
 
     metric_info_t **result =
-        (metric_info_t **)AGENTRT_CALLOC(result_count, sizeof(metric_info_t *));
+        (metric_info_t **)AIRY_CALLOC(result_count, sizeof(metric_info_t *));
     if (!result) {
-        agentrt_mutex_unlock(&service->metric_lock);
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate metrics result array");
+        airy_mtx_unlock(&service->metric_lock);
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate metrics result array");
     }
 
     size_t idx = 0;
@@ -427,34 +427,34 @@ int monitor_service_get_metrics(monitor_service_t *service, const char *metric_n
     *metrics = result;
     *count = result_count;
 
-    agentrt_mutex_unlock(&service->metric_lock);
-    return AGENTRT_SUCCESS;
+    airy_mtx_unlock(&service->metric_lock);
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_get_alerts(monitor_service_t *service, alert_info_t ***alerts, size_t *count)
 {
     if (!service || !alerts || !count) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&service->alert_lock);
+    airy_mtx_lock(&service->alert_lock);
 
     if (service->alert_count == 0) {
         *alerts = NULL;
         *count = 0;
-        agentrt_mutex_unlock(&service->alert_lock);
-        return AGENTRT_SUCCESS;
+        airy_mtx_unlock(&service->alert_lock);
+        return AIRY_SUCCESS;
     }
 
     alert_info_t **result =
-        (alert_info_t **)AGENTRT_CALLOC(service->alert_count, sizeof(alert_info_t *));
+        (alert_info_t **)AIRY_CALLOC(service->alert_count, sizeof(alert_info_t *));
     if (!result) {
-        agentrt_mutex_unlock(&service->alert_lock);
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate alerts result array");
+        airy_mtx_unlock(&service->alert_lock);
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate alerts result array");
     }
 
     for (size_t i = 0; i < service->alert_count; i++) {
-        alert_info_t *info = (alert_info_t *)AGENTRT_CALLOC(1, sizeof(alert_info_t));
+        alert_info_t *info = (alert_info_t *)AIRY_CALLOC(1, sizeof(alert_info_t));
         if (info) {
             info->alert_id = service->alerts[i].alert_id;
             info->message = service->alerts[i].message;
@@ -470,40 +470,40 @@ int monitor_service_get_alerts(monitor_service_t *service, alert_info_t ***alert
     *alerts = result;
     *count = service->alert_count;
 
-    agentrt_mutex_unlock(&service->alert_lock);
-    return AGENTRT_SUCCESS;
+    airy_mtx_unlock(&service->alert_lock);
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_reload_config(monitor_service_t *service, const monitor_config_t *config)
 {
     if (!service || !config) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    AGENTRT_FREE(service->config.log_file_path);
+    AIRY_FREE(service->config.log_file_path);
     service->config.log_file_path = NULL;
-    AGENTRT_FREE(service->config.metrics_storage_path);
+    AIRY_FREE(service->config.metrics_storage_path);
     service->config.metrics_storage_path = NULL;
 
     __builtin_memcpy(&service->config, config, sizeof(monitor_config_t));
     service->config.log_file_path =
-        config->log_file_path ? AGENTRT_STRDUP(config->log_file_path) : NULL;
+        config->log_file_path ? AIRY_STRDUP(config->log_file_path) : NULL;
     service->config.metrics_storage_path =
-        config->metrics_storage_path ? AGENTRT_STRDUP(config->metrics_storage_path) : NULL;
+        config->metrics_storage_path ? AIRY_STRDUP(config->metrics_storage_path) : NULL;
 
     SVC_LOG_INFO("Monitor service config reloaded");
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_generate_report(monitor_service_t *service, char **report)
 {
     if (!service || !report) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    char *buf = (char *)AGENTRT_MALLOC(MAX_REPORT_SIZE);
+    char *buf = (char *)AIRY_MALLOC(MAX_REPORT_SIZE);
     if (!buf) {
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to allocate report buffer");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate report buffer");
     }
 
     size_t pos = 0;
@@ -512,7 +512,7 @@ int monitor_service_generate_report(monitor_service_t *service, char **report)
                     "Generated at: %llu\n\n",
                     (unsigned long long)get_timestamp_ms());
 
-    agentrt_mutex_lock(&service->metric_lock);
+    airy_mtx_lock(&service->metric_lock);
     pos += snprintf(buf + pos, MAX_REPORT_SIZE - pos, "--- Metrics (%zu recorded) ---\n",
                     service->metric_cache_count);
     for (size_t i = 0; i < service->metric_cache_count && pos < MAX_REPORT_SIZE - 256; i++) {
@@ -522,9 +522,9 @@ int monitor_service_generate_report(monitor_service_t *service, char **report)
                             m->name, m->value, m->type, (unsigned long long)m->timestamp);
         }
     }
-    agentrt_mutex_unlock(&service->metric_lock);
+    airy_mtx_unlock(&service->metric_lock);
 
-    agentrt_mutex_lock(&service->alert_lock);
+    airy_mtx_lock(&service->alert_lock);
     size_t unresolved = 0;
     for (size_t i = 0; i < service->alert_count; i++) {
         if (!service->alerts[i].is_resolved)
@@ -541,9 +541,9 @@ int monitor_service_generate_report(monitor_service_t *service, char **report)
                         a->alert_id ? a->alert_id : "N/A", a->message ? a->message : "N/A",
                         a->is_resolved ? " (resolved)" : "");
     }
-    agentrt_mutex_unlock(&service->alert_lock);
+    airy_mtx_unlock(&service->alert_lock);
 
-    agentrt_mutex_lock(&service->trace_lock);
+    airy_mtx_lock(&service->trace_lock);
     pos += snprintf(buf + pos, MAX_REPORT_SIZE - pos, "\n--- Traces (%zu recorded) ---\n",
                     service->trace_count);
     for (size_t i = 0; i < service->trace_count && pos < MAX_REPORT_SIZE - 256; i++) {
@@ -553,13 +553,13 @@ int monitor_service_generate_report(monitor_service_t *service, char **report)
                         t->operation_name ? t->operation_name : "N/A", t->status,
                         (unsigned long long)(t->end_time - t->start_time));
     }
-    agentrt_mutex_unlock(&service->trace_lock);
+    airy_mtx_unlock(&service->trace_lock);
 
     pos += snprintf(buf + pos, MAX_REPORT_SIZE - pos, "\n--- Logs (%zu entries) ---\n",
                     service->log_count);
 
     *report = buf;
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_start_agent_trace(monitor_service_t *service,
@@ -570,19 +570,19 @@ int monitor_service_start_agent_trace(monitor_service_t *service,
                                       agent_execution_trace_t **trace)
 {
     if (!service || !trace) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (!service->config.enable_tracing) {
-        AGENTRT_ERROR(AGENTRT_ERR_STATE_ERROR, "tracing is disabled");
+        AIRY_ERROR(AIRY_ERR_STATE_ERROR, "tracing is disabled");
     }
 
-    agentrt_mutex_lock(&service->trace_lock);
+    airy_mtx_lock(&service->trace_lock);
 
     if (service->trace_count >= MAX_TRACES) {
-        AGENTRT_FREE(service->traces[0].trace_id);
-        AGENTRT_FREE(service->traces[0].operation_name);
-        AGENTRT_FREE(service->traces[0].service_name);
+        AIRY_FREE(service->traces[0].trace_id);
+        AIRY_FREE(service->traces[0].operation_name);
+        AIRY_FREE(service->traces[0].service_name);
         __builtin_memmove(&service->traces[0], &service->traces[1],
                 (service->trace_count - 1) * sizeof(trace_entry_t));
         service->trace_count--;
@@ -592,23 +592,23 @@ int monitor_service_start_agent_trace(monitor_service_t *service,
     char tid[64];
     snprintf(tid, sizeof(tid), "trace-%zu-%lu", service->trace_count,
              (unsigned long)get_timestamp_ms());
-    entry->trace_id = AGENTRT_STRDUP(tid);
+    entry->trace_id = AIRY_STRDUP(tid);
     if (!entry->trace_id) {
-        agentrt_mutex_unlock(&service->trace_lock);
-        return AGENTRT_ENOMEM;
+        airy_mtx_unlock(&service->trace_lock);
+        return AIRY_ENOMEM;
     }
-    entry->operation_name = task_id ? AGENTRT_STRDUP(task_id) : AGENTRT_STRDUP("unknown");
+    entry->operation_name = task_id ? AIRY_STRDUP(task_id) : AIRY_STRDUP("unknown");
     if (!entry->operation_name) {
-        AGENTRT_FREE(entry->trace_id);
-        agentrt_mutex_unlock(&service->trace_lock);
-        return AGENTRT_ENOMEM;
+        AIRY_FREE(entry->trace_id);
+        airy_mtx_unlock(&service->trace_lock);
+        return AIRY_ENOMEM;
     }
-    entry->service_name = agent_id ? AGENTRT_STRDUP(agent_id) : NULL;
+    entry->service_name = agent_id ? AIRY_STRDUP(agent_id) : NULL;
     if (agent_id && !entry->service_name) {
-        AGENTRT_FREE(entry->operation_name);
-        AGENTRT_FREE(entry->trace_id);
-        agentrt_mutex_unlock(&service->trace_lock);
-        return AGENTRT_ENOMEM;
+        AIRY_FREE(entry->operation_name);
+        AIRY_FREE(entry->trace_id);
+        airy_mtx_unlock(&service->trace_lock);
+        return AIRY_ENOMEM;
     }
     entry->start_time = get_timestamp_ms();
     entry->end_time = 0;
@@ -617,17 +617,17 @@ int monitor_service_start_agent_trace(monitor_service_t *service,
     service->trace_count++;
 
     agent_execution_trace_t *t =
-        (agent_execution_trace_t *)AGENTRT_CALLOC(1, sizeof(agent_execution_trace_t));
+        (agent_execution_trace_t *)AIRY_CALLOC(1, sizeof(agent_execution_trace_t));
     if (t) {
-        t->agent_id = agent_id ? AGENTRT_STRDUP(agent_id) : NULL;
+        t->agent_id = agent_id ? AIRY_STRDUP(agent_id) : NULL;
         if (agent_id && !t->agent_id) {
-            AGENTRT_FREE(t);
+            AIRY_FREE(t);
             t = NULL;
         } else {
-            t->task_id = task_id ? AGENTRT_STRDUP(task_id) : NULL;
+            t->task_id = task_id ? AIRY_STRDUP(task_id) : NULL;
             if (task_id && !t->task_id) {
-                AGENTRT_FREE(t->agent_id);
-                AGENTRT_FREE(t);
+                AIRY_FREE(t->agent_id);
+                AIRY_FREE(t);
                 t = NULL;
             }
         }
@@ -637,19 +637,19 @@ int monitor_service_start_agent_trace(monitor_service_t *service,
     }
 
     *trace = t;
-    agentrt_mutex_unlock(&service->trace_lock);
-    return AGENTRT_SUCCESS;
+    airy_mtx_unlock(&service->trace_lock);
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_update_agent_state(monitor_service_t *service, agent_execution_trace_t *trace,
                                        agent_execution_state_t new_state, const char *location)
 {
     if (!service || !trace) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (!service->config.enable_tracing) {
-        AGENTRT_ERROR(AGENTRT_ERR_STATE_ERROR, "tracing is disabled");
+        AIRY_ERROR(AIRY_ERR_STATE_ERROR, "tracing is disabled");
     }
 
     trace->current_state = new_state;
@@ -671,8 +671,8 @@ int monitor_service_update_agent_state(monitor_service_t *service, agent_executi
             agent_trace_point_t *tp = &trace->trace_points[idx];
             tp->timestamp = now;
             tp->state = new_state;
-            AGENTRT_FREE(tp->location);
-            tp->location = AGENTRT_STRDUP(location);
+            AIRY_FREE(tp->location);
+            tp->location = AIRY_STRDUP(location);
             tp->loop_count = 0;
             tp->memory_usage = 0;
             tp->cpu_usage = 0.0;
@@ -688,21 +688,21 @@ int monitor_service_update_agent_state(monitor_service_t *service, agent_executi
         break;
     }
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_check_loop(monitor_service_t *service, agent_execution_trace_t *trace,
                                bool *is_loop, double *confidence)
 {
     if (!service || !trace || !is_loop || !confidence) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     *is_loop = false;
     *confidence = 0.0;
 
     if (trace->trace_point_count < 3) {
-        return AGENTRT_SUCCESS;
+        return AIRY_SUCCESS;
     }
 
     size_t loop_count = 0;
@@ -728,17 +728,17 @@ int monitor_service_check_loop(monitor_service_t *service, agent_execution_trace
         }
     }
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_end_agent_trace(monitor_service_t *service, agent_execution_trace_t *trace,
                                     agent_execution_state_t final_state __attribute__((unused)))
 {
     if (!service || !trace) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&service->trace_lock);
+    airy_mtx_lock(&service->trace_lock);
     for (size_t i = 0; i < service->trace_count; i++) {
         if (service->traces[i].trace_id && trace->trace_id &&
             strcmp(service->traces[i].trace_id, trace->trace_id) == 0) {
@@ -747,40 +747,40 @@ int monitor_service_end_agent_trace(monitor_service_t *service, agent_execution_
             break;
         }
     }
-    agentrt_mutex_unlock(&service->trace_lock);
+    airy_mtx_unlock(&service->trace_lock);
 
     /* 释放 trace 内部字符串字段 */
-    AGENTRT_FREE(trace->agent_id);
-    AGENTRT_FREE(trace->task_id);
-    AGENTRT_FREE(trace->trace_id);
-    AGENTRT_FREE(trace->service_name);
+    AIRY_FREE(trace->agent_id);
+    AIRY_FREE(trace->task_id);
+    AIRY_FREE(trace->trace_id);
+    AIRY_FREE(trace->service_name);
 
     /* 释放轨迹点数组中的字符串 */
     if (trace->trace_points) {
         for (size_t i = 0; i < trace->trace_point_count; i++) {
-            AGENTRT_FREE(trace->trace_points[i].location);
+            AIRY_FREE(trace->trace_points[i].location);
         }
-        AGENTRT_FREE(trace->trace_points);
+        AIRY_FREE(trace->trace_points);
     }
 
     /* 释放位置历史数组 */
     if (trace->locations) {
         for (size_t i = 0; i < trace->location_count; i++) {
-            AGENTRT_FREE(trace->locations[i]);
+            AIRY_FREE(trace->locations[i]);
         }
-        AGENTRT_FREE(trace->locations);
+        AIRY_FREE(trace->locations);
     }
-    AGENTRT_FREE(trace->location_times);
+    AIRY_FREE(trace->location_times);
 
-    AGENTRT_FREE(trace);
-    return AGENTRT_SUCCESS;
+    AIRY_FREE(trace);
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_get_agent_summary(monitor_service_t *service, const char *agent_id,
                                       uint64_t start_time, uint64_t end_time, char **summary)
 {
     if (!service || !summary) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     char buf[4096];
@@ -791,18 +791,18 @@ int monitor_service_get_agent_summary(monitor_service_t *service, const char *ag
              (unsigned long long)end_time, service->trace_count, service->alert_count,
              service->metric_cache_count);
 
-    *summary = AGENTRT_STRDUP(buf);
+    *summary = AIRY_STRDUP(buf);
     if (!*summary) {
-        return AGENTRT_ENOMEM;
+        return AIRY_ENOMEM;
     }
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_export_agent_trace(monitor_service_t *service, agent_execution_trace_t *trace,
                                        const char *format, char **data, size_t *size)
 {
     if (!service || !data || !size) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     const char *fmt = format ? format : "json";
@@ -816,18 +816,18 @@ int monitor_service_export_agent_trace(monitor_service_t *service, agent_executi
                  trace && trace->agent_id ? trace->agent_id : "unknown", fmt);
     }
 
-    *data = AGENTRT_STRDUP(buf);
+    *data = AIRY_STRDUP(buf);
     *size = strlen(buf);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_get_active_agents(monitor_service_t *service, char ***agent_ids, size_t *count)
 {
     if (!service || !agent_ids || !count) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&service->trace_lock);
+    airy_mtx_lock(&service->trace_lock);
 
     size_t active = 0;
     for (size_t i = 0; i < service->trace_count; i++) {
@@ -839,33 +839,33 @@ int monitor_service_get_active_agents(monitor_service_t *service, char ***agent_
     if (active == 0) {
         *agent_ids = NULL;
         *count = 0;
-        agentrt_mutex_unlock(&service->trace_lock);
-        return AGENTRT_SUCCESS;
+        airy_mtx_unlock(&service->trace_lock);
+        return AIRY_SUCCESS;
     }
 
-    char **ids = (char **)AGENTRT_CALLOC(active, sizeof(char *));
+    char **ids = (char **)AIRY_CALLOC(active, sizeof(char *));
     if (!ids) {
-        agentrt_mutex_unlock(&service->trace_lock);
-        return AGENTRT_ENOMEM;
+        airy_mtx_unlock(&service->trace_lock);
+        return AIRY_ENOMEM;
     }
     size_t idx = 0;
     for (size_t i = 0; i < service->trace_count && idx < active; i++) {
         if (service->traces[i].end_time == 0 && service->traces[i].service_name) {
-            ids[idx++] = AGENTRT_STRDUP(service->traces[i].service_name);
+            ids[idx++] = AIRY_STRDUP(service->traces[i].service_name);
         }
     }
 
     *agent_ids = ids;
     *count = active;
 
-    agentrt_mutex_unlock(&service->trace_lock);
-    return AGENTRT_SUCCESS;
+    airy_mtx_unlock(&service->trace_lock);
+    return AIRY_SUCCESS;
 }
 
 int monitor_service_reset_loop_detection(monitor_service_t *service, agent_execution_trace_t *trace)
 {
     if (!service || !trace) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     trace->is_suspected_loop = false;
@@ -873,11 +873,11 @@ int monitor_service_reset_loop_detection(monitor_service_t *service, agent_execu
 
     for (size_t i = 0; i < trace->trace_point_count; i++) {
         agent_trace_point_t *tp = &trace->trace_points[i];
-        AGENTRT_FREE(tp->location);
+        AIRY_FREE(tp->location);
         tp->location = NULL;
         tp->loop_count = 0;
     }
     trace->trace_point_count = 0;
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }

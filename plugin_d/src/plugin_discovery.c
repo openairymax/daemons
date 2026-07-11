@@ -76,10 +76,10 @@ static char *parse_yaml_value(const char *line, const char *key)
 
     if (val_len == 0) return NULL;
 
-    char *result = (char *)AGENTRT_MALLOC(val_len + 1);
+    char *result = (char *)AIRY_MALLOC(val_len + 1);
     if (!result) return NULL;
 
-    AGENTRT_MEMCPY(result, rest, val_len);
+    AIRY_MEMCPY(result, rest, val_len);
     result[val_len] = '\0';
     return result;
 }
@@ -144,7 +144,7 @@ int plugin_discovery_init(const plugin_discovery_config_t *config)
 
     g_discovery.initialized = true;
 
-    AGENTRT_LOG_INFO("PluginDiscovery: initialized (dir=%s, auto_load=%d, "
+    AIRY_LOG_INFO("PluginDiscovery: initialized (dir=%s, auto_load=%d, "
                      "scan_depth=%u)",
                      g_discovery.plugins_dir,
                      g_discovery.config.auto_load,
@@ -160,7 +160,7 @@ void plugin_discovery_destroy(void)
         g_discovery.count = 0;
     }
 
-    AGENTRT_LOG_INFO("PluginDiscovery: destroyed");
+    AIRY_LOG_INFO("PluginDiscovery: destroyed");
     g_discovery.initialized = false;
 }
 
@@ -170,17 +170,17 @@ int plugin_discovery_parse_manifest(const char *yaml_path,
                                     const char *plugin_dir,
                                     plugin_discovery_result_t *out_result)
 {
-    if (!yaml_path || !out_result) return AGENTRT_ERR_INVALID_PARAM;
+    if (!yaml_path || !out_result) return AIRY_ERR_INVALID_PARAM;
 
     __builtin_memset(out_result, 0, sizeof(*out_result));
 
     FILE *fp = fopen(yaml_path, "r");
     if (!fp) {
-        AGENTRT_LOG_WARN("PluginDiscovery: cannot open manifest '%s'", yaml_path);
+        AIRY_LOG_WARN("PluginDiscovery: cannot open manifest '%s'", yaml_path);
         out_result->valid = false;
         safe_strcpy(out_result->error_reason, "Cannot open manifest file",
                     sizeof(out_result->error_reason));
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
     char line[512];
@@ -201,8 +201,8 @@ int plugin_discovery_parse_manifest(const char *yaml_path,
             out_result->type = parse_plugin_type(value);
         } else if ((value = parse_yaml_value(line, "api_version"))) {
             out_result->api_version = (uint32_t)atoi(value);
-        } else if ((value = parse_yaml_value(line, "min_agentrt_version"))) {
-            out_result->min_agentrt_version = (uint32_t)atoi(value);
+        } else if ((value = parse_yaml_value(line, "min_airy_version"))) {
+            out_result->min_airy_version = (uint32_t)atoi(value);
         } else if ((value = parse_yaml_value(line, "library"))) {
             /* 构建完整路径 */
             if (plugin_dir) {
@@ -223,7 +223,7 @@ int plugin_discovery_parse_manifest(const char *yaml_path,
             }
         }
 
-        if (value) AGENTRT_FREE(value);
+        if (value) AIRY_FREE(value);
     }
 
     fclose(fp);
@@ -234,9 +234,9 @@ int plugin_discovery_parse_manifest(const char *yaml_path,
         safe_strcpy(out_result->error_reason,
                     "Missing required field: name",
                     sizeof(out_result->error_reason));
-        AGENTRT_LOG_WARN("PluginDiscovery: invalid manifest '%s': %s",
+        AIRY_LOG_WARN("PluginDiscovery: invalid manifest '%s': %s",
                          yaml_path, out_result->error_reason);
-        return AGENTRT_ERR_PARSE_ERROR;
+        return AIRY_ERR_PARSE_ERROR;
     }
 
     if (out_result->library_path[0] == '\0') {
@@ -244,12 +244,12 @@ int plugin_discovery_parse_manifest(const char *yaml_path,
         safe_strcpy(out_result->error_reason,
                     "Missing required field: library",
                     sizeof(out_result->error_reason));
-        return AGENTRT_ERR_PARSE_ERROR;
+        return AIRY_ERR_PARSE_ERROR;
     }
 
     out_result->valid = true;
 
-    AGENTRT_LOG_DEBUG("PluginDiscovery: parsed manifest '%s' → name=%s "
+    AIRY_LOG_DEBUG("PluginDiscovery: parsed manifest '%s' → name=%s "
                       "type=%d version=%s perms=%u",
                       yaml_path, out_result->name,
                       out_result->type, out_result->version,
@@ -262,25 +262,25 @@ int plugin_discovery_parse_manifest(const char *yaml_path,
 int plugin_discovery_scan(plugin_discovery_result_t **out_results,
                           size_t *out_count)
 {
-    if (!out_results || !out_count) return AGENTRT_ERR_INVALID_PARAM;
+    if (!out_results || !out_count) return AIRY_ERR_INVALID_PARAM;
 
     *out_results = NULL;
     *out_count = 0;
 
     if (!g_discovery.initialized) {
-        AGENTRT_LOG_WARN("PluginDiscovery: not initialized");
-        return AGENTRT_ERR_SYS_NOT_INIT;
+        AIRY_LOG_WARN("PluginDiscovery: not initialized");
+        return AIRY_ERR_SYS_NOT_INIT;
     }
 
     const char *plugins_dir = g_discovery.plugins_dir;
 
     if (!dir_exists(plugins_dir)) {
-        AGENTRT_LOG_INFO("PluginDiscovery: plugins dir not found '%s', "
+        AIRY_LOG_INFO("PluginDiscovery: plugins dir not found '%s', "
                          "skipping scan", plugins_dir);
         return 0;
     }
 
-    AGENTRT_LOG_INFO("PluginDiscovery: scanning '%s'...", plugins_dir);
+    AIRY_LOG_INFO("PluginDiscovery: scanning '%s'...", plugins_dir);
 
     /* 跨平台目录遍历初始化：
      * POSIX: opendir/readdir/closedir
@@ -288,8 +288,8 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results,
 #ifndef _WIN32
     DIR *dir = opendir(plugins_dir);
     if (!dir) {
-        AGENTRT_LOG_ERROR("PluginDiscovery: cannot open dir '%s'", plugins_dir);
-        return AGENTRT_ERR_IO;
+        AIRY_LOG_ERROR("PluginDiscovery: cannot open dir '%s'", plugins_dir);
+        return AIRY_ERR_IO;
     }
 #else
     char win_pattern[PLUGIN_DISCOVERY_MAX_PATH];
@@ -297,14 +297,14 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results,
     WIN32_FIND_DATAA fd;
     HANDLE hFind = FindFirstFileA(win_pattern, &fd);
     if (hFind == INVALID_HANDLE_VALUE) {
-        AGENTRT_LOG_ERROR("PluginDiscovery: cannot open dir '%s'", plugins_dir);
-        return AGENTRT_ERR_IO;
+        AIRY_LOG_ERROR("PluginDiscovery: cannot open dir '%s'", plugins_dir);
+        return AIRY_ERR_IO;
     }
 #endif
 
     /* 先分配结果数组（最大数量） */
     plugin_discovery_result_t *results = (plugin_discovery_result_t *)
-        AGENTRT_CALLOC(PLUGIN_DISCOVERY_MAX_PLUGINS,
+        AIRY_CALLOC(PLUGIN_DISCOVERY_MAX_PLUGINS,
                        sizeof(plugin_discovery_result_t));
     if (!results) {
 #ifndef _WIN32
@@ -312,7 +312,7 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results,
 #else
         FindClose(hFind);
 #endif
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     size_t found = 0;
@@ -353,7 +353,7 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results,
                  "%s/manifest.yaml", plugin_dir_path);
 
         if (!file_exists(manifest_path)) {
-            AGENTRT_LOG_DEBUG("PluginDiscovery: skipping '%s' (no manifest.yaml)",
+            AIRY_LOG_DEBUG("PluginDiscovery: skipping '%s' (no manifest.yaml)",
                               d_name);
             continue;
         }
@@ -365,10 +365,10 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results,
 
         if (ret == 0 && result->valid) {
             found++;
-            AGENTRT_LOG_INFO("PluginDiscovery: found plugin '%s' v%s (type=%d)",
+            AIRY_LOG_INFO("PluginDiscovery: found plugin '%s' v%s (type=%d)",
                              result->name, result->version, result->type);
         } else if (g_discovery.config.fail_on_invalid) {
-            AGENTRT_LOG_ERROR("PluginDiscovery: invalid plugin '%s' in '%s'",
+            AIRY_LOG_ERROR("PluginDiscovery: invalid plugin '%s' in '%s'",
                               d_name, plugin_dir_path);
         }
     }
@@ -389,7 +389,7 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results,
     g_discovery.results = results;
     g_discovery.count = found;
 
-    AGENTRT_LOG_INFO("PluginDiscovery: scan complete (%zu plugins found)",
+    AIRY_LOG_INFO("PluginDiscovery: scan complete (%zu plugins found)",
                      found);
     return 0;
 }
@@ -407,7 +407,7 @@ int plugin_discovery_auto_load(void)
 
     int ret = plugin_discovery_scan(&results, &count);
     if (ret != 0 || count == 0) {
-        AGENTRT_LOG_INFO("PluginDiscovery: no plugins to auto-load");
+        AIRY_LOG_INFO("PluginDiscovery: no plugins to auto-load");
         return 0;
     }
 
@@ -417,7 +417,7 @@ int plugin_discovery_auto_load(void)
     for (size_t i = 0; i < count; i++) {
         if (!results[i].valid) continue;
 
-        AGENTRT_LOG_INFO("PluginDiscovery: auto-loading '%s' from '%s'",
+        AIRY_LOG_INFO("PluginDiscovery: auto-loading '%s' from '%s'",
                          results[i].name, results[i].library_path);
 
         const char *out_name = NULL;
@@ -430,12 +430,12 @@ int plugin_discovery_auto_load(void)
             plugin_service_start(results[i].name);
         } else {
             failed++;
-            AGENTRT_LOG_WARN("PluginDiscovery: auto-load failed for '%s'",
+            AIRY_LOG_WARN("PluginDiscovery: auto-load failed for '%s'",
                              results[i].name);
         }
     }
 
-    AGENTRT_LOG_INFO("PluginDiscovery: auto-load complete "
+    AIRY_LOG_INFO("PluginDiscovery: auto-load complete "
                      "(loaded=%zu, failed=%zu)",
                      loaded, failed);
 
@@ -457,6 +457,6 @@ void plugin_discovery_free_results(plugin_discovery_result_t *results,
 {
     (void)count;
     if (results) {
-        AGENTRT_FREE(results);
+        AIRY_FREE(results);
     }
 }

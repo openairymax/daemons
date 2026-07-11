@@ -6,11 +6,11 @@
  * Copyright (c) 2026 SPHARX. All Rights Reserved.
  * P0.18.1: daemon_main.h 传递性提供 atomic_compat、daemon_bootstrap_sd/ipc、
  * daemon_cupolas、daemon_platform_ext、logging、svc_logger 等头文件。
- * 本守护进程使用自定义 agentrt_event_loop 与采集线程，
+ * 本守护进程使用自定义 airy_event_loop 与采集线程，
  * 不使用 DAEMON_DECLARE_COMMON 生成的 JSON-RPC 样板。
  */
 
-#include "agentrt_event_loop.h"
+#include "airy_event_loop.h"
 #include "daemon_main.h"
 
 #include <stdio.h>
@@ -27,7 +27,7 @@
 
 #define INFO_D_DEFAULT_PORT 8083
 #define INFO_D_MAX_BUFFER 65536
-#define INFO_D_DEFAULT_SOCKET AGENTRT_RUNTIME_DIR "/info.sock"
+#define INFO_D_DEFAULT_SOCKET AIRY_RUNTIME_DIR "/info.sock"
 #define INFO_D_COLLECT_INTERVAL_SEC 5
 #define INFO_D_HISTORY_SIZE 64
 
@@ -47,9 +47,9 @@ typedef struct {
 } system_info_snapshot_t;
 
 typedef struct {
-    agentrt_socket_t server_fd;
-    agentrt_mutex_t lock;
-    agentrt_thread_t collect_thread;
+    airy_sock_t server_fd;
+    airy_mtx_t lock;
+    airy_thread_t collect_thread;
     atomic_int running;
     atomic_int collect_running;
     atomic_int force_stop;
@@ -67,7 +67,7 @@ typedef struct {
 
 static info_d_service_t g_service = {0};
 static atomic_int g_shutdown = 0;
-static agentrt_event_loop_t *g_event_loop = NULL;
+static airy_event_loop_t *g_event_loop = NULL;
 static daemon_bootstrap_sd_t *g_bsd = NULL;
 static daemon_bootstrap_ipc_t *g_bipc = NULL;
 
@@ -76,7 +76,7 @@ static void info_d_signal_handler(int sig)
     (void)sig;
     atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
     if (g_event_loop)
-        agentrt_event_loop_stop(g_event_loop);
+        airy_event_loop_stop(g_event_loop);
 }
 
 static void svc_log_toggle_handler(int sig)
@@ -87,18 +87,18 @@ static void svc_log_toggle_handler(int sig)
     log_set_module_level("*", debug_mode ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO);
 }
 
-static void info_d_handle_request(info_d_service_t *svc, agentrt_socket_t client_fd);
+static void info_d_handle_request(info_d_service_t *svc, airy_sock_t client_fd);
 
 static int info_d_on_client(int fd, uint32_t events, void *user_data)
 {
     (void)events;
     info_d_service_t *svc = (info_d_service_t *)user_data;
     if (!svc || !svc->running) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "svc is NULL or not running");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "svc is NULL or not running");
     }
 
-    agentrt_socket_t client = agentrt_socket_accept(fd, 0);
-    if (client != AGENTRT_INVALID_SOCKET) {
+    airy_sock_t client = airy_sock_accept(fd, 0);
+    if (client != AIRY_INVALID_SOCKET) {
         info_d_handle_request(svc, client);
     }
     return 0;
@@ -107,7 +107,7 @@ static int info_d_on_client(int fd, uint32_t events, void *user_data)
 static int info_d_collect_system_info(system_info_snapshot_t *snap)
 {
     if (!snap) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "snap is NULL");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "snap is NULL");
     }
     __builtin_memset(snap, 0, sizeof(*snap));
     snap->timestamp = (uint64_t)time(NULL);
@@ -181,7 +181,7 @@ static void *info_d_collect_loop(void *arg)
 #ifdef _WIN32
         return 1;
 #else
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
 #endif
     }
 
@@ -189,7 +189,7 @@ static void *info_d_collect_loop(void *arg)
         system_info_snapshot_t snap;
         info_d_collect_system_info(&snap);
 
-        agentrt_mutex_lock(&svc->lock);
+        airy_mtx_lock(&svc->lock);
         __builtin_memcpy(&svc->latest_snapshot, &snap, sizeof(snap));
         svc->last_collect_time = snap.timestamp;
 
@@ -197,7 +197,7 @@ static void *info_d_collect_loop(void *arg)
         svc->history_head = (svc->history_head + 1) % INFO_D_HISTORY_SIZE;
         if (svc->history_count < INFO_D_HISTORY_SIZE)
             svc->history_count++;
-        agentrt_mutex_unlock(&svc->lock);
+        airy_mtx_unlock(&svc->lock);
 
         for (int i = 0; i < INFO_D_COLLECT_INTERVAL_SEC && svc->collect_running; i++) {
 #ifdef _WIN32
@@ -218,41 +218,41 @@ static void *info_d_collect_loop(void *arg)
 static int info_d_init(info_d_service_t *svc, int port, const char *sock)
 {
     if (!svc) {
-        AGENTRT_ERROR(AGENTRT_EINVAL, "svc is NULL");
+        AIRY_ERROR(AIRY_EINVAL, "svc is NULL");
     }
 
     __builtin_memset(svc, 0, sizeof(*svc));
     svc->tcp_port = port > 0 ? port : INFO_D_DEFAULT_PORT;
-    svc->socket_path = sock ? AGENTRT_STRDUP(sock) : AGENTRT_STRDUP(INFO_D_DEFAULT_SOCKET);
+    svc->socket_path = sock ? AIRY_STRDUP(sock) : AIRY_STRDUP(INFO_D_DEFAULT_SOCKET);
     svc->start_time = (uint64_t)time(NULL);
 
-    agentrt_mutex_init(&svc->lock);
-    agentrt_socket_init();
+    airy_mtx_init(&svc->lock);
+    airy_sock_init();
 
     info_d_collect_system_info(&svc->latest_snapshot);
     svc->last_collect_time = svc->latest_snapshot.timestamp;
 
     SVC_LOG_INFO("info_d: init complete (cpu_cores=%d)", svc->latest_snapshot.cpu_cores);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 static int info_d_start(info_d_service_t *svc)
 {
     if (!svc) {
-        AGENTRT_ERROR(AGENTRT_EINVAL, "svc is NULL");
+        AIRY_ERROR(AIRY_EINVAL, "svc is NULL");
     }
 
 #ifndef _WIN32
-    svc->server_fd = agentrt_socket_create_unix_server(svc->socket_path);
+    svc->server_fd = airy_sock_create_unix_server(svc->socket_path);
     if (svc->server_fd < 0) {
         SVC_LOG_ERROR("info_d: failed to create socket at %s", svc->socket_path);
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "failed to create unix socket");
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to create unix socket");
     }
 #else
-    svc->server_fd = agentrt_socket_create_tcp_server("127.0.0.1", (uint16_t)svc->tcp_port);
+    svc->server_fd = airy_sock_create_tcp_server("127.0.0.1", (uint16_t)svc->tcp_port);
     if (svc->server_fd < 0) {
         SVC_LOG_ERROR("info_d: failed to create TCP server");
-        AGENTRT_ERROR(AGENTRT_ERR_UNKNOWN, "failed to create TCP server");
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to create TCP server");
     }
 #endif
 
@@ -260,34 +260,34 @@ static int info_d_start(info_d_service_t *svc)
     svc->collect_running = 1;
     svc->force_stop = 0;
 
-    agentrt_thread_create(&svc->collect_thread, info_d_collect_loop, svc);
+    airy_thread_create(&svc->collect_thread, info_d_collect_loop, svc);
 
     SVC_LOG_INFO("info_d: service started (collect_interval=%ds)", INFO_D_COLLECT_INTERVAL_SEC);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 static int info_d_stop(info_d_service_t *svc, int force)
 {
     if (!svc) {
-        AGENTRT_ERROR(AGENTRT_EINVAL, "svc is NULL");
+        AIRY_ERROR(AIRY_EINVAL, "svc is NULL");
     }
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     svc->running = 0;
     svc->collect_running = 0;
     if (force)
         svc->force_stop = 1;
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     if (force) {
-        agentrt_thread_join(svc->collect_thread, NULL);
+        airy_thread_join(svc->collect_thread, NULL);
     } else {
-        agentrt_thread_join(svc->collect_thread, NULL);
+        airy_thread_join(svc->collect_thread, NULL);
     }
 
-    if (svc->server_fd != AGENTRT_INVALID_SOCKET) {
-        agentrt_socket_close(svc->server_fd);
-        svc->server_fd = AGENTRT_INVALID_SOCKET;
+    if (svc->server_fd != AIRY_INVALID_SOCKET) {
+        airy_sock_close(svc->server_fd);
+        svc->server_fd = AIRY_INVALID_SOCKET;
     }
 
     if (force) {
@@ -297,24 +297,24 @@ static int info_d_stop(info_d_service_t *svc, int force)
     }
 
     SVC_LOG_INFO("info_d: service stopped (force=%d, collections=%zu)", force, svc->history_count);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 static int info_d_destroy(info_d_service_t *svc)
 {
     if (!svc) {
-        AGENTRT_ERROR(AGENTRT_EINVAL, "svc is NULL");
+        AIRY_ERROR(AIRY_EINVAL, "svc is NULL");
     }
 
-    if (svc->server_fd != AGENTRT_INVALID_SOCKET) {
-        agentrt_socket_close(svc->server_fd);
+    if (svc->server_fd != AIRY_INVALID_SOCKET) {
+        airy_sock_close(svc->server_fd);
     }
-    agentrt_socket_cleanup();
-    agentrt_mutex_destroy(&svc->lock);
-    AGENTRT_FREE(svc->socket_path);
+    airy_sock_cleanup();
+    airy_mtx_destroy(&svc->lock);
+    AIRY_FREE(svc->socket_path);
     __builtin_memset(svc, 0, sizeof(*svc));
     SVC_LOG_INFO("info_d: service destroyed");
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 static uint64_t info_d_healthcheck(info_d_service_t *svc)
@@ -323,9 +323,9 @@ static uint64_t info_d_healthcheck(info_d_service_t *svc)
         return 0;
 
     uint64_t last_time = 0;
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     last_time = svc->last_collect_time;
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     if (!svc->running)
         return 0;
@@ -338,20 +338,20 @@ static uint64_t info_d_healthcheck(info_d_service_t *svc)
     return last_time;
 }
 
-static void info_d_handle_request(info_d_service_t *svc, agentrt_socket_t client_fd)
+static void info_d_handle_request(info_d_service_t *svc, airy_sock_t client_fd)
 {
     char buffer[INFO_D_MAX_BUFFER];
-    ssize_t n = agentrt_socket_recv(client_fd, buffer, sizeof(buffer) - 1);
+    ssize_t n = airy_sock_recv(client_fd, buffer, sizeof(buffer) - 1);
     if (n <= 0) {
-        agentrt_socket_close(client_fd);
+        airy_sock_close(client_fd);
         return;
     }
     buffer[n] = '\0';
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     svc->request_count++;
     system_info_snapshot_t snap = svc->latest_snapshot;
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     char response[8192];
 #ifdef _WIN32
@@ -405,8 +405,8 @@ static void info_d_handle_request(info_d_service_t *svc, agentrt_socket_t client
              (unsigned long long)snap.uptime_sec, INFO_D_COLLECT_INTERVAL_SEC,
              (unsigned long long)last_collect, svc->history_count);
 
-    agentrt_socket_send(client_fd, response, strlen(response));
-    agentrt_socket_close(client_fd);
+    airy_sock_send(client_fd, response, strlen(response));
+    airy_sock_close(client_fd);
 }
 
 int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
@@ -421,15 +421,15 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     signal(SIGUSR1, svc_log_toggle_handler);
 #endif
 
-    agentrt_log_init(NULL);
+    airy_log_init(NULL);
     atexit(log_cleanup);
 
     /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("info_d");
 
-    if (info_d_init(&g_service, INFO_D_DEFAULT_PORT, INFO_D_DEFAULT_SOCKET) != AGENTRT_SUCCESS)
+    if (info_d_init(&g_service, INFO_D_DEFAULT_PORT, INFO_D_DEFAULT_SOCKET) != AIRY_SUCCESS)
         return 1;
-    if (info_d_start(&g_service) != AGENTRT_SUCCESS) {
+    if (info_d_start(&g_service) != AIRY_SUCCESS) {
         info_d_destroy(&g_service);
         return 1;
     }
@@ -439,7 +439,7 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     g_bipc = daemon_bootstrap_ipc_start("info_d", "info", g_service.socket_path,
                                         0, IPC_BUS_PROTO_JSON_RPC);
 
-    g_event_loop = agentrt_event_loop_create(64);
+    g_event_loop = airy_event_loop_create(64);
     if (!g_event_loop) {
         LOG_ERROR("Failed to create event loop");
         info_d_stop(&g_service, 1);
@@ -447,13 +447,13 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
         return 1;
     }
 
-    agentrt_event_loop_add_fd(g_event_loop, (int)g_service.server_fd, AGENTRT_EVENT_TYPE_READ,
+    airy_event_loop_add_fd(g_event_loop, (int)g_service.server_fd, AIRY_EVENT_TYPE_READ,
                               info_d_on_client, &g_service);
 
     LOG_INFO("info_d running with epoll event loop on fd=%d", (int)g_service.server_fd);
-    agentrt_event_loop_run(g_event_loop);
+    airy_event_loop_run(g_event_loop);
 
-    agentrt_event_loop_destroy(g_event_loop);
+    airy_event_loop_destroy(g_event_loop);
     g_event_loop = NULL;
 
     daemon_bootstrap_ipc_stop(g_bipc);

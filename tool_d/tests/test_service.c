@@ -35,7 +35,7 @@ static void test_service_register_tool(void)
     assert(svc != NULL);
 
     tool_metadata_t meta;
-    AGENTRT_MEMSET(&meta, 0, sizeof(meta));
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "test_tool";
     meta.name = "test_tool";
     meta.description = "A test tool";
@@ -58,14 +58,14 @@ static void test_service_list_tools(void)
     assert(svc != NULL);
 
     tool_metadata_t meta1;
-    AGENTRT_MEMSET(&meta1, 0, sizeof(meta1));
+    AIRY_MEMSET(&meta1, 0, sizeof(meta1));
     meta1.id = "tool1";
     meta1.name = "tool1";
     meta1.executable = "/usr/bin/echo";
     meta1.timeout_sec = 10;
 
     tool_metadata_t meta2;
-    AGENTRT_MEMSET(&meta2, 0, sizeof(meta2));
+    AIRY_MEMSET(&meta2, 0, sizeof(meta2));
     meta2.id = "tool2";
     meta2.name = "tool2";
     meta2.executable = "/usr/bin/cat";
@@ -92,7 +92,7 @@ static void test_service_get_tool(void)
     assert(svc != NULL);
 
     tool_metadata_t meta;
-    AGENTRT_MEMSET(&meta, 0, sizeof(meta));
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "get_test_tool";
     meta.name = "get_test_tool";
     meta.executable = "/usr/bin/echo";
@@ -118,7 +118,7 @@ static void test_service_unregister_tool(void)
     assert(svc != NULL);
 
     tool_metadata_t meta;
-    AGENTRT_MEMSET(&meta, 0, sizeof(meta));
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "unregister_test";
     meta.name = "unregister_test";
     meta.executable = "/usr/bin/echo";

@@ -27,7 +27,7 @@ static struct {
     uint32_t module_count;
     um_stats_t stats;
     bool initialized;
-    agentrt_mutex_t mutex;
+    airy_mtx_t mutex;
 } g_um = {0};
 
 /* ==================== 辅助函数 ==================== */
@@ -40,7 +40,7 @@ static um_module_metrics_t *find_module(const char *name)
     }
     /* "未找到"是正常控制流（调用者通过返回值判断并记录具体错误日志），
      * 不应在此分配 error context，否则导致内存泄漏。
-     * 之前还错误使用了 AGENTRT_ERR_OVERFLOW（"limit exceeded"）码，语义不符。 */
+     * 之前还错误使用了 AIRY_ERR_OVERFLOW（"limit exceeded"）码，语义不符。 */
     return NULL;
 }
 
@@ -57,7 +57,7 @@ static um_metric_entry_t *find_metric(um_module_metrics_t *mod, const char *name
 static int sanitize_prom_name(const char *in, char *out, size_t out_size)
 {
     if (!in || !out || out_size == 0)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     size_t j = 0;
     for (size_t i = 0; in[i] && j < out_size - 1; i++) {
         char ch = in[i];
@@ -69,7 +69,7 @@ static int sanitize_prom_name(const char *in, char *out, size_t out_size)
         }
     }
     out[j] = '\0';
-    return (j > 0) ? 0 : AGENTRT_ERR_INVALID_PARAM;
+    return (j > 0) ? 0 : AIRY_ERR_INVALID_PARAM;
 }
 
 static const char *metric_type_string(um_metric_type_t type)
@@ -90,7 +90,7 @@ static const char *metric_type_string(um_metric_type_t type)
 
 /* ==================== 公共API实现 ==================== */
 
-AGENTRT_API um_config_t um_create_default_config(void)
+AIRY_API um_config_t um_create_default_config(void)
 {
     um_config_t config;
     __builtin_memset(&config, 0, sizeof(um_config_t));
@@ -101,7 +101,7 @@ AGENTRT_API um_config_t um_create_default_config(void)
     return config;
 }
 
-AGENTRT_API int um_init(const um_config_t *config)
+AIRY_API int um_init(const um_config_t *config)
 {
     if (g_um.initialized)
         return 0;
@@ -112,10 +112,10 @@ AGENTRT_API int um_init(const um_config_t *config)
         g_um.config = um_create_default_config();
     }
 
-    agentrt_error_t err = agentrt_mutex_init(&g_um.mutex);
-    if (err != AGENTRT_SUCCESS) {
+    airy_err_t err = airy_mtx_init(&g_um.mutex);
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("um_init: mutex init failed err=%d", err);
-        return AGENTRT_ERR_UNKNOWN;
+        return AIRY_ERR_UNKNOWN;
     }
 
     __builtin_memset(g_um.modules, 0, sizeof(g_um.modules));
@@ -131,49 +131,49 @@ AGENTRT_API int um_init(const um_config_t *config)
     return 0;
 }
 
-AGENTRT_API void um_shutdown(void)
+AIRY_API void um_shutdown(void)
 {
     if (!g_um.initialized)
         return;
 
-    agentrt_mutex_lock(&g_um.mutex);
+    airy_mtx_lock(&g_um.mutex);
     g_um.initialized = false;
-    agentrt_mutex_unlock(&g_um.mutex);
+    airy_mtx_unlock(&g_um.mutex);
 
-    agentrt_mutex_destroy(&g_um.mutex);
+    airy_mtx_destroy(&g_um.mutex);
 
     LOG_INFO("Unified metrics collector shutdown");
 }
 
-AGENTRT_API bool um_is_initialized(void)
+AIRY_API bool um_is_initialized(void)
 {
     return g_um.initialized;
 }
 
 /* ==================== 模块注册 ==================== */
 
-AGENTRT_API int um_register_module(const char *module_name, const char *instance_id)
+AIRY_API int um_register_module(const char *module_name, const char *instance_id)
 {
     if (!module_name) {
         SVC_LOG_ERROR("um_register_module: null module_name parameter");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     if (!g_um.initialized)
         um_init(NULL);
 
-    agentrt_mutex_lock(&g_um.mutex);
+    airy_mtx_lock(&g_um.mutex);
 
     if (find_module(module_name)) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         return 0;
     }
 
     if (g_um.module_count >= UM_MAX_MODULES) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         SVC_LOG_ERROR("um_register_module: max modules reached count=%u max=%u module='%s'",
                       g_um.module_count, UM_MAX_MODULES, module_name);
         LOG_ERROR("Max metric modules reached");
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
     }
 
     um_module_metrics_t *mod = &g_um.modules[g_um.module_count];
@@ -194,26 +194,26 @@ AGENTRT_API int um_register_module(const char *module_name, const char *instance
     g_um.module_count++;
     g_um.stats.active_modules = g_um.module_count;
 
-    agentrt_mutex_unlock(&g_um.mutex);
+    airy_mtx_unlock(&g_um.mutex);
 
     LOG_INFO("Metrics module registered: %s (instance=%s)", module_name, mod->instance_id);
     return 0;
 }
 
-AGENTRT_API int um_unregister_module(const char *module_name)
+AIRY_API int um_unregister_module(const char *module_name)
 {
     if (!module_name) {
         SVC_LOG_ERROR("um_unregister_module: null module_name parameter");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&g_um.mutex);
+    airy_mtx_lock(&g_um.mutex);
 
     um_module_metrics_t *mod = find_module(module_name);
     if (!mod) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         SVC_LOG_WARN("um_unregister_module: module '%s' not found", module_name);
-        return AGENTRT_ERR_NOT_FOUND;
+        return AIRY_ERR_NOT_FOUND;
     }
 
     uint32_t idx = (uint32_t)(mod - g_um.modules);
@@ -226,49 +226,49 @@ AGENTRT_API int um_unregister_module(const char *module_name)
     g_um.module_count--;
     g_um.stats.active_modules = g_um.module_count;
 
-    agentrt_mutex_unlock(&g_um.mutex);
+    airy_mtx_unlock(&g_um.mutex);
 
     return 0;
 }
 
 /* ==================== 指标操作 ==================== */
 
-AGENTRT_API int um_register_metric(const char *module_name, const char *name, um_metric_type_t type,
+AIRY_API int um_register_metric(const char *module_name, const char *name, um_metric_type_t type,
                                    const char *help, const char *labels)
 {
     if (!module_name || !name) {
         SVC_LOG_ERROR("um_register_metric: null parameter module_name=%p name=%p",
                       (void *)module_name, (void *)name);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     if (!g_um.initialized)
         um_init(NULL);
 
-    agentrt_mutex_lock(&g_um.mutex);
+    airy_mtx_lock(&g_um.mutex);
 
     um_module_metrics_t *mod = find_module(module_name);
     if (!mod) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         um_register_module(module_name, NULL);
-        agentrt_mutex_lock(&g_um.mutex);
+        airy_mtx_lock(&g_um.mutex);
         mod = find_module(module_name);
         if (!mod) {
-            agentrt_mutex_unlock(&g_um.mutex);
+            airy_mtx_unlock(&g_um.mutex);
             SVC_LOG_ERROR("um_register_metric: failed to find/create module '%s'", module_name);
-            return AGENTRT_ERR_NOT_FOUND;
+            return AIRY_ERR_NOT_FOUND;
         }
     }
 
     if (find_metric(mod, name)) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         return 0;
     }
 
     if (mod->metric_count >= UM_MAX_METRICS_PER_MOD) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         SVC_LOG_ERROR("um_register_metric: max metrics reached for module '%s' count=%u max=%u metric='%s'",
                       module_name, mod->metric_count, UM_MAX_METRICS_PER_MOD, name);
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
     }
 
     um_metric_entry_t *entry = &mod->metrics[mod->metric_count];
@@ -279,7 +279,7 @@ AGENTRT_API int um_register_metric(const char *module_name, const char *name, um
     if (labels)
         safe_strcpy(entry->labels, labels, sizeof(entry->labels));
     entry->type = type;
-    entry->timestamp_ms = agentrt_time_ms();
+    entry->timestamp_ms = airy_time_ms();
     mod->metric_count++;
 
     g_um.stats.total_registrations++;
@@ -288,135 +288,135 @@ AGENTRT_API int um_register_metric(const char *module_name, const char *name, um
         g_um.stats.total_metrics += g_um.modules[i].metric_count;
     }
 
-    agentrt_mutex_unlock(&g_um.mutex);
+    airy_mtx_unlock(&g_um.mutex);
 
     return 0;
 }
 
-AGENTRT_API int um_increment(const char *module_name, const char *name, uint64_t value)
+AIRY_API int um_increment(const char *module_name, const char *name, uint64_t value)
 {
     if (!module_name || !name) {
         SVC_LOG_ERROR("um_increment: null parameter module_name=%p name=%p",
                       (void *)module_name, (void *)name);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&g_um.mutex);
+    airy_mtx_lock(&g_um.mutex);
 
     um_module_metrics_t *mod = find_module(module_name);
     if (!mod) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         SVC_LOG_ERROR("um_increment: module '%s' not found", module_name);
-        return AGENTRT_ERR_NOT_FOUND;
+        return AIRY_ERR_NOT_FOUND;
     }
 
     um_metric_entry_t *entry = find_metric(mod, name);
     if (!entry) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         SVC_LOG_ERROR("um_increment: metric '%s' not found in module '%s'", name, module_name);
-        return AGENTRT_ERR_NOT_FOUND;
+        return AIRY_ERR_NOT_FOUND;
     }
 
     entry->value += (double)value;
     entry->count += value;
-    entry->timestamp_ms = agentrt_time_ms();
+    entry->timestamp_ms = airy_time_ms();
 
     g_um.stats.total_increments++;
 
-    agentrt_mutex_unlock(&g_um.mutex);
+    airy_mtx_unlock(&g_um.mutex);
     return 0;
 }
 
-AGENTRT_API int um_gauge_set(const char *module_name, const char *name, double value)
+AIRY_API int um_gauge_set(const char *module_name, const char *name, double value)
 {
     if (!module_name || !name) {
         SVC_LOG_ERROR("um_gauge_set: null parameter module_name=%p name=%p",
                       (void *)module_name, (void *)name);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&g_um.mutex);
+    airy_mtx_lock(&g_um.mutex);
 
     um_module_metrics_t *mod = find_module(module_name);
     if (!mod) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         SVC_LOG_ERROR("um_gauge_set: module '%s' not found", module_name);
-        return AGENTRT_ERR_NOT_FOUND;
+        return AIRY_ERR_NOT_FOUND;
     }
 
     um_metric_entry_t *entry = find_metric(mod, name);
     if (!entry) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         SVC_LOG_ERROR("um_gauge_set: metric '%s' not found in module '%s'", name, module_name);
-        return AGENTRT_ERR_NOT_FOUND;
+        return AIRY_ERR_NOT_FOUND;
     }
 
     entry->value = value;
-    entry->timestamp_ms = agentrt_time_ms();
+    entry->timestamp_ms = airy_time_ms();
 
     g_um.stats.total_updates++;
 
-    agentrt_mutex_unlock(&g_um.mutex);
+    airy_mtx_unlock(&g_um.mutex);
     return 0;
 }
 
-AGENTRT_API int um_observe(const char *module_name, const char *name, double value)
+AIRY_API int um_observe(const char *module_name, const char *name, double value)
 {
     if (!module_name || !name) {
         SVC_LOG_ERROR("um_observe: null parameter module_name=%p name=%p",
                       (void *)module_name, (void *)name);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&g_um.mutex);
+    airy_mtx_lock(&g_um.mutex);
 
     um_module_metrics_t *mod = find_module(module_name);
     if (!mod) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         SVC_LOG_ERROR("um_observe: module '%s' not found", module_name);
-        return AGENTRT_ERR_NOT_FOUND;
+        return AIRY_ERR_NOT_FOUND;
     }
 
     um_metric_entry_t *entry = find_metric(mod, name);
     if (!entry) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         SVC_LOG_ERROR("um_observe: metric '%s' not found in module '%s'", name, module_name);
-        return AGENTRT_ERR_NOT_FOUND;
+        return AIRY_ERR_NOT_FOUND;
     }
 
     entry->sum += value;
     entry->count++;
     entry->value = entry->count > 0 ? entry->sum / entry->count : 0;
-    entry->timestamp_ms = agentrt_time_ms();
+    entry->timestamp_ms = airy_time_ms();
 
     g_um.stats.total_updates++;
 
-    agentrt_mutex_unlock(&g_um.mutex);
+    airy_mtx_unlock(&g_um.mutex);
     return 0;
 }
 
 /* ==================== 导出 ==================== */
 
-AGENTRT_API char *um_export_prometheus(void)
+AIRY_API char *um_export_prometheus(void)
 {
     return um_export_prometheus_module(NULL);
 }
 
-AGENTRT_API char *um_export_prometheus_module(const char *module_name)
+AIRY_API char *um_export_prometheus_module(const char *module_name)
 {
     if (!g_um.initialized) {
         SVC_LOG_ERROR("um_export_prometheus_module: metrics not initialized");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
-    agentrt_mutex_lock(&g_um.mutex);
+    airy_mtx_lock(&g_um.mutex);
 
     size_t buf_size = 8192;
-    char *buf = (char *)AGENTRT_MALLOC(buf_size);
+    char *buf = (char *)AIRY_MALLOC(buf_size);
     if (!buf) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         SVC_LOG_ERROR("um_export_prometheus_module: memory allocation failed for export buffer");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     size_t pos = 0;
 
@@ -426,26 +426,26 @@ AGENTRT_API char *um_export_prometheus_module(const char *module_name)
             snprintf(buf + pos, buf_size - pos, fmt,                                               \
                      ##__VA_ARGS__); /* flawfinder: ignore - bounded snprintf in PAPPEND macro */  \
         if (w < 0) {                                                                               \
-            AGENTRT_FREE(buf);                                                                     \
-            agentrt_mutex_unlock(&g_um.mutex);                                                     \
+            AIRY_FREE(buf);                                                                     \
+            airy_mtx_unlock(&g_um.mutex);                                                     \
             return NULL;                                                                           \
         }                                                                                          \
         if ((size_t)w >= buf_size - pos) {                                                         \
             buf_size *= 2;                                                                         \
-            char *nb = (char *)AGENTRT_MALLOC(buf_size);                                           \
+            char *nb = (char *)AIRY_MALLOC(buf_size);                                           \
             if (!nb) {                                                                             \
-                AGENTRT_FREE(buf);                                                                 \
-                agentrt_mutex_unlock(&g_um.mutex);                                                 \
+                AIRY_FREE(buf);                                                                 \
+                airy_mtx_unlock(&g_um.mutex);                                                 \
                 return NULL;                                                                       \
             }                                                                                      \
             __builtin_memcpy(nb, buf, pos);                                                                  \
-            AGENTRT_FREE(buf);                                                                     \
+            AIRY_FREE(buf);                                                                     \
             buf = nb;                                                                              \
             w = snprintf(buf + pos, buf_size - pos, fmt,                                           \
                          ##__VA_ARGS__); /* flawfinder: ignore - bounded realloc+snprintf retry */ \
             if (w < 0 || (size_t)w >= buf_size - pos) {                                            \
-                AGENTRT_FREE(buf);                                                                 \
-                agentrt_mutex_unlock(&g_um.mutex);                                                 \
+                AIRY_FREE(buf);                                                                 \
+                airy_mtx_unlock(&g_um.mutex);                                                 \
                 return NULL;                                                                       \
             }                                                                                      \
         }                                                                                          \
@@ -467,7 +467,7 @@ AGENTRT_API char *um_export_prometheus_module(const char *module_name)
             if (sanitize_prom_name(entry->name, safe_name, sizeof(safe_name)) != 0)
                 continue;
 
-            snprintf(prefixed_name, sizeof(prefixed_name), "agentrt_%s_%s", mod->module_name,
+            snprintf(prefixed_name, sizeof(prefixed_name), "airy_%s_%s", mod->module_name,
                      safe_name);
 
             if (entry->help[0]) {
@@ -503,26 +503,26 @@ AGENTRT_API char *um_export_prometheus_module(const char *module_name)
 #undef PAPPEND
 
     g_um.stats.total_exports++;
-    agentrt_mutex_unlock(&g_um.mutex);
+    airy_mtx_unlock(&g_um.mutex);
 
     return buf;
 }
 
-AGENTRT_API char *um_export_json(void)
+AIRY_API char *um_export_json(void)
 {
     if (!g_um.initialized) {
         SVC_LOG_ERROR("um_export_json: metrics not initialized");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
-    agentrt_mutex_lock(&g_um.mutex);
+    airy_mtx_lock(&g_um.mutex);
 
     size_t buf_size = 8192;
-    char *buf = (char *)AGENTRT_MALLOC(buf_size);
+    char *buf = (char *)AIRY_MALLOC(buf_size);
     if (!buf) {
-        agentrt_mutex_unlock(&g_um.mutex);
+        airy_mtx_unlock(&g_um.mutex);
         SVC_LOG_ERROR("um_export_json: memory allocation failed for export buffer");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     size_t pos = 0;
 
@@ -550,14 +550,14 @@ AGENTRT_API char *um_export_json(void)
     pos += snprintf(buf + pos, buf_size - pos, "}}");
 
     g_um.stats.total_exports++;
-    agentrt_mutex_unlock(&g_um.mutex);
+    airy_mtx_unlock(&g_um.mutex);
 
     return buf;
 }
 
 /* ==================== 默认指标 ==================== */
 
-AGENTRT_API int um_register_default_metrics(void)
+AIRY_API int um_register_default_metrics(void)
 {
     um_register_module("system", "default");
 
@@ -571,23 +571,23 @@ AGENTRT_API int um_register_default_metrics(void)
     um_register_metric("system", "process_uptime_seconds", UM_TYPE_COUNTER,
                        "Process uptime in seconds", NULL);
 
-    um_register_module("agentrt_runtime", "default");
+    um_register_module("airy_runtime", "default");
 
-    um_register_metric("agentrt_runtime", "requests_total", UM_TYPE_COUNTER,
+    um_register_metric("airy_runtime", "requests_total", UM_TYPE_COUNTER,
                        "Total number of requests processed", "method=\"\",path=\"\"");
-    um_register_metric("agentrt_runtime", "request_duration_seconds", UM_TYPE_SUMMARY,
+    um_register_metric("airy_runtime", "request_duration_seconds", UM_TYPE_SUMMARY,
                        "Request duration in seconds", "method=\"\",path=\"\"");
-    um_register_metric("agentrt_runtime", "errors_total", UM_TYPE_COUNTER, "Total number of errors",
+    um_register_metric("airy_runtime", "errors_total", UM_TYPE_COUNTER, "Total number of errors",
                        "type=\"\"");
-    um_register_metric("agentrt_runtime", "active_sessions", UM_TYPE_GAUGE,
+    um_register_metric("airy_runtime", "active_sessions", UM_TYPE_GAUGE,
                        "Number of active sessions", NULL);
-    um_register_metric("agentrt_runtime", "active_connections", UM_TYPE_GAUGE,
+    um_register_metric("airy_runtime", "active_connections", UM_TYPE_GAUGE,
                        "Number of active connections", NULL);
 
     return 0;
 }
 
-AGENTRT_API void um_update_default_metrics(void)
+AIRY_API void um_update_default_metrics(void)
 {
     if (!g_um.initialized)
         return;
@@ -616,22 +616,22 @@ AGENTRT_API void um_update_default_metrics(void)
     }
 #endif
 
-    uint64_t uptime __attribute__((unused)) = agentrt_time_ms() / 1000;
+    uint64_t uptime __attribute__((unused)) = airy_time_ms() / 1000;
     um_increment("system", "process_uptime_seconds", 1);
 }
 
 /* ==================== 统计 ==================== */
 
-AGENTRT_API int um_get_stats(um_stats_t *stats)
+AIRY_API int um_get_stats(um_stats_t *stats)
 {
     if (!stats) {
         SVC_LOG_ERROR("um_get_stats: null stats parameter");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&g_um.mutex);
+    airy_mtx_lock(&g_um.mutex);
     __builtin_memcpy(stats, &g_um.stats, sizeof(um_stats_t));
-    agentrt_mutex_unlock(&g_um.mutex);
+    airy_mtx_unlock(&g_um.mutex);
 
     return 0;
 }

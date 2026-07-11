@@ -6,8 +6,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_LLM_PROVIDER_REGISTRY_H
-#define AGENTRT_LLM_PROVIDER_REGISTRY_H
+#ifndef AIRY_RT_LLM_PROVIDER_REGISTRY_H
+#define AIRY_RT_LLM_PROVIDER_REGISTRY_H
 
 #include "provider.h"
 
@@ -63,4 +63,4 @@ int provider_registry_enumerate(provider_registry_t *reg,
 }
 #endif
 
-#endif /* AGENTRT_LLM_PROVIDER_REGISTRY_H */
+#endif /* AIRY_RT_LLM_PROVIDER_REGISTRY_H */

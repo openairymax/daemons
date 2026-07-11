@@ -85,7 +85,7 @@ static int bin_batch_fill(tcache_t *tc, tcache_bin_t *bin)
         to_fill = tc->config.batch_fill_count;
     }
 
-    AGENTRT_LOG_DEBUG("Tcache: batch_fill size_class=%u (count=%u/%u, "
+    AIRY_LOG_DEBUG("Tcache: batch_fill size_class=%u (count=%u/%u, "
                       "to_fill=%u, cached_bytes=%zu/%u)",
                       bin->size_class, bin->count, bin->max_count,
                       to_fill, tc->total_cached_bytes,
@@ -93,9 +93,9 @@ static int bin_batch_fill(tcache_t *tc, tcache_bin_t *bin)
 
     uint32_t filled = 0;
     for (uint32_t i = 0; i < to_fill; i++) {
-        void *ptr = AGENTRT_MALLOC(bin->size_class);
+        void *ptr = AIRY_MALLOC(bin->size_class);
         if (!ptr) {
-            AGENTRT_LOG_ERROR("Tcache: batch_fill OOM at %u/%u "
+            AIRY_LOG_ERROR("Tcache: batch_fill OOM at %u/%u "
                               "(size_class=%u, total_cached=%zu)",
                               i, to_fill, bin->size_class,
                               tc->total_cached_bytes);
@@ -110,7 +110,7 @@ static int bin_batch_fill(tcache_t *tc, tcache_bin_t *bin)
     bin->count += filled;
     tc->stats.batch_fill_count++;
 
-    AGENTRT_LOG_DEBUG("Tcache: batch_fill done (size_class=%u, filled=%u/%u, "
+    AIRY_LOG_DEBUG("Tcache: batch_fill done (size_class=%u, filled=%u/%u, "
                       "cache_count=%u, cached_bytes=%zu)",
                       bin->size_class, filled, to_fill,
                       bin->count, tc->total_cached_bytes);
@@ -128,20 +128,20 @@ static void bin_batch_flush(tcache_t *tc, tcache_bin_t *bin)
         to_flush = tc->config.batch_fill_count;
     }
 
-    AGENTRT_LOG_DEBUG("Tcache: batch_flush size_class=%u (count=%u, "
+    AIRY_LOG_DEBUG("Tcache: batch_flush size_class=%u (count=%u, "
                       "to_flush=%u, cached_bytes=%zu)",
                       bin->size_class, bin->count, to_flush,
                       tc->total_cached_bytes);
 
     for (uint32_t i = 0; i < to_flush; i++) {
-        AGENTRT_FREE(bin->entries[bin->count - 1 - i]);
+        AIRY_FREE(bin->entries[bin->count - 1 - i]);
         tc->total_cached_bytes -= bin->size_class;
     }
 
     bin->count -= to_flush;
     tc->stats.batch_flush_count++;
 
-    AGENTRT_LOG_DEBUG("Tcache: batch_flush done (size_class=%u, "
+    AIRY_LOG_DEBUG("Tcache: batch_flush done (size_class=%u, "
                       "flushed=%u, cache_count=%u, cached_bytes=%zu)",
                       bin->size_class, to_flush, bin->count,
                       tc->total_cached_bytes);
@@ -151,9 +151,9 @@ static void bin_batch_flush(tcache_t *tc, tcache_bin_t *bin)
 
 tcache_t *tcache_create(const tcache_config_t *config)
 {
-    tcache_t *tc = (tcache_t *)AGENTRT_CALLOC(1, sizeof(tcache_t));
+    tcache_t *tc = (tcache_t *)AIRY_CALLOC(1, sizeof(tcache_t));
     if (!tc) {
-        AGENTRT_LOG_ERROR("Tcache: OOM creating tcache");
+        AIRY_LOG_ERROR("Tcache: OOM creating tcache");
         return NULL;
     }
 
@@ -181,7 +181,7 @@ tcache_t *tcache_create(const tcache_config_t *config)
     tc->total_cached_bytes = 0;
     __builtin_memset(&tc->stats, 0, sizeof(tc->stats));
 
-    AGENTRT_LOG_DEBUG("Tcache: created (max_entries=%zu, batch=%zu, "
+    AIRY_LOG_DEBUG("Tcache: created (max_entries=%zu, batch=%zu, "
                       "max_class=%u, max_bytes=%u)",
                       tc->config.max_cache_entries,
                       tc->config.batch_fill_count,
@@ -208,7 +208,7 @@ void tcache_destroy(tcache_t *tc)
         double hit_rate = total > 0
             ? (double)tc->stats.cache_hit_count / (double)total * 100.0
             : 0.0;
-        AGENTRT_LOG_INFO("Tcache: destroyed (hits=%llu misses=%llu "
+        AIRY_LOG_INFO("Tcache: destroyed (hits=%llu misses=%llu "
                          "hit_rate=%.2f%%, oversize=%llu, "
                          "cached_at_exit=%zu objects/%zu bytes)",
                          (unsigned long long)tc->stats.cache_hit_count,
@@ -217,11 +217,11 @@ void tcache_destroy(tcache_t *tc)
                          (unsigned long long)tc->stats.oversized_alloc,
                          cached_count, cached_bytes);
     } else {
-        AGENTRT_LOG_INFO("Tcache: destroyed (cached_at_exit=%zu objects/%zu bytes)",
+        AIRY_LOG_INFO("Tcache: destroyed (cached_at_exit=%zu objects/%zu bytes)",
                          cached_count, cached_bytes);
     }
 
-    AGENTRT_FREE(tc);
+    AIRY_FREE(tc);
 }
 
 /* ==================== 分配操作实现 ==================== */
@@ -230,7 +230,7 @@ void *tcache_alloc(tcache_t *tc, size_t size)
 {
     if (!tc || size == 0) {
         if (!tc) {
-            AGENTRT_LOG_ERROR("Tcache: tcache_alloc called with NULL tcache");
+            AIRY_LOG_ERROR("Tcache: tcache_alloc called with NULL tcache");
         }
         return NULL;
     }
@@ -241,11 +241,11 @@ void *tcache_alloc(tcache_t *tc, size_t size)
     int bin_idx = find_size_class(size);
     if (bin_idx < 0 || (uint32_t)size > tc->config.max_cache_size_class) {
         tc->stats.oversized_alloc++;
-        AGENTRT_LOG_TRACE("Tcache: oversized alloc (size=%zu, "
+        AIRY_LOG_TRACE("Tcache: oversized alloc (size=%zu, "
                           "oversized_count=%llu)",
                           size,
                           (unsigned long long)tc->stats.oversized_alloc);
-        return AGENTRT_MALLOC(size);
+        return AIRY_MALLOC(size);
     }
 
     tcache_bin_t *bin = &tc->bins[bin_idx];
@@ -253,17 +253,17 @@ void *tcache_alloc(tcache_t *tc, size_t size)
     /* 缓存为空，批量填充 */
     if (bin->count == 0) {
         tc->stats.cache_miss_count++;
-        AGENTRT_LOG_DEBUG("Tcache: cache miss (size=%zu → size_class=%u, "
+        AIRY_LOG_DEBUG("Tcache: cache miss (size=%zu → size_class=%u, "
                           "miss_count=%llu, hit_count=%llu)",
                           size, bin->size_class,
                           (unsigned long long)tc->stats.cache_miss_count,
                           (unsigned long long)tc->stats.cache_hit_count);
         if (bin_batch_fill(tc, bin) <= 0) {
             /* 批量填充失败，降级为直接分配 */
-            AGENTRT_LOG_WARN("Tcache: batch_fill failed, fallback to MALLOC "
+            AIRY_LOG_WARN("Tcache: batch_fill failed, fallback to MALLOC "
                              "(size=%zu, size_class=%u)",
                              size, bin->size_class);
-            return AGENTRT_MALLOC(size);
+            return AIRY_MALLOC(size);
         }
     } else {
         tc->stats.cache_hit_count++;
@@ -274,7 +274,7 @@ void *tcache_alloc(tcache_t *tc, size_t size)
     void *ptr = bin->entries[bin->count];
     tc->total_cached_bytes -= bin->size_class;
 
-    AGENTRT_LOG_TRACE("Tcache: alloc hit (size=%zu → class=%u, ptr=%p, "
+    AIRY_LOG_TRACE("Tcache: alloc hit (size=%zu → class=%u, ptr=%p, "
                       "cache_remaining=%u/%u, cached_bytes=%zu)",
                       size, bin->size_class, ptr,
                       bin->count, bin->max_count,
@@ -287,7 +287,7 @@ void tcache_free(tcache_t *tc, void *ptr, size_t size)
 {
     if (!tc || !ptr) {
         if (!tc) {
-            AGENTRT_LOG_WARN("Tcache: tcache_free called with NULL tcache "
+            AIRY_LOG_WARN("Tcache: tcache_free called with NULL tcache "
                              "(ptr=%p, size=%zu)", ptr, size);
         }
         return;
@@ -298,19 +298,19 @@ void tcache_free(tcache_t *tc, void *ptr, size_t size)
     /* 超大对象直接释放 */
     int bin_idx = find_size_class(size);
     if (bin_idx < 0 || (uint32_t)size > tc->config.max_cache_size_class) {
-        AGENTRT_LOG_TRACE("Tcache: oversized free (size=%zu)", size);
-        AGENTRT_FREE(ptr);
+        AIRY_LOG_TRACE("Tcache: oversized free (size=%zu)", size);
+        AIRY_FREE(ptr);
         return;
     }
 
     /* 检查缓存总字节数限制 */
     if (tc->config.max_total_cached_bytes > 0 &&
         tc->total_cached_bytes + size > tc->config.max_total_cached_bytes) {
-        AGENTRT_LOG_DEBUG("Tcache: cache full, direct free (size=%zu, "
+        AIRY_LOG_DEBUG("Tcache: cache full, direct free (size=%zu, "
                           "cached=%zu, max=%u)",
                           size, tc->total_cached_bytes,
                           tc->config.max_total_cached_bytes);
-        AGENTRT_FREE(ptr);
+        AIRY_FREE(ptr);
         return;
     }
 
@@ -318,7 +318,7 @@ void tcache_free(tcache_t *tc, void *ptr, size_t size)
 
     /* 缓存已满，批量归还 */
     if (bin->count >= bin->max_count) {
-        AGENTRT_LOG_DEBUG("Tcache: bin full, triggering flush (size_class=%u, "
+        AIRY_LOG_DEBUG("Tcache: bin full, triggering flush (size_class=%u, "
                           "count=%u/%u)",
                           bin->size_class, bin->count, bin->max_count);
         bin_batch_flush(tc, bin);
@@ -329,7 +329,7 @@ void tcache_free(tcache_t *tc, void *ptr, size_t size)
     bin->count++;
     tc->total_cached_bytes += bin->size_class;
 
-    AGENTRT_LOG_TRACE("Tcache: free cached (size=%zu → class=%u, ptr=%p, "
+    AIRY_LOG_TRACE("Tcache: free cached (size=%zu → class=%u, ptr=%p, "
                       "cache_count=%u/%u, cached_bytes=%zu)",
                       size, bin->size_class, ptr,
                       bin->count, bin->max_count,
@@ -348,20 +348,20 @@ void tcache_flush(tcache_t *tc)
     for (int i = 0; i < NUM_SIZE_CLASSES; i++) {
         tcache_bin_t *bin = &tc->bins[i];
         if (bin->count > 0) {
-            AGENTRT_LOG_DEBUG("Tcache: flush bin %d (size_class=%u, count=%u)",
+            AIRY_LOG_DEBUG("Tcache: flush bin %d (size_class=%u, count=%u)",
                               i, bin->size_class, bin->count);
         }
         flushed_count += bin->count;
         while (bin->count > 0) {
             bin->count--;
-            AGENTRT_FREE(bin->entries[bin->count]);
+            AIRY_FREE(bin->entries[bin->count]);
             tc->total_cached_bytes -= bin->size_class;
         }
     }
 
     tc->stats.batch_flush_count++;
 
-    AGENTRT_LOG_INFO("Tcache: flush complete (flushed=%zu objects, "
+    AIRY_LOG_INFO("Tcache: flush complete (flushed=%zu objects, "
                      "%zu bytes)",
                      flushed_count, flushed_bytes);
 }
@@ -379,7 +379,7 @@ void tcache_purge(tcache_t *tc)
     }
     tc->total_cached_bytes = 0;
 
-    AGENTRT_LOG_INFO("Tcache: purge (discarded %zu objects, %zu bytes)",
+    AIRY_LOG_INFO("Tcache: purge (discarded %zu objects, %zu bytes)",
                      purged_count, purged_bytes);
 }
 

@@ -37,13 +37,13 @@ int route_quality_first(const llm_route_request_t *request,
                                                  LLM_ROUTER_MAX_ENDPOINTS);
 
     if (eligible_count == 0) {
-        AGENTRT_LOG_WARN("C-L02: Quality: no eligible endpoints "
+        AIRY_LOG_WARN("C-L02: Quality: no eligible endpoints "
                 "(caps=0x%x, total_endpoints=%zu) STACK: route_quality_first",
                 request->required_caps, router_ctx_get()->endpoint_count);
-        return AGENTRT_ERR_NOT_FOUND;  /* BAN-073: 无可用端点 */
+        return AIRY_ERR_NOT_FOUND;  /* BAN-073: 无可用端点 */
     }
 
-    AGENTRT_LOG_DEBUG("C-L02: Quality: sorting %zu endpoints by quality",
+    AIRY_LOG_DEBUG("C-L02: Quality: sorting %zu endpoints by quality",
                       eligible_count);
 
     /* 按优先级排序（priority 越大越优先，相同时按 context_window 降序） */
@@ -66,14 +66,14 @@ int route_quality_first(const llm_route_request_t *request,
 
     /* 日志：打印排序后的端点列表 */
     for (size_t i = 0; i < eligible_count; i++) {
-        AGENTRT_LOG_DEBUG("C-L02: Quality: rank[%zu] %s/%s priority=%d "
+        AIRY_LOG_DEBUG("C-L02: Quality: rank[%zu] %s/%s priority=%d "
                           "context=%u",
                           i, eligible[i]->provider_name, eligible[i]->model_name,
                           eligible[i]->priority, eligible[i]->context_window);
     }
 
     /* 记录优先级范围 */
-    AGENTRT_LOG_DEBUG("C-L02: Quality: priority range max=%d min=%d "
+    AIRY_LOG_DEBUG("C-L02: Quality: priority range max=%d min=%d "
                       "across %zu endpoints",
                       eligible[0]->priority,
                       eligible[eligible_count - 1]->priority,
@@ -89,13 +89,13 @@ int route_quality_first(const llm_route_request_t *request,
     /* 降级：次优端点 */
     if (eligible_count > 1) {
         router_set_fallback(result, eligible[1]);
-        AGENTRT_LOG_DEBUG("C-L02: Quality: fallback set to %s/%s "
+        AIRY_LOG_DEBUG("C-L02: Quality: fallback set to %s/%s "
                           "(priority=%d)",
                           eligible[1]->provider_name, eligible[1]->model_name,
                           eligible[1]->priority);
     }
 
-    AGENTRT_LOG_INFO("C-L02: Quality: selected %s/%s priority=%d "
+    AIRY_LOG_INFO("C-L02: Quality: selected %s/%s priority=%d "
                      "context=%u",
                      ep->provider_name, ep->model_name,
                      ep->priority, ep->context_window);

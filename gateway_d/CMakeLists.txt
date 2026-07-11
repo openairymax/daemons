@@ -7,7 +7,7 @@
 #   它依赖 gateway 库提供的公共 API (include/gateway.h)，
 #   并通过 gateway 库间接调用 agentrt/atoms/syscall 接口。
 #
-#   依赖链：gateway_d --> agentrt_gateway_service (静态库) --> gateway 库 (OBJECT) --> agentrt/atoms/syscall + agentrt/atoms/corekern
+#   依赖链：gateway_d --> airy_gateway_service (静态库) --> gateway 库 (OBJECT) --> agentrt/atoms/syscall + agentrt/atoms/corekern
 
 
 
@@ -50,7 +50,7 @@ set(PROTOCOLS_OPENAI_INCLUDE_DIR ${PROTOCOLS_OPENAI_DIR}/include)
 set(PROTOCOLS_COMMON_INCLUDE_DIR ${PROTOCOLS_DIR}/common/include)
 
 # ==================== 协议栈开关 ====================
-option(AGENTRT_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
+option(AIRY_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
 
 # ==================== Gateway 服务静态库 ====================
 # 提取 service/gateway_svc_adapter/gateway_forward + protocol/* 为独立静态库，
@@ -62,41 +62,41 @@ set(GATEWAY_SERVICE_SOURCES
     src/gateway_forward.c
 )
 
-if(AGENTRT_ENABLE_PROTOCOLS)
+if(AIRY_ENABLE_PROTOCOLS)
     list(APPEND GATEWAY_SERVICE_SOURCES
         src/protocol/gateway_mcp_server.c
         src/protocol/gateway_a2a_handler.c
         src/protocol/gateway_openai_compat.c
         src/protocol/gateway_protocol_router.c
     )
-    agentrt_print_ok("[gateway_d] Protocol stack: ENABLED (MCP/A2A/OpenAI)")
+    airy_print_ok("[gateway_d] Protocol stack: ENABLED (MCP/A2A/OpenAI)")
 else()
-    agentrt_print_warn("[gateway_d] Protocol stack: DISABLED")
+    airy_print_warn("[gateway_d] Protocol stack: DISABLED")
 endif()
 
-add_library(agentrt_gateway_service STATIC ${GATEWAY_SERVICE_SOURCES})
+add_library(airy_gateway_service STATIC ${GATEWAY_SERVICE_SOURCES})
 
-if(AGENTRT_ENABLE_PROTOCOLS)
-    target_compile_definitions(agentrt_gateway_service PRIVATE AGENTRT_HAS_PROTOCOLS=1)
+if(AIRY_ENABLE_PROTOCOLS)
+    target_compile_definitions(airy_gateway_service PRIVATE AIRY_HAS_PROTOCOLS=1)
 endif()
 
 # ==================== 平台特定配置 ====================
 if(WIN32)
-    target_compile_definitions(agentrt_gateway_service PRIVATE
-        AGENTRT_PLATFORM_WINDOWS=1
+    target_compile_definitions(airy_gateway_service PRIVATE
+        AIRY_PLATFORM_WINDOWS=1
         WIN32_LEAN_AND_MEAN
         NOMINMAX
         _CRT_SECURE_NO_WARNINGS
     )
 elseif(UNIX)
-    target_compile_definitions(agentrt_gateway_service PRIVATE
-        AGENTRT_PLATFORM_LINUX=1
+    target_compile_definitions(airy_gateway_service PRIVATE
+        AIRY_PLATFORM_LINUX=1
         _GNU_SOURCE
     )
 endif()
 
 # ==================== 包含目录 ====================
-target_include_directories(agentrt_gateway_service PUBLIC
+target_include_directories(airy_gateway_service PUBLIC
     # 本模块头文件
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -107,7 +107,7 @@ target_include_directories(agentrt_gateway_service PUBLIC
     ${GATEWAY_SRC_DIR}
     ${GATEWAY_SRC_DIR}/gateway
     ${GATEWAY_SRC_DIR}/utils
-    # Atom 模块（service.c 引用 "syscalls.h", "agentrt.h"）
+    # Atom 模块（service.c 引用 "syscalls.h", "airy_rt.h"）
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
     # Daemon 兼容层
@@ -134,43 +134,43 @@ target_include_directories(agentrt_gateway_service PUBLIC
     ${PROTOCOLS_OPENAI_INCLUDE_DIR}
 )
 
-target_include_directories(agentrt_gateway_service PRIVATE
+target_include_directories(airy_gateway_service PRIVATE
     ${CJSON_INCLUDE_DIRS}
 )
 
-# 链接库：svc_common 提供 daemon 公共层，agentrt_protocols 提供协议栈
-# 注意：agentrt_common 不在此处直接链接，而是通过 svc_common 的 PUBLIC
+# 链接库：svc_common 提供 daemon 公共层，airy_protocols 提供协议栈
+# 注意：airy_common 不在此处直接链接，而是通过 svc_common 的 PUBLIC
 # 传递依赖处理，避免在链接命令中重复出现导致 LTO 符号解析失败。
-target_link_libraries(agentrt_gateway_service PUBLIC svc_common agentrt_protocols)
+target_link_libraries(airy_gateway_service PUBLIC svc_common airy_protocols)
 
 if(UNIX)
-    target_link_libraries(agentrt_gateway_service PUBLIC Threads::Threads agentrt_platform_libs)
+    target_link_libraries(airy_gateway_service PUBLIC Threads::Threads airy_platform_libs)
 endif()
 
 # 条件包含外部库头文件和定义（使用根级缓存变量）
-if(AGENTRT_HAS_MICROHTTPD)
-    target_compile_definitions(agentrt_gateway_service PRIVATE GATEWAY_HAS_HTTP=1 GATEWAY_HAS_LIBMICROHTTPD=1)
+if(AIRY_HAS_MICROHTTPD)
+    target_compile_definitions(airy_gateway_service PRIVATE GATEWAY_HAS_HTTP=1 GATEWAY_HAS_LIBMICROHTTPD=1)
 else()
-    agentrt_print_warn("libmicrohttpd not found, HTTP gateway may not compile.")
+    airy_print_warn("libmicrohttpd not found, HTTP gateway may not compile.")
 endif()
 
-if(AGENTRT_HAS_LIBWEBSOCKETS)
-    target_compile_definitions(agentrt_gateway_service PRIVATE GATEWAY_HAS_WS=1)
+if(AIRY_HAS_LIBWEBSOCKETS)
+    target_compile_definitions(airy_gateway_service PRIVATE GATEWAY_HAS_WS=1)
 else()
-    agentrt_print_warn("libwebsockets not found, WebSocket gateway may not compile.")
+    airy_print_warn("libwebsockets not found, WebSocket gateway may not compile.")
 endif()
 
-if(AGENTRT_HAS_CJSON)
+if(AIRY_HAS_CJSON)
     if(cJSON_FOUND)
-        target_link_libraries(agentrt_gateway_service PUBLIC cjson)
+        target_link_libraries(airy_gateway_service PUBLIC cjson)
     elseif(CJSON_FOUND)
-        target_link_libraries(agentrt_gateway_service PUBLIC ${CJSON_LIBRARIES})
+        target_link_libraries(airy_gateway_service PUBLIC ${CJSON_LIBRARIES})
     endif()
 endif()
 
 # 编译选项
 if(NOT MSVC)
-    target_compile_options(agentrt_gateway_service PRIVATE
+    target_compile_options(airy_gateway_service PRIVATE
         -Wall
         -Wextra
         -Wpedantic
@@ -183,7 +183,7 @@ endif()
 
 # ==================== Gateway 库对象（gateway 模块源码） ====================
 # gateway 库大量依赖 cJSON，不可用时整个库跳过
-if(AGENTRT_HAS_CJSON)
+if(AIRY_HAS_CJSON)
 set(GATEWAY_LIB_SOURCES
     ${GATEWAY_SRC_DIR}/gateway/gateway_api.c
     ${GATEWAY_SRC_DIR}/gateway/http_gateway.c
@@ -200,14 +200,14 @@ set(GATEWAY_LIB_SOURCES
 # 创建 gateway 库对象（不安装，仅供 gateway_d 使用）
 add_library(gateway_lib_obj OBJECT ${GATEWAY_LIB_SOURCES})
 
-# P0.18.2: 启用 cjson_helpers.h 的 AGENTRT_HAS_CJSON 守卫，
+# P0.18.2: 启用 cjson_helpers.h 的 AIRY_HAS_CJSON 守卫，
 # 使 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 等宏可见（否则被 #ifdef 跳过，宏当作函数调用导致编译错误）。
-target_compile_definitions(gateway_lib_obj PUBLIC AGENTRT_HAS_CJSON)
+target_compile_definitions(gateway_lib_obj PUBLIC AIRY_HAS_CJSON)
 
-if(AGENTRT_HAS_LIBWEBSOCKETS)
+if(AIRY_HAS_LIBWEBSOCKETS)
     set_source_files_properties(
         ${GATEWAY_SRC_DIR}/gateway/ws_gateway.c
-        PROPERTIES COMPILE_DEFINITIONS "AGENTRT_COMPLIANCE_IMPL"
+        PROPERTIES COMPILE_DEFINITIONS "AIRY_COMPLIANCE_IMPL"
     )
 endif()
 target_include_directories(gateway_lib_obj PUBLIC
@@ -236,8 +236,8 @@ target_include_directories(gateway_lib_obj PUBLIC
 endif()
 
 # 条件包含外部库头文件和定义（使用根级缓存变量）
-# 注意：gateway_lib_obj 仅在 AGENTRT_HAS_CJSON 时创建，此处必须检查目标存在性
-if(AGENTRT_HAS_MICROHTTPD)
+# 注意：gateway_lib_obj 仅在 AIRY_HAS_CJSON 时创建，此处必须检查目标存在性
+if(AIRY_HAS_MICROHTTPD)
     if(TARGET gateway_lib_obj)
         if(libmicrohttpd_FOUND)
             target_include_directories(gateway_lib_obj PUBLIC ${libmicrohttpd_INCLUDE_DIRS})
@@ -248,7 +248,7 @@ if(AGENTRT_HAS_MICROHTTPD)
     endif()
 endif()
 
-if(AGENTRT_HAS_LIBWEBSOCKETS)
+if(AIRY_HAS_LIBWEBSOCKETS)
     if(TARGET gateway_lib_obj)
         if(libwebsockets_FOUND)
             target_include_directories(gateway_lib_obj PUBLIC ${libwebsockets_INCLUDE_DIRS})
@@ -260,19 +260,19 @@ if(AGENTRT_HAS_LIBWEBSOCKETS)
 endif()
 
 # ==================== Gateway daemon 可执行文件 ====================
-# main.c 仅属于 daemon 可执行文件；服务代码已纳入 agentrt_gateway_service 库
+# main.c 仅属于 daemon 可执行文件；服务代码已纳入 airy_gateway_service 库
 add_executable(gateway_d
     src/main.c
 )
 
-if(AGENTRT_ENABLE_PROTOCOLS)
-    target_compile_definitions(gateway_d PRIVATE AGENTRT_HAS_PROTOCOLS=1)
+if(AIRY_ENABLE_PROTOCOLS)
+    target_compile_definitions(gateway_d PRIVATE AIRY_HAS_PROTOCOLS=1)
 endif()
 
 # ==================== 平台特定配置 ====================
 if(WIN32)
     target_compile_definitions(gateway_d PRIVATE
-        AGENTRT_PLATFORM_WINDOWS=1
+        AIRY_PLATFORM_WINDOWS=1
         WIN32_LEAN_AND_MEAN
         NOMINMAX
         _CRT_SECURE_NO_WARNINGS
@@ -284,7 +284,7 @@ if(WIN32)
 elseif(UNIX)
     target_link_libraries(gateway_d PRIVATE
         Threads::Threads
-        agentrt_platform_libs
+        airy_platform_libs
     )
 endif()
 
@@ -320,11 +320,11 @@ target_include_directories(gateway_d PRIVATE
     ${CJSON_INCLUDE_DIRS}
 )
 
-if(AGENTRT_HAS_MICROHTTPD)
+if(AIRY_HAS_MICROHTTPD)
     target_compile_definitions(gateway_d PRIVATE GATEWAY_HAS_HTTP=1 GATEWAY_HAS_LIBMICROHTTPD=1)
 endif()
 
-if(AGENTRT_HAS_LIBWEBSOCKETS)
+if(AIRY_HAS_LIBWEBSOCKETS)
     target_compile_definitions(gateway_d PRIVATE GATEWAY_HAS_WS=1)
 endif()
 
@@ -334,35 +334,35 @@ endif()
 #   （表现为 undefined reference to memory_alloc 等，但符号确实存在于 .a 中）。
 #   根 CMakeLists.txt 已添加 -ffat-lto-objects，让 LTO 对象同时包含机器代码，
 #   链接器可用传统符号表解析静态库，无需 --whole-archive。
-#   使用 --start-group/--end-group 处理 agentrt_gateway_service 与 svc_common/
-#   agentrt_protocols 之间的传递依赖符号解析。
+#   使用 --start-group/--end-group 处理 airy_gateway_service 与 svc_common/
+#   airy_protocols 之间的传递依赖符号解析。
 if(NOT MSVC AND NOT APPLE)
     target_link_libraries(gateway_d PRIVATE
         "-Wl,--start-group"
-        agentrt_gateway_service
+        airy_gateway_service
         "-Wl,--end-group"
         Threads::Threads
     )
 else()
     target_link_libraries(gateway_d PRIVATE
-        agentrt_gateway_service
+        airy_gateway_service
         Threads::Threads
     )
 endif()
-if(AGENTRT_HAS_CJSON)
+if(AIRY_HAS_CJSON)
     target_link_libraries(gateway_d PRIVATE
         $<TARGET_OBJECTS:gateway_lib_obj>
     )
 endif()
 
-if(AGENTRT_HAS_MICROHTTPD)
+if(AIRY_HAS_MICROHTTPD)
     if(libmicrohttpd_FOUND)
         target_link_libraries(gateway_d PRIVATE microhttpd)
     elseif(MICROHTTPD_FOUND)
         target_link_libraries(gateway_d PRIVATE ${MICROHTTPD_LIBRARIES})
     endif()
 endif()
-if(AGENTRT_HAS_LIBWEBSOCKETS)
+if(AIRY_HAS_LIBWEBSOCKETS)
     if(libwebsockets_FOUND)
         target_link_libraries(gateway_d PRIVATE websockets)
     elseif(LIBWEBSOCKETS_FOUND)

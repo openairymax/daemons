@@ -15,8 +15,8 @@
  * @see contracts/contract_A_B.h 第3节（协议适配器 vtable）
  */
 
-#ifndef AGENTRT_DAEMON_PLUGIN_D_PLUGIN_SERVICE_H
-#define AGENTRT_DAEMON_PLUGIN_D_PLUGIN_SERVICE_H
+#ifndef AIRY_RT_DAEMON_PLUGIN_D_PLUGIN_SERVICE_H
+#define AIRY_RT_DAEMON_PLUGIN_D_PLUGIN_SERVICE_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -56,7 +56,7 @@ typedef struct {
     char description[256];        /**< 描述 */
     plugin_type_t type;           /**< 插件类型 */
     uint32_t api_version;         /**< 插件 API 版本 */
-    uint32_t min_agentrt_version; /**< 最低 AgentRT 版本要求 */
+    uint32_t min_airy_version; /**< 最低 AgentRT 版本要求 */
 } plugin_metadata_t;
 
 /* ── 插件入口点 ── */
@@ -182,4 +182,4 @@ int plugin_service_list(char ***names, size_t *count, int type_filter);
 }
 #endif
 
-#endif /* AGENTRT_DAEMON_PLUGIN_D_PLUGIN_SERVICE_H */
+#endif /* AIRY_RT_DAEMON_PLUGIN_D_PLUGIN_SERVICE_H */

@@ -34,7 +34,7 @@ int installer_install_agent(market_service_t *service, const install_request_t *
                             install_result_t **result)
 {
     if (!service || !request || !result) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     return market_service_install_agent(service, request, result);
 }
@@ -43,7 +43,7 @@ int installer_install_skill(market_service_t *service, const install_request_t *
                             install_result_t **result)
 {
     if (!service || !request || !result) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     return market_service_install_skill(service, request, result);
 }
@@ -51,7 +51,7 @@ int installer_install_skill(market_service_t *service, const install_request_t *
 int installer_uninstall_agent(market_service_t *service, const char *agent_id)
 {
     if (!service || !agent_id) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     return market_service_uninstall_agent(service, agent_id);
 }
@@ -59,7 +59,7 @@ int installer_uninstall_agent(market_service_t *service, const char *agent_id)
 int installer_uninstall_skill(market_service_t *service, const char *skill_id)
 {
     if (!service || !skill_id) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
     return market_service_uninstall_skill(service, skill_id);
 }

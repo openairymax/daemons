@@ -7,8 +7,8 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#ifndef AGENTRT_STRATEGY_INTERFACE_H
-#define AGENTRT_STRATEGY_INTERFACE_H
+#ifndef AIRY_RT_STRATEGY_INTERFACE_H
+#define AIRY_RT_STRATEGY_INTERFACE_H
 
 #include "scheduler_service.h"
 
@@ -109,4 +109,4 @@ const strategy_interface_t *get_ml_based_strategy();
  */
 const strategy_interface_t *get_priority_based_strategy();
 
-#endif /* AGENTRT_STRATEGY_INTERFACE_H */
+#endif /* AIRY_RT_STRATEGY_INTERFACE_H */

@@ -10,8 +10,8 @@
  * 的完整转发链路，支持 A2A / MCP / OpenAI 兼容三种协议路径。
  */
 
-#ifndef AGENTRT_GATEWAY_FORWARD_H
-#define AGENTRT_GATEWAY_FORWARD_H
+#ifndef AIRY_RT_GATEWAY_FORWARD_H
+#define AIRY_RT_GATEWAY_FORWARD_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -193,4 +193,4 @@ void gw_forward_dump_stats(gw_forward_t *fw, uint32_t interval_sec);
 }
 #endif
 
-#endif /* AGENTRT_GATEWAY_FORWARD_H */
+#endif /* AIRY_RT_GATEWAY_FORWARD_H */

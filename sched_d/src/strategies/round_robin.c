@@ -36,9 +36,9 @@ typedef struct {
 static char *safe_strdup(const char *src)
 {
     if (!src) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
-    char *dest = AGENTRT_STRDUP(src);
+    char *dest = AIRY_STRDUP(src);
     return dest;
 }
 
@@ -51,14 +51,14 @@ static void free_agent_info(agent_info_t *agent)
     if (!agent)
         return;
     if (agent->agent_id) {
-        AGENTRT_FREE(agent->agent_id);
+        AIRY_FREE(agent->agent_id);
         agent->agent_id = NULL;
     }
     if (agent->agent_name) {
-        AGENTRT_FREE(agent->agent_name);
+        AIRY_FREE(agent->agent_name);
         agent->agent_name = NULL;
     }
-    AGENTRT_FREE(agent);
+    AIRY_FREE(agent);
 }
 
 /**
@@ -69,29 +69,29 @@ static void free_agent_info(agent_info_t *agent)
 static agent_info_t *clone_agent_info(const agent_info_t *src)
 {
     if (!src) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
-    agent_info_t *dest = (agent_info_t *)AGENTRT_MALLOC(sizeof(agent_info_t));
+    agent_info_t *dest = (agent_info_t *)AIRY_MALLOC(sizeof(agent_info_t));
     if (!dest) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     __builtin_memset(dest, 0, sizeof(agent_info_t));
 
     if (src->agent_id) {
         dest->agent_id = safe_strdup(src->agent_id);
         if (!dest->agent_id) {
-            AGENTRT_FREE(dest);
-            AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+            AIRY_FREE(dest);
+            AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
     }
 
     if (src->agent_name) {
         dest->agent_name = safe_strdup(src->agent_name);
         if (!dest->agent_name) {
-            AGENTRT_FREE(dest->agent_id);
-            AGENTRT_FREE(dest);
-            AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+            AIRY_FREE(dest->agent_id);
+            AIRY_FREE(dest);
+            AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
     }
 
@@ -113,22 +113,22 @@ static agent_info_t *clone_agent_info(const agent_info_t *src)
 static int round_robin_create(const sched_config_t *config, void **data)
 {
     if (!config || !data) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     *data = NULL;
 
-    round_robin_data_t *rrd = (round_robin_data_t *)AGENTRT_MALLOC(sizeof(round_robin_data_t));
+    round_robin_data_t *rrd = (round_robin_data_t *)AIRY_MALLOC(sizeof(round_robin_data_t));
     if (!rrd) {
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
     __builtin_memset(rrd, 0, sizeof(round_robin_data_t));
 
     rrd->max_agents = config->max_agents > 0 ? config->max_agents : 100;
-    rrd->agents = (agent_info_t **)AGENTRT_MALLOC(sizeof(agent_info_t *) * rrd->max_agents);
+    rrd->agents = (agent_info_t **)AIRY_MALLOC(sizeof(agent_info_t *) * rrd->max_agents);
     if (!rrd->agents) {
-        AGENTRT_FREE(rrd);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        AIRY_FREE(rrd);
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
     __builtin_memset(rrd->agents, 0, sizeof(agent_info_t *) * rrd->max_agents);
 
@@ -136,7 +136,7 @@ static int round_robin_create(const sched_config_t *config, void **data)
     rrd->current_index = 0;
 
     *data = rrd;
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 /**
@@ -147,7 +147,7 @@ static int round_robin_create(const sched_config_t *config, void **data)
 static int round_robin_destroy(void *data)
 {
     if (!data) {
-        return AGENTRT_OK;
+        return AIRY_OK;
     }
 
     round_robin_data_t *rrd = (round_robin_data_t *)data;
@@ -157,12 +157,12 @@ static int round_robin_destroy(void *data)
             free_agent_info(rrd->agents[i]);
             rrd->agents[i] = NULL;
         }
-        AGENTRT_FREE(rrd->agents);
+        AIRY_FREE(rrd->agents);
         rrd->agents = NULL;
     }
 
-    AGENTRT_FREE(rrd);
-    return AGENTRT_OK;
+    AIRY_FREE(rrd);
+    return AIRY_OK;
 }
 
 /**
@@ -174,30 +174,30 @@ static int round_robin_destroy(void *data)
 static int round_robin_register_agent(void *data, const agent_info_t *agent_info)
 {
     if (!data || !agent_info) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     round_robin_data_t *rrd = (round_robin_data_t *)data;
 
     if (!agent_info->agent_id) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (rrd->agent_count >= rrd->max_agents) {
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
     }
 
     for (size_t i = 0; i < rrd->agent_count; i++) {
         if (rrd->agents[i] && rrd->agents[i]->agent_id &&
             strcmp(rrd->agents[i]->agent_id, agent_info->agent_id) == 0) {
             if (rrd->agents[i]->agent_name) {
-                AGENTRT_FREE(rrd->agents[i]->agent_name);
+                AIRY_FREE(rrd->agents[i]->agent_name);
                 rrd->agents[i]->agent_name = NULL;
             }
             if (agent_info->agent_name) {
                 rrd->agents[i]->agent_name = safe_strdup(agent_info->agent_name);
                 if (!rrd->agents[i]->agent_name) {
-                    return AGENTRT_ERR_OUT_OF_MEMORY;
+                    return AIRY_ERR_OUT_OF_MEMORY;
                 }
             }
             rrd->agents[i]->load_factor = agent_info->load_factor;
@@ -205,17 +205,17 @@ static int round_robin_register_agent(void *data, const agent_info_t *agent_info
             rrd->agents[i]->avg_response_time_ms = agent_info->avg_response_time_ms;
             rrd->agents[i]->is_available = agent_info->is_available;
             rrd->agents[i]->weight = agent_info->weight;
-            return AGENTRT_OK;
+            return AIRY_OK;
         }
     }
 
     agent_info_t *new_agent = clone_agent_info(agent_info);
     if (!new_agent) {
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     rrd->agents[rrd->agent_count++] = new_agent;
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 /**
@@ -227,7 +227,7 @@ static int round_robin_register_agent(void *data, const agent_info_t *agent_info
 static int round_robin_unregister_agent(void *data, const char *agent_id)
 {
     if (!data || !agent_id) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     round_robin_data_t *rrd = (round_robin_data_t *)data;
@@ -247,11 +247,11 @@ static int round_robin_unregister_agent(void *data, const char *agent_id)
                 rrd->current_index = 0;
             }
 
-            return AGENTRT_OK;
+            return AIRY_OK;
         }
     }
 
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 /**
@@ -275,7 +275,7 @@ static int round_robin_update_agent_status(void *data, const agent_info_t *agent
 static int round_robin_schedule(void *data, const task_info_t *task_info, sched_result_t **result)
 {
     if (!data || !task_info || !result) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     *result = NULL;
@@ -283,7 +283,7 @@ static int round_robin_schedule(void *data, const task_info_t *task_info, sched_
     round_robin_data_t *rrd = (round_robin_data_t *)data;
 
     if (rrd->agent_count == 0) {
-        return AGENTRT_ERR_NOT_FOUND;
+        return AIRY_ERR_NOT_FOUND;
     }
 
     size_t __attribute__((unused)) start_index = rrd->current_index;
@@ -293,17 +293,17 @@ static int round_robin_schedule(void *data, const task_info_t *task_info, sched_
         agent_info_t *agent = rrd->agents[rrd->current_index];
 
         if (agent && agent->is_available && agent->load_factor < 0.9) {
-            sched_result_t *res = (sched_result_t *)AGENTRT_MALLOC(sizeof(sched_result_t));
+            sched_result_t *res = (sched_result_t *)AIRY_MALLOC(sizeof(sched_result_t));
             if (!res) {
-                return AGENTRT_ERR_OUT_OF_MEMORY;
+                return AIRY_ERR_OUT_OF_MEMORY;
             }
             __builtin_memset(res, 0, sizeof(sched_result_t));
 
             if (agent->agent_id) {
                 res->selected_agent_id = safe_strdup(agent->agent_id);
                 if (!res->selected_agent_id) {
-                    AGENTRT_FREE(res);
-                    return AGENTRT_ERR_OUT_OF_MEMORY;
+                    AIRY_FREE(res);
+                    return AIRY_ERR_OUT_OF_MEMORY;
                 }
             } else {
                 res->selected_agent_id = NULL;
@@ -315,14 +315,14 @@ static int round_robin_schedule(void *data, const task_info_t *task_info, sched_
             rrd->current_index = (rrd->current_index + 1) % rrd->agent_count;
 
             *result = res;
-            return AGENTRT_OK;
+            return AIRY_OK;
         }
 
         rrd->current_index = (rrd->current_index + 1) % rrd->agent_count;
         attempts++;
     }
 
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 /**

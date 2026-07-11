@@ -26,7 +26,7 @@ typedef struct registry_entry {
 
 struct tool_registry {
     registry_entry_t *buckets[HASH_SIZE];
-    agentrt_mutex_t lock;
+    airy_mtx_t lock;
 };
 
 static unsigned int hash(const char *id)
@@ -39,89 +39,89 @@ static unsigned int hash(const char *id)
 
 static tool_metadata_t *dup_metadata(const tool_metadata_t *src)
 {
-    tool_metadata_t *dst = AGENTRT_CALLOC(1, sizeof(tool_metadata_t));
+    tool_metadata_t *dst = AIRY_CALLOC(1, sizeof(tool_metadata_t));
     if (!dst) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
-    dst->id = AGENTRT_STRDUP(src->id);
+    dst->id = AIRY_STRDUP(src->id);
     if (!dst->id) {
-        AGENTRT_FREE(dst);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate id");
+        AIRY_FREE(dst);
+        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate id");
     }
-    dst->name = AGENTRT_STRDUP(src->name);
+    dst->name = AIRY_STRDUP(src->name);
     if (!dst->name) {
-        AGENTRT_FREE(dst->id);
-        AGENTRT_FREE(dst);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate name");
+        AIRY_FREE(dst->id);
+        AIRY_FREE(dst);
+        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate name");
     }
-    dst->description = src->description ? AGENTRT_STRDUP(src->description) : NULL;
+    dst->description = src->description ? AIRY_STRDUP(src->description) : NULL;
     if (src->description && !dst->description) {
-        AGENTRT_FREE(dst->name);
-        AGENTRT_FREE(dst->id);
-        AGENTRT_FREE(dst);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate description");
+        AIRY_FREE(dst->name);
+        AIRY_FREE(dst->id);
+        AIRY_FREE(dst);
+        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate description");
     }
-    dst->executable = AGENTRT_STRDUP(src->executable);
+    dst->executable = AIRY_STRDUP(src->executable);
     if (!dst->executable) {
-        AGENTRT_FREE(dst->description);
-        AGENTRT_FREE(dst->name);
-        AGENTRT_FREE(dst->id);
-        AGENTRT_FREE(dst);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate executable");
+        AIRY_FREE(dst->description);
+        AIRY_FREE(dst->name);
+        AIRY_FREE(dst->id);
+        AIRY_FREE(dst);
+        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate executable");
     }
     dst->timeout_sec = src->timeout_sec;
     dst->cacheable = src->cacheable;
-    dst->permission_rule = src->permission_rule ? AGENTRT_STRDUP(src->permission_rule) : NULL;
+    dst->permission_rule = src->permission_rule ? AIRY_STRDUP(src->permission_rule) : NULL;
     if (src->permission_rule && !dst->permission_rule) {
-        AGENTRT_FREE(dst->executable);
-        AGENTRT_FREE(dst->description);
-        AGENTRT_FREE(dst->name);
-        AGENTRT_FREE(dst->id);
-        AGENTRT_FREE(dst);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate permission_rule");
+        AIRY_FREE(dst->executable);
+        AIRY_FREE(dst->description);
+        AIRY_FREE(dst->name);
+        AIRY_FREE(dst->id);
+        AIRY_FREE(dst);
+        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate permission_rule");
     }
     if (src->param_count > 0) {
-        dst->params = AGENTRT_CALLOC(src->param_count, sizeof(tool_param_t));
+        dst->params = AIRY_CALLOC(src->param_count, sizeof(tool_param_t));
         if (!dst->params) {
-            AGENTRT_FREE(dst->permission_rule);
-            AGENTRT_FREE(dst->executable);
-            AGENTRT_FREE(dst->description);
-            AGENTRT_FREE(dst->name);
-            AGENTRT_FREE(dst->id);
-            AGENTRT_FREE(dst);
-            AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+            AIRY_FREE(dst->permission_rule);
+            AIRY_FREE(dst->executable);
+            AIRY_FREE(dst->description);
+            AIRY_FREE(dst->name);
+            AIRY_FREE(dst->id);
+            AIRY_FREE(dst);
+            AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
         for (size_t i = 0; i < src->param_count; ++i) {
-            dst->params[i].name = AGENTRT_STRDUP(src->params[i].name);
+            dst->params[i].name = AIRY_STRDUP(src->params[i].name);
             if (!dst->params[i].name) {
                 for (size_t k = 0; k < i; ++k) {
-                    AGENTRT_FREE(dst->params[k].name);
-                    AGENTRT_FREE(dst->params[k].schema);
+                    AIRY_FREE(dst->params[k].name);
+                    AIRY_FREE(dst->params[k].schema);
                 }
-                AGENTRT_FREE(dst->params);
-                AGENTRT_FREE(dst->permission_rule);
-                AGENTRT_FREE(dst->executable);
-                AGENTRT_FREE(dst->description);
-                AGENTRT_FREE(dst->name);
-                AGENTRT_FREE(dst->id);
-                AGENTRT_FREE(dst);
-                AGENTRT_ERROR_NULL(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate param name");
+                AIRY_FREE(dst->params);
+                AIRY_FREE(dst->permission_rule);
+                AIRY_FREE(dst->executable);
+                AIRY_FREE(dst->description);
+                AIRY_FREE(dst->name);
+                AIRY_FREE(dst->id);
+                AIRY_FREE(dst);
+                AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate param name");
             }
-            dst->params[i].schema = AGENTRT_STRDUP(src->params[i].schema);
+            dst->params[i].schema = AIRY_STRDUP(src->params[i].schema);
             if (!dst->params[i].schema) {
-                AGENTRT_FREE(dst->params[i].name);
+                AIRY_FREE(dst->params[i].name);
                 for (size_t k = 0; k < i; ++k) {
-                    AGENTRT_FREE(dst->params[k].name);
-                    AGENTRT_FREE(dst->params[k].schema);
+                    AIRY_FREE(dst->params[k].name);
+                    AIRY_FREE(dst->params[k].schema);
                 }
-                AGENTRT_FREE(dst->params);
-                AGENTRT_FREE(dst->permission_rule);
-                AGENTRT_FREE(dst->executable);
-                AGENTRT_FREE(dst->description);
-                AGENTRT_FREE(dst->name);
-                AGENTRT_FREE(dst->id);
-                AGENTRT_FREE(dst);
-                AGENTRT_ERROR_NULL(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate param schema");
+                AIRY_FREE(dst->params);
+                AIRY_FREE(dst->permission_rule);
+                AIRY_FREE(dst->executable);
+                AIRY_FREE(dst->description);
+                AIRY_FREE(dst->name);
+                AIRY_FREE(dst->id);
+                AIRY_FREE(dst);
+                AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate param schema");
             }
         }
         dst->param_count = src->param_count;
@@ -131,11 +131,11 @@ static tool_metadata_t *dup_metadata(const tool_metadata_t *src)
 
 tool_registry_t *tool_registry_create(const tool_config_t *cfg)
 {
-    tool_registry_t *reg = AGENTRT_CALLOC(1, sizeof(tool_registry_t));
+    tool_registry_t *reg = AIRY_CALLOC(1, sizeof(tool_registry_t));
     if (!reg) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
-    agentrt_mutex_init(&reg->lock);
+    airy_mtx_init(&reg->lock);
 
     if (cfg && cfg->tools) {
         for (tool_def_t *def = cfg->tools; def->name; ++def) {
@@ -152,16 +152,16 @@ tool_registry_t *tool_registry_create(const tool_config_t *cfg)
                 while (def->params[cnt])
                     cnt++;
                 if (cnt > 0) {
-                    tool_param_t *params = AGENTRT_CALLOC(cnt, sizeof(tool_param_t));
+                    tool_param_t *params = AIRY_CALLOC(cnt, sizeof(tool_param_t));
                     if (params) {
                         for (size_t i = 0; i < cnt; ++i) {
-                            params[i].name = AGENTRT_STRDUP(def->params[i]);
+                            params[i].name = AIRY_STRDUP(def->params[i]);
                             if (!params[i].name) {
                                 for (size_t k = 0; k < i; ++k) {
-                                    AGENTRT_FREE((void *)params[k].name);
-                                    AGENTRT_FREE((void *)params[k].schema);
+                                    AIRY_FREE((void *)params[k].name);
+                                    AIRY_FREE((void *)params[k].schema);
                                 }
-                                AGENTRT_FREE(params);
+                                AIRY_FREE(params);
                                 params = NULL;
                                 break;
                             }
@@ -185,14 +185,14 @@ tool_registry_t *tool_registry_create(const tool_config_t *cfg)
                             } else {
                                 snprintf(schema, sizeof(schema), "{}");
                             }
-                            params[i].schema = AGENTRT_STRDUP(schema);
+                            params[i].schema = AIRY_STRDUP(schema);
                             if (!params[i].schema) {
-                                AGENTRT_FREE(params[i].name);
+                                AIRY_FREE(params[i].name);
                                 for (size_t k = 0; k < i; ++k) {
-                                    AGENTRT_FREE((void *)params[k].name);
-                                    AGENTRT_FREE((void *)params[k].schema);
+                                    AIRY_FREE((void *)params[k].name);
+                                    AIRY_FREE((void *)params[k].schema);
                                 }
-                                AGENTRT_FREE(params);
+                                AIRY_FREE(params);
                                 params = NULL;
                                 break;
                             }
@@ -207,10 +207,10 @@ tool_registry_t *tool_registry_create(const tool_config_t *cfg)
             tool_registry_add(reg, &meta);
             if (meta.params) {
                 for (size_t i = 0; i < meta.param_count; ++i) {
-                    AGENTRT_FREE((void *)meta.params[i].name);
-                    AGENTRT_FREE((void *)meta.params[i].schema);
+                    AIRY_FREE((void *)meta.params[i].name);
+                    AIRY_FREE((void *)meta.params[i].schema);
                 }
-                AGENTRT_FREE((void *)meta.params);
+                AIRY_FREE((void *)meta.params);
             }
         }
     }
@@ -221,100 +221,100 @@ void tool_registry_destroy(tool_registry_t *reg)
 {
     if (!reg)
         return;
-    agentrt_mutex_lock(&reg->lock);
+    airy_mtx_lock(&reg->lock);
     for (int i = 0; i < HASH_SIZE; ++i) {
         registry_entry_t *e = reg->buckets[i];
         while (e) {
             registry_entry_t *next = e->next;
-            AGENTRT_FREE(e->id);
+            AIRY_FREE(e->id);
             tool_metadata_free(e->meta);
-            AGENTRT_FREE(e);
+            AIRY_FREE(e);
             e = next;
         }
     }
-    agentrt_mutex_unlock(&reg->lock);
-    agentrt_mutex_destroy(&reg->lock);
-    AGENTRT_FREE(reg);
+    airy_mtx_unlock(&reg->lock);
+    airy_mtx_destroy(&reg->lock);
+    AIRY_FREE(reg);
 }
 
 int tool_registry_add(tool_registry_t *reg, const tool_metadata_t *meta)
 {
     if (!reg || !meta || !meta->id)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     unsigned int idx = hash(meta->id);
-    agentrt_mutex_lock(&reg->lock);
+    airy_mtx_lock(&reg->lock);
     for (registry_entry_t *e = reg->buckets[idx]; e; e = e->next) {
         if (strcmp(e->id, meta->id) == 0) {
-            agentrt_mutex_unlock(&reg->lock);
-            return AGENTRT_ERR_ALREADY_EXISTS;
+            airy_mtx_unlock(&reg->lock);
+            return AIRY_ERR_ALREADY_EXISTS;
         }
     }
-    registry_entry_t *e = AGENTRT_CALLOC(1, sizeof(registry_entry_t));
+    registry_entry_t *e = AIRY_CALLOC(1, sizeof(registry_entry_t));
     if (!e) {
-        agentrt_mutex_unlock(&reg->lock);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        airy_mtx_unlock(&reg->lock);
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
-    e->id = AGENTRT_STRDUP(meta->id);
+    e->id = AIRY_STRDUP(meta->id);
     e->meta = dup_metadata(meta);
     if (!e->id || !e->meta) {
-        AGENTRT_FREE(e->id);
-        AGENTRT_FREE(e->meta);
-        AGENTRT_FREE(e);
-        agentrt_mutex_unlock(&reg->lock);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        AIRY_FREE(e->id);
+        AIRY_FREE(e->meta);
+        AIRY_FREE(e);
+        airy_mtx_unlock(&reg->lock);
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
     e->next = reg->buckets[idx];
     reg->buckets[idx] = e;
-    agentrt_mutex_unlock(&reg->lock);
+    airy_mtx_unlock(&reg->lock);
     return 0;
 }
 
 int tool_registry_remove(tool_registry_t *reg, const char *tool_id)
 {
     if (!reg || !tool_id)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     unsigned int idx = hash(tool_id);
-    agentrt_mutex_lock(&reg->lock);
+    airy_mtx_lock(&reg->lock);
     registry_entry_t **p = &reg->buckets[idx];
     while (*p) {
         if (strcmp((*p)->id, tool_id) == 0) {
             registry_entry_t *victim = *p;
             *p = victim->next;
-            AGENTRT_FREE(victim->id);
+            AIRY_FREE(victim->id);
             tool_metadata_free(victim->meta);
-            AGENTRT_FREE(victim);
-            agentrt_mutex_unlock(&reg->lock);
+            AIRY_FREE(victim);
+            airy_mtx_unlock(&reg->lock);
             return 0;
         }
         p = &(*p)->next;
     }
-    agentrt_mutex_unlock(&reg->lock);
-    return AGENTRT_ERR_NOT_FOUND;
+    airy_mtx_unlock(&reg->lock);
+    return AIRY_ERR_NOT_FOUND;
 }
 
 tool_metadata_t *tool_registry_get(tool_registry_t *reg, const char *tool_id)
 {
     if (!reg || !tool_id) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
     unsigned int idx = hash(tool_id);
-    agentrt_mutex_lock(&reg->lock);
+    airy_mtx_lock(&reg->lock);
     for (registry_entry_t *e = reg->buckets[idx]; e; e = e->next) {
         if (strcmp(e->id, tool_id) == 0) {
             tool_metadata_t *copy = dup_metadata(e->meta);
-            agentrt_mutex_unlock(&reg->lock);
+            airy_mtx_unlock(&reg->lock);
             return copy;
         }
     }
-    agentrt_mutex_unlock(&reg->lock);
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+    airy_mtx_unlock(&reg->lock);
+    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
 char *tool_registry_list_json(tool_registry_t *reg)
 {
     if (!reg)
-        return AGENTRT_STRDUP("[]");
-    agentrt_mutex_lock(&reg->lock);
+        return AIRY_STRDUP("[]");
+    airy_mtx_lock(&reg->lock);
     cJSON *arr = cJSON_CreateArray();
     for (int i = 0; i < HASH_SIZE; ++i) {
         for (registry_entry_t *e = reg->buckets[i]; e; e = e->next) {
@@ -329,6 +329,6 @@ char *tool_registry_list_json(tool_registry_t *reg)
     }
     char *json = cJSON_PrintUnformatted(arr);
     cJSON_Delete(arr);
-    agentrt_mutex_unlock(&reg->lock);
+    airy_mtx_unlock(&reg->lock);
     return json;
 }

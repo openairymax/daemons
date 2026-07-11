@@ -44,7 +44,7 @@ typedef struct circuit_breaker_s {
     uint32_t window_calls;
     bool destroying;
     struct cb_manager_s *manager;
-    agentrt_mutex_t mutex;
+    airy_mtx_t mutex;
 } cb_internal_t;
 
 typedef struct cb_manager_s {
@@ -52,7 +52,7 @@ typedef struct cb_manager_s {
     uint32_t breaker_count;
     cb_callback_entry_t callbacks[CB_MAX_CALLBACKS];
     uint32_t callback_count;
-    agentrt_mutex_t mutex;
+    airy_mtx_t mutex;
 } cb_manager_internal_t;
 
 /* ==================== 辅助函数 ==================== */
@@ -75,7 +75,7 @@ static void transition_state(cb_internal_t *cb, cb_manager_internal_t *mgr, cb_s
         return;
 
     cb->state = new_state;
-    cb->state_changed_at = agentrt_time_ms();
+    cb->state_changed_at = airy_time_ms();
     cb->stats.state_transitions++;
     cb->stats.last_state_change_time = cb->state_changed_at;
 
@@ -89,7 +89,7 @@ static void transition_state(cb_internal_t *cb, cb_manager_internal_t *mgr, cb_s
         cb->stats.consecutive_successes = 0;
         cb->window_failures = 0;
         cb->window_calls = 0;
-        cb->window_start = agentrt_time_ms();
+        cb->window_start = airy_time_ms();
     }
 
     cb_event_t event;
@@ -111,7 +111,7 @@ static void transition_state(cb_internal_t *cb, cb_manager_internal_t *mgr, cb_s
 
 static void check_window_reset(cb_internal_t *cb)
 {
-    uint64_t now = agentrt_time_ms();
+    uint64_t now = airy_time_ms();
     if (cb->config.window_size_ms > 0 && (now - cb->window_start) >= cb->config.window_size_ms) {
         cb->window_start = now;
         cb->window_failures = 0;
@@ -141,7 +141,7 @@ static bool should_trip(cb_internal_t *cb)
 
 /* ==================== 公共API实现 ==================== */
 
-AGENTRT_API cb_config_t cb_create_default_config(void)
+AIRY_API cb_config_t cb_create_default_config(void)
 {
     cb_config_t config;
     __builtin_memset(&config, 0, sizeof(cb_config_t));
@@ -149,100 +149,100 @@ AGENTRT_API cb_config_t cb_create_default_config(void)
     config.success_threshold = CB_DEFAULT_SUCCESS_THRESHOLD;
     config.timeout_ms = CB_DEFAULT_TIMEOUT_MS;
     config.half_open_max_calls = CB_DEFAULT_HALF_OPEN_MAX;
-    config.window_size_ms = AGENTRT_CB_WINDOW_SIZE_MS;
-    config.slow_call_duration_ms = AGENTRT_CB_SLOW_CALL_MS;
-    config.slow_call_rate_threshold = AGENTRT_CB_SLOW_CALL_RATE_PCT;
-    config.failure_rate_threshold = AGENTRT_CB_FAILURE_RATE_PCT;
+    config.window_size_ms = AIRY_CB_WINDOW_SIZE_MS;
+    config.slow_call_duration_ms = AIRY_CB_SLOW_CALL_MS;
+    config.slow_call_rate_threshold = AIRY_CB_SLOW_CALL_RATE_PCT;
+    config.failure_rate_threshold = AIRY_CB_FAILURE_RATE_PCT;
     config.enable_slow_call_detection = true;
     config.enable_auto_failover = false;
     return config;
 }
 
-AGENTRT_API cb_failover_config_t cb_create_default_failover_config(void)
+AIRY_API cb_failover_config_t cb_create_default_failover_config(void)
 {
     cb_failover_config_t config;
     __builtin_memset(&config, 0, sizeof(cb_failover_config_t));
     config.strategy = CB_FAILOVER_RETRY;
-    config.max_retries = AGENTRT_DEFAULT_MAX_RETRIES;
-    config.retry_delay_ms = AGENTRT_DEFAULT_RETRY_DELAY_MS;
-    config.retry_backoff_factor = AGENTRT_DEFAULT_BACKOFF_FACTOR;
+    config.max_retries = AIRY_DEFAULT_MAX_RETRIES;
+    config.retry_delay_ms = AIRY_DEFAULT_RETRY_DELAY_MS;
+    config.retry_backoff_factor = AIRY_DEFAULT_BACKOFF_FACTOR;
     return config;
 }
 
-AGENTRT_API cb_manager_t cb_manager_create(void)
+AIRY_API cb_manager_t cb_manager_create(void)
 {
     cb_manager_internal_t *mgr =
-        (cb_manager_internal_t *)AGENTRT_CALLOC(1, sizeof(cb_manager_internal_t));
+        (cb_manager_internal_t *)AIRY_CALLOC(1, sizeof(cb_manager_internal_t));
     if (!mgr) {
         SVC_LOG_ERROR("cb_manager_create: memory allocation failed");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    agentrt_error_t err = agentrt_mutex_init(&mgr->mutex);
-    if (err != AGENTRT_SUCCESS) {
+    airy_err_t err = airy_mtx_init(&mgr->mutex);
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("cb_manager_create: mutex init failed err=%d", err);
-        AGENTRT_FREE(mgr);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_FREE(mgr);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     LOG_INFO("Circuit breaker manager created");
     return (cb_manager_t)mgr;
 }
 
-AGENTRT_API void cb_manager_destroy(cb_manager_t manager)
+AIRY_API void cb_manager_destroy(cb_manager_t manager)
 {
     if (!manager)
         return;
 
     cb_manager_internal_t *mgr = (cb_manager_internal_t *)manager;
 
-    agentrt_mutex_lock(&mgr->mutex);
+    airy_mtx_lock(&mgr->mutex);
     for (uint32_t i = 0; i < mgr->breaker_count; i++) {
         if (mgr->breakers[i]) {
             mgr->breakers[i]->destroying = true;
-            agentrt_mutex_destroy(&mgr->breakers[i]->mutex);
-            AGENTRT_FREE(mgr->breakers[i]);
+            airy_mtx_destroy(&mgr->breakers[i]->mutex);
+            AIRY_FREE(mgr->breakers[i]);
         }
     }
     mgr->breaker_count = 0;
-    agentrt_mutex_unlock(&mgr->mutex);
+    airy_mtx_unlock(&mgr->mutex);
 
-    agentrt_mutex_destroy(&mgr->mutex);
-    AGENTRT_FREE(mgr);
+    airy_mtx_destroy(&mgr->mutex);
+    AIRY_FREE(mgr);
 
     LOG_INFO("Circuit breaker manager destroyed");
 }
 
-AGENTRT_API circuit_breaker_t cb_create(cb_manager_t manager, const char *name,
+AIRY_API circuit_breaker_t cb_create(cb_manager_t manager, const char *name,
                                         const cb_config_t *config)
 {
     if (!manager || !name) {
         SVC_LOG_ERROR("cb_create: null parameter manager=%p name=%p", (void *)manager, (void *)name);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     cb_manager_internal_t *mgr = (cb_manager_internal_t *)manager;
 
-    agentrt_mutex_lock(&mgr->mutex);
+    airy_mtx_lock(&mgr->mutex);
 
     if (mgr->breaker_count >= CB_MAX_BREAKERS) {
-        agentrt_mutex_unlock(&mgr->mutex);
+        airy_mtx_unlock(&mgr->mutex);
         SVC_LOG_ERROR("cb_create: max circuit breakers reached count=%u max=%u", mgr->breaker_count, CB_MAX_BREAKERS);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_OVERFLOW, "limit exceeded");
+        AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
     }
 
     for (uint32_t i = 0; i < mgr->breaker_count; i++) {
         if (strcmp(mgr->breakers[i]->name, name) == 0) {
-            agentrt_mutex_unlock(&mgr->mutex);
+            airy_mtx_unlock(&mgr->mutex);
             return (circuit_breaker_t)mgr->breakers[i];
         }
     }
 
-    cb_internal_t *cb = (cb_internal_t *)AGENTRT_CALLOC(1, sizeof(cb_internal_t));
+    cb_internal_t *cb = (cb_internal_t *)AIRY_CALLOC(1, sizeof(cb_internal_t));
     if (!cb) {
-        agentrt_mutex_unlock(&mgr->mutex);
+        airy_mtx_unlock(&mgr->mutex);
         SVC_LOG_ERROR("cb_create: memory allocation failed for breaker '%s'", name);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     safe_strcpy(cb->name, name, CB_MAX_NAME_LEN);
@@ -255,29 +255,29 @@ AGENTRT_API circuit_breaker_t cb_create(cb_manager_t manager, const char *name,
 
     cb->failover_config = cb_create_default_failover_config();
     cb->state = CB_STATE_CLOSED;
-    cb->state_changed_at = agentrt_time_ms();
-    cb->window_start = agentrt_time_ms();
+    cb->state_changed_at = airy_time_ms();
+    cb->window_start = airy_time_ms();
     cb->manager = mgr;
 
-    agentrt_error_t err = agentrt_mutex_init(&cb->mutex);
-    if (err != AGENTRT_SUCCESS) {
+    airy_err_t err = airy_mtx_init(&cb->mutex);
+    if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("cb_create: mutex init failed for breaker '%s' err=%d", name, err);
-        AGENTRT_FREE(cb);
-        agentrt_mutex_unlock(&mgr->mutex);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_FREE(cb);
+        airy_mtx_unlock(&mgr->mutex);
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     mgr->breakers[mgr->breaker_count] = cb;
     mgr->breaker_count++;
 
-    agentrt_mutex_unlock(&mgr->mutex);
+    airy_mtx_unlock(&mgr->mutex);
 
     LOG_INFO("Circuit breaker '%s' created (failure_threshold=%u, timeout=%ums)", name,
              cb->config.failure_threshold, cb->config.timeout_ms);
     return (circuit_breaker_t)cb;
 }
 
-AGENTRT_API void cb_destroy(circuit_breaker_t breaker)
+AIRY_API void cb_destroy(circuit_breaker_t breaker)
 {
     if (!breaker)
         return;
@@ -288,7 +288,7 @@ AGENTRT_API void cb_destroy(circuit_breaker_t breaker)
     if (cb->manager) {
         cb_manager_internal_t *mgr = cb->manager;
 
-        agentrt_mutex_lock(&mgr->mutex);
+        airy_mtx_lock(&mgr->mutex);
         for (uint32_t i = 0; i < mgr->breaker_count; i++) {
             if (mgr->breakers[i] == cb) {
                 /* 将后续元素前移填补空位 */
@@ -300,20 +300,20 @@ AGENTRT_API void cb_destroy(circuit_breaker_t breaker)
                 break;
             }
         }
-        agentrt_mutex_unlock(&mgr->mutex);
+        airy_mtx_unlock(&mgr->mutex);
     }
 
-    agentrt_mutex_lock(&cb->mutex);
+    airy_mtx_lock(&cb->mutex);
     cb->destroying = true;
-    agentrt_mutex_unlock(&cb->mutex);
+    airy_mtx_unlock(&cb->mutex);
 
     LOG_INFO("Circuit breaker '%s' destroyed", cb->name);
 
-    agentrt_mutex_destroy(&cb->mutex);
-    AGENTRT_FREE(cb);
+    airy_mtx_destroy(&cb->mutex);
+    AIRY_FREE(cb);
 }
 
-AGENTRT_API bool cb_allow_request(circuit_breaker_t breaker)
+AIRY_API bool cb_allow_request(circuit_breaker_t breaker)
 {
     if (!breaker) {
         SVC_LOG_ERROR("cb_allow_request: null breaker parameter");
@@ -322,47 +322,47 @@ AGENTRT_API bool cb_allow_request(circuit_breaker_t breaker)
 
     cb_internal_t *cb = (cb_internal_t *)breaker;
 
-    agentrt_mutex_lock(&cb->mutex);
+    airy_mtx_lock(&cb->mutex);
     if (cb->destroying) {
         SVC_LOG_WARN("cb_allow_request: breaker is being destroyed");
-        agentrt_mutex_unlock(&cb->mutex);
+        airy_mtx_unlock(&cb->mutex);
         return false;
     }
 
     switch (cb->state) {
     case CB_STATE_CLOSED:
-        agentrt_mutex_unlock(&cb->mutex);
+        airy_mtx_unlock(&cb->mutex);
         return true;
 
     case CB_STATE_OPEN: {
-        uint64_t now = agentrt_time_ms();
+        uint64_t now = airy_time_ms();
         if (now - cb->state_changed_at >= cb->config.timeout_ms) {
             transition_state(cb, cb->manager, CB_STATE_HALF_OPEN);
-            agentrt_mutex_unlock(&cb->mutex);
+            airy_mtx_unlock(&cb->mutex);
             return true;
         }
         cb->stats.rejected_calls++;
-        agentrt_mutex_unlock(&cb->mutex);
+        airy_mtx_unlock(&cb->mutex);
         return false;
     }
 
     case CB_STATE_HALF_OPEN:
         if (cb->half_open_calls < cb->config.half_open_max_calls) {
             cb->half_open_calls++;
-            agentrt_mutex_unlock(&cb->mutex);
+            airy_mtx_unlock(&cb->mutex);
             return true;
         }
         cb->stats.rejected_calls++;
-        agentrt_mutex_unlock(&cb->mutex);
+        airy_mtx_unlock(&cb->mutex);
         return false;
 
     default:
-        agentrt_mutex_unlock(&cb->mutex);
+        airy_mtx_unlock(&cb->mutex);
         return false;
     }
 }
 
-AGENTRT_API void cb_record_success(circuit_breaker_t breaker, uint32_t duration_ms)
+AIRY_API void cb_record_success(circuit_breaker_t breaker, uint32_t duration_ms)
 {
     if (!breaker) {
         SVC_LOG_ERROR("cb_record_success: null breaker parameter");
@@ -371,16 +371,16 @@ AGENTRT_API void cb_record_success(circuit_breaker_t breaker, uint32_t duration_
 
     cb_internal_t *cb = (cb_internal_t *)breaker;
 
-    agentrt_mutex_lock(&cb->mutex);
+    airy_mtx_lock(&cb->mutex);
     if (cb->destroying) {
         SVC_LOG_WARN("cb_record_success: breaker is being destroyed");
-        agentrt_mutex_unlock(&cb->mutex);
+        airy_mtx_unlock(&cb->mutex);
         return;
     }
 
     cb->stats.total_calls++;
     cb->stats.successful_calls++;
-    cb->stats.last_success_time = agentrt_time_ms();
+    cb->stats.last_success_time = airy_time_ms();
     cb->stats.consecutive_failures = 0;
     cb->stats.consecutive_successes++;
 
@@ -400,10 +400,10 @@ AGENTRT_API void cb_record_success(circuit_breaker_t breaker, uint32_t duration_
         }
     }
 
-    agentrt_mutex_unlock(&cb->mutex);
+    airy_mtx_unlock(&cb->mutex);
 }
 
-AGENTRT_API void cb_record_failure(circuit_breaker_t breaker, int32_t error_code)
+AIRY_API void cb_record_failure(circuit_breaker_t breaker, int32_t error_code)
 {
     if (!breaker) {
         SVC_LOG_ERROR("cb_record_failure: null breaker parameter");
@@ -412,16 +412,16 @@ AGENTRT_API void cb_record_failure(circuit_breaker_t breaker, int32_t error_code
 
     cb_internal_t *cb = (cb_internal_t *)breaker;
 
-    agentrt_mutex_lock(&cb->mutex);
+    airy_mtx_lock(&cb->mutex);
     if (cb->destroying) {
         SVC_LOG_WARN("cb_record_failure: breaker is being destroyed");
-        agentrt_mutex_unlock(&cb->mutex);
+        airy_mtx_unlock(&cb->mutex);
         return;
     }
 
     cb->stats.total_calls++;
     cb->stats.failed_calls++;
-    cb->stats.last_failure_time = agentrt_time_ms();
+    cb->stats.last_failure_time = airy_time_ms();
     cb->stats.consecutive_failures++;
     cb->stats.consecutive_successes = 0;
 
@@ -444,13 +444,13 @@ AGENTRT_API void cb_record_failure(circuit_breaker_t breaker, int32_t error_code
         transition_state(cb, cb->manager, CB_STATE_OPEN);
     }
 
-    agentrt_mutex_unlock(&cb->mutex);
+    airy_mtx_unlock(&cb->mutex);
 
     LOG_DEBUG("Circuit breaker '%s': failure recorded (error=%d, consecutive=%u)", cb->name,
               error_code, cb->stats.consecutive_failures);
 }
 
-AGENTRT_API void cb_record_timeout(circuit_breaker_t breaker)
+AIRY_API void cb_record_timeout(circuit_breaker_t breaker)
 {
     if (!breaker) {
         SVC_LOG_ERROR("cb_record_timeout: null breaker parameter");
@@ -459,17 +459,17 @@ AGENTRT_API void cb_record_timeout(circuit_breaker_t breaker)
 
     cb_internal_t *cb = (cb_internal_t *)breaker;
 
-    agentrt_mutex_lock(&cb->mutex);
+    airy_mtx_lock(&cb->mutex);
     if (cb->destroying) {
         SVC_LOG_WARN("cb_record_timeout: breaker is being destroyed");
-        agentrt_mutex_unlock(&cb->mutex);
+        airy_mtx_unlock(&cb->mutex);
         return;
     }
 
     cb->stats.total_calls++;
     cb->stats.timeout_calls++;
     cb->stats.failed_calls++;
-    cb->stats.last_failure_time = agentrt_time_ms();
+    cb->stats.last_failure_time = airy_time_ms();
     cb->stats.consecutive_failures++;
     cb->stats.consecutive_successes = 0;
 
@@ -492,14 +492,14 @@ AGENTRT_API void cb_record_timeout(circuit_breaker_t breaker)
         transition_state(cb, cb->manager, CB_STATE_OPEN);
     }
 
-    agentrt_mutex_unlock(&cb->mutex);
+    airy_mtx_unlock(&cb->mutex);
 
     LOG_DEBUG("Circuit breaker '%s': timeout recorded", cb->name);
 }
 
 /* ==================== 状态查询 ==================== */
 
-AGENTRT_API cb_state_t cb_get_state(circuit_breaker_t breaker)
+AIRY_API cb_state_t cb_get_state(circuit_breaker_t breaker)
 {
     if (!breaker) {
         SVC_LOG_ERROR("cb_get_state: null breaker parameter");
@@ -509,38 +509,38 @@ AGENTRT_API cb_state_t cb_get_state(circuit_breaker_t breaker)
     return cb->state;
 }
 
-AGENTRT_API const char *cb_get_name(circuit_breaker_t breaker)
+AIRY_API const char *cb_get_name(circuit_breaker_t breaker)
 {
     if (!breaker) {
         SVC_LOG_ERROR("cb_get_name: null breaker parameter");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     cb_internal_t *cb = (cb_internal_t *)breaker;
     return cb->name;
 }
 
-AGENTRT_API agentrt_error_t cb_get_stats(circuit_breaker_t breaker, cb_stats_t *stats)
+AIRY_API airy_err_t cb_get_stats(circuit_breaker_t breaker, cb_stats_t *stats)
 {
     if (!breaker || !stats) {
         SVC_LOG_ERROR("cb_get_stats: null parameter breaker=%p stats=%p", (void *)breaker, (void *)stats);
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
     }
 
     cb_internal_t *cb = (cb_internal_t *)breaker;
 
-    agentrt_mutex_lock(&cb->mutex);
+    airy_mtx_lock(&cb->mutex);
     if (cb->destroying) {
         SVC_LOG_WARN("cb_get_stats: breaker is being destroyed");
-        agentrt_mutex_unlock(&cb->mutex);
-        return AGENTRT_EINVAL;
+        airy_mtx_unlock(&cb->mutex);
+        return AIRY_EINVAL;
     }
     __builtin_memcpy(stats, &cb->stats, sizeof(cb_stats_t));
-    agentrt_mutex_unlock(&cb->mutex);
+    airy_mtx_unlock(&cb->mutex);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API void cb_reset(circuit_breaker_t breaker)
+AIRY_API void cb_reset(circuit_breaker_t breaker)
 {
     if (!breaker) {
         SVC_LOG_ERROR("cb_reset: null breaker parameter");
@@ -549,21 +549,21 @@ AGENTRT_API void cb_reset(circuit_breaker_t breaker)
 
     cb_internal_t *cb = (cb_internal_t *)breaker;
 
-    agentrt_mutex_lock(&cb->mutex);
+    airy_mtx_lock(&cb->mutex);
     if (cb->destroying) {
         SVC_LOG_WARN("cb_reset: breaker is being destroyed");
-        agentrt_mutex_unlock(&cb->mutex);
+        airy_mtx_unlock(&cb->mutex);
         return;
     }
 
     cb_state_t old = cb->state;
     cb->state = CB_STATE_CLOSED;
-    cb->state_changed_at = agentrt_time_ms();
+    cb->state_changed_at = airy_time_ms();
     cb->stats.consecutive_failures = 0;
     cb->stats.consecutive_successes = 0;
     cb->window_failures = 0;
     cb->window_calls = 0;
-    cb->window_start = agentrt_time_ms();
+    cb->window_start = airy_time_ms();
     cb->half_open_calls = 0;
 
     if (old != CB_STATE_CLOSED) {
@@ -571,12 +571,12 @@ AGENTRT_API void cb_reset(circuit_breaker_t breaker)
         cb->stats.last_state_change_time = cb->state_changed_at;
     }
 
-    agentrt_mutex_unlock(&cb->mutex);
+    airy_mtx_unlock(&cb->mutex);
 
     LOG_INFO("Circuit breaker '%s' reset to CLOSED", cb->name);
 }
 
-AGENTRT_API void cb_force_open(circuit_breaker_t breaker)
+AIRY_API void cb_force_open(circuit_breaker_t breaker)
 {
     if (!breaker) {
         SVC_LOG_ERROR("cb_force_open: null breaker parameter");
@@ -584,17 +584,17 @@ AGENTRT_API void cb_force_open(circuit_breaker_t breaker)
     }
     cb_internal_t *cb = (cb_internal_t *)breaker;
 
-    agentrt_mutex_lock(&cb->mutex);
+    airy_mtx_lock(&cb->mutex);
     if (cb->destroying) {
         SVC_LOG_WARN("cb_force_open: breaker is being destroyed");
-        agentrt_mutex_unlock(&cb->mutex);
+        airy_mtx_unlock(&cb->mutex);
         return;
     }
     transition_state(cb, cb->manager, CB_STATE_OPEN);
-    agentrt_mutex_unlock(&cb->mutex);
+    airy_mtx_unlock(&cb->mutex);
 }
 
-AGENTRT_API void cb_force_close(circuit_breaker_t breaker)
+AIRY_API void cb_force_close(circuit_breaker_t breaker)
 {
     if (!breaker) {
         SVC_LOG_ERROR("cb_force_close: null breaker parameter");
@@ -602,89 +602,89 @@ AGENTRT_API void cb_force_close(circuit_breaker_t breaker)
     }
     cb_internal_t *cb = (cb_internal_t *)breaker;
 
-    agentrt_mutex_lock(&cb->mutex);
+    airy_mtx_lock(&cb->mutex);
     if (cb->destroying) {
         SVC_LOG_WARN("cb_force_close: breaker is being destroyed");
-        agentrt_mutex_unlock(&cb->mutex);
+        airy_mtx_unlock(&cb->mutex);
         return;
     }
     transition_state(cb, cb->manager, CB_STATE_CLOSED);
-    agentrt_mutex_unlock(&cb->mutex);
+    airy_mtx_unlock(&cb->mutex);
 }
 
 /* ==================== 故障转移 ==================== */
 
-AGENTRT_API agentrt_error_t cb_set_failover_config(circuit_breaker_t breaker,
+AIRY_API airy_err_t cb_set_failover_config(circuit_breaker_t breaker,
                                                    const cb_failover_config_t *config)
 {
     if (!breaker || !config) {
         SVC_LOG_ERROR("cb_set_failover_config: null parameter breaker=%p config=%p", (void *)breaker, (void *)config);
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
     }
 
     cb_internal_t *cb = (cb_internal_t *)breaker;
 
-    agentrt_mutex_lock(&cb->mutex);
+    airy_mtx_lock(&cb->mutex);
     if (cb->destroying) {
         SVC_LOG_WARN("cb_set_failover_config: breaker is being destroyed");
-        agentrt_mutex_unlock(&cb->mutex);
-        return AGENTRT_EINVAL;
+        airy_mtx_unlock(&cb->mutex);
+        return AIRY_EINVAL;
     }
     __builtin_memcpy(&cb->failover_config, config, sizeof(cb_failover_config_t));
-    agentrt_mutex_unlock(&cb->mutex);
+    airy_mtx_unlock(&cb->mutex);
 
     LOG_INFO("Circuit breaker '%s': failover config updated (strategy=%d)", cb->name,
              config->strategy);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t cb_execute_failover(circuit_breaker_t breaker, int32_t original_error,
+AIRY_API airy_err_t cb_execute_failover(circuit_breaker_t breaker, int32_t original_error,
                                                 char *fallback_result, size_t result_size)
 {
     if (!breaker) {
         SVC_LOG_ERROR("cb_execute_failover: null breaker parameter");
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
     }
 
     cb_internal_t *cb = (cb_internal_t *)breaker;
 
-    agentrt_mutex_lock(&cb->mutex);
+    airy_mtx_lock(&cb->mutex);
     if (cb->destroying) {
         SVC_LOG_WARN("cb_execute_failover: breaker is being destroyed");
-        agentrt_mutex_unlock(&cb->mutex);
-        return AGENTRT_EINVAL;
+        airy_mtx_unlock(&cb->mutex);
+        return AIRY_EINVAL;
     }
 
     cb_failover_config_t *fc = &cb->failover_config;
-    agentrt_error_t err = DAEMON_EFAIL;
+    airy_err_t err = DAEMON_EFAIL;
 
     switch (fc->strategy) {
     case CB_FAILOVER_RETRY:
         snprintf(fallback_result, result_size,
                  "{\"failover\":\"retry\",\"service\":\"%s\",\"retries\":%u,\"delay_ms\":%u}",
                  cb->name, fc->max_retries, fc->retry_delay_ms);
-        err = AGENTRT_SUCCESS;
+        err = AIRY_SUCCESS;
         break;
 
     case CB_FAILOVER_FALLBACK:
         snprintf(fallback_result, result_size,
                  "{\"failover\":\"fallback\",\"service\":\"%s\",\"fallback\":\"%s\"}", cb->name,
                  fc->fallback_service);
-        err = AGENTRT_SUCCESS;
+        err = AIRY_SUCCESS;
         break;
 
     case CB_FAILOVER_REDIRECT:
         snprintf(fallback_result, result_size,
                  "{\"failover\":\"redirect\",\"service\":\"%s\",\"target\":\"%s\"}", cb->name,
                  fc->fallback_service);
-        err = AGENTRT_SUCCESS;
+        err = AIRY_SUCCESS;
         break;
 
     case CB_FAILOVER_CACHE:
         snprintf(fallback_result, result_size,
                  "{\"failover\":\"cache\",\"service\":\"%s\",\"error\":%d}", cb->name,
                  original_error);
-        err = AGENTRT_SUCCESS;
+        err = AIRY_SUCCESS;
         break;
 
     default:
@@ -695,7 +695,7 @@ AGENTRT_API agentrt_error_t cb_execute_failover(circuit_breaker_t breaker, int32
         break;
     }
 
-    agentrt_mutex_unlock(&cb->mutex);
+    airy_mtx_unlock(&cb->mutex);
 
     LOG_INFO("Circuit breaker '%s': failover executed (strategy=%d, error=%d)", cb->name,
              fc->strategy, original_error);
@@ -704,58 +704,58 @@ AGENTRT_API agentrt_error_t cb_execute_failover(circuit_breaker_t breaker, int32
 
 /* ==================== 事件与回调 ==================== */
 
-AGENTRT_API agentrt_error_t cb_register_event_callback(cb_manager_t manager,
+AIRY_API airy_err_t cb_register_event_callback(cb_manager_t manager,
                                                        cb_event_callback_t callback,
                                                        void *user_data)
 {
     if (!manager || !callback) {
         SVC_LOG_ERROR("cb_register_event_callback: null parameter manager=%p callback=%p", (void *)manager, (void *)(uintptr_t)callback);
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
     }
 
     cb_manager_internal_t *mgr = (cb_manager_internal_t *)manager;
 
-    agentrt_mutex_lock(&mgr->mutex);
+    airy_mtx_lock(&mgr->mutex);
 
     if (mgr->callback_count >= CB_MAX_CALLBACKS) {
-        agentrt_mutex_unlock(&mgr->mutex);
+        airy_mtx_unlock(&mgr->mutex);
         SVC_LOG_ERROR("cb_register_event_callback: max callbacks reached count=%u max=%u", mgr->callback_count, CB_MAX_CALLBACKS);
-        return AGENTRT_ENOMEM;
+        return AIRY_ENOMEM;
     }
 
     mgr->callbacks[mgr->callback_count].callback = callback;
     mgr->callbacks[mgr->callback_count].user_data = user_data;
     mgr->callback_count++;
 
-    agentrt_mutex_unlock(&mgr->mutex);
+    airy_mtx_unlock(&mgr->mutex);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API circuit_breaker_t cb_find(cb_manager_t manager, const char *name)
+AIRY_API circuit_breaker_t cb_find(cb_manager_t manager, const char *name)
 {
     if (!manager || !name) {
         SVC_LOG_ERROR("cb_find: null parameter manager=%p name=%p", (void *)manager, (void *)name);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     cb_manager_internal_t *mgr = (cb_manager_internal_t *)manager;
 
-    agentrt_mutex_lock(&mgr->mutex);
+    airy_mtx_lock(&mgr->mutex);
 
     for (uint32_t i = 0; i < mgr->breaker_count; i++) {
         if (strcmp(mgr->breakers[i]->name, name) == 0) {
-            agentrt_mutex_unlock(&mgr->mutex);
+            airy_mtx_unlock(&mgr->mutex);
             return (circuit_breaker_t)mgr->breakers[i];
         }
     }
 
-    agentrt_mutex_unlock(&mgr->mutex);
+    airy_mtx_unlock(&mgr->mutex);
     SVC_LOG_WARN("cb_find: breaker '%s' not found", name);
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
-AGENTRT_API uint32_t cb_count(cb_manager_t manager)
+AIRY_API uint32_t cb_count(cb_manager_t manager)
 {
     if (!manager) {
         SVC_LOG_ERROR("cb_count: null manager parameter");
@@ -765,7 +765,7 @@ AGENTRT_API uint32_t cb_count(cb_manager_t manager)
     return mgr->breaker_count;
 }
 
-AGENTRT_API const char *cb_state_to_string(cb_state_t state)
+AIRY_API const char *cb_state_to_string(cb_state_t state)
 {
     static const char *state_strings[] = {"CLOSED", "OPEN", "HALF_OPEN"};
 

@@ -1,7 +1,7 @@
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
 
 # 测试代码豁免 BAN 严格合规：测试允许使用裸 malloc/free/memset 等函数
-add_compile_definitions(AGENTRT_COMPLIANCE_IMPL)
+add_compile_definitions(AIRY_COMPLIANCE_IMPL)
 # Scheduler 服务测试构建文件
 
 
@@ -51,7 +51,7 @@ foreach(TEST_SRC ${SCHED_TEST_SOURCES})
 
     target_link_libraries(test_sched_${TEST_NAME} PRIVATE
         svc_common
-        agentrt_common
+        airy_common
         Threads::Threads
         m
     )

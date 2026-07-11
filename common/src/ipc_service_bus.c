@@ -24,7 +24,7 @@
 #include <string.h>
 #include <time.h>
 #include "error.h"
-/* P0.18.2: 提供 DAEMON_ESTATE 定义（daemon_errors.h:60，映射至 AGENTRT_ERR_SVC_NOT_READY） */
+/* P0.18.2: 提供 DAEMON_ESTATE 定义（daemon_errors.h:60，映射至 AIRY_ERR_SVC_NOT_READY） */
 #include "daemon_errors.h"
 
 /* ==================== 内部常量 ==================== */
@@ -51,8 +51,8 @@ typedef struct {
     uint64_t msg_id;
     ipc_bus_message_t *response;
     atomic_int completed;
-    agentrt_mutex_t mutex;
-    agentrt_cond_t cond;
+    airy_mtx_t mutex;
+    airy_cond_t cond;
 } pending_request_t;
 
 typedef struct ipc_bus_channel_s {
@@ -77,7 +77,7 @@ typedef struct ipc_service_bus_s {
     uint32_t pending_count;
     ipc_bus_stats_t stats;
     bool running;
-    agentrt_mutex_t mutex;
+    airy_mtx_t mutex;
     uint64_t next_msg_id;
 } ipc_service_bus_internal_t;
 
@@ -117,7 +117,7 @@ static ipc_bus_channel_internal_t *find_channel(ipc_service_bus_internal_t *bus,
             return ch;
         ch = ch->next;
     }
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
 static int32_t find_endpoint_index(ipc_service_bus_internal_t *bus, const char *service_name)
@@ -126,7 +126,7 @@ static int32_t find_endpoint_index(ipc_service_bus_internal_t *bus, const char *
         if (strcmp(bus->endpoints[i].service_name, service_name) == 0)
             return (int32_t)i;
     }
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 static void init_message_header(ipc_bus_message_header_t *header, ipc_bus_msg_type_t msg_type,
@@ -137,7 +137,7 @@ static void init_message_header(ipc_bus_message_header_t *header, ipc_bus_msg_ty
     header->version = IPC_BUS_MESSAGE_VERSION;
     header->msg_type = msg_type;
     header->protocol = protocol;
-    header->timestamp = agentrt_time_ms();
+    header->timestamp = airy_time_ms();
     if (source)
         safe_strcpy(header->source, source, IPC_BUS_SERVICE_ID_LEN);
     if (target)
@@ -146,22 +146,22 @@ static void init_message_header(ipc_bus_message_header_t *header, ipc_bus_msg_ty
 
 /* ==================== 公共API实现 ==================== */
 
-AGENTRT_API ipc_service_bus_t ipc_service_bus_create(const char *bus_name,
+AIRY_API ipc_service_bus_t ipc_service_bus_create(const char *bus_name,
                                                      const ipc_bus_channel_config_t *config)
 {
     if (!bus_name) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     ipc_service_bus_internal_t *bus =
-        (ipc_service_bus_internal_t *)AGENTRT_CALLOC(1, sizeof(ipc_service_bus_internal_t));
+        (ipc_service_bus_internal_t *)AIRY_CALLOC(1, sizeof(ipc_service_bus_internal_t));
     if (!bus) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     if (safe_strcpy(bus->name, bus_name, IPC_BUS_SERVICE_ID_LEN) != 0) {
-        AGENTRT_FREE(bus);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_FREE(bus);
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     if (config) {
@@ -175,10 +175,10 @@ AGENTRT_API ipc_service_bus_t ipc_service_bus_create(const char *bus_name,
         bus->default_config.buffer_size = IPC_BUS_MAX_MESSAGE_SIZE;
     }
 
-    agentrt_error_t err = agentrt_mutex_init(&bus->mutex);
-    if (err != AGENTRT_SUCCESS) {
-        AGENTRT_FREE(bus);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_OVERFLOW, "limit exceeded");
+    airy_err_t err = airy_mtx_init(&bus->mutex);
+    if (err != AIRY_SUCCESS) {
+        AIRY_FREE(bus);
+        AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
     }
 
     bus->running = false;
@@ -189,7 +189,7 @@ AGENTRT_API ipc_service_bus_t ipc_service_bus_create(const char *bus_name,
     return (ipc_service_bus_t)bus;
 }
 
-AGENTRT_API void ipc_service_bus_destroy(ipc_service_bus_t bus_handle)
+AIRY_API void ipc_service_bus_destroy(ipc_service_bus_t bus_handle)
 {
     if (!bus_handle)
         return;
@@ -203,7 +203,7 @@ AGENTRT_API void ipc_service_bus_destroy(ipc_service_bus_t bus_handle)
     ipc_bus_channel_internal_t *ch = bus->channels;
     while (ch) {
         ipc_bus_channel_internal_t *next = ch->next;
-        AGENTRT_FREE(ch);
+        AIRY_FREE(ch);
         ch = next;
     }
 
@@ -213,77 +213,77 @@ AGENTRT_API void ipc_service_bus_destroy(ipc_service_bus_t bus_handle)
         }
     }
 
-    agentrt_mutex_destroy(&bus->mutex);
-    AGENTRT_FREE(bus);
+    airy_mtx_destroy(&bus->mutex);
+    AIRY_FREE(bus);
 
     LOG_INFO("IPC service bus destroyed");
 }
 
-AGENTRT_API agentrt_error_t ipc_service_bus_start(ipc_service_bus_t bus_handle)
+AIRY_API airy_err_t ipc_service_bus_start(ipc_service_bus_t bus_handle)
 {
     if (!bus_handle)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
     if (bus->running) {
-        agentrt_mutex_unlock(&bus->mutex);
-        return AGENTRT_SUCCESS;
+        airy_mtx_unlock(&bus->mutex);
+        return AIRY_SUCCESS;
     }
 
     bus->running = true;
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
     LOG_INFO("IPC service bus '%s' started", bus->name);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t ipc_service_bus_stop(ipc_service_bus_t bus_handle)
+AIRY_API airy_err_t ipc_service_bus_stop(ipc_service_bus_t bus_handle)
 {
     if (!bus_handle)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
     bus->running = false;
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
     LOG_INFO("IPC service bus '%s' stopped", bus->name);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 /* ==================== 通道管理 ==================== */
 
-AGENTRT_API ipc_bus_channel_t ipc_bus_channel_create(ipc_service_bus_t bus_handle,
+AIRY_API ipc_bus_channel_t ipc_bus_channel_create(ipc_service_bus_t bus_handle,
                                                      const ipc_bus_channel_config_t *config)
 {
     if (!bus_handle || !config) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
 
     if (bus->channel_count >= IPC_BUS_MAX_CHANNELS) {
-        agentrt_mutex_unlock(&bus->mutex);
+        airy_mtx_unlock(&bus->mutex);
         LOG_ERROR("Cannot create channel: max channels reached");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_OVERFLOW, "limit exceeded");
+        AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
     }
 
     if (find_channel(bus, config->name)) {
-        agentrt_mutex_unlock(&bus->mutex);
+        airy_mtx_unlock(&bus->mutex);
         LOG_ERROR("Channel '%s' already exists", config->name);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
     }
 
     ipc_bus_channel_internal_t *ch =
-        (ipc_bus_channel_internal_t *)AGENTRT_CALLOC(1, sizeof(ipc_bus_channel_internal_t));
+        (ipc_bus_channel_internal_t *)AIRY_CALLOC(1, sizeof(ipc_bus_channel_internal_t));
     if (!ch) {
-        agentrt_mutex_unlock(&bus->mutex);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        airy_mtx_unlock(&bus->mutex);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     __builtin_memcpy(&ch->config, config, sizeof(ipc_bus_channel_config_t));
@@ -293,13 +293,13 @@ AGENTRT_API ipc_bus_channel_t ipc_bus_channel_create(ipc_service_bus_t bus_handl
     bus->channels = ch;
     bus->channel_count++;
 
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
     LOG_INFO("Channel '%s' created on bus '%s'", config->name, bus->name);
     return (ipc_bus_channel_t)ch;
 }
 
-AGENTRT_API void ipc_bus_channel_destroy(ipc_bus_channel_t channel)
+AIRY_API void ipc_bus_channel_destroy(ipc_bus_channel_t channel)
 {
     if (!channel)
         return;
@@ -310,10 +310,10 @@ AGENTRT_API void ipc_bus_channel_destroy(ipc_bus_channel_t channel)
     LOG_INFO("Channel '%s' destroyed", ch->name);
 }
 
-AGENTRT_API const char *ipc_bus_channel_get_name(ipc_bus_channel_t channel)
+AIRY_API const char *ipc_bus_channel_get_name(ipc_bus_channel_t channel)
 {
     if (!channel) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     ipc_bus_channel_internal_t *ch = (ipc_bus_channel_internal_t *)channel;
     return ch->name;
@@ -321,57 +321,57 @@ AGENTRT_API const char *ipc_bus_channel_get_name(ipc_bus_channel_t channel)
 
 /* ==================== 消息发送 ==================== */
 
-AGENTRT_API agentrt_error_t ipc_service_bus_send(ipc_service_bus_t bus_handle,
+AIRY_API airy_err_t ipc_service_bus_send(ipc_service_bus_t bus_handle,
                                                  const char *target_service,
                                                  const ipc_bus_message_t *message)
 {
     if (!bus_handle || !target_service || !message)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
 
     if (!bus->running) {
-        agentrt_mutex_unlock(&bus->mutex);
+        airy_mtx_unlock(&bus->mutex);
         return DAEMON_ESTATE;
     }
 
     bus->stats.messages_sent++;
     bus->stats.bytes_sent += message->payload_size;
 
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
     LOG_DEBUG("Bus '%s': sent message to '%s' (type=%d, proto=%d, size=%zu)", bus->name,
               target_service, message->header.msg_type, message->header.protocol,
               message->payload_size);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
+AIRY_API airy_err_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
                                                     const char *target_service,
                                                     const ipc_bus_message_t *request,
                                                     ipc_bus_message_t *response,
                                                     uint32_t timeout_ms)
 {
     if (!bus_handle || !target_service || !request || !response)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
 
     if (!bus->running) {
-        agentrt_mutex_unlock(&bus->mutex);
+        airy_mtx_unlock(&bus->mutex);
         return DAEMON_ESTATE;
     }
 
     if (bus->pending_count >= IPC_BUS_MAX_PENDING) {
-        agentrt_mutex_unlock(&bus->mutex);
-        return AGENTRT_EBUSY;
+        airy_mtx_unlock(&bus->mutex);
+        return AIRY_EBUSY;
     }
 
-    uint64_t start_time = agentrt_time_ms();
+    uint64_t start_time = airy_time_ms();
 
     pending_request_t *pending = &bus->pending[bus->pending_count];
     pending->msg_id = request->header.msg_id;
@@ -382,14 +382,14 @@ AGENTRT_API agentrt_error_t ipc_service_bus_request(ipc_service_bus_t bus_handle
     bus->stats.messages_sent++;
     bus->stats.bytes_sent += request->payload_size;
 
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
     if (timeout_ms == 0)
         timeout_ms = bus->default_config.timeout_ms;
 
     const char *req_payload = (const char *)request->payload;
     char *resp_json = NULL;
-    agentrt_error_t svc_err = AGENTRT_SUCCESS;
+    airy_err_t svc_err = AIRY_SUCCESS;
 
     char rpc_method[256];
     snprintf(rpc_method, sizeof(rpc_method), "%s.handle", target_service);
@@ -397,14 +397,14 @@ AGENTRT_API agentrt_error_t ipc_service_bus_request(ipc_service_bus_t bus_handle
     int rpc_err =
         svc_rpc_call(rpc_method, req_payload ? req_payload : "{}", &resp_json, timeout_ms);
     if (rpc_err != 0) {
-        svc_err = AGENTRT_EIO;
+        svc_err = AIRY_EIO;
     }
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
 
-    if (svc_err == AGENTRT_SUCCESS && resp_json) {
+    if (svc_err == AIRY_SUCCESS && resp_json) {
         size_t resp_len = strlen(resp_json) + 1;
-        pending->response = (ipc_bus_message_t *)AGENTRT_CALLOC(1, sizeof(ipc_bus_message_t));
+        pending->response = (ipc_bus_message_t *)AIRY_CALLOC(1, sizeof(ipc_bus_message_t));
         if (pending->response) {
             pending->response->header.msg_type = IPC_BUS_MSG_RESPONSE;
             pending->response->header.protocol = request->header.protocol;
@@ -416,7 +416,7 @@ AGENTRT_API agentrt_error_t ipc_service_bus_request(ipc_service_bus_t bus_handle
             pending->response->payload_size = resp_len;
             pending->completed = 1;
         } else {
-            AGENTRT_FREE(resp_json);
+            AIRY_FREE(resp_json);
             resp_json = NULL;
             pending->completed = 0;
         }
@@ -427,64 +427,64 @@ AGENTRT_API agentrt_error_t ipc_service_bus_request(ipc_service_bus_t bus_handle
          * 之前在此处创建 {"error":{"code":...}} 消息并返回 SUCCESS，
          * 混淆了传输错误与业务错误，违反 API 契约"0成功，非0失败"。 */
         if (resp_json) {
-            AGENTRT_FREE(resp_json);
+            AIRY_FREE(resp_json);
             resp_json = NULL;
         }
     }
 
-    uint64_t elapsed = agentrt_time_ms() - start_time;
+    uint64_t elapsed = airy_time_ms() - start_time;
     if (elapsed >= (uint64_t)timeout_ms && !pending->completed) {
         bus->stats.timeouts++;
         bus->pending_count--;
         if (resp_json)
-            AGENTRT_FREE(resp_json);
-        agentrt_mutex_unlock(&bus->mutex);
-        return AGENTRT_ETIMEDOUT;
+            AIRY_FREE(resp_json);
+        airy_mtx_unlock(&bus->mutex);
+        return AIRY_ETIMEDOUT;
     }
 
     if (pending->completed && pending->response) {
         /* 将响应消息（含 payload 所有权）转移给调用者。
          * 注意：此处只释放 pending->response 结构体本身，payload 所有权归调用者，
-         * 由调用者在用完后通过 AGENTRT_FREE(response->payload) 释放。
+         * 由调用者在用完后通过 AIRY_FREE(response->payload) 释放。
          * 不能调用 ipc_bus_message_free()，因为它会同时释放 payload，
          * 会导致调用者的 response->payload 变成悬垂指针（use-after-free）。
          * 所有调用者（orchestrator.c, daemon_task_dispatcher.c, ipc_bus_helper.c）
          * 都已遵循"调用者负责释放 response.payload"的契约。 */
         __builtin_memcpy(response, pending->response, sizeof(ipc_bus_message_t));
-        AGENTRT_FREE(pending->response);
+        AIRY_FREE(pending->response);
         pending->response = NULL;
     }
 
     bus->pending_count--;
     bus->stats.messages_received++;
-    uint64_t latency = agentrt_time_ms() - start_time;
+    uint64_t latency = airy_time_ms() - start_time;
     bus->stats.avg_latency_us = bus->stats.avg_latency_us == 0
                                     ? latency * 1000
                                     : (bus->stats.avg_latency_us + latency * 1000) / 2;
     if (latency * 1000 > bus->stats.max_latency_us)
         bus->stats.max_latency_us = latency * 1000;
 
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
     LOG_DEBUG("Bus '%s': request to '%s' completed in %llums (completed=%d)", bus->name,
               target_service, (unsigned long long)latency, pending->completed);
-    /* RPC 成功返回 SUCCESS；RPC 失败返回 svc_err（AGENTRT_EIO 等）。
+    /* RPC 成功返回 SUCCESS；RPC 失败返回 svc_err（AIRY_EIO 等）。
      * 遵循 API 契约"0成功，非0失败"。 */
     return svc_err;
 }
 
-AGENTRT_API agentrt_error_t ipc_service_bus_broadcast(ipc_service_bus_t bus_handle,
+AIRY_API airy_err_t ipc_service_bus_broadcast(ipc_service_bus_t bus_handle,
                                                       const ipc_bus_message_t *message)
 {
     if (!bus_handle || !message)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
 
     if (!bus->running) {
-        agentrt_mutex_unlock(&bus->mutex);
+        airy_mtx_unlock(&bus->mutex);
         return DAEMON_ESTATE;
     }
 
@@ -497,17 +497,17 @@ AGENTRT_API agentrt_error_t ipc_service_bus_broadcast(ipc_service_bus_t bus_hand
     bus->stats.messages_sent += target_count;
     bus->stats.bytes_sent += message->payload_size * target_count;
 
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
-    agentrt_error_t first_error = AGENTRT_SUCCESS;
+    airy_err_t first_error = AIRY_SUCCESS;
     uint32_t sent_count = 0;
     for (uint32_t i = 0; i < bus->endpoint_count; i++) {
         if (bus->endpoints[i].healthy) {
-            agentrt_error_t err =
+            airy_err_t err =
                 ipc_service_bus_send(bus_handle, bus->endpoints[i].service_name, message);
-            if (err == AGENTRT_SUCCESS) {
+            if (err == AIRY_SUCCESS) {
                 sent_count++;
-            } else if (first_error == AGENTRT_SUCCESS) {
+            } else if (first_error == AIRY_SUCCESS) {
                 first_error = err;
             }
         }
@@ -515,28 +515,28 @@ AGENTRT_API agentrt_error_t ipc_service_bus_broadcast(ipc_service_bus_t bus_hand
 
     LOG_DEBUG("Bus '%s': broadcast to %u/%u endpoints succeeded", bus->name, sent_count,
               target_count);
-    return (sent_count > 0) ? AGENTRT_SUCCESS : first_error;
+    return (sent_count > 0) ? AIRY_SUCCESS : first_error;
 }
 
-AGENTRT_API agentrt_error_t ipc_service_bus_notify(ipc_service_bus_t bus_handle,
+AIRY_API airy_err_t ipc_service_bus_notify(ipc_service_bus_t bus_handle,
                                                    const char *target_service, const void *payload,
                                                    size_t payload_size, ipc_bus_proto_t protocol)
 {
     if (!bus_handle || !target_service || !payload)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
     ipc_bus_message_t *msg =
         ipc_bus_message_create(IPC_BUS_MSG_NOTIFICATION, protocol, payload, payload_size);
     if (!msg)
-        return AGENTRT_ENOMEM;
+        return AIRY_ENOMEM;
 
     init_message_header(&msg->header, IPC_BUS_MSG_NOTIFICATION, protocol, bus->name,
                         target_service);
     msg->header.payload_len = (uint32_t)payload_size;
 
-    agentrt_error_t err = ipc_service_bus_send(bus_handle, target_service, msg);
+    airy_err_t err = ipc_service_bus_send(bus_handle, target_service, msg);
     ipc_bus_message_free(msg);
 
     return err;
@@ -544,55 +544,55 @@ AGENTRT_API agentrt_error_t ipc_service_bus_notify(ipc_service_bus_t bus_handle,
 
 /* ==================== 消息接收 ==================== */
 
-AGENTRT_API agentrt_error_t ipc_service_bus_register_handler(ipc_service_bus_t bus_handle,
+AIRY_API airy_err_t ipc_service_bus_register_handler(ipc_service_bus_t bus_handle,
                                                              ipc_bus_message_handler_t handler,
                                                              void *user_data)
 {
     if (!bus_handle || !handler)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
 
     if (bus->channel_count == 0) {
         ipc_bus_channel_config_t config;
         __builtin_memcpy(&config, &bus->default_config, sizeof(ipc_bus_channel_config_t));
         safe_strcpy(config.name, "default", IPC_BUS_CHANNEL_NAME_LEN);
-        agentrt_mutex_unlock(&bus->mutex);
+        airy_mtx_unlock(&bus->mutex);
 
         ipc_bus_channel_t ch = ipc_bus_channel_create(bus_handle, &config);
         if (!ch)
-            return AGENTRT_ENOMEM;
+            return AIRY_ENOMEM;
 
-        agentrt_mutex_lock(&bus->mutex);
+        airy_mtx_lock(&bus->mutex);
     }
 
     ipc_bus_channel_internal_t *ch = bus->channels;
     if (!ch || ch->handler_count >= IPC_BUS_MAX_HANDLERS) {
-        agentrt_mutex_unlock(&bus->mutex);
-        return AGENTRT_ENOMEM;
+        airy_mtx_unlock(&bus->mutex);
+        return AIRY_ENOMEM;
     }
 
     ch->handlers[ch->handler_count].handler = handler;
     ch->handlers[ch->handler_count].user_data = user_data;
     ch->handler_count++;
 
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
     LOG_INFO("Message handler registered on bus '%s'", bus->name);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t ipc_service_bus_unregister_handler(ipc_service_bus_t bus_handle,
+AIRY_API airy_err_t ipc_service_bus_unregister_handler(ipc_service_bus_t bus_handle,
                                                                ipc_bus_message_handler_t handler)
 {
     if (!bus_handle || !handler)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
 
     ipc_bus_channel_internal_t *ch = bus->channels;
     while (ch) {
@@ -608,25 +608,25 @@ AGENTRT_API agentrt_error_t ipc_service_bus_unregister_handler(ipc_service_bus_t
         ch = ch->next;
     }
 
-    agentrt_mutex_unlock(&bus->mutex);
-    return AGENTRT_SUCCESS;
+    airy_mtx_unlock(&bus->mutex);
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t ipc_service_bus_register_event_handler(ipc_service_bus_t bus_handle,
+AIRY_API airy_err_t ipc_service_bus_register_event_handler(ipc_service_bus_t bus_handle,
                                                                    const char *event_name,
                                                                    ipc_bus_event_handler_t handler,
                                                                    void *user_data)
 {
     if (!bus_handle || !event_name || !handler)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
 
     if (bus->event_handler_count >= IPC_BUS_MAX_EVENTS) {
-        agentrt_mutex_unlock(&bus->mutex);
-        return AGENTRT_ENOMEM;
+        airy_mtx_unlock(&bus->mutex);
+        return AIRY_ENOMEM;
     }
 
     event_handler_entry_t *entry = &bus->event_handlers[bus->event_handler_count];
@@ -635,64 +635,64 @@ AGENTRT_API agentrt_error_t ipc_service_bus_register_event_handler(ipc_service_b
     entry->user_data = user_data;
     bus->event_handler_count++;
 
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
     LOG_INFO("Event handler registered for '%s' on bus '%s'", event_name, bus->name);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 /* ==================== 服务端点管理 ==================== */
 
-AGENTRT_API agentrt_error_t ipc_service_bus_register_endpoint(ipc_service_bus_t bus_handle,
+AIRY_API airy_err_t ipc_service_bus_register_endpoint(ipc_service_bus_t bus_handle,
                                                               const ipc_bus_endpoint_t *endpoint)
 {
     if (!bus_handle || !endpoint)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
 
     int32_t idx = find_endpoint_index(bus, endpoint->service_name);
     if (idx >= 0) {
         __builtin_memcpy(&bus->endpoints[idx], endpoint, sizeof(ipc_bus_endpoint_t));
-        bus->endpoints[idx].last_heartbeat = agentrt_time_ms();
-        agentrt_mutex_unlock(&bus->mutex);
+        bus->endpoints[idx].last_heartbeat = airy_time_ms();
+        airy_mtx_unlock(&bus->mutex);
         LOG_INFO("Endpoint '%s' updated on bus '%s'", endpoint->service_name, bus->name);
-        return AGENTRT_SUCCESS;
+        return AIRY_SUCCESS;
     }
 
     if (bus->endpoint_count >= IPC_BUS_MAX_SERVICES) {
-        agentrt_mutex_unlock(&bus->mutex);
-        return AGENTRT_ENOMEM;
+        airy_mtx_unlock(&bus->mutex);
+        return AIRY_ENOMEM;
     }
 
     __builtin_memcpy(&bus->endpoints[bus->endpoint_count], endpoint, sizeof(ipc_bus_endpoint_t));
-    bus->endpoints[bus->endpoint_count].last_heartbeat = agentrt_time_ms();
+    bus->endpoints[bus->endpoint_count].last_heartbeat = airy_time_ms();
     bus->endpoint_count++;
     bus->stats.active_endpoints = bus->endpoint_count;
 
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
     LOG_INFO("Endpoint '%s' registered on bus '%s' (endpoint=%s)", endpoint->service_name,
              bus->name, endpoint->endpoint);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t ipc_service_bus_unregister_endpoint(ipc_service_bus_t bus_handle,
+AIRY_API airy_err_t ipc_service_bus_unregister_endpoint(ipc_service_bus_t bus_handle,
                                                                 const char *service_name)
 {
     if (!bus_handle || !service_name)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
 
     int32_t idx = find_endpoint_index(bus, service_name);
     if (idx < 0) {
-        agentrt_mutex_unlock(&bus->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&bus->mutex);
+        return AIRY_ENOENT;
     }
 
     if ((uint32_t)idx < bus->endpoint_count - 1) {
@@ -702,24 +702,24 @@ AGENTRT_API agentrt_error_t ipc_service_bus_unregister_endpoint(ipc_service_bus_
     bus->endpoint_count--;
     bus->stats.active_endpoints = bus->endpoint_count;
 
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
     LOG_INFO("Endpoint '%s' unregistered from bus '%s'", service_name, bus->name);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t ipc_service_bus_discover(ipc_service_bus_t bus_handle,
+AIRY_API airy_err_t ipc_service_bus_discover(ipc_service_bus_t bus_handle,
                                                      const char *service_name,
                                                      ipc_bus_proto_t protocol,
                                                      ipc_bus_endpoint_t *endpoints,
                                                      uint32_t max_count, uint32_t *found_count)
 {
     if (!bus_handle || !endpoints || !found_count)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
 
     uint32_t count = 0;
     for (uint32_t i = 0; i < bus->endpoint_count && count < max_count; i++) {
@@ -745,24 +745,24 @@ AGENTRT_API agentrt_error_t ipc_service_bus_discover(ipc_service_bus_t bus_handl
     }
 
     *found_count = count;
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
     LOG_DEBUG("Service discovery: found %u endpoints (name=%s, proto=%d)", count,
               service_name ? service_name : "*", protocol);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t ipc_service_bus_select_endpoint(ipc_service_bus_t bus_handle,
+AIRY_API airy_err_t ipc_service_bus_select_endpoint(ipc_service_bus_t bus_handle,
                                                             const char *service_name,
                                                             ipc_bus_proto_t protocol,
                                                             ipc_bus_endpoint_t *endpoint)
 {
     if (!bus_handle || !service_name || !endpoint)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
 
     ipc_bus_endpoint_t *best = NULL;
     uint32_t best_load = UINT32_MAX;
@@ -799,38 +799,38 @@ AGENTRT_API agentrt_error_t ipc_service_bus_select_endpoint(ipc_service_bus_t bu
     }
 
     if (!best) {
-        agentrt_mutex_unlock(&bus->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&bus->mutex);
+        return AIRY_ENOENT;
     }
 
     __builtin_memcpy(endpoint, best, sizeof(ipc_bus_endpoint_t));
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t ipc_service_bus_update_endpoint_health(ipc_service_bus_t bus_handle,
+AIRY_API airy_err_t ipc_service_bus_update_endpoint_health(ipc_service_bus_t bus_handle,
                                                                    const char *service_name,
                                                                    bool healthy)
 {
     if (!bus_handle || !service_name)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
 
     int32_t idx = find_endpoint_index(bus, service_name);
     if (idx < 0) {
-        agentrt_mutex_unlock(&bus->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&bus->mutex);
+        return AIRY_ENOENT;
     }
 
     bool was_healthy = bus->endpoints[idx].healthy;
     bus->endpoints[idx].healthy = healthy;
-    bus->endpoints[idx].last_heartbeat = agentrt_time_ms();
+    bus->endpoints[idx].last_heartbeat = airy_time_ms();
 
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
     if (was_healthy && !healthy) {
         LOG_WARN("Endpoint '%s' became unhealthy on bus '%s'", service_name, bus->name);
@@ -838,31 +838,31 @@ AGENTRT_API agentrt_error_t ipc_service_bus_update_endpoint_health(ipc_service_b
         LOG_INFO("Endpoint '%s' recovered on bus '%s'", service_name, bus->name);
     }
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 /* ==================== 消息辅助函数 ==================== */
 
-AGENTRT_API ipc_bus_message_t *ipc_bus_message_create(ipc_bus_msg_type_t msg_type,
+AIRY_API ipc_bus_message_t *ipc_bus_message_create(ipc_bus_msg_type_t msg_type,
                                                       ipc_bus_proto_t protocol, const void *payload,
                                                       size_t payload_size)
 {
-    ipc_bus_message_t *msg = (ipc_bus_message_t *)AGENTRT_CALLOC(1, sizeof(ipc_bus_message_t));
+    ipc_bus_message_t *msg = (ipc_bus_message_t *)AIRY_CALLOC(1, sizeof(ipc_bus_message_t));
     if (!msg) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     init_message_header(&msg->header, msg_type, protocol, NULL, NULL);
-    msg->header.msg_id = (uint64_t)agentrt_time_ms();
+    msg->header.msg_id = (uint64_t)airy_time_ms();
     msg->header.payload_len = (uint32_t)payload_size;
 
     if (payload && payload_size > 0) {
-        msg->payload = AGENTRT_CALLOC(1, payload_size);
+        msg->payload = AIRY_CALLOC(1, payload_size);
         if (!msg->payload) {
-            AGENTRT_FREE(msg);
-            AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+            AIRY_FREE(msg);
+            AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
-        /* SEC-02: dst容量 = payload_size (来自AGENTRT_CALLOC)，与复制大小一致，边界检查已隐式满足 */
+        /* SEC-02: dst容量 = payload_size (来自AIRY_CALLOC)，与复制大小一致，边界检查已隐式满足 */
         __builtin_memcpy(msg->payload, payload, payload_size);
         msg->payload_size = payload_size;
         msg->header.checksum = compute_checksum(payload, payload_size);
@@ -871,35 +871,35 @@ AGENTRT_API ipc_bus_message_t *ipc_bus_message_create(ipc_bus_msg_type_t msg_typ
     return msg;
 }
 
-AGENTRT_API void ipc_bus_message_free(ipc_bus_message_t *message)
+AIRY_API void ipc_bus_message_free(ipc_bus_message_t *message)
 {
     if (!message)
         return;
     if (message->payload) {
-        AGENTRT_FREE(message->payload);
+        AIRY_FREE(message->payload);
         message->payload = NULL;
     }
-    AGENTRT_FREE(message);
+    AIRY_FREE(message);
 }
 
-AGENTRT_API ipc_bus_message_t *ipc_bus_message_clone(const ipc_bus_message_t *message)
+AIRY_API ipc_bus_message_t *ipc_bus_message_clone(const ipc_bus_message_t *message)
 {
     if (!message) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     ipc_bus_message_t *clone =
         ipc_bus_message_create(message->header.msg_type, message->header.protocol, message->payload,
                                message->payload_size);
     if (!clone) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     clone->header = message->header;
     return clone;
 }
 
-AGENTRT_API const char *ipc_bus_proto_to_string(ipc_bus_proto_t proto)
+AIRY_API const char *ipc_bus_proto_to_string(ipc_bus_proto_t proto)
 {
     static const char *proto_strings[] = {"JSON-RPC", "MCP", "A2A", "OpenAI", "AUTO"};
 
@@ -908,7 +908,7 @@ AGENTRT_API const char *ipc_bus_proto_to_string(ipc_bus_proto_t proto)
     return proto_strings[proto];
 }
 
-AGENTRT_API ipc_bus_proto_t ipc_bus_proto_from_string(const char *str)
+AIRY_API ipc_bus_proto_t ipc_bus_proto_from_string(const char *str)
 {
     if (!str)
         return IPC_BUS_PROTO_AUTO;
@@ -927,47 +927,47 @@ AGENTRT_API ipc_bus_proto_t ipc_bus_proto_from_string(const char *str)
 
 /* ==================== 统计与诊断 ==================== */
 
-AGENTRT_API agentrt_error_t ipc_service_bus_get_stats(ipc_service_bus_t bus_handle,
+AIRY_API airy_err_t ipc_service_bus_get_stats(ipc_service_bus_t bus_handle,
                                                       ipc_bus_stats_t *stats)
 {
     if (!bus_handle || !stats)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
     __builtin_memcpy(stats, &bus->stats, sizeof(ipc_bus_stats_t));
     stats->active_channels = bus->channel_count;
     stats->active_endpoints = bus->endpoint_count;
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t ipc_service_bus_reset_stats(ipc_service_bus_t bus_handle)
+AIRY_API airy_err_t ipc_service_bus_reset_stats(ipc_service_bus_t bus_handle)
 {
     if (!bus_handle)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
-    agentrt_mutex_lock(&bus->mutex);
+    airy_mtx_lock(&bus->mutex);
     __builtin_memset(&bus->stats, 0, sizeof(ipc_bus_stats_t));
-    agentrt_mutex_unlock(&bus->mutex);
+    airy_mtx_unlock(&bus->mutex);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API const char *ipc_service_bus_get_name(ipc_service_bus_t bus_handle)
+AIRY_API const char *ipc_service_bus_get_name(ipc_service_bus_t bus_handle)
 {
     if (!bus_handle) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
     return bus->name;
 }
 
-AGENTRT_API bool ipc_service_bus_is_running(ipc_service_bus_t bus_handle)
+AIRY_API bool ipc_service_bus_is_running(ipc_service_bus_t bus_handle)
 {
     if (!bus_handle)
         return false;

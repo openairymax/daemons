@@ -34,10 +34,10 @@ static int handle_a2a_request(const char *method, const char *path, const char *
 
 gw_a2a_handler_t *gw_a2a_handler_create(const gw_a2a_handler_config_t *config)
 {
-    gw_a2a_handler_t *handler = (gw_a2a_handler_t *)AGENTRT_CALLOC(1, sizeof(gw_a2a_handler_t));
+    gw_a2a_handler_t *handler = (gw_a2a_handler_t *)AIRY_CALLOC(1, sizeof(gw_a2a_handler_t));
     if (!handler) {
-        AGENTRT_LOG_ERROR("handler allocation failed, size=%zu", sizeof(gw_a2a_handler_t));
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_LOG_ERROR("handler allocation failed, size=%zu", sizeof(gw_a2a_handler_t));
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     if (config) {
         handler->config = *config;
@@ -55,13 +55,13 @@ void gw_a2a_handler_destroy(gw_a2a_handler_t *handler)
     if (handler->initialized) {
         gw_a2a_handler_shutdown(handler);
     }
-    AGENTRT_FREE(handler);
+    AIRY_FREE(handler);
 }
 
 int gw_a2a_handler_init(gw_a2a_handler_t *handler)
 {
     if (!handler)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (handler->initialized)
         return 0;
     handler->initialized = true;
@@ -74,7 +74,7 @@ int gw_a2a_handler_init(gw_a2a_handler_t *handler)
 int gw_a2a_handler_shutdown(gw_a2a_handler_t *handler)
 {
     if (!handler || !handler->initialized)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     handler->task_type_count = 0;
     handler->initialized = false;
     handler->healthy = false;
@@ -85,12 +85,12 @@ int gw_a2a_handler_register_task_type(gw_a2a_handler_t *handler, const char *tas
                                       gw_a2a_task_exec_fn exec_fn, void *user_data)
 {
     if (!handler || !task_type || !exec_fn)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     if (handler->task_type_count >= GW_A2A_MAX_TASK_TYPES)
-        return AGENTRT_ERR_OVERFLOW;
+        return AIRY_ERR_OVERFLOW;
 
     gw_a2a_task_type_entry_t *entry = &handler->task_types[handler->task_type_count];
-AGENTRT_STRNCPY_TERM(entry->task_type, task_type, sizeof(entry->task_type));
+AIRY_STRNCPY_TERM(entry->task_type, task_type, sizeof(entry->task_type));
     entry->task_type[sizeof(entry->task_type) - 1] = '\0';
     entry->exec_fn = exec_fn;
     entry->user_data = user_data;
@@ -101,7 +101,7 @@ AGENTRT_STRNCPY_TERM(entry->task_type, task_type, sizeof(entry->task_type));
 int gw_a2a_handler_get_agent_card(gw_a2a_handler_t *handler, char **card_json)
 {
     if (!handler || !card_json)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     const char *fmt = "{"
                       "\"name\":\"%s\","
@@ -121,9 +121,9 @@ int gw_a2a_handler_get_agent_card(gw_a2a_handler_t *handler, char **card_json)
                           (caps & 0x08) ? fmt_bool : "false", (caps & 0x10) ? fmt_bool : "false",
                           (caps & 0x20) ? fmt_bool : "false");
 
-    char *buf = (char *)AGENTRT_MALLOC(len + 1);
+    char *buf = (char *)AIRY_MALLOC(len + 1);
     if (!buf)
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     snprintf(buf, len + 1, fmt, handler->config.agent_name, handler->config.agent_version,
              handler->config.agent_url, (caps & 0x01) ? fmt_bool : "false",
              (caps & 0x02) ? fmt_bool : "false", (caps & 0x04) ? fmt_bool : "false",
@@ -141,42 +141,42 @@ static gw_a2a_task_type_entry_t *find_task_type(gw_a2a_handler_t *handler, const
             return &handler->task_types[i];
         }
     }
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_OVERFLOW, "limit exceeded");
+    AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
 }
 
 static char *extract_a2a_field(const char *json, const char *field_name)
 {
     if (!json || !field_name) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     size_t flen = strlen(field_name) + 4;
-    char *key = (char *)AGENTRT_MALLOC(flen);
+    char *key = (char *)AIRY_MALLOC(flen);
     if (!key) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     snprintf(key, flen, "\"%s\"", field_name);
     const char *p = strstr(json, key);
-    AGENTRT_FREE(key);
+    AIRY_FREE(key);
     if (!p) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     p += strlen(field_name) + 3;
     while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
         p++;
     if (*p != '"') {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     p++;
     const char *end = strchr(p, '"');
     if (!end) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     size_t len = (size_t)(end - p);
-    char *val = (char *)AGENTRT_MALLOC(len + 1);
+    char *val = (char *)AIRY_MALLOC(len + 1);
     if (!val) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
-    AGENTRT_MEMCPY(val, p, len);
+    AIRY_MEMCPY(val, p, len);
     val[len] = '\0';
     return val;
 }
@@ -185,7 +185,7 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
                                   const char *body_json, char **response_json)
 {
     if (!handler || !body_json || !response_json)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     handler->request_count++;
 
     if (path && strcmp(path, "/a2a/agent-card") == 0) {
@@ -198,27 +198,27 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
         char *input_json = extract_a2a_field(body_json, "input");
 
         if (!task_type) {
-            AGENTRT_LOG_WARN("missing task type in A2A request, path=%s", path ? path : "(null)");
-            AGENTRT_FREE(task_id);
-            AGENTRT_FREE(input_json);
+            AIRY_LOG_WARN("missing task type in A2A request, path=%s", path ? path : "(null)");
+            AIRY_FREE(task_id);
+            AIRY_FREE(input_json);
             handler->error_count++;
-            return AGENTRT_ERR_PARSE_ERROR;
+            return AIRY_ERR_PARSE_ERROR;
         }
 
         gw_a2a_task_type_entry_t *entry = find_task_type(handler, task_type);
         if (!entry) {
-            AGENTRT_LOG_WARN("unknown task type: task_type=%s, registered=%zu", task_type, handler->task_type_count);
+            AIRY_LOG_WARN("unknown task type: task_type=%s, registered=%zu", task_type, handler->task_type_count);
             const char *err = "{\"error\":{\"code\":-32601,\"message\":\"Unknown task type: %s\"}}";
             size_t elen = snprintf(NULL, 0, err, task_type);
-            char *ebuf = (char *)AGENTRT_MALLOC(elen + 1);
+            char *ebuf = (char *)AIRY_MALLOC(elen + 1);
             if (ebuf)
                 snprintf(ebuf, elen + 1, err, task_type);
             *response_json = ebuf;
-            AGENTRT_FREE(task_type);
-            AGENTRT_FREE(task_id);
-            AGENTRT_FREE(input_json);
+            AIRY_FREE(task_type);
+            AIRY_FREE(task_id);
+            AIRY_FREE(input_json);
             handler->error_count++;
-            return AGENTRT_ERR_NOT_FOUND;
+            return AIRY_ERR_NOT_FOUND;
         }
 
         char *output = NULL;
@@ -226,29 +226,29 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
                                 input_json ? input_json : "{}", &output, entry->user_data);
 
         if (rc != 0 || !output) {
-            AGENTRT_LOG_ERROR("task execution failed: task_type=%s, rc=%d", task_type, rc);
-            AGENTRT_FREE(task_type);
-            AGENTRT_FREE(task_id);
-            AGENTRT_FREE(input_json);
-            AGENTRT_FREE(output);
+            AIRY_LOG_ERROR("task execution failed: task_type=%s, rc=%d", task_type, rc);
+            AIRY_FREE(task_type);
+            AIRY_FREE(task_id);
+            AIRY_FREE(input_json);
+            AIRY_FREE(output);
             handler->error_count++;
-            return AGENTRT_ERR_EXEC_FAIL;
+            return AIRY_ERR_EXEC_FAIL;
         }
 
-        AGENTRT_FREE(task_type);
+        AIRY_FREE(task_type);
         task_type = NULL;
-        AGENTRT_FREE(task_id);
+        AIRY_FREE(task_id);
         task_id = NULL;
-        AGENTRT_FREE(input_json);
+        AIRY_FREE(input_json);
         input_json = NULL;
 
         const char *resp_fmt = "{\"result\":{\"status\":\"completed\",\"output\":%s}}";
         size_t rlen = snprintf(NULL, 0, resp_fmt, output);
-        char *buf = (char *)AGENTRT_MALLOC(rlen + 1);
+        char *buf = (char *)AIRY_MALLOC(rlen + 1);
         if (buf)
             snprintf(buf, rlen + 1, resp_fmt, output);
         *response_json = buf;
-        AGENTRT_FREE(output);
+        AIRY_FREE(output);
         return 0;
     }
 
@@ -257,7 +257,7 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
     }
 
     handler->error_count++;
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 static int handle_a2a_request(const char *method, const char *path, const char *body_json,
@@ -265,14 +265,14 @@ static int handle_a2a_request(const char *method, const char *path, const char *
 {
     gw_a2a_handler_t *handler = (gw_a2a_handler_t *)user_data;
     if (!handler)
-        return AGENTRT_ERR_NULL_POINTER;
+        return AIRY_ERR_NULL_POINTER;
     return gw_a2a_handler_handle_request(handler, method, path, body_json, response_json);
 }
 
 gw_proto_request_handler_t gw_a2a_handler_get_handler(gw_a2a_handler_t *handler)
 {
     if (!handler) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     return handle_a2a_request;
 }

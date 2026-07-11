@@ -8,7 +8,7 @@
  *
  * 改进说明：
  * 1. 修复 stpcpy 不可移植问题
- * 2. 统一错误码为 AGENTRT_ERR_*
+ * 2. 统一错误码为 AIRY_ERR_*
  * 3. 完善 YAML 解析逻辑
  * 4. 线程安全
  */
@@ -76,7 +76,7 @@ static char *make_cache_key(const llm_request_config_t *manager)
 {
     if (!manager || !manager->model) {
         SVC_LOG_ERROR("make_cache_key: NULL parameter (manager=%p, model=%p)", (const void *)manager, manager ? (const void *)manager->model : NULL);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     /* 计算所需缓冲区大小 */
@@ -87,10 +87,10 @@ static char *make_cache_key(const llm_request_config_t *manager)
         len += strlen(role) + 1 + strlen(content) + 1;
     }
 
-    char *key = (char *)AGENTRT_MALLOC(len);
+    char *key = (char *)AIRY_MALLOC(len);
     if (!key) {
         SVC_LOG_ERROR("make_cache_key: malloc failed for cache key (len=%zu)", len);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     /* 构建缓存键 */
@@ -145,21 +145,21 @@ static pricing_rule_t *load_pricing_rules(cJSON *root, int *count)
     if (!root || !count) {
         SVC_LOG_ERROR("load_pricing_rules: NULL parameter (root=%p, count=%p)", (const void *)root, (const void *)count);
         *count = 0;
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     cJSON *pricing = cJSON_GetObjectItem(root, "pricing");
     if (!pricing || !cJSON_IsArray(pricing)) {
         SVC_LOG_ERROR("load_pricing_rules: pricing array missing or not an array in config");
         *count = 0;
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     int n = cJSON_GetArraySize(pricing);
-    pricing_rule_t *rules = (pricing_rule_t *)AGENTRT_CALLOC((size_t)n, sizeof(pricing_rule_t));
+    pricing_rule_t *rules = (pricing_rule_t *)AIRY_CALLOC((size_t)n, sizeof(pricing_rule_t));
     if (!rules) {
         SVC_LOG_ERROR("load_pricing_rules: calloc failed for %d pricing rules", n);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     for (int i = 0; i < n; ++i) {
@@ -169,16 +169,16 @@ static pricing_rule_t *load_pricing_rules(cJSON *root, int *count)
         cJSON *output = cJSON_GetObjectItem(item, "output_price_per_k");
 
         if (cJSON_IsString(pattern) && cJSON_IsNumber(input) && cJSON_IsNumber(output)) {
-            rules[i].model_pattern = AGENTRT_STRDUP(pattern->valuestring);
+            rules[i].model_pattern = AIRY_STRDUP(pattern->valuestring);
             if (!rules[i].model_pattern) {
                 /* 内存分配失败，清理已分配的 */
                 SVC_LOG_ERROR("load_pricing_rules: strdup failed for model_pattern at index %d", i);
                 for (int j = 0; j < i; ++j) {
-                    AGENTRT_FREE((void *)rules[j].model_pattern);
+                    AIRY_FREE((void *)rules[j].model_pattern);
                 }
-                AGENTRT_FREE(rules);
+                AIRY_FREE(rules);
                 *count = 0;
-                AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+                AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
             }
             rules[i].input_price_per_k = input->valuedouble;
             rules[i].output_price_per_k = output->valuedouble;
@@ -198,9 +198,9 @@ static void free_pricing_rules(pricing_rule_t *rules, int count)
     if (!rules)
         return;
     for (int i = 0; i < count; ++i) {
-        AGENTRT_FREE((void *)rules[i].model_pattern);
+        AIRY_FREE((void *)rules[i].model_pattern);
     }
-    AGENTRT_FREE(rules);
+    AIRY_FREE(rules);
 }
 
 /* ---------- P3.16 (ACC-DT17): llm_router 端点注册辅助 ---------- */
@@ -287,25 +287,25 @@ static void register_router_endpoints(llm_service_t *svc)
 
 llm_service_t *llm_service_create(const char *config_path)
 {
-    llm_service_t *svc = (llm_service_t *)AGENTRT_CALLOC(1, sizeof(llm_service_t));
+    llm_service_t *svc = (llm_service_t *)AIRY_CALLOC(1, sizeof(llm_service_t));
     if (!svc) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL allocate service context, STACK: llm_service_create");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    if (agentrt_mutex_init(&svc->lock) != 0) {
+    if (airy_mtx_init(&svc->lock) != 0) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL init lock, STACK: llm_service_create");
-        AGENTRT_FREE(svc);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_FREE(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     /* 加载基础配置 */
     service_config_t base_cfg;
     __builtin_memset(&base_cfg, 0, sizeof(base_cfg));
-    base_cfg.llm_cache_capacity = AGENTRT_DEFAULT_CACHE_CAPACITY;
-    base_cfg.llm_cache_ttl_sec = AGENTRT_DEFAULT_CACHE_TTL_SEC;
-    base_cfg.max_retries = AGENTRT_DEFAULT_MAX_RETRIES;
-    base_cfg.timeout_ms = AGENTRT_DEFAULT_TIMEOUT_MS;
+    base_cfg.llm_cache_capacity = AIRY_DEFAULT_CACHE_CAPACITY;
+    base_cfg.llm_cache_ttl_sec = AIRY_DEFAULT_CACHE_TTL_SEC;
+    base_cfg.max_retries = AIRY_DEFAULT_MAX_RETRIES;
+    base_cfg.timeout_ms = AIRY_DEFAULT_TIMEOUT_MS;
 
     /* 解析定价规则（使用 cJSON） */
     if (config_path) {
@@ -318,11 +318,11 @@ llm_service_t *llm_service_create(const char *config_path)
             if (yaml_len <= 0) {
                 fclose(f);
             } else {
-                char *yaml_content = (char *)AGENTRT_MALLOC((size_t)yaml_len + 1);
+                char *yaml_content = (char *)AIRY_MALLOC((size_t)yaml_len + 1);
                 if (yaml_content) {
                     size_t read_len = fread(yaml_content, 1, (size_t)yaml_len, f);
                     if (read_len != (size_t)yaml_len) {
-                        AGENTRT_FREE(yaml_content);
+                        AIRY_FREE(yaml_content);
                         yaml_content = NULL;
                     }
                     if (yaml_content) {
@@ -342,12 +342,12 @@ llm_service_t *llm_service_create(const char *config_path)
                                 svc->rule_count = rule_count;
                                 SVC_LOG_INFO("Loaded %d pricing rules", rule_count);
                             } else if (rules) {
-                                AGENTRT_FREE(rules);
+                                AIRY_FREE(rules);
                             }
                             /* root 由 CJSON_AUTO_FREE 自动释放 */
                         } while (0);
                     }
-                    AGENTRT_FREE(yaml_content);
+                    AIRY_FREE(yaml_content);
                 } else {
                     SVC_LOG_ERROR("Failed to allocate memory for manager content");
                 }
@@ -360,9 +360,9 @@ llm_service_t *llm_service_create(const char *config_path)
     svc->registry = provider_registry_create(&base_cfg);
     if (!svc->registry) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL registry, STACK: llm_service_create");
-        agentrt_mutex_destroy(&svc->lock);
-        AGENTRT_FREE(svc);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        airy_mtx_destroy(&svc->lock);
+        AIRY_FREE(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     /* 创建缓存 */
@@ -370,9 +370,9 @@ llm_service_t *llm_service_create(const char *config_path)
     if (!svc->cache) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL cache, STACK: llm_service_create");
         provider_registry_destroy(svc->registry);
-        agentrt_mutex_destroy(&svc->lock);
-        AGENTRT_FREE(svc);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        airy_mtx_destroy(&svc->lock);
+        AIRY_FREE(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     /* 创建成本追踪器 */
@@ -381,9 +381,9 @@ llm_service_t *llm_service_create(const char *config_path)
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL cost_tracker, STACK: llm_service_create");
         llm_cache_destroy(svc->cache);
         provider_registry_destroy(svc->registry);
-        agentrt_mutex_destroy(&svc->lock);
-        AGENTRT_FREE(svc);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        airy_mtx_destroy(&svc->lock);
+        AIRY_FREE(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     /* 创建 Token 计数器 */
@@ -393,9 +393,9 @@ llm_service_t *llm_service_create(const char *config_path)
         cost_tracker_destroy(svc->cost);
         llm_cache_destroy(svc->cache);
         provider_registry_destroy(svc->registry);
-        agentrt_mutex_destroy(&svc->lock);
-        AGENTRT_FREE(svc);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        airy_mtx_destroy(&svc->lock);
+        AIRY_FREE(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     /* P3.16 (ACC-DT17): 初始化 llm_router 并将 registry 中的 provider/model
@@ -453,8 +453,8 @@ void llm_service_destroy(llm_service_t *svc)
      * 服务时可再次初始化。每个测试为独立可执行进程，无跨实例全局状态污染。 */
     llm_router_destroy();
 
-    agentrt_mutex_destroy(&svc->lock);
-    AGENTRT_FREE(svc);
+    airy_mtx_destroy(&svc->lock);
+    AIRY_FREE(svc);
 }
 
 /* ---------- 辅助函数（降低 llm_service_complete 复杂度） ---------- */
@@ -565,13 +565,13 @@ static int get_cached_response(llm_service_t *svc, const char *cache_key,
 {
     if (!svc || !cache_key || !out_response) {
         SVC_LOG_ERROR("get_cached_response: NULL parameter (svc=%p, cache_key=%p, out_response=%p)", (const void *)svc, (const void *)cache_key, (const void *)out_response);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     char *cached_json = NULL;
     if (llm_cache_get(svc->cache, cache_key, &cached_json) == 1 && cached_json) {
         llm_response_t *cached_resp = response_from_json(cached_json);
-        AGENTRT_FREE(cached_json);
+        AIRY_FREE(cached_json);
         cached_json = NULL;
 
         if (cached_resp) {
@@ -592,12 +592,12 @@ static const provider_t *find_provider(llm_service_t *svc, const char *model)
 {
     if (!svc || !model) {
         SVC_LOG_ERROR("find_provider: NULL parameter (svc=%p, model=%p)", (const void *)svc, (const void *)model);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     const provider_t *prov = provider_registry_find(svc->registry, model);
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     return prov;
 }
@@ -674,7 +674,7 @@ static void cache_response(llm_service_t *svc, const char *cache_key, llm_respon
     char *resp_json = response_to_json(resp);
     if (resp_json) {
         llm_cache_put(svc->cache, cache_key, resp_json);
-        AGENTRT_FREE(resp_json);
+        AIRY_FREE(resp_json);
         resp_json = NULL;
     }
 }
@@ -699,28 +699,28 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     /* 参数检查 */
     if (!svc || !manager || !out_response) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL invalid arguments, STACK: llm_service_complete");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (!manager->model) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL model=NULL, STACK: llm_service_complete");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     /* 生成缓存键 */
     char *cache_key = make_cache_key(manager);
     if (!cache_key) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL cache_key alloc, STACK: llm_service_complete");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     /* 检查缓存 */
     llm_response_t *cached_resp = NULL;
     int cache_status = get_cached_response(svc, cache_key, &cached_resp);
     if (cache_status > 0 && cached_resp) {
-        AGENTRT_FREE(cache_key);
+        AIRY_FREE(cache_key);
         *out_response = cached_resp;
-        return AGENTRT_OK;
+        return AIRY_OK;
     }
 
     /* P3.16 (ACC-DT17): 优先通过 llm_router 策略路由选择 provider；
@@ -735,9 +735,9 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     if (!prov) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL model=%s, error=INVALID_MODEL, STACK: llm_service_complete",
                       manager->model);
-        AGENTRT_FREE(cache_key);
+        AIRY_FREE(cache_key);
         cache_key = NULL;
-        return AGENTRT_ERR_LLM_INVALID_MODEL;
+        return AIRY_ERR_LLM_INVALID_MODEL;
     }
 
     /* 审计日志: 记录模型路由决策（BAN-137 编码契约） */
@@ -759,7 +759,7 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     if (ret != 0) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL model=%s, error=%d, STACK: llm_service_complete",
                       manager->model, ret);
-        AGENTRT_FREE(cache_key);
+        AIRY_FREE(cache_key);
         cache_key = NULL;
         return ret;
     }
@@ -769,9 +769,9 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     cache_response(svc, cache_key, resp);
 
     *out_response = resp;
-    AGENTRT_FREE(cache_key);
+    AIRY_FREE(cache_key);
     cache_key = NULL;
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 /* ---------- 流式完成 ---------- */
@@ -783,12 +783,12 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
     /* 参数检查 */
     if (!svc || !manager || !callback) {
         SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL invalid arguments, STACK: llm_service_complete_stream");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (!manager->model) {
         SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL model=NULL, STACK: llm_service_complete_stream");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     /* P3.16 (ACC-DT17): 优先通过 llm_router 策略路由选择 provider；
@@ -802,7 +802,7 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
     if (!prov) {
         SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL model=%s, error=INVALID_MODEL, STACK: llm_service_complete_stream",
                       manager->model);
-        return AGENTRT_ERR_LLM_INVALID_MODEL;
+        return AIRY_ERR_LLM_INVALID_MODEL;
     }
 
     /* 审计日志: 记录流式路由决策（BAN-137 编码契约） */
@@ -821,7 +821,7 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
     if (!prov->ops->complete_stream) {
         SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL model=%s, error=NOT_SUPPORTED, STACK: llm_service_complete_stream",
                       manager->model);
-        return AGENTRT_ERR_NOT_SUPPORTED;
+        return AIRY_ERR_NOT_SUPPORTED;
     }
 
     /* 调用流式接口 */
@@ -841,13 +841,13 @@ int llm_service_stats(llm_service_t *svc, char **out_json)
 {
     if (!svc || !out_json) {
         SVC_LOG_ERROR("llm_service_stats: NULL parameter (svc=%p, out_json=%p)", (const void *)svc, (const void *)out_json);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     cJSON *root = cJSON_CreateObject();
     if (!root) {
         SVC_LOG_ERROR("llm_service_stats: cJSON_CreateObject failed");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     cJSON *cost_json = cost_tracker_export(svc->cost);
@@ -863,11 +863,11 @@ int llm_service_stats(llm_service_t *svc, char **out_json)
 
     if (!json) {
         SVC_LOG_ERROR("llm_service_stats: cJSON_PrintUnformatted failed");
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     *out_json = json;
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 /* ---------- 服务配置加载 ---------- */
@@ -882,7 +882,7 @@ int svc_config_load(const char *config_path, service_config_t *cfg)
 {
     if (!cfg || !config_path) {
         SVC_LOG_ERROR("C-L02: SVC: CONFIG-FAIL NULL parameter, STACK: svc_config_load");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (ends_with(config_path, ".yaml") || ends_with(config_path, ".yml")) {
@@ -891,20 +891,20 @@ int svc_config_load(const char *config_path, service_config_t *cfg)
 #else
         SVC_LOG_WARN("C-L02: SVC: CONFIG-WARN YAML not compiled, STACK: svc_config_load");
         __builtin_memset(cfg, 0, sizeof(service_config_t));
-        cfg->llm_cache_capacity = AGENTRT_DEFAULT_CACHE_CAPACITY;
-        cfg->llm_cache_ttl_sec = AGENTRT_DEFAULT_CACHE_TTL_SEC;
-        cfg->max_retries = AGENTRT_DEFAULT_MAX_RETRIES;
-        cfg->timeout_ms = AGENTRT_DEFAULT_TIMEOUT_MS;
+        cfg->llm_cache_capacity = AIRY_DEFAULT_CACHE_CAPACITY;
+        cfg->llm_cache_ttl_sec = AIRY_DEFAULT_CACHE_TTL_SEC;
+        cfg->max_retries = AIRY_DEFAULT_MAX_RETRIES;
+        cfg->timeout_ms = AIRY_DEFAULT_TIMEOUT_MS;
         return 0;
 #endif
     }
 
     __builtin_memset(cfg, 0, sizeof(service_config_t));
 
-    cfg->llm_cache_capacity = AGENTRT_DEFAULT_CACHE_CAPACITY;
-    cfg->llm_cache_ttl_sec = AGENTRT_DEFAULT_CACHE_TTL_SEC;
-    cfg->max_retries = AGENTRT_DEFAULT_MAX_RETRIES;
-    cfg->timeout_ms = AGENTRT_DEFAULT_TIMEOUT_MS;
+    cfg->llm_cache_capacity = AIRY_DEFAULT_CACHE_CAPACITY;
+    cfg->llm_cache_ttl_sec = AIRY_DEFAULT_CACHE_TTL_SEC;
+    cfg->max_retries = AIRY_DEFAULT_MAX_RETRIES;
+    cfg->timeout_ms = AIRY_DEFAULT_TIMEOUT_MS;
 
     FILE *f = fopen(config_path, "rb");
     if (!f) {
@@ -916,30 +916,30 @@ int svc_config_load(const char *config_path, service_config_t *cfg)
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    char *content = (char *)AGENTRT_MALLOC((size_t)len + 1);
+    char *content = (char *)AIRY_MALLOC((size_t)len + 1);
     if (!content) {
         SVC_LOG_ERROR("C-L02: SVC: CONFIG-FAIL malloc, STACK: svc_config_load");
         fclose(f);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     size_t read_len = fread(content, 1, (size_t)len, f);
     if (read_len != (size_t)len) {
         SVC_LOG_ERROR("C-L02: SVC: CONFIG-FAIL fread, STACK: svc_config_load");
-        AGENTRT_FREE(content);
+        AIRY_FREE(content);
         fclose(f);
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
     content[read_len] = '\0';
     fclose(f);
 
     /* P0.18.2: 模式 B — CJSON_PARSE_GUARD（on_fail 中释放 content） */
     CJSON_PARSE_GUARD(root, content, {
-        AGENTRT_FREE(content);
+        AIRY_FREE(content);
         SVC_LOG_WARN("C-L02: SVC: CONFIG-WARN parse failed, STACK: svc_config_load");
         return 0;
     });
-    AGENTRT_FREE(content);
+    AIRY_FREE(content);
 
     /* 提取配置值 */
     cJSON *item;
@@ -973,7 +973,7 @@ int svc_config_load(const char *config_path, service_config_t *cfg)
     }
 
     /* root 由 CJSON_AUTO_FREE 自动释放 */
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 #ifdef HAVE_YAML
@@ -1002,32 +1002,32 @@ static void yaml_map_add(yaml_map_t *m, const char *key, const char *value)
         return;
     if (m->count >= m->capacity) {
         size_t new_cap = m->capacity == 0 ? 16 : m->capacity * 2;
-        yaml_kv_t *new_pairs = (yaml_kv_t *)AGENTRT_REALLOC(m->pairs, new_cap * sizeof(yaml_kv_t));
+        yaml_kv_t *new_pairs = (yaml_kv_t *)AIRY_REALLOC(m->pairs, new_cap * sizeof(yaml_kv_t));
         if (!new_pairs)
             return;
         m->pairs = new_pairs;
         m->capacity = new_cap;
     }
-    AGENTRT_STRNCPY_TERM(m->pairs[m->count].key, key, sizeof(m->pairs[m->count].key));
-    AGENTRT_STRNCPY_TERM(m->pairs[m->count].value, value, sizeof(m->pairs[m->count].value));
+    AIRY_STRNCPY_TERM(m->pairs[m->count].key, key, sizeof(m->pairs[m->count].key));
+    AIRY_STRNCPY_TERM(m->pairs[m->count].value, value, sizeof(m->pairs[m->count].value));
     m->count++;
 }
 
 static const char *yaml_map_get(const yaml_map_t *m, const char *key)
 {
     if (!m || !key) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     for (size_t i = 0; i < m->count; ++i) {
         if (strcmp(m->pairs[i].key, key) == 0)
             return m->pairs[i].value;
     }
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+    AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
 }
 
 static void yaml_map_free(yaml_map_t *m)
 {
-    AGENTRT_FREE(m->pairs);
+    AIRY_FREE(m->pairs);
     m->pairs = NULL;
     m->count = 0;
     m->capacity = 0;
@@ -1036,13 +1036,13 @@ static void yaml_map_free(yaml_map_t *m)
 int svc_config_load_yaml(const char *config_path, service_config_t *cfg)
 {
     if (!cfg || !config_path)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     __builtin_memset(cfg, 0, sizeof(service_config_t));
-    cfg->llm_cache_capacity = AGENTRT_DEFAULT_CACHE_CAPACITY;
-    cfg->llm_cache_ttl_sec = AGENTRT_DEFAULT_CACHE_TTL_SEC;
-    cfg->max_retries = AGENTRT_DEFAULT_MAX_RETRIES;
-    cfg->timeout_ms = AGENTRT_DEFAULT_TIMEOUT_MS;
+    cfg->llm_cache_capacity = AIRY_DEFAULT_CACHE_CAPACITY;
+    cfg->llm_cache_ttl_sec = AIRY_DEFAULT_CACHE_TTL_SEC;
+    cfg->max_retries = AIRY_DEFAULT_MAX_RETRIES;
+    cfg->timeout_ms = AIRY_DEFAULT_TIMEOUT_MS;
 
     FILE *f = fopen(config_path, "rb");
     if (!f) {
@@ -1077,7 +1077,7 @@ int svc_config_load_yaml(const char *config_path, service_config_t *cfg)
                 in_global = 1;
             } else if (in_global && val) {
                 char key_buf[128];
-                AGENTRT_STRNCPY_TERM(key_buf, val, sizeof(key_buf));
+                AIRY_STRNCPY_TERM(key_buf, val, sizeof(key_buf));
 
                 yaml_event_t val_event;
                 if (yaml_parser_parse(&parser, &val_event)) {
@@ -1120,7 +1120,7 @@ int svc_config_load_yaml(const char *config_path, service_config_t *cfg)
 
     yaml_map_free(&current_map);
     SVC_LOG_INFO("C-L02: SVC: MODEL-CONFIG-OK YAML loaded, STACK: svc_config_load_yaml");
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 typedef struct {
@@ -1136,7 +1136,7 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
                                size_t *out_count)
 {
     if (!config_path || !out_providers || !out_count)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     *out_providers = NULL;
     *out_count = 0;
@@ -1178,7 +1178,7 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
             }
             if (in_models && val) {
                 char key_buf[128];
-                AGENTRT_STRNCPY_TERM(key_buf, val, sizeof(key_buf));
+                AIRY_STRNCPY_TERM(key_buf, val, sizeof(key_buf));
 
                 yaml_event_t val_event;
                 if (yaml_parser_parse(&parser, &val_event)) {
@@ -1208,12 +1208,12 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
 
                 if (n && p) {
                     __builtin_memset(&models[model_count], 0, sizeof(model_entry_t));
-                    AGENTRT_STRNCPY_TERM(models[model_count].name, n, sizeof(models[model_count].name));
-                    AGENTRT_STRNCPY_TERM(models[model_count].provider, p, sizeof(models[model_count].provider));
+                    AIRY_STRNCPY_TERM(models[model_count].name, n, sizeof(models[model_count].name));
+                    AIRY_STRNCPY_TERM(models[model_count].provider, p, sizeof(models[model_count].provider));
                     if (e)
-                        AGENTRT_STRNCPY_TERM(models[model_count].api_key_env, e, sizeof(models[model_count].api_key_env));
+                        AIRY_STRNCPY_TERM(models[model_count].api_key_env, e, sizeof(models[model_count].api_key_env));
                     if (ep)
-                        AGENTRT_STRNCPY_TERM(models[model_count].endpoint, ep, sizeof(models[model_count].endpoint));
+                        AIRY_STRNCPY_TERM(models[model_count].endpoint, ep, sizeof(models[model_count].endpoint));
                     if (t)
                         models[model_count].timeout_sec = (int)strtol(t, NULL, 10);
                     if (r)
@@ -1259,16 +1259,16 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
             if (prov_count >= 16)
                 break;
             __builtin_memset(&provs[prov_count], 0, sizeof(provider_agg_t));
-            AGENTRT_STRNCPY_TERM(provs[prov_count].name, models[i].provider, sizeof(provs[prov_count].name));
+            AIRY_STRNCPY_TERM(provs[prov_count].name, models[i].provider, sizeof(provs[prov_count].name));
             if (models[i].api_key_env[0])
-                AGENTRT_STRNCPY_TERM(provs[prov_count].api_key_env, models[i].api_key_env, sizeof(provs[prov_count].api_key_env));
+                AIRY_STRNCPY_TERM(provs[prov_count].api_key_env, models[i].api_key_env, sizeof(provs[prov_count].api_key_env));
             prov_count++;
         }
         if (provs[j].model_count < 64) {
-            provs[j].model_names[provs[j].model_count++] = AGENTRT_STRDUP(models[i].name);
+            provs[j].model_names[provs[j].model_count++] = AIRY_STRDUP(models[i].name);
         }
         if (!provs[j].base_url[0] && models[i].endpoint[0]) {
-            AGENTRT_STRNCPY_TERM(provs[j].base_url, models[i].endpoint, sizeof(provs[j].base_url));
+            AIRY_STRNCPY_TERM(provs[j].base_url, models[i].endpoint, sizeof(provs[j].base_url));
         }
         if (models[i].timeout_sec > provs[j].timeout_sec)
             provs[j].timeout_sec = models[i].timeout_sec;
@@ -1277,21 +1277,21 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
     }
 
     provider_config_t *result =
-        (provider_config_t *)AGENTRT_CALLOC(prov_count + 1, sizeof(provider_config_t));
+        (provider_config_t *)AIRY_CALLOC(prov_count + 1, sizeof(provider_config_t));
     if (!result) {
         for (size_t j = 0; j < prov_count; ++j) {
             for (size_t k = 0; k < provs[j].model_count; ++k)
-                AGENTRT_FREE(provs[j].model_names[k]);
+                AIRY_FREE(provs[j].model_names[k]);
         }
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     for (size_t i = 0; i < prov_count; ++i) {
-        result[i].name = AGENTRT_STRDUP(provs[i].name);
+        result[i].name = AIRY_STRDUP(provs[i].name);
         if (provs[i].api_key_env[0]) {
             char env_prefix[8] = "env:";
             size_t env_key_len = strlen(provs[i].api_key_env);
-            char *key_buf = (char *)AGENTRT_MALLOC(4 + env_key_len + 1);
+            char *key_buf = (char *)AIRY_MALLOC(4 + env_key_len + 1);
             if (key_buf) {
                 __builtin_memcpy(key_buf, env_prefix, 4);
                 __builtin_memcpy(key_buf + 4, provs[i].api_key_env, env_key_len + 1);
@@ -1299,18 +1299,18 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
             }
         }
         if (provs[i].base_url[0])
-            result[i].api_base = AGENTRT_STRDUP(provs[i].base_url);
+            result[i].api_base = AIRY_STRDUP(provs[i].base_url);
         result[i].timeout_sec = (double)provs[i].timeout_sec;
         result[i].max_retries = provs[i].max_retries;
         if (provs[i].model_count > 0) {
-            char **marr = (char **)AGENTRT_CALLOC(provs[i].model_count + 1, sizeof(char *));
+            char **marr = (char **)AIRY_CALLOC(provs[i].model_count + 1, sizeof(char *));
             if (marr) {
                 for (size_t k = 0; k < provs[i].model_count; ++k)
                     marr[k] = provs[i].model_names[k];
                 marr[provs[i].model_count] = NULL;
             } else {
                 for (size_t k = 0; k < provs[i].model_count; ++k)
-                    AGENTRT_FREE(provs[i].model_names[k]);
+                    AIRY_FREE(provs[i].model_names[k]);
             }
             result[i].models = marr;
         }
@@ -1319,7 +1319,7 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
     *out_providers = result;
     *out_count = prov_count;
     SVC_LOG_INFO("C-L02: SVC: MODEL-CONFIG-OK YAML providers=%zu, STACK: svc_load_model_config_yaml", prov_count);
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 #endif /* HAVE_YAML */
@@ -1329,7 +1329,7 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
 {
     if (!config_path || !out_providers || !out_count) {
         SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL NULL parameter, STACK: svc_load_model_config_json");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     *out_providers = NULL;
@@ -1345,11 +1345,11 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    char *content = (char *)AGENTRT_MALLOC((size_t)len + 1);
+    char *content = (char *)AIRY_MALLOC((size_t)len + 1);
     if (!content) {
         SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL malloc, STACK: svc_load_model_config_json");
         fclose(f);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     size_t read_len = fread(content, 1, (size_t)len, f);
@@ -1358,11 +1358,11 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
 
     /* P0.18.2: 模式 B — CJSON_PARSE_GUARD（on_fail 中释放 content） */
     CJSON_PARSE_GUARD(root, content, {
-        AGENTRT_FREE(content);
+        AIRY_FREE(content);
         SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN parse failed, STACK: svc_load_model_config_json");
         return 0;
     });
-    AGENTRT_FREE(content);
+    AIRY_FREE(content);
 
     cJSON *providers_arr = cJSON_GetObjectItem(root, "providers");
     if (!providers_arr || !cJSON_IsArray(providers_arr)) {
@@ -1378,11 +1378,11 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
     }
 
     provider_config_t *result =
-        (provider_config_t *)AGENTRT_CALLOC((size_t)n + 1, sizeof(provider_config_t));
+        (provider_config_t *)AIRY_CALLOC((size_t)n + 1, sizeof(provider_config_t));
     if (!result) {
         SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL calloc, STACK: svc_load_model_config_json");
         /* root 由 CJSON_AUTO_FREE 自动释放 */
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     size_t valid_count = 0;
@@ -1399,11 +1399,11 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
             continue;
 
         provider_config_t *pcfg = &result[valid_count];
-        pcfg->name = AGENTRT_STRDUP(pname->valuestring);
+        pcfg->name = AIRY_STRDUP(pname->valuestring);
 
         if (cJSON_IsString(pkey_env) && pkey_env->valuestring[0]) {
             size_t env_len = strlen(pkey_env->valuestring);
-            char *key_buf = (char *)AGENTRT_MALLOC(4 + env_len + 1);
+            char *key_buf = (char *)AIRY_MALLOC(4 + env_len + 1);
             if (key_buf) {
                 __builtin_memcpy(key_buf, "env:", 4);
                 __builtin_memcpy(key_buf + 4, pkey_env->valuestring, env_len + 1);
@@ -1412,7 +1412,7 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
         }
 
         if (cJSON_IsString(pbase))
-            pcfg->api_base = AGENTRT_STRDUP(pbase->valuestring);
+            pcfg->api_base = AIRY_STRDUP(pbase->valuestring);
         if (cJSON_IsNumber(ptimeout))
             pcfg->timeout_sec = ptimeout->valuedouble;
         if (cJSON_IsNumber(pretries))
@@ -1420,12 +1420,12 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
 
         if (cJSON_IsArray(pmodels)) {
             int mcount = cJSON_GetArraySize(pmodels);
-            char **marr = (char **)AGENTRT_CALLOC((size_t)mcount + 1, sizeof(char *));
+            char **marr = (char **)AIRY_CALLOC((size_t)mcount + 1, sizeof(char *));
             if (marr) {
                 for (int j = 0; j < mcount; ++j) {
                     cJSON *mitem = cJSON_GetArrayItem(pmodels, j);
                     if (cJSON_IsString(mitem))
-                        marr[j] = AGENTRT_STRDUP(mitem->valuestring);
+                        marr[j] = AIRY_STRDUP(mitem->valuestring);
                 }
                 marr[mcount] = NULL;
                 pcfg->models = marr;
@@ -1438,7 +1438,7 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
     *out_providers = result;
     *out_count = valid_count;
     SVC_LOG_INFO("C-L02: SVC: MODEL-CONFIG-OK providers=%zu, STACK: svc_load_model_config_json", valid_count);
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 int svc_load_model_config(const char *config_path, provider_config_t **out_providers,
@@ -1446,7 +1446,7 @@ int svc_load_model_config(const char *config_path, provider_config_t **out_provi
 {
     if (!config_path || !out_providers || !out_count) {
         SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL NULL parameter, STACK: svc_load_model_config");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (ends_with(config_path, ".yaml") || ends_with(config_path, ".yml")) {
@@ -1454,7 +1454,7 @@ int svc_load_model_config(const char *config_path, provider_config_t **out_provi
         return svc_load_model_config_yaml(config_path, out_providers, out_count);
 #else
         SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL YAML not compiled, STACK: svc_load_model_config");
-        return AGENTRT_ERR_NOT_SUPPORTED;
+        return AIRY_ERR_NOT_SUPPORTED;
 #endif
     }
     return svc_load_model_config_json(config_path, out_providers, out_count);
@@ -1464,15 +1464,15 @@ void llm_response_free(llm_response_t *resp)
 {
     if (!resp)
         return;
-    AGENTRT_FREE(resp->id);
-    AGENTRT_FREE(resp->model);
-    AGENTRT_FREE(resp->finish_reason);
+    AIRY_FREE(resp->id);
+    AIRY_FREE(resp->model);
+    AIRY_FREE(resp->finish_reason);
     if (resp->choices) {
         for (size_t i = 0; i < resp->choice_count; i++) {
-            AGENTRT_FREE((void *)resp->choices[i].role);
-            AGENTRT_FREE((void *)resp->choices[i].content);
+            AIRY_FREE((void *)resp->choices[i].role);
+            AIRY_FREE((void *)resp->choices[i].content);
         }
-        AGENTRT_FREE(resp->choices);
+        AIRY_FREE(resp->choices);
     }
-    AGENTRT_FREE(resp);
+    AIRY_FREE(resp);
 }

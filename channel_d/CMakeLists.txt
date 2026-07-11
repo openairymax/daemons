@@ -33,15 +33,15 @@ target_include_directories(channel_d PRIVATE
 if(UNIX)
     target_link_libraries(channel_d PRIVATE
         svc_common
-        agentrt_common
+        airy_common
         Threads::Threads
-        agentrt_platform_libs
+        airy_platform_libs
     )
     target_compile_definitions(channel_d PRIVATE
         _GNU_SOURCE
         # R-09-119: use platform.h default
-        AGENTRT_CONFIG_DIR="/etc/agentrt"
-        AGENTRT_LOG_DIR="/var/log/agentrt"
+        AIRY_CONFIG_DIR="/etc/agentrt"
+        AIRY_LOG_DIR="/var/log/agentrt"
     )
 endif()
 
@@ -67,10 +67,10 @@ install(FILES
 )
 
 if(BUILD_TESTS)
-if(AGENTRT_HAS_CMOCKA)
+if(AIRY_HAS_CMOCKA)
     enable_testing()
     add_executable(test_channel_e2e tests/test_channel_e2e.c src/channel_service.c)
-    target_compile_definitions(test_channel_e2e PRIVATE AGENTRT_COMPLIANCE_IMPL)
+    target_compile_definitions(test_channel_e2e PRIVATE AIRY_COMPLIANCE_IMPL)
     target_include_directories(test_channel_e2e PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -79,28 +79,28 @@ if(AGENTRT_HAS_CMOCKA)
     target_link_libraries(test_channel_e2e PRIVATE
         ${CMOCKA_LIBRARIES}
         svc_common
-        agentrt_common
-        Threads::Threads agentrt_platform_libs
+        airy_common
+        Threads::Threads airy_platform_libs
     )
     target_compile_options(test_channel_e2e PRIVATE -Wall -Wextra)
     add_test(NAME channel_e2e COMMAND test_channel_e2e)
 else()
     enable_testing()
     add_executable(test_channel_e2e tests/test_channel_e2e.c src/channel_service.c)
-    target_compile_definitions(test_channel_e2e PRIVATE AGENTRT_COMPLIANCE_IMPL)
+    target_compile_definitions(test_channel_e2e PRIVATE AIRY_COMPLIANCE_IMPL)
     target_include_directories(test_channel_e2e PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${COMMONS_DIR}/tests/utils
         ${COMMONS_INCLUDE_DIR}/utils/string/include
     )
-    target_link_libraries(test_channel_e2e PRIVATE Threads::Threads agentrt_platform_libs svc_common agentrt_common)
+    target_link_libraries(test_channel_e2e PRIVATE Threads::Threads airy_platform_libs svc_common airy_common)
     target_compile_options(test_channel_e2e PRIVATE -Wall -Wextra)
     target_compile_definitions(test_channel_e2e PRIVATE
         USE_CMOCKA_STUB
         # R-09-119: use platform.h default
-        AGENTRT_CONFIG_DIR="/etc/agentrt"
-        AGENTRT_LOG_DIR="/var/log/agentrt"
+        AIRY_CONFIG_DIR="/etc/agentrt"
+        AIRY_LOG_DIR="/var/log/agentrt"
     )
     add_test(NAME channel_e2e COMMAND test_channel_e2e)
 endif()

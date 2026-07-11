@@ -7,7 +7,7 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 改进说明：
- * 1. 统一错误码为 AGENTRT_ERR_*
+ * 1. 统一错误码为 AIRY_ERR_*
  * 2. 完善流式执行功能
  * 3. 线程安全
  */
@@ -29,39 +29,39 @@
 tool_service_t *tool_service_create(const char *config_path __attribute__((unused)))
 {
 
-    tool_service_t *svc = (tool_service_t *)AGENTRT_CALLOC(1, sizeof(tool_service_t));
+    tool_service_t *svc = (tool_service_t *)AIRY_CALLOC(1, sizeof(tool_service_t));
     if (!svc) {
         SVC_LOG_ERROR("Failed to allocate tool service");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    if (agentrt_mutex_init(&svc->lock) != 0) {
+    if (airy_mtx_init(&svc->lock) != 0) {
         SVC_LOG_ERROR("Failed to initialize service lock");
-        AGENTRT_FREE(svc);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_FREE(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     /* 创建注册表 */
     svc->registry = tool_registry_create(NULL);
     if (!svc->registry) {
         SVC_LOG_ERROR("Failed to create registry");
-        agentrt_mutex_destroy(&svc->lock);
-        AGENTRT_FREE(svc);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        airy_mtx_destroy(&svc->lock);
+        AIRY_FREE(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     /* 创建执行器 */
     tool_executor_config_t exec_config;
     __builtin_memset(&exec_config, 0, sizeof(exec_config));
-    exec_config.timeout_sec = AGENTRT_DEFAULT_TIMEOUT_SEC;
+    exec_config.timeout_sec = AIRY_DEFAULT_TIMEOUT_SEC;
 
     svc->executor = tool_executor_create_ex(&exec_config);
     if (!svc->executor) {
         SVC_LOG_ERROR("Failed to create executor");
         tool_registry_destroy(svc->registry);
-        agentrt_mutex_destroy(&svc->lock);
-        AGENTRT_FREE(svc);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        airy_mtx_destroy(&svc->lock);
+        AIRY_FREE(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     /* P3.17 (ACC-DT18): 默认启用工具审批（enable_approval=true）。
@@ -91,9 +91,9 @@ tool_service_t *tool_service_create(const char *config_path __attribute__((unuse
         SVC_LOG_ERROR("Failed to create validator");
         tool_executor_destroy(svc->executor);
         tool_registry_destroy(svc->registry);
-        agentrt_mutex_destroy(&svc->lock);
-        AGENTRT_FREE(svc);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        airy_mtx_destroy(&svc->lock);
+        AIRY_FREE(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     /* 创建缓存（默认配置） */
@@ -133,8 +133,8 @@ void tool_service_destroy(tool_service_t *svc)
         svc->cache = NULL;
     }
 
-    agentrt_mutex_destroy(&svc->lock);
-    AGENTRT_FREE(svc);
+    airy_mtx_destroy(&svc->lock);
+    AIRY_FREE(svc);
 }
 
 /* ---------- 工具注册 ---------- */
@@ -143,12 +143,12 @@ int tool_service_register(tool_service_t *svc, const tool_metadata_t *meta)
 {
     if (!svc || !meta || !meta->id) {
         SVC_LOG_ERROR("Invalid parameters to tool_service_register");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     int ret = tool_registry_add(svc->registry, meta);
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     if (ret == 0) {
         SVC_LOG_INFO("Registered tool: %s", meta->id);
@@ -162,12 +162,12 @@ int tool_service_register(tool_service_t *svc, const tool_metadata_t *meta)
 int tool_service_unregister(tool_service_t *svc, const char *tool_id)
 {
     if (!svc || !tool_id) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     int ret = tool_registry_remove(svc->registry, tool_id);
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     if (ret == 0) {
         SVC_LOG_INFO("Unregistered tool: %s", tool_id);
@@ -179,12 +179,12 @@ int tool_service_unregister(tool_service_t *svc, const char *tool_id)
 tool_metadata_t *tool_service_get(tool_service_t *svc, const char *tool_id)
 {
     if (!svc || !tool_id) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     tool_metadata_t *meta = tool_registry_get(svc->registry, tool_id);
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     return meta;
 }
@@ -192,12 +192,12 @@ tool_metadata_t *tool_service_get(tool_service_t *svc, const char *tool_id)
 char *tool_service_list(tool_service_t *svc)
 {
     if (!svc) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     char *json = tool_registry_list_json(svc->registry);
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     return json;
 }
@@ -210,12 +210,12 @@ char *tool_service_list(tool_service_t *svc)
 static tool_metadata_t *get_tool_metadata(tool_service_t *svc, const char *tool_id)
 {
     if (!svc || !tool_id) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     tool_metadata_t *meta = tool_registry_get(svc->registry, tool_id);
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     return meta;
 }
@@ -227,7 +227,7 @@ static int validate_tool_params(tool_service_t *svc, tool_metadata_t *meta, cons
                                 const char *params_json)
 {
     if (!svc || !meta || !tool_id) {
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
     }
 
     if (svc->validator) {
@@ -247,34 +247,34 @@ static tool_result_t *get_cached_result(tool_service_t *svc, tool_metadata_t *me
                                         const char *tool_id, const char *params_json)
 {
     if (!svc || !meta || !tool_id || !params_json) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     if (!meta->cacheable) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     char *cache_key = tool_cache_key(tool_id, params_json);
     if (!cache_key) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     char *cached = NULL;
     if (tool_cache_get(svc->cache, cache_key, &cached) == 1 && cached) {
         tool_result_t *res = tool_result_from_json(cached);
-        AGENTRT_FREE(cached);
+        AIRY_FREE(cached);
         cached = NULL;
         if (res) {
             SVC_LOG_DEBUG("Cache hit for tool: %s", tool_id);
-            AGENTRT_FREE(cache_key);
+            AIRY_FREE(cache_key);
             return res;
         }
         SVC_LOG_WARN("Failed to parse cached result for tool: %s", tool_id);
     }
 
-    AGENTRT_FREE(cache_key);
+    AIRY_FREE(cache_key);
     cache_key = NULL;
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
 /**
@@ -299,11 +299,11 @@ static void cache_tool_result(tool_service_t *svc, tool_metadata_t *meta, const 
     char *res_json = tool_result_to_json(res);
     if (res_json) {
         tool_cache_put(svc->cache, cache_key, res_json);
-        AGENTRT_FREE(res_json);
+        AIRY_FREE(res_json);
         res_json = NULL;
     }
 
-    AGENTRT_FREE(cache_key);
+    AIRY_FREE(cache_key);
     cache_key = NULL;
 }
 
@@ -314,7 +314,7 @@ static int do_execute_tool(tool_service_t *svc, tool_metadata_t *meta, const cha
                            tool_result_t **out_result)
 {
     if (!svc || !meta || !out_result) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     tool_result_t *res = NULL;
@@ -330,7 +330,7 @@ static int do_execute_tool(tool_service_t *svc, tool_metadata_t *meta, const cha
     }
 
     *out_result = res;
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 /* ---------- 工具执行（重构后：圈复杂度从 18 降至 8） ---------- */
@@ -340,25 +340,25 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
 {
     if (!svc || !req || !out_result) {
         SVC_LOG_ERROR("Invalid parameters to tool_service_execute");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (!req->tool_id) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     /* 1. 获取工具元数据 */
     tool_metadata_t *meta = get_tool_metadata(svc, req->tool_id);
     if (!meta) {
         SVC_LOG_ERROR("Tool not found: %s", req->tool_id);
-        return AGENTRT_ERROR_TOOL_NOT_FOUND;
+        return AIRY_ERROR_TOOL_NOT_FOUND;
     }
 
     /* 2. 验证参数 */
     int valid = validate_tool_params(svc, meta, req->tool_id, req->params_json);
     if (valid <= 0) {
         tool_metadata_free(meta);
-        return AGENTRT_ERROR_TOOL_VALIDATION;
+        return AIRY_ERROR_TOOL_VALIDATION;
     }
 
     /* 3. 检查缓存 */
@@ -366,7 +366,7 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
     if (cached_result) {
         tool_metadata_free(meta);
         *out_result = cached_result;
-        return AGENTRT_OK;
+        return AIRY_OK;
     }
 
     /* 4. 执行工具 */
@@ -386,7 +386,7 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
         tool_metadata_free(meta);
         meta = NULL;
     }
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 /* ---------- 流式执行 ---------- */
@@ -397,21 +397,21 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
 {
     if (!svc || !req || !callback) {
         SVC_LOG_ERROR("Invalid parameters to tool_service_execute_stream");
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     if (!req->tool_id) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     /* 1. 获取工具元数据 */
-    agentrt_mutex_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
     tool_metadata_t *meta = tool_registry_get(svc->registry, req->tool_id);
-    agentrt_mutex_unlock(&svc->lock);
+    airy_mtx_unlock(&svc->lock);
 
     if (!meta) {
         SVC_LOG_ERROR("Tool not found: %s", req->tool_id);
-        return AGENTRT_ERROR_TOOL_NOT_FOUND;
+        return AIRY_ERROR_TOOL_NOT_FOUND;
     }
 
     /* 2. 验证参数 */
@@ -420,7 +420,7 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
         if (!valid) {
             SVC_LOG_WARN("Parameter validation failed for tool: %s", req->tool_id);
             tool_metadata_free(meta);
-            return AGENTRT_ERROR_TOOL_VALIDATION;
+            return AIRY_ERROR_TOOL_VALIDATION;
         }
     }
 
@@ -466,9 +466,9 @@ void tool_result_free(tool_result_t *res)
 {
     if (!res)
         return;
-    AGENTRT_FREE(res->output);
-    AGENTRT_FREE(res->error);
-    AGENTRT_FREE(res);
+    AIRY_FREE(res->output);
+    AIRY_FREE(res->error);
+    AIRY_FREE(res);
 }
 
 /* ---------- 工具元数据释放 ---------- */
@@ -477,17 +477,17 @@ void tool_metadata_free(tool_metadata_t *meta)
 {
     if (!meta)
         return;
-    AGENTRT_FREE(meta->id);
-    AGENTRT_FREE(meta->name);
-    AGENTRT_FREE(meta->description);
-    AGENTRT_FREE(meta->executable);
+    AIRY_FREE(meta->id);
+    AIRY_FREE(meta->name);
+    AIRY_FREE(meta->description);
+    AIRY_FREE(meta->executable);
 
     for (size_t i = 0; i < meta->param_count; ++i) {
-        AGENTRT_FREE((void *)meta->params[i].name);
-        AGENTRT_FREE((void *)meta->params[i].schema);
+        AIRY_FREE((void *)meta->params[i].name);
+        AIRY_FREE((void *)meta->params[i].schema);
     }
-    AGENTRT_FREE(meta->params);
+    AIRY_FREE(meta->params);
 
-    AGENTRT_FREE(meta->permission_rule);
-    AGENTRT_FREE(meta);
+    AIRY_FREE(meta->permission_rule);
+    AIRY_FREE(meta);
 }

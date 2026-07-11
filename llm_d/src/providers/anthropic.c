@@ -43,11 +43,11 @@ static provider_ctx_t *anthropic_init(const char *name __attribute__((unused)), 
                                       double timeout_sec, int max_retries)
 {
 
-    anthropic_ctx_t *ctx = (anthropic_ctx_t *)AGENTRT_CALLOC(1, sizeof(anthropic_ctx_t));
+    anthropic_ctx_t *ctx = (anthropic_ctx_t *)AIRY_CALLOC(1, sizeof(anthropic_ctx_t));
     if (!ctx) {
         SVC_LOG_ERROR("C-L02: ANTHROPIC: INIT-FAIL — OOM allocating ctx (size=%zu)",
                       sizeof(anthropic_ctx_t));
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     provider_base_init(&ctx->base, api_key, api_base, organization, timeout_sec, max_retries,
@@ -67,7 +67,7 @@ static void anthropic_destroy(provider_ctx_t *ctx_ptr)
 {
     if (ctx_ptr) {
         SVC_LOG_DEBUG("C-L02: ANTHROPIC: DESTROY ctx=%p", (void *)ctx_ptr);
-        AGENTRT_FREE(ctx_ptr);
+        AIRY_FREE(ctx_ptr);
     }
 }
 
@@ -76,12 +76,12 @@ static void anthropic_destroy(provider_ctx_t *ctx_ptr)
 static char *anthropic_build_request(const llm_request_config_t *manager)
 {
     if (!manager) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     cJSON *root = cJSON_CreateObject();
     if (!root) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     cJSON_AddStringToObject(root, "model",
@@ -104,7 +104,7 @@ static char *anthropic_build_request(const llm_request_config_t *manager)
     for (size_t i = 0; i < manager->message_count; ++i) {
         if (manager->messages[i].role && strcmp(manager->messages[i].role, "system") == 0) {
             system_prompt =
-                AGENTRT_STRDUP(manager->messages[i].content ? manager->messages[i].content : "");
+                AIRY_STRDUP(manager->messages[i].content ? manager->messages[i].content : "");
         } else {
             cJSON *msg = cJSON_CreateObject();
             const char *role = manager->messages[i].role ? manager->messages[i].role : "user";
@@ -117,7 +117,7 @@ static char *anthropic_build_request(const llm_request_config_t *manager)
 
     if (system_prompt) {
         cJSON_AddStringToObject(root, "system", system_prompt);
-        AGENTRT_FREE(system_prompt);
+        AIRY_FREE(system_prompt);
     }
 
     cJSON_AddItemToObject(root, "messages", messages);
@@ -132,28 +132,28 @@ static char *anthropic_build_request(const llm_request_config_t *manager)
 static int anthropic_parse_response(const char *body, llm_response_t **out)
 {
     if (!body || !out) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
     CJSON_PARSE_GUARD(root, body, {
-        return AGENTRT_ERR_PARSE_ERROR;
+        return AIRY_ERR_PARSE_ERROR;
     });
 
-    llm_response_t *resp = (llm_response_t *)AGENTRT_CALLOC(1, sizeof(llm_response_t));
+    llm_response_t *resp = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {
         /* root 由 CJSON_AUTO_FREE 自动释放 */
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     cJSON *id = cJSON_GetObjectItem(root, "id");
     if (cJSON_IsString(id) && id->valuestring) {
-        resp->id = AGENTRT_STRDUP(id->valuestring);
+        resp->id = AIRY_STRDUP(id->valuestring);
     }
 
     cJSON *model = cJSON_GetObjectItem(root, "model");
     if (cJSON_IsString(model) && model->valuestring) {
-        resp->model = AGENTRT_STRDUP(model->valuestring);
+        resp->model = AIRY_STRDUP(model->valuestring);
     }
 
     cJSON *content = cJSON_GetObjectItem(root, "content");
@@ -161,16 +161,16 @@ static int anthropic_parse_response(const char *body, llm_response_t **out)
         cJSON *first = cJSON_GetArrayItem(content, 0);
         cJSON *text = cJSON_GetObjectItem(first, "text");
         if (cJSON_IsString(text) && text->valuestring) {
-            resp->choices = (llm_message_t *)AGENTRT_CALLOC(1, sizeof(llm_message_t));
+            resp->choices = (llm_message_t *)AIRY_CALLOC(1, sizeof(llm_message_t));
             if (!resp->choices) {
                 resp->choice_count = 0;
                 /* root 由 CJSON_AUTO_FREE 自动释放 */
                 llm_response_free(resp);
-                return AGENTRT_ERR_OUT_OF_MEMORY;
+                return AIRY_ERR_OUT_OF_MEMORY;
             }
             resp->choice_count = 1;
-            resp->choices[0].role = AGENTRT_STRDUP("assistant");
-            resp->choices[0].content = AGENTRT_STRDUP(text->valuestring);
+            resp->choices[0].role = AIRY_STRDUP("assistant");
+            resp->choices[0].content = AIRY_STRDUP(text->valuestring);
         }
     }
 
@@ -187,7 +187,7 @@ static int anthropic_parse_response(const char *body, llm_response_t **out)
 
     /* root 由 CJSON_AUTO_FREE 自动释放 */
     *out = resp;
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 /* ---------- 同步完成 ---------- */
@@ -199,7 +199,7 @@ static int anthropic_complete(provider_ctx_t *ctx_ptr, const llm_request_config_
         SVC_LOG_ERROR("C-L02: ANTHROPIC: COMPLETE-FAIL — invalid params "
                       "ctx=%p manager=%p out=%p",
                       (void *)ctx_ptr, (void *)manager, (void *)out_response);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     anthropic_ctx_t *ctx = (anthropic_ctx_t *)ctx_ptr;
@@ -216,7 +216,7 @@ static int anthropic_complete(provider_ctx_t *ctx_ptr, const llm_request_config_
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: ANTHROPIC: COMPLETE-FAIL — request body build failed "
                       "model=%s", model);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     char url[1024];
@@ -241,9 +241,9 @@ static int anthropic_complete(provider_ctx_t *ctx_ptr, const llm_request_config_
                                  &http_resp, &http_code);
 
     curl_slist_free_all(headers);
-    AGENTRT_FREE(req_body);
+    AIRY_FREE(req_body);
 
-    if (ret != AGENTRT_OK) {
+    if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: ANTHROPIC: COMPLETE-FAIL — HTTP request failed "
                       "url=%s http_code=%ld ret=%d timeout=%.1fs "
                       "STACK: provider_http_post() → anthropic_complete()",
@@ -263,7 +263,7 @@ static int anthropic_complete(provider_ctx_t *ctx_ptr, const llm_request_config_
                       (http_code == 529) ? "overloaded" :
                       "check API key and endpoint");
         provider_http_resp_free(http_resp);
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
     size_t resp_body_len = http_resp ? strlen(http_resp->data) : 0;
@@ -271,7 +271,7 @@ static int anthropic_complete(provider_ctx_t *ctx_ptr, const llm_request_config_
                   http_code, resp_body_len);
 
     ret = anthropic_parse_response(http_resp->data, out_response);
-    if (ret != AGENTRT_OK) {
+    if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: ANTHROPIC: COMPLETE-FAIL — response parse failed "
                       "ret=%d resp_body_len=%zu "
                       "STACK: anthropic_parse_response() → anthropic_complete()",
@@ -319,14 +319,14 @@ static void ant_sse_init(ant_sse_ctx_t *s, ant_stream_acc_t *a)
 {
     __builtin_memset(s, 0, sizeof(*s));
     s->line_cap = 4096;
-    s->line_buf = (char *)AGENTRT_MALLOC(s->line_cap);
+    s->line_buf = (char *)AIRY_MALLOC(s->line_cap);
     s->acc = a;
 }
 
 static void ant_sse_destroy(ant_sse_ctx_t *s)
 {
     if (s) {
-        AGENTRT_FREE(s->line_buf);
+        AIRY_FREE(s->line_buf);
         s->line_buf = NULL;
     }
 }
@@ -354,10 +354,10 @@ static int ant_feed_sse_event(ant_sse_ctx_t *s, const char *event, const char *d
         if (msg) {
             cJSON *id = cJSON_GetObjectItem(msg, "id");
             if (cJSON_IsString(id) && id->valuestring)
-                acc->resp_id = AGENTRT_STRDUP(id->valuestring);
+                acc->resp_id = AIRY_STRDUP(id->valuestring);
             cJSON *model = cJSON_GetObjectItem(msg, "model");
             if (cJSON_IsString(model) && model->valuestring)
-                acc->resp_model = AGENTRT_STRDUP(model->valuestring);
+                acc->resp_model = AIRY_STRDUP(model->valuestring);
             cJSON *usage = cJSON_GetObjectItem(msg, "usage");
             if (usage) {
                 cJSON *iptok = cJSON_GetObjectItem(usage, "input_tokens");
@@ -384,7 +384,7 @@ static int ant_feed_sse_event(ant_sse_ctx_t *s, const char *event, const char *d
                         size_t nc = acc->acc_cap * 2;
                         while (nc < needed)
                             nc *= 2;
-                        char *p = (char *)AGENTRT_REALLOC(acc->acc_content, nc);
+                        char *p = (char *)AIRY_REALLOC(acc->acc_content, nc);
                         if (p) {
                             acc->acc_content = p;
                             acc->acc_cap = nc;
@@ -403,8 +403,8 @@ static int ant_feed_sse_event(ant_sse_ctx_t *s, const char *event, const char *d
         if (delta) {
             cJSON *fr = cJSON_GetObjectItem(delta, "stop_reason");
             if (cJSON_IsString(fr) && fr->valuestring) {
-                AGENTRT_FREE(acc->finish_reason);
-                acc->finish_reason = AGENTRT_STRDUP(fr->valuestring);
+                AIRY_FREE(acc->finish_reason);
+                acc->finish_reason = AIRY_STRDUP(fr->valuestring);
             }
         }
         cJSON *usage = cJSON_GetObjectItem(root, "usage");
@@ -483,7 +483,7 @@ static size_t ant_sse_write_cb(void *contents, size_t size, size_t nmemb, void *
         size_t nc = s->line_cap * 2;
         while (nc < needed)
             nc *= 2;
-        char *ptr = (char *)AGENTRT_REALLOC(s->line_buf, nc);
+        char *ptr = (char *)AIRY_REALLOC(s->line_buf, nc);
         if (!ptr)
             return 0;
         s->line_buf = ptr;
@@ -500,28 +500,28 @@ static size_t ant_sse_write_cb(void *contents, size_t size, size_t nmemb, void *
 
 static llm_response_t *ant_build_stream_response(ant_stream_acc_t *acc)
 {
-    llm_response_t *r = (llm_response_t *)AGENTRT_CALLOC(1, sizeof(llm_response_t));
+    llm_response_t *r = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
     if (!r) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
-    r->id = acc->resp_id ? acc->resp_id : AGENTRT_STRDUP("");
+    r->id = acc->resp_id ? acc->resp_id : AIRY_STRDUP("");
     acc->resp_id = NULL;
-    r->model = acc->resp_model ? acc->resp_model : AGENTRT_STRDUP("unknown");
+    r->model = acc->resp_model ? acc->resp_model : AIRY_STRDUP("unknown");
     acc->resp_model = NULL;
     r->prompt_tokens = acc->prompt_tokens;
     r->completion_tokens = acc->completion_tokens;
     r->total_tokens = r->prompt_tokens + r->completion_tokens;
-    r->choices = (llm_message_t *)AGENTRT_CALLOC(1, sizeof(llm_message_t));
+    r->choices = (llm_message_t *)AIRY_CALLOC(1, sizeof(llm_message_t));
     if (r->choices) {
         r->choice_count = 1;
-        r->choices[0].role = AGENTRT_STRDUP("assistant");
+        r->choices[0].role = AIRY_STRDUP("assistant");
         r->choices[0].content = acc->acc_content;
         acc->acc_content = NULL;
     } else {
         r->choice_count = 0;
     }
-    r->finish_reason = acc->finish_reason ? acc->finish_reason : AGENTRT_STRDUP("end_turn");
+    r->finish_reason = acc->finish_reason ? acc->finish_reason : AIRY_STRDUP("end_turn");
     acc->finish_reason = NULL;
     return r;
 }
@@ -534,7 +534,7 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
         SVC_LOG_ERROR("C-L02: ANTHROPIC: STREAM-FAIL — invalid params "
                       "ctx=%p manager=%p callback=%p",
                       (void *)ctx_ptr, (void *)manager, (void *)(uintptr_t)callback);
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     anthropic_ctx_t *ctx = (anthropic_ctx_t *)ctx_ptr;
@@ -552,7 +552,7 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: ANTHROPIC: STREAM-FAIL — request body build failed "
                       "model=%s", model);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     char url[1024];
@@ -572,16 +572,16 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
     acc.user_cb = callback;
     acc.user_data = user_data;
     acc.acc_cap = 4096;
-    acc.acc_content = (char *)AGENTRT_MALLOC(acc.acc_cap);
+    acc.acc_content = (char *)AIRY_MALLOC(acc.acc_cap);
 
     ant_sse_ctx_t sse;
     ant_sse_init(&sse, &acc);
     if (!sse.line_buf) {
         SVC_LOG_ERROR("C-L02: ANTHROPIC: STREAM-FAIL — SSE buffer alloc failed (OOM)");
-        AGENTRT_FREE(req_body);
+        AIRY_FREE(req_body);
         curl_slist_free_all(headers);
-        AGENTRT_FREE(acc.acc_content);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        AIRY_FREE(acc.acc_content);
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     SVC_LOG_DEBUG("C-L02: ANTHROPIC: STREAM-HTTP-POST url=%s body_len=%zu timeout=%.1fs",
@@ -589,7 +589,7 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
 
     CURL *curl = curl_easy_init();
     long http_code = 0;
-    int ret = AGENTRT_ERR_IO;
+    int ret = AIRY_ERR_IO;
 
     if (curl) {
         curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -612,7 +612,7 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
             ant_process_buffer(&sse);
 
         if (cres == CURLE_OK)
-            ret = AGENTRT_OK;
+            ret = AIRY_OK;
         else
             SVC_LOG_WARN("C-L02: ANTHROPIC: STREAM — curl error: %s (code=%d)",
                          curl_easy_strerror(cres), (int)cres);
@@ -622,25 +622,25 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
 
     ant_sse_destroy(&sse);
     curl_slist_free_all(headers);
-    AGENTRT_FREE(req_body);
+    AIRY_FREE(req_body);
 
-    if (ret != AGENTRT_OK) {
+    if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: ANTHROPIC: STREAM-FAIL — HTTP stream error "
                       "url=%s http_code=%ld ret=%d timeout=%.1fs "
                       "STACK: curl_easy_perform() → anthropic_complete_stream()",
                       url, http_code, ret, base->timeout_sec);
-        AGENTRT_FREE(acc.acc_content);
-        AGENTRT_FREE(acc.resp_id);
-        AGENTRT_FREE(acc.resp_model);
-        AGENTRT_FREE(acc.finish_reason);
+        AIRY_FREE(acc.acc_content);
+        AIRY_FREE(acc.resp_id);
+        AIRY_FREE(acc.resp_model);
+        AIRY_FREE(acc.finish_reason);
         return ret;
     }
 
     llm_response_t *resp = ant_build_stream_response(&acc);
-    AGENTRT_FREE(acc.acc_content);
-    AGENTRT_FREE(acc.resp_id);
-    AGENTRT_FREE(acc.resp_model);
-    AGENTRT_FREE(acc.finish_reason);
+    AIRY_FREE(acc.acc_content);
+    AIRY_FREE(acc.resp_id);
+    AIRY_FREE(acc.resp_model);
+    AIRY_FREE(acc.finish_reason);
 
     if (resp) {
         SVC_LOG_INFO("C-L02: ANTHROPIC: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
@@ -658,7 +658,7 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
     else if (resp)
         llm_response_free(resp);
 
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 /* ---------- 操作表 ---------- */

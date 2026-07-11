@@ -31,8 +31,8 @@
  * - 内存：方法数量线性增长
  */
 
-#ifndef AGENTRT_METHOD_DISPATCHER_H
-#define AGENTRT_METHOD_DISPATCHER_H
+#ifndef AIRY_RT_METHOD_DISPATCHER_H
+#define AIRY_RT_METHOD_DISPATCHER_H
 
 #include <cjson/cJSON.h>
 #include <stdint.h>
@@ -103,4 +103,4 @@ int method_dispatcher_dispatch(method_dispatcher_t *disp, cJSON *request,
 }
 #endif
 
-#endif /* AGENTRT_METHOD_DISPATCHER_H */
+#endif /* AIRY_RT_METHOD_DISPATCHER_H */

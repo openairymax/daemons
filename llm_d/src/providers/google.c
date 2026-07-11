@@ -45,10 +45,10 @@ static provider_ctx_t *google_init(const char *name __attribute__((unused)), con
                  timeout_sec, max_retries,
                  (api_key && api_key[0]) ? 1 : 0);
 
-    google_ctx_t *ctx = (google_ctx_t *)AGENTRT_CALLOC(1, sizeof(google_ctx_t));
+    google_ctx_t *ctx = (google_ctx_t *)AIRY_CALLOC(1, sizeof(google_ctx_t));
     if (!ctx) {
         SVC_LOG_ERROR("C-L02: GOOGLE: INIT-FAIL reason=alloc_failed");
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     provider_base_init(&ctx->base, api_key, api_base, organization, timeout_sec, max_retries,
@@ -62,19 +62,19 @@ static void google_destroy(provider_ctx_t *ctx_ptr)
 {
     SVC_LOG_INFO("C-L02: GOOGLE: DESTROY ctx=%p", (void *)ctx_ptr);
     if (ctx_ptr) {
-        AGENTRT_FREE(ctx_ptr);
+        AIRY_FREE(ctx_ptr);
     }
 }
 
 static char *google_build_request(const llm_request_config_t *manager)
 {
     if (!manager) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     cJSON *root = cJSON_CreateObject();
     if (!root) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     cJSON *contents = cJSON_CreateArray();
@@ -85,7 +85,7 @@ static char *google_build_request(const llm_request_config_t *manager)
         const char *content = manager->messages[i].content ? manager->messages[i].content : "";
 
         if (strcmp(role, "system") == 0) {
-            system_instruction_text = AGENTRT_STRDUP(content);
+            system_instruction_text = AIRY_STRDUP(content);
             continue;
         }
 
@@ -111,7 +111,7 @@ static char *google_build_request(const llm_request_config_t *manager)
         cJSON_AddItemToArray(si_parts, si_part);
         cJSON_AddItemToObject(si, "parts", si_parts);
         cJSON_AddItemToObject(root, "systemInstruction", si);
-        AGENTRT_FREE(system_instruction_text);
+        AIRY_FREE(system_instruction_text);
     }
 
     cJSON *gen_config = cJSON_CreateObject();
@@ -131,18 +131,18 @@ static char *google_build_request(const llm_request_config_t *manager)
 static int google_parse_response(const char *body, llm_response_t **out)
 {
     if (!body || !out) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
     CJSON_PARSE_GUARD(root, body, {
-        return AGENTRT_ERR_PARSE_ERROR;
+        return AIRY_ERR_PARSE_ERROR;
     });
 
-    llm_response_t *resp = (llm_response_t *)AGENTRT_CALLOC(1, sizeof(llm_response_t));
+    llm_response_t *resp = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {
         /* root 由 CJSON_AUTO_FREE 自动释放 */
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     cJSON *candidates = cJSON_GetObjectItem(root, "candidates");
@@ -155,18 +155,18 @@ static int google_parse_response(const char *body, llm_response_t **out)
                 cJSON *part0 = cJSON_GetArrayItem(parts, 0);
                 cJSON *text = cJSON_GetObjectItem(part0, "text");
                 if (cJSON_IsString(text) && text->valuestring) {
-                    resp->choices = (llm_message_t *)AGENTRT_CALLOC(1, sizeof(llm_message_t));
+                    resp->choices = (llm_message_t *)AIRY_CALLOC(1, sizeof(llm_message_t));
                     if (resp->choices) {
-                        char *role_copy = AGENTRT_STRDUP("assistant");
-                        char *content_copy = AGENTRT_STRDUP(text->valuestring);
+                        char *role_copy = AIRY_STRDUP("assistant");
+                        char *content_copy = AIRY_STRDUP(text->valuestring);
                         if (role_copy && content_copy) {
                             resp->choices[0].role = role_copy;
                             resp->choices[0].content = content_copy;
                             resp->choice_count = 1;
                         } else {
-                            AGENTRT_FREE(role_copy);
-                            AGENTRT_FREE(content_copy);
-                            AGENTRT_FREE(resp->choices);
+                            AIRY_FREE(role_copy);
+                            AIRY_FREE(content_copy);
+                            AIRY_FREE(resp->choices);
                             resp->choices = NULL;
                             resp->choice_count = 0;
                         }
@@ -181,20 +181,20 @@ static int google_parse_response(const char *body, llm_response_t **out)
         if (cJSON_IsString(finish) && finish->valuestring) {
             const char *fr = finish->valuestring;
             if (strcmp(fr, "STOP") == 0) {
-                resp->finish_reason = AGENTRT_STRDUP("stop");
+                resp->finish_reason = AIRY_STRDUP("stop");
             } else if (strcmp(fr, "MAX_TOKENS") == 0) {
-                resp->finish_reason = AGENTRT_STRDUP("length");
+                resp->finish_reason = AIRY_STRDUP("length");
             } else if (strcmp(fr, "SAFETY") == 0) {
-                resp->finish_reason = AGENTRT_STRDUP("content_filter");
+                resp->finish_reason = AIRY_STRDUP("content_filter");
             } else {
-                resp->finish_reason = AGENTRT_STRDUP(fr);
+                resp->finish_reason = AIRY_STRDUP(fr);
             }
         }
     }
 
     cJSON *model = cJSON_GetObjectItem(root, "modelVersion");
     if (cJSON_IsString(model) && model->valuestring) {
-        resp->model = AGENTRT_STRDUP(model->valuestring);
+        resp->model = AIRY_STRDUP(model->valuestring);
     }
 
     cJSON *usage = cJSON_GetObjectItem(root, "usageMetadata");
@@ -210,14 +210,14 @@ static int google_parse_response(const char *body, llm_response_t **out)
 
     /* root 由 CJSON_AUTO_FREE 自动释放 */
     *out = resp;
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 static int google_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *manager,
                            llm_response_t **out_response)
 {
     if (!ctx_ptr || !manager || !out_response) {
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     google_ctx_t *ctx = (google_ctx_t *)ctx_ptr;
@@ -233,7 +233,7 @@ static int google_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     char *req_body = google_build_request(manager);
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: GOOGLE: COMPLETE-FAIL model=%s reason=build_request_failed", model);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     char url[1024];
@@ -258,12 +258,12 @@ static int google_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
                                  &http_resp, &http_code);
 
     curl_slist_free_all(headers);
-    AGENTRT_FREE(req_body);
+    AIRY_FREE(req_body);
 
     size_t resp_body_len = (http_resp && http_resp->data) ? strlen(http_resp->data) : 0;
     SVC_LOG_INFO("C-L02: GOOGLE: HTTP-RESPONSE http_code=%ld resp_body_len=%zu", http_code, resp_body_len);
 
-    if (ret != AGENTRT_OK) {
+    if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: GOOGLE: COMPLETE-FAIL model=%s reason=http_request_failed http_code=%ld ret=%d",
                       model, http_code, ret);
         SVC_LOG_ERROR("C-L02: GOOGLE: STACK: google_complete http_request_failed url=%s", url);
@@ -285,13 +285,13 @@ static int google_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
                       (http_resp && http_resp->data) ? http_resp->data : "(null)");
         SVC_LOG_ERROR("C-L02: GOOGLE: STACK: google_complete http_error url=%s http_code=%ld", url, http_code);
         provider_http_resp_free(http_resp);
-        return AGENTRT_ERR_IO;
+        return AIRY_ERR_IO;
     }
 
     ret = google_parse_response(http_resp->data, out_response);
     provider_http_resp_free(http_resp);
 
-    if (ret == AGENTRT_OK && *out_response) {
+    if (ret == AIRY_OK && *out_response) {
         llm_response_t *r = *out_response;
         SVC_LOG_INFO("C-L02: GOOGLE: COMPLETE-OK model=%s prompt_tokens=%u completion_tokens=%u total_tokens=%u finish_reason=%s",
                      r->model ? r->model : model,
@@ -329,14 +329,14 @@ static void gg_sse_init(gg_sse_ctx_t *s, gg_stream_acc_t *a)
 {
     __builtin_memset(s, 0, sizeof(*s));
     s->line_cap = 4096;
-    s->line_buf = (char *)AGENTRT_MALLOC(s->line_cap);
+    s->line_buf = (char *)AIRY_MALLOC(s->line_cap);
     s->acc = a;
 }
 
 static void gg_sse_destroy(gg_sse_ctx_t *s)
 {
     if (s) {
-        AGENTRT_FREE(s->line_buf);
+        AIRY_FREE(s->line_buf);
         s->line_buf = NULL;
     }
 }
@@ -376,7 +376,7 @@ static int gg_feed_sse_data(gg_sse_ctx_t *s, const char *data, size_t data_len)
                                 size_t nc = acc->acc_cap * 2;
                                 while (nc < needed)
                                     nc *= 2;
-                                char *p = (char *)AGENTRT_REALLOC(acc->acc_content, nc);
+                                char *p = (char *)AIRY_REALLOC(acc->acc_content, nc);
                                 if (p) {
                                     acc->acc_content = p;
                                     acc->acc_cap = nc;
@@ -395,14 +395,14 @@ static int gg_feed_sse_data(gg_sse_ctx_t *s, const char *data, size_t data_len)
 
         cJSON *finish = cJSON_GetObjectItem(first, "finishReason");
         if (cJSON_IsString(finish) && finish->valuestring) {
-            AGENTRT_FREE(acc->finish_reason);
+            AIRY_FREE(acc->finish_reason);
             const char *fr = finish->valuestring;
             if (strcmp(fr, "STOP") == 0) {
-                acc->finish_reason = AGENTRT_STRDUP("stop");
+                acc->finish_reason = AIRY_STRDUP("stop");
             } else if (strcmp(fr, "MAX_TOKENS") == 0) {
-                acc->finish_reason = AGENTRT_STRDUP("length");
+                acc->finish_reason = AIRY_STRDUP("length");
             } else {
-                acc->finish_reason = AGENTRT_STRDUP(fr);
+                acc->finish_reason = AIRY_STRDUP(fr);
             }
         }
     }
@@ -419,7 +419,7 @@ static int gg_feed_sse_data(gg_sse_ctx_t *s, const char *data, size_t data_len)
 
     cJSON *mv = cJSON_GetObjectItem(root, "modelVersion");
     if (cJSON_IsString(mv) && mv->valuestring && !acc->resp_model) {
-        acc->resp_model = AGENTRT_STRDUP(mv->valuestring);
+        acc->resp_model = AIRY_STRDUP(mv->valuestring);
     }
 
     /* root 由 CJSON_AUTO_FREE 自动释放 */
@@ -448,12 +448,12 @@ static void gg_process_buffer(gg_sse_ctx_t *s)
             while (*ds == ' ' || *ds == '\t')
                 ds++;
             size_t dlen = llen - (size_t)(ds - p);
-            char *data_copy = (char *)AGENTRT_MALLOC(dlen + 1);
+            char *data_copy = (char *)AIRY_MALLOC(dlen + 1);
             if (data_copy) {
                 __builtin_memcpy(data_copy, ds, dlen);
                 data_copy[dlen] = '\0';
                 gg_feed_sse_data(s, data_copy, dlen);
-                AGENTRT_FREE(data_copy);
+                AIRY_FREE(data_copy);
             }
         }
 
@@ -481,7 +481,7 @@ static size_t gg_sse_write_cb(void *contents, size_t size, size_t nmemb, void *u
         size_t nc = s->line_cap * 2;
         while (nc < needed)
             nc *= 2;
-        char *ptr = (char *)AGENTRT_REALLOC(s->line_buf, nc);
+        char *ptr = (char *)AIRY_REALLOC(s->line_buf, nc);
         if (!ptr)
             return 0;
         s->line_buf = ptr;
@@ -498,34 +498,34 @@ static size_t gg_sse_write_cb(void *contents, size_t size, size_t nmemb, void *u
 
 static llm_response_t *gg_build_stream_response(gg_stream_acc_t *acc)
 {
-    llm_response_t *r = (llm_response_t *)AGENTRT_CALLOC(1, sizeof(llm_response_t));
+    llm_response_t *r = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
     if (!r) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
-    r->id = AGENTRT_STRDUP("");
-    r->model = acc->resp_model ? acc->resp_model : AGENTRT_STRDUP("unknown");
+    r->id = AIRY_STRDUP("");
+    r->model = acc->resp_model ? acc->resp_model : AIRY_STRDUP("unknown");
     acc->resp_model = NULL;
     r->prompt_tokens = acc->prompt_tokens;
     r->completion_tokens = acc->completion_tokens;
     r->total_tokens = r->prompt_tokens + r->completion_tokens;
-    r->choices = (llm_message_t *)AGENTRT_CALLOC(1, sizeof(llm_message_t));
+    r->choices = (llm_message_t *)AIRY_CALLOC(1, sizeof(llm_message_t));
     if (r->choices) {
-        char *role_copy = AGENTRT_STRDUP("assistant");
+        char *role_copy = AIRY_STRDUP("assistant");
         if (role_copy) {
             r->choices[0].role = role_copy;
             r->choices[0].content = acc->acc_content;
             acc->acc_content = NULL;
             r->choice_count = 1;
         } else {
-            AGENTRT_FREE(r->choices);
+            AIRY_FREE(r->choices);
             r->choices = NULL;
             r->choice_count = 0;
         }
     } else {
         r->choice_count = 0;
     }
-    r->finish_reason = acc->finish_reason ? acc->finish_reason : AGENTRT_STRDUP("stop");
+    r->finish_reason = acc->finish_reason ? acc->finish_reason : AIRY_STRDUP("stop");
     acc->finish_reason = NULL;
     return r;
 }
@@ -535,7 +535,7 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
                                   llm_response_t **out_response)
 {
     if (!ctx_ptr || !manager || !callback)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
 
     google_ctx_t *ctx = (google_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
@@ -553,7 +553,7 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     char *req_body = google_build_request(&stream_cfg);
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: GOOGLE: STREAM-FAIL model=%s reason=build_request_failed", model);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     char url[1024];
@@ -576,21 +576,21 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     acc.user_cb = callback;
     acc.user_data = user_data;
     acc.acc_cap = 4096;
-    acc.acc_content = (char *)AGENTRT_MALLOC(acc.acc_cap);
+    acc.acc_content = (char *)AIRY_MALLOC(acc.acc_cap);
 
     gg_sse_ctx_t sse;
     gg_sse_init(&sse, &acc);
     if (!sse.line_buf) {
         SVC_LOG_ERROR("C-L02: GOOGLE: STREAM-FAIL model=%s reason=sse_alloc_failed", model);
-        AGENTRT_FREE(req_body);
+        AIRY_FREE(req_body);
         curl_slist_free_all(headers);
-        AGENTRT_FREE(acc.acc_content);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        AIRY_FREE(acc.acc_content);
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     CURL *curl = curl_easy_init();
     long http_code = 0;
-    int ret = AGENTRT_ERR_IO;
+    int ret = AIRY_ERR_IO;
 
     if (curl) {
         curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -613,7 +613,7 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
             gg_process_buffer(&sse);
 
         if (cres == CURLE_OK)
-            ret = AGENTRT_OK;
+            ret = AIRY_OK;
         else {
             SVC_LOG_WARN("C-L02: GOOGLE: STREAM-FAIL model=%s reason=curl_error err=%s",
                          model, curl_easy_strerror(cres));
@@ -624,22 +624,22 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
 
     gg_sse_destroy(&sse);
     curl_slist_free_all(headers);
-    AGENTRT_FREE(req_body);
+    AIRY_FREE(req_body);
 
-    if (ret != AGENTRT_OK) {
+    if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: GOOGLE: STREAM-FAIL model=%s reason=http_error http_code=%ld ret=%d",
                       model, http_code, ret);
         SVC_LOG_ERROR("C-L02: GOOGLE: STACK: google_complete_stream stream_failed url=%s http_code=%ld", url, http_code);
-        AGENTRT_FREE(acc.acc_content);
-        AGENTRT_FREE(acc.resp_model);
-        AGENTRT_FREE(acc.finish_reason);
+        AIRY_FREE(acc.acc_content);
+        AIRY_FREE(acc.resp_model);
+        AIRY_FREE(acc.finish_reason);
         return ret;
     }
 
     llm_response_t *resp = gg_build_stream_response(&acc);
-    AGENTRT_FREE(acc.acc_content);
-    AGENTRT_FREE(acc.resp_model);
-    AGENTRT_FREE(acc.finish_reason);
+    AIRY_FREE(acc.acc_content);
+    AIRY_FREE(acc.resp_model);
+    AIRY_FREE(acc.finish_reason);
 
     if (resp) {
         SVC_LOG_INFO("C-L02: GOOGLE: STREAM-OK model=%s prompt_tokens=%u completion_tokens=%u total_tokens=%u finish_reason=%s",
@@ -656,7 +656,7 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     else if (resp)
         llm_response_free(resp);
 
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 const provider_ops_t google_ops = {.init = google_init,

@@ -19,7 +19,7 @@ set(COMMONS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../commons")
 if(NOT EXISTS "${COMMONS_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "commons module not found at ${COMMONS_DIR}. Please ensure commons is available.")
 endif()
-if(NOT TARGET agentrt_common)
+if(NOT TARGET airy_common)
     add_subdirectory(${COMMONS_DIR} ${CMAKE_BINARY_DIR}/commons)
 endif()
 
@@ -44,7 +44,7 @@ set(SVC_COMMON_SOURCES
     src/param_validator.c
     src/log_sanitizer.c
     src/platform_compat.c     # 平台兼容层实现
-    src/agentrt_event_loop.c  # 事件驱动循环
+    src/airy_event_loop.c  # 事件驱动循环
     src/daemon_event_driver.c # 统一事件驱动框架
     src/api_recovery.c        # API恢复系统
     src/thread_pool.c         # 工作线程池
@@ -61,8 +61,8 @@ add_library(svc_common STATIC ${SVC_COMMON_SOURCES})
 
 # 链接 commons 库
 target_link_libraries(svc_common PUBLIC
-    agentrt_common
-    agentrt_compile_defs
+    airy_common
+    airy_compile_defs
 )
 
 # P3.14 ACC-DT15: cupolas 安全穹顶（PUBLIC 使得所有链接 svc_common 的 daemon 自动获得 cupolas）
@@ -75,14 +75,14 @@ else()
     message(WARNING "cupolas target not found — daemon_cupolas_bootstrap will fail to link. "
                     "Ensure cupolas module is built (agentrt/cupolas/CMakeLists.txt).")
 endif()
-if(AGENTRT_HAS_OPENSSL)
+if(AIRY_HAS_OPENSSL)
     target_link_libraries(svc_common PUBLIC ${OPENSSL_CRYPTO_LIBRARY})
 endif()
 
 # 平台特定配置
 if(WIN32)
     target_compile_definitions(svc_common PRIVATE
-        AGENTRT_PLATFORM_WINDOWS=1
+        AIRY_PLATFORM_WINDOWS=1
         WIN32_LEAN_AND_MEAN
         NOMINMAX
         _CRT_SECURE_NO_WARNINGS
@@ -94,23 +94,23 @@ if(WIN32)
     )
 elseif(APPLE)
     target_compile_definitions(svc_common PRIVATE
-        AGENTRT_PLATFORM_MACOS=1
+        AIRY_PLATFORM_MACOS=1
     )
 elseif(UNIX)
     target_compile_definitions(svc_common PRIVATE
-        AGENTRT_PLATFORM_LINUX=1
+        AIRY_PLATFORM_LINUX=1
         _GNU_SOURCE
     )
     target_link_libraries(svc_common PRIVATE
         Threads::Threads
-        agentrt_platform_libs
+        airy_platform_libs
     )
 endif()
 
 # P0.17 IRON-6 跨层耦合禁令修复:
 # commons 权威路径必须声明在 daemons/common/include 之前。
 # CMake 的 INTERFACE_INCLUDE_DIRECTORIES 按声明顺序累加，并传递给所有链接 svc_common
-# 的目标（包括 atoms/coreloopthree 的 agentrt_execution、agentrt_cognition 子目标）。
+# 的目标（包括 atoms/coreloopthree 的 airy_execution、airy_cognition 子目标）。
 # 若 daemons/common/include 在前，atoms 源代码 #include "daemon_bootstrap_ipc.h" 等
 # 会先命中 daemons 重导出兼容头（虽然内部经相对路径到达 commons，但仍构成编译期
 # atoms→daemons 反向依赖）。将 daemons/common/include 移至 commons 路径之后，
@@ -139,7 +139,7 @@ target_include_directories(svc_common PUBLIC
     # P0.17 阶段 4: service_discovery.h/service_discovery_helper.h/daemon_bootstrap_sd.h
     # 迁移至 commons/utils/sd/include（daemons 版保留为重导出兼容头）
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/sd/include>
-    # P0.17 阶段 1: daemon_defaults.h 重导出 agentrt_defaults.h（位于 commons/include）
+    # P0.17 阶段 1: daemon_defaults.h 重导出 airy_defaults.h（位于 commons/include）
     $<BUILD_INTERFACE:${COMMONS_DIR}/include>
     # daemons/common/include 兼容层路径（放最后，避免 atoms 误命中重导出兼容头）
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -159,8 +159,8 @@ target_include_directories(svc_common PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../daemons/llm_d/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../daemons/tool_d/include>
 )
-if(AGENTRT_HAS_CURL)
-    target_compile_definitions(svc_common PUBLIC AGENTRT_HAS_CURL)
+if(AIRY_HAS_CURL)
+    target_compile_definitions(svc_common PUBLIC AIRY_HAS_CURL)
     if(CURL_FOUND)
         target_include_directories(svc_common PRIVATE ${CURL_INCLUDE_DIRS})
         target_link_libraries(svc_common PUBLIC ${CURL_LIBRARIES})
@@ -169,11 +169,11 @@ if(AGENTRT_HAS_CURL)
         target_link_libraries(svc_common PUBLIC ${LIBCURL_LIBRARIES})
     endif()
 endif()
-if(AGENTRT_HAS_YAML AND YAML_FOUND)
+if(AIRY_HAS_YAML AND YAML_FOUND)
     target_include_directories(svc_common PRIVATE ${YAML_INCLUDE_DIRS})
     target_link_libraries(svc_common PUBLIC ${YAML_LIBRARIES})
 endif()
-if(AGENTRT_HAS_CJSON)
+if(AIRY_HAS_CJSON)
     if(cJSON_FOUND)
         target_link_libraries(svc_common PUBLIC cjson)
     elseif(CJSON_FOUND)
@@ -264,7 +264,7 @@ install(FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/include/thread_pool.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_defaults.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/parallel_dispatcher.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/agentrt_event_loop.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/airy_event_loop.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_oom.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ipc_backpressure.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_startup.h

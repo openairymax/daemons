@@ -36,7 +36,7 @@ typedef struct {
 typedef struct {
     agent_weight_t agents[MAX_AGENTS];
     size_t agent_count;
-    agentrt_mutex_t lock;
+    airy_mtx_t lock;
     double total_weight;
 } weighted_data_t;
 
@@ -46,7 +46,7 @@ static int find_agent_index(weighted_data_t *data, const char *agent_id)
         if (data->agents[i].agent_id && strcmp(data->agents[i].agent_id, agent_id) == 0)
             return (int)i;
     }
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 static void normalize_weights(weighted_data_t *data)
@@ -60,8 +60,8 @@ static void normalize_weights(weighted_data_t *data)
 static int select_by_weight(weighted_data_t *data)
 {
     if (data->agent_count == 0)
-        return AGENTRT_ERR_NOT_FOUND;
-    double r = ((double)agentrt_random_float()) * data->total_weight;
+        return AIRY_ERR_NOT_FOUND;
+    double r = ((double)airy_random_float()) * data->total_weight;
     double cumulative = 0.0;
     for (size_t i = 0; i < data->agent_count; i++) {
         cumulative += data->agents[i].weight;
@@ -75,51 +75,51 @@ static int select_by_weight(weighted_data_t *data)
 
 static int weighted_create(const sched_config_t *manager __attribute__((unused)), void **out_data)
 {
-    weighted_data_t *data = (weighted_data_t *)AGENTRT_CALLOC(1, sizeof(weighted_data_t));
+    weighted_data_t *data = (weighted_data_t *)AIRY_CALLOC(1, sizeof(weighted_data_t));
     if (!data)
-        return AGENTRT_ERR_OUT_OF_MEMORY;
-    if (agentrt_mutex_init(&data->lock) != 0) {
-        AGENTRT_FREE(data);
-        return AGENTRT_ERR_UNKNOWN;
+        return AIRY_ERR_OUT_OF_MEMORY;
+    if (airy_mtx_init(&data->lock) != 0) {
+        AIRY_FREE(data);
+        return AIRY_ERR_UNKNOWN;
     }
     data->total_weight = 0.0;
     *out_data = data;
-    return AGENTRT_OK;
+    return AIRY_OK;
 }
 
 static int weighted_destroy(void *raw_data)
 {
     if (!raw_data)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     weighted_data_t *data = (weighted_data_t *)raw_data;
-    agentrt_mutex_lock(&data->lock);
+    airy_mtx_lock(&data->lock);
     for (size_t i = 0; i < data->agent_count; i++)
-        AGENTRT_FREE(data->agents[i].agent_id);
-    agentrt_mutex_unlock(&data->lock);
-    agentrt_mutex_destroy(&data->lock);
-    AGENTRT_FREE(data);
-    return AGENTRT_OK;
+        AIRY_FREE(data->agents[i].agent_id);
+    airy_mtx_unlock(&data->lock);
+    airy_mtx_destroy(&data->lock);
+    AIRY_FREE(data);
+    return AIRY_OK;
 }
 
 static int weighted_register_agent(void *raw_data, const agent_info_t *agent)
 {
     if (!raw_data || !agent || !agent->agent_id)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     weighted_data_t *data = (weighted_data_t *)raw_data;
-    agentrt_mutex_lock(&data->lock);
+    airy_mtx_lock(&data->lock);
     if (find_agent_index(data, agent->agent_id) >= 0) {
-        agentrt_mutex_unlock(&data->lock);
-        return AGENTRT_ERR_ALREADY_EXISTS;
+        airy_mtx_unlock(&data->lock);
+        return AIRY_ERR_ALREADY_EXISTS;
     }
     if (data->agent_count >= MAX_AGENTS) {
-        agentrt_mutex_unlock(&data->lock);
-        return AGENTRT_ERR_OVERFLOW;
+        airy_mtx_unlock(&data->lock);
+        return AIRY_ERR_OVERFLOW;
     }
     size_t idx = data->agent_count;
-    data->agents[idx].agent_id = AGENTRT_STRDUP(agent->agent_id);
+    data->agents[idx].agent_id = AIRY_STRDUP(agent->agent_id);
     if (!data->agents[idx].agent_id) {
-        agentrt_mutex_unlock(&data->lock);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        airy_mtx_unlock(&data->lock);
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
     data->agents[idx].weight = agent->weight > 0 ? agent->weight : DEFAULT_WEIGHT;
     data->agents[idx].success_rate = agent->success_rate > 0 ? agent->success_rate : 1.0;
@@ -128,72 +128,72 @@ static int weighted_register_agent(void *raw_data, const agent_info_t *agent)
     data->agents[idx].avg_latency_ms = 0.0;
     data->agent_count++;
     normalize_weights(data);
-    agentrt_mutex_unlock(&data->lock);
-    return AGENTRT_OK;
+    airy_mtx_unlock(&data->lock);
+    return AIRY_OK;
 }
 
 static int weighted_unregister_agent(void *raw_data, const char *agent_id)
 {
     if (!raw_data || !agent_id)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     weighted_data_t *data = (weighted_data_t *)raw_data;
-    agentrt_mutex_lock(&data->lock);
+    airy_mtx_lock(&data->lock);
     int idx = find_agent_index(data, agent_id);
     if (idx < 0) {
-        agentrt_mutex_unlock(&data->lock);
-        return AGENTRT_ERR_NOT_FOUND;
+        airy_mtx_unlock(&data->lock);
+        return AIRY_ERR_NOT_FOUND;
     }
-    AGENTRT_FREE(data->agents[idx].agent_id);
+    AIRY_FREE(data->agents[idx].agent_id);
     for (size_t i = (size_t)idx; i < data->agent_count - 1; i++)
         data->agents[i] = data->agents[i + 1];
     __builtin_memset(&data->agents[--data->agent_count], 0, sizeof(agent_weight_t));
     normalize_weights(data);
-    agentrt_mutex_unlock(&data->lock);
-    return AGENTRT_OK;
+    airy_mtx_unlock(&data->lock);
+    return AIRY_OK;
 }
 
 static int weighted_update_agent_status(void *raw_data, const agent_info_t *agent_info)
 {
     if (!raw_data || !agent_info)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     weighted_data_t *data = (weighted_data_t *)raw_data;
-    agentrt_mutex_lock(&data->lock);
+    airy_mtx_lock(&data->lock);
     int idx = find_agent_index(data, agent_info->agent_id);
     if (idx >= 0) {
         data->agents[idx].success_rate = agent_info->success_rate;
         data->agents[idx].avg_latency_ms = (double)agent_info->avg_response_time_ms;
     }
-    agentrt_mutex_unlock(&data->lock);
-    return AGENTRT_OK;
+    airy_mtx_unlock(&data->lock);
+    return AIRY_OK;
 }
 
 static int weighted_schedule(void *raw_data, const task_info_t *task_info __attribute__((unused)),
                              sched_result_t **out_result)
 {
     if (!raw_data || !out_result)
-        return AGENTRT_ERR_INVALID_PARAM;
+        return AIRY_ERR_INVALID_PARAM;
     weighted_data_t *data = (weighted_data_t *)raw_data;
-    agentrt_mutex_lock(&data->lock);
+    airy_mtx_lock(&data->lock);
     if (data->agent_count == 0) {
-        agentrt_mutex_unlock(&data->lock);
-        return AGENTRT_ERR_NOT_FOUND;
+        airy_mtx_unlock(&data->lock);
+        return AIRY_ERR_NOT_FOUND;
     }
     int idx = select_by_weight(data);
     if (idx < 0) {
-        agentrt_mutex_unlock(&data->lock);
-        return AGENTRT_ERR_NOT_FOUND;
+        airy_mtx_unlock(&data->lock);
+        return AIRY_ERR_NOT_FOUND;
     }
-    sched_result_t *result = (sched_result_t *)AGENTRT_CALLOC(1, sizeof(sched_result_t));
+    sched_result_t *result = (sched_result_t *)AIRY_CALLOC(1, sizeof(sched_result_t));
     if (!result) {
-        agentrt_mutex_unlock(&data->lock);
-        return AGENTRT_ERR_OUT_OF_MEMORY;
+        airy_mtx_unlock(&data->lock);
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
-    result->selected_agent_id = AGENTRT_STRDUP(data->agents[idx].agent_id);
+    result->selected_agent_id = AIRY_STRDUP(data->agents[idx].agent_id);
     result->confidence = (float)(data->agents[idx].weight / data->total_weight);
     result->estimated_time_ms = (uint32_t)data->agents[idx].avg_latency_ms;
     *out_result = result;
-    agentrt_mutex_unlock(&data->lock);
-    return AGENTRT_OK;
+    airy_mtx_unlock(&data->lock);
+    return AIRY_OK;
 }
 
 static const char *weighted_get_name(void)
@@ -206,9 +206,9 @@ static size_t weighted_get_available_agent_count(void *raw_data)
     if (!raw_data)
         return 0;
     weighted_data_t *data = (weighted_data_t *)raw_data;
-    agentrt_mutex_lock(&data->lock);
+    airy_mtx_lock(&data->lock);
     size_t c = data->agent_count;
-    agentrt_mutex_unlock(&data->lock);
+    airy_mtx_unlock(&data->lock);
     return c;
 }
 

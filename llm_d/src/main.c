@@ -12,7 +12,7 @@
  * - ARCHITECTURAL_PRINCIPLES.md E-3 资源确定性(成对管理)
  * - ARCHITECTURAL_PRINCIPLES.md E-4 跨平台一致性(platform.h)
  * - ARCHITECTURAL_PRINCIPLES.md E-5 命名语义化(SVC_LOG_*)
- * - ARCHITECTURAL_PRINCIPLES.md E-6 错误可追溯(AGENTRT_ERR_*)
+ * - ARCHITECTURAL_PRINCIPLES.md E-6 错误可追溯(AIRY_ERR_*)
  */
 
 /* P0.18.1: 引入 daemon_main.h 提供 DAEMON_DECLARE_COMMON/DAEMON_SETUP_SIGNALS/
@@ -27,8 +27,8 @@
 
 /* ==================== 配置常量 ==================== */
 
-#define DEFAULT_SOCKET_PATH_UNIX AGENTRT_RUNTIME_DIR "/llm.sock"
-#define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\agentrt_llm"
+#define DEFAULT_SOCKET_PATH_UNIX AIRY_RUNTIME_DIR "/llm.sock"
+#define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_llm"
 #define DEFAULT_TCP_PORT 8080
 #define MAX_BUFFER 65536
 #define MAX_CLIENTS 64
@@ -72,16 +72,16 @@ typedef struct {
  */
 static request_context_t *request_context_create(void)
 {
-    request_context_t *ctx = (request_context_t *)AGENTRT_CALLOC(1, sizeof(request_context_t));
+    request_context_t *ctx = (request_context_t *)AIRY_CALLOC(1, sizeof(request_context_t));
     if (!ctx) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     ctx->response_capacity = MAX_BUFFER;
-    ctx->response_buffer = (char *)AGENTRT_MALLOC(ctx->response_capacity);
+    ctx->response_buffer = (char *)AIRY_MALLOC(ctx->response_capacity);
     if (!ctx->response_buffer) {
-        AGENTRT_FREE(ctx);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_INVALID_PARAM, "null parameter");
+        AIRY_FREE(ctx);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     ctx->response_buffer[0] = '\0';
     ctx->response_size = 0;
@@ -98,12 +98,12 @@ static void request_context_destroy(request_context_t *ctx)
         return;
 
     for (size_t i = 0; i < ctx->message_count; i++) {
-        AGENTRT_FREE((void *)ctx->messages[i].role);
-        AGENTRT_FREE((void *)ctx->messages[i].content);
+        AIRY_FREE((void *)ctx->messages[i].role);
+        AIRY_FREE((void *)ctx->messages[i].content);
     }
 
-    AGENTRT_FREE(ctx->response_buffer);
-    AGENTRT_FREE(ctx);
+    AIRY_FREE(ctx->response_buffer);
+    AIRY_FREE(ctx);
 }
 
 /* ==================== 参数解析（线程安全） ==================== */
@@ -118,12 +118,12 @@ static void request_context_destroy(request_context_t *ctx)
 static void parse_params_cleanup(request_context_t *ctx, llm_request_config_t *cfg)
 {
     if (cfg->model) {
-        AGENTRT_FREE((void *)cfg->model);
+        AIRY_FREE((void *)cfg->model);
         cfg->model = NULL;
     }
     for (size_t i = 0; i < ctx->message_count; i++) {
-        AGENTRT_FREE((void *)ctx->messages[i].role);
-        AGENTRT_FREE((void *)ctx->messages[i].content);
+        AIRY_FREE((void *)ctx->messages[i].role);
+        AIRY_FREE((void *)ctx->messages[i].content);
     }
     ctx->message_count = 0;
 }
@@ -134,11 +134,11 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
 
     cJSON *model = cJSON_GetObjectItem(params, "model");
     if (!cJSON_IsString(model)) {
-        AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "model parameter is not a string");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "model parameter is not a string");
     }
-    cfg->model = AGENTRT_STRDUP(model->valuestring);
+    cfg->model = AIRY_STRDUP(model->valuestring);
     if (!cfg->model) {
-        AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate model string");
+        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate model string");
     }
 
     cJSON *messages = cJSON_GetObjectItem(params, "messages");
@@ -146,7 +146,7 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
         size_t count = cJSON_GetArraySize(messages);
         if (count > MAX_MESSAGES_PER_REQUEST) {
             parse_params_cleanup(ctx, cfg);
-            AGENTRT_ERROR(AGENTRT_ERR_OVERFLOW, "too many messages");
+            AIRY_ERROR(AIRY_ERR_OVERFLOW, "too many messages");
         }
 
         ctx->message_count = count;
@@ -160,16 +160,16 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
 
             if (!cJSON_IsString(role) || !cJSON_IsString(content)) {
                 parse_params_cleanup(ctx, cfg);
-                AGENTRT_ERROR(AGENTRT_ERR_INVALID_PARAM, "message role or content is not a string");
+                AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "message role or content is not a string");
             }
 
-            ctx->messages[i].role = AGENTRT_STRDUP(role->valuestring);
-            ctx->messages[i].content = AGENTRT_STRDUP(content->valuestring);
+            ctx->messages[i].role = AIRY_STRDUP(role->valuestring);
+            ctx->messages[i].content = AIRY_STRDUP(content->valuestring);
 
             if (!ctx->messages[i].role || !ctx->messages[i].content) {
                 ctx->message_count = i;
                 parse_params_cleanup(ctx, cfg);
-                AGENTRT_ERROR(AGENTRT_ERR_OUT_OF_MEMORY, "failed to duplicate message role or content");
+                AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate message role or content");
             }
         }
     }
@@ -212,7 +212,7 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
 
 /* 前向声明 */
 static char *handle_complete(cJSON *params, int id);
-static char *handle_complete_stream(cJSON *params, int id, agentrt_socket_t client_fd);
+static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd);
 
 /**
  * @brief complete 方法的包装器（适配 method_dispatcher 接口）
@@ -221,9 +221,9 @@ static void on_complete_method(cJSON *params, int id, void *user_data __attribut
 {
     char *response = handle_complete(params, id);
     if (response) {
-        agentrt_socket_t client_fd = *(agentrt_socket_t *)user_data;
-        agentrt_socket_send(client_fd, response, strlen(response));
-        AGENTRT_FREE(response);
+        airy_sock_t client_fd = *(airy_sock_t *)user_data;
+        airy_sock_send(client_fd, response, strlen(response));
+        AIRY_FREE(response);
     }
 }
 
@@ -233,11 +233,11 @@ static void on_complete_method(cJSON *params, int id, void *user_data __attribut
 static void on_complete_stream_method(cJSON *params, int id,
                                       void *user_data __attribute__((unused)))
 {
-    agentrt_socket_t client_fd = *(agentrt_socket_t *)user_data;
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
     char *response = handle_complete_stream(params, id, client_fd);
     if (response) {
-        agentrt_socket_send(client_fd, response, strlen(response));
-        AGENTRT_FREE(response);
+        airy_sock_send(client_fd, response, strlen(response));
+        AIRY_FREE(response);
     }
 }
 
@@ -259,7 +259,7 @@ static char *handle_complete(cJSON *params, int id)
         return jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "Invalid params", id);
     }
 
-    uint64_t start_time = agentrt_time_ms();
+    uint64_t start_time = airy_time_ms();
 
 #define LLM_MAX_RETRIES 3
 #define LLM_BASE_DELAY_MS 100
@@ -277,16 +277,16 @@ static char *handle_complete(cJSON *params, int id)
             unsigned delay_ms = LLM_BASE_DELAY_MS * (1U << (attempt > 15 ? 15 : attempt));
             SVC_LOG_WARN("LLM complete attempt %d/%d failed (err=%d), retrying in %ums",
                          attempt + 1, LLM_MAX_RETRIES + 1, ret, delay_ms);
-            agentrt_sleep_ms(delay_ms);
+            airy_sleep_ms(delay_ms);
         }
     }
 
-    uint64_t end_time = agentrt_time_ms();
+    uint64_t end_time = airy_time_ms();
 
     if (ret != 0) {
         SVC_LOG_ERROR("LLM complete failed after %d attempts (total %llums)", LLM_MAX_RETRIES + 1,
                       (unsigned long long)(end_time - start_time));
-        AGENTRT_FREE((void *)cfg.model);
+        AIRY_FREE((void *)cfg.model);
         request_context_destroy(ctx);
         return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "LLM service unavailable after retries",
                                    id);
@@ -294,7 +294,7 @@ static char *handle_complete(cJSON *params, int id)
 
     char *resp_json = response_to_json(resp);
     llm_response_free(resp);
-    AGENTRT_FREE((void *)cfg.model);
+    AIRY_FREE((void *)cfg.model);
 
     if (!resp_json) {
         request_context_destroy(ctx);
@@ -303,11 +303,11 @@ static char *handle_complete(cJSON *params, int id)
 
     /* P0.18.2: 模式 B — CJSON_PARSE_GUARD（on_fail 中释放 resp_json） */
     CJSON_PARSE_GUARD(result, resp_json, {
-        AGENTRT_FREE(resp_json);
+        AIRY_FREE(resp_json);
         request_context_destroy(ctx);
         return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Invalid response format", id);
     });
-    AGENTRT_FREE(resp_json);
+    AIRY_FREE(resp_json);
 
     char *success = jsonrpc_build_success(result, id);
     /* P0.20.8 修复：jsonrpc_build_success 通过 cJSON_AddItemToObject 转移 result 所有权到
@@ -323,16 +323,16 @@ static char *handle_complete(cJSON *params, int id)
  * @brief 处理 complete_stream 方法
  */
 typedef struct {
-    agentrt_socket_t fd;
+    airy_sock_t fd;
 } llm_stream_ctx_t;
 
 static void llm_stream_callback(const char *chunk, void *user_data)
 {
     llm_stream_ctx_t *sctx = (llm_stream_ctx_t *)user_data;
-    agentrt_socket_send(sctx->fd, chunk, strlen(chunk));
+    airy_sock_send(sctx->fd, chunk, strlen(chunk));
 }
 
-static char *handle_complete_stream(cJSON *params, int id, agentrt_socket_t client_fd)
+static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd)
 {
     request_context_t *ctx = request_context_create();
     if (!ctx) {
@@ -353,7 +353,7 @@ static char *handle_complete_stream(cJSON *params, int id, agentrt_socket_t clie
     int ret = llm_service_complete_stream(g_service, &cfg, llm_stream_callback, &stream_ctx, &resp);
 
     if (ret != 0) {
-        AGENTRT_FREE((void *)cfg.model);
+        AIRY_FREE((void *)cfg.model);
         request_context_destroy(ctx);
         return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Service error", id);
     }
@@ -362,9 +362,9 @@ static char *handle_complete_stream(cJSON *params, int id, agentrt_socket_t clie
         llm_response_free(resp);
     }
 
-    AGENTRT_FREE((void *)cfg.model);
+    AIRY_FREE((void *)cfg.model);
     request_context_destroy(ctx);
-    AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "operation failed");
+    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
 /* ==================== 配置加载 ==================== */
@@ -379,12 +379,12 @@ static int load_daemon_config(const char *config_path)
     g_config.max_threads = MAX_THREADS;
     g_config.max_clients = MAX_CLIENTS;
 
-#if defined(AGENTRT_PLATFORM_WINDOWS)
-    g_config.socket_path = AGENTRT_STRDUP(DEFAULT_SOCKET_PATH_WIN);
-    g_config.tcp_host = AGENTRT_STRDUP("127.0.0.1");
+#if defined(AIRY_PLATFORM_WINDOWS)
+    g_config.socket_path = AIRY_STRDUP(DEFAULT_SOCKET_PATH_WIN);
+    g_config.tcp_host = AIRY_STRDUP("127.0.0.1");
 #else
-    g_config.socket_path = AGENTRT_STRDUP(DEFAULT_SOCKET_PATH_UNIX);
-    g_config.tcp_host = AGENTRT_STRDUP("127.0.0.1");
+    g_config.socket_path = AIRY_STRDUP(DEFAULT_SOCKET_PATH_UNIX);
+    g_config.tcp_host = AIRY_STRDUP("127.0.0.1");
 #endif
     g_config.tcp_port = DEFAULT_TCP_PORT;
 
@@ -396,7 +396,7 @@ static int load_daemon_config(const char *config_path)
             long len = ftell(f);
             fseek(f, 0, SEEK_SET);
 
-            char *content = (char *)AGENTRT_MALLOC(len + 1);
+            char *content = (char *)AIRY_MALLOC(len + 1);
             if (content) {
                 size_t nread = fread(content, 1, len, f);
                 if (nread == (size_t)len) {
@@ -410,8 +410,8 @@ static int load_daemon_config(const char *config_path)
                         if (daemon) {
                             cJSON *socket_path = cJSON_GetObjectItem(daemon, "socket_path");
                             if (cJSON_IsString(socket_path)) {
-                                AGENTRT_FREE(g_config.socket_path);
-                                g_config.socket_path = AGENTRT_STRDUP(socket_path->valuestring);
+                                AIRY_FREE(g_config.socket_path);
+                                g_config.socket_path = AIRY_STRDUP(socket_path->valuestring);
                             }
 
                             cJSON *tcp_port = cJSON_GetObjectItem(daemon, "tcp_port");
@@ -428,7 +428,7 @@ static int load_daemon_config(const char *config_path)
                         /* root 由 CJSON_AUTO_FREE 自动释放（do-while 作用域退出时） */
                     } while (0);
                 }
-                AGENTRT_FREE(content);
+                AIRY_FREE(content);
             }
             fclose(f);
         }
@@ -442,8 +442,8 @@ static int load_daemon_config(const char *config_path)
  */
 static void free_daemon_config(void)
 {
-    AGENTRT_FREE(g_config.socket_path);
-    AGENTRT_FREE(g_config.tcp_host);
+    AIRY_FREE(g_config.socket_path);
+    AIRY_FREE(g_config.tcp_host);
     __builtin_memset(&g_config, 0, sizeof(g_config));
 }
 
@@ -471,8 +471,8 @@ int main(int argc, char **argv)
         return parse_rc == 1 ? 0 : 1;
 
     /* 初始化平台层 */
-    agentrt_socket_init();
-    agentrt_mutex_init(&g_running_lock_llm_d);
+    airy_sock_init();
+    airy_mtx_init(&g_running_lock_llm_d);
 
     /* P0.18.1: 跨平台信号处理设置 */
 #ifdef _WIN32
@@ -482,9 +482,9 @@ int main(int argc, char **argv)
 #endif
 
     /* 保留初始日志级别 WARN（SIGUSR1 切换在 DEBUG/INFO 间切换，详见生成的 svc_log_toggle_handler_llm_d） */
-    agentrt_logger_config_t log_cfg = {0};
-    log_cfg.level = (agentrt_log_level_t)LOG_LEVEL_WARN;
-    agentrt_log_init(&log_cfg);
+    airy_logger_config_t log_cfg = {0};
+    log_cfg.level = (airy_log_level_t)LOG_LEVEL_WARN;
+    airy_log_init(&log_cfg);
     atexit(log_cleanup);
 
     /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
@@ -500,21 +500,21 @@ int main(int argc, char **argv)
     g_service = llm_service_create(config_path);
     if (!g_service) {
         SVC_LOG_ERROR("Failed to create service");
-        agentrt_mutex_destroy(&g_running_lock_llm_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_llm_d);
+        airy_sock_cleanup();
         return 1;
     }
 
     /* P0.18.1: 统一服务器 Socket 创建（TCP/Unix/NamedPipe 封装） */
     int tcp_port = g_config.tcp_port ? (int)g_config.tcp_port : DEFAULT_TCP_PORT;
     const char *unix_path = g_config.socket_path ? g_config.socket_path : DEFAULT_SOCKET_PATH_UNIX;
-    agentrt_socket_t server_fd = daemon_create_server_socket(use_tcp, tcp_port, unix_path,
+    airy_sock_t server_fd = daemon_create_server_socket(use_tcp, tcp_port, unix_path,
                                                               DEFAULT_SOCKET_PATH_WIN);
     if (server_fd < 0) {
         SVC_LOG_ERROR("Failed to create server socket");
         destroy_service_llm_d();
-        agentrt_mutex_destroy(&g_running_lock_llm_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_llm_d);
+        airy_sock_cleanup();
         return 1;
     }
     if (use_tcp)
@@ -538,12 +538,12 @@ int main(int argc, char **argv)
                                        use_tcp ? tcp_port : 0, "ai,core", use_tcp,
                                        &ev_config, &g_event_driver_llm_d, &g_bsd_llm_d,
                                        &g_bipc_llm_d);
-    if (ret != AGENTRT_SUCCESS || !g_event_driver_llm_d) {
+    if (ret != AIRY_SUCCESS || !g_event_driver_llm_d) {
         SVC_LOG_ERROR("Failed to create event driver");
-        agentrt_socket_close(server_fd);
+        airy_sock_close(server_fd);
         destroy_service_llm_d();
-        agentrt_mutex_destroy(&g_running_lock_llm_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_llm_d);
+        airy_sock_cleanup();
         return 1;
     }
 
@@ -555,10 +555,10 @@ int main(int argc, char **argv)
     if (daemon_event_driver_add_server_fd(g_event_driver_llm_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
         daemon_event_driver_destroy(g_event_driver_llm_d);
-        agentrt_socket_close(server_fd);
+        airy_sock_close(server_fd);
         destroy_service_llm_d();
-        agentrt_mutex_destroy(&g_running_lock_llm_d);
-        agentrt_socket_cleanup();
+        airy_mtx_destroy(&g_running_lock_llm_d);
+        airy_sock_cleanup();
         return 1;
     }
 

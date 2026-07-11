@@ -43,7 +43,7 @@ typedef struct {
     uint32_t total_instances;
     uint64_t last_modified;
     uint32_t checksum;
-    agentrt_mutex_t shm_mutex;
+    airy_mtx_t shm_mutex;
 } sd_registry_header_t;
 
 #define SD_REGISTRY_MAGIC 0x53445247
@@ -63,7 +63,7 @@ typedef struct service_discovery_s {
     uint32_t callback_count;
     sd_stats_t stats;
     bool running;
-    agentrt_mutex_t mutex;
+    airy_mtx_t mutex;
     uint32_t rr_counter;
     void *shm_handle;
     void *shm_ptr;
@@ -79,9 +79,9 @@ static int32_t find_service_index(sd_internal_t *sd, const char *name)
             return (int32_t)i;
     }
     /* "未找到"是正常控制流（调用者通过返回值判断），不是错误。
-     * 之前调用 AGENTRT_ERROR_HANDLE 会在每次查找未命中时分配 error context，
+     * 之前调用 AIRY_ERROR_HANDLE 会在每次查找未命中时分配 error context，
      * 导致内存泄漏（尤其在并发注册场景下）。 */
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 static int32_t find_instance_index(sd_service_entry_t *entry, const char *instance_id)
@@ -91,7 +91,7 @@ static int32_t find_instance_index(sd_service_entry_t *entry, const char *instan
             return (int32_t)i;
     }
     /* 同 find_service_index：正常控制流，不分配 error context */
-    return AGENTRT_ERR_NOT_FOUND;
+    return AIRY_ERR_NOT_FOUND;
 }
 
 static void notify_event(sd_internal_t *sd, sd_event_type_t event, const char *service_name,
@@ -108,7 +108,7 @@ static bool is_instance_expired(const sd_instance_t *inst, uint32_t expire_ms)
 {
     if (expire_ms == 0)
         return false;
-    uint64_t now = agentrt_time_ms();
+    uint64_t now = airy_time_ms();
     return (now - inst->last_heartbeat) > expire_ms;
 }
 
@@ -117,7 +117,7 @@ static void expire_stale_instances(sd_internal_t *sd)
     if (!sd->config.enable_auto_expire)
         return;
 
-    uint64_t now = agentrt_time_ms();
+    uint64_t now = airy_time_ms();
     for (uint32_t i = 0; i < sd->service_count; i++) {
         sd_service_entry_t *entry = &sd->services[i];
         for (uint32_t j = 0; j < entry->instance_count;) {
@@ -158,11 +158,11 @@ static void expire_stale_instances(sd_internal_t *sd)
 
 /* ==================== 负载均衡选择 ==================== */
 
-static agentrt_error_t lb_round_robin(sd_internal_t *sd, const sd_service_entry_t *entry,
+static airy_err_t lb_round_robin(sd_internal_t *sd, const sd_service_entry_t *entry,
                                       sd_instance_t *result)
 {
     if (entry->instance_count == 0) {
-        AGENTRT_ERROR(AGENTRT_ENOENT, "service_discovery: endpoint not found");
+        AIRY_ERROR(AIRY_ENOENT, "service_discovery: endpoint not found");
     }
 
     uint32_t start = sd->rr_counter % entry->instance_count;
@@ -171,13 +171,13 @@ static agentrt_error_t lb_round_robin(sd_internal_t *sd, const sd_service_entry_
         if (entry->instances[idx].healthy) {
             __builtin_memcpy(result, &entry->instances[idx], sizeof(sd_instance_t));
             sd->rr_counter = idx + 1;
-            return AGENTRT_SUCCESS;
+            return AIRY_SUCCESS;
         }
     }
-    return AGENTRT_ENOENT;
+    return AIRY_ENOENT;
 }
 
-static agentrt_error_t lb_weighted(const sd_service_entry_t *entry, sd_instance_t *result)
+static airy_err_t lb_weighted(const sd_service_entry_t *entry, sd_instance_t *result)
 {
     uint32_t total_weight = 0;
     for (uint32_t i = 0; i < entry->instance_count; i++) {
@@ -186,10 +186,10 @@ static agentrt_error_t lb_weighted(const sd_service_entry_t *entry, sd_instance_
         }
     }
     if (total_weight == 0) {
-        AGENTRT_ERROR(AGENTRT_ENOENT, "service_discovery: no endpoints registered");
+        AIRY_ERROR(AIRY_ENOENT, "service_discovery: no endpoints registered");
     }
 
-    uint32_t random_val = agentrt_random_uint32(0, total_weight - 1);
+    uint32_t random_val = airy_random_uint32(0, total_weight - 1);
     uint32_t cumulative = 0;
     for (uint32_t i = 0; i < entry->instance_count; i++) {
         if (!entry->instances[i].healthy)
@@ -197,20 +197,20 @@ static agentrt_error_t lb_weighted(const sd_service_entry_t *entry, sd_instance_
         cumulative += entry->instances[i].weight;
         if (random_val < cumulative) {
             __builtin_memcpy(result, &entry->instances[i], sizeof(sd_instance_t));
-            return AGENTRT_SUCCESS;
+            return AIRY_SUCCESS;
         }
     }
 
     for (uint32_t i = 0; i < entry->instance_count; i++) {
         if (entry->instances[i].healthy) {
             __builtin_memcpy(result, &entry->instances[i], sizeof(sd_instance_t));
-            return AGENTRT_SUCCESS;
+            return AIRY_SUCCESS;
         }
     }
-    AGENTRT_ERROR(AGENTRT_ENOENT, "service_discovery: service not registered");
+    AIRY_ERROR(AIRY_ENOENT, "service_discovery: service not registered");
 }
 
-static agentrt_error_t lb_least_connection(const sd_service_entry_t *entry, sd_instance_t *result)
+static airy_err_t lb_least_connection(const sd_service_entry_t *entry, sd_instance_t *result)
 {
     int32_t best_idx = -1;
     uint32_t min_conn = UINT32_MAX;
@@ -225,13 +225,13 @@ static agentrt_error_t lb_least_connection(const sd_service_entry_t *entry, sd_i
     }
 
     if (best_idx < 0) {
-        AGENTRT_ERROR(AGENTRT_ENOENT, "service_discovery: health check failed");
+        AIRY_ERROR(AIRY_ENOENT, "service_discovery: health check failed");
     }
     __builtin_memcpy(result, &entry->instances[best_idx], sizeof(sd_instance_t));
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-static agentrt_error_t lb_random(const sd_service_entry_t *entry, sd_instance_t *result)
+static airy_err_t lb_random(const sd_service_entry_t *entry, sd_instance_t *result)
 {
     uint32_t healthy_count = 0;
     for (uint32_t i = 0; i < entry->instance_count; i++) {
@@ -239,23 +239,23 @@ static agentrt_error_t lb_random(const sd_service_entry_t *entry, sd_instance_t 
             healthy_count++;
     }
     if (healthy_count == 0)
-        return AGENTRT_ENOENT;
+        return AIRY_ENOENT;
 
-    uint32_t idx = agentrt_random_uint32(0, healthy_count - 1);
+    uint32_t idx = airy_random_uint32(0, healthy_count - 1);
     uint32_t count = 0;
     for (uint32_t i = 0; i < entry->instance_count; i++) {
         if (entry->instances[i].healthy) {
             if (count == idx) {
                 __builtin_memcpy(result, &entry->instances[i], sizeof(sd_instance_t));
-                return AGENTRT_SUCCESS;
+                return AIRY_SUCCESS;
             }
             count++;
         }
     }
-    return AGENTRT_ENOENT;
+    return AIRY_ENOENT;
 }
 
-static agentrt_error_t lb_least_load(const sd_service_entry_t *entry, sd_instance_t *result)
+static airy_err_t lb_least_load(const sd_service_entry_t *entry, sd_instance_t *result)
 {
     int32_t best_idx = -1;
     uint32_t min_load = UINT32_MAX;
@@ -274,14 +274,14 @@ static agentrt_error_t lb_least_load(const sd_service_entry_t *entry, sd_instanc
     }
 
     if (best_idx < 0)
-        return AGENTRT_ENOENT;
+        return AIRY_ENOENT;
     __builtin_memcpy(result, &entry->instances[best_idx], sizeof(sd_instance_t));
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 /* ==================== 公共API实现 ==================== */
 
-AGENTRT_API sd_config_t sd_create_default_config(void)
+AIRY_API sd_config_t sd_create_default_config(void)
 {
     sd_config_t config;
     __builtin_memset(&config, 0, sizeof(sd_config_t));
@@ -295,11 +295,11 @@ AGENTRT_API sd_config_t sd_create_default_config(void)
     return config;
 }
 
-AGENTRT_API service_discovery_t sd_create(const sd_config_t *config)
+AIRY_API service_discovery_t sd_create(const sd_config_t *config)
 {
-    sd_internal_t *sd = (sd_internal_t *)AGENTRT_CALLOC(1, sizeof(sd_internal_t));
+    sd_internal_t *sd = (sd_internal_t *)AIRY_CALLOC(1, sizeof(sd_internal_t));
     if (!sd) {
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     if (config) {
@@ -308,10 +308,10 @@ AGENTRT_API service_discovery_t sd_create(const sd_config_t *config)
         sd->config = sd_create_default_config();
     }
 
-    agentrt_error_t err = agentrt_mutex_init(&sd->mutex);
-    if (err != AGENTRT_SUCCESS) {
-        AGENTRT_FREE(sd);
-        AGENTRT_ERROR_NULL(AGENTRT_ERR_UNKNOWN, "validation failed");
+    airy_err_t err = airy_mtx_init(&sd->mutex);
+    if (err != AIRY_SUCCESS) {
+        AIRY_FREE(sd);
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     sd->running = false;
@@ -326,7 +326,7 @@ AGENTRT_API service_discovery_t sd_create(const sd_config_t *config)
     return (service_discovery_t)sd;
 }
 
-AGENTRT_API void sd_destroy(service_discovery_t sd_handle)
+AIRY_API void sd_destroy(service_discovery_t sd_handle)
 {
     if (!sd_handle)
         return;
@@ -341,60 +341,60 @@ AGENTRT_API void sd_destroy(service_discovery_t sd_handle)
         sd->shm_ptr = NULL;
     }
 
-    agentrt_mutex_destroy(&sd->mutex);
-    AGENTRT_FREE(sd);
+    airy_mtx_destroy(&sd->mutex);
+    AIRY_FREE(sd);
 
     SD_LOG_INFO("DESTROY");
 }
 
-AGENTRT_API agentrt_error_t sd_start(service_discovery_t sd_handle)
+AIRY_API airy_err_t sd_start(service_discovery_t sd_handle)
 {
     if (!sd_handle)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
     if (sd->running) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_SUCCESS;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_SUCCESS;
     }
 
     sd->running = true;
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
     SD_LOG_INFO("START (heartbeat=%ums expire=%ums)",
              sd->config.heartbeat_interval_ms, sd->config.expire_timeout_ms);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t sd_stop(service_discovery_t sd_handle)
+AIRY_API airy_err_t sd_stop(service_discovery_t sd_handle)
 {
     if (!sd_handle)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
     sd->running = false;
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
     SD_LOG_INFO("STOP");
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 /* ==================== 服务注册 ==================== */
 
-AGENTRT_API agentrt_error_t sd_register(service_discovery_t sd_handle, const char *service_name,
+AIRY_API airy_err_t sd_register(service_discovery_t sd_handle, const char *service_name,
                                         const char *service_type, const sd_instance_t *instance,
                                         const char *tags, const char *dependencies)
 {
     if (!sd_handle || !service_name || !service_type || !instance)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     int32_t svc_idx = find_service_index(sd, service_name);
     sd_service_entry_t *entry = NULL;
@@ -403,10 +403,10 @@ AGENTRT_API agentrt_error_t sd_register(service_discovery_t sd_handle, const cha
         entry = &sd->services[svc_idx];
     } else {
         if (sd->service_count >= SD_MAX_SERVICES) {
-            agentrt_mutex_unlock(&sd->mutex);
+            airy_mtx_unlock(&sd->mutex);
             SD_LOG_ERROR("REGISTRY-FULL max=%u cannot register '%s'",
                      SD_MAX_SERVICES, service_name);
-            return AGENTRT_ENOMEM;
+            return AIRY_ENOMEM;
         }
 
         entry = &sd->services[sd->service_count];
@@ -418,7 +418,7 @@ AGENTRT_API agentrt_error_t sd_register(service_discovery_t sd_handle, const cha
         if (dependencies)
             safe_strcpy(entry->dependencies, dependencies, SD_MAX_DEPS_LEN);
         entry->active = true;
-        entry->last_updated = agentrt_time_ms();
+        entry->last_updated = airy_time_ms();
         sd->service_count++;
         sd->stats.registrations++;
     }
@@ -426,20 +426,20 @@ AGENTRT_API agentrt_error_t sd_register(service_discovery_t sd_handle, const cha
     int32_t inst_idx = find_instance_index(entry, instance->instance_id);
     if (inst_idx >= 0) {
         __builtin_memcpy(&entry->instances[inst_idx], instance, sizeof(sd_instance_t));
-        entry->instances[inst_idx].last_heartbeat = agentrt_time_ms();
+        entry->instances[inst_idx].last_heartbeat = airy_time_ms();
         entry->instances[inst_idx].register_time = entry->instances[inst_idx].register_time > 0
                                                        ? entry->instances[inst_idx].register_time
-                                                       : agentrt_time_ms();
+                                                       : airy_time_ms();
     } else {
         if (entry->instance_count >= SD_MAX_INSTANCES) {
-            agentrt_mutex_unlock(&sd->mutex);
+            airy_mtx_unlock(&sd->mutex);
             SD_LOG_ERROR("INSTANCE-LIMIT max=%u service='%s'", SD_MAX_INSTANCES, service_name);
-            return AGENTRT_ENOMEM;
+            return AIRY_ENOMEM;
         }
 
         __builtin_memcpy(&entry->instances[entry->instance_count], instance, sizeof(sd_instance_t));
-        entry->instances[entry->instance_count].last_heartbeat = agentrt_time_ms();
-        entry->instances[entry->instance_count].register_time = agentrt_time_ms();
+        entry->instances[entry->instance_count].last_heartbeat = airy_time_ms();
+        entry->instances[entry->instance_count].register_time = airy_time_ms();
         entry->instances[entry->instance_count].pid =
 #ifdef _WIN32
             (uint32_t)GetCurrentProcessId();
@@ -449,14 +449,14 @@ AGENTRT_API agentrt_error_t sd_register(service_discovery_t sd_handle, const cha
         entry->instance_count++;
     }
 
-    entry->last_updated = agentrt_time_ms();
+    entry->last_updated = airy_time_ms();
     sd->stats.active_services = sd->service_count;
     sd->stats.active_instances = 0;
     for (uint32_t i = 0; i < sd->service_count; i++) {
         sd->stats.active_instances += sd->services[i].instance_count;
     }
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
     notify_event(sd, SD_EVENT_REGISTERED, service_name, instance);
 
@@ -465,30 +465,30 @@ AGENTRT_API agentrt_error_t sd_register(service_discovery_t sd_handle, const cha
              service_name, instance->instance_id, service_type,
              instance->endpoint, sd->service_count,
              sd->stats.active_instances);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t sd_deregister(service_discovery_t sd_handle, const char *service_name,
+AIRY_API airy_err_t sd_deregister(service_discovery_t sd_handle, const char *service_name,
                                           const char *instance_id)
 {
     if (!sd_handle || !service_name || !instance_id)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     int32_t svc_idx = find_service_index(sd, service_name);
     if (svc_idx < 0) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOENT;
     }
 
     sd_service_entry_t *entry = &sd->services[svc_idx];
     int32_t inst_idx = find_instance_index(entry, instance_id);
     if (inst_idx < 0) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOENT;
     }
 
     sd_instance_t removed = entry->instances[inst_idx];
@@ -497,7 +497,7 @@ AGENTRT_API agentrt_error_t sd_deregister(service_discovery_t sd_handle, const c
     }
     __builtin_memset(&entry->instances[entry->instance_count - 1], 0, sizeof(sd_instance_t));
     entry->instance_count--;
-    entry->last_updated = agentrt_time_ms();
+    entry->last_updated = airy_time_ms();
 
     sd->stats.deregistrations++;
     sd->stats.active_instances = 0;
@@ -505,7 +505,7 @@ AGENTRT_API agentrt_error_t sd_deregister(service_discovery_t sd_handle, const c
         sd->stats.active_instances += sd->services[i].instance_count;
     }
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
     notify_event(sd, SD_EVENT_DEREGISTERED, service_name, &removed);
 
@@ -513,54 +513,54 @@ AGENTRT_API agentrt_error_t sd_deregister(service_discovery_t sd_handle, const c
              "(total_svcs=%u total_insts=%u)",
              service_name, instance_id,
              sd->service_count, sd->stats.active_instances);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t sd_deregister_all(service_discovery_t sd_handle,
+AIRY_API airy_err_t sd_deregister_all(service_discovery_t sd_handle,
                                               const char *service_name)
 {
     if (!sd_handle || !service_name)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     int32_t svc_idx = find_service_index(sd, service_name);
     if (svc_idx < 0) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOENT;
     }
 
     sd->services[svc_idx].instance_count = 0;
-    sd->services[svc_idx].last_updated = agentrt_time_ms();
+    sd->services[svc_idx].last_updated = airy_time_ms();
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
     SD_LOG_INFO("DEREGISTER-ALL service='%s'", service_name);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 /* ==================== 服务发现 ==================== */
 
-AGENTRT_API agentrt_error_t sd_discover(service_discovery_t sd_handle, const char *service_name,
+AIRY_API airy_err_t sd_discover(service_discovery_t sd_handle, const char *service_name,
                                         sd_instance_t *instances, uint32_t max_count,
                                         uint32_t *found_count)
 {
     if (!sd_handle || !service_name || !instances || !found_count)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     expire_stale_instances(sd);
 
     int32_t svc_idx = find_service_index(sd, service_name);
     if (svc_idx < 0) {
         *found_count = 0;
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOENT;
     }
 
     sd_service_entry_t *entry = &sd->services[svc_idx];
@@ -575,23 +575,23 @@ AGENTRT_API agentrt_error_t sd_discover(service_discovery_t sd_handle, const cha
     *found_count = count;
     sd->stats.discoveries++;
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
     SD_LOG_DEBUG("DISCOVER service='%s' found=%u healthy", service_name, count);
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t sd_discover_by_type(service_discovery_t sd_handle,
+AIRY_API airy_err_t sd_discover_by_type(service_discovery_t sd_handle,
                                                 const char *service_type,
                                                 sd_service_entry_t *entries, uint32_t max_count,
                                                 uint32_t *found_count)
 {
     if (!sd_handle || !service_type || !entries || !found_count)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     expire_stale_instances(sd);
 
@@ -606,21 +606,21 @@ AGENTRT_API agentrt_error_t sd_discover_by_type(service_discovery_t sd_handle,
     *found_count = count;
     sd->stats.discoveries++;
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t sd_discover_by_tags(service_discovery_t sd_handle, const char *tags,
+AIRY_API airy_err_t sd_discover_by_tags(service_discovery_t sd_handle, const char *tags,
                                                 sd_service_entry_t *entries, uint32_t max_count,
                                                 uint32_t *found_count)
 {
     if (!sd_handle || !tags || !entries || !found_count)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     expire_stale_instances(sd);
 
@@ -657,32 +657,32 @@ AGENTRT_API agentrt_error_t sd_discover_by_tags(service_discovery_t sd_handle, c
     *found_count = count;
     sd->stats.discoveries++;
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t sd_select_instance(service_discovery_t sd_handle,
+AIRY_API airy_err_t sd_select_instance(service_discovery_t sd_handle,
                                                const char *service_name, sd_lb_strategy_t strategy,
                                                sd_instance_t *instance)
 {
     if (!sd_handle || !service_name || !instance)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     expire_stale_instances(sd);
 
     int32_t svc_idx = find_service_index(sd, service_name);
     if (svc_idx < 0) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOENT;
     }
 
     sd_service_entry_t *entry = &sd->services[svc_idx];
-    agentrt_error_t err;
+    airy_err_t err;
 
     switch (strategy) {
     case SD_LB_ROUND_ROBIN:
@@ -705,78 +705,78 @@ AGENTRT_API agentrt_error_t sd_select_instance(service_discovery_t sd_handle,
         break;
     }
 
-    if (err == AGENTRT_SUCCESS) {
+    if (err == AIRY_SUCCESS) {
         sd->stats.lb_selections++;
     }
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
     return err;
 }
 
 /* ==================== 心跳与健康 ==================== */
 
-AGENTRT_API agentrt_error_t sd_heartbeat(service_discovery_t sd_handle, const char *service_name,
+AIRY_API airy_err_t sd_heartbeat(service_discovery_t sd_handle, const char *service_name,
                                          const char *instance_id)
 {
     if (!sd_handle || !service_name || !instance_id)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     int32_t svc_idx = find_service_index(sd, service_name);
     if (svc_idx < 0) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOENT;
     }
 
     sd_service_entry_t *entry = &sd->services[svc_idx];
     int32_t inst_idx = find_instance_index(entry, instance_id);
     if (inst_idx < 0) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOENT;
     }
 
-    entry->instances[inst_idx].last_heartbeat = agentrt_time_ms();
+    entry->instances[inst_idx].last_heartbeat = airy_time_ms();
     sd->stats.heartbeats++;
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t sd_update_health(service_discovery_t sd_handle,
+AIRY_API airy_err_t sd_update_health(service_discovery_t sd_handle,
                                              const char *service_name, const char *instance_id,
                                              bool healthy)
 {
     if (!sd_handle || !service_name || !instance_id)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     int32_t svc_idx = find_service_index(sd, service_name);
     if (svc_idx < 0) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOENT;
     }
 
     sd_service_entry_t *entry = &sd->services[svc_idx];
     int32_t inst_idx = find_instance_index(entry, instance_id);
     if (inst_idx < 0) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOENT;
     }
 
     bool was_healthy = entry->instances[inst_idx].healthy;
     entry->instances[inst_idx].healthy = healthy;
-    entry->instances[inst_idx].last_heartbeat = agentrt_time_ms();
-    entry->last_updated = agentrt_time_ms();
+    entry->instances[inst_idx].last_heartbeat = airy_time_ms();
+    entry->last_updated = airy_time_ms();
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
     if (was_healthy != healthy) {
         sd_event_type_t event = healthy ? SD_EVENT_INSTANCE_UP : SD_EVENT_INSTANCE_DOWN;
@@ -789,81 +789,81 @@ AGENTRT_API agentrt_error_t sd_update_health(service_discovery_t sd_handle,
         }
     }
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t sd_update_connections(service_discovery_t sd_handle,
+AIRY_API airy_err_t sd_update_connections(service_discovery_t sd_handle,
                                                   const char *service_name, const char *instance_id,
                                                   uint32_t active_connections)
 {
     if (!sd_handle || !service_name || !instance_id)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     int32_t svc_idx = find_service_index(sd, service_name);
     if (svc_idx < 0) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOENT;
     }
 
     sd_service_entry_t *entry = &sd->services[svc_idx];
     int32_t inst_idx = find_instance_index(entry, instance_id);
     if (inst_idx < 0) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOENT;
     }
 
     entry->instances[inst_idx].active_connections = active_connections;
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
 /* ==================== 依赖管理 ==================== */
 
-AGENTRT_API agentrt_error_t sd_get_dependencies(service_discovery_t sd_handle,
+AIRY_API airy_err_t sd_get_dependencies(service_discovery_t sd_handle,
                                                 const char *service_name, char *dependencies,
                                                 size_t max_len)
 {
     if (!sd_handle || !service_name || !dependencies)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     int32_t svc_idx = find_service_index(sd, service_name);
     if (svc_idx < 0) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOENT;
     }
 
     safe_strcpy(dependencies, sd->services[svc_idx].dependencies, (uint32_t)max_len);
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t sd_check_dependencies(service_discovery_t sd_handle,
+AIRY_API airy_err_t sd_check_dependencies(service_discovery_t sd_handle,
                                                   const char *service_name, char *missing_deps,
                                                   size_t max_len)
 {
     if (!sd_handle || !service_name)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     int32_t svc_idx = find_service_index(sd, service_name);
     if (svc_idx < 0) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOENT;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOENT;
     }
 
     char deps_copy[SD_MAX_DEPS_LEN];
@@ -904,75 +904,75 @@ AGENTRT_API agentrt_error_t sd_check_dependencies(service_discovery_t sd_handle,
         token = strtok_r(NULL, ",", &saveptr);
     }
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
     if (missing_deps && max_len > 0) {
         safe_strcpy(missing_deps, missing, (uint32_t)max_len);
     }
 
-    return missing_len > 0 ? DAEMON_EDEPEND : AGENTRT_SUCCESS;
+    return missing_len > 0 ? DAEMON_EDEPEND : AIRY_SUCCESS;
 }
 
 /* ==================== 事件与统计 ==================== */
 
-AGENTRT_API agentrt_error_t sd_register_event_callback(service_discovery_t sd_handle,
+AIRY_API airy_err_t sd_register_event_callback(service_discovery_t sd_handle,
                                                        sd_event_callback_t callback,
                                                        void *user_data)
 {
     if (!sd_handle || !callback)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     if (sd->callback_count >= SD_MAX_CALLBACKS) {
-        agentrt_mutex_unlock(&sd->mutex);
-        return AGENTRT_ENOMEM;
+        airy_mtx_unlock(&sd->mutex);
+        return AIRY_ENOMEM;
     }
 
     sd->callbacks[sd->callback_count].callback = callback;
     sd->callbacks[sd->callback_count].user_data = user_data;
     sd->callback_count++;
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API agentrt_error_t sd_get_stats(service_discovery_t sd_handle, sd_stats_t *stats)
+AIRY_API airy_err_t sd_get_stats(service_discovery_t sd_handle, sd_stats_t *stats)
 {
     if (!sd_handle || !stats)
-        return AGENTRT_EINVAL;
+        return AIRY_EINVAL;
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
     __builtin_memcpy(stats, &sd->stats, sizeof(sd_stats_t));
     stats->active_services = sd->service_count;
     stats->active_instances = 0;
     for (uint32_t i = 0; i < sd->service_count; i++) {
         stats->active_instances += sd->services[i].instance_count;
     }
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
-    return AGENTRT_SUCCESS;
+    return AIRY_SUCCESS;
 }
 
-AGENTRT_API uint32_t sd_service_count(service_discovery_t sd_handle)
+AIRY_API uint32_t sd_service_count(service_discovery_t sd_handle)
 {
     if (!sd_handle)
         return 0;
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
     uint32_t count = sd->service_count;
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
     return count;
 }
 
-AGENTRT_API bool sd_is_running(service_discovery_t sd_handle)
+AIRY_API bool sd_is_running(service_discovery_t sd_handle)
 {
     if (!sd_handle)
         return false;
@@ -980,7 +980,7 @@ AGENTRT_API bool sd_is_running(service_discovery_t sd_handle)
     return sd->running;
 }
 
-AGENTRT_API const char *sd_lb_strategy_to_string(sd_lb_strategy_t strategy)
+AIRY_API const char *sd_lb_strategy_to_string(sd_lb_strategy_t strategy)
 {
     static const char *strategy_strings[] = {"ROUND_ROBIN", "WEIGHTED", "LEAST_CONNECTION",
                                              "RANDOM", "LEAST_LOAD"};
@@ -992,7 +992,7 @@ AGENTRT_API const char *sd_lb_strategy_to_string(sd_lb_strategy_t strategy)
 
 /* ==================== C-L08: 统计摘要 ==================== */
 
-AGENTRT_API void sd_dump_stats(service_discovery_t sd_handle)
+AIRY_API void sd_dump_stats(service_discovery_t sd_handle)
 {
     if (!sd_handle) {
         SD_LOG_WARN("STATS unavailable (NULL handle)");
@@ -1001,7 +1001,7 @@ AGENTRT_API void sd_dump_stats(service_discovery_t sd_handle)
 
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
-    agentrt_mutex_lock(&sd->mutex);
+    airy_mtx_lock(&sd->mutex);
 
     sd_stats_t stats = sd->stats;
     stats.active_services = sd->service_count;
@@ -1018,7 +1018,7 @@ AGENTRT_API void sd_dump_stats(service_discovery_t sd_handle)
         }
     }
 
-    agentrt_mutex_unlock(&sd->mutex);
+    airy_mtx_unlock(&sd->mutex);
 
     SD_LOG_INFO("SD-STATS services=%u instances=%u (%u healthy) "
                 "registrations=%llu deregistrations=%llu "

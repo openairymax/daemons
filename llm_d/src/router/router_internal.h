@@ -8,8 +8,8 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  */
 
-#ifndef AGENTRT_LLM_ROUTER_INTERNAL_H
-#define AGENTRT_LLM_ROUTER_INTERNAL_H
+#ifndef AIRY_RT_LLM_ROUTER_INTERNAL_H
+#define AIRY_RT_LLM_ROUTER_INTERNAL_H
 
 #include "router/llm_router.h"
 
@@ -37,4 +37,4 @@ int route_quality_first(const llm_route_request_t *request,
 }
 #endif
 
-#endif /* AGENTRT_LLM_ROUTER_INTERNAL_H */
+#endif /* AIRY_RT_LLM_ROUTER_INTERNAL_H */

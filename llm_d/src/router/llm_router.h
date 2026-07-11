@@ -18,8 +18,8 @@
  * @see contracts/contract_A_B.h 第3节（协议路由表）
  */
 
-#ifndef AGENTRT_DAEMON_LLM_D_ROUTER_LLM_ROUTER_H
-#define AGENTRT_DAEMON_LLM_D_ROUTER_LLM_ROUTER_H
+#ifndef AIRY_RT_DAEMON_LLM_D_ROUTER_LLM_ROUTER_H
+#define AIRY_RT_DAEMON_LLM_D_ROUTER_LLM_ROUTER_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -164,4 +164,4 @@ int llm_router_set_default_strategy(llm_route_strategy_t strategy);
 }
 #endif
 
-#endif /* AGENTRT_DAEMON_LLM_D_ROUTER_LLM_ROUTER_H */
+#endif /* AIRY_RT_DAEMON_LLM_D_ROUTER_LLM_ROUTER_H */
