@@ -62,7 +62,7 @@ info_d/
 
 ### 事件循环
 
-- 基于 `agentrt_event_loop`（epoll）实现
+- 基于 `airy_event_loop`（epoll）实现
 - 监听 `server_fd` 上的客户端连接
 - 请求处理在事件循环中完成
 
@@ -116,14 +116,14 @@ info_d/
 |------|------|------|
 | 入站 | JSON-RPC 2.0 | 通过 IPC Service Bus 接收请求 |
 | 入站 | TCP | 默认监听端口 8083 |
-| 入站 | Unix Socket | `AGENTRT_RUNTIME_DIR/info.sock` |
+| 入站 | Unix Socket | `AIRY_RUNTIME_DIR/info.sock` |
 
 ## 配置选项
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
 | TCP 端口 | 8083 | HTTP/TCP 监听端口 |
-| Unix Socket | `AGENTRT_RUNTIME_DIR/info.sock` | IPC 通信 Socket 路径 |
+| Unix Socket | `AIRY_RUNTIME_DIR/info.sock` | IPC 通信 Socket 路径 |
 | 采集间隔 | 5 秒 | 系统指标采集周期 |
 | 历史容量 | 64 | 环形缓冲区历史快照条数 |
 
@@ -144,7 +144,7 @@ info_d/
 
 ```
 info_d
-├── common (agentrt_common, svc_common)
+├── common (airy_common, svc_common)
 ├── Threads::Threads
 └── Windows 额外: ws2_32
 ```

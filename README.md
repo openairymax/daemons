@@ -39,7 +39,7 @@ Within the Airymax 0.1.1 release, the workspace is partitioned into **38 reposit
 
 **Class — (Service / Composition layer).**
 
-daemons is a service/composition module: it does not provide foundational primitives but composes them into running processes. It depends on `atoms` (CoreLoopThree / Syscall / TaskFlow / Memory primitives — `hook_d` directly links `agentrt_coreloopthree`; every daemon dispatches through `atoms/syscall`), `commons` (logging, config_unified, network, token, cost, observability, cognition, strategy — transitively through `svc_common`), `cupolas` (security dome, PUBLIC-linked by `svc_common`), `protocols` (JSON-RPC 2.0 / AgentsIPC envelope used by the IPC service bus; A2A / MCP adapters at the gateway boundary), `heapstore` (persistence for daemon state), and `gateway` (the `gateway_d` daemon wraps the gateway library). Its primary consumers are the SDK / Agent applications (over the gateway's JSON-RPC 2.0 surface) and OpenLab modules.
+daemons is a service/composition module: it does not provide foundational primitives but composes them into running processes. It depends on `atoms` (CoreLoopThree / Syscall / TaskFlow / Memory primitives — `hook_d` directly links `airy_coreloopthree`; every daemon dispatches through `atoms/syscall`), `commons` (logging, config_unified, network, token, cost, observability, cognition, strategy — transitively through `svc_common`), `cupolas` (security dome, PUBLIC-linked by `svc_common`), `protocols` (JSON-RPC 2.0 / AgentsIPC envelope used by the IPC service bus; A2A / MCP adapters at the gateway boundary), `heapstore` (persistence for daemon state), and `gateway` (the `gateway_d` daemon wraps the gateway library). Its primary consumers are the SDK / Agent applications (over the gateway's JSON-RPC 2.0 surface) and OpenLab modules.
 
 ## Directory Structure
 
@@ -86,7 +86,7 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 | **Service framework** | `svc_common.c`, `svc_auth.c`, `svc_cache.h`, `svc_config.h`, `svc_logger.h`, `service_discovery.c`, `service_discovery_helper.c`, `daemon_bootstrap_ipc.c`, `daemon_bootstrap_sd.c`, `daemon_cupolas_bootstrap.c`, `daemon_startup.h`, `daemon_event_driver.c`, `daemon_task_dispatcher.c` |
 | **Resilience & safety** | `circuit_breaker.c`, `api_recovery.c`, `daemon_degradation.c`, `daemon_security.c`, `daemon_oom.c`, `input_validator.c`, `log_sanitizer.c`, `ipc_backpressure.c` |
 | **IPC & messaging** | `ipc_service_bus.c`, `ipc_client.c`, `ipc_bus_helper.c`, `daemon_bootstrap_ipc.h`, `method_dispatcher.c`, `jsonrpc_helpers.c`, `param_validator.c` |
-| **Event & concurrency** | `agentrt_event_loop.c`, `thread_pool.c`, `refcount.c` |
+| **Event & concurrency** | `airy_event_loop.c`, `thread_pool.c`, `refcount.c` |
 | **Metrics & alerting** | `unified_metrics.c`, `alert_manager.c` |
 | **Configuration** | `config_manager.c`, `daemon_defaults.h`, `daemon_errors.h`, `daemon_platform_ext.h` |
 | **Memory** | `arena.c`, `tcache.c` (daemon-local allocators) |
@@ -110,10 +110,10 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 | 8 | **Information Service** | `info_d/` | System information query and status reporting | `info_d` |
 | 9 | **Notification Service** | `notify_d/` | Multi-channel notification push (email / Slack / Discord) | `notify_d` |
 | 10 | **Observability Service** | `observe_d/` | OpenTelemetry observability data collection | `observe_d` |
-| 11 | **Hook Daemon** | `hook_d/` | Thin daemon shell; the hook system core lives in `atoms/coreloopthree/src/hook/` and is obtained by linking `agentrt_coreloopthree` | `hook_d` |
+| 11 | **Hook Daemon** | `hook_d/` | Thin daemon shell; the hook system core lives in `atoms/coreloopthree/src/hook/` and is obtained by linking `airy_coreloopthree` | `hook_d` |
 | 12 | **Plugin Daemon** | `plugin_d/` | Plugin lifecycle management and isolation | `plugin_d` |
 
-> **Binary naming convention:** every daemon executable keeps the `*_d` suffix (`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d`). Per the 2026-07-05 naming decision, the module name was unified from `daemon` → `daemons` (directory, CMake target `agentrt_daemons`, repo `daemons.git`), but the 12 process binary names were deliberately preserved.
+> **Binary naming convention:** every daemon executable keeps the `*_d` suffix (`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d`). Per the 2026-07-05 naming decision, the module name was unified from `daemon` → `daemons` (directory, CMake target `airy_daemons`, repo `daemons.git`), but the 12 process binary names were deliberately preserved.
 
 ## Architecture
 
@@ -169,7 +169,7 @@ svc_common  ←  gateway_d  ←  external clients
 
 | Dependency | Source | Purpose |
 |------------|--------|---------|
-| **atoms** | `agentrt/atoms/` | CoreLoopThree (cognition / execution / memory loops), Syscall entry surface, TaskFlow orchestration, Memory primitives — `hook_d` directly links `agentrt_coreloopthree`; every daemon dispatches business logic through `atoms/syscall` |
+| **atoms** | `agentrt/atoms/` | CoreLoopThree (cognition / execution / memory loops), Syscall entry surface, TaskFlow orchestration, Memory primitives — `hook_d` directly links `airy_coreloopthree`; every daemon dispatches business logic through `atoms/syscall` |
 | **commons** | `agentrt/commons/` | Logging, config_unified, network, token, cost, observability, cognition, strategy — linked transitively through `svc_common`. The authoritative `svc_common.h` / `ipc_service_bus.h` now live here (`commons/utils/ipc/include/`) per IRON-6 |
 | **cupolas** | `agentrt/cupolas/` | `svc_common` PUBLIC-links Cupolas (`daemon_cupolas_bootstrap.c`), so every daemon automatically inherits Cupolas security — request authentication, input sanitization, audit, sandbox |
 | **protocols** | `agentrt/protocols/` | JSON-RPC 2.0 / AgentsIPC envelope used by the IPC service bus; A2A / MCP adapters used at the gateway boundary |
@@ -262,20 +262,20 @@ cmake --install /tmp/daemons-build --prefix /opt/airymax
 
 ### Service lifecycle
 
-Service state enum (`agentrt_svc_state_t`, defined in `commons/utils/ipc/include/svc_common.h`):
+Service state enum (`airy_svc_state_t`, defined in `commons/utils/ipc/include/svc_common.h`):
 
 | State | Description |
 |-------|-------------|
-| `AGENTRT_SVC_STATE_NONE` | Not initialized |
-| `AGENTRT_SVC_STATE_CREATED` | Created |
-| `AGENTRT_SVC_STATE_INITIALIZING` | Initializing |
-| `AGENTRT_SVC_STATE_READY` | Ready |
-| `AGENTRT_SVC_STATE_RUNNING` | Running |
-| `AGENTRT_SVC_STATE_PAUSED` | Paused |
-| `AGENTRT_SVC_STATE_STOPPING` | Stopping |
-| `AGENTRT_SVC_STATE_STOPPED` | Stopped |
-| `AGENTRT_SVC_STATE_ZOMBIE` | Zombie (stop timeout / partial cleanup) |
-| `AGENTRT_SVC_STATE_ERROR` | Error state |
+| `AIRY_SVC_STATE_NONE` | Not initialized |
+| `AIRY_SVC_STATE_CREATED` | Created |
+| `AIRY_SVC_STATE_INITIALIZING` | Initializing |
+| `AIRY_SVC_STATE_READY` | Ready |
+| `AIRY_SVC_STATE_RUNNING` | Running |
+| `AIRY_SVC_STATE_PAUSED` | Paused |
+| `AIRY_SVC_STATE_STOPPING` | Stopping |
+| `AIRY_SVC_STATE_STOPPED` | Stopped |
+| `AIRY_SVC_STATE_ZOMBIE` | Zombie (stop timeout / partial cleanup) |
+| `AIRY_SVC_STATE_ERROR` | Error state |
 
 Lifecycle progression:
 
@@ -284,9 +284,9 @@ INIT → CONFIG_LOAD → SERVICE_REGISTER → IDLE → BUSY → SHUTDOWN
  init    load cfg      register to SvcDisc   wait    handle   graceful stop
 ```
 
-### Service capability flags (`agentrt_svc_capability_t`)
+### Service capability flags (`airy_svc_capability_t`)
 
-`AGENTRT_SVC_CAP_NONE / ASYNC / STREAMING / CANCELABLE / PAUSEABLE / THROTTLE / BATCH / PRIORITY / TIMEOUT` — each daemon advertises its capabilities via the `agentrt_svc_config_t.capabilities` bitmask.
+`AIRY_SVC_CAP_NONE / ASYNC / STREAMING / CANCELABLE / PAUSEABLE / THROTTLE / BATCH / PRIORITY / TIMEOUT` — each daemon advertises its capabilities via the `airy_svc_config_t.capabilities` bitmask.
 
 ### IPC service bus
 
@@ -298,7 +298,7 @@ INIT → CONFIG_LOAD → SERVICE_REGISTER → IDLE → BUSY → SHUTDOWN
 
 ### Error codes
 
-Daemon-extended error codes are exposed through `daemon_errors.h` (re-exported via `common/include/svc_common.h`): `DAEMON_EINIT / ESTATE / EHEALTH` and other compatibility aliases layered on top of the standard `AGENTRT_E*` set defined in `commons/include/agentrt_types.h`.
+Daemon-extended error codes are exposed through `daemon_errors.h` (re-exported via `common/include/svc_common.h`): `DAEMON_EINIT / ESTATE / EHEALTH` and other compatibility aliases layered on top of the standard `AIRY_E*` set defined in `commons/include/airy_types.h`.
 
 ### Usage example
 
@@ -308,10 +308,10 @@ Daemon-extended error codes are exposed through `daemon_errors.h` (re-exported v
 
 int main(void) {
     /* Daemon registers with the IPC service bus, advertising capabilities. */
-    agentrt_svc_config_t cfg = {
+    airy_svc_config_t cfg = {
         .name           = "my_daemon",
         .version        = "0.1.1",
-        .capabilities   = AGENTRT_SVC_CAP_ASYNC | AGENTRT_SVC_CAP_CANCELABLE,
+        .capabilities   = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_CANCELABLE,
         .max_concurrent = 64,
         .timeout_ms     = 5000,
         .auto_start     = true,

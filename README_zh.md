@@ -39,7 +39,7 @@
 
 **— 类（服务 / 组合层）。**
 
-daemons 是服务/组合模块：它不提供基础原语，而是将原语组合为运行中的进程。它依赖 `atoms`（CoreLoopThree / Syscall / TaskFlow / Memory 原语——`hook_d` 直接链接 `agentrt_coreloopthree`；每个守护进程通过 `atoms/syscall` 派发）、`commons`（日志、config_unified、网络、令牌、成本、可观测性、认知、策略——通过 `svc_common` 传递链接）、`cupolas`（安全穹顶，由 `svc_common` 以 `PUBLIC` 形式链接）、`protocols`（IPC 服务总线使用的 JSON-RPC 2.0 / AgentsIPC 信封；网关边界使用 A2A / MCP 适配器）、`heapstore`（守护进程状态持久化）、`gateway`（`gateway_d` 守护进程封装网关库）。它的主要消费者是 SDK / Agent 应用（通过网关的 JSON-RPC 2.0 表面）和 OpenLab 模块。
+daemons 是服务/组合模块：它不提供基础原语，而是将原语组合为运行中的进程。它依赖 `atoms`（CoreLoopThree / Syscall / TaskFlow / Memory 原语——`hook_d` 直接链接 `airy_coreloopthree`；每个守护进程通过 `atoms/syscall` 派发）、`commons`（日志、config_unified、网络、令牌、成本、可观测性、认知、策略——通过 `svc_common` 传递链接）、`cupolas`（安全穹顶，由 `svc_common` 以 `PUBLIC` 形式链接）、`protocols`（IPC 服务总线使用的 JSON-RPC 2.0 / AgentsIPC 信封；网关边界使用 A2A / MCP 适配器）、`heapstore`（守护进程状态持久化）、`gateway`（`gateway_d` 守护进程封装网关库）。它的主要消费者是 SDK / Agent 应用（通过网关的 JSON-RPC 2.0 表面）和 OpenLab 模块。
 
 ## 目录结构
 
@@ -86,7 +86,7 @@ daemons/
 | **服务框架** | `svc_common.c`、`svc_auth.c`、`svc_cache.h`、`svc_config.h`、`svc_logger.h`、`service_discovery.c`、`service_discovery_helper.c`、`daemon_bootstrap_ipc.c`、`daemon_bootstrap_sd.c`、`daemon_cupolas_bootstrap.c`、`daemon_startup.h`、`daemon_event_driver.c`、`daemon_task_dispatcher.c` |
 | **韧性与安全** | `circuit_breaker.c`、`api_recovery.c`、`daemon_degradation.c`、`daemon_security.c`、`daemon_oom.c`、`input_validator.c`、`log_sanitizer.c`、`ipc_backpressure.c` |
 | **IPC 与消息** | `ipc_service_bus.c`、`ipc_client.c`、`ipc_bus_helper.c`、`daemon_bootstrap_ipc.h`、`method_dispatcher.c`、`jsonrpc_helpers.c`、`param_validator.c` |
-| **事件与并发** | `agentrt_event_loop.c`、`thread_pool.c`、`refcount.c` |
+| **事件与并发** | `airy_event_loop.c`、`thread_pool.c`、`refcount.c` |
 | **指标与告警** | `unified_metrics.c`、`alert_manager.c` |
 | **配置** | `config_manager.c`、`daemon_defaults.h`、`daemon_errors.h`、`daemon_platform_ext.h` |
 | **内存** | `arena.c`、`tcache.c`（守护进程本地分配器） |
@@ -110,10 +110,10 @@ daemons/
 | 8 | **信息服务** | `info_d/` | 系统信息查询与状态报告 | `info_d` |
 | 9 | **通知服务** | `notify_d/` | 多渠道通知推送（邮件 / Slack / Discord） | `notify_d` |
 | 10 | **观测服务** | `observe_d/` | OpenTelemetry 可观测性数据采集 | `observe_d` |
-| 11 | **Hook 守护进程** | `hook_d/` | 薄守护进程壳；Hook 系统核心位于 `atoms/coreloopthree/src/hook/`，通过链接 `agentrt_coreloopthree` 获取 | `hook_d` |
+| 11 | **Hook 守护进程** | `hook_d/` | 薄守护进程壳；Hook 系统核心位于 `atoms/coreloopthree/src/hook/`，通过链接 `airy_coreloopthree` 获取 | `hook_d` |
 | 12 | **Plugin 守护进程** | `plugin_d/` | 插件生命周期管理与隔离 | `plugin_d` |
 
-> **二进制命名规范：** 每个守护进程可执行文件保留 `*_d` 后缀（`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d`）。根据 2026-07-05 改名决策，模块名从 `daemon` 统一为 `daemons`（目录、CMake target `agentrt_daemons`、仓库 `daemons.git`），但 12 个进程二进制名被刻意保留。
+> **二进制命名规范：** 每个守护进程可执行文件保留 `*_d` 后缀（`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d`）。根据 2026-07-05 改名决策，模块名从 `daemon` 统一为 `daemons`（目录、CMake target `airy_daemons`、仓库 `daemons.git`），但 12 个进程二进制名被刻意保留。
 
 ## 架构
 
@@ -169,7 +169,7 @@ svc_common  ←  gateway_d  ←  外部客户端
 
 | 依赖 | 来源 | 用途 |
 |------|------|------|
-| **atoms** | `agentrt/atoms/` | CoreLoopThree（认知 / 执行 / 记忆循环）、Syscall 入口表面、TaskFlow 编排、Memory 原语——`hook_d` 直接链接 `agentrt_coreloopthree`；每个守护进程通过 `atoms/syscall` 派发业务逻辑 |
+| **atoms** | `agentrt/atoms/` | CoreLoopThree（认知 / 执行 / 记忆循环）、Syscall 入口表面、TaskFlow 编排、Memory 原语——`hook_d` 直接链接 `airy_coreloopthree`；每个守护进程通过 `atoms/syscall` 派发业务逻辑 |
 | **commons** | `agentrt/commons/` | 日志、config_unified、网络、令牌、成本、可观测性、认知、策略——通过 `svc_common` 传递链接。`svc_common.h` / `ipc_service_bus.h` 的权威定义按 IRON-6 现位于此（`commons/utils/ipc/include/`） |
 | **cupolas** | `agentrt/cupolas/` | `svc_common` 以 `PUBLIC` 形式链接 Cupolas（`daemon_cupolas_bootstrap.c`），每个守护进程自动继承 Cupolas 安全——请求鉴权、输入净化、审计、沙箱 |
 | **protocols** | `agentrt/protocols/` | IPC 服务总线使用的 JSON-RPC 2.0 / AgentsIPC 信封；网关边界使用 A2A / MCP 适配器 |
@@ -262,20 +262,20 @@ cmake --install /tmp/daemons-build --prefix /opt/airymax
 
 ### 服务生命周期
 
-服务状态枚举（`agentrt_svc_state_t`，定义于 `commons/utils/ipc/include/svc_common.h`）：
+服务状态枚举（`airy_svc_state_t`，定义于 `commons/utils/ipc/include/svc_common.h`）：
 
 | 状态 | 说明 |
 |------|------|
-| `AGENTRT_SVC_STATE_NONE` | 未初始化 |
-| `AGENTRT_SVC_STATE_CREATED` | 已创建 |
-| `AGENTRT_SVC_STATE_INITIALIZING` | 初始化中 |
-| `AGENTRT_SVC_STATE_READY` | 就绪 |
-| `AGENTRT_SVC_STATE_RUNNING` | 运行中 |
-| `AGENTRT_SVC_STATE_PAUSED` | 已暂停 |
-| `AGENTRT_SVC_STATE_STOPPING` | 停止中 |
-| `AGENTRT_SVC_STATE_STOPPED` | 已停止 |
-| `AGENTRT_SVC_STATE_ZOMBIE` | 僵尸状态（停止超时 / 部分清理） |
-| `AGENTRT_SVC_STATE_ERROR` | 错误状态 |
+| `AIRY_SVC_STATE_NONE` | 未初始化 |
+| `AIRY_SVC_STATE_CREATED` | 已创建 |
+| `AIRY_SVC_STATE_INITIALIZING` | 初始化中 |
+| `AIRY_SVC_STATE_READY` | 就绪 |
+| `AIRY_SVC_STATE_RUNNING` | 运行中 |
+| `AIRY_SVC_STATE_PAUSED` | 已暂停 |
+| `AIRY_SVC_STATE_STOPPING` | 停止中 |
+| `AIRY_SVC_STATE_STOPPED` | 已停止 |
+| `AIRY_SVC_STATE_ZOMBIE` | 僵尸状态（停止超时 / 部分清理） |
+| `AIRY_SVC_STATE_ERROR` | 错误状态 |
 
 生命周期推进：
 
@@ -284,9 +284,9 @@ INIT → CONFIG_LOAD → SERVICE_REGISTER → IDLE → BUSY → SHUTDOWN
  初始化   加载配置    注册到服务发现     等待    处理    优雅关闭
 ```
 
-### 服务能力标志（`agentrt_svc_capability_t`）
+### 服务能力标志（`airy_svc_capability_t`）
 
-`AGENTRT_SVC_CAP_NONE / ASYNC / STREAMING / CANCELABLE / PAUSEABLE / THROTTLE / BATCH / PRIORITY / TIMEOUT`——每个守护进程通过 `agentrt_svc_config_t.capabilities` 位掩码声明其能力。
+`AIRY_SVC_CAP_NONE / ASYNC / STREAMING / CANCELABLE / PAUSEABLE / THROTTLE / BATCH / PRIORITY / TIMEOUT`——每个守护进程通过 `airy_svc_config_t.capabilities` 位掩码声明其能力。
 
 ### IPC 服务总线
 
@@ -298,7 +298,7 @@ INIT → CONFIG_LOAD → SERVICE_REGISTER → IDLE → BUSY → SHUTDOWN
 
 ### 错误码
 
-守护进程扩展错误码通过 `daemon_errors.h` 暴露（经 `common/include/svc_common.h` 重导出）：`DAEMON_EINIT / ESTATE / EHEALTH` 等兼容别名，叠加在 `commons/include/agentrt_types.h` 中定义的标准 `AGENTRT_E*` 错误码集合之上。
+守护进程扩展错误码通过 `daemon_errors.h` 暴露（经 `common/include/svc_common.h` 重导出）：`DAEMON_EINIT / ESTATE / EHEALTH` 等兼容别名，叠加在 `commons/include/airy_types.h` 中定义的标准 `AIRY_E*` 错误码集合之上。
 
 ### 使用示例
 
@@ -308,10 +308,10 @@ INIT → CONFIG_LOAD → SERVICE_REGISTER → IDLE → BUSY → SHUTDOWN
 
 int main(void) {
     /* 守护进程向 IPC 服务总线注册，声明能力。 */
-    agentrt_svc_config_t cfg = {
+    airy_svc_config_t cfg = {
         .name           = "my_daemon",
         .version        = "0.1.1",
-        .capabilities   = AGENTRT_SVC_CAP_ASYNC | AGENTRT_SVC_CAP_CANCELABLE,
+        .capabilities   = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_CANCELABLE,
         .max_concurrent = 64,
         .timeout_ms     = 5000,
         .auto_start     = true,

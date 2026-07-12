@@ -68,34 +68,34 @@ channel_d/
 ### 通道服务生命周期（channel_service.h）
 
 ```c
-agentrt_error_t channel_service_create(channel_service_t *service,
+airy_error_t channel_service_create(channel_service_t *service,
                                        const channel_service_config_t *config);
 void channel_service_destroy(channel_service_t service);
-agentrt_error_t channel_service_start(channel_service_t service);
-agentrt_error_t channel_service_stop(channel_service_t service);
+airy_error_t channel_service_start(channel_service_t service);
+airy_error_t channel_service_stop(channel_service_t service);
 ```
 
 ### 通道操作接口
 
 ```c
-agentrt_error_t channel_open(channel_service_t service, channel_type_t type,
+airy_error_t channel_open(channel_service_t service, channel_type_t type,
                              const char *name, channel_handle_t *handle);
-agentrt_error_t channel_close(channel_service_t service, channel_handle_t handle);
-agentrt_error_t channel_send(channel_service_t service, channel_handle_t handle,
+airy_error_t channel_close(channel_service_t service, channel_handle_t handle);
+airy_error_t channel_send(channel_service_t service, channel_handle_t handle,
                              const void *data, size_t len);
-agentrt_error_t channel_receive(channel_service_t service, channel_handle_t handle,
+airy_error_t channel_receive(channel_service_t service, channel_handle_t handle,
                                 void *buffer, size_t buf_size, size_t *out_len);
 ```
 
 ### 查询与回调接口
 
 ```c
-agentrt_error_t channel_list(channel_service_t service, char **out_json);
-agentrt_error_t channel_get_info(channel_service_t service, channel_handle_t handle,
+airy_error_t channel_list(channel_service_t service, char **out_json);
+airy_error_t channel_get_info(channel_service_t service, channel_handle_t handle,
                                  channel_info_t *info);
-agentrt_error_t channel_set_callback(channel_service_t service, channel_handle_t handle,
+airy_error_t channel_set_callback(channel_service_t service, channel_handle_t handle,
                                      channel_event_cb_t callback, void *user_data);
-agentrt_error_t channel_ping(channel_service_t service, channel_handle_t handle,
+airy_error_t channel_ping(channel_service_t service, channel_handle_t handle,
                              uint64_t *out_latency_ms);
 bool channel_is_healthy(channel_service_t service, channel_handle_t handle);
 ```
@@ -154,7 +154,7 @@ typedef struct {
 
 ```
 channel_d
-├── common (svc_common, agentrt_common)
+├── common (svc_common, airy_common)
 └── Threads::Threads
 ```
 

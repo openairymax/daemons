@@ -17,7 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_AGENTS 256
+#include <airymax/sched.h>
+
 #define DEFAULT_WEIGHT 1.0
 #define WEIGHT_DECAY 0.95
 #define WEIGHT_BOOST 1.05
@@ -34,7 +35,7 @@ typedef struct {
 } agent_weight_t;
 
 typedef struct {
-    agent_weight_t agents[MAX_AGENTS];
+    agent_weight_t agents[MAC_MAX_AGENTS];
     size_t agent_count;
     airy_mtx_t lock;
     double total_weight;
@@ -111,7 +112,7 @@ static int weighted_register_agent(void *raw_data, const agent_info_t *agent)
         airy_mtx_unlock(&data->lock);
         return AIRY_ERR_ALREADY_EXISTS;
     }
-    if (data->agent_count >= MAX_AGENTS) {
+    if (data->agent_count >= MAC_MAX_AGENTS) {
         airy_mtx_unlock(&data->lock);
         return AIRY_ERR_OVERFLOW;
     }

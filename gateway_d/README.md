@@ -93,28 +93,28 @@ gateway_d/
 ### 网关服务生命周期（gateway_service.h）
 
 ```c
-agentrt_error_t gateway_service_create(gateway_service_t *service,
+airy_error_t gateway_service_create(gateway_service_t *service,
                                        const gateway_service_config_t *config);
 void gateway_service_destroy(gateway_service_t service);
-agentrt_error_t gateway_service_init(gateway_service_t service);
-agentrt_error_t gateway_service_start(gateway_service_t service);
-agentrt_error_t gateway_service_stop(gateway_service_t service, bool force);
+airy_error_t gateway_service_init(gateway_service_t service);
+airy_error_t gateway_service_start(gateway_service_t service);
+airy_error_t gateway_service_stop(gateway_service_t service, bool force);
 ```
 
 ### 网关服务状态查询
 
 ```c
-agentrt_svc_state_t gateway_service_get_state(gateway_service_t service);
+airy_svc_state_t gateway_service_get_state(gateway_service_t service);
 bool gateway_service_is_running(gateway_service_t service);
-agentrt_error_t gateway_service_get_stats(gateway_service_t service,
-                                          agentrt_svc_stats_t *stats);
-agentrt_error_t gateway_service_healthcheck(gateway_service_t service);
+airy_error_t gateway_service_get_stats(gateway_service_t service,
+                                          airy_svc_stats_t *stats);
+airy_error_t gateway_service_healthcheck(gateway_service_t service);
 ```
 
 ### 网关配置管理
 
 ```c
-agentrt_error_t gateway_service_load_config(gateway_service_config_t *config,
+airy_error_t gateway_service_load_config(gateway_service_config_t *config,
                                             const char *config_path);
 void gateway_service_get_default_config(gateway_service_config_t *config);
 ```

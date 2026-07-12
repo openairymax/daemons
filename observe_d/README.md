@@ -109,7 +109,7 @@ void record_metric(observe_metric_t *metric, double value);
 |------|------|-----------|------|
 | 入站 | JSON-RPC 2.0 | IPC Service Bus | 接收指标上报与查询请求 |
 | 入站 | TCP | 8085 | 服务监听端口 |
-| 入站 | Unix Socket | `AGENTRT_RUNTIME_DIR/observe.sock` | IPC 通信 |
+| 入站 | Unix Socket | `AIRY_RUNTIME_DIR/observe.sock` | IPC 通信 |
 | 出站 | HTTP | 9090 | Prometheus metrics 端点 |
 
 ## 配置选项
@@ -118,7 +118,7 @@ void record_metric(observe_metric_t *metric, double value);
 |--------|--------|------|
 | TCP 端口 | 8085 | 服务监听端口 |
 | Prometheus 端口 | 9090 | HTTP metrics 服务端口 |
-| Unix Socket | `AGENTRT_RUNTIME_DIR/observe.sock` | IPC 通信 Socket 路径 |
+| Unix Socket | `AIRY_RUNTIME_DIR/observe.sock` | IPC 通信 Socket 路径 |
 | 最大指标数 | 256 | 指标存储容量上限 |
 | HTTP backlog | 16 | HTTP 服务监听 backlog |
 
@@ -142,7 +142,7 @@ void record_metric(observe_metric_t *metric, double value);
 
 ```
 observe_d
-├── common (agentrt_common, svc_common)
+├── common (airy_common, svc_common)
 ├── Threads::Threads
 └── Windows 额外: ws2_32
 ```
