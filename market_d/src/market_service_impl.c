@@ -29,7 +29,8 @@
 #include <windows.h>   /* CreateProcess / FindFirstFile / RemoveDirectory 等 Windows API */
 #endif
 
-#define MAX_AGENTS 256
+#include <airymax/sched.h>
+
 #define MAX_SKILLS 256
 
 #ifdef _WIN32
@@ -175,7 +176,7 @@ static int is_safe_path_component(const char *str)
 
 struct market_service {
     market_config_t config;
-    agent_info_t *agents[MAX_AGENTS];
+    agent_info_t *agents[MAC_MAX_AGENTS];
     size_t agent_count;
     skill_info_t *skills[MAX_SKILLS];
     size_t skill_count;
@@ -257,8 +258,8 @@ int market_service_register_agent(market_service_t *service, const agent_info_t 
         SVC_LOG_ERROR("market_service_register_agent: NULL parameter or not initialized (service=%p, agent_info=%p, initialized=%d)", (const void *)service, (const void *)agent_info, service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
-    if (service->agent_count >= MAX_AGENTS) {
-        SVC_LOG_ERROR("market_service_register_agent: max agents exceeded (count=%zu, max=%d)", service->agent_count, MAX_AGENTS);
+    if (service->agent_count >= MAC_MAX_AGENTS) {
+        SVC_LOG_ERROR("market_service_register_agent: max agents exceeded (count=%zu, max=%d)", service->agent_count, MAC_MAX_AGENTS);
         AIRY_ERROR(AIRY_ERR_OVERFLOW, "max agents exceeded");
     }
 
@@ -1029,7 +1030,7 @@ AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
                 }
             }
 
-            if (!already_exists && service->agent_count < MAX_AGENTS) {
+            if (!already_exists && service->agent_count < MAC_MAX_AGENTS) {
                 agent_info_t *new_agent = (agent_info_t *)AIRY_CALLOC(1, sizeof(agent_info_t));
                 if (new_agent) {
                     new_agent->agent_id = AIRY_STRDUP(found_id);

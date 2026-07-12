@@ -21,7 +21,7 @@ common/
 ├── CMakeLists.txt                   # 构建配置
 ├── README.md                        # 本文件
 ├── include/                         # 公共头文件
-│   ├── agentrt_event_loop.h         # 事件循环
+│   ├── airy_event_loop.h         # 事件循环
 │   ├── alert_manager.h              # 智能告警管理器
 │   ├── api_recovery.h               # API 恢复策略
 │   ├── checkpoint.h                 # 任务检查点/状态持久化
@@ -53,7 +53,7 @@ common/
 │   ├── thread_pool.h                # 线程池
 │   └── unified_metrics.h            # 统一指标采集
 ├── src/                             # 实现文件
-│   ├── agentrt_event_loop.c
+│   ├── airy_event_loop.c
 │   ├── alert_manager.c
 │   ├── api_recovery.c
 │   ├── checkpoint.c
@@ -97,7 +97,7 @@ common/
     ├── test_thread_pool.c
     ├── test_log_sanitizer.c
     ├── test_api_recovery.c
-    ├── test_agentrt_event_loop.c
+    ├── test_airy_event_loop.c
     └── test_checkpoint.c
 ```
 
@@ -152,7 +152,7 @@ common/
 | 组件 | 头文件 | 说明 |
 |------|--------|------|
 | **thread_pool** | `thread_pool.h` | 线程池，支持任务队列和并发控制 |
-| **agentrt_event_loop** | `agentrt_event_loop.h` | 事件循环，异步 I/O 处理 |
+| **airy_event_loop** | `airy_event_loop.h` | 事件循环，异步 I/O 处理 |
 | **daemon_event_driver** | `daemon_event_driver.h` | 事件驱动框架 |
 | **parallel_dispatcher** | `parallel_dispatcher.h` | 并行分发器 |
 | **orchestrator** | `orchestrator.h` | 编排器，多服务协调 |
@@ -174,19 +174,19 @@ common/
 ### 服务生命周期管理（svc_common.h）
 
 ```c
-agentrt_error_t agentrt_service_create(agentrt_service_t *service, const char *name,
-                                       const agentrt_svc_interface_t *iface,
-                                       const agentrt_svc_config_t *config);
-agentrt_error_t agentrt_service_init(agentrt_service_t service);
-agentrt_error_t agentrt_service_start(agentrt_service_t service);
-agentrt_error_t agentrt_service_stop(agentrt_service_t service, bool force);
-void agentrt_service_destroy(agentrt_service_t service);
-agentrt_svc_state_t agentrt_service_get_state(agentrt_service_t service);
-bool agentrt_service_is_ready(agentrt_service_t service);
-bool agentrt_service_is_running(agentrt_service_t service);
-agentrt_error_t agentrt_service_healthcheck(agentrt_service_t service);
-agentrt_error_t agentrt_service_get_stats(agentrt_service_t service,
-                                          agentrt_svc_stats_t *stats);
+airy_error_t airy_service_create(airy_service_t *service, const char *name,
+                                       const airy_svc_interface_t *iface,
+                                       const airy_svc_config_t *config);
+airy_error_t airy_service_init(airy_service_t service);
+airy_error_t airy_service_start(airy_service_t service);
+airy_error_t airy_service_stop(airy_service_t service, bool force);
+void airy_service_destroy(airy_service_t service);
+airy_svc_state_t airy_service_get_state(airy_service_t service);
+bool airy_service_is_ready(airy_service_t service);
+bool airy_service_is_running(airy_service_t service);
+airy_error_t airy_service_healthcheck(airy_service_t service);
+airy_error_t airy_service_get_stats(airy_service_t service,
+                                          airy_svc_stats_t *stats);
 ```
 
 ### IPC 服务总线（ipc_service_bus.h）
@@ -194,16 +194,16 @@ agentrt_error_t agentrt_service_get_stats(agentrt_service_t service,
 ```c
 ipc_service_bus_t ipc_service_bus_create(const char *bus_name,
                                          const ipc_bus_channel_config_t *config);
-agentrt_error_t ipc_service_bus_start(ipc_service_bus_t bus);
-agentrt_error_t ipc_service_bus_stop(ipc_service_bus_t bus);
-agentrt_error_t ipc_service_bus_send(ipc_service_bus_t bus, const char *target_service,
+airy_error_t ipc_service_bus_start(ipc_service_bus_t bus);
+airy_error_t ipc_service_bus_stop(ipc_service_bus_t bus);
+airy_error_t ipc_service_bus_send(ipc_service_bus_t bus, const char *target_service,
                                      const ipc_bus_message_t *message);
-agentrt_error_t ipc_service_bus_request(ipc_service_bus_t bus, const char *target_service,
+airy_error_t ipc_service_bus_request(ipc_service_bus_t bus, const char *target_service,
                                         const ipc_bus_message_t *request,
                                         ipc_bus_message_t *response, uint32_t timeout_ms);
-agentrt_error_t ipc_service_bus_broadcast(ipc_service_bus_t bus,
+airy_error_t ipc_service_bus_broadcast(ipc_service_bus_t bus,
                                           const ipc_bus_message_t *message);
-agentrt_error_t ipc_service_bus_register_handler(ipc_service_bus_t bus,
+airy_error_t ipc_service_bus_register_handler(ipc_service_bus_t bus,
                                                  ipc_bus_message_handler_t handler,
                                                  void *user_data);
 ```
@@ -240,7 +240,7 @@ bool cb_allow_request(circuit_breaker_t breaker);
 void cb_record_success(circuit_breaker_t breaker, uint32_t duration_ms);
 void cb_record_failure(circuit_breaker_t breaker, int32_t error_code);
 cb_state_t cb_get_state(circuit_breaker_t breaker);
-agentrt_error_t cb_execute_failover(circuit_breaker_t breaker, int32_t original_error,
+airy_error_t cb_execute_failover(circuit_breaker_t breaker, int32_t original_error,
                                     char *fallback_result, size_t result_size);
 ```
 
@@ -259,7 +259,7 @@ void auth_cleanup(void);
 ### 安全框架（daemon_security.h）
 
 ```c
-int daemon_security_init(const daemon_security_config_t *config, agentrt_error_t *error);
+int daemon_security_init(const daemon_security_config_t *config, airy_error_t *error);
 int daemon_sanitize_llm_input(const char *input, char *output, size_t output_size);
 int daemon_sanitize_tool_params(const char *tool_name, const char *params,
                                 char *sanitized_tool, size_t tool_buf_size,
@@ -278,15 +278,15 @@ int daemon_audit_log_event(const char *service_name, const char *operation,
 
 ```c
 service_discovery_t sd_create(const sd_config_t *config);
-agentrt_error_t sd_register(service_discovery_t sd, const char *service_name,
+airy_error_t sd_register(service_discovery_t sd, const char *service_name,
                             const char *service_type, const sd_instance_t *instance,
                             const char *tags, const char *dependencies);
-agentrt_error_t sd_discover(service_discovery_t sd, const char *service_name,
+airy_error_t sd_discover(service_discovery_t sd, const char *service_name,
                             sd_instance_t *instances, uint32_t max_count,
                             uint32_t *found_count);
-agentrt_error_t sd_select_instance(service_discovery_t sd, const char *service_name,
+airy_error_t sd_select_instance(service_discovery_t sd, const char *service_name,
                                    sd_lb_strategy_t strategy, sd_instance_t *instance);
-agentrt_error_t sd_heartbeat(service_discovery_t sd, const char *service_name,
+airy_error_t sd_heartbeat(service_discovery_t sd, const char *service_name,
                              const char *instance_id);
 ```
 
@@ -346,10 +346,10 @@ ctest --test-dir build -R "test_daemon_common|test_ipc|test_jsonrpc|test_logger|
 #include "daemons/common/svc_logger.h"
 #include "daemons/common/ipc_service_bus.h"
 
-agentrt_svc_config_t config = {
+airy_svc_config_t config = {
     .name = "my_daemon",
     .version = "1.0.0",
-    .capabilities = AGENTRT_SVC_CAP_ASYNC | AGENTRT_SVC_CAP_CANCELABLE,
+    .capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_CANCELABLE,
     .max_concurrent = 16,
     .timeout_ms = 5000,
     .auto_start = true,
@@ -357,10 +357,10 @@ agentrt_svc_config_t config = {
     .enable_tracing = true
 };
 
-agentrt_service_t service;
-agentrt_service_create(&service, "my_daemon", &iface, &config);
-agentrt_service_init(service);
-agentrt_service_start(service);
+airy_service_t service;
+airy_service_create(&service, "my_daemon", &iface, &config);
+airy_service_init(service);
+airy_service_start(service);
 ```
 
 ### 使用 IPC 服务总线
@@ -392,8 +392,8 @@ cb_manager_t cb_mgr = cb_manager_create();
 circuit_breaker_t cb = cb_create(cb_mgr, "llm_service", NULL);
 
 if (cb_allow_request(cb)) {
-    agentrt_error_t err = call_llm_service();
-    if (err == AGENTRT_OK) {
+    airy_error_t err = call_llm_service();
+    if (err == AIRY_OK) {
         cb_record_success(cb, duration_ms);
     } else {
         cb_record_failure(cb, err);

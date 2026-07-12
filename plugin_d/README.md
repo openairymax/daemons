@@ -93,7 +93,7 @@ author: SPHARX
 description: My plugin description
 type: tool_provider          # tool_provider | protocol_adapter | memory_provider | hook_extension
 api_version: 1
-min_agentrt_version: 0.1.1
+min_airy_version: 0.1.1
 library: libmy_plugin.so
 permissions:                 # 权限声明，与 Cupolas 守卫映射
   - file_read
@@ -126,7 +126,7 @@ config:
 ```
 1. 信号处理注册 (SIGINT/SIGTERM → graceful shutdown)
 2. Cupolas 安全穹顶初始化 (daemon_cupolas_init)
-3. Unix Socket 服务器创建 (AGENTRT_RUNTIME_DIR/plugin.sock)
+3. Unix Socket 服务器创建 (AIRY_RUNTIME_DIR/plugin.sock)
 4. ServiceDiscovery 自动注册 (tag: plugin,core)
 5. IPC Bus 消息路由注册 (JSON-RPC 2.0)
 6. 权限校验模块初始化 (strict_mode + audit_log)
@@ -143,7 +143,7 @@ config:
 | **svc_common** | `agentrt/daemons/common/` | 守护进程框架（ServiceDiscovery / IPC Bus / Cupolas bootstrap / 日志） |
 | **cupolas** | `agentrt/cupolas/` | 安全穹顶（permission_engine + safety_guard），提供守卫类型枚举与权限裁决 |
 | **commons** | `agentrt/commons/` | 基础库（logging / config_unified / memory / sync / string / error） |
-| **agentrt_common** | `agentrt/commons/` | 通用运行时库 |
+| **airy_common** | `agentrt/commons/` | 通用运行时库 |
 | libdl | 系统 | 动态库加载（dlopen / dlsym / dlclose） |
 | libyaml | 外部 | manifest.yaml 解析 |
 | cJSON | 外部 | JSON 配置解析 |
@@ -198,7 +198,7 @@ cmake --build build --target plugin_d
 
 ### Unix Socket
 
-- 路径：`${AGENTRT_RUNTIME_DIR}/plugin.sock`（默认 `/var/run/agentrt/plugin.sock`）
+- 路径：`${AIRY_RUNTIME_DIR}/plugin.sock`（默认 `/var/run/agentrt/plugin.sock`）
 - 协议：JSON-RPC 2.0 over Unix Socket
 
 ### 服务 API
