@@ -4,12 +4,12 @@
 
 ## 概述
 
-`daemons/hook_d/` 是 AgentRT 十二大运行时守护进程之一，负责 Hook 事件系统的守护进程生命周期管理。在 SP04 重构后，Hook 系统核心（hook_registry / executor / interceptor / timeout / handlers，共 9 个 .c + 7 个 .h）已迁移至 `atoms/coreloopthree/src/hook/`，`hook_d` 退化为仅含 `main.c` 的薄 daemon 壳，通过链接 `agentrt_coreloopthree` 获取 Hook 系统全部能力。
+`daemons/hook_d/` 是 AgentRT 十二大运行时守护进程之一，负责 Hook 事件系统的守护进程生命周期管理。在 SP04 重构后，Hook 系统核心（hook_registry / executor / interceptor / timeout / handlers，共 9 个 .c + 7 个 .h）已迁移至 `atoms/coreloopthree/src/hook/`，`hook_d` 退化为仅含 `main.c` 的薄 daemon 壳，通过链接 `airy_coreloopthree` 获取 Hook 系统全部能力。
 
 ### 架构定位
 
 ```
-hook_d (daemon shell) → agentrt_coreloopthree (hook 系统核心) → cupolas (安全穹顶)
+hook_d (daemon shell) → airy_coreloopthree (hook 系统核心) → cupolas (安全穹顶)
          ↑                              ↑
     守护进程生命周期              Hook 注册/执行/拦截/超时
     (socket + SD + IPC)          (9 个 .c + 7 个 .h)
@@ -17,7 +17,7 @@ hook_d (daemon shell) → agentrt_coreloopthree (hook 系统核心) → cupolas 
 
 ### 核心职责
 
-- **Unix Socket 服务**：在 `AGENTRT_RUNTIME_DIR/hook.sock` 上监听 Unix Socket，接收来自 `sched_d` 和 `tool_d` 的 Hook 注入请求
+- **Unix Socket 服务**：在 `AIRY_RUNTIME_DIR/hook.sock` 上监听 Unix Socket，接收来自 `sched_d` 和 `tool_d` 的 Hook 注入请求
 - **ServiceDiscovery 注册**：通过 `daemon_bootstrap_sd` 在服务发现总线上注册自身，注册 tag 为 `hook,core`
 - **IPC Bus 消息路由**：通过 `daemon_bootstrap_ipc` 接入 JSON-RPC 2.0 统一 IPC 服务总线
 - **Cupolas 安全穹顶集成**：启动时初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger），继承内生安全能力
@@ -27,7 +27,7 @@ hook_d (daemon shell) → agentrt_coreloopthree (hook 系统核心) → cupolas 
 
 ```
 hook_d/
-├── CMakeLists.txt       # 构建配置（仅编译 main.c，链接 agentrt_coreloopthree）
+├── CMakeLists.txt       # 构建配置（仅编译 main.c，链接 airy_coreloopthree）
 ├── README.md            # 本文件
 ├── src/
 │   └── main.c           # 守护进程入口（薄 daemon 壳）
@@ -42,7 +42,7 @@ hook_d/
 ```
 1. 信号处理注册 (SIGINT/SIGTERM → graceful shutdown)
 2. Cupolas 安全穹顶初始化 (daemon_cupolas_init)
-3. Unix Socket 服务器创建 (AGENTRT_RUNTIME_DIR/hook.sock)
+3. Unix Socket 服务器创建 (AIRY_RUNTIME_DIR/hook.sock)
 4. ServiceDiscovery 自动注册 (daemon_bootstrap_sd_start)
 5. IPC Bus 消息路由注册 (daemon_bootstrap_ipc_start)
 6. 进入事件循环，等待 shutdown 信号
@@ -51,7 +51,7 @@ hook_d/
 
 ### Hook 系统核心（位于 atoms/coreloopthree）
 
-Hook 系统核心在 `atoms/coreloopthree/src/hook/` 中实现，`hook_d` 通过 `target_link_libraries(hook_d PRIVATE agentrt_coreloopthree)` 获取。核心组件包括：
+Hook 系统核心在 `atoms/coreloopthree/src/hook/` 中实现，`hook_d` 通过 `target_link_libraries(hook_d PRIVATE airy_coreloopthree)` 获取。核心组件包括：
 
 | 组件 | 说明 |
 |------|------|
@@ -68,20 +68,20 @@ Hook 系统核心在 `atoms/coreloopthree/src/hook/` 中实现，`hook_d` 通过
 | 阶段 | 操作 | 说明 |
 |------|------|------|
 | 启动 | `daemon_cupolas_init` | 初始化安全穹顶 |
-| 启动 | `agentrt_socket_create_unix_server` | 创建 Unix Socket |
+| 启动 | `airy_socket_create_unix_server` | 创建 Unix Socket |
 | 注册 | `daemon_bootstrap_sd_start` | 向 ServiceDiscovery 注册 |
 | 注册 | `daemon_bootstrap_ipc_start` | 向 IPC Bus 注册 |
 | 运行 | `sleep(1)` 循环 | 等待关闭信号 |
 | 停止 | `daemon_bootstrap_ipc_stop` | 注销 IPC 路由 |
 | 停止 | `daemon_bootstrap_sd_stop` | 注销服务发现 |
-| 停止 | `agentrt_socket_close` | 关闭 Socket |
+| 停止 | `airy_socket_close` | 关闭 Socket |
 | 清理 | `daemon_cupolas_cleanup` | 清理安全穹顶 |
 
 ## 上游依赖
 
 | 依赖 | 来源 | 用途 |
 |------|------|------|
-| **agentrt_coreloopthree** | `agentrt/atoms/coreloopthree/` | Hook 系统核心（registry / executor / interceptor / timeout / handlers） |
+| **airy_coreloopthree** | `agentrt/atoms/coreloopthree/` | Hook 系统核心（registry / executor / interceptor / timeout / handlers） |
 | **svc_common** | `agentrt/daemons/common/` | 守护进程框架（ServiceDiscovery / IPC Bus / Cupolas bootstrap / 日志 / 配置） |
 | **cupolas** | `agentrt/cupolas/` | 安全穹顶（permission_engine + sanitizer + audit_logger），通过 `daemon_cupolas_bootstrap` 集成 |
 | **commons** | `agentrt/commons/` | 基础库（logging / config_unified / network / memory / sync / string / cache / compat / error / ipc） |
@@ -101,7 +101,7 @@ Hook 系统核心在 `atoms/coreloopthree/src/hook/` 中实现，`hook_d` 通过
 
 - CMake ≥ 3.16
 - C11 编译器（GCC / Clang / MSVC）
-- `agentrt_coreloopthree` 已构建（atoms 子项目）
+- `airy_coreloopthree` 已构建（atoms 子项目）
 - `svc_common` 已构建（daemons/common 子项目）
 
 ### 编译选项
@@ -128,7 +128,7 @@ Linux 平台使用 `--start-group/--end-group` 避免 LTO + ASan 下符号扫描
 ```cmake
 target_link_libraries(hook_d PRIVATE
     "-Wl,--start-group"
-    agentrt_coreloopthree
+    airy_coreloopthree
     svc_common
     cupolas
     "-Wl,--end-group"
@@ -150,7 +150,7 @@ target_link_libraries(hook_d PRIVATE
 
 ### Unix Socket
 
-- 路径：`${AGENTRT_RUNTIME_DIR}/hook.sock`（默认 `/var/run/agentrt/hook.sock`）
+- 路径：`${AIRY_RUNTIME_DIR}/hook.sock`（默认 `/var/run/agentrt/hook.sock`）
 - 协议：JSON-RPC 2.0 over Unix Socket
 
 ### 信号

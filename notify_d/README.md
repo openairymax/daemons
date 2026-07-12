@@ -103,7 +103,7 @@ data: {"event":"...","data":"..."}\n\n
 |------|------|------|
 | 入站 | JSON-RPC 2.0 | 通过 IPC Service Bus 接收请求 |
 | 入站 | TCP | 默认监听端口 8084 |
-| 入站 | Unix Socket | `AGENTRT_RUNTIME_DIR/notify.sock` |
+| 入站 | Unix Socket | `AIRY_RUNTIME_DIR/notify.sock` |
 | 出站 | WebSocket | WS 文本帧广播 |
 | 出站 | SSE | Server-Sent Events 推送 |
 | 出站 | 原始 Socket | 直接数据推送 |
@@ -113,7 +113,7 @@ data: {"event":"...","data":"..."}\n\n
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
 | TCP 端口 | 8084 | HTTP/TCP 监听端口 |
-| Unix Socket | `AGENTRT_RUNTIME_DIR/notify.sock` | IPC 通信 Socket 路径 |
+| Unix Socket | `AIRY_RUNTIME_DIR/notify.sock` | IPC 通信 Socket 路径 |
 | 最大待处理事件 | 1024 | 环形缓冲区事件队列容量 |
 | 最大客户端数 | 128 | 同时连接的最大客户端数量 |
 | WebSocket GUID | `258EAFA5-E914-47DA-95CA-C5AB0DC85B11` | WebSocket 协议握手 GUID |
@@ -135,7 +135,7 @@ data: {"event":"...","data":"..."}\n\n
 
 ```
 notify_d
-├── common (agentrt_common, svc_common)
+├── common (airy_common, svc_common)
 ├── Threads::Threads
 └── Windows 额外: ws2_32
 ```

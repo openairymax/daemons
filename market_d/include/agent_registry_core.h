@@ -12,6 +12,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <airymax/sched.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,7 +21,6 @@ extern "C" {
 #define MAX_AGENT_ID_LEN 128
 #define MAX_AGENT_NAME_LEN 256
 #define MAX_DESCRIPTION_LEN 4096
-#define MAX_AGENTS 1024
 #define MAX_TAGS_PER_AGENT 16
 #define MAX_VERSIONS_PER_AGENT 32
 #define MAX_URL_LEN 512

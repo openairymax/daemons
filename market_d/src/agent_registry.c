@@ -18,14 +18,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_AGENTS 1024
+#include <airymax/sched.h>
 
 typedef struct {
     agent_info_t info;
 } agent_entry_t;
 
 typedef struct {
-    agent_entry_t entries[MAX_AGENTS];
+    agent_entry_t entries[MAC_MAX_AGENTS];
     size_t entry_count;
     airy_mtx_t lock;
     int initialized;
@@ -111,7 +111,7 @@ int agent_registry_register(const agent_info_t *reg)
         airy_mtx_unlock(&g_registry.lock);
         return AIRY_ERR_ALREADY_EXISTS;
     }
-    if (g_registry.entry_count >= MAX_AGENTS) {
+    if (g_registry.entry_count >= MAC_MAX_AGENTS) {
         airy_mtx_unlock(&g_registry.lock);
         return AIRY_ERR_OVERFLOW;
     }
