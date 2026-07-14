@@ -120,31 +120,36 @@ int agent_registry_core_remove(agent_registry_t *registry, const char *agent_id)
     return AIRY_ERR_NOT_FOUND;
 }
 
-const agent_entry_t *agent_registry_core_get(agent_registry_t *registry, const char *agent_id)
+int agent_registry_core_get(agent_registry_t *registry, const char *agent_id, agent_entry_t *out)
 {
-    if (!registry || !registry->initialized || !agent_id) {
-        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-    }
+    if (!registry || !registry->initialized || !agent_id || !out)
+        return AIRY_ERR_INVALID_PARAM;
     airy_mtx_lock(&registry->lock);
     for (size_t i = 0; i < registry->entry_count; i++) {
         if (strcmp(registry->entries[i].id, agent_id) == 0) {
+            /* P0-7 修复：在锁内完成浅拷贝后再解锁，避免调用方无锁访问内部 entries[]。
+             * 注意：description/author/tags 仍为内部指针，调用方不应在 unlock 后解引用；
+             * 如需长期持有应额外深拷贝。本修复聚焦消除返回内部数组指针的数据竞争。 */
+            *out = registry->entries[i];
             airy_mtx_unlock(&registry->lock);
-            return &registry->entries[i];
+            return 0;
         }
     }
     airy_mtx_unlock(&registry->lock);
-    AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
+    return AIRY_ERR_NOT_FOUND;
 }
 
-size_t agent_registry_core_list(agent_registry_t *registry, const agent_entry_t **out_entries,
+size_t agent_registry_core_list(agent_registry_t *registry, agent_entry_t *out_entries,
                                 size_t max_entries)
 {
     if (!registry || !registry->initialized || !out_entries)
         return 0;
     airy_mtx_lock(&registry->lock);
     size_t count = (registry->entry_count < max_entries) ? registry->entry_count : max_entries;
+    /* P0-7 修复：在锁内按值拷贝条目快照，调用方解锁后访问的是独立拷贝，
+     * 不再持有指向内部 entries[] 的指针，消除 remove() 数组搬移导致的 use-after-free。 */
     for (size_t i = 0; i < count; i++)
-        out_entries[i] = &registry->entries[i];
+        out_entries[i] = registry->entries[i];
     airy_mtx_unlock(&registry->lock);
     return count;
 }
@@ -191,24 +196,28 @@ AIRY_STRNCPY_TERM(registry->entries[i].latest_version, version->version, sizeof(
     return AIRY_ERR_NOT_FOUND;
 }
 
-const char *agent_registry_core_get_latest_version(agent_registry_t *registry, const char *agent_id)
+int agent_registry_core_get_latest_version(agent_registry_t *registry, const char *agent_id,
+                                           char *out, size_t out_size)
 {
-    if (!registry || !registry->initialized || !agent_id) {
-        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-    }
+    if (!registry || !registry->initialized || !agent_id || !out || out_size == 0)
+        return AIRY_ERR_INVALID_PARAM;
     airy_mtx_lock(&registry->lock);
     for (size_t i = 0; i < registry->entry_count; i++) {
         if (strcmp(registry->entries[i].id, agent_id) == 0) {
+            /* P0-7 修复：在锁内拷贝 latest_version 字符串到调用方缓冲区后再解锁，
+             * 避免返回内部 char 数组指针后调用方无锁访问。 */
+            AIRY_STRNCPY_TERM(out, registry->entries[i].latest_version, out_size);
+            out[out_size - 1] = '\0';
             airy_mtx_unlock(&registry->lock);
-            return registry->entries[i].latest_version;
+            return 0;
         }
     }
     airy_mtx_unlock(&registry->lock);
-    AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
+    return AIRY_ERR_NOT_FOUND;
 }
 
 size_t agent_registry_core_search_by_tag(agent_registry_t *registry, const char *tag,
-                                         const agent_entry_t **out_entries, size_t max_entries)
+                                         agent_entry_t *out_entries, size_t max_entries)
 {
     if (!registry || !registry->initialized || !tag || !out_entries)
         return 0;
@@ -217,7 +226,8 @@ size_t agent_registry_core_search_by_tag(agent_registry_t *registry, const char 
     for (size_t i = 0; i < registry->entry_count && count < max_entries; i++) {
         for (size_t j = 0; j < registry->entries[i].tag_count; j++) {
             if (registry->entries[i].tags[j] && strcmp(registry->entries[i].tags[j], tag) == 0) {
-                out_entries[count++] = &registry->entries[i];
+                /* P0-7 修复：在锁内按值拷贝匹配条目，调用方解锁后访问的是独立快照。 */
+                out_entries[count++] = registry->entries[i];
                 break;
             }
         }
@@ -227,7 +237,7 @@ size_t agent_registry_core_search_by_tag(agent_registry_t *registry, const char 
 }
 
 size_t agent_registry_core_search(agent_registry_t *registry, const char *query,
-                                  const agent_entry_t **out_entries, size_t max_entries)
+                                  agent_entry_t *out_entries, size_t max_entries)
 {
     if (!registry || !registry->initialized || !query || !out_entries)
         return 0;
@@ -236,7 +246,11 @@ size_t agent_registry_core_search(agent_registry_t *registry, const char *query,
     for (size_t i = 0; i < registry->entry_count && count < max_entries; i++) {
         if (strstr(registry->entries[i].id, query) || strstr(registry->entries[i].name, query) ||
             (registry->entries[i].description && strstr(registry->entries[i].description, query))) {
-            out_entries[count++] = &registry->entries[i];
+            /* P1-15 修复：在锁内按值拷贝匹配条目，调用方解锁后访问的是独立快照，
+             * 不再持有指向内部 entries[] 的指针，消除 remove() 数组搬移导致的 use-after-free。
+             * 参照 P0-7 修正的 agent_registry_core_search_by_tag 同模式。 */
+            out_entries[count] = registry->entries[i];
+            count++;
         }
     }
     airy_mtx_unlock(&registry->lock);

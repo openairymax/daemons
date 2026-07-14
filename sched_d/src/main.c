@@ -251,9 +251,8 @@ int main(int argc, char **argv)
     int ret = sched_service_create(&config, &g_service);
     if (ret != AIRY_SUCCESS || !g_service) {
         SVC_LOG_ERROR("Failed to create scheduler service (error=%d)", ret);
-        airy_mtx_destroy(&g_running_lock_sched_d);
-        airy_sock_cleanup();
-        return 1;
+        /* N5 修复：改用 goto 集中出口，避免重复清理代码 */
+        goto out_mtx_sock;
     }
 
     SVC_LOG_INFO("Scheduler service created with strategy: round_robin");
@@ -263,10 +262,8 @@ int main(int argc, char **argv)
         use_tcp, DEFAULT_TCP_PORT, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN);
     if (server_fd < 0) {
         SVC_LOG_ERROR("Failed to create server socket");
-        destroy_service();
-        airy_mtx_destroy(&g_running_lock_sched_d);
-        airy_sock_cleanup();
-        return 1;
+        /* N5 修复：server_fd 未创建，跳过 airy_sock_close，仅清理 service + mtx + sock */
+        goto out_service;
     }
     SVC_LOG_INFO(use_tcp ? "Listening on TCP port %d" : "Listening on Unix socket",
                  DEFAULT_TCP_PORT);
@@ -289,11 +286,8 @@ int main(int argc, char **argv)
                                    &g_bipc_sched_d);
     if (ret != AIRY_SUCCESS || !g_event_driver_sched_d) {
         SVC_LOG_ERROR("Failed to create event driver");
-        airy_sock_close(server_fd);
-        destroy_service();
-        airy_mtx_destroy(&g_running_lock_sched_d);
-        airy_sock_cleanup();
-        return 1;
+        /* N5 修复：event_driver 未创建，跳过 destroy，清理 server_fd + service + mtx + sock */
+        goto out_server_fd;
     }
 
     g_dispatcher_sched_d = daemon_event_driver_get_dispatcher(g_event_driver_sched_d);
@@ -305,12 +299,8 @@ int main(int argc, char **argv)
 
     if (daemon_event_driver_add_server_fd(g_event_driver_sched_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
-        daemon_event_driver_destroy(g_event_driver_sched_d);
-        airy_sock_close(server_fd);
-        destroy_service();
-        airy_mtx_destroy(&g_running_lock_sched_d);
-        airy_sock_cleanup();
-        return 1;
+        /* N5 修复：event_driver 已创建但 add_server_fd 失败，需 destroy + 清理全部资源 */
+        goto out_event_driver;
     }
 
     SVC_LOG_INFO("Scheduler service running (event-driven mode)");
@@ -323,4 +313,16 @@ int main(int argc, char **argv)
     daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
     log_cleanup();
     return 0;
+
+/* N5 修复：goto 集中出口标签（按资源分配逆序释放，fall-through 模式） */
+out_event_driver:
+    daemon_event_driver_destroy(g_event_driver_sched_d);
+out_server_fd:
+    airy_sock_close(server_fd);
+out_service:
+    destroy_service();
+out_mtx_sock:
+    airy_mtx_destroy(&g_running_lock_sched_d);
+    airy_sock_cleanup();
+    return 1;
 }
