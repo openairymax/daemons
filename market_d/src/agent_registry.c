@@ -190,6 +190,36 @@ int agent_registry_get(const char *agent_id, agent_info_t *out_info)
     return AIRY_OK;
 }
 
+/* P2-6 修复：agent_registry_get 的不加锁版本，供已持锁的内部函数调用。
+ * 避免嵌套加锁（agent_registry_search 持锁时调用 agent_registry_get 会再次获取同一锁）。
+ * 调用方必须已持有 g_registry.lock。 */
+static int agent_registry_get_locked(const char *agent_id, agent_info_t *out_info)
+{
+    if (!agent_id || !out_info)
+        return AIRY_ERR_INVALID_PARAM;
+
+    int idx = find_agent_index(agent_id);
+    if (idx < 0)
+        return AIRY_ERR_NOT_FOUND;
+
+    agent_entry_t *entry = &g_registry.entries[idx];
+    __builtin_memset(out_info, 0, sizeof(agent_info_t));
+    out_info->agent_id = safe_strdup(entry->info.agent_id);
+    out_info->name = safe_strdup(entry->info.name);
+    out_info->version = safe_strdup(entry->info.version);
+    out_info->description = safe_strdup(entry->info.description);
+    out_info->type = entry->info.type;
+    out_info->status = entry->info.status;
+    out_info->author = safe_strdup(entry->info.author);
+    out_info->repository = safe_strdup(entry->info.repository);
+    out_info->dependencies = safe_strdup(entry->info.dependencies);
+    out_info->rating = entry->info.rating;
+    out_info->download_count = entry->info.download_count;
+    out_info->last_updated = entry->info.last_updated;
+
+    return AIRY_OK;
+}
+
 int agent_registry_search(const search_params_t *params, agent_info_t ***results, size_t *count)
 {
     if (!params || !results || !count)
@@ -232,7 +262,10 @@ int agent_registry_search(const search_params_t *params, agent_info_t ***results
 
             (*results)[result_idx] = (agent_info_t *)AIRY_CALLOC(1, sizeof(agent_info_t));
             if ((*results)[result_idx]) {
-                agent_registry_get(entry->info.agent_id, (*results)[result_idx]);
+                /* P2-6 修复：调用 _locked 版本避免嵌套加锁。
+                 * 当前线程已持有 g_registry.lock，若调用 agent_registry_get 会再次
+                 * 尝试获取同一锁（当前依赖 PTHREAD_MUTEX_RECURSIVE 才不致死锁）。 */
+                agent_registry_get_locked(entry->info.agent_id, (*results)[result_idx]);
                 result_idx++;
             }
         }
