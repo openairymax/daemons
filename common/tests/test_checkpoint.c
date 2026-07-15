@@ -11,7 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#include <errno.h>
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -32,10 +34,15 @@ static void setup_temp_dir(void)
 static void teardown_temp_dir(void)
 {
     airy_checkpoint_shutdown();
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "rm -rf %s", g_storage_path);
-    int _system_ret = system(cmd);
-    (void)_system_ret;
+    /* P2-25: 使用 fork/exec 替代 system() 防止 shell 注入 */
+    pid_t pid = fork();
+    if (pid == 0) {
+        execl("/bin/rm", "rm", "-rf", g_storage_path, (char *)NULL);
+        _exit(127);
+    } else if (pid > 0) {
+        int wstatus;
+        while (waitpid(pid, &wstatus, 0) < 0 && errno == EINTR) {}
+    }
 }
 
 static void test_init_shutdown(void)
