@@ -15,6 +15,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <errno.h>
 
 #include "memory_compat.h"
 #include <time.h>
@@ -41,10 +44,25 @@ static uint64_t get_time_ns(void)
 
 static void cleanup_test_dir(void)
 {
-    char cmd[256];
-    snprintf(cmd, sizeof(cmd), "mkdir -p %s && rm -rf %s", TEST_SOCKET_DIR, TEST_SOCKET_DIR);
-    {
-        int __rc __attribute__((unused)) = system(cmd);
+    /* P2-25: 使用 fork/exec 替代 system() 防止 shell 注入 */
+    pid_t pid = fork();
+    if (pid == 0) {
+        execl("/bin/mkdir", "mkdir", "-p", TEST_SOCKET_DIR, (char *)NULL);
+        _exit(127);
+    }
+    if (pid > 0) {
+        int wstatus;
+        while (waitpid(pid, &wstatus, 0) < 0 && errno == EINTR) {}
+    }
+
+    pid = fork();
+    if (pid == 0) {
+        execl("/bin/rm", "rm", "-rf", TEST_SOCKET_DIR, (char *)NULL);
+        _exit(127);
+    }
+    if (pid > 0) {
+        int wstatus;
+        while (waitpid(pid, &wstatus, 0) < 0 && errno == EINTR) {}
     }
 }
 
