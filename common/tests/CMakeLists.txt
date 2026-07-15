@@ -89,7 +89,7 @@ add_executable(svc_test_daemon_common test_daemon_common.c)
 target_include_directories(svc_test_daemon_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../agentrt/commons/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/tests/utils
 )
 
