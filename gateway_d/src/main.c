@@ -203,7 +203,7 @@ int main(int argc, char *argv[])
     if (parse_args(argc, argv, &config) != 0) {
         airy_mtx_destroy(&g_running_lock);
         airy_sock_cleanup();
-        return 1;
+        return EXIT_FAILURE;
     }
 
     SVC_LOG_INFO("Gateway service starting...");

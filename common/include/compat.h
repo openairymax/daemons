@@ -15,7 +15,7 @@
 
 #include <compat.h>
 #include <stdlib.h>
-#include "memory_compat.h"
+#include "airy_memory.h"
 
 /* ==================== 额外的兼容性别名 ==================== */
 

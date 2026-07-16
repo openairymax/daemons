@@ -7,7 +7,7 @@
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "scheduler_service.h"
 #include "svc_logger.h"
 

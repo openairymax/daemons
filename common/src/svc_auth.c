@@ -1,4 +1,4 @@
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "error.h"
 /**
  * @file svc_auth.c

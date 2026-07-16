@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "error.h"
 /*
  * Copyright (c) 2026 SPHARX. All Rights Reserved.
@@ -12,6 +12,7 @@
 #include "daemon_main.h"
 
 #include <inttypes.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #define CHANNEL_D_SOCKET_PATH AIRY_RUNTIME_DIR "/channel.sock"
@@ -309,13 +310,13 @@ int main(int argc, char *argv[])
     g_svc = channel_service_create(&config);
     if (!g_svc) {
         SVC_LOG_ERROR("Failed to create channel service");
-        return 1;
+        return EXIT_FAILURE;
     }
 
     if (channel_service_start(g_svc) != 0) {
         SVC_LOG_ERROR("Failed to start channel service");
         channel_service_destroy(g_svc);
-        return 1;
+        return EXIT_FAILURE;
     }
 
     SVC_LOG_INFO("channel_d started (max_channels=%u, socket_dir=%s)", config.max_channels,
@@ -327,7 +328,7 @@ int main(int argc, char *argv[])
     if (server_fd < 0) {
         SVC_LOG_ERROR("channel_d: failed to create socket at %s", CHANNEL_D_SOCKET_PATH);
         channel_service_destroy(g_svc);
-        return 1;
+        return EXIT_FAILURE;
     }
     SVC_LOG_INFO("channel_d: listening on %s (fd=%d)", CHANNEL_D_SOCKET_PATH, (int)server_fd);
 

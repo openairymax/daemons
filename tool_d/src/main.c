@@ -1,4 +1,4 @@
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "error.h"
 /*
  * Copyright (C) 2026 SPHARX. All Rights Reserved.
@@ -14,6 +14,8 @@
 #include "svc_logger.h"
 #include "thread_pool.h"
 #include "tool_service.h"
+
+#include <stdlib.h>
 
 /* ==================== 配置常量 ==================== */
 
@@ -374,7 +376,7 @@ int main(int argc, char **argv)
         free_daemon_config();
         airy_mtx_destroy(&g_running_lock_tool_d);
         airy_sock_cleanup();
-        return 1;
+        return EXIT_FAILURE;
     }
 
     /* 创建服务器 Socket（TCP/Unix/NamedPipe 统一封装） */
@@ -386,7 +388,7 @@ int main(int argc, char **argv)
         free_daemon_config();
         airy_mtx_destroy(&g_running_lock_tool_d);
         airy_sock_cleanup();
-        return 1;
+        return EXIT_FAILURE;
     }
     SVC_LOG_INFO(g_config.use_tcp ? "Listening on TCP %s:%d" : "Listening on %s",
                  g_config.tcp_host, g_config.tcp_port);
@@ -414,7 +416,7 @@ int main(int argc, char **argv)
         free_daemon_config();
         airy_mtx_destroy(&g_running_lock_tool_d);
         airy_sock_cleanup();
-        return 1;
+        return EXIT_FAILURE;
     }
 
     g_dispatcher_tool_d = daemon_event_driver_get_dispatcher(g_event_driver_tool_d);
@@ -432,7 +434,7 @@ int main(int argc, char **argv)
         free_daemon_config();
         airy_mtx_destroy(&g_running_lock_tool_d);
         airy_sock_cleanup();
-        return 1;
+        return EXIT_FAILURE;
     }
 
     SVC_LOG_INFO("Tool service running (event-driven mode)");

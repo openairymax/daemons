@@ -1,4 +1,4 @@
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "error.h"
 /*
  * Copyright (C) 2026 SPHARX. All Rights Reserved.
@@ -24,6 +24,8 @@
 #include "llm_service.h"
 #include "response.h"
 #include "daemon_main.h"
+
+#include <stdlib.h>
 
 /* ==================== 配置常量 ==================== */
 
@@ -502,7 +504,7 @@ int main(int argc, char **argv)
         SVC_LOG_ERROR("Failed to create service");
         airy_mtx_destroy(&g_running_lock_llm_d);
         airy_sock_cleanup();
-        return 1;
+        return EXIT_FAILURE;
     }
 
     /* P0.18.1: 统一服务器 Socket 创建（TCP/Unix/NamedPipe 封装） */
@@ -515,7 +517,7 @@ int main(int argc, char **argv)
         destroy_service_llm_d();
         airy_mtx_destroy(&g_running_lock_llm_d);
         airy_sock_cleanup();
-        return 1;
+        return EXIT_FAILURE;
     }
     if (use_tcp)
         SVC_LOG_INFO("Listening on TCP port %d", tcp_port);
@@ -544,7 +546,7 @@ int main(int argc, char **argv)
         destroy_service_llm_d();
         airy_mtx_destroy(&g_running_lock_llm_d);
         airy_sock_cleanup();
-        return 1;
+        return EXIT_FAILURE;
     }
 
     g_dispatcher_llm_d = daemon_event_driver_get_dispatcher(g_event_driver_llm_d);
@@ -559,7 +561,7 @@ int main(int argc, char **argv)
         destroy_service_llm_d();
         airy_mtx_destroy(&g_running_lock_llm_d);
         airy_sock_cleanup();
-        return 1;
+        return EXIT_FAILURE;
     }
 
     SVC_LOG_INFO("LLM service running (event-driven mode)");

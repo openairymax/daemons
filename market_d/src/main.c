@@ -1,4 +1,4 @@
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "error.h"
 /*
  * Copyright (C) 2026 SPHARX. All Rights Reserved.
@@ -15,6 +15,7 @@
 #include "svc_logger.h"
 #include "thread_pool.h"
 
+#include <stdlib.h>
 #include <time.h>
 
 /* ==================== 配置常量 ==================== */
@@ -342,7 +343,7 @@ int main(int argc, char **argv)
         SVC_LOG_ERROR("Failed to create market service (error=%d)", ret);
         airy_mtx_destroy(&g_running_lock_market_d);
         airy_sock_cleanup();
-        return 1;
+        return EXIT_FAILURE;
     }
 
     /* 注册 RPC 方法 */
@@ -351,7 +352,7 @@ int main(int argc, char **argv)
         destroy_service();
         airy_mtx_destroy(&g_running_lock_market_d);
         airy_sock_cleanup();
-        return 1;
+        return EXIT_FAILURE;
     }
 
     SVC_LOG_INFO("Market service created successfully");
@@ -365,7 +366,7 @@ int main(int argc, char **argv)
         destroy_service();
         airy_mtx_destroy(&g_running_lock_market_d);
         airy_sock_cleanup();
-        return 1;
+        return EXIT_FAILURE;
     }
     SVC_LOG_INFO(use_tcp ? "Listening on TCP port %d" : "Listening on Unix socket",
                  DEFAULT_TCP_PORT);
@@ -395,7 +396,7 @@ int main(int argc, char **argv)
         destroy_service();
         airy_mtx_destroy(&g_running_lock_market_d);
         airy_sock_cleanup();
-        return 1;
+        return EXIT_FAILURE;
     }
 
     /* 主事件循环：接受连接并提交线程池并发处理 */

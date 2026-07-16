@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 #include "gateway_a2a_handler.h"
 
-#include "memory_compat.h"
+#include "airy_memory.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "error.h"
 
-#include "logging_compat.h"
+#include "logging.h"
 
 #define GW_A2A_MAX_TASK_TYPES 64
 
@@ -36,7 +36,7 @@ gw_a2a_handler_t *gw_a2a_handler_create(const gw_a2a_handler_config_t *config)
 {
     gw_a2a_handler_t *handler = (gw_a2a_handler_t *)AIRY_CALLOC(1, sizeof(gw_a2a_handler_t));
     if (!handler) {
-        AIRY_LOG_ERROR("handler allocation failed, size=%zu", sizeof(gw_a2a_handler_t));
+        LOG_ERROR("handler allocation failed, size=%zu", sizeof(gw_a2a_handler_t));
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     if (config) {
@@ -198,7 +198,7 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
         char *input_json = extract_a2a_field(body_json, "input");
 
         if (!task_type) {
-            AIRY_LOG_WARN("missing task type in A2A request, path=%s", path ? path : "(null)");
+            LOG_WARN("missing task type in A2A request, path=%s", path ? path : "(null)");
             AIRY_FREE(task_id);
             AIRY_FREE(input_json);
             handler->error_count++;
@@ -207,7 +207,7 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
 
         gw_a2a_task_type_entry_t *entry = find_task_type(handler, task_type);
         if (!entry) {
-            AIRY_LOG_WARN("unknown task type: task_type=%s, registered=%zu", task_type, handler->task_type_count);
+            LOG_WARN("unknown task type: task_type=%s, registered=%zu", task_type, handler->task_type_count);
             const char *err = "{\"error\":{\"code\":-32601,\"message\":\"Unknown task type: %s\"}}";
             size_t elen = snprintf(NULL, 0, err, task_type);
             char *ebuf = (char *)AIRY_MALLOC(elen + 1);
@@ -226,7 +226,7 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
                                 input_json ? input_json : "{}", &output, entry->user_data);
 
         if (rc != 0 || !output) {
-            AIRY_LOG_ERROR("task execution failed: task_type=%s, rc=%d", task_type, rc);
+            LOG_ERROR("task execution failed: task_type=%s, rc=%d", task_type, rc);
             AIRY_FREE(task_type);
             AIRY_FREE(task_id);
             AIRY_FREE(input_json);

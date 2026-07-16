@@ -17,7 +17,7 @@
 #include "llm_service.h"
 #include "providers/provider.h"
 #include "providers/registry.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 
 #include <assert.h>
 #include <stdio.h>
