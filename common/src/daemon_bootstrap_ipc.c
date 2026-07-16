@@ -10,7 +10,7 @@
 
 #include "daemon_bootstrap_ipc.h"
 
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "svc_logger.h"
 
 #include <stdio.h>

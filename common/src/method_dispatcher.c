@@ -3,7 +3,7 @@
 
 #include "daemon_errors.h"
 #include "jsonrpc_helpers.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "method_dispatcher.h"
 #include "svc_logger.h"
 

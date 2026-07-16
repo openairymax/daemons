@@ -14,7 +14,7 @@
 #include "safe_string_utils.h"
 
 #include "logger.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "string_compat.h"
 
 #include <stdio.h>

@@ -28,7 +28,7 @@
 #include "atomic_compat.h"
 #include "error.h"
 #include "ipc_client.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "memory_stats_reporter.h"
 #include "daemon_platform_ext.h"
 #include "safe_string_utils.h"

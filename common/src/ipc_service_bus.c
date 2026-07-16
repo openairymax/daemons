@@ -14,7 +14,7 @@
 
 #include "atomic_compat.h"
 #include "ipc_client.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "platform.h"
 #include "safe_string_utils.h"
 #include "svc_common.h"

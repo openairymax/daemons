@@ -7,11 +7,12 @@
  */
 
 #include "hook_service.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "error.h"
 #include "daemon_main.h"
 
 #include <errno.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #define HOOK_D_SOCKET_PATH AIRY_RUNTIME_DIR "/hook.sock"
@@ -70,7 +71,7 @@ int main(int argc, char *argv[])
     if (server_fd < 0) {
         SVC_LOG_ERROR("P2.1: HookD: failed to create socket at %s (errno=%d: %s)",
                       HOOK_D_SOCKET_PATH, errno, strerror(errno));
-        return 1;
+        return EXIT_FAILURE;
     }
     SVC_LOG_INFO("P2.1: HookD: listening on %s (fd=%d)", HOOK_D_SOCKET_PATH, (int)server_fd);
 

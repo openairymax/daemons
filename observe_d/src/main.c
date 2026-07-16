@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "error.h"
 /*
  * Copyright (c) 2026 SPHARX. All Rights Reserved.
@@ -246,7 +246,7 @@ static void *observe_d_http_loop(void *arg)
     observe_d_service_t *svc = (observe_d_service_t *)arg;
     if (!svc) {
 #ifdef _WIN32
-        return 1;
+        return EXIT_FAILURE;
 #else
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
 #endif
@@ -520,10 +520,10 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
 
     if (observe_d_init(&g_service, OBSERVE_D_DEFAULT_PORT, OBSERVE_D_DEFAULT_SOCKET) !=
         AIRY_SUCCESS)
-        return 1;
+        return EXIT_FAILURE;
     if (observe_d_start(&g_service) != AIRY_SUCCESS) {
         observe_d_destroy(&g_service);
-        return 1;
+        return EXIT_FAILURE;
     }
 
     g_bsd = daemon_bootstrap_sd_start("observe_d", "observe", g_service.socket_path,

@@ -14,7 +14,7 @@
 #include "daemon_defaults.h"
 #include "daemon_errors.h"
 #include "error.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "daemon_platform_ext.h"
 #include "safe_string_utils.h"
 #include "svc_logger.h"

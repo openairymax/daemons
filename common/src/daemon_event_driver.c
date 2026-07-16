@@ -3,7 +3,7 @@
 #include "daemon_event_driver.h"
 
 #include "jsonrpc_helpers.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "method_dispatcher.h"
 #include "svc_logger.h"
 /* P0.17 阶段 2: daemon_event_driver.c 使用 airy_sock_* daemons 特有函数，

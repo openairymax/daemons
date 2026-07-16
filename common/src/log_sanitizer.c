@@ -1,4 +1,4 @@
-#include "memory_compat.h"
+#include "airy_memory.h"
 /**
  * @file log_sanitizer.c
  * @brief 日志脱敏过滤器实现

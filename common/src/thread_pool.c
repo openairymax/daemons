@@ -3,7 +3,7 @@
 #include "thread_pool.h"
 
 #include "error.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "svc_logger.h"
 
 #include <platform.h>

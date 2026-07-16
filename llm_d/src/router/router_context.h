@@ -14,9 +14,10 @@
 #include "router/llm_router.h"
 #include "cost_tracker.h"
 #include "token_counter.h"
-#include "memory_compat.h"
-#include "sync_compat.h"
-#include "logging_compat.h"
+#include "airy_memory.h"
+/* d8 清理：移除 sync_compat.h（本文件仅用 airy_mtx_t 类型，通过
+ * airy_memory.h → error.h → types.h → platform.h 间接获得，无需 sync_compat.h） */
+#include "logging.h"
 
 #include <math.h>
 #include <stdbool.h>

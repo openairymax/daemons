@@ -9,7 +9,7 @@
 #include "executor.h"
 #include "tool_service.h"
 
-#include "memory_compat.h"
+#include "airy_memory.h"
 
 #include <assert.h>
 #include <stdio.h>

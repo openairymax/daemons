@@ -8,7 +8,7 @@
 
 #include "monitor_service.h"
 
-#include "memory_compat.h"
+#include "airy_memory.h"
 
 #include <assert.h>
 #include <stdint.h>

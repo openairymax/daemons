@@ -3,7 +3,7 @@
 /* _GNU_SOURCE: defined via CMakeLists.txt target_compile_definitions (BAN-182) */
 #include "atomic_compat.h"
 #include "daemon_platform_ext.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 
 #include <limits.h>
 #include <stdio.h>

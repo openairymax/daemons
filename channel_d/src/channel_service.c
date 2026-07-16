@@ -5,7 +5,7 @@
 #include "airy_mman.h"
 #include "atomic_compat.h"
 #include "daemon_errors.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "daemon_platform_ext.h"
 #include "string_compat.h"
 

@@ -22,8 +22,8 @@
 #include "daemon_platform_ext.h"
 #include "error.h"
 #include "svc_logger.h"
-#include "sync_compat.h"
-#include "memory_compat.h"
+#include "sync.h"  /* d8 清理：从 sync_compat.h 迁移到 sync.h 直接 API（消除兼容层） */
+#include "airy_memory.h"
 
 /* dlfcn.h 已由 daemon_platform_ext.h 的 airy_dl_* 跨平台抽象替代 */
 #include <stdio.h>
@@ -109,7 +109,7 @@ static int registry_init(void)
         return 0;
 
     AIRY_MEMSET(&g_plugin_registry, 0, sizeof(g_plugin_registry));
-    if (AIRY_RWLOCK_INIT(&g_plugin_registry.rwlock, NULL) != 0)
+    if (sync_rwlock_create(&g_plugin_registry.rwlock, NULL) != 0)
         return AIRY_ERR_SYS_MUTEX;
 
     g_plugin_registry.initialized = true;
@@ -150,14 +150,14 @@ int plugin_service_load(const char *library_path, const char *config_path,
     }
 
     /* 检查重名 */
-    AIRY_RWLOCK_WRLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_write_lock_ex(g_plugin_registry.rwlock, NULL);
     if (find_node(metadata->name)) {
-        AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+        sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
         SVC_LOG_WARN("P2.2: PluginD: Plugin already loaded: %s", metadata->name);
         airy_dl_close(handle);
         return AIRY_ERR_ALREADY_EXISTS;
     }
-    AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
 
     /* 加载入口点 */
     plugin_init_fn init_fn = NULL;
@@ -218,11 +218,11 @@ int plugin_service_load(const char *library_path, const char *config_path,
     node->stats.load_count++;
 
     /* 插入注册表 */
-    AIRY_RWLOCK_WRLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_write_lock_ex(g_plugin_registry.rwlock, NULL);
     node->next = g_plugin_registry.head;
     g_plugin_registry.head = node;
     g_plugin_registry.count++;
-    AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
 
     if (out_name) {
         *out_name = metadata->name;
@@ -238,7 +238,7 @@ int plugin_service_unload(const char *name)
 {
     if (!name) return AIRY_ERR_INVALID_PARAM;
 
-    AIRY_RWLOCK_WRLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_write_lock_ex(g_plugin_registry.rwlock, NULL);
 
     plugin_node_t **prev = &g_plugin_registry.head;
     while (*prev) {
@@ -263,14 +263,14 @@ int plugin_service_unload(const char *name)
             AIRY_FREE(node);
             g_plugin_registry.count--;
 
-            AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+            sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
             SVC_LOG_INFO("P2.2: PluginD: Plugin unloaded: %s", name);
             return 0;
         }
         prev = &(*prev)->next;
     }
 
-    AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
     return AIRY_ERR_NOT_FOUND;
 }
 
@@ -278,20 +278,20 @@ int plugin_service_start(const char *name)
 {
     if (!name) return AIRY_ERR_INVALID_PARAM;
 
-    AIRY_RWLOCK_WRLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_write_lock_ex(g_plugin_registry.rwlock, NULL);
     plugin_node_t *node = find_node(name);
     if (!node) {
-        AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+        sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
         return AIRY_ERR_NOT_FOUND;
     }
 
     if (node->desc.state == PLUGIN_STATE_RUNNING) {
-        AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+        sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
         return 0;  /* 已在运行 */
     }
 
     if (node->desc.state == PLUGIN_STATE_ERROR) {
-        AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+        sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
         return AIRY_ERR_STATE_ERROR;
     }
 
@@ -300,14 +300,14 @@ int plugin_service_start(const char *name)
         if (ret != 0) {
             node->desc.state = PLUGIN_STATE_ERROR;
             node->stats.error_count++;
-            AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+            sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
             SVC_LOG_ERROR("P2.2: PluginD: Plugin start failed: %s (err=%d)", name, ret);
             return AIRY_ERR_EXEC_FAIL;
         }
     }
 
     node->desc.state = PLUGIN_STATE_RUNNING;
-    AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
 
     SVC_LOG_INFO("P2.2: PluginD: Plugin started: %s", name);
     return 0;
@@ -317,15 +317,15 @@ int plugin_service_stop(const char *name)
 {
     if (!name) return AIRY_ERR_INVALID_PARAM;
 
-    AIRY_RWLOCK_WRLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_write_lock_ex(g_plugin_registry.rwlock, NULL);
     plugin_node_t *node = find_node(name);
     if (!node) {
-        AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+        sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
         return AIRY_ERR_NOT_FOUND;
     }
 
     if (node->desc.state != PLUGIN_STATE_RUNNING) {
-        AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+        sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
         return 0;
     }
 
@@ -342,7 +342,7 @@ int plugin_service_stop(const char *name)
         (uint64_t)(now.tv_sec - node->load_time.tv_sec) * 1000000000ULL
         + (uint64_t)(now.tv_nsec - node->load_time.tv_nsec);
 
-    AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
 
     SVC_LOG_INFO("P2.2: PluginD: Plugin stopped: %s", name);
     return 0;
@@ -352,15 +352,15 @@ int plugin_service_get_metadata(const char *name, plugin_metadata_t *metadata)
 {
     if (!name || !metadata) return AIRY_ERR_INVALID_PARAM;
 
-    AIRY_RWLOCK_RDLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_read_lock_ex(g_plugin_registry.rwlock, NULL);
     plugin_node_t *node = find_node(name);
     if (!node) {
-        AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+        sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
         return AIRY_ERR_NOT_FOUND;
     }
 
     AIRY_MEMCPY(metadata, &node->desc.metadata, sizeof(plugin_metadata_t));
-    AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
     return 0;
 }
 
@@ -368,10 +368,10 @@ plugin_state_t plugin_service_get_state(const char *name)
 {
     if (!name) return PLUGIN_STATE_UNLOADED;
 
-    AIRY_RWLOCK_RDLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_read_lock_ex(g_plugin_registry.rwlock, NULL);
     plugin_node_t *node = find_node(name);
     plugin_state_t state = node ? node->desc.state : PLUGIN_STATE_UNLOADED;
-    AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
     return state;
 }
 
@@ -379,10 +379,10 @@ int plugin_service_get_stats(const char *name, plugin_stats_t *stats)
 {
     if (!name || !stats) return AIRY_ERR_INVALID_PARAM;
 
-    AIRY_RWLOCK_RDLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_read_lock_ex(g_plugin_registry.rwlock, NULL);
     plugin_node_t *node = find_node(name);
     if (!node) {
-        AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+        sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
         return AIRY_ERR_NOT_FOUND;
     }
 
@@ -397,7 +397,7 @@ int plugin_service_get_stats(const char *name, plugin_stats_t *stats)
             + (uint64_t)(now.tv_nsec - node->load_time.tv_nsec);
     }
 
-    AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
     return 0;
 }
 
@@ -405,7 +405,7 @@ int plugin_service_list(char ***names, size_t *count, int type_filter)
 {
     if (!names || !count) return AIRY_ERR_INVALID_PARAM;
 
-    AIRY_RWLOCK_RDLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_read_lock_ex(g_plugin_registry.rwlock, NULL);
 
     /* 先计数 */
     size_t total = 0;
@@ -420,7 +420,7 @@ int plugin_service_list(char ***names, size_t *count, int type_filter)
     /* 分配名称数组 */
     char **name_array = (char **)AIRY_CALLOC(total, sizeof(char *));
     if (!name_array && total > 0) {
-        AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+        sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
@@ -435,7 +435,7 @@ int plugin_service_list(char ***names, size_t *count, int type_filter)
         node = node->next;
     }
 
-    AIRY_RWLOCK_UNLOCK(&g_plugin_registry.rwlock);
+    sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
 
     *names = name_array;
     *count = total;

@@ -27,7 +27,7 @@
 
 #include "airy_sandbox.h"
 #include "executor.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "syscalls.h"
 
 #include <stdio.h>
