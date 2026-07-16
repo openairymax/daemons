@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
-#include "memory_compat.h"
+#include "airy_memory.h"
 /**
  * @file service.c
  * @brief 网关服务核心实现
@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "logging_compat.h"
+#include "logging.h"
 
 typedef enum {
     GW_STATE_CREATED = 0,
@@ -131,7 +131,7 @@ airy_err_t gateway_service_create(gateway_service_t *service,
         return AIRY_EINVAL;
     gateway_service_t svc = (gateway_service_t)AIRY_CALLOC(1, sizeof(struct gateway_service_s));
     if (!svc) {
-        AIRY_LOG_ERROR("service allocation failed, size=%zu", sizeof(struct gateway_service_s));
+        LOG_ERROR("service allocation failed, size=%zu", sizeof(struct gateway_service_s));
         return AIRY_ENOMEM;
     }
     if (config) {
@@ -176,7 +176,7 @@ airy_err_t gateway_service_start(gateway_service_t service)
     if (service->state == GW_STATE_RUNNING)
         return AIRY_SUCCESS;
     if (service->state != GW_STATE_INITIALIZED && service->state != GW_STATE_STOPPED) {
-        AIRY_LOG_ERROR("service start rejected: invalid state=%d", service->state);
+        LOG_ERROR("service start rejected: invalid state=%d", service->state);
         return AIRY_EPERM;
     }
     service->state = GW_STATE_RUNNING;
@@ -186,7 +186,7 @@ airy_err_t gateway_service_start(gateway_service_t service)
         service->http_gateway =
             http_gateway_create(service->config.http.host, service->config.http.port);
         if (!service->http_gateway) {
-            AIRY_LOG_ERROR("http_gateway_create failed: host=%s, port=%d",
+            LOG_ERROR("http_gateway_create failed: host=%s, port=%d",
                               service->config.http.host, service->config.http.port);
             service->state = GW_STATE_STOPPED;
             return AIRY_ENOMEM;

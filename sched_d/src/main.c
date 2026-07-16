@@ -1,4 +1,4 @@
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "error.h"
 /*
  * Copyright (C) 2026 SPHARX. All Rights Reserved.
@@ -23,6 +23,7 @@
 #include "svc_logger.h"
 #include "thread_pool.h"
 
+#include <stdlib.h>
 #include <time.h>
 
 /* ==================== 配置常量 ==================== */
@@ -324,5 +325,5 @@ out_service:
 out_mtx_sock:
     airy_mtx_destroy(&g_running_lock_sched_d);
     airy_sock_cleanup();
-    return 1;
+    return EXIT_FAILURE;
 }

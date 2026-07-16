@@ -13,7 +13,7 @@
 
 #include "service_discovery_helper.h"
 
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "daemon_platform_ext.h"
 #include "error.h"
 #include "safe_string_utils.h"

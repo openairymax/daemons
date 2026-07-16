@@ -60,7 +60,7 @@ airy_svc_interface_t iface = {
 
 ```
 examples
-├── common/include (svc_common.h, memory_compat.h)
+├── common/include (svc_common.h, airy_memory.h)
 ├── airy_common (libairy_common)
 └── svc_common (libsvc_common)
 ```

@@ -3,7 +3,7 @@
 #include "airy_event_loop.h"
 
 #include "daemon_errors.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 
 #include <errno.h>
 #include <stdlib.h>

@@ -5,7 +5,7 @@
 #include "gateway_a2a_handler.h"
 #include "gateway_mcp_server.h"
 #include "gateway_openai_compat.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,7 +13,7 @@
 #include <time.h>
 #include "error.h"
 
-#include "logging_compat.h"
+#include "logging.h"
 
 /**
  * @brief 将协议类型枚举转换为可读字符串
@@ -262,32 +262,32 @@ find_handler(gw_proto_router_t *router, gw_proto_detect_result_t proto_type, voi
 static void record_proto_stats(gw_proto_router_stats_t *stats, gw_proto_detect_result_t proto_type)
 {
     const char *name = proto_type_name(proto_type);
-    (void)name; /* Release 模式下 AIRY_LOG_DEBUG 为空操作，标记避免未使用警告 */
+    (void)name; /* Release 模式下 LOG_DEBUG 为空操作，标记避免未使用警告 */
 
     switch (proto_type) {
     case GW_PROTO_DETECT_MCP:
         stats->mcp_requests++;
-        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (mcp_requests)", name,
+        LOG_DEBUG("protocol=%-8s count=%llu (mcp_requests)", name,
                           (unsigned long long)stats->mcp_requests);
         break;
     case GW_PROTO_DETECT_A2A:
         stats->a2a_requests++;
-        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (a2a_requests)", name,
+        LOG_DEBUG("protocol=%-8s count=%llu (a2a_requests)", name,
                           (unsigned long long)stats->a2a_requests);
         break;
     case GW_PROTO_DETECT_OPENAI:
         stats->openai_requests++;
-        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (openai_requests)", name,
+        LOG_DEBUG("protocol=%-8s count=%llu (openai_requests)", name,
                           (unsigned long long)stats->openai_requests);
         break;
     case GW_PROTO_DETECT_JSONRPC:
         stats->jsonrpc_requests++;
-        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (jsonrpc_requests)", name,
+        LOG_DEBUG("protocol=%-8s count=%llu (jsonrpc_requests)", name,
                           (unsigned long long)stats->jsonrpc_requests);
         break;
     default:
         stats->unknown_requests++;
-        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (unknown_requests)", name,
+        LOG_DEBUG("protocol=%-8s count=%llu (unknown_requests)", name,
                           (unsigned long long)stats->unknown_requests);
         break;
     }
@@ -306,7 +306,7 @@ int gw_proto_router_route(gw_proto_router_t *router, gw_proto_detect_result_t pr
     gw_proto_request_handler_t handler = find_handler(router, proto_type, &user_data);
 
     if (!handler) {
-        AIRY_LOG_WARN("no handler found for protocol type=%d, route_errors=%llu",
+        LOG_WARN("no handler found for protocol type=%d, route_errors=%llu",
                          proto_type, (unsigned long long)router->stats.route_errors);
         router->stats.route_errors++;
         record_proto_stats(&router->stats, proto_type);
@@ -317,7 +317,7 @@ int gw_proto_router_route(gw_proto_router_t *router, gw_proto_detect_result_t pr
 
     int result = handler(method, path, body_json, response_json, user_data);
     if (result != 0) {
-        AIRY_LOG_WARN("handler returned error: proto_type=%d, result=%d, path=%s",
+        LOG_WARN("handler returned error: proto_type=%d, result=%d, path=%s",
                          proto_type, result, path ? path : "(null)");
         router->stats.route_errors++;
     }

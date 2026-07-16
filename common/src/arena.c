@@ -17,7 +17,7 @@
 
 #include "arena.h"
 #include "logger.h"
-#include "memory_compat.h"
+#include "airy_memory.h"
 
 #include <stdint.h>
 #include <stdio.h>

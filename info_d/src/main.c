@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "error.h"
 /*
  * Copyright (c) 2026 SPHARX. All Rights Reserved.
@@ -179,7 +179,7 @@ static void *info_d_collect_loop(void *arg)
     info_d_service_t *svc = (info_d_service_t *)arg;
     if (!svc) {
 #ifdef _WIN32
-        return 1;
+        return EXIT_FAILURE;
 #else
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
 #endif
@@ -428,10 +428,10 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     daemon_cupolas_init("info_d");
 
     if (info_d_init(&g_service, INFO_D_DEFAULT_PORT, INFO_D_DEFAULT_SOCKET) != AIRY_SUCCESS)
-        return 1;
+        return EXIT_FAILURE;
     if (info_d_start(&g_service) != AIRY_SUCCESS) {
         info_d_destroy(&g_service);
-        return 1;
+        return EXIT_FAILURE;
     }
 
     g_bsd = daemon_bootstrap_sd_start("info_d", "info", g_service.socket_path,
@@ -444,7 +444,7 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
         LOG_ERROR("Failed to create event loop");
         info_d_stop(&g_service, 1);
         info_d_destroy(&g_service);
-        return 1;
+        return EXIT_FAILURE;
     }
 
     airy_event_loop_add_fd(g_event_loop, (int)g_service.server_fd, AIRY_EVENT_TYPE_READ,

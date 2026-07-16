@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include "error.h"
 /*
  * Copyright (c) 2026 SPHARX. All Rights Reserved.
@@ -349,7 +349,7 @@ static DWORD WINAPI notify_d_event_loop(LPVOID arg)
 #ifndef _WIN32
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
 #else
-        return 1;
+        return EXIT_FAILURE;
 #endif
     }
 
@@ -713,10 +713,10 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
 
     if (notify_d_init(&g_service, NOTIFY_D_DEFAULT_PORT, NOTIFY_D_DEFAULT_SOCKET) !=
         AIRY_SUCCESS)
-        return 1;
+        return EXIT_FAILURE;
     if (notify_d_start(&g_service) != AIRY_SUCCESS) {
         notify_d_destroy(&g_service);
-        return 1;
+        return EXIT_FAILURE;
     }
 
     g_bsd = daemon_bootstrap_sd_start("notify_d", "notify", g_service.socket_path,

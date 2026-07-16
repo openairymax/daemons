@@ -19,7 +19,7 @@
 #include <unistd.h>
 #include <errno.h>
 
-#include "memory_compat.h"
+#include "airy_memory.h"
 #include <time.h>
 #ifdef USE_CMOCKA_STUB
 #include "cmocka_stub.h"
