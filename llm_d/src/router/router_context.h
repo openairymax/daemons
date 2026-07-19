@@ -17,6 +17,10 @@
 #include "airy_memory.h"
 /* d8 清理：移除 sync_compat.h（本文件仅用 airy_mtx_t 类型，通过
  * airy_memory.h → error.h → types.h → platform.h 间接获得，无需 sync_compat.h） */
+/* AIRY_MUTEX_* 兼容宏定义在 platform.h 末尾 */
+#include "platform.h"
+/* AIRY_LOG_* 宏定义在 logging_compat.h（转发至 logging.h 的 LOG_* 宏） */
+#include "logging_compat.h"
 #include "logging.h"
 
 #include <math.h>
