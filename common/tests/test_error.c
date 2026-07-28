@@ -47,19 +47,20 @@ static void test_error_new_codes(void)
     printf("  test_error_new_codes...\n");
 
     /* v3.0 SSoT 统一收敛：与 POSIX errno 负值冲突的 AIRY_ERR_* 扩展码
-     * 已迁移至 -40~-50 区间。详见 error.h 注释。 */
-    assert(AIRY_ERR_INVALID_PARAM == -40);
+     * 已迁移至 -36~-60 区间（第三轮迁移，避免与 IPC 码空间冲突）。
+     * 详见 error.h 注释（原 -2→-40→-36 等迁移轨迹）。 */
+    assert(AIRY_ERR_INVALID_PARAM == -36);
     assert(AIRY_ERR_NULL_POINTER == -3);
-    assert(AIRY_ERR_OUT_OF_MEMORY == -49);
+    assert(AIRY_ERR_OUT_OF_MEMORY == -59);
     assert(AIRY_ERR_NOT_FOUND == -6);
-    assert(AIRY_ERR_ALREADY_EXISTS == -42);
+    assert(AIRY_ERR_ALREADY_EXISTS == -38);
     assert(AIRY_ERR_TIMEOUT == -8);
     assert(AIRY_ERR_NOT_SUPPORTED == -9);
-    assert(AIRY_ERR_PERMISSION_DENIED == -43);
-    assert(AIRY_ERR_IO == -44);
-    assert(AIRY_ERR_OVERFLOW == -50);
-    assert(AIRY_ERR_CANCELED == -47);
-    assert(AIRY_ERR_BUSY == -48);
+    assert(AIRY_ERR_PERMISSION_DENIED == -39);
+    assert(AIRY_ERR_IO == -40);
+    assert(AIRY_ERR_OVERFLOW == -60);
+    assert(AIRY_ERR_CANCELED == -57);
+    assert(AIRY_ERR_BUSY == -58);
     assert(AIRY_ERR_INTERRUPTED == -19);
 
     assert(AIRY_ERR_SYS_NOT_INIT == -101);

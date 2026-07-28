@@ -17,7 +17,7 @@
 #include <time.h>
 
 struct agent_registry {
-    agent_entry_t entries[MAC_MAX_AGENTS];
+    agent_entry_t entries[AIRY_CAP_MAX_AGENTS];
     size_t entry_count;
     airy_mtx_t lock;
     char *db_path;
@@ -78,7 +78,7 @@ int agent_registry_core_add(agent_registry_t *registry, const agent_entry_t *reg
         return AIRY_ERR_INVALID_PARAM;
     if (!reg->id[0] || !reg->name[0])
         return AIRY_ERR_INVALID_PARAM;
-    if (registry->entry_count >= MAC_MAX_AGENTS)
+    if (registry->entry_count >= AIRY_CAP_MAX_AGENTS)
         return AIRY_ERR_OVERFLOW;
 
     airy_mtx_lock(&registry->lock);
