@@ -35,7 +35,7 @@ typedef struct {
 } agent_weight_t;
 
 typedef struct {
-    agent_weight_t agents[MAC_MAX_AGENTS];
+    agent_weight_t agents[AIRY_CAP_MAX_AGENTS];
     size_t agent_count;
     airy_mtx_t lock;
     double total_weight;
@@ -112,7 +112,7 @@ static int weighted_register_agent(void *raw_data, const agent_info_t *agent)
         airy_mtx_unlock(&data->lock);
         return AIRY_ERR_ALREADY_EXISTS;
     }
-    if (data->agent_count >= MAC_MAX_AGENTS) {
+    if (data->agent_count >= AIRY_CAP_MAX_AGENTS) {
         airy_mtx_unlock(&data->lock);
         return AIRY_ERR_OVERFLOW;
     }

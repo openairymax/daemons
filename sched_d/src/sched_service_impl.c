@@ -20,7 +20,7 @@
 
 struct sched_service {
     sched_config_t config;
-    agent_info_t *agents[MAC_MAX_AGENTS];
+    agent_info_t *agents[AIRY_CAP_MAX_AGENTS];
     size_t agent_count;
     uint64_t total_tasks_scheduled;
     uint64_t total_success;
@@ -75,8 +75,8 @@ int sched_service_register_agent(sched_service_t *service, const agent_info_t *a
         SVC_LOG_ERROR("sched_service_register_agent: NULL parameter or not initialized (service=%p, agent_info=%p, initialized=%d)", (const void *)service, (const void *)agent_info, service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
-    if (service->agent_count >= MAC_MAX_AGENTS) {
-        SVC_LOG_ERROR("sched_service_register_agent: max agents exceeded (count=%zu, max=%d)", service->agent_count, MAC_MAX_AGENTS);
+    if (service->agent_count >= AIRY_CAP_MAX_AGENTS) {
+        SVC_LOG_ERROR("sched_service_register_agent: max agents exceeded (count=%zu, max=%d)", service->agent_count, AIRY_CAP_MAX_AGENTS);
         return AIRY_ERR_OVERFLOW;
     }
 

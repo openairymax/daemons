@@ -25,7 +25,7 @@ typedef struct {
 } agent_entry_t;
 
 typedef struct {
-    agent_entry_t entries[MAC_MAX_AGENTS];
+    agent_entry_t entries[AIRY_CAP_MAX_AGENTS];
     size_t entry_count;
     airy_mtx_t lock;
     int initialized;
@@ -111,7 +111,7 @@ int agent_registry_register(const agent_info_t *reg)
         airy_mtx_unlock(&g_registry.lock);
         return AIRY_ERR_ALREADY_EXISTS;
     }
-    if (g_registry.entry_count >= MAC_MAX_AGENTS) {
+    if (g_registry.entry_count >= AIRY_CAP_MAX_AGENTS) {
         airy_mtx_unlock(&g_registry.lock);
         return AIRY_ERR_OVERFLOW;
     }
