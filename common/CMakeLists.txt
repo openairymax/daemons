@@ -54,6 +54,7 @@ set(SVC_COMMON_SOURCES
     src/daemon_bootstrap_sd.c    # P1.7 C-L08: daemon ServiceDiscovery 一键引导
     src/daemon_bootstrap_ipc.c   # P1.7 C-L09: daemon IPC Bus 一键引导
     src/daemon_cupolas_bootstrap.c # P3.14 ACC-DT15: daemon 统一 cupolas 安全穹顶引导
+    src/daemon_rpc_client.c       # Phase 3: gateway→daemon thin IPC client (Unix socket JSON-RPC)
 )
 
 # 创建静态库
@@ -272,5 +273,6 @@ install(FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_cupolas_bootstrap.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_errors.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_platform_ext.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_rpc_client.h
     DESTINATION include/agentrt
 )
