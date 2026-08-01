@@ -38,7 +38,8 @@ typedef struct {
     int status;            /* 1=running, 3=terminated */
     uint64_t spawned_at;   /* 派生时间戳（秒） */
 #if AIRY_PLATFORM_POSIX
-    /* Stage5+ 待办4：真实 spawn — fork Python runner 子进程后的句柄。
+    /* Stage5+ 待办4：真实 spawn — fork Agent runner 子进程后的句柄
+     * （Python/Rust 双语言支持）。
      * child_pid>0 表示有活跃子进程；-1 表示无子进程（回退旧逻辑）。
      * stdin_fd 用于向子进程写请求，stdout_fd 用于读响应。 */
     pid_t child_pid;

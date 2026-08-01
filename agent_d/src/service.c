@@ -108,14 +108,77 @@ static int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeo
     return 0;
 }
 
-/* fork Python runner 子进程，建立双向 stdin/stdout 管道。
- * 命令：python3 -m airymax_agents.runner --spec <spec>
+/* 从 spec JSON 中提取 language 字段，默认 "python"。
+ * 写入 buf（size 字节），始终以 null 结尾。 */
+static void spec_get_language(const char *spec, char *buf, size_t size)
+{
+    if (!spec || size == 0) {
+        if (size > 0) buf[0] = '\0';
+        return;
+    }
+    cJSON *root = cJSON_Parse(spec);
+    if (!root) {
+        snprintf(buf, size, "python");
+        return;
+    }
+    cJSON *lang = cJSON_GetObjectItem(root, "language");
+    if (lang && cJSON_IsString(lang) && lang->valuestring[0] != '\0') {
+        snprintf(buf, size, "%s", lang->valuestring);
+    } else {
+        snprintf(buf, size, "python");
+    }
+    cJSON_Delete(root);
+}
+
+/* 解析 Rust agent binary 路径。
+ * 优先级：spec.binary_path > ${AIRY_RUST_AGENT_DIR}/<role>_agent。
+ * 结果写入 out_path（AIRY_PATH_MAX 字节），始终以 null 结尾。 */
+static void spec_resolve_rust_binary(const char *spec, const char *agent_id,
+                                      char *out_path)
+{
+    if (!spec || !out_path) {
+        if (out_path) out_path[0] = '\0';
+        return;
+    }
+    cJSON *root = cJSON_Parse(spec);
+    if (!root) {
+        out_path[0] = '\0';
+        return;
+    }
+    /* 1. spec.binary_path 优先 */
+    cJSON *bin = cJSON_GetObjectItem(root, "binary_path");
+    if (bin && cJSON_IsString(bin) && bin->valuestring[0] != '\0') {
+        snprintf(out_path, AIRY_PATH_MAX, "%s", bin->valuestring);
+        cJSON_Delete(root);
+        return;
+    }
+    /* 2. ${AIRY_RUST_AGENT_DIR}/<role>_agent */
+    cJSON *role = cJSON_GetObjectItem(root, "role");
+    const char *role_str = (role && cJSON_IsString(role)) ? role->valuestring : "unknown";
+    const char *agent_dir = getenv("AIRY_RUST_AGENT_DIR");
+    if (agent_dir && agent_dir[0] != '\0') {
+        snprintf(out_path, AIRY_PATH_MAX, "%s/%s_agent", agent_dir, role_str);
+    } else {
+        out_path[0] = '\0';
+    }
+    cJSON_Delete(root);
+    /* 仅警告：不影响 agent 生命周期，下次 invoke 会检测到子进程未启动而回退 */
+    (void)agent_id;
+}
+
+/* fork Agent runner 子进程，建立双向 stdin/stdout 管道。
+ * 根据 spec.language 选择启动方式：
+ *   - "python"（默认）：python3 -m airymax_agents.runner --spec <spec>
+ *   - "rust"：<binary_path> --spec <spec>
  * 使用 execvp（不经过 shell，无注入风险）。
  * 成功返回 0，out_pid/out_stdin/out_stdout 写入句柄；失败返回 -1。
  * stderr 重定向到 ${AIRY_RUNTIME_DIR}/agent_<agent_id>.log 便于调试。 */
 static int agent_spawn_child(const char *spec, const char *agent_id,
                               pid_t *out_pid, int *out_stdin, int *out_stdout)
 {
+    char lang[16] = {0};
+    spec_get_language(spec, lang, sizeof(lang));
+
     int stdin_pipe[2], stdout_pipe[2];
     if (pipe(stdin_pipe) < 0)
         return -1;
@@ -155,16 +218,41 @@ static int agent_spawn_child(const char *spec, const char *agent_id,
             close(log_fd);
         }
 
-        /* execvp：argv 以 NULL 结尾，spec 作为单个参数（无需 shell 转义） */
-        char *argv[] = {
-            (char *)"python3",
-            (char *)"-m",
-            (char *)"airymax_agents.runner",
-            (char *)"--spec",
-            (char *)spec,
-            NULL,
-        };
-        execvp("python3", argv);
+        if (strcmp(lang, "rust") == 0) {
+            /* Rust agent：binary_path 或 ${AIRY_RUST_AGENT_DIR}/<role>_agent */
+            char bin_path[AIRY_PATH_MAX] = {0};
+            spec_resolve_rust_binary(spec, agent_id, bin_path);
+            if (bin_path[0] == '\0') {
+                /* 无有效 binary 路径 → 回退到 Python */
+                SVC_LOG_WARN("Rust agent binary path empty, fallback to python3: agent_id=%s",
+                             agent_id);
+                goto fallback_python;
+            }
+            char *argv[] = {
+                bin_path,
+                (char *)"--spec",
+                (char *)spec,
+                NULL,
+            };
+            execvp(bin_path, argv);
+            /* Rust binary 可能不存在或无执行权限，回退到 Python */
+            SVC_LOG_WARN("execvp Rust agent failed, fallback to python3: binary=%s, agent_id=%s",
+                         bin_path, agent_id);
+        }
+
+fallback_python:
+        /* Python runner（默认 & 回退路径） */
+        {
+            char *argv[] = {
+                (char *)"python3",
+                (char *)"-m",
+                (char *)"airymax_agents.runner",
+                (char *)"--spec",
+                (char *)spec,
+                NULL,
+            };
+            execvp("python3", argv);
+        }
         /* 仅 execvp 失败才到达此处 */
         _exit(127);
     }
