@@ -42,6 +42,10 @@
 #include <string.h>
 #include <time.h>
 
+#if AIRY_PLATFORM_POSIX
+#include <poll.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -123,6 +127,22 @@ extern "C" {
         airy_sock_t client_fd, method_dispatcher_t *dispatcher)                  \
     {                                                                                \
         char buffer[MAX_BUFFER];                                                     \
+        /* 等待请求数据就绪后再 recv。accept 返回的 fd 由事件驱动在 epoll 可读      \
+         * 事件中 accept，但数据可能尚未到达；airy_sock_recv 为 MSG_DONTWAIT 非阻塞  \
+         * 读取，立即 recv 会因 EAGAIN 返回 0 而误判连接失败并关闭，导致客户端       \
+         * send 时 SIGPIPE/请求丢失（RPC 时序竞态）。此处先 poll 等待 POLLIN。       \
+         * 5s 超时与客户端 daemon_rpc_call 默认 30s 相比足够，超时视为请求丢失。   */ \
+        if (AIRY_PLATFORM_POSIX) {                                                  \
+            struct pollfd pfd;                                                       \
+            pfd.fd = (int)client_fd;                                                 \
+            pfd.events = POLLIN;                                                     \
+            pfd.revents = 0;                                                         \
+            int pr = poll(&pfd, 1, 5000);                                            \
+            if (pr <= 0 || !(pfd.revents & POLLIN)) {                                \
+                airy_sock_close(client_fd);                                          \
+                return AIRY_ERR_FAIL;                                                \
+            }                                                                        \
+        }                                                                            \
         ssize_t n = airy_sock_recv(client_fd, buffer, sizeof(buffer) - 1);      \
         if (n <= 0) {                                                                \
             airy_sock_close(client_fd);                                         \
@@ -142,6 +162,10 @@ extern "C" {
             airy_sock_close(client_fd);                                         \
             return AIRY_ERR_FAIL;                                                 \
         });                                                                          \
+        if (getenv("AIRY_DAEMON_DUMP_REQ")) {                                        \
+            __builtin_fprintf(stderr, "[AIRY-DUMP] %s req[%zd]=\"%.400s\"\n",        \
+                              #daemon_name, n, buffer);                              \
+        }                                                                            \
         cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");                        \
         cJSON *method = cJSON_GetObjectItem(req, "method");                          \
         cJSON *id = cJSON_GetObjectItem(req, "id");                                  \
