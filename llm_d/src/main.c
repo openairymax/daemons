@@ -224,7 +224,12 @@ static void on_complete_method(cJSON *params, int id, void *user_data __attribut
     char *response = handle_complete(params, id);
     if (response) {
         airy_sock_t client_fd = *(airy_sock_t *)user_data;
-        airy_sock_send(client_fd, response, strlen(response));
+        size_t resp_len = strlen(response);
+        if (getenv("AIRY_LLM_D_DIAG"))
+            SVC_LOG_ERROR("llm_d diag: complete send start fd=%d resp_len=%zu", (int)client_fd, resp_len);
+        ssize_t sent = airy_sock_send(client_fd, response, resp_len);
+        if (getenv("AIRY_LLM_D_DIAG"))
+            SVC_LOG_ERROR("llm_d diag: complete send done fd=%d sent=%zd errno=%d", (int)client_fd, sent, errno);
         AIRY_FREE(response);
     }
 }
@@ -483,9 +488,13 @@ int main(int argc, char **argv)
     DAEMON_SETUP_SIGNALS(llm_d);
 #endif
 
-    /* 保留初始日志级别 WARN（SIGUSR1 切换在 DEBUG/INFO 间切换，详见生成的 svc_log_toggle_handler_llm_d） */
+    /* 保留初始日志级别 WARN（SIGUSR1 切换在 DEBUG/INFO 间切换，详见生成的 svc_log_toggle_handler_llm_d）
+     * 调试：AIRY_LLM_D_DEBUG=1 时输出 DEBUG 级日志 */
     airy_logger_config_t log_cfg = {0};
-    log_cfg.level = (airy_log_level_t)LOG_LEVEL_WARN;
+    const char *dbg = getenv("AIRY_LLM_D_DEBUG");
+    log_cfg.level = (dbg && dbg[0] == '1')
+                        ? (airy_log_level_t)LOG_LEVEL_DEBUG
+                        : (airy_log_level_t)LOG_LEVEL_WARN;
     airy_log_init(&log_cfg);
     atexit(log_cleanup);
 
