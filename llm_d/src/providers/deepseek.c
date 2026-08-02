@@ -135,23 +135,33 @@ static int deepseek_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t
     }
 
     if (http_code != 200) {
-        size_t resp_body_len = http_resp ? strlen(http_resp->data) : 0;
+        size_t resp_body_len = (http_resp && http_resp->data) ? strlen(http_resp->data) : 0;
         SVC_LOG_ERROR("C-L02: DEEPSEEK: COMPLETE-FAIL — HTTP error "
                       "url=%s http_code=%ld resp_body_len=%zu "
-                      "DIAGNOSIS: %s",
+                      "DIAGNOSIS: %s"
+                      " BODY: %.300s",
                       url, http_code, resp_body_len,
                       (http_code == 401) ? "invalid API key" :
                       (http_code == 429) ? "rate limited" :
                       (http_code == 500) ? "server error" :
                       (http_code == 503) ? "service unavailable" :
-                      "check API key and endpoint");
+                      "check API key and endpoint",
+                      (http_resp && http_resp->data) ? http_resp->data : "");
         provider_http_resp_free(http_resp);
         return AIRY_ERR_IO;
     }
 
-    size_t resp_body_len = http_resp ? strlen(http_resp->data) : 0;
+    size_t resp_body_len = (http_resp && http_resp->data) ? strlen(http_resp->data) : 0;
     SVC_LOG_DEBUG("C-L02: DEEPSEEK: HTTP-RESPONSE http_code=%ld resp_body_len=%zu",
                   http_code, resp_body_len);
+
+    if (!http_resp || !http_resp->data || http_resp->data[0] == '\0') {
+        SVC_LOG_ERROR("C-L02: DEEPSEEK: COMPLETE-FAIL — empty response body "
+                      "http_code=%ld STACK: deepseek_complete()",
+                      http_code);
+        provider_http_resp_free(http_resp);
+        return AIRY_ERR_IO;
+    }
 
     ret = provider_parse_openai_response(http_resp->data, out_response);
     if (ret != AIRY_OK) {
