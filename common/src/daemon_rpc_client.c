@@ -143,6 +143,8 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms)
                             ? (timeout_ms - elapsed_ms)
                             : step_ms);
         int pr = poll(&pfd, 1, remain);
+        if (getenv("AIRY_RPC_DIAG") && pr > 0)
+            SVC_LOG_ERROR("rpc diag: poll hit fd=%d pr=%d revents=0x%x buf_size=%zu", fd, pr, pfd.revents, buf->size);
         if (pr < 0) {
             if (errno == EINTR)
                 continue;
@@ -160,15 +162,23 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms)
             }
             continue;
         }
-        if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
-            return AIRY_ERR_FAIL;
-
+        /* 对端在 send 响应后立即 close（daemon 为"单请求-单响应-即关闭"模型），
+         * poll 可能同时返回 POLLIN 与 POLLHUP。必须先处理 POLLIN 中的数据，
+         * 否则会因先判断 POLLHUP 而丢弃已到达的完整响应（RPC 时序竞态）。
+         * 大响应（>4096 字节）一次 recv 读不完：即使 hangup 置位也必须继续
+         * recv 读尽剩余数据（对端 close 后已发送数据仍可从 socket buffer 读出），
+         * 最后以 recv()==0（EOF）收尾，再判断 JSON 完整性。 */
+        int hangup = (pfd.revents & (POLLHUP | POLLNVAL));
         if (pfd.revents & POLLIN) {
             char chunk[4096];
             ssize_t n = recv(fd, chunk, sizeof(chunk), 0);
+            if (getenv("AIRY_RPC_DIAG"))
+                SVC_LOG_ERROR("rpc diag: recv n=%zd errno=%d buf_size=%zu revents=0x%x", n, errno, buf->size, pfd.revents);
             if (n < 0) {
                 if (errno == EINTR || errno == EAGAIN)
                     continue;
+                if (getenv("AIRY_RPC_DIAG"))
+                    SVC_LOG_ERROR("rpc diag: recv<0 errno=%d buf_size=%zu", errno, buf->size);
                 return AIRY_ERR_FAIL;
             }
             if (n == 0) {
@@ -180,6 +190,9 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms)
                         return AIRY_SUCCESS;
                     }
                 }
+                if (getenv("AIRY_RPC_DIAG"))
+                    SVC_LOG_ERROR("rpc diag: EOF buf_size=%zu head=%.120s", buf->size,
+                                  buf->data ? buf->data : "");
                 return AIRY_ERR_FAIL;
             }
             int rc = rpc_buf_append(buf, chunk, (size_t)n);
@@ -192,7 +205,41 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms)
                 cJSON_Delete(probe);
                 return AIRY_SUCCESS;
             }
+            if (hangup) {
+                /* 数据不全但连接已关闭：读尽 socket 剩余数据（对端 close 后
+                 * 已发送的字节仍可读），直到 EOF 再判断完整性，避免大响应
+                 * 被 hangup 误判为 FAIL。 */
+                for (;;) {
+                    ssize_t n2 = recv(fd, chunk, sizeof(chunk), 0);
+                    if (n2 < 0) {
+                        if (errno == EINTR)
+                            continue;
+                        if (errno == EAGAIN)
+                            break;
+                        return AIRY_ERR_FAIL;
+                    }
+                    if (n2 == 0)
+                        break; /* EOF：剩余数据已全部读出 */
+                    rc = rpc_buf_append(buf, chunk, (size_t)n2);
+                    if (rc != AIRY_SUCCESS)
+                        return rc;
+                }
+                cJSON *final = cJSON_Parse(buf->data);
+                if (final) {
+                    cJSON_Delete(final);
+                    return AIRY_SUCCESS;
+                }
+                if (getenv("AIRY_RPC_DIAG"))
+                    SVC_LOG_ERROR("rpc diag: hangup json-incomplete buf_size=%zu head=%.120s",
+                                  buf->size, buf->data ? buf->data : "");
+                return AIRY_ERR_FAIL;
+            }
             elapsed_ms += 1; /* 至少消耗 1ms 进度防止死循环 */
+        } else if (hangup || (pfd.revents & POLLERR)) {
+            if (getenv("AIRY_RPC_DIAG"))
+                SVC_LOG_ERROR("rpc diag: hangup-no-POLLIN revents=0x%x buf_size=%zu",
+                              pfd.revents, buf->size);
+            return AIRY_ERR_FAIL;
         }
     }
     return AIRY_ERR_TIMEOUT;

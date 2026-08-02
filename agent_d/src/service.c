@@ -241,8 +241,27 @@ static int agent_spawn_child(const char *spec, const char *agent_id,
         }
 
 fallback_python:
-        /* Python runner（默认 & 回退路径） */
+        /* Python runner（默认 & 回退路径）
+         *
+         * 注入 Agent Python 运行时路径：airymax_agents 及其依赖（openlab、
+         * agentrt SDK）不在系统 site-packages，需通过 AIRY_AGENTS_PYTHONPATH
+         * （冒号分隔，与 PYTHONPATH 同语法）指定搜索路径，否则子进程启动
+         * 即失败并回退 stub（历史 P0-3：ModuleNotFoundError）。
+         * 仅当 AIRY_AGENTS_PYTHONPATH 显式设置时注入，未设置时保持
+         * 继承父进程环境，兼容已配置好 PYTHONPATH 的部署。 */
         {
+            const char *agents_pypath = getenv("AIRY_AGENTS_PYTHONPATH");
+            if (agents_pypath && agents_pypath[0] != '\0') {
+                const char *cur = getenv("PYTHONPATH");
+                if (cur && cur[0] != '\0') {
+                    char merged[2048];
+                    snprintf(merged, sizeof(merged), "%s:%s",
+                             agents_pypath, cur);
+                    setenv("PYTHONPATH", merged, 1);
+                } else {
+                    setenv("PYTHONPATH", agents_pypath, 1);
+                }
+            }
             char *argv[] = {
                 (char *)"python3",
                 (char *)"-m",
