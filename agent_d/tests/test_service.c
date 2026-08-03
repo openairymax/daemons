@@ -107,22 +107,12 @@ static void test_invoke(void)
     assert(agent_id != NULL);
 
     char *out_output = NULL;
+    /* P0-2：AIRY_AGENT_NO_SPAWN 模式下无子进程，invoke 必须返回明确
+     * 错误，而非"invocation processed"假成功 */
     ret = agent_service_invoke(svc, agent_id, "hello", 5, &out_output);
-    assert(ret == AIRY_SUCCESS);
+    assert(ret != AIRY_SUCCESS);
     assert(out_output != NULL);
-
-    /* 解析输出 JSON，验证包含 agent_id 和 output 字段 */
-    cJSON *parsed = cJSON_Parse(out_output);
-    assert(parsed != NULL);
-    cJSON *aid = cJSON_GetObjectItem(parsed, "agent_id");
-    assert(aid != NULL && cJSON_IsString(aid));
-    assert(strcmp(aid->valuestring, agent_id) == 0);
-    cJSON *output = cJSON_GetObjectItem(parsed, "output");
-    assert(output != NULL && cJSON_IsString(output));
-    assert(strcmp(output->valuestring, "invocation processed") == 0);
-    cJSON *ptm = cJSON_GetObjectItem(parsed, "processing_time_ms");
-    assert(ptm != NULL && cJSON_IsNumber(ptm));
-    cJSON_Delete(parsed);
+    assert(strstr(out_output, "error") != NULL);
 
     AIRY_FREE(out_output);
     AIRY_FREE(agent_id);
@@ -214,9 +204,9 @@ static void test_spawn_after_terminate(void)
     assert(r3 != NULL);
     assert(agent_service_count(svc) == 3);
 
-    /* r2 仍可正常调用 */
+    /* r2 仍可调用：no-spawn 模式下返回明确错误（P0-2） */
     char *out_output = NULL;
-    assert(agent_service_invoke(svc, r2, "hi", 2, &out_output) == AIRY_SUCCESS);
+    assert(agent_service_invoke(svc, r2, "hi", 2, &out_output) != AIRY_SUCCESS);
     AIRY_FREE(out_output);
 
     AIRY_FREE(r1);
@@ -229,6 +219,10 @@ static void test_spawn_after_terminate(void)
 
 int main(void)
 {
+    /* P0-2：单元测试使用确定性模式 — 禁止真实 fork Python 子进程，
+     * 验证 service 状态机与"无子进程 invoke 返回明确错误"的新契约。 */
+    setenv("AIRY_AGENT_NO_SPAWN", "1", 1);
+
     printf("=== Agent Service Unit Tests ===\n");
     test_create_destroy();
     test_spawn_and_list();

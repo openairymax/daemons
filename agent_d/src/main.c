@@ -23,6 +23,7 @@
 #include "param_validator.h"
 #include "svc_logger.h"
 #include "thread_pool.h"
+#include "platform.h"
 
 #include <stdlib.h>
 
@@ -42,6 +43,61 @@ DAEMON_DECLARE_COMMON(agent_d, agent, DEFAULT_SOCKET_PATH_UNIX,
 /* ==================== 全局状态 ==================== */
 
 static agent_service_t *g_service = NULL;
+
+#if AIRY_PLATFORM_POSIX
+/* P0-3：空闲 Agent 子进程回收。
+ * 守护线程周期性调用 agent_service_reap_idle，终止超过空闲阈值
+ * （AIRY_AGENT_IDLE_TIMEOUT_S，默认 300s）仍无调用的子进程，
+ * 防止 Python runner 进程泄漏（历史上达 12 个空闲进程残留）。 */
+static volatile int g_reaper_run = 0;
+static airy_thread_t g_reaper_thread = AIRY_INVALID_THREAD;
+
+static void *idle_reaper_thread(void *arg)
+{
+    (void)arg;
+    const char *env_timeout = getenv("AIRY_AGENT_IDLE_TIMEOUT_S");
+    uint64_t max_idle_s = 300;
+    if (env_timeout && env_timeout[0] != '\0') {
+        unsigned long long v = strtoull(env_timeout, NULL, 10);
+        if (v > 0)
+            max_idle_s = (uint64_t)v;
+    }
+    SVC_LOG_INFO("Idle reaper started (max_idle=%llus, scan every %ds)",
+                 (unsigned long long)max_idle_s, 30);
+    int slept = 0;
+    while (g_reaper_run) {
+        /* 1s 步进休眠，便于收到退出信号后快速 join */
+        struct timespec ts = {1, 0};
+        nanosleep(&ts, NULL);
+        if (!g_reaper_run)
+            break;
+        if (++slept >= 30) {
+            slept = 0;
+            if (g_service)
+                agent_service_reap_idle(g_service, max_idle_s);
+        }
+    }
+    return NULL;
+}
+
+static void idle_reaper_start(void)
+{
+    g_reaper_run = 1;
+    if (airy_thread_create(&g_reaper_thread, idle_reaper_thread, NULL) != 0) {
+        g_reaper_run = 0;
+        SVC_LOG_WARN("Failed to start idle reaper thread");
+    }
+}
+
+static void idle_reaper_stop(void)
+{
+    g_reaper_run = 0;
+    if (g_reaper_thread != AIRY_INVALID_THREAD) {
+        airy_thread_join(g_reaper_thread, NULL);
+        g_reaper_thread = AIRY_INVALID_THREAD;
+    }
+}
+#endif /* AIRY_PLATFORM_POSIX */
 
 typedef struct {
     char *socket_path;
@@ -407,7 +463,15 @@ int main(int argc, char **argv)
     }
 
     SVC_LOG_INFO("Agent service running (event-driven mode)");
+#if AIRY_PLATFORM_POSIX
+    /* P0-3：启动空闲子进程回收守护线程 */
+    idle_reaper_start();
+#endif
     daemon_event_driver_run(g_event_driver_agent_d);
+#if AIRY_PLATFORM_POSIX
+    /* 主循环退出：先停止回收线程再清理服务 */
+    idle_reaper_stop();
+#endif
 
     daemon_cleanup_standard(g_bipc_agent_d, g_bsd_agent_d, g_event_driver_agent_d,
                              server_fd, destroy_service, &g_running_lock_agent_d);

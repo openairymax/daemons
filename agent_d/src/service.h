@@ -41,10 +41,12 @@ typedef struct {
     /* Stage5+ 待办4：真实 spawn — fork Agent runner 子进程后的句柄
      * （Python/Rust 双语言支持）。
      * child_pid>0 表示有活跃子进程；-1 表示无子进程（回退旧逻辑）。
-     * stdin_fd 用于向子进程写请求，stdout_fd 用于读响应。 */
+     * stdin_fd 用于向子进程写请求，stdout_fd 用于读响应。
+     * last_active：最近一次成功与子进程通信的时间（秒），空闲回收依据。 */
     pid_t child_pid;
     int stdin_fd;
     int stdout_fd;
+    uint64_t last_active;
 #endif
 } agent_entry_internal_t;
 
