@@ -65,6 +65,18 @@ int agent_service_list(agent_service_t *svc, char ***out_agent_ids,
 size_t agent_service_count(agent_service_t *svc);
 void agent_service_list_free(char **agent_ids, size_t count);
 
+/**
+ * @brief 回收空闲超时的 Agent 子进程（P0-3：防止子进程泄漏）
+ *
+ * 遍历所有 running 且有活跃子进程的 Agent，当 now - last_active >=
+ * max_idle_s 时终止并回收其子进程，Agent 槽位置为 terminated（不压缩数组）。
+ *
+ * @param svc Agent 服务实例
+ * @param max_idle_s 空闲阈值（秒），0 表示立即回收
+ * @return AIRY_SUCCESS 成功
+ */
+int agent_service_reap_idle(agent_service_t *svc, uint64_t max_idle_s);
+
 #ifdef __cplusplus
 }
 #endif

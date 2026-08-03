@@ -45,6 +45,9 @@
 
 /* invoke 读响应超时（秒），与设计要求 60s 一致 */
 #define AGENT_INVOKE_TIMEOUT_S 60
+/* spawn 后等待子进程 ready 的超时（秒）。Python runner 冷启动含依赖
+ * 导入，典型 2~5s；15s 容忍慢速环境，超时即判定 spawn 失败（P0-2）。 */
+#define AGENT_SPAWN_READY_TIMEOUT_S 15
 /* 单行响应最大长度（与 MAX_BUFFER 65536 对齐） */
 #define AGENT_RESP_BUF_SIZE 65536
 
@@ -106,6 +109,80 @@ static int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeo
     }
     buf[buf_size - 1] = '\0';
     return 0;
+}
+
+/* P0-1：从 agent_d 可执行文件位置反推 Airymax 仓库根目录。
+ * 沿 /proc/self/exe 的目录逐级向上，找到含 sdk/sdk-python/agentrt/
+ * __init__.py 的祖先目录即为仓库根。返回 0 成功，-1 未找到。 */
+static int agent_find_repo_root(char *out, size_t size)
+{
+    char exe[AIRY_PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (n <= 0)
+        return -1;
+    exe[n] = '\0';
+
+    char dir[AIRY_PATH_MAX];
+    snprintf(dir, sizeof(dir), "%s", exe);
+    for (;;) {
+        char *slash = strrchr(dir, '/');
+        if (!slash || slash == dir)
+            break; /* 已到文件系统根 */
+        *slash = '\0';
+        char probe[AIRY_PATH_MAX];
+        snprintf(probe, sizeof(probe),
+                 "%s/sdk/sdk-python/agentrt/__init__.py", dir);
+        if (access(probe, F_OK) == 0) {
+            snprintf(out, size, "%s", dir);
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/* P0-1：构造 agent 子进程的 Python 搜索路径（注入 PYTHONPATH 的前缀）。
+ * 基础为环境变量 AIRY_AGENTS_PYTHONPATH（若设置）；随后自动补充仓库根下
+ * 的关键目录 sdk/sdk-python、ecosystem/agents、ecosystem/openlab（存在且
+ * 尚未包含时）。历史缺失 sdk/sdk-python 导致子进程无法导入 agentrt.syscall，
+ * SyscallProxy 记忆持久化从未生效。结果写入 buf，始终以 null 结尾。 */
+static void agent_build_agents_pypath(char *buf, size_t size)
+{
+    char merged[8192];
+    size_t pos = 0;
+    merged[0] = '\0';
+
+    const char *custom = getenv("AIRY_AGENTS_PYTHONPATH");
+    if (custom && custom[0] != '\0') {
+        int n = snprintf(merged + pos, sizeof(merged) - pos, "%s", custom);
+        if (n > 0 && (size_t)n < sizeof(merged) - pos)
+            pos += (size_t)n;
+    }
+
+    char root[AIRY_PATH_MAX];
+    if (agent_find_repo_root(root, sizeof(root)) == 0) {
+        static const char *const suffixes[] = {
+            "/sdk/sdk-python",
+            "/ecosystem/agents",
+            "/ecosystem/openlab",
+        };
+        for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
+            char probe[AIRY_PATH_MAX];
+            snprintf(probe, sizeof(probe), "%s%s", root, suffixes[i]);
+            if (access(probe, F_OK) != 0)
+                continue; /* 该目录不存在（如裁剪安装），跳过 */
+            int n;
+            if (pos > 0 && merged[pos - 1] != ':')
+                n = snprintf(merged + pos, sizeof(merged) - pos,
+                             ":%s", probe);
+            else
+                n = snprintf(merged + pos, sizeof(merged) - pos,
+                             "%s", probe);
+            if (n > 0 && (size_t)n < sizeof(merged) - pos)
+                pos += (size_t)n;
+        }
+    }
+
+    snprintf(buf, size, "%s", merged);
 }
 
 /* 从 spec JSON 中提取 language 字段，默认 "python"。
@@ -244,17 +321,22 @@ fallback_python:
         /* Python runner（默认 & 回退路径）
          *
          * 注入 Agent Python 运行时路径：airymax_agents 及其依赖（openlab、
-         * agentrt SDK）不在系统 site-packages，需通过 AIRY_AGENTS_PYTHONPATH
-         * （冒号分隔，与 PYTHONPATH 同语法）指定搜索路径，否则子进程启动
-         * 即失败并回退 stub（历史 P0-3：ModuleNotFoundError）。
-         * 仅当 AIRY_AGENTS_PYTHONPATH 显式设置时注入，未设置时保持
-         * 继承父进程环境，兼容已配置好 PYTHONPATH 的部署。 */
+         * agentrt SDK）不在系统 site-packages，需通过 PYTHONPATH（冒号分隔）
+         * 指定搜索路径，否则子进程启动即失败（历史 P0-3 变体：
+         * ModuleNotFoundError）。
+         *
+         * P0-1：路径自动补全。基础为 AIRY_AGENTS_PYTHONPATH（若显式设置），
+         * 再按 agent_d 可执行文件位置反推仓库根，自动补上 sdk/sdk-python、
+         * ecosystem/agents、ecosystem/openlab 三个关键目录。修复历史上
+         * 缺失 sdk/sdk-python 导致 SyscallProxy 记忆持久化从未生效的问题。
+         * 未找到仓库根（生产裁剪安装）时仅使用显式环境变量，兼容旧部署。 */
         {
-            const char *agents_pypath = getenv("AIRY_AGENTS_PYTHONPATH");
-            if (agents_pypath && agents_pypath[0] != '\0') {
+            char agents_pypath[8192];
+            agent_build_agents_pypath(agents_pypath, sizeof(agents_pypath));
+            if (agents_pypath[0] != '\0') {
                 const char *cur = getenv("PYTHONPATH");
                 if (cur && cur[0] != '\0') {
-                    char merged[2048];
+                    char merged[9216];
                     snprintf(merged, sizeof(merged), "%s:%s",
                              agents_pypath, cur);
                     setenv("PYTHONPATH", merged, 1);
@@ -530,8 +612,81 @@ int agent_service_spawn(agent_service_t *svc, const char *spec,
     agent->status = 1;
     agent->spawned_at = (uint64_t)time(NULL);
 
+#if AIRY_PLATFORM_POSIX
+    agent->child_pid = -1;
+    agent->stdin_fd = -1;
+    agent->stdout_fd = -1;
+    agent->last_active = (uint64_t)time(NULL);
+
+    /* P0-2：真实派生并校验子进程存活，不再静默回退 stub。
+     * AIRY_AGENT_NO_SPAWN=1 时跳过 fork（单元测试确定性模式）：视为成功
+     * 注册但无子进程，invoke 会返回明确错误而非假成功。 */
+    const char *no_spawn_env = getenv("AIRY_AGENT_NO_SPAWN");
+    int spawn_disabled = (no_spawn_env && no_spawn_env[0] != '\0' &&
+                          strcmp(no_spawn_env, "0") != 0);
+
+    pid_t child_pid = -1;
+    int child_sin = -1, child_sout = -1;
+    if (spawn_disabled) {
+        SVC_LOG_WARN("Agent spawn skipped (AIRY_AGENT_NO_SPAWN): agent_id=%s",
+                     agent->agent_id);
+    } else if (agent_spawn_child(spec, agent->agent_id,
+                                 &child_pid, &child_sin, &child_sout) == 0) {
+        /* 等待子进程 ready 确认存活；失败则回收子进程并判定 spawn 失败 */
+        char ready_buf[512];
+        int ready_rc = agent_read_line_timeout(child_sout, ready_buf,
+                                               sizeof(ready_buf),
+                                               AGENT_SPAWN_READY_TIMEOUT_S);
+        int alive = 0;
+        if (ready_rc == 0) {
+            cJSON *r = cJSON_Parse(ready_buf);
+            if (r) {
+                cJSON *ready_item = cJSON_GetObjectItem(r, "ready");
+                if (ready_item && cJSON_IsTrue(ready_item))
+                    alive = 1;
+                cJSON_Delete(r);
+            }
+        }
+        if (alive) {
+            agent->child_pid = child_pid;
+            agent->stdin_fd = child_sin;
+            agent->stdout_fd = child_sout;
+            SVC_LOG_INFO("Agent child spawned: agent_id=%s, pid=%d",
+                         agent->agent_id, (int)child_pid);
+        } else {
+            SVC_LOG_WARN("Agent child not ready, spawn rejected: agent_id=%s, resp=%s",
+                         agent->agent_id,
+                         ready_rc == 0 ? ready_buf : "(timeout/eof)");
+            pid_t dead_pid = child_pid;
+            int dead_sin = child_sin, dead_sout = child_sout;
+            agent_kill_and_reap(&dead_pid, &dead_sin, &dead_sout);
+            child_pid = -1; /* 标记 spawn 失败，进入下方失败判定 */
+        }
+    } else {
+        SVC_LOG_WARN("Agent child spawn failed: agent_id=%s", agent->agent_id);
+    }
+
+    if (child_pid <= 0 && !spawn_disabled) {
+        /* 子进程未存活 → spawn 整体失败，不返回"幽灵"agent（无子进程却
+         * 被视为成功，导致 invoke 静默回退 stub 假输出）。释放槽位资源。 */
+        AIRY_FREE(agent->agent_id);
+        AIRY_FREE(agent->spec);
+        agent->agent_id = NULL;
+        agent->spec = NULL;
+        airy_mtx_unlock(&svc->lock);
+        return AIRY_ERR_SVC_NOT_READY;
+    }
+#endif
+
+    /* 子进程存活确认后才注册到哈希表与计数 */
     int rc = agent_ht_insert(&svc->agent_index, agent->agent_id, idx);
     if (rc != AIRY_SUCCESS) {
+#if AIRY_PLATFORM_POSIX
+        if (agent->child_pid > 0) {
+            agent_kill_and_reap(&agent->child_pid,
+                                &agent->stdin_fd, &agent->stdout_fd);
+        }
+#endif
         AIRY_FREE(agent->agent_id);
         AIRY_FREE(agent->spec);
         agent->agent_id = NULL;
@@ -543,26 +698,6 @@ int agent_service_spawn(agent_service_t *svc, const char *spec,
     *out_agent_id = AIRY_STRDUP(agent->agent_id);
     svc->agent_count++;
     uint64_t total_agents = svc->agent_count;
-
-#if AIRY_PLATFORM_POSIX
-    agent->child_pid = -1;
-    agent->stdin_fd = -1;
-    agent->stdout_fd = -1;
-
-    pid_t child_pid = -1;
-    int child_sin = -1, child_sout = -1;
-    if (agent_spawn_child(spec, agent->agent_id,
-                          &child_pid, &child_sin, &child_sout) == 0) {
-        agent->child_pid = child_pid;
-        agent->stdin_fd = child_sin;
-        agent->stdout_fd = child_sout;
-        SVC_LOG_INFO("Agent child spawned: agent_id=%s, pid=%d",
-                     agent->agent_id, (int)child_pid);
-    } else {
-        SVC_LOG_WARN("Agent child spawn failed (fallback to stub): agent_id=%s",
-                     agent->agent_id);
-    }
-#endif
 
     airy_mtx_unlock(&svc->lock);
 
@@ -661,13 +796,15 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id,
         int wrc = agent_write_all(sin_fd, write_buf, req_len + 1);
         AIRY_FREE(write_buf);
         if (wrc != 0) {
-            SVC_LOG_WARN("Agent invoke write failed, fallback to stub: agent_id=%s",
+            SVC_LOG_WARN("Agent invoke write failed, child unusable: agent_id=%s",
                          agent_id);
             agent_kill_and_reap(&svc->agents[idx].child_pid,
                                 &svc->agents[idx].stdin_fd,
                                 &svc->agents[idx].stdout_fd);
             goto invoke_fallback;
         }
+        /* P0-3：成功向子进程写入请求视为活跃，更新空闲回收基准 */
+        svc->agents[idx].last_active = (uint64_t)time(NULL);
 
         /* 从子进程 stdout 读响应行（带 60s 超时） */
         char *resp_buf = (char *)AIRY_MALLOC(AGENT_RESP_BUF_SIZE);
@@ -680,13 +817,15 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id,
                                           AGENT_RESP_BUF_SIZE, AGENT_INVOKE_TIMEOUT_S);
         if (rrc != 0) {
             AIRY_FREE(resp_buf);
-            SVC_LOG_WARN("Agent invoke read failed, fallback to stub: agent_id=%s",
+            SVC_LOG_WARN("Agent invoke read failed, child unusable: agent_id=%s",
                          agent_id);
             agent_kill_and_reap(&svc->agents[idx].child_pid,
                                 &svc->agents[idx].stdin_fd,
                                 &svc->agents[idx].stdout_fd);
             goto invoke_fallback;
         }
+        /* 收到响应同样刷新活跃时间 */
+        svc->agents[idx].last_active = (uint64_t)time(NULL);
 
         /* 解析响应 JSON，提取 output 字段（runner.py 约定）。
          * 成功: {"success":true,"output":"..."}
@@ -719,22 +858,23 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id,
 #endif
 
 invoke_fallback:
-    /* 回退路径：无子进程或子进程通信失败，
-     * 返回固定字符串保持向后兼容 */
+    /* P0-2：无子进程或通信失败 → 返回明确错误，不再伪造"invocation
+     * processed"假成功。上层（taskflow/SDK）据此感知 agent 不可用，
+     * 避免静默吞掉故障。 */
     (void)input;
     (void)len;
 
     cJSON *result = cJSON_CreateObject();
     cJSON_AddStringToObject(result, "agent_id", agent_id);
-    cJSON_AddStringToObject(result, "output", "invocation processed");
-    cJSON_AddNumberToObject(result, "processing_time_ms", 5.2);
+    cJSON_AddStringToObject(result, "error",
+                            "agent child process unavailable");
     *out_output = cJSON_PrintUnformatted(result);
     cJSON_Delete(result);
 
     airy_mtx_unlock(&svc->lock);
 
-    SVC_LOG_DEBUG("Agent invoke: agent_id=%s (stub)", agent_id);
-    return AIRY_SUCCESS;
+    SVC_LOG_WARN("Agent invoke fallback (no child): agent_id=%s", agent_id);
+    return AIRY_ERR_SVC_NOT_READY;
 }
 
 int agent_service_list(agent_service_t *svc, char ***out_agent_ids,
@@ -787,6 +927,37 @@ size_t agent_service_count(agent_service_t *svc)
     size_t c = svc->agent_count;
     airy_mtx_unlock(&svc->lock);
     return c;
+}
+
+int agent_service_reap_idle(agent_service_t *svc, uint64_t max_idle_s)
+{
+    if (!svc || !svc->initialized)
+        return AIRY_ERR_INVALID_PARAM;
+
+    uint64_t now = (uint64_t)time(NULL);
+    size_t reaped = 0;
+
+    airy_mtx_lock(&svc->lock);
+#if AIRY_PLATFORM_POSIX
+    for (size_t i = 0; i < svc->agent_count; i++) {
+        agent_entry_internal_t *a = &svc->agents[i];
+        if (a->status != 1 || a->child_pid <= 0)
+            continue;
+        if (now <= a->last_active || (now - a->last_active) < max_idle_s)
+            continue;
+        SVC_LOG_INFO("Agent idle reclaimed: agent_id=%s, idle=%llus",
+                     a->agent_id,
+                     (unsigned long long)(now - a->last_active));
+        agent_kill_and_reap(&a->child_pid, &a->stdin_fd, &a->stdout_fd);
+        a->status = 3;
+        reaped++;
+    }
+#endif
+    airy_mtx_unlock(&svc->lock);
+
+    if (reaped > 0)
+        SVC_LOG_INFO("Agent idle reclaim done: reaped=%zu", reaped);
+    return AIRY_SUCCESS;
 }
 
 void agent_service_list_free(char **agent_ids, size_t count)
