@@ -19,6 +19,7 @@
  */
 
 #include "daemon_main.h"
+#include "platform.h"
 #include "mem_service.h"
 #include "param_validator.h"
 #include "svc_logger.h"
@@ -28,7 +29,7 @@
 
 /* ==================== 配置常量 ==================== */
 
-#define DEFAULT_SOCKET_PATH_UNIX AIRY_RUNTIME_DIR "/mem.sock"
+#define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("mem.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_mem"
 #define DEFAULT_TCP_PORT 8085
 #define MAX_BUFFER 65536

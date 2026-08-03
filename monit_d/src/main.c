@@ -10,6 +10,7 @@
  */
 
 #include "daemon_main.h"
+#include "platform.h"
 #include "monitor_service.h"
 #include "param_validator.h"
 #include "prometheus_exporter.h"
@@ -21,7 +22,7 @@
 
 /* ==================== 配置常量 ==================== */
 
-#define DEFAULT_SOCKET_PATH_UNIX AIRY_RUNTIME_DIR "/monit.sock"
+#define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("monit.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_monit"
 #define DEFAULT_TCP_PORT 9090
 #define MAX_BUFFER 65536

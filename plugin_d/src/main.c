@@ -12,11 +12,12 @@
 #include "plugin_discovery.h"
 #include "plugin_permission.h"
 #include "daemon_main.h"
+#include "platform.h"
 #include "logger.h"
 
 #include <unistd.h>
 
-#define PLUGIN_D_SOCKET_PATH AIRY_RUNTIME_DIR "/plugin.sock"
+#define PLUGIN_D_SOCKET_PATH airy_runtime_dir_socket("plugin.sock")
 #define PLUGIN_D_PIPE_PATH   "\\\\.\\pipe\\airy_plugin"
 
 /* ==================== 全局状态 ==================== */
