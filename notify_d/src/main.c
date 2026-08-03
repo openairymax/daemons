@@ -11,6 +11,7 @@
  */
 
 #include "daemon_main.h"
+#include "platform.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,7 +27,7 @@
 
 #define NOTIFY_D_DEFAULT_PORT 8084
 #define NOTIFY_D_MAX_BUFFER 65536
-#define NOTIFY_D_DEFAULT_SOCKET AIRY_RUNTIME_DIR "/notify.sock"
+#define NOTIFY_D_DEFAULT_SOCKET airy_runtime_dir_socket("notify.sock")
 #define NOTIFY_D_MAX_PENDING 1024
 #define NOTIFY_D_MAX_CLIENTS 128
 #define NOTIFY_D_WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"

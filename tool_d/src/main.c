@@ -10,6 +10,7 @@
  */
 
 #include "daemon_main.h"
+#include "platform.h"
 #include "param_validator.h"
 #include "svc_logger.h"
 #include "thread_pool.h"
@@ -19,7 +20,7 @@
 
 /* ==================== 配置常量 ==================== */
 
-#define DEFAULT_SOCKET_PATH_UNIX AIRY_RUNTIME_DIR "/tool.sock"
+#define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("tool.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_tool"
 #define DEFAULT_TCP_PORT 8081
 #define MAX_BUFFER 65536

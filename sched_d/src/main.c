@@ -17,6 +17,7 @@
 
 #include "../../monit_d/include/monitor_service.h"
 #include "daemon_main.h"
+#include "platform.h"
 #include "param_validator.h"
 #include "scheduler_service.h"
 #include "strategy_interface.h"
@@ -28,7 +29,7 @@
 
 /* ==================== 配置常量 ==================== */
 
-#define DEFAULT_SOCKET_PATH_UNIX AIRY_RUNTIME_DIR "/sched.sock"
+#define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("sched.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_sched"
 #define DEFAULT_TCP_PORT 8083
 #define MAX_BUFFER 65536

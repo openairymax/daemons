@@ -24,12 +24,13 @@
 #include "llm_service.h"
 #include "response.h"
 #include "daemon_main.h"
+#include "platform.h"
 
 #include <stdlib.h>
 
 /* ==================== 配置常量 ==================== */
 
-#define DEFAULT_SOCKET_PATH_UNIX AIRY_RUNTIME_DIR "/llm.sock"
+#define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("llm.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_llm"
 #define DEFAULT_TCP_PORT 8080
 #define MAX_BUFFER 65536

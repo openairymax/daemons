@@ -23,6 +23,7 @@
  */
 
 #include "daemon_main.h"
+#include "platform.h"
 #include "a2a_service.h"
 #include "param_validator.h"
 #include "svc_logger.h"
@@ -32,7 +33,7 @@
 
 /* ==================== 配置常量 ==================== */
 
-#define DEFAULT_SOCKET_PATH_UNIX AIRY_RUNTIME_DIR "/a2a.sock"
+#define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("a2a.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_a2a"
 #define DEFAULT_TCP_PORT 8087
 #define MAX_BUFFER 65536

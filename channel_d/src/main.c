@@ -10,12 +10,13 @@
 
 #include "channel_service.h"
 #include "daemon_main.h"
+#include "platform.h"
 
 #include <inttypes.h>
 #include <stdlib.h>
 #include <unistd.h>
 
-#define CHANNEL_D_SOCKET_PATH AIRY_RUNTIME_DIR "/channel.sock"
+#define CHANNEL_D_SOCKET_PATH airy_runtime_dir_socket("channel.sock")
 #define CHANNEL_D_PIPE_PATH   "\\\\.\\pipe\\airy_channel"
 
 /* P0.18.1: 使用 DAEMON_DECLARE_COMMON 生成公共样板（信号处理/全局变量/print_usage） */

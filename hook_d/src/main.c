@@ -10,12 +10,13 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "daemon_main.h"
+#include "platform.h"
 
 #include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
 
-#define HOOK_D_SOCKET_PATH AIRY_RUNTIME_DIR "/hook.sock"
+#define HOOK_D_SOCKET_PATH airy_runtime_dir_socket("hook.sock")
 #define HOOK_D_PIPE_PATH   "\\\\.\\pipe\\airy_hook"
 
 /* P0.18.1: 使用 DAEMON_DECLARE_COMMON 生成公共样板（信号处理/全局变量/print_usage） */
