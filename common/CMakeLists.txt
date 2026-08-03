@@ -264,7 +264,7 @@ install(FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/include/api_recovery.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/thread_pool.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_defaults.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/parallel_dispatcher.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_task_dispatcher.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/airy_event_loop.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_oom.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ipc_backpressure.h
