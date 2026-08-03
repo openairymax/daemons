@@ -43,13 +43,38 @@
 #if AIRY_PLATFORM_POSIX
 /* ==================== 真实 spawn 辅助（POSIX） ==================== */
 
-/* invoke 读响应超时（秒），与设计要求 60s 一致 */
-#define AGENT_INVOKE_TIMEOUT_S 60
+/* invoke 读响应超时（秒）。默认 300s（5 分钟）覆盖真实 LLM 调用；
+ * 可通过 AIRY_AGENT_INVOKE_TIMEOUT_S 覆盖。 */
+#define AGENT_INVOKE_TIMEOUT_S 300
 /* spawn 后等待子进程 ready 的超时（秒）。Python runner 冷启动含依赖
- * 导入，典型 2~5s；15s 容忍慢速环境，超时即判定 spawn 失败（P0-2）。 */
+ * 导入，典型 2~5s；默认 15s 容忍慢速环境，超时即判定 spawn 失败（P0-2）。
+ * 可通过 AIRY_AGENT_SPAWN_TIMEOUT_S 覆盖。 */
 #define AGENT_SPAWN_READY_TIMEOUT_S 15
 /* 单行响应最大长度（与 MAX_BUFFER 65536 对齐） */
 #define AGENT_RESP_BUF_SIZE 65536
+
+/* 运行时可配置超时：env 优先，缺省用编译期默认值 */
+static int agent_invoke_timeout_s(void)
+{
+    const char *env = getenv("AIRY_AGENT_INVOKE_TIMEOUT_S");
+    if (env && env[0] != '\0') {
+        long v = strtol(env, NULL, 10);
+        if (v > 0)
+            return (int)v;
+    }
+    return AGENT_INVOKE_TIMEOUT_S;
+}
+
+static int agent_spawn_ready_timeout_s(void)
+{
+    const char *env = getenv("AIRY_AGENT_SPAWN_TIMEOUT_S");
+    if (env && env[0] != '\0') {
+        long v = strtol(env, NULL, 10);
+        if (v > 0)
+            return (int)v;
+    }
+    return AGENT_SPAWN_READY_TIMEOUT_S;
+}
 
 /* 向 fd 写入全部字节（处理 EINTR 与短写）。
  * 返回 0 成功，-1 失败（含 EPIPE — 子进程已退出）。 */
@@ -141,10 +166,11 @@ static int agent_find_repo_root(char *out, size_t size)
 }
 
 /* P0-1：构造 agent 子进程的 Python 搜索路径（注入 PYTHONPATH 的前缀）。
- * 基础为环境变量 AIRY_AGENTS_PYTHONPATH（若设置）；随后自动补充仓库根下
- * 的关键目录 sdk/sdk-python、ecosystem/agents、ecosystem/openlab（存在且
- * 尚未包含时）。历史缺失 sdk/sdk-python 导致子进程无法导入 agentrt.syscall，
- * SyscallProxy 记忆持久化从未生效。结果写入 buf，始终以 null 结尾。 */
+ * 优先级：环境变量 AIRY_AGENTS_PYTHONPATH（显式）→ AIRY_LIB_DIR（生产
+ * 安装依赖，agentrt 独立安装于 AIRY_HOME 时依赖库在 lib/）→ 源码树反推
+ * （开发模式，/proc/self/exe 向上找仓库根）。历史缺失 sdk/sdk-python 导致
+ * 子进程无法导入 agentrt.syscall，SyscallProxy 记忆持久化从未生效。
+ * 结果写入 buf，始终以 null 结尾。 */
 static void agent_build_agents_pypath(char *buf, size_t size)
 {
     char merged[8192];
@@ -158,6 +184,19 @@ static void agent_build_agents_pypath(char *buf, size_t size)
             pos += (size_t)n;
     }
 
+    /* 生产安装：AIRY_HOME/lib 下直接提供 airymax_agents/openlab/agentrt */
+    const char *lib_dir = getenv("AIRY_LIB_DIR");
+    if (lib_dir && lib_dir[0] != '\0' && access(lib_dir, F_OK) == 0) {
+        int n;
+        if (pos > 0 && merged[pos - 1] != ':')
+            n = snprintf(merged + pos, sizeof(merged) - pos, ":%s", lib_dir);
+        else
+            n = snprintf(merged + pos, sizeof(merged) - pos, "%s", lib_dir);
+        if (n > 0 && (size_t)n < sizeof(merged) - pos)
+            pos += (size_t)n;
+    }
+
+    /* 开发模式：源码树反推（agent_d 在仓库内构建运行时） */
     char root[AIRY_PATH_MAX];
     if (agent_find_repo_root(root, sizeof(root)) == 0) {
         static const char *const suffixes[] = {
@@ -285,10 +324,11 @@ static int agent_spawn_child(const char *spec, const char *agent_id,
         close(stdin_pipe[0]);
         close(stdout_pipe[1]);
 
-        /* stderr → 日志文件（best-effort，失败则继承父进程 stderr） */
+        /* stderr → 日志文件（best-effort，失败则继承父进程 stderr）。
+         * 日志收敛到 AIRY_HOME/run（与 socket 同目录，便于排查）。 */
         char log_path[AIRY_PATH_MAX];
         snprintf(log_path, sizeof(log_path), "%s/agent_%s.log",
-                 AIRY_RUNTIME_DIR, agent_id);
+                 airy_runtime_dir(), agent_id);
         int log_fd = open(log_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (log_fd >= 0) {
             dup2(log_fd, STDERR_FILENO);
@@ -636,7 +676,7 @@ int agent_service_spawn(agent_service_t *svc, const char *spec,
         char ready_buf[512];
         int ready_rc = agent_read_line_timeout(child_sout, ready_buf,
                                                sizeof(ready_buf),
-                                               AGENT_SPAWN_READY_TIMEOUT_S);
+                                               agent_spawn_ready_timeout_s());
         int alive = 0;
         if (ready_rc == 0) {
             cJSON *r = cJSON_Parse(ready_buf);
@@ -814,7 +854,8 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id,
             return AIRY_ERR_OUT_OF_MEMORY;
         }
         int rrc = agent_read_line_timeout(sout_fd, resp_buf,
-                                          AGENT_RESP_BUF_SIZE, AGENT_INVOKE_TIMEOUT_S);
+                                          AGENT_RESP_BUF_SIZE,
+                                          agent_invoke_timeout_s());
         if (rrc != 0) {
             AIRY_FREE(resp_buf);
             SVC_LOG_WARN("Agent invoke read failed, child unusable: agent_id=%s",
