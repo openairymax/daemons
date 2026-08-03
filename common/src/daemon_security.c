@@ -1,5 +1,6 @@
 #include "airy_memory.h"
 #include "error.h"
+#include "platform.h" /* airy_log_dir() 等 AIRY_HOME 路径 */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 /*
  * Copyright (c) 2026 SPHARX Ltd. All Rights Reserved.
@@ -176,8 +177,9 @@ int daemon_security_init(const daemon_security_config_t *config, airy_err_t *err
     }
 
     if (g_security_ctx.audit_enabled && g_security_ctx.audit_log_path[0] == '\0') {
+        /* 审计日志收敛到 AIRY_HOME/logs（生产部署不依赖 /var/log/agentrt） */
         snprintf(g_security_ctx.audit_log_path, sizeof(g_security_ctx.audit_log_path),
-                 AIRY_LOG_DIR "/daemon_audit.log");
+                 "%s/daemon_audit.log", airy_log_dir());
     }
 
     if (g_security_ctx.audit_enabled) {
