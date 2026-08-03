@@ -11,6 +11,7 @@
  */
 
 #include "daemon_main.h"
+#include "platform.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,7 +28,7 @@
 #define OBSERVE_D_DEFAULT_PORT 8085
 #define OBSERVE_D_METRICS_PORT 9090
 #define OBSERVE_D_MAX_BUFFER 65536
-#define OBSERVE_D_DEFAULT_SOCKET AIRY_RUNTIME_DIR "/observe.sock"
+#define OBSERVE_D_DEFAULT_SOCKET airy_runtime_dir_socket("observe.sock")
 #define OBSERVE_D_MAX_METRICS 256
 #define OBSERVE_D_HTTP_BACKLOG 16
 
