@@ -293,7 +293,13 @@ static int load_daemon_config(const char *config_path)
     g_config.socket_path = AIRY_STRDUP(DEFAULT_SOCKET_PATH_WIN);
     g_config.tcp_host = AIRY_STRDUP("127.0.0.1");
 #else
-    g_config.socket_path = AIRY_STRDUP(DEFAULT_SOCKET_PATH_UNIX);
+    /* Unix socket 收敛到 AIRY_HOME/run（生产部署不依赖 /tmp/agentrt） */
+    {
+        char sock_buf[AIRY_PATH_MAX];
+        snprintf(sock_buf, sizeof(sock_buf), "%s/agent.sock",
+                 airy_runtime_dir());
+        g_config.socket_path = AIRY_STRDUP(sock_buf);
+    }
     g_config.tcp_host = AIRY_STRDUP("127.0.0.1");
 #endif
     g_config.tcp_port = DEFAULT_TCP_PORT;
@@ -375,6 +381,7 @@ int main(int argc, char **argv)
     int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_agent_d);
     if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
 
+    airy_paths_init();
     airy_sock_init();
     airy_mtx_init(&g_running_lock_agent_d);
 

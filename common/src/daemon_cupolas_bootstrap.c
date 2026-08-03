@@ -8,6 +8,7 @@
 
 #include "daemon_cupolas_bootstrap.h"
 
+#include "platform.h" /* airy_paths_init() 等 AIRY_HOME 路径 */
 #include "cupolas.h"
 #include "daemon_security.h"
 #include "svc_logger.h"
@@ -32,6 +33,10 @@ airy_err_t daemon_cupolas_init(const char *daemon_name)
         SVC_LOG_DEBUG("daemon_cupolas_init: cupolas already initialized (daemon=%s)", daemon_name);
         return AIRY_SUCCESS;
     }
+
+    /* AIRY_HOME 路径体系：所有 daemon 启动即确保目录就绪（幂等）。
+     * 审计日志、socket、agent 子进程日志均收敛于其下。 */
+    airy_paths_init();
 
     /* P3.15 ACC-DT16: 显式初始化 daemon_security 层（非 NULL config）。
      * 历史代码在各 security 函数内部 lazy-init（daemon_security_init(NULL,NULL)），
