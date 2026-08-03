@@ -196,3 +196,15 @@ if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
     )
     export(PACKAGE agentrt-daemon)
 endif()
+
+# ==================== 生产安装：daemon 二进制 ====================
+# cmake --install --prefix $AIRY_HOME → 15 个 daemon 装到 $AIRY_HOME/bin。
+# 与 bootstrap AIRY_HOME/bin、agent_build_agents_pypath 的 AIRY_LIB_DIR
+# 回退组成完整生产安装（AIRY_HOME 体系，K8s 节点运行时根类比）。
+install(TARGETS gateway_d llm_d tool_d
+                monit_d sched_d market_d channel_d
+                info_d notify_d observe_d
+                hook_d plugin_d
+                mem_d agent_d a2a_d
+    RUNTIME DESTINATION bin
+)
