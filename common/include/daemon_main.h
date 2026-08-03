@@ -181,8 +181,22 @@ extern "C" {
         int req_id = cJSON_IsNumber(id) ? id->valueint : 0;                          \
         SVC_LOG_DEBUG("Processing request: method=%s, id=%d",                        \
                       method->valuestring, req_id);                                   \
-        method_dispatcher_dispatch(dispatcher, req, jsonrpc_build_error,              \
-                                   &client_fd);                                      \
+        int dr = method_dispatcher_dispatch(dispatcher, req, jsonrpc_build_error,    \
+                                            &client_fd);                             \
+        if (dr != 0) {                                                               \
+            /* dispatch 的错误路径只构建错误字符串不发送（历史缺陷），此处补发，     \
+               避免客户端收到空响应/EOF 无从诊断。 */                                \
+            if (dr == AIRY_ERR_NOT_FOUND) {                                           \
+                JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND,              \
+                                   "Method not found", req_id);                      \
+            } else if (dr == AIRY_ERR_PARSE_ERROR) {                                 \
+                JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST,               \
+                                   "Invalid request", req_id);                       \
+            } else {                                                                 \
+                JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,                \
+                                   "Internal error", req_id);                        \
+            }                                                                        \
+        }                                                                            \
         /* req 由 CJSON_AUTO_FREE 自动释放 */                                        \
         airy_sock_close(client_fd);                                             \
         return 0;                                                                    \
