@@ -1225,12 +1225,30 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
     int map_depth = 0;       /* 全局 mapping 深度 */
     int seq_depth = 0;       /* 全局 sequence 深度 */
     int in_models = 0;       /* 处于顶级 models: 序列内 */
-    int item_depth = 0;      /* models 序列内 mapping 深度（模型项=1） */
-    int nested = 0;          /* 模型项内嵌套结构深度（retry/circuit_breaker 等） */
+    int in_providers = 0;    /* 处于顶级 providers: 序列内 */
+    int item_depth = 0;      /* 序列内 mapping 深度（模型项/provider 项=1） */
+    int nested = 0;          /* 项内嵌套结构深度（retry/circuit_breaker 等） */
     char pending_key[128];
     int has_pending_key = 0;
     yaml_map_t item_map;
     yaml_map_init(&item_map);
+    /* providers 段解析（P0.20: providers 段为权威 base_url/api_key_env，
+     * 此前 YAML 加载器只解析顶级 models 列表，providers 段被忽略，导致
+     * glm/qwen/moonshot 等 OpenAI 兼容厂商无法注册） */
+    typedef struct {
+        char name[64];
+        char api_key_env[128];
+        char base_url[512];
+        int timeout_sec;
+        int max_retries;
+        char *model_names[64];
+        size_t model_count;
+    } prov_cfg_t;
+    yaml_map_t prov_map;
+    yaml_map_init(&prov_map);
+    prov_cfg_t pcfg[16];
+    size_t pcfg_count = 0;
+    prov_cfg_t cur_p;        /* 当前解析中的 provider 项（mapping 结束提交） */
     int done = 0;
 
     while (!done) {
@@ -1244,14 +1262,20 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
 
         case YAML_MAPPING_START_EVENT:
             map_depth++;
-            if (in_models) {
+            if (in_models || in_providers) {
                 item_depth++;
                 if (item_depth == 1) {
-                    /* 新模型项开始 */
+                    /* 新模型项 / provider 项开始 */
                     nested = 0;
                     has_pending_key = 0;
-                    yaml_map_free(&item_map);
-                    yaml_map_init(&item_map);
+                    if (in_providers) {
+                        yaml_map_free(&prov_map);
+                        yaml_map_init(&prov_map);
+                        __builtin_memset(&cur_p, 0, sizeof(cur_p));
+                    } else {
+                        yaml_map_free(&item_map);
+                        yaml_map_init(&item_map);
+                    }
                 } else {
                     /* 嵌套结构（retry/circuit_breaker/...），其字段不是模型字段 */
                     nested++;
@@ -1261,29 +1285,58 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
             break;
 
         case YAML_MAPPING_END_EVENT:
-            if (in_models) {
-                if (item_depth == 1 && nested == 0 && model_count < 64) {
-                    /* 模型项结束：收集字段 */
-                    const char *n = yaml_map_get(&item_map, "name");
-                    const char *p = yaml_map_get(&item_map, "provider");
-                    const char *e = yaml_map_get(&item_map, "api_key_env");
-                    const char *ep = yaml_map_get(&item_map, "endpoint");
-                    const char *t = yaml_map_get(&item_map, "timeout_sec");
-                    const char *r = yaml_map_get(&item_map, "max_retries");
+            if (in_models || in_providers) {
+                if (item_depth == 1 && nested == 0) {
+                    if (in_providers) {
+                        /* provider 项结束：收集字段并提交到 pcfg[] */
+                        const char *pn = yaml_map_get(&prov_map, "name");
+                        if (pn && pn[0]) {
+                            AIRY_STRNCPY_TERM(cur_p.name, pn, sizeof(cur_p.name));
+                            const char *pke = yaml_map_get(&prov_map, "api_key_env");
+                            if (pke)
+                                AIRY_STRNCPY_TERM(cur_p.api_key_env, pke, sizeof(cur_p.api_key_env));
+                            const char *pb = yaml_map_get(&prov_map, "base_url");
+                            if (pb)
+                                AIRY_STRNCPY_TERM(cur_p.base_url, pb, sizeof(cur_p.base_url));
+                            const char *pt = yaml_map_get(&prov_map, "timeout_sec");
+                            if (pt)
+                                cur_p.timeout_sec = (int)strtol(pt, NULL, 10);
+                            const char *pr = yaml_map_get(&prov_map, "max_retries");
+                            if (pr)
+                                cur_p.max_retries = (int)strtol(pr, NULL, 10);
+                            if (pcfg_count < 16) {
+                                pcfg[pcfg_count++] = cur_p;
+                            } else {
+                                for (size_t k = 0; k < cur_p.model_count; ++k)
+                                    AIRY_FREE(cur_p.model_names[k]);
+                            }
+                        } else {
+                            for (size_t k = 0; k < cur_p.model_count; ++k)
+                                AIRY_FREE(cur_p.model_names[k]);
+                        }
+                    } else if (model_count < 64) {
+                        /* 模型项结束：收集字段 */
+                        const char *n = yaml_map_get(&item_map, "name");
+                        const char *p = yaml_map_get(&item_map, "provider");
+                        const char *e = yaml_map_get(&item_map, "api_key_env");
+                        const char *ep = yaml_map_get(&item_map, "endpoint");
+                        const char *t = yaml_map_get(&item_map, "timeout_sec");
+                        const char *r = yaml_map_get(&item_map, "max_retries");
 
-                    if (n && p) {
-                        __builtin_memset(&models[model_count], 0, sizeof(model_entry_t));
-                        AIRY_STRNCPY_TERM(models[model_count].name, n, sizeof(models[model_count].name));
-                        AIRY_STRNCPY_TERM(models[model_count].provider, p, sizeof(models[model_count].provider));
-                        if (e)
-                            AIRY_STRNCPY_TERM(models[model_count].api_key_env, e, sizeof(models[model_count].api_key_env));
-                        if (ep)
-                            AIRY_STRNCPY_TERM(models[model_count].endpoint, ep, sizeof(models[model_count].endpoint));
-                        if (t)
-                            models[model_count].timeout_sec = (int)strtol(t, NULL, 10);
-                        if (r)
-                            models[model_count].max_retries = (int)strtol(r, NULL, 10);
-                        model_count++;
+                        if (n && p) {
+                            __builtin_memset(&models[model_count], 0, sizeof(model_entry_t));
+                            AIRY_STRNCPY_TERM(models[model_count].name, n, sizeof(models[model_count].name));
+                            AIRY_STRNCPY_TERM(models[model_count].provider, p, sizeof(models[model_count].provider));
+                            if (e)
+                                AIRY_STRNCPY_TERM(models[model_count].api_key_env, e, sizeof(models[model_count].api_key_env));
+                            if (ep)
+                                AIRY_STRNCPY_TERM(models[model_count].endpoint, ep, sizeof(models[model_count].endpoint));
+                            if (t)
+                                models[model_count].timeout_sec = (int)strtol(t, NULL, 10);
+                            if (r)
+                                models[model_count].max_retries = (int)strtol(r, NULL, 10);
+                            model_count++;
+                        }
                     }
                 }
                 item_depth--;
@@ -1298,33 +1351,51 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
 
         case YAML_SEQUENCE_START_EVENT:
             seq_depth++;
-            if (in_models && item_depth >= 1)
+            if ((in_models || in_providers) && item_depth >= 1)
                 nested++;
             break;
 
         case YAML_SEQUENCE_END_EVENT:
             seq_depth--;
-            if (in_models && item_depth >= 1 && nested > 0)
+            if ((in_models || in_providers) && item_depth >= 1 && nested > 0)
                 nested--;
             if (in_models && item_depth == 0 && seq_depth <= 1)
                 in_models = 0; /* models 序列结束 */
+            if (in_providers && item_depth == 0 && seq_depth <= 1)
+                in_providers = 0; /* providers 序列结束 */
+            if (in_providers && item_depth == 1 && has_pending_key &&
+                strcmp(pending_key, "models") == 0)
+                has_pending_key = 0; /* providers 段 models 数组结束，清 pending key */
             break;
 
         case YAML_SCALAR_EVENT: {
             const char *val = (const char *)event.data.scalar.value;
-            if (!in_models && map_depth == 1 && val && strcmp(val, "models") == 0) {
-                /* 顶级 models: 键（providers 段内的 models 键 map_depth==2，不触发） */
-                in_models = 1;
-                has_pending_key = 0;
-            } else if (in_models && item_depth == 1 && nested == 0 && val) {
-                /* 模型项第一层字段：key 或 value */
+            if (!in_models && !in_providers && map_depth == 1 && val) {
+                /* 顶级键：models / providers */
+                if (strcmp(val, "models") == 0) {
+                    in_models = 1;
+                    has_pending_key = 0;
+                } else if (strcmp(val, "providers") == 0) {
+                    in_providers = 1;
+                    has_pending_key = 0;
+                }
+            } else if ((in_models || in_providers) && item_depth == 1 && nested == 0 && val) {
+                /* 模型项 / provider 项第一层字段：key 或 value */
                 if (!has_pending_key) {
                     AIRY_STRNCPY_TERM(pending_key, val, sizeof(pending_key));
                     has_pending_key = 1;
                 } else {
-                    yaml_map_add(&item_map, pending_key, val);
+                    if (in_models)
+                        yaml_map_add(&item_map, pending_key, val);
+                    else
+                        yaml_map_add(&prov_map, pending_key, val);
                     has_pending_key = 0;
                 }
+            } else if (in_providers && item_depth == 1 && nested >= 1 && val &&
+                       has_pending_key && strcmp(pending_key, "models") == 0) {
+                /* providers 段 models 数组元素（模型名） */
+                if (cur_p.model_count < 64)
+                    cur_p.model_names[cur_p.model_count++] = AIRY_STRDUP(val);
             }
             /* 其余位置的标量忽略 */
             break;
@@ -1339,8 +1410,9 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
     yaml_parser_delete(&parser);
     fclose(f);
     yaml_map_free(&item_map);
+    yaml_map_free(&prov_map);
 
-    if (model_count == 0) {
+    if (model_count == 0 && pcfg_count == 0) {
         SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN no models found, STACK: svc_load_model_config_yaml");
         return 0;
     }
@@ -1395,6 +1467,53 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
             provs[j].timeout_sec = models[i].timeout_sec;
         if (models[i].max_retries > provs[j].max_retries)
             provs[j].max_retries = models[i].max_retries;
+    }
+
+    /* P0.20: 合并 providers 段解析结果（providers 段为权威 base_url/api_key_env）。
+     * 此前 YAML 加载器仅按顶级 models 列表聚合 provider，providers 段（含
+     * glm/qwen/moonshot 等 OpenAI 兼容厂商的 base_url）被整体忽略。 */
+    for (size_t pi = 0; pi < pcfg_count; ++pi) {
+        size_t j = 0;
+        for (; j < prov_count; ++j) {
+            if (strcmp(provs[j].name, pcfg[pi].name) == 0)
+                break;
+        }
+        if (j == prov_count) {
+            if (prov_count >= 16) {
+                for (size_t k = 0; k < pcfg[pi].model_count; ++k)
+                    AIRY_FREE(pcfg[pi].model_names[k]);
+                continue;
+            }
+            __builtin_memset(&provs[prov_count], 0, sizeof(provider_agg_t));
+            AIRY_STRNCPY_TERM(provs[prov_count].name, pcfg[pi].name, sizeof(provs[prov_count].name));
+            prov_count++;
+        }
+        /* 权威字段覆盖 */
+        if (pcfg[pi].base_url[0])
+            AIRY_STRNCPY_TERM(provs[j].base_url, pcfg[pi].base_url, sizeof(provs[j].base_url));
+        if (pcfg[pi].api_key_env[0])
+            AIRY_STRNCPY_TERM(provs[j].api_key_env, pcfg[pi].api_key_env, sizeof(provs[j].api_key_env));
+        if (pcfg[pi].timeout_sec > provs[j].timeout_sec)
+            provs[j].timeout_sec = pcfg[pi].timeout_sec;
+        if (pcfg[pi].max_retries > provs[j].max_retries)
+            provs[j].max_retries = pcfg[pi].max_retries;
+        /* 合并模型名（去重，避免 providers 与 models 列表重复登记） */
+        for (size_t k = 0; k < pcfg[pi].model_count; ++k) {
+            int dup = 0;
+            for (size_t m = 0; m < provs[j].model_count; ++m) {
+                if (strcmp(provs[j].model_names[m], pcfg[pi].model_names[k]) == 0) {
+                    dup = 1;
+                    break;
+                }
+            }
+            if (dup) {
+                AIRY_FREE(pcfg[pi].model_names[k]);
+            } else if (provs[j].model_count < 64) {
+                provs[j].model_names[provs[j].model_count++] = pcfg[pi].model_names[k];
+            } else {
+                AIRY_FREE(pcfg[pi].model_names[k]);
+            }
+        }
     }
 
     provider_config_t *result =

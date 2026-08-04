@@ -269,6 +269,79 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
     AIRY_ERROR(AIRY_ERR_UNKNOWN, "unknown method");
 }
 
+/* ==================== JSON-RPC 方法包装（接入 method_dispatcher） ==================== */
+
+/**
+ * @brief 将 cJSON params 序列化后转交 handle_service_request，并把返回的
+ *        JSON 结果封装为 JSON-RPC 成功响应。
+ *
+ * user_data 由 daemon_handle_client_* 传入，指向 client_fd。
+ */
+static void channel_dispatch_method(cJSON *params, int id, void *user_data, const char *method)
+{
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
+    cJSON *tmp = NULL;
+    if (!params) {
+        tmp = cJSON_CreateObject();
+        params = tmp;
+    }
+
+    char *params_json = cJSON_PrintUnformatted(params);
+    if (tmp)
+        cJSON_Delete(tmp);
+    if (!params_json) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "failed to serialize params", id);
+        return;
+    }
+
+    char *result_json = NULL;
+    int rc = handle_service_request(method, params_json, &result_json, g_svc);
+    AIRY_FREE(params_json);
+    if (rc != 0 || !result_json) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "channel service error", id);
+        AIRY_FREE(result_json);
+        return;
+    }
+
+    cJSON *result = cJSON_Parse(result_json);
+    AIRY_FREE(result_json);
+    if (!result) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "invalid channel response", id);
+        return;
+    }
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+static void channel_on_ping(cJSON *params, int id, void *user_data)
+{
+    channel_dispatch_method(params, id, user_data, "ping");
+}
+
+static void channel_on_list(cJSON *params, int id, void *user_data)
+{
+    channel_dispatch_method(params, id, user_data, "list");
+}
+
+static void channel_on_open(cJSON *params, int id, void *user_data)
+{
+    channel_dispatch_method(params, id, user_data, "open");
+}
+
+static void channel_on_close(cJSON *params, int id, void *user_data)
+{
+    channel_dispatch_method(params, id, user_data, "close");
+}
+
+static void channel_on_send(cJSON *params, int id, void *user_data)
+{
+    channel_dispatch_method(params, id, user_data, "send");
+}
+
+static void channel_on_health(cJSON *params, int id, void *user_data)
+{
+    channel_dispatch_method(params, id, user_data, "health");
+}
+
 /* ==================== 主入口 ==================== */
 
 int main(int argc, char *argv[])
@@ -276,18 +349,29 @@ int main(int argc, char *argv[])
     const char *socket_dir = NULL;
     uint32_t max_channels = CHANNEL_MAX_CHANNELS;
 
+    /* 兼容原有 -c/-s/-n/-h 短选项，同时接受统一长选项 --manager */
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
-            i++;
+        if ((strcmp(argv[i], "--manager") == 0 || strcmp(argv[i], "-c") == 0) &&
+            i + 1 < argc) {
+            i++; /* 配置路径暂不影响 channel 服务，接受并跳过 */
         } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
             socket_dir = argv[++i];
         } else if (strcmp(argv[i], "-n") == 0 && i + 1 < argc) {
             max_channels = (uint32_t)strtol(argv[++i], NULL, 10);
-        } else if (strcmp(argv[i], "-h") == 0) {
-            fputs("Usage: channel_d [-c config] [-s socket_dir] [-n max_channels] [-h]\n", stdout);
+        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            fputs("Usage: channel_d [--manager config] [-s socket_dir] [-n max_channels] [-h]\n",
+                  stdout);
             return 0;
+        } else {
+            SVC_LOG_ERROR("Unknown option: %s", argv[i]);
+            fputs("Usage: channel_d [--manager config] [-s socket_dir] [-n max_channels] [-h]\n",
+                  stderr);
+            return 1;
         }
     }
+
+    airy_sock_init();
+    airy_mtx_init(&g_running_lock_channel_d);
 
     /* 跨平台信号处理 */
 #ifdef _WIN32
@@ -311,12 +395,17 @@ int main(int argc, char *argv[])
     g_svc = channel_service_create(&config);
     if (!g_svc) {
         SVC_LOG_ERROR("Failed to create channel service");
+        airy_mtx_destroy(&g_running_lock_channel_d);
+        airy_sock_cleanup();
         return EXIT_FAILURE;
     }
 
     if (channel_service_start(g_svc) != 0) {
         SVC_LOG_ERROR("Failed to start channel service");
         channel_service_destroy(g_svc);
+        g_svc = NULL;
+        airy_mtx_destroy(&g_running_lock_channel_d);
+        airy_sock_cleanup();
         return EXIT_FAILURE;
     }
 
@@ -329,24 +418,62 @@ int main(int argc, char *argv[])
     if (server_fd < 0) {
         SVC_LOG_ERROR("channel_d: failed to create socket at %s", CHANNEL_D_SOCKET_PATH);
         channel_service_destroy(g_svc);
+        g_svc = NULL;
+        airy_mtx_destroy(&g_running_lock_channel_d);
+        airy_sock_cleanup();
         return EXIT_FAILURE;
     }
     SVC_LOG_INFO("channel_d: listening on %s (fd=%d)", CHANNEL_D_SOCKET_PATH, (int)server_fd);
 
-    g_bsd_channel_d = daemon_bootstrap_sd_start("channel_d", "channel", CHANNEL_D_SOCKET_PATH,
-                                                  0, "channel,core", 0);
-    g_bipc_channel_d = daemon_bootstrap_ipc_start("channel_d", "channel", CHANNEL_D_SOCKET_PATH,
-                                                   0, IPC_BUS_PROTO_JSON_RPC);
+    /* 事件驱动（mem_d 同款模式）：统一 accept + JSON-RPC 分发 */
+    daemon_event_config_t ev_config;
+    __builtin_memset(&ev_config, 0, sizeof(ev_config));
+    ev_config.max_events = 64;
+    ev_config.thread_pool_min = 4;
+    ev_config.thread_pool_max = 8;
+    ev_config.thread_pool_queue_size = 256;
+    ev_config.use_jsonrpc = true;
+    ev_config.on_client = daemon_on_client_channel_d;
+    ev_config.service_ctx = NULL;
 
-    while (atomic_load_explicit(&g_running_channel_d, memory_order_acquire)) {
-        /* 替代 sleep(1)，允许更快响应关闭信号 */
-        for (int _w = 0; _w < 10 && atomic_load_explicit(&g_running_channel_d, memory_order_acquire); _w++) {
-            usleep(100000); /* 100ms */
-        }
+    int ret = daemon_init_event_driver("channel_d", "channel", CHANNEL_D_SOCKET_PATH, 0,
+                                       "channel,core", 0, &ev_config, &g_event_driver_channel_d,
+                                       &g_bsd_channel_d, &g_bipc_channel_d);
+    if (ret != AIRY_SUCCESS || !g_event_driver_channel_d) {
+        SVC_LOG_ERROR("channel_d: failed to create event driver");
+        airy_sock_close(server_fd);
+        channel_service_destroy(g_svc);
+        g_svc = NULL;
+        airy_mtx_destroy(&g_running_lock_channel_d);
+        airy_sock_cleanup();
+        return EXIT_FAILURE;
     }
 
+    g_dispatcher_channel_d = daemon_event_driver_get_dispatcher(g_event_driver_channel_d);
+    method_dispatcher_register(g_dispatcher_channel_d, "ping", channel_on_ping, NULL);
+    method_dispatcher_register(g_dispatcher_channel_d, "list", channel_on_list, NULL);
+    method_dispatcher_register(g_dispatcher_channel_d, "open", channel_on_open, NULL);
+    method_dispatcher_register(g_dispatcher_channel_d, "close", channel_on_close, NULL);
+    method_dispatcher_register(g_dispatcher_channel_d, "send", channel_on_send, NULL);
+    method_dispatcher_register(g_dispatcher_channel_d, "health", channel_on_health, NULL);
+    SVC_LOG_INFO("channel_d: registered 6 RPC methods (channel.* namespace)");
+
+    if (daemon_event_driver_add_server_fd(g_event_driver_channel_d, (int)server_fd) != 0) {
+        SVC_LOG_ERROR("channel_d: failed to add server fd to event driver");
+        daemon_event_driver_destroy(g_event_driver_channel_d);
+        airy_sock_close(server_fd);
+        channel_service_destroy(g_svc);
+        g_svc = NULL;
+        airy_mtx_destroy(&g_running_lock_channel_d);
+        airy_sock_cleanup();
+        return EXIT_FAILURE;
+    }
+
+    SVC_LOG_INFO("channel_d: running (event-driven mode), waiting for requests");
+    daemon_event_driver_run(g_event_driver_channel_d);
+
     SVC_LOG_INFO("channel_d shutting down");
-    daemon_cleanup_standard(g_bipc_channel_d, g_bsd_channel_d, NULL, server_fd,
+    daemon_cleanup_standard(g_bipc_channel_d, g_bsd_channel_d, g_event_driver_channel_d, server_fd,
                             destroy_service_channel_d, &g_running_lock_channel_d);
     log_cleanup();
     return 0;
