@@ -33,8 +33,8 @@
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_agent"
 #define DEFAULT_TCP_PORT 8086
 #define MAX_BUFFER 65536
-#define MAX_CLIENTS 64
-#define AGENT_DEFAULT_MAX_AGENTS 256
+#define MAX_CLIENTS 2048
+#define AGENT_DEFAULT_MAX_AGENTS 10000
 
 /* 生成公共全局变量、信号处理、help、客户端处理等样板 */
 DAEMON_DECLARE_COMMON(agent_d, agent, DEFAULT_SOCKET_PATH_UNIX,
@@ -43,6 +43,18 @@ DAEMON_DECLARE_COMMON(agent_d, agent, DEFAULT_SOCKET_PATH_UNIX,
 /* ==================== 全局状态 ==================== */
 
 static agent_service_t *g_service = NULL;
+
+/* daemon 配置（max_agents 等），供启动/监控线程使用 */
+typedef struct {
+    char *socket_path;
+    char *tcp_host;
+    uint16_t tcp_port;
+    int use_tcp;
+    int max_clients;
+    size_t max_agents;
+} agent_daemon_config_t;
+
+static agent_daemon_config_t g_config = {0};
 
 #if AIRY_PLATFORM_POSIX
 /* P0-3：空闲 Agent 子进程回收。
@@ -97,18 +109,133 @@ static void idle_reaper_stop(void)
         g_reaper_thread = AIRY_INVALID_THREAD;
     }
 }
+
+/* ==================== 性能监控 ==================== */
+
+/* 单调时钟微秒（POSIX: clock_gettime；Windows: GetTickCount64 换算） */
+static uint64_t perf_now_us(void)
+{
+#if AIRY_PLATFORM_POSIX
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000ull;
+#else
+    return (uint64_t)GetTickCount64() * 1000ull;
+#endif
+}
+
+/* 慢请求判定阈值（微秒）：AIRY_AGENT_PERF_SLOW_US，默认 1s */
+static int64_t perf_slow_threshold_us(void)
+{
+    const char *env = getenv("AIRY_AGENT_PERF_SLOW_US");
+    if (env && env[0] != '\0') {
+        long long v = strtoll(env, NULL, 10);
+        if (v > 0)
+            return v;
+    }
+    return 1000000;
+}
+
+/* 周期采样线程：聚合 service 层原子计数器 + 线程池状态，输出一行
+ * [PERF] 摘要。10000 并发下逐请求日志会刷爆 IO，因此只做窗口聚合：
+ *   - spawn/invoke/terminate 窗口增量与累计成败
+ *   - spawn/invoke 平均/最大时延（微秒）
+ *   - 全局锁竞争次数（lock_wait，trylock 探测）
+ *   - 当前 agent 数 / 峰值并发 / 线程池 active 与 pending（队列深度）
+ * 采样间隔：AIRY_AGENT_PERF_INTERVAL_S，默认 5s。 */
+static volatile int g_perf_run = 0;
+static airy_thread_t g_perf_thread = AIRY_INVALID_THREAD;
+
+static void *perf_monitor_thread(void *arg)
+{
+    (void)arg;
+    const char *env_interval = getenv("AIRY_AGENT_PERF_INTERVAL_S");
+    int interval_s = 5;
+    if (env_interval && env_interval[0] != '\0') {
+        long v = strtol(env_interval, NULL, 10);
+        if (v > 0 && v <= 3600)
+            interval_s = (int)v;
+    }
+    SVC_LOG_INFO("Perf monitor started (interval=%ds, slow_threshold_us=%lld)",
+                 interval_s, (long long)perf_slow_threshold_us());
+
+    agent_perf_stats_t prev;
+    __builtin_memset(&prev, 0, sizeof(prev));
+    int slept = 0;
+    while (g_perf_run) {
+        struct timespec ts = {1, 0};
+        nanosleep(&ts, NULL);
+        if (!g_perf_run)
+            break;
+        if (++slept < interval_s)
+            continue;
+        slept = 0;
+
+        if (!g_service)
+            continue;
+        agent_perf_stats_t cur;
+        if (agent_service_get_perf(g_service, &cur) != AIRY_SUCCESS)
+            continue;
+
+        int d_spawn = cur.spawn_total - prev.spawn_total;
+        int d_invoke = cur.invoke_total - prev.invoke_total;
+        int d_terminate = cur.terminate_total - prev.terminate_total;
+        int d_lock = cur.lock_wait_total - prev.lock_wait_total;
+        prev = cur;
+
+        /* 线程池状态：active 线程数 / pending（待执行队列深度） */
+        uint32_t pool_active = 0, pool_pending = 0;
+        thread_pool_t *pool = g_event_driver_agent_d
+                                  ? daemon_event_driver_get_pool(g_event_driver_agent_d)
+                                  : NULL;
+        if (pool) {
+            pool_active = thread_pool_active_count(pool);
+            pool_pending = thread_pool_pending_count(pool);
+        }
+
+        uint64_t spawn_avg = (cur.spawn_ok > 0)
+            ? (uint64_t)(cur.spawn_us_total / (unsigned long long)cur.spawn_ok)
+            : 0;
+        uint64_t invoke_avg = (cur.invoke_ok > 0)
+            ? (uint64_t)(cur.invoke_us_total / (unsigned long long)cur.invoke_ok)
+            : 0;
+
+        SVC_LOG_INFO(
+            "[PERF] window=%ds spawn{+%d total=%d ok=%d fail=%d avg_us=%llu max_us=%llu} "
+            "invoke{+%d total=%d ok=%d fail=%d avg_us=%llu max_us=%llu} "
+            "terminate{+%d total=%d} lock_wait{+%d total=%d} "
+            "agents=%zu/%zu peak_running=%d pool{active=%u pending=%u}",
+            interval_s,
+            d_spawn, cur.spawn_total, cur.spawn_ok, cur.spawn_fail,
+            (unsigned long long)spawn_avg, cur.spawn_us_max,
+            d_invoke, cur.invoke_total, cur.invoke_ok, cur.invoke_fail,
+            (unsigned long long)invoke_avg, cur.invoke_us_max,
+            d_terminate, cur.terminate_total,
+            d_lock, cur.lock_wait_total,
+            agent_service_count(g_service), g_config.max_agents,
+            cur.peak_running, pool_active, pool_pending);
+    }
+    return NULL;
+}
+
+static void perf_monitor_start(void)
+{
+    g_perf_run = 1;
+    if (airy_thread_create(&g_perf_thread, perf_monitor_thread, NULL) != 0) {
+        g_perf_run = 0;
+        SVC_LOG_WARN("Failed to start perf monitor thread");
+    }
+}
+
+static void perf_monitor_stop(void)
+{
+    g_perf_run = 0;
+    if (g_perf_thread != AIRY_INVALID_THREAD) {
+        airy_thread_join(g_perf_thread, NULL);
+        g_perf_thread = AIRY_INVALID_THREAD;
+    }
+}
 #endif /* AIRY_PLATFORM_POSIX */
-
-typedef struct {
-    char *socket_path;
-    char *tcp_host;
-    uint16_t tcp_port;
-    int use_tcp;
-    int max_clients;
-    size_t max_agents;
-} agent_daemon_config_t;
-
-static agent_daemon_config_t g_config = {0};
 
 #ifdef _WIN32
 static BOOL WINAPI console_handler(DWORD fdwCtrlType)
@@ -178,9 +305,19 @@ static void handle_spawn(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
+    uint64_t perf_t0 = perf_now_us();
     char *out_agent_id = NULL;
     int ret = agent_service_spawn(g_service, spec_str, &out_agent_id);
     AIRY_FREE(spec_str);
+
+    /* 慢请求监控：超过阈值（默认 1s）时打 WARN，便于定位冷启动/资源瓶颈 */
+    {
+        uint64_t elapsed = perf_now_us() - perf_t0;
+        int64_t slow_us = perf_slow_threshold_us();
+        if ((int64_t)elapsed > slow_us)
+            SVC_LOG_WARN("agent.spawn slow: %llu us (threshold=%lld us)",
+                         (unsigned long long)elapsed, (long long)slow_us);
+    }
 
     if (ret != AIRY_SUCCESS || !out_agent_id) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent spawn failed", id);
@@ -228,9 +365,20 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
     const char *input_str = input && cJSON_IsString(input) ? input->valuestring : "";
     size_t input_len = strlen(input_str);
 
+    uint64_t perf_t0 = perf_now_us();
     char *out_output = NULL;
     int ret = agent_service_invoke(g_service, agent_id->valuestring,
                                      input_str, input_len, &out_output);
+
+    /* 慢请求监控：invoke 含子进程 LLM 往返，超过阈值（默认 1s）打 WARN */
+    {
+        uint64_t elapsed = perf_now_us() - perf_t0;
+        int64_t slow_us = perf_slow_threshold_us();
+        if ((int64_t)elapsed > slow_us)
+            SVC_LOG_WARN("agent.invoke slow: %llu us (threshold=%lld us, agent_id=%s)",
+                         (unsigned long long)elapsed, (long long)slow_us,
+                         agent_id->valuestring);
+    }
 
     if (ret == AIRY_SUCCESS && out_output) {
         cJSON *result = cJSON_CreateObject();
@@ -427,10 +575,10 @@ int main(int argc, char **argv)
 
     daemon_event_config_t ev_config;
     __builtin_memset(&ev_config, 0, sizeof(ev_config));
-    ev_config.max_events = 64;
-    ev_config.thread_pool_min = 4;
-    ev_config.thread_pool_max = 8;
-    ev_config.thread_pool_queue_size = 256;
+    ev_config.max_events = 256;
+    ev_config.thread_pool_min = 16;
+    ev_config.thread_pool_max = 128;
+    ev_config.thread_pool_queue_size = 4096;
     ev_config.use_jsonrpc = true;
     ev_config.on_client = daemon_on_client_agent_d;
     ev_config.service_ctx = NULL;
@@ -473,10 +621,13 @@ int main(int argc, char **argv)
 #if AIRY_PLATFORM_POSIX
     /* P0-3：启动空闲子进程回收守护线程 */
     idle_reaper_start();
+    /* 性能监控：周期采样线程（10000 并发验证资源瓶颈） */
+    perf_monitor_start();
 #endif
     daemon_event_driver_run(g_event_driver_agent_d);
 #if AIRY_PLATFORM_POSIX
-    /* 主循环退出：先停止回收线程再清理服务 */
+    /* 主循环退出：先停止监控与回收线程再清理服务 */
+    perf_monitor_stop();
     idle_reaper_stop();
 #endif
 

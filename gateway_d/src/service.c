@@ -42,7 +42,7 @@ void gateway_service_get_default_config(gateway_service_config_t *config)
     AIRY_MEMSET(config, 0, sizeof(*config));
 
     config->name = "agentrt-gateway";
-    config->version = "0.1.0";
+    config->version = "0.1.1";
 
     config->http.type = GATEWAY_DAEMON_TYPE_HTTP;
     config->http.host = "0.0.0.0";

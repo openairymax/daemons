@@ -27,7 +27,7 @@ typedef struct {
 
 #define GW_MCP_SERVER_CONFIG_DEFAULTS                                                      \
     {                                                                                      \
-        .server_name = "agentrt-gateway", .server_version = "1.0.0", .capabilities = 0x3F, \
+        .server_name = "agentrt-gateway", .server_version = "0.1.1", .capabilities = 0x3F, \
         .default_timeout_ms = 30000, .enable_progress = true, .enable_cancellation = true, \
         .enable_sampling = true                                                            \
     }

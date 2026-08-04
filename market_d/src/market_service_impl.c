@@ -180,6 +180,7 @@ struct market_service {
     size_t agent_count;
     skill_info_t *skills[MAX_SKILLS];
     size_t skill_count;
+    airy_mtx_t lock;
     int initialized;
 };
 
@@ -208,6 +209,7 @@ int market_service_create(const market_config_t *config, market_service_t **serv
     if (config->storage_path)
         svc->config.storage_path = AIRY_STRDUP(config->storage_path);
 
+    airy_mtx_init(&svc->lock);
     svc->initialized = 1;
     *service = svc;
     return 0;
@@ -220,6 +222,7 @@ int market_service_destroy(market_service_t *service)
         return AIRY_ERR_INVALID_PARAM;
     }
 
+    airy_mtx_lock(&service->lock);
     for (size_t i = 0; i < service->agent_count; i++) {
         if (service->agents[i]) {
             AIRY_FREE(service->agents[i]->agent_id);
@@ -248,6 +251,8 @@ int market_service_destroy(market_service_t *service)
 
     AIRY_FREE((void *)service->config.registry_url);
     AIRY_FREE((void *)service->config.storage_path);
+    airy_mtx_unlock(&service->lock);
+    airy_mtx_destroy(&service->lock);
     AIRY_FREE(service);
     return 0;
 }
@@ -263,6 +268,7 @@ int market_service_register_agent(market_service_t *service, const agent_info_t 
         AIRY_ERROR(AIRY_ERR_OVERFLOW, "max agents exceeded");
     }
 
+    airy_mtx_lock(&service->lock);
     for (size_t i = 0; i < service->agent_count; i++) {
         if (strcmp(service->agents[i]->agent_id, agent_info->agent_id) == 0) {
             AIRY_FREE(service->agents[i]->name);
@@ -294,12 +300,14 @@ int market_service_register_agent(market_service_t *service, const agent_info_t 
             service->agents[i]->rating = agent_info->rating;
             service->agents[i]->download_count = agent_info->download_count;
             service->agents[i]->last_updated = (uint64_t)time(NULL);
+            airy_mtx_unlock(&service->lock);
             return 0;
         }
     }
 
     agent_info_t *new_agent = (agent_info_t *)AIRY_CALLOC(1, sizeof(agent_info_t));
     if (!new_agent) {
+        airy_mtx_unlock(&service->lock);
         SVC_LOG_ERROR("market_service_register_agent: calloc failed for new agent entry");
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate agent entry");
     }
@@ -316,6 +324,7 @@ int market_service_register_agent(market_service_t *service, const agent_info_t 
     new_agent->dependencies =
         agent_info->dependencies ? AIRY_STRDUP(agent_info->dependencies) : NULL;
     if (!new_agent->agent_id || !new_agent->name || !new_agent->version) {
+        airy_mtx_unlock(&service->lock);
         SVC_LOG_ERROR("market_service_register_agent: strdup failed for required agent fields (agent_id=%p, name=%p, version=%p)", (const void *)new_agent->agent_id, (const void *)new_agent->name, (const void *)new_agent->version);
         AIRY_FREE(new_agent->agent_id);
         AIRY_FREE(new_agent->name);
@@ -332,6 +341,7 @@ int market_service_register_agent(market_service_t *service, const agent_info_t 
     new_agent->last_updated = (uint64_t)time(NULL);
 
     service->agents[service->agent_count++] = new_agent;
+    airy_mtx_unlock(&service->lock);
     return 0;
 }
 
@@ -346,6 +356,7 @@ int market_service_register_skill(market_service_t *service, const skill_info_t 
         AIRY_ERROR(AIRY_ERR_OVERFLOW, "max skills exceeded");
     }
 
+    airy_mtx_lock(&service->lock);
     for (size_t i = 0; i < service->skill_count; i++) {
         if (strcmp(service->skills[i]->skill_id, skill_info->skill_id) == 0) {
             AIRY_FREE(service->skills[i]->name);
@@ -376,12 +387,14 @@ int market_service_register_skill(market_service_t *service, const skill_info_t 
             service->skills[i]->rating = skill_info->rating;
             service->skills[i]->download_count = skill_info->download_count;
             service->skills[i]->last_updated = (uint64_t)time(NULL);
+            airy_mtx_unlock(&service->lock);
             return 0;
         }
     }
 
     skill_info_t *new_skill = (skill_info_t *)AIRY_CALLOC(1, sizeof(skill_info_t));
     if (!new_skill) {
+        airy_mtx_unlock(&service->lock);
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate skill entry");
     }
 
@@ -404,6 +417,7 @@ int market_service_register_skill(market_service_t *service, const skill_info_t 
         AIRY_FREE(new_skill->repository);
         AIRY_FREE(new_skill->dependencies);
         AIRY_FREE(new_skill);
+        airy_mtx_unlock(&service->lock);
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate skill required fields");
     }
     new_skill->rating = skill_info->rating;
@@ -411,6 +425,7 @@ int market_service_register_skill(market_service_t *service, const skill_info_t 
     new_skill->last_updated = (uint64_t)time(NULL);
 
     service->skills[service->skill_count++] = new_skill;
+    airy_mtx_unlock(&service->lock);
     return 0;
 }
 
@@ -430,6 +445,7 @@ int market_service_search_agents(market_service_t *service, const search_params_
     }
 
     size_t found = 0;
+    airy_mtx_lock(&service->lock);
     for (size_t i = 0; i < service->agent_count; i++) {
         if (params->query && strlen(params->query) > 0) {
             if (!strstr(service->agents[i]->agent_id, params->query) &&
@@ -447,6 +463,7 @@ int market_service_search_agents(market_service_t *service, const search_params_
             if (!tmp) {
                 SVC_LOG_ERROR("market_service_search_agents: realloc failed for search results (results_size=%zu)", results_size);
                 AIRY_FREE(results);
+                airy_mtx_unlock(&service->lock);
                 AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to resize search results");
             }
             results = tmp;
@@ -456,6 +473,7 @@ int market_service_search_agents(market_service_t *service, const search_params_
         if (params->limit > 0 && found >= params->limit)
             break;
     }
+    airy_mtx_unlock(&service->lock);
 
     *agents = results;
     *count = found;
@@ -475,6 +493,7 @@ int market_service_search_skills(market_service_t *service, const search_params_
     }
 
     size_t found = 0;
+    airy_mtx_lock(&service->lock);
     for (size_t i = 0; i < service->skill_count; i++) {
         if (params->query && strlen(params->query) > 0) {
             if (!strstr(service->skills[i]->skill_id, params->query) &&
@@ -491,6 +510,7 @@ int market_service_search_skills(market_service_t *service, const search_params_
                 (skill_info_t **)AIRY_REALLOC(results, sizeof(skill_info_t *) * results_size);
             if (!tmp) {
                 AIRY_FREE(results);
+                airy_mtx_unlock(&service->lock);
                 AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to resize skill search results");
             }
             results = tmp;
@@ -500,6 +520,7 @@ int market_service_search_skills(market_service_t *service, const search_params_
         if (params->limit > 0 && found >= params->limit)
             break;
     }
+    airy_mtx_unlock(&service->lock);
 
     *skills = results;
     *count = found;
@@ -524,15 +545,18 @@ int market_service_install_agent(market_service_t *service, const install_reques
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate install result");
     }
 
-    agent_info_t *target = NULL;
+    /* 阶段1：锁内查找 + 快照目标字段（锁外执行下载时使用快照，避免悬垂指针） */
+    airy_mtx_lock(&service->lock);
+    size_t target_idx = (size_t)-1;
     for (size_t i = 0; i < service->agent_count; i++) {
         if (strcmp(service->agents[i]->agent_id, request->id) == 0) {
-            target = service->agents[i];
+            target_idx = i;
             break;
         }
     }
 
-    if (!target) {
+    if (target_idx == (size_t)-1) {
+        airy_mtx_unlock(&service->lock);
         res->success = false;
         res->message = AIRY_STRDUP("Agent not found");
         res->error_code = -3;
@@ -540,10 +564,30 @@ int market_service_install_agent(market_service_t *service, const install_reques
         return 0;
     }
 
-    const char *base_path =
-        request->install_path
-            ? request->install_path
-            : (service->config.storage_path ? service->config.storage_path : "./agents");
+    agent_info_t *target = service->agents[target_idx];
+    char *snap_agent_id = target->agent_id ? AIRY_STRDUP(target->agent_id) : NULL;
+    char *snap_name = target->name ? AIRY_STRDUP(target->name) : NULL;
+    char *snap_version = target->version ? AIRY_STRDUP(target->version) : NULL;
+    char *snap_author = target->author ? AIRY_STRDUP(target->author) : NULL;
+    char *snap_repo = target->repository ? AIRY_STRDUP(target->repository) : NULL;
+    char *snap_storage =
+        service->config.storage_path ? AIRY_STRDUP(service->config.storage_path) : NULL;
+    airy_mtx_unlock(&service->lock);
+
+    if (!snap_agent_id) {
+        AIRY_FREE(snap_name);
+        AIRY_FREE(snap_version);
+        AIRY_FREE(snap_author);
+        AIRY_FREE(snap_repo);
+        AIRY_FREE(snap_storage);
+        AIRY_FREE(res);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    /* 阶段2：锁外执行本地安装与网络下载（fork/execlp/waitpid 不得持锁） */
+    const char *base_path = request->install_path
+                                ? request->install_path
+                                : (snap_storage ? snap_storage : "./agents");
     char install_dir[1024];
     snprintf(install_dir, sizeof(install_dir), "%s/%s", base_path, request->id);
 
@@ -555,6 +599,12 @@ int market_service_install_agent(market_service_t *service, const install_reques
             res->message = AIRY_STRDUP("Failed to create install directory");
             res->error_code = -4;
             *result = res;
+            AIRY_FREE(snap_agent_id);
+            AIRY_FREE(snap_name);
+            AIRY_FREE(snap_version);
+            AIRY_FREE(snap_author);
+            AIRY_FREE(snap_repo);
+            AIRY_FREE(snap_storage);
             return 0;
         }
     }
@@ -568,17 +618,18 @@ int market_service_install_agent(market_service_t *service, const install_reques
     if (meta_fp) {
         char _mi_buf[1024];
         fputs("{\n", meta_fp);
-        snprintf(_mi_buf, sizeof(_mi_buf), "  \"agent_id\": \"%s\",\n", target->agent_id);
+        snprintf(_mi_buf, sizeof(_mi_buf), "  \"agent_id\": \"%s\",\n",
+                 snap_agent_id ? snap_agent_id : "");
         fputs(_mi_buf, meta_fp);
         snprintf(_mi_buf, sizeof(_mi_buf), "  \"name\": \"%s\",\n",
-                 target->name ? target->name : "");
+                 snap_name ? snap_name : "");
         fputs(_mi_buf, meta_fp);
         snprintf(_mi_buf, sizeof(_mi_buf), "  \"version\": \"%s\",\n",
                  request->version ? request->version
-                                  : (target->version ? target->version : "0.0.1"));
+                                  : (snap_version ? snap_version : "0.0.1"));
         fputs(_mi_buf, meta_fp);
         snprintf(_mi_buf, sizeof(_mi_buf), "  \"author\": \"%s\",\n",
-                 target->author ? target->author : "");
+                 snap_author ? snap_author : "");
         fputs(_mi_buf, meta_fp);
         fputs("  \"status\": \"installed\",\n", meta_fp);
         snprintf(_mi_buf, sizeof(_mi_buf), "  \"installed_at\": %lld\n", (long long)time(NULL));
@@ -587,7 +638,7 @@ int market_service_install_agent(market_service_t *service, const install_reques
         fclose(meta_fp);
     }
 
-    if (target->repository && strlen(target->repository) > 0 && is_valid_url(target->repository)) {
+    if (snap_repo && strlen(snap_repo) > 0 && is_valid_url(snap_repo)) {
         char download_path[1024];
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-truncation"
@@ -598,13 +649,12 @@ int market_service_install_agent(market_service_t *service, const install_reques
         /* Windows 等价：用 win_run_command（CreateProcess）替代 fork/execlp/waitpid。
          * 行为对齐：curl 失败则仅元数据安装；成功则解压 tar 并清理下载文件。 */
         {
-            const char *const curl_args[] = {"-sfL", "-o", download_path,
-                                             target->repository, NULL};
+            const char *const curl_args[] = {"-sfL", "-o", download_path, snap_repo, NULL};
             int curl_ret = win_run_command("curl", curl_args);
             if (curl_ret != 0) {
                 SVC_LOG_WARN(
                     "Download failed for agent %s from %s (curl_ret=%d), metadata only install",
-                    request->id, target->repository, curl_ret);
+                    request->id, snap_repo, curl_ret);
             } else {
                 const char *const tar_args[] = {"-xzf", download_path, "-C", install_dir, NULL};
                 win_run_command("tar", tar_args);
@@ -614,7 +664,7 @@ int market_service_install_agent(market_service_t *service, const install_reques
 #else
         pid_t curl_pid = fork();
         if (curl_pid == 0) {
-            execlp("curl", "curl", "-sfL", "-o", download_path, target->repository, (char *)NULL);
+            execlp("curl", "curl", "-sfL", "-o", download_path, snap_repo, (char *)NULL);
             _exit(127);
         } else if (curl_pid > 0) {
             int curl_status = 0;
@@ -623,7 +673,7 @@ int market_service_install_agent(market_service_t *service, const install_reques
             if (curl_ret != 0) {
                 SVC_LOG_WARN(
                     "Download failed for agent %s from %s (curl_ret=%d), metadata only install",
-                    request->id, target->repository, curl_ret);
+                    request->id, snap_repo, curl_ret);
             } else {
                 pid_t tar_pid = fork();
                 if (tar_pid == 0) {
@@ -641,14 +691,30 @@ int market_service_install_agent(market_service_t *service, const install_reques
 #endif
     }
 
-    target->status = AGENT_STATUS_AVAILABLE;
-    target->download_count++;
+    /* 阶段3：重新加锁更新注册表状态 */
+    airy_mtx_lock(&service->lock);
+    for (size_t i = 0; i < service->agent_count; i++) {
+        if (strcmp(service->agents[i]->agent_id, request->id) == 0) {
+            service->agents[i]->status = AGENT_STATUS_AVAILABLE;
+            service->agents[i]->download_count++;
+            break;
+        }
+    }
+    airy_mtx_unlock(&service->lock);
 
     res->success = true;
     res->message = AIRY_STRDUP("Agent installed successfully");
-    res->installed_version = AIRY_STRDUP(request->version ? request->version : target->version);
+    res->installed_version =
+        AIRY_STRDUP(request->version ? request->version : (snap_version ? snap_version : "0.0.1"));
     res->install_path = AIRY_STRDUP(install_dir);
     res->error_code = 0;
+
+    AIRY_FREE(snap_agent_id);
+    AIRY_FREE(snap_name);
+    AIRY_FREE(snap_version);
+    AIRY_FREE(snap_author);
+    AIRY_FREE(snap_repo);
+    AIRY_FREE(snap_storage);
 
     *result = res;
     return 0;
@@ -668,6 +734,7 @@ int market_service_install_skill(market_service_t *service, const install_reques
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate skill install result");
     }
 
+    airy_mtx_lock(&service->lock);
     skill_info_t *target = NULL;
     for (size_t i = 0; i < service->skill_count; i++) {
         if (strcmp(service->skills[i]->skill_id, request->id) == 0) {
@@ -677,6 +744,7 @@ int market_service_install_skill(market_service_t *service, const install_reques
     }
 
     if (!target) {
+        airy_mtx_unlock(&service->lock);
         res->success = false;
         res->message = AIRY_STRDUP("Skill not found");
         res->error_code = -3;
@@ -691,6 +759,7 @@ int market_service_install_skill(market_service_t *service, const install_reques
     res->installed_version = AIRY_STRDUP(request->version ? request->version : target->version);
     res->install_path = AIRY_STRDUP(request->install_path ? request->install_path : "./skills");
     res->error_code = 0;
+    airy_mtx_unlock(&service->lock);
 
     *result = res;
     return 0;
@@ -707,6 +776,7 @@ int market_service_uninstall_agent(market_service_t *service, const char *agent_
         AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "agent_id is unsafe path component");
     }
 
+    airy_mtx_lock(&service->lock);
     for (size_t i = 0; i < service->agent_count; i++) {
         if (strcmp(service->agents[i]->agent_id, agent_id) == 0) {
             const char *storage =
@@ -721,9 +791,11 @@ int market_service_uninstall_agent(market_service_t *service, const char *agent_
             }
 
             service->agents[i]->status = AGENT_STATUS_DISABLED;
+            airy_mtx_unlock(&service->lock);
             return 0;
         }
     }
+    airy_mtx_unlock(&service->lock);
     AIRY_ERROR(AIRY_ERR_NOT_FOUND, "agent not found for uninstall");
 }
 
@@ -732,6 +804,7 @@ int market_service_uninstall_skill(market_service_t *service, const char *skill_
     if (!service || !skill_id || !service->initialized)
         return AIRY_ERR_INVALID_PARAM;
 
+    airy_mtx_lock(&service->lock);
     for (size_t i = 0; i < service->skill_count; i++) {
         if (strcmp(service->skills[i]->skill_id, skill_id) == 0) {
             AIRY_FREE(service->skills[i]->skill_id);
@@ -747,9 +820,11 @@ int market_service_uninstall_skill(market_service_t *service, const char *skill_
                 service->skills[j] = service->skills[j + 1];
             }
             service->skill_count--;
+            airy_mtx_unlock(&service->lock);
             return 0;
         }
     }
+    airy_mtx_unlock(&service->lock);
     AIRY_ERROR(AIRY_ERR_NOT_FOUND, "skill not found for uninstall");
 }
 
@@ -766,6 +841,7 @@ int market_service_get_installed_agents(market_service_t *service, agent_info_t 
     }
 
     size_t found = 0;
+    airy_mtx_lock(&service->lock);
     for (size_t i = 0; i < service->agent_count; i++) {
         if (service->agents[i]->status == AGENT_STATUS_AVAILABLE ||
             service->agents[i]->status == AGENT_STATUS_ERROR) {
@@ -776,6 +852,7 @@ int market_service_get_installed_agents(market_service_t *service, agent_info_t 
                     results, sizeof(agent_info_t *) * results_size);
                 if (!tmp) {
                     AIRY_FREE(results);
+                    airy_mtx_unlock(&service->lock);
                     AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY,
                                   "failed to resize installed agents list");
                 }
@@ -785,6 +862,7 @@ int market_service_get_installed_agents(market_service_t *service, agent_info_t 
             results[found++] = service->agents[i];
         }
     }
+    airy_mtx_unlock(&service->lock);
 
     *agents = results;
     *count = found;
@@ -804,6 +882,7 @@ int market_service_get_installed_skills(market_service_t *service, skill_info_t 
     }
 
     size_t found = 0;
+    airy_mtx_lock(&service->lock);
     for (size_t i = 0; i < service->skill_count; i++) {
         if (found >= results_size) {
             results_size *= 2;
@@ -811,6 +890,7 @@ int market_service_get_installed_skills(market_service_t *service, skill_info_t 
                 (skill_info_t **)AIRY_REALLOC(results, sizeof(skill_info_t *) * results_size);
             if (!tmp) {
                 AIRY_FREE(results);
+                airy_mtx_unlock(&service->lock);
                 AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to resize installed skills list");
             }
             results = tmp;
@@ -818,6 +898,7 @@ int market_service_get_installed_skills(market_service_t *service, skill_info_t 
 
         results[found++] = service->skills[i];
     }
+    airy_mtx_unlock(&service->lock);
 
     *skills = results;
     *count = found;
@@ -832,9 +913,11 @@ int market_service_check_update(market_service_t *service, const char *id, bool 
 
     *has_update = false;
 
+    airy_mtx_lock(&service->lock);
     for (size_t i = 0; i < service->agent_count; i++) {
         if (strcmp(service->agents[i]->agent_id, id) == 0) {
             *latest_version = AIRY_STRDUP(service->agents[i]->version);
+            airy_mtx_unlock(&service->lock);
             return 0;
         }
     }
@@ -842,11 +925,13 @@ int market_service_check_update(market_service_t *service, const char *id, bool 
     for (size_t i = 0; i < service->skill_count; i++) {
         if (strcmp(service->skills[i]->skill_id, id) == 0) {
             *latest_version = AIRY_STRDUP(service->skills[i]->version);
+            airy_mtx_unlock(&service->lock);
             return 0;
         }
     }
 
     *latest_version = NULL;
+    airy_mtx_unlock(&service->lock);
     AIRY_ERROR(AIRY_ERR_NOT_FOUND, "update check: id not found");
 }
 
@@ -854,6 +939,8 @@ int market_service_reload_config(market_service_t *service, const market_config_
 {
     if (!service || !config || !service->initialized)
         return AIRY_ERR_INVALID_PARAM;
+
+    airy_mtx_lock(&service->lock);
 
     // Save old owned pointers
     char *old_url = (char *)service->config.registry_url;
@@ -873,12 +960,14 @@ int market_service_reload_config(market_service_t *service, const market_config_
 
     if (config->registry_url && !new_url) {
         AIRY_FREE(new_path);
+        airy_mtx_unlock(&service->lock);
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate registry_url");
         return AIRY_ERR_OUT_OF_MEMORY;
     }
     if (config->storage_path && !new_path) {
         AIRY_FREE(new_url);
         service->config.registry_url = new_url;
+        airy_mtx_unlock(&service->lock);
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate storage_path");
         return AIRY_ERR_OUT_OF_MEMORY;
     }
@@ -887,6 +976,7 @@ int market_service_reload_config(market_service_t *service, const market_config_
     service->config.storage_path = new_path;
     AIRY_FREE(old_url);
     AIRY_FREE(old_path);
+    airy_mtx_unlock(&service->lock);
 
     return 0;
 }
@@ -896,17 +986,37 @@ int market_service_sync_registry(market_service_t *service)
     if (!service || !service->initialized)
         return AIRY_ERR_INVALID_PARAM;
 
+    /* 阶段1：锁内校验配置并快照 URL/存储路径（网络操作在锁外执行） */
+    airy_mtx_lock(&service->lock);
     if (!service->config.enable_remote_registry) {
+        airy_mtx_unlock(&service->lock);
         return 0;
     }
 
     if (!service->config.registry_url || strlen(service->config.registry_url) == 0) {
         SVC_LOG_WARN("Sync registry: no registry_url configured");
+        airy_mtx_unlock(&service->lock);
         return 0;
     }
 
-    const char *storage =
-        service->config.storage_path ? service->config.storage_path : AIRY_CACHE_DIR;
+    if (!is_safe_for_shell(service->config.registry_url)) {
+        SVC_LOG_WARN("Sync registry: invalid registry_url, possible injection detected");
+        airy_mtx_unlock(&service->lock);
+        return 0;
+    }
+
+    char *snap_url = AIRY_STRDUP(service->config.registry_url);
+    char *snap_storage =
+        service->config.storage_path ? AIRY_STRDUP(service->config.storage_path) : NULL;
+    airy_mtx_unlock(&service->lock);
+
+    if (!snap_url) {
+        AIRY_FREE(snap_storage);
+        SVC_LOG_ERROR("Sync registry: strdup failed for registry_url");
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    const char *storage = snap_storage ? snap_storage : AIRY_CACHE_DIR;
 
     {
         size_t pos = 0;
@@ -928,16 +1038,11 @@ AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
     char index_path[1024];
     snprintf(index_path, sizeof(index_path), "%s/registry_index.json", storage);
 
-    if (!is_safe_for_shell(service->config.registry_url)) {
-        SVC_LOG_WARN("Sync registry: invalid registry_url, possible injection detected");
-        return 0;
-    }
-
     char url[2048];
-    if (strncmp(service->config.registry_url, "http", 4) == 0) {
-        snprintf(url, sizeof(url), "%s/index.json", service->config.registry_url);
+    if (strncmp(snap_url, "http", 4) == 0) {
+        snprintf(url, sizeof(url), "%s/index.json", snap_url);
     } else {
-        snprintf(url, sizeof(url), "https://%s/index.json", service->config.registry_url);
+        snprintf(url, sizeof(url), "https://%s/index.json", snap_url);
     }
 
 #ifdef _WIN32
@@ -949,6 +1054,8 @@ AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
         int curl_ret = win_run_command("curl", curl_args);
         if (curl_ret != 0) {
             SVC_LOG_WARN("Sync registry: download failed from %s (curl_ret=%d)", url, curl_ret);
+            AIRY_FREE(snap_url);
+            AIRY_FREE(snap_storage);
             return 0;
         }
     }
@@ -964,10 +1071,14 @@ AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
         int curl_ret = WIFEXITED(curl_status) ? WEXITSTATUS(curl_status) : -1;
         if (curl_ret != 0) {
             SVC_LOG_WARN("Sync registry: download failed from %s (curl_ret=%d)", url, curl_ret);
+            AIRY_FREE(snap_url);
+            AIRY_FREE(snap_storage);
             return 0;
         }
     } else {
         SVC_LOG_WARN("Sync registry: fork failed: %s", strerror(errno));
+        AIRY_FREE(snap_url);
+        AIRY_FREE(snap_storage);
         AIRY_ERROR(AIRY_ERR_IO, "fork failed during sync");
     }
 #endif
@@ -975,6 +1086,8 @@ AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
     FILE *idx_fp = fopen(index_path, "r");
     if (!idx_fp) {
         SVC_LOG_WARN("Sync registry: cannot open downloaded index %s", index_path);
+        AIRY_FREE(snap_url);
+        AIRY_FREE(snap_storage);
         return 0;
     }
 
@@ -985,12 +1098,16 @@ AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
     if (fsize <= 0 || fsize > 10 * 1024 * 1024) {
         fclose(idx_fp);
         SVC_LOG_WARN("Sync registry: invalid index size %ld", fsize);
+        AIRY_FREE(snap_url);
+        AIRY_FREE(snap_storage);
         return 0;
     }
 
     char *idx_data = (char *)AIRY_MALLOC((size_t)fsize + 1);
     if (!idx_data) {
         fclose(idx_fp);
+        AIRY_FREE(snap_url);
+        AIRY_FREE(snap_storage);
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate index buffer");
     }
     size_t nread = fread(idx_data, 1, (size_t)fsize, idx_fp);
@@ -998,14 +1115,18 @@ AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
         AIRY_FREE(idx_data);
         idx_data = NULL;
         fclose(idx_fp);
+        AIRY_FREE(snap_url);
+        AIRY_FREE(snap_storage);
         AIRY_ERROR(AIRY_ERR_IO, "fread index file failed");
     }
     idx_data[nread] = '\0';
     fclose(idx_fp);
 
+    /* 阶段2：锁外解析索引文件（仅收集 id，不触碰注册表） */
+    char found_ids[256][128];
+    int n_found = 0;
     char *entry = strstr(idx_data, "\"agent_id\"");
-    int synced = 0;
-    while (entry && synced < 256) {
+    while (entry && n_found < 256) {
         char *id_start = strchr(entry, ':');
         if (!id_start)
             break;
@@ -1018,36 +1139,44 @@ AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
 
         size_t id_len = (size_t)(id_end - id_start);
         if (id_len > 0 && id_len < 128) {
-            char found_id[128];
-            __builtin_memcpy(found_id, id_start, id_len);
-            found_id[id_len] = '\0';
-
-            int already_exists = 0;
-            for (size_t i = 0; i < service->agent_count; i++) {
-                if (strcmp(service->agents[i]->agent_id, found_id) == 0) {
-                    already_exists = 1;
-                    break;
-                }
-            }
-
-            if (!already_exists && service->agent_count < AIRY_CAP_MAX_AGENTS) {
-                agent_info_t *new_agent = (agent_info_t *)AIRY_CALLOC(1, sizeof(agent_info_t));
-                if (new_agent) {
-                    new_agent->agent_id = AIRY_STRDUP(found_id);
-                    new_agent->name = AIRY_STRDUP(found_id);
-                    new_agent->version = AIRY_STRDUP("latest");
-                    new_agent->status = AGENT_STATUS_AVAILABLE;
-                    service->agents[service->agent_count++] = new_agent;
-                    synced++;
-                }
-            }
+            __builtin_memcpy(found_ids[n_found], id_start, id_len);
+            found_ids[n_found][id_len] = '\0';
+            n_found++;
         }
 
         entry = strstr(id_end + 1, "\"agent_id\"");
     }
-
     AIRY_FREE(idx_data);
     idx_data = NULL;
+
+    /* 阶段3：重新加锁更新注册表 */
+    int synced = 0;
+    airy_mtx_lock(&service->lock);
+    for (int k = 0; k < n_found; k++) {
+        int already_exists = 0;
+        for (size_t i = 0; i < service->agent_count; i++) {
+            if (strcmp(service->agents[i]->agent_id, found_ids[k]) == 0) {
+                already_exists = 1;
+                break;
+            }
+        }
+
+        if (!already_exists && service->agent_count < AIRY_CAP_MAX_AGENTS) {
+            agent_info_t *new_agent = (agent_info_t *)AIRY_CALLOC(1, sizeof(agent_info_t));
+            if (new_agent) {
+                new_agent->agent_id = AIRY_STRDUP(found_ids[k]);
+                new_agent->name = AIRY_STRDUP(found_ids[k]);
+                new_agent->version = AIRY_STRDUP("latest");
+                new_agent->status = AGENT_STATUS_AVAILABLE;
+                service->agents[service->agent_count++] = new_agent;
+                synced++;
+            }
+        }
+    }
+    airy_mtx_unlock(&service->lock);
+
+    AIRY_FREE(snap_url);
+    AIRY_FREE(snap_storage);
     SVC_LOG_INFO("Sync registry: synced %d new agents from %s", synced, url);
     return 0;
 }

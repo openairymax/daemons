@@ -278,6 +278,11 @@ int plugin_service_start(const char *name)
 {
     if (!name) return AIRY_ERR_INVALID_PARAM;
 
+    /* 锁内查找 + 快照回调（用户回调可能在插件初始化时耗时/阻塞，
+     * 移出写锁以避免阻塞 registry 的所有读操作） */
+    int (*start_fn)(void *) = NULL;
+    void *user_data = NULL;
+
     sync_rwlock_write_lock_ex(g_plugin_registry.rwlock, NULL);
     plugin_node_t *node = find_node(name);
     if (!node) {
@@ -296,17 +301,34 @@ int plugin_service_start(const char *name)
     }
 
     if (node->desc.start) {
-        int ret = node->desc.start(node->desc.user_data);
-        if (ret != 0) {
-            node->desc.state = PLUGIN_STATE_ERROR;
-            node->stats.error_count++;
-            sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
-            SVC_LOG_ERROR("P2.2: PluginD: Plugin start failed: %s (err=%d)", name, ret);
-            return AIRY_ERR_EXEC_FAIL;
-        }
+        start_fn = node->desc.start;
+        user_data = node->desc.user_data;
+    }
+    node->desc.state = PLUGIN_STATE_STARTING;
+    sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
+
+    /* 锁外执行用户回调（不阻塞其他插件操作） */
+    int ret = 0;
+    if (start_fn) {
+        ret = start_fn(user_data);
     }
 
-    node->desc.state = PLUGIN_STATE_RUNNING;
+    /* 回调后重新加锁更新状态；插件可能已被并发 unload */
+    sync_rwlock_write_lock_ex(g_plugin_registry.rwlock, NULL);
+    plugin_node_t *n2 = find_node(name);
+    if (!n2) {
+        sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
+        return AIRY_ERR_NOT_FOUND;
+    }
+    if (ret != 0) {
+        n2->desc.state = PLUGIN_STATE_ERROR;
+        n2->stats.error_count++;
+        sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
+        SVC_LOG_ERROR("P2.2: PluginD: Plugin start failed: %s (err=%d)", name, ret);
+        return AIRY_ERR_EXEC_FAIL;
+    }
+
+    n2->desc.state = PLUGIN_STATE_RUNNING;
     sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
 
     SVC_LOG_INFO("P2.2: PluginD: Plugin started: %s", name);

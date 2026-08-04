@@ -187,7 +187,7 @@ int mem_service_adapter_create(airy_svc_t *out_service, const airy_svc_config_t 
         ctx->common_cfg.enable_tracing = config->enable_tracing;
     } else {
         ctx->common_cfg.name = "mem_d";
-        ctx->common_cfg.version = "0.1.0";
+        ctx->common_cfg.version = "0.1.1";
         ctx->common_cfg.capabilities = AIRY_SVC_CAP_ASYNC;
         ctx->common_cfg.enable_metrics = true;
     }
@@ -239,7 +239,7 @@ int mem_service_adapter_wrap(airy_svc_t *out_service, mem_service_t *mem_svc,
         ctx->common_cfg.enable_tracing = config->enable_tracing;
     } else {
         ctx->common_cfg.name = "mem_d";
-        ctx->common_cfg.version = "0.1.0";
+        ctx->common_cfg.version = "0.1.1";
     }
 
     airy_svc_t svc_handle = NULL;

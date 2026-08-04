@@ -65,6 +65,38 @@ int agent_service_list(agent_service_t *svc, char ***out_agent_ids,
 size_t agent_service_count(agent_service_t *svc);
 void agent_service_list_free(char **agent_ids, size_t count);
 
+/* ---------- 性能监控 ---------- */
+
+/**
+ * @brief 服务性能统计快照（10000 并发场景下由 agent_d 监控线程周期采样）
+ *
+ * 所有字段均为自服务创建以来的累计值；spawn/invoke 耗时为微秒聚合。
+ * 各字段以原子计数更新，读取无需持锁（宽松一致即可满足监控语义）。
+ */
+typedef struct {
+    int spawn_total;         /* spawn 请求总数 */
+    int spawn_ok;            /* spawn 成功数 */
+    int spawn_fail;          /* spawn 失败数 */
+    int invoke_total;        /* invoke 请求总数 */
+    int invoke_ok;           /* invoke 成功数 */
+    int invoke_fail;         /* invoke 失败数 */
+    int terminate_total;     /* terminate 请求总数 */
+    int lock_wait_total;     /* 全局锁 trylock 探测失败次数（锁竞争信号） */
+    int peak_running;        /* 峰值并发 running agent 数 */
+    unsigned long long spawn_us_total; /* spawn 累计耗时（微秒） */
+    unsigned long long spawn_us_max;   /* spawn 单次最大耗时（微秒） */
+    unsigned long long invoke_us_total;/* invoke 累计耗时（微秒） */
+    unsigned long long invoke_us_max;  /* invoke 单次最大耗时（微秒） */
+} agent_perf_stats_t;
+
+/**
+ * @brief 获取服务性能统计快照
+ * @param svc  Agent 服务实例
+ * @param out  输出统计（非 NULL）
+ * @return AIRY_SUCCESS 成功
+ */
+int agent_service_get_perf(agent_service_t *svc, agent_perf_stats_t *out);
+
 /**
  * @brief 回收空闲超时的 Agent 子进程（P0-3：防止子进程泄漏）
  *

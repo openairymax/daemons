@@ -66,7 +66,7 @@ static airy_err_t gateway_adapter_init(airy_svc_t service,
 
     // 更新网关配置中的名称和版本
     ctx->gateway_cfg.name = ctx->common_cfg.name ? ctx->common_cfg.name : "gateway_d";
-    ctx->gateway_cfg.version = ctx->common_cfg.version ? ctx->common_cfg.version : "1.0.0";
+    ctx->gateway_cfg.version = ctx->common_cfg.version ? ctx->common_cfg.version : "0.1.1";
 
     // 根据通用配置调整网关能力
     if (ctx->common_cfg.capabilities & AIRY_SVC_CAP_ASYNC) {
@@ -260,7 +260,7 @@ airy_err_t gateway_service_adapter_create(airy_svc_t *out_service,
     } else {
         // 使用默认配置
         ctx->common_cfg.name = "gateway_d";
-        ctx->common_cfg.version = "0.1.0";
+        ctx->common_cfg.version = "0.1.1";
         ctx->common_cfg.capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_STREAMING;
         ctx->common_cfg.max_concurrent = 1000;
         ctx->common_cfg.timeout_ms = 30000;
@@ -346,7 +346,7 @@ airy_err_t gateway_service_adapter_wrap(airy_svc_t *out_service,
     } else {
         // 从网关服务获取配置信息
         ctx->common_cfg.name = "gateway_d";
-        ctx->common_cfg.version = "0.1.0";
+        ctx->common_cfg.version = "0.1.1";
         ctx->common_cfg.capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_STREAMING;
         ctx->common_cfg.max_concurrent = 1000;
         ctx->common_cfg.timeout_ms = 30000;
@@ -550,7 +550,7 @@ airy_err_t gateway_service_adapter_create_from_config(airy_svc_t *out_service,
     airy_svc_config_t config;
     AIRY_MEMSET(&config, 0, sizeof(config));
     config.name = "gateway_d";
-    config.version = "0.1.0";
+    config.version = "0.1.1";
     config.capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_STREAMING;
     config.max_concurrent = 1000;
     config.timeout_ms = 30000;

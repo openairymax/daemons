@@ -178,7 +178,7 @@ airy_err_t llm_service_adapter_create(airy_svc_t *out_service,
         }
     } else {
         ctx->common_cfg.name = "llm_d";
-        ctx->common_cfg.version = "0.1.0";
+        ctx->common_cfg.version = "0.1.1";
         ctx->common_cfg.capabilities = AIRY_SVC_CAP_ASYNC;
         ctx->common_cfg.enable_metrics = true;
     }
@@ -223,7 +223,7 @@ airy_err_t llm_service_adapter_wrap(airy_svc_t *out_service, llm_service_t *llm_
         __builtin_memcpy(&ctx->common_cfg, config, sizeof(airy_svc_config_t));
     } else {
         ctx->common_cfg.name = "llm_d";
-        ctx->common_cfg.version = "0.1.0";
+        ctx->common_cfg.version = "0.1.1";
     }
 
     airy_svc_t svc_handle = NULL;
