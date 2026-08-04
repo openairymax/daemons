@@ -355,6 +355,15 @@ int channel_service_send(channel_service_t *svc, const char *channel_id, const v
     if (!svc || !channel_id || !data || data_len == 0)
         return AIRY_ERR_INVALID_PARAM;
 
+    /* 快照所需字段（全局锁仅做查找与快照，禁止持锁做网络 IO） */
+    char endpoint[512];
+    int socket_fd = -1;
+    void *shm_ptr = NULL;
+    size_t shm_size = 0;
+    int type = -1;
+    channel_message_cb_t cb = NULL;
+    void *ud = NULL;
+
     airy_mtx_lock(&svc->lock);
     channel_entry_t *entry = find_channel(svc, channel_id);
     if (!entry || entry->info.status != CHANNEL_STATUS_OPEN) {
@@ -364,22 +373,52 @@ int channel_service_send(channel_service_t *svc, const char *channel_id, const v
     }
 
     entry->info.last_activity = get_time_ms();
+    type = entry->info.type;
+    cb = entry->callback;
+    ud = entry->callback_user_data;
+    AIRY_STRNCPY_TERM(endpoint, entry->info.endpoint, sizeof(endpoint));
+    socket_fd = entry->socket_fd;
+    shm_ptr = entry->shm_ptr;
+    shm_size = entry->shm_size;
 
-    switch (entry->info.type) {
-    case CHANNEL_TYPE_SOCKET: {
-        if (entry->socket_fd < 0) {
+    /* SHM 写为快速内存拷贝 + 原子 flag，保持在锁内（不阻塞） */
+    if (type == CHANNEL_TYPE_SHM) {
+        if (!shm_ptr) {
             airy_mtx_unlock(&svc->lock);
+            AIRY_ERROR(AIRY_ERR_UNKNOWN, "shm_ptr is NULL in send");
+            return AIRY_ERR_UNKNOWN;
+        }
+        size_t header_size = sizeof(uint32_t) * 2;
+        if (data_len + header_size > shm_size) {
+            airy_mtx_unlock(&svc->lock);
+            AIRY_ERROR(AIRY_ERR_OVERFLOW, "data exceeds shm buffer size");
+            return AIRY_ERR_OVERFLOW;
+        }
+        volatile uint32_t *msg_len = (volatile uint32_t *)shm_ptr;
+        volatile uint32_t *msg_flag =
+            (volatile uint32_t *)((char *)shm_ptr + sizeof(uint32_t));
+        *msg_len = (uint32_t)data_len;
+        __builtin_memcpy((char *)shm_ptr + header_size, data, data_len);
+        atomic_thread_fence(memory_order_seq_cst);
+        *msg_flag = 1;
+    }
+    airy_mtx_unlock(&svc->lock);
+
+    /* 锁外执行阻塞 IO（socket connect/write、pipe open/write） */
+    int io_rc = 0;
+    switch (type) {
+    case CHANNEL_TYPE_SOCKET: {
+        if (socket_fd < 0) {
             AIRY_ERROR(AIRY_ERR_IO, "socket not open for send");
             return AIRY_ERR_IO;
         }
         struct sockaddr_un client_addr;
         __builtin_memset(&client_addr, 0, sizeof(client_addr));
         client_addr.sun_family = AF_UNIX;
-AIRY_STRNCPY_TERM(client_addr.sun_path, entry->info.endpoint, sizeof(client_addr.sun_path));
+        AIRY_STRNCPY_TERM(client_addr.sun_path, endpoint, sizeof(client_addr.sun_path));
         (client_addr.sun_path)[sizeof(client_addr.sun_path) - 1] = '\0';
         int client_fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (client_fd < 0) {
-            airy_mtx_unlock(&svc->lock);
             AIRY_ERROR(AIRY_ERR_IO, "client socket creation failed");
             return AIRY_ERR_IO;
         }
@@ -391,7 +430,6 @@ AIRY_STRNCPY_TERM(client_addr.sun_path, entry->info.endpoint, sizeof(client_addr
         }
         if (connect(client_fd, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
             close(client_fd);
-            airy_mtx_unlock(&svc->lock);
             return (errno == EAGAIN || errno == ETIMEDOUT) ? AIRY_ERR_TIMEOUT : AIRY_ERR_IO;
         }
         uint32_t net_len = htonl((uint32_t)data_len);
@@ -399,50 +437,25 @@ AIRY_STRNCPY_TERM(client_addr.sun_path, entry->info.endpoint, sizeof(client_addr
         ssize_t w2 = write(client_fd, data, data_len);
         close(client_fd);
         if (w1 < 0 || w2 < 0) {
-            airy_mtx_unlock(&svc->lock);
-            return (errno == EAGAIN || errno == ETIMEDOUT) ? AIRY_ERR_TIMEOUT : AIRY_ERR_IO;
+            io_rc = (errno == EAGAIN || errno == ETIMEDOUT) ? AIRY_ERR_TIMEOUT : AIRY_ERR_IO;
         }
-        break;
-    }
-    case CHANNEL_TYPE_SHM: {
-        if (!entry->shm_ptr) {
-            airy_mtx_unlock(&svc->lock);
-            AIRY_ERROR(AIRY_ERR_UNKNOWN, "shm_ptr is NULL in send");
-            return AIRY_ERR_UNKNOWN;
-        }
-        size_t header_size = sizeof(uint32_t) * 2;
-        if (data_len + header_size > entry->shm_size) {
-            airy_mtx_unlock(&svc->lock);
-            AIRY_ERROR(AIRY_ERR_OVERFLOW, "data exceeds shm buffer size");
-            return AIRY_ERR_OVERFLOW;
-        }
-        volatile uint32_t *msg_len = (volatile uint32_t *)entry->shm_ptr;
-        volatile uint32_t *msg_flag =
-            (volatile uint32_t *)((char *)entry->shm_ptr + sizeof(uint32_t));
-        *msg_len = (uint32_t)data_len;
-        __builtin_memcpy((char *)entry->shm_ptr + header_size, data, data_len);
-        atomic_thread_fence(memory_order_seq_cst);
-        *msg_flag = 1;
         break;
     }
     case CHANNEL_TYPE_PIPE: {
-        if (entry->info.endpoint[0]) {
-            int fd = open(entry->info.endpoint, O_WRONLY | O_NONBLOCK);
+        if (endpoint[0]) {
+            int fd = open(endpoint, O_WRONLY | O_NONBLOCK);
             if (fd < 0) {
-                airy_mtx_unlock(&svc->lock);
                 AIRY_ERROR(AIRY_ERR_IO, "pipe open for write failed");
                 return AIRY_ERR_IO;
             }
             uint32_t net_len = htonl((uint32_t)data_len);
             if (write(fd, &net_len, sizeof(net_len)) < 0) {
                 close(fd);
-                airy_mtx_unlock(&svc->lock);
                 AIRY_ERROR(AIRY_ERR_IO, "pipe write header failed");
                 return AIRY_ERR_IO;
             }
             if (write(fd, data, data_len) < 0) {
                 close(fd);
-                airy_mtx_unlock(&svc->lock);
                 AIRY_ERROR(AIRY_ERR_IO, "pipe write data failed");
                 return AIRY_ERR_IO;
             }
@@ -450,24 +463,30 @@ AIRY_STRNCPY_TERM(client_addr.sun_path, entry->info.endpoint, sizeof(client_addr
         }
         break;
     }
+    case CHANNEL_TYPE_SHM:
+        /* 已在锁内完成 */
+        break;
     default:
-        airy_mtx_unlock(&svc->lock);
         AIRY_ERROR(AIRY_ERR_UNKNOWN, "unknown channel type in send");
         return AIRY_ERR_UNKNOWN;
     }
 
-    entry->info.messages_sent++;
-    svc->total_messages_sent++;
-
-    if (entry->callback) {
-        channel_message_cb_t cb = entry->callback;
-        void *ud = entry->callback_user_data;
-        airy_mtx_unlock(&svc->lock);
-        cb(channel_id, data, data_len, ud);
-        return 0;
+    if (io_rc != 0) {
+        return io_rc;
     }
 
+    /* 更新计数（重新加锁，channel 可能已被并发删除） */
+    airy_mtx_lock(&svc->lock);
+    channel_entry_t *e2 = find_channel(svc, channel_id);
+    if (e2 && e2->info.status == CHANNEL_STATUS_OPEN) {
+        e2->info.messages_sent++;
+        svc->total_messages_sent++;
+    }
     airy_mtx_unlock(&svc->lock);
+
+    if (cb) {
+        cb(channel_id, data, data_len, ud);
+    }
     return 0;
 }
 
@@ -477,6 +496,14 @@ int channel_service_receive(channel_service_t *svc, const char *channel_id, void
     if (!svc || !channel_id || !out_data || !out_len)
         return AIRY_ERR_INVALID_PARAM;
 
+    /* 全局锁仅做查找与快照（SHM 快速读保持在锁内，阻塞 IO 移出锁） */
+    char endpoint[512];
+    int socket_fd = -1;
+    void *shm_ptr = NULL;
+    size_t shm_size = 0;
+    uint32_t max_msg = 0;
+    int type = -1;
+
     airy_mtx_lock(&svc->lock);
     channel_entry_t *entry = find_channel(svc, channel_id);
     if (!entry || entry->info.status != CHANNEL_STATUS_OPEN) {
@@ -485,64 +512,29 @@ int channel_service_receive(channel_service_t *svc, const char *channel_id, void
     }
 
     entry->info.last_activity = get_time_ms();
+    type = entry->info.type;
+    AIRY_STRNCPY_TERM(endpoint, entry->info.endpoint, sizeof(endpoint));
+    socket_fd = entry->socket_fd;
+    shm_ptr = entry->shm_ptr;
+    shm_size = entry->shm_size;
+    max_msg = svc->config.default_buffer_size;
 
-    switch (entry->info.type) {
-    case CHANNEL_TYPE_SOCKET: {
-        if (entry->socket_fd < 0) {
-            airy_mtx_unlock(&svc->lock);
-            return AIRY_ERR_IO;
-        }
-        int client_fd = accept(entry->socket_fd, NULL, NULL);
-        if (client_fd < 0) {
-            airy_mtx_unlock(&svc->lock);
-            return AIRY_ERR_IO;
-        }
-        uint32_t net_len = 0;
-        ssize_t r1 = read(client_fd, &net_len, sizeof(net_len));
-        if (r1 <= 0) {
-            close(client_fd);
-            airy_mtx_unlock(&svc->lock);
-            return AIRY_ERR_IO;
-        }
-        uint32_t msg_len = ntohl(net_len);
-        if (msg_len == 0 || msg_len > svc->config.default_buffer_size) {
-            close(client_fd);
-            airy_mtx_unlock(&svc->lock);
-            return AIRY_ERR_OVERFLOW;
-        }
-        void *buf = AIRY_MALLOC(msg_len);
-        if (!buf) {
-            close(client_fd);
-            airy_mtx_unlock(&svc->lock);
-            return AIRY_ERR_OUT_OF_MEMORY;
-        }
-        ssize_t r2 = read(client_fd, buf, msg_len);
-        close(client_fd);
-        if (r2 <= 0) {
-            AIRY_FREE(buf);
-            airy_mtx_unlock(&svc->lock);
-            return AIRY_ERR_IO;
-        }
-        *out_data = buf;
-        *out_len = (size_t)r2;
-        break;
-    }
-    case CHANNEL_TYPE_SHM: {
-        if (!entry->shm_ptr) {
+    if (type == CHANNEL_TYPE_SHM) {
+        if (!shm_ptr) {
             airy_mtx_unlock(&svc->lock);
             AIRY_ERROR(AIRY_ERR_UNKNOWN, "shm_ptr is NULL in receive");
             return AIRY_ERR_UNKNOWN;
         }
-        volatile uint32_t *msg_len = (volatile uint32_t *)entry->shm_ptr;
+        volatile uint32_t *msg_len = (volatile uint32_t *)shm_ptr;
         volatile uint32_t *msg_flag =
-            (volatile uint32_t *)((char *)entry->shm_ptr + sizeof(uint32_t));
+            (volatile uint32_t *)((char *)shm_ptr + sizeof(uint32_t));
         atomic_thread_fence(memory_order_seq_cst);
         if (*msg_flag != 1) {
             airy_mtx_unlock(&svc->lock);
             return 0;
         }
         uint32_t len = *msg_len;
-        if (len == 0 || len > entry->shm_size - sizeof(uint32_t) * 2) {
+        if (len == 0 || len > shm_size - sizeof(uint32_t) * 2) {
             airy_mtx_unlock(&svc->lock);
             AIRY_ERROR(AIRY_ERR_OVERFLOW, "shm message length overflow");
             return AIRY_ERR_OVERFLOW;
@@ -552,62 +544,104 @@ int channel_service_receive(channel_service_t *svc, const char *channel_id, void
             airy_mtx_unlock(&svc->lock);
             return AIRY_ERR_OUT_OF_MEMORY;
         }
-        __builtin_memcpy(buf, (char *)entry->shm_ptr + sizeof(uint32_t) * 2, len);
+        __builtin_memcpy(buf, (char *)shm_ptr + sizeof(uint32_t) * 2, len);
         atomic_thread_fence(memory_order_seq_cst);
         *msg_flag = 0;
         *out_data = buf;
         *out_len = len;
+    }
+    airy_mtx_unlock(&svc->lock);
+
+    /* 锁外执行阻塞 IO */
+    int io_rc = 0;
+    switch (type) {
+    case CHANNEL_TYPE_SOCKET: {
+        if (socket_fd < 0) {
+            return AIRY_ERR_IO;
+        }
+        int client_fd = accept(socket_fd, NULL, NULL);
+        if (client_fd < 0) {
+            return AIRY_ERR_IO;
+        }
+        uint32_t net_len = 0;
+        ssize_t r1 = read(client_fd, &net_len, sizeof(net_len));
+        if (r1 <= 0) {
+            close(client_fd);
+            return AIRY_ERR_IO;
+        }
+        uint32_t msg_len = ntohl(net_len);
+        if (msg_len == 0 || msg_len > max_msg) {
+            close(client_fd);
+            return AIRY_ERR_OVERFLOW;
+        }
+        void *buf = AIRY_MALLOC(msg_len);
+        if (!buf) {
+            close(client_fd);
+            return AIRY_ERR_OUT_OF_MEMORY;
+        }
+        ssize_t r2 = read(client_fd, buf, msg_len);
+        close(client_fd);
+        if (r2 <= 0) {
+            AIRY_FREE(buf);
+            return AIRY_ERR_IO;
+        }
+        *out_data = buf;
+        *out_len = (size_t)r2;
         break;
     }
     case CHANNEL_TYPE_PIPE: {
-        if (entry->info.endpoint[0]) {
-            int fd = open(entry->info.endpoint, O_RDONLY | O_NONBLOCK);
-            if (fd < 0) {
-                airy_mtx_unlock(&svc->lock);
-                return 0;
-            }
-            uint32_t net_len = 0;
-            ssize_t r1 = read(fd, &net_len, sizeof(net_len));
-            if (r1 <= 0) {
-                close(fd);
-                airy_mtx_unlock(&svc->lock);
-                return 0;
-            }
-            uint32_t msg_len = ntohl(net_len);
-            if (msg_len == 0) {
-                close(fd);
-                airy_mtx_unlock(&svc->lock);
-                return 0;
-            }
-            void *buf = AIRY_MALLOC(msg_len);
-            if (!buf) {
-                close(fd);
-                airy_mtx_unlock(&svc->lock);
-                return AIRY_ERR_OUT_OF_MEMORY;
-            }
-            ssize_t r2 = read(fd, buf, msg_len);
-            close(fd);
-            if (r2 <= 0) {
-                AIRY_FREE(buf);
-                airy_mtx_unlock(&svc->lock);
-                return 0;
-            }
-            *out_data = buf;
-            *out_len = (size_t)r2;
-        } else {
-            airy_mtx_unlock(&svc->lock);
+        if (!endpoint[0]) {
             return 0;
         }
+        int fd = open(endpoint, O_RDONLY | O_NONBLOCK);
+        if (fd < 0) {
+            return 0;
+        }
+        uint32_t net_len = 0;
+        ssize_t r1 = read(fd, &net_len, sizeof(net_len));
+        if (r1 <= 0) {
+            close(fd);
+            return 0;
+        }
+        uint32_t msg_len = ntohl(net_len);
+        if (msg_len == 0) {
+            close(fd);
+            return 0;
+        }
+        void *buf = AIRY_MALLOC(msg_len);
+        if (!buf) {
+            close(fd);
+            return AIRY_ERR_OUT_OF_MEMORY;
+        }
+        ssize_t r2 = read(fd, buf, msg_len);
+        close(fd);
+        if (r2 <= 0) {
+            AIRY_FREE(buf);
+            return 0;
+        }
+        *out_data = buf;
+        *out_len = (size_t)r2;
         break;
     }
+    case CHANNEL_TYPE_SHM:
+        /* 已在锁内完成 */
+        break;
     default:
-        airy_mtx_unlock(&svc->lock);
         AIRY_ERROR(AIRY_ERR_UNKNOWN, "unknown channel type in receive");
         return AIRY_ERR_UNKNOWN;
     }
 
-    entry->info.messages_received++;
-    svc->total_messages_received++;
+    if (io_rc != 0) {
+        return io_rc;
+    }
+
+    /* 更新计数（重新加锁） */
+    airy_mtx_lock(&svc->lock);
+    channel_entry_t *e2 = find_channel(svc, channel_id);
+    if (e2 && e2->info.status == CHANNEL_STATUS_OPEN) {
+        e2->info.messages_received++;
+        svc->total_messages_received++;
+    }
     airy_mtx_unlock(&svc->lock);
     return 0;
 }

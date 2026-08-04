@@ -191,7 +191,7 @@ airy_err_t monit_service_adapter_create(airy_svc_t *out_service,
         __builtin_memcpy(&ctx->common_cfg, config, sizeof(airy_svc_config_t));
     } else {
         ctx->common_cfg.name = "monit_d";
-        ctx->common_cfg.version = "0.1.0";
+        ctx->common_cfg.version = "0.1.1";
         ctx->common_cfg.enable_metrics = true;
         ctx->common_cfg.enable_tracing = true;
     }
@@ -234,7 +234,7 @@ airy_err_t monit_service_adapter_wrap(airy_svc_t *out_service, void *monit_svc,
         __builtin_memcpy(&ctx->common_cfg, config, sizeof(airy_svc_config_t));
     } else {
         ctx->common_cfg.name = "monit_d";
-        ctx->common_cfg.version = "0.1.0";
+        ctx->common_cfg.version = "0.1.1";
     }
 
     airy_svc_t svc_handle = NULL;

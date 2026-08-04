@@ -5,7 +5,7 @@
 FROM ubuntu:24.04 AS builder
 
 LABEL maintainer="SPHARX Team <devops@spharx.cn>"
-LABEL version="0.1.0"
+LABEL version="0.1.1"
 LABEL description="AgentRT daemon Build Environment"
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -105,7 +105,7 @@ RUN cd /build/daemon/market_d/build && ctest --output-on-failure
 FROM ubuntu:24.04 AS runtime
 
 LABEL maintainer="SPHARX Team <devops@spharx.cn>"
-LABEL version="0.1.0"
+LABEL version="0.1.1"
 LABEL description="AgentRT daemon Runtime"
 
 ENV DEBIAN_FRONTEND=noninteractive \

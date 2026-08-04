@@ -44,7 +44,8 @@ typedef enum {
     PLUGIN_STATE_INITIALIZED = 2, /**< 已初始化 */
     PLUGIN_STATE_RUNNING   = 3,  /**< 运行中 */
     PLUGIN_STATE_ERROR     = 4,  /**< 错误 */
-    PLUGIN_STATE_DISABLED  = 5   /**< 已禁用 */
+    PLUGIN_STATE_DISABLED  = 5,  /**< 已禁用 */
+    PLUGIN_STATE_STARTING  = 6   /**< 启动中（start 回调执行期间） */
 } plugin_state_t;
 
 /* ── 插件元数据 ── */

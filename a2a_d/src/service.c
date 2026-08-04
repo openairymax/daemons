@@ -506,13 +506,14 @@ int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id,
     message.type = A2A_MSG_TEXT;
     message.content_json = (char *)content_json;
 
-    airy_mtx_lock(&svc->lock);
+    /* 网络往返在全局锁外执行：不同目标的消息发送可并行，
+     * 不阻塞其他 A2A 操作（a2a_v03_send_message 内部经 handler
+     * 分发，ctx 为协议上下文，调用本身不依赖本服务共享状态） */
     a2a_message_t *response = NULL;
     size_t response_count = 0;
     int rc = a2a_v03_send_message(svc->ctx, target_agent_id, &message,
                                     &response, &response_count);
     if (rc != AIRY_SUCCESS) {
-        airy_mtx_unlock(&svc->lock);
         SVC_LOG_ERROR("A2A send_message failed: rc=%d", rc);
         return rc;
     }
@@ -523,7 +524,6 @@ int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id,
             for (size_t i = 0; i < response_count; i++)
                 a2a_message_destroy(&response[i]);
         }
-        airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
@@ -532,7 +532,6 @@ int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id,
         if (item)
             cJSON_AddItemToArray(arr, item);
     }
-    airy_mtx_unlock(&svc->lock);
 
     char *str = cJSON_PrintUnformatted(arr);
     cJSON_Delete(arr);
