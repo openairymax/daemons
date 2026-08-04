@@ -43,7 +43,13 @@ static const provider_ops_t *get_ops_by_name(const char *name)
         return &google_ops;
     if (strcmp(name, "local") == 0)
         return &local_ops;
-    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
+    /* OpenAI 兼容统一适配（对齐 LiteLLM 的 openai_like 模式）：
+     * 任何未内置的厂商（glm / qwen / moonshot / siliconflow / spark /
+     * minimax / 自定义名）只需在 model.yaml 提供 base_url + api_key
+     * 即可走统一的 OpenAI Chat Completions 协议，无需新增 provider 实现。 */
+    SVC_LOG_DEBUG("Provider '%s' falls back to OpenAI-compatible adapter "
+                  "(custom base_url)", name);
+    return &openai_ops;
 }
 
 provider_registry_t *provider_registry_create(const service_config_t *cfg)
