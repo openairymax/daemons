@@ -791,7 +791,7 @@ const char *airy_svc_get_version(airy_svc_t svc)
     }
 
     airy_svc_internal_t *service = (airy_svc_internal_t *)svc;
-    return service->version[0] ? service->version : "1.0.0";
+    return service->version[0] ? service->version : "0.1.1";
 }
 
 /* 服务统计 */

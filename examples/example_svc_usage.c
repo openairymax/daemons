@@ -118,7 +118,7 @@ int main(void)
 
     /* 1. 创建服务配置 */
     airy_svc_config_t config = {.name = "example-service",
-                                   .version = "0.1.0",
+                                   .version = "0.1.1",
                                    .capabilities =
                                        AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_PAUSEABLE,
                                    .max_concurrent = 10,

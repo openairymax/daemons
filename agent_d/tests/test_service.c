@@ -163,8 +163,10 @@ static void test_capacity_limit(void)
     assert(svc != NULL);
 
     char *r1 = NULL, *r2 = NULL, *r3 = NULL;
-    assert(agent_service_spawn(svc, "{\"n\":1}", &r1) == AIRY_SUCCESS);
-    assert(agent_service_spawn(svc, "{\"n\":2}", &r2) == AIRY_SUCCESS);
+    int sprc1 = agent_service_spawn(svc, "{\"n\":1}", &r1);
+    assert(sprc1 == AIRY_SUCCESS);
+    int sprc2 = agent_service_spawn(svc, "{\"n\":2}", &r2);
+    assert(sprc2 == AIRY_SUCCESS);
     /* 第三次派生应因容量上限失败 */
     int ret = agent_service_spawn(svc, "{\"n\":3}", &r3);
     assert(ret != AIRY_SUCCESS);
@@ -206,7 +208,8 @@ static void test_spawn_after_terminate(void)
 
     /* r2 仍可调用：no-spawn 模式下返回明确错误（P0-2） */
     char *out_output = NULL;
-    assert(agent_service_invoke(svc, r2, "hi", 2, &out_output) != AIRY_SUCCESS);
+    int irc = agent_service_invoke(svc, r2, "hi", 2, &out_output);
+    assert(irc != AIRY_SUCCESS);
     AIRY_FREE(out_output);
 
     AIRY_FREE(r1);

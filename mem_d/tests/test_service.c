@@ -214,8 +214,10 @@ static void test_capacity_limit(void)
     mem_write_request_t req3 = { .data = "third", .len = 5, .metadata = NULL };
 
     char *r1 = NULL, *r2 = NULL, *r3 = NULL;
-    assert(mem_service_write(svc, &req1, &r1) == AIRY_SUCCESS);
-    assert(mem_service_write(svc, &req2, &r2) == AIRY_SUCCESS);
+    int wrc1 = mem_service_write(svc, &req1, &r1);
+    assert(wrc1 == AIRY_SUCCESS);
+    int wrc2 = mem_service_write(svc, &req2, &r2);
+    assert(wrc2 == AIRY_SUCCESS);
     /* 第三条应因容量上限失败 */
     int ret = mem_service_write(svc, &req3, &r3);
     assert(ret != AIRY_SUCCESS);
@@ -240,11 +242,14 @@ static void test_fill_after_delete_keeps_compact(void)
     mem_write_request_t req1 = { .data = "first", .len = 5, .metadata = NULL };
     mem_write_request_t req2 = { .data = "second", .len = 6, .metadata = NULL };
     char *r1 = NULL, *r2 = NULL;
-    assert(mem_service_write(svc, &req1, &r1) == AIRY_SUCCESS);
-    assert(mem_service_write(svc, &req2, &r2) == AIRY_SUCCESS);
+    int wrc1 = mem_service_write(svc, &req1, &r1);
+    assert(wrc1 == AIRY_SUCCESS);
+    int wrc2 = mem_service_write(svc, &req2, &r2);
+    assert(wrc2 == AIRY_SUCCESS);
 
     /* 删除 r1，再写入新记录应成功（填补空洞或扩展） */
-    assert(mem_service_delete(svc, r1) == AIRY_SUCCESS);
+    int drc = mem_service_delete(svc, r1);
+    assert(drc == AIRY_SUCCESS);
 
     mem_write_request_t req3 = { .data = "third", .len = 5, .metadata = NULL };
     char *r3 = NULL;
@@ -253,7 +258,8 @@ static void test_fill_after_delete_keeps_compact(void)
 
     /* r2 应仍可读取 */
     mem_record_t rec = {0};
-    assert(mem_service_get(svc, r2, &rec) == AIRY_SUCCESS);
+    int grc = mem_service_get(svc, r2, &rec);
+    assert(grc == AIRY_SUCCESS);
     mem_record_free(&rec);
 
     AIRY_FREE(r1);

@@ -188,7 +188,7 @@ int a2a_service_adapter_create(airy_svc_t *out_service,
         ctx->common_cfg.enable_tracing = config->enable_tracing;
     } else {
         ctx->common_cfg.name = "a2a_d";
-        ctx->common_cfg.version = "0.1.0";
+        ctx->common_cfg.version = "0.1.1";
         ctx->common_cfg.capabilities = AIRY_SVC_CAP_ASYNC;
         ctx->common_cfg.enable_metrics = true;
     }
@@ -240,7 +240,7 @@ int a2a_service_adapter_wrap(airy_svc_t *out_service, a2a_service_t *a2a_svc,
         ctx->common_cfg.enable_tracing = config->enable_tracing;
     } else {
         ctx->common_cfg.name = "a2a_d";
-        ctx->common_cfg.version = "0.1.0";
+        ctx->common_cfg.version = "0.1.1";
     }
 
     airy_svc_t svc_handle = NULL;
