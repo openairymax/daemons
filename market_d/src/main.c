@@ -30,6 +30,9 @@
 DAEMON_DECLARE_COMMON(market_d, market, DEFAULT_SOCKET_PATH_UNIX,
                       DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
 
+/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
+DAEMON_DECLARE_SHUTDOWN_METHOD(market_d)
+
 /* ==================== 全局状态 ==================== */
 
 static market_service_t *g_service = NULL;
@@ -49,6 +52,8 @@ static void handle_install_agent(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_register_skill(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_search_skills(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_health_check(int id, airy_sock_t client_fd);
+static void handle_publish(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_get_stats(int id, airy_sock_t client_fd);
 
 static void on_register_agent_method(cJSON *params, int id, void *user_data)
 {
@@ -80,6 +85,18 @@ static void on_health_check_method(cJSON *params __attribute__((unused)), int id
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
 
+/* L2 标准方法 market.publish（02-l2-service-protocol.md） */
+static void on_publish_method(cJSON *params, int id, void *user_data)
+{
+    handle_publish(params, id, *(airy_sock_t *)user_data);
+}
+
+/* L2 标准方法 market.get_stats（02-l2-service-protocol.md §6.1） */
+static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+{
+    handle_get_stats(id, *(airy_sock_t *)user_data);
+}
+
 static int register_rpc_methods(void)
 {
     g_dispatcher_market_d = method_dispatcher_create(16);
@@ -94,8 +111,16 @@ static int register_rpc_methods(void)
     method_dispatcher_register(g_dispatcher_market_d, "register_skill", on_register_skill_method, NULL);
     method_dispatcher_register(g_dispatcher_market_d, "search_skills", on_search_skills_method, NULL);
     method_dispatcher_register(g_dispatcher_market_d, "health_check", on_health_check_method, NULL);
+    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：market.publish / market.search / market.install） */
+    method_dispatcher_register(g_dispatcher_market_d, "publish", on_publish_method, NULL);
+    method_dispatcher_register(g_dispatcher_market_d, "search", on_search_agents_method, NULL);
+    method_dispatcher_register(g_dispatcher_market_d, "install", on_install_agent_method, NULL);
+    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+    method_dispatcher_register(g_dispatcher_market_d, "shutdown", on_shutdown_method_market_d, NULL);
+    /* L2 协议标准方法 market.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+    method_dispatcher_register(g_dispatcher_market_d, "get_stats", on_get_stats_method, NULL);
 
-    SVC_LOG_INFO("Registered %d RPC methods", 6);
+    SVC_LOG_INFO("Registered %d RPC methods (market.* namespace)", 11);
     return 0;
 }
 
@@ -192,20 +217,47 @@ static void handle_install_agent(cJSON *params, int id, airy_sock_t client_fd)
     }
 
     const char *version = get_string_field(params, "version", "latest");
+    const char *install_path = get_string_field(params, "install_path", NULL);
+    cJSON *force_json = cJSON_GetObjectItem(params, "force_update");
+    bool force = cJSON_IsTrue(force_json);
 
-    int ret = market_service_install_agent(g_service, (const install_request_t *)aid,
-                                           (install_result_t **)version);
+    /* 构造真实 install_request_t（原实现把 JSON 字符串指针强转结构体指针，属 UB） */
+    install_request_t req;
+    AIRY_MEMSET(&req, 0, sizeof(req));
+    req.id = (char *)aid;
+    req.version = (char *)version;
+    req.install_path = (char *)install_path;
+    req.force_update = force;
 
-    if (ret != AIRY_SUCCESS) {
+    install_result_t *result = NULL;
+    int ret = market_service_install_agent(g_service, &req, &result);
+
+    if (ret != AIRY_SUCCESS || !result) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Install failed", id);
         SVC_LOG_ERROR("Failed to install agent: %s@%s (error=%d)", aid, version, ret);
     } else {
-        cJSON *result = cJSON_CreateObject();
-        cJSON_AddStringToObject(result, "status", "installed");
-        cJSON_AddStringToObject(result, "agent_id", aid);
-        cJSON_AddStringToObject(result, "installed_version", version);
-        JSONRPC_SEND_SUCCESS(client_fd, result, id);
-        SVC_LOG_INFO("Agent installed: %s@%s", aid, version);
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp, "status", result->success ? "installed" : "failed");
+        cJSON_AddStringToObject(resp, "agent_id", aid);
+        cJSON_AddStringToObject(
+            resp, "installed_version",
+            result->installed_version ? result->installed_version : version);
+        if (result->message) {
+            cJSON_AddStringToObject(resp, "message", result->message);
+        }
+        if (result->install_path) {
+            cJSON_AddStringToObject(resp, "install_path", result->install_path);
+        }
+        JSONRPC_SEND_SUCCESS(client_fd, resp, id);
+        SVC_LOG_INFO("Agent install %s: %s@%s (ret=%d)",
+                     result->success ? "OK" : "FAILED", aid, version, ret);
+    }
+
+    if (result) {
+        AIRY_FREE(result->message);
+        AIRY_FREE(result->installed_version);
+        AIRY_FREE(result->install_path);
+        AIRY_FREE(result);
     }
 }
 
@@ -290,6 +342,127 @@ static void handle_health_check(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
+/* L2 标准方法 market.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+static void handle_get_stats(int id, airy_sock_t client_fd)
+{
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "daemon", "market_d");
+    if (g_service) {
+        /* 注册仓库（registry）计数：search_agents/search_skills 全量查询 */
+        search_params_t sp;
+        AIRY_MEMSET(&sp, 0, sizeof(sp));
+        sp.query = (char *)"";
+        sp.limit = 100000;
+        sp.offset = 0;
+        agent_info_t **agents = NULL;
+        size_t agent_count = 0;
+        if (market_service_search_agents(g_service, &sp, &agents, &agent_count) == AIRY_SUCCESS) {
+            cJSON_AddNumberToObject(result, "agents", (double)agent_count);
+            if (agents)
+                AIRY_FREE(agents);
+        }
+        skill_info_t **skills = NULL;
+        size_t skill_count = 0;
+        if (market_service_search_skills(g_service, &sp, &skills, &skill_count) == AIRY_SUCCESS) {
+            cJSON_AddNumberToObject(result, "skills", (double)skill_count);
+            if (skills)
+                AIRY_FREE(skills);
+        }
+        /* 已安装（本机）计数 */
+        agent_info_t **installed_agents = NULL;
+        size_t installed_agent_count = 0;
+        if (market_service_get_installed_agents(g_service, &installed_agents,
+                                                &installed_agent_count) == AIRY_SUCCESS) {
+            cJSON_AddNumberToObject(result, "installed_agents", (double)installed_agent_count);
+            if (installed_agents)
+                AIRY_FREE(installed_agents);
+        }
+        skill_info_t **installed_skills = NULL;
+        size_t installed_skill_count = 0;
+        if (market_service_get_installed_skills(g_service, &installed_skills,
+                                                &installed_skill_count) == AIRY_SUCCESS) {
+            cJSON_AddNumberToObject(result, "installed_skills", (double)installed_skill_count);
+            if (installed_skills)
+                AIRY_FREE(installed_skills);
+        }
+    }
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+/*
+ * L2 标准方法 market.publish（02-l2-service-protocol.md）：
+ * 复用现有 install 逻辑，接受 params.agent 或 params.skill 对象，
+ * 落盘到 $AIRY_HOME/agents 或 $AIRY_HOME/skills 并返回安装路径。
+ */
+static void handle_publish(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *agent_json = jsonrpc_get_object_param(params, "agent");
+    cJSON *skill_json = jsonrpc_get_object_param(params, "skill");
+
+    if (!agent_json && !skill_json) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           "Missing agent or skill object", id);
+        return;
+    }
+
+    install_request_t req;
+    AIRY_MEMSET(&req, 0, sizeof(req));
+    req.force_update = get_bool_field(params, "force_update", false);
+    req.install_path = (char *)get_string_field(params, "install_path", NULL);
+
+    bool is_agent = agent_json != NULL;
+    const char *id_str = NULL;
+    const char *version = "latest";
+
+    if (is_agent) {
+        id_str = get_string_field(agent_json, "agent_id", NULL);
+        version = get_string_field(agent_json, "version", "latest");
+    } else {
+        id_str = get_string_field(skill_json, "skill_id", NULL);
+        version = get_string_field(skill_json, "version", "latest");
+    }
+    if (!id_str) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           is_agent ? "Missing agent_id" : "Missing skill_id", id);
+        return;
+    }
+    req.id = (char *)id_str;
+    req.version = (char *)version;
+
+    install_result_t *result = NULL;
+    int ret = is_agent ? market_service_install_agent(g_service, &req, &result)
+                       : market_service_install_skill(g_service, &req, &result);
+
+    if (ret != AIRY_SUCCESS || !result || !result->success) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Publish failed", id);
+        SVC_LOG_ERROR("market.publish failed: %s=%s@%s (error=%d)",
+                      is_agent ? "agent" : "skill", id_str, version, ret);
+    } else {
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp, "status", "published");
+        cJSON_AddStringToObject(resp, "type", is_agent ? "agent" : "skill");
+        cJSON_AddStringToObject(resp, "id", id_str);
+        cJSON_AddStringToObject(
+            resp, "published_version",
+            result->installed_version ? result->installed_version : version);
+        if (result->message)
+            cJSON_AddStringToObject(resp, "message", result->message);
+        if (result->install_path)
+            cJSON_AddStringToObject(resp, "install_path", result->install_path);
+        JSONRPC_SEND_SUCCESS(client_fd, resp, id);
+        SVC_LOG_INFO("market.publish OK: %s=%s@%s path=%s",
+                     is_agent ? "agent" : "skill", id_str, version,
+                     result->install_path ? result->install_path : "?");
+    }
+
+    if (result) {
+        AIRY_FREE(result->message);
+        AIRY_FREE(result->installed_version);
+        AIRY_FREE(result->install_path);
+        AIRY_FREE(result);
+    }
+}
+
 /* ==================== 销毁服务 ==================== */
 
 static void destroy_service(void)
@@ -330,9 +503,10 @@ int main(int argc, char **argv)
 
     SVC_LOG_INFO("Market service starting, manager=%s", config_path);
 
-    /* 创建配置 */
+    /* 创建配置：storage_path 为 NULL → service 层回落 $AIRY_HOME/agents（/skills），
+     * 不再使用 "./agents" 相对路径（随 CWD 漂移）或误把日志名当存储目录 */
     market_config_t config = {.registry_url = NULL,
-                              .storage_path = "market.log",
+                              .storage_path = NULL,
                               .sync_interval_ms = 30000,
                               .cache_ttl_ms = 3600000,
                               .enable_remote_registry = false,

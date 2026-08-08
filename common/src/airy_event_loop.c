@@ -365,6 +365,19 @@ void airy_event_loop_stop(airy_event_loop_t *loop)
 {
     if (!loop)
         return;
+    airy_event_loop_stop_async(loop);
+    LOG_DEBUG("Event loop stop requested");
+}
+
+/**
+ * @brief 异步安全停止事件循环（可在信号处理器中安全调用）
+ *
+ * 仅设置 stop_requested 并 SetEvent 唤醒，无日志、无锁。
+ */
+void airy_event_loop_stop_async(airy_event_loop_t *loop)
+{
+    if (!loop)
+        return;
     loop->stop_requested = true;
     if (loop->wakeup_event)
         SetEvent(loop->wakeup_event);
@@ -685,13 +698,24 @@ void airy_event_loop_stop(airy_event_loop_t *loop)
 {
     if (!loop)
         return;
+    airy_event_loop_stop_async(loop);
+    LOG_DEBUG("Event loop stop requested");
+}
+
+/**
+ * @brief 异步安全停止事件循环（可在信号处理器中安全调用）
+ *
+ * 仅设置 stop_requested 并写入 wakeup eventfd，无日志、无锁，
+ * 满足 async-signal-safe（write() 为异步安全系统调用）。
+ */
+void airy_event_loop_stop_async(airy_event_loop_t *loop)
+{
+    if (!loop)
+        return;
     loop->stop_requested = true;
     if (loop->wakeup_fd >= 0) {
         uint64_t val = 1;
-        ssize_t ret = write(loop->wakeup_fd, &val, sizeof(val));
-        if (ret < 0) {
-            LOG_DEBUG("wakeup write failed: %s", strerror(errno));
-        }
+        (void)write(loop->wakeup_fd, &val, sizeof(val));
     }
 }
 

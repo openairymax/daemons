@@ -13,6 +13,7 @@
 #include "error.h"
 #ifndef _WIN32
 #include <dlfcn.h>
+#include <errno.h>
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #ifdef __APPLE__
@@ -494,7 +495,15 @@ airy_sock_t airy_sock_accept(airy_sock_t server_fd, uint32_t timeout_ms)
     pfd.fd = server_fd;
     pfd.events = POLLIN;
 
-    int ret = poll(&pfd, 1, timeout_ms == 0 ? -1 : (int)timeout_ms);
+    /* timeout_ms==0 表示非阻塞探测（立即返回），而非无限阻塞：
+     * 历史缺陷：0 被映射为 poll(-1) 无限等待，当信号（如 SIGTERM）恰好在
+     * 事件循环线程执行 accept 时，poll 返回 EINTR，随后再次进入无限阻塞，
+     * 导致事件循环永远无法检查 stop_requested，daemon 无法优雅退出。 */
+    int timeout = timeout_ms == 0 ? 0 : (int)timeout_ms;
+    int ret;
+    do {
+        ret = poll(&pfd, 1, timeout);
+    } while (ret < 0 && errno == EINTR);
 
     if (ret <= 0 || !(pfd.revents & POLLIN))
         return AIRY_ERR_IO;

@@ -31,9 +31,13 @@
 DAEMON_DECLARE_COMMON(monit_d, monitor, DEFAULT_SOCKET_PATH_UNIX,
                       DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
 
+/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
+DAEMON_DECLARE_SHUTDOWN_METHOD(monit_d)
+
 /* ==================== 全局状态 ==================== */
 
 static monitor_service_t *g_service = NULL;
+static uint64_t g_service_start_time = 0; /* 进程启动时间（L2 get_stats uptime 用） */
 
 /* ==================== 错误码定义（统一使用 AIRY_ERR_*） ==================== */
 #define MONIT_ERR_INVALID_PARAM AIRY_ERR_INVALID_PARAM
@@ -46,10 +50,13 @@ static monitor_service_t *g_service = NULL;
 
 static void handle_record_metric(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_get_metrics(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_get_stats(int id, airy_sock_t client_fd);
 static void handle_trigger_alert(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_get_alerts(int id, airy_sock_t client_fd);
 static void handle_health_check(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_generate_report(int id, airy_sock_t client_fd);
+static void handle_heartbeat(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_alert_resolve(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_client(airy_sock_t client_fd);
 
 static void on_record_metric_method(cJSON *params, int id, void *user_data)
@@ -60,6 +67,12 @@ static void on_record_metric_method(cJSON *params, int id, void *user_data)
 static void on_get_metrics_method(cJSON *params, int id, void *user_data)
 {
     handle_get_metrics(params, id, *(airy_sock_t *)user_data);
+}
+
+/* L2 标准方法 monit.get_stats（02-l2-service-protocol.md §6.1） */
+static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+{
+    handle_get_stats(id, *(airy_sock_t *)user_data);
 }
 
 static void on_trigger_alert_method(cJSON *params, int id, void *user_data)
@@ -80,6 +93,17 @@ static void on_health_check_method(cJSON *params, int id, void *user_data)
 static void on_generate_report_method(cJSON *params, int id, void *user_data)
 {
     handle_generate_report(id, *(airy_sock_t *)user_data);
+}
+
+/* L2 标准方法 monit.heartbeat / monit.alert_resolve（02-l2-service-protocol.md） */
+static void on_heartbeat_method(cJSON *params, int id, void *user_data)
+{
+    handle_heartbeat(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_alert_resolve_method(cJSON *params, int id, void *user_data)
+{
+    handle_alert_resolve(params, id, *(airy_sock_t *)user_data);
 }
 
 /* monit 自定义 on_client：调用本文件 handle_client（含 Prometheus HTTP 处理） */
@@ -203,6 +227,42 @@ static void handle_get_metrics(cJSON *params, int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, arr, id);
 }
 
+/* L2 标准方法 monit.get_stats（02-l2-service-protocol.md §6.1：复用 get_metrics/get_alerts） */
+static void handle_get_stats(int id, airy_sock_t client_fd)
+{
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "daemon", "monit_d");
+    cJSON_AddNumberToObject(result, "uptime_s",
+                            (double)((uint64_t)time(NULL) - (uint64_t)g_service_start_time));
+    if (g_service) {
+        metric_info_t **metrics = NULL;
+        size_t mcount = 0;
+        if (monitor_service_get_metrics(g_service, NULL, &metrics, &mcount) == AIRY_SUCCESS) {
+            cJSON_AddNumberToObject(result, "metrics", (double)mcount);
+            AIRY_FREE(metrics);
+        } else {
+            cJSON_AddNumberToObject(result, "metrics", 0);
+        }
+        alert_info_t **alerts = NULL;
+        size_t acount = 0;
+        if (monitor_service_get_alerts(g_service, &alerts, &acount) == AIRY_SUCCESS) {
+            int resolved = 0;
+            for (size_t i = 0; i < acount && alerts && alerts[i]; i++) {
+                if (alerts[i]->is_resolved)
+                    resolved++;
+            }
+            cJSON_AddNumberToObject(result, "alerts", (double)acount);
+            cJSON_AddNumberToObject(result, "alerts_resolved", (double)resolved);
+            if (alerts)
+                AIRY_FREE(alerts);
+        } else {
+            cJSON_AddNumberToObject(result, "alerts", 0);
+            cJSON_AddNumberToObject(result, "alerts_resolved", 0);
+        }
+    }
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
 static void handle_trigger_alert(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *alert_json = jsonrpc_get_object_param(params, "alert");
@@ -312,6 +372,59 @@ static void handle_generate_report(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
+/* L2 标准方法 monit.heartbeat：记录心跳指标（NOTIFY 语义，返回 received=true） */
+static void handle_heartbeat(cJSON *params, int id, airy_sock_t client_fd)
+{
+    metric_info_t metric = {0};
+    metric.name = AIRY_STRDUP("heartbeat");
+    metric.description = (char *)get_string_field(params, "description", NULL);
+    metric.type = METRIC_TYPE_COUNTER;
+    metric.value = get_double_field(params, "value", 1.0);
+    metric.timestamp = (uint64_t)time(NULL) * 1000;
+
+    int ret = monitor_service_record_metric(g_service, &metric);
+    AIRY_FREE((void *)metric.name);
+
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Heartbeat record failed", id);
+        SVC_LOG_ERROR("monit.heartbeat record failed: error=%d", ret);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddBoolToObject(result, "received", true);
+    cJSON_AddStringToObject(result, "service", "monit_d");
+    cJSON_AddNumberToObject(result, "timestamp", (double)metric.timestamp);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    SVC_LOG_DEBUG("Heartbeat recorded: timestamp=%llu", (unsigned long long)metric.timestamp);
+}
+
+/* L2 标准方法 monit.alert_resolve：将指定告警标记为已解决 */
+static void handle_alert_resolve(cJSON *params, int id, airy_sock_t client_fd)
+{
+    const char *alert_id = get_string_field(params, "alert_id", NULL);
+    if (!alert_id) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing alert_id", id);
+        return;
+    }
+
+    int ret = monitor_service_resolve_alert(g_service, alert_id);
+    if (ret == AIRY_ERR_NOT_FOUND) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Alert not found", id);
+        return;
+    }
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Alert resolve failed", id);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddBoolToObject(result, "resolved", true);
+    cJSON_AddStringToObject(result, "alert_id", alert_id);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    SVC_LOG_INFO("Alert resolved via RPC: %s", alert_id);
+}
+
 /* ==================== 客户端连接处理（含 Prometheus HTTP） ==================== */
 
 static void handle_client(airy_sock_t client_fd)
@@ -389,6 +502,8 @@ int main(int argc, char **argv)
 {
     const char *config_path = "agentrt/manager/service/monit_d/monit.yaml";
     int use_tcp = 0;
+
+    g_service_start_time = (uint64_t)time(NULL);
 
     /* 解析命令行参数（--manager/--tcp/--help） */
     int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_monit_d);
@@ -489,7 +604,16 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_monit_d, "get_alerts", on_get_alerts_method, NULL);
     method_dispatcher_register(g_dispatcher_monit_d, "health_check", on_health_check_method, NULL);
     method_dispatcher_register(g_dispatcher_monit_d, "generate_report", on_generate_report_method, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods", 6);
+    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：monit.heartbeat / monit.metrics / monit.alert_raise / monit.alert_resolve） */
+    method_dispatcher_register(g_dispatcher_monit_d, "heartbeat", on_heartbeat_method, NULL);
+    method_dispatcher_register(g_dispatcher_monit_d, "metrics", on_get_metrics_method, NULL);
+    method_dispatcher_register(g_dispatcher_monit_d, "alert_raise", on_trigger_alert_method, NULL);
+    method_dispatcher_register(g_dispatcher_monit_d, "alert_resolve", on_alert_resolve_method, NULL);
+    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止，仅 monit_d 可调用） */
+    method_dispatcher_register(g_dispatcher_monit_d, "shutdown", on_shutdown_method_monit_d, NULL);
+    /* L2 协议标准方法 monit.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+    method_dispatcher_register(g_dispatcher_monit_d, "get_stats", on_get_stats_method, NULL);
+    SVC_LOG_INFO("Registered %d RPC methods (monit.* namespace)", 12);
 
     /* C-L10: 注册周期性指标上报定时器（每 30s） */
     daemon_event_driver_add_timer(g_event_driver_monit_d, 30000,

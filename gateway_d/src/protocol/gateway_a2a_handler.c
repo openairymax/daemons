@@ -181,6 +181,50 @@ static char *extract_a2a_field(const char *json, const char *field_name)
     return val;
 }
 
+/* 提取 JSON 对象/数组字段（如 A2A message 对象），失败返回 "{}" */
+static char *extract_a2a_object_field(const char *json, const char *field_name)
+{
+    if (!json || !field_name)
+        return AIRY_STRDUP("{}");
+    size_t flen = strlen(field_name) + 4;
+    char *key = (char *)AIRY_MALLOC(flen);
+    if (!key)
+        return AIRY_STRDUP("{}");
+    snprintf(key, flen, "\"%s\"", field_name);
+    const char *p = strstr(json, key);
+    AIRY_FREE(key);
+    if (!p)
+        return AIRY_STRDUP("{}");
+    p += strlen(field_name) + 3;
+    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
+        p++;
+    if (*p != '{' && *p != '[')
+        return AIRY_STRDUP("{}");
+    char open = *p;
+    char close = (open == '{') ? '}' : ']';
+    int depth = 0;
+    const char *start = p;
+    while (*p) {
+        if (*p == open)
+            depth++;
+        else if (*p == close) {
+            depth--;
+            if (depth == 0) {
+                p++;
+                size_t len = (size_t)(p - start);
+                char *obj = (char *)AIRY_MALLOC(len + 1);
+                if (!obj)
+                    return AIRY_STRDUP("{}");
+                AIRY_MEMCPY(obj, start, len);
+                obj[len] = '\0';
+                return obj;
+            }
+        }
+        p++;
+    }
+    return AIRY_STRDUP("{}");
+}
+
 int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method, const char *path,
                                   const char *body_json, char **response_json)
 {
@@ -188,14 +232,32 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
         return AIRY_ERR_INVALID_PARAM;
     handler->request_count++;
 
-    if (path && strcmp(path, "/a2a/agent-card") == 0) {
+    /* 动作判定：优先 path（/a2a/agent-card、/a2a/task），
+     * path 不可用时按 body 的 JSON-RPC method（tasks/send 等）判定（body-only 路由） */
+    int is_agent_card = (path && strcmp(path, "/a2a/agent-card") == 0);
+    int is_task = (path && strcmp(path, "/a2a/task") == 0);
+    if (!is_agent_card && !is_task && body_json) {
+        char *body_method = extract_a2a_field(body_json, "method");
+        if (body_method) {
+            if (strcmp(body_method, "tasks/send") == 0 ||
+                strcmp(body_method, "task/delegate") == 0) {
+                is_task = 1;
+            } else if (strcmp(body_method, "agent-card/get") == 0 ||
+                       strcmp(body_method, "agent/getAgentCard") == 0) {
+                is_agent_card = 1;
+            }
+            AIRY_FREE(body_method);
+        }
+    }
+
+    if (is_agent_card) {
         return gw_a2a_handler_get_agent_card(handler, response_json);
     }
 
-    if (path && strcmp(path, "/a2a/task") == 0) {
+    if (is_task) {
         char *task_type = extract_a2a_field(body_json, "type");
         char *task_id = extract_a2a_field(body_json, "id");
-        char *input_json = extract_a2a_field(body_json, "input");
+        char *input_json = extract_a2a_object_field(body_json, "message");
 
         if (!task_type) {
             LOG_WARN("missing task type in A2A request, path=%s", path ? path : "(null)");

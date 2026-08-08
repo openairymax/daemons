@@ -223,6 +223,9 @@ static int google_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     google_ctx_t *ctx = (google_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
 
+    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
+    provider_refresh_api_key(base);
+
     const char *model =
         (manager->model && manager->model[0]) ? manager->model : GOOGLE_DEFAULT_MODEL;
 
@@ -539,6 +542,9 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
 
     google_ctx_t *ctx = (google_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
+
+    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
+    provider_refresh_api_key(base);
 
     const char *model =
         (manager->model && manager->model[0]) ? manager->model : GOOGLE_DEFAULT_MODEL;

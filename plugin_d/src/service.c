@@ -463,3 +463,45 @@ int plugin_service_list(char ***names, size_t *count, int type_filter)
     *count = total;
     return 0;
 }
+
+int plugin_service_execute(const char *name, const char *json_input,
+                           char **json_output)
+{
+    if (!name || !json_input || !json_output)
+        return AIRY_ERR_INVALID_PARAM;
+    *json_output = NULL;
+
+    /* 锁内快照执行函数与 user_data（与 plugin_service_start 同模式，
+     * 避免 dlclose 竞态；用户回调移出锁外执行） */
+    int (*exec_fn)(const char *, char **) = NULL;
+    sync_rwlock_read_lock_ex(g_plugin_registry.rwlock, NULL);
+    plugin_node_t *node = find_node(name);
+    if (!node) {
+        sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
+        return AIRY_ERR_NOT_FOUND;
+    }
+    void *sym = airy_dl_sym(node->desc.handle, "plugin_execute");
+    if (sym) {
+        AIRY_MEMCPY(&exec_fn, &sym, sizeof(sym));
+    }
+    sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
+
+    if (!exec_fn) {
+        SVC_LOG_WARN("P2.2: PluginD: plugin '%s' does not export plugin_execute",
+                     name);
+        return AIRY_ERR_NOT_FOUND;
+    }
+
+    int ret = exec_fn(json_input, json_output);
+    if (ret != 0) {
+        SVC_LOG_ERROR("P2.2: PluginD: plugin_execute failed: %s (err=%d)",
+                      name, ret);
+        return AIRY_ERR_EXEC_FAIL;
+    }
+    if (!*json_output) {
+        SVC_LOG_ERROR("P2.2: PluginD: plugin_execute returned empty output: %s",
+                      name);
+        return AIRY_ERR_EXEC_FAIL;
+    }
+    return 0;
+}

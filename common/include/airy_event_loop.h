@@ -51,6 +51,14 @@ int airy_event_loop_run(airy_event_loop_t *loop);
 
 void airy_event_loop_stop(airy_event_loop_t *loop);
 
+/**
+ * @brief 异步安全停止事件循环（可在信号处理器中安全调用）
+ *
+ * 仅执行原子置位 + eventfd/事件唤醒，不调用任何日志或锁原语，
+ * 保持 async-signal-safe，避免信号处理器与日志锁死锁导致无法退出。
+ */
+void airy_event_loop_stop_async(airy_event_loop_t *loop);
+
 int airy_event_loop_get_fd_count(airy_event_loop_t *loop);
 
 int airy_event_loop_wakeup(airy_event_loop_t *loop);

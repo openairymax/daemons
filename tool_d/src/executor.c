@@ -16,6 +16,7 @@
 #include "syscalls.h"
 #include "daemon_errors.h"
 #include "executor.h"
+#include "builtin.h"
 #include "daemon_platform_ext.h"
 #include "safety_guard_bridge.h"
 #include "svc_logger.h"
@@ -189,7 +190,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
                       tool_result_t **out_result)
 {
     if (!exec || !meta || !out_result) {
-        SVC_LOG_ERROR("tool_executor_run: NULL parameter (exec=%p, meta=%p, out_result=%p)", (const void *)exec, (const void *)meta, (const void *)out_result);
+        SVC_LOG_ERROR("tool_executor_run: NULL parameter (exec/meta/out_result)");
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -206,7 +207,8 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     time_t start_time = time(NULL);
 
     if (!meta->executable || strlen(meta->executable) == 0) {
-        SVC_LOG_ERROR("tool_executor_run: no executable specified in tool metadata (executable=%p)", (const void *)meta->executable);
+        SVC_LOG_ERROR("tool_executor_run: no executable specified in tool metadata (id=%s)",
+                      meta->id ? meta->id : "?");
         result->success = 0;
         result->output = AIRY_STRDUP("");
         result->error = AIRY_STRDUP("No executable specified in tool metadata");
@@ -260,6 +262,19 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         }
         SVC_LOG_INFO("C-L05: Tool '%s' approved (decision=%d)", meta->name ? meta->name : "?",
                      (int)approval_detail.decision);
+    }
+
+    /* 内置工具（builtin:xxx）：真实实现直接分派（fs_read/fs_write/fs_list/shell_run），
+     * 已通过上方 approval（fail-closed ACL），无需 execvp 外部进程。 */
+    if (tool_builtin_is_builtin(meta->executable)) {
+        int brc = tool_builtin_run(meta->id, params_json, result);
+        result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
+        if (brc == 0 && result->success) {
+            exec->success_count++;
+        }
+        *out_result = result;
+        airy_mtx_unlock(&exec->lock);
+        return brc;
     }
 
     /* BAN-211/235: 构建 argv 并通过 execvp 直接执行（不经 shell），消除命令注入风险。
@@ -404,7 +419,7 @@ int tool_executor_run_async(tool_executor_t *exec, const tool_metadata_t *meta,
                             void *user_data, tool_result_t **out_result)
 {
     if (!exec || !meta) {
-        SVC_LOG_ERROR("tool_executor_run_async: NULL parameter (exec=%p, meta=%p)", (const void *)exec, (const void *)meta);
+        SVC_LOG_ERROR("tool_executor_run_async: NULL parameter (exec/meta)");
         return AIRY_ERR_INVALID_PARAM;
     }
 

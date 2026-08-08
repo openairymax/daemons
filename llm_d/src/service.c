@@ -20,6 +20,8 @@
 #include "router/llm_router.h"
 #include "service.h"
 #include "svc_logger.h"
+/* A2-1: model.yaml global 段提取公共 API（svc_common，gateway_d 共用） */
+#include "svc_model_defaults.h"
 
 #include <cjson/cJSON.h>
 /* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
@@ -295,6 +297,105 @@ static void register_router_endpoints(llm_service_t *svc)
     SVC_LOG_INFO("C-L02: SVC: registered %d endpoints into llm_router", registered_count);
 }
 
+/* ---------- 模型配置辅助（A2-1: global 段 + 用户覆盖文件合并） ---------- */
+
+/* 释放 provider_config_t 数组（registry 已深拷贝后调用） */
+static void free_provider_configs(provider_config_t *providers, size_t count)
+{
+    if (!providers)
+        return;
+    for (size_t i = 0; i < count; ++i) {
+        AIRY_FREE((void *)providers[i].name);
+        AIRY_FREE((void *)providers[i].api_key);
+        AIRY_FREE((void *)providers[i].api_base);
+        AIRY_FREE((void *)providers[i].organization);
+        if (providers[i].models) {
+            for (size_t j = 0; providers[i].models[j]; ++j)
+                AIRY_FREE(providers[i].models[j]);
+            AIRY_FREE(providers[i].models);
+        }
+    }
+    AIRY_FREE(providers);
+}
+
+/* 深拷贝单个 provider 配置（字段全部 strdup，独立生命周期） */
+static provider_config_t provider_config_dup(const provider_config_t *src)
+{
+    provider_config_t d;
+    __builtin_memset(&d, 0, sizeof(d));
+    if (!src)
+        return d;
+    if (src->name)
+        d.name = AIRY_STRDUP(src->name);
+    if (src->api_key)
+        d.api_key = AIRY_STRDUP(src->api_key);
+    if (src->api_base)
+        d.api_base = AIRY_STRDUP(src->api_base);
+    if (src->organization)
+        d.organization = AIRY_STRDUP(src->organization);
+    d.timeout_sec = src->timeout_sec;
+    d.max_retries = src->max_retries;
+    if (src->models) {
+        size_t n = 0;
+        while (src->models[n])
+            n++;
+        char **marr = (char **)AIRY_CALLOC(n + 1, sizeof(char *));
+        if (marr) {
+            for (size_t i = 0; i < n; ++i)
+                marr[i] = AIRY_STRDUP(src->models[i]);
+            d.models = marr;
+        }
+    }
+    return d;
+}
+
+/* 合并主配置与用户覆盖：同名 provider 用户优先替换，不同名追加（深拷贝，无所有权转移） */
+static void merge_provider_configs(const provider_config_t *main_provs, size_t main_cnt,
+                                   const provider_config_t *user_provs, size_t user_cnt,
+                                   provider_config_t **out, size_t *out_cnt)
+{
+    *out = NULL;
+    *out_cnt = 0;
+    if ((!main_provs || main_cnt == 0) && (!user_provs || user_cnt == 0))
+        return;
+
+    size_t cap = main_cnt + user_cnt + 1;
+    provider_config_t *merged = (provider_config_t *)AIRY_CALLOC(cap, sizeof(provider_config_t));
+    if (!merged)
+        return;
+
+    size_t mc = 0;
+    for (size_t i = 0; i < main_cnt && mc < cap; ++i) {
+        provider_config_t d = provider_config_dup(&main_provs[i]);
+        if (d.name)
+            merged[mc++] = d;
+    }
+    for (size_t u = 0; u < user_cnt; ++u) {
+        if (!user_provs[u].name)
+            continue;
+        size_t j = 0;
+        for (; j < mc; ++j) {
+            if (merged[j].name && strcmp(merged[j].name, user_provs[u].name) == 0)
+                break;
+        }
+        if (j < mc) {
+            /* 同名替换：释放主配置该 provider 的旧字段，拷贝用户项（用户优先） */
+            free_provider_configs(&merged[j], 1);
+            merged[j] = provider_config_dup(&user_provs[u]);
+        } else if (mc < cap) {
+            provider_config_t d = provider_config_dup(&user_provs[u]);
+            if (d.name)
+                merged[mc++] = d;
+        }
+    }
+    *out = merged;
+    *out_cnt = mc;
+}
+
+/* 从 YAML 提取 global.default_model / global.default_provider 已公共化到
+ * svc_common 的 svc_model_defaults_from_yaml()（llm_d 与 gateway_d 共用，
+ * 避免两处独立实现 libyaml 扫描逻辑）。 */
+
 /* ---------- 创建服务 ---------- */
 
 llm_service_t *llm_service_create(const char *config_path)
@@ -327,6 +428,45 @@ llm_service_t *llm_service_create(const char *config_path)
     if (config_path) {
         int cfg_ret = svc_load_model_config(config_path, &model_providers, &model_provider_count);
         if (cfg_ret == 0 && model_providers && model_provider_count > 0) {
+            /* A2-1: 用户覆盖文件 $AIRY_CONFIG_DIR/model.yaml（用户优先，同名 provider 替换）。
+             * 用户无需改动仓库 SSoT 即可增删 provider/模型/改 default。 */
+            char user_path[1024];
+            int has_user_cfg = 0;
+            const char *cfg_dir = airy_config_dir();
+            if (cfg_dir) {
+                int plen = snprintf(user_path, sizeof(user_path), "%s/model.yaml", cfg_dir);
+                if (plen > 0 && plen < (int)sizeof(user_path)) {
+                    FILE *uf = fopen(user_path, "rb");
+                    if (uf) {
+                        fclose(uf);
+                        has_user_cfg = 1;
+                    }
+                }
+            }
+            if (has_user_cfg) {
+                provider_config_t *user_providers = NULL;
+                size_t user_provider_count = 0;
+                int u_ret = svc_load_model_config(user_path, &user_providers, &user_provider_count);
+                if (u_ret == 0 && user_providers && user_provider_count > 0) {
+                    provider_config_t *merged = NULL;
+                    size_t merged_count = 0;
+                    merge_provider_configs(model_providers, model_provider_count,
+                                           user_providers, user_provider_count,
+                                           &merged, &merged_count);
+                    if (merged && merged_count > 0) {
+                        free_provider_configs(model_providers, model_provider_count);
+                        model_providers = merged;
+                        model_provider_count = merged_count;
+                        SVC_LOG_INFO("C-L02: SVC: merged %zu user provider(s) from %s "
+                                     "(user overrides same-name)",
+                                     user_provider_count, user_path);
+                    } else {
+                        free_provider_configs(user_providers, user_provider_count);
+                    }
+                } else if (user_providers) {
+                    free_provider_configs(user_providers, user_provider_count);
+                }
+            }
             base_cfg.providers = model_providers;
             base_cfg.provider_count = model_provider_count;
             SVC_LOG_INFO("C-L02: SVC: loaded %zu provider(s) from manager config",
@@ -337,8 +477,46 @@ llm_service_t *llm_service_create(const char *config_path)
         }
     }
 
-    /* 解析定价规则（使用 cJSON） */
-    if (config_path) {
+    /* A2-1: global.default_model/default_provider 生效（主配置 + 用户覆盖，用户优先）。
+     * 此前 model.yaml 的 global 段不被任何代码消费，默认模型仅靠 gateway 硬编码。 */
+    char global_model[128] = {0};
+    char global_provider[64] = {0};
+    if (config_path)
+        svc_model_defaults_from_yaml(config_path, global_model, sizeof(global_model),
+                                     global_provider, sizeof(global_provider));
+    {
+        char user_path[1024];
+        const char *cfg_dir = airy_config_dir();
+        if (cfg_dir) {
+            int plen = snprintf(user_path, sizeof(user_path), "%s/model.yaml", cfg_dir);
+            if (plen > 0 && plen < (int)sizeof(user_path)) {
+                FILE *uf = fopen(user_path, "rb");
+                if (uf) {
+                    fclose(uf);
+                    char um[128] = {0};
+                    char up[64] = {0};
+                    svc_model_defaults_from_yaml(user_path, um, sizeof(um), up, sizeof(up));
+                    if (um[0])
+                        AIRY_STRNCPY_TERM(global_model, um, sizeof(global_model));
+                    if (up[0])
+                        AIRY_STRNCPY_TERM(global_provider, up, sizeof(global_provider));
+                }
+            }
+        }
+    }
+    if (global_model[0]) {
+        AIRY_STRNCPY_TERM(svc->default_model, global_model, sizeof(svc->default_model));
+        SVC_LOG_INFO("C-L02: SVC: default_model=%s (from global config)", svc->default_model);
+    }
+    if (global_provider[0])
+        AIRY_STRNCPY_TERM(svc->default_provider, global_provider, sizeof(svc->default_provider));
+
+    /* 解析定价规则（使用 cJSON；仅 JSON 配置适用）。
+     * model.yaml 为 YAML 格式，若将 YAML 内容直接喂给 cJSON 必然解析失败，
+     * 每次启动误报 "Failed to parse pricing rules" WARN 且定价规则永不加载。
+     * 当前 model.yaml/model.json 均无 pricing 段，YAML 配置优雅降级为无规则，
+     * 与 JSON 同源配置语义一致（缺失 pricing → 无成本规则，仅记录 DEBUG）。 */
+    if (config_path && ends_with(config_path, ".json")) {
         FILE *f = fopen(config_path, "rb");
         if (f) {
             fseek(f, 0, SEEK_END);
@@ -384,6 +562,9 @@ llm_service_t *llm_service_create(const char *config_path)
                 fclose(f);
             }
         }
+    } else if (config_path) {
+        SVC_LOG_DEBUG("pricing rules: YAML config has no cJSON pricing section, "
+                      "degraded to no cost rules");
     }
 
     /* 创建提供商注册表 */
@@ -395,19 +576,10 @@ llm_service_t *llm_service_create(const char *config_path)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    /* P0.18.3: registry 已深拷贝 provider 配置，释放临时加载的 model_providers */
+    /* P0.18.3: registry 已深拷贝 provider 配置，释放临时加载的 model_providers
+     * （含用户覆盖合并后的 merged 数组） */
     if (model_providers) {
-        for (size_t i = 0; i < model_provider_count; ++i) {
-            AIRY_FREE((void *)model_providers[i].name);
-            AIRY_FREE((void *)model_providers[i].api_key);
-            AIRY_FREE((void *)model_providers[i].api_base);
-            if (model_providers[i].models) {
-                for (size_t j = 0; model_providers[i].models[j]; ++j)
-                    AIRY_FREE(model_providers[i].models[j]);
-                AIRY_FREE(model_providers[i].models);
-            }
-        }
-        AIRY_FREE(model_providers);
+        free_provider_configs(model_providers, model_provider_count);
         model_providers = NULL;
     }
 
@@ -744,15 +916,17 @@ static void cache_response(llm_service_t *svc, const char *cache_key, llm_respon
 }
 
 /**
- * @brief 更新成本追踪
+ * @brief 更新成本追踪（累计 + 单次成本回填到响应）
  */
-static void update_cost_tracking(llm_service_t *svc, const char *model, const llm_response_t *resp)
+static void update_cost_tracking(llm_service_t *svc, const char *model, llm_response_t *resp)
 {
     if (!svc || !model || !resp) {
         return;
     }
 
     cost_tracker_add(svc->cost, model, resp->prompt_tokens, resp->completion_tokens);
+    resp->cost_usd = cost_tracker_estimate(svc->cost, model, resp->prompt_tokens,
+                                           resp->completion_tokens);
 }
 
 /* ---------- 同步完成（重构后：圈复杂度从 22 降至 9） ---------- */
@@ -894,6 +1068,8 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
     if (ret == 0 && out_response && *out_response) {
         llm_response_t *resp = *out_response;
         cost_tracker_add(svc->cost, manager->model, resp->prompt_tokens, resp->completion_tokens);
+        resp->cost_usd = cost_tracker_estimate(svc->cost, manager->model, resp->prompt_tokens,
+                                               resp->completion_tokens);
     }
 
     return ret;
@@ -932,6 +1108,74 @@ int llm_service_stats(llm_service_t *svc, char **out_json)
 
     *out_json = json;
     return AIRY_OK;
+}
+
+/* ---------- 模型列表（A2-3: llm.list_models） ---------- */
+
+typedef struct {
+    cJSON *models_arr;
+    const char *default_model;
+} list_models_ctx_t;
+
+/* provider_registry_enumerate 回调：收集 (provider, model) 到 JSON 数组 */
+static int list_models_cb(const char *provider_name, const char *model_name, void *user_data)
+{
+    list_models_ctx_t *ctx = (list_models_ctx_t *)user_data;
+    if (!ctx || !ctx->models_arr || !provider_name || !model_name)
+        return 0;
+
+    cJSON *item = cJSON_CreateObject();
+    if (!item)
+        return 0;
+    cJSON_AddStringToObject(item, "name", model_name);
+    cJSON_AddStringToObject(item, "provider", provider_name);
+    cJSON_AddBoolToObject(item, "default",
+                          ctx->default_model && strcmp(ctx->default_model, model_name) == 0);
+    cJSON_AddItemToArray(ctx->models_arr, item);
+    return 0;
+}
+
+char *llm_service_list_models(llm_service_t *svc)
+{
+    if (!svc)
+        return NULL;
+
+    airy_mtx_lock(&svc->lock);
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        airy_mtx_unlock(&svc->lock);
+        return NULL;
+    }
+    cJSON *models_arr = cJSON_CreateArray();
+    if (!models_arr) {
+        cJSON_Delete(root);
+        airy_mtx_unlock(&svc->lock);
+        return NULL;
+    }
+    cJSON_AddItemToObject(root, "models", models_arr);
+
+    list_models_ctx_t ctx = {
+        .models_arr = models_arr,
+        .default_model = svc->default_model[0] ? svc->default_model : NULL,
+    };
+    provider_registry_enumerate(svc->registry, list_models_cb, &ctx);
+
+    cJSON_AddStringToObject(root, "default_model",
+                            svc->default_model[0] ? svc->default_model : "");
+    if (svc->default_provider[0])
+        cJSON_AddStringToObject(root, "default_provider", svc->default_provider);
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    airy_mtx_unlock(&svc->lock);
+    return json;
+}
+
+const char *llm_service_default_model(const llm_service_t *svc)
+{
+    if (!svc)
+        return NULL;
+    return svc->default_model[0] ? svc->default_model : NULL;
 }
 
 /* ---------- 服务配置加载 ---------- */
@@ -1711,6 +1955,8 @@ void llm_response_free(llm_response_t *resp)
         for (size_t i = 0; i < resp->choice_count; i++) {
             AIRY_FREE((void *)resp->choices[i].role);
             AIRY_FREE((void *)resp->choices[i].content);
+            AIRY_FREE((void *)resp->choices[i].tool_call_id);
+            AIRY_FREE((void *)resp->choices[i].tool_calls_json);
         }
         AIRY_FREE(resp->choices);
     }

@@ -11,6 +11,7 @@
 
 #include "daemon_errors.h"
 #include "market_service.h"
+#include "platform.h" /* airy_home_dir() / AIRY_PATH_MAX：默认安装目录收敛到 AIRY_HOME */
 #include "svc_logger.h"
 
 #include <errno.h>
@@ -172,6 +173,16 @@ static int is_safe_path_component(const char *str)
     if (strstr(str, ".."))
         return 0;
     return 1;
+}
+
+/* 默认存储根目录：$AIRY_HOME/agents（或 /skills）。
+ * 历史上 install/uninstall 硬编码 "./agents" 相对路径，随进程 CWD 漂移，
+ * 部署到 $AIRY_HOME/bin 后必然落错位置；统一收敛到 AIRY_HOME 路径体系。 */
+static const char *market_default_storage(const char *subdir)
+{
+    static __thread char s_path[AIRY_PATH_MAX];
+    snprintf(s_path, sizeof(s_path), "%s/%s", airy_home_dir(), subdir);
+    return s_path;
 }
 
 struct market_service {
@@ -587,9 +598,33 @@ int market_service_install_agent(market_service_t *service, const install_reques
     /* 阶段2：锁外执行本地安装与网络下载（fork/execlp/waitpid 不得持锁） */
     const char *base_path = request->install_path
                                 ? request->install_path
-                                : (snap_storage ? snap_storage : "./agents");
+                                : (snap_storage ? snap_storage
+                                                : market_default_storage("agents"));
     char install_dir[1024];
     snprintf(install_dir, sizeof(install_dir), "%s/%s", base_path, request->id);
+
+    /* 确保父目录存在（$AIRY_HOME/agents 等默认目录首次安装时可能不存在） */
+    {
+        char _par[1024];
+        snprintf(_par, sizeof(_par), "%s", base_path);
+        size_t _plen = strlen(_par);
+        while (_plen > 1 && _par[_plen - 1] == '/')
+            _par[--_plen] = '\0';
+        for (char *p = _par + 1; *p; p++) {
+            if (*p == '/') {
+                *p = '\0';
+                int _m = mkdir(_par, 0755);
+                *p = '/';
+                if (_m != 0 && errno != EEXIST) {
+                    SVC_LOG_ERROR("market_service_install_agent: mkdir failed for parent (path=%s, errno=%d)", _par, errno);
+                    break;
+                }
+            }
+        }
+        if (mkdir(_par, 0755) != 0 && errno != EEXIST) {
+            SVC_LOG_ERROR("market_service_install_agent: mkdir failed for parent root (path=%s, errno=%d)", _par, errno);
+        }
+    }
 
     {
         int mkret = mkdir(install_dir, 0755);
@@ -757,7 +792,9 @@ int market_service_install_skill(market_service_t *service, const install_reques
     res->success = true;
     res->message = AIRY_STRDUP("Skill installed successfully");
     res->installed_version = AIRY_STRDUP(request->version ? request->version : target->version);
-    res->install_path = AIRY_STRDUP(request->install_path ? request->install_path : "./skills");
+    res->install_path = AIRY_STRDUP(request->install_path
+                                        ? request->install_path
+                                        : market_default_storage("skills"));
     res->error_code = 0;
     airy_mtx_unlock(&service->lock);
 
@@ -780,7 +817,8 @@ int market_service_uninstall_agent(market_service_t *service, const char *agent_
     for (size_t i = 0; i < service->agent_count; i++) {
         if (strcmp(service->agents[i]->agent_id, agent_id) == 0) {
             const char *storage =
-                service->config.storage_path ? service->config.storage_path : "./agents";
+                service->config.storage_path ? service->config.storage_path
+                                             : market_default_storage("agents");
             char install_dir[1024];
             snprintf(install_dir, sizeof(install_dir), "%s/%s", storage, agent_id);
 

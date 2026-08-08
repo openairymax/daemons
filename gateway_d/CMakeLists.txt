@@ -59,7 +59,7 @@ option(AIRY_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
 set(GATEWAY_SERVICE_SOURCES
     src/service.c
     src/gateway_svc_adapter.c
-    src/gateway_forward.c
+    src/gateway_business_handler.c
 )
 
 if(AIRY_ENABLE_PROTOCOLS)
@@ -132,6 +132,8 @@ target_include_directories(airy_gateway_service PUBLIC
     ${PROTOCOLS_MCP_DIR}/include
     ${PROTOCOLS_A2A_INCLUDE_DIR}
     ${PROTOCOLS_OPENAI_INCLUDE_DIR}
+    # nghttp2 头文件（HTTP/2 支持）— 项目本地副本 commons/include/third_party/
+    ${COMMONS_INCLUDE_DIR}/include/third_party
 )
 
 target_include_directories(airy_gateway_service PRIVATE
@@ -158,6 +160,13 @@ if(AIRY_HAS_LIBWEBSOCKETS)
     target_compile_definitions(airy_gateway_service PRIVATE GATEWAY_HAS_WS=1)
 else()
     airy_print_warn("libwebsockets not found, WebSocket gateway may not compile.")
+endif()
+
+if(AIRY_HAS_HTTP2)
+    target_compile_definitions(airy_gateway_service PRIVATE GATEWAY_HAS_HTTP2=1)
+    # http2_gateway.h 传递包含 nghttp2.h（头文件内联函数使用 malloc/free 等），
+    # 需 AIRY_COMPLIANCE_IMPL 豁免毒化（与 gateway_lib_obj 的 http2_gateway.c 同策略）
+    set_source_files_properties(src/service.c PROPERTIES COMPILE_DEFINITIONS "AIRY_COMPLIANCE_IMPL")
 endif()
 
 if(AIRY_HAS_CJSON)
@@ -197,6 +206,26 @@ set(GATEWAY_LIB_SOURCES
     ${GATEWAY_SRC_DIR}/utils/gateway_rate_limiter.c
 )
 
+# nghttp2（HTTP/2 支持）：根级缓存变量 AIRY_HAS_HTTP2 由 gateway 模块探测；
+# 若 NGHTTP2_LIBRARY 未缓存则在此补充查找（运行时库可能仅有 .so.14 无 .so 软链接）
+if(AIRY_HAS_HTTP2)
+    if(NOT NGHTTP2_LIBRARY)
+        find_library(NGHTTP2_LIBRARY NAMES nghttp2)
+    endif()
+    if(NOT NGHTTP2_LIBRARY)
+        find_file(NGHTTP2_LIBRARY
+            NAMES libnghttp2.so.14 libnghttp2.so.19 libnghttp2.so
+            PATHS /usr/lib/x86_64-linux-gnu /usr/lib /usr/local/lib
+        )
+    endif()
+    if(NGHTTP2_LIBRARY)
+        list(APPEND GATEWAY_LIB_SOURCES ${GATEWAY_SRC_DIR}/gateway/http2_gateway.c)
+    else()
+        set(AIRY_HAS_HTTP2 FALSE CACHE BOOL "nghttp2 available")
+        airy_print_warn("[gateway_d] nghttp2 not found, HTTP/2 gateway disabled")
+    endif()
+endif()
+
 # 创建 gateway 库对象（不安装，仅供 gateway_d 使用）
 add_library(gateway_lib_obj OBJECT ${GATEWAY_LIB_SOURCES})
 
@@ -209,6 +238,18 @@ if(AIRY_HAS_LIBWEBSOCKETS)
         ${GATEWAY_SRC_DIR}/gateway/ws_gateway.c
         PROPERTIES COMPILE_DEFINITIONS "AIRY_COMPLIANCE_IMPL"
     )
+endif()
+
+# nghttp2 头文件内部使用 malloc/free/memcpy/memset 等函数，
+# 在 AIRY_COMPLIANCE_STRICT 模式下会被 banned_functions.h 毒化，
+# 需通过 AIRY_COMPLIANCE_IMPL 豁免（与 ws_gateway.c 同策略）。
+if(AIRY_HAS_HTTP2 AND NGHTTP2_LIBRARY)
+    set_source_files_properties(
+        ${GATEWAY_SRC_DIR}/gateway/http2_gateway.c
+        PROPERTIES COMPILE_DEFINITIONS "AIRY_COMPLIANCE_IMPL"
+    )
+    # http2_gateway.c 内部使用 AIRY_HAS_HTTP2 宏控制真实/禁用实现
+    target_compile_definitions(gateway_lib_obj PUBLIC GATEWAY_HAS_HTTP2=1 AIRY_HAS_HTTP2=1)
 endif()
 target_include_directories(gateway_lib_obj PUBLIC
     ${GATEWAY_INCLUDE_DIR}
@@ -232,6 +273,8 @@ target_include_directories(gateway_lib_obj PUBLIC
      ${PROTOCOLS_COMMON_INCLUDE_DIR}
     # P0.18.2: cJSON 三步曲宏化辅助头文件（cjson_helpers.h）
     ${COMMONS_DIR}/utils/cjson/include
+    # nghttp2 头文件（HTTP/2 支持）— 项目本地副本 commons/include/third_party/
+    ${COMMONS_DIR}/include/third_party
 )
 endif()
 
@@ -328,6 +371,10 @@ if(AIRY_HAS_LIBWEBSOCKETS)
     target_compile_definitions(gateway_d PRIVATE GATEWAY_HAS_WS=1)
 endif()
 
+if(AIRY_HAS_HTTP2)
+    target_compile_definitions(gateway_d PRIVATE GATEWAY_HAS_HTTP2=1)
+endif()
+
 # ==================== 链接库 ====================
 # 链接策略说明：
 #   LTO + ASan 组合下，链接器扫描静态库时使用 LTO 符号摘要，可能漏掉符号
@@ -368,6 +415,11 @@ if(AIRY_HAS_LIBWEBSOCKETS)
     elseif(LIBWEBSOCKETS_FOUND)
         target_link_libraries(gateway_d PRIVATE ${LIBWEBSOCKETS_LIBRARIES})
     endif()
+endif()
+
+# nghttp2 链接（HTTP/2 支持）：使用完整路径避免 -lnghttp2 找不到（系统仅有 .so.14）
+if(AIRY_HAS_HTTP2 AND NGHTTP2_LIBRARY)
+    target_link_libraries(gateway_d PRIVATE ${NGHTTP2_LIBRARY})
 endif()
 
 # ==================== 编译选项 ====================

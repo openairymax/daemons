@@ -18,9 +18,10 @@
  * @brief 调度策略类型
  */
 typedef enum {
-    SCHED_STRATEGY_ROUND_ROBIN, /**< 轮询调度 */
-    SCHED_STRATEGY_WEIGHTED,    /**< 加权调度 */
-    SCHED_STRATEGY_ML_BASED,    /**< 基于机器学习的调度 */
+    SCHED_STRATEGY_ROUND_ROBIN,   /**< 轮询调度 */
+    SCHED_STRATEGY_WEIGHTED,      /**< 加权调度 */
+    SCHED_STRATEGY_ML_BASED,      /**< 基于机器学习的调度 */
+    SCHED_STRATEGY_PRIORITY_BASED, /**< 基于优先级的调度（任务优先级越高，选人分数放大） */
     SCHED_STRATEGY_COUNT
 } sched_strategy_t;
 
@@ -39,13 +40,55 @@ typedef enum {
  * @brief 任务信息
  */
 typedef struct {
-    char *task_id;            /**< 任务 ID */
+    char *task_id;            /**< 任务 ID（可为 NULL，缺省由服务端生成） */
     char *task_description;   /**< 任务描述 */
     task_priority_t priority; /**< 任务优先级 */
     uint32_t timeout_ms;      /**< 超时时间（毫秒） */
     void *task_data;          /**< 任务数据 */
     size_t task_data_size;    /**< 任务数据大小 */
 } task_info_t;
+
+/**
+ * @brief 任务生命周期状态（异步队列：入队→选中→执行→完成/失败）
+ * @note 命名用 SCHED_ 前缀：types.h 已占用 TASK_STATUS_* 宏，避免枚举名展开冲突
+ */
+typedef enum {
+    SCHED_TASK_STATUS_PENDING,   /**< 已入队，等待工作线程消费 */
+    SCHED_TASK_STATUS_RUNNING,   /**< 已选中 agent，执行中 */
+    SCHED_TASK_STATUS_COMPLETED, /**< 执行成功（output 有效） */
+    SCHED_TASK_STATUS_FAILED,    /**< 执行失败（error 有效） */
+    SCHED_TASK_STATUS_CANCELED,  /**< 已取消（sched.cancel，仅 PENDING 可取消） */
+    SCHED_TASK_STATUS_COUNT
+} task_status_t;
+
+/**
+ * @brief 任务记录（队列条目，get_task 查询依据）
+ */
+typedef struct {
+    char *task_id;          /**< 任务 ID */
+    char *task_description; /**< 任务描述 */
+    task_priority_t priority; /**< 任务优先级 */
+    uint32_t timeout_ms;    /**< 超时时间（毫秒） */
+    task_status_t status;   /**< 当前状态 */
+    char *selected_agent_id; /**< 选中的 agent（role） */
+    char *output;           /**< 执行输出（COMPLETED） */
+    char *error;            /**< 失败原因（FAILED） */
+    uint64_t created_at_ms; /**< 入队时间戳 */
+    uint64_t finished_at_ms; /**< 结束时间戳（COMPLETED/FAILED） */
+} task_record_t;
+
+/**
+ * @brief 任务执行回调（由 daemon 注入：选 agent + spawn + invoke）
+ * @param agent_id 选中的 agent（role）
+ * @param task_description 任务描述（作为 invoke 的 input）
+ * @param out_output 执行输出（AIRY_MALLOC，调用方释放）
+ * @return 0 成功，非 0 失败
+ */
+typedef int (*sched_task_executor_t)(const char *agent_id, const char *task_description,
+                                     char **out_output);
+
+/** 任务队列/记录容量上限 */
+#define AIRY_CAP_MAX_TASKS 256
 
 /**
  * @brief Agent 信息
@@ -158,5 +201,131 @@ int sched_service_health_check(sched_service_t *service, bool *health_status);
  * @return 0 表示成功，非 0 表示错误码
  */
 int sched_service_reload_config(sched_service_t *service, const sched_config_t *manager);
+
+/**
+ * @brief 提交任务（异步队列）：入队后立即返回，工作线程随后执行
+ * @param service 服务句柄
+ * @param task_info 任务信息（task_id 为 NULL 时由服务端生成）
+ * @param out_task_id 输出参数，返回实际生效的任务 ID（AIRY_MALLOC，调用方 AIRY_FREE）
+ * @return 0 表示成功，非 0 表示错误码
+ */
+int sched_service_submit_task(sched_service_t *service, const task_info_t *task_info,
+                              char **out_task_id);
+
+/**
+ * @brief 查询任务状态
+ * @param service 服务句柄
+ * @param task_id 任务 ID
+ * @param out_json 输出参数，返回任务状态 JSON（AIRY_MALLOC，调用方 AIRY_FREE）
+ * @return 0 表示成功；AIRY_ERR_NOT_FOUND 表示任务不存在
+ */
+int sched_service_get_task(sched_service_t *service, const char *task_id, char **out_json);
+
+/**
+ * @brief 注入任务执行回调（必须在 start_workers 之前调用）
+ * @param service 服务句柄
+ * @param executor 执行回调（选中 agent 后由工作线程调用）
+ * @return 0 表示成功，非 0 表示错误码
+ */
+int sched_service_set_executor(sched_service_t *service, sched_task_executor_t executor);
+
+/**
+ * @brief 启动任务队列工作线程（消费 pending 队列并执行）
+ * @param service 服务句柄
+ * @return 0 表示成功，非 0 表示错误码
+ */
+int sched_service_start_workers(sched_service_t *service);
+
+/**
+ * @brief 停止任务队列工作线程（destroy 前调用；幂等）
+ * @param service 服务句柄
+ */
+void sched_service_stop_workers(sched_service_t *service);
+
+/**
+ * @brief 取消任务（仅 PENDING 可取消；RUNNING/终态返回 AIRY_ERR_BUSY）
+ * @param service 服务句柄
+ * @param task_id 任务 ID
+ * @return 0 成功；AIRY_ERR_NOT_FOUND 任务不存在；AIRY_ERR_BUSY 不可取消
+ */
+int sched_service_cancel_task(sched_service_t *service, const char *task_id);
+
+/* ============================================================================
+ * DAG 任务图执行引擎（工作大厅机制，见 08-work-hall.md）
+ *
+ * 提交一个带依赖的任务图：dag 工作线程按拓扑顺序派发就绪节点（依赖全部
+ * 完成后），每个节点经注入的 executor（sched_dispatch_executor → agent_d
+ * spawn/invoke）真实执行；节点失败即中止该图并取消其余未完成节点。
+ * 数据来源：think_d 的 GCCP+GRAD 计划（nodes: id/goal/depends[role]）。
+ * ============================================================================ */
+
+/** DAG 节点状态（字符串名：pending/ready/running/completed/failed/canceled） */
+typedef enum {
+    SCHED_DAG_NODE_PENDING = 0, /**< 依赖未满足 */
+    SCHED_DAG_NODE_READY,       /**< 依赖已满足，等待派发 */
+    SCHED_DAG_NODE_RUNNING,     /**< 正在派发（executor 执行中） */
+    SCHED_DAG_NODE_COMPLETED,   /**< 成功（output 有效） */
+    SCHED_DAG_NODE_FAILED,      /**< 失败（error 有效） */
+    SCHED_DAG_NODE_CANCELED,    /**< 已取消（图被取消或依赖失败） */
+    SCHED_DAG_NODE_COUNT
+} sched_dag_node_status_t;
+
+/** DAG 图整体状态（字符串名：active/completed/failed/canceled） */
+typedef enum {
+    SCHED_DAG_STATUS_ACTIVE = 0,
+    SCHED_DAG_STATUS_COMPLETED,
+    SCHED_DAG_STATUS_FAILED,
+    SCHED_DAG_STATUS_CANCELED,
+    SCHED_DAG_STATUS_COUNT
+} sched_dag_status_t;
+
+/** 单图节点/依赖/并发图数量上限（防资源失控） */
+#define SCHED_DAG_MAX_NODES 64
+#define SCHED_DAG_MAX_DEPS 8
+#define SCHED_DAG_MAX_DAGS 32
+
+/**
+ * @brief 提交 DAG 任务图（异步：入图后 dag 工作线程按拓扑执行）
+ * @param service 服务句柄
+ * @param dag_json 图描述 JSON 字符串：
+ *   {"name":"...","nodes":[{"id":"S_01","goal":"...","role":"coding",
+ *    "depends":["S_02",...]}, ...]}
+ *   - role 缺省 "coding"；depends 缺省空（入口节点）
+ *   - 图必须无环（Kahn 拓扑校验，有环返回 AIRY_ERR_CYCLE_DETECTED）
+ * @param out_dag_id 输出参数，返回 dag_id（AIRY_MALLOC，调用方 AIRY_FREE）
+ * @return 0 成功；AIRY_ERR_INVALID_PARAM 非法 JSON/空节点/超上限；
+ *         AIRY_ERR_CYCLE_DETECTED 存在依赖环
+ */
+int sched_service_submit_dag(sched_service_t *service, const char *dag_json,
+                             char **out_dag_id);
+
+/**
+ * @brief 查询 DAG 状态（看板快照：图状态/节点状态/进度/输出）
+ * @param service 服务句柄
+ * @param dag_id DAG ID
+ * @param out_json 输出参数，返回 JSON（AIRY_MALLOC，调用方 AIRY_FREE）
+ * @return 0 成功；AIRY_ERR_NOT_FOUND 不存在
+ */
+int sched_service_get_dag(sched_service_t *service, const char *dag_id, char **out_json);
+
+/**
+ * @brief 取消 DAG（未完成节点全部置 canceled；RUNNING 节点完成后不再上屏输出）
+ * @param service 服务句柄
+ * @param dag_id DAG ID
+ * @return 0 成功；AIRY_ERR_NOT_FOUND 不存在
+ */
+int sched_service_cancel_dag(sched_service_t *service, const char *dag_id);
+
+/**
+ * @brief 保存调度检查点（L2 协议标准方法 sched.checkpoint_save）
+ * @param service 服务句柄
+ * @param out_json 输出参数，返回当前队列/DAG 状态快照 JSON（AIRY_MALLOC，调用方 AIRY_FREE）：
+ *   {"agent_count":N,"total_tasks":T,"pending":P,"running":R,
+ *    "dag_count":D,"active_dags":A,"completed_dags":C,"timestamp_ms":...}
+ * @return 0 成功；AIRY_ERR_INVALID_PARAM 参数非法
+ * @note 快照为内存视图（不落盘），由上层（如 monit_d / 集群管理器）决定持久化；
+ *       供调度状态观测与故障恢复前的状态导出。
+ */
+int sched_service_checkpoint_save(sched_service_t *service, char **out_json);
 
 #endif /* AIRY_RT_SCHEDULER_SERVICE_H */

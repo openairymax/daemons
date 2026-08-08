@@ -27,6 +27,11 @@ typedef enum {
 
 typedef struct gw_proto_router gw_proto_router_t;
 
+/* 前向声明适配器（完整类型见各适配器头文件，getter 返回不透明指针供接线） */
+typedef struct gw_mcp_server gw_mcp_server_t;
+typedef struct gw_openai_compat gw_openai_compat_t;
+typedef struct gw_a2a_handler gw_a2a_handler_t;
+
 typedef struct {
     char method[GW_PROTO_MAX_METHOD_LEN];
     char path[GW_PROTO_MAX_PATH_LEN];
@@ -72,6 +77,11 @@ int gw_proto_router_route_auto(gw_proto_router_t *router, const char *content_ty
 int gw_proto_router_get_stats(gw_proto_router_t *router, gw_proto_router_stats_t *stats);
 
 bool gw_proto_router_is_healthy(gw_proto_router_t *router);
+
+/* 适配器 getter：供接线方注入内部服务 backend（注册 MCP 工具 / OpenAI llm_call / A2A task_type） */
+gw_mcp_server_t *gw_proto_router_get_mcp(gw_proto_router_t *router);
+gw_openai_compat_t *gw_proto_router_get_openai(gw_proto_router_t *router);
+gw_a2a_handler_t *gw_proto_router_get_a2a(gw_proto_router_t *router);
 
 #ifdef __cplusplus
 }

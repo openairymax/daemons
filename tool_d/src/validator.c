@@ -179,10 +179,16 @@ int tool_validator_validate(tool_validator_t *val __attribute__((unused)),
             const char *pschema = meta->params[i].schema;
             cJSON *item = cJSON_GetObjectItem(root, pname);
 
+            /* 可选参数缺省（如 fs_list.path）直接跳过——与 gateway 工具 schema
+             * required 数组一致（SSoT，T2 修复）；仅必需参数缺一即拒。 */
             if (!item) {
-                SVC_LOG_WARN("Missing required parameter '%s' for tool %s", pname, meta->id);
-                /* root 由 CJSON_AUTO_FREE 自动释放 */
-                return 0;
+                if (meta->params[i].required) {
+                    SVC_LOG_WARN("Missing required parameter '%s' for tool %s", pname,
+                                 meta->id);
+                    /* root 由 CJSON_AUTO_FREE 自动释放 */
+                    return 0;
+                }
+                continue;
             }
 
             if (!validate_single_param(pname, pschema, item)) {

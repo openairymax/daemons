@@ -334,6 +334,9 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     openai_ctx_t *ctx = (openai_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
 
+    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
+    provider_refresh_api_key(base);
+
     char *req_body = provider_build_openai_request(manager, OPENAI_DEFAULT_MODEL);
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s reason=build_request_oom "
@@ -537,6 +540,9 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
 
     openai_ctx_t *ctx = (openai_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
+
+    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
+    provider_refresh_api_key(base);
 
     llm_request_config_t stream_cfg = *manager;
     stream_cfg.stream = 1;

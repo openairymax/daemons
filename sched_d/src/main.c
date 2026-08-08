@@ -40,6 +40,9 @@
 DAEMON_DECLARE_COMMON(sched_d, scheduler, DEFAULT_SOCKET_PATH_UNIX,
                       DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
 
+/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
+DAEMON_DECLARE_SHUTDOWN_METHOD(sched_d)
+
 /* ==================== 全局状态 ==================== */
 
 static sched_service_t *g_service = NULL;
@@ -55,8 +58,14 @@ static sched_service_t *g_service = NULL;
 
 static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_dag_submit(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_dag_status(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_dag_cancel(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_get_stats(int id, airy_sock_t client_fd);
 static void handle_health_check(int id, airy_sock_t client_fd);
+static void handle_checkpoint_save(cJSON *params, int id, airy_sock_t client_fd);
 
 /* P2.2 选后派发：声明（实现位于 handle_health_check 之后） */
 typedef struct {
@@ -77,6 +86,31 @@ static void on_schedule_task_method(cJSON *params, int id, void *user_data)
     handle_schedule_task(params, id, *(airy_sock_t *)user_data);
 }
 
+static void on_get_task_method(cJSON *params, int id, void *user_data)
+{
+    handle_get_task(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_cancel_task_method(cJSON *params, int id, void *user_data)
+{
+    handle_cancel_task(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_dag_submit_method(cJSON *params, int id, void *user_data)
+{
+    handle_dag_submit(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_dag_status_method(cJSON *params, int id, void *user_data)
+{
+    handle_dag_status(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_dag_cancel_method(cJSON *params, int id, void *user_data)
+{
+    handle_dag_cancel(params, id, *(airy_sock_t *)user_data);
+}
+
 static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_get_stats(id, *(airy_sock_t *)user_data);
@@ -85,6 +119,11 @@ static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, v
 static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_health_check(id, *(airy_sock_t *)user_data);
+}
+
+static void on_checkpoint_save_method(cJSON *params, int id, void *user_data)
+{
+    handle_checkpoint_save(params, id, *(airy_sock_t *)user_data);
 }
 
 static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
@@ -146,19 +185,13 @@ static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd)
     }
 
     task_info_t task = {0};
+    /* task_id 可选：客户端提供则采用；否则由 sched_d 生成（异步队列语义） */
     const char *tid = get_string_field(task_json, "task_id", NULL);
-    if (!tid) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing task_id", id);
-        return;
-    }
-    /* task_id/task_description 为堆指针字段：须 AIRY_STRDUP 分配（同 register_agent
-     * 既有 P0 修复：原 AIRY_STRNCPY_TERM(…, sizeof(char*)) 向 NULL 写入导致 SEGV）。 */
-    task.task_id = AIRY_STRDUP(tid);
+    task.task_id = tid ? AIRY_STRDUP(tid) : NULL;
     const char *desc = get_string_field(task_json, "task_description", NULL);
     task.task_description = AIRY_STRDUP(desc ? desc : "");
-    if (!task.task_id || !task.task_description) {
+    if (!task.task_description) {
         AIRY_FREE(task.task_id);
-        AIRY_FREE(task.task_description);
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
         return;
     }
@@ -166,59 +199,182 @@ static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd)
     task.priority = get_int_field(task_json, "priority", 0);
     task.timeout_ms = get_int_field(task_json, "timeout_ms", 30000);
 
-    sched_result_t *result = NULL;
-    int ret = sched_service_schedule_task(g_service, &task, &result);
-
-    if (ret != AIRY_SUCCESS || !result) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Schedule failed", id);
-        SVC_LOG_ERROR("Task scheduling failed: %s (error=%d)", task.task_id, ret);
-        AIRY_FREE(task.task_id);
-        AIRY_FREE(task.task_description);
+    /* 异步入队：立即返回 task_id + status=pending；
+     * 工作线程随后完成 选 agent → spawn → invoke → 状态回写（get_task 查询）。 */
+    char *assigned_id = NULL;
+    int ret = sched_service_submit_task(g_service, &task, &assigned_id);
+    AIRY_FREE(task.task_id);
+    AIRY_FREE(task.task_description);
+    if (ret != AIRY_SUCCESS || !assigned_id) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Task enqueue failed", id);
+        SVC_LOG_ERROR("Task enqueue failed: error=%d", ret);
+        AIRY_FREE(assigned_id);
         return;
     }
 
     cJSON *res_obj = cJSON_CreateObject();
-    cJSON_AddStringToObject(res_obj, "selected_agent_id", result->selected_agent_id);
-    cJSON_AddNumberToObject(res_obj, "confidence", result->confidence);
-    cJSON_AddNumberToObject(res_obj, "estimated_time_ms", result->estimated_time_ms);
+    cJSON_AddStringToObject(res_obj, "task_id", assigned_id);
+    cJSON_AddStringToObject(res_obj, "status", "pending");
+    JSONRPC_SEND_SUCCESS(client_fd, res_obj, id);
+    SVC_LOG_INFO("Task scheduled (async): %s", assigned_id);
+    AIRY_FREE(assigned_id);
+}
 
-    /* P2.2 选后派发：调度选定 agent 后经 agent_d 真实 spawn+invoke 执行任务。
-     * 派发失败如实返回错误（禁止假数据替代真实执行）。 */
-    if (result->selected_agent_id && result->selected_agent_id[0] &&
-        sched_dispatch_enabled()) {
-        sched_dispatch_result_t dispatch = {0};
-        int dret = sched_dispatch_task(result->selected_agent_id,
-                                       task.task_description, &dispatch);
-        if (dret != AIRY_SUCCESS || !dispatch.output || !dispatch.agent_id) {
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
-                               "Schedule succeeded but dispatch failed", id);
-            SVC_LOG_ERROR("Task dispatch failed: %s -> %s (error=%d)", task.task_id,
-                          result->selected_agent_id, dret);
-            AIRY_FREE(dispatch.agent_id);
-            AIRY_FREE(dispatch.output);
-            AIRY_FREE(result->selected_agent_id);
-            AIRY_FREE(result);
-            AIRY_FREE(task.task_id);
-            AIRY_FREE(task.task_description);
-            return;
-        }
-        cJSON_AddBoolToObject(res_obj, "dispatched", true);
-        cJSON_AddStringToObject(res_obj, "agent_id", dispatch.agent_id);
-        cJSON_AddStringToObject(res_obj, "output", dispatch.output);
-        SVC_LOG_INFO("Task dispatched: %s -> Agent %s (role=%s)", task.task_id,
-                     dispatch.agent_id, result->selected_agent_id);
-        AIRY_FREE(dispatch.agent_id);
-        AIRY_FREE(dispatch.output);
+/* 查询任务状态：params.task_id → {status, selected_agent_id, output, error, ...} */
+static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *tid = cJSON_GetObjectItem(params, "task_id");
+    if (!cJSON_IsString(tid) || !tid->valuestring || !*tid->valuestring) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing task_id", id);
+        return;
     }
 
-    JSONRPC_SEND_SUCCESS(client_fd, res_obj, id);
-    SVC_LOG_INFO("Task scheduled: %s -> Agent: %s (Confidence: %.2f)", task.task_id,
-                 result->selected_agent_id, result->confidence);
+    char *json_out = NULL;
+    int ret = sched_service_get_task(g_service, tid->valuestring, &json_out);
+    if (ret != AIRY_SUCCESS || !json_out) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
+                           ret == AIRY_ERR_NOT_FOUND ? "Task not found" : "Get task failed", id);
+        return;
+    }
 
-    AIRY_FREE(result->selected_agent_id);
-    AIRY_FREE(result);
-    AIRY_FREE(task.task_id);
-    AIRY_FREE(task.task_description);
+    /* P0.18.2 模式 B（与 get_stats 一致）：parse + 立即释放 text + 自动释放 */
+    CJSON_PARSE_GUARD(report_json, json_out, {
+        AIRY_FREE(json_out);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid task data", id);
+        return;
+    });
+    AIRY_FREE(json_out);
+
+    JSONRPC_SEND_SUCCESS(client_fd, report_json, id);
+    report_json = NULL; /* JSONRPC_SEND_SUCCESS 已 Delete */
+}
+
+/* 取消任务：params.task_id → 仅 PENDING 可取消（RUNNING/终态返回 busy） */
+static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *tid = cJSON_GetObjectItem(params, "task_id");
+    if (!cJSON_IsString(tid) || !tid->valuestring || !*tid->valuestring) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing task_id", id);
+        return;
+    }
+
+    int ret = sched_service_cancel_task(g_service, tid->valuestring);
+    if (ret == AIRY_ERR_NOT_FOUND) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Task not found", id);
+        return;
+    }
+    if (ret == AIRY_ERR_BUSY) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Task not cancelable", id);
+        return;
+    }
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Cancel failed", id);
+        return;
+    }
+
+    cJSON *res_obj = cJSON_CreateObject();
+    cJSON_AddStringToObject(res_obj, "task_id", tid->valuestring);
+    cJSON_AddStringToObject(res_obj, "status", "canceled");
+    JSONRPC_SEND_SUCCESS(client_fd, res_obj, id);
+    SVC_LOG_INFO("Task canceled via RPC: %s", tid->valuestring);
+}
+
+/* 提交 DAG 任务图：params.dag（JSON 对象，nodes[] 含 id/goal/role/depends） */
+static void handle_dag_submit(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *dag_json = jsonrpc_get_object_param(params, "dag");
+    if (!dag_json) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing dag object", id);
+        return;
+    }
+    char *dag_str = cJSON_PrintUnformatted(dag_json);
+    if (!dag_str) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "JSON serialization failed", id);
+        return;
+    }
+
+    char *dag_id = NULL;
+    int ret = sched_service_submit_dag(g_service, dag_str, &dag_id);
+    AIRY_FREE(dag_str);
+    if (ret == AIRY_ERR_CYCLE_DETECTED) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "DAG cycle detected", id);
+        return;
+    }
+    if (ret == AIRY_ERR_OVERFLOW) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           "DAG exceeds capacity limits", id);
+        return;
+    }
+    if (ret != AIRY_SUCCESS || !dag_id) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "DAG submit failed", id);
+        AIRY_FREE(dag_id);
+        return;
+    }
+
+    cJSON *res_obj = cJSON_CreateObject();
+    cJSON_AddStringToObject(res_obj, "dag_id", dag_id);
+    cJSON_AddStringToObject(res_obj, "status", "active");
+    JSONRPC_SEND_SUCCESS(client_fd, res_obj, id);
+    SVC_LOG_INFO("DAG submitted via RPC: %s", dag_id);
+    AIRY_FREE(dag_id);
+}
+
+/* 查询 DAG 状态：params.dag_id → 看板快照 */
+static void handle_dag_status(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *did = cJSON_GetObjectItem(params, "dag_id");
+    if (!cJSON_IsString(did) || !did->valuestring || !*did->valuestring) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing dag_id", id);
+        return;
+    }
+
+    char *json_out = NULL;
+    int ret = sched_service_get_dag(g_service, did->valuestring, &json_out);
+    if (ret != AIRY_SUCCESS || !json_out) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
+                           ret == AIRY_ERR_NOT_FOUND ? "DAG not found" : "Get DAG failed", id);
+        return;
+    }
+
+    CJSON_PARSE_GUARD(report_json, json_out, {
+        AIRY_FREE(json_out);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid DAG data", id);
+        return;
+    });
+    AIRY_FREE(json_out);
+
+    JSONRPC_SEND_SUCCESS(client_fd, report_json, id);
+    report_json = NULL;
+}
+
+/* 取消 DAG：params.dag_id */
+static void handle_dag_cancel(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *did = cJSON_GetObjectItem(params, "dag_id");
+    if (!cJSON_IsString(did) || !did->valuestring || !*did->valuestring) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing dag_id", id);
+        return;
+    }
+
+    int ret = sched_service_cancel_dag(g_service, did->valuestring);
+    if (ret == AIRY_ERR_NOT_FOUND) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "DAG not found", id);
+        return;
+    }
+    if (ret == AIRY_ERR_BUSY) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "DAG not active", id);
+        return;
+    }
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "DAG cancel failed", id);
+        return;
+    }
+
+    cJSON *res_obj = cJSON_CreateObject();
+    cJSON_AddStringToObject(res_obj, "dag_id", did->valuestring);
+    cJSON_AddStringToObject(res_obj, "status", "canceled");
+    JSONRPC_SEND_SUCCESS(client_fd, res_obj, id);
+    SVC_LOG_INFO("DAG canceled via RPC: %s", did->valuestring);
 }
 
 static void handle_get_stats(int id, airy_sock_t client_fd)
@@ -254,6 +410,28 @@ static void handle_health_check(int id, airy_sock_t client_fd)
     cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
 
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+/* 调度检查点（L2 标准方法 sched.checkpoint_save）：返回队列/DAG 状态快照 */
+static void handle_checkpoint_save(cJSON *params __attribute__((unused)), int id,
+                                   airy_sock_t client_fd)
+{
+    char *json_out = NULL;
+    int ret = sched_service_checkpoint_save(g_service, &json_out);
+    if (ret != AIRY_SUCCESS || !json_out) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Checkpoint save failed", id);
+        return;
+    }
+
+    CJSON_PARSE_GUARD(report_json, json_out, {
+        AIRY_FREE(json_out);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid checkpoint data", id);
+        return;
+    });
+    AIRY_FREE(json_out);
+
+    JSONRPC_SEND_SUCCESS(client_fd, report_json, id);
+    report_json = NULL;
 }
 
 /* ==================== 选后派发（P2.2） ==================== */
@@ -421,6 +599,32 @@ static int sched_dispatch_task(const char *role, const char *task_description,
     return AIRY_SUCCESS;
 }
 
+/*
+ * 任务执行回调（注入 sched_service，由工作线程调用）：
+ * 复用 sched_dispatch_task 的真实链路（选 agent 已由 sched_service 完成，
+ * 这里对选中 role 执行 spawn+invoke+terminate）。
+ */
+static int sched_dispatch_executor(const char *agent_id, const char *task_description,
+                                   char **out_output)
+{
+    /* 保留 P2.2 env 开关：AIRY_SCHED_DISPATCH=0 时关闭真实派发 */
+    if (!sched_dispatch_enabled()) {
+        SVC_LOG_WARN("sched dispatch disabled (AIRY_SCHED_DISPATCH=0), task not executed");
+        return AIRY_ERR_NOT_SUPPORTED;
+    }
+
+    sched_dispatch_result_t dispatch = {0};
+    int dret = sched_dispatch_task(agent_id, task_description, &dispatch);
+    if (dret != AIRY_SUCCESS || !dispatch.output || !dispatch.agent_id) {
+        AIRY_FREE(dispatch.agent_id);
+        AIRY_FREE(dispatch.output);
+        return dret;
+    }
+    *out_output = dispatch.output;
+    AIRY_FREE(dispatch.agent_id);
+    return AIRY_SUCCESS;
+}
+
 /* ==================== 销毁服务 ==================== */
 
 static void destroy_service(void)
@@ -515,9 +719,28 @@ int main(int argc, char **argv)
     g_dispatcher_sched_d = daemon_event_driver_get_dispatcher(g_event_driver_sched_d);
     method_dispatcher_register(g_dispatcher_sched_d, "register_agent", on_register_agent_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "schedule_task", on_schedule_task_method, NULL);
+    method_dispatcher_register(g_dispatcher_sched_d, "get_task", on_get_task_method, NULL);
+    method_dispatcher_register(g_dispatcher_sched_d, "cancel", on_cancel_task_method, NULL);
+    method_dispatcher_register(g_dispatcher_sched_d, "dag_submit", on_dag_submit_method, NULL);
+    method_dispatcher_register(g_dispatcher_sched_d, "dag_status", on_dag_status_method, NULL);
+    method_dispatcher_register(g_dispatcher_sched_d, "dag_cancel", on_dag_cancel_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "get_stats", on_get_stats_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "health_check", on_health_check_method, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods", 4);
+    method_dispatcher_register(g_dispatcher_sched_d, "checkpoint_save", on_checkpoint_save_method, NULL);
+    /* L2 协议命名别名（02-l2-service-protocol.md：sched.submit / sched.query / sched.cancel） */
+    method_dispatcher_register(g_dispatcher_sched_d, "submit", on_schedule_task_method, NULL);
+    method_dispatcher_register(g_dispatcher_sched_d, "query", on_get_task_method, NULL);
+    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+    method_dispatcher_register(g_dispatcher_sched_d, "shutdown", on_shutdown_method_sched_d, NULL);
+    SVC_LOG_INFO("Registered %d RPC methods (sched.* namespace)", 13);
+
+    /* 注入任务执行回调并启动队列工作线程：schedule_task 入队后由工作线程
+     * 异步完成 选 agent → spawn → invoke（真实派发），get_task 查询状态 */
+    sched_service_set_executor(g_service, sched_dispatch_executor);
+    if (sched_service_start_workers(g_service) != AIRY_SUCCESS) {
+        SVC_LOG_ERROR("Failed to start scheduler worker thread");
+        goto out_event_driver;
+    }
 
     if (daemon_event_driver_add_server_fd(g_event_driver_sched_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");

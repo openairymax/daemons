@@ -22,6 +22,7 @@ set(SCHED_IMPL_SOURCES
 set(SCHED_TEST_SOURCES
     test_scheduler.c
     test_strategies.c
+    test_dag.c
 )
 
 set(SCHED_COMMON_INCLUDES
