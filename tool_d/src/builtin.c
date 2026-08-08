@@ -21,6 +21,7 @@
 #include "error.h"
 
 #include "builtin.h"
+#include "os_sandbox.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -118,13 +119,16 @@ static void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const c
  * 替代 popen：命令超过 timeout_ms 即 SIGKILL 子进程，杜绝 tool_d 永久阻塞。
  * @param cmd 命令字符串（由 /bin/sh -c 解释）
  * @param out 捕获输出（AIRY_MALLOC，调用者释放）
- * @param exit_code 进程退出码（超时置 -1）
+ * @param exit_code 进程退出码（超时置 -1，沙箱应用失败置 126）
  * @param timeout_ms 超时毫秒
  * @param out_truncated 输出是否被截断
+ * @param sandbox 非 NULL 时在子进程 exec 前应用 OS 级沙箱（Landlock/seccomp/
+ *                rlimit，仅对命令进程及其后代生效，tool_d 主进程不受影响）
  * @return 0 成功，非 0 失败（fork/pipe/OOM）
  */
 static int builtin_shell_run(const char *cmd, char **out, int *exit_code,
-                             uint32_t timeout_ms, int *out_truncated)
+                             uint32_t timeout_ms, int *out_truncated,
+                             const os_sandbox_cfg_t *sandbox)
 {
     *out = NULL;
     *exit_code = -1;
@@ -146,6 +150,13 @@ static int builtin_shell_run(const char *cmd, char **out, int *exit_code,
         dup2(pipefd[1], STDOUT_FILENO);
         dup2(pipefd[1], STDERR_FILENO);
         close(pipefd[1]);
+        /* P2 OS 级沙箱：fork 后、exec 前应用（Landlock/seccomp/rlimit）。
+         * 应用失败按 fail-closed 拒绝执行（126 与 bash 约定一致）。 */
+        if (sandbox && sandbox->mode != OS_SANDBOX_MODE_OFF) {
+            if (os_sandbox_apply(sandbox) != 0) {
+                _exit(126);
+            }
+        }
         execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
         _exit(127);
     }
@@ -438,10 +449,14 @@ static int shell_run_tool(const char *params_json, tool_result_t *res)
         return AIRY_ERR_INVALID_PARAM;
     }
 #ifndef _WIN32
+    /* P2 OS 级沙箱：shell_run 默认按环境配置启用（Landlock/seccomp/rlimit），
+     * 命令仅可写工作区与 /tmp，系统目录只读，特权 syscall 被 seccomp 拒绝 */
+    os_sandbox_cfg_t sandbox_cfg;
+    os_sandbox_cfg_from_env(&sandbox_cfg);
     char *out = NULL;
     int exit_code = -1;
     int rc = builtin_shell_run(cmd->valuestring, &out, &exit_code, BUILTIN_SHELL_TIMEOUT_MS,
-                               NULL);
+                               NULL, &sandbox_cfg);
     if (rc != 0) {
         res->error = AIRY_STRDUP("Failed to execute command (fork/pipe failed)");
         return AIRY_ERR_EXEC_FAIL;
@@ -644,7 +659,8 @@ static int web_fetch_tool(const char *params_json, tool_result_t *res)
 
     char *out = NULL;
     int exit_code = -1;
-    int rc = builtin_shell_run(cmd, &out, &exit_code, 45000, NULL);
+    /* 网络工具不套 OS 级沙箱（需访问任意网络资源），由 ACL/审批层管控 */
+    int rc = builtin_shell_run(cmd, &out, &exit_code, 45000, NULL, NULL);
     if (rc != 0) {
         res->error = AIRY_STRDUP("Failed to execute web fetch (fork/pipe failed)");
         return AIRY_ERR_EXEC_FAIL;
@@ -1375,7 +1391,8 @@ static int web_search_via_bing(const char *query, int max_results, char *buf,
              "web_search)\" 'https://www.bing.com/search?q=%s'", enc);
     char *out = NULL;
     int exit_code = -1;
-    if (builtin_shell_run(cmd, &out, &exit_code, 45000, NULL) != 0 || !out)
+    /* 网络工具不套 OS 级沙箱（需访问任意网络资源），由 ACL/审批层管控 */
+    if (builtin_shell_run(cmd, &out, &exit_code, 45000, NULL, NULL) != 0 || !out)
         return -1;
     if (exit_code != 0 || strstr(out, "command not found")) {
         AIRY_FREE(out);
@@ -1425,7 +1442,8 @@ static int web_search_tool(const char *params_json, tool_result_t *res)
                  "'https://html.duckduckgo.com/html/?q=%s'", enc);
         char *out = NULL;
         int exit_code = -1;
-        int curl_ok = (builtin_shell_run(cmd, &out, &exit_code, 45000, NULL) == 0 && out &&
+        /* 网络工具不套 OS 级沙箱（需访问任意网络资源），由 ACL/审批层管控 */
+        int curl_ok = (builtin_shell_run(cmd, &out, &exit_code, 45000, NULL, NULL) == 0 && out &&
                        exit_code == 0 && !strstr(out, "command not found"));
         if (curl_ok) {
             web_search_extract(out,
@@ -1456,6 +1474,399 @@ static int web_search_tool(const char *params_json, tool_result_t *res)
     res->output = buf;
     res->success = 1;
     res->exit_code = 0;
+    return AIRY_OK;
+}
+
+/* ============================================================================
+ * git_exec / git_diff / git_apply：git 原子文件修改能力（对标 Codex patch）
+ *
+ * - git_exec：白名单只读命令（status/diff/log/branch/show/ls-files/grep 等），
+ *   直接 execvp 执行 git（argv 数组无 shell 解释，规避命令注入），带超时截断。
+ * - git_diff：生成指定路径的 unified diff（git diff [--cached] [path]）。
+ * - git_apply：应用 unified diff 到工作区（git apply [--check] -，patch 经 stdin）。
+ * ============================================================================ */
+
+/* git_exec 单次调用允许的最大参数个数 */
+#define BUILTIN_GIT_MAX_ARGS 32
+
+/* git 只读子命令白名单（fail-closed：未列出的一律拒绝） */
+static const char *const g_git_readonly_cmds[] = {
+    "status", "diff", "log", "branch", "show", "ls-files", "ls-tree", "grep",
+    "rev-parse", "blame", "describe", "diff-tree", "name-rev", "rev-list",
+    "for-each-ref", "show-ref", "count-objects", "fsck", "shortlog",
+    "symbolic-ref", "var", "version", "help", "whatchanged", "remote",
+    "submodule", "mergetool", NULL,
+};
+
+/**
+ * @brief 带超时执行 git 命令并捕获 stdout/stderr（fork + pipe + poll + waitpid）
+ *
+ * 与 builtin_shell_run 不同：直接 execvp 执行 git（argv 数组，无 shell 解释，
+ * 规避命令注入），并支持向子进程 stdin 写入数据（git_apply 需要）。
+ * @param argv          argv 数组（argv[0]="git"，以 NULL 结尾）
+ * @param stdin_data    要写入子进程 stdin 的数据（可为 NULL）
+ * @param stdin_len     stdin_data 长度
+ * @param out           捕获输出（stdout+stderr 合并，AIRY_MALLOC，调用者释放）
+ * @param exit_code     进程退出码（超时置 -1）
+ * @param out_truncated 输出是否被截断
+ * @return 0 成功，非 0 失败（fork/pipe/OOM）
+ */
+static int builtin_git_run(char *const argv[], const char *stdin_data, size_t stdin_len,
+                           char **out, int *exit_code, int *out_truncated)
+{
+    *out = NULL;
+    *exit_code = -1;
+    if (out_truncated)
+        *out_truncated = 0;
+
+    int outfd[2];
+    int infd[2];
+    if (pipe(outfd) != 0)
+        return -1;
+    if (pipe(infd) != 0) {
+        close(outfd[0]);
+        close(outfd[1]);
+        return -1;
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(outfd[0]);
+        close(outfd[1]);
+        close(infd[0]);
+        close(infd[1]);
+        return -1;
+    }
+    if (pid == 0) {
+        /* 子进程：stdout/stderr 合并重定向到 outfd[1]，stdin 从 infd[0] 读 */
+        close(outfd[0]);
+        close(infd[1]);
+        dup2(outfd[1], STDOUT_FILENO);
+        dup2(outfd[1], STDERR_FILENO);
+        dup2(infd[0], STDIN_FILENO);
+        close(outfd[1]);
+        close(infd[0]);
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    close(outfd[1]);
+    close(infd[0]);
+
+    /* 父进程：先把 stdin 数据写入子进程（git_apply 的 patch），再进入读循环。
+     * git apply 在读完 stdin 后才产生输出，故先写后读不会死锁。 */
+    if (stdin_data && stdin_len > 0) {
+        size_t off = 0;
+        while (off < stdin_len) {
+            ssize_t n = write(infd[1], stdin_data + off, stdin_len - off);
+            if (n < 0) {
+                if (errno == EINTR)
+                    continue;
+                break;
+            }
+            off += (size_t)n;
+        }
+    }
+    close(infd[1]);
+
+    size_t cap = 4096;
+    size_t len = 0;
+    char *buf = (char *)AIRY_MALLOC(cap);
+    if (!buf) {
+        kill(pid, SIGKILL);
+        waitpid(pid, NULL, 0);
+        close(outfd[0]);
+        return -1;
+    }
+    buf[0] = '\0';
+
+    int wstatus = 0;
+    int exited = 0;
+    int timed_out = 0;
+    int truncated = 0;
+
+    /* 单调时钟截止时间：快速写入的子进程不会饿死超时检查 */
+    struct timespec ts_now;
+    clock_gettime(CLOCK_MONOTONIC, &ts_now);
+    uint64_t deadline_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 +
+                           BUILTIN_SHELL_TIMEOUT_MS;
+
+    for (;;) {
+        if (!exited) {
+            pid_t w = waitpid(pid, &wstatus, WNOHANG);
+            if (w == pid)
+                exited = 1;
+        }
+        if (exited)
+            break;
+        /* 超时检查：每次循环都依据单调时钟判定，与数据流量无关 */
+        clock_gettime(CLOCK_MONOTONIC, &ts_now);
+        uint64_t now_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000;
+        if (now_ms >= deadline_ms) {
+            timed_out = 1;
+            break;
+        }
+        /* poll 100ms：读取子进程已写入的数据（不阻塞于空管道） */
+        struct pollfd pfd = {.fd = outfd[0], .events = POLLIN};
+        int pr = poll(&pfd, 1, 100);
+        if (pr > 0 && (pfd.revents & POLLIN)) {
+            char chunk[4096];
+            ssize_t n = read(outfd[0], chunk, sizeof(chunk));
+            if (n > 0) {
+                if (len + (size_t)n + 1 > cap) {
+                    size_t new_cap = cap * 2;
+                    if (new_cap > BUILTIN_OUTPUT_CAP)
+                        new_cap = BUILTIN_OUTPUT_CAP;
+                    if (new_cap <= cap) {
+                        truncated = 1;
+                        break;
+                    }
+                    char *nb = (char *)AIRY_REALLOC(buf, new_cap);
+                    if (!nb) {
+                        truncated = 1;
+                        break;
+                    }
+                    buf = nb;
+                    cap = new_cap;
+                }
+                if (len + (size_t)n >= cap) {
+                    n = (ssize_t)(cap - len - 1);
+                    truncated = 1;
+                }
+                __builtin_memcpy(buf + len, chunk, (size_t)n);
+                len += (size_t)n;
+            }
+        }
+    }
+
+    if (timed_out) {
+        kill(pid, SIGKILL);
+        waitpid(pid, NULL, 0);
+    }
+
+    /* 排空剩余输出（子进程已退出/被杀，read 不会阻塞） */
+    for (;;) {
+        char chunk[4096];
+        ssize_t n = read(outfd[0], chunk, sizeof(chunk));
+        if (n <= 0)
+            break;
+        if (len + (size_t)n + 1 > cap) {
+            size_t new_cap = cap * 2;
+            if (new_cap > BUILTIN_OUTPUT_CAP)
+                new_cap = BUILTIN_OUTPUT_CAP;
+            if (new_cap <= cap) {
+                truncated = 1;
+                break;
+            }
+            char *nb = (char *)AIRY_REALLOC(buf, new_cap);
+            if (!nb) {
+                truncated = 1;
+                break;
+            }
+            buf = nb;
+            cap = new_cap;
+        }
+        if (len + (size_t)n >= cap) {
+            n = (ssize_t)(cap - len - 1);
+            truncated = 1;
+        }
+        __builtin_memcpy(buf + len, chunk, (size_t)n);
+        len += (size_t)n;
+    }
+    close(outfd[0]);
+
+    if (timed_out) {
+        const char mark[] = "\n[command timed out after 60s]";
+        builtin_append_trunc_mark(buf, cap, len, mark);
+        len += sizeof(mark) - 1;
+        if (len >= cap)
+            len = cap - 1;
+        buf[len] = '\0';
+        *exit_code = -1;
+    } else if (exited) {
+#ifdef WIFEXITED
+        *exit_code = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : -1;
+#else
+        *exit_code = wstatus;
+#endif
+    } else {
+        *exit_code = -1;
+    }
+    if (truncated) {
+        const char mark[] = "\n[output truncated at 1MB]";
+        builtin_append_trunc_mark(buf, cap, len, mark);
+        len += sizeof(mark) - 1;
+        if (len >= cap)
+            len = cap - 1;
+        buf[len] = '\0';
+    }
+    if (out_truncated)
+        *out_truncated = truncated;
+    *out = buf;
+    return 0;
+}
+
+/* git_exec：执行白名单只读 git 命令，参数 {command_args:[string...], cwd?} */
+static int git_exec_tool(const char *params_json, tool_result_t *res)
+{
+    CJSON_PARSE_GUARD(root, params_json, {
+        res->error = AIRY_STRDUP("Invalid params JSON");
+        return AIRY_ERR_PARSE_ERROR;
+    });
+    cJSON *args = cJSON_GetObjectItem(root, "command_args");
+    if (!cJSON_IsArray(args) || cJSON_GetArraySize(args) < 1) {
+        res->error = AIRY_STRDUP("Missing array parameter: command_args");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    cJSON *cwd = cJSON_GetObjectItem(root, "cwd");
+    const char *cwd_str = (cJSON_IsString(cwd) && cwd->valuestring && cwd->valuestring[0])
+                              ? cwd->valuestring
+                              : NULL;
+
+    /* 提取子命令（首个元素）并做白名单校验（fail-closed） */
+    cJSON *first = cJSON_GetArrayItem(args, 0);
+    if (!cJSON_IsString(first) || !first->valuestring || !first->valuestring[0]) {
+        res->error = AIRY_STRDUP("command_args[0] must be a non-empty string subcommand");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    int allowed = 0;
+    for (size_t k = 0; g_git_readonly_cmds[k]; k++) {
+        if (strcmp(first->valuestring, g_git_readonly_cmds[k]) == 0) {
+            allowed = 1;
+            break;
+        }
+    }
+    if (!allowed) {
+        char err[512];
+        snprintf(err, sizeof(err), "git subcommand '%s' is not in the read-only whitelist",
+                 first->valuestring);
+        res->error = AIRY_STRDUP(err);
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    int n = cJSON_GetArraySize(args);
+    if (n > BUILTIN_GIT_MAX_ARGS) {
+        res->error = AIRY_STRDUP("Too many command_args (max 32)");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    /* 构造 argv：git [-C cwd] <sub> [args...] */
+    char *argv[BUILTIN_GIT_MAX_ARGS + 4];
+    int aidx = 0;
+    argv[aidx++] = (char *)"git";
+    if (cwd_str) {
+        argv[aidx++] = (char *)"-C";
+        argv[aidx++] = (char *)cwd_str;
+    }
+    for (int i = 0; i < n; i++) {
+        cJSON *it = cJSON_GetArrayItem(args, i);
+        if (!cJSON_IsString(it) || !it->valuestring) {
+            res->error = AIRY_STRDUP("command_args must contain only strings");
+            return AIRY_ERR_INVALID_PARAM;
+        }
+        argv[aidx++] = it->valuestring;
+    }
+    argv[aidx] = NULL;
+
+    char *out = NULL;
+    int exit_code = -1;
+    int rc = builtin_git_run(argv, NULL, 0, &out, &exit_code, NULL);
+    if (rc != 0) {
+        res->error = AIRY_STRDUP("Failed to execute git (fork/pipe failed)");
+        return AIRY_ERR_EXEC_FAIL;
+    }
+    res->output = out ? out : AIRY_STRDUP("");
+    res->success = (exit_code == 0) ? 1 : 0;
+    res->exit_code = exit_code;
+    if (exit_code != 0) {
+        char err[256];
+        snprintf(err, sizeof(err), "git exited with code %d", exit_code);
+        res->error = AIRY_STRDUP(err);
+    }
+    return AIRY_OK;
+}
+
+/* git_diff：生成指定路径的 unified diff，参数 {path?, staged?} */
+static int git_diff_tool(const char *params_json, tool_result_t *res)
+{
+    CJSON_PARSE_GUARD(root, params_json, {
+        res->error = AIRY_STRDUP("Invalid params JSON");
+        return AIRY_ERR_PARSE_ERROR;
+    });
+    cJSON *path = cJSON_GetObjectItem(root, "path");
+    cJSON *staged = cJSON_GetObjectItem(root, "staged");
+    const char *path_str = (cJSON_IsString(path) && path->valuestring && path->valuestring[0])
+                               ? path->valuestring
+                               : NULL;
+    int use_staged = cJSON_IsTrue(staged) ? 1 : 0;
+
+    /* 构造 argv：git diff [--cached] [path] */
+    char *argv[8];
+    int aidx = 0;
+    argv[aidx++] = (char *)"git";
+    argv[aidx++] = (char *)"diff";
+    if (use_staged)
+        argv[aidx++] = (char *)"--cached";
+    if (path_str)
+        argv[aidx++] = (char *)path_str;
+    argv[aidx] = NULL;
+
+    char *out = NULL;
+    int exit_code = -1;
+    int rc = builtin_git_run(argv, NULL, 0, &out, &exit_code, NULL);
+    if (rc != 0) {
+        res->error = AIRY_STRDUP("Failed to execute git diff (fork/pipe failed)");
+        return AIRY_ERR_EXEC_FAIL;
+    }
+    res->output = out ? out : AIRY_STRDUP("");
+    res->success = (exit_code == 0) ? 1 : 0;
+    res->exit_code = exit_code;
+    if (exit_code != 0) {
+        char err[256];
+        snprintf(err, sizeof(err), "git diff exited with code %d", exit_code);
+        res->error = AIRY_STRDUP(err);
+    }
+    return AIRY_OK;
+}
+
+/* git_apply：应用 unified diff 到工作区，参数 {patch, check_only?} */
+static int git_apply_tool(const char *params_json, tool_result_t *res)
+{
+    CJSON_PARSE_GUARD(root, params_json, {
+        res->error = AIRY_STRDUP("Invalid params JSON");
+        return AIRY_ERR_PARSE_ERROR;
+    });
+    cJSON *patch = cJSON_GetObjectItem(root, "patch");
+    if (!cJSON_IsString(patch) || !patch->valuestring) {
+        res->error = AIRY_STRDUP("Missing string parameter: patch");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    cJSON *check_only = cJSON_GetObjectItem(root, "check_only");
+    int do_check = cJSON_IsTrue(check_only) ? 1 : 0;
+
+    /* 构造 argv：git apply [--check] -（patch 经 stdin 读取） */
+    char *argv[8];
+    int aidx = 0;
+    argv[aidx++] = (char *)"git";
+    argv[aidx++] = (char *)"apply";
+    if (do_check)
+        argv[aidx++] = (char *)"--check";
+    argv[aidx++] = (char *)"-";
+    argv[aidx] = NULL;
+
+    char *out = NULL;
+    int exit_code = -1;
+    int rc = builtin_git_run(argv, patch->valuestring, strlen(patch->valuestring), &out,
+                             &exit_code, NULL);
+    if (rc != 0) {
+        res->error = AIRY_STRDUP("Failed to execute git apply (fork/pipe failed)");
+        return AIRY_ERR_EXEC_FAIL;
+    }
+    res->output = out ? out : AIRY_STRDUP("");
+    res->success = (exit_code == 0) ? 1 : 0;
+    res->exit_code = exit_code;
+    if (exit_code != 0) {
+        char err[256];
+        snprintf(err, sizeof(err), "git apply exited with code %d", exit_code);
+        res->error = AIRY_STRDUP(err);
+    }
     return AIRY_OK;
 }
 #endif /* !_WIN32 */
@@ -1489,6 +1900,12 @@ int tool_builtin_run(const char *tool_id, const char *params_json, tool_result_t
         return fs_edit_tool(params_json, res);
     if (strcmp(tool_id, "web_search") == 0)
         return web_search_tool(params_json, res);
+    if (strcmp(tool_id, "git_exec") == 0)
+        return git_exec_tool(params_json, res);
+    if (strcmp(tool_id, "git_diff") == 0)
+        return git_diff_tool(params_json, res);
+    if (strcmp(tool_id, "git_apply") == 0)
+        return git_apply_tool(params_json, res);
 #endif
     SVC_LOG_ERROR("builtin: unknown builtin tool '%s'", tool_id);
     res->error = AIRY_STRDUP("Unknown builtin tool");

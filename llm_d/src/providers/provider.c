@@ -579,7 +579,8 @@ typedef struct {
     size_t line_len;
     provider_stream_chunk_cb_t on_chunk;
     void *chunk_user_data;
-    int cancelled;
+    int cancelled; /**< 流被取消（on_chunk 返回错误） */
+    int done;      /**< 收到 [DONE]：正常流结束标记 */
 } sse_stream_ctx_t;
 
 static void sse_ctx_init(sse_stream_ctx_t *sse, provider_stream_chunk_cb_t cb, void *user_data)
@@ -616,7 +617,11 @@ static int sse_feed_line(sse_stream_ctx_t *sse, const char *line, size_t len)
         size_t data_len = len - (size_t)(data_start - line);
 
         if (data_len >= 6 && memcmp(data_start, "[DONE]", 6) == 0) {
-            sse->cancelled = 1;
+            /* 正常流结束：[DONE] 是 SSE 协议的标准收尾，不是错误。
+             * 仅置 done 标记；cancelled 留给 on_chunk 错误取消使用，
+             * 否则 curl 写回调因 cancelled 返回 0 会误报 CURLE_WRITE_ERROR
+             * 并把正常完成当成 STREAM-FAIL（历史缺陷，真实流式调用方暴露）。 */
+            sse->done = 1;
             return 0;
         }
 

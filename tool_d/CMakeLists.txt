@@ -37,6 +37,8 @@ set(TOOL_SERVICE_SOURCES
     src/safety_guard_bridge.c
     src/tool_svc_adapter.c
     src/builtin.c
+    src/tool_interactive_approval.c
+    src/os_sandbox.c
 )
 
 add_library(airy_tool_service STATIC ${TOOL_SERVICE_SOURCES})

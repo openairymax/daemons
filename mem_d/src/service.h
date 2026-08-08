@@ -11,6 +11,9 @@
 
 #include "mem_service.h"
 
+#include "vector.h"
+#include "emb_client.h"
+
 #include "platform.h"
 
 #include <stdio.h>
@@ -34,12 +37,15 @@ typedef struct {
 /* ---------- 记忆记录条目 ---------- */
 
 typedef struct {
-    char *record_id;     /* 记录唯一标识（UUID 风格） */
-    void *data;          /* 原始数据 */
-    size_t len;          /* 数据长度 */
-    char *metadata;      /* JSON 元数据字符串 */
-    float score;         /* 当前相关度分数（用于 search 排序缓存） */
-    uint64_t created_at; /* 创建时间戳（ms） */
+    char *record_id;        /* 记录唯一标识（UUID 风格） */
+    void *data;             /* 原始数据 */
+    size_t len;             /* 数据长度 */
+    char *metadata;         /* JSON 元数据字符串 */
+    float score;            /* 当前相关度分数（用于 search 排序缓存） */
+    uint64_t created_at;    /* 创建时间戳（ms） */
+    mem_tfidf_vec_t vec;    /* TF-IDF 词频向量（内存缓存，写入时构建，JSONL 只存原文） */
+    float *emb;             /* embedding 向量（可选增强，NULL 时降级 TF-IDF） */
+    size_t emb_dim;         /* embedding 维度 */
 } mem_record_entry_t;
 
 struct mem_service {
@@ -47,6 +53,9 @@ struct mem_service {
     size_t record_count;
     size_t max_records;
     mem_hash_table_t record_index;
+    mem_df_table_t df_table;    /* 全局文档频率（DF）表，供 TF-IDF IDF 计算 */
+    float tfidf_weight;         /* 混合融合权重（TF-IDF/embedding 占比，默认 0.6） */
+    mem_emb_client_t emb;       /* 可选 embedding 后端客户端 */
     airy_mtx_t lock;
     int initialized;
     char *jsonl_path;       /* JSONL 持久化文件路径（${AIRY_RUNTIME_DIR}/mem.jsonl） */

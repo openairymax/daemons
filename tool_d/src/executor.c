@@ -15,6 +15,7 @@
 /* P3.18 (ACC-DT27): SYS_TOOL_EXECUTE syscall 号 + tool_execute_args_t 结构体 */
 #include "syscalls.h"
 #include "daemon_errors.h"
+#include "daemon_security.h"
 #include "executor.h"
 #include "builtin.h"
 #include "daemon_platform_ext.h"
@@ -45,6 +46,10 @@ struct tool_executor {
      *   - sandbox: 基于 syscall 号的权限/配额/审计拦截
      * sandbox 为 NULL（初始化失败）时 tool_executor_run 拒绝执行任何工具。 */
     airy_sandbox_t *sandbox;
+    /* P0: 工具级交互式权限审批（Claude Code 风格 permission prompt）。
+     * 创建时读取 AIRY_TOOL_APPROVAL_MODE，为"interactive"时启用。
+     * 静态审批拒绝时，若此处启用则入队 pending 并阻塞等待 tool.approve 决议。 */
+    interactive_approval_t *interactive;
 };
 
 tool_executor_t *tool_executor_create(const tool_executor_config_t *cfg)
@@ -77,6 +82,9 @@ tool_executor_t *tool_executor_create(const tool_executor_config_t *cfg)
     exec->approval_ctx = NULL;
     exec->safety_bridge = NULL;
     exec->sandbox = NULL;
+    /* P0: 创建交互式审批管理器（读取 AIRY_TOOL_APPROVAL_MODE 决定是否启用）。
+     * 创建失败仅禁用交互审批，不阻断 executor 正常创建与静态 fail-closed 审批。 */
+    exec->interactive = interactive_approval_create();
 
     /* P3.18 (ACC-DT27): 初始化工具执行沙箱。
      *
@@ -142,6 +150,11 @@ void tool_executor_destroy(tool_executor_t *exec)
         airy_sandbox_destroy(exec->sandbox);
         exec->sandbox = NULL;
     }
+    /* P0: 释放交互式审批管理器 */
+    if (exec->interactive) {
+        interactive_approval_destroy(exec->interactive);
+        exec->interactive = NULL;
+    }
     airy_mtx_destroy(&exec->lock);
     AIRY_FREE(exec);
 }
@@ -187,12 +200,15 @@ void tool_executor_set_approval_ctx(tool_executor_t *exec, tool_approval_ctx_t *
 }
 
 int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const char *params_json,
-                      tool_result_t **out_result)
+                      const char *agent_id, tool_result_t **out_result)
 {
     if (!exec || !meta || !out_result) {
         SVC_LOG_ERROR("tool_executor_run: NULL parameter (exec/meta/out_result)");
         return AIRY_ERR_INVALID_PARAM;
     }
+
+    /* 审批主体：未显式传入时回退审批上下文默认（"tool_d"） */
+    const char *caller_agent = (agent_id && agent_id[0]) ? agent_id : NULL;
 
     *out_result = NULL;
 
@@ -243,22 +259,77 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
 
     {
         tool_approval_detail_t approval_detail;
-        int app_ret =
-            tool_approval_check(exec->approval_ctx, meta, params_json, &approval_detail);
+        int app_ret = tool_approval_check_for_agent(exec->approval_ctx, caller_agent, meta,
+                                                    params_json, &approval_detail);
         if (app_ret != 0) {
-            SVC_LOG_ERROR(
-                "C-L05: Tool approval denied for '%s': %s",
-                meta->name ? meta->name : "?", approval_detail.reason);
-            result->success = 0;
-            result->output = AIRY_STRDUP("");
-            result->error = AIRY_STRDUP(approval_detail.reason[0]
-                                               ? approval_detail.reason
-                                               : "Tool execution denied by safety guard");
-            result->exit_code = -1;
-            result->duration_ms = 0;
-            *out_result = result;
-            airy_mtx_unlock(&exec->lock);
-            return AIRY_EPERM;
+            /* P0: 工具级交互式权限审批。
+             * 启用时（AIRY_TOOL_APPROVAL_MODE=interactive）被静态审批拒绝不再直接
+             * fail-closed，而是入队 pending 并阻塞等待 tool.approve 决议：
+             *   - allow    → 放行本次执行
+             *   - always   → 放行并加入持久 ACL 规则
+             *   - deny/超时 → 返回 EPERM（错误信息含 "User denied tool execution"） */
+            if (exec->interactive && interactive_approval_is_enabled(exec->interactive)) {
+                /* 审批主体：真实调用方 agent（若透传），否则回退上下文默认 */
+                const char *agent = caller_agent;
+                if (!agent) {
+                    agent = tool_approval_get_agent_id(exec->approval_ctx);
+                }
+                /* 阻塞等待决议期间必须临时释放 exec->lock，避免阻塞时持有锁导致
+                 * tool.approve handler（经 service→executor 调用）无法取得锁。
+                 * interactive 模块使用独立 sync_mutex，不依赖 exec->lock。 */
+                airy_mtx_unlock(&exec->lock);
+                airy_approval_outcome_t outcome = AIRY_APPROVAL_DENIED;
+                char *request_id = interactive_approval_block(
+                    exec->interactive, meta->name ? meta->name : "?",
+                    agent ? agent : "unknown", params_json, &outcome);
+                if (request_id) {
+                    AIRY_FREE(request_id);
+                }
+                airy_mtx_lock(&exec->lock);
+
+                if (outcome == AIRY_APPROVAL_ALLOWED) {
+                    SVC_LOG_INFO("C-L05: Tool '%s' approved by user (interactive, one-shot)",
+                                 meta->name ? meta->name : "?");
+                } else if (outcome == AIRY_APPROVAL_ALWAYS) {
+                    SVC_LOG_INFO("C-L05: Tool '%s' approved by user (interactive, always)",
+                                 meta->name ? meta->name : "?");
+                    /* 加入持久 ACL 规则（agent_id + 工具名 + allow），
+                     * 使后续同类调用直接通过静态审批。 */
+                    if (agent && meta->name) {
+                        int ar = daemon_security_add_acl_rule(agent, meta->name, true);
+                        if (ar != 0) {
+                            SVC_LOG_WARN("C-L05: add_acl_rule('%s','%s') failed rc=%d",
+                                         agent, meta->name, ar);
+                        }
+                    }
+                } else {
+                    /* deny 决议或超时：返回 EPERM */
+                    SVC_LOG_ERROR("C-L05: Tool '%s' denied by user (interactive) or timed out",
+                                  meta->name ? meta->name : "?");
+                    result->success = 0;
+                    result->output = AIRY_STRDUP("");
+                    result->error = AIRY_STRDUP("User denied tool execution");
+                    result->exit_code = -1;
+                    result->duration_ms = 0;
+                    *out_result = result;
+                    airy_mtx_unlock(&exec->lock);
+                    return AIRY_EPERM;
+                }
+            } else {
+                SVC_LOG_ERROR(
+                    "C-L05: Tool approval denied for '%s': %s",
+                    meta->name ? meta->name : "?", approval_detail.reason);
+                result->success = 0;
+                result->output = AIRY_STRDUP("");
+                result->error = AIRY_STRDUP(approval_detail.reason[0]
+                                                   ? approval_detail.reason
+                                                   : "Tool execution denied by safety guard");
+                result->exit_code = -1;
+                result->duration_ms = 0;
+                *out_result = result;
+                airy_mtx_unlock(&exec->lock);
+                return AIRY_EPERM;
+            }
         }
         SVC_LOG_INFO("C-L05: Tool '%s' approved (decision=%d)", meta->name ? meta->name : "?",
                      (int)approval_detail.decision);
@@ -415,8 +486,9 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
 }
 
 int tool_executor_run_async(tool_executor_t *exec, const tool_metadata_t *meta,
-                            const char *params_json, tool_execute_callback_t callback,
-                            void *user_data, tool_result_t **out_result)
+                            const char *params_json, const char *agent_id,
+                            tool_execute_callback_t callback, void *user_data,
+                            tool_result_t **out_result)
 {
     if (!exec || !meta) {
         SVC_LOG_ERROR("tool_executor_run_async: NULL parameter (exec/meta)");
@@ -428,7 +500,7 @@ int tool_executor_run_async(tool_executor_t *exec, const tool_metadata_t *meta,
     }
 
     tool_result_t *result = NULL;
-    int ret = tool_executor_run(exec, meta, params_json, &result);
+    int ret = tool_executor_run(exec, meta, params_json, agent_id, &result);
 
     if (callback && result) {
         callback(result, user_data);
@@ -439,4 +511,31 @@ int tool_executor_run_async(tool_executor_t *exec, const tool_metadata_t *meta,
     }
 
     return ret;
+}
+
+/* ---------- P0 交互式审批：service 层调用 ---------- */
+
+bool tool_executor_interactive_enabled(tool_executor_t *exec)
+{
+    if (!exec || !exec->interactive) {
+        return false;
+    }
+    return interactive_approval_is_enabled(exec->interactive);
+}
+
+char *tool_executor_interactive_pending_list(tool_executor_t *exec)
+{
+    if (!exec || !exec->interactive) {
+        return NULL;
+    }
+    return interactive_approval_pending_list_json(exec->interactive);
+}
+
+int tool_executor_interactive_resolve(tool_executor_t *exec, const char *request_id,
+                                      const char *decision)
+{
+    if (!exec || !exec->interactive) {
+        return AIRY_ERR_NOT_FOUND;
+    }
+    return interactive_approval_resolve(exec->interactive, request_id, decision);
 }

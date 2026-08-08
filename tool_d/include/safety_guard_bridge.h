@@ -110,6 +110,26 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
                               safety_guard_bridge_result_t *result);
 
 /**
+ * @brief 以指定 agent 身份执行完整 SafetyGuard 守卫链检查
+ *
+ * 与 safety_guard_bridge_check 等价，但权限/审计守卫使用传入的 agent_id
+ * 而非桥接层默认 agent_id。用于按请求透传真实 Agent 身份（如 agent_d 子进程
+ * 的 coding_v1），使 ACL 按真实主体判定，未授权工具进入交互式审批。
+ *
+ * @param bridge 桥接句柄
+ * @param agent_id 本次请求的 Agent ID（NULL 时回退桥接层默认）
+ * @param meta 工具元数据
+ * @param params_json 原始参数 JSON
+ * @param result 输出检查结果
+ * @return 0 全部通过，非0 被拒绝
+ */
+int safety_guard_bridge_check_for_agent(safety_guard_bridge_t *bridge,
+                                        const char *agent_id,
+                                        const tool_metadata_t *meta,
+                                        const char *params_json,
+                                        safety_guard_bridge_result_t *result);
+
+/**
  * @brief 仅执行权限守卫检查
  * @param bridge 桥接句柄
  * @param agent_id Agent ID

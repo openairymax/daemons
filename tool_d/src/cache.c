@@ -284,22 +284,27 @@ void tool_cache_clear(tool_cache_t *cache)
     airy_mtx_unlock(&cache->lru_lock);
 }
 
-char *tool_cache_key(const char *tool_id, const char *params_json)
+char *tool_cache_key(const char *tool_id, const char *params_json, const char *agent_id)
 {
     if (!tool_id || !params_json) {
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
+    /* 缓存键纳入 agent_id（SEC-xx：防止未授权 agent 命中他人审批放行的缓存，
+     * 绕过权限审批）。agent_id 为空时退化为 "tool_d|tool|params" 兼容既有行为。 */
+    const char *subject = (agent_id && agent_id[0]) ? agent_id : "tool_d";
+
     size_t tool_id_len = strlen(tool_id);
     size_t params_len = strlen(params_json);
-    size_t len = tool_id_len + params_len + 2;
+    size_t subject_len = strlen(subject);
+    size_t len = subject_len + tool_id_len + params_len + 3;
 
     char *key = memory_safe_alloc(len);
     if (!key) {
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
-    snprintf(key, len, "%s|%s", tool_id, params_json);
+    snprintf(key, len, "%s|%s|%s", subject, tool_id, params_json);
     return key;
 }
 

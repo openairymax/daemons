@@ -868,7 +868,10 @@ int sched_service_cancel_task(sched_service_t *service, const char *task_id)
         rec->status = SCHED_TASK_STATUS_CANCELED;
         rec->finished_at_ms = sched_now_ms();
         rec->error = AIRY_STRDUP("canceled by user");
-        SVC_LOG_INFO("Task canceled: %s", task_id);
+        SVC_LOG_INFO("Task canceled: %s (removed_from_queue=%d, pending_in_queue=%zu)",
+                     task_id, (int)removed,
+                     (service->queue_tail + AIRY_CAP_MAX_TASKS - service->queue_head) %
+                         AIRY_CAP_MAX_TASKS);
         break;
     }
     airy_mtx_unlock(&service->lock);
@@ -991,6 +994,8 @@ static void *sched_dag_worker_thread(void *arg)
             output = NULL; /* 尾部 cleanup 需避免 double-free */
             if (node->status != SCHED_DAG_NODE_CANCELED)
                 node->status = SCHED_DAG_NODE_CANCELED;
+            SVC_LOG_INFO("sched: DAG node %s/%s canceled during dispatch, "
+                         "output discarded", dag->dag_id, node->id);
         } else if (dret == AIRY_SUCCESS && output) {
             node->status = SCHED_DAG_NODE_COMPLETED;
             node->output = output;
@@ -1277,7 +1282,25 @@ int sched_service_submit_dag(sched_service_t *service, const char *dag_json, cha
 
     *out_dag_id = AIRY_STRDUP(id_buf);
     cJSON_Delete(root);
-    SVC_LOG_INFO("DAG submitted: %s (%zu nodes)", id_buf, dag->node_count);
+    SVC_LOG_INFO("DAG submitted: %s name=%s (%zu nodes)", id_buf,
+                 dag->name ? dag->name : "?", dag->node_count);
+    /* 逐节点打印依赖关系：排查「节点不就绪/依赖悬挂」类调度异常的关键线索 */
+    for (size_t j = 0; j < dag->node_count; j++) {
+        const sched_dag_node_t *node = dag->nodes[j];
+        char depbuf[256];
+        size_t off = 0;
+        depbuf[0] = '\0';
+        for (size_t k = 0; k < node->dep_count && off < sizeof(depbuf) - 2; k++) {
+            int w = snprintf(depbuf + off, sizeof(depbuf) - off, "%s%s",
+                             k > 0 ? "," : "", node->depends[k]);
+            if (w < 0)
+                break;
+            off += (size_t)w;
+        }
+        SVC_LOG_DEBUG("DAG %s node[%zu]: id=%s role=%s depends=[%s] goal_len=%zu",
+                      id_buf, j, node->id, node->role ? node->role : "?", depbuf,
+                      node->goal ? strlen(node->goal) : 0);
+    }
     return AIRY_SUCCESS;
 }
 
@@ -1383,19 +1406,25 @@ int sched_service_cancel_dag(sched_service_t *service, const char *dag_id)
 
     dag->status = SCHED_DAG_STATUS_CANCELED;
     dag->finished_at_ms = sched_now_ms();
+    size_t canceled_nodes = 0, running_nodes = 0;
     for (size_t j = 0; j < dag->node_count; j++) {
         sched_dag_node_t *node = dag->nodes[j];
         if (node->status == SCHED_DAG_NODE_PENDING || node->status == SCHED_DAG_NODE_READY) {
             node->status = SCHED_DAG_NODE_CANCELED;
             node->finished_at_ms = sched_now_ms();
             node->error = AIRY_STRDUP("canceled by user");
+            canceled_nodes++;
+        } else if (node->status == SCHED_DAG_NODE_RUNNING) {
+            running_nodes++;
         }
         /* RUNNING 节点：保留运行，完成后 worker 发现已取消即丢弃输出 */
     }
     airy_cond_broadcast(&service->dag_cond);
     airy_mtx_unlock(&service->lock);
 
-    SVC_LOG_INFO("DAG canceled: %s", dag_id);
+    SVC_LOG_INFO("DAG canceled: %s (%zu nodes canceled, %zu still running — "
+                 "outputs will be discarded on completion)",
+                 dag_id, canceled_nodes, running_nodes);
     return AIRY_SUCCESS;
 }
 
