@@ -87,6 +87,9 @@ static int deepseek_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t
     deepseek_ctx_t *ctx = (deepseek_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
 
+    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
+    provider_refresh_api_key(base);
+
     const char *model = (manager->model && manager->model[0]) ? manager->model : DEEPSEEK_DEFAULT_MODEL;
 
     SVC_LOG_INFO("C-L02: DEEPSEEK: COMPLETE-START model=%s msgs=%zu max_tokens=%d temp=%.2f "
@@ -305,6 +308,9 @@ static int deepseek_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_c
 
     deepseek_ctx_t *ctx = (deepseek_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
+
+    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
+    provider_refresh_api_key(base);
 
     const char *model = (manager->model && manager->model[0]) ? manager->model : DEEPSEEK_DEFAULT_MODEL;
 

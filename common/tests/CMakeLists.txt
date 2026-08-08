@@ -30,6 +30,7 @@ set(TEST_SOURCES
     test_airy_event_loop.c
     test_api_recovery.c
     test_service_discovery.c
+    test_svc_model_defaults.c
 )
 
 foreach(TEST_SRC ${TEST_SOURCES})

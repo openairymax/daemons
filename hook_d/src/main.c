@@ -37,6 +37,9 @@
 /* P0.18.1: 使用 DAEMON_DECLARE_COMMON 生成公共样板（信号处理/全局变量/print_usage） */
 DAEMON_DECLARE_COMMON(hook_d, hook, HOOK_D_SOCKET_PATH, HOOK_D_PIPE_PATH, 0, HOOK_D_MAX_BUFFER)
 
+/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
+DAEMON_DECLARE_SHUTDOWN_METHOD(hook_d)
+
 static int g_registry_initialized = 0;
 static uint64_t g_start_time = 0;
 
@@ -80,6 +83,18 @@ static const char *hook_type_name(hook_type_t type)
     case HOOK_TYPE_ON_MEMORY_EVOLVE: return "on_memory_evolve";
     default:                         return "unknown";
     }
+}
+
+/* 字符串 → hook_type_t（hook_on_register/trigger 入参解析），未知返回 -1 */
+static int hook_type_from_name(const char *name)
+{
+    if (!name)
+        return -1;
+    for (int t = 0; t < HOOK_TYPE_COUNT; t++) {
+        if (strcmp(name, hook_type_name((hook_type_t)t)) == 0)
+            return t;
+    }
+    return -1;
 }
 
 /* ==================== JSON-RPC 方法 ==================== */
@@ -182,6 +197,190 @@ static void hook_on_stats(cJSON *params, int id, void *user_data)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
+/* L2 标准方法 hook.get_stats（02-l2-service-protocol.md §6.1：daemon 级统计） */
+static void hook_on_get_stats(cJSON *params __attribute__((unused)), int id, void *user_data)
+{
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "daemon", "hook_d");
+    cJSON_AddNumberToObject(result, "hooks", (double)hook_registry_count());
+    if (g_start_time > 0) {
+        cJSON_AddNumberToObject(result, "uptime_s",
+                                (double)((uint64_t)time(NULL) - g_start_time));
+    }
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+/* ==================== L2 标准方法（02-l2-service-protocol.md：hook.register / hook.unregister / hook.trigger / hook.health_check） ==================== */
+
+/*
+ * hook.register：向 hook_registry 注册脚本类 Hook（RPC 无法传递 C 回调，
+ * 因此支持 shell/python/webhook 实现类型；CALLBACK 类型仅限内置处理器）。
+ * params：name(必填)、type(字符串或整数，如 "pre_exec")、impl("shell"/"python"/"webhook")、
+ *        script_path(脚本路径或 Webhook URL)、priority(默认 0)、enabled(默认 true)
+ */
+static void hook_on_register(cJSON *params, int id, void *user_data)
+{
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
+
+    const char *name = jsonrpc_get_string_param(params, "name", NULL);
+    if (!name || !name[0]) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing hook name", id);
+        return;
+    }
+
+    int type = -1;
+    cJSON *type_json = cJSON_GetObjectItem(params, "type");
+    if (cJSON_IsNumber(type_json)) {
+        type = type_json->valueint;
+    } else if (cJSON_IsString(type_json)) {
+        type = hook_type_from_name(type_json->valuestring);
+    }
+    if (type < 0 || type >= HOOK_TYPE_COUNT) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Invalid hook type", id);
+        return;
+    }
+
+    const char *impl_str = jsonrpc_get_string_param(params, "impl", "shell");
+    hook_impl_type_t impl_type = HOOK_IMPL_SHELL;
+    if (strcmp(impl_str, "python") == 0)
+        impl_type = HOOK_IMPL_PYTHON;
+    else if (strcmp(impl_str, "webhook") == 0)
+        impl_type = HOOK_IMPL_WEBHOOK;
+    else if (strcmp(impl_str, "callback") == 0)
+        impl_type = HOOK_IMPL_CALLBACK;
+
+    const char *script_path = jsonrpc_get_string_param(params, "script_path", NULL);
+    if (impl_type != HOOK_IMPL_CALLBACK && (!script_path || !script_path[0])) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           "Missing script_path for script/webhook hook", id);
+        return;
+    }
+
+    int priority = 0;
+    cJSON *priority_json = cJSON_GetObjectItem(params, "priority");
+    if (cJSON_IsNumber(priority_json))
+        priority = priority_json->valueint;
+    cJSON *enabled_json = cJSON_GetObjectItem(params, "enabled");
+    bool enabled = !cJSON_IsFalse(enabled_json);
+
+    hook_entry_t entry;
+    __builtin_memset(&entry, 0, sizeof(entry));
+    AIRY_STRNCPY_TERM(entry.name, name, sizeof(entry.name));
+    entry.type = (hook_type_t)type;
+    entry.impl_type = impl_type;
+    if (script_path)
+        AIRY_STRNCPY_TERM(entry.script_path, script_path, sizeof(entry.script_path));
+    entry.priority = priority;
+    entry.enabled = enabled;
+
+    int ret = hook_registry_register(&entry);
+    if (ret != 0) {
+        const char *msg = ret == -3 ? "Hook name already registered"
+                          : ret == -2 ? "Hook registry full"
+                          : "Hook register failed";
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, msg, id);
+        SVC_LOG_ERROR("hook.register failed: name=%s error=%d", name, ret);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "status", "registered");
+    cJSON_AddStringToObject(result, "name", name);
+    cJSON_AddStringToObject(result, "type", hook_type_name((hook_type_t)type));
+    cJSON_AddBoolToObject(result, "enabled", enabled);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    SVC_LOG_INFO("hook.register OK: name=%s type=%s impl=%s", name,
+                 hook_type_name((hook_type_t)type), impl_str);
+}
+
+/* hook.unregister：从注册表注销指定 Hook */
+static void hook_on_unregister(cJSON *params, int id, void *user_data)
+{
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
+    const char *name = jsonrpc_get_string_param(params, "name", NULL);
+    if (!name || !name[0]) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing hook name", id);
+        return;
+    }
+
+    int ret = hook_registry_unregister(name);
+    if (ret != 0) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Hook not found", id);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "status", "unregistered");
+    cJSON_AddStringToObject(result, "name", name);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    SVC_LOG_INFO("hook.unregister OK: name=%s", name);
+}
+
+/* hook.trigger：按 type 触发 Hook 链（hook_service_fire 聚合决策）
+ * params：type(字符串或整数)、operation(可选)、input(可选文本) */
+static void hook_on_trigger(cJSON *params, int id, void *user_data)
+{
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
+
+    int type = -1;
+    cJSON *type_json = cJSON_GetObjectItem(params, "type");
+    if (cJSON_IsNumber(type_json)) {
+        type = type_json->valueint;
+    } else if (cJSON_IsString(type_json)) {
+        type = hook_type_from_name(type_json->valuestring);
+    }
+    if (type < 0 || type >= HOOK_TYPE_COUNT) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Invalid hook type", id);
+        return;
+    }
+
+    const char *operation = jsonrpc_get_string_param(params, "operation", NULL);
+    const char *input = jsonrpc_get_string_param(params, "input", NULL);
+    const char *hook_name = jsonrpc_get_string_param(params, "hook_name", NULL);
+
+    hook_context_t ctx;
+    __builtin_memset(&ctx, 0, sizeof(ctx));
+    ctx.type = (hook_type_t)type;
+    ctx.hook_name = hook_name;
+    ctx.operation = operation;
+    ctx.input_data = input;
+    ctx.input_data_len = input ? strlen(input) : 0;
+    ctx.timestamp_ns = (uint64_t)time(NULL) * 1000000000ull;
+
+    hook_decision_t decision = hook_service_fire(&ctx);
+
+    const char *decision_name = "continue";
+    switch (decision) {
+    case HOOK_DECISION_SKIP:   decision_name = "skip";   break;
+    case HOOK_DECISION_RETRY:  decision_name = "retry";  break;
+    case HOOK_DECISION_ABORT:  decision_name = "abort";  break;
+    case HOOK_DECISION_MODIFY: decision_name = "modify"; break;
+    default:                                             break;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddNumberToObject(result, "decision", (double)decision);
+    cJSON_AddStringToObject(result, "decision_name", decision_name);
+    cJSON_AddStringToObject(result, "type", hook_type_name((hook_type_t)type));
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    SVC_LOG_INFO("hook.trigger OK: type=%s decision=%s", hook_type_name((hook_type_t)type),
+                 decision_name);
+}
+
+/* hook.health_check：无副作用健康探针 */
+static void hook_on_health_check(cJSON *params, int id, void *user_data)
+{
+    (void)params;
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "service", "hook_d");
+    cJSON_AddBoolToObject(result, "healthy", g_registry_initialized ? true : false);
+    cJSON_AddNumberToObject(result, "hook_count", (double)hook_registry_count());
+    cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
 /* ==================== 主入口 ==================== */
 
 int main(int argc, char *argv[])
@@ -263,7 +462,16 @@ int main(int argc, char *argv[])
     method_dispatcher_register(g_dispatcher_hook_d, "status", hook_on_status, NULL);
     method_dispatcher_register(g_dispatcher_hook_d, "list", hook_on_list, NULL);
     method_dispatcher_register(g_dispatcher_hook_d, "stats", hook_on_stats, NULL);
-    SVC_LOG_INFO("hook_d: registered 5 RPC methods (hook.* namespace)");
+    /* L2 协议标准方法（02-l2-service-protocol.md：hook.register / hook.unregister / hook.trigger / hook.health_check） */
+    method_dispatcher_register(g_dispatcher_hook_d, "register", hook_on_register, NULL);
+    method_dispatcher_register(g_dispatcher_hook_d, "unregister", hook_on_unregister, NULL);
+    method_dispatcher_register(g_dispatcher_hook_d, "trigger", hook_on_trigger, NULL);
+    method_dispatcher_register(g_dispatcher_hook_d, "health_check", hook_on_health_check, NULL);
+    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+    method_dispatcher_register(g_dispatcher_hook_d, "shutdown", on_shutdown_method_hook_d, NULL);
+    /* L2 协议标准方法 hook.get_stats（02-l2-service-protocol.md §6.1：daemon 级统计） */
+    method_dispatcher_register(g_dispatcher_hook_d, "get_stats", hook_on_get_stats, NULL);
+    SVC_LOG_INFO("hook_d: registered 11 RPC methods (hook.* namespace)");
 
     if (daemon_event_driver_add_server_fd(g_event_driver_hook_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("hook_d: failed to add server fd to event driver");

@@ -21,8 +21,171 @@
 #include "svc_logger.h"
 #include "tool_approval.h"
 
+#include <cjson/cJSON.h>
+
 #include <stdlib.h>
 #include <string.h>
+
+/* ---------- 内置基础工具注册（fs_read / fs_write / fs_list / shell_run） ----------
+ *
+ * 通过 daemon_security ACL 显式授权（fail-closed：未授权一律拒绝）。
+ * executable 使用 "builtin:<id>" 标记，由 executor 分派到 builtin.c 真实实现。 */
+
+static void register_builtin_tools(tool_service_t *svc)
+{
+    /* 静态元数据（params schema 与 OpenStandards 工具描述对齐）
+     * required 标志与 gateway 工具 schema required 数组一致（SSoT，T2 修复）：
+     * fs_list.path 可选（builtin 实现省略时默认 "."），其余参数必需。 */
+    static tool_param_t fs_path_params[] = {
+        {"path", "{\"type\":\"string\"}", 1},
+    };
+    static tool_param_t fs_write_params[] = {
+        {"path", "{\"type\":\"string\"}", 1},
+        {"content", "{\"type\":\"string\"}", 1},
+    };
+    static tool_param_t shell_params[] = {
+        {"command", "{\"type\":\"string\"}", 1},
+    };
+    static tool_param_t fs_list_params[] = {
+        {"path", "{\"type\":\"string\"}", 0},
+    };
+    static tool_param_t web_fetch_params[] = {
+        {"url", "{\"type\":\"string\"}", 1},
+    };
+    static tool_param_t glob_params[] = {
+        {"pattern", "{\"type\":\"string\"}", 1},
+        {"base", "{\"type\":\"string\"}", 0},
+    };
+    static tool_param_t grep_params[] = {
+        {"pattern", "{\"type\":\"string\"}", 1},
+        {"path", "{\"type\":\"string\"}", 0},
+        {"glob", "{\"type\":\"string\"}", 0},
+        {"max_results", "{\"type\":\"integer\"}", 0},
+    };
+    static tool_param_t edit_params[] = {
+        {"path", "{\"type\":\"string\"}", 1},
+        {"old", "{\"type\":\"string\"}", 1},
+        {"new", "{\"type\":\"string\"}", 1},
+        {"count", "{\"type\":\"integer\"}", 0},
+    };
+    static tool_param_t web_search_params[] = {
+        {"query", "{\"type\":\"string\"}", 1},
+        {"max_results", "{\"type\":\"integer\"}", 0},
+    };
+
+    tool_metadata_t tools[9] = {
+        {
+            .id = "fs_read",
+            .name = "fs_read",
+            .description = "Read a file's content from the local filesystem",
+            .executable = "builtin:fs_read",
+            .params = fs_path_params,
+            .param_count = 1,
+            .timeout_sec = 30,
+            .cacheable = 0,
+            .permission_rule = "fs_read",
+        },
+        {
+            .id = "fs_write",
+            .name = "fs_write",
+            .description = "Write content to a local file (creates or overwrites)",
+            .executable = "builtin:fs_write",
+            .params = fs_write_params,
+            .param_count = 2,
+            .timeout_sec = 30,
+            .cacheable = 0,
+            .permission_rule = "fs_write",
+        },
+        {
+            .id = "fs_list",
+            .name = "fs_list",
+            .description = "List entries of a local directory (JSON array)",
+            .executable = "builtin:fs_list",
+            .params = fs_list_params,
+            .param_count = 1,
+            .timeout_sec = 30,
+            .cacheable = 1,
+            .permission_rule = "fs_list",
+        },
+        {
+            .id = "shell_run",
+            .name = "shell_run",
+            .description = "Execute a shell command and capture its output",
+            .executable = "builtin:shell_run",
+            .params = shell_params,
+            .param_count = 1,
+            .timeout_sec = 60,
+            .cacheable = 0,
+            .permission_rule = "shell_run",
+        },
+        {
+            .id = "web_fetch",
+            .name = "web_fetch",
+            .description = "Fetch a web page over HTTP(S) and return its body text",
+            .executable = "builtin:web_fetch",
+            .params = web_fetch_params,
+            .param_count = 1,
+            .timeout_sec = 45,
+            .cacheable = 1,
+            .permission_rule = "web_fetch",
+        },
+        {
+            .id = "fs_glob",
+            .name = "fs_glob",
+            .description = "List files matching a glob pattern (supports * ? and **)",
+            .executable = "builtin:fs_glob",
+            .params = glob_params,
+            .param_count = 2,
+            .timeout_sec = 30,
+            .cacheable = 0,
+            .permission_rule = "fs_glob",
+        },
+        {
+            .id = "fs_grep",
+            .name = "fs_grep",
+            .description = "Search file contents with a regular expression (relpath:line:text)",
+            .executable = "builtin:fs_grep",
+            .params = grep_params,
+            .param_count = 4,
+            .timeout_sec = 60,
+            .cacheable = 0,
+            .permission_rule = "fs_grep",
+        },
+        {
+            .id = "fs_edit",
+            .name = "fs_edit",
+            .description = "Replace an exact string in a file (search-and-replace edit)",
+            .executable = "builtin:fs_edit",
+            .params = edit_params,
+            .param_count = 4,
+            .timeout_sec = 30,
+            .cacheable = 0,
+            .permission_rule = "fs_edit",
+        },
+        {
+            .id = "web_search",
+            .name = "web_search",
+            .description = "Search the web (DuckDuckGo) and return ranked results",
+            .executable = "builtin:web_search",
+            .params = web_search_params,
+            .param_count = 2,
+            .timeout_sec = 45,
+            .cacheable = 1,
+            .permission_rule = "web_search",
+        },
+    };
+
+    for (size_t i = 0; i < sizeof(tools) / sizeof(tools[0]); ++i) {
+        int rc = tool_service_register(svc, &tools[i]);
+        if (rc == 0) {
+            SVC_LOG_INFO("Builtin tool registered: %s", tools[i].id);
+        } else {
+            SVC_LOG_ERROR("Failed to register builtin tool: %s (rc=%d)", tools[i].id, rc);
+        }
+        /* ACL 授权：agent tool_d 可执行该工具（fail-closed 表） */
+        daemon_security_add_acl_rule("tool_d", tools[i].id, true);
+    }
+}
 
 /* ---------- 工具服务创建 ---------- */
 
@@ -70,6 +233,10 @@ tool_service_t *tool_service_create(const char *config_path __attribute__((unuse
      * daemon_security 采用 fail-closed ACL：无 ACL 条目 = 拒绝。
      * 部署时需通过 daemon_security_add_acl_rule() 注册授权的工具。*/
     daemon_security_init(NULL, NULL);
+
+    /* 注册内置基础工具（fs_read/fs_write/fs_list/shell_run）+ ACL 授权 */
+    register_builtin_tools(svc);
+
     tool_approval_config_t approval_cfg;
     __builtin_memset(&approval_cfg, 0, sizeof(approval_cfg));
     approval_cfg.agent_id = "tool_d";
@@ -180,7 +347,7 @@ tool_metadata_t *tool_service_get(tool_service_t *svc, const char *tool_id)
 {
     if (!svc || !tool_id) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-        }
+    }
 
     airy_mtx_lock(&svc->lock);
     tool_metadata_t *meta = tool_registry_get(svc->registry, tool_id);
@@ -193,7 +360,7 @@ char *tool_service_list(tool_service_t *svc)
 {
     if (!svc) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-        }
+    }
 
     airy_mtx_lock(&svc->lock);
     char *json = tool_registry_list_json(svc->registry);
@@ -366,13 +533,20 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
     if (cached_result) {
         tool_metadata_free(meta);
         *out_result = cached_result;
+        svc->exec_total++; /* 缓存命中同样计入执行统计 */
         return AIRY_OK;
     }
 
     /* 4. 执行工具 */
     tool_result_t *res = NULL;
+    airy_timestamp_t ts0, ts1;
+    airy_time_monotonic(&ts0);
     int ret = do_execute_tool(svc, meta, req->params_json, &res);
+    airy_time_monotonic(&ts1);
+    svc->exec_total++;
+    svc->exec_ms_total += airy_time_to_ms(&ts1) - airy_time_to_ms(&ts0);
     if (ret != 0) {
+        svc->exec_fail++;
         tool_metadata_free(meta);
         meta = NULL;
         return ret;
@@ -432,7 +606,12 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
 
     /* 4. 执行工具（带流式回调） */
     tool_result_t *res = NULL;
+    airy_timestamp_t ts0, ts1;
+    airy_time_monotonic(&ts0);
     int ret = tool_executor_run(svc->executor, meta, req->params_json, &res);
+    airy_time_monotonic(&ts1);
+    svc->exec_total++;
+    svc->exec_ms_total += airy_time_to_ms(&ts1) - airy_time_to_ms(&ts0);
 
     if (ret == 0 && res) {
         if (callback) {
@@ -453,6 +632,7 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
     }
 
     if (ret != 0) {
+        svc->exec_fail++;
         SVC_LOG_ERROR("Tool stream execution failed: %s, error: %d", req->tool_id, ret);
     }
 
@@ -461,6 +641,35 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
 }
 
 /* ---------- 工具结果释放 ---------- */
+
+char *tool_service_get_stats(tool_service_t *svc)
+{
+    if (!svc)
+        return NULL;
+
+    /* 注册工具数：复用 tool_service_list（真实 registry 内容） */
+    char *list = tool_service_list(svc);
+    cJSON *arr = list ? cJSON_Parse(list) : NULL;
+    int tool_count = arr ? cJSON_GetArraySize(arr) : 0;
+    if (arr)
+        cJSON_Delete(arr);
+    AIRY_FREE(list);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root)
+        return NULL;
+    cJSON_AddStringToObject(root, "daemon", "tool_d");
+    cJSON_AddNumberToObject(root, "tools", tool_count);
+    cJSON_AddNumberToObject(root, "exec_total", (double)svc->exec_total);
+    cJSON_AddNumberToObject(root, "exec_fail", (double)svc->exec_fail);
+    cJSON_AddNumberToObject(root, "exec_ms_total", (double)svc->exec_ms_total);
+    cJSON_AddNumberToObject(root, "avg_exec_ms",
+                            svc->exec_total ? (double)svc->exec_ms_total / (double)svc->exec_total
+                                            : 0.0);
+    char *out = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return out;
+}
 
 void tool_result_free(tool_result_t *res)
 {

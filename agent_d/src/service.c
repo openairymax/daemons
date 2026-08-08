@@ -138,94 +138,6 @@ static int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeo
     return 0;
 }
 
-/* P0-1：从 agent_d 可执行文件位置反推 Airymax 仓库根目录。
- * 沿 /proc/self/exe 的目录逐级向上，找到含 sdk/sdk-python/agentrt/
- * __init__.py 的祖先目录即为仓库根。返回 0 成功，-1 未找到。 */
-static int agent_find_repo_root(char *out, size_t size)
-{
-    char exe[AIRY_PATH_MAX];
-    ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-    if (n <= 0)
-        return -1;
-    exe[n] = '\0';
-
-    char dir[AIRY_PATH_MAX];
-    snprintf(dir, sizeof(dir), "%s", exe);
-    for (;;) {
-        char *slash = strrchr(dir, '/');
-        if (!slash || slash == dir)
-            break; /* 已到文件系统根 */
-        *slash = '\0';
-        char probe[AIRY_PATH_MAX];
-        snprintf(probe, sizeof(probe),
-                 "%s/sdk/sdk-python/agentrt/__init__.py", dir);
-        if (access(probe, F_OK) == 0) {
-            snprintf(out, size, "%s", dir);
-            return 0;
-        }
-    }
-    return -1;
-}
-
-/* P0-1：构造 agent 子进程的 Python 搜索路径（注入 PYTHONPATH 的前缀）。
- * 优先级：环境变量 AIRY_AGENTS_PYTHONPATH（显式）→ AIRY_LIB_DIR（生产
- * 安装依赖，agentrt 独立安装于 AIRY_HOME 时依赖库在 lib/）→ 源码树反推
- * （开发模式，/proc/self/exe 向上找仓库根）。历史缺失 sdk/sdk-python 导致
- * 子进程无法导入 agentrt.syscall，SyscallProxy 记忆持久化从未生效。
- * 结果写入 buf，始终以 null 结尾。 */
-static void agent_build_agents_pypath(char *buf, size_t size)
-{
-    char merged[8192];
-    size_t pos = 0;
-    merged[0] = '\0';
-
-    const char *custom = getenv("AIRY_AGENTS_PYTHONPATH");
-    if (custom && custom[0] != '\0') {
-        int n = snprintf(merged + pos, sizeof(merged) - pos, "%s", custom);
-        if (n > 0 && (size_t)n < sizeof(merged) - pos)
-            pos += (size_t)n;
-    }
-
-    /* 生产安装：AIRY_HOME/lib 下直接提供 airymax_agents/openlab/agentrt */
-    const char *lib_dir = getenv("AIRY_LIB_DIR");
-    if (lib_dir && lib_dir[0] != '\0' && access(lib_dir, F_OK) == 0) {
-        int n;
-        if (pos > 0 && merged[pos - 1] != ':')
-            n = snprintf(merged + pos, sizeof(merged) - pos, ":%s", lib_dir);
-        else
-            n = snprintf(merged + pos, sizeof(merged) - pos, "%s", lib_dir);
-        if (n > 0 && (size_t)n < sizeof(merged) - pos)
-            pos += (size_t)n;
-    }
-
-    /* 开发模式：源码树反推（agent_d 在仓库内构建运行时） */
-    char root[AIRY_PATH_MAX];
-    if (agent_find_repo_root(root, sizeof(root)) == 0) {
-        static const char *const suffixes[] = {
-            "/sdk/sdk-python",
-            "/ecosystem/agents",
-            "/ecosystem/openlab",
-        };
-        for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
-            char probe[AIRY_PATH_MAX];
-            snprintf(probe, sizeof(probe), "%s%s", root, suffixes[i]);
-            if (access(probe, F_OK) != 0)
-                continue; /* 该目录不存在（如裁剪安装），跳过 */
-            int n;
-            if (pos > 0 && merged[pos - 1] != ':')
-                n = snprintf(merged + pos, sizeof(merged) - pos,
-                             ":%s", probe);
-            else
-                n = snprintf(merged + pos, sizeof(merged) - pos,
-                             "%s", probe);
-            if (n > 0 && (size_t)n < sizeof(merged) - pos)
-                pos += (size_t)n;
-        }
-    }
-
-    snprintf(buf, size, "%s", merged);
-}
-
 /* 从 spec JSON 中提取 language 字段，默认 "python"。
  * 写入 buf（size 字节），始终以 null 结尾。 */
 static void spec_get_language(const char *spec, char *buf, size_t size)
@@ -362,30 +274,11 @@ static int agent_spawn_child(const char *spec, const char *agent_id,
 fallback_python:
         /* Python runner（默认 & 回退路径）
          *
-         * 注入 Agent Python 运行时路径：airymax_agents 及其依赖（openlab、
-         * agentrt SDK）不在系统 site-packages，需通过 PYTHONPATH（冒号分隔）
-         * 指定搜索路径，否则子进程启动即失败（历史 P0-3 变体：
-         * ModuleNotFoundError）。
-         *
-         * P0-1：路径自动补全。基础为 AIRY_AGENTS_PYTHONPATH（若显式设置），
-         * 再按 agent_d 可执行文件位置反推仓库根，自动补上 sdk/sdk-python、
-         * ecosystem/agents、ecosystem/openlab 三个关键目录。修复历史上
-         * 缺失 sdk/sdk-python 导致 SyscallProxy 记忆持久化从未生效的问题。
-         * 未找到仓库根（生产裁剪安装）时仅使用显式环境变量，兼容旧部署。 */
+         * 依赖解析：airymax_agents / openlab / agentrt SDK 通过标准 Python
+         * 包安装（pip install -e，见 ecosystem 三包 packaging）解析，不再注入
+         * PYTHONPATH 或从可执行文件位置反推源码树（历史 P0-1 机制的移除，
+         * 参见 docs-closed/agentrt/01-designs/_design_0.1.1/06-agent-gateway-wiring.md §3.1）。 */
         {
-            char agents_pypath[8192];
-            agent_build_agents_pypath(agents_pypath, sizeof(agents_pypath));
-            if (agents_pypath[0] != '\0') {
-                const char *cur = getenv("PYTHONPATH");
-                if (cur && cur[0] != '\0') {
-                    char merged[9216];
-                    snprintf(merged, sizeof(merged), "%s:%s",
-                             agents_pypath, cur);
-                    setenv("PYTHONPATH", merged, 1);
-                } else {
-                    setenv("PYTHONPATH", agents_pypath, 1);
-                }
-            }
             char *argv[] = {
                 (char *)"python3",
                 (char *)"-m",

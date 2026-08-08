@@ -50,6 +50,14 @@ int daemon_event_driver_run(daemon_event_driver_t *driver);
 
 void daemon_event_driver_stop(daemon_event_driver_t *driver);
 
+/**
+ * @brief 异步安全停止事件驱动（可在信号处理器中安全调用）
+ *
+ * 仅触发底层事件循环的异步安全停止（原子置位 + eventfd 唤醒），
+ * 不执行任何日志/锁操作，保持 async-signal-safe。
+ */
+void daemon_event_driver_stop_async(daemon_event_driver_t *driver);
+
 airy_event_loop_t *daemon_event_driver_get_loop(daemon_event_driver_t *driver);
 
 thread_pool_t *daemon_event_driver_get_pool(daemon_event_driver_t *driver);

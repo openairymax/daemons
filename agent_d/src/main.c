@@ -20,12 +20,14 @@
 
 #include "daemon_main.h"
 #include "agent_service.h"
+#include "daemon_rpc_client.h"
 #include "param_validator.h"
 #include "svc_logger.h"
 #include "thread_pool.h"
 #include "platform.h"
 
 #include <stdlib.h>
+#include <time.h>
 
 /* ==================== 配置常量 ==================== */
 
@@ -40,9 +42,13 @@
 DAEMON_DECLARE_COMMON(agent_d, agent, DEFAULT_SOCKET_PATH_UNIX,
                        DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
 
+/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
+DAEMON_DECLARE_SHUTDOWN_METHOD(agent_d)
+
 /* ==================== 全局状态 ==================== */
 
 static agent_service_t *g_service = NULL;
+static uint64_t g_start_time = 0; /* 进程启动时间（L2 get_stats uptime 用） */
 
 /* daemon 配置（max_agents 等），供启动/监控线程使用 */
 typedef struct {
@@ -252,6 +258,70 @@ static BOOL WINAPI console_handler(DWORD fdwCtrlType)
 }
 #endif
 
+/* ==================== 向 sched_d 注册派生 Agent ==================== */
+
+/*
+ * agent.spawn 成功后向 sched_d 注册该 role，解决「sched_d 注册表恒空」
+ * （历史上无任何组件调用 register_agent，导致 schedule_task 选不到 agent）。
+ *
+ * 注册键为 spec.role（如 "coding"）：sched_d 的选后派发（sched_dispatch_task）
+ * 会把注册表中的 agent_id 直接作为 role 传给 agent.spawn，因此注册表必须
+ * 存 role 才能被调度选中。同一 role 重复 spawn 仅更新状态（sched_d 注册
+ * 幂等：同 agent_id 命中时只刷新负载/可用性字段）。
+ *
+ * 注册失败仅告警、不阻断 spawn：agent_d 仍可被 gateway 编排分支直接调用。
+ */
+static void sched_d_register_spawned_agent(const char *agent_id, const char *spec_str)
+{
+    /* 解析 spec.role；缺省回退 agent_id */
+    char role[128] = {0};
+    cJSON *spec = cJSON_Parse(spec_str);
+    if (spec) {
+        cJSON *r = cJSON_GetObjectItem(spec, "role");
+        if (cJSON_IsString(r) && r->valuestring && *r->valuestring) {
+            snprintf(role, sizeof(role), "%s", r->valuestring);
+        }
+        cJSON_Delete(spec);
+    }
+    if (role[0] == '\0')
+        snprintf(role, sizeof(role), "%s", agent_id ? agent_id : "unknown");
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON *agent = cJSON_CreateObject();
+    if (!params || !agent) {
+        if (params)
+            cJSON_Delete(params);
+        if (agent)
+            cJSON_Delete(agent);
+        return;
+    }
+    cJSON_AddStringToObject(agent, "agent_id", role);
+    cJSON_AddStringToObject(agent, "agent_name", role);
+    cJSON_AddBoolToObject(agent, "is_available", true);
+    cJSON_AddNumberToObject(agent, "weight", 1.0);
+    cJSON_AddItemToObject(params, "agent", agent);
+
+    char *params_str = cJSON_PrintUnformatted(params);
+    cJSON_Delete(params);
+    if (!params_str)
+        return;
+
+    /* sched_d 监听路径与 sched_d/main.c 的 DEFAULT_SOCKET_PATH_UNIX 对齐 */
+    char sock_buf[AIRY_PATH_MAX];
+    snprintf(sock_buf, sizeof(sock_buf), "%s", airy_runtime_dir_socket("sched.sock"));
+    char *result = NULL;
+    int rc = daemon_rpc_call(sock_buf, "register_agent", params_str, &result, 5000);
+    AIRY_FREE(params_str);
+    if (rc != AIRY_SUCCESS || !result) {
+        SVC_LOG_WARN("sched_d register_agent failed (role=%s, agent_id=%s, rc=%d)",
+                     role, agent_id ? agent_id : "?", rc);
+    } else {
+        SVC_LOG_INFO("sched_d registered (role=%s, agent_id=%s)",
+                     role, agent_id ? agent_id : "?");
+        AIRY_FREE(result);
+    }
+}
+
 /* ==================== 请求处理方法 ==================== */
 
 static void handle_spawn(cJSON *params, int id, airy_sock_t fd);
@@ -259,6 +329,8 @@ static void handle_terminate(cJSON *params, int id, airy_sock_t fd);
 static void handle_invoke(cJSON *params, int id, airy_sock_t fd);
 static void handle_list(int id, airy_sock_t fd);
 static void handle_count(int id, airy_sock_t fd);
+static void handle_health_check(int id, airy_sock_t fd);
+static void handle_get_stats(int id, airy_sock_t fd);
 
 static void on_spawn_method(cJSON *params, int id, void *user_data)
 {
@@ -285,6 +357,18 @@ static void on_count_method(cJSON *params __attribute__((unused)), int id, void 
     handle_count(id, *(airy_sock_t *)user_data);
 }
 
+/* L2 标准方法 agent.health_check（02-l2-service-protocol.md） */
+static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+{
+    handle_health_check(id, *(airy_sock_t *)user_data);
+}
+
+/* L2 标准方法 agent.get_stats（02-l2-service-protocol.md §6.1） */
+static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+{
+    handle_get_stats(id, *(airy_sock_t *)user_data);
+}
+
 static void handle_spawn(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *spec = cJSON_GetObjectItem(params, "agent_spec");
@@ -308,7 +392,6 @@ static void handle_spawn(cJSON *params, int id, airy_sock_t client_fd)
     uint64_t perf_t0 = perf_now_us();
     char *out_agent_id = NULL;
     int ret = agent_service_spawn(g_service, spec_str, &out_agent_id);
-    AIRY_FREE(spec_str);
 
     /* 慢请求监控：超过阈值（默认 1s）时打 WARN，便于定位冷启动/资源瓶颈 */
     {
@@ -322,9 +405,14 @@ static void handle_spawn(cJSON *params, int id, airy_sock_t client_fd)
     if (ret != AIRY_SUCCESS || !out_agent_id) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent spawn failed", id);
         SVC_LOG_ERROR("agent.spawn failed: error=%d", ret);
+        AIRY_FREE(spec_str);
         AIRY_FREE(out_agent_id);
         return;
     }
+
+    /* spawn 成功且子进程 ready 后，向 sched_d 注册该 role（注册表恒空修复） */
+    sched_d_register_spawned_agent(out_agent_id, spec_str);
+    AIRY_FREE(spec_str);
 
     cJSON *result = cJSON_CreateObject();
     cJSON_AddStringToObject(result, "agent_id", out_agent_id);
@@ -429,6 +517,56 @@ static void handle_count(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
+/* L2 标准方法 agent.health_check：无副作用健康探针（含当前 Agent 数） */
+static void handle_health_check(int id, airy_sock_t client_fd)
+{
+    bool healthy = g_service != NULL;
+    size_t agents = healthy ? agent_service_count(g_service) : 0;
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "service", "agent_d");
+    cJSON_AddBoolToObject(result, "healthy", healthy);
+    cJSON_AddNumberToObject(result, "agents", (double)agents);
+    cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
+
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+/* L2 标准方法 agent.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+static void handle_get_stats(int id, airy_sock_t client_fd)
+{
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "daemon", "agent_d");
+    cJSON_AddNumberToObject(result, "uptime_s",
+                            (double)((uint64_t)time(NULL) - g_start_time));
+    if (g_service) {
+        cJSON_AddNumberToObject(result, "agents", (double)agent_service_count(g_service));
+        agent_perf_stats_t perf;
+        if (agent_service_get_perf(g_service, &perf) == AIRY_SUCCESS) {
+            cJSON_AddNumberToObject(result, "spawn_total", perf.spawn_total);
+            cJSON_AddNumberToObject(result, "spawn_ok", perf.spawn_ok);
+            cJSON_AddNumberToObject(result, "spawn_fail", perf.spawn_fail);
+            cJSON_AddNumberToObject(result, "invoke_total", perf.invoke_total);
+            cJSON_AddNumberToObject(result, "invoke_ok", perf.invoke_ok);
+            cJSON_AddNumberToObject(result, "invoke_fail", perf.invoke_fail);
+            cJSON_AddNumberToObject(result, "terminate_total", perf.terminate_total);
+            cJSON_AddNumberToObject(result, "lock_wait_total", perf.lock_wait_total);
+            cJSON_AddNumberToObject(result, "peak_running", perf.peak_running);
+            if (perf.spawn_ok > 0) {
+                cJSON_AddNumberToObject(result, "avg_spawn_us",
+                                        (double)perf.spawn_us_total / (double)perf.spawn_ok);
+            }
+            if (perf.invoke_ok > 0) {
+                cJSON_AddNumberToObject(result, "avg_invoke_us",
+                                        (double)perf.invoke_us_total / (double)perf.invoke_ok);
+            }
+        }
+    } else {
+        cJSON_AddNumberToObject(result, "agents", 0);
+    }
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
 /* ==================== 配置加载 ==================== */
 
 static int load_daemon_config(const char *config_path)
@@ -526,6 +664,8 @@ int main(int argc, char **argv)
     const char *config_path = NULL;
     int use_tcp = 0;
 
+    g_start_time = (uint64_t)time(NULL);
+
     int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_agent_d);
     if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
 
@@ -604,7 +744,13 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_agent_d, "invoke", on_invoke_method, NULL);
     method_dispatcher_register(g_dispatcher_agent_d, "list", on_list_method, NULL);
     method_dispatcher_register(g_dispatcher_agent_d, "count", on_count_method, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (agent.* namespace)", 5);
+    /* L2 协议标准方法（02-l2-service-protocol.md：agent.health_check） */
+    method_dispatcher_register(g_dispatcher_agent_d, "health_check", on_health_check_method, NULL);
+    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+    method_dispatcher_register(g_dispatcher_agent_d, "shutdown", on_shutdown_method_agent_d, NULL);
+    /* L2 协议标准方法 agent.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+    method_dispatcher_register(g_dispatcher_agent_d, "get_stats", on_get_stats_method, NULL);
+    SVC_LOG_INFO("Registered %d RPC methods (agent.* namespace)", 8);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_agent_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");

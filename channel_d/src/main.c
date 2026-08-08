@@ -23,6 +23,9 @@
 DAEMON_DECLARE_COMMON(channel_d, channel, CHANNEL_D_SOCKET_PATH,
                       CHANNEL_D_PIPE_PATH, 0, 65536)
 
+/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
+DAEMON_DECLARE_SHUTDOWN_METHOD(channel_d)
+
 static channel_service_t *g_svc __attribute__((unused)) = NULL;
 
 /* 销毁服务（daemon_cleanup_standard 回调） */
@@ -133,6 +136,38 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
                             info_list[i].messages_received);
         }
         pos += snprintf(buf + pos, buf_size - pos, "]}");
+        *response_json = buf;
+        return 0;
+    }
+
+    if (strcmp(method, "stats") == 0) {
+        /* L2 标准方法 channel.get_stats（02-l2-service-protocol.md §6.1）：
+         * 返回 channel 数 + 各通道累计收发消息数（真实统计）。 */
+        channel_info_t info_list[CHANNEL_MAX_CHANNELS];
+        size_t count = 0;
+        int rc = channel_service_list(svc, info_list, CHANNEL_MAX_CHANNELS, &count);
+        if (rc != 0) {
+            *response_json = AIRY_STRDUP("{\"error\":\"list failed\"}");
+            AIRY_ERROR(AIRY_ERR_UNKNOWN, "channel_service_list failed in stats");
+        }
+        uint64_t sent = 0, recv = 0;
+        for (size_t i = 0; i < count; i++) {
+            sent += info_list[i].messages_sent;
+            recv += info_list[i].messages_received;
+        }
+        size_t sz = snprintf(NULL, 0,
+                             "{\"daemon\":\"channel_d\",\"channels\":%zu,"
+                             "\"messages_sent\":%llu,\"messages_received\":%llu}",
+                             count, (unsigned long long)sent, (unsigned long long)recv) +
+                    1;
+        char *buf = (char *)AIRY_MALLOC(sz);
+        if (!buf) {
+            AIRY_ERROR(AIRY_ERR_UNKNOWN, "malloc failed for stats response buffer");
+        }
+        snprintf(buf, sz,
+                 "{\"daemon\":\"channel_d\",\"channels\":%zu,"
+                 "\"messages_sent\":%llu,\"messages_received\":%llu}",
+                 count, (unsigned long long)sent, (unsigned long long)recv);
         *response_json = buf;
         return 0;
     }
@@ -259,7 +294,7 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
         return 0;
     }
 
-    if (strcmp(method, "health") == 0) {
+    if (strcmp(method, "health") == 0 || strcmp(method, "health_check") == 0) {
         bool healthy = channel_service_is_healthy(svc);
         *response_json = AIRY_STRDUP(healthy ? "{\"healthy\":true}" : "{\"healthy\":false}");
         return 0;
@@ -340,6 +375,12 @@ static void channel_on_send(cJSON *params, int id, void *user_data)
 static void channel_on_health(cJSON *params, int id, void *user_data)
 {
     channel_dispatch_method(params, id, user_data, "health");
+}
+
+/* L2 标准方法 channel.get_stats（02-l2-service-protocol.md §6.1） */
+static void channel_on_get_stats(cJSON *params, int id, void *user_data)
+{
+    channel_dispatch_method(params, id, user_data, "stats");
 }
 
 /* ==================== 主入口 ==================== */
@@ -456,7 +497,13 @@ int main(int argc, char *argv[])
     method_dispatcher_register(g_dispatcher_channel_d, "close", channel_on_close, NULL);
     method_dispatcher_register(g_dispatcher_channel_d, "send", channel_on_send, NULL);
     method_dispatcher_register(g_dispatcher_channel_d, "health", channel_on_health, NULL);
-    SVC_LOG_INFO("channel_d: registered 6 RPC methods (channel.* namespace)");
+    /* L2 协议标准方法 <ns>.health_check 别名（02-l2-service-protocol.md §6.1） */
+    method_dispatcher_register(g_dispatcher_channel_d, "health_check", channel_on_health, NULL);
+    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+    method_dispatcher_register(g_dispatcher_channel_d, "shutdown", on_shutdown_method_channel_d, NULL);
+    /* L2 协议标准方法 channel.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+    method_dispatcher_register(g_dispatcher_channel_d, "get_stats", channel_on_get_stats, NULL);
+    SVC_LOG_INFO("channel_d: registered 9 RPC methods (channel.* namespace)");
 
     if (daemon_event_driver_add_server_fd(g_event_driver_channel_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("channel_d: failed to add server fd to event driver");

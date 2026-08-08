@@ -12,6 +12,14 @@
 #ifdef GATEWAY_HAS_HTTP
 #include "http_gateway.h"
 #endif
+#ifdef GATEWAY_HAS_WS
+#include "ws_gateway.h"
+#endif
+/* stdio 网关不依赖外部库（gateway_lib_obj 恒定编译），无需宏保护 */
+#include "stdio_gateway.h"
+#ifdef GATEWAY_HAS_HTTP2
+#include "http2_gateway.h"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,7 +41,29 @@ struct gateway_service_s {
 #ifdef GATEWAY_HAS_HTTP
     gateway_t *http_gateway;
 #endif
+#ifdef GATEWAY_HAS_WS
+    gateway_t *ws_gateway;
+#endif
+    gateway_t *stdio_gateway;
+    airy_thread_t stdio_thread;         /**< stdio 网关事件循环线程（start 为阻塞循环） */
+    int stdio_thread_started;           /**< stdio 线程是否已创建 */
+#ifdef GATEWAY_HAS_HTTP2
+    gateway_t *http2_gateway;
+#endif
+    gateway_service_handler_t handler; /**< 业务请求处理器 */
+    void *handler_data;                /**< 业务处理器用户数据 */
 };
+
+/* stdio 网关 start 为阻塞事件循环（select 循环），放入独立线程运行，
+ * 避免阻塞 HTTP/WS/HTTP2 等其余传输的启动。 */
+static void *gateway_stdio_thread_main(void *arg)
+{
+    gateway_t *gw = (gateway_t *)arg;
+    if (gw) {
+        gateway_start(gw);
+    }
+    return NULL;
+}
 
 void gateway_service_get_default_config(gateway_service_config_t *config)
 {
@@ -156,6 +186,19 @@ void gateway_service_destroy(gateway_service_t service)
         gateway_destroy(service->http_gateway);
     }
 #endif
+#ifdef GATEWAY_HAS_WS
+    if (service->ws_gateway) {
+        gateway_destroy(service->ws_gateway);
+    }
+#endif
+    if (service->stdio_gateway) {
+        gateway_destroy(service->stdio_gateway);
+    }
+#ifdef GATEWAY_HAS_HTTP2
+    if (service->http2_gateway) {
+        gateway_destroy(service->http2_gateway);
+    }
+#endif
     AIRY_FREE(service);
 }
 
@@ -191,9 +234,115 @@ airy_err_t gateway_service_start(gateway_service_t service)
             service->state = GW_STATE_STOPPED;
             return AIRY_ENOMEM;
         }
+        /* 注册业务处理器：未注册时 HTTP JSON-RPC 请求会因 handler 为 NULL 失败 */
+        if (service->handler && service->http_gateway->ops &&
+            service->http_gateway->ops->set_handler) {
+            service->http_gateway->ops->set_handler(service->http_gateway->impl,
+                                                    service->handler, service->handler_data);
+        }
         gateway_start(service->http_gateway);
     }
 #endif
+
+#ifdef GATEWAY_HAS_WS
+    /* AIRY_GATEWAY_DISABLE_WS=1 可显式关闭 WebSocket 传输（诊断/受限环境用） */
+    const char *ws_disable_env = getenv("AIRY_GATEWAY_DISABLE_WS");
+    int ws_disabled = ws_disable_env && strcmp(ws_disable_env, "1") == 0;
+    if (service->config.ws.enabled && !ws_disabled) {
+        service->ws_gateway =
+            ws_gateway_create(service->config.ws.host, service->config.ws.port);
+        if (!service->ws_gateway) {
+            /* 创建失败只记日志，不阻塞其余传输（WS 为可选传输） */
+            LOG_ERROR("ws_gateway_create failed: host=%s, port=%d",
+                              service->config.ws.host, service->config.ws.port);
+        } else {
+            if (service->handler && service->ws_gateway->ops &&
+                service->ws_gateway->ops->set_handler) {
+                service->ws_gateway->ops->set_handler(service->ws_gateway->impl,
+                                                      service->handler, service->handler_data);
+            }
+            if (gateway_start(service->ws_gateway) == AIRY_SUCCESS) {
+                LOG_INFO("WS gateway started on %s:%d", service->config.ws.host,
+                         service->config.ws.port);
+            } else {
+                LOG_ERROR("WS gateway start failed on %s:%d", service->config.ws.host,
+                          service->config.ws.port);
+            }
+        }
+    } else if (!service->config.ws.enabled) {
+        LOG_INFO("WS gateway disabled by config");
+    }
+#endif
+
+    if (service->config.stdio.enabled) {
+        service->stdio_gateway = stdio_gateway_create();
+        if (!service->stdio_gateway) {
+            LOG_ERROR("stdio_gateway_create failed");
+        } else {
+            if (service->handler && service->stdio_gateway->ops &&
+                service->stdio_gateway->ops->set_handler) {
+                service->stdio_gateway->ops->set_handler(service->stdio_gateway->impl,
+                                                         service->handler,
+                                                         service->handler_data);
+            }
+            /* stdio start 为阻塞事件循环：放入独立线程，不阻塞其余传输 */
+            if (airy_thread_create(&service->stdio_thread, gateway_stdio_thread_main,
+                                   service->stdio_gateway) != 0) {
+                LOG_ERROR("stdio gateway thread create failed");
+                gateway_destroy(service->stdio_gateway);
+                service->stdio_gateway = NULL;
+            } else {
+                service->stdio_thread_started = 1;
+                LOG_INFO("Stdio gateway started");
+            }
+        }
+    }
+
+#ifdef GATEWAY_HAS_HTTP2
+    if (service->config.http.enabled) {
+        /* HTTP/2 需要独立监听端口（默认 http.port+2，可用 AIRY_GATEWAY_HTTP2_PORT
+         * 覆盖），避免与 HTTP/1.1 网关同端口 bind 冲突 */
+        const char *h2port_env = getenv("AIRY_GATEWAY_HTTP2_PORT");
+        uint16_t h2_port = (h2port_env && *h2port_env)
+            ? (uint16_t)atoi(h2port_env)
+            : (uint16_t)(service->config.http.port + 2);
+        service->http2_gateway =
+            http2_gateway_create(service->config.http.host, h2_port);
+        if (!service->http2_gateway) {
+            LOG_ERROR("http2_gateway_create failed: host=%s, port=%d",
+                              service->config.http.host, h2_port);
+        } else {
+            if (service->handler && service->http2_gateway->ops &&
+                service->http2_gateway->ops->set_handler) {
+                service->http2_gateway->ops->set_handler(service->http2_gateway->impl,
+                                                         service->handler,
+                                                         service->handler_data);
+            }
+            if (gateway_start(service->http2_gateway) == AIRY_SUCCESS) {
+                LOG_INFO("HTTP/2 gateway started on %s:%d", service->config.http.host,
+                         h2_port);
+            } else {
+                LOG_ERROR("HTTP/2 gateway start failed on %s:%d", service->config.http.host,
+                          h2_port);
+            }
+        }
+    }
+#endif
+    return AIRY_SUCCESS;
+}
+
+airy_err_t gateway_service_set_handler(gateway_service_t service,
+                                       gateway_service_handler_t handler,
+                                       void *user_data)
+{
+    if (!service)
+        return AIRY_EINVAL;
+    if (service->state == GW_STATE_RUNNING) {
+        LOG_ERROR("gateway_service_set_handler rejected: service running");
+        return AIRY_EPERM;
+    }
+    service->handler = handler;
+    service->handler_data = user_data;
     return AIRY_SUCCESS;
 }
 
@@ -207,6 +356,26 @@ airy_err_t gateway_service_stop(gateway_service_t service, bool force __attribut
     if (service->http_gateway) {
         gateway_destroy(service->http_gateway);
         service->http_gateway = NULL;
+    }
+#endif
+#ifdef GATEWAY_HAS_WS
+    if (service->ws_gateway) {
+        gateway_destroy(service->ws_gateway);
+        service->ws_gateway = NULL;
+    }
+#endif
+    if (service->stdio_gateway) {
+        gateway_destroy(service->stdio_gateway); /* 内部置 running=false，事件循环 1s 内退出 */
+        service->stdio_gateway = NULL;
+        if (service->stdio_thread_started) {
+            airy_thread_join(service->stdio_thread, NULL);
+            service->stdio_thread_started = 0;
+        }
+    }
+#ifdef GATEWAY_HAS_HTTP2
+    if (service->http2_gateway) {
+        gateway_destroy(service->http2_gateway);
+        service->http2_gateway = NULL;
     }
 #endif
     service->state = GW_STATE_STOPPED;

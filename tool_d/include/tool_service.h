@@ -26,6 +26,9 @@ typedef struct tool_service tool_service_t;
 typedef struct {
     const char *name;   /* 参数名 */
     const char *schema; /* JSON Schema 片段，如 "{\"type\":\"string\"}" */
+    int required;       /* 是否必需（0=可选，1=必需）。与 gateway 工具 schema 的
+                         * required 数组一致（SSoT）：fs_list.path 可选（省略时
+                         * 默认列出当前目录），fs_read/fs_write/shell_run 必填。 */
 } tool_param_t;
 
 /**
@@ -95,6 +98,18 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
                                 tool_result_t **out_result);
 
 void tool_result_free(tool_result_t *res);
+
+/* ---------- 统计接口 ---------- */
+
+/**
+ * @brief 获取工具服务运行统计（L2 标准方法 tool.get_stats）
+ * @param svc 工具服务实例
+ * @return JSON 字符串（AIRY_MALLOC，调用者 AIRY_FREE），失败返回 NULL
+ *
+ * 返回字段：daemon、tools（注册工具数）、exec_total（执行总次数）、
+ * exec_fail（失败次数）、exec_ms_total（累计耗时 ms）、avg_exec_ms。
+ */
+char *tool_service_get_stats(tool_service_t *svc);
 
 #ifdef __cplusplus
 }

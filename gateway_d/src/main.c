@@ -17,14 +17,21 @@
 #include "daemon_bootstrap_sd.h"
 #include "daemon_bootstrap_ipc.h"
 #include "daemon_cupolas_bootstrap.h"
-#include "gateway_forward.h"
 #include "gateway_service.h"
+#include "gateway_business_handler.h"
+#include "daemon_security.h"
 #include "logging.h"
 #include "daemon_platform_ext.h"
 #include "svc_common.h"
 #include "svc_config.h"
 #include "svc_logger.h"
 #include "error.h"
+
+/* Phase 2: 协议适配接线（MCP/OpenAI/A2A 适配器 → 内部服务） */
+#include "gateway_protocol_router.h"
+#include "gateway_mcp_server.h"
+#include "gateway_openai_compat.h"
+#include "gateway_a2a_handler.h"
 
 #ifdef AIRY_HAS_PROTOCOLS
 #include "a2a_v03_adapter.h"
@@ -39,31 +46,88 @@
 #include <string.h>
 #ifndef _WIN32
 #include <sys/stat.h> /* umask */
+#include <unistd.h>   /* write()：async-signal-safe 信号埋点 */
 #endif
 
 /* ==================== 全局状态 ==================== */
 
 static gateway_service_t g_service = NULL;
 static atomic_int g_running = 1;
-static airy_mtx_t g_running_lock;
 static daemon_bootstrap_sd_t *g_bsd = NULL;
 static daemon_bootstrap_ipc_t *g_bipc = NULL;
-static gw_forward_t *g_forward = NULL; /* C-L11: 协议转发器 */
+static gateway_business_ctx_t *g_biz_ctx = NULL; /* 业务处理器上下文 */
+static gateway_entry_ctx_t g_entry_ctx;          /* 统一协议入口上下文 */
+static gw_proto_router_t *g_proto_router = NULL; /* 协议路由器（MCP/OpenAI/A2A） */
+
+/* ==================== Phase 3 R4: 协议层 ACL 默认规则 ==================== */
+
+/**
+ * @brief 注册外部协议默认 ACL 规则（fail-closed 需显式授权）
+ *
+ * 外部协议请求统一身份 "external"（见 gateway_business_handler.c）：
+ *   - fs_read/fs_write/fs_list 基础工具默认允许（不误拦正常请求）
+ *   - shell_run 默认允许（与基础工具一致）：gateway 已把 shell_run 作为工具
+ *     schema 暴露给 LLM（GW_TOOLS_JSON），若默认拒绝则 LLM 一调用即被 ACL 拦截，
+ *     导致工具链路整体不可用；如需关闭可设 AIRY_GATEWAY_ACL_ALLOW_SHELL=false
+ *     显式拒绝（仅 "false"/"0" 视为关闭，其余取值默认放行）。
+ *
+ * 须在 daemon_security 初始化后（daemon_cupolas_init）调用。
+ */
+static void gw_acl_register_defaults(void)
+{
+    daemon_security_add_acl_rule("external", "fs_read", true);
+    daemon_security_add_acl_rule("external", "fs_write", true);
+    daemon_security_add_acl_rule("external", "fs_list", true);
+    /* web_fetch 只读联网抓取，与 fs_read 同级信任，默认放行 */
+    daemon_security_add_acl_rule("external", "web_fetch", true);
+    /* fs_glob/fs_grep 只读检索、fs_edit 受控替换、web_search 只读联网搜索，
+     * 与 fs_* 基础工具同级信任，默认放行（否则 LLM 一经 MCP 调用即被 ACL 拦截） */
+    daemon_security_add_acl_rule("external", "fs_glob", true);
+    daemon_security_add_acl_rule("external", "fs_grep", true);
+    daemon_security_add_acl_rule("external", "fs_edit", true);
+    daemon_security_add_acl_rule("external", "web_search", true);
+
+    /* shell_run 默认放行：与 fs_* 一致，修复「LLM 一调用 shell_run 即被 ACL 拒绝」。
+     * 仅当显式设置 AIRY_GATEWAY_ACL_ALLOW_SHELL=false/0 时才拒绝。 */
+    const char *shell = getenv("AIRY_GATEWAY_ACL_ALLOW_SHELL");
+    bool shell_allowed = !(shell && (strcmp(shell, "false") == 0 || strcmp(shell, "0") == 0));
+    daemon_security_add_acl_rule("external", "shell_run", shell_allowed);
+
+    SVC_LOG_INFO("Phase 3: Gateway ACL defaults registered "
+                 "(external: fs_read/fs_write/fs_list ALLOW, shell_run=%s)",
+                 shell_allowed ? "ALLOW" : "DENY");
+}
 
 /* ==================== 信号处理 ==================== */
 
 /**
- * @brief 信号处理函数（线程安全，使用互斥锁保护运行标志）
+ * @brief L2 标准方法 <ns>.shutdown 回调（02-l2-service-protocol.md §6.1）
+ *
+ * 与信号处理路径一致：原子置位 g_running，主循环 1s 轮询内优雅退出。
+ * 由 gateway_business_handle 收到 "shutdown" RPC 时经回调触发。
+ */
+static void gw_rpc_shutdown(void *user_data)
+{
+    (void)user_data;
+    atomic_store_explicit(&g_running, 0, memory_order_seq_cst);
+}
+
+/**
+ * @brief 信号处理函数（async-signal-safe：仅原子置位，真实停止动作由主循环完成）
+ *
+ * 禁止在信号处理器中调用锁/分配/日志（airy_mtx_lock、gateway_service_stop 等
+ * 均非 async-signal-safe），否则主循环持锁时收到信号会死锁。
  */
 static void signal_handler(int sig __attribute__((unused)))
 {
-    airy_mtx_lock(&g_running_lock);
     atomic_store_explicit(&g_running, 0, memory_order_seq_cst);
-    airy_mtx_unlock(&g_running_lock);
-
-    if (g_service) {
-        gateway_service_stop(g_service, false);
+#ifndef _WIN32
+    {
+        static const char sig_msg[] =
+            "[SIG] shutdown signal received, initiating graceful shutdown\n";
+        (void)write(STDERR_FILENO, sig_msg, sizeof(sig_msg) - 1);
     }
+#endif
 }
 
 #ifdef _WIN32
@@ -181,7 +245,6 @@ int main(int argc, char *argv[])
 
     /* E-3 资源确定性: 初始化与清理成对 */
     airy_sock_init();
-    airy_mtx_init(&g_running_lock);
 
     /* 跨平台信号处理 */
 #ifdef _WIN32
@@ -201,7 +264,6 @@ int main(int argc, char *argv[])
     daemon_cupolas_init("gateway_d");
 
     if (parse_args(argc, argv, &config) != 0) {
-        airy_mtx_destroy(&g_running_lock);
         airy_sock_cleanup();
         return EXIT_FAILURE;
     }
@@ -220,6 +282,121 @@ int main(int argc, char *argv[])
         goto cleanup_service;
     }
 
+    /* 注册业务处理器：agent.run → llm_d 转发（修复 handler 未接线缺口） */
+    g_biz_ctx = gateway_business_ctx_create();
+    if (!g_biz_ctx) {
+        SVC_LOG_ERROR("Failed to create business handler context");
+        goto cleanup_service;
+    }
+
+    /* L2 标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1）：
+     * 注入回调，收到 "shutdown" RPC 后触发与信号处理一致的优雅退出
+     * （原子置位 g_running，主循环 1s 轮询内退出）。 */
+    gateway_business_ctx_set_shutdown_cb(g_biz_ctx, gw_rpc_shutdown, NULL);
+
+    /* Phase 3 R4: 协议层 ACL 默认规则（daemon_security 已由 cupolas 初始化） */
+    gw_acl_register_defaults();
+
+    /* Phase 2: 协议路由器（MCP/OpenAI/A2A 适配器注册于此） */
+    g_proto_router = gw_proto_router_create();
+    if (!g_proto_router) {
+        SVC_LOG_ERROR("Failed to create protocol router");
+        gateway_business_ctx_destroy(g_biz_ctx);
+        g_biz_ctx = NULL;
+        goto cleanup_service;
+    }
+    if (gw_proto_router_init(g_proto_router) != 0) {
+        SVC_LOG_ERROR("Failed to init protocol router");
+        gw_proto_router_destroy(g_proto_router);
+        g_proto_router = NULL;
+        gateway_business_ctx_destroy(g_biz_ctx);
+        g_biz_ctx = NULL;
+        goto cleanup_service;
+    }
+
+    /* Phase 2: 适配器接线 —— MCP 工具 → tool_d / OpenAI → llm_d / A2A → sched_d
+     * （协议翻译集中在网关，daemon 侧零协议知识，D2） */
+    {
+        /* MCP: 注册内置工具，exec_fn 直连 tool_d.execute_tool */
+        gw_mcp_server_t *mcp = gw_proto_router_get_mcp(g_proto_router);
+        if (mcp) {
+            gw_mcp_server_register_tool(mcp, "fs_read",
+                                        "Read a file's content from the local filesystem",
+                                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}",
+                                        gw_biz_tool_exec, g_biz_ctx);
+            gw_mcp_server_register_tool(mcp, "fs_write",
+                                        "Write content to a local file (creates or overwrites)",
+                                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}",
+                                        gw_biz_tool_exec, g_biz_ctx);
+            gw_mcp_server_register_tool(mcp, "fs_list",
+                                        "List entries of a local directory (JSON array)",
+                                        /* 与 tool_d 注册一致：path 必填（tool_d validator
+                                         * 对注册参数一律校验存在性，schema 声明可选会导致
+                                         * LLM/MCP 不传 path 而 tool_d 校验失败） */
+                                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}",
+                                        gw_biz_tool_exec, g_biz_ctx);
+            gw_mcp_server_register_tool(mcp, "shell_run",
+                                        "Execute a shell command and capture its output",
+                                        "{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},\"required\":[\"command\"]}",
+                                        gw_biz_tool_exec, g_biz_ctx);
+            gw_mcp_server_register_tool(mcp, "web_fetch",
+                                        "Fetch a web page over HTTP(S) and return its body text",
+                                        "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"required\":[\"url\"]}",
+                                        gw_biz_tool_exec, g_biz_ctx);
+            /* 与 tool_d 内置工具保持一致（tools[9]），补齐剩余 4 个工具 */
+            gw_mcp_server_register_tool(mcp, "fs_glob",
+                                        "List files matching a glob pattern (supports * ? and **)",
+                                        "{\"type\":\"object\",\"properties\":{\"pattern\":{\"type\":\"string\"},\"base\":{\"type\":\"string\"}},\"required\":[\"pattern\"]}",
+                                        gw_biz_tool_exec, g_biz_ctx);
+            gw_mcp_server_register_tool(mcp, "fs_grep",
+                                        "Search file contents with a regular expression (relpath:line:text)",
+                                        "{\"type\":\"object\",\"properties\":{\"pattern\":{\"type\":\"string\"},\"path\":{\"type\":\"string\"},\"glob\":{\"type\":\"string\"},\"max_results\":{\"type\":\"integer\"}},\"required\":[\"pattern\"]}",
+                                        gw_biz_tool_exec, g_biz_ctx);
+            gw_mcp_server_register_tool(mcp, "fs_edit",
+                                        "Replace an exact string in a file (search-and-replace edit)",
+                                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"old\":{\"type\":\"string\"},\"new\":{\"type\":\"string\"},\"count\":{\"type\":\"integer\"}},\"required\":[\"path\",\"old\",\"new\"]}",
+                                        gw_biz_tool_exec, g_biz_ctx);
+            gw_mcp_server_register_tool(mcp, "web_search",
+                                        "Search the web (DuckDuckGo) and return ranked results",
+                                        "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},\"max_results\":{\"type\":\"integer\"}},\"required\":[\"query\"]}",
+                                        gw_biz_tool_exec, g_biz_ctx);
+            SVC_LOG_INFO("Phase 2: MCP adapter wired — 9 tools → tool_d");
+        }
+
+        /* OpenAI: chat/completions → llm_d.complete */
+        gw_openai_compat_t *openai = gw_proto_router_get_openai(g_proto_router);
+        if (openai) {
+            gw_openai_compat_set_llm_call(openai, gw_biz_llm_complete, g_biz_ctx);
+            SVC_LOG_INFO("Phase 2: OpenAI adapter wired — chat/completions → llm_d");
+        }
+
+        /* A2A: task → sched_d.schedule_task（注册常用任务类型） */
+        gw_a2a_handler_t *a2a = gw_proto_router_get_a2a(g_proto_router);
+        if (a2a) {
+            static const char *a2a_task_types[] = {
+                "coding", "analysis", "summarize", "general", "devops", NULL};
+            for (int i = 0; a2a_task_types[i]; i++) {
+                gw_a2a_handler_register_task_type(a2a, a2a_task_types[i],
+                                                  gw_biz_sched_schedule, g_biz_ctx);
+            }
+            SVC_LOG_INFO("Phase 2: A2A adapter wired — task → sched_d");
+        }
+    }
+
+    /* 统一协议入口：协议检测路由（MCP/OpenAI/A2A）+ JSON-RPC 业务（agent.run/ping） */
+    g_entry_ctx.biz_ctx = g_biz_ctx;
+    g_entry_ctx.router = g_proto_router;
+    err = gateway_service_set_handler(g_service, gateway_protocol_entry, &g_entry_ctx);
+    if (err != AIRY_SUCCESS) {
+        SVC_LOG_ERROR("Failed to register protocol entry handler (err=%d)", err);
+        gw_proto_router_destroy(g_proto_router);
+        g_proto_router = NULL;
+        gateway_business_ctx_destroy(g_biz_ctx);
+        g_biz_ctx = NULL;
+        goto cleanup_service;
+    }
+    SVC_LOG_INFO("Protocol entry handler registered (MCP/OpenAI/A2A/JSON-RPC)");
+
     /* Initialize UnifiedProtocol stack for multi-protocol support */
 #ifdef AIRY_HAS_PROTOCOLS
     const protocol_adapter_t *mcp_adapter = mcp_v1_get_adapter();
@@ -236,17 +413,6 @@ int main(int argc, char *argv[])
         SVC_LOG_WARN("MCP v1.0 adapter not available");
     }
 #endif
-
-    /* C-L11: 初始化协议转发器 — 连接 gateway → gateway_d → 目标 daemon */
-    {
-        gw_forward_config_t fwd_cfg = GW_FORWARD_CONFIG_DEFAULTS;
-        g_forward = gw_forward_create(&fwd_cfg);
-        if (!g_forward) {
-            SVC_LOG_ERROR("C-L11: Failed to create gateway forwarder");
-        } else {
-            SVC_LOG_INFO("C-L11: Gateway protocol forwarder initialized");
-        }
-    }
 
     err = gateway_service_start(g_service);
     if (err != AIRY_SUCCESS) {
@@ -291,35 +457,11 @@ int main(int argc, char *argv[])
             } else {
                 SVC_LOG_WARN("Health check failed: unable to retrieve service stats");
             }
-
-            /* C-L11: 报告转发器统计 */
-            if (g_forward && gw_forward_is_healthy(g_forward)) {
-                gw_forward_dump_stats(g_forward, HEALTH_CHECK_INTERVAL);
-            }
         }
     }
 
     daemon_bootstrap_ipc_stop(g_bipc);
     daemon_bootstrap_sd_stop(g_bsd);
-
-    /* C-L11: 清理协议转发器 */
-    if (g_forward) {
-        gw_forward_stats_t fwd_stats;
-        if (gw_forward_get_stats(g_forward, &fwd_stats) == 0) {
-            SVC_LOG_INFO("C-L11: Forwarder stats — total=%llu (A2A=%llu MCP=%llu OpenAI=%llu "
-                         "JSONRPC=%llu) errors=%llu timeouts=%llu avg_latency=%lluus",
-                         (unsigned long long)fwd_stats.total_forwarded,
-                         (unsigned long long)fwd_stats.by_proto[GW_FWD_PROTO_A2A],
-                         (unsigned long long)fwd_stats.by_proto[GW_FWD_PROTO_MCP],
-                         (unsigned long long)fwd_stats.by_proto[GW_FWD_PROTO_OPENAI],
-                         (unsigned long long)fwd_stats.by_proto[GW_FWD_PROTO_JSONRPC],
-                         (unsigned long long)fwd_stats.forward_errors,
-                         (unsigned long long)fwd_stats.timeout_errors,
-                         (unsigned long long)fwd_stats.avg_latency_us);
-        }
-        gw_forward_destroy(g_forward);
-        g_forward = NULL;
-    }
 
     SVC_LOG_INFO("Gateway shutting down...");
     gateway_service_stop(g_service, false);
@@ -336,9 +478,16 @@ int main(int argc, char *argv[])
 #endif
 
 cleanup_service:
+    if (g_proto_router) {
+        gw_proto_router_destroy(g_proto_router);
+        g_proto_router = NULL;
+    }
+    if (g_biz_ctx) {
+        gateway_business_ctx_destroy(g_biz_ctx);
+        g_biz_ctx = NULL;
+    }
     gateway_service_destroy(g_service);
 cleanup:
-    airy_mtx_destroy(&g_running_lock);
     airy_sock_cleanup();
 
     SVC_LOG_INFO("Gateway daemon stopped");

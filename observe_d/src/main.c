@@ -21,6 +21,7 @@
 #ifndef _WIN32
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -69,8 +70,16 @@ static daemon_bootstrap_ipc_t *g_bipc = NULL;
 
 static void observe_d_signal_handler(int sig)
 {
-
+    (void)sig;
+    /* async-signal-safe：仅原子置位（accept 循环 1s 超时轮询，随后自然退出） */
     atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
+#ifndef _WIN32
+    {
+        static const char sig_msg[] =
+            "[SIG] shutdown signal received, initiating graceful shutdown\n";
+        (void)write(STDERR_FILENO, sig_msg, sizeof(sig_msg) - 1);
+    }
+#endif
 }
 
 static observe_metric_t *observe_d_find_or_create_metric(observe_d_service_t *svc, const char *name)
@@ -457,12 +466,79 @@ static int observe_d_healthcheck(observe_d_service_t *svc)
 static void observe_d_handle_request(observe_d_service_t *svc, airy_sock_t client_fd)
 {
     char buffer[OBSERVE_D_MAX_BUFFER];
+#ifndef _WIN32
+    /* 等待请求数据就绪后再 recv：airy_sock_recv 为 MSG_DONTWAIT 非阻塞读取，
+     * accept 后立即 recv 会因 EAGAIN 返回 0 而误判连接失败并关闭（RPC 时序竞态）。 */
+    struct pollfd pfd;
+    pfd.fd = (int)client_fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    int pr = poll(&pfd, 1, 5000);
+    if (pr <= 0 || !(pfd.revents & POLLIN)) {
+        airy_sock_close(client_fd);
+        return;
+    }
+#endif
     ssize_t n = airy_sock_recv(client_fd, buffer, sizeof(buffer) - 1);
     if (n <= 0) {
         airy_sock_close(client_fd);
         return;
     }
     buffer[n] = '\0';
+
+    /* L2 标准方法 <ns>.shutdown / <ns>.get_stats（02-l2-service-protocol.md §6.1）：
+     * 先尝试解析 JSON-RPC 请求，命中标准方法则按 JSON-RPC 2.0 响应并返回；
+     * 其余（Prometheus 抓取等原始请求）保持原有逻辑，向后兼容。 */
+    cJSON *req = cJSON_Parse(buffer);
+    if (req) {
+        cJSON *m = cJSON_GetObjectItem(req, "method");
+        cJSON *idj = cJSON_GetObjectItem(req, "id");
+        if (cJSON_IsString(m) && idj) {
+            int rid = cJSON_IsNumber(idj) ? idj->valueint : 0;
+            if (strcmp(m->valuestring, "shutdown") == 0) {
+                /* 与信号处理一致：原子置位 g_shutdown，accept 循环 1s 内退出 */
+                atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
+                cJSON *result = cJSON_CreateObject();
+                cJSON_AddStringToObject(result, "status", "shutting_down");
+                JSONRPC_SEND_SUCCESS(client_fd, result, rid);
+                cJSON_Delete(req);
+                airy_sock_close(client_fd);
+                return;
+            } else if (strcmp(m->valuestring, "get_stats") == 0) {
+                uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
+                airy_mtx_lock(&svc->lock);
+                uint64_t observed = svc->observe_count;
+                uint64_t errors = svc->error_count;
+                uint64_t http_reqs = svc->http_request_count;
+                size_t mcount = svc->metric_count;
+                airy_mtx_unlock(&svc->lock);
+                cJSON *result = cJSON_CreateObject();
+                cJSON_AddStringToObject(result, "daemon", "observe_d");
+                cJSON_AddNumberToObject(result, "uptime_s", (double)uptime);
+                cJSON_AddNumberToObject(result, "observed", (double)observed);
+                cJSON_AddNumberToObject(result, "errors", (double)errors);
+                cJSON_AddNumberToObject(result, "http_requests", (double)http_reqs);
+                cJSON_AddNumberToObject(result, "metric_count", (double)mcount);
+                JSONRPC_SEND_SUCCESS(client_fd, result, rid);
+                cJSON_Delete(req);
+                airy_sock_close(client_fd);
+                return;
+            } else if (strcmp(m->valuestring, "health_check") == 0) {
+                uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
+                cJSON *result = cJSON_CreateObject();
+                cJSON_AddStringToObject(result, "status", "ok");
+                cJSON_AddStringToObject(result, "service", "observe_d");
+                cJSON_AddNumberToObject(result, "uptime_s", (double)uptime);
+                cJSON_AddNumberToObject(result, "timestamp",
+                                        (double)time(NULL) * 1000.0);
+                JSONRPC_SEND_SUCCESS(client_fd, result, rid);
+                cJSON_Delete(req);
+                airy_sock_close(client_fd);
+                return;
+            }
+        }
+        cJSON_Delete(req);
+    }
 
     airy_mtx_lock(&svc->lock);
     svc->observe_count++;

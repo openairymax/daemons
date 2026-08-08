@@ -17,6 +17,7 @@
 #include "tool_service.h"
 
 #include <stdlib.h>
+#include <time.h>
 
 /* ==================== 配置常量 ==================== */
 
@@ -29,6 +30,9 @@
 /* 生成公共全局变量、信号处理、help、客户端处理等样板 */
 DAEMON_DECLARE_COMMON(tool_d, tool, DEFAULT_SOCKET_PATH_UNIX,
                       DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+
+/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
+DAEMON_DECLARE_SHUTDOWN_METHOD(tool_d)
 
 /* ==================== 全局状态 ==================== */
 
@@ -67,6 +71,7 @@ static void handle_register(cJSON *params, int id, airy_sock_t fd);
 static void handle_list(int id, airy_sock_t fd);
 static void handle_get(cJSON *params, int id, airy_sock_t fd);
 static void handle_execute(cJSON *params, int id, airy_sock_t fd);
+static void handle_health_check(int id, airy_sock_t fd);
 
 static void on_register_method(cJSON *params, int id, void *user_data)
 {
@@ -86,6 +91,35 @@ static void on_get_method(cJSON *params, int id, void *user_data)
 static void on_execute_method(cJSON *params, int id, void *user_data)
 {
     handle_execute(params, id, *(airy_sock_t *)user_data);
+}
+
+/* L2 标准方法 tool.health_check（02-l2-service-protocol.md） */
+static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+{
+    handle_health_check(id, *(airy_sock_t *)user_data);
+}
+
+/* L2 标准方法 tool.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+{
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
+    if (!g_service) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Tool service not ready", id);
+        return;
+    }
+    char *stats_json = tool_service_get_stats(g_service);
+    if (stats_json) {
+        /* stats_json 为合法 JSON 对象，直接作为 result */
+        cJSON *result = cJSON_Parse(stats_json);
+        AIRY_FREE(stats_json);
+        if (result) {
+            JSONRPC_SEND_SUCCESS(client_fd, result, id);
+        } else {
+            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Stats serialization failed", id);
+        }
+    } else {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Failed to collect stats", id);
+    }
 }
 
 static void handle_register(cJSON *params, int id, airy_sock_t client_fd)
@@ -248,6 +282,17 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
 
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
     tool_result_free(res);
+}
+
+/* L2 标准方法 tool.health_check：无副作用健康探针 */
+static void handle_health_check(int id, airy_sock_t client_fd)
+{
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "service", "tool_d");
+    cJSON_AddBoolToObject(result, "healthy", g_service != NULL);
+    cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
+
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
 /* ==================== 配置加载 ==================== */
@@ -425,7 +470,15 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_tool_d, "list_tools", on_list_method, NULL);
     method_dispatcher_register(g_dispatcher_tool_d, "get_tool", on_get_method, NULL);
     method_dispatcher_register(g_dispatcher_tool_d, "execute_tool", on_execute_method, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods", 4);
+    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：tool.execute / tool.list / tool.health_check） */
+    method_dispatcher_register(g_dispatcher_tool_d, "execute", on_execute_method, NULL);
+    method_dispatcher_register(g_dispatcher_tool_d, "list", on_list_method, NULL);
+    method_dispatcher_register(g_dispatcher_tool_d, "health_check", on_health_check_method, NULL);
+    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+    method_dispatcher_register(g_dispatcher_tool_d, "shutdown", on_shutdown_method_tool_d, NULL);
+    /* L2 协议标准方法 tool.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+    method_dispatcher_register(g_dispatcher_tool_d, "get_stats", on_get_stats_method, NULL);
+    SVC_LOG_INFO("Registered %d RPC methods (tool.* namespace)", 9);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_tool_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");

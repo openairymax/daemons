@@ -122,6 +122,16 @@ void cost_tracker_add(cost_tracker_t *ct, const char *model, uint32_t prompt_tok
     airy_mtx_unlock(&ct->lock);
 }
 
+double cost_tracker_estimate(const cost_tracker_t *ct, const char *model,
+                             uint32_t prompt_tokens, uint32_t completion_tokens)
+{
+    if (!ct || !model)
+        return 0.0;
+    double in_price, out_price;
+    get_price(ct, model, &in_price, &out_price);
+    return (prompt_tokens / 1000.0) * in_price + (completion_tokens / 1000.0) * out_price;
+}
+
 cJSON *cost_tracker_export(cost_tracker_t *ct)
 {
     if (!ct)

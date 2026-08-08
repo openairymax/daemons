@@ -179,6 +179,22 @@ int plugin_service_get_stats(const char *name, plugin_stats_t *stats);
  */
 int plugin_service_list(char ***names, size_t *count, int type_filter);
 
+/**
+ * @brief 执行插件（调用插件导出的 plugin_execute 符号）
+ *
+ * 技能类插件通过 plugin_execute 提供 JSON 入参 → JSON 出参的执行入口，
+ * 与设计文档 airy_sys_skill_execute() 的契约一致。plugin_d 通过 dlsym
+ * 解析可选符号 plugin_execute，未导出该符号的插件执行将返回
+ * AIRY_ERR_NOT_FOUND。
+ *
+ * @param name       插件名称
+ * @param json_input 输入 JSON 字符串
+ * @param json_output 输出 JSON 字符串（由插件分配，调用者负责 AIRY_FREE）
+ * @return 0 成功，非0失败
+ */
+int plugin_service_execute(const char *name, const char *json_input,
+                           char **json_output);
+
 #ifdef __cplusplus
 }
 #endif

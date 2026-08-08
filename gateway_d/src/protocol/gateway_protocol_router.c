@@ -88,6 +88,12 @@ static gw_proto_detect_result_t detect_from_body(const char *body)
             strstr(body, "\"prompts/")) {
             return GW_PROTO_DETECT_MCP;
         }
+        /* A2A 基于 JSON-RPC 2.0（tasks/send 等）：须在 jsonrpc 分支内检测，
+         * 否则含 jsonrpc 的 A2A 请求会被永久误判为 JSONRPC */
+        if (strstr(body, "\"tasks/") || strstr(body, "\"task/") ||
+            strstr(body, "\"agentCard\"") || strstr(body, "\"message/")) {
+            return GW_PROTO_DETECT_A2A;
+        }
         return GW_PROTO_DETECT_JSONRPC;
     }
 
@@ -348,4 +354,19 @@ bool gw_proto_router_is_healthy(gw_proto_router_t *router)
     if (!router)
         return false;
     return router->healthy;
+}
+
+gw_mcp_server_t *gw_proto_router_get_mcp(gw_proto_router_t *router)
+{
+    return router ? router->mcp_server : NULL;
+}
+
+gw_openai_compat_t *gw_proto_router_get_openai(gw_proto_router_t *router)
+{
+    return router ? router->openai_compat : NULL;
+}
+
+gw_a2a_handler_t *gw_proto_router_get_a2a(gw_proto_router_t *router)
+{
+    return router ? router->a2a_handler : NULL;
 }

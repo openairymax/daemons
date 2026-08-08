@@ -55,6 +55,7 @@ set(SVC_COMMON_SOURCES
     src/daemon_bootstrap_ipc.c   # P1.7 C-L09: daemon IPC Bus 一键引导
     src/daemon_cupolas_bootstrap.c # P3.14 ACC-DT15: daemon 统一 cupolas 安全穹顶引导
     src/daemon_rpc_client.c       # Phase 3: gateway→daemon thin IPC client (Unix socket JSON-RPC)
+    src/svc_model_defaults.c      # A2-1: model.yaml global 段默认模型提取（llm_d/gateway_d 共用）
 )
 
 # 创建静态库
@@ -170,9 +171,11 @@ if(AIRY_HAS_CURL)
         target_link_libraries(svc_common PUBLIC ${LIBCURL_LIBRARIES})
     endif()
 endif()
-if(AIRY_HAS_YAML AND YAML_FOUND)
+if(AIRY_HAS_YAML)
     target_include_directories(svc_common PRIVATE ${YAML_INCLUDE_DIRS})
     target_link_libraries(svc_common PUBLIC ${YAML_LIBRARIES})
+    # svc_model_defaults.c 依赖 yaml.h，仅在本库内使用（HAVE_YAML 与 llm_d 保持一致）
+    target_compile_definitions(svc_common PRIVATE HAVE_YAML=1)
 endif()
 if(AIRY_HAS_CJSON)
     if(cJSON_FOUND)
@@ -274,5 +277,6 @@ install(FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_errors.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_platform_ext.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_rpc_client.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/svc_model_defaults.h
     DESTINATION include/agentrt
 )

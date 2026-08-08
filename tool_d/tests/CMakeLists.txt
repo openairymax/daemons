@@ -18,6 +18,7 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/registry.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tool_approval.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/safety_guard_bridge.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin.c
 )
 
 # YAML found by root CMakeLists.txt (AIRY_HAS_YAML)

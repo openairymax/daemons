@@ -44,6 +44,7 @@
 
 #if AIRY_PLATFORM_POSIX
 #include <poll.h>
+#include <unistd.h>
 #endif
 
 #ifdef __cplusplus
@@ -73,6 +74,23 @@ extern "C" {
  *   - static int daemon_handle_client(daemon_event_driver_t *driver,
  *         airy_sock_t client_fd, method_dispatcher_t *dispatcher)
  */
+/* SIGTERM 接收埋点：write 直接写 stderr（async-signal-safe，绕过日志锁）。
+ * 必须在宏外做平台条件分支——预处理器指令（#if/#endif）不能出现在宏体内，
+ * 否则 '#' 会被当作字符串化运算符导致 "'#' is not followed by a macro parameter"。 */
+#if AIRY_PLATFORM_POSIX
+#define DAEMON_SIG_RECEIVED_TRACE(daemon_name)                                       \
+    do {                                                                             \
+        static const char _sig_msg_##daemon_name[] =                                 \
+            "[SIG] shutdown signal received, initiating graceful shutdown\n";         \
+        if (write(STDERR_FILENO, _sig_msg_##daemon_name,                             \
+                  sizeof(_sig_msg_##daemon_name) - 1) < 0) {                         \
+            /* 忽略：stderr 不可写时信号埋点丢弃（信号路径无日志系统可用） */         \
+        }                                                                            \
+    } while (0)
+#else
+#define DAEMON_SIG_RECEIVED_TRACE(daemon_name) ((void)0)
+#endif
+
 #define DAEMON_DECLARE_COMMON(daemon_name, daemon_cname, DEFAULT_SOCKET_PATH_UNIX,   \
                               DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER) \
                                                                                      \
@@ -86,11 +104,15 @@ extern "C" {
     static void signal_handler_##daemon_name(int sig)                                 \
     {                                                                                \
         (void)sig;                                                                   \
-        airy_mtx_lock(&g_running_lock_##daemon_name);                            \
+        /* 信号处理器必须保持 async-signal-safe：不锁互斥锁、不调用日志系统，         \
+         * 仅做原子置位 + eventfd 异步安全唤醒，避免与日志锁死锁导致无法退出。       \
+         * 由 daemon_event_driver_stop_async 保持纯异步安全路径。                    */ \
         atomic_store_explicit(&g_running_##daemon_name, 0, memory_order_seq_cst);     \
-        airy_mtx_unlock(&g_running_lock_##daemon_name);                          \
-        if (g_event_driver_##daemon_name)                                             \
-            daemon_event_driver_stop(g_event_driver_##daemon_name);                   \
+        if (g_event_driver_##daemon_name)                                            \
+            daemon_event_driver_stop_async(g_event_driver_##daemon_name);            \
+        /* 关键节点埋点：信号接收（write 为 async-signal-safe，绕过日志系统           \
+         * 避免锁死，输出到 stderr 便于排查）                                       */ \
+        DAEMON_SIG_RECEIVED_TRACE(daemon_name);                                        \
     }                                                                                \
                                                                                      \
     static void svc_log_toggle_handler_##daemon_name(int sig)                         \
@@ -213,6 +235,37 @@ extern "C" {
 
 
 /* ==================== 公共初始化辅助函数 ==================== */
+
+/**
+ * @brief 生成标准 L2 <ns>.shutdown 方法处理器（02-l2-service-protocol.md §6.1）
+ *
+ * 该方法与信号处理路径保持一致：原子置位 g_running_<daemon> + 唤醒事件驱动
+ * （daemon_event_driver_stop_async），使主循环优雅退出（真实生效，非桩），
+ * 随后向调用方返回成功响应。
+ *
+ * 使用方式（main.c）：
+ *   1. 在 DAEMON_DECLARE_COMMON(...) 之后（文件顶层）展开本宏生成处理器；
+ *   2. 在 register_rpc_methods() 中注册：
+ *        method_dispatcher_register(g_dispatcher_<daemon>, "shutdown",
+ *                                   on_shutdown_method_<daemon>, NULL);
+ *
+ * @note user_data 由 daemon_handle_client_<daemon> 传入 &client_fd，
+ *       因此 *(airy_sock_t *)user_data 为客户端 socket。
+ */
+#define DAEMON_DECLARE_SHUTDOWN_METHOD(daemon_name)                                  \
+    static void on_shutdown_method_##daemon_name(cJSON *params, int id, void *user_data) \
+    {                                                                                \
+        (void)params;                                                                \
+        /* 与信号处理器一致：原子置位 + 事件驱动异步唤醒（async-signal-safe 路径）*/  \
+        atomic_store_explicit(&g_running_##daemon_name, 0, memory_order_seq_cst);    \
+        if (g_event_driver_##daemon_name)                                            \
+            daemon_event_driver_stop_async(g_event_driver_##daemon_name);            \
+        cJSON *result = cJSON_CreateObject();                                        \
+        cJSON_AddStringToObject(result, "status", "shutting_down");                  \
+        JSONRPC_SEND_SUCCESS(*(airy_sock_t *)user_data, result, id);                 \
+        SVC_LOG_INFO("RPC shutdown requested, initiating graceful shutdown");         \
+    }
+
 
 /**
  * @brief 跨平台信号处理设置
@@ -356,7 +409,7 @@ static inline void daemon_cleanup_standard(
     void (*destroy_service)(void),
     airy_mtx_t *running_lock)
 {
-    SVC_LOG_INFO("Service stopping...");
+    SVC_LOG_WARN("Service stopping...");
 
     if (bipc)  daemon_bootstrap_ipc_stop(bipc);
     if (bsd)   daemon_bootstrap_sd_stop(bsd);
@@ -366,7 +419,7 @@ static inline void daemon_cleanup_standard(
     if (running_lock) airy_mtx_destroy(running_lock);
     airy_sock_cleanup();
 
-    SVC_LOG_INFO("Service stopped");
+    SVC_LOG_WARN("Service stopped");
 }
 
 

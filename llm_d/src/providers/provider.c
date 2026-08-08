@@ -15,6 +15,7 @@
 
 #include "provider.h"
 #include "svc_logger.h"
+#include "platform.h"
 
 #include <cjson/cJSON.h>
 /* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD 宏 */
@@ -24,6 +25,130 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* ---------- secrets.env 热加载 ---------- */
+
+/* 保护 api_key 写入（llm_d 线程池并发请求可能同时触发热加载） */
+static airy_mtx_t g_secrets_refresh_lock;
+static bool g_secrets_lock_inited = false;
+
+static void secrets_lock_ensure(void)
+{
+    if (!g_secrets_lock_inited) {
+        airy_mtx_init(&g_secrets_refresh_lock);
+        g_secrets_lock_inited = true;
+    }
+}
+
+/**
+ * @brief 从 $AIRY_HOME/config/secrets.env 读取指定 key 的值
+ * @return 动态分配字符串（调用方 AIRY_FREE），未找到/读取失败返回 NULL
+ */
+static char *secrets_env_read(const char *key_name)
+{
+    if (!key_name || !key_name[0])
+        return NULL;
+
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/secrets.env", airy_config_dir());
+
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return NULL;
+
+    char line[1024];
+    char *found = NULL;
+    while (fgets(line, sizeof(line), f)) {
+        /* 跳过空行与注释 */
+        char *p = line;
+        while (*p == ' ' || *p == '\t')
+            p++;
+        if (*p == '\0' || *p == '\n' || *p == '\r' || *p == '#')
+            continue;
+
+        char *eq = strchr(p, '=');
+        if (!eq)
+            continue;
+
+        /* key = 等号前去除首尾空白 */
+        char *key_end = eq;
+        while (key_end > p && (key_end[-1] == ' ' || key_end[-1] == '\t'))
+            key_end--;
+        size_t key_len = (size_t)(key_end - p);
+        if (key_len == 0 || key_len != strlen(key_name) ||
+            strncmp(p, key_name, key_len) != 0)
+            continue;
+
+        /* value = 等号后去除首尾空白与行尾换行 */
+        char *v = eq + 1;
+        while (*v == ' ' || *v == '\t')
+            v++;
+        size_t vlen = strlen(v);
+        while (vlen > 0 && (v[vlen - 1] == '\n' || v[vlen - 1] == '\r' ||
+                            v[vlen - 1] == ' ' || v[vlen - 1] == '\t'))
+            vlen--;
+        if (vlen > 0 && v[0] == '"' && v[vlen - 1] == '"') {
+            v++;
+            vlen -= 2;
+        }
+        if (vlen > 0) {
+            found = (char *)AIRY_MALLOC(vlen + 1);
+            if (found) {
+                __builtin_memcpy(found, v, vlen);
+                found[vlen] = '\0';
+            }
+        }
+        break;
+    }
+
+    explicit_bzero(line, sizeof(line));
+    fclose(f);
+    return found;
+}
+
+/**
+ * @brief 请求时热加载 api_key：每次请求重新解析（环境变量优先，secrets.env 兜底）
+ *
+ * 设计意图：普通用户无需重启 llm_d——在 $AIRY_HOME/config/secrets.env
+ * 填入 API key 后保存，下一次请求自动生效；后续修改 key 同样即时生效。
+ * 优先级：环境变量（bootstrap 启动时 source 的 secrets.env）> secrets.env 文件。
+ * 安全性：key 值不写入日志（仅记录 env 名与来源）；临时缓冲用后清零。
+ */
+void provider_refresh_api_key(provider_base_ctx_t *base_ctx)
+{
+    if (!base_ctx || base_ctx->api_key_env[0] == '\0')
+        return;
+
+    /* 环境变量优先（bootstrap 启动时 source 的 secrets.env） */
+    const char *env_val = getenv(base_ctx->api_key_env);
+    const char *new_key = (env_val && env_val[0]) ? env_val : NULL;
+    char *file_val = NULL;
+    if (!new_key) {
+        file_val = secrets_env_read(base_ctx->api_key_env);
+        new_key = file_val;
+    }
+    if (!new_key || !new_key[0])
+        return;
+
+    secrets_lock_ensure();
+    airy_mtx_lock(&g_secrets_refresh_lock);
+    /* 仅当值发生变化才更新并记录日志，避免刷屏 */
+    if (strcmp(base_ctx->api_key, new_key) != 0) {
+        size_t n = strlen(new_key);
+        if (n < sizeof(base_ctx->api_key)) {
+            explicit_bzero(base_ctx->api_key, sizeof(base_ctx->api_key));
+            __builtin_memcpy(base_ctx->api_key, new_key, n + 1);
+            SVC_LOG_INFO("C-L02: PROVIDER: KEY-RELOAD api_key_env=%s source=%s",
+                         base_ctx->api_key_env, env_val ? "env" : "secrets.env");
+        }
+    }
+    airy_mtx_unlock(&g_secrets_refresh_lock);
+
+    if (file_val) {
+        explicit_bzero(file_val, strlen(file_val));
+        AIRY_FREE(file_val);
+    }
+}
 
 /* ---------- 通用上下文初始化 ---------- */
 
@@ -86,6 +211,32 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, cons
         return;
 
     __builtin_memset(base_ctx, 0, sizeof(provider_base_ctx_t));
+
+    /* 记录 api_key_env 名（供请求时 secrets.env 热加载）。
+     * 优先从 "env:NAME" 前缀提取；否则按 provider/base_url 推断标准环境变量名。 */
+    base_ctx->api_key_env[0] = '\0';
+    if (api_key && strncmp(api_key, "env:", 4) == 0) {
+        const char *env_name = api_key + 4;
+        size_t env_len = strlen(env_name);
+        if (env_len > 0 && env_len < sizeof(base_ctx->api_key_env)) {
+            __builtin_memcpy(base_ctx->api_key_env, env_name, env_len + 1);
+        }
+    } else {
+        const char *guessed = guess_provider_from_url(api_base ? api_base : default_base);
+        if (guessed) {
+            const char *env_name = NULL;
+            if (strcmp(guessed, "openai") == 0)
+                env_name = "OPENAI_API_KEY";
+            else if (strcmp(guessed, "anthropic") == 0)
+                env_name = "ANTHROPIC_API_KEY";
+            else if (strcmp(guessed, "deepseek") == 0)
+                env_name = "DEEPSEEK_API_KEY";
+            else if (strcmp(guessed, "google") == 0)
+                env_name = "GOOGLE_AI_API_KEY";
+            if (env_name)
+                AIRY_STRNCPY_TERM(base_ctx->api_key_env, env_name, sizeof(base_ctx->api_key_env));
+        }
+    }
 
     const char *resolved_key = resolve_api_key(api_key);
     if (!resolved_key || resolved_key[0] == '\0') {
@@ -287,6 +438,14 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
         cJSON_AddItemToObject(root, "stop", stop);
     }
 
+    /* Function calling：透传 tools 定义（OpenAI tools 数组 JSON 字符串） */
+    if (manager->tools_json && manager->tools_json[0]) {
+        CJSON_PARSE_GUARD(tools, manager->tools_json, {});
+        if (cJSON_IsArray(tools) && cJSON_GetArraySize(tools) > 0) {
+            cJSON_AddItemToObject(root, "tools", cJSON_Duplicate(tools, 1));
+        }
+    }
+
     cJSON *msgs = cJSON_CreateArray();
     for (size_t i = 0; i < manager->message_count; ++i) {
         cJSON *msg = cJSON_CreateObject();
@@ -294,6 +453,17 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
         const char *content = manager->messages[i].content ? manager->messages[i].content : "";
         cJSON_AddStringToObject(msg, "role", role);
         cJSON_AddStringToObject(msg, "content", content);
+        /* role="tool"：携带 tool_call_id */
+        if (manager->messages[i].tool_call_id && manager->messages[i].tool_call_id[0]) {
+            cJSON_AddStringToObject(msg, "tool_call_id", manager->messages[i].tool_call_id);
+        }
+        /* role="assistant"：携带 tool_calls（OpenAI 格式 JSON 数组字符串） */
+        if (manager->messages[i].tool_calls_json && manager->messages[i].tool_calls_json[0]) {
+            CJSON_PARSE_GUARD(tc, manager->messages[i].tool_calls_json, {});
+            if (cJSON_IsArray(tc)) {
+                cJSON_AddItemToObject(msg, "tool_calls", cJSON_Duplicate(tc, 1));
+            }
+        }
         cJSON_AddItemToArray(msgs, msg);
     }
     cJSON_AddItemToObject(root, "messages", msgs);
@@ -366,6 +536,14 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
                 }
                 if (cJSON_IsString(content) && content->valuestring) {
                     resp->choices[i].content = AIRY_STRDUP(content->valuestring);
+                }
+                /* Function calling：提取 tool_calls（原始 JSON 数组，序列化为字符串） */
+                cJSON *tool_calls = cJSON_GetObjectItem(message, "tool_calls");
+                if (cJSON_IsArray(tool_calls) && cJSON_GetArraySize(tool_calls) > 0) {
+                    char *tc_json = cJSON_PrintUnformatted(tool_calls);
+                    if (tc_json) {
+                        resp->choices[i].tool_calls_json = tc_json;
+                    }
                 }
             }
             cJSON *finish = cJSON_GetObjectItem(choice, "finish_reason");
