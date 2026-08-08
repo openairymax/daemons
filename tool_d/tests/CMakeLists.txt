@@ -19,6 +19,7 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tool_approval.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/safety_guard_bridge.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/os_sandbox.c
 )
 
 # YAML found by root CMakeLists.txt (AIRY_HAS_YAML)
@@ -33,6 +34,7 @@ set(TOOL_TEST_SOURCES
     test_validator.c
     test_registry.c
     test_sandbox_integration.c
+    test_os_sandbox.c
 )
 
 set(TOOL_COMMON_INCLUDES

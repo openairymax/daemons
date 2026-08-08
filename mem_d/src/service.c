@@ -6,7 +6,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file service.c
- * @brief Memory 服务实现：记忆记录 CRUD + 关键词检索
+ * @brief Memory 服务实现：记忆记录 CRUD + 向量检索
  *
  * 从 gateway/src/utils/syscall_router.c 抽离的 g_runtime.records[] 逻辑，
  * 重构为独立的、自包含的服务模块。守护进程 mem_d 持有 mem_service_t
@@ -16,7 +16,10 @@
  * - 自带哈希表（djb2 算法，与 syscall_router.c 同源但解耦）
  * - 线程安全：所有公共接口持锁
  * - 记录 ID：32 字符十六进制（基于时间戳 + 计数器，无外部依赖）
- * - 检索：基于关键词子串匹配 + 简单评分（便于无嵌入模型场景下可用）
+ * - 检索：自研 TF-IDF 向量余弦相似度（vector.c）与原子串评分按 0.6/0.4
+ *   加权融合（权重可配置 AIRY_MEM_TFIDF_WEIGHT）；可选 embedding 后端
+ *   （emb_client.c，AIRY_MEM_EMBEDDING_URL/KEY）增强，调用失败自动降级
+ *   TF-IDF；记录无向量时退化为纯子串评分，保持向后兼容
  */
 
 #include "service.h"
@@ -34,6 +37,7 @@
 #define MEM_RECORD_ID_LEN 33    /* 32 字符 + '\0' */
 #define MEM_HASH_LOAD_FACTOR 4  /* capacity = max_records * 4 */
 #define MEM_JSONL_FILENAME "mem.jsonl"
+#define MEM_DEFAULT_TFIDF_WEIGHT 0.6f /* 向量/子串混合融合权重（默认 0.6/0.4） */
 
 /* ==================== 内部哈希表 ==================== */
 
@@ -199,6 +203,48 @@ static float mem_compute_score(const mem_record_entry_t *rec, const char *query)
     if (density > 1.0f)
         density = 1.0f;
     return density;
+}
+
+/* ==================== 向量检索辅助（TF-IDF 混合融合） ==================== */
+
+/* 读取混合融合权重（AIRY_MEM_TFIDF_WEIGHT，0.0~1.0，默认 0.6） */
+static float mem_load_tfidf_weight(void)
+{
+    const char *env = getenv("AIRY_MEM_TFIDF_WEIGHT");
+    if (env && env[0]) {
+        char *end = NULL;
+        double v = strtod(env, &end);
+        if (end != env && v >= 0.0 && v <= 1.0)
+            return (float)v;
+    }
+    return MEM_DEFAULT_TFIDF_WEIGHT;
+}
+
+/* 为记录构建 TF-IDF 词频向量并登记到全局 DF 表（失败时保持空向量，退化为子串评分） */
+static void mem_record_build_vector(mem_service_t *svc, mem_record_entry_t *rec)
+{
+    if (!svc || !rec)
+        return;
+    mem_tfidf_vec_t vec;
+    AIRY_MEMSET(&vec, 0, sizeof(vec));
+    if (mem_vec_build((const char *)rec->data, rec->len, &vec) != AIRY_SUCCESS) {
+        SVC_LOG_WARN("mem_d vector: build failed for record %s", rec->record_id);
+        mem_vec_destroy(&vec);
+        return;
+    }
+    rec->vec = vec;
+    mem_df_add_doc(&svc->df_table, &rec->vec);
+}
+
+/* 释放记录的向量资源（TF-IDF 向量 + embedding 向量） */
+static void mem_record_free_vector(mem_record_entry_t *rec)
+{
+    if (!rec)
+        return;
+    mem_vec_destroy(&rec->vec);
+    AIRY_FREE(rec->emb);
+    rec->emb = NULL;
+    rec->emb_dim = 0;
 }
 
 /* ==================== JSONL 持久化（best-effort，纯 C stdio） ==================== */
@@ -431,6 +477,9 @@ static void mem_persist_load_existing(mem_service_t *svc)
                                                   : (uint64_t)time(NULL);
                             if (mem_ht_insert(&svc->record_index,
                                               rec->record_id, idx) == AIRY_SUCCESS) {
+                                /* 重启时从 JSONL 原文重建 TF-IDF 向量并登记全局 DF
+                                 * （JSONL 只持久化原文，向量仅存内存） */
+                                mem_record_build_vector(svc, rec);
                                 svc->record_count++;
                                 loaded++;
                             } else {
@@ -485,9 +534,19 @@ mem_service_t *mem_service_create(size_t max_records)
         return NULL;
     }
 
+    /* 全局 DF 表容量取记录数 64 倍（每条记录平均 ~10 个独特词项，保证低负载因子） */
+    if (mem_df_init(&svc->df_table, max_records * 64) != AIRY_SUCCESS) {
+        mem_ht_destroy(&svc->record_index);
+        AIRY_FREE(svc->records);
+        AIRY_FREE(svc);
+        return NULL;
+    }
+
     airy_mtx_init(&svc->lock);
     svc->record_count = 0;
     svc->initialized = 1;
+    svc->tfidf_weight = mem_load_tfidf_weight();
+    (void)mem_emb_client_init(&svc->emb); /* 未配置 embedding 时静默禁用 */
 
     if (mem_jsonl_path_resolve(&svc->jsonl_path) != AIRY_SUCCESS) {
         SVC_LOG_WARN("mem_d persist: path resolve failed, persistence disabled");
@@ -496,7 +555,8 @@ mem_service_t *mem_service_create(size_t max_records)
         mem_persist_load_existing(svc);
     }
 
-    SVC_LOG_INFO("Memory service created (max_records=%zu)", max_records);
+    SVC_LOG_INFO("Memory service created (max_records=%zu, tfidf_weight=%.2f)",
+                 max_records, (double)svc->tfidf_weight);
     return svc;
 }
 
@@ -507,12 +567,15 @@ void mem_service_destroy(mem_service_t *svc)
 
     airy_mtx_lock(&svc->lock);
     for (size_t i = 0; i < svc->record_count; i++) {
+        mem_record_free_vector(&svc->records[i]);
         AIRY_FREE(svc->records[i].record_id);
         AIRY_FREE(svc->records[i].data);
         AIRY_FREE(svc->records[i].metadata);
     }
     AIRY_FREE(svc->records);
     mem_ht_destroy(&svc->record_index);
+    mem_df_destroy(&svc->df_table);
+    mem_emb_client_destroy(&svc->emb);
     /* 关闭持久化句柄并释放路径，确保缓冲数据落盘 */
     if (svc->jsonl_append_fp) {
         fflush(svc->jsonl_append_fp);
@@ -566,9 +629,12 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req,
     rec->metadata = req->metadata ? AIRY_STRDUP(req->metadata) : NULL;
     rec->score = 0.0f;
     rec->created_at = (uint64_t)time(NULL);
+    /* 构建 TF-IDF 词频向量并登记全局 DF（失败时保持空向量，退化为子串评分） */
+    mem_record_build_vector(svc, rec);
 
     int rc = mem_ht_insert(&svc->record_index, rec->record_id, idx);
     if (rc != AIRY_SUCCESS) {
+        mem_record_free_vector(rec);
         AIRY_FREE(rec->record_id);
         AIRY_FREE(rec->data);
         AIRY_FREE(rec->metadata);
@@ -588,6 +654,27 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req,
 
     airy_mtx_unlock(&svc->lock);
 
+    /* 可选 embedding 增强：锁外发起网络调用（避免持锁阻塞），
+     * 成功则回填向量；失败已由 emb_client 标记 unhealthy 进入冷却，自动降级 TF-IDF */
+    if (mem_emb_should_try(&svc->emb)) {
+        float *emb_vec = NULL;
+        size_t emb_dim = 0;
+        if (mem_emb_embed(&svc->emb, (const char *)rec->data, &emb_vec, &emb_dim) ==
+                AIRY_SUCCESS &&
+            emb_vec && emb_dim > 0) {
+            airy_mtx_lock(&svc->lock);
+            ssize_t eidx = mem_ht_lookup(&svc->record_index, *out_record_id);
+            if (eidx >= 0 && (size_t)eidx < svc->record_count) {
+                AIRY_FREE(svc->records[eidx].emb);
+                svc->records[eidx].emb = emb_vec;
+                svc->records[eidx].emb_dim = emb_dim;
+                emb_vec = NULL;
+            }
+            airy_mtx_unlock(&svc->lock);
+        }
+        AIRY_FREE(emb_vec);
+    }
+
     SVC_LOG_DEBUG("Memory write: record_id=%s, len=%zu, total=%lu",
                   *out_record_id, req->len, (unsigned long)total_writes);
     return AIRY_SUCCESS;
@@ -605,10 +692,26 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
     if (limit == 0)
         limit = 10;
 
+    /* 锁外准备（网络调用不持锁，避免阻塞写/删）：
+     * 1) 查询 TF-IDF 词频向量；2) 可选查询 embedding（失败自动降级） */
+    mem_tfidf_vec_t qvec;
+    AIRY_MEMSET(&qvec, 0, sizeof(qvec));
+    (void)mem_vec_build(query, strlen(query), &qvec);
+
+    float *qemb = NULL;
+    size_t qemb_dim = 0;
+    int use_emb = 0;
+    if (mem_emb_should_try(&svc->emb) &&
+        mem_emb_embed(&svc->emb, query, &qemb, &qemb_dim) == AIRY_SUCCESS &&
+        qemb && qemb_dim > 0)
+        use_emb = 1;
+
     airy_mtx_lock(&svc->lock);
 
     if (svc->record_count == 0) {
         airy_mtx_unlock(&svc->lock);
+        mem_vec_destroy(&qvec);
+        AIRY_FREE(qemb);
         return AIRY_SUCCESS;
     }
 
@@ -617,14 +720,36 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
                                                               sizeof(mem_search_hit_t));
     if (!hits) {
         airy_mtx_unlock(&svc->lock);
+        mem_vec_destroy(&qvec);
+        AIRY_FREE(qemb);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     size_t hit_count = 0;
+    size_t vec_used = 0; /* 有向量参与评分的记录数（日志统计） */
+    const float w = svc->tfidf_weight;
     for (size_t i = 0; i < svc->record_count; i++) {
-        float score = mem_compute_score(&svc->records[i], query);
+        const mem_record_entry_t *rec = &svc->records[i];
+
+        /* 向量相似度：embedding 可用且记录有向量时用 embedding 余弦，
+         * 否则用 TF-IDF 余弦；记录无向量（或查询无词项）时该分量为 0 */
+        float vec_score = 0.0f;
+        if (use_emb && rec->emb && rec->emb_dim == qemb_dim) {
+            vec_score = mem_emb_cosine(qemb, rec->emb, qemb_dim);
+        } else if (rec->vec.term_count > 0) {
+            vec_score = mem_vec_cosine(&qvec, &rec->vec, &svc->df_table,
+                                       svc->record_count);
+        }
+        if (rec->vec.term_count > 0)
+            vec_used++;
+
+        /* 子串评分（旧检索，保留为 fallback：无向量时纯子串评分仍可工作） */
+        float sub_score = mem_compute_score(rec, query);
+
+        /* 0.6/0.4 加权融合，score 保持 [0,1] */
+        float score = w * vec_score + (1.0f - w) * sub_score;
         if (score > 0.0f) {
-            hits[hit_count].record_id = AIRY_STRDUP(svc->records[i].record_id);
+            hits[hit_count].record_id = AIRY_STRDUP(rec->record_id);
             hits[hit_count].score = score;
             hit_count++;
         }
@@ -654,6 +779,9 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
 
     airy_mtx_unlock(&svc->lock);
 
+    mem_vec_destroy(&qvec);
+    AIRY_FREE(qemb);
+
     if (hit_count == 0) {
         AIRY_FREE(hits);
         *out_hits = NULL;
@@ -667,7 +795,8 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
     *out_hits = shrunk ? shrunk : hits;
     *out_count = hit_count;
 
-    SVC_LOG_DEBUG("Memory search: query='%s', hits=%zu", query, hit_count);
+    SVC_LOG_DEBUG("Memory search: query='%s', hits=%zu (vec_used=%zu)",
+                  query, hit_count, vec_used);
     return AIRY_SUCCESS;
 }
 
@@ -714,6 +843,10 @@ int mem_service_delete(mem_service_t *svc, const char *record_id)
         airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_NOT_FOUND;
     }
+
+    /* 维护全局 DF 表并从记录条目移除向量资源（在 swap 之前，idx 仍指向目标记录） */
+    mem_df_remove_doc(&svc->df_table, &svc->records[idx].vec);
+    mem_record_free_vector(&svc->records[idx]);
 
     /* 释放被删除记录的资源 */
     AIRY_FREE(svc->records[idx].record_id);

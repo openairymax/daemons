@@ -27,6 +27,10 @@ typedef struct daemon_event_config {
     int thread_pool_queue_size;
     int health_check_interval_sec;
     bool use_jsonrpc;
+    /* 若为 true 且配置了池 + on_client，则每个客户端请求被分派到线程池并发处理，
+     * 事件循环线程不再被单个长请求（如阻塞等待交互审批的 execute）卡住。
+     * 默认 false：保持原有同步逐请求处理语义（不影响其他 daemon）。 */
+    bool concurrent_clients;
     daemon_on_client_cb on_client;
     daemon_on_timer_cb on_timer;
     void *service_ctx;

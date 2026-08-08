@@ -72,8 +72,20 @@ static void register_builtin_tools(tool_service_t *svc)
         {"query", "{\"type\":\"string\"}", 1},
         {"max_results", "{\"type\":\"integer\"}", 0},
     };
+    static tool_param_t git_exec_params[] = {
+        {"command_args", "{\"type\":\"array\",\"items\":{\"type\":\"string\"}}", 1},
+        {"cwd", "{\"type\":\"string\"}", 0},
+    };
+    static tool_param_t git_diff_params[] = {
+        {"path", "{\"type\":\"string\"}", 0},
+        {"staged", "{\"type\":\"boolean\"}", 0},
+    };
+    static tool_param_t git_apply_params[] = {
+        {"patch", "{\"type\":\"string\"}", 1},
+        {"check_only", "{\"type\":\"boolean\"}", 0},
+    };
 
-    tool_metadata_t tools[9] = {
+    tool_metadata_t tools[12] = {
         {
             .id = "fs_read",
             .name = "fs_read",
@@ -172,6 +184,39 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 45,
             .cacheable = 1,
             .permission_rule = "web_search",
+        },
+        {
+            .id = "git_exec",
+            .name = "git_exec",
+            .description = "Execute a read-only git command (whitelisted: status/diff/log/branch/show/ls-files/grep) and capture output",
+            .executable = "builtin:git_exec",
+            .params = git_exec_params,
+            .param_count = 2,
+            .timeout_sec = 60,
+            .cacheable = 0,
+            .permission_rule = "git_exec",
+        },
+        {
+            .id = "git_diff",
+            .name = "git_diff",
+            .description = "Generate a unified diff for a path (git diff [--cached] [path])",
+            .executable = "builtin:git_diff",
+            .params = git_diff_params,
+            .param_count = 2,
+            .timeout_sec = 60,
+            .cacheable = 0,
+            .permission_rule = "git_diff",
+        },
+        {
+            .id = "git_apply",
+            .name = "git_apply",
+            .description = "Apply a unified diff to the working tree (git apply [--check] -)",
+            .executable = "builtin:git_apply",
+            .params = git_apply_params,
+            .param_count = 2,
+            .timeout_sec = 60,
+            .cacheable = 0,
+            .permission_rule = "git_apply",
         },
     };
 
@@ -408,10 +453,11 @@ static int validate_tool_params(tool_service_t *svc, tool_metadata_t *meta, cons
 }
 
 /**
- * @brief 获取缓存的工具结果
+ * @brief 获取缓存的工具结果（缓存键含 agent_id，避免跨主体缓存绕过审批）
  */
 static tool_result_t *get_cached_result(tool_service_t *svc, tool_metadata_t *meta,
-                                        const char *tool_id, const char *params_json)
+                                        const char *tool_id, const char *params_json,
+                                        const char *agent_id)
 {
     if (!svc || !meta || !tool_id || !params_json) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
@@ -421,7 +467,7 @@ static tool_result_t *get_cached_result(tool_service_t *svc, tool_metadata_t *me
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    char *cache_key = tool_cache_key(tool_id, params_json);
+    char *cache_key = tool_cache_key(tool_id, params_json, agent_id);
     if (!cache_key) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
@@ -445,10 +491,10 @@ static tool_result_t *get_cached_result(tool_service_t *svc, tool_metadata_t *me
 }
 
 /**
- * @brief 缓存工具结果
+ * @brief 缓存工具结果（缓存键含 agent_id，与获取路径保持一致）
  */
 static void cache_tool_result(tool_service_t *svc, tool_metadata_t *meta, const char *tool_id,
-                              const char *params_json, tool_result_t *res)
+                              const char *params_json, const char *agent_id, tool_result_t *res)
 {
     if (!svc || !meta || !tool_id || !params_json || !res || !res->success) {
         return;
@@ -458,7 +504,7 @@ static void cache_tool_result(tool_service_t *svc, tool_metadata_t *meta, const 
         return;
     }
 
-    char *cache_key = tool_cache_key(tool_id, params_json);
+    char *cache_key = tool_cache_key(tool_id, params_json, agent_id);
     if (!cache_key) {
         return;
     }
@@ -478,21 +524,20 @@ static void cache_tool_result(tool_service_t *svc, tool_metadata_t *meta, const 
  * @brief 执行工具
  */
 static int do_execute_tool(tool_service_t *svc, tool_metadata_t *meta, const char *params_json,
-                           tool_result_t **out_result)
+                           const char *agent_id, tool_result_t **out_result)
 {
     if (!svc || !meta || !out_result) {
         return AIRY_ERR_INVALID_PARAM;
     }
 
     tool_result_t *res = NULL;
-    int ret = tool_executor_run(svc->executor, meta, params_json, &res);
+    int ret = tool_executor_run(svc->executor, meta, params_json, agent_id, &res);
 
     if (ret != 0) {
         SVC_LOG_ERROR("Tool execution failed, error: %d", ret);
-        if (res) {
-            tool_result_free(res);
-            res = NULL;
-        }
+        /* 保留 result 供上层读取 res->error（如交互审批 deny/超时的
+         * "User denied tool execution"），由调用方 tool_service_execute 释放。 */
+        *out_result = res;
         return ret;
     }
 
@@ -528,8 +573,16 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
         return AIRY_ERROR_TOOL_VALIDATION;
     }
 
-    /* 3. 检查缓存 */
-    tool_result_t *cached_result = get_cached_result(svc, meta, req->tool_id, req->params_json);
+    /* 3. 检查缓存。
+     * P0 交互式审批语义：仅静态 ACL 已授权的主体可命中缓存。未授权主体
+     * （需人工决议，allow 为一次性授予）每次调用必须重新走审批——即使
+     * 上次被批准过并已缓存，也不能跳过本次权限确认。 */
+    tool_result_t *cached_result = NULL;
+    const char *subject = (req->agent_id && req->agent_id[0]) ? req->agent_id : "tool_d";
+    if (daemon_check_tool_permission(subject, req->tool_id, "execute") == 0) {
+        cached_result = get_cached_result(svc, meta, req->tool_id, req->params_json,
+                                          req->agent_id);
+    }
     if (cached_result) {
         tool_metadata_free(meta);
         *out_result = cached_result;
@@ -541,7 +594,7 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
     tool_result_t *res = NULL;
     airy_timestamp_t ts0, ts1;
     airy_time_monotonic(&ts0);
-    int ret = do_execute_tool(svc, meta, req->params_json, &res);
+    int ret = do_execute_tool(svc, meta, req->params_json, req->agent_id, &res);
     airy_time_monotonic(&ts1);
     svc->exec_total++;
     svc->exec_ms_total += airy_time_to_ms(&ts1) - airy_time_to_ms(&ts0);
@@ -549,11 +602,13 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
         svc->exec_fail++;
         tool_metadata_free(meta);
         meta = NULL;
+        /* 失败时也传递 result（含 res->error 错误描述），由调用方读取后释放 */
+        *out_result = res;
         return ret;
     }
 
     /* 5. 存入缓存 */
-    cache_tool_result(svc, meta, req->tool_id, req->params_json, res);
+    cache_tool_result(svc, meta, req->tool_id, req->params_json, req->agent_id, res);
 
     *out_result = res;
     if (meta) {
@@ -608,7 +663,7 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
     tool_result_t *res = NULL;
     airy_timestamp_t ts0, ts1;
     airy_time_monotonic(&ts0);
-    int ret = tool_executor_run(svc->executor, meta, req->params_json, &res);
+    int ret = tool_executor_run(svc->executor, meta, req->params_json, req->agent_id, &res);
     airy_time_monotonic(&ts1);
     svc->exec_total++;
     svc->exec_ms_total += airy_time_to_ms(&ts1) - airy_time_to_ms(&ts0);
@@ -699,4 +754,26 @@ void tool_metadata_free(tool_metadata_t *meta)
 
     AIRY_FREE(meta->permission_rule);
     AIRY_FREE(meta);
+}
+
+/* ---------- P0 交互式审批 ---------- */
+
+char *tool_service_interactive_pending_list(tool_service_t *svc)
+{
+    if (!svc || !svc->executor) {
+        return NULL;
+    }
+    return tool_executor_interactive_pending_list(svc->executor);
+}
+
+int tool_service_interactive_resolve(tool_service_t *svc, const char *request_id,
+                                     const char *decision)
+{
+    if (!svc || !request_id || !decision) {
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    if (!svc->executor) {
+        return AIRY_ERR_NOT_FOUND;
+    }
+    return tool_executor_interactive_resolve(svc->executor, request_id, decision);
 }

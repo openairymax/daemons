@@ -713,6 +713,68 @@ static char *handle_llm_list_models(cJSON *root, const gateway_business_ctx_t *c
     return out;
 }
 
+/**
+ * @brief tool.pending / tool.approve 转发：gateway JSON-RPC → tool_d
+ *
+ * P0 交互式权限审批（Claude Code 风格 permission prompt）：
+ * 外部 tool.pending → tool_d "pending"；外部 tool.approve → tool_d "approve"。
+ * params/响应透传，响应 id 改写为请求 id（同 handle_mem_call 的并发合规）。
+ */
+static char *handle_tool_approval_call(cJSON *root, const gateway_business_ctx_t *ctx,
+                                       const char *tool_method)
+{
+    cJSON *id = cJSON_GetObjectItem(root, "id");
+    cJSON *params = cJSON_GetObjectItem(root, "params");
+
+    /* tool.approve 参数校验：request_id + decision 缺一不可（P0 交互式审批） */
+    if (strcmp(tool_method, "approve") == 0) {
+        const cJSON *req_id = params ? cJSON_GetObjectItem(params, "request_id") : NULL;
+        const cJSON *decision = params ? cJSON_GetObjectItem(params, "decision") : NULL;
+        if (!cJSON_IsString(req_id) || !req_id->valuestring || !req_id->valuestring[0] ||
+            !cJSON_IsString(decision) || !decision->valuestring || !decision->valuestring[0]) {
+            return jsonrpc_error(-32602, "Invalid params: request_id and decision required", id);
+        }
+    }
+
+    char *params_str = NULL;
+    if (params) {
+        params_str = cJSON_PrintUnformatted(params);
+    } else {
+        params_str = AIRY_STRDUP("{}");
+    }
+    if (!params_str) {
+        return jsonrpc_error(-32603, "Out of memory", id);
+    }
+
+    char *resp = gw_svc_call(ctx->tool_sock_path, tool_method, params_str, GW_TOOL_TIMEOUT_MS);
+    AIRY_FREE(params_str);
+    if (!resp) {
+        return jsonrpc_error(-32603, "Tool service unreachable", id);
+    }
+
+    /* 透传 tool_d 完整 JSON-RPC 响应（result/error 原样） */
+    cJSON *rroot = cJSON_Parse(resp);
+    AIRY_FREE(resp);
+    if (!rroot) {
+        return jsonrpc_error(-32603, "Tool service returned invalid response", id);
+    }
+    /* JSON-RPC 2.0 合规：响应 id 与请求 id 一致 */
+    cJSON *req_id = cJSON_GetObjectItem(root, "id");
+    cJSON *tool_id = cJSON_GetObjectItem(rroot, "id");
+    if (tool_id)
+        cJSON_DeleteItemFromObject(rroot, "id");
+    if (req_id && cJSON_IsString(req_id)) {
+        cJSON_AddStringToObject(rroot, "id", req_id->valuestring);
+    } else if (req_id && cJSON_IsNumber(req_id)) {
+        cJSON_AddNumberToObject(rroot, "id", req_id->valuedouble);
+    } else {
+        cJSON_AddNullToObject(rroot, "id");
+    }
+    char *out = cJSON_PrintUnformatted(rroot);
+    cJSON_Delete(rroot);
+    return out;
+}
+
 /* ==================== agent.run 处理 ==================== */
 
 /* ---- 运行中请求注册表：agent.cancel 支持 ---- */
@@ -1876,6 +1938,10 @@ char *gateway_business_handle(void *request, void *user_data)
         resp = handle_llm_list_models(root, ctx);
     } else if (strncmp(method->valuestring, "mem.", 4) == 0) {
         resp = handle_mem_call(root, ctx);
+    } else if (strcmp(method->valuestring, "tool.pending") == 0) {
+        resp = handle_tool_approval_call(root, ctx, "pending");
+    } else if (strcmp(method->valuestring, "tool.approve") == 0) {
+        resp = handle_tool_approval_call(root, ctx, "approve");
     } else if (strcmp(method->valuestring, "ping") == 0) {
         cJSON *id = cJSON_GetObjectItem(root, "id");
         cJSON *out = cJSON_CreateObject();

@@ -136,8 +136,8 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
     /* ── C-L05: 优先使用 SafetyGuard 桥接层（6 种守卫链） ── */
     if (ctx->bridge) {
         safety_guard_bridge_result_t bridge_result;
-        int bridge_ret = safety_guard_bridge_check(
-            ctx->bridge, meta, params_json, &bridge_result);
+        int bridge_ret = safety_guard_bridge_check_for_agent(
+            ctx->bridge, agent_id, meta, params_json, &bridge_result);
 
         if (bridge_ret != 0) {
             /* 守卫链拒绝 */
@@ -289,4 +289,34 @@ void tool_approval_get_stats(tool_approval_ctx_t *ctx, uint64_t *out_total_check
         *out_denied_count = ctx->denied_count;
     if (out_sanitized_count)
         *out_sanitized_count = ctx->sanitized_count;
+}
+
+const char *tool_approval_get_agent_id(const tool_approval_ctx_t *ctx)
+{
+    if (!ctx)
+        return NULL;
+    return ctx->agent_id;
+}
+
+int tool_approval_check_for_agent(tool_approval_ctx_t *ctx, const char *agent_id,
+                                  const tool_metadata_t *meta, const char *params_json,
+                                  tool_approval_detail_t *detail)
+{
+    if (!ctx || !meta) {
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    /* 未传入 agent_id（或空串）时回退上下文默认，等价于 tool_approval_check */
+    if (!agent_id || !agent_id[0]) {
+        return tool_approval_check(ctx, meta, params_json, detail);
+    }
+
+    /* 临时覆盖审批主体：保存原 agent_id（ctx->config.agent_id 指向 ctx->agent_id
+     * 缓冲区），检查完成后恢复。tool_d 为单线程事件循环，且审批检查不阻塞，
+     * 此处无并发竞争；仍以保存/恢复保证调用者视角状态一致。 */
+    const char *saved_agent = ctx->config.agent_id;
+    ctx->config.agent_id = agent_id;
+    int ret = tool_approval_check(ctx, meta, params_json, detail);
+    ctx->config.agent_id = saved_agent;
+    return ret;
 }

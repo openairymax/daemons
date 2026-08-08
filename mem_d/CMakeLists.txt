@@ -22,9 +22,12 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 # ==================== Memory 服务静态库 ====================
 # 提取 service/mem_svc_adapter 为独立静态库，供 mem_d 可执行文件与单元测试共用，
 # 消除桩函数依赖。排除 main.c（含 main()）。
+# vector.c 提供自研 TF-IDF 向量检索；emb_client.c 提供可选 embedding 后端（AIRY_HAS_CURL）
 set(MEM_SERVICE_SOURCES
     src/service.c
     src/mem_svc_adapter.c
+    src/vector.c
+    src/emb_client.c
 )
 
 add_library(airy_mem_service STATIC ${MEM_SERVICE_SOURCES})
@@ -79,6 +82,18 @@ if(AIRY_HAS_CJSON)
 endif()
 if(AIRY_HAS_YAML AND YAML_FOUND AND YAML_LIBRARIES)
     target_link_libraries(airy_mem_service PUBLIC ${YAML_LIBRARIES})
+endif()
+
+# 可选 embedding 后端：libcurl（AIRY_HAS_CURL 由 dependencies.cmake 定义）
+if(AIRY_HAS_CURL)
+    if(CURL_FOUND)
+        target_link_libraries(airy_mem_service PUBLIC CURL::libcurl)
+    elseif(LIBCURL_FOUND)
+        target_link_libraries(airy_mem_service PUBLIC ${LIBCURL_LIBRARIES})
+        target_include_directories(airy_mem_service PUBLIC ${LIBCURL_INCLUDE_DIRS})
+    else()
+        message(WARNING "AIRY_HAS_CURL defined but CURL target not found, embedding backend disabled")
+    endif()
 endif()
 
 if(UNIX)

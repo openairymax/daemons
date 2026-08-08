@@ -58,7 +58,7 @@ static void test_executor_run(void)
     meta.timeout_sec = 5;
 
     tool_result_t *result = NULL;
-    int ret = tool_executor_run(exec, &meta, "hello", &result);
+    int ret = tool_executor_run(exec, &meta, "hello", NULL, &result);
     if (ret == 0 && result != NULL) {
         if (result->output)
             printf("    Output: %s\n", result->output);
@@ -91,7 +91,7 @@ static void test_executor_run_async(void)
     meta.timeout_sec = 5;
 
     tool_result_t *result = NULL;
-    int ret = tool_executor_run_async(exec, &meta, "hello", NULL, NULL, &result);
+    int ret = tool_executor_run_async(exec, &meta, "hello", NULL, NULL, NULL, &result);
     if (ret == 0 && result != NULL) {
         tool_result_free(result);
     } else {

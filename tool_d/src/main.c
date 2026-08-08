@@ -72,6 +72,9 @@ static void handle_list(int id, airy_sock_t fd);
 static void handle_get(cJSON *params, int id, airy_sock_t fd);
 static void handle_execute(cJSON *params, int id, airy_sock_t fd);
 static void handle_health_check(int id, airy_sock_t fd);
+/* P0 交互式审批：tool.pending / tool.approve */
+static void handle_pending(int id, airy_sock_t fd);
+static void handle_approve(cJSON *params, int id, airy_sock_t fd);
 
 static void on_register_method(cJSON *params, int id, void *user_data)
 {
@@ -97,6 +100,18 @@ static void on_execute_method(cJSON *params, int id, void *user_data)
 static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_health_check(id, *(airy_sock_t *)user_data);
+}
+
+/* P0 交互式审批：tool.pending（无参数，列出 pending 请求） */
+static void on_pending_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+{
+    handle_pending(id, *(airy_sock_t *)user_data);
+}
+
+/* P0 交互式审批：tool.approve（request_id + decision 决议） */
+static void on_approve_method(cJSON *params, int id, void *user_data)
+{
+    handle_approve(params, id, *(airy_sock_t *)user_data);
 }
 
 /* L2 标准方法 tool.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
@@ -246,6 +261,9 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *tid = get_string_field(params, "tool_id", NULL);
     cJSON *jparams = jsonrpc_get_object_param(params, "params");
+    /* P0 交互式审批：可选透传调用方 agent_id（如 agent 子进程的 coding_v1），
+     * 使 ACL 按真实主体判定；未传时回退 "tool_d" 默认（既有行为不变）。 */
+    const char *agent_id = get_string_field(params, "agent_id", NULL);
 
     if (!tid || !jparams) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
@@ -259,14 +277,21 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    tool_execute_request_t req = {.tool_id = tid, .params_json = params_json, .stream = 0};
+    tool_execute_request_t req = {.tool_id = tid, .params_json = params_json, .stream = 0,
+                                  .agent_id = agent_id};
 
     tool_result_t *res = NULL;
     int ret = tool_service_execute(g_service, &req, &res);
     AIRY_FREE((void *)params_json);
 
     if (ret != AIRY_SUCCESS || !res) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Execution failed", id);
+        /* 优先透传 executor 的错误描述（如交互审批 deny/超时的
+         * "User denied tool execution"），否则回退通用信息。 */
+        const char *emsg = (res && res->error) ? res->error : "Execution failed";
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, emsg, id);
+        if (res) {
+            tool_result_free(res);
+        }
         SVC_LOG_ERROR("Tool execution failed: %s (error=%d)", tid, ret);
         return;
     }
@@ -293,6 +318,58 @@ static void handle_health_check(int id, airy_sock_t client_fd)
     cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
 
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+/* P0 交互式审批：tool.pending — 列出所有 pending 审批请求 */
+static void handle_pending(int id, airy_sock_t client_fd)
+{
+    if (!g_service) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Tool service not ready", id);
+        return;
+    }
+    char *pending_json = tool_service_interactive_pending_list(g_service);
+    cJSON *arr = pending_json ? cJSON_Parse(pending_json) : NULL;
+    AIRY_FREE(pending_json);
+    if (!arr) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
+                           "Failed to list pending approvals", id);
+        return;
+    }
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddItemToObject(result, "pending", arr);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+/* P0 交互式审批：tool.approve — 决议一个 pending 审批请求 */
+static void handle_approve(cJSON *params, int id, airy_sock_t client_fd)
+{
+    if (!g_service) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Tool service not ready", id);
+        return;
+    }
+    const char *request_id = get_string_field(params, "request_id", NULL);
+    const char *decision = get_string_field(params, "decision", NULL);
+    if (!request_id || !decision) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           "request_id and decision required", id);
+        return;
+    }
+    int ret = tool_service_interactive_resolve(g_service, request_id, decision);
+    if (ret == 0) {
+        cJSON *result = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result, "resolved", true);
+        cJSON_AddStringToObject(result, "request_id", request_id);
+        cJSON_AddStringToObject(result, "decision", decision);
+        JSONRPC_SEND_SUCCESS(client_fd, result, id);
+        SVC_LOG_INFO("P0: tool.approve resolved request_id=%s decision=%s", request_id, decision);
+    } else if (ret == AIRY_ERR_NOT_FOUND) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Approval request not found", id);
+    } else if (ret == AIRY_ERR_INVALID_PARAM) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           "Invalid decision (allow/always/deny)", id);
+    } else {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Failed to resolve approval", id);
+    }
 }
 
 /* ==================== 配置加载 ==================== */
@@ -449,6 +526,10 @@ int main(int argc, char **argv)
     ev_config.use_jsonrpc = true;
     ev_config.on_client = daemon_on_client_tool_d;
     ev_config.service_ctx = NULL;
+    /* P0 交互式审批：客户端请求分派到线程池并发处理。
+     * 否则 execute 在阻塞等待 tool.approve 决议期间会卡住事件循环线程，
+     * 导致 pending/approve 请求无法被处理。 */
+    ev_config.concurrent_clients = true;
 
     const char *sock_addr = g_config.use_tcp ? g_config.tcp_host : g_config.socket_path;
     int ret = daemon_init_event_driver("tool_d", "tool", sock_addr,
@@ -478,7 +559,10 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_tool_d, "shutdown", on_shutdown_method_tool_d, NULL);
     /* L2 协议标准方法 tool.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
     method_dispatcher_register(g_dispatcher_tool_d, "get_stats", on_get_stats_method, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (tool.* namespace)", 9);
+    /* P0 交互式审批：tool.pending / tool.approve（Claude Code 风格 permission prompt） */
+    method_dispatcher_register(g_dispatcher_tool_d, "pending", on_pending_method, NULL);
+    method_dispatcher_register(g_dispatcher_tool_d, "approve", on_approve_method, NULL);
+    SVC_LOG_INFO("Registered %d RPC methods (tool.* namespace)", 11);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_tool_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
