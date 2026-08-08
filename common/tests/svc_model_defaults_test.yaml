@@ -1,0 +1,3 @@
+providers:
+  - name: "openai"
+    models: ["gpt-4"]
