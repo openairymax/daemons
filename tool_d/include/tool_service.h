@@ -53,6 +53,7 @@ typedef struct {
     const char *tool_id;     /* 工具ID */
     const char *params_json; /* 参数 JSON 字符串 */
     int stream;              /* 是否流式输出 */
+    const char *agent_id;    /* 调用方 Agent ID（NULL 回退 "tool_d" 默认） */
     void *user_data;         /* 透传用户数据 */
 } tool_execute_request_t;
 
@@ -110,6 +111,27 @@ void tool_result_free(tool_result_t *res);
  * exec_fail（失败次数）、exec_ms_total（累计耗时 ms）、avg_exec_ms。
  */
 char *tool_service_get_stats(tool_service_t *svc);
+
+/* ---------- P0 交互式审批接口 ---------- */
+
+/**
+ * @brief 列出所有 pending 审批请求（JSON 数组字符串）
+ * @param svc 工具服务实例
+ * @return JSON 数组字符串（AIRY_MALLOC，调用者 AIRY_FREE），失败返回 NULL
+ *
+ * 每个元素: {request_id, tool, agent_id, params, created_at}
+ */
+char *tool_service_interactive_pending_list(tool_service_t *svc);
+
+/**
+ * @brief 按 request_id 决议一个 pending 审批请求
+ * @param svc 工具服务实例
+ * @param request_id 请求 ID
+ * @param decision 决议："allow" / "always" / "deny"
+ * @return 0 成功；未找到 AIRY_ERR_NOT_FOUND；参数非法 AIRY_ERR_INVALID_PARAM
+ */
+int tool_service_interactive_resolve(tool_service_t *svc, const char *request_id,
+                                     const char *decision);
 
 #ifdef __cplusplus
 }

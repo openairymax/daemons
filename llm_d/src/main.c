@@ -539,10 +539,62 @@ typedef struct {
     airy_sock_t fd;
 } llm_stream_ctx_t;
 
+#ifndef _WIN32
+#include <poll.h>
+#include <errno.h>
+#include <unistd.h>
+#endif
+
+/**
+ * @brief 阻塞式完整发送（流式专用）
+ *
+ * llm_d 流式回调由 curl 写回调驱动：LLM 推送节奏可能快于对端（gateway SSE
+ * 拉取）消费速度。airy_sock_send 使用 MSG_DONTWAIT，缓冲满时返回 EAGAIN，
+ * 导致 curl 写回调失败 → STREAM-FAIL 且流中断。
+ *
+ * 此处改为阻塞式：send 循环 + poll(POLLOUT) 等待可写，保证增量块完整送达
+ * 对端后再返回。对端关闭（EPIPE/ECONNRESET）时静默放弃，不触发流失败。
+ */
+static void llm_stream_send_all(airy_sock_t fd, const char *buf, size_t len)
+{
+    size_t off = 0;
+    while (off < len) {
+#ifdef _WIN32
+        int sent = send(fd, buf + off, (int)(len - off), 0);
+#else
+        ssize_t sent = send(fd, buf + off, len - off, MSG_NOSIGNAL);
+#endif
+        if (sent > 0) {
+            off += (size_t)sent;
+            continue;
+        }
+        if (sent < 0) {
+#ifdef _WIN32
+            int e = WSAGetLastError();
+            if (e != WSAEWOULDBLOCK && e != WSAEINTR)
+                break;
+#else
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                /* 等待可写（1s 超时），超时则放弃本次块 */
+                struct pollfd pfd = {.fd = (int)fd, .events = POLLOUT};
+                if (poll(&pfd, 1, 1000) <= 0)
+                    break;
+                continue;
+            }
+            if (errno == EINTR)
+                continue;
+            break; /* EPIPE/ECONNRESET 等：对端关闭，放弃 */
+#endif
+        } else {
+            break; /* send 返回 0：异常，放弃 */
+        }
+    }
+}
+
 static void llm_stream_callback(const char *chunk, void *user_data)
 {
     llm_stream_ctx_t *sctx = (llm_stream_ctx_t *)user_data;
-    airy_sock_send(sctx->fd, chunk, strlen(chunk));
+    llm_stream_send_all(sctx->fd, chunk, strlen(chunk));
 }
 
 static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd)

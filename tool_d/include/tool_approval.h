@@ -110,6 +110,24 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
                         const char *params_json, tool_approval_detail_t *detail);
 
 /**
+ * @brief C-L05: 以指定 Agent 身份审批工具执行请求
+ *
+ * 与 tool_approval_check 等价，但权限检查与审计以传入的 agent_id 为
+ * 主体（而非审批上下文默认 agent）。用于按请求透传真实 Agent 身份，
+ * 使未授权的工具调用进入交互式审批流程。
+ *
+ * @param ctx 审批上下文
+ * @param agent_id 本次请求的 Agent ID（NULL/空串时回退上下文默认）
+ * @param meta 工具元数据
+ * @param params_json 原始参数 JSON
+ * @param detail 输出审批详情
+ * @return 0 成功（批准），非0 拒绝
+ */
+int tool_approval_check_for_agent(tool_approval_ctx_t *ctx, const char *agent_id,
+                                  const tool_metadata_t *meta, const char *params_json,
+                                  tool_approval_detail_t *detail);
+
+/**
  * @brief 仅执行参数净化（不检查权限）
  *
  * @param ctx 审批上下文
@@ -152,6 +170,16 @@ void tool_approval_get_stats(tool_approval_ctx_t *ctx, uint64_t *out_total_check
  */
 void tool_approval_set_safety_guard_bridge(tool_approval_ctx_t *ctx,
                                            safety_guard_bridge_t *bridge);
+
+/**
+ * @brief 获取审批上下文的 Agent ID
+ *
+ * @param ctx 审批上下文
+ * @return Agent ID 字符串指针（ctx 生命周期内有效），ctx 为 NULL 返回 NULL
+ *
+ * @ownership ctx: BORROW; return: BORROW
+ */
+const char *tool_approval_get_agent_id(const tool_approval_ctx_t *ctx);
 
 #ifdef __cplusplus
 }

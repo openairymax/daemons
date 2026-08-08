@@ -518,11 +518,21 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
     }
 
     if (strcmp(method, "tools/list") == 0) {
-        *response_json = build_tools_list_json(server);
-        if (!*response_json) {
+        /* MCP 规范：tools/list 响应须为 JSON-RPC result 包装
+         * {"jsonrpc","id","result":{"tools":[...]}}，保证外部标准客户端可解析。 */
+        char *inner = build_tools_list_json(server);
+        if (!inner) {
             server->error_count++;
             return AIRY_ERR_OUT_OF_MEMORY;
         }
+        const char *resp_fmt = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}";
+        size_t rlen = snprintf(NULL, 0, resp_fmt, rid, inner);
+        char *buf = (char *)AIRY_MALLOC(rlen + 1);
+        if (buf) {
+            snprintf(buf, rlen + 1, resp_fmt, rid, inner);
+        }
+        AIRY_FREE(inner);
+        *response_json = buf;
         return 0;
     }
 
@@ -581,11 +591,20 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
     }
 
     if (strcmp(method, "resources/list") == 0) {
-        *response_json = build_resources_list_json(server);
-        if (!*response_json) {
+        /* 同 tools/list：补 JSON-RPC result 包装，保证标准客户端可解析 */
+        char *inner = build_resources_list_json(server);
+        if (!inner) {
             server->error_count++;
             return AIRY_ERR_OUT_OF_MEMORY;
         }
+        const char *resp_fmt = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}";
+        size_t rlen = snprintf(NULL, 0, resp_fmt, rid, inner);
+        char *buf = (char *)AIRY_MALLOC(rlen + 1);
+        if (buf) {
+            snprintf(buf, rlen + 1, resp_fmt, rid, inner);
+        }
+        AIRY_FREE(inner);
+        *response_json = buf;
         return 0;
     }
 

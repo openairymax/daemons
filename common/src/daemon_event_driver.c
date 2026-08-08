@@ -22,6 +22,7 @@ struct daemon_event_driver {
     daemon_on_timer_cb on_timer;
     void *service_ctx;
     bool use_jsonrpc;
+    bool concurrent_clients;
     int health_check_interval_sec;
     uint64_t health_timer_id;
 };
@@ -29,6 +30,29 @@ struct daemon_event_driver {
 static void socket_close_wrapper(void *arg)
 {
     airy_sock_close((airy_sock_t)(uintptr_t)arg);
+}
+
+/* 并发客户端处理任务：封装 on_client 回调 + service_ctx + client_fd，
+ * 由线程池 worker 线程执行，避免阻塞事件循环线程（交互审批需要）。 */
+typedef struct on_client_task {
+    daemon_on_client_cb cb;
+    void *service_ctx;
+    airy_sock_t client_fd;
+} on_client_task_t;
+
+static void on_client_task_runner(void *arg)
+{
+    on_client_task_t *task = (on_client_task_t *)arg;
+    if (!task) {
+        return;
+    }
+    daemon_on_client_cb cb = task->cb;
+    void *ctx = task->service_ctx;
+    airy_sock_t fd = task->client_fd;
+    AIRY_FREE(task);
+    if (cb) {
+        cb(ctx, fd);
+    }
 }
 
 static int on_server_fd_event(int fd, uint32_t events, void *user_data)
@@ -54,7 +78,27 @@ static int on_server_fd_event(int fd, uint32_t events, void *user_data)
 
         SVC_LOG_INFO("C-L02: EVENT-DRIVER: CLIENT-ACCEPT fd=%d", (int)(uintptr_t)client_fd);
 
-        if (driver->on_client) {
+        if (driver->concurrent_clients && driver->on_client && driver->pool) {
+            /* 并发模式：将客户端请求分派到线程池，事件循环线程立即返回以继续
+             * accept/处理其他连接。on_client_task_runner 负责在 worker 线程执行
+             * on_client 并在完成后由 daemon_handle_client 关闭 fd。 */
+            on_client_task_t *task = (on_client_task_t *)AIRY_CALLOC(1, sizeof(on_client_task_t));
+            if (task) {
+                task->cb = driver->on_client;
+                task->service_ctx = driver->service_ctx;
+                task->client_fd = client_fd;
+                if (thread_pool_submit(driver->pool, on_client_task_runner, task) != 0) {
+                    SVC_LOG_ERROR("C-L02: EVENT-DRIVER: CLIENT-ERROR pool submit failed fd=%d",
+                                  (int)(uintptr_t)client_fd);
+                    AIRY_FREE(task);
+                    airy_sock_close(client_fd);
+                }
+            } else {
+                SVC_LOG_ERROR("C-L02: EVENT-DRIVER: CLIENT-ERROR alloc task failed fd=%d",
+                              (int)(uintptr_t)client_fd);
+                airy_sock_close(client_fd);
+            }
+        } else if (driver->on_client) {
             driver->on_client(driver->service_ctx, client_fd);
         } else if (driver->pool) {
             thread_pool_submit(driver->pool, socket_close_wrapper, (void *)(uintptr_t)client_fd);
@@ -130,6 +174,7 @@ daemon_event_driver_t *daemon_event_driver_create(const daemon_event_config_t *c
     driver->on_timer = config->on_timer;
     driver->service_ctx = config->service_ctx;
     driver->use_jsonrpc = config->use_jsonrpc;
+    driver->concurrent_clients = config->concurrent_clients;
     driver->health_check_interval_sec =
         config->health_check_interval_sec > 0 ? config->health_check_interval_sec : 30;
 

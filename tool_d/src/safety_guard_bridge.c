@@ -194,12 +194,18 @@ static void build_safety_event(safety_event_t *event, const tool_metadata_t *met
 
 /* ==================== 守卫检查实现 ==================== */
 
-int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
-                              const tool_metadata_t *meta,
-                              const char *params_json,
-                              safety_guard_bridge_result_t *result)
+/* 内部实现：以指定 agent_id 执行完整守卫链。
+ * 权限守卫（SAFETY_GUARD_PERMISSION）与审计守卫使用传入的 agent_id，
+ * 其余守卫与 agent 无关。 */
+static int bridge_check_impl(safety_guard_bridge_t *bridge, const char *agent_id,
+                             const tool_metadata_t *meta, const char *params_json,
+                             safety_guard_bridge_result_t *result)
 {
     if (!bridge || !meta) return AIRY_ERR_INVALID_PARAM;
+
+    if (!agent_id || !agent_id[0]) {
+        agent_id = bridge->agent_id;
+    }
 
     /* 初始化结果 */
     if (result) {
@@ -209,7 +215,6 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
     bridge->total_checks++;
 
     const char *tool_name = meta->name ? meta->name : "unknown";
-    const char *agent_id = bridge->agent_id;
     int guard_chain_length = 0;
     int guards_executed = 0;
 
@@ -400,6 +405,23 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
     }
 
     return 0;
+}
+
+int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
+                              const tool_metadata_t *meta,
+                              const char *params_json,
+                              safety_guard_bridge_result_t *result)
+{
+    return bridge_check_impl(bridge, NULL, meta, params_json, result);
+}
+
+int safety_guard_bridge_check_for_agent(safety_guard_bridge_t *bridge,
+                                        const char *agent_id,
+                                        const tool_metadata_t *meta,
+                                        const char *params_json,
+                                        safety_guard_bridge_result_t *result)
+{
+    return bridge_check_impl(bridge, agent_id, meta, params_json, result);
 }
 
 /* ==================== 单一守卫检查 ==================== */

@@ -50,6 +50,8 @@ add_subdirectory(agent_d)
 add_subdirectory(a2a_d)
 # 双思考系统：CoreLoopThree 认知引擎接入（think.* 命名空间）
 add_subdirectory(think_d)
+# P2-5: cupolas 安全穹顶独立 daemon（cupolas.* 命名空间）
+add_subdirectory(cupolas_d)
 
 # 全局测试支持
 if(BUILD_TESTS)
@@ -119,6 +121,7 @@ airy_print_info("  - mem_d     : ${CMAKE_CURRENT_SOURCE_DIR}/mem_d")
 airy_print_info("  - agent_d   : ${CMAKE_CURRENT_SOURCE_DIR}/agent_d")
 airy_print_info("  - a2a_d     : ${CMAKE_CURRENT_SOURCE_DIR}/a2a_d")
 airy_print_info("  - think_d   : ${CMAKE_CURRENT_SOURCE_DIR}/think_d (双思考系统 Thinkdual)")
+airy_print_info("  - cupolas_d : ${CMAKE_CURRENT_SOURCE_DIR}/cupolas_d (安全穹顶独立服务)")
 airy_print_info("")
 
 # 安装支持
@@ -177,12 +180,18 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/a2a_d/include/
     FILES_MATCHING PATTERN "*.h"
 )
 
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cupolas_d/include/
+    DESTINATION include/agentrt
+    FILES_MATCHING PATTERN "*.h"
+)
+
 # 导出项目配置
 if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
    AND TARGET monit_d AND TARGET sched_d AND TARGET market_d
    AND TARGET channel_d AND TARGET info_d AND TARGET notify_d
    AND TARGET observe_d AND TARGET hook_d AND TARGET plugin_d
-   AND TARGET mem_d AND TARGET agent_d AND TARGET a2a_d)
+   AND TARGET mem_d AND TARGET agent_d AND TARGET a2a_d
+   AND TARGET cupolas_d)
     # 注意：仅导出 15 个 daemon 可执行文件（含 Phase 3 新增 mem_d/agent_d/a2a_d）。
     # svc_common 是 STATIC 库且 PUBLIC 链接 airy_common/airy_compile_defs/
     # cupolas/airy_platform_libs，若将其加入 export(TARGETS) 列表，
@@ -195,6 +204,7 @@ if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
                   info_d notify_d observe_d
                   hook_d plugin_d
                   mem_d agent_d a2a_d
+                  cupolas_d
         FILE "${CMAKE_CURRENT_BINARY_DIR}/agentrt-daemon-targets.cmake"
     )
     export(PACKAGE agentrt-daemon)
@@ -208,6 +218,6 @@ install(TARGETS gateway_d llm_d tool_d
                 monit_d sched_d market_d channel_d
                 info_d notify_d observe_d
                 hook_d plugin_d
-                mem_d agent_d a2a_d think_d
+                mem_d agent_d a2a_d think_d cupolas_d
     RUNTIME DESTINATION bin
 )

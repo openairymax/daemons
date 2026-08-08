@@ -32,11 +32,19 @@ static void test_cache_key_generation(void)
     const char *tool_id = "test_tool";
     const char *params = "{\"arg\": \"value\"}";
 
-    char *key = tool_cache_key(tool_id, params);
+    char *key = tool_cache_key(tool_id, params, NULL);
     assert(key != NULL);
     assert(strstr(key, tool_id) != NULL);
 
+    /* 不同 agent 生成不同缓存键（SEC：防止跨主体缓存绕过审批） */
+    char *key_a = tool_cache_key(tool_id, params, "agent_a");
+    char *key_b = tool_cache_key(tool_id, params, "agent_b");
+    assert(key_a != NULL && key_b != NULL);
+    assert(strcmp(key_a, key_b) != 0);
+
     free(key);
+    free(key_a);
+    free(key_b);
 
     printf("    PASSED\n");
 }
@@ -45,13 +53,13 @@ static void test_cache_key_null_inputs(void)
 {
     printf("  test_cache_key_null_inputs...\n");
 
-    char *key __attribute__((unused)) = tool_cache_key(NULL, "params");
+    char *key __attribute__((unused)) = tool_cache_key(NULL, "params", NULL);
     assert(key == NULL);
 
-    key = tool_cache_key("tool_id", NULL);
+    key = tool_cache_key("tool_id", NULL, NULL);
     assert(key == NULL);
 
-    key = tool_cache_key(NULL, NULL);
+    key = tool_cache_key(NULL, NULL, NULL);
     assert(key == NULL);
 
     printf("    PASSED\n");
