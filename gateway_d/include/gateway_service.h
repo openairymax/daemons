@@ -168,6 +168,32 @@ AIRY_API airy_err_t gateway_service_load_config(gateway_service_config_t *config
  */
 AIRY_API void gateway_service_get_default_config(gateway_service_config_t *config);
 
+/* ==================== 业务处理 ==================== */
+
+/**
+ * @brief 网关业务请求处理器（内部签名，与 http_gateway 底层 handler 对齐）
+ *
+ * @param request 标准 JSON-RPC 请求字符串（UTF-8，由多协议处理器标准化）
+ * @param user_data 注册时传入的用户数据
+ * @return JSON 响应字符串（AIRY_MALLOC 分配，调用方负责释放），失败返回 NULL
+ */
+typedef char *(*gateway_service_handler_t)(void *request, void *user_data);
+
+/**
+ * @brief 注册网关业务请求处理器
+ *
+ * 未注册时 HTTP JSON-RPC 请求返回 "Custom handler failed"（handler 为 NULL）。
+ * 必须在 gateway_service_start() 之前调用才生效。
+ *
+ * @param[in] service 服务句柄
+ * @param[in] handler 业务处理器
+ * @param[in] user_data 用户数据（随 handler 透传）
+ * @return AIRY_SUCCESS 成功
+ */
+AIRY_API airy_err_t gateway_service_set_handler(gateway_service_t service,
+                                                gateway_service_handler_t handler,
+                                                void *user_data);
+
 #ifdef __cplusplus
 }
 #endif

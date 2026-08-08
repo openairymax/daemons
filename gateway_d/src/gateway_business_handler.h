@@ -53,6 +53,24 @@ gateway_business_ctx_t *gateway_business_ctx_create(void);
 void gateway_business_ctx_destroy(gateway_business_ctx_t *ctx);
 
 /**
+ * @brief L2 标准方法 <ns>.shutdown 回调类型（02-l2-service-protocol.md §6.1）
+ *
+ * gateway_business_handle 收到 "shutdown" 方法时调用，由宿主（gateway_d main）
+ * 负责触发真实优雅退出（如原子置位 g_running 让主循环退出）。
+ */
+typedef void (*gateway_shutdown_fn_t)(void *user_data);
+
+/**
+ * @brief 设置 shutdown 回调（L2 <ns>.shutdown 支持）
+ * @param ctx 业务处理器上下文
+ * @param cb  shutdown 回调（可传 NULL 表示不支持）
+ * @param user_data 回调用户数据（如 &g_running）
+ * @return 0 成功，非 0 失败
+ */
+int gateway_business_ctx_set_shutdown_cb(gateway_business_ctx_t *ctx,
+                                         gateway_shutdown_fn_t cb, void *user_data);
+
+/**
  * @brief 网关业务请求处理器（gateway_service_handler_t 签名）
  *
  * 输入标准 JSON-RPC 请求字符串，支持：

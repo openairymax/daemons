@@ -23,6 +23,8 @@ typedef struct provider_ctx provider_ctx_t;
 /* 基础上下文（各提供商共享） */
 typedef struct {
     char api_key[256];
+    char api_key_env[128]; /* 记录 model.yaml api_key_env 名（如 DEEPSEEK_API_KEY），
+                             * 用于请求时从 secrets.env 热加载（启动后填 key 无需重启） */
     char api_base[512];
     char organization[128];
     double timeout_sec;
@@ -63,6 +65,10 @@ typedef struct {
 void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, const char *api_base,
                         const char *organization, double timeout_sec, int max_retries,
                         const char *default_base);
+
+/* 热加载：每次请求前调用，若当前 api_key 为空则从 $AIRY_HOME/config/secrets.env
+ * 读取 base_ctx->api_key_env 对应的值填充（启动后填 key 无需重启）。 */
+void provider_refresh_api_key(provider_base_ctx_t *base_ctx);
 
 int provider_http_post(const char *url, struct curl_slist *headers, const char *body,
                        double timeout_sec, int max_retries, provider_http_resp_t **out_response,

@@ -228,13 +228,12 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
 
         char api_key_buf[512] = {0};
         if (cJSON_IsString(pkey_env) && pkey_env->valuestring[0]) {
-            const char *env_val = getenv(pkey_env->valuestring);
-            if (env_val && env_val[0]) {
-AIRY_STRNCPY_TERM(api_key_buf, env_val, sizeof(api_key_buf));
-                (api_key_buf)[sizeof(api_key_buf) - 1] = '\0';
-            } else {
-                SVC_LOG_WARN("Env var '%s' not set for provider '%s'", pkey_env->valuestring,
-                             name_str);
+            /* 保留 "env:NAME" 形式：provider_base_init 会提取 env 名，
+             * 供请求时 secrets.env 热加载（启动后填 key 无需重启） */
+            size_t env_len = strlen(pkey_env->valuestring);
+            if (4 + env_len < sizeof(api_key_buf)) {
+                __builtin_memcpy(api_key_buf, "env:", 4);
+                __builtin_memcpy(api_key_buf + 4, pkey_env->valuestring, env_len + 1);
             }
         } else if (cJSON_IsString(pkey) && pkey->valuestring[0]) {
 AIRY_STRNCPY_TERM(api_key_buf, pkey->valuestring, sizeof(api_key_buf));

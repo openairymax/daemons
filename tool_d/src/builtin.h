@@ -16,7 +16,7 @@ extern "C" {
 /* 判断 executable 是否为内置工具标记（"builtin:xxx"） */
 int tool_builtin_is_builtin(const char *executable);
 
-/* 执行内置工具：tool_id ∈ {fs_read, fs_write, fs_list, shell_run}
+/* 执行内置工具：tool_id ∈ {fs_read, fs_write, fs_list, shell_run, web_fetch}
  * params_json 为 OpenAI tool_call arguments（JSON 对象字符串）；
  * 结果写入 res（output/error/exit_code/success）。 */
 int tool_builtin_run(const char *tool_id, const char *params_json, tool_result_t *res);

@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2026 SPHARX.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+ * Copyright (C) 2026 SPHARX Ltd. All Rights Reserved.
  *
  * @file main.c
  * @brief LLM 服务守护进程主入口（遵循 daemon 模块统一规范）
@@ -23,10 +23,13 @@
  * 故此处仅保留业务逻辑直接依赖的头文件。 */
 #include "llm_service.h"
 #include "response.h"
+#include "token_counter.h"
 #include "daemon_main.h"
 #include "platform.h"
 
 #include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 /* ==================== 配置常量 ==================== */
 
@@ -38,11 +41,18 @@
 #define MAX_THREADS 8
 #define MAX_MESSAGES_PER_REQUEST 128
 
+/* LLM 服务调用重试策略：最多重试 3 次，指数退避（100ms 起） */
+#define LLM_MAX_RETRIES 3
+#define LLM_BASE_DELAY_MS 100
+
 /* P0.18.1: 生成公共全局变量（g_running_llm_d 等）、信号处理（signal_handler_llm_d、
  * svc_log_toggle_handler_llm_d）、print_usage_llm_d、daemon_handle_client_llm_d、
  * daemon_on_client_llm_d 等样板，消除手工重复代码。 */
 DAEMON_DECLARE_COMMON(llm_d, llm, DEFAULT_SOCKET_PATH_UNIX,
                       DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+
+/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
+DAEMON_DECLARE_SHUTDOWN_METHOD(llm_d)
 
 /* ==================== 全局状态 ==================== */
 
@@ -68,6 +78,7 @@ typedef struct {
     char *response_buffer;
     size_t response_size;
     size_t response_capacity;
+    char *tools_json; /* OpenAI tools 数组 JSON（由 parse_params 分配，cleanup 释放） */
 } request_context_t;
 
 /**
@@ -103,8 +114,11 @@ static void request_context_destroy(request_context_t *ctx)
     for (size_t i = 0; i < ctx->message_count; i++) {
         AIRY_FREE((void *)ctx->messages[i].role);
         AIRY_FREE((void *)ctx->messages[i].content);
+        AIRY_FREE((void *)ctx->messages[i].tool_call_id);
+        AIRY_FREE((void *)ctx->messages[i].tool_calls_json);
     }
 
+    AIRY_FREE(ctx->tools_json);
     AIRY_FREE(ctx->response_buffer);
     AIRY_FREE(ctx);
 }
@@ -127,8 +141,16 @@ static void parse_params_cleanup(request_context_t *ctx, llm_request_config_t *c
     for (size_t i = 0; i < ctx->message_count; i++) {
         AIRY_FREE((void *)ctx->messages[i].role);
         AIRY_FREE((void *)ctx->messages[i].content);
+        AIRY_FREE((void *)ctx->messages[i].tool_call_id);
+        AIRY_FREE((void *)ctx->messages[i].tool_calls_json);
+        ctx->messages[i].role = NULL;
+        ctx->messages[i].content = NULL;
+        ctx->messages[i].tool_call_id = NULL;
+        ctx->messages[i].tool_calls_json = NULL;
     }
     ctx->message_count = 0;
+    AIRY_FREE(ctx->tools_json);
+    ctx->tools_json = NULL;
 }
 
 static int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cfg)
@@ -136,10 +158,19 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
     __builtin_memset(cfg, 0, sizeof(llm_request_config_t));
 
     cJSON *model = cJSON_GetObjectItem(params, "model");
-    if (!cJSON_IsString(model)) {
-        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "model parameter is not a string");
+    if (cJSON_IsString(model)) {
+        cfg->model = AIRY_STRDUP(model->valuestring);
+    } else {
+        /* A2-2: model 缺省时回落 global.default_model（此前 llm_d 无缺省概念，
+         * 空 model 一律报 INVALID_PARAM，导致客户端必须显式指定模型） */
+        const char *def = g_service ? llm_service_default_model(g_service) : NULL;
+        if (def) {
+            cfg->model = AIRY_STRDUP(def);
+        } else {
+            AIRY_ERROR(AIRY_ERR_INVALID_PARAM,
+                       "model parameter is not a string and no default model configured");
+        }
     }
-    cfg->model = AIRY_STRDUP(model->valuestring);
     if (!cfg->model) {
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate model string");
     }
@@ -173,6 +204,28 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
                 ctx->message_count = i;
                 parse_params_cleanup(ctx, cfg);
                 AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate message role or content");
+            }
+
+            /* Function calling：role="tool" 消息的 tool_call_id（可空） */
+            cJSON *tcid = cJSON_GetObjectItem(item, "tool_call_id");
+            if (cJSON_IsString(tcid) && tcid->valuestring && tcid->valuestring[0]) {
+                ctx->messages[i].tool_call_id = AIRY_STRDUP(tcid->valuestring);
+                if (!ctx->messages[i].tool_call_id) {
+                    ctx->message_count = i + 1;
+                    parse_params_cleanup(ctx, cfg);
+                    AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate tool_call_id");
+                }
+            }
+
+            /* Function calling：role="assistant" 消息的 tool_calls（可空，JSON 数组） */
+            cJSON *tcalls = cJSON_GetObjectItem(item, "tool_calls");
+            if (cJSON_IsArray(tcalls) && cJSON_GetArraySize(tcalls) > 0) {
+                ctx->messages[i].tool_calls_json = cJSON_PrintUnformatted(tcalls);
+                if (!ctx->messages[i].tool_calls_json) {
+                    ctx->message_count = i + 1;
+                    parse_params_cleanup(ctx, cfg);
+                    AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to serialize tool_calls");
+                }
             }
         }
     }
@@ -208,6 +261,17 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
         cfg->frequency_penalty = frequency_penalty->valuedouble;
     }
 
+    /* Function calling：解析 tools 定义（OpenAI tools 数组，可空） */
+    cJSON *tools = cJSON_GetObjectItem(params, "tools");
+    if (cJSON_IsArray(tools) && cJSON_GetArraySize(tools) > 0) {
+        ctx->tools_json = cJSON_PrintUnformatted(tools);
+        if (!ctx->tools_json) {
+            parse_params_cleanup(ctx, cfg);
+            AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to serialize tools");
+        }
+        cfg->tools_json = ctx->tools_json;
+    }
+
     return 0;
 }
 
@@ -216,6 +280,150 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
 /* 前向声明 */
 static char *handle_complete(cJSON *params, int id);
 static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd);
+
+/* A2-3: llm.list_models 处理器——返回 registry 全部模型 + 默认模型 */
+static char *handle_list_models(cJSON *params __attribute__((unused)), int id)
+{
+    if (!g_service)
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Service not ready", id);
+
+    char *json = llm_service_list_models(g_service);
+    if (!json)
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+
+    /* 包装为 JSON-RPC 成功响应 */
+    cJSON *root = cJSON_Parse(json);
+    AIRY_FREE(json);
+    if (!root)
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Invalid list result", id);
+
+    /* 所有权语义：jsonrpc_build_success 通过 cJSON_AddItemToObject 将 root
+     * 挂到响应对象后由 cJSON_Delete 递归释放，此处不可再 Delete（否则 double-free） */
+    return jsonrpc_build_success(root, id);
+}
+
+/* list_models 方法包装器（适配 method_dispatcher 接口） */
+static void on_list_models_method(cJSON *params, int id, void *user_data)
+{
+    char *response = handle_list_models(params, id);
+    if (response) {
+        airy_sock_t client_fd = *(airy_sock_t *)user_data;
+        airy_sock_send(client_fd, response, strlen(response));
+        AIRY_FREE(response);
+    }
+}
+
+/* L2 标准方法 llm.count_tokens / llm.health_check / llm.get_stats */
+
+/* 由模型名推导 token 编码（与 src/token_counter.c 的 encoding_to_model_type 映射一致） */
+static const char *llm_encoding_for_model(const char *model)
+{
+    if (!model || model[0] == '\0')
+        return "cl100k_base";
+    if (strstr(model, "claude"))
+        return "claude";
+    if (strstr(model, "gpt-3.5") || strstr(model, "text-davinci") ||
+        strstr(model, "code-davinci"))
+        return "p50k_base";
+    return "cl100k_base";
+}
+
+/* llm.count_tokens：params {model?, text} → {"model", "text", "tokens", "encoding"} */
+static char *handle_count_tokens(cJSON *params, int id)
+{
+    cJSON *text = cJSON_GetObjectItem(params, "text");
+    if (!cJSON_IsString(text) || !text->valuestring) {
+        return jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "Missing text string", id);
+    }
+
+    const char *model = NULL;
+    cJSON *model_json = cJSON_GetObjectItem(params, "model");
+    if (cJSON_IsString(model_json) && model_json->valuestring)
+        model = model_json->valuestring;
+    else if (g_service)
+        model = llm_service_default_model(g_service);
+
+    const char *encoding = llm_encoding_for_model(model);
+    token_counter_t *counter = token_counter_create(encoding);
+    if (!counter)
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Token counter unavailable", id);
+
+    size_t tokens = token_counter_count(counter, text->valuestring);
+    token_counter_destroy(counter);
+    if (tokens == (size_t)-1)
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Token counting failed", id);
+
+    cJSON *result = cJSON_CreateObject();
+    if (!result)
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+    cJSON_AddStringToObject(result, "model", model ? model : "default");
+    cJSON_AddStringToObject(result, "text", text->valuestring);
+    cJSON_AddNumberToObject(result, "tokens", (double)tokens);
+    cJSON_AddStringToObject(result, "encoding", encoding);
+    return jsonrpc_build_success(result, id);
+}
+
+static void on_count_tokens_method(cJSON *params, int id, void *user_data)
+{
+    char *response = handle_count_tokens(params, id);
+    if (response) {
+        airy_sock_t client_fd = *(airy_sock_t *)user_data;
+        airy_sock_send(client_fd, response, strlen(response));
+        AIRY_FREE(response);
+    }
+}
+
+/* llm.health_check：无副作用健康探针 */
+static char *handle_health_check(cJSON *params __attribute__((unused)), int id)
+{
+    cJSON *result = cJSON_CreateObject();
+    if (!result)
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+    cJSON_AddStringToObject(result, "service", "llm_d");
+    cJSON_AddBoolToObject(result, "healthy", g_service != NULL);
+    cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
+    return jsonrpc_build_success(result, id);
+}
+
+static void on_health_check_method(cJSON *params, int id, void *user_data)
+{
+    char *response = handle_health_check(params, id);
+    if (response) {
+        airy_sock_t client_fd = *(airy_sock_t *)user_data;
+        airy_sock_send(client_fd, response, strlen(response));
+        AIRY_FREE(response);
+    }
+}
+
+/* llm.get_stats：接线服务层 llm_service_stats（JSON 字符串） */
+static char *handle_get_stats(cJSON *params __attribute__((unused)), int id)
+{
+    if (!g_service)
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Service not ready", id);
+
+    char *json = NULL;
+    if (llm_service_stats(g_service, &json) != 0 || !json)
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Get stats failed", id);
+
+    cJSON *root = cJSON_Parse(json);
+    AIRY_FREE(json);
+    if (!root)
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Invalid stats result", id);
+
+    /* 所有权语义：jsonrpc_build_success 通过 cJSON_AddItemToObject 将 root
+     * 挂到响应对象后由 cJSON_Delete 递归释放，此处不可再 Delete */
+    return jsonrpc_build_success(root, id);
+}
+
+static void on_get_stats_method(cJSON *params, int id, void *user_data)
+{
+    char *response = handle_get_stats(params, id);
+    if (response) {
+        airy_sock_t client_fd = *(airy_sock_t *)user_data;
+        airy_sock_send(client_fd, response, strlen(response));
+        AIRY_FREE(response);
+    }
+}
 
 /**
  * @brief complete 方法的包装器（适配 method_dispatcher 接口）
@@ -268,9 +476,6 @@ static char *handle_complete(cJSON *params, int id)
     }
 
     uint64_t start_time = airy_time_ms();
-
-#define LLM_MAX_RETRIES 3
-#define LLM_BASE_DELAY_MS 100
 
     llm_response_t *resp = NULL;
     int ret = -1;
@@ -562,7 +767,14 @@ int main(int argc, char **argv)
     g_dispatcher_llm_d = daemon_event_driver_get_dispatcher(g_event_driver_llm_d);
     method_dispatcher_register(g_dispatcher_llm_d, "complete", on_complete_method, NULL);
     method_dispatcher_register(g_dispatcher_llm_d, "complete_stream", on_complete_stream_method, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods", 2);
+    method_dispatcher_register(g_dispatcher_llm_d, "list_models", on_list_models_method, NULL);
+    /* L2 协议标准方法（02-l2-service-protocol.md：llm.count_tokens / llm.health_check / llm.get_stats） */
+    method_dispatcher_register(g_dispatcher_llm_d, "count_tokens", on_count_tokens_method, NULL);
+    method_dispatcher_register(g_dispatcher_llm_d, "health_check", on_health_check_method, NULL);
+    method_dispatcher_register(g_dispatcher_llm_d, "get_stats", on_get_stats_method, NULL);
+    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+    method_dispatcher_register(g_dispatcher_llm_d, "shutdown", on_shutdown_method_llm_d, NULL);
+    SVC_LOG_INFO("Registered %d RPC methods (llm.* namespace)", 7);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_llm_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");

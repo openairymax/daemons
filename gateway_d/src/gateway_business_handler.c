@@ -43,7 +43,12 @@
 /* ==================== 常量 ==================== */
 
 #define GW_LLM_DEFAULT_MODEL "deepseek-v4-flash" /* 与 model.yaml global.default_model 对齐 */
-#define GW_LLM_DEFAULT_TIMEOUT_MS 30000
+/* LLM 完整响应超时 90s：长思考/多 tool_calls 轮次响应可能超过 30s，
+ * 30s 旧值会导致网关在 LLM 尚未返回时 recv 超时而中断工具链路 */
+#define GW_LLM_DEFAULT_TIMEOUT_MS 90000
+/* think.process 超时 120s：双思考（GCCP probe/confirm + GRAD 多轮四验）
+ * 含多次 LLM 调用，实测单次 15-25s，120s 覆盖最坏情况 */
+#define GW_THINK_TIMEOUT_MS 120000
 #define GW_LLM_MAX_RESP 1048576 /* 1MB 响应上限 */
 #define GW_LLM_DEFAULT_TCP_PORT 8080
 #define GW_SESSION_ID_LEN 64
@@ -75,10 +80,14 @@ struct gateway_business_ctx_s {
     char agent_sock_path[256]; /* POSIX: agent_d Unix socket 路径（agent 编排） */
     char mem_sock_path[256];   /* POSIX: mem_d Unix socket 路径（记忆服务） */
     char sched_sock_path[256]; /* POSIX: sched_d Unix socket 路径（调度服务） */
+    char think_sock_path[256]; /* POSIX: think_d Unix socket 路径（双思考 GCCP+GRAD） */
     char default_model[128]; /* 默认模型（env AIRY_AGENT_MODEL 或内置默认） */
     /* 运行中请求注册表（agent.cancel 支持） */
     airy_mtx_t active_lock;
     gw_active_request_t *active_requests;
+    /* L2 标准方法 <ns>.shutdown 回调（02-l2-service-protocol.md §6.1） */
+    gateway_shutdown_fn_t on_shutdown;      /**< shutdown 回调（由宿主 main 注入） */
+    void *shutdown_user_data;               /**< shutdown 回调用户数据 */
 };
 
 /* ==================== JSON-RPC 错误响应 ==================== */
@@ -256,7 +265,10 @@ static char *llm_call_complete(const gateway_business_ctx_t *ctx, const char *re
 
 /* ==================== tool_d 客户端（工具执行） ==================== */
 
-/* 内置工具 OpenAI tools schema（与 tool_d builtin.c 注册的工具一一对应） */
+/* 内置工具 OpenAI tools schema（与 tool_d builtin.c 注册的工具一一对应）
+ * 注意：所有工具的 required 必须与 tool_d 注册的参数集合一致——tool_d
+ * validator 对所有注册参数一律校验「必须存在」，若 schema 声明可选而 tool_d
+ * 要求必填（如 fs_list 的 path），LLM 按 schema 不传参会导致工具校验失败。 */
 static const char GW_TOOLS_JSON[] =
     "["
     "{\"type\":\"function\",\"function\":{\"name\":\"fs_read\","
@@ -270,15 +282,21 @@ static const char GW_TOOLS_JSON[] =
     ",{\"type\":\"function\",\"function\":{\"name\":\"fs_list\","
     "\"description\":\"List entries of a local directory (JSON array)\","
     "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},"
-    "\"required\":[]}}}"
+    "\"required\":[\"path\"]}}}"
     ",{\"type\":\"function\",\"function\":{\"name\":\"shell_run\","
     "\"description\":\"Execute a shell command and capture its output\","
     "\"parameters\":{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},"
     "\"required\":[\"command\"]}}}"
+    ",{\"type\":\"function\",\"function\":{\"name\":\"web_fetch\","
+    "\"description\":\"Fetch a web page over HTTP(S) and return its body text\","
+    "\"parameters\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},"
+    "\"required\":[\"url\"]}}}"
     "]";
 
 #define GW_MAX_TOOL_LOOPS 8 /* 单次 agent.run 工具循环上限（防失控） */
-#define GW_TOOL_TIMEOUT_MS 30000
+/* 工具执行超时 90s：shell_run 自身超时 60s，30s 的旧值会先于工具完成而触发
+ * recv 超时，导致长命令被网关误判为失败 */
+#define GW_TOOL_TIMEOUT_MS 90000
 
 /* agent 编排超时：spawn 含 Python runner 冷启动（秒级），invoke 含 LLM 往返（可达数十秒） */
 #define GW_AGENT_SPAWN_TIMEOUT_MS 90000
@@ -470,6 +488,74 @@ static char *gw_svc_call(const char *sock_path, const char *method,
     (void)timeout_ms;
     return NULL;
 #endif
+}
+
+/* ==================== think_d 双思考阶段（GCCP+GRAD） ==================== */
+
+/**
+ * @brief 调用 think_d 双思考阶段（think.process：GCCP 目标确认 + GRAD 计划批判）
+ *
+ * 对话主链路接入双思考（用户决策，2026-08-07）：agent.run 无 agent 编排时，
+ * 先经 think_d 运行 GCCP+GRAD 产出收敛 DAG 计划与思考事件，再注入 LLM 请求
+ * 上下文并随响应回传，替代原先 gateway→llm_d 单模型直连（D4 修复）。
+ *
+ * @param ctx 网关上下文
+ * @param prompt 用户输入
+ * @param out_think 双思考结果 JSON（cJSON 对象，调用者 cJSON_Delete）：
+ *        {plan:{...DAG...}, feedback:[...], stats:{...}}
+ * @return 0 成功（*out_think 有效）；非 0 失败（think_d 不可达/超时，降级直连）
+ */
+static int gw_think_process(const gateway_business_ctx_t *ctx, const char *prompt,
+                            cJSON **out_think)
+{
+    *out_think = NULL;
+    if (!ctx || !prompt || !*prompt)
+        return -1;
+
+    /* 构造 think.process 请求参数（prompt 需 JSON 转义） */
+    cJSON *params = cJSON_CreateObject();
+    if (!params)
+        return -1;
+    cJSON *p = cJSON_CreateString(prompt);
+    cJSON_AddItemToObject(params, "prompt", p);
+    char *params_str = cJSON_PrintUnformatted(params);
+    cJSON_Delete(params);
+    if (!params_str)
+        return -1;
+
+    /* think.process 含多次 LLM 调用（GCCP 2 次 + GRAD 2-3 轮），超时放宽到 120s */
+    char *resp = gw_svc_call(ctx->think_sock_path, "process", params_str,
+                             GW_THINK_TIMEOUT_MS);
+    AIRY_FREE(params_str);
+    if (!resp) {
+        LOG_WARN("gateway: think.process failed (think_d unreachable at %s), "
+                 "degrading to direct LLM", ctx->think_sock_path);
+        return -1;
+    }
+
+    cJSON *root = cJSON_Parse(resp);
+    AIRY_FREE(resp);
+    if (!root)
+        return -1;
+    cJSON *err = cJSON_GetObjectItem(root, "error");
+    if (err) {
+        LOG_WARN("gateway: think.process returned error");
+        cJSON_Delete(root);
+        return -1;
+    }
+    cJSON *result = cJSON_GetObjectItem(root, "result");
+    if (!cJSON_IsString(result) || !result->valuestring) {
+        cJSON_Delete(root);
+        return -1;
+    }
+    /* think_d 的 result 是内嵌 JSON 字符串（plan/feedback/stats），二次解析 */
+    cJSON *think = cJSON_Parse(result->valuestring);
+    cJSON_Delete(root);
+    if (!think)
+        return -1;
+    *out_think = think;
+    LOG_INFO("gateway: think.process ok (dual-thinking engaged)");
+    return 0;
 }
 
 /* ==================== 协议层 ACL（R4 fail-closed） ==================== */
@@ -821,6 +907,101 @@ static int gw_agent_run_orchestrate(const gateway_business_ctx_t *ctx,
     return rc;
 }
 
+/* ==================== agent_file → agent spec ==================== */
+
+#define GW_AGENT_FILE_MAX (64 * 1024) /* agent_file 内容上限，防止超大文件拖垮网关 */
+
+/* 在类 YAML 内容中查找顶层 "role:" 键并返回值起始位置（跳过冒号与前导空白）；
+ * 找不到返回 NULL。仅支持最简单的键值形态，复杂 YAML 应改用 JSON。 */
+static const char *yaml_role_value(const char *buf)
+{
+    const char *p = buf;
+    while ((p = strstr(p, "role")) != NULL) {
+        const char *q = p + 4;
+        while (*q == ' ' || *q == '\t')
+            q++;
+        if (*q == ':')
+            return q + 1;
+        p = p + 4;
+    }
+    return NULL;
+}
+
+/*
+ * 从 params.agent_file 解析 agent spec（params.agent 未直接提供时的回退路径）：
+ *   1. JSON 文件（如 {"role":"coding","language":"python"}）→ 整个对象直接作为 spec；
+ *   2. 简单 YAML（role: xxx 行）→ 提取 role 构造 {"role": xxx}；
+ *   3. 其它纯文本 → 截断取前段作为 role。
+ * 返回新分配的 cJSON 对象（调用方负责 cJSON_Delete）；无有效 spec 返回 NULL。
+ *
+ * 设计取舍：编排分支（spawn+invoke）只需 role 即可派生 agent，这里仅解析
+ * role 字段；语言/能力等完整声明属未来扩展，不过度设计。
+ */
+static cJSON *gw_agent_spec_from_agent_file(const cJSON *params)
+{
+    cJSON *af = cJSON_GetObjectItem(params, "agent_file");
+    if (!cJSON_IsString(af) || !af->valuestring || !*af->valuestring)
+        return NULL;
+
+    FILE *f = fopen(af->valuestring, "rb");
+    if (!f) {
+        LOG_WARN("gateway: agent_file unreadable: %s", af->valuestring);
+        return NULL;
+    }
+    char *buf = (char *)AIRY_MALLOC(GW_AGENT_FILE_MAX + 1);
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
+    size_t n = fread(buf, 1, GW_AGENT_FILE_MAX, f);
+    fclose(f);
+    buf[n] = '\0';
+
+    /* 1) JSON 对象：直接透传为 agent spec */
+    cJSON *parsed = cJSON_Parse(buf);
+    if (parsed) {
+        if (cJSON_IsObject(parsed)) {
+            AIRY_FREE(buf);
+            return parsed;
+        }
+        cJSON_Delete(parsed); /* 数组/标量不构成 spec，降级到 role 提取 */
+    }
+
+    /* 2) YAML role 键（优先）或纯文本内容 → 提取 role 值构造 {"role": ...} */
+    const char *src = yaml_role_value(buf);
+    if (!src)
+        src = buf;
+    size_t start = 0;
+    while (src[start] == ' ' || src[start] == '\t')
+        start++;
+    size_t end = start;
+    while (src[end] && src[end] != '\n' && src[end] != '\r' && src[end] != ',' &&
+           end < GW_AGENT_FILE_MAX && end - start < 127)
+        end++;
+    while (end > start && (src[end - 1] == ' ' || src[end - 1] == '\t' ||
+                           src[end - 1] == '"' || src[end - 1] == '\''))
+        end--;
+
+    cJSON *spec = NULL;
+    if (end > start) {
+        spec = cJSON_CreateObject();
+        if (spec) {
+            char role[128];
+            size_t rlen = end - start;
+            /* banned_functions.h 毒化 memcpy，改用项目统一的 AIRY_MEMCPY */
+            AIRY_MEMCPY(role, src + start, rlen);
+            role[rlen] = '\0';
+            cJSON_AddStringToObject(spec, "role", role);
+            LOG_INFO("gateway: agent spec built from agent_file (role=%s, file=%s)",
+                     role, af->valuestring);
+        }
+    } else {
+        LOG_WARN("gateway: agent_file contains no usable role: %s", af->valuestring);
+    }
+    AIRY_FREE(buf);
+    return spec;
+}
+
 /**
  * @brief 从 llm 响应提取对话文本与 token 用量
  * @return 0 成功（*out_text / *out_tokens / *out_cost 有效），非 0 失败
@@ -851,11 +1032,13 @@ static int parse_llm_result(const char *llm_resp, char **out_text, uint64_t *out
                          ? cJSON_GetArrayItem(choices, 0)
                          : NULL;
     cJSON *content = choice0 ? cJSON_GetObjectItem(choice0, "content") : NULL;
-    if (!cJSON_IsString(content)) {
-        cJSON_Delete(root);
-        return -1;
+    if (cJSON_IsString(content)) {
+        *out_text = AIRY_STRDUP(content->valuestring);
+    } else {
+        /* LLM 工具调用轮 content 常为 null（响应仅含 tool_calls），
+         * 回退为空字符串而不是解析失败，保证工具循环可继续执行 */
+        *out_text = AIRY_STRDUP("");
     }
-    *out_text = AIRY_STRDUP(content->valuestring);
 
     /* token：优先 usage.total_tokens（OpenAI 兼容），其次顶层 total_tokens（llm_d 旧格式）。
      * 两处缺失时尝试 usage 内 prompt+completion 求和。 */
@@ -1047,6 +1230,9 @@ static char *gw_build_llm_request(const char *model, const cJSON *messages)
  * @param ctx 网关上下文
  * @param model 模型名
  * @param prompt 用户输入
+ * @param history 完整对话历史（OpenAI messages 数组，可为 NULL）。非空时
+ *        作为工具循环的初始消息（跨请求多轮上下文，M2 修复），末条 user
+ *        消息即当前输入；空/无效时退化为单条 prompt 消息。
  * @param active 运行中请求条目（agent.cancel 支持；轮次间检查取消标志）
  * @param out_trace 工具轨迹数组（cJSON，调用者 cJSON_Delete；失败为 NULL）
  * @param out_text 最终回复文本（AIRY_MALLOC，调用者 AIRY_FREE；失败为 NULL）
@@ -1055,7 +1241,8 @@ static char *gw_build_llm_request(const char *model, const cJSON *messages)
  * @return 0 成功（*out_text 有效）；1 用户取消；非 0 失败（未得到最终答案）
  */
 static int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model,
-                            const char *prompt, gw_active_request_t *active,
+                            const char *prompt, const cJSON *history,
+                            gw_active_request_t *active,
                             cJSON **out_trace, char **out_text,
                             uint64_t *out_tokens, double *out_cost)
 {
@@ -1065,7 +1252,18 @@ static int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model
     if (out_cost)
         *out_cost = 0.0;
 
-    cJSON *messages = cJSON_CreateArray();
+    cJSON *messages = NULL;
+    if (history && cJSON_IsArray(history) && cJSON_GetArraySize(history) > 0) {
+        /* 完整历史作为初始上下文；末条即当前输入（TUI 保证），不再重复追加 */
+        messages = cJSON_Duplicate(history, 1);
+    }
+    if (!messages) {
+        messages = cJSON_CreateArray();
+        cJSON *msg0 = cJSON_CreateObject();
+        cJSON_AddStringToObject(msg0, "role", "user");
+        cJSON_AddStringToObject(msg0, "content", prompt);
+        cJSON_AddItemToArray(messages, msg0);
+    }
     cJSON *tool_trace = cJSON_CreateArray();
     if (!messages || !tool_trace) {
         if (messages)
@@ -1074,10 +1272,6 @@ static int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model
             cJSON_Delete(tool_trace);
         return -1;
     }
-    cJSON *msg0 = cJSON_CreateObject();
-    cJSON_AddStringToObject(msg0, "role", "user");
-    cJSON_AddStringToObject(msg0, "content", prompt);
-    cJSON_AddItemToArray(messages, msg0);
 
     char *final_text = NULL;
     uint64_t total_tokens = 0;
@@ -1188,6 +1382,64 @@ static int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model
     return rc;
 }
 
+/**
+ * @brief 对话结束后将本轮问答写入 mem_d（mem.write）
+ *
+ * M6 修复：此前 mem_d 无任何业务调用方（悬挂服务）。gateway 在每次
+ * agent.run 成功完成后，把本轮 user prompt + assistant 回复作为一条
+ * 记忆记录写入 mem_d（metadata 含 session_id/role），供 mem.search 召回。
+ *
+ * 仅内部 socket 直调（不经 AIRY_GATEWAY_MEM_PUBLIC 门控——那是外部
+ * mem.* 方法的访问开关；内部落库不受其影响）。失败仅告警，不阻断响应。
+ */
+static void gw_persist_conversation(const gateway_business_ctx_t *ctx,
+                                    const char *session_id,
+                                    const char *user_prompt,
+                                    const char *assistant_text)
+{
+    /* mem_sock_path 为 char 数组，空串即未解析成功 */
+    if (!ctx || !ctx->mem_sock_path[0] || !user_prompt)
+        return;
+
+    /* data = "user: <prompt>\nassistant: <text>" 便于子串召回 */
+    size_t data_len = strlen(user_prompt) + strlen(assistant_text) + 24;
+    char *data = (char *)AIRY_MALLOC(data_len);
+    if (!data)
+        return;
+    snprintf(data, data_len, "user: %s\nassistant: %s",
+             user_prompt, assistant_text ? assistant_text : "");
+
+    cJSON *wparams = cJSON_CreateObject();
+    cJSON *metadata = cJSON_CreateObject();
+    if (!wparams || !metadata) {
+        cJSON_Delete(wparams);
+        cJSON_Delete(metadata);
+        AIRY_FREE(data);
+        return;
+    }
+    cJSON_AddStringToObject(wparams, "data", data);
+    cJSON_AddStringToObject(metadata, "session_id", session_id ? session_id : "");
+    cJSON_AddStringToObject(metadata, "role", "agentrt");
+    cJSON_AddItemToObject(wparams, "metadata", metadata);
+    char *params_str = cJSON_PrintUnformatted(wparams);
+    cJSON_Delete(wparams);
+    AIRY_FREE(data);
+    if (!params_str)
+        return;
+
+    char *resp = gw_svc_call(ctx->mem_sock_path, "write", params_str,
+                             GW_TOOL_TIMEOUT_MS);
+    AIRY_FREE(params_str);
+    if (!resp) {
+        LOG_WARN("gateway: mem.write failed (mem_d unreachable, session=%s)",
+                 session_id ? session_id : "?");
+        return;
+    }
+    AIRY_FREE(resp);
+    LOG_INFO("gateway: conversation persisted to mem_d (session=%s)",
+             session_id ? session_id : "?");
+}
+
 static char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
 {
     cJSON *id = cJSON_GetObjectItem(root, "id");
@@ -1221,6 +1473,13 @@ static char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
             model = m->valuestring;
     }
 
+    /* 完整对话历史（OpenAI messages 数组，可缺省）：非空时作为工具循环
+     * 初始上下文（M1/M2 修复——跨请求真实多轮），空则退化为单条 prompt。 */
+    cJSON *history = params ? cJSON_GetObjectItem(params, "messages") : NULL;
+    if (history && (!cJSON_IsArray(history) || cJSON_GetArraySize(history) == 0)) {
+        history = NULL;
+    }
+
     /* ── 分支：params.agent 存在 → agent_d 编排（spawn+invoke）；
      *        否则维持 llm_d 直连工具循环（向后兼容，D4） ── */
     cJSON *tool_trace = NULL;
@@ -1244,9 +1503,19 @@ static char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
     gw_active_request_t *active = gw_active_register(ctx, session_id);
 
     cJSON *agent_spec = params ? cJSON_GetObjectItem(params, "agent") : NULL;
+    /* params.agent 未直接提供时，回退解析 params.agent_file 构造 spec：
+     * 兼容只透传 agent_file 的旧客户端，让编排分支仍能触发。
+     * agent_spec_owned 需在本函数所有出口释放（区别于指向 params 的 agent_spec）。 */
+    cJSON *agent_spec_owned = NULL;
+    if (!agent_spec && params) {
+        agent_spec_owned = gw_agent_spec_from_agent_file(params);
+        agent_spec = agent_spec_owned;
+    }
     LOG_INFO("gateway: agent.run start (session=%s, model=%s, orchestrate=%d)",
              session_id, model ? model : "(default)", agent_spec ? 1 : 0);
     int run_rc = -1;
+    /* 双思考结果（GCCP+GRAD DAG 计划 + 思考事件）；think_d 不可达时保持 NULL */
+    cJSON *think_result = NULL;
     if (agent_spec) {
         char *err_msg = NULL;
         run_rc = gw_agent_run_orchestrate(ctx, agent_spec, prompt,
@@ -1257,20 +1526,87 @@ static char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
                      err_msg ? err_msg : "unknown error");
             AIRY_FREE(err_msg);
             gw_active_unregister(ctx, active);
+            if (agent_spec_owned)
+                cJSON_Delete(agent_spec_owned);
             return jsonrpc_error(-32603, msg, id);
         }
         /* 编排路径工具轨迹由 runner（ecosystem/agents）内部完成，网关不感知；
          * 响应中 tool_trace 置空数组保持字段契约 */
         tool_trace = cJSON_CreateArray();
     } else {
-        /* 返回值必须检查：工具循环耗尽/LLM 故障/用户取消时，
-         * final_text 可能为 NULL，不得静默返回空响应 */
-        run_rc = gw_run_tool_loop(ctx, model, prompt, active, &tool_trace, &final_text,
-                                  &total_tokens, &total_cost);
+        /* ── 对话主链路接入双思考（D4 修复，2026-08-07）──
+         * 无 agent 编排时，先经 think_d 运行 GCCP（事实锁目标确认）+ GRAD
+         * （逻辑锁计划四验/终裁），产出收敛 DAG 计划与思考事件；随后将
+         * 计划注入 LLM 请求上下文（system 消息），LLM 按计划回答/执行。
+         * think_d 不可达/超时 → 降级原直连链路（不影响对话可用性）。 */
+        if (gw_think_process(ctx, prompt, &think_result) == 0 && think_result) {
+            cJSON *plan = cJSON_GetObjectItem(think_result, "plan");
+            if (plan) {
+                char *plan_str = cJSON_PrintUnformatted(plan);
+                if (plan_str) {
+                    /* 构造带双思考计划的 system 消息，插入 messages 头部：
+                     * LLM 依据 GCCP+GRAD 收敛的 DAG 计划组织回答，避免自创步骤 */
+                    cJSON *messages_with_plan = NULL;
+                    if (history && cJSON_IsArray(history) &&
+                        cJSON_GetArraySize(history) > 0) {
+                        messages_with_plan = cJSON_Duplicate(history, 1);
+                    } else {
+                        messages_with_plan = cJSON_CreateArray();
+                    }
+                    cJSON *sys = cJSON_CreateObject();
+                    char sys_content[8192];
+                    int sn = snprintf(sys_content, sizeof(sys_content),
+                                      "You are executing a task under the AgentRT "
+                                      "dual-thinking system (GCCP goal confirmation + "
+                                      "GRAD plan critique). A verified action plan has "
+                                      "been produced. Follow this DAG plan strictly:\n%s",
+                                      plan_str);
+                    if (sn > 0 && sn < (int)sizeof(sys_content))
+                        cJSON_AddStringToObject(sys, "content", sys_content);
+                    else
+                        cJSON_AddStringToObject(sys, "content",
+                                                "Execute the user request following "
+                                                "the verified action plan.");
+                    cJSON_AddStringToObject(sys, "role", "system");
+                    cJSON_AddItemToArray(messages_with_plan, sys);
+                    /* 末条 user 消息即当前输入（TUI 保证），追加双思考提示 */
+                    cJSON *usr = cJSON_CreateObject();
+                    cJSON_AddStringToObject(usr, "role", "user");
+                    cJSON_AddStringToObject(usr, "content", prompt);
+                    cJSON_AddItemToArray(messages_with_plan, usr);
+                    AIRY_FREE(plan_str);
+
+                    run_rc = gw_run_tool_loop(ctx, model, prompt, messages_with_plan,
+                                              active, &tool_trace, &final_text,
+                                              &total_tokens, &total_cost);
+                    cJSON_Delete(messages_with_plan);
+                } else {
+                    run_rc = gw_run_tool_loop(ctx, model, prompt, history, active,
+                                              &tool_trace, &final_text,
+                                              &total_tokens, &total_cost);
+                }
+            } else {
+                run_rc = gw_run_tool_loop(ctx, model, prompt, history, active,
+                                          &tool_trace, &final_text,
+                                          &total_tokens, &total_cost);
+            }
+        } else {
+            /* think_d 不可达：降级原直连链路（向后兼容） */
+            run_rc = gw_run_tool_loop(ctx, model, prompt, history, active,
+                                      &tool_trace, &final_text,
+                                      &total_tokens, &total_cost);
+        }
     }
     gw_active_unregister(ctx, active);
     LOG_INFO("gateway: agent.run done (session=%s, rc=%d, tokens=%llu, cost=%.4f)",
              session_id, run_rc, (unsigned long long)total_tokens, total_cost);
+
+    /* 对话结束自动落 mem_d（M6 修复：mem_d 不再是悬挂服务）。
+     * 仅在成功回答（rc==0）时写入；用户取消/失败不产生半截记忆。 */
+    if (run_rc == 0) {
+        gw_persist_conversation(ctx, session_id, prompt,
+                                final_text ? final_text : "");
+    }
 
     if (run_rc == 1) {
         /* 用户中止（Ctrl+X / agent.cancel） */
@@ -1290,16 +1626,24 @@ static char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
         cJSON_Delete(err_out);
         if (tool_trace)
             cJSON_Delete(tool_trace);
+        if (think_result)
+            cJSON_Delete(think_result);
         if (final_text)
             AIRY_FREE(final_text);
+        if (agent_spec_owned)
+            cJSON_Delete(agent_spec_owned);
         return err_str;
     }
     if (run_rc != 0) {
         /* 工具循环失败：明确报错，而非空响应 */
         if (tool_trace)
             cJSON_Delete(tool_trace);
+        if (think_result)
+            cJSON_Delete(think_result);
         if (final_text)
             AIRY_FREE(final_text);
+        if (agent_spec_owned)
+            cJSON_Delete(agent_spec_owned);
         return jsonrpc_error(-32603,
                              "agent.run failed: tool loop exhausted or LLM service error", id);
     }
@@ -1322,12 +1666,20 @@ static char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
     } else {
         cJSON_AddItemToObject(result, "tool_trace", cJSON_CreateArray());
     }
+    /* 双思考结果回传（GCCP+GRAD DAG 计划 + 思考事件 + 统计）。
+     * think_d 不可达时为 NULL，不附加该字段（向后兼容旧客户端）。 */
+    if (think_result) {
+        cJSON_AddItemToObject(result, "thinking", think_result);
+        think_result = NULL;
+    }
     cJSON_AddItemToObject(out, "result", result);
 
     char *out_str = cJSON_PrintUnformatted(out);
     cJSON_Delete(out);
     if (final_text)
         AIRY_FREE(final_text);
+    if (agent_spec_owned)
+        cJSON_Delete(agent_spec_owned);
     return out_str;
 }
 
@@ -1425,6 +1777,8 @@ gateway_business_ctx_t *gateway_business_ctx_create(void)
                            "AIRY_MEM_SOCK", "mem.sock");
     gw_resolve_daemon_sock(ctx->sched_sock_path, sizeof(ctx->sched_sock_path),
                            "AIRY_SCHED_SOCK", "sched.sock");
+    gw_resolve_daemon_sock(ctx->think_sock_path, sizeof(ctx->think_sock_path),
+                           "AIRY_THINK_SOCK", "think.sock");
 
     const char *tcp_env = getenv("AIRY_LLM_TCP_ADDR");
     AIRY_STRNCPY_TERM(ctx->llm_tcp_addr,
@@ -1463,6 +1817,16 @@ gateway_business_ctx_t *gateway_business_ctx_create(void)
     }
 
     return ctx;
+}
+
+int gateway_business_ctx_set_shutdown_cb(gateway_business_ctx_t *ctx,
+                                         gateway_shutdown_fn_t cb, void *user_data)
+{
+    if (!ctx)
+        return AIRY_ERR_INVALID_PARAM;
+    ctx->on_shutdown = cb;
+    ctx->shutdown_user_data = user_data;
+    return AIRY_SUCCESS;
 }
 
 void gateway_business_ctx_destroy(gateway_business_ctx_t *ctx)
@@ -1526,6 +1890,28 @@ char *gateway_business_handle(void *request, void *user_data)
         cJSON_AddItemToObject(out, "result", result);
         resp = cJSON_PrintUnformatted(out);
         cJSON_Delete(out);
+    } else if (strcmp(method->valuestring, "shutdown") == 0) {
+        /* L2 标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止）
+         * 先构建成功响应，再回调宿主触发真实优雅退出（主循环退出），
+         * 避免响应未发出即被停机打断。 */
+        cJSON *id = cJSON_GetObjectItem(root, "id");
+        cJSON *out = cJSON_CreateObject();
+        cJSON_AddStringToObject(out, "jsonrpc", "2.0");
+        if (id && cJSON_IsNumber(id)) {
+            cJSON_AddNumberToObject(out, "id", id->valuedouble);
+        } else {
+            cJSON_AddNullToObject(out, "id");
+        }
+        cJSON *result = cJSON_CreateObject();
+        cJSON_AddStringToObject(result, "status", "shutting_down");
+        cJSON_AddItemToObject(out, "result", result);
+        resp = cJSON_PrintUnformatted(out);
+        cJSON_Delete(out);
+        if (ctx->on_shutdown) {
+            ctx->on_shutdown(ctx->shutdown_user_data);
+        } else {
+            LOG_WARN("gateway: shutdown requested but no shutdown callback registered");
+        }
     } else {
         cJSON *id = cJSON_GetObjectItem(root, "id");
         resp = jsonrpc_error(-32601, "Method not found", id);

@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include "error.h"
 
 #include "logging.h"
@@ -175,7 +176,8 @@ static gw_mcp_resource_entry_t *find_resource(gw_mcp_server_t *server, const cha
 
 static char *build_tools_list_json(gw_mcp_server_t *server)
 {
-    size_t buf_size = 4096 + server->tool_count * 1024;
+    /* 每工具含 inputSchema（最长 2048B），预留 4KB/工具防止缓冲区溢出 */
+    size_t buf_size = 4096 + server->tool_count * 4096;
     char *buf = (char *)AIRY_MALLOC(buf_size);
     if (!buf) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null buffer");
@@ -187,8 +189,13 @@ static char *build_tools_list_json(gw_mcp_server_t *server)
         if (i > 0)
             pos += snprintf(buf + pos, buf_size - pos, ",");
         gw_mcp_tool_entry_t *t = &server->tools[i];
-        pos += snprintf(buf + pos, buf_size - pos, "{\"name\":\"%s\",\"description\":\"%s\"}",
-                        t->name, t->description);
+        /* MCP tools/list 规范：每个工具必须携带 inputSchema（注册时的 JSON
+         * 对象原样内嵌，非法 JSON 或过长会被截断），修复客户端无法获取
+         * 参数定义而无法正确调用工具的问题 */
+        pos += snprintf(buf + pos, buf_size - pos,
+                        "{\"name\":\"%s\",\"description\":\"%s\",\"inputSchema\":%.*s}",
+                        t->name, t->description,
+                        (int)sizeof(t->input_schema) - 1, t->input_schema);
     }
     pos += snprintf(buf + pos, buf_size - pos, "]}");
     return buf;
@@ -286,6 +293,52 @@ static char *__attribute__((used)) extract_jsonrpc_id(const char *body)
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     snprintf(id, 32, "%ld", val);
+    return id;
+}
+
+static char *extract_jsonrpc_id_raw(const char *body)
+{
+    /* 提取请求 id 的原始 JSON 文本（数字原样、字符串含引号），可直接内嵌
+     * 到响应（"id":%s），保证 JSON-RPC 2.0 响应 id 与请求 id 类型一致。
+     * 请求无 id / 格式非法时返回 NULL，调用方回退 "id":null。 */
+    if (!body) {
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
+    }
+    const char *key = "\"id\"";
+    const char *p = strstr(body, key);
+    if (!p) {
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
+    }
+    p += strlen(key);
+    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
+        p++;
+    if (*p == '"') {
+        const char *end = strchr(p + 1, '"');
+        if (!end) {
+            AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
+        }
+        size_t len = (size_t)(end + 1 - p);
+        char *id = (char *)AIRY_MALLOC(len + 1);
+        if (!id) {
+            AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
+        }
+        __builtin_memcpy(id, p, len);
+        id[len] = '\0';
+        return id;
+    }
+    const char *start = p;
+    while (*p && (*p == '-' || *p == '+' || *p == '.' || isdigit((unsigned char)*p)))
+        p++;
+    if (p == start) {
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
+    }
+    size_t len = (size_t)(p - start);
+    char *id = (char *)AIRY_MALLOC(len + 1);
+    if (!id) {
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
+    }
+    __builtin_memcpy(id, start, len);
+    id[len] = '\0';
     return id;
 }
 
@@ -428,27 +481,38 @@ static char *extract_resource_uri_from_params(const char *params_json)
     return uri;
 }
 
-int gw_mcp_server_handle_jsonrpc(gw_mcp_server_t *server, const char *method,
-                                 const char *params_json, char **response_json)
+/**
+ * @brief JSON-RPC 处理核心（含请求 id 回显）
+ *
+ * @param id_json 请求 id 的原始 JSON 文本（数字原样 / 字符串含引号），
+ *                可安全内嵌响应（"id":%s）；NULL 时回退 "id":null。
+ *                MCP 基于 JSON-RPC 2.0，响应 id 必须与请求 id 一致，
+ *                否则客户端无法将响应关联到原请求。
+ */
+static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *method,
+                                           const char *params_json, const char *id_json,
+                                           char **response_json)
 {
     if (!server || !method || !response_json)
         return AIRY_ERR_INVALID_PARAM;
     server->request_count++;
+    const char *rid = id_json ? id_json : "null";
 
     if (strcmp(method, "initialize") == 0) {
-        const char *resp = "{\"jsonrpc\":\"2.0\",\"result\":{"
+        const char *resp = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
                            "\"protocolVersion\":\"2024-11-05\","
                            "\"capabilities\":{\"tools\":{\"listChanged\":true},"
                            "\"resources\":{\"subscribe\":true,\"listChanged\":true}},"
                            "\"serverInfo\":{\"name\":\"%s\",\"version\":\"%s\"}}}";
-        size_t len =
-            snprintf(NULL, 0, resp, server->config.server_name, server->config.server_version);
+        size_t len = snprintf(NULL, 0, resp, rid, server->config.server_name,
+                              server->config.server_version);
         char *buf = (char *)AIRY_MALLOC(len + 1);
         if (!buf) {
             server->error_count++;
             return AIRY_ERR_OUT_OF_MEMORY;
         }
-        snprintf(buf, len + 1, resp, server->config.server_name, server->config.server_version);
+        snprintf(buf, len + 1, resp, rid, server->config.server_name,
+                 server->config.server_version);
         *response_json = buf;
         return 0;
     }
@@ -505,12 +569,12 @@ int gw_mcp_server_handle_jsonrpc(gw_mcp_server_t *server, const char *method,
         tool_name = NULL;
         AIRY_FREE(tool_args);
         tool_args = NULL;
-        const char *resp_fmt = "{\"jsonrpc\":\"2.0\",\"result\":{"
+        const char *resp_fmt = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
                                "\"content\":[{\"type\":\"text\",\"text\":%s}]}}";
-        size_t rlen = snprintf(NULL, 0, resp_fmt, tool_result);
+        size_t rlen = snprintf(NULL, 0, resp_fmt, rid, tool_result);
         char *buf = (char *)AIRY_MALLOC(rlen + 1);
         if (buf)
-            snprintf(buf, rlen + 1, resp_fmt, tool_result);
+            snprintf(buf, rlen + 1, resp_fmt, rid, tool_result);
         *response_json = buf;
         AIRY_FREE(tool_result);
         return 0;
@@ -572,6 +636,13 @@ int gw_mcp_server_handle_jsonrpc(gw_mcp_server_t *server, const char *method,
     return AIRY_ERR_NOT_FOUND;
 }
 
+/* 公开入口：无 id 上下文时调用（响应 id 回退 null） */
+int gw_mcp_server_handle_jsonrpc(gw_mcp_server_t *server, const char *method,
+                                 const char *params_json, char **response_json)
+{
+    return gw_mcp_server_handle_jsonrpc_ex(server, method, params_json, NULL, response_json);
+}
+
 int gw_mcp_server_handle_request(gw_mcp_server_t *server, const char *method, const char *path,
                                  const char *body_json, char **response_json)
 {
@@ -586,7 +657,11 @@ int gw_mcp_server_handle_request(gw_mcp_server_t *server, const char *method, co
     }
 
     char *rpc_params = extract_jsonrpc_params(body_json);
-    int rc = gw_mcp_server_handle_jsonrpc(server, rpc_method, rpc_params, response_json);
+    /* 提取请求 id 供响应回显（JSON-RPC 2.0 要求响应 id 与请求一致） */
+    char *rpc_id = extract_jsonrpc_id_raw(body_json);
+    int rc = gw_mcp_server_handle_jsonrpc_ex(server, rpc_method, rpc_params, rpc_id,
+                                             response_json);
+    AIRY_FREE(rpc_id);
     AIRY_FREE(rpc_method);
     AIRY_FREE(rpc_params);
     return rc;

@@ -24,6 +24,8 @@ struct llm_service {
     airy_mtx_t lock; /* 保护 registry 和 cost 等 */
     void *rules;
     size_t rule_count;
+    char default_model[128];   /* global.default_model（主配置 + 用户覆盖，用户优先） */
+    char default_provider[64]; /* global.default_provider */
 };
 
 #endif /* AIRY_RT_LLM_SERVICE_INTERNAL_H */

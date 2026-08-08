@@ -50,6 +50,10 @@ static const char *REQUIRED_METRICS[][5] = {
     {"airy_memory_heap_bytes", "gauge", "Heap memory usage in bytes", ""},
     {"airy_memory_pool_utilization", "gauge", "Memory pool utilization (0.0~1.0)", ""},
     {"airy_oom_events_total", "counter", "Total OOM event count", "level"},
+
+    /* --- monit_d 自身 scrape 统计（prometheus_exporter_get_metrics 会设置） --- */
+    {"airy_monit_scrape_count", "gauge", "Total Prometheus scrape requests handled", ""},
+    {"airy_monit_scrape_errors", "gauge", "Total Prometheus scrape errors", ""},
 };
 
 #define REQUIRED_METRICS_COUNT                                                \

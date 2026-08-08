@@ -43,14 +43,16 @@ static int on_server_fd_event(int fd, uint32_t events, void *user_data)
     int first = 1;
     while (1) {
         airy_sock_t client_fd = airy_sock_accept(fd, 0);
-        if (client_fd == AIRY_INVALID_SOCKET) {
+        if (client_fd < 0) {
+            /* <0 涵盖 AIRY_INVALID_SOCKET(-1) 与负错误码（如 AIRY_ERR_IO），
+             * 避免 -40 等负错误码被误判为合法连接而记录 CLIENT-ACCEPT */
             if (first) {
                 SVC_LOG_ERROR("C-L02: EVENT-DRIVER: CLIENT-ERROR accept failed on fd=%d", fd);
             }
             break;
         }
 
-        SVC_LOG_DEBUG("C-L02: EVENT-DRIVER: CLIENT-ACCEPT fd=%d", (int)(uintptr_t)client_fd);
+        SVC_LOG_INFO("C-L02: EVENT-DRIVER: CLIENT-ACCEPT fd=%d", (int)(uintptr_t)client_fd);
 
         if (driver->on_client) {
             driver->on_client(driver->service_ctx, client_fd);
@@ -201,8 +203,17 @@ void daemon_event_driver_stop(daemon_event_driver_t *driver)
 {
     if (!driver)
         return;
+    /* 先异步安全停止（信号上下文可达），再记录日志：
+     * 避免日志锁在信号路径上被占用导致停止流程死锁。 */
+    airy_event_loop_stop_async(driver->loop);
     SVC_LOG_INFO("C-L02: EVENT-DRIVER: STOP");
-    airy_event_loop_stop(driver->loop);
+}
+
+void daemon_event_driver_stop_async(daemon_event_driver_t *driver)
+{
+    if (!driver)
+        return;
+    airy_event_loop_stop_async(driver->loop);
 }
 
 airy_event_loop_t *daemon_event_driver_get_loop(daemon_event_driver_t *driver)

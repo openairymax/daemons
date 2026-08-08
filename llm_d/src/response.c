@@ -35,6 +35,15 @@ char *response_to_json(const llm_response_t *resp)
     cJSON_AddNumberToObject(root, "prompt_tokens", resp->prompt_tokens);
     cJSON_AddNumberToObject(root, "completion_tokens", resp->completion_tokens);
     cJSON_AddNumberToObject(root, "total_tokens", resp->total_tokens);
+    /* 成本（USD）：网关/OpenAI 兼容适配器据此累计金额 */
+    cJSON_AddNumberToObject(root, "cost_usd", resp->cost_usd);
+    /* usage 嵌套对象：OpenAI chat.completions 兼容格式，网关 parse_llm_result
+     * 与 OpenAI 适配器均读取此节点；顶层 prompt/completion/total_tokens 保留兼容 */
+    cJSON *usage = cJSON_CreateObject();
+    cJSON_AddNumberToObject(usage, "prompt_tokens", resp->prompt_tokens);
+    cJSON_AddNumberToObject(usage, "completion_tokens", resp->completion_tokens);
+    cJSON_AddNumberToObject(usage, "total_tokens", resp->total_tokens);
+    cJSON_AddItemToObject(root, "usage", usage);
     if (resp->finish_reason)
         cJSON_AddStringToObject(root, "finish_reason", resp->finish_reason);
 
@@ -42,7 +51,18 @@ char *response_to_json(const llm_response_t *resp)
     for (size_t i = 0; i < resp->choice_count; ++i) {
         cJSON *choice = cJSON_CreateObject();
         cJSON_AddStringToObject(choice, "role", resp->choices[i].role);
-        cJSON_AddStringToObject(choice, "content", resp->choices[i].content);
+        /* LLM 工具调用轮 content 常为 NULL（响应仅含 tool_calls），
+         * cJSON_AddStringToObject 对 NULL 行为不确定，显式回退空字符串
+         * 保证 choices[i].content 字段恒为合法字符串（网关可解析） */
+        cJSON_AddStringToObject(choice, "content",
+                                resp->choices[i].content ? resp->choices[i].content : "");
+        /* Function calling：透传 assistant 的 tool_calls（原始 JSON 数组） */
+        if (resp->choices[i].tool_calls_json && resp->choices[i].tool_calls_json[0]) {
+            CJSON_PARSE_GUARD(tc, resp->choices[i].tool_calls_json, {});
+            if (cJSON_IsArray(tc)) {
+                cJSON_AddItemToObject(choice, "tool_calls", cJSON_Duplicate(tc, 1));
+            }
+        }
         cJSON_AddItemToArray(choices, choice);
     }
     cJSON_AddItemToObject(root, "choices", choices);
@@ -92,6 +112,24 @@ llm_response_t *response_from_json(const char *json)
     if (cJSON_IsNumber(total_tokens))
         resp->total_tokens = (uint32_t)total_tokens->valuedouble;
 
+    /* usage 嵌套对象（response_to_json 新格式）：优先读取，顶层字段保留兼容 */
+    cJSON *usage = cJSON_GetObjectItem(root, "usage");
+    if (cJSON_IsObject(usage)) {
+        cJSON *u_pt = cJSON_GetObjectItem(usage, "prompt_tokens");
+        if (cJSON_IsNumber(u_pt))
+            resp->prompt_tokens = (uint32_t)u_pt->valuedouble;
+        cJSON *u_ct = cJSON_GetObjectItem(usage, "completion_tokens");
+        if (cJSON_IsNumber(u_ct))
+            resp->completion_tokens = (uint32_t)u_ct->valuedouble;
+        cJSON *u_tt = cJSON_GetObjectItem(usage, "total_tokens");
+        if (cJSON_IsNumber(u_tt))
+            resp->total_tokens = (uint32_t)u_tt->valuedouble;
+    }
+
+    cJSON *cost = cJSON_GetObjectItem(root, "cost_usd");
+    if (cJSON_IsNumber(cost))
+        resp->cost_usd = cost->valuedouble;
+
     cJSON *finish_reason = cJSON_GetObjectItem(root, "finish_reason");
     if (cJSON_IsString(finish_reason))
         resp->finish_reason = AIRY_STRDUP(finish_reason->valuestring);
@@ -100,6 +138,11 @@ llm_response_t *response_from_json(const char *json)
     if (cJSON_IsArray(choices)) {
         resp->choice_count = cJSON_GetArraySize(choices);
         resp->choices = AIRY_CALLOC(resp->choice_count, sizeof(llm_message_t));
+        if (!resp->choices) {
+            /* root 由 CJSON_AUTO_FREE 自动释放 */
+            llm_response_free(resp);
+            return NULL;
+        }
         for (size_t i = 0; i < resp->choice_count; ++i) {
             cJSON *choice = cJSON_GetArrayItem(choices, i);
             cJSON *role = cJSON_GetObjectItem(choice, "role");
@@ -108,6 +151,15 @@ llm_response_t *response_from_json(const char *json)
                 resp->choices[i].role = AIRY_STRDUP(role->valuestring);
             if (cJSON_IsString(content))
                 resp->choices[i].content = AIRY_STRDUP(content->valuestring);
+            /* Function calling：与 response_to_json 对称，回读 assistant 的 tool_calls */
+            cJSON *tool_calls = cJSON_GetObjectItem(choice, "tool_calls");
+            if (cJSON_IsArray(tool_calls) && cJSON_GetArraySize(tool_calls) > 0) {
+                resp->choices[i].tool_calls_json = cJSON_PrintUnformatted(tool_calls);
+                if (!resp->choices[i].tool_calls_json) {
+                    llm_response_free(resp);
+                    return NULL;
+                }
+            }
         }
     }
 

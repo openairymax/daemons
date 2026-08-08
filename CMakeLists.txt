@@ -48,6 +48,8 @@ add_subdirectory(plugin_d)
 add_subdirectory(mem_d)
 add_subdirectory(agent_d)
 add_subdirectory(a2a_d)
+# 双思考系统：CoreLoopThree 认知引擎接入（think.* 命名空间）
+add_subdirectory(think_d)
 
 # 全局测试支持
 if(BUILD_TESTS)
@@ -116,6 +118,7 @@ airy_print_info("  - plugin_d  : ${CMAKE_CURRENT_SOURCE_DIR}/plugin_d")
 airy_print_info("  - mem_d     : ${CMAKE_CURRENT_SOURCE_DIR}/mem_d")
 airy_print_info("  - agent_d   : ${CMAKE_CURRENT_SOURCE_DIR}/agent_d")
 airy_print_info("  - a2a_d     : ${CMAKE_CURRENT_SOURCE_DIR}/a2a_d")
+airy_print_info("  - think_d   : ${CMAKE_CURRENT_SOURCE_DIR}/think_d (双思考系统 Thinkdual)")
 airy_print_info("")
 
 # 安装支持
@@ -198,13 +201,13 @@ if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
 endif()
 
 # ==================== 生产安装：daemon 二进制 ====================
-# cmake --install --prefix $AIRY_HOME → 15 个 daemon 装到 $AIRY_HOME/bin。
+# cmake --install --prefix $AIRY_HOME → 16 个 daemon 装到 $AIRY_HOME/bin。
 # 与 bootstrap AIRY_HOME/bin、agent_build_agents_pypath 的 AIRY_LIB_DIR
 # 回退组成完整生产安装（AIRY_HOME 体系，K8s 节点运行时根类比）。
 install(TARGETS gateway_d llm_d tool_d
                 monit_d sched_d market_d channel_d
                 info_d notify_d observe_d
                 hook_d plugin_d
-                mem_d agent_d a2a_d
+                mem_d agent_d a2a_d think_d
     RUNTIME DESTINATION bin
 )

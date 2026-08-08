@@ -28,6 +28,9 @@ cost_tracker_t *cost_tracker_create(const pricing_rule_t *rules, int rule_count)
 void cost_tracker_destroy(cost_tracker_t *ct);
 void cost_tracker_add(cost_tracker_t *ct, const char *model, uint32_t prompt_tokens,
                       uint32_t completion_tokens);
+/* 按模型单价估算单次调用成本（USD）：(prompt/1000)*in + (completion/1000)*out */
+double cost_tracker_estimate(const cost_tracker_t *ct, const char *model,
+                             uint32_t prompt_tokens, uint32_t completion_tokens);
 cJSON *cost_tracker_export(cost_tracker_t *ct);
 
 #ifdef __cplusplus

@@ -21,6 +21,7 @@
 #ifndef _WIN32
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -83,8 +84,16 @@ static daemon_bootstrap_ipc_t *g_bipc = NULL;
 
 static void notify_d_signal_handler(int sig)
 {
-
+    (void)sig;
+    /* async-signal-safe：仅原子置位（accept 循环 1s 超时轮询，随后自然退出） */
     atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
+#ifndef _WIN32
+    {
+        static const char sig_msg[] =
+            "[SIG] shutdown signal received, initiating graceful shutdown\n";
+        (void)write(STDERR_FILENO, sig_msg, sizeof(sig_msg) - 1);
+    }
+#endif
 }
 
 static int notify_d_compute_ws_accept_key(const char *client_key, char *out_key, size_t out_size)
@@ -582,12 +591,79 @@ static int notify_d_healthcheck(notify_d_service_t *svc)
 static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_fd)
 {
     char buffer[NOTIFY_D_MAX_BUFFER];
+#ifndef _WIN32
+    /* 等待请求数据就绪后再 recv：airy_sock_recv 为 MSG_DONTWAIT 非阻塞读取，
+     * accept 后立即 recv 会因 EAGAIN 返回 0 而误判连接失败并关闭（RPC 时序竞态）。 */
+    struct pollfd pfd;
+    pfd.fd = (int)client_fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    int pr = poll(&pfd, 1, 5000);
+    if (pr <= 0 || !(pfd.revents & POLLIN)) {
+        airy_sock_close(client_fd);
+        return;
+    }
+#endif
     ssize_t n = airy_sock_recv(client_fd, buffer, sizeof(buffer) - 1);
     if (n <= 0) {
         airy_sock_close(client_fd);
         return;
     }
     buffer[n] = '\0';
+
+    /* L2 标准方法 <ns>.shutdown / <ns>.get_stats（02-l2-service-protocol.md §6.1）：
+     * 先尝试解析 JSON-RPC 请求，命中标准方法则按 JSON-RPC 2.0 响应并返回；
+     * 其余（SSE/WebSocket 升级/普通消息投递）保持原有逻辑，向后兼容。 */
+    cJSON *req = cJSON_Parse(buffer);
+    if (req) {
+        cJSON *m = cJSON_GetObjectItem(req, "method");
+        cJSON *idj = cJSON_GetObjectItem(req, "id");
+        if (cJSON_IsString(m) && idj) {
+            int rid = cJSON_IsNumber(idj) ? idj->valueint : 0;
+            if (strcmp(m->valuestring, "shutdown") == 0) {
+                /* 与信号处理一致：原子置位 g_shutdown，accept 循环 1s 内退出 */
+                atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
+                cJSON *result = cJSON_CreateObject();
+                cJSON_AddStringToObject(result, "status", "shutting_down");
+                JSONRPC_SEND_SUCCESS(client_fd, result, rid);
+                cJSON_Delete(req);
+                airy_sock_close(client_fd);
+                return;
+            } else if (strcmp(m->valuestring, "get_stats") == 0) {
+                airy_mtx_lock(&svc->lock);
+                uint64_t notified = svc->notified_count;
+                uint64_t errors = svc->error_count;
+                size_t clients = svc->client_count;
+                size_t pending = svc->pending_count;
+                airy_mtx_unlock(&svc->lock);
+                uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
+                cJSON *result = cJSON_CreateObject();
+                cJSON_AddStringToObject(result, "daemon", "notify_d");
+                cJSON_AddNumberToObject(result, "uptime_s", (double)uptime);
+                cJSON_AddNumberToObject(result, "notified", (double)notified);
+                cJSON_AddNumberToObject(result, "errors", (double)errors);
+                cJSON_AddNumberToObject(result, "clients", (double)clients);
+                cJSON_AddNumberToObject(result, "pending", (double)pending);
+                JSONRPC_SEND_SUCCESS(client_fd, result, rid);
+                cJSON_Delete(req);
+                airy_sock_close(client_fd);
+                return;
+            } else if (strcmp(m->valuestring, "health_check") == 0) {
+                uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
+                cJSON *result = cJSON_CreateObject();
+                cJSON_AddStringToObject(result, "status", "ok");
+                cJSON_AddStringToObject(result, "service", "notify_d");
+                cJSON_AddNumberToObject(result, "uptime_s", (double)uptime);
+                cJSON_AddNumberToObject(result, "timestamp",
+                                        (double)time(NULL) * 1000.0);
+                JSONRPC_SEND_SUCCESS(client_fd, result, rid);
+                cJSON_Delete(req);
+                airy_sock_close(client_fd);
+                return;
+            }
+        }
+        cJSON_Delete(req);
+    }
 
     airy_mtx_lock(&svc->lock);
 

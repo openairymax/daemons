@@ -24,6 +24,10 @@ struct tool_service {
     tool_cache_t *cache;
     tool_config_t *manager;
     airy_mtx_t lock;
+    /* L2 get_stats 真实统计（volatile：宽松一致即可满足监控语义） */
+    volatile uint64_t exec_total;    /* 工具执行总次数（含缓存命中） */
+    volatile uint64_t exec_fail;     /* 执行失败次数 */
+    volatile uint64_t exec_ms_total; /* 执行累计耗时（毫秒） */
 };
 
 #endif /* TOOL_SERVICE_INTERNAL_H */

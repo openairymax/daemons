@@ -30,6 +30,7 @@
 #include "thread_pool.h"
 
 #include <stdlib.h>
+#include <time.h>
 
 /* ==================== 配置常量 ==================== */
 
@@ -44,6 +45,9 @@
 /* 生成公共全局变量、信号处理、help、客户端处理等样板 */
 DAEMON_DECLARE_COMMON(a2a_d, a2a, DEFAULT_SOCKET_PATH_UNIX,
                        DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+
+/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
+DAEMON_DECLARE_SHUTDOWN_METHOD(a2a_d)
 
 /* ==================== 全局状态 ==================== */
 
@@ -87,6 +91,8 @@ static void handle_cancel_task(cJSON *params, int id, airy_sock_t fd);
 static void handle_get_task(cJSON *params, int id, airy_sock_t fd);
 static void handle_send_message(cJSON *params, int id, airy_sock_t fd);
 static void handle_count(int id, airy_sock_t fd);
+static void handle_health_check(int id, airy_sock_t fd);
+static void handle_get_stats(int id, airy_sock_t fd);
 
 static void on_register_agent_method(cJSON *params, int id, void *user_data)
 {
@@ -131,6 +137,18 @@ static void on_send_message_method(cJSON *params, int id, void *user_data)
 static void on_count_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_count(id, *(airy_sock_t *)user_data);
+}
+
+/* L2 标准方法 a2a.health_check（02-l2-service-protocol.md） */
+static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+{
+    handle_health_check(id, *(airy_sock_t *)user_data);
+}
+
+/* L2 标准方法 a2a.get_stats（02-l2-service-protocol.md §6.1） */
+static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+{
+    handle_get_stats(id, *(airy_sock_t *)user_data);
 }
 
 /* 将 cJSON 值序列化为字符串（调用方负责 free，使用标准 free） */
@@ -398,6 +416,38 @@ static void handle_count(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
+/* L2 标准方法 a2a.health_check：无副作用健康探针 */
+static void handle_health_check(int id, airy_sock_t client_fd)
+{
+    bool healthy = g_service != NULL;
+    size_t agent_count = healthy ? a2a_service_count(g_service) : 0;
+    size_t task_count = healthy ? a2a_service_task_count(g_service) : 0;
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "service", "a2a_d");
+    cJSON_AddBoolToObject(result, "healthy", healthy);
+    cJSON_AddNumberToObject(result, "agent_count", (double)agent_count);
+    cJSON_AddNumberToObject(result, "task_count", (double)task_count);
+    cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
+
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+/* L2 标准方法 a2a.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+static void handle_get_stats(int id, airy_sock_t client_fd)
+{
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "daemon", "a2a_d");
+    if (g_service) {
+        cJSON_AddNumberToObject(result, "agents", (double)a2a_service_count(g_service));
+        cJSON_AddNumberToObject(result, "tasks", (double)a2a_service_task_count(g_service));
+    } else {
+        cJSON_AddNumberToObject(result, "agents", 0);
+        cJSON_AddNumberToObject(result, "tasks", 0);
+    }
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
 /* ==================== 配置加载 ==================== */
 
 static int load_daemon_config(const char *config_path)
@@ -580,7 +630,15 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_a2a_d, "get_task", on_get_task_method, NULL);
     method_dispatcher_register(g_dispatcher_a2a_d, "send_message", on_send_message_method, NULL);
     method_dispatcher_register(g_dispatcher_a2a_d, "count", on_count_method, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (a2a.* namespace)", 9);
+    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：a2a.send / a2a.receive / a2a.health_check） */
+    method_dispatcher_register(g_dispatcher_a2a_d, "send", on_send_message_method, NULL);
+    method_dispatcher_register(g_dispatcher_a2a_d, "receive", on_get_task_method, NULL);
+    method_dispatcher_register(g_dispatcher_a2a_d, "health_check", on_health_check_method, NULL);
+    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+    method_dispatcher_register(g_dispatcher_a2a_d, "shutdown", on_shutdown_method_a2a_d, NULL);
+    /* L2 协议标准方法 a2a.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+    method_dispatcher_register(g_dispatcher_a2a_d, "get_stats", on_get_stats_method, NULL);
+    SVC_LOG_INFO("Registered %d RPC methods (a2a.* namespace)", 14);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_a2a_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
