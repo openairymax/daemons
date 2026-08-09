@@ -21,6 +21,18 @@ extern "C" {
 typedef struct tool_service tool_service_t;
 
 /**
+ * @brief 工具访问类型（改进1 P1d：并行工具并发门控）
+ *
+ * READ 工具只读无副作用 → 并发门控 read 锁（多工具并行执行）；
+ * WRITE 工具有副作用 → 并发门控 write 锁（互斥串行执行）。
+ * 枚举首项为 WRITE（=0），零初始化默认互斥串行（安全默认）。
+ */
+typedef enum {
+    TOOL_ACCESS_WRITE = 0, /**< 有副作用：互斥串行（默认，安全） */
+    TOOL_ACCESS_READ = 1,  /**< 只读：可并行执行 */
+} tool_access_t;
+
+/**
  * @brief 工具参数定义（JSON Schema 格式字符串）
  */
 typedef struct {
@@ -43,6 +55,7 @@ typedef struct {
     size_t param_count;
     int timeout_sec;       /* 执行超时（秒） */
     int cacheable;         /* 结果是否可缓存（0/1） */
+    tool_access_t access;  /* 访问类型（改进1 P1d）：READ 并发 / WRITE 串行 */
     char *permission_rule; /* 权限规则标识（与 cupolas 配合） */
 } tool_metadata_t;
 
@@ -58,6 +71,21 @@ typedef struct {
 } tool_execute_request_t;
 
 /**
+ * @brief 工具执行失败分级（改进3：Codex Fatal/RespondToModel/普通 三态）
+ *
+ * 上层（taskflow/工作大厅/蓝图调度）依据分级决定任务语义：
+ *   - FATAL             → 终止任务（fail-closed），级联取消相关执行
+ *   - RESPOND_TO_MODEL  → 结果回传上层，任务不终止（启动失败/审批拒绝等）
+ *   - NORMAL_FAIL       → 封装 success:false 回传，任务继续（可配重试）
+ */
+typedef enum {
+    TOOL_RESULT_CLASS_SUCCESS = 0,      /**< 成功（success==1） */
+    TOOL_RESULT_CLASS_FATAL,            /**< 致命：内存/安全层等系统级异常 */
+    TOOL_RESULT_CLASS_RESPOND_TO_MODEL, /**< 回传继续：-1 启动失败、审批拒绝 */
+    TOOL_RESULT_CLASS_NORMAL_FAIL,      /**< 普通失败：>0 退出码、-2 超时等 */
+} tool_result_class_t;
+
+/**
  * @brief 工具执行结果（非流式）
  */
 typedef struct {
@@ -66,6 +94,7 @@ typedef struct {
     char *error;          /* 标准错误 */
     int exit_code;        /* 进程退出码 */
     uint64_t duration_ms; /* 执行耗时 */
+    tool_result_class_t failure_class; /* 失败分级（改进3），成功时为 SUCCESS */
 } tool_result_t;
 
 /**

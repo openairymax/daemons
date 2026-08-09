@@ -324,7 +324,8 @@ static void test_strategy_enum_values(void)
     assert(SCHED_STRATEGY_ROUND_ROBIN == 0);
     assert(SCHED_STRATEGY_WEIGHTED == 1);
     assert(SCHED_STRATEGY_ML_BASED == 2);
-    assert(SCHED_STRATEGY_COUNT == 3);
+    assert(SCHED_STRATEGY_PRIORITY_BASED == 3);
+    assert(SCHED_STRATEGY_COUNT == 4);
 
     assert(TASK_PRIORITY_LOW == 0);
     assert(TASK_PRIORITY_NORMAL == 1);

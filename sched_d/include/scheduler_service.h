@@ -122,6 +122,19 @@ typedef struct {
     bool enable_ml_strategy;           /**< 是否启用机器学习策略 */
     char *ml_model_path;               /**< 机器学习模型路径 */
     uint32_t max_agents;               /**< 最大 Agent 数量 */
+    /* ---- DAG 并行派发（mac_framework 委派模式接线，0 = 保持串行） ----
+     * dag_max_parallel: 单轮同时派发的就绪节点上限（≤ SCHED_DAG_MAX_NODES）。
+     *                    0 = 保持现有单节点串行派发（兼容旧行为）。
+     * dag_batch_size:   每轮就绪节点批大小（≤ dag_max_parallel，0 = 默认取
+     *                    dag_max_parallel）。批量收集后经 mac_framework 委派
+     *                    → 线程池并发执行 → 汇聚回写节点状态。 */
+    uint32_t dag_max_parallel;         /**< DAG 节点并行度上限（0 = 串行） */
+    uint32_t dag_batch_size;           /**< 每轮就绪节点批大小（0 = dag_max_parallel） */
+    /* ---- 失败分级语义（改进3：Codex Fatal/普通 三态收敛到 sched 层） ----
+     * dag_fatal_cascade: true（生产默认）→ 仅 FATAL 类失败级联取消整个图
+     * （fail-closed），普通失败仅标记节点 FAILED 并取消依赖它的不可达下游，
+     * 图其余独立分支继续执行；false → 任意节点失败即级联取消整图（旧行为）。 */
+    bool dag_fatal_cascade;            /**< 仅 FATAL 级联取消整图（默认 true） */
 } sched_config_t;
 
 /**

@@ -671,7 +671,38 @@ int main(int argc, char **argv)
                              .stats_report_interval_ms = 10000,
                              .enable_ml_strategy = false,
                              .ml_model_path = NULL,
-                             .max_agents = 100};
+                             .max_agents = 100,
+                             /* DAG 并行派发：0 = 串行（默认保持旧行为）。
+                              * 环境变量 AIRY_DAG_PARALLEL=N（N≥1）启用
+                              * mac_framework 委派模式并行，N 为并行度上限。 */
+                             .dag_max_parallel = 0,
+                             .dag_batch_size = 0,
+                             /* 失败分级语义（改进3）：生产默认仅 FATAL
+                              * 级联取消整图，普通失败不中断独立分支。
+                              * AIRY_DAG_FATAL_CASCADE=0 恢复旧行为。 */
+                             .dag_fatal_cascade = true};
+    {
+        const char *dag_fc = getenv("AIRY_DAG_FATAL_CASCADE");
+        if (dag_fc && dag_fc[0] != '\0' && strcmp(dag_fc, "0") == 0) {
+            config.dag_fatal_cascade = false;
+            SVC_LOG_WARN("sched: DAG fatal-cascade disabled "
+                         "(AIRY_DAG_FATAL_CASCADE=0) — any node failure aborts graph");
+        }
+    }
+    {
+        const char *dag_par = getenv("AIRY_DAG_PARALLEL");
+        if (dag_par && dag_par[0] != '\0') {
+            unsigned long pv = strtoul(dag_par, NULL, 10);
+            if (pv > 0 && pv <= SCHED_DAG_MAX_NODES) {
+                config.dag_max_parallel = (uint32_t)pv;
+                SVC_LOG_INFO("sched: DAG parallel mode enabled via AIRY_DAG_PARALLEL=%lu",
+                             pv);
+            } else {
+                SVC_LOG_WARN("sched: invalid AIRY_DAG_PARALLEL=%s (1..%d), fallback serial",
+                             dag_par, SCHED_DAG_MAX_NODES);
+            }
+        }
+    }
 
     /* 创建调度服务 */
     int ret = sched_service_create(&config, &g_service);

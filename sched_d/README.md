@@ -39,7 +39,63 @@ sched_d/
 └── tests/                            # 单元测试
     ├── CMakeLists.txt
     ├── test_scheduler.c              # 调度器测试
-    └── test_strategies.c             # 策略测试
+    ├── test_strategies.c             # 策略测试
+    └── test_dag.c                    # DAG 任务图引擎测试（串行/并行委派/group+consensus）
+```
+
+## DAG 任务图与并行派发（mac_framework 委派模式）
+
+### DAG 引擎概览
+
+`daemons/sched_d/` 内置 DAG 任务图执行引擎（工作大厅机制，详见伞仓 `docs/AirymaxRT/10-architecture/08-work-hall.md`）：
+
+- **提交**：`sched_service_submit_dag(svc, dag_json, &dag_id)` 提交带依赖的任务图（JSON 声明 nodes: id/goal/depends），Kahn 拓扑校验拒绝环（`AIRY_ERR_CYCLE_DETECTED`）
+- **执行**：dag 工作线程按拓扑派发就绪节点（依赖全部完成），节点经注入 executor（`sched_dispatch_executor` → agent_d spawn/invoke）真实执行
+- **失败语义**：节点失败即中止该图并取消其余未完成节点（fail-fast 级联取消）
+- **看板**：`sched_service_get_dag(svc, dag_id, &json)` 查询图/节点状态快照
+
+### 并行度配置链路（完整透传）
+
+DAG 并行派发通过 mac_framework（multi_agent_collaboration）**委派模式**接线：就绪节点批量收集 → 委派选人 → 线程池并发执行 → 汇聚回写。配置从顶层到引擎完整传递，**0 = 保持串行**（默认，兼容旧行为）：
+
+```
+┌──────────────────────────────┐
+│ 服务框架配置（airy_svc_config_t）│
+│  capabilities |= AIRY_SVC_CAP_BATCH      │ ← 声明 BATCH 能力
+│  max_concurrent = N                      │ ← 并行度来源
+└──────────────┬───────────────┘
+               │ sched_svc_adapter.c: sched_config_from_common()
+               │  （clamp 至 SCHED_DAG_MAX_NODES=64）
+┌──────────────▼───────────────┐
+│ sched_config_t                │
+│  dag_max_parallel = N         │ ← 0 = 串行
+│  dag_batch_size   = 0        │ ← 0 = 取 dag_max_parallel
+└──────────────┬───────────────┘
+               │ sched_service_create()
+               │  （thread_pool min=max=dag_max_parallel 固定常驻）
+┌──────────────▼───────────────┐
+│ mac_framework (委派模式)       │
+│  sched_mac_sync_agent()       │ ← performance/reliability/max_concurrent_tasks
+│  delegate_batch → 线程池并发    │
+│  complete_task → 槽位释放闭环   │
+└──────────────────────────────┘
+```
+
+- **方式一（守护进程）**：环境变量 `AIRY_DAG_PARALLEL=N`（`0 < N ≤ SCHED_DAG_MAX_NODES`），见 `src/main.c`
+- **方式二（框架接入）**：服务配置声明 `AIRY_SVC_CAP_BATCH` 且 `max_concurrent > 0`，适配器透传，见 `src/sched_svc_adapter.c`
+
+> **注意**：`dag_max_parallel` 会创建同等数量的常驻线程池 worker（thread_pool 不动态扩增），透传时须 clamp 至 `SCHED_DAG_MAX_NODES` 防止失控。
+
+### 测试用例（tests/test_dag.c）
+
+| 用例 | 验证内容 |
+|------|----------|
+| `test_dag_parallel_delegation` | 菱形 DAG 委派模式并行：并发窗口实测 ≥2，拓扑顺序不破坏（用例 7） |
+| `test_dag_group_consensus_collab` | 委派模式 + group 协作 + consensus 机制：3 名评审 agent 建组、批量委派、结果收集、MAJORITY 通过 / UNANIMOUS 一票否决、重复投票拒绝（用例 8） |
+
+```bash
+# 运行 DAG 相关测试
+ctest --test-dir <build> -R 'sched_d_test_dag' --output-on-failure
 ```
 
 ## 核心组件说明
@@ -133,6 +189,8 @@ typedef struct {
     bool enable_ml_strategy;
     char *ml_model_path;
     uint32_t max_agents;
+    uint32_t dag_max_parallel; /* DAG 节点并行度上限（0 = 串行，默认） */
+    uint32_t dag_batch_size;   /* 每轮就绪节点批大小（0 = 取 dag_max_parallel） */
 } sched_config_t;
 
 typedef struct {

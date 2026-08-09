@@ -41,6 +41,8 @@ set(SCHED_COMMON_INCLUDES
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
+    # DAG 并行派发（mac_framework 委派模式）：sched_service_impl.c 引用其头
+    ${ATOMIC_DIR}/coreloopthree/include
 )
 
 foreach(TEST_SRC ${SCHED_TEST_SOURCES})
@@ -53,6 +55,7 @@ foreach(TEST_SRC ${SCHED_TEST_SOURCES})
     target_link_libraries(test_sched_${TEST_NAME} PRIVATE
         svc_common
         airy_common
+        airy_coreloopthree
         Threads::Threads
         m
     )
@@ -61,6 +64,7 @@ foreach(TEST_SRC ${SCHED_TEST_SOURCES})
         -Wall
         -Wextra
         -Wno-unused-function
+        -UAIRY_USE_SCHEDULER_THREAD_IMPL
     )
 
     add_test(NAME sched_d_${TEST_NAME} COMMAND test_sched_${TEST_NAME})

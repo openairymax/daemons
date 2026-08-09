@@ -97,21 +97,35 @@ static int agent_write_all(int fd, const char *buf, size_t len)
     return 0;
 }
 
-/* 带超时地从 fd 读取一行（以 '\n' 结尾）。
- * 成功时 buf 中存放不含 '\n' 的 null 结尾字符串，返回 0；
- * 超时或 EOF 或出错返回 -1。逐字节读取以避免跨行缓冲。 */
-static int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeout_s)
+/* 带超时地从 fd 读取一行（以 '\n' 结尾），支持取消令牌短轮询（改进1）。
+ * 成功时 buf 中存放不含 '\n' 的 null 结尾字符串。
+ * 返回：0=完整行；1=缓冲满截断（buf 已 null 结尾，调用方需标记）；
+ *      -1=超时/EOF/出错；-2=取消（token 命中）。
+ * select 以 200ms 短片轮询，保证取消判定粒度；逐字节读取避免跨行缓冲。 */
+static int agent_read_line_timeout_ex(int fd, char *buf, size_t buf_size, int timeout_s,
+                                      airy_cancel_token_t *token)
 {
     if (buf_size < 2)
         return -1;
-    fd_set rfds;
-    struct timeval tv;
+    uint64_t deadline_ms = airy_time_ms() + (uint64_t)(timeout_s > 0 ? timeout_s : 300) * 1000U;
     size_t pos = 0;
     while (pos < buf_size - 1) {
+        /* 取消检查：命中立即中止（与超时 -1 区分，返回 -2） */
+        if (token && airy_cancel_token_is_canceled(token))
+            return -2;
+        uint64_t now = airy_time_ms();
+        if (now >= deadline_ms)
+            return -1; /* 超时 */
+        uint32_t remain = (uint32_t)(deadline_ms - now);
+        if (remain > 200U)
+            remain = 200U; /* 短片轮询：取消粒度 200ms */
+
+        fd_set rfds;
+        struct timeval tv;
         FD_ZERO(&rfds);
         FD_SET(fd, &rfds);
-        tv.tv_sec = timeout_s;
-        tv.tv_usec = 0;
+        tv.tv_sec = remain / 1000U;
+        tv.tv_usec = (remain % 1000U) * 1000U;
         int rv = select(fd + 1, &rfds, NULL, NULL, &tv);
         if (rv < 0) {
             if (errno == EINTR)
@@ -119,7 +133,7 @@ static int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeo
             return -1;
         }
         if (rv == 0)
-            return -1; /* 超时 */
+            continue; /* 本片超时：回到循环顶部复查 token 与总 deadline */
         ssize_t n = read(fd, buf + pos, 1);
         if (n < 0) {
             if (errno == EINTR)
@@ -135,7 +149,13 @@ static int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeo
         pos++;
     }
     buf[buf_size - 1] = '\0';
-    return 0;
+    return 1; /* 缓冲满：截断，明确标记 */
+}
+
+/* 无取消令牌版本（既有语义不变，token=NULL） */
+static int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeout_s)
+{
+    return agent_read_line_timeout_ex(fd, buf, buf_size, timeout_s, NULL);
 }
 
 /* 从 spec JSON 中提取 language 字段，默认 "python"。
@@ -231,6 +251,9 @@ static int agent_spawn_child(const char *spec, const char *agent_id,
         /* 子进程：重定向 stdin/stdout 到管道，关闭父进程持有的端 */
         close(stdin_pipe[1]);
         close(stdout_pipe[0]);
+        /* 改进1：自建进程组（setpgid(0,0)），使终止可按组 SIGTERM/SIGKILL
+         * 级联到 runner 派生的全部子进程（优雅终止整棵进程树）。 */
+        setpgid(0, 0);
         if (dup2(stdin_pipe[0], STDIN_FILENO) < 0)
             _exit(127);
         if (dup2(stdout_pipe[1], STDOUT_FILENO) < 0)
@@ -303,14 +326,16 @@ fallback_python:
 }
 
 /* 回收子进程并关闭管道句柄（terminate / invoke 失败 / destroy 调用）。
- * 先 SIGTERM，等待最多 2 秒，仍不退出则 SIGKILL，最后 waitpid 回收僵尸。 */
+ * 先对进程组 SIGTERM，等待最多 2 秒，仍不退出则对进程组 SIGKILL，
+ * 最后 waitpid 回收组长僵尸（子进程 spawn 时 setpgid(0,0) 自成进程组，
+ * 负 pid 信号级联到 runner 派生的全部子进程）。 */
 static void agent_kill_and_reap(pid_t *pid_ptr, int *stdin_ptr, int *stdout_ptr)
 {
     pid_t pid = *pid_ptr;
     if (pid <= 0)
         return;
 
-    kill(pid, SIGTERM);
+    kill(-pid, SIGTERM);
     /* 非阻塞轮询 2 秒等待退出 */
     for (int i = 0; i < 20; i++) {
         int status = 0;
@@ -324,7 +349,7 @@ static void agent_kill_and_reap(pid_t *pid_ptr, int *stdin_ptr, int *stdout_ptr)
     /* 仍存活则 SIGKILL */
     int status = 0;
     if (waitpid(pid, &status, WNOHANG) == 0) {
-        kill(pid, SIGKILL);
+        kill(-pid, SIGKILL);
         waitpid(pid, &status, 0);
     }
 
@@ -775,7 +800,9 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id)
 }
 
 int agent_service_invoke(agent_service_t *svc, const char *agent_id,
-                          const char *input, size_t len, char **out_output)
+                          const char *input, size_t len,
+                          airy_cancel_token_t *cancel_token,
+                          char **out_output)
 {
     if (!svc || !svc->initialized || !agent_id || !out_output)
         return AIRY_ERR_INVALID_PARAM;
@@ -857,17 +884,36 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id,
         /* P0-3：成功向子进程写入请求视为活跃，更新空闲回收基准 */
         agent->last_active = (uint64_t)time(NULL);
 
-        /* 从子进程 stdout 读响应行（带超时） */
+        /* 从子进程 stdout 读响应行（带超时 + 取消令牌短轮询，改进1） */
         char *resp_buf = (char *)AIRY_MALLOC(AGENT_RESP_BUF_SIZE);
         if (!resp_buf) {
             airy_mtx_unlock(&agent->entry_lock);
             *out_output = AIRY_STRDUP("{\"error\":\"out of memory\"}");
             return AIRY_ERR_OUT_OF_MEMORY;
         }
-        int rrc = agent_read_line_timeout(sout_fd, resp_buf,
-                                          AGENT_RESP_BUF_SIZE,
-                                          agent_invoke_timeout_s());
-        if (rrc != 0) {
+        int rrc = agent_read_line_timeout_ex(sout_fd, resp_buf,
+                                             AGENT_RESP_BUF_SIZE,
+                                             agent_invoke_timeout_s(),
+                                             cancel_token);
+        if (rrc == -2) {
+            /* 取消：优雅终止子进程（SIGTERM→2s→SIGKILL 进程组），
+             * 以 AbortedOutput 收尾，与超时（fallback 路径）明确区分 */
+            AIRY_FREE(resp_buf);
+            SVC_LOG_WARN("Agent invoke canceled, terminating child: agent_id=%s",
+                         agent_id);
+            agent_kill_and_reap(&agent->child_pid,
+                                &agent->stdin_fd,
+                                &agent->stdout_fd);
+            airy_mtx_unlock(&agent->entry_lock);
+            *out_output = AIRY_STRDUP(
+                "{\"success\":false,\"error\":\"aborted\",\"aborted\":true}");
+            airy_atomic_fetch_add(&svc->m_invoke_fail, 1);
+            agent_perf_accumulate(&svc->m_invoke_us_total,
+                                  &svc->m_invoke_us_max,
+                                  agent_perf_now_us() - perf_t0);
+            return AIRY_ERR_CANCELED;
+        }
+        if (rrc < 0) {
             AIRY_FREE(resp_buf);
             SVC_LOG_WARN("Agent invoke read failed, child unusable: agent_id=%s",
                          agent_id);
@@ -878,6 +924,21 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id,
         }
         /* 收到响应同样刷新活跃时间 */
         agent->last_active = (uint64_t)time(NULL);
+
+        /* rrc==1：响应超过 AGENT_RESP_BUF_SIZE 被截断，追加显式标记
+         * 防止静默丢数据（调用方可检测 \n...[truncated] 后缀） */
+        if (rrc == 1) {
+            static const char TRUNC_SUFFIX[] = "\n...[agent response truncated]";
+            size_t slen = strlen(resp_buf);
+            size_t avail = AGENT_RESP_BUF_SIZE - slen - 1;
+            if (avail >= sizeof(TRUNC_SUFFIX) - 1)
+                AIRY_MEMCPY(resp_buf + slen, TRUNC_SUFFIX, sizeof(TRUNC_SUFFIX));
+            else if (avail > 1)
+                AIRY_MEMCPY(resp_buf + slen, TRUNC_SUFFIX, avail - 1);
+            resp_buf[AGENT_RESP_BUF_SIZE - 1] = '\0';
+            SVC_LOG_WARN("Agent invoke response truncated at %d bytes (agent_id=%s)",
+                         (int)AGENT_RESP_BUF_SIZE, agent_id);
+        }
 
         /* 解析响应 JSON，提取 output 字段（runner.py 约定）。
          * 成功: {"success":true,"output":"..."}

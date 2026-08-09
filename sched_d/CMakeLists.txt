@@ -83,9 +83,23 @@ target_include_directories(sched_d PRIVATE
 # 链接库
 target_link_libraries(sched_d PRIVATE
     svc_common
+    airy_coreloopthree
     Threads::Threads
     ${CJSON_LIBRARIES}
 )
+
+# DAG 并行派发（mac_framework 委派模式）：multi_agent_collaboration.h 位于
+# coreloopthree/include，airy_rt.h 位于 corekern/include（head include 链）。
+target_include_directories(sched_d PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../atoms/coreloopthree/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../atoms/corekern/include
+)
+
+# airy_coreloopthree → airy_core 会 PUBLIC 传播 AIRY_USE_SCHEDULER_THREAD_IMPL
+# （corekern 调度器线程实现）。sched_d 未初始化 corekern scheduler，撤销该宏
+# 恢复 platform.h 的 airy_thread_create → airy_platform_thread_create 宏路径
+# （commons 平台线程实现，随 airy_common 链接），与既有线程用法保持一致。
+target_compile_options(sched_d PRIVATE -UAIRY_USE_SCHEDULER_THREAD_IMPL)
 
 # 编译选项
 target_compile_options(sched_d PRIVATE
