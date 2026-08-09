@@ -7,6 +7,7 @@
  */
 
 #include "agent_service.h"
+#include "service.h" /* 内部结构：手工注入子进程句柄以验证 invoke 取消路径 */
 
 #include "airy_memory.h"
 
@@ -15,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h> /* fork/pipe/dup2 */
 
 static void test_create_destroy(void)
 {
@@ -82,7 +84,7 @@ static void test_terminate(void)
     assert(agent_service_count(svc) == 1);
 
     char *out_output = NULL;
-    ret = agent_service_invoke(svc, agent_id, "ping", 4, &out_output);
+    ret = agent_service_invoke(svc, agent_id, "ping", 4, NULL, &out_output);
     assert(ret != AIRY_SUCCESS);
     assert(out_output != NULL);
     assert(strstr(out_output, "error") != NULL);
@@ -109,7 +111,7 @@ static void test_invoke(void)
     char *out_output = NULL;
     /* P0-2：AIRY_AGENT_NO_SPAWN 模式下无子进程，invoke 必须返回明确
      * 错误，而非"invocation processed"假成功 */
-    ret = agent_service_invoke(svc, agent_id, "hello", 5, &out_output);
+    ret = agent_service_invoke(svc, agent_id, "hello", 5, NULL, &out_output);
     assert(ret != AIRY_SUCCESS);
     assert(out_output != NULL);
     assert(strstr(out_output, "error") != NULL);
@@ -129,7 +131,7 @@ static void test_invoke_nonexistent(void)
     assert(svc != NULL);
 
     char *out_output = NULL;
-    int ret = agent_service_invoke(svc, "nonexistent_agent_id", "hi", 2, &out_output);
+    int ret = agent_service_invoke(svc, "nonexistent_agent_id", "hi", 2, NULL, &out_output);
     assert(ret == AIRY_ERR_NOT_FOUND);
     assert(out_output != NULL);
     assert(strstr(out_output, "Agent not found") != NULL);
@@ -208,7 +210,7 @@ static void test_spawn_after_terminate(void)
 
     /* r2 仍可调用：no-spawn 模式下返回明确错误（P0-2） */
     char *out_output = NULL;
-    int irc = agent_service_invoke(svc, r2, "hi", 2, &out_output);
+    int irc = agent_service_invoke(svc, r2, "hi", 2, NULL, &out_output);
     assert(irc != AIRY_SUCCESS);
     AIRY_FREE(out_output);
 
@@ -219,6 +221,88 @@ static void test_spawn_after_terminate(void)
 
     printf("    PASSED\n");
 }
+
+/* ========== P1c（改进1）：invoke 取消（token 短轮询 + 优雅终止 + AbortedOutput） ========== */
+
+/* 取消线程：延迟 150ms 后触发取消令牌 */
+static void *invoke_cancel_thread(void *arg)
+{
+    airy_sleep_ms(150);
+    airy_cancel_token_cancel((airy_cancel_token_t *)arg);
+    return NULL;
+}
+
+static void test_invoke_cancel(void)
+{
+    printf("  test_invoke_cancel...\n");
+
+    agent_service_t *svc = agent_service_create(8);
+    assert(svc != NULL);
+
+    /* no-spawn 模式注册槽位（child_pid=0），随后手工注入真实子进程 */
+    char *agent_id = NULL;
+    int ret = agent_service_spawn(svc, "{\"type\":\"block\"}", &agent_id);
+    assert(ret == AIRY_SUCCESS && agent_id != NULL);
+
+    /* 注入子进程：读一行请求后静默 30s（不响应），模拟慢 LLM 调用 */
+    int in_pipe[2], out_pipe[2];
+    assert(pipe(in_pipe) == 0 && pipe(out_pipe) == 0);
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        close(in_pipe[0]); close(in_pipe[1]);
+        close(out_pipe[0]); close(out_pipe[1]);
+        setpgid(0, 0); /* 自成进程组：父进程按组 SIGTERM/SIGKILL 级联 */
+        char buf[64];
+        (void)read(STDIN_FILENO, buf, sizeof(buf)); /* 收到 invoke 请求后阻塞 */
+        sleep(30);                                  /* 兜底，正常由 SIGTERM 终止 */
+        _exit(0);
+    }
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+
+    /* 定位槽位并注入 child 句柄（单线程测试，无并发竞争） */
+    agent_entry_internal_t *agent = NULL;
+    for (size_t i = 0; i < svc->agent_count; i++) {
+        if (strcmp(svc->agents[i].agent_id, agent_id) == 0) {
+            agent = &svc->agents[i];
+            break;
+        }
+    }
+    assert(agent != NULL);
+    agent->child_pid = pid;
+    agent->stdin_fd = in_pipe[1];   /* 父写端：invoke 写请求 */
+    agent->stdout_fd = out_pipe[0]; /* 父读端：invoke 读响应 */
+    agent->status = AGENT_STATUS_RUNNING;
+    agent->last_active = (uint64_t)time(NULL);
+
+    /* 取消令牌 + 异步取消线程 */
+    airy_cancel_token_t token;
+    assert(airy_cancel_token_init(&token) == 0);
+    airy_thread_t th;
+    assert(airy_platform_thread_create(&th, invoke_cancel_thread, &token) == 0);
+
+    /* invoke 阻塞读响应；150ms 后 token 命中 → 优雅终止子进程 → AbortedOutput */
+    char *out_output = NULL;
+    ret = agent_service_invoke(svc, agent_id, "ping", 4, &token, &out_output);
+    assert(airy_platform_thread_join(th, NULL) == 0);
+
+    assert(ret == AIRY_ERR_CANCELED);
+    assert(out_output != NULL);
+    assert(strstr(out_output, "aborted") != NULL); /* AbortedOutput 标记 */
+    assert(agent->child_pid <= 0);                 /* 子进程已被回收 */
+
+    AIRY_FREE(out_output);
+    AIRY_FREE(agent_id);
+    airy_cancel_token_destroy(&token);
+    agent_service_destroy(svc);
+
+    printf("    PASSED\n");
+}
+
+/* ========== main ========== */
 
 int main(void)
 {
@@ -235,6 +319,8 @@ int main(void)
     test_terminate_nonexistent();
     test_capacity_limit();
     test_spawn_after_terminate();
+    /* 改进1（P1c）：invoke 取消令牌（select 短轮询 + 优雅终止 + AbortedOutput） */
+    test_invoke_cancel();
     printf("=== All tests PASSED ===\n");
     return 0;
 }

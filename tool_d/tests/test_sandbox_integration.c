@@ -309,7 +309,7 @@ static void test_executor_sandbox_integration(void)
     meta.timeout_sec = 5;
 
     tool_result_t *result = NULL;
-    int ret = tool_executor_run(exec, &meta, "hello", &result);
+    int ret = tool_executor_run(exec, &meta, "hello", NULL, &result);
 
     /* 验证：未设置 approval_ctx → fail-closed 拒绝（EPERM）
      * 注意：AIRY_EPERM 在 executor.c 中作为 approval_ctx NULL 的返回值。

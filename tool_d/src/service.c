@@ -96,6 +96,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 30,
             .cacheable = 0,
             .permission_rule = "fs_read",
+            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
         },
         {
             .id = "fs_write",
@@ -107,6 +108,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 30,
             .cacheable = 0,
             .permission_rule = "fs_write",
+            .access = TOOL_ACCESS_WRITE, /* 有副作用：互斥串行 */
         },
         {
             .id = "fs_list",
@@ -118,6 +120,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 30,
             .cacheable = 1,
             .permission_rule = "fs_list",
+            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
         },
         {
             .id = "shell_run",
@@ -129,6 +132,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 60,
             .cacheable = 0,
             .permission_rule = "shell_run",
+            .access = TOOL_ACCESS_WRITE, /* 有副作用：互斥串行 */
         },
         {
             .id = "web_fetch",
@@ -140,6 +144,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 45,
             .cacheable = 1,
             .permission_rule = "web_fetch",
+            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
         },
         {
             .id = "fs_glob",
@@ -151,6 +156,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 30,
             .cacheable = 0,
             .permission_rule = "fs_glob",
+            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
         },
         {
             .id = "fs_grep",
@@ -162,6 +168,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 60,
             .cacheable = 0,
             .permission_rule = "fs_grep",
+            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
         },
         {
             .id = "fs_edit",
@@ -173,6 +180,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 30,
             .cacheable = 0,
             .permission_rule = "fs_edit",
+            .access = TOOL_ACCESS_WRITE, /* 有副作用：互斥串行 */
         },
         {
             .id = "web_search",
@@ -184,6 +192,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 45,
             .cacheable = 1,
             .permission_rule = "web_search",
+            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
         },
         {
             .id = "git_exec",
@@ -195,6 +204,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 60,
             .cacheable = 0,
             .permission_rule = "git_exec",
+            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
         },
         {
             .id = "git_diff",
@@ -206,6 +216,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 60,
             .cacheable = 0,
             .permission_rule = "git_diff",
+            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
         },
         {
             .id = "git_apply",
@@ -217,6 +228,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 60,
             .cacheable = 0,
             .permission_rule = "git_apply",
+            .access = TOOL_ACCESS_WRITE, /* 有副作用：互斥串行 */
         },
     };
 
