@@ -231,34 +231,6 @@ int airy_get_sysinfo(airy_sysinfo_t *info)
 #endif
 }
 
-int airy_atomic_load(airy_atomic_int_t *atomic)
-{
-    if (!atomic)
-        return 0;
-    return atomic_load_explicit(atomic, memory_order_seq_cst);
-}
-
-void airy_atomic_store(airy_atomic_int_t *atomic, int value)
-{
-    if (!atomic)
-        return;
-    atomic_store_explicit(atomic, value, memory_order_seq_cst);
-}
-
-int airy_atomic_fetch_add(airy_atomic_int_t *atomic, int value)
-{
-    if (!atomic)
-        return 0;
-    return atomic_fetch_add_explicit(atomic, value, memory_order_seq_cst);
-}
-
-int airy_atomic_fetch_sub(airy_atomic_int_t *atomic, int value)
-{
-    if (!atomic)
-        return 0;
-    return atomic_fetch_sub_explicit(atomic, value, memory_order_seq_cst);
-}
-
 /* ==================== Socket 兼容层（生产级真实实现） ==================== */
 /* SEC-017合规：基于POSIX Socket API的真实网络通信实现 */
 

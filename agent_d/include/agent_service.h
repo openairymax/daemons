@@ -16,6 +16,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* 改进1（异步可中断）：invoke 支持取消令牌（select/poll 非阻塞 + token 轮询） */
+#include "cancel_token.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -45,12 +48,18 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id);
 
 /**
  * @brief 调用指定 Agent
+ * @param cancel_token [in] 取消令牌（可为 NULL）：invoke 阻塞读响应期间
+ *        短轮询该令牌，命中则优雅终止子进程（SIGTERM→2s→SIGKILL）并以
+ *        AbortedOutput 收尾，返回 AIRY_ERR_CANCELED（区别于超时路径）
  * @return AIRY_SUCCESS 成功，*out_output 输出 JSON 结果字符串（调用方负责 AIRY_FREE）；
  *         AIRY_ERR_NOT_FOUND Agent 不存在；
- *         AIRY_ERR_STATE_ERROR Agent 未运行（已终止）
+ *         AIRY_ERR_STATE_ERROR Agent 未运行（已终止）；
+ *         AIRY_ERR_CANCELED 执行被取消（AbortedOutput）
  */
 int agent_service_invoke(agent_service_t *svc, const char *agent_id,
-                          const char *input, size_t len, char **out_output);
+                          const char *input, size_t len,
+                          airy_cancel_token_t *cancel_token,
+                          char **out_output);
 
 /**
  * @brief 列出所有 Agent ID

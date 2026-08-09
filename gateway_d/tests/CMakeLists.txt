@@ -93,6 +93,13 @@ foreach(TEST_SRC ${TEST_SOURCES})
         endif()
     endif()
 
+    # nghttp2 链接（HTTP/2 支持）：gateway_lib_obj 含 http2_gateway.c，
+    # 引用 nghttp2 符号，测试目标必须显式链接（与 gateway_d 主目标同模式，
+    # 使用完整路径避免系统仅有 .so.14 无 .so 软链接时 -lnghttp2 找不到）。
+    if(AIRY_HAS_HTTP2 AND NGHTTP2_LIBRARY)
+        target_link_libraries(${TEST_NAME} PRIVATE ${NGHTTP2_LIBRARY})
+    endif()
+
     target_compile_options(${TEST_NAME} PRIVATE -Wall -Wextra -g -Wno-unused-function)
 
     add_test(NAME gateway_d_${TEST_NAME} COMMAND ${TEST_NAME}

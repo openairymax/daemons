@@ -456,7 +456,7 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
     uint64_t perf_t0 = perf_now_us();
     char *out_output = NULL;
     int ret = agent_service_invoke(g_service, agent_id->valuestring,
-                                     input_str, input_len, &out_output);
+                                     input_str, input_len, NULL, &out_output);
 
     /* 慢请求监控：invoke 含子进程 LLM 往返，超过阈值（默认 1s）打 WARN */
     {

@@ -47,6 +47,22 @@ static void sched_config_from_common(sched_config_t *sched_cfg,
     sched_cfg->ml_model_path = NULL;
     sched_cfg->max_agents =
         (common_cfg && common_cfg->max_concurrent > 0) ? common_cfg->max_concurrent : 100;
+
+    /* DAG 并行派发透传（语义与 main.c AIRY_DAG_PARALLEL 一致：0 = 串行）：
+     * 服务声明 BATCH 能力（AIRY_SVC_CAP_BATCH）且 max_concurrent>0 时启用，
+     * 并行度取 max_concurrent。clamp 至 SCHED_DAG_MAX_NODES——线程池按并行度
+     * 创建常驻 worker（min=max），超限会创建失控数量的线程。
+     * dag_batch_size 留 0：sched_service_create 默认取 dag_max_parallel。 */
+    if (common_cfg && (common_cfg->capabilities & AIRY_SVC_CAP_BATCH) &&
+        common_cfg->max_concurrent > 0) {
+        sched_cfg->dag_max_parallel =
+            (common_cfg->max_concurrent > SCHED_DAG_MAX_NODES)
+                ? SCHED_DAG_MAX_NODES
+                : common_cfg->max_concurrent;
+    }
+    /* 失败分级语义（改进3）：生产默认仅 FATAL 级联取消整图，
+     * 普通失败不中断图其余独立分支。 */
+    sched_cfg->dag_fatal_cascade = true;
 }
 
 static airy_err_t sched_adapter_init(airy_svc_t service,
