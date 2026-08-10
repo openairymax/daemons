@@ -67,4 +67,12 @@ target_compile_options(observe_d PRIVATE
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
 
+# 测试支持
+if(BUILD_TESTS)
+    enable_testing()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+        add_subdirectory(tests)
+    endif()
+endif()
+
 install(TARGETS observe_d DESTINATION bin)

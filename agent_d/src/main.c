@@ -2,7 +2,7 @@
 #include "error.h"
 /*
  * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2026 SPHARX.
+ * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
  * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file main.c
@@ -327,6 +327,7 @@ static void sched_d_register_spawned_agent(const char *agent_id, const char *spe
 static void handle_spawn(cJSON *params, int id, airy_sock_t fd);
 static void handle_terminate(cJSON *params, int id, airy_sock_t fd);
 static void handle_invoke(cJSON *params, int id, airy_sock_t fd);
+static void handle_cancel(cJSON *params, int id, airy_sock_t fd);
 static void handle_list(int id, airy_sock_t fd);
 static void handle_count(int id, airy_sock_t fd);
 static void handle_health_check(int id, airy_sock_t fd);
@@ -345,6 +346,11 @@ static void on_terminate_method(cJSON *params, int id, void *user_data)
 static void on_invoke_method(cJSON *params, int id, void *user_data)
 {
     handle_invoke(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_cancel_method(cJSON *params, int id, void *user_data)
+{
+    handle_cancel(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_list_method(cJSON *params __attribute__((unused)), int id, void *user_data)
@@ -453,10 +459,30 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
     const char *input_str = input && cJSON_IsString(input) ? input->valuestring : "";
     size_t input_len = strlen(input_str);
 
+    /* 改进1（取消下探）：可选 request_id 参数开启跨进程取消会话。
+     * 调用方（wh_agent_invoke 等）传入唯一 request_id，invoke 阻塞期间
+     * 可通过 agent.cancel RPC 按 request_id 终止子进程（SIGTERM→SIGKILL）。 */
+    cJSON *request_id_item = cJSON_GetObjectItem(params, "request_id");
+    const char *request_id =
+        (request_id_item && cJSON_IsString(request_id_item) &&
+         request_id_item->valuestring && request_id_item->valuestring[0])
+            ? request_id_item->valuestring
+            : NULL;
+
+    airy_cancel_token_t *token = NULL;
+    if (request_id) {
+        if (agent_service_invoke_begin(g_service, request_id, &token) !=
+            AIRY_SUCCESS) {
+            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
+                               "Invoke session register failed", id);
+            return;
+        }
+    }
+
     uint64_t perf_t0 = perf_now_us();
     char *out_output = NULL;
     int ret = agent_service_invoke(g_service, agent_id->valuestring,
-                                     input_str, input_len, NULL, &out_output);
+                                     input_str, input_len, token, &out_output);
 
     /* 慢请求监控：invoke 含子进程 LLM 往返，超过阈值（默认 1s）打 WARN */
     {
@@ -467,6 +493,9 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
                          (unsigned long long)elapsed, (long long)slow_us,
                          agent_id->valuestring);
     }
+
+    if (request_id)
+        agent_service_invoke_end(g_service, request_id);
 
     if (ret == AIRY_SUCCESS && out_output) {
         cJSON *result = cJSON_CreateObject();
@@ -480,10 +509,38 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
     AIRY_FREE(out_output);
     if (ret == AIRY_ERR_NOT_FOUND) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Agent not found", id);
+    } else if (ret == AIRY_ERR_CANCELED) {
+        /* 跨进程取消：invoke 被 agent.cancel 终止（AbortedOutput 收尾） */
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent invoke canceled", id);
     } else {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent invoke failed", id);
     }
     SVC_LOG_ERROR("agent.invoke failed: error=%d", ret);
+}
+
+/* 改进1（取消下探）：agent.cancel — 按 request_id 取消活跃 invoke 会话。
+ * 跨进程取消链路：调用方 daemon_rpc_call_cancelable 在取消令牌命中时发送
+ * 本方法 → service 层 select 轮询感知 token → SIGTERM→2s→SIGKILL 子进程 →
+ * 原 invoke 以 AbortedOutput 收尾返回（调用方据此区分"取消"与"超时"）。 */
+static void handle_cancel(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *request_id = cJSON_GetObjectItem(params, "request_id");
+
+    if (!request_id || !cJSON_IsString(request_id)) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing request_id", id);
+        return;
+    }
+
+    int ret = agent_service_invoke_cancel(g_service, request_id->valuestring);
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND,
+                           "No active invoke for request_id", id);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddBoolToObject(result, "canceled", true);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
 static void handle_list(int id, airy_sock_t client_fd)
@@ -720,6 +777,10 @@ int main(int argc, char **argv)
     ev_config.thread_pool_max = 128;
     ev_config.thread_pool_queue_size = 4096;
     ev_config.use_jsonrpc = true;
+    /* 改进1（取消下探）：必须开启并发客户端。invoke 是长请求（LLM 往返
+     * 最长 300s），若同步逐请求处理会阻塞事件循环，agent.cancel 请求
+     * 将永远无法到达——跨进程取消依赖并发处理（与 tool_d 同款配置）。 */
+    ev_config.concurrent_clients = true;
     ev_config.on_client = daemon_on_client_agent_d;
     ev_config.service_ctx = NULL;
 
@@ -742,6 +803,7 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_agent_d, "spawn", on_spawn_method, NULL);
     method_dispatcher_register(g_dispatcher_agent_d, "terminate", on_terminate_method, NULL);
     method_dispatcher_register(g_dispatcher_agent_d, "invoke", on_invoke_method, NULL);
+    method_dispatcher_register(g_dispatcher_agent_d, "cancel", on_cancel_method, NULL);
     method_dispatcher_register(g_dispatcher_agent_d, "list", on_list_method, NULL);
     method_dispatcher_register(g_dispatcher_agent_d, "count", on_count_method, NULL);
     /* L2 协议标准方法（02-l2-service-protocol.md：agent.health_check） */
@@ -750,7 +812,7 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_agent_d, "shutdown", on_shutdown_method_agent_d, NULL);
     /* L2 协议标准方法 agent.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
     method_dispatcher_register(g_dispatcher_agent_d, "get_stats", on_get_stats_method, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (agent.* namespace)", 8);
+    SVC_LOG_INFO("Registered %d RPC methods (agent.* namespace)", 9);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_agent_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");

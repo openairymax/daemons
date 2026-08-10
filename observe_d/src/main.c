@@ -535,6 +535,102 @@ static void observe_d_handle_request(observe_d_service_t *svc, airy_sock_t clien
                 cJSON_Delete(req);
                 airy_sock_close(client_fd);
                 return;
+            } else if (strcmp(m->valuestring, "record_metric") == 0) {
+                /* L2 命名空间方法 record_metric：name/value/type（gauge|counter，可选 unit） */
+                cJSON *params = cJSON_GetObjectItem(req, "params");
+                if (!cJSON_IsObject(params)) {
+                    JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                                       "params object required", rid);
+                    cJSON_Delete(req);
+                    airy_sock_close(client_fd);
+                    return;
+                }
+                cJSON *namej = cJSON_GetObjectItem(params, "name");
+                cJSON *valuej = cJSON_GetObjectItem(params, "value");
+                cJSON *typej = cJSON_GetObjectItem(params, "type");
+                cJSON *unitj = cJSON_GetObjectItem(params, "unit");
+                if (!cJSON_IsString(namej) || !cJSON_IsNumber(valuej)) {
+                    JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                                       "name (string) and value (number) required", rid);
+                    cJSON_Delete(req);
+                    airy_sock_close(client_fd);
+                    return;
+                }
+                observe_metric_type_t mtype = OBSERVE_METRIC_GAUGE;
+                if (cJSON_IsString(typej)) {
+                    if (strcmp(typej->valuestring, "counter") == 0) {
+                        mtype = OBSERVE_METRIC_COUNTER;
+                    } else if (strcmp(typej->valuestring, "gauge") == 0) {
+                        mtype = OBSERVE_METRIC_GAUGE;
+                    } else {
+                        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                                           "type must be gauge or counter", rid);
+                        cJSON_Delete(req);
+                        airy_sock_close(client_fd);
+                        return;
+                    }
+                }
+                const char *unit = cJSON_IsString(unitj) ? unitj->valuestring : NULL;
+                int rc = observe_d_record_metric(svc, namej->valuestring,
+                                                 valuej->valuedouble, unit, mtype);
+                if (rc != AIRY_SUCCESS) {
+                    JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
+                                       "failed to record metric", rid);
+                    cJSON_Delete(req);
+                    airy_sock_close(client_fd);
+                    return;
+                }
+                cJSON *result = cJSON_CreateObject();
+                cJSON_AddStringToObject(result, "status", "recorded");
+                cJSON_AddStringToObject(result, "name", namej->valuestring);
+                cJSON_AddNumberToObject(result, "value", valuej->valuedouble);
+                cJSON_AddStringToObject(result, "type",
+                                        mtype == OBSERVE_METRIC_COUNTER ? "counter" : "gauge");
+                if (unit)
+                    cJSON_AddStringToObject(result, "unit", unit);
+                JSONRPC_SEND_SUCCESS(client_fd, result, rid);
+                cJSON_Delete(req);
+                airy_sock_close(client_fd);
+                return;
+            } else if (strcmp(m->valuestring, "query_metrics") == 0 ||
+                       strcmp(m->valuestring, "get_metrics") == 0) {
+                /* L2 命名空间方法 query_metrics/get_metrics（别名）：
+                 * params.name 可选，作为过滤条件；返回名称、值、类型、单位。 */
+                cJSON *params = cJSON_GetObjectItem(req, "params");
+                const char *filter = NULL;
+                if (cJSON_IsObject(params)) {
+                    cJSON *namej = cJSON_GetObjectItem(params, "name");
+                    if (cJSON_IsString(namej))
+                        filter = namej->valuestring;
+                }
+                cJSON *result = cJSON_CreateObject();
+                cJSON *arr = cJSON_CreateArray();
+                size_t count = 0;
+                airy_mtx_lock(&svc->lock);
+                for (size_t i = 0; i < svc->metric_count; i++) {
+                    observe_metric_t *mtr = &svc->metrics[i];
+                    if (!mtr->name)
+                        continue;
+                    if (filter && strcmp(mtr->name, filter) != 0)
+                        continue;
+                    cJSON *item = cJSON_CreateObject();
+                    cJSON_AddStringToObject(item, "name", mtr->name);
+                    cJSON_AddNumberToObject(item, "value", mtr->value);
+                    cJSON_AddStringToObject(item, "type",
+                                            mtr->type == OBSERVE_METRIC_COUNTER ? "counter"
+                                                                               : "gauge");
+                    cJSON_AddStringToObject(item, "unit",
+                                            mtr->unit ? mtr->unit : "");
+                    cJSON_AddItemToArray(arr, item);
+                    count++;
+                }
+                airy_mtx_unlock(&svc->lock);
+                cJSON_AddNumberToObject(result, "count", (double)count);
+                cJSON_AddItemToObject(result, "metrics", arr);
+                JSONRPC_SEND_SUCCESS(client_fd, result, rid);
+                cJSON_Delete(req);
+                airy_sock_close(client_fd);
+                return;
             }
         }
         cJSON_Delete(req);

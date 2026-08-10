@@ -2,7 +2,7 @@
 #include "error.h"
 /*
  * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2026 SPHARX.
+ * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
  * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file main.c
@@ -51,6 +51,7 @@ static uint64_t g_service_start_time = 0; /* 进程启动时间（L2 get_stats u
 static void handle_record_metric(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_get_metrics(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_get_stats(int id, airy_sock_t client_fd);
+static void free_alert_info_list(alert_info_t **alerts, size_t count);
 static void handle_trigger_alert(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_get_alerts(int id, airy_sock_t client_fd);
 static void handle_health_check(cJSON *params, int id, airy_sock_t client_fd);
@@ -253,8 +254,7 @@ static void handle_get_stats(int id, airy_sock_t client_fd)
             }
             cJSON_AddNumberToObject(result, "alerts", (double)acount);
             cJSON_AddNumberToObject(result, "alerts_resolved", (double)resolved);
-            if (alerts)
-                AIRY_FREE(alerts);
+            free_alert_info_list(alerts, acount);
         } else {
             cJSON_AddNumberToObject(result, "alerts", 0);
             cJSON_AddNumberToObject(result, "alerts_resolved", 0);
@@ -297,6 +297,21 @@ static void handle_trigger_alert(cJSON *params, int id, airy_sock_t client_fd)
     }
 }
 
+/* 释放 monitor_service_get_alerts 返回的深拷贝结果（元素内字符串 + 元素 + 数组） */
+static void free_alert_info_list(alert_info_t **alerts, size_t count)
+{
+    if (!alerts)
+        return;
+    for (size_t i = 0; i < count && alerts[i]; i++) {
+        AIRY_FREE(alerts[i]->alert_id);
+        AIRY_FREE(alerts[i]->message);
+        AIRY_FREE(alerts[i]->service_name);
+        AIRY_FREE(alerts[i]->resource_id);
+        AIRY_FREE(alerts[i]);
+    }
+    AIRY_FREE(alerts);
+}
+
 static void handle_get_alerts(int id, airy_sock_t client_fd)
 {
     alert_info_t **alerts = NULL;
@@ -323,7 +338,7 @@ static void handle_get_alerts(int id, airy_sock_t client_fd)
         cJSON_AddItemToArray(arr, a);
     }
 
-    AIRY_FREE(alerts);
+    free_alert_info_list(alerts, count);
 
     JSONRPC_SEND_SUCCESS(client_fd, arr, id);
 }

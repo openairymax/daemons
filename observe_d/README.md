@@ -93,11 +93,32 @@ void record_metric(observe_metric_t *metric, double value);
 
 ### JSON-RPC 2.0 方法
 
-| 方法 | 说明 |
-|------|------|
-| `observe.record` | 记录指标值 |
-| `observe.metrics` | 获取所有指标列表 |
-| `observe.health` | 查询可观测性服务健康状态 |
+L2 服务协议命名空间方法（gateway 转发时已剥离 `observe.` 前缀，方法名不带前缀）：
+
+| 方法 | 参数 | 返回 | 说明 |
+|------|------|------|------|
+| `record_metric` | `name`(string, 必填)、`value`(number, 必填)、`type`(string: `gauge`/`counter`, 可选, 默认 `gauge`)、`unit`(string, 可选) | `{status,name,value,type[,unit]}` | 记录/更新指标（counter 累加，gauge 覆盖） |
+| `query_metrics` | `name`(string, 可选过滤) | `{count, metrics:[{name,value,type,unit}]}` | 查询全部或指定指标 |
+| `get_metrics` | 同 `query_metrics` | 同 `query_metrics` | `query_metrics` 的别名（Prometheus 语义一致） |
+| `health_check` | - | `{status,service,uptime_s,timestamp}` | 健康检查 |
+| `get_stats` | - | `{daemon,uptime_s,observed,errors,http_requests,metric_count}` | 服务统计 |
+| `shutdown` | - | `{status:"shutting_down"}` | 优雅关闭 |
+
+示例：
+
+```bash
+# 记录一个 counter 指标
+echo '{"jsonrpc":"2.0","id":1,"method":"record_metric","params":{"name":"http_requests","value":1,"type":"counter","unit":"count"}}' | \
+  socat - UNIX-CONNECT:$AIRY_RUNTIME_DIR/observe.sock
+
+# 查询全部指标
+echo '{"jsonrpc":"2.0","id":2,"method":"query_metrics"}' | \
+  socat - UNIX-CONNECT:$AIRY_RUNTIME_DIR/observe.sock
+
+# 按名称过滤查询（get_metrics 为同义别名）
+echo '{"jsonrpc":"2.0","id":3,"method":"get_metrics","params":{"name":"http_requests"}}' | \
+  socat - UNIX-CONNECT:$AIRY_RUNTIME_DIR/observe.sock
+```
 
 ### 请求处理
 

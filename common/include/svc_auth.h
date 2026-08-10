@@ -1,8 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file svc_auth.h
  * @brief Daemon 服务层认证中间件 - JWT/API Key/速率限制
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * 设计原则 (遵循 ARCHITECTURAL_PRINCIPLES.md):
  * - E-1 安全内生: 默认安全，所有请求必须验证

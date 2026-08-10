@@ -468,6 +468,10 @@ int market_service_search_agents(market_service_t *service, const search_params_
         }
 
         if (found >= results_size) {
+            /* 倍增溢出检查：results_size * 2 * sizeof(agent_info_t *) 不得回绕，
+             * 溢出时停止扩容，返回已收集的部分结果 */
+            if (results_size > SIZE_MAX / (2 * sizeof(agent_info_t *)))
+                break;
             results_size *= 2;
             agent_info_t **tmp =
                 (agent_info_t **)AIRY_REALLOC(results, sizeof(agent_info_t *) * results_size);
@@ -516,6 +520,10 @@ int market_service_search_skills(market_service_t *service, const search_params_
         }
 
         if (found >= results_size) {
+            /* 倍增溢出检查：results_size * 2 * sizeof(skill_info_t *) 不得回绕，
+             * 溢出时停止扩容，返回已收集的部分结果 */
+            if (results_size > SIZE_MAX / (2 * sizeof(skill_info_t *)))
+                break;
             results_size *= 2;
             skill_info_t **tmp =
                 (skill_info_t **)AIRY_REALLOC(results, sizeof(skill_info_t *) * results_size);
@@ -885,6 +893,10 @@ int market_service_get_installed_agents(market_service_t *service, agent_info_t 
             service->agents[i]->status == AGENT_STATUS_ERROR) {
 
             if (found >= results_size) {
+                /* 倍增溢出检查：results_size * 2 * sizeof(agent_info_t *) 不得回绕，
+                 * 溢出时停止扩容，返回已收集的部分结果 */
+                if (results_size > SIZE_MAX / (2 * sizeof(agent_info_t *)))
+                    break;
                 results_size *= 2;
                 agent_info_t **tmp = (agent_info_t **)AIRY_REALLOC(
                     results, sizeof(agent_info_t *) * results_size);
@@ -923,6 +935,10 @@ int market_service_get_installed_skills(market_service_t *service, skill_info_t 
     airy_mtx_lock(&service->lock);
     for (size_t i = 0; i < service->skill_count; i++) {
         if (found >= results_size) {
+            /* 倍增溢出检查：results_size * 2 * sizeof(skill_info_t *) 不得回绕，
+             * 溢出时停止扩容，返回已收集的部分结果 */
+            if (results_size > SIZE_MAX / (2 * sizeof(skill_info_t *)))
+                break;
             results_size *= 2;
             skill_info_t **tmp =
                 (skill_info_t **)AIRY_REALLOC(results, sizeof(skill_info_t *) * results_size);

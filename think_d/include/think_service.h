@@ -33,9 +33,10 @@ typedef struct think_service think_service_t;
  * @brief 双思考服务配置
  */
 typedef struct {
-    const char *s2_model;       /* t2 主思考模型名（NULL=provider 默认） */
-    const char *verify_model;   /* t1-f 验证模型名（NULL=provider 默认） */
-    const char *expert_model;   /* t1-p 仲裁模型名（NULL=provider 默认） */
+    int enabled;            /* 双思考开关（0=关闭 GRAD 批判循环，退化单轮计划；默认 1） */
+    const char *think2_slow_model;  /* t2 慢思考模型名（NULL=provider 默认） */
+    const char *think1_fast_model;  /* t1-f 快思考模型名（NULL=provider 默认） */
+    const char *think1_prof_model;  /* t1-p 专业思考模型名（NULL=provider 默认） */
     uint32_t process_timeout_ms; /* 单次认知处理超时（毫秒），0 用默认 120000 */
     uint32_t max_feedback_events; /* 思考事件环形缓冲容量，0 用默认 64 */
 } think_service_config_t;

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 SPHARX Ltd.
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file service_discovery_helper.c
@@ -55,7 +55,18 @@ static void *sd_helper_heartbeat_loop(void *arg) {
                  sdh->service_name, sdh->heartbeat_interval_ms);
 
     while (sdh->heartbeat_running) {
-        airy_sleep_ms(sdh->heartbeat_interval_ms);
+        /* 分片睡眠：将长心跳间隔拆成 500ms 步长并持续检查 heartbeat_running，
+         * 使 sd_helper_stop_heartbeat 的 join 能在步长内快速返回。否则 stop 时
+         * 会阻塞在单次 10s 睡眠上，导致守护进程优雅退出超过外部停止阈值
+         * （例如 airymaxrt 的 TERM 等待窗口）而被强制 KILL。 */
+        const int step_ms = 500;
+        int total_ms = (int)sdh->heartbeat_interval_ms;
+        if (total_ms <= 0)
+            total_ms = 10000;
+        for (int elapsed = 0; elapsed < total_ms && sdh->heartbeat_running;
+             elapsed += step_ms) {
+            airy_sleep_ms(step_ms);
+        }
 
         if (!sdh->heartbeat_running) break;
 
