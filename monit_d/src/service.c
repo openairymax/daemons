@@ -2,7 +2,7 @@
 #include "error.h"
 /*
  * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2026 SPHARX.
+ * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
  * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file service.c
@@ -456,11 +456,20 @@ int monitor_service_get_alerts(monitor_service_t *service, alert_info_t ***alert
     for (size_t i = 0; i < service->alert_count; i++) {
         alert_info_t *info = (alert_info_t *)AIRY_CALLOC(1, sizeof(alert_info_t));
         if (info) {
-            info->alert_id = service->alerts[i].alert_id;
-            info->message = service->alerts[i].message;
+            /* 深拷贝字符串字段：原实现直接指向内部条目，锁释放后调用方读取
+             * 与并发 trigger_alert 驱逐（free）构成 use-after-free 竞态。
+             * 调用方须配合释放（AIRY_FREE 各字符串 + 元素）。 */
+            info->alert_id =
+                service->alerts[i].alert_id ? AIRY_STRDUP(service->alerts[i].alert_id) : NULL;
+            info->message =
+                service->alerts[i].message ? AIRY_STRDUP(service->alerts[i].message) : NULL;
+            info->service_name = service->alerts[i].service_name
+                                     ? AIRY_STRDUP(service->alerts[i].service_name)
+                                     : NULL;
+            info->resource_id = service->alerts[i].resource_id
+                                    ? AIRY_STRDUP(service->alerts[i].resource_id)
+                                    : NULL;
             info->level = service->alerts[i].level;
-            info->service_name = service->alerts[i].service_name;
-            info->resource_id = service->alerts[i].resource_id;
             info->timestamp = service->alerts[i].timestamp;
             info->is_resolved = service->alerts[i].is_resolved;
         }
@@ -633,7 +642,18 @@ int monitor_service_start_agent_trace(monitor_service_t *service,
         }
     }
     if (t) {
-        t->current_state = AGENT_STATE_INITIALIZING;
+        /* 回填 trace_id：外部 trace 句柄必须携带内部生成的 tid，否则
+         * end_agent_trace 的 trace_id 匹配永不命中，end_time 恒为 0，
+         * get_active_agents 会把已结束的 trace 恒报为活跃（原缺陷）。 */
+        t->trace_id = AIRY_STRDUP(tid);
+        if (!t->trace_id) {
+            AIRY_FREE(t->agent_id);
+            AIRY_FREE(t->task_id);
+            AIRY_FREE(t);
+            t = NULL;
+        } else {
+            t->current_state = AGENT_STATE_INITIALIZING;
+        }
     }
 
     *trace = t;

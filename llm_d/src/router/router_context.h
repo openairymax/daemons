@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file router_context.h
  * @brief 路由器共享上下文 — 全局状态、辅助函数、端点管理
@@ -5,7 +7,6 @@
  * 所有路由器实现文件共享此头文件，避免循环依赖。
  *
  * Copyright (C) 2025-2026 SPHARX Ltd. All Rights Reserved.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  */
 
 #ifndef AIRY_RT_LLM_ROUTER_CONTEXT_H

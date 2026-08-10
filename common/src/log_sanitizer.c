@@ -1,9 +1,10 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 #include "airy_memory.h"
 /**
  * @file log_sanitizer.c
  * @brief 日志脱敏过滤器实现
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  */
 
 #include "atomic_compat.h"

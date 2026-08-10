@@ -68,3 +68,10 @@ target_compile_options(info_d PRIVATE
 )
 
 install(TARGETS info_d DESTINATION bin)
+
+# ==================== 单元测试 ====================
+if(BUILD_TESTS)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+        add_subdirectory(tests)
+    endif()
+endif()

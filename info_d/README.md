@@ -28,8 +28,11 @@ info_d/ → IPC Service Bus → sched_d / monit_d / observe_d
 info_d/
 ├── CMakeLists.txt                    # 构建配置
 ├── README.md                         # 本文件
-└── src/                              # 实现文件
-    └── main.c                        # 守护进程入口（含采集逻辑与请求处理）
+├── src/                              # 实现文件
+│   └── main.c                        # 守护进程入口（含采集逻辑与请求处理）
+└── tests/                            # 单元测试（CTest）
+    ├── CMakeLists.txt
+    └── test_info_service.c           # 方法分发响应格式 + 环形历史缓冲测试
 ```
 
 ## 核心组件说明
@@ -104,11 +107,79 @@ info_d/
 
 ### JSON-RPC 2.0 方法
 
-| 方法 | 说明 |
-|------|------|
-| `info.system` | 获取当前系统信息快照 |
-| `info.history` | 获取历史系统信息记录 |
-| `info.health` | 查询采集服务健康状态 |
+方法遵循 L2 服务通信协议标准（`02-l2-service-protocol.md` §5/§6）的 `<ns>.<method>` 命名空间格式（`info.*`）。gateway_d 转发时已剥离 `<daemon>.` 前缀，daemon 内部按不带前缀的方法名分发。
+
+| 方法 | 说明 | 参数 |
+|------|------|------|
+| `info.system` | 获取当前系统信息快照（CPU/内存/磁盘/uptime/hostname/内核版本） | 无 |
+| `info.history` | 获取环形历史快照列表（按时间升序，最旧 → 最新） | `N`（可选，返回最近 N 条，默认全部 64 条；支持对象参数 `N`/`n`/`count`/`limit` 或数组参数首个元素） |
+| `info.health` | 查询采集服务健康状态（采集线程是否活跃、最近采集时间、运行时长） | 无 |
+| `info.health_check` | 标准健康检查（L2 §6.1，无副作用） | 无 |
+| `info.get_stats` | 查询服务统计（请求数/错误数/历史条数/运行时长） | 无 |
+| `info.shutdown` | 优雅停止 daemon（L2 §6.1） | 无 |
+
+#### `info.system` 响应示例
+
+```json
+{
+    "jsonrpc": "2.0",
+    "result": {
+        "service": "info_d",
+        "platform": "Linux",
+        "hostname": "host-01",
+        "kernel_version": "6.8.0-45-generic",
+        "system": {
+            "timestamp": 1717660800,
+            "cpu_cores": 8,
+            "cpu_usage_pct": 23.5,
+            "total_memory_kb": 16777216,
+            "free_memory_kb": 8388608,
+            "used_memory_kb": 8388608,
+            "memory_usage_pct": 50.0,
+            "disk_total_kb": 524288000,
+            "disk_free_kb": 262144000,
+            "disk_used_kb": 262144000,
+            "disk_usage_pct": 50.0,
+            "uptime_sec": 86400
+        }
+    },
+    "id": 1
+}
+```
+
+#### `info.history` 响应示例
+
+```json
+{
+    "jsonrpc": "2.0",
+    "result": [
+        { "timestamp": 1717660800, "cpu_cores": 8, "cpu_usage_pct": 23.5, "uptime_sec": 86400 },
+        { "timestamp": 1717660805, "cpu_cores": 8, "cpu_usage_pct": 24.1, "uptime_sec": 86405 }
+    ],
+    "id": 2
+}
+```
+
+#### `info.health` 响应示例
+
+```json
+{
+    "jsonrpc": "2.0",
+    "result": {
+        "status": "ok",
+        "service": "info_d",
+        "collecting": true,
+        "running": true,
+        "last_collect_time": 1717660805,
+        "staleness_sec": 1,
+        "uptime_s": 3600,
+        "timestamp": 1717660806
+    },
+    "id": 3
+}
+```
+
+`status` 取值：`ok`（采集线程活跃且最近采集未超过 3 个采集间隔）或 `degraded`（采集停滞或服务未运行）。
 
 ## 通信方式
 

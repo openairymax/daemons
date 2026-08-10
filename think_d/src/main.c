@@ -20,8 +20,10 @@
 #include "svc_logger.h"
 #include "thread_pool.h"
 #include "think_service.h"
+#include "svc_model_defaults.h"
 
 #include <stdlib.h>
+#include <strings.h>
 
 /* ==================== 配置常量 ==================== */
 
@@ -49,9 +51,10 @@ typedef struct {
     int use_tcp;
     int max_clients;
     uint32_t process_timeout_ms;
-    char s2_model[128];
-    char verify_model[128];
-    char expert_model[128];
+    int think_enabled;      /* 双思考开关（model.yaml think.enabled / env AIRY_THINK_ENABLED） */
+    char think2_slow_model[128];   /* t2 慢思考（GRAD 模型 A） */
+    char think1_fast_model[128];   /* t1-f 快思考（GRAD 模型 B） */
+    char think1_prof_model[128];   /* t1-p 专业思考（GRAD 模型 C） */
 } think_daemon_config_t;
 
 static think_daemon_config_t g_config = {0};
@@ -157,6 +160,7 @@ static int load_daemon_config(const char *config_path)
     g_config.use_tcp = 0;
     g_config.max_clients = MAX_CLIENTS;
     g_config.process_timeout_ms = 120000;
+    g_config.think_enabled = 1;
 
 #if defined(AIRY_PLATFORM_WINDOWS)
     g_config.socket_path = AIRY_STRDUP(DEFAULT_SOCKET_PATH_WIN);
@@ -196,21 +200,26 @@ static int load_daemon_config(const char *config_path)
                             }
                             cJSON *think = cJSON_GetObjectItem(root, "think");
                             if (think) {
-                                cJSON *s2 = cJSON_GetObjectItem(think, "s2_model");
+                                cJSON *s2 = cJSON_GetObjectItem(think, "think2_slow_model");
                                 if (cJSON_IsString(s2) && s2->valuestring[0])
-                                    AIRY_STRNCPY_TERM(g_config.s2_model, s2->valuestring,
-                                                      sizeof(g_config.s2_model));
-                                cJSON *verify = cJSON_GetObjectItem(think, "verify_model");
+                                    AIRY_STRNCPY_TERM(g_config.think2_slow_model, s2->valuestring,
+                                                      sizeof(g_config.think2_slow_model));
+                                cJSON *verify = cJSON_GetObjectItem(think, "think1_fast_model");
                                 if (cJSON_IsString(verify) && verify->valuestring[0])
-                                    AIRY_STRNCPY_TERM(g_config.verify_model, verify->valuestring,
-                                                      sizeof(g_config.verify_model));
-                                cJSON *expert = cJSON_GetObjectItem(think, "expert_model");
+                                    AIRY_STRNCPY_TERM(g_config.think1_fast_model,
+                                                      verify->valuestring,
+                                                      sizeof(g_config.think1_fast_model));
+                                cJSON *expert = cJSON_GetObjectItem(think, "think1_prof_model");
                                 if (cJSON_IsString(expert) && expert->valuestring[0])
-                                    AIRY_STRNCPY_TERM(g_config.expert_model, expert->valuestring,
-                                                      sizeof(g_config.expert_model));
+                                    AIRY_STRNCPY_TERM(g_config.think1_prof_model,
+                                                      expert->valuestring,
+                                                      sizeof(g_config.think1_prof_model));
                                 cJSON *timeout = cJSON_GetObjectItem(think, "timeout_ms");
                                 if (cJSON_IsNumber(timeout))
                                     g_config.process_timeout_ms = (uint32_t)timeout->valueint;
+                                cJSON *enabled = cJSON_GetObjectItem(think, "enabled");
+                                if (cJSON_IsBool(enabled) || cJSON_IsNumber(enabled))
+                                    g_config.think_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
                             }
                         } while (0);
                     }
@@ -219,6 +228,58 @@ static int load_daemon_config(const char *config_path)
             }
             fclose(f);
         }
+    }
+
+    /* ── 模型 SSoT：$AIRY_CONFIG_DIR/model.yaml 的 think 段（三角色唯一配置源）。
+     * 优先级：env（AIRY_THINK_*）> model.yaml think 段 > -c JSON（兼容旧）> 默认。
+     * 与 gateway_d 读 global 段同一模式（svc_model_defaults 公共层 libyaml）。 */
+    {
+        char model_path[1024];
+        const char *cfg_dir = airy_config_dir();
+        int have_model_yaml = 0;
+        if (cfg_dir) {
+            snprintf(model_path, sizeof(model_path), "%s/model.yaml", cfg_dir);
+            have_model_yaml = 1;
+        }
+        svc_model_think_config_t think_cfg;
+        __builtin_memset(&think_cfg, 0, sizeof(think_cfg));
+        think_cfg.enabled = g_config.think_enabled; /* 保留 -c JSON 层结果（缺省 1） */
+        if (have_model_yaml &&
+            svc_model_defaults_think_from_yaml(model_path, &think_cfg) == 0) {
+            g_config.think_enabled = think_cfg.enabled;
+            if (think_cfg.think2_slow_model[0])
+                AIRY_STRNCPY_TERM(g_config.think2_slow_model, think_cfg.think2_slow_model,
+                                  sizeof(g_config.think2_slow_model));
+            if (think_cfg.think1_fast_model[0])
+                AIRY_STRNCPY_TERM(g_config.think1_fast_model, think_cfg.think1_fast_model,
+                                  sizeof(g_config.think1_fast_model));
+            if (think_cfg.think1_prof_model[0])
+                AIRY_STRNCPY_TERM(g_config.think1_prof_model, think_cfg.think1_prof_model,
+                                  sizeof(g_config.think1_prof_model));
+            if (think_cfg.timeout_ms > 0)
+                g_config.process_timeout_ms = think_cfg.timeout_ms;
+        }
+
+        /* env 临时覆盖（最高优先级） */
+        const char *e;
+        if ((e = getenv("AIRY_THINK_ENABLED")) && *e) {
+            int b = (strcmp(e, "0") == 0 || strcasecmp(e, "false") == 0 ||
+                     strcasecmp(e, "no") == 0)
+                        ? 0
+                        : 1;
+            g_config.think_enabled = b;
+        }
+        if ((e = getenv("AIRY_THINK2_SLOW_MODEL")) && *e)
+            AIRY_STRNCPY_TERM(g_config.think2_slow_model, e,
+                              sizeof(g_config.think2_slow_model));
+        if ((e = getenv("AIRY_THINK1_FAST_MODEL")) && *e)
+            AIRY_STRNCPY_TERM(g_config.think1_fast_model, e,
+                              sizeof(g_config.think1_fast_model));
+        if ((e = getenv("AIRY_THINK1_PROF_MODEL")) && *e)
+            AIRY_STRNCPY_TERM(g_config.think1_prof_model, e,
+                              sizeof(g_config.think1_prof_model));
+        if ((e = getenv("AIRY_THINK_TIMEOUT_MS")) && *e && atoi(e) > 0)
+            g_config.process_timeout_ms = (uint32_t)atoi(e);
     }
     return 0;
 }
@@ -272,9 +333,10 @@ int main(int argc, char **argv)
 
     think_service_config_t svc_cfg;
     __builtin_memset(&svc_cfg, 0, sizeof(svc_cfg));
-    svc_cfg.s2_model = g_config.s2_model[0] ? g_config.s2_model : NULL;
-    svc_cfg.verify_model = g_config.verify_model[0] ? g_config.verify_model : NULL;
-    svc_cfg.expert_model = g_config.expert_model[0] ? g_config.expert_model : NULL;
+    svc_cfg.enabled = g_config.think_enabled;
+    svc_cfg.think2_slow_model = g_config.think2_slow_model[0] ? g_config.think2_slow_model : NULL;
+    svc_cfg.think1_fast_model = g_config.think1_fast_model[0] ? g_config.think1_fast_model : NULL;
+    svc_cfg.think1_prof_model = g_config.think1_prof_model[0] ? g_config.think1_prof_model : NULL;
     svc_cfg.process_timeout_ms = g_config.process_timeout_ms;
 
     g_service = think_service_create(&svc_cfg);

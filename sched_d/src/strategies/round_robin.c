@@ -125,6 +125,11 @@ static int round_robin_create(const sched_config_t *config, void **data)
     __builtin_memset(rrd, 0, sizeof(round_robin_data_t));
 
     rrd->max_agents = config->max_agents > 0 ? config->max_agents : 100;
+    /* 乘法溢出检查：max_agents * sizeof(agent_info_t *) 不得回绕 */
+    if (rrd->max_agents > SIZE_MAX / sizeof(agent_info_t *)) {
+        AIRY_FREE(rrd);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
     rrd->agents = (agent_info_t **)AIRY_MALLOC(sizeof(agent_info_t *) * rrd->max_agents);
     if (!rrd->agents) {
         AIRY_FREE(rrd);

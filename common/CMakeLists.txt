@@ -56,6 +56,7 @@ set(SVC_COMMON_SOURCES
     src/daemon_cupolas_bootstrap.c # P3.14 ACC-DT15: daemon 统一 cupolas 安全穹顶引导
     src/daemon_rpc_client.c       # Phase 3: gateway→daemon thin IPC client (Unix socket JSON-RPC)
     src/svc_model_defaults.c      # A2-1: model.yaml global 段默认模型提取（llm_d/gateway_d 共用）
+    src/daemon_heapstore_bootstrap.c # KER-05~07: daemon 统一 heapstore 运行时数据存储引导
 )
 
 # 创建静态库
@@ -66,6 +67,16 @@ target_link_libraries(svc_common PUBLIC
     airy_common
     airy_compile_defs
 )
+
+# KER-05~07: heapstore 运行时数据存储（daemon_heapstore_bootstrap 使用）。
+# heapstore 仅依赖 commons + threads，无循环依赖（与 atoms/corekern 同模式）。
+# 注：CMake 支持前向目标引用，daemons 先于 heapstore 配置但 target_link_libraries
+# 在生成阶段解析，与 atoms/corekern 引用 airy_heapstore 同模式。
+if(BUILD_HEAPSTORE)
+    target_link_libraries(svc_common PUBLIC airy_heapstore)
+    target_include_directories(svc_common PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../heapstore/include)
+endif()
 
 # P3.14 ACC-DT15: cupolas 安全穹顶（PUBLIC 使得所有链接 svc_common 的 daemon 自动获得 cupolas）
 if(TARGET cupolas)

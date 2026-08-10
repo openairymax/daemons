@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 #include "airy_memory.h"
 #include "error.h"
 /*
  * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2026 SPHARX.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file daemon_rpc_client.c
  * @brief 轻量级 Unix-socket JSON-RPC 客户端实现
@@ -121,19 +121,45 @@ static int rpc_connect_unix(const char *socket_path)
 }
 
 /**
- * @brief 带超时的接收：循环 recv 直至收到完整 JSON 或超时
+ * @brief 带超时与取消的接收：循环 recv 直至收到完整 JSON 或超时/取消
  *
  * 简化策略：使用 cJSON_ParseIntervalFromBuffer 检测 JSON 完整性；
  * 若解析失败且未超时，继续接收。此策略在 daemon 响应通常单包返回的
  * 场景下足够，复杂分包场景亦能正确处理。
+ *
+ * 改进1（取消下探）：每次 poll 片（200ms）后检查取消令牌。命中时先关闭
+ * 当前连接（invoke 响应丢弃），再通过新连接发送 cancel 请求（daemon 为
+ * "单请求-单响应-即关闭"模型，cancel 必须独立连接），返回 AIRY_ERR_CANCELED。
  */
-static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms)
+static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
+                             airy_cancel_token_t *cancel_token,
+                             const char *cancel_socket_path,
+                             const char *cancel_method,
+                             const char *cancel_params_json)
 {
     /* 总超时控制 */
     uint32_t elapsed_ms = 0;
     const uint32_t step_ms = 200;
 
     while (elapsed_ms < timeout_ms) {
+        /* 改进1：取消检查（每次 poll 片边界，粒度 ≤200ms） */
+        if (cancel_token && airy_cancel_token_is_canceled(cancel_token)) {
+#if AIRY_PLATFORM_POSIX
+            close(fd);
+#endif
+            /* 发送取消请求：独立连接送达 daemon（invoke 响应已放弃） */
+            if (cancel_method && cancel_method[0]) {
+                char *cancel_result = NULL;
+                int crc = daemon_rpc_call(cancel_socket_path, cancel_method,
+                                          cancel_params_json, &cancel_result, 5000);
+                AIRY_FREE(cancel_result);
+                if (crc != AIRY_SUCCESS)
+                    SVC_LOG_WARN("rpc cancel request failed (method=%s, rc=%d)",
+                                 cancel_method, crc);
+            }
+            return AIRY_ERR_CANCELED;
+        }
+
         struct pollfd pfd;
         pfd.fd = fd;
         pfd.events = POLLIN;
@@ -255,11 +281,19 @@ static int rpc_connect_unix(const char *socket_path)
     return -AIRY_ERR_NOT_SUPPORTED;
 }
 
-static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms)
+static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
+                             airy_cancel_token_t *cancel_token,
+                             const char *cancel_socket_path,
+                             const char *cancel_method,
+                             const char *cancel_params_json)
 {
     (void)fd;
     (void)buf;
     (void)timeout_ms;
+    (void)cancel_token;
+    (void)cancel_socket_path;
+    (void)cancel_method;
+    (void)cancel_params_json;
     return AIRY_ERR_NOT_SUPPORTED;
 }
 
@@ -270,6 +304,18 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms)
 int daemon_rpc_call(const char *socket_path, const char *method,
                     const char *params_json,
                     char **out_result_json, uint32_t timeout_ms)
+{
+    return daemon_rpc_call_cancelable(socket_path, method, params_json,
+                                      out_result_json, timeout_ms,
+                                      NULL, NULL, NULL);
+}
+
+int daemon_rpc_call_cancelable(const char *socket_path, const char *method,
+                               const char *params_json,
+                               char **out_result_json, uint32_t timeout_ms,
+                               airy_cancel_token_t *cancel_token,
+                               const char *cancel_method,
+                               const char *cancel_params_json)
 {
     if (!socket_path || !method || !out_result_json)
         return AIRY_ERR_INVALID_PARAM;
@@ -341,13 +387,15 @@ int daemon_rpc_call(const char *socket_path, const char *method,
         return rc;
     }
 
-    rc = rpc_recv_response(fd, &buf, timeout_ms);
+    rc = rpc_recv_response(fd, &buf, timeout_ms, cancel_token,
+                           socket_path, cancel_method, cancel_params_json);
 #if AIRY_PLATFORM_POSIX
     close(fd);
 #endif
     if (rc != AIRY_SUCCESS) {
-        SVC_LOG_ERROR("daemon_rpc_call: recv failed (method=%s, rc=%d, timeout=%u)",
-                       method, rc, timeout_ms);
+        if (rc != AIRY_ERR_CANCELED)
+            SVC_LOG_ERROR("daemon_rpc_call: recv failed (method=%s, rc=%d, timeout=%u)",
+                           method, rc, timeout_ms);
         rpc_buf_free(&buf);
         return rc;
     }

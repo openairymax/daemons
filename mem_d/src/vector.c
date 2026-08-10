@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 SPHARX Ltd.
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file vector.c
@@ -109,8 +109,16 @@ static int mem_vec_ensure_capacity(mem_tfidf_vec_t *v, size_t need)
     if (need <= v->term_capacity)
         return AIRY_SUCCESS;
     size_t cap = v->term_capacity ? v->term_capacity : MEM_VEC_INIT_CAPACITY;
-    while (cap < need)
+    while (cap < need) {
+        if (cap > SIZE_MAX / 2) {
+            /* 翻倍将溢出 — 直接用 need（若 need 也过大由下方乘法检查拦截） */
+            cap = need;
+            break;
+        }
         cap *= 2;
+    }
+    if (cap > SIZE_MAX / sizeof(mem_vec_term_t))
+        return AIRY_ERR_OUT_OF_MEMORY;
     mem_vec_term_t *nt = (mem_vec_term_t *)AIRY_REALLOC(v->terms,
                                                          cap * sizeof(mem_vec_term_t));
     if (!nt)

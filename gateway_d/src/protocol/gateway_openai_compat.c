@@ -317,20 +317,25 @@ static int handle_chat_completions(gw_openai_compat_t *compat, const char *body_
                                  messages ? messages : "[]", functions ? functions : NULL,
                                  temperature, max_tokens, &llm_response, compat->llm_call_data);
 
-    AIRY_FREE(model);
-    AIRY_FREE(messages);
-    AIRY_FREE(functions);
-
     if (rc != 0 || !llm_response) {
+        /* 注意：model/messages/functions 在此处仍有效，须在错误分支打印
+         * 完成之后再释放，避免 use-after-free（此前先释放后引用导致
+         * ASan heap-use-after-free 崩溃）。 */
         LOG_ERROR("LLM call failed: model=%s, rc=%d",
                           model ? model : compat->config.default_model, rc);
         AIRY_FREE(llm_response);
+        AIRY_FREE(model);
+        AIRY_FREE(messages);
+        AIRY_FREE(functions);
         *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"LLM call failed\","
                                         "\"type\":\"server_error\",\"code\":500}}");
         compat->error_count++;
         return AIRY_ERR_IO;
     }
 
+    AIRY_FREE(model);
+    AIRY_FREE(messages);
+    AIRY_FREE(functions);
     *response_json = llm_response;
     compat->tokens_used += (uint64_t)(strlen(llm_response) / 4);
     return 0;
@@ -390,20 +395,24 @@ static int handle_embeddings(gw_openai_compat_t *compat, const char *body_json,
     int rc = compat->embed_fn(model ? model : "text-embedding-ada-002",
                               input_json ? input_json : "[]", &embed_response, compat->embed_data);
 
-    AIRY_FREE(model);
-    model = NULL;
-    AIRY_FREE(input_json);
-    input_json = NULL;
-
     if (rc != 0 || !embed_response) {
         LOG_ERROR("embedding call failed: model=%s, rc=%d",
                           model ? model : "text-embedding-ada-002", rc);
         AIRY_FREE(embed_response);
+        AIRY_FREE(model);
+        model = NULL;
+        AIRY_FREE(input_json);
+        input_json = NULL;
         *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"Embedding failed\","
                                         "\"type\":\"server_error\",\"code\":500}}");
         compat->error_count++;
         return AIRY_ERR_IO;
     }
+
+    AIRY_FREE(model);
+    model = NULL;
+    AIRY_FREE(input_json);
+    input_json = NULL;
 
     *response_json = embed_response;
     return 0;

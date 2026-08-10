@@ -1,8 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file param_validator.c
  * @brief JSON-RPC 参数验证工具实现
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  */
 
 #include "param_validator.h"

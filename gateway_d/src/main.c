@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2026 SPHARX.
+ * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
  * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file main.c
@@ -17,6 +17,8 @@
 #include "daemon_bootstrap_sd.h"
 #include "daemon_bootstrap_ipc.h"
 #include "daemon_cupolas_bootstrap.h"
+/* KER-05~07: heapstore 运行时数据存储引导 */
+#include "daemon_heapstore_bootstrap.h"
 #include "gateway_service.h"
 #include "gateway_business_handler.h"
 #include "daemon_security.h"
@@ -481,6 +483,9 @@ int main(int argc, char *argv[])
     /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("gateway_d");
 
+    /* KER-05~07: 初始化 heapstore 运行时数据存储（失败降级，服务可继续） */
+    daemon_heapstore_init("gateway_d");
+
     if (parse_args(argc, argv, &config) != 0) {
         airy_sock_cleanup();
         return EXIT_FAILURE;
@@ -713,6 +718,7 @@ cleanup:
     airy_sock_cleanup();
 
     SVC_LOG_INFO("Gateway daemon stopped");
+    daemon_heapstore_cleanup(); /* KER-05~07: 清理 heapstore 运行时数据存储 */
     daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
     log_cleanup();
     return 0;

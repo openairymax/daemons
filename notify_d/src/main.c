@@ -8,9 +8,11 @@
  * daemon_cupolas、daemon_platform_ext、logging、svc_logger 等头文件。
  * 本守护进程使用自定义 WebSocket/SSE 广播引擎与 accept 循环，
  * 不使用 DAEMON_DECLARE_COMMON 生成的 JSON-RPC 样板。
+ * 服务核心（订阅注册表/事件队列/广播引擎/JSON-RPC 分发）位于 notify_service.c。
  */
 
 #include "daemon_main.h"
+#include "notify_service.h"
 #include "platform.h"
 
 #include <stdio.h>
@@ -27,55 +29,8 @@
 #endif
 
 #define NOTIFY_D_DEFAULT_PORT 8084
-#define NOTIFY_D_MAX_BUFFER 65536
 #define NOTIFY_D_DEFAULT_SOCKET airy_runtime_dir_socket("notify.sock")
-#define NOTIFY_D_MAX_PENDING 1024
-#define NOTIFY_D_MAX_CLIENTS 128
 #define NOTIFY_D_WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-
-typedef enum {
-    NOTIFY_CLIENT_SOCKET,
-    NOTIFY_CLIENT_WEBSOCKET,
-    NOTIFY_CLIENT_SSE
-} notify_client_type_t;
-
-typedef struct {
-    airy_sock_t fd;
-    notify_client_type_t type;
-    char *channel;
-    uint64_t connected_at;
-    uint64_t last_activity;
-    uint64_t messages_sent;
-    int active;
-    char handshake_done;
-} notify_client_t;
-
-typedef struct {
-    char *message;
-    char *channel;
-    char *event_type;
-    uint64_t timestamp;
-} notify_event_t;
-
-typedef struct {
-    airy_sock_t server_fd;
-    airy_mtx_t lock;
-    airy_thread_t event_thread;
-    atomic_int running;
-    atomic_int event_running;
-    atomic_int force_stop;
-    uint64_t start_time;
-    uint64_t notified_count;
-    uint64_t error_count;
-    notify_client_t clients[NOTIFY_D_MAX_CLIENTS];
-    size_t client_count;
-    notify_event_t *pending[NOTIFY_D_MAX_PENDING];
-    size_t pending_head;
-    size_t pending_tail;
-    size_t pending_count;
-    int tcp_port;
-    char *socket_path;
-} notify_d_service_t;
 
 static notify_d_service_t g_service = {0};
 static atomic_int g_shutdown = 0;
@@ -216,6 +171,7 @@ static int notify_d_compute_ws_accept_key(const char *client_key, char *out_key,
 static int notify_d_handle_ws_upgrade(notify_d_service_t *svc, notify_client_t *client,
                                       const char *request)
 {
+    (void)svc;
     const char *key_tag = "Sec-WebSocket-Key: ";
     const char *key_start = strstr(request, key_tag);
     if (!key_start) {
@@ -257,94 +213,6 @@ static int notify_d_handle_ws_upgrade(notify_d_service_t *svc, notify_client_t *
     client->type = NOTIFY_CLIENT_WEBSOCKET;
     client->handshake_done = 1;
     return 0;
-}
-
-static int notify_d_send_ws_frame(notify_client_t *client, const char *payload, size_t payload_len)
-{
-    if (!client || !payload || client->fd == AIRY_INVALID_SOCKET) {
-        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null parameter or invalid socket");
-    }
-
-    unsigned char frame[10];
-    size_t header_len = 2;
-    frame[0] = 0x81;
-
-    if (payload_len <= 125) {
-        frame[1] = (unsigned char)payload_len;
-    } else if (payload_len <= 65535) {
-        frame[1] = 126;
-        frame[2] = (unsigned char)(payload_len >> 8);
-        frame[3] = (unsigned char)(payload_len & 0xFF);
-        header_len = 4;
-    } else {
-        frame[1] = 127;
-        for (int i = 0; i < 8; i++)
-            frame[2 + i] = (unsigned char)(payload_len >> (56 - 8 * i));
-        header_len = 10;
-    }
-
-    if (airy_sock_send(client->fd, (const char *)frame, header_len) <= 0) {
-        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to send WS frame header");
-    }
-    if (airy_sock_send(client->fd, payload, payload_len) <= 0) {
-        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to send WS frame payload");
-    }
-
-    return 0;
-}
-
-static int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *event)
-{
-    if (!svc || !event) {
-        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null parameter");
-    }
-
-    char json_msg[8192];
-    int msg_len =
-        snprintf(json_msg, sizeof(json_msg),
-                 "{"
-                 "\"event\":\"%s\","
-                 "\"channel\":\"%s\","
-                 "\"message\":\"%s\","
-                 "\"timestamp\":%llu"
-                 "}",
-                 event->event_type ? event->event_type : "message",
-                 event->channel ? event->channel : "default", event->message ? event->message : "",
-                 (unsigned long long)event->timestamp);
-
-    size_t broadcast_count = 0;
-
-    for (size_t i = 0; i < svc->client_count; i++) {
-        notify_client_t *client = &svc->clients[i];
-        if (!client->active)
-            continue;
-
-        int subscribed = !event->channel || !client->channel ||
-                         strcmp(event->channel, "broadcast") == 0 ||
-                         strcmp(client->channel, event->channel) == 0;
-
-        if (!subscribed)
-            continue;
-
-        if (client->type == NOTIFY_CLIENT_WEBSOCKET && client->handshake_done) {
-            notify_d_send_ws_frame(client, json_msg, (size_t)msg_len);
-            client->messages_sent++;
-            broadcast_count++;
-        } else if (client->type == NOTIFY_CLIENT_SOCKET) {
-            airy_sock_send(client->fd, json_msg, (size_t)msg_len);
-            client->messages_sent++;
-            broadcast_count++;
-        } else if (client->type == NOTIFY_CLIENT_SSE) {
-            char sse_msg[8448];
-            int sse_len = snprintf(sse_msg, sizeof(sse_msg), "event: %s\ndata: %s\n\n",
-                                   event->event_type ? event->event_type : "message", json_msg);
-            airy_sock_send(client->fd, sse_msg, (size_t)sse_len);
-            client->messages_sent++;
-            broadcast_count++;
-        }
-    }
-
-    return (int)broadcast_count;
 }
 
 #ifndef _WIN32
@@ -402,33 +270,6 @@ static DWORD WINAPI notify_d_event_loop(LPVOID arg)
 #endif
 }
 
-static int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char *channel,
-                            const char *event_type)
-{
-    if (!svc || !msg) {
-        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null parameter");
-    }
-    if (svc->pending_count >= NOTIFY_D_MAX_PENDING) {
-        AIRY_ERROR(AIRY_ERR_UNKNOWN, "pending queue full");
-    }
-
-    notify_event_t *event = (notify_event_t *)AIRY_CALLOC(1, sizeof(notify_event_t));
-    if (!event) {
-        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "calloc failed for notify_event_t");
-    }
-
-    event->message = AIRY_STRDUP(msg);
-    event->channel = channel ? AIRY_STRDUP(channel) : AIRY_STRDUP("default");
-    event->event_type = event_type ? AIRY_STRDUP(event_type) : AIRY_STRDUP("message");
-    event->timestamp = (uint64_t)time(NULL);
-
-    svc->pending[svc->pending_tail] = event;
-    svc->pending_tail = (svc->pending_tail + 1) % NOTIFY_D_MAX_PENDING;
-    svc->pending_count++;
-
-    return 0;
-}
-
 static notify_client_t *notify_d_find_client_slot(notify_d_service_t *svc)
 {
     for (size_t i = 0; i < NOTIFY_D_MAX_CLIENTS; i++) {
@@ -446,12 +287,12 @@ static int notify_d_init(notify_d_service_t *svc, int port, const char *sock)
         AIRY_ERROR(AIRY_EINVAL, "svc is NULL");
     }
 
-    __builtin_memset(svc, 0, sizeof(*svc));
+    if (notify_d_service_init(svc) != AIRY_SUCCESS) {
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to init notify service core");
+    }
     svc->tcp_port = port > 0 ? port : NOTIFY_D_DEFAULT_PORT;
     svc->socket_path = sock ? AIRY_STRDUP(sock) : AIRY_STRDUP(NOTIFY_D_DEFAULT_SOCKET);
-    svc->start_time = (uint64_t)time(NULL);
 
-    airy_mtx_init(&svc->lock);
     airy_sock_init();
 
     SVC_LOG_INFO("notify_d: init complete (max_clients=%d)", NOTIFY_D_MAX_CLIENTS);
@@ -518,10 +359,14 @@ static int notify_d_stop(notify_d_service_t *svc, int force)
     if (force) {
         for (size_t i = 0; i < svc->pending_count; i++) {
             size_t idx = (svc->pending_head + i) % NOTIFY_D_MAX_PENDING;
-            AIRY_FREE(svc->pending[idx]->message);
-            AIRY_FREE(svc->pending[idx]->channel);
-            AIRY_FREE(svc->pending[idx]->event_type);
-            AIRY_FREE(svc->pending[idx]);
+            notify_event_t *event = svc->pending[idx];
+            if (event) {
+                AIRY_FREE(event->message);
+                AIRY_FREE(event->channel);
+                AIRY_FREE(event->event_type);
+                AIRY_FREE(event);
+            }
+            svc->pending[idx] = NULL;
         }
         svc->pending_count = 0;
         svc->pending_head = 0;
@@ -551,12 +396,8 @@ static int notify_d_destroy(notify_d_service_t *svc)
     }
 
     notify_d_stop(svc, 1);
-
-    for (size_t i = 0; i < svc->client_count; i++) {
-        AIRY_FREE(svc->clients[i].channel);
-    }
+    notify_d_service_destroy(svc);
     airy_sock_cleanup();
-    airy_mtx_destroy(&svc->lock);
     AIRY_FREE(svc->socket_path);
     __builtin_memset(svc, 0, sizeof(*svc));
     SVC_LOG_INFO("notify_d: service destroyed");
@@ -611,58 +452,22 @@ static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_
     }
     buffer[n] = '\0';
 
-    /* L2 标准方法 <ns>.shutdown / <ns>.get_stats（02-l2-service-protocol.md §6.1）：
-     * 先尝试解析 JSON-RPC 请求，命中标准方法则按 JSON-RPC 2.0 响应并返回；
+    /* L2 命名空间方法（02-l2-service-protocol.md §6.1）：gateway 转发时已剥离
+     * <ns>. 前缀，此处直接匹配 publish/subscribe/unsubscribe/list/health 与
+     * 标准方法 shutdown/get_stats/health_check。命中则回 JSON-RPC 2.0 响应；
      * 其余（SSE/WebSocket 升级/普通消息投递）保持原有逻辑，向后兼容。 */
-    cJSON *req = cJSON_Parse(buffer);
-    if (req) {
-        cJSON *m = cJSON_GetObjectItem(req, "method");
-        cJSON *idj = cJSON_GetObjectItem(req, "id");
-        if (cJSON_IsString(m) && idj) {
-            int rid = cJSON_IsNumber(idj) ? idj->valueint : 0;
-            if (strcmp(m->valuestring, "shutdown") == 0) {
-                /* 与信号处理一致：原子置位 g_shutdown，accept 循环 1s 内退出 */
-                atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
-                cJSON *result = cJSON_CreateObject();
-                cJSON_AddStringToObject(result, "status", "shutting_down");
-                JSONRPC_SEND_SUCCESS(client_fd, result, rid);
-                cJSON_Delete(req);
-                airy_sock_close(client_fd);
-                return;
-            } else if (strcmp(m->valuestring, "get_stats") == 0) {
-                airy_mtx_lock(&svc->lock);
-                uint64_t notified = svc->notified_count;
-                uint64_t errors = svc->error_count;
-                size_t clients = svc->client_count;
-                size_t pending = svc->pending_count;
-                airy_mtx_unlock(&svc->lock);
-                uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
-                cJSON *result = cJSON_CreateObject();
-                cJSON_AddStringToObject(result, "daemon", "notify_d");
-                cJSON_AddNumberToObject(result, "uptime_s", (double)uptime);
-                cJSON_AddNumberToObject(result, "notified", (double)notified);
-                cJSON_AddNumberToObject(result, "errors", (double)errors);
-                cJSON_AddNumberToObject(result, "clients", (double)clients);
-                cJSON_AddNumberToObject(result, "pending", (double)pending);
-                JSONRPC_SEND_SUCCESS(client_fd, result, rid);
-                cJSON_Delete(req);
-                airy_sock_close(client_fd);
-                return;
-            } else if (strcmp(m->valuestring, "health_check") == 0) {
-                uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
-                cJSON *result = cJSON_CreateObject();
-                cJSON_AddStringToObject(result, "status", "ok");
-                cJSON_AddStringToObject(result, "service", "notify_d");
-                cJSON_AddNumberToObject(result, "uptime_s", (double)uptime);
-                cJSON_AddNumberToObject(result, "timestamp",
-                                        (double)time(NULL) * 1000.0);
-                JSONRPC_SEND_SUCCESS(client_fd, result, rid);
-                cJSON_Delete(req);
-                airy_sock_close(client_fd);
-                return;
-            }
-        }
-        cJSON_Delete(req);
+    char rpc_response[NOTIFY_D_MAX_BUFFER];
+    int dispatch_rc = notify_d_dispatch_jsonrpc(svc, buffer, rpc_response,
+                                                sizeof(rpc_response));
+    if (dispatch_rc == NOTIFY_D_METHOD_SHUTDOWN) {
+        /* 与信号处理一致：原子置位 g_shutdown，accept 循环 1s 内退出 */
+        atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
+    }
+    if (dispatch_rc == NOTIFY_D_METHOD_HANDLED ||
+        dispatch_rc == NOTIFY_D_METHOD_SHUTDOWN) {
+        airy_sock_send(client_fd, rpc_response, strlen(rpc_response));
+        airy_sock_close(client_fd);
+        return;
     }
 
     airy_mtx_lock(&svc->lock);
@@ -685,6 +490,25 @@ static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_
     client->connected_at = (uint64_t)time(NULL);
     client->last_activity = client->connected_at;
     client->active = 1;
+
+    /* 解析可选 X-Client-Id 头：供订阅注册表（subscribe/unsubscribe）投递匹配 */
+    const char *cid_tag = "X-Client-Id: ";
+    const char *cid_hdr = strstr(buffer, cid_tag);
+    if (cid_hdr) {
+        const char *cid_start = cid_hdr + strlen(cid_tag);
+        const char *cid_end = strstr(cid_start, "\r\n");
+        if (cid_end && cid_end > cid_start) {
+            size_t clen = (size_t)(cid_end - cid_start);
+            if (clen > 0 && clen < 256) {
+                char *cid = (char *)AIRY_MALLOC(clen + 1);
+                if (cid) {
+                    __builtin_memcpy(cid, cid_start, clen);
+                    cid[clen] = '\0';
+                    client->client_id = cid;
+                }
+            }
+        }
+    }
 
     if (is_sse) {
         client->type = NOTIFY_CLIENT_SSE;

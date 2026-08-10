@@ -45,6 +45,11 @@ static int priority_based_create(const sched_config_t *manager, void **data)
     }
 
     pbd->max_agents = manager->max_agents;
+    /* 乘法溢出检查：max_agents * sizeof(agent_info_t *) 不得回绕 */
+    if (pbd->max_agents > SIZE_MAX / sizeof(agent_info_t *)) {
+        AIRY_FREE(pbd);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
     pbd->agents = (agent_info_t **)AIRY_MALLOC(sizeof(agent_info_t *) * pbd->max_agents);
     if (!pbd->agents) {
         AIRY_FREE(pbd);

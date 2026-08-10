@@ -29,8 +29,14 @@ notify_d/ → IPC Service Bus → 各守护进程事件源
 notify_d/
 ├── CMakeLists.txt                    # 构建配置
 ├── README.md                         # 本文件
-└── src/                              # 实现文件
-    └── main.c                        # 守护进程入口（含通知逻辑与协议处理）
+├── include/                          # 公共头文件
+│   └── notify_service.h              # 服务核心接口（订阅注册表/队列/广播/分发）
+├── src/                              # 实现文件
+│   ├── main.c                        # 守护进程入口（网络层：accept 循环 / WS 握手 / 客户端生命周期）
+│   └── notify_service.c              # 服务核心（订阅注册表 / 事件队列 / 广播引擎 / JSON-RPC 分发）
+└── tests/                            # 单元测试（CTest）
+    ├── CMakeLists.txt
+    └── test_notify_service.c
 ```
 
 ## 核心组件说明
@@ -89,13 +95,20 @@ data: {"event":"...","data":"..."}\n\n
 
 ### JSON-RPC 2.0 方法
 
-| 方法 | 说明 |
-|------|------|
-| `notify.subscribe` | 订阅指定频道 |
-| `notify.unsubscribe` | 取消订阅频道 |
-| `notify.publish` | 发布事件到指定频道 |
-| `notify.list` | 列出当前活跃客户端 |
-| `notify.health` | 查询通知服务健康状态 |
+方法名不带 `<ns>.` 前缀——gateway 转发时已剥离命名空间前缀（`02-l2-service-protocol.md` §5）。完整方法集（L2 命名空间规范）：
+
+| 方法 | 参数 | 说明 |
+|------|------|------|
+| `publish` | `event?`, `channel?`, `message` 或 `payload` | 将事件推入环形队列，经后台消费线程广播到所有已订阅对应频道的客户端；返回 `{"queued": true, "channel": ..., "event": ..., "pending": N, "subscribers": M}` |
+| `subscribe` | `channel`, `client_id` | 将客户端加入指定频道的订阅注册表；返回 `{"status": "subscribed", ...}`（幂等） |
+| `unsubscribe` | `channel`, `client_id` | 从订阅注册表移除；返回 `{"status": "unsubscribed", ...}`（幂等） |
+| `list` | — | 返回活跃连接数、订阅注册表总数及各频道 `subscribers` / `active_clients` 明细 |
+| `health` | — | 返回健康状态：队列占用（`queue_pending` / `queue_occupancy`）、消费线程状态（`consumer_running`）、活跃连接数 |
+| `get_stats` | — | 返回统计：`uptime_s` / `notified` / `errors` / `clients` / `pending` |
+| `health_check` | — | 标准健康检查：`{"status": "ok", "service": "notify_d", "uptime_s": ..., "timestamp": ...}` |
+| `shutdown` | — | 优雅停止：原子置位退出标志并返回 `{"status": "shutting_down"}` |
+
+> **订阅投递匹配**：客户端连接时可通过 `X-Client-Id` 头声明身份；`publish` 广播时，事件会投递给「连接频道匹配（`X-Channel`）」或「订阅注册表中 (channel, client_id) 匹配」的活跃客户端。`subscribe`/`unsubscribe` 管理逻辑订阅注册表，不要求客户端保持在线。
 
 ## 通信方式
 
@@ -116,6 +129,7 @@ data: {"event":"...","data":"..."}\n\n
 | Unix Socket | `AIRY_RUNTIME_DIR/notify.sock` | IPC 通信 Socket 路径 |
 | 最大待处理事件 | 1024 | 环形缓冲区事件队列容量 |
 | 最大客户端数 | 128 | 同时连接的最大客户端数量 |
+| 最大订阅数 | 512 | 频道订阅注册表容量 |
 | WebSocket GUID | `258EAFA5-E914-47DA-95CA-C5AB0DC85B11` | WebSocket 协议握手 GUID |
 
 ## 健康检查机制

@@ -54,9 +54,9 @@ struct think_service {
     airy_cognition_engine_t *engine;   /* 认知引擎（GCCP+GRAD 双思考主体） */
     llm_svc_adapter_t *llm_adapter;    /* LLM IPC 适配器（直连 llm.sock） */
 
-    char s2_model[128];
-    char verify_model[128];
-    char expert_model[128];
+    char think2_slow_model[128];   /* t2 慢思考模型（GRAD 模型 A：生成计划） */
+    char think1_fast_model[128];   /* t1-f 快思考模型（GRAD 模型 B：语境终裁） */
+    char think1_prof_model[128];   /* t1-p 专业思考模型（GRAD 模型 C：四验专家） */
     uint32_t process_timeout_ms;
 
     /* 思考事件缓冲 */
@@ -124,21 +124,24 @@ think_service_t *think_service_create(const think_service_config_t *config)
     airy_mtx_init(&svc->lock);
 
     /* 模型配置：NULL → provider 默认（llm_d global.default_model） */
-    const char *s2 = config ? config->s2_model : NULL;
-    const char *verify = config ? config->verify_model : NULL;
-    const char *expert = config ? config->expert_model : NULL;
+    const char *s2 = config ? config->think2_slow_model : NULL;
+    const char *verify = config ? config->think1_fast_model : NULL;
+    const char *expert = config ? config->think1_prof_model : NULL;
     if (s2)
-        __builtin_memcpy(svc->s2_model, s2,
-                         (strlen(s2) < sizeof(svc->s2_model)) ? strlen(s2) + 1
-                                                              : sizeof(svc->s2_model));
+        __builtin_memcpy(svc->think2_slow_model, s2,
+                         (strlen(s2) < sizeof(svc->think2_slow_model))
+                             ? strlen(s2) + 1
+                             : sizeof(svc->think2_slow_model));
     if (verify)
-        __builtin_memcpy(svc->verify_model, verify,
-                         (strlen(verify) < sizeof(svc->verify_model)) ? strlen(verify) + 1
-                                                                       : sizeof(svc->verify_model));
+        __builtin_memcpy(svc->think1_fast_model, verify,
+                         (strlen(verify) < sizeof(svc->think1_fast_model))
+                             ? strlen(verify) + 1
+                             : sizeof(svc->think1_fast_model));
     if (expert)
-        __builtin_memcpy(svc->expert_model, expert,
-                         (strlen(expert) < sizeof(svc->expert_model)) ? strlen(expert) + 1
-                                                                       : sizeof(svc->expert_model));
+        __builtin_memcpy(svc->think1_prof_model, expert,
+                         (strlen(expert) < sizeof(svc->think1_prof_model))
+                             ? strlen(expert) + 1
+                             : sizeof(svc->think1_prof_model));
     svc->process_timeout_ms = (config && config->process_timeout_ms > 0)
                                   ? config->process_timeout_ms
                                   : THINK_DEFAULT_TIMEOUT_MS;
@@ -204,18 +207,26 @@ think_service_t *think_service_create(const think_service_config_t *config)
     airy_cognition_set_llm_adapter(svc->engine, svc->llm_adapter);
 
     /* 4. 注入 t2/t1-f/t1-p 三独立模型槽位（NULL → provider 默认）。
-     * GRAD 三模型角色复用这些槽位：模型 A=t2（生成）、模型 C=t1-p（四验）、
-     * 模型 B=t1-f（终裁），因此注入的是 GRAD 三模型名，而非已废除的 TC3
-     * 文本级批判循环（旧双思考已于 2026-08-07 完全废除）。 */
-    airy_cognition_set_tc3_models(svc->engine, svc->s2_model[0] ? svc->s2_model : NULL,
-                                  svc->verify_model[0] ? svc->verify_model : NULL,
-                                  svc->expert_model[0] ? svc->expert_model : NULL);
+     * GRAD 三模型角色复用这些槽位：模型 A=t2 慢思考（生成）、模型 C=t1-p
+     * 专业思考（四验）、模型 B=t1-f 快思考（终裁）。 */
+    airy_cognition_set_tc3_models(svc->engine,
+                                  svc->think2_slow_model[0] ? svc->think2_slow_model : NULL,
+                                  svc->think1_fast_model[0] ? svc->think1_fast_model : NULL,
+                                  svc->think1_prof_model[0] ? svc->think1_prof_model : NULL);
 
-    SVC_LOG_INFO("ThinkDual: service ready (engine=%p, adapter=%p, tc3=%s/%s/%s)",
+    /* 5. 双思考开关：enabled=0 → 关闭 GRAD 计划级批判循环（退化单轮计划），
+     * 此时 t2/t1-f/t1-p 三角色不参与批判，走普通 GCCP → 计划路径。 */
+    if (config && config->enabled == 0) {
+        airy_cognition_set_grad_enabled(svc->engine, 0);
+        SVC_LOG_WARN("ThinkDual: dual-thinking disabled (enabled=0), GRAD off");
+    }
+
+    SVC_LOG_INFO("ThinkDual: service ready (engine=%p, adapter=%p, tc3=%s/%s/%s, enabled=%d)",
                  (void *)svc->engine, (void *)svc->llm_adapter,
-                 svc->s2_model[0] ? svc->s2_model : "(default)",
-                 svc->verify_model[0] ? svc->verify_model : "(default)",
-                 svc->expert_model[0] ? svc->expert_model : "(default)");
+                 svc->think2_slow_model[0] ? svc->think2_slow_model : "(default)",
+                 svc->think1_fast_model[0] ? svc->think1_fast_model : "(default)",
+                 svc->think1_prof_model[0] ? svc->think1_prof_model : "(default)",
+                 config ? config->enabled : 1);
     return svc;
 }
 

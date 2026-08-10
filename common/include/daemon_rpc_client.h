@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 SPHARX Ltd.
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file daemon_rpc_client.h
@@ -22,6 +22,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "cancel_token.h" /* 改进1（取消下探）：可取消 RPC 调用 */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -42,6 +44,32 @@ extern "C" {
 int daemon_rpc_call(const char *socket_path, const char *method,
                     const char *params_json,
                     char **out_result_json, uint32_t timeout_ms);
+
+/**
+ * @brief 可取消的 daemon JSON-RPC 调用（改进1 "取消下探"）
+ *
+ * 与 daemon_rpc_call 相同，但在等待响应期间短轮询取消令牌（select/poll
+ * 非阻塞，200ms 片）。令牌命中时先向同一 daemon 发送 cancel 请求
+ * （agent_d：agent.cancel，按 request_id 终止 invoke 会话），再返回
+ * AIRY_ERR_CANCELED。用于 DAG 节点级取消 → 工具/Agent 调用级取消下探。
+ *
+ * @param socket_path  daemon Unix socket 路径（非 NULL）
+ * @param method       JSON-RPC 方法名（如 "invoke"）
+ * @param params_json  params 对象序列化字符串（可为 NULL）
+ * @param out_result_json 输出 result JSON 字符串（调用方负责 AIRY_FREE）
+ * @param timeout_ms   超时（毫秒），0 表示使用默认 30000ms
+ * @param cancel_token 取消令牌（可为 NULL = 等同 daemon_rpc_call）
+ * @param cancel_method    取消时发送的方法名（如 "cancel"）
+ * @param cancel_params_json 取消请求的 params JSON（如 {"request_id":...}）
+ * @return AIRY_SUCCESS 成功；AIRY_ERR_CANCELED 已被取消（取消请求已送达）；
+ *         其他为错误码
+ */
+int daemon_rpc_call_cancelable(const char *socket_path, const char *method,
+                               const char *params_json,
+                               char **out_result_json, uint32_t timeout_ms,
+                               airy_cancel_token_t *cancel_token,
+                               const char *cancel_method,
+                               const char *cancel_params_json);
 
 #ifdef __cplusplus
 }

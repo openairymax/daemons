@@ -56,38 +56,48 @@ static BOOL WINAPI console_handler_channel_d(DWORD fdwCtrlType)
 
 /* ==================== 业务逻辑：请求处理 ==================== */
 
-__attribute__((used)) static int handle_service_request(const char *method, const char *params_json,
+/* 从 cJSON params 提取 channel_id：支持字符串与数字 id，返回 AIRY_MALLOC 字符串或 NULL。
+ * （修复：原手写 strstr/strchr 解析无法处理数字 id 与含转义引号的 data，导致
+ *   send 数据静默丢失仍上报成功 —— 改为 cJSON 解析，fail-closed 返回错误。） */
+static char *channel_param_id_str(cJSON *params)
+{
+    cJSON *id = cJSON_GetObjectItem(params, "id");
+    if (cJSON_IsString(id) && id->valuestring && id->valuestring[0])
+        return AIRY_STRDUP(id->valuestring);
+    if (cJSON_IsNumber(id)) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", id->valueint);
+        return AIRY_STRDUP(buf);
+    }
+    return NULL;
+}
+
+__attribute__((used)) static int handle_service_request(const char *method, cJSON *params,
                                                         char **response_json, void *user_data)
 {
     channel_service_t *svc = (channel_service_t *)user_data;
     if (!svc || !method || !response_json) {
         AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
+    if (!params) {
+        params = cJSON_CreateObject();
+        if (!params)
+            AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to create empty params");
+    }
 
     if (strcmp(method, "ping") == 0) {
-        const char *id_start = strstr(params_json, "\"id\"");
-        if (!id_start) {
+        char *id = channel_param_id_str(params);
+        if (!id) {
             bool healthy = channel_service_is_healthy(svc);
             char buf[128];
             snprintf(buf, sizeof(buf), "{\"status\":\"%s\"}", healthy ? "ok" : "degraded");
             *response_json = AIRY_STRDUP(buf);
             return 0;
         }
-        char id[128] = {0};
-        const char *p = strchr(id_start + 4, '"');
-        if (p) {
-            p++;
-            const char *e = strchr(p, '"');
-            if (e) {
-                size_t l = (size_t)(e - p);
-                if (l > 127)
-                    l = 127;
-                __builtin_memcpy(id, p, l);
-            }
-        }
         int64_t latency_ms = 0;
         int rc = channel_service_ping(svc, id, &latency_ms);
         if (rc != CHANNEL_OK) {
+            AIRY_FREE(id);
             char err[256];
             snprintf(err, sizeof(err), "{\"error\":\"ping failed: %d\",\"latency_ms\":%lld}", rc,
                      (long long)latency_ms);
@@ -100,10 +110,12 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
             1;
         char *buf = (char *)AIRY_MALLOC(sz);
         if (!buf) {
+            AIRY_FREE(id);
             AIRY_ERROR(AIRY_ERR_UNKNOWN, "malloc failed for ping response buffer");
         }
         snprintf(buf, sz, "{\"status\":\"ok\",\"channel_id\":\"%s\",\"latency_ms\":%lld}", id,
                  (long long)latency_ms);
+        AIRY_FREE(id);
         *response_json = buf;
         return 0;
     }
@@ -173,51 +185,20 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
     }
 
     if (strcmp(method, "open") == 0) {
-        const char *id_start = strstr(params_json, "\"id\"");
-        const char *name_start = strstr(params_json, "\"name\"");
-        const char *type_start = strstr(params_json, "\"type\"");
-
-        if (!id_start || !name_start) {
+        cJSON *id = cJSON_GetObjectItem(params, "id");
+        cJSON *name = cJSON_GetObjectItem(params, "name");
+        if (!cJSON_IsString(id) || !id->valuestring[0] || !cJSON_IsString(name) ||
+            !name->valuestring[0]) {
             *response_json = AIRY_STRDUP("{\"error\":\"missing id or name\"}");
             AIRY_ERROR(AIRY_ERR_UNKNOWN, "missing id or name in open request");
         }
 
-        char id[128] = {0}, name[256] = {0};
-        const char *p = strchr(id_start + 4, '"');
-        if (p) {
-            p++;
-            const char *e = strchr(p, '"');
-            if (e) {
-                size_t l = (size_t)(e - p);
-                if (l > 127)
-                    l = 127;
-                __builtin_memcpy(id, p, l);
-            }
-        }
-
-        p = strchr(name_start + 6, '"');
-        if (p) {
-            p++;
-            const char *e = strchr(p, '"');
-            if (e) {
-                size_t l = (size_t)(e - p);
-                if (l > 255)
-                    l = 255;
-                __builtin_memcpy(name, p, l);
-            }
-        }
-
         channel_type_t type = CHANNEL_TYPE_SOCKET;
-        if (type_start) {
-            p = strchr(type_start + 6, ':');
-            if (p) {
-                int t = (int)strtol(p + 1, NULL, 10);
-                if (t >= 0 && t <= 2)
-                    type = (channel_type_t)t;
-            }
-        }
+        cJSON *typej = cJSON_GetObjectItem(params, "type");
+        if (cJSON_IsNumber(typej) && typej->valueint >= 0 && typej->valueint <= 2)
+            type = (channel_type_t)typej->valueint;
 
-        int rc = channel_service_open(svc, id, name, type, NULL);
+        int rc = channel_service_open(svc, id->valuestring, name->valuestring, type, NULL);
         if (rc != 0) {
             char err[256];
             snprintf(err, sizeof(err), "{\"error\":\"open failed: %d\"}", rc);
@@ -230,25 +211,13 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
     }
 
     if (strcmp(method, "close") == 0) {
-        const char *id_start = strstr(params_json, "\"id\"");
-        if (!id_start) {
+        cJSON *id = cJSON_GetObjectItem(params, "id");
+        if (!cJSON_IsString(id) || !id->valuestring[0]) {
             *response_json = AIRY_STRDUP("{\"error\":\"missing id\"}");
             AIRY_ERROR(AIRY_ERR_UNKNOWN, "missing id in close request");
         }
-        char id[128] = {0};
-        const char *p = strchr(id_start + 4, '"');
-        if (p) {
-            p++;
-            const char *e = strchr(p, '"');
-            if (e) {
-                size_t l = (size_t)(e - p);
-                if (l > 127)
-                    l = 127;
-                __builtin_memcpy(id, p, l);
-            }
-        }
 
-        int rc = channel_service_close(svc, id);
+        int rc = channel_service_close(svc, id->valuestring);
         if (rc != 0) {
             *response_json = AIRY_STRDUP("{\"error\":\"close failed\"}");
             AIRY_ERROR(AIRY_ERR_UNKNOWN, "channel_service_close failed");
@@ -258,37 +227,21 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
     }
 
     if (strcmp(method, "send") == 0) {
-        const char *id_start = strstr(params_json, "\"id\"");
-        const char *data_start = strstr(params_json, "\"data\"");
-        if (!id_start || !data_start) {
+        cJSON *id = cJSON_GetObjectItem(params, "id");
+        cJSON *data = cJSON_GetObjectItem(params, "data");
+        /* fail-closed：data 必须为字符串，非字符串（数字/对象/数组）或缺失
+         * 一律返回错误，禁止静默跳过导致消息丢失却上报成功 */
+        if (!cJSON_IsString(id) || !id->valuestring[0] || !cJSON_IsString(data)) {
             *response_json = AIRY_STRDUP("{\"error\":\"missing id or data\"}");
-            AIRY_ERROR(AIRY_ERR_UNKNOWN, "missing id or data in send request");
+            AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "missing id or data in send request");
         }
-        char id[128] = {0};
-        const char *p = strchr(id_start + 4, '"');
-        if (p) {
-            p++;
-            const char *e = strchr(p, '"');
-            if (e) {
-                size_t l = (size_t)(e - p);
-                if (l > 127)
-                    l = 127;
-                __builtin_memcpy(id, p, l);
-            }
-        }
-
-        p = strchr(data_start + 6, '"');
-        if (p) {
-            p++;
-            const char *e = strchr(p, '"');
-            size_t dlen = e ? (size_t)(e - p) : strlen(p);
-            int rc = channel_service_send(svc, id, p, dlen);
-            if (rc != 0) {
-                char err[256];
-                snprintf(err, sizeof(err), "{\"error\":\"send failed: %d\"}", rc);
-                *response_json = AIRY_STRDUP(err);
-                AIRY_ERROR(AIRY_ERR_UNKNOWN, "channel_service_send failed");
-            }
+        size_t dlen = strlen(data->valuestring);
+        int rc = channel_service_send(svc, id->valuestring, data->valuestring, dlen);
+        if (rc != 0) {
+            char err[256];
+            snprintf(err, sizeof(err), "{\"error\":\"send failed: %d\"}", rc);
+            *response_json = AIRY_STRDUP(err);
+            AIRY_ERROR(AIRY_ERR_UNKNOWN, "channel_service_send failed");
         }
         *response_json = AIRY_STRDUP("{\"status\":\"sent\"}");
         return 0;
@@ -307,33 +260,23 @@ __attribute__((used)) static int handle_service_request(const char *method, cons
 /* ==================== JSON-RPC 方法包装（接入 method_dispatcher） ==================== */
 
 /**
- * @brief 将 cJSON params 序列化后转交 handle_service_request，并把返回的
- *        JSON 结果封装为 JSON-RPC 成功响应。
+ * @brief 将 cJSON params 直接转交 handle_service_request（cJSON 解析，无字符串往返），
+ *        并把返回的 JSON 结果封装为 JSON-RPC 成功响应。
  *
  * user_data 由 daemon_handle_client_* 传入，指向 client_fd。
  */
 static void channel_dispatch_method(cJSON *params, int id, void *user_data, const char *method)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
-    cJSON *tmp = NULL;
-    if (!params) {
-        tmp = cJSON_CreateObject();
-        params = tmp;
-    }
-
-    char *params_json = cJSON_PrintUnformatted(params);
-    if (tmp)
-        cJSON_Delete(tmp);
-    if (!params_json) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "failed to serialize params", id);
-        return;
-    }
 
     char *result_json = NULL;
-    int rc = handle_service_request(method, params_json, &result_json, g_svc);
-    AIRY_FREE(params_json);
+    int rc = handle_service_request(method, params, &result_json, g_svc);
     if (rc != 0 || !result_json) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "channel service error", id);
+        /* 参数校验失败（fail-closed 缺 id/data、非法类型）映射为
+         * JSON-RPC Invalid params(-32602)；其余服务错误为 Internal error(-32603) */
+        int code = (rc == AIRY_ERR_INVALID_PARAM) ? JSONRPC_INVALID_PARAMS
+                                                  : JSONRPC_INTERNAL_ERROR;
+        JSONRPC_SEND_ERROR(client_fd, code, "channel service error", id);
         AIRY_FREE(result_json);
         return;
     }

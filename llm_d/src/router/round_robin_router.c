@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file round_robin_router.c
  * @brief P3.1.2: 轮询路由
@@ -6,7 +8,6 @@
  * 确保请求均匀分布到各端点。
  *
  * Copyright (C) 2025-2026 SPHARX Ltd. All Rights Reserved.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  */
 
 #include "router/router_context.h"

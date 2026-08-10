@@ -389,7 +389,14 @@ int channel_service_send(channel_service_t *svc, const char *channel_id, const v
             return AIRY_ERR_UNKNOWN;
         }
         size_t header_size = sizeof(uint32_t) * 2;
-        if (data_len + header_size > shm_size) {
+        /* 先校验 header 不超缓冲区，再以减法形式检查 data_len，
+         * 避免 data_len + header_size 加法回绕 */
+        if (header_size > shm_size) {
+            airy_mtx_unlock(&svc->lock);
+            AIRY_ERROR(AIRY_ERR_OVERFLOW, "shm buffer too small for header");
+            return AIRY_ERR_OVERFLOW;
+        }
+        if (data_len > shm_size - header_size) {
             airy_mtx_unlock(&svc->lock);
             AIRY_ERROR(AIRY_ERR_OVERFLOW, "data exceeds shm buffer size");
             return AIRY_ERR_OVERFLOW;

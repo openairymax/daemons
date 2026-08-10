@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file llm_router.c
  * @brief P3.1.5: LLM 路由器编排器 — 统一选择接口 + 端点管理 + 统计
@@ -12,7 +14,6 @@
  *   - P3.1.4 quality_first_router.c:  质量优先路由
  *
  * Copyright (C) 2025-2026 SPHARX Ltd. All Rights Reserved.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  */
 
 #include "router/router_context.h"

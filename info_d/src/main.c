@@ -178,6 +178,16 @@ static int info_d_collect_system_info(system_info_snapshot_t *snap)
     return 0;
 }
 
+/* 将快照追加到环形历史缓冲（调用方须持有 svc->lock） */
+static void info_d_history_append(info_d_service_t *svc,
+                                  const system_info_snapshot_t *snap)
+{
+    svc->history[svc->history_head] = *snap;
+    svc->history_head = (svc->history_head + 1) % INFO_D_HISTORY_SIZE;
+    if (svc->history_count < INFO_D_HISTORY_SIZE)
+        svc->history_count++;
+}
+
 #ifdef _WIN32
 static DWORD WINAPI info_d_collect_loop(LPVOID arg)
 {
@@ -201,11 +211,7 @@ static void *info_d_collect_loop(void *arg)
         airy_mtx_lock(&svc->lock);
         __builtin_memcpy(&svc->latest_snapshot, &snap, sizeof(snap));
         svc->last_collect_time = snap.timestamp;
-
-        svc->history[svc->history_head] = snap;
-        svc->history_head = (svc->history_head + 1) % INFO_D_HISTORY_SIZE;
-        if (svc->history_count < INFO_D_HISTORY_SIZE)
-            svc->history_count++;
+        info_d_history_append(svc, &snap);
         airy_mtx_unlock(&svc->lock);
 
         for (int i = 0; i < INFO_D_COLLECT_INTERVAL_SEC && svc->collect_running; i++) {
@@ -347,6 +353,149 @@ static uint64_t info_d_healthcheck(info_d_service_t *svc)
     return last_time;
 }
 
+/* ==================== L2 命名空间方法（02-l2-service-protocol.md §5/§6） ====================
+ * gateway_d 转发时已剥离 "<daemon>." 前缀，故此处方法名不带前缀。
+ */
+
+/* 将单个快照序列化为 cJSON 对象（system/history 共用） */
+static cJSON *info_d_build_snapshot_json(const system_info_snapshot_t *snap)
+{
+    cJSON *item = cJSON_CreateObject();
+    cJSON_AddNumberToObject(item, "timestamp", (double)snap->timestamp);
+    cJSON_AddNumberToObject(item, "cpu_cores", snap->cpu_cores);
+    cJSON_AddNumberToObject(item, "cpu_usage_pct", snap->cpu_usage_pct);
+    cJSON_AddNumberToObject(item, "total_memory_kb", (double)snap->total_memory_kb);
+    cJSON_AddNumberToObject(item, "free_memory_kb", (double)snap->free_memory_kb);
+    cJSON_AddNumberToObject(item, "used_memory_kb", (double)snap->used_memory_kb);
+    cJSON_AddNumberToObject(item, "memory_usage_pct", snap->memory_usage_pct);
+    cJSON_AddNumberToObject(item, "disk_total_kb", (double)snap->disk_total_kb);
+    cJSON_AddNumberToObject(item, "disk_free_kb", (double)snap->disk_free_kb);
+    cJSON_AddNumberToObject(item, "disk_used_kb", (double)snap->disk_used_kb);
+    cJSON_AddNumberToObject(item, "disk_usage_pct", snap->disk_usage_pct);
+    cJSON_AddNumberToObject(item, "uptime_sec", (double)snap->uptime_sec);
+    return item;
+}
+
+/* info.system：当前系统信息快照（CPU/内存/磁盘/uptime/hostname/内核版本） */
+static cJSON *info_d_build_system_result(info_d_service_t *svc)
+{
+    airy_mtx_lock(&svc->lock);
+    system_info_snapshot_t snap = svc->latest_snapshot;
+    airy_mtx_unlock(&svc->lock);
+
+    const char *platform_name = "Linux";
+    const char *hostname = "localhost";
+    const char *kernel_release = "unknown";
+#ifndef _WIN32
+    struct utsname uts;
+    if (uname(&uts) == 0) {
+        platform_name = uts.sysname;
+        hostname = uts.nodename;
+        kernel_release = uts.release;
+    }
+#endif
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "service", "info_d");
+    cJSON_AddStringToObject(result, "platform", platform_name);
+    cJSON_AddStringToObject(result, "hostname", hostname);
+    cJSON_AddStringToObject(result, "kernel_version", kernel_release);
+    cJSON_AddItemToObject(result, "system", info_d_build_snapshot_json(&snap));
+    return result;
+}
+
+/* info.history：环形历史快照列表（参数 N 可选，返回最近 N 条，默认全部） */
+static cJSON *info_d_build_history_result(info_d_service_t *svc, cJSON *params)
+{
+    /* 解析 N：支持对象参数（N/n/count/limit）与数组参数（首个元素）两种形式 */
+    int limit = INFO_D_HISTORY_SIZE;
+    if (cJSON_IsObject(params)) {
+        cJSON *n = cJSON_GetObjectItem(params, "N");
+        if (!cJSON_IsNumber(n))
+            n = cJSON_GetObjectItem(params, "n");
+        if (!cJSON_IsNumber(n))
+            n = cJSON_GetObjectItem(params, "count");
+        if (!cJSON_IsNumber(n))
+            n = cJSON_GetObjectItem(params, "limit");
+        if (cJSON_IsNumber(n))
+            limit = n->valueint;
+    } else if (cJSON_IsArray(params) && cJSON_GetArraySize(params) > 0) {
+        cJSON *n = cJSON_GetArrayItem(params, 0);
+        if (cJSON_IsNumber(n))
+            limit = n->valueint;
+    }
+    if (limit < 0)
+        limit = 0;
+    if (limit > (int)INFO_D_HISTORY_SIZE)
+        limit = (int)INFO_D_HISTORY_SIZE;
+
+    airy_mtx_lock(&svc->lock);
+    size_t take = svc->history_count < (size_t)limit ? svc->history_count : (size_t)limit;
+    size_t head = svc->history_head;
+
+    cJSON *arr = cJSON_CreateArray();
+    /* 环形缓冲按时间升序（最旧 → 最新）读取最近 take 条 */
+    for (size_t i = 0; i < take; i++) {
+        size_t idx = (head + INFO_D_HISTORY_SIZE - take + i) % INFO_D_HISTORY_SIZE;
+        cJSON_AddItemToArray(arr, info_d_build_snapshot_json(&svc->history[idx]));
+    }
+    airy_mtx_unlock(&svc->lock);
+    return arr;
+}
+
+/* info.health：采集线程活跃度、最近采集时间、运行时长 */
+static cJSON *info_d_build_health_result(info_d_service_t *svc)
+{
+    airy_mtx_lock(&svc->lock);
+    int collecting = atomic_load_explicit(&svc->collect_running, memory_order_relaxed);
+    int running = atomic_load_explicit(&svc->running, memory_order_relaxed);
+    uint64_t last_collect = svc->last_collect_time;
+    airy_mtx_unlock(&svc->lock);
+
+    uint64_t now = (uint64_t)time(NULL);
+    uint64_t uptime_s = now > svc->start_time ? now - svc->start_time : 0;
+    uint64_t staleness = now > last_collect ? now - last_collect : 0;
+    const char *status =
+        (collecting && running &&
+         staleness <= (uint64_t)(INFO_D_COLLECT_INTERVAL_SEC * 3))
+            ? "ok"
+            : "degraded";
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "status", status);
+    cJSON_AddStringToObject(result, "service", "info_d");
+    cJSON_AddBoolToObject(result, "collecting", collecting ? 1 : 0);
+    cJSON_AddBoolToObject(result, "running", running ? 1 : 0);
+    cJSON_AddNumberToObject(result, "last_collect_time", (double)last_collect);
+    cJSON_AddNumberToObject(result, "staleness_sec", (double)staleness);
+    cJSON_AddNumberToObject(result, "uptime_s", (double)uptime_s);
+    cJSON_AddNumberToObject(result, "timestamp", (double)now);
+    return result;
+}
+
+static void handle_system(info_d_service_t *svc, cJSON *params, int id,
+                          airy_sock_t client_fd)
+{
+    (void)params;
+    cJSON *result = info_d_build_system_result(svc);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+static void handle_history(info_d_service_t *svc, cJSON *params, int id,
+                           airy_sock_t client_fd)
+{
+    cJSON *result = info_d_build_history_result(svc, params);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+static void handle_health(info_d_service_t *svc, cJSON *params, int id,
+                          airy_sock_t client_fd)
+{
+    (void)params;
+    cJSON *result = info_d_build_health_result(svc);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
 static void info_d_handle_request(info_d_service_t *svc, airy_sock_t client_fd)
 {
     char buffer[INFO_D_MAX_BUFFER];
@@ -414,6 +563,24 @@ static void info_d_handle_request(info_d_service_t *svc, airy_sock_t client_fd)
                 cJSON_AddNumberToObject(result, "timestamp",
                                         (double)time(NULL) * 1000.0);
                 JSONRPC_SEND_SUCCESS(client_fd, result, rid);
+                cJSON_Delete(req);
+                airy_sock_close(client_fd);
+                return;
+            } else if (strcmp(m->valuestring, "system") == 0) {
+                cJSON *params = cJSON_GetObjectItem(req, "params");
+                handle_system(svc, params, rid, client_fd);
+                cJSON_Delete(req);
+                airy_sock_close(client_fd);
+                return;
+            } else if (strcmp(m->valuestring, "history") == 0) {
+                cJSON *params = cJSON_GetObjectItem(req, "params");
+                handle_history(svc, params, rid, client_fd);
+                cJSON_Delete(req);
+                airy_sock_close(client_fd);
+                return;
+            } else if (strcmp(m->valuestring, "health") == 0) {
+                cJSON *params = cJSON_GetObjectItem(req, "params");
+                handle_health(svc, params, rid, client_fd);
                 cJSON_Delete(req);
                 airy_sock_close(client_fd);
                 return;

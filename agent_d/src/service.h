@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 SPHARX Ltd.
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file service.h
@@ -15,6 +15,18 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+/* ---------- invoke 会话（跨进程取消基础，改进1 "取消下探"） ---------- */
+
+/* 活跃 invoke 会话上限（并发取消查找为线性扫描，上限防资源失控）。
+ * 每会话持有独立 cancel_token：handle_invoke 注册、agent.cancel 查表取消。 */
+#define AGENT_INVOKE_SESSIONS_MAX 1024
+
+typedef struct {
+    char request_id[64];   /* 调用方生成的唯一请求 ID */
+    airy_cancel_token_t *token; /* invoke 期间活跃的取消令牌（BORROW，调用方生命周期） */
+    int active;
+} agent_invoke_session_t;
 
 /* ---------- 内部哈希表（与 syscall_router.c 解耦的独立实现） ---------- */
 
@@ -94,6 +106,12 @@ struct agent_service {
     atomic_ullong m_spawn_us_max;
     atomic_ullong m_invoke_us_total;
     atomic_ullong m_invoke_us_max;
+
+    /* ---- invoke 会话表（改进1 "取消下探"：跨进程取消） ----
+     * 保护锁独立于 svc->lock（invoke 路径持 entry_lock 做子进程 IO，
+     * 会话注册/注销/取消为短临界区，独立锁避免全局锁长时间占用）。 */
+    airy_mtx_t session_lock;
+    agent_invoke_session_t sessions[AGENT_INVOKE_SESSIONS_MAX];
 };
 
 #endif /* AGENT_SERVICE_INTERNAL_H */

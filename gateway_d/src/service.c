@@ -89,7 +89,10 @@ void gateway_service_get_default_config(gateway_service_config_t *config)
     config->ws.timeout_ms = 30000;
 
     config->stdio.type = GATEWAY_DAEMON_TYPE_STDIO;
-    config->stdio.enabled = true;
+    /* stdio 传输默认关闭：仅当显式传入 -s（或配置文件启用）时才启动。
+     * 若默认开启，gateway_d 以 -h/-p TCP 模式运行时 stdin 往往被重定向
+     * （/dev/null 或已关闭管道），select 恒可读导致 stdio 线程 100% CPU 忙循环。 */
+    config->stdio.enabled = false;
     config->stdio.max_request_size = 1048576;
     config->stdio.timeout_ms = 30000;
 
@@ -133,7 +136,11 @@ airy_err_t gateway_service_load_config(gateway_service_config_t *config,
         if (strcmp(key, "http.port") == 0) {
             config->http.port = (uint16_t)strtol(val, NULL, 10);
         } else if (strcmp(key, "http.host") == 0) {
-            AIRY_FREE((void *)config->http.host);
+            /* 默认值为字符串字面量 "0.0.0.0"（gateway_service_get_default_config），
+             * 直接释放属 UB（free 非堆内存）。仅当已被配置文件替换为堆分配值
+             * （非默认字面量）时才释放，与 gateway_svc_adapter.c 的保护写法一致。 */
+            if (config->http.host && strcmp(config->http.host, "0.0.0.0") != 0)
+                AIRY_FREE((void *)config->http.host);
             config->http.host = AIRY_STRDUP(val);
         } else if (strcmp(key, "http.enabled") == 0) {
             config->http.enabled = (strcmp(val, "true") == 0 || strcmp(val, "1") == 0);
@@ -352,16 +359,19 @@ airy_err_t gateway_service_stop(gateway_service_t service, bool force __attribut
         return AIRY_EINVAL;
     if (service->state != GW_STATE_RUNNING)
         return AIRY_SUCCESS;
+    LOG_INFO("gateway_service_stop: begin (http/ws/stdio/http2 teardown)");
 #ifdef GATEWAY_HAS_HTTP
     if (service->http_gateway) {
         gateway_destroy(service->http_gateway);
         service->http_gateway = NULL;
+        LOG_INFO("gateway_service_stop: HTTP gateway destroyed");
     }
 #endif
 #ifdef GATEWAY_HAS_WS
     if (service->ws_gateway) {
         gateway_destroy(service->ws_gateway);
         service->ws_gateway = NULL;
+        LOG_INFO("gateway_service_stop: WS gateway destroyed");
     }
 #endif
     if (service->stdio_gateway) {
@@ -371,14 +381,17 @@ airy_err_t gateway_service_stop(gateway_service_t service, bool force __attribut
             airy_thread_join(service->stdio_thread, NULL);
             service->stdio_thread_started = 0;
         }
+        LOG_INFO("gateway_service_stop: Stdio gateway destroyed");
     }
 #ifdef GATEWAY_HAS_HTTP2
     if (service->http2_gateway) {
         gateway_destroy(service->http2_gateway);
         service->http2_gateway = NULL;
+        LOG_INFO("gateway_service_stop: HTTP/2 gateway destroyed");
     }
 #endif
     service->state = GW_STATE_STOPPED;
+    LOG_INFO("gateway_service_stop: complete");
     return AIRY_SUCCESS;
 }
 

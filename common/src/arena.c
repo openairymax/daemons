@@ -67,7 +67,11 @@ struct arena_s {
  */
 static inline size_t align_up(size_t size, size_t alignment)
 {
-    return (size + alignment - 1) & ~(alignment - 1);
+    size_t align_mask = alignment - 1;
+    /* 溢出检查：(size + alignment - 1) 回绕时返回 SIZE_MAX 哨兵 */
+    if (size > SIZE_MAX - align_mask)
+        return SIZE_MAX;
+    return (size + align_mask) & ~align_mask;
 }
 
 /**
@@ -83,6 +87,12 @@ static inline uint8_t *block_data(arena_block_t *block)
  */
 static arena_block_t *arena_block_create(size_t capacity, size_t alignment)
 {
+    /* 溢出检查：BLOCK_HEADER_SIZE + capacity 不得回绕 */
+    if (capacity > SIZE_MAX - BLOCK_HEADER_SIZE) {
+        AIRY_LOG_ERROR("Arena: block capacity %zu overflows with header %d",
+                          capacity, BLOCK_HEADER_SIZE);
+        return NULL;
+    }
     size_t total_size = BLOCK_HEADER_SIZE + capacity;
     AIRY_LOG_DEBUG("Arena: allocating new block (capacity=%zu, total=%zu, "
                       "alignment=%zu)",
@@ -119,14 +129,22 @@ static void *arena_block_alloc(arena_block_t *block, size_t size,
     size_t effective_alignment = (alignment > block->alignment)
                                      ? alignment : block->alignment;
     size_t aligned_offset = align_up(block->offset, effective_alignment);
+    if (aligned_offset == SIZE_MAX) {
+        /* 对齐计算溢出 — 视为空间不足 */
+        AIRY_LOG_DEBUG("Arena: block %p full (align overflow, requested=%zu, "
+                          "offset=%zu)",
+                          (void *)block, size, block->offset);
+        return NULL;
+    }
 
-    if (aligned_offset + size > block->capacity) {
+    if (aligned_offset > block->capacity ||
+        size > block->capacity - aligned_offset) {
         /* 空间不足 — 记录详细诊断信息 */
         AIRY_LOG_DEBUG("Arena: block %p full (requested=%zu, capacity=%zu, "
                           "offset=%zu, aligned_offset=%zu, remaining=%zu)",
                           (void *)block, size, block->capacity,
                           block->offset, aligned_offset,
-                          block->capacity - block->offset);
+                          block->capacity - aligned_offset);
         return NULL;
     }
 
@@ -243,6 +261,14 @@ void *arena_alloc_aligned(arena_t *arena, size_t size, size_t alignment)
         AIRY_LOG_INFO("Arena: request %zu exceeds default block_size %zu, "
                          "creating oversized block",
                          size, new_block_size);
+        /* 溢出检查：size + BLOCK_HEADER_SIZE + alignment 不得回绕 */
+        if (size > SIZE_MAX - BLOCK_HEADER_SIZE ||
+            size + BLOCK_HEADER_SIZE > SIZE_MAX - alignment) {
+            AIRY_LOG_ERROR("Arena: request %zu + header %d + alignment %zu "
+                              "overflows size_t",
+                              size, BLOCK_HEADER_SIZE, alignment);
+            return NULL;
+        }
         new_block_size = size + BLOCK_HEADER_SIZE + alignment;
     }
 

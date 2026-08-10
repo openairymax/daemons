@@ -14,6 +14,7 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 set(NOTIFY_D_SOURCES
     src/main.c
+    src/notify_service.c
 )
 
 add_executable(notify_d ${NOTIFY_D_SOURCES})
@@ -68,3 +69,11 @@ target_compile_options(notify_d PRIVATE
 )
 
 install(TARGETS notify_d DESTINATION bin)
+
+# 单元测试（复用顶层 BUILD_TESTS 开关）
+if(BUILD_TESTS)
+    enable_testing()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+        add_subdirectory(tests)
+    endif()
+endif()
