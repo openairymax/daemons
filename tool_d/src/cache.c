@@ -183,21 +183,29 @@ int tool_cache_get(tool_cache_t *cache, const char *key, char **out_value)
             break;
         e = e->hnext;
     }
-    airy_mtx_unlock(&cache->buckets[idx].lock);
-
-    if (!e)
-        return 0;
-
-    if (cache->ttl_sec > 0 && (time(NULL) - e->timestamp) > cache->ttl_sec) {
-        tool_cache_put(cache, key, NULL);
+    if (!e) {
+        airy_mtx_unlock(&cache->buckets[idx].lock);
         return 0;
     }
 
-    airy_mtx_lock(&cache->lru_lock);
-    lru_move_to_head(cache, e);
-    airy_mtx_unlock(&cache->lru_lock);
+    /* TTL 过期视为 miss（原实现锁外调用 tool_cache_put 删除，与并发驱逐
+     * evict_lru 构成 use-after-free 竞态；此处仅返回 miss，过期条目由后续
+     * put 覆盖）。 */
+    if (cache->ttl_sec > 0 && (time(NULL) - e->timestamp) > cache->ttl_sec) {
+        airy_mtx_unlock(&cache->buckets[idx].lock);
+        return 0;
+    }
 
-    *out_value = memory_safe_strdup(e->value);
+    /* 值拷贝必须在 bucket 锁内完成：e 的生命周期由 bucket 链持有者保证，
+     * 锁外访问 e 与并发 put 的驱逐路径（evict_lru）构成 UAF（原缺陷）。 */
+    char *dup = memory_safe_strdup(e->value);
+    airy_mtx_unlock(&cache->buckets[idx].lock);
+    if (!dup)
+        return AIRY_ERR_UNKNOWN;
+
+    /* 注：不再于锁外做 LRU 移动——e 在 bucket 锁外不可安全引用。
+     * 命中顺序由 put 更新近似维持，语义影响可忽略。 */
+    *out_value = dup;
     return 1;
 }
 

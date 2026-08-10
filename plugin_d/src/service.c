@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file service.c
  * @brief P2.2: Plugin 服务实现 — 动态加载/卸载/生命周期管理
@@ -13,7 +15,6 @@
  *   - plugin_stop_fn()      → 停止
  *
  * Copyright (C) 2025-2026 SPHARX Ltd. All Rights Reserved.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  */
 
 #include "plugin_service.h"

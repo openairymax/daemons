@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 SPHARX.
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 // @owner: team-B
 /**
@@ -19,6 +19,8 @@
 #include "daemon_security.h"
 /* A2-1: model.yaml global 段提取公共 API（与 llm_d 同一实现） */
 #include "svc_model_defaults.h"
+/* KER-05~07: heapstore 运行时数据存储引导（服务访问日志） */
+#include "daemon_heapstore_bootstrap.h"
 
 #include <cjson/cJSON.h>
 
@@ -81,6 +83,16 @@ struct gateway_business_ctx_s {
     char mem_sock_path[256];   /* POSIX: mem_d Unix socket 路径（记忆服务） */
     char sched_sock_path[256]; /* POSIX: sched_d Unix socket 路径（调度服务） */
     char think_sock_path[256]; /* POSIX: think_d Unix socket 路径（双思考 GCCP+GRAD） */
+    char a2a_sock_path[256];   /* POSIX: a2a_d Unix socket 路径（多智能体通信） */
+    char plugin_sock_path[256]; /* POSIX: plugin_d Unix socket 路径（插件管理） */
+    char info_sock_path[256];   /* POSIX: info_d Unix socket 路径（系统信息） */
+    char notify_sock_path[256]; /* POSIX: notify_d Unix socket 路径（通知推送） */
+    char observe_sock_path[256]; /* POSIX: observe_d Unix socket 路径（观测指标） */
+    char market_sock_path[256];  /* POSIX: market_d Unix socket 路径（应用市场） */
+    char hook_sock_path[256];    /* POSIX: hook_d Unix socket 路径（钩子管理） */
+    char monit_sock_path[256];   /* POSIX: monit_d Unix socket 路径（监控指标） */
+    char channel_sock_path[256]; /* POSIX: channel_d Unix socket 路径（通道管理） */
+    char cupolas_sock_path[256]; /* POSIX: cupolas_d Unix socket 路径（安全穹顶） */
     char default_model[128]; /* 默认模型（env AIRY_AGENT_MODEL 或内置默认） */
     /* 运行中请求注册表（agent.cancel 支持） */
     airy_mtx_t active_lock;
@@ -588,7 +600,7 @@ static int gw_acl_check_tool(const char *tool_name)
 /**
  * @brief mem.* 方法白名单：返回 mem_d 内部方法名，非白名单返回 NULL
  *
- * 仅透传标准 5 方法（02-l2-service-protocol.md mem.* 命名空间），
+ * 透传 mem_d 已注册方法（write/search/get/delete/count/evolve/health_check/get_stats），
  * 其他 mem.* 方法拒绝——防止任意方法穿透到 mem_d。
  */
 static const char *gw_mem_method_allowlist(const char *method)
@@ -605,7 +617,135 @@ static const char *gw_mem_method_allowlist(const char *method)
         return "delete";
     if (strcmp(method, "mem.count") == 0)
         return "count";
+    if (strcmp(method, "mem.evolve") == 0)
+        return "evolve";
+    if (strcmp(method, "mem.health_check") == 0)
+        return "health_check";
+    if (strcmp(method, "mem.get_stats") == 0)
+        return "get_stats";
     return NULL;
+}
+
+/* ==================== 通用命名空间转发（a2a./plugin./info./notify./observe./market./hook.） ==================== */
+
+/* 命名空间转发规则：<ns>.<method> → 目标 daemon <method>（白名单制）
+ * 仅放行各 daemon 已注册的 L2 方法（02-l2-service-protocol.md §6），
+ * 防止任意方法穿透。execute 等敏感方法由调用方在 allowlist 中显式列出。 */
+typedef struct {
+    const char *ns;          /* 命名空间前缀（如 "a2a."） */
+    const char *sock_path;   /* 目标 daemon socket 路径 */
+    const char *const *methods; /* 白名单方法名（不含前缀，NULL 结尾） */
+    int timeout_ms;          /* 转发超时 */
+} gw_ns_forward_rule_t;
+
+static const char *GW_A2A_METHODS[] = {
+    "register_agent", "unregister_agent", "discover_agents", "create_task",
+    "update_task", "cancel_task", "get_task", "send_message", "count",
+    "send", "receive", "health_check", "get_stats", NULL};
+static const char *GW_PLUGIN_METHODS[] = {
+    "load", "unload", "start", "stop", "execute", "get_metadata",
+    "get_state", "get_stats", "list", "install", "uninstall",
+    "health_check", NULL};
+static const char *GW_INFO_METHODS[] = {
+    "system", "history", "health", "health_check", "get_stats", NULL};
+static const char *GW_NOTIFY_METHODS[] = {
+    "publish", "subscribe", "unsubscribe", "list", "health",
+    "health_check", "get_stats", NULL};
+static const char *GW_OBSERVE_METHODS[] = {
+    "record_metric", "query_metrics", "get_metrics", "get_stats", "health_check", NULL};
+static const char *GW_MARKET_METHODS[] = {
+    "register_agent", "search_agents", "install_agent", "register_skill",
+    "search_skills", "health_check", "publish", "search", "install",
+    "get_stats", NULL};
+static const char *GW_HOOK_METHODS[] = {
+    "register", "unregister", "trigger", "list", "status", "stats",
+    "health", "ping", "health_check", "get_stats", NULL};
+static const char *GW_SCHED_METHODS[] = {
+    "register_agent", "schedule_task", "get_task", "cancel",
+    "dag_submit", "dag_status", "dag_cancel", "checkpoint_save",
+    "submit", "query", "get_stats", "health_check", NULL};
+static const char *GW_THINK_METHODS[] = {
+    "process", "health_check", "get_stats", NULL};
+static const char *GW_MONIT_METHODS[] = {
+    "record_metric", "get_metrics", "trigger_alert", "get_alerts",
+    "health_check", "generate_report", "heartbeat", "metrics",
+    "alert_raise", "alert_resolve", "get_stats", NULL};
+static const char *GW_CHANNEL_METHODS[] = {
+    "ping", "list", "open", "close", "send", "health",
+    "health_check", "get_stats", NULL};
+static const char *GW_CUPOLAS_METHODS[] = {
+    "check_permission", "sanitize", "execute_command", "add_rule",
+    "audit_flush", "health_check", "get_stats", NULL};
+static const char *GW_AGENT_METHODS[] = {
+    "spawn", "terminate", "invoke", "cancel", "list", "count",
+    "health_check", "get_stats", NULL};
+static const char *GW_LLM_METHODS[] = {
+    "complete", "list_models", "count_tokens", "health_check", "get_stats", NULL};
+static const char *GW_TOOL_METHODS[] = {
+    "register", "list_tools", "get_tool", "execute_tool", "execute",
+    "list", "health_check", "get_stats", NULL};
+
+/**
+ * @brief 命名空间方法转发：gateway JSON-RPC <ns>.<method> → daemon <method>
+ *
+ * 与 handle_mem_call 同款透传模式：params/响应原样透传，响应 id 改写为请求 id。
+ * 白名单内方法放行，其余返回 -32601。
+ *
+ * @param rule 转发规则（ns/sock/白名单/超时）
+ * @return 目标 daemon 完整 JSON-RPC 响应字符串（AIRY_MALLOC），失败返回错误响应
+ */
+static char *handle_ns_forward(cJSON *root, const gw_ns_forward_rule_t *rule)
+{
+    cJSON *id = cJSON_GetObjectItem(root, "id");
+    cJSON *method = cJSON_GetObjectItem(root, "method");
+    const char *method_str = cJSON_IsString(method) ? method->valuestring : NULL;
+    if (!method_str || !rule)
+        return jsonrpc_error(-32601, "Method not found", id);
+
+    size_t ns_len = strlen(rule->ns);
+    if (strncmp(method_str, rule->ns, ns_len) != 0)
+        return jsonrpc_error(-32601, "Method not found", id);
+    const char *inner = method_str + ns_len;
+
+    int allow = 0;
+    for (const char *const *m = rule->methods; m && *m; ++m) {
+        if (strcmp(inner, *m) == 0) {
+            allow = 1;
+            break;
+        }
+    }
+    if (!allow)
+        return jsonrpc_error(-32601, "Method not found", id);
+
+    cJSON *params = cJSON_GetObjectItem(root, "params");
+    char *params_str = params ? cJSON_PrintUnformatted(params) : AIRY_STRDUP("{}");
+    if (!params_str)
+        return jsonrpc_error(-32603, "Out of memory", id);
+
+    char *resp = gw_svc_call(rule->sock_path, inner, params_str, rule->timeout_ms);
+    AIRY_FREE(params_str);
+    if (!resp)
+        return jsonrpc_error(-32603, "Service unreachable", id);
+
+    cJSON *rroot = cJSON_Parse(resp);
+    AIRY_FREE(resp);
+    if (!rroot)
+        return jsonrpc_error(-32603, "Service returned invalid response", id);
+    /* 响应 id 改写为请求 id（同 handle_mem_call 并发合规） */
+    cJSON *req_id = cJSON_GetObjectItem(root, "id");
+    cJSON *svc_id = cJSON_GetObjectItem(rroot, "id");
+    if (svc_id)
+        cJSON_DeleteItemFromObject(rroot, "id");
+    if (req_id && cJSON_IsString(req_id)) {
+        cJSON_AddStringToObject(rroot, "id", req_id->valuestring);
+    } else if (req_id && cJSON_IsNumber(req_id)) {
+        cJSON_AddNumberToObject(rroot, "id", req_id->valuedouble);
+    } else {
+        cJSON_AddNullToObject(rroot, "id");
+    }
+    char *out = cJSON_PrintUnformatted(rroot);
+    cJSON_Delete(rroot);
+    return out;
 }
 
 /**
@@ -1841,6 +1981,26 @@ gateway_business_ctx_t *gateway_business_ctx_create(void)
                            "AIRY_SCHED_SOCK", "sched.sock");
     gw_resolve_daemon_sock(ctx->think_sock_path, sizeof(ctx->think_sock_path),
                            "AIRY_THINK_SOCK", "think.sock");
+    gw_resolve_daemon_sock(ctx->a2a_sock_path, sizeof(ctx->a2a_sock_path),
+                           "AIRY_A2A_SOCK", "a2a.sock");
+    gw_resolve_daemon_sock(ctx->plugin_sock_path, sizeof(ctx->plugin_sock_path),
+                           "AIRY_PLUGIN_SOCK", "plugin.sock");
+    gw_resolve_daemon_sock(ctx->info_sock_path, sizeof(ctx->info_sock_path),
+                           "AIRY_INFO_SOCK", "info.sock");
+    gw_resolve_daemon_sock(ctx->notify_sock_path, sizeof(ctx->notify_sock_path),
+                           "AIRY_NOTIFY_SOCK", "notify.sock");
+    gw_resolve_daemon_sock(ctx->observe_sock_path, sizeof(ctx->observe_sock_path),
+                           "AIRY_OBSERVE_SOCK", "observe.sock");
+    gw_resolve_daemon_sock(ctx->market_sock_path, sizeof(ctx->market_sock_path),
+                           "AIRY_MARKET_SOCK", "market.sock");
+    gw_resolve_daemon_sock(ctx->hook_sock_path, sizeof(ctx->hook_sock_path),
+                           "AIRY_HOOK_SOCK", "hook.sock");
+    gw_resolve_daemon_sock(ctx->monit_sock_path, sizeof(ctx->monit_sock_path),
+                           "AIRY_MONIT_SOCK", "monit.sock");
+    gw_resolve_daemon_sock(ctx->channel_sock_path, sizeof(ctx->channel_sock_path),
+                           "AIRY_CHANNEL_SOCK", "channel.sock");
+    gw_resolve_daemon_sock(ctx->cupolas_sock_path, sizeof(ctx->cupolas_sock_path),
+                           "AIRY_CUPOLAS_SOCK", "cupolas.sock");
 
     const char *tcp_env = getenv("AIRY_LLM_TCP_ADDR");
     AIRY_STRNCPY_TERM(ctx->llm_tcp_addr,
@@ -1870,6 +2030,17 @@ gateway_business_ctx_t *gateway_business_ctx_create(void)
                     if (svc_model_defaults_from_yaml(user_path, um, sizeof(um), NULL, 0) == 0 &&
                         um[0])
                         has_user_cfg = 1;
+                    else {
+                        /* 无 global 段：回退简化 llm 段 model（与 llm_d 同语义，
+                         * 普通用户 llm: 段配置的默认模型对 gateway 同样生效） */
+                        svc_model_llm_config_t llm_cfg;
+                        AIRY_MEMSET(&llm_cfg, 0, sizeof(llm_cfg));
+                        if (svc_model_defaults_llm_from_yaml(user_path, &llm_cfg) == 0 &&
+                            llm_cfg.model[0]) {
+                            AIRY_STRNCPY_TERM(um, llm_cfg.model, sizeof(um));
+                            has_user_cfg = 1;
+                        }
+                    }
                 }
             }
         }
@@ -1929,6 +2100,9 @@ char *gateway_business_handle(void *request, void *user_data)
         return jsonrpc_error(-32600, "Invalid Request", NULL);
     }
 
+    /* KER-05~07: heapstore 运行时数据存储 — 服务访问日志（存储不可用时静默忽略） */
+    daemon_heapstore_log("gateway_d", 1, method->valuestring, NULL);
+
     char *resp = NULL;
     if (strcmp(method->valuestring, "agent.run") == 0) {
         resp = handle_agent_run(root, ctx);
@@ -1936,12 +2110,109 @@ char *gateway_business_handle(void *request, void *user_data)
         resp = handle_agent_cancel(root, ctx);
     } else if (strcmp(method->valuestring, "llm.list_models") == 0) {
         resp = handle_llm_list_models(root, ctx);
+    } else if (strncmp(method->valuestring, "llm.", 4) == 0) {
+        /* llm.list_models 走上方专用分支（附加 default_model/default_provider）；
+         * 其余 llm.* 方法（complete/count_tokens/health_check/get_stats）通用转发 */
+        static const gw_ns_forward_rule_t rule = {
+            "llm.", NULL, GW_LLM_METHODS, GW_LLM_DEFAULT_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->llm_sock_path;
+        resp = handle_ns_forward(root, &r2);
     } else if (strncmp(method->valuestring, "mem.", 4) == 0) {
         resp = handle_mem_call(root, ctx);
     } else if (strcmp(method->valuestring, "tool.pending") == 0) {
         resp = handle_tool_approval_call(root, ctx, "pending");
     } else if (strcmp(method->valuestring, "tool.approve") == 0) {
         resp = handle_tool_approval_call(root, ctx, "approve");
+    } else if (strncmp(method->valuestring, "agent.", 6) == 0) {
+        /* agent.run / agent.cancel 走上方专用编排分支；其余 agent.*
+         * 方法（spawn/list/count/health_check/get_stats 等）通用转发 */
+        static const gw_ns_forward_rule_t rule = {
+            "agent.", NULL, GW_AGENT_METHODS, GW_TOOL_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->agent_sock_path;
+        resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "tool.", 5) == 0) {
+        /* tool.pending / tool.approve 走上方专用分支（审批流）；
+         * 其余 tool.* 方法（list/execute/health_check 等）通用转发 */
+        static const gw_ns_forward_rule_t rule = {
+            "tool.", NULL, GW_TOOL_METHODS, GW_TOOL_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->tool_sock_path;
+        resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "a2a.", 4) == 0) {
+        static const gw_ns_forward_rule_t rule = {
+            "a2a.", NULL, GW_A2A_METHODS, GW_LLM_DEFAULT_TIMEOUT_MS};
+        /* 规则内 sock_path 需绑定 ctx 的 a2a_sock_path */
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->a2a_sock_path;
+        resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "plugin.", 7) == 0) {
+        static const gw_ns_forward_rule_t rule = {
+            "plugin.", NULL, GW_PLUGIN_METHODS, GW_TOOL_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->plugin_sock_path;
+        resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "info.", 5) == 0) {
+        static const gw_ns_forward_rule_t rule = {
+            "info.", NULL, GW_INFO_METHODS, GW_TOOL_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->info_sock_path;
+        resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "notify.", 7) == 0) {
+        static const gw_ns_forward_rule_t rule = {
+            "notify.", NULL, GW_NOTIFY_METHODS, GW_TOOL_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->notify_sock_path;
+        resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "observe.", 8) == 0) {
+        static const gw_ns_forward_rule_t rule = {
+            "observe.", NULL, GW_OBSERVE_METHODS, GW_TOOL_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->observe_sock_path;
+        resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "market.", 7) == 0) {
+        static const gw_ns_forward_rule_t rule = {
+            "market.", NULL, GW_MARKET_METHODS, GW_TOOL_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->market_sock_path;
+        resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "hook.", 5) == 0) {
+        static const gw_ns_forward_rule_t rule = {
+            "hook.", NULL, GW_HOOK_METHODS, GW_TOOL_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->hook_sock_path;
+        resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "sched.", 6) == 0) {
+        static const gw_ns_forward_rule_t rule = {
+            "sched.", NULL, GW_SCHED_METHODS, GW_TOOL_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->sched_sock_path;
+        resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "think.", 6) == 0) {
+        static const gw_ns_forward_rule_t rule = {
+            "think.", NULL, GW_THINK_METHODS, GW_THINK_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->think_sock_path;
+        resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "monit.", 6) == 0) {
+        static const gw_ns_forward_rule_t rule = {
+            "monit.", NULL, GW_MONIT_METHODS, GW_TOOL_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->monit_sock_path;
+        resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "channel.", 8) == 0) {
+        static const gw_ns_forward_rule_t rule = {
+            "channel.", NULL, GW_CHANNEL_METHODS, GW_TOOL_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->channel_sock_path;
+        resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "cupolas.", 8) == 0) {
+        static const gw_ns_forward_rule_t rule = {
+            "cupolas.", NULL, GW_CUPOLAS_METHODS, GW_TOOL_TIMEOUT_MS};
+        gw_ns_forward_rule_t r2 = rule;
+        r2.sock_path = ctx->cupolas_sock_path;
+        resp = handle_ns_forward(root, &r2);
     } else if (strcmp(method->valuestring, "ping") == 0) {
         cJSON *id = cJSON_GetObjectItem(root, "id");
         cJSON *out = cJSON_CreateObject();
@@ -2272,7 +2543,8 @@ static int is_mcp_jsonrpc_method(const char *method)
         if (strcmp(method, mcp_methods[i]) == 0)
             return 1;
     }
-    return strncmp(method, "mcp.", 4) == 0;
+    /* 同 a2a：不得按 "mcp." 前缀劫持（mcp.* 属业务命名空间预留，防止误路由） */
+    return 0;
 }
 
 /* A2A JSON-RPC 方法集（tasks 系 / message 系，A2A 基于 JSON-RPC 2.0） */
@@ -2288,7 +2560,10 @@ static int is_a2a_jsonrpc_method(const char *method)
         if (strcmp(method, a2a_methods[i]) == 0)
             return 1;
     }
-    return strncmp(method, "a2a.", 4) == 0;
+    /* 注意：不得按 "a2a." 前缀劫持——a2a.* 同时是 JSON-RPC 业务命名空间
+     * （gateway → a2a_d 转发链，如 a2a.discover_agents）。此前的前缀匹配
+     * 会把业务方法误路由到 A2A 协议 handler（proto=A2A）导致 -32603。 */
+    return 0;
 }
 
 char *gateway_protocol_entry(void *request, void *user_data)

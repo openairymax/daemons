@@ -2,7 +2,7 @@
 #include "error.h"
 /*
  * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2026 SPHARX.
+ * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
  * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file service.c
@@ -789,9 +789,13 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
         return AIRY_SUCCESS;
     }
 
-    /* 缩容到实际命中数 */
-    mem_search_hit_t *shrunk = (mem_search_hit_t *)AIRY_REALLOC(hits,
-                                                                  hit_count * sizeof(mem_search_hit_t));
+    /* 缩容到实际命中数（先做乘法溢出检查，避免 hit_count * sizeof 回绕，
+     * 溢出时保留原缓冲区，不缩容） */
+    mem_search_hit_t *shrunk = NULL;
+    if (hit_count <= SIZE_MAX / sizeof(mem_search_hit_t)) {
+        shrunk = (mem_search_hit_t *)AIRY_REALLOC(hits,
+                                                  hit_count * sizeof(mem_search_hit_t));
+    }
     *out_hits = shrunk ? shrunk : hits;
     *out_count = hit_count;
 

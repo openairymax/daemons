@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 SPHARX Ltd.
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 /**
  * @file agent_service.h
@@ -68,6 +68,41 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id,
  */
 int agent_service_list(agent_service_t *svc, char ***out_agent_ids,
                          size_t *out_count);
+
+/* ---------- invoke 会话管理（改进1 "取消下探"：跨进程取消） ---------- */
+
+/**
+ * @brief 注册 invoke 会话（request_id → cancel_token）
+ *
+ * 跨进程取消的会话基础：RPC 层 handle_invoke 在调用 agent_service_invoke
+ * 前注册会话，调用方可通过 agent.cancel（RPC）按 request_id 取消。取消
+ * 命中后 agent_service_invoke 内 select 轮询感知 token → SIGTERM→SIGKILL
+ * 子进程 → 以 AbortedOutput 收尾（与超时 -2 区分）。
+ *
+ * @param svc 服务实例（非 NULL）
+ * @param request_id 唯一请求 ID（非 NULL，≤63 字符）
+ * @param out_token [out] 输出本会话的取消令牌指针（BORROW，会话注销前有效）
+ * @return AIRY_SUCCESS 注册成功；AIRY_ERR_INVALID_PARAM 参数非法；
+ *         AIRY_ERR_BUSY 会话表已满
+ */
+int agent_service_invoke_begin(agent_service_t *svc, const char *request_id,
+                                airy_cancel_token_t **out_token);
+
+/**
+ * @brief 注销 invoke 会话（invoke 完成/失败/取消后调用）
+ * @param svc 服务实例
+ * @param request_id 注册时使用的请求 ID
+ */
+void agent_service_invoke_end(agent_service_t *svc, const char *request_id);
+
+/**
+ * @brief 按 request_id 取消活跃 invoke 会话
+ * @param svc 服务实例
+ * @param request_id 请求 ID
+ * @return AIRY_SUCCESS 找到会话并已请求取消；
+ *         AIRY_ERR_NOT_FOUND 无匹配活跃会话
+ */
+int agent_service_invoke_cancel(agent_service_t *svc, const char *request_id);
 
 /* ---------- 辅助接口 ---------- */
 

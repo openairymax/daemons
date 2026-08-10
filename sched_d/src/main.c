@@ -2,7 +2,7 @@
 #include "error.h"
 /*
  * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2026 SPHARX.
+ * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
  * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file main.c
@@ -193,6 +193,15 @@ static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd)
     if (!task.task_description) {
         AIRY_FREE(task.task_id);
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
+    /* 空任务守卫：task_id 与 task_description 均缺失时拒绝入队，
+     * 防止无意义空任务进入异步队列（worker 无法据此选 agent/执行） */
+    if ((!tid || !*tid) && (!desc || !*desc)) {
+        AIRY_FREE(task.task_id);
+        AIRY_FREE(task.task_description);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           "task_id or task_description required", id);
         return;
     }
 

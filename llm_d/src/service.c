@@ -299,22 +299,30 @@ static void register_router_endpoints(llm_service_t *svc)
 
 /* ---------- 模型配置辅助（A2-1: global 段 + 用户覆盖文件合并） ---------- */
 
+/* 释放单个 provider 配置的字段（不释放 provider 结构本身；用于数组元素替换） */
+static void free_provider_fields(provider_config_t *prov)
+{
+    if (!prov)
+        return;
+    AIRY_FREE((void *)prov->name);
+    AIRY_FREE((void *)prov->api_key);
+    AIRY_FREE((void *)prov->api_base);
+    AIRY_FREE((void *)prov->organization);
+    if (prov->models) {
+        for (size_t j = 0; prov->models[j]; ++j)
+            AIRY_FREE(prov->models[j]);
+        AIRY_FREE(prov->models);
+    }
+    __builtin_memset(prov, 0, sizeof(*prov));
+}
+
 /* 释放 provider_config_t 数组（registry 已深拷贝后调用） */
 static void free_provider_configs(provider_config_t *providers, size_t count)
 {
     if (!providers)
         return;
-    for (size_t i = 0; i < count; ++i) {
-        AIRY_FREE((void *)providers[i].name);
-        AIRY_FREE((void *)providers[i].api_key);
-        AIRY_FREE((void *)providers[i].api_base);
-        AIRY_FREE((void *)providers[i].organization);
-        if (providers[i].models) {
-            for (size_t j = 0; providers[i].models[j]; ++j)
-                AIRY_FREE(providers[i].models[j]);
-            AIRY_FREE(providers[i].models);
-        }
-    }
+    for (size_t i = 0; i < count; ++i)
+        free_provider_fields(&providers[i]);
     AIRY_FREE(providers);
 }
 
@@ -379,8 +387,9 @@ static void merge_provider_configs(const provider_config_t *main_provs, size_t m
                 break;
         }
         if (j < mc) {
-            /* 同名替换：释放主配置该 provider 的旧字段，拷贝用户项（用户优先） */
-            free_provider_configs(&merged[j], 1);
+            /* 同名替换：仅释放该元素旧字段（不得释放数组本身，避免 use-after-free），
+             * 拷贝用户项（用户优先） */
+            free_provider_fields(&merged[j]);
             merged[j] = provider_config_dup(&user_provs[u]);
         } else if (mc < cap) {
             provider_config_t d = provider_config_dup(&user_provs[u]);
@@ -455,6 +464,7 @@ llm_service_t *llm_service_create(const char *config_path)
                                            &merged, &merged_count);
                     if (merged && merged_count > 0) {
                         free_provider_configs(model_providers, model_provider_count);
+                        free_provider_configs(user_providers, user_provider_count);
                         model_providers = merged;
                         model_provider_count = merged_count;
                         SVC_LOG_INFO("C-L02: SVC: merged %zu user provider(s) from %s "
@@ -507,6 +517,21 @@ llm_service_t *llm_service_create(const char *config_path)
     if (global_model[0]) {
         AIRY_STRNCPY_TERM(svc->default_model, global_model, sizeof(svc->default_model));
         SVC_LOG_INFO("C-L02: SVC: default_model=%s (from global config)", svc->default_model);
+    } else if (config_path) {
+        /* 简化 llm 段：无 global 段时回退 llm.model 作默认模型 */
+        svc_model_llm_config_t llm_cfg;
+        __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
+        if (svc_model_defaults_llm_from_yaml(config_path, &llm_cfg) == 0 && llm_cfg.model[0]) {
+            AIRY_STRNCPY_TERM(svc->default_model, llm_cfg.model, sizeof(svc->default_model));
+            if (!global_provider[0] && llm_cfg.api_format[0]) {
+                const char *adapter = (strcasecmp(llm_cfg.api_format, "anthropic") == 0)
+                                          ? "anthropic"
+                                          : "openai";
+                AIRY_STRNCPY_TERM(svc->default_provider, adapter,
+                                  sizeof(svc->default_provider));
+            }
+            SVC_LOG_INFO("C-L02: SVC: default_model=%s (from llm section)", svc->default_model);
+        }
     }
     if (global_provider[0])
         AIRY_STRNCPY_TERM(svc->default_provider, global_provider, sizeof(svc->default_provider));
@@ -1656,6 +1681,47 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
     yaml_map_free(&item_map);
     yaml_map_free(&prov_map);
 
+    /* 简化 llm 段展开：顶级 llm: mapping 存在且 model 非空时优先于完整
+     * providers/models（面向普通用户的最少配置入口，api_format 仅 openai
+     * /anthropic 两种适配器）。高级用户删除 llm 段后走完整 schema，
+     * 二者并存时 llm 段优先（普通用户无需理解完整 providers/models）。
+     * 需释放已解析 providers 段 strdup 的模型名，避免覆盖后泄漏。 */
+    {
+        svc_model_llm_config_t llm_cfg;
+        __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
+        if (svc_model_defaults_llm_from_yaml(config_path, &llm_cfg) == 0 && llm_cfg.model[0]) {
+            for (size_t pi = 0; pi < pcfg_count; ++pi) {
+                for (size_t k = 0; k < pcfg[pi].model_count; ++k)
+                    AIRY_FREE(pcfg[pi].model_names[k]);
+                pcfg[pi].model_count = 0;
+            }
+            pcfg_count = 0;
+            const char *adapter = "openai";
+            if (strcasecmp(llm_cfg.api_format, "anthropic") == 0)
+                adapter = "anthropic";
+            __builtin_memset(&models[0], 0, sizeof(models[0]));
+            AIRY_STRNCPY_TERM(models[0].name, llm_cfg.model, sizeof(models[0].name));
+            AIRY_STRNCPY_TERM(models[0].provider, adapter, sizeof(models[0].provider));
+            if (llm_cfg.api_key_env[0])
+                AIRY_STRNCPY_TERM(models[0].api_key_env, llm_cfg.api_key_env,
+                                  sizeof(models[0].api_key_env));
+            if (llm_cfg.base_url[0]) {
+                /* endpoint = 适配器根地址 + 协议路径（聚合阶段再还原为根地址） */
+                if (strcmp(adapter, "anthropic") == 0)
+                    snprintf(models[0].endpoint, sizeof(models[0].endpoint), "%s/messages",
+                             llm_cfg.base_url);
+                else
+                    snprintf(models[0].endpoint, sizeof(models[0].endpoint),
+                             "%s/chat/completions", llm_cfg.base_url);
+            }
+            model_count = 1;
+            SVC_LOG_INFO("C-L02: SVC: expanded simplified llm section "
+                         "(format=%s base_url=%s model=%s)",
+                         llm_cfg.api_format[0] ? llm_cfg.api_format : "openai",
+                         llm_cfg.base_url[0] ? llm_cfg.base_url : "(default)",
+                         llm_cfg.model);
+        }
+    }
     if (model_count == 0 && pcfg_count == 0) {
         SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN no models found, STACK: svc_load_model_config_yaml");
         return 0;
@@ -1693,10 +1759,13 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
             provs[j].model_names[provs[j].model_count++] = AIRY_STRDUP(models[i].name);
         }
         if (!provs[j].base_url[0] && models[i].endpoint[0]) {
-            /* model 的 endpoint 形如 https://host/v1/chat/completions，
-             * provider base_url 应取前缀（provider 侧会再拼接 /chat/completions），
+            /* model 的 endpoint 形如 https://host/v1/chat/completions（openai）或
+             * https://host/v1/messages（anthropic），provider base_url 应取前缀
+             * （provider 侧会再拼接 /chat/completions 或 /messages），
              * 避免 URL 重复拼接导致 404/空响应。 */
             const char *suffix = strstr(models[i].endpoint, "/chat/completions");
+            if (!suffix)
+                suffix = strstr(models[i].endpoint, "/messages");
             if (suffix && suffix != models[i].endpoint) {
                 size_t base_len = (size_t)(suffix - models[i].endpoint);
                 if (base_len < sizeof(provs[j].base_url)) {

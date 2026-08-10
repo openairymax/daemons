@@ -2,7 +2,7 @@
 #include "error.h"
 /*
  * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2026 SPHARX.
+ * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
  * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file service.c
@@ -548,6 +548,7 @@ agent_service_t *agent_service_create(size_t max_agents)
     }
 
     airy_mtx_init(&svc->lock);
+    airy_mtx_init(&svc->session_lock);
     svc->agent_count = 0;
     svc->initialized = 1;
     /* 初始化每个槽位的细粒度锁（并发重构：子进程生命周期操作在
@@ -591,6 +592,7 @@ void agent_service_destroy(agent_service_t *svc)
     svc->initialized = 0;
     airy_mtx_unlock(&svc->lock);
     airy_mtx_destroy(&svc->lock);
+    airy_mtx_destroy(&svc->session_lock);
     AIRY_FREE(svc);
 }
 
@@ -1001,6 +1003,105 @@ invoke_fallback:
     return AIRY_ERR_SVC_NOT_READY;
 }
 
+/* ==================== invoke 会话管理（改进1 "取消下探"） ==================== */
+
+int agent_service_invoke_begin(agent_service_t *svc, const char *request_id,
+                                airy_cancel_token_t **out_token)
+{
+    if (!svc || !svc->initialized || !request_id || !out_token ||
+        request_id[0] == '\0')
+        return AIRY_ERR_INVALID_PARAM;
+    *out_token = NULL;
+
+    /* 会话持有 token 所有权：begin 分配/初始化，end 注销并销毁。
+     * cancel 仅置位 token（幂等），不销毁，避免与 invoke 线程竞态。 */
+    airy_cancel_token_t *token =
+        (airy_cancel_token_t *)AIRY_CALLOC(1, sizeof(airy_cancel_token_t));
+    if (!token)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    if (airy_cancel_token_init(token) != 0) {
+        AIRY_FREE(token);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    airy_mtx_lock(&svc->session_lock);
+    for (size_t i = 0; i < AGENT_INVOKE_SESSIONS_MAX; i++) {
+        agent_invoke_session_t *s = &svc->sessions[i];
+        if (s->active && strcmp(s->request_id, request_id) == 0) {
+            /* 同 request_id 重复注册：清理旧会话（旧会话已完成/超时注销滞后） */
+            s->active = 0;
+            if (s->token) {
+                airy_cancel_token_destroy(s->token);
+                AIRY_FREE(s->token);
+                s->token = NULL;
+            }
+        }
+    }
+    for (size_t i = 0; i < AGENT_INVOKE_SESSIONS_MAX; i++) {
+        agent_invoke_session_t *s = &svc->sessions[i];
+        if (!s->active) {
+            snprintf(s->request_id, sizeof(s->request_id), "%s", request_id);
+            s->active = 1;
+            s->token = token;
+            *out_token = token;
+            airy_mtx_unlock(&svc->session_lock);
+            return AIRY_SUCCESS;
+        }
+    }
+    airy_mtx_unlock(&svc->session_lock);
+
+    airy_cancel_token_destroy(token);
+    AIRY_FREE(token);
+    return AIRY_ERR_BUSY;
+}
+
+void agent_service_invoke_end(agent_service_t *svc, const char *request_id)
+{
+    if (!svc || !request_id || request_id[0] == '\0')
+        return;
+    airy_mtx_lock(&svc->session_lock);
+    for (size_t i = 0; i < AGENT_INVOKE_SESSIONS_MAX; i++) {
+        agent_invoke_session_t *s = &svc->sessions[i];
+        if (s->active && strcmp(s->request_id, request_id) == 0) {
+            s->active = 0;
+            s->request_id[0] = '\0';
+            if (s->token) {
+                airy_cancel_token_destroy(s->token);
+                AIRY_FREE(s->token);
+                s->token = NULL;
+            }
+            break;
+        }
+    }
+    airy_mtx_unlock(&svc->session_lock);
+}
+
+int agent_service_invoke_cancel(agent_service_t *svc, const char *request_id)
+{
+    if (!svc || !svc->initialized || !request_id || request_id[0] == '\0')
+        return AIRY_ERR_INVALID_PARAM;
+
+    airy_cancel_token_t *token = NULL;
+    airy_mtx_lock(&svc->session_lock);
+    for (size_t i = 0; i < AGENT_INVOKE_SESSIONS_MAX; i++) {
+        agent_invoke_session_t *s = &svc->sessions[i];
+        if (s->active && strcmp(s->request_id, request_id) == 0) {
+            token = s->token;
+            break;
+        }
+    }
+    airy_mtx_unlock(&svc->session_lock);
+
+    if (!token) {
+        SVC_LOG_WARN("agent.cancel: no active invoke session (request_id=%s)",
+                     request_id);
+        return AIRY_ERR_NOT_FOUND;
+    }
+    airy_cancel_token_cancel(token);
+    SVC_LOG_INFO("agent.cancel: requested cancel (request_id=%s)", request_id);
+    return AIRY_SUCCESS;
+}
+
 int agent_service_list(agent_service_t *svc, char ***out_agent_ids,
                          size_t *out_count)
 {
@@ -1074,6 +1175,11 @@ int agent_service_reap_idle(agent_service_t *svc, uint64_t max_idle_s)
     {
         agent_lock_svc(svc);
         if (svc->agent_count > 0) {
+            /* 乘法溢出检查：agent_count * sizeof(size_t) 不得回绕 */
+            if (svc->agent_count > SIZE_MAX / sizeof(size_t)) {
+                airy_mtx_unlock(&svc->lock);
+                return AIRY_ERR_OUT_OF_MEMORY;
+            }
             candidates = (size_t *)AIRY_MALLOC(svc->agent_count * sizeof(size_t));
             if (candidates) {
                 for (size_t i = 0; i < svc->agent_count; i++) {

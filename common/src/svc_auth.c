@@ -1,10 +1,11 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file svc_auth.c
  * @brief Daemon 服务层认证中间件实现
  * @copyright (c) 2026 SPHARX. All Rights Reserved.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * 实现内容:
  * - JWT Token 生成和验证（HS256）
