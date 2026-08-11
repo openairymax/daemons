@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_metrics.c
  * @brief 指标收集模块单元测试
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "monitor_service.h"
@@ -124,7 +124,6 @@ static void test_monitor_get_metrics(void)
         printf("    Found %zu metrics\n", count);
     }
 
-    /* 释放 monitor_service_get_metrics 返回的数组 */
     AIRY_FREE(metrics);
 
     monitor_service_destroy(svc);

@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_platform.c
  * @brief 平台抽象层单元测试
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "daemon_platform_ext.h"
@@ -44,12 +44,12 @@ static void test_mutex_operations(void)
     assert(ret == 0);
 
     ret = airy_mtx_trylock(&mutex);
-    assert(ret == 0);  /* recursive mutex: same thread can relock */
+    assert(ret == 0); /* recursive mutex: same thread can relock */
 
     ret = airy_mtx_unlock(&mutex);
-    assert(ret == 0);  /* unlock the extra recursive lock */
+    assert(ret == 0); /* unlock the extra recursive lock */
 
-    ret = airy_mtx_lock(&mutex);  /* relock for later unlock test */
+    ret = airy_mtx_lock(&mutex); /* relock for later unlock test */
     assert(ret == 0);
 
     ret = airy_mtx_unlock(&mutex);

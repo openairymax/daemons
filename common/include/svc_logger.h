@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file svc_logger.h
  * @brief 日志服务兼容层（重导出）
@@ -23,7 +24,7 @@
  * 的源文件应直接 #include "daemon_platform_ext.h"，不通过 svc_logger.h 间接获取。
  * 参见 daemon_platform_ext.h 了解 daemons 特有平台扩展声明。 */
 
-/* 使用相对路径避免找到 daemons 自身的 svc_logger.h（递归包含） */
+
 #include "../../../commons/utils/logging/include/svc_logger.h"
 
 #endif /* AIRY_RT_DAEMON_COMMON_SVC_LOGGER_H */

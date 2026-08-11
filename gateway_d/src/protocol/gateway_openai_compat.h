@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 #ifndef AIRY_RT_GATEWAY_OPENAI_COMPAT_H
 #define AIRY_RT_GATEWAY_OPENAI_COMPAT_H
 
@@ -25,11 +26,14 @@ typedef struct {
     uint32_t retry_base_ms;
 } gw_openai_compat_config_t;
 
-#define GW_OPENAI_COMPAT_CONFIG_DEFAULTS                                                  \
-    {                                                                                     \
-        .default_model = "gpt-4", .max_tokens_default = 4096, .temperature_default = 0.7, \
-        .top_p_default = 1.0, .rate_limit_rpm = 60, .retry_max = 3, .retry_base_ms = 1000 \
-    }
+#define GW_OPENAI_COMPAT_CONFIG_DEFAULTS \
+    {.default_model = "gpt-4",           \
+     .max_tokens_default = 4096,         \
+     .temperature_default = 0.7,         \
+     .top_p_default = 1.0,               \
+     .rate_limit_rpm = 60,               \
+     .retry_max = 3,                     \
+     .retry_base_ms = 1000}
 
 typedef int (*gw_openai_llm_call_fn)(const char *model, const char *messages_json,
                                      const char *functions_json, double temperature, int max_tokens,

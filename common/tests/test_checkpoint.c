@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /*
- * Copyright (c) 2026 SPHARX Ltd. All Rights Reserved.
  * test_checkpoint.c - Checkpoint Module Unit Tests
  */
 
-#include "checkpoint.h"  /* SP02: migrated to commons/utils/execution/include/ */
-
+#include "checkpoint.h" /* SP02: migrated to commons/utils/execution/include/ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,10 +18,27 @@ static int tests_run = 0;
 static int tests_passed = 0;
 static char g_storage_path[256] = {0};
 
-#define TEST(name) do { tests_run++; printf("  %-50s", name); } while(0)
-#define PASS() do { tests_passed++; printf("[PASS]\n"); } while(0)
-#define FAIL(msg) do { printf("[FAIL] %s\n", msg); return; } while(0)
-#define ASSERT(cond, msg) do { if (!(cond)) { FAIL(msg); } } while(0)
+#define TEST(name)               \
+    do {                         \
+        tests_run++;             \
+        printf("  %-50s", name); \
+    } while (0)
+#define PASS()              \
+    do {                    \
+        tests_passed++;     \
+        printf("[PASS]\n"); \
+    } while (0)
+#define FAIL(msg)                   \
+    do {                            \
+        printf("[FAIL] %s\n", msg); \
+        return;                     \
+    } while (0)
+#define ASSERT(cond, msg) \
+    do {                  \
+        if (!(cond)) {    \
+            FAIL(msg);    \
+        }                 \
+    } while (0)
 
 static void setup_temp_dir(void)
 {
@@ -34,14 +50,15 @@ static void setup_temp_dir(void)
 static void teardown_temp_dir(void)
 {
     airy_checkpoint_shutdown();
-    /* P2-25: 使用 fork/exec 替代 system() 防止 shell 注入 */
+
     pid_t pid = fork();
     if (pid == 0) {
         execl("/bin/rm", "rm", "-rf", g_storage_path, (char *)NULL);
         _exit(127);
     } else if (pid > 0) {
         int wstatus;
-        while (waitpid(pid, &wstatus, 0) < 0 && errno == EINTR) {}
+        while (waitpid(pid, &wstatus, 0) < 0 && errno == EINTR) {
+        }
     }
 }
 
@@ -62,9 +79,8 @@ static void test_create_and_verify(void)
     setup_temp_dir();
 
     airy_task_checkpoint_t *cp = NULL;
-    airy_err_t err = airy_checkpoint_create(
-        "task_001", "session_001", 1, "{\"key\":\"value\"}",
-        NULL, 0, NULL, 0, &cp);
+    airy_err_t err = airy_checkpoint_create("task_001", "session_001", 1, "{\"key\":\"value\"}",
+                                            NULL, 0, NULL, 0, &cp);
     ASSERT(err == AIRY_OK, "create should succeed");
     ASSERT(cp != NULL, "checkpoint should not be NULL");
     ASSERT(strcmp(cp->task_id, "task_001") == 0, "task_id should match");
@@ -86,22 +102,18 @@ static void test_create_null_params(void)
     setup_temp_dir();
 
     airy_task_checkpoint_t *cp = NULL;
-    airy_err_t err = airy_checkpoint_create(
-        NULL, "session", 1, "{}", NULL, 0, NULL, 0, &cp);
+    airy_err_t err = airy_checkpoint_create(NULL, "session", 1, "{}", NULL, 0, NULL, 0, &cp);
     ASSERT(err != AIRY_OK, "null task_id should be rejected");
 
-    err = airy_checkpoint_create(
-        "task", NULL, 1, "{}", NULL, 0, NULL, 0, &cp);
+    err = airy_checkpoint_create("task", NULL, 1, "{}", NULL, 0, NULL, 0, &cp);
     ASSERT(err == AIRY_OK, "null session_id should be allowed (optional)");
     airy_checkpoint_destroy(cp);
     cp = NULL;
 
-    err = airy_checkpoint_create(
-        "task", "session", 1, NULL, NULL, 0, NULL, 0, &cp);
+    err = airy_checkpoint_create("task", "session", 1, NULL, NULL, 0, NULL, 0, &cp);
     ASSERT(err != AIRY_OK, "null state_json should be rejected");
 
-    err = airy_checkpoint_create(
-        "task", "session", 1, "{}", NULL, 0, NULL, 0, NULL);
+    err = airy_checkpoint_create("task", "session", 1, "{}", NULL, 0, NULL, 0, NULL);
     ASSERT(err != AIRY_OK, "null out_checkpoint should be rejected");
 
     teardown_temp_dir();
@@ -114,9 +126,8 @@ static void test_save_and_restore(void)
     setup_temp_dir();
 
     airy_task_checkpoint_t *cp = NULL;
-    airy_err_t err = airy_checkpoint_create(
-        "task_save", "session_001", 1, "{\"state\":\"saved\"}",
-        NULL, 0, NULL, 0, &cp);
+    airy_err_t err = airy_checkpoint_create("task_save", "session_001", 1, "{\"state\":\"saved\"}",
+                                            NULL, 0, NULL, 0, &cp);
     ASSERT(err == AIRY_OK, "create should succeed");
 
     err = airy_checkpoint_save(cp);
@@ -154,15 +165,14 @@ static void test_list_checkpoints(void)
     setup_temp_dir();
 
     airy_task_checkpoint_t *cp1 = NULL;
-    airy_err_t err = airy_checkpoint_create(
-        "task_list", "session_001", 1, "{}", NULL, 0, NULL, 0, &cp1);
+    airy_err_t err =
+        airy_checkpoint_create("task_list", "session_001", 1, "{}", NULL, 0, NULL, 0, &cp1);
     ASSERT(err == AIRY_OK, "create cp1");
     airy_checkpoint_save(cp1);
     airy_checkpoint_destroy(cp1);
 
     airy_task_checkpoint_t *cp2 = NULL;
-    err = airy_checkpoint_create(
-        "task_list", "session_001", 2, "{}", NULL, 0, NULL, 0, &cp2);
+    err = airy_checkpoint_create("task_list", "session_001", 2, "{}", NULL, 0, NULL, 0, &cp2);
     ASSERT(err == AIRY_OK, "create cp2");
     airy_checkpoint_save(cp2);
     airy_checkpoint_destroy(cp2);
@@ -190,8 +200,8 @@ static void test_delete(void)
     setup_temp_dir();
 
     airy_task_checkpoint_t *cp = NULL;
-    airy_err_t err = airy_checkpoint_create(
-        "task_del", "session_001", 1, "{}", NULL, 0, NULL, 0, &cp);
+    airy_err_t err =
+        airy_checkpoint_create("task_del", "session_001", 1, "{}", NULL, 0, NULL, 0, &cp);
     ASSERT(err == AIRY_OK, "create");
     airy_checkpoint_save(cp);
     airy_checkpoint_destroy(cp);
@@ -249,9 +259,8 @@ static void test_create_with_completed_nodes(void)
 
     char *completed[] = {"node_a", "node_b", "node_c"};
     airy_task_checkpoint_t *cp = NULL;
-    airy_err_t err = airy_checkpoint_create(
-        "task_nodes", "session_001", 1, "{}",
-        completed, 3, NULL, 0, &cp);
+    airy_err_t err =
+        airy_checkpoint_create("task_nodes", "session_001", 1, "{}", completed, 3, NULL, 0, &cp);
     ASSERT(err == AIRY_OK, "create with completed nodes should succeed");
     ASSERT(cp->completed_count == 3, "should have 3 completed nodes");
 
@@ -267,9 +276,8 @@ static void test_create_with_pending_nodes(void)
 
     char *pending[] = {"node_x", "node_y"};
     airy_task_checkpoint_t *cp = NULL;
-    airy_err_t err = airy_checkpoint_create(
-        "task_pending", "session_001", 1, "{}",
-        NULL, 0, pending, 2, &cp);
+    airy_err_t err =
+        airy_checkpoint_create("task_pending", "session_001", 1, "{}", NULL, 0, pending, 2, &cp);
     ASSERT(err == AIRY_OK, "create with pending nodes should succeed");
     ASSERT(cp->pending_count == 2, "should have 2 pending nodes");
 

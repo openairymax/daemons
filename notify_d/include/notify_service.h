@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file notify_service.h
  * @brief 通知服务核心（notify.* 命名空间）
@@ -8,7 +9,6 @@
  * 多协议（WebSocket / SSE / Unix Socket）广播引擎与 JSON-RPC 方法分发。
  * 网络层（accept 循环、WS 握手、客户端生命周期）由 src/main.c 编排。
  *
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_NOTIFY_SERVICE_H
@@ -37,8 +37,8 @@ typedef enum {
 typedef struct {
     airy_sock_t fd;
     notify_client_type_t type;
-    char *channel;    /* 客户端连接的频道（X-Channel 头，单频道） */
-    char *client_id;  /* 客户端标识（X-Client-Id 头，用于订阅注册表投递匹配） */
+    char *channel;
+    char *client_id;
     uint64_t connected_at;
     uint64_t last_activity;
     uint64_t messages_sent;
@@ -53,7 +53,7 @@ typedef struct {
     uint64_t timestamp;
 } notify_event_t;
 
-/* 频道订阅注册表条目：(channel, client_id) 逻辑订阅 */
+
 typedef struct {
     char *client_id;
     char *channel;
@@ -82,34 +82,33 @@ typedef struct {
     char *socket_path;
 } notify_d_service_t;
 
-/* JSON-RPC 分发返回码 */
-#define NOTIFY_D_METHOD_NOT_RPC 0   /* 非 JSON-RPC 或未知方法：交由原协议路径处理 */
-#define NOTIFY_D_METHOD_HANDLED 1   /* 已处理，response 填充合法 JSON-RPC 响应 */
-#define NOTIFY_D_METHOD_SHUTDOWN 2  /* 已处理 shutdown，调用方应触发优雅关闭 */
 
-/* ---------- 服务核心生命周期（网络层由 main.c 编排） ---------- */
+#define NOTIFY_D_METHOD_NOT_RPC 0
+#define NOTIFY_D_METHOD_HANDLED 1
+#define NOTIFY_D_METHOD_SHUTDOWN 2
+
 int notify_d_service_init(notify_d_service_t *svc);
 void notify_d_service_destroy(notify_d_service_t *svc);
 
-/* ---------- 频道订阅注册表 ---------- */
+
 int notify_d_subscribe(notify_d_service_t *svc, const char *channel, const char *client_id);
 int notify_d_unsubscribe(notify_d_service_t *svc, const char *channel, const char *client_id);
 int notify_d_has_subscription(notify_d_service_t *svc, const char *channel, const char *client_id);
 size_t notify_d_subscription_count(notify_d_service_t *svc, const char *channel);
 
-/* ---------- 事件队列与广播 ---------- */
+
 /* 注意：notify_d_enqueue 不持有锁，调用方须保证持锁（与消费线程互斥），
  * 或在单线程上下文（单元测试）中调用。 */
 int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char *channel,
                      const char *event_type);
 int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *event);
 
-/* ---------- 查询辅助 ---------- */
+
 size_t notify_d_active_client_count(notify_d_service_t *svc);
 
-/* ---------- JSON-RPC 方法分发（L2 命名空间方法，方法名不带前缀） ---------- */
-int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request,
-                              char *response, size_t response_size);
+
+int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request, char *response,
+                              size_t response_size);
 
 #ifdef __cplusplus
 }

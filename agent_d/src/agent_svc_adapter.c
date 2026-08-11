@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file agent_svc_adapter.c
  * @brief Agent 服务适配器：将 agent_service_t 适配到统一 AgentRT 服务管理框架
@@ -151,7 +151,7 @@ static int agent_adapter_healthcheck(airy_svc_t service)
         return AIRY_ENOTINIT;
     if (!ctx->running)
         return AIRY_ENOTINIT;
-    /* 健康检查：服务存在且计数可读 */
+
     size_t n = agent_service_count(ctx->agent_svc);
     SVC_LOG_INFO("Agent healthcheck: %zu agents", n);
     return AIRY_SUCCESS;
@@ -165,8 +165,7 @@ static const airy_svc_interface_t agent_adapter_iface = {
     .healthcheck = agent_adapter_healthcheck,
 };
 
-int agent_service_adapter_create(airy_svc_t *out_service,
-                                   const airy_svc_config_t *config)
+int agent_service_adapter_create(airy_svc_t *out_service, const airy_svc_config_t *config)
 {
     if (!out_service)
         return AIRY_EINVAL;
@@ -196,8 +195,8 @@ int agent_service_adapter_create(airy_svc_t *out_service,
     ctx->owns_service = true;
 
     airy_svc_t svc_handle = NULL;
-    int err = airy_svc_create(&svc_handle, ctx->common_cfg.name, &agent_adapter_iface,
-                                &ctx->common_cfg);
+    int err =
+        airy_svc_create(&svc_handle, ctx->common_cfg.name, &agent_adapter_iface, &ctx->common_cfg);
     if (err != AIRY_SUCCESS) {
         AIRY_FREE(ctx);
         return err;
@@ -215,7 +214,7 @@ int agent_service_adapter_create(airy_svc_t *out_service,
 }
 
 int agent_service_adapter_wrap(airy_svc_t *out_service, agent_service_t *agent_svc,
-                                 const airy_svc_config_t *config)
+                               const airy_svc_config_t *config)
 {
     if (!out_service || !agent_svc)
         return AIRY_EINVAL;
@@ -244,8 +243,8 @@ int agent_service_adapter_wrap(airy_svc_t *out_service, agent_service_t *agent_s
     }
 
     airy_svc_t svc_handle = NULL;
-    int err = airy_svc_create(&svc_handle, ctx->common_cfg.name, &agent_adapter_iface,
-                                &ctx->common_cfg);
+    int err =
+        airy_svc_create(&svc_handle, ctx->common_cfg.name, &agent_adapter_iface, &ctx->common_cfg);
     if (err != AIRY_SUCCESS) {
         AIRY_FREE(ctx);
         return err;

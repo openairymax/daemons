@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (c) 2026 SPHARX. All Rights Reserved.
  * P0.18.1: daemon_main.h 传递性提供 atomic_compat、daemon_bootstrap_sd/ipc、
  * daemon_cupolas、daemon_platform_ext、logging、svc_logger 等头文件。
  * 本守护进程使用自定义 airy_event_loop 与采集线程，
@@ -75,7 +75,7 @@ static daemon_bootstrap_ipc_t *g_bipc = NULL;
 static void info_d_signal_handler(int sig)
 {
     (void)sig;
-    /* async-signal-safe：仅原子置位 + eventfd 唤醒，不调用日志/锁 */
+
     atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
     if (g_event_loop)
         airy_event_loop_stop_async(g_event_loop);
@@ -178,9 +178,7 @@ static int info_d_collect_system_info(system_info_snapshot_t *snap)
     return 0;
 }
 
-/* 将快照追加到环形历史缓冲（调用方须持有 svc->lock） */
-static void info_d_history_append(info_d_service_t *svc,
-                                  const system_info_snapshot_t *snap)
+static void info_d_history_append(info_d_service_t *svc, const system_info_snapshot_t *snap)
 {
     svc->history[svc->history_head] = *snap;
     svc->history_head = (svc->history_head + 1) % INFO_D_HISTORY_SIZE;
@@ -357,7 +355,6 @@ static uint64_t info_d_healthcheck(info_d_service_t *svc)
  * gateway_d 转发时已剥离 "<daemon>." 前缀，故此处方法名不带前缀。
  */
 
-/* 将单个快照序列化为 cJSON 对象（system/history 共用） */
 static cJSON *info_d_build_snapshot_json(const system_info_snapshot_t *snap)
 {
     cJSON *item = cJSON_CreateObject();
@@ -376,7 +373,6 @@ static cJSON *info_d_build_snapshot_json(const system_info_snapshot_t *snap)
     return item;
 }
 
-/* info.system：当前系统信息快照（CPU/内存/磁盘/uptime/hostname/内核版本） */
 static cJSON *info_d_build_system_result(info_d_service_t *svc)
 {
     airy_mtx_lock(&svc->lock);
@@ -404,10 +400,9 @@ static cJSON *info_d_build_system_result(info_d_service_t *svc)
     return result;
 }
 
-/* info.history：环形历史快照列表（参数 N 可选，返回最近 N 条，默认全部） */
 static cJSON *info_d_build_history_result(info_d_service_t *svc, cJSON *params)
 {
-    /* 解析 N：支持对象参数（N/n/count/limit）与数组参数（首个元素）两种形式 */
+
     int limit = INFO_D_HISTORY_SIZE;
     if (cJSON_IsObject(params)) {
         cJSON *n = cJSON_GetObjectItem(params, "N");
@@ -434,7 +429,7 @@ static cJSON *info_d_build_history_result(info_d_service_t *svc, cJSON *params)
     size_t head = svc->history_head;
 
     cJSON *arr = cJSON_CreateArray();
-    /* 环形缓冲按时间升序（最旧 → 最新）读取最近 take 条 */
+
     for (size_t i = 0; i < take; i++) {
         size_t idx = (head + INFO_D_HISTORY_SIZE - take + i) % INFO_D_HISTORY_SIZE;
         cJSON_AddItemToArray(arr, info_d_build_snapshot_json(&svc->history[idx]));
@@ -443,7 +438,6 @@ static cJSON *info_d_build_history_result(info_d_service_t *svc, cJSON *params)
     return arr;
 }
 
-/* info.health：采集线程活跃度、最近采集时间、运行时长 */
 static cJSON *info_d_build_health_result(info_d_service_t *svc)
 {
     airy_mtx_lock(&svc->lock);
@@ -456,10 +450,9 @@ static cJSON *info_d_build_health_result(info_d_service_t *svc)
     uint64_t uptime_s = now > svc->start_time ? now - svc->start_time : 0;
     uint64_t staleness = now > last_collect ? now - last_collect : 0;
     const char *status =
-        (collecting && running &&
-         staleness <= (uint64_t)(INFO_D_COLLECT_INTERVAL_SEC * 3))
-            ? "ok"
-            : "degraded";
+        (collecting && running && staleness <= (uint64_t)(INFO_D_COLLECT_INTERVAL_SEC * 3)) ?
+            "ok" :
+            "degraded";
 
     cJSON *result = cJSON_CreateObject();
     cJSON_AddStringToObject(result, "status", status);
@@ -473,23 +466,20 @@ static cJSON *info_d_build_health_result(info_d_service_t *svc)
     return result;
 }
 
-static void handle_system(info_d_service_t *svc, cJSON *params, int id,
-                          airy_sock_t client_fd)
+static void handle_system(info_d_service_t *svc, cJSON *params, int id, airy_sock_t client_fd)
 {
     (void)params;
     cJSON *result = info_d_build_system_result(svc);
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-static void handle_history(info_d_service_t *svc, cJSON *params, int id,
-                           airy_sock_t client_fd)
+static void handle_history(info_d_service_t *svc, cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *result = info_d_build_history_result(svc, params);
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-static void handle_health(info_d_service_t *svc, cJSON *params, int id,
-                          airy_sock_t client_fd)
+static void handle_health(info_d_service_t *svc, cJSON *params, int id, airy_sock_t client_fd)
 {
     (void)params;
     cJSON *result = info_d_build_health_result(svc);
@@ -529,7 +519,7 @@ static void info_d_handle_request(info_d_service_t *svc, airy_sock_t client_fd)
         if (cJSON_IsString(m) && idj) {
             int rid = cJSON_IsNumber(idj) ? idj->valueint : 0;
             if (strcmp(m->valuestring, "shutdown") == 0) {
-                /* 与信号处理一致：原子置位 g_shutdown，accept 循环 1s 内退出 */
+
                 atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
                 cJSON *result = cJSON_CreateObject();
                 cJSON_AddStringToObject(result, "status", "shutting_down");
@@ -560,8 +550,7 @@ static void info_d_handle_request(info_d_service_t *svc, airy_sock_t client_fd)
                 cJSON_AddStringToObject(result, "status", "ok");
                 cJSON_AddStringToObject(result, "service", "info_d");
                 cJSON_AddNumberToObject(result, "uptime_s", (double)uptime);
-                cJSON_AddNumberToObject(result, "timestamp",
-                                        (double)time(NULL) * 1000.0);
+                cJSON_AddNumberToObject(result, "timestamp", (double)time(NULL) * 1000.0);
                 JSONRPC_SEND_SUCCESS(client_fd, result, rid);
                 cJSON_Delete(req);
                 airy_sock_close(client_fd);
@@ -665,7 +654,6 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("info_d");
 
     if (info_d_init(&g_service, INFO_D_DEFAULT_PORT, INFO_D_DEFAULT_SOCKET) != AIRY_SUCCESS)
@@ -675,10 +663,9 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
         return EXIT_FAILURE;
     }
 
-    g_bsd = daemon_bootstrap_sd_start("info_d", "info", g_service.socket_path,
-                                      0, "info,core", 0);
-    g_bipc = daemon_bootstrap_ipc_start("info_d", "info", g_service.socket_path,
-                                        0, IPC_BUS_PROTO_JSON_RPC);
+    g_bsd = daemon_bootstrap_sd_start("info_d", "info", g_service.socket_path, 0, "info,core", 0);
+    g_bipc = daemon_bootstrap_ipc_start("info_d", "info", g_service.socket_path, 0,
+                                        IPC_BUS_PROTO_JSON_RPC);
 
     g_event_loop = airy_event_loop_create(64);
     if (!g_event_loop) {
@@ -689,7 +676,7 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     }
 
     airy_event_loop_add_fd(g_event_loop, (int)g_service.server_fd, AIRY_EVENT_TYPE_READ,
-                              info_d_on_client, &g_service);
+                           info_d_on_client, &g_service);
 
     LOG_INFO("info_d running with epoll event loop on fd=%d", (int)g_service.server_fd);
     airy_event_loop_run(g_event_loop);
@@ -701,7 +688,7 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     daemon_bootstrap_sd_stop(g_bsd);
     info_d_stop(&g_service, g_shutdown ? 1 : 0);
     info_d_destroy(&g_service);
-    daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
+    daemon_cupolas_cleanup();
     log_cleanup();
     return 0;
 }

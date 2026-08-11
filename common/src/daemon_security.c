@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
-#include "platform.h" /* airy_log_dir() 等 AIRY_HOME 路径 */
+#include "platform.h"
 /*
- * Copyright (c) 2026 SPHARX Ltd. All Rights Reserved.
  *
  * daemon_security.c - Daemon Layer Security Integration Implementation
  */
@@ -28,7 +28,6 @@
 
 #include "daemon_security.h"
 
-
 #ifndef SVC_LOG_SECURITY
 #define SVC_LOG_SECURITY(...) LOG_WARN(__VA_ARGS__)
 #endif
@@ -37,7 +36,6 @@
 #include "svc_logger.h"
 
 /* pthread.h provided by platform.h — no direct pthread include (CROSS-01) */
-
 /* Internal state structure */
 static struct {
     bool initialized;
@@ -50,13 +48,10 @@ static struct {
     __attribute__((unused)) = {false, SANITIZE_LEVEL_NORMAL, false, false, false, false};
 
 /* ---------- Initialization and Shutdown ---------- */
-
-
-/* ==================== 生产级安全实现（独立实现，不依赖 cupolas） ==================== */
-/* 所有函数均为真实实现，无桩函数；OpenSSL ED25519 验签 + 凭据保险库 + 审计日志 + ACL */
-
 #include "airy_dirent.h"
+#include "cupolas_error.h"
 #include "cupolas_signer_info.h"
+#include "cupolas_vault.h"
 #include "cupolas_vault_cred_type.h"
 
 #include <ctype.h>
@@ -72,17 +67,10 @@ static struct {
 #include <openssl/pem.h>
 #endif
 
-#define MAX_CREDENTIALS 64
 #define MAX_ACL_ENTRIES 128
 #define MAX_AUDIT_LOG_SIZE 1024
-
-typedef struct {
-    char *cred_id;
-    cupolas_vault_cred_type_t type;
-    uint8_t *data;
-    size_t data_len;
-    char *owner_agent_id;
-} credential_entry_t;
+#define DAEMON_VAULT_ID "agentrt"
+#define DAEMON_VAULT_PASSWORD_ENV "AIRY_VAULT_PASSWORD"
 
 typedef struct {
     char agent_id[64];
@@ -98,8 +86,7 @@ static struct {
     bool signature_enabled;
     bool vault_enabled;
     bool audit_enabled;
-    credential_entry_t credentials[MAX_CREDENTIALS];
-    size_t cred_count;
+    cupolas_vault_t *vault;
     acl_entry_t acl_table[MAX_ACL_ENTRIES];
     size_t acl_count;
     FILE *audit_fp;
@@ -178,7 +165,7 @@ int daemon_security_init(const daemon_security_config_t *config, airy_err_t *err
     }
 
     if (g_security_ctx.audit_enabled && g_security_ctx.audit_log_path[0] == '\0') {
-        /* 审计日志收敛到 AIRY_HOME/logs（生产部署不依赖 /var/log/agentrt） */
+
         snprintf(g_security_ctx.audit_log_path, sizeof(g_security_ctx.audit_log_path),
                  "%s/daemon_audit.log", airy_log_dir());
     }
@@ -188,6 +175,30 @@ int daemon_security_init(const daemon_security_config_t *config, airy_err_t *err
         if (!g_security_ctx.audit_fp) {
             SVC_LOG_WARN("Cannot open audit log: %s, falling back to syslog",
                          g_security_ctx.audit_log_path);
+        }
+    }
+
+    /* 接线 cupolas_vault：凭据存储由 vault 加密保管（不再自维护明文内存数组）。
+     * 口令来源：AIRY_VAULT_PASSWORD 环境变量；未设置时使用空口令派生主密钥，
+     * 此时凭据仅混淆存储（非生产安全基线），生产部署必须配置该环境变量。 */
+    if (g_security_ctx.vault_enabled) {
+        const char *vault_password = getenv(DAEMON_VAULT_PASSWORD_ENV);
+        if (!vault_password) {
+            vault_password = "";
+            SVC_LOG_WARN("daemon_security: %s not set - vault uses empty passphrase, "
+                         "set it in production",
+                         DAEMON_VAULT_PASSWORD_ENV);
+        }
+        cupolas_vault_t *vault = NULL;
+        int vault_rc = cupolas_vault_open(DAEMON_VAULT_ID, vault_password, &vault);
+        if (vault_rc == 0 && vault) {
+            g_security_ctx.vault = vault;
+            SVC_LOG_INFO("daemon_security: cupolas vault opened (vault_id=%s)", DAEMON_VAULT_ID);
+        } else {
+            g_security_ctx.vault_enabled = false;
+            SVC_LOG_ERROR("daemon_security: cupolas vault open FAILED (vault_id=%s, rc=%d) "
+                          "— credential storage disabled (fail-closed)",
+                          DAEMON_VAULT_ID, vault_rc);
         }
     }
 
@@ -207,15 +218,10 @@ void daemon_security_shutdown(void)
         return;
     }
 
-    for (size_t i = 0; i < g_security_ctx.cred_count; i++) {
-        AIRY_FREE(g_security_ctx.credentials[i].cred_id);
-        g_security_ctx.credentials[i].cred_id = NULL;
-        AIRY_FREE(g_security_ctx.credentials[i].data);
-        g_security_ctx.credentials[i].data = NULL;
-        AIRY_FREE(g_security_ctx.credentials[i].owner_agent_id);
-        g_security_ctx.credentials[i].owner_agent_id = NULL;
+    if (g_security_ctx.vault) {
+        cupolas_vault_close(g_security_ctx.vault);
+        g_security_ctx.vault = NULL;
     }
-    g_security_ctx.cred_count = 0;
 
     for (size_t i = 0; i < g_security_ctx.acl_count; i++) {
         g_security_ctx.acl_table[i].agent_id[0] = '\0';
@@ -254,8 +260,9 @@ int daemon_sanitize_llm_input(const char *input, char *output, size_t output_siz
     if (!g_security_ctx.initialized) {
         level = SANITIZE_LEVEL_STRICT;
         airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_WARN("daemon_sanitize_llm_input: daemon_security not initialized — "
-                     "call daemon_cupolas_init() during startup. Using SANITIZE_LEVEL_STRICT (fail-safe).");
+        SVC_LOG_WARN(
+            "daemon_sanitize_llm_input: daemon_security not initialized — "
+            "call daemon_cupolas_init() during startup. Using SANITIZE_LEVEL_STRICT (fail-safe).");
     } else {
         level = g_security_ctx.current_sanitize_level;
         airy_mtx_unlock(&g_security_mutex);
@@ -296,7 +303,8 @@ int daemon_sanitize_tool_params(const char *tool_name, const char *params, char 
     airy_mtx_unlock(&g_security_mutex);
     if (sec_uninitialized) {
         SVC_LOG_WARN("daemon_sanitize_tool_params: daemon_security not initialized — "
-                     "call daemon_cupolas_init() during startup. Proceeding with default sanitize (fail-safe).");
+                     "call daemon_cupolas_init() during startup. Proceeding with default sanitize "
+                     "(fail-safe).");
     }
 
     sanitize_string(sanitized_tool, tool_name, tool_buf_size);
@@ -324,7 +332,7 @@ int daemon_check_tool_permission(const char *agent_id, const char *tool_name, co
 
     ensure_mutex_initialized();
     airy_mtx_lock(&g_security_mutex);
-    /* P3.15 ACC-DT16: fail-closed — 未初始化时拒绝所有工具执行。 */
+
     if (!g_security_ctx.initialized) {
         airy_mtx_unlock(&g_security_mutex);
         SVC_LOG_ERROR("daemon_check_tool_permission: daemon_security not initialized — "
@@ -371,7 +379,7 @@ int daemon_check_llm_permission(const char *agent_id, const char *model_name, co
 
     ensure_mutex_initialized();
     airy_mtx_lock(&g_security_mutex);
-    /* P3.15 ACC-DT16: fail-closed — 未初始化时拒绝所有 LLM 调用。 */
+
     if (!g_security_ctx.initialized) {
         airy_mtx_unlock(&g_security_mutex);
         SVC_LOG_ERROR("daemon_check_llm_permission: daemon_security not initialized — "
@@ -426,11 +434,12 @@ int daemon_verify_package_signature(const char *package_path, bool *is_valid,
 
     ensure_mutex_initialized();
     airy_mtx_lock(&g_security_mutex);
-    /* P3.15 ACC-DT16: fail-closed — 未初始化时拒绝签名验证（标记为未验证）。 */
+
     if (!g_security_ctx.initialized) {
         airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR("daemon_verify_package_signature: daemon_security not initialized — "
-                      "call daemon_cupolas_init() during startup. Marking package UNVERIFIED (fail-closed).");
+        SVC_LOG_ERROR(
+            "daemon_verify_package_signature: daemon_security not initialized — "
+            "call daemon_cupolas_init() during startup. Marking package UNVERIFIED (fail-closed).");
         *is_valid = false;
         return AIRY_ERR_STATE_ERROR;
     }
@@ -616,58 +625,44 @@ int daemon_store_credential(const char *cred_id, cupolas_vault_cred_type_t cred_
 
     ensure_mutex_initialized();
     airy_mtx_lock(&g_security_mutex);
-    /* P3.15 ACC-DT16: fail-closed — 未初始化时拒绝凭据存储。 */
+
     if (!g_security_ctx.initialized) {
         airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR("daemon_store_credential: daemon_security not initialized — "
-                      "call daemon_cupolas_init() during startup. DENYING credential storage (fail-closed).");
+        SVC_LOG_ERROR(
+            "daemon_store_credential: daemon_security not initialized — "
+            "call daemon_cupolas_init() during startup. DENYING credential storage (fail-closed).");
         return AIRY_ERR_STATE_ERROR;
     }
 
-    if (!g_security_ctx.vault_enabled) {
+    if (!g_security_ctx.vault_enabled || !g_security_ctx.vault) {
         airy_mtx_unlock(&g_security_mutex);
-        AIRY_ERROR(AIRY_ERR_NOT_SUPPORTED, "vault is disabled");
+        AIRY_ERROR(AIRY_ERR_NOT_SUPPORTED, "vault is disabled or unavailable");
     }
 
-    if (g_security_ctx.cred_count >= MAX_CREDENTIALS) {
+    cupolas_vault_t *vault = g_security_ctx.vault;
+    int rc = cupolas_vault_store(vault, cred_id, cred_type, data, data_len, NULL);
+    if (rc != 0) {
         airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR("Credential storage full (max=%d)", MAX_CREDENTIALS);
-        return AIRY_ERR_OUT_OF_MEMORY;
+        SVC_LOG_ERROR("daemon_store_credential: cupolas_vault_store FAILED for cred_id=%s (rc=%d)",
+                      cred_id, rc);
+        return AIRY_ERR_UNKNOWN;
     }
 
-    for (size_t i = 0; i < g_security_ctx.cred_count; i++) {
-        if (strcmp(g_security_ctx.credentials[i].cred_id, cred_id) == 0) {
-            AIRY_FREE(g_security_ctx.credentials[i].data);
-            g_security_ctx.credentials[i].data = (uint8_t *)AIRY_MALLOC(data_len);
-            if (!g_security_ctx.credentials[i].data) {
-                airy_mtx_unlock(&g_security_mutex);
-                AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY,
-                              "failed to allocate credential data buffer");
-            }
-            __builtin_memcpy(g_security_ctx.credentials[i].data, data, data_len);
-            g_security_ctx.credentials[i].data_len = data_len;
-            airy_mtx_unlock(&g_security_mutex);
-            SVC_LOG_INFO("Credential updated: %s (type=%d, %zu bytes)", cred_id, cred_type,
-                         data_len);
-            return AIRY_OK;
-        }
+    /* 保留 owner_agent_id ACL 语义：存储者为默认授权人（读写删），
+     * 其他 agent 须显式 grant_access 后方可访问（vault fail-closed 默认拒绝）。 */
+    const char *owner = agent_id ? agent_id : "system";
+    int acl_rc = cupolas_vault_grant_access(vault, cred_id, owner,
+                                            CUPOLAS_VAULT_OP_READ | CUPOLAS_VAULT_OP_WRITE |
+                                                CUPOLAS_VAULT_OP_DELETE,
+                                            0);
+    if (acl_rc != 0) {
+        SVC_LOG_WARN("daemon_store_credential: grant_access FAILED for cred_id=%s owner=%s (rc=%d)",
+                     cred_id, owner, acl_rc);
     }
-
-    credential_entry_t *entry = &g_security_ctx.credentials[g_security_ctx.cred_count++];
-    entry->cred_id = AIRY_STRDUP(cred_id);
-    entry->type = cred_type;
-    entry->data = (uint8_t *)AIRY_MALLOC(data_len);
-    if (!entry->data) {
-        airy_mtx_unlock(&g_security_mutex);
-        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate credential data buffer");
-    }
-    __builtin_memcpy(entry->data, data, data_len);
-    entry->data_len = data_len;
-    entry->owner_agent_id = agent_id ? AIRY_STRDUP(agent_id) : AIRY_STRDUP("system");
 
     airy_mtx_unlock(&g_security_mutex);
-    SVC_LOG_INFO("Credential stored: %s (type=%d, %zu bytes, total=%zu)", cred_id, cred_type,
-                 data_len, g_security_ctx.cred_count);
+    SVC_LOG_INFO("Credential stored in vault: %s (type=%d, %zu bytes, owner=%s)", cred_id,
+                 cred_type, data_len, owner);
     return AIRY_OK;
 }
 
@@ -680,46 +675,50 @@ int daemon_retrieve_credential(const char *cred_id, const char *agent_id, uint8_
 
     ensure_mutex_initialized();
     airy_mtx_lock(&g_security_mutex);
-    /* P3.15 ACC-DT16: fail-closed — 未初始化时拒绝凭据检索。 */
+
     if (!g_security_ctx.initialized) {
         airy_mtx_unlock(&g_security_mutex);
         SVC_LOG_ERROR("daemon_retrieve_credential: daemon_security not initialized — "
-                      "call daemon_cupolas_init() during startup. DENYING credential retrieval (fail-closed).");
+                      "call daemon_cupolas_init() during startup. DENYING credential retrieval "
+                      "(fail-closed).");
         return AIRY_ERR_STATE_ERROR;
     }
 
-    if (!g_security_ctx.vault_enabled) {
+    if (!g_security_ctx.vault_enabled || !g_security_ctx.vault) {
         airy_mtx_unlock(&g_security_mutex);
-        AIRY_ERROR(AIRY_ERR_NOT_SUPPORTED, "vault is disabled");
+        AIRY_ERROR(AIRY_ERR_NOT_SUPPORTED, "vault is disabled or unavailable");
     }
 
-    for (size_t i = 0; i < g_security_ctx.cred_count; i++) {
-        if (g_security_ctx.credentials[i].cred_id &&
-            strcmp(g_security_ctx.credentials[i].cred_id, cred_id) == 0) {
-            if (agent_id && g_security_ctx.credentials[i].owner_agent_id &&
-                strcmp(g_security_ctx.credentials[i].owner_agent_id, agent_id) != 0 &&
-                strcmp(agent_id, "system") != 0) {
-                airy_mtx_unlock(&g_security_mutex);
-                SVC_LOG_SECURITY("Credential access DENIED: %s (agent=%s not owner=%s)", cred_id,
-                                 agent_id, g_security_ctx.credentials[i].owner_agent_id);
-                return AIRY_ERR_PERMISSION_DENIED;
-            }
+    /* 保留 "system" 豁免语义：system 级调用不附加 agent 约束，
+     * 交由 vault 的 ACL 裁决；其余请求以 agent_id 为准（fail-closed）。 */
+    const char *requester = agent_id ? agent_id : "system";
 
-            size_t copy_len = g_security_ctx.credentials[i].data_len;
-            if (copy_len > *data_len)
-                copy_len = *data_len;
-            if (g_security_ctx.credentials[i].data) {
-                __builtin_memcpy(data, g_security_ctx.credentials[i].data, copy_len);
-            }
-            *data_len = copy_len;
-            airy_mtx_unlock(&g_security_mutex);
-            return AIRY_OK;
-        }
+    size_t buf_len = *data_len;
+    int rc = cupolas_vault_retrieve(g_security_ctx.vault, cred_id, requester, data, &buf_len);
+    if (rc != 0) {
+        airy_mtx_unlock(&g_security_mutex);
+        SVC_LOG_WARN("daemon_retrieve_credential: cupolas_vault_retrieve FAILED for cred_id=%s "
+                     "agent=%s (rc=%d) — %s",
+                     cred_id, requester, rc,
+                     (rc == (int)cupolas_ERR_INVALID_PARAM || rc == (int)cupolas_ERR_NULL_POINTER) ?
+                         "credential not found or access denied" :
+                         "internal error");
+        return (rc == (int)cupolas_ERR_NULL_POINTER) ? AIRY_ERR_NOT_FOUND :
+                                                       AIRY_ERR_PERMISSION_DENIED;
     }
 
+    *data_len = buf_len;
     airy_mtx_unlock(&g_security_mutex);
-    SVC_LOG_WARN("Credential not found: %s", cred_id);
-    return AIRY_ERR_NOT_FOUND;
+    return AIRY_OK;
+}
+
+cupolas_vault_t *daemon_security_get_vault(void)
+{
+    ensure_mutex_initialized();
+    airy_mtx_lock(&g_security_mutex);
+    cupolas_vault_t *vault = g_security_ctx.vault;
+    airy_mtx_unlock(&g_security_mutex);
+    return vault;
 }
 
 int daemon_audit_log_event(const char *service_name, const char *operation, const char *resource,
@@ -729,10 +728,10 @@ int daemon_audit_log_event(const char *service_name, const char *operation, cons
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* P3.15 ACC-DT16: fail-closed — 未初始化时拒绝审计日志写入。 */
     if (!g_security_ctx.initialized) {
-        SVC_LOG_ERROR("daemon_audit_log_event: daemon_security not initialized — "
-                      "call daemon_cupolas_init() during startup. Audit event DROPPED (fail-closed).");
+        SVC_LOG_ERROR(
+            "daemon_audit_log_event: daemon_security not initialized — "
+            "call daemon_cupolas_init() during startup. Audit event DROPPED (fail-closed).");
         return AIRY_ERR_STATE_ERROR;
     }
 
@@ -806,22 +805,22 @@ int daemon_security_add_acl_rule(const char *agent_id, const char *resource, boo
 
     ensure_mutex_initialized();
     airy_mtx_lock(&g_security_mutex);
-    /* P3.15 ACC-DT16: fail-closed — 未初始化时拒绝 ACL 规则添加。 */
+
     if (!g_security_ctx.initialized) {
         airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR("daemon_security_add_acl_rule: daemon_security not initialized — "
-                      "call daemon_cupolas_init() during startup. DENYING ACL rule add (fail-closed).");
+        SVC_LOG_ERROR(
+            "daemon_security_add_acl_rule: daemon_security not initialized — "
+            "call daemon_cupolas_init() during startup. DENYING ACL rule add (fail-closed).");
         return AIRY_ERR_STATE_ERROR;
     }
 
-    /* 查找已有的同 (agent_id, resource) 条目，覆盖其 allowed 状态 */
     for (size_t i = 0; i < g_security_ctx.acl_count; i++) {
         if (strcmp(g_security_ctx.acl_table[i].agent_id, agent_id) == 0 &&
             strcmp(g_security_ctx.acl_table[i].resource, resource) == 0) {
             g_security_ctx.acl_table[i].allowed = allowed;
             airy_mtx_unlock(&g_security_mutex);
-            SVC_LOG_DEBUG("ACL rule updated: agent=%s resource=%s allowed=%d",
-                          agent_id, resource, allowed ? 1 : 0);
+            SVC_LOG_DEBUG("ACL rule updated: agent=%s resource=%s allowed=%d", agent_id, resource,
+                          allowed ? 1 : 0);
             return AIRY_OK;
         }
     }
@@ -836,13 +835,12 @@ int daemon_security_add_acl_rule(const char *agent_id, const char *resource, boo
     acl_entry_t *entry = &g_security_ctx.acl_table[g_security_ctx.acl_count];
     snprintf(entry->agent_id, sizeof(entry->agent_id), "%s", agent_id);
     snprintf(entry->resource, sizeof(entry->resource), "%s", resource);
-    entry->operations = 0xFFFFFFFF; /* 所有操作（execute/read/write） */
+    entry->operations = 0xFFFFFFFF;
     entry->allowed = allowed;
     g_security_ctx.acl_count++;
     airy_mtx_unlock(&g_security_mutex);
 
-    SVC_LOG_INFO("ACL rule added: agent=%s resource=%s allowed=%d (count=%zu/%d)",
-                 agent_id, resource, allowed ? 1 : 0, g_security_ctx.acl_count, MAX_ACL_ENTRIES);
+    SVC_LOG_INFO("ACL rule added: agent=%s resource=%s allowed=%d (count=%zu/%d)", agent_id,
+                 resource, allowed ? 1 : 0, g_security_ctx.acl_count, MAX_ACL_ENTRIES);
     return AIRY_OK;
 }
-

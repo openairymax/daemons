@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file a2a_service.h
  * @brief A2A 服务对外接口（a2a.* 命名空间）
@@ -7,7 +8,6 @@
  * 封装 a2a_v03_adapter 库，作为 a2a_d 守护进程的服务核心对外暴露。
  * 提供智能体注册/发现、任务生命周期管理、智能体间消息传递能力。
  *
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_A2A_SERVICE_H
@@ -22,7 +22,6 @@ extern "C" {
 
 typedef struct a2a_service a2a_service_t;
 
-/* ---------- 生命周期 ---------- */
 
 /**
  * @brief 创建 A2A 服务实例
@@ -33,7 +32,6 @@ typedef struct a2a_service a2a_service_t;
 a2a_service_t *a2a_service_create(size_t max_agents, size_t max_tasks);
 void a2a_service_destroy(a2a_service_t *svc);
 
-/* ---------- Agent Card 管理接口 ---------- */
 
 /**
  * @brief 注册智能体
@@ -56,8 +54,7 @@ int a2a_service_unregister_agent(a2a_service_t *svc, const char *agent_id);
  *         （调用方负责 a2a_service_card_free 释放）；
  *         AIRY_ERR_NOT_FOUND 未找到
  */
-int a2a_service_get_agent_card(a2a_service_t *svc, const char *agent_id,
-                                 char **out_card_json);
+int a2a_service_get_agent_card(a2a_service_t *svc, const char *agent_id, char **out_card_json);
 
 /**
  * @brief 发现智能体
@@ -66,20 +63,17 @@ int a2a_service_get_agent_card(a2a_service_t *svc, const char *agent_id,
  * @return AIRY_SUCCESS 成功，*out_results_json 输出卡片 JSON 数组字符串
  *         （调用方负责 a2a_service_results_free 释放），*out_count 输出命中数
  */
-int a2a_service_discover_agents(a2a_service_t *svc, const char *capability,
-                                  const char *skill_name,
-                                  char **out_results_json, size_t *out_count);
+int a2a_service_discover_agents(a2a_service_t *svc, const char *capability, const char *skill_name,
+                                char **out_results_json, size_t *out_count);
 
-/* ---------- Task 生命周期接口 ---------- */
 
 /**
  * @brief 创建任务
  * @return AIRY_SUCCESS 成功，*out_task_json 输出任务 JSON 字符串
  *         （调用方负责 a2a_service_task_free 释放）
  */
-int a2a_service_create_task(a2a_service_t *svc, const char *agent_id,
-                              const char *description, const char *input_json,
-                              char **out_task_json);
+int a2a_service_create_task(a2a_service_t *svc, const char *agent_id, const char *description,
+                            const char *input_json, char **out_task_json);
 
 /**
  * @brief 更新任务状态
@@ -89,15 +83,14 @@ int a2a_service_create_task(a2a_service_t *svc, const char *agent_id,
  * @return AIRY_SUCCESS 成功，AIRY_ERR_NOT_FOUND 未找到
  */
 int a2a_service_update_task(a2a_service_t *svc, const char *task_id, int state,
-                              const char *output_json, double progress);
+                            const char *output_json, double progress);
 
 /**
  * @brief 取消任务
  * @param reason 取消原因，可为 NULL
  * @return AIRY_SUCCESS 成功，AIRY_ERR_NOT_FOUND 未找到
  */
-int a2a_service_cancel_task(a2a_service_t *svc, const char *task_id,
-                              const char *reason);
+int a2a_service_cancel_task(a2a_service_t *svc, const char *task_id, const char *reason);
 
 /**
  * @brief 获取任务
@@ -105,10 +98,8 @@ int a2a_service_cancel_task(a2a_service_t *svc, const char *task_id,
  *         （调用方负责 a2a_service_task_free 释放）；
  *         AIRY_ERR_NOT_FOUND 未找到
  */
-int a2a_service_get_task(a2a_service_t *svc, const char *task_id,
-                           char **out_task_json);
+int a2a_service_get_task(a2a_service_t *svc, const char *task_id, char **out_task_json);
 
-/* ---------- 消息传递接口 ---------- */
 
 /**
  * @brief 发送消息到目标智能体
@@ -118,12 +109,10 @@ int a2a_service_get_task(a2a_service_t *svc, const char *task_id,
  *         （调用方负责 a2a_service_results_free 释放），
  *         *out_response_count 输出响应数
  */
-int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id,
-                               const char *role, const char *content_json,
-                               char **out_response_json,
-                               size_t *out_response_count);
+int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id, const char *role,
+                             const char *content_json, char **out_response_json,
+                             size_t *out_response_count);
 
-/* ---------- 辅助接口 ---------- */
 
 size_t a2a_service_count(a2a_service_t *svc);
 size_t a2a_service_task_count(a2a_service_t *svc);

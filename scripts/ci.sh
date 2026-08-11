@@ -1,5 +1,7 @@
 #!/bin/bash
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
+# SPDX-FileCopyrightText: 2026 SPHARX Ltd.
+# SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 # AgentRT Backs模块CI/CD脚本
 # 包含：构建、测试、静态分析、代码覆盖率
 

@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file validator.h
  * @brief 工具参数验证器接口
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef TOOL_VALIDATOR_H

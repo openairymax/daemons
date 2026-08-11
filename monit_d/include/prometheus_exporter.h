@@ -1,7 +1,7 @@
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file prometheus_exporter.h
  * @brief C-L10: Prometheus scrape endpoint for monit_d
@@ -21,7 +21,6 @@
 extern "C" {
 #endif
 
-/* ==================== 生命周期 ==================== */
 
 /**
  * @brief C-L10: 初始化 Prometheus exporter
@@ -37,7 +36,6 @@ int prometheus_exporter_init(const char *service_name);
  */
 void prometheus_exporter_shutdown(void);
 
-/* ==================== 指标注册 ==================== */
 
 /**
  * @brief C-L10: 注册 14 项必需指标
@@ -48,7 +46,6 @@ void prometheus_exporter_shutdown(void);
  */
 int prometheus_exporter_register_required_metrics(void);
 
-/* ==================== HTTP 端点处理 ==================== */
 
 /**
  * @brief C-L10: 处理 Prometheus scrape HTTP 请求
@@ -61,10 +58,9 @@ int prometheus_exporter_register_required_metrics(void);
  * @param response_len 输出参数，响应数据长度
  * @return 0 表示已处理（是 /metrics 请求），-1 表示非 Prometheus 请求（需其他处理）
  */
-int prometheus_exporter_handle_http(const char *request, size_t request_len,
-                                    char **response, size_t *response_len);
+int prometheus_exporter_handle_http(const char *request, size_t request_len, char **response,
+                                    size_t *response_len);
 
-/* ==================== 指标值更新 ==================== */
 
 /**
  * @brief 递增计数器指标
@@ -87,7 +83,6 @@ void prometheus_histogram_observe(const char *name, double value);
  */
 char *prometheus_exporter_get_metrics(void);
 
-/* ==================== C-L10: 抓取统计 ==================== */
 
 /**
  * @brief C-L10: 获取 Prometheus scrape 统计

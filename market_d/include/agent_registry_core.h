@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file agent_registry_core.h
  * @brief Agent注册表核心功能接口
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_AGENT_REGISTRY_CORE_H
@@ -68,8 +68,7 @@ int agent_registry_core_remove(agent_registry_t *registry, const char *agent_id)
  * @return 0 成功；AIRY_ERR_INVALID_PARAM 参数非法；AIRY_ERR_NOT_FOUND 未命中。
  * @note 数据在锁内拷贝完成后解锁，避免调用方无锁访问内部 entries[]。
  */
-int agent_registry_core_get(agent_registry_t *registry, const char *agent_id,
-                            agent_entry_t *out);
+int agent_registry_core_get(agent_registry_t *registry, const char *agent_id, agent_entry_t *out);
 
 /**
  * @brief 列出全部条目并拷贝到调用方缓冲区。

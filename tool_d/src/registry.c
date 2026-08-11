@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 /**
  * @file registry.c
  * @brief 工具注册表实现（内存哈希表）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "error.h"
@@ -42,7 +42,7 @@ static tool_metadata_t *dup_metadata(const tool_metadata_t *src)
     tool_metadata_t *dst = AIRY_CALLOC(1, sizeof(tool_metadata_t));
     if (!dst) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-        }
+    }
     dst->id = AIRY_STRDUP(src->id);
     if (!dst->id) {
         AIRY_FREE(dst);
@@ -134,7 +134,7 @@ tool_registry_t *tool_registry_create(const tool_config_t *cfg)
     tool_registry_t *reg = AIRY_CALLOC(1, sizeof(tool_registry_t));
     if (!reg) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-        }
+    }
     airy_mtx_init(&reg->lock);
 
     if (cfg && cfg->tools) {
@@ -296,7 +296,7 @@ tool_metadata_t *tool_registry_get(tool_registry_t *reg, const char *tool_id)
 {
     if (!reg || !tool_id) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-        }
+    }
     unsigned int idx = hash(tool_id);
     airy_mtx_lock(&reg->lock);
     for (registry_entry_t *e = reg->buckets[idx]; e; e = e->next) {

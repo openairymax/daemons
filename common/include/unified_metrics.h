@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file unified_metrics.h
  * @brief 统一指标收集器 - 聚合所有守护进程指标
@@ -25,14 +26,12 @@
 extern "C" {
 #endif
 
-/* ==================== 常量定义 ==================== */
 
 #define UM_MAX_MODULES 32
 #define UM_MAX_METRICS_PER_MOD 256
 #define UM_MODULE_NAME_LEN 32
 #define UM_METRIC_NAME_LEN 128
 
-/* ==================== 指标类型 ==================== */
 
 typedef enum {
     UM_TYPE_COUNTER = 0,
@@ -41,7 +40,6 @@ typedef enum {
     UM_TYPE_SUMMARY = 3
 } um_metric_type_t;
 
-/* ==================== 指标条目 ==================== */
 
 typedef struct {
     char name[UM_METRIC_NAME_LEN];
@@ -54,7 +52,6 @@ typedef struct {
     uint64_t timestamp_ms;
 } um_metric_entry_t;
 
-/* ==================== 模块指标集合 ==================== */
 
 typedef struct {
     char module_name[UM_MODULE_NAME_LEN];
@@ -64,7 +61,6 @@ typedef struct {
     bool active;
 } um_module_metrics_t;
 
-/* ==================== 统一指标配置 ==================== */
 
 typedef struct {
     char service_name[64];
@@ -73,7 +69,6 @@ typedef struct {
     bool enable_default_metrics;
 } um_config_t;
 
-/* ==================== 统一指标统计 ==================== */
 
 typedef struct {
     uint64_t total_registrations;
@@ -84,7 +79,6 @@ typedef struct {
     uint32_t total_metrics;
 } um_stats_t;
 
-/* ==================== 生命周期管理 ==================== */
 
 /**
  * @brief 初始化统一指标收集器
@@ -104,7 +98,6 @@ void um_shutdown(void);
  */
 bool um_is_initialized(void);
 
-/* ==================== 模块注册 ==================== */
 
 /**
  * @brief 注册指标模块
@@ -121,7 +114,6 @@ int um_register_module(const char *module_name, const char *instance_id);
  */
 int um_unregister_module(const char *module_name);
 
-/* ==================== 指标操作 ==================== */
 
 /**
  * @brief 注册指标定义
@@ -162,7 +154,6 @@ int um_gauge_set(const char *module_name, const char *name, double value);
  */
 int um_observe(const char *module_name, const char *name, double value);
 
-/* ==================== 导出 ==================== */
 
 /**
  * @brief 导出所有指标为Prometheus格式
@@ -183,7 +174,6 @@ char *um_export_prometheus_module(const char *module_name);
  */
 char *um_export_json(void);
 
-/* ==================== 默认指标 ==================== */
 
 /**
  * @brief 注册默认系统指标（CPU/内存/线程等）
@@ -196,7 +186,6 @@ int um_register_default_metrics(void);
  */
 void um_update_default_metrics(void);
 
-/* ==================== 统计 ==================== */
 
 /**
  * @brief 获取统一指标统计

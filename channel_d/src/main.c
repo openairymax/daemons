@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (c) 2026 SPHARX. All Rights Reserved.
  * @file main.c
  * @brief Channel 守护进程主入口（P0.18.1 样板宏化）
  */
@@ -17,18 +17,14 @@
 #include <unistd.h>
 
 #define CHANNEL_D_SOCKET_PATH airy_runtime_dir_socket("channel.sock")
-#define CHANNEL_D_PIPE_PATH   "\\\\.\\pipe\\airy_channel"
+#define CHANNEL_D_PIPE_PATH "\\\\.\\pipe\\airy_channel"
 
-/* P0.18.1: 使用 DAEMON_DECLARE_COMMON 生成公共样板（信号处理/全局变量/print_usage） */
-DAEMON_DECLARE_COMMON(channel_d, channel, CHANNEL_D_SOCKET_PATH,
-                      CHANNEL_D_PIPE_PATH, 0, 65536)
+DAEMON_DECLARE_COMMON(channel_d, channel, CHANNEL_D_SOCKET_PATH, CHANNEL_D_PIPE_PATH, 0, 65536)
 
-/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
 DAEMON_DECLARE_SHUTDOWN_METHOD(channel_d)
 
 static channel_service_t *g_svc __attribute__((unused)) = NULL;
 
-/* 销毁服务（daemon_cleanup_standard 回调） */
 static void destroy_service_channel_d(void)
 {
     if (g_svc) {
@@ -53,8 +49,6 @@ static BOOL WINAPI console_handler_channel_d(DWORD fdwCtrlType)
     }
 }
 #endif
-
-/* ==================== 业务逻辑：请求处理 ==================== */
 
 /* 从 cJSON params 提取 channel_id：支持字符串与数字 id，返回 AIRY_MALLOC 字符串或 NULL。
  * （修复：原手写 strstr/strchr 解析无法处理数字 id 与含转义引号的 data，导致
@@ -257,8 +251,6 @@ __attribute__((used)) static int handle_service_request(const char *method, cJSO
     AIRY_ERROR(AIRY_ERR_UNKNOWN, "unknown method");
 }
 
-/* ==================== JSON-RPC 方法包装（接入 method_dispatcher） ==================== */
-
 /**
  * @brief 将 cJSON params 直接转交 handle_service_request（cJSON 解析，无字符串往返），
  *        并把返回的 JSON 结果封装为 JSON-RPC 成功响应。
@@ -274,8 +266,7 @@ static void channel_dispatch_method(cJSON *params, int id, void *user_data, cons
     if (rc != 0 || !result_json) {
         /* 参数校验失败（fail-closed 缺 id/data、非法类型）映射为
          * JSON-RPC Invalid params(-32602)；其余服务错误为 Internal error(-32603) */
-        int code = (rc == AIRY_ERR_INVALID_PARAM) ? JSONRPC_INVALID_PARAMS
-                                                  : JSONRPC_INTERNAL_ERROR;
+        int code = (rc == AIRY_ERR_INVALID_PARAM) ? JSONRPC_INVALID_PARAMS : JSONRPC_INTERNAL_ERROR;
         JSONRPC_SEND_ERROR(client_fd, code, "channel service error", id);
         AIRY_FREE(result_json);
         return;
@@ -320,24 +311,19 @@ static void channel_on_health(cJSON *params, int id, void *user_data)
     channel_dispatch_method(params, id, user_data, "health");
 }
 
-/* L2 标准方法 channel.get_stats（02-l2-service-protocol.md §6.1） */
 static void channel_on_get_stats(cJSON *params, int id, void *user_data)
 {
     channel_dispatch_method(params, id, user_data, "stats");
 }
-
-/* ==================== 主入口 ==================== */
 
 int main(int argc, char *argv[])
 {
     const char *socket_dir = NULL;
     uint32_t max_channels = CHANNEL_MAX_CHANNELS;
 
-    /* 兼容原有 -c/-s/-n/-h 短选项，同时接受统一长选项 --manager */
     for (int i = 1; i < argc; i++) {
-        if ((strcmp(argv[i], "--manager") == 0 || strcmp(argv[i], "-c") == 0) &&
-            i + 1 < argc) {
-            i++; /* 配置路径暂不影响 channel 服务，接受并跳过 */
+        if ((strcmp(argv[i], "--manager") == 0 || strcmp(argv[i], "-c") == 0) && i + 1 < argc) {
+            i++;
         } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
             socket_dir = argv[++i];
         } else if (strcmp(argv[i], "-n") == 0 && i + 1 < argc) {
@@ -357,7 +343,6 @@ int main(int argc, char *argv[])
     airy_sock_init();
     airy_mtx_init(&g_running_lock_channel_d);
 
-    /* 跨平台信号处理 */
 #ifdef _WIN32
     SetConsoleCtrlHandler(console_handler_channel_d, TRUE);
 #else
@@ -396,7 +381,6 @@ int main(int argc, char *argv[])
     SVC_LOG_INFO("channel_d started (max_channels=%u, socket_dir=%s)", config.max_channels,
                  config.socket_dir);
 
-    /* 创建 Socket 服务器 */
     airy_sock_t server_fd =
         daemon_create_server_socket(0, 0, CHANNEL_D_SOCKET_PATH, CHANNEL_D_PIPE_PATH);
     if (server_fd < 0) {
@@ -409,7 +393,6 @@ int main(int argc, char *argv[])
     }
     SVC_LOG_INFO("channel_d: listening on %s (fd=%d)", CHANNEL_D_SOCKET_PATH, (int)server_fd);
 
-    /* 事件驱动（mem_d 同款模式）：统一 accept + JSON-RPC 分发 */
     daemon_event_config_t ev_config;
     __builtin_memset(&ev_config, 0, sizeof(ev_config));
     ev_config.max_events = 64;
@@ -440,11 +423,12 @@ int main(int argc, char *argv[])
     method_dispatcher_register(g_dispatcher_channel_d, "close", channel_on_close, NULL);
     method_dispatcher_register(g_dispatcher_channel_d, "send", channel_on_send, NULL);
     method_dispatcher_register(g_dispatcher_channel_d, "health", channel_on_health, NULL);
-    /* L2 协议标准方法 <ns>.health_check 别名（02-l2-service-protocol.md §6.1） */
+
     method_dispatcher_register(g_dispatcher_channel_d, "health_check", channel_on_health, NULL);
-    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
-    method_dispatcher_register(g_dispatcher_channel_d, "shutdown", on_shutdown_method_channel_d, NULL);
-    /* L2 协议标准方法 channel.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+
+    method_dispatcher_register(g_dispatcher_channel_d, "shutdown", on_shutdown_method_channel_d,
+                               NULL);
+
     method_dispatcher_register(g_dispatcher_channel_d, "get_stats", channel_on_get_stats, NULL);
     SVC_LOG_INFO("channel_d: registered 9 RPC methods (channel.* namespace)");
 

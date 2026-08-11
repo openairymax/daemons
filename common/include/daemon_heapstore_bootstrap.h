@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file daemon_heapstore_bootstrap.h
  * @brief daemon 统一 heapstore 运行时数据存储引导
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * heapstore 是 agentrt 运行时数据存储（KER-05~07：syscall 会话/追踪
  * 持久化，airy_core 链接）。本引导为 daemon 层提供统一初始化入口：
@@ -20,13 +20,11 @@
 #define AIRY_RT_DAEMON_HEAPSTORE_BOOTSTRAP_H
 
 #include "error.h" /* airy_err_t */
-
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
-    /**
+/**
      * @brief 初始化 heapstore 运行时数据存储（统一引导）
      *
      * 在 daemon main() 中 airy_log_init() 之后调用（与 daemon_cupolas_init
@@ -35,15 +33,15 @@ extern "C"
      * @param daemon_name daemon 名称（如 "gateway_d"），用于日志标识
      * @return AIRY_SUCCESS 成功；错误码失败（FATAL 日志已记录，服务可降级）
      */
-    airy_err_t daemon_heapstore_init(const char *daemon_name);
+airy_err_t daemon_heapstore_init(const char *daemon_name);
 
-    /**
+/**
      * @brief 清理 heapstore 运行时数据存储
      * 幂等：重复调用安全。
      */
-    void daemon_heapstore_cleanup(void);
+void daemon_heapstore_cleanup(void);
 
-    /**
+/**
      * @brief 写入服务访问日志（gateway 转发链等 daemon 调用）
      *
      * heapstore 不可用（未初始化/写失败）时静默忽略，返回非 0。
@@ -54,8 +52,7 @@ extern "C"
      * @param trace_id 追踪 ID（可 NULL）
      * @return 0 成功；非 0 存储不可用/失败
      */
-    int daemon_heapstore_log(const char *module, int level, const char *msg,
-                             const char *trace_id);
+int daemon_heapstore_log(const char *module, int level, const char *msg, const char *trace_id);
 
 #ifdef __cplusplus
 }

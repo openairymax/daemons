@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /* _GNU_SOURCE: defined via CMakeLists.txt target_compile_definitions (BAN-182) */
 #include "atomic_compat.h"
 #include "daemon_platform_ext.h"
@@ -82,8 +83,8 @@ int airy_thread_setname(const char *name)
 #elif defined(__APPLE__)
     return pthread_setname_np(name);
 #else
-    /* 非POSIX平台：名称用于验证（非桩） */
-    if (name && name[0]) { /* 名称非空 */
+
+    if (name && name[0]) {
     }
     return 0;
 #endif
@@ -100,7 +101,7 @@ int airy_thread_getname(char *name, size_t size)
         name[0] = '\0';
     return 0;
 #else
-    /* 非POSIX平台：参数安全使用（非桩） */
+
     if (name && size > 0)
         name[0] = '\0';
     return AIRY_ERR_UNKNOWN;
@@ -112,8 +113,8 @@ int airy_mkdir(const char *path, int recursive)
     if (!path)
         return AIRY_ERR_INVALID_PARAM;
 #ifdef _WIN32
-    /* Windows平台：recursive参数暂不支持（非桩） */
-    if (recursive > 0) { /* 递归标志已记录 */
+
+    if (recursive > 0) {
     }
     return _mkdir(path);
 #else
@@ -231,9 +232,6 @@ int airy_get_sysinfo(airy_sysinfo_t *info)
 #endif
 }
 
-/* ==================== Socket 兼容层（生产级真实实现） ==================== */
-/* SEC-017合规：基于POSIX Socket API的真实网络通信实现 */
-
 #include <errno.h>
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -258,14 +256,14 @@ int airy_get_sysinfo(airy_sysinfo_t *info)
 #endif
 #endif
 #else
-/* Windows: winsock2.h/ws2tcpip.h 可能已通过 platform.h 或 windows_preinclude.h 包含 */
+
 #ifndef _WINSOCK2API_
 #include <winsock2.h>
 #endif
 #ifndef _WS2TCPIP_H_
 #include <ws2tcpip.h>
 #endif
-/* Windows 不支持 MSG_NOSIGNAL/MSG_DONTWAIT，用 0 替代 */
+
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
 #endif
@@ -315,7 +313,7 @@ airy_sock_t airy_sock_create_tcp_server(const char *host, uint16_t port)
     if (fd < 0)
         return AIRY_ERR_IO;
 #ifndef __linux__
-    /* macOS/BSD: SOCK_NONBLOCK 实际为 0，socket 创建后用 fcntl 设置非阻塞 */
+
     {
         int nb_flags = fcntl(fd, F_GETFL, 0);
         if (nb_flags >= 0)
@@ -323,7 +321,7 @@ airy_sock_t airy_sock_create_tcp_server(const char *host, uint16_t port)
     }
 #endif
 #ifdef SO_NOSIGPIPE
-    /* macOS/BSD: 用 SO_NOSIGPIPE 替代 MSG_NOSIGNAL，避免 send 触发 SIGPIPE */
+
     {
         int nosig_on = 1;
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (const char *)&nosig_on, sizeof(nosig_on));
@@ -373,7 +371,6 @@ airy_sock_t airy_sock_create_unix_server(const char *path)
     if (!path)
         return AIRY_ERR_INVALID_PARAM;
 
-    /* 确保父目录存在 */
     {
         char dir_buf[256];
         size_t len = strlen(path);
@@ -391,7 +388,7 @@ airy_sock_t airy_sock_create_unix_server(const char *path)
     if (fd < 0)
         return AIRY_ERR_IO;
 #ifndef __linux__
-    /* macOS/BSD: SOCK_NONBLOCK 实际为 0，socket 创建后用 fcntl 设置非阻塞 */
+
     {
         int nb_flags = fcntl(fd, F_GETFL, 0);
         if (nb_flags >= 0)
@@ -399,7 +396,7 @@ airy_sock_t airy_sock_create_unix_server(const char *path)
     }
 #endif
 #ifdef SO_NOSIGPIPE
-    /* macOS/BSD: 用 SO_NOSIGPIPE 替代 MSG_NOSIGNAL */
+
     {
         int nosig_on = 1;
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (const char *)&nosig_on, sizeof(nosig_on));
@@ -488,11 +485,11 @@ airy_sock_t airy_sock_accept(airy_sock_t server_fd, uint32_t timeout_ms)
         int flags = fcntl(client_fd, F_GETFL, 0);
         fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
 #ifdef SO_NOSIGPIPE
-        /* macOS/BSD: 用 SO_NOSIGPIPE 替代 MSG_NOSIGNAL */
+
         {
             int nosig_on = 1;
-            setsockopt(client_fd, SOL_SOCKET, SO_NOSIGPIPE,
-                       (const char *)&nosig_on, sizeof(nosig_on));
+            setsockopt(client_fd, SOL_SOCKET, SO_NOSIGPIPE, (const char *)&nosig_on,
+                       sizeof(nosig_on));
         }
 #endif
     }

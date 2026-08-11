@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_cache.c
  * @brief Tool 缓存模块单元测试
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "cache.h"
@@ -36,7 +36,6 @@ static void test_cache_key_generation(void)
     assert(key != NULL);
     assert(strstr(key, tool_id) != NULL);
 
-    /* 不同 agent 生成不同缓存键（SEC：防止跨主体缓存绕过审批） */
     char *key_a = tool_cache_key(tool_id, params, "agent_a");
     char *key_b = tool_cache_key(tool_id, params, "agent_b");
     assert(key_a != NULL && key_b != NULL);

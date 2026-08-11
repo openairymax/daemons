@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file monitor.c
  * @brief 监控模块实现
  * @details 监控 Agent 健康状态和系统运行状态
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "airy_memory.h"
@@ -21,14 +21,14 @@
  * @brief 监控数据
  */
 typedef struct {
-    uint64_t total_tasks;             /**< 总任务数 */
-    uint64_t successful_tasks;        /**< 成功任务数 */
-    uint64_t failed_tasks;            /**< 失败任务数 */
-    uint64_t total_execution_time_ms; /**< 总执行时间（毫秒） */
-    time_t last_health_check;         /**< 上次健康检查时间 */
-    time_t last_stats_report;         /**< 上次统计报告时间 */
-    size_t available_agents;          /**< 可用 Agent 数量 */
-    size_t total_agents;              /**< 总 Agent 数量 */
+    uint64_t total_tasks;
+    uint64_t successful_tasks;
+    uint64_t failed_tasks;
+    uint64_t total_execution_time_ms;
+    time_t last_health_check;
+    time_t last_stats_report;
+    size_t available_agents;
+    size_t total_agents;
 } monitor_data_t;
 
 /**
@@ -131,29 +131,21 @@ int monitor_health_check(void *data, bool *health_status)
 
     monitor_data_t *md = (monitor_data_t *)data;
 
-    // 简单的健康检查逻辑
-    // 1. 检查是否有可用的 Agent
-    // 2. 检查任务失败率是否过高
-    // 3. 检查系统是否响应
-
     bool healthy = true;
 
-    // 检查可用 Agent
     if (md->total_agents > 0 && md->available_agents == 0) {
         healthy = false;
         SVC_LOG_WARN("Health check failed: No available agents");
     }
 
-    // 检查任务失败率
-    if (md->total_tasks > 10) {  // 至少有 10 个任务
+    if (md->total_tasks > 10) {
         float failure_rate = (float)md->failed_tasks / md->total_tasks;
-        if (failure_rate > 0.5) {  // 失败率超过 50%
+        if (failure_rate > 0.5) {
             healthy = false;
             SVC_LOG_WARN("Health check failed: High failure rate (%.2f)", failure_rate);
         }
     }
 
-    // 更新最后检查时间
     md->last_health_check = time(NULL);
 
     *health_status = healthy;
@@ -174,7 +166,6 @@ int monitor_get_stats(void *data, void **stats)
 
     monitor_data_t *md = (monitor_data_t *)data;
 
-    // 创建统计信息字符串
     char *stats_str = (char *)AIRY_MALLOC(512);
     if (!stats_str) {
         return AIRY_ERR_OUT_OF_MEMORY;
@@ -221,7 +212,6 @@ int monitor_generate_report(void *data)
 
     monitor_data_t *md = (monitor_data_t *)data;
 
-    // 生成统计报告
     void *stats = NULL;
     if (monitor_get_stats(data, &stats) == 0) {
         SVC_LOG_INFO("=== Scheduler Stats Report ===");
@@ -230,7 +220,6 @@ int monitor_generate_report(void *data)
         AIRY_FREE(stats);
     }
 
-    // 更新最后报告时间
     md->last_stats_report = time(NULL);
 
     return 0;

@@ -1,6 +1,7 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
-// @owner: team-B
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
+/* @owner: team-B */
 /**
  * @file gateway_business_handler.h
  * @brief 网关业务请求处理器（agent.run → llm_d 转发）
@@ -19,7 +20,7 @@
 extern "C" {
 #endif
 
-/* 前向声明：协议路由器（见 protocol/gateway_protocol_router.h） */
+
 typedef struct gw_proto_router gw_proto_router_t;
 
 /**
@@ -31,8 +32,8 @@ typedef struct gateway_business_ctx_s gateway_business_ctx_t;
  * @brief 统一协议入口上下文：协议路由 + JSON-RPC 业务处理
  */
 typedef struct {
-    gateway_business_ctx_t *biz_ctx; /**< 业务处理器上下文（agent.run 等 JSON-RPC 业务） */
-    gw_proto_router_t *router;       /**< 协议路由器（MCP/OpenAI/A2A 适配器） */
+    gateway_business_ctx_t *biz_ctx;
+    gw_proto_router_t *router;
 } gateway_entry_ctx_t;
 
 /**
@@ -67,8 +68,8 @@ typedef void (*gateway_shutdown_fn_t)(void *user_data);
  * @param user_data 回调用户数据（如 &g_running）
  * @return 0 成功，非 0 失败
  */
-int gateway_business_ctx_set_shutdown_cb(gateway_business_ctx_t *ctx,
-                                         gateway_shutdown_fn_t cb, void *user_data);
+int gateway_business_ctx_set_shutdown_cb(gateway_business_ctx_t *ctx, gateway_shutdown_fn_t cb,
+                                         void *user_data);
 
 /**
  * @brief 网关业务请求处理器（gateway_service_handler_t 签名）
@@ -84,7 +85,6 @@ int gateway_business_ctx_set_shutdown_cb(gateway_business_ctx_t *ctx,
  */
 char *gateway_business_handle(void *request, void *user_data);
 
-/* ==================== Phase 2: 协议适配 backend（内部服务调用） ==================== */
 
 /**
  * @brief 统一协议入口（替换 gateway_business_handle 作为 HTTP 唯一 handler）
@@ -107,8 +107,8 @@ char *gateway_protocol_entry(void *request, void *user_data);
  * @param user_data gateway_business_ctx_t*
  * @return 0 成功，非 0 失败
  */
-int gw_biz_tool_exec(const char *tool_name, const char *arguments_json,
-                     char **result_json, void *user_data);
+int gw_biz_tool_exec(const char *tool_name, const char *arguments_json, char **result_json,
+                     void *user_data);
 
 /**
  * @brief OpenAI LLM backend：chat/completions → llm_d.complete
@@ -121,9 +121,8 @@ int gw_biz_tool_exec(const char *tool_name, const char *arguments_json,
  * @param user_data gateway_business_ctx_t*
  * @return 0 成功，非 0 失败
  */
-int gw_biz_llm_complete(const char *model, const char *messages_json,
-                        const char *functions_json, double temperature, int max_tokens,
-                        char **response_json, void *user_data);
+int gw_biz_llm_complete(const char *model, const char *messages_json, const char *functions_json,
+                        double temperature, int max_tokens, char **response_json, void *user_data);
 
 /**
  * @brief A2A 任务 backend：task → sched_d.schedule_task
@@ -134,8 +133,8 @@ int gw_biz_llm_complete(const char *model, const char *messages_json,
  * @param user_data gateway_business_ctx_t*
  * @return 0 成功，非 0 失败
  */
-int gw_biz_sched_schedule(const char *task_id, const char *task_type,
-                          const char *input_json, char **output_json, void *user_data);
+int gw_biz_sched_schedule(const char *task_id, const char *task_type, const char *input_json,
+                          char **output_json, void *user_data);
 
 #ifdef __cplusplus
 }

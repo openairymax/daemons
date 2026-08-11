@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 /**
  * @file service.c
  * @brief 工具服务核心逻辑
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 改进说明：
  * 1. 统一错误码为 AIRY_ERR_*
@@ -96,7 +96,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 30,
             .cacheable = 0,
             .permission_rule = "fs_read",
-            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
+            .access = TOOL_ACCESS_READ,
         },
         {
             .id = "fs_write",
@@ -108,7 +108,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 30,
             .cacheable = 0,
             .permission_rule = "fs_write",
-            .access = TOOL_ACCESS_WRITE, /* 有副作用：互斥串行 */
+            .access = TOOL_ACCESS_WRITE,
         },
         {
             .id = "fs_list",
@@ -120,7 +120,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 30,
             .cacheable = 1,
             .permission_rule = "fs_list",
-            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
+            .access = TOOL_ACCESS_READ,
         },
         {
             .id = "shell_run",
@@ -132,7 +132,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 60,
             .cacheable = 0,
             .permission_rule = "shell_run",
-            .access = TOOL_ACCESS_WRITE, /* 有副作用：互斥串行 */
+            .access = TOOL_ACCESS_WRITE,
         },
         {
             .id = "web_fetch",
@@ -144,7 +144,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 45,
             .cacheable = 1,
             .permission_rule = "web_fetch",
-            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
+            .access = TOOL_ACCESS_READ,
         },
         {
             .id = "fs_glob",
@@ -156,7 +156,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 30,
             .cacheable = 0,
             .permission_rule = "fs_glob",
-            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
+            .access = TOOL_ACCESS_READ,
         },
         {
             .id = "fs_grep",
@@ -168,7 +168,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 60,
             .cacheable = 0,
             .permission_rule = "fs_grep",
-            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
+            .access = TOOL_ACCESS_READ,
         },
         {
             .id = "fs_edit",
@@ -180,7 +180,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 30,
             .cacheable = 0,
             .permission_rule = "fs_edit",
-            .access = TOOL_ACCESS_WRITE, /* 有副作用：互斥串行 */
+            .access = TOOL_ACCESS_WRITE,
         },
         {
             .id = "web_search",
@@ -192,19 +192,20 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 45,
             .cacheable = 1,
             .permission_rule = "web_search",
-            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
+            .access = TOOL_ACCESS_READ,
         },
         {
             .id = "git_exec",
             .name = "git_exec",
-            .description = "Execute a read-only git command (whitelisted: status/diff/log/branch/show/ls-files/grep) and capture output",
+            .description = "Execute a read-only git command (whitelisted: "
+                           "status/diff/log/branch/show/ls-files/grep) and capture output",
             .executable = "builtin:git_exec",
             .params = git_exec_params,
             .param_count = 2,
             .timeout_sec = 60,
             .cacheable = 0,
             .permission_rule = "git_exec",
-            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
+            .access = TOOL_ACCESS_READ,
         },
         {
             .id = "git_diff",
@@ -216,7 +217,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 60,
             .cacheable = 0,
             .permission_rule = "git_diff",
-            .access = TOOL_ACCESS_READ, /* 只读：可并行 */
+            .access = TOOL_ACCESS_READ,
         },
         {
             .id = "git_apply",
@@ -228,7 +229,7 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 60,
             .cacheable = 0,
             .permission_rule = "git_apply",
-            .access = TOOL_ACCESS_WRITE, /* 有副作用：互斥串行 */
+            .access = TOOL_ACCESS_WRITE,
         },
     };
 
@@ -239,12 +240,10 @@ static void register_builtin_tools(tool_service_t *svc)
         } else {
             SVC_LOG_ERROR("Failed to register builtin tool: %s (rc=%d)", tools[i].id, rc);
         }
-        /* ACL 授权：agent tool_d 可执行该工具（fail-closed 表） */
+
         daemon_security_add_acl_rule("tool_d", tools[i].id, true);
     }
 }
-
-/* ---------- 工具服务创建 ---------- */
 
 tool_service_t *tool_service_create(const char *config_path __attribute__((unused)))
 {
@@ -261,7 +260,6 @@ tool_service_t *tool_service_create(const char *config_path __attribute__((unuse
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
-    /* 创建注册表 */
     svc->registry = tool_registry_create(NULL);
     if (!svc->registry) {
         SVC_LOG_ERROR("Failed to create registry");
@@ -270,7 +268,6 @@ tool_service_t *tool_service_create(const char *config_path __attribute__((unuse
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    /* 创建执行器 */
     tool_executor_config_t exec_config;
     __builtin_memset(&exec_config, 0, sizeof(exec_config));
     exec_config.timeout_sec = AIRY_DEFAULT_TIMEOUT_SEC;
@@ -291,7 +288,6 @@ tool_service_t *tool_service_create(const char *config_path __attribute__((unuse
      * 部署时需通过 daemon_security_add_acl_rule() 注册授权的工具。*/
     daemon_security_init(NULL, NULL);
 
-    /* 注册内置基础工具（fs_read/fs_write/fs_list/shell_run）+ ACL 授权 */
     register_builtin_tools(svc);
 
     tool_approval_config_t approval_cfg;
@@ -309,7 +305,6 @@ tool_service_t *tool_service_create(const char *config_path __attribute__((unuse
                       "executor will fail-closed on all tool executions");
     }
 
-    /* 创建验证器 */
     svc->validator = tool_validator_create();
     if (!svc->validator) {
         SVC_LOG_ERROR("Failed to create validator");
@@ -320,7 +315,6 @@ tool_service_t *tool_service_create(const char *config_path __attribute__((unuse
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    /* 创建缓存（默认配置） */
     svc->cache = tool_cache_create(1024, 3600);
     if (!svc->cache) {
         SVC_LOG_WARN("Cache creation failed, continuing without cache");
@@ -329,8 +323,6 @@ tool_service_t *tool_service_create(const char *config_path __attribute__((unuse
     SVC_LOG_INFO("Tool service initialized successfully");
     return svc;
 }
-
-/* ---------- 工具服务销毁 ---------- */
 
 void tool_service_destroy(tool_service_t *svc)
 {
@@ -360,8 +352,6 @@ void tool_service_destroy(tool_service_t *svc)
     airy_mtx_destroy(&svc->lock);
     AIRY_FREE(svc);
 }
-
-/* ---------- 工具注册 ---------- */
 
 int tool_service_register(tool_service_t *svc, const tool_metadata_t *meta)
 {
@@ -425,8 +415,6 @@ char *tool_service_list(tool_service_t *svc)
 
     return json;
 }
-
-/* ---------- 辅助函数（降低 tool_service_execute 复杂度） ---------- */
 
 /**
  * @brief 获取工具元数据
@@ -557,8 +545,6 @@ static int do_execute_tool(tool_service_t *svc, tool_metadata_t *meta, const cha
     return AIRY_OK;
 }
 
-/* ---------- 工具执行（重构后：圈复杂度从 18 降至 8） ---------- */
-
 int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
                          tool_result_t **out_result)
 {
@@ -571,14 +557,12 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* 1. 获取工具元数据 */
     tool_metadata_t *meta = get_tool_metadata(svc, req->tool_id);
     if (!meta) {
         SVC_LOG_ERROR("Tool not found: %s", req->tool_id);
         return AIRY_ERROR_TOOL_NOT_FOUND;
     }
 
-    /* 2. 验证参数 */
     int valid = validate_tool_params(svc, meta, req->tool_id, req->params_json);
     if (valid <= 0) {
         tool_metadata_free(meta);
@@ -592,17 +576,15 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
     tool_result_t *cached_result = NULL;
     const char *subject = (req->agent_id && req->agent_id[0]) ? req->agent_id : "tool_d";
     if (daemon_check_tool_permission(subject, req->tool_id, "execute") == 0) {
-        cached_result = get_cached_result(svc, meta, req->tool_id, req->params_json,
-                                          req->agent_id);
+        cached_result = get_cached_result(svc, meta, req->tool_id, req->params_json, req->agent_id);
     }
     if (cached_result) {
         tool_metadata_free(meta);
         *out_result = cached_result;
-        svc->exec_total++; /* 缓存命中同样计入执行统计 */
+        svc->exec_total++;
         return AIRY_OK;
     }
 
-    /* 4. 执行工具 */
     tool_result_t *res = NULL;
     airy_timestamp_t ts0, ts1;
     airy_time_monotonic(&ts0);
@@ -614,12 +596,11 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
         svc->exec_fail++;
         tool_metadata_free(meta);
         meta = NULL;
-        /* 失败时也传递 result（含 res->error 错误描述），由调用方读取后释放 */
+
         *out_result = res;
         return ret;
     }
 
-    /* 5. 存入缓存 */
     cache_tool_result(svc, meta, req->tool_id, req->params_json, req->agent_id, res);
 
     *out_result = res;
@@ -629,8 +610,6 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
     }
     return AIRY_OK;
 }
-
-/* ---------- 流式执行 ---------- */
 
 int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_t *req,
                                 tool_stream_callback_t callback, void *callback_data,
@@ -645,7 +624,6 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* 1. 获取工具元数据 */
     airy_mtx_lock(&svc->lock);
     tool_metadata_t *meta = tool_registry_get(svc->registry, req->tool_id);
     airy_mtx_unlock(&svc->lock);
@@ -655,7 +633,6 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
         return AIRY_ERROR_TOOL_NOT_FOUND;
     }
 
-    /* 2. 验证参数 */
     if (svc->validator) {
         int valid = tool_validator_validate(svc->validator, meta, req->params_json);
         if (!valid) {
@@ -665,13 +642,11 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
         }
     }
 
-    /* 3. 检查是否支持流式 */
     if (!meta->executable || !strstr(meta->executable, "stream")) {
-        /* 工具不支持流式，使用普通执行并逐块返回 */
+
         SVC_LOG_INFO("Tool does not support streaming, using synchronous execution");
     }
 
-    /* 4. 执行工具（带流式回调） */
     tool_result_t *res = NULL;
     airy_timestamp_t ts0, ts1;
     airy_time_monotonic(&ts0);
@@ -707,14 +682,11 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
     return ret;
 }
 
-/* ---------- 工具结果释放 ---------- */
-
 char *tool_service_get_stats(tool_service_t *svc)
 {
     if (!svc)
         return NULL;
 
-    /* 注册工具数：复用 tool_service_list（真实 registry 内容） */
     char *list = tool_service_list(svc);
     cJSON *arr = list ? cJSON_Parse(list) : NULL;
     int tool_count = arr ? cJSON_GetArraySize(arr) : 0;
@@ -731,8 +703,8 @@ char *tool_service_get_stats(tool_service_t *svc)
     cJSON_AddNumberToObject(root, "exec_fail", (double)svc->exec_fail);
     cJSON_AddNumberToObject(root, "exec_ms_total", (double)svc->exec_ms_total);
     cJSON_AddNumberToObject(root, "avg_exec_ms",
-                            svc->exec_total ? (double)svc->exec_ms_total / (double)svc->exec_total
-                                            : 0.0);
+                            svc->exec_total ? (double)svc->exec_ms_total / (double)svc->exec_total :
+                                              0.0);
     char *out = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return out;
@@ -746,8 +718,6 @@ void tool_result_free(tool_result_t *res)
     AIRY_FREE(res->error);
     AIRY_FREE(res);
 }
-
-/* ---------- 工具元数据释放 ---------- */
 
 void tool_metadata_free(tool_metadata_t *meta)
 {
@@ -767,8 +737,6 @@ void tool_metadata_free(tool_metadata_t *meta)
     AIRY_FREE(meta->permission_rule);
     AIRY_FREE(meta);
 }
-
-/* ---------- P0 交互式审批 ---------- */
 
 char *tool_service_interactive_pending_list(tool_service_t *svc)
 {

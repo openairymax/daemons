@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file ipc_client.c
  * @brief IPC 客户端实现（线程安全版本）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 改进：
  * 1. 线程安全的连接池
@@ -19,7 +19,7 @@
 #include "svc_config.h"
 
 #include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+
 #include <cjson_helpers.h>
 #include <curl/curl.h>
 #include <errno.h>
@@ -27,11 +27,8 @@
 #include <string.h>
 
 #ifndef airy_err_push_ex
-void airy_err_push_ex(int code, const char *file, int line, const char *func, const char *fmt,
-                           ...);
+void airy_err_push_ex(int code, const char *file, int line, const char *func, const char *fmt, ...);
 #endif
-
-/* ==================== 公共接口实现 ==================== */
 
 #define IPC_POOL_SIZE 4
 #define IPC_DEFAULT_TIMEOUT_MS 30000
@@ -39,15 +36,11 @@ void airy_err_push_ex(int code, const char *file, int line, const char *func, co
 #define IPC_MAX_RETRIES 3
 #define IPC_RETRY_DELAY_MS 100
 
-/* ==================== 响应缓冲区 ==================== */
-
 typedef struct {
     char *data;
     size_t size;
     size_t capacity;
 } ipc_response_buffer_t;
-
-/* ==================== 连接池条目 ==================== */
 
 typedef struct {
     CURL *curl;
@@ -55,8 +48,6 @@ typedef struct {
     int in_use;
     uint64_t last_used;
 } ipc_pool_entry_t;
-
-/* ==================== IPC 客户端上下文 ==================== */
 
 struct ipc_client {
     char *base_url;
@@ -69,8 +60,6 @@ struct ipc_client {
 static struct ipc_client *g_ipc_client = NULL;
 static airy_mtx_t g_init_lock = {0};
 static int g_curl_initialized = 0;
-
-/* ==================== 内部函数 ==================== */
 
 /**
  * @brief 初始化响应缓冲区
@@ -108,12 +97,10 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
     size_t realsize = size * nmemb;
     ipc_response_buffer_t *buf = (ipc_response_buffer_t *)userp;
 
-    /* 检查是否超过最大响应大小 */
     if (buf->size + realsize > IPC_MAX_RESPONSE_SIZE) {
-        return 0; /* 返回0表示错误 */
+        return 0;
     }
 
-    /* 检查是否需要扩展缓冲区 */
     size_t new_size = buf->size + realsize + 1;
     if (new_size > buf->capacity) {
         size_t new_capacity = buf->capacity * 2;
@@ -130,7 +117,6 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
         buf->capacity = new_capacity;
     }
 
-    /* 追加数据 */
     __builtin_memcpy(buf->data + buf->size, contents, realsize);
     buf->size += realsize;
     buf->data[buf->size] = '\0';
@@ -147,7 +133,6 @@ static ipc_pool_entry_t *pool_acquire(struct ipc_client *client)
 
     airy_mtx_lock(&client->pool_lock);
 
-    /* 查找空闲连接 */
     for (int i = 0; i < IPC_POOL_SIZE; i++) {
         if (!client->pool[i].in_use) {
             entry = &client->pool[i];
@@ -158,7 +143,6 @@ static ipc_pool_entry_t *pool_acquire(struct ipc_client *client)
 
     airy_mtx_unlock(&client->pool_lock);
 
-    /* 如果没有空闲连接，等待并重试 */
     if (!entry) {
         for (int retry = 0; retry < 10; retry++) {
             airy_mtx_lock(&client->pool_lock);
@@ -174,7 +158,6 @@ static ipc_pool_entry_t *pool_acquire(struct ipc_client *client)
             if (entry)
                 break;
 
-            /* 短暂等待 */
             airy_mtx_lock(&client->pool_lock);
             airy_mtx_unlock(&client->pool_lock);
         }
@@ -207,10 +190,9 @@ static int do_rpc_call(ipc_pool_entry_t *entry, const char *base_url, const char
     int retry = 0;
 
     while (retry <= max_retries) {
-        /* 重置 curl 状态 */
+
         curl_easy_reset(entry->curl);
 
-        /* 设置请求选项 */
         curl_easy_setopt(entry->curl, CURLOPT_URL, base_url);
         curl_easy_setopt(entry->curl, CURLOPT_POST, 1L);
         curl_easy_setopt(entry->curl, CURLOPT_POSTFIELDS, request);
@@ -220,12 +202,10 @@ static int do_rpc_call(ipc_pool_entry_t *entry, const char *base_url, const char
         curl_easy_setopt(entry->curl, CURLOPT_NOSIGNAL, 1L);
         curl_easy_setopt(entry->curl, CURLOPT_FOLLOWLOCATION, 1L);
 
-        /* 设置请求头 */
         struct curl_slist *headers = NULL;
         headers = curl_slist_append(headers, "Content-Type: application/json");
         curl_easy_setopt(entry->curl, CURLOPT_HTTPHEADER, headers);
 
-        /* 执行请求 */
         res = curl_easy_perform(entry->curl);
         curl_slist_free_all(headers);
 
@@ -236,7 +216,6 @@ static int do_rpc_call(ipc_pool_entry_t *entry, const char *base_url, const char
             }
         }
 
-        /* 重试前清空响应缓冲区 */
         response->size = 0;
         if (response->data) {
             response->data[0] = '\0';
@@ -253,13 +232,10 @@ static int do_rpc_call(ipc_pool_entry_t *entry, const char *base_url, const char
     return SVC_ERR_RPC;
 }
 
-/* ==================== 公共接口实现 ==================== */
-
-/* 本地错误处理宏 */
-#define SVC_ERROR(code, msg)                                                      \
-    do {                                                                          \
+#define SVC_ERROR(code, msg)                                                 \
+    do {                                                                     \
         airy_err_push_ex((code), __FILE__, __LINE__, __func__, "%s", (msg)); \
-        return (code);                                                            \
+        return (code);                                                       \
     } while (0)
 
 int svc_ipc_init(const char *baseruntime_url)
@@ -272,7 +248,6 @@ int svc_ipc_init(const char *baseruntime_url)
 
     airy_mtx_lock(&g_init_lock);
 
-    /* 初始化 libcurl（仅一次） */
     if (!g_curl_initialized) {
         CURLcode curl_res = curl_global_init(CURL_GLOBAL_ALL);
         if (curl_res != CURLE_OK) {
@@ -282,13 +257,11 @@ int svc_ipc_init(const char *baseruntime_url)
         g_curl_initialized = 1;
     }
 
-    /* 如果已经初始化，直接返回 */
     if (g_ipc_client) {
         airy_mtx_unlock(&g_init_lock);
         return SVC_OK;
     }
 
-    /* 创建客户端上下文 */
     client = (struct ipc_client *)AIRY_CALLOC(1, sizeof(struct ipc_client));
     if (!client) {
         airy_mtx_unlock(&g_init_lock);
@@ -310,30 +283,28 @@ int svc_ipc_init(const char *baseruntime_url)
         SVC_ERROR(SVC_ERR_OUT_OF_MEMORY, "Failed to initialize pool mutex");
     }
 
-    /* 初始化连接池 */
     int i;
     for (i = 0; i < IPC_POOL_SIZE; i++) {
         client->pool[i].curl = curl_easy_init();
         if (!client->pool[i].curl) {
-            /* 记录错误并清理 */
+
             airy_err_push_ex(SVC_ERR_OUT_OF_MEMORY, __FILE__, __LINE__, __func__,
-                                  "Failed to initialize CURL handle %d", i);
+                             "Failed to initialize CURL handle %d", i);
             break;
         }
         if (airy_mtx_init(&client->pool[i].lock) != 0) {
             curl_easy_cleanup(client->pool[i].curl);
             client->pool[i].curl = NULL;
             airy_err_push_ex(SVC_ERR_OUT_OF_MEMORY, __FILE__, __LINE__, __func__,
-                                  "Failed to initialize pool entry mutex %d", i);
+                             "Failed to initialize pool entry mutex %d", i);
             break;
         }
         client->pool[i].in_use = 0;
         client->pool[i].last_used = 0;
     }
 
-    /* 检查连接池初始化是否成功 */
     if (i < IPC_POOL_SIZE) {
-        /* 清理已创建的资源 */
+
         for (int j = 0; j < i; j++) {
             if (client->pool[j].curl) {
                 curl_easy_cleanup(client->pool[j].curl);
@@ -361,7 +332,7 @@ void svc_ipc_cleanup(void)
     airy_mtx_lock(&g_init_lock);
 
     if (g_ipc_client) {
-        /* 清理连接池 */
+
         for (int i = 0; i < IPC_POOL_SIZE; i++) {
             if (g_ipc_client->pool[i].curl) {
                 curl_easy_cleanup(g_ipc_client->pool[i].curl);
@@ -395,27 +366,24 @@ int svc_rpc_call(const char *method, const char *params, char **out_result, uint
 
     *out_result = NULL;
 
-    /* 从连接池获取连接 */
     ipc_pool_entry_t *entry = pool_acquire(g_ipc_client);
     if (!entry) {
         return SVC_ERR_RPC;
     }
 
-    /* 构建 JSON-RPC 请求 */
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "jsonrpc", "2.0");
     cJSON_AddStringToObject(root, "method", method);
 
     if (params) {
-        /* P0.18.2: 模式 C — 解析成功则所有权转移至 root，失败则回退为字符串参数 */
+
         do {
             CJSON_PARSE_GUARD(params_json, params, {
-                /* 解析失败，作为字符串参数 */
                 cJSON_AddStringToObject(root, "params", params);
                 break;
             });
             cJSON_AddItemToObject(root, "params", params_json);
-            params_json = NULL; /* 所有权转移到 root，防止 CJSON_AUTO_FREE 重复释放 */
+            params_json = NULL;
         } while (0);
     }
 
@@ -429,7 +397,6 @@ int svc_rpc_call(const char *method, const char *params, char **out_result, uint
         return SVC_ERR_OUT_OF_MEMORY;
     }
 
-    /* 初始化响应缓冲区 */
     ipc_response_buffer_t response;
     if (buffer_init(&response) != 0) {
         AIRY_FREE(request);
@@ -437,7 +404,6 @@ int svc_rpc_call(const char *method, const char *params, char **out_result, uint
         return SVC_ERR_OUT_OF_MEMORY;
     }
 
-    /* 执行 RPC 调用 */
     if (timeout_ms == 0) {
         timeout_ms = g_ipc_client->default_timeout_ms;
     }
@@ -454,33 +420,25 @@ int svc_rpc_call(const char *method, const char *params, char **out_result, uint
         return ret;
     }
 
-    /* 验证 JSON-RPC 响应格式 */
-    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
     CJSON_PARSE_GUARD(resp_json, response.data, {
         buffer_free(&response);
         pool_release(g_ipc_client, entry);
         return SVC_ERR_RPC;
     });
 
-    /* 检查是否有错误 */
     cJSON *error = cJSON_GetObjectItem(resp_json, "error");
     if (error) {
-        /* resp_json 由 CJSON_AUTO_FREE 自动释放 */
+
         buffer_free(&response);
         pool_release(g_ipc_client, entry);
         return SVC_ERR_RPC;
     }
 
-    /* resp_json 由 CJSON_AUTO_FREE 自动释放 */
-
-    /* 返回结果 */
     *out_result = response.data;
 
     pool_release(g_ipc_client, entry);
     return SVC_OK;
 }
-
-/* ==================== 扩展接口 ==================== */
 
 /**
  * @brief 设置默认超时时间

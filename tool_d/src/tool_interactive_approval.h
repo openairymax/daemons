@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file tool_interactive_approval.h
  * @brief P0：工具级交互式权限审批（Claude Code 风格 permission prompt）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 当 AIRY_TOOL_APPROVAL_MODE=interactive 时，被静态审批拒绝的工具执行不再
  * fail-closed 直接返回 EPERM，而是入队一个 pending 审批请求并阻塞等待外部
@@ -26,12 +26,12 @@ extern "C" {
  * @brief 交互审批决议结果
  */
 typedef enum {
-    AIRY_APPROVAL_DENIED = 0, /**< deny 决议或等待超时 */
-    AIRY_APPROVAL_ALLOWED,    /**< allow 决议：放行本次执行 */
-    AIRY_APPROVAL_ALWAYS      /**< always 决议：放行并加入持久 ACL */
+    AIRY_APPROVAL_DENIED = 0,
+    AIRY_APPROVAL_ALLOWED,
+    AIRY_APPROVAL_ALWAYS
 } airy_approval_outcome_t;
 
-/* 交互审批管理器（不透明类型） */
+
 typedef struct interactive_approval interactive_approval_t;
 
 /**

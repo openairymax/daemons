@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "thread_pool.h"
 
 #include "error.h"
@@ -90,10 +91,11 @@ thread_pool_t *thread_pool_create(const thread_pool_config_t *config)
         pool->config = defaults;
     }
 
-    pool->threads =
-        (airy_thread_t *)AIRY_CALLOC(pool->config.max_threads, sizeof(airy_thread_t));
+    pool->threads = (airy_thread_t *)AIRY_CALLOC(pool->config.max_threads, sizeof(airy_thread_t));
     if (!pool->threads) {
-        SVC_LOG_ERROR("thread_pool_create: memory allocation failed for threads array (max_threads=%u)", pool->config.max_threads);
+        SVC_LOG_ERROR(
+            "thread_pool_create: memory allocation failed for threads array (max_threads=%u)",
+            pool->config.max_threads);
         AIRY_FREE(pool);
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
@@ -124,7 +126,8 @@ thread_pool_t *thread_pool_create(const thread_pool_config_t *config)
     }
 
     if (pool->thread_count == 0) {
-        SVC_LOG_ERROR("thread_pool_create: all thread creations failed (attempted=%u)", num_threads);
+        SVC_LOG_ERROR("thread_pool_create: all thread creations failed (attempted=%u)",
+                      num_threads);
         airy_mtx_destroy(&pool->lock);
         airy_cond_destroy(&pool->notify);
         AIRY_FREE(pool->threads);
@@ -165,7 +168,8 @@ void thread_pool_destroy(thread_pool_t *pool)
 int thread_pool_submit(thread_pool_t *pool, thread_task_fn_t task, void *arg)
 {
     if (!pool || !task) {
-        SVC_LOG_ERROR("thread_pool_submit: null parameter pool=%p task=%p", (void *)pool, (void *)(uintptr_t)task);
+        SVC_LOG_ERROR("thread_pool_submit: null parameter pool=%p task=%p", (void *)pool,
+                      (void *)(uintptr_t)task);
         return AIRY_ERR_INVALID_PARAM;
     }
     if (!pool->running) {
@@ -195,7 +199,8 @@ int thread_pool_submit(thread_pool_t *pool, thread_task_fn_t task, void *arg)
     if (pool->queue_count >= pool->config.queue_size) {
         airy_mtx_unlock(&pool->lock);
         AIRY_FREE(node);
-        SVC_LOG_WARN("thread_pool_submit: queue full queue_count=%u queue_size=%u", pool->queue_count, pool->config.queue_size);
+        SVC_LOG_WARN("thread_pool_submit: queue full queue_count=%u queue_size=%u",
+                     pool->queue_count, pool->config.queue_size);
         return AIRY_ERR_OVERFLOW;
     }
 

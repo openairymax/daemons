@@ -1,10 +1,10 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file monitor_service.h
  * @brief 监控服务接口定义
  * @details 负责系统监控、指标收集、告警管理和日志记录
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_MONITOR_SERVICE_H
@@ -18,25 +18,25 @@
  * @brief 监控服务配置
  */
 typedef struct {
-    uint32_t metrics_collection_interval_ms; /**< 指标收集间隔（毫秒） */
-    uint32_t health_check_interval_ms;       /**< 健康检查间隔（毫秒） */
-    uint32_t log_flush_interval_ms;          /**< 日志刷新间隔（毫秒） */
-    uint32_t alert_check_interval_ms;        /**< 告警检查间隔（毫秒） */
-    char *log_file_path;                     /**< 日志文件路径 */
-    char *metrics_storage_path;              /**< 指标存储路径 */
-    bool enable_tracing;                     /**< 是否启用追踪 */
-    bool enable_alerting;                    /**< 是否启用告警 */
-    double loop_threshold;                   /**< 死循环检测阈值（0.0-1.0） */
+    uint32_t metrics_collection_interval_ms;
+    uint32_t health_check_interval_ms;
+    uint32_t log_flush_interval_ms;
+    uint32_t alert_check_interval_ms;
+    char *log_file_path;
+    char *metrics_storage_path;
+    bool enable_tracing;
+    bool enable_alerting;
+    double loop_threshold;
 } monitor_config_t;
 
 /**
  * @brief 指标类型
  */
 typedef enum {
-    METRIC_TYPE_COUNTER,   /**< 计数器 */
-    METRIC_TYPE_GAUGE,     /**<  gauge */
-    METRIC_TYPE_HISTOGRAM, /**< 直方图 */
-    METRIC_TYPE_SUMMARY,   /**< 摘要 */
+    METRIC_TYPE_COUNTER,
+    METRIC_TYPE_GAUGE, /**<  gauge */
+    METRIC_TYPE_HISTOGRAM,
+    METRIC_TYPE_SUMMARY,
     METRIC_TYPE_COUNT
 } metric_type_t;
 
@@ -44,10 +44,10 @@ typedef enum {
  * @brief 告警级别
  */
 typedef enum {
-    ALERT_LEVEL_INFO,     /**< 信息 */
-    ALERT_LEVEL_WARNING,  /**< 警告 */
-    ALERT_LEVEL_ERROR,    /**< 错误 */
-    ALERT_LEVEL_CRITICAL, /**< 严重 */
+    ALERT_LEVEL_INFO,
+    ALERT_LEVEL_WARNING,
+    ALERT_LEVEL_ERROR,
+    ALERT_LEVEL_CRITICAL,
     ALERT_LEVEL_COUNT
 } alert_level_t;
 
@@ -55,28 +55,28 @@ typedef enum {
  * @brief 指标信息
  */
 typedef struct {
-    char *name;         /**< 指标名称 */
-    char *description;  /**< 指标描述 */
-    metric_type_t type; /**< 指标类型 */
-    char **labels;      /**< 标签数组 */
-    size_t label_count; /**< 标签数量 */
-    double value;       /**< 指标值 */
-    uint64_t timestamp; /**< 时间戳 */
+    char *name;
+    char *description;
+    metric_type_t type;
+    char **labels;
+    size_t label_count;
+    double value;
+    uint64_t timestamp;
 } metric_info_t;
 
 /**
  * @brief 告警信息
  */
 typedef struct {
-    char *alert_id;      /**< 告警 ID */
-    char *message;       /**< 告警消息 */
-    alert_level_t level; /**< 告警级别 */
-    char *service_name;  /**< 服务名称 */
-    char *resource_id;   /**< 资源 ID */
-    char **labels;       /**< 标签数组 */
-    size_t label_count;  /**< 标签数量 */
-    uint64_t timestamp;  /**< 时间戳 */
-    bool is_resolved;    /**< 是否已解决 */
+    char *alert_id;
+    char *message;
+    alert_level_t level;
+    char *service_name;
+    char *resource_id;
+    char **labels;
+    size_t label_count;
+    uint64_t timestamp;
+    bool is_resolved;
 } alert_info_t;
 
 /**
@@ -91,26 +91,26 @@ typedef struct {
  * @brief 日志信息
  */
 typedef struct {
-    log_level_t level;    /**< 日志级别 */
-    char *message;        /**< 日志消息 */
-    char *service_name;   /**< 服务名称 */
-    char *file;           /**< 文件名 */
-    int line;             /**< 行号 */
-    char *function;       /**< 函数名 */
-    uint64_t timestamp;   /**< 时间戳 */
-    char **context;       /**< 上下文信息 */
-    size_t context_count; /**< 上下文数量 */
+    log_level_t level;
+    char *message;
+    char *service_name;
+    char *file;
+    int line;
+    char *function;
+    uint64_t timestamp;
+    char **context;
+    size_t context_count;
 } log_info_t;
 
 /**
  * @brief 健康检查结果
  */
 typedef struct {
-    char *service_name;   /**< 服务名称 */
-    bool is_healthy;      /**< 是否健康 */
-    char *status_message; /**< 状态消息 */
-    uint64_t timestamp;   /**< 时间戳 */
-    int error_code;       /**< 错误码 */
+    char *service_name;
+    bool is_healthy;
+    char *status_message;
+    uint64_t timestamp;
+    int error_code;
 } health_check_result_t;
 
 /**
@@ -211,25 +211,24 @@ int monitor_service_reload_config(monitor_service_t *service, const monitor_conf
  */
 int monitor_service_generate_report(monitor_service_t *service, char **report);
 
-/* ===================== Agent 状态监控增强 ===================== */
 
 /**
  * @brief Agent 执行状态
  */
 typedef enum {
-    AGENT_STATE_CREATED = 0,    /**< 已创建 */
-    AGENT_STATE_INITIALIZING,   /**< 初始化中 */
-    AGENT_STATE_READY,          /**< 就绪 */
-    AGENT_STATE_RUNNING,        /**< 运行中 */
-    AGENT_STATE_WAITING,        /**< 等待中 */
-    AGENT_STATE_THINKING,       /**< 思考中 */
-    AGENT_STATE_EXECUTING,      /**< 执行中 */
-    AGENT_STATE_EXECUTING_TOOL, /**< 执行工具中 */
-    AGENT_STATE_PAUSED,         /**< 暂停 */
-    AGENT_STATE_COMPLETED,      /**< 完成 */
-    AGENT_STATE_FAILED,         /**< 失败 */
-    AGENT_STATE_CANCELLED,      /**< 已取消 */
-    AGENT_STATE_STUCK,          /**< 卡住（可能死循环） */
+    AGENT_STATE_CREATED = 0,
+    AGENT_STATE_INITIALIZING,
+    AGENT_STATE_READY,
+    AGENT_STATE_RUNNING,
+    AGENT_STATE_WAITING,
+    AGENT_STATE_THINKING,
+    AGENT_STATE_EXECUTING,
+    AGENT_STATE_EXECUTING_TOOL,
+    AGENT_STATE_PAUSED,
+    AGENT_STATE_COMPLETED,
+    AGENT_STATE_FAILED,
+    AGENT_STATE_CANCELLED,
+    AGENT_STATE_STUCK,
     AGENT_STATE_COUNT
 } agent_execution_state_t;
 
@@ -237,71 +236,73 @@ typedef enum {
  * @brief 死循环检测模式
  */
 typedef enum {
-    LOOP_DETECTION_TIME_BASED = 0, /**< 基于时间检测 */
-    LOOP_DETECTION_PATTERN_BASED,  /**< 基于模式检测 */
-    LOOP_DETECTION_RESOURCE_BASED, /**< 基于资源检测 */
-    LOOP_DETECTION_HYBRID          /**< 混合检测 */
+    LOOP_DETECTION_TIME_BASED = 0,
+    LOOP_DETECTION_PATTERN_BASED,
+    LOOP_DETECTION_RESOURCE_BASED,
+    LOOP_DETECTION_HYBRID
 } loop_detection_mode_t;
 
 /**
  * @brief Agent 执行轨迹点
  */
 typedef struct {
-    uint64_t timestamp;            /**< 时间戳（微秒） */
-    agent_execution_state_t state; /**< 状态 */
-    char *location;                /**< 位置（函数/模块） */
-    size_t loop_count;             /**< 循环计数 */
-    size_t memory_usage;           /**< 内存使用（字节） */
-    double cpu_usage;              /**< CPU 使用率 */
+    uint64_t timestamp;
+    agent_execution_state_t state;
+    char *location;
+    size_t loop_count;
+    size_t memory_usage;
+    double cpu_usage;
 } agent_trace_point_t;
 
 /**
  * @brief Agent 执行轨迹
  */
 typedef struct {
-    char *agent_id;                        /**< Agent ID */
-    char *task_id;                         /**< 任务 ID */
-    char *trace_id;                        /**< Trace ID */
-    agent_execution_state_t current_state; /**< 当前状态 */
-    uint64_t start_time;                   /**< 开始时间 */
-    uint64_t end_time;                     /**< 结束时间 */
-    uint64_t last_update_time;             /**< 最后更新时间 */
-    int status;                            /**< 状态码 */
-    char *service_name;                    /**< 服务名称 */
-    agent_trace_point_t *trace_points;     /**< 轨迹点数组 */
-    size_t trace_point_count;              /**< 轨迹点数量 */
-    size_t trace_point_capacity;           /**< 轨迹点容量 */
-    size_t loop_detection_count;           /**< 循环检测计数 */
-    bool is_suspected_loop;                /**< 是否疑似死循环 */
-    bool loop_detected;                    /**< 是否检测到死循环 */
-    double loop_confidence;                /**< 死循环置信度 */
-    char **locations;                      /**< 位置历史数组 */
-    uint64_t *location_times;              /**< 位置时间戳数组 */
-    size_t location_count;                 /**< 位置数量 */
+    char *agent_id; /**< Agent ID */
+    char *task_id;
+    char *trace_id; /**< Trace ID */
+    agent_execution_state_t current_state;
+    uint64_t start_time;
+    uint64_t end_time;
+    uint64_t last_update_time;
+    int status;
+    char *service_name;
+    agent_trace_point_t *trace_points;
+    size_t trace_point_count;
+    size_t trace_point_capacity;
+    size_t loop_detection_count;
+    bool is_suspected_loop;
+    bool loop_detected;
+    double loop_confidence;
+    char **locations;
+    uint64_t *location_times;
+    size_t location_count;
 } agent_execution_trace_t;
 
 /**
  * @brief 死循环检测配置
  */
 typedef struct {
-    loop_detection_mode_t mode;     /**< 检测模式 */
-    uint64_t max_execution_time_ms; /**< 最大执行时间（毫秒） */
-    size_t max_loop_iterations;     /**< 最大循环迭代次数 */
-    size_t pattern_window_size;     /**< 模式窗口大小 */
-    double resource_threshold;      /**< 资源阈值 */
-    bool enable_auto_recovery;      /**< 是否启用自动恢复 */
-    bool enable_alerting;           /**< 是否启用告警 */
+    loop_detection_mode_t mode;
+    uint64_t max_execution_time_ms;
+    size_t max_loop_iterations;
+    size_t pattern_window_size;
+    double resource_threshold;
+    bool enable_auto_recovery;
+    bool enable_alerting;
 } loop_detection_config_t;
 
 /**
  * @brief 默认死循环检测配置
  */
-#define LOOP_DETECTION_CONFIG_DEFAULT                                                      \
-    {                                                                                      \
-        .mode = LOOP_DETECTION_HYBRID, .max_execution_time_ms = 30000,                     \
-        .max_loop_iterations = 1000, .pattern_window_size = 10, .resource_threshold = 0.9, \
-        .enable_auto_recovery = true, .enable_alerting = true                              \
-    }
+#define LOOP_DETECTION_CONFIG_DEFAULT \
+    {.mode = LOOP_DETECTION_HYBRID,   \
+     .max_execution_time_ms = 30000,  \
+     .max_loop_iterations = 1000,     \
+     .pattern_window_size = 10,       \
+     .resource_threshold = 0.9,       \
+     .enable_auto_recovery = true,    \
+     .enable_alerting = true}
 
 /**
  * @brief 开始监控 Agent 执行

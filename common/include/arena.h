@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file arena.h
  * @brief P1.19: Arena 线性分配器 — 链式扩展 + 整体 reset
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 适用于短生命周期对象的批量分配。
  * 基于区块（block）的线性分配器，区块用尽后自动链式扩展。
@@ -28,19 +28,16 @@
 extern "C" {
 #endif
 
-/* ==================== Arena 句柄 ==================== */
 
 typedef struct arena_s arena_t;
 
-/* ==================== 配置 ==================== */
 
 typedef struct {
-    size_t block_size;          /**< 单个区块大小，默认 64KB */
-    size_t alignment;           /**< 对齐要求，默认 16 */
-    bool use_huge_pages;        /**< 是否使用大页（Linux only） */
+    size_t block_size;
+    size_t alignment;
+    bool use_huge_pages;
 } arena_config_t;
 
-/* ==================== 标记 ==================== */
 
 /**
  * @brief Arena 位置标记
@@ -48,12 +45,11 @@ typedef struct {
  * 用于记录当前分配位置，以便后续回滚。
  */
 typedef struct {
-    void *block_start;          /**< 当前区块起始 */
-    size_t offset;              /**< 当前区块内偏移 */
-    void *arena_internal;       /**< 内部标记 */
+    void *block_start;
+    size_t offset;
+    void *arena_internal;
 } arena_mark_t;
 
-/* ==================== 生命周期 ==================== */
 
 /**
  * @brief 创建 Arena 分配器
@@ -72,7 +68,6 @@ arena_t *arena_create(const arena_config_t *config);
  */
 void arena_destroy(arena_t *arena);
 
-/* ==================== 分配操作 ==================== */
 
 /**
  * @brief 从 Arena 分配内存
@@ -114,7 +109,6 @@ void *arena_calloc(arena_t *arena, size_t size);
  */
 void arena_reset(arena_t *arena);
 
-/* ==================== 标记与回滚 ==================== */
 
 /**
  * @brief 记录当前 Arena 位置
@@ -135,7 +129,6 @@ arena_mark_t arena_mark(arena_t *arena);
  */
 void arena_rollback(arena_t *arena, arena_mark_t mark);
 
-/* ==================== 查询 ==================== */
 
 /**
  * @brief 获取 Arena 统计信息
@@ -146,11 +139,8 @@ void arena_rollback(arena_t *arena, arena_mark_t mark);
  * @param out_current_usage 输出当前使用量
  * @param out_peak_usage 输出峰值使用量
  */
-void arena_get_stats(arena_t *arena,
-                     size_t *out_total_allocated,
-                     size_t *out_total_blocks,
-                     size_t *out_current_usage,
-                     size_t *out_peak_usage);
+void arena_get_stats(arena_t *arena, size_t *out_total_allocated, size_t *out_total_blocks,
+                     size_t *out_current_usage, size_t *out_peak_usage);
 
 /**
  * @brief 获取当前区块中的剩余空间

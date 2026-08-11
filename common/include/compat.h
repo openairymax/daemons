@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file compat.h
  * @brief 兼容性定义兼容层
@@ -17,22 +18,19 @@
 #include <stdlib.h>
 #include "airy_memory.h"
 
-/* ==================== 额外的兼容性别名 ==================== */
 
-/* 静态断言兼容 */
 #ifndef AIRY_STATIC_ASSERT
 #define AIRY_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
 #endif
 
-/* 调试断点兼容 */
+
 #ifndef AIRY_DEBUG_BREAK
 #define AIRY_DEBUG_BREAK() airy_debug_break()
 #endif
 
-/* 安全字符串函数别名 */
+
 #define airy_strlcpy_safe airy_strncpy_safe
 
-/* ==================== 额外的位操作宏 ==================== */
 
 /**
  * @brief 位掩码生成
@@ -55,7 +53,6 @@
 #define AIRY_SET_BYTE(value, byte, val) \
     (((value) & ~AIRY_BYTE_MASK(byte)) | (((val) & 0xFFU) << ((byte) * 8)))
 
-/* ==================== 编译器特定扩展 ==================== */
 
 /**
  * @brief 函数签名（用于调试）
@@ -68,7 +65,6 @@
 #define AIRY_FUNC_SIGNATURE __func__
 #endif
 
-/* ==================== 分支预测辅助宏 ==================== */
 
 /**
  * @brief 检查指针是否有效（非空且可读）
@@ -76,7 +72,6 @@
 #define AIRY_LIKELY_VALID(ptr) AIRY_LIKELY((ptr) != NULL)
 #define AIRY_UNLIKELY_NULL(ptr) AIRY_UNLIKELY((ptr) == NULL)
 
-/* ==================== 资源管理辅助 ==================== */
 
 /**
  * @brief 自动清理属性
@@ -99,7 +94,6 @@ static inline void airy_auto_free_helper(void **ptr)
     }
 }
 
-/* ==================== 编译时字符串操作 ==================== */
 
 /**
  * @brief 字符串化宏
@@ -113,7 +107,6 @@ static inline void airy_auto_free_helper(void **ptr)
 #define AIRY_CONCAT(a, b) a##b
 #define AIRY_CONCAT3(a, b, c) a##b##c
 
-/* ==================== 类型安全宏 ==================== */
 
 /**
  * @brief 类型安全的数组大小
@@ -125,7 +118,6 @@ static inline void airy_auto_free_helper(void **ptr)
  */
 #define AIRY_TYPE_CHECK(type, expr) ((type){0}, (expr))
 
-/* ==================== 编译器版本检查 ==================== */
 
 /**
  * @brief 检查 GCC 版本是否至少为指定版本
@@ -147,7 +139,6 @@ static inline void airy_auto_free_helper(void **ptr)
 #define AIRY_CLANG_VERSION_AT_LEAST(major, minor) 0
 #endif
 
-/* ==================== C11 特性检测 ==================== */
 
 /**
  * @brief 检查是否支持 _Generic

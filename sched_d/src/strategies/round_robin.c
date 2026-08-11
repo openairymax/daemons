@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file round_robin.c
  * @brief 轮询调度策略实现
  * @details 按照注册顺序依次选择可用的 Agent
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "scheduler_service.h"
@@ -22,10 +22,10 @@
  * @brief 轮询调度策略数据
  */
 typedef struct {
-    agent_info_t **agents; /**< Agent 列表 */
-    size_t agent_count;    /**< Agent 数量 */
-    size_t current_index;  /**< 当前索引 */
-    size_t max_agents;     /**< 最大 Agent 数量 */
+    agent_info_t **agents;
+    size_t agent_count;
+    size_t current_index;
+    size_t max_agents;
 } round_robin_data_t;
 
 /**
@@ -125,7 +125,7 @@ static int round_robin_create(const sched_config_t *config, void **data)
     __builtin_memset(rrd, 0, sizeof(round_robin_data_t));
 
     rrd->max_agents = config->max_agents > 0 ? config->max_agents : 100;
-    /* 乘法溢出检查：max_agents * sizeof(agent_info_t *) 不得回绕 */
+
     if (rrd->max_agents > SIZE_MAX / sizeof(agent_info_t *)) {
         AIRY_FREE(rrd);
         return AIRY_ERR_OUT_OF_MEMORY;

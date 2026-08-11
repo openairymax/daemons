@@ -1,10 +1,9 @@
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file daemon_oom.h
  * @brief Daemon OOM 降级回调注册辅助
- *
- * Copyright (C) 2025-2026 SPHARX Ltd. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * P1.22: 为每个 daemon 提供标准化的 OOM 降级回调。
  * WARNING 级丢弃缓存，CRITICAL 级拒绝请求。
@@ -25,10 +24,10 @@ extern "C" {
  * @brief Daemon OOM 降级配置
  */
 typedef struct {
-    const char *daemon_name;         /**< Daemon 名称 */
-    bool drop_cache_on_warning;      /**< WARNING 级是否丢弃缓存 */
-    bool reject_requests_on_critical;/**< CRITICAL 级是否拒绝请求 */
-    void *user_context;              /**< 用户上下文（传给回调） */
+    const char *daemon_name;
+    bool drop_cache_on_warning;
+    bool reject_requests_on_critical;
+    void *user_context;
 } daemon_oom_config_t;
 
 /**

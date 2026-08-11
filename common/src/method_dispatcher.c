@@ -40,8 +40,7 @@ method_dispatcher_t *method_dispatcher_create(size_t max_methods)
         AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
     }
 
-    method_dispatcher_t *disp =
-        (method_dispatcher_t *)AIRY_CALLOC(1, sizeof(method_dispatcher_t));
+    method_dispatcher_t *disp = (method_dispatcher_t *)AIRY_CALLOC(1, sizeof(method_dispatcher_t));
     if (!disp) {
         SVC_LOG_ERROR("method_dispatcher_create: memory allocation failed for dispatcher");
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
@@ -50,7 +49,9 @@ method_dispatcher_t *method_dispatcher_create(size_t max_methods)
     disp->handlers =
         (struct method_handler *)AIRY_CALLOC(max_methods, sizeof(struct method_handler));
     if (!disp->handlers) {
-        SVC_LOG_ERROR("method_dispatcher_create: memory allocation failed for handlers (max_methods=%zu)", max_methods);
+        SVC_LOG_ERROR(
+            "method_dispatcher_create: memory allocation failed for handlers (max_methods=%zu)",
+            max_methods);
         AIRY_FREE(disp);
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
@@ -84,14 +85,16 @@ int method_dispatcher_register(method_dispatcher_t *disp, const char *method, me
         return AIRY_ERR_INVALID_PARAM;
     }
     if (disp->method_count >= disp->max_methods) {
-        SVC_LOG_ERROR("method_dispatcher_register: max methods reached count=%zu max=%zu method='%s'",
-                      disp->method_count, disp->max_methods, method);
+        SVC_LOG_ERROR(
+            "method_dispatcher_register: max methods reached count=%zu max=%zu method='%s'",
+            disp->method_count, disp->max_methods, method);
         return AIRY_ERR_OVERFLOW;
     }
 
     int existing = find_method_index(disp, method);
     if (existing >= 0) {
-        SVC_LOG_WARN("method_dispatcher_register: method '%s' already registered at index=%d", method, existing);
+        SVC_LOG_WARN("method_dispatcher_register: method '%s' already registered at index=%d",
+                     method, existing);
         return AIRY_ERR_UNKNOWN;
     }
 
@@ -107,8 +110,8 @@ int method_dispatcher_dispatch(method_dispatcher_t *disp, cJSON *request,
                                char *(*error_response_fn)(int, const char *, int), void *user_data)
 {
     if (!disp || !request) {
-        SVC_LOG_ERROR("method_dispatcher_dispatch: null parameter disp=%p request=%p",
-                      (void *)disp, (void *)request);
+        SVC_LOG_ERROR("method_dispatcher_dispatch: null parameter disp=%p request=%p", (void *)disp,
+                      (void *)request);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -140,7 +143,8 @@ int method_dispatcher_dispatch(method_dispatcher_t *disp, cJSON *request,
         }
     }
     if (index < 0) {
-        SVC_LOG_WARN("method_dispatcher_dispatch: method '%s' not found (registered=%zu)", method, disp->method_count);
+        SVC_LOG_WARN("method_dispatcher_dispatch: method '%s' not found (registered=%zu)", method,
+                     disp->method_count);
         if (error_response_fn) {
             char *err = error_response_fn(JSONRPC_METHOD_NOT_FOUND, "Method not found", id);
             AIRY_FREE(err);

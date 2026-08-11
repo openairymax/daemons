@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_market.c
  * @brief 市场服务单元测试
  * @details 测试市场服务的核心功能，包括 Agent 和 Skill 的注册、发现、安装和管理
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "market_service.h"
@@ -29,7 +29,6 @@ int test_service_create_destroy()
                                .enable_remote_registry = true,
                                .enable_auto_update = true};
 
-    // 创建市场服务
     market_service_t *service = NULL;
     int ret = market_service_create(&manager, &service);
     if (ret != 0) {
@@ -37,7 +36,6 @@ int test_service_create_destroy()
         return ret;
     }
 
-    // 销毁市场服务
     ret = market_service_destroy(service);
     if (ret != 0) {
         printf("失败：销毁服务返回 %d\n", ret);
@@ -55,7 +53,6 @@ int test_register_agent()
 {
     printf("测试 Agent 注册...");
 
-    // 配置市场服务
     market_config_t manager = {.registry_url = "http://registry.agentrt.org",
                                .storage_path = "./test_market",
                                .sync_interval_ms = 60000,
@@ -63,7 +60,6 @@ int test_register_agent()
                                .enable_remote_registry = true,
                                .enable_auto_update = true};
 
-    // 创建市场服务
     market_service_t *service = NULL;
     int ret = market_service_create(&manager, &service);
     if (ret != 0) {
@@ -71,7 +67,6 @@ int test_register_agent()
         return ret;
     }
 
-    // 注册 Agent
     agent_info_t agent = {.agent_id = "agent-001",
                           .name = "助手 Agent",
                           .version = "1.0.0",
@@ -92,7 +87,6 @@ int test_register_agent()
         return ret;
     }
 
-    // 搜索 Agent
     search_params_t search_params = {.query = "助手",
                                      .agent_type = AGENT_TYPE_ASSISTANT,
                                      .skill_type = SKILL_TYPE_COUNT,

@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file cost_tracker.c
  * @brief 成本跟踪实现（根据配置规则匹配）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "cost_tracker.h"
@@ -122,8 +122,8 @@ void cost_tracker_add(cost_tracker_t *ct, const char *model, uint32_t prompt_tok
     airy_mtx_unlock(&ct->lock);
 }
 
-double cost_tracker_estimate(const cost_tracker_t *ct, const char *model,
-                             uint32_t prompt_tokens, uint32_t completion_tokens)
+double cost_tracker_estimate(const cost_tracker_t *ct, const char *model, uint32_t prompt_tokens,
+                             uint32_t completion_tokens)
 {
     if (!ct || !model)
         return 0.0;

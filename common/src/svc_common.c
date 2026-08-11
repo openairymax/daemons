@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file svc_common.c
  * @brief 服务公共实现 - 统一服务管理框架
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 实现 svc_common.h 中定义的统一服务管理接口。
  * 本模块为 AgentRT daemon 模块提供标准化的服务生命周期管理、
@@ -50,51 +50,39 @@
 #include <curl/curl.h>
 #endif
 
-/* ==================== 内部常量 ==================== */
-
 #define MAX_SERVICE_NAME_LEN 64
 #define MAX_SERVICE_VERSION_LEN 32
 #define MAX_SERVICES 256
-#define DEFAULT_HEALTHCHECK_INTERVAL_MS 5000 /* 5秒健康检查间隔 */
-
-/* ==================== 内部数据结构 ==================== */
+#define DEFAULT_HEALTHCHECK_INTERVAL_MS 5000
 
 /**
  * @brief 服务实例内部结构
  */
 typedef struct airy_svc_internal {
-    /* 基本信息 */
+
     char name[MAX_SERVICE_NAME_LEN];
     char version[MAX_SERVICE_VERSION_LEN];
 
-    /* 状态管理 */
     airy_svc_state_t state;
     airy_mtx_t state_mutex;
 
-    /* 配置 */
     airy_svc_config_t config;
     uint32_t capabilities;
 
-    /* 统计信息 */
     airy_svc_stats_t stats;
     airy_mtx_t stats_mutex;
 
-    /* 接口 */
     airy_svc_interface_t iface;
 
-    /* 健康检查状态 */
     uint64_t last_healthcheck_time;
     int healthcheck_failures;
 
-    /* 用户上下文数据 */
     void *user_data;
 
-    /* 并发支持 */
     void *thread_pool;
     pthread_t *threads;
     size_t thread_count;
 
-    /* 链表支持 */
     struct airy_svc_internal *next;
 } airy_svc_internal_t;
 
@@ -102,13 +90,11 @@ typedef struct airy_svc_internal {
  * @brief 服务注册表内部状态
  */
 static struct {
-    airy_svc_internal_t *services; /* 服务链表头 */
-    airy_mtx_t registry_mutex;       /* 注册表互斥锁 */
-    uint32_t service_count;               /* 当前服务数 */
-    int initialized;                      /* 模块初始化标志 */
+    airy_svc_internal_t *services;
+    airy_mtx_t registry_mutex;
+    uint32_t service_count;
+    int initialized;
 } g_registry = {.services = NULL, .service_count = 0, .initialized = 0};
-
-/* ==================== 辅助函数 ==================== */
 
 /**
  * @brief 初始化服务管理模块
@@ -121,7 +107,6 @@ static airy_err_t svc_common_module_init(void)
 
     airy_err_t err = AIRY_SUCCESS;
 
-    /* 初始化注册表互斥锁 */
     err = airy_mtx_init(&g_registry.registry_mutex);
     if (err != AIRY_SUCCESS) {
         LOG_ERROR("Failed to initialize registry mutex: %d", err);
@@ -147,7 +132,6 @@ static void svc_common_module_cleanup(void)
         return;
     }
 
-    /* 注意：不在这里销毁服务，应由调用者负责 */
     airy_mtx_destroy(&g_registry.registry_mutex);
     g_registry.initialized = 0;
 
@@ -185,13 +169,11 @@ static airy_err_t register_service_internal(airy_svc_internal_t *service)
 
     airy_mtx_lock(&g_registry.registry_mutex);
 
-    /* 检查服务是否已存在 */
     if (find_service_internal(service->name)) {
         airy_mtx_unlock(&g_registry.registry_mutex);
         return AIRY_EEXIST;
     }
 
-    /* 添加到链表头部 */
     service->next = g_registry.services;
     g_registry.services = service;
     g_registry.service_count++;
@@ -214,7 +196,6 @@ static airy_err_t unregister_service_internal(airy_svc_internal_t *service)
 
     airy_mtx_lock(&g_registry.registry_mutex);
 
-    /* 查找服务并移除 */
     airy_svc_internal_t **prev = &g_registry.services;
     airy_svc_internal_t *current = g_registry.services;
 
@@ -234,14 +215,14 @@ static airy_err_t unregister_service_internal(airy_svc_internal_t *service)
 
     airy_mtx_unlock(&g_registry.registry_mutex);
 
-    return AIRY_ENOENT; /* 服务未找到 */
+    return AIRY_ENOENT;
 }
 
 /**
  * @brief 更新服务统计信息
  */
-static void __attribute__((unused)) update_service_stats(airy_svc_internal_t *service,
-                                                         bool success, uint64_t process_time_ms)
+static void __attribute__((unused)) update_service_stats(airy_svc_internal_t *service, bool success,
+                                                         uint64_t process_time_ms)
 {
     if (!service) {
         return;
@@ -275,39 +256,30 @@ static void __attribute__((unused)) update_service_stats(airy_svc_internal_t *se
     airy_mtx_unlock(&service->stats_mutex);
 }
 
-/* ==================== 公共API实现 ==================== */
-
-/* 服务生命周期管理 */
-
 airy_err_t airy_svc_create(airy_svc_t *out_service, const char *name,
-                                       const airy_svc_interface_t *iface,
-                                       const airy_svc_config_t *config)
+                           const airy_svc_interface_t *iface, const airy_svc_config_t *config)
 {
 
     if (!out_service || !name || !iface || !config) {
         return AIRY_EINVAL;
     }
 
-    /* 初始化模块（如果未初始化） */
     airy_err_t err = svc_common_module_init();
     if (err != AIRY_SUCCESS) {
         return err;
     }
 
-    /* 检查名称长度 */
     size_t name_len = strlen(name);
     if (name_len == 0 || name_len >= MAX_SERVICE_NAME_LEN) {
         return AIRY_EINVAL;
     }
 
-    /* 分配服务结构 */
     airy_svc_internal_t *service =
         (airy_svc_internal_t *)AIRY_CALLOC(1, sizeof(airy_svc_internal_t));
     if (!service) {
         AIRY_ERROR(AIRY_ENOMEM, "airy_svc_create: calloc service failed");
     }
 
-    /* 初始化基本信息 */
     if (safe_strcpy(service->name, name, MAX_SERVICE_NAME_LEN) != 0) {
         AIRY_FREE(service);
         AIRY_ERROR(AIRY_EINVAL, "airy_svc_create: name copy failed");
@@ -320,7 +292,6 @@ airy_err_t airy_svc_create(airy_svc_t *out_service, const char *name,
         }
     }
 
-    /* 初始化状态 */
     service->state = AIRY_SVC_STATE_CREATED;
     err = airy_mtx_init(&service->state_mutex);
     if (err != AIRY_SUCCESS) {
@@ -328,7 +299,6 @@ airy_err_t airy_svc_create(airy_svc_t *out_service, const char *name,
         AIRY_ERROR(err, "airy_svc_create: state mutex init failed");
     }
 
-    /* 初始化统计互斥锁 */
     err = airy_mtx_init(&service->stats_mutex);
     if (err != AIRY_SUCCESS) {
         airy_mtx_destroy(&service->state_mutex);
@@ -336,21 +306,16 @@ airy_err_t airy_svc_create(airy_svc_t *out_service, const char *name,
         return err;
     }
 
-    /* 复制配置 */
     __builtin_memcpy(&service->config, config, sizeof(airy_svc_config_t));
     service->capabilities = config->capabilities;
 
-    /* 复制接口 */
     __builtin_memcpy(&service->iface, iface, sizeof(airy_svc_interface_t));
 
-    /* 初始化线程追踪 */
     service->threads = NULL;
     service->thread_count = 0;
 
-    /* 初始化统计信息 */
     __builtin_memset(&service->stats, 0, sizeof(airy_svc_stats_t));
 
-    /* 注册到内部注册表 */
     err = register_service_internal(service);
     if (err != AIRY_SUCCESS) {
         airy_mtx_destroy(&service->stats_mutex);
@@ -374,12 +339,10 @@ void airy_svc_destroy(airy_svc_t svc)
 
     airy_svc_internal_t *service = (airy_svc_internal_t *)svc;
 
-    /* 如果服务还在运行，先强制停止（带5秒超时保护） */
     if (service->state == AIRY_SVC_STATE_RUNNING || service->state == AIRY_SVC_STATE_PAUSED) {
         airy_svc_stop((airy_svc_t)service, true);
     }
 
-    /* 从注册表注销（即使部分资源已损坏，继续清理） */
     {
         airy_err_t unreg_err = unregister_service_internal(service);
         if (unreg_err != AIRY_SUCCESS && unreg_err != AIRY_ENOENT) {
@@ -388,16 +351,13 @@ void airy_svc_destroy(airy_svc_t svc)
         }
     }
 
-    /* 调用服务的销毁函数（容错：失败不阻塞后续清理） */
     if (service->iface.destroy) {
         service->iface.destroy(svc);
     }
 
-    /* 清理资源：跳过已损坏/已释放的资源 */
     airy_mtx_destroy(&service->state_mutex);
     airy_mtx_destroy(&service->stats_mutex);
 
-    /* 释放内存：无论前面是否出错，内存必须释放 */
     if (service->threads) {
         AIRY_FREE(service->threads);
         service->threads = NULL;
@@ -418,18 +378,15 @@ airy_err_t airy_svc_init(airy_svc_t svc)
 
     airy_mtx_lock(&service->state_mutex);
 
-    /* 状态检查 */
     if (service->state != AIRY_SVC_STATE_CREATED) {
         airy_mtx_unlock(&service->state_mutex);
         LOG_ERROR("Service '%s' cannot initialize from state %d", service->name, service->state);
         return DAEMON_ESTATE;
     }
 
-    /* 更新状态 */
     service->state = AIRY_SVC_STATE_INITIALIZING;
     airy_mtx_unlock(&service->state_mutex);
 
-    /* 调用服务的初始化函数 */
     airy_err_t err = AIRY_SUCCESS;
     if (service->iface.init) {
         err = service->iface.init(svc, &service->config);
@@ -459,7 +416,6 @@ airy_err_t airy_svc_start(airy_svc_t svc)
 
     airy_mtx_lock(&service->state_mutex);
 
-    /* 状态检查 */
     if (service->state != AIRY_SVC_STATE_READY && service->state != AIRY_SVC_STATE_STOPPED &&
         service->state != AIRY_SVC_STATE_PAUSED && service->state != AIRY_SVC_STATE_ZOMBIE) {
         airy_mtx_unlock(&service->state_mutex);
@@ -467,12 +423,10 @@ airy_err_t airy_svc_start(airy_svc_t svc)
         return DAEMON_ESTATE;
     }
 
-    /* 更新状态 */
     airy_svc_state_t old_state = service->state;
     service->state = AIRY_SVC_STATE_RUNNING;
     airy_mtx_unlock(&service->state_mutex);
 
-    /* 调用服务的启动函数 */
     airy_err_t err = AIRY_SUCCESS;
     if (service->iface.start) {
         err = service->iface.start(svc);
@@ -480,7 +434,7 @@ airy_err_t airy_svc_start(airy_svc_t svc)
 
     if (err != AIRY_SUCCESS) {
         airy_mtx_lock(&service->state_mutex);
-        service->state = old_state; /* 恢复原状态 */
+        service->state = old_state;
         airy_mtx_unlock(&service->state_mutex);
 
         LOG_ERROR("Service '%s' start failed: %d", service->name, err);
@@ -515,18 +469,15 @@ airy_err_t airy_svc_stop(airy_svc_t svc, bool force)
 
     airy_mtx_lock(&service->state_mutex);
 
-    /* 状态检查 */
     if (service->state != AIRY_SVC_STATE_RUNNING && service->state != AIRY_SVC_STATE_PAUSED) {
         airy_mtx_unlock(&service->state_mutex);
         LOG_WARN("Service '%s' cannot stop from state %d", service->name, service->state);
         return DAEMON_ESTATE;
     }
 
-    /* 更新状态 */
     service->state = AIRY_SVC_STATE_STOPPING;
     airy_mtx_unlock(&service->state_mutex);
 
-    /* 调用服务的停止函数 */
     airy_err_t err = AIRY_SUCCESS;
     bool zombie = false;
 
@@ -577,7 +528,7 @@ airy_err_t airy_svc_stop(airy_svc_t svc, bool force)
 #endif
             }
         }
-#else  /* _WIN32 */
+#else /* _WIN32 */
         /* Windows 无 SIGALRM/alarm/sigaction 机制，无法对 force stop 施加超时
          * 强杀。退化语义：直接调用服务的 stop；超时保护不可用，若 stop 阻塞
          * 将挂起该调用。明确告警以避免静默退化（ARCHITECTURAL_PRINCIPLES E-6
@@ -650,9 +601,8 @@ airy_err_t airy_svc_set_thread_pool(airy_svc_t svc, void *pool)
     return AIRY_SUCCESS;
 }
 
-int airy_svc_handle_request_async(airy_svc_t service, const char *method,
-                                         const char *params_json,
-                                         airy_svc_async_complete_fn on_complete, void *user_data)
+int airy_svc_handle_request_async(airy_svc_t service, const char *method, const char *params_json,
+                                  airy_svc_async_complete_fn on_complete, void *user_data)
 {
     if (!service || !method) {
         AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "handle_request_async: null service or method");
@@ -696,21 +646,18 @@ airy_err_t airy_svc_pause(airy_svc_t svc)
 
     airy_mtx_lock(&service->state_mutex);
 
-    /* 状态检查 */
     if (service->state != AIRY_SVC_STATE_RUNNING) {
         airy_mtx_unlock(&service->state_mutex);
         LOG_ERROR("Service '%s' cannot pause from state %d", service->name, service->state);
         return DAEMON_ESTATE;
     }
 
-    /* 检查是否支持暂停 */
     if (!(service->capabilities & AIRY_SVC_CAP_PAUSEABLE)) {
         airy_mtx_unlock(&service->state_mutex);
         LOG_ERROR("Service '%s' does not support pause", service->name);
         return AIRY_EPROTONOSUPPORT;
     }
 
-    /* 更新状态 */
     service->state = AIRY_SVC_STATE_PAUSED;
     airy_mtx_unlock(&service->state_mutex);
 
@@ -729,14 +676,12 @@ airy_err_t airy_svc_resume(airy_svc_t svc)
 
     airy_mtx_lock(&service->state_mutex);
 
-    /* 状态检查 */
     if (service->state != AIRY_SVC_STATE_PAUSED) {
         airy_mtx_unlock(&service->state_mutex);
         LOG_ERROR("Service '%s' cannot resume from state %d", service->name, service->state);
         return DAEMON_ESTATE;
     }
 
-    /* 更新状态 */
     service->state = AIRY_SVC_STATE_RUNNING;
     airy_mtx_unlock(&service->state_mutex);
 
@@ -744,8 +689,6 @@ airy_err_t airy_svc_resume(airy_svc_t svc)
 
     return AIRY_SUCCESS;
 }
-
-/* 服务状态查询 */
 
 airy_svc_state_t airy_svc_get_state(airy_svc_t svc)
 {
@@ -794,8 +737,6 @@ const char *airy_svc_get_version(airy_svc_t svc)
     return service->version[0] ? service->version : "0.1.1";
 }
 
-/* 服务统计 */
-
 airy_err_t airy_svc_get_stats(airy_svc_t svc, airy_svc_stats_t *out_stats)
 {
 
@@ -827,8 +768,6 @@ void airy_svc_reset_stats(airy_svc_t svc)
     LOG_DEBUG("Service '%s' stats reset", service->name);
 }
 
-/* 服务健康检查 */
-
 airy_err_t airy_svc_healthcheck(airy_svc_t svc)
 {
     if (!svc) {
@@ -837,11 +776,9 @@ airy_err_t airy_svc_healthcheck(airy_svc_t svc)
 
     airy_svc_internal_t *service = (airy_svc_internal_t *)svc;
 
-    /* 如果服务提供了健康检查函数，则使用它 */
     if (service->iface.healthcheck) {
         airy_err_t err = service->iface.healthcheck(svc);
 
-        /* 更新健康检查状态 */
         uint64_t current_time = airy_time_ms();
         service->last_healthcheck_time = current_time;
 
@@ -856,7 +793,6 @@ airy_err_t airy_svc_healthcheck(airy_svc_t svc)
         return err;
     }
 
-    /* 默认健康检查：检查服务状态 */
     airy_svc_state_t state = airy_svc_get_state(svc);
 
     switch (state) {
@@ -873,8 +809,6 @@ airy_err_t airy_svc_healthcheck(airy_svc_t svc)
     }
 }
 
-/* 服务能力查询 */
-
 bool airy_svc_has_capability(airy_svc_t svc, airy_svc_capability_t capability)
 {
 
@@ -885,8 +819,6 @@ bool airy_svc_has_capability(airy_svc_t svc, airy_svc_capability_t capability)
     airy_svc_internal_t *service = (airy_svc_internal_t *)svc;
     return (service->capabilities & capability) != 0;
 }
-
-/* 服务状态字符串转换 */
 
 const char *airy_svc_state_to_string(airy_svc_state_t state)
 {
@@ -930,8 +862,6 @@ airy_svc_state_t airy_svc_state_from_string(const char *str)
     return AIRY_SVC_STATE_NONE;
 }
 
-/* 服务注册表 */
-
 airy_err_t airy_svc_register(airy_svc_t svc)
 {
     if (!svc) {
@@ -948,8 +878,7 @@ airy_err_t airy_svc_register(airy_svc_t svc)
     airy_svc_internal_t *internal = (airy_svc_internal_t *)svc;
     airy_mtx_lock(&g_registry.registry_mutex);
 
-    for (airy_svc_internal_t *current = g_registry.services; current;
-         current = current->next) {
+    for (airy_svc_internal_t *current = g_registry.services; current; current = current->next) {
         if (current == internal) {
             airy_mtx_unlock(&g_registry.registry_mutex);
             LOG_DEBUG("Service '%s' already registered", internal->name);
@@ -1077,9 +1006,6 @@ void *airy_svc_get_user_data(airy_svc_t service)
     return data;
 }
 
-/* ==================== 模块清理 ==================== */
-
-/* 前向声明：g_monitor 定义在文件末尾 */
 #define MAX_MONITORED_SERVICES 32
 typedef struct {
     airy_svc_t service;
@@ -1114,12 +1040,10 @@ static void monitor_shutdown(void)
 
 void airy_svc_common_cleanup(void)
 {
-    airy_mem_stats_reporter_shutdown();
+    airy_msrep_shutdown();
     monitor_shutdown();
     svc_common_module_cleanup();
 }
-
-/* ==================== 跨进程服务注册中心（Phase 3.2） ==================== */
 
 #define MAX_REGISTRY_ENTRIES 64
 #define HEARTBEAT_INTERVAL_MS 30000
@@ -1174,8 +1098,7 @@ airy_err_t airy_cross_registry_init(const char *registry_url)
     return AIRY_SUCCESS;
 }
 
-airy_err_t airy_registry_register(airy_svc_t service,
-                                          const airy_svc_metadata_t *metadata)
+airy_err_t airy_registry_register(airy_svc_t service, const airy_svc_metadata_t *metadata)
 {
     if (!service || !metadata) {
         return AIRY_EINVAL;
@@ -1196,7 +1119,7 @@ airy_err_t airy_registry_register(airy_svc_t service,
     for (uint32_t i = 0; i < g_cross_registry.entry_count; i++) {
         if (g_cross_registry.entries[i].service == service) {
             __builtin_memcpy(&g_cross_registry.entries[i].metadata, metadata,
-                   sizeof(airy_svc_metadata_t));
+                             sizeof(airy_svc_metadata_t));
             g_cross_registry.entries[i].metadata.last_heartbeat = airy_time_ms();
             airy_mtx_unlock(&g_cross_registry.mutex);
             LOG_INFO("Service '%s' re-registered in cross-process registry", metadata->name);
@@ -1237,7 +1160,7 @@ airy_err_t airy_registry_deregister(airy_svc_t service)
                     g_cross_registry.entries[g_cross_registry.entry_count - 1];
             }
             __builtin_memset(&g_cross_registry.entries[g_cross_registry.entry_count - 1], 0,
-                   sizeof(registry_entry_t));
+                             sizeof(registry_entry_t));
             g_cross_registry.entry_count--;
 
             airy_mtx_unlock(&g_cross_registry.mutex);
@@ -1274,8 +1197,8 @@ static bool tag_matches(const char *filter_tags, const char *service_tags)
     return false;
 }
 
-airy_svc_metadata_t *airy_registry_discover(const char *service_type,
-                                                      const char *filter_tags, size_t *result_count)
+airy_svc_metadata_t *airy_registry_discover(const char *service_type, const char *filter_tags,
+                                            size_t *result_count)
 {
     if (!result_count) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
@@ -1309,8 +1232,8 @@ airy_svc_metadata_t *airy_registry_discover(const char *service_type,
         AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
     }
 
-    airy_svc_metadata_t *results = (airy_svc_metadata_t *)AIRY_CALLOC(
-        match_count, sizeof(airy_svc_metadata_t));
+    airy_svc_metadata_t *results =
+        (airy_svc_metadata_t *)AIRY_CALLOC(match_count, sizeof(airy_svc_metadata_t));
     if (!results) {
         airy_mtx_unlock(&g_cross_registry.mutex);
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
@@ -1365,10 +1288,10 @@ airy_err_t airy_registry_heartbeat(airy_svc_t service)
             airy_svc_stats_t stats;
             if (airy_svc_get_stats(service, &stats) == AIRY_SUCCESS) {
                 g_cross_registry.entries[i].metadata.current_load =
-                    stats.current_concurrent > 0
-                        ? (uint32_t)(stats.current_concurrent * 100 /
-                                     (stats.peak_concurrent > 0 ? stats.peak_concurrent : 1))
-                        : 0;
+                    stats.current_concurrent > 0 ?
+                        (uint32_t)(stats.current_concurrent * 100 /
+                                   (stats.peak_concurrent > 0 ? stats.peak_concurrent : 1)) :
+                        0;
             }
 
             airy_mtx_unlock(&g_cross_registry.mutex);
@@ -1394,8 +1317,6 @@ void airy_registry_cleanup(void)
 
     LOG_INFO("Service registry client cleaned up");
 }
-
-/* ==================== 配置管理（Phase 3.2） ==================== */
 
 #define MAX_CONFIG_WATCHERS 32
 #define MAX_CONFIG_PATH_LEN 512
@@ -1532,8 +1453,8 @@ airy_err_t airy_config_load(const char *service_name, airy_config_t **config)
     return AIRY_SUCCESS;
 }
 
-airy_err_t airy_config_watch(const char *service_name,
-                                     airy_config_change_callback_t callback, void *user_data)
+airy_err_t airy_config_watch(const char *service_name, airy_config_change_callback_t callback,
+                             void *user_data)
 {
     if (!service_name || !callback) {
         return AIRY_EINVAL;
@@ -1574,8 +1495,7 @@ airy_err_t airy_config_watch(const char *service_name,
     return AIRY_SUCCESS;
 }
 
-airy_err_t airy_config_unwatch(const char *service_name,
-                                       airy_config_change_callback_t callback)
+airy_err_t airy_config_unwatch(const char *service_name, airy_config_change_callback_t callback)
 {
     if (!service_name) {
         return AIRY_EINVAL;
@@ -1622,8 +1542,6 @@ void airy_config_free(airy_config_t *config)
 
     AIRY_FREE(config);
 }
-
-/* ==================== 故障恢复（Phase 3.3） ==================== */
 
 static airy_err_t monitor_init(void)
 {
@@ -1720,8 +1638,7 @@ static void *monitor_thread_func(void *arg)
     AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
-airy_err_t airy_svc_monitor_start(airy_svc_t service,
-                                              const airy_monitor_config_t *config)
+airy_err_t airy_svc_monitor_start(airy_svc_t service, const airy_monitor_config_t *config)
 {
     if (!service || !config) {
         return AIRY_EINVAL;
@@ -1749,7 +1666,7 @@ airy_err_t airy_svc_monitor_start(airy_svc_t service,
             g_monitor.services[i].next_restart_time = 0;
 
             int thread_err = airy_thread_create(&g_monitor.services[i].monitor_thread,
-                                                   monitor_thread_func, &g_monitor.services[i]);
+                                                monitor_thread_func, &g_monitor.services[i]);
             if (thread_err != 0) {
                 g_monitor.services[i].active = false;
                 airy_mtx_unlock(&g_monitor.mutex);
@@ -1787,8 +1704,7 @@ airy_err_t airy_svc_monitor_start(airy_svc_t service,
     if (thread_err != 0) {
         mon->active = false;
         airy_mtx_unlock(&g_monitor.mutex);
-        LOG_ERROR("Failed to create monitor thread for service '%s'",
-                  airy_svc_get_name(service));
+        LOG_ERROR("Failed to create monitor thread for service '%s'", airy_svc_get_name(service));
         return DAEMON_EINIT;
     }
 
@@ -1831,13 +1747,12 @@ airy_err_t airy_svc_monitor_stop(airy_svc_t service)
 
             for (uint32_t j = 0; j < g_monitor.count; j++) {
                 if (g_monitor.services[j].service == service) {
-                    LOG_INFO("Service monitoring stopped for '%s'",
-                             airy_svc_get_name(service));
+                    LOG_INFO("Service monitoring stopped for '%s'", airy_svc_get_name(service));
                     if (j < g_monitor.count - 1) {
                         g_monitor.services[j] = g_monitor.services[g_monitor.count - 1];
                     }
                     __builtin_memset(&g_monitor.services[g_monitor.count - 1], 0,
-                           sizeof(monitored_service_t));
+                                     sizeof(monitored_service_t));
                     g_monitor.count--;
                     break;
                 }
@@ -1852,9 +1767,8 @@ airy_err_t airy_svc_monitor_stop(airy_svc_t service)
     return AIRY_ENOENT;
 }
 
-airy_err_t airy_svc_set_degradation_handler(airy_svc_t service,
-                                                        airy_degradation_handler_t handler,
-                                                        void *user_data)
+airy_err_t airy_svc_set_degrad_hdlr(airy_svc_t service, airy_degradation_handler_t handler,
+                                    void *user_data)
 {
     if (!service || !handler) {
         return AIRY_EINVAL;
@@ -1895,8 +1809,6 @@ airy_err_t airy_svc_set_degradation_handler(airy_svc_t service,
     return AIRY_ENOMEM;
 }
 
-/* ==================== 服务间通信客户端（Phase 3.2） ==================== */
-
 typedef struct {
     airy_svc_protocol_type_t protocol;
     char base_url[512];
@@ -1924,10 +1836,10 @@ static size_t curl_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata
         buf->data = new_data;
         buf->capacity = new_cap;
     }
-    /* SEC-02: 二次校验，防御 realloc 异常返回 */
+
     if (buf->size + total > buf->capacity) {
         airy_err_push_ex(AIRY_EOVERFLOW, __FILE__, __LINE__, __func__,
-                               "curl_write_cb: buffer overflow");
+                         "curl_write_cb: buffer overflow");
         return 0;
     }
     __builtin_memcpy(buf->data + buf->size, ptr, total);
@@ -1938,8 +1850,8 @@ static size_t curl_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata
 #endif
 
 static airy_err_t http_client_call(const char *service_name, const char *method,
-                                        const char *params_json, char **response_json,
-                                        uint32_t timeout_ms)
+                                   const char *params_json, char **response_json,
+                                   uint32_t timeout_ms)
 {
     if (!service_name || !method || !response_json) {
         return AIRY_EINVAL;
@@ -1954,8 +1866,8 @@ static airy_err_t http_client_call(const char *service_name, const char *method,
         airy_svc_internal_t *internal = (airy_svc_internal_t *)svc;
 
         if (internal->iface.handle_request) {
-            airy_err_t err = internal->iface.handle_request(
-                svc, method, params_json, response_json, internal->user_data);
+            airy_err_t err = internal->iface.handle_request(svc, method, params_json, response_json,
+                                                            internal->user_data);
             if (err != AIRY_SUCCESS) {
                 LOG_WARN("Service '%s' handle_request('%s') failed: %d", service_name, method, err);
                 return err;
@@ -2048,8 +1960,8 @@ cleanup:
 }
 
 static airy_err_t http_client_stream(const char *service_name, const char *method,
-                                          const char *params_json,
-                                          airy_stream_callback_t callback, void *user_data)
+                                     const char *params_json, airy_stream_callback_t callback,
+                                     void *user_data)
 {
     if (!service_name || !method || !callback) {
         return AIRY_EINVAL;
@@ -2063,8 +1975,8 @@ static airy_err_t http_client_stream(const char *service_name, const char *metho
 
         if (internal->iface.handle_request) {
             char *response = NULL;
-            airy_err_t err = internal->iface.handle_request(svc, method, params_json,
-                                                                 &response, internal->user_data);
+            airy_err_t err = internal->iface.handle_request(svc, method, params_json, &response,
+                                                            internal->user_data);
             if (err == AIRY_SUCCESS && response) {
                 callback(response, strlen(response), user_data);
                 AIRY_FREE(response);
@@ -2084,8 +1996,8 @@ static airy_err_t http_client_stream(const char *service_name, const char *metho
 }
 
 static airy_err_t memory_client_call(const char *service_name, const char *method,
-                                          const char *params_json, char **response_json,
-                                          uint32_t timeout_ms)
+                                     const char *params_json, char **response_json,
+                                     uint32_t timeout_ms)
 {
     if (!service_name || !method || !response_json) {
         return AIRY_EINVAL;
@@ -2096,8 +2008,8 @@ static airy_err_t memory_client_call(const char *service_name, const char *metho
         airy_svc_internal_t *internal = (airy_svc_internal_t *)svc;
 
         if (internal->iface.handle_request) {
-            airy_err_t err = internal->iface.handle_request(
-                svc, method, params_json, response_json, internal->user_data);
+            airy_err_t err = internal->iface.handle_request(svc, method, params_json, response_json,
+                                                            internal->user_data);
             if (err != AIRY_SUCCESS) {
                 LOG_WARN("Service '%s' handle_request('%s') failed: %d", service_name, method, err);
                 return err;
@@ -2133,8 +2045,8 @@ static airy_err_t memory_client_call(const char *service_name, const char *metho
 }
 
 static airy_err_t memory_client_stream(const char *service_name, const char *method,
-                                            const char *params_json,
-                                            airy_stream_callback_t callback, void *user_data)
+                                       const char *params_json, airy_stream_callback_t callback,
+                                       void *user_data)
 {
     if (!service_name || !method || !callback) {
         return AIRY_EINVAL;
@@ -2150,7 +2062,7 @@ static airy_err_t memory_client_stream(const char *service_name, const char *met
     if (internal->iface.handle_request) {
         char *response = NULL;
         airy_err_t err = internal->iface.handle_request(svc, method, params_json, &response,
-                                                             internal->user_data);
+                                                        internal->user_data);
         if (err == AIRY_SUCCESS && response) {
             callback(response, strlen(response), user_data);
             AIRY_FREE(response);
@@ -2166,8 +2078,8 @@ static airy_err_t memory_client_stream(const char *service_name, const char *met
     return AIRY_ESERVICE;
 }
 
-airy_err_t airy_svc_client_create(airy_svc_protocol_type_t protocol,
-                                              const char *config, airy_svc_client_t **client)
+airy_err_t airy_svc_client_create(airy_svc_protocol_type_t protocol, const char *config,
+                                  airy_svc_client_t **client)
 {
     if (!client) {
         return AIRY_EINVAL;
@@ -2194,8 +2106,7 @@ airy_err_t airy_svc_client_create(airy_svc_protocol_type_t protocol,
         }
     }
 
-    airy_svc_client_t *cli =
-        (airy_svc_client_t *)AIRY_CALLOC(1, sizeof(airy_svc_client_t));
+    airy_svc_client_t *cli = (airy_svc_client_t *)AIRY_CALLOC(1, sizeof(airy_svc_client_t));
     if (!cli) {
         AIRY_FREE(internal);
         return AIRY_ENOMEM;

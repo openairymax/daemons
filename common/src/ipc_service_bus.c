@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file ipc_service_bus.c
  * @brief IPC服务总线实现 - 守护进程间统一通信框架
@@ -24,17 +25,13 @@
 #include <string.h>
 #include <time.h>
 #include "error.h"
-/* P0.18.2: 提供 DAEMON_ESTATE 定义（daemon_errors.h:60，映射至 AIRY_ERR_SVC_NOT_READY） */
-#include "daemon_errors.h"
 
-/* ==================== 内部常量 ==================== */
+#include "daemon_errors.h"
 
 #define IPC_BUS_MAX_HANDLERS 16
 #define IPC_BUS_MAX_EVENTS 32
 #define IPC_BUS_MAX_PENDING 256
 #define IPC_BUS_HASH_SEED 0x9e3779b9
-
-/* ==================== 内部数据结构 ==================== */
 
 typedef struct {
     ipc_bus_message_handler_t handler;
@@ -82,8 +79,6 @@ typedef struct ipc_service_bus_s {
 } ipc_service_bus_internal_t;
 
 static uint64_t g_bus_instance_count = 0;
-
-/* ==================== 辅助函数 ==================== */
 
 static uint64_t __attribute__((unused)) generate_msg_id(ipc_service_bus_internal_t *bus)
 {
@@ -144,10 +139,8 @@ static void init_message_header(ipc_bus_message_header_t *header, ipc_bus_msg_ty
         safe_strcpy(header->target, target, IPC_BUS_SERVICE_ID_LEN);
 }
 
-/* ==================== 公共API实现 ==================== */
-
 AIRY_API ipc_service_bus_t ipc_service_bus_create(const char *bus_name,
-                                                     const ipc_bus_channel_config_t *config)
+                                                  const ipc_bus_channel_config_t *config)
 {
     if (!bus_name) {
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
@@ -254,10 +247,8 @@ AIRY_API airy_err_t ipc_service_bus_stop(ipc_service_bus_t bus_handle)
     return AIRY_SUCCESS;
 }
 
-/* ==================== 通道管理 ==================== */
-
 AIRY_API ipc_bus_channel_t ipc_bus_channel_create(ipc_service_bus_t bus_handle,
-                                                     const ipc_bus_channel_config_t *config)
+                                                  const ipc_bus_channel_config_t *config)
 {
     if (!bus_handle || !config) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
@@ -319,11 +310,8 @@ AIRY_API const char *ipc_bus_channel_get_name(ipc_bus_channel_t channel)
     return ch->name;
 }
 
-/* ==================== 消息发送 ==================== */
-
-AIRY_API airy_err_t ipc_service_bus_send(ipc_service_bus_t bus_handle,
-                                                 const char *target_service,
-                                                 const ipc_bus_message_t *message)
+AIRY_API airy_err_t ipc_service_bus_send(ipc_service_bus_t bus_handle, const char *target_service,
+                                         const ipc_bus_message_t *message)
 {
     if (!bus_handle || !target_service || !message)
         return AIRY_EINVAL;
@@ -349,10 +337,9 @@ AIRY_API airy_err_t ipc_service_bus_send(ipc_service_bus_t bus_handle,
 }
 
 AIRY_API airy_err_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
-                                                    const char *target_service,
-                                                    const ipc_bus_message_t *request,
-                                                    ipc_bus_message_t *response,
-                                                    uint32_t timeout_ms)
+                                            const char *target_service,
+                                            const ipc_bus_message_t *request,
+                                            ipc_bus_message_t *response, uint32_t timeout_ms)
 {
     if (!bus_handle || !target_service || !request || !response)
         return AIRY_EINVAL;
@@ -458,9 +445,9 @@ AIRY_API airy_err_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
     bus->pending_count--;
     bus->stats.messages_received++;
     uint64_t latency = airy_time_ms() - start_time;
-    bus->stats.avg_latency_us = bus->stats.avg_latency_us == 0
-                                    ? latency * 1000
-                                    : (bus->stats.avg_latency_us + latency * 1000) / 2;
+    bus->stats.avg_latency_us = bus->stats.avg_latency_us == 0 ?
+                                    latency * 1000 :
+                                    (bus->stats.avg_latency_us + latency * 1000) / 2;
     if (latency * 1000 > bus->stats.max_latency_us)
         bus->stats.max_latency_us = latency * 1000;
 
@@ -474,7 +461,7 @@ AIRY_API airy_err_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
 }
 
 AIRY_API airy_err_t ipc_service_bus_broadcast(ipc_service_bus_t bus_handle,
-                                                      const ipc_bus_message_t *message)
+                                              const ipc_bus_message_t *message)
 {
     if (!bus_handle || !message)
         return AIRY_EINVAL;
@@ -518,9 +505,9 @@ AIRY_API airy_err_t ipc_service_bus_broadcast(ipc_service_bus_t bus_handle,
     return (sent_count > 0) ? AIRY_SUCCESS : first_error;
 }
 
-AIRY_API airy_err_t ipc_service_bus_notify(ipc_service_bus_t bus_handle,
-                                                   const char *target_service, const void *payload,
-                                                   size_t payload_size, ipc_bus_proto_t protocol)
+AIRY_API airy_err_t ipc_service_bus_notify(ipc_service_bus_t bus_handle, const char *target_service,
+                                           const void *payload, size_t payload_size,
+                                           ipc_bus_proto_t protocol)
 {
     if (!bus_handle || !target_service || !payload)
         return AIRY_EINVAL;
@@ -542,11 +529,9 @@ AIRY_API airy_err_t ipc_service_bus_notify(ipc_service_bus_t bus_handle,
     return err;
 }
 
-/* ==================== 消息接收 ==================== */
-
 AIRY_API airy_err_t ipc_service_bus_register_handler(ipc_service_bus_t bus_handle,
-                                                             ipc_bus_message_handler_t handler,
-                                                             void *user_data)
+                                                     ipc_bus_message_handler_t handler,
+                                                     void *user_data)
 {
     if (!bus_handle || !handler)
         return AIRY_EINVAL;
@@ -585,7 +570,7 @@ AIRY_API airy_err_t ipc_service_bus_register_handler(ipc_service_bus_t bus_handl
 }
 
 AIRY_API airy_err_t ipc_service_bus_unregister_handler(ipc_service_bus_t bus_handle,
-                                                               ipc_bus_message_handler_t handler)
+                                                       ipc_bus_message_handler_t handler)
 {
     if (!bus_handle || !handler)
         return AIRY_EINVAL;
@@ -613,9 +598,9 @@ AIRY_API airy_err_t ipc_service_bus_unregister_handler(ipc_service_bus_t bus_han
 }
 
 AIRY_API airy_err_t ipc_service_bus_register_event_handler(ipc_service_bus_t bus_handle,
-                                                                   const char *event_name,
-                                                                   ipc_bus_event_handler_t handler,
-                                                                   void *user_data)
+                                                           const char *event_name,
+                                                           ipc_bus_event_handler_t handler,
+                                                           void *user_data)
 {
     if (!bus_handle || !event_name || !handler)
         return AIRY_EINVAL;
@@ -641,10 +626,8 @@ AIRY_API airy_err_t ipc_service_bus_register_event_handler(ipc_service_bus_t bus
     return AIRY_SUCCESS;
 }
 
-/* ==================== 服务端点管理 ==================== */
-
 AIRY_API airy_err_t ipc_service_bus_register_endpoint(ipc_service_bus_t bus_handle,
-                                                              const ipc_bus_endpoint_t *endpoint)
+                                                      const ipc_bus_endpoint_t *endpoint)
 {
     if (!bus_handle || !endpoint)
         return AIRY_EINVAL;
@@ -680,7 +663,7 @@ AIRY_API airy_err_t ipc_service_bus_register_endpoint(ipc_service_bus_t bus_hand
 }
 
 AIRY_API airy_err_t ipc_service_bus_unregister_endpoint(ipc_service_bus_t bus_handle,
-                                                                const char *service_name)
+                                                        const char *service_name)
 {
     if (!bus_handle || !service_name)
         return AIRY_EINVAL;
@@ -708,11 +691,10 @@ AIRY_API airy_err_t ipc_service_bus_unregister_endpoint(ipc_service_bus_t bus_ha
     return AIRY_SUCCESS;
 }
 
-AIRY_API airy_err_t ipc_service_bus_discover(ipc_service_bus_t bus_handle,
-                                                     const char *service_name,
-                                                     ipc_bus_proto_t protocol,
-                                                     ipc_bus_endpoint_t *endpoints,
-                                                     uint32_t max_count, uint32_t *found_count)
+AIRY_API airy_err_t ipc_service_bus_discover(ipc_service_bus_t bus_handle, const char *service_name,
+                                             ipc_bus_proto_t protocol,
+                                             ipc_bus_endpoint_t *endpoints, uint32_t max_count,
+                                             uint32_t *found_count)
 {
     if (!bus_handle || !endpoints || !found_count)
         return AIRY_EINVAL;
@@ -753,9 +735,9 @@ AIRY_API airy_err_t ipc_service_bus_discover(ipc_service_bus_t bus_handle,
 }
 
 AIRY_API airy_err_t ipc_service_bus_select_endpoint(ipc_service_bus_t bus_handle,
-                                                            const char *service_name,
-                                                            ipc_bus_proto_t protocol,
-                                                            ipc_bus_endpoint_t *endpoint)
+                                                    const char *service_name,
+                                                    ipc_bus_proto_t protocol,
+                                                    ipc_bus_endpoint_t *endpoint)
 {
     if (!bus_handle || !service_name || !endpoint)
         return AIRY_EINVAL;
@@ -810,8 +792,7 @@ AIRY_API airy_err_t ipc_service_bus_select_endpoint(ipc_service_bus_t bus_handle
 }
 
 AIRY_API airy_err_t ipc_service_bus_update_endpoint_health(ipc_service_bus_t bus_handle,
-                                                                   const char *service_name,
-                                                                   bool healthy)
+                                                           const char *service_name, bool healthy)
 {
     if (!bus_handle || !service_name)
         return AIRY_EINVAL;
@@ -841,11 +822,9 @@ AIRY_API airy_err_t ipc_service_bus_update_endpoint_health(ipc_service_bus_t bus
     return AIRY_SUCCESS;
 }
 
-/* ==================== 消息辅助函数 ==================== */
-
 AIRY_API ipc_bus_message_t *ipc_bus_message_create(ipc_bus_msg_type_t msg_type,
-                                                      ipc_bus_proto_t protocol, const void *payload,
-                                                      size_t payload_size)
+                                                   ipc_bus_proto_t protocol, const void *payload,
+                                                   size_t payload_size)
 {
     ipc_bus_message_t *msg = (ipc_bus_message_t *)AIRY_CALLOC(1, sizeof(ipc_bus_message_t));
     if (!msg) {
@@ -862,7 +841,7 @@ AIRY_API ipc_bus_message_t *ipc_bus_message_create(ipc_bus_msg_type_t msg_type,
             AIRY_FREE(msg);
             AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
-        /* SEC-02: dst容量 = payload_size (来自AIRY_CALLOC)，与复制大小一致，边界检查已隐式满足 */
+
         __builtin_memcpy(msg->payload, payload, payload_size);
         msg->payload_size = payload_size;
         msg->header.checksum = compute_checksum(payload, payload_size);
@@ -925,10 +904,7 @@ AIRY_API ipc_bus_proto_t ipc_bus_proto_from_string(const char *str)
     return IPC_BUS_PROTO_AUTO;
 }
 
-/* ==================== 统计与诊断 ==================== */
-
-AIRY_API airy_err_t ipc_service_bus_get_stats(ipc_service_bus_t bus_handle,
-                                                      ipc_bus_stats_t *stats)
+AIRY_API airy_err_t ipc_service_bus_get_stats(ipc_service_bus_t bus_handle, ipc_bus_stats_t *stats)
 {
     if (!bus_handle || !stats)
         return AIRY_EINVAL;

@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_thread_pool.c
  * @brief 线程池单元测试 (P1-C06)
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  */
 
 #include "thread_pool.h"
@@ -16,15 +16,16 @@ static int tests_run = 0;
 static int tests_passed = 0;
 static int tests_failed = 0;
 
-#define TEST_ASSERT(cond, msg) do { \
-    tests_run++; \
-    if (cond) { \
-        tests_passed++; \
-    } else { \
-        tests_failed++; \
-        fprintf(stderr, "  FAIL: %s\n", msg); \
-    } \
-} while (0)
+#define TEST_ASSERT(cond, msg)                    \
+    do {                                          \
+        tests_run++;                              \
+        if (cond) {                               \
+            tests_passed++;                       \
+        } else {                                  \
+            tests_failed++;                       \
+            fprintf(stderr, "  FAIL: %s\n", msg); \
+        }                                         \
+    } while (0)
 
 static void test_default_config(void)
 {
@@ -255,7 +256,7 @@ int main(void)
     test_destroy_then_use();
     test_create_destroy_cycle();
 
-    printf("\n=== Results: %d run, %d passed, %d failed ===\n",
-           tests_run, tests_passed, tests_failed);
+    printf("\n=== Results: %d run, %d passed, %d failed ===\n", tests_run, tests_passed,
+           tests_failed);
     return tests_failed > 0 ? 1 : 0;
 }

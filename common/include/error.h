@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file error.h
  * @brief 错误处理兼容层
@@ -13,13 +14,10 @@
 #ifndef AIRY_RT_DAEMON_COMMON_ERROR_H
 #define AIRY_RT_DAEMON_COMMON_ERROR_H
 
-/* 包含 commons 的统一错误处理框架 */
-/* 使用相对路径避免 include 搜索找到 daemon 自身的 error.h */
+
 #include "../../../commons/utils/error/include/error.h"
 
-/* ==================== 兼容性别名 ==================== */
 
-/* 旧的错误码名称映射到新的名称 */
 #define AIRY_ERROR_UNKNOWN AIRY_ERR_UNKNOWN
 #define AIRY_ERROR_OUT_OF_MEMORY AIRY_ERR_OUT_OF_MEMORY
 #define AIRY_ERROR_INVALID_PARAMETER AIRY_ERR_INVALID_PARAM
@@ -39,7 +37,7 @@
 #define AIRY_ERROR_CORRUPTED_DATA AIRY_ERR_MEM_CORRUPT
 #define AIRY_ERROR_INTERNAL AIRY_ERR_UNKNOWN
 
-/* 核心循环错误码兼容 */
+
 #define AIRY_ERROR_LOOP_BASE AIRY_ERR_KERN_BASE
 #define AIRY_ERROR_LOOP_CREATE_FAILED AIRY_ERR_KERN_TASK
 #define AIRY_ERROR_LOOP_RUN_FAILED AIRY_ERR_KERN_TASK
@@ -47,14 +45,14 @@
 #define AIRY_ERROR_TASK_SUBMIT_FAILED AIRY_ERR_KERN_TASK
 #define AIRY_ERROR_TASK_WAIT_FAILED AIRY_ERR_KERN_TASK
 
-/* 服务层错误码兼容 */
+
 #define AIRY_ERROR_SERVICE_BASE AIRY_ERR_SVC_BASE
 #define AIRY_ERROR_SERVICE_NOT_READY AIRY_ERR_SVC_NOT_READY
 #define AIRY_ERROR_SERVICE_BUSY AIRY_ERR_SVC_BUSY
 #define AIRY_ERROR_SERVICE_STOPPED AIRY_ERR_SVC_STOPPED
 #define AIRY_ERROR_SERVICE_CONFIG AIRY_ERR_SVC_CONFIG
 
-/* IPC 错误码兼容 */
+
 #define AIRY_ERROR_IPC_BASE AIRY_ERR_KERN_BASE
 #define AIRY_ERROR_IPC_CONNECT AIRY_ERR_KERN_IPC
 #define AIRY_ERROR_IPC_DISCONNECT AIRY_ERR_KERN_IPC
@@ -62,7 +60,7 @@
 #define AIRY_ERROR_IPC_INVALID_MSG AIRY_ERR_KERN_IPC
 #define AIRY_ERROR_IPC_BUFFER_FULL AIRY_ERR_BUFFER_TOO_SMALL
 
-/* LLM 服务错误码兼容 */
+
 #define AIRY_ERROR_LLM_BASE AIRY_ERR_LLM_BASE
 #define AIRY_ERROR_LLM_NO_PROVIDER AIRY_ERR_LLM_NO_PROVIDER
 #define AIRY_ERROR_LLM_PROVIDER_FAIL AIRY_ERR_LLM_PROVIDER_FAIL
@@ -71,7 +69,7 @@
 #define AIRY_ERROR_LLM_INVALID_MODEL AIRY_ERR_LLM_INVALID_MODEL
 #define AIRY_ERROR_LLM_AUTH_FAIL AIRY_ERR_LLM_AUTH_FAIL
 
-/* 工具服务错误码兼容 */
+
 #define AIRY_ERROR_TOOL_BASE AIRY_ERR_EXEC_BASE
 #define AIRY_ERROR_TOOL_NOT_FOUND AIRY_ERR_EXEC_NOT_FOUND
 #define AIRY_ERROR_TOOL_EXEC_FAIL AIRY_ERR_EXEC_FAIL
@@ -79,7 +77,7 @@
 #define AIRY_ERROR_TOOL_VALIDATION AIRY_ERR_EXEC_VALIDATION
 #define AIRY_ERROR_TOOL_SANDBOX AIRY_ERR_EXEC_SANDBOX
 
-/* 调度服务错误码兼容 */
+
 #define AIRY_ERROR_SCHED_BASE AIRY_ERR_KERN_BASE
 #define AIRY_ERROR_SCHED_NO_AGENT AIRY_ERR_KERN_SCHED
 #define AIRY_ERROR_SCHED_AGENT_BUSY AIRY_ERR_SVC_BUSY
@@ -87,13 +85,13 @@
 #define AIRY_ERROR_SCHED_AGENT_NOT_FOUND AIRY_ERR_NOT_FOUND
 #define AIRY_ERROR_SCHED_NO_AVAILABLE AIRY_ERR_KERN_SCHED
 
-/* 市场服务错误码兼容 */
+
 #define AIRY_ERROR_MARKET_BASE AIRY_ERR_SVC_BASE
 #define AIRY_ERROR_MARKET_NOT_FOUND AIRY_ERR_NOT_FOUND
 #define AIRY_ERROR_MARKET_INSTALL AIRY_ERR_EXEC_FAIL
 #define AIRY_ERROR_MARKET_DEPENDENCY AIRY_ERR_SVC_DEPENDENCY
 
-/* 监控服务错误码兼容 */
+
 #define AIRY_ERROR_MONITOR_BASE AIRY_ERR_SVC_BASE
 #define AIRY_ERROR_MONITOR_METRIC AIRY_ERR_SYS_RESOURCE
 #define AIRY_ERROR_MONITOR_TRACE AIRY_ERR_SYS_RESOURCE
@@ -105,7 +103,6 @@
  * daemons 内部源文件可直接 #include "daemon_errors.h" 获取这些错误码。 */
 #include "daemon_errors.h"
 
-/* ==================== 兼容性函数别名 ==================== */
 
 /**
  * @brief 兼容旧函数名
@@ -119,7 +116,6 @@
  */
 #define airy_err_name(code) airy_err_str(code)
 
-/* ==================== 兼容性宏 ==================== */
 
 /**
  * @brief 错误码检查宏（兼容旧代码）
@@ -127,6 +123,5 @@
 #define AIRY_IS_ERROR(code) ((code) != AIRY_OK)
 #define AIRY_IS_SUCCESS(code) ((code) == AIRY_OK)
 
-/* ==================== 兼容性类型别名 ==================== */
 
 #endif /* AIRY_RT_DAEMON_COMMON_ERROR_H */

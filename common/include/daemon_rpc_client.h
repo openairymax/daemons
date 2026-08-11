@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file daemon_rpc_client.h
  * @brief 轻量级 Unix-socket JSON-RPC 客户端
@@ -13,7 +14,6 @@
  *   - 自包含、不依赖 libcurl（区别于 ipc_client.h）
  *   - 调用方负责 AIRY_FREE 返回的 result_json 字符串
  *
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_DAEMON_RPC_CLIENT_H
@@ -22,8 +22,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "cancel_token.h" /* 改进1（取消下探）：可取消 RPC 调用 */
-
+#include "cancel_token.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -41,8 +40,7 @@ extern "C" {
  * @note 失败时 *out_result_json 不会被设置（保持 NULL）。
  *       仅在 POSIX 平台可用；Windows 下返回 AIRY_ERR_NOT_SUPPORTED。
  */
-int daemon_rpc_call(const char *socket_path, const char *method,
-                    const char *params_json,
+int daemon_rpc_call(const char *socket_path, const char *method, const char *params_json,
                     char **out_result_json, uint32_t timeout_ms);
 
 /**
@@ -64,11 +62,9 @@ int daemon_rpc_call(const char *socket_path, const char *method,
  * @return AIRY_SUCCESS 成功；AIRY_ERR_CANCELED 已被取消（取消请求已送达）；
  *         其他为错误码
  */
-int daemon_rpc_call_cancelable(const char *socket_path, const char *method,
-                               const char *params_json,
+int daemon_rpc_call_cancelable(const char *socket_path, const char *method, const char *params_json,
                                char **out_result_json, uint32_t timeout_ms,
-                               airy_cancel_token_t *cancel_token,
-                               const char *cancel_method,
+                               airy_cancel_token_t *cancel_token, const char *cancel_method,
                                const char *cancel_params_json);
 
 #ifdef __cplusplus

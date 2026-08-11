@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file param_validator.c
  * @brief JSON-RPC 参数验证工具实现
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "param_validator.h"
@@ -52,7 +52,6 @@ int validate_jsonrpc_request(cJSON *req, cJSON **jsonrpc, cJSON **method, cJSON 
     *params = cJSON_GetObjectItem(req, "params");
     *id = cJSON_GetObjectItem(req, "id");
 
-    /* 验证必需字段 */
     if (!cJSON_IsString(*jsonrpc) || strcmp((*jsonrpc)->valuestring, "2.0") != 0 ||
         !cJSON_IsString(*method) || !(*id)) {
         AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "param_validator: value too long");

@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_event_loop.h"
 
 #include "daemon_errors.h"
@@ -147,8 +148,7 @@ static int add_fd_internal(airy_event_loop_t *loop, int fd, uint32_t events,
 
 airy_event_loop_t *airy_event_loop_create(int max_events)
 {
-    airy_event_loop_t *loop =
-        (airy_event_loop_t *)AIRY_CALLOC(1, sizeof(airy_event_loop_t));
+    airy_event_loop_t *loop = (airy_event_loop_t *)AIRY_CALLOC(1, sizeof(airy_event_loop_t));
     if (!loop) {
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
@@ -196,13 +196,13 @@ void airy_event_loop_destroy(airy_event_loop_t *loop)
 }
 
 int airy_event_loop_add_fd(airy_event_loop_t *loop, int fd, uint32_t events,
-                              airy_event_callback_t cb, void *user_data)
+                           airy_event_callback_t cb, void *user_data)
 {
     return add_fd_internal(loop, fd, events, cb, user_data, false);
 }
 
 int airy_event_loop_add_fd_lt(airy_event_loop_t *loop, int fd, uint32_t events,
-                                 airy_event_callback_t cb, void *user_data)
+                              airy_event_callback_t cb, void *user_data)
 {
     return add_fd_internal(loop, fd, events, cb, user_data, true);
 }
@@ -242,7 +242,7 @@ void airy_event_loop_remove_fd(airy_event_loop_t *loop, int fd)
 }
 
 uint64_t airy_event_loop_add_timer(airy_event_loop_t *loop, uint64_t interval_ms,
-                                      airy_timer_callback_t cb, void *user_data)
+                                   airy_timer_callback_t cb, void *user_data)
 {
     if (!loop || !cb)
         return 0;
@@ -491,8 +491,7 @@ static int add_fd_internal(airy_event_loop_t *loop, int fd, uint32_t events,
 
 airy_event_loop_t *airy_event_loop_create(int max_events)
 {
-    airy_event_loop_t *loop =
-        (airy_event_loop_t *)AIRY_CALLOC(1, sizeof(airy_event_loop_t));
+    airy_event_loop_t *loop = (airy_event_loop_t *)AIRY_CALLOC(1, sizeof(airy_event_loop_t));
     if (!loop) {
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
@@ -557,13 +556,13 @@ void airy_event_loop_destroy(airy_event_loop_t *loop)
 }
 
 int airy_event_loop_add_fd(airy_event_loop_t *loop, int fd, uint32_t events,
-                              airy_event_callback_t cb, void *user_data)
+                           airy_event_callback_t cb, void *user_data)
 {
     return add_fd_internal(loop, fd, events, cb, user_data, false);
 }
 
 int airy_event_loop_add_fd_lt(airy_event_loop_t *loop, int fd, uint32_t events,
-                                 airy_event_callback_t cb, void *user_data)
+                              airy_event_callback_t cb, void *user_data)
 {
     return add_fd_internal(loop, fd, events, cb, user_data, true);
 }
@@ -603,7 +602,7 @@ void airy_event_loop_remove_fd(airy_event_loop_t *loop, int fd)
 }
 
 uint64_t airy_event_loop_add_timer(airy_event_loop_t *loop, uint64_t interval_ms,
-                                      airy_timer_callback_t cb, void *user_data)
+                                   airy_timer_callback_t cb, void *user_data)
 {
     if (!loop || !cb)
         return 0;
@@ -671,7 +670,8 @@ int airy_event_loop_run(airy_event_loop_t *loop)
 
             if (loop->wakeup_fd >= 0 && fd == loop->wakeup_fd) {
                 uint64_t val;
-                while (read(loop->wakeup_fd, &val, sizeof(val)) > 0) {}
+                while (read(loop->wakeup_fd, &val, sizeof(val)) > 0) {
+                }
                 continue;
             }
 
@@ -742,8 +742,12 @@ int airy_event_loop_get_fd_count(airy_event_loop_t *loop)
     return count;
 }
 
-#else  /* !defined(_WIN32) && !defined(__linux__) — 不支持的平台 */
+#else
 
-#error "Airymax 0.1.1 仅支持 Linux 和 Windows 平台；macOS/kqueue 及其他 POSIX 平台支持未规划。请使用 Linux 构建环境。"
+// clang-format off
+#error                                                                                             \
+    "Airymax 0.1.1 仅支持 Linux 和 Windows 平台；macOS/kqueue 及其他 POSIX "                       \
+    "平台支持未规划。请使用 Linux 构建环境。"
+// clang-format on
 
 #endif

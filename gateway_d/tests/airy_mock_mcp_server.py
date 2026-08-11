@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 airy_mock_mcp_server.py — 模拟 MCP stdio server（P2-4 回归测试用）
 
 通过 stdin/stdout 以 LSP 风格帧（Content-Length 头 + \\r\\n\\r\\n + JSON body）

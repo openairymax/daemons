@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_monitor.c
  * @brief 监控服务单元测试
  * @details 测试监控服务的核心功能，包括指标收集、告警管理、日志记录和健康检查
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "monitor_service.h"
@@ -31,7 +31,6 @@ int test_service_create_destroy()
                                 .enable_tracing = true,
                                 .enable_alerting = true};
 
-    // 创建监控服务
     monitor_service_t *service = NULL;
     int ret = monitor_service_create(&manager, &service);
     if (ret != 0) {
@@ -39,7 +38,6 @@ int test_service_create_destroy()
         return ret;
     }
 
-    // 销毁监控服务
     ret = monitor_service_destroy(service);
     if (ret != 0) {
         printf("失败：销毁服务返回 %d\n", ret);
