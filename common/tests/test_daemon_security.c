@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /*
- * Copyright (c) 2026 SPHARX Ltd. All Rights Reserved.
  * test_daemon_security.c - Daemon Security Module Unit Tests
  */
 
@@ -15,10 +15,27 @@
 static int tests_run = 0;
 static int tests_passed = 0;
 
-#define TEST(name) do { tests_run++; printf("  %-50s", name); } while(0)
-#define PASS() do { tests_passed++; printf("[PASS]\n"); } while(0)
-#define FAIL(msg) do { printf("[FAIL] %s\n", msg); return; } while(0)
-#define ASSERT(cond, msg) do { if (!(cond)) { FAIL(msg); } } while(0)
+#define TEST(name)               \
+    do {                         \
+        tests_run++;             \
+        printf("  %-50s", name); \
+    } while (0)
+#define PASS()              \
+    do {                    \
+        tests_passed++;     \
+        printf("[PASS]\n"); \
+    } while (0)
+#define FAIL(msg)                   \
+    do {                            \
+        printf("[FAIL] %s\n", msg); \
+        return;                     \
+    } while (0)
+#define ASSERT(cond, msg) \
+    do {                  \
+        if (!(cond)) {    \
+            FAIL(msg);    \
+        }                 \
+    } while (0)
 
 static void test_init_null_config(void)
 {
@@ -118,9 +135,9 @@ static void test_sanitize_tool_params_normal(void)
 
     char sanitized_tool[128];
     char sanitized_params[256];
-    int ret = daemon_sanitize_tool_params("read_file", "{\"path\":\"/tmp/test\"}",
-        sanitized_tool, sizeof(sanitized_tool),
-        sanitized_params, sizeof(sanitized_params));
+    int ret = daemon_sanitize_tool_params("read_file", "{\"path\":\"/tmp/test\"}", sanitized_tool,
+                                          sizeof(sanitized_tool), sanitized_params,
+                                          sizeof(sanitized_params));
     ASSERT(ret == 0, "sanitize tool params should succeed");
     ASSERT(strstr(sanitized_tool, "read_file") != NULL, "tool name should be preserved");
 
@@ -137,9 +154,9 @@ static void test_sanitize_tool_params_dangerous(void)
 
     char sanitized_tool[128];
     char sanitized_params[256];
-    int ret = daemon_sanitize_tool_params("exec", "; cat /etc/passwd",
-        sanitized_tool, sizeof(sanitized_tool),
-        sanitized_params, sizeof(sanitized_params));
+    int ret = daemon_sanitize_tool_params("exec", "; cat /etc/passwd", sanitized_tool,
+                                          sizeof(sanitized_tool), sanitized_params,
+                                          sizeof(sanitized_params));
     ASSERT(ret != 0, "dangerous params should be rejected");
 
     daemon_security_shutdown();
@@ -254,8 +271,8 @@ static void test_store_and_retrieve_credential(void)
     daemon_security_init(NULL, &err);
 
     const uint8_t secret[] = "my_api_key_12345";
-    int ret = daemon_store_credential("test_key", CUPOLAS_VAULT_CRED_TOKEN,
-        secret, strlen((const char *)secret), "agent_001");
+    int ret = daemon_store_credential("test_key", CUPOLAS_VAULT_CRED_TOKEN, secret,
+                                      strlen((const char *)secret), "agent_001");
     ASSERT(ret == 0, "store credential should succeed");
 
     uint8_t retrieved[256];
@@ -293,16 +310,13 @@ static void test_store_credential_null_params(void)
     daemon_security_init(NULL, &err);
 
     const uint8_t data[] = "secret";
-    int ret = daemon_store_credential(NULL, CUPOLAS_VAULT_CRED_TOKEN,
-        data, sizeof(data), "agent");
+    int ret = daemon_store_credential(NULL, CUPOLAS_VAULT_CRED_TOKEN, data, sizeof(data), "agent");
     ASSERT(ret != 0, "null cred_id should be rejected");
 
-    ret = daemon_store_credential("key", CUPOLAS_VAULT_CRED_TOKEN,
-        NULL, sizeof(data), "agent");
+    ret = daemon_store_credential("key", CUPOLAS_VAULT_CRED_TOKEN, NULL, sizeof(data), "agent");
     ASSERT(ret != 0, "null data should be rejected");
 
-    ret = daemon_store_credential("key", CUPOLAS_VAULT_CRED_TOKEN,
-        data, 0, "agent");
+    ret = daemon_store_credential("key", CUPOLAS_VAULT_CRED_TOKEN, data, 0, "agent");
     ASSERT(ret != 0, "zero data_len should be rejected");
 
     daemon_security_shutdown();
@@ -427,12 +441,12 @@ static void test_store_credential_overwrite(void)
 
     const uint8_t v1[] = "version_one";
     const uint8_t v2[] = "version_two_updated";
-    int ret = daemon_store_credential("overwrite_key", CUPOLAS_VAULT_CRED_TOKEN,
-        v1, strlen((const char *)v1), "agent");
+    int ret = daemon_store_credential("overwrite_key", CUPOLAS_VAULT_CRED_TOKEN, v1,
+                                      strlen((const char *)v1), "agent");
     ASSERT(ret == 0, "first store");
 
-    ret = daemon_store_credential("overwrite_key", CUPOLAS_VAULT_CRED_TOKEN,
-        v2, strlen((const char *)v2), "agent");
+    ret = daemon_store_credential("overwrite_key", CUPOLAS_VAULT_CRED_TOKEN, v2,
+                                  strlen((const char *)v2), "agent");
     ASSERT(ret == 0, "overwrite should succeed");
 
     uint8_t retrieved[256];
@@ -454,8 +468,8 @@ static void test_credential_access_control(void)
     daemon_security_init(NULL, &err);
 
     const uint8_t secret[] = "owner_only_secret";
-    daemon_store_credential("owned_key", CUPOLAS_VAULT_CRED_TOKEN,
-        secret, strlen((const char *)secret), "owner_agent");
+    daemon_store_credential("owned_key", CUPOLAS_VAULT_CRED_TOKEN, secret,
+                            strlen((const char *)secret), "owner_agent");
 
     uint8_t buf[256];
     size_t len = sizeof(buf);

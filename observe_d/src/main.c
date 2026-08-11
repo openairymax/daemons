@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (c) 2026 SPHARX. All Rights Reserved.
  * P0.18.1: daemon_main.h 传递性提供 atomic_compat、daemon_bootstrap_sd/ipc、
  * daemon_cupolas、daemon_platform_ext、logging、svc_logger 等头文件。
  * 本守护进程使用自定义 HTTP/Prometheus metrics 服务端与 accept 循环，
@@ -71,7 +71,7 @@ static daemon_bootstrap_ipc_t *g_bipc = NULL;
 static void observe_d_signal_handler(int sig)
 {
     (void)sig;
-    /* async-signal-safe：仅原子置位（accept 循环 1s 超时轮询，随后自然退出） */
+
     atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
 #ifndef _WIN32
     {
@@ -92,7 +92,7 @@ static observe_metric_t *observe_d_find_or_create_metric(observe_d_service_t *sv
 
     if (svc->metric_count >= OBSERVE_D_MAX_METRICS) {
         AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
-        }
+    }
 
     observe_metric_t *m = &svc->metrics[svc->metric_count];
     m->name = AIRY_STRDUP(name);
@@ -219,17 +219,18 @@ static int observe_d_handle_http_request(observe_d_service_t *svc, airy_sock_t c
         (void)(health_len - content_start);
 
         char final_buf[1024];
-        int final_len = snprintf(
-            final_buf, sizeof(final_buf),
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: application/json\r\n"
-            "Content-Length: %d\r\n"
-            "Connection: close\r\n"
-            "\r\n"
-            "{\"status\":\"ok\",\"uptime_sec\":%llu,\"metrics_count\":%zu}",
-            (int)snprintf(NULL, 0, "{\"status\":\"ok\",\"uptime_sec\":%llu,\"metrics_count\":%zu}",
-                          (unsigned long long)uptime, svc->metric_count),
-            (unsigned long long)uptime, svc->metric_count);
+        int final_len =
+            snprintf(final_buf, sizeof(final_buf),
+                     "HTTP/1.1 200 OK\r\n"
+                     "Content-Type: application/json\r\n"
+                     "Content-Length: %d\r\n"
+                     "Connection: close\r\n"
+                     "\r\n"
+                     "{\"status\":\"ok\",\"uptime_sec\":%llu,\"metrics_count\":%zu}",
+                     (int)snprintf(NULL, 0,
+                                   "{\"status\":\"ok\",\"uptime_sec\":%llu,\"metrics_count\":%zu}",
+                                   (unsigned long long)uptime, svc->metric_count),
+                     (unsigned long long)uptime, svc->metric_count);
 
         airy_sock_send(client_fd, final_buf, (size_t)final_len);
     } else {
@@ -292,12 +293,10 @@ static int observe_d_init(observe_d_service_t *svc, int port, const char *sock)
 
     observe_d_record_metric(svc, "airy_observe_requests_total", 0.0, "count",
                             OBSERVE_METRIC_COUNTER);
-    observe_d_record_metric(svc, "airy_observe_errors_total", 0.0, "count",
-                            OBSERVE_METRIC_COUNTER);
+    observe_d_record_metric(svc, "airy_observe_errors_total", 0.0, "count", OBSERVE_METRIC_COUNTER);
     observe_d_record_metric(svc, "airy_observe_http_requests_total", 0.0, "count",
                             OBSERVE_METRIC_COUNTER);
-    observe_d_record_metric(svc, "airy_observe_metrics_count", 0.0, "count",
-                            OBSERVE_METRIC_GAUGE);
+    observe_d_record_metric(svc, "airy_observe_metrics_count", 0.0, "count", OBSERVE_METRIC_GAUGE);
     observe_d_record_metric(svc, "airy_observe_uptime_seconds", 0.0, "seconds",
                             OBSERVE_METRIC_GAUGE);
 
@@ -496,7 +495,7 @@ static void observe_d_handle_request(observe_d_service_t *svc, airy_sock_t clien
         if (cJSON_IsString(m) && idj) {
             int rid = cJSON_IsNumber(idj) ? idj->valueint : 0;
             if (strcmp(m->valuestring, "shutdown") == 0) {
-                /* 与信号处理一致：原子置位 g_shutdown，accept 循环 1s 内退出 */
+
                 atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
                 cJSON *result = cJSON_CreateObject();
                 cJSON_AddStringToObject(result, "status", "shutting_down");
@@ -529,18 +528,17 @@ static void observe_d_handle_request(observe_d_service_t *svc, airy_sock_t clien
                 cJSON_AddStringToObject(result, "status", "ok");
                 cJSON_AddStringToObject(result, "service", "observe_d");
                 cJSON_AddNumberToObject(result, "uptime_s", (double)uptime);
-                cJSON_AddNumberToObject(result, "timestamp",
-                                        (double)time(NULL) * 1000.0);
+                cJSON_AddNumberToObject(result, "timestamp", (double)time(NULL) * 1000.0);
                 JSONRPC_SEND_SUCCESS(client_fd, result, rid);
                 cJSON_Delete(req);
                 airy_sock_close(client_fd);
                 return;
             } else if (strcmp(m->valuestring, "record_metric") == 0) {
-                /* L2 命名空间方法 record_metric：name/value/type（gauge|counter，可选 unit） */
+
                 cJSON *params = cJSON_GetObjectItem(req, "params");
                 if (!cJSON_IsObject(params)) {
-                    JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                                       "params object required", rid);
+                    JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "params object required",
+                                       rid);
                     cJSON_Delete(req);
                     airy_sock_close(client_fd);
                     return;
@@ -571,11 +569,11 @@ static void observe_d_handle_request(observe_d_service_t *svc, airy_sock_t clien
                     }
                 }
                 const char *unit = cJSON_IsString(unitj) ? unitj->valuestring : NULL;
-                int rc = observe_d_record_metric(svc, namej->valuestring,
-                                                 valuej->valuedouble, unit, mtype);
+                int rc = observe_d_record_metric(svc, namej->valuestring, valuej->valuedouble, unit,
+                                                 mtype);
                 if (rc != AIRY_SUCCESS) {
-                    JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
-                                       "failed to record metric", rid);
+                    JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "failed to record metric",
+                                       rid);
                     cJSON_Delete(req);
                     airy_sock_close(client_fd);
                     return;
@@ -617,10 +615,9 @@ static void observe_d_handle_request(observe_d_service_t *svc, airy_sock_t clien
                     cJSON_AddStringToObject(item, "name", mtr->name);
                     cJSON_AddNumberToObject(item, "value", mtr->value);
                     cJSON_AddStringToObject(item, "type",
-                                            mtr->type == OBSERVE_METRIC_COUNTER ? "counter"
-                                                                               : "gauge");
-                    cJSON_AddStringToObject(item, "unit",
-                                            mtr->unit ? mtr->unit : "");
+                                            mtr->type == OBSERVE_METRIC_COUNTER ? "counter" :
+                                                                                  "gauge");
+                    cJSON_AddStringToObject(item, "unit", mtr->unit ? mtr->unit : "");
                     cJSON_AddItemToArray(arr, item);
                     count++;
                 }
@@ -688,7 +685,6 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     airy_log_init(NULL);
     atexit(airy_log_shutdown);
 
-    /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("observe_d");
 
     if (observe_d_init(&g_service, OBSERVE_D_DEFAULT_PORT, OBSERVE_D_DEFAULT_SOCKET) !=
@@ -699,10 +695,10 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
         return EXIT_FAILURE;
     }
 
-    g_bsd = daemon_bootstrap_sd_start("observe_d", "observe", g_service.socket_path,
-                                      0, "observe,core", 0);
-    g_bipc = daemon_bootstrap_ipc_start("observe_d", "observe", g_service.socket_path,
-                                        0, IPC_BUS_PROTO_JSON_RPC);
+    g_bsd = daemon_bootstrap_sd_start("observe_d", "observe", g_service.socket_path, 0,
+                                      "observe,core", 0);
+    g_bipc = daemon_bootstrap_ipc_start("observe_d", "observe", g_service.socket_path, 0,
+                                        IPC_BUS_PROTO_JSON_RPC);
 
     while (!g_shutdown && g_service.running) {
         airy_sock_t client = airy_sock_accept(g_service.server_fd, 1000);
@@ -715,6 +711,6 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     daemon_bootstrap_sd_stop(g_bsd);
     observe_d_stop(&g_service, g_shutdown ? 1 : 0);
     observe_d_destroy(&g_service);
-    daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
+    daemon_cupolas_cleanup();
     return 0;
 }

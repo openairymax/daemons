@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file token_counter.c
  * @brief Token 计数实现
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "svc_logger.h"
@@ -37,7 +37,8 @@ token_counter_t *token_counter_create(const char *encoding_name)
     tc->enc = tiktoken_get_encoding(encoding_name);
     if (!tc->enc) {
         SVC_LOG_ERROR("C-L02: TOKEN-COUNTER: CREATE-FAIL — "
-                      "tiktoken_get_encoding failed encoding=%s", encoding_name);
+                      "tiktoken_get_encoding failed encoding=%s",
+                      encoding_name);
         AIRY_FREE(tc);
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
@@ -48,7 +49,8 @@ token_counter_t *token_counter_create(const char *encoding_name)
 
 void token_counter_destroy(token_counter_t *tc)
 {
-    if (!tc) return;
+    if (!tc)
+        return;
     SVC_LOG_INFO("C-L02: TOKEN-COUNTER: DESTROY encoding=%s", tc->encoding_name);
     tiktoken_free(tc->enc);
     AIRY_FREE(tc->encoding_name);
@@ -112,7 +114,8 @@ token_counter_t *token_counter_create(const char *encoding_name)
 
 void token_counter_destroy(token_counter_t *tc)
 {
-    if (!tc) return;
+    if (!tc)
+        return;
     SVC_LOG_INFO("C-L02: TOKEN-COUNTER: DESTROY encoding=%s (heuristic)", tc->encoding_name);
     AIRY_FREE(tc->encoding_name);
     AIRY_FREE(tc);

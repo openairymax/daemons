@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file google.c
  * @brief Google Gemini 适配器实现
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * Gemini API 特点：
  * 1. 认证使用 x-goog-api-key 头（非 Bearer token）
@@ -20,7 +20,7 @@
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+
 #include <cjson_helpers.h>
 #include <curl/curl.h>
 #include <stdio.h>
@@ -40,10 +40,8 @@ static provider_ctx_t *google_init(const char *name __attribute__((unused)), con
                                    double timeout_sec, int max_retries)
 {
     SVC_LOG_INFO("C-L02: GOOGLE: INIT api_base=%s model=%s timeout=%.1fs retries=%d has_api_key=%d",
-                 api_base ? api_base : GOOGLE_DEFAULT_BASE,
-                 GOOGLE_DEFAULT_MODEL,
-                 timeout_sec, max_retries,
-                 (api_key && api_key[0]) ? 1 : 0);
+                 api_base ? api_base : GOOGLE_DEFAULT_BASE, GOOGLE_DEFAULT_MODEL, timeout_sec,
+                 max_retries, (api_key && api_key[0]) ? 1 : 0);
 
     google_ctx_t *ctx = (google_ctx_t *)AIRY_CALLOC(1, sizeof(google_ctx_t));
     if (!ctx) {
@@ -134,14 +132,11 @@ static int google_parse_response(const char *body, llm_response_t **out)
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
-    CJSON_PARSE_GUARD(root, body, {
-        return AIRY_ERR_PARSE_ERROR;
-    });
+    CJSON_PARSE_GUARD(root, body, { return AIRY_ERR_PARSE_ERROR; });
 
     llm_response_t *resp = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {
-        /* root 由 CJSON_AUTO_FREE 自动释放 */
+
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
@@ -208,7 +203,6 @@ static int google_parse_response(const char *body, llm_response_t **out)
         resp->total_tokens = resp->prompt_tokens + resp->completion_tokens;
     }
 
-    /* root 由 CJSON_AUTO_FREE 自动释放 */
     *out = resp;
     return AIRY_OK;
 }
@@ -223,15 +217,14 @@ static int google_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     google_ctx_t *ctx = (google_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
 
-    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
     provider_refresh_api_key(base);
 
     const char *model =
         (manager->model && manager->model[0]) ? manager->model : GOOGLE_DEFAULT_MODEL;
 
-    SVC_LOG_INFO("C-L02: GOOGLE: COMPLETE-START model=%s msg_count=%zu max_tokens=%d temp=%.2f stream=%d",
-                 model, manager->message_count, manager->max_tokens, manager->temperature,
-                 manager->stream);
+    SVC_LOG_INFO(
+        "C-L02: GOOGLE: COMPLETE-START model=%s msg_count=%zu max_tokens=%d temp=%.2f stream=%d",
+        model, manager->message_count, manager->max_tokens, manager->temperature, manager->stream);
 
     char *req_body = google_build_request(manager);
     if (!req_body) {
@@ -251,8 +244,9 @@ static int google_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     explicit_bzero(auth_header, sizeof(auth_header));
 
     size_t body_len = strlen(req_body);
-    SVC_LOG_INFO("C-L02: GOOGLE: HTTP-POST url=%s body_len=%zu timeout=%.1fs retries=%d auth=x-goog-api-key",
-                 url, body_len, base->timeout_sec, base->max_retries);
+    SVC_LOG_INFO(
+        "C-L02: GOOGLE: HTTP-POST url=%s body_len=%zu timeout=%.1fs retries=%d auth=x-goog-api-key",
+        url, body_len, base->timeout_sec, base->max_retries);
 
     provider_http_resp_t *http_resp = NULL;
     long http_code = 0;
@@ -264,11 +258,13 @@ static int google_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     AIRY_FREE(req_body);
 
     size_t resp_body_len = (http_resp && http_resp->data) ? strlen(http_resp->data) : 0;
-    SVC_LOG_INFO("C-L02: GOOGLE: HTTP-RESPONSE http_code=%ld resp_body_len=%zu", http_code, resp_body_len);
+    SVC_LOG_INFO("C-L02: GOOGLE: HTTP-RESPONSE http_code=%ld resp_body_len=%zu", http_code,
+                 resp_body_len);
 
     if (ret != AIRY_OK) {
-        SVC_LOG_ERROR("C-L02: GOOGLE: COMPLETE-FAIL model=%s reason=http_request_failed http_code=%ld ret=%d",
-                      model, http_code, ret);
+        SVC_LOG_ERROR(
+            "C-L02: GOOGLE: COMPLETE-FAIL model=%s reason=http_request_failed http_code=%ld ret=%d",
+            model, http_code, ret);
         SVC_LOG_ERROR("C-L02: GOOGLE: STACK: google_complete http_request_failed url=%s", url);
         return ret;
     }
@@ -276,17 +272,30 @@ static int google_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     if (http_code != 200) {
         const char *diagnosis = "";
         switch (http_code) {
-            case 401: diagnosis = "DIAGNOSIS: invalid_api_key_or_expired"; break;
-            case 403: diagnosis = "DIAGNOSIS: access_denied_or_quota_exceeded"; break;
-            case 429: diagnosis = "DIAGNOSIS: rate_limited"; break;
-            case 500: diagnosis = "DIAGNOSIS: google_internal_server_error"; break;
-            case 503: diagnosis = "DIAGNOSIS: google_service_unavailable_or_overloaded"; break;
-            default:  diagnosis = "DIAGNOSIS: unexpected_http_error"; break;
+        case 401:
+            diagnosis = "DIAGNOSIS: invalid_api_key_or_expired";
+            break;
+        case 403:
+            diagnosis = "DIAGNOSIS: access_denied_or_quota_exceeded";
+            break;
+        case 429:
+            diagnosis = "DIAGNOSIS: rate_limited";
+            break;
+        case 500:
+            diagnosis = "DIAGNOSIS: google_internal_server_error";
+            break;
+        case 503:
+            diagnosis = "DIAGNOSIS: google_service_unavailable_or_overloaded";
+            break;
+        default:
+            diagnosis = "DIAGNOSIS: unexpected_http_error";
+            break;
         }
-        SVC_LOG_ERROR("C-L02: GOOGLE: COMPLETE-FAIL model=%s http_code=%ld %s resp_body=%s",
-                      model, http_code, diagnosis,
+        SVC_LOG_ERROR("C-L02: GOOGLE: COMPLETE-FAIL model=%s http_code=%ld %s resp_body=%s", model,
+                      http_code, diagnosis,
                       (http_resp && http_resp->data) ? http_resp->data : "(null)");
-        SVC_LOG_ERROR("C-L02: GOOGLE: STACK: google_complete http_error url=%s http_code=%ld", url, http_code);
+        SVC_LOG_ERROR("C-L02: GOOGLE: STACK: google_complete http_error url=%s http_code=%ld", url,
+                      http_code);
         provider_http_resp_free(http_resp);
         return AIRY_ERR_IO;
     }
@@ -296,12 +305,13 @@ static int google_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
 
     if (ret == AIRY_OK && *out_response) {
         llm_response_t *r = *out_response;
-        SVC_LOG_INFO("C-L02: GOOGLE: COMPLETE-OK model=%s prompt_tokens=%u completion_tokens=%u total_tokens=%u finish_reason=%s",
-                     r->model ? r->model : model,
-                     r->prompt_tokens, r->completion_tokens, r->total_tokens,
-                     r->finish_reason ? r->finish_reason : "unknown");
+        SVC_LOG_INFO("C-L02: GOOGLE: COMPLETE-OK model=%s prompt_tokens=%u completion_tokens=%u "
+                     "total_tokens=%u finish_reason=%s",
+                     r->model ? r->model : model, r->prompt_tokens, r->completion_tokens,
+                     r->total_tokens, r->finish_reason ? r->finish_reason : "unknown");
     } else {
-        SVC_LOG_ERROR("C-L02: GOOGLE: COMPLETE-FAIL model=%s reason=parse_response_failed ret=%d", model, ret);
+        SVC_LOG_ERROR("C-L02: GOOGLE: COMPLETE-FAIL model=%s reason=parse_response_failed ret=%d",
+                      model, ret);
         SVC_LOG_ERROR("C-L02: GOOGLE: STACK: google_complete parse_failed");
     }
 
@@ -351,10 +361,7 @@ static int gg_feed_sse_data(gg_sse_ctx_t *s, const char *data, size_t data_len)
     if (!data || data_len == 0)
         return 0;
 
-    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
-    CJSON_PARSE_GUARD(root, data, {
-        return 0;
-    });
+    CJSON_PARSE_GUARD(root, data, { return 0; });
 
     cJSON *candidates = cJSON_GetObjectItem(root, "candidates");
     if (cJSON_IsArray(candidates) && cJSON_GetArraySize(candidates) > 0) {
@@ -425,7 +432,6 @@ static int gg_feed_sse_data(gg_sse_ctx_t *s, const char *data, size_t data_len)
         acc->resp_model = AIRY_STRDUP(mv->valuestring);
     }
 
-    /* root 由 CJSON_AUTO_FREE 自动释放 */
     return 0;
 }
 
@@ -543,15 +549,14 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     google_ctx_t *ctx = (google_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
 
-    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
     provider_refresh_api_key(base);
 
     const char *model =
         (manager->model && manager->model[0]) ? manager->model : GOOGLE_DEFAULT_MODEL;
 
-    SVC_LOG_INFO("C-L02: GOOGLE: STREAM-START model=%s msg_count=%zu max_tokens=%d temp=%.2f stream=%d",
-                 model, manager->message_count, manager->max_tokens, manager->temperature,
-                 manager->stream);
+    SVC_LOG_INFO(
+        "C-L02: GOOGLE: STREAM-START model=%s msg_count=%zu max_tokens=%d temp=%.2f stream=%d",
+        model, manager->message_count, manager->max_tokens, manager->temperature, manager->stream);
 
     llm_request_config_t stream_cfg = *manager;
     stream_cfg.stream = 1;
@@ -574,7 +579,8 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     explicit_bzero(auth_header, sizeof(auth_header));
 
     size_t body_len = strlen(req_body);
-    SVC_LOG_INFO("C-L02: GOOGLE: STREAM-HTTP-POST url=%s body_len=%zu timeout=%.1fs retries=%d auth=x-goog-api-key sse=alt=sse",
+    SVC_LOG_INFO("C-L02: GOOGLE: STREAM-HTTP-POST url=%s body_len=%zu timeout=%.1fs retries=%d "
+                 "auth=x-goog-api-key sse=alt=sse",
                  url, body_len, base->timeout_sec, base->max_retries);
 
     gg_stream_acc_t acc;
@@ -621,8 +627,8 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
         if (cres == CURLE_OK)
             ret = AIRY_OK;
         else {
-            SVC_LOG_WARN("C-L02: GOOGLE: STREAM-FAIL model=%s reason=curl_error err=%s",
-                         model, curl_easy_strerror(cres));
+            SVC_LOG_WARN("C-L02: GOOGLE: STREAM-FAIL model=%s reason=curl_error err=%s", model,
+                         curl_easy_strerror(cres));
         }
     } else {
         SVC_LOG_ERROR("C-L02: GOOGLE: STREAM-FAIL model=%s reason=curl_init_failed", model);
@@ -635,7 +641,9 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: GOOGLE: STREAM-FAIL model=%s reason=http_error http_code=%ld ret=%d",
                       model, http_code, ret);
-        SVC_LOG_ERROR("C-L02: GOOGLE: STACK: google_complete_stream stream_failed url=%s http_code=%ld", url, http_code);
+        SVC_LOG_ERROR(
+            "C-L02: GOOGLE: STACK: google_complete_stream stream_failed url=%s http_code=%ld", url,
+            http_code);
         AIRY_FREE(acc.acc_content);
         AIRY_FREE(acc.resp_model);
         AIRY_FREE(acc.finish_reason);
@@ -648,9 +656,10 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     AIRY_FREE(acc.finish_reason);
 
     if (resp) {
-        SVC_LOG_INFO("C-L02: GOOGLE: STREAM-OK model=%s prompt_tokens=%u completion_tokens=%u total_tokens=%u finish_reason=%s",
-                     resp->model ? resp->model : model,
-                     resp->prompt_tokens, resp->completion_tokens, resp->total_tokens,
+        SVC_LOG_INFO("C-L02: GOOGLE: STREAM-OK model=%s prompt_tokens=%u completion_tokens=%u "
+                     "total_tokens=%u finish_reason=%s",
+                     resp->model ? resp->model : model, resp->prompt_tokens,
+                     resp->completion_tokens, resp->total_tokens,
                      resp->finish_reason ? resp->finish_reason : "unknown");
     } else {
         SVC_LOG_ERROR("C-L02: GOOGLE: STREAM-FAIL model=%s reason=build_response_failed", model);

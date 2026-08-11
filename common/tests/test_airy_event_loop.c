@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /*
- * Copyright (c) 2026 SPHARX Ltd. All Rights Reserved.
  * test_airy_event_loop.c - AgentRT Event Loop Module Unit Tests
  */
 
@@ -16,10 +16,27 @@
 static int tests_run = 0;
 static int tests_passed = 0;
 
-#define TEST(name) do { tests_run++; printf("  %-50s", name); } while(0)
-#define PASS() do { tests_passed++; printf("[PASS]\n"); } while(0)
-#define FAIL(msg) do { printf("[FAIL] %s\n", msg); return; } while(0)
-#define ASSERT(cond, msg) do { if (!(cond)) { FAIL(msg); } } while(0)
+#define TEST(name)               \
+    do {                         \
+        tests_run++;             \
+        printf("  %-50s", name); \
+    } while (0)
+#define PASS()              \
+    do {                    \
+        tests_passed++;     \
+        printf("[PASS]\n"); \
+    } while (0)
+#define FAIL(msg)                   \
+    do {                            \
+        printf("[FAIL] %s\n", msg); \
+        return;                     \
+    } while (0)
+#define ASSERT(cond, msg) \
+    do {                  \
+        if (!(cond)) {    \
+            FAIL(msg);    \
+        }                 \
+    } while (0)
 
 static int timer_fired_count = 0;
 
@@ -53,7 +70,8 @@ static void test_create_zero_events(void)
     TEST("Create with zero max_events");
     airy_event_loop_t *loop = airy_event_loop_create(0);
     ASSERT(loop != NULL || loop == NULL, "create with 0 should not crash");
-    if (loop) airy_event_loop_destroy(loop);
+    if (loop)
+        airy_event_loop_destroy(loop);
     PASS();
 }
 

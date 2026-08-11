@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "gateway_protocol_router.h"
 
 #include "gateway_a2a_handler.h"
@@ -21,11 +22,16 @@
 static const char *proto_type_name(gw_proto_detect_result_t proto_type)
 {
     switch (proto_type) {
-    case GW_PROTO_DETECT_MCP:     return "MCP";
-    case GW_PROTO_DETECT_A2A:     return "A2A";
-    case GW_PROTO_DETECT_OPENAI:  return "OpenAI";
-    case GW_PROTO_DETECT_JSONRPC: return "JSON-RPC";
-    default:                      return "Unknown";
+    case GW_PROTO_DETECT_MCP:
+        return "MCP";
+    case GW_PROTO_DETECT_A2A:
+        return "A2A";
+    case GW_PROTO_DETECT_OPENAI:
+        return "OpenAI";
+    case GW_PROTO_DETECT_JSONRPC:
+        return "JSON-RPC";
+    default:
+        return "Unknown";
     }
 }
 
@@ -90,8 +96,8 @@ static gw_proto_detect_result_t detect_from_body(const char *body)
         }
         /* A2A 基于 JSON-RPC 2.0（tasks/send 等）：须在 jsonrpc 分支内检测，
          * 否则含 jsonrpc 的 A2A 请求会被永久误判为 JSONRPC */
-        if (strstr(body, "\"tasks/") || strstr(body, "\"task/") ||
-            strstr(body, "\"agentCard\"") || strstr(body, "\"message/")) {
+        if (strstr(body, "\"tasks/") || strstr(body, "\"task/") || strstr(body, "\"agentCard\"") ||
+            strstr(body, "\"message/")) {
             return GW_PROTO_DETECT_A2A;
         }
         return GW_PROTO_DETECT_JSONRPC;
@@ -244,8 +250,9 @@ int gw_proto_router_register(gw_proto_router_t *router, gw_proto_detect_result_t
     return 0;
 }
 
-static gw_proto_request_handler_t
-find_handler(gw_proto_router_t *router, gw_proto_detect_result_t proto_type, void **out_user_data)
+static gw_proto_request_handler_t find_handler(gw_proto_router_t *router,
+                                               gw_proto_detect_result_t proto_type,
+                                               void **out_user_data)
 {
     for (size_t i = 0; i < router->adapter_count; i++) {
         if (router->adapters[i].proto_type == proto_type && router->adapters[i].registered) {
@@ -268,33 +275,33 @@ find_handler(gw_proto_router_t *router, gw_proto_detect_result_t proto_type, voi
 static void record_proto_stats(gw_proto_router_stats_t *stats, gw_proto_detect_result_t proto_type)
 {
     const char *name = proto_type_name(proto_type);
-    (void)name; /* Release 模式下 LOG_DEBUG 为空操作，标记避免未使用警告 */
+    (void)name;
 
     switch (proto_type) {
     case GW_PROTO_DETECT_MCP:
         stats->mcp_requests++;
         LOG_DEBUG("protocol=%-8s count=%llu (mcp_requests)", name,
-                          (unsigned long long)stats->mcp_requests);
+                  (unsigned long long)stats->mcp_requests);
         break;
     case GW_PROTO_DETECT_A2A:
         stats->a2a_requests++;
         LOG_DEBUG("protocol=%-8s count=%llu (a2a_requests)", name,
-                          (unsigned long long)stats->a2a_requests);
+                  (unsigned long long)stats->a2a_requests);
         break;
     case GW_PROTO_DETECT_OPENAI:
         stats->openai_requests++;
         LOG_DEBUG("protocol=%-8s count=%llu (openai_requests)", name,
-                          (unsigned long long)stats->openai_requests);
+                  (unsigned long long)stats->openai_requests);
         break;
     case GW_PROTO_DETECT_JSONRPC:
         stats->jsonrpc_requests++;
         LOG_DEBUG("protocol=%-8s count=%llu (jsonrpc_requests)", name,
-                          (unsigned long long)stats->jsonrpc_requests);
+                  (unsigned long long)stats->jsonrpc_requests);
         break;
     default:
         stats->unknown_requests++;
         LOG_DEBUG("protocol=%-8s count=%llu (unknown_requests)", name,
-                          (unsigned long long)stats->unknown_requests);
+                  (unsigned long long)stats->unknown_requests);
         break;
     }
 }
@@ -312,8 +319,8 @@ int gw_proto_router_route(gw_proto_router_t *router, gw_proto_detect_result_t pr
     gw_proto_request_handler_t handler = find_handler(router, proto_type, &user_data);
 
     if (!handler) {
-        LOG_WARN("no handler found for protocol type=%d, route_errors=%llu",
-                         proto_type, (unsigned long long)router->stats.route_errors);
+        LOG_WARN("no handler found for protocol type=%d, route_errors=%llu", proto_type,
+                 (unsigned long long)router->stats.route_errors);
         router->stats.route_errors++;
         record_proto_stats(&router->stats, proto_type);
         return AIRY_ERR_NOT_FOUND;
@@ -323,8 +330,8 @@ int gw_proto_router_route(gw_proto_router_t *router, gw_proto_detect_result_t pr
 
     int result = handler(method, path, body_json, response_json, user_data);
     if (result != 0) {
-        LOG_WARN("handler returned error: proto_type=%d, result=%d, path=%s",
-                         proto_type, result, path ? path : "(null)");
+        LOG_WARN("handler returned error: proto_type=%d, result=%d, path=%s", proto_type, result,
+                 path ? path : "(null)");
         router->stats.route_errors++;
     }
     return result;

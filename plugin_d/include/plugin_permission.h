@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file plugin_permission.h
  * @brief P2.2.4: 插件权限校验 — manifest 权限 ↔ Cupolas 守卫类型映射
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 将插件 manifest 中声明的权限映射到 Cupolas 安全穹顶的守卫类型。
  * 加载插件时自动校验权限，不符合安全策略的插件拒绝加载。
@@ -33,25 +33,22 @@
 extern "C" {
 #endif
 
-/* ==================== 权限校验结果 ==================== */
 
 typedef enum {
-    PLUGIN_PERM_ALLOWED    = 0,  /**< 权限通过 */
-    PLUGIN_PERM_DENIED     = 1,  /**< 权限拒绝 */
-    PLUGIN_PERM_UNKNOWN    = 2,  /**< 未识别的权限声明 */
-    PLUGIN_PERM_ERROR      = 3,  /**< 校验失败 */
+    PLUGIN_PERM_ALLOWED = 0,
+    PLUGIN_PERM_DENIED = 1,
+    PLUGIN_PERM_UNKNOWN = 2,
+    PLUGIN_PERM_ERROR = 3,
 } plugin_permission_result_t;
 
-/* ==================== 权限校验配置 ==================== */
 
 typedef struct {
-    bool enable_strict_mode;          /**< 严格模式：未声明的权限视为拒绝 */
-    bool enable_audit_log;            /**< 启用审计日志 */
-    char safety_policy_path[512];     /**< 安全策略文件路径 */
-    const char *agent_id;             /**< 代理 ID */
+    bool enable_strict_mode;
+    bool enable_audit_log;
+    char safety_policy_path[512];
+    const char *agent_id;
 } plugin_permission_config_t;
 
-/* ==================== 权限校验 API ==================== */
 
 /**
  * @brief 初始化权限校验模块
@@ -79,12 +76,10 @@ void plugin_permission_destroy(void);
  * @param out_denied_size   缓冲区大小
  * @return PLUGIN_PERM_ALLOWED 全部通过，否则返回第一个拒绝原因
  */
-plugin_permission_result_t plugin_permission_check(
-    const char (*permissions)[64],
-    uint32_t permission_count,
-    const char *plugin_name,
-    char *out_denied,
-    size_t out_denied_size);
+plugin_permission_result_t plugin_permission_check(const char (*permissions)[64],
+                                                   uint32_t permission_count,
+                                                   const char *plugin_name, char *out_denied,
+                                                   size_t out_denied_size);
 
 /**
  * @brief 将权限字符串映射到 Cupolas 守卫类型
@@ -93,8 +88,7 @@ plugin_permission_result_t plugin_permission_check(
  * @param out_guard  输出守卫类型
  * @return 0 成功，-1 未知权限
  */
-int plugin_permission_map_to_guard(const char *permission,
-                                   safety_guard_type_t *out_guard);
+int plugin_permission_map_to_guard(const char *permission, safety_guard_type_t *out_guard);
 
 /**
  * @brief 获取权限的人类可读描述
@@ -111,8 +105,7 @@ const char *plugin_permission_description(const char *permission);
  * @param out_count       输出数量
  * @return 0 成功
  */
-int plugin_permission_list_supported(char ***out_permissions,
-                                     size_t *out_count);
+int plugin_permission_list_supported(char ***out_permissions, size_t *out_count);
 
 #ifdef __cplusplus
 }

@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_sandbox_integration.c
  * @brief P3.18 (ACC-DT27): tool_d sandbox 集成测试
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 验证 ACC-DT27 验收标准：
  *   1. sandbox ALLOW 路径 — airy_sandbox_invoke(SYS_TOOL_EXECUTE) 执行 /usr/bin/echo 成功
@@ -34,15 +34,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ========== 测试统计 ========== */
-
 static int test_count = 0;
 static int pass_count = 0;
 
-#define TEST_PASS() do { pass_count++; test_count++; } while (0)
-#define TEST_FAIL(msg) do { printf("    FAIL: %s\n", msg); test_count++; } while (0)
-
-/* ========== 辅助：构造 echo 工具参数 ========== */
+#define TEST_PASS()   \
+    do {              \
+        pass_count++; \
+        test_count++; \
+    } while (0)
+#define TEST_FAIL(msg)                 \
+    do {                               \
+        printf("    FAIL: %s\n", msg); \
+        test_count++;                  \
+    } while (0)
 
 static tool_execute_args_t *make_echo_args(const char *message, uint32_t timeout_ms)
 {
@@ -81,7 +85,7 @@ static tool_execute_args_t *make_echo_args(const char *message, uint32_t timeout
         return NULL;
     }
     t->output_buffer[0] = '\0';
-    t->exec_result = -999; /* 哨兵值：未执行 */
+    t->exec_result = -999;
     return t;
 }
 
@@ -108,13 +112,12 @@ static void free_echo_args(tool_execute_args_t *t)
  */
 static void test_sandbox_allow_path(void)
 {
-    /* 1. 初始化管理器（幂等） */
+
     if (airy_sandbox_manager_init() != AIRY_SUCCESS) {
         TEST_FAIL("airy_sandbox_manager_init failed");
         return;
     }
 
-    /* 2. 创建沙箱 */
     airy_sandbox_t *sb = NULL;
     if (airy_sandbox_create_default("test_allow", "test_owner", &sb) != AIRY_SUCCESS || !sb) {
         TEST_FAIL("airy_sandbox_create_default failed");
@@ -122,7 +125,6 @@ static void test_sandbox_allow_path(void)
         return;
     }
 
-    /* 3. 添加 PERM_ALLOW 规则（显式，便于审计） */
     if (airy_sandbox_add_rule(sb, SYS_TOOL_EXECUTE, PERM_ALLOW, NULL) != AIRY_SUCCESS) {
         TEST_FAIL("airy_sandbox_add_rule(ALLOW) failed");
         airy_sandbox_destroy(sb);
@@ -130,7 +132,6 @@ static void test_sandbox_allow_path(void)
         return;
     }
 
-    /* 4. 构造 echo 参数并执行 */
     tool_execute_args_t *t = make_echo_args("hello_airymax", 5000);
     if (!t) {
         TEST_FAIL("make_echo_args failed (OOM)");
@@ -139,15 +140,14 @@ static void test_sandbox_allow_path(void)
         return;
     }
 
-    void *invoke_args[1] = { t };
+    void *invoke_args[1] = {t};
     void *out_result = NULL;
     airy_err_t rc = airy_sandbox_invoke(sb, SYS_TOOL_EXECUTE, invoke_args, 1, &out_result);
 
-    /* 5. 验证返回 SUCCESS */
     if (rc != AIRY_SUCCESS) {
         char msg[128];
-        snprintf(msg, sizeof(msg), "invoke returned %d (expected SUCCESS=%d)",
-                 (int)rc, (int)AIRY_SUCCESS);
+        snprintf(msg, sizeof(msg), "invoke returned %d (expected SUCCESS=%d)", (int)rc,
+                 (int)AIRY_SUCCESS);
         TEST_FAIL(msg);
         free_echo_args(t);
         airy_sandbox_destroy(sb);
@@ -155,7 +155,6 @@ static void test_sandbox_allow_path(void)
         return;
     }
 
-    /* 6. 验证 exec_result == 0（echo 退出码） */
     if (t->exec_result != 0) {
         char msg[128];
         snprintf(msg, sizeof(msg), "exec_result=%d (expected 0)", t->exec_result);
@@ -166,7 +165,6 @@ static void test_sandbox_allow_path(void)
         return;
     }
 
-    /* 7. 验证 output 含 "hello_airymax" */
     if (!t->output_buffer || strstr(t->output_buffer, "hello_airymax") == NULL) {
         char msg[128];
         snprintf(msg, sizeof(msg), "output='%s' (expected to contain 'hello_airymax')",
@@ -178,8 +176,7 @@ static void test_sandbox_allow_path(void)
         return;
     }
 
-    /* 8. 清理 */
-    (void)out_result; /* sys_tool_execute 返回 SUCCESS/EFAIL，已由 rc 覆盖 */
+    (void)out_result;
     printf("    ALLOW path: echo executed via sandbox, output='%s'\n", t->output_buffer);
     free_echo_args(t);
     airy_sandbox_destroy(sb);
@@ -208,7 +205,6 @@ static void test_sandbox_deny_path(void)
         return;
     }
 
-    /* 添加 PERM_DENY 规则 — DENY 优先于默认 ALLOW */
     if (airy_sandbox_add_rule(sb, SYS_TOOL_EXECUTE, PERM_DENY, NULL) != AIRY_SUCCESS) {
         TEST_FAIL("airy_sandbox_add_rule(DENY) failed");
         airy_sandbox_destroy(sb);
@@ -224,15 +220,14 @@ static void test_sandbox_deny_path(void)
         return;
     }
 
-    void *invoke_args[1] = { t };
+    void *invoke_args[1] = {t};
     void *out_result = NULL;
     airy_err_t rc = airy_sandbox_invoke(sb, SYS_TOOL_EXECUTE, invoke_args, 1, &out_result);
 
-    /* 验证返回 EACCES（权限拒绝） */
     if (rc != AIRY_EACCES) {
         char msg[128];
-        snprintf(msg, sizeof(msg), "invoke returned %d (expected EACCES=%d)",
-                 (int)rc, (int)AIRY_EACCES);
+        snprintf(msg, sizeof(msg), "invoke returned %d (expected EACCES=%d)", (int)rc,
+                 (int)AIRY_EACCES);
         TEST_FAIL(msg);
         free_echo_args(t);
         airy_sandbox_destroy(sb);
@@ -240,10 +235,10 @@ static void test_sandbox_deny_path(void)
         return;
     }
 
-    /* 验证工具未实际执行（exec_result 保持哨兵值 -999） */
     if (t->exec_result != -999) {
         char msg[128];
-        snprintf(msg, sizeof(msg), "exec_result=%d (expected -999 sentinel, tool should NOT have run)",
+        snprintf(msg, sizeof(msg),
+                 "exec_result=%d (expected -999 sentinel, tool should NOT have run)",
                  t->exec_result);
         TEST_FAIL(msg);
         free_echo_args(t);
@@ -268,14 +263,14 @@ static void test_sandbox_deny_path(void)
 static void test_sandbox_null_fail_closed(void)
 {
     void *out_result = NULL;
-    /* 构造无效 args（NULL sandbox 下不会解引用） */
-    void *invoke_args[1] = { NULL };
+
+    void *invoke_args[1] = {NULL};
     airy_err_t rc = airy_sandbox_invoke(NULL, SYS_TOOL_EXECUTE, invoke_args, 1, &out_result);
 
     if (rc != AIRY_EINVAL) {
         char msg[128];
-        snprintf(msg, sizeof(msg), "invoke(NULL,...) returned %d (expected EINVAL=%d)",
-                 (int)rc, (int)AIRY_EINVAL);
+        snprintf(msg, sizeof(msg), "invoke(NULL,...) returned %d (expected EINVAL=%d)", (int)rc,
+                 (int)AIRY_EINVAL);
         TEST_FAIL(msg);
         return;
     }
@@ -300,7 +295,6 @@ static void test_executor_sandbox_integration(void)
         return;
     }
 
-    /* 构造工具元数据 — /usr/bin/echo */
     tool_metadata_t meta;
     AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "test_echo";
@@ -317,7 +311,8 @@ static void test_executor_sandbox_integration(void)
     if (ret != AIRY_EPERM) {
         char msg[128];
         snprintf(msg, sizeof(msg),
-                 "tool_executor_run returned %d (expected EPERM=%d, approval_ctx NULL should fail-closed)",
+                 "tool_executor_run returned %d (expected EPERM=%d, approval_ctx NULL should "
+                 "fail-closed)",
                  ret, (int)AIRY_EPERM);
         TEST_FAIL(msg);
         if (result)

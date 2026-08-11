@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file main.c
  * @brief 市场服务守护进程主入口（遵循 daemon 模块统一规范）
@@ -19,32 +19,23 @@
 #include <stdlib.h>
 #include <time.h>
 
-/* ==================== 配置常量 ==================== */
-
 #define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("market.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_market"
 #define DEFAULT_TCP_PORT 8082
 #define MAX_BUFFER 65536
 
-/* 生成公共全局变量、信号处理、help、客户端处理等样板 */
-DAEMON_DECLARE_COMMON(market_d, market, DEFAULT_SOCKET_PATH_UNIX,
-                      DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+DAEMON_DECLARE_COMMON(market_d, market, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN,
+                      DEFAULT_TCP_PORT, MAX_BUFFER)
 
-/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
 DAEMON_DECLARE_SHUTDOWN_METHOD(market_d)
-
-/* ==================== 全局状态 ==================== */
 
 static market_service_t *g_service = NULL;
 
-/* ==================== 错误码定义 ==================== */
 #define MARKET_ERR_INVALID_PARAM AIRY_ERR_INVALID_PARAM
 #define MARKET_ERR_OUT_OF_MEMORY AIRY_ERR_OUT_OF_MEMORY
 #define MARKET_ERR_NOT_FOUND AIRY_ERR_NOT_FOUND
 #define MARKET_ERR_ALREADY_EXISTS (AIRY_ERR_DAEMON_BASE + 0x20)
 #define MARKET_ERR_INSTALL_FAIL (AIRY_ERR_DAEMON_BASE + 0x21)
-
-/* ==================== 方法处理器包装函数 ==================== */
 
 static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_search_agents(cJSON *params, int id, airy_sock_t client_fd);
@@ -85,13 +76,11 @@ static void on_health_check_method(cJSON *params __attribute__((unused)), int id
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
 
-/* L2 标准方法 market.publish（02-l2-service-protocol.md） */
 static void on_publish_method(cJSON *params, int id, void *user_data)
 {
     handle_publish(params, id, *(airy_sock_t *)user_data);
 }
 
-/* L2 标准方法 market.get_stats（02-l2-service-protocol.md §6.1） */
 static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_get_stats(id, *(airy_sock_t *)user_data);
@@ -105,26 +94,33 @@ static int register_rpc_methods(void)
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    method_dispatcher_register(g_dispatcher_market_d, "register_agent", on_register_agent_method, NULL);
-    method_dispatcher_register(g_dispatcher_market_d, "search_agents", on_search_agents_method, NULL);
-    method_dispatcher_register(g_dispatcher_market_d, "install_agent", on_install_agent_method, NULL);
-    method_dispatcher_register(g_dispatcher_market_d, "register_skill", on_register_skill_method, NULL);
-    method_dispatcher_register(g_dispatcher_market_d, "search_skills", on_search_skills_method, NULL);
+    method_dispatcher_register(g_dispatcher_market_d, "register_agent", on_register_agent_method,
+                               NULL);
+    method_dispatcher_register(g_dispatcher_market_d, "search_agents", on_search_agents_method,
+                               NULL);
+    method_dispatcher_register(g_dispatcher_market_d, "install_agent", on_install_agent_method,
+                               NULL);
+    method_dispatcher_register(g_dispatcher_market_d, "register_skill", on_register_skill_method,
+                               NULL);
+    method_dispatcher_register(g_dispatcher_market_d, "search_skills", on_search_skills_method,
+                               NULL);
     method_dispatcher_register(g_dispatcher_market_d, "health_check", on_health_check_method, NULL);
-    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：market.publish / market.search / market.install） */
+    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：market.publish / market.search /
+     * market.install）
+     */
     method_dispatcher_register(g_dispatcher_market_d, "publish", on_publish_method, NULL);
     method_dispatcher_register(g_dispatcher_market_d, "search", on_search_agents_method, NULL);
     method_dispatcher_register(g_dispatcher_market_d, "install", on_install_agent_method, NULL);
-    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
-    method_dispatcher_register(g_dispatcher_market_d, "shutdown", on_shutdown_method_market_d, NULL);
-    /* L2 协议标准方法 market.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+
+    method_dispatcher_register(g_dispatcher_market_d, "shutdown", on_shutdown_method_market_d,
+                               NULL);
+
     method_dispatcher_register(g_dispatcher_market_d, "get_stats", on_get_stats_method, NULL);
 
     SVC_LOG_INFO("Registered %d RPC methods (market.* namespace)", 11);
     return 0;
 }
 
-/* 线程池提交回调：复用生成的 daemon_handle_client_market_d */
 static void handle_client_wrapper(void *arg)
 {
     daemon_handle_client_market_d((airy_sock_t)(uintptr_t)arg, g_dispatcher_market_d);
@@ -221,7 +217,6 @@ static void handle_install_agent(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *force_json = cJSON_GetObjectItem(params, "force_update");
     bool force = cJSON_IsTrue(force_json);
 
-    /* 构造真实 install_request_t（原实现把 JSON 字符串指针强转结构体指针，属 UB） */
     install_request_t req;
     AIRY_MEMSET(&req, 0, sizeof(req));
     req.id = (char *)aid;
@@ -239,9 +234,8 @@ static void handle_install_agent(cJSON *params, int id, airy_sock_t client_fd)
         cJSON *resp = cJSON_CreateObject();
         cJSON_AddStringToObject(resp, "status", result->success ? "installed" : "failed");
         cJSON_AddStringToObject(resp, "agent_id", aid);
-        cJSON_AddStringToObject(
-            resp, "installed_version",
-            result->installed_version ? result->installed_version : version);
+        cJSON_AddStringToObject(resp, "installed_version",
+                                result->installed_version ? result->installed_version : version);
         if (result->message) {
             cJSON_AddStringToObject(resp, "message", result->message);
         }
@@ -249,8 +243,8 @@ static void handle_install_agent(cJSON *params, int id, airy_sock_t client_fd)
             cJSON_AddStringToObject(resp, "install_path", result->install_path);
         }
         JSONRPC_SEND_SUCCESS(client_fd, resp, id);
-        SVC_LOG_INFO("Agent install %s: %s@%s (ret=%d)",
-                     result->success ? "OK" : "FAILED", aid, version, ret);
+        SVC_LOG_INFO("Agent install %s: %s@%s (ret=%d)", result->success ? "OK" : "FAILED", aid,
+                     version, ret);
     }
 
     if (result) {
@@ -342,13 +336,12 @@ static void handle_health_check(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* L2 标准方法 market.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
 static void handle_get_stats(int id, airy_sock_t client_fd)
 {
     cJSON *result = cJSON_CreateObject();
     cJSON_AddStringToObject(result, "daemon", "market_d");
     if (g_service) {
-        /* 注册仓库（registry）计数：search_agents/search_skills 全量查询 */
+
         search_params_t sp;
         AIRY_MEMSET(&sp, 0, sizeof(sp));
         sp.query = (char *)"";
@@ -368,7 +361,7 @@ static void handle_get_stats(int id, airy_sock_t client_fd)
             if (skills)
                 AIRY_FREE(skills);
         }
-        /* 已安装（本机）计数 */
+
         agent_info_t **installed_agents = NULL;
         size_t installed_agent_count = 0;
         if (market_service_get_installed_agents(g_service, &installed_agents,
@@ -400,8 +393,7 @@ static void handle_publish(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *skill_json = jsonrpc_get_object_param(params, "skill");
 
     if (!agent_json && !skill_json) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "Missing agent or skill object", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent or skill object", id);
         return;
     }
 
@@ -430,29 +422,27 @@ static void handle_publish(cJSON *params, int id, airy_sock_t client_fd)
     req.version = (char *)version;
 
     install_result_t *result = NULL;
-    int ret = is_agent ? market_service_install_agent(g_service, &req, &result)
-                       : market_service_install_skill(g_service, &req, &result);
+    int ret = is_agent ? market_service_install_agent(g_service, &req, &result) :
+                         market_service_install_skill(g_service, &req, &result);
 
     if (ret != AIRY_SUCCESS || !result || !result->success) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Publish failed", id);
-        SVC_LOG_ERROR("market.publish failed: %s=%s@%s (error=%d)",
-                      is_agent ? "agent" : "skill", id_str, version, ret);
+        SVC_LOG_ERROR("market.publish failed: %s=%s@%s (error=%d)", is_agent ? "agent" : "skill",
+                      id_str, version, ret);
     } else {
         cJSON *resp = cJSON_CreateObject();
         cJSON_AddStringToObject(resp, "status", "published");
         cJSON_AddStringToObject(resp, "type", is_agent ? "agent" : "skill");
         cJSON_AddStringToObject(resp, "id", id_str);
-        cJSON_AddStringToObject(
-            resp, "published_version",
-            result->installed_version ? result->installed_version : version);
+        cJSON_AddStringToObject(resp, "published_version",
+                                result->installed_version ? result->installed_version : version);
         if (result->message)
             cJSON_AddStringToObject(resp, "message", result->message);
         if (result->install_path)
             cJSON_AddStringToObject(resp, "install_path", result->install_path);
         JSONRPC_SEND_SUCCESS(client_fd, resp, id);
-        SVC_LOG_INFO("market.publish OK: %s=%s@%s path=%s",
-                     is_agent ? "agent" : "skill", id_str, version,
-                     result->install_path ? result->install_path : "?");
+        SVC_LOG_INFO("market.publish OK: %s=%s@%s path=%s", is_agent ? "agent" : "skill", id_str,
+                     version, result->install_path ? result->install_path : "?");
     }
 
     if (result) {
@@ -463,8 +453,6 @@ static void handle_publish(cJSON *params, int id, airy_sock_t client_fd)
     }
 }
 
-/* ==================== 销毁服务 ==================== */
-
 static void destroy_service(void)
 {
     if (g_service) {
@@ -473,22 +461,18 @@ static void destroy_service(void)
     }
 }
 
-/* ==================== 主函数 ==================== */
-
 int main(int argc, char **argv)
 {
     const char *config_path = "agentrt/manager/service/market_d/market.yaml";
     int use_tcp = 0;
 
-    /* 解析命令行参数（--manager/--tcp/--help） */
     int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_market_d);
-    if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
+    if (parse_rc > 0)
+        return parse_rc == 1 ? 0 : 1;
 
-    /* 初始化平台层 */
     airy_sock_init();
     airy_mtx_init(&g_running_lock_market_d);
 
-    /* 设置信号处理 */
 #ifdef _WIN32
     SetConsoleCtrlHandler((PHANDLER_ROUTINE)signal_handler_market_d, TRUE);
 #else
@@ -498,7 +482,6 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("market_d");
 
     SVC_LOG_INFO("Market service starting, manager=%s", config_path);
@@ -512,7 +495,6 @@ int main(int argc, char **argv)
                               .enable_remote_registry = false,
                               .enable_auto_update = false};
 
-    /* 创建市场服务 */
     int ret = market_service_create(&config, &g_service);
     if (ret != AIRY_SUCCESS || !g_service) {
         SVC_LOG_ERROR("Failed to create market service (error=%d)", ret);
@@ -521,7 +503,6 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    /* 注册 RPC 方法 */
     if (register_rpc_methods() != 0) {
         SVC_LOG_ERROR("Failed to register RPC methods");
         destroy_service();
@@ -532,9 +513,9 @@ int main(int argc, char **argv)
 
     SVC_LOG_INFO("Market service created successfully");
 
-    /* 创建服务器 Socket（TCP/Unix/NamedPipe 统一封装） */
-    airy_sock_t server_fd = daemon_create_server_socket(
-        use_tcp, DEFAULT_TCP_PORT, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN);
+    airy_sock_t server_fd =
+        daemon_create_server_socket(use_tcp, DEFAULT_TCP_PORT, DEFAULT_SOCKET_PATH_UNIX,
+                                    DEFAULT_SOCKET_PATH_WIN);
     if (server_fd < 0) {
         SVC_LOG_ERROR("Failed to create server socket");
         method_dispatcher_destroy(g_dispatcher_market_d);
@@ -549,10 +530,10 @@ int main(int argc, char **argv)
     /* SD/IPC bootstrap */
     const char *sock_addr = use_tcp ? "127.0.0.1" : DEFAULT_SOCKET_PATH_UNIX;
     g_bsd_market_d = daemon_bootstrap_sd_start("market_d", "market", sock_addr,
-                                                use_tcp ? DEFAULT_TCP_PORT : 0, "market,core", 0);
-    g_bipc_market_d = daemon_bootstrap_ipc_start("market_d", "market", sock_addr,
-                                                  use_tcp ? DEFAULT_TCP_PORT : 0,
-                                                  IPC_BUS_PROTO_JSON_RPC);
+                                               use_tcp ? DEFAULT_TCP_PORT : 0, "market,core", 0);
+    g_bipc_market_d =
+        daemon_bootstrap_ipc_start("market_d", "market", sock_addr, use_tcp ? DEFAULT_TCP_PORT : 0,
+                                   IPC_BUS_PROTO_JSON_RPC);
 
     SVC_LOG_INFO("Market service started successfully");
 
@@ -574,7 +555,6 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    /* 主事件循环：接受连接并提交线程池并发处理 */
     while (atomic_load_explicit(&g_running_market_d, memory_order_acquire)) {
         airy_sock_t client_fd = airy_sock_accept(server_fd, 5000);
         if (client_fd == AIRY_INVALID_SOCKET)
@@ -583,15 +563,14 @@ int main(int argc, char **argv)
         thread_pool_submit(pool, handle_client_wrapper, (void *)(uintptr_t)client_fd);
     }
 
-    /* 清理资源 */
-    daemon_cleanup_standard(g_bipc_market_d, g_bsd_market_d, NULL, server_fd,
-                           destroy_service, &g_running_lock_market_d);
+    daemon_cleanup_standard(g_bipc_market_d, g_bsd_market_d, NULL, server_fd, destroy_service,
+                            &g_running_lock_market_d);
     thread_pool_destroy(pool);
     if (g_dispatcher_market_d)
         method_dispatcher_destroy(g_dispatcher_market_d);
 
     SVC_LOG_INFO("Market service stopped");
-    daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
+    daemon_cupolas_cleanup();
     log_cleanup();
     return 0;
 }

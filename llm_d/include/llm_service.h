@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file llm_service.h
  * @brief LLM 服务对外接口
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_LLM_SERVICE_H
@@ -16,7 +16,6 @@
 extern "C" {
 #endif
 
-/* ---------- 公共类型定义 ---------- */
 
 typedef struct llm_service llm_service_t;
 
@@ -58,18 +57,16 @@ typedef struct {
     uint32_t prompt_tokens;
     uint32_t completion_tokens;
     uint32_t total_tokens;
-    double cost_usd; /* 单次调用估算成本（USD），由 llm_d 按模型单价计算，网关/TUI 据此累计 */
+    double cost_usd;
     char *finish_reason;
 } llm_response_t;
 
 typedef void (*llm_stream_callback_t)(const char *chunk, void *user_data);
 
-/* ---------- 生命周期 ---------- */
 
 llm_service_t *llm_service_create(const char *config_path);
 void llm_service_destroy(llm_service_t *svc);
 
-/* ---------- 请求接口 ---------- */
 
 int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager,
                          llm_response_t **out_response);
@@ -80,11 +77,9 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
 
 void llm_response_free(llm_response_t *resp);
 
-/* ---------- 统计 ---------- */
 
 int llm_service_stats(llm_service_t *svc, char **out_json);
 
-/* ---------- 模型列表（A2-3: llm.list_models） ---------- */
 
 /**
  * @brief 返回 registry 中全部可用模型列表（JSON 字符串，调用者 AIRY_FREE）
@@ -95,7 +90,6 @@ int llm_service_stats(llm_service_t *svc, char **out_json);
  */
 char *llm_service_list_models(llm_service_t *svc);
 
-/* ---------- 默认模型（A2-2: 缺省回落） ---------- */
 
 /**
  * @brief 返回服务默认模型名（global.default_model，主配置 + 用户覆盖）

@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file tool_svc_adapter.c
  * @brief 工具服务适配器：将工具服务适配到统一的AgentRT服务管理框架
@@ -35,8 +35,7 @@ static tool_adapter_ctx_t *tool_get_ctx(airy_svc_t service)
     return (tool_adapter_ctx_t *)airy_svc_get_user_data(service);
 }
 
-static airy_err_t tool_adapter_init(airy_svc_t service,
-                                         const airy_svc_config_t *config)
+static airy_err_t tool_adapter_init(airy_svc_t service, const airy_svc_config_t *config)
 {
     if (!service)
         return AIRY_EINVAL;
@@ -170,8 +169,7 @@ static const airy_svc_interface_t tool_adapter_iface = {
     .healthcheck = tool_adapter_healthcheck,
 };
 
-airy_err_t tool_service_adapter_create(airy_svc_t *out_service,
-                                            const airy_svc_config_t *config)
+airy_err_t tool_service_adapter_create(airy_svc_t *out_service, const airy_svc_config_t *config)
 {
     if (!out_service)
         return AIRY_EINVAL;
@@ -208,8 +206,8 @@ airy_err_t tool_service_adapter_create(airy_svc_t *out_service,
     ctx->owns_service = true;
 
     airy_svc_t svc_handle = NULL;
-    airy_err_t err = airy_svc_create(&svc_handle, ctx->common_cfg.name,
-                                                 &tool_adapter_iface, &ctx->common_cfg);
+    airy_err_t err =
+        airy_svc_create(&svc_handle, ctx->common_cfg.name, &tool_adapter_iface, &ctx->common_cfg);
     if (err != AIRY_SUCCESS) {
         AIRY_FREE(ctx->config_path);
         AIRY_FREE(ctx);
@@ -229,7 +227,7 @@ airy_err_t tool_service_adapter_create(airy_svc_t *out_service,
 }
 
 airy_err_t tool_service_adapter_wrap(airy_svc_t *out_service, tool_service_t *tool_svc,
-                                          const airy_svc_config_t *config)
+                                     const airy_svc_config_t *config)
 {
     if (!out_service || !tool_svc)
         return AIRY_EINVAL;
@@ -258,8 +256,8 @@ airy_err_t tool_service_adapter_wrap(airy_svc_t *out_service, tool_service_t *to
     }
 
     airy_svc_t svc_handle = NULL;
-    airy_err_t err = airy_svc_create(&svc_handle, ctx->common_cfg.name,
-                                                 &tool_adapter_iface, &ctx->common_cfg);
+    airy_err_t err =
+        airy_svc_create(&svc_handle, ctx->common_cfg.name, &tool_adapter_iface, &ctx->common_cfg);
     if (err != AIRY_SUCCESS) {
         AIRY_FREE(ctx);
         return err;

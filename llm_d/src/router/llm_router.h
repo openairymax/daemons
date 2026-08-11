@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file llm_router.h
  * @brief LLM 路由器接口
@@ -29,87 +30,80 @@
 extern "C" {
 #endif
 
-/* ── 路由策略 ── */
 
 typedef enum {
-    LLM_ROUTE_COMPLEXITY  = 0,  /**< 基于复杂度路由 */
-    LLM_ROUTE_COST        = 1,  /**< 成本优化路由 */
-    LLM_ROUTE_LATENCY     = 2,  /**< 延迟优化路由 */
-    LLM_ROUTE_FALLBACK    = 3,  /**< 降级路由 */
-    LLM_ROUTE_ROUND_ROBIN = 4,  /**< 轮询路由 */
-    LLM_ROUTE_COUNT       = 5   /**< 策略总数 */
+    LLM_ROUTE_COMPLEXITY = 0,
+    LLM_ROUTE_COST = 1,
+    LLM_ROUTE_LATENCY = 2,
+    LLM_ROUTE_FALLBACK = 3,
+    LLM_ROUTE_ROUND_ROBIN = 4,
+    LLM_ROUTE_COUNT = 5
 } llm_route_strategy_t;
 
-/* ── 模型能力标志 ── */
 
 typedef enum {
-    LLM_CAP_CHAT           = 0x0001,  /**< 对话 */
-    LLM_CAP_COMPLETION     = 0x0002,  /**< 补全 */
-    LLM_CAP_EMBEDDING      = 0x0004,  /**< 嵌入 */
-    LLM_CAP_FUNCTION_CALL  = 0x0008,  /**< 函数调用 */
-    LLM_CAP_VISION         = 0x0010,  /**< 视觉 */
-    LLM_CAP_STREAMING      = 0x0020,  /**< 流式 */
-    LLM_CAP_JSON_MODE      = 0x0040,  /**< JSON 模式 */
-    LLM_CAP_EXTENDED_THINK = 0x0080,  /**< 扩展思考 */
-    LLM_CAP_CODE_EXEC      = 0x0100   /**< 代码执行 */
+    LLM_CAP_CHAT = 0x0001,
+    LLM_CAP_COMPLETION = 0x0002,
+    LLM_CAP_EMBEDDING = 0x0004,
+    LLM_CAP_FUNCTION_CALL = 0x0008,
+    LLM_CAP_VISION = 0x0010,
+    LLM_CAP_STREAMING = 0x0020,
+    LLM_CAP_JSON_MODE = 0x0040,
+    LLM_CAP_EXTENDED_THINK = 0x0080,
+    LLM_CAP_CODE_EXEC = 0x0100
 } llm_capability_t;
 
-/* ── 提供商端点 ── */
 
 typedef struct {
-    char provider_name[64];      /**< 提供商名称 */
-    char model_name[64];         /**< 模型名称 */
-    char endpoint[256];          /**< API 端点 */
-    char api_key_env[64];        /**< API Key 环境变量名 */
-    uint32_t capabilities;       /**< 能力标志 (llm_capability_t 位掩码) */
-    uint32_t context_window;     /**< 上下文窗口大小 */
-    double cost_per_1k_input;    /**< 输入每 1K token 成本 (USD) */
-    double cost_per_1k_output;   /**< 输出每 1K token 成本 (USD) */
-    uint32_t avg_latency_ms;     /**< 平均延迟 (ms) */
-    uint32_t rate_limit_rpm;     /**< 速率限制 (请求/分钟) */
-    bool enabled;                /**< 是否启用 */
-    int priority;                /**< 优先级 */
+    char provider_name[64];
+    char model_name[64];
+    char endpoint[256];
+    char api_key_env[64];
+    uint32_t capabilities;
+    uint32_t context_window;
+    double cost_per_1k_input;
+    double cost_per_1k_output;
+    uint32_t avg_latency_ms;
+    uint32_t rate_limit_rpm;
+    bool enabled;
+    int priority;
 } llm_endpoint_t;
 
-/* ── 路由请求 ── */
 
 typedef struct {
-    const char *prompt;          /**< 提示文本 */
-    size_t prompt_len;           /**< 提示长度 */
-    uint32_t required_caps;     /**< 必需能力 (llm_capability_t 位掩码) */
-    uint32_t max_tokens;        /**< 最大 token 数 */
-    double max_cost;             /**< 最大成本 (USD, 0=无限制) */
-    uint32_t max_latency_ms;    /**< 最大延迟 (ms, 0=无限制) */
-    llm_route_strategy_t strategy; /**< 路由策略 */
-    char preferred_provider[64]; /**< 首选提供商（空字符串=自动） */
+    const char *prompt;
+    size_t prompt_len;
+    uint32_t required_caps;
+    uint32_t max_tokens;
+    double max_cost;
+    uint32_t max_latency_ms;
+    llm_route_strategy_t strategy;
+    char preferred_provider[64];
 } llm_route_request_t;
 
-/* ── 路由结果 ── */
 
 typedef struct {
-    char provider_name[64];      /**< 选中的提供商 */
-    char model_name[64];         /**< 选中的模型 */
-    char endpoint[256];          /**< 选中的端点 */
-    double estimated_cost;       /**< 预估成本 (USD) */
-    uint32_t estimated_latency_ms; /**< 预估延迟 (ms) */
-    llm_route_strategy_t strategy_used; /**< 实际使用的策略 */
-    int confidence;              /**< 路由置信度 (0-100) */
-    char fallback_provider[64];  /**< 降级提供商 */
-    char fallback_model[64];     /**< 降级模型 */
+    char provider_name[64];
+    char model_name[64];
+    char endpoint[256];
+    double estimated_cost;
+    uint32_t estimated_latency_ms;
+    llm_route_strategy_t strategy_used;
+    int confidence;
+    char fallback_provider[64];
+    char fallback_model[64];
 } llm_route_result_t;
 
-/* ── 路由器统计 ── */
 
 typedef struct {
-    uint64_t total_requests;     /**< 总请求数 */
-    uint64_t routed_count[5];    /**< 各策略路由计数 */
-    uint64_t fallback_count;     /**< 降级次数 */
-    uint64_t error_count;        /**< 错误次数 */
-    double total_cost;           /**< 总成本 (USD) */
-    uint64_t total_tokens;       /**< 总 token 数 */
+    uint64_t total_requests;
+    uint64_t routed_count[5];
+    uint64_t fallback_count;
+    uint64_t error_count;
+    double total_cost;
+    uint64_t total_tokens;
 } llm_router_stats_t;
 
-/* ── 路由器 API ── */
 
 /**
  * @brief 初始化 LLM 路由器

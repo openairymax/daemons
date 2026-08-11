@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_dag.c
  * @brief DAG 任务图执行引擎单元测试（工作大厅机制）
@@ -12,7 +13,7 @@
 #include "scheduler_service.h"
 #include "airy_memory.h"
 #include "error.h"
-#include "multi_agent_collaboration.h" /* 用例 8：group 协作 + consensus 机制 */
+#include "multi_agent_collaboration.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,15 +27,13 @@
 #define TEST_SLEEP_MS(ms) usleep((ms) * 1000)
 #endif
 
-/* ---- 假 executor：记录 (role, goal) 派发日志；支持按 goal 注入失败/阻塞 ---- */
-
 static char g_exec_log[64][256];
 static size_t g_exec_count;
-static const char *g_fail_goal;       /* goal 含此串 → 永久失败（EXEC_FAIL） */
-static const char *g_fatal_goal;      /* goal 含此串 → FATAL 失败（OOM，级联整图） */
-static const char *g_flaky_goal;      /* goal 含此串 → transient 失败（EXEC_TIMEOUT，可重试） */
-static int g_flaky_left;              /* transient 失败剩余次数 */
-static volatile int g_block;          /* 置 1 时 executor 阻塞（取消测试用） */
+static const char *g_fail_goal;
+static const char *g_fatal_goal;
+static const char *g_flaky_goal;
+static int g_flaky_left;
+static volatile int g_block;
 
 static void exec_log_push(const char *role, const char *goal)
 {
@@ -53,15 +52,15 @@ static int fake_executor(const char *agent_id, const char *task_description, cha
             TEST_SLEEP_MS(20);
     }
     if (g_fatal_goal && task_description && strstr(task_description, g_fatal_goal)) {
-        return AIRY_ERR_OUT_OF_MEMORY; /* FATAL：级联取消整图（改进3） */
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
     if (g_fail_goal && task_description && strstr(task_description, g_fail_goal)) {
-        return AIRY_ERR_EXEC_FAIL; /* 普通失败：不级联（改进3） */
+        return AIRY_ERR_EXEC_FAIL;
     }
     if (g_flaky_goal && task_description && strstr(task_description, g_flaky_goal)) {
         if (g_flaky_left > 0) {
             g_flaky_left--;
-            return AIRY_ERR_EXEC_TIMEOUT; /* transient：分级重试（改进4） */
+            return AIRY_ERR_EXEC_TIMEOUT;
         }
     }
 
@@ -165,7 +164,6 @@ static sched_service_t *make_parallel_service(void)
     return svc;
 }
 
-/* 轮询 dag_status 直到非 active（带超时） */
 static int wait_dag_terminal(sched_service_t *svc, const char *dag_id, int timeout_ms)
 {
     int elapsed = 0;
@@ -182,10 +180,9 @@ static int wait_dag_terminal(sched_service_t *svc, const char *dag_id, int timeo
         TEST_SLEEP_MS(50);
         elapsed += 50;
     }
-    return -1; /* 超时 */
+    return -1;
 }
 
-/* 解析 dag_status 图状态字符串：找到 "status":"xxx"（图的，第一个） */
 static int get_dag_status_str(sched_service_t *svc, const char *dag_id, char *out, size_t cap)
 {
     char *json = NULL;
@@ -211,7 +208,6 @@ static int get_dag_status_str(sched_service_t *svc, const char *dag_id, char *ou
     return 0;
 }
 
-/* ---- 用例 1：菱形 DAG 拓扑执行（A→B/C→D），顺序与状态断言 ---- */
 static int test_dag_topological_order(void)
 {
     printf("=== test_dag_topological_order ===\n");
@@ -264,7 +260,6 @@ static int test_dag_topological_order(void)
         return 1;
     }
 
-    /* 顺序断言：A 最先；B/C 在 A 后；D 最后 */
     if (strstr(g_exec_log[0], "|goal-A") == NULL) {
         printf("  FAILED: first dispatch not A (got: %s)\n", g_exec_log[0]);
         AIRY_FREE(dag_id);
@@ -273,9 +268,12 @@ static int test_dag_topological_order(void)
     }
     int b_pos = -1, c_pos = -1, d_pos = -1;
     for (size_t i = 0; i < g_exec_count; i++) {
-        if (strstr(g_exec_log[i], "|goal-B")) b_pos = (int)i;
-        if (strstr(g_exec_log[i], "|goal-C")) c_pos = (int)i;
-        if (strstr(g_exec_log[i], "|goal-D")) d_pos = (int)i;
+        if (strstr(g_exec_log[i], "|goal-B"))
+            b_pos = (int)i;
+        if (strstr(g_exec_log[i], "|goal-C"))
+            c_pos = (int)i;
+        if (strstr(g_exec_log[i], "|goal-D"))
+            d_pos = (int)i;
     }
     if (b_pos < 1 || c_pos < 1 || d_pos <= b_pos || d_pos <= c_pos) {
         printf("  FAILED: order B=%d C=%d D=%d (expect B,C>0 and D>B,C)\n", b_pos, c_pos, d_pos);
@@ -284,14 +282,13 @@ static int test_dag_topological_order(void)
         return 1;
     }
 
-    printf("  PASSED (exec order: %s | %s | %s | %s)\n\n",
-           g_exec_log[0], g_exec_log[1], g_exec_log[2], g_exec_log[3]);
+    printf("  PASSED (exec order: %s | %s | %s | %s)\n\n", g_exec_log[0], g_exec_log[1],
+           g_exec_log[2], g_exec_log[3]);
     AIRY_FREE(dag_id);
     sched_service_destroy(svc);
     return 0;
 }
 
-/* ---- 用例 2：环检测 ---- */
 static int test_dag_cycle_detection(void)
 {
     printf("=== test_dag_cycle_detection ===\n");
@@ -302,11 +299,10 @@ static int test_dag_cycle_detection(void)
         return 1;
     }
 
-    const char *cycle_json =
-        "{\"name\":\"cycle\",\"nodes\":["
-        "{\"id\":\"A\",\"goal\":\"g\",\"depends\":[\"B\"]},"
-        "{\"id\":\"B\",\"goal\":\"g\",\"depends\":[\"A\"]}"
-        "]}";
+    const char *cycle_json = "{\"name\":\"cycle\",\"nodes\":["
+                             "{\"id\":\"A\",\"goal\":\"g\",\"depends\":[\"B\"]},"
+                             "{\"id\":\"B\",\"goal\":\"g\",\"depends\":[\"A\"]}"
+                             "]}";
     char *dag_id = NULL;
     int ret = sched_service_submit_dag(svc, cycle_json, &dag_id);
     if (ret != AIRY_ERR_CYCLE_DETECTED) {
@@ -326,7 +322,6 @@ static int test_dag_cycle_detection(void)
     return 0;
 }
 
-/* ---- 用例 3：节点失败 → 图 failed + 依赖级联取消 ---- */
 static int test_dag_failure_cascade(void)
 {
     printf("=== test_dag_failure_cascade ===\n");
@@ -339,14 +334,13 @@ static int test_dag_failure_cascade(void)
     g_exec_count = 0;
     g_fail_goal = NULL;
     g_block = 0;
-    g_fail_goal = "boom-B"; /* B 的 goal 命中 → 返回失败 */
+    g_fail_goal = "boom-B";
 
-    const char *dag_json =
-        "{\"name\":\"fail\",\"nodes\":["
-        "{\"id\":\"A\",\"goal\":\"ok-A\",\"depends\":[]},"
-        "{\"id\":\"B\",\"goal\":\"boom-B\",\"depends\":[\"A\"]},"
-        "{\"id\":\"C\",\"goal\":\"never-C\",\"depends\":[\"B\"]}"
-        "]}";
+    const char *dag_json = "{\"name\":\"fail\",\"nodes\":["
+                           "{\"id\":\"A\",\"goal\":\"ok-A\",\"depends\":[]},"
+                           "{\"id\":\"B\",\"goal\":\"boom-B\",\"depends\":[\"A\"]},"
+                           "{\"id\":\"C\",\"goal\":\"never-C\",\"depends\":[\"B\"]}"
+                           "]}";
     char *dag_id = NULL;
     int ret = sched_service_submit_dag(svc, dag_json, &dag_id);
     if (ret != AIRY_SUCCESS || !dag_id) {
@@ -370,7 +364,7 @@ static int test_dag_failure_cascade(void)
         sched_service_destroy(svc);
         return 1;
     }
-    /* B 失败后 C 不得执行（级联取消） */
+
     for (size_t i = 0; i < g_exec_count; i++) {
         if (strstr(g_exec_log[i], "never-C")) {
             printf("  FAILED: node C executed after B failed\n");
@@ -386,7 +380,6 @@ static int test_dag_failure_cascade(void)
     return 0;
 }
 
-/* ---- 用例 4：用户取消 DAG ---- */
 static int test_dag_cancel(void)
 {
     printf("=== test_dag_cancel ===\n");
@@ -398,13 +391,12 @@ static int test_dag_cancel(void)
     }
     g_exec_count = 0;
     g_fail_goal = NULL;
-    g_block = 1; /* 首节点执行中阻塞，模拟长任务 */
+    g_block = 1;
 
-    const char *dag_json =
-        "{\"name\":\"cancel\",\"nodes\":["
-        "{\"id\":\"A\",\"goal\":\"block-A\",\"depends\":[]},"
-        "{\"id\":\"B\",\"goal\":\"never-B\",\"depends\":[\"A\"]}"
-        "]}";
+    const char *dag_json = "{\"name\":\"cancel\",\"nodes\":["
+                           "{\"id\":\"A\",\"goal\":\"block-A\",\"depends\":[]},"
+                           "{\"id\":\"B\",\"goal\":\"never-B\",\"depends\":[\"A\"]}"
+                           "]}";
     char *dag_id = NULL;
     int ret = sched_service_submit_dag(svc, dag_json, &dag_id);
     if (ret != AIRY_SUCCESS || !dag_id) {
@@ -413,7 +405,7 @@ static int test_dag_cancel(void)
         return 1;
     }
 
-    TEST_SLEEP_MS(200); /* 让 A 进入 running（executor 阻塞） */
+    TEST_SLEEP_MS(200);
     ret = sched_service_cancel_dag(svc, dag_id);
     if (ret != AIRY_SUCCESS) {
         printf("  FAILED: cancel_dag rc=%d\n", ret);
@@ -422,7 +414,7 @@ static int test_dag_cancel(void)
         sched_service_destroy(svc);
         return 1;
     }
-    g_block = 0; /* 释放 executor */
+    g_block = 0;
 
     char st[32];
     get_dag_status_str(svc, dag_id, st, sizeof(st));
@@ -465,7 +457,6 @@ static int test_dag_cancel(void)
     return 0;
 }
 
-/* ---- 用例 5：结构非法错误码区分（重复 id / 依赖缺失 → INVALID_PARAM，非环） ---- */
 static int test_dag_invalid_node_ids(void)
 {
     printf("=== test_dag_invalid_node_ids ===\n");
@@ -476,12 +467,10 @@ static int test_dag_invalid_node_ids(void)
         return 1;
     }
 
-    /* 5a：重复 id → INVALID_PARAM */
-    const char *dup_json =
-        "{\"name\":\"dup\",\"nodes\":["
-        "{\"id\":\"A\",\"goal\":\"g1\"},"
-        "{\"id\":\"A\",\"goal\":\"g2\"}"
-        "]}";
+    const char *dup_json = "{\"name\":\"dup\",\"nodes\":["
+                           "{\"id\":\"A\",\"goal\":\"g1\"},"
+                           "{\"id\":\"A\",\"goal\":\"g2\"}"
+                           "]}";
     char *dag_id = NULL;
     int ret = sched_service_submit_dag(svc, dup_json, &dag_id);
     if (ret != AIRY_ERR_INVALID_PARAM) {
@@ -496,11 +485,9 @@ static int test_dag_invalid_node_ids(void)
         return 1;
     }
 
-    /* 5b：依赖指向不存在的节点 → INVALID_PARAM */
-    const char *missing_json =
-        "{\"name\":\"missing\",\"nodes\":["
-        "{\"id\":\"A\",\"goal\":\"g\",\"depends\":[\"NOPE\"]}"
-        "]}";
+    const char *missing_json = "{\"name\":\"missing\",\"nodes\":["
+                               "{\"id\":\"A\",\"goal\":\"g\",\"depends\":[\"NOPE\"]}"
+                               "]}";
     ret = sched_service_submit_dag(svc, missing_json, &dag_id);
     if (ret != AIRY_ERR_INVALID_PARAM) {
         printf("  FAILED: missing dep rc=%d (expect %d)\n", ret, AIRY_ERR_INVALID_PARAM);
@@ -513,7 +500,6 @@ static int test_dag_invalid_node_ids(void)
     return 0;
 }
 
-/* ---- 用例 6：优先级队列消费顺序（URGENT 优先，同优先级 FIFO） ---- */
 static int test_priority_queue_order(void)
 {
     printf("=== test_priority_queue_order ===\n");
@@ -543,7 +529,6 @@ static int test_priority_queue_order(void)
     g_fail_goal = NULL;
     g_block = 0;
 
-    /* 先入队（worker 未启动，无消费者），再启动 worker 验证优先级消费 */
     task_info_t t = {0};
     char *tid = NULL;
     t.task_description = "goal-L";
@@ -603,8 +588,8 @@ static int test_priority_queue_order(void)
         return 1;
     }
 
-    printf("  PASSED (consume order: %s | %s | %s)\n\n",
-           g_exec_log[0], g_exec_log[1], g_exec_log[2]);
+    printf("  PASSED (consume order: %s | %s | %s)\n\n", g_exec_log[0], g_exec_log[1],
+           g_exec_log[2]);
     sched_service_destroy(svc);
     return 0;
 }
@@ -618,14 +603,13 @@ static int test_priority_queue_order(void)
 static int g_concurrent_now;
 static int g_concurrent_max;
 
-static int parallel_executor(const char *agent_id, const char *task_description,
-                             char **out_output)
+static int parallel_executor(const char *agent_id, const char *task_description, char **out_output)
 {
     exec_log_push(agent_id ? agent_id : "?", task_description ? task_description : "");
     int now = ++g_concurrent_now;
     if (now > g_concurrent_max)
         g_concurrent_max = now;
-    TEST_SLEEP_MS(30); /* 制造并发窗口 */
+    TEST_SLEEP_MS(30);
     --g_concurrent_now;
     char buf[128];
     snprintf(buf, sizeof(buf), "p[%s:%s]", agent_id ? agent_id : "?",
@@ -650,13 +634,12 @@ static int test_dag_parallel_delegation(void)
     g_block = 0;
     sched_service_set_executor(svc, parallel_executor);
 
-    const char *dag_json =
-        "{\"name\":\"para\",\"nodes\":["
-        "{\"id\":\"A\",\"goal\":\"goal-A\",\"depends\":[]},"
-        "{\"id\":\"B\",\"goal\":\"goal-B\",\"depends\":[\"A\"]},"
-        "{\"id\":\"C\",\"goal\":\"goal-C\",\"depends\":[\"A\"]},"
-        "{\"id\":\"D\",\"goal\":\"goal-D\",\"depends\":[\"B\",\"C\"]}"
-        "]}";
+    const char *dag_json = "{\"name\":\"para\",\"nodes\":["
+                           "{\"id\":\"A\",\"goal\":\"goal-A\",\"depends\":[]},"
+                           "{\"id\":\"B\",\"goal\":\"goal-B\",\"depends\":[\"A\"]},"
+                           "{\"id\":\"C\",\"goal\":\"goal-C\",\"depends\":[\"A\"]},"
+                           "{\"id\":\"D\",\"goal\":\"goal-D\",\"depends\":[\"B\",\"C\"]}"
+                           "]}";
 
     char *dag_id = NULL;
     int ret = sched_service_submit_dag(svc, dag_json, &dag_id);
@@ -688,8 +671,7 @@ static int test_dag_parallel_delegation(void)
         return 1;
     }
     if (g_concurrent_max < 2) {
-        printf("  FAILED: no real concurrency (max concurrent=%d, expect ≥2)\n",
-               g_concurrent_max);
+        printf("  FAILED: no real concurrency (max concurrent=%d, expect ≥2)\n", g_concurrent_max);
         AIRY_FREE(dag_id);
         sched_service_destroy(svc);
         return 1;
@@ -716,7 +698,6 @@ static int test_dag_group_consensus_collab(void)
 {
     printf("=== test_dag_group_consensus_collab ===\n");
 
-    /* 资源统一前置声明并 NULL 初始化：fail 集中释放路径不得触碰未初始化变量 */
     char *group_id = NULL;
     char **results = NULL;
     size_t result_count = 0;
@@ -730,33 +711,42 @@ static int test_dag_group_consensus_collab(void)
         return 1;
     }
 
-    /* 3 名评审 agent（可靠/性能分不同，供 WEIGHTED 共识作权重来源） */
     const char *ids[3] = {"reviewer_a", "reviewer_b", "reviewer_c"};
     mac_agent_info_t agents[3] = {
-        {.id = "reviewer_a", .name = "Reviewer A", .performance_score = 0.9,
-         .reliability_score = 0.8, .max_concurrent_tasks = 3, .available = true},
-        {.id = "reviewer_b", .name = "Reviewer B", .performance_score = 0.8,
-         .reliability_score = 0.9, .max_concurrent_tasks = 3, .available = true},
-        {.id = "reviewer_c", .name = "Reviewer C", .performance_score = 0.7,
-         .reliability_score = 0.7, .max_concurrent_tasks = 3, .available = true},
+        {.id = "reviewer_a",
+         .name = "Reviewer A",
+         .performance_score = 0.9,
+         .reliability_score = 0.8,
+         .max_concurrent_tasks = 3,
+         .available = true},
+        {.id = "reviewer_b",
+         .name = "Reviewer B",
+         .performance_score = 0.8,
+         .reliability_score = 0.9,
+         .max_concurrent_tasks = 3,
+         .available = true},
+        {.id = "reviewer_c",
+         .name = "Reviewer C",
+         .performance_score = 0.7,
+         .reliability_score = 0.7,
+         .max_concurrent_tasks = 3,
+         .available = true},
     };
     size_t registered = 0;
-    if (mac_framework_register_agents_batch(fw, agents, 3, &registered) != 0 ||
-        registered != 3) {
+    if (mac_framework_register_agents_batch(fw, agents, 3, &registered) != 0 || registered != 3) {
         printf("  FAILED: register_agents_batch (%zu/3)\n", registered);
         mac_framework_destroy(fw);
         return 1;
     }
 
-    /* 建组（COLLABORATIVE 协作模式，组长取首个成员 reviewer_a） */
-    if (mac_framework_create_group(fw, "code-review-squad", MAC_MODE_COLLABORATIVE,
-                                   ids, 3, &group_id) != 0 || !group_id) {
+    if (mac_framework_create_group(fw, "code-review-squad", MAC_MODE_COLLABORATIVE, ids, 3,
+                                   &group_id) != 0 ||
+        !group_id) {
         printf("  FAILED: create_group\n");
         mac_framework_destroy(fw);
         return 1;
     }
 
-    /* 批量委派 3 个评审任务（委派模式批量路径） */
     mac_collab_task_t tasks[3] = {
         {.id = "t_1", .input_json = "{\"file\":\"ipc.c\",\"mode\":\"security\"}"},
         {.id = "t_2", .input_json = "{\"file\":\"sched.c\",\"mode\":\"perf\"}"},
@@ -779,15 +769,13 @@ static int test_dag_group_consensus_collab(void)
                 in_group = true;
         }
         if (!in_group) {
-            printf("  FAILED: task t_%d assigned outside group: %s\n", i + 1,
-                   assigned[i]);
+            printf("  FAILED: task t_%d assigned outside group: %s\n", i + 1, assigned[i]);
             goto fail;
         }
         AIRY_FREE(assigned[i]);
         assigned[i] = NULL;
     }
 
-    /* 回写完成（输出写入，释放 agent 并发槽位） */
     for (int i = 0; i < 3; i++) {
         char out[64];
         snprintf(out, sizeof(out), "{\"review\":\"ok-%s\"}", tasks[i].id);
@@ -797,7 +785,6 @@ static int test_dag_group_consensus_collab(void)
         }
     }
 
-    /* 收集结果：组内 3 个任务全部完成 */
     if (mac_framework_collect_results(fw, group_id, NULL, &results, &result_count) != 0 ||
         result_count != 3) {
         printf("  FAILED: collect_results (count=%zu, expect 3)\n", result_count);
@@ -815,9 +802,9 @@ static int test_dag_group_consensus_collab(void)
         goto fail;
     }
 
-    /* consensus 1：MAJORITY 多数通过 */
     if (mac_framework_start_consensus(fw, group_id, "{\"merge\":\"allowed\",\"round\":1}",
-                                      MAC_CONSENSUS_MAJORITY, &c1) != 0 || !c1) {
+                                      MAC_CONSENSUS_MAJORITY, &c1) != 0 ||
+        !c1) {
         printf("  FAILED: start_consensus (majority)\n");
         goto fail;
     }
@@ -841,9 +828,9 @@ static int test_dag_group_consensus_collab(void)
     AIRY_FREE(c1);
     c1 = NULL;
 
-    /* consensus 2：UNANIMOUS 全票——一票否决 */
     if (mac_framework_start_consensus(fw, group_id, "{\"merge\":\"blocked\",\"round\":2}",
-                                      MAC_CONSENSUS_UNANIMOUS, &c2) != 0 || !c2) {
+                                      MAC_CONSENSUS_UNANIMOUS, &c2) != 0 ||
+        !c2) {
         printf("  FAILED: start_consensus (unanimous)\n");
         goto fail;
     }
@@ -870,7 +857,8 @@ static int test_dag_group_consensus_collab(void)
     AIRY_FREE(group_id);
     group_id = NULL;
     mac_framework_destroy(fw);
-    printf("  PASSED (group collab: 3 tasks delegated+collected; consensus: majority ok, unanimous veto)\n\n");
+    printf("  PASSED (group collab: 3 tasks delegated+collected; consensus: majority ok, unanimous "
+           "veto)\n\n");
     return 0;
 
 fail:
@@ -904,12 +892,11 @@ static int test_dag_normal_failure_no_cascade(void)
     g_flaky_left = 0;
     g_block = 0;
 
-    const char *dag_json =
-        "{\"name\":\"graded\",\"nodes\":["
-        "{\"id\":\"A\",\"goal\":\"ok-A\",\"depends\":[]},"
-        "{\"id\":\"B\",\"goal\":\"boom-B\",\"depends\":[\"A\"]},"
-        "{\"id\":\"C\",\"goal\":\"never-C\",\"depends\":[\"B\"]}"
-        "]}";
+    const char *dag_json = "{\"name\":\"graded\",\"nodes\":["
+                           "{\"id\":\"A\",\"goal\":\"ok-A\",\"depends\":[]},"
+                           "{\"id\":\"B\",\"goal\":\"boom-B\",\"depends\":[\"A\"]},"
+                           "{\"id\":\"C\",\"goal\":\"never-C\",\"depends\":[\"B\"]}"
+                           "]}";
     char *dag_id = NULL;
     int ret = sched_service_submit_dag(svc, dag_json, &dag_id);
     if (ret != AIRY_SUCCESS || !dag_id) {
@@ -958,8 +945,7 @@ static int test_dag_normal_failure_no_cascade(void)
         return 1;
     }
 
-    printf("  PASSED (B failed, A continued, C unreachable canceled; exec=%zu)\n\n",
-           g_exec_count);
+    printf("  PASSED (B failed, A continued, C unreachable canceled; exec=%zu)\n\n", g_exec_count);
     AIRY_FREE(dag_id);
     sched_service_destroy(svc);
     return 0;
@@ -984,12 +970,11 @@ static int test_dag_fatal_cascade_whole(void)
     g_flaky_left = 0;
     g_block = 0;
 
-    const char *dag_json =
-        "{\"name\":\"fatal\",\"nodes\":["
-        "{\"id\":\"A\",\"goal\":\"ok-A\",\"depends\":[]},"
-        "{\"id\":\"B\",\"goal\":\"fatal-B\",\"depends\":[]},"
-        "{\"id\":\"C\",\"goal\":\"never-C\",\"depends\":[\"A\",\"B\"]}"
-        "]}";
+    const char *dag_json = "{\"name\":\"fatal\",\"nodes\":["
+                           "{\"id\":\"A\",\"goal\":\"ok-A\",\"depends\":[]},"
+                           "{\"id\":\"B\",\"goal\":\"fatal-B\",\"depends\":[]},"
+                           "{\"id\":\"C\",\"goal\":\"never-C\",\"depends\":[\"A\",\"B\"]}"
+                           "]}";
     char *dag_id = NULL;
     int ret = sched_service_submit_dag(svc, dag_json, &dag_id);
     if (ret != AIRY_SUCCESS || !dag_id) {
@@ -1013,8 +998,7 @@ static int test_dag_fatal_cascade_whole(void)
         return 1;
     }
     if (g_exec_count != 2) {
-        printf("  FAILED: executor called %zu times (expect 2: A+B, C canceled)\n",
-               g_exec_count);
+        printf("  FAILED: executor called %zu times (expect 2: A+B, C canceled)\n", g_exec_count);
         AIRY_FREE(dag_id);
         sched_service_destroy(svc);
         return 1;
@@ -1050,14 +1034,13 @@ static int test_dag_transient_retry(void)
     g_fail_goal = NULL;
     g_fatal_goal = NULL;
     g_flaky_goal = "flaky-A";
-    g_flaky_left = 2; /* 前 2 次 transient 失败，第 3 次成功 */
+    g_flaky_left = 2;
     g_block = 0;
 
-    const char *dag_json =
-        "{\"name\":\"retry\",\"nodes\":["
-        "{\"id\":\"A\",\"goal\":\"flaky-A\",\"depends\":[],"
-        "\"max_retries\":2,\"retry_delay_ms\":30}"
-        "]}";
+    const char *dag_json = "{\"name\":\"retry\",\"nodes\":["
+                           "{\"id\":\"A\",\"goal\":\"flaky-A\",\"depends\":[],"
+                           "\"max_retries\":2,\"retry_delay_ms\":30}"
+                           "]}";
     char *dag_id = NULL;
     int ret = sched_service_submit_dag(svc, dag_json, &dag_id);
     if (ret != AIRY_SUCCESS || !dag_id) {
@@ -1121,14 +1104,13 @@ static int test_dag_transient_retry_exhausted(void)
     g_fail_goal = NULL;
     g_fatal_goal = NULL;
     g_flaky_goal = "flaky-A";
-    g_flaky_left = 100; /* 持续 transient 失败 */
+    g_flaky_left = 100;
     g_block = 0;
 
-    const char *dag_json =
-        "{\"name\":\"retryx\",\"nodes\":["
-        "{\"id\":\"A\",\"goal\":\"flaky-A\",\"depends\":[],"
-        "\"max_retries\":1,\"retry_delay_ms\":30}"
-        "]}";
+    const char *dag_json = "{\"name\":\"retryx\",\"nodes\":["
+                           "{\"id\":\"A\",\"goal\":\"flaky-A\",\"depends\":[],"
+                           "\"max_retries\":1,\"retry_delay_ms\":30}"
+                           "]}";
     char *dag_id = NULL;
     int ret = sched_service_submit_dag(svc, dag_json, &dag_id);
     if (ret != AIRY_SUCCESS || !dag_id) {
@@ -1187,7 +1169,7 @@ int main(void)
     failed += test_priority_queue_order();
     failed += test_dag_parallel_delegation();
     failed += test_dag_group_consensus_collab();
-    /* P0：失败分级（改进3）+ 分级重试（改进4）用例 */
+
     failed += test_dag_normal_failure_no_cascade();
     failed += test_dag_fatal_cascade_whole();
     failed += test_dag_transient_retry();

@@ -1,10 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file daemon_oom.c
  * @brief Daemon OOM 降级回调注册辅助实现
- *
- * Copyright (C) 2025-2026 SPHARX Ltd. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * P1.22: 为每个 daemon 提供标准化的 OOM 降级回调。
  */
@@ -14,8 +13,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-
-/* ==================== Daemon OOM 降级处理器 ==================== */
 
 /**
  * @brief Daemon OOM 降级上下文
@@ -29,16 +26,13 @@ typedef struct {
     degradation_handler_t critical_handler;
 } daemon_oom_ctx_t;
 
-/* 最大同时注册的 daemon 数 */
 #define DAEMON_OOM_MAX_SLOTS 16
 
 static daemon_oom_ctx_t g_daemons_oom_slots[DAEMON_OOM_MAX_SLOTS];
 static int g_daemons_oom_count = 0;
 
-/* WARNING 级降级回调 */
-static int daemon_oom_on_warning(degradation_handler_t *handler,
-                                  watermark_level_t old_level,
-                                  watermark_level_t new_level)
+static int daemon_oom_on_warning(degradation_handler_t *handler, watermark_level_t old_level,
+                                 watermark_level_t new_level)
 {
     daemon_oom_ctx_t *ctx = (daemon_oom_ctx_t *)handler->context;
     (void)old_level;
@@ -51,10 +45,8 @@ static int daemon_oom_on_warning(degradation_handler_t *handler,
     return 0;
 }
 
-/* WARNING 级恢复回调 */
 static int daemon_oom_on_warning_restore(degradation_handler_t *handler,
-                                          watermark_level_t old_level,
-                                          watermark_level_t new_level)
+                                         watermark_level_t old_level, watermark_level_t new_level)
 {
     daemon_oom_ctx_t *ctx = (daemon_oom_ctx_t *)handler->context;
     (void)old_level;
@@ -64,10 +56,8 @@ static int daemon_oom_on_warning_restore(degradation_handler_t *handler,
     return 0;
 }
 
-/* CRITICAL 级降级回调 */
-static int daemon_oom_on_critical(degradation_handler_t *handler,
-                                   watermark_level_t old_level,
-                                   watermark_level_t new_level)
+static int daemon_oom_on_critical(degradation_handler_t *handler, watermark_level_t old_level,
+                                  watermark_level_t new_level)
 {
     daemon_oom_ctx_t *ctx = (daemon_oom_ctx_t *)handler->context;
     (void)old_level;
@@ -80,10 +70,8 @@ static int daemon_oom_on_critical(degradation_handler_t *handler,
     return 0;
 }
 
-/* CRITICAL 级恢复回调 */
 static int daemon_oom_on_critical_restore(degradation_handler_t *handler,
-                                           watermark_level_t old_level,
-                                           watermark_level_t new_level)
+                                          watermark_level_t old_level, watermark_level_t new_level)
 {
     daemon_oom_ctx_t *ctx = (daemon_oom_ctx_t *)handler->context;
     (void)old_level;
@@ -111,7 +99,6 @@ int daemon_oom_register(const daemon_oom_config_t *config)
     ctx->reject_requests_on_critical = config->reject_requests_on_critical;
     ctx->user_context = config->user_context;
 
-    /* 注册 WARNING 级降级处理器 */
     ctx->warning_handler.feature_name = ctx->daemon_name;
     ctx->warning_handler.trigger_level = WATERMARK_WARNING;
     ctx->warning_handler.action = DEGRADE_REDUCE_CACHE;
@@ -125,7 +112,6 @@ int daemon_oom_register(const daemon_oom_config_t *config)
                      config->daemon_name, err);
     }
 
-    /* 注册 CRITICAL 级降级处理器 */
     ctx->critical_handler.feature_name = ctx->daemon_name;
     ctx->critical_handler.trigger_level = WATERMARK_CRITICAL;
     ctx->critical_handler.action = DEGRADE_REJECT_NEW_CONN;
@@ -141,8 +127,7 @@ int daemon_oom_register(const daemon_oom_config_t *config)
 
     g_daemons_oom_count++;
     SVC_LOG_INFO("P1.22: [%s] OOM callbacks registered (warning=%s, critical=%s)",
-                 config->daemon_name,
-                 config->drop_cache_on_warning ? "drop-cache" : "none",
+                 config->daemon_name, config->drop_cache_on_warning ? "drop-cache" : "none",
                  config->reject_requests_on_critical ? "reject-requests" : "none");
 
     return 0;

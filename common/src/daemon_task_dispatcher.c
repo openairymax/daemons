@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "daemon_task_dispatcher.h"
 
 #include "atomic_compat.h"
@@ -52,7 +53,8 @@ static uint64_t time_ms(void)
 static char *json_extract_field(const char *json, const char *key)
 {
     if (!json || !key) {
-        SVC_LOG_ERROR("json_extract_field: null parameter json=%p key=%p", (void *)json, (void *)key);
+        SVC_LOG_ERROR("json_extract_field: null parameter json=%p key=%p", (void *)json,
+                      (void *)key);
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     char search[256];
@@ -117,8 +119,8 @@ static void dispatch_worker(void *arg)
 {
     dispatch_context_t *ctx = (dispatch_context_t *)arg;
     if (!ctx || !ctx->dispatcher || !ctx->session) {
-        SVC_LOG_ERROR("dispatch_worker: null context ctx=%p dispatcher=%p session=%p",
-                      (void *)ctx, ctx ? (void *)ctx->dispatcher : NULL, ctx ? (void *)ctx->session : NULL);
+        SVC_LOG_ERROR("dispatch_worker: null context ctx=%p dispatcher=%p session=%p", (void *)ctx,
+                      ctx ? (void *)ctx->dispatcher : NULL, ctx ? (void *)ctx->session : NULL);
         return;
     }
 
@@ -170,9 +172,10 @@ static void dispatch_worker(void *arg)
         ipc_bus_message_t response;
         __builtin_memset(&response, 0, sizeof(response));
 
-        airy_err_t err = ipc_service_bus_request(
-            bus, "tool_d", &request, &response,
-            ctx->dispatcher->config.timeout_ms > 0 ? ctx->dispatcher->config.timeout_ms : 30000);
+        airy_err_t err = ipc_service_bus_request(bus, "tool_d", &request, &response,
+                                                 ctx->dispatcher->config.timeout_ms > 0 ?
+                                                     ctx->dispatcher->config.timeout_ms :
+                                                     30000);
 
         if (err == AIRY_SUCCESS && response.payload && response.payload_size > 0) {
             const char *resp_str = (const char *)response.payload;
@@ -283,8 +286,7 @@ static dispatch_session_t *session_create(parallel_dispatcher_t *dispatcher,
                                           parallel_result_t *results,
                                           parallel_complete_cb_t on_complete, void *user_data)
 {
-    dispatch_session_t *session =
-        (dispatch_session_t *)AIRY_CALLOC(1, sizeof(dispatch_session_t));
+    dispatch_session_t *session = (dispatch_session_t *)AIRY_CALLOC(1, sizeof(dispatch_session_t));
     if (!session) {
         SVC_LOG_ERROR("session_create: memory allocation failed for session");
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
@@ -301,10 +303,10 @@ static dispatch_session_t *session_create(parallel_dispatcher_t *dispatcher,
     session->cb_user_data = user_data;
     session->dispatcher = dispatcher;
 
-    session->contexts =
-        (dispatch_context_t *)AIRY_CALLOC(task_count, sizeof(dispatch_context_t));
+    session->contexts = (dispatch_context_t *)AIRY_CALLOC(task_count, sizeof(dispatch_context_t));
     if (!session->contexts) {
-        SVC_LOG_ERROR("session_create: memory allocation failed for contexts (task_count=%zu)", task_count);
+        SVC_LOG_ERROR("session_create: memory allocation failed for contexts (task_count=%zu)",
+                      task_count);
         airy_mtx_destroy(&session->lock);
         airy_cond_destroy(&session->cond);
         AIRY_FREE(session);
@@ -327,14 +329,17 @@ int parallel_dispatcher_execute(parallel_dispatcher_t *dispatcher, const paralle
                                 size_t *result_count)
 {
     if (!dispatcher || !tasks || task_count == 0 || !results) {
-        SVC_LOG_ERROR("parallel_dispatcher_execute: invalid parameter dispatcher=%p tasks=%p task_count=%zu results=%p",
+        SVC_LOG_ERROR("parallel_dispatcher_execute: invalid parameter dispatcher=%p tasks=%p "
+                      "task_count=%zu results=%p",
                       (void *)dispatcher, (void *)tasks, task_count, (void *)results);
         return AIRY_ERR_INVALID_PARAM;
     }
 
     *results = (parallel_result_t *)AIRY_CALLOC(task_count, sizeof(parallel_result_t));
     if (!*results) {
-        SVC_LOG_ERROR("parallel_dispatcher_execute: memory allocation failed for results (task_count=%zu)", task_count);
+        SVC_LOG_ERROR(
+            "parallel_dispatcher_execute: memory allocation failed for results (task_count=%zu)",
+            task_count);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
     if (result_count)
@@ -343,7 +348,8 @@ int parallel_dispatcher_execute(parallel_dispatcher_t *dispatcher, const paralle
     dispatch_session_t *session =
         session_create(dispatcher, tasks, task_count, *results, NULL, NULL);
     if (!session) {
-        SVC_LOG_ERROR("parallel_dispatcher_execute: session creation failed (task_count=%zu)", task_count);
+        SVC_LOG_ERROR("parallel_dispatcher_execute: session creation failed (task_count=%zu)",
+                      task_count);
         AIRY_FREE(*results);
         *results = NULL;
         return AIRY_ERR_OUT_OF_MEMORY;
@@ -391,7 +397,8 @@ wait_done: {
             break;
 
         if (time_ms() >= deadline) {
-            SVC_LOG_WARN("parallel_dispatcher_execute: timeout reached, cancelling remaining tasks (timeout_ms=%u)",
+            SVC_LOG_WARN("parallel_dispatcher_execute: timeout reached, cancelling remaining tasks "
+                         "(timeout_ms=%u)",
                          dispatcher->config.timeout_ms);
             session->cancel_flag = 1;
             break;
@@ -427,7 +434,8 @@ int parallel_dispatcher_execute_async(parallel_dispatcher_t *dispatcher,
                                       parallel_complete_cb_t on_complete, void *user_data)
 {
     if (!dispatcher || !tasks || task_count == 0) {
-        SVC_LOG_ERROR("parallel_dispatcher_execute_async: invalid parameter dispatcher=%p tasks=%p task_count=%zu",
+        SVC_LOG_ERROR("parallel_dispatcher_execute_async: invalid parameter dispatcher=%p tasks=%p "
+                      "task_count=%zu",
                       (void *)dispatcher, (void *)tasks, task_count);
         return AIRY_ERR_INVALID_PARAM;
     }
@@ -435,14 +443,17 @@ int parallel_dispatcher_execute_async(parallel_dispatcher_t *dispatcher,
     parallel_result_t *results =
         (parallel_result_t *)AIRY_CALLOC(task_count, sizeof(parallel_result_t));
     if (!results) {
-        SVC_LOG_ERROR("parallel_dispatcher_execute_async: memory allocation failed for results (task_count=%zu)", task_count);
+        SVC_LOG_ERROR("parallel_dispatcher_execute_async: memory allocation failed for results "
+                      "(task_count=%zu)",
+                      task_count);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     dispatch_session_t *session =
         session_create(dispatcher, tasks, task_count, results, on_complete, user_data);
     if (!session) {
-        SVC_LOG_ERROR("parallel_dispatcher_execute_async: session creation failed (task_count=%zu)", task_count);
+        SVC_LOG_ERROR("parallel_dispatcher_execute_async: session creation failed (task_count=%zu)",
+                      task_count);
         AIRY_FREE(results);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
@@ -453,7 +464,8 @@ int parallel_dispatcher_execute_async(parallel_dispatcher_t *dispatcher,
         if (rc == 0) {
             submitted++;
         } else {
-            SVC_LOG_WARN("parallel_dispatcher_execute_async: task submit failed index=%zu rc=%d", i, rc);
+            SVC_LOG_WARN("parallel_dispatcher_execute_async: task submit failed index=%zu rc=%d", i,
+                         rc);
             results[i].success = 0;
             results[i].error = AIRY_STRDUP("submit failed");
             results[i].task_index = i;
@@ -467,7 +479,9 @@ int parallel_dispatcher_execute_async(parallel_dispatcher_t *dispatcher,
     }
 
     if (submitted == 0) {
-        SVC_LOG_ERROR("parallel_dispatcher_execute_async: all task submissions failed (task_count=%zu)", task_count);
+        SVC_LOG_ERROR(
+            "parallel_dispatcher_execute_async: all task submissions failed (task_count=%zu)",
+            task_count);
         airy_mtx_destroy(&session->lock);
         airy_cond_destroy(&session->cond);
         if (session->contexts)

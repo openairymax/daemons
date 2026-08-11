@@ -1,13 +1,12 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
-
 
 /**
  * @file metrics.c
  * @brief 监控指标采集实现（生产级版本）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 功能：
  * 1. 指标采集与聚合
@@ -25,8 +24,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ==================== 配置常量 ==================== */
-
 #define MAX_METRICS 1024
 #define MAX_LABELS_PER_METRIC 16
 #define MAX_SERIES_PER_METRIC 256
@@ -34,24 +31,15 @@
 #define DEFAULT_EXPORT_INTERVAL_MS 60000
 #define DEFAULT_RETENTION_SECONDS 3600
 
-/* ==================== 指标配置类型 ==================== */
-
 typedef struct {
     uint32_t export_interval_ms;
     uint32_t retention_seconds;
 } metrics_config_t;
 
-/* ==================== 指标类型 ==================== */
-/* metric_type_t 已在 monitor_service.h 中定义 */
-
-/* ==================== 标签 ==================== */
-
 typedef struct {
     char *key;
     char *value;
 } metric_label_t;
-
-/* ==================== 时间序列 ==================== */
 
 typedef struct {
     metric_label_t labels[MAX_LABELS_PER_METRIC];
@@ -61,14 +49,10 @@ typedef struct {
     uint64_t update_count;
 } metric_series_t;
 
-/* ==================== 直方图桶 ==================== */
-
 typedef struct {
     double boundary;
     uint64_t count;
 } histogram_bucket_t;
-
-/* ==================== 直方图数据 ==================== */
 
 typedef struct {
     histogram_bucket_t *buckets;
@@ -76,8 +60,6 @@ typedef struct {
     double sum;
     uint64_t count;
 } histogram_data_t;
-
-/* ==================== 指标定义 ==================== */
 
 typedef struct {
     char *name;
@@ -91,8 +73,6 @@ typedef struct {
     int initialized;
 } metric_t;
 
-/* ==================== 指标存储 ==================== */
-
 typedef struct {
     metric_t metrics[MAX_METRICS];
     size_t metric_count;
@@ -103,8 +83,6 @@ typedef struct {
 } metrics_storage_t;
 
 static metrics_storage_t g_metrics = {0};
-
-/* ==================== 内部函数 ==================== */
 
 /**
  * @brief 查找指标索引
@@ -166,7 +144,7 @@ static int create_series(metric_t *metric, const metric_label_t *labels, size_t 
     for (size_t i = 0; i < label_count; i++) {
         series->labels[i].key = AIRY_STRDUP(labels[i].key);
         if (!series->labels[i].key) {
-            /* 回滚已分配的标签 */
+
             for (size_t k = 0; k < i; k++) {
                 AIRY_FREE(series->labels[k].key);
                 AIRY_FREE(series->labels[k].value);
@@ -223,8 +201,6 @@ static void format_labels(char *buf, size_t buf_size, const metric_label_t *labe
     buf[pos] = '\0';
 }
 
-/* ==================== 公共接口实现 ==================== */
-
 /**
  * @brief 初始化指标系统
  */
@@ -241,7 +217,6 @@ int metrics_init(const metrics_config_t *manager)
         manager ? manager->export_interval_ms : DEFAULT_EXPORT_INTERVAL_MS;
     g_metrics.retention_seconds = manager ? manager->retention_seconds : DEFAULT_RETENTION_SECONDS;
 
-    /* 初始化所有指标的互斥锁 */
     for (size_t i = 0; i < MAX_METRICS; i++) {
         airy_mtx_init(&g_metrics.metrics[i].lock);
     }
@@ -261,7 +236,6 @@ void metrics_shutdown(void)
 
     airy_mtx_lock(&g_metrics.global_lock);
 
-    /* 释放所有指标 */
     for (size_t i = 0; i < g_metrics.metric_count; i++) {
         metric_t *metric = &g_metrics.metrics[i];
 
@@ -271,7 +245,6 @@ void metrics_shutdown(void)
         AIRY_FREE(metric->description);
         AIRY_FREE(metric->unit);
 
-        /* 释放时间序列 */
         for (size_t j = 0; j < metric->series_count; j++) {
             metric_series_t *series = &metric->series[j];
             for (size_t k = 0; k < series->label_count; k++) {
@@ -280,7 +253,6 @@ void metrics_shutdown(void)
             }
         }
 
-        /* 释放直方图桶 */
         if (metric->histogram.buckets) {
             AIRY_FREE(metric->histogram.buckets);
         }
@@ -312,19 +284,16 @@ int metrics_register(const char *name, const char *description, const char *unit
 
     airy_mtx_lock(&g_metrics.global_lock);
 
-    /* 检查是否已存在 */
     if (find_metric_index(name) >= 0) {
         airy_mtx_unlock(&g_metrics.global_lock);
         AIRY_ERROR(AIRY_ERR_ALREADY_EXISTS, "Metric already exists");
     }
 
-    /* 检查容量 */
     if (g_metrics.metric_count >= MAX_METRICS) {
         airy_mtx_unlock(&g_metrics.global_lock);
         AIRY_ERROR(AIRY_ERR_OVERFLOW, "Too many metrics");
     }
 
-    /* 创建指标 */
     metric_t *metric = &g_metrics.metrics[g_metrics.metric_count];
     metric->name = AIRY_STRDUP(name);
     if (!metric->name) {
@@ -348,7 +317,6 @@ int metrics_register(const char *name, const char *description, const char *unit
     metric->series_count = 0;
     metric->initialized = 1;
 
-    /* 初始化直方图 */
     if (type == METRIC_TYPE_HISTOGRAM && histogram_buckets && bucket_count > 0) {
         metric->histogram.buckets =
             (histogram_bucket_t *)AIRY_MALLOC(sizeof(histogram_bucket_t) * bucket_count);
@@ -390,7 +358,6 @@ int metrics_counter_inc(const char *name, const metric_label_t *labels, size_t l
     airy_mtx_lock(&metric->lock);
     airy_mtx_unlock(&g_metrics.global_lock);
 
-    /* 查找或创建时间序列 */
     int series_idx = find_series_index(metric, labels, label_count);
     if (series_idx < 0) {
         series_idx = create_series(metric, labels, label_count);
@@ -502,7 +469,6 @@ int metrics_histogram_observe(const char *name, double value, const metric_label
     airy_mtx_lock(&metric->lock);
     airy_mtx_unlock(&g_metrics.global_lock);
 
-    /* 更新直方图桶 */
     for (size_t i = 0; i < metric->histogram.bucket_count; i++) {
         if (value <= metric->histogram.buckets[i].boundary) {
             metric->histogram.buckets[i].count++;
@@ -512,7 +478,6 @@ int metrics_histogram_observe(const char *name, double value, const metric_label
     metric->histogram.sum += value;
     metric->histogram.count++;
 
-    /* 同时更新时间序列 */
     int series_idx = find_series_index(metric, labels, label_count);
     if (series_idx < 0) {
         series_idx = create_series(metric, labels, label_count);
@@ -551,13 +516,11 @@ char *metrics_export_prometheus(void)
         metric_t *metric = &g_metrics.metrics[i];
         airy_mtx_lock(&metric->lock);
 
-        /* 写入 HELP 注释 */
         if (metric->description) {
             pos += snprintf(buf + pos, buf_size - pos, "# HELP %s %s\n", metric->name,
                             metric->description);
         }
 
-        /* 写入 TYPE 注释 */
         const char *type_str = "untyped";
         switch (metric->type) {
         case METRIC_TYPE_COUNTER:
@@ -578,7 +541,6 @@ char *metrics_export_prometheus(void)
         }
         pos += snprintf(buf + pos, buf_size - pos, "# TYPE %s %s\n", metric->name, type_str);
 
-        /* 写入时间序列值 */
         for (size_t j = 0; j < metric->series_count && pos < buf_size - 256; j++) {
             metric_series_t *series = &metric->series[j];
 
@@ -589,7 +551,6 @@ char *metrics_export_prometheus(void)
                             labels_buf, series->value, (unsigned long long)series->timestamp);
         }
 
-        /* 写入直方图数据 */
         if (metric->type == METRIC_TYPE_HISTOGRAM && metric->histogram.bucket_count > 0) {
             for (size_t b = 0; b < metric->histogram.bucket_count && pos < buf_size - 256; b++) {
                 pos += snprintf(buf + pos, buf_size - pos, "%s_bucket{le=\"%.17g\"} %llu\n",

@@ -1,10 +1,10 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file market_service.h
  * @brief 市场服务接口定义
  * @details 负责 Agent 和 Skill 的注册、发现、安装和管理
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_MARKET_SERVICE_H
@@ -18,22 +18,22 @@
  * @brief 市场服务配置
  */
 typedef struct {
-    char *registry_url;          /**< 注册中心 URL */
-    char *storage_path;          /**< 存储路径 */
-    uint32_t sync_interval_ms;   /**< 同步间隔（毫秒） */
-    uint32_t cache_ttl_ms;       /**< 缓存过期时间（毫秒） */
-    bool enable_remote_registry; /**< 是否启用远程注册中心 */
-    bool enable_auto_update;     /**< 是否启用自动更新 */
+    char *registry_url;
+    char *storage_path;
+    uint32_t sync_interval_ms;
+    uint32_t cache_ttl_ms;
+    bool enable_remote_registry;
+    bool enable_auto_update;
 } market_config_t;
 
 /**
  * @brief Agent 类型
  */
 typedef enum {
-    AGENT_TYPE_ASSISTANT,   /**< 助手型 Agent */
-    AGENT_TYPE_EXPERT,      /**< 专家型 Agent */
-    AGENT_TYPE_SPECIALIZED, /**< 专业型 Agent */
-    AGENT_TYPE_CUSTOM,      /**< 自定义 Agent */
+    AGENT_TYPE_ASSISTANT,
+    AGENT_TYPE_EXPERT,
+    AGENT_TYPE_SPECIALIZED,
+    AGENT_TYPE_CUSTOM,
     AGENT_TYPE_COUNT
 } agent_type_t;
 
@@ -41,10 +41,10 @@ typedef enum {
  * @brief Agent 状态
  */
 typedef enum {
-    AGENT_STATUS_AVAILABLE,  /**< 可用 */
-    AGENT_STATUS_INSTALLING, /**< 安装中 */
-    AGENT_STATUS_ERROR,      /**< 错误 */
-    AGENT_STATUS_DISABLED,   /**< 禁用 */
+    AGENT_STATUS_AVAILABLE,
+    AGENT_STATUS_INSTALLING,
+    AGENT_STATUS_ERROR,
+    AGENT_STATUS_DISABLED,
     AGENT_STATUS_COUNT
 } agent_status_t;
 
@@ -52,10 +52,10 @@ typedef enum {
  * @brief Skill 类型
  */
 typedef enum {
-    SKILL_TYPE_TOOL,        /**< 工具型 Skill */
-    SKILL_TYPE_KNOWLEDGE,   /**< 知识型 Skill */
-    SKILL_TYPE_INTEGRATION, /**< 集成型 Skill */
-    SKILL_TYPE_CUSTOM,      /**< 自定义 Skill */
+    SKILL_TYPE_TOOL,
+    SKILL_TYPE_KNOWLEDGE,
+    SKILL_TYPE_INTEGRATION,
+    SKILL_TYPE_CUSTOM,
     SKILL_TYPE_COUNT
 } skill_type_t;
 
@@ -63,70 +63,70 @@ typedef enum {
  * @brief Agent 信息
  */
 typedef struct {
-    char *agent_id;          /**< Agent ID */
-    char *name;              /**< Agent 名称 */
-    char *version;           /**< 版本 */
-    char *description;       /**< 描述 */
-    agent_type_t type;       /**< Agent 类型 */
-    agent_status_t status;   /**< Agent 状态 */
-    char *author;            /**< 作者 */
-    char *repository;        /**< 仓库地址 */
-    char *dependencies;      /**< 依赖项 */
-    float rating;            /**< 评分 */
-    uint32_t download_count; /**< 下载次数 */
-    uint64_t last_updated;   /**< 最后更新时间 */
+    char *agent_id; /**< Agent ID */
+    char *name;
+    char *version;
+    char *description;
+    agent_type_t type;
+    agent_status_t status;
+    char *author;
+    char *repository;
+    char *dependencies;
+    float rating;
+    uint32_t download_count;
+    uint64_t last_updated;
 } agent_info_t;
 
 /**
  * @brief Skill 信息
  */
 typedef struct {
-    char *skill_id;          /**< Skill ID */
-    char *name;              /**< Skill 名称 */
-    char *version;           /**< 版本 */
-    char *description;       /**< 描述 */
-    skill_type_t type;       /**< Skill 类型 */
-    char *author;            /**< 作者 */
-    char *repository;        /**< 仓库地址 */
-    char *dependencies;      /**< 依赖项 */
-    float rating;            /**< 评分 */
-    uint32_t download_count; /**< 下载次数 */
-    uint64_t last_updated;   /**< 最后更新时间 */
+    char *skill_id; /**< Skill ID */
+    char *name;
+    char *version;
+    char *description;
+    skill_type_t type;
+    char *author;
+    char *repository;
+    char *dependencies;
+    float rating;
+    uint32_t download_count;
+    uint64_t last_updated;
 } skill_info_t;
 
 /**
  * @brief 安装请求
  */
 typedef struct {
-    char *id;           /**< Agent 或 Skill ID */
-    char *version;      /**< 版本（可选，为空表示最新版本） */
-    bool force_update;  /**< 是否强制更新 */
-    char *install_path; /**< 安装路径（可选） */
+    char *id;
+    char *version;
+    bool force_update;
+    char *install_path;
 } install_request_t;
 
 /**
  * @brief 安装结果
  */
 typedef struct {
-    bool success;            /**< 是否成功 */
-    char *message;           /**< 消息 */
-    char *installed_version; /**< 安装的版本 */
-    char *install_path;      /**< 安装路径 */
-    int error_code;          /**< 错误码 */
+    bool success;
+    char *message;
+    char *installed_version;
+    char *install_path;
+    int error_code;
 } install_result_t;
 
 /**
  * @brief 搜索参数
  */
 typedef struct {
-    char *query;             /**< 搜索关键词 */
-    agent_type_t agent_type; /**< Agent 类型（仅搜索 Agent 时使用） */
-    skill_type_t skill_type; /**< Skill 类型（仅搜索 Skill 时使用） */
-    bool only_installed;     /**< 仅显示已安装的 */
-    bool sort_by_rating;     /**< 按评分排序 */
-    bool sort_by_download;   /**< 按下载量排序 */
-    size_t limit;            /**< 结果数量限制 */
-    size_t offset;           /**< 结果偏移量 */
+    char *query;
+    agent_type_t agent_type;
+    skill_type_t skill_type;
+    bool only_installed;
+    bool sort_by_rating;
+    bool sort_by_download;
+    size_t limit;
+    size_t offset;
 } search_params_t;
 
 /**

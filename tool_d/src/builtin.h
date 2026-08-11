@@ -1,8 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
-//
-// @file builtin.h
-// @brief tool_d 内置基础工具集接口（fs_read / fs_write / fs_list / shell_run）
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
+/* */
+/* @file builtin.h */
+
 
 #ifndef AIRY_RT_TOOL_BUILTIN_H
 #define AIRY_RT_TOOL_BUILTIN_H
@@ -13,7 +14,7 @@
 extern "C" {
 #endif
 
-/* 判断 executable 是否为内置工具标记（"builtin:xxx"） */
+
 int tool_builtin_is_builtin(const char *executable);
 
 /* 执行内置工具：tool_id ∈ {fs_read, fs_write, fs_list, shell_run, web_fetch}

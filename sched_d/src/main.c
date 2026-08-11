@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file main.c
  * @brief 调度服务守护进程主入口（遵循 daemon 模块统一规范）
@@ -29,32 +29,23 @@
 #include <string.h>
 #include <time.h>
 
-/* ==================== 配置常量 ==================== */
-
 #define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("sched.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_sched"
 #define DEFAULT_TCP_PORT 8083
 #define MAX_BUFFER 65536
 
-/* 生成公共全局变量、信号处理、help、客户端处理等样板 */
-DAEMON_DECLARE_COMMON(sched_d, scheduler, DEFAULT_SOCKET_PATH_UNIX,
-                      DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+DAEMON_DECLARE_COMMON(sched_d, scheduler, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN,
+                      DEFAULT_TCP_PORT, MAX_BUFFER)
 
-/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
 DAEMON_DECLARE_SHUTDOWN_METHOD(sched_d)
-
-/* ==================== 全局状态 ==================== */
 
 static sched_service_t *g_service = NULL;
 
-/* ==================== 错误码定义（统一使用 AIRY_ERR_*） ==================== */
 #define SCHED_ERR_INVALID_PARAM AIRY_ERR_INVALID_PARAM
 #define SCHED_ERR_OUT_OF_MEMORY AIRY_ERR_OUT_OF_MEMORY
 #define SCHED_ERR_NOT_FOUND AIRY_ERR_NOT_FOUND
 #define SCHED_ERR_INVALID_CONFIG (AIRY_ERR_DAEMON_BASE + 0x01)
 #define SCHED_ERR_STRATEGY_FAIL (AIRY_ERR_DAEMON_BASE + 0x02)
-
-/* ==================== 方法处理器包装函数 ==================== */
 
 static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd);
@@ -67,10 +58,9 @@ static void handle_get_stats(int id, airy_sock_t client_fd);
 static void handle_health_check(int id, airy_sock_t client_fd);
 static void handle_checkpoint_save(cJSON *params, int id, airy_sock_t client_fd);
 
-/* P2.2 选后派发：声明（实现位于 handle_health_check 之后） */
 typedef struct {
-    char *agent_id; /* agent_d 派生出的真实 agent_id */
-    char *output;   /* agent_d invoke 返回的真实执行输出 */
+    char *agent_id;
+    char *output;
 } sched_dispatch_result_t;
 static int sched_dispatch_enabled(void);
 static int sched_dispatch_task(const char *role, const char *task_description,
@@ -185,7 +175,7 @@ static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd)
     }
 
     task_info_t task = {0};
-    /* task_id 可选：客户端提供则采用；否则由 sched_d 生成（异步队列语义） */
+
     const char *tid = get_string_field(task_json, "task_id", NULL);
     task.task_id = tid ? AIRY_STRDUP(tid) : NULL;
     const char *desc = get_string_field(task_json, "task_description", NULL);
@@ -229,7 +219,6 @@ static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd)
     AIRY_FREE(assigned_id);
 }
 
-/* 查询任务状态：params.task_id → {status, selected_agent_id, output, error, ...} */
 static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *tid = cJSON_GetObjectItem(params, "task_id");
@@ -246,7 +235,6 @@ static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    /* P0.18.2 模式 B（与 get_stats 一致）：parse + 立即释放 text + 自动释放 */
     CJSON_PARSE_GUARD(report_json, json_out, {
         AIRY_FREE(json_out);
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid task data", id);
@@ -255,10 +243,9 @@ static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd)
     AIRY_FREE(json_out);
 
     JSONRPC_SEND_SUCCESS(client_fd, report_json, id);
-    report_json = NULL; /* JSONRPC_SEND_SUCCESS 已 Delete */
+    report_json = NULL;
 }
 
-/* 取消任务：params.task_id → 仅 PENDING 可取消（RUNNING/终态返回 busy） */
 static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *tid = cJSON_GetObjectItem(params, "task_id");
@@ -288,7 +275,6 @@ static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd)
     SVC_LOG_INFO("Task canceled via RPC: %s", tid->valuestring);
 }
 
-/* 提交 DAG 任务图：params.dag（JSON 对象，nodes[] 含 id/goal/role/depends） */
 static void handle_dag_submit(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *dag_json = jsonrpc_get_object_param(params, "dag");
@@ -310,8 +296,7 @@ static void handle_dag_submit(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
     if (ret == AIRY_ERR_OVERFLOW) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "DAG exceeds capacity limits", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "DAG exceeds capacity limits", id);
         return;
     }
     if (ret != AIRY_SUCCESS || !dag_id) {
@@ -328,7 +313,6 @@ static void handle_dag_submit(cJSON *params, int id, airy_sock_t client_fd)
     AIRY_FREE(dag_id);
 }
 
-/* 查询 DAG 状态：params.dag_id → 看板快照 */
 static void handle_dag_status(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *did = cJSON_GetObjectItem(params, "dag_id");
@@ -356,7 +340,6 @@ static void handle_dag_status(cJSON *params, int id, airy_sock_t client_fd)
     report_json = NULL;
 }
 
-/* 取消 DAG：params.dag_id */
 static void handle_dag_cancel(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *did = cJSON_GetObjectItem(params, "dag_id");
@@ -396,7 +379,6 @@ static void handle_get_stats(int id, airy_sock_t client_fd)
         return;
     }
 
-    /* P0.18.2: 模式 B — parse + 立即释放 text + 自动释放（JSONRPC_SEND_SUCCESS 内部 Delete） */
     CJSON_PARSE_GUARD(report_json, (char *)stats_data, {
         AIRY_FREE(stats_data);
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid report data", id);
@@ -405,7 +387,7 @@ static void handle_get_stats(int id, airy_sock_t client_fd)
     AIRY_FREE(stats_data);
 
     JSONRPC_SEND_SUCCESS(client_fd, report_json, id);
-    report_json = NULL; /* JSONRPC_SEND_SUCCESS 已 Delete，防止 CJSON_AUTO_FREE 重复释放 */
+    report_json = NULL;
 }
 
 static void handle_health_check(int id, airy_sock_t client_fd)
@@ -421,7 +403,6 @@ static void handle_health_check(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* 调度检查点（L2 标准方法 sched.checkpoint_save）：返回队列/DAG 状态快照 */
 static void handle_checkpoint_save(cJSON *params __attribute__((unused)), int id,
                                    airy_sock_t client_fd)
 {
@@ -443,16 +424,12 @@ static void handle_checkpoint_save(cJSON *params __attribute__((unused)), int id
     report_json = NULL;
 }
 
-/* ==================== 选后派发（P2.2） ==================== */
-
-/* 是否启用派发：默认开启；AIRY_SCHED_DISPATCH=0 关闭（回归纯调度模式） */
 static int sched_dispatch_enabled(void)
 {
     const char *env = getenv("AIRY_SCHED_DISPATCH");
     return !(env && env[0] != '\0' && strcmp(env, "0") == 0);
 }
 
-/* agent_d Unix socket 路径：AIRY_SCHED_AGENT_SOCK > $AIRY_HOME/run/agent.sock */
 static void sched_dispatch_agent_socket(char *buf, size_t size)
 {
     const char *env = getenv("AIRY_SCHED_AGENT_SOCK");
@@ -463,7 +440,6 @@ static void sched_dispatch_agent_socket(char *buf, size_t size)
     }
 }
 
-/* 派发单次 RPC 超时（毫秒）：AIRY_SCHED_DISPATCH_TIMEOUT_MS，默认 300000（覆盖真实 LLM 调用） */
 static uint32_t sched_dispatch_timeout_ms(void)
 {
     const char *env = getenv("AIRY_SCHED_DISPATCH_TIMEOUT_MS");
@@ -491,7 +467,6 @@ static int sched_dispatch_task(const char *role, const char *task_description,
     char sock[AIRY_PATH_MAX];
     sched_dispatch_agent_socket(sock, sizeof(sock));
 
-    /* 1. agent.spawn：spec={"role":...,"language":"python"} */
     cJSON *spec = cJSON_CreateObject();
     cJSON_AddStringToObject(spec, "role", role);
     cJSON_AddStringToObject(spec, "language", "python");
@@ -536,11 +511,9 @@ static int sched_dispatch_task(const char *role, const char *task_description,
     if (!agent_id)
         return AIRY_ERR_OUT_OF_MEMORY;
 
-    /* 2. agent.invoke：input=task_description（含接力上游产出的任务内容） */
     cJSON *invoke_params = cJSON_CreateObject();
     cJSON_AddStringToObject(invoke_params, "agent_id", agent_id);
-    cJSON_AddStringToObject(invoke_params, "input",
-                            task_description ? task_description : "");
+    cJSON_AddStringToObject(invoke_params, "input", task_description ? task_description : "");
     char *invoke_params_str = cJSON_PrintUnformatted(invoke_params);
     cJSON_Delete(invoke_params);
     if (!invoke_params_str) {
@@ -553,8 +526,7 @@ static int sched_dispatch_task(const char *role, const char *task_description,
                          sched_dispatch_timeout_ms());
     AIRY_FREE(invoke_params_str);
     if (rc != AIRY_SUCCESS || !invoke_result) {
-        SVC_LOG_ERROR("sched dispatch: agent.invoke failed (agent=%s, rc=%d)",
-                      agent_id, rc);
+        SVC_LOG_ERROR("sched dispatch: agent.invoke failed (agent=%s, rc=%d)", agent_id, rc);
         AIRY_FREE(agent_id);
         if (invoke_result)
             AIRY_FREE(invoke_result);
@@ -582,7 +554,6 @@ static int sched_dispatch_task(const char *role, const char *task_description,
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    /* 3. agent.terminate（best-effort：回收子进程资源，失败仅告警不阻断） */
     {
         cJSON *term_params = cJSON_CreateObject();
         cJSON_AddStringToObject(term_params, "agent_id", agent_id);
@@ -596,15 +567,15 @@ static int sched_dispatch_task(const char *role, const char *task_description,
             if (term_result)
                 AIRY_FREE(term_result);
             if (trc != AIRY_SUCCESS)
-                SVC_LOG_WARN("sched dispatch: agent.terminate failed (agent=%s, rc=%d)",
-                             agent_id, trc);
+                SVC_LOG_WARN("sched dispatch: agent.terminate failed (agent=%s, rc=%d)", agent_id,
+                             trc);
         }
     }
 
     out_result->agent_id = agent_id;
     out_result->output = output;
-    SVC_LOG_INFO("sched dispatch: role=%s agent=%s dispatched (output_len=%zu)",
-                 role, agent_id, strlen(output));
+    SVC_LOG_INFO("sched dispatch: role=%s agent=%s dispatched (output_len=%zu)", role, agent_id,
+                 strlen(output));
     return AIRY_SUCCESS;
 }
 
@@ -616,7 +587,7 @@ static int sched_dispatch_task(const char *role, const char *task_description,
 static int sched_dispatch_executor(const char *agent_id, const char *task_description,
                                    char **out_output)
 {
-    /* 保留 P2.2 env 开关：AIRY_SCHED_DISPATCH=0 时关闭真实派发 */
+
     if (!sched_dispatch_enabled()) {
         SVC_LOG_WARN("sched dispatch disabled (AIRY_SCHED_DISPATCH=0), task not executed");
         return AIRY_ERR_NOT_SUPPORTED;
@@ -634,8 +605,6 @@ static int sched_dispatch_executor(const char *agent_id, const char *task_descri
     return AIRY_SUCCESS;
 }
 
-/* ==================== 销毁服务 ==================== */
-
 static void destroy_service(void)
 {
     if (g_service) {
@@ -644,22 +613,18 @@ static void destroy_service(void)
     }
 }
 
-/* ==================== 主函数 ==================== */
-
 int main(int argc, char **argv)
 {
     const char *config_path = "agentrt/manager/service/sched_d/sched.yaml";
     int use_tcp = 0;
 
-    /* 解析命令行参数（--manager/--tcp/--help） */
     int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_sched_d);
-    if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
+    if (parse_rc > 0)
+        return parse_rc == 1 ? 0 : 1;
 
-    /* 初始化平台层 */
     airy_sock_init();
     airy_mtx_init(&g_running_lock_sched_d);
 
-    /* 设置信号处理 */
 #ifdef _WIN32
     SetConsoleCtrlHandler((PHANDLER_ROUTINE)signal_handler_sched_d, TRUE);
 #else
@@ -669,12 +634,10 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("sched_d");
 
     SVC_LOG_INFO("Scheduler service starting, manager=%s", config_path);
 
-    /* 创建配置 */
     sched_config_t config = {.strategy = SCHED_STRATEGY_ROUND_ROBIN,
                              .health_check_interval_ms = 5000,
                              .stats_report_interval_ms = 10000,
@@ -704,8 +667,7 @@ int main(int argc, char **argv)
             unsigned long pv = strtoul(dag_par, NULL, 10);
             if (pv > 0 && pv <= SCHED_DAG_MAX_NODES) {
                 config.dag_max_parallel = (uint32_t)pv;
-                SVC_LOG_INFO("sched: DAG parallel mode enabled via AIRY_DAG_PARALLEL=%lu",
-                             pv);
+                SVC_LOG_INFO("sched: DAG parallel mode enabled via AIRY_DAG_PARALLEL=%lu", pv);
             } else {
                 SVC_LOG_WARN("sched: invalid AIRY_DAG_PARALLEL=%s (1..%d), fallback serial",
                              dag_par, SCHED_DAG_MAX_NODES);
@@ -713,28 +675,26 @@ int main(int argc, char **argv)
         }
     }
 
-    /* 创建调度服务 */
     int ret = sched_service_create(&config, &g_service);
     if (ret != AIRY_SUCCESS || !g_service) {
         SVC_LOG_ERROR("Failed to create scheduler service (error=%d)", ret);
-        /* N5 修复：改用 goto 集中出口，避免重复清理代码 */
+
         goto out_mtx_sock;
     }
 
     SVC_LOG_INFO("Scheduler service created with strategy: round_robin");
 
-    /* 创建服务器 Socket（TCP/Unix/NamedPipe 统一封装） */
-    airy_sock_t server_fd = daemon_create_server_socket(
-        use_tcp, DEFAULT_TCP_PORT, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN);
+    airy_sock_t server_fd =
+        daemon_create_server_socket(use_tcp, DEFAULT_TCP_PORT, DEFAULT_SOCKET_PATH_UNIX,
+                                    DEFAULT_SOCKET_PATH_WIN);
     if (server_fd < 0) {
         SVC_LOG_ERROR("Failed to create server socket");
-        /* N5 修复：server_fd 未创建，跳过 airy_sock_close，仅清理 service + mtx + sock */
+
         goto out_service;
     }
     SVC_LOG_INFO(use_tcp ? "Listening on TCP port %d" : "Listening on Unix socket",
                  DEFAULT_TCP_PORT);
 
-    /* 创建事件驱动 + SD/IPC bootstrap */
     daemon_event_config_t ev_config;
     __builtin_memset(&ev_config, 0, sizeof(ev_config));
     ev_config.max_events = 64;
@@ -746,19 +706,21 @@ int main(int argc, char **argv)
     ev_config.service_ctx = NULL;
 
     const char *sock_addr = use_tcp ? "127.0.0.1" : DEFAULT_SOCKET_PATH_UNIX;
-    ret = daemon_init_event_driver("sched_d", "scheduler", sock_addr,
-                                   use_tcp ? DEFAULT_TCP_PORT : 0, "scheduler,core", use_tcp,
-                                   &ev_config, &g_event_driver_sched_d, &g_bsd_sched_d,
-                                   &g_bipc_sched_d);
+    ret =
+        daemon_init_event_driver("sched_d", "scheduler", sock_addr, use_tcp ? DEFAULT_TCP_PORT : 0,
+                                 "scheduler,core", use_tcp, &ev_config, &g_event_driver_sched_d,
+                                 &g_bsd_sched_d, &g_bipc_sched_d);
     if (ret != AIRY_SUCCESS || !g_event_driver_sched_d) {
         SVC_LOG_ERROR("Failed to create event driver");
-        /* N5 修复：event_driver 未创建，跳过 destroy，清理 server_fd + service + mtx + sock */
+
         goto out_server_fd;
     }
 
     g_dispatcher_sched_d = daemon_event_driver_get_dispatcher(g_event_driver_sched_d);
-    method_dispatcher_register(g_dispatcher_sched_d, "register_agent", on_register_agent_method, NULL);
-    method_dispatcher_register(g_dispatcher_sched_d, "schedule_task", on_schedule_task_method, NULL);
+    method_dispatcher_register(g_dispatcher_sched_d, "register_agent", on_register_agent_method,
+                               NULL);
+    method_dispatcher_register(g_dispatcher_sched_d, "schedule_task", on_schedule_task_method,
+                               NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "get_task", on_get_task_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "cancel", on_cancel_task_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "dag_submit", on_dag_submit_method, NULL);
@@ -766,11 +728,12 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_sched_d, "dag_cancel", on_dag_cancel_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "get_stats", on_get_stats_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "health_check", on_health_check_method, NULL);
-    method_dispatcher_register(g_dispatcher_sched_d, "checkpoint_save", on_checkpoint_save_method, NULL);
-    /* L2 协议命名别名（02-l2-service-protocol.md：sched.submit / sched.query / sched.cancel） */
+    method_dispatcher_register(g_dispatcher_sched_d, "checkpoint_save", on_checkpoint_save_method,
+                               NULL);
+
     method_dispatcher_register(g_dispatcher_sched_d, "submit", on_schedule_task_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "query", on_get_task_method, NULL);
-    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+
     method_dispatcher_register(g_dispatcher_sched_d, "shutdown", on_shutdown_method_sched_d, NULL);
     SVC_LOG_INFO("Registered %d RPC methods (sched.* namespace)", 13);
 
@@ -784,22 +747,20 @@ int main(int argc, char **argv)
 
     if (daemon_event_driver_add_server_fd(g_event_driver_sched_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
-        /* N5 修复：event_driver 已创建但 add_server_fd 失败，需 destroy + 清理全部资源 */
+
         goto out_event_driver;
     }
 
     SVC_LOG_INFO("Scheduler service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_sched_d);
 
-    /* 标准资源清理链 */
-    daemon_cleanup_standard(g_bipc_sched_d, g_bsd_sched_d, g_event_driver_sched_d,
-                           server_fd, destroy_service, &g_running_lock_sched_d);
+    daemon_cleanup_standard(g_bipc_sched_d, g_bsd_sched_d, g_event_driver_sched_d, server_fd,
+                            destroy_service, &g_running_lock_sched_d);
 
-    daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
+    daemon_cupolas_cleanup();
     log_cleanup();
     return 0;
 
-/* N5 修复：goto 集中出口标签（按资源分配逆序释放，fall-through 模式） */
 out_event_driver:
     daemon_event_driver_destroy(g_event_driver_sched_d);
 out_server_fd:

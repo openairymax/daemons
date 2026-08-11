@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file cupolas_svc_adapter.c
  * @brief Cupolas 服务适配器：将 cupolas_service_t 适配到统一 AgentRT 服务管理框架
@@ -152,7 +152,7 @@ static int cupolas_adapter_healthcheck(airy_svc_t service)
         return AIRY_ENOTINIT;
     if (!ctx->running)
         return AIRY_ENOTINIT;
-    /* 健康检查：服务实例存在且 cupolas 库版本可读（模块已初始化） */
+
     const char *version = cupolas_version();
     if (!version || version[0] == '\0') {
         SVC_LOG_WARN("Cupolas healthcheck failed: version unavailable");

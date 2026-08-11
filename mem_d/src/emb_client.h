@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file emb_client.h
  * @brief Memory 服务可选 embedding 后端客户端（OpenAI 兼容 /embeddings 接口）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 作为 TF-IDF 向量检索的可选增强：
  * - 通过环境变量 AIRY_MEM_EMBEDDING_URL / AIRY_MEM_EMBEDDING_KEY 配置
@@ -19,12 +19,12 @@
 #include <stdint.h>
 
 typedef struct {
-    char *url;              /* OpenAI 兼容 base url（如 http://host:port/v1） */
-    char *api_key;          /* 可选 Bearer token */
-    int enabled;            /* 配置齐全且 libcurl 可用 */
-    int healthy;            /* 最近一次调用是否成功（失败自动降级） */
-    uint64_t last_fail_time; /* 上次失败时间戳（ms），用于失败冷却 */
-    uint64_t retry_after_ms; /* 失败后重试冷却期（默认 60s） */
+    char *url;
+    char *api_key;
+    int enabled;
+    int healthy;
+    uint64_t last_fail_time;
+    uint64_t retry_after_ms;
 } mem_emb_client_t;
 
 /**
@@ -51,8 +51,7 @@ int mem_emb_should_try(const mem_emb_client_t *client);
  * @param out_dim 输出维度，失败置 0
  * @return AIRY_SUCCESS 成功；失败返回错误码并标记 unhealthy（触发冷却降级）
  */
-int mem_emb_embed(mem_emb_client_t *client, const char *text,
-                  float **out_vec, size_t *out_dim);
+int mem_emb_embed(mem_emb_client_t *client, const char *text, float **out_vec, size_t *out_dim);
 
 /**
  * @brief 计算两个 embedding 的余弦相似度，钳制到 [0,1]

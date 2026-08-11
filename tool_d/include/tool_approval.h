@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file tool_approval.h
  * @brief C-L05: Cupolas SafetyGuard → tool_d 工具审批适配器
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 在工具执行前通过 Cupolas 安全穹顶进行权限检查和参数净化。
  * 集成点位于 executor.c 的 tool_executor_run() 中。
@@ -24,7 +24,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* 前向声明 */
+
 typedef struct safety_guard_bridge_s safety_guard_bridge_t;
 
 #ifdef __cplusplus
@@ -35,10 +35,10 @@ extern "C" {
  * @brief 工具审批结果
  */
 typedef enum {
-    TOOL_APPROVAL_ALLOWED = 0,     /**< 批准执行 */
-    TOOL_APPROVAL_DENIED,          /**< 拒绝执行 */
-    TOOL_APPROVAL_SANITIZED,       /**< 已净化参数，批准执行 */
-    TOOL_APPROVAL_PENDING_AUDIT    /**< 需人工审核 */
+    TOOL_APPROVAL_ALLOWED = 0,
+    TOOL_APPROVAL_DENIED,
+    TOOL_APPROVAL_SANITIZED,
+    TOOL_APPROVAL_PENDING_AUDIT
 } tool_approval_result_t;
 
 /**
@@ -50,25 +50,24 @@ typedef struct tool_approval_ctx tool_approval_ctx_t;
  * @brief 工具审批配置
  */
 typedef struct {
-    const char *agent_id;            /**< 请求 Agent ID */
-    bool enable_safety_guard_chain;  /**< 是否启用 SafetyGuard 链式检查 */
-    bool enable_audit_logging;       /**< 是否记录审计日志 */
-    const char *permission_rules;    /**< 权限规则 JSON（NULL 使用默认） */
+    const char *agent_id;
+    bool enable_safety_guard_chain;
+    bool enable_audit_logging;
+    const char *permission_rules;
 } tool_approval_config_t;
 
 /**
  * @brief 审批详细结果
  */
 typedef struct {
-    tool_approval_result_t decision;        /**< 审批决定 */
-    char reason[256];                       /**< 审批原因 */
-    char sanitized_params[4096];            /**< 净化后的参数 */
-    int permission_check_passed;            /**< 权限检查是否通过 */
-    int safety_guard_passed;                /**< SafetyGuard 是否通过 */
-    int params_were_sanitized;              /**< 参数是否被修改 */
+    tool_approval_result_t decision;
+    char reason[256];
+    char sanitized_params[4096];
+    int permission_check_passed;
+    int safety_guard_passed;
+    int params_were_sanitized;
 } tool_approval_detail_t;
 
-/* ── 生命周期 ── */
 
 /**
  * @brief 创建工具审批上下文
@@ -87,7 +86,6 @@ tool_approval_ctx_t *tool_approval_create(const tool_approval_config_t *cfg);
  */
 void tool_approval_destroy(tool_approval_ctx_t *ctx);
 
-/* ── 审批接口 ── */
 
 /**
  * @brief C-L05: 审批工具执行请求
@@ -168,8 +166,7 @@ void tool_approval_get_stats(tool_approval_ctx_t *ctx, uint64_t *out_total_check
  *
  * @ownership ctx: BORROW, bridge: BORROW (caller retains ownership)
  */
-void tool_approval_set_safety_guard_bridge(tool_approval_ctx_t *ctx,
-                                           safety_guard_bridge_t *bridge);
+void tool_approval_set_safety_guard_bridge(tool_approval_ctx_t *ctx, safety_guard_bridge_t *bridge);
 
 /**
  * @brief 获取审批上下文的 Agent ID

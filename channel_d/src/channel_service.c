@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "channel_service.h"
 
 #include "airy_mman.h"
@@ -67,7 +68,7 @@ static int create_socket_channel(channel_entry_t *entry, const char *endpoint)
     struct sockaddr_un addr;
     __builtin_memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-AIRY_STRNCPY_TERM(addr.sun_path, endpoint, sizeof(addr.sun_path));
+    AIRY_STRNCPY_TERM(addr.sun_path, endpoint, sizeof(addr.sun_path));
     (addr.sun_path)[sizeof(addr.sun_path) - 1] = '\0';
 
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -102,11 +103,10 @@ AIRY_STRNCPY_TERM(addr.sun_path, endpoint, sizeof(addr.sun_path));
 
 static int create_shm_channel(channel_entry_t *entry, const char *endpoint __attribute__((unused)))
 {
-    /* 拷贝 channel_id 到局部变量，避免 snprintf 源/目标同结构体重叠警告 (-Wrestrict) */
+
     char channel_id_copy[sizeof(entry->shm_name)];
     snprintf(channel_id_copy, sizeof(channel_id_copy), "%s", entry->info.channel_id);
-    snprintf(entry->shm_name, sizeof(entry->shm_name), "%s%s", "/airy_ch_",
-             channel_id_copy);
+    snprintf(entry->shm_name, sizeof(entry->shm_name), "%s%s", "/airy_ch_", channel_id_copy);
 
     size_t shm_size = entry->info.buffer_size > 0 ? entry->info.buffer_size : 65536;
 
@@ -262,14 +262,14 @@ int channel_service_open(channel_service_t *svc, const char *channel_id, const c
     entry->socket_fd = -1;
     entry->shm_fd = -1;
 
-AIRY_STRNCPY_TERM(entry->info.channel_id, channel_id, sizeof(entry->info.channel_id));
-AIRY_STRNCPY_TERM(entry->info.name, name, sizeof(entry->info.name));
+    AIRY_STRNCPY_TERM(entry->info.channel_id, channel_id, sizeof(entry->info.channel_id));
+    AIRY_STRNCPY_TERM(entry->info.name, name, sizeof(entry->info.name));
     entry->info.type = type;
     entry->info.status = CHANNEL_STATUS_OPEN;
     entry->info.buffer_size = svc->config.default_buffer_size;
 
     if (endpoint) {
-AIRY_STRNCPY_TERM(entry->info.endpoint, endpoint, sizeof(entry->info.endpoint));
+        AIRY_STRNCPY_TERM(entry->info.endpoint, endpoint, sizeof(entry->info.endpoint));
     } else {
         if (type == CHANNEL_TYPE_SOCKET) {
             snprintf(entry->info.endpoint, sizeof(entry->info.endpoint), "%s/%s.sock",
@@ -335,7 +335,8 @@ int channel_service_close(channel_service_t *svc, const char *channel_id)
             destroy_channel(&svc->channels[i]);
             if (i < svc->channel_count - 1) {
                 svc->channels[i] = svc->channels[svc->channel_count - 1];
-                __builtin_memset(&svc->channels[svc->channel_count - 1], 0, sizeof(channel_entry_t));
+                __builtin_memset(&svc->channels[svc->channel_count - 1], 0,
+                                 sizeof(channel_entry_t));
                 svc->channels[svc->channel_count - 1].socket_fd = -1;
                 svc->channels[svc->channel_count - 1].shm_fd = -1;
             }
@@ -355,7 +356,6 @@ int channel_service_send(channel_service_t *svc, const char *channel_id, const v
     if (!svc || !channel_id || !data || data_len == 0)
         return AIRY_ERR_INVALID_PARAM;
 
-    /* 快照所需字段（全局锁仅做查找与快照，禁止持锁做网络 IO） */
     char endpoint[512];
     int socket_fd = -1;
     void *shm_ptr = NULL;
@@ -381,7 +381,6 @@ int channel_service_send(channel_service_t *svc, const char *channel_id, const v
     shm_ptr = entry->shm_ptr;
     shm_size = entry->shm_size;
 
-    /* SHM 写为快速内存拷贝 + 原子 flag，保持在锁内（不阻塞） */
     if (type == CHANNEL_TYPE_SHM) {
         if (!shm_ptr) {
             airy_mtx_unlock(&svc->lock);
@@ -402,8 +401,7 @@ int channel_service_send(channel_service_t *svc, const char *channel_id, const v
             return AIRY_ERR_OVERFLOW;
         }
         volatile uint32_t *msg_len = (volatile uint32_t *)shm_ptr;
-        volatile uint32_t *msg_flag =
-            (volatile uint32_t *)((char *)shm_ptr + sizeof(uint32_t));
+        volatile uint32_t *msg_flag = (volatile uint32_t *)((char *)shm_ptr + sizeof(uint32_t));
         *msg_len = (uint32_t)data_len;
         __builtin_memcpy((char *)shm_ptr + header_size, data, data_len);
         atomic_thread_fence(memory_order_seq_cst);
@@ -411,7 +409,6 @@ int channel_service_send(channel_service_t *svc, const char *channel_id, const v
     }
     airy_mtx_unlock(&svc->lock);
 
-    /* 锁外执行阻塞 IO（socket connect/write、pipe open/write） */
     int io_rc = 0;
     switch (type) {
     case CHANNEL_TYPE_SOCKET: {
@@ -471,7 +468,7 @@ int channel_service_send(channel_service_t *svc, const char *channel_id, const v
         break;
     }
     case CHANNEL_TYPE_SHM:
-        /* 已在锁内完成 */
+
         break;
     default:
         AIRY_ERROR(AIRY_ERR_UNKNOWN, "unknown channel type in send");
@@ -482,7 +479,6 @@ int channel_service_send(channel_service_t *svc, const char *channel_id, const v
         return io_rc;
     }
 
-    /* 更新计数（重新加锁，channel 可能已被并发删除） */
     airy_mtx_lock(&svc->lock);
     channel_entry_t *e2 = find_channel(svc, channel_id);
     if (e2 && e2->info.status == CHANNEL_STATUS_OPEN) {
@@ -503,7 +499,6 @@ int channel_service_receive(channel_service_t *svc, const char *channel_id, void
     if (!svc || !channel_id || !out_data || !out_len)
         return AIRY_ERR_INVALID_PARAM;
 
-    /* 全局锁仅做查找与快照（SHM 快速读保持在锁内，阻塞 IO 移出锁） */
     char endpoint[512];
     int socket_fd = -1;
     void *shm_ptr = NULL;
@@ -533,8 +528,7 @@ int channel_service_receive(channel_service_t *svc, const char *channel_id, void
             return AIRY_ERR_UNKNOWN;
         }
         volatile uint32_t *msg_len = (volatile uint32_t *)shm_ptr;
-        volatile uint32_t *msg_flag =
-            (volatile uint32_t *)((char *)shm_ptr + sizeof(uint32_t));
+        volatile uint32_t *msg_flag = (volatile uint32_t *)((char *)shm_ptr + sizeof(uint32_t));
         atomic_thread_fence(memory_order_seq_cst);
         if (*msg_flag != 1) {
             airy_mtx_unlock(&svc->lock);
@@ -559,7 +553,6 @@ int channel_service_receive(channel_service_t *svc, const char *channel_id, void
     }
     airy_mtx_unlock(&svc->lock);
 
-    /* 锁外执行阻塞 IO */
     int io_rc = 0;
     switch (type) {
     case CHANNEL_TYPE_SOCKET: {
@@ -631,7 +624,7 @@ int channel_service_receive(channel_service_t *svc, const char *channel_id, void
         break;
     }
     case CHANNEL_TYPE_SHM:
-        /* 已在锁内完成 */
+
         break;
     default:
         AIRY_ERROR(AIRY_ERR_UNKNOWN, "unknown channel type in receive");
@@ -642,7 +635,6 @@ int channel_service_receive(channel_service_t *svc, const char *channel_id, void
         return io_rc;
     }
 
-    /* 更新计数（重新加锁） */
     airy_mtx_lock(&svc->lock);
     channel_entry_t *e2 = find_channel(svc, channel_id);
     if (e2 && e2->info.status == CHANNEL_STATUS_OPEN) {
@@ -743,7 +735,7 @@ int channel_service_ping(channel_service_t *svc, const char *channel_id, int64_t
         struct sockaddr_un addr;
         __builtin_memset(&addr, 0, sizeof(addr));
         addr.sun_family = AF_UNIX;
-AIRY_STRNCPY_TERM(addr.sun_path, entry->info.endpoint, sizeof(addr.sun_path));
+        AIRY_STRNCPY_TERM(addr.sun_path, entry->info.endpoint, sizeof(addr.sun_path));
         (addr.sun_path)[sizeof(addr.sun_path) - 1] = '\0';
 
         {
@@ -756,9 +748,9 @@ AIRY_STRNCPY_TERM(addr.sun_path, entry->info.endpoint, sizeof(addr.sun_path));
 
         if (connect(sock_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
             close(sock_fd);
-            rc = (errno == EAGAIN || errno == ETIMEDOUT || errno == EINPROGRESS)
-                     ? AIRY_ERR_TIMEOUT
-                     : AIRY_ERR_IO;
+            rc = (errno == EAGAIN || errno == ETIMEDOUT || errno == EINPROGRESS) ?
+                     AIRY_ERR_TIMEOUT :
+                     AIRY_ERR_IO;
             break;
         }
 

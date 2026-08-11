@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /*
- * Copyright (c) 2026 SPHARX Ltd. All Rights Reserved.
  * test_service_discovery.c - Service Discovery Module Unit Tests
  */
 
@@ -16,16 +16,33 @@
 static int tests_run = 0;
 static int tests_passed = 0;
 
-#define TEST(name) do { tests_run++; printf("  %-50s", name); } while(0)
-#define PASS() do { tests_passed++; printf("[PASS]\n"); } while(0)
-#define FAIL(msg) do { printf("[FAIL] %s\n", msg); return; } while(0)
-#define ASSERT(cond, msg) do { if (!(cond)) { FAIL(msg); } } while(0)
+#define TEST(name)               \
+    do {                         \
+        tests_run++;             \
+        printf("  %-50s", name); \
+    } while (0)
+#define PASS()              \
+    do {                    \
+        tests_passed++;     \
+        printf("[PASS]\n"); \
+    } while (0)
+#define FAIL(msg)                   \
+    do {                            \
+        printf("[FAIL] %s\n", msg); \
+        return;                     \
+    } while (0)
+#define ASSERT(cond, msg) \
+    do {                  \
+        if (!(cond)) {    \
+            FAIL(msg);    \
+        }                 \
+    } while (0)
 
 static int callback_fired = 0;
 static sd_event_type_t last_event = 0;
 
-static void event_callback(sd_event_type_t event, const char *svc,
-                           const sd_instance_t *inst, void *user_data)
+static void event_callback(sd_event_type_t event, const char *svc, const sd_instance_t *inst,
+                           void *user_data)
 {
     (void)svc;
     (void)inst;
@@ -47,30 +64,23 @@ static sd_instance_t make_instance(const char *id, const char *endpoint)
 }
 
 /* ==================== 1. sd_create_default_config ==================== */
-
 static void test_sd_create_default_config(void)
 {
     TEST("sd_create_default_config - verify defaults");
     sd_config_t cfg = sd_create_default_config();
-    ASSERT(cfg.heartbeat_interval_ms == SD_DEFAULT_HEARTBEAT_MS,
-           "default heartbeat_interval_ms");
-    ASSERT(cfg.expire_timeout_ms == SD_DEFAULT_EXPIRE_MS,
-           "default expire_timeout_ms");
+    ASSERT(cfg.heartbeat_interval_ms == SD_DEFAULT_HEARTBEAT_MS, "default heartbeat_interval_ms");
+    ASSERT(cfg.expire_timeout_ms == SD_DEFAULT_EXPIRE_MS, "default expire_timeout_ms");
     ASSERT(cfg.default_lb_strategy == SD_LB_ROUND_ROBIN,
            "default lb strategy should be ROUND_ROBIN");
-    ASSERT(cfg.enable_auto_expire == true,
-           "auto expire should be enabled by default");
+    ASSERT(cfg.enable_auto_expire == true, "auto expire should be enabled by default");
     ASSERT(cfg.enable_health_propagation == true,
            "health propagation should be enabled by default");
-    ASSERT(cfg.shm_size == 1024 * 1024,
-           "default shm_size should be 1MB");
-    ASSERT(strcmp(cfg.shm_name, SD_SHM_NAME) == 0,
-           "default shm_name should match SD_SHM_NAME");
+    ASSERT(cfg.shm_size == 1024 * 1024, "default shm_size should be 1MB");
+    ASSERT(strcmp(cfg.shm_name, SD_SHM_NAME) == 0, "default shm_name should match SD_SHM_NAME");
     PASS();
 }
 
 /* ==================== 2. sd_create(NULL) ==================== */
-
 static void test_sd_create_null_config(void)
 {
     TEST("sd_create(NULL) - create with defaults");
@@ -81,7 +91,6 @@ static void test_sd_create_null_config(void)
 }
 
 /* ==================== 3. sd_create(config) ==================== */
-
 static void test_sd_create_with_config(void)
 {
     TEST("sd_create(config) - create with custom config");
@@ -99,7 +108,6 @@ static void test_sd_create_with_config(void)
 }
 
 /* ==================== 4. sd_destroy(NULL) ==================== */
-
 static void test_sd_destroy_null(void)
 {
     TEST("sd_destroy(NULL) - safe null handling");
@@ -108,7 +116,6 @@ static void test_sd_destroy_null(void)
 }
 
 /* ==================== 5. sd_start / sd_stop / sd_is_running lifecycle ==================== */
-
 static void test_sd_lifecycle(void)
 {
     TEST("sd_start/sd_stop/sd_is_running lifecycle");
@@ -130,7 +137,6 @@ static void test_sd_lifecycle(void)
 }
 
 /* ==================== 6. sd_start idempotent ==================== */
-
 static void test_sd_start_idempotent(void)
 {
     TEST("sd_start on already started - idempotent");
@@ -150,7 +156,6 @@ static void test_sd_start_idempotent(void)
 }
 
 /* ==================== 7. sd_stop(NULL) ==================== */
-
 static void test_sd_stop_null(void)
 {
     TEST("sd_stop(NULL) - rejected");
@@ -160,7 +165,6 @@ static void test_sd_stop_null(void)
 }
 
 /* ==================== 8. sd_register - normal ==================== */
-
 static void test_sd_register_normal(void)
 {
     TEST("sd_register - normal registration");
@@ -168,8 +172,8 @@ static void test_sd_register_normal(void)
     ASSERT(sd != NULL, "create");
 
     sd_instance_t inst = make_instance("inst-001", "tcp://127.0.0.1:8080");
-    int ret = sd_register(sd, "auth-service", "auth",
-                          &inst, "critical,prod", "db-service,log-service");
+    int ret =
+        sd_register(sd, "auth-service", "auth", &inst, "critical,prod", "db-service,log-service");
     ASSERT(ret == 0, "registration should succeed");
 
     sd_service_count(sd);
@@ -180,7 +184,6 @@ static void test_sd_register_normal(void)
 }
 
 /* ==================== 9. sd_register - NULL parameter validation ==================== */
-
 static void test_sd_register_null_params(void)
 {
     TEST("sd_register - NULL parameter validation");
@@ -205,7 +208,6 @@ static void test_sd_register_null_params(void)
 }
 
 /* ==================== 10. sd_deregister - normal ==================== */
-
 static void test_sd_deregister_normal(void)
 {
     TEST("sd_deregister - normal deregistration");
@@ -225,7 +227,6 @@ static void test_sd_deregister_normal(void)
 }
 
 /* ==================== 11. sd_deregister - nonexistent service ==================== */
-
 static void test_sd_deregister_nonexistent(void)
 {
     TEST("sd_deregister - nonexistent service");
@@ -246,7 +247,6 @@ static void test_sd_deregister_nonexistent(void)
 }
 
 /* ==================== 12. sd_deregister_all ==================== */
-
 static void test_sd_deregister_all(void)
 {
     TEST("sd_deregister_all - deregister all instances");
@@ -275,7 +275,6 @@ static void test_sd_deregister_all(void)
 }
 
 /* ==================== 13. sd_discover - discover registered instances ==================== */
-
 static void test_sd_discover_normal(void)
 {
     TEST("sd_discover - discover registered instances");
@@ -299,7 +298,6 @@ static void test_sd_discover_normal(void)
 }
 
 /* ==================== 14. sd_discover - nonexistent service ==================== */
-
 static void test_sd_discover_nonexistent(void)
 {
     TEST("sd_discover - nonexistent service");
@@ -317,7 +315,6 @@ static void test_sd_discover_nonexistent(void)
 }
 
 /* ==================== 15. sd_discover_by_type ==================== */
-
 static void test_sd_discover_by_type(void)
 {
     TEST("sd_discover_by_type - find services by type");
@@ -350,7 +347,6 @@ static void test_sd_discover_by_type(void)
 }
 
 /* ==================== 16. sd_discover_by_tags ==================== */
-
 static void test_sd_discover_by_tags(void)
 {
     TEST("sd_discover_by_tags - find services by tags");
@@ -382,7 +378,6 @@ static void test_sd_discover_by_tags(void)
 }
 
 /* ==================== 17. sd_select_instance - round_robin ==================== */
-
 static void test_sd_select_instance_round_robin(void)
 {
     TEST("sd_select_instance - round_robin strategy");
@@ -409,7 +404,6 @@ static void test_sd_select_instance_round_robin(void)
 }
 
 /* ==================== 18. sd_select_instance - random ==================== */
-
 static void test_sd_select_instance_random(void)
 {
     TEST("sd_select_instance - random strategy");
@@ -423,15 +417,13 @@ static void test_sd_select_instance_random(void)
     memset(&selected, 0, sizeof(selected));
     int ret = sd_select_instance(sd, "rand-svc", SD_LB_RANDOM, &selected);
     ASSERT(ret == 0, "random select should succeed");
-    ASSERT(strcmp(selected.instance_id, "inst-001") == 0,
-           "should select the only instance");
+    ASSERT(strcmp(selected.instance_id, "inst-001") == 0, "should select the only instance");
 
     sd_destroy(sd);
     PASS();
 }
 
 /* ==================== 19. sd_select_instance - nonexistent ==================== */
-
 static void test_sd_select_instance_nonexistent(void)
 {
     TEST("sd_select_instance - nonexistent service");
@@ -447,7 +439,6 @@ static void test_sd_select_instance_nonexistent(void)
 }
 
 /* ==================== 20. sd_heartbeat - normal ==================== */
-
 static void test_sd_heartbeat_normal(void)
 {
     TEST("sd_heartbeat - normal heartbeat");
@@ -465,7 +456,6 @@ static void test_sd_heartbeat_normal(void)
 }
 
 /* ==================== 21. sd_heartbeat - nonexistent ==================== */
-
 static void test_sd_heartbeat_nonexistent(void)
 {
     TEST("sd_heartbeat - nonexistent service");
@@ -486,7 +476,6 @@ static void test_sd_heartbeat_nonexistent(void)
 }
 
 /* ==================== 22. sd_update_health ==================== */
-
 static void test_sd_update_health(void)
 {
     TEST("sd_update_health - mark unhealthy then healthy");
@@ -516,7 +505,6 @@ static void test_sd_update_health(void)
 }
 
 /* ==================== 23. sd_update_connections ==================== */
-
 static void test_sd_update_connections(void)
 {
     TEST("sd_update_connections - update connections");
@@ -537,7 +525,6 @@ static void test_sd_update_connections(void)
 }
 
 /* ==================== 24. sd_get_dependencies ==================== */
-
 static void test_sd_get_dependencies(void)
 {
     TEST("sd_get_dependencies - retrieve dependencies");
@@ -563,7 +550,6 @@ static void test_sd_get_dependencies(void)
 }
 
 /* ==================== 25. sd_check_dependencies ==================== */
-
 static void test_sd_check_dependencies(void)
 {
     TEST("sd_check_dependencies - check dependency health");
@@ -596,7 +582,6 @@ static void test_sd_check_dependencies(void)
 }
 
 /* ==================== 26. sd_register_event_callback ==================== */
-
 static void test_sd_register_event_callback(void)
 {
     TEST("sd_register_event_callback - register callback");
@@ -630,7 +615,6 @@ static void test_sd_register_event_callback(void)
 }
 
 /* ==================== 27. sd_get_stats ==================== */
-
 static void test_sd_get_stats(void)
 {
     TEST("sd_get_stats - retrieve stats");
@@ -659,7 +643,6 @@ static void test_sd_get_stats(void)
 }
 
 /* ==================== 28. sd_service_count ==================== */
-
 static void test_sd_service_count(void)
 {
     TEST("sd_service_count - service count tracking");
@@ -691,45 +674,36 @@ static void test_sd_service_count(void)
 }
 
 /* ==================== 29. sd_lb_strategy_to_string ==================== */
-
 static void test_sd_lb_strategy_to_string(void)
 {
     TEST("sd_lb_strategy_to_string - all strategies");
     const char *s;
 
     s = sd_lb_strategy_to_string(SD_LB_ROUND_ROBIN);
-    ASSERT(s != NULL && strcmp(s, "ROUND_ROBIN") == 0,
-           "ROUND_ROBIN string");
+    ASSERT(s != NULL && strcmp(s, "ROUND_ROBIN") == 0, "ROUND_ROBIN string");
 
     s = sd_lb_strategy_to_string(SD_LB_WEIGHTED);
-    ASSERT(s != NULL && strcmp(s, "WEIGHTED") == 0,
-           "WEIGHTED string");
+    ASSERT(s != NULL && strcmp(s, "WEIGHTED") == 0, "WEIGHTED string");
 
     s = sd_lb_strategy_to_string(SD_LB_LEAST_CONNECTION);
-    ASSERT(s != NULL && strcmp(s, "LEAST_CONNECTION") == 0,
-           "LEAST_CONNECTION string");
+    ASSERT(s != NULL && strcmp(s, "LEAST_CONNECTION") == 0, "LEAST_CONNECTION string");
 
     s = sd_lb_strategy_to_string(SD_LB_RANDOM);
-    ASSERT(s != NULL && strcmp(s, "RANDOM") == 0,
-           "RANDOM string");
+    ASSERT(s != NULL && strcmp(s, "RANDOM") == 0, "RANDOM string");
 
     s = sd_lb_strategy_to_string(SD_LB_LEAST_LOAD);
-    ASSERT(s != NULL && strcmp(s, "LEAST_LOAD") == 0,
-           "LEAST_LOAD string");
+    ASSERT(s != NULL && strcmp(s, "LEAST_LOAD") == 0, "LEAST_LOAD string");
 
     s = sd_lb_strategy_to_string((sd_lb_strategy_t)999);
-    ASSERT(s != NULL && strcmp(s, "UNKNOWN") == 0,
-           "invalid strategy should return UNKNOWN");
+    ASSERT(s != NULL && strcmp(s, "UNKNOWN") == 0, "invalid strategy should return UNKNOWN");
 
     s = sd_lb_strategy_to_string((sd_lb_strategy_t)-1);
-    ASSERT(s != NULL && strcmp(s, "UNKNOWN") == 0,
-           "negative strategy should return UNKNOWN");
+    ASSERT(s != NULL && strcmp(s, "UNKNOWN") == 0, "negative strategy should return UNKNOWN");
 
     PASS();
 }
 
 /* ==================== 30. Multiple services and instances stress ==================== */
-
 static void test_sd_multiple_services_stress(void)
 {
     TEST("Multiple services and instances stress");
@@ -777,7 +751,6 @@ static void test_sd_multiple_services_stress(void)
 }
 
 /* ==================== 31. All null parameter safety checks ==================== */
-
 static void test_sd_null_parameter_safety(void)
 {
     TEST("All null parameter safety checks for each API");
@@ -809,23 +782,15 @@ static void test_sd_null_parameter_safety(void)
     ASSERT(sd_discover(sd, "s", buf, 4, NULL) != 0, "sd_discover null found");
 
     sd_service_entry_t entries[4];
-    ASSERT(sd_discover_by_type(NULL, "t", entries, 4, &found) != 0,
-           "sd_discover_by_type null sd");
-    ASSERT(sd_discover_by_type(sd, NULL, entries, 4, &found) != 0,
-           "sd_discover_by_type null type");
-    ASSERT(sd_discover_by_type(sd, "t", NULL, 4, &found) != 0,
-           "sd_discover_by_type null entries");
-    ASSERT(sd_discover_by_type(sd, "t", entries, 4, NULL) != 0,
-           "sd_discover_by_type null found");
+    ASSERT(sd_discover_by_type(NULL, "t", entries, 4, &found) != 0, "sd_discover_by_type null sd");
+    ASSERT(sd_discover_by_type(sd, NULL, entries, 4, &found) != 0, "sd_discover_by_type null type");
+    ASSERT(sd_discover_by_type(sd, "t", NULL, 4, &found) != 0, "sd_discover_by_type null entries");
+    ASSERT(sd_discover_by_type(sd, "t", entries, 4, NULL) != 0, "sd_discover_by_type null found");
 
-    ASSERT(sd_discover_by_tags(NULL, "t", entries, 4, &found) != 0,
-           "sd_discover_by_tags null sd");
-    ASSERT(sd_discover_by_tags(sd, NULL, entries, 4, &found) != 0,
-           "sd_discover_by_tags null tags");
-    ASSERT(sd_discover_by_tags(sd, "t", NULL, 4, &found) != 0,
-           "sd_discover_by_tags null entries");
-    ASSERT(sd_discover_by_tags(sd, "t", entries, 4, NULL) != 0,
-           "sd_discover_by_tags null found");
+    ASSERT(sd_discover_by_tags(NULL, "t", entries, 4, &found) != 0, "sd_discover_by_tags null sd");
+    ASSERT(sd_discover_by_tags(sd, NULL, entries, 4, &found) != 0, "sd_discover_by_tags null tags");
+    ASSERT(sd_discover_by_tags(sd, "t", NULL, 4, &found) != 0, "sd_discover_by_tags null entries");
+    ASSERT(sd_discover_by_tags(sd, "t", entries, 4, NULL) != 0, "sd_discover_by_tags null found");
 
     sd_instance_t sel;
     ASSERT(sd_select_instance(NULL, "s", SD_LB_ROUND_ROBIN, &sel) != 0,
@@ -843,22 +808,15 @@ static void test_sd_null_parameter_safety(void)
     ASSERT(sd_update_health(sd, NULL, "i", true) != 0, "sd_update_health null name");
     ASSERT(sd_update_health(sd, "s", NULL, true) != 0, "sd_update_health null inst_id");
 
-    ASSERT(sd_update_connections(NULL, "s", "i", 10) != 0,
-           "sd_update_connections null sd");
-    ASSERT(sd_update_connections(sd, NULL, "i", 10) != 0,
-           "sd_update_connections null name");
-    ASSERT(sd_update_connections(sd, "s", NULL, 10) != 0,
-           "sd_update_connections null inst_id");
+    ASSERT(sd_update_connections(NULL, "s", "i", 10) != 0, "sd_update_connections null sd");
+    ASSERT(sd_update_connections(sd, NULL, "i", 10) != 0, "sd_update_connections null name");
+    ASSERT(sd_update_connections(sd, "s", NULL, 10) != 0, "sd_update_connections null inst_id");
 
-    ASSERT(sd_get_dependencies(NULL, "s", NULL, 0) != 0,
-           "sd_get_dependencies null sd");
-    ASSERT(sd_get_dependencies(sd, NULL, NULL, 0) != 0,
-           "sd_get_dependencies null name");
+    ASSERT(sd_get_dependencies(NULL, "s", NULL, 0) != 0, "sd_get_dependencies null sd");
+    ASSERT(sd_get_dependencies(sd, NULL, NULL, 0) != 0, "sd_get_dependencies null name");
 
-    ASSERT(sd_check_dependencies(NULL, "s", NULL, 0) != 0,
-           "sd_check_dependencies null sd");
-    ASSERT(sd_check_dependencies(sd, NULL, NULL, 0) != 0,
-           "sd_check_dependencies null name");
+    ASSERT(sd_check_dependencies(NULL, "s", NULL, 0) != 0, "sd_check_dependencies null sd");
+    ASSERT(sd_check_dependencies(sd, NULL, NULL, 0) != 0, "sd_check_dependencies null name");
 
     ASSERT(sd_register_event_callback(NULL, event_callback, NULL) != 0,
            "sd_register_event_callback null sd");
@@ -874,7 +832,6 @@ static void test_sd_null_parameter_safety(void)
 }
 
 /* ==================== 32. sd_select_instance - weighted ==================== */
-
 static void test_sd_select_instance_weighted(void)
 {
     TEST("sd_select_instance - weighted strategy");
@@ -889,15 +846,13 @@ static void test_sd_select_instance_weighted(void)
     memset(&selected, 0, sizeof(selected));
     int ret = sd_select_instance(sd, "weight-svc", SD_LB_WEIGHTED, &selected);
     ASSERT(ret == 0, "weighted select should succeed");
-    ASSERT(strcmp(selected.instance_id, "inst-001") == 0,
-           "should select the only instance");
+    ASSERT(strcmp(selected.instance_id, "inst-001") == 0, "should select the only instance");
 
     sd_destroy(sd);
     PASS();
 }
 
 /* ==================== 33. sd_select_instance - least_connection ==================== */
-
 static void test_sd_select_instance_least_connection(void)
 {
     TEST("sd_select_instance - least_connection strategy");
@@ -924,7 +879,6 @@ static void test_sd_select_instance_least_connection(void)
 }
 
 /* ==================== 34. sd_select_instance - least_load ==================== */
-
 static void test_sd_select_instance_least_load(void)
 {
     TEST("sd_select_instance - least_load strategy");
@@ -953,7 +907,6 @@ static void test_sd_select_instance_least_load(void)
 }
 
 /* ==================== 35. sd_discover with max_count limit ==================== */
-
 static void test_sd_discover_max_count(void)
 {
     TEST("sd_discover - max_count limit");
@@ -979,7 +932,6 @@ static void test_sd_discover_max_count(void)
 }
 
 /* ==================== 36. Callback on health changes ==================== */
-
 static void test_sd_callback_health_changes(void)
 {
     TEST("Callback on health changes");
@@ -1009,7 +961,6 @@ static void test_sd_callback_health_changes(void)
 }
 
 /* ==================== 37. sd_deregister_all - nonexistent service ==================== */
-
 static void test_sd_deregister_all_nonexistent(void)
 {
     TEST("sd_deregister_all - nonexistent service");
@@ -1024,7 +975,6 @@ static void test_sd_deregister_all_nonexistent(void)
 }
 
 /* ==================== 38. sd_discover returns only healthy ==================== */
-
 static void test_sd_discover_only_healthy(void)
 {
     TEST("sd_discover - returns only healthy instances");
@@ -1053,7 +1003,6 @@ static void test_sd_discover_only_healthy(void)
 }
 
 /* ==================== 39. Multiple callbacks ==================== */
-
 static void test_sd_multiple_callbacks(void)
 {
     TEST("Multiple event callbacks");
@@ -1077,7 +1026,6 @@ static void test_sd_multiple_callbacks(void)
 }
 
 /* ==================== 40. sd_discover_by_type - null params ==================== */
-
 static void test_sd_discover_null_params(void)
 {
     TEST("sd_discover - null parameter safety");
@@ -1086,14 +1034,10 @@ static void test_sd_discover_null_params(void)
 
     sd_instance_t buf[4];
     uint32_t found;
-    ASSERT(sd_discover(NULL, "s", buf, 4, &found) != 0,
-           "sd_discover null sd should fail");
-    ASSERT(sd_discover(sd, NULL, buf, 4, &found) != 0,
-           "sd_discover null name should fail");
-    ASSERT(sd_discover(sd, "s", NULL, 4, &found) != 0,
-           "sd_discover null instances should fail");
-    ASSERT(sd_discover(sd, "s", buf, 4, NULL) != 0,
-           "sd_discover null found_count should fail");
+    ASSERT(sd_discover(NULL, "s", buf, 4, &found) != 0, "sd_discover null sd should fail");
+    ASSERT(sd_discover(sd, NULL, buf, 4, &found) != 0, "sd_discover null name should fail");
+    ASSERT(sd_discover(sd, "s", NULL, 4, &found) != 0, "sd_discover null instances should fail");
+    ASSERT(sd_discover(sd, "s", buf, 4, NULL) != 0, "sd_discover null found_count should fail");
 
     sd_destroy(sd);
     PASS();

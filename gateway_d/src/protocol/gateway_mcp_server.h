@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 #ifndef AIRY_RT_GATEWAY_MCP_SERVER_H
 #define AIRY_RT_GATEWAY_MCP_SERVER_H
 
@@ -25,12 +26,14 @@ typedef struct {
     bool enable_sampling;
 } gw_mcp_server_config_t;
 
-#define GW_MCP_SERVER_CONFIG_DEFAULTS                                                      \
-    {                                                                                      \
-        .server_name = "agentrt-gateway", .server_version = "0.1.1", .capabilities = 0x3F, \
-        .default_timeout_ms = 30000, .enable_progress = true, .enable_cancellation = true, \
-        .enable_sampling = true                                                            \
-    }
+#define GW_MCP_SERVER_CONFIG_DEFAULTS  \
+    {.server_name = "agentrt-gateway", \
+     .server_version = "0.1.1",        \
+     .capabilities = 0x3F,             \
+     .default_timeout_ms = 30000,      \
+     .enable_progress = true,          \
+     .enable_cancellation = true,      \
+     .enable_sampling = true}
 
 typedef int (*gw_mcp_tool_exec_fn)(const char *tool_name, const char *arguments_json,
                                    char **result_json, void *user_data);

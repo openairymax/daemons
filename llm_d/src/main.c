@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX Ltd. All Rights Reserved.
  *
  * @file main.c
  * @brief LLM 服务守护进程主入口（遵循 daemon 模块统一规范）
@@ -31,8 +31,6 @@
 #include <string.h>
 #include <time.h>
 
-/* ==================== 配置常量 ==================== */
-
 #define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("llm.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_llm"
 #define DEFAULT_TCP_PORT 8080
@@ -41,24 +39,19 @@
 #define MAX_THREADS 8
 #define MAX_MESSAGES_PER_REQUEST 128
 
-/* LLM 服务调用重试策略：最多重试 3 次，指数退避（100ms 起） */
 #define LLM_MAX_RETRIES 3
 #define LLM_BASE_DELAY_MS 100
 
 /* P0.18.1: 生成公共全局变量（g_running_llm_d 等）、信号处理（signal_handler_llm_d、
  * svc_log_toggle_handler_llm_d）、print_usage_llm_d、daemon_handle_client_llm_d、
  * daemon_on_client_llm_d 等样板，消除手工重复代码。 */
-DAEMON_DECLARE_COMMON(llm_d, llm, DEFAULT_SOCKET_PATH_UNIX,
-                      DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+DAEMON_DECLARE_COMMON(llm_d, llm, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN,
+                      DEFAULT_TCP_PORT, MAX_BUFFER)
 
-/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
 DAEMON_DECLARE_SHUTDOWN_METHOD(llm_d)
-
-/* ==================== 全局状态 ==================== */
 
 static llm_service_t *g_service = NULL;
 
-/* 服务配置 */
 typedef struct {
     char *socket_path;
     char *tcp_host;
@@ -70,15 +63,13 @@ typedef struct {
 
 static llm_daemon_config_t g_config = {0};
 
-/* ==================== 请求上下文（线程安全） ==================== */
-
 typedef struct {
     llm_message_t messages[MAX_MESSAGES_PER_REQUEST];
     size_t message_count;
     char *response_buffer;
     size_t response_size;
     size_t response_capacity;
-    char *tools_json; /* OpenAI tools 数组 JSON（由 parse_params 分配，cleanup 释放） */
+    char *tools_json;
 } request_context_t;
 
 /**
@@ -122,8 +113,6 @@ static void request_context_destroy(request_context_t *ctx)
     AIRY_FREE(ctx->response_buffer);
     AIRY_FREE(ctx);
 }
-
-/* ==================== 参数解析（线程安全） ==================== */
 
 /**
  * @brief 解析请求参数为 llm_request_config_t
@@ -206,7 +195,6 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
                 AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate message role or content");
             }
 
-            /* Function calling：role="tool" 消息的 tool_call_id（可空） */
             cJSON *tcid = cJSON_GetObjectItem(item, "tool_call_id");
             if (cJSON_IsString(tcid) && tcid->valuestring && tcid->valuestring[0]) {
                 ctx->messages[i].tool_call_id = AIRY_STRDUP(tcid->valuestring);
@@ -217,7 +205,6 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
                 }
             }
 
-            /* Function calling：role="assistant" 消息的 tool_calls（可空，JSON 数组） */
             cJSON *tcalls = cJSON_GetObjectItem(item, "tool_calls");
             if (cJSON_IsArray(tcalls) && cJSON_GetArraySize(tcalls) > 0) {
                 ctx->messages[i].tool_calls_json = cJSON_PrintUnformatted(tcalls);
@@ -230,7 +217,6 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
         }
     }
 
-    /* 解析可选参数 */
     cJSON *temp = cJSON_GetObjectItem(params, "temperature");
     if (cJSON_IsNumber(temp)) {
         cfg->temperature = (float)temp->valuedouble;
@@ -261,7 +247,6 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
         cfg->frequency_penalty = frequency_penalty->valuedouble;
     }
 
-    /* Function calling：解析 tools 定义（OpenAI tools 数组，可空） */
     cJSON *tools = cJSON_GetObjectItem(params, "tools");
     if (cJSON_IsArray(tools) && cJSON_GetArraySize(tools) > 0) {
         ctx->tools_json = cJSON_PrintUnformatted(tools);
@@ -275,13 +260,9 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
     return 0;
 }
 
-/* ==================== 方法处理器包装函数 ==================== */
-
-/* 前向声明 */
 static char *handle_complete(cJSON *params, int id);
 static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd);
 
-/* A2-3: llm.list_models 处理器——返回 registry 全部模型 + 默认模型 */
 static char *handle_list_models(cJSON *params __attribute__((unused)), int id)
 {
     if (!g_service)
@@ -291,7 +272,6 @@ static char *handle_list_models(cJSON *params __attribute__((unused)), int id)
     if (!json)
         return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Out of memory", id);
 
-    /* 包装为 JSON-RPC 成功响应 */
     cJSON *root = cJSON_Parse(json);
     AIRY_FREE(json);
     if (!root)
@@ -302,7 +282,6 @@ static char *handle_list_models(cJSON *params __attribute__((unused)), int id)
     return jsonrpc_build_success(root, id);
 }
 
-/* list_models 方法包装器（适配 method_dispatcher 接口） */
 static void on_list_models_method(cJSON *params, int id, void *user_data)
 {
     char *response = handle_list_models(params, id);
@@ -313,22 +292,17 @@ static void on_list_models_method(cJSON *params, int id, void *user_data)
     }
 }
 
-/* L2 标准方法 llm.count_tokens / llm.health_check / llm.get_stats */
-
-/* 由模型名推导 token 编码（与 src/token_counter.c 的 encoding_to_model_type 映射一致） */
 static const char *llm_encoding_for_model(const char *model)
 {
     if (!model || model[0] == '\0')
         return "cl100k_base";
     if (strstr(model, "claude"))
         return "claude";
-    if (strstr(model, "gpt-3.5") || strstr(model, "text-davinci") ||
-        strstr(model, "code-davinci"))
+    if (strstr(model, "gpt-3.5") || strstr(model, "text-davinci") || strstr(model, "code-davinci"))
         return "p50k_base";
     return "cl100k_base";
 }
 
-/* llm.count_tokens：params {model?, text} → {"model", "text", "tokens", "encoding"} */
 static char *handle_count_tokens(cJSON *params, int id)
 {
     cJSON *text = cJSON_GetObjectItem(params, "text");
@@ -373,7 +347,6 @@ static void on_count_tokens_method(cJSON *params, int id, void *user_data)
     }
 }
 
-/* llm.health_check：无副作用健康探针 */
 static char *handle_health_check(cJSON *params __attribute__((unused)), int id)
 {
     cJSON *result = cJSON_CreateObject();
@@ -395,7 +368,6 @@ static void on_health_check_method(cJSON *params, int id, void *user_data)
     }
 }
 
-/* llm.get_stats：接线服务层 llm_service_stats（JSON 字符串） */
 static char *handle_get_stats(cJSON *params __attribute__((unused)), int id)
 {
     if (!g_service)
@@ -435,10 +407,12 @@ static void on_complete_method(cJSON *params, int id, void *user_data __attribut
         airy_sock_t client_fd = *(airy_sock_t *)user_data;
         size_t resp_len = strlen(response);
         if (getenv("AIRY_LLM_D_DIAG"))
-            SVC_LOG_ERROR("llm_d diag: complete send start fd=%d resp_len=%zu", (int)client_fd, resp_len);
+            SVC_LOG_ERROR("llm_d diag: complete send start fd=%d resp_len=%zu", (int)client_fd,
+                          resp_len);
         ssize_t sent = airy_sock_send(client_fd, response, resp_len);
         if (getenv("AIRY_LLM_D_DIAG"))
-            SVC_LOG_ERROR("llm_d diag: complete send done fd=%d sent=%zd errno=%d", (int)client_fd, sent, errno);
+            SVC_LOG_ERROR("llm_d diag: complete send done fd=%d sent=%zd errno=%d", (int)client_fd,
+                          sent, errno);
         AIRY_FREE(response);
     }
 }
@@ -456,8 +430,6 @@ static void on_complete_stream_method(cJSON *params, int id,
         AIRY_FREE(response);
     }
 }
-
-/* ==================== 请求处理 ==================== */
 
 /**
  * @brief 处理 complete 方法
@@ -514,7 +486,6 @@ static char *handle_complete(cJSON *params, int id)
         return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Failed to serialize response", id);
     }
 
-    /* P0.18.2: 模式 B — CJSON_PARSE_GUARD（on_fail 中释放 resp_json） */
     CJSON_PARSE_GUARD(result, resp_json, {
         AIRY_FREE(resp_json);
         request_context_destroy(ctx);
@@ -575,7 +546,7 @@ static void llm_stream_send_all(airy_sock_t fd, const char *buf, size_t len)
                 break;
 #else
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                /* 等待可写（1s 超时），超时则放弃本次块 */
+
                 struct pollfd pfd = {.fd = (int)fd, .events = POLLOUT};
                 if (poll(&pfd, 1, 1000) <= 0)
                     break;
@@ -583,10 +554,10 @@ static void llm_stream_send_all(airy_sock_t fd, const char *buf, size_t len)
             }
             if (errno == EINTR)
                 continue;
-            break; /* EPIPE/ECONNRESET 等：对端关闭，放弃 */
+            break;
 #endif
         } else {
-            break; /* send 返回 0：异常，放弃 */
+            break;
         }
     }
 }
@@ -632,14 +603,12 @@ static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd
     AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
-/* ==================== 配置加载 ==================== */
-
 /**
  * @brief 加载守护进程配置
  */
 static int load_daemon_config(const char *config_path)
 {
-    /* 默认配置 */
+
     g_config.use_tcp = 0;
     g_config.max_threads = MAX_THREADS;
     g_config.max_clients = MAX_CLIENTS;
@@ -653,7 +622,6 @@ static int load_daemon_config(const char *config_path)
 #endif
     g_config.tcp_port = DEFAULT_TCP_PORT;
 
-    /* 如果提供了配置文件，尝试加载 */
     if (config_path) {
         FILE *f = fopen(config_path, "rb");
         if (f) {
@@ -668,7 +636,8 @@ static int load_daemon_config(const char *config_path)
                     content[len] = '\0';
 
                     /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + if (root) + 手动 cJSON_Delete
-                     * 使用 do { ... } while (0) + break 保持原 if (root) 块语义：解析失败时跳过配置提取 */
+                      * 使用 do { ... } while (0) + break 保持原 if (root)
+                      * 块语义：解析失败时跳过配置提取 */
                     do {
                         CJSON_PARSE_GUARD(root, content, { break; });
                         cJSON *daemon = cJSON_GetObjectItem(root, "daemon");
@@ -690,7 +659,7 @@ static int load_daemon_config(const char *config_path)
                                 g_config.max_threads = max_threads->valueint;
                             }
                         }
-                        /* root 由 CJSON_AUTO_FREE 自动释放（do-while 作用域退出时） */
+
                     } while (0);
                 }
                 AIRY_FREE(content);
@@ -712,8 +681,6 @@ static void free_daemon_config(void)
     __builtin_memset(&g_config, 0, sizeof(g_config));
 }
 
-/* ==================== 销毁服务（daemon_cleanup_standard 回调） ==================== */
-
 static void destroy_service_llm_d(void)
 {
     if (g_service) {
@@ -723,49 +690,40 @@ static void destroy_service_llm_d(void)
     free_daemon_config();
 }
 
-/* ==================== 主函数 ==================== */
-
 int main(int argc, char **argv)
 {
     const char *config_path = NULL;
     int use_tcp = 0;
 
-    /* P0.18.1: 统一命令行参数解析（--manager/--tcp/--help） */
     int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_llm_d);
     if (parse_rc > 0)
         return parse_rc == 1 ? 0 : 1;
 
-    /* 初始化平台层 */
     airy_sock_init();
     airy_mtx_init(&g_running_lock_llm_d);
 
-    /* P0.18.1: 跨平台信号处理设置 */
 #ifdef _WIN32
     SetConsoleCtrlHandler((PHANDLER_ROUTINE)signal_handler_llm_d, TRUE);
 #else
     DAEMON_SETUP_SIGNALS(llm_d);
 #endif
 
-    /* 保留初始日志级别 WARN（SIGUSR1 切换在 DEBUG/INFO 间切换，详见生成的 svc_log_toggle_handler_llm_d）
-     * 调试：AIRY_LLM_D_DEBUG=1 时输出 DEBUG 级日志 */
+    /* 保留初始日志级别 WARN（SIGUSR1 切换在 DEBUG/INFO 间切换，详见生成的
+     * svc_log_toggle_handler_llm_d）调试：AIRY_LLM_D_DEBUG=1 时输出 DEBUG 级日志 */
     airy_logger_config_t log_cfg = {0};
     const char *dbg = getenv("AIRY_LLM_D_DEBUG");
-    log_cfg.level = (dbg && dbg[0] == '1')
-                        ? (airy_log_level_t)LOG_LEVEL_DEBUG
-                        : (airy_log_level_t)LOG_LEVEL_WARN;
+    log_cfg.level = (dbg && dbg[0] == '1') ? (airy_log_level_t)LOG_LEVEL_DEBUG :
+                                             (airy_log_level_t)LOG_LEVEL_WARN;
     airy_log_init(&log_cfg);
     atexit(log_cleanup);
 
-    /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("llm_d");
 
-    /* 加载配置（配置文件中的 tcp_port 会置位 g_config.use_tcp） */
     load_daemon_config(config_path);
     use_tcp = use_tcp || g_config.use_tcp;
 
     SVC_LOG_INFO("LLM service starting, manager=%s", config_path ? config_path : "default");
 
-    /* 创建 LLM 服务 */
     g_service = llm_service_create(config_path);
     if (!g_service) {
         SVC_LOG_ERROR("Failed to create service");
@@ -774,11 +732,10 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    /* P0.18.1: 统一服务器 Socket 创建（TCP/Unix/NamedPipe 封装） */
     int tcp_port = g_config.tcp_port ? (int)g_config.tcp_port : DEFAULT_TCP_PORT;
     const char *unix_path = g_config.socket_path ? g_config.socket_path : DEFAULT_SOCKET_PATH_UNIX;
-    airy_sock_t server_fd = daemon_create_server_socket(use_tcp, tcp_port, unix_path,
-                                                              DEFAULT_SOCKET_PATH_WIN);
+    airy_sock_t server_fd =
+        daemon_create_server_socket(use_tcp, tcp_port, unix_path, DEFAULT_SOCKET_PATH_WIN);
     if (server_fd < 0) {
         SVC_LOG_ERROR("Failed to create server socket");
         destroy_service_llm_d();
@@ -791,7 +748,6 @@ int main(int argc, char **argv)
     else
         SVC_LOG_INFO("Listening on %s", unix_path);
 
-    /* P0.18.1: 创建事件驱动 + SD/IPC bootstrap（统一封装） */
     daemon_event_config_t ev_config;
     __builtin_memset(&ev_config, 0, sizeof(ev_config));
     ev_config.max_events = 64;
@@ -799,13 +755,12 @@ int main(int argc, char **argv)
     ev_config.thread_pool_max = g_config.max_threads > 0 ? g_config.max_threads : 8;
     ev_config.thread_pool_queue_size = 256;
     ev_config.use_jsonrpc = true;
-    ev_config.on_client = daemon_on_client_llm_d; /* P0.18.1: 使用生成的客户端处理回调 */
+    ev_config.on_client = daemon_on_client_llm_d;
     ev_config.service_ctx = NULL;
 
     const char *sock_addr = use_tcp ? "127.0.0.1" : unix_path;
-    int ret = daemon_init_event_driver("llm_d", "llm", sock_addr,
-                                       use_tcp ? tcp_port : 0, "ai,core", use_tcp,
-                                       &ev_config, &g_event_driver_llm_d, &g_bsd_llm_d,
+    int ret = daemon_init_event_driver("llm_d", "llm", sock_addr, use_tcp ? tcp_port : 0, "ai,core",
+                                       use_tcp, &ev_config, &g_event_driver_llm_d, &g_bsd_llm_d,
                                        &g_bipc_llm_d);
     if (ret != AIRY_SUCCESS || !g_event_driver_llm_d) {
         SVC_LOG_ERROR("Failed to create event driver");
@@ -818,13 +773,16 @@ int main(int argc, char **argv)
 
     g_dispatcher_llm_d = daemon_event_driver_get_dispatcher(g_event_driver_llm_d);
     method_dispatcher_register(g_dispatcher_llm_d, "complete", on_complete_method, NULL);
-    method_dispatcher_register(g_dispatcher_llm_d, "complete_stream", on_complete_stream_method, NULL);
+    method_dispatcher_register(g_dispatcher_llm_d, "complete_stream", on_complete_stream_method,
+                               NULL);
     method_dispatcher_register(g_dispatcher_llm_d, "list_models", on_list_models_method, NULL);
-    /* L2 协议标准方法（02-l2-service-protocol.md：llm.count_tokens / llm.health_check / llm.get_stats） */
+    /* L2 协议标准方法（02-l2-service-protocol.md：llm.count_tokens / llm.health_check /
+     * llm.get_stats）
+     */
     method_dispatcher_register(g_dispatcher_llm_d, "count_tokens", on_count_tokens_method, NULL);
     method_dispatcher_register(g_dispatcher_llm_d, "health_check", on_health_check_method, NULL);
     method_dispatcher_register(g_dispatcher_llm_d, "get_stats", on_get_stats_method, NULL);
-    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+
     method_dispatcher_register(g_dispatcher_llm_d, "shutdown", on_shutdown_method_llm_d, NULL);
     SVC_LOG_INFO("Registered %d RPC methods (llm.* namespace)", 7);
 
@@ -841,11 +799,10 @@ int main(int argc, char **argv)
     SVC_LOG_INFO("LLM service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_llm_d);
 
-    /* P0.18.1: 标准资源清理链（与 init 相反顺序） */
-    daemon_cleanup_standard(g_bipc_llm_d, g_bsd_llm_d, g_event_driver_llm_d,
-                           server_fd, destroy_service_llm_d, &g_running_lock_llm_d);
+    daemon_cleanup_standard(g_bipc_llm_d, g_bsd_llm_d, g_event_driver_llm_d, server_fd,
+                            destroy_service_llm_d, &g_running_lock_llm_d);
 
-    daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
+    daemon_cupolas_cleanup();
     log_cleanup();
     return 0;
 }

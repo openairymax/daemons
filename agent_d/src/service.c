@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file service.c
  * @brief Agent 服务实现：Agent 派生/终止/调用/列表
@@ -43,19 +43,17 @@
 #define AGENT_DEFAULT_MAX_AGENTS 10000
 
 #if AIRY_PLATFORM_POSIX
-/* ==================== 真实 spawn 辅助（POSIX） ==================== */
 
-/* invoke 读响应超时（秒）。默认 300s（5 分钟）覆盖真实 LLM 调用；
- * 可通过 AIRY_AGENT_INVOKE_TIMEOUT_S 覆盖。 */
+/* invoke read-response timeout (seconds). Default 300s (5 min) covers real LLM
+ * calls; overridable via AIRY_AGENT_INVOKE_TIMEOUT_S. */
 #define AGENT_INVOKE_TIMEOUT_S 300
 /* spawn 后等待子进程 ready 的超时（秒）。Python runner 冷启动含依赖
  * 导入，典型 2~5s；默认 15s 容忍慢速环境，超时即判定 spawn 失败（P0-2）。
  * 可通过 AIRY_AGENT_SPAWN_TIMEOUT_S 覆盖。 */
 #define AGENT_SPAWN_READY_TIMEOUT_S 15
-/* 单行响应最大长度（与 MAX_BUFFER 65536 对齐） */
+
 #define AGENT_RESP_BUF_SIZE 65536
 
-/* 运行时可配置超时：env 优先，缺省用编译期默认值 */
 static int agent_invoke_timeout_s(void)
 {
     const char *env = getenv("AIRY_AGENT_INVOKE_TIMEOUT_S");
@@ -110,15 +108,15 @@ static int agent_read_line_timeout_ex(int fd, char *buf, size_t buf_size, int ti
     uint64_t deadline_ms = airy_time_ms() + (uint64_t)(timeout_s > 0 ? timeout_s : 300) * 1000U;
     size_t pos = 0;
     while (pos < buf_size - 1) {
-        /* 取消检查：命中立即中止（与超时 -1 区分，返回 -2） */
+
         if (token && airy_cancel_token_is_canceled(token))
             return -2;
         uint64_t now = airy_time_ms();
         if (now >= deadline_ms)
-            return -1; /* 超时 */
+            return -1;
         uint32_t remain = (uint32_t)(deadline_ms - now);
         if (remain > 200U)
-            remain = 200U; /* 短片轮询：取消粒度 200ms */
+            remain = 200U;
 
         fd_set rfds;
         struct timeval tv;
@@ -133,7 +131,7 @@ static int agent_read_line_timeout_ex(int fd, char *buf, size_t buf_size, int ti
             return -1;
         }
         if (rv == 0)
-            continue; /* 本片超时：回到循环顶部复查 token 与总 deadline */
+            continue;
         ssize_t n = read(fd, buf + pos, 1);
         if (n < 0) {
             if (errno == EINTR)
@@ -141,7 +139,7 @@ static int agent_read_line_timeout_ex(int fd, char *buf, size_t buf_size, int ti
             return -1;
         }
         if (n == 0)
-            return -1; /* EOF — 子进程已关闭 stdout */
+            return -1;
         if (buf[pos] == '\n') {
             buf[pos] = '\0';
             return 0;
@@ -149,10 +147,9 @@ static int agent_read_line_timeout_ex(int fd, char *buf, size_t buf_size, int ti
         pos++;
     }
     buf[buf_size - 1] = '\0';
-    return 1; /* 缓冲满：截断，明确标记 */
+    return 1;
 }
 
-/* 无取消令牌版本（既有语义不变，token=NULL） */
 static int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeout_s)
 {
     return agent_read_line_timeout_ex(fd, buf, buf_size, timeout_s, NULL);
@@ -163,7 +160,8 @@ static int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeo
 static void spec_get_language(const char *spec, char *buf, size_t size)
 {
     if (!spec || size == 0) {
-        if (size > 0) buf[0] = '\0';
+        if (size > 0)
+            buf[0] = '\0';
         return;
     }
     cJSON *root = cJSON_Parse(spec);
@@ -183,11 +181,11 @@ static void spec_get_language(const char *spec, char *buf, size_t size)
 /* 解析 Rust agent binary 路径。
  * 优先级：spec.binary_path > ${AIRY_RUST_AGENT_DIR}/<role>_agent。
  * 结果写入 out_path（AIRY_PATH_MAX 字节），始终以 null 结尾。 */
-static void spec_resolve_rust_binary(const char *spec, const char *agent_id,
-                                      char *out_path)
+static void spec_resolve_rust_binary(const char *spec, const char *agent_id, char *out_path)
 {
     if (!spec || !out_path) {
-        if (out_path) out_path[0] = '\0';
+        if (out_path)
+            out_path[0] = '\0';
         return;
     }
     cJSON *root = cJSON_Parse(spec);
@@ -195,7 +193,7 @@ static void spec_resolve_rust_binary(const char *spec, const char *agent_id,
         out_path[0] = '\0';
         return;
     }
-    /* 1. spec.binary_path 优先 */
+
     cJSON *bin = cJSON_GetObjectItem(root, "binary_path");
     if (bin && cJSON_IsString(bin) && bin->valuestring[0] != '\0') {
         snprintf(out_path, AIRY_PATH_MAX, "%s", bin->valuestring);
@@ -212,7 +210,7 @@ static void spec_resolve_rust_binary(const char *spec, const char *agent_id,
         out_path[0] = '\0';
     }
     cJSON_Delete(root);
-    /* 仅警告：不影响 agent 生命周期，下次 invoke 会检测到子进程未启动而回退 */
+
     (void)agent_id;
 }
 
@@ -223,8 +221,8 @@ static void spec_resolve_rust_binary(const char *spec, const char *agent_id,
  * 使用 execvp（不经过 shell，无注入风险）。
  * 成功返回 0，out_pid/out_stdin/out_stdout 写入句柄；失败返回 -1。
  * stderr 重定向到 ${AIRY_RUNTIME_DIR}/agent_<agent_id>.log 便于调试。 */
-static int agent_spawn_child(const char *spec, const char *agent_id,
-                              pid_t *out_pid, int *out_stdin, int *out_stdout)
+static int agent_spawn_child(const char *spec, const char *agent_id, pid_t *out_pid, int *out_stdin,
+                             int *out_stdout)
 {
     char lang[16] = {0};
     spec_get_language(spec, lang, sizeof(lang));
@@ -248,7 +246,7 @@ static int agent_spawn_child(const char *spec, const char *agent_id,
     }
 
     if (pid == 0) {
-        /* 子进程：重定向 stdin/stdout 到管道，关闭父进程持有的端 */
+
         close(stdin_pipe[1]);
         close(stdout_pipe[0]);
         /* 改进1：自建进程组（setpgid(0,0)），使终止可按组 SIGTERM/SIGKILL
@@ -264,8 +262,7 @@ static int agent_spawn_child(const char *spec, const char *agent_id,
         /* stderr → 日志文件（best-effort，失败则继承父进程 stderr）。
          * 日志收敛到 AIRY_HOME/run（与 socket 同目录，便于排查）。 */
         char log_path[AIRY_PATH_MAX];
-        snprintf(log_path, sizeof(log_path), "%s/agent_%s.log",
-                 airy_runtime_dir(), agent_id);
+        snprintf(log_path, sizeof(log_path), "%s/agent_%s.log", airy_runtime_dir(), agent_id);
         int log_fd = open(log_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (log_fd >= 0) {
             dup2(log_fd, STDERR_FILENO);
@@ -273,11 +270,11 @@ static int agent_spawn_child(const char *spec, const char *agent_id,
         }
 
         if (strcmp(lang, "rust") == 0) {
-            /* Rust agent：binary_path 或 ${AIRY_RUST_AGENT_DIR}/<role>_agent */
+
             char bin_path[AIRY_PATH_MAX] = {0};
             spec_resolve_rust_binary(spec, agent_id, bin_path);
             if (bin_path[0] == '\0') {
-                /* 无有效 binary 路径 → 回退到 Python */
+
                 SVC_LOG_WARN("Rust agent binary path empty, fallback to python3: agent_id=%s",
                              agent_id);
                 goto fallback_python;
@@ -289,12 +286,12 @@ static int agent_spawn_child(const char *spec, const char *agent_id,
                 NULL,
             };
             execvp(bin_path, argv);
-            /* Rust binary 可能不存在或无执行权限，回退到 Python */
+
             SVC_LOG_WARN("execvp Rust agent failed, fallback to python3: binary=%s, agent_id=%s",
                          bin_path, agent_id);
         }
 
-fallback_python:
+    fallback_python:
         /* Python runner（默认 & 回退路径）
          *
          * 依赖解析：airymax_agents / openlab / agentrt SDK 通过标准 Python
@@ -303,20 +300,15 @@ fallback_python:
          * 参见 docs-closed/agentrt/01-designs/_design_0.1.1/06-agent-gateway-wiring.md §3.1）。 */
         {
             char *argv[] = {
-                (char *)"python3",
-                (char *)"-m",
-                (char *)"airymax_agents.runner",
-                (char *)"--spec",
-                (char *)spec,
-                NULL,
+                (char *)"python3", (char *)"-m", (char *)"airymax_agents.runner",
+                (char *)"--spec",  (char *)spec, NULL,
             };
             execvp("python3", argv);
         }
-        /* 仅 execvp 失败才到达此处 */
+
         _exit(127);
     }
 
-    /* 父进程：保留 stdin 写端与 stdout 读端 */
     close(stdin_pipe[0]);
     close(stdout_pipe[1]);
     *out_pid = pid;
@@ -336,17 +328,17 @@ static void agent_kill_and_reap(pid_t *pid_ptr, int *stdin_ptr, int *stdout_ptr)
         return;
 
     kill(-pid, SIGTERM);
-    /* 非阻塞轮询 2 秒等待退出 */
+
     for (int i = 0; i < 20; i++) {
         int status = 0;
         pid_t r = waitpid(pid, &status, WNOHANG);
         if (r == pid || r < 0)
             break;
-        /* r == 0 表示仍未退出，休眠 100ms */
+
         struct timespec ts = {0, 100 * 1000000L};
         nanosleep(&ts, NULL);
     }
-    /* 仍存活则 SIGKILL */
+
     int status = 0;
     if (waitpid(pid, &status, WNOHANG) == 0) {
         kill(-pid, SIGKILL);
@@ -364,14 +356,12 @@ static void agent_kill_and_reap(pid_t *pid_ptr, int *stdin_ptr, int *stdout_ptr)
     *pid_ptr = -1;
 }
 #endif /* AIRY_PLATFORM_POSIX */
-#define AGENT_ID_LEN 33          /* 32 字符 + '\0' */
+#define AGENT_ID_LEN 33
 #define AGENT_HASH_LOAD_FACTOR 4 /* capacity = max_agents * 4 */
-
-/* ==================== 内部哈希表 ==================== */
 
 static unsigned long agent_hash_fn(const char *str)
 {
-    /* djb2 — 与 syscall_router.c::hash_fn 同算法，避免符号碰撞 */
+
     unsigned long h = 5381;
     int c;
     while ((c = (unsigned char)*str++))
@@ -446,8 +436,6 @@ static ssize_t agent_ht_lookup(agent_hash_table_t *ht, const char *key)
     return -1;
 }
 
-/* ==================== Agent ID 生成 ==================== */
-
 static void agent_generate_agent_id(char *buf, size_t buf_size)
 {
     /* 32 字符十六进制：8 字符时间戳 + 8 字符计数器 + 16 字符随机
@@ -467,7 +455,7 @@ static void agent_generate_agent_id(char *buf, size_t buf_size)
     airy_mtx_unlock(&counter_lock);
 
     uint64_t t = (uint64_t)time(NULL);
-    /* xorshift 简单 PRNG，基于时间 + 计数器 */
+
     uint64_t r = t ^ (c * 0x9E3779B97F4A7C15ULL);
     r ^= r << 13;
     r ^= r >> 7;
@@ -475,13 +463,9 @@ static void agent_generate_agent_id(char *buf, size_t buf_size)
 
     if (buf_size < AGENT_ID_LEN)
         return;
-    snprintf(buf, AGENT_ID_LEN, "%08lx%08lx%016lx",
-             (unsigned long)(t & 0xFFFFFFFFu),
-             (unsigned long)(c & 0xFFFFFFFFu),
-             (unsigned long)(r & 0xFFFFFFFFFFFFFFFFULL));
+    snprintf(buf, AGENT_ID_LEN, "%08lx%08lx%016lx", (unsigned long)(t & 0xFFFFFFFFu),
+             (unsigned long)(c & 0xFFFFFFFFu), (unsigned long)(r & 0xFFFFFFFFFFFFFFFFULL));
 }
-
-/* ==================== 性能监控辅助 ==================== */
 
 /* 单调时钟微秒：POSIX 用 CLOCK_MONOTONIC（不受 NTP/时区跳变影响），
  * Windows 用 GetTickCount64（毫秒精度换算）。用于 spawn/invoke 时延
@@ -508,21 +492,17 @@ static void agent_lock_svc(agent_service_t *svc)
     }
 }
 
-/* 记录一次耗时到 (累计, 最大值) 聚合器。64 位原子累加 + CAS 更新最大值。 */
 static void agent_perf_accumulate(atomic_ullong *us_total, atomic_ullong *us_max,
                                   uint64_t elapsed_us)
 {
     atomic_fetch_add_explicit(us_total, elapsed_us, memory_order_relaxed);
     unsigned long long cur = atomic_load_explicit(us_max, memory_order_relaxed);
     while (elapsed_us > cur) {
-        if (atomic_compare_exchange_weak_explicit(us_max, &cur, elapsed_us,
-                                                  memory_order_relaxed,
+        if (atomic_compare_exchange_weak_explicit(us_max, &cur, elapsed_us, memory_order_relaxed,
                                                   memory_order_relaxed))
             break;
     }
 }
-
-/* ==================== 公共接口实现 ==================== */
 
 agent_service_t *agent_service_create(size_t max_agents)
 {
@@ -534,8 +514,7 @@ agent_service_t *agent_service_create(size_t max_agents)
         return NULL;
 
     svc->max_agents = max_agents;
-    svc->agents = (agent_entry_internal_t *)AIRY_CALLOC(max_agents,
-                                                          sizeof(agent_entry_internal_t));
+    svc->agents = (agent_entry_internal_t *)AIRY_CALLOC(max_agents, sizeof(agent_entry_internal_t));
     if (!svc->agents) {
         AIRY_FREE(svc);
         return NULL;
@@ -576,8 +555,7 @@ void agent_service_destroy(agent_service_t *svc)
         agent_entry_internal_t *agent = &svc->agents[i];
 #if AIRY_PLATFORM_POSIX
         if (agent->child_pid > 0) {
-            agent_kill_and_reap(&agent->child_pid,
-                                &agent->stdin_fd, &agent->stdout_fd);
+            agent_kill_and_reap(&agent->child_pid, &agent->stdin_fd, &agent->stdout_fd);
         }
 #endif
         AIRY_FREE(agent->agent_id);
@@ -596,24 +574,21 @@ void agent_service_destroy(agent_service_t *svc)
     AIRY_FREE(svc);
 }
 
-int agent_service_spawn(agent_service_t *svc, const char *spec,
-                          char **out_agent_id)
+int agent_service_spawn(agent_service_t *svc, const char *spec, char **out_agent_id)
 {
     if (!svc || !svc->initialized || !spec || spec[0] == '\0' || !out_agent_id)
         return AIRY_ERR_INVALID_PARAM;
 
     *out_agent_id = NULL;
 
-    /* ---- 性能监控：spawn 耗时起点与请求计数 ---- */
     uint64_t perf_t0 = agent_perf_now_us();
     airy_atomic_fetch_add(&svc->m_spawn_total, 1);
 
-    /* ---- 阶段1：全局锁内快速分配槽位（无阻塞 IO，禁止持锁 fork） ---- */
     size_t idx;
     agent_entry_internal_t *agent = NULL;
 
     agent_lock_svc(svc);
-    /* 优先复用空闲槽位（spawn 失败回滚产生），避免 count 因失败膨胀 */
+
     idx = SIZE_MAX;
     for (size_t i = 0; i < svc->agent_count; i++) {
         if (svc->agents[i].status == AGENT_STATUS_FREE) {
@@ -650,7 +625,6 @@ int agent_service_spawn(agent_service_t *svc, const char *spec,
     agent->spawned_at = (uint64_t)time(NULL);
     airy_mtx_unlock(&svc->lock);
 
-    /* ---- 阶段2：全局锁外 fork + 等待子进程 ready（可并行） ---- */
     pid_t child_pid = -1;
     int child_sin = -1, child_sout = -1;
     int spawn_ok = 1;
@@ -660,18 +634,15 @@ int agent_service_spawn(agent_service_t *svc, const char *spec,
      * AIRY_AGENT_NO_SPAWN=1 时跳过 fork（单元测试确定性模式）：视为成功
      * 注册但无子进程，invoke 会返回明确错误而非假成功。 */
     const char *no_spawn_env = getenv("AIRY_AGENT_NO_SPAWN");
-    int spawn_disabled = (no_spawn_env && no_spawn_env[0] != '\0' &&
-                          strcmp(no_spawn_env, "0") != 0);
+    int spawn_disabled =
+        (no_spawn_env && no_spawn_env[0] != '\0' && strcmp(no_spawn_env, "0") != 0);
 
     if (spawn_disabled) {
-        SVC_LOG_WARN("Agent spawn skipped (AIRY_AGENT_NO_SPAWN): agent_id=%s",
-                     agent->agent_id);
-    } else if (agent_spawn_child(spec, agent->agent_id,
-                                 &child_pid, &child_sin, &child_sout) == 0) {
-        /* 等待子进程 ready 确认存活；失败则回收子进程并判定 spawn 失败 */
+        SVC_LOG_WARN("Agent spawn skipped (AIRY_AGENT_NO_SPAWN): agent_id=%s", agent->agent_id);
+    } else if (agent_spawn_child(spec, agent->agent_id, &child_pid, &child_sin, &child_sout) == 0) {
+
         char ready_buf[512];
-        int ready_rc = agent_read_line_timeout(child_sout, ready_buf,
-                                               sizeof(ready_buf),
+        int ready_rc = agent_read_line_timeout(child_sout, ready_buf, sizeof(ready_buf),
                                                agent_spawn_ready_timeout_s());
         int alive = 0;
         if (ready_rc == 0) {
@@ -684,16 +655,15 @@ int agent_service_spawn(agent_service_t *svc, const char *spec,
             }
         }
         if (alive) {
-            SVC_LOG_INFO("Agent child spawned: agent_id=%s, pid=%d",
-                         agent->agent_id, (int)child_pid);
+            SVC_LOG_INFO("Agent child spawned: agent_id=%s, pid=%d", agent->agent_id,
+                         (int)child_pid);
         } else {
             SVC_LOG_WARN("Agent child not ready, spawn rejected: agent_id=%s, resp=%s",
-                         agent->agent_id,
-                         ready_rc == 0 ? ready_buf : "(timeout/eof)");
+                         agent->agent_id, ready_rc == 0 ? ready_buf : "(timeout/eof)");
             pid_t dead_pid = child_pid;
             int dead_sin = child_sin, dead_sout = child_sout;
             agent_kill_and_reap(&dead_pid, &dead_sin, &dead_sout);
-            child_pid = -1; /* 标记 spawn 失败，进入下方失败判定 */
+            child_pid = -1;
         }
     } else {
         SVC_LOG_WARN("Agent child spawn failed: agent_id=%s", agent->agent_id);
@@ -704,7 +674,6 @@ int agent_service_spawn(agent_service_t *svc, const char *spec,
     }
 #endif
 
-    /* ---- 阶段3：细粒度锁下回填子进程句柄 + 全局锁下注册哈希表 ---- */
     airy_mtx_lock(&agent->entry_lock);
 
     if (spawn_ok) {
@@ -726,20 +695,18 @@ int agent_service_spawn(agent_service_t *svc, const char *spec,
             airy_mtx_unlock(&svc->lock);
             airy_mtx_unlock(&agent->entry_lock);
             *out_agent_id = AIRY_STRDUP(agent->agent_id);
-            /* 性能监控：spawn 成功计数 + 耗时聚合 */
+
             airy_atomic_fetch_add(&svc->m_spawn_ok, 1);
-            agent_perf_accumulate(&svc->m_spawn_us_total,
-                                  &svc->m_spawn_us_max,
+            agent_perf_accumulate(&svc->m_spawn_us_total, &svc->m_spawn_us_max,
                                   agent_perf_now_us() - perf_t0);
-            SVC_LOG_DEBUG("Agent spawn: agent_id=%s, total=%lu",
-                          *out_agent_id, (unsigned long)svc->agent_count);
+            SVC_LOG_DEBUG("Agent spawn: agent_id=%s, total=%lu", *out_agent_id,
+                          (unsigned long)svc->agent_count);
             return AIRY_SUCCESS;
         }
-        /* 注册失败：回收子进程并回滚槽位 */
+
 #if AIRY_PLATFORM_POSIX
         if (agent->child_pid > 0) {
-            agent_kill_and_reap(&agent->child_pid,
-                                &agent->stdin_fd, &agent->stdout_fd);
+            agent_kill_and_reap(&agent->child_pid, &agent->stdin_fd, &agent->stdout_fd);
         }
 #endif
         airy_mtx_unlock(&svc->lock);
@@ -757,10 +724,8 @@ int agent_service_spawn(agent_service_t *svc, const char *spec,
     agent->spec = NULL;
     airy_mtx_unlock(&svc->lock);
 
-    /* 性能监控：spawn 失败计数 */
     airy_atomic_fetch_add(&svc->m_spawn_fail, 1);
-    agent_perf_accumulate(&svc->m_spawn_us_total,
-                          &svc->m_spawn_us_max,
+    agent_perf_accumulate(&svc->m_spawn_us_total, &svc->m_spawn_us_max,
                           agent_perf_now_us() - perf_t0);
 
     return spawn_ok ? AIRY_ERR_FAIL : AIRY_ERR_SVC_NOT_READY;
@@ -771,7 +736,6 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id)
     if (!svc || !svc->initialized || !agent_id)
         return AIRY_ERR_INVALID_PARAM;
 
-    /* 性能监控：terminate 请求计数 */
     airy_atomic_fetch_add(&svc->m_terminate_total, 1);
 
     agent_lock_svc(svc);
@@ -784,16 +748,13 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id)
     agent_entry_internal_t *agent = &svc->agents[idx];
     airy_mtx_unlock(&svc->lock);
 
-    /* 细粒度锁下终止子进程并置状态，不阻塞其他 agent 操作 */
     airy_mtx_lock(&agent->entry_lock);
 #if AIRY_PLATFORM_POSIX
     if (agent->child_pid > 0) {
-        agent_kill_and_reap(&agent->child_pid,
-                            &agent->stdin_fd,
-                            &agent->stdout_fd);
+        agent_kill_and_reap(&agent->child_pid, &agent->stdin_fd, &agent->stdout_fd);
     }
 #endif
-    /* 仅置终止状态，不回收槽位（与原 syscall_router.c 实现一致） */
+
     agent->status = AGENT_STATUS_TERMINATED;
     airy_mtx_unlock(&agent->entry_lock);
 
@@ -801,21 +762,17 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id)
     return AIRY_SUCCESS;
 }
 
-int agent_service_invoke(agent_service_t *svc, const char *agent_id,
-                          const char *input, size_t len,
-                          airy_cancel_token_t *cancel_token,
-                          char **out_output)
+int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char *input, size_t len,
+                         airy_cancel_token_t *cancel_token, char **out_output)
 {
     if (!svc || !svc->initialized || !agent_id || !out_output)
         return AIRY_ERR_INVALID_PARAM;
 
     *out_output = NULL;
 
-    /* ---- 性能监控：invoke 耗时起点与请求计数 ---- */
     uint64_t perf_t0 = agent_perf_now_us();
     airy_atomic_fetch_add(&svc->m_invoke_total, 1);
 
-    /* 索引查找仅在全局锁下短暂执行，随即释放 */
     agent_lock_svc(svc);
     ssize_t idx = agent_ht_lookup(&svc->agent_index, agent_id);
     if (idx < 0 || (size_t)idx >= svc->agent_count) {
@@ -846,7 +803,6 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id,
         int sin_fd = agent->stdin_fd;
         int sout_fd = agent->stdout_fd;
 
-        /* 构建请求 JSON: {"agent_id":..., "input":...} */
         cJSON *req = cJSON_CreateObject();
         cJSON_AddStringToObject(req, "agent_id", agent_id);
         cJSON_AddStringToObject(req, "input", input ? input : "");
@@ -859,7 +815,6 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id,
             return AIRY_ERR_OUT_OF_MEMORY;
         }
 
-        /* 写请求到子进程 stdin（追加 '\n' 作为行分隔） */
         size_t req_len = strlen(req_str);
         char *write_buf = (char *)AIRY_MALLOC(req_len + 2);
         if (!write_buf) {
@@ -876,55 +831,41 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id,
         int wrc = agent_write_all(sin_fd, write_buf, req_len + 1);
         AIRY_FREE(write_buf);
         if (wrc != 0) {
-            SVC_LOG_WARN("Agent invoke write failed, child unusable: agent_id=%s",
-                         agent_id);
-            agent_kill_and_reap(&agent->child_pid,
-                                &agent->stdin_fd,
-                                &agent->stdout_fd);
+            SVC_LOG_WARN("Agent invoke write failed, child unusable: agent_id=%s", agent_id);
+            agent_kill_and_reap(&agent->child_pid, &agent->stdin_fd, &agent->stdout_fd);
             goto invoke_fallback;
         }
-        /* P0-3：成功向子进程写入请求视为活跃，更新空闲回收基准 */
+
         agent->last_active = (uint64_t)time(NULL);
 
-        /* 从子进程 stdout 读响应行（带超时 + 取消令牌短轮询，改进1） */
         char *resp_buf = (char *)AIRY_MALLOC(AGENT_RESP_BUF_SIZE);
         if (!resp_buf) {
             airy_mtx_unlock(&agent->entry_lock);
             *out_output = AIRY_STRDUP("{\"error\":\"out of memory\"}");
             return AIRY_ERR_OUT_OF_MEMORY;
         }
-        int rrc = agent_read_line_timeout_ex(sout_fd, resp_buf,
-                                             AGENT_RESP_BUF_SIZE,
-                                             agent_invoke_timeout_s(),
-                                             cancel_token);
+        int rrc = agent_read_line_timeout_ex(sout_fd, resp_buf, AGENT_RESP_BUF_SIZE,
+                                             agent_invoke_timeout_s(), cancel_token);
         if (rrc == -2) {
             /* 取消：优雅终止子进程（SIGTERM→2s→SIGKILL 进程组），
              * 以 AbortedOutput 收尾，与超时（fallback 路径）明确区分 */
             AIRY_FREE(resp_buf);
-            SVC_LOG_WARN("Agent invoke canceled, terminating child: agent_id=%s",
-                         agent_id);
-            agent_kill_and_reap(&agent->child_pid,
-                                &agent->stdin_fd,
-                                &agent->stdout_fd);
+            SVC_LOG_WARN("Agent invoke canceled, terminating child: agent_id=%s", agent_id);
+            agent_kill_and_reap(&agent->child_pid, &agent->stdin_fd, &agent->stdout_fd);
             airy_mtx_unlock(&agent->entry_lock);
-            *out_output = AIRY_STRDUP(
-                "{\"success\":false,\"error\":\"aborted\",\"aborted\":true}");
+            *out_output = AIRY_STRDUP("{\"success\":false,\"error\":\"aborted\",\"aborted\":true}");
             airy_atomic_fetch_add(&svc->m_invoke_fail, 1);
-            agent_perf_accumulate(&svc->m_invoke_us_total,
-                                  &svc->m_invoke_us_max,
+            agent_perf_accumulate(&svc->m_invoke_us_total, &svc->m_invoke_us_max,
                                   agent_perf_now_us() - perf_t0);
             return AIRY_ERR_CANCELED;
         }
         if (rrc < 0) {
             AIRY_FREE(resp_buf);
-            SVC_LOG_WARN("Agent invoke read failed, child unusable: agent_id=%s",
-                         agent_id);
-            agent_kill_and_reap(&agent->child_pid,
-                                &agent->stdin_fd,
-                                &agent->stdout_fd);
+            SVC_LOG_WARN("Agent invoke read failed, child unusable: agent_id=%s", agent_id);
+            agent_kill_and_reap(&agent->child_pid, &agent->stdin_fd, &agent->stdout_fd);
             goto invoke_fallback;
         }
-        /* 收到响应同样刷新活跃时间 */
+
         agent->last_active = (uint64_t)time(NULL);
 
         /* rrc==1：响应超过 AGENT_RESP_BUF_SIZE 被截断，追加显式标记
@@ -949,7 +890,8 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id,
         if (resp) {
             cJSON *success_item = cJSON_GetObjectItem(resp, "success");
             cJSON *err_item = cJSON_GetObjectItem(resp, "error");
-            if (success_item && cJSON_IsFalse(success_item) && err_item && cJSON_IsString(err_item)) {
+            if (success_item && cJSON_IsFalse(success_item) && err_item &&
+                cJSON_IsString(err_item)) {
                 *out_output = AIRY_STRDUP(err_item->valuestring);
             } else {
                 cJSON *output_item = cJSON_GetObjectItem(resp, "output");
@@ -961,16 +903,15 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id,
             }
             cJSON_Delete(resp);
         } else {
-            /* 响应非合法 JSON — 原样返回，调用方自行判断 */
+
             *out_output = AIRY_STRDUP(resp_buf);
         }
         AIRY_FREE(resp_buf);
 
         airy_mtx_unlock(&agent->entry_lock);
-        /* 性能监控：invoke 成功计数 + 耗时聚合 */
+
         airy_atomic_fetch_add(&svc->m_invoke_ok, 1);
-        agent_perf_accumulate(&svc->m_invoke_us_total,
-                              &svc->m_invoke_us_max,
+        agent_perf_accumulate(&svc->m_invoke_us_total, &svc->m_invoke_us_max,
                               agent_perf_now_us() - perf_t0);
         SVC_LOG_DEBUG("Agent invoke via child: agent_id=%s", agent_id);
         return AIRY_SUCCESS;
@@ -986,37 +927,30 @@ invoke_fallback:
 
     cJSON *result = cJSON_CreateObject();
     cJSON_AddStringToObject(result, "agent_id", agent_id);
-    cJSON_AddStringToObject(result, "error",
-                            "agent child process unavailable");
+    cJSON_AddStringToObject(result, "error", "agent child process unavailable");
     *out_output = cJSON_PrintUnformatted(result);
     cJSON_Delete(result);
 
     airy_mtx_unlock(&agent->entry_lock);
 
-    /* 性能监控：invoke 失败计数（fallback 路径：无子进程/通信失败） */
     airy_atomic_fetch_add(&svc->m_invoke_fail, 1);
-    agent_perf_accumulate(&svc->m_invoke_us_total,
-                          &svc->m_invoke_us_max,
+    agent_perf_accumulate(&svc->m_invoke_us_total, &svc->m_invoke_us_max,
                           agent_perf_now_us() - perf_t0);
 
     SVC_LOG_WARN("Agent invoke fallback (no child): agent_id=%s", agent_id);
     return AIRY_ERR_SVC_NOT_READY;
 }
 
-/* ==================== invoke 会话管理（改进1 "取消下探"） ==================== */
-
 int agent_service_invoke_begin(agent_service_t *svc, const char *request_id,
-                                airy_cancel_token_t **out_token)
+                               airy_cancel_token_t **out_token)
 {
-    if (!svc || !svc->initialized || !request_id || !out_token ||
-        request_id[0] == '\0')
+    if (!svc || !svc->initialized || !request_id || !out_token || request_id[0] == '\0')
         return AIRY_ERR_INVALID_PARAM;
     *out_token = NULL;
 
     /* 会话持有 token 所有权：begin 分配/初始化，end 注销并销毁。
      * cancel 仅置位 token（幂等），不销毁，避免与 invoke 线程竞态。 */
-    airy_cancel_token_t *token =
-        (airy_cancel_token_t *)AIRY_CALLOC(1, sizeof(airy_cancel_token_t));
+    airy_cancel_token_t *token = (airy_cancel_token_t *)AIRY_CALLOC(1, sizeof(airy_cancel_token_t));
     if (!token)
         return AIRY_ERR_OUT_OF_MEMORY;
     if (airy_cancel_token_init(token) != 0) {
@@ -1028,7 +962,7 @@ int agent_service_invoke_begin(agent_service_t *svc, const char *request_id,
     for (size_t i = 0; i < AGENT_INVOKE_SESSIONS_MAX; i++) {
         agent_invoke_session_t *s = &svc->sessions[i];
         if (s->active && strcmp(s->request_id, request_id) == 0) {
-            /* 同 request_id 重复注册：清理旧会话（旧会话已完成/超时注销滞后） */
+
             s->active = 0;
             if (s->token) {
                 airy_cancel_token_destroy(s->token);
@@ -1093,8 +1027,7 @@ int agent_service_invoke_cancel(agent_service_t *svc, const char *request_id)
     airy_mtx_unlock(&svc->session_lock);
 
     if (!token) {
-        SVC_LOG_WARN("agent.cancel: no active invoke session (request_id=%s)",
-                     request_id);
+        SVC_LOG_WARN("agent.cancel: no active invoke session (request_id=%s)", request_id);
         return AIRY_ERR_NOT_FOUND;
     }
     airy_cancel_token_cancel(token);
@@ -1102,8 +1035,7 @@ int agent_service_invoke_cancel(agent_service_t *svc, const char *request_id)
     return AIRY_SUCCESS;
 }
 
-int agent_service_list(agent_service_t *svc, char ***out_agent_ids,
-                         size_t *out_count)
+int agent_service_list(agent_service_t *svc, char ***out_agent_ids, size_t *out_count)
 {
     if (!svc || !svc->initialized || !out_agent_ids || !out_count)
         return AIRY_ERR_INVALID_PARAM;
@@ -1118,14 +1050,12 @@ int agent_service_list(agent_service_t *svc, char ***out_agent_ids,
         return AIRY_SUCCESS;
     }
 
-    char **ids = (char **)AIRY_CALLOC(svc->agent_count > 0 ? svc->agent_count : 1,
-                                      sizeof(char *));
+    char **ids = (char **)AIRY_CALLOC(svc->agent_count > 0 ? svc->agent_count : 1, sizeof(char *));
     if (!ids) {
         airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    /* 仅列出 running 状态的 agent（spawning/terminated/free 槽位不对外可见） */
     size_t collected = 0;
     for (size_t i = 0; i < svc->agent_count; i++) {
         if (svc->agents[i].status != AGENT_STATUS_RUNNING)
@@ -1175,7 +1105,7 @@ int agent_service_reap_idle(agent_service_t *svc, uint64_t max_idle_s)
     {
         agent_lock_svc(svc);
         if (svc->agent_count > 0) {
-            /* 乘法溢出检查：agent_count * sizeof(size_t) 不得回绕 */
+
             if (svc->agent_count > SIZE_MAX / sizeof(size_t)) {
                 airy_mtx_unlock(&svc->lock);
                 return AIRY_ERR_OUT_OF_MEMORY;
@@ -1200,8 +1130,7 @@ int agent_service_reap_idle(agent_service_t *svc, uint64_t max_idle_s)
         agent_entry_internal_t *a = &svc->agents[candidates[j]];
         airy_mtx_lock(&a->entry_lock);
         if (a->status == AGENT_STATUS_RUNNING && a->child_pid > 0) {
-            SVC_LOG_INFO("Agent idle reclaimed: agent_id=%s, idle=%llus",
-                         a->agent_id,
+            SVC_LOG_INFO("Agent idle reclaimed: agent_id=%s, idle=%llus", a->agent_id,
                          (unsigned long long)(now - a->last_active));
             agent_kill_and_reap(&a->child_pid, &a->stdin_fd, &a->stdout_fd);
             a->status = AGENT_STATUS_TERMINATED;
@@ -1232,7 +1161,6 @@ int agent_service_get_perf(agent_service_t *svc, agent_perf_stats_t *out)
     if (!svc || !out)
         return AIRY_ERR_INVALID_PARAM;
 
-    /* 原子计数器宽松读（监控语义，无需精确一致） */
     out->spawn_total = airy_atomic_load(&svc->m_spawn_total);
     out->spawn_ok = airy_atomic_load(&svc->m_spawn_ok);
     out->spawn_fail = airy_atomic_load(&svc->m_spawn_fail);
@@ -1242,17 +1170,13 @@ int agent_service_get_perf(agent_service_t *svc, agent_perf_stats_t *out)
     out->terminate_total = airy_atomic_load(&svc->m_terminate_total);
     out->lock_wait_total = airy_atomic_load(&svc->m_lock_wait_total);
     out->spawn_us_total =
-        (unsigned long long)atomic_load_explicit(&svc->m_spawn_us_total,
-                                                 memory_order_relaxed);
+        (unsigned long long)atomic_load_explicit(&svc->m_spawn_us_total, memory_order_relaxed);
     out->spawn_us_max =
-        (unsigned long long)atomic_load_explicit(&svc->m_spawn_us_max,
-                                                 memory_order_relaxed);
+        (unsigned long long)atomic_load_explicit(&svc->m_spawn_us_max, memory_order_relaxed);
     out->invoke_us_total =
-        (unsigned long long)atomic_load_explicit(&svc->m_invoke_us_total,
-                                                 memory_order_relaxed);
+        (unsigned long long)atomic_load_explicit(&svc->m_invoke_us_total, memory_order_relaxed);
     out->invoke_us_max =
-        (unsigned long long)atomic_load_explicit(&svc->m_invoke_us_max,
-                                                 memory_order_relaxed);
+        (unsigned long long)atomic_load_explicit(&svc->m_invoke_us_max, memory_order_relaxed);
 
     /* 峰值并发：扫描 running 槽位计数并 CAS 更新峰值。
      * O(n) 扫描由监控线程周期执行（默认 5s），10000 槽位开销可忽略 */
@@ -1267,9 +1191,8 @@ int agent_service_get_perf(agent_service_t *svc, agent_perf_stats_t *out)
     }
     int prev_peak = airy_atomic_load(&svc->m_peak_running);
     while ((int)running > prev_peak) {
-        if (atomic_compare_exchange_weak_explicit(
-                &svc->m_peak_running, &prev_peak, (int)running,
-                memory_order_relaxed, memory_order_relaxed))
+        if (atomic_compare_exchange_weak_explicit(&svc->m_peak_running, &prev_peak, (int)running,
+                                                  memory_order_relaxed, memory_order_relaxed))
             break;
     }
     out->peak_running = airy_atomic_load(&svc->m_peak_running);

@@ -1,10 +1,9 @@
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file daemon_startup.h
  * @brief daemon 启动顺序编排与依赖 DAG 定义
- *
- * Copyright (C) 2025-2026 SPHARX Ltd. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * P1.23.1: 定义 12 daemon 的启动依赖 DAG（有向无环图）。
  *
@@ -48,45 +47,41 @@
 extern "C" {
 #endif
 
-/* ==================== 常量 ==================== */
 
-#define AIRY_DAEMON_COUNT     12
+#define AIRY_DAEMON_COUNT 12
 #define AIRY_MAX_DEPS_PER_DAEMON 4
-#define AIRY_MAX_LAYERS       5
+#define AIRY_MAX_LAYERS 5
 
-/* ==================== daemon 标识 ==================== */
 
 typedef enum {
-    AIRY_DAEMON_MONIT   = 0,
+    AIRY_DAEMON_MONIT = 0,
     AIRY_DAEMON_OBSERVE = 1,
-    AIRY_DAEMON_INFO    = 2,
-    AIRY_DAEMON_NOTIFY  = 3,
-    AIRY_DAEMON_SCHED   = 4,
+    AIRY_DAEMON_INFO = 2,
+    AIRY_DAEMON_NOTIFY = 3,
+    AIRY_DAEMON_SCHED = 4,
     AIRY_DAEMON_CHANNEL = 5,
-    AIRY_DAEMON_LLM     = 6,
-    AIRY_DAEMON_TOOL    = 7,
-    AIRY_DAEMON_HOOK    = 8,
-    AIRY_DAEMON_PLUGIN  = 9,
-    AIRY_DAEMON_MARKET  = 10,
+    AIRY_DAEMON_LLM = 6,
+    AIRY_DAEMON_TOOL = 7,
+    AIRY_DAEMON_HOOK = 8,
+    AIRY_DAEMON_PLUGIN = 9,
+    AIRY_DAEMON_MARKET = 10,
     AIRY_DAEMON_GATEWAY = 11,
     AIRY_DAEMON_INVALID = -1
 } airy_daemon_id_t;
 
-/* ==================== daemon 启动描述 ==================== */
 
 typedef struct {
-    airy_daemon_id_t id;          /**< daemon 标识 */
-    const char *name;                /**< 进程名 (e.g. "gateway_d") */
-    const char *service_type;        /**< 服务发现类型 (e.g. "gateway") */
-    uint32_t layer;                  /**< 启动层级 (0=最先) */
-    uint32_t health_timeout_ms;      /**< 健康检查超时 */
-    uint32_t health_interval_ms;     /**< 健康检查轮询间隔 */
-    uint16_t default_port;           /**< 默认端口 (0=Unix Socket) */
-    int dep_count;                   /**< 依赖数量 */
-    airy_daemon_id_t deps[AIRY_MAX_DEPS_PER_DAEMON]; /**< 依赖列表 */
+    airy_daemon_id_t id;
+    const char *name;
+    const char *service_type;
+    uint32_t layer;
+    uint32_t health_timeout_ms;
+    uint32_t health_interval_ms;
+    uint16_t default_port;
+    int dep_count;
+    airy_daemon_id_t deps[AIRY_MAX_DEPS_PER_DAEMON];
 } airy_daemon_desc_t;
 
-/* ==================== DAG 表 ==================== */
 
 /**
  * @brief 全局 daemon 描述表 — 按 layer 排序
@@ -95,150 +90,161 @@ typedef struct {
  * 跨 layer 必须等待前一层所有 daemon 健康检查通过。
  */
 static const airy_daemon_desc_t airy_daemon_table[AIRY_DAEMON_COUNT] = {
-    /* --- Layer 0: 基础设施 --- */
-    [AIRY_DAEMON_MONIT] = {
-        .id = AIRY_DAEMON_MONIT,
-        .name = "monit_d",
-        .service_type = "monitor",
-        .layer = 0,
-        .health_timeout_ms = 15000,
-        .health_interval_ms = 500,
-        .default_port = 0,
-        .dep_count = 0,
-        .deps = {0},
-    },
-    [AIRY_DAEMON_OBSERVE] = {
-        .id = AIRY_DAEMON_OBSERVE,
-        .name = "observe_d",
-        .service_type = "observability",
-        .layer = 0,
-        .health_timeout_ms = 15000,
-        .health_interval_ms = 500,
-        .default_port = 0,
-        .dep_count = 0,
-        .deps = {0},
-    },
-    [AIRY_DAEMON_INFO] = {
-        .id = AIRY_DAEMON_INFO,
-        .name = "info_d",
-        .service_type = "info",
-        .layer = 0,
-        .health_timeout_ms = 15000,
-        .health_interval_ms = 500,
-        .default_port = 0,
-        .dep_count = 0,
-        .deps = {0},
-    },
-    [AIRY_DAEMON_NOTIFY] = {
-        .id = AIRY_DAEMON_NOTIFY,
-        .name = "notify_d",
-        .service_type = "notification",
-        .layer = 0,
-        .health_timeout_ms = 15000,
-        .health_interval_ms = 500,
-        .default_port = 0,
-        .dep_count = 0,
-        .deps = {0},
-    },
 
-    /* --- Layer 1: 核心服务 --- */
-    [AIRY_DAEMON_SCHED] = {
-        .id = AIRY_DAEMON_SCHED,
-        .name = "sched_d",
-        .service_type = "scheduler",
-        .layer = 1,
-        .health_timeout_ms = 20000,
-        .health_interval_ms = 500,
-        .default_port = 0,
-        .dep_count = 1,
-        .deps = { AIRY_DAEMON_OBSERVE },
-    },
-    [AIRY_DAEMON_CHANNEL] = {
-        .id = AIRY_DAEMON_CHANNEL,
-        .name = "channel_d",
-        .service_type = "channel",
-        .layer = 1,
-        .health_timeout_ms = 20000,
-        .health_interval_ms = 500,
-        .default_port = 0,
-        .dep_count = 1,
-        .deps = { AIRY_DAEMON_NOTIFY },
-    },
+    [AIRY_DAEMON_MONIT] =
+        {
+            .id = AIRY_DAEMON_MONIT,
+            .name = "monit_d",
+            .service_type = "monitor",
+            .layer = 0,
+            .health_timeout_ms = 15000,
+            .health_interval_ms = 500,
+            .default_port = 0,
+            .dep_count = 0,
+            .deps = {0},
+        },
+    [AIRY_DAEMON_OBSERVE] =
+        {
+            .id = AIRY_DAEMON_OBSERVE,
+            .name = "observe_d",
+            .service_type = "observability",
+            .layer = 0,
+            .health_timeout_ms = 15000,
+            .health_interval_ms = 500,
+            .default_port = 0,
+            .dep_count = 0,
+            .deps = {0},
+        },
+    [AIRY_DAEMON_INFO] =
+        {
+            .id = AIRY_DAEMON_INFO,
+            .name = "info_d",
+            .service_type = "info",
+            .layer = 0,
+            .health_timeout_ms = 15000,
+            .health_interval_ms = 500,
+            .default_port = 0,
+            .dep_count = 0,
+            .deps = {0},
+        },
+    [AIRY_DAEMON_NOTIFY] =
+        {
+            .id = AIRY_DAEMON_NOTIFY,
+            .name = "notify_d",
+            .service_type = "notification",
+            .layer = 0,
+            .health_timeout_ms = 15000,
+            .health_interval_ms = 500,
+            .default_port = 0,
+            .dep_count = 0,
+            .deps = {0},
+        },
 
-    /* --- Layer 2: Agent 服务 --- */
-    [AIRY_DAEMON_LLM] = {
-        .id = AIRY_DAEMON_LLM,
-        .name = "llm_d",
-        .service_type = "llm",
-        .layer = 2,
-        .health_timeout_ms = 30000,
-        .health_interval_ms = 1000,
-        .default_port = 0,
-        .dep_count = 1,
-        .deps = { AIRY_DAEMON_SCHED },
-    },
-    [AIRY_DAEMON_TOOL] = {
-        .id = AIRY_DAEMON_TOOL,
-        .name = "tool_d",
-        .service_type = "tool",
-        .layer = 2,
-        .health_timeout_ms = 30000,
-        .health_interval_ms = 1000,
-        .default_port = 8082,
-        .dep_count = 2,
-        .deps = { AIRY_DAEMON_LLM, AIRY_DAEMON_SCHED },
-    },
-    [AIRY_DAEMON_HOOK] = {
-        .id = AIRY_DAEMON_HOOK,
-        .name = "hook_d",
-        .service_type = "hook",
-        .layer = 2,
-        .health_timeout_ms = 20000,
-        .health_interval_ms = 500,
-        .default_port = 0,
-        .dep_count = 1,
-        .deps = { AIRY_DAEMON_TOOL },
-    },
-    [AIRY_DAEMON_PLUGIN] = {
-        .id = AIRY_DAEMON_PLUGIN,
-        .name = "plugin_d",
-        .service_type = "plugin",
-        .layer = 2,
-        .health_timeout_ms = 30000,
-        .health_interval_ms = 1000,
-        .default_port = 0,
-        .dep_count = 2,
-        .deps = { AIRY_DAEMON_TOOL, AIRY_DAEMON_HOOK },
-    },
 
-    /* --- Layer 3: 业务服务 --- */
-    [AIRY_DAEMON_MARKET] = {
-        .id = AIRY_DAEMON_MARKET,
-        .name = "market_d",
-        .service_type = "marketplace",
-        .layer = 3,
-        .health_timeout_ms = 30000,
-        .health_interval_ms = 1000,
-        .default_port = 0,
-        .dep_count = 1,
-        .deps = { AIRY_DAEMON_PLUGIN },
-    },
+    [AIRY_DAEMON_SCHED] =
+        {
+            .id = AIRY_DAEMON_SCHED,
+            .name = "sched_d",
+            .service_type = "scheduler",
+            .layer = 1,
+            .health_timeout_ms = 20000,
+            .health_interval_ms = 500,
+            .default_port = 0,
+            .dep_count = 1,
+            .deps = {AIRY_DAEMON_OBSERVE},
+        },
+    [AIRY_DAEMON_CHANNEL] =
+        {
+            .id = AIRY_DAEMON_CHANNEL,
+            .name = "channel_d",
+            .service_type = "channel",
+            .layer = 1,
+            .health_timeout_ms = 20000,
+            .health_interval_ms = 500,
+            .default_port = 0,
+            .dep_count = 1,
+            .deps = {AIRY_DAEMON_NOTIFY},
+        },
 
-    /* --- Layer 4: 网关 --- */
-    [AIRY_DAEMON_GATEWAY] = {
-        .id = AIRY_DAEMON_GATEWAY,
-        .name = "gateway_d",
-        .service_type = "gateway",
-        .layer = 4,
-        .health_timeout_ms = 30000,
-        .health_interval_ms = 1000,
-        .default_port = 8080,
-        .dep_count = 3,
-        .deps = { AIRY_DAEMON_LLM, AIRY_DAEMON_TOOL, AIRY_DAEMON_MARKET },
-    },
+
+    [AIRY_DAEMON_LLM] =
+        {
+            .id = AIRY_DAEMON_LLM,
+            .name = "llm_d",
+            .service_type = "llm",
+            .layer = 2,
+            .health_timeout_ms = 30000,
+            .health_interval_ms = 1000,
+            .default_port = 0,
+            .dep_count = 1,
+            .deps = {AIRY_DAEMON_SCHED},
+        },
+    [AIRY_DAEMON_TOOL] =
+        {
+            .id = AIRY_DAEMON_TOOL,
+            .name = "tool_d",
+            .service_type = "tool",
+            .layer = 2,
+            .health_timeout_ms = 30000,
+            .health_interval_ms = 1000,
+            .default_port = 8082,
+            .dep_count = 2,
+            .deps = {AIRY_DAEMON_LLM, AIRY_DAEMON_SCHED},
+        },
+    [AIRY_DAEMON_HOOK] =
+        {
+            .id = AIRY_DAEMON_HOOK,
+            .name = "hook_d",
+            .service_type = "hook",
+            .layer = 2,
+            .health_timeout_ms = 20000,
+            .health_interval_ms = 500,
+            .default_port = 0,
+            .dep_count = 1,
+            .deps = {AIRY_DAEMON_TOOL},
+        },
+    [AIRY_DAEMON_PLUGIN] =
+        {
+            .id = AIRY_DAEMON_PLUGIN,
+            .name = "plugin_d",
+            .service_type = "plugin",
+            .layer = 2,
+            .health_timeout_ms = 30000,
+            .health_interval_ms = 1000,
+            .default_port = 0,
+            .dep_count = 2,
+            .deps = {AIRY_DAEMON_TOOL, AIRY_DAEMON_HOOK},
+        },
+
+
+    [AIRY_DAEMON_MARKET] =
+        {
+            .id = AIRY_DAEMON_MARKET,
+            .name = "market_d",
+            .service_type = "marketplace",
+            .layer = 3,
+            .health_timeout_ms = 30000,
+            .health_interval_ms = 1000,
+            .default_port = 0,
+            .dep_count = 1,
+            .deps = {AIRY_DAEMON_PLUGIN},
+        },
+
+
+    [AIRY_DAEMON_GATEWAY] =
+        {
+            .id = AIRY_DAEMON_GATEWAY,
+            .name = "gateway_d",
+            .service_type = "gateway",
+            .layer = 4,
+            .health_timeout_ms = 30000,
+            .health_interval_ms = 1000,
+            .default_port = 8080,
+            .dep_count = 3,
+            .deps = {AIRY_DAEMON_LLM, AIRY_DAEMON_TOOL, AIRY_DAEMON_MARKET},
+        },
 };
 
-/* ==================== 查询 API ==================== */
 
 /**
  * @brief 根据 daemon 名称查找描述
@@ -247,10 +253,10 @@ static const airy_daemon_desc_t airy_daemon_table[AIRY_DAEMON_COUNT] = {
  */
 static inline const airy_daemon_desc_t *airy_daemon_find_by_name(const char *name)
 {
-    if (!name) return NULL;
+    if (!name)
+        return NULL;
     for (int i = 0; i < AIRY_DAEMON_COUNT; i++) {
-        if (airy_daemon_table[i].name &&
-            __builtin_strcmp(airy_daemon_table[i].name, name) == 0) {
+        if (airy_daemon_table[i].name && __builtin_strcmp(airy_daemon_table[i].name, name) == 0) {
             return &airy_daemon_table[i];
         }
     }

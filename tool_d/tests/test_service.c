@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_service.c
  * @brief Tool 服务核心功能单元测试
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "tool_service.h"

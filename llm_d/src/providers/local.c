@@ -1,15 +1,15 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 
 #include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD 宏 */
+
 #include <cjson_helpers.h>
 #include "error.h"
 /**
  * @file local.c
  * @brief 本地模型适配器（兼容 OpenAI 格式）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 改进说明：
  * 1. 使用公共 Provider 基础设施
@@ -31,13 +31,9 @@
 #define LOCAL_DEFAULT_MODEL "gpt-3.5-turbo"
 #define LOCAL_DEFAULT_TIMEOUT 60.0
 
-/* ---------- 上下文 ---------- */
-
 typedef struct {
     provider_base_ctx_t base;
 } local_ctx_t;
-
-/* ---------- 生命周期 ---------- */
 
 static provider_ctx_t *local_init(const char *name __attribute__((unused)),
                                   const char *api_key __attribute__((unused)), const char *api_base,
@@ -57,9 +53,7 @@ static provider_ctx_t *local_init(const char *name __attribute__((unused)),
 
     SVC_LOG_INFO("C-L02: LOCAL: INIT api_base=%s model=%s timeout=%.1fs max_retries=%d "
                  "has_api_key=%d (no auth, local endpoint, higher default timeout)",
-                 ctx->base.api_base,
-                 LOCAL_DEFAULT_MODEL,
-                 timeout, max_retries, 0);
+                 ctx->base.api_base, LOCAL_DEFAULT_MODEL, timeout, max_retries, 0);
 
     return (provider_ctx_t *)ctx;
 }
@@ -71,8 +65,6 @@ static void local_destroy(provider_ctx_t *ctx_ptr)
         AIRY_FREE(ctx_ptr);
     }
 }
-
-/* ---------- 同步完成 ---------- */
 
 static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *manager,
                           llm_response_t **out_response)
@@ -87,17 +79,19 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
     local_ctx_t *ctx = (local_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
 
-    const char *model = (manager->model && manager->model[0]) ? manager->model : LOCAL_DEFAULT_MODEL;
+    const char *model =
+        (manager->model && manager->model[0]) ? manager->model : LOCAL_DEFAULT_MODEL;
 
     SVC_LOG_INFO("C-L02: LOCAL: COMPLETE-START model=%s msgs=%zu max_tokens=%d temp=%.2f "
                  "stream=%d (no auth, local endpoint)",
-                 model, manager->message_count, manager->max_tokens,
-                 manager->temperature, manager->stream);
+                 model, manager->message_count, manager->max_tokens, manager->temperature,
+                 manager->stream);
 
     char *req_body = provider_build_openai_request(manager, LOCAL_DEFAULT_MODEL);
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: LOCAL: COMPLETE-FAIL — request body build failed (OOM) "
-                      "model=%s", model);
+                      "model=%s",
+                      model);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
@@ -132,23 +126,24 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
 
     if (http_code != 200) {
         size_t resp_body_len = http_resp ? strlen(http_resp->data) : 0;
-        SVC_LOG_ERROR("C-L02: LOCAL: COMPLETE-FAIL — HTTP error "
-                      "url=%s http_code=%ld resp_body_len=%zu "
-                      "DIAGNOSIS: %s "
-                      "STACK: provider_http_post() → local_complete()",
-                      url, http_code, resp_body_len,
-                      (http_code == 401) ? "invalid API key (but local should not use auth)" :
-                      (http_code == 429) ? "rate limited" :
-                      (http_code == 500) ? "local server internal error" :
-                      (http_code == 503) ? "local service unavailable — check if model server is running" :
-                      "check local endpoint URL and model server status");
+        SVC_LOG_ERROR(
+            "C-L02: LOCAL: COMPLETE-FAIL — HTTP error "
+            "url=%s http_code=%ld resp_body_len=%zu "
+            "DIAGNOSIS: %s "
+            "STACK: provider_http_post() → local_complete()",
+            url, http_code, resp_body_len,
+            (http_code == 401) ? "invalid API key (but local should not use auth)" :
+            (http_code == 429) ? "rate limited" :
+            (http_code == 500) ? "local server internal error" :
+            (http_code == 503) ? "local service unavailable — check if model server is running" :
+                                 "check local endpoint URL and model server status");
         provider_http_resp_free(http_resp);
         return AIRY_ERR_IO;
     }
 
     size_t resp_body_len = http_resp ? strlen(http_resp->data) : 0;
-    SVC_LOG_DEBUG("C-L02: LOCAL: HTTP-RESPONSE http_code=%ld resp_body_len=%zu",
-                  http_code, resp_body_len);
+    SVC_LOG_DEBUG("C-L02: LOCAL: HTTP-RESPONSE http_code=%ld resp_body_len=%zu", http_code,
+                  resp_body_len);
 
     ret = provider_parse_openai_response(http_resp->data, out_response);
     if (ret != AIRY_OK) {
@@ -160,8 +155,7 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
         SVC_LOG_INFO("C-L02: LOCAL: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
                      "finish_reason=%s",
                      (*out_response)->model ? (*out_response)->model : "unknown",
-                     (*out_response)->prompt_tokens,
-                     (*out_response)->completion_tokens,
+                     (*out_response)->prompt_tokens, (*out_response)->completion_tokens,
                      (*out_response)->total_tokens,
                      (*out_response)->finish_reason ? (*out_response)->finish_reason : "none");
     }
@@ -170,8 +164,6 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
 
     return ret;
 }
-
-/* ---------- 流式完成（SSE, OpenAI兼容格式） ---------- */
 
 typedef struct {
     llm_stream_callback_t user_cb;
@@ -189,7 +181,6 @@ static int loc_stream_on_chunk(const char *json_line, void *userdata)
 {
     loc_stream_acc_t *acc = (loc_stream_acc_t *)userdata;
 
-    /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + NULL 检查 + 手动 cJSON_Delete */
     CJSON_PARSE_GUARD(root, json_line, { return 0; });
 
     if (!acc->resp_id) {
@@ -249,7 +240,6 @@ static int loc_stream_on_chunk(const char *json_line, void *userdata)
         }
     }
 
-    /* root 由 CJSON_AUTO_FREE 自动释放 */
     return 0;
 }
 
@@ -293,7 +283,8 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
     local_ctx_t *ctx = (local_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
 
-    const char *model = (manager->model && manager->model[0]) ? manager->model : LOCAL_DEFAULT_MODEL;
+    const char *model =
+        (manager->model && manager->model[0]) ? manager->model : LOCAL_DEFAULT_MODEL;
 
     SVC_LOG_INFO("C-L02: LOCAL: STREAM-START model=%s msgs=%zu max_tokens=%d temp=%.2f "
                  "(no auth, local endpoint)",
@@ -305,7 +296,8 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
     char *req_body = provider_build_openai_request(&stream_cfg, LOCAL_DEFAULT_MODEL);
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: LOCAL: STREAM-FAIL — request body build failed (OOM) "
-                      "model=%s", model);
+                      "model=%s",
+                      model);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
@@ -354,10 +346,11 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
     if (resp) {
         SVC_LOG_INFO("C-L02: LOCAL: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
                      "finish_reason=%s acc_len=%zu",
-                     resp->model ? resp->model : "unknown",
-                     resp->prompt_tokens, resp->completion_tokens, resp->total_tokens,
+                     resp->model ? resp->model : "unknown", resp->prompt_tokens,
+                     resp->completion_tokens, resp->total_tokens,
                      resp->finish_reason ? resp->finish_reason : "none",
-                     resp->choices && resp->choices[0].content ? strlen(resp->choices[0].content) : 0);
+                     resp->choices && resp->choices[0].content ? strlen(resp->choices[0].content) :
+                                                                 0);
     } else {
         SVC_LOG_WARN("C-L02: LOCAL: STREAM — null response built");
     }
@@ -369,8 +362,6 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
 
     return AIRY_OK;
 }
-
-/* ---------- 操作表 ---------- */
 
 const provider_ops_t local_ops = {.init = local_init,
                                   .destroy = local_destroy,

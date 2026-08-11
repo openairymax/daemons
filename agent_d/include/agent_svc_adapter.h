@@ -1,12 +1,12 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file agent_svc_adapter.h
  * @brief Agent 服务适配器头文件
  *
  * 将 agent_service_t 适配到统一 AgentRT 服务管理框架（airy_svc_t）。
  *
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_DAEMON_AGENT_SVC_ADAPTER_H
@@ -21,12 +21,10 @@
 extern "C" {
 #endif
 
-AIRY_API int agent_service_adapter_create(airy_svc_t *out_service,
-                                            const airy_svc_config_t *config);
+AIRY_API int agent_service_adapter_create(airy_svc_t *out_service, const airy_svc_config_t *config);
 
-AIRY_API int agent_service_adapter_wrap(airy_svc_t *out_service,
-                                          agent_service_t *agent_svc,
-                                          const airy_svc_config_t *config);
+AIRY_API int agent_service_adapter_wrap(airy_svc_t *out_service, agent_service_t *agent_svc,
+                                        const airy_svc_config_t *config);
 
 AIRY_API agent_service_t *agent_service_adapter_get_original(airy_svc_t service);
 

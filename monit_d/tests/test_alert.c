@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_alert.c
  * @brief 告警模块单元测试
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "monitor_service.h"
@@ -120,7 +120,6 @@ static void test_alert_get_alerts(void)
         printf("    Found %zu alerts\n", count);
     }
 
-    /* 释放 monitor_service_get_alerts 返回的数组 */
     if (alerts) {
         for (size_t i = 0; i < count; i++) {
             AIRY_FREE(alerts[i]);

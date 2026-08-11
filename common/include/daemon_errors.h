@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file daemon_errors.h
  * @brief Daemon 模块扩展错误码定义
@@ -19,7 +20,7 @@
 #ifndef AIRY_RT_DAEMON_ERRORS_H
 #define AIRY_RT_DAEMON_ERRORS_H
 
-/* ==================== Daemon 服务层错误码（daemon 模块扩展） ==================== */
+
 /*
  * 错误码段：-910 到 -949
  *
@@ -43,12 +44,12 @@
 #define AIRY_ERR_DAEMON_ALREADY_INIT (AIRY_ERR_DAEMON_BASE + 0x04)
 #endif
 
-/* Daemon 层兼容别名（daemon 模块扩展，非 commons 定义） */
+
 #ifndef AIRY_ERR_ALREADY_INIT
 #define AIRY_ERR_ALREADY_INIT AIRY_ERR_DAEMON_ALREADY_INIT
 #endif
 
-/* ==================== Daemon 旧错误码兼容别名 ==================== */
+
 /*
  * P0.17 阶段 2：以下别名统一 daemons 内部源文件中使用的旧式 DAEMON_E* 错误码
  * 名称，映射到 commons 权威错误码或 daemon 扩展错误码。

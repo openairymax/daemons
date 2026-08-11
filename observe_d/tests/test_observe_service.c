@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_observe_service.c
  * @brief Observe 服务单元测试（L2 方法集：record_metric / query_metrics / get_metrics）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * observe_d 的实现全部位于 src/main.c（含 main()）。本测试将 main 重命名后
  * include 源文件，直接复用全部 static 实现（真实代码，禁止桩函数）。
@@ -24,8 +24,6 @@
 #include <unistd.h>
 #endif
 
-/* ---------- 辅助 ---------- */
-
 static void test_svc_setup(observe_d_service_t *svc)
 {
     int rc = observe_d_init(svc, 0, "/tmp/observe_d_test.sock");
@@ -41,16 +39,13 @@ static void test_svc_teardown(observe_d_service_t *svc)
     observe_d_destroy(svc);
 }
 
-/* ---------- 用例 1：record_metric 后指标可查询 ---------- */
-
 static void test_record_metric_queryable(void)
 {
     printf("  test_record_metric_queryable...\n");
     observe_d_service_t svc = {0};
     test_svc_setup(&svc);
 
-    int rc = observe_d_record_metric(&svc, "test_latency_ms", 12.5, "ms",
-                                     OBSERVE_METRIC_GAUGE);
+    int rc = observe_d_record_metric(&svc, "test_latency_ms", 12.5, "ms", OBSERVE_METRIC_GAUGE);
     assert(rc == AIRY_SUCCESS);
 
     observe_metric_t *m = observe_d_find_or_create_metric(&svc, "test_latency_ms");
@@ -62,8 +57,6 @@ static void test_record_metric_queryable(void)
     test_svc_teardown(&svc);
     printf("    PASSED\n");
 }
-
-/* ---------- 用例 2：同名指标重复记录的行为 ---------- */
 
 static void test_counter_accumulate(void)
 {
@@ -77,7 +70,7 @@ static void test_counter_accumulate(void)
 
     observe_metric_t *m = observe_d_find_or_create_metric(&svc, "test_counter");
     assert(m != NULL);
-    assert(fabs(m->value - 6.5) < 1e-9); /* 1.0 + 2.0 + 3.5 累加 */
+    assert(fabs(m->value - 6.5) < 1e-9);
     assert(m->type == OBSERVE_METRIC_COUNTER);
 
     test_svc_teardown(&svc);
@@ -95,19 +88,17 @@ static void test_gauge_overwrite(void)
 
     observe_metric_t *m = observe_d_find_or_create_metric(&svc, "test_gauge");
     assert(m != NULL);
-    assert(fabs(m->value - 42.0) < 1e-9); /* gauge 覆盖旧值 */
+    assert(fabs(m->value - 42.0) < 1e-9);
     assert(m->type == OBSERVE_METRIC_GAUGE);
 
     test_svc_teardown(&svc);
     printf("    PASSED\n");
 }
 
-/* ---------- 用例 3：JSON-RPC 方法分发响应为合法 JSON ---------- */
-
 #ifndef _WIN32
-/* 通过 socketpair 模拟 IPC 客户端：发送 JSON-RPC 请求并读取响应 */
-static char *rpc_roundtrip(observe_d_service_t *svc, const char *method,
-                           const char *params_json, int id)
+
+static char *rpc_roundtrip(observe_d_service_t *svc, const char *method, const char *params_json,
+                           int id)
 {
     cJSON *root = cJSON_CreateObject();
     assert(root != NULL);
@@ -131,7 +122,6 @@ static char *rpc_roundtrip(observe_d_service_t *svc, const char *method,
 
     observe_d_handle_request(svc, (airy_sock_t)fds[0]);
 
-    /* 服务端已关闭 fds[0]；循环读取直到 EOF */
     char buf[16384];
     size_t off = 0;
     for (;;) {
@@ -147,11 +137,10 @@ static char *rpc_roundtrip(observe_d_service_t *svc, const char *method,
     return AIRY_STRDUP(buf);
 }
 
-/* 校验响应为合法 JSON-RPC 2.0 成功响应（jsonrpc/id/result），返回 root */
 static cJSON *rpc_expect_success(const char *resp, int id)
 {
     cJSON *root = cJSON_Parse(resp);
-    assert(root != NULL); /* 方法分发响应必须为合法 JSON */
+    assert(root != NULL);
     cJSON *jv = cJSON_GetObjectItem(root, "jsonrpc");
     assert(cJSON_IsString(jv) && strcmp(jv->valuestring, "2.0") == 0);
     cJSON *idj = cJSON_GetObjectItem(root, "id");
@@ -179,7 +168,6 @@ static void test_jsonrpc_record_metric(void)
     cJSON_Delete(root);
     AIRY_FREE(resp);
 
-    /* 响应是分发的唯一途径：指标必须真实入库 */
     observe_metric_t *m = observe_d_find_or_create_metric(&svc, "rpc_counter");
     assert(m != NULL);
     assert(fabs(m->value - 5.0) < 1e-9);
@@ -196,7 +184,6 @@ static void test_jsonrpc_record_metric_invalid(void)
     observe_d_service_t svc = {0};
     test_svc_setup(&svc);
 
-    /* 缺少 name → 必须返回 JSON-RPC 错误响应（合法 JSON） */
     char *resp = rpc_roundtrip(&svc, "record_metric", "{\"value\":1.0}", 8);
     assert(resp != NULL);
     cJSON *root = cJSON_Parse(resp);
@@ -222,7 +209,6 @@ static void test_jsonrpc_query_metrics(void)
 
     observe_d_record_metric(&svc, "rpc_gauge", 3.14, "bytes", OBSERVE_METRIC_GAUGE);
 
-    /* 不带 name：返回全部指标（名称、值、类型、单位） */
     char *resp = rpc_roundtrip(&svc, "query_metrics", NULL, 9);
     assert(resp != NULL);
     cJSON *root = rpc_expect_success(resp, 9);
@@ -233,7 +219,8 @@ static void test_jsonrpc_query_metrics(void)
     assert(cJSON_IsArray(arr) && cJSON_GetArraySize(arr) == (int)count->valueint);
     int found = 0;
     cJSON *item = NULL;
-    cJSON_ArrayForEach(item, arr) {
+    cJSON_ArrayForEach(item, arr)
+    {
         cJSON *namej = cJSON_GetObjectItem(item, "name");
         if (cJSON_IsString(namej) && strcmp(namej->valuestring, "rpc_gauge") == 0) {
             cJSON *valj = cJSON_GetObjectItem(item, "value");
@@ -249,7 +236,6 @@ static void test_jsonrpc_query_metrics(void)
     cJSON_Delete(root);
     AIRY_FREE(resp);
 
-    /* 带 name：按名称过滤 */
     resp = rpc_roundtrip(&svc, "query_metrics", "{\"name\":\"rpc_gauge\"}", 10);
     assert(resp != NULL);
     root = rpc_expect_success(resp, 10);
@@ -269,7 +255,6 @@ static void test_jsonrpc_get_metrics_alias(void)
     observe_d_service_t svc = {0};
     test_svc_setup(&svc);
 
-    /* get_metrics 为 query_metrics 的别名，行为一致 */
     char *resp = rpc_roundtrip(&svc, "get_metrics", NULL, 11);
     assert(resp != NULL);
     cJSON *root = rpc_expect_success(resp, 11);
@@ -291,7 +276,7 @@ int main(void)
     printf("=========================================\n");
     fflush(stdout);
 
-    airy_log_init(NULL); /* SVC_LOG_INFO 依赖日志系统（同 observe_d main） */
+    airy_log_init(NULL);
 
     test_record_metric_queryable();
     test_counter_accumulate();

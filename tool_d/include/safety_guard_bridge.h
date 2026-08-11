@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file safety_guard_bridge.h
  * @brief C-L05: Cupolas SafetyGuard → tool_d 桥接层
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 将 Cupolas 安全穹顶的 safety_guard_check_chain() API
  * 桥接到 tool_d 的工具审批流程中，实现 6 种守卫类型的
@@ -31,41 +31,37 @@
 extern "C" {
 #endif
 
-/* ==================== 桥接层句柄 ==================== */
 
 typedef struct safety_guard_bridge_s safety_guard_bridge_t;
 
-/* ==================== 桥接层配置 ==================== */
 
 typedef struct {
-    bool enable_permission_guard;    /**< 启用权限守卫 */
-    bool enable_rate_limit_guard;    /**< 启用速率限制守卫 */
-    bool enable_content_filter;      /**< 启用内容过滤守卫 */
-    bool enable_input_sanitization;  /**< 启用输入净化守卫 */
-    bool enable_resource_quota;      /**< 启用资源配额守卫 */
-    bool enable_audit_guard;         /**< 启用审计守卫 */
-    uint32_t rate_limit_per_minute;  /**< 每分钟最大调用次数，0=无限制 */
-    uint32_t max_params_size;        /**< 最大参数大小（字节），0=无限制 */
-    const char *denied_patterns;     /**< 禁止的参数模式（逗号分隔），NULL=无 */
-    const char *agent_id;            /**< Agent ID */
+    bool enable_permission_guard;
+    bool enable_rate_limit_guard;
+    bool enable_content_filter;
+    bool enable_input_sanitization;
+    bool enable_resource_quota;
+    bool enable_audit_guard;
+    uint32_t rate_limit_per_minute;
+    uint32_t max_params_size;
+    const char *denied_patterns;
+    const char *agent_id; /**< Agent ID */
 } safety_guard_bridge_config_t;
 
-/* ==================== 守卫检查结果 ==================== */
 
 typedef struct {
-    int permission_passed;           /**< 权限检查是否通过 */
-    int rate_limit_passed;           /**< 速率限制是否通过 */
-    int content_filter_passed;       /**< 内容过滤是否通过 */
-    int input_sanitized;             /**< 输入是否被净化 */
-    int resource_quota_passed;       /**< 资源配额是否通过 */
-    int audit_recorded;              /**< 审计日志是否已记录 */
-    char denial_reason[256];         /**< 拒绝原因 */
-    char sanitized_params[4096];     /**< 净化后的参数 */
-    int guard_chain_length;          /**< 守卫链长度 */
-    int guards_executed;             /**< 实际执行的守卫数 */
+    int permission_passed;
+    int rate_limit_passed;
+    int content_filter_passed;
+    int input_sanitized;
+    int resource_quota_passed;
+    int audit_recorded;
+    char denial_reason[256];
+    char sanitized_params[4096];
+    int guard_chain_length;
+    int guards_executed;
 } safety_guard_bridge_result_t;
 
-/* ==================== 生命周期 ==================== */
 
 /**
  * @brief 创建 SafetyGuard 桥接层
@@ -82,7 +78,6 @@ safety_guard_bridge_t *safety_guard_bridge_create(const safety_guard_bridge_conf
  */
 void safety_guard_bridge_destroy(safety_guard_bridge_t *bridge);
 
-/* ==================== 守卫检查 ==================== */
 
 /**
  * @brief C-L05: 执行完整的 SafetyGuard 守卫链检查
@@ -104,10 +99,8 @@ void safety_guard_bridge_destroy(safety_guard_bridge_t *bridge);
  * @return 0 全部通过，非0 被拒绝
  * @ownership bridge: BORROW, meta: BORROW, params_json: BORROW, result: BORROW
  */
-int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
-                              const tool_metadata_t *meta,
-                              const char *params_json,
-                              safety_guard_bridge_result_t *result);
+int safety_guard_bridge_check(safety_guard_bridge_t *bridge, const tool_metadata_t *meta,
+                              const char *params_json, safety_guard_bridge_result_t *result);
 
 /**
  * @brief 以指定 agent 身份执行完整 SafetyGuard 守卫链检查
@@ -123,10 +116,8 @@ int safety_guard_bridge_check(safety_guard_bridge_t *bridge,
  * @param result 输出检查结果
  * @return 0 全部通过，非0 被拒绝
  */
-int safety_guard_bridge_check_for_agent(safety_guard_bridge_t *bridge,
-                                        const char *agent_id,
-                                        const tool_metadata_t *meta,
-                                        const char *params_json,
+int safety_guard_bridge_check_for_agent(safety_guard_bridge_t *bridge, const char *agent_id,
+                                        const tool_metadata_t *meta, const char *params_json,
                                         safety_guard_bridge_result_t *result);
 
 /**
@@ -137,10 +128,8 @@ int safety_guard_bridge_check_for_agent(safety_guard_bridge_t *bridge,
  * @param action 操作（"execute"/"register"/"list"）
  * @return 0 通过，非0 拒绝
  */
-int safety_guard_bridge_check_permission(safety_guard_bridge_t *bridge,
-                                         const char *agent_id,
-                                         const char *tool_name,
-                                         const char *action);
+int safety_guard_bridge_check_permission(safety_guard_bridge_t *bridge, const char *agent_id,
+                                         const char *tool_name, const char *action);
 
 /**
  * @brief 仅执行速率限制检查
@@ -148,8 +137,7 @@ int safety_guard_bridge_check_permission(safety_guard_bridge_t *bridge,
  * @param tool_name 工具名称
  * @return 0 通过，非0 超出限制
  */
-int safety_guard_bridge_check_rate_limit(safety_guard_bridge_t *bridge,
-                                         const char *tool_name);
+int safety_guard_bridge_check_rate_limit(safety_guard_bridge_t *bridge, const char *tool_name);
 
 /**
  * @brief 仅执行内容过滤检查
@@ -159,12 +147,9 @@ int safety_guard_bridge_check_rate_limit(safety_guard_bridge_t *bridge,
  * @param sanitized_size 输出缓冲区大小
  * @return 0 通过，非0 被过滤
  */
-int safety_guard_bridge_filter_content(safety_guard_bridge_t *bridge,
-                                       const char *params_json,
-                                       char *sanitized_params,
-                                       size_t sanitized_size);
+int safety_guard_bridge_filter_content(safety_guard_bridge_t *bridge, const char *params_json,
+                                       char *sanitized_params, size_t sanitized_size);
 
-/* ==================== 审计日志 ==================== */
 
 /**
  * @brief 记录审计日志事件
@@ -176,11 +161,8 @@ int safety_guard_bridge_filter_content(safety_guard_bridge_t *bridge,
  * @param agent_id Agent ID
  * @return 0 成功
  */
-int safety_guard_bridge_audit_log(safety_guard_bridge_t *bridge,
-                                  const char *event_type,
-                                  const char *tool_name,
-                                  int decision,
-                                  const char *reason,
+int safety_guard_bridge_audit_log(safety_guard_bridge_t *bridge, const char *event_type,
+                                  const char *tool_name, int decision, const char *reason,
                                   const char *agent_id);
 
 /**
@@ -190,10 +172,8 @@ int safety_guard_bridge_audit_log(safety_guard_bridge_t *bridge,
  * @param out_denied_count 输出拒绝次数
  * @param out_rate_limited 输出速率限制次数
  */
-void safety_guard_bridge_get_stats(safety_guard_bridge_t *bridge,
-                                   uint64_t *out_total_checks,
-                                   uint64_t *out_denied_count,
-                                   uint64_t *out_rate_limited);
+void safety_guard_bridge_get_stats(safety_guard_bridge_t *bridge, uint64_t *out_total_checks,
+                                   uint64_t *out_denied_count, uint64_t *out_rate_limited);
 
 #ifdef __cplusplus
 }

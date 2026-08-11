@@ -1,14 +1,13 @@
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file llm_svc_adapter.h
  * @brief LLM服务适配器头文件
  *
  * 提供LLM服务与AgentRT统一服务管理框架的适配接口。
  *
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_DAEMON_LLM_SVC_ADAPTER_H
@@ -24,11 +23,10 @@ extern "C" {
 #endif
 
 AIRY_API airy_err_t llm_service_adapter_create(airy_svc_t *out_service,
-                                                       const airy_svc_config_t *config);
+                                               const airy_svc_config_t *config);
 
-AIRY_API airy_err_t llm_service_adapter_wrap(airy_svc_t *out_service,
-                                                     llm_service_t llm_svc,
-                                                     const airy_svc_config_t *config);
+AIRY_API airy_err_t llm_service_adapter_wrap(airy_svc_t *out_service, llm_service_t llm_svc,
+                                             const airy_svc_config_t *config);
 
 AIRY_API llm_service_t llm_service_adapter_get_original(airy_svc_t service);
 

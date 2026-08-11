@@ -1,7 +1,7 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file prometheus_exporter.c
  * @brief C-L10: Prometheus scrape endpoint 实现
@@ -23,9 +23,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ==================== 14 项必需指标定义 ==================== */
-
-/* --- 核心可观测性指标 (Section 16.1) --- */
 static const char *REQUIRED_METRICS[][5] = {
     /* {name, type, help, labels} */
     {"airy_cognition_latency_ms", "histogram", "Cognitive phase latency in milliseconds",
@@ -34,8 +31,7 @@ static const char *REQUIRED_METRICS[][5] = {
      "provider,model"},
     {"airy_llm_cost_usd_total", "counter", "Total LLM cost in USD", "provider"},
     {"airy_tool_call_total", "counter", "Total tool call count", "tool_name,status"},
-    {"airy_memory_operations_total", "counter", "Total memory operations count",
-     "layer,operation"},
+    {"airy_memory_operations_total", "counter", "Total memory operations count", "layer,operation"},
     {"airy_hook_execution_ms", "histogram", "Hook execution latency in milliseconds",
      "hook_name,event"},
     {"airy_connection_health", "gauge", "Connection line health status (0=down, 1=up)",
@@ -45,28 +41,21 @@ static const char *REQUIRED_METRICS[][5] = {
     {"airy_llm_retry_total", "counter", "Total LLM retry count", "provider,error_category"},
     {"airy_config_reload_total", "counter", "Total config reload count", "status"},
 
-    /* --- 内存可观测性指标 --- */
     {"airy_memory_rss_bytes", "gauge", "Resident memory size in bytes", ""},
     {"airy_memory_heap_bytes", "gauge", "Heap memory usage in bytes", ""},
     {"airy_memory_pool_utilization", "gauge", "Memory pool utilization (0.0~1.0)", ""},
     {"airy_oom_events_total", "counter", "Total OOM event count", "level"},
 
-    /* --- monit_d 自身 scrape 统计（prometheus_exporter_get_metrics 会设置） --- */
     {"airy_monit_scrape_count", "gauge", "Total Prometheus scrape requests handled", ""},
     {"airy_monit_scrape_errors", "gauge", "Total Prometheus scrape errors", ""},
 };
 
-#define REQUIRED_METRICS_COUNT                                                \
-    (sizeof(REQUIRED_METRICS) / sizeof(REQUIRED_METRICS[0]))
-
-/* ==================== 内部状态 ==================== */
+#define REQUIRED_METRICS_COUNT (sizeof(REQUIRED_METRICS) / sizeof(REQUIRED_METRICS[0]))
 
 static char g_module_name[UM_MODULE_NAME_LEN] = "monit_d";
 static int g_initialized = 0;
-static uint64_t g_scrape_count = 0;       /* C-L10: 抓取计数 */
-static uint64_t g_scrape_errors = 0;      /* C-L10: 抓取错误计数 */
-
-/* ==================== 辅助函数 ==================== */
+static uint64_t g_scrape_count = 0;
+static uint64_t g_scrape_errors = 0;
 
 /**
  * @brief 根据字符串名称获取指标类型枚举
@@ -86,8 +75,6 @@ static um_metric_type_t parse_metric_type(const char *type_str)
     return UM_TYPE_GAUGE;
 }
 
-/* ==================== 公共接口实现 ==================== */
-
 int prometheus_exporter_init(const char *service_name)
 {
     if (g_initialized) {
@@ -95,23 +82,20 @@ int prometheus_exporter_init(const char *service_name)
         return 0;
     }
 
-    /* 设置模块名称 */
     if (service_name && service_name[0]) {
         AIRY_STRNCPY_TERM(g_module_name, service_name, sizeof(g_module_name));
     }
 
-    /* 初始化统一指标收集器 */
     um_config_t config = um_create_default_config();
     AIRY_STRNCPY_TERM(config.service_name, g_module_name, sizeof(config.service_name));
     config.enable_default_metrics = true;
-    config.scrape_interval_ms = 15000;  /* 15s scrape interval */
+    config.scrape_interval_ms = 15000; /* 15s scrape interval */
 
     if (um_init(&config) != 0) {
         SVC_LOG_ERROR("C-L10: Failed to initialize unified metrics for '%s'", g_module_name);
         return AIRY_ERR_FAIL;
     }
 
-    /* 注册模块 */
     if (um_register_module(g_module_name, NULL) != 0) {
         SVC_LOG_ERROR("C-L10: Failed to register metrics module '%s'", g_module_name);
         um_shutdown();
@@ -153,9 +137,8 @@ int prometheus_exporter_register_required_metrics(void)
         um_metric_type_t type = parse_metric_type(type_str);
 
         if (um_register_metric(g_module_name, name, type, help, labels) == 0) {
-            SVC_LOG_DEBUG("C-L10: Registered metric [%zu/%zu] %s (type=%s, labels=%s)",
-                          i + 1, REQUIRED_METRICS_COUNT, name, type_str,
-                          labels[0] ? labels : "none");
+            SVC_LOG_DEBUG("C-L10: Registered metric [%zu/%zu] %s (type=%s, labels=%s)", i + 1,
+                          REQUIRED_METRICS_COUNT, name, type_str, labels[0] ? labels : "none");
             registered++;
         } else {
             SVC_LOG_WARN("C-L10: Failed to register metric %s", name);
@@ -169,26 +152,21 @@ int prometheus_exporter_register_required_metrics(void)
     return (failed > 0) ? -1 : 0;
 }
 
-/* ==================== HTTP /metrics 端点 ==================== */
-
-int prometheus_exporter_handle_http(const char *request, size_t request_len,
-                                    char **response, size_t *response_len)
+int prometheus_exporter_handle_http(const char *request, size_t request_len, char **response,
+                                    size_t *response_len)
 {
     if (!request || !response || !response_len)
         return AIRY_ERR_INVALID_PARAM;
 
-    /* 检测是否为 HTTP GET /metrics 请求 */
     if (request_len < 14)
         return AIRY_ERR_INVALID_PARAM;
 
-    /* 匹配 "GET /metrics" 前缀 */
     if (strncmp(request, "GET /metrics", 12) != 0)
         return AIRY_ERR_INVALID_PARAM;
 
     SVC_LOG_DEBUG("C-L10: Prometheus scrape request received (scrape #%llu)",
                   (unsigned long long)(g_scrape_count + 1));
 
-    /* 获取 Prometheus 格式指标 */
     char *metrics_text = prometheus_exporter_get_metrics();
     if (!metrics_text) {
         g_scrape_errors++;
@@ -222,7 +200,6 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len,
     SVC_LOG_INFO("C-L10: Prometheus scrape #%llu — %zu bytes of metrics",
                  (unsigned long long)g_scrape_count, metrics_len);
 
-    /* 构建 HTTP 响应 */
     char header_buf[256];
     int header_len = snprintf(header_buf, sizeof(header_buf),
                               "HTTP/1.1 200 OK\r\n"
@@ -249,8 +226,6 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len,
     *response_len = total_len;
     return 0;
 }
-
-/* ==================== 指标值更新 ==================== */
 
 void prometheus_counter_inc(const char *name, double value)
 {
@@ -280,14 +255,11 @@ char *prometheus_exporter_get_metrics(void)
         return NULL;
     }
 
-    /* 更新默认系统指标（CPU/内存等） */
     um_update_default_metrics();
 
-    /* C-L10: 更新 scrape 统计指标 */
     prometheus_gauge_set("airy_monit_scrape_count", (double)g_scrape_count);
     prometheus_gauge_set("airy_monit_scrape_errors", (double)g_scrape_errors);
 
-    /* 导出 Prometheus 格式 */
     char *result = um_export_prometheus_module(g_module_name);
     if (!result) {
         SVC_LOG_WARN("C-L10: Failed to export Prometheus metrics");
@@ -296,10 +268,10 @@ char *prometheus_exporter_get_metrics(void)
     return result;
 }
 
-/* ==================== C-L10: 抓取统计 ==================== */
-
 void prometheus_exporter_get_scrape_stats(uint64_t *out_count, uint64_t *out_errors)
 {
-    if (out_count)  *out_count = g_scrape_count;
-    if (out_errors) *out_errors = g_scrape_errors;
+    if (out_count)
+        *out_count = g_scrape_count;
+    if (out_errors)
+        *out_errors = g_scrape_errors;
 }

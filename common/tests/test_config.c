@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_config.c
  * @brief 配置管理器单元测试 (TeamC)
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  * 对齐: cm_* 全局配置API (config_manager.h)
  */
 
@@ -120,8 +120,6 @@ static void test_config_environment(void)
 
     printf("    PASSED\n");
 }
-
-/* ========== Round 10: 配置API扩展测试 (C-W1-003) ========== */
 
 static int g_watch_callback_fired = 0;
 static char g_last_watch_key[128] = {0};
@@ -339,7 +337,6 @@ int main(void)
     test_config_namespaced();
     test_config_environment();
 
-    /* ========== Round 10: API扩展测试 (C-W1-003) ========== */
     /* test_config_watch_callback(); */
     test_config_load_json();
     test_config_history();

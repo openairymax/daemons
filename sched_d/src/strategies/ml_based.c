@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file ml_based.c
  * @brief 基于机器学习的调度策略实现（生产级）
  * @details 使用加权特征融合模型进行Agent选择预测，包含完整的特征工程和评分函数
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "../../include/scheduler_service.h"
@@ -102,9 +102,9 @@ static float predict_score(const ml_based_data_t *mld, const agent_info_t *agent
     score += w->weight_priority_weight * fminf(agent->weight / 10.0f, 1.0f);
 
     float confidence_boost =
-        (mld->total_predictions > 10)
-            ? fminf((float)mld->correct_predictions / (float)mld->total_predictions, 1.0f)
-            : 0.5f;
+        (mld->total_predictions > 10) ?
+            fminf((float)mld->correct_predictions / (float)mld->total_predictions, 1.0f) :
+            0.5f;
     score *= (0.8f + 0.2f * confidence_boost);
 
     return score;

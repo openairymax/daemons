@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file vector.h
  * @brief Memory 服务向量检索内部接口（自研 TF-IDF，无外部依赖）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 为 mem_d 提供轻量级向量检索能力：
  * - tokenizer：英文按小写单词切分（可去停用词），中文按单字 + 相邻双字 bigram 切分
@@ -18,35 +18,32 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* ---------- TF-IDF 词频向量（缓存于每条记忆记录） ---------- */
 
 typedef struct {
-    char *term;   /* 词项：小写英文单词 / 中文单字 / 相邻汉字 bigram */
-    float tf;     /* 词频（该词在文档中出现的原始次数） */
+    char *term;
+    float tf;
 } mem_vec_term_t;
 
 typedef struct {
-    mem_vec_term_t *terms; /* 去重后的词项数组 */
-    size_t term_count;     /* 词项数量 */
-    size_t term_capacity;  /* 数组容量 */
-    size_t total_tokens;   /* 文档 token 总数（含重复，TF 归一化参考） */
+    mem_vec_term_t *terms;
+    size_t term_count;
+    size_t term_capacity;
+    size_t total_tokens;
 } mem_tfidf_vec_t;
 
-/* ---------- 全局文档频率（DF）统计表：term -> 出现文档数 ---------- */
 
 typedef struct {
-    char *key; /* 词项 */
-    size_t df; /* 文档频率 */
-    int state; /* 0=空闲 1=活跃 2=墓碑（删除标记，保证线性探测正确性） */
+    char *key;
+    size_t df;
+    int state;
 } mem_df_entry_t;
 
 typedef struct {
     mem_df_entry_t *entries;
     size_t capacity;
-    size_t count; /* 活跃条目数 */
+    size_t count;
 } mem_df_table_t;
 
-/* ---------- 接口 ---------- */
 
 /**
  * @brief 对文本 tokenize 并构建词频向量（terms 已去重，tf 为原始计数）

@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_jsonrpc_helpers.c
  * @brief JSON-RPC 辅助函数单元测试
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "jsonrpc_helpers.h"

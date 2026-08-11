@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file provider.h
  * @brief 提供商适配器接口定义
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_LLM_PROVIDER_H
@@ -17,10 +17,10 @@
 extern "C" {
 #endif
 
-/* 不透明上下文 */
+
 typedef struct provider_ctx provider_ctx_t;
 
-/* 基础上下文（各提供商共享） */
+
 typedef struct {
     char api_key[256];
     char api_key_env[128]; /* 记录 model.yaml api_key_env 名（如 DEEPSEEK_API_KEY），
@@ -31,14 +31,14 @@ typedef struct {
     int max_retries;
 } provider_base_ctx_t;
 
-/* HTTP 响应 */
+
 typedef struct {
     char *data;
     size_t size;
     size_t capacity;
 } provider_http_resp_t;
 
-/* 操作表 */
+
 typedef struct {
     const char *name;
     const char *default_model;
@@ -53,7 +53,7 @@ typedef struct {
                            llm_response_t **out_response);
 } provider_ops_t;
 
-/* 提供商实例（对外可见） */
+
 typedef struct {
     const char *name;
     const provider_ops_t *ops;
@@ -61,7 +61,7 @@ typedef struct {
     char **models;
 } provider_t;
 
-/* 通用工具函数 */
+
 void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, const char *api_base,
                         const char *organization, double timeout_sec, int max_retries,
                         const char *default_base);
@@ -80,7 +80,6 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
 
 int provider_parse_openai_response(const char *body, llm_response_t **out);
 
-/* ---------- SSE 流式传输 ---------- */
 
 typedef int (*provider_stream_chunk_cb_t)(const char *data_line, void *user_data);
 

@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file main.c
  * @brief Memory 服务守护进程主入口（遵循 daemon 模块统一规范）
@@ -29,8 +29,6 @@
 #include <string.h>
 #include <time.h>
 
-/* ==================== 配置常量 ==================== */
-
 #define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("mem.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_mem"
 #define DEFAULT_TCP_PORT 8085
@@ -38,14 +36,10 @@
 #define MAX_CLIENTS 64
 #define MEM_DEFAULT_MAX_RECORDS 1024
 
-/* 生成公共全局变量、信号处理、help、客户端处理等样板 */
-DAEMON_DECLARE_COMMON(mem_d, mem, DEFAULT_SOCKET_PATH_UNIX,
-                       DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+DAEMON_DECLARE_COMMON(mem_d, mem, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN,
+                      DEFAULT_TCP_PORT, MAX_BUFFER)
 
-/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
 DAEMON_DECLARE_SHUTDOWN_METHOD(mem_d)
-
-/* ==================== 全局状态 ==================== */
 
 static mem_service_t *g_service = NULL;
 
@@ -74,8 +68,6 @@ static BOOL WINAPI console_handler(DWORD fdwCtrlType)
     }
 }
 #endif
-
-/* ==================== 请求处理方法 ==================== */
 
 static void handle_write(cJSON *params, int id, airy_sock_t fd);
 static void handle_search(cJSON *params, int id, airy_sock_t fd);
@@ -111,7 +103,6 @@ static void on_count_method(cJSON *params __attribute__((unused)), int id, void 
     handle_count(id, *(airy_sock_t *)user_data);
 }
 
-/* L2 标准方法 mem.evolve / mem.health_check（02-l2-service-protocol.md） */
 static void on_evolve_method(cJSON *params, int id, void *user_data)
 {
     handle_evolve(params, id, *(airy_sock_t *)user_data);
@@ -122,7 +113,6 @@ static void on_health_check_method(cJSON *params __attribute__((unused)), int id
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
 
-/* L2 标准方法 mem.get_stats（02-l2-service-protocol.md §6.1） */
 static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_get_stats(id, *(airy_sock_t *)user_data);
@@ -263,11 +253,10 @@ static void handle_evolve(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *query = cJSON_GetObjectItem(params, "query");
     cJSON *rid = cJSON_GetObjectItem(params, "record_id");
 
-    /* ---- 模式一：按 query 检索并归并 ---- */
     if (cJSON_IsString(query) && query->valuestring) {
         cJSON *limit_json = cJSON_GetObjectItem(params, "limit");
-        uint32_t lim = limit_json && cJSON_IsNumber(limit_json)
-                           ? (uint32_t)limit_json->valueint : 10;
+        uint32_t lim =
+            limit_json && cJSON_IsNumber(limit_json) ? (uint32_t)limit_json->valueint : 10;
 
         mem_search_hit_t *hits = NULL;
         size_t count = 0;
@@ -280,8 +269,10 @@ static void handle_evolve(cJSON *params, int id, airy_sock_t client_fd)
         cJSON *meta = cJSON_CreateObject();
         cJSON *sources = cJSON_CreateArray();
         if (!meta || !sources) {
-            if (meta) cJSON_Delete(meta);
-            if (sources) cJSON_Delete(sources);
+            if (meta)
+                cJSON_Delete(meta);
+            if (sources)
+                cJSON_Delete(sources);
             mem_search_hits_free(hits, count);
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
             return;
@@ -289,7 +280,6 @@ static void handle_evolve(cJSON *params, int id, airy_sock_t client_fd)
         cJSON_AddStringToObject(meta, "evolved_from_query", query->valuestring);
         cJSON_AddNumberToObject(meta, "evolved_at", (double)(uint64_t)time(NULL) * 1000);
 
-        /* 收集命中记录内容并统计来源 */
         size_t total_len = 0;
         char **data_parts = (char **)AIRY_CALLOC(count ? count : 1, sizeof(char *));
         if (count > 0 && !data_parts) {
@@ -303,7 +293,7 @@ static void handle_evolve(cJSON *params, int id, airy_sock_t client_fd)
         for (size_t i = 0; i < count; i++) {
             mem_record_t rec = {0};
             if (mem_service_get(g_service, hits[i].record_id, &rec) == AIRY_SUCCESS) {
-                data_parts[i] = (char *)rec.data; /* 归并时统一释放 */
+                data_parts[i] = (char *)rec.data;
                 total_len += rec.len;
                 cJSON *src = cJSON_CreateObject();
                 cJSON_AddStringToObject(src, "record_id", hits[i].record_id);
@@ -318,7 +308,6 @@ static void handle_evolve(cJSON *params, int id, airy_sock_t client_fd)
         }
         cJSON_AddItemToObject(meta, "sources", sources);
 
-        /* 归并内容写入强化记录（count==0 时写空记录并标记 no_records） */
         char *merged = NULL;
         if (total_len > 0) {
             merged = (char *)AIRY_MALLOC(total_len + 1);
@@ -373,13 +362,12 @@ static void handle_evolve(cJSON *params, int id, airy_sock_t client_fd)
         cJSON_AddStringToObject(result, "evolved_record_id", new_id);
         cJSON_AddNumberToObject(result, "source_count", (double)count);
         JSONRPC_SEND_SUCCESS(client_fd, result, id);
-        SVC_LOG_INFO("mem.evolve: query='%s' merged=%zu records -> %s",
-                     query->valuestring, count, new_id);
+        SVC_LOG_INFO("mem.evolve: query='%s' merged=%zu records -> %s", query->valuestring, count,
+                     new_id);
         AIRY_FREE(new_id);
         return;
     }
 
-    /* ---- 模式二：record_id 单条演化 ---- */
     if (cJSON_IsString(rid) && rid->valuestring) {
         mem_record_t rec = {0};
         int ret = mem_service_get(g_service, rid->valuestring, &rec);
@@ -428,11 +416,9 @@ static void handle_evolve(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                       "Missing query or record_id", id);
+    JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing query or record_id", id);
 }
 
-/* L2 标准方法 mem.health_check：无副作用健康探针 */
 static void handle_health_check(int id, airy_sock_t client_fd)
 {
     cJSON *result = cJSON_CreateObject();
@@ -444,7 +430,6 @@ static void handle_health_check(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* L2 标准方法 mem.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
 static void handle_get_stats(int id, airy_sock_t client_fd)
 {
     cJSON *result = cJSON_CreateObject();
@@ -457,8 +442,6 @@ static void handle_get_stats(int id, airy_sock_t client_fd)
     cJSON_AddNumberToObject(result, "max_records", (double)g_config.max_records);
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
-
-/* ==================== 配置加载 ==================== */
 
 static int load_daemon_config(const char *config_path)
 {
@@ -475,7 +458,6 @@ static int load_daemon_config(const char *config_path)
 #endif
     g_config.tcp_port = DEFAULT_TCP_PORT;
 
-    /* 环境变量覆盖：AIRY_MEM_MAX_RECORDS */
     const char *env = getenv("AIRY_MEM_MAX_RECORDS");
     if (env) {
         unsigned long v = strtoul(env, NULL, 10);
@@ -542,15 +524,14 @@ static void destroy_service(void)
     }
 }
 
-/* ==================== 主函数 ==================== */
-
 int main(int argc, char **argv)
 {
     const char *config_path = NULL;
     int use_tcp = 0;
 
     int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_mem_d);
-    if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
+    if (parse_rc > 0)
+        return parse_rc == 1 ? 0 : 1;
 
     airy_sock_init();
     airy_mtx_init(&g_running_lock_mem_d);
@@ -564,7 +545,6 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶 */
     daemon_cupolas_init("mem_d");
 
     load_daemon_config(config_path);
@@ -582,8 +562,8 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    airy_sock_t server_fd = daemon_create_server_socket(
-        g_config.use_tcp, g_config.tcp_port, g_config.socket_path, g_config.socket_path);
+    airy_sock_t server_fd = daemon_create_server_socket(g_config.use_tcp, g_config.tcp_port,
+                                                        g_config.socket_path, g_config.socket_path);
     if (server_fd < 0) {
         SVC_LOG_ERROR("Failed to create server socket");
         destroy_service();
@@ -592,8 +572,8 @@ int main(int argc, char **argv)
         airy_sock_cleanup();
         return EXIT_FAILURE;
     }
-    SVC_LOG_INFO(g_config.use_tcp ? "Listening on TCP %s:%d" : "Listening on %s",
-                 g_config.tcp_host, g_config.tcp_port);
+    SVC_LOG_INFO(g_config.use_tcp ? "Listening on TCP %s:%d" : "Listening on %s", g_config.tcp_host,
+                 g_config.tcp_port);
 
     daemon_event_config_t ev_config;
     __builtin_memset(&ev_config, 0, sizeof(ev_config));
@@ -607,9 +587,9 @@ int main(int argc, char **argv)
 
     const char *sock_addr = g_config.use_tcp ? g_config.tcp_host : g_config.socket_path;
     int ret = daemon_init_event_driver("mem_d", "mem", sock_addr,
-                                        g_config.use_tcp ? g_config.tcp_port : 0, "mem,core",
-                                        g_config.use_tcp, &ev_config, &g_event_driver_mem_d,
-                                        &g_bsd_mem_d, &g_bipc_mem_d);
+                                       g_config.use_tcp ? g_config.tcp_port : 0, "mem,core",
+                                       g_config.use_tcp, &ev_config, &g_event_driver_mem_d,
+                                       &g_bsd_mem_d, &g_bipc_mem_d);
     if (ret != AIRY_SUCCESS || !g_event_driver_mem_d) {
         SVC_LOG_ERROR("Failed to create event driver");
         airy_sock_close(server_fd);
@@ -626,12 +606,12 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_mem_d, "get", on_get_method, NULL);
     method_dispatcher_register(g_dispatcher_mem_d, "delete", on_delete_method, NULL);
     method_dispatcher_register(g_dispatcher_mem_d, "count", on_count_method, NULL);
-    /* L2 协议标准方法（02-l2-service-protocol.md：mem.evolve / mem.health_check） */
+
     method_dispatcher_register(g_dispatcher_mem_d, "evolve", on_evolve_method, NULL);
     method_dispatcher_register(g_dispatcher_mem_d, "health_check", on_health_check_method, NULL);
-    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+
     method_dispatcher_register(g_dispatcher_mem_d, "shutdown", on_shutdown_method_mem_d, NULL);
-    /* L2 协议标准方法 mem.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+
     method_dispatcher_register(g_dispatcher_mem_d, "get_stats", on_get_stats_method, NULL);
     SVC_LOG_INFO("Registered %d RPC methods (mem.* namespace)", 9);
 
@@ -649,8 +629,8 @@ int main(int argc, char **argv)
     SVC_LOG_INFO("Memory service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_mem_d);
 
-    daemon_cleanup_standard(g_bipc_mem_d, g_bsd_mem_d, g_event_driver_mem_d,
-                             server_fd, destroy_service, &g_running_lock_mem_d);
+    daemon_cleanup_standard(g_bipc_mem_d, g_bsd_mem_d, g_event_driver_mem_d, server_fd,
+                            destroy_service, &g_running_lock_mem_d);
     free_daemon_config();
 
     SVC_LOG_INFO("Memory service stopped");

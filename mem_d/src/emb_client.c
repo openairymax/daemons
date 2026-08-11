@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file emb_client.c
  * @brief Memory 服务可选 embedding 后端客户端实现（libcurl + cJSON）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 实现细节：
  * - 配置：AIRY_MEM_EMBEDDING_URL（base url）+ AIRY_MEM_EMBEDDING_KEY（可选 Bearer）
@@ -33,15 +33,13 @@
 #include <cjson/cJSON.h>
 #endif
 
-/* 默认失败重试冷却期（毫秒） */
 #define MEM_EMB_RETRY_AFTER_MS 60000
-/* 默认 embedding 模型 */
+
 #define MEM_EMB_MODEL "text-embedding-3-small"
-/* HTTP 超时（秒） */
+
 #define MEM_EMB_TIMEOUT_SEC 10
 #define MEM_EMB_CONNECT_TIMEOUT_SEC 5
 
-/* curl 全局初始化只执行一次（curl_global_init 非线程安全） */
 static int g_curl_lock_ready = 0;
 static int g_curl_ready = 0;
 static airy_mtx_t g_curl_lock;
@@ -50,7 +48,7 @@ static airy_mtx_t g_curl_lock;
 
 static void mem_curl_global_init_once(void)
 {
-    /* 惰性初始化锁（mem_service_create 在主线程调用，竞争风险可忽略） */
+
     if (!g_curl_lock_ready) {
         airy_mtx_init(&g_curl_lock);
         g_curl_lock_ready = 1;
@@ -63,7 +61,6 @@ static void mem_curl_global_init_once(void)
     airy_mtx_unlock(&g_curl_lock);
 }
 
-/* libcurl 写回调：累积响应体 */
 typedef struct {
     char *buf;
     size_t len;
@@ -86,7 +83,6 @@ static size_t mem_emb_write_cb(void *ptr, size_t size, size_t nmemb, void *userd
 }
 
 #endif /* AIRY_HAS_CURL */
-
 int mem_emb_client_init(mem_emb_client_t *client)
 {
     if (!client)
@@ -114,7 +110,6 @@ int mem_emb_client_init(mem_emb_client_t *client)
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    /* 冷却期可配置 */
     const char *rs = getenv("AIRY_MEM_EMB_RETRY_SECONDS");
     if (rs && rs[0]) {
         long v = strtol(rs, NULL, 10);
@@ -126,7 +121,6 @@ int mem_emb_client_init(mem_emb_client_t *client)
     client->healthy = 1;
     client->last_fail_time = 0;
 
-    /* 仅当真正使用 curl 前初始化一次 */
     mem_curl_global_init_once();
     SVC_LOG_INFO("mem_d embedding backend enabled (url=%s)", client->url);
     return AIRY_SUCCESS;
@@ -149,22 +143,20 @@ int mem_emb_should_try(const mem_emb_client_t *client)
     if (client->healthy)
         return 1;
     uint64_t now = airy_time_ms();
-    if (now < client->last_fail_time) /* 时钟回拨保护 */
+    if (now < client->last_fail_time)
         return 0;
     return (now - client->last_fail_time) >= client->retry_after_ms;
 }
 
 #ifdef AIRY_HAS_CURL
 
-/* 标记调用失败：进入冷却期（上层随后降级 TF-IDF） */
 static void mem_emb_mark_fail(mem_emb_client_t *client)
 {
     client->healthy = 0;
     client->last_fail_time = airy_time_ms();
 }
 
-int mem_emb_embed(mem_emb_client_t *client, const char *text,
-                  float **out_vec, size_t *out_dim)
+int mem_emb_embed(mem_emb_client_t *client, const char *text, float **out_vec, size_t *out_dim)
 {
     if (!out_vec || !out_dim)
         return AIRY_ERR_INVALID_PARAM;
@@ -174,12 +166,14 @@ int mem_emb_embed(mem_emb_client_t *client, const char *text,
         return AIRY_ERR_INVALID_PARAM;
 
 #ifdef AIRY_HAS_CJSON
-    /* ---- 构造请求体 ---- */
+
     cJSON *root = cJSON_CreateObject();
     cJSON *input = cJSON_CreateArray();
     if (!root || !input) {
-        if (root) cJSON_Delete(root);
-        if (input) cJSON_Delete(input);
+        if (root)
+            cJSON_Delete(root);
+        if (input)
+            cJSON_Delete(input);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
     cJSON_AddStringToObject(root, "model", MEM_EMB_MODEL);
@@ -190,7 +184,6 @@ int mem_emb_embed(mem_emb_client_t *client, const char *text,
     if (!body)
         return AIRY_ERR_OUT_OF_MEMORY;
 
-    /* ---- 拼接 URL：{base}/embeddings ---- */
     size_t url_len = strlen(client->url) + strlen("/embeddings") + 1;
     char *url = (char *)AIRY_MALLOC(url_len);
     if (!url) {
@@ -199,7 +192,6 @@ int mem_emb_embed(mem_emb_client_t *client, const char *text,
     }
     snprintf(url, url_len, "%s/embeddings", client->url);
 
-    /* ---- 发起 HTTP POST ---- */
     CURL *curl = curl_easy_init();
     if (!curl) {
         AIRY_FREE(url);
@@ -249,7 +241,6 @@ int mem_emb_embed(mem_emb_client_t *client, const char *text,
         return AIRY_ERR_LLM_PROVIDER_FAIL;
     }
 
-    /* ---- 解析响应：data[0].embedding ---- */
     cJSON *r = cJSON_Parse(resp.buf);
     AIRY_FREE(resp.buf);
     if (!r) {
@@ -295,9 +286,7 @@ int mem_emb_embed(mem_emb_client_t *client, const char *text,
 }
 
 #else /* !AIRY_HAS_CURL */
-
-int mem_emb_embed(mem_emb_client_t *client, const char *text,
-                  float **out_vec, size_t *out_dim)
+int mem_emb_embed(mem_emb_client_t *client, const char *text, float **out_vec, size_t *out_dim)
 {
     (void)client;
     (void)text;
@@ -309,7 +298,6 @@ int mem_emb_embed(mem_emb_client_t *client, const char *text,
 }
 
 #endif /* AIRY_HAS_CURL */
-
 float mem_emb_cosine(const float *a, const float *b, size_t dim)
 {
     if (!a || !b || dim == 0)

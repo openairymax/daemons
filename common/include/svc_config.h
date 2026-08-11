@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file svc_config.h
  * @brief 配置服务兼容层
@@ -19,7 +20,6 @@
 extern "C" {
 #endif
 
-/* ==================== 错误码兼容 ==================== */
 
 #define SVC_OK AIRY_OK
 #define SVC_ERR_INVALID_PARAM AIRY_ERR_INVALID_PARAM
@@ -28,7 +28,6 @@ extern "C" {
 #define SVC_ERR_PARSE_ERROR AIRY_ERR_PARSE_ERROR
 #define SVC_ERR_RPC (-5001)
 
-/* ==================== 类型兼容 ==================== */
 
 typedef struct {
     char *service_name;
@@ -36,7 +35,6 @@ typedef struct {
     int log_level;
 } svc_config_t;
 
-/* ==================== 兼容性函数包装 ==================== */
 
 static inline int svc_config_load(const char *path __attribute__((unused)),
                                   svc_config_t **out_config)

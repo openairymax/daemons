@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file svc_model_defaults.h
  * @brief model.yaml global / think 段默认模型提取（llm_d / gateway_d / think_d 共用）
@@ -41,8 +42,7 @@ extern "C" {
  * @param prov_sz       out_provider 缓冲大小
  * @return 0 成功；AIRY_ERR_INVALID_PARAM / AIRY_ERR_IO / AIRY_ERR_NOT_SUPPORTED
  */
-int svc_model_defaults_from_yaml(const char *path,
-                                 char *out_model, size_t model_sz,
+int svc_model_defaults_from_yaml(const char *path, char *out_model, size_t model_sz,
                                  char *out_provider, size_t prov_sz);
 
 /**
@@ -53,11 +53,11 @@ int svc_model_defaults_from_yaml(const char *path,
  * think_d 内置默认（120000）。
  */
 typedef struct {
-    int enabled;                /* think.enabled（默认 1） */
-    char think2_slow_model[128]; /* think.think2_slow_model（t2 慢思考，生成计划） */
-    char think1_fast_model[128]; /* think.think1_fast_model（t1-f 快思考，语境终裁） */
-    char think1_prof_model[128]; /* think.think1_prof_model（t1-p 专业思考，四验专家） */
-    uint32_t timeout_ms;        /* think.timeout_ms（单次认知处理超时） */
+    int enabled;
+    char think2_slow_model[128];
+    char think1_fast_model[128];
+    char think1_prof_model[128];
+    uint32_t timeout_ms;
 } svc_model_think_config_t;
 
 /**
@@ -73,8 +73,7 @@ typedef struct {
  * @param out  输出结构（非 NULL；调用方应先行清零）
  * @return 0 成功；AIRY_ERR_INVALID_PARAM / AIRY_ERR_IO / AIRY_ERR_NOT_SUPPORTED
  */
-int svc_model_defaults_think_from_yaml(const char *path,
-                                       svc_model_think_config_t *out);
+int svc_model_defaults_think_from_yaml(const char *path, svc_model_think_config_t *out);
 
 /**
  * @brief 简化 LLM 配置（model.yaml 的 llm 段）
@@ -82,16 +81,16 @@ int svc_model_defaults_think_from_yaml(const char *path,
  * 面向普通用户的最小配置入口：一个 provider + 一个默认模型。
  * api_format 仅两种：openai（OpenAI Chat Completions）/ anthropic
  * （Anthropic Messages）。base_url 为适配器根地址（DeepSeek 官方同源
- * 双协议：openai 形如 https://api.deepseek.com；anthropic 形如
- * https://api.deepseek.com/anthropic，见 api-docs.deepseek.com）。
+ * 双协议：openai 形如 https:
+ * https:
  * 存在 llm 段且 model 非空时，llm_d 运行时展开为单 provider（优先于完整
  * providers/models 列表）。
  */
 typedef struct {
-    char api_format[16];    /* llm.api_format: openai | anthropic */
-    char base_url[512];     /* llm.base_url（适配器根地址） */
-    char api_key_env[128];  /* llm.api_key_env（对应 secrets.env 变量名） */
-    char model[128];        /* llm.model（默认模型名） */
+    char api_format[16]; /* llm.api_format: openai | anthropic */
+    char base_url[512];
+    char api_key_env[128];
+    char model[128];
 } svc_model_llm_config_t;
 
 /**
@@ -105,8 +104,7 @@ typedef struct {
  * @param out  输出结构（非 NULL；调用方应先行清零）
  * @return 0 成功；AIRY_ERR_INVALID_PARAM / AIRY_ERR_IO / AIRY_ERR_NOT_SUPPORTED
  */
-int svc_model_defaults_llm_from_yaml(const char *path,
-                                     svc_model_llm_config_t *out);
+int svc_model_defaults_llm_from_yaml(const char *path, svc_model_llm_config_t *out);
 
 #ifdef __cplusplus
 }

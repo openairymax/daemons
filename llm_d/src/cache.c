@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file cache.c
  * @brief LRU 缓存实现（双链表 + 哈希表）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "cache.h"

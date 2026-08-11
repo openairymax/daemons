@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file executor.h
  * @brief 工具执行器接口
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef TOOL_EXECUTOR_H
@@ -48,10 +48,9 @@ int tool_executor_run_async(tool_executor_t *exec, const tool_metadata_t *meta,
                             tool_execute_callback_t callback, void *user_data,
                             tool_result_t **out_result);
 
-/* C-L05: 设置工具审批上下文（Cupolas SafetyGuard → tool_d） */
+
 void tool_executor_set_approval_ctx(tool_executor_t *exec, tool_approval_ctx_t *approval_ctx);
 
-/* P0 交互式审批：暴露给 service 层的接口 */
 
 /**
  * @brief 交互式审批是否启用

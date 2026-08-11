@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file daemon_cupolas_bootstrap.h
  * @brief P3.14 (ACC-DT15): daemon 统一 cupolas 安全穹顶引导
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 为所有 daemon 提供统一的 cupolas 安全穹顶初始化与清理接口，
  * 避免在 12 个 main.c 中重复代码。
@@ -25,13 +25,11 @@
 #define AIRY_RT_DAEMON_CUPOLAS_BOOTSTRAP_H
 
 #include "error.h" /* airy_err_t */
-
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
-    /**
+/**
      * @brief 初始化 cupolas 安全穹顶（统一引导）
      *
      * 在 daemon main() 中 airy_log_init() 之后调用。
@@ -42,15 +40,15 @@ extern "C"
      *
      * @ownership daemon_name: BORROW (调用方保留所有权)
      */
-    airy_err_t daemon_cupolas_init(const char *daemon_name);
+airy_err_t daemon_cupolas_init(const char *daemon_name);
 
-    /**
+/**
      * @brief 清理 cupolas 安全穹顶
      *
      * 在 daemon main() 退出前调用。刷新审计日志、释放资源。
      * 幂等：重复调用安全。
      */
-    void daemon_cupolas_cleanup(void);
+void daemon_cupolas_cleanup(void);
 
 #ifdef __cplusplus
 }

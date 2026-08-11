@@ -1,10 +1,10 @@
-#include "airy_memory.h"
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
+#include "airy_memory.h"
 /**
  * @file example_svc_usage.c
  * @brief 服务管理框架使用示例
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 展示如何使用 svc_common.h 中定义的服务管理框架 API。
  * 此示例演示了服务的完整生命周期管理。
@@ -22,8 +22,6 @@
 #include <stdio.h>
 #include <string.h>
 
-/* ==================== 示例服务实现 ==================== */
-
 /**
  * @brief 示例服务上下文
  */
@@ -35,13 +33,11 @@ typedef struct {
 /**
  * @brief 示例服务初始化函数
  */
-static airy_err_t example_service_init(airy_svc_t svc,
-                                            const airy_svc_config_t *config)
+static airy_err_t example_service_init(airy_svc_t svc, const airy_svc_config_t *config)
 {
 
     printf("示例服务初始化: %s\n", airy_svc_get_name(svc));
 
-    /* 分配服务上下文 */
     example_service_context_t *ctx =
         (example_service_context_t *)AIRY_MALLOC(sizeof(example_service_context_t));
     if (!ctx) {
@@ -49,11 +45,8 @@ static airy_err_t example_service_init(airy_svc_t svc,
     }
 
     __builtin_memset(ctx, 0, sizeof(example_service_context_t));
-AIRY_STRNCPY_TERM(ctx->name, config->name, sizeof(ctx->name));
+    AIRY_STRNCPY_TERM(ctx->name, config->name, sizeof(ctx->name));
     ctx->counter = 0;
-
-    /* 存储上下文到服务 */
-    /* 注意：实际实现中应使用 airy_svc_set_user_data 等接口 */
 
     return AIRY_SUCCESS;
 }
@@ -100,14 +93,12 @@ static airy_err_t example_service_healthcheck(airy_svc_t svc)
 static airy_svc_interface_t create_example_service_interface(void)
 {
     airy_svc_interface_t iface = {.init = example_service_init,
-                                     .start = example_service_start,
-                                     .stop = example_service_stop,
-                                     .destroy = example_service_destroy,
-                                     .healthcheck = example_service_healthcheck};
+                                  .start = example_service_start,
+                                  .stop = example_service_stop,
+                                  .destroy = example_service_destroy,
+                                  .healthcheck = example_service_healthcheck};
     return iface;
 }
-
-/* ==================== 主程序 ==================== */
 
 int main(void)
 {
@@ -116,22 +107,18 @@ int main(void)
     airy_err_t err = AIRY_SUCCESS;
     airy_svc_t service = NULL;
 
-    /* 1. 创建服务配置 */
     airy_svc_config_t config = {.name = "example-service",
-                                   .version = "0.1.1",
-                                   .capabilities =
-                                       AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_PAUSEABLE,
-                                   .max_concurrent = 10,
-                                   .timeout_ms = 5000,
-                                   .priority = 5,
-                                   .auto_start = true,
-                                   .enable_metrics = true,
-                                   .enable_tracing = false};
+                                .version = "0.1.1",
+                                .capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_PAUSEABLE,
+                                .max_concurrent = 10,
+                                .timeout_ms = 5000,
+                                .priority = 5,
+                                .auto_start = true,
+                                .enable_metrics = true,
+                                .enable_tracing = false};
 
-    /* 2. 创建服务接口 */
     airy_svc_interface_t iface = create_example_service_interface();
 
-    /* 3. 创建服务实例 */
     printf("1. 创建服务...\n");
     err = airy_svc_create(&service, "example-service", &iface, &config);
     if (err != AIRY_SUCCESS) {
@@ -140,7 +127,6 @@ int main(void)
     }
     printf("  服务创建成功: %s\n", airy_svc_get_name(service));
 
-    /* 4. 初始化服务 */
     printf("\n2. 初始化服务...\n");
     err = airy_svc_init(service);
     if (err != AIRY_SUCCESS) {
@@ -148,10 +134,8 @@ int main(void)
         airy_svc_destroy(service);
         return 1;
     }
-    printf("  服务初始化成功，状态: %s\n",
-           airy_svc_state_to_string(airy_svc_get_state(service)));
+    printf("  服务初始化成功，状态: %s\n", airy_svc_state_to_string(airy_svc_get_state(service)));
 
-    /* 5. 启动服务 */
     printf("\n3. 启动服务...\n");
     err = airy_svc_start(service);
     if (err != AIRY_SUCCESS) {
@@ -159,10 +143,8 @@ int main(void)
         airy_svc_destroy(service);
         return 1;
     }
-    printf("  服务启动成功，状态: %s\n",
-           airy_svc_state_to_string(airy_svc_get_state(service)));
+    printf("  服务启动成功，状态: %s\n", airy_svc_state_to_string(airy_svc_get_state(service)));
 
-    /* 6. 检查服务状态 */
     printf("\n4. 检查服务状态...\n");
     printf("  服务名称: %s\n", airy_svc_get_name(service));
     printf("  服务版本: %s\n", airy_svc_get_version(service));
@@ -170,7 +152,6 @@ int main(void)
     printf("  是否就绪: %s\n", airy_svc_is_ready(service) ? "是" : "否");
     printf("  是否运行: %s\n", airy_svc_is_running(service) ? "是" : "否");
 
-    /* 7. 执行健康检查 */
     printf("\n5. 执行健康检查...\n");
     err = airy_svc_healthcheck(service);
     if (err != AIRY_SUCCESS) {
@@ -179,7 +160,6 @@ int main(void)
         printf("  健康检查通过\n");
     }
 
-    /* 8. 获取服务统计 */
     printf("\n6. 获取服务统计...\n");
     airy_svc_stats_t stats;
     err = airy_svc_get_stats(service, &stats);
@@ -191,7 +171,6 @@ int main(void)
         printf("  错误次数: %llu\n", (unsigned long long)stats.error_count);
     }
 
-    /* 9. 暂停和恢复服务（如果支持） */
     printf("\n7. 测试暂停/恢复功能...\n");
     if (airy_svc_has_capability(service, AIRY_SVC_CAP_PAUSEABLE)) {
         printf("  服务支持暂停功能\n");
@@ -215,25 +194,21 @@ int main(void)
         printf("  服务不支持暂停功能\n");
     }
 
-    /* 10. 停止服务 */
     printf("\n8. 停止服务...\n");
-    err = airy_svc_stop(service, false); /* 正常停止 */
+    err = airy_svc_stop(service, false);
     if (err != AIRY_SUCCESS) {
         printf("  服务停止失败: %d，尝试强制停止...\n", err);
-        err = airy_svc_stop(service, true); /* 强制停止 */
+        err = airy_svc_stop(service, true);
         if (err != AIRY_SUCCESS) {
             printf("  强制停止也失败: %d\n", err);
         }
     }
-    printf("  服务停止成功，状态: %s\n",
-           airy_svc_state_to_string(airy_svc_get_state(service)));
+    printf("  服务停止成功，状态: %s\n", airy_svc_state_to_string(airy_svc_get_state(service)));
 
-    /* 11. 销毁服务 */
     printf("\n9. 销毁服务...\n");
     airy_svc_destroy(service);
     printf("  服务销毁完成\n");
 
-    /* 12. 查询注册表中的服务数量 */
     printf("\n10. 注册表统计...\n");
     uint32_t service_count = airy_svc_count();
     printf("  注册表中的服务数量: %u\n", service_count);

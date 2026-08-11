@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
@@ -25,22 +26,16 @@
 #include <stdlib.h>
 #include <strings.h>
 
-/* ==================== 配置常量 ==================== */
-
 #define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("think.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_think"
 #define DEFAULT_TCP_PORT 8090
 #define MAX_BUFFER 1048576
 #define MAX_CLIENTS 16
 
-/* 生成公共全局变量、信号处理、help、客户端处理等样板 */
-DAEMON_DECLARE_COMMON(think_d, think, DEFAULT_SOCKET_PATH_UNIX,
-                       DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+DAEMON_DECLARE_COMMON(think_d, think, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN,
+                      DEFAULT_TCP_PORT, MAX_BUFFER)
 
-/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
 DAEMON_DECLARE_SHUTDOWN_METHOD(think_d)
-
-/* ==================== 全局状态 ==================== */
 
 static think_service_t *g_service = NULL;
 
@@ -51,10 +46,10 @@ typedef struct {
     int use_tcp;
     int max_clients;
     uint32_t process_timeout_ms;
-    int think_enabled;      /* 双思考开关（model.yaml think.enabled / env AIRY_THINK_ENABLED） */
-    char think2_slow_model[128];   /* t2 慢思考（GRAD 模型 A） */
-    char think1_fast_model[128];   /* t1-f 快思考（GRAD 模型 B） */
-    char think1_prof_model[128];   /* t1-p 专业思考（GRAD 模型 C） */
+    int think_enabled;
+    char think2_slow_model[128];
+    char think1_fast_model[128];
+    char think1_prof_model[128];
 } think_daemon_config_t;
 
 static think_daemon_config_t g_config = {0};
@@ -74,8 +69,6 @@ static BOOL WINAPI console_handler(DWORD fdwCtrlType)
 }
 #endif
 
-/* ==================== 请求处理方法 ==================== */
-
 static void handle_process(cJSON *params, int id, airy_sock_t fd);
 static void handle_get_stats(cJSON *params, int id, airy_sock_t fd);
 static void handle_health_check(cJSON *params, int id, airy_sock_t fd);
@@ -90,8 +83,7 @@ static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, v
     handle_get_stats(params, id, *(airy_sock_t *)user_data);
 }
 
-static void on_health_check_method(cJSON *params __attribute__((unused)), int id,
-                                   void *user_data)
+static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_health_check(params, id, *(airy_sock_t *)user_data);
 }
@@ -112,7 +104,6 @@ static void handle_process(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    /* result 为 JSON 字符串值（JSON-RPC result 可为任意 JSON 值） */
     cJSON *res_obj = cJSON_CreateString(res.json);
     think_result_free(&res);
     if (!res_obj) {
@@ -122,8 +113,7 @@ static void handle_process(cJSON *params, int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, res_obj, id);
 }
 
-static void handle_get_stats(cJSON *params __attribute__((unused)), int id,
-                             airy_sock_t client_fd)
+static void handle_get_stats(cJSON *params __attribute__((unused)), int id, airy_sock_t client_fd)
 {
     char *stats = think_service_stats_json(g_service);
     if (!stats) {
@@ -152,8 +142,6 @@ static void handle_health_check(cJSON *params __attribute__((unused)), int id,
     cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
-
-/* ==================== 配置加载 ==================== */
 
 static int load_daemon_config(const char *config_path)
 {
@@ -243,9 +231,8 @@ static int load_daemon_config(const char *config_path)
         }
         svc_model_think_config_t think_cfg;
         __builtin_memset(&think_cfg, 0, sizeof(think_cfg));
-        think_cfg.enabled = g_config.think_enabled; /* 保留 -c JSON 层结果（缺省 1） */
-        if (have_model_yaml &&
-            svc_model_defaults_think_from_yaml(model_path, &think_cfg) == 0) {
+        think_cfg.enabled = g_config.think_enabled;
+        if (have_model_yaml && svc_model_defaults_think_from_yaml(model_path, &think_cfg) == 0) {
             g_config.think_enabled = think_cfg.enabled;
             if (think_cfg.think2_slow_model[0])
                 AIRY_STRNCPY_TERM(g_config.think2_slow_model, think_cfg.think2_slow_model,
@@ -260,24 +247,20 @@ static int load_daemon_config(const char *config_path)
                 g_config.process_timeout_ms = think_cfg.timeout_ms;
         }
 
-        /* env 临时覆盖（最高优先级） */
         const char *e;
         if ((e = getenv("AIRY_THINK_ENABLED")) && *e) {
-            int b = (strcmp(e, "0") == 0 || strcasecmp(e, "false") == 0 ||
-                     strcasecmp(e, "no") == 0)
-                        ? 0
-                        : 1;
+            int b =
+                (strcmp(e, "0") == 0 || strcasecmp(e, "false") == 0 || strcasecmp(e, "no") == 0) ?
+                    0 :
+                    1;
             g_config.think_enabled = b;
         }
         if ((e = getenv("AIRY_THINK2_SLOW_MODEL")) && *e)
-            AIRY_STRNCPY_TERM(g_config.think2_slow_model, e,
-                              sizeof(g_config.think2_slow_model));
+            AIRY_STRNCPY_TERM(g_config.think2_slow_model, e, sizeof(g_config.think2_slow_model));
         if ((e = getenv("AIRY_THINK1_FAST_MODEL")) && *e)
-            AIRY_STRNCPY_TERM(g_config.think1_fast_model, e,
-                              sizeof(g_config.think1_fast_model));
+            AIRY_STRNCPY_TERM(g_config.think1_fast_model, e, sizeof(g_config.think1_fast_model));
         if ((e = getenv("AIRY_THINK1_PROF_MODEL")) && *e)
-            AIRY_STRNCPY_TERM(g_config.think1_prof_model, e,
-                              sizeof(g_config.think1_prof_model));
+            AIRY_STRNCPY_TERM(g_config.think1_prof_model, e, sizeof(g_config.think1_prof_model));
         if ((e = getenv("AIRY_THINK_TIMEOUT_MS")) && *e && atoi(e) > 0)
             g_config.process_timeout_ms = (uint32_t)atoi(e);
     }
@@ -298,8 +281,6 @@ static void destroy_service(void)
         g_service = NULL;
     }
 }
-
-/* ==================== 主函数 ==================== */
 
 int main(int argc, char **argv)
 {
@@ -322,7 +303,6 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    /* 安全穹顶初始化（与其余 daemon 一致） */
     daemon_cupolas_init("think_d");
 
     load_daemon_config(config_path);
@@ -348,8 +328,8 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    airy_sock_t server_fd = daemon_create_server_socket(
-        g_config.use_tcp, g_config.tcp_port, g_config.socket_path, g_config.socket_path);
+    airy_sock_t server_fd = daemon_create_server_socket(g_config.use_tcp, g_config.tcp_port,
+                                                        g_config.socket_path, g_config.socket_path);
     if (server_fd < 0) {
         SVC_LOG_ERROR("Failed to create server socket");
         destroy_service();
@@ -358,8 +338,8 @@ int main(int argc, char **argv)
         airy_sock_cleanup();
         return EXIT_FAILURE;
     }
-    SVC_LOG_INFO(g_config.use_tcp ? "Listening on TCP %s:%d" : "Listening on %s",
-                 g_config.tcp_host, g_config.tcp_port);
+    SVC_LOG_INFO(g_config.use_tcp ? "Listening on TCP %s:%d" : "Listening on %s", g_config.tcp_host,
+                 g_config.tcp_port);
 
     daemon_event_config_t ev_config;
     __builtin_memset(&ev_config, 0, sizeof(ev_config));
@@ -390,7 +370,7 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_think_d, "process", on_process_method, NULL);
     method_dispatcher_register(g_dispatcher_think_d, "get_stats", on_get_stats_method, NULL);
     method_dispatcher_register(g_dispatcher_think_d, "health_check", on_health_check_method, NULL);
-    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+
     method_dispatcher_register(g_dispatcher_think_d, "shutdown", on_shutdown_method_think_d, NULL);
     SVC_LOG_INFO("Registered %d RPC methods (think.* namespace)", 4);
 
@@ -408,8 +388,8 @@ int main(int argc, char **argv)
     SVC_LOG_INFO("ThinkDual service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_think_d);
 
-    daemon_cleanup_standard(g_bipc_think_d, g_bsd_think_d, g_event_driver_think_d,
-                            server_fd, destroy_service, &g_running_lock_think_d);
+    daemon_cleanup_standard(g_bipc_think_d, g_bsd_think_d, g_event_driver_think_d, server_fd,
+                            destroy_service, &g_running_lock_think_d);
     free_daemon_config();
 
     SVC_LOG_INFO("ThinkDual service stopped");

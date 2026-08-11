@@ -1,15 +1,15 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 
 #include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD 宏 */
+
 #include <cjson_helpers.h>
 #include "error.h"
 /**
  * @file deepseek.c
  * @brief DeepSeek 适配器（兼容 OpenAI 格式）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 改进说明：
  * 1. 使用公共 Provider 基础设施
@@ -30,13 +30,9 @@
 #define DEEPSEEK_DEFAULT_BASE "https://api.deepseek.com/v1"
 #define DEEPSEEK_DEFAULT_MODEL "deepseek-chat"
 
-/* ---------- 上下文 ---------- */
-
 typedef struct {
     provider_base_ctx_t base;
 } deepseek_ctx_t;
-
-/* ---------- 生命周期 ---------- */
 
 static provider_ctx_t *deepseek_init(const char *name __attribute__((unused)), const char *api_key,
                                      const char *api_base,
@@ -56,9 +52,7 @@ static provider_ctx_t *deepseek_init(const char *name __attribute__((unused)), c
 
     SVC_LOG_INFO("C-L02: DEEPSEEK: INIT api_base=%s model=%s timeout=%.1fs max_retries=%d "
                  "has_api_key=%d",
-                 ctx->base.api_base,
-                 DEEPSEEK_DEFAULT_MODEL,
-                 timeout_sec, max_retries,
+                 ctx->base.api_base, DEEPSEEK_DEFAULT_MODEL, timeout_sec, max_retries,
                  (api_key && api_key[0]) ? 1 : 0);
 
     return (provider_ctx_t *)ctx;
@@ -71,8 +65,6 @@ static void deepseek_destroy(provider_ctx_t *ctx_ptr)
         AIRY_FREE(ctx_ptr);
     }
 }
-
-/* ---------- 同步完成 ---------- */
 
 static int deepseek_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *manager,
                              llm_response_t **out_response)
@@ -87,20 +79,21 @@ static int deepseek_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t
     deepseek_ctx_t *ctx = (deepseek_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
 
-    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
     provider_refresh_api_key(base);
 
-    const char *model = (manager->model && manager->model[0]) ? manager->model : DEEPSEEK_DEFAULT_MODEL;
+    const char *model =
+        (manager->model && manager->model[0]) ? manager->model : DEEPSEEK_DEFAULT_MODEL;
 
     SVC_LOG_INFO("C-L02: DEEPSEEK: COMPLETE-START model=%s msgs=%zu max_tokens=%d temp=%.2f "
                  "stream=%d",
-                 model, manager->message_count, manager->max_tokens,
-                 manager->temperature, manager->stream);
+                 model, manager->message_count, manager->max_tokens, manager->temperature,
+                 manager->stream);
 
     char *req_body = provider_build_openai_request(manager, DEEPSEEK_DEFAULT_MODEL);
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: DEEPSEEK: COMPLETE-FAIL — request body build failed (OOM) "
-                      "model=%s", model);
+                      "model=%s",
+                      model);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
@@ -120,8 +113,8 @@ static int deepseek_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t
     provider_http_resp_t *http_resp = NULL;
     long http_code = 0;
 
-    SVC_LOG_DEBUG("C-L02: DEEPSEEK: HTTP-POST url=%s body_len=%zu timeout=%.1fs retries=%d",
-                  url, req_body_len, base->timeout_sec, base->max_retries);
+    SVC_LOG_DEBUG("C-L02: DEEPSEEK: HTTP-POST url=%s body_len=%zu timeout=%.1fs retries=%d", url,
+                  req_body_len, base->timeout_sec, base->max_retries);
 
     int ret = provider_http_post(url, headers, req_body, base->timeout_sec, base->max_retries,
                                  &http_resp, &http_code);
@@ -148,15 +141,15 @@ static int deepseek_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t
                       (http_code == 429) ? "rate limited" :
                       (http_code == 500) ? "server error" :
                       (http_code == 503) ? "service unavailable" :
-                      "check API key and endpoint",
+                                           "check API key and endpoint",
                       (http_resp && http_resp->data) ? http_resp->data : "");
         provider_http_resp_free(http_resp);
         return AIRY_ERR_IO;
     }
 
     size_t resp_body_len = (http_resp && http_resp->data) ? strlen(http_resp->data) : 0;
-    SVC_LOG_DEBUG("C-L02: DEEPSEEK: HTTP-RESPONSE http_code=%ld resp_body_len=%zu",
-                  http_code, resp_body_len);
+    SVC_LOG_DEBUG("C-L02: DEEPSEEK: HTTP-RESPONSE http_code=%ld resp_body_len=%zu", http_code,
+                  resp_body_len);
 
     if (!http_resp || !http_resp->data || http_resp->data[0] == '\0') {
         SVC_LOG_ERROR("C-L02: DEEPSEEK: COMPLETE-FAIL — empty response body "
@@ -173,21 +166,19 @@ static int deepseek_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t
                       "STACK: provider_parse_openai_response() → deepseek_complete()",
                       ret, resp_body_len);
     } else if (*out_response) {
-        SVC_LOG_INFO("C-L02: DEEPSEEK: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
-                     "finish_reason=%s",
-                     (*out_response)->model ? (*out_response)->model : "unknown",
-                     (*out_response)->prompt_tokens,
-                     (*out_response)->completion_tokens,
-                     (*out_response)->total_tokens,
-                     (*out_response)->finish_reason ? (*out_response)->finish_reason : "none");
+        SVC_LOG_INFO(
+            "C-L02: DEEPSEEK: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
+            "finish_reason=%s",
+            (*out_response)->model ? (*out_response)->model : "unknown",
+            (*out_response)->prompt_tokens, (*out_response)->completion_tokens,
+            (*out_response)->total_tokens,
+            (*out_response)->finish_reason ? (*out_response)->finish_reason : "none");
     }
 
     provider_http_resp_free(http_resp);
 
     return ret;
 }
-
-/* ---------- 流式完成（SSE, OpenAI兼容格式） ---------- */
 
 typedef struct {
     llm_stream_callback_t user_cb;
@@ -205,7 +196,6 @@ static int ds_stream_on_chunk(const char *json_line, void *userdata)
 {
     ds_stream_acc_t *acc = (ds_stream_acc_t *)userdata;
 
-    /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + NULL 检查 + 手动 cJSON_Delete */
     CJSON_PARSE_GUARD(root, json_line, { return 0; });
 
     if (!acc->resp_id) {
@@ -265,7 +255,6 @@ static int ds_stream_on_chunk(const char *json_line, void *userdata)
         }
     }
 
-    /* root 由 CJSON_AUTO_FREE 自动释放 */
     return 0;
 }
 
@@ -309,13 +298,13 @@ static int deepseek_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_c
     deepseek_ctx_t *ctx = (deepseek_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
 
-    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
     provider_refresh_api_key(base);
 
-    const char *model = (manager->model && manager->model[0]) ? manager->model : DEEPSEEK_DEFAULT_MODEL;
+    const char *model =
+        (manager->model && manager->model[0]) ? manager->model : DEEPSEEK_DEFAULT_MODEL;
 
-    SVC_LOG_INFO("C-L02: DEEPSEEK: STREAM-START model=%s msgs=%zu max_tokens=%d temp=%.2f",
-                 model, manager->message_count, manager->max_tokens, manager->temperature);
+    SVC_LOG_INFO("C-L02: DEEPSEEK: STREAM-START model=%s msgs=%zu max_tokens=%d temp=%.2f", model,
+                 manager->message_count, manager->max_tokens, manager->temperature);
 
     llm_request_config_t stream_cfg = *manager;
     stream_cfg.stream = 1;
@@ -323,7 +312,8 @@ static int deepseek_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_c
     char *req_body = provider_build_openai_request(&stream_cfg, DEEPSEEK_DEFAULT_MODEL);
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: DEEPSEEK: STREAM-FAIL — request body build failed (OOM) "
-                      "model=%s", model);
+                      "model=%s",
+                      model);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
@@ -345,8 +335,8 @@ static int deepseek_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_c
     acc.acc_cap = 4096;
     acc.acc_content = (char *)AIRY_MALLOC(acc.acc_cap);
 
-    SVC_LOG_DEBUG("C-L02: DEEPSEEK: STREAM-HTTP-POST url=%s body_len=%zu timeout=%.1fs",
-                  url, strlen(req_body), base->timeout_sec);
+    SVC_LOG_DEBUG("C-L02: DEEPSEEK: STREAM-HTTP-POST url=%s body_len=%zu timeout=%.1fs", url,
+                  strlen(req_body), base->timeout_sec);
 
     long http_code = 0;
     int ret = provider_http_post_stream(url, headers, req_body, base->timeout_sec,
@@ -374,12 +364,12 @@ static int deepseek_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_c
     AIRY_FREE(acc.finish_reason);
 
     if (resp) {
-        SVC_LOG_INFO("C-L02: DEEPSEEK: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
-                     "finish_reason=%s acc_len=%zu",
-                     resp->model ? resp->model : "unknown",
-                     resp->prompt_tokens, resp->completion_tokens, resp->total_tokens,
-                     resp->finish_reason ? resp->finish_reason : "none",
-                     resp->choices && resp->choices[0].content ? strlen(resp->choices[0].content) : 0);
+        SVC_LOG_INFO(
+            "C-L02: DEEPSEEK: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
+            "finish_reason=%s acc_len=%zu",
+            resp->model ? resp->model : "unknown", resp->prompt_tokens, resp->completion_tokens,
+            resp->total_tokens, resp->finish_reason ? resp->finish_reason : "none",
+            resp->choices && resp->choices[0].content ? strlen(resp->choices[0].content) : 0);
     } else {
         SVC_LOG_WARN("C-L02: DEEPSEEK: STREAM — null response built");
     }
@@ -391,8 +381,6 @@ static int deepseek_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_c
 
     return AIRY_OK;
 }
-
-/* ---------- 操作表 ---------- */
 
 const provider_ops_t deepseek_ops = {.init = deepseek_init,
                                      .destroy = deepseek_destroy,

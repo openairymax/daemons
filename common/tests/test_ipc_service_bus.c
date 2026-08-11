@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_ipc_service_bus.c
  * @brief IPC服务总线模块单元测试
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "ipc_service_bus.h"
@@ -19,13 +19,14 @@
 static int g_tests_passed = 0;
 static int g_tests_failed = 0;
 
-#define RUN_TEST(fn) do { \
-    fn(); \
-    g_tests_passed++; \
-} while (0)
+#define RUN_TEST(fn)      \
+    do {                  \
+        fn();             \
+        g_tests_passed++; \
+    } while (0)
 
-static int dummy_handler(ipc_bus_channel_t channel,
-                         const ipc_bus_message_t *message, void *user_data)
+static int dummy_handler(ipc_bus_channel_t channel, const ipc_bus_message_t *message,
+                         void *user_data)
 {
     (void)channel;
     (void)message;
@@ -33,8 +34,8 @@ static int dummy_handler(ipc_bus_channel_t channel,
     return AIRY_OK;
 }
 
-static int dummy_handler2(ipc_bus_channel_t channel,
-                          const ipc_bus_message_t *message, void *user_data)
+static int dummy_handler2(ipc_bus_channel_t channel, const ipc_bus_message_t *message,
+                          void *user_data)
 {
     (void)channel;
     (void)message;
@@ -106,7 +107,7 @@ static void test_ipc_bus_double_start(void)
     assert(ret == AIRY_OK);
 
     ret = ipc_service_bus_start(bus);
-    assert(ret == AIRY_OK || ret == AIRY_EBUSY);  /* 幂等或已运行 */
+    assert(ret == AIRY_OK || ret == AIRY_EBUSY);
 
     ipc_service_bus_stop(bus);
     ipc_service_bus_destroy(bus);
@@ -190,7 +191,7 @@ static void test_ipc_bus_unregister_handler(void)
     assert(ret == AIRY_OK);
 
     ret = ipc_service_bus_unregister_handler(bus, dummy_handler);
-    assert(ret == AIRY_OK || ret == AIRY_ENOENT);  /* 成功或已不存在 */
+    assert(ret == AIRY_OK || ret == AIRY_ENOENT);
 
     ipc_service_bus_destroy(bus);
 
@@ -386,8 +387,8 @@ int main(void)
     RUN_TEST(test_ipc_bus_destroy_while_running);
 
     printf("\n=========================================\n");
-    printf("  Results: %d passed, %d failed, %d total\n",
-           g_tests_passed, g_tests_failed, g_tests_passed + g_tests_failed);
+    printf("  Results: %d passed, %d failed, %d total\n", g_tests_passed, g_tests_failed,
+           g_tests_passed + g_tests_failed);
     printf("=========================================\n");
 
     return g_tests_failed > 0 ? 1 : 0;

@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file sched_service_impl.c
  * @brief 调度服务核心实现
  * @details 定义 struct sched_service 并实现 scheduler_service.h 中的所有公共API
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "scheduler_service.h"
@@ -14,7 +14,7 @@
 #include "platform.h"
 #include "thread_pool.h"
 #include "multi_agent_collaboration.h"
-/* 改进2（P2a）：执行产物验证层（确定性规则集，write_back 之前执行） */
+
 #include "airy_artifact_validator.h"
 
 #include <stdio.h>
@@ -29,41 +29,39 @@
  * ============================================================================ */
 
 typedef struct sched_dag_node {
-    char *id;                            /**< 节点 ID（计划节点 S_01 等） */
-    char *goal;                          /**< 节点目标（executor 的 input） */
-    char *role;                          /**< agent 角色（缺省 "coding"） */
-    char *depends[SCHED_DAG_MAX_DEPS];   /**< 依赖节点 ID 数组 */
+    char *id;
+    char *goal;
+    char *role;
+    char *depends[SCHED_DAG_MAX_DEPS];
     size_t dep_count;
-    sched_dag_node_status_t status;      /**< 节点状态 */
-    char *output;                        /**< 执行输出（COMPLETED） */
-    char *error;                         /**< 失败原因（FAILED / 重试历史） */
+    sched_dag_node_status_t status;
+    char *output;
+    char *error;
     uint64_t started_at_ms;
     uint64_t finished_at_ms;
-    /* ---- 分级重试（改进4：transient 指数退避） ---- */
-    uint32_t max_retries;                /**< transient 失败最大重试次数（0 = 不重试） */
-    uint32_t retry_delay_ms;             /**< 退避基数 ms（指数退避 base×2^n，0 = 1000） */
-    uint32_t retry_count;                /**< 已重试次数 */
-    uint64_t retry_at_ms;                /**< 下次可派发时刻（退避中；0 = 未在退避） */
-    /* ---- 产物验证（改进2/P2a）：节点声明验证规则（JSON，NULL = SKIP 不验证） ---- */
-    char *validator_rule_json;           /**< 验证规则（{"exit_code":0,...}，见 airy_artifact_validator_from_json） */
+
+    uint32_t max_retries;
+    uint32_t retry_delay_ms;
+    uint32_t retry_count;
+    uint64_t retry_at_ms;
+
+    char *validator_rule_json;
 } sched_dag_node_t;
 
 typedef struct sched_dag {
-    char *dag_id;                        /**< 图 ID */
-    char *name;                          /**< 图名称（任务描述） */
+    char *dag_id;
+    char *name;
     sched_dag_node_t *nodes[SCHED_DAG_MAX_NODES];
     size_t node_count;
-    sched_dag_status_t status;           /**< 图整体状态 */
-    size_t terminal_count;               /**< 已终态（completed/failed/canceled）节点数 */
+    sched_dag_status_t status;
+    size_t terminal_count;
     uint64_t created_at_ms;
     uint64_t finished_at_ms;
-    uint64_t retry_budget_ms;            /**< 共享重试总预算窗口（从图创建起，0 = 不限） */
+    uint64_t retry_budget_ms;
 } sched_dag_t;
 
-/* dag 工作线程（start_workers 中创建，实现在文件尾部 DAG 引擎段） */
 static void *sched_dag_worker_thread(void *arg);
 
-/* 队列/记录存储空间：任务记录数组（含已完成的查询历史）+ 环形 pending 队列 */
 struct sched_service {
     sched_config_t config;
     agent_info_t *agents[AIRY_CAP_MAX_AGENTS];
@@ -72,19 +70,19 @@ struct sched_service {
     uint64_t total_success;
     int initialized;
 
-    /* 任务队列（异步执行：入队 → 工作线程消费 → 选 agent → executor 派发） */
     task_record_t *tasks[AIRY_CAP_MAX_TASKS];
     size_t task_count;
-    task_record_t *queue[AIRY_CAP_MAX_TASKS]; /* 环形队列，存 pending 任务 */
+    task_record_t *queue[AIRY_CAP_MAX_TASKS];
     size_t queue_head;
     size_t queue_tail;
-    size_t task_seq; /* task_id 生成序号 */
-    /* 统一锁：保护 agents 数组 + 任务队列 + 任务记录 + DAG 表；
-     * 工作线程与 RPC 线程并发访问（原单线程事件驱动无需锁，引入
-     * 工作线程后必须加锁，否则 register_agent 与选人读操作竞争） */
+    size_t task_seq;
+    /* Unified lock: guards the agents array + task queue + task records + DAG
+     * table. Worker and RPC threads access them concurrently (the original
+     * single-threaded event loop needed no lock; with worker threads the lock
+     * is mandatory, otherwise register_agent races with selection reads) */
     airy_mtx_t lock;
     airy_cond_t queue_cond;
-    sched_task_executor_t executor; /* 任务执行回调（daemon 注入，仅 worker 读） */
+    sched_task_executor_t executor;
     volatile int worker_run;
     airy_thread_t worker_thread;
 
@@ -93,7 +91,7 @@ struct sched_service {
      * dag 工作线程扫描 active 图，将就绪节点逐个派发到 executor。 */
     sched_dag_t *dags[SCHED_DAG_MAX_DAGS];
     size_t dag_count;
-    size_t dag_seq; /* dag_id 生成序号 */
+    size_t dag_seq;
     airy_cond_t dag_cond;
     volatile int dag_run;
     airy_thread_t dag_thread;
@@ -103,17 +101,16 @@ struct sched_service {
      * 到 mac；dag 工作线程每轮收集一批就绪节点（≤ dag_batch_size），经 mac
      * delegate_batch 选人 → dag_pool 并发执行 → complete_task 回写 → 节点
      * 状态统一在批次屏障后回写。dag_max_parallel==0 时保持原单节点串行。 */
-    mac_framework_t *mac;       /* 委派框架（可选，NULL = 串行） */
-    thread_pool_t *dag_pool;    /* 并发执行线程池（可选） */
-    uint32_t dag_max_parallel;  /* 并行度上限（0 = 串行） */
-    uint32_t dag_batch_size;    /* 每轮就绪节点批大小 */
-    bool dag_fatal_cascade;     /* 失败分级（改进3）：true=仅 FATAL 级联整图（生产默认） */
-    volatile size_t batch_pending; /* 批次未完成节点数（并行分支屏障） */
-    airy_mtx_t batch_lock;      /* 批次完成屏障锁 */
-    airy_cond_t batch_cond;     /* 批次完成屏障条件 */
+    mac_framework_t *mac;
+    thread_pool_t *dag_pool;
+    uint32_t dag_max_parallel;
+    uint32_t dag_batch_size;
+    bool dag_fatal_cascade;
+    volatile size_t batch_pending;
+    airy_mtx_t batch_lock;
+    airy_cond_t batch_cond;
 };
 
-/* 当前毫秒时间戳（秒级 time(NULL) * 1000，够用于状态记录） */
 static uint64_t sched_now_ms(void)
 {
     return (uint64_t)time(NULL) * 1000ull;
@@ -153,7 +150,8 @@ static void sched_mac_sync_agent(sched_service_t *service, const agent_info_t *a
 int sched_service_create(const sched_config_t *config, sched_service_t **service)
 {
     if (!config || !service) {
-        SVC_LOG_ERROR("sched_service_create: NULL parameter (config=%p, service=%p)", (const void *)config, (const void *)service);
+        SVC_LOG_ERROR("sched_service_create: NULL parameter (config=%p, service=%p)",
+                      (const void *)config, (const void *)service);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -186,7 +184,7 @@ int sched_service_create(const sched_config_t *config, sched_service_t **service
     svc->dag_pool = NULL;
     svc->dag_max_parallel = config->dag_max_parallel;
     svc->dag_batch_size = config->dag_batch_size;
-    svc->dag_fatal_cascade = config->dag_fatal_cascade; /* 生产默认 true（main/adapter 已置） */
+    svc->dag_fatal_cascade = config->dag_fatal_cascade;
     if (svc->dag_batch_size == 0)
         svc->dag_batch_size = svc->dag_max_parallel;
     if (svc->dag_batch_size > SCHED_DAG_MAX_NODES)
@@ -229,7 +227,6 @@ int sched_service_destroy(sched_service_t *service)
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* 先停工作线程，防止其并发访问 agents/tasks（worker 会等待退出信号） */
     sched_service_stop_workers(service);
 
     airy_mtx_lock(&service->lock);
@@ -294,13 +291,17 @@ int sched_service_destroy(sched_service_t *service)
 int sched_service_register_agent(sched_service_t *service, const agent_info_t *agent_info)
 {
     if (!service || !agent_info || !service->initialized) {
-        SVC_LOG_ERROR("sched_service_register_agent: NULL parameter or not initialized (service=%p, agent_info=%p, initialized=%d)", (const void *)service, (const void *)agent_info, service ? service->initialized : -1);
+        SVC_LOG_ERROR("sched_service_register_agent: NULL parameter or not initialized "
+                      "(service=%p, agent_info=%p, initialized=%d)",
+                      (const void *)service, (const void *)agent_info,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
 
     airy_mtx_lock(&service->lock);
     if (service->agent_count >= AIRY_CAP_MAX_AGENTS) {
-        SVC_LOG_ERROR("sched_service_register_agent: max agents exceeded (count=%zu, max=%d)", service->agent_count, AIRY_CAP_MAX_AGENTS);
+        SVC_LOG_ERROR("sched_service_register_agent: max agents exceeded (count=%zu, max=%d)",
+                      service->agent_count, AIRY_CAP_MAX_AGENTS);
         airy_mtx_unlock(&service->lock);
         return AIRY_ERR_OVERFLOW;
     }
@@ -335,7 +336,9 @@ int sched_service_register_agent(sched_service_t *service, const agent_info_t *a
     new_agent->agent_name =
         agent_info->agent_name ? AIRY_STRDUP(agent_info->agent_name) : AIRY_STRDUP("");
     if (!new_agent->agent_id || !new_agent->agent_name) {
-        SVC_LOG_ERROR("sched_service_register_agent: strdup failed for agent fields (agent_id=%p, agent_name=%p)", (const void *)new_agent->agent_id, (const void *)new_agent->agent_name);
+        SVC_LOG_ERROR("sched_service_register_agent: strdup failed for agent fields (agent_id=%p, "
+                      "agent_name=%p)",
+                      (const void *)new_agent->agent_id, (const void *)new_agent->agent_name);
         AIRY_FREE(new_agent->agent_id);
         AIRY_FREE(new_agent->agent_name);
         AIRY_FREE(new_agent);
@@ -362,7 +365,10 @@ int sched_service_register_agent(sched_service_t *service, const agent_info_t *a
 int sched_service_unregister_agent(sched_service_t *service, const char *agent_id)
 {
     if (!service || !agent_id || !service->initialized) {
-        SVC_LOG_ERROR("sched_service_unregister_agent: NULL parameter or not initialized (service=%p, agent_id=%p, initialized=%d)", (const void *)service, (const void *)agent_id, service ? service->initialized : -1);
+        SVC_LOG_ERROR("sched_service_unregister_agent: NULL parameter or not initialized "
+                      "(service=%p, agent_id=%p, initialized=%d)",
+                      (const void *)service, (const void *)agent_id,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -370,7 +376,7 @@ int sched_service_unregister_agent(sched_service_t *service, const char *agent_i
     for (size_t i = 0; i < service->agent_count; i++) {
         if (strcmp(service->agents[i]->agent_id, agent_id) == 0) {
             if (service->mac) {
-                /* mac 持有 agent 独立副本：同步注销（best-effort） */
+
                 mac_framework_unregister_agent(service->mac, agent_id);
             }
             AIRY_FREE(service->agents[i]->agent_id);
@@ -386,14 +392,18 @@ int sched_service_unregister_agent(sched_service_t *service, const char *agent_i
         }
     }
     airy_mtx_unlock(&service->lock);
-    SVC_LOG_ERROR("sched_service_unregister_agent: agent not found (agent_id=%s)", agent_id ? agent_id : "NULL");
+    SVC_LOG_ERROR("sched_service_unregister_agent: agent not found (agent_id=%s)",
+                  agent_id ? agent_id : "NULL");
     return AIRY_ERR_NOT_FOUND;
 }
 
 int sched_service_update_agent_status(sched_service_t *service, const agent_info_t *agent_info)
 {
     if (!service || !agent_info || !service->initialized) {
-        SVC_LOG_ERROR("sched_service_update_agent_status: NULL parameter or not initialized (service=%p, agent_info=%p, initialized=%d)", (const void *)service, (const void *)agent_info, service ? service->initialized : -1);
+        SVC_LOG_ERROR("sched_service_update_agent_status: NULL parameter or not initialized "
+                      "(service=%p, agent_info=%p, initialized=%d)",
+                      (const void *)service, (const void *)agent_info,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -411,7 +421,8 @@ int sched_service_update_agent_status(sched_service_t *service, const agent_info
         }
     }
     airy_mtx_unlock(&service->lock);
-    SVC_LOG_ERROR("sched_service_update_agent_status: agent not found (agent_id=%s)", agent_info->agent_id ? agent_info->agent_id : "NULL");
+    SVC_LOG_ERROR("sched_service_update_agent_status: agent not found (agent_id=%s)",
+                  agent_info->agent_id ? agent_info->agent_id : "NULL");
     return AIRY_ERR_NOT_FOUND;
 }
 
@@ -419,11 +430,13 @@ int sched_service_schedule_task(sched_service_t *service, const task_info_t *tas
                                 sched_result_t **result)
 {
     if (!service || !task_info || !result || !service->initialized) {
-        SVC_LOG_ERROR("sched_service_schedule_task: NULL parameter or not initialized (service=%p, task_info=%p, result=%p, initialized=%d)", (const void *)service, (const void *)task_info, (const void *)result, service ? service->initialized : -1);
+        SVC_LOG_ERROR("sched_service_schedule_task: NULL parameter or not initialized (service=%p, "
+                      "task_info=%p, result=%p, initialized=%d)",
+                      (const void *)service, (const void *)task_info, (const void *)result,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* 选人在锁内完成：工作线程与 register/unregister RPC 并发，必须互斥 */
     airy_mtx_lock(&service->lock);
     sched_result_t *res = (sched_result_t *)AIRY_CALLOC(1, sizeof(sched_result_t));
     if (!res) {
@@ -471,7 +484,8 @@ int sched_service_schedule_task(sched_service_t *service, const task_info_t *tas
             else if (task_info->priority >= TASK_PRIORITY_NORMAL)
                 pw = 1.5f;
             score = (service->agents[i]->weight * service->agents[i]->success_rate *
-                     (1.0f - service->agents[i]->load_factor)) * pw;
+                     (1.0f - service->agents[i]->load_factor)) *
+                    pw;
             break;
         }
         default:
@@ -494,12 +508,13 @@ int sched_service_schedule_task(sched_service_t *service, const task_info_t *tas
         service->total_success++;
         SVC_LOG_DEBUG("sched: agent selected: task=%s agent=%s score=%.3f "
                       "confidence=%.2f strategy=%d candidates=%zu (avail filtered)",
-                      task_info->task_id ? task_info->task_id : "?",
-                      best_agent->agent_id, (double)best_score,
-                      (double)res->confidence, (int)service->config.strategy,
+                      task_info->task_id ? task_info->task_id : "?", best_agent->agent_id,
+                      (double)best_score, (double)res->confidence, (int)service->config.strategy,
                       service->agent_count);
     } else {
-        SVC_LOG_ERROR("sched_service_schedule_task: no available agent found (agent_count=%zu, strategy=%d)", service->agent_count, service->config.strategy);
+        SVC_LOG_ERROR(
+            "sched_service_schedule_task: no available agent found (agent_count=%zu, strategy=%d)",
+            service->agent_count, service->config.strategy);
         res->selected_agent_id = NULL;
         res->confidence = 0.0f;
         res->estimated_time_ms = 0;
@@ -513,7 +528,10 @@ int sched_service_schedule_task(sched_service_t *service, const task_info_t *tas
 int sched_service_get_stats(sched_service_t *service, void **stats)
 {
     if (!service || !stats || !service->initialized) {
-        SVC_LOG_ERROR("sched_service_get_stats: NULL parameter or not initialized (service=%p, stats=%p, initialized=%d)", (const void *)service, (const void *)stats, service ? service->initialized : -1);
+        SVC_LOG_ERROR("sched_service_get_stats: NULL parameter or not initialized (service=%p, "
+                      "stats=%p, initialized=%d)",
+                      (const void *)service, (const void *)stats,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -526,9 +544,9 @@ int sched_service_get_stats(sched_service_t *service, void **stats)
     snprintf(json_stats, 512,
              "{\"agent_count\":%zu,\"total_tasks\":%llu,\"success_rate\":\"%.2f\",\"strategy\":%d}",
              service->agent_count, (unsigned long long)service->total_tasks_scheduled,
-             service->total_tasks_scheduled > 0
-                 ? (float)service->total_success / (float)service->total_tasks_scheduled
-                 : 0.0f,
+             service->total_tasks_scheduled > 0 ?
+                 (float)service->total_success / (float)service->total_tasks_scheduled :
+                 0.0f,
              service->config.strategy);
 
     *stats = json_stats;
@@ -538,7 +556,10 @@ int sched_service_get_stats(sched_service_t *service, void **stats)
 int sched_service_health_check(sched_service_t *service, bool *health_status)
 {
     if (!service || !health_status || !service->initialized) {
-        SVC_LOG_ERROR("sched_service_health_check: NULL parameter or not initialized (service=%p, health_status=%p, initialized=%d)", (const void *)service, (const void *)health_status, service ? service->initialized : -1);
+        SVC_LOG_ERROR("sched_service_health_check: NULL parameter or not initialized (service=%p, "
+                      "health_status=%p, initialized=%d)",
+                      (const void *)service, (const void *)health_status,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -557,7 +578,10 @@ int sched_service_health_check(sched_service_t *service, bool *health_status)
 int sched_service_reload_config(sched_service_t *service, const sched_config_t *config)
 {
     if (!service || !config || !service->initialized) {
-        SVC_LOG_ERROR("sched_service_reload_config: NULL parameter or not initialized (service=%p, config=%p, initialized=%d)", (const void *)service, (const void *)config, service ? service->initialized : -1);
+        SVC_LOG_ERROR("sched_service_reload_config: NULL parameter or not initialized (service=%p, "
+                      "config=%p, initialized=%d)",
+                      (const void *)service, (const void *)config,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -568,15 +592,14 @@ int sched_service_reload_config(sched_service_t *service, const sched_config_t *
     if (config->ml_model_path) {
         service->config.ml_model_path = AIRY_STRDUP(config->ml_model_path);
         if (!service->config.ml_model_path) {
-            SVC_LOG_ERROR("sched_service_reload_config: strdup failed for ml_model_path (path=%s)", config->ml_model_path ? config->ml_model_path : "NULL");
+            SVC_LOG_ERROR("sched_service_reload_config: strdup failed for ml_model_path (path=%s)",
+                          config->ml_model_path ? config->ml_model_path : "NULL");
             return AIRY_ERR_OUT_OF_MEMORY;
         }
     }
 
     return 0;
 }
-
-/* ==================== 异步任务队列（断点 4） ==================== */
 
 /*
  * 从环形队列选取并移除最高优先级任务（等优先级保持 FIFO，取最早入队者）。
@@ -588,11 +611,9 @@ static task_record_t *sched_queue_take_highest(sched_service_t *svc)
     if (svc->queue_head == svc->queue_tail)
         return NULL;
 
-    /* 第一遍：找最高优先级（同优先级保留最先入队者 → FIFO 稳定） */
     size_t best = svc->queue_head;
     task_priority_t best_p = svc->queue[best]->priority;
-    for (size_t qi = svc->queue_head; qi != svc->queue_tail;
-         qi = (qi + 1) % AIRY_CAP_MAX_TASKS) {
+    for (size_t qi = svc->queue_head; qi != svc->queue_tail; qi = (qi + 1) % AIRY_CAP_MAX_TASKS) {
         if (svc->queue[qi]->priority > best_p) {
             best = qi;
             best_p = svc->queue[qi]->priority;
@@ -600,7 +621,6 @@ static task_record_t *sched_queue_take_highest(sched_service_t *svc)
     }
     task_record_t *rec = svc->queue[best];
 
-    /* 第二遍：紧凑删除 best 位置，把其后元素整体前移（环形） */
     size_t src = (best + 1) % AIRY_CAP_MAX_TASKS;
     size_t dst = best;
     while (src != svc->queue_tail) {
@@ -608,13 +628,11 @@ static task_record_t *sched_queue_take_highest(sched_service_t *svc)
         src = (src + 1) % AIRY_CAP_MAX_TASKS;
         dst = (dst + 1) % AIRY_CAP_MAX_TASKS;
     }
-    svc->queue_tail = (svc->queue_tail + AIRY_CAP_MAX_TASKS - 1) %
-                      AIRY_CAP_MAX_TASKS;
-    size_t remain = (svc->queue_tail + AIRY_CAP_MAX_TASKS - svc->queue_head) %
-                    AIRY_CAP_MAX_TASKS;
-    SVC_LOG_DEBUG("sched: queue take: task=%s priority=%d wait_ms=%llu remain=%zu",
-                  rec->task_id, (int)rec->priority,
-                  (unsigned long long)(sched_now_ms() - rec->created_at_ms), remain);
+    svc->queue_tail = (svc->queue_tail + AIRY_CAP_MAX_TASKS - 1) % AIRY_CAP_MAX_TASKS;
+    size_t remain = (svc->queue_tail + AIRY_CAP_MAX_TASKS - svc->queue_head) % AIRY_CAP_MAX_TASKS;
+    SVC_LOG_DEBUG("sched: queue take: task=%s priority=%d wait_ms=%llu remain=%zu", rec->task_id,
+                  (int)rec->priority, (unsigned long long)(sched_now_ms() - rec->created_at_ms),
+                  remain);
     return rec;
 }
 
@@ -630,7 +648,7 @@ static void *sched_worker_thread(void *arg)
 
     while (1) {
         airy_mtx_lock(&svc->lock);
-        /* 等待 pending 任务或退出信号 */
+
         while (svc->queue_head == svc->queue_tail && svc->worker_run) {
             SVC_LOG_DEBUG("sched: worker idle, waiting for tasks");
             airy_cond_wait(&svc->queue_cond, &svc->lock);
@@ -641,7 +659,7 @@ static void *sched_worker_thread(void *arg)
             break;
         }
         task_record_t *rec = sched_queue_take_highest(svc);
-        if (!rec) { /* 理论不可达（非空队列必有可取任务），防御性跳过 */
+        if (!rec) {
             SVC_LOG_WARN("sched: worker woke but queue empty (spurious wakeup?)");
             airy_mtx_unlock(&svc->lock);
             continue;
@@ -650,13 +668,10 @@ static void *sched_worker_thread(void *arg)
         const uint64_t wait_ms = sched_now_ms() - rec->created_at_ms;
         SVC_LOG_INFO("sched: task dequeued: %s (priority=%d, wait_ms=%llu, "
                      "desc_len=%zu, timeout_ms=%u)",
-                     rec->task_id, (int)rec->priority,
-                     (unsigned long long)wait_ms,
-                     rec->task_description ? strlen(rec->task_description) : 0,
-                     rec->timeout_ms);
+                     rec->task_id, (int)rec->priority, (unsigned long long)wait_ms,
+                     rec->task_description ? strlen(rec->task_description) : 0, rec->timeout_ms);
         airy_mtx_unlock(&svc->lock);
 
-        /* ---- 锁外执行：选 agent + 派发（含 LLM 往返，耗时） ---- */
         char *selected = NULL;
         char *output = NULL;
         char *error = NULL;
@@ -682,15 +697,16 @@ static void *sched_worker_thread(void *arg)
                 sret = AIRY_ERR_SVC_NOT_READY;
                 error = AIRY_STRDUP("task executor not injected");
                 SVC_LOG_ERROR("sched: task %s executor not injected (set_executor "
-                              "must be called before start_workers)", rec->task_id);
+                              "must be called before start_workers)",
+                              rec->task_id);
             } else {
-                SVC_LOG_INFO("sched: dispatching task %s to agent %s",
-                             rec->task_id, sel->selected_agent_id);
+                SVC_LOG_INFO("sched: dispatching task %s to agent %s", rec->task_id,
+                             sel->selected_agent_id);
                 sret = svc->executor(sel->selected_agent_id, rec->task_description, &output);
                 if (sret != AIRY_SUCCESS || !output) {
                     SVC_LOG_ERROR("sched: executor returned failure for task %s "
-                                  "(rc=%d, output=%p)", rec->task_id, sret,
-                                  (const void *)output);
+                                  "(rc=%d, output=%p)",
+                                  rec->task_id, sret, (const void *)output);
                     error = AIRY_STRDUP("agent dispatch failed");
                 }
             }
@@ -715,15 +731,14 @@ static void *sched_worker_thread(void *arg)
                 rec->error = AIRY_STRDUP("task timed out");
                 AIRY_FREE(output);
                 output = NULL;
-                SVC_LOG_WARN("Task timed out: %s (elapsed=%llu ms, limit=%u ms)",
-                             rec->task_id, (unsigned long long)exec_elapsed_ms,
-                             rec->timeout_ms);
+                SVC_LOG_WARN("Task timed out: %s (elapsed=%llu ms, limit=%u ms)", rec->task_id,
+                             (unsigned long long)exec_elapsed_ms, rec->timeout_ms);
             } else {
                 rec->status = SCHED_TASK_STATUS_COMPLETED;
                 rec->output = output;
                 output = NULL;
-                SVC_LOG_INFO("Task completed: %s (agent=%s, output_len=%zu)",
-                             rec->task_id, rec->selected_agent_id ? rec->selected_agent_id : "?",
+                SVC_LOG_INFO("Task completed: %s (agent=%s, output_len=%zu)", rec->task_id,
+                             rec->selected_agent_id ? rec->selected_agent_id : "?",
                              rec->output ? strlen(rec->output) : 0);
             }
         } else {
@@ -747,7 +762,10 @@ int sched_service_submit_task(sched_service_t *service, const task_info_t *task_
                               char **out_task_id)
 {
     if (!service || !task_info || !out_task_id || !service->initialized) {
-        SVC_LOG_ERROR("sched_service_submit_task: NULL parameter or not initialized (service=%p, task_info=%p, out_task_id=%p, initialized=%d)", (const void *)service, (const void *)task_info, (const void *)out_task_id, service ? service->initialized : -1);
+        SVC_LOG_ERROR("sched_service_submit_task: NULL parameter or not initialized (service=%p, "
+                      "task_info=%p, out_task_id=%p, initialized=%d)",
+                      (const void *)service, (const void *)task_info, (const void *)out_task_id,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
     *out_task_id = NULL;
@@ -760,8 +778,8 @@ int sched_service_submit_task(sched_service_t *service, const task_info_t *task_
 
     airy_mtx_lock(&service->lock);
     if (use_generated) {
-        snprintf(id_buf, sizeof(id_buf), "task_%llu_%zu",
-                 (unsigned long long)time(NULL), service->task_seq++);
+        snprintf(id_buf, sizeof(id_buf), "task_%llu_%zu", (unsigned long long)time(NULL),
+                 service->task_seq++);
     } else {
         snprintf(id_buf, sizeof(id_buf), "%s", task_info->task_id);
     }
@@ -772,11 +790,12 @@ int sched_service_submit_task(sched_service_t *service, const task_info_t *task_
             return AIRY_ERR_ALREADY_EXISTS;
         }
     }
-    size_t qlen = (service->queue_tail + AIRY_CAP_MAX_TASKS - service->queue_head) %
-                  AIRY_CAP_MAX_TASKS;
+    size_t qlen =
+        (service->queue_tail + AIRY_CAP_MAX_TASKS - service->queue_head) % AIRY_CAP_MAX_TASKS;
     if (qlen >= AIRY_CAP_MAX_TASKS - 1 || service->task_count >= AIRY_CAP_MAX_TASKS) {
         airy_mtx_unlock(&service->lock);
-        SVC_LOG_ERROR("sched_service_submit_task: task queue full (task_count=%zu)", service->task_count);
+        SVC_LOG_ERROR("sched_service_submit_task: task queue full (task_count=%zu)",
+                      service->task_count);
         return AIRY_ERR_OVERFLOW;
     }
 
@@ -804,7 +823,7 @@ int sched_service_submit_task(sched_service_t *service, const task_info_t *task_
     service->tasks[service->task_count++] = rec;
     service->queue[service->queue_tail] = rec;
     service->queue_tail = (service->queue_tail + 1) % AIRY_CAP_MAX_TASKS;
-    /* 唤醒工作线程（若未启动则任务保持 pending，启动后自然消费） */
+
     airy_cond_signal(&service->queue_cond);
     airy_mtx_unlock(&service->lock);
 
@@ -820,7 +839,10 @@ int sched_service_submit_task(sched_service_t *service, const task_info_t *task_
 int sched_service_get_task(sched_service_t *service, const char *task_id, char **out_json)
 {
     if (!service || !task_id || !out_json || !service->initialized) {
-        SVC_LOG_ERROR("sched_service_get_task: NULL parameter or not initialized (service=%p, task_id=%p, out_json=%p, initialized=%d)", (const void *)service, (const void *)task_id, (const void *)out_json, service ? service->initialized : -1);
+        SVC_LOG_ERROR("sched_service_get_task: NULL parameter or not initialized (service=%p, "
+                      "task_id=%p, out_json=%p, initialized=%d)",
+                      (const void *)service, (const void *)task_id, (const void *)out_json,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
     *out_json = NULL;
@@ -840,7 +862,8 @@ int sched_service_get_task(sched_service_t *service, const char *task_id, char *
     }
 
     static const char *status_names[] = {"pending", "running", "completed", "failed", "canceled"};
-    const char *sname = (rec->status < SCHED_TASK_STATUS_COUNT) ? status_names[rec->status] : "unknown";
+    const char *sname =
+        (rec->status < SCHED_TASK_STATUS_COUNT) ? status_names[rec->status] : "unknown";
 
     cJSON *root = cJSON_CreateObject();
     if (root) {
@@ -868,7 +891,7 @@ int sched_service_set_executor(sched_service_t *service, sched_task_executor_t e
 {
     if (!service || !executor || !service->initialized)
         return AIRY_ERR_INVALID_PARAM;
-    /* 必须在 start_workers 之前注入：worker 启动后不再变更（仅 worker 读） */
+
     service->executor = executor;
     return AIRY_SUCCESS;
 }
@@ -878,7 +901,7 @@ int sched_service_start_workers(sched_service_t *service)
     if (!service || !service->initialized)
         return AIRY_ERR_INVALID_PARAM;
     if (service->worker_thread != AIRY_INVALID_THREAD)
-        return AIRY_SUCCESS; /* 已启动，幂等 */
+        return AIRY_SUCCESS;
 
     service->worker_run = 1;
     if (airy_thread_create(&service->worker_thread, sched_worker_thread, service) != 0) {
@@ -889,7 +912,6 @@ int sched_service_start_workers(sched_service_t *service)
     }
     SVC_LOG_INFO("Scheduler worker thread started");
 
-    /* DAG 引擎工作线程（独立消费者：图节点拓扑派发） */
     service->dag_run = 1;
     if (airy_thread_create(&service->dag_thread, sched_dag_worker_thread, service) != 0) {
         service->dag_run = 0;
@@ -924,7 +946,7 @@ void sched_service_stop_workers(sched_service_t *service)
 
     airy_mtx_lock(&service->lock);
     service->worker_run = 0;
-    /* 唤醒可能阻塞在 cond_wait 的工作线程 */
+
     airy_cond_broadcast(&service->queue_cond);
     airy_mtx_unlock(&service->lock);
 
@@ -953,11 +975,11 @@ int sched_service_cancel_task(sched_service_t *service, const char *task_id)
         found = 1;
         if (rec->status != SCHED_TASK_STATUS_PENDING) {
             airy_mtx_unlock(&service->lock);
-            SVC_LOG_WARN("sched_service_cancel_task: task %s not cancelable (status=%d)",
-                         task_id, (int)rec->status);
+            SVC_LOG_WARN("sched_service_cancel_task: task %s not cancelable (status=%d)", task_id,
+                         (int)rec->status);
             return AIRY_ERR_BUSY;
         }
-        /* 从环形队列移除（该任务在队列中位置不定，紧凑重排） */
+
         size_t qi = service->queue_head;
         size_t removed = 0;
         while (qi != service->queue_tail) {
@@ -969,7 +991,7 @@ int sched_service_cancel_task(sched_service_t *service, const char *task_id)
             qi = (qi + 1) % AIRY_CAP_MAX_TASKS;
         }
         if (removed) {
-            /* 重排队列，去掉空洞（保持环形语义） */
+
             size_t src = (qi + 1) % AIRY_CAP_MAX_TASKS;
             size_t dst = qi;
             while (src != service->queue_tail) {
@@ -977,14 +999,14 @@ int sched_service_cancel_task(sched_service_t *service, const char *task_id)
                 src = (src + 1) % AIRY_CAP_MAX_TASKS;
                 dst = (dst + 1) % AIRY_CAP_MAX_TASKS;
             }
-            service->queue_tail = (service->queue_tail + AIRY_CAP_MAX_TASKS - 1) %
-                                  AIRY_CAP_MAX_TASKS;
+            service->queue_tail =
+                (service->queue_tail + AIRY_CAP_MAX_TASKS - 1) % AIRY_CAP_MAX_TASKS;
         }
         rec->status = SCHED_TASK_STATUS_CANCELED;
         rec->finished_at_ms = sched_now_ms();
         rec->error = AIRY_STRDUP("canceled by user");
-        SVC_LOG_INFO("Task canceled: %s (removed_from_queue=%d, pending_in_queue=%zu)",
-                     task_id, (int)removed,
+        SVC_LOG_INFO("Task canceled: %s (removed_from_queue=%d, pending_in_queue=%zu)", task_id,
+                     (int)removed,
                      (service->queue_tail + AIRY_CAP_MAX_TASKS - service->queue_head) %
                          AIRY_CAP_MAX_TASKS);
         break;
@@ -994,14 +1016,13 @@ int sched_service_cancel_task(sched_service_t *service, const char *task_id)
     return found ? AIRY_SUCCESS : AIRY_ERR_NOT_FOUND;
 }
 
-/* 节点是否依赖已全部满足（均 COMPLETED） */
 static int sched_dag_node_ready(const sched_dag_t *dag, size_t idx)
 {
     const sched_dag_node_t *node = dag->nodes[idx];
     if (node->status != SCHED_DAG_NODE_PENDING)
         return 0;
     if (node->retry_at_ms && sched_now_ms() < node->retry_at_ms)
-        return 0; /* 分级重试退避等待中（改进4） */
+        return 0;
     for (size_t k = 0; k < node->dep_count; k++) {
         const char *dep_id = node->depends[k];
         int dep_ok = 0;
@@ -1011,14 +1032,14 @@ static int sched_dag_node_ready(const sched_dag_t *dag, size_t idx)
                     dep_ok = 1;
                 } else if (dag->nodes[j]->status == SCHED_DAG_NODE_FAILED ||
                            dag->nodes[j]->status == SCHED_DAG_NODE_CANCELED) {
-                    /* 依赖失败/取消 → 本节点级联取消 */
+
                     return -1;
                 }
                 break;
             }
         }
         if (!dep_ok) {
-            /* 依赖未完成（或引用不存在的依赖：防御性视为未就绪） */
+
             return 0;
         }
     }
@@ -1044,7 +1065,6 @@ static long sched_dag_find_ready(sched_service_t *svc, sched_dag_node_t **out_no
     return -1;
 }
 
-/* 图是否全部节点进入终态 */
 static int sched_dag_all_terminal(sched_service_t *svc, sched_dag_t *dag)
 {
     for (size_t j = 0; j < dag->node_count; j++) {
@@ -1116,7 +1136,7 @@ typedef struct sched_dag_batch_item {
     sched_service_t *svc;
     sched_dag_t *dag;
     sched_dag_node_t *node;
-    char *agent_id; /* mac 委派结果（BORROW：batch 完成后统一释放） */
+    char *agent_id;
 } sched_dag_batch_item_t;
 
 /* 节点终态回写（持锁调用，供 batch worker 复用；返回节点是否成功）。
@@ -1130,20 +1150,19 @@ typedef struct sched_dag_batch_item {
  *   - 其余（普通失败 / 旧行为 dag_fatal_cascade=false）→ 节点 FAILED
  *     （旧行为级联取消整图；新行为不级联，不可达下游由
  *      sched_dag_propagate_unreachable 统一取消） */
-static int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag,
-                                     sched_dag_node_t *node, int dret, char *output)
+static int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_node_t *node,
+                                     int dret, char *output)
 {
-    if (node->status == SCHED_DAG_NODE_CANCELED ||
-        dag->status == SCHED_DAG_STATUS_CANCELED ||
+    if (node->status == SCHED_DAG_NODE_CANCELED || dag->status == SCHED_DAG_STATUS_CANCELED ||
         dag->status == SCHED_DAG_STATUS_FAILED) {
-        /* 节点/图在派发期间被取消，或图已收敛失败：丢弃结果 */
+
         if (output)
             AIRY_FREE(output);
         if (node->status != SCHED_DAG_NODE_CANCELED)
             node->status = SCHED_DAG_NODE_CANCELED;
         node->finished_at_ms = sched_now_ms();
-        SVC_LOG_INFO("sched: DAG node %s/%s result discarded (dag canceled/failed)",
-                     dag->dag_id, node->id);
+        SVC_LOG_INFO("sched: DAG node %s/%s result discarded (dag canceled/failed)", dag->dag_id,
+                     node->id);
         return 0;
     }
     if (dret == AIRY_SUCCESS && output) {
@@ -1160,7 +1179,7 @@ static int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag,
             if (airy_artifact_validator_from_json(&av, node->validator_rule_json) == AIRY_SUCCESS && av) {
                 airy_artifact_meta_t vmeta;
                 __builtin_memset(&vmeta, 0, sizeof(vmeta));
-                vmeta.exit_code = 0; /* dret==SUCCESS：执行成功（exit_code 规则恒通过） */
+                vmeta.exit_code = 0;
                 vmeta.output = output;
                 airy_artifact_result_t vres;
                 __builtin_memset(&vres, 0, sizeof(vres));
@@ -1169,44 +1188,43 @@ static int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag,
                 if (vres.verify == AIRY_AV_FAIL) {
                     node->status = SCHED_DAG_NODE_FAILED;
                     if (node->error) {
-                        AIRY_FREE(node->error); /* 清除重试历史错误 */
+                        AIRY_FREE(node->error);
                         node->error = NULL;
                     }
                     node->error = AIRY_STRDUP("artifact verification failed");
                     node->retry_at_ms = 0;
                     node->finished_at_ms = sched_now_ms();
-                    SVC_LOG_ERROR("DAG node verification FAILED: %s/%s (%s)",
-                                  dag->dag_id, node->id, vres.reason);
+                    SVC_LOG_ERROR("DAG node verification FAILED: %s/%s (%s)", dag->dag_id, node->id,
+                                  vres.reason);
                     AIRY_FREE(output);
                     return 0;
                 }
             }
         }
         node->status = SCHED_DAG_NODE_COMPLETED;
-        node->output = output; /* 所有权移交节点 */
+        node->output = output;
         if (node->error) {
-            AIRY_FREE(node->error); /* 清除重试历史错误 */
+            AIRY_FREE(node->error);
             node->error = NULL;
         }
         node->retry_at_ms = 0;
         node->finished_at_ms = sched_now_ms();
-        SVC_LOG_INFO("DAG node completed: %s/%s (output_len=%zu)",
-                     dag->dag_id, node->id, node->output ? strlen(node->output) : 0);
+        SVC_LOG_INFO("DAG node completed: %s/%s (output_len=%zu)", dag->dag_id, node->id,
+                     node->output ? strlen(node->output) : 0);
         return 1;
     }
     node->finished_at_ms = sched_now_ms();
-    /* 统一先释放可能存在的旧错误（重试历史），再走失败分级分支 */
+
     if (node->error) {
         AIRY_FREE(node->error);
         node->error = NULL;
     }
 
-    /* ---- 失败分级：FATAL 级联整图（fail-closed） ---- */
     if (svc->dag_fatal_cascade && sched_dag_error_is_fatal(dret)) {
         node->status = SCHED_DAG_NODE_FAILED;
         node->error = AIRY_STRDUP("agent dispatch failed (fatal)");
-        SVC_LOG_ERROR("DAG node FATAL failed: %s/%s (error=%s, rc=%d)", dag->dag_id,
-                      node->id, node->error ? node->error : "?", dret);
+        SVC_LOG_ERROR("DAG node FATAL failed: %s/%s (error=%s, rc=%d)", dag->dag_id, node->id,
+                      node->error ? node->error : "?", dret);
         dag->status = SCHED_DAG_STATUS_FAILED;
         size_t cascade = 0;
         for (size_t j = 0; j < dag->node_count; j++) {
@@ -1224,12 +1242,10 @@ static int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag,
         return 0;
     }
 
-    /* ---- 旧行为（dag_fatal_cascade=false）：任意失败级联取消整图 ---- */
     if (!svc->dag_fatal_cascade) {
         node->status = SCHED_DAG_NODE_FAILED;
-        node->error = AIRY_STRDUP(dret == AIRY_ERR_SVC_NOT_READY
-                                      ? "dag executor not injected"
-                                      : "agent dispatch failed");
+        node->error = AIRY_STRDUP(dret == AIRY_ERR_SVC_NOT_READY ? "dag executor not injected" :
+                                                                   "agent dispatch failed");
         SVC_LOG_ERROR("DAG node failed: %s/%s (error=%s)", dag->dag_id, node->id,
                       node->error ? node->error : "unknown");
         dag->status = SCHED_DAG_STATUS_FAILED;
@@ -1243,13 +1259,13 @@ static int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag,
             }
         }
         SVC_LOG_WARN("DAG aborted by node failure: %s (%zu downstream nodes "
-                     "cascade-canceled)", dag->dag_id, cascade);
+                     "cascade-canceled)",
+                     dag->dag_id, cascade);
         if (output)
-            AIRY_FREE(output); /* 失败但 executor 已产出 output：释放防泄漏 */
+            AIRY_FREE(output);
         return 0;
     }
 
-    /* ---- 分级重试（改进4）：transient + 未超限/未超预算 → 退避重试 ---- */
     if (sched_dag_error_is_transient(dret) && node->retry_count < node->max_retries) {
         uint64_t now = sched_now_ms();
         uint64_t budget_deadline =
@@ -1257,25 +1273,24 @@ static int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag,
         if (budget_deadline == 0 || now < budget_deadline) {
             node->retry_count++;
             uint64_t base = node->retry_delay_ms ? node->retry_delay_ms : 1000;
-            uint64_t backoff = base * (1ULL << (node->retry_count - 1)); /* 指数退避 */
+            uint64_t backoff = base * (1ULL << (node->retry_count - 1));
             node->retry_at_ms = now + backoff;
             node->error = AIRY_STRDUP("transient failure, retrying with backoff");
-            node->status = SCHED_DAG_NODE_PENDING; /* 重新入就绪集（保 DAG 语义） */
+            node->status = SCHED_DAG_NODE_PENDING;
             node->finished_at_ms = 0;
             SVC_LOG_WARN("DAG node transient failure, retry %u/%u backoff=%llu ms: %s/%s",
-                         node->retry_count, node->max_retries,
-                         (unsigned long long)backoff, dag->dag_id, node->id);
+                         node->retry_count, node->max_retries, (unsigned long long)backoff,
+                         dag->dag_id, node->id);
             if (output)
-                AIRY_FREE(output); /* 部分输出丢弃，等待重试 */
+                AIRY_FREE(output);
             return 0;
         }
     }
 
-    /* ---- 普通失败（或重试耗尽/超预算）：节点 FAILED，不级联整图 ---- */
     node->status = SCHED_DAG_NODE_FAILED;
     node->error = AIRY_STRDUP("agent dispatch failed");
-    SVC_LOG_ERROR("DAG node failed (no cascade): %s/%s (error=%s, rc=%d)", dag->dag_id,
-                  node->id, node->error ? node->error : "unknown", dret);
+    SVC_LOG_ERROR("DAG node failed (no cascade): %s/%s (error=%s, rc=%d)", dag->dag_id, node->id,
+                  node->error ? node->error : "unknown", dret);
     if (output)
         AIRY_FREE(output);
     return 0;
@@ -1335,8 +1350,8 @@ static void sched_dag_finalize_terminal(sched_service_t *svc)
         }
         dag->status = has_failed ? SCHED_DAG_STATUS_FAILED : SCHED_DAG_STATUS_COMPLETED;
         dag->finished_at_ms = sched_now_ms();
-        SVC_LOG_INFO("DAG %s: %s (%zu nodes)", dag->dag_id,
-                     has_failed ? "failed" : "completed", dag->node_count);
+        SVC_LOG_INFO("DAG %s: %s (%zu nodes)", dag->dag_id, has_failed ? "failed" : "completed",
+                     dag->node_count);
     }
 }
 
@@ -1361,7 +1376,6 @@ static uint64_t sched_dag_min_retry_at(sched_service_t *svc)
     return min;
 }
 
-/* batch worker（线程池执行）：锁外 executor + mac 回写 + 锁内节点状态回写 */
 static void sched_dag_batch_worker(void *arg)
 {
     sched_dag_batch_item_t *item = (sched_dag_batch_item_t *)arg;
@@ -1370,10 +1384,9 @@ static void sched_dag_batch_worker(void *arg)
 
     char *output = NULL;
     int dret = svc->executor ? svc->executor(item->agent_id ? item->agent_id : "coding",
-                                             node->goal ? node->goal : "", &output)
-                             : AIRY_ERR_SVC_NOT_READY;
+                                             node->goal ? node->goal : "", &output) :
+                               AIRY_ERR_SVC_NOT_READY;
 
-    /* mac 任务完成回写（释放 agent 并发槽位，幂等） */
     if (svc->mac && node->id) {
         mac_framework_complete_task(svc->mac, node->id,
                                     (dret == AIRY_SUCCESS && output) ? output : NULL);
@@ -1381,7 +1394,7 @@ static void sched_dag_batch_worker(void *arg)
 
     airy_mtx_lock(&svc->lock);
     sched_dag_write_back_node(svc, item->dag, node, dret, output);
-    /* 批次屏障：最后一个节点完成时唤醒 dag 线程 */
+
     if (svc->batch_pending > 0) {
         svc->batch_pending--;
         if (svc->batch_pending == 0)
@@ -1389,14 +1402,13 @@ static void sched_dag_batch_worker(void *arg)
     }
     airy_mtx_unlock(&svc->lock);
 
-    AIRY_FREE(item->agent_id); /* 委派结果所有权：提交时转移给 item */
+    AIRY_FREE(item->agent_id);
     AIRY_FREE(item);
 }
 
 /* 批量收集所有 active 图的首批就绪节点（≤ max），全部置 RUNNING。
  * 调用方持锁。返回收集数；out_dags 记录每个节点的归属图（与 out_nodes 对齐）。 */
-static size_t sched_dag_collect_ready_batch(sched_service_t *svc,
-                                            sched_dag_node_t **out_nodes,
+static size_t sched_dag_collect_ready_batch(sched_service_t *svc, sched_dag_node_t **out_nodes,
                                             sched_dag_t **out_dags, size_t max)
 {
     size_t n = 0;
@@ -1431,7 +1443,8 @@ static void *sched_dag_worker_thread(void *arg)
             uint64_t min_retry = sched_dag_min_retry_at(svc);
             if (min_retry == 0) {
                 SVC_LOG_DEBUG("sched: dag worker idle, waiting for ready nodes "
-                              "(dags=%zu)", svc->dag_count);
+                              "(dags=%zu)",
+                              svc->dag_count);
                 airy_cond_wait(&svc->dag_cond, &svc->lock);
             } else {
                 uint64_t now = sched_now_ms();
@@ -1445,7 +1458,6 @@ static void *sched_dag_worker_thread(void *arg)
             break;
         }
 
-        /* ---- 并行分支（mac 委派模式） ---- */
         if (svc->mac && svc->dag_pool && svc->dag_max_parallel > 0) {
             sched_dag_node_t *batch[SCHED_DAG_MAX_NODES];
             sched_dag_t *batch_dags[SCHED_DAG_MAX_NODES];
@@ -1457,7 +1469,6 @@ static void *sched_dag_worker_thread(void *arg)
                 continue;
             }
 
-            /* mac 批量委派选人：构造 task 数组（id=node->id, input_json=node->goal） */
             mac_collab_task_t tasks[SCHED_DAG_MAX_NODES];
             char *assigned[SCHED_DAG_MAX_NODES];
             __builtin_memset(tasks, 0, sizeof(tasks));
@@ -1465,7 +1476,7 @@ static void *sched_dag_worker_thread(void *arg)
             for (size_t i = 0; i < batch_n; i++) {
                 AIRY_STRNCPY_TERM(tasks[i].id, batch[i]->id, sizeof(tasks[i].id));
                 tasks[i].id[sizeof(tasks[i].id) - 1] = '\0';
-                tasks[i].input_json = batch[i]->goal; /* BORROW：delegate 内部 STRDUP 拷贝 */
+                tasks[i].input_json = batch[i]->goal;
                 SVC_LOG_INFO("sched: DAG node dispatch (parallel): %s/%s role=%s deps=%zu",
                              batch_dags[i]->dag_id, batch[i]->id,
                              batch[i]->role ? batch[i]->role : "coding", batch[i]->dep_count);
@@ -1474,7 +1485,6 @@ static void *sched_dag_worker_thread(void *arg)
             if (dret != 0)
                 SVC_LOG_WARN("sched: mac delegate_batch partial failure rc=%d", dret);
 
-            /* 批次屏障计数（worker 完成时递减，最后节点唤醒） */
             svc->batch_pending = batch_n;
             airy_mtx_unlock(&svc->lock);
 
@@ -1484,7 +1494,7 @@ static void *sched_dag_worker_thread(void *arg)
                 sched_dag_batch_item_t *item =
                     (sched_dag_batch_item_t *)AIRY_CALLOC(1, sizeof(sched_dag_batch_item_t));
                 if (!item) {
-                    /* OOM：释放委派结果，节点直接标记失败（避免悬挂 RUNNING） */
+
                     AIRY_FREE(assigned[i]);
                     assigned[i] = NULL;
                     airy_mtx_lock(&svc->lock);
@@ -1500,37 +1510,34 @@ static void *sched_dag_worker_thread(void *arg)
                     continue;
                 }
                 item->svc = svc;
-                item->dag = batch_dags[i]; /* 节点归属图（write_back 级联取消需要） */
+                item->dag = batch_dags[i];
                 item->node = batch[i];
-                item->agent_id = assigned[i]; /* BORROW → 所有权转移给 item */
+                item->agent_id = assigned[i];
                 if (thread_pool_submit(svc->dag_pool, sched_dag_batch_worker, item) != 0) {
                     SVC_LOG_WARN("sched: dag pool submit failed, run synchronously");
                     sched_dag_batch_worker(item);
                 }
             }
 
-            /* 批次屏障：等待全部节点完成 */
             airy_mtx_lock(&svc->lock);
             while (svc->batch_pending > 0) {
                 airy_cond_wait(&svc->batch_cond, &svc->lock);
             }
-            /* 普通失败 → 不可达下游取消 + 终态收敛（FATAL 已在 write_back 级联） */
+
             sched_dag_propagate_unreachable(svc);
             sched_dag_finalize_terminal(svc);
             airy_mtx_unlock(&svc->lock);
 
-            /* 有节点完成 → 依赖它的节点可能就绪，唤醒 dag 线程 */
             airy_mtx_lock(&svc->lock);
             airy_cond_broadcast(&svc->dag_cond);
             airy_mtx_unlock(&svc->lock);
             continue;
         }
 
-        /* ---- 串行分支（原逻辑，dag_max_parallel==0 或 mac 不可用） ---- */
         sched_dag_node_t *node = NULL;
         long dag_idx = sched_dag_find_ready(svc, &node);
         if (dag_idx < 0 || !node) {
-            /* 无就绪节点但未退出：可能全部图已完成，重新等待信号 */
+
             SVC_LOG_DEBUG("sched: dag worker woke but no ready node (all dags "
                           "done or deps unresolved)");
             airy_mtx_unlock(&svc->lock);
@@ -1539,7 +1546,7 @@ static void *sched_dag_worker_thread(void *arg)
         sched_dag_t *dag = svc->dags[dag_idx];
         node->status = SCHED_DAG_NODE_RUNNING;
         node->started_at_ms = sched_now_ms();
-        /* 快照 role/goal（节点持久存在，锁外可安全读） */
+
         const char *role = node->role ? node->role : "coding";
         const char *goal = node->goal ? node->goal : "";
         SVC_LOG_INFO("sched: DAG node dispatch: %s/%s role=%s deps=%zu "
@@ -1549,19 +1556,16 @@ static void *sched_dag_worker_thread(void *arg)
                      svc->executor ? "ready" : "MISSING");
         airy_mtx_unlock(&svc->lock);
 
-        /* ---- 锁外派发（executor 含 spawn/invoke/LLM 往返，耗时） ---- */
         char *output = NULL;
-        int dret = svc->executor ? svc->executor(role, goal, &output)
-                                 : AIRY_ERR_SVC_NOT_READY;
+        int dret = svc->executor ? svc->executor(role, goal, &output) : AIRY_ERR_SVC_NOT_READY;
 
         airy_mtx_lock(&svc->lock);
-        sched_dag_write_back_node(svc, dag, node, dret, output); /* 接管 output 所有权 */
-        /* 普通失败 → 取消不可达下游（FATAL 已在 write_back 级联）→ 终态收敛 */
+        sched_dag_write_back_node(svc, dag, node, dret, output);
+
         sched_dag_propagate_unreachable(svc);
         sched_dag_finalize_terminal(svc);
         airy_mtx_unlock(&svc->lock);
 
-        /* 有节点完成 → 依赖它的节点可能就绪，唤醒 dag 线程 */
         airy_mtx_lock(&svc->lock);
         airy_cond_broadcast(&svc->dag_cond);
         airy_mtx_unlock(&svc->lock);
@@ -1569,7 +1573,6 @@ static void *sched_dag_worker_thread(void *arg)
     return NULL;
 }
 
-/* 解析 DAG JSON 并做 Kahn 拓扑校验（有环返回非 0），纯校验不写服务状态 */
 static int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
 {
     cJSON *nodes_json = cJSON_GetObjectItem(root, "nodes");
@@ -1586,8 +1589,8 @@ static int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
         return AIRY_ERR_OUT_OF_MEMORY;
 
     cJSON *name = cJSON_GetObjectItem(root, "name");
-    dag->name = AIRY_STRDUP(cJSON_IsString(name) && name->valuestring ? name->valuestring
-                                                                      : "unnamed_dag");
+    dag->name =
+        AIRY_STRDUP(cJSON_IsString(name) && name->valuestring ? name->valuestring : "unnamed_dag");
     /* 分级重试（改进4）：图级共享重试总预算窗口 ms（0 = 不限）。
      * 所有节点的重试总截止 = created_at + retry_budget_ms，超预算即终止重试。 */
     cJSON *rbudget = cJSON_GetObjectItem(root, "retry_budget_ms");
@@ -1608,7 +1611,7 @@ static int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
         }
         for (size_t p = 0; p < dag->node_count; p++) {
             if (strcmp(dag->nodes[p]->id, nid->valuestring) == 0) {
-                err = AIRY_ERR_INVALID_PARAM; /* 重复 id */
+                err = AIRY_ERR_INVALID_PARAM;
                 break;
             }
         }
@@ -1622,12 +1625,12 @@ static int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
         }
         node->id = AIRY_STRDUP(nid->valuestring);
         cJSON *goal = cJSON_GetObjectItem(nj, "goal");
-        node->goal = AIRY_STRDUP(cJSON_IsString(goal) && goal->valuestring ? goal->valuestring
-                                                                           : "");
+        node->goal =
+            AIRY_STRDUP(cJSON_IsString(goal) && goal->valuestring ? goal->valuestring : "");
         cJSON *role = cJSON_GetObjectItem(nj, "role");
-        node->role = AIRY_STRDUP(cJSON_IsString(role) && role->valuestring ? role->valuestring
-                                                                           : "coding");
-        /* 分级重试（改进4）：节点级 max_retries / retry_delay_ms（0 = 不重试 / 默认退避基） */
+        node->role =
+            AIRY_STRDUP(cJSON_IsString(role) && role->valuestring ? role->valuestring : "coding");
+
         cJSON *mretry = cJSON_GetObjectItem(nj, "max_retries");
         if (cJSON_IsNumber(mretry) && mretry->valuedouble > 0) {
             node->max_retries = (uint32_t)mretry->valuedouble;
@@ -1635,7 +1638,7 @@ static int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
             if (cJSON_IsNumber(rdelay) && rdelay->valuedouble > 0)
                 node->retry_delay_ms = (uint32_t)rdelay->valuedouble;
         }
-        /* 产物验证（改进2/P2a）：节点声明 validator 规则（JSON 对象，缺失 = 不验证） */
+
         cJSON *validator = cJSON_GetObjectItem(nj, "validator");
         if (cJSON_IsObject(validator)) {
             node->validator_rule_json = cJSON_PrintUnformatted(validator);
@@ -1672,7 +1675,6 @@ static int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
             break;
     }
 
-    /* 依赖存在性校验（依赖 id 必须命中图内节点） */
     for (size_t i = 0; i < dag->node_count && err == AIRY_SUCCESS; i++) {
         sched_dag_node_t *node = dag->nodes[i];
         for (size_t k = 0; k < node->dep_count; k++) {
@@ -1690,7 +1692,6 @@ static int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
         }
     }
 
-    /* Kahn 拓扑校验：从入度 0 节点出发，统计可处理节点数，== n 则无环 */
     if (err == AIRY_SUCCESS) {
         size_t *indeg = (size_t *)AIRY_CALLOC(dag->node_count, sizeof(size_t));
         if (!indeg) {
@@ -1712,13 +1713,13 @@ static int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
                 progressed = 0;
                 for (size_t i = 0; i < dag->node_count; i++) {
                     if (indeg[i] == SIZE_MAX)
-                        continue; /* 已处理 */
+                        continue;
                     int all_ok = 1;
                     for (size_t k = 0; k < dag->nodes[i]->dep_count && all_ok; k++) {
                         for (size_t j = 0; j < dag->node_count; j++) {
                             if (strcmp(dag->nodes[j]->id, dag->nodes[i]->depends[k]) == 0) {
                                 if (indeg[j] != SIZE_MAX)
-                                    all_ok = 0; /* 依赖尚未处理 */
+                                    all_ok = 0;
                                 break;
                             }
                         }
@@ -1732,12 +1733,12 @@ static int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
             }
             AIRY_FREE(indeg);
             if (processed != dag->node_count)
-                err = AIRY_ERR_CYCLE_DETECTED; /* 存在环 */
+                err = AIRY_ERR_CYCLE_DETECTED;
         }
     }
 
     if (err != AIRY_SUCCESS) {
-        /* 释放半成品 */
+
         for (size_t i = 0; i < dag->node_count; i++) {
             sched_dag_node_t *node = dag->nodes[i];
             AIRY_FREE(node->id);
@@ -1777,14 +1778,14 @@ int sched_service_submit_dag(sched_service_t *service, const char *dag_json, cha
     if (vret != AIRY_SUCCESS || !dag) {
         cJSON_Delete(root);
         SVC_LOG_ERROR("sched_service_submit_dag: validation failed (rc=%d)", vret);
-        /* 错误码如实透传（环 INVALID_PARAM/OVERFLOW/OOM 各有语义，不再归一） */
+
         return vret;
     }
 
     airy_mtx_lock(&service->lock);
     if (service->dag_count >= SCHED_DAG_MAX_DAGS) {
         airy_mtx_unlock(&service->lock);
-        /* 释放构建好的图（root 在出口统一释放） */
+
         for (size_t i = 0; i < dag->node_count; i++) {
             sched_dag_node_t *node = dag->nodes[i];
             AIRY_FREE(node->id);
@@ -1826,29 +1827,28 @@ int sched_service_submit_dag(sched_service_t *service, const char *dag_json, cha
     dag->created_at_ms = sched_now_ms();
     service->dags[service->dag_count++] = dag;
 
-    /* 唤醒 dag 工作线程（入口节点可能已就绪） */
     airy_cond_broadcast(&service->dag_cond);
     airy_mtx_unlock(&service->lock);
 
     *out_dag_id = AIRY_STRDUP(id_buf);
     cJSON_Delete(root);
-    SVC_LOG_INFO("DAG submitted: %s name=%s (%zu nodes)", id_buf,
-                 dag->name ? dag->name : "?", dag->node_count);
-    /* 逐节点打印依赖关系：排查「节点不就绪/依赖悬挂」类调度异常的关键线索 */
+    SVC_LOG_INFO("DAG submitted: %s name=%s (%zu nodes)", id_buf, dag->name ? dag->name : "?",
+                 dag->node_count);
+
     for (size_t j = 0; j < dag->node_count; j++) {
         const sched_dag_node_t *node = dag->nodes[j];
         char depbuf[256];
         size_t off = 0;
         depbuf[0] = '\0';
         for (size_t k = 0; k < node->dep_count && off < sizeof(depbuf) - 2; k++) {
-            int w = snprintf(depbuf + off, sizeof(depbuf) - off, "%s%s",
-                             k > 0 ? "," : "", node->depends[k]);
+            int w = snprintf(depbuf + off, sizeof(depbuf) - off, "%s%s", k > 0 ? "," : "",
+                             node->depends[k]);
             if (w < 0)
                 break;
             off += (size_t)w;
         }
-        SVC_LOG_DEBUG("DAG %s node[%zu]: id=%s role=%s depends=[%s] goal_len=%zu",
-                      id_buf, j, node->id, node->role ? node->role : "?", depbuf,
+        SVC_LOG_DEBUG("DAG %s node[%zu]: id=%s role=%s depends=[%s] goal_len=%zu", id_buf, j,
+                      node->id, node->role ? node->role : "?", depbuf,
                       node->goal ? strlen(node->goal) : 0);
     }
     return AIRY_SUCCESS;
@@ -1875,8 +1875,8 @@ int sched_service_get_dag(sched_service_t *service, const char *dag_id, char **o
     }
 
     static const char *dag_status_names[] = {"active", "completed", "failed", "canceled"};
-    static const char *node_status_names[] = {"pending", "ready", "running", "completed",
-                                              "failed", "canceled"};
+    static const char *node_status_names[] = {"pending",   "ready",  "running",
+                                              "completed", "failed", "canceled"};
 
     cJSON *root = cJSON_CreateObject();
     if (root) {
@@ -1904,9 +1904,8 @@ int sched_service_get_dag(sched_service_t *service, const char *dag_id, char **o
             cJSON_AddStringToObject(nj, "id", node->id);
             cJSON_AddStringToObject(nj, "goal", node->goal ? node->goal : "");
             cJSON_AddStringToObject(nj, "role", node->role ? node->role : "");
-            cJSON_AddStringToObject(
-                nj, "status",
-                node_status_names[node->status % SCHED_DAG_NODE_COUNT]);
+            cJSON_AddStringToObject(nj, "status",
+                                    node_status_names[node->status % SCHED_DAG_NODE_COUNT]);
             cJSON *deps = cJSON_CreateArray();
             for (size_t k = 0; k < node->dep_count; k++)
                 cJSON_AddItemToArray(deps, cJSON_CreateString(node->depends[k]));
@@ -1972,7 +1971,6 @@ int sched_service_cancel_dag(sched_service_t *service, const char *dag_id)
         } else if (node->status == SCHED_DAG_NODE_RUNNING) {
             running_nodes++;
         }
-        /* RUNNING 节点：保留运行，完成后 worker 发现已取消即丢弃输出 */
     }
     airy_cond_broadcast(&service->dag_cond);
     airy_mtx_unlock(&service->lock);
@@ -1991,7 +1989,6 @@ int sched_service_checkpoint_save(sched_service_t *service, char **out_json)
     }
     *out_json = NULL;
 
-    /* 快照在锁内统计（队列/DAG 状态与 register/submit 并发，需一致视图） */
     airy_mtx_lock(&service->lock);
     size_t pending = 0, running = 0;
     size_t qi = service->queue_head;
@@ -2016,8 +2013,7 @@ int sched_service_checkpoint_save(sched_service_t *service, char **out_json)
     cJSON *root = cJSON_CreateObject();
     if (root) {
         cJSON_AddNumberToObject(root, "agent_count", (double)service->agent_count);
-        cJSON_AddNumberToObject(root, "total_tasks",
-                                (double)service->total_tasks_scheduled);
+        cJSON_AddNumberToObject(root, "total_tasks", (double)service->total_tasks_scheduled);
         cJSON_AddNumberToObject(root, "pending", (double)pending);
         cJSON_AddNumberToObject(root, "running", (double)running);
         cJSON_AddNumberToObject(root, "dag_count", (double)service->dag_count);

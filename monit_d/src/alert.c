@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file alert.c
  * @brief 告警管理系统实现
@@ -208,8 +208,7 @@ int alert_add_threshold_rule(const char *rule_id, const char *metric_name, compa
     rule->rule.threshold.op = op;
     rule->rule.threshold.threshold = threshold;
     rule->rule.threshold.level = level;
-    rule->rule.threshold.message_template =
-        message_template ? AIRY_STRDUP(message_template) : NULL;
+    rule->rule.threshold.message_template = message_template ? AIRY_STRDUP(message_template) : NULL;
     if (message_template && !rule->rule.threshold.message_template) {
         AIRY_FREE(rule->rule.threshold.metric_name);
         AIRY_FREE(rule->rule.threshold.rule_id);
@@ -298,9 +297,10 @@ static void notify_channels(const alert_info_t *alert)
             break;
         case CHANNEL_LOG: {
             const char *level_str[] = {"INFO", "WARNING", "ERROR", "CRITICAL"};
-            SVC_LOG_WARN(
-                "ALERT [%s] %s: %s", level_str[alert->level < ALERT_LEVEL_COUNT ? alert->level : 0],
-                alert->alert_id ? alert->alert_id : "N/A", alert->message ? alert->message : "N/A");
+            SVC_LOG_WARN("ALERT [%s] %s: %s",
+                         level_str[alert->level < ALERT_LEVEL_COUNT ? alert->level : 0],
+                         alert->alert_id ? alert->alert_id : "N/A",
+                         alert->message ? alert->message : "N/A");
             break;
         }
         case CHANNEL_ESCALATION:
@@ -318,7 +318,7 @@ static void add_to_history(const alert_info_t *alert)
         AIRY_FREE(g_alert_mgr.history[0].alert.service_name);
         AIRY_FREE(g_alert_mgr.history[0].alert.resource_id);
         __builtin_memmove(&g_alert_mgr.history[0], &g_alert_mgr.history[1],
-                (g_alert_mgr.history_count - 1) * sizeof(grouped_alert_t));
+                          (g_alert_mgr.history_count - 1) * sizeof(grouped_alert_t));
         g_alert_mgr.history_count--;
     }
 

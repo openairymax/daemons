@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 /**
  * @file log_sanitizer.c
  * @brief 日志脱敏过滤器实现
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "atomic_compat.h"
@@ -17,7 +17,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* 默认敏感字段模式 */
 static const sensitive_field_t default_patterns[] = {
     {"api_key", "***"},     {"apikey", "***"},        {"api-key", "***"},
     {"password", "***"},    {"passwd", "***"},        {"secret", "***"},
@@ -26,7 +25,6 @@ static const sensitive_field_t default_patterns[] = {
     {"private_key", "***"}, {"authorization", "***"}, {"x-api-key", "***"},
 };
 
-/* 全局状态 */
 static sensitive_field_t *g_patterns = NULL;
 static size_t g_pattern_count = 0;
 static size_t g_pattern_capacity = 0;
@@ -43,7 +41,6 @@ static void ensure_mutex_init(void)
 }
 static atomic_int g_initialized = 0;
 
-/* 默认替换字符串 */
 #define DEFAULT_REPLACEMENT "***"
 #define MAX_LINE_LENGTH 4096
 
@@ -115,7 +112,7 @@ static const char *find_pattern(const char *message, const sensitive_field_t *pa
 {
     const char *pos = message;
     while ((pos = log_strcasestr(pos, pattern->pattern)) != NULL) {
-        /* 检查是否是独立的字段（前面是空白或引号，后面是 = 或 : 或空白） */
+
         if (pos > message) {
             char prev = *(pos - 1);
             if (!isspace(prev) && prev != '"' && prev != '\'' && prev != ',') {
@@ -124,7 +121,6 @@ static const char *find_pattern(const char *message, const sensitive_field_t *pa
             }
         }
 
-        /* 检查后面是否是分隔符 */
         const char *after = pos + strlen(pattern->pattern);
         if (*after && *after != '=' && *after != ':' && *after != ' ' && *after != '"' &&
             *after != '\'' && *after != '\n' && *after != '&') {
@@ -153,11 +149,11 @@ static const char *find_value_end(const char *value_start)
     }
 
     if (quote) {
-        /* 引号包裹的值 */
+
         const char *end = strchr(value_start, quote);
         return end ? end + 1 : NULL;
     } else {
-        /* 普通值 */
+
         const char *end = value_start;
         while (*end && !isspace(*end) && *end != ',' && *end != '&' && *end != '"') {
             end++;
@@ -185,51 +181,44 @@ static int sanitize_core(const char *message, char *buffer, size_t buffer_size)
     while (*pos && out < out_end) {
         int matched = 0;
 
-        /* 检查每个敏感模式 */
         for (size_t i = 0; i < g_pattern_count && !matched; i++) {
             const char *match = find_pattern(pos, &g_patterns[i]);
             if (match && match == pos) {
-                /* 找到匹配，复制字段名 */
+
                 const char *after_pattern = pos + strlen(g_patterns[i].pattern);
                 const char *value_start = after_pattern;
 
-                /* 跳过空白和分隔符 */
                 while (*value_start &&
                        (isspace(*value_start) || *value_start == '=' || *value_start == ':')) {
                     value_start++;
                 }
 
-                /* 找到值结束位置 */
                 const char *value_end = find_value_end(value_start);
                 if (!value_end)
                     value_end = value_start + strlen(value_start);
 
-                /* 计算可写的空间 */
                 size_t field_name_len = after_pattern - pos;
                 size_t repl_len = strlen(g_patterns[i].replacement);
 
                 size_t needed = field_name_len + 1 + repl_len + 1;
                 if ((size_t)(out_end - out) < needed) {
                     *out = '\0';
-                    SVC_LOG_ERROR("C-L02: SANITIZER: SANITIZE-FAIL reason=overflow buffer_size=%zu needed=%zu",
+                    SVC_LOG_ERROR("C-L02: SANITIZER: SANITIZE-FAIL reason=overflow buffer_size=%zu "
+                                  "needed=%zu",
                                   buffer_size, needed);
                     return AIRY_ERR_OVERFLOW;
                 }
 
-                /* 写入字段名 */
                 __builtin_memcpy(out, pos, field_name_len);
                 out += field_name_len;
 
-                /* 写入分隔符 */
                 *out++ = '=';
 
-                /* 写入脱敏值 */
                 __builtin_memcpy(out, g_patterns[i].replacement, repl_len);
                 out += repl_len;
 
                 *out = '\0';
 
-                /* 更新位置 */
                 pos = value_end;
                 matched = 1;
             }
@@ -266,7 +255,8 @@ void log_sanitizer_init(size_t max_fields)
     g_initialized = 1;
     airy_mtx_unlock(&g_mutex);
 
-    SVC_LOG_INFO("C-L02: SANITIZER: INIT count=%zu capacity=%zu", g_pattern_count, g_pattern_capacity);
+    SVC_LOG_INFO("C-L02: SANITIZER: INIT count=%zu capacity=%zu", g_pattern_count,
+                 g_pattern_capacity);
 }
 
 void log_sanitizer_destroy(void)
@@ -323,7 +313,6 @@ char *log_sanitize_dup(const char *message)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    /* 预分配缓冲区 */
     size_t alloc_size = strlen(message) + 1;
     if (alloc_size < MAX_LINE_LENGTH)
         alloc_size = MAX_LINE_LENGTH;
@@ -336,8 +325,9 @@ char *log_sanitize_dup(const char *message)
 
     int result = sanitize_core(message, buffer, alloc_size);
     if (result < 0) {
-        SVC_LOG_ERROR("C-L02: SANITIZER: SANITIZE-FAIL reason=sanitize_core_error result=%d alloc_size=%zu",
-                      result, alloc_size);
+        SVC_LOG_ERROR(
+            "C-L02: SANITIZER: SANITIZE-FAIL reason=sanitize_core_error result=%d alloc_size=%zu",
+            result, alloc_size);
         AIRY_FREE(buffer);
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }

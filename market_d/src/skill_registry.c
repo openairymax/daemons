@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file skill_registry.c
  * @brief Skill 注册管理模块
  * @details 基于 market_service 公共 API 实现 Skill 的注册、查询和管理
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "daemon_errors.h"

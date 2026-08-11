@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_strategies_recovery.c
  * @brief 调度策略与API恢复机制单元测试
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 测试覆盖：
  *   - API Recovery 池生命周期与重试机制（7 cases）
@@ -22,8 +22,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include "error.h"
-
-/* ==================== 内部辅助：模拟 compute_weighted_score 逻辑 ==================== */
 
 typedef struct {
     char *agent_id;
@@ -61,14 +59,10 @@ static float mock_compute_weighted_score(const mock_agent_info_t *agent,
            config->trust_weight * trust_score;
 }
 
-/* ==================== 辅助：浮点近似比较 ==================== */
-
 static int feq(float a, float b, float eps)
 {
     return fabsf(a - b) < eps;
 }
-
-/* ==================== API Recovery 测试 ==================== */
 
 static void test_api_recovery_init(void)
 {
@@ -89,7 +83,7 @@ static void test_api_recovery_init(void)
     assert(total == 0 && recovered == 0 && failed == 0);
 
     const char *model = api_rec_current_model(pool);
-    assert(model != NULL);  /* 有效指针（可能是 "primary" 或实际模型名） */
+    assert(model != NULL);
 
     api_rec_pool_destroy(pool);
 
@@ -153,8 +147,8 @@ static int g_mock_should_fail = 0;
 static int mock_request_success(void *ctx __attribute__((unused)),
                                 const char *url __attribute__((unused)),
                                 const char *body __attribute__((unused)),
-                                const char *cred __attribute__((unused)),
-                                char **resp_body, long *http_code)
+                                const char *cred __attribute__((unused)), char **resp_body,
+                                long *http_code)
 {
     g_mock_call_count++;
     if (http_code)
@@ -178,9 +172,8 @@ static void test_api_recovery_execute_success(void)
     api_rec_result_t result = {0};
 
     int ret = api_rec_execute_with_recovery(pool, mock_request_success, NULL,
-                                           "https://api.test.com/v1/chat",
-                                           "{\"msg\":\"hello\"}", &response,
-                                           &http_code, &result);
+                                            "https://api.test.com/v1/chat", "{\"msg\":\"hello\"}",
+                                            &response, &http_code, &result);
     assert(ret == 0);
     assert(g_mock_call_count >= 1);
     assert(http_code == 200);
@@ -233,8 +226,8 @@ static void test_api_recovery_execute_failure_with_retry(void)
     api_rec_result_t result = {0};
 
     int ret = api_rec_execute_with_recovery(pool, mock_request_fail_then_succeed, NULL,
-                                           "https://api.test.com/v1/retry",
-                                           "{}", &response, &http_code, &result);
+                                            "https://api.test.com/v1/retry", "{}", &response,
+                                            &http_code, &result);
     assert(ret == 0);
     assert(g_mock_fail_count > 1);
     assert(g_mock_fail_count >= g_mock_fail_before_success + 1);
@@ -248,8 +241,8 @@ static void test_api_recovery_execute_failure_with_retry(void)
 static int mock_request_always_fail(void *ctx __attribute__((unused)),
                                     const char *url __attribute__((unused)),
                                     const char *body __attribute__((unused)),
-                                    const char *cred __attribute__((unused)),
-                                    char **resp_body, long *http_code)
+                                    const char *cred __attribute__((unused)), char **resp_body,
+                                    long *http_code)
 {
     g_mock_call_count++;
     if (http_code)
@@ -274,8 +267,8 @@ static void test_api_recovery_max_retries_exceeded(void)
     api_rec_result_t result = {0};
 
     int ret = api_rec_execute_with_recovery(pool, mock_request_always_fail, NULL,
-                                           "https://api.test.com/v1/fail",
-                                           "{}", &response, &http_code, &result);
+                                            "https://api.test.com/v1/fail", "{}", &response,
+                                            &http_code, &result);
     assert(ret != 0);
     assert(g_mock_call_count > 1);
 
@@ -310,22 +303,23 @@ static void test_api_recovery_shutdown(void)
     printf("      PASSED\n");
 }
 
-/* ==================== Weighted Strategy 测试 ==================== */
-
 static void test_weighted_equal_weights(void)
 {
     printf("  [8]  test_weighted_equal_weights...\n");
 
-    mock_weighted_config_t config = {.cost_weight = 0.333f, .perf_weight = 0.333f,
+    mock_weighted_config_t config = {.cost_weight = 0.333f,
+                                     .perf_weight = 0.333f,
                                      .trust_weight = 0.334f};
-    mock_agent_info_t agent = {
-        .agent_id = "agent-a", .cost_estimate = 1.0f, .success_rate = 0.8f, .trust_score = 0.9f,
-        .priority = 5};
+    mock_agent_info_t agent = {.agent_id = "agent-a",
+                               .cost_estimate = 1.0f,
+                               .success_rate = 0.8f,
+                               .trust_score = 0.9f,
+                               .priority = 5};
 
     float score = mock_compute_weighted_score(&agent, &config);
     float expected_cost = 1.0f / (1.0f + 1.0f);
-    float expected = config.cost_weight * expected_cost + config.perf_weight * 0.8f +
-                     config.trust_weight * 0.9f;
+    float expected =
+        config.cost_weight * expected_cost + config.perf_weight * 0.8f + config.trust_weight * 0.9f;
 
     assert(feq(score, expected, 0.005f));
     assert(score > 0.0f && score < 1.0f);
@@ -337,14 +331,19 @@ static void test_weighted_cost_dominant(void)
 {
     printf("  [9]  test_weighted_cost_dominant...\n");
 
-    mock_weighted_config_t high_cost_cfg = {.cost_weight = 0.8f, .perf_weight = 0.1f,
+    mock_weighted_config_t high_cost_cfg = {.cost_weight = 0.8f,
+                                            .perf_weight = 0.1f,
                                             .trust_weight = 0.1f};
-    mock_agent_info_t low_cost = {
-        .agent_id = "cheap-agent", .cost_estimate = 0.1f, .success_rate = 0.5f,
-        .trust_score = 0.5f, .priority = 3};
-    mock_agent_info_t high_cost = {
-        .agent_id = "expensive-agent", .cost_estimate = 10.0f, .success_rate = 0.95f,
-        .trust_score = 0.95f, .priority = 3};
+    mock_agent_info_t low_cost = {.agent_id = "cheap-agent",
+                                  .cost_estimate = 0.1f,
+                                  .success_rate = 0.5f,
+                                  .trust_score = 0.5f,
+                                  .priority = 3};
+    mock_agent_info_t high_cost = {.agent_id = "expensive-agent",
+                                   .cost_estimate = 10.0f,
+                                   .success_rate = 0.95f,
+                                   .trust_score = 0.95f,
+                                   .priority = 3};
 
     float s_cheap = mock_compute_weighted_score(&low_cost, &high_cost_cfg);
     float s_expensive = mock_compute_weighted_score(&high_cost, &high_cost_cfg);
@@ -358,14 +357,19 @@ static void test_weighted_perf_dominant(void)
 {
     printf("  [10] test_weighted_perf_dominant...\n");
 
-    mock_weighted_config_t perf_cfg = {.cost_weight = 0.1f, .perf_weight = 0.8f,
+    mock_weighted_config_t perf_cfg = {.cost_weight = 0.1f,
+                                       .perf_weight = 0.8f,
                                        .trust_weight = 0.1f};
-    mock_agent_info_t high_perf = {
-        .agent_id = "fast-agent", .cost_estimate = 5.0f, .success_rate = 0.99f,
-        .trust_score = 0.5f, .priority = 3};
-    mock_agent_info_t low_perf = {
-        .agent_id = "slow-agent", .cost_estimate = 0.5f, .success_rate = 0.3f,
-        .trust_score = 0.8f, .priority = 3};
+    mock_agent_info_t high_perf = {.agent_id = "fast-agent",
+                                   .cost_estimate = 5.0f,
+                                   .success_rate = 0.99f,
+                                   .trust_score = 0.5f,
+                                   .priority = 3};
+    mock_agent_info_t low_perf = {.agent_id = "slow-agent",
+                                  .cost_estimate = 0.5f,
+                                  .success_rate = 0.3f,
+                                  .trust_score = 0.8f,
+                                  .priority = 3};
 
     float s_fast = mock_compute_weighted_score(&high_perf, &perf_cfg);
     float s_slow = mock_compute_weighted_score(&low_perf, &perf_cfg);
@@ -379,14 +383,19 @@ static void test_weighted_trust_dominant(void)
 {
     printf("  [11] test_weighted_trust_dominant...\n");
 
-    mock_weighted_config_t trust_cfg = {.cost_weight = 0.1f, .perf_weight = 0.1f,
+    mock_weighted_config_t trust_cfg = {.cost_weight = 0.1f,
+                                        .perf_weight = 0.1f,
                                         .trust_weight = 0.8f};
-    mock_agent_info_t high_trust = {
-        .agent_id = "trusted-agent", .cost_estimate = 5.0f, .success_rate = 0.5f,
-        .trust_score = 0.98f, .priority = 3};
-    mock_agent_info_t low_trust = {
-        .agent_id = "distrusted-agent", .cost_estimate = 0.5f, .success_rate = 0.9f,
-        .trust_score = 0.2f, .priority = 3};
+    mock_agent_info_t high_trust = {.agent_id = "trusted-agent",
+                                    .cost_estimate = 5.0f,
+                                    .success_rate = 0.5f,
+                                    .trust_score = 0.98f,
+                                    .priority = 3};
+    mock_agent_info_t low_trust = {.agent_id = "distrusted-agent",
+                                   .cost_estimate = 0.5f,
+                                   .success_rate = 0.9f,
+                                   .trust_score = 0.2f,
+                                   .priority = 3};
 
     float s_trusted = mock_compute_weighted_score(&high_trust, &trust_cfg);
     float s_untrusted = mock_compute_weighted_score(&low_trust, &trust_cfg);
@@ -400,11 +409,14 @@ static void test_weighted_zero_all_scores(void)
 {
     printf("  [12] test_weighted_zero_all_scores...\n");
 
-    mock_weighted_config_t cfg = {.cost_weight = 0.33f, .perf_weight = 0.33f,
+    mock_weighted_config_t cfg = {.cost_weight = 0.33f,
+                                  .perf_weight = 0.33f,
                                   .trust_weight = 0.34f};
-    mock_agent_info_t zero_agent = {
-        .agent_id = "zero-agent", .cost_estimate = 0.0f, .success_rate = 0.0f,
-        .trust_score = 0.0f, .priority = 1};
+    mock_agent_info_t zero_agent = {.agent_id = "zero-agent",
+                                    .cost_estimate = 0.0f,
+                                    .success_rate = 0.0f,
+                                    .trust_score = 0.0f,
+                                    .priority = 1};
 
     float score = mock_compute_weighted_score(&zero_agent, &cfg);
 
@@ -418,14 +430,17 @@ static void test_weighted_high_cost_penalty(void)
 {
     printf("  [13] test_weighted_high_cost_penalty...\n");
 
-    mock_weighted_config_t cfg = {.cost_weight = 0.5f, .perf_weight = 0.25f,
-                                  .trust_weight = 0.25f};
-    mock_agent_info_t cheap = {
-        .agent_id = "cheap", .cost_estimate = 0.1f, .success_rate = 0.7f,
-        .trust_score = 0.7f, .priority = 2};
-    mock_agent_info_t expensive = {
-        .agent_id = "expensive", .cost_estimate = 100.0f, .success_rate = 0.99f,
-        .trust_score = 0.99f, .priority = 2};
+    mock_weighted_config_t cfg = {.cost_weight = 0.5f, .perf_weight = 0.25f, .trust_weight = 0.25f};
+    mock_agent_info_t cheap = {.agent_id = "cheap",
+                               .cost_estimate = 0.1f,
+                               .success_rate = 0.7f,
+                               .trust_score = 0.7f,
+                               .priority = 2};
+    mock_agent_info_t expensive = {.agent_id = "expensive",
+                                   .cost_estimate = 100.0f,
+                                   .success_rate = 0.99f,
+                                   .trust_score = 0.99f,
+                                   .priority = 2};
 
     float s_cheap = mock_compute_weighted_score(&cheap, &cfg);
     float s_exp = mock_compute_weighted_score(&expensive, &cfg);
@@ -434,7 +449,7 @@ static void test_weighted_high_cost_penalty(void)
 
     float cost_penalty_ratio = s_cheap / s_exp;
     (void)cost_penalty_ratio;
-    assert(cost_penalty_ratio > 1.0f);  /* 便宜Agent得分更高 */
+    assert(cost_penalty_ratio > 1.0f);
 
     printf("      PASSED\n");
 }
@@ -443,11 +458,12 @@ static void test_weighted_perfect_agent(void)
 {
     printf("  [14] test_weighted_perfect_agent...\n");
 
-    mock_weighted_config_t cfg = {.cost_weight = 0.3f, .perf_weight = 0.4f,
-                                  .trust_weight = 0.3f};
-    mock_agent_info_t perfect = {
-        .agent_id = "perfect", .cost_estimate = 0.0f, .success_rate = 1.0f,
-        .trust_score = 1.0f, .priority = 10};
+    mock_weighted_config_t cfg = {.cost_weight = 0.3f, .perf_weight = 0.4f, .trust_weight = 0.3f};
+    mock_agent_info_t perfect = {.agent_id = "perfect",
+                                 .cost_estimate = 0.0f,
+                                 .success_rate = 1.0f,
+                                 .trust_score = 1.0f,
+                                 .priority = 10};
 
     float score = mock_compute_weighted_score(&perfect, &cfg);
     float expected = 0.3f * 1.0f + 0.4f * 1.0f + 0.3f * 1.0f;
@@ -457,8 +473,6 @@ static void test_weighted_perfect_agent(void)
 
     printf("      PASSED\n");
 }
-
-/* ==================== Priority-Based Strategy 测试 ==================== */
 
 static int mock_priority_select(const mock_agent_info_t *candidates[], size_t count)
 {
@@ -536,8 +550,6 @@ static void test_priority_invalid_priority(void)
     printf("      PASSED\n");
 }
 
-/* ==================== Error Code Migration 验证 ==================== */
-
 static void test_err_migration_no_return_neg1(void)
 {
     printf("  [18] test_err_migration_no_return_neg1 (ERR-02/ERR-03 migration)...\n");
@@ -545,19 +557,15 @@ static void test_err_migration_no_return_neg1(void)
     assert(AIRY_SUCCESS == 0);
     assert(AIRY_OK == 0);
 
-    /* 验证 ERR_UNKNOWN == -1 （传统未知错误码） */
     assert(AIRY_ERR_UNKNOWN < 0);
 
-    /* 验证 E* 别名映射到 ERR* 系列 */
     assert(AIRY_EINVAL != 0);
     assert(AIRY_ENOMEM != 0);
     assert(AIRY_ENOENT != 0);
 
-    /* 验证没有错误码使用 -1 作为返回值（ERR-02 合规） */
     assert(AIRY_ERR_INVALID_PARAM != (-1));
     assert(AIRY_ERR_OUT_OF_MEMORY != (-1));
 
-    /* 验证 strerror 可用 */
     const char *s_unknown = airy_err_str(AIRY_ERR_UNKNOWN);
     const char *s_inval = airy_err_str(AIRY_ERR_INVALID_PARAM);
     assert(s_unknown != NULL);
@@ -567,8 +575,6 @@ static void test_err_migration_no_return_neg1(void)
 
     printf("      PASSED\n");
 }
-
-/* ==================== Main 入口 ==================== */
 
 int main(void)
 {

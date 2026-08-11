@@ -1,15 +1,15 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file jsonrpc_helpers.c
  * @brief JSON-RPC 2.0 公共辅助函数实现
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "jsonrpc_helpers.h"
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+
 #include <cjson_helpers.h>
 #include "svc_logger.h"
 
@@ -73,11 +73,10 @@ int jsonrpc_parse_request(const char *raw, char **out_method, cJSON **out_params
     *out_params = NULL;
     *out_id = 0;
 
-    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
     CJSON_PARSE_GUARD(req, raw, { return JSONRPC_PARSE_ERROR; });
 
     if (jsonrpc_validate_request(req) != 0) {
-        /* req 由 CJSON_AUTO_FREE 自动释放 */
+
         return JSONRPC_INVALID_REQUEST;
     }
 
@@ -96,7 +95,6 @@ int jsonrpc_parse_request(const char *raw, char **out_method, cJSON **out_params
         *out_id = id_obj->valueint;
     }
 
-    /* req 由 CJSON_AUTO_FREE 自动释放 */
     return 0;
 }
 
@@ -230,7 +228,7 @@ char *jsonrpc_build_notification(const char *method, cJSON *params)
 const char *jsonrpc_get_error_message(int code)
 {
     switch (code) {
-    /* JSON-RPC 2.0 标准错误码 */
+
     case JSONRPC_PARSE_ERROR:
         return "Parse error";
     case JSONRPC_INVALID_REQUEST:
@@ -241,7 +239,7 @@ const char *jsonrpc_get_error_message(int code)
         return "Invalid params";
     case JSONRPC_INTERNAL_ERROR:
         return "Internal error";
-    /* 自定义服务器错误码（-32000 ~ -32099 区间） */
+
     case JSONRPC_RATE_LIMITED:
         return "Rate limit exceeded";
     case JSONRPC_AUTH_FAILED:

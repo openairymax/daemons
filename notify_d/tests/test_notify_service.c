@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_notify_service.c
  * @brief 通知服务核心单元测试
@@ -11,7 +12,6 @@
  *    get_stats/health_check/shutdown）
  *  - 订阅注册表驱动的频道过滤广播（POSIX socketpair 端到端）
  *
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "notify_service.h"
@@ -48,7 +48,6 @@ static void test_publish_enqueues_event(void)
     printf("  test_publish_enqueues_event...\n");
     notify_d_service_init(&g_svc);
 
-    /* 直接入队：消息进入环形队列 */
     assert(notify_d_enqueue(&g_svc, "hello notify", "alerts", "alert") == AIRY_SUCCESS);
     assert(g_svc.pending_count == 1);
     assert(g_svc.pending[g_svc.pending_head] != NULL);
@@ -56,7 +55,6 @@ static void test_publish_enqueues_event(void)
     assert(strcmp(g_svc.pending[g_svc.pending_head]->channel, "alerts") == 0);
     assert(strcmp(g_svc.pending[g_svc.pending_head]->event_type, "alert") == 0);
 
-    /* 经 JSON-RPC publish 方法：事件进入队列 */
     char resp[4096];
     int rc = notify_d_dispatch_jsonrpc(
         &g_svc,
@@ -70,7 +68,6 @@ static void test_publish_enqueues_event(void)
     assert(strcmp(g_svc.pending[tail]->channel, "ops") == 0);
     assert(strcmp(g_svc.pending[tail]->event_type, "deploy") == 0);
 
-    /* payload 别名参数 */
     rc = notify_d_dispatch_jsonrpc(
         &g_svc,
         "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{\"payload\":\"via payload\"},"
@@ -83,12 +80,11 @@ static void test_publish_enqueues_event(void)
     assert(strcmp(g_svc.pending[tail2]->channel, "default") == 0);
     assert(strcmp(g_svc.pending[tail2]->event_type, "message") == 0);
 
-    /* 队列满时 publish 返回内部错误（合法 JSON-RPC 错误响应） */
     g_svc.pending_count = NOTIFY_D_MAX_PENDING;
-    rc = notify_d_dispatch_jsonrpc(
-        &g_svc,
-        "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{\"message\":\"overflow\"},\"id\":9}",
-        resp, sizeof(resp));
+    rc = notify_d_dispatch_jsonrpc(&g_svc,
+                                   "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{"
+                                   "\"message\":\"overflow\"},\"id\":9}",
+                                   resp, sizeof(resp));
     assert(rc == NOTIFY_D_METHOD_HANDLED);
     cJSON *parsed = cJSON_Parse(resp);
     assert(parsed != NULL);
@@ -115,26 +111,21 @@ static void test_subscribe_unsubscribe(void)
     assert(notify_d_has_subscription(&g_svc, "alerts", "agent-2"));
     assert(!notify_d_has_subscription(&g_svc, "alerts", "ghost"));
 
-    /* 幂等订阅：不重复计数 */
     assert(notify_d_subscribe(&g_svc, "alerts", "agent-1") == AIRY_SUCCESS);
     assert(notify_d_subscription_count(&g_svc, "alerts") == 2);
 
-    /* 取消订阅 */
     assert(notify_d_unsubscribe(&g_svc, "alerts", "agent-1") == AIRY_SUCCESS);
     assert(notify_d_subscription_count(&g_svc, "alerts") == 1);
     assert(!notify_d_has_subscription(&g_svc, "alerts", "agent-1"));
     assert(notify_d_has_subscription(&g_svc, "ops", "agent-1"));
 
-    /* 幂等取消：未订阅也返回成功 */
     assert(notify_d_unsubscribe(&g_svc, "alerts", "agent-1") == AIRY_SUCCESS);
 
-    /* 参数校验 */
     assert(notify_d_subscribe(&g_svc, NULL, "x") != AIRY_SUCCESS);
     assert(notify_d_subscribe(&g_svc, "", "x") != AIRY_SUCCESS);
     assert(notify_d_subscribe(&g_svc, "x", NULL) != AIRY_SUCCESS);
     assert(notify_d_unsubscribe(&g_svc, NULL, "x") != AIRY_SUCCESS);
 
-    /* 槽位复用：unsubscribe 后重新订阅不扩大注册表 */
     assert(notify_d_subscribe(&g_svc, "alerts", "agent-1") == AIRY_SUCCESS);
     assert(g_svc.subscription_count == 3);
 
@@ -164,7 +155,6 @@ static void test_dispatch_responses_valid_json(void)
         int rc = notify_d_dispatch_jsonrpc(&g_svc, reqs[i], resp, sizeof(resp));
         assert(rc == NOTIFY_D_METHOD_HANDLED);
 
-        /* 响应必须是合法 JSON 且为 JSON-RPC 2.0 成功响应 */
         cJSON *parsed = cJSON_Parse(resp);
         assert(parsed != NULL);
         cJSON *jsonrpc = cJSON_GetObjectItem(parsed, "jsonrpc");
@@ -177,7 +167,6 @@ static void test_dispatch_responses_valid_json(void)
         cJSON_Delete(parsed);
     }
 
-    /* subscribe 后 list 应体现频道订阅数 */
     char resp[8192];
     notify_d_dispatch_jsonrpc(
         &g_svc,
@@ -208,7 +197,6 @@ static void test_dispatch_responses_valid_json(void)
     assert(found);
     cJSON_Delete(parsed);
 
-    /* health 应返回队列占用与消费者状态 */
     notify_d_dispatch_jsonrpc(&g_svc,
                               "{\"jsonrpc\":\"2.0\",\"method\":\"health\",\"params\":{},\"id\":1}",
                               resp, sizeof(resp));
@@ -223,20 +211,18 @@ static void test_dispatch_responses_valid_json(void)
     assert(queue_capacity->valueint == NOTIFY_D_MAX_PENDING);
     cJSON_Delete(parsed);
 
-    /* 缺失参数应返回合法 JSON-RPC 错误响应 */
     int rc = notify_d_dispatch_jsonrpc(
-        &g_svc, "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{},\"id\":10}",
-        resp, sizeof(resp));
+        &g_svc, "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{},\"id\":10}", resp,
+        sizeof(resp));
     assert(rc == NOTIFY_D_METHOD_HANDLED);
     parsed = cJSON_Parse(resp);
     assert(parsed != NULL);
     assert(cJSON_IsObject(cJSON_GetObjectItem(parsed, "error")));
     cJSON_Delete(parsed);
 
-    /* shutdown 返回 SHUTDOWN 且响应为合法 JSON */
     rc = notify_d_dispatch_jsonrpc(
-        &g_svc, "{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\",\"params\":{},\"id\":11}",
-        resp, sizeof(resp));
+        &g_svc, "{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\",\"params\":{},\"id\":11}", resp,
+        sizeof(resp));
     assert(rc == NOTIFY_D_METHOD_SHUTDOWN);
     parsed = cJSON_Parse(resp);
     assert(parsed != NULL);
@@ -244,13 +230,11 @@ static void test_dispatch_responses_valid_json(void)
     assert(cJSON_IsObject(result));
     cJSON_Delete(parsed);
 
-    /* 未知方法：不处理，交由原协议路径 */
     rc = notify_d_dispatch_jsonrpc(
-        &g_svc, "{\"jsonrpc\":\"2.0\",\"method\":\"bogus\",\"params\":{},\"id\":12}",
-        resp, sizeof(resp));
+        &g_svc, "{\"jsonrpc\":\"2.0\",\"method\":\"bogus\",\"params\":{},\"id\":12}", resp,
+        sizeof(resp));
     assert(rc == NOTIFY_D_METHOD_NOT_RPC);
 
-    /* 非 JSON-RPC（无 id / 非 JSON）→ 不处理 */
     rc = notify_d_dispatch_jsonrpc(&g_svc, "hello raw message", resp, sizeof(resp));
     assert(rc == NOTIFY_D_METHOD_NOT_RPC);
 
@@ -259,7 +243,7 @@ static void test_dispatch_responses_valid_json(void)
 }
 
 #ifndef _WIN32
-/* 端到端：订阅注册表驱动广播投递到携带 client_id 的活跃连接 */
+
 static void test_broadcast_to_subscribed_client(void)
 {
     printf("  test_broadcast_to_subscribed_client...\n");
@@ -270,7 +254,6 @@ static void test_broadcast_to_subscribed_client(void)
 
     assert(notify_d_subscribe(&g_svc, "alerts", "agent-1") == AIRY_SUCCESS);
 
-    /* 活跃客户端：连接频道为 "none"，但 client_id 命中订阅注册表 */
     notify_client_t *client = &g_svc.clients[0];
     __builtin_memset(client, 0, sizeof(*client));
     client->fd = sp[0];
@@ -280,7 +263,6 @@ static void test_broadcast_to_subscribed_client(void)
     client->channel = AIRY_STRDUP("none");
     g_svc.client_count = 1;
 
-    /* 订阅频道事件 → 投递 */
     notify_event_t ev = {0};
     ev.message = "alert msg";
     ev.channel = "alerts";
@@ -295,13 +277,11 @@ static void test_broadcast_to_subscribed_client(void)
     assert(strstr(buf, "\"alert msg\"") != NULL);
     assert(strstr(buf, "\"alerts\"") != NULL);
 
-    /* 未订阅频道 → 不投递 */
     ev.channel = "other";
     assert(notify_d_broadcast_event(&g_svc, &ev) == 0);
     got = recv(sp[1], buf, sizeof(buf), MSG_DONTWAIT);
     assert(got < 0); /* EAGAIN */
 
-    /* 取消订阅后 → 不再投递 */
     assert(notify_d_unsubscribe(&g_svc, "alerts", "agent-1") == AIRY_SUCCESS);
     ev.channel = "alerts";
     assert(notify_d_broadcast_event(&g_svc, &ev) == 0);

@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file agent_service.h
  * @brief Agent 服务对外接口（agent.* 命名空间）
@@ -7,7 +8,6 @@
  * 承载原 syscall_router.c 中 airy_sys_agent_spawn/terminate/invoke/list
  * 的运行时 Agent 管理逻辑，作为 agent_d 守护进程的服务核心对外暴露。
  *
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_AGENT_SERVICE_H
@@ -16,7 +16,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* 改进1（异步可中断）：invoke 支持取消令牌（select/poll 非阻塞 + token 轮询） */
+
 #include "cancel_token.h"
 
 #ifdef __cplusplus
@@ -25,20 +25,17 @@ extern "C" {
 
 typedef struct agent_service agent_service_t;
 
-/* ---------- 生命周期 ---------- */
 
 agent_service_t *agent_service_create(size_t max_agents);
 void agent_service_destroy(agent_service_t *svc);
 
-/* ---------- Agent 管理接口 ---------- */
 
 /**
  * @brief 派生新 Agent
  * @param spec Agent 规格（JSON 字符串）
  * @return AIRY_SUCCESS 成功，*out_agent_id 输出新 Agent ID（调用方负责 AIRY_FREE）
  */
-int agent_service_spawn(agent_service_t *svc, const char *spec,
-                          char **out_agent_id);
+int agent_service_spawn(agent_service_t *svc, const char *spec, char **out_agent_id);
 
 /**
  * @brief 终止指定 Agent
@@ -56,20 +53,16 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id);
  *         AIRY_ERR_STATE_ERROR Agent 未运行（已终止）；
  *         AIRY_ERR_CANCELED 执行被取消（AbortedOutput）
  */
-int agent_service_invoke(agent_service_t *svc, const char *agent_id,
-                          const char *input, size_t len,
-                          airy_cancel_token_t *cancel_token,
-                          char **out_output);
+int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char *input, size_t len,
+                         airy_cancel_token_t *cancel_token, char **out_output);
 
 /**
  * @brief 列出所有 Agent ID
  * @return AIRY_SUCCESS 成功，*out_agent_ids 输出 ID 数组，*out_count 输出数量
  *         （调用方负责 agent_service_list_free 释放）
  */
-int agent_service_list(agent_service_t *svc, char ***out_agent_ids,
-                         size_t *out_count);
+int agent_service_list(agent_service_t *svc, char ***out_agent_ids, size_t *out_count);
 
-/* ---------- invoke 会话管理（改进1 "取消下探"：跨进程取消） ---------- */
 
 /**
  * @brief 注册 invoke 会话（request_id → cancel_token）
@@ -86,7 +79,7 @@ int agent_service_list(agent_service_t *svc, char ***out_agent_ids,
  *         AIRY_ERR_BUSY 会话表已满
  */
 int agent_service_invoke_begin(agent_service_t *svc, const char *request_id,
-                                airy_cancel_token_t **out_token);
+                               airy_cancel_token_t **out_token);
 
 /**
  * @brief 注销 invoke 会话（invoke 完成/失败/取消后调用）
@@ -104,12 +97,10 @@ void agent_service_invoke_end(agent_service_t *svc, const char *request_id);
  */
 int agent_service_invoke_cancel(agent_service_t *svc, const char *request_id);
 
-/* ---------- 辅助接口 ---------- */
 
 size_t agent_service_count(agent_service_t *svc);
 void agent_service_list_free(char **agent_ids, size_t count);
 
-/* ---------- 性能监控 ---------- */
 
 /**
  * @brief 服务性能统计快照（10000 并发场景下由 agent_d 监控线程周期采样）
@@ -118,19 +109,19 @@ void agent_service_list_free(char **agent_ids, size_t count);
  * 各字段以原子计数更新，读取无需持锁（宽松一致即可满足监控语义）。
  */
 typedef struct {
-    int spawn_total;         /* spawn 请求总数 */
-    int spawn_ok;            /* spawn 成功数 */
-    int spawn_fail;          /* spawn 失败数 */
-    int invoke_total;        /* invoke 请求总数 */
-    int invoke_ok;           /* invoke 成功数 */
-    int invoke_fail;         /* invoke 失败数 */
-    int terminate_total;     /* terminate 请求总数 */
-    int lock_wait_total;     /* 全局锁 trylock 探测失败次数（锁竞争信号） */
-    int peak_running;        /* 峰值并发 running agent 数 */
-    unsigned long long spawn_us_total; /* spawn 累计耗时（微秒） */
-    unsigned long long spawn_us_max;   /* spawn 单次最大耗时（微秒） */
-    unsigned long long invoke_us_total;/* invoke 累计耗时（微秒） */
-    unsigned long long invoke_us_max;  /* invoke 单次最大耗时（微秒） */
+    int spawn_total;
+    int spawn_ok;
+    int spawn_fail;
+    int invoke_total;
+    int invoke_ok;
+    int invoke_fail;
+    int terminate_total;
+    int lock_wait_total;
+    int peak_running;
+    unsigned long long spawn_us_total;
+    unsigned long long spawn_us_max;
+    unsigned long long invoke_us_total;
+    unsigned long long invoke_us_max;
 } agent_perf_stats_t;
 
 /**

@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 /**
  * @file service.c
  * @brief LLM 服务核心逻辑实现
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 改进说明：
  * 1. 修复 stpcpy 不可移植问题
@@ -20,11 +20,11 @@
 #include "router/llm_router.h"
 #include "service.h"
 #include "svc_logger.h"
-/* A2-1: model.yaml global 段提取公共 API（svc_common，gateway_d 共用） */
+
 #include "svc_model_defaults.h"
 
 #include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+
 #include <cjson_helpers.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,8 +55,6 @@ static int ends_with(const char *str, const char *suffix)
         return 0;
     return strcmp(str + str_len - suffix_len, suffix) == 0;
 }
-
-/* ---------- 缓存键生成（便携版本） ---------- */
 
 /**
  * @brief 安全字符串拼接
@@ -89,11 +87,11 @@ static char *safe_strcat(char *dest, size_t dest_size, const char *src)
 static char *make_cache_key(const llm_request_config_t *manager)
 {
     if (!manager || !manager->model) {
-        SVC_LOG_ERROR("make_cache_key: NULL parameter (manager=%p, model=%p)", (const void *)manager, manager ? (const void *)manager->model : NULL);
+        SVC_LOG_ERROR("make_cache_key: NULL parameter (manager=%p, model=%p)",
+                      (const void *)manager, manager ? (const void *)manager->model : NULL);
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    /* 计算所需缓冲区大小 */
     size_t len = strlen(manager->model) + 2;
     for (size_t i = 0; i < manager->message_count; ++i) {
         const char *role = manager->messages[i].role ? manager->messages[i].role : "";
@@ -107,10 +105,8 @@ static char *make_cache_key(const llm_request_config_t *manager)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    /* 构建缓存键 */
     char *p = key;
 
-    /* 使用安全的字符串复制 */
     size_t pos = 0;
     size_t written = (size_t)snprintf(p, len, "%s", manager->model);
     if (written < len) {
@@ -134,7 +130,6 @@ static char *make_cache_key(const llm_request_config_t *manager)
         }
     }
 
-    /* 确保字符串以 null 结尾 */
     if (pos > 0 && key[pos - 1] == '|') {
         key[pos - 1] = '\0';
     } else if (pos < len) {
@@ -146,8 +141,6 @@ static char *make_cache_key(const llm_request_config_t *manager)
     return key;
 }
 
-/* ---------- 从 cJSON 节点加载定价规则 ---------- */
-
 /**
  * @brief 加载定价规则
  * @param root JSON 根节点
@@ -157,7 +150,8 @@ static char *make_cache_key(const llm_request_config_t *manager)
 static pricing_rule_t *load_pricing_rules(cJSON *root, int *count)
 {
     if (!root || !count) {
-        SVC_LOG_ERROR("load_pricing_rules: NULL parameter (root=%p, count=%p)", (const void *)root, (const void *)count);
+        SVC_LOG_ERROR("load_pricing_rules: NULL parameter (root=%p, count=%p)", (const void *)root,
+                      (const void *)count);
         *count = 0;
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
@@ -185,7 +179,7 @@ static pricing_rule_t *load_pricing_rules(cJSON *root, int *count)
         if (cJSON_IsString(pattern) && cJSON_IsNumber(input) && cJSON_IsNumber(output)) {
             rules[i].model_pattern = AIRY_STRDUP(pattern->valuestring);
             if (!rules[i].model_pattern) {
-                /* 内存分配失败，清理已分配的 */
+
                 SVC_LOG_ERROR("load_pricing_rules: strdup failed for model_pattern at index %d", i);
                 for (int j = 0; j < i; ++j) {
                     AIRY_FREE((void *)rules[j].model_pattern);
@@ -205,8 +199,6 @@ static pricing_rule_t *load_pricing_rules(cJSON *root, int *count)
     return rules;
 }
 
-/* ---------- 释放定价规则 ---------- */
-
 static void free_pricing_rules(pricing_rule_t *rules, int count)
 {
     if (!rules)
@@ -217,12 +209,10 @@ static void free_pricing_rules(pricing_rule_t *rules, int count)
     AIRY_FREE(rules);
 }
 
-/* ---------- P3.16 (ACC-DT17): llm_router 端点注册辅助 ---------- */
-
 /* 默认模型元数据 — 与 llm_router_init 的 cost_tracker 默认定价规则保持一致。
  * 用于在端点注册时填充 cost/latency/caps 字段；未来版本可通过配置文件覆盖。 */
 typedef struct {
-    const char *prefix;             /* 模型名前缀匹配（大小写敏感） */
+    const char *prefix;
     double cost_per_1k_input;
     double cost_per_1k_output;
     uint32_t avg_latency_ms;
@@ -230,11 +220,15 @@ typedef struct {
 } model_default_meta_t;
 
 static const model_default_meta_t MODEL_DEFAULT_META[] = {
-    {"gpt-4",    0.03,    0.06,    1200, LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING | LLM_CAP_FUNCTION_CALL},
-    {"gpt-3.5",  0.001,   0.002,   1000, LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING},
-    {"claude",   0.015,   0.075,   1100, LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING | LLM_CAP_FUNCTION_CALL},
-    {"deepseek", 0.00014, 0.00028,  900, LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING | LLM_CAP_FUNCTION_CALL},
-    {"gemini",   0.0005,  0.0015,  1000, LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING | LLM_CAP_VISION},
+    {"gpt-4", 0.03, 0.06, 1200,
+     LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING | LLM_CAP_FUNCTION_CALL},
+    {"gpt-3.5", 0.001, 0.002, 1000, LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING},
+    {"claude", 0.015, 0.075, 1100,
+     LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING | LLM_CAP_FUNCTION_CALL},
+    {"deepseek", 0.00014, 0.00028, 900,
+     LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING | LLM_CAP_FUNCTION_CALL},
+    {"gemini", 0.0005, 0.0015, 1000,
+     LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING | LLM_CAP_VISION},
 };
 
 static const model_default_meta_t *lookup_model_meta(const char *model_name)
@@ -250,9 +244,7 @@ static const model_default_meta_t *lookup_model_meta(const char *model_name)
     return NULL;
 }
 
-/* provider_registry_enumerate 回调：将每个 (provider, model) 注册为 router 端点 */
-static int register_endpoint_cb(const char *provider_name, const char *model_name,
-                                void *user_data)
+static int register_endpoint_cb(const char *provider_name, const char *model_name, void *user_data)
 {
     int *registered_count = (int *)user_data;
 
@@ -260,36 +252,35 @@ static int register_endpoint_cb(const char *provider_name, const char *model_nam
     __builtin_memset(&ep, 0, sizeof(ep));
     snprintf(ep.provider_name, sizeof(ep.provider_name), "%s", provider_name);
     snprintf(ep.model_name, sizeof(ep.model_name), "%s", model_name);
-    /* endpoint/api_key_env 留空：实际凭证由 provider ctx 内部持有，路由器无需感知 */
+
     ep.enabled = true;
     ep.priority = 0;
-    ep.context_window = 8192; /* 保守默认；未来可按模型精确化 */
+    ep.context_window = 8192;
 
     const model_default_meta_t *meta = lookup_model_meta(model_name);
     if (meta) {
-        ep.cost_per_1k_input  = meta->cost_per_1k_input;
+        ep.cost_per_1k_input = meta->cost_per_1k_input;
         ep.cost_per_1k_output = meta->cost_per_1k_output;
-        ep.avg_latency_ms     = meta->avg_latency_ms;
-        ep.capabilities       = meta->capabilities;
+        ep.avg_latency_ms = meta->avg_latency_ms;
+        ep.capabilities = meta->capabilities;
     } else {
-        /* 未知模型：保守默认值，确保仍可被路由（非桩，真实可路由端点） */
-        ep.cost_per_1k_input  = 0.001;
+
+        ep.cost_per_1k_input = 0.001;
         ep.cost_per_1k_output = 0.002;
-        ep.avg_latency_ms     = 1000;
-        ep.capabilities       = LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING;
+        ep.avg_latency_ms = 1000;
+        ep.capabilities = LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING;
     }
 
     int rc = llm_router_register_endpoint(&ep);
     if (rc == 0) {
         (*registered_count)++;
     } else {
-        SVC_LOG_WARN("C-L02: SVC: router endpoint register FAILED for %s/%s (rc=%d)",
-                     provider_name, model_name, rc);
+        SVC_LOG_WARN("C-L02: SVC: router endpoint register FAILED for %s/%s (rc=%d)", provider_name,
+                     model_name, rc);
     }
-    return 0; /* 继续枚举所有端点 */
+    return 0;
 }
 
-/* 将 registry 中所有 provider/model 注册为 llm_router 端点 */
 static void register_router_endpoints(llm_service_t *svc)
 {
     int registered_count = 0;
@@ -297,9 +288,6 @@ static void register_router_endpoints(llm_service_t *svc)
     SVC_LOG_INFO("C-L02: SVC: registered %d endpoints into llm_router", registered_count);
 }
 
-/* ---------- 模型配置辅助（A2-1: global 段 + 用户覆盖文件合并） ---------- */
-
-/* 释放单个 provider 配置的字段（不释放 provider 结构本身；用于数组元素替换） */
 static void free_provider_fields(provider_config_t *prov)
 {
     if (!prov)
@@ -316,7 +304,6 @@ static void free_provider_fields(provider_config_t *prov)
     __builtin_memset(prov, 0, sizeof(*prov));
 }
 
-/* 释放 provider_config_t 数组（registry 已深拷贝后调用） */
 static void free_provider_configs(provider_config_t *providers, size_t count)
 {
     if (!providers)
@@ -326,7 +313,6 @@ static void free_provider_configs(provider_config_t *providers, size_t count)
     AIRY_FREE(providers);
 }
 
-/* 深拷贝单个 provider 配置（字段全部 strdup，独立生命周期） */
 static provider_config_t provider_config_dup(const provider_config_t *src)
 {
     provider_config_t d;
@@ -357,7 +343,6 @@ static provider_config_t provider_config_dup(const provider_config_t *src)
     return d;
 }
 
-/* 合并主配置与用户覆盖：同名 provider 用户优先替换，不同名追加（深拷贝，无所有权转移） */
 static void merge_provider_configs(const provider_config_t *main_provs, size_t main_cnt,
                                    const provider_config_t *user_provs, size_t user_cnt,
                                    provider_config_t **out, size_t *out_cnt)
@@ -405,13 +390,12 @@ static void merge_provider_configs(const provider_config_t *main_provs, size_t m
  * svc_common 的 svc_model_defaults_from_yaml()（llm_d 与 gateway_d 共用，
  * 避免两处独立实现 libyaml 扫描逻辑）。 */
 
-/* ---------- 创建服务 ---------- */
-
 llm_service_t *llm_service_create(const char *config_path)
 {
     llm_service_t *svc = (llm_service_t *)AIRY_CALLOC(1, sizeof(llm_service_t));
     if (!svc) {
-        SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL allocate service context, STACK: llm_service_create");
+        SVC_LOG_ERROR(
+            "C-L02: SVC: CREATE-FAIL allocate service context, STACK: llm_service_create");
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
@@ -421,7 +405,6 @@ llm_service_t *llm_service_create(const char *config_path)
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
-    /* 加载基础配置 */
     service_config_t base_cfg;
     __builtin_memset(&base_cfg, 0, sizeof(base_cfg));
     base_cfg.llm_cache_capacity = AIRY_DEFAULT_CACHE_CAPACITY;
@@ -459,9 +442,8 @@ llm_service_t *llm_service_create(const char *config_path)
                 if (u_ret == 0 && user_providers && user_provider_count > 0) {
                     provider_config_t *merged = NULL;
                     size_t merged_count = 0;
-                    merge_provider_configs(model_providers, model_provider_count,
-                                           user_providers, user_provider_count,
-                                           &merged, &merged_count);
+                    merge_provider_configs(model_providers, model_provider_count, user_providers,
+                                           user_provider_count, &merged, &merged_count);
                     if (merged && merged_count > 0) {
                         free_provider_configs(model_providers, model_provider_count);
                         free_provider_configs(user_providers, user_provider_count);
@@ -483,7 +465,8 @@ llm_service_t *llm_service_create(const char *config_path)
                          model_provider_count);
         } else {
             SVC_LOG_WARN("C-L02: SVC: model config load failed (ret=%d), "
-                         "registry will be empty", cfg_ret);
+                         "registry will be empty",
+                         cfg_ret);
         }
     }
 
@@ -518,17 +501,15 @@ llm_service_t *llm_service_create(const char *config_path)
         AIRY_STRNCPY_TERM(svc->default_model, global_model, sizeof(svc->default_model));
         SVC_LOG_INFO("C-L02: SVC: default_model=%s (from global config)", svc->default_model);
     } else if (config_path) {
-        /* 简化 llm 段：无 global 段时回退 llm.model 作默认模型 */
+
         svc_model_llm_config_t llm_cfg;
         __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
         if (svc_model_defaults_llm_from_yaml(config_path, &llm_cfg) == 0 && llm_cfg.model[0]) {
             AIRY_STRNCPY_TERM(svc->default_model, llm_cfg.model, sizeof(svc->default_model));
             if (!global_provider[0] && llm_cfg.api_format[0]) {
-                const char *adapter = (strcasecmp(llm_cfg.api_format, "anthropic") == 0)
-                                          ? "anthropic"
-                                          : "openai";
-                AIRY_STRNCPY_TERM(svc->default_provider, adapter,
-                                  sizeof(svc->default_provider));
+                const char *adapter =
+                    (strcasecmp(llm_cfg.api_format, "anthropic") == 0) ? "anthropic" : "openai";
+                AIRY_STRNCPY_TERM(svc->default_provider, adapter, sizeof(svc->default_provider));
             }
             SVC_LOG_INFO("C-L02: SVC: default_model=%s (from llm section)", svc->default_model);
         }
@@ -561,8 +542,9 @@ llm_service_t *llm_service_create(const char *config_path)
                     if (yaml_content) {
                         yaml_content[read_len] = '\0';
 
-                        /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + if (root) + 手动 cJSON_Delete
-                         * 使用 do { ... } while (0) + break 保持原 if (root) ... else ... 块语义 */
+                        /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + if (root) +
+                         * 手动 cJSON_Delete 使用 do { ... } while (0) + break
+                         * 保持原 if (root) ... else ... 块语义 */
                         do {
                             CJSON_PARSE_GUARD(root, yaml_content, {
                                 SVC_LOG_WARN("Failed to parse pricing rules from manager");
@@ -577,7 +559,7 @@ llm_service_t *llm_service_create(const char *config_path)
                             } else if (rules) {
                                 AIRY_FREE(rules);
                             }
-                            /* root 由 CJSON_AUTO_FREE 自动释放 */
+
                         } while (0);
                     }
                     AIRY_FREE(yaml_content);
@@ -592,7 +574,6 @@ llm_service_t *llm_service_create(const char *config_path)
                       "degraded to no cost rules");
     }
 
-    /* 创建提供商注册表 */
     svc->registry = provider_registry_create(&base_cfg);
     if (!svc->registry) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL registry, STACK: llm_service_create");
@@ -608,7 +589,6 @@ llm_service_t *llm_service_create(const char *config_path)
         model_providers = NULL;
     }
 
-    /* 创建缓存 */
     svc->cache = llm_cache_create(base_cfg.llm_cache_capacity, base_cfg.llm_cache_ttl_sec);
     if (!svc->cache) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL cache, STACK: llm_service_create");
@@ -618,7 +598,6 @@ llm_service_t *llm_service_create(const char *config_path)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    /* 创建成本追踪器 */
     svc->cost = cost_tracker_create((const pricing_rule_t *)svc->rules, (int)svc->rule_count);
     if (!svc->cost) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL cost_tracker, STACK: llm_service_create");
@@ -629,7 +608,6 @@ llm_service_t *llm_service_create(const char *config_path)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    /* 创建 Token 计数器 */
     svc->token_counter = token_counter_create(base_cfg.token_encoding);
     if (!svc->token_counter) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL token_counter, STACK: llm_service_create");
@@ -645,7 +623,8 @@ llm_service_t *llm_service_create(const char *config_path)
      * 注册为路由端点。路由器为全局单例（设计见 llm_router.c），init 幂等。
      * 失败非致命：complete 路径会回退到 find_provider 保持向后兼容。 */
     if (llm_router_init(NULL) != 0) {
-        SVC_LOG_WARN("C-L02: SVC: llm_router_init failed — routing disabled, falling back to find_provider");
+        SVC_LOG_WARN(
+            "C-L02: SVC: llm_router_init failed — routing disabled, falling back to find_provider");
     } else {
         register_router_endpoints(svc);
     }
@@ -654,8 +633,6 @@ llm_service_t *llm_service_create(const char *config_path)
                  (int)svc->rule_count, base_cfg.llm_cache_capacity, base_cfg.llm_cache_ttl_sec);
     return svc;
 }
-
-/* ---------- 销毁服务 ---------- */
 
 void llm_service_destroy(llm_service_t *svc)
 {
@@ -700,15 +677,13 @@ void llm_service_destroy(llm_service_t *svc)
     AIRY_FREE(svc);
 }
 
-/* ---------- 辅助函数（降低 llm_service_complete 复杂度） ---------- */
-
 /**
  * @brief 复杂度评估等级（BAN-133 编码契约）
  */
 typedef enum {
-    LLM_COMPLEXITY_SIMPLE   = 0,
+    LLM_COMPLEXITY_SIMPLE = 0,
     LLM_COMPLEXITY_MODERATE = 1,
-    LLM_COMPLEXITY_COMPLEX  = 2
+    LLM_COMPLEXITY_COMPLEX = 2
 } llm_complexity_level_t;
 
 /**
@@ -728,44 +703,49 @@ typedef enum {
  */
 static llm_complexity_level_t assess_complexity(const char *input)
 {
-    if (!input) return LLM_COMPLEXITY_SIMPLE;
+    if (!input)
+        return LLM_COMPLEXITY_SIMPLE;
 
     size_t len = strlen(input);
     int score = 0;
 
-    /* 输入长度评分 */
-    if (len > 500) score += 2;
-    else if (len > 100) score += 1;
+    if (len > 500)
+        score += 2;
+    else if (len > 100)
+        score += 1;
 
-    /* 架构/设计/系统级关键词 */
-    const char *complex_kw[] = {
-        "architecture", "distributed", "system design", "scalability",
-        "架构", "分布式", "系统设计", "高可用", "微服务", "重构"
-    };
+    const char *complex_kw[] = {"architecture", "distributed", "system design", "scalability",
+                                "架构",         "分布式",      "系统设计",      "高可用",
+                                "微服务",       "重构"};
     for (size_t i = 0; i < sizeof(complex_kw) / sizeof(complex_kw[0]); i++) {
-        if (strstr(input, complex_kw[i])) { score += 1; break; }
+        if (strstr(input, complex_kw[i])) {
+            score += 1;
+            break;
+        }
     }
 
-    /* 多步骤标志 */
-    const char *multi_step_kw[] = {
-        "first", "then", "finally", "step 1", "step 2",
-        "首先", "然后", "最后", "第一步", "第二步"
-    };
+    const char *multi_step_kw[] = {"first", "then", "finally", "step 1", "step 2",
+                                   "首先",  "然后", "最后",    "第一步", "第二步"};
     for (size_t i = 0; i < sizeof(multi_step_kw) / sizeof(multi_step_kw[0]); i++) {
-        if (strstr(input, multi_step_kw[i])) { score += 2; break; }
+        if (strstr(input, multi_step_kw[i])) {
+            score += 2;
+            break;
+        }
     }
 
-    /* 代码生成标志 */
-    const char *code_kw[] = {
-        "function", "algorithm", "implement", "write a",
-        "函数", "算法", "实现", "编写", "代码"
-    };
+    const char *code_kw[] = {"function", "algorithm", "implement", "write a", "函数",
+                             "算法",     "实现",      "编写",      "代码"};
     for (size_t i = 0; i < sizeof(code_kw) / sizeof(code_kw[0]); i++) {
-        if (strstr(input, code_kw[i])) { score += 1; break; }
+        if (strstr(input, code_kw[i])) {
+            score += 1;
+            break;
+        }
     }
 
-    if (score >= 5) return LLM_COMPLEXITY_COMPLEX;
-    if (score >= 2) return LLM_COMPLEXITY_MODERATE;
+    if (score >= 5)
+        return LLM_COMPLEXITY_COMPLEX;
+    if (score >= 2)
+        return LLM_COMPLEXITY_MODERATE;
     return LLM_COMPLEXITY_SIMPLE;
 }
 
@@ -794,9 +774,7 @@ static void log_routing_decision(const char *model, llm_complexity_level_t compl
 {
     const char *complexity_names[] = {"SIMPLE", "MODERATE", "COMPLEX"};
     SVC_LOG_INFO("[ROUTING] model=%s complexity=%s input_len=%zu reason=%s",
-                 model ? model : "unknown",
-                 complexity_names[complexity],
-                 input_len,
+                 model ? model : "unknown", complexity_names[complexity], input_len,
                  reason ? reason : "default");
 }
 
@@ -807,7 +785,8 @@ static int get_cached_response(llm_service_t *svc, const char *cache_key,
                                llm_response_t **out_response)
 {
     if (!svc || !cache_key || !out_response) {
-        SVC_LOG_ERROR("get_cached_response: NULL parameter (svc=%p, cache_key=%p, out_response=%p)", (const void *)svc, (const void *)cache_key, (const void *)out_response);
+        SVC_LOG_ERROR("get_cached_response: NULL parameter (svc=%p, cache_key=%p, out_response=%p)",
+                      (const void *)svc, (const void *)cache_key, (const void *)out_response);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -834,7 +813,8 @@ static int get_cached_response(llm_service_t *svc, const char *cache_key,
 static const provider_t *find_provider(llm_service_t *svc, const char *model)
 {
     if (!svc || !model) {
-        SVC_LOG_ERROR("find_provider: NULL parameter (svc=%p, model=%p)", (const void *)svc, (const void *)model);
+        SVC_LOG_ERROR("find_provider: NULL parameter (svc=%p, model=%p)", (const void *)svc,
+                      (const void *)model);
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
@@ -863,7 +843,6 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
         return NULL;
     }
 
-    /* 显式 model 优先：精确匹配 registry（BAN-137 编码契约：用户指定即尊重） */
     if (manager->model && manager->model[0]) {
         const provider_t *exact = find_provider(svc, manager->model);
         if (exact) {
@@ -880,9 +859,7 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
     llm_route_request_t req;
     __builtin_memset(&req, 0, sizeof(req));
 
-    /* 从首条消息提取 prompt 用于 token 估算（路由器内部用其估算成本） */
-    if (manager->message_count > 0 && manager->messages &&
-        manager->messages[0].content) {
+    if (manager->message_count > 0 && manager->messages && manager->messages[0].content) {
         req.prompt = manager->messages[0].content;
         req.prompt_len = strlen(req.prompt);
     } else {
@@ -890,24 +867,23 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
         req.prompt_len = 0;
     }
 
-    /* 必需能力：CHAT + COMPLETION；流式额外要求 STREAMING */
     req.required_caps = LLM_CAP_CHAT | LLM_CAP_COMPLETION;
     if (is_stream) {
         req.required_caps |= LLM_CAP_STREAMING;
     }
 
     req.max_tokens = (manager->max_tokens > 0) ? (uint32_t)manager->max_tokens : 0;
-    req.max_cost = 0;          /* 不限成本 */
-    req.max_latency_ms = 0;    /* 不限延迟 */
+    req.max_cost = 0;
+    req.max_latency_ms = 0;
     req.strategy = LLM_ROUTE_COST;
-    req.preferred_provider[0] = '\0';  /* 自动选择，让策略生效 */
+    req.preferred_provider[0] = '\0';
 
     llm_route_result_t result;
     __builtin_memset(&result, 0, sizeof(result));
     int rc = llm_router_route(&req, &result);
     if (rc != 0) {
-        SVC_LOG_DEBUG("C-L02: SVC: router_route rc=%d — will fall back to find_provider(%s)",
-                      rc, manager->model ? manager->model : "NULL");
+        SVC_LOG_DEBUG("C-L02: SVC: router_route rc=%d — will fall back to find_provider(%s)", rc,
+                      manager->model ? manager->model : "NULL");
         return NULL;
     }
 
@@ -950,16 +926,14 @@ static void update_cost_tracking(llm_service_t *svc, const char *model, llm_resp
     }
 
     cost_tracker_add(svc->cost, model, resp->prompt_tokens, resp->completion_tokens);
-    resp->cost_usd = cost_tracker_estimate(svc->cost, model, resp->prompt_tokens,
-                                           resp->completion_tokens);
+    resp->cost_usd =
+        cost_tracker_estimate(svc->cost, model, resp->prompt_tokens, resp->completion_tokens);
 }
-
-/* ---------- 同步完成（重构后：圈复杂度从 22 降至 9） ---------- */
 
 int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager,
                          llm_response_t **out_response)
 {
-    /* 参数检查 */
+
     if (!svc || !manager || !out_response) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL invalid arguments, STACK: llm_service_complete");
         return AIRY_ERR_INVALID_PARAM;
@@ -970,14 +944,12 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* 生成缓存键 */
     char *cache_key = make_cache_key(manager);
     if (!cache_key) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL cache_key alloc, STACK: llm_service_complete");
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    /* 检查缓存 */
     llm_response_t *cached_resp = NULL;
     int cache_status = get_cached_response(svc, cache_key, &cached_resp);
     if (cache_status > 0 && cached_resp) {
@@ -996,16 +968,16 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
         prov = find_provider(svc, manager->model);
     }
     if (!prov) {
-        SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL model=%s, error=INVALID_MODEL, STACK: llm_service_complete",
-                      manager->model);
+        SVC_LOG_ERROR(
+            "C-L02: SVC: COMPLETE-FAIL model=%s, error=INVALID_MODEL, STACK: llm_service_complete",
+            manager->model);
         AIRY_FREE(cache_key);
         cache_key = NULL;
         return AIRY_ERR_LLM_INVALID_MODEL;
     }
 
-    /* 审计日志: 记录模型路由决策（BAN-137 编码契约） */
     {
-        /* 从消息中提取输入文本用于复杂度评估 */
+
         const char *first_content = NULL;
         size_t input_len = 0;
         if (manager->message_count > 0 && manager->messages[0].content) {
@@ -1016,7 +988,6 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
         log_routing_decision(manager->model, complexity, input_len, "user_specified");
     }
 
-    /* 调用提供商 */
     llm_response_t *resp = NULL;
     int ret = prov->ops->complete(prov->ctx, manager, &resp);
     if (ret != 0) {
@@ -1027,7 +998,6 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
         return ret;
     }
 
-    /* 更新成本追踪和缓存 */
     update_cost_tracking(svc, manager->model, resp);
     cache_response(svc, cache_key, resp);
 
@@ -1037,15 +1007,14 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     return AIRY_OK;
 }
 
-/* ---------- 流式完成 ---------- */
-
 int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *manager,
                                 llm_stream_callback_t callback, void *callback_data,
                                 llm_response_t **out_response)
 {
-    /* 参数检查 */
+
     if (!svc || !manager || !callback) {
-        SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL invalid arguments, STACK: llm_service_complete_stream");
+        SVC_LOG_ERROR(
+            "C-L02: SVC: STREAM-FAIL invalid arguments, STACK: llm_service_complete_stream");
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -1063,12 +1032,12 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
         prov = find_provider(svc, manager->model);
     }
     if (!prov) {
-        SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL model=%s, error=INVALID_MODEL, STACK: llm_service_complete_stream",
+        SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL model=%s, error=INVALID_MODEL, STACK: "
+                      "llm_service_complete_stream",
                       manager->model);
         return AIRY_ERR_LLM_INVALID_MODEL;
     }
 
-    /* 审计日志: 记录流式路由决策（BAN-137 编码契约） */
     {
         const char *first_content = NULL;
         size_t input_len = 0;
@@ -1080,14 +1049,13 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
         log_routing_decision(manager->model, complexity, input_len, "stream_user_specified");
     }
 
-    /* 检查是否支持流式 */
     if (!prov->ops->complete_stream) {
-        SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL model=%s, error=NOT_SUPPORTED, STACK: llm_service_complete_stream",
+        SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL model=%s, error=NOT_SUPPORTED, STACK: "
+                      "llm_service_complete_stream",
                       manager->model);
         return AIRY_ERR_NOT_SUPPORTED;
     }
 
-    /* 调用流式接口 */
     int ret = prov->ops->complete_stream(prov->ctx, manager, callback, callback_data, out_response);
 
     if (ret == 0 && out_response && *out_response) {
@@ -1100,12 +1068,11 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
     return ret;
 }
 
-/* ---------- 统计 ---------- */
-
 int llm_service_stats(llm_service_t *svc, char **out_json)
 {
     if (!svc || !out_json) {
-        SVC_LOG_ERROR("llm_service_stats: NULL parameter (svc=%p, out_json=%p)", (const void *)svc, (const void *)out_json);
+        SVC_LOG_ERROR("llm_service_stats: NULL parameter (svc=%p, out_json=%p)", (const void *)svc,
+                      (const void *)out_json);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -1135,14 +1102,11 @@ int llm_service_stats(llm_service_t *svc, char **out_json)
     return AIRY_OK;
 }
 
-/* ---------- 模型列表（A2-3: llm.list_models） ---------- */
-
 typedef struct {
     cJSON *models_arr;
     const char *default_model;
 } list_models_ctx_t;
 
-/* provider_registry_enumerate 回调：收集 (provider, model) 到 JSON 数组 */
 static int list_models_cb(const char *provider_name, const char *model_name, void *user_data)
 {
     list_models_ctx_t *ctx = (list_models_ctx_t *)user_data;
@@ -1185,8 +1149,7 @@ char *llm_service_list_models(llm_service_t *svc)
     };
     provider_registry_enumerate(svc->registry, list_models_cb, &ctx);
 
-    cJSON_AddStringToObject(root, "default_model",
-                            svc->default_model[0] ? svc->default_model : "");
+    cJSON_AddStringToObject(root, "default_model", svc->default_model[0] ? svc->default_model : "");
     if (svc->default_provider[0])
         cJSON_AddStringToObject(root, "default_provider", svc->default_provider);
 
@@ -1202,8 +1165,6 @@ const char *llm_service_default_model(const llm_service_t *svc)
         return NULL;
     return svc->default_model[0] ? svc->default_model : NULL;
 }
-
-/* ---------- 服务配置加载 ---------- */
 
 /**
  * @brief 加载服务配置
@@ -1242,7 +1203,7 @@ int svc_config_load(const char *config_path, service_config_t *cfg)
     FILE *f = fopen(config_path, "rb");
     if (!f) {
         SVC_LOG_WARN("C-L02: SVC: CONFIG-WARN cannot open file, STACK: svc_config_load");
-        return 0; /* 使用默认值，不算错误 */
+        return 0;
     }
 
     fseek(f, 0, SEEK_END);
@@ -1266,7 +1227,6 @@ int svc_config_load(const char *config_path, service_config_t *cfg)
     content[read_len] = '\0';
     fclose(f);
 
-    /* P0.18.2: 模式 B — CJSON_PARSE_GUARD（on_fail 中释放 content） */
     CJSON_PARSE_GUARD(root, content, {
         AIRY_FREE(content);
         SVC_LOG_WARN("C-L02: SVC: CONFIG-WARN parse failed, STACK: svc_config_load");
@@ -1274,7 +1234,6 @@ int svc_config_load(const char *config_path, service_config_t *cfg)
     });
     AIRY_FREE(content);
 
-    /* 提取配置值 */
     cJSON *item;
 
     item = cJSON_GetObjectItem(root, "llm_cache_capacity");
@@ -1305,7 +1264,6 @@ int svc_config_load(const char *config_path, service_config_t *cfg)
         }
     }
 
-    /* root 由 CJSON_AUTO_FREE 自动释放 */
     return AIRY_OK;
 }
 
@@ -1399,7 +1357,8 @@ int svc_config_load_yaml(const char *config_path, service_config_t *cfg)
 
     while (!done) {
         if (!yaml_parser_parse(&parser, &event)) {
-            SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN YAML parse error, STACK: svc_config_load_yaml");
+            SVC_LOG_WARN(
+                "C-L02: SVC: MODEL-CONFIG-WARN YAML parse error, STACK: svc_config_load_yaml");
             break;
         }
         if (event.type == YAML_STREAM_END_EVENT) {
@@ -1476,14 +1435,16 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
 
     FILE *f = fopen(config_path, "rb");
     if (!f) {
-        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN cannot open model config, STACK: svc_load_model_config_yaml");
+        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN cannot open model config, STACK: "
+                     "svc_load_model_config_yaml");
         return 0;
     }
 
     yaml_parser_t parser;
     if (!yaml_parser_initialize(&parser)) {
         fclose(f);
-        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN YAML parser init, STACK: svc_load_model_config_yaml");
+        SVC_LOG_WARN(
+            "C-L02: SVC: MODEL-CONFIG-WARN YAML parser init, STACK: svc_load_model_config_yaml");
         return 0;
     }
     yaml_parser_set_input_file(&parser, f);
@@ -1491,12 +1452,12 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
     yaml_event_t event;
     model_entry_t models[64];
     size_t model_count = 0;
-    int map_depth = 0;       /* 全局 mapping 深度 */
-    int seq_depth = 0;       /* 全局 sequence 深度 */
-    int in_models = 0;       /* 处于顶级 models: 序列内 */
-    int in_providers = 0;    /* 处于顶级 providers: 序列内 */
-    int item_depth = 0;      /* 序列内 mapping 深度（模型项/provider 项=1） */
-    int nested = 0;          /* 项内嵌套结构深度（retry/circuit_breaker 等） */
+    int map_depth = 0;
+    int seq_depth = 0;
+    int in_models = 0;
+    int in_providers = 0;
+    int item_depth = 0;
+    int nested = 0;
     char pending_key[128];
     int has_pending_key = 0;
     yaml_map_t item_map;
@@ -1517,7 +1478,7 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
     yaml_map_init(&prov_map);
     prov_cfg_t pcfg[16];
     size_t pcfg_count = 0;
-    prov_cfg_t cur_p;        /* 当前解析中的 provider 项（mapping 结束提交） */
+    prov_cfg_t cur_p;
     int done = 0;
 
     while (!done) {
@@ -1534,7 +1495,7 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
             if (in_models || in_providers) {
                 item_depth++;
                 if (item_depth == 1) {
-                    /* 新模型项 / provider 项开始 */
+
                     nested = 0;
                     has_pending_key = 0;
                     if (in_providers) {
@@ -1546,7 +1507,7 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
                         yaml_map_init(&item_map);
                     }
                 } else {
-                    /* 嵌套结构（retry/circuit_breaker/...），其字段不是模型字段 */
+
                     nested++;
                     has_pending_key = 0;
                 }
@@ -1557,13 +1518,14 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
             if (in_models || in_providers) {
                 if (item_depth == 1 && nested == 0) {
                     if (in_providers) {
-                        /* provider 项结束：收集字段并提交到 pcfg[] */
+
                         const char *pn = yaml_map_get(&prov_map, "name");
                         if (pn && pn[0]) {
                             AIRY_STRNCPY_TERM(cur_p.name, pn, sizeof(cur_p.name));
                             const char *pke = yaml_map_get(&prov_map, "api_key_env");
                             if (pke)
-                                AIRY_STRNCPY_TERM(cur_p.api_key_env, pke, sizeof(cur_p.api_key_env));
+                                AIRY_STRNCPY_TERM(cur_p.api_key_env, pke,
+                                                  sizeof(cur_p.api_key_env));
                             const char *pb = yaml_map_get(&prov_map, "base_url");
                             if (pb)
                                 AIRY_STRNCPY_TERM(cur_p.base_url, pb, sizeof(cur_p.base_url));
@@ -1584,7 +1546,7 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
                                 AIRY_FREE(cur_p.model_names[k]);
                         }
                     } else if (model_count < 64) {
-                        /* 模型项结束：收集字段 */
+
                         const char *n = yaml_map_get(&item_map, "name");
                         const char *p = yaml_map_get(&item_map, "provider");
                         const char *e = yaml_map_get(&item_map, "api_key_env");
@@ -1594,12 +1556,16 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
 
                         if (n && p) {
                             __builtin_memset(&models[model_count], 0, sizeof(model_entry_t));
-                            AIRY_STRNCPY_TERM(models[model_count].name, n, sizeof(models[model_count].name));
-                            AIRY_STRNCPY_TERM(models[model_count].provider, p, sizeof(models[model_count].provider));
+                            AIRY_STRNCPY_TERM(models[model_count].name, n,
+                                              sizeof(models[model_count].name));
+                            AIRY_STRNCPY_TERM(models[model_count].provider, p,
+                                              sizeof(models[model_count].provider));
                             if (e)
-                                AIRY_STRNCPY_TERM(models[model_count].api_key_env, e, sizeof(models[model_count].api_key_env));
+                                AIRY_STRNCPY_TERM(models[model_count].api_key_env, e,
+                                                  sizeof(models[model_count].api_key_env));
                             if (ep)
-                                AIRY_STRNCPY_TERM(models[model_count].endpoint, ep, sizeof(models[model_count].endpoint));
+                                AIRY_STRNCPY_TERM(models[model_count].endpoint, ep,
+                                                  sizeof(models[model_count].endpoint));
                             if (t)
                                 models[model_count].timeout_sec = (int)strtol(t, NULL, 10);
                             if (r)
@@ -1629,18 +1595,18 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
             if ((in_models || in_providers) && item_depth >= 1 && nested > 0)
                 nested--;
             if (in_models && item_depth == 0 && seq_depth <= 1)
-                in_models = 0; /* models 序列结束 */
+                in_models = 0;
             if (in_providers && item_depth == 0 && seq_depth <= 1)
-                in_providers = 0; /* providers 序列结束 */
+                in_providers = 0;
             if (in_providers && item_depth == 1 && has_pending_key &&
                 strcmp(pending_key, "models") == 0)
-                has_pending_key = 0; /* providers 段 models 数组结束，清 pending key */
+                has_pending_key = 0;
             break;
 
         case YAML_SCALAR_EVENT: {
             const char *val = (const char *)event.data.scalar.value;
             if (!in_models && !in_providers && map_depth == 1 && val) {
-                /* 顶级键：models / providers */
+
                 if (strcmp(val, "models") == 0) {
                     in_models = 1;
                     has_pending_key = 0;
@@ -1649,7 +1615,7 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
                     has_pending_key = 0;
                 }
             } else if ((in_models || in_providers) && item_depth == 1 && nested == 0 && val) {
-                /* 模型项 / provider 项第一层字段：key 或 value */
+
                 if (!has_pending_key) {
                     AIRY_STRNCPY_TERM(pending_key, val, sizeof(pending_key));
                     has_pending_key = 1;
@@ -1660,17 +1626,17 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
                         yaml_map_add(&prov_map, pending_key, val);
                     has_pending_key = 0;
                 }
-            } else if (in_providers && item_depth == 1 && nested >= 1 && val &&
-                       has_pending_key && strcmp(pending_key, "models") == 0) {
-                /* providers 段 models 数组元素（模型名） */
+            } else if (in_providers && item_depth == 1 && nested >= 1 && val && has_pending_key &&
+                       strcmp(pending_key, "models") == 0) {
+
                 if (cur_p.model_count < 64)
                     cur_p.model_names[cur_p.model_count++] = AIRY_STRDUP(val);
             }
-            /* 其余位置的标量忽略 */
+
             break;
         }
         default:
-            /* YAML_NO_EVENT/STREAM_START/DOCUMENT_START/END/ALIAS：忽略 */
+
             break;
         }
         yaml_event_delete(&event);
@@ -1706,24 +1672,24 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
                 AIRY_STRNCPY_TERM(models[0].api_key_env, llm_cfg.api_key_env,
                                   sizeof(models[0].api_key_env));
             if (llm_cfg.base_url[0]) {
-                /* endpoint = 适配器根地址 + 协议路径（聚合阶段再还原为根地址） */
+
                 if (strcmp(adapter, "anthropic") == 0)
                     snprintf(models[0].endpoint, sizeof(models[0].endpoint), "%s/messages",
                              llm_cfg.base_url);
                 else
-                    snprintf(models[0].endpoint, sizeof(models[0].endpoint),
-                             "%s/chat/completions", llm_cfg.base_url);
+                    snprintf(models[0].endpoint, sizeof(models[0].endpoint), "%s/chat/completions",
+                             llm_cfg.base_url);
             }
             model_count = 1;
             SVC_LOG_INFO("C-L02: SVC: expanded simplified llm section "
                          "(format=%s base_url=%s model=%s)",
                          llm_cfg.api_format[0] ? llm_cfg.api_format : "openai",
-                         llm_cfg.base_url[0] ? llm_cfg.base_url : "(default)",
-                         llm_cfg.model);
+                         llm_cfg.base_url[0] ? llm_cfg.base_url : "(default)", llm_cfg.model);
         }
     }
     if (model_count == 0 && pcfg_count == 0) {
-        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN no models found, STACK: svc_load_model_config_yaml");
+        SVC_LOG_WARN(
+            "C-L02: SVC: MODEL-CONFIG-WARN no models found, STACK: svc_load_model_config_yaml");
         return 0;
     }
 
@@ -1750,17 +1716,19 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
             if (prov_count >= 16)
                 break;
             __builtin_memset(&provs[prov_count], 0, sizeof(provider_agg_t));
-            AIRY_STRNCPY_TERM(provs[prov_count].name, models[i].provider, sizeof(provs[prov_count].name));
+            AIRY_STRNCPY_TERM(provs[prov_count].name, models[i].provider,
+                              sizeof(provs[prov_count].name));
             if (models[i].api_key_env[0])
-                AIRY_STRNCPY_TERM(provs[prov_count].api_key_env, models[i].api_key_env, sizeof(provs[prov_count].api_key_env));
+                AIRY_STRNCPY_TERM(provs[prov_count].api_key_env, models[i].api_key_env,
+                                  sizeof(provs[prov_count].api_key_env));
             prov_count++;
         }
         if (provs[j].model_count < 64) {
             provs[j].model_names[provs[j].model_count++] = AIRY_STRDUP(models[i].name);
         }
         if (!provs[j].base_url[0] && models[i].endpoint[0]) {
-            /* model 的 endpoint 形如 https://host/v1/chat/completions（openai）或
-             * https://host/v1/messages（anthropic），provider base_url 应取前缀
+            /* model 的 endpoint 形如 https:
+             * https:
              * （provider 侧会再拼接 /chat/completions 或 /messages），
              * 避免 URL 重复拼接导致 404/空响应。 */
             const char *suffix = strstr(models[i].endpoint, "/chat/completions");
@@ -1798,19 +1766,21 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
                 continue;
             }
             __builtin_memset(&provs[prov_count], 0, sizeof(provider_agg_t));
-            AIRY_STRNCPY_TERM(provs[prov_count].name, pcfg[pi].name, sizeof(provs[prov_count].name));
+            AIRY_STRNCPY_TERM(provs[prov_count].name, pcfg[pi].name,
+                              sizeof(provs[prov_count].name));
             prov_count++;
         }
-        /* 权威字段覆盖 */
+
         if (pcfg[pi].base_url[0])
             AIRY_STRNCPY_TERM(provs[j].base_url, pcfg[pi].base_url, sizeof(provs[j].base_url));
         if (pcfg[pi].api_key_env[0])
-            AIRY_STRNCPY_TERM(provs[j].api_key_env, pcfg[pi].api_key_env, sizeof(provs[j].api_key_env));
+            AIRY_STRNCPY_TERM(provs[j].api_key_env, pcfg[pi].api_key_env,
+                              sizeof(provs[j].api_key_env));
         if (pcfg[pi].timeout_sec > provs[j].timeout_sec)
             provs[j].timeout_sec = pcfg[pi].timeout_sec;
         if (pcfg[pi].max_retries > provs[j].max_retries)
             provs[j].max_retries = pcfg[pi].max_retries;
-        /* 合并模型名（去重，避免 providers 与 models 列表重复登记） */
+
         for (size_t k = 0; k < pcfg[pi].model_count; ++k) {
             int dup = 0;
             for (size_t m = 0; m < provs[j].model_count; ++m) {
@@ -1871,17 +1841,19 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
 
     *out_providers = result;
     *out_count = prov_count;
-    SVC_LOG_INFO("C-L02: SVC: MODEL-CONFIG-OK YAML providers=%zu, STACK: svc_load_model_config_yaml", prov_count);
+    SVC_LOG_INFO(
+        "C-L02: SVC: MODEL-CONFIG-OK YAML providers=%zu, STACK: svc_load_model_config_yaml",
+        prov_count);
     return AIRY_OK;
 }
 
 #endif /* HAVE_YAML */
-
 static int svc_load_model_config_json(const char *config_path, provider_config_t **out_providers,
                                       size_t *out_count)
 {
     if (!config_path || !out_providers || !out_count) {
-        SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL NULL parameter, STACK: svc_load_model_config_json");
+        SVC_LOG_ERROR(
+            "C-L02: SVC: MODEL-CONFIG-FAIL NULL parameter, STACK: svc_load_model_config_json");
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -1890,7 +1862,8 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
 
     FILE *f = fopen(config_path, "rb");
     if (!f) {
-        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN cannot open file, STACK: svc_load_model_config_json");
+        SVC_LOG_WARN(
+            "C-L02: SVC: MODEL-CONFIG-WARN cannot open file, STACK: svc_load_model_config_json");
         return 0;
     }
 
@@ -1909,24 +1882,25 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
     content[read_len] = '\0';
     fclose(f);
 
-    /* P0.18.2: 模式 B — CJSON_PARSE_GUARD（on_fail 中释放 content） */
     CJSON_PARSE_GUARD(root, content, {
         AIRY_FREE(content);
-        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN parse failed, STACK: svc_load_model_config_json");
+        SVC_LOG_WARN(
+            "C-L02: SVC: MODEL-CONFIG-WARN parse failed, STACK: svc_load_model_config_json");
         return 0;
     });
     AIRY_FREE(content);
 
     cJSON *providers_arr = cJSON_GetObjectItem(root, "providers");
     if (!providers_arr || !cJSON_IsArray(providers_arr)) {
-        /* root 由 CJSON_AUTO_FREE 自动释放 */
-        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN no providers, STACK: svc_load_model_config_json");
+
+        SVC_LOG_WARN(
+            "C-L02: SVC: MODEL-CONFIG-WARN no providers, STACK: svc_load_model_config_json");
         return 0;
     }
 
     int n = cJSON_GetArraySize(providers_arr);
     if (n <= 0) {
-        /* root 由 CJSON_AUTO_FREE 自动释放 */
+
         return 0;
     }
 
@@ -1934,7 +1908,7 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
         (provider_config_t *)AIRY_CALLOC((size_t)n + 1, sizeof(provider_config_t));
     if (!result) {
         SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL calloc, STACK: svc_load_model_config_json");
-        /* root 由 CJSON_AUTO_FREE 自动释放 */
+
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
@@ -1987,10 +1961,10 @@ static int svc_load_model_config_json(const char *config_path, provider_config_t
         valid_count++;
     }
 
-    /* root 由 CJSON_AUTO_FREE 自动释放 */
     *out_providers = result;
     *out_count = valid_count;
-    SVC_LOG_INFO("C-L02: SVC: MODEL-CONFIG-OK providers=%zu, STACK: svc_load_model_config_json", valid_count);
+    SVC_LOG_INFO("C-L02: SVC: MODEL-CONFIG-OK providers=%zu, STACK: svc_load_model_config_json",
+                 valid_count);
     return AIRY_OK;
 }
 
@@ -2006,7 +1980,8 @@ int svc_load_model_config(const char *config_path, provider_config_t **out_provi
 #ifdef HAVE_YAML
         return svc_load_model_config_yaml(config_path, out_providers, out_count);
 #else
-        SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL YAML not compiled, STACK: svc_load_model_config");
+        SVC_LOG_ERROR(
+            "C-L02: SVC: MODEL-CONFIG-FAIL YAML not compiled, STACK: svc_load_model_config");
         return AIRY_ERR_NOT_SUPPORTED;
 #endif
     }

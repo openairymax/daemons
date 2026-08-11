@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file bench_routing_latency.c
  * @brief llm_d 模型路由延迟基准测试 (INT-18)
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 目标: 路由决策延迟 < 5ms
  */
@@ -18,10 +18,7 @@
 #include <string.h>
 #include <time.h>
 
-/* 基准测试迭代次数 */
 #define BENCH_ITERATIONS 10000
-
-/* ========== 计时工具 ========== */
 
 static double get_time_us(void)
 {
@@ -82,19 +79,17 @@ static void print_bench_result(const char *name, const bench_result_t *r)
     printf("    max:   %8.2f us\n", r->max_us);
 }
 
-/* ========== INT-18.1: 提供商查找延迟基准 ========== */
-
 static void bench_provider_lookup(void)
 {
     printf("  [INT-18.1] Provider lookup latency benchmark...\n");
 
     service_config_t cfg = {
         .llm_cache_capacity = 100,
-        .llm_cache_ttl_sec  = 3600,
-        .max_retries    = 3,
-        .timeout_ms     = 30000,
+        .llm_cache_ttl_sec = 3600,
+        .max_retries = 3,
+        .timeout_ms = 30000,
         .token_encoding = "cl100k_base",
-        .providers      = NULL,
+        .providers = NULL,
         .provider_count = 0,
     };
 
@@ -104,12 +99,10 @@ static void bench_provider_lookup(void)
     double *samples = (double *)malloc(BENCH_ITERATIONS * sizeof(double));
     assert(samples != NULL);
 
-    /* 预热 */
     for (int i = 0; i < 100; i++) {
         provider_registry_find(reg, "warmup-model");
     }
 
-    /* 基准测试 */
     for (int i = 0; i < BENCH_ITERATIONS; i++) {
         double start = get_time_us();
         provider_registry_find(reg, "test-model-gpt-4o");
@@ -121,7 +114,6 @@ static void bench_provider_lookup(void)
     compute_stats(samples, BENCH_ITERATIONS, &result);
     print_bench_result("Provider lookup (empty registry)", &result);
 
-    /* 验证目标: P99 < 5ms */
     double target_us = 5000.0; /* 5ms = 5000us */
     if (result.p99_us < target_us) {
         printf("    TARGET MET: P99 %.2fus < 5000us (5ms)\n", result.p99_us);
@@ -134,8 +126,6 @@ static void bench_provider_lookup(void)
     printf("    PASSED\n");
 }
 
-/* ========== INT-18.2: 缓存命中延迟基准 ========== */
-
 static void bench_cache_hit_latency(void)
 {
     printf("  [INT-18.2] Cache hit latency benchmark...\n");
@@ -143,22 +133,22 @@ static void bench_cache_hit_latency(void)
     llm_cache_t *cache = llm_cache_create(1000, 3600);
     assert(cache != NULL);
 
-    /* 预填充缓存 */
     const char *test_key = "model:gpt-4o:hash_complex_key_12345";
-    const char *test_value = "{\"id\":\"chatcmpl-123\",\"model\":\"gpt-4o\",\"choices\":[{\"message\":{\"content\":\"Benchmark response content\"}}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":50}}";
+    const char *test_value =
+        "{\"id\":\"chatcmpl-123\",\"model\":\"gpt-4o\",\"choices\":[{\"message\":{\"content\":"
+        "\"Benchmark response "
+        "content\"}}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":50}}";
     llm_cache_put(cache, test_key, test_value);
 
     double *samples = (double *)malloc(BENCH_ITERATIONS * sizeof(double));
     assert(samples != NULL);
 
-    /* 预热 */
     for (int i = 0; i < 100; i++) {
         char *val = NULL;
         llm_cache_get(cache, test_key, &val);
         free(val);
     }
 
-    /* 基准测试 */
     for (int i = 0; i < BENCH_ITERATIONS; i++) {
         double start = get_time_us();
         char *val = NULL;
@@ -172,7 +162,6 @@ static void bench_cache_hit_latency(void)
     compute_stats(samples, BENCH_ITERATIONS, &result);
     print_bench_result("Cache hit (LRU lookup)", &result);
 
-    /* 缓存命中应远低于5ms */
     double target_us = 5000.0;
     if (result.p99_us < target_us) {
         printf("    TARGET MET: P99 %.2fus < 5000us (5ms)\n", result.p99_us);
@@ -184,8 +173,6 @@ static void bench_cache_hit_latency(void)
     llm_cache_destroy(cache);
     printf("    PASSED\n");
 }
-
-/* ========== INT-18.3: 缓存未命中延迟基准 ========== */
 
 static void bench_cache_miss_latency(void)
 {
@@ -218,8 +205,6 @@ static void bench_cache_miss_latency(void)
     printf("    PASSED\n");
 }
 
-/* ========== INT-18.4: 综合路由决策延迟 ========== */
-
 static void bench_full_routing_decision(void)
 {
     printf("  [INT-18.4] Full routing decision latency (cache + lookup)...\n");
@@ -229,11 +214,11 @@ static void bench_full_routing_decision(void)
 
     service_config_t cfg = {
         .llm_cache_capacity = 100,
-        .llm_cache_ttl_sec  = 3600,
-        .max_retries    = 3,
-        .timeout_ms     = 30000,
+        .llm_cache_ttl_sec = 3600,
+        .max_retries = 3,
+        .timeout_ms = 30000,
         .token_encoding = "cl100k_base",
-        .providers      = NULL,
+        .providers = NULL,
         .provider_count = 0,
     };
 
@@ -246,7 +231,6 @@ static void bench_full_routing_decision(void)
     const char *model = "gpt-4o";
     const char *cache_key = "model:gpt-4o:hash_routing_bench";
 
-    /* 预热 */
     llm_cache_put(cache, cache_key, "{\"cached\":true}");
     for (int i = 0; i < 100; i++) {
         char *val = NULL;
@@ -256,16 +240,14 @@ static void bench_full_routing_decision(void)
         free(val);
     }
 
-    /* 基准测试: 模拟完整路由决策流程 */
     for (int i = 0; i < BENCH_ITERATIONS; i++) {
         double start = get_time_us();
 
-        /* 步骤1: 检查缓存 */
         char *cached = NULL;
         int cache_hit = llm_cache_get(cache, cache_key, &cached);
 
         if (!cache_hit || !cached) {
-            /* 步骤2: 查找提供商 */
+
             provider_registry_find(reg, model);
         }
 
@@ -278,7 +260,6 @@ static void bench_full_routing_decision(void)
     compute_stats(samples, BENCH_ITERATIONS, &result);
     print_bench_result("Full routing decision (cache hit path)", &result);
 
-    /* 目标 < 5ms */
     double target_us = 5000.0;
     if (result.p99_us < target_us) {
         printf("    TARGET MET: P99 %.2fus < 5000us (5ms)\n", result.p99_us);
@@ -291,8 +272,6 @@ static void bench_full_routing_decision(void)
     llm_cache_destroy(cache);
     printf("    PASSED\n");
 }
-
-/* ========== 主函数 ========== */
 
 int main(void)
 {

@@ -1,17 +1,17 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file market_service_impl.c
  * @brief 市场服务核心实现
  * @details 定义 struct market_service 并实现 market_service.h 中的所有公共API
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "daemon_errors.h"
 #include "market_service.h"
-#include "platform.h" /* airy_home_dir() / AIRY_PATH_MAX：默认安装目录收敛到 AIRY_HOME */
+#include "platform.h"
 #include "svc_logger.h"
 
 #include <errno.h>
@@ -23,11 +23,11 @@
 #include <time.h>
 
 #ifndef _WIN32
-#include <ftw.h>       /* nftw 递归删除目录树（仅 POSIX） */
-#include <unistd.h>    /* rmdir 等 POSIX 文件操作 */
-#include <sys/wait.h>  /* fork/execlp/waitpid/WIFEXITED 仅 POSIX 可用 */
+#include <ftw.h>
+#include <unistd.h>
+#include <sys/wait.h>
 #else
-#include <windows.h>   /* CreateProcess / FindFirstFile / RemoveDirectory 等 Windows API */
+#include <windows.h>
 #endif
 
 #include <airymax/sched.h>
@@ -53,15 +53,16 @@ static int win_run_command(const char *prog, const char *const args[])
     char cmdline[2048];
     size_t off = 0;
     int n = snprintf(cmdline, sizeof(cmdline), "\"%s\"", prog);
-    if (n < 0) return AIRY_ERR_FAIL;
+    if (n < 0)
+        return AIRY_ERR_FAIL;
     off = (size_t)n;
     for (size_t i = 0; args && args[i] && off < sizeof(cmdline) - 1; i++) {
         const char *a = args[i];
         int quote = (strpbrk(a, " \t\"") != NULL);
-        n = quote
-                ? snprintf(cmdline + off, sizeof(cmdline) - off, " \"%s\"", a)
-                : snprintf(cmdline + off, sizeof(cmdline) - off, " %s", a);
-        if (n < 0) break;
+        n = quote ? snprintf(cmdline + off, sizeof(cmdline) - off, " \"%s\"", a) :
+                    snprintf(cmdline + off, sizeof(cmdline) - off, " %s", a);
+        if (n < 0)
+            break;
         off += (size_t)n;
     }
     cmdline[sizeof(cmdline) - 1] = '\0';
@@ -110,14 +111,14 @@ static int recursive_remove(const char *path)
 #ifdef _WIN32
     DWORD attr = GetFileAttributesA(path);
     if (attr == INVALID_FILE_ATTRIBUTES) {
-        return AIRY_ERR_NOT_FOUND; /* 路径不存在 */
+        return AIRY_ERR_NOT_FOUND;
     }
     if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-        /* 文件：清除只读属性后直接删除 */
+
         SetFileAttributesA(path, FILE_ATTRIBUTE_NORMAL);
         return DeleteFileA(path) ? 0 : -1;
     }
-    /* 目录：递归删除内容后删除目录本身 */
+
     char pattern[MAX_PATH];
     WIN32_FIND_DATAA fd;
     snprintf(pattern, sizeof(pattern), "%s\\*", path);
@@ -126,7 +127,8 @@ static int recursive_remove(const char *path)
         return RemoveDirectoryA(path) ? 0 : -1;
     }
     do {
-        if (fd.cFileName[0] == '.') continue;
+        if (fd.cFileName[0] == '.')
+            continue;
         char child[MAX_PATH];
         snprintf(child, sizeof(child), "%s\\%s", path, fd.cFileName);
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
@@ -271,11 +273,15 @@ int market_service_destroy(market_service_t *service)
 int market_service_register_agent(market_service_t *service, const agent_info_t *agent_info)
 {
     if (!service || !agent_info || !service->initialized) {
-        SVC_LOG_ERROR("market_service_register_agent: NULL parameter or not initialized (service=%p, agent_info=%p, initialized=%d)", (const void *)service, (const void *)agent_info, service ? service->initialized : -1);
+        SVC_LOG_ERROR("market_service_register_agent: NULL parameter or not initialized "
+                      "(service=%p, agent_info=%p, initialized=%d)",
+                      (const void *)service, (const void *)agent_info,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
     if (service->agent_count >= AIRY_CAP_MAX_AGENTS) {
-        SVC_LOG_ERROR("market_service_register_agent: max agents exceeded (count=%zu, max=%d)", service->agent_count, AIRY_CAP_MAX_AGENTS);
+        SVC_LOG_ERROR("market_service_register_agent: max agents exceeded (count=%zu, max=%d)",
+                      service->agent_count, AIRY_CAP_MAX_AGENTS);
         AIRY_ERROR(AIRY_ERR_OVERFLOW, "max agents exceeded");
     }
 
@@ -326,8 +332,7 @@ int market_service_register_agent(market_service_t *service, const agent_info_t 
     new_agent->agent_id = agent_info->agent_id ? AIRY_STRDUP(agent_info->agent_id) : NULL;
     new_agent->name = agent_info->name ? AIRY_STRDUP(agent_info->name) : NULL;
     new_agent->version = agent_info->version ? AIRY_STRDUP(agent_info->version) : NULL;
-    new_agent->description =
-        agent_info->description ? AIRY_STRDUP(agent_info->description) : NULL;
+    new_agent->description = agent_info->description ? AIRY_STRDUP(agent_info->description) : NULL;
     new_agent->type = agent_info->type;
     new_agent->status = agent_info->status;
     new_agent->author = agent_info->author ? AIRY_STRDUP(agent_info->author) : NULL;
@@ -336,7 +341,10 @@ int market_service_register_agent(market_service_t *service, const agent_info_t 
         agent_info->dependencies ? AIRY_STRDUP(agent_info->dependencies) : NULL;
     if (!new_agent->agent_id || !new_agent->name || !new_agent->version) {
         airy_mtx_unlock(&service->lock);
-        SVC_LOG_ERROR("market_service_register_agent: strdup failed for required agent fields (agent_id=%p, name=%p, version=%p)", (const void *)new_agent->agent_id, (const void *)new_agent->name, (const void *)new_agent->version);
+        SVC_LOG_ERROR("market_service_register_agent: strdup failed for required agent fields "
+                      "(agent_id=%p, name=%p, version=%p)",
+                      (const void *)new_agent->agent_id, (const void *)new_agent->name,
+                      (const void *)new_agent->version);
         AIRY_FREE(new_agent->agent_id);
         AIRY_FREE(new_agent->name);
         AIRY_FREE(new_agent->version);
@@ -359,11 +367,15 @@ int market_service_register_agent(market_service_t *service, const agent_info_t 
 int market_service_register_skill(market_service_t *service, const skill_info_t *skill_info)
 {
     if (!service || !skill_info || !service->initialized) {
-        SVC_LOG_ERROR("market_service_register_skill: NULL parameter or not initialized (service=%p, skill_info=%p, initialized=%d)", (const void *)service, (const void *)skill_info, service ? service->initialized : -1);
+        SVC_LOG_ERROR("market_service_register_skill: NULL parameter or not initialized "
+                      "(service=%p, skill_info=%p, initialized=%d)",
+                      (const void *)service, (const void *)skill_info,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
     if (service->skill_count >= MAX_SKILLS) {
-        SVC_LOG_ERROR("market_service_register_skill: max skills exceeded (count=%zu, max=%d)", service->skill_count, MAX_SKILLS);
+        SVC_LOG_ERROR("market_service_register_skill: max skills exceeded (count=%zu, max=%d)",
+                      service->skill_count, MAX_SKILLS);
         AIRY_ERROR(AIRY_ERR_OVERFLOW, "max skills exceeded");
     }
 
@@ -412,8 +424,7 @@ int market_service_register_skill(market_service_t *service, const skill_info_t 
     new_skill->skill_id = skill_info->skill_id ? AIRY_STRDUP(skill_info->skill_id) : NULL;
     new_skill->name = skill_info->name ? AIRY_STRDUP(skill_info->name) : NULL;
     new_skill->version = skill_info->version ? AIRY_STRDUP(skill_info->version) : NULL;
-    new_skill->description =
-        skill_info->description ? AIRY_STRDUP(skill_info->description) : NULL;
+    new_skill->description = skill_info->description ? AIRY_STRDUP(skill_info->description) : NULL;
     new_skill->type = skill_info->type;
     new_skill->author = skill_info->author ? AIRY_STRDUP(skill_info->author) : NULL;
     new_skill->repository = skill_info->repository ? AIRY_STRDUP(skill_info->repository) : NULL;
@@ -444,7 +455,10 @@ int market_service_search_agents(market_service_t *service, const search_params_
                                  agent_info_t ***agents, size_t *count)
 {
     if (!service || !params || !agents || !count || !service->initialized) {
-        SVC_LOG_ERROR("market_service_search_agents: NULL parameter or not initialized (service=%p, params=%p, agents=%p, count=%p, initialized=%d)", (const void *)service, (const void *)params, (const void *)agents, (const void *)count, service ? service->initialized : -1);
+        SVC_LOG_ERROR("market_service_search_agents: NULL parameter or not initialized "
+                      "(service=%p, params=%p, agents=%p, count=%p, initialized=%d)",
+                      (const void *)service, (const void *)params, (const void *)agents,
+                      (const void *)count, service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -476,7 +490,9 @@ int market_service_search_agents(market_service_t *service, const search_params_
             agent_info_t **tmp =
                 (agent_info_t **)AIRY_REALLOC(results, sizeof(agent_info_t *) * results_size);
             if (!tmp) {
-                SVC_LOG_ERROR("market_service_search_agents: realloc failed for search results (results_size=%zu)", results_size);
+                SVC_LOG_ERROR("market_service_search_agents: realloc failed for search results "
+                              "(results_size=%zu)",
+                              results_size);
                 AIRY_FREE(results);
                 airy_mtx_unlock(&service->lock);
                 AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to resize search results");
@@ -550,11 +566,16 @@ int market_service_install_agent(market_service_t *service, const install_reques
                                  install_result_t **result)
 {
     if (!service || !request || !result || !service->initialized) {
-        SVC_LOG_ERROR("market_service_install_agent: NULL parameter or not initialized (service=%p, request=%p, result=%p, initialized=%d)", (const void *)service, (const void *)request, (const void *)result, service ? service->initialized : -1);
+        SVC_LOG_ERROR("market_service_install_agent: NULL parameter or not initialized "
+                      "(service=%p, request=%p, result=%p, initialized=%d)",
+                      (const void *)service, (const void *)request, (const void *)result,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
     if (!is_safe_path_component(request->id)) {
-        SVC_LOG_ERROR("market_service_install_agent: unsafe path component in install request id (id=%s)", request->id ? request->id : "NULL");
+        SVC_LOG_ERROR(
+            "market_service_install_agent: unsafe path component in install request id (id=%s)",
+            request->id ? request->id : "NULL");
         AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "install request id is unsafe");
     }
 
@@ -564,7 +585,6 @@ int market_service_install_agent(market_service_t *service, const install_reques
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate install result");
     }
 
-    /* 阶段1：锁内查找 + 快照目标字段（锁外执行下载时使用快照，避免悬垂指针） */
     airy_mtx_lock(&service->lock);
     size_t target_idx = (size_t)-1;
     for (size_t i = 0; i < service->agent_count; i++) {
@@ -603,15 +623,12 @@ int market_service_install_agent(market_service_t *service, const install_reques
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    /* 阶段2：锁外执行本地安装与网络下载（fork/execlp/waitpid 不得持锁） */
-    const char *base_path = request->install_path
-                                ? request->install_path
-                                : (snap_storage ? snap_storage
-                                                : market_default_storage("agents"));
+    const char *base_path = request->install_path ?
+                                request->install_path :
+                                (snap_storage ? snap_storage : market_default_storage("agents"));
     char install_dir[1024];
     snprintf(install_dir, sizeof(install_dir), "%s/%s", base_path, request->id);
 
-    /* 确保父目录存在（$AIRY_HOME/agents 等默认目录首次安装时可能不存在） */
     {
         char _par[1024];
         snprintf(_par, sizeof(_par), "%s", base_path);
@@ -624,20 +641,26 @@ int market_service_install_agent(market_service_t *service, const install_reques
                 int _m = mkdir(_par, 0755);
                 *p = '/';
                 if (_m != 0 && errno != EEXIST) {
-                    SVC_LOG_ERROR("market_service_install_agent: mkdir failed for parent (path=%s, errno=%d)", _par, errno);
+                    SVC_LOG_ERROR(
+                        "market_service_install_agent: mkdir failed for parent (path=%s, errno=%d)",
+                        _par, errno);
                     break;
                 }
             }
         }
         if (mkdir(_par, 0755) != 0 && errno != EEXIST) {
-            SVC_LOG_ERROR("market_service_install_agent: mkdir failed for parent root (path=%s, errno=%d)", _par, errno);
+            SVC_LOG_ERROR(
+                "market_service_install_agent: mkdir failed for parent root (path=%s, errno=%d)",
+                _par, errno);
         }
     }
 
     {
         int mkret = mkdir(install_dir, 0755);
         if (mkret != 0 && errno != EEXIST) {
-            SVC_LOG_ERROR("market_service_install_agent: mkdir failed for install directory (path=%s, errno=%d)", install_dir, errno);
+            SVC_LOG_ERROR("market_service_install_agent: mkdir failed for install directory "
+                          "(path=%s, errno=%d)",
+                          install_dir, errno);
             res->success = false;
             res->message = AIRY_STRDUP("Failed to create install directory");
             res->error_code = -4;
@@ -664,12 +687,10 @@ int market_service_install_agent(market_service_t *service, const install_reques
         snprintf(_mi_buf, sizeof(_mi_buf), "  \"agent_id\": \"%s\",\n",
                  snap_agent_id ? snap_agent_id : "");
         fputs(_mi_buf, meta_fp);
-        snprintf(_mi_buf, sizeof(_mi_buf), "  \"name\": \"%s\",\n",
-                 snap_name ? snap_name : "");
+        snprintf(_mi_buf, sizeof(_mi_buf), "  \"name\": \"%s\",\n", snap_name ? snap_name : "");
         fputs(_mi_buf, meta_fp);
         snprintf(_mi_buf, sizeof(_mi_buf), "  \"version\": \"%s\",\n",
-                 request->version ? request->version
-                                  : (snap_version ? snap_version : "0.0.1"));
+                 request->version ? request->version : (snap_version ? snap_version : "0.0.1"));
         fputs(_mi_buf, meta_fp);
         snprintf(_mi_buf, sizeof(_mi_buf), "  \"author\": \"%s\",\n",
                  snap_author ? snap_author : "");
@@ -734,7 +755,6 @@ int market_service_install_agent(market_service_t *service, const install_reques
 #endif
     }
 
-    /* 阶段3：重新加锁更新注册表状态 */
     airy_mtx_lock(&service->lock);
     for (size_t i = 0; i < service->agent_count; i++) {
         if (strcmp(service->agents[i]->agent_id, request->id) == 0) {
@@ -767,7 +787,10 @@ int market_service_install_skill(market_service_t *service, const install_reques
                                  install_result_t **result)
 {
     if (!service || !request || !result || !service->initialized) {
-        SVC_LOG_ERROR("market_service_install_skill: NULL parameter or not initialized (service=%p, request=%p, result=%p, initialized=%d)", (const void *)service, (const void *)request, (const void *)result, service ? service->initialized : -1);
+        SVC_LOG_ERROR("market_service_install_skill: NULL parameter or not initialized "
+                      "(service=%p, request=%p, result=%p, initialized=%d)",
+                      (const void *)service, (const void *)request, (const void *)result,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -800,9 +823,8 @@ int market_service_install_skill(market_service_t *service, const install_reques
     res->success = true;
     res->message = AIRY_STRDUP("Skill installed successfully");
     res->installed_version = AIRY_STRDUP(request->version ? request->version : target->version);
-    res->install_path = AIRY_STRDUP(request->install_path
-                                        ? request->install_path
-                                        : market_default_storage("skills"));
+    res->install_path = AIRY_STRDUP(request->install_path ? request->install_path :
+                                                            market_default_storage("skills"));
     res->error_code = 0;
     airy_mtx_unlock(&service->lock);
 
@@ -813,20 +835,24 @@ int market_service_install_skill(market_service_t *service, const install_reques
 int market_service_uninstall_agent(market_service_t *service, const char *agent_id)
 {
     if (!service || !agent_id || !service->initialized) {
-        SVC_LOG_ERROR("market_service_uninstall_agent: NULL parameter or not initialized (service=%p, agent_id=%p, initialized=%d)", (const void *)service, (const void *)agent_id, service ? service->initialized : -1);
+        SVC_LOG_ERROR("market_service_uninstall_agent: NULL parameter or not initialized "
+                      "(service=%p, agent_id=%p, initialized=%d)",
+                      (const void *)service, (const void *)agent_id,
+                      service ? service->initialized : -1);
         return AIRY_ERR_INVALID_PARAM;
     }
     if (!is_safe_path_component(agent_id)) {
-        SVC_LOG_ERROR("market_service_uninstall_agent: unsafe path component in agent_id (agent_id=%s)", agent_id);
+        SVC_LOG_ERROR(
+            "market_service_uninstall_agent: unsafe path component in agent_id (agent_id=%s)",
+            agent_id);
         AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "agent_id is unsafe path component");
     }
 
     airy_mtx_lock(&service->lock);
     for (size_t i = 0; i < service->agent_count; i++) {
         if (strcmp(service->agents[i]->agent_id, agent_id) == 0) {
-            const char *storage =
-                service->config.storage_path ? service->config.storage_path
-                                             : market_default_storage("agents");
+            const char *storage = service->config.storage_path ? service->config.storage_path :
+                                                                 market_default_storage("agents");
             char install_dir[1024];
             snprintf(install_dir, sizeof(install_dir), "%s/%s", storage, agent_id);
 
@@ -898,13 +924,12 @@ int market_service_get_installed_agents(market_service_t *service, agent_info_t 
                 if (results_size > SIZE_MAX / (2 * sizeof(agent_info_t *)))
                     break;
                 results_size *= 2;
-                agent_info_t **tmp = (agent_info_t **)AIRY_REALLOC(
-                    results, sizeof(agent_info_t *) * results_size);
+                agent_info_t **tmp =
+                    (agent_info_t **)AIRY_REALLOC(results, sizeof(agent_info_t *) * results_size);
                 if (!tmp) {
                     AIRY_FREE(results);
                     airy_mtx_unlock(&service->lock);
-                    AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY,
-                                  "failed to resize installed agents list");
+                    AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to resize installed agents list");
                 }
                 results = tmp;
             }
@@ -1040,7 +1065,6 @@ int market_service_sync_registry(market_service_t *service)
     if (!service || !service->initialized)
         return AIRY_ERR_INVALID_PARAM;
 
-    /* 阶段1：锁内校验配置并快照 URL/存储路径（网络操作在锁外执行） */
     airy_mtx_lock(&service->lock);
     if (!service->config.enable_remote_registry) {
         airy_mtx_unlock(&service->lock);
@@ -1075,7 +1099,7 @@ int market_service_sync_registry(market_service_t *service)
     {
         size_t pos = 0;
         char tmp[1024];
-AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
+        AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
         (tmp)[sizeof(tmp) - 1] = '\0';
         tmp[sizeof(tmp) - 1] = '\0';
         while (tmp[pos]) {
@@ -1103,8 +1127,8 @@ AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
     /* Windows 等价：用 win_run_command（CreateProcess）替代 fork/execlp/waitpid。
      * 行为对齐：curl 失败（含 CreateProcess 找不到 curl）则告警并返回 0。 */
     {
-        const char *const curl_args[] = {"-sfL", "-o", index_path, url,
-                                         "--connect-timeout", "10", "--max-time", "60", NULL};
+        const char *const curl_args[] = {"-sfL", "-o",         index_path, url, "--connect-timeout",
+                                         "10",   "--max-time", "60",       NULL};
         int curl_ret = win_run_command("curl", curl_args);
         if (curl_ret != 0) {
             SVC_LOG_WARN("Sync registry: download failed from %s (curl_ret=%d)", url, curl_ret);
@@ -1176,7 +1200,6 @@ AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
     idx_data[nread] = '\0';
     fclose(idx_fp);
 
-    /* 阶段2：锁外解析索引文件（仅收集 id，不触碰注册表） */
     char found_ids[256][128];
     int n_found = 0;
     char *entry = strstr(idx_data, "\"agent_id\"");
@@ -1203,7 +1226,6 @@ AIRY_STRNCPY_TERM(tmp, storage, sizeof(tmp));
     AIRY_FREE(idx_data);
     idx_data = NULL;
 
-    /* 阶段3：重新加锁更新注册表 */
     int synced = 0;
     airy_mtx_lock(&service->lock);
     for (int k = 0; k < n_found; k++) {

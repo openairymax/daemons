@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file circuit_breaker.c
  * @brief 熔断器与自愈框架实现
@@ -21,8 +22,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-
-/* ==================== 内部数据结构 ==================== */
 
 typedef struct {
     cb_event_callback_t callback;
@@ -54,8 +53,6 @@ typedef struct cb_manager_s {
     uint32_t callback_count;
     airy_mtx_t mutex;
 } cb_manager_internal_t;
-
-/* ==================== 辅助函数 ==================== */
 
 static void notify_event(cb_manager_internal_t *mgr, const cb_event_t *event)
 {
@@ -139,8 +136,6 @@ static bool should_trip(cb_internal_t *cb)
     return false;
 }
 
-/* ==================== 公共API实现 ==================== */
-
 AIRY_API cb_config_t cb_create_default_config(void)
 {
     cb_config_t config;
@@ -214,10 +209,11 @@ AIRY_API void cb_manager_destroy(cb_manager_t manager)
 }
 
 AIRY_API circuit_breaker_t cb_create(cb_manager_t manager, const char *name,
-                                        const cb_config_t *config)
+                                     const cb_config_t *config)
 {
     if (!manager || !name) {
-        SVC_LOG_ERROR("cb_create: null parameter manager=%p name=%p", (void *)manager, (void *)name);
+        SVC_LOG_ERROR("cb_create: null parameter manager=%p name=%p", (void *)manager,
+                      (void *)name);
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
@@ -227,7 +223,8 @@ AIRY_API circuit_breaker_t cb_create(cb_manager_t manager, const char *name,
 
     if (mgr->breaker_count >= CB_MAX_BREAKERS) {
         airy_mtx_unlock(&mgr->mutex);
-        SVC_LOG_ERROR("cb_create: max circuit breakers reached count=%u max=%u", mgr->breaker_count, CB_MAX_BREAKERS);
+        SVC_LOG_ERROR("cb_create: max circuit breakers reached count=%u max=%u", mgr->breaker_count,
+                      CB_MAX_BREAKERS);
         AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
     }
 
@@ -284,14 +281,13 @@ AIRY_API void cb_destroy(circuit_breaker_t breaker)
 
     cb_internal_t *cb = (cb_internal_t *)breaker;
 
-    /* 从管理器数组中移除，避免悬空指针 */
     if (cb->manager) {
         cb_manager_internal_t *mgr = cb->manager;
 
         airy_mtx_lock(&mgr->mutex);
         for (uint32_t i = 0; i < mgr->breaker_count; i++) {
             if (mgr->breakers[i] == cb) {
-                /* 将后续元素前移填补空位 */
+
                 for (uint32_t j = i; j < mgr->breaker_count - 1; j++) {
                     mgr->breakers[j] = mgr->breakers[j + 1];
                 }
@@ -435,12 +431,15 @@ AIRY_API void cb_record_failure(circuit_breaker_t breaker, int32_t error_code)
 
     if (cb->state == CB_STATE_CLOSED) {
         if (should_trip(cb)) {
-            SVC_LOG_WARN("cb_record_failure: breaker '%s' threshold exceeded, tripping to OPEN (consecutive_failures=%u, failure_rate=%.1f%%)",
+            SVC_LOG_WARN("cb_record_failure: breaker '%s' threshold exceeded, tripping to OPEN "
+                         "(consecutive_failures=%u, failure_rate=%.1f%%)",
                          cb->name, cb->stats.consecutive_failures, cb->stats.failure_rate);
             transition_state(cb, cb->manager, CB_STATE_OPEN);
         }
     } else if (cb->state == CB_STATE_HALF_OPEN) {
-        SVC_LOG_WARN("cb_record_failure: breaker '%s' failed in HALF_OPEN, reopening (error_code=%d)", cb->name, error_code);
+        SVC_LOG_WARN(
+            "cb_record_failure: breaker '%s' failed in HALF_OPEN, reopening (error_code=%d)",
+            cb->name, error_code);
         transition_state(cb, cb->manager, CB_STATE_OPEN);
     }
 
@@ -483,7 +482,8 @@ AIRY_API void cb_record_timeout(circuit_breaker_t breaker)
 
     if (cb->state == CB_STATE_CLOSED) {
         if (should_trip(cb)) {
-            SVC_LOG_WARN("cb_record_timeout: breaker '%s' threshold exceeded after timeout, tripping to OPEN (consecutive_failures=%u)",
+            SVC_LOG_WARN("cb_record_timeout: breaker '%s' threshold exceeded after timeout, "
+                         "tripping to OPEN (consecutive_failures=%u)",
                          cb->name, cb->stats.consecutive_failures);
             transition_state(cb, cb->manager, CB_STATE_OPEN);
         }
@@ -496,8 +496,6 @@ AIRY_API void cb_record_timeout(circuit_breaker_t breaker)
 
     LOG_DEBUG("Circuit breaker '%s': timeout recorded", cb->name);
 }
-
-/* ==================== 状态查询 ==================== */
 
 AIRY_API cb_state_t cb_get_state(circuit_breaker_t breaker)
 {
@@ -522,7 +520,8 @@ AIRY_API const char *cb_get_name(circuit_breaker_t breaker)
 AIRY_API airy_err_t cb_get_stats(circuit_breaker_t breaker, cb_stats_t *stats)
 {
     if (!breaker || !stats) {
-        SVC_LOG_ERROR("cb_get_stats: null parameter breaker=%p stats=%p", (void *)breaker, (void *)stats);
+        SVC_LOG_ERROR("cb_get_stats: null parameter breaker=%p stats=%p", (void *)breaker,
+                      (void *)stats);
         return AIRY_EINVAL;
     }
 
@@ -612,13 +611,12 @@ AIRY_API void cb_force_close(circuit_breaker_t breaker)
     airy_mtx_unlock(&cb->mutex);
 }
 
-/* ==================== 故障转移 ==================== */
-
 AIRY_API airy_err_t cb_set_failover_config(circuit_breaker_t breaker,
-                                                   const cb_failover_config_t *config)
+                                           const cb_failover_config_t *config)
 {
     if (!breaker || !config) {
-        SVC_LOG_ERROR("cb_set_failover_config: null parameter breaker=%p config=%p", (void *)breaker, (void *)config);
+        SVC_LOG_ERROR("cb_set_failover_config: null parameter breaker=%p config=%p",
+                      (void *)breaker, (void *)config);
         return AIRY_EINVAL;
     }
 
@@ -639,7 +637,7 @@ AIRY_API airy_err_t cb_set_failover_config(circuit_breaker_t breaker,
 }
 
 AIRY_API airy_err_t cb_execute_failover(circuit_breaker_t breaker, int32_t original_error,
-                                                char *fallback_result, size_t result_size)
+                                        char *fallback_result, size_t result_size)
 {
     if (!breaker) {
         SVC_LOG_ERROR("cb_execute_failover: null breaker parameter");
@@ -688,7 +686,8 @@ AIRY_API airy_err_t cb_execute_failover(circuit_breaker_t breaker, int32_t origi
         break;
 
     default:
-        SVC_LOG_WARN("cb_execute_failover: unknown failover strategy=%d for breaker '%s'", fc->strategy, cb->name);
+        SVC_LOG_WARN("cb_execute_failover: unknown failover strategy=%d for breaker '%s'",
+                     fc->strategy, cb->name);
         snprintf(fallback_result, result_size,
                  "{\"failover\":\"none\",\"service\":\"%s\",\"error\":%d}", cb->name,
                  original_error);
@@ -702,14 +701,12 @@ AIRY_API airy_err_t cb_execute_failover(circuit_breaker_t breaker, int32_t origi
     return err;
 }
 
-/* ==================== 事件与回调 ==================== */
-
-AIRY_API airy_err_t cb_register_event_callback(cb_manager_t manager,
-                                                       cb_event_callback_t callback,
-                                                       void *user_data)
+AIRY_API airy_err_t cb_register_event_callback(cb_manager_t manager, cb_event_callback_t callback,
+                                               void *user_data)
 {
     if (!manager || !callback) {
-        SVC_LOG_ERROR("cb_register_event_callback: null parameter manager=%p callback=%p", (void *)manager, (void *)(uintptr_t)callback);
+        SVC_LOG_ERROR("cb_register_event_callback: null parameter manager=%p callback=%p",
+                      (void *)manager, (void *)(uintptr_t)callback);
         return AIRY_EINVAL;
     }
 
@@ -719,7 +716,8 @@ AIRY_API airy_err_t cb_register_event_callback(cb_manager_t manager,
 
     if (mgr->callback_count >= CB_MAX_CALLBACKS) {
         airy_mtx_unlock(&mgr->mutex);
-        SVC_LOG_ERROR("cb_register_event_callback: max callbacks reached count=%u max=%u", mgr->callback_count, CB_MAX_CALLBACKS);
+        SVC_LOG_ERROR("cb_register_event_callback: max callbacks reached count=%u max=%u",
+                      mgr->callback_count, CB_MAX_CALLBACKS);
         return AIRY_ENOMEM;
     }
 

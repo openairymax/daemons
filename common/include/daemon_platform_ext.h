@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file daemon_platform_ext.h
  * @brief Daemon 模块平台扩展声明
@@ -35,8 +36,6 @@
 extern "C" {
 #endif
 
-/* ==================== 兼容别名 ==================== */
-/* 旧代码可能使用 airy_platform_* 前缀，此处提供兼容别名 */
 
 typedef airy_mtx_t airy_platform_mutex_t;
 #define airy_platform_mutex_init airy_mtx_init
@@ -54,9 +53,7 @@ typedef airy_cond_t airy_platform_cond_val_t;
 #define airy_platform_cond_broadcast airy_cond_broadcast
 
 typedef airy_thread_t airy_platform_thread_t;
-/* airy_platform_thread_create/join/detach 已由 commons 版 platform.h 提供 */
 
-/* ==================== Handle 类型兼容 ==================== */
 
 typedef airy_mtx_t *airy_mtx_handle_t;
 typedef airy_cond_t *airy_cond_handle_t;
@@ -64,7 +61,6 @@ typedef airy_cond_t *airy_platform_cond_t;
 typedef airy_thread_t *airy_thread_handle_t;
 typedef airy_sock_t *airy_sock_handle_t;
 
-/* ==================== 额外类型定义 ==================== */
 
 #ifndef AIRY_TIMESTAMP_T_DEFINED
 #define AIRY_TIMESTAMP_T_DEFINED
@@ -81,15 +77,10 @@ typedef struct {
     int signal;
 } airy_process_status_t;
 
-/* ==================== Socket 额外类型 ==================== */
 
 typedef enum { AIRY_AF_INET, AIRY_AF_INET6, AIRY_AF_UNIX } airy_address_family_t;
 
-typedef enum {
-    AIRY_SOCK_STREAM,
-    AIRY_SOCK_DGRAM,
-    AIRY_SOCK_SEQPACKET
-} airy_sock_type_t;
+typedef enum { AIRY_SOCK_STREAM, AIRY_SOCK_DGRAM, AIRY_SOCK_SEQPACKET } airy_sock_type_t;
 
 typedef struct {
     airy_address_family_t family;
@@ -101,21 +92,18 @@ typedef struct {
     } addr;
 } airy_sockaddr_t;
 
-/* ==================== Daemon 特有函数声明 ==================== */
-/* 实现在 daemons/common/src/platform_compat.c */
 
 int airy_time_now(airy_timestamp_t *ts);
 int airy_time_monotonic(airy_timestamp_t *ts);
 uint64_t airy_time_to_ms(const airy_timestamp_t *ts);
 void airy_time_from_ms(uint64_t ms, airy_timestamp_t *ts);
-/* airy_sleep_ms 已由 commons 版 platform.h 提供，此处不重复 */
+
 uint32_t airy_process_self(void);
 uint64_t airy_thread_self(void);
 int airy_thread_setname(const char *name);
 int airy_thread_getname(char *name, size_t size);
 int airy_mkdir(const char *path, int recursive);
 
-/* ==================== 动态库加载 (DL) 抽象 ==================== */
 
 #ifndef AIRY_DL_T_DEFINED
 #define AIRY_DL_T_DEFINED
@@ -127,7 +115,6 @@ int airy_dl_close(airy_dl_t dl);
 void *airy_dl_sym(airy_dl_t dl, const char *name);
 const char *airy_dl_error(void);
 
-/* ==================== 服务器端 Socket 兼容 ==================== */
 
 int airy_sock_init(void);
 void airy_sock_cleanup(void);

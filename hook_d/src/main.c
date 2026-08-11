@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file main.c
  * @brief Hook 守护进程入口（P0.18.1 样板宏化）
@@ -31,19 +32,16 @@
 #include <unistd.h>
 
 #define HOOK_D_SOCKET_PATH airy_runtime_dir_socket("hook.sock")
-#define HOOK_D_PIPE_PATH   "\\\\.\\pipe\\airy_hook"
-#define HOOK_D_MAX_BUFFER  4096
+#define HOOK_D_PIPE_PATH "\\\\.\\pipe\\airy_hook"
+#define HOOK_D_MAX_BUFFER 4096
 
-/* P0.18.1: 使用 DAEMON_DECLARE_COMMON 生成公共样板（信号处理/全局变量/print_usage） */
 DAEMON_DECLARE_COMMON(hook_d, hook, HOOK_D_SOCKET_PATH, HOOK_D_PIPE_PATH, 0, HOOK_D_MAX_BUFFER)
 
-/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
 DAEMON_DECLARE_SHUTDOWN_METHOD(hook_d)
 
 static int g_registry_initialized = 0;
 static uint64_t g_start_time = 0;
 
-/* 销毁服务（daemon_cleanup_standard 回调） */
 static void destroy_service_hook_d(void)
 {
     if (g_registry_initialized) {
@@ -55,7 +53,7 @@ static void destroy_service_hook_d(void)
 }
 
 #ifdef _WIN32
-/* Windows 控制台事件处理（复用生成的 signal_handler_hook_d） */
+
 static BOOL WINAPI console_handler_hook_d(DWORD fdwCtrlType)
 {
     switch (fdwCtrlType) {
@@ -73,19 +71,27 @@ static BOOL WINAPI console_handler_hook_d(DWORD fdwCtrlType)
 static const char *hook_type_name(hook_type_t type)
 {
     switch (type) {
-    case HOOK_TYPE_PRE_EXEC:         return "pre_exec";
-    case HOOK_TYPE_POST_EXEC:        return "post_exec";
-    case HOOK_TYPE_PRE_LLM:          return "pre_llm";
-    case HOOK_TYPE_POST_LLM:         return "post_llm";
-    case HOOK_TYPE_PRE_TOOL:         return "pre_tool";
-    case HOOK_TYPE_POST_TOOL:        return "post_tool";
-    case HOOK_TYPE_ON_ERROR:         return "on_error";
-    case HOOK_TYPE_ON_MEMORY_EVOLVE: return "on_memory_evolve";
-    default:                         return "unknown";
+    case HOOK_TYPE_PRE_EXEC:
+        return "pre_exec";
+    case HOOK_TYPE_POST_EXEC:
+        return "post_exec";
+    case HOOK_TYPE_PRE_LLM:
+        return "pre_llm";
+    case HOOK_TYPE_POST_LLM:
+        return "post_llm";
+    case HOOK_TYPE_PRE_TOOL:
+        return "pre_tool";
+    case HOOK_TYPE_POST_TOOL:
+        return "post_tool";
+    case HOOK_TYPE_ON_ERROR:
+        return "on_error";
+    case HOOK_TYPE_ON_MEMORY_EVOLVE:
+        return "on_memory_evolve";
+    default:
+        return "unknown";
     }
 }
 
-/* 字符串 → hook_type_t（hook_on_register/trigger 入参解析），未知返回 -1 */
 static int hook_type_from_name(const char *name)
 {
     if (!name)
@@ -96,8 +102,6 @@ static int hook_type_from_name(const char *name)
     }
     return -1;
 }
-
-/* ==================== JSON-RPC 方法 ==================== */
 
 static void hook_on_health(cJSON *params, int id, void *user_data)
 {
@@ -197,7 +201,6 @@ static void hook_on_stats(cJSON *params, int id, void *user_data)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* L2 标准方法 hook.get_stats（02-l2-service-protocol.md §6.1：daemon 级统计） */
 static void hook_on_get_stats(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
@@ -205,13 +208,14 @@ static void hook_on_get_stats(cJSON *params __attribute__((unused)), int id, voi
     cJSON_AddStringToObject(result, "daemon", "hook_d");
     cJSON_AddNumberToObject(result, "hooks", (double)hook_registry_count());
     if (g_start_time > 0) {
-        cJSON_AddNumberToObject(result, "uptime_s",
-                                (double)((uint64_t)time(NULL) - g_start_time));
+        cJSON_AddNumberToObject(result, "uptime_s", (double)((uint64_t)time(NULL) - g_start_time));
     }
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* ==================== L2 标准方法（02-l2-service-protocol.md：hook.register / hook.unregister / hook.trigger / hook.health_check） ==================== */
+/* ==================== L2 标准方法（02-l2-service-protocol.md：hook.register / hook.unregister /
+ * hook.trigger / hook.health_check） ====================
+ */
 
 /*
  * hook.register：向 hook_registry 注册脚本类 Hook（RPC 无法传递 C 回调，
@@ -276,9 +280,9 @@ static void hook_on_register(cJSON *params, int id, void *user_data)
 
     int ret = hook_registry_register(&entry);
     if (ret != 0) {
-        const char *msg = ret == -3 ? "Hook name already registered"
-                          : ret == -2 ? "Hook registry full"
-                          : "Hook register failed";
+        const char *msg = ret == -3 ? "Hook name already registered" :
+                          ret == -2 ? "Hook registry full" :
+                                      "Hook register failed";
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, msg, id);
         SVC_LOG_ERROR("hook.register failed: name=%s error=%d", name, ret);
         return;
@@ -294,7 +298,6 @@ static void hook_on_register(cJSON *params, int id, void *user_data)
                  hook_type_name((hook_type_t)type), impl_str);
 }
 
-/* hook.unregister：从注册表注销指定 Hook */
 static void hook_on_unregister(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
@@ -352,11 +355,20 @@ static void hook_on_trigger(cJSON *params, int id, void *user_data)
 
     const char *decision_name = "continue";
     switch (decision) {
-    case HOOK_DECISION_SKIP:   decision_name = "skip";   break;
-    case HOOK_DECISION_RETRY:  decision_name = "retry";  break;
-    case HOOK_DECISION_ABORT:  decision_name = "abort";  break;
-    case HOOK_DECISION_MODIFY: decision_name = "modify"; break;
-    default:                                             break;
+    case HOOK_DECISION_SKIP:
+        decision_name = "skip";
+        break;
+    case HOOK_DECISION_RETRY:
+        decision_name = "retry";
+        break;
+    case HOOK_DECISION_ABORT:
+        decision_name = "abort";
+        break;
+    case HOOK_DECISION_MODIFY:
+        decision_name = "modify";
+        break;
+    default:
+        break;
     }
 
     cJSON *result = cJSON_CreateObject();
@@ -368,7 +380,6 @@ static void hook_on_trigger(cJSON *params, int id, void *user_data)
                  decision_name);
 }
 
-/* hook.health_check：无副作用健康探针 */
 static void hook_on_health_check(cJSON *params, int id, void *user_data)
 {
     (void)params;
@@ -381,21 +392,19 @@ static void hook_on_health_check(cJSON *params, int id, void *user_data)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* ==================== 主入口 ==================== */
-
 int main(int argc, char *argv[])
 {
     const char *config_path = NULL;
     int use_tcp = 0;
 
     int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_hook_d);
-    if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
+    if (parse_rc > 0)
+        return parse_rc == 1 ? 0 : 1;
     (void)config_path;
 
     airy_sock_init();
     airy_mtx_init(&g_running_lock_hook_d);
 
-    /* 跨平台信号处理 */
 #ifdef _WIN32
     SetConsoleCtrlHandler(console_handler_hook_d, TRUE);
 #else
@@ -405,12 +414,10 @@ int main(int argc, char *argv[])
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶 */
     daemon_cupolas_init("hook_d");
     g_start_time = (uint64_t)time(NULL);
     SVC_LOG_INFO("hook_d: starting");
 
-    /* 初始化 hook 注册表（status/list 的真实数据源） */
     if (hook_registry_init() == 0) {
         g_registry_initialized = 1;
         SVC_LOG_INFO("hook_d: hook registry initialized");
@@ -421,19 +428,17 @@ int main(int argc, char *argv[])
         SVC_LOG_ERROR("hook_d: hook registry init failed");
     }
 
-    /* 创建 Socket 服务器 */
     airy_sock_t server_fd =
         daemon_create_server_socket(use_tcp, 0, HOOK_D_SOCKET_PATH, HOOK_D_PIPE_PATH);
     if (server_fd < 0) {
-        SVC_LOG_ERROR("hook_d: failed to create socket at %s (errno=%d: %s)",
-                      HOOK_D_SOCKET_PATH, errno, strerror(errno));
+        SVC_LOG_ERROR("hook_d: failed to create socket at %s (errno=%d: %s)", HOOK_D_SOCKET_PATH,
+                      errno, strerror(errno));
         airy_mtx_destroy(&g_running_lock_hook_d);
         airy_sock_cleanup();
         return EXIT_FAILURE;
     }
     SVC_LOG_INFO("hook_d: listening on %s (fd=%d)", HOOK_D_SOCKET_PATH, (int)server_fd);
 
-    /* 事件驱动（mem_d 同款模式）：统一 accept + JSON-RPC 分发 */
     daemon_event_config_t ev_config;
     __builtin_memset(&ev_config, 0, sizeof(ev_config));
     ev_config.max_events = 64;
@@ -445,9 +450,9 @@ int main(int argc, char *argv[])
     ev_config.service_ctx = NULL;
 
     const char *sock_addr = use_tcp ? "127.0.0.1" : HOOK_D_SOCKET_PATH;
-    int ret = daemon_init_event_driver("hook_d", "hook", sock_addr, use_tcp ? 0 : 0,
-                                       "hook,core", use_tcp, &ev_config, &g_event_driver_hook_d,
-                                       &g_bsd_hook_d, &g_bipc_hook_d);
+    int ret =
+        daemon_init_event_driver("hook_d", "hook", sock_addr, use_tcp ? 0 : 0, "hook,core", use_tcp,
+                                 &ev_config, &g_event_driver_hook_d, &g_bsd_hook_d, &g_bipc_hook_d);
     if (ret != AIRY_SUCCESS || !g_event_driver_hook_d) {
         SVC_LOG_ERROR("hook_d: failed to create event driver");
         airy_sock_close(server_fd);
@@ -462,14 +467,16 @@ int main(int argc, char *argv[])
     method_dispatcher_register(g_dispatcher_hook_d, "status", hook_on_status, NULL);
     method_dispatcher_register(g_dispatcher_hook_d, "list", hook_on_list, NULL);
     method_dispatcher_register(g_dispatcher_hook_d, "stats", hook_on_stats, NULL);
-    /* L2 协议标准方法（02-l2-service-protocol.md：hook.register / hook.unregister / hook.trigger / hook.health_check） */
+    /* L2 协议标准方法（02-l2-service-protocol.md：hook.register / hook.unregister / hook.trigger /
+     * hook.health_check）
+     */
     method_dispatcher_register(g_dispatcher_hook_d, "register", hook_on_register, NULL);
     method_dispatcher_register(g_dispatcher_hook_d, "unregister", hook_on_unregister, NULL);
     method_dispatcher_register(g_dispatcher_hook_d, "trigger", hook_on_trigger, NULL);
     method_dispatcher_register(g_dispatcher_hook_d, "health_check", hook_on_health_check, NULL);
-    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+
     method_dispatcher_register(g_dispatcher_hook_d, "shutdown", on_shutdown_method_hook_d, NULL);
-    /* L2 协议标准方法 hook.get_stats（02-l2-service-protocol.md §6.1：daemon 级统计） */
+
     method_dispatcher_register(g_dispatcher_hook_d, "get_stats", hook_on_get_stats, NULL);
     SVC_LOG_INFO("hook_d: registered 11 RPC methods (hook.* namespace)");
 

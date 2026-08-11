@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 //
 // @file os_sandbox.c
 // @brief shell_run OS 级沙箱实现（Landlock + seccomp + rlimit）
@@ -36,15 +37,12 @@
 #include <sys/resource.h>
 #include <sys/syscall.h>
 
-/* ---------- Landlock ABI 常量（自包含，与 Linux UAPI 逐位一致） ---------- */
-
-/* Landlock syscall 号：64 位架构统一为 444/445/446（Linux >= 5.13） */
 #if defined(__x86_64__) || defined(__aarch64__) || defined(__riscv)
 #define OS_LL_CREATE_RULESET 444
 #define OS_LL_ADD_RULE 445
 #define OS_LL_RESTRICT_SELF 446
 #else
-/* 32 位架构 Landlock 号未在此处枚举：视为不可用 */
+
 #define OS_LL_NO_SUPPORT 1
 #endif
 
@@ -66,7 +64,6 @@
 #define OS_LL_FS_MAKE_BLOCK (1ULL << 11)
 #define OS_LL_FS_MAKE_SYM (1ULL << 12)
 
-/* 内核 ABI 结构（与 linux/landlock.h 一致） */
 struct os_ll_ruleset_attr {
     uint64_t handled_access_fs;
     uint64_t handled_access_net;
@@ -77,22 +74,16 @@ struct os_ll_path_beneath_attr {
 };
 
 #define LL_FS_READ (OS_LL_FS_READ_FILE | OS_LL_FS_READ_DIR)
-#define LL_FS_WRITE                                                            \
-    (OS_LL_FS_WRITE_FILE | OS_LL_FS_REMOVE_DIR | OS_LL_FS_REMOVE_FILE |        \
-     OS_LL_FS_MAKE_CHAR | OS_LL_FS_MAKE_DIR | OS_LL_FS_MAKE_REG |              \
-     OS_LL_FS_MAKE_SOCK | OS_LL_FS_MAKE_FIFO | OS_LL_FS_MAKE_BLOCK |           \
-     OS_LL_FS_MAKE_SYM)
+#define LL_FS_WRITE                                                                          \
+    (OS_LL_FS_WRITE_FILE | OS_LL_FS_REMOVE_DIR | OS_LL_FS_REMOVE_FILE | OS_LL_FS_MAKE_CHAR | \
+     OS_LL_FS_MAKE_DIR | OS_LL_FS_MAKE_REG | OS_LL_FS_MAKE_SOCK | OS_LL_FS_MAKE_FIFO |       \
+     OS_LL_FS_MAKE_BLOCK | OS_LL_FS_MAKE_SYM)
 #define LL_FS_EXEC OS_LL_FS_EXECUTE
 #define LL_FS_HANDLED (LL_FS_READ | LL_FS_WRITE | LL_FS_EXEC)
 
-/* STRICT 模式放行的系统基础路径（动态链接器/命令解释器依赖） */
 static const char *const k_sys_read_paths[] = {
-    "/bin", "/sbin", "/usr", "/lib", "/lib64", "/lib32", "/libx32",
-    "/etc", "/opt",
-    NULL,
+    "/bin", "/sbin", "/usr", "/lib", "/lib64", "/lib32", "/libx32", "/etc", "/opt", NULL,
 };
-
-/* ---------- 探测与配置 ---------- */
 
 int os_sandbox_landlock_available(void)
 {
@@ -117,7 +108,7 @@ void os_sandbox_cfg_from_env(os_sandbox_cfg_t *cfg)
 {
     AIRY_MEMSET(cfg, 0, sizeof(*cfg));
     cfg->mode = OS_SANDBOX_MODE_WORKSPACE;
-    cfg->net_access = 1; /* WORKSPACE 默认允许网络（shell 可 curl 等） */
+    cfg->net_access = 1;
 
     const char *mode = getenv("AIRY_TOOL_SANDBOX_MODE");
     if (mode) {
@@ -145,19 +136,14 @@ void os_sandbox_cfg_from_env(os_sandbox_cfg_t *cfg)
 
     const char *net = getenv("AIRY_TOOL_SANDBOX_NET");
     if (net) {
-        cfg->net_access = (strcmp(net, "0") != 0 && strcmp(net, "false") != 0)
-                              ? 1
-                              : 0;
+        cfg->net_access = (strcmp(net, "0") != 0 && strcmp(net, "false") != 0) ? 1 : 0;
     }
 }
-
-/* ---------- rlimit 资源限制 ---------- */
 
 static int os_sandbox_apply_rlimits(const os_sandbox_cfg_t *cfg)
 {
     struct rlimit rl;
 
-    /* 禁止 core dump：防止敏感内存落盘 */
     rl.rlim_cur = 0;
     rl.rlim_max = 0;
     (void)setrlimit(RLIMIT_CORE, &rl);
@@ -193,12 +179,9 @@ static int os_sandbox_apply_rlimits(const os_sandbox_cfg_t *cfg)
     return 0;
 }
 
-/* ---------- seccomp 特权 syscall 黑名单 ---------- */
-
-#define SECCOMP_BAN(nr)                                                       \
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (nr), 0, 1),                          \
-        BPF_STMT(BPF_RET | BPF_K,                                             \
-                 SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA))
+#define SECCOMP_BAN(nr)                              \
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (nr), 0, 1), \
+        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA))
 
 static int os_sandbox_apply_seccomp(void)
 {
@@ -238,7 +221,6 @@ static int os_sandbox_apply_seccomp(void)
         .filter = filter,
     };
 
-    /* no_new_privs：execve 时 setuid 位失效，防提权；seccomp 过滤不可逆 */
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
         return -1;
     }
@@ -248,9 +230,6 @@ static int os_sandbox_apply_seccomp(void)
     return 0;
 }
 
-/* ---------- Landlock 文件系统沙箱 ---------- */
-
-/* 打开目录 fd（O_PATH，Landlock path_beneath 所需） */
 static int os_sandbox_open_dir(const char *path)
 {
     int fd = open(path, O_PATH | O_DIRECTORY | O_CLOEXEC);
@@ -260,7 +239,6 @@ static int os_sandbox_open_dir(const char *path)
     return fd;
 }
 
-/* 添加一条 path_beneath 规则；路径不存在返回 -2（可跳过） */
 static int os_sandbox_ll_allow(int ruleset_fd, const char *path, uint64_t access)
 {
     int dir_fd = os_sandbox_open_dir(path);
@@ -271,15 +249,12 @@ static int os_sandbox_ll_allow(int ruleset_fd, const char *path, uint64_t access
     AIRY_MEMSET(&rule, 0, sizeof(rule));
     rule.allowed_access = access;
     rule.parent_fd = dir_fd;
-    int rc = (int)syscall(OS_LL_ADD_RULE, ruleset_fd, OS_LL_RULE_PATH_BENEATH,
-                          &rule, 0U);
+    int rc = (int)syscall(OS_LL_ADD_RULE, ruleset_fd, OS_LL_RULE_PATH_BENEATH, &rule, 0U);
     close(dir_fd);
     return (rc == 0) ? 0 : -1;
 }
 
-/* 添加一条作用于文件的 path_beneath 规则（如 /dev/null 单独放行） */
-static int os_sandbox_ll_allow_file(int ruleset_fd, const char *path,
-                                    uint64_t access)
+static int os_sandbox_ll_allow_file(int ruleset_fd, const char *path, uint64_t access)
 {
     int fd = open(path, O_PATH | O_CLOEXEC);
     if (fd < 0) {
@@ -289,8 +264,7 @@ static int os_sandbox_ll_allow_file(int ruleset_fd, const char *path,
     AIRY_MEMSET(&rule, 0, sizeof(rule));
     rule.allowed_access = access;
     rule.parent_fd = fd;
-    int rc = (int)syscall(OS_LL_ADD_RULE, ruleset_fd, OS_LL_RULE_PATH_BENEATH,
-                          &rule, 0U);
+    int rc = (int)syscall(OS_LL_ADD_RULE, ruleset_fd, OS_LL_RULE_PATH_BENEATH, &rule, 0U);
     close(fd);
     return (rc == 0) ? 0 : -1;
 }
@@ -305,8 +279,7 @@ static int os_sandbox_apply_landlock(const os_sandbox_cfg_t *cfg)
     AIRY_MEMSET(&attr, 0, sizeof(attr));
     attr.handled_access_fs = LL_FS_HANDLED;
 
-    int ruleset_fd =
-        (int)syscall(OS_LL_CREATE_RULESET, &attr, sizeof(attr), 0U);
+    int ruleset_fd = (int)syscall(OS_LL_CREATE_RULESET, &attr, sizeof(attr), 0U);
     if (ruleset_fd < 0) {
         return -1;
     }
@@ -317,24 +290,22 @@ static int os_sandbox_apply_landlock(const os_sandbox_cfg_t *cfg)
     const uint64_t w = LL_FS_WRITE;
 
     if (cfg->mode == OS_SANDBOX_MODE_WORKSPACE) {
-        /* 全局只读+可执行：shell 命令可读系统配置/执行命令，但无写权限 */
+
         if (os_sandbox_ll_allow(ruleset_fd, "/", rx) != 0) {
             rc = -1;
             goto out;
         }
     } else {
-        /* STRICT：仅放行系统基础路径（动态链接/常用命令），不全局放读 */
+
         for (int i = 0; k_sys_read_paths[i] != NULL; i++) {
             int ar = os_sandbox_ll_allow(ruleset_fd, k_sys_read_paths[i], rx);
             if (ar == -1) {
                 rc = -1;
                 goto out;
             }
-            /* ar == -2：目录不存在，跳过（非致命） */
         }
     }
 
-    /* 工作区可读写（shell 命令可创建/修改项目文件） */
     if (cfg->workspace[0]) {
         if (os_sandbox_ll_allow(ruleset_fd, cfg->workspace, rw) != 0) {
             SVC_LOG_ERROR("os_sandbox: allow workspace %s failed", cfg->workspace);
@@ -342,10 +313,9 @@ static int os_sandbox_apply_landlock(const os_sandbox_cfg_t *cfg)
             goto out;
         }
     }
-    /* 临时目录可读写（命令常依赖 /tmp）；不存在时跳过 */
+
     (void)os_sandbox_ll_allow(ruleset_fd, "/tmp", w);
 
-    /* /dev 只读 + /dev/null 可写：shell 命令的 stdout/stderr 重定向目标 */
     (void)os_sandbox_ll_allow(ruleset_fd, "/dev", rx);
     (void)os_sandbox_ll_allow_file(ruleset_fd, "/dev/null", OS_LL_FS_WRITE_FILE);
 
@@ -369,19 +339,16 @@ int os_sandbox_apply(const os_sandbox_cfg_t *cfg)
 #else
     int ll_ok = os_sandbox_landlock_available();
 
-    /* STRICT 模式依赖 Landlock 白名单：不可用即 fail-closed */
     if (cfg->mode == OS_SANDBOX_MODE_STRICT && !ll_ok) {
         SVC_LOG_ERROR("os_sandbox: strict mode requires Landlock, unavailable");
         return -1;
     }
 
-    /* rlimit 资源限制（不依赖 Landlock，始终应用） */
     if (os_sandbox_apply_rlimits(cfg) != 0) {
         SVC_LOG_ERROR("os_sandbox: rlimit apply failed");
         return -1;
     }
 
-    /* seccomp 特权 syscall 黑名单 */
     if (os_sandbox_apply_seccomp() != 0) {
         SVC_LOG_ERROR("os_sandbox: seccomp apply failed");
         return -1;
@@ -393,7 +360,7 @@ int os_sandbox_apply(const os_sandbox_cfg_t *cfg)
             return -1;
         }
     } else {
-        /* WORKSPACE 模式降级执行：内核无 Landlock 时仅保留 rlimit+seccomp */
+
         SVC_LOG_WARN("os_sandbox: Landlock unavailable, degraded to "
                      "rlimit+seccomp only (workspace mode)");
     }
@@ -402,7 +369,6 @@ int os_sandbox_apply(const os_sandbox_cfg_t *cfg)
 }
 
 #else /* !__linux__ */
-
 int os_sandbox_landlock_available(void)
 {
     return 0;
@@ -417,7 +383,7 @@ void os_sandbox_cfg_from_env(os_sandbox_cfg_t *cfg)
 int os_sandbox_apply(const os_sandbox_cfg_t *cfg)
 {
     (void)cfg;
-    return 0; /* 非 Linux 平台：无 OS 级沙箱（保持既有行为） */
+    return 0;
 }
 
 #endif /* __linux__ */

@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 //
 // @file test_os_sandbox.c
 // @brief os_sandbox（Landlock + seccomp + rlimit）单元测试
@@ -28,31 +29,29 @@
 
 static int g_failures = 0;
 
-#define CHECK(cond, msg)                                                       \
-    do {                                                                       \
-        if (cond) {                                                            \
-            printf("PASS: %s\n", msg);                                         \
-        } else {                                                               \
-            printf("FAIL: %s\n", msg);                                         \
-            g_failures++;                                                      \
-        }                                                                      \
+#define CHECK(cond, msg)               \
+    do {                               \
+        if (cond) {                    \
+            printf("PASS: %s\n", msg); \
+        } else {                       \
+            printf("FAIL: %s\n", msg); \
+            g_failures++;              \
+        }                              \
     } while (0)
 
-#define CHECK_ERRNO(cond, msg)                                                 \
-    do {                                                                       \
-        int _e = errno;                                                        \
-        if (cond) {                                                            \
-            printf("PASS: %s\n", msg);                                         \
-        } else {                                                               \
-            printf("FAIL: %s (errno=%d)\n", msg, _e);                          \
-            g_failures++;                                                      \
-        }                                                                      \
+#define CHECK_ERRNO(cond, msg)                        \
+    do {                                              \
+        int _e = errno;                               \
+        if (cond) {                                   \
+            printf("PASS: %s\n", msg);                \
+        } else {                                      \
+            printf("FAIL: %s (errno=%d)\n", msg, _e); \
+            g_failures++;                             \
+        }                                             \
     } while (0)
 
-/* 测试工作区目录 */
 static const char *k_ws = "/tmp/airy_os_sandbox_ws";
 
-/* 在沙箱子进程中执行 action，返回子进程退出码（沙箱应用失败=126） */
 static int run_in_sandbox(const os_sandbox_cfg_t *cfg, int (*action)(void))
 {
     pid_t pid = fork();
@@ -71,8 +70,6 @@ static int run_in_sandbox(const os_sandbox_cfg_t *cfg, int (*action)(void))
     return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
 }
 
-/* ---------- 沙箱内动作（返回 0=动作成功，非 0=动作被拒绝/失败） ---------- */
-
 static int act_echo_ok(void)
 {
     return system("echo hello > /dev/null") == 0 ? 0 : 1;
@@ -84,7 +81,7 @@ static int act_write_workspace(void)
     snprintf(path, sizeof(path), "%s/probe.txt", k_ws);
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
-        return 1; /* 被拒绝 */
+        return 1;
     }
     close(fd);
     unlink(path);
@@ -105,14 +102,14 @@ static int act_write_system(void)
     if (fd >= 0) {
         close(fd);
         unlink(path);
-        return 0; /* 意外成功（沙箱未生效） */
+        return 0;
     }
     return 1;
 }
 
 static int act_read_system(void)
 {
-    /* STRICT 模式：/proc 不在白名单，读应失败；WORKSPACE：全局可读 */
+
     FILE *f = fopen("/proc/version", "r");
     if (!f) {
         return 1;
@@ -123,7 +120,7 @@ static int act_read_system(void)
 
 static int act_read_home_ok(void)
 {
-    /* WORKSPACE 模式：/ 只读放行，读 $HOME 应成功 */
+
     FILE *f = fopen("/etc/passwd", "r");
     if (!f) {
         return 1;
@@ -134,13 +131,13 @@ static int act_read_home_ok(void)
 
 static int act_unshare(void)
 {
-    /* 应被 seccomp 黑名单拒绝（EPERM），返回非 0 表示被拒 */
+
     return unshare(CLONE_NEWNS) == 0 ? 0 : 1;
 }
 
 static int act_mount(void)
 {
-    /* 应被 seccomp 黑名单拒绝（EPERM） */
+
     return mount("none", "/tmp", "tmpfs", 0, NULL) == 0 ? 0 : 1;
 }
 
@@ -157,11 +154,9 @@ static int act_write_tmp(void)
 
 static int act_ptrace(void)
 {
-    /* 无沙箱时 PTRACE_TRACEME 对自己应成功；seccomp 黑名单拦截后返回 EPERM */
+
     return ptrace(PTRACE_TRACEME, 0, NULL, NULL) == 0 ? 0 : 1;
 }
-
-/* ---------- 用例 ---------- */
 
 static void test_landlock_available(void)
 {
@@ -184,7 +179,6 @@ static void test_env_config(void)
     unsetenv("AIRY_TOOL_SANDBOX_NET");
     unsetenv("AIRY_TOOL_SANDBOX_WORKSPACE");
 
-    /* 默认值 */
     os_sandbox_cfg_from_env(&cfg);
     CHECK(cfg.mode == OS_SANDBOX_MODE_WORKSPACE, "default mode workspace");
     CHECK(cfg.net_access == 1, "default net on (workspace)");
@@ -239,7 +233,7 @@ static void test_off_mode(void)
 
 int main(void)
 {
-    /* 准备测试工作区 */
+
     mkdir(k_ws, 0755);
 
     test_landlock_available();
@@ -248,7 +242,6 @@ int main(void)
     test_strict_mode();
     test_off_mode();
 
-    /* 清理测试工作区 */
     rmdir(k_ws);
 
     printf("\n%s: %d failures\n", g_failures ? "FAILED" : "OK", g_failures);

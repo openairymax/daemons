@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file think_service.h
  * @brief 双思考系统（Thinkdual）服务对外接口
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * think_d 承载 CoreLoopThree 认知引擎，将双思考系统接入 15 daemon 运行时：
  *   - t2（慢思考主模型）：TC3 批判循环主生成
@@ -25,7 +25,6 @@
 extern "C" {
 #endif
 
-/* ---------- 公共类型定义 ---------- */
 
 typedef struct think_service think_service_t;
 
@@ -33,12 +32,12 @@ typedef struct think_service think_service_t;
  * @brief 双思考服务配置
  */
 typedef struct {
-    int enabled;            /* 双思考开关（0=关闭 GRAD 批判循环，退化单轮计划；默认 1） */
-    const char *think2_slow_model;  /* t2 慢思考模型名（NULL=provider 默认） */
-    const char *think1_fast_model;  /* t1-f 快思考模型名（NULL=provider 默认） */
-    const char *think1_prof_model;  /* t1-p 专业思考模型名（NULL=provider 默认） */
-    uint32_t process_timeout_ms; /* 单次认知处理超时（毫秒），0 用默认 120000 */
-    uint32_t max_feedback_events; /* 思考事件环形缓冲容量，0 用默认 64 */
+    int enabled;
+    const char *think2_slow_model;
+    const char *think1_fast_model;
+    const char *think1_prof_model;
+    uint32_t process_timeout_ms;
+    uint32_t max_feedback_events;
 } think_service_config_t;
 
 /**
@@ -56,12 +55,10 @@ typedef struct {
     size_t json_len;
 } think_process_result_t;
 
-/* ---------- 生命周期 ---------- */
 
 think_service_t *think_service_create(const think_service_config_t *config);
 void think_service_destroy(think_service_t *svc);
 
-/* ---------- 核心处理 ---------- */
 
 /**
  * @brief 双思考处理：输入 prompt → 认知引擎（TC3 + dual_coordinate）→ JSON 结果
@@ -75,7 +72,6 @@ int think_service_process(think_service_t *svc, const char *prompt,
 
 void think_result_free(think_process_result_t *res);
 
-/* ---------- 查询 ---------- */
 
 /**
  * @brief 获取双思考统计（JSON 字符串，调用者 AIRY_FREE）

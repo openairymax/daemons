@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file anthropic.c
  * @brief Anthropic 适配器实现
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 改进说明：
  * 1. 使用公共 Provider 基础设施
@@ -19,7 +19,7 @@
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+
 #include <cjson_helpers.h>
 #include <curl/curl.h>
 #include <stdio.h>
@@ -29,13 +29,9 @@
 #define ANTHROPIC_DEFAULT_BASE "https://api.anthropic.com/v1"
 #define ANTHROPIC_DEFAULT_MODEL "claude-3-sonnet-20240229"
 
-/* ---------- 上下文 ---------- */
-
 typedef struct {
     provider_base_ctx_t base;
 } anthropic_ctx_t;
-
-/* ---------- 生命周期 ---------- */
 
 static provider_ctx_t *anthropic_init(const char *name __attribute__((unused)), const char *api_key,
                                       const char *api_base,
@@ -55,9 +51,7 @@ static provider_ctx_t *anthropic_init(const char *name __attribute__((unused)), 
 
     SVC_LOG_INFO("C-L02: ANTHROPIC: INIT api_base=%s model=%s timeout=%.1fs max_retries=%d "
                  "has_api_key=%d",
-                 ctx->base.api_base,
-                 ANTHROPIC_DEFAULT_MODEL,
-                 timeout_sec, max_retries,
+                 ctx->base.api_base, ANTHROPIC_DEFAULT_MODEL, timeout_sec, max_retries,
                  (api_key && api_key[0]) ? 1 : 0);
 
     return (provider_ctx_t *)ctx;
@@ -71,8 +65,6 @@ static void anthropic_destroy(provider_ctx_t *ctx_ptr)
     }
 }
 
-/* ---------- Anthropic 特有的请求构建 ---------- */
-
 static char *anthropic_build_request(const llm_request_config_t *manager)
 {
     if (!manager) {
@@ -85,8 +77,8 @@ static char *anthropic_build_request(const llm_request_config_t *manager)
     }
 
     cJSON_AddStringToObject(root, "model",
-                            manager->model && manager->model[0] ? manager->model
-                                                                : ANTHROPIC_DEFAULT_MODEL);
+                            manager->model && manager->model[0] ? manager->model :
+                                                                  ANTHROPIC_DEFAULT_MODEL);
     cJSON_AddNumberToObject(root, "temperature",
                             manager->temperature > 0 ? manager->temperature : 0.7);
 
@@ -127,22 +119,17 @@ static char *anthropic_build_request(const llm_request_config_t *manager)
     return json;
 }
 
-/* ---------- Anthropic 特有的响应解析 ---------- */
-
 static int anthropic_parse_response(const char *body, llm_response_t **out)
 {
     if (!body || !out) {
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
-    CJSON_PARSE_GUARD(root, body, {
-        return AIRY_ERR_PARSE_ERROR;
-    });
+    CJSON_PARSE_GUARD(root, body, { return AIRY_ERR_PARSE_ERROR; });
 
     llm_response_t *resp = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {
-        /* root 由 CJSON_AUTO_FREE 自动释放 */
+
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
@@ -164,7 +151,7 @@ static int anthropic_parse_response(const char *body, llm_response_t **out)
             resp->choices = (llm_message_t *)AIRY_CALLOC(1, sizeof(llm_message_t));
             if (!resp->choices) {
                 resp->choice_count = 0;
-                /* root 由 CJSON_AUTO_FREE 自动释放 */
+
                 llm_response_free(resp);
                 return AIRY_ERR_OUT_OF_MEMORY;
             }
@@ -185,12 +172,9 @@ static int anthropic_parse_response(const char *body, llm_response_t **out)
         resp->total_tokens = resp->prompt_tokens + resp->completion_tokens;
     }
 
-    /* root 由 CJSON_AUTO_FREE 自动释放 */
     *out = resp;
     return AIRY_OK;
 }
-
-/* ---------- 同步完成 ---------- */
 
 static int anthropic_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *manager,
                               llm_response_t **out_response)
@@ -205,20 +189,21 @@ static int anthropic_complete(provider_ctx_t *ctx_ptr, const llm_request_config_
     anthropic_ctx_t *ctx = (anthropic_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
 
-    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
     provider_refresh_api_key(base);
 
-    const char *model = (manager->model && manager->model[0]) ? manager->model : ANTHROPIC_DEFAULT_MODEL;
+    const char *model =
+        (manager->model && manager->model[0]) ? manager->model : ANTHROPIC_DEFAULT_MODEL;
 
     SVC_LOG_INFO("C-L02: ANTHROPIC: COMPLETE-START model=%s msgs=%zu max_tokens=%d temp=%.2f "
                  "stream=%d",
-                 model, manager->message_count, manager->max_tokens,
-                 manager->temperature, manager->stream);
+                 model, manager->message_count, manager->max_tokens, manager->temperature,
+                 manager->stream);
 
     char *req_body = anthropic_build_request(manager);
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: ANTHROPIC: COMPLETE-FAIL — request body build failed "
-                      "model=%s", model);
+                      "model=%s",
+                      model);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
@@ -237,8 +222,8 @@ static int anthropic_complete(provider_ctx_t *ctx_ptr, const llm_request_config_
     provider_http_resp_t *http_resp = NULL;
     long http_code = 0;
 
-    SVC_LOG_DEBUG("C-L02: ANTHROPIC: HTTP-POST url=%s body_len=%zu timeout=%.1fs retries=%d",
-                  url, strlen(req_body), base->timeout_sec, base->max_retries);
+    SVC_LOG_DEBUG("C-L02: ANTHROPIC: HTTP-POST url=%s body_len=%zu timeout=%.1fs retries=%d", url,
+                  strlen(req_body), base->timeout_sec, base->max_retries);
 
     int ret = provider_http_post(url, headers, req_body, base->timeout_sec, base->max_retries,
                                  &http_resp, &http_code);
@@ -264,14 +249,14 @@ static int anthropic_complete(provider_ctx_t *ctx_ptr, const llm_request_config_
                       (http_code == 403) ? "forbidden (check API key permissions)" :
                       (http_code == 429) ? "rate limited" :
                       (http_code == 529) ? "overloaded" :
-                      "check API key and endpoint");
+                                           "check API key and endpoint");
         provider_http_resp_free(http_resp);
         return AIRY_ERR_IO;
     }
 
     size_t resp_body_len = http_resp ? strlen(http_resp->data) : 0;
-    SVC_LOG_DEBUG("C-L02: ANTHROPIC: HTTP-RESPONSE http_code=%ld resp_body_len=%zu",
-                  http_code, resp_body_len);
+    SVC_LOG_DEBUG("C-L02: ANTHROPIC: HTTP-RESPONSE http_code=%ld resp_body_len=%zu", http_code,
+                  resp_body_len);
 
     ret = anthropic_parse_response(http_resp->data, out_response);
     if (ret != AIRY_OK) {
@@ -280,21 +265,19 @@ static int anthropic_complete(provider_ctx_t *ctx_ptr, const llm_request_config_
                       "STACK: anthropic_parse_response() → anthropic_complete()",
                       ret, resp_body_len);
     } else if (*out_response) {
-        SVC_LOG_INFO("C-L02: ANTHROPIC: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
-                     "finish_reason=%s",
-                     (*out_response)->model ? (*out_response)->model : "unknown",
-                     (*out_response)->prompt_tokens,
-                     (*out_response)->completion_tokens,
-                     (*out_response)->total_tokens,
-                     (*out_response)->finish_reason ? (*out_response)->finish_reason : "none");
+        SVC_LOG_INFO(
+            "C-L02: ANTHROPIC: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
+            "finish_reason=%s",
+            (*out_response)->model ? (*out_response)->model : "unknown",
+            (*out_response)->prompt_tokens, (*out_response)->completion_tokens,
+            (*out_response)->total_tokens,
+            (*out_response)->finish_reason ? (*out_response)->finish_reason : "none");
     }
 
     provider_http_resp_free(http_resp);
 
     return ret;
 }
-
-/* ---------- 流式完成（Anthropic特有SSE格式） ---------- */
 
 typedef struct {
     llm_stream_callback_t user_cb;
@@ -342,10 +325,7 @@ static int ant_feed_sse_event(ant_sse_ctx_t *s, const char *event, const char *d
     if (!data || data_len == 0)
         return 0;
 
-    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
-    CJSON_PARSE_GUARD(root, data, {
-        return 0;
-    });
+    CJSON_PARSE_GUARD(root, data, { return 0; });
 
     const char *type_str = NULL;
     cJSON *type_field = cJSON_GetObjectItem(root, "type");
@@ -418,7 +398,6 @@ static int ant_feed_sse_event(ant_sse_ctx_t *s, const char *event, const char *d
         }
     }
 
-    /* root 由 CJSON_AUTO_FREE 自动释放 */
     return 0;
 }
 
@@ -543,13 +522,13 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
     anthropic_ctx_t *ctx = (anthropic_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
 
-    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
     provider_refresh_api_key(base);
 
-    const char *model = (manager->model && manager->model[0]) ? manager->model : ANTHROPIC_DEFAULT_MODEL;
+    const char *model =
+        (manager->model && manager->model[0]) ? manager->model : ANTHROPIC_DEFAULT_MODEL;
 
-    SVC_LOG_INFO("C-L02: ANTHROPIC: STREAM-START model=%s msgs=%zu max_tokens=%d temp=%.2f",
-                 model, manager->message_count, manager->max_tokens, manager->temperature);
+    SVC_LOG_INFO("C-L02: ANTHROPIC: STREAM-START model=%s msgs=%zu max_tokens=%d temp=%.2f", model,
+                 manager->message_count, manager->max_tokens, manager->temperature);
 
     llm_request_config_t stream_cfg = *manager;
     stream_cfg.stream = 1;
@@ -557,7 +536,8 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
     char *req_body = anthropic_build_request(&stream_cfg);
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: ANTHROPIC: STREAM-FAIL — request body build failed "
-                      "model=%s", model);
+                      "model=%s",
+                      model);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
@@ -590,8 +570,8 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    SVC_LOG_DEBUG("C-L02: ANTHROPIC: STREAM-HTTP-POST url=%s body_len=%zu timeout=%.1fs",
-                  url, strlen(req_body), base->timeout_sec);
+    SVC_LOG_DEBUG("C-L02: ANTHROPIC: STREAM-HTTP-POST url=%s body_len=%zu timeout=%.1fs", url,
+                  strlen(req_body), base->timeout_sec);
 
     CURL *curl = curl_easy_init();
     long http_code = 0;
@@ -649,12 +629,12 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
     AIRY_FREE(acc.finish_reason);
 
     if (resp) {
-        SVC_LOG_INFO("C-L02: ANTHROPIC: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
-                     "finish_reason=%s acc_len=%zu",
-                     resp->model ? resp->model : "unknown",
-                     resp->prompt_tokens, resp->completion_tokens, resp->total_tokens,
-                     resp->finish_reason ? resp->finish_reason : "none",
-                     resp->choices && resp->choices[0].content ? strlen(resp->choices[0].content) : 0);
+        SVC_LOG_INFO(
+            "C-L02: ANTHROPIC: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
+            "finish_reason=%s acc_len=%zu",
+            resp->model ? resp->model : "unknown", resp->prompt_tokens, resp->completion_tokens,
+            resp->total_tokens, resp->finish_reason ? resp->finish_reason : "none",
+            resp->choices && resp->choices[0].content ? strlen(resp->choices[0].content) : 0);
     } else {
         SVC_LOG_WARN("C-L02: ANTHROPIC: STREAM — null response built");
     }
@@ -666,8 +646,6 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
 
     return AIRY_OK;
 }
-
-/* ---------- 操作表 ---------- */
 
 const provider_ops_t anthropic_ops = {.init = anthropic_init,
                                       .destroy = anthropic_destroy,

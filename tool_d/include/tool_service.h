@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file tool_service.h
  * @brief 工具服务对外接口
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_TOOL_SERVICE_H
@@ -16,7 +16,6 @@
 extern "C" {
 #endif
 
-/* ---------- 公共类型定义 ---------- */
 
 typedef struct tool_service tool_service_t;
 
@@ -28,17 +27,17 @@ typedef struct tool_service tool_service_t;
  * 枚举首项为 WRITE（=0），零初始化默认互斥串行（安全默认）。
  */
 typedef enum {
-    TOOL_ACCESS_WRITE = 0, /**< 有副作用：互斥串行（默认，安全） */
-    TOOL_ACCESS_READ = 1,  /**< 只读：可并行执行 */
+    TOOL_ACCESS_WRITE = 0,
+    TOOL_ACCESS_READ = 1,
 } tool_access_t;
 
 /**
  * @brief 工具参数定义（JSON Schema 格式字符串）
  */
 typedef struct {
-    const char *name;   /* 参数名 */
-    const char *schema; /* JSON Schema 片段，如 "{\"type\":\"string\"}" */
-    int required;       /* 是否必需（0=可选，1=必需）。与 gateway 工具 schema 的
+    const char *name;
+    const char *schema;
+    int required; /* 是否必需（0=可选，1=必需）。与 gateway 工具 schema 的
                          * required 数组一致（SSoT）：fs_list.path 可选（省略时
                          * 默认列出当前目录），fs_read/fs_write/shell_run 必填。 */
 } tool_param_t;
@@ -47,27 +46,27 @@ typedef struct {
  * @brief 工具元数据
  */
 typedef struct {
-    char *id;             /* 工具唯一标识 */
-    char *name;           /* 工具名称 */
-    char *description;    /* 描述 */
-    char *executable;     /* 可执行文件路径或命令 */
-    tool_param_t *params; /* 参数定义数组 */
+    char *id;
+    char *name;
+    char *description;
+    char *executable;
+    tool_param_t *params;
     size_t param_count;
-    int timeout_sec;       /* 执行超时（秒） */
-    int cacheable;         /* 结果是否可缓存（0/1） */
-    tool_access_t access;  /* 访问类型（改进1 P1d）：READ 并发 / WRITE 串行 */
-    char *permission_rule; /* 权限规则标识（与 cupolas 配合） */
+    int timeout_sec;
+    int cacheable;
+    tool_access_t access;
+    char *permission_rule;
 } tool_metadata_t;
 
 /**
  * @brief 工具执行请求
  */
 typedef struct {
-    const char *tool_id;     /* 工具ID */
-    const char *params_json; /* 参数 JSON 字符串 */
-    int stream;              /* 是否流式输出 */
-    const char *agent_id;    /* 调用方 Agent ID（NULL 回退 "tool_d" 默认） */
-    void *user_data;         /* 透传用户数据 */
+    const char *tool_id;
+    const char *params_json;
+    int stream;
+    const char *agent_id;
+    void *user_data;
 } tool_execute_request_t;
 
 /**
@@ -79,22 +78,22 @@ typedef struct {
  *   - NORMAL_FAIL       → 封装 success:false 回传，任务继续（可配重试）
  */
 typedef enum {
-    TOOL_RESULT_CLASS_SUCCESS = 0,      /**< 成功（success==1） */
-    TOOL_RESULT_CLASS_FATAL,            /**< 致命：内存/安全层等系统级异常 */
-    TOOL_RESULT_CLASS_RESPOND_TO_MODEL, /**< 回传继续：-1 启动失败、审批拒绝 */
-    TOOL_RESULT_CLASS_NORMAL_FAIL,      /**< 普通失败：>0 退出码、-2 超时等 */
+    TOOL_RESULT_CLASS_SUCCESS = 0,
+    TOOL_RESULT_CLASS_FATAL,
+    TOOL_RESULT_CLASS_RESPOND_TO_MODEL,
+    TOOL_RESULT_CLASS_NORMAL_FAIL,
 } tool_result_class_t;
 
 /**
  * @brief 工具执行结果（非流式）
  */
 typedef struct {
-    int success;          /* 0 成功，非0失败 */
-    char *output;         /* 标准输出（文本） */
-    char *error;          /* 标准错误 */
-    int exit_code;        /* 进程退出码 */
-    uint64_t duration_ms; /* 执行耗时 */
-    tool_result_class_t failure_class; /* 失败分级（改进3），成功时为 SUCCESS */
+    int success;
+    char *output;
+    char *error;
+    int exit_code;
+    uint64_t duration_ms;
+    tool_result_class_t failure_class;
 } tool_result_t;
 
 /**
@@ -105,20 +104,17 @@ typedef struct {
  */
 typedef void (*tool_stream_callback_t)(const char *chunk, int is_stderr, void *user_data);
 
-/* ---------- 生命周期 ---------- */
 
 tool_service_t *tool_service_create(const char *config_path);
 void tool_service_destroy(tool_service_t *svc);
 
-/* ---------- 工具管理接口 ---------- */
 
 int tool_service_register(tool_service_t *svc, const tool_metadata_t *meta);
 int tool_service_unregister(tool_service_t *svc, const char *tool_id);
 tool_metadata_t *tool_service_get(tool_service_t *svc, const char *tool_id);
 void tool_metadata_free(tool_metadata_t *meta);
-char *tool_service_list(tool_service_t *svc); /* 返回 JSON 数组 */
+char *tool_service_list(tool_service_t *svc);
 
-/* ---------- 工具执行接口 ---------- */
 
 int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
                          tool_result_t **out_result);
@@ -129,7 +125,6 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
 
 void tool_result_free(tool_result_t *res);
 
-/* ---------- 统计接口 ---------- */
 
 /**
  * @brief 获取工具服务运行统计（L2 标准方法 tool.get_stats）
@@ -141,7 +136,6 @@ void tool_result_free(tool_result_t *res);
  */
 char *tool_service_get_stats(tool_service_t *svc);
 
-/* ---------- P0 交互式审批接口 ---------- */
 
 /**
  * @brief 列出所有 pending 审批请求（JSON 数组字符串）

@@ -1,7 +1,7 @@
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file gateway_svc_adapter.h
  * @brief Gateway服务适配器头文件
@@ -16,7 +16,6 @@
  * 3. 最小侵入 - 对原始服务代码影响最小化
  * 4. 可扩展性 - 支持未来服务功能的扩展
  *
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_DAEMON_GATEWAY_SVC_ADAPTER_H
@@ -31,7 +30,6 @@
 extern "C" {
 #endif
 
-/* ==================== 适配器创建与销毁 ==================== */
 
 /**
  * @brief 创建网关服务适配器
@@ -61,14 +59,14 @@ extern "C" {
  *
  * airy_err_t err = gateway_service_adapter_create(&svc, &config);
  * if (err == AIRY_SUCCESS) {
- *     // 使用airy_svc_*函数管理服务
+ *
  *     airy_svc_init(svc);
  *     airy_svc_start(svc);
  * }
  * @endcode
  */
 AIRY_API airy_err_t gateway_service_adapter_create(airy_svc_t *out_service,
-                                                           const airy_svc_config_t *config);
+                                                   const airy_svc_config_t *config);
 
 /**
  * @brief 将现有网关服务包装为适配器
@@ -88,8 +86,8 @@ AIRY_API airy_err_t gateway_service_adapter_create(airy_svc_t *out_service,
  * @reentrant 是
  */
 AIRY_API airy_err_t gateway_service_adapter_wrap(airy_svc_t *out_service,
-                                                         gateway_service_t gateway_svc,
-                                                         const airy_svc_config_t *config);
+                                                 gateway_service_t gateway_svc,
+                                                 const airy_svc_config_t *config);
 
 /**
  * @brief 获取原始网关服务句柄
@@ -105,7 +103,6 @@ AIRY_API airy_err_t gateway_service_adapter_wrap(airy_svc_t *out_service,
  */
 AIRY_API gateway_service_t gateway_service_adapter_get_original(airy_svc_t service);
 
-/* ==================== 适配器生命周期管理 ==================== */
 
 /**
  * @brief 适配器服务初始化
@@ -173,7 +170,6 @@ AIRY_API void gateway_service_adapter_destroy(airy_svc_t service);
  */
 AIRY_API airy_err_t gateway_service_adapter_healthcheck(airy_svc_t service);
 
-/* ==================== 服务状态查询 ==================== */
 
 /**
  * @brief 获取适配器服务状态
@@ -213,10 +209,8 @@ AIRY_API bool gateway_service_adapter_is_running(airy_svc_t service);
  * @threadsafe 是
  * @reentrant 是
  */
-AIRY_API airy_err_t gateway_service_adapter_get_stats(airy_svc_t service,
-                                                              airy_svc_stats_t *stats);
+AIRY_API airy_err_t gateway_service_adapter_get_stats(airy_svc_t service, airy_svc_stats_t *stats);
 
-/* ==================== 工具函数 ==================== */
 
 /**
  * @brief 创建网关服务适配器接口
@@ -243,8 +237,7 @@ AIRY_API const airy_svc_interface_t *gateway_service_adapter_get_interface(void)
  * @threadsafe 是
  * @reentrant 是
  */
-AIRY_API bool gateway_service_adapter_supports_type(airy_svc_t service,
-                                                       gateway_daemon_type_t type);
+AIRY_API bool gateway_service_adapter_supports_type(airy_svc_t service, gateway_daemon_type_t type);
 
 /**
  * @brief 启用/禁用特定网关类型
@@ -261,10 +254,9 @@ AIRY_API bool gateway_service_adapter_supports_type(airy_svc_t service,
  * @reentrant 否
  */
 AIRY_API airy_err_t gateway_service_adapter_set_type_enabled(airy_svc_t service,
-                                                                     gateway_daemon_type_t type,
-                                                                     bool enabled);
+                                                             gateway_daemon_type_t type,
+                                                             bool enabled);
 
-/* ==================== 配置管理 ==================== */
 
 /**
  * @brief 从配置文件创建网关服务适配器
@@ -278,8 +270,8 @@ AIRY_API airy_err_t gateway_service_adapter_set_type_enabled(airy_svc_t service,
  * @threadsafe 否
  * @reentrant 是
  */
-AIRY_API airy_err_t
-gateway_service_adapter_create_from_config(airy_svc_t *out_service, const char *config_path);
+AIRY_API airy_err_t gateway_service_adapter_create_from_config(airy_svc_t *out_service,
+                                                               const char *config_path);
 
 /**
  * @brief 重新加载适配器配置
@@ -295,9 +287,8 @@ gateway_service_adapter_create_from_config(airy_svc_t *out_service, const char *
  * @reentrant 否
  */
 AIRY_API airy_err_t gateway_service_adapter_reload_config(airy_svc_t service,
-                                                                  const char *config_path);
+                                                          const char *config_path);
 
-/* ==================== 适配器注册 ==================== */
 
 /**
  * @brief 注册网关服务适配器到服务注册表

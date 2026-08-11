@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_svc_stop.c
  * @brief R-09-87 Daemon stop() 边缘情况单元测试
@@ -12,13 +13,11 @@
  * - airy_svc_destroy 清理
  * - 状态字符串映射（含ZOMBIE）
  *
- * @copyright Copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "svc_common.h"
 #include "test_macros.h"
 
-/* 绕过 banned_functions.h 的 printf 宏重定义 */
 #ifdef printf
 #undef printf
 #endif
@@ -48,15 +47,14 @@ static int g_test_init_called = 0;
 static int g_test_start_called = 0;
 
 static airy_svc_config_t g_test_config = {.name = "test_svc",
-                                             .version = "1.0.0",
-                                             .capabilities = 0,
-                                             .max_concurrent = 4,
-                                             .timeout_ms = 5000,
-                                             .priority = 0,
-                                             .auto_start = false};
+                                          .version = "1.0.0",
+                                          .capabilities = 0,
+                                          .max_concurrent = 4,
+                                          .timeout_ms = 5000,
+                                          .priority = 0,
+                                          .auto_start = false};
 
-static airy_err_t test_interface_init(airy_svc_t svc,
-                                           const airy_svc_config_t *config)
+static airy_err_t test_interface_init(airy_svc_t svc, const airy_svc_config_t *config)
 {
     (void)svc;
     (void)config;
@@ -103,8 +101,9 @@ static int test_stop_from_wrong_state(void)
 {
     TEST_CASE_START(stop_from_wrong_state);
 
-    airy_svc_interface_t iface = {
-        .init = test_interface_init, .start = test_interface_start, .stop = test_interface_stop};
+    airy_svc_interface_t iface = {.init = test_interface_init,
+                                  .start = test_interface_start,
+                                  .stop = test_interface_stop};
 
     airy_svc_t svc = NULL;
     airy_err_t err = airy_svc_create(&svc, "test_stop_wrong", &iface, &g_test_config);
@@ -112,7 +111,6 @@ static int test_stop_from_wrong_state(void)
     TEST_ASSERT_EQUAL_INT(AIRY_SUCCESS, err, "服务创建成功");
     TEST_ASSERT_NOT_NULL(svc, "服务句柄非空");
 
-    /* 未初始化状态尝试stop应失败 */
     err = airy_svc_stop(svc, false);
     TEST_ASSERT_TRUE(err != AIRY_SUCCESS, "未初始化服务stop应失败");
 
@@ -126,8 +124,9 @@ static int test_stop_normal_flow(void)
 
     reset_test_state();
 
-    airy_svc_interface_t iface = {
-        .init = test_interface_init, .start = test_interface_start, .stop = test_interface_stop};
+    airy_svc_interface_t iface = {.init = test_interface_init,
+                                  .start = test_interface_start,
+                                  .stop = test_interface_stop};
 
     airy_svc_t svc = NULL;
     airy_err_t err = airy_svc_create(&svc, "test_stop_normal", &iface, &g_test_config);
@@ -159,8 +158,9 @@ static int test_stop_then_start_again(void)
 
     reset_test_state();
 
-    airy_svc_interface_t iface = {
-        .init = test_interface_init, .start = test_interface_start, .stop = test_interface_stop};
+    airy_svc_interface_t iface = {.init = test_interface_init,
+                                  .start = test_interface_start,
+                                  .stop = test_interface_stop};
 
     airy_svc_t svc = NULL;
     airy_err_t err = airy_svc_create(&svc, "test_restart", &iface, &g_test_config);
@@ -174,7 +174,6 @@ static int test_stop_then_start_again(void)
     err = airy_svc_stop(svc, false);
     TEST_ASSERT_EQUAL_INT(AIRY_SUCCESS, err, "停止成功");
 
-    /* 从STOPPED状态可以重新启动 */
     err = airy_svc_start(svc);
     TEST_ASSERT_EQUAL_INT(AIRY_SUCCESS, err, "从STOPPED重新启动成功");
 
@@ -187,15 +186,15 @@ static int test_start_from_zombie_state(void)
 {
     TEST_CASE_START(start_from_zombie_state);
 
-    airy_svc_interface_t iface = {
-        .init = test_interface_init, .start = test_interface_start, .stop = test_interface_stop};
+    airy_svc_interface_t iface = {.init = test_interface_init,
+                                  .start = test_interface_start,
+                                  .stop = test_interface_stop};
 
     airy_svc_t svc = NULL;
     airy_err_t err = airy_svc_create(&svc, "test_zombie_start", &iface, &g_test_config);
     TEST_ASSERT_EQUAL_INT(AIRY_SUCCESS, err, "服务创建成功");
     TEST_ASSERT_NOT_NULL(svc, "服务句柄非空");
 
-    /* 验证zombie状态字符串 */
     const char *zombie_str = airy_svc_state_to_string(AIRY_SVC_STATE_ZOMBIE);
     TEST_ASSERT_NOT_NULL(zombie_str, "ZOMBIE状态字符串非空");
     TEST_ASSERT_STRING_CONTAINS(zombie_str, "ZOMBIE", "状态字符串包含ZOMBIE");
@@ -208,7 +207,6 @@ static int test_state_to_string_boundary(void)
 {
     TEST_CASE_START(state_to_string_boundary);
 
-    /* 有效状态 */
     const char *s_none = airy_svc_state_to_string(AIRY_SVC_STATE_NONE);
     TEST_ASSERT_NOT_NULL(s_none, "NONE状态字符串非空");
     TEST_ASSERT_STRING_CONTAINS(s_none, "NONE", "NONE匹配");
@@ -221,7 +219,6 @@ static int test_state_to_string_boundary(void)
     TEST_ASSERT_NOT_NULL(s_zombie, "ZOMBIE状态字符串非空");
     TEST_ASSERT_STRING_CONTAINS(s_zombie, "ZOMBIE", "ZOMBIE匹配");
 
-    /* 越界状态返回UNKNOWN */
     const char *s_invalid = airy_svc_state_to_string((airy_svc_state_t)999);
     TEST_ASSERT_NOT_NULL(s_invalid, "越界状态返回非空");
     TEST_ASSERT_STRING_CONTAINS(s_invalid, "UNKNOWN", "越界返回UNKNOWN");

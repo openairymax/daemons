@@ -1,7 +1,7 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /*
- * Copyright (c) 2026 SPHARX Ltd. All Rights Reserved.
  *
  * daemon_security.h - Daemon Layer Security Integration with cupolas Module
  *
@@ -38,6 +38,7 @@
  * - S-2 层次分解: 安全类型定义与实现分离
  */
 #include "cupolas_signer_info.h"
+#include "cupolas_vault.h"
 #include "cupolas_vault_cred_type.h"
 #include "sanitize_level.h"
 #define SANITIZE_LEVEL_NONE 0
@@ -59,22 +60,19 @@ extern "C" {
  */
 typedef struct daemon_security_config {
     /* Sanitizer configuration */
-    sanitize_level_t sanitize_level;  /**< Input sanitization level */
+    sanitize_level_t sanitize_level; /**< Input sanitization level */
     const char *sanitizer_rules_path; /**< Path to sanitizer rules file */
 
     /* Permission configuration */
     const char *permission_rules_path; /**< Path to permission rules file */
-    bool enable_permission_cache;      /**< Enable permission result caching */
-
+    bool enable_permission_cache; /**< Enable permission result caching */
     /* Signature verification configuration */
     bool enable_signature_verification; /**< Enable code signature verification */
-    const char *trusted_ca_path;        /**< Trusted CA bundle path */
-    const char *expected_signer;        /**< Expected signer CN (optional) */
-
+    const char *trusted_ca_path; /**< Trusted CA bundle path */
+    const char *expected_signer; /**< Expected signer CN (optional) */
     /* Vault configuration */
-    bool enable_vault;              /**< Enable secure credential storage */
+    bool enable_vault; /**< Enable secure credential storage */
     const char *vault_storage_path; /**< Path to vault storage */
-
     /* Audit configuration */
     bool enable_audit_logging; /**< Enable audit logging */
     const char *audit_log_dir; /**< Directory for audit logs */
@@ -424,6 +422,14 @@ int daemon_security_get_status(int *sanitizer_status, int *permission_status, in
  * @endcode
  */
 int daemon_security_add_acl_rule(const char *agent_id, const char *resource, bool allowed);
+
+/**
+ * @brief 获取 daemon_security 打开的 cupolas vault 实例
+ * @return vault 句柄；未启用或未打开返回 NULL
+ * @note 同一实例由 daemon_security_init() 打开，与 daemon_store/retrieve_credential
+ *       读写一致；调用方不得自行 close
+ */
+cupolas_vault_t *daemon_security_get_vault(void);
 
 #ifdef __cplusplus
 }

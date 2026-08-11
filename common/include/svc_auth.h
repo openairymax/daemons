@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file svc_auth.h
  * @brief Daemon 服务层认证中间件 - JWT/API Key/速率限制
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 设计原则 (遵循 ARCHITECTURAL_PRINCIPLES.md):
  * - E-1 安全内生: 默认安全，所有请求必须验证
@@ -22,72 +22,65 @@
 extern "C" {
 #endif
 
-/* ==================== 认证结果码 ==================== */
 
-/** 认证成功 */
 #define AUTH_SUCCESS AIRY_SUCCESS
-/** 认证失败 */
+
 #define AUTH_FAILED AIRY_ERR_PERMISSION_DENIED
-/** Token 过期 */
+
 #define AUTH_TOKEN_EXPIRED (AIRY_ERR_DAEMON_BASE + 0x30)
-/** Token 无效 */
+
 #define AUTH_TOKEN_INVALID (AIRY_ERR_DAEMON_BASE + 0x31)
-/** API Key 无效 */
+
 #define AUTH_APIKEY_INVALID (AIRY_ERR_DAEMON_BASE + 0x32)
-/** 速率限制超出 */
+
 #define AUTH_RATE_LIMIT_EXCEEDED (AIRY_ERR_DAEMON_BASE + 0x33)
-/** 缺少认证凭据 */
+
 #define AUTH_MISSING_CREDENTIALS (AIRY_ERR_DAEMON_BASE + 0x34)
 
-/* ==================== JWT 配置 ==================== */
 
 /**
  * @brief JWT 认证配置结构体
  */
 typedef struct jwt_config {
-    const char *secret;             /**< JWT 签名密钥 */
-    size_t secret_len;              /**< 密钥长度 */
-    uint64_t token_ttl_sec;         /**< Token 有效期（秒），默认 3600 */
-    uint64_t refresh_threshold_sec; /**< 刷新阈值（秒），默认 300 */
-    const char *issuer;             /**< 签发者标识 */
+    const char *secret;
+    size_t secret_len;
+    uint64_t token_ttl_sec;
+    uint64_t refresh_threshold_sec;
+    const char *issuer;
 } jwt_config_t;
 
-/* ==================== API Key 配置 ==================== */
 
 /**
  * @brief API Key 验证配置结构体
  */
 typedef struct apikey_config {
-    const char **allowed_keys; /**< 允许的 Key 列表 */
-    size_t key_count;          /**< Key 数量 */
-    bool enable_key_rotation;  /**< 是否启用密钥轮换 */
+    const char **allowed_keys;
+    size_t key_count;
+    bool enable_key_rotation;
 } apikey_config_t;
 
-/* ==================== 速率限制配置 ==================== */
 
 /**
  * @brief 速率限制器配置结构体
  */
 typedef struct rate_limit_config {
-    uint32_t requests_per_sec; /**< 每秒请求数限制 */
-    uint32_t burst_size;       /**< 突发大小 */
-    size_t max_clients;        /**< 最大客户端数 */
+    uint32_t requests_per_sec;
+    uint32_t burst_size;
+    size_t max_clients;
 } rate_limit_config_t;
 
-/* ==================== 认证上下文 ==================== */
 
 /**
  * @brief 认证结果上下文
  */
 typedef struct auth_result {
-    int status;                /**< 认证状态码 */
-    const char *error_message; /**< 错误消息 */
-    const char *subject;       /**< 认证主体（用户ID/Agent ID） */
-    const char *role;          /**< 用户角色 */
-    int64_t expires_at;        /**< 过期时间戳（毫秒） */
+    int status;
+    const char *error_message;
+    const char *subject;
+    const char *role;
+    int64_t expires_at;
 } auth_result_t;
 
-/* ==================== JWT 函数接口 ==================== */
 
 /**
  * @brief 初始化 JWT 认证模块
@@ -132,7 +125,6 @@ int auth_jwt_refresh_token(const char *old_token, char **out_new_token);
  */
 void auth_jwt_cleanup(void);
 
-/* ==================== API Key 函数接口 ==================== */
 
 /**
  * @brief 初始化 API Key 验证模块
@@ -168,7 +160,6 @@ int auth_apikey_remove(const char *key);
  */
 void auth_apikey_cleanup(void);
 
-/* ==================== 速率限制函数接口 ==================== */
 
 /**
  * @brief 初始化速率限制器
@@ -205,18 +196,17 @@ int auth_ratelimit_get_stats(const char *client_id, uint32_t *remaining, int64_t
  */
 void auth_ratelimit_cleanup(void);
 
-/* ==================== 统一认证入口 ==================== */
 
 /**
  * @brief 认证配置（统一初始化）
  */
 typedef struct auth_config {
-    jwt_config_t jwt;              /**< JWT 配置 */
-    apikey_config_t apikey;        /**< API Key 配置 */
-    rate_limit_config_t ratelimit; /**< 速率限制配置 */
-    bool enable_jwt;               /**< 启用 JWT */
-    bool enable_apikey;            /**< 启用 API Key */
-    bool enable_ratelimit;         /**< 启用速率限制 */
+    jwt_config_t jwt;
+    apikey_config_t apikey;
+    rate_limit_config_t ratelimit;
+    bool enable_jwt;
+    bool enable_apikey;
+    bool enable_ratelimit;
 } auth_config_t;
 
 /**

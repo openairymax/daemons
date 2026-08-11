@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file sched_svc_adapter.c
  * @brief 调度器服务适配器：将调度器服务适配到统一的AgentRT服务管理框架
@@ -35,8 +35,7 @@ static sched_adapter_ctx_t *sched_get_ctx(airy_svc_t service)
     return (sched_adapter_ctx_t *)airy_svc_get_user_data(service);
 }
 
-static void sched_config_from_common(sched_config_t *sched_cfg,
-                                     const airy_svc_config_t *common_cfg)
+static void sched_config_from_common(sched_config_t *sched_cfg, const airy_svc_config_t *common_cfg)
 {
     __builtin_memset(sched_cfg, 0, sizeof(sched_config_t));
     sched_cfg->strategy = SCHED_STRATEGY_WEIGHTED;
@@ -55,18 +54,16 @@ static void sched_config_from_common(sched_config_t *sched_cfg,
      * dag_batch_size 留 0：sched_service_create 默认取 dag_max_parallel。 */
     if (common_cfg && (common_cfg->capabilities & AIRY_SVC_CAP_BATCH) &&
         common_cfg->max_concurrent > 0) {
-        sched_cfg->dag_max_parallel =
-            (common_cfg->max_concurrent > SCHED_DAG_MAX_NODES)
-                ? SCHED_DAG_MAX_NODES
-                : common_cfg->max_concurrent;
+        sched_cfg->dag_max_parallel = (common_cfg->max_concurrent > SCHED_DAG_MAX_NODES) ?
+                                          SCHED_DAG_MAX_NODES :
+                                          common_cfg->max_concurrent;
     }
     /* 失败分级语义（改进3）：生产默认仅 FATAL 级联取消整图，
      * 普通失败不中断图其余独立分支。 */
     sched_cfg->dag_fatal_cascade = true;
 }
 
-static airy_err_t sched_adapter_init(airy_svc_t service,
-                                          const airy_svc_config_t *config)
+static airy_err_t sched_adapter_init(airy_svc_t service, const airy_svc_config_t *config)
 {
     if (!service)
         return AIRY_EINVAL;
@@ -179,8 +176,7 @@ static const airy_svc_interface_t sched_adapter_iface = {
     .healthcheck = sched_adapter_healthcheck,
 };
 
-airy_err_t sched_service_adapter_create(airy_svc_t *out_service,
-                                             const airy_svc_config_t *config)
+airy_err_t sched_service_adapter_create(airy_svc_t *out_service, const airy_svc_config_t *config)
 {
     if (!out_service)
         return AIRY_EINVAL;
@@ -200,8 +196,8 @@ airy_err_t sched_service_adapter_create(airy_svc_t *out_service,
     ctx->owns_service = true;
 
     airy_svc_t svc_handle = NULL;
-    airy_err_t err = airy_svc_create(&svc_handle, ctx->common_cfg.name,
-                                                 &sched_adapter_iface, &ctx->common_cfg);
+    airy_err_t err =
+        airy_svc_create(&svc_handle, ctx->common_cfg.name, &sched_adapter_iface, &ctx->common_cfg);
     if (err != AIRY_SUCCESS) {
         AIRY_FREE(ctx);
         return err;
@@ -218,9 +214,8 @@ airy_err_t sched_service_adapter_create(airy_svc_t *out_service,
     return AIRY_SUCCESS;
 }
 
-airy_err_t sched_service_adapter_wrap(airy_svc_t *out_service,
-                                           sched_service_t *sched_svc,
-                                           const airy_svc_config_t *config)
+airy_err_t sched_service_adapter_wrap(airy_svc_t *out_service, sched_service_t *sched_svc,
+                                      const airy_svc_config_t *config)
 {
     if (!out_service || !sched_svc)
         return AIRY_EINVAL;
@@ -240,8 +235,8 @@ airy_err_t sched_service_adapter_wrap(airy_svc_t *out_service,
     }
 
     airy_svc_t svc_handle = NULL;
-    airy_err_t err = airy_svc_create(&svc_handle, ctx->common_cfg.name,
-                                                 &sched_adapter_iface, &ctx->common_cfg);
+    airy_err_t err =
+        airy_svc_create(&svc_handle, ctx->common_cfg.name, &sched_adapter_iface, &ctx->common_cfg);
     if (err != AIRY_SUCCESS) {
         AIRY_FREE(ctx);
         return err;

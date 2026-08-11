@@ -1,5 +1,7 @@
 #!/bin/bash
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
+# SPDX-FileCopyrightText: 2026 SPHARX Ltd.
+# SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 # AgentRT daemon CI/CD 本地验证脚本
 # 用于本地验证 CI/CD 流程
 # 包含：构建、测试、静态分析、代码覆盖率

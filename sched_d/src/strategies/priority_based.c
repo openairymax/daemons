@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file priority_based.c
  * @brief 基于优先级的调度策略实现
  * @details 根据任务优先级和Agent权重进行智能调度
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "scheduler_service.h"
@@ -17,17 +17,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-
-
 /**
  * @brief 基于优先级的调度策略数据
  */
 typedef struct {
-    agent_info_t **agents;   /**< Agent 列表 */
-    size_t agent_count;      /**< Agent 数量 */
-    size_t max_agents;       /**< 最大 Agent 数量 */
-    float *priority_weights; /**< 优先级权重表 */
-    size_t priority_levels;  /**< 优先级级别数量 */
+    agent_info_t **agents;
+    size_t agent_count;
+    size_t max_agents;
+    float *priority_weights;
+    size_t priority_levels;
 } priority_based_data_t;
 
 /**
@@ -45,7 +43,7 @@ static int priority_based_create(const sched_config_t *manager, void **data)
     }
 
     pbd->max_agents = manager->max_agents;
-    /* 乘法溢出检查：max_agents * sizeof(agent_info_t *) 不得回绕 */
+
     if (pbd->max_agents > SIZE_MAX / sizeof(agent_info_t *)) {
         AIRY_FREE(pbd);
         return AIRY_ERR_OUT_OF_MEMORY;
@@ -58,12 +56,10 @@ static int priority_based_create(const sched_config_t *manager, void **data)
 
     pbd->agent_count = 0;
 
-    // 初始化优先级权重表（默认：优先级越高，权重越大）
-    pbd->priority_levels = 10;  // 假设有10个优先级级别
+    pbd->priority_levels = 10;
     SAFE_MALLOC_ARRAY(pbd->priority_weights, pbd->priority_levels, sizeof(float));
     if (pbd->priority_weights) {
         for (size_t i = 0; i < pbd->priority_levels; i++) {
-            // 指数权重：优先级越高，权重增长越快
             pbd->priority_weights[i] = expf((float)i / 2.0f);
         }
     }
@@ -122,10 +118,8 @@ static int priority_based_register_agent(void *data, const agent_info_t *agent_i
         return AIRY_ERR_OVERFLOW;
     }
 
-    // 检查是否已存在
     for (size_t i = 0; i < pbd->agent_count; i++) {
         if (strcmp(pbd->agents[i]->agent_id, agent_info->agent_id) == 0) {
-            // 更新现有 Agent
             AIRY_FREE(pbd->agents[i]->agent_id);
             AIRY_FREE(pbd->agents[i]->agent_name);
 
@@ -148,7 +142,6 @@ static int priority_based_register_agent(void *data, const agent_info_t *agent_i
         }
     }
 
-    // 添加新 Agent
     agent_info_t *new_agent = (agent_info_t *)AIRY_MALLOC(sizeof(agent_info_t));
     if (!new_agent) {
         return AIRY_ERR_OUT_OF_MEMORY;
@@ -188,12 +181,10 @@ static int priority_based_unregister_agent(void *data, const char *agent_id)
 
     for (size_t i = 0; i < pbd->agent_count; i++) {
         if (strcmp(pbd->agents[i]->agent_id, agent_id) == 0) {
-            // 释放 Agent 资源
             AIRY_FREE(pbd->agents[i]->agent_id);
             AIRY_FREE(pbd->agents[i]->agent_name);
             AIRY_FREE(pbd->agents[i]);
 
-            // 移动剩余 Agent
             for (size_t j = i; j < pbd->agent_count - 1; j++) {
                 pbd->agents[j] = pbd->agents[j + 1];
             }
@@ -203,7 +194,7 @@ static int priority_based_unregister_agent(void *data, const char *agent_id)
         }
     }
 
-    return AIRY_ERR_NOT_FOUND;  // Agent 不存在
+    return AIRY_ERR_NOT_FOUND;
 }
 
 /**
@@ -228,25 +219,20 @@ static float calculate_match_score(const agent_info_t *agent, const task_info_t 
                                    float priority_weight)
 {
     if (!agent->is_available || agent->load_factor >= 0.9) {
-        return AIRY_EINVAL;  // 不可用或负载过高
+        return AIRY_EINVAL;
     }
 
     float score = 0.0f;
 
-    // 基础成功率权重
     score += agent->success_rate * 0.4f;
 
-    // 负载因子权重（负载越低越好）
     score += (1.0f - agent->load_factor) * 0.3f;
 
-    // 响应时间权重（响应时间越短越好）
     float response_factor = 1.0f / (1.0f + agent->avg_response_time_ms / 1000.0f);
     score += response_factor * 0.2f;
 
-    // Agent权重（配置的优先级）
     score += agent->weight * 0.1f;
 
-    // 应用任务优先级权重
     score *= priority_weight;
 
     return score;
@@ -269,12 +255,10 @@ static int priority_based_schedule(void *data, const task_info_t *task_info,
     priority_based_data_t *pbd = (priority_based_data_t *)data;
 
     if (pbd->agent_count == 0) {
-        return AIRY_ERR_NOT_FOUND;  // 无可用 Agent
+        return AIRY_ERR_NOT_FOUND;
     }
 
-    // 获取任务优先级（假设task_info中有priority字段）
-    // 如果没有，使用默认优先级
-    int task_priority = 5;  // 默认中等优先级
+    int task_priority = 5;
     if (task_info->priority >= 0) {
         task_priority = task_info->priority;
     }
@@ -304,10 +288,9 @@ static int priority_based_schedule(void *data, const task_info_t *task_info,
     }
 
     if (!best_agent) {
-        return AIRY_ERR_NOT_FOUND;  // 无可用 Agent
+        return AIRY_ERR_NOT_FOUND;
     }
 
-    // 创建调度结果
     sched_result_t *res = (sched_result_t *)AIRY_MALLOC(sizeof(sched_result_t));
     if (!res) {
         return AIRY_ERR_OUT_OF_MEMORY;

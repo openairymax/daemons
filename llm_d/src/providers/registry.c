@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 /**
  * @file registry.c
  * @brief 提供商注册表实现
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "daemon_platform_ext.h"
@@ -12,14 +12,13 @@
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD 宏 */
+
 #include <cjson_helpers.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "error.h"
 
-/* 外部声明各提供商操作表 */
 extern const provider_ops_t openai_ops;
 extern const provider_ops_t anthropic_ops;
 extern const provider_ops_t deepseek_ops;
@@ -48,7 +47,8 @@ static const provider_ops_t *get_ops_by_name(const char *name)
      * minimax / 自定义名）只需在 model.yaml 提供 base_url + api_key
      * 即可走统一的 OpenAI Chat Completions 协议，无需新增 provider 实现。 */
     SVC_LOG_DEBUG("Provider '%s' falls back to OpenAI-compatible adapter "
-                  "(custom base_url)", name);
+                  "(custom base_url)",
+                  name);
     return &openai_ops;
 }
 
@@ -161,7 +161,6 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
     content[read_len] = '\0';
     fclose(f);
 
-    /* P0.18.2: 模式 B — CJSON_PARSE_GUARD（on_fail 中释放 content） */
     CJSON_PARSE_GUARD(root, content, {
         AIRY_FREE(content);
         SVC_LOG_WARN("Failed to parse provider config '%s'", config_path);
@@ -171,14 +170,14 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
 
     cJSON *providers_arr = cJSON_GetObjectItem(root, "providers");
     if (!providers_arr || !cJSON_IsArray(providers_arr)) {
-        /* root 由 CJSON_AUTO_FREE 自动释放 */
+
         SVC_LOG_WARN("No 'providers' array in '%s'", config_path);
         return reg;
     }
 
     int n = cJSON_GetArraySize(providers_arr);
     if (n <= 0) {
-        /* root 由 CJSON_AUTO_FREE 自动释放 */
+
         return reg;
     }
 
@@ -195,7 +194,7 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
         (provider_t *)AIRY_CALLOC(old_count + new_count + 1, sizeof(provider_t));
     if (!new_provs) {
         airy_mtx_unlock(&reg->lock);
-        /* root 由 CJSON_AUTO_FREE 自动释放 */
+
         return reg;
     }
 
@@ -236,7 +235,7 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
                 __builtin_memcpy(api_key_buf + 4, pkey_env->valuestring, env_len + 1);
             }
         } else if (cJSON_IsString(pkey) && pkey->valuestring[0]) {
-AIRY_STRNCPY_TERM(api_key_buf, pkey->valuestring, sizeof(api_key_buf));
+            AIRY_STRNCPY_TERM(api_key_buf, pkey->valuestring, sizeof(api_key_buf));
             (api_key_buf)[sizeof(api_key_buf) - 1] = '\0';
         }
 
@@ -294,7 +293,6 @@ AIRY_STRNCPY_TERM(api_key_buf, pkey->valuestring, sizeof(api_key_buf));
 
     airy_mtx_unlock(&reg->lock);
 
-    /* root 由 CJSON_AUTO_FREE 自动释放 */
     SVC_LOG_INFO("Loaded %zu providers from config '%s'", valid_idx - old_count, config_path);
     return reg;
 }

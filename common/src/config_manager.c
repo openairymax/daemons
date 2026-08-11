@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file config_manager.c
  * @brief 统一配置管理系统实现
@@ -23,11 +24,7 @@
 
 extern char **environ;
 
-/* ==================== 内部常量 ==================== */
-
 #define CM_MAX_VALIDATORS 16
-
-/* ==================== 内部数据结构 ==================== */
 
 typedef struct {
     char pattern[CM_MAX_KEY_LEN];
@@ -55,8 +52,6 @@ static struct {
     bool initialized;
     airy_mtx_t mutex;
 } g_cm = {0};
-
-/* ==================== 辅助函数 ==================== */
 
 static cm_entry_t *find_entry(const char *key)
 {
@@ -136,8 +131,6 @@ static bool validate_value(const char *key, const char *value)
     return true;
 }
 
-/* ==================== 公共API实现 ==================== */
-
 AIRY_API cm_config_t cm_create_default_config(void)
 {
     cm_config_t config;
@@ -168,7 +161,7 @@ AIRY_API int cm_init(const cm_config_t *config)
     airy_err_t err = airy_mtx_init(&g_cm.mutex);
     if (err != AIRY_SUCCESS) {
         airy_err_push_ex(AIRY_ERR_DAEMON_INIT_FAILED, __FILE__, __LINE__, __func__,
-                              "mutex init failed (err=%d)", err);
+                         "mutex init failed (err=%d)", err);
         return AIRY_ERR_UNKNOWN;
     }
 
@@ -195,8 +188,6 @@ AIRY_API void cm_shutdown(void)
 
     LOG_INFO("Config manager shutdown");
 }
-
-/* ==================== 配置读写 ==================== */
 
 AIRY_API const char *cm_get(const char *key, const char *default_value)
 {
@@ -286,7 +277,7 @@ AIRY_API int cm_set(const char *key, const char *value, const char *source)
     if (g_cm.entry_count >= CM_MAX_ENTRIES) {
         airy_mtx_unlock(&g_cm.mutex);
         airy_err_push_ex(AIRY_ERR_STATE_ERROR, __FILE__, __LINE__, __func__,
-                              "entry_count overflow: %u >= %u", g_cm.entry_count, CM_MAX_ENTRIES);
+                         "entry_count overflow: %u >= %u", g_cm.entry_count, CM_MAX_ENTRIES);
         return AIRY_ERR_OVERFLOW;
     }
 
@@ -313,7 +304,7 @@ AIRY_API int cm_set(const char *key, const char *value, const char *source)
 }
 
 AIRY_API int cm_set_namespaced(const char *namespace_, const char *key, const char *value,
-                                  const char *source)
+                               const char *source)
 {
     if (!namespace_ || !key)
         return AIRY_ERR_INVALID_PARAM;
@@ -322,8 +313,6 @@ AIRY_API int cm_set_namespaced(const char *namespace_, const char *key, const ch
     snprintf(full_key, sizeof(full_key), "%s.%s", namespace_, key);
     return cm_set(full_key, value, source);
 }
-
-/* ==================== 配置加载 ==================== */
 
 AIRY_API int cm_load_json(const char *path, const char *namespace_)
 {
@@ -521,8 +510,6 @@ AIRY_API int cm_load_args(int argc, char **argv)
     return count;
 }
 
-/* ==================== 配置监视与热更新 ==================== */
-
 AIRY_API int cm_watch(const char *key_pattern, cm_change_callback_t callback, void *user_data)
 {
     if (!callback)
@@ -583,8 +570,6 @@ AIRY_API int cm_reload(void)
     return cm_load_json(g_cm.config.base_path[0] ? g_cm.config.base_path : "./config", NULL);
 }
 
-/* ==================== 配置校验 ==================== */
-
 AIRY_API int cm_register_validator(const char *key_pattern, cm_validator_t validator)
 {
     if (!validator)
@@ -625,10 +610,8 @@ AIRY_API int cm_validate_all(void)
     return failures;
 }
 
-/* ==================== 版本控制 ==================== */
-
 AIRY_API int cm_get_history(const char *key, cm_change_record_t *records, uint32_t max_count,
-                               uint32_t *found_count)
+                            uint32_t *found_count)
 {
     if (!records || !found_count)
         return AIRY_ERR_INVALID_PARAM;
@@ -719,8 +702,6 @@ AIRY_API int cm_load_environment_config(const char *env)
     return count > 0 ? count : 0;
 }
 
-/* ==================== 导出 ==================== */
-
 AIRY_API char *cm_export_json(const char *namespace_)
 {
     if (!g_cm.initialized) {
@@ -734,7 +715,7 @@ AIRY_API char *cm_export_json(const char *namespace_)
     if (!buf) {
         airy_mtx_unlock(&g_cm.mutex);
         airy_err_push_ex(AIRY_ERR_OUT_OF_MEMORY, __FILE__, __LINE__, __func__,
-                              "cm_export_json alloc failed");
+                         "cm_export_json alloc failed");
         return NULL;
     }
     size_t pos = 0;

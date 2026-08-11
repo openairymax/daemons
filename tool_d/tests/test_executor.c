@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_executor.c
  * @brief Tool 执行器单元测试
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "executor.h"
@@ -18,8 +18,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-/* ========== 改进1（P1d）：并行工具并发门控测试辅助 ========== */
 
 static long long now_ms(void)
 {
@@ -59,7 +57,7 @@ static void *exec_thread_fn(void *argp)
     exec_thread_arg_t *arg = (exec_thread_arg_t *)argp;
     arg->start_ms = now_ms();
     tool_result_t *result = NULL;
-    /* agent_id 显式传 "tool_d"（与 ACL 规则一致） */
+
     arg->ret = tool_executor_run(arg->exec, &arg->meta, "0.35", "tool_d", &result);
     arg->end_ms = now_ms();
     if (result)
@@ -67,13 +65,11 @@ static void *exec_thread_fn(void *argp)
     return NULL;
 }
 
-/* 两个执行区间是否重叠（含边界） */
 static int intervals_overlap(long long s1, long long e1, long long s2, long long e2)
 {
     return s1 <= e2 && s2 <= e1;
 }
 
-/* 两个线程的总耗时（从最早 start 到最晚 end） */
 static long long threads_total_ms(const exec_thread_arg_t *a, const exec_thread_arg_t *b)
 {
     long long min_start = a->start_ms < b->start_ms ? a->start_ms : b->start_ms;
@@ -98,7 +94,7 @@ static void test_executor_read_concurrent(void)
     AIRY_MEMSET(&b, 0, sizeof(b));
     a.exec = exec;
     b.exec = exec;
-    /* 两个只读工具（TOOL_ACCESS_READ）：应并发执行（读门并行） */
+
     a.meta.id = "sleep_read_1";
     a.meta.name = "sleep_read";
     a.meta.executable = "/usr/bin/sleep";
@@ -122,11 +118,11 @@ static void test_executor_read_concurrent(void)
 
     assert(a.ret == AIRY_OK && b.ret == AIRY_OK);
     long long total = threads_total_ms(&a, &b);
-    printf("    read intervals: [%lld,%lld] [%lld,%lld] total=%lldms\n",
-           a.start_ms, a.end_ms, b.start_ms, b.end_ms, total);
-    /* 并发：总耗时显著小于两次 sleep（0.35s×2=700ms，阈值 600ms） */
+    printf("    read intervals: [%lld,%lld] [%lld,%lld] total=%lldms\n", a.start_ms, a.end_ms,
+           b.start_ms, b.end_ms, total);
+
     assert(total < 600);
-    /* 两执行区间应真实重叠（无门控等待） */
+
     assert(intervals_overlap(a.start_ms, a.end_ms, b.start_ms, b.end_ms));
 
     tool_executor_destroy(exec);
@@ -146,7 +142,7 @@ static void test_executor_write_serial(void)
     AIRY_MEMSET(&b, 0, sizeof(b));
     a.exec = exec;
     b.exec = exec;
-    /* 两个写工具（TOOL_ACCESS_WRITE）：必须互斥串行（写门互斥） */
+
     a.meta.id = "sleep_write_1";
     a.meta.name = "sleep_write";
     a.meta.executable = "/usr/bin/sleep";
@@ -156,7 +152,7 @@ static void test_executor_write_serial(void)
     b.meta.id = "sleep_write_2";
 
     pthread_t ta, tb;
-    /* 同 read 并发：create/join 独立于 assert（NDEBUG 下 assert 参数不求值） */
+
     int rc_ta = pthread_create(&ta, NULL, exec_thread_fn, &a);
     assert(rc_ta == 0);
     int rc_tb = pthread_create(&tb, NULL, exec_thread_fn, &b);
@@ -168,9 +164,9 @@ static void test_executor_write_serial(void)
 
     assert(a.ret == AIRY_OK && b.ret == AIRY_OK);
     long long total = threads_total_ms(&a, &b);
-    printf("    write intervals: [%lld,%lld] [%lld,%lld] total=%lldms\n",
-           a.start_ms, a.end_ms, b.start_ms, b.end_ms, total);
-    /* 串行：总耗时 ≥ 两次 sleep（0.35s×2=700ms，容差 150ms） */
+    printf("    write intervals: [%lld,%lld] [%lld,%lld] total=%lldms\n", a.start_ms, a.end_ms,
+           b.start_ms, b.end_ms, total);
+
     assert(total >= 700 - 150);
 
     tool_executor_destroy(exec);
@@ -193,8 +189,9 @@ static void test_executor_config(void)
 {
     printf("  test_executor_config...\n");
 
-    tool_executor_config_t config = {
-        .max_workers = 5, .timeout_sec = 10, .workbench_type = "default"};
+    tool_executor_config_t config = {.max_workers = 5,
+                                     .timeout_sec = 10,
+                                     .workbench_type = "default"};
 
     tool_executor_t *exec = tool_executor_create(&config);
     assert(exec != NULL);
@@ -270,7 +267,6 @@ static void test_executor_failure_class(void)
 {
     printf("  test_executor_failure_class...\n");
 
-    /* approval_ctx 未注入 → fail-closed：结果分级必须为 FATAL（改进3） */
     tool_executor_t *exec = tool_executor_create(NULL);
     assert(exec != NULL);
 
@@ -285,14 +281,13 @@ static void test_executor_failure_class(void)
     int ret = tool_executor_run(exec, &meta, "hello", NULL, &result);
     if (result) {
         assert(result->success == 0);
-        /* 安全系统未配置 = 致命（fail-closed），非普通失败/回传继续 */
+
         assert(result->failure_class == TOOL_RESULT_CLASS_FATAL);
         tool_result_free(result);
     } else {
         printf("    WARN: no result allocated (ret=%d)\n", ret);
     }
 
-    /* 缺 executable → 回传继续（RESPOND_TO_MODEL），任务不终止 */
     tool_metadata_t bad_meta;
     AIRY_MEMSET(&bad_meta, 0, sizeof(bad_meta));
     bad_meta.id = "no_exec";
@@ -324,7 +319,7 @@ int main(void)
     test_executor_run();
     test_executor_run_async();
     test_executor_failure_class();
-    /* P1d：并行工具并发门控（READ 并发 / WRITE 串行） */
+
     test_executor_read_concurrent();
     test_executor_write_serial();
 

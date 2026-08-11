@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 #ifndef AIRY_GATEWAY_A2A_HANDLER_H
 #define AIRY_GATEWAY_A2A_HANDLER_H
 
@@ -23,12 +24,12 @@ typedef struct {
     uint32_t default_timeout_ms;
 } gw_a2a_handler_config_t;
 
-#define GW_A2A_HANDLER_CONFIG_DEFAULTS                                  \
-    {                                                                   \
-        .agent_name = "agentrt-a2a", .agent_version = "0.3.0",          \
-        .agent_url = "http://localhost:8080/a2a", .capabilities = 0x3F, \
-        .default_timeout_ms = 60000                                     \
-    }
+#define GW_A2A_HANDLER_CONFIG_DEFAULTS         \
+    {.agent_name = "agentrt-a2a",              \
+     .agent_version = "0.3.0",                 \
+     .agent_url = "http://localhost:8080/a2a", \
+     .capabilities = 0x3F,                     \
+     .default_timeout_ms = 60000}
 
 typedef int (*gw_a2a_task_exec_fn)(const char *task_id, const char *task_type,
                                    const char *input_json, char **output_json, void *user_data);

@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_log_sanitizer.c
  * @brief 日志脱敏过滤器单元测试 (P1-C06)
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  */
 
 #include "log_sanitizer.h"
@@ -15,15 +15,16 @@ static int tests_run = 0;
 static int tests_passed = 0;
 static int tests_failed = 0;
 
-#define TEST_ASSERT(cond, msg) do { \
-    tests_run++; \
-    if (cond) { \
-        tests_passed++; \
-    } else { \
-        tests_failed++; \
-        fprintf(stderr, "  FAIL: %s\n", msg); \
-    } \
-} while (0)
+#define TEST_ASSERT(cond, msg)                    \
+    do {                                          \
+        tests_run++;                              \
+        if (cond) {                               \
+            tests_passed++;                       \
+        } else {                                  \
+            tests_failed++;                       \
+            fprintf(stderr, "  FAIL: %s\n", msg); \
+        }                                         \
+    } while (0)
 
 static void test_init_destroy(void)
 {
@@ -133,7 +134,8 @@ static void test_contains_sensitive(void)
     log_sanitizer_init(16);
     TEST_ASSERT(log_contains_sensitive("api_key=secret123"), "should detect api_key");
     TEST_ASSERT(log_contains_sensitive("password=pass123"), "should detect password");
-    TEST_ASSERT(!log_contains_sensitive("normal log message"), "should not detect in normal message");
+    TEST_ASSERT(!log_contains_sensitive("normal log message"),
+                "should not detect in normal message");
     TEST_ASSERT(!log_contains_sensitive(""), "empty string should not be sensitive");
     log_sanitizer_destroy();
 }
@@ -212,7 +214,7 @@ int main(void)
     test_multiple_init();
     test_case_insensitive();
 
-    printf("\n=== Results: %d run, %d passed, %d failed ===\n",
-           tests_run, tests_passed, tests_failed);
+    printf("\n=== Results: %d run, %d passed, %d failed ===\n", tests_run, tests_passed,
+           tests_failed);
     return tests_failed > 0 ? 1 : 0;
 }

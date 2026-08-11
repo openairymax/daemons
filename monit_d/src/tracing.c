@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file tracing.c
  * @brief 分布式追踪系统实现
@@ -191,7 +191,8 @@ int tracing_start_trace(const char *operation_name, const char *parent_trace_id,
                         size_t trace_id_buf_len)
 {
     if (!operation_name || !out_trace_id) {
-        SVC_LOG_ERROR("tracing_start_trace: NULL parameter (operation_name=%p, out_trace_id=%p)", (const void *)operation_name, (const void *)out_trace_id);
+        SVC_LOG_ERROR("tracing_start_trace: NULL parameter (operation_name=%p, out_trace_id=%p)",
+                      (const void *)operation_name, (const void *)out_trace_id);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -235,7 +236,7 @@ int tracing_start_trace(const char *operation_name, const char *parent_trace_id,
     airy_mtx_init(&trace->lock);
 
     if (parent_trace_id) {
-AIRY_STRNCPY_TERM(trace->trace_id, parent_trace_id, TRACE_ID_LEN);
+        AIRY_STRNCPY_TERM(trace->trace_id, parent_trace_id, TRACE_ID_LEN);
     } else {
         generate_hex_id(trace->trace_id, TRACE_ID_LEN);
     }
@@ -251,7 +252,8 @@ AIRY_STRNCPY_TERM(trace->trace_id, parent_trace_id, TRACE_ID_LEN);
     root_span->parent_span_id[0] = '\0';
     root_span->operation_name = AIRY_STRDUP(operation_name);
     if (!root_span->operation_name) {
-        SVC_LOG_ERROR("tracing_start_trace: strdup failed for operation_name (operation=%s)", operation_name);
+        SVC_LOG_ERROR("tracing_start_trace: strdup failed for operation_name (operation=%s)",
+                      operation_name);
         g_tracing.traces[g_tracing.trace_count].trace_id[0] = '\0';
         return AIRY_ERR_OUT_OF_MEMORY;
     }
@@ -266,7 +268,7 @@ AIRY_STRNCPY_TERM(trace->trace_id, parent_trace_id, TRACE_ID_LEN);
 
     g_tracing.trace_count++;
 
-AIRY_STRNCPY_TERM(out_trace_id, trace->trace_id, trace_id_buf_len);
+    AIRY_STRNCPY_TERM(out_trace_id, trace->trace_id, trace_id_buf_len);
 
     airy_mtx_unlock(&g_tracing.global_lock);
 
@@ -279,7 +281,9 @@ int tracing_start_span(const char *trace_id, const char *operation_name, span_ki
                        char *out_span_id, size_t span_id_buf_len)
 {
     if (!trace_id || !operation_name || !out_span_id) {
-        SVC_LOG_ERROR("tracing_start_span: NULL parameter (trace_id=%p, operation_name=%p, out_span_id=%p)", (const void *)trace_id, (const void *)operation_name, (const void *)out_span_id);
+        SVC_LOG_ERROR(
+            "tracing_start_span: NULL parameter (trace_id=%p, operation_name=%p, out_span_id=%p)",
+            (const void *)trace_id, (const void *)operation_name, (const void *)out_span_id);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -294,7 +298,8 @@ int tracing_start_span(const char *trace_id, const char *operation_name, span_ki
     }
 
     if (!trace) {
-        SVC_LOG_ERROR("tracing_start_span: trace not found (trace_id=%s)", trace_id ? trace_id : "NULL");
+        SVC_LOG_ERROR("tracing_start_span: trace not found (trace_id=%s)",
+                      trace_id ? trace_id : "NULL");
         airy_mtx_unlock(&g_tracing.global_lock);
         return AIRY_ERR_NOT_FOUND;
     }
@@ -303,7 +308,9 @@ int tracing_start_span(const char *trace_id, const char *operation_name, span_ki
     airy_mtx_unlock(&g_tracing.global_lock);
 
     if (trace->span_count >= MAX_SPANS_PER_TRACE) {
-        SVC_LOG_ERROR("tracing_start_span: max spans exceeded for trace (trace_id=%s, span_count=%zu, max=%d)", trace_id, trace->span_count, MAX_SPANS_PER_TRACE);
+        SVC_LOG_ERROR("tracing_start_span: max spans exceeded for trace (trace_id=%s, "
+                      "span_count=%zu, max=%d)",
+                      trace_id, trace->span_count, MAX_SPANS_PER_TRACE);
         airy_mtx_unlock(&trace->lock);
         return AIRY_ERR_OVERFLOW;
     }
@@ -312,7 +319,8 @@ int tracing_start_span(const char *trace_id, const char *operation_name, span_ki
     generate_hex_id(span->span_id, SPAN_ID_LEN);
 
     if (trace->span_count > 0) {
-AIRY_STRNCPY_TERM(span->parent_span_id, trace->spans[trace->span_count - 1].span_id, SPAN_ID_LEN);
+        AIRY_STRNCPY_TERM(span->parent_span_id, trace->spans[trace->span_count - 1].span_id,
+                          SPAN_ID_LEN);
     } else {
         span->parent_span_id[0] = '\0';
     }
@@ -327,7 +335,7 @@ AIRY_STRNCPY_TERM(span->parent_span_id, trace->spans[trace->span_count - 1].span
     span->event_count = 0;
     trace->span_count++;
 
-AIRY_STRNCPY_TERM(out_span_id, span->span_id, span_id_buf_len);
+    AIRY_STRNCPY_TERM(out_span_id, span->span_id, span_id_buf_len);
 
     airy_mtx_unlock(&trace->lock);
     return AIRY_SUCCESS;
@@ -337,7 +345,8 @@ int tracing_end_span(const char *trace_id, const char *span_id, int status_code,
                      const char *status_message)
 {
     if (!trace_id || !span_id) {
-        SVC_LOG_ERROR("tracing_end_span: NULL parameter (trace_id=%p, span_id=%p)", (const void *)trace_id, (const void *)span_id);
+        SVC_LOG_ERROR("tracing_end_span: NULL parameter (trace_id=%p, span_id=%p)",
+                      (const void *)trace_id, (const void *)span_id);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -352,7 +361,8 @@ int tracing_end_span(const char *trace_id, const char *span_id, int status_code,
     }
 
     if (!trace) {
-        SVC_LOG_ERROR("tracing_end_span: trace not found (trace_id=%s)", trace_id ? trace_id : "NULL");
+        SVC_LOG_ERROR("tracing_end_span: trace not found (trace_id=%s)",
+                      trace_id ? trace_id : "NULL");
         airy_mtx_unlock(&g_tracing.global_lock);
         return AIRY_ERR_NOT_FOUND;
     }
@@ -390,7 +400,10 @@ int tracing_add_span_attribute(const char *trace_id, const char *span_id, const 
                                const char *value)
 {
     if (!trace_id || !span_id || !key || !value) {
-        SVC_LOG_ERROR("tracing_add_span_attribute: NULL parameter (trace_id=%p, span_id=%p, key=%p, value=%p)", (const void *)trace_id, (const void *)span_id, (const void *)key, (const void *)value);
+        SVC_LOG_ERROR("tracing_add_span_attribute: NULL parameter (trace_id=%p, span_id=%p, "
+                      "key=%p, value=%p)",
+                      (const void *)trace_id, (const void *)span_id, (const void *)key,
+                      (const void *)value);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -405,7 +418,8 @@ int tracing_add_span_attribute(const char *trace_id, const char *span_id, const 
     }
 
     if (!trace) {
-        SVC_LOG_ERROR("tracing_add_span_attribute: trace not found (trace_id=%s)", trace_id ? trace_id : "NULL");
+        SVC_LOG_ERROR("tracing_add_span_attribute: trace not found (trace_id=%s)",
+                      trace_id ? trace_id : "NULL");
         airy_mtx_unlock(&g_tracing.global_lock);
         return AIRY_ERR_NOT_FOUND;
     }
@@ -439,7 +453,9 @@ int tracing_add_span_attribute(const char *trace_id, const char *span_id, const 
 int tracing_add_span_event(const char *trace_id, const char *span_id, const char *event_name)
 {
     if (!trace_id || !span_id || !event_name) {
-        SVC_LOG_ERROR("tracing_add_span_event: NULL parameter (trace_id=%p, span_id=%p, event_name=%p)", (const void *)trace_id, (const void *)span_id, (const void *)event_name);
+        SVC_LOG_ERROR(
+            "tracing_add_span_event: NULL parameter (trace_id=%p, span_id=%p, event_name=%p)",
+            (const void *)trace_id, (const void *)span_id, (const void *)event_name);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -454,7 +470,8 @@ int tracing_add_span_event(const char *trace_id, const char *span_id, const char
     }
 
     if (!trace) {
-        SVC_LOG_ERROR("tracing_add_span_event: trace not found (trace_id=%s)", trace_id ? trace_id : "NULL");
+        SVC_LOG_ERROR("tracing_add_span_event: trace not found (trace_id=%s)",
+                      trace_id ? trace_id : "NULL");
         airy_mtx_unlock(&g_tracing.global_lock);
         return AIRY_ERR_NOT_FOUND;
     }
@@ -500,7 +517,8 @@ char *tracing_export_json(const char *trace_id)
     }
 
     if (!trace) {
-        SVC_LOG_ERROR("tracing_export_json: trace not found (trace_id=%s)", trace_id ? trace_id : "NULL");
+        SVC_LOG_ERROR("tracing_export_json: trace not found (trace_id=%s)",
+                      trace_id ? trace_id : "NULL");
         airy_mtx_unlock(&g_tracing.global_lock);
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
@@ -510,7 +528,8 @@ char *tracing_export_json(const char *trace_id)
 
     char *buf = (char *)AIRY_MALLOC(MAX_TRACE_EXPORT_SIZE);
     if (!buf) {
-        SVC_LOG_ERROR("tracing_export_json: malloc failed for export buffer (size=%d)", MAX_TRACE_EXPORT_SIZE);
+        SVC_LOG_ERROR("tracing_export_json: malloc failed for export buffer (size=%d)",
+                      MAX_TRACE_EXPORT_SIZE);
         airy_mtx_unlock(&trace->lock);
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }

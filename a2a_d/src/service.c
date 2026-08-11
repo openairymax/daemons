@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file service.c
  * @brief A2A 服务实现：封装 a2a_v03_adapter 库
@@ -34,8 +34,6 @@
 #define A2A_DEFAULT_MAX_AGENTS 256
 #define A2A_DEFAULT_MAX_TASKS 4096
 
-/* ==================== JSON 序列化辅助 ==================== */
-
 static void a2a_add_str_item(cJSON *obj, const char *key, const char *val)
 {
     if (val)
@@ -44,7 +42,6 @@ static void a2a_add_str_item(cJSON *obj, const char *key, const char *val)
         cJSON_AddNullToObject(obj, key);
 }
 
-/* 将 Agent Card 序列化为 cJSON 对象（不接管所有权） */
 static cJSON *a2a_card_to_json(const a2a_agent_card_t *card)
 {
     if (!card)
@@ -66,7 +63,6 @@ static cJSON *a2a_card_to_json(const a2a_agent_card_t *card)
     return obj;
 }
 
-/* 将 Task 序列化为 cJSON 对象 */
 static cJSON *a2a_task_to_json(const a2a_task_t *task)
 {
     if (!task)
@@ -91,7 +87,6 @@ static cJSON *a2a_task_to_json(const a2a_task_t *task)
     return obj;
 }
 
-/* 将 Message 序列化为 cJSON 对象 */
 static cJSON *a2a_message_to_json(const a2a_message_t *msg)
 {
     if (!msg)
@@ -108,8 +103,6 @@ static cJSON *a2a_message_to_json(const a2a_message_t *msg)
 
     return obj;
 }
-
-/* ==================== 生命周期 ==================== */
 
 a2a_service_t *a2a_service_create(size_t max_agents, size_t max_tasks)
 {
@@ -137,8 +130,7 @@ a2a_service_t *a2a_service_create(size_t max_agents, size_t max_tasks)
     svc->max_tasks = max_tasks;
     airy_mtx_init(&svc->lock);
     svc->initialized = 1;
-    SVC_LOG_INFO("A2A service created (max_agents=%zu, max_tasks=%zu)",
-                 max_agents, max_tasks);
+    SVC_LOG_INFO("A2A service created (max_agents=%zu, max_tasks=%zu)", max_agents, max_tasks);
     return svc;
 }
 
@@ -159,8 +151,6 @@ void a2a_service_destroy(a2a_service_t *svc)
     airy_mtx_destroy(&svc->lock);
     AIRY_FREE(svc);
 }
-
-/* ==================== Agent Card 管理 ==================== */
 
 int a2a_service_register_agent(a2a_service_t *svc, const char *card_json)
 {
@@ -186,7 +176,6 @@ int a2a_service_register_agent(a2a_service_t *svc, const char *card_json)
     cJSON *available = cJSON_GetObjectItem(root, "available");
     cJSON *skills = cJSON_GetObjectItem(root, "skills");
 
-    /* id 必填 */
     if (!id || !cJSON_IsString(id) || id->valuestring[0] == '\0') {
         cJSON_Delete(root);
         SVC_LOG_WARN("A2A register: missing agent id");
@@ -195,17 +184,17 @@ int a2a_service_register_agent(a2a_service_t *svc, const char *card_json)
 
     card.id = AIRY_STRDUP(id->valuestring);
     card.name = AIRY_STRDUP(name && cJSON_IsString(name) ? name->valuestring : "Unknown");
-    card.description = (description && cJSON_IsString(description))
-                           ? AIRY_STRDUP(description->valuestring) : NULL;
+    card.description =
+        (description && cJSON_IsString(description)) ? AIRY_STRDUP(description->valuestring) : NULL;
     card.url = (url && cJSON_IsString(url)) ? AIRY_STRDUP(url->valuestring) : NULL;
     card.version = (version && cJSON_IsString(version)) ? AIRY_STRDUP(version->valuestring) : NULL;
-    card.protocol_version = (protocol_version && cJSON_IsNumber(protocol_version))
-                                ? protocol_version->valueint : 3;
-    card.capabilities = (a2a_capability_t)((capabilities && cJSON_IsNumber(capabilities))
-                                               ? capabilities->valueint : 0);
+    card.protocol_version =
+        (protocol_version && cJSON_IsNumber(protocol_version)) ? protocol_version->valueint : 3;
+    card.capabilities =
+        (a2a_capability_t)((capabilities && cJSON_IsNumber(capabilities)) ? capabilities->valueint :
+                                                                            0);
     card.available = available ? cJSON_IsTrue(available) : true;
 
-    /* skills 数组可选：存在则解析 */
     if (skills && cJSON_IsArray(skills)) {
         size_t skill_count = (size_t)cJSON_GetArraySize(skills);
         if (skill_count > 0) {
@@ -213,18 +202,20 @@ int a2a_service_register_agent(a2a_service_t *svc, const char *card_json)
             if (card.skills) {
                 size_t idx = 0;
                 cJSON *skill = NULL;
-                cJSON_ArrayForEach(skill, skills) {
+                cJSON_ArrayForEach(skill, skills)
+                {
                     if (idx >= skill_count)
                         break;
                     cJSON *sname = cJSON_GetObjectItem(skill, "name");
                     cJSON *sdesc = cJSON_GetObjectItem(skill, "description");
                     cJSON *sschema = cJSON_GetObjectItem(skill, "schema_json");
-                    card.skills[idx].name = (sname && cJSON_IsString(sname))
-                                                ? AIRY_STRDUP(sname->valuestring) : NULL;
-                    card.skills[idx].description = (sdesc && cJSON_IsString(sdesc))
-                                                       ? AIRY_STRDUP(sdesc->valuestring) : NULL;
-                    card.skills[idx].schema_json = (sschema && cJSON_IsString(sschema))
-                                                       ? AIRY_STRDUP(sschema->valuestring) : NULL;
+                    card.skills[idx].name =
+                        (sname && cJSON_IsString(sname)) ? AIRY_STRDUP(sname->valuestring) : NULL;
+                    card.skills[idx].description =
+                        (sdesc && cJSON_IsString(sdesc)) ? AIRY_STRDUP(sdesc->valuestring) : NULL;
+                    card.skills[idx].schema_json = (sschema && cJSON_IsString(sschema)) ?
+                                                       AIRY_STRDUP(sschema->valuestring) :
+                                                       NULL;
                     idx++;
                 }
                 card.skill_count = idx;
@@ -232,22 +223,19 @@ int a2a_service_register_agent(a2a_service_t *svc, const char *card_json)
         }
     }
 
-    /* 保存 id 字符串用于日志：root/card 释放后 id->valuestring 不可用 */
     const char *registered_id = card.id ? AIRY_STRDUP(card.id) : NULL;
 
     airy_mtx_lock(&svc->lock);
     int rc = a2a_v03_register_agent(svc->ctx, &card);
     airy_mtx_unlock(&svc->lock);
 
-    /* adapter 库内部通过 STRNCPY 复制所需字段，调用方释放 card 字段 */
     a2a_agent_card_destroy(&card);
     cJSON_Delete(root);
 
     if (rc != AIRY_SUCCESS) {
         SVC_LOG_ERROR("A2A register_agent failed: rc=%d", rc);
     } else {
-        SVC_LOG_DEBUG("A2A agent registered: id=%s",
-                       registered_id ? registered_id : "(null)");
+        SVC_LOG_DEBUG("A2A agent registered: id=%s", registered_id ? registered_id : "(null)");
     }
     AIRY_FREE((void *)registered_id);
     return rc;
@@ -269,8 +257,7 @@ int a2a_service_unregister_agent(a2a_service_t *svc, const char *agent_id)
     return rc;
 }
 
-int a2a_service_get_agent_card(a2a_service_t *svc, const char *agent_id,
-                                 char **out_card_json)
+int a2a_service_get_agent_card(a2a_service_t *svc, const char *agent_id, char **out_card_json)
 {
     if (!svc || !svc->initialized || !agent_id || !out_card_json)
         return AIRY_ERR_INVALID_PARAM;
@@ -278,7 +265,7 @@ int a2a_service_get_agent_card(a2a_service_t *svc, const char *agent_id,
     *out_card_json = NULL;
 
     airy_mtx_lock(&svc->lock);
-    /* 返回 const 静态卡片指针（由 adapter 持有，不可释放） */
+
     const a2a_agent_card_t *card = a2a_v03_get_agent_card(svc->ctx, agent_id);
     if (!card) {
         airy_mtx_unlock(&svc->lock);
@@ -297,16 +284,15 @@ int a2a_service_get_agent_card(a2a_service_t *svc, const char *agent_id,
         return AIRY_ERR_OUT_OF_MEMORY;
 
     *out_card_json = AIRY_STRDUP(str);
-    AIRY_FREE(str);  /* cJSON_PrintUnformatted 输出，与 agent_d 同释放约定 */
+    AIRY_FREE(str);
     if (!*out_card_json)
         return AIRY_ERR_OUT_OF_MEMORY;
 
     return AIRY_SUCCESS;
 }
 
-int a2a_service_discover_agents(a2a_service_t *svc, const char *capability,
-                                  const char *skill_name,
-                                  char **out_results_json, size_t *out_count)
+int a2a_service_discover_agents(a2a_service_t *svc, const char *capability, const char *skill_name,
+                                char **out_results_json, size_t *out_count)
 {
     if (!svc || !svc->initialized || !out_results_json || !out_count)
         return AIRY_ERR_INVALID_PARAM;
@@ -317,8 +303,7 @@ int a2a_service_discover_agents(a2a_service_t *svc, const char *capability,
     airy_mtx_lock(&svc->lock);
     a2a_agent_card_t **results = NULL;
     size_t count = 0;
-    int rc = a2a_v03_discover_agents(svc->ctx, capability, skill_name,
-                                       &results, &count);
+    int rc = a2a_v03_discover_agents(svc->ctx, capability, skill_name, &results, &count);
     if (rc != AIRY_SUCCESS) {
         airy_mtx_unlock(&svc->lock);
         SVC_LOG_ERROR("A2A discover_agents failed: rc=%d", rc);
@@ -327,7 +312,7 @@ int a2a_service_discover_agents(a2a_service_t *svc, const char *capability,
 
     cJSON *arr = cJSON_CreateArray();
     if (!arr) {
-        /* 释放 adapter 分配的结果数组（每项为新建卡片） */
+
         if (results) {
             for (size_t i = 0; i < count; i++) {
                 if (results[i]) {
@@ -351,7 +336,6 @@ int a2a_service_discover_agents(a2a_service_t *svc, const char *capability,
     char *str = cJSON_PrintUnformatted(arr);
     cJSON_Delete(arr);
 
-    /* 释放 adapter 分配的结果数组与卡片 */
     if (results) {
         for (size_t i = 0; i < count; i++) {
             if (results[i]) {
@@ -371,16 +355,13 @@ int a2a_service_discover_agents(a2a_service_t *svc, const char *capability,
         return AIRY_ERR_OUT_OF_MEMORY;
 
     *out_count = count;
-    SVC_LOG_DEBUG("A2A discover: capability=%s, count=%zu",
-                  capability ? capability : "(null)", count);
+    SVC_LOG_DEBUG("A2A discover: capability=%s, count=%zu", capability ? capability : "(null)",
+                  count);
     return AIRY_SUCCESS;
 }
 
-/* ==================== Task 生命周期 ==================== */
-
-int a2a_service_create_task(a2a_service_t *svc, const char *agent_id,
-                              const char *description, const char *input_json,
-                              char **out_task_json)
+int a2a_service_create_task(a2a_service_t *svc, const char *agent_id, const char *description,
+                            const char *input_json, char **out_task_json)
 {
     if (!svc || !svc->initialized || !agent_id || !out_task_json)
         return AIRY_ERR_INVALID_PARAM;
@@ -417,14 +398,13 @@ int a2a_service_create_task(a2a_service_t *svc, const char *agent_id,
 }
 
 int a2a_service_update_task(a2a_service_t *svc, const char *task_id, int state,
-                              const char *output_json, double progress)
+                            const char *output_json, double progress)
 {
     if (!svc || !svc->initialized || !task_id)
         return AIRY_ERR_INVALID_PARAM;
 
     airy_mtx_lock(&svc->lock);
-    int rc = a2a_v03_update_task(svc->ctx, task_id, (a2a_task_state_t)state,
-                                   output_json, progress);
+    int rc = a2a_v03_update_task(svc->ctx, task_id, (a2a_task_state_t)state, output_json, progress);
     airy_mtx_unlock(&svc->lock);
 
     if (rc != AIRY_SUCCESS)
@@ -434,8 +414,7 @@ int a2a_service_update_task(a2a_service_t *svc, const char *task_id, int state,
     return rc;
 }
 
-int a2a_service_cancel_task(a2a_service_t *svc, const char *task_id,
-                              const char *reason)
+int a2a_service_cancel_task(a2a_service_t *svc, const char *task_id, const char *reason)
 {
     if (!svc || !svc->initialized || !task_id)
         return AIRY_ERR_INVALID_PARAM;
@@ -451,8 +430,7 @@ int a2a_service_cancel_task(a2a_service_t *svc, const char *task_id,
     return rc;
 }
 
-int a2a_service_get_task(a2a_service_t *svc, const char *task_id,
-                           char **out_task_json)
+int a2a_service_get_task(a2a_service_t *svc, const char *task_id, char **out_task_json)
 {
     if (!svc || !svc->initialized || !task_id || !out_task_json)
         return AIRY_ERR_INVALID_PARAM;
@@ -486,15 +464,12 @@ int a2a_service_get_task(a2a_service_t *svc, const char *task_id,
     return AIRY_SUCCESS;
 }
 
-/* ==================== 消息传递 ==================== */
-
-int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id,
-                               const char *role, const char *content_json,
-                               char **out_response_json,
-                               size_t *out_response_count)
+int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id, const char *role,
+                             const char *content_json, char **out_response_json,
+                             size_t *out_response_count)
 {
-    if (!svc || !svc->initialized || !target_agent_id || !role || !content_json
-        || !out_response_json || !out_response_count)
+    if (!svc || !svc->initialized || !target_agent_id || !role || !content_json ||
+        !out_response_json || !out_response_count)
         return AIRY_ERR_INVALID_PARAM;
 
     *out_response_json = NULL;
@@ -511,8 +486,7 @@ int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id,
      * 分发，ctx 为协议上下文，调用本身不依赖本服务共享状态） */
     a2a_message_t *response = NULL;
     size_t response_count = 0;
-    int rc = a2a_v03_send_message(svc->ctx, target_agent_id, &message,
-                                    &response, &response_count);
+    int rc = a2a_v03_send_message(svc->ctx, target_agent_id, &message, &response, &response_count);
     if (rc != AIRY_SUCCESS) {
         SVC_LOG_ERROR("A2A send_message failed: rc=%d", rc);
         return rc;
@@ -552,12 +526,9 @@ int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id,
         return AIRY_ERR_OUT_OF_MEMORY;
 
     *out_response_count = response_count;
-    SVC_LOG_DEBUG("A2A message sent: target=%s, responses=%zu",
-                  target_agent_id, response_count);
+    SVC_LOG_DEBUG("A2A message sent: target=%s, responses=%zu", target_agent_id, response_count);
     return AIRY_SUCCESS;
 }
-
-/* ==================== 辅助接口 ==================== */
 
 size_t a2a_service_count(a2a_service_t *svc)
 {

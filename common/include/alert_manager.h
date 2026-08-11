@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file alert_manager.h
  * @brief 智能告警管理系统
@@ -26,7 +27,6 @@
 extern "C" {
 #endif
 
-/* ==================== 常量定义 ==================== */
 
 #define AM_MAX_RULES 64
 #define AM_MAX_NAME_LEN 64
@@ -34,7 +34,6 @@ extern "C" {
 #define AM_MAX_CHANNELS 8
 #define AM_MAX_ACTIVE_ALERTS 256
 
-/* ==================== 告警级别 ==================== */
 
 typedef enum {
     AM_LEVEL_INFO = 0,
@@ -43,7 +42,6 @@ typedef enum {
     AM_LEVEL_EMERGENCY = 3
 } am_level_t;
 
-/* ==================== 告警状态 ==================== */
 
 typedef enum {
     AM_STATE_PENDING = 0,
@@ -53,7 +51,6 @@ typedef enum {
     AM_STATE_ACKNOWLEDGED = 4
 } am_state_t;
 
-/* ==================== 告警规则类型 ==================== */
 
 typedef enum {
     AM_RULE_THRESHOLD = 0,
@@ -62,7 +59,6 @@ typedef enum {
     AM_RULE_ANOMALY = 3
 } am_rule_type_t;
 
-/* ==================== 比较运算符 ==================== */
 
 typedef enum {
     AM_OP_GT = 0,
@@ -73,7 +69,6 @@ typedef enum {
     AM_OP_NEQ = 5
 } am_comparison_t;
 
-/* ==================== 通知通道类型 ==================== */
 
 typedef enum {
     AM_CHANNEL_LOG = 0,
@@ -82,7 +77,6 @@ typedef enum {
     AM_CHANNEL_FILE = 3
 } am_channel_type_t;
 
-/* ==================== 告警条目 ==================== */
 
 typedef struct {
     char name[AM_MAX_NAME_LEN];
@@ -99,7 +93,6 @@ typedef struct {
     bool acknowledged;
 } am_alert_t;
 
-/* ==================== 告警规则 ==================== */
 
 typedef struct {
     char name[AM_MAX_NAME_LEN];
@@ -115,7 +108,6 @@ typedef struct {
     uint64_t last_triggered;
 } am_rule_t;
 
-/* ==================== 通知通道 ==================== */
 
 typedef struct {
     am_channel_type_t type;
@@ -125,7 +117,6 @@ typedef struct {
     bool enabled;
 } am_channel_t;
 
-/* ==================== 告警管理器配置 ==================== */
 
 typedef struct {
     uint32_t evaluation_interval_ms;
@@ -136,11 +127,9 @@ typedef struct {
     bool enable_suppression;
 } am_config_t;
 
-/* ==================== 告警回调 ==================== */
 
 typedef void (*am_alert_callback_t)(const am_alert_t *alert, void *user_data);
 
-/* ==================== 生命周期管理 ==================== */
 
 /**
  * @brief 创建告警管理器
@@ -154,7 +143,6 @@ int am_init(const am_config_t *config);
  */
 void am_shutdown(void);
 
-/* ==================== 规则管理 ==================== */
 
 /**
  * @brief 添加告警规则
@@ -178,7 +166,6 @@ int am_remove_rule(const char *name);
  */
 int am_set_rule_enabled(const char *name, bool enabled);
 
-/* ==================== 告警触发 ==================== */
 
 /**
  * @brief 触发告警
@@ -206,7 +193,6 @@ int am_resolve(const char *name);
  */
 int am_acknowledge(const char *name);
 
-/* ==================== 指标评估 ==================== */
 
 /**
  * @brief 记录指标值（供 am_evaluate_all 使用）
@@ -230,7 +216,6 @@ int am_evaluate(const char *metric_name, double value);
  */
 int am_evaluate_all(void);
 
-/* ==================== 通知通道 ==================== */
 
 /**
  * @brief 注册通知通道
@@ -248,7 +233,6 @@ int am_register_channel(const am_channel_t *channel);
  */
 int am_register_callback(am_alert_callback_t callback, void *user_data, am_level_t min_level);
 
-/* ==================== 查询 ==================== */
 
 /**
  * @brief 获取活跃告警列表
@@ -276,7 +260,6 @@ int am_get_alerts_by_level(am_level_t level, am_alert_t *alerts, uint32_t max_co
  */
 uint32_t am_active_alert_count(void);
 
-/* ==================== 工具函数 ==================== */
 
 /**
  * @brief 告警级别转字符串

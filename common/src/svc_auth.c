@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file svc_auth.c
  * @brief Daemon 服务层认证中间件实现
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 实现内容:
  * - JWT Token 生成和验证（HS256）
@@ -19,14 +19,12 @@
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+
 #include <cjson_helpers.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-/* ==================== 内部常量 ==================== */
 
 #define MAX_TOKEN_SIZE 4096
 #define MAX_SUBJECT_SIZE 256
@@ -42,17 +40,13 @@
 #define BEARER_PREFIX "Bearer "
 #define APIKEY_PREFIX "ApiKey "
 
-/* ==================== JWT 内部状态 ==================== */
-
 static struct {
     jwt_config_t config;
     airy_mtx_t lock;
     int initialized;
-    char subject_buf[MAX_SUBJECT_SIZE]; /**< JWT 验证结果字符串缓冲 */
-    char role_buf[MAX_ROLE_SIZE];       /**< JWT 验证角色缓冲 */
+    char subject_buf[MAX_SUBJECT_SIZE];
+    char role_buf[MAX_ROLE_SIZE];
 } g_jwt = {.initialized = 0};
-
-/* ==================== API Key 内部状态 ==================== */
 
 static struct {
     apikey_config_t config;
@@ -63,18 +57,16 @@ static struct {
     char subject_buf[512];
 } g_apikey = {.initialized = 0};
 
-/* ==================== 速率限制内部状态 ==================== */
-
 /**
  * @brief 客户端速率限制条目
  */
 typedef struct rate_limit_entry {
-    char client_id[128]; /**< 客户端标识 */
-    double tokens;       /**< 当前令牌数 */
-    double max_tokens;   /**< 最大令牌数 */
-    double refill_rate;  /**< 每秒补充速率 */
-    time_t last_update;  /**< 最后更新时间 */
-    bool active;         /**< 是否活跃 */
+    char client_id[128];
+    double tokens;
+    double max_tokens;
+    double refill_rate;
+    time_t last_update;
+    bool active;
 } rate_limit_entry_t;
 
 static struct {
@@ -83,8 +75,6 @@ static struct {
     airy_mtx_t lock;
     int initialized;
 } g_ratelimit = {.initialized = 0};
-
-/* ==================== Base64 工具函数 ==================== */
 
 /**
  * @brief Base64 编码
@@ -133,8 +123,6 @@ static int base64_encode(const uint8_t *data, size_t len, char *output, size_t *
 
     return AIRY_SUCCESS;
 }
-
-/* ==================== HMAC-SHA256 实现（三模式条件编译） ==================== */
 
 /**
  * @brief HMAC-SHA256 计算函数指针类型
@@ -208,15 +196,15 @@ static void hmac_mbedtls(const char *key, const char *message, uint8_t *output, 
  */
 #if defined(NDEBUG) && !defined(AUTH_ALLOW_INSECURE_HMAC) && !defined(AUTH_USE_OPENSSL) && \
     !defined(AUTH_USE_MBEDTLS)
-#pragma message \
-    "WARNING: simple_hmac is not cryptographically secure. Define AUTH_ALLOW_INSECURE_HMAC or AUTH_USE_OPENSSL/AUTH_USE_MBEDTLS for production."
+#pragma message "WARNING: simple_hmac is not cryptographically secure. Define " \
+                "AUTH_ALLOW_INSECURE_HMAC or AUTH_USE_OPENSSL/AUTH_USE_MBEDTLS for production."
 #define AUTH_ALLOW_INSECURE_HMAC
 #endif
 
 static void __attribute__((unused)) hmac_builtin(const char *key, const char *message,
                                                  uint8_t *output, size_t *out_len)
 {
-/* 生产级纯C SHA-256 + HMAC 实现 */
+
 #define ROTRIGHT(a, b) (((a) >> (b)) | ((a) << (32 - (b))))
 #define CH(x, y, z) (((x) & (y)) ^ (~(x) & (z)))
 #define MAJ(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
@@ -225,17 +213,19 @@ static void __attribute__((unused)) hmac_builtin(const char *key, const char *me
 #define SIG0(x) (ROTRIGHT(x, 7) ^ ROTRIGHT(x, 18) ^ ((x) >> 3))
 #define SIG1(x) (ROTRIGHT(x, 17) ^ ROTRIGHT(x, 19) ^ ((x) >> 10))
 
-    static const uint32_t K[64] = {
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
-        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
-        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
-        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
-        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
-        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
-        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
-        0xc67178f2};
+    static const uint32_t K[64] = {0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b,
+                                   0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
+                                   0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7,
+                                   0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+                                   0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152,
+                                   0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+                                   0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+                                   0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+                                   0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819,
+                                   0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08,
+                                   0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f,
+                                   0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+                                   0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 
     uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
                      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
@@ -376,7 +366,6 @@ static void __attribute__((unused)) hmac_builtin(const char *key, const char *me
         }
     }
 
-    /* Inner hash - 正确处理多块 */
     size_t ilen = 64 + msg_len;
     size_t inner_padded = ((ilen + 8) / 64 + 1) * 64;
     unsigned char *inner = AIRY_CALLOC(inner_padded + 64, 1);
@@ -434,7 +423,6 @@ static void __attribute__((unused)) hmac_builtin(const char *key, const char *me
     AIRY_FREE(inner);
     inner = NULL;
 
-    /* Outer hash - 正确处理多块 */
     size_t olen = 64 + 32;
     size_t outer_padded = ((olen + 8) / 64 + 1) * 64;
     unsigned char *outer = AIRY_CALLOC(outer_padded + 64, 1);
@@ -514,9 +502,6 @@ static void __attribute__((unused)) hmac_builtin(const char *key, const char *me
 #endif
 
 #endif /* AUTH_USE_OPENSSL / AUTH_USE_MBEDTLS / builtin */
-
-/* ==================== JWT 实现 ==================== */
-
 int auth_jwt_init(const jwt_config_t *config)
 {
     airy_mtx_lock(&g_jwt.lock);
@@ -539,7 +524,6 @@ int auth_jwt_init(const jwt_config_t *config)
     if (g_jwt.config.refresh_threshold_sec == 0)
         g_jwt.config.refresh_threshold_sec = DEFAULT_REFRESH_THRESHOLD;
 
-        /* 选择 HMAC 实现模式（运行时绑定）*/
 #if defined(AUTH_USE_OPENSSL)
     g_hmac_impl = hmac_openssl;
 #elif defined(AUTH_USE_MBEDTLS)
@@ -570,10 +554,8 @@ int auth_jwt_generate_token(const char *subject, const char *role, char **out_to
         AIRY_ERROR(AUTH_TOKEN_INVALID, "JWT generate: subject too long");
     }
 
-    /* 构建 Header: {"alg":"HS256","typ":"JWT"} */
     const char *header_b64 = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
 
-    /* 构建 Payload */
     time_t now = time(NULL);
     cJSON *payload = cJSON_CreateObject();
     cJSON_AddStringToObject(payload, "iss",
@@ -591,7 +573,6 @@ int auth_jwt_generate_token(const char *subject, const char *role, char **out_to
         return AUTH_TOKEN_INVALID;
     }
 
-    /* Base64 编码 Payload */
     size_t payload_b64_size = strlen(payload_json) * 2 + 100;
     char *payload_b64 = (char *)AIRY_MALLOC(payload_b64_size);
     if (!payload_b64) {
@@ -605,7 +586,6 @@ int auth_jwt_generate_token(const char *subject, const char *role, char **out_to
     AIRY_FREE(payload_json);
     payload_json = NULL;
 
-    /* 构建签名部分 */
     size_t sign_input_size = strlen(header_b64) + 1 + payload_b64_size + 100;
     char *sign_input = (char *)AIRY_MALLOC(sign_input_size);
     if (!sign_input) {
@@ -641,7 +621,6 @@ int auth_jwt_generate_token(const char *subject, const char *role, char **out_to
         return AUTH_TOKEN_INVALID;
     }
 
-    /* 组合 Token */
     size_t token_size = sign_input_size + sig_b64_size + 10;
     *out_token = (char *)AIRY_MALLOC(token_size);
     if (!*out_token) {
@@ -674,18 +653,18 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
     result->status = AUTH_FAILED;
     result->error_message = "Token verification failed";
 
-    /* Base64 解码表（函数作用域，供 payload 和 signature 解码共用） */
     static const int b64_decode_table[256] = {
-        ['A']=0,['B']=1,['C']=2,['D']=3,['E']=4,['F']=5,['G']=6,['H']=7,['I']=8,['J']=9,
-        ['K']=10,['L']=11,['M']=12,['N']=13,['O']=14,['P']=15,['Q']=16,['R']=17,['S']=18,['T']=19,
-        ['U']=20,['V']=21,['W']=22,['X']=23,['Y']=24,['Z']=25,['a']=26,['b']=27,['c']=28,['d']=29,
-        ['e']=30,['f']=31,['g']=32,['h']=33,['i']=34,['j']=35,['k']=36,['l']=37,['m']=38,['n']=39,
-        ['o']=40,['p']=41,['q']=42,['r']=43,['s']=44,['t']=45,['u']=46,['v']=47,['w']=48,['x']=49,
-        ['y']=50,['z']=51,['0']=52,['1']=53,['2']=54,['3']=55,['4']=56,['5']=57,['6']=58,['7']=59,
-        ['8']=60,['9']=61,['+']=62,['/']=63
-    };
+        ['A'] = 0,  ['B'] = 1,  ['C'] = 2,  ['D'] = 3,  ['E'] = 4,  ['F'] = 5,  ['G'] = 6,
+        ['H'] = 7,  ['I'] = 8,  ['J'] = 9,  ['K'] = 10, ['L'] = 11, ['M'] = 12, ['N'] = 13,
+        ['O'] = 14, ['P'] = 15, ['Q'] = 16, ['R'] = 17, ['S'] = 18, ['T'] = 19, ['U'] = 20,
+        ['V'] = 21, ['W'] = 22, ['X'] = 23, ['Y'] = 24, ['Z'] = 25, ['a'] = 26, ['b'] = 27,
+        ['c'] = 28, ['d'] = 29, ['e'] = 30, ['f'] = 31, ['g'] = 32, ['h'] = 33, ['i'] = 34,
+        ['j'] = 35, ['k'] = 36, ['l'] = 37, ['m'] = 38, ['n'] = 39, ['o'] = 40, ['p'] = 41,
+        ['q'] = 42, ['r'] = 43, ['s'] = 44, ['t'] = 45, ['u'] = 46, ['v'] = 47, ['w'] = 48,
+        ['x'] = 49, ['y'] = 50, ['z'] = 51, ['0'] = 52, ['1'] = 53, ['2'] = 54, ['3'] = 55,
+        ['4'] = 56, ['5'] = 57, ['6'] = 58, ['7'] = 59, ['8'] = 60, ['9'] = 61, ['+'] = 62,
+        ['/'] = 63};
 
-    /* 简单格式检查 */
     const char *dot1 = strchr(token, '.');
     const char *dot2 = dot1 ? strchr(dot1 + 1, '.') : NULL;
     if (!dot1 || !dot2) {
@@ -694,7 +673,6 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         return AUTH_TOKEN_INVALID;
     }
 
-    /* 解析 Payload */
     size_t payload_len = (size_t)(dot2 - dot1 - 1);
     char *payload_b64 = (char *)AIRY_MALLOC(payload_len + 1);
     if (!payload_b64) {
@@ -704,7 +682,6 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
     __builtin_memcpy(payload_b64, dot1 + 1, payload_len);
     payload_b64[payload_len] = '\0';
 
-    /* Base64 URL-safe -> Standard 转换 */
     for (size_t i = 0; i < payload_len; i++) {
         if (payload_b64[i] == '-')
             payload_b64[i] = '+';
@@ -712,7 +689,6 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
             payload_b64[i] = '/';
     }
 
-    /* 补齐 padding（标准 Base64 必须是 4 的倍数） */
     size_t pad = (4 - (payload_len % 4)) % 4;
     size_t b64_total_len = payload_len + pad;
     char *payload_padded = (char *)AIRY_MALLOC(b64_total_len + 1);
@@ -728,8 +704,6 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
     AIRY_FREE(payload_b64);
     payload_b64 = NULL;
 
-    /* Base64 解码 */
-
     size_t decoded_max = (b64_total_len / 4) * 3 + 4;
     unsigned char *payload_decoded = (unsigned char *)AIRY_MALLOC(decoded_max);
     if (!payload_decoded) {
@@ -742,8 +716,12 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
     for (size_t i = 0; i < b64_total_len; i += 4) {
         int a = b64_decode_table[(unsigned char)payload_padded[i]];
         int b = b64_decode_table[(unsigned char)payload_padded[i + 1]];
-        int c = (i + 2 < b64_total_len && payload_padded[i + 2] != '=') ? b64_decode_table[(unsigned char)payload_padded[i + 2]] : 0;
-        int d = (i + 3 < b64_total_len && payload_padded[i + 3] != '=') ? b64_decode_table[(unsigned char)payload_padded[i + 3]] : 0;
+        int c = (i + 2 < b64_total_len && payload_padded[i + 2] != '=') ?
+                    b64_decode_table[(unsigned char)payload_padded[i + 2]] :
+                    0;
+        int d = (i + 3 < b64_total_len && payload_padded[i + 3] != '=') ?
+                    b64_decode_table[(unsigned char)payload_padded[i + 3]] :
+                    0;
 
         payload_decoded[out_idx++] = (unsigned char)((a << 2) | (b >> 4));
         if (i + 2 < b64_total_len && payload_padded[i + 2] != '=')
@@ -755,7 +733,6 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
     AIRY_FREE(payload_padded);
     payload_padded = NULL;
 
-    /* P0.18.2: 模式 B — parse + 立即释放 text + 自动释放（RAII） */
     CJSON_PARSE_GUARD(payload, (const char *)payload_decoded, {
         AIRY_FREE(payload_decoded);
         payload_decoded = NULL;
@@ -766,7 +743,6 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
     AIRY_FREE(payload_decoded);
     payload_decoded = NULL;
 
-    /* 提取字段 - 必须在 cJSON_Delete 前复制字符串 */
     cJSON *sub = cJSON_GetObjectItem(payload, "sub");
     cJSON *role = cJSON_GetObjectItem(payload, "role");
     cJSON *exp = cJSON_GetObjectItem(payload, "exp");
@@ -786,7 +762,6 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         result->role = g_jwt.role_buf;
     }
 
-    /* 检查过期时间 */
     if (cJSON_IsNumber(exp)) {
         time_t exp_time = (time_t)exp->valuedouble;
         time_t now = time(NULL);
@@ -795,20 +770,19 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         if (now > exp_time) {
             result->status = AUTH_TOKEN_EXPIRED;
             result->error_message = "Token has expired";
-            /* payload 由 CJSON_AUTO_FREE 自动释放 */
+
             airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_EXPIRED;
         }
     }
 
-    /* ========== FATAL-30 修复: 验证 HMAC 签名（原实现完全跳过此步骤）========== */
     {
         size_t header_len = (size_t)(dot1 - token);
         size_t sig_input_len = header_len + 1 + payload_len;
         char *sig_input = (char *)AIRY_MALLOC(sig_input_len + 1);
         if (!sig_input) {
             result->error_message = "Memory allocation failed for signature verification";
-            /* payload 由 CJSON_AUTO_FREE 自动释放 */
+
             airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
@@ -822,7 +796,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         if (!sig_b64) {
             AIRY_FREE(sig_input);
             result->error_message = "Memory allocation failed";
-            /* payload 由 CJSON_AUTO_FREE 自动释放 */
+
             airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
@@ -843,7 +817,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
             AIRY_FREE(sig_input);
             AIRY_FREE(sig_b64);
             result->error_message = "HMAC computation failed";
-            /* payload 由 CJSON_AUTO_FREE 自动释放 */
+
             airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
@@ -854,7 +828,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
             AIRY_FREE(sig_input);
             AIRY_FREE(sig_b64);
             result->error_message = "Memory allocation failed";
-            /* payload 由 CJSON_AUTO_FREE 自动释放 */
+
             airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
@@ -870,7 +844,7 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
             AIRY_FREE(sig_b64);
             AIRY_FREE(sig_padded);
             result->error_message = "Memory allocation failed";
-            /* payload 由 CJSON_AUTO_FREE 自动释放 */
+
             airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
@@ -880,8 +854,12 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         for (size_t i = 0; i < sig_padded_len; i += 4) {
             int sa = b64_decode_table[(unsigned char)sig_padded[i]];
             int sb = b64_decode_table[(unsigned char)sig_padded[i + 1]];
-            int sc = (i + 2 < sig_padded_len && sig_padded[i + 2] != '=') ? b64_decode_table[(unsigned char)sig_padded[i + 2]] : 0;
-            int sd = (i + 3 < sig_padded_len && sig_padded[i + 3] != '=') ? b64_decode_table[(unsigned char)sig_padded[i + 3]] : 0;
+            int sc = (i + 2 < sig_padded_len && sig_padded[i + 2] != '=') ?
+                         b64_decode_table[(unsigned char)sig_padded[i + 2]] :
+                         0;
+            int sd = (i + 3 < sig_padded_len && sig_padded[i + 3] != '=') ?
+                         b64_decode_table[(unsigned char)sig_padded[i + 3]] :
+                         0;
             provided_sig[prov_idx++] = (unsigned char)((sa << 2) | (sb >> 4));
             if (i + 2 < sig_padded_len && sig_padded[i + 2] != '=')
                 provided_sig[prov_idx++] = (unsigned char)(((sb & 0x0F) << 4) | (sc >> 2));
@@ -914,17 +892,15 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
         if (!sig_match) {
             result->status = AUTH_FAILED;
             result->error_message = "Invalid token signature";
-            /* payload 由 CJSON_AUTO_FREE 自动释放 */
+
             SVC_LOG_WARN("JWT signature verification FAILED for token");
             airy_mtx_unlock(&g_jwt.lock);
             return AUTH_TOKEN_INVALID;
         }
     }
-    /* ========== 签名验证结束 ========== */
 
     result->status = AUTH_SUCCESS;
     result->error_message = NULL;
-    /* payload 由 CJSON_AUTO_FREE 自动释放 */
 
     SVC_LOG_DEBUG("JWT token verified for subject=%s",
                   result->subject ? result->subject : "unknown");
@@ -943,7 +919,6 @@ int auth_jwt_refresh_token(const char *old_token, char **out_new_token)
         return ret;
     }
 
-    /* 生成新 Token，保留相同的 subject 和 role */
     return auth_jwt_generate_token(result.subject, result.role, out_new_token);
 }
 
@@ -962,8 +937,6 @@ void auth_jwt_cleanup(void)
     airy_mtx_destroy(&g_jwt.lock);
 }
 
-/* ==================== API Key 实现 ==================== */
-
 int auth_apikey_init(const apikey_config_t *config)
 {
     if (g_apikey.initialized)
@@ -974,7 +947,6 @@ int auth_apikey_init(const apikey_config_t *config)
     if (config) {
         __builtin_memcpy(&g_apikey.config, config, sizeof(apikey_config_t));
 
-        /* 复制允许的 Key 列表 */
         if (config->allowed_keys && config->key_count > 0) {
             g_apikey.capacity = config->key_count + 10;
             g_apikey.keys = (char **)AIRY_CALLOC(g_apikey.capacity, sizeof(*g_apikey.keys));
@@ -988,7 +960,7 @@ int auth_apikey_init(const apikey_config_t *config)
             }
         }
     } else {
-        /* 默认空配置 */
+
         __builtin_memset(&g_apikey.config, 0, sizeof(apikey_config_t));
         g_apikey.capacity = 10;
         g_apikey.keys = (char **)AIRY_CALLOC(g_apikey.capacity, sizeof(*g_apikey.keys));
@@ -1045,7 +1017,6 @@ int auth_apikey_add(const char *new_key)
 
     airy_mtx_lock(&g_apikey.lock);
 
-    /* 检查是否已存在 */
     for (size_t i = 0; i < g_apikey.config.key_count; i++) {
         if (g_apikey.keys[i] && strcmp(new_key, g_apikey.keys[i]) == 0) {
             airy_mtx_unlock(&g_apikey.lock);
@@ -1053,7 +1024,6 @@ int auth_apikey_add(const char *new_key)
         }
     }
 
-    /* 扩容检查 */
     if (g_apikey.config.key_count >= g_apikey.capacity) {
         size_t new_cap = g_apikey.capacity * 2;
         char **new_keys = (char **)AIRY_REALLOC(g_apikey.keys, new_cap * sizeof(*g_apikey.keys));
@@ -1085,7 +1055,6 @@ int auth_apikey_remove(const char *key)
             AIRY_FREE(g_apikey.keys[i]);
             g_apikey.keys[i] = NULL;
 
-            /* 压缩数组: 将后续元素前移，消除空洞 */
             for (size_t j = i; j < g_apikey.config.key_count - 1; j++) {
                 g_apikey.keys[j] = g_apikey.keys[j + 1];
             }
@@ -1121,8 +1090,6 @@ void auth_apikey_cleanup(void)
     }
 }
 
-/* ==================== 速率限制实现（令牌桶算法）==================== */
-
 int auth_ratelimit_init(const rate_limit_config_t *config)
 {
     if (g_ratelimit.initialized)
@@ -1138,7 +1105,6 @@ int auth_ratelimit_init(const rate_limit_config_t *config)
         g_ratelimit.config.max_clients = MAX_CLIENTS;
     }
 
-    /* 初始化所有条目为非活跃状态 */
     __builtin_memset(g_ratelimit.entries, 0, sizeof(g_ratelimit.entries));
     for (size_t i = 0; i < MAX_CLIENTS; i++) {
         g_ratelimit.entries[i].active = false;
@@ -1162,7 +1128,6 @@ int auth_ratelimit_check(const char *client_id)
     rate_limit_entry_t *entry = NULL;
     size_t free_slot = SIZE_MAX;
 
-    /* 查找或创建客户端条目 */
     for (size_t i = 0; i < g_ratelimit.config.max_clients; i++) {
         if (g_ratelimit.entries[i].active) {
             if (strncmp(g_ratelimit.entries[i].client_id, client_id,
@@ -1175,7 +1140,6 @@ int auth_ratelimit_check(const char *client_id)
         }
     }
 
-    /* 创建新条目 */
     if (!entry && free_slot != SIZE_MAX) {
         entry = &g_ratelimit.entries[free_slot];
         AIRY_STRNCPY_TERM(entry->client_id, client_id, sizeof(entry->client_id));
@@ -1187,7 +1151,6 @@ int auth_ratelimit_check(const char *client_id)
         entry->active = true;
     }
 
-    /* LRU 驱逐策略: 当所有槽位占用时，驱逐最久未使用的条目 */
     if (!entry) {
         time_t oldest_time = now;
         size_t oldest_idx = 0;
@@ -1199,18 +1162,16 @@ int auth_ratelimit_check(const char *client_id)
             }
         }
 
-        /* 复用最老条目 */
         entry = &g_ratelimit.entries[oldest_idx];
         SVC_LOG_DEBUG("Rate limit: evicting stale client: %s", entry->client_id);
         AIRY_STRNCPY_TERM(entry->client_id, client_id, sizeof(entry->client_id));
         entry->client_id[sizeof(entry->client_id) - 1] = '\0';
         entry->max_tokens = (double)g_ratelimit.config.burst_size;
-        entry->tokens = entry->max_tokens; /* 重置令牌，不继承旧值 */
+        entry->tokens = entry->max_tokens;
         entry->refill_rate = (double)g_ratelimit.config.requests_per_sec;
         entry->last_update = now;
     }
 
-    /* 补充令牌 */
     double elapsed = difftime(now, entry->last_update);
     entry->tokens += elapsed * entry->refill_rate;
     if (entry->tokens > entry->max_tokens) {
@@ -1218,7 +1179,6 @@ int auth_ratelimit_check(const char *client_id)
     }
     entry->last_update = now;
 
-    /* 检查是否有可用令牌 */
     if (entry->tokens >= 1.0) {
         entry->tokens -= 1.0;
         airy_mtx_unlock(&g_ratelimit.lock);
@@ -1290,8 +1250,6 @@ void auth_ratelimit_cleanup(void)
     }
 }
 
-/* ==================== 统一认证入口 ==================== */
-
 int auth_init(const auth_config_t *config)
 {
     int ret = 0;
@@ -1335,7 +1293,6 @@ int auth_authenticate(const char *auth_header, const char *client_id, auth_resul
 
     __builtin_memset(result, 0, sizeof(auth_result_t));
 
-    /* 步骤1: 速率限制检查 */
     if (g_ratelimit.initialized) {
         int rl_ret = auth_ratelimit_check(client_id);
         if (rl_ret != AUTH_SUCCESS) {
@@ -1345,7 +1302,6 @@ int auth_authenticate(const char *auth_header, const char *client_id, auth_resul
         }
     }
 
-    /* 步骤2: 解析认证头 */
     if (strncmp(auth_header, BEARER_PREFIX, strlen(BEARER_PREFIX)) == 0) {
         /* Bearer Token (JWT) */
         if (!g_jwt.initialized) {

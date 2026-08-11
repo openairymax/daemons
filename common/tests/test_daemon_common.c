@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_daemon_common.c
  * @brief daemons/common 模块深度单元测试（P1-C06）
@@ -11,7 +12,6 @@
  * - 告警管理器（Alert Manager）规则引擎与通知
  * - 服务生命周期（Service Lifecycle）创建/启停/状态查询
  *
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
  */
 
 #include <assert.h>
@@ -21,15 +21,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* daemons/common 公共头文件 */
 #include "alert_manager.h"
 #include "circuit_breaker.h"
 #include "config_manager.h"
 #include "error.h"
 #include "method_dispatcher.h"
 #include "svc_common.h"
-
-/* ==================== 文件作用域回调函数（C99不允许嵌套函数） ==================== */
 
 static int g_dispatch_called = 0;
 static int g_dispatch_id = -1;
@@ -42,7 +39,6 @@ static void dummy_handler(cJSON *params, int id, void *user_data)
     g_dispatch_id = id;
 }
 
-/* test_md_multiple_methods 回调 */
 static int g_md_call_a = 0, g_md_call_b = 0;
 
 static void md_handler_a(cJSON *p, int id, void *ud)
@@ -60,7 +56,6 @@ static void md_handler_b(cJSON *p, int id, void *ud)
     g_md_call_b++;
 }
 
-/* test_md_overwrite_registration 回调 */
 static int g_v1_calls = 0, g_v2_calls = 0;
 
 static void v1_handler(cJSON *p, int id, void *ud)
@@ -79,7 +74,6 @@ static void v2_handler(cJSON *p, int id, void *ud)
 }
 
 /* ==================== Service lifecycle stubs ==================== */
-
 static airy_err_t svc_dummy_init(airy_svc_t svc, const airy_svc_config_t *cfg)
 {
     (void)svc;
@@ -122,8 +116,6 @@ static airy_svc_interface_t make_dummy_interface(void)
     return iface;
 }
 
-/* ==================== 测试框架 ==================== */
-
 static int g_tests_run = 0;
 static int g_tests_passed = 0;
 static int g_tests_failed = 0;
@@ -157,9 +149,7 @@ static int g_tests_failed = 0;
 #define TEST_ASSERT_NOT_NULL(ptr, msg) TEST_ASSERT((ptr) != NULL, msg)
 
 /* ======================================================================== */
-/*  1. 熔断器（Circuit Breaker）完整生命周期                                */
 /* ======================================================================== */
-
 static void test_cb_manager_lifecycle(void)
 {
     printf("\n--- [CB] 管理器创建与销毁 ---\n");
@@ -242,7 +232,6 @@ static void test_cb_failure_trip(void)
     state = cb_get_state(cb);
     TEST_ASSERT_EQ(state, CB_STATE_CLOSED, "reset后回到CLOSED");
 
-    /* 依赖manager统一清理，避免double free */
     cb_manager_destroy(mgr);
 }
 
@@ -333,7 +322,6 @@ static void test_cb_multiple_breakers(void)
     TEST_ASSERT_EQ(cb_get_state(cb_b), CB_STATE_CLOSED, "B仍关闭");
     TEST_ASSERT_EQ(cb_get_state(cb_c), CB_STATE_CLOSED, "C仍关闭");
 
-    /* 依赖manager统一清理所有breaker，避免double free */
     cb_manager_destroy(mgr);
 }
 
@@ -361,9 +349,7 @@ static void test_cb_default_configs(void)
 }
 
 /* ======================================================================== */
-/*  2. 配置管理器（Config Manager）类型化API                                */
 /* ======================================================================== */
-
 static void test_cm_init_shutdown(void)
 {
     printf("\n--- [CM] 初始化与关闭 ---\n");
@@ -492,9 +478,7 @@ static void test_cm_export_and_entry_count(void)
 }
 
 /* ======================================================================== */
-/*  3. 方法分发器（Method Dispatcher）                                      */
 /* ======================================================================== */
-
 static void test_md_create_destroy(void)
 {
     printf("\n--- [MD] 创建与销毁 ---\n");
@@ -618,9 +602,7 @@ static void test_md_overwrite_registration(void)
 }
 
 /* ======================================================================== */
-/*  4. 告警管理器（Alert Manager）                                           */
 /* ======================================================================== */
-
 static void test_am_lifecycle(void)
 {
     printf("\n--- [AM] 初始化与关闭 ---\n");
@@ -737,24 +719,21 @@ static void test_am_query_and_utils(void)
 }
 
 /* ======================================================================== */
-/*  5. 服务生命周期（Service Lifecycle）                                     */
 /* ======================================================================== */
-
 static void test_svc_create_destroy(void)
 {
     printf("\n--- [Svc] 创建与销毁 ---\n");
 
     airy_svc_interface_t iface = make_dummy_interface();
     airy_svc_config_t config = {.name = "test_service",
-                                   .version = "1.0.0",
-                                   .capabilities =
-                                       AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_CANCELABLE,
-                                   .max_concurrent = 10,
-                                   .timeout_ms = 5000,
-                                   .priority = 5,
-                                   .auto_start = false,
-                                   .enable_metrics = true,
-                                   .enable_tracing = true};
+                                .version = "1.0.0",
+                                .capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_CANCELABLE,
+                                .max_concurrent = 10,
+                                .timeout_ms = 5000,
+                                .priority = 5,
+                                .auto_start = false,
+                                .enable_metrics = true,
+                                .enable_tracing = true};
 
     airy_svc_t svc = NULL;
     airy_err_t err = airy_svc_create(&svc, "test_service", &iface, &config);
@@ -776,10 +755,10 @@ static void test_svc_full_lifecycle(void)
 
     airy_svc_interface_t iface = make_dummy_interface();
     airy_svc_config_t config = {.name = "lifecycle_svc",
-                                   .version = "2.0.0",
-                                   .capabilities = AIRY_SVC_CAP_NONE,
-                                   .max_concurrent = 4,
-                                   .timeout_ms = 3000};
+                                .version = "2.0.0",
+                                .capabilities = AIRY_SVC_CAP_NONE,
+                                .max_concurrent = 4,
+                                .timeout_ms = 3000};
 
     airy_svc_t svc = NULL;
     airy_err_t err = airy_svc_create(&svc, "lifecycle_svc", &iface, &config);
@@ -822,10 +801,9 @@ static void test_svc_state_strings(void)
 
     static const struct {
         airy_svc_state_t state;
-    } cases[] = {
-        {AIRY_SVC_STATE_NONE},     {AIRY_SVC_STATE_CREATED}, {AIRY_SVC_STATE_INITIALIZING},
-        {AIRY_SVC_STATE_READY},    {AIRY_SVC_STATE_RUNNING}, {AIRY_SVC_STATE_PAUSED},
-        {AIRY_SVC_STATE_STOPPING}, {AIRY_SVC_STATE_STOPPED}, {AIRY_SVC_STATE_ERROR}};
+    } cases[] = {{AIRY_SVC_STATE_NONE},     {AIRY_SVC_STATE_CREATED}, {AIRY_SVC_STATE_INITIALIZING},
+                 {AIRY_SVC_STATE_READY},    {AIRY_SVC_STATE_RUNNING}, {AIRY_SVC_STATE_PAUSED},
+                 {AIRY_SVC_STATE_STOPPING}, {AIRY_SVC_STATE_STOPPED}, {AIRY_SVC_STATE_ERROR}};
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         const char *str = airy_svc_state_to_string(cases[i].state);
@@ -848,10 +826,9 @@ static void test_svc_capability_checks(void)
 
     airy_svc_interface_t iface = make_dummy_interface();
     airy_svc_config_t config = {.name = "cap_svc",
-                                   .version = "1.0",
-                                   .capabilities =
-                                       AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_STREAMING |
-                                       AIRY_SVC_CAP_PAUSEABLE | AIRY_SVC_CAP_BATCH};
+                                .version = "1.0",
+                                .capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_STREAMING |
+                                                AIRY_SVC_CAP_PAUSEABLE | AIRY_SVC_CAP_BATCH};
 
     airy_svc_t svc = NULL;
     airy_err_t err = airy_svc_create(&svc, "cap_svc", &iface, &config);
@@ -925,8 +902,6 @@ static void test_svc_user_data_and_metadata(void)
     airy_svc_destroy(svc);
 }
 
-/* ==================== main 入口 ==================== */
-
 int main(void)
 {
     printf("========================================\n");
@@ -974,7 +949,6 @@ int main(void)
     test_svc_registry_operations();
     test_svc_user_data_and_metadata();
 
-    /* 结果汇总 */
     printf("\n========================================\n");
     printf("  P1-C06 测试结果汇总\n");
     printf("========================================\n");

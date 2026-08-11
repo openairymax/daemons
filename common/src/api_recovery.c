@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file api_recovery.c
  * @brief API错误恢复系统实现 — 多凭证池 + 降级策略 + 熔断集成
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "api_recovery.h"
@@ -18,8 +18,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-
 
 static uint64_t rec_timestamp_ms(void)
 {
@@ -79,7 +77,6 @@ static api_rec_error_code_t classify_http_error(long http_code)
 }
 
 /* ==================== Lifecycle ==================== */
-
 api_rec_pool_t *api_rec_pool_create(const char *name)
 {
     api_rec_pool_t *pool = AIRY_CALLOC(1, sizeof(api_rec_pool_t));
@@ -88,7 +85,7 @@ api_rec_pool_t *api_rec_pool_create(const char *name)
     }
 
     if (name) {
-AIRY_STRNCPY_TERM(pool->name, name, sizeof(pool->name));
+        AIRY_STRNCPY_TERM(pool->name, name, sizeof(pool->name));
         pool->name[sizeof(pool->name) - 1] = '\0';
     }
 
@@ -125,7 +122,6 @@ void api_rec_pool_destroy(api_rec_pool_t *pool)
 }
 
 /* ==================== Credential Pool ==================== */
-
 int api_rec_add_credential(api_rec_pool_t *pool, const char *api_key)
 {
     if (!pool || !api_key)
@@ -243,7 +239,6 @@ double api_rec_cred_health(const api_rec_pool_t *pool, size_t index)
 }
 
 /* ==================== Fallback Models ==================== */
-
 int api_rec_add_fallback_model(api_rec_pool_t *pool, const char *model, float cost_weight,
                                int priority)
 {
@@ -327,7 +322,6 @@ api_rec_degradation_level_t api_rec_current_level(const api_rec_pool_t *pool)
 }
 
 /* ==================== Retry Config ==================== */
-
 int api_rec_set_retry_config(api_rec_pool_t *pool, uint32_t max_retries, uint32_t base_delay_ms,
                              float backoff_factor, float jitter_ratio)
 {
@@ -341,7 +335,6 @@ int api_rec_set_retry_config(api_rec_pool_t *pool, uint32_t max_retries, uint32_
 }
 
 /* ==================== Circuit Breaker Bind ==================== */
-
 int api_rec_bind_circuit_breaker(api_rec_pool_t *pool, void *breaker)
 {
     if (!pool)
@@ -351,7 +344,6 @@ int api_rec_bind_circuit_breaker(api_rec_pool_t *pool, void *breaker)
 }
 
 /* ==================== Core: Execute with Recovery ==================== */
-
 int api_rec_execute_with_recovery(api_rec_pool_t *pool, api_rec_request_fn request_fn, void *ctx,
                                   const char *url, const char *body, char **out_response,
                                   long *out_http_code, api_rec_result_t *out_result)
@@ -487,7 +479,6 @@ done:
 }
 
 /* ==================== Stats ==================== */
-
 void api_rec_get_stats(const api_rec_pool_t *pool, uint64_t *total, uint64_t *recovered,
                        uint64_t *failed, double *rate)
 {

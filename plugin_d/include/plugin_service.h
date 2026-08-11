@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file plugin_service.h
  * @brief Plugin 守护进程服务接口
@@ -26,41 +27,37 @@
 extern "C" {
 #endif
 
-/* ── 插件类型 ── */
 
 typedef enum {
-    PLUGIN_TYPE_TOOL_PROVIDER     = 0,  /**< 工具提供者 */
-    PLUGIN_TYPE_PROTOCOL_ADAPTER  = 1,  /**< 协议适配器 */
-    PLUGIN_TYPE_MEMORY_PROVIDER   = 2,  /**< 记忆提供商 */
-    PLUGIN_TYPE_HOOK_EXTENSION    = 3,  /**< Hook 扩展 */
-    PLUGIN_TYPE_COUNT             = 4   /**< 插件类型总数 */
+    PLUGIN_TYPE_TOOL_PROVIDER = 0,
+    PLUGIN_TYPE_PROTOCOL_ADAPTER = 1,
+    PLUGIN_TYPE_MEMORY_PROVIDER = 2,
+    PLUGIN_TYPE_HOOK_EXTENSION = 3,
+    PLUGIN_TYPE_COUNT = 4
 } plugin_type_t;
 
-/* ── 插件状态 ── */
 
 typedef enum {
-    PLUGIN_STATE_UNLOADED  = 0,  /**< 未加载 */
-    PLUGIN_STATE_LOADED    = 1,  /**< 已加载 */
-    PLUGIN_STATE_INITIALIZED = 2, /**< 已初始化 */
-    PLUGIN_STATE_RUNNING   = 3,  /**< 运行中 */
-    PLUGIN_STATE_ERROR     = 4,  /**< 错误 */
-    PLUGIN_STATE_DISABLED  = 5,  /**< 已禁用 */
-    PLUGIN_STATE_STARTING  = 6   /**< 启动中（start 回调执行期间） */
+    PLUGIN_STATE_UNLOADED = 0,
+    PLUGIN_STATE_LOADED = 1,
+    PLUGIN_STATE_INITIALIZED = 2,
+    PLUGIN_STATE_RUNNING = 3,
+    PLUGIN_STATE_ERROR = 4,
+    PLUGIN_STATE_DISABLED = 5,
+    PLUGIN_STATE_STARTING = 6
 } plugin_state_t;
 
-/* ── 插件元数据 ── */
 
 typedef struct {
-    char name[64];                /**< 插件名称（全局唯一） */
-    char version[32];             /**< 插件版本 */
-    char author[64];              /**< 作者 */
-    char description[256];        /**< 描述 */
-    plugin_type_t type;           /**< 插件类型 */
-    uint32_t api_version;         /**< 插件 API 版本 */
-    uint32_t min_airy_version; /**< 最低 AgentRT 版本要求 */
+    char name[64];
+    char version[32];
+    char author[64];
+    char description[256];
+    plugin_type_t type;
+    uint32_t api_version;
+    uint32_t min_airy_version;
 } plugin_metadata_t;
 
-/* ── 插件入口点 ── */
 
 /**
  * @brief 插件初始化回调
@@ -90,31 +87,28 @@ typedef int (*plugin_start_fn)(void *user_data);
  */
 typedef int (*plugin_stop_fn)(void *user_data);
 
-/* ── 插件描述符 ── */
 
 typedef struct {
-    plugin_metadata_t metadata;   /**< 元数据 */
-    plugin_init_fn init;          /**< 初始化函数 */
-    plugin_destroy_fn destroy;    /**< 销毁函数 */
-    plugin_start_fn start;        /**< 启动函数 */
-    plugin_stop_fn stop;          /**< 停止函数 */
-    void *handle;                 /**< 动态库句柄（不透明） */
-    void *user_data;              /**< 用户数据 */
-    plugin_state_t state;         /**< 当前状态 */
-    char config_path[256];        /**< 配置路径 */
-    char library_path[256];       /**< 库文件路径 */
+    plugin_metadata_t metadata;
+    plugin_init_fn init;
+    plugin_destroy_fn destroy;
+    plugin_start_fn start;
+    plugin_stop_fn stop;
+    void *handle;
+    void *user_data;
+    plugin_state_t state;
+    char config_path[256];
+    char library_path[256];
 } plugin_descriptor_t;
 
-/* ── 插件统计 ── */
 
 typedef struct {
-    uint64_t load_count;          /**< 加载次数 */
-    uint64_t error_count;         /**< 错误次数 */
-    uint64_t uptime_ns;           /**< 运行时间（纳秒） */
-    uint64_t memory_bytes;        /**< 内存占用（字节） */
+    uint64_t load_count;
+    uint64_t error_count;
+    uint64_t uptime_ns;
+    uint64_t memory_bytes;
 } plugin_stats_t;
 
-/* ── 服务 API ── */
 
 /**
  * @brief 从动态库加载插件
@@ -123,8 +117,7 @@ typedef struct {
  * @param out_name     输出插件名称
  * @return 0 成功，非0失败
  */
-int plugin_service_load(const char *library_path, const char *config_path,
-                        const char **out_name);
+int plugin_service_load(const char *library_path, const char *config_path, const char **out_name);
 
 /**
  * @brief 卸载插件
@@ -192,8 +185,7 @@ int plugin_service_list(char ***names, size_t *count, int type_filter);
  * @param json_output 输出 JSON 字符串（由插件分配，调用者负责 AIRY_FREE）
  * @return 0 成功，非0失败
  */
-int plugin_service_execute(const char *name, const char *json_input,
-                           char **json_output);
+int plugin_service_execute(const char *name, const char *json_input, char **json_output);
 
 #ifdef __cplusplus
 }

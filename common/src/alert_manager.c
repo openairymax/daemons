@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file alert_manager.c
  * @brief 智能告警管理系统实现
@@ -18,11 +19,7 @@
 #include <string.h>
 #include "error.h"
 
-/* ==================== 内部常量 ==================== */
-
 #define AM_MAX_CALLBACKS 8
-
-/* ==================== 内部数据结构 ==================== */
 
 typedef struct {
     am_alert_callback_t callback;
@@ -54,8 +51,6 @@ static struct {
     } metric_history[AM_MAX_RULES];
     uint32_t metric_count;
 } g_am = {0};
-
-/* ==================== 辅助函数 ==================== */
 
 static bool evaluate_trend(const char *metric_name, am_comparison_t op, double threshold);
 
@@ -135,8 +130,6 @@ static void dispatch_notifications(const am_alert_t *alert)
     }
 }
 
-/* ==================== 公共API实现 ==================== */
-
 AIRY_API am_config_t am_create_default_config(void)
 {
     am_config_t config;
@@ -199,8 +192,6 @@ AIRY_API void am_shutdown(void)
 
     LOG_INFO("Alert manager shutdown");
 }
-
-/* ==================== 规则管理 ==================== */
 
 AIRY_API int am_add_rule(const am_rule_t *rule)
 {
@@ -275,10 +266,8 @@ AIRY_API int am_set_rule_enabled(const char *name, bool enabled)
     return 0;
 }
 
-/* ==================== 告警触发 ==================== */
-
 AIRY_API int am_fire(const char *name, am_level_t level, const char *message, const char *source,
-                        const char *labels)
+                     const char *labels)
 {
     if (!name)
         return AIRY_ERR_INVALID_PARAM;
@@ -396,8 +385,6 @@ AIRY_API int am_acknowledge(const char *name)
     return 0;
 }
 
-/* ==================== 指标评估 ==================== */
-
 AIRY_API int am_evaluate(const char *metric_name, double value)
 {
     if (!metric_name)
@@ -440,12 +427,12 @@ AIRY_API int am_evaluate(const char *metric_name, double value)
             char message[AM_MAX_MESSAGE_LEN];
             snprintf(message, sizeof(message), "Metric %s value %.2f %s threshold %.2f",
                      metric_name, value,
-                     rule->comparison == AM_OP_GT    ? ">"
-                     : rule->comparison == AM_OP_GTE ? ">="
-                     : rule->comparison == AM_OP_LT  ? "<"
-                     : rule->comparison == AM_OP_LTE ? "<="
-                     : rule->comparison == AM_OP_EQ  ? "=="
-                                                     : "!=",
+                     rule->comparison == AM_OP_GT  ? ">" :
+                     rule->comparison == AM_OP_GTE ? ">=" :
+                     rule->comparison == AM_OP_LT  ? "<" :
+                     rule->comparison == AM_OP_LTE ? "<=" :
+                     rule->comparison == AM_OP_EQ  ? "==" :
+                                                     "!=",
                      rule->threshold);
 
             am_alert_t *existing = find_active_alert(rule->name);
@@ -486,10 +473,12 @@ AIRY_API int am_record_metric(const char *metric_name, double value)
     }
 
     if (g_am.metric_count < AM_MAX_RULES) {
-        AIRY_STRNCPY_TERM(g_am.latest_metrics[g_am.metric_count].name, metric_name, sizeof(g_am.latest_metrics[g_am.metric_count].name));
+        AIRY_STRNCPY_TERM(g_am.latest_metrics[g_am.metric_count].name, metric_name,
+                          sizeof(g_am.latest_metrics[g_am.metric_count].name));
         g_am.latest_metrics[g_am.metric_count].value = value;
 
-        AIRY_STRNCPY_TERM(g_am.metric_history[g_am.metric_count].name, metric_name, sizeof(g_am.metric_history[g_am.metric_count].name));
+        AIRY_STRNCPY_TERM(g_am.metric_history[g_am.metric_count].name, metric_name,
+                          sizeof(g_am.metric_history[g_am.metric_count].name));
         g_am.metric_history[g_am.metric_count].values[0] = value;
         g_am.metric_history[g_am.metric_count].count = 1;
         g_am.metric_history[g_am.metric_count].head = 0;
@@ -575,8 +564,6 @@ AIRY_API int am_evaluate_all(void)
     return total_triggered;
 }
 
-/* ==================== 通知通道 ==================== */
-
 AIRY_API int am_register_channel(const am_channel_t *channel)
 {
     if (!channel)
@@ -599,7 +586,7 @@ AIRY_API int am_register_channel(const am_channel_t *channel)
 }
 
 AIRY_API int am_register_callback(am_alert_callback_t callback, void *user_data,
-                                     am_level_t min_level)
+                                  am_level_t min_level)
 {
     if (!callback)
         return AIRY_ERR_INVALID_PARAM;
@@ -621,8 +608,6 @@ AIRY_API int am_register_callback(am_alert_callback_t callback, void *user_data,
     return 0;
 }
 
-/* ==================== 查询 ==================== */
-
 AIRY_API int am_get_active_alerts(am_alert_t *alerts, uint32_t max_count, uint32_t *found_count)
 {
     if (!alerts || !found_count)
@@ -639,7 +624,7 @@ AIRY_API int am_get_active_alerts(am_alert_t *alerts, uint32_t max_count, uint32
 }
 
 AIRY_API int am_get_alerts_by_level(am_level_t level, am_alert_t *alerts, uint32_t max_count,
-                                       uint32_t *found_count)
+                                    uint32_t *found_count)
 {
     if (!alerts || !found_count)
         return AIRY_ERR_INVALID_PARAM;
@@ -663,8 +648,6 @@ AIRY_API uint32_t am_active_alert_count(void)
 {
     return g_am.active_alert_count;
 }
-
-/* ==================== 工具函数 ==================== */
 
 AIRY_API const char *am_level_to_string(am_level_t level)
 {
