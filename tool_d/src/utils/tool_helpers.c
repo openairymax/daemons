@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file tool_helpers.c
  * @brief 辅助函数
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "tool_helpers.h"
@@ -16,6 +16,8 @@
 #include <string.h>
 #include "error.h"
 #include "airy_memory.h"
+
+#include "platform.h"
 
 bool tool_is_valid_id(const char *id)
 {
@@ -58,9 +60,18 @@ int tool_parse_version(const char *version_str, int *major, int *minor, int *pat
     char *tok_n = strtok_r(NULL, ".", &saveptr);
     char *tok_p = strtok_r(NULL, ".\r\n", &saveptr);
     int fields = 0;
-    if (tok_m) { m = (int)strtol(tok_m, NULL, 10); fields++; }
-    if (tok_n) { n = (int)strtol(tok_n, NULL, 10); fields++; }
-    if (tok_p) { p = (int)strtol(tok_p, NULL, 10); fields++; }
+    if (tok_m) {
+        m = (int)strtol(tok_m, NULL, 10);
+        fields++;
+    }
+    if (tok_n) {
+        n = (int)strtol(tok_n, NULL, 10);
+        fields++;
+    }
+    if (tok_p) {
+        p = (int)strtol(tok_p, NULL, 10);
+        fields++;
+    }
     if (fields < 1)
         return AIRY_ERR_PARSE_ERROR;
     if (major)

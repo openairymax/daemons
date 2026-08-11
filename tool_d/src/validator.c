@@ -1,18 +1,18 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file validator.c
  * @brief 工具参数验证器实现（基于 cJSON Schema 验证）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "svc_logger.h"
 #include "validator.h"
 
 #include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+
 #include <cjson_helpers.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,7 +51,6 @@ static int validate_single_param(const char *param_name, const char *schema_str,
     if (!schema_str || !value)
         return 1;
 
-    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
     CJSON_PARSE_GUARD(schema, schema_str, { return 1; });
 
     const char *type_str = NULL;
@@ -65,11 +64,11 @@ static int validate_single_param(const char *param_name, const char *schema_str,
         if (strcmp(type_str, "string") == 0) {
             if (!cJSON_IsString(value)) {
                 valid = validate_type_mismatch(param_name, "string",
-                                               cJSON_IsNumber(value)   ? "number"
-                                               : cJSON_IsBool(value)   ? "boolean"
-                                               : cJSON_IsArray(value)  ? "array"
-                                               : cJSON_IsObject(value) ? "object"
-                                                                       : "null");
+                                               cJSON_IsNumber(value) ? "number" :
+                                               cJSON_IsBool(value)   ? "boolean" :
+                                               cJSON_IsArray(value)  ? "array" :
+                                               cJSON_IsObject(value) ? "object" :
+                                                                       "null");
                 goto cleanup;
             }
             cJSON *min_len = cJSON_GetObjectItem(schema, "minLength");
@@ -157,7 +156,7 @@ static int validate_single_param(const char *param_name, const char *schema_str,
     }
 
 cleanup:
-    /* schema 由 CJSON_AUTO_FREE 自动释放 */
+
     return valid;
 }
 
@@ -167,7 +166,6 @@ int tool_validator_validate(tool_validator_t *val __attribute__((unused)),
     if (!meta || !params_json)
         return AIRY_ERR_INVALID_PARAM;
 
-    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
     CJSON_PARSE_GUARD(root, params_json, {
         SVC_LOG_WARN("Invalid JSON params for tool %s", meta->id);
         return 0;
@@ -183,9 +181,8 @@ int tool_validator_validate(tool_validator_t *val __attribute__((unused)),
              * required 数组一致（SSoT，T2 修复）；仅必需参数缺一即拒。 */
             if (!item) {
                 if (meta->params[i].required) {
-                    SVC_LOG_WARN("Missing required parameter '%s' for tool %s", pname,
-                                 meta->id);
-                    /* root 由 CJSON_AUTO_FREE 自动释放 */
+                    SVC_LOG_WARN("Missing required parameter '%s' for tool %s", pname, meta->id);
+
                     return 0;
                 }
                 continue;
@@ -193,12 +190,11 @@ int tool_validator_validate(tool_validator_t *val __attribute__((unused)),
 
             if (!validate_single_param(pname, pschema, item)) {
                 SVC_LOG_WARN("Validation failed for parameter '%s' in tool %s", pname, meta->id);
-                /* root 由 CJSON_AUTO_FREE 自动释放 */
+
                 return 0;
             }
         }
     }
 
-    /* root 由 CJSON_AUTO_FREE 自动释放 */
     return 1;
 }

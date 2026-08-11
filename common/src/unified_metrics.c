@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file unified_metrics.c
  * @brief 统一指标收集器实现
@@ -19,8 +20,6 @@
 #include <string.h>
 #include "error.h"
 
-/* ==================== 内部状态 ==================== */
-
 static struct {
     um_config_t config;
     um_module_metrics_t modules[UM_MAX_MODULES];
@@ -29,8 +28,6 @@ static struct {
     bool initialized;
     airy_mtx_t mutex;
 } g_um = {0};
-
-/* ==================== 辅助函数 ==================== */
 
 static um_module_metrics_t *find_module(const char *name)
 {
@@ -50,7 +47,7 @@ static um_metric_entry_t *find_metric(um_module_metrics_t *mod, const char *name
         if (strcmp(mod->metrics[i].name, name) == 0)
             return &mod->metrics[i];
     }
-    /* 同 find_module：正常控制流，不分配 error context */
+
     return NULL;
 }
 
@@ -87,8 +84,6 @@ static const char *metric_type_string(um_metric_type_t type)
         return "untyped";
     }
 }
-
-/* ==================== 公共API实现 ==================== */
 
 AIRY_API um_config_t um_create_default_config(void)
 {
@@ -149,8 +144,6 @@ AIRY_API bool um_is_initialized(void)
 {
     return g_um.initialized;
 }
-
-/* ==================== 模块注册 ==================== */
 
 AIRY_API int um_register_module(const char *module_name, const char *instance_id)
 {
@@ -231,10 +224,8 @@ AIRY_API int um_unregister_module(const char *module_name)
     return 0;
 }
 
-/* ==================== 指标操作 ==================== */
-
 AIRY_API int um_register_metric(const char *module_name, const char *name, um_metric_type_t type,
-                                   const char *help, const char *labels)
+                                const char *help, const char *labels)
 {
     if (!module_name || !name) {
         SVC_LOG_ERROR("um_register_metric: null parameter module_name=%p name=%p",
@@ -266,8 +257,9 @@ AIRY_API int um_register_metric(const char *module_name, const char *name, um_me
 
     if (mod->metric_count >= UM_MAX_METRICS_PER_MOD) {
         airy_mtx_unlock(&g_um.mutex);
-        SVC_LOG_ERROR("um_register_metric: max metrics reached for module '%s' count=%u max=%u metric='%s'",
-                      module_name, mod->metric_count, UM_MAX_METRICS_PER_MOD, name);
+        SVC_LOG_ERROR(
+            "um_register_metric: max metrics reached for module '%s' count=%u max=%u metric='%s'",
+            module_name, mod->metric_count, UM_MAX_METRICS_PER_MOD, name);
         return AIRY_ERR_OVERFLOW;
     }
 
@@ -296,8 +288,8 @@ AIRY_API int um_register_metric(const char *module_name, const char *name, um_me
 AIRY_API int um_increment(const char *module_name, const char *name, uint64_t value)
 {
     if (!module_name || !name) {
-        SVC_LOG_ERROR("um_increment: null parameter module_name=%p name=%p",
-                      (void *)module_name, (void *)name);
+        SVC_LOG_ERROR("um_increment: null parameter module_name=%p name=%p", (void *)module_name,
+                      (void *)name);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -330,8 +322,8 @@ AIRY_API int um_increment(const char *module_name, const char *name, uint64_t va
 AIRY_API int um_gauge_set(const char *module_name, const char *name, double value)
 {
     if (!module_name || !name) {
-        SVC_LOG_ERROR("um_gauge_set: null parameter module_name=%p name=%p",
-                      (void *)module_name, (void *)name);
+        SVC_LOG_ERROR("um_gauge_set: null parameter module_name=%p name=%p", (void *)module_name,
+                      (void *)name);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -363,8 +355,8 @@ AIRY_API int um_gauge_set(const char *module_name, const char *name, double valu
 AIRY_API int um_observe(const char *module_name, const char *name, double value)
 {
     if (!module_name || !name) {
-        SVC_LOG_ERROR("um_observe: null parameter module_name=%p name=%p",
-                      (void *)module_name, (void *)name);
+        SVC_LOG_ERROR("um_observe: null parameter module_name=%p name=%p", (void *)module_name,
+                      (void *)name);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -395,8 +387,6 @@ AIRY_API int um_observe(const char *module_name, const char *name, double value)
     return 0;
 }
 
-/* ==================== 导出 ==================== */
-
 AIRY_API char *um_export_prometheus(void)
 {
     return um_export_prometheus_module(NULL);
@@ -426,26 +416,26 @@ AIRY_API char *um_export_prometheus_module(const char *module_name)
             snprintf(buf + pos, buf_size - pos, fmt,                                               \
                      ##__VA_ARGS__); /* flawfinder: ignore - bounded snprintf in PAPPEND macro */  \
         if (w < 0) {                                                                               \
-            AIRY_FREE(buf);                                                                     \
-            airy_mtx_unlock(&g_um.mutex);                                                     \
+            AIRY_FREE(buf);                                                                        \
+            airy_mtx_unlock(&g_um.mutex);                                                          \
             return NULL;                                                                           \
         }                                                                                          \
         if ((size_t)w >= buf_size - pos) {                                                         \
             buf_size *= 2;                                                                         \
-            char *nb = (char *)AIRY_MALLOC(buf_size);                                           \
+            char *nb = (char *)AIRY_MALLOC(buf_size);                                              \
             if (!nb) {                                                                             \
-                AIRY_FREE(buf);                                                                 \
-                airy_mtx_unlock(&g_um.mutex);                                                 \
+                AIRY_FREE(buf);                                                                    \
+                airy_mtx_unlock(&g_um.mutex);                                                      \
                 return NULL;                                                                       \
             }                                                                                      \
-            __builtin_memcpy(nb, buf, pos);                                                                  \
-            AIRY_FREE(buf);                                                                     \
+            __builtin_memcpy(nb, buf, pos);                                                        \
+            AIRY_FREE(buf);                                                                        \
             buf = nb;                                                                              \
             w = snprintf(buf + pos, buf_size - pos, fmt,                                           \
                          ##__VA_ARGS__); /* flawfinder: ignore - bounded realloc+snprintf retry */ \
             if (w < 0 || (size_t)w >= buf_size - pos) {                                            \
-                AIRY_FREE(buf);                                                                 \
-                airy_mtx_unlock(&g_um.mutex);                                                 \
+                AIRY_FREE(buf);                                                                    \
+                airy_mtx_unlock(&g_um.mutex);                                                      \
                 return NULL;                                                                       \
             }                                                                                      \
         }                                                                                          \
@@ -555,8 +545,6 @@ AIRY_API char *um_export_json(void)
     return buf;
 }
 
-/* ==================== 默认指标 ==================== */
-
 AIRY_API int um_register_default_metrics(void)
 {
     um_register_module("system", "default");
@@ -619,8 +607,6 @@ AIRY_API void um_update_default_metrics(void)
     uint64_t uptime __attribute__((unused)) = airy_time_ms() / 1000;
     um_increment("system", "process_uptime_seconds", 1);
 }
-
-/* ==================== 统计 ==================== */
 
 AIRY_API int um_get_stats(um_stats_t *stats)
 {

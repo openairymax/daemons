@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file main.c
  * @brief Tool 服务守护进程主入口（遵循 daemon 模块统一规范）
@@ -19,26 +19,19 @@
 #include <stdlib.h>
 #include <time.h>
 
-/* ==================== 配置常量 ==================== */
-
 #define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("tool.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_tool"
 #define DEFAULT_TCP_PORT 8081
 #define MAX_BUFFER 65536
 #define MAX_CLIENTS 64
 
-/* 生成公共全局变量、信号处理、help、客户端处理等样板 */
-DAEMON_DECLARE_COMMON(tool_d, tool, DEFAULT_SOCKET_PATH_UNIX,
-                      DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+DAEMON_DECLARE_COMMON(tool_d, tool, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN,
+                      DEFAULT_TCP_PORT, MAX_BUFFER)
 
-/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
 DAEMON_DECLARE_SHUTDOWN_METHOD(tool_d)
-
-/* ==================== 全局状态 ==================== */
 
 static tool_service_t *g_service = NULL;
 
-/* 服务配置 */
 typedef struct {
     char *socket_path;
     char *tcp_host;
@@ -50,7 +43,7 @@ typedef struct {
 static tool_daemon_config_t g_config = {0};
 
 #ifdef _WIN32
-/* Windows 控制台处理：复用 signal_handler_tool_d 触发优雅停机 */
+
 static BOOL WINAPI console_handler(DWORD fdwCtrlType)
 {
     switch (fdwCtrlType) {
@@ -65,14 +58,12 @@ static BOOL WINAPI console_handler(DWORD fdwCtrlType)
 }
 #endif
 
-/* ==================== 请求处理方法 ==================== */
-
 static void handle_register(cJSON *params, int id, airy_sock_t fd);
 static void handle_list(int id, airy_sock_t fd);
 static void handle_get(cJSON *params, int id, airy_sock_t fd);
 static void handle_execute(cJSON *params, int id, airy_sock_t fd);
 static void handle_health_check(int id, airy_sock_t fd);
-/* P0 交互式审批：tool.pending / tool.approve */
+
 static void handle_pending(int id, airy_sock_t fd);
 static void handle_approve(cJSON *params, int id, airy_sock_t fd);
 
@@ -96,25 +87,21 @@ static void on_execute_method(cJSON *params, int id, void *user_data)
     handle_execute(params, id, *(airy_sock_t *)user_data);
 }
 
-/* L2 标准方法 tool.health_check（02-l2-service-protocol.md） */
 static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
 
-/* P0 交互式审批：tool.pending（无参数，列出 pending 请求） */
 static void on_pending_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_pending(id, *(airy_sock_t *)user_data);
 }
 
-/* P0 交互式审批：tool.approve（request_id + decision 决议） */
 static void on_approve_method(cJSON *params, int id, void *user_data)
 {
     handle_approve(params, id, *(airy_sock_t *)user_data);
 }
 
-/* L2 标准方法 tool.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
 static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
@@ -124,7 +111,7 @@ static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, v
     }
     char *stats_json = tool_service_get_stats(g_service);
     if (stats_json) {
-        /* stats_json 为合法 JSON 对象，直接作为 result */
+
         cJSON *result = cJSON_Parse(stats_json);
         AIRY_FREE(stats_json);
         if (result) {
@@ -165,7 +152,6 @@ static void handle_register(cJSON *params, int id, airy_sock_t client_fd)
     meta.cacheable = get_bool_field(tool, "cacheable", false);
     meta.permission_rule = (char *)get_string_field(tool, "permission_rule", NULL);
 
-    /* 参数列表 */
     cJSON *params_arr = cJSON_GetObjectItem(tool, "params");
     if (cJSON_IsArray(params_arr)) {
         size_t cnt = cJSON_GetArraySize(params_arr);
@@ -205,7 +191,6 @@ static void handle_list(int id, airy_sock_t client_fd)
         return;
     }
 
-    /* P0.18.2: 模式 B — parse + 立即释放 text + 自动释放（JSONRPC_SEND_SUCCESS 内部 Delete） */
     CJSON_PARSE_GUARD(result, list_json, {
         AIRY_FREE(list_json);
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid JSON from list", id);
@@ -214,7 +199,7 @@ static void handle_list(int id, airy_sock_t client_fd)
     AIRY_FREE(list_json);
 
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
-    result = NULL; /* JSONRPC_SEND_SUCCESS 已 Delete，防止 CJSON_AUTO_FREE 重复释放 */
+    result = NULL;
 }
 
 static void handle_get(cJSON *params, int id, airy_sock_t client_fd)
@@ -277,7 +262,9 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    tool_execute_request_t req = {.tool_id = tid, .params_json = params_json, .stream = 0,
+    tool_execute_request_t req = {.tool_id = tid,
+                                  .params_json = params_json,
+                                  .stream = 0,
                                   .agent_id = agent_id};
 
     tool_result_t *res = NULL;
@@ -296,7 +283,6 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    /* 结果转 JSON */
     cJSON *result = cJSON_CreateObject();
     cJSON_AddNumberToObject(result, "success", res->success);
     if (res->output)
@@ -309,7 +295,6 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
     tool_result_free(res);
 }
 
-/* L2 标准方法 tool.health_check：无副作用健康探针 */
 static void handle_health_check(int id, airy_sock_t client_fd)
 {
     cJSON *result = cJSON_CreateObject();
@@ -320,7 +305,6 @@ static void handle_health_check(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* P0 交互式审批：tool.pending — 列出所有 pending 审批请求 */
 static void handle_pending(int id, airy_sock_t client_fd)
 {
     if (!g_service) {
@@ -331,8 +315,8 @@ static void handle_pending(int id, airy_sock_t client_fd)
     cJSON *arr = pending_json ? cJSON_Parse(pending_json) : NULL;
     AIRY_FREE(pending_json);
     if (!arr) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
-                           "Failed to list pending approvals", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Failed to list pending approvals",
+                           id);
         return;
     }
     cJSON *result = cJSON_CreateObject();
@@ -340,7 +324,6 @@ static void handle_pending(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* P0 交互式审批：tool.approve — 决议一个 pending 审批请求 */
 static void handle_approve(cJSON *params, int id, airy_sock_t client_fd)
 {
     if (!g_service) {
@@ -350,8 +333,8 @@ static void handle_approve(cJSON *params, int id, airy_sock_t client_fd)
     const char *request_id = get_string_field(params, "request_id", NULL);
     const char *decision = get_string_field(params, "decision", NULL);
     if (!request_id || !decision) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "request_id and decision required", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "request_id and decision required",
+                           id);
         return;
     }
     int ret = tool_service_interactive_resolve(g_service, request_id, decision);
@@ -372,11 +355,9 @@ static void handle_approve(cJSON *params, int id, airy_sock_t client_fd)
     }
 }
 
-/* ==================== 配置加载 ==================== */
-
 static int load_daemon_config(const char *config_path)
 {
-    /* 默认配置 */
+
     g_config.use_tcp = 0;
     g_config.max_clients = MAX_CLIENTS;
 
@@ -389,7 +370,6 @@ static int load_daemon_config(const char *config_path)
 #endif
     g_config.tcp_port = DEFAULT_TCP_PORT;
 
-    /* 如果提供了配置文件，尝试加载 */
     if (config_path) {
         FILE *f = fopen(config_path, "rb");
         if (f) {
@@ -397,14 +377,13 @@ static int load_daemon_config(const char *config_path)
             long len = ftell(f);
             fseek(f, 0, SEEK_SET);
 
-            if (len > 0 && len < 1024 * 1024) { /* 限制配置文件大小为 1MB */
+            if (len > 0 && len < 1024 * 1024) {
                 char *content = (char *)AIRY_MALLOC((size_t)len + 1);
                 if (content) {
                     size_t read_len = fread(content, 1, (size_t)len, f);
                     if (read_len == (size_t)len) {
                         content[read_len] = '\0';
 
-                        /* P0.18.2: 模式 C — do { ... } while (0) + break 配合 CJSON_PARSE_GUARD */
                         do {
                             CJSON_PARSE_GUARD(root, content, { break; });
                             cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
@@ -426,7 +405,7 @@ static int load_daemon_config(const char *config_path)
                                     g_config.max_clients = max_clients->valueint;
                                 }
                             }
-                            /* root 由 CJSON_AUTO_FREE 自动释放 */
+
                         } while (0);
                     }
                     AIRY_FREE(content);
@@ -446,8 +425,6 @@ static void free_daemon_config(void)
     __builtin_memset(&g_config, 0, sizeof(g_config));
 }
 
-/* ==================== 销毁服务 ==================== */
-
 static void destroy_service(void)
 {
     if (g_service) {
@@ -456,22 +433,18 @@ static void destroy_service(void)
     }
 }
 
-/* ==================== 主函数 ==================== */
-
 int main(int argc, char **argv)
 {
     const char *config_path = NULL;
     int use_tcp = 0;
 
-    /* 解析命令行参数（--manager/--tcp/--help） */
     int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_tool_d);
-    if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
+    if (parse_rc > 0)
+        return parse_rc == 1 ? 0 : 1;
 
-    /* 初始化平台层 */
     airy_sock_init();
     airy_mtx_init(&g_running_lock_tool_d);
 
-    /* 设置信号处理 */
 #ifdef _WIN32
     SetConsoleCtrlHandler(console_handler, TRUE);
 #else
@@ -481,17 +454,14 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("tool_d");
 
-    /* 加载配置（命令行 --tcp 覆盖配置文件） */
     load_daemon_config(config_path);
     if (use_tcp)
         g_config.use_tcp = 1;
 
     SVC_LOG_INFO("Tool service starting, manager=%s", config_path ? config_path : "default");
 
-    /* 创建工具服务 */
     g_service =
         tool_service_create(config_path ? config_path : "agentrt/manager/service/tool_d/tool.yaml");
     if (!g_service) {
@@ -502,9 +472,8 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    /* 创建服务器 Socket（TCP/Unix/NamedPipe 统一封装） */
-    airy_sock_t server_fd = daemon_create_server_socket(
-        g_config.use_tcp, g_config.tcp_port, g_config.socket_path, g_config.socket_path);
+    airy_sock_t server_fd = daemon_create_server_socket(g_config.use_tcp, g_config.tcp_port,
+                                                        g_config.socket_path, g_config.socket_path);
     if (server_fd < 0) {
         SVC_LOG_ERROR("Failed to create server socket");
         destroy_service();
@@ -513,10 +482,9 @@ int main(int argc, char **argv)
         airy_sock_cleanup();
         return EXIT_FAILURE;
     }
-    SVC_LOG_INFO(g_config.use_tcp ? "Listening on TCP %s:%d" : "Listening on %s",
-                 g_config.tcp_host, g_config.tcp_port);
+    SVC_LOG_INFO(g_config.use_tcp ? "Listening on TCP %s:%d" : "Listening on %s", g_config.tcp_host,
+                 g_config.tcp_port);
 
-    /* 创建事件驱动 + SD/IPC bootstrap */
     daemon_event_config_t ev_config;
     __builtin_memset(&ev_config, 0, sizeof(ev_config));
     ev_config.max_events = 64;
@@ -551,15 +519,17 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_tool_d, "list_tools", on_list_method, NULL);
     method_dispatcher_register(g_dispatcher_tool_d, "get_tool", on_get_method, NULL);
     method_dispatcher_register(g_dispatcher_tool_d, "execute_tool", on_execute_method, NULL);
-    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：tool.execute / tool.list / tool.health_check） */
+    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：tool.execute / tool.list /
+     * tool.health_check）
+     */
     method_dispatcher_register(g_dispatcher_tool_d, "execute", on_execute_method, NULL);
     method_dispatcher_register(g_dispatcher_tool_d, "list", on_list_method, NULL);
     method_dispatcher_register(g_dispatcher_tool_d, "health_check", on_health_check_method, NULL);
-    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+
     method_dispatcher_register(g_dispatcher_tool_d, "shutdown", on_shutdown_method_tool_d, NULL);
-    /* L2 协议标准方法 tool.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+
     method_dispatcher_register(g_dispatcher_tool_d, "get_stats", on_get_stats_method, NULL);
-    /* P0 交互式审批：tool.pending / tool.approve（Claude Code 风格 permission prompt） */
+
     method_dispatcher_register(g_dispatcher_tool_d, "pending", on_pending_method, NULL);
     method_dispatcher_register(g_dispatcher_tool_d, "approve", on_approve_method, NULL);
     SVC_LOG_INFO("Registered %d RPC methods (tool.* namespace)", 11);
@@ -578,13 +548,12 @@ int main(int argc, char **argv)
     SVC_LOG_INFO("Tool service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_tool_d);
 
-    /* 标准资源清理链 */
-    daemon_cleanup_standard(g_bipc_tool_d, g_bsd_tool_d, g_event_driver_tool_d,
-                           server_fd, destroy_service, &g_running_lock_tool_d);
+    daemon_cleanup_standard(g_bipc_tool_d, g_bsd_tool_d, g_event_driver_tool_d, server_fd,
+                            destroy_service, &g_running_lock_tool_d);
     free_daemon_config();
 
     SVC_LOG_INFO("Tool service stopped");
-    daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
+    daemon_cupolas_cleanup();
     log_cleanup();
     return 0;
 }

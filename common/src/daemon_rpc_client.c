@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
  *
  * @file daemon_rpc_client.c
  * @brief 轻量级 Unix-socket JSON-RPC 客户端实现
@@ -27,23 +27,21 @@
 #include <string.h>
 
 #if AIRY_PLATFORM_WINDOWS
-    /* Windows：仅提供桩，不连接 Unix socket */
+
 #elif AIRY_PLATFORM_POSIX
-    #include <poll.h>
-    #include <sys/socket.h>
-    #include <sys/un.h>
-    #include <unistd.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 #endif
 
 #define DAEMON_RPC_DEFAULT_TIMEOUT_MS 30000
-#define DAEMON_RPC_MAX_RESPONSE      (16 * 1024 * 1024) /* 16MB */
-#define DAEMON_RPC_INITIAL_BUF        4096
-
-/* ==================== 内部辅助：响应缓冲区 ==================== */
+#define DAEMON_RPC_MAX_RESPONSE (16 * 1024 * 1024) /* 16MB */
+#define DAEMON_RPC_INITIAL_BUF 4096
 
 typedef struct {
     char *data;
-    size_t size;     /* 已写入字节数 */
+    size_t size;
     size_t capacity;
 } rpc_buf_t;
 
@@ -92,8 +90,6 @@ static int rpc_buf_append(rpc_buf_t *buf, const char *src, size_t len)
     return AIRY_SUCCESS;
 }
 
-/* ==================== POSIX 实现 ==================== */
-
 #if AIRY_PLATFORM_POSIX
 
 /**
@@ -115,7 +111,7 @@ static int rpc_connect_unix(const char *socket_path)
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         close(fd);
-        return -AIRY_ERR_NOT_FOUND; /* daemon 未运行或路径错误 */
+        return -AIRY_ERR_NOT_FOUND;
     }
     return fd;
 }
@@ -132,30 +128,28 @@ static int rpc_connect_unix(const char *socket_path)
  * "单请求-单响应-即关闭"模型，cancel 必须独立连接），返回 AIRY_ERR_CANCELED。
  */
 static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
-                             airy_cancel_token_t *cancel_token,
-                             const char *cancel_socket_path,
-                             const char *cancel_method,
-                             const char *cancel_params_json)
+                             airy_cancel_token_t *cancel_token, const char *cancel_socket_path,
+                             const char *cancel_method, const char *cancel_params_json)
 {
-    /* 总超时控制 */
+
     uint32_t elapsed_ms = 0;
     const uint32_t step_ms = 200;
 
     while (elapsed_ms < timeout_ms) {
-        /* 改进1：取消检查（每次 poll 片边界，粒度 ≤200ms） */
+
         if (cancel_token && airy_cancel_token_is_canceled(cancel_token)) {
 #if AIRY_PLATFORM_POSIX
             close(fd);
 #endif
-            /* 发送取消请求：独立连接送达 daemon（invoke 响应已放弃） */
+
             if (cancel_method && cancel_method[0]) {
                 char *cancel_result = NULL;
-                int crc = daemon_rpc_call(cancel_socket_path, cancel_method,
-                                          cancel_params_json, &cancel_result, 5000);
+                int crc = daemon_rpc_call(cancel_socket_path, cancel_method, cancel_params_json,
+                                          &cancel_result, 5000);
                 AIRY_FREE(cancel_result);
                 if (crc != AIRY_SUCCESS)
-                    SVC_LOG_WARN("rpc cancel request failed (method=%s, rc=%d)",
-                                 cancel_method, crc);
+                    SVC_LOG_WARN("rpc cancel request failed (method=%s, rc=%d)", cancel_method,
+                                 crc);
             }
             return AIRY_ERR_CANCELED;
         }
@@ -165,12 +159,12 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
         pfd.events = POLLIN;
         pfd.revents = 0;
 
-        int remain = (int)((timeout_ms - elapsed_ms) < step_ms
-                            ? (timeout_ms - elapsed_ms)
-                            : step_ms);
+        int remain =
+            (int)((timeout_ms - elapsed_ms) < step_ms ? (timeout_ms - elapsed_ms) : step_ms);
         int pr = poll(&pfd, 1, remain);
         if (getenv("AIRY_RPC_DIAG") && pr > 0)
-            SVC_LOG_ERROR("rpc diag: poll hit fd=%d pr=%d revents=0x%x buf_size=%zu", fd, pr, pfd.revents, buf->size);
+            SVC_LOG_ERROR("rpc diag: poll hit fd=%d pr=%d revents=0x%x buf_size=%zu", fd, pr,
+                          pfd.revents, buf->size);
         if (pr < 0) {
             if (errno == EINTR)
                 continue;
@@ -178,7 +172,7 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
         }
         if (pr == 0) {
             elapsed_ms += (uint32_t)remain;
-            /* 检查已有数据是否构成完整 JSON */
+
             if (buf->size > 0) {
                 cJSON *probe = cJSON_Parse(buf->data);
                 if (probe) {
@@ -199,7 +193,8 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
             char chunk[4096];
             ssize_t n = recv(fd, chunk, sizeof(chunk), 0);
             if (getenv("AIRY_RPC_DIAG"))
-                SVC_LOG_ERROR("rpc diag: recv n=%zd errno=%d buf_size=%zu revents=0x%x", n, errno, buf->size, pfd.revents);
+                SVC_LOG_ERROR("rpc diag: recv n=%zd errno=%d buf_size=%zu revents=0x%x", n, errno,
+                              buf->size, pfd.revents);
             if (n < 0) {
                 if (errno == EINTR || errno == EAGAIN)
                     continue;
@@ -208,7 +203,7 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
                 return AIRY_ERR_FAIL;
             }
             if (n == 0) {
-                /* 对端关闭：检查是否已收到完整 JSON */
+
                 if (buf->size > 0) {
                     cJSON *probe = cJSON_Parse(buf->data);
                     if (probe) {
@@ -225,7 +220,6 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
             if (rc != AIRY_SUCCESS)
                 return rc;
 
-            /* 立即检查 JSON 完整性 */
             cJSON *probe = cJSON_Parse(buf->data);
             if (probe) {
                 cJSON_Delete(probe);
@@ -245,7 +239,7 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
                         return AIRY_ERR_FAIL;
                     }
                     if (n2 == 0)
-                        break; /* EOF：剩余数据已全部读出 */
+                        break;
                     rc = rpc_buf_append(buf, chunk, (size_t)n2);
                     if (rc != AIRY_SUCCESS)
                         return rc;
@@ -260,18 +254,16 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
                                   buf->size, buf->data ? buf->data : "");
                 return AIRY_ERR_FAIL;
             }
-            elapsed_ms += 1; /* 至少消耗 1ms 进度防止死循环 */
+            elapsed_ms += 1;
         } else if (hangup || (pfd.revents & POLLERR)) {
             if (getenv("AIRY_RPC_DIAG"))
-                SVC_LOG_ERROR("rpc diag: hangup-no-POLLIN revents=0x%x buf_size=%zu",
-                              pfd.revents, buf->size);
+                SVC_LOG_ERROR("rpc diag: hangup-no-POLLIN revents=0x%x buf_size=%zu", pfd.revents,
+                              buf->size);
             return AIRY_ERR_FAIL;
         }
     }
     return AIRY_ERR_TIMEOUT;
 }
-
-/* ==================== Windows 桩实现 ==================== */
 
 #elif AIRY_PLATFORM_WINDOWS
 
@@ -282,10 +274,8 @@ static int rpc_connect_unix(const char *socket_path)
 }
 
 static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
-                             airy_cancel_token_t *cancel_token,
-                             const char *cancel_socket_path,
-                             const char *cancel_method,
-                             const char *cancel_params_json)
+                             airy_cancel_token_t *cancel_token, const char *cancel_socket_path,
+                             const char *cancel_method, const char *cancel_params_json)
 {
     (void)fd;
     (void)buf;
@@ -298,23 +288,16 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
 }
 
 #endif /* AIRY_PLATFORM_WINDOWS / POSIX */
-
-/* ==================== 公共接口实现 ==================== */
-
-int daemon_rpc_call(const char *socket_path, const char *method,
-                    const char *params_json,
+int daemon_rpc_call(const char *socket_path, const char *method, const char *params_json,
                     char **out_result_json, uint32_t timeout_ms)
 {
-    return daemon_rpc_call_cancelable(socket_path, method, params_json,
-                                      out_result_json, timeout_ms,
+    return daemon_rpc_call_cancelable(socket_path, method, params_json, out_result_json, timeout_ms,
                                       NULL, NULL, NULL);
 }
 
-int daemon_rpc_call_cancelable(const char *socket_path, const char *method,
-                               const char *params_json,
+int daemon_rpc_call_cancelable(const char *socket_path, const char *method, const char *params_json,
                                char **out_result_json, uint32_t timeout_ms,
-                               airy_cancel_token_t *cancel_token,
-                               const char *cancel_method,
+                               airy_cancel_token_t *cancel_token, const char *cancel_method,
                                const char *cancel_params_json)
 {
     if (!socket_path || !method || !out_result_json)
@@ -324,12 +307,10 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method,
     if (timeout_ms == 0)
         timeout_ms = DAEMON_RPC_DEFAULT_TIMEOUT_MS;
 
-    /* 连接 daemon */
     int fd = rpc_connect_unix(socket_path);
     if (fd < 0)
-        return -fd; /* rpc_connect_unix 返回负的 AIRY_ERR_* */
+        return -fd;
 
-    /* 构造 JSON-RPC 2.0 请求 */
     cJSON *root = cJSON_CreateObject();
     if (!root) {
 #if AIRY_PLATFORM_POSIX
@@ -344,7 +325,7 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method,
         if (params) {
             cJSON_AddItemToObject(root, "params", params);
         } else {
-            /* 解析失败：作为字符串字段回退 */
+
             cJSON_AddStringToObject(root, "params", params_json);
         }
     } else {
@@ -361,7 +342,6 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method,
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    /* 发送请求 */
     size_t req_len = strlen(request_str);
 #if AIRY_PLATFORM_POSIX
     ssize_t sent = send(fd, request_str, req_len, 0);
@@ -377,7 +357,6 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method,
         return AIRY_ERR_FAIL;
     }
 
-    /* 接收响应 */
     rpc_buf_t buf;
     int rc = rpc_buf_init(&buf);
     if (rc != AIRY_SUCCESS) {
@@ -387,20 +366,19 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method,
         return rc;
     }
 
-    rc = rpc_recv_response(fd, &buf, timeout_ms, cancel_token,
-                           socket_path, cancel_method, cancel_params_json);
+    rc = rpc_recv_response(fd, &buf, timeout_ms, cancel_token, socket_path, cancel_method,
+                           cancel_params_json);
 #if AIRY_PLATFORM_POSIX
     close(fd);
 #endif
     if (rc != AIRY_SUCCESS) {
         if (rc != AIRY_ERR_CANCELED)
-            SVC_LOG_ERROR("daemon_rpc_call: recv failed (method=%s, rc=%d, timeout=%u)",
-                           method, rc, timeout_ms);
+            SVC_LOG_ERROR("daemon_rpc_call: recv failed (method=%s, rc=%d, timeout=%u)", method, rc,
+                          timeout_ms);
         rpc_buf_free(&buf);
         return rc;
     }
 
-    /* 解析响应，提取 result 字段 */
     cJSON *resp = cJSON_Parse(buf.data);
     rpc_buf_free(&buf);
     if (!resp) {
@@ -414,8 +392,8 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method,
         const char *msg = (err_msg && cJSON_IsString(err_msg)) ? err_msg->valuestring : "unknown";
         cJSON *err_code = cJSON_GetObjectItem(err_obj, "code");
         int code = (err_code && cJSON_IsNumber(err_code)) ? err_code->valueint : -32000;
-        SVC_LOG_WARN("daemon_rpc_call: daemon returned error (method=%s, code=%d, msg=%s)",
-                      method, code, msg);
+        SVC_LOG_WARN("daemon_rpc_call: daemon returned error (method=%s, code=%d, msg=%s)", method,
+                     code, msg);
         cJSON_Delete(resp);
         return AIRY_ERR_FAIL;
     }
@@ -427,7 +405,6 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method,
         return AIRY_ERR_FAIL;
     }
 
-    /* 将 result 序列化为字符串返回 */
     char *result_str = cJSON_PrintUnformatted(result);
     cJSON_Delete(resp);
     if (!result_str)

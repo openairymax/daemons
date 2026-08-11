@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "gateway_openai_compat.h"
 
 #include "airy_memory.h"
@@ -32,8 +33,7 @@ static int handle_openai_request(const char *method, const char *path, const cha
 
 gw_openai_compat_t *gw_openai_compat_create(const gw_openai_compat_config_t *config)
 {
-    gw_openai_compat_t *compat =
-        (gw_openai_compat_t *)AIRY_CALLOC(1, sizeof(gw_openai_compat_t));
+    gw_openai_compat_t *compat = (gw_openai_compat_t *)AIRY_CALLOC(1, sizeof(gw_openai_compat_t));
     if (!compat) {
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
@@ -289,16 +289,16 @@ static int handle_chat_completions(gw_openai_compat_t *compat, const char *body_
     if (!compat->llm_call_fn) {
         LOG_ERROR("no LLM backend configured for chat completions");
         *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"No LLM backend configured\","
-                                        "\"type\":\"server_error\",\"code\":503}}");
+                                     "\"type\":\"server_error\",\"code\":503}}");
         compat->error_count++;
         return AIRY_ERR_NULL_POINTER;
     }
 
     if (!check_rate_limit(compat)) {
-        LOG_WARN("rate limit exceeded: window_requests=%u, limit=%u",
-                         compat->window_requests, compat->config.rate_limit_rpm);
+        LOG_WARN("rate limit exceeded: window_requests=%u, limit=%u", compat->window_requests,
+                 compat->config.rate_limit_rpm);
         *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"Rate limit exceeded\","
-                                        "\"type\":\"rate_limit_error\",\"code\":429}}");
+                                     "\"type\":\"rate_limit_error\",\"code\":429}}");
         compat->error_count++;
         return AIRY_ERR_OVERFLOW;
     }
@@ -321,14 +321,14 @@ static int handle_chat_completions(gw_openai_compat_t *compat, const char *body_
         /* 注意：model/messages/functions 在此处仍有效，须在错误分支打印
          * 完成之后再释放，避免 use-after-free（此前先释放后引用导致
          * ASan heap-use-after-free 崩溃）。 */
-        LOG_ERROR("LLM call failed: model=%s, rc=%d",
-                          model ? model : compat->config.default_model, rc);
+        LOG_ERROR("LLM call failed: model=%s, rc=%d", model ? model : compat->config.default_model,
+                  rc);
         AIRY_FREE(llm_response);
         AIRY_FREE(model);
         AIRY_FREE(messages);
         AIRY_FREE(functions);
         *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"LLM call failed\","
-                                        "\"type\":\"server_error\",\"code\":500}}");
+                                     "\"type\":\"server_error\",\"code\":500}}");
         compat->error_count++;
         return AIRY_ERR_IO;
     }
@@ -346,9 +346,8 @@ static int handle_embeddings(gw_openai_compat_t *compat, const char *body_json,
 {
     if (!compat->embed_fn) {
         LOG_ERROR("no embedding backend configured for embeddings endpoint");
-        *response_json =
-            AIRY_STRDUP("{\"error\":{\"message\":\"No embedding backend configured\","
-                           "\"type\":\"server_error\",\"code\":503}}");
+        *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"No embedding backend configured\","
+                                     "\"type\":\"server_error\",\"code\":503}}");
         compat->error_count++;
         return AIRY_ERR_NULL_POINTER;
     }
@@ -397,14 +396,14 @@ static int handle_embeddings(gw_openai_compat_t *compat, const char *body_json,
 
     if (rc != 0 || !embed_response) {
         LOG_ERROR("embedding call failed: model=%s, rc=%d",
-                          model ? model : "text-embedding-ada-002", rc);
+                  model ? model : "text-embedding-ada-002", rc);
         AIRY_FREE(embed_response);
         AIRY_FREE(model);
         model = NULL;
         AIRY_FREE(input_json);
         input_json = NULL;
         *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"Embedding failed\","
-                                        "\"type\":\"server_error\",\"code\":500}}");
+                                     "\"type\":\"server_error\",\"code\":500}}");
         compat->error_count++;
         return AIRY_ERR_IO;
     }
@@ -449,7 +448,7 @@ int gw_openai_compat_handle_request(gw_openai_compat_t *compat, const char *meth
                  strcmp(path, "/openai/v1/chat/completions") == 0)) {
         if (!body_json) {
             *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"Empty body\","
-                                            "\"type\":\"invalid_request_error\",\"code\":400}}");
+                                         "\"type\":\"invalid_request_error\",\"code\":400}}");
             compat->error_count++;
             return AIRY_ERR_INVALID_PARAM;
         }
@@ -460,7 +459,7 @@ int gw_openai_compat_handle_request(gw_openai_compat_t *compat, const char *meth
         (strcmp(path, "/v1/embeddings") == 0 || strcmp(path, "/openai/v1/embeddings") == 0)) {
         if (!body_json) {
             *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"Empty body\","
-                                            "\"type\":\"invalid_request_error\",\"code\":400}}");
+                                         "\"type\":\"invalid_request_error\",\"code\":400}}");
             compat->error_count++;
             return AIRY_ERR_INVALID_PARAM;
         }
@@ -472,7 +471,7 @@ int gw_openai_compat_handle_request(gw_openai_compat_t *compat, const char *meth
     }
 
     *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"Unknown OpenAI endpoint\","
-                                    "\"type\":\"invalid_request_error\",\"code\":404}}");
+                                 "\"type\":\"invalid_request_error\",\"code\":404}}");
     compat->error_count++;
     return AIRY_ERR_NOT_FOUND;
 }

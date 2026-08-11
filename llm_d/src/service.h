@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file service.h
  * @brief 服务内部结构声明
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_LLM_SERVICE_INTERNAL_H
@@ -21,10 +21,10 @@ struct llm_service {
     llm_cache_t *cache;
     cost_tracker_t *cost;
     token_counter_t *token_counter;
-    airy_mtx_t lock; /* 保护 registry 和 cost 等 */
+    airy_mtx_t lock;
     void *rules;
     size_t rule_count;
-    char default_model[128];   /* global.default_model（主配置 + 用户覆盖，用户优先） */
+    char default_model[128];
     char default_provider[64]; /* global.default_provider */
 };
 

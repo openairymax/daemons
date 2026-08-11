@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file main.c
  * @brief A2A 服务守护进程主入口（遵循 daemon 模块统一规范）
@@ -32,8 +32,6 @@
 #include <stdlib.h>
 #include <time.h>
 
-/* ==================== 配置常量 ==================== */
-
 #define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("a2a.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_a2a"
 #define DEFAULT_TCP_PORT 8087
@@ -42,14 +40,10 @@
 #define A2A_DEFAULT_MAX_AGENTS 256
 #define A2A_DEFAULT_MAX_TASKS 4096
 
-/* 生成公共全局变量、信号处理、help、客户端处理等样板 */
-DAEMON_DECLARE_COMMON(a2a_d, a2a, DEFAULT_SOCKET_PATH_UNIX,
-                       DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)
+DAEMON_DECLARE_COMMON(a2a_d, a2a, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN,
+                      DEFAULT_TCP_PORT, MAX_BUFFER)
 
-/* L2 标准方法 <ns>.shutdown：生成优雅退出处理器（02-l2-service-protocol.md §6.1） */
 DAEMON_DECLARE_SHUTDOWN_METHOD(a2a_d)
-
-/* ==================== 全局状态 ==================== */
 
 static a2a_service_t *g_service = NULL;
 
@@ -79,8 +73,6 @@ static BOOL WINAPI console_handler(DWORD fdwCtrlType)
     }
 }
 #endif
-
-/* ==================== 请求处理方法 ==================== */
 
 static void handle_register_agent(cJSON *params, int id, airy_sock_t fd);
 static void handle_unregister_agent(cJSON *params, int id, airy_sock_t fd);
@@ -139,19 +131,16 @@ static void on_count_method(cJSON *params __attribute__((unused)), int id, void 
     handle_count(id, *(airy_sock_t *)user_data);
 }
 
-/* L2 标准方法 a2a.health_check（02-l2-service-protocol.md） */
 static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
 
-/* L2 标准方法 a2a.get_stats（02-l2-service-protocol.md §6.1） */
 static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_get_stats(id, *(airy_sock_t *)user_data);
 }
 
-/* 将 cJSON 值序列化为字符串（调用方负责 free，使用标准 free） */
 static char *a2a_cjson_to_string(cJSON *obj)
 {
     if (!obj)
@@ -173,7 +162,6 @@ static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    /* 直接转发整个 params 作为 card_json */
     char *card_json = a2a_cjson_to_string(params);
     if (!card_json) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Card serialize failed", id);
@@ -219,14 +207,13 @@ static void handle_discover(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *capability = cJSON_GetObjectItem(params, "capability");
     cJSON *skill = cJSON_GetObjectItem(params, "skill");
 
-    const char *cap_str = (capability && cJSON_IsString(capability))
-                              ? capability->valuestring : NULL;
+    const char *cap_str =
+        (capability && cJSON_IsString(capability)) ? capability->valuestring : NULL;
     const char *skill_str = (skill && cJSON_IsString(skill)) ? skill->valuestring : NULL;
 
     char *results_json = NULL;
     size_t count = 0;
-    int ret = a2a_service_discover_agents(g_service, cap_str, skill_str,
-                                            &results_json, &count);
+    int ret = a2a_service_discover_agents(g_service, cap_str, skill_str, &results_json, &count);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Discover failed", id);
         return;
@@ -262,8 +249,8 @@ static void handle_create_task(cJSON *params, int id, airy_sock_t client_fd)
     const char *input_str = (input && cJSON_IsString(input)) ? input->valuestring : NULL;
 
     char *task_json = NULL;
-    int ret = a2a_service_create_task(g_service, agent_id->valuestring,
-                                        description->valuestring, input_str, &task_json);
+    int ret = a2a_service_create_task(g_service, agent_id->valuestring, description->valuestring,
+                                      input_str, &task_json);
     if (ret != AIRY_SUCCESS || !task_json) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Task create failed", id);
         SVC_LOG_ERROR("a2a.create_task failed: error=%d", ret);
@@ -301,8 +288,8 @@ static void handle_update_task(cJSON *params, int id, airy_sock_t client_fd)
     const char *output_str = (output && cJSON_IsString(output)) ? output->valuestring : NULL;
     double prog = (progress && cJSON_IsNumber(progress)) ? progress->valuedouble : 0.0;
 
-    int ret = a2a_service_update_task(g_service, task_id->valuestring,
-                                        state->valueint, output_str, prog);
+    int ret =
+        a2a_service_update_task(g_service, task_id->valuestring, state->valueint, output_str, prog);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Task not found", id);
         return;
@@ -384,9 +371,8 @@ static void handle_send_message(cJSON *params, int id, airy_sock_t client_fd)
 
     char *response_json = NULL;
     size_t response_count = 0;
-    int ret = a2a_service_send_message(g_service, target->valuestring,
-                                         role->valuestring, content->valuestring,
-                                         &response_json, &response_count);
+    int ret = a2a_service_send_message(g_service, target->valuestring, role->valuestring,
+                                       content->valuestring, &response_json, &response_count);
     if (ret != AIRY_SUCCESS || !response_json) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Send message failed", id);
         SVC_LOG_ERROR("a2a.send_message failed: error=%d", ret);
@@ -416,7 +402,6 @@ static void handle_count(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* L2 标准方法 a2a.health_check：无副作用健康探针 */
 static void handle_health_check(int id, airy_sock_t client_fd)
 {
     bool healthy = g_service != NULL;
@@ -433,7 +418,6 @@ static void handle_health_check(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* L2 标准方法 a2a.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
 static void handle_get_stats(int id, airy_sock_t client_fd)
 {
     cJSON *result = cJSON_CreateObject();
@@ -447,8 +431,6 @@ static void handle_get_stats(int id, airy_sock_t client_fd)
     }
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
-
-/* ==================== 配置加载 ==================== */
 
 static int load_daemon_config(const char *config_path)
 {
@@ -466,7 +448,6 @@ static int load_daemon_config(const char *config_path)
 #endif
     g_config.tcp_port = DEFAULT_TCP_PORT;
 
-    /* 环境变量覆盖：AIRY_A2A_MAX_AGENTS / AIRY_A2A_MAX_TASKS */
     const char *env_agents = getenv("AIRY_A2A_MAX_AGENTS");
     if (env_agents) {
         unsigned long v = strtoul(env_agents, NULL, 10);
@@ -542,15 +523,14 @@ static void destroy_service(void)
     }
 }
 
-/* ==================== 主函数 ==================== */
-
 int main(int argc, char **argv)
 {
     const char *config_path = NULL;
     int use_tcp = 0;
 
     int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_a2a_d);
-    if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
+    if (parse_rc > 0)
+        return parse_rc == 1 ? 0 : 1;
 
     airy_sock_init();
     airy_mtx_init(&g_running_lock_a2a_d);
@@ -564,7 +544,6 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶 */
     daemon_cupolas_init("a2a_d");
 
     load_daemon_config(config_path);
@@ -582,8 +561,8 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    airy_sock_t server_fd = daemon_create_server_socket(
-        g_config.use_tcp, g_config.tcp_port, g_config.socket_path, g_config.socket_path);
+    airy_sock_t server_fd = daemon_create_server_socket(g_config.use_tcp, g_config.tcp_port,
+                                                        g_config.socket_path, g_config.socket_path);
     if (server_fd < 0) {
         SVC_LOG_ERROR("Failed to create server socket");
         destroy_service();
@@ -592,8 +571,8 @@ int main(int argc, char **argv)
         airy_sock_cleanup();
         return EXIT_FAILURE;
     }
-    SVC_LOG_INFO(g_config.use_tcp ? "Listening on TCP %s:%d" : "Listening on %s",
-                 g_config.tcp_host, g_config.tcp_port);
+    SVC_LOG_INFO(g_config.use_tcp ? "Listening on TCP %s:%d" : "Listening on %s", g_config.tcp_host,
+                 g_config.tcp_port);
 
     daemon_event_config_t ev_config;
     __builtin_memset(&ev_config, 0, sizeof(ev_config));
@@ -607,9 +586,9 @@ int main(int argc, char **argv)
 
     const char *sock_addr = g_config.use_tcp ? g_config.tcp_host : g_config.socket_path;
     int ret = daemon_init_event_driver("a2a_d", "a2a", sock_addr,
-                                         g_config.use_tcp ? g_config.tcp_port : 0, "a2a,core",
-                                         g_config.use_tcp, &ev_config, &g_event_driver_a2a_d,
-                                         &g_bsd_a2a_d, &g_bipc_a2a_d);
+                                       g_config.use_tcp ? g_config.tcp_port : 0, "a2a,core",
+                                       g_config.use_tcp, &ev_config, &g_event_driver_a2a_d,
+                                       &g_bsd_a2a_d, &g_bipc_a2a_d);
     if (ret != AIRY_SUCCESS || !g_event_driver_a2a_d) {
         SVC_LOG_ERROR("Failed to create event driver");
         airy_sock_close(server_fd);
@@ -621,8 +600,10 @@ int main(int argc, char **argv)
     }
 
     g_dispatcher_a2a_d = daemon_event_driver_get_dispatcher(g_event_driver_a2a_d);
-    method_dispatcher_register(g_dispatcher_a2a_d, "register_agent", on_register_agent_method, NULL);
-    method_dispatcher_register(g_dispatcher_a2a_d, "unregister_agent", on_unregister_agent_method, NULL);
+    method_dispatcher_register(g_dispatcher_a2a_d, "register_agent", on_register_agent_method,
+                               NULL);
+    method_dispatcher_register(g_dispatcher_a2a_d, "unregister_agent", on_unregister_agent_method,
+                               NULL);
     method_dispatcher_register(g_dispatcher_a2a_d, "discover_agents", on_discover_method, NULL);
     method_dispatcher_register(g_dispatcher_a2a_d, "create_task", on_create_task_method, NULL);
     method_dispatcher_register(g_dispatcher_a2a_d, "update_task", on_update_task_method, NULL);
@@ -630,13 +611,15 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_a2a_d, "get_task", on_get_task_method, NULL);
     method_dispatcher_register(g_dispatcher_a2a_d, "send_message", on_send_message_method, NULL);
     method_dispatcher_register(g_dispatcher_a2a_d, "count", on_count_method, NULL);
-    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：a2a.send / a2a.receive / a2a.health_check） */
+    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：a2a.send / a2a.receive /
+     * a2a.health_check）
+     */
     method_dispatcher_register(g_dispatcher_a2a_d, "send", on_send_message_method, NULL);
     method_dispatcher_register(g_dispatcher_a2a_d, "receive", on_get_task_method, NULL);
     method_dispatcher_register(g_dispatcher_a2a_d, "health_check", on_health_check_method, NULL);
-    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止） */
+
     method_dispatcher_register(g_dispatcher_a2a_d, "shutdown", on_shutdown_method_a2a_d, NULL);
-    /* L2 协议标准方法 a2a.get_stats（02-l2-service-protocol.md §6.1：真实统计） */
+
     method_dispatcher_register(g_dispatcher_a2a_d, "get_stats", on_get_stats_method, NULL);
     SVC_LOG_INFO("Registered %d RPC methods (a2a.* namespace)", 14);
 
@@ -654,8 +637,8 @@ int main(int argc, char **argv)
     SVC_LOG_INFO("A2A service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_a2a_d);
 
-    daemon_cleanup_standard(g_bipc_a2a_d, g_bsd_a2a_d, g_event_driver_a2a_d,
-                             server_fd, destroy_service, &g_running_lock_a2a_d);
+    daemon_cleanup_standard(g_bipc_a2a_d, g_bsd_a2a_d, g_event_driver_a2a_d, server_fd,
+                            destroy_service, &g_running_lock_a2a_d);
     free_daemon_config();
 
     SVC_LOG_INFO("A2A service stopped");

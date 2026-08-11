@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file cache.c
  * @brief 工具结果缓存实现（LRU?
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "cache.h"
@@ -14,7 +14,7 @@
 #include "tool_service.h"
 
 #include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏 */
+
 #include <cjson_helpers.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -318,13 +318,11 @@ char *tool_cache_key(const char *tool_id, const char *params_json, const char *a
 
 tool_result_t *tool_result_from_json(const char *json)
 {
-    /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */
-    CJSON_PARSE_GUARD(root, json, {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    });
+
+    CJSON_PARSE_GUARD(root, json, { AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed"); });
     tool_result_t *res = AIRY_CALLOC(1, sizeof(tool_result_t));
     if (!res) {
-        /* root 由 CJSON_AUTO_FREE 自动释放 */
+
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     cJSON *success = cJSON_GetObjectItem(root, "success");
@@ -339,7 +337,7 @@ tool_result_t *tool_result_from_json(const char *json)
     cJSON *exit_code = cJSON_GetObjectItem(root, "exit_code");
     if (cJSON_IsNumber(exit_code))
         res->exit_code = exit_code->valueint;
-    /* root 由 CJSON_AUTO_FREE 自动释放 */
+
     return res;
 }
 

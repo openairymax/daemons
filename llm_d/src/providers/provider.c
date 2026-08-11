@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file provider.c
  * @brief 提供商通用工具实现
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 改进说明：
  * 1. 提取公共代码到通用函数
@@ -18,7 +18,7 @@
 #include "platform.h"
 
 #include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD 宏 */
+
 #include <cjson_helpers.h>
 #include <curl/curl.h>
 #include <errno.h>
@@ -26,9 +26,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---------- secrets.env 热加载 ---------- */
-
-/* 保护 api_key 写入（llm_d 线程池并发请求可能同时触发热加载） */
 static airy_mtx_t g_secrets_refresh_lock;
 static bool g_secrets_lock_inited = false;
 
@@ -59,7 +56,7 @@ static char *secrets_env_read(const char *key_name)
     char line[1024];
     char *found = NULL;
     while (fgets(line, sizeof(line), f)) {
-        /* 跳过空行与注释 */
+
         char *p = line;
         while (*p == ' ' || *p == '\t')
             p++;
@@ -70,22 +67,19 @@ static char *secrets_env_read(const char *key_name)
         if (!eq)
             continue;
 
-        /* key = 等号前去除首尾空白 */
         char *key_end = eq;
         while (key_end > p && (key_end[-1] == ' ' || key_end[-1] == '\t'))
             key_end--;
         size_t key_len = (size_t)(key_end - p);
-        if (key_len == 0 || key_len != strlen(key_name) ||
-            strncmp(p, key_name, key_len) != 0)
+        if (key_len == 0 || key_len != strlen(key_name) || strncmp(p, key_name, key_len) != 0)
             continue;
 
-        /* value = 等号后去除首尾空白与行尾换行 */
         char *v = eq + 1;
         while (*v == ' ' || *v == '\t')
             v++;
         size_t vlen = strlen(v);
-        while (vlen > 0 && (v[vlen - 1] == '\n' || v[vlen - 1] == '\r' ||
-                            v[vlen - 1] == ' ' || v[vlen - 1] == '\t'))
+        while (vlen > 0 && (v[vlen - 1] == '\n' || v[vlen - 1] == '\r' || v[vlen - 1] == ' ' ||
+                            v[vlen - 1] == '\t'))
             vlen--;
         if (vlen > 0 && v[0] == '"' && v[vlen - 1] == '"') {
             v++;
@@ -119,7 +113,6 @@ void provider_refresh_api_key(provider_base_ctx_t *base_ctx)
     if (!base_ctx || base_ctx->api_key_env[0] == '\0')
         return;
 
-    /* 环境变量优先（bootstrap 启动时 source 的 secrets.env） */
     const char *env_val = getenv(base_ctx->api_key_env);
     const char *new_key = (env_val && env_val[0]) ? env_val : NULL;
     char *file_val = NULL;
@@ -132,7 +125,7 @@ void provider_refresh_api_key(provider_base_ctx_t *base_ctx)
 
     secrets_lock_ensure();
     airy_mtx_lock(&g_secrets_refresh_lock);
-    /* 仅当值发生变化才更新并记录日志，避免刷屏 */
+
     if (strcmp(base_ctx->api_key, new_key) != 0) {
         size_t n = strlen(new_key);
         if (n < sizeof(base_ctx->api_key)) {
@@ -149,8 +142,6 @@ void provider_refresh_api_key(provider_base_ctx_t *base_ctx)
         AIRY_FREE(file_val);
     }
 }
-
-/* ---------- 通用上下文初始化 ---------- */
 
 static const char *resolve_api_key(const char *api_key)
 {
@@ -278,8 +269,6 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, cons
                  base_ctx->max_retries, base_ctx->api_key[0] ? 1 : 0);
 }
 
-/* ---------- HTTP 响应管理 ---------- */
-
 void provider_http_resp_free(provider_http_resp_t *resp)
 {
     if (resp) {
@@ -287,8 +276,6 @@ void provider_http_resp_free(provider_http_resp_t *resp)
         AIRY_FREE(resp);
     }
 }
-
-/* ---------- HTTP 回调 ---------- */
 
 static size_t http_write_callback(void *contents, size_t size, size_t nmemb, void *userp)
 {
@@ -314,8 +301,6 @@ static size_t http_write_callback(void *contents, size_t size, size_t nmemb, voi
     mem->data[mem->size] = '\0';
     return realsize;
 }
-
-/* ---------- HTTP POST 实现 ---------- */
 
 int provider_http_post(const char *url, struct curl_slist *headers, const char *body,
                        double timeout_sec, int max_retries, provider_http_resp_t **out_response,
@@ -390,8 +375,6 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
     return AIRY_OK;
 }
 
-/* ---------- 通用请求构建 ---------- */
-
 char *provider_build_openai_request(const llm_request_config_t *manager, const char *default_model)
 {
     if (!manager) {
@@ -438,7 +421,6 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
         cJSON_AddItemToObject(root, "stop", stop);
     }
 
-    /* Function calling：透传 tools 定义（OpenAI tools 数组 JSON 字符串） */
     if (manager->tools_json && manager->tools_json[0]) {
         CJSON_PARSE_GUARD(tools, manager->tools_json, {});
         if (cJSON_IsArray(tools) && cJSON_GetArraySize(tools) > 0) {
@@ -453,11 +435,11 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
         const char *content = manager->messages[i].content ? manager->messages[i].content : "";
         cJSON_AddStringToObject(msg, "role", role);
         cJSON_AddStringToObject(msg, "content", content);
-        /* role="tool"：携带 tool_call_id */
+
         if (manager->messages[i].tool_call_id && manager->messages[i].tool_call_id[0]) {
             cJSON_AddStringToObject(msg, "tool_call_id", manager->messages[i].tool_call_id);
         }
-        /* role="assistant"：携带 tool_calls（OpenAI 格式 JSON 数组字符串） */
+
         if (manager->messages[i].tool_calls_json && manager->messages[i].tool_calls_json[0]) {
             CJSON_PARSE_GUARD(tc, manager->messages[i].tool_calls_json, {});
             if (cJSON_IsArray(tc)) {
@@ -473,15 +455,12 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
     return json;
 }
 
-/* ---------- 通用响应解析 ---------- */
-
 int provider_parse_openai_response(const char *body, llm_response_t **out)
 {
     if (!body || !out) {
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + NULL 检查 + 手动 cJSON_Delete */
     CJSON_PARSE_GUARD(root, body, {
         SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=cjson_parse_error "
                       "STACK: provider_parse_openai_response");
@@ -492,7 +471,7 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
     if (!resp) {
         SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=oom_resp "
                       "STACK: provider_parse_openai_response");
-        /* root 由 CJSON_AUTO_FREE 自动释放 */
+
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
@@ -520,7 +499,7 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
         if (!resp->choices) {
             SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=oom_choices "
                           "STACK: provider_parse_openai_response");
-            /* root 由 CJSON_AUTO_FREE 自动释放 */
+
             llm_response_free(resp);
             return AIRY_ERR_OUT_OF_MEMORY;
         }
@@ -537,7 +516,7 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
                 if (cJSON_IsString(content) && content->valuestring) {
                     resp->choices[i].content = AIRY_STRDUP(content->valuestring);
                 }
-                /* Function calling：提取 tool_calls（原始 JSON 数组，序列化为字符串） */
+
                 cJSON *tool_calls = cJSON_GetObjectItem(message, "tool_calls");
                 if (cJSON_IsArray(tool_calls) && cJSON_GetArraySize(tool_calls) > 0) {
                     char *tc_json = cJSON_PrintUnformatted(tool_calls);
@@ -566,12 +545,9 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
             resp->total_tokens = (uint32_t)total->valuedouble;
     }
 
-    /* root 由 CJSON_AUTO_FREE 自动释放 */
     *out = resp;
     return AIRY_OK;
 }
-
-/* ========== SSE 流式传输实现 ========== */
 
 typedef struct {
     char *line_buf;
@@ -579,8 +555,8 @@ typedef struct {
     size_t line_len;
     provider_stream_chunk_cb_t on_chunk;
     void *chunk_user_data;
-    int cancelled; /**< 流被取消（on_chunk 返回错误） */
-    int done;      /**< 收到 [DONE]：正常流结束标记 */
+    int cancelled;
+    int done;
 } sse_stream_ctx_t;
 
 static void sse_ctx_init(sse_stream_ctx_t *sse, provider_stream_chunk_cb_t cb, void *user_data)
@@ -759,7 +735,7 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
 
     if (res != CURLE_OK) {
         SVC_LOG_WARN("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d curl_error=%s", url, errno,
-                 curl_easy_strerror(res));
+                     curl_easy_strerror(res));
         return AIRY_ERR_IO;
     }
 

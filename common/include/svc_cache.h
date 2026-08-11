@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file svc_cache.h
  * @brief 缓存服务兼容层
@@ -13,7 +14,7 @@
 #ifndef SVC_CACHE_H
 #define SVC_CACHE_H
 
-/* 包含 commons 的统一缓存库 */
+
 #include <cache_common.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -22,7 +23,6 @@
 extern "C" {
 #endif
 
-/* ==================== 类型兼容 ==================== */
 
 /**
  * @brief 兼容旧缓存类型名
@@ -40,7 +40,6 @@ typedef struct {
     cache_free_func_t value_free_fn;
 } svc_cache_config_t;
 
-/* ==================== 兼容性函数包装 ==================== */
 
 /**
  * @brief 创建缓存（兼容层）
@@ -133,7 +132,6 @@ static inline bool svc_cache_is_empty(svc_cache_t *cache)
     return cache_get_size(cache) == 0;
 }
 
-/* ==================== 额外的便捷函数 ==================== */
 
 /**
  * @brief 检查缓存是否存在键
@@ -146,7 +144,7 @@ static inline bool svc_cache_contains(svc_cache_t *cache, const char *key)
     void *value = NULL;
     int result = cache_get(cache, key, &value);
     if (result == 1 && value) {
-        /* 注意：cache_get 会复制值，需要释放 */
+
         AIRY_FREE(value);
         return true;
     }

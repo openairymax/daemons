@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file tcache.h
  * @brief P1.20: per-Thread 缓存层 — 批量获取/归还 + 限流上限
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 在每个线程的 TLS 中维护一个小的分配缓存。
  * 小对象分配直接从 tcache 获取，避免频繁访问全局分配器。
@@ -28,34 +28,30 @@
 extern "C" {
 #endif
 
-/* ==================== 句柄 ==================== */
 
 typedef struct tcache_s tcache_t;
 
-/* ==================== 配置 ==================== */
 
 typedef struct {
-    size_t max_cache_entries;      /**< 每个大小类最大缓存条目，默认 64 */
-    size_t batch_fill_count;       /**< 批量填充数量，默认 32 */
-    uint32_t max_cache_size_class; /**< 最大缓存大小类，超过此大小直接分配 */
-    uint32_t max_total_cached_bytes;/**< 线程最大缓存总字节数，0 无限制 */
-    bool enable_stats;             /**< 是否启用统计 */
+    size_t max_cache_entries;
+    size_t batch_fill_count;
+    uint32_t max_cache_size_class;
+    uint32_t max_total_cached_bytes;
+    bool enable_stats;
 } tcache_config_t;
 
-/* ==================== 统计 ==================== */
 
 typedef struct {
-    uint64_t alloc_count;          /**< 总分配次数 */
-    uint64_t free_count;           /**< 总释放次数 */
-    uint64_t cache_hit_count;      /**< 缓存命中次数 */
-    uint64_t cache_miss_count;     /**< 缓存未命中次数 */
-    uint64_t batch_fill_count;     /**< 批量填充次数 */
-    uint64_t batch_flush_count;    /**< 批量归还次数 */
-    uint64_t oversized_alloc;      /**< 超大对象分配次数 */
-    double hit_rate;               /**< 缓存命中率 */
+    uint64_t alloc_count;
+    uint64_t free_count;
+    uint64_t cache_hit_count;
+    uint64_t cache_miss_count;
+    uint64_t batch_fill_count;
+    uint64_t batch_flush_count;
+    uint64_t oversized_alloc;
+    double hit_rate;
 } tcache_stats_t;
 
-/* ==================== 生命周期 ==================== */
 
 /**
  * @brief 创建 tcache 实例
@@ -76,7 +72,6 @@ tcache_t *tcache_create(const tcache_config_t *config);
  */
 void tcache_destroy(tcache_t *tc);
 
-/* ==================== 分配操作 ==================== */
 
 /**
  * @brief 从 tcache 分配内存
@@ -102,7 +97,6 @@ void *tcache_alloc(tcache_t *tc, size_t size);
  */
 void tcache_free(tcache_t *tc, void *ptr, size_t size);
 
-/* ==================== 批量操作 ==================== */
 
 /**
  * @brief 批量归还所有缓存对象到全局分配器
@@ -122,7 +116,6 @@ void tcache_flush(tcache_t *tc);
  */
 void tcache_purge(tcache_t *tc);
 
-/* ==================== 查询 ==================== */
 
 /**
  * @brief 获取 tcache 统计信息

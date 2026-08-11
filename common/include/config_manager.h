@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file config_manager.h
  * @brief 统一配置管理系统
@@ -26,7 +27,6 @@
 extern "C" {
 #endif
 
-/* ==================== 常量定义 ==================== */
 
 #define CM_MAX_KEY_LEN 128
 #define CM_MAX_VALUE_LEN 2048
@@ -36,7 +36,6 @@ extern "C" {
 #define CM_MAX_NAMESPACE_LEN 32
 #define CM_MAX_PATH_LEN 512
 
-/* ==================== 配置值类型 ==================== */
 
 typedef enum {
     CM_TYPE_STRING = 0,
@@ -46,7 +45,6 @@ typedef enum {
     CM_TYPE_NULL = 4
 } cm_value_type_t;
 
-/* ==================== 配置条目 ==================== */
 
 typedef struct {
     char key[CM_MAX_KEY_LEN];
@@ -60,7 +58,6 @@ typedef struct {
     char source[64];
 } cm_entry_t;
 
-/* ==================== 配置变更记录 ==================== */
 
 typedef struct {
     char key[CM_MAX_KEY_LEN];
@@ -70,7 +67,6 @@ typedef struct {
     char source[64];
 } cm_change_record_t;
 
-/* ==================== 配置管理器配置 ==================== */
 
 typedef struct {
     char base_path[CM_MAX_PATH_LEN];
@@ -83,17 +79,14 @@ typedef struct {
     char sync_shm_name[256];
 } cm_config_t;
 
-/* ==================== 配置变更回调 ==================== */
 
 typedef void (*cm_change_callback_t)(const char *key, const char *old_value, const char *new_value,
                                      void *user_data);
 
-/* ==================== 配置校验回调 ==================== */
 
 typedef bool (*cm_validator_t)(const char *key, const char *value, char *error_msg,
                                size_t error_msg_size);
 
-/* ==================== 生命周期管理 ==================== */
 
 /**
  * @brief 初始化配置管理器
@@ -107,7 +100,6 @@ int cm_init(const cm_config_t *config);
  */
 void cm_shutdown(void);
 
-/* ==================== 配置读写 ==================== */
 
 /**
  * @brief 获取配置值
@@ -161,7 +153,6 @@ int cm_set(const char *key, const char *value, const char *source);
 int cm_set_namespaced(const char *namespace_, const char *key, const char *value,
                       const char *source);
 
-/* ==================== 配置加载 ==================== */
 
 /**
  * @brief 从配置文件加载配置
@@ -192,7 +183,6 @@ int cm_load_env(const char *prefix, const char *namespace_);
  */
 int cm_load_args(int argc, char **argv);
 
-/* ==================== 配置监视与热更新 ==================== */
 
 /**
  * @brief 注册配置变更回调
@@ -217,7 +207,6 @@ int cm_unwatch(const char *key_pattern, cm_change_callback_t callback);
  */
 int cm_reload(void);
 
-/* ==================== 配置校验 ==================== */
 
 /**
  * @brief 注册配置校验器
@@ -233,7 +222,6 @@ int cm_register_validator(const char *key_pattern, cm_validator_t validator);
  */
 int cm_validate_all(void);
 
-/* ==================== 版本控制 ==================== */
 
 /**
  * @brief 获取配置变更历史
@@ -254,7 +242,6 @@ int cm_get_history(const char *key, cm_change_record_t *records, uint32_t max_co
  */
 int cm_rollback(const char *key, uint64_t version);
 
-/* ==================== 环境差异化 ==================== */
 
 /**
  * @brief 获取当前环境
@@ -276,7 +263,6 @@ int cm_set_environment(const char *env);
  */
 int cm_load_environment_config(const char *env);
 
-/* ==================== 导出 ==================== */
 
 /**
  * @brief 导出配置为JSON字符串

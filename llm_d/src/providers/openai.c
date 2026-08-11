@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file openai.c
  * @brief OpenAI 适配器实现（含生产级Rate Limiting）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * PROTO-003 实现内容：
  * 1. 令牌桶算法速率限制（RPM/TPM）
@@ -24,7 +24,7 @@
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD 宏 */
+
 #include <cjson_helpers.h>
 #include <curl/curl.h>
 #include <math.h>
@@ -36,39 +36,31 @@
 #define OPENAI_DEFAULT_BASE "https://api.openai.com/v1"
 #define OPENAI_DEFAULT_MODEL "gpt-3.5-turbo"
 
-/* ---------- OpenAI 默认速率限制（Tier 1 限制值） ---------- */
-
-#define OPENAI_DEFAULT_RPM 500          /* Requests per minute */
-#define OPENAI_DEFAULT_TPM 150000       /* Tokens per minute (Tier 1) */
+#define OPENAI_DEFAULT_RPM 500 /* Requests per minute */
+#define OPENAI_DEFAULT_TPM 150000 /* Tokens per minute (Tier 1) */
 #define OPENAI_DEFAULT_TPM_TIER2 300000 /* Tokens per minute (Tier 2) */
-#define OPENAI_MAX_RETRIES 5            /* 最大重试次数 */
-#define OPENAI_BASE_DELAY_MS 1000       /* 初始退避延迟(ms) */
-#define OPENAI_MAX_DELAY_MS 60000       /* 最大退避延迟(ms) */
-#define OPENAI_JITTER_FACTOR 0.2        /* 抖动因子(20%) */
-
-/* ---------- 速率限制器状态 ---------- */
+#define OPENAI_MAX_RETRIES 5
+#define OPENAI_BASE_DELAY_MS 1000
+#define OPENAI_MAX_DELAY_MS 60000
+#define OPENAI_JITTER_FACTOR 0.2
 
 typedef struct {
     airy_mtx_t lock;
-    time_t rpm_window_start; /* RPM窗口起始时间 */
-    int rpm_count;           /* 当前窗口内请求数 */
-    int rpm_limit;           /* RPM限制 */
-    long tpm_count;          /* TPM累计token数 */
-    time_t tpm_window_start; /* TPM窗口起始时间 */
-    long tpm_limit;          /* TPM限制 */
-    time_t last_429_time;    /* 上次429响应时间 */
-    int retry_after_sec;     /* 服务端建议的Retry-After(秒) */
-    int consecutive_429s;    /* 连续429次数(用于自适应退避) */
+    time_t rpm_window_start;
+    int rpm_count;
+    int rpm_limit;
+    long tpm_count;
+    time_t tpm_window_start;
+    long tpm_limit;
+    time_t last_429_time;
+    int retry_after_sec;
+    int consecutive_429s;
 } openai_rate_limiter_t;
-
-/* ---------- 上下文 ---------- */
 
 typedef struct {
     provider_base_ctx_t base;
     openai_rate_limiter_t rl;
 } openai_ctx_t;
-
-/* ========== 速率限制器内部函数 ========== */
 
 static void openai_rl_init(openai_rate_limiter_t *rl)
 {
@@ -176,8 +168,6 @@ static void openai_rl_reset_429(openai_rate_limiter_t *rl)
     airy_mtx_unlock(&rl->lock);
 }
 
-/* ========== HTTP 429 Retry-After 解析 ========== */
-
 static int parse_retry_after(const char *headers_data)
 {
     if (!headers_data)
@@ -205,8 +195,6 @@ static int parse_retry_after(const char *headers_data)
 
     return (int)seconds;
 }
-
-/* ========== 带重试的HTTP请求 ========== */
 
 static int openai_http_request_with_retry(openai_ctx_t *ctx, const char *url,
                                           struct curl_slist *headers, const char *body,
@@ -283,8 +271,6 @@ static int openai_http_request_with_retry(openai_ctx_t *ctx, const char *url,
     return AIRY_ERR_IO;
 }
 
-/* ---------- 生命周期 ---------- */
-
 static provider_ctx_t *openai_init(const char *name __attribute__((unused)), const char *api_key,
                                    const char *api_base, const char *organization,
                                    double timeout_sec, int max_retries)
@@ -306,8 +292,8 @@ static provider_ctx_t *openai_init(const char *name __attribute__((unused)), con
     SVC_LOG_INFO("C-L02: OPENAI: INIT api_base=%s timeout=%.1fs retries=%d has_api_key=%d "
                  "RPM=%d TPM=%ld",
                  ctx->base.api_base[0] ? ctx->base.api_base : OPENAI_DEFAULT_BASE,
-                 ctx->base.timeout_sec, ctx->base.max_retries,
-                 ctx->base.api_key[0] ? 1 : 0, OPENAI_DEFAULT_RPM, (long)OPENAI_DEFAULT_TPM);
+                 ctx->base.timeout_sec, ctx->base.max_retries, ctx->base.api_key[0] ? 1 : 0,
+                 OPENAI_DEFAULT_RPM, (long)OPENAI_DEFAULT_TPM);
 
     return (provider_ctx_t *)ctx;
 }
@@ -322,8 +308,6 @@ static void openai_destroy(provider_ctx_t *ctx_ptr)
     }
 }
 
-/* ---------- 同步完成（含Rate Limiting） ---------- */
-
 static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *manager,
                            llm_response_t **out_response)
 {
@@ -334,7 +318,6 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     openai_ctx_t *ctx = (openai_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
 
-    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
     provider_refresh_api_key(base);
 
     char *req_body = provider_build_openai_request(manager, OPENAI_DEFAULT_MODEL);
@@ -389,11 +372,11 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     provider_http_resp_free(http_resp);
 
     if (ret == AIRY_OK && *out_response) {
-        SVC_LOG_INFO("C-L02: OPENAI: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
-                     "http_code=%ld",
-                     (*out_response)->model ? (*out_response)->model : model,
-                     (*out_response)->prompt_tokens, (*out_response)->completion_tokens,
-                     (*out_response)->total_tokens, http_code);
+        SVC_LOG_INFO(
+            "C-L02: OPENAI: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
+            "http_code=%ld",
+            (*out_response)->model ? (*out_response)->model : model, (*out_response)->prompt_tokens,
+            (*out_response)->completion_tokens, (*out_response)->total_tokens, http_code);
     } else {
         SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld "
                       "DIAGNOSIS=parse_response_failed ret=%d",
@@ -402,8 +385,6 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
 
     return ret;
 }
-
-/* ---------- 流式完成（SSE） ---------- */
 
 typedef struct {
     llm_stream_callback_t user_cb;
@@ -421,7 +402,6 @@ static int oai_stream_on_chunk(const char *json_line, void *userdata)
 {
     oai_stream_acc_t *acc = (oai_stream_acc_t *)userdata;
 
-    /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + NULL 检查 + 手动 cJSON_Delete */
     CJSON_PARSE_GUARD(root, json_line, { return 0; });
 
     if (!acc->resp_id) {
@@ -485,7 +465,6 @@ static int oai_stream_on_chunk(const char *json_line, void *userdata)
         }
     }
 
-    /* root 由 CJSON_AUTO_FREE 自动释放 */
     return 0;
 }
 
@@ -541,7 +520,6 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     openai_ctx_t *ctx = (openai_ctx_t *)ctx_ptr;
     provider_base_ctx_t *base = &ctx->base;
 
-    /* 热加载：启动后填写的 secrets.env 密钥在下次请求自动生效，无需重启 llm_d */
     provider_refresh_api_key(base);
 
     llm_request_config_t stream_cfg = *manager;
@@ -556,8 +534,8 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     }
 
     const char *model = manager->model && manager->model[0] ? manager->model : OPENAI_DEFAULT_MODEL;
-    SVC_LOG_INFO("C-L02: OPENAI: STREAM-START model=%s msgs=%zu max_tokens=%d temp=%.2f",
-                 model, manager->message_count, manager->max_tokens, manager->temperature);
+    SVC_LOG_INFO("C-L02: OPENAI: STREAM-START model=%s msgs=%zu max_tokens=%d temp=%.2f", model,
+                 manager->message_count, manager->max_tokens, manager->temperature);
 
     char url[1024];
     snprintf(url, sizeof(url), "%s/chat/completions", base->api_base);
@@ -626,8 +604,6 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
 
     return AIRY_OK;
 }
-
-/* ---------- 操作表 ---------- */
 
 const provider_ops_t openai_ops = {.init = openai_init,
                                    .destroy = openai_destroy,

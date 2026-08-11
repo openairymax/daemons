@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file service.c
  * @brief 监控服务核心实现
@@ -298,7 +298,7 @@ int monitor_service_trigger_alert(monitor_service_t *service, const alert_info_t
         AIRY_FREE(service->alerts[0].service_name);
         AIRY_FREE(service->alerts[0].resource_id);
         __builtin_memmove(&service->alerts[0], &service->alerts[1],
-                (service->alert_count - 1) * sizeof(alert_entry_t));
+                          (service->alert_count - 1) * sizeof(alert_entry_t));
         service->alert_count--;
     }
 
@@ -356,8 +356,7 @@ int monitor_service_health_check(monitor_service_t *service, const char *service
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate health check result");
     }
 
-    hr->service_name =
-        service_name ? AIRY_STRDUP(service_name) : AIRY_STRDUP("monitor_service");
+    hr->service_name = service_name ? AIRY_STRDUP(service_name) : AIRY_STRDUP("monitor_service");
     hr->is_healthy = service->initialized ? true : false;
     hr->timestamp = get_timestamp_ms();
     hr->error_code = 0;
@@ -409,8 +408,7 @@ int monitor_service_get_metrics(monitor_service_t *service, const char *metric_n
         return AIRY_SUCCESS;
     }
 
-    metric_info_t **result =
-        (metric_info_t **)AIRY_CALLOC(result_count, sizeof(metric_info_t *));
+    metric_info_t **result = (metric_info_t **)AIRY_CALLOC(result_count, sizeof(metric_info_t *));
     if (!result) {
         airy_mtx_unlock(&service->metric_lock);
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate metrics result array");
@@ -463,12 +461,11 @@ int monitor_service_get_alerts(monitor_service_t *service, alert_info_t ***alert
                 service->alerts[i].alert_id ? AIRY_STRDUP(service->alerts[i].alert_id) : NULL;
             info->message =
                 service->alerts[i].message ? AIRY_STRDUP(service->alerts[i].message) : NULL;
-            info->service_name = service->alerts[i].service_name
-                                     ? AIRY_STRDUP(service->alerts[i].service_name)
-                                     : NULL;
-            info->resource_id = service->alerts[i].resource_id
-                                    ? AIRY_STRDUP(service->alerts[i].resource_id)
-                                    : NULL;
+            info->service_name = service->alerts[i].service_name ?
+                                     AIRY_STRDUP(service->alerts[i].service_name) :
+                                     NULL;
+            info->resource_id =
+                service->alerts[i].resource_id ? AIRY_STRDUP(service->alerts[i].resource_id) : NULL;
             info->level = service->alerts[i].level;
             info->timestamp = service->alerts[i].timestamp;
             info->is_resolved = service->alerts[i].is_resolved;
@@ -593,7 +590,7 @@ int monitor_service_start_agent_trace(monitor_service_t *service,
         AIRY_FREE(service->traces[0].operation_name);
         AIRY_FREE(service->traces[0].service_name);
         __builtin_memmove(&service->traces[0], &service->traces[1],
-                (service->trace_count - 1) * sizeof(trace_entry_t));
+                          (service->trace_count - 1) * sizeof(trace_entry_t));
         service->trace_count--;
     }
 
@@ -769,13 +766,11 @@ int monitor_service_end_agent_trace(monitor_service_t *service, agent_execution_
     }
     airy_mtx_unlock(&service->trace_lock);
 
-    /* 释放 trace 内部字符串字段 */
     AIRY_FREE(trace->agent_id);
     AIRY_FREE(trace->task_id);
     AIRY_FREE(trace->trace_id);
     AIRY_FREE(trace->service_name);
 
-    /* 释放轨迹点数组中的字符串 */
     if (trace->trace_points) {
         for (size_t i = 0; i < trace->trace_point_count; i++) {
             AIRY_FREE(trace->trace_points[i].location);
@@ -783,7 +778,6 @@ int monitor_service_end_agent_trace(monitor_service_t *service, agent_execution_
         AIRY_FREE(trace->trace_points);
     }
 
-    /* 释放位置历史数组 */
     if (trace->locations) {
         for (size_t i = 0; i < trace->location_count; i++) {
             AIRY_FREE(trace->locations[i]);

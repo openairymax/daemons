@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file market_svc_adapter.c
  * @brief 市场服务适配器：将市场服务适配到统一的AgentRT服务管理框架
@@ -48,8 +48,7 @@ static void market_config_from_common(market_config_t *market_cfg,
     market_cfg->storage_path = AIRY_STRDUP("./market_data");
 }
 
-static airy_err_t market_adapter_init(airy_svc_t service,
-                                           const airy_svc_config_t *config)
+static airy_err_t market_adapter_init(airy_svc_t service, const airy_svc_config_t *config)
 {
     if (!service)
         return AIRY_EINVAL;
@@ -173,8 +172,7 @@ static const airy_svc_interface_t market_adapter_iface = {
     .healthcheck = market_adapter_healthcheck,
 };
 
-airy_err_t market_service_adapter_create(airy_svc_t *out_service,
-                                              const airy_svc_config_t *config)
+airy_err_t market_service_adapter_create(airy_svc_t *out_service, const airy_svc_config_t *config)
 {
     if (!out_service)
         return AIRY_EINVAL;
@@ -194,8 +192,8 @@ airy_err_t market_service_adapter_create(airy_svc_t *out_service,
     ctx->owns_service = true;
 
     airy_svc_t svc_handle = NULL;
-    airy_err_t err = airy_svc_create(&svc_handle, ctx->common_cfg.name,
-                                                 &market_adapter_iface, &ctx->common_cfg);
+    airy_err_t err =
+        airy_svc_create(&svc_handle, ctx->common_cfg.name, &market_adapter_iface, &ctx->common_cfg);
     if (err != AIRY_SUCCESS) {
         AIRY_FREE(ctx);
         return err;
@@ -212,9 +210,8 @@ airy_err_t market_service_adapter_create(airy_svc_t *out_service,
     return AIRY_SUCCESS;
 }
 
-airy_err_t market_service_adapter_wrap(airy_svc_t *out_service,
-                                            market_service_t *market_svc,
-                                            const airy_svc_config_t *config)
+airy_err_t market_service_adapter_wrap(airy_svc_t *out_service, market_service_t *market_svc,
+                                       const airy_svc_config_t *config)
 {
     if (!out_service || !market_svc)
         return AIRY_EINVAL;
@@ -234,8 +231,8 @@ airy_err_t market_service_adapter_wrap(airy_svc_t *out_service,
     }
 
     airy_svc_t svc_handle = NULL;
-    airy_err_t err = airy_svc_create(&svc_handle, ctx->common_cfg.name,
-                                                 &market_adapter_iface, &ctx->common_cfg);
+    airy_err_t err =
+        airy_svc_create(&svc_handle, ctx->common_cfg.name, &market_adapter_iface, &ctx->common_cfg);
     if (err != AIRY_SUCCESS) {
         AIRY_FREE(ctx);
         return err;

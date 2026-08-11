@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "gateway_mcp_server.h"
 
 #include "airy_memory.h"
@@ -108,14 +109,14 @@ int gw_mcp_server_register_tool(gw_mcp_server_t *server, const char *name, const
         return AIRY_ERR_OVERFLOW;
 
     gw_mcp_tool_entry_t *entry = &server->tools[server->tool_count];
-AIRY_STRNCPY_TERM(entry->name, name, sizeof(entry->name));
+    AIRY_STRNCPY_TERM(entry->name, name, sizeof(entry->name));
     entry->name[sizeof(entry->name) - 1] = '\0';
     if (description) {
-AIRY_STRNCPY_TERM(entry->description, description, sizeof(entry->description));
+        AIRY_STRNCPY_TERM(entry->description, description, sizeof(entry->description));
         entry->description[sizeof(entry->description) - 1] = '\0';
     }
     if (input_schema_json) {
-AIRY_STRNCPY_TERM(entry->input_schema, input_schema_json, sizeof(entry->input_schema));
+        AIRY_STRNCPY_TERM(entry->input_schema, input_schema_json, sizeof(entry->input_schema));
         entry->input_schema[sizeof(entry->input_schema) - 1] = '\0';
     }
     entry->exec_fn = exec_fn;
@@ -134,18 +135,18 @@ int gw_mcp_server_register_resource(gw_mcp_server_t *server, const char *uri, co
         return AIRY_ERR_OVERFLOW;
 
     gw_mcp_resource_entry_t *entry = &server->resources[server->resource_count];
-AIRY_STRNCPY_TERM(entry->uri, uri, sizeof(entry->uri));
+    AIRY_STRNCPY_TERM(entry->uri, uri, sizeof(entry->uri));
     entry->uri[sizeof(entry->uri) - 1] = '\0';
     if (name) {
-AIRY_STRNCPY_TERM(entry->name, name, sizeof(entry->name));
+        AIRY_STRNCPY_TERM(entry->name, name, sizeof(entry->name));
         entry->name[sizeof(entry->name) - 1] = '\0';
     }
     if (description) {
-AIRY_STRNCPY_TERM(entry->description, description, sizeof(entry->description));
+        AIRY_STRNCPY_TERM(entry->description, description, sizeof(entry->description));
         entry->description[sizeof(entry->description) - 1] = '\0';
     }
     if (mime_type) {
-AIRY_STRNCPY_TERM(entry->mime_type, mime_type, sizeof(entry->mime_type));
+        AIRY_STRNCPY_TERM(entry->mime_type, mime_type, sizeof(entry->mime_type));
         entry->mime_type[sizeof(entry->mime_type) - 1] = '\0';
     }
     entry->read_fn = read_fn;
@@ -176,7 +177,7 @@ static gw_mcp_resource_entry_t *find_resource(gw_mcp_server_t *server, const cha
 
 static char *build_tools_list_json(gw_mcp_server_t *server)
 {
-    /* 每工具含 inputSchema（最长 2048B），预留 4KB/工具防止缓冲区溢出 */
+
     size_t buf_size = 4096 + server->tool_count * 4096;
     char *buf = (char *)AIRY_MALLOC(buf_size);
     if (!buf) {
@@ -193,9 +194,8 @@ static char *build_tools_list_json(gw_mcp_server_t *server)
          * 对象原样内嵌，非法 JSON 或过长会被截断），修复客户端无法获取
          * 参数定义而无法正确调用工具的问题 */
         pos += snprintf(buf + pos, buf_size - pos,
-                        "{\"name\":\"%s\",\"description\":\"%s\",\"inputSchema\":%.*s}",
-                        t->name, t->description,
-                        (int)sizeof(t->input_schema) - 1, t->input_schema);
+                        "{\"name\":\"%s\",\"description\":\"%s\",\"inputSchema\":%.*s}", t->name,
+                        t->description, (int)sizeof(t->input_schema) - 1, t->input_schema);
     }
     pos += snprintf(buf + pos, buf_size - pos, "]}");
     return buf;
@@ -504,8 +504,8 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
                            "\"capabilities\":{\"tools\":{\"listChanged\":true},"
                            "\"resources\":{\"subscribe\":true,\"listChanged\":true}},"
                            "\"serverInfo\":{\"name\":\"%s\",\"version\":\"%s\"}}}";
-        size_t len = snprintf(NULL, 0, resp, rid, server->config.server_name,
-                              server->config.server_version);
+        size_t len =
+            snprintf(NULL, 0, resp, rid, server->config.server_name, server->config.server_version);
         char *buf = (char *)AIRY_MALLOC(len + 1);
         if (!buf) {
             server->error_count++;
@@ -591,7 +591,7 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
     }
 
     if (strcmp(method, "resources/list") == 0) {
-        /* 同 tools/list：补 JSON-RPC result 包装，保证标准客户端可解析 */
+
         char *inner = build_resources_list_json(server);
         if (!inner) {
             server->error_count++;
@@ -655,7 +655,6 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
     return AIRY_ERR_NOT_FOUND;
 }
 
-/* 公开入口：无 id 上下文时调用（响应 id 回退 null） */
 int gw_mcp_server_handle_jsonrpc(gw_mcp_server_t *server, const char *method,
                                  const char *params_json, char **response_json)
 {
@@ -676,10 +675,9 @@ int gw_mcp_server_handle_request(gw_mcp_server_t *server, const char *method, co
     }
 
     char *rpc_params = extract_jsonrpc_params(body_json);
-    /* 提取请求 id 供响应回显（JSON-RPC 2.0 要求响应 id 与请求一致） */
+
     char *rpc_id = extract_jsonrpc_id_raw(body_json);
-    int rc = gw_mcp_server_handle_jsonrpc_ex(server, rpc_method, rpc_params, rpc_id,
-                                             response_json);
+    int rc = gw_mcp_server_handle_jsonrpc_ex(server, rpc_method, rpc_params, rpc_id, response_json);
     AIRY_FREE(rpc_id);
     AIRY_FREE(rpc_method);
     AIRY_FREE(rpc_params);

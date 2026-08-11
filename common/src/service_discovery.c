@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file service_discovery.c
  * @brief 跨进程服务发现机制实现
@@ -28,19 +29,14 @@
 #include <dirent.h>
 #endif
 
-/* C-L08: ServiceDiscovery 日志前缀 */
-#define SD_LOG_INFO(fmt, ...)  LOG_INFO("C-L08: " fmt, ##__VA_ARGS__)
-#define SD_LOG_WARN(fmt, ...)  LOG_WARN("C-L08: " fmt, ##__VA_ARGS__)
+#define SD_LOG_INFO(fmt, ...) LOG_INFO("C-L08: " fmt, ##__VA_ARGS__)
+#define SD_LOG_WARN(fmt, ...) LOG_WARN("C-L08: " fmt, ##__VA_ARGS__)
 #define SD_LOG_ERROR(fmt, ...) LOG_ERROR("C-L08: " fmt, ##__VA_ARGS__)
 #define SD_LOG_DEBUG(fmt, ...) LOG_DEBUG("C-L08: " fmt, ##__VA_ARGS__)
-
-/* ==================== 内部常量 ==================== */
 
 #define SD_MAX_CALLBACKS 8
 #define SD_REGISTRY_VERSION 1
 #define SD_SHM_DEFAULT_SIZE (1024 * 1024)
-
-/* ==================== 共享内存注册表头 ==================== */
 
 typedef struct {
     uint32_t magic;
@@ -53,8 +49,6 @@ typedef struct {
 } sd_registry_header_t;
 
 #define SD_REGISTRY_MAGIC 0x53445247
-
-/* ==================== 内部数据结构 ==================== */
 
 typedef struct {
     sd_event_callback_t callback;
@@ -74,7 +68,7 @@ typedef struct service_discovery_s {
     void *shm_handle;
     void *shm_ptr;
     bool is_shm_owner;
-    const struct sd_backend *backend; /**< 当前注册中心后端（select 于 create，BORROW） */
+    const struct sd_backend *backend;
 } sd_internal_t;
 
 /* 后端接口：注册中心介质抽象。
@@ -88,7 +82,7 @@ typedef struct sd_backend {
     const char *name; /* "shm" / "file" */
     airy_err_t (*init)(sd_internal_t *sd);
     void (*deinit)(sd_internal_t *sd);
-    /* 注册中心核心操作 */
+
     airy_err_t (*register_service)(sd_internal_t *sd, const char *name, const char *type,
                                    const sd_instance_t *inst, const char *tags, const char *deps);
     airy_err_t (*deregister_service)(sd_internal_t *sd, const char *name, const char *instance_id);
@@ -99,8 +93,6 @@ typedef struct sd_backend {
     airy_err_t (*refresh)(sd_internal_t *sd, const char *name);
     airy_err_t (*commit)(sd_internal_t *sd, const char *name);
 } sd_backend_t;
-
-/* ==================== 辅助函数 ==================== */
 
 static int32_t find_service_index(sd_internal_t *sd, const char *name)
 {
@@ -120,7 +112,7 @@ static int32_t find_instance_index(sd_service_entry_t *entry, const char *instan
         if (strcmp(entry->instances[i].instance_id, instance_id) == 0)
             return (int32_t)i;
     }
-    /* 同 find_service_index：正常控制流，不分配 error context */
+
     return AIRY_ERR_NOT_FOUND;
 }
 
@@ -155,16 +147,17 @@ static void expire_stale_instances(sd_internal_t *sd)
             if (is_instance_expired(&entry->instances[j], sd->config.expire_timeout_ms)) {
                 sd_instance_t expired = entry->instances[j];
                 SD_LOG_WARN("EXPIRED instance='%s' service='%s' "
-                         "last_heartbeat=%llums ago "
-                         "(active_svcs=%u active_insts=%u)",
-                         expired.instance_id, entry->name,
-                         (unsigned long long)(now - expired.last_heartbeat),
-                         sd->service_count, entry->instance_count);
+                            "last_heartbeat=%llums ago "
+                            "(active_svcs=%u active_insts=%u)",
+                            expired.instance_id, entry->name,
+                            (unsigned long long)(now - expired.last_heartbeat), sd->service_count,
+                            entry->instance_count);
 
                 if (j < entry->instance_count - 1) {
                     entry->instances[j] = entry->instances[entry->instance_count - 1];
                 }
-                __builtin_memset(&entry->instances[entry->instance_count - 1], 0, sizeof(sd_instance_t));
+                __builtin_memset(&entry->instances[entry->instance_count - 1], 0,
+                                 sizeof(sd_instance_t));
                 entry->instance_count--;
                 sd->stats.expirations++;
                 changed = true;
@@ -180,21 +173,19 @@ static void expire_stale_instances(sd_internal_t *sd)
                 if (i < sd->service_count - 1) {
                     sd->services[i] = sd->services[sd->service_count - 1];
                 }
-                __builtin_memset(&sd->services[sd->service_count - 1], 0, sizeof(sd_service_entry_t));
+                __builtin_memset(&sd->services[sd->service_count - 1], 0,
+                                 sizeof(sd_service_entry_t));
                 sd->service_count--;
                 changed = true;
                 i--;
             }
         }
     }
-    /* 有实例/服务被移除时，将变更持久化到介质（shm 后端 no-op） */
+
     if (changed && sd->backend)
         sd->backend->commit(sd, NULL);
 }
 
-/* ==================== 后端抽象（多后端注册中心） ==================== */
-
-/* 注册表变更通用逻辑（shm/file 后端共用）：新增或更新服务实例 */
 static airy_err_t sd_registry_add_instance(sd_internal_t *sd, const char *name, const char *type,
                                            const sd_instance_t *inst, const char *tags,
                                            const char *deps)
@@ -225,10 +216,9 @@ static airy_err_t sd_registry_add_instance(sd_internal_t *sd, const char *name, 
     if (inst_idx >= 0) {
         __builtin_memcpy(&entry->instances[inst_idx], inst, sizeof(sd_instance_t));
         entry->instances[inst_idx].last_heartbeat = airy_time_ms();
-        entry->instances[inst_idx].register_time =
-            entry->instances[inst_idx].register_time > 0
-                ? entry->instances[inst_idx].register_time
-                : airy_time_ms();
+        entry->instances[inst_idx].register_time = entry->instances[inst_idx].register_time > 0 ?
+                                                       entry->instances[inst_idx].register_time :
+                                                       airy_time_ms();
     } else {
         if (entry->instance_count >= SD_MAX_INSTANCES)
             return AIRY_ENOMEM;
@@ -252,7 +242,6 @@ static airy_err_t sd_registry_add_instance(sd_internal_t *sd, const char *name, 
     return AIRY_SUCCESS;
 }
 
-/* 注册表变更通用逻辑：移除服务实例（out_removed 可为 NULL） */
 static airy_err_t sd_registry_remove_instance(sd_internal_t *sd, const char *name,
                                               const char *instance_id, sd_instance_t *out_removed)
 {
@@ -280,8 +269,6 @@ static airy_err_t sd_registry_remove_instance(sd_internal_t *sd, const char *nam
         *out_removed = removed;
     return AIRY_SUCCESS;
 }
-
-/* ---------- shm 后端：内存注册表（默认） ---------- */
 
 static airy_err_t shm_init(sd_internal_t *sd)
 {
@@ -364,16 +351,13 @@ static const sd_backend_t sd_backend_shm = {
 #ifdef AIRY_HAS_CJSON
 #include <cjson/cJSON.h>
 
-/* ---------- file 后端：JSON 文件注册表（$AIRY_HOME/state/sd/） ---------- */
-
-/* 服务名 → 安全文件名（把路径分隔符等不安全字符替换为 '_'） */
 static void sd_safe_filename(const char *name, char *out, size_t out_sz)
 {
     size_t i = 0;
     while (*name && i + 1 < out_sz) {
         char c = *name++;
-        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-            (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_') {
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+            c == '.' || c == '-' || c == '_') {
             out[i++] = c;
         } else {
             out[i++] = '_';
@@ -382,7 +366,6 @@ static void sd_safe_filename(const char *name, char *out, size_t out_sz)
     out[i] = '\0';
 }
 
-/* 目录：$AIRY_HOME/state/sd（无 AIRY_HOME 时回退到相对路径 state/sd） */
 static void sd_file_dir(char *buf, size_t size)
 {
     const char *home = airy_home_dir();
@@ -392,7 +375,6 @@ static void sd_file_dir(char *buf, size_t size)
         snprintf(buf, size, "%s/state/sd", home);
 }
 
-/* 服务文件路径：$AIRY_HOME/state/sd/<name>.json */
 static void sd_file_path(const char *name, char *buf, size_t size)
 {
     char dir[512], safe[SD_MAX_NAME_LEN];
@@ -401,7 +383,6 @@ static void sd_file_path(const char *name, char *buf, size_t size)
     snprintf(buf, size, "%s/%s.json", dir, safe);
 }
 
-/* 文件名 → 服务名（去掉 .json 后缀；仅用于与注册表内 name 匹配） */
 static void sd_file_name_from_path(const char *path, char *out, size_t out_sz)
 {
     size_t i = 0;
@@ -411,7 +392,6 @@ static void sd_file_name_from_path(const char *path, char *out, size_t out_sz)
     out[i] = '\0';
 }
 
-/* 序列化单个服务条目到 JSON 文件（先写临时文件再 rename，避免读到半株文件） */
 static airy_err_t sd_file_write_service(const sd_service_entry_t *entry)
 {
     char dir[512], path[512];
@@ -474,7 +454,6 @@ static airy_err_t sd_file_write_service(const sd_service_entry_t *entry)
     return AIRY_SUCCESS;
 }
 
-/* 从 JSON 文件读取单个服务条目（文件不存在返回 AIRY_ENOENT） */
 static airy_err_t sd_file_read_service(const char *name, sd_service_entry_t *out)
 {
     char path[512];
@@ -583,7 +562,6 @@ static airy_err_t sd_file_read_service(const char *name, sd_service_entry_t *out
     return AIRY_SUCCESS;
 }
 
-/* file 后端：从介质刷新工作副本（name=NULL 全量扫描目录） */
 static airy_err_t file_refresh(sd_internal_t *sd, const char *name)
 {
     if (name) {
@@ -629,7 +607,6 @@ static airy_err_t file_refresh(sd_internal_t *sd, const char *name)
     return AIRY_SUCCESS;
 }
 
-/* file 后端：将工作副本持久化到介质（name=NULL 全量写入） */
 static airy_err_t file_commit(sd_internal_t *sd, const char *name)
 {
     if (name) {
@@ -683,7 +660,7 @@ static airy_err_t file_deregister(sd_internal_t *sd, const char *name, const cha
     if (idx < 0)
         return AIRY_SUCCESS;
     if (sd->services[idx].instance_count == 0) {
-        /* 服务无剩余实例：删除其文件 */
+
         char path[512];
         sd_file_path(name, path, sizeof(path));
         remove(path);
@@ -707,7 +684,7 @@ static airy_err_t file_deregister_all(sd_internal_t *sd, const char *name)
 
 static airy_err_t file_lookup(sd_internal_t *sd, const char *name, sd_service_entry_t *out)
 {
-    /* 先扫描介质刷新工作副本，再从中返回条目 */
+
     file_refresh(sd, name);
     int32_t svc_idx = find_service_index(sd, name);
     if (svc_idx < 0)
@@ -741,8 +718,6 @@ static const sd_backend_t sd_backend_file = {
 };
 
 #endif /* AIRY_HAS_CJSON */
-
-/* 后端选择：AIRY_SD_BACKEND=file|shm（默认 shm）；无 cJSON 时仅有 shm 可用 */
 static const sd_backend_t *sd_backend_select(void)
 {
 #ifdef AIRY_HAS_CJSON
@@ -753,10 +728,8 @@ static const sd_backend_t *sd_backend_select(void)
     return &sd_backend_shm;
 }
 
-/* ==================== 负载均衡选择 ==================== */
-
 static airy_err_t lb_round_robin(sd_internal_t *sd, const sd_service_entry_t *entry,
-                                      sd_instance_t *result)
+                                 sd_instance_t *result)
 {
     if (entry->instance_count == 0) {
         AIRY_ERROR(AIRY_ENOENT, "service_discovery: endpoint not found");
@@ -861,9 +834,9 @@ static airy_err_t lb_least_load(const sd_service_entry_t *entry, sd_instance_t *
         if (!entry->instances[i].healthy)
             continue;
         uint32_t load =
-            entry->instances[i].max_connections > 0
-                ? entry->instances[i].active_connections * 100 / entry->instances[i].max_connections
-                : 0;
+            entry->instances[i].max_connections > 0 ?
+                entry->instances[i].active_connections * 100 / entry->instances[i].max_connections :
+                0;
         if (load < min_load) {
             min_load = load;
             best_idx = (int32_t)i;
@@ -875,8 +848,6 @@ static airy_err_t lb_least_load(const sd_service_entry_t *entry, sd_instance_t *
     __builtin_memcpy(result, &entry->instances[best_idx], sizeof(sd_instance_t));
     return AIRY_SUCCESS;
 }
-
-/* ==================== 公共API实现 ==================== */
 
 AIRY_API sd_config_t sd_create_default_config(void)
 {
@@ -917,7 +888,6 @@ AIRY_API service_discovery_t sd_create(const sd_config_t *config)
     sd->shm_ptr = NULL;
     sd->is_shm_owner = false;
 
-    /* 选择并初始化注册中心后端（AIRY_SD_BACKEND=file|shm，默认 shm） */
     sd->backend = sd_backend_select();
     if (sd->backend->init(sd) != AIRY_SUCCESS) {
         airy_mtx_destroy(&sd->mutex);
@@ -926,9 +896,8 @@ AIRY_API service_discovery_t sd_create(const sd_config_t *config)
     }
 
     SD_LOG_INFO("CREATE (heartbeat=%ums expire=%ums lb=%s backend=%s)",
-             sd->config.heartbeat_interval_ms, sd->config.expire_timeout_ms,
-             sd_lb_strategy_to_string(sd->config.default_lb_strategy),
-             sd->backend->name);
+                sd->config.heartbeat_interval_ms, sd->config.expire_timeout_ms,
+                sd_lb_strategy_to_string(sd->config.default_lb_strategy), sd->backend->name);
     return (service_discovery_t)sd;
 }
 
@@ -972,8 +941,8 @@ AIRY_API airy_err_t sd_start(service_discovery_t sd_handle)
     sd->running = true;
     airy_mtx_unlock(&sd->mutex);
 
-    SD_LOG_INFO("START (heartbeat=%ums expire=%ums)",
-             sd->config.heartbeat_interval_ms, sd->config.expire_timeout_ms);
+    SD_LOG_INFO("START (heartbeat=%ums expire=%ums)", sd->config.heartbeat_interval_ms,
+                sd->config.expire_timeout_ms);
     return AIRY_SUCCESS;
 }
 
@@ -992,11 +961,9 @@ AIRY_API airy_err_t sd_stop(service_discovery_t sd_handle)
     return AIRY_SUCCESS;
 }
 
-/* ==================== 服务注册 ==================== */
-
 AIRY_API airy_err_t sd_register(service_discovery_t sd_handle, const char *service_name,
-                                        const char *service_type, const sd_instance_t *instance,
-                                        const char *tags, const char *dependencies)
+                                const char *service_type, const sd_instance_t *instance,
+                                const char *tags, const char *dependencies)
 {
     if (!sd_handle || !service_name || !service_type || !instance)
         return AIRY_EINVAL;
@@ -1004,8 +971,8 @@ AIRY_API airy_err_t sd_register(service_discovery_t sd_handle, const char *servi
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
     airy_mtx_lock(&sd->mutex);
-    airy_err_t err = sd->backend->register_service(sd, service_name, service_type,
-                                                   instance, tags, dependencies);
+    airy_err_t err =
+        sd->backend->register_service(sd, service_name, service_type, instance, tags, dependencies);
     airy_mtx_unlock(&sd->mutex);
 
     if (err != AIRY_SUCCESS) {
@@ -1017,15 +984,14 @@ AIRY_API airy_err_t sd_register(service_discovery_t sd_handle, const char *servi
     notify_event(sd, SD_EVENT_REGISTERED, service_name, instance);
 
     SD_LOG_INFO("REGISTER service='%s' instance='%s' type='%s' "
-             "endpoint='%s' (total_svcs=%u total_insts=%u)",
-             service_name, instance->instance_id, service_type,
-             instance->endpoint, sd->service_count,
-             sd->stats.active_instances);
+                "endpoint='%s' (total_svcs=%u total_insts=%u)",
+                service_name, instance->instance_id, service_type, instance->endpoint,
+                sd->service_count, sd->stats.active_instances);
     return AIRY_SUCCESS;
 }
 
 AIRY_API airy_err_t sd_deregister(service_discovery_t sd_handle, const char *service_name,
-                                          const char *instance_id)
+                                  const char *instance_id)
 {
     if (!sd_handle || !service_name || !instance_id)
         return AIRY_EINVAL;
@@ -1033,7 +999,7 @@ AIRY_API airy_err_t sd_deregister(service_discovery_t sd_handle, const char *ser
     sd_internal_t *sd = (sd_internal_t *)sd_handle;
 
     airy_mtx_lock(&sd->mutex);
-    /* 先捕获被移除实例，供回调与日志使用 */
+
     sd_instance_t removed;
     __builtin_memset(&removed, 0, sizeof(removed));
     int32_t svc_idx = find_service_index(sd, service_name);
@@ -1051,14 +1017,12 @@ AIRY_API airy_err_t sd_deregister(service_discovery_t sd_handle, const char *ser
     notify_event(sd, SD_EVENT_DEREGISTERED, service_name, &removed);
 
     SD_LOG_INFO("DEREGISTER service='%s' instance='%s' "
-             "(total_svcs=%u total_insts=%u)",
-             service_name, instance_id,
-             sd->service_count, sd->stats.active_instances);
+                "(total_svcs=%u total_insts=%u)",
+                service_name, instance_id, sd->service_count, sd->stats.active_instances);
     return AIRY_SUCCESS;
 }
 
-AIRY_API airy_err_t sd_deregister_all(service_discovery_t sd_handle,
-                                              const char *service_name)
+AIRY_API airy_err_t sd_deregister_all(service_discovery_t sd_handle, const char *service_name)
 {
     if (!sd_handle || !service_name)
         return AIRY_EINVAL;
@@ -1076,11 +1040,8 @@ AIRY_API airy_err_t sd_deregister_all(service_discovery_t sd_handle,
     return AIRY_SUCCESS;
 }
 
-/* ==================== 服务发现 ==================== */
-
 AIRY_API airy_err_t sd_discover(service_discovery_t sd_handle, const char *service_name,
-                                        sd_instance_t *instances, uint32_t max_count,
-                                        uint32_t *found_count)
+                                sd_instance_t *instances, uint32_t max_count, uint32_t *found_count)
 {
     if (!sd_handle || !service_name || !instances || !found_count)
         return AIRY_EINVAL;
@@ -1089,7 +1050,6 @@ AIRY_API airy_err_t sd_discover(service_discovery_t sd_handle, const char *servi
 
     airy_mtx_lock(&sd->mutex);
 
-    /* 先刷新目标服务的工作副本（file 后端读文件；shm 后端 no-op） */
     sd->backend->refresh(sd, service_name);
     expire_stale_instances(sd);
 
@@ -1118,10 +1078,9 @@ AIRY_API airy_err_t sd_discover(service_discovery_t sd_handle, const char *servi
     return AIRY_SUCCESS;
 }
 
-AIRY_API airy_err_t sd_discover_by_type(service_discovery_t sd_handle,
-                                                const char *service_type,
-                                                sd_service_entry_t *entries, uint32_t max_count,
-                                                uint32_t *found_count)
+AIRY_API airy_err_t sd_discover_by_type(service_discovery_t sd_handle, const char *service_type,
+                                        sd_service_entry_t *entries, uint32_t max_count,
+                                        uint32_t *found_count)
 {
     if (!sd_handle || !service_type || !entries || !found_count)
         return AIRY_EINVAL;
@@ -1130,7 +1089,6 @@ AIRY_API airy_err_t sd_discover_by_type(service_discovery_t sd_handle,
 
     airy_mtx_lock(&sd->mutex);
 
-    /* 全量刷新工作副本（file 后端扫描目录；shm 后端 no-op） */
     sd->backend->refresh(sd, NULL);
     expire_stale_instances(sd);
 
@@ -1151,8 +1109,8 @@ AIRY_API airy_err_t sd_discover_by_type(service_discovery_t sd_handle,
 }
 
 AIRY_API airy_err_t sd_discover_by_tags(service_discovery_t sd_handle, const char *tags,
-                                                sd_service_entry_t *entries, uint32_t max_count,
-                                                uint32_t *found_count)
+                                        sd_service_entry_t *entries, uint32_t max_count,
+                                        uint32_t *found_count)
 {
     if (!sd_handle || !tags || !entries || !found_count)
         return AIRY_EINVAL;
@@ -1202,9 +1160,8 @@ AIRY_API airy_err_t sd_discover_by_tags(service_discovery_t sd_handle, const cha
     return AIRY_SUCCESS;
 }
 
-AIRY_API airy_err_t sd_select_instance(service_discovery_t sd_handle,
-                                               const char *service_name, sd_lb_strategy_t strategy,
-                                               sd_instance_t *instance)
+AIRY_API airy_err_t sd_select_instance(service_discovery_t sd_handle, const char *service_name,
+                                       sd_lb_strategy_t strategy, sd_instance_t *instance)
 {
     if (!sd_handle || !service_name || !instance)
         return AIRY_EINVAL;
@@ -1255,10 +1212,8 @@ AIRY_API airy_err_t sd_select_instance(service_discovery_t sd_handle,
     return err;
 }
 
-/* ==================== 心跳与健康 ==================== */
-
 AIRY_API airy_err_t sd_heartbeat(service_discovery_t sd_handle, const char *service_name,
-                                         const char *instance_id)
+                                 const char *instance_id)
 {
     if (!sd_handle || !service_name || !instance_id)
         return AIRY_EINVAL;
@@ -1291,9 +1246,8 @@ AIRY_API airy_err_t sd_heartbeat(service_discovery_t sd_handle, const char *serv
     return AIRY_SUCCESS;
 }
 
-AIRY_API airy_err_t sd_update_health(service_discovery_t sd_handle,
-                                             const char *service_name, const char *instance_id,
-                                             bool healthy)
+AIRY_API airy_err_t sd_update_health(service_discovery_t sd_handle, const char *service_name,
+                                     const char *instance_id, bool healthy)
 {
     if (!sd_handle || !service_name || !instance_id)
         return AIRY_EINVAL;
@@ -1339,9 +1293,8 @@ AIRY_API airy_err_t sd_update_health(service_discovery_t sd_handle,
     return AIRY_SUCCESS;
 }
 
-AIRY_API airy_err_t sd_update_connections(service_discovery_t sd_handle,
-                                                  const char *service_name, const char *instance_id,
-                                                  uint32_t active_connections)
+AIRY_API airy_err_t sd_update_connections(service_discovery_t sd_handle, const char *service_name,
+                                          const char *instance_id, uint32_t active_connections)
 {
     if (!sd_handle || !service_name || !instance_id)
         return AIRY_EINVAL;
@@ -1373,11 +1326,8 @@ AIRY_API airy_err_t sd_update_connections(service_discovery_t sd_handle,
     return AIRY_SUCCESS;
 }
 
-/* ==================== 依赖管理 ==================== */
-
-AIRY_API airy_err_t sd_get_dependencies(service_discovery_t sd_handle,
-                                                const char *service_name, char *dependencies,
-                                                size_t max_len)
+AIRY_API airy_err_t sd_get_dependencies(service_discovery_t sd_handle, const char *service_name,
+                                        char *dependencies, size_t max_len)
 {
     if (!sd_handle || !service_name || !dependencies)
         return AIRY_EINVAL;
@@ -1401,9 +1351,8 @@ AIRY_API airy_err_t sd_get_dependencies(service_discovery_t sd_handle,
     return AIRY_SUCCESS;
 }
 
-AIRY_API airy_err_t sd_check_dependencies(service_discovery_t sd_handle,
-                                                  const char *service_name, char *missing_deps,
-                                                  size_t max_len)
+AIRY_API airy_err_t sd_check_dependencies(service_discovery_t sd_handle, const char *service_name,
+                                          char *missing_deps, size_t max_len)
 {
     if (!sd_handle || !service_name)
         return AIRY_EINVAL;
@@ -1412,7 +1361,6 @@ AIRY_API airy_err_t sd_check_dependencies(service_discovery_t sd_handle,
 
     airy_mtx_lock(&sd->mutex);
 
-    /* 依赖检查需跨服务，先全量刷新工作副本 */
     sd->backend->refresh(sd, NULL);
 
     int32_t svc_idx = find_service_index(sd, service_name);
@@ -1468,11 +1416,8 @@ AIRY_API airy_err_t sd_check_dependencies(service_discovery_t sd_handle,
     return missing_len > 0 ? DAEMON_EDEPEND : AIRY_SUCCESS;
 }
 
-/* ==================== 事件与统计 ==================== */
-
 AIRY_API airy_err_t sd_register_event_callback(service_discovery_t sd_handle,
-                                                       sd_event_callback_t callback,
-                                                       void *user_data)
+                                               sd_event_callback_t callback, void *user_data)
 {
     if (!sd_handle || !callback)
         return AIRY_EINVAL;
@@ -1547,8 +1492,6 @@ AIRY_API const char *sd_lb_strategy_to_string(sd_lb_strategy_t strategy)
     return strategy_strings[strategy];
 }
 
-/* ==================== C-L08: 统计摘要 ==================== */
-
 AIRY_API void sd_dump_stats(service_discovery_t sd_handle)
 {
     if (!sd_handle) {
@@ -1569,11 +1512,11 @@ AIRY_API void sd_dump_stats(service_discovery_t sd_handle)
         stats.active_instances += sd->services[i].instance_count;
     }
 
-    /* 计算健康实例数 */
     uint32_t healthy_instances = 0;
     for (uint32_t i = 0; i < sd->service_count; i++) {
         for (uint32_t j = 0; j < sd->services[i].instance_count; j++) {
-            if (sd->services[i].instances[j].healthy) healthy_instances++;
+            if (sd->services[i].instances[j].healthy)
+                healthy_instances++;
         }
     }
 
@@ -1584,13 +1527,9 @@ AIRY_API void sd_dump_stats(service_discovery_t sd_handle)
                 "discoveries=%llu heartbeats=%llu "
                 "expirations=%llu lb_selections=%llu "
                 "running=%s",
-                stats.active_services, stats.active_instances,
-                healthy_instances,
-                (unsigned long long)stats.registrations,
-                (unsigned long long)stats.deregistrations,
-                (unsigned long long)stats.discoveries,
-                (unsigned long long)stats.heartbeats,
-                (unsigned long long)stats.expirations,
-                (unsigned long long)stats.lb_selections,
+                stats.active_services, stats.active_instances, healthy_instances,
+                (unsigned long long)stats.registrations, (unsigned long long)stats.deregistrations,
+                (unsigned long long)stats.discoveries, (unsigned long long)stats.heartbeats,
+                (unsigned long long)stats.expirations, (unsigned long long)stats.lb_selections,
                 sd->running ? "yes" : "no");
 }

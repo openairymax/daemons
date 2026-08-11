@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file think_service.c
  * @brief 双思考系统服务实现（Thinkdual: t2/t1-f/t1-p + dual_coordinate）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 设计说明：
  * - 承载 CoreLoopThree 认知引擎（airy_cognition_*），经 llm_svc_adapter
@@ -33,50 +33,40 @@
  * 真实 LLM 规划/生成仍由 engine 的 llm_adapter 路径完成。 */
 extern airy_plan_strategy_t *airy_plan_reactive_create(void *llm);
 
-/* ---------- 常量 ---------- */
-
 #define THINK_DEFAULT_TIMEOUT_MS 120000u
 #define THINK_DEFAULT_MAX_EVENTS 64u
 #define THINK_MAX_EVENT_DATA_LEN 1024u
 
-/* ---------- 思考事件（环形缓冲） ---------- */
-
 typedef struct {
-    int level;       /* 0=实时，1=轮次内，2=跨轮次 */
+    int level;
     char module[64];
     char event[96];
     char data[THINK_MAX_EVENT_DATA_LEN];
 } think_feedback_event_t;
 
-/* ---------- 服务结构 ---------- */
-
 struct think_service {
-    airy_cognition_engine_t *engine;   /* 认知引擎（GCCP+GRAD 双思考主体） */
-    llm_svc_adapter_t *llm_adapter;    /* LLM IPC 适配器（直连 llm.sock） */
+    airy_cognition_engine_t *engine;
+    llm_svc_adapter_t *llm_adapter;
 
-    char think2_slow_model[128];   /* t2 慢思考模型（GRAD 模型 A：生成计划） */
-    char think1_fast_model[128];   /* t1-f 快思考模型（GRAD 模型 B：语境终裁） */
-    char think1_prof_model[128];   /* t1-p 专业思考模型（GRAD 模型 C：四验专家） */
+    char think2_slow_model[128];
+    char think1_fast_model[128];
+    char think1_prof_model[128];
     uint32_t process_timeout_ms;
 
-    /* 思考事件缓冲 */
     think_feedback_event_t *events;
     uint32_t event_capacity;
     uint32_t event_count;
     uint32_t event_head;
 
-    uint32_t dual_invocations;   /* 双思考触发次数 */
-    uint32_t dual_corrections;   /* GRAD 修正次数 */
+    uint32_t dual_invocations;
+    uint32_t dual_corrections;
     airy_mtx_t lock;
 };
 
-/* ---------- 思考事件回调（cognition engine → think_service） ---------- */
-
-/* 前向声明：process / stats_json 均需同步 engine 真实统计 */
 static void think_sync_engine_stats(think_service_t *svc);
 
-static void think_feedback_cb(int level, const char *module, const char *event,
-                              const char *data, size_t data_len, void *user_data)
+static void think_feedback_cb(int level, const char *module, const char *event, const char *data,
+                              size_t data_len, void *user_data)
 {
     think_service_t *svc = (think_service_t *)user_data;
     if (!svc)
@@ -87,14 +77,14 @@ static void think_feedback_cb(int level, const char *module, const char *event,
     slot->level = level;
     if (module)
         __builtin_memcpy(slot->module, module,
-                         (strlen(module) < sizeof(slot->module)) ? strlen(module) + 1
-                                                                  : sizeof(slot->module));
+                         (strlen(module) < sizeof(slot->module)) ? strlen(module) + 1 :
+                                                                   sizeof(slot->module));
     else
         slot->module[0] = '\0';
     if (event)
         __builtin_memcpy(slot->event, event,
-                         (strlen(event) < sizeof(slot->event)) ? strlen(event) + 1
-                                                               : sizeof(slot->event));
+                         (strlen(event) < sizeof(slot->event)) ? strlen(event) + 1 :
+                                                                 sizeof(slot->event));
     else
         slot->event[0] = '\0';
     if (data && data_len > 0) {
@@ -109,11 +99,9 @@ static void think_feedback_cb(int level, const char *module, const char *event,
         svc->event_count++;
     airy_mtx_unlock(&svc->lock);
 
-    SVC_LOG_DEBUG("ThinkDual feedback: level=%d module=%s event=%s", level,
-                  module ? module : "?", event ? event : "?");
+    SVC_LOG_DEBUG("ThinkDual feedback: level=%d module=%s event=%s", level, module ? module : "?",
+                  event ? event : "?");
 }
-
-/* ---------- 服务创建 ---------- */
 
 think_service_t *think_service_create(const think_service_config_t *config)
 {
@@ -123,31 +111,29 @@ think_service_t *think_service_create(const think_service_config_t *config)
 
     airy_mtx_init(&svc->lock);
 
-    /* 模型配置：NULL → provider 默认（llm_d global.default_model） */
     const char *s2 = config ? config->think2_slow_model : NULL;
     const char *verify = config ? config->think1_fast_model : NULL;
     const char *expert = config ? config->think1_prof_model : NULL;
     if (s2)
         __builtin_memcpy(svc->think2_slow_model, s2,
-                         (strlen(s2) < sizeof(svc->think2_slow_model))
-                             ? strlen(s2) + 1
-                             : sizeof(svc->think2_slow_model));
+                         (strlen(s2) < sizeof(svc->think2_slow_model)) ?
+                             strlen(s2) + 1 :
+                             sizeof(svc->think2_slow_model));
     if (verify)
         __builtin_memcpy(svc->think1_fast_model, verify,
-                         (strlen(verify) < sizeof(svc->think1_fast_model))
-                             ? strlen(verify) + 1
-                             : sizeof(svc->think1_fast_model));
+                         (strlen(verify) < sizeof(svc->think1_fast_model)) ?
+                             strlen(verify) + 1 :
+                             sizeof(svc->think1_fast_model));
     if (expert)
         __builtin_memcpy(svc->think1_prof_model, expert,
-                         (strlen(expert) < sizeof(svc->think1_prof_model))
-                             ? strlen(expert) + 1
-                             : sizeof(svc->think1_prof_model));
-    svc->process_timeout_ms = (config && config->process_timeout_ms > 0)
-                                  ? config->process_timeout_ms
-                                  : THINK_DEFAULT_TIMEOUT_MS;
-    uint32_t cap = (config && config->max_feedback_events > 0)
-                       ? config->max_feedback_events
-                       : THINK_DEFAULT_MAX_EVENTS;
+                         (strlen(expert) < sizeof(svc->think1_prof_model)) ?
+                             strlen(expert) + 1 :
+                             sizeof(svc->think1_prof_model));
+    svc->process_timeout_ms = (config && config->process_timeout_ms > 0) ?
+                                  config->process_timeout_ms :
+                                  THINK_DEFAULT_TIMEOUT_MS;
+    uint32_t cap = (config && config->max_feedback_events > 0) ? config->max_feedback_events :
+                                                                 THINK_DEFAULT_MAX_EVENTS;
     svc->event_capacity = cap;
     svc->events = (think_feedback_event_t *)AIRY_CALLOC(cap, sizeof(think_feedback_event_t));
     if (!svc->events) {
@@ -156,7 +142,6 @@ think_service_t *think_service_create(const think_service_config_t *config)
         AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "think event buffer alloc failed");
     }
 
-    /* 1. LLM IPC 适配器（直连 llm.sock，默认 socket 路径 airy_runtime_dir_socket） */
     llm_svc_adapter_config_t acfg;
     __builtin_memset(&acfg, 0, sizeof(acfg));
     acfg.request_timeout_ms = svc->process_timeout_ms;
@@ -203,7 +188,6 @@ think_service_t *think_service_create(const think_service_config_t *config)
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "cognition create failed");
     }
 
-    /* 3. 注入 LLM 适配器（首选路径：C-L02 P1.2.1） */
     airy_cognition_set_llm_adapter(svc->engine, svc->llm_adapter);
 
     /* 4. 注入 t2/t1-f/t1-p 三独立模型槽位（NULL → provider 默认）。
@@ -248,8 +232,6 @@ void think_service_destroy(think_service_t *svc)
     AIRY_FREE(svc);
 }
 
-/* ---------- 计划序列化（DAG → JSON） ---------- */
-
 static cJSON *think_plan_to_json(const airy_task_plan_t *plan)
 {
     if (!plan)
@@ -269,8 +251,7 @@ static cJSON *think_plan_to_json(const airy_task_plan_t *plan)
         cJSON_AddStringToObject(nj, "goal", n->task_node_goal ? n->task_node_goal : "");
         cJSON_AddStringToObject(nj, "handler",
                                 n->task_node_handler_name ? n->task_node_handler_name : "");
-        cJSON_AddStringToObject(nj, "role",
-                                n->task_node_agent_role ? n->task_node_agent_role : "");
+        cJSON_AddStringToObject(nj, "role", n->task_node_agent_role ? n->task_node_agent_role : "");
         cJSON *deps = cJSON_CreateArray();
         for (size_t d = 0; d < n->task_node_depends_count; d++) {
             if (n->task_node_depends_on && n->task_node_depends_on[d])
@@ -297,7 +278,7 @@ static cJSON *think_plan_to_json(const airy_task_plan_t *plan)
         cJSON_AddItemToArray(nodes, nj);
     }
     cJSON_AddItemToObject(root, "nodes", nodes);
-    /* 入口点数组（DAG 执行起点） */
+
     cJSON *entry = cJSON_CreateArray();
     for (size_t d = 0; d < plan->task_plan_entry_count; d++) {
         if (plan->task_plan_entry_points && plan->task_plan_entry_points[d])
@@ -306,8 +287,6 @@ static cJSON *think_plan_to_json(const airy_task_plan_t *plan)
     cJSON_AddItemToObject(root, "entry_points", entry);
     return root;
 }
-
-/* ---------- 核心处理 ---------- */
 
 int think_service_process(think_service_t *svc, const char *prompt,
                           think_process_result_t *out_result)
@@ -321,7 +300,6 @@ int think_service_process(think_service_t *svc, const char *prompt,
     if (plen == 0)
         return AIRY_ERR_INVALID_PARAM;
 
-    /* 引擎非线程安全：串行处理 */
     airy_mtx_lock(&svc->lock);
     svc->event_head = 0;
     svc->event_count = 0;
@@ -333,7 +311,7 @@ int think_service_process(think_service_t *svc, const char *prompt,
         int err_code = (int)err;
         airy_mtx_unlock(&svc->lock);
         SVC_LOG_ERROR("ThinkDual: cognition process failed (err=%d)", err_code);
-        /* 返回含错误码的 JSON 结果，便于上层定位（非桩，真实错误透传） */
+
         cJSON *root = cJSON_CreateObject();
         if (root) {
             cJSON *st = cJSON_CreateObject();
@@ -358,7 +336,6 @@ int think_service_process(think_service_t *svc, const char *prompt,
         return AIRY_ERR_UNKNOWN;
     }
 
-    /* 序列化结果 */
     cJSON *root = cJSON_CreateObject();
     if (!root) {
         airy_task_plan_free(plan);
@@ -370,7 +347,6 @@ int think_service_process(think_service_t *svc, const char *prompt,
     if (plan_json)
         cJSON_AddItemToObject(root, "plan", plan_json);
 
-    /* 思考事件 */
     cJSON *events_arr = cJSON_CreateArray();
     for (uint32_t i = 0; i < svc->event_count; i++) {
         const think_feedback_event_t *ev = &svc->events[i];
@@ -383,7 +359,6 @@ int think_service_process(think_service_t *svc, const char *prompt,
     }
     cJSON_AddItemToObject(root, "feedback", events_arr);
 
-    /* 统计（同步 engine 真实双思考修正次数） */
     think_sync_engine_stats(svc);
     cJSON *st = cJSON_CreateObject();
     cJSON_AddNumberToObject(st, "dual_invocations", svc->dual_invocations);
@@ -413,8 +388,6 @@ void think_result_free(think_process_result_t *res)
     res->json_len = 0;
 }
 
-/* ---------- 查询 ---------- */
-
 /* 从 engine 读取真实双思考统计（engine 内部 dual_think_corrections 更新点：
  * Phase 1 S1 预验证失败 / TC3 修正 / GRAD rejections），回填 svc 统计。 */
 static void think_sync_engine_stats(think_service_t *svc)
@@ -443,7 +416,6 @@ char *think_service_stats_json(think_service_t *svc)
     if (h != AIRY_SUCCESS || !health)
         return NULL;
 
-    /* 附加 think_d 自身统计 */
     cJSON *root = cJSON_Parse(health);
     AIRY_FREE(health);
     if (!root)

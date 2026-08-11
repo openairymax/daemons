@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_scheduler.c
  * @brief 调度服务单元测试
  * @details 测试调度服务的各个功能模块
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "scheduler_service.h"
@@ -67,7 +67,6 @@ int test_register_unregister_agent()
         return ret;
     }
 
-    // 注册 Agent
     agent_info_t agent1 = {.agent_id = "agent1",
                            .agent_name = "Agent 1",
                            .load_factor = 0.3,
@@ -83,7 +82,6 @@ int test_register_unregister_agent()
         return ret;
     }
 
-    // 注销 Agent
     ret = sched_service_unregister_agent(service, "agent1");
     if (ret != 0) {
         printf("Failed to unregister agent\n");

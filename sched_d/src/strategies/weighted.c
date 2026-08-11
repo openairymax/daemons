@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file weighted.c
  * @brief 加权调度策略实现（基于实际API定义）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "daemon_errors.h"
@@ -71,8 +71,6 @@ static int select_by_weight(weighted_data_t *data)
     }
     return (int)(data->agent_count - 1);
 }
-
-/* ==================== strategy_interface_t 实现 ==================== */
 
 static int weighted_create(const sched_config_t *manager __attribute__((unused)), void **out_data)
 {

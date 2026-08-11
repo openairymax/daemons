@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_info_service.c
  * @brief info_d 信息服务单元测试
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 通过将守护进程主实现（src/main.c）编译进本测试单元，
  * 从而可访问其 static 实现细节（环形缓冲、L2 方法处理器、分发入口）。
@@ -24,9 +24,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-/* ==================== 工具函数 ==================== */
-
-/* 初始化互斥锁（失败直接终止，避免 NDEBUG 下 assert 被编译掉导致未初始化锁） */
 static void init_lock(airy_mtx_t *lock)
 {
     if (airy_mtx_init(lock) != 0) {
@@ -35,7 +32,6 @@ static void init_lock(airy_mtx_t *lock)
     }
 }
 
-/* 创建 socketpair（失败直接终止） */
 static void make_sockpair(int sv[2])
 {
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) {
@@ -44,7 +40,6 @@ static void make_sockpair(int sv[2])
     }
 }
 
-/* 写入完整请求（失败直接终止） */
 static void write_all(int fd, const char *data)
 {
     size_t len = strlen(data);
@@ -54,8 +49,6 @@ static void write_all(int fd, const char *data)
     }
 }
 
-/* ==================== 环形历史缓冲行为 ==================== */
-
 static void test_history_ring_buffer(void)
 {
     printf("  test_history_ring_buffer...\n");
@@ -64,7 +57,6 @@ static void test_history_ring_buffer(void)
     AIRY_MEMSET(&svc, 0, sizeof(svc));
     init_lock(&svc.lock);
 
-    /* 记录 5 条后能按序读取 */
     for (int i = 1; i <= 5; i++) {
         system_info_snapshot_t snap;
         AIRY_MEMSET(&snap, 0, sizeof(snap));
@@ -77,7 +69,6 @@ static void test_history_ring_buffer(void)
     assert(svc.history_count == 5);
     assert(svc.history_head == 5);
 
-    /* 默认返回全部已记录条目，按时间升序 */
     cJSON *arr = info_d_build_history_result(&svc, NULL);
     assert(arr != NULL);
     assert(cJSON_GetArraySize(arr) == 5);
@@ -91,7 +82,6 @@ static void test_history_ring_buffer(void)
     (void)t4;
     cJSON_Delete(arr);
 
-    /* 参数 N=3 返回最近 3 条 */
     cJSON *params = cJSON_CreateObject();
     cJSON_AddNumberToObject(params, "N", 3);
     arr = info_d_build_history_result(&svc, params);
@@ -104,7 +94,6 @@ static void test_history_ring_buffer(void)
     cJSON_Delete(arr);
     cJSON_Delete(params);
 
-    /* 环形回绕：追加超过容量后仅保留最近 64 条 */
     for (int i = 6; i <= 130; i++) {
         system_info_snapshot_t snap;
         AIRY_MEMSET(&snap, 0, sizeof(snap));
@@ -125,7 +114,6 @@ static void test_history_ring_buffer(void)
     (void)wt;
     cJSON_Delete(arr);
 
-    /* N=0 返回空数组；N 超界截断为全部 */
     cJSON *params0 = cJSON_CreateObject();
     cJSON_AddNumberToObject(params0, "count", 0);
     arr = info_d_build_history_result(&svc, params0);
@@ -137,8 +125,6 @@ static void test_history_ring_buffer(void)
     printf("    PASSED\n");
 }
 
-/* ==================== 工具：构造最小可用测试服务 ==================== */
-
 static void test_svc_init(info_d_service_t *svc)
 {
     AIRY_MEMSET(svc, 0, sizeof(*svc));
@@ -147,7 +133,6 @@ static void test_svc_init(info_d_service_t *svc)
     svc->running = 1;
     svc->collect_running = 1;
 
-    /* 采集一条真实快照作为 latest */
     info_d_collect_system_info(&svc->latest_snapshot);
     svc->last_collect_time = svc->latest_snapshot.timestamp;
 }
@@ -157,7 +142,6 @@ static void test_svc_destroy(info_d_service_t *svc)
     airy_mtx_destroy(&svc->lock);
 }
 
-/* 从 socket 读取完整响应并解析为 cJSON（失败返回 NULL） */
 static cJSON *read_response(int fd)
 {
     char buf[16384];
@@ -168,7 +152,6 @@ static cJSON *read_response(int fd)
     return cJSON_Parse(buf);
 }
 
-/* 校验 JSON-RPC 2.0 响应骨架：jsonrpc=2.0 且 id 回显 */
 static cJSON *check_rpc_ok(const char *label, int fd, int expect_id)
 {
     cJSON *resp = read_response(fd);
@@ -185,8 +168,6 @@ static cJSON *check_rpc_ok(const char *label, int fd, int expect_id)
     return resp;
 }
 
-/* ==================== L2 方法响应格式 ==================== */
-
 static void test_system_method_response(void)
 {
     printf("  test_system_method_response...\n");
@@ -197,7 +178,6 @@ static void test_system_method_response(void)
     int sv[2];
     make_sockpair(sv);
 
-    /* 直接调用方法处理器 */
     handle_system(&svc, NULL, 42, sv[1]);
     close(sv[1]);
 
@@ -233,7 +213,6 @@ static void test_history_method_response(void)
     info_d_service_t svc;
     test_svc_init(&svc);
 
-    /* 预置 3 条历史记录 */
     for (int i = 0; i < 3; i++) {
         system_info_snapshot_t snap;
         AIRY_MEMSET(&snap, 0, sizeof(snap));
@@ -243,7 +222,6 @@ static void test_history_method_response(void)
         airy_mtx_unlock(&svc.lock);
     }
 
-    /* 无参数：返回全部 3 条 */
     int sv[2];
     make_sockpair(sv);
     handle_history(&svc, NULL, 7, sv[1]);
@@ -255,7 +233,6 @@ static void test_history_method_response(void)
     cJSON_Delete(resp);
     close(sv[0]);
 
-    /* 带参数 N=2：返回最近 2 条 */
     make_sockpair(sv);
     cJSON *params = cJSON_CreateObject();
     cJSON_AddNumberToObject(params, "N", 2);
@@ -313,8 +290,6 @@ static void test_health_method_response(void)
     printf("    PASSED\n");
 }
 
-/* ==================== 完整 JSON-RPC 分发路径 ==================== */
-
 static void test_request_dispatch(void)
 {
     printf("  test_request_dispatch...\n");
@@ -327,7 +302,6 @@ static void test_request_dispatch(void)
     make_sockpair(sv);
     write_all(sv[0], req);
 
-    /* info_d_handle_request 内部 recv → 分发 → 发送 → close(sv[1]) */
     info_d_handle_request(&svc, sv[1]);
 
     cJSON *resp = read_response(sv[0]);
@@ -345,7 +319,6 @@ static void test_request_dispatch(void)
     cJSON_Delete(resp);
     close(sv[0]);
 
-    /* 未知方法回落旧逻辑（仍返回合法 JSON 系统信息） */
     const char *unknown_req = "{\"jsonrpc\":\"2.0\",\"method\":\"nope\",\"id\":12}";
     make_sockpair(sv);
     write_all(sv[0], unknown_req);

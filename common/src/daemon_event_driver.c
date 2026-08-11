@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "daemon_event_driver.h"
 
 #include "jsonrpc_helpers.h"
@@ -125,14 +126,16 @@ static void on_health_timer(airy_event_loop_t *loop, uint64_t timer_id, void *us
 daemon_event_driver_t *daemon_event_driver_create(const daemon_event_config_t *config)
 {
     if (!config) {
-        SVC_LOG_ERROR("C-L02: EVENT-DRIVER: CREATE-FAIL null config, STACK: daemon_event_driver_create");
+        SVC_LOG_ERROR(
+            "C-L02: EVENT-DRIVER: CREATE-FAIL null config, STACK: daemon_event_driver_create");
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
     daemon_event_driver_t *driver =
         (daemon_event_driver_t *)AIRY_CALLOC(1, sizeof(daemon_event_driver_t));
     if (!driver) {
-        SVC_LOG_ERROR("C-L02: EVENT-DRIVER: CREATE-FAIL alloc driver, STACK: daemon_event_driver_create");
+        SVC_LOG_ERROR(
+            "C-L02: EVENT-DRIVER: CREATE-FAIL alloc driver, STACK: daemon_event_driver_create");
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
@@ -154,14 +157,18 @@ daemon_event_driver_t *daemon_event_driver_create(const daemon_event_config_t *c
         tp_config.idle_timeout_ms = 30000;
         driver->pool = thread_pool_create(&tp_config);
         if (!driver->pool) {
-            SVC_LOG_WARN("C-L02: EVENT-DRIVER: CREATE-WARN thread pool failed, STACK: daemon_event_driver_create");
+            SVC_LOG_WARN("C-L02: EVENT-DRIVER: CREATE-WARN thread pool failed, STACK: "
+                         "daemon_event_driver_create");
         }
     }
 
     if (config->use_jsonrpc) {
-        driver->dispatcher = method_dispatcher_create(16);
+        /* 32 个方法容量：cupolas_d 已注册 17 个（含 vault/net/entitlements 接线方法），
+         * 其余 daemon 均在 16 以内。此容量为上限保护，注册溢出会告警并拒绝。 */
+        driver->dispatcher = method_dispatcher_create(32);
         if (!driver->dispatcher) {
-            SVC_LOG_ERROR("C-L02: EVENT-DRIVER: CREATE-FAIL dispatcher, STACK: daemon_event_driver_create");
+            SVC_LOG_ERROR(
+                "C-L02: EVENT-DRIVER: CREATE-FAIL dispatcher, STACK: daemon_event_driver_create");
             if (driver->pool)
                 thread_pool_destroy(driver->pool);
             airy_event_loop_destroy(driver->loop);
@@ -184,9 +191,10 @@ daemon_event_driver_t *daemon_event_driver_create(const daemon_event_config_t *c
             airy_event_loop_add_timer(driver->loop, interval_ms, on_health_timer, driver);
     }
 
-    SVC_LOG_INFO("C-L02: EVENT-DRIVER: CREATE-OK max_events=%d pool=%s jsonrpc=%s health_check_interval=%ds",
-             max_events, driver->pool ? "on" : "off", driver->dispatcher ? "on" : "off",
-             driver->health_check_interval_sec);
+    SVC_LOG_INFO(
+        "C-L02: EVENT-DRIVER: CREATE-OK max_events=%d pool=%s jsonrpc=%s health_check_interval=%ds",
+        max_events, driver->pool ? "on" : "off", driver->dispatcher ? "on" : "off",
+        driver->health_check_interval_sec);
 
     return driver;
 }
@@ -209,8 +217,8 @@ int daemon_event_driver_add_server_fd(daemon_event_driver_t *driver, int fd)
 {
     if (!driver || fd < 0)
         return AIRY_ERR_INVALID_PARAM;
-    return airy_event_loop_add_fd_lt(driver->loop, fd, AIRY_EVENT_TYPE_READ,
-                                        on_server_fd_event, driver);
+    return airy_event_loop_add_fd_lt(driver->loop, fd, AIRY_EVENT_TYPE_READ, on_server_fd_event,
+                                     driver);
 }
 
 int daemon_event_driver_add_fd(daemon_event_driver_t *driver, int fd, uint32_t events,

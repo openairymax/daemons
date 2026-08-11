@@ -1,5 +1,6 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file daemon_degradation.h
  * @brief Daemon 层优雅降级处理器（SEC-14 合规）
@@ -40,9 +41,9 @@ extern "C" {
  * 保存原始缓存容量，以便恢复时还原。
  */
 typedef struct {
-    void *cache_handle;      /**< 缓存句柄（svc_cache_t *） */
-    size_t original_capacity; /**< 原始缓存容量 */
-    size_t reduced_capacity;  /**< 降级后缓存容量 */
+    void *cache_handle;
+    size_t original_capacity;
+    size_t reduced_capacity;
 } degrade_cache_ctx_t;
 
 /**
@@ -51,8 +52,8 @@ typedef struct {
  * 保存原始日志级别，以便恢复时还原。
  */
 typedef struct {
-    int original_log_level;  /**< 原始日志级别 */
-    int degraded_log_level;  /**< 降级后日志级别 */
+    int original_log_level;
+    int degraded_log_level;
 } degrade_log_ctx_t;
 
 /**
@@ -61,9 +62,9 @@ typedef struct {
  * 保存原始批次大小，以便恢复时还原。
  */
 typedef struct {
-    size_t *batch_size_ptr;      /**< 指向当前批次大小的指针 */
-    size_t original_batch_size;  /**< 原始批次大小 */
-    size_t reduced_batch_size;   /**< 降级后批次大小 */
+    size_t *batch_size_ptr;
+    size_t original_batch_size;
+    size_t reduced_batch_size;
 } degrade_batch_ctx_t;
 
 /**
@@ -72,7 +73,7 @@ typedef struct {
  * 控制新连接是否被接受。
  */
 typedef struct {
-    bool *reject_new_flag;  /**< 指向拒绝新连接标志的指针 */
+    bool *reject_new_flag;
 } degrade_conn_ctx_t;
 
 /* ============================================================================
@@ -89,8 +90,8 @@ typedef struct {
  * @param original_capacity 原始缓存容量
  * @return 降级处理器指针（静态分配，调用者不持有所有权），失败返回 NULL
  */
-degradation_handler_t *daemon_degradation_register_cache(
-    void *cache_handle, size_t original_capacity);
+degradation_handler_t *daemon_degradation_register_cache(void *cache_handle,
+                                                         size_t original_capacity);
 
 /**
  * @brief 注册日志级别降级处理器
@@ -101,8 +102,7 @@ degradation_handler_t *daemon_degradation_register_cache(
  * @param original_log_level 原始日志级别
  * @return 降级处理器指针（静态分配），失败返回 NULL
  */
-degradation_handler_t *daemon_degradation_register_log_level(
-    int original_log_level);
+degradation_handler_t *daemon_degradation_register_log_level(int original_log_level);
 
 /**
  * @brief 注册批处理大小降级处理器
@@ -114,8 +114,8 @@ degradation_handler_t *daemon_degradation_register_log_level(
  * @param original_batch_size 原始批次大小
  * @return 降级处理器指针（静态分配），失败返回 NULL
  */
-degradation_handler_t *daemon_degradation_register_batch(
-    size_t *batch_size_ptr, size_t original_batch_size);
+degradation_handler_t *daemon_degradation_register_batch(size_t *batch_size_ptr,
+                                                         size_t original_batch_size);
 
 /**
  * @brief 注册新连接拒绝降级处理器
@@ -126,8 +126,7 @@ degradation_handler_t *daemon_degradation_register_batch(
  * @param reject_flag 指向拒绝标志的指针（运行时可变）
  * @return 降级处理器指针（静态分配），失败返回 NULL
  */
-degradation_handler_t *daemon_degradation_register_reject_conn(
-    bool *reject_flag);
+degradation_handler_t *daemon_degradation_register_reject_conn(bool *reject_flag);
 
 /**
  * @brief 注册自定义降级处理器
@@ -142,8 +141,7 @@ degradation_handler_t *daemon_degradation_register_reject_conn(
  * @return 降级处理器指针（静态分配），失败返回 NULL
  */
 degradation_handler_t *daemon_degradation_register_custom(
-    const char *feature_name,
-    watermark_level_t trigger_level,
+    const char *feature_name, watermark_level_t trigger_level,
     int (*on_degrade)(degradation_handler_t *, watermark_level_t, watermark_level_t),
     int (*on_restore)(degradation_handler_t *, watermark_level_t, watermark_level_t),
     void *context);

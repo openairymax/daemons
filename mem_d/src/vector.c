@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file vector.c
  * @brief Memory 服务向量检索实现（自研 TF-IDF，无外部依赖）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 设计要点：
  * - tokenizer：英文按小写单词切分（可选去停用词），中文按单字 + 相邻双字 bigram 切分，
@@ -24,27 +24,23 @@
 #include <stdio.h>
 #include <string.h>
 
-/* 最大英文单词长度（超出截断，防止畸形长词拖慢检索） */
 #define MEM_VEC_MAX_WORD_LEN 63
-/* 向量初始容量与扩容因子 */
+
 #define MEM_VEC_INIT_CAPACITY 8
-/* 哈希表状态：空闲 / 活跃 / 墓碑 */
+
 #define MEM_DF_STATE_FREE 0
 #define MEM_DF_STATE_USED 1
 #define MEM_DF_STATE_TOMB 2
 
-/* ==================== 英文停用词表（小写） ==================== */
-
 static const char *const mem_stopwords[] = {
-    "a", "am", "an", "and", "are", "as", "at", "be", "been", "being",
-    "but", "by", "can", "could", "did", "do", "does", "for", "from",
-    "had", "has", "have", "he", "her", "his", "i", "if", "in", "into",
-    "is", "it", "its", "may", "me", "might", "must", "my", "no", "not",
-    "of", "on", "or", "our", "she", "should", "so", "than", "that",
-    "the", "their", "them", "then", "there", "these", "they", "this",
-    "those", "to", "too", "us", "was", "we", "were", "what", "when",
-    "where", "which", "who", "will", "with", "would", "you", "your",
-    "s", "t", "m", "d", "re", "ll", "ve",
+    "a",     "am",   "an",    "and",   "are",    "as",    "at",    "be",   "been", "being",
+    "but",   "by",   "can",   "could", "did",    "do",    "does",  "for",  "from", "had",
+    "has",   "have", "he",    "her",   "his",    "i",     "if",    "in",   "into", "is",
+    "it",    "its",  "may",   "me",    "might",  "must",  "my",    "no",   "not",  "of",
+    "on",    "or",   "our",   "she",   "should", "so",    "than",  "that", "the",  "their",
+    "them",  "then", "there", "these", "they",   "this",  "those", "to",   "too",  "us",
+    "was",   "we",   "were",  "what",  "when",   "where", "which", "who",  "will", "with",
+    "would", "you",  "your",  "s",     "t",      "m",     "d",     "re",   "ll",   "ve",
 };
 
 int mem_vec_is_stopword(const char *term)
@@ -59,9 +55,6 @@ int mem_vec_is_stopword(const char *term)
     return 0;
 }
 
-/* ==================== UTF-8 辅助 ==================== */
-
-/* 返回引导字节对应的 UTF-8 序列长度（1-4），非法字节返回 0 */
 static int mem_utf8_seq_len(unsigned char c)
 {
     if (c < 0x80)
@@ -75,34 +68,27 @@ static int mem_utf8_seq_len(unsigned char c)
     return 0;
 }
 
-/* 将 len 字节的 UTF-8 序列解码为 Unicode 码点 */
 static uint32_t mem_utf8_decode(const unsigned char *s, int len)
 {
     switch (len) {
     case 2:
         return ((uint32_t)(s[0] & 0x1F) << 6) | (uint32_t)(s[1] & 0x3F);
     case 3:
-        return ((uint32_t)(s[0] & 0x0F) << 12) |
-               ((uint32_t)(s[1] & 0x3F) << 6) | (uint32_t)(s[2] & 0x3F);
+        return ((uint32_t)(s[0] & 0x0F) << 12) | ((uint32_t)(s[1] & 0x3F) << 6) |
+               (uint32_t)(s[2] & 0x3F);
     case 4:
-        return ((uint32_t)(s[0] & 0x07) << 18) |
-               ((uint32_t)(s[1] & 0x3F) << 12) |
+        return ((uint32_t)(s[0] & 0x07) << 18) | ((uint32_t)(s[1] & 0x3F) << 12) |
                ((uint32_t)(s[2] & 0x3F) << 6) | (uint32_t)(s[3] & 0x3F);
     default:
         return 0;
     }
 }
 
-/* 判断码点是否为 CJK 表意文字（含扩展区） */
 static int mem_utf8_is_cjk(uint32_t cp)
 {
-    return (cp >= 0x3400u && cp <= 0x4DBFu) ||  /* CJK 扩展 A */
-           (cp >= 0x4E00u && cp <= 0x9FFFu) ||  /* CJK 统一表意文字 */
-           (cp >= 0xF900u && cp <= 0xFAFFu) ||  /* CJK 兼容表意文字 */
-           (cp >= 0x20000u && cp <= 0x2FA1Fu);  /* CJK 扩展 B-F */
+    return (cp >= 0x3400u && cp <= 0x4DBFu) || (cp >= 0x4E00u && cp <= 0x9FFFu) ||
+           (cp >= 0xF900u && cp <= 0xFAFFu) || (cp >= 0x20000u && cp <= 0x2FA1Fu);
 }
-
-/* ==================== 词频向量 ==================== */
 
 static int mem_vec_ensure_capacity(mem_tfidf_vec_t *v, size_t need)
 {
@@ -111,7 +97,7 @@ static int mem_vec_ensure_capacity(mem_tfidf_vec_t *v, size_t need)
     size_t cap = v->term_capacity ? v->term_capacity : MEM_VEC_INIT_CAPACITY;
     while (cap < need) {
         if (cap > SIZE_MAX / 2) {
-            /* 翻倍将溢出 — 直接用 need（若 need 也过大由下方乘法检查拦截） */
+
             cap = need;
             break;
         }
@@ -119,8 +105,7 @@ static int mem_vec_ensure_capacity(mem_tfidf_vec_t *v, size_t need)
     }
     if (cap > SIZE_MAX / sizeof(mem_vec_term_t))
         return AIRY_ERR_OUT_OF_MEMORY;
-    mem_vec_term_t *nt = (mem_vec_term_t *)AIRY_REALLOC(v->terms,
-                                                         cap * sizeof(mem_vec_term_t));
+    mem_vec_term_t *nt = (mem_vec_term_t *)AIRY_REALLOC(v->terms, cap * sizeof(mem_vec_term_t));
     if (!nt)
         return AIRY_ERR_OUT_OF_MEMORY;
     v->terms = nt;
@@ -128,14 +113,12 @@ static int mem_vec_ensure_capacity(mem_tfidf_vec_t *v, size_t need)
     return AIRY_SUCCESS;
 }
 
-/* 将词项写入向量：已存在则词频+1，否则追加新词项（tf=1） */
 static int mem_vec_upsert(mem_tfidf_vec_t *v, const char *term, size_t tlen)
 {
     if (!v || !term)
         return AIRY_ERR_INVALID_PARAM;
     for (size_t i = 0; i < v->term_count; i++) {
-        if (strlen(v->terms[i].term) == tlen &&
-            strncmp(v->terms[i].term, term, tlen) == 0) {
+        if (strlen(v->terms[i].term) == tlen && strncmp(v->terms[i].term, term, tlen) == 0) {
             v->terms[i].tf += 1.0f;
             return AIRY_SUCCESS;
         }
@@ -164,23 +147,20 @@ int mem_vec_build(const char *text, size_t len, mem_tfidf_vec_t *out)
 
     char word[MEM_VEC_MAX_WORD_LEN + 1];
     size_t wlen = 0;
-    char last_han[5] = {0}; /* 上一个汉字（UTF-8 3 字节 + '\0'），用于 bigram */
+    char last_han[5] = {0};
     size_t total_tokens = 0;
 
     size_t i = 0;
     while (i < len) {
         unsigned char c = (unsigned char)text[i];
 
-        /* 英文/数字：累积为小写单词 */
-        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-            (c >= '0' && c <= '9')) {
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
             if (wlen < MEM_VEC_MAX_WORD_LEN)
                 word[wlen++] = (char)((c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c);
             i++;
             continue;
         }
 
-        /* 遇到分隔符：先冲刷已累积的单词 */
         if (wlen > 0) {
             word[wlen] = '\0';
             if (!mem_vec_is_stopword(word)) {
@@ -190,17 +170,15 @@ int mem_vec_build(const char *text, size_t len, mem_tfidf_vec_t *out)
             wlen = 0;
         }
 
-        /* ASCII 分隔符（空格/标点/控制字符）会打断中文连续 bigram */
         if (c < 0x80) {
             last_han[0] = '\0';
             i++;
             continue;
         }
 
-        /* 多字节 UTF-8 序列 */
         int slen = mem_utf8_seq_len(c);
         if (slen < 2 || i + (size_t)slen > len) {
-            /* 非法 UTF-8 序列：跳过 1 字节 */
+
             last_han[0] = '\0';
             i++;
             continue;
@@ -210,26 +188,24 @@ int mem_vec_build(const char *text, size_t len, mem_tfidf_vec_t *out)
             char buf[5];
             AIRY_MEMCPY(buf, text + i, (size_t)slen);
             buf[slen] = '\0';
-            /* 单字 */
+
             if (mem_vec_upsert(out, buf, (size_t)slen) == AIRY_SUCCESS)
                 total_tokens++;
-            /* 相邻汉字 bigram */
+
             if (last_han[0]) {
                 char bigram[9];
                 int n = snprintf(bigram, sizeof(bigram), "%s%s", last_han, buf);
-                if (n > 0 &&
-                    mem_vec_upsert(out, bigram, (size_t)n) == AIRY_SUCCESS)
+                if (n > 0 && mem_vec_upsert(out, bigram, (size_t)n) == AIRY_SUCCESS)
                     total_tokens++;
             }
             AIRY_MEMCPY(last_han, buf, (size_t)slen + 1);
         } else {
-            /* 非 CJK 多字节字符（emoji 等）作为分隔符 */
+
             last_han[0] = '\0';
         }
         i += (size_t)slen;
     }
 
-    /* 末尾冲刷残留单词 */
     if (wlen > 0) {
         word[wlen] = '\0';
         if (!mem_vec_is_stopword(word)) {
@@ -252,9 +228,6 @@ void mem_vec_destroy(mem_tfidf_vec_t *vec)
     AIRY_MEMSET(vec, 0, sizeof(*vec));
 }
 
-/* ==================== 全局文档频率（DF）表 ==================== */
-
-/* djb2 哈希，与 service.c 同算法保证一致性 */
 static unsigned long mem_df_hash_fn(const char *str)
 {
     unsigned long h = 5381;
@@ -305,7 +278,6 @@ size_t mem_df_get(const mem_df_table_t *tbl, const char *term)
     return 0;
 }
 
-/* 插入新词项（优先复用墓碑槽） */
 static int mem_df_insert(mem_df_table_t *tbl, const char *term)
 {
     if (tbl->count >= tbl->capacity * 3 / 4)
@@ -316,7 +288,7 @@ static int mem_df_insert(mem_df_table_t *tbl, const char *term)
     for (size_t i = 0; i < tbl->capacity; i++) {
         size_t pos = (h + i) % tbl->capacity;
         if (tbl->entries[pos].state == MEM_DF_STATE_FREE) {
-            /* 无墓碑则用空闲槽；有墓碑则复用更早找到的墓碑槽 */
+
             if (tomb == tbl->capacity)
                 tomb = pos;
             break;
@@ -374,7 +346,7 @@ static void mem_df_remove(mem_df_table_t *tbl, const char *term)
             if (tbl->entries[pos].df > 1) {
                 tbl->entries[pos].df--;
             } else {
-                /* df 归零：释放词项并标记墓碑，保持线性探测正确性 */
+
                 AIRY_FREE(tbl->entries[pos].key);
                 tbl->entries[pos].key = NULL;
                 tbl->entries[pos].df = 0;
@@ -396,7 +368,6 @@ void mem_df_add_doc(mem_df_table_t *tbl, const mem_tfidf_vec_t *doc)
             SVC_LOG_WARN("mem_d df: out of memory while tracking term");
             break;
         }
-        /* BUSY（表满）仅影响 DF 统计精度，不阻断检索 */
     }
 }
 
@@ -408,9 +379,6 @@ void mem_df_remove_doc(mem_df_table_t *tbl, const mem_tfidf_vec_t *doc)
         mem_df_remove(tbl, doc->terms[i].term);
 }
 
-/* ==================== TF-IDF 余弦相似度 ==================== */
-
-/* 平滑 IDF：idf = ln((N+1)/(df+1)) + 1，恒为正且 df<=N 时 idf>=1 */
 static double mem_idf(size_t df, size_t doc_count)
 {
     if (doc_count == 0)
@@ -429,13 +397,11 @@ float mem_vec_cosine(const mem_tfidf_vec_t *query, const mem_tfidf_vec_t *doc,
     double dot = 0.0;
     double q_norm = 0.0;
 
-    /* 遍历查询词项，累计点积与查询范数 */
     for (size_t i = 0; i < query->term_count; i++) {
         double idf = mem_idf(mem_df_get(df_tbl, query->terms[i].term), doc_count);
         double wq = (double)query->terms[i].tf * idf;
         q_norm += wq * wq;
 
-        /* 在文档向量中查找该词项（线性搜索，词项数量通常 < 100） */
         for (size_t j = 0; j < doc->term_count; j++) {
             if (strcmp(query->terms[i].term, doc->terms[j].term) == 0) {
                 double wd = (double)doc->terms[j].tf * idf;
@@ -448,7 +414,6 @@ float mem_vec_cosine(const mem_tfidf_vec_t *query, const mem_tfidf_vec_t *doc,
     if (q_norm == 0.0 || dot <= 0.0)
         return 0.0f;
 
-    /* 计算文档向量范数（含文档独有词项） */
     double d_norm = 0.0;
     for (size_t j = 0; j < doc->term_count; j++) {
         double idf = mem_idf(mem_df_get(df_tbl, doc->terms[j].term), doc_count);

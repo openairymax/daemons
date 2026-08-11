@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file service.c
  * @brief Memory 服务实现：记忆记录 CRUD + 向量检索
@@ -34,16 +34,14 @@
 #include <time.h>
 
 #define MEM_DEFAULT_MAX_RECORDS 1024
-#define MEM_RECORD_ID_LEN 33    /* 32 字符 + '\0' */
-#define MEM_HASH_LOAD_FACTOR 4  /* capacity = max_records * 4 */
+#define MEM_RECORD_ID_LEN 33
+#define MEM_HASH_LOAD_FACTOR 4 /* capacity = max_records * 4 */
 #define MEM_JSONL_FILENAME "mem.jsonl"
-#define MEM_DEFAULT_TFIDF_WEIGHT 0.6f /* 向量/子串混合融合权重（默认 0.6/0.4） */
-
-/* ==================== 内部哈希表 ==================== */
+#define MEM_DEFAULT_TFIDF_WEIGHT 0.6f
 
 static unsigned long mem_hash_fn(const char *str)
 {
-    /* djb2 — 与 syscall_router.c::hash_fn 同算法，避免符号碰撞 */
+
     unsigned long h = 5381;
     int c;
     while ((c = (unsigned char)*str++))
@@ -139,8 +137,6 @@ static void mem_ht_remove(mem_hash_table_t *ht, const char *key)
     }
 }
 
-/* ==================== 记录 ID 生成 ==================== */
-
 static void mem_generate_record_id(char *buf, size_t buf_size)
 {
     /* 32 字符十六进制：8 字符时间戳 + 8 字符计数器 + 16 字符随机
@@ -160,7 +156,7 @@ static void mem_generate_record_id(char *buf, size_t buf_size)
     airy_mtx_unlock(&counter_lock);
 
     uint64_t t = (uint64_t)time(NULL);
-    /* xorshift 简单 PRNG，基于时间 + 计数器 */
+
     uint64_t r = t ^ (c * 0x9E3779B97F4A7C15ULL);
     r ^= r << 13;
     r ^= r >> 7;
@@ -168,13 +164,9 @@ static void mem_generate_record_id(char *buf, size_t buf_size)
 
     if (buf_size < MEM_RECORD_ID_LEN)
         return;
-    snprintf(buf, MEM_RECORD_ID_LEN, "%08lx%08lx%016lx",
-             (unsigned long)(t & 0xFFFFFFFFu),
-             (unsigned long)(c & 0xFFFFFFFFu),
-             (unsigned long)(r & 0xFFFFFFFFFFFFFFFFULL));
+    snprintf(buf, MEM_RECORD_ID_LEN, "%08lx%08lx%016lx", (unsigned long)(t & 0xFFFFFFFFu),
+             (unsigned long)(c & 0xFFFFFFFFu), (unsigned long)(r & 0xFFFFFFFFFFFFFFFFULL));
 }
-
-/* ==================== 评分（无嵌入模型时的退化检索） ==================== */
 
 static float mem_compute_score(const mem_record_entry_t *rec, const char *query)
 {
@@ -188,7 +180,6 @@ static float mem_compute_score(const mem_record_entry_t *rec, const char *query)
     if (query_len == 0)
         return 0.0f;
 
-    /* 子串匹配计数 */
     size_t match_count = 0;
     for (size_t i = 0; i + query_len <= text_len; i++) {
         if (strncmp(text + i, query, query_len) == 0)
@@ -198,16 +189,12 @@ static float mem_compute_score(const mem_record_entry_t *rec, const char *query)
     if (match_count == 0)
         return 0.0f;
 
-    /* 归一化分数：匹配次数 / 文本长度，并叠加密度修正 */
     float density = (float)match_count * (float)query_len / (float)text_len;
     if (density > 1.0f)
         density = 1.0f;
     return density;
 }
 
-/* ==================== 向量检索辅助（TF-IDF 混合融合） ==================== */
-
-/* 读取混合融合权重（AIRY_MEM_TFIDF_WEIGHT，0.0~1.0，默认 0.6） */
 static float mem_load_tfidf_weight(void)
 {
     const char *env = getenv("AIRY_MEM_TFIDF_WEIGHT");
@@ -220,7 +207,6 @@ static float mem_load_tfidf_weight(void)
     return MEM_DEFAULT_TFIDF_WEIGHT;
 }
 
-/* 为记录构建 TF-IDF 词频向量并登记到全局 DF 表（失败时保持空向量，退化为子串评分） */
 static void mem_record_build_vector(mem_service_t *svc, mem_record_entry_t *rec)
 {
     if (!svc || !rec)
@@ -236,7 +222,6 @@ static void mem_record_build_vector(mem_service_t *svc, mem_record_entry_t *rec)
     mem_df_add_doc(&svc->df_table, &rec->vec);
 }
 
-/* 释放记录的向量资源（TF-IDF 向量 + embedding 向量） */
 static void mem_record_free_vector(mem_record_entry_t *rec)
 {
     if (!rec)
@@ -246,8 +231,6 @@ static void mem_record_free_vector(mem_record_entry_t *rec)
     rec->emb = NULL;
     rec->emb_dim = 0;
 }
-
-/* ==================== JSONL 持久化（best-effort，纯 C stdio） ==================== */
 
 /* JSON 字符串字面量内容转义（不含外层引号）。
  * 返回 malloc 缓冲（调用方负责 AIRY_FREE），返回写入长度。
@@ -271,13 +254,34 @@ static size_t mem_json_escape(const char *in, size_t len, char **out)
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)in[i];
         switch (c) {
-        case '"':  buf[pos++] = '\\'; buf[pos++] = '"'; break;
-        case '\\': buf[pos++] = '\\'; buf[pos++] = '\\'; break;
-        case '\n': buf[pos++] = '\\'; buf[pos++] = 'n'; break;
-        case '\t': buf[pos++] = '\\'; buf[pos++] = 't'; break;
-        case '\r': buf[pos++] = '\\'; buf[pos++] = 'r'; break;
-        case '\b': buf[pos++] = '\\'; buf[pos++] = 'b'; break;
-        case '\f': buf[pos++] = '\\'; buf[pos++] = 'f'; break;
+        case '"':
+            buf[pos++] = '\\';
+            buf[pos++] = '"';
+            break;
+        case '\\':
+            buf[pos++] = '\\';
+            buf[pos++] = '\\';
+            break;
+        case '\n':
+            buf[pos++] = '\\';
+            buf[pos++] = 'n';
+            break;
+        case '\t':
+            buf[pos++] = '\\';
+            buf[pos++] = 't';
+            break;
+        case '\r':
+            buf[pos++] = '\\';
+            buf[pos++] = 'r';
+            break;
+        case '\b':
+            buf[pos++] = '\\';
+            buf[pos++] = 'b';
+            break;
+        case '\f':
+            buf[pos++] = '\\';
+            buf[pos++] = 'f';
+            break;
         default:
             if (c < 0x20) {
                 int w = snprintf(buf + pos, cap - pos, "\\u%04x", c);
@@ -294,7 +298,6 @@ static size_t mem_json_escape(const char *in, size_t len, char **out)
     return pos;
 }
 
-/* 解析 JSONL 文件路径：优先 getenv("AIRY_RUNTIME_DIR")，回退到宏默认值。 */
 static int mem_jsonl_path_resolve(char **out_path)
 {
     if (!out_path)
@@ -317,7 +320,6 @@ static int mem_jsonl_path_resolve(char **out_path)
     return AIRY_SUCCESS;
 }
 
-/* 将单条记录序列化为 JSON 行并追加到 jsonl_append_fp（best-effort）。 */
 static void mem_persist_append_record(mem_service_t *svc, const mem_record_entry_t *rec)
 {
     if (!svc || !svc->jsonl_path || !rec || !rec->record_id || !rec->data)
@@ -326,8 +328,8 @@ static void mem_persist_append_record(mem_service_t *svc, const mem_record_entry
     if (!svc->jsonl_append_fp) {
         svc->jsonl_append_fp = fopen(svc->jsonl_path, "a");
         if (!svc->jsonl_append_fp) {
-            SVC_LOG_WARN("mem_d persist: open append failed (path=%s errno=%d)",
-                         svc->jsonl_path, errno);
+            SVC_LOG_WARN("mem_d persist: open append failed (path=%s errno=%d)", svc->jsonl_path,
+                         errno);
             return;
         }
     }
@@ -340,10 +342,10 @@ static void mem_persist_append_record(mem_service_t *svc, const mem_record_entry
     }
 
     const char *meta = rec->metadata ? rec->metadata : "null";
-    int rc = fprintf(svc->jsonl_append_fp,
+    int rc = fprintf(
+        svc->jsonl_append_fp,
         "{\"record_id\":\"%s\",\"data\":\"%s\",\"metadata\":%s,\"created_at\":%llu,\"len\":%zu}\n",
-        rec->record_id, data_esc, meta,
-        (unsigned long long)rec->created_at, rec->len);
+        rec->record_id, data_esc, meta, (unsigned long long)rec->created_at, rec->len);
     if (rc < 0) {
         SVC_LOG_WARN("mem_d persist: append write failed (errno=%d)", errno);
     } else {
@@ -354,7 +356,6 @@ static void mem_persist_append_record(mem_service_t *svc, const mem_record_entry
     AIRY_FREE(data_esc);
 }
 
-/* 全量重写 JSONL（删除记录后调用，保持文件与内存一致）。 */
 static void mem_persist_rewrite_all(mem_service_t *svc)
 {
     if (!svc || !svc->jsonl_path)
@@ -367,8 +368,8 @@ static void mem_persist_rewrite_all(mem_service_t *svc)
 
     FILE *f = fopen(svc->jsonl_path, "w");
     if (!f) {
-        SVC_LOG_WARN("mem_d persist: open rewrite failed (path=%s errno=%d)",
-                     svc->jsonl_path, errno);
+        SVC_LOG_WARN("mem_d persist: open rewrite failed (path=%s errno=%d)", svc->jsonl_path,
+                     errno);
         return;
     }
 
@@ -382,9 +383,9 @@ static void mem_persist_rewrite_all(mem_service_t *svc)
             continue;
         const char *meta = rec->metadata ? rec->metadata : "null";
         fprintf(f,
-            "{\"record_id\":\"%s\",\"data\":\"%s\",\"metadata\":%s,\"created_at\":%llu,\"len\":%zu}\n",
-            rec->record_id, data_esc, meta,
-            (unsigned long long)rec->created_at, rec->len);
+                "{\"record_id\":\"%s\",\"data\":\"%s\",\"metadata\":%s,\"created_at\":%llu,\"len\":"
+                "%zu}\n",
+                rec->record_id, data_esc, meta, (unsigned long long)rec->created_at, rec->len);
         AIRY_FREE(data_esc);
     }
 
@@ -394,7 +395,6 @@ static void mem_persist_rewrite_all(mem_service_t *svc)
     fclose(f);
 }
 
-/* 启动时从 JSONL 加载历史记录，直接插入 records[] + 哈希表（不再次写盘）。 */
 static void mem_persist_load_existing(mem_service_t *svc)
 {
     if (!svc || !svc->jsonl_path)
@@ -450,9 +450,9 @@ static void mem_persist_load_existing(mem_service_t *svc)
                         size_t idx = svc->record_count;
                         mem_record_entry_t *rec = &svc->records[idx];
                         const char *data_str = data->valuestring;
-                        size_t data_len = (len_item && cJSON_IsNumber(len_item))
-                                              ? (size_t)len_item->valuedouble
-                                              : strlen(data_str);
+                        size_t data_len = (len_item && cJSON_IsNumber(len_item)) ?
+                                              (size_t)len_item->valuedouble :
+                                              strlen(data_str);
                         if (data_len == 0)
                             data_len = strlen(data_str);
 
@@ -472,11 +472,11 @@ static void mem_persist_load_existing(mem_service_t *svc)
                                 }
                             }
                             rec->score = 0.0f;
-                            rec->created_at = (cat && cJSON_IsNumber(cat))
-                                                  ? (uint64_t)cat->valuedouble
-                                                  : (uint64_t)time(NULL);
-                            if (mem_ht_insert(&svc->record_index,
-                                              rec->record_id, idx) == AIRY_SUCCESS) {
+                            rec->created_at = (cat && cJSON_IsNumber(cat)) ?
+                                                  (uint64_t)cat->valuedouble :
+                                                  (uint64_t)time(NULL);
+                            if (mem_ht_insert(&svc->record_index, rec->record_id, idx) ==
+                                AIRY_SUCCESS) {
                                 /* 重启时从 JSONL 原文重建 TF-IDF 向量并登记全局 DF
                                  * （JSONL 只持久化原文，向量仅存内存） */
                                 mem_record_build_vector(svc, rec);
@@ -506,11 +506,8 @@ static void mem_persist_load_existing(mem_service_t *svc)
 
     AIRY_FREE(content);
     if (loaded > 0)
-        SVC_LOG_INFO("mem_d persist: loaded %zu records from %s",
-                     loaded, svc->jsonl_path);
+        SVC_LOG_INFO("mem_d persist: loaded %zu records from %s", loaded, svc->jsonl_path);
 }
-
-/* ==================== 公共接口实现 ==================== */
 
 mem_service_t *mem_service_create(size_t max_records)
 {
@@ -534,7 +531,6 @@ mem_service_t *mem_service_create(size_t max_records)
         return NULL;
     }
 
-    /* 全局 DF 表容量取记录数 64 倍（每条记录平均 ~10 个独特词项，保证低负载因子） */
     if (mem_df_init(&svc->df_table, max_records * 64) != AIRY_SUCCESS) {
         mem_ht_destroy(&svc->record_index);
         AIRY_FREE(svc->records);
@@ -546,7 +542,7 @@ mem_service_t *mem_service_create(size_t max_records)
     svc->record_count = 0;
     svc->initialized = 1;
     svc->tfidf_weight = mem_load_tfidf_weight();
-    (void)mem_emb_client_init(&svc->emb); /* 未配置 embedding 时静默禁用 */
+    (void)mem_emb_client_init(&svc->emb);
 
     if (mem_jsonl_path_resolve(&svc->jsonl_path) != AIRY_SUCCESS) {
         SVC_LOG_WARN("mem_d persist: path resolve failed, persistence disabled");
@@ -555,8 +551,8 @@ mem_service_t *mem_service_create(size_t max_records)
         mem_persist_load_existing(svc);
     }
 
-    SVC_LOG_INFO("Memory service created (max_records=%zu, tfidf_weight=%.2f)",
-                 max_records, (double)svc->tfidf_weight);
+    SVC_LOG_INFO("Memory service created (max_records=%zu, tfidf_weight=%.2f)", max_records,
+                 (double)svc->tfidf_weight);
     return svc;
 }
 
@@ -576,7 +572,7 @@ void mem_service_destroy(mem_service_t *svc)
     mem_ht_destroy(&svc->record_index);
     mem_df_destroy(&svc->df_table);
     mem_emb_client_destroy(&svc->emb);
-    /* 关闭持久化句柄并释放路径，确保缓冲数据落盘 */
+
     if (svc->jsonl_append_fp) {
         fflush(svc->jsonl_append_fp);
         fclose(svc->jsonl_append_fp);
@@ -592,8 +588,7 @@ void mem_service_destroy(mem_service_t *svc)
     AIRY_FREE(svc);
 }
 
-int mem_service_write(mem_service_t *svc, const mem_write_request_t *req,
-                       char **out_record_id)
+int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char **out_record_id)
 {
     if (!svc || !svc->initialized || !req || !req->data || req->len == 0 || !out_record_id)
         return AIRY_ERR_INVALID_PARAM;
@@ -629,7 +624,7 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req,
     rec->metadata = req->metadata ? AIRY_STRDUP(req->metadata) : NULL;
     rec->score = 0.0f;
     rec->created_at = (uint64_t)time(NULL);
-    /* 构建 TF-IDF 词频向量并登记全局 DF（失败时保持空向量，退化为子串评分） */
+
     mem_record_build_vector(svc, rec);
 
     int rc = mem_ht_insert(&svc->record_index, rec->record_id, idx);
@@ -649,7 +644,6 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req,
     svc->record_count++;
     uint64_t total_writes = svc->record_count;
 
-    /* best-effort 持久化：追加一行到 JSONL（失败仅 warning，不阻断内存操作） */
     mem_persist_append_record(svc, rec);
 
     airy_mtx_unlock(&svc->lock);
@@ -659,8 +653,7 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req,
     if (mem_emb_should_try(&svc->emb)) {
         float *emb_vec = NULL;
         size_t emb_dim = 0;
-        if (mem_emb_embed(&svc->emb, (const char *)rec->data, &emb_vec, &emb_dim) ==
-                AIRY_SUCCESS &&
+        if (mem_emb_embed(&svc->emb, (const char *)rec->data, &emb_vec, &emb_dim) == AIRY_SUCCESS &&
             emb_vec && emb_dim > 0) {
             airy_mtx_lock(&svc->lock);
             ssize_t eidx = mem_ht_lookup(&svc->record_index, *out_record_id);
@@ -675,13 +668,13 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req,
         AIRY_FREE(emb_vec);
     }
 
-    SVC_LOG_DEBUG("Memory write: record_id=%s, len=%zu, total=%lu",
-                  *out_record_id, req->len, (unsigned long)total_writes);
+    SVC_LOG_DEBUG("Memory write: record_id=%s, len=%zu, total=%lu", *out_record_id, req->len,
+                  (unsigned long)total_writes);
     return AIRY_SUCCESS;
 }
 
 int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
-                        mem_search_hit_t **out_hits, size_t *out_count)
+                       mem_search_hit_t **out_hits, size_t *out_count)
 {
     if (!svc || !svc->initialized || !query || !out_hits || !out_count)
         return AIRY_ERR_INVALID_PARAM;
@@ -702,8 +695,7 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
     size_t qemb_dim = 0;
     int use_emb = 0;
     if (mem_emb_should_try(&svc->emb) &&
-        mem_emb_embed(&svc->emb, query, &qemb, &qemb_dim) == AIRY_SUCCESS &&
-        qemb && qemb_dim > 0)
+        mem_emb_embed(&svc->emb, query, &qemb, &qemb_dim) == AIRY_SUCCESS && qemb && qemb_dim > 0)
         use_emb = 1;
 
     airy_mtx_lock(&svc->lock);
@@ -715,9 +707,8 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
         return AIRY_SUCCESS;
     }
 
-    /* 收集所有命中 */
-    mem_search_hit_t *hits = (mem_search_hit_t *)AIRY_CALLOC(svc->record_count,
-                                                              sizeof(mem_search_hit_t));
+    mem_search_hit_t *hits =
+        (mem_search_hit_t *)AIRY_CALLOC(svc->record_count, sizeof(mem_search_hit_t));
     if (!hits) {
         airy_mtx_unlock(&svc->lock);
         mem_vec_destroy(&qvec);
@@ -726,7 +717,7 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
     }
 
     size_t hit_count = 0;
-    size_t vec_used = 0; /* 有向量参与评分的记录数（日志统计） */
+    size_t vec_used = 0;
     const float w = svc->tfidf_weight;
     for (size_t i = 0; i < svc->record_count; i++) {
         const mem_record_entry_t *rec = &svc->records[i];
@@ -737,16 +728,13 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
         if (use_emb && rec->emb && rec->emb_dim == qemb_dim) {
             vec_score = mem_emb_cosine(qemb, rec->emb, qemb_dim);
         } else if (rec->vec.term_count > 0) {
-            vec_score = mem_vec_cosine(&qvec, &rec->vec, &svc->df_table,
-                                       svc->record_count);
+            vec_score = mem_vec_cosine(&qvec, &rec->vec, &svc->df_table, svc->record_count);
         }
         if (rec->vec.term_count > 0)
             vec_used++;
 
-        /* 子串评分（旧检索，保留为 fallback：无向量时纯子串评分仍可工作） */
         float sub_score = mem_compute_score(rec, query);
 
-        /* 0.6/0.4 加权融合，score 保持 [0,1] */
         float score = w * vec_score + (1.0f - w) * sub_score;
         if (score > 0.0f) {
             hits[hit_count].record_id = AIRY_STRDUP(rec->record_id);
@@ -767,7 +755,6 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
         }
     }
 
-    /* 截取前 limit 项，释放超出部分的 record_id 防止内存泄漏 */
     if (hit_count > limit) {
         for (size_t i = limit; i < hit_count; i++) {
             AIRY_FREE(hits[i].record_id);
@@ -793,19 +780,16 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
      * 溢出时保留原缓冲区，不缩容） */
     mem_search_hit_t *shrunk = NULL;
     if (hit_count <= SIZE_MAX / sizeof(mem_search_hit_t)) {
-        shrunk = (mem_search_hit_t *)AIRY_REALLOC(hits,
-                                                  hit_count * sizeof(mem_search_hit_t));
+        shrunk = (mem_search_hit_t *)AIRY_REALLOC(hits, hit_count * sizeof(mem_search_hit_t));
     }
     *out_hits = shrunk ? shrunk : hits;
     *out_count = hit_count;
 
-    SVC_LOG_DEBUG("Memory search: query='%s', hits=%zu (vec_used=%zu)",
-                  query, hit_count, vec_used);
+    SVC_LOG_DEBUG("Memory search: query='%s', hits=%zu (vec_used=%zu)", query, hit_count, vec_used);
     return AIRY_SUCCESS;
 }
 
-int mem_service_get(mem_service_t *svc, const char *record_id,
-                     mem_record_t *out_record)
+int mem_service_get(mem_service_t *svc, const char *record_id, mem_record_t *out_record)
 {
     if (!svc || !svc->initialized || !record_id || !out_record)
         return AIRY_ERR_INVALID_PARAM;
@@ -848,30 +832,25 @@ int mem_service_delete(mem_service_t *svc, const char *record_id)
         return AIRY_ERR_NOT_FOUND;
     }
 
-    /* 维护全局 DF 表并从记录条目移除向量资源（在 swap 之前，idx 仍指向目标记录） */
     mem_df_remove_doc(&svc->df_table, &svc->records[idx].vec);
     mem_record_free_vector(&svc->records[idx]);
 
-    /* 释放被删除记录的资源 */
     AIRY_FREE(svc->records[idx].record_id);
     AIRY_FREE(svc->records[idx].data);
     AIRY_FREE(svc->records[idx].metadata);
 
-    /* 用最后一条记录填补空洞，保持数组紧凑 */
     size_t last = svc->record_count - 1;
     if ((size_t)idx != last) {
         svc->records[idx] = svc->records[last];
-        /* 更新哈希表中 last 索引指向新位置 */
+
         mem_ht_remove(&svc->record_index, svc->records[idx].record_id);
         mem_ht_insert(&svc->record_index, svc->records[idx].record_id, idx);
     }
     __builtin_memset(&svc->records[last], 0, sizeof(mem_record_entry_t));
     svc->record_count--;
 
-    /* 从哈希表移除被删除记录的 ID */
     mem_ht_remove(&svc->record_index, record_id);
 
-    /* best-effort 持久化：全量重写 JSONL 保持文件与内存一致（失败仅 warning） */
     mem_persist_rewrite_all(svc);
 
     airy_mtx_unlock(&svc->lock);

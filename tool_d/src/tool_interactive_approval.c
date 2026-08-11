@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file tool_interactive_approval.c
  * @brief P0：工具级交互式权限审批实现
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "airy_memory.h"
@@ -17,33 +17,30 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* 默认阻塞等待超时（毫秒） */
 #define AIRY_APPROVAL_DEFAULT_TIMEOUT_MS 120000u
 
-/* 环境变量 */
 #define ENV_APPROVAL_MODE "AIRY_TOOL_APPROVAL_MODE"
 #define ENV_APPROVAL_TIMEOUT "AIRY_TOOL_APPROVAL_TIMEOUT_MS"
 #define ENV_MODE_INTERACTIVE "interactive"
 
-/* 单个 pending 审批请求 */
 typedef struct interactive_pending_req {
-    char *request_id;                          /* 唯一请求 ID */
-    char *tool;                                /* 工具名称 */
-    char *agent_id;                            /* 调用者 Agent ID */
-    char *params;                              /* 工具参数 JSON 副本 */
-    uint64_t created_at;                       /* 创建时间（毫秒） */
-    airy_approval_outcome_t outcome;           /* 决议结果 */
-    int resolved;                              /* 是否已决议 */
-    struct interactive_pending_req *next;      /* 链表指针 */
+    char *request_id;
+    char *tool;
+    char *agent_id;
+    char *params;
+    uint64_t created_at;
+    airy_approval_outcome_t outcome;
+    int resolved;
+    struct interactive_pending_req *next;
 } interactive_pending_req_t;
 
 struct interactive_approval {
-    bool enabled;                              /* 是否启用交互审批 */
-    uint64_t timeout_ms;                       /* 阻塞等待超时 */
-    sync_mutex_t lock;                         /* 队列互斥锁 */
-    sync_condition_t cond;                     /* 决议条件变量 */
-    interactive_pending_req_t *head;           /* pending 队列头 */
-    uint64_t seq;                              /* 自增序号（request_id 组成部分） */
+    bool enabled;
+    uint64_t timeout_ms;
+    sync_mutex_t lock;
+    sync_condition_t cond;
+    interactive_pending_req_t *head;
+    uint64_t seq;
 };
 
 static void pending_req_free(interactive_pending_req_t *req)
@@ -66,14 +63,11 @@ interactive_approval_t *interactive_approval_create(void)
         return NULL;
     }
 
-    /* 默认超时 120000ms */
     mgr->timeout_ms = AIRY_APPROVAL_DEFAULT_TIMEOUT_MS;
 
-    /* AIRY_TOOL_APPROVAL_MODE=interactive 时启用 */
     const char *mode = getenv(ENV_APPROVAL_MODE);
     mgr->enabled = (mode && strcmp(mode, ENV_MODE_INTERACTIVE) == 0);
 
-    /* AIRY_TOOL_APPROVAL_TIMEOUT_MS 覆盖默认超时 */
     const char *timeout_str = getenv(ENV_APPROVAL_TIMEOUT);
     if (timeout_str) {
         long v = strtol(timeout_str, NULL, 10);
@@ -98,8 +92,7 @@ interactive_approval_t *interactive_approval_create(void)
     }
 
     SVC_LOG_INFO("P0: Interactive tool approval %s (timeout_ms=%llu)",
-                 mgr->enabled ? "ENABLED" : "disabled",
-                 (unsigned long long)mgr->timeout_ms);
+                 mgr->enabled ? "ENABLED" : "disabled", (unsigned long long)mgr->timeout_ms);
     return mgr;
 }
 
@@ -150,7 +143,6 @@ char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
         return NULL;
     }
 
-    /* 生成唯一 request_id：req_<毫秒时间戳>_<自增序号> */
     char reqbuf[72];
     sync_mutex_lock_ex(mgr->lock, NULL);
     uint64_t now = sync_get_timestamp_ms();
@@ -166,31 +158,28 @@ char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
     req->next = NULL;
     mgr->seq++;
 
-    /* 入队队尾 */
     interactive_pending_req_t **pp = &mgr->head;
     while (*pp) {
         pp = &(*pp)->next;
     }
     *pp = req;
 
-    SVC_LOG_INFO("P0: Interactive approval pending req=%s tool='%s' agent='%s'",
-                 req->request_id, tool, agent_id ? agent_id : "?");
+    SVC_LOG_INFO("P0: Interactive approval pending req=%s tool='%s' agent='%s'", req->request_id,
+                 tool, agent_id ? agent_id : "?");
 
-    /* 阻塞等待决议：按绝对截止时间循环等待，直至 resolved 或超时 */
     uint64_t deadline = now + mgr->timeout_ms;
     while (!req->resolved) {
         uint64_t now_ms = sync_get_timestamp_ms();
         if (now_ms >= deadline) {
-            break; /* 超时 → DENIED */
+            break;
         }
-        sync_timeout_t to = { deadline - now_ms, false };
+        sync_timeout_t to = {deadline - now_ms, false};
         sync_result_t wr = sync_condition_wait_ex(mgr->cond, mgr->lock, &to);
         if (wr != SYNC_SUCCESS) {
-            break; /* 超时或其他错误 → DENIED */
+            break;
         }
     }
 
-    /* 从队列移除（自身已出队，不会再被其他线程访问） */
     interactive_pending_req_t **q = &mgr->head;
     while (*q && *q != req) {
         q = &(*q)->next;
@@ -202,8 +191,8 @@ char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
 
     *out_outcome = req->outcome;
     char *request_id = AIRY_STRDUP(req->request_id);
-    SVC_LOG_INFO("P0: Interactive approval resolved req=%s decision=%d",
-                 req->request_id, (int)req->outcome);
+    SVC_LOG_INFO("P0: Interactive approval resolved req=%s decision=%d", req->request_id,
+                 (int)req->outcome);
     pending_req_free(req);
     return request_id;
 }
@@ -231,7 +220,7 @@ int interactive_approval_resolve(interactive_approval_t *mgr, const char *reques
     while (p) {
         if (strcmp(p->request_id, request_id) == 0) {
             if (p->resolved) {
-                /* 已决议：不允许重复决议 */
+
                 sync_mutex_unlock_ex(mgr->lock);
                 return AIRY_ERR_STATE_ERROR;
             }
@@ -239,8 +228,8 @@ int interactive_approval_resolve(interactive_approval_t *mgr, const char *reques
             p->outcome = outcome;
             sync_mutex_unlock_ex(mgr->lock);
             sync_condition_broadcast_ex(mgr->cond);
-            SVC_LOG_INFO("P0: Interactive approval decision req=%s decision=%s",
-                         request_id, decision);
+            SVC_LOG_INFO("P0: Interactive approval decision req=%s decision=%s", request_id,
+                         decision);
             return 0;
         }
         p = p->next;

@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file agent_registry_core.c
  * @brief Agent注册表核心功能实现
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "agent_registry_core.h"
@@ -84,8 +84,8 @@ int agent_registry_core_add(agent_registry_t *registry, const agent_entry_t *reg
     airy_mtx_lock(&registry->lock);
     agent_entry_t *entry = &registry->entries[registry->entry_count];
     __builtin_memset(entry, 0, sizeof(agent_entry_t));
-AIRY_STRNCPY_TERM(entry->id, reg->id, sizeof(entry->id));
-AIRY_STRNCPY_TERM(entry->name, reg->name, sizeof(entry->name));
+    AIRY_STRNCPY_TERM(entry->id, reg->id, sizeof(entry->id));
+    AIRY_STRNCPY_TERM(entry->name, reg->name, sizeof(entry->name));
     if (reg->description)
         entry->description = AIRY_STRDUP(reg->description);
     if (reg->author)
@@ -176,16 +176,17 @@ int agent_registry_core_add_version(agent_registry_t *registry, const char *agen
             }
             agent_version_t *v = &registry->entries[i].versions[registry->entries[i].version_count];
             __builtin_memset(v, 0, sizeof(agent_version_t));
-AIRY_STRNCPY_TERM(v->version, version->version, sizeof(v->version));
+            AIRY_STRNCPY_TERM(v->version, version->version, sizeof(v->version));
             v->version[sizeof(v->version) - 1] = '\0';
-AIRY_STRNCPY_TERM(v->download_url, version->download_url, sizeof(v->download_url));
+            AIRY_STRNCPY_TERM(v->download_url, version->download_url, sizeof(v->download_url));
             v->download_url[sizeof(v->download_url) - 1] = '\0';
-AIRY_STRNCPY_TERM(v->checksum, version->checksum, sizeof(v->checksum));
+            AIRY_STRNCPY_TERM(v->checksum, version->checksum, sizeof(v->checksum));
             v->checksum[sizeof(v->checksum) - 1] = '\0';
             v->created_at = (uint64_t)time(NULL);
             v->deprecated = version->deprecated;
             registry->entries[i].version_count++;
-AIRY_STRNCPY_TERM(registry->entries[i].latest_version, version->version, sizeof(registry->entries[i].latest_version));
+            AIRY_STRNCPY_TERM(registry->entries[i].latest_version, version->version,
+                              sizeof(registry->entries[i].latest_version));
             registry->entries[i].latest_version[sizeof(registry->entries[i].latest_version) - 1] =
                 '\0';
             airy_mtx_unlock(&registry->lock);
@@ -226,7 +227,7 @@ size_t agent_registry_core_search_by_tag(agent_registry_t *registry, const char 
     for (size_t i = 0; i < registry->entry_count && count < max_entries; i++) {
         for (size_t j = 0; j < registry->entries[i].tag_count; j++) {
             if (registry->entries[i].tags[j] && strcmp(registry->entries[i].tags[j], tag) == 0) {
-                /* P0-7 修复：在锁内按值拷贝匹配条目，调用方解锁后访问的是独立快照。 */
+
                 out_entries[count++] = registry->entries[i];
                 break;
             }

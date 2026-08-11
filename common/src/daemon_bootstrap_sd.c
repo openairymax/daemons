@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file daemon_bootstrap_sd.c
  * @brief P1.7 C-L08: daemon ServiceDiscovery 一键引导实现
@@ -15,19 +16,15 @@
 
 #include <string.h>
 
-/* ==================== 内部数据结构 ==================== */
-
 struct daemon_bootstrap_sd_s {
-    sd_helper_t *sdh;           /* 底层 SD helper */
-    bool        running;        /* 是否运行中 */
-    char        service_name[64]; /* 服务名（用于日志） */
+    sd_helper_t *sdh;
+    bool running;
+    char service_name[64];
 };
 
-/* ==================== 实现 ==================== */
-
 daemon_bootstrap_sd_t *daemon_bootstrap_sd_start(const char *name, const char *type,
-                                                  const char *host, uint16_t port,
-                                                  const char *tags, uint32_t ttl_ms)
+                                                 const char *host, uint16_t port, const char *tags,
+                                                 uint32_t ttl_ms)
 {
     if (!name || !type || (!host && port == 0)) {
         SVC_LOG_ERROR("daemon_bootstrap_sd_start: invalid parameters");
@@ -41,7 +38,6 @@ daemon_bootstrap_sd_t *daemon_bootstrap_sd_start(const char *name, const char *t
         return NULL;
     }
 
-    /* 初始化 SD helper */
     bsd->sdh = sd_helper_init(NULL);
     if (!bsd->sdh) {
         SVC_LOG_ERROR("daemon_bootstrap_sd_start: sd_helper_init failed for '%s'", name);
@@ -49,17 +45,16 @@ daemon_bootstrap_sd_t *daemon_bootstrap_sd_start(const char *name, const char *t
         return NULL;
     }
 
-    /* 注册服务 */
     if (host && port > 0) {
         if (sd_helper_register(bsd->sdh, name, type, host, port, tags, ttl_ms) != 0) {
-            SVC_LOG_ERROR("daemon_bootstrap_sd_start: register failed for '%s' (%s:%u)",
-                          name, host, port);
+            SVC_LOG_ERROR("daemon_bootstrap_sd_start: register failed for '%s' (%s:%u)", name, host,
+                          port);
             sd_helper_shutdown(bsd->sdh);
             AIRY_FREE(bsd);
             return NULL;
         }
     } else {
-        /* host 为 NULL 时使用 Unix socket 路径 */
+
         const char *sock = host ? host : name;
         if (sd_helper_register_unix(bsd->sdh, name, type, sock, tags, ttl_ms) != 0) {
             SVC_LOG_ERROR("daemon_bootstrap_sd_start: unix register failed for '%s'", name);
@@ -69,10 +64,8 @@ daemon_bootstrap_sd_t *daemon_bootstrap_sd_start(const char *name, const char *t
         }
     }
 
-    /* 启动心跳 */
     if (sd_helper_start_heartbeat(bsd->sdh) != 0) {
         SVC_LOG_WARN("daemon_bootstrap_sd_start: heartbeat start failed for '%s'", name);
-        /* 非致命，继续运行 */
     }
 
     AIRY_STRNCPY_TERM(bsd->service_name, name, sizeof(bsd->service_name) - 1);
@@ -84,8 +77,8 @@ daemon_bootstrap_sd_t *daemon_bootstrap_sd_start(const char *name, const char *t
 }
 
 daemon_bootstrap_sd_t *daemon_bootstrap_sd_start_unix(const char *name, const char *type,
-                                                       const char *socket_path,
-                                                       const char *tags, uint32_t ttl_ms)
+                                                      const char *socket_path, const char *tags,
+                                                      uint32_t ttl_ms)
 {
     if (!name || !type || !socket_path) {
         SVC_LOG_ERROR("daemon_bootstrap_sd_start_unix: invalid parameters");
@@ -94,7 +87,8 @@ daemon_bootstrap_sd_t *daemon_bootstrap_sd_start_unix(const char *name, const ch
 
     daemon_bootstrap_sd_t *bsd =
         (daemon_bootstrap_sd_t *)AIRY_CALLOC(1, sizeof(daemon_bootstrap_sd_t));
-    if (!bsd) return NULL;
+    if (!bsd)
+        return NULL;
 
     bsd->sdh = sd_helper_init(NULL);
     if (!bsd->sdh) {
@@ -124,7 +118,8 @@ daemon_bootstrap_sd_t *daemon_bootstrap_sd_start_unix(const char *name, const ch
 
 void daemon_bootstrap_sd_stop(daemon_bootstrap_sd_t *bsd)
 {
-    if (!bsd) return;
+    if (!bsd)
+        return;
 
     SVC_LOG_INFO("C-L08: ServiceDiscovery shutting down for '%s'", bsd->service_name);
 

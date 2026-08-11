@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file log_sanitizer.h
  * @brief 日志脱敏过滤器 - 防止敏感信息泄露到日志
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 功能：
  * 1. 自动检测并脱敏敏感字段（API Key、密码、Token 等）
@@ -26,8 +26,8 @@ extern "C" {
  * @brief 敏感字段模式
  */
 typedef struct {
-    const char *pattern;     /* 匹配模式（如 "api_key", "password"） */
-    const char *replacement; /* 替换字符串（默认为 "***"） */
+    const char *pattern;
+    const char *replacement;
 } sensitive_field_t;
 
 /**

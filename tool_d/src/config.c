@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 /**
  * @file manager.c
  * @brief 工具服务配置加载（YAML）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "config.h"
@@ -47,13 +47,11 @@ tool_config_t *tool_config_load(const char *path)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    /* 设置默认值 */
     cfg->cache_capacity = 100;
     cfg->cache_ttl_sec = 300;
     cfg->executor_workers = 4;
     cfg->workbench_type = AIRY_STRDUP("process");
 
-    /* 解析状态机 */
     enum { STATE_ROOT, STATE_TOOLS, STATE_TOOL } state = STATE_ROOT;
     tool_def_t cur_tool = {0};
     char **params = NULL;
@@ -80,9 +78,9 @@ tool_config_t *tool_config_load(const char *path)
                     yaml_parser_parse(&parser, &event);
                     cur_tool.executable = AIRY_STRDUP((const char *)event.data.scalar.value);
                 } else if (strcmp(val, "params") == 0) {
-                    /* 进入参数列表 */
+
                 } else if (strcmp(val, "-") == 0 && in_tools_list) {
-                    /* 参数列表项 */
+
                     yaml_parser_parse(&parser, &event);
                     const char *param = (const char *)event.data.scalar.value;
                     if (params_cnt + 1 >= params_cap) {
@@ -105,8 +103,7 @@ tool_config_t *tool_config_load(const char *path)
                         (int)strtol((const char *)event.data.scalar.value, NULL, 10);
                 } else if (strcmp(val, "permission_rule") == 0) {
                     yaml_parser_parse(&parser, &event);
-                    cur_tool.permission_rule =
-                        AIRY_STRDUP((const char *)event.data.scalar.value);
+                    cur_tool.permission_rule = AIRY_STRDUP((const char *)event.data.scalar.value);
                 } else if (strcmp(val, "cache_capacity") == 0 && state == STATE_ROOT) {
                     yaml_parser_parse(&parser, &event);
                     cfg->cache_capacity =
@@ -130,7 +127,7 @@ tool_config_t *tool_config_load(const char *path)
             }
         } else if (event.type == YAML_MAPPING_END_EVENT) {
             if (state == STATE_TOOL && cur_tool.name) {
-                /* 完成一个工具的解析 */
+
                 if (params) {
                     params[params_cnt] = NULL;
                     cur_tool.params = params;
@@ -138,7 +135,6 @@ tool_config_t *tool_config_load(const char *path)
                     cur_tool.params = NULL;
                 }
 
-                /* 添加到 cfg->tools 数组 */
                 size_t cur_cnt = 0;
                 while (cfg->tools && cfg->tools[cur_cnt].name)
                     cur_cnt++;
@@ -152,7 +148,6 @@ tool_config_t *tool_config_load(const char *path)
                 cfg->tools[cur_cnt] = cur_tool;
                 __builtin_memset(&cfg->tools[cur_cnt + 1], 0, sizeof(tool_def_t));
 
-                /* 重置临时变量 */
                 __builtin_memset(&cur_tool, 0, sizeof(cur_tool));
                 params = NULL;
                 params_cnt = params_cap = 0;

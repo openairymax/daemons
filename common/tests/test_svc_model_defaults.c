@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_svc_model_defaults.c
  * @brief svc_model_defaults_from_yaml 单元测试
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 覆盖：
  * 1. 正常 global 段（含嵌套子段 default_retry）→ default_model/default_provider
@@ -35,27 +35,25 @@ static int write_tmp_yaml(const char *content)
     return n == strlen(content) ? 0 : -1;
 }
 
-/* global 段内 default_retry 为嵌套子段，验证嵌套结束后字段仍可解析 */
 static int test_global_with_nested(void)
 {
-    const char *yaml =
-        "providers:\n"
-        "  - name: \"deepseek\"\n"
-        "    models: [\"deepseek-v4-flash\"]\n"
-        "global:\n"
-        "  default_provider: \"deepseek\"\n"
-        "  default_retry:\n"
-        "    max_attempts: 3\n"
-        "  default_model: \"deepseek-v4-flash\"\n"
-        "  default_timeout_sec: 60\n";
+    const char *yaml = "providers:\n"
+                       "  - name: \"deepseek\"\n"
+                       "    models: [\"deepseek-v4-flash\"]\n"
+                       "global:\n"
+                       "  default_provider: \"deepseek\"\n"
+                       "  default_retry:\n"
+                       "    max_attempts: 3\n"
+                       "  default_model: \"deepseek-v4-flash\"\n"
+                       "  default_timeout_sec: 60\n";
     if (write_tmp_yaml(yaml) != 0) {
         TEST_FAIL("global_with_nested", "cannot write temp yaml");
         return -1;
     }
     char model[128] = {0};
     char provider[64] = {0};
-    int rc = svc_model_defaults_from_yaml(TMP_YAML, model, sizeof(model),
-                                          provider, sizeof(provider));
+    int rc =
+        svc_model_defaults_from_yaml(TMP_YAML, model, sizeof(model), provider, sizeof(provider));
     if (rc != 0) {
         TEST_FAIL("global_with_nested", "unexpected error code");
         return -1;
@@ -78,18 +76,17 @@ static int test_global_with_nested(void)
 
 static int test_no_global_section(void)
 {
-    const char *yaml =
-        "providers:\n"
-        "  - name: \"openai\"\n"
-        "    models: [\"gpt-4\"]\n";
+    const char *yaml = "providers:\n"
+                       "  - name: \"openai\"\n"
+                       "    models: [\"gpt-4\"]\n";
     if (write_tmp_yaml(yaml) != 0) {
         TEST_FAIL("no_global_section", "cannot write temp yaml");
         return -1;
     }
     char model[128] = {0};
     char provider[64] = {0};
-    int rc = svc_model_defaults_from_yaml(TMP_YAML, model, sizeof(model),
-                                          provider, sizeof(provider));
+    int rc =
+        svc_model_defaults_from_yaml(TMP_YAML, model, sizeof(model), provider, sizeof(provider));
     if (rc != 0) {
         TEST_FAIL("no_global_section", "unexpected error code");
         return -1;
@@ -106,8 +103,8 @@ static int test_missing_file(void)
 {
     char model[128] = {0};
     char provider[64] = {0};
-    int rc = svc_model_defaults_from_yaml("no_such_file_airy.yaml", model, sizeof(model),
-                                          provider, sizeof(provider));
+    int rc = svc_model_defaults_from_yaml("no_such_file_airy.yaml", model, sizeof(model), provider,
+                                          sizeof(provider));
     if (rc != AIRY_ERR_IO) {
         char buf[128];
         snprintf(buf, sizeof(buf), "rc=%d, expected AIRY_ERR_IO", rc);
@@ -129,7 +126,6 @@ static int test_null_args(void)
     return 0;
 }
 
-/* 仓库 SSoT（真实文件）：与 global 段一致（工作目录为 daemons/common/tests） */
 static int test_repo_ssot(void)
 {
     const char *path = "../../../../ecosystem/manager/model/model.yaml";

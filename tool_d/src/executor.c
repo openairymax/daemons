@@ -1,18 +1,18 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /**
  * @file executor.c
  * @brief 工具执行器实现（生产级进程管理）
  * @details 基于popen/pclose的真实工具执行，支持超时、输出捕获、错误处理
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 /* P3.18 (ACC-DT27): sandbox 公共 API（airy_sandbox_t, permission_type_t,
  * airy_sandbox_create_default, airy_sandbox_invoke 等） */
 #include "airy_sandbox.h"
-/* P3.18 (ACC-DT27): SYS_TOOL_EXECUTE syscall 号 + tool_execute_args_t 结构体 */
+
 #include "syscalls.h"
 #include "daemon_errors.h"
 #include "daemon_security.h"
@@ -29,7 +29,7 @@
 #include <time.h>
 
 #ifndef _WIN32
-#include <sys/wait.h> /* POSIX 专用头文件（当前文件未直接使用，保留以备扩展） */
+#include <sys/wait.h>
 #endif
 
 /* ---------- 改进1（P1d）：并行工具并发门控（writer-preferring RwLock） ----------
@@ -41,9 +41,9 @@
 typedef struct {
     airy_mtx_t lock;
     airy_cond_t cond;
-    int readers;        /* 活跃读门持有者数 */
-    int writer;         /* 活跃写门持有者（0/1） */
-    int writer_waiting; /* 等待中的写者数（写优先防饿死） */
+    int readers;
+    int writer;
+    int writer_waiting;
 } tool_rw_gate_t;
 
 static void tool_rw_gate_init(tool_rw_gate_t *g)
@@ -100,9 +100,9 @@ struct tool_executor {
     airy_mtx_t lock;
     uint64_t total_executions;
     uint64_t success_count;
-    /* P1d：并行工具并发门控（READ 并发 / WRITE 串行） */
+
     tool_rw_gate_t rw_gate;
-    /* C-L05: Cupolas SafetyGuard → tool_d 工具审批 */
+
     tool_approval_ctx_t *approval_ctx;
     safety_guard_bridge_t *safety_bridge;
     /* P3.18 (ACC-DT27): 工具执行沙箱 — 强制安全层（非可选增强）。
@@ -166,19 +166,18 @@ tool_executor_t *tool_executor_create(const tool_executor_config_t *cfg)
         SVC_LOG_WARN("C-L08: sandbox_manager_init failed (rc=%d) — tools will be fail-closed",
                      (int)sb_init);
     } else {
-        airy_err_t sb_create =
-            airy_sandbox_create_default("tool_d", "tool_d", &exec->sandbox);
+        airy_err_t sb_create = airy_sandbox_create_default("tool_d", "tool_d", &exec->sandbox);
         if (sb_create != AIRY_SUCCESS || !exec->sandbox) {
-            SVC_LOG_ERROR("C-L08: sandbox_create_default failed (rc=%d) — tools will be fail-closed",
-                          (int)sb_create);
+            SVC_LOG_ERROR(
+                "C-L08: sandbox_create_default failed (rc=%d) — tools will be fail-closed",
+                (int)sb_create);
             exec->sandbox = NULL;
         } else {
-            airy_err_t sb_rule = airy_sandbox_add_rule(
-                exec->sandbox, SYS_TOOL_EXECUTE, PERM_ALLOW, NULL);
+            airy_err_t sb_rule =
+                airy_sandbox_add_rule(exec->sandbox, SYS_TOOL_EXECUTE, PERM_ALLOW, NULL);
             if (sb_rule != AIRY_SUCCESS) {
                 SVC_LOG_WARN("C-L08: sandbox_add_rule(SYS_TOOL_EXECUTE, ALLOW) failed (rc=%d)",
                              (int)sb_rule);
-                /* 规则添加失败不致命：默认策略是 PERM_ALLOW，工具仍可执行 */
             }
             SVC_LOG_INFO("C-L08: Sandbox initialized for tool executor (allow SYS_TOOL_EXECUTE)");
         }
@@ -216,7 +215,7 @@ void tool_executor_destroy(tool_executor_t *exec)
         airy_sandbox_destroy(exec->sandbox);
         exec->sandbox = NULL;
     }
-    /* P0: 释放交互式审批管理器 */
+
     if (exec->interactive) {
         interactive_approval_destroy(exec->interactive);
         exec->interactive = NULL;
@@ -226,7 +225,6 @@ void tool_executor_destroy(tool_executor_t *exec)
     AIRY_FREE(exec);
 }
 
-/* C-L05: 设置工具审批上下文 */
 void tool_executor_set_approval_ctx(tool_executor_t *exec, tool_approval_ctx_t *approval_ctx)
 {
     if (!exec)
@@ -237,7 +235,6 @@ void tool_executor_set_approval_ctx(tool_executor_t *exec, tool_approval_ctx_t *
     if (approval_ctx) {
         SVC_LOG_INFO("C-L05: Approval context attached to executor");
 
-        /* C-L05: 创建 SafetyGuard 桥接层并注入到审批上下文 */
         if (!exec->safety_bridge) {
             safety_guard_bridge_config_t bridge_cfg;
             __builtin_memset(&bridge_cfg, 0, sizeof(bridge_cfg));
@@ -247,8 +244,8 @@ void tool_executor_set_approval_ctx(tool_executor_t *exec, tool_approval_ctx_t *
             bridge_cfg.enable_input_sanitization = true;
             bridge_cfg.enable_resource_quota = true;
             bridge_cfg.enable_audit_guard = true;
-            bridge_cfg.rate_limit_per_minute = 0;  /* 无限制 */
-            bridge_cfg.max_params_size = 0;        /* 无限制 */
+            bridge_cfg.rate_limit_per_minute = 0;
+            bridge_cfg.max_params_size = 0;
             bridge_cfg.denied_patterns = NULL;
             bridge_cfg.agent_id = "tool_d";
 
@@ -261,7 +258,6 @@ void tool_executor_set_approval_ctx(tool_executor_t *exec, tool_approval_ctx_t *
             }
         }
 
-        /* 将桥接层注入到审批上下文 */
         tool_approval_set_safety_guard_bridge(approval_ctx, exec->safety_bridge);
     }
 }
@@ -274,7 +270,6 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* 审批主体：未显式传入时回退审批上下文默认（"tool_d"） */
     const char *caller_agent = (agent_id && agent_id[0]) ? agent_id : NULL;
 
     *out_result = NULL;
@@ -304,7 +299,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         result->output = AIRY_STRDUP("");
         result->error = AIRY_STRDUP("No executable specified in tool metadata");
         result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL; /* 配置缺陷：回传上层修正 */
+        result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
         result->duration_ms = 0;
         *out_result = result;
         tool_rw_gate_unlock(&exec->rw_gate);
@@ -327,7 +322,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         result->output = AIRY_STRDUP("");
         result->error = AIRY_STRDUP("Safety approval system not configured (approval_ctx is NULL)");
         result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_FATAL; /* 安全系统缺失：fail-closed 致命 */
+        result->failure_class = TOOL_RESULT_CLASS_FATAL;
         result->duration_ms = 0;
         *out_result = result;
         tool_rw_gate_unlock(&exec->rw_gate);
@@ -346,7 +341,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
              *   - always   → 放行并加入持久 ACL 规则
              *   - deny/超时 → 返回 EPERM（错误信息含 "User denied tool execution"） */
             if (exec->interactive && interactive_approval_is_enabled(exec->interactive)) {
-                /* 审批主体：真实调用方 agent（若透传），否则回退上下文默认 */
+
                 const char *agent = caller_agent;
                 if (!agent) {
                     agent = tool_approval_get_agent_id(exec->approval_ctx);
@@ -354,9 +349,9 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
                 /* 交互阻塞期间不持有 exec->lock（P1d：锁仅保护统计字段），
                  * 但保留并发门控（write 工具审批未决时阻塞其他工具，语义正确）。 */
                 airy_approval_outcome_t outcome = AIRY_APPROVAL_DENIED;
-                char *request_id = interactive_approval_block(
-                    exec->interactive, meta->name ? meta->name : "?",
-                    agent ? agent : "unknown", params_json, &outcome);
+                char *request_id =
+                    interactive_approval_block(exec->interactive, meta->name ? meta->name : "?",
+                                               agent ? agent : "unknown", params_json, &outcome);
                 if (request_id) {
                     AIRY_FREE(request_id);
                 }
@@ -372,35 +367,34 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
                     if (agent && meta->name) {
                         int ar = daemon_security_add_acl_rule(agent, meta->name, true);
                         if (ar != 0) {
-                            SVC_LOG_WARN("C-L05: add_acl_rule('%s','%s') failed rc=%d",
-                                         agent, meta->name, ar);
+                            SVC_LOG_WARN("C-L05: add_acl_rule('%s','%s') failed rc=%d", agent,
+                                         meta->name, ar);
                         }
                     }
                 } else {
-                    /* deny 决议或超时：返回 EPERM */
+
                     SVC_LOG_ERROR("C-L05: Tool '%s' denied by user (interactive) or timed out",
                                   meta->name ? meta->name : "?");
                     result->success = 0;
                     result->output = AIRY_STRDUP("");
                     result->error = AIRY_STRDUP("User denied tool execution");
                     result->exit_code = -1;
-                    result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL; /* 审批拒绝：回传上层改道 */
+                    result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
                     result->duration_ms = 0;
                     *out_result = result;
                     tool_rw_gate_unlock(&exec->rw_gate);
                     return AIRY_EPERM;
                 }
             } else {
-                SVC_LOG_ERROR(
-                    "C-L05: Tool approval denied for '%s': %s",
-                    meta->name ? meta->name : "?", approval_detail.reason);
+                SVC_LOG_ERROR("C-L05: Tool approval denied for '%s': %s",
+                              meta->name ? meta->name : "?", approval_detail.reason);
                 result->success = 0;
                 result->output = AIRY_STRDUP("");
-                result->error = AIRY_STRDUP(approval_detail.reason[0]
-                                                   ? approval_detail.reason
-                                                   : "Tool execution denied by safety guard");
+                result->error = AIRY_STRDUP(approval_detail.reason[0] ?
+                                                approval_detail.reason :
+                                                "Tool execution denied by safety guard");
                 result->exit_code = -1;
-                result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL; /* 审批拒绝：回传上层 */
+                result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
                 result->duration_ms = 0;
                 *out_result = result;
                 tool_rw_gate_unlock(&exec->rw_gate);
@@ -422,7 +416,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
             exec->success_count++;
             airy_mtx_unlock(&exec->lock);
         } else {
-            /* 内建工具失败（含工具自身返回错误）：普通失败，回传继续 */
+
             result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
         }
         *out_result = result;
@@ -440,7 +434,6 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     }
     argv[arg_count] = NULL;
 
-    /* 分配输出捕获缓冲区（1MB 上限，覆盖绝大多数工具输出，同时防止失控输出 OOM） */
     size_t cap_size = 1024 * 1024;
     char *output_buffer = (char *)AIRY_MALLOC(cap_size);
     if (!output_buffer) {
@@ -449,7 +442,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         result->output = AIRY_STRDUP("");
         result->error = AIRY_STRDUP("Memory allocation failed for output buffer");
         result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_FATAL; /* 内存分配失败：系统级致命 */
+        result->failure_class = TOOL_RESULT_CLASS_FATAL;
         result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
         *out_result = result;
         tool_rw_gate_unlock(&exec->rw_gate);
@@ -476,7 +469,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         result->output = AIRY_STRDUP("");
         result->error = AIRY_STRDUP("Sandbox not configured (initialization failed)");
         result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_FATAL; /* 安全沙箱缺失：fail-closed 致命 */
+        result->failure_class = TOOL_RESULT_CLASS_FATAL;
         result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
         AIRY_FREE(output_buffer);
         *out_result = result;
@@ -484,18 +477,16 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         return AIRY_EPERM;
     }
 
-    tool_execute_args_t targs = {
-        .executable = meta->executable,
-        .argv = (char *const *)argv,
-        .timeout_ms = timeout_ms,
-        .output_buffer = output_buffer,
-        .cap_size = cap_size,
-        .exec_result = 0
-    };
-    void *invoke_args[1] = { &targs };
+    tool_execute_args_t targs = {.executable = meta->executable,
+                                 .argv = (char *const *)argv,
+                                 .timeout_ms = timeout_ms,
+                                 .output_buffer = output_buffer,
+                                 .cap_size = cap_size,
+                                 .exec_result = 0};
+    void *invoke_args[1] = {&targs};
     void *sb_out_result = NULL;
-    airy_err_t sb_ret = airy_sandbox_invoke(exec->sandbox, SYS_TOOL_EXECUTE,
-                                                     invoke_args, 1, &sb_out_result);
+    airy_err_t sb_ret =
+        airy_sandbox_invoke(exec->sandbox, SYS_TOOL_EXECUTE, invoke_args, 1, &sb_out_result);
     if (sb_ret != AIRY_SUCCESS) {
         SVC_LOG_ERROR("C-L08: sandbox denied tool '%s' execution (rc=%d) — fail-closed",
                       meta->name ? meta->name : "?", (int)sb_ret);
@@ -503,7 +494,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         result->output = AIRY_STRDUP("");
         result->error = AIRY_STRDUP("Tool execution denied by sandbox (permission/quota/state)");
         result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_FATAL; /* 安全层拦截：fail-closed 致命 */
+        result->failure_class = TOOL_RESULT_CLASS_FATAL;
         result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
         AIRY_FREE(output_buffer);
         *out_result = result;
@@ -514,9 +505,8 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     /* sandbox_invoke 成功：targs.exec_result 含 airy_process_run_capture 返回值
      * (0-255=exit code; -1=启动失败; -2=超时) */
     int ret = targs.exec_result;
-    (void)sb_out_result;  /* sys_tool_execute 返回 SUCCESS/EFAIL，已由 sb_ret 覆盖检查 */
+    (void)sb_out_result;
 
-    /* 缩减缓冲区到实际输出长度，避免内存浪费 */
     size_t actual_len = strlen(output_buffer);
     if (actual_len + 1 < cap_size) {
         char *shrunk = (char *)AIRY_REALLOC(output_buffer, actual_len + 1);
@@ -534,14 +524,14 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         result->success = 0;
         result->error = AIRY_STRDUP("Failed to execute command: execvp failed");
         result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL; /* 启动失败：回传上层继续 */
+        result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
     } else if (ret == -2) {
         SVC_LOG_ERROR("tool_executor_run: command timed out after %u ms (executable=%s)",
                       timeout_ms, meta->executable ? meta->executable : "NULL");
         result->success = 0;
         result->error = AIRY_STRDUP("Command timed out");
         result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL; /* 超时：普通失败（transient 可重试） */
+        result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
     } else if (ret == 0) {
         result->success = 1;
         result->exit_code = 0;
@@ -555,9 +545,9 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         snprintf(err_msg, sizeof(err_msg), "Command exited with code %d", ret);
         result->error = AIRY_STRDUP(err_msg);
         result->exit_code = ret;
-        result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL; /* 退出码>0：普通失败 */
+        result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
     } else {
-        /* ret < 0 且非 -1/-2：信号终止（exit_code = -signum） */
+
         SVC_LOG_ERROR("tool_executor_run: command killed by signal %d (executable=%s)", -ret,
                       meta->executable ? meta->executable : "NULL");
         result->success = 0;
@@ -565,7 +555,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         snprintf(err_msg, sizeof(err_msg), "Command killed by signal %d", -ret);
         result->error = AIRY_STRDUP(err_msg);
         result->exit_code = ret;
-        result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL; /* 信号终止：普通失败 */
+        result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
     }
 
     result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
@@ -602,8 +592,6 @@ int tool_executor_run_async(tool_executor_t *exec, const tool_metadata_t *meta,
 
     return ret;
 }
-
-/* ---------- P0 交互式审批：service 层调用 ---------- */
 
 bool tool_executor_interactive_enabled(tool_executor_t *exec)
 {

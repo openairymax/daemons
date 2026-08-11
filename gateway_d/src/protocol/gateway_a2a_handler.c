@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "gateway_a2a_handler.h"
 
 #include "airy_memory.h"
@@ -90,7 +91,7 @@ int gw_a2a_handler_register_task_type(gw_a2a_handler_t *handler, const char *tas
         return AIRY_ERR_OVERFLOW;
 
     gw_a2a_task_type_entry_t *entry = &handler->task_types[handler->task_type_count];
-AIRY_STRNCPY_TERM(entry->task_type, task_type, sizeof(entry->task_type));
+    AIRY_STRNCPY_TERM(entry->task_type, task_type, sizeof(entry->task_type));
     entry->task_type[sizeof(entry->task_type) - 1] = '\0';
     entry->exec_fn = exec_fn;
     entry->user_data = user_data;
@@ -181,7 +182,6 @@ static char *extract_a2a_field(const char *json, const char *field_name)
     return val;
 }
 
-/* 提取 JSON 对象/数组字段（如 A2A message 对象），失败返回 "{}" */
 static char *extract_a2a_object_field(const char *json, const char *field_name)
 {
     if (!json || !field_name)
@@ -269,7 +269,8 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
 
         gw_a2a_task_type_entry_t *entry = find_task_type(handler, task_type);
         if (!entry) {
-            LOG_WARN("unknown task type: task_type=%s, registered=%zu", task_type, handler->task_type_count);
+            LOG_WARN("unknown task type: task_type=%s, registered=%zu", task_type,
+                     handler->task_type_count);
             const char *err = "{\"error\":{\"code\":-32601,\"message\":\"Unknown task type: %s\"}}";
             size_t elen = snprintf(NULL, 0, err, task_type);
             char *ebuf = (char *)AIRY_MALLOC(elen + 1);

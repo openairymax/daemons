@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (c) 2026 SPHARX. All Rights Reserved.
  * P0.18.1: daemon_main.h 传递性提供 atomic_compat、daemon_bootstrap_sd/ipc、
  * daemon_cupolas、daemon_platform_ext、logging、svc_logger 等头文件。
  * 本守护进程使用自定义 WebSocket/SSE 广播引擎与 accept 循环，
@@ -40,7 +40,7 @@ static daemon_bootstrap_ipc_t *g_bipc = NULL;
 static void notify_d_signal_handler(int sig)
 {
     (void)sig;
-    /* async-signal-safe：仅原子置位（accept 循环 1s 超时轮询，随后自然退出） */
+
     atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
 #ifndef _WIN32
     {
@@ -146,7 +146,7 @@ static int notify_d_compute_ws_accept_key(const char *client_key, char *out_key,
 
     static const char *b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     size_t off = 0;
-    /* 处理前 18 字节（6 组 3 字节 → 24 字符） */
+
     for (int i = 0; i < 18 && off + 4 <= out_size; i += 3) {
         unsigned int val = ((unsigned int)sha1[i] << 16) | ((unsigned int)sha1[i + 1] << 8) |
                            (unsigned int)sha1[i + 2];
@@ -155,7 +155,7 @@ static int notify_d_compute_ws_accept_key(const char *client_key, char *out_key,
         out_key[off++] = b64[(val >> 6) & 0x3F];
         out_key[off++] = b64[val & 0x3F];
     }
-    /* 处理最后 2 字节 → 3 字符 + '='（避免访问 sha1[20] 越界） */
+
     if (off + 4 <= out_size) {
         unsigned int val = ((unsigned int)sha1[18] << 16) | ((unsigned int)sha1[19] << 8);
         out_key[off++] = b64[(val >> 18) & 0x3F];
@@ -250,12 +250,12 @@ static DWORD WINAPI notify_d_event_loop(LPVOID arg)
         } else {
             airy_mtx_unlock(&svc->lock);
 #ifndef _WIN32
-            /* 替代 sleep(1)，允许更快响应关闭信号 */
+
             for (int _w = 0; _w < 10 && svc->event_running; _w++) {
                 usleep(100000); /* 100ms */
             }
 #else
-            /* 替代 Sleep(1000)，允许更快响应关闭信号 */
+
             for (int _w = 0; _w < 10 && svc->event_running; _w++) {
                 Sleep(100); /* 100ms */
             }
@@ -457,14 +457,12 @@ static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_
      * 标准方法 shutdown/get_stats/health_check。命中则回 JSON-RPC 2.0 响应；
      * 其余（SSE/WebSocket 升级/普通消息投递）保持原有逻辑，向后兼容。 */
     char rpc_response[NOTIFY_D_MAX_BUFFER];
-    int dispatch_rc = notify_d_dispatch_jsonrpc(svc, buffer, rpc_response,
-                                                sizeof(rpc_response));
+    int dispatch_rc = notify_d_dispatch_jsonrpc(svc, buffer, rpc_response, sizeof(rpc_response));
     if (dispatch_rc == NOTIFY_D_METHOD_SHUTDOWN) {
-        /* 与信号处理一致：原子置位 g_shutdown，accept 循环 1s 内退出 */
+
         atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
     }
-    if (dispatch_rc == NOTIFY_D_METHOD_HANDLED ||
-        dispatch_rc == NOTIFY_D_METHOD_SHUTDOWN) {
+    if (dispatch_rc == NOTIFY_D_METHOD_HANDLED || dispatch_rc == NOTIFY_D_METHOD_SHUTDOWN) {
         airy_sock_send(client_fd, rpc_response, strlen(rpc_response));
         airy_sock_close(client_fd);
         return;
@@ -491,7 +489,6 @@ static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_
     client->last_activity = client->connected_at;
     client->active = 1;
 
-    /* 解析可选 X-Client-Id 头：供订阅注册表（subscribe/unsubscribe）投递匹配 */
     const char *cid_tag = "X-Client-Id: ";
     const char *cid_hdr = strstr(buffer, cid_tag);
     if (cid_hdr) {
@@ -609,21 +606,19 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    /* P3.14 ACC-DT15: 初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger）*/
     daemon_cupolas_init("notify_d");
 
-    if (notify_d_init(&g_service, NOTIFY_D_DEFAULT_PORT, NOTIFY_D_DEFAULT_SOCKET) !=
-        AIRY_SUCCESS)
+    if (notify_d_init(&g_service, NOTIFY_D_DEFAULT_PORT, NOTIFY_D_DEFAULT_SOCKET) != AIRY_SUCCESS)
         return EXIT_FAILURE;
     if (notify_d_start(&g_service) != AIRY_SUCCESS) {
         notify_d_destroy(&g_service);
         return EXIT_FAILURE;
     }
 
-    g_bsd = daemon_bootstrap_sd_start("notify_d", "notify", g_service.socket_path,
-                                      0, "notify,core", 0);
-    g_bipc = daemon_bootstrap_ipc_start("notify_d", "notify", g_service.socket_path,
-                                        0, IPC_BUS_PROTO_JSON_RPC);
+    g_bsd =
+        daemon_bootstrap_sd_start("notify_d", "notify", g_service.socket_path, 0, "notify,core", 0);
+    g_bipc = daemon_bootstrap_ipc_start("notify_d", "notify", g_service.socket_path, 0,
+                                        IPC_BUS_PROTO_JSON_RPC);
 
     while (!g_shutdown && g_service.running) {
         airy_sock_t client = airy_sock_accept(g_service.server_fd, 1000);
@@ -636,7 +631,7 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     daemon_bootstrap_sd_stop(g_bsd);
     notify_d_stop(&g_service, g_shutdown ? 1 : 0);
     notify_d_destroy(&g_service);
-    daemon_cupolas_cleanup(); /* P3.14 ACC-DT15: 清理 cupolas 安全穹顶 */
+    daemon_cupolas_cleanup();
     log_cleanup();
     return 0;
 }

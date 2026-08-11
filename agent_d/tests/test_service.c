@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_service.c
  * @brief Agent 服务单元测试
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "agent_service.h"
-#include "service.h" /* 内部结构：手工注入子进程句柄以验证 invoke 取消路径 */
+#include "service.h"
 
 #include "airy_memory.h"
 
@@ -76,11 +76,9 @@ static void test_terminate(void)
     assert(ret == AIRY_SUCCESS);
     assert(agent_id != NULL);
 
-    /* 终止后通过 invoke 验证状态：应返回错误 JSON */
     ret = agent_service_terminate(svc, agent_id);
     assert(ret == AIRY_SUCCESS);
 
-    /* terminate 不回收槽位，count 仍为 1 */
     assert(agent_service_count(svc) == 1);
 
     char *out_output = NULL;
@@ -169,7 +167,7 @@ static void test_capacity_limit(void)
     assert(sprc1 == AIRY_SUCCESS);
     int sprc2 = agent_service_spawn(svc, "{\"n\":2}", &r2);
     assert(sprc2 == AIRY_SUCCESS);
-    /* 第三次派生应因容量上限失败 */
+
     int ret = agent_service_spawn(svc, "{\"n\":3}", &r3);
     assert(ret != AIRY_SUCCESS);
     assert(r3 == NULL);
@@ -197,18 +195,15 @@ static void test_spawn_after_terminate(void)
     assert(agent_service_spawn(svc, "{\"n\":2}", &r2) == AIRY_SUCCESS);
     assert(agent_service_count(svc) == 2);
 
-    /* 终止第一个 agent，槽位不回收 */
     assert(agent_service_terminate(svc, r1) == AIRY_SUCCESS);
     assert(agent_service_count(svc) == 2);
 
-    /* 再派生一个：count=2 < max_agents=3，应成功 */
     char *r3 = NULL;
     int ret = agent_service_spawn(svc, "{\"n\":3}", &r3);
     assert(ret == AIRY_SUCCESS);
     assert(r3 != NULL);
     assert(agent_service_count(svc) == 3);
 
-    /* r2 仍可调用：no-spawn 模式下返回明确错误（P0-2） */
     char *out_output = NULL;
     int irc = agent_service_invoke(svc, r2, "hi", 2, NULL, &out_output);
     assert(irc != AIRY_SUCCESS);
@@ -222,9 +217,6 @@ static void test_spawn_after_terminate(void)
     printf("    PASSED\n");
 }
 
-/* ========== P1c（改进1）：invoke 取消（token 短轮询 + 优雅终止 + AbortedOutput） ========== */
-
-/* 取消线程：延迟 150ms 后触发取消令牌 */
 static void *invoke_cancel_thread(void *arg)
 {
     airy_sleep_ms(150);
@@ -239,12 +231,10 @@ static void test_invoke_cancel(void)
     agent_service_t *svc = agent_service_create(8);
     assert(svc != NULL);
 
-    /* no-spawn 模式注册槽位（child_pid=0），随后手工注入真实子进程 */
     char *agent_id = NULL;
     int ret = agent_service_spawn(svc, "{\"type\":\"block\"}", &agent_id);
     assert(ret == AIRY_SUCCESS && agent_id != NULL);
 
-    /* 注入子进程：读一行请求后静默 30s（不响应），模拟慢 LLM 调用 */
     int in_pipe[2], out_pipe[2];
     assert(pipe(in_pipe) == 0 && pipe(out_pipe) == 0);
     pid_t pid = fork();
@@ -252,90 +242,10 @@ static void test_invoke_cancel(void)
     if (pid == 0) {
         dup2(in_pipe[0], STDIN_FILENO);
         dup2(out_pipe[1], STDOUT_FILENO);
-        close(in_pipe[0]); close(in_pipe[1]);
-        close(out_pipe[0]); close(out_pipe[1]);
-        setpgid(0, 0); /* 自成进程组：父进程按组 SIGTERM/SIGKILL 级联 */
-        char buf[64];
-        (void)read(STDIN_FILENO, buf, sizeof(buf)); /* 收到 invoke 请求后阻塞 */
-        sleep(30);                                  /* 兜底，正常由 SIGTERM 终止 */
-        _exit(0);
-    }
-    close(in_pipe[0]);
-    close(out_pipe[1]);
-
-    /* 定位槽位并注入 child 句柄（单线程测试，无并发竞争） */
-    agent_entry_internal_t *agent = NULL;
-    for (size_t i = 0; i < svc->agent_count; i++) {
-        if (strcmp(svc->agents[i].agent_id, agent_id) == 0) {
-            agent = &svc->agents[i];
-            break;
-        }
-    }
-    assert(agent != NULL);
-    agent->child_pid = pid;
-    agent->stdin_fd = in_pipe[1];   /* 父写端：invoke 写请求 */
-    agent->stdout_fd = out_pipe[0]; /* 父读端：invoke 读响应 */
-    agent->status = AGENT_STATUS_RUNNING;
-    agent->last_active = (uint64_t)time(NULL);
-
-    /* 取消令牌 + 异步取消线程 */
-    airy_cancel_token_t token;
-    assert(airy_cancel_token_init(&token) == 0);
-    airy_thread_t th;
-    assert(airy_platform_thread_create(&th, invoke_cancel_thread, &token) == 0);
-
-    /* invoke 阻塞读响应；150ms 后 token 命中 → 优雅终止子进程 → AbortedOutput */
-    char *out_output = NULL;
-    ret = agent_service_invoke(svc, agent_id, "ping", 4, &token, &out_output);
-    assert(airy_platform_thread_join(th, NULL) == 0);
-
-    assert(ret == AIRY_ERR_CANCELED);
-    assert(out_output != NULL);
-    assert(strstr(out_output, "aborted") != NULL); /* AbortedOutput 标记 */
-    assert(agent->child_pid <= 0);                 /* 子进程已被回收 */
-
-    AIRY_FREE(out_output);
-    AIRY_FREE(agent_id);
-    airy_cancel_token_destroy(&token);
-    agent_service_destroy(svc);
-
-    printf("    PASSED\n");
-}
-
-/* ========== 改进1（取消下探）：invoke 会话管理（request_id → token） ========== */
-
-/* 会话测试：invoke_begin 注册会话 → 外部按 request_id cancel → token 命中 */
-static void *session_cancel_thread(void *arg)
-{
-    agent_service_t *svc = (agent_service_t *)arg;
-    airy_sleep_ms(150);
-    int rc = agent_service_invoke_cancel(svc, "req-session-1");
-    assert(rc == AIRY_SUCCESS); /* 会话存在，取消送达 */
-    return NULL;
-}
-
-static void test_invoke_session_cancel(void)
-{
-    printf("  test_invoke_session_cancel...\n");
-
-    agent_service_t *svc = agent_service_create(8);
-    assert(svc != NULL);
-
-    /* no-spawn 模式注册槽位，随后手工注入真实子进程 */
-    char *agent_id = NULL;
-    int ret = agent_service_spawn(svc, "{\"type\":\"block\"}", &agent_id);
-    assert(ret == AIRY_SUCCESS && agent_id != NULL);
-
-    /* 注入子进程：读一行请求后静默 30s（不响应），模拟慢 LLM 调用 */
-    int in_pipe[2], out_pipe[2];
-    assert(pipe(in_pipe) == 0 && pipe(out_pipe) == 0);
-    pid_t pid = fork();
-    assert(pid >= 0);
-    if (pid == 0) {
-        dup2(in_pipe[0], STDIN_FILENO);
-        dup2(out_pipe[1], STDOUT_FILENO);
-        close(in_pipe[0]); close(in_pipe[1]);
-        close(out_pipe[0]); close(out_pipe[1]);
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
         setpgid(0, 0);
         char buf[64];
         (void)read(STDIN_FILENO, buf, sizeof(buf));
@@ -345,7 +255,6 @@ static void test_invoke_session_cancel(void)
     close(in_pipe[0]);
     close(out_pipe[1]);
 
-    /* 注入 child 句柄 */
     agent_entry_internal_t *agent = NULL;
     for (size_t i = 0; i < svc->agent_count; i++) {
         if (strcmp(svc->agents[i].agent_id, agent_id) == 0) {
@@ -360,16 +269,89 @@ static void test_invoke_session_cancel(void)
     agent->status = AGENT_STATUS_RUNNING;
     agent->last_active = (uint64_t)time(NULL);
 
-    /* 1. 注册 invoke 会话（request_id → token） */
+    airy_cancel_token_t token;
+    assert(airy_cancel_token_init(&token) == 0);
+    airy_thread_t th;
+    assert(airy_platform_thread_create(&th, invoke_cancel_thread, &token) == 0);
+
+    char *out_output = NULL;
+    ret = agent_service_invoke(svc, agent_id, "ping", 4, &token, &out_output);
+    assert(airy_platform_thread_join(th, NULL) == 0);
+
+    assert(ret == AIRY_ERR_CANCELED);
+    assert(out_output != NULL);
+    assert(strstr(out_output, "aborted") != NULL);
+    assert(agent->child_pid <= 0);
+
+    AIRY_FREE(out_output);
+    AIRY_FREE(agent_id);
+    airy_cancel_token_destroy(&token);
+    agent_service_destroy(svc);
+
+    printf("    PASSED\n");
+}
+
+static void *session_cancel_thread(void *arg)
+{
+    agent_service_t *svc = (agent_service_t *)arg;
+    airy_sleep_ms(150);
+    int rc = agent_service_invoke_cancel(svc, "req-session-1");
+    assert(rc == AIRY_SUCCESS);
+    return NULL;
+}
+
+static void test_invoke_session_cancel(void)
+{
+    printf("  test_invoke_session_cancel...\n");
+
+    agent_service_t *svc = agent_service_create(8);
+    assert(svc != NULL);
+
+    char *agent_id = NULL;
+    int ret = agent_service_spawn(svc, "{\"type\":\"block\"}", &agent_id);
+    assert(ret == AIRY_SUCCESS && agent_id != NULL);
+
+    int in_pipe[2], out_pipe[2];
+    assert(pipe(in_pipe) == 0 && pipe(out_pipe) == 0);
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        setpgid(0, 0);
+        char buf[64];
+        (void)read(STDIN_FILENO, buf, sizeof(buf));
+        sleep(30);
+        _exit(0);
+    }
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+
+    agent_entry_internal_t *agent = NULL;
+    for (size_t i = 0; i < svc->agent_count; i++) {
+        if (strcmp(svc->agents[i].agent_id, agent_id) == 0) {
+            agent = &svc->agents[i];
+            break;
+        }
+    }
+    assert(agent != NULL);
+    agent->child_pid = pid;
+    agent->stdin_fd = in_pipe[1];
+    agent->stdout_fd = out_pipe[0];
+    agent->status = AGENT_STATUS_RUNNING;
+    agent->last_active = (uint64_t)time(NULL);
+
     airy_cancel_token_t *token = NULL;
     ret = agent_service_invoke_begin(svc, "req-session-1", &token);
     assert(ret == AIRY_SUCCESS && token != NULL);
 
-    /* 2. 外部线程按 request_id 取消会话 */
     airy_thread_t th;
     assert(airy_platform_thread_create(&th, session_cancel_thread, svc) == 0);
 
-    /* 3. invoke 持会话 token 阻塞 → cancel 送达后 select 轮询命中 → AbortedOutput */
     char *out_output = NULL;
     ret = agent_service_invoke(svc, agent_id, "ping", 4, token, &out_output);
     assert(airy_platform_thread_join(th, NULL) == 0);
@@ -378,11 +360,9 @@ static void test_invoke_session_cancel(void)
     assert(out_output != NULL);
     assert(strstr(out_output, "aborted") != NULL);
 
-    /* 4. 注销会话（幂等安全） */
     agent_service_invoke_end(svc, "req-session-1");
-    agent_service_invoke_end(svc, "req-session-1"); /* 重复注销不崩溃 */
+    agent_service_invoke_end(svc, "req-session-1");
 
-    /* 5. 已注销：cancel 返回 NOT_FOUND */
     assert(agent_service_invoke_cancel(svc, "req-session-1") == AIRY_ERR_NOT_FOUND);
 
     AIRY_FREE(out_output);
@@ -392,7 +372,6 @@ static void test_invoke_session_cancel(void)
     printf("    PASSED\n");
 }
 
-/* 会话表满：拒绝新会话注册（BOUNDED） */
 static void test_invoke_session_capacity(void)
 {
     printf("  test_invoke_session_capacity...\n");
@@ -400,7 +379,6 @@ static void test_invoke_session_capacity(void)
     agent_service_t *svc = agent_service_create(8);
     assert(svc != NULL);
 
-    /* 注册满 AGENT_INVOKE_SESSIONS_MAX 个会话 */
     airy_cancel_token_t *tokens[AGENT_INVOKE_SESSIONS_MAX];
     char rid[64];
     for (size_t i = 0; i < AGENT_INVOKE_SESSIONS_MAX; i++) {
@@ -409,18 +387,15 @@ static void test_invoke_session_capacity(void)
         assert(rc == AIRY_SUCCESS && tokens[i] != NULL);
     }
 
-    /* 第 N+1 个：BUSY */
     int rc = agent_service_invoke_begin(svc, "req-cap-overflow", NULL);
     assert(rc == AIRY_ERR_BUSY);
 
-    /* 注销后恢复可用 */
     agent_service_invoke_end(svc, "req-cap-0");
     airy_cancel_token_t *t2 = NULL;
     rc = agent_service_invoke_begin(svc, "req-cap-overflow", &t2);
     assert(rc == AIRY_SUCCESS && t2 != NULL);
     agent_service_invoke_end(svc, "req-cap-overflow");
 
-    /* 逐一注销全部会话 */
     for (size_t i = 0; i < AGENT_INVOKE_SESSIONS_MAX; i++) {
         snprintf(rid, sizeof(rid), "req-cap-%zu", i);
         agent_service_invoke_end(svc, rid);
@@ -431,7 +406,6 @@ static void test_invoke_session_capacity(void)
 }
 
 /* ========== main ========== */
-
 int main(void)
 {
     /* P0-2：单元测试使用确定性模式 — 禁止真实 fork Python 子进程，
@@ -447,9 +421,9 @@ int main(void)
     test_terminate_nonexistent();
     test_capacity_limit();
     test_spawn_after_terminate();
-    /* 改进1（P1c）：invoke 取消令牌（select 短轮询 + 优雅终止 + AbortedOutput） */
+
     test_invoke_cancel();
-    /* 改进1（取消下探）：invoke 会话管理（request_id → token 跨会话取消） */
+
     test_invoke_session_cancel();
     test_invoke_session_capacity();
     printf("=== All tests PASSED ===\n");

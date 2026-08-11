@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file test_channel_e2e.c
  * @brief channel_d 统一通道服务端到端通信测试 (P3-B01)
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 验收标准: 往返延迟 < 10ms, 全部协议路由方法可用
  */
@@ -44,7 +44,7 @@ static uint64_t get_time_ns(void)
 
 static void cleanup_test_dir(void)
 {
-    /* P2-25: 使用 fork/exec 替代 system() 防止 shell 注入 */
+
     pid_t pid = fork();
     if (pid == 0) {
         execl("/bin/mkdir", "mkdir", "-p", TEST_SOCKET_DIR, (char *)NULL);
@@ -52,7 +52,8 @@ static void cleanup_test_dir(void)
     }
     if (pid > 0) {
         int wstatus;
-        while (waitpid(pid, &wstatus, 0) < 0 && errno == EINTR) {}
+        while (waitpid(pid, &wstatus, 0) < 0 && errno == EINTR) {
+        }
     }
 
     pid = fork();
@@ -62,7 +63,8 @@ static void cleanup_test_dir(void)
     }
     if (pid > 0) {
         int wstatus;
-        while (waitpid(pid, &wstatus, 0) < 0 && errno == EINTR) {}
+        while (waitpid(pid, &wstatus, 0) < 0 && errno == EINTR) {
+        }
     }
 }
 

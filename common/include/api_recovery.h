@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file api_recovery.h
  * @brief API错误恢复系统：多凭证池 + 降级策略 + 熔断集成
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * 核心能力：
  * - 多凭证轮换池（Round-Robin + 健康度追踪）

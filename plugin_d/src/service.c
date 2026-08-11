@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file service.c
  * @brief P2.2: Plugin 服务实现 — 动态加载/卸载/生命周期管理
@@ -14,7 +15,6 @@
  *   - plugin_start_fn()     → 启动
  *   - plugin_stop_fn()      → 停止
  *
- * Copyright (C) 2025-2026 SPHARX Ltd. All Rights Reserved.
  */
 
 #include "plugin_service.h"
@@ -23,55 +23,48 @@
 #include "daemon_platform_ext.h"
 #include "error.h"
 #include "svc_logger.h"
-#include "sync.h"  /* d8 清理：从 sync_compat.h 迁移到 sync.h 直接 API（消除兼容层） */
+#include "sync.h"
 #include "airy_memory.h"
 
-/* dlfcn.h 已由 daemon_platform_ext.h 的 airy_dl_* 跨平台抽象替代 */
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
-/* ==================== dlsym 函数指针安全获取 ==================== */
 /* dlsym 返回 void*（对象指针），但插件符号是函数指针。
  * ISO C 禁止函数指针↔对象指针直接转换，使用 memcpy 模式避免 -Wpedantic 警告。
  * 这是 POSIX 推荐的 dlsym 函数指针获取方式（避免未定义行为）。 */
-#define PLUGIN_DLSYM_FUNC(handle, name, fn_var) do { \
-    void *_plugin_sym = load_symbol((handle), (name)); \
-    if (_plugin_sym) { \
-        AIRY_MEMCPY(&(fn_var), &_plugin_sym, sizeof(_plugin_sym)); \
-    } else { \
-        (fn_var) = NULL; \
-    } \
-} while (0)
+#define PLUGIN_DLSYM_FUNC(handle, name, fn_var)                        \
+    do {                                                               \
+        void *_plugin_sym = load_symbol((handle), (name));             \
+        if (_plugin_sym) {                                             \
+            AIRY_MEMCPY(&(fn_var), &_plugin_sym, sizeof(_plugin_sym)); \
+        } else {                                                       \
+            (fn_var) = NULL;                                           \
+        }                                                              \
+    } while (0)
 
-/* ==================== 常量 ==================== */
-
-#define PLUGIN_MAX_COUNT     64     /**< 最大插件数 */
-#define PLUGIN_NAME_MAX_LEN  64     /**< 插件名称最大长度 */
-
-/* ==================== 内部数据结构 ==================== */
+#define PLUGIN_MAX_COUNT 64
+#define PLUGIN_NAME_MAX_LEN 64
 
 /**
  * @brief 插件注册表节点
  */
 typedef struct plugin_node {
-    plugin_descriptor_t desc;        /**< 插件描述符 */
-    plugin_stats_t stats;            /**< 插件统计 */
-    struct timespec load_time;       /**< 加载时间 */
-    struct plugin_node *next;       /**< 下一个节点 */
+    plugin_descriptor_t desc;
+    plugin_stats_t stats;
+    struct timespec load_time;
+    struct plugin_node *next;
 } plugin_node_t;
 
 /**
  * @brief 全局插件注册表
  */
 static struct {
-    plugin_node_t *head;             /**< 链表头 */
-    size_t count;                    /**< 插件总数 */
-    sync_rwlock_t rwlock;            /**< 读写锁 */
-    bool initialized;                /**< 是否已初始化 */
+    plugin_node_t *head;
+    size_t count;
+    sync_rwlock_t rwlock;
+    bool initialized;
 } g_plugin_registry;
-
-/* ==================== 内部辅助函数 ==================== */
 
 /**
  * @brief 按名称查找插件节点
@@ -79,7 +72,8 @@ static struct {
  */
 static plugin_node_t *find_node(const char *name)
 {
-    if (!name) return NULL;
+    if (!name)
+        return NULL;
     plugin_node_t *node = g_plugin_registry.head;
     while (node) {
         if (strcmp(node->desc.metadata.name, name) == 0)
@@ -117,24 +111,20 @@ static int registry_init(void)
     return 0;
 }
 
-/* ==================== 服务 API 实现 ==================== */
-
-int plugin_service_load(const char *library_path, const char *config_path,
-                        const char **out_name)
+int plugin_service_load(const char *library_path, const char *config_path, const char **out_name)
 {
-    if (!library_path) return AIRY_ERR_INVALID_PARAM;
+    if (!library_path)
+        return AIRY_ERR_INVALID_PARAM;
 
-    /* 惰性初始化注册表 */
-    if (registry_init() != 0) return AIRY_ERR_FAIL;
+    if (registry_init() != 0)
+        return AIRY_ERR_FAIL;
 
-    /* 打开动态库 */
     void *handle = airy_dl_open(library_path);
     if (!handle) {
         SVC_LOG_ERROR("P2.2: PluginD: dlopen failed: %s (%s)", library_path, airy_dl_error());
         return AIRY_ERR_FAIL;
     }
 
-    /* 加载元数据 */
     typedef const plugin_metadata_t *(*metadata_fn_t)(void);
     metadata_fn_t get_metadata = NULL;
     PLUGIN_DLSYM_FUNC(handle, "plugin_get_metadata", get_metadata);
@@ -150,7 +140,6 @@ int plugin_service_load(const char *library_path, const char *config_path,
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* 检查重名 */
     sync_rwlock_write_lock_ex(g_plugin_registry.rwlock, NULL);
     if (find_node(metadata->name)) {
         sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
@@ -160,7 +149,6 @@ int plugin_service_load(const char *library_path, const char *config_path,
     }
     sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
 
-    /* 加载入口点 */
     plugin_init_fn init_fn = NULL;
     plugin_destroy_fn destroy_fn = NULL;
     plugin_start_fn start_fn = NULL;
@@ -177,40 +165,34 @@ int plugin_service_load(const char *library_path, const char *config_path,
         return AIRY_ERR_NOT_FOUND;
     }
 
-    /* 分配插件节点 */
     plugin_node_t *node = (plugin_node_t *)AIRY_CALLOC(1, sizeof(plugin_node_t));
     if (!node) {
         airy_dl_close(handle);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    /* 填充描述符 */
     AIRY_MEMCPY(&node->desc.metadata, metadata, sizeof(plugin_metadata_t));
-    node->desc.init      = init_fn;
-    node->desc.destroy   = destroy_fn;
-    node->desc.start     = start_fn;
-    node->desc.stop      = stop_fn;
-    node->desc.handle    = handle;
+    node->desc.init = init_fn;
+    node->desc.destroy = destroy_fn;
+    node->desc.start = start_fn;
+    node->desc.stop = stop_fn;
+    node->desc.handle = handle;
     node->desc.user_data = NULL;
-    node->desc.state     = PLUGIN_STATE_LOADED;
+    node->desc.state = PLUGIN_STATE_LOADED;
 
-    AIRY_STRNCPY_TERM(node->desc.library_path, library_path,
-                         sizeof(node->desc.library_path));
+    AIRY_STRNCPY_TERM(node->desc.library_path, library_path, sizeof(node->desc.library_path));
     if (config_path) {
-        AIRY_STRNCPY_TERM(node->desc.config_path, config_path,
-                             sizeof(node->desc.config_path));
+        AIRY_STRNCPY_TERM(node->desc.config_path, config_path, sizeof(node->desc.config_path));
     }
 
-    /* 初始化插件 */
     clock_gettime(CLOCK_MONOTONIC, &node->load_time);
     void *user_data = NULL;
     int init_ret = init_fn(config_path, &user_data);
     if (init_ret != 0) {
-        SVC_LOG_ERROR("P2.2: PluginD: Plugin init failed: %s (err=%d)",
-                      metadata->name, init_ret);
+        SVC_LOG_ERROR("P2.2: PluginD: Plugin init failed: %s (err=%d)", metadata->name, init_ret);
         node->desc.state = PLUGIN_STATE_ERROR;
         node->stats.error_count++;
-        /* 继续添加，允许用户重试 */
+
     } else {
         node->desc.user_data = user_data;
         node->desc.state = PLUGIN_STATE_INITIALIZED;
@@ -218,7 +200,6 @@ int plugin_service_load(const char *library_path, const char *config_path,
 
     node->stats.load_count++;
 
-    /* 插入注册表 */
     sync_rwlock_write_lock_ex(g_plugin_registry.rwlock, NULL);
     node->next = g_plugin_registry.head;
     g_plugin_registry.head = node;
@@ -229,15 +210,16 @@ int plugin_service_load(const char *library_path, const char *config_path,
         *out_name = metadata->name;
     }
 
-    SVC_LOG_INFO("P2.2: PluginD: Plugin loaded: %s v%s (type=%d, state=%d)",
-               metadata->name, metadata->version, metadata->type, node->desc.state);
+    SVC_LOG_INFO("P2.2: PluginD: Plugin loaded: %s v%s (type=%d, state=%d)", metadata->name,
+                 metadata->version, metadata->type, node->desc.state);
 
     return 0;
 }
 
 int plugin_service_unload(const char *name)
 {
-    if (!name) return AIRY_ERR_INVALID_PARAM;
+    if (!name)
+        return AIRY_ERR_INVALID_PARAM;
 
     sync_rwlock_write_lock_ex(g_plugin_registry.rwlock, NULL);
 
@@ -245,17 +227,15 @@ int plugin_service_unload(const char *name)
     while (*prev) {
         plugin_node_t *node = *prev;
         if (strcmp(node->desc.metadata.name, name) == 0) {
-            /* 先停止 */
+
             if (node->desc.state == PLUGIN_STATE_RUNNING && node->desc.stop) {
                 node->desc.stop(node->desc.user_data);
             }
 
-            /* 销毁 */
             if (node->desc.destroy) {
                 node->desc.destroy(node->desc.user_data);
             }
 
-            /* 关闭动态库 */
             if (node->desc.handle) {
                 airy_dl_close(node->desc.handle);
             }
@@ -277,7 +257,8 @@ int plugin_service_unload(const char *name)
 
 int plugin_service_start(const char *name)
 {
-    if (!name) return AIRY_ERR_INVALID_PARAM;
+    if (!name)
+        return AIRY_ERR_INVALID_PARAM;
 
     /* 锁内查找 + 快照回调（用户回调可能在插件初始化时耗时/阻塞，
      * 移出写锁以避免阻塞 registry 的所有读操作） */
@@ -293,7 +274,7 @@ int plugin_service_start(const char *name)
 
     if (node->desc.state == PLUGIN_STATE_RUNNING) {
         sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
-        return 0;  /* 已在运行 */
+        return 0;
     }
 
     if (node->desc.state == PLUGIN_STATE_ERROR) {
@@ -308,13 +289,11 @@ int plugin_service_start(const char *name)
     node->desc.state = PLUGIN_STATE_STARTING;
     sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
 
-    /* 锁外执行用户回调（不阻塞其他插件操作） */
     int ret = 0;
     if (start_fn) {
         ret = start_fn(user_data);
     }
 
-    /* 回调后重新加锁更新状态；插件可能已被并发 unload */
     sync_rwlock_write_lock_ex(g_plugin_registry.rwlock, NULL);
     plugin_node_t *n2 = find_node(name);
     if (!n2) {
@@ -338,7 +317,8 @@ int plugin_service_start(const char *name)
 
 int plugin_service_stop(const char *name)
 {
-    if (!name) return AIRY_ERR_INVALID_PARAM;
+    if (!name)
+        return AIRY_ERR_INVALID_PARAM;
 
     sync_rwlock_write_lock_ex(g_plugin_registry.rwlock, NULL);
     plugin_node_t *node = find_node(name);
@@ -358,12 +338,10 @@ int plugin_service_stop(const char *name)
 
     node->desc.state = PLUGIN_STATE_INITIALIZED;
 
-    /* 更新运行时间统计 */
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
-    node->stats.uptime_ns +=
-        (uint64_t)(now.tv_sec - node->load_time.tv_sec) * 1000000000ULL
-        + (uint64_t)(now.tv_nsec - node->load_time.tv_nsec);
+    node->stats.uptime_ns += (uint64_t)(now.tv_sec - node->load_time.tv_sec) * 1000000000ULL +
+                             (uint64_t)(now.tv_nsec - node->load_time.tv_nsec);
 
     sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
 
@@ -373,7 +351,8 @@ int plugin_service_stop(const char *name)
 
 int plugin_service_get_metadata(const char *name, plugin_metadata_t *metadata)
 {
-    if (!name || !metadata) return AIRY_ERR_INVALID_PARAM;
+    if (!name || !metadata)
+        return AIRY_ERR_INVALID_PARAM;
 
     sync_rwlock_read_lock_ex(g_plugin_registry.rwlock, NULL);
     plugin_node_t *node = find_node(name);
@@ -389,7 +368,8 @@ int plugin_service_get_metadata(const char *name, plugin_metadata_t *metadata)
 
 plugin_state_t plugin_service_get_state(const char *name)
 {
-    if (!name) return PLUGIN_STATE_UNLOADED;
+    if (!name)
+        return PLUGIN_STATE_UNLOADED;
 
     sync_rwlock_read_lock_ex(g_plugin_registry.rwlock, NULL);
     plugin_node_t *node = find_node(name);
@@ -400,7 +380,8 @@ plugin_state_t plugin_service_get_state(const char *name)
 
 int plugin_service_get_stats(const char *name, plugin_stats_t *stats)
 {
-    if (!name || !stats) return AIRY_ERR_INVALID_PARAM;
+    if (!name || !stats)
+        return AIRY_ERR_INVALID_PARAM;
 
     sync_rwlock_read_lock_ex(g_plugin_registry.rwlock, NULL);
     plugin_node_t *node = find_node(name);
@@ -411,13 +392,11 @@ int plugin_service_get_stats(const char *name, plugin_stats_t *stats)
 
     AIRY_MEMCPY(stats, &node->stats, sizeof(plugin_stats_t));
 
-    /* 如果正在运行，更新 uptime */
     if (node->desc.state == PLUGIN_STATE_RUNNING) {
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
-        stats->uptime_ns +=
-            (uint64_t)(now.tv_sec - node->load_time.tv_sec) * 1000000000ULL
-            + (uint64_t)(now.tv_nsec - node->load_time.tv_nsec);
+        stats->uptime_ns += (uint64_t)(now.tv_sec - node->load_time.tv_sec) * 1000000000ULL +
+                            (uint64_t)(now.tv_nsec - node->load_time.tv_nsec);
     }
 
     sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
@@ -426,11 +405,11 @@ int plugin_service_get_stats(const char *name, plugin_stats_t *stats)
 
 int plugin_service_list(char ***names, size_t *count, int type_filter)
 {
-    if (!names || !count) return AIRY_ERR_INVALID_PARAM;
+    if (!names || !count)
+        return AIRY_ERR_INVALID_PARAM;
 
     sync_rwlock_read_lock_ex(g_plugin_registry.rwlock, NULL);
 
-    /* 先计数 */
     size_t total = 0;
     plugin_node_t *node = g_plugin_registry.head;
     while (node) {
@@ -440,14 +419,12 @@ int plugin_service_list(char ***names, size_t *count, int type_filter)
         node = node->next;
     }
 
-    /* 分配名称数组 */
     char **name_array = (char **)AIRY_CALLOC(total, sizeof(char *));
     if (!name_array && total > 0) {
         sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    /* 填充名称 */
     size_t idx = 0;
     node = g_plugin_registry.head;
     while (node && idx < total) {
@@ -465,8 +442,7 @@ int plugin_service_list(char ***names, size_t *count, int type_filter)
     return 0;
 }
 
-int plugin_service_execute(const char *name, const char *json_input,
-                           char **json_output)
+int plugin_service_execute(const char *name, const char *json_input, char **json_output)
 {
     if (!name || !json_input || !json_output)
         return AIRY_ERR_INVALID_PARAM;
@@ -488,20 +464,17 @@ int plugin_service_execute(const char *name, const char *json_input,
     sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
 
     if (!exec_fn) {
-        SVC_LOG_WARN("P2.2: PluginD: plugin '%s' does not export plugin_execute",
-                     name);
+        SVC_LOG_WARN("P2.2: PluginD: plugin '%s' does not export plugin_execute", name);
         return AIRY_ERR_NOT_FOUND;
     }
 
     int ret = exec_fn(json_input, json_output);
     if (ret != 0) {
-        SVC_LOG_ERROR("P2.2: PluginD: plugin_execute failed: %s (err=%d)",
-                      name, ret);
+        SVC_LOG_ERROR("P2.2: PluginD: plugin_execute failed: %s (err=%d)", name, ret);
         return AIRY_ERR_EXEC_FAIL;
     }
     if (!*json_output) {
-        SVC_LOG_ERROR("P2.2: PluginD: plugin_execute returned empty output: %s",
-                      name);
+        SVC_LOG_ERROR("P2.2: PluginD: plugin_execute returned empty output: %s", name);
         return AIRY_ERR_EXEC_FAIL;
     }
     return 0;

@@ -1,9 +1,9 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
 /*
- * Copyright (C) 2026 SPHARX. All Rights Reserved.
- * SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
- * SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
  *
  * @file gateway_svc_adapter.c
  * @brief Gateway服务适配器：将网关服务适配到统一的AgentRT服务管理框架
@@ -17,7 +17,6 @@
  * 2. 保持向后兼容性
  * 3. 最小化性能开销
  *
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "gateway_service.h"
@@ -27,24 +26,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ==================== 适配器上下文 ==================== */
-
 /**
  * @brief 网关服务适配器上下文
  */
 typedef struct {
-    gateway_service_t gateway_svc;        /**< 原始网关服务句柄 */
-    gateway_service_config_t gateway_cfg; /**< 网关服务配置 */
-    airy_svc_config_t common_cfg;      /**< 通用服务配置 */
+    gateway_service_t gateway_svc;
+    gateway_service_config_t gateway_cfg;
+    airy_svc_config_t common_cfg;
 } gateway_adapter_ctx_t;
-
-/* ==================== 适配器实现 ==================== */
 
 /**
  * @brief 适配器初始化函数
  */
-static airy_err_t gateway_adapter_init(airy_svc_t service,
-                                            const airy_svc_config_t *config)
+static airy_err_t gateway_adapter_init(airy_svc_t service, const airy_svc_config_t *config)
 {
     if (!service) {
         return AIRY_EINVAL;
@@ -56,25 +50,19 @@ static airy_err_t gateway_adapter_init(airy_svc_t service,
         return AIRY_EINVAL;
     }
 
-    // 保存通用配置
     if (config) {
         AIRY_MEMCPY(&ctx->common_cfg, config, sizeof(airy_svc_config_t));
     }
 
-    // 将通用配置转换为网关特定配置
     gateway_service_get_default_config(&ctx->gateway_cfg);
 
-    // 更新网关配置中的名称和版本
     ctx->gateway_cfg.name = ctx->common_cfg.name ? ctx->common_cfg.name : "gateway_d";
     ctx->gateway_cfg.version = ctx->common_cfg.version ? ctx->common_cfg.version : "0.1.1";
 
-    // 根据通用配置调整网关能力
     if (ctx->common_cfg.capabilities & AIRY_SVC_CAP_ASYNC) {
-        // 网关服务支持异步操作
     }
 
     if (ctx->common_cfg.capabilities & AIRY_SVC_CAP_STREAMING) {
-        // WebSocket网关支持流式处理
         ctx->gateway_cfg.ws.enabled = true;
     }
 
@@ -87,7 +75,6 @@ static airy_err_t gateway_adapter_init(airy_svc_t service,
     ctx->gateway_cfg.enable_metrics = ctx->common_cfg.enable_metrics;
     ctx->gateway_cfg.enable_tracing = ctx->common_cfg.enable_tracing;
 
-    // 创建网关服务实例
     airy_err_t err = gateway_service_create(&ctx->gateway_svc, &ctx->gateway_cfg);
 
     if (err != AIRY_SUCCESS) {
@@ -95,7 +82,6 @@ static airy_err_t gateway_adapter_init(airy_svc_t service,
         return err;
     }
 
-    // 初始化网关服务
     err = gateway_service_init(ctx->gateway_svc);
     if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("网关服务初始化失败: %d", err);
@@ -182,7 +168,6 @@ static void gateway_adapter_destroy(airy_svc_t service)
         ctx->gateway_svc = NULL;
     }
 
-    // 释放动态分配的资源
     if (ctx->gateway_cfg.http.host && strcmp(ctx->gateway_cfg.http.host, "0.0.0.0") != 0) {
         AIRY_FREE((void *)ctx->gateway_cfg.http.host);
     }
@@ -216,8 +201,6 @@ static airy_err_t gateway_adapter_healthcheck(airy_svc_t service)
     return gateway_service_healthcheck(ctx->gateway_svc);
 }
 
-/* ==================== 适配器接口 ==================== */
-
 /**
  * @brief 网关服务适配器接口
  */
@@ -229,8 +212,6 @@ static const airy_svc_interface_t gateway_adapter_iface = {
     .healthcheck = gateway_adapter_healthcheck,
 };
 
-/* ==================== 公共API ==================== */
-
 /**
  * @brief 创建网关服务适配器
  *
@@ -240,25 +221,21 @@ static const airy_svc_interface_t gateway_adapter_iface = {
  * @param[in] config 通用服务配置
  * @return 错误码
  */
-airy_err_t gateway_service_adapter_create(airy_svc_t *out_service,
-                                               const airy_svc_config_t *config)
+airy_err_t gateway_service_adapter_create(airy_svc_t *out_service, const airy_svc_config_t *config)
 {
     if (!out_service) {
         return AIRY_EINVAL;
     }
 
-    // 分配适配器上下文
     gateway_adapter_ctx_t *ctx = AIRY_CALLOC(1, sizeof(gateway_adapter_ctx_t));
     if (!ctx) {
         SVC_LOG_ERROR("gateway_service_adapter_create: context allocation failed");
         return AIRY_ENOMEM;
     }
 
-    // 保存通用配置
     if (config) {
         AIRY_MEMCPY(&ctx->common_cfg, config, sizeof(airy_svc_config_t));
     } else {
-        // 使用默认配置
         ctx->common_cfg.name = "gateway_d";
         ctx->common_cfg.version = "0.1.1";
         ctx->common_cfg.capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_STREAMING;
@@ -270,10 +247,9 @@ airy_err_t gateway_service_adapter_create(airy_svc_t *out_service,
         ctx->common_cfg.enable_tracing = false;
     }
 
-    // 通过通用服务创建API创建服务实例
     airy_svc_t svc_handle = NULL;
-    airy_err_t err = airy_svc_create(&svc_handle, ctx->common_cfg.name,
-                                                 &gateway_adapter_iface, &ctx->common_cfg);
+    airy_err_t err = airy_svc_create(&svc_handle, ctx->common_cfg.name, &gateway_adapter_iface,
+                                     &ctx->common_cfg);
 
     if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("gateway_service_adapter_create: airy_svc_create failed, err=%d", err);
@@ -281,8 +257,6 @@ airy_err_t gateway_service_adapter_create(airy_svc_t *out_service,
         return err;
     }
 
-    // 将适配器上下文存储在服务的user_data字段中
-    // 这样接口函数可以通过user_data获取适配器上下文，
     // 而不是将service句柄强转为适配器上下文（避免类型混淆）
     err = airy_svc_set_user_data(svc_handle, ctx);
     if (err != AIRY_SUCCESS) {
@@ -324,15 +298,13 @@ gateway_service_t gateway_service_adapter_get_original(airy_svc_t service)
  * @param[in] config 通用服务配置
  * @return 错误码
  */
-airy_err_t gateway_service_adapter_wrap(airy_svc_t *out_service,
-                                             gateway_service_t gateway_svc,
-                                             const airy_svc_config_t *config)
+airy_err_t gateway_service_adapter_wrap(airy_svc_t *out_service, gateway_service_t gateway_svc,
+                                        const airy_svc_config_t *config)
 {
     if (!out_service || !gateway_svc) {
         return AIRY_EINVAL;
     }
 
-    // 分配适配器上下文
     gateway_adapter_ctx_t *ctx = AIRY_CALLOC(1, sizeof(gateway_adapter_ctx_t));
     if (!ctx) {
         return AIRY_ENOMEM;
@@ -340,11 +312,9 @@ airy_err_t gateway_service_adapter_wrap(airy_svc_t *out_service,
 
     ctx->gateway_svc = gateway_svc;
 
-    // 保存通用配置
     if (config) {
         AIRY_MEMCPY(&ctx->common_cfg, config, sizeof(airy_svc_config_t));
     } else {
-        // 从网关服务获取配置信息
         ctx->common_cfg.name = "gateway_d";
         ctx->common_cfg.version = "0.1.1";
         ctx->common_cfg.capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_STREAMING;
@@ -354,17 +324,15 @@ airy_err_t gateway_service_adapter_wrap(airy_svc_t *out_service,
         ctx->common_cfg.enable_metrics = true;
     }
 
-    // 通过通用服务创建API创建服务实例
     airy_svc_t svc_handle = NULL;
-    airy_err_t err = airy_svc_create(&svc_handle, ctx->common_cfg.name,
-                                                 &gateway_adapter_iface, &ctx->common_cfg);
+    airy_err_t err = airy_svc_create(&svc_handle, ctx->common_cfg.name, &gateway_adapter_iface,
+                                     &ctx->common_cfg);
 
     if (err != AIRY_SUCCESS) {
         AIRY_FREE(ctx);
         return err;
     }
 
-    // 将适配器上下文存储在user_data中
     err = airy_svc_set_user_data(svc_handle, ctx);
     if (err != AIRY_SUCCESS) {
         airy_svc_destroy(svc_handle);
@@ -375,8 +343,6 @@ airy_err_t gateway_service_adapter_wrap(airy_svc_t *out_service,
     *out_service = svc_handle;
     return AIRY_SUCCESS;
 }
-
-/* ==================== 适配器生命周期管理 ==================== */
 
 /**
  * @brief 适配器服务初始化（代理函数）
@@ -434,8 +400,6 @@ airy_err_t gateway_service_adapter_healthcheck(airy_svc_t service)
     return gateway_adapter_healthcheck(service);
 }
 
-/* ==================== 服务状态查询 ==================== */
-
 /**
  * @brief 获取适配器服务状态
  */
@@ -473,8 +437,7 @@ bool gateway_service_adapter_is_running(airy_svc_t service)
 /**
  * @brief 获取适配器服务统计信息
  */
-airy_err_t gateway_service_adapter_get_stats(airy_svc_t service,
-                                                  airy_svc_stats_t *stats)
+airy_err_t gateway_service_adapter_get_stats(airy_svc_t service, airy_svc_stats_t *stats)
 {
     if (!service || !stats) {
         return AIRY_EINVAL;
@@ -487,8 +450,6 @@ airy_err_t gateway_service_adapter_get_stats(airy_svc_t service,
 
     return gateway_service_get_stats(ctx->gateway_svc, stats);
 }
-
-/* ==================== 示例使用代码 ==================== */
 
 const airy_svc_interface_t *gateway_service_adapter_get_interface(void)
 {
@@ -514,8 +475,8 @@ bool gateway_service_adapter_supports_type(airy_svc_t service, gateway_daemon_ty
     }
 }
 
-airy_err_t gateway_service_adapter_set_type_enabled(airy_svc_t service,
-                                                         gateway_daemon_type_t type, bool enabled)
+airy_err_t gateway_service_adapter_set_type_enabled(airy_svc_t service, gateway_daemon_type_t type,
+                                                    bool enabled)
 {
     if (!service)
         return AIRY_EINVAL;
@@ -543,7 +504,7 @@ airy_err_t gateway_service_adapter_set_type_enabled(airy_svc_t service,
 }
 
 airy_err_t gateway_service_adapter_create_from_config(airy_svc_t *out_service,
-                                                           const char *config_path)
+                                                      const char *config_path)
 {
     if (!out_service || !config_path)
         return AIRY_EINVAL;
@@ -559,16 +520,14 @@ airy_err_t gateway_service_adapter_create_from_config(airy_svc_t *out_service,
     airy_err_t err = gateway_service_adapter_create(out_service, &config);
     if (err != AIRY_SUCCESS)
         return err;
-    gateway_adapter_ctx_t *ctx =
-        (gateway_adapter_ctx_t *)airy_svc_get_user_data(*out_service);
+    gateway_adapter_ctx_t *ctx = (gateway_adapter_ctx_t *)airy_svc_get_user_data(*out_service);
     if (ctx) {
         gateway_service_get_default_config(&ctx->gateway_cfg);
     }
     return AIRY_SUCCESS;
 }
 
-airy_err_t gateway_service_adapter_reload_config(airy_svc_t service,
-                                                      const char *config_path)
+airy_err_t gateway_service_adapter_reload_config(airy_svc_t service, const char *config_path)
 {
     if (!service)
         return AIRY_EINVAL;

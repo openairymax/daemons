@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /*
- * Copyright (c) 2026 SPHARX Ltd. All Rights Reserved.
  * test_api_recovery.c - API Recovery Module Unit Tests
  */
 
@@ -15,13 +15,29 @@
 static int tests_run = 0;
 static int tests_passed = 0;
 
-#define TEST(name) do { tests_run++; printf("  %-50s", name); } while(0)
-#define PASS() do { tests_passed++; printf("[PASS]\n"); } while(0)
-#define FAIL(msg) do { printf("[FAIL] %s\n", msg); return; } while(0)
-#define ASSERT(cond, msg) do { if (!(cond)) { FAIL(msg); } } while(0)
+#define TEST(name)               \
+    do {                         \
+        tests_run++;             \
+        printf("  %-50s", name); \
+    } while (0)
+#define PASS()              \
+    do {                    \
+        tests_passed++;     \
+        printf("[PASS]\n"); \
+    } while (0)
+#define FAIL(msg)                   \
+    do {                            \
+        printf("[FAIL] %s\n", msg); \
+        return;                     \
+    } while (0)
+#define ASSERT(cond, msg) \
+    do {                  \
+        if (!(cond)) {    \
+            FAIL(msg);    \
+        }                 \
+    } while (0)
 
 /* ==================== Pool Lifecycle ==================== */
-
 static void test_pool_create_null_name(void)
 {
     TEST("Pool create with NULL name");
@@ -70,7 +86,6 @@ static void test_pool_multiple_create_destroy(void)
 }
 
 /* ==================== Credential Add/Remove/Rotate ==================== */
-
 static void test_add_credential(void)
 {
     TEST("Add credential");
@@ -189,7 +204,6 @@ static void test_remove_credential_out_of_range(void)
 }
 
 /* ==================== Credential Rotation ==================== */
-
 static void test_next_credential_rotation(void)
 {
     TEST("Next credential rotation");
@@ -242,7 +256,6 @@ static void test_next_credential_empty_pool(void)
 }
 
 /* ==================== Credential Health Tracking ==================== */
-
 static void test_mark_cred_success(void)
 {
     TEST("Mark credential success");
@@ -359,7 +372,6 @@ static void test_cred_health_out_of_range(void)
 }
 
 /* ==================== Fallback Models ==================== */
-
 static void test_add_fallback_model(void)
 {
     TEST("Add fallback model");
@@ -424,7 +436,6 @@ static void test_add_fallback_model_overflow(void)
 }
 
 /* ==================== Degradation / Upgrade / Level ==================== */
-
 static void test_current_model_primary(void)
 {
     TEST("Current model when no degradation");
@@ -465,7 +476,8 @@ static void test_degrade_upgrade_cycle(void)
     ASSERT(level == API_REC_DEGRADE_LOWER_TIER, "level should be LOWER_TIER after one degrade");
 
     const char *model = api_rec_current_model(pool);
-    ASSERT(strcmp(model, "fallback-gpt-3.5") == 0, "should use second fallback model after one degrade");
+    ASSERT(strcmp(model, "fallback-gpt-3.5") == 0,
+           "should use second fallback model after one degrade");
 
     ret = api_rec_degrade(pool);
     ASSERT(ret == 0, "second degrade should succeed");
@@ -549,7 +561,6 @@ static void test_current_level_null_pool(void)
 }
 
 /* ==================== Retry Configuration ==================== */
-
 static void test_set_retry_config(void)
 {
     TEST("Set retry configuration");
@@ -584,7 +595,8 @@ static void test_set_retry_config_edge_values(void)
     int ret = api_rec_set_retry_config(pool, 0, 0, 0.0f, 0.0f);
     ASSERT(ret == 0, "set zero values should succeed");
     ASSERT(pool->max_retries == API_REC_MAX_RETRY, "zero max_retries should fallback to default");
-    ASSERT(pool->base_delay_ms == API_REC_DEFAULT_BASE_DELAY_MS, "zero delay should fallback to default");
+    ASSERT(pool->base_delay_ms == API_REC_DEFAULT_BASE_DELAY_MS,
+           "zero delay should fallback to default");
     ASSERT(pool->backoff_factor == 2.0f, "zero backoff should fallback to 2.0");
     ASSERT(pool->jitter_ratio == 0.0f, "zero jitter should be accepted");
 
@@ -598,7 +610,6 @@ static void test_set_retry_config_edge_values(void)
 }
 
 /* ==================== Circuit Breaker Binding ==================== */
-
 static void test_bind_circuit_breaker(void)
 {
     TEST("Bind circuit breaker");
@@ -627,7 +638,6 @@ static void test_bind_circuit_breaker_null_pool(void)
 }
 
 /* ==================== Statistics ==================== */
-
 static void test_get_stats(void)
 {
     TEST("Get statistics");
@@ -681,18 +691,19 @@ static void test_get_stats_null_output(void)
 }
 
 /* ==================== String Conversion ==================== */
-
 static void test_error_string(void)
 {
     TEST("Error code to string conversion");
     ASSERT(strcmp(api_rec_error_string(API_REC_ERR_NONE), "none") == 0, "NONE -> none");
     ASSERT(strcmp(api_rec_error_string(API_REC_ERR_NETWORK), "network") == 0, "NETWORK -> network");
     ASSERT(strcmp(api_rec_error_string(API_REC_ERR_TIMEOUT), "timeout") == 0, "TIMEOUT -> timeout");
-    ASSERT(strcmp(api_rec_error_string(API_REC_ERR_RATE_LIMIT), "rate_limit") == 0, "RATE_LIMIT -> rate_limit");
+    ASSERT(strcmp(api_rec_error_string(API_REC_ERR_RATE_LIMIT), "rate_limit") == 0,
+           "RATE_LIMIT -> rate_limit");
     ASSERT(strcmp(api_rec_error_string(API_REC_ERR_AUTH), "auth") == 0, "AUTH -> auth");
     ASSERT(strcmp(api_rec_error_string(API_REC_ERR_SERVER), "server") == 0, "SERVER -> server");
     ASSERT(strcmp(api_rec_error_string(API_REC_ERR_UNKNOWN), "unknown") == 0, "UNKNOWN -> unknown");
-    ASSERT(strcmp(api_rec_error_string((api_rec_error_code_t)999), "unknown") == 0, "invalid -> unknown");
+    ASSERT(strcmp(api_rec_error_string((api_rec_error_code_t)999), "unknown") == 0,
+           "invalid -> unknown");
     PASS();
 }
 
@@ -700,14 +711,16 @@ static void test_degradation_string(void)
 {
     TEST("Degradation level to string conversion");
     ASSERT(strcmp(api_rec_degradation_string(API_REC_DEGRADE_NONE), "none") == 0, "NONE -> none");
-    ASSERT(strcmp(api_rec_degradation_string(API_REC_DEGRADE_LOWER_TIER), "lower_tier") == 0, "LOWER_TIER -> lower_tier");
-    ASSERT(strcmp(api_rec_degradation_string(API_REC_DEGRADE_CACHE), "cache") == 0, "CACHE -> cache");
-    ASSERT(strcmp(api_rec_degradation_string((api_rec_degradation_level_t)999), "unknown") == 0, "invalid -> unknown");
+    ASSERT(strcmp(api_rec_degradation_string(API_REC_DEGRADE_LOWER_TIER), "lower_tier") == 0,
+           "LOWER_TIER -> lower_tier");
+    ASSERT(strcmp(api_rec_degradation_string(API_REC_DEGRADE_CACHE), "cache") == 0,
+           "CACHE -> cache");
+    ASSERT(strcmp(api_rec_degradation_string((api_rec_degradation_level_t)999), "unknown") == 0,
+           "invalid -> unknown");
     PASS();
 }
 
 /* ==================== Comprehensive Scenario Tests ==================== */
-
 static void test_credential_health_decay_after_failures(void)
 {
     TEST("Credential health decays after multiple failures");
@@ -765,7 +778,8 @@ static void test_credential_auth_failure_disables(void)
     int ret = api_rec_mark_cred_failure(pool, API_REC_ERR_AUTH);
     ASSERT(ret == 0, "mark auth failure should succeed");
 
-    ASSERT(pool->credentials[0].is_valid == false, "credential should be disabled after auth failure");
+    ASSERT(pool->credentials[0].is_valid == false,
+           "credential should be disabled after auth failure");
 
     api_rec_pool_destroy(pool);
     PASS();

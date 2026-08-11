@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file notify_service.c
  * @brief 通知服务核心实现（notify.* 命名空间）
@@ -8,23 +9,19 @@
  * 多协议广播引擎（broadcast_event）与 JSON-RPC 方法分发（dispatch_jsonrpc）。
  * 方法名不带命名空间前缀——gateway 转发时已剥离 <ns>. 前缀（02-l2-service-protocol.md §5）。
  *
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "notify_service.h"
 
 #include "airy_memory.h"
-#include "daemon_platform_ext.h" /* airy_sock_send 等 daemon 平台扩展声明 */
+#include "daemon_platform_ext.h"
 #include "jsonrpc_helpers.h"
 
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
-/* ==================== WebSocket 帧发送 ==================== */
-
-static int notify_d_send_ws_frame(notify_client_t *client, const char *payload,
-                                  size_t payload_len)
+static int notify_d_send_ws_frame(notify_client_t *client, const char *payload, size_t payload_len)
 {
     if (!client || !payload || client->fd == AIRY_INVALID_SOCKET) {
         AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null parameter or invalid socket");
@@ -58,8 +55,6 @@ static int notify_d_send_ws_frame(notify_client_t *client, const char *payload,
     return 0;
 }
 
-/* ==================== 事件广播引擎 ==================== */
-
 int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *event)
 {
     if (!svc || !event) {
@@ -86,11 +81,10 @@ int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *even
         if (!client->active)
             continue;
 
-        /* 向后兼容的频道匹配：无频道（接收全部）/ broadcast 频道 / 频道相等 */
         int subscribed = !event->channel || !client->channel ||
                          strcmp(event->channel, "broadcast") == 0 ||
                          strcmp(client->channel, event->channel) == 0;
-        /* 订阅注册表匹配：客户端携带 client_id 且 (channel, client_id) 已订阅 */
+
         if (!subscribed && event->channel && client->client_id)
             subscribed = notify_d_has_subscription(svc, event->channel, client->client_id);
 
@@ -117,8 +111,6 @@ int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *even
 
     return (int)broadcast_count;
 }
-
-/* ==================== 事件队列 ==================== */
 
 int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char *channel,
                      const char *event_type)
@@ -147,8 +139,6 @@ int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char *chann
     return 0;
 }
 
-/* ==================== 服务核心生命周期 ==================== */
-
 int notify_d_service_init(notify_d_service_t *svc)
 {
     if (!svc) {
@@ -166,7 +156,6 @@ void notify_d_service_destroy(notify_d_service_t *svc)
     if (!svc)
         return;
 
-    /* 释放订阅注册表 */
     for (size_t i = 0; i < svc->subscription_count; i++) {
         notify_subscription_t *sub = &svc->subscriptions[i];
         if (sub->active) {
@@ -179,7 +168,6 @@ void notify_d_service_destroy(notify_d_service_t *svc)
     }
     svc->subscription_count = 0;
 
-    /* 释放未消费的待处理事件（调用方须先确保消费线程已停止） */
     for (size_t i = 0; i < svc->pending_count; i++) {
         size_t idx = (svc->pending_head + i) % NOTIFY_D_MAX_PENDING;
         notify_event_t *event = svc->pending[idx];
@@ -195,7 +183,6 @@ void notify_d_service_destroy(notify_d_service_t *svc)
     svc->pending_head = 0;
     svc->pending_tail = 0;
 
-    /* 释放客户端连接资源 */
     for (size_t i = 0; i < svc->client_count; i++) {
         AIRY_FREE(svc->clients[i].channel);
         AIRY_FREE(svc->clients[i].client_id);
@@ -207,11 +194,8 @@ void notify_d_service_destroy(notify_d_service_t *svc)
     airy_mtx_destroy(&svc->lock);
 }
 
-/* ==================== 频道订阅注册表 ==================== */
-
 static notify_subscription_t *notify_d_find_subscription(notify_d_service_t *svc,
-                                                         const char *channel,
-                                                         const char *client_id)
+                                                         const char *channel, const char *client_id)
 {
     for (size_t i = 0; i < svc->subscription_count; i++) {
         notify_subscription_t *sub = &svc->subscriptions[i];
@@ -231,13 +215,11 @@ int notify_d_subscribe(notify_d_service_t *svc, const char *channel, const char 
 
     airy_mtx_lock(&svc->lock);
 
-    /* 幂等：已订阅则直接确认 */
     if (notify_d_find_subscription(svc, channel, client_id)) {
         airy_mtx_unlock(&svc->lock);
         return AIRY_SUCCESS;
     }
 
-    /* 优先复用未激活槽位，否则追加到注册表尾部 */
     notify_subscription_t *slot = NULL;
     for (size_t i = 0; i < svc->subscription_count; i++) {
         if (!svc->subscriptions[i].active) {
@@ -290,7 +272,6 @@ int notify_d_unsubscribe(notify_d_service_t *svc, const char *channel, const cha
     }
     airy_mtx_unlock(&svc->lock);
 
-    /* 幂等：未订阅也返回成功 */
     return AIRY_SUCCESS;
 }
 
@@ -336,10 +317,8 @@ size_t notify_d_active_client_count(notify_d_service_t *svc)
     return count;
 }
 
-/* ==================== JSON-RPC 方法分发 ==================== */
-
-int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request,
-                              char *response, size_t response_size)
+int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request, char *response,
+                              size_t response_size)
 {
     if (!svc || !request || !response || response_size == 0)
         return NOTIFY_D_METHOD_NOT_RPC;
@@ -362,7 +341,7 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request,
     int status = NOTIFY_D_METHOD_HANDLED;
 
     if (strcmp(method, "publish") == 0) {
-        /* publish：params {event?, channel?, message|payload} → 入队并触发广播 */
+
         cJSON *params = cJSON_GetObjectItem(req, "params");
         const char *channel = jsonrpc_get_string_param(params, "channel", "default");
         const char *message = jsonrpc_get_string_param(params, "message", NULL);
@@ -374,14 +353,14 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request,
             out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "message (or payload) is required",
                                       rid);
         } else {
-            /* enqueue 假定调用方持有 svc->lock（与消费线程互斥） */
+
             airy_mtx_lock(&svc->lock);
             int rc = notify_d_enqueue(svc, message, channel, event_type);
             airy_mtx_unlock(&svc->lock);
             if (rc != AIRY_SUCCESS) {
                 out = jsonrpc_build_error(JSONRPC_INTERNAL_ERROR,
-                                          rc == AIRY_ERR_OUT_OF_MEMORY ? "out of memory"
-                                                                       : "pending queue full",
+                                          rc == AIRY_ERR_OUT_OF_MEMORY ? "out of memory" :
+                                                                         "pending queue full",
                                           rid);
             } else {
                 airy_mtx_lock(&svc->lock);
@@ -397,14 +376,14 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request,
             }
         }
     } else if (strcmp(method, "subscribe") == 0) {
-        /* subscribe：params {channel, client_id} → 注册订阅 */
+
         cJSON *params = cJSON_GetObjectItem(req, "params");
         const char *channel = jsonrpc_get_string_param(params, "channel", NULL);
         const char *client_id = jsonrpc_get_string_param(params, "client_id", NULL);
 
         if (!channel || !channel[0] || !client_id || !client_id[0]) {
-            out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS,
-                                      "channel and client_id are required", rid);
+            out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "channel and client_id are required",
+                                      rid);
         } else {
             int rc = notify_d_subscribe(svc, channel, client_id);
             if (rc != AIRY_SUCCESS) {
@@ -419,14 +398,14 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request,
             }
         }
     } else if (strcmp(method, "unsubscribe") == 0) {
-        /* unsubscribe：params {channel, client_id} → 移除订阅 */
+
         cJSON *params = cJSON_GetObjectItem(req, "params");
         const char *channel = jsonrpc_get_string_param(params, "channel", NULL);
         const char *client_id = jsonrpc_get_string_param(params, "client_id", NULL);
 
         if (!channel || !channel[0] || !client_id || !client_id[0]) {
-            out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS,
-                                      "channel and client_id are required", rid);
+            out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "channel and client_id are required",
+                                      rid);
         } else {
             int rc = notify_d_unsubscribe(svc, channel, client_id);
             if (rc != AIRY_SUCCESS) {
@@ -441,7 +420,7 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request,
             }
         }
     } else if (strcmp(method, "list") == 0) {
-        /* list：活跃连接数 + 各频道订阅数（聚合订阅注册表与活跃客户端） */
+
         const char *chan_names[NOTIFY_D_MAX_SUBSCRIPTIONS + NOTIFY_D_MAX_CLIENTS];
         size_t chan_count = 0;
         size_t active_clients = 0;
@@ -504,7 +483,7 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request,
         }
         cJSON_AddItemToObject(result, "channels", channels_arr);
     } else if (strcmp(method, "health") == 0) {
-        /* health：队列占用、消费线程状态、活跃连接数 */
+
         size_t pending = 0;
         size_t active_clients = 0;
         size_t total_subs = 0;
@@ -529,12 +508,10 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request,
         airy_mtx_unlock(&svc->lock);
 
         uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
-        double occupancy = NOTIFY_D_MAX_PENDING > 0
-                               ? (double)pending / (double)NOTIFY_D_MAX_PENDING
-                               : 0.0;
-        const char *status = (!consumer_running || pending >= NOTIFY_D_MAX_PENDING)
-                                 ? "degraded"
-                                 : "ok";
+        double occupancy =
+            NOTIFY_D_MAX_PENDING > 0 ? (double)pending / (double)NOTIFY_D_MAX_PENDING : 0.0;
+        const char *status =
+            (!consumer_running || pending >= NOTIFY_D_MAX_PENDING) ? "degraded" : "ok";
 
         result = cJSON_CreateObject();
         cJSON_AddStringToObject(result, "status", status);
@@ -549,7 +526,7 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request,
         cJSON_AddNumberToObject(result, "errors", (double)errors);
         cJSON_AddNumberToObject(result, "uptime_s", (double)uptime);
     } else if (strcmp(method, "shutdown") == 0) {
-        /* shutdown：与信号处理一致，调用方负责原子置位退出标志 */
+
         result = cJSON_CreateObject();
         cJSON_AddStringToObject(result, "status", "shutting_down");
         status = NOTIFY_D_METHOD_SHUTDOWN;
@@ -581,7 +558,7 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request,
         cJSON_AddNumberToObject(result, "uptime_s", (double)uptime);
         cJSON_AddNumberToObject(result, "timestamp", (double)time(NULL) * 1000.0);
     } else {
-        /* 未知方法：不处理，交由原协议路径（普通消息投递 / WS 升级 / SSE） */
+
         cJSON_Delete(req);
         return NOTIFY_D_METHOD_NOT_RPC;
     }
@@ -595,7 +572,7 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request,
             snprintf(response, response_size, "%s", built);
             AIRY_FREE(built);
         } else {
-            /* 构建失败回退：保证调用方始终得到合法 JSON-RPC 响应 */
+
             snprintf(response, response_size,
                      "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":%d,\"message\":\"internal error\"},"
                      "\"id\":%d}",

@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file channel_service.h
  * @brief UnifiedChannel 统一通道服务 API
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  *
  * IMP-08: 统一通道服务，支持 SOCKET/SHM 通道类型
  */
@@ -68,12 +68,13 @@ typedef struct {
     uint32_t idle_timeout_ms;
 } channel_config_t;
 
-#define CHANNEL_CONFIG_DEFAULTS                                                                    \
-    {                                                                                              \
-        .max_channels = CHANNEL_MAX_CHANNELS, .default_buffer_size = 65536, .socket_backlog = 128, \
-        .socket_dir = AIRY_TMP_DIR "/channels", .shm_prefix = "/airy_ch_",                   \
-        .idle_timeout_ms = 30000                                                                   \
-    }
+#define CHANNEL_CONFIG_DEFAULTS              \
+    {.max_channels = CHANNEL_MAX_CHANNELS,   \
+     .default_buffer_size = 65536,           \
+     .socket_backlog = 128,                  \
+     .socket_dir = AIRY_TMP_DIR "/channels", \
+     .shm_prefix = "/airy_ch_",              \
+     .idle_timeout_ms = 30000}
 
 typedef void (*channel_message_cb_t)(const char *channel_id, const void *data, size_t data_len,
                                      void *user_data);

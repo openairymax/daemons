@@ -1,9 +1,9 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file service.h
  * @brief Agent 服务内部结构声明
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AGENT_SERVICE_INTERNAL_H
@@ -16,19 +16,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* ---------- invoke 会话（跨进程取消基础，改进1 "取消下探"） ---------- */
 
 /* 活跃 invoke 会话上限（并发取消查找为线性扫描，上限防资源失控）。
  * 每会话持有独立 cancel_token：handle_invoke 注册、agent.cancel 查表取消。 */
 #define AGENT_INVOKE_SESSIONS_MAX 1024
 
 typedef struct {
-    char request_id[64];   /* 调用方生成的唯一请求 ID */
-    airy_cancel_token_t *token; /* invoke 期间活跃的取消令牌（BORROW，调用方生命周期） */
+    char request_id[64];
+    airy_cancel_token_t *token;
     int active;
 } agent_invoke_session_t;
 
-/* ---------- 内部哈希表（与 syscall_router.c 解耦的独立实现） ---------- */
 
 typedef struct {
     char *key;
@@ -42,7 +40,6 @@ typedef struct {
     size_t count;
 } agent_hash_table_t;
 
-/* ---------- Agent 条目 ---------- */
 
 /* 槽位状态机：
  *   0 = 空闲（可复用，spawn 失败回滚后）
@@ -55,10 +52,10 @@ typedef struct {
 #define AGENT_STATUS_SPAWNING 4
 
 typedef struct {
-    char *agent_id;       /* Agent 唯一标识（32 字符十六进制） */
-    char *spec;            /* Agent 规格（JSON 字符串） */
-    int status;            /* 见上方状态机 */
-    uint64_t spawned_at;   /* 派生时间戳（秒） */
+    char *agent_id;
+    char *spec;
+    int status;
+    uint64_t spawned_at;
     /* 细粒度锁：保护本条目的 status/child 句柄，避免全局锁持有期间
      * 做 fork / 子进程 IO 而串行化所有 agent 操作。每个 spawn/invoke/
      * terminate 仅在索引查找时短暂持有全局锁，子进程生命周期操作

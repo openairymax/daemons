@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 /**
  * @file tool_approval.c
  * @brief C-L05: Cupolas SafetyGuard → tool_d 工具审批适配器实现
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "tool_approval.h"
@@ -25,14 +25,13 @@ struct tool_approval_ctx {
     uint64_t total_checks;
     uint64_t denied_count;
     uint64_t sanitized_count;
-    /* C-L05: SafetyGuard 桥接层 */
+
     safety_guard_bridge_t *bridge;
 };
 
 tool_approval_ctx_t *tool_approval_create(const tool_approval_config_t *cfg)
 {
-    tool_approval_ctx_t *ctx =
-        (tool_approval_ctx_t *)AIRY_CALLOC(1, sizeof(tool_approval_ctx_t));
+    tool_approval_ctx_t *ctx = (tool_approval_ctx_t *)AIRY_CALLOC(1, sizeof(tool_approval_ctx_t));
     if (!ctx) {
         AIRY_LOG_ERROR("tool_approval_create: alloc failed");
         return NULL;
@@ -57,8 +56,7 @@ tool_approval_ctx_t *tool_approval_create(const tool_approval_config_t *cfg)
     ctx->bridge = NULL;
 
     AIRY_LOG_INFO("C-L05: Tool approval context created (safety_guard=%d, audit=%d)",
-                     ctx->config.enable_safety_guard_chain,
-                     ctx->config.enable_audit_logging);
+                  ctx->config.enable_safety_guard_chain, ctx->config.enable_audit_logging);
     return ctx;
 }
 
@@ -67,17 +65,15 @@ void tool_approval_destroy(tool_approval_ctx_t *ctx)
     if (!ctx)
         return;
     AIRY_LOG_INFO("C-L05: Tool approval destroyed (checks=%llu denied=%llu sanitized=%llu)",
-                     (unsigned long long)ctx->total_checks,
-                     (unsigned long long)ctx->denied_count,
-                     (unsigned long long)ctx->sanitized_count);
+                  (unsigned long long)ctx->total_checks, (unsigned long long)ctx->denied_count,
+                  (unsigned long long)ctx->sanitized_count);
     AIRY_FREE(ctx);
 }
 
-/* C-L05: 设置 SafetyGuard 桥接层 */
-void tool_approval_set_safety_guard_bridge(tool_approval_ctx_t *ctx,
-                                           safety_guard_bridge_t *bridge)
+void tool_approval_set_safety_guard_bridge(tool_approval_ctx_t *ctx, safety_guard_bridge_t *bridge)
 {
-    if (!ctx) return;
+    if (!ctx)
+        return;
     ctx->bridge = bridge;
     if (bridge) {
         AIRY_LOG_INFO("C-L05: SafetyGuard bridge attached to approval context");
@@ -91,16 +87,15 @@ int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *tool_nam
                                   size_t sanitized_size)
 {
     if (!ctx || !tool_name || !params_json || !sanitized_params || sanitized_size == 0) {
-        return AIRY_ERR_INVALID_PARAM;  /* BAN-073 */
+        return AIRY_ERR_INVALID_PARAM; /* BAN-073 */
     }
 
-    /* 使用 daemon_security 进行参数净化 */
     char sanitized_tool[256];
     int ret = daemon_sanitize_tool_params(tool_name, params_json, sanitized_tool,
                                           sizeof(sanitized_tool), sanitized_params, sanitized_size);
 
     if (ret == 0) {
-        /* 检查参数是否被修改 */
+
         if (strcmp(params_json, sanitized_params) != 0) {
             AIRY_LOG_INFO("C-L05: Tool params sanitized for '%s'", tool_name);
             ctx->sanitized_count++;
@@ -119,7 +114,6 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* 初始化详情 */
     if (detail) {
         __builtin_memset(detail, 0, sizeof(*detail));
         detail->decision = TOOL_APPROVAL_DENIED;
@@ -133,73 +127,58 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
     const char *tool_name = meta->name ? meta->name : "unknown";
     const char *agent_id = ctx->config.agent_id ? ctx->config.agent_id : "unknown";
 
-    /* ── C-L05: 优先使用 SafetyGuard 桥接层（6 种守卫链） ── */
     if (ctx->bridge) {
         safety_guard_bridge_result_t bridge_result;
-        int bridge_ret = safety_guard_bridge_check_for_agent(
-            ctx->bridge, agent_id, meta, params_json, &bridge_result);
+        int bridge_ret = safety_guard_bridge_check_for_agent(ctx->bridge, agent_id, meta,
+                                                             params_json, &bridge_result);
 
         if (bridge_ret != 0) {
-            /* 守卫链拒绝 */
-            AIRY_LOG_WARN("C-L05: SafetyGuard bridge denied '%s' for '%s': %s",
-                             tool_name, agent_id, bridge_result.denial_reason);
+
+            AIRY_LOG_WARN("C-L05: SafetyGuard bridge denied '%s' for '%s': %s", tool_name, agent_id,
+                          bridge_result.denial_reason);
             if (detail) {
                 detail->decision = TOOL_APPROVAL_DENIED;
                 detail->permission_check_passed = bridge_result.permission_passed;
                 detail->safety_guard_passed = 0;
                 detail->params_were_sanitized = bridge_result.input_sanitized;
                 snprintf(detail->reason, sizeof(detail->reason), "%s",
-                         bridge_result.denial_reason[0]
-                             ? bridge_result.denial_reason
-                             : "Denied by SafetyGuard chain");
-                if (bridge_result.input_sanitized &&
-                    bridge_result.sanitized_params[0]) {
-                    snprintf(detail->sanitized_params,
-                             sizeof(detail->sanitized_params), "%s",
+                         bridge_result.denial_reason[0] ? bridge_result.denial_reason :
+                                                          "Denied by SafetyGuard chain");
+                if (bridge_result.input_sanitized && bridge_result.sanitized_params[0]) {
+                    snprintf(detail->sanitized_params, sizeof(detail->sanitized_params), "%s",
                              bridge_result.sanitized_params);
                 }
             }
             ctx->denied_count++;
 
-            /* ── P1.4.3: DENY 审计日志 ── */
             if (ctx->config.enable_audit_logging) {
-                daemon_audit_log_event("tool_d", "tool_execute_denied",
-                                       tool_name, 0, agent_id);
+                daemon_audit_log_event("tool_d", "tool_execute_denied", tool_name, 0, agent_id);
             }
 
             return AIRY_ERR_PERMISSION_DENIED;
         }
 
-        /* 守卫链全部通过 */
         if (detail) {
-            detail->decision = bridge_result.input_sanitized
-                                   ? TOOL_APPROVAL_SANITIZED
-                                   : TOOL_APPROVAL_ALLOWED;
+            detail->decision =
+                bridge_result.input_sanitized ? TOOL_APPROVAL_SANITIZED : TOOL_APPROVAL_ALLOWED;
             detail->permission_check_passed = bridge_result.permission_passed;
             detail->safety_guard_passed = 1;
             detail->params_were_sanitized = bridge_result.input_sanitized;
-            if (bridge_result.input_sanitized &&
-                bridge_result.sanitized_params[0]) {
-                snprintf(detail->sanitized_params,
-                         sizeof(detail->sanitized_params), "%s",
+            if (bridge_result.input_sanitized && bridge_result.sanitized_params[0]) {
+                snprintf(detail->sanitized_params, sizeof(detail->sanitized_params), "%s",
                          bridge_result.sanitized_params);
             }
             snprintf(detail->reason, sizeof(detail->reason),
                      "Approved by SafetyGuard chain (%d/%d guards) for tool '%s'",
-                     bridge_result.guards_executed,
-                     bridge_result.guard_chain_length, tool_name);
+                     bridge_result.guards_executed, bridge_result.guard_chain_length, tool_name);
         }
 
         AIRY_LOG_INFO("C-L05: SafetyGuard bridge approved '%s' "
-                         "(%d/%d guards executed)",
-                         tool_name, bridge_result.guards_executed,
-                         bridge_result.guard_chain_length);
+                      "(%d/%d guards executed)",
+                      tool_name, bridge_result.guards_executed, bridge_result.guard_chain_length);
         return 0;
     }
 
-    /* ── 降级路径：桥接层不可用时使用本地安全检查 ── */
-
-    /* ── 步骤 1: 参数净化 ── */
     char sanitized[4096] = {0};
     if (params_json && params_json[0] != '\0') {
         int san_ret = tool_approval_sanitize_params(ctx, tool_name, params_json, sanitized,
@@ -227,8 +206,8 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
      * 修正为 `if (perm_ret != 0)` 与 safety_guard_bridge.c L218 保持一致。*/
     int perm_ret = daemon_check_tool_permission(agent_id, tool_name, "execute");
     if (perm_ret != 0) {
-        AIRY_LOG_WARN("C-L05: Permission denied for agent='%s' tool='%s' (perm_ret=%d)",
-                         agent_id, tool_name, perm_ret);
+        AIRY_LOG_WARN("C-L05: Permission denied for agent='%s' tool='%s' (perm_ret=%d)", agent_id,
+                      tool_name, perm_ret);
         if (detail) {
             detail->permission_check_passed = 0;
             snprintf(detail->reason, sizeof(detail->reason),
@@ -236,10 +215,8 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
         }
         ctx->denied_count++;
 
-        /* ── P1.4.3: DENY 审计日志 ── */
         if (ctx->config.enable_audit_logging) {
-            daemon_audit_log_event("tool_d", "tool_execute_denied",
-                                   tool_name, 0, agent_id);
+            daemon_audit_log_event("tool_d", "tool_execute_denied", tool_name, 0, agent_id);
         }
         return AIRY_ERR_PERMISSION_DENIED;
     }
@@ -248,22 +225,17 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
         detail->permission_check_passed = 1;
     }
 
-    /* ── 步骤 3: SafetyGuard 链式检查（可选） ── */
     if (ctx->config.enable_safety_guard_chain) {
-        /* SafetyGuard 链式检查通过 daemon_security 内部集成 */
-        /* 此处使用 daemon_check_tool_permission 已涵盖基本 SafetyGuard 检查 */
-        /* 未来可扩展为调用 safety_guard_check() API */
+
         if (detail) {
             detail->safety_guard_passed = 1;
         }
     }
 
-    /* ── 步骤 4: 审计日志（成功路径） ── */
     if (ctx->config.enable_audit_logging) {
         daemon_audit_log_event("tool_d", "tool_execute", tool_name, 1, agent_id);
     }
 
-    /* ── 返回结果 ── */
     if (detail) {
         if (detail->params_were_sanitized) {
             detail->decision = TOOL_APPROVAL_SANITIZED;
@@ -306,7 +278,6 @@ int tool_approval_check_for_agent(tool_approval_ctx_t *ctx, const char *agent_id
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* 未传入 agent_id（或空串）时回退上下文默认，等价于 tool_approval_check */
     if (!agent_id || !agent_id[0]) {
         return tool_approval_check(ctx, meta, params_json, detail);
     }

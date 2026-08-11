@@ -1,10 +1,10 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
+
 /**
  * @file scheduler_service.h
  * @brief 调度服务接口定义
  * @details 负责任务调度，选择最合适的 Agent
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #ifndef AIRY_RT_SCHEDULER_SERVICE_H
@@ -18,10 +18,10 @@
  * @brief 调度策略类型
  */
 typedef enum {
-    SCHED_STRATEGY_ROUND_ROBIN,   /**< 轮询调度 */
-    SCHED_STRATEGY_WEIGHTED,      /**< 加权调度 */
-    SCHED_STRATEGY_ML_BASED,      /**< 基于机器学习的调度 */
-    SCHED_STRATEGY_PRIORITY_BASED, /**< 基于优先级的调度（任务优先级越高，选人分数放大） */
+    SCHED_STRATEGY_ROUND_ROBIN,
+    SCHED_STRATEGY_WEIGHTED,
+    SCHED_STRATEGY_ML_BASED,
+    SCHED_STRATEGY_PRIORITY_BASED,
     SCHED_STRATEGY_COUNT
 } sched_strategy_t;
 
@@ -29,10 +29,10 @@ typedef enum {
  * @brief 任务优先级
  */
 typedef enum {
-    TASK_PRIORITY_LOW,    /**< 低优先级 */
-    TASK_PRIORITY_NORMAL, /**< 正常优先级 */
-    TASK_PRIORITY_HIGH,   /**< 高优先级 */
-    TASK_PRIORITY_URGENT, /**< 紧急优先级 */
+    TASK_PRIORITY_LOW,
+    TASK_PRIORITY_NORMAL,
+    TASK_PRIORITY_HIGH,
+    TASK_PRIORITY_URGENT,
     TASK_PRIORITY_COUNT
 } task_priority_t;
 
@@ -40,12 +40,12 @@ typedef enum {
  * @brief 任务信息
  */
 typedef struct {
-    char *task_id;            /**< 任务 ID（可为 NULL，缺省由服务端生成） */
-    char *task_description;   /**< 任务描述 */
-    task_priority_t priority; /**< 任务优先级 */
-    uint32_t timeout_ms;      /**< 超时时间（毫秒） */
-    void *task_data;          /**< 任务数据 */
-    size_t task_data_size;    /**< 任务数据大小 */
+    char *task_id;
+    char *task_description;
+    task_priority_t priority;
+    uint32_t timeout_ms;
+    void *task_data;
+    size_t task_data_size;
 } task_info_t;
 
 /**
@@ -53,11 +53,11 @@ typedef struct {
  * @note 命名用 SCHED_ 前缀：types.h 已占用 TASK_STATUS_* 宏，避免枚举名展开冲突
  */
 typedef enum {
-    SCHED_TASK_STATUS_PENDING,   /**< 已入队，等待工作线程消费 */
-    SCHED_TASK_STATUS_RUNNING,   /**< 已选中 agent，执行中 */
-    SCHED_TASK_STATUS_COMPLETED, /**< 执行成功（output 有效） */
-    SCHED_TASK_STATUS_FAILED,    /**< 执行失败（error 有效） */
-    SCHED_TASK_STATUS_CANCELED,  /**< 已取消（sched.cancel，仅 PENDING 可取消） */
+    SCHED_TASK_STATUS_PENDING,
+    SCHED_TASK_STATUS_RUNNING,
+    SCHED_TASK_STATUS_COMPLETED,
+    SCHED_TASK_STATUS_FAILED,
+    SCHED_TASK_STATUS_CANCELED,
     SCHED_TASK_STATUS_COUNT
 } task_status_t;
 
@@ -65,16 +65,16 @@ typedef enum {
  * @brief 任务记录（队列条目，get_task 查询依据）
  */
 typedef struct {
-    char *task_id;          /**< 任务 ID */
-    char *task_description; /**< 任务描述 */
-    task_priority_t priority; /**< 任务优先级 */
-    uint32_t timeout_ms;    /**< 超时时间（毫秒） */
-    task_status_t status;   /**< 当前状态 */
-    char *selected_agent_id; /**< 选中的 agent（role） */
-    char *output;           /**< 执行输出（COMPLETED） */
-    char *error;            /**< 失败原因（FAILED） */
-    uint64_t created_at_ms; /**< 入队时间戳 */
-    uint64_t finished_at_ms; /**< 结束时间戳（COMPLETED/FAILED） */
+    char *task_id;
+    char *task_description;
+    task_priority_t priority;
+    uint32_t timeout_ms;
+    task_status_t status;
+    char *selected_agent_id;
+    char *output;
+    char *error;
+    uint64_t created_at_ms;
+    uint64_t finished_at_ms;
 } task_record_t;
 
 /**
@@ -87,54 +87,54 @@ typedef struct {
 typedef int (*sched_task_executor_t)(const char *agent_id, const char *task_description,
                                      char **out_output);
 
-/** 任务队列/记录容量上限 */
+
 #define AIRY_CAP_MAX_TASKS 256
 
 /**
  * @brief Agent 信息
  */
 typedef struct {
-    char *agent_id;                /**< Agent ID */
-    char *agent_name;              /**< Agent 名称 */
-    float load_factor;             /**< 负载因子（0.0-1.0） */
-    float success_rate;            /**< 成功率 */
-    uint32_t avg_response_time_ms; /**< 平均响应时间（毫秒） */
-    bool is_available;             /**< 是否可用 */
-    float weight;                  /**< 权重（用于加权调度） */
+    char *agent_id; /**< Agent ID */
+    char *agent_name;
+    float load_factor;
+    float success_rate;
+    uint32_t avg_response_time_ms;
+    bool is_available;
+    float weight;
 } agent_info_t;
 
 /**
  * @brief 调度结果
  */
 typedef struct {
-    char *selected_agent_id;    /**< 选中的 Agent ID */
-    float confidence;           /**< 置信度（0.0-1.0） */
-    uint32_t estimated_time_ms; /**< 估计执行时间（毫秒） */
+    char *selected_agent_id;
+    float confidence;
+    uint32_t estimated_time_ms;
 } sched_result_t;
 
 /**
  * @brief 调度服务配置
  */
 typedef struct {
-    sched_strategy_t strategy;         /**< 调度策略 */
-    uint32_t health_check_interval_ms; /**< 健康检查间隔（毫秒） */
-    uint32_t stats_report_interval_ms; /**< 统计报告间隔（毫秒） */
-    bool enable_ml_strategy;           /**< 是否启用机器学习策略 */
-    char *ml_model_path;               /**< 机器学习模型路径 */
-    uint32_t max_agents;               /**< 最大 Agent 数量 */
+    sched_strategy_t strategy;
+    uint32_t health_check_interval_ms;
+    uint32_t stats_report_interval_ms;
+    bool enable_ml_strategy;
+    char *ml_model_path;
+    uint32_t max_agents;
     /* ---- DAG 并行派发（mac_framework 委派模式接线，0 = 保持串行） ----
      * dag_max_parallel: 单轮同时派发的就绪节点上限（≤ SCHED_DAG_MAX_NODES）。
      *                    0 = 保持现有单节点串行派发（兼容旧行为）。
      * dag_batch_size:   每轮就绪节点批大小（≤ dag_max_parallel，0 = 默认取
      *                    dag_max_parallel）。批量收集后经 mac_framework 委派
      *                    → 线程池并发执行 → 汇聚回写节点状态。 */
-    uint32_t dag_max_parallel;         /**< DAG 节点并行度上限（0 = 串行） */
-    uint32_t dag_batch_size;           /**< 每轮就绪节点批大小（0 = dag_max_parallel） */
+    uint32_t dag_max_parallel;
+    uint32_t dag_batch_size;
     /* ---- 失败分级语义（改进3：Codex Fatal/普通 三态收敛到 sched 层） ----
      * dag_fatal_cascade: true（生产默认）→ 仅 FATAL 类失败级联取消整个图
      * （fail-closed），普通失败仅标记节点 FAILED 并取消依赖它的不可达下游，
      * 图其余独立分支继续执行；false → 任意节点失败即级联取消整图（旧行为）。 */
-    bool dag_fatal_cascade;            /**< 仅 FATAL 级联取消整图（默认 true） */
+    bool dag_fatal_cascade;
 } sched_config_t;
 
 /**
@@ -272,18 +272,18 @@ int sched_service_cancel_task(sched_service_t *service, const char *task_id);
  * 数据来源：think_d 的 GCCP+GRAD 计划（nodes: id/goal/depends[role]）。
  * ============================================================================ */
 
-/** DAG 节点状态（字符串名：pending/ready/running/completed/failed/canceled） */
+
 typedef enum {
-    SCHED_DAG_NODE_PENDING = 0, /**< 依赖未满足 */
-    SCHED_DAG_NODE_READY,       /**< 依赖已满足，等待派发 */
-    SCHED_DAG_NODE_RUNNING,     /**< 正在派发（executor 执行中） */
-    SCHED_DAG_NODE_COMPLETED,   /**< 成功（output 有效） */
-    SCHED_DAG_NODE_FAILED,      /**< 失败（error 有效） */
-    SCHED_DAG_NODE_CANCELED,    /**< 已取消（图被取消或依赖失败） */
+    SCHED_DAG_NODE_PENDING = 0,
+    SCHED_DAG_NODE_READY,
+    SCHED_DAG_NODE_RUNNING,
+    SCHED_DAG_NODE_COMPLETED,
+    SCHED_DAG_NODE_FAILED,
+    SCHED_DAG_NODE_CANCELED,
     SCHED_DAG_NODE_COUNT
 } sched_dag_node_status_t;
 
-/** DAG 图整体状态（字符串名：active/completed/failed/canceled） */
+
 typedef enum {
     SCHED_DAG_STATUS_ACTIVE = 0,
     SCHED_DAG_STATUS_COMPLETED,
@@ -292,7 +292,7 @@ typedef enum {
     SCHED_DAG_STATUS_COUNT
 } sched_dag_status_t;
 
-/** 单图节点/依赖/并发图数量上限（防资源失控） */
+
 #define SCHED_DAG_MAX_NODES 64
 #define SCHED_DAG_MAX_DEPS 8
 #define SCHED_DAG_MAX_DAGS 32
@@ -309,8 +309,7 @@ typedef enum {
  * @return 0 成功；AIRY_ERR_INVALID_PARAM 非法 JSON/空节点/超上限；
  *         AIRY_ERR_CYCLE_DETECTED 存在依赖环
  */
-int sched_service_submit_dag(sched_service_t *service, const char *dag_json,
-                             char **out_dag_id);
+int sched_service_submit_dag(sched_service_t *service, const char *dag_json, char **out_dag_id);
 
 /**
  * @brief 查询 DAG 状态（看板快照：图状态/节点状态/进度/输出）

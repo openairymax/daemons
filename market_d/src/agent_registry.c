@@ -1,13 +1,12 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
 #include "airy_memory.h"
 #include "error.h"
-
 
 /**
  * @file agent_registry.c
  * @brief Agent 注册表实现（基于实际market_service.h API）
- * @copyright (c) 2026 SPHARX. All Rights Reserved.
  */
 
 #include "daemon_errors.h"
