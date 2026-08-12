@@ -56,10 +56,11 @@ typedef struct {
 static agent_daemon_config_t g_config = {0};
 
 #if AIRY_PLATFORM_POSIX
-/* P0-3：空闲 Agent 子进程回收。
- * 守护线程周期性调用 agent_service_reap_idle，终止超过空闲阈值
- * （AIRY_AGENT_IDLE_TIMEOUT_S，默认 300s）仍无调用的子进程，
- * 防止 Python runner 进程泄漏（历史上达 12 个空闲进程残留）。 */
+/* P0-3: idle agent child reaping.
+ * A guardian thread periodically calls agent_service_reap_idle, terminating
+ * child processes with no calls beyond the idle threshold
+ * (AIRY_AGENT_IDLE_TIMEOUT_S, default 300s), preventing Python runner process
+ * leaks (historically up to 12 idle processes remained). */
 static volatile int g_reaper_run = 0;
 static airy_thread_t g_reaper_thread = AIRY_INVALID_THREAD;
 
@@ -131,13 +132,15 @@ static int64_t perf_slow_threshold_us(void)
     return 1000000;
 }
 
-/* 周期采样线程：聚合 service 层原子计数器 + 线程池状态，输出一行
- * [PERF] 摘要。10000 并发下逐请求日志会刷爆 IO，因此只做窗口聚合：
- *   - spawn/invoke/terminate 窗口增量与累计成败
- *   - spawn/invoke 平均/最大时延（微秒）
- *   - 全局锁竞争次数（lock_wait，trylock 探测）
- *   - 当前 agent 数 / 峰值并发 / 线程池 active 与 pending（队列深度）
- * 采样间隔：AIRY_AGENT_PERF_INTERVAL_S，默认 5s。 */
+/* Periodic sampling thread: aggregates the service-layer atomic counters +
+ * thread-pool state into a one-line [PERF] summary. With 10000-way concurrency,
+ * per-request logging would flood IO, so only window aggregation is done:
+ *   - spawn/invoke/terminate window deltas and cumulative success/failure
+ *   - spawn/invoke average/max latency (microseconds)
+ *   - global-lock contention count (lock_wait, trylock probing)
+ *   - current agent count / peak concurrency / thread-pool active and pending
+ *     (queue depth)
+ * Sampling interval: AIRY_AGENT_PERF_INTERVAL_S, default 5s. */
 static volatile int g_perf_run = 0;
 static airy_thread_t g_perf_thread = AIRY_INVALID_THREAD;
 
@@ -243,15 +246,19 @@ static BOOL WINAPI console_handler(DWORD fdwCtrlType)
 #endif
 
 /*
- * agent.spawn 成功后向 sched_d 注册该 role，解决「sched_d 注册表恒空」
- * （历史上无任何组件调用 register_agent，导致 schedule_task 选不到 agent）。
+ * After agent.spawn succeeds, register the role with sched_d, solving the
+ * "sched_d registry always empty" problem (historically no component called
+ * register_agent, so schedule_task could not select any agent).
  *
- * 注册键为 spec.role（如 "coding"）：sched_d 的选后派发（sched_dispatch_task）
- * 会把注册表中的 agent_id 直接作为 role 传给 agent.spawn，因此注册表必须
- * 存 role 才能被调度选中。同一 role 重复 spawn 仅更新状态（sched_d 注册
- * 幂等：同 agent_id 命中时只刷新负载/可用性字段）。
+ * The registration key is spec.role (e.g. "coding"): sched_d's post-selection
+ * dispatch (sched_dispatch_task) passes the registered agent_id directly as
+ * the role to agent.spawn, so the registry must store the role to be selected
+ * by scheduling. Repeated spawns of the same role only update state (sched_d
+ * registration is idempotent: on the same agent_id hit, only the
+ * load/availability fields are refreshed).
  *
- * 注册失败仅告警、不阻断 spawn：agent_d 仍可被 gateway 编排分支直接调用。
+ * Registration failure only warns and does not block spawn: agent_d can still
+ * be called directly by the gateway orchestration branch.
  */
 static void sched_d_register_spawned_agent(const char *agent_id, const char *spec_str)
 {
@@ -433,9 +440,10 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
     const char *input_str = input && cJSON_IsString(input) ? input->valuestring : "";
     size_t input_len = strlen(input_str);
 
-    /* 改进1（取消下探）：可选 request_id 参数开启跨进程取消会话。
-     * 调用方（wh_agent_invoke 等）传入唯一 request_id，invoke 阻塞期间
-     * 可通过 agent.cancel RPC 按 request_id 终止子进程（SIGTERM→SIGKILL）。 */
+    /* Improvement 1 (cancellation drill-down): an optional request_id param
+     * enables a cross-process cancellation session. The caller (wh_agent_invoke
+     * etc.) passes a unique request_id; while invoke blocks, the agent.cancel
+     * RPC can terminate the child by request_id (SIGTERM->SIGKILL). */
     cJSON *request_id_item = cJSON_GetObjectItem(params, "request_id");
     const char *request_id = (request_id_item && cJSON_IsString(request_id_item) &&
                               request_id_item->valuestring && request_id_item->valuestring[0]) ?
@@ -487,10 +495,12 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
     SVC_LOG_ERROR("agent.invoke failed: error=%d", ret);
 }
 
-/* 改进1（取消下探）：agent.cancel — 按 request_id 取消活跃 invoke 会话。
- * 跨进程取消链路：调用方 daemon_rpc_call_cancelable 在取消令牌命中时发送
- * 本方法 → service 层 select 轮询感知 token → SIGTERM→2s→SIGKILL 子进程 →
- * 原 invoke 以 AbortedOutput 收尾返回（调用方据此区分"取消"与"超时"）。 */
+/* Improvement 1 (cancellation drill-down): agent.cancel — cancel the active
+ * invoke session by request_id. Cross-process cancel chain: the caller
+ * daemon_rpc_call_cancelable sends this method when the cancel token hits ->
+ * the service layer senses the token via select polling -> SIGTERM->2s->SIGKILL
+ * the child -> the original invoke returns with AbortedOutput (the caller
+ * distinguishes "cancel" from "timeout" by this). */
 static void handle_cancel(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *request_id = cJSON_GetObjectItem(params, "request_id");
@@ -737,9 +747,11 @@ int main(int argc, char **argv)
     ev_config.thread_pool_max = 128;
     ev_config.thread_pool_queue_size = 4096;
     ev_config.use_jsonrpc = true;
-    /* 改进1（取消下探）：必须开启并发客户端。invoke 是长请求（LLM 往返
-     * 最长 300s），若同步逐请求处理会阻塞事件循环，agent.cancel 请求
-     * 将永远无法到达——跨进程取消依赖并发处理（与 tool_d 同款配置）。 */
+    /* Improvement 1 (cancellation drill-down): concurrent clients are
+     * required. invoke is a long request (LLM round-trip up to 300s); with
+     * synchronous per-request processing the event loop would block and the
+     * agent.cancel request could never arrive — cross-process cancellation
+     * depends on concurrent handling (same configuration as tool_d). */
     ev_config.concurrent_clients = true;
     ev_config.on_client = daemon_on_client_agent_d;
     ev_config.service_ctx = NULL;

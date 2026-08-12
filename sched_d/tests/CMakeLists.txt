@@ -25,6 +25,13 @@ set(SCHED_TEST_SOURCES
     test_dag.c
 )
 
+set(SCHED_TEST_EXTRA_SOURCES
+    # test_dag.c 已按功能域拆分，需一并编译各域文件
+    test_dag_core.c
+    test_dag_failure.c
+    test_dag_parallel.c
+)
+
 set(SCHED_COMMON_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
@@ -48,7 +55,12 @@ set(SCHED_COMMON_INCLUDES
 foreach(TEST_SRC ${SCHED_TEST_SOURCES})
     get_filename_component(TEST_NAME ${TEST_SRC} NAME_WE)
 
-    add_executable(test_sched_${TEST_NAME} ${TEST_SRC} ${SCHED_IMPL_SOURCES})
+    set(EXTRA_SOURCES "")
+    if(TEST_SRC STREQUAL "test_dag.c")
+        set(EXTRA_SOURCES ${SCHED_TEST_EXTRA_SOURCES})
+    endif()
+
+    add_executable(test_sched_${TEST_NAME} ${TEST_SRC} ${EXTRA_SOURCES} ${SCHED_IMPL_SOURCES})
 
     target_include_directories(test_sched_${TEST_NAME} PRIVATE ${SCHED_COMMON_INCLUDES})
 

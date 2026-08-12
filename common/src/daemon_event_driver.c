@@ -69,8 +69,10 @@ static int on_server_fd_event(int fd, uint32_t events, void *user_data)
     while (1) {
         airy_sock_t client_fd = airy_sock_accept(fd, 0);
         if (client_fd < 0) {
-            /* <0 涵盖 AIRY_INVALID_SOCKET(-1) 与负错误码（如 AIRY_ERR_IO），
-             * 避免 -40 等负错误码被误判为合法连接而记录 CLIENT-ACCEPT */
+            /* <0 covers AIRY_INVALID_SOCKET(-1) and negative error codes
+             * (e.g. AIRY_ERR_IO), preventing negative codes like -40 from
+             * being misjudged as valid connections and logged as
+             * CLIENT-ACCEPT */
             if (first) {
                 SVC_LOG_ERROR("C-L02: EVENT-DRIVER: CLIENT-ERROR accept failed on fd=%d", fd);
             }
@@ -80,9 +82,11 @@ static int on_server_fd_event(int fd, uint32_t events, void *user_data)
         SVC_LOG_INFO("C-L02: EVENT-DRIVER: CLIENT-ACCEPT fd=%d", (int)(uintptr_t)client_fd);
 
         if (driver->concurrent_clients && driver->on_client && driver->pool) {
-            /* 并发模式：将客户端请求分派到线程池，事件循环线程立即返回以继续
-             * accept/处理其他连接。on_client_task_runner 负责在 worker 线程执行
-             * on_client 并在完成后由 daemon_handle_client 关闭 fd。 */
+            /* Concurrent mode: dispatch the client request to the thread
+             * pool; the event-loop thread returns immediately to keep
+             * accepting/handling other connections. on_client_task_runner
+             * executes on_client on a worker thread and closes the fd via
+             * daemon_handle_client afterwards. */
             on_client_task_t *task = (on_client_task_t *)AIRY_CALLOC(1, sizeof(on_client_task_t));
             if (task) {
                 task->cb = driver->on_client;
@@ -163,8 +167,10 @@ daemon_event_driver_t *daemon_event_driver_create(const daemon_event_config_t *c
     }
 
     if (config->use_jsonrpc) {
-        /* 32 个方法容量：cupolas_d 已注册 17 个（含 vault/net/entitlements 接线方法），
-         * 其余 daemon 均在 16 以内。此容量为上限保护，注册溢出会告警并拒绝。 */
+        /* 32-method capacity: cupolas_d registers 17 (incl. the vault/net/
+         * entitlements wiring methods), all other daemons stay within 16.
+         * This capacity is an upper-bound guard; registration overflow warns
+         * and is rejected. */
         driver->dispatcher = method_dispatcher_create(32);
         if (!driver->dispatcher) {
             SVC_LOG_ERROR(
@@ -256,8 +262,9 @@ void daemon_event_driver_stop(daemon_event_driver_t *driver)
 {
     if (!driver)
         return;
-    /* 先异步安全停止（信号上下文可达），再记录日志：
-     * 避免日志锁在信号路径上被占用导致停止流程死锁。 */
+    /* Stop async-safely first (reachable from signal context), then log:
+     * avoids the log lock being held on the signal path and deadlocking the
+     * stop flow. */
     airy_event_loop_stop_async(driver->loop);
     SVC_LOG_INFO("C-L02: EVENT-DRIVER: STOP");
 }

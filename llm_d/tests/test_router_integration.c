@@ -86,10 +86,10 @@ static void test_cost_strategy_selects_cheapest(void)
         return;
     }
 
-    /* 注册 3 个端点，能力相同但成本递减：
-     *   gpt-4o     : 0.030   / 0.060    (最贵)
-     *   gpt-3.5    : 0.001   / 0.002    (中等)
-     *   deepseek   : 0.00014 / 0.00028  (最便宜) */
+    /* Register 3 endpoints with the same capabilities but decreasing cost:
+     *   gpt-4o     : 0.030   / 0.060    (most expensive)
+     *   gpt-3.5    : 0.001   / 0.002    (medium)
+     *   deepseek   : 0.00014 / 0.00028  (cheapest) */
     const uint32_t caps = LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING;
     llm_endpoint_t e1 = make_endpoint("openai", "gpt-4o", 0.030, 0.060, 1200, caps);
     llm_endpoint_t e2 = make_endpoint("openai", "gpt-3.5", 0.001, 0.002, 1000, caps);
@@ -236,8 +236,9 @@ static void test_service_lifecycle_integration(void)
         return;
     }
 
-    /* create 后 router 应已初始化，stats 可访问且 total_requests==0
-     * （空 registry → register_router_endpoints 注册 0 个端点） */
+    /* After create, the router should already be initialized and stats
+     * accessible with total_requests==0 (empty registry ->
+     * register_router_endpoints registers 0 endpoints) */
     llm_router_stats_t stats;
     if (llm_router_get_stats(&stats) != 0) {
         TEST_FAIL("llm_router_get_stats failed after service create");

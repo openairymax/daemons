@@ -93,8 +93,8 @@ static int rpc_buf_append(rpc_buf_t *buf, const char *src, size_t len)
 #if AIRY_PLATFORM_POSIX
 
 /**
- * @brief 连接到 Unix socket
- * @return fd >= 0 成功；< 0 失败（返回负的 AIRY_ERR_* 错误码）
+ * @brief Connect to a Unix socket
+ * @return fd >= 0 on success; < 0 on failure (returns negative AIRY_ERR_* code)
  */
 static int rpc_connect_unix(const char *socket_path)
 {
@@ -105,8 +105,8 @@ static int rpc_connect_unix(const char *socket_path)
     struct sockaddr_un addr;
     __builtin_memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    /* 使用 __builtin_strncpy 以避免 BAN-211/235 禁用 strncpy 的编译期报错
-     * （与 daemons/common/src/platform_compat.c 同策略） */
+    /* Use __builtin_strncpy to avoid the compile-time error from BAN-211/235
+     * banning strncpy (same policy as daemons/common/src/platform_compat.c) */
     __builtin_strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
@@ -117,15 +117,19 @@ static int rpc_connect_unix(const char *socket_path)
 }
 
 /**
- * @brief 带超时与取消的接收：循环 recv 直至收到完整 JSON 或超时/取消
+ * @brief Receive with timeout and cancellation: loop recv until a complete
+ *        JSON is received or timeout/cancel
  *
- * 简化策略：使用 cJSON_ParseIntervalFromBuffer 检测 JSON 完整性；
- * 若解析失败且未超时，继续接收。此策略在 daemon 响应通常单包返回的
- * 场景下足够，复杂分包场景亦能正确处理。
+ * Simplified strategy: use cJSON_ParseIntervalFromBuffer to detect JSON
+ * completeness; if parsing fails and no timeout yet, keep receiving. This is
+ * sufficient for the typical single-packet daemon response, and also handles
+ * complex fragmented packets correctly.
  *
- * 改进1（取消下探）：每次 poll 片（200ms）后检查取消令牌。命中时先关闭
- * 当前连接（invoke 响应丢弃），再通过新连接发送 cancel 请求（daemon 为
- * "单请求-单响应-即关闭"模型，cancel 必须独立连接），返回 AIRY_ERR_CANCELED。
+ * Improvement 1 (cancellation drill-down): check the cancel token after each
+ * poll slice (200ms). On hit, first close the current connection (invoke
+ * response discarded), then send the cancel request over a NEW connection
+ * (daemons are "single-request-single-response-then-close"; cancel needs its
+ * own connection), returning AIRY_ERR_CANCELED.
  */
 static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
                              airy_cancel_token_t *cancel_token, const char *cancel_socket_path,
@@ -182,12 +186,15 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
             }
             continue;
         }
-        /* 对端在 send 响应后立即 close（daemon 为"单请求-单响应-即关闭"模型），
-         * poll 可能同时返回 POLLIN 与 POLLHUP。必须先处理 POLLIN 中的数据，
-         * 否则会因先判断 POLLHUP 而丢弃已到达的完整响应（RPC 时序竞态）。
-         * 大响应（>4096 字节）一次 recv 读不完：即使 hangup 置位也必须继续
-         * recv 读尽剩余数据（对端 close 后已发送数据仍可从 socket buffer 读出），
-         * 最后以 recv()==0（EOF）收尾，再判断 JSON 完整性。 */
+        /* The peer closes immediately after sending the response (daemons are
+         * "single-request-single-response-then-close"); poll may return both
+         * POLLIN and POLLHUP. POLLIN data must be processed first, otherwise
+         * checking POLLHUP first discards the already-arrived complete
+         * response (RPC timing race). Large responses (>4096 bytes) cannot be
+         * read in one recv: even with hangup set, keep recv-ing the remaining
+         * data (bytes sent before close are still readable from the socket
+         * buffer), finally ending with recv()==0 (EOF), then judge JSON
+         * completeness. */
         int hangup = (pfd.revents & (POLLHUP | POLLNVAL));
         if (pfd.revents & POLLIN) {
             char chunk[4096];
@@ -226,9 +233,10 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
                 return AIRY_SUCCESS;
             }
             if (hangup) {
-                /* 数据不全但连接已关闭：读尽 socket 剩余数据（对端 close 后
-                 * 已发送的字节仍可读），直到 EOF 再判断完整性，避免大响应
-                 * 被 hangup 误判为 FAIL。 */
+                /* Data incomplete but connection closed: read out the
+                 * remaining socket data (bytes the peer sent before close are
+                 * still readable) until EOF before judging completeness, so a
+                 * large response is not misjudged as FAIL by hangup. */
                 for (;;) {
                     ssize_t n2 = recv(fd, chunk, sizeof(chunk), 0);
                     if (n2 < 0) {
@@ -411,8 +419,8 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
         return AIRY_ERR_OUT_OF_MEMORY;
 
     *out_result_json = AIRY_STRDUP(result_str);
-    /* cJSON_PrintUnformatted 使用 cJSON 默认 allocator（malloc），
-     * AIRY_FREE 与默认 cJSON allocator 兼容 */
+    /* cJSON_PrintUnformatted uses the cJSON default allocator (malloc);
+     * AIRY_FREE is compatible with the default cJSON allocator */
     AIRY_FREE(result_str);
     if (!*out_result_json)
         return AIRY_ERR_OUT_OF_MEMORY;

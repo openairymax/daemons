@@ -48,7 +48,7 @@ static int g_tests_failed = 0;
     } while (0)
 
 /**
- * 测试 1: 创建和销毁背压控制器
+ * Test 1: create and destroy the backpressure controller
  */
 static void test_bp_create_destroy(void)
 {
@@ -65,7 +65,7 @@ static void test_bp_create_destroy(void)
 }
 
 /**
- * 测试 2: 默认配置验证
+ * Test 2: default config validation
  */
 static void test_bp_default_config(void)
 {
@@ -92,7 +92,7 @@ static void test_bp_default_config(void)
 }
 
 /**
- * 测试 3: 自定义配置验证
+ * Test 3: custom config validation
  */
 static void test_bp_custom_config(void)
 {
@@ -121,7 +121,7 @@ static void test_bp_custom_config(void)
 }
 
 /**
- * 测试 4: 三级背压策略 — NORMAL → SLOW → DROP → REJECT
+ * Test 4: three-level backpressure — NORMAL -> SLOW -> DROP -> REJECT
  */
 static void test_bp_escalation(void)
 {
@@ -168,7 +168,7 @@ static void test_bp_escalation(void)
 }
 
 /**
- * 测试 5: 背压恢复 — REJECT → DROP → SLOW → NORMAL
+ * Test 5: backpressure recovery — REJECT -> DROP -> SLOW -> NORMAL
  */
 static void test_bp_recovery(void)
 {
@@ -204,7 +204,7 @@ static void test_bp_recovery(void)
 }
 
 /**
- * 测试 6: should_send 在各级别下的行为
+ * Test 6: should_send behavior at each level
  */
 static void test_bp_should_send(void)
 {
@@ -247,7 +247,7 @@ static void test_bp_should_send(void)
 }
 
 /**
- * 测试 7: should_accept_connection 在各级别下的行为
+ * Test 7: should_accept_connection behavior at each level
  */
 static void test_bp_should_accept_connection(void)
 {
@@ -286,7 +286,7 @@ static void test_bp_should_accept_connection(void)
 }
 
 /**
- * 测试 8: 统计信息正确性
+ * Test 8: statistics correctness
  */
 static void test_bp_stats_accuracy(void)
 {
@@ -333,10 +333,11 @@ static void test_bp_stats_accuracy(void)
 }
 
 /**
- * 测试 9: 模拟队列满 → 生产者降速 → 消费者消费 → 恢复
+ * Test 9: simulate queue full -> producer slows down -> consumer consumes ->
+ *         recovery
  *
- * 这是 P1.24.4 验收标准的完整模拟：
- * "OOM 场景下 IPC 不死锁、不丢关键消息"
+ * This is a full simulation of the P1.24.4 acceptance criterion:
+ * "IPC must not deadlock or drop critical messages under OOM conditions"
  */
 static void test_bp_full_cycle_simulation(void)
 {
@@ -397,7 +398,7 @@ static void test_bp_full_cycle_simulation(void)
 }
 
 /**
- * 测试 10: NULL 安全性
+ * Test 10: NULL safety
  */
 static void test_bp_null_safety(void)
 {
@@ -421,7 +422,7 @@ static void test_bp_null_safety(void)
 }
 
 /**
- * 测试 11: 边界值测试
+ * Test 11: boundary value tests
  */
 static void test_bp_boundary_values(void)
 {

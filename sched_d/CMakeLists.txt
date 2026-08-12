@@ -27,6 +27,8 @@ set(SCHED_D_SOURCES
     src/main.c
     src/monitor.c
     src/sched_service_impl.c
+    src/sched_dag_impl.c
+    src/sched_dag_parse.c
     src/sched_svc_adapter.c
     src/strategies/weighted.c
     src/strategies/round_robin.c

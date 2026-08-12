@@ -188,23 +188,27 @@ int tool_cache_get(tool_cache_t *cache, const char *key, char **out_value)
         return 0;
     }
 
-    /* TTL 过期视为 miss（原实现锁外调用 tool_cache_put 删除，与并发驱逐
-     * evict_lru 构成 use-after-free 竞态；此处仅返回 miss，过期条目由后续
-     * put 覆盖）。 */
+    /* TTL expiry counts as a miss (the original implementation called
+     * tool_cache_put outside the lock to delete, racing with concurrent
+     * evict_lru into a use-after-free; here just return miss, expired entries
+     * are overwritten by the next put). */
     if (cache->ttl_sec > 0 && (time(NULL) - e->timestamp) > cache->ttl_sec) {
         airy_mtx_unlock(&cache->buckets[idx].lock);
         return 0;
     }
 
-    /* 值拷贝必须在 bucket 锁内完成：e 的生命周期由 bucket 链持有者保证，
-     * 锁外访问 e 与并发 put 的驱逐路径（evict_lru）构成 UAF（原缺陷）。 */
+    /* The value copy must be done under the bucket lock: e's lifetime is
+     * guaranteed by the bucket-chain holder; accessing e outside the lock
+     * races with the concurrent put eviction path (evict_lru) into a UAF
+     * (original defect). */
     char *dup = memory_safe_strdup(e->value);
     airy_mtx_unlock(&cache->buckets[idx].lock);
     if (!dup)
         return AIRY_ERR_UNKNOWN;
 
-    /* 注：不再于锁外做 LRU 移动——e 在 bucket 锁外不可安全引用。
-     * 命中顺序由 put 更新近似维持，语义影响可忽略。 */
+    /* Note: no LRU move outside the lock anymore — e cannot be safely
+     * referenced outside the bucket lock. Hit order is approximately
+     * maintained by put updates; the semantic impact is negligible. */
     *out_value = dup;
     return 1;
 }
@@ -298,8 +302,10 @@ char *tool_cache_key(const char *tool_id, const char *params_json, const char *a
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
-    /* 缓存键纳入 agent_id（SEC-xx：防止未授权 agent 命中他人审批放行的缓存，
-     * 绕过权限审批）。agent_id 为空时退化为 "tool_d|tool|params" 兼容既有行为。 */
+    /* Include agent_id in the cache key (SEC: prevents an unauthorized agent
+     * from hitting another's approval-cleared cache, bypassing permission
+     * approval). Empty agent_id degrades to "tool_d|tool|params" for legacy
+     * compatibility. */
     const char *subject = (agent_id && agent_id[0]) ? agent_id : "tool_d";
 
     size_t tool_id_len = strlen(tool_id);

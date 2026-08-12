@@ -58,7 +58,7 @@ static void test_registry_add(void)
 }
 
 /**
- * @brief 测试工具重复注册
+ * @brief Test duplicate tool registration
  */
 static void test_registry_add_duplicate(void)
 {
@@ -85,7 +85,7 @@ static void test_registry_add_duplicate(void)
 }
 
 /**
- * @brief 测试工具获取
+ * @brief Test tool retrieval
  */
 static void test_registry_get(void)
 {
@@ -115,7 +115,7 @@ static void test_registry_get(void)
 }
 
 /**
- * @brief 测试工具获取不存在
+ * @brief Test tool retrieval of a nonexistent tool
  */
 static void test_registry_get_nonexistent(void)
 {
@@ -133,7 +133,7 @@ static void test_registry_get_nonexistent(void)
 }
 
 /**
- * @brief 测试工具移除
+ * @brief Test tool removal
  */
 static void test_registry_remove(void)
 {
@@ -162,7 +162,7 @@ static void test_registry_remove(void)
 }
 
 /**
- * @brief 测试工具移除不存在
+ * @brief Test removal of a nonexistent tool
  */
 static void test_registry_remove_nonexistent(void)
 {
@@ -180,7 +180,7 @@ static void test_registry_remove_nonexistent(void)
 }
 
 /**
- * @brief 测试工具列表JSON
+ * @brief Test tool list as JSON
  */
 static void test_registry_list_json(void)
 {
@@ -216,7 +216,7 @@ static void test_registry_list_json(void)
 }
 
 /**
- * @brief 测试空注册表列表JSON
+ * @brief Test empty-registry list JSON
  */
 static void test_registry_list_json_empty(void)
 {
@@ -236,7 +236,7 @@ static void test_registry_list_json_empty(void)
 }
 
 /**
- * @brief 测试注册表空参数
+ * @brief Test registry null parameters
  */
 static void test_registry_null_param(void)
 {
@@ -265,7 +265,7 @@ static void test_registry_null_param(void)
 }
 
 /**
- * @brief 测试带参数的工具
+ * @brief Test a tool with parameters
  */
 static void test_registry_tool_with_params(void)
 {

@@ -50,9 +50,12 @@ static BOOL WINAPI console_handler_channel_d(DWORD fdwCtrlType)
 }
 #endif
 
-/* 从 cJSON params 提取 channel_id：支持字符串与数字 id，返回 AIRY_MALLOC 字符串或 NULL。
- * （修复：原手写 strstr/strchr 解析无法处理数字 id 与含转义引号的 data，导致
- *   send 数据静默丢失仍上报成功 —— 改为 cJSON 解析，fail-closed 返回错误。） */
+/* Extract channel_id from cJSON params: supports string and numeric ids,
+ * returning an AIRY_MALLOC string or NULL.
+ * (Fix: the original hand-written strstr/strchr parsing could not handle
+ * numeric ids nor data containing escaped quotes, silently dropping send data
+ * while still reporting success — switched to cJSON parsing, failing closed
+ * with an error.) */
 static char *channel_param_id_str(cJSON *params)
 {
     cJSON *id = cJSON_GetObjectItem(params, "id");
@@ -147,8 +150,9 @@ __attribute__((used)) static int handle_service_request(const char *method, cJSO
     }
 
     if (strcmp(method, "stats") == 0) {
-        /* L2 标准方法 channel.get_stats（02-l2-service-protocol.md §6.1）：
-         * 返回 channel 数 + 各通道累计收发消息数（真实统计）。 */
+        /* L2 standard method channel.get_stats (02-l2-service-protocol.md
+         * §6.1): returns the channel count + cumulative sent/received message
+         * counts per channel (real statistics). */
         channel_info_t info_list[CHANNEL_MAX_CHANNELS];
         size_t count = 0;
         int rc = channel_service_list(svc, info_list, CHANNEL_MAX_CHANNELS, &count);
@@ -223,8 +227,9 @@ __attribute__((used)) static int handle_service_request(const char *method, cJSO
     if (strcmp(method, "send") == 0) {
         cJSON *id = cJSON_GetObjectItem(params, "id");
         cJSON *data = cJSON_GetObjectItem(params, "data");
-        /* fail-closed：data 必须为字符串，非字符串（数字/对象/数组）或缺失
-         * 一律返回错误，禁止静默跳过导致消息丢失却上报成功 */
+        /* fail-closed: data must be a string; non-string (number/object/array)
+         * or missing returns an error — silent skipping that loses messages
+         * while reporting success is forbidden */
         if (!cJSON_IsString(id) || !id->valuestring[0] || !cJSON_IsString(data)) {
             *response_json = AIRY_STRDUP("{\"error\":\"missing id or data\"}");
             AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "missing id or data in send request");
@@ -252,10 +257,11 @@ __attribute__((used)) static int handle_service_request(const char *method, cJSO
 }
 
 /**
- * @brief 将 cJSON params 直接转交 handle_service_request（cJSON 解析，无字符串往返），
- *        并把返回的 JSON 结果封装为 JSON-RPC 成功响应。
+ * @brief Hand cJSON params directly to handle_service_request (cJSON parsing,
+ *        no string round-trip) and wrap the returned JSON result as a
+ *        JSON-RPC success response.
  *
- * user_data 由 daemon_handle_client_* 传入，指向 client_fd。
+ * user_data comes from daemon_handle_client_*, pointing to client_fd.
  */
 static void channel_dispatch_method(cJSON *params, int id, void *user_data, const char *method)
 {
@@ -264,8 +270,9 @@ static void channel_dispatch_method(cJSON *params, int id, void *user_data, cons
     char *result_json = NULL;
     int rc = handle_service_request(method, params, &result_json, g_svc);
     if (rc != 0 || !result_json) {
-        /* 参数校验失败（fail-closed 缺 id/data、非法类型）映射为
-         * JSON-RPC Invalid params(-32602)；其余服务错误为 Internal error(-32603) */
+        /* Param-validation failures (fail-closed: missing id/data, invalid
+         * type) map to JSON-RPC Invalid params(-32602); other service errors
+         * map to Internal error(-32603) */
         int code = (rc == AIRY_ERR_INVALID_PARAM) ? JSONRPC_INVALID_PARAMS : JSONRPC_INTERNAL_ERROR;
         JSONRPC_SEND_ERROR(client_fd, code, "channel service error", id);
         AIRY_FREE(result_json);

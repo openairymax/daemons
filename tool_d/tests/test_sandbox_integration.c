@@ -55,7 +55,8 @@ static tool_execute_args_t *make_echo_args(const char *message, uint32_t timeout
         return NULL;
 
     /* argv: {"/usr/bin/echo", "<message>", NULL}
-     * argv[0] 习惯为程序名，execvp 会用 executable 字段定位二进制。 */
+     * argv[0] is conventionally the program name; execvp uses the executable
+     * field to locate the binary. */
     char **argv = (char **)malloc(3 * sizeof(char *));
     if (!argv) {
         free(t);
@@ -102,13 +103,13 @@ static void free_echo_args(tool_execute_args_t *t)
     free(t);
 }
 
-/* ========== TEST 1: sandbox ALLOW 路径 — 执行 echo 成功 ==========
+/* ========== TEST 1: sandbox ALLOW path — echo executes successfully ==========
  *
- * 验证：
- *   - airy_sandbox_create_default 创建沙箱
- *   - add_rule(SYS_TOOL_EXECUTE, PERM_ALLOW) 配置允许
- *   - invoke 执行 /usr/bin/echo hello
- *   - 返回 SUCCESS，exec_result==0（echo 退出码），output 含 "hello"
+ * Verifies:
+ *   - airy_sandbox_create_default creates the sandbox
+ *   - add_rule(SYS_TOOL_EXECUTE, PERM_ALLOW) configures allowance
+ *   - invoke runs /usr/bin/echo hello
+ *   - returns SUCCESS, exec_result==0 (echo exit code), output contains "hello"
  */
 static void test_sandbox_allow_path(void)
 {
@@ -184,12 +185,12 @@ static void test_sandbox_allow_path(void)
     TEST_PASS();
 }
 
-/* ========== TEST 2: sandbox DENY 路径 — 工具被拒绝 ==========
+/* ========== TEST 2: sandbox DENY path — the tool is rejected ==========
  *
- * 验证：
- *   - add_rule(SYS_TOOL_EXECUTE, PERM_DENY) 配置拒绝
- *   - invoke 返回 EACCES（权限拒绝）
- *   - exec_result 保持哨兵值（工具未实际执行）
+ * Verifies:
+ *   - add_rule(SYS_TOOL_EXECUTE, PERM_DENY) configures denial
+ *   - invoke returns EACCES (permission denied)
+ *   - exec_result keeps its sentinel value (the tool did not actually run)
  */
 static void test_sandbox_deny_path(void)
 {
@@ -257,8 +258,9 @@ static void test_sandbox_deny_path(void)
 
 /* ========== TEST 3: sandbox NULL fail-closed ==========
  *
- * 验证 sandbox 句柄为 NULL 时 invoke 返回 EINVAL。
- * 这对应 tool_executor_run 中 `if (!exec->sandbox) return AIRY_EPERM` 的防御。
+ * Verifies that invoke returns EINVAL when the sandbox handle is NULL.
+ * This corresponds to the `if (!exec->sandbox) return AIRY_EPERM` defense in
+ * tool_executor_run.
  */
 static void test_sandbox_null_fail_closed(void)
 {
@@ -279,13 +281,17 @@ static void test_sandbox_null_fail_closed(void)
     printf("    NULL fail-closed: invoke(NULL,...) returned EINVAL\n");
 }
 
-/* ========== TEST 4: tool_executor 集成 — sandbox 在 create 中初始化 ==========
+/* ========== TEST 4: tool_executor integration — sandbox initialized in
+ * create ==========
  *
- * 验证 executor.c 的 sandbox 集成不破坏现有行为：
- *   - tool_executor_create 内部调用 airy_sandbox_manager_init + create_default
- *   - 不设置 approval_ctx，调用 tool_executor_run → 应返回 EPERM（approval_ctx NULL fail-closed）
- *   - 这验证 sandbox 初始化代码路径正常，且双层 fail-closed 中
- *     approval_ctx 层在前（先拒绝），sandbox 层不会被触及
+ * Verifies executor.c's sandbox integration does not break existing behavior:
+ *   - tool_executor_create internally calls airy_sandbox_manager_init +
+ *     create_default
+ *   - without approval_ctx, calling tool_executor_run -> should return EPERM
+ *     (approval_ctx NULL fail-closed)
+ *   - this confirms the sandbox init code path works and that, in the
+ *     two-tier fail-closed design, the approval_ctx layer comes first (denies
+ *     first), so the sandbox layer is never reached
  */
 static void test_executor_sandbox_integration(void)
 {
@@ -305,9 +311,10 @@ static void test_executor_sandbox_integration(void)
     tool_result_t *result = NULL;
     int ret = tool_executor_run(exec, &meta, "hello", NULL, &result);
 
-    /* 验证：未设置 approval_ctx → fail-closed 拒绝（EPERM）
-     * 注意：AIRY_EPERM 在 executor.c 中作为 approval_ctx NULL 的返回值。
-     * 这验证了 sandbox 初始化不会绕过 approval_ctx 的 fail-closed。 */
+    /* Verifies: unset approval_ctx -> fail-closed denial (EPERM)
+     * Note: AIRY_EPERM is the return value in executor.c for a NULL
+     * approval_ctx. This confirms sandbox initialization does not bypass
+     * approval_ctx's fail-closed behavior. */
     if (ret != AIRY_EPERM) {
         char msg[128];
         snprintf(msg, sizeof(msg),

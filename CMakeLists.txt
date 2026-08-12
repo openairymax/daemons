@@ -180,6 +180,11 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/a2a_d/include/
     FILES_MATCHING PATTERN "*.h"
 )
 
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/think_d/include/
+    DESTINATION include/agentrt
+    FILES_MATCHING PATTERN "*.h"
+)
+
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cupolas_d/include/
     DESTINATION include/agentrt
     FILES_MATCHING PATTERN "*.h"
@@ -191,8 +196,8 @@ if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
    AND TARGET channel_d AND TARGET info_d AND TARGET notify_d
    AND TARGET observe_d AND TARGET hook_d AND TARGET plugin_d
    AND TARGET mem_d AND TARGET agent_d AND TARGET a2a_d
-   AND TARGET cupolas_d)
-    # 注意：仅导出 15 个 daemon 可执行文件（含 Phase 3 新增 mem_d/agent_d/a2a_d）。
+   AND TARGET think_d AND TARGET cupolas_d)
+    # 注意：仅导出 16 个 daemon 可执行文件（svc_common 导出限制见下）。
     # svc_common 是 STATIC 库且 PUBLIC 链接 airy_common/airy_compile_defs/
     # cupolas/airy_platform_libs，若将其加入 export(TARGETS) 列表，
     # 则要求上述 4 个传递依赖也在同一 export set（它们定义于 commons/cupolas 等
@@ -204,14 +209,14 @@ if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
                   info_d notify_d observe_d
                   hook_d plugin_d
                   mem_d agent_d a2a_d
-                  cupolas_d
+                  think_d cupolas_d
         FILE "${CMAKE_CURRENT_BINARY_DIR}/agentrt-daemon-targets.cmake"
     )
     export(PACKAGE agentrt-daemon)
 endif()
 
 # ==================== 生产安装：daemon 二进制 ====================
-# cmake --install --prefix $AIRY_HOME → 16 个 daemon 装到 $AIRY_HOME/bin。
+# cmake --install --prefix $AIRY_HOME → 17 个 daemon 装到 $AIRY_HOME/bin。
 # 与 bootstrap AIRY_HOME/bin、agent_build_agents_pypath 的 AIRY_LIB_DIR
 # 回退组成完整生产安装（AIRY_HOME 体系，K8s 节点运行时根类比）。
 install(TARGETS gateway_d llm_d tool_d

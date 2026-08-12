@@ -62,7 +62,7 @@ static airy_mtx_t g_init_lock = {0};
 static int g_curl_initialized = 0;
 
 /**
- * @brief 初始化响应缓冲区
+ * @brief Initialize the response buffer
  */
 static int buffer_init(ipc_response_buffer_t *buf)
 {
@@ -77,7 +77,7 @@ static int buffer_init(ipc_response_buffer_t *buf)
 }
 
 /**
- * @brief 释放响应缓冲区
+ * @brief Free the response buffer
  */
 static void buffer_free(ipc_response_buffer_t *buf)
 {
@@ -90,7 +90,7 @@ static void buffer_free(ipc_response_buffer_t *buf)
 }
 
 /**
- * @brief libcurl 写回调（内存安全版本）
+ * @brief libcurl write callback (memory-safe version)
  */
 static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp)
 {
@@ -125,7 +125,7 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
 }
 
 /**
- * @brief 从连接池获取可用连接
+ * @brief Acquire an available connection from the pool
  */
 static ipc_pool_entry_t *pool_acquire(struct ipc_client *client)
 {
@@ -167,7 +167,7 @@ static ipc_pool_entry_t *pool_acquire(struct ipc_client *client)
 }
 
 /**
- * @brief 释放连接回连接池
+ * @brief Release a connection back to the pool
  */
 static void pool_release(struct ipc_client *client, ipc_pool_entry_t *entry)
 {
@@ -180,7 +180,7 @@ static void pool_release(struct ipc_client *client, ipc_pool_entry_t *entry)
 }
 
 /**
- * @brief 执行 RPC 调用（带重试）
+ * @brief Execute an RPC call (with retries)
  */
 static int do_rpc_call(ipc_pool_entry_t *entry, const char *base_url, const char *request,
                        ipc_response_buffer_t *response, uint32_t timeout_ms, int max_retries)
@@ -441,7 +441,7 @@ int svc_rpc_call(const char *method, const char *params, char **out_result, uint
 }
 
 /**
- * @brief 设置默认超时时间
+ * @brief Set the default timeout
  */
 int svc_ipc_set_timeout(uint32_t timeout_ms)
 {
@@ -454,7 +454,7 @@ int svc_ipc_set_timeout(uint32_t timeout_ms)
 }
 
 /**
- * @brief 获取连接池状态
+ * @brief Get the connection pool status
  */
 int svc_ipc_get_pool_status(int *total, int *available)
 {

@@ -351,8 +351,10 @@ static uint64_t info_d_healthcheck(info_d_service_t *svc)
     return last_time;
 }
 
-/* ==================== L2 命名空间方法（02-l2-service-protocol.md §5/§6） ====================
- * gateway_d 转发时已剥离 "<daemon>." 前缀，故此处方法名不带前缀。
+/* ==================== L2 namespace methods (02-l2-service-protocol.md §5/§6)
+ * ====================
+ * gateway_d strips the "<daemon>." prefix during forwarding, so method names
+ * here carry no prefix.
  */
 
 static cJSON *info_d_build_snapshot_json(const system_info_snapshot_t *snap)
@@ -490,8 +492,10 @@ static void info_d_handle_request(info_d_service_t *svc, airy_sock_t client_fd)
 {
     char buffer[INFO_D_MAX_BUFFER];
 #ifndef _WIN32
-    /* 等待请求数据就绪后再 recv：airy_sock_recv 为 MSG_DONTWAIT 非阻塞读取，
-     * accept 后立即 recv 会因 EAGAIN 返回 0 而误判连接失败并关闭（RPC 时序竞态）。 */
+    /* Wait for request data to be ready before recv: airy_sock_recv is a
+     * non-blocking MSG_DONTWAIT read; recv immediately after accept returns 0
+     * on EAGAIN and would misjudge the connection as failed and close it (RPC
+     * timing race). */
     struct pollfd pfd;
     pfd.fd = (int)client_fd;
     pfd.events = POLLIN;
@@ -509,9 +513,10 @@ static void info_d_handle_request(info_d_service_t *svc, airy_sock_t client_fd)
     }
     buffer[n] = '\0';
 
-    /* L2 标准方法 <ns>.shutdown / <ns>.get_stats（02-l2-service-protocol.md §6.1）：
-     * 先尝试解析 JSON-RPC 请求，命中标准方法则按 JSON-RPC 2.0 响应并返回；
-     * 其余请求保持原有逻辑，向后兼容。 */
+    /* L2 standard methods <ns>.shutdown / <ns>.get_stats
+     * (02-l2-service-protocol.md §6.1): first try to parse the JSON-RPC
+     * request; on a standard-method hit, respond per JSON-RPC 2.0 and return;
+     * all other requests keep the original logic, backward compatible. */
     cJSON *req = cJSON_Parse(buffer);
     if (req) {
         cJSON *m = cJSON_GetObjectItem(req, "method");

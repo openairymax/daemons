@@ -242,8 +242,9 @@ int airy_get_sysinfo(airy_sysinfo_t *info)
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-/* macOS/BSD 兼容：SOCK_NONBLOCK / MSG_NOSIGNAL / MSG_DONTWAIT 为 Linux 专用标志。
-   在非 Linux POSIX 平台上定义为 0；socket 创建后改用 fcntl / SO_NOSIGPIPE 替代。 */
+/* macOS/BSD compatibility: SOCK_NONBLOCK / MSG_NOSIGNAL / MSG_DONTWAIT are
+   Linux-specific flags; defined as 0 on non-Linux POSIX platforms; after
+   socket creation, fcntl / SO_NOSIGPIPE are used instead. */
 #ifndef __linux__
 #ifndef SOCK_NONBLOCK
 #define SOCK_NONBLOCK 0
@@ -464,10 +465,12 @@ airy_sock_t airy_sock_accept(airy_sock_t server_fd, uint32_t timeout_ms)
     pfd.fd = server_fd;
     pfd.events = POLLIN;
 
-    /* timeout_ms==0 表示非阻塞探测（立即返回），而非无限阻塞：
-     * 历史缺陷：0 被映射为 poll(-1) 无限等待，当信号（如 SIGTERM）恰好在
-     * 事件循环线程执行 accept 时，poll 返回 EINTR，随后再次进入无限阻塞，
-     * 导致事件循环永远无法检查 stop_requested，daemon 无法优雅退出。 */
+    /* timeout_ms==0 means a non-blocking probe (return immediately), not an
+     * infinite block: historical defect — 0 was mapped to poll(-1) infinite
+     * wait; when a signal (e.g. SIGTERM) arrived exactly while the
+     * event-loop thread was in accept, poll returned EINTR and then re-entered
+     * infinite blocking, so the loop could never check stop_requested and the
+     * daemon could not exit gracefully. */
     int timeout = timeout_ms == 0 ? 0 : (int)timeout_ms;
     int ret;
     do {

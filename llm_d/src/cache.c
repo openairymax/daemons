@@ -51,10 +51,10 @@ static unsigned int hash_key(const char *key)
 }
 
 /**
- * @brief 创建缓存条目
- * @param key 键
- * @param value 值
- * @return 新创建的条目，失败返回 NULL
+ * @brief Create a cache entry
+ * @param key   Key
+ * @param value Value
+ * @return Newly created entry, NULL on failure
  */
 static cache_entry_t *entry_create(const char *key, const char *value)
 {
@@ -82,8 +82,8 @@ static cache_entry_t *entry_create(const char *key, const char *value)
 }
 
 /**
- * @brief 安全释放缓存条目内存
- * @param e 缓存条目
+ * @brief Safely free a cache entry's memory
+ * @param e Cache entry
  */
 static void entry_memory_safe_free(cache_entry_t *e)
 {
@@ -95,9 +95,9 @@ static void entry_memory_safe_free(cache_entry_t *e)
 }
 
 /**
- * @brief 从 LRU 链表中移除条目
- * @param cache 缓存实例
- * @param e 要移除的条目
+ * @brief Remove an entry from the LRU list
+ * @param cache Cache instance
+ * @param e     Entry to remove
  */
 static void lru_remove(llm_cache_t *cache, cache_entry_t *e)
 {
@@ -113,9 +113,9 @@ static void lru_remove(llm_cache_t *cache, cache_entry_t *e)
 }
 
 /**
- * @brief 将条目移动到 LRU 链表头部
- * @param cache 缓存实例
- * @param e 要移动的条目
+ * @brief Move an entry to the head of the LRU list
+ * @param cache Cache instance
+ * @param e     Entry to move
  */
 static void lru_move_to_head(llm_cache_t *cache, cache_entry_t *e)
 {

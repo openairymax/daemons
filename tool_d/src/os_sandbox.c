@@ -48,8 +48,9 @@
 
 #define OS_LL_RULE_PATH_BENEATH 1
 
-/* handled_access_fs 权限位（ABI1，不含 ABI2 REFER / ABI3 TRUNCATE，
- * 保证旧内核兼容；未处理的权限位在 restrict 后保持默认拒绝） */
+/* handled_access_fs permission bits (ABI1, without ABI2 REFER / ABI3
+ * TRUNCATE, keeping old-kernel compatibility; unhandled permission bits stay
+ * denied by default after restrict) */
 #define OS_LL_FS_EXECUTE (1ULL << 0)
 #define OS_LL_FS_WRITE_FILE (1ULL << 1)
 #define OS_LL_FS_READ_FILE (1ULL << 2)
@@ -90,8 +91,10 @@ int os_sandbox_landlock_available(void)
 #ifdef OS_LL_NO_SUPPORT
     return 0;
 #else
-    /* 探测须用非空 handled_access_fs：空 ruleset 内核直接返回 EINVAL，
-     * 无法区分"不支持"与"属性为空"。用全部 ABI1 fs 权限位探测。 */
+    /* The probe must use a non-empty handled_access_fs: an empty ruleset
+     * makes the kernel return EINVAL directly, making it impossible to
+     * distinguish "unsupported" from "empty attributes". Probe with all ABI1
+     * fs permission bits. */
     struct os_ll_ruleset_attr attr;
     AIRY_MEMSET(&attr, 0, sizeof(attr));
     attr.handled_access_fs = LL_FS_HANDLED;
@@ -185,8 +188,9 @@ static int os_sandbox_apply_rlimits(const os_sandbox_cfg_t *cfg)
 
 static int os_sandbox_apply_seccomp(void)
 {
-    /* 黑名单：命名空间/挂载/调试/模块加载等特权 syscall。
-     * 先取 syscall nr，逐条 JEQ 命中即返回 EPERM，未命中全部放行。 */
+    /* Blacklist: privileged syscalls such as namespace/mount/debug/module
+     * load. Fetch the syscall nr first, then JEQ per entry; on a hit return
+     * EPERM, otherwise allow everything. */
     struct sock_filter filter[] = {
         BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
 
@@ -269,10 +273,12 @@ static int os_sandbox_ll_allow_file(int ruleset_fd, const char *path, uint64_t a
     return (rc == 0) ? 0 : -1;
 }
 
-/* 应用 Landlock 文件系统白名单：
- * - WORKSPACE：全局只读可执行 + 工作区/临时目录可写
- * - STRICT：仅系统基础路径 + 工作区可读可执行，工作区/临时目录可写
- * 两者均放行 /dev 只读与 /dev/null 写入（shell 命令常用重定向目标）。 */
+/* Apply the Landlock filesystem whitelist:
+ * - WORKSPACE: global read+exec, workspace/temp dirs writable
+ * - STRICT: only system base paths + workspace readable/executable;
+ *   workspace/temp dirs writable
+ * Both allow /dev read-only and /dev/null writes (common shell redirection
+ * targets). */
 static int os_sandbox_apply_landlock(const os_sandbox_cfg_t *cfg)
 {
     struct os_ll_ruleset_attr attr;

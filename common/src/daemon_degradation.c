@@ -44,7 +44,7 @@ static int g_handler_count = 0;
  * ============================================================================ */
 
 /**
- * @brief 缓存降级回调 — 将缓存容量减半
+ * @brief Cache degradation callback — halve the cache capacity
  */
 static int on_cache_degrade(degradation_handler_t *handler, watermark_level_t old_level,
                             watermark_level_t new_level)
@@ -69,7 +69,7 @@ static int on_cache_degrade(degradation_handler_t *handler, watermark_level_t ol
 }
 
 /**
- * @brief 缓存恢复回调 — 恢复原始缓存容量
+ * @brief Cache restore callback — restore the original cache capacity
  */
 static int on_cache_restore(degradation_handler_t *handler, watermark_level_t old_level,
                             watermark_level_t new_level)
@@ -89,7 +89,7 @@ static int on_cache_restore(degradation_handler_t *handler, watermark_level_t ol
 }
 
 /**
- * @brief 日志降级回调 — 将日志级别提升至 ERROR
+ * @brief Log degradation callback — raise the log level to ERROR
  */
 static int on_log_degrade(degradation_handler_t *handler, watermark_level_t old_level,
                           watermark_level_t new_level)
@@ -109,7 +109,7 @@ static int on_log_degrade(degradation_handler_t *handler, watermark_level_t old_
 }
 
 /**
- * @brief 日志恢复回调 — 恢复原始日志级别
+ * @brief Log restore callback — restore the original log level
  */
 static int on_log_restore(degradation_handler_t *handler, watermark_level_t old_level,
                           watermark_level_t new_level)
@@ -128,7 +128,7 @@ static int on_log_restore(degradation_handler_t *handler, watermark_level_t old_
 }
 
 /**
- * @brief 批处理降级回调 — 将批次大小减半
+ * @brief Batch degradation callback — halve the batch size
  */
 static int on_batch_degrade(degradation_handler_t *handler, watermark_level_t old_level,
                             watermark_level_t new_level)
@@ -153,7 +153,7 @@ static int on_batch_degrade(degradation_handler_t *handler, watermark_level_t ol
 }
 
 /**
- * @brief 批处理恢复回调 — 恢复原始批次大小
+ * @brief Batch restore callback — restore the original batch size
  */
 static int on_batch_restore(degradation_handler_t *handler, watermark_level_t old_level,
                             watermark_level_t new_level)
@@ -173,7 +173,7 @@ static int on_batch_restore(degradation_handler_t *handler, watermark_level_t ol
 }
 
 /**
- * @brief 连接拒绝降级回调 — 设置拒绝新连接标志
+ * @brief Connection degrade callback — set the reject-new-connections flag
  */
 static int on_conn_degrade(degradation_handler_t *handler, watermark_level_t old_level,
                            watermark_level_t new_level)
@@ -192,7 +192,7 @@ static int on_conn_degrade(degradation_handler_t *handler, watermark_level_t old
 }
 
 /**
- * @brief 连接恢复回调 — 清除拒绝新连接标志
+ * @brief Connection restore callback — clear the reject-new-connections flag
  */
 static int on_conn_restore(degradation_handler_t *handler, watermark_level_t old_level,
                            watermark_level_t new_level)
@@ -211,7 +211,7 @@ static int on_conn_restore(degradation_handler_t *handler, watermark_level_t old
 }
 
 /* ============================================================================
- * 公共 API 实现
+ * Public API implementation
  * ============================================================================ */
 
 degradation_handler_t *daemon_degradation_register_cache(void *cache_handle,

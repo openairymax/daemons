@@ -42,10 +42,11 @@ static const provider_ops_t *get_ops_by_name(const char *name)
         return &google_ops;
     if (strcmp(name, "local") == 0)
         return &local_ops;
-    /* OpenAI 兼容统一适配（对齐 LiteLLM 的 openai_like 模式）：
-     * 任何未内置的厂商（glm / qwen / moonshot / siliconflow / spark /
-     * minimax / 自定义名）只需在 model.yaml 提供 base_url + api_key
-     * 即可走统一的 OpenAI Chat Completions 协议，无需新增 provider 实现。 */
+    /* Unified OpenAI-compatible adapter (aligned with LiteLLM's openai_like
+     * mode): any non-built-in vendor (glm / qwen / moonshot / siliconflow /
+     * spark / minimax / custom names) only needs base_url + api_key in
+     * model.yaml to use the unified OpenAI Chat Completions protocol, with no
+     * new provider implementation needed. */
     SVC_LOG_DEBUG("Provider '%s' falls back to OpenAI-compatible adapter "
                   "(custom base_url)",
                   name);
@@ -227,8 +228,9 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
 
         char api_key_buf[512] = {0};
         if (cJSON_IsString(pkey_env) && pkey_env->valuestring[0]) {
-            /* 保留 "env:NAME" 形式：provider_base_init 会提取 env 名，
-             * 供请求时 secrets.env 热加载（启动后填 key 无需重启） */
+            /* Keep the "env:NAME" form: provider_base_init extracts the env
+             * name for secrets.env hot-reload on request (filling the key
+             * after startup needs no restart) */
             size_t env_len = strlen(pkey_env->valuestring);
             if (4 + env_len < sizeof(api_key_buf)) {
                 __builtin_memcpy(api_key_buf, "env:", 4);
@@ -359,10 +361,12 @@ int provider_registry_enumerate(provider_registry_t *reg,
         return 0;
     }
 
-    /* P3.16 (ACC-DT17): 遍历所有 (provider, model) 对并回调。
-     * 注意：回调期间持有 reg->lock，因此回调不得回调会获取同一锁的
-     * registry 函数（如 provider_registry_find）。router 端点注册使用
-     * 独立的 router mutex，无死锁风险。回调返回非 0 时短路停止。 */
+    /* P3.16 (ACC-DT17): iterate all (provider, model) pairs and callback.
+     * Note: reg->lock is held during the callback, so the callback must not
+     * call registry functions that acquire the same lock (e.g.
+     * provider_registry_find). Router endpoint registration uses its own
+     * router mutex, no deadlock risk. A non-zero callback return short-circuits
+     * the iteration. */
     int short_circuit = 0;
     for (provider_t *p = reg->providers; p->name; ++p) {
         if (!p->name || !p->models)

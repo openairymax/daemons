@@ -107,8 +107,9 @@ static void test_invoke(void)
     assert(agent_id != NULL);
 
     char *out_output = NULL;
-    /* P0-2：AIRY_AGENT_NO_SPAWN 模式下无子进程，invoke 必须返回明确
-     * 错误，而非"invocation processed"假成功 */
+    /* P0-2: in AIRY_AGENT_NO_SPAWN mode there is no child process; invoke
+     * must return a clear error rather than an "invocation processed" fake
+     * success */
     ret = agent_service_invoke(svc, agent_id, "hello", 5, NULL, &out_output);
     assert(ret != AIRY_SUCCESS);
     assert(out_output != NULL);
@@ -184,9 +185,10 @@ static void test_spawn_after_terminate(void)
 {
     printf("  test_spawn_after_terminate...\n");
 
-    /* 实现不压缩数组（terminate 仅置 status=3），故 max_agents=3
-     * 以允许终止后再派生：spawn 2（count=2），terminate 1（count=2），
-     * spawn 1（count=3）应成功 */
+    /* The implementation does not compact the array (terminate only sets
+     * status=3), so max_agents=3 allows spawning again after termination:
+     * spawn 2 (count=2), terminate 1 (count=2), spawn 1 (count=3) must
+     * succeed */
     agent_service_t *svc = agent_service_create(3);
     assert(svc != NULL);
 
@@ -408,8 +410,9 @@ static void test_invoke_session_capacity(void)
 /* ========== main ========== */
 int main(void)
 {
-    /* P0-2：单元测试使用确定性模式 — 禁止真实 fork Python 子进程，
-     * 验证 service 状态机与"无子进程 invoke 返回明确错误"的新契约。 */
+    /* P0-2: unit tests use the deterministic mode — real Python child
+     * processes must not be forked; verifies the service state machine and
+     * the new "no-child invoke returns a clear error" contract. */
     setenv("AIRY_AGENT_NO_SPAWN", "1", 1);
 
     printf("=== Agent Service Unit Tests ===\n");
