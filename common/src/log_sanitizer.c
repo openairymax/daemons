@@ -4,7 +4,7 @@
 #include "airy_memory.h"
 /**
  * @file log_sanitizer.c
- * @brief 日志脱敏过滤器实现
+ * @brief Log sanitization filter implementation.
  */
 
 #include "atomic_compat.h"
@@ -44,9 +44,7 @@ static atomic_int g_initialized = 0;
 #define DEFAULT_REPLACEMENT "***"
 #define MAX_LINE_LENGTH 4096
 
-/**
- * @brief 线程安全的初始化
- */
+/** @brief Thread-safe initialization. */
 static void ensure_initialized(void)
 {
     if (g_initialized)
@@ -75,9 +73,7 @@ static void ensure_initialized(void)
     airy_mtx_unlock(&g_mutex);
 }
 
-/**
- * @brief 简单的大小写不敏感字符串比较
- */
+/** @brief Simple case-insensitive string comparison. */
 static const char *log_strcasestr(const char *haystack, const char *needle)
 {
     if (!haystack || !needle) {
@@ -105,9 +101,7 @@ static const char *log_strcasestr(const char *haystack, const char *needle)
     AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
-/**
- * @brief 查找匹配模式的起始位置
- */
+/** @brief Find the start position of a matching pattern. */
 static const char *find_pattern(const char *message, const sensitive_field_t *pattern)
 {
     const char *pos = message;
@@ -133,9 +127,7 @@ static const char *find_pattern(const char *message, const sensitive_field_t *pa
     AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
-/**
- * @brief 查找字段值的结束位置
- */
+/** @brief Find the end position of a field value. */
 static const char *find_value_end(const char *value_start)
 {
     if (!value_start || !*value_start) {
@@ -162,9 +154,7 @@ static const char *find_value_end(const char *value_start)
     }
 }
 
-/**
- * @brief 脱敏核心逻辑
- */
+/** @brief Core sanitization logic. */
 static int sanitize_core(const char *message, char *buffer, size_t buffer_size)
 {
     if (!message || !buffer || buffer_size == 0) {

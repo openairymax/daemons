@@ -4,13 +4,16 @@
 // @owner: team-B
 /**
  * @file gateway_biz_backend.c
- * @brief 网关协议后端：MCP / OpenAI / A2A 适配器的业务执行接口
+ * @brief Gateway protocol backends: business-execution interfaces of the
+ *        MCP / OpenAI / A2A adapters.
  *
- * 将 MCP tools/call、OpenAI chat/completions、A2A task 三类外部协议
- * 的调用翻译为 daemon 内部服务调用（tool_d.execute_tool / llm_d.complete /
- * sched_d.schedule_task），供 gateway_protocol_router 注册的适配器使用。
+ * Translates calls of the three external protocols (MCP tools/call, OpenAI
+ * chat/completions, A2A task) into internal daemon service calls
+ * (tool_d.execute_tool / llm_d.complete / sched_d.schedule_task), for use
+ * by the adapters registered with gateway_protocol_router.
  *
- * 从 gateway_business_handler.c 拆分（单一职责：外部协议后端）。
+ * Split from gateway_business_handler.c (single responsibility: external
+ * protocol backends).
  */
 
 #include "gateway_biz_internal.h"

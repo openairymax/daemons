@@ -3,16 +3,18 @@
 
 /**
  * @file daemon_rpc_client.h
- * @brief 轻量级 Unix-socket JSON-RPC 客户端
+ * @brief Lightweight Unix-socket JSON-RPC client.
  *
- * Phase 3 执行体集中化重构：为 gateway_d 内 syscall_router.c 提供
- * 从进程内实现迁移到 daemon IPC 的 thin client。仅暴露同步阻塞接口，
- * 内部完成 socket 连接、JSON-RPC 2.0 请求构造、响应解析与结果提取。
+ * Phase-3 executor consolidation refactor: a thin client for migrating
+ * syscall_router.c in gateway_d from in-process implementation to daemon
+ * IPC. Exposes only synchronous blocking calls; internally handles socket
+ * connection, JSON-RPC 2.0 request construction, response parsing and
+ * result extraction.
  *
- * 设计目标：
- *   - 与 daemon 端 JSON-RPC 2.0 over Unix socket 协议严格对齐
- *   - 自包含、不依赖 libcurl（区别于 ipc_client.h）
- *   - 调用方负责 AIRY_FREE 返回的 result_json 字符串
+ * Design goals:
+ *   - Strictly aligned with the daemon-side JSON-RPC 2.0 over Unix socket
+ *   - Self-contained, no libcurl dependency (unlike ipc_client.h)
+ *   - Caller frees the returned result_json string via AIRY_FREE
  *
  */
 
@@ -28,39 +30,42 @@ extern "C" {
 #endif
 
 /**
- * @brief 调用 daemon 上的 JSON-RPC 方法（Unix socket，同步阻塞）
+ * @brief Call a JSON-RPC method on a daemon (Unix socket, synchronous).
  *
- * @param socket_path  daemon Unix socket 路径（非 NULL）
- * @param method       JSON-RPC 方法名（非 NULL，不含命名空间前缀，如 "write"）
- * @param params_json  params 对象序列化字符串（可为 NULL 表示空 params）
- * @param out_result_json 输出 result 字段的 JSON 序列化字符串（调用方负责 AIRY_FREE）
- * @param timeout_ms   超时（毫秒），0 表示使用默认 30000ms
- * @return AIRY_SUCCESS 成功；其他为错误码
+ * @param socket_path  Daemon Unix socket path (non-NULL)
+ * @param method       JSON-RPC method name (non-NULL, without namespace
+ *                     prefix, e.g. "write")
+ * @param params_json  Serialized params object (NULL = empty params)
+ * @param out_result_json Serialized result-field string (caller AIRY_FREEs)
+ * @param timeout_ms   Timeout in ms, 0 = default 30000ms
+ * @return AIRY_SUCCESS on success; other codes on failure
  *
- * @note 失败时 *out_result_json 不会被设置（保持 NULL）。
- *       仅在 POSIX 平台可用；Windows 下返回 AIRY_ERR_NOT_SUPPORTED。
+ * @note On failure *out_result_json is not set (stays NULL).
+ *       Available on POSIX only; returns AIRY_ERR_NOT_SUPPORTED on Windows.
  */
 int daemon_rpc_call(const char *socket_path, const char *method, const char *params_json,
                     char **out_result_json, uint32_t timeout_ms);
 
 /**
- * @brief 可取消的 daemon JSON-RPC 调用（改进1 "取消下探"）
+ * @brief Cancelable daemon JSON-RPC call (improvement 1 "cancel down-probe").
  *
- * 与 daemon_rpc_call 相同，但在等待响应期间短轮询取消令牌（select/poll
- * 非阻塞，200ms 片）。令牌命中时先向同一 daemon 发送 cancel 请求
- * （agent_d：agent.cancel，按 request_id 终止 invoke 会话），再返回
- * AIRY_ERR_CANCELED。用于 DAG 节点级取消 → 工具/Agent 调用级取消下探。
+ * Same as daemon_rpc_call, but short-polls the cancel token while waiting
+ * for the response (non-blocking select/poll, 200ms slices). On token hit,
+ * first sends a cancel request to the same daemon (agent_d: agent.cancel
+ * terminates the invoke session by request_id), then returns
+ * AIRY_ERR_CANCELED. Used for DAG-node-level cancellation -> tool/agent
+ * call-level cancellation down-probe.
  *
- * @param socket_path  daemon Unix socket 路径（非 NULL）
- * @param method       JSON-RPC 方法名（如 "invoke"）
- * @param params_json  params 对象序列化字符串（可为 NULL）
- * @param out_result_json 输出 result JSON 字符串（调用方负责 AIRY_FREE）
- * @param timeout_ms   超时（毫秒），0 表示使用默认 30000ms
- * @param cancel_token 取消令牌（可为 NULL = 等同 daemon_rpc_call）
- * @param cancel_method    取消时发送的方法名（如 "cancel"）
- * @param cancel_params_json 取消请求的 params JSON（如 {"request_id":...}）
- * @return AIRY_SUCCESS 成功；AIRY_ERR_CANCELED 已被取消（取消请求已送达）；
- *         其他为错误码
+ * @param socket_path  Daemon Unix socket path (non-NULL)
+ * @param method       JSON-RPC method name (e.g. "invoke")
+ * @param params_json  Serialized params object (may be NULL)
+ * @param out_result_json Serialized result JSON string (caller AIRY_FREEs)
+ * @param timeout_ms   Timeout in ms, 0 = default 30000ms
+ * @param cancel_token Cancel token (NULL = same as daemon_rpc_call)
+ * @param cancel_method    Method name sent on cancel (e.g. "cancel")
+ * @param cancel_params_json params JSON of the cancel request (e.g. {"request_id":...})
+ * @return AIRY_SUCCESS on success; AIRY_ERR_CANCELED on cancellation (cancel
+ *         request delivered); other codes on failure
  */
 int daemon_rpc_call_cancelable(const char *socket_path, const char *method, const char *params_json,
                                char **out_result_json, uint32_t timeout_ms,

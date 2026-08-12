@@ -3,10 +3,12 @@
 
 /**
  * @file plugin_permission.c
- * @brief P2.2.4: 插件权限校验 — manifest 权限 ↔ Cupolas 守卫类型映射
+ * @brief P2.2.4: plugin permission checks - manifest permissions to
+ *        Cupolas guard-type mapping.
  *
- * 将插件 manifest 中声明的权限映射到 Cupolas 安全穹顶的守卫类型。
- * 加载插件时自动校验权限，不符合安全策略的插件拒绝加载。
+ * Maps permissions declared in a plugin manifest to the guard types of the
+ * Cupolas security dome. Permissions are validated automatically at plugin
+ * load; plugins that do not match the security policy are refused.
  */
 
 #include "plugin_permission.h"

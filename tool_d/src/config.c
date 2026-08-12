@@ -4,7 +4,7 @@
 #include "airy_memory.h"
 /**
  * @file manager.c
- * @brief 工具服务配置加载（YAML）
+ * @brief Tool-service config loading (YAML).
  */
 
 #include "config.h"

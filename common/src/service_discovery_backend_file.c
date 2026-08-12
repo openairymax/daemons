@@ -3,8 +3,10 @@
 
 /**
  * @file service_discovery_backend_file.c
- * @brief 跨进程服务发现 file 后端：将服务注册写入 $AIRY_HOME/state/sd/ 下
- *        的 JSON 文件，list/lookup 扫描目录，实现跨进程持久化注册中心
+ * @brief Cross-process service-discovery file backend: writes service
+ *        registrations to JSON files under $AIRY_HOME/state/sd/; list/lookup
+ *        scan the directory, implementing a cross-process persistent
+ *        registry.
  */
 
 #include "service_discovery_internal.h"

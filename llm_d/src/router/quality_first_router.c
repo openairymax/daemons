@@ -3,28 +3,29 @@
 
 /**
  * @file quality_first_router.c
- * @brief P3.1.4: 质量优先路由
+ * @brief P3.1.4: quality-first routing.
  *
- * 按优先级排序（priority 越大越优先），
- * 同优先级按上下文窗口降序排列，
- * 选择质量最高的端点。
+ * Sorts by priority (higher priority first); ties broken by descending
+ * context-window size, selecting the highest-quality endpoint.
  *
  */
 
 #include "router/router_context.h"
 
 /**
- * @brief 质量优先路由 — 按优先级和上下文窗口排序选择最佳端点
+ * @brief Quality-first routing - pick the best endpoint by priority and
+ *        context-window size.
  *
- * 排序规则：
- *   1. priority 越大越优先
- *   2. 同优先级时 context_window 越大越优先
+ * Sort rules:
+ *   1. Higher priority wins
+ *   2. On equal priority, larger context_window wins
  *
- * 适用于需要高质量输出的场景（如代码生成、复杂推理）。
+ * For scenarios needing high-quality output (e.g. code generation,
+ * complex reasoning).
  *
- * @param request 路由请求
- * @param result  路由结果输出
- * @return 0 成功，-1 无可用端点
+ * @param request Routing request
+ * @param result  Routing-result output
+ * @return 0 on success, -1 if no eligible endpoint
  */
 int route_quality_first(const llm_route_request_t *request, llm_route_result_t *result)
 {

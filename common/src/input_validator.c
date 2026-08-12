@@ -5,7 +5,7 @@
 #include "error.h"
 /**
  * @file input_validator.c
- * @brief 输入验证框架实现
+ * @brief Input-validation framework implementation.
  */
 
 #include "input_validator.h"

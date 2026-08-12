@@ -3,8 +3,9 @@
 
 /**
  * @file builtin_git.c
- * @brief 内置工具 git 域：git_exec / git_diff / git_apply 原子 git 文件修改
- *        能力（fork + pipe + poll + waitpid，支持 stdin 数据注入）
+ * @brief Built-in tool git domain: git_exec / git_diff / git_apply atomic
+ *        git file-modification capability (fork + pipe + poll + waitpid,
+ *        supporting stdin data injection).
  */
 
 #include "airy_memory.h"

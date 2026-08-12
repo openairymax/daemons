@@ -3,7 +3,7 @@
 
 /**
  * @file param_validator.c
- * @brief JSON-RPC 参数验证工具实现
+ * @brief JSON-RPC parameter validation tool implementation.
  */
 
 #include "param_validator.h"
@@ -12,9 +12,7 @@
 #include <string.h>
 #include "error.h"
 
-/**
- * @brief 验证必需字段是否存在
- */
+/** @brief Validate that required fields are present. */
 int validate_required_fields(cJSON *obj, ...)
 {
     if (!obj || !cJSON_IsObject(obj)) {
@@ -37,9 +35,7 @@ int validate_required_fields(cJSON *obj, ...)
     return 0;
 }
 
-/**
- * @brief 验证 JSON-RPC 请求的基本结构
- */
+/** @brief Validate the basic structure of a JSON-RPC request. */
 int validate_jsonrpc_request(cJSON *req, cJSON **jsonrpc, cJSON **method, cJSON **params,
                              cJSON **id)
 {

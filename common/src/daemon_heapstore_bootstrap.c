@@ -3,7 +3,7 @@
 
 /**
  * @file daemon_heapstore_bootstrap.c
- * @brief daemon 统一 heapstore 运行时数据存储引导实现
+ * @brief Unified heapstore runtime data-store bootstrap implementation.
  */
 
 #include "daemon_heapstore_bootstrap.h"

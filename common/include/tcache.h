@@ -3,18 +3,19 @@
 
 /**
  * @file tcache.h
- * @brief P1.20: per-Thread 缓存层 — 批量获取/归还 + 限流上限
+ * @brief P1.20: per-thread caching layer - batch acquire/return + cap.
  *
- * 在每个线程的 TLS 中维护一个小的分配缓存。
- * 小对象分配直接从 tcache 获取，避免频繁访问全局分配器。
- * 缓存耗尽时批量从 Arena 或全局分配器获取。
+ * Maintains a small allocation cache in each thread's TLS. Small-object
+ * allocations are served from the tcache, avoiding frequent access to the
+ * global allocator. When the cache is exhausted, objects are fetched in
+ * batch from the Arena or the global allocator.
  *
- * 设计目标：
- *   - 单线程分配延迟降低 > 30%
- *   - 批量获取/归还减少锁竞争
- *   - 限流上限防止单个线程过度缓存
+ * Design goals:
+ *   - Single-thread allocation latency reduced by > 30%
+ *   - Batch acquire/return reduces lock contention
+ *   - Cap prevents a single thread from over-caching
  *
- * @see arena.h  Arena 线性分配器
+ * @see arena.h  Arena linear allocator
  */
 
 #ifndef AIRY_RT_TCACHE_H
@@ -54,90 +55,94 @@ typedef struct {
 
 
 /**
- * @brief 创建 tcache 实例
+ * @brief Create a tcache instance.
  *
- * 每个线程应创建自己的 tcache 实例（通常存储在 _Thread_local）。
+ * Each thread should create its own tcache instance (typically stored in
+ * _Thread_local).
  *
- * @param config 配置（NULL 使用默认）
- * @return tcache 句柄，失败返回 NULL
+ * @param config Config (NULL = defaults)
+ * @return tcache handle, NULL on failure
  */
 tcache_t *tcache_create(const tcache_config_t *config);
 
 /**
- * @brief 销毁 tcache 实例
+ * @brief Destroy a tcache instance.
  *
- * 将所有缓存的对象归还给全局分配器。
+ * Returns all cached objects to the global allocator.
  *
- * @param tc tcache 句柄
+ * @param tc tcache handle
  */
 void tcache_destroy(tcache_t *tc);
 
 
 /**
- * @brief 从 tcache 分配内存
+ * @brief Allocate memory from the tcache.
  *
- * 优先从线程本地缓存获取，缓存未命中时批量从全局分配器获取。
- * 超过 max_cache_size_class 的对象直接分配。
+ * Serves from the thread-local cache first; on a miss, fetches in batch
+ * from the global allocator. Objects above max_cache_size_class are
+ * allocated directly.
  *
- * @param tc tcache 句柄
- * @param size 分配大小
- * @return 内存指针，失败返回 NULL
+ * @param tc tcache handle
+ * @param size Allocation size
+ * @return Memory pointer, NULL on failure
  */
 void *tcache_alloc(tcache_t *tc, size_t size);
 
 /**
- * @brief 释放内存到 tcache
+ * @brief Free memory to the tcache.
  *
- * 小对象缓存到线程本地，大对象直接释放。
- * 如果缓存已满，批量归还到全局分配器。
+ * Small objects are cached thread-locally; large objects are freed
+ * directly. If the cache is full, objects are returned in batch to the
+ * global allocator.
  *
- * @param tc tcache 句柄
- * @param ptr 内存指针
- * @param size 分配时的大小
+ * @param tc tcache handle
+ * @param ptr Memory pointer
+ * @param size Size used at allocation
  */
 void tcache_free(tcache_t *tc, void *ptr, size_t size);
 
 
 /**
- * @brief 批量归还所有缓存对象到全局分配器
+ * @brief Return all cached objects to the global allocator in batch.
  *
- * 在线程退出前调用，确保所有缓存对象被正确释放。
+ * Call before the thread exits to ensure all cached objects are released.
  *
- * @param tc tcache 句柄
+ * @param tc tcache handle
  */
 void tcache_flush(tcache_t *tc);
 
 /**
- * @brief 清空缓存（不归还到全局分配器）
+ * @brief Clear the cache (without returning to the global allocator).
  *
- * 用于 Arena 模式：缓存对象属于 Arena，不需要单独释放。
+ * Used in Arena mode: cached objects belong to the Arena and need no
+ * separate release.
  *
- * @param tc tcache 句柄
+ * @param tc tcache handle
  */
 void tcache_purge(tcache_t *tc);
 
 
 /**
- * @brief 获取 tcache 统计信息
+ * @brief Get tcache statistics.
  *
- * @param tc tcache 句柄
- * @param out_stats 输出统计
+ * @param tc tcache handle
+ * @param out_stats Output statistics
  */
 void tcache_get_stats(tcache_t *tc, tcache_stats_t *out_stats);
 
 /**
- * @brief 获取当前缓存的对象数
+ * @brief Get the number of currently cached objects.
  *
- * @param tc tcache 句柄
- * @return 缓存对象数
+ * @param tc tcache handle
+ * @return Cached object count
  */
 size_t tcache_cached_count(tcache_t *tc);
 
 /**
- * @brief 获取当前缓存的总字节数
+ * @brief Get the total bytes currently cached.
  *
- * @param tc tcache 句柄
- * @return 缓存字节数
+ * @param tc tcache handle
+ * @return Cached bytes
  */
 size_t tcache_cached_bytes(tcache_t *tc);
 

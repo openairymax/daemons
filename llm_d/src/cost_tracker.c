@@ -5,7 +5,7 @@
 #include "error.h"
 /**
  * @file cost_tracker.c
- * @brief 成本跟踪实现（根据配置规则匹配）
+ * @brief Cost-tracking implementation (matched by config rules).
  */
 
 #include "cost_tracker.h"

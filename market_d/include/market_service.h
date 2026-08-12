@@ -3,8 +3,9 @@
 
 /**
  * @file market_service.h
- * @brief 市场服务接口定义
- * @details 负责 Agent 和 Skill 的注册、发现、安装和管理
+ * @brief Market service interface.
+ * @details Handles registration, discovery, installation and management of
+ *          agents and skills.
  */
 
 #ifndef AIRY_RT_MARKET_SERVICE_H
@@ -14,9 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/**
- * @brief 市场服务配置
- */
+/** @brief Market service config. */
 typedef struct {
     char *registry_url;
     char *storage_path;
@@ -26,9 +25,7 @@ typedef struct {
     bool enable_auto_update;
 } market_config_t;
 
-/**
- * @brief Agent 类型
- */
+/** @brief Agent type. */
 typedef enum {
     AGENT_TYPE_ASSISTANT,
     AGENT_TYPE_EXPERT,
@@ -37,9 +34,7 @@ typedef enum {
     AGENT_TYPE_COUNT
 } agent_type_t;
 
-/**
- * @brief Agent 状态
- */
+/** @brief Agent status. */
 typedef enum {
     AGENT_STATUS_AVAILABLE,
     AGENT_STATUS_INSTALLING,
@@ -48,9 +43,7 @@ typedef enum {
     AGENT_STATUS_COUNT
 } agent_status_t;
 
-/**
- * @brief Skill 类型
- */
+/** @brief Skill type. */
 typedef enum {
     SKILL_TYPE_TOOL,
     SKILL_TYPE_KNOWLEDGE,
@@ -59,9 +52,7 @@ typedef enum {
     SKILL_TYPE_COUNT
 } skill_type_t;
 
-/**
- * @brief Agent 信息
- */
+/** @brief Agent info. */
 typedef struct {
     char *agent_id; /**< Agent ID */
     char *name;
@@ -77,9 +68,7 @@ typedef struct {
     uint64_t last_updated;
 } agent_info_t;
 
-/**
- * @brief Skill 信息
- */
+/** @brief Skill info. */
 typedef struct {
     char *skill_id; /**< Skill ID */
     char *name;
@@ -94,9 +83,7 @@ typedef struct {
     uint64_t last_updated;
 } skill_info_t;
 
-/**
- * @brief 安装请求
- */
+/** @brief Install request. */
 typedef struct {
     char *id;
     char *version;
@@ -104,9 +91,7 @@ typedef struct {
     char *install_path;
 } install_request_t;
 
-/**
- * @brief 安装结果
- */
+/** @brief Install result. */
 typedef struct {
     bool success;
     char *message;
@@ -115,9 +100,7 @@ typedef struct {
     int error_code;
 } install_result_t;
 
-/**
- * @brief 搜索参数
- */
+/** @brief Search parameters. */
 typedef struct {
     char *query;
     agent_type_t agent_type;
@@ -129,143 +112,141 @@ typedef struct {
     size_t offset;
 } search_params_t;
 
-/**
- * @brief 市场服务句柄
- */
+/** @brief Market service handle. */
 typedef struct market_service market_service_t;
 
 /**
- * @brief 创建市场服务
- * @param manager 配置信息
- * @param service 输出参数，返回创建的服务句柄
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Create a market service.
+ * @param manager Config info
+ * @param service Output parameter, returns the created service handle
+ * @return 0 on success, non-zero error code
  */
 int market_service_create(const market_config_t *manager, market_service_t **service);
 
 /**
- * @brief 销毁市场服务
- * @param service 服务句柄
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Destroy a market service.
+ * @param service Service handle
+ * @return 0 on success, non-zero error code
  */
 int market_service_destroy(market_service_t *service);
 
 /**
- * @brief 注册 Agent
- * @param service 服务句柄
- * @param agent_info Agent 信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Register an agent.
+ * @param service Service handle
+ * @param agent_info Agent info
+ * @return 0 on success, non-zero error code
  */
 int market_service_register_agent(market_service_t *service, const agent_info_t *agent_info);
 
 /**
- * @brief 注册 Skill
- * @param service 服务句柄
- * @param skill_info Skill 信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Register a skill.
+ * @param service Service handle
+ * @param skill_info Skill info
+ * @return 0 on success, non-zero error code
  */
 int market_service_register_skill(market_service_t *service, const skill_info_t *skill_info);
 
 /**
- * @brief 搜索 Agent
- * @param service 服务句柄
- * @param params 搜索参数
- * @param agents 输出参数，返回 Agent 信息数组
- * @param count 输出参数，返回 Agent 数量
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Search agents.
+ * @param service Service handle
+ * @param params Search parameters
+ * @param agents Output parameter, returns the agent-info array
+ * @param count Output parameter, returns the agent count
+ * @return 0 on success, non-zero error code
  */
 int market_service_search_agents(market_service_t *service, const search_params_t *params,
                                  agent_info_t ***agents, size_t *count);
 
 /**
- * @brief 搜索 Skill
- * @param service 服务句柄
- * @param params 搜索参数
- * @param skills 输出参数，返回 Skill 信息数组
- * @param count 输出参数，返回 Skill 数量
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Search skills.
+ * @param service Service handle
+ * @param params Search parameters
+ * @param skills Output parameter, returns the skill-info array
+ * @param count Output parameter, returns the skill count
+ * @return 0 on success, non-zero error code
  */
 int market_service_search_skills(market_service_t *service, const search_params_t *params,
                                  skill_info_t ***skills, size_t *count);
 
 /**
- * @brief 安装 Agent
- * @param service 服务句柄
- * @param request 安装请求
- * @param result 输出参数，返回安装结果
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Install an agent.
+ * @param service Service handle
+ * @param request Install request
+ * @param result Output parameter, returns the install result
+ * @return 0 on success, non-zero error code
  */
 int market_service_install_agent(market_service_t *service, const install_request_t *request,
                                  install_result_t **result);
 
 /**
- * @brief 安装 Skill
- * @param service 服务句柄
- * @param request 安装请求
- * @param result 输出参数，返回安装结果
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Install a skill.
+ * @param service Service handle
+ * @param request Install request
+ * @param result Output parameter, returns the install result
+ * @return 0 on success, non-zero error code
  */
 int market_service_install_skill(market_service_t *service, const install_request_t *request,
                                  install_result_t **result);
 
 /**
- * @brief 卸载 Agent
- * @param service 服务句柄
+ * @brief Uninstall an agent.
+ * @param service Service handle
  * @param agent_id Agent ID
- * @return 0 表示成功，非 0 表示错误码
+ * @return 0 on success, non-zero error code
  */
 int market_service_uninstall_agent(market_service_t *service, const char *agent_id);
 
 /**
- * @brief 卸载 Skill
- * @param service 服务句柄
+ * @brief Uninstall a skill.
+ * @param service Service handle
  * @param skill_id Skill ID
- * @return 0 表示成功，非 0 表示错误码
+ * @return 0 on success, non-zero error code
  */
 int market_service_uninstall_skill(market_service_t *service, const char *skill_id);
 
 /**
- * @brief 获取已安装的 Agent 列表
- * @param service 服务句柄
- * @param agents 输出参数，返回 Agent 信息数组
- * @param count 输出参数，返回 Agent 数量
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Get the installed-agent list.
+ * @param service Service handle
+ * @param agents Output parameter, returns the agent-info array
+ * @param count Output parameter, returns the agent count
+ * @return 0 on success, non-zero error code
  */
 int market_service_get_installed_agents(market_service_t *service, agent_info_t ***agents,
                                         size_t *count);
 
 /**
- * @brief 获取已安装的 Skill 列表
- * @param service 服务句柄
- * @param skills 输出参数，返回 Skill 信息数组
- * @param count 输出参数，返回 Skill 数量
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Get the installed-skill list.
+ * @param service Service handle
+ * @param skills Output parameter, returns the skill-info array
+ * @param count Output parameter, returns the skill count
+ * @return 0 on success, non-zero error code
  */
 int market_service_get_installed_skills(market_service_t *service, skill_info_t ***skills,
                                         size_t *count);
 
 /**
- * @brief 检查更新
- * @param service 服务句柄
- * @param id Agent 或 Skill ID
- * @param has_update 输出参数，返回是否有更新
- * @param latest_version 输出参数，返回最新版本
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Check for updates.
+ * @param service Service handle
+ * @param id Agent or Skill ID
+ * @param has_update Output parameter, whether an update exists
+ * @param latest_version Output parameter, returns the latest version
+ * @return 0 on success, non-zero error code
  */
 int market_service_check_update(market_service_t *service, const char *id, bool *has_update,
                                 char **latest_version);
 
 /**
- * @brief 重载配置
- * @param service 服务句柄
- * @param manager 新的配置信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Reload the config.
+ * @param service Service handle
+ * @param manager New config info
+ * @return 0 on success, non-zero error code
  */
 int market_service_reload_config(market_service_t *service, const market_config_t *manager);
 
 /**
- * @brief 同步注册中心
- * @param service 服务句柄
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Sync with the registry.
+ * @param service Service handle
+ * @return 0 on success, non-zero error code
  */
 int market_service_sync_registry(market_service_t *service);
 

@@ -3,7 +3,7 @@
 
 /**
  * @file cache.h
- * @brief 工具结果缓存接口（复用 llm_d 的 cache 实现）
+ * @brief Tool-result cache interface (reuses llm_d's cache implementation).
  */
 
 #ifndef TOOL_CACHE_H

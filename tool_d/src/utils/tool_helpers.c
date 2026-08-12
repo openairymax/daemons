@@ -3,7 +3,7 @@
 
 /**
  * @file tool_helpers.c
- * @brief 辅助函数
+ * @brief Tool helper functions.
  */
 
 #include "tool_helpers.h"

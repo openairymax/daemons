@@ -3,13 +3,15 @@
 
 /**
  * @file ipc_service_bus.h
- * @brief IPC服务总线（daemons 重导出兼容头）
+ * @brief IPC service bus (daemons re-export compat header).
  *
- * P0.17 阶段 3：实际定义已迁移至 commons/utils/ipc/include/ipc_service_bus.h，
- * 消除 atoms→daemons 编译期反向依赖（IRON-6）。本文件保留为重导出
- * 兼容头，使 daemons 内部源文件无需立即修改 #include 路径。
+ * P0.17 phase 3: the real definitions moved to
+ * commons/utils/ipc/include/ipc_service_bus.h, removing the compile-time
+ * reverse dependency atoms->daemons (IRON-6). This file stays as a
+ * re-export compat header, so daemon sources need no immediate #include
+ * changes.
  *
- * @see commons/utils/ipc/include/ipc_service_bus.h (commons 权威版本)
+ * @see commons/utils/ipc/include/ipc_service_bus.h (commons authoritative)
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_IPC_SERVICE_BUS_H

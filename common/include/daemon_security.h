@@ -23,19 +23,22 @@
 #include <stdint.h>
 
 /*
- * External Dependency Guard (E-1 安全内生 + E-3 资源确定性 + S-2 层次分解)
+ * External Dependency Guard (E-1 security built-in + E-3 resource
+ * determinism + S-2 hierarchical decomposition)
  *
- * daemon_security 使用独立生产级安全实现，不依赖 cupolas 库。
- * 安全功能（签名验证/凭据保险库/审计日志/输入消毒/ACL）均在 daemon_security.c 中真实实现。
+ * daemon_security uses an independent production-grade security
+ * implementation and does not depend on the cupolas library. Security
+ * features (signature verification / credential vault / audit logging /
+ * input sanitization / ACL) are all really implemented in daemon_security.c.
  *
- * 类型定义复用 commons/utils/types/include/ 下的规范头文件：
- * - cupolas_signer_info.h: 签名者信息结构
- * - cupolas_vault_cred_type.h: 凭据类型枚举
+ * Type definitions reuse the canonical headers under commons/utils/types/include/:
+ * - cupolas_signer_info.h: signer-info structure
+ * - cupolas_vault_cred_type.h: credential-type enum
  *
- * 设计决策依据 ARCHITECTURAL_PRINCIPLES.md:
- * - K-4 零信任: 所有安全操作 fail-closed，默认拒绝
- * - E-6 错误可追溯: 完整审计日志
- * - S-2 层次分解: 安全类型定义与实现分离
+ * Design decisions follow ARCHITECTURAL_PRINCIPLES.md:
+ * - K-4 zero trust: all security operations fail closed, deny by default
+ * - E-6 traceable errors: full audit logs
+ * - S-2 hierarchical decomposition: security types separated from impl
  */
 #include "cupolas_signer_info.h"
 #include "cupolas_vault.h"
@@ -424,10 +427,10 @@ int daemon_security_get_status(int *sanitizer_status, int *permission_status, in
 int daemon_security_add_acl_rule(const char *agent_id, const char *resource, bool allowed);
 
 /**
- * @brief 获取 daemon_security 打开的 cupolas vault 实例
- * @return vault 句柄；未启用或未打开返回 NULL
- * @note 同一实例由 daemon_security_init() 打开，与 daemon_store/retrieve_credential
- *       读写一致；调用方不得自行 close
+ * @brief Get the cupolas vault instance opened by daemon_security.
+ * @return Vault handle; NULL if not enabled or not opened
+ * @note Opened by daemon_security_init(), consistent with the reads/writes
+ *       of daemon_store/retrieve_credential; callers must not close it
  */
 cupolas_vault_t *daemon_security_get_vault(void);
 

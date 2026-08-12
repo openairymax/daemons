@@ -3,21 +3,25 @@
 
 /**
  * @file svc_monitor.c
- * @brief 服务监控与降级处理（monitor + degradation 域）
+ * @brief Service monitoring and degradation handling (monitor + degradation domain).
  *
- * 实现 svc_common.h 中定义的服务监控接口（airy_svc_monitor_start/stop）
- * 与降级处理函数注册（airy_svc_set_degrad_hdlr）。监控线程周期性执行
- * 健康检查，在连续失败超过阈值时触发降级回调，并可配置自动重启
- * （带指数退避）。
+ * Implements the service-monitoring interface defined in svc_common.h
+ * (airy_svc_monitor_start/stop) and degradation-handler registration
+ * (airy_svc_set_degrad_hdlr). A monitoring thread periodically runs health
+ * checks, triggering the degradation callback when consecutive failures
+ * exceed the threshold, with configurable auto-restart (with exponential
+ * backoff).
  *
- * monitor 与 degradation 共享同一张监控表（g_monitor）：
- * - airy_svc_monitor_start 创建监控线程并初始化降级字段
- * - airy_svc_set_degrad_hdlr 可对未监控服务直接注册降级处理字段
- * 二者相互依赖，故合并于本文件。
+ * monitor and degradation share the same monitoring table (g_monitor):
+ * - airy_svc_monitor_start creates the monitor thread and initializes the
+ *   degradation fields
+ * - airy_svc_set_degrad_hdlr registers degradation fields directly for
+ *   unmonitored services
+ * They depend on each other, so both live in this file.
  *
- * 跨模块接口：monitor_shutdown()（非 static）由 svc_common.c 的
- * airy_svc_common_cleanup() 在退出路径调用，声明见 svc_common_internal.h；
- * g_monitor 状态保持本文件私有。
+ * Cross-module interface: monitor_shutdown() (non-static) is called by
+ * airy_svc_common_cleanup() in svc_common.c on the exit path; declared in
+ * svc_common_internal.h; g_monitor state stays private to this file.
  *
  * @see agentrt/daemons/common/include/svc_common.h
  * @see agentrt/daemons/common/src/svc_common.c
@@ -57,8 +61,8 @@ static struct {
     airy_mtx_t mutex;
 } g_monitor;
 
-/* 非 static：由 svc_common.c 的 airy_svc_common_cleanup() 调用（退出路径），
- * 声明见 svc_common_internal.h。 */
+/* Not static: called by airy_svc_common_cleanup() in svc_common.c (exit
+ * path); declared in svc_common_internal.h. */
 void monitor_shutdown(void)
 {
     if (g_monitor.initialized) {

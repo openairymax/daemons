@@ -3,20 +3,23 @@
 
 //
 // @file builtin.c
-// @brief tool_d 内置基础工具集（真实实现，非桩）：
+// @brief tool_d built-in basic tool set (real implementations, not stubs):
 //   fs_read / fs_write / fs_list / shell_run / web_fetch
 //
-// 设计说明：
-// - 内置工具是 Agent 基础能力的开箱即用集（对标 Claude Code / OpenAI Codex
-//   的 fs 与 shell 工具），通过 daemon_security ACL 显式授权后可用。
-// - 所有工具接收 params_json（OpenAI tool_call arguments），返回结果写入
-//   tool_result_t（output=stdout 语义 / error=stderr 语义 / exit_code）。
-// - shell_run 使用 popen 真实执行命令（agent 端命令执行能力），权限由
-//   上层 approval（fail-closed ACL）管控。
+// Design notes:
+// - Built-in tools are an out-of-the-box set of agent base capabilities
+//   (mirroring the fs and shell tools of Claude Code / OpenAI Codex),
+//   usable after explicit authorization via the daemon_security ACL.
+// - All tools take params_json (OpenAI tool_call arguments) and write the
+//   result to tool_result_t (output = stdout semantics / error = stderr
+//   semantics / exit_code).
+// - shell_run really executes commands via popen (agent-side command
+//   execution), gated by the upper approval layer (fail-closed ACL).
 //
-// 安全边界：
-// - fs 操作与 shell 执行均为真实 I/O，由 approval 层（daemon_security ACL
-//   fail-closed）决定是否放行；未授权工具一律拒绝。
+// Security boundary:
+// - fs operations and shell execution are real I/O, released only by the
+//   approval layer (daemon_security ACL fail-closed); unauthorized tools
+//   are always refused.
 
 #include "airy_memory.h"
 #include "error.h"

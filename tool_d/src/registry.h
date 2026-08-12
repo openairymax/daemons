@@ -3,7 +3,7 @@
 
 /**
  * @file registry.h
- * @brief 工具注册表接口
+ * @brief Tool-registry interface.
  */
 
 #ifndef TOOL_REGISTRY_H

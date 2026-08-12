@@ -3,8 +3,9 @@
 
 /**
  * @file publisher.c
- * @brief 发布管理模块
- * @details 基于 market_service 公共 API 实现发布和更新功能
+ * @brief Publish-management module.
+ * @details Implements publish and update on top of the market_service
+ *          public API.
  */
 
 #include "market_service.h"

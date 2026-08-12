@@ -3,10 +3,13 @@
 
 /**
  * @file sched_dag_parse.c
- * @brief 调度服务 · 蓝图调度（DAG）JSON 解析与拓扑校验域
- * @details 从蓝图提交 JSON 中解析节点/依赖/重试/校验规则，构建
- *          sched_dag_t 内部结构；负责唯一性校验、依赖存在性校验与
- *          环检测（Kahn 拓扑排序），失败时完整回滚已分配内存。
+ * @brief Scheduler service - blueprint scheduling (DAG) JSON parsing and
+ *        topological-validation domain.
+ * @details Parses nodes/dependencies/retry/validation rules from the
+ *          blueprint-submission JSON and builds the sched_dag_t internal
+ *          structure; handles uniqueness checks, dependency-existence checks
+ *          and cycle detection (Kahn topological sort), fully rolling back
+ *          allocated memory on failure.
  */
 
 #include "sched_service_internal.h"

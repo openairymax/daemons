@@ -5,17 +5,17 @@
 #include "error.h"
 /**
  * @file openai.c
- * @brief OpenAI 适配器实现（含生产级Rate Limiting）
+ * @brief OpenAI adapter implementation (with production-grade rate limiting).
  *
- * PROTO-003 实现内容：
- * 1. 令牌桶算法速率限制（RPM/TPM）
- * 2. HTTP 429 检测与 Retry-After 头解析
- * 3. 指数退避 + 抖动（Exponential Backoff with Jitter）
- * 4. 可配置的速率限制参数
+ * PROTO-003 implementation:
+ * 1. Token-bucket rate limiting (RPM/TPM)
+ * 2. HTTP 429 detection and Retry-After header parsing
+ * 3. Exponential backoff with jitter
+ * 4. Configurable rate-limit parameters
  *
- * 改进说明：
- * - 使用公共 Provider 基础设施
- * - 集成 OpenAI API 最佳实践
+ * Improvements:
+ * - Uses the common Provider infrastructure
+ * - Follows OpenAI API best practices
  */
 
 #include "daemon_errors.h"

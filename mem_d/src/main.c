@@ -4,18 +4,17 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file main.c
- * @brief Memory 服务守护进程主入口（遵循 daemon 模块统一规范）
+ * @brief Memory service daemon main entry (daemon module conventions).
  *
- * 暴露 JSON-RPC 方法（mem.* 命名空间）：
- *   - mem.write   : 写入记忆记录
- *   - mem.search  : 关键词检索
- *   - mem.get     : 按 ID 读取
- *   - mem.delete  : 按 ID 删除
- *   - mem.count   : 返回当前记录数（健康检查辅助）
+ * Exposes JSON-RPC methods (mem.* namespace):
+ *   - mem.write   : write a memory record
+ *   - mem.search  : keyword search
+ *   - mem.get     : read by ID
+ *   - mem.delete  : delete by ID
+ *   - mem.count   : current record count (health-check helper)
  *
- * Unix socket 路径：${AIRY_RUNTIME_DIR}/mem.sock
+ * Unix socket path: ${AIRY_RUNTIME_DIR}/mem.sock
  */
 
 #include "daemon_main.h"

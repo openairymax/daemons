@@ -2,19 +2,19 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
 /*
- *
  * @file gateway_svc_adapter.h
- * @brief Gateway服务适配器头文件
+ * @brief Gateway service-adapter header.
  *
- * 提供网关服务与AgentRT统一服务管理框架的适配接口。
- * 通过本适配器，网关服务可以无缝集成到服务注册表、服务发现、
- * 统一生命周期管理等框架功能中。
+ * Provides the adapter interface between the gateway service and the
+ * AgentRT unified service-management framework. Through this adapter the
+ * gateway service integrates seamlessly into the service registry, service
+ * discovery and unified lifecycle management.
  *
- * 设计原则：
- * 1. 接口契约化 - 提供标准化的服务接口
- * 2. 向后兼容 - 保持与现有网关服务的兼容性
- * 3. 最小侵入 - 对原始服务代码影响最小化
- * 4. 可扩展性 - 支持未来服务功能的扩展
+ * Design principles:
+ * 1. Interface contracts - standardized service interface
+ * 2. Backward compatibility - stays compatible with existing gateway services
+ * 3. Minimal intrusion - minimal impact on original service code
+ * 4. Extensibility - supports future service-feature extension
  *
  */
 
@@ -32,17 +32,18 @@ extern "C" {
 
 
 /**
- * @brief 创建网关服务适配器
+ * @brief Create a gateway service adapter.
  *
- * 创建一个新的网关服务适配器实例，该实例实现了airy_svc_t接口，
- * 可以通过统一的AgentRT服务管理框架进行管理。
+ * Creates a new gateway service-adapter instance implementing the
+ * airy_svc_t interface, manageable through the unified AgentRT
+ * service-management framework.
  *
- * @param[out] out_service 输出服务句柄
- * @param[in] config 通用服务配置（可为NULL，使用默认配置）
- * @return AIRY_SUCCESS 成功，其他值为错误码
+ * @param[out] out_service Output service handle
+ * @param[in] config Generic service config (may be NULL = default config)
+ * @return AIRY_SUCCESS on success, other values are error codes
  *
- * @threadsafe 否（需在单线程环境下调用）
- * @reentrant 是
+ * @threadsafe no (call in a single-threaded context)
+ * @reentrant yes
  *
  * @example
  * @code
@@ -69,189 +70,193 @@ AIRY_API airy_err_t gateway_service_adapter_create(airy_svc_t *out_service,
                                                    const airy_svc_config_t *config);
 
 /**
- * @brief 将现有网关服务包装为适配器
+ * @brief Wrap an existing gateway service as an adapter.
  *
- * 将已存在的网关服务实例包装为适配器，使其能够集成到服务管理框架中。
- * 包装后，原始服务句柄将由适配器管理，不应再直接使用原始句柄。
+ * Wraps an existing gateway service instance as an adapter so it can be
+ * integrated into the service-management framework. After wrapping, the
+ * original service handle is managed by the adapter and should not be used
+ * directly.
  *
- * @param[out] out_service 输出服务句柄
- * @param[in] gateway_svc 原始网关服务句柄
- * @param[in] config 通用服务配置（可为NULL，使用默认配置）
- * @return AIRY_SUCCESS 成功，其他值为错误码
+ * @param[out] out_service Output service handle
+ * @param[in] gateway_svc Original gateway service handle
+ * @param[in] config Generic service config (may be NULL = default config)
+ * @return AIRY_SUCCESS on success, other values are error codes
  *
- * @warning 包装后，原始服务句柄的生命周期由适配器管理，
- *          不应再调用gateway_service_destroy等函数。
+ * @warning After wrapping, the original service handle's lifecycle is
+ *          managed by the adapter; do not call gateway_service_destroy etc.
  *
- * @threadsafe 否
- * @reentrant 是
+ * @threadsafe no
+ * @reentrant yes
  */
 AIRY_API airy_err_t gateway_service_adapter_wrap(airy_svc_t *out_service,
                                                  gateway_service_t gateway_svc,
                                                  const airy_svc_config_t *config);
 
 /**
- * @brief 获取原始网关服务句柄
+ * @brief Get the original gateway service handle.
  *
- * 用于需要直接访问网关服务特定功能的场景。
- * 获取的句柄不应被修改或销毁，应由适配器管理其生命周期。
+ * For scenarios needing direct access to gateway-service-specific features.
+ * The returned handle must not be modified or destroyed; the adapter
+ * manages its lifecycle.
  *
- * @param service 适配器服务句柄
- * @return 原始网关服务句柄，或NULL（如果无效）
+ * @param service Adapter service handle
+ * @return Original gateway service handle, or NULL (if invalid)
  *
- * @threadsafe 是（前提是服务状态不变）
- * @reentrant 是
+ * @threadsafe yes (provided service state is unchanged)
+ * @reentrant yes
  */
 AIRY_API gateway_service_t gateway_service_adapter_get_original(airy_svc_t service);
 
 
 /**
- * @brief 适配器服务初始化
+ * @brief Initialize the adapter service.
  *
- * 初始化适配器服务，创建底层网关服务实例。
- * 如果使用gateway_service_adapter_wrap创建适配器，此函数无操作。
+ * Initializes the adapter service, creating the underlying gateway service
+ * instance. No-op if the adapter was created via gateway_service_adapter_wrap.
  *
- * @param service 适配器服务句柄
- * @return AIRY_SUCCESS 成功，其他值为错误码
+ * @param service Adapter service handle
+ * @return AIRY_SUCCESS on success, other values are error codes
  *
- * @threadsafe 否
- * @reentrant 否
+ * @threadsafe no
+ * @reentrant no
  */
 AIRY_API airy_err_t gateway_service_adapter_init(airy_svc_t service);
 
 /**
- * @brief 适配器服务启动
+ * @brief Start the adapter service.
  *
- * 启动底层网关服务。
+ * Starts the underlying gateway service.
  *
- * @param service 适配器服务句柄
- * @return AIRY_SUCCESS 成功，其他值为错误码
+ * @param service Adapter service handle
+ * @return AIRY_SUCCESS on success, other values are error codes
  *
- * @threadsafe 否
- * @reentrant 否
+ * @threadsafe no
+ * @reentrant no
  */
 AIRY_API airy_err_t gateway_service_adapter_start(airy_svc_t service);
 
 /**
- * @brief 适配器服务停止
+ * @brief Stop the adapter service.
  *
- * 停止底层网关服务。
+ * Stops the underlying gateway service.
  *
- * @param service 适配器服务句柄
- * @param force 是否强制停止
- * @return AIRY_SUCCESS 成功，其他值为错误码
+ * @param service Adapter service handle
+ * @param force Whether to force stop
+ * @return AIRY_SUCCESS on success, other values are error codes
  *
- * @threadsafe 是（底层网关服务需支持并发停止）
- * @reentrant 否
+ * @threadsafe yes (the underlying gateway service must support concurrent stop)
+ * @reentrant no
  */
 AIRY_API airy_err_t gateway_service_adapter_stop(airy_svc_t service, bool force);
 
 /**
- * @brief 适配器服务销毁
+ * @brief Destroy the adapter service.
  *
- * 销毁适配器及其管理的底层网关服务。
+ * Destroys the adapter and the underlying gateway service it manages.
  *
- * @param service 适配器服务句柄
+ * @param service Adapter service handle
  *
- * @threadsafe 否
- * @reentrant 否
+ * @threadsafe no
+ * @reentrant no
  */
 AIRY_API void gateway_service_adapter_destroy(airy_svc_t service);
 
 /**
- * @brief 适配器服务健康检查
+ * @brief Health check of the adapter service.
  *
- * 执行底层网关服务的健康检查。
+ * Runs the health check of the underlying gateway service.
  *
- * @param service 适配器服务句柄
- * @return AIRY_SUCCESS 健康，其他值为不健康
+ * @param service Adapter service handle
+ * @return AIRY_SUCCESS healthy, other values unhealthy
  *
- * @threadsafe 是
- * @reentrant 是
+ * @threadsafe yes
+ * @reentrant yes
  */
 AIRY_API airy_err_t gateway_service_adapter_healthcheck(airy_svc_t service);
 
 
 /**
- * @brief 获取适配器服务状态
+ * @brief Get the adapter service state.
  *
- * 获取底层网关服务的当前状态。
+ * Gets the current state of the underlying gateway service.
  *
- * @param service 适配器服务句柄
- * @return 服务状态枚举值
+ * @param service Adapter service handle
+ * @return Service-state enum value
  *
- * @threadsafe 是
- * @reentrant 是
+ * @threadsafe yes
+ * @reentrant yes
  */
 AIRY_API airy_svc_state_t gateway_service_adapter_get_state(airy_svc_t service);
 
 /**
- * @brief 检查适配器服务是否运行中
+ * @brief Check whether the adapter service is running.
  *
- * 检查底层网关服务是否处于运行状态。
+ * Checks whether the underlying gateway service is in the running state.
  *
- * @param service 适配器服务句柄
- * @return true 运行中，false 未运行
+ * @param service Adapter service handle
+ * @return true running, false not running
  *
- * @threadsafe 是
- * @reentrant 是
+ * @threadsafe yes
+ * @reentrant yes
  */
 AIRY_API bool gateway_service_adapter_is_running(airy_svc_t service);
 
 /**
- * @brief 获取适配器服务统计信息
+ * @brief Get the adapter service statistics.
  *
- * 获取底层网关服务的统计信息。
+ * Gets the statistics of the underlying gateway service.
  *
- * @param service 适配器服务句柄
- * @param stats 统计信息输出
- * @return AIRY_SUCCESS 成功，其他值为错误码
+ * @param service Adapter service handle
+ * @param stats Statistics output
+ * @return AIRY_SUCCESS on success, other values are error codes
  *
- * @threadsafe 是
- * @reentrant 是
+ * @threadsafe yes
+ * @reentrant yes
  */
 AIRY_API airy_err_t gateway_service_adapter_get_stats(airy_svc_t service, airy_svc_stats_t *stats);
 
 
 /**
- * @brief 创建网关服务适配器接口
+ * @brief Create the gateway service-adapter interface.
  *
- * 返回网关服务的标准适配器接口，可用于airy_svc_create函数。
- * 此函数主要用于高级用法，通常使用gateway_service_adapter_create即可。
+ * Returns the standard adapter interface of the gateway service, usable
+ * with airy_svc_create. This is mainly for advanced usage; usually
+ * gateway_service_adapter_create suffices.
  *
- * @return 网关服务适配器接口结构体
+ * @return Gateway service-adapter interface struct
  *
- * @threadsafe 是
- * @reentrant 是
+ * @threadsafe yes
+ * @reentrant yes
  */
 AIRY_API const airy_svc_interface_t *gateway_service_adapter_get_interface(void);
 
 /**
- * @brief 检查是否支持特定网关类型
+ * @brief Check whether a specific gateway type is supported.
  *
- * 检查适配器是否支持特定的网关类型。
+ * Checks whether the adapter supports the given gateway type.
  *
- * @param service 适配器服务句柄
- * @param type 网关类型
- * @return true 支持，false 不支持
+ * @param service Adapter service handle
+ * @param type Gateway type
+ * @return true supported, false not supported
  *
- * @threadsafe 是
- * @reentrant 是
+ * @threadsafe yes
+ * @reentrant yes
  */
 AIRY_API bool gateway_service_adapter_supports_type(airy_svc_t service, gateway_daemon_type_t type);
 
 /**
- * @brief 启用/禁用特定网关类型
+ * @brief Enable/disable a specific gateway type.
  *
- * 动态启用或禁用特定的网关类型。
- * 只能在服务停止状态下调用。
+ * Dynamically enables or disables a gateway type. Callable only while the
+ * service is stopped.
  *
- * @param service 适配器服务句柄
- * @param type 网关类型
- * @param enabled 是否启用
- * @return AIRY_SUCCESS 成功，其他值为错误码
+ * @param service Adapter service handle
+ * @param type Gateway type
+ * @param enabled Whether enabled
+ * @return AIRY_SUCCESS on success, other values are error codes
  *
- * @threadsafe 否
- * @reentrant 否
+ * @threadsafe no
+ * @reentrant no
  */
 AIRY_API airy_err_t gateway_service_adapter_set_type_enabled(airy_svc_t service,
                                                              gateway_daemon_type_t type,
@@ -259,60 +264,61 @@ AIRY_API airy_err_t gateway_service_adapter_set_type_enabled(airy_svc_t service,
 
 
 /**
- * @brief 从配置文件创建网关服务适配器
+ * @brief Create a gateway service adapter from a config file.
  *
- * 从配置文件加载配置并创建网关服务适配器。
+ * Loads the config from a file and creates the gateway service adapter.
  *
- * @param[out] out_service 输出服务句柄
- * @param config_path 配置文件路径
- * @return AIRY_SUCCESS 成功，其他值为错误码
+ * @param[out] out_service Output service handle
+ * @param config_path Config-file path
+ * @return AIRY_SUCCESS on success, other values are error codes
  *
- * @threadsafe 否
- * @reentrant 是
+ * @threadsafe no
+ * @reentrant yes
  */
 AIRY_API airy_err_t gateway_service_adapter_create_from_config(airy_svc_t *out_service,
                                                                const char *config_path);
 
 /**
- * @brief 重新加载适配器配置
+ * @brief Reload the adapter config.
  *
- * 从配置文件重新加载配置并更新适配器。
- * 只能在服务停止状态下调用。
+ * Reloads the config from a file and updates the adapter. Callable only
+ * while the service is stopped.
  *
- * @param service 适配器服务句柄
- * @param config_path 配置文件路径
- * @return AIRY_SUCCESS 成功，其他值为错误码
+ * @param service Adapter service handle
+ * @param config_path Config-file path
+ * @return AIRY_SUCCESS on success, other values are error codes
  *
- * @threadsafe 否
- * @reentrant 否
+ * @threadsafe no
+ * @reentrant no
  */
 AIRY_API airy_err_t gateway_service_adapter_reload_config(airy_svc_t service,
                                                           const char *config_path);
 
 
 /**
- * @brief 注册网关服务适配器到服务注册表
+ * @brief Register the gateway service adapter with the service registry.
  *
- * 将网关服务适配器注册到全局服务注册表中，使其可以通过服务发现机制访问。
+ * Registers the gateway service adapter in the global service registry,
+ * making it discoverable via service discovery.
  *
- * @param service 适配器服务句柄
- * @return AIRY_SUCCESS 成功，其他值为错误码
+ * @param service Adapter service handle
+ * @return AIRY_SUCCESS on success, other values are error codes
  *
- * @threadsafe 是
- * @reentrant 是
+ * @threadsafe yes
+ * @reentrant yes
  */
 AIRY_API airy_err_t gateway_service_adapter_register(airy_svc_t service);
 
 /**
- * @brief 从服务注册表注销网关服务适配器
+ * @brief Unregister the gateway service adapter from the service registry.
  *
- * 从全局服务注册表中注销网关服务适配器。
+ * Unregisters the gateway service adapter from the global service registry.
  *
- * @param service 适配器服务句柄
- * @return AIRY_SUCCESS 成功，其他值为错误码
+ * @param service Adapter service handle
+ * @return AIRY_SUCCESS on success, other values are error codes
  *
- * @threadsafe 是
- * @reentrant 是
+ * @threadsafe yes
+ * @reentrant yes
  */
 AIRY_API airy_err_t gateway_service_adapter_unregister(airy_svc_t service);
 

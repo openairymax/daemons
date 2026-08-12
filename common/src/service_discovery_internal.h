@@ -3,7 +3,8 @@
 
 /**
  * @file service_discovery_internal.h
- * @brief 跨进程服务发现内部跨文件共享声明（service_discovery.c 拆分后各域共用）
+ * @brief Internal cross-file shared declarations of the service-discovery
+ *        module (shared by the domains after service_discovery.c split).
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_SERVICE_DISCOVERY_INTERNAL_H
@@ -98,13 +99,13 @@ typedef struct sd_backend {
     airy_err_t (*commit)(sd_internal_t *sd, const char *name);
 } sd_backend_t;
 
-/* 后端实例（service_discovery_backend_shm.c / service_discovery_backend_file.c） */
+/* Backend instances (service_discovery_backend_shm.c / service_discovery_backend_file.c) */
 extern const sd_backend_t sd_backend_shm;
 #ifdef AIRY_HAS_CJSON
 extern const sd_backend_t sd_backend_file;
 #endif
 
-/* 注册表核心操作（service_discovery.c） */
+/* Registry core operations (service_discovery.c) */
 int32_t find_service_index(sd_internal_t *sd, const char *name);
 int32_t find_instance_index(sd_service_entry_t *entry, const char *instance_id);
 void notify_event(sd_internal_t *sd, sd_event_type_t event, const char *service_name,
@@ -118,7 +119,7 @@ airy_err_t sd_registry_remove_instance(sd_internal_t *sd, const char *name,
                                        const char *instance_id, sd_instance_t *out_removed);
 const sd_backend_t *sd_backend_select(void);
 
-/* 负载均衡策略（service_discovery_lb.c） */
+/* Load-balancing strategies (service_discovery_lb.c) */
 airy_err_t lb_round_robin(sd_internal_t *sd, const sd_service_entry_t *entry,
                           sd_instance_t *result);
 airy_err_t lb_weighted(const sd_service_entry_t *entry, sd_instance_t *result);

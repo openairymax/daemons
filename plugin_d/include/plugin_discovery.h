@@ -3,12 +3,12 @@
 
 /**
  * @file plugin_discovery.h
- * @brief P2.2.1: 插件发现 — 扫描目录 + 解析 manifest.yaml
+ * @brief P2.2.1: plugin discovery - scan directories + parse manifest.yaml.
  *
- * 扫描 ecosystem/plugins/ 目录，发现所有插件。
- * 每个插件目录下必须包含 manifest.yaml 描述文件。
+ * Scans the ecosystem/plugins/ directory to discover all plugins. Each
+ * plugin directory must contain a manifest.yaml description file.
  *
- * manifest.yaml 格式：
+ * manifest.yaml format:
  * @code
  *   name: my_plugin
  *   version: 1.0.0
@@ -71,63 +71,61 @@ typedef struct {
 
 
 /**
- * @brief 初始化插件发现模块
+ * @brief Initialize the plugin-discovery module.
  *
- * @param config 配置（NULL 使用默认）
- * @return 0 成功，非0 失败
+ * @param config Config (NULL = defaults)
+ * @return 0 on success, non-zero on failure
  */
 int plugin_discovery_init(const plugin_discovery_config_t *config);
 
-/**
- * @brief 销毁插件发现模块
- */
+/** @brief Destroy the plugin-discovery module. */
 void plugin_discovery_destroy(void);
 
 /**
- * @brief 扫描插件目录，发现所有可用插件
+ * @brief Scan the plugin directory and discover all available plugins.
  *
- * 扫描 plugins_dir 下的每个子目录，查找 manifest.yaml。
- * 解析后返回所有发现的插件元数据。
+ * Scans every subdirectory under plugins_dir looking for manifest.yaml,
+ * and returns the metadata of all discovered plugins.
  *
- * @param out_results 输出发现结果数组（需调用者释放）
- * @param out_count   输出数量
- * @return 0 成功，非0 失败
+ * @param out_results Output discovered-result array (caller frees)
+ * @param out_count   Output count
+ * @return 0 on success, non-zero on failure
  */
 int plugin_discovery_scan(plugin_discovery_result_t **out_results, size_t *out_count);
 
 /**
- * @brief 解析单个 manifest.yaml 文件
+ * @brief Parse a single manifest.yaml file.
  *
- * @param yaml_path   manifest.yaml 文件路径
- * @param plugin_dir  插件目录（用于解析相对路径）
- * @param out_result  输出解析结果
- * @return 0 成功，非0 失败
+ * @param yaml_path   manifest.yaml file path
+ * @param plugin_dir  Plugin directory (for resolving relative paths)
+ * @param out_result  Output parse result
+ * @return 0 on success, non-zero on failure
  */
 int plugin_discovery_parse_manifest(const char *yaml_path, const char *plugin_dir,
                                     plugin_discovery_result_t *out_result);
 
 /**
- * @brief 自动加载所有发现的插件
+ * @brief Auto-load all discovered plugins.
  *
- * 调用 plugin_discovery_scan() 发现所有插件，
- * 然后对每个有效插件调用 plugin_service_load()。
+ * Calls plugin_discovery_scan() to discover plugins, then
+ * plugin_service_load() for every valid plugin.
  *
- * @return 0 成功，非0 失败
+ * @return 0 on success, non-zero on failure
  */
 int plugin_discovery_auto_load(void);
 
 /**
- * @brief 获取发现的插件数量
+ * @brief Get the number of discovered plugins.
  *
- * @return 插件数量
+ * @return Plugin count
  */
 size_t plugin_discovery_count(void);
 
 /**
- * @brief 释放发现结果
+ * @brief Free the discovery results.
  *
- * @param results 结果数组
- * @param count   数量
+ * @param results Result array
+ * @param count   Count
  */
 void plugin_discovery_free_results(plugin_discovery_result_t *results, size_t count);
 

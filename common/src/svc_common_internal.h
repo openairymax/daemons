@@ -3,20 +3,25 @@
 
 /**
  * @file svc_common_internal.h
- * @brief svc_common 静态库内部共享定义（非公共 API）
+ * @brief Internal shared definitions of the svc_common static library
+ *        (not public API).
  *
- * P1.x 模块化拆分：svc_common.c 拆分为 svc_registry.c / svc_config.c /
- * svc_monitor.c / svc_client.c 后，以下定义被多个源文件共享：
+ * After the P1.x modular split of svc_common.c into svc_registry.c /
+ * svc_config.c / svc_monitor.c / svc_client.c, the following definitions
+ * are shared across multiple source files:
  *
- * - airy_svc_internal_t：服务实例内部结构。svc_common.c（生命周期/内部注册表）
- *   与 svc_client.c（本地直连客户端读取 iface/user_data）均需访问其字段，
- *   故移至内部头而非留在单一 .c 文件。
- * - MAX_SERVICE_NAME_LEN / MAX_SERVICE_VERSION_LEN：结构体内定长数组依赖，
- *   svc_common.c 的 airy_svc_create() 亦使用。
- * - monitor_shutdown()：monitor 域（svc_monitor.c）持有监控全局状态，由
- *   svc_common.c 的 airy_svc_common_cleanup() 调用以销毁监控互斥锁。
+ * - airy_svc_internal_t: internal service-instance struct. Both
+ *   svc_common.c (lifecycle/internal registry) and svc_client.c (local
+ *   direct-connect client reading iface/user_data) need its fields, so it
+ *   lives in an internal header instead of a single .c file.
+ * - MAX_SERVICE_NAME_LEN / MAX_SERVICE_VERSION_LEN: fixed-size array deps
+ *   in the struct, also used by airy_svc_create() in svc_common.c.
+ * - monitor_shutdown(): the monitor domain (svc_monitor.c) owns the
+ *   monitoring global state; called by airy_svc_common_cleanup() in
+ *   svc_common.c to destroy the monitor mutex.
  *
- * 本头仅供 svc_common 静态库内部源文件包含，不得被 daemons 其他模块使用。
+ * This header is for svc_common static-library sources only; it must not
+ * be used by other daemons modules.
  *
  * @see agentrt/daemons/common/src/svc_common.c
  * @see agentrt/daemons/common/src/svc_monitor.c
@@ -70,8 +75,9 @@ typedef struct airy_svc_internal {
 
 /**
  * @brief Shut down the service monitor subsystem.
- * @note 实现位于 svc_monitor.c（g_monitor 状态归 monitor 域私有），
- *       由 svc_common.c 的 airy_svc_common_cleanup() 在进程退出路径调用。
+ * @note Implementation lives in svc_monitor.c (g_monitor state is private
+ *       to the monitor domain), called by airy_svc_common_cleanup() in
+ *       svc_common.c on the process-exit path.
  */
 void monitor_shutdown(void);
 

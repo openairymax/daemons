@@ -3,8 +3,8 @@
 
 /**
  * @file service_stats.c
- * @brief Agent 服务状态管理域：运行中 agent 列表/计数、空闲回收与
- *        性能统计导出
+ * @brief Agent service status-management domain: running-agent list/count,
+ *        idle reaping and performance-stats export.
  */
 
 #include "airy_memory.h"

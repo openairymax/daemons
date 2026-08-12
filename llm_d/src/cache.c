@@ -5,7 +5,7 @@
 #include "error.h"
 /**
  * @file cache.c
- * @brief LRU 缓存实现（双链表 + 哈希表）
+ * @brief LRU cache implementation (doubly-linked list + hash table).
  */
 
 #include "cache.h"

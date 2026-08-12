@@ -5,7 +5,7 @@
 #include "error.h"
 /**
  * @file jsonrpc_helpers.c
- * @brief JSON-RPC 2.0 公共辅助函数实现
+ * @brief JSON-RPC 2.0 common helper function implementation.
  */
 
 #include "jsonrpc_helpers.h"

@@ -4,18 +4,17 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file main.c
- * @brief Agent 服务守护进程主入口（遵循 daemon 模块统一规范）
+ * @brief Agent service daemon main entry (daemon module conventions).
  *
- * 暴露 JSON-RPC 方法（agent.* 命名空间）：
- *   - agent.spawn     : 派生新 Agent
- *   - agent.terminate : 终止指定 Agent
- *   - agent.invoke    : 调用指定 Agent
- *   - agent.list      : 列出所有 Agent ID
- *   - agent.count     : 返回当前 Agent 数（健康检查辅助）
+ * Exposes JSON-RPC methods (agent.* namespace):
+ *   - agent.spawn     : spawn a new agent
+ *   - agent.terminate : terminate the given agent
+ *   - agent.invoke    : invoke the given agent
+ *   - agent.list      : list all agent IDs
+ *   - agent.count     : current agent count (health-check helper)
  *
- * Unix socket 路径：${AIRY_RUNTIME_DIR}/agent.sock
+ * Unix socket path: ${AIRY_RUNTIME_DIR}/agent.sock
  */
 
 #include "daemon_main.h"

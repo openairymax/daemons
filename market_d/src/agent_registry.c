@@ -6,7 +6,7 @@
 
 /**
  * @file agent_registry.c
- * @brief Agent 注册表实现（基于实际market_service.h API）
+ * @brief Agent registry implementation (based on the real market_service.h API).
  */
 
 #include "daemon_errors.h"

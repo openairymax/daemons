@@ -3,19 +3,19 @@
 
 /**
  * @file arena.h
- * @brief P1.19: Arena 线性分配器 — 链式扩展 + 整体 reset
+ * @brief P1.19: Arena linear allocator - chained blocks + whole reset.
  *
- * 适用于短生命周期对象的批量分配。
- * 基于区块（block）的线性分配器，区块用尽后自动链式扩展。
- * 通过 arena_reset() 一次性释放所有内存。
+ * For bulk allocation of short-lived objects. Block-based linear
+ * allocator; when a block is exhausted a new one is chained. arena_reset()
+ * releases all memory at once.
  *
- * 设计目标：
- *   - O(1) 分配（仅移动指针）
- *   - O(1) 批量释放（reset 整个 arena）
- *   - 零碎片（线性分配，无 free 操作）
- *   - 线程不安全（由调用者加锁或使用 tcache）
+ * Design goals:
+ *   - O(1) allocation (pointer bump only)
+ *   - O(1) bulk release (reset the whole arena)
+ *   - Zero fragmentation (linear allocation, no frees)
+ *   - Not thread-safe (caller locks or uses tcache)
  *
- * @see tcache.h  per-thread 缓存层
+ * @see tcache.h  per-thread caching layer
  */
 
 #ifndef AIRY_RT_ARENA_H
@@ -40,9 +40,9 @@ typedef struct {
 
 
 /**
- * @brief Arena 位置标记
+ * @brief Arena position mark.
  *
- * 用于记录当前分配位置，以便后续回滚。
+ * Records the current allocation position for later rollback.
  */
 typedef struct {
     void *block_start;
@@ -52,101 +52,101 @@ typedef struct {
 
 
 /**
- * @brief 创建 Arena 分配器
+ * @brief Create an arena allocator.
  *
- * @param config 配置（NULL 使用默认）
- * @return arena 句柄，失败返回 NULL
+ * @param config Config (NULL = defaults)
+ * @return Arena handle, NULL on failure
  */
 arena_t *arena_create(const arena_config_t *config);
 
 /**
- * @brief 销毁 Arena 分配器
+ * @brief Destroy an arena allocator.
  *
- * 释放所有区块和元数据。
+ * Releases all blocks and metadata.
  *
- * @param arena arena 句柄
+ * @param arena Arena handle
  */
 void arena_destroy(arena_t *arena);
 
 
 /**
- * @brief 从 Arena 分配内存
+ * @brief Allocate memory from the arena.
  *
- * 如果当前区块空间不足，自动分配新区块（链式扩展）。
+ * If the current block has insufficient space, a new block is chained.
  *
- * @param arena arena 句柄
- * @param size 分配大小
- * @return 内存指针，失败返回 NULL
+ * @param arena Arena handle
+ * @param size Allocation size
+ * @return Memory pointer, NULL on failure
  */
 void *arena_alloc(arena_t *arena, size_t size);
 
 /**
- * @brief 从 Arena 分配对齐内存
+ * @brief Allocate aligned memory from the arena.
  *
- * @param arena arena 句柄
- * @param size 分配大小
- * @param alignment 对齐要求（必须是 2 的幂）
- * @return 内存指针，失败返回 NULL
+ * @param arena Arena handle
+ * @param size Allocation size
+ * @param alignment Alignment requirement (must be a power of 2)
+ * @return Memory pointer, NULL on failure
  */
 void *arena_alloc_aligned(arena_t *arena, size_t size, size_t alignment);
 
 /**
- * @brief 从 Arena 分配并清零
+ * @brief Allocate zeroed memory from the arena.
  *
- * @param arena arena 句柄
- * @param size 分配大小
- * @return 内存指针，失败返回 NULL
+ * @param arena Arena handle
+ * @param size Allocation size
+ * @return Memory pointer, NULL on failure
  */
 void *arena_calloc(arena_t *arena, size_t size);
 
 /**
- * @brief 重置 Arena
+ * @brief Reset the arena.
  *
- * 将所有区块的分配指针重置到起始位置。
- * 不释放区块内存，后续分配复用已有区块。
+ * Resets every block's allocation pointer to its start. Block memory is
+ * not freed; later allocations reuse existing blocks.
  *
- * @param arena arena 句柄
+ * @param arena Arena handle
  */
 void arena_reset(arena_t *arena);
 
 
 /**
- * @brief 记录当前 Arena 位置
+ * @brief Record the current arena position.
  *
- * @param arena arena 句柄
- * @return 位置标记
+ * @param arena Arena handle
+ * @return Position mark
  */
 arena_mark_t arena_mark(arena_t *arena);
 
 /**
- * @brief 回滚到标记位置
+ * @brief Roll back to a mark position.
  *
- * 释放标记之后分配的所有区块，并将当前区块指针回退到标记位置。
- * 如果标记之后分配了新区块，这些区块被释放。
+ * Releases all blocks allocated after the mark and rewinds the current
+ * block pointer to the mark. Newly-chained blocks after the mark are freed.
  *
- * @param arena arena 句柄
- * @param mark 位置标记
+ * @param arena Arena handle
+ * @param mark Position mark
  */
 void arena_rollback(arena_t *arena, arena_mark_t mark);
 
 
 /**
- * @brief 获取 Arena 统计信息
+ * @brief Get arena statistics.
  *
- * @param arena arena 句柄
- * @param out_total_allocated 输出总分配量
- * @param out_total_blocks 输出总区块数
- * @param out_current_usage 输出当前使用量
- * @param out_peak_usage 输出峰值使用量
+ * @param arena Arena handle
+ * @param out_total_allocated Total allocated amount
+ * @param out_total_blocks Total block count
+ * @param out_current_usage Current usage
+ * @param out_peak_usage Peak usage
  */
 void arena_get_stats(arena_t *arena, size_t *out_total_allocated, size_t *out_total_blocks,
                      size_t *out_current_usage, size_t *out_peak_usage);
 
 /**
- * @brief 获取当前区块中的剩余空间
+ * @brief Get the remaining space in the current block.
  *
- * @param arena arena 句柄
- * @return 剩余字节数
+ * @param arena Arena handle
+ * @return Remaining bytes
  */
 size_t arena_available(arena_t *arena);
 

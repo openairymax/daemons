@@ -370,9 +370,9 @@ void airy_event_loop_stop(airy_event_loop_t *loop)
 }
 
 /**
- * @brief 异步安全停止事件循环（可在信号处理器中安全调用）
+ * @brief Async-safe stop of the event loop (safe in signal handlers).
  *
- * 仅设置 stop_requested 并 SetEvent 唤醒，无日志、无锁。
+ * Only sets stop_requested and SetEvent-wakes; no logging, no locks.
  */
 void airy_event_loop_stop_async(airy_event_loop_t *loop)
 {
@@ -703,10 +703,10 @@ void airy_event_loop_stop(airy_event_loop_t *loop)
 }
 
 /**
- * @brief 异步安全停止事件循环（可在信号处理器中安全调用）
+ * @brief Async-safe stop of the event loop (safe in signal handlers).
  *
- * 仅设置 stop_requested 并写入 wakeup eventfd，无日志、无锁，
- * 满足 async-signal-safe（write() 为异步安全系统调用）。
+ * Only sets stop_requested and writes the wakeup eventfd; no logging, no
+ * locks, satisfying async-signal-safe (write() is an async-safe syscall).
  */
 void airy_event_loop_stop_async(airy_event_loop_t *loop)
 {

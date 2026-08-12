@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /*
- *
  * @file prometheus_exporter.c
- * @brief C-L10: Prometheus scrape endpoint 实现
+ * @brief C-L10: Prometheus scrape endpoint implementation.
  *
- * 实现 /metrics HTTP 端点，暴露 14 项必需指标供 Prometheus 抓取。
- * 工程标准规范手册 16.1 定义的指标：
- *   1-10: 核心可观测性指标
- *   11-14: 内存可观测性指标
+ * Implements the /metrics HTTP endpoint exposing the 14 required metrics
+ * for Prometheus scraping. Metrics defined in engineering-standards manual
+ * 16.1:
+ *   1-10: core observability metrics
+ *   11-14: memory-observability metrics
  */
 
 #include "prometheus_exporter.h"
@@ -57,9 +57,7 @@ static int g_initialized = 0;
 static uint64_t g_scrape_count = 0;
 static uint64_t g_scrape_errors = 0;
 
-/**
- * @brief 根据字符串名称获取指标类型枚举
- */
+/** @brief Get the metric-type enum from a string name. */
 static um_metric_type_t parse_metric_type(const char *type_str)
 {
     if (!type_str)

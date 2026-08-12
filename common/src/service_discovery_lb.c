@@ -3,8 +3,9 @@
 
 /**
  * @file service_discovery_lb.c
- * @brief 跨进程服务发现负载均衡域：轮询/加权/最少连接/随机/最少负载
- *        实例选择策略实现
+ * @brief Cross-process service-discovery load-balancing domain: round-robin /
+ *        weighted / least-connection / random / least-load instance-selection
+ *        strategy implementations.
  */
 
 #include "service_discovery_internal.h"

@@ -4,17 +4,18 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file daemon_rpc_client.c
- * @brief 轻量级 Unix-socket JSON-RPC 客户端实现
+ * @brief Lightweight Unix-socket JSON-RPC client implementation.
  *
- * Phase 3 执行体集中化重构：从 syscall_router.c 抽离的 airy_sys_memory_* /
- * airy_sys_agent_* 系统调用经此 helper 转发到 mem_d / agent_d 守护进程。
+ * Phase-3 executor consolidation refactor: the airy_sys_memory_* /
+ * airy_sys_agent_* syscalls extracted from syscall_router.c are forwarded
+ * through this helper to the mem_d / agent_d daemons.
  *
- * 实现：
- *   - POSIX：socket(AF_UNIX, SOCK_STREAM) + connect + send + recv (poll 超时)
- *   - Windows：返回 AIRY_ERR_NOT_SUPPORTED（gateway_d 在 Windows 上仍可
- *     保留进程内 g_runtime 退化路径，但 thin IPC client 暂不支持）
+ * Implementation:
+ *   - POSIX: socket(AF_UNIX, SOCK_STREAM) + connect + send + recv (poll timeout)
+ *   - Windows: returns AIRY_ERR_NOT_SUPPORTED (gateway_d keeps the
+ *     in-process g_runtime fallback path on Windows, but the thin IPC
+ *     client is not supported yet)
  */
 
 #include "daemon_rpc_client.h"

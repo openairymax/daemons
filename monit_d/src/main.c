@@ -4,9 +4,8 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file main.c
- * @brief 监控服务守护进程主入口（遵循 daemon 模块统一规范）
+ * @brief Monitoring service daemon main entry (daemon module conventions).
  */
 
 #include "daemon_main.h"
@@ -578,16 +577,16 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_monit_d, "health_check", on_health_check_method, NULL);
     method_dispatcher_register(g_dispatcher_monit_d, "generate_report", on_generate_report_method,
                                NULL);
-    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：monit.heartbeat / monit.metrics /
-     * monit.alert_raise / monit.alert_resolve）
+    /* L2 protocol standard methods + aliases (02-l2-service-protocol.md:
+     * monit.heartbeat / monit.metrics / monit.alert_raise / monit.alert_resolve)
      */
     method_dispatcher_register(g_dispatcher_monit_d, "heartbeat", on_heartbeat_method, NULL);
     method_dispatcher_register(g_dispatcher_monit_d, "metrics", on_get_metrics_method, NULL);
     method_dispatcher_register(g_dispatcher_monit_d, "alert_raise", on_trigger_alert_method, NULL);
     method_dispatcher_register(g_dispatcher_monit_d, "alert_resolve", on_alert_resolve_method,
                                NULL);
-    /* L2 协议标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1：优雅停止，
-     * 仅 monit_d 可调用） */
+    /* L2 protocol standard method <ns>.shutdown (02-l2-service-protocol.md
+     * §6.1: graceful stop, callable only by monit_d) */
     method_dispatcher_register(g_dispatcher_monit_d, "shutdown", on_shutdown_method_monit_d, NULL);
 
     method_dispatcher_register(g_dispatcher_monit_d, "get_stats", on_get_stats_method, NULL);

@@ -4,14 +4,14 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file llm_svc_adapter.c
- * @brief LLM服务适配器：将LLM服务适配到统一的AgentRT服务管理框架
+ * @brief Adapts the LLM service to the unified AgentRT service framework.
  *
- * LLM服务的create接口接受config_path字符串而非配置结构体，
- * 本适配器将通用服务配置转换为LLM服务所需的配置路径格式。
- * 使用 airy_svc_set/get_user_data 存取适配器上下文，
- * 避免类型强转导致的类型安全问题。
+ * The LLM service's create interface takes a config_path string rather
+ * than a config struct; this adapter converts the generic service config
+ * into the config-path format the LLM service expects. It stores the
+ * adapter context via airy_svc_set/get_user_data to avoid unsafe type
+ * casts.
  */
 
 #include "llm_service.h"

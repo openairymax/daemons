@@ -3,8 +3,10 @@
 
 /**
  * @file service_discovery_api.c
- * @brief 跨进程服务发现操作域：服务注册/注销、发现、负载均衡选择、
- *        心跳、健康状态/连接数更新、依赖查询与检查等对外操作 API
+ * @brief Cross-process service-discovery operation domain: service
+ *        register/unregister, discovery, load-balancing selection,
+ *        heartbeat, health-status/connection-count updates, dependency
+ *        queries and checks - the external operation APIs.
  */
 
 #include "service_discovery_internal.h"

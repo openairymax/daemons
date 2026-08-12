@@ -3,31 +3,32 @@
 
 /**
  * @file cost_aware_router.c
- * @brief P3.1.1: 成本感知路由 — 决策树路由
+ * @brief P3.1.1: cost-aware routing - decision-tree routing.
  *
- * 决策树：
- *   预算检查 → 任务类型判断 → Provider 选择 → 降级链
+ * Decision tree:
+ *   budget check -> task-type decision -> provider selection -> fallback chain
  *
- * 在所有满足能力要求的端点中选择成本最低的，
- * 同时考虑预算上限和延迟上限约束。
+ * Selects the cheapest endpoint among those meeting the capability
+ * requirements, honoring budget and latency caps.
  *
  */
 
 #include "router/router_context.h"
 
 /**
- * @brief 决策树路由（预算检查 → 任务类型判断 → Provider 选择 → 降级链）
+ * @brief Decision-tree routing (budget check -> task-type decision ->
+ *        provider selection -> fallback chain).
  *
- * 路由决策流程：
- *   1. 筛选满足能力要求的端点
- *   2. 估算输入/输出 token 数
- *   3. 遍历端点，跳过超出预算或延迟上限的
- *   4. 选择成本最低的端点
- *   5. 设置次优端点作为降级
+ * Routing flow:
+ *   1. Filter endpoints meeting the capability requirements
+ *   2. Estimate input/output token counts
+ *   3. Walk endpoints, skipping those over budget or latency caps
+ *   4. Select the cheapest endpoint
+ *   5. Set the runner-up endpoint as fallback
  *
- * @param request 路由请求
- * @param result  路由结果输出
- * @return 0 成功，-1 无可用端点
+ * @param request Routing request
+ * @param result  Routing-result output
+ * @return 0 on success, -1 if no eligible endpoint
  */
 int route_cost_aware(const llm_route_request_t *request, llm_route_result_t *result)
 {

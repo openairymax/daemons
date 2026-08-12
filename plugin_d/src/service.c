@@ -3,23 +3,25 @@
 
 /**
  * @file service.c
- * @brief P2.2: Plugin 服务实现 — 动态加载/卸载/生命周期管理
+ * @brief P2.2: Plugin service implementation - dynamic load/unload and
+ *        lifecycle management.
  *
- * 使用 dlopen/dlsym 加载动态库插件，管理插件生命周期。
- * 线程安全的注册表，支持 4 种插件类型。
+ * Uses dlopen/dlsym to load dynamic-library plugins and manage their
+ * lifecycle. Thread-safe registry supporting the 4 plugin types.
  *
- * 插件入口点约定：
- *   - plugin_metadata_fn()  → 返回 plugin_metadata_t
- *   - plugin_init_fn()      → 初始化
- *   - plugin_destroy_fn()   → 销毁
- *   - plugin_start_fn()     → 启动
- *   - plugin_stop_fn()      → 停止
+ * Plugin entry-point convention:
+ *   - plugin_metadata_fn()  -> returns plugin_metadata_t
+ *   - plugin_init_fn()      -> initialize
+ *   - plugin_destroy_fn()   -> destroy
+ *   - plugin_start_fn()     -> start
+ *   - plugin_stop_fn()      -> stop
  *
  */
 
 #include "plugin_service.h"
-/* P0.17 阶段 2: service.c 使用 airy_dl_* daemons 特有函数，
- * 需包含 daemon_platform_ext.h 获取声明（commons 版 platform.h 无这些函数）。 */
+/* P0.17 phase 2: service.c uses airy_dl_* daemon-specific functions, so
+ * include daemon_platform_ext.h for their declarations (the commons
+ * platform.h lacks them). */
 #include "daemon_platform_ext.h"
 #include "error.h"
 #include "svc_logger.h"
@@ -30,9 +32,11 @@
 #include <string.h>
 #include <time.h>
 
-/* dlsym 返回 void*（对象指针），但插件符号是函数指针。
- * ISO C 禁止函数指针↔对象指针直接转换，使用 memcpy 模式避免 -Wpedantic 警告。
- * 这是 POSIX 推荐的 dlsym 函数指针获取方式（避免未定义行为）。 */
+/* dlsym returns void* (object pointer) but plugin symbols are function
+ * pointers. ISO C forbids direct function-pointer <-> object-pointer
+ * conversion; the memcpy pattern avoids -Wpedantic warnings. This is the
+ * POSIX-recommended way to obtain function pointers via dlsym (avoiding
+ * undefined behavior). */
 #define PLUGIN_DLSYM_FUNC(handle, name, fn_var)                        \
     do {                                                               \
         void *_plugin_sym = load_symbol((handle), (name));             \

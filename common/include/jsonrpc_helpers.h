@@ -3,9 +3,7 @@
 
 /**
  * @file jsonrpc_helpers.h
- * @brief JSON-RPC 2.0 公共辅助函数库
- * @version 0.1.0
- * @date 2026-04-04
+ * @brief JSON-RPC 2.0 common helper library.
  */
 
 #ifndef AIRY_RT_JSONRPC_HELPERS_H
@@ -66,12 +64,12 @@ AIRY_API int jsonrpc_is_batch_request(const char *raw);
 
 
 /**
- * @brief 发送 JSON-RPC 错误响应到客户端（自动构建+发送+释放）
- * @param socket 客户端 socket 描述符
- * @param error_code 错误码
- * @param message 错误消息
- * @param id 请求 ID
- * @note 替代手动: build_error → send → free 三行组合
+ * @brief Send a JSON-RPC error response to the client (build+send+free).
+ * @param socket Client socket descriptor
+ * @param error_code Error code
+ * @param message Error message
+ * @param id Request ID
+ * @note Replaces the manual build_error -> send -> free three-liner
  */
 #define JSONRPC_SEND_ERROR(socket, error_code, message, id)              \
     do {                                                                 \
@@ -83,20 +81,23 @@ AIRY_API int jsonrpc_is_batch_request(const char *raw);
     } while (0)
 
 /**
- * @brief 发送 JSON-RPC 成功响应到客户端（自动构建+发送+释放）
- * @param socket 客户端 socket 描述符
- * @param result cJSON 结果对象（所有权转移给 jsonrpc_build_success 内部 root，
- *                由 cJSON_Delete(root) 递归释放，调用方不可再次释放）
- * @param id 请求 ID
- * @note 替代手动: build_success → send → free 三行组合
- * @warning jsonrpc_build_success 通过 cJSON_AddItemToObject 将 result 挂到 root 上，
- *          随后 cJSON_Delete(root) 递归释放了 result。此宏不可再调用 cJSON_Delete(result)，
- *          否则 double-free。若 result 变量带 CJSON_AUTO_FREE，调用方需在宏后置 result=NULL。
+ * @brief Send a JSON-RPC success response to the client (build+send+free).
+ * @param socket Client socket descriptor
+ * @param result cJSON result object (ownership transfers to the root
+ *               inside jsonrpc_build_success, recursively freed by
+ *               cJSON_Delete(root); caller must not free it again)
+ * @param id Request ID
+ * @note Replaces the manual build_success -> send -> free three-liner
+ * @warning jsonrpc_build_success attaches result to its root via
+ *          cJSON_AddItemToObject, then cJSON_Delete(root) recursively frees
+ *          result. This macro must not call cJSON_Delete(result) again or it
+ *          double-frees. If result carries CJSON_AUTO_FREE, set result=NULL
+ *          after the macro.
  */
 #define JSONRPC_SEND_SUCCESS(socket, result, id)                                            \
     do {                                                                                    \
         char *_success = jsonrpc_build_success((result), (id));                             \
-        /* result 所有权已转移至 jsonrpc_build_success 内部 root 并被释放，不可再 Delete */ \
+        /* result ownership already moved into jsonrpc_build_success's root; do not Delete */\
         if (_success) {                                                                     \
             airy_sock_send((socket), _success, strlen(_success));                           \
             AIRY_FREE(_success);                                                            \

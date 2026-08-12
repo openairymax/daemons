@@ -4,18 +4,20 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file gateway_svc_adapter.c
- * @brief Gateway服务适配器：将网关服务适配到统一的AgentRT服务管理框架
+ * @brief Adapts the gateway service to the unified AgentRT service framework.
  *
- * 本文件实现了网关服务与airy_svc_t通用接口的适配层。
- * 通过适配器模式，网关服务可以无缝集成到服务管理框架中，
- * 享受统一的生命周期管理、状态监控、服务发现等功能。
+ * This file implements the adapter layer between the gateway service and
+ * the generic airy_svc_t interface. Through the adapter pattern, the
+ * gateway service integrates seamlessly into the service-management
+ * framework, getting unified lifecycle management, state monitoring,
+ * service discovery, etc.
  *
- * 适配器设计遵循架构原则K-2（接口契约化原则）：
- * 1. 提供标准化的服务接口
- * 2. 保持向后兼容性
- * 3. 最小化性能开销
+ * The adapter design follows architectural principle K-2 (interface
+ * contract):
+ * 1. Provide a standardized service interface
+ * 2. Keep backward compatibility
+ * 3. Minimize performance overhead
  *
  */
 
@@ -26,18 +28,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-/**
- * @brief 网关服务适配器上下文
- */
+/** @brief Gateway service-adapter context. */
 typedef struct {
     gateway_service_t gateway_svc;
     gateway_service_config_t gateway_cfg;
     airy_svc_config_t common_cfg;
 } gateway_adapter_ctx_t;
 
-/**
- * @brief 适配器初始化函数
- */
+/** @brief Adapter-init function. */
 static airy_err_t gateway_adapter_init(airy_svc_t service, const airy_svc_config_t *config)
 {
     if (!service) {

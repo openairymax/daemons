@@ -3,24 +3,27 @@
 
 /**
  * @file svc_common.c
- * @brief 服务公共实现 - service 生命周期域（统一服务管理框架）
+ * @brief Common service implementation - service lifecycle domain (unified
+ *        service-management framework).
  *
- * 实现 svc_common.h 中定义的服务生命周期管理、状态监控、健康检查和
- * 统计收集功能（service 生命周期域）。
+ * Implements service lifecycle management, state monitoring, health checks
+ * and statistics collection defined in svc_common.h (service lifecycle
+ * domain).
  *
- * 设计原则：
- * 1. 统一的服务接口定义（K-2 接口契约化）
- * 2. 明确的生命周期管理
- * 3. 标准化的错误处理（E-6 错误可追溯）
- * 4. 线程安全的实现（E-5 并发安全）
+ * Design principles:
+ * 1. Unified service interface definition (K-2 interface contracts)
+ * 2. Explicit lifecycle management
+ * 3. Standardized error handling (E-6 traceable errors)
+ * 4. Thread-safe implementation (E-5 concurrency safety)
  *
- * P1.x 模块化拆分：本文件仅保留 service 生命周期域，其余功能域已拆分：
- * - registry 域  -> svc_registry.c（跨进程注册中心客户端）
- * - config 域    -> svc_config.c（配置文件加载与监视）
- * - monitor 域   -> svc_monitor.c（服务监控与降级处理）
- * - client 域    -> svc_client.c（服务通信客户端）
- * 跨文件共享的 airy_svc_internal_t / monitor_shutdown() 声明于
- * svc_common_internal.h（本静态库内部，非公共 API）。
+ * P1.x modular split: this file keeps only the service lifecycle domain;
+ * the other domains were split out:
+ * - registry domain  -> svc_registry.c (cross-process registry client)
+ * - config domain    -> svc_config.c (config file loading and watching)
+ * - monitor domain   -> svc_monitor.c (service monitoring and degradation)
+ * - client domain    -> svc_client.c (service communication client)
+ * Cross-file shared airy_svc_internal_t / monitor_shutdown() are declared
+ * in svc_common_internal.h (internal to this static lib, not public API).
  *
  * @see agentrt/daemons/common/include/svc_common.h
  * @see agentrt/daemons/common/src/svc_common_internal.h
@@ -28,9 +31,10 @@
  */
 
 #include "svc_common.h"
-/* P0.17 阶段 4: 显式包含 daemon_errors.h 提供 DAEMON_E* 扩展错误码。
- * commons 版 svc_common.h（经 -I 路径优先解析）不包含 daemon_errors.h，
- * daemons 内部源文件需显式包含以获取 DAEMON_EINIT/ESTATE/EHEALTH 等别名。 */
+/* P0.17 phase 4: explicitly include daemon_errors.h for the DAEMON_E*
+ * extension codes. The commons svc_common.h (resolved first via -I order)
+ * does not include daemon_errors.h, so daemon sources must include it
+ * explicitly to get the DAEMON_EINIT/ESTATE/EHEALTH aliases. */
 #include "daemon_errors.h"
 #include "svc_common_internal.h"
 
@@ -42,8 +46,9 @@
 #include "thread_pool.h"
 
 #ifndef _WIN32
-/* SIGALRM/alarm/sigaction 仅 POSIX 可用；Windows 分支不依赖 signal.h
- *（force-stop 超时机制在 Windows 退化为告警，见 airy_svc_stop） */
+/* SIGALRM/alarm/sigaction are POSIX-only; the Windows branch does not rely
+ * on signal.h (the force-stop timeout degrades to a warning on Windows,
+ * see airy_svc_stop). */
 #include <signal.h>
 #endif
 #include <stdio.h>

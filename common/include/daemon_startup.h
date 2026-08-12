@@ -3,32 +3,33 @@
 
 /**
  * @file daemon_startup.h
- * @brief daemon 启动顺序编排与依赖 DAG 定义
+ * @brief Daemon startup-order orchestration and dependency DAG definitions.
  *
- * P1.23.1: 定义 12 daemon 的启动依赖 DAG（有向无环图）。
+ * P1.23.1: defines the startup dependency DAG (directed acyclic graph) of
+ * the 12 daemons.
  *
- * 启动层级（Layer 越小越先启动）：
+ * Startup layers (smaller Layer starts earlier):
  *
- *   Layer 0 — 基础设施（无 daemon 依赖）
+ *   Layer 0 - infrastructure (no daemon dependencies)
  *     monit_d, observe_d, info_d, notify_d
  *
- *   Layer 1 — 核心服务
- *     sched_d   → observe_d
- *     channel_d → notify_d
+ *   Layer 1 - core services
+ *     sched_d   -> observe_d
+ *     channel_d -> notify_d
  *
- *   Layer 2 — Agent 服务
- *     llm_d    → sched_d
- *     tool_d   → llm_d, sched_d
- *     hook_d   → tool_d
- *     plugin_d → tool_d, hook_d
+ *   Layer 2 - agent services
+ *     llm_d    -> sched_d
+ *     tool_d   -> llm_d, sched_d
+ *     hook_d   -> tool_d
+ *     plugin_d -> tool_d, hook_d
  *
- *   Layer 3 — 业务服务
- *     market_d → plugin_d
+ *   Layer 3 - business services
+ *     market_d -> plugin_d
  *
- *   Layer 4 — 网关（依赖所有服务）
- *     gateway_d → llm_d, tool_d, market_d
+ *   Layer 4 - gateway (depends on all services)
+ *     gateway_d -> llm_d, tool_d, market_d
  *
- * DAG 可视化：
+ * DAG visualization:
  *
  *   monit_d ──┐
  *   observe_d ─┼──→ sched_d ──→ llm_d ──→ tool_d ──→ hook_d ──→ plugin_d ──→ market_d ──→ gateway_d
@@ -84,10 +85,11 @@ typedef struct {
 
 
 /**
- * @brief 全局 daemon 描述表 — 按 layer 排序
+ * @brief Global daemon descriptor table, sorted by layer.
  *
- * 启动编排器遍历此表，同 layer 内可并行启动，
- * 跨 layer 必须等待前一层所有 daemon 健康检查通过。
+ * The startup orchestrator walks this table; daemons in the same layer can
+ * start in parallel, while crossing layers waits until all daemons of the
+ * previous layer pass their health checks.
  */
 static const airy_daemon_desc_t airy_daemon_table[AIRY_DAEMON_COUNT] = {
 
@@ -247,9 +249,9 @@ static const airy_daemon_desc_t airy_daemon_table[AIRY_DAEMON_COUNT] = {
 
 
 /**
- * @brief 根据 daemon 名称查找描述
- * @param name daemon 进程名 (e.g. "gateway_d")
- * @return 描述指针，未找到返回 NULL
+ * @brief Find a descriptor by daemon name.
+ * @param name Daemon process name (e.g. "gateway_d")
+ * @return Descriptor pointer, NULL if not found
  */
 static inline const airy_daemon_desc_t *airy_daemon_find_by_name(const char *name)
 {
@@ -263,9 +265,7 @@ static inline const airy_daemon_desc_t *airy_daemon_find_by_name(const char *nam
     return NULL;
 }
 
-/**
- * @brief 获取指定 layer 的 daemon 数量
- */
+/** @brief Count daemons in the given layer. */
 static inline int airy_daemon_count_in_layer(uint32_t layer)
 {
     int count = 0;
@@ -276,9 +276,7 @@ static inline int airy_daemon_count_in_layer(uint32_t layer)
     return count;
 }
 
-/**
- * @brief 获取最大 layer 值
- */
+/** @brief Get the maximum layer value. */
 static inline uint32_t airy_daemon_max_layer(void)
 {
     uint32_t max_l = 0;

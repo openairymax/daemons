@@ -3,19 +3,20 @@
 
 /**
  * @file daemon_degradation.h
- * @brief Daemon 层优雅降级处理器（SEC-14 合规）
+ * @brief Daemon-layer graceful degradation handlers (SEC-14 compliant).
  *
- * 为所有 daemon 服务提供预构建的 OOM 降级处理器。
- * 每个服务启动时调用 daemon_degradation_register_*() 注册对应的降级回调。
+ * Prebuilt OOM degradation handlers for all daemon services. Each service
+ * registers its degradation callbacks via daemon_degradation_register_*()
+ * at startup.
  *
- * 降级策略映射:
- *   WARNING  → 减小缓存 50%、降低日志级别、驱逐 LRU
- *   HIGH     → 异步 IO 降级为同步、减小批次大小
- *   CRITICAL → 拒绝新连接、暂停非关键功能
+ * Degradation policy mapping:
+ *   WARNING  -> shrink cache 50%, lower log level, evict LRU
+ *   HIGH     -> async IO downgraded to sync, smaller batch size
+ *   CRITICAL -> reject new connections, suspend non-critical features
  *
- * @see oom_handler.h  OOM 分级响应框架
- * @see svc_cache.h    缓存服务接口
- * @see svc_logger.h   日志服务接口
+ * @see oom_handler.h  OOM tiered response framework
+ * @see svc_cache.h    cache service interface
+ * @see svc_logger.h   logging service interface
  */
 
 #ifndef DAEMON_DEGRADATION_H
@@ -32,13 +33,13 @@ extern "C" {
 #endif
 
 /* ============================================================================
- * 降级上下文类型
+ * Degradation context types
  * ============================================================================ */
 
 /**
- * @brief 缓存降级上下文
+ * @brief Cache degradation context.
  *
- * 保存原始缓存容量，以便恢复时还原。
+ * Saves the original cache capacity so it can be restored on recovery.
  */
 typedef struct {
     void *cache_handle;
@@ -47,9 +48,9 @@ typedef struct {
 } degrade_cache_ctx_t;
 
 /**
- * @brief 日志降级上下文
+ * @brief Log degradation context.
  *
- * 保存原始日志级别，以便恢复时还原。
+ * Saves the original log level so it can be restored on recovery.
  */
 typedef struct {
     int original_log_level;
@@ -57,9 +58,9 @@ typedef struct {
 } degrade_log_ctx_t;
 
 /**
- * @brief 批处理降级上下文
+ * @brief Batch degradation context.
  *
- * 保存原始批次大小，以便恢复时还原。
+ * Saves the original batch size so it can be restored on recovery.
  */
 typedef struct {
     size_t *batch_size_ptr;
@@ -68,77 +69,78 @@ typedef struct {
 } degrade_batch_ctx_t;
 
 /**
- * @brief 连接控制降级上下文
+ * @brief Connection-control degradation context.
  *
- * 控制新连接是否被接受。
+ * Controls whether new connections are accepted.
  */
 typedef struct {
     bool *reject_new_flag;
 } degrade_conn_ctx_t;
 
 /* ============================================================================
- * 预构建降级处理器注册
+ * Prebuilt degradation handler registration
  * ============================================================================ */
 
 /**
- * @brief 注册缓存容量降级处理器
+ * @brief Register a cache-capacity degradation handler.
  *
- * 当水位达到 WATERMARK_WARNING 时，将缓存容量减半。
- * 当水位回落时，恢复原始缓存容量。
+ * When the watermark reaches WATERMARK_WARNING, halves the cache capacity.
+ * When the watermark recedes, restores the original capacity.
  *
- * @param cache_handle 缓存句柄（svc_cache_t * 或兼容类型）
- * @param original_capacity 原始缓存容量
- * @return 降级处理器指针（静态分配，调用者不持有所有权），失败返回 NULL
+ * @param cache_handle Cache handle (svc_cache_t * or compatible type)
+ * @param original_capacity Original cache capacity
+ * @return Degradation handler pointer (statically allocated; caller does not
+ *         own it), NULL on failure
  */
 degradation_handler_t *daemon_degradation_register_cache(void *cache_handle,
                                                          size_t original_capacity);
 
 /**
- * @brief 注册日志级别降级处理器
+ * @brief Register a log-level degradation handler.
  *
- * 当水位达到 WATERMARK_WARNING 时，将日志级别提升到 ERROR。
- * 当水位回落时，恢复原始日志级别。
+ * When the watermark reaches WATERMARK_WARNING, raises the log level to
+ * ERROR. When the watermark recedes, restores the original level.
  *
- * @param original_log_level 原始日志级别
- * @return 降级处理器指针（静态分配），失败返回 NULL
+ * @param original_log_level Original log level
+ * @return Degradation handler pointer (statically allocated), NULL on failure
  */
 degradation_handler_t *daemon_degradation_register_log_level(int original_log_level);
 
 /**
- * @brief 注册批处理大小降级处理器
+ * @brief Register a batch-size degradation handler.
  *
- * 当水位达到 WATERMARK_HIGH 时，将批次大小减半。
- * 当水位回落时，恢复原始批次大小。
+ * When the watermark reaches WATERMARK_HIGH, halves the batch size.
+ * When the watermark recedes, restores the original size.
  *
- * @param batch_size_ptr 指向当前批次大小的指针（运行时可变）
- * @param original_batch_size 原始批次大小
- * @return 降级处理器指针（静态分配），失败返回 NULL
+ * @param batch_size_ptr Pointer to the current batch size (runtime-mutable)
+ * @param original_batch_size Original batch size
+ * @return Degradation handler pointer (statically allocated), NULL on failure
  */
 degradation_handler_t *daemon_degradation_register_batch(size_t *batch_size_ptr,
                                                          size_t original_batch_size);
 
 /**
- * @brief 注册新连接拒绝降级处理器
+ * @brief Register a new-connection rejection degradation handler.
  *
- * 当水位达到 WATERMARK_CRITICAL 时，设置拒绝新连接标志。
- * 当水位回落时，清除拒绝标志。
+ * When the watermark reaches WATERMARK_CRITICAL, sets the reject-new-flag.
+ * When the watermark recedes, clears the flag.
  *
- * @param reject_flag 指向拒绝标志的指针（运行时可变）
- * @return 降级处理器指针（静态分配），失败返回 NULL
+ * @param reject_flag Pointer to the reject flag (runtime-mutable)
+ * @return Degradation handler pointer (statically allocated), NULL on failure
  */
 degradation_handler_t *daemon_degradation_register_reject_conn(bool *reject_flag);
 
 /**
- * @brief 注册自定义降级处理器
+ * @brief Register a custom degradation handler.
  *
- * 允许 daemon 服务注册自定义的降级和恢复回调。
+ * Lets a daemon service register custom degrade/restore callbacks.
  *
- * @param feature_name 功能名称（用于日志）
- * @param trigger_level 触发降级的水位级别
- * @param on_degrade 降级回调
- * @param on_restore 恢复回调
- * @param context 用户上下文
- * @return 降级处理器指针（静态分配），失败返回 NULL
+ * @param feature_name Feature name (for logging)
+ * @param trigger_level Watermark level that triggers degradation
+ * @param on_degrade Degradation callback
+ * @param on_restore Restore callback
+ * @param context User context
+ * @return Degradation handler pointer (statically allocated), NULL on failure
  */
 degradation_handler_t *daemon_degradation_register_custom(
     const char *feature_name, watermark_level_t trigger_level,
@@ -147,9 +149,9 @@ degradation_handler_t *daemon_degradation_register_custom(
     void *context);
 
 /**
- * @brief 注销所有 daemon 降级处理器
+ * @brief Unregister all daemon degradation handlers.
  *
- * 在 daemon 服务关闭时调用，清理所有注册的降级处理器。
+ * Call at daemon service shutdown to clean up all registered handlers.
  */
 void daemon_degradation_unregister_all(void);
 

@@ -3,13 +3,13 @@
 
 /**
  * @file service_discovery_helper.c
- * @brief C-L08: ServiceDiscovery → daemon 自动注册便捷层实现
+ * @brief C-L08: ServiceDiscovery -> daemon auto-registration convenience layer.
  *
- * 封装 service_discovery 核心 API，提供 daemon 一键注册、心跳管理、
- * 服务发现和负载均衡选择的便捷接口。
+ * Wraps the service_discovery core API, providing one-call registration,
+ * heartbeat management, service discovery and load-balancing selection.
  *
  * @see service_discovery_helper.h
- * @see P1.7 C-L08 连接线
+ * @see P1.7 C-L08 wiring
  */
 
 #include "service_discovery_helper.h"
@@ -50,10 +50,12 @@ static void *sd_helper_heartbeat_loop(void *arg)
                  sdh->heartbeat_interval_ms);
 
     while (sdh->heartbeat_running) {
-        /* 分片睡眠：将长心跳间隔拆成 500ms 步长并持续检查 heartbeat_running，
-         * 使 sd_helper_stop_heartbeat 的 join 能在步长内快速返回。否则 stop 时
-         * 会阻塞在单次 10s 睡眠上，导致守护进程优雅退出超过外部停止阈值
-         * （例如 airymaxrt 的 TERM 等待窗口）而被强制 KILL。 */
+        /* Fragmented sleep: split the long heartbeat interval into 500ms
+         * steps, re-checking heartbeat_running each step, so that
+         * sd_helper_stop_heartbeat's join returns quickly. Otherwise stop
+         * blocks on a single 10s sleep and the daemon's graceful exit
+         * exceeds the external stop threshold (e.g. airymaxrt's TERM
+         * window) and gets force-KILLed. */
         const int step_ms = 500;
         int total_ms = (int)sdh->heartbeat_interval_ms;
         if (total_ms <= 0)

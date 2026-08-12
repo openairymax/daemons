@@ -3,33 +3,33 @@
 
 /**
  * @file method_dispatcher.h
- * @brief JSON-RPC 方法分发器框架（基于注册表模式的高效路由）
+ * @brief JSON-RPC method dispatcher framework (registry-based routing).
  *
- * 设计目标：
- * 1. 消除 if-else 方法路由链，降低圈复杂度
- * 2. 统一所有 JSON-RPC 服务的请求处理模式
- * 3. 支持动态方法注册和运行时扩展
- * 4. 线程安全的分发机制
+ * Design goals:
+ * 1. Eliminate the if-else method routing chain, lowering cyclomatic complexity
+ * 2. Unify request handling across all JSON-RPC services
+ * 3. Support dynamic method registration and runtime extension
+ * 4. Thread-safe dispatch mechanism
  *
- * 使用示例：
+ * Usage example:
  * @code
- *   // 创建分发器
+ *   // Create a dispatcher
  *   method_dispatcher_t* disp = method_dispatcher_create(16);
  *
- *   // 注册方法处理器
+ *   // Register a method handler
  *   method_dispatcher_register(disp, "my_method", on_my_method, NULL);
  *
- *   // 分发请求（自动调用匹配的处理器）
+ *   // Dispatch a request (auto-invokes the matching handler)
  *   method_dispatcher_dispatch(disp, request, jsonrpc_build_error, &client_fd);
  *
- *   // 清理资源
+ *   // Clean up
  *   method_dispatcher_destroy(disp);
  * @endcode
  *
- * 性能特征：
- * - 注册：O(1) 哈希表插入
- * - 分发：O(1) 平均查找
- * - 内存：方法数量线性增长
+ * Performance:
+ * - Register: O(1) hash-table insert
+ * - Dispatch: O(1) average lookup
+ * - Memory: linear in the number of methods
  */
 
 #ifndef AIRY_RT_METHOD_DISPATCHER_H
@@ -45,57 +45,58 @@ extern "C" {
 typedef struct method_dispatcher method_dispatcher_t;
 
 /**
- * @brief 方法处理函数类型签名
- * @param params JSON-RPC 请求的 params 对象
- * @param id 请求 ID（用于构建响应）
- * @param user_data 用户上下文数据（注册时传入）
- * @note 所有方法处理器必须符合此签名
+ * @brief Method-handler function type signature.
+ * @param params params object of the JSON-RPC request
+ * @param id Request ID (for building the response)
+ * @param user_data User context data (passed at registration)
+ * @note All method handlers must match this signature
  */
 typedef void (*method_fn)(cJSON *params, int id, void *user_data);
 
 /**
- * @创建方法分发器实例
- * @param max_methods 最大支持的方法数量
- * @return 分发器指针，失败返回 NULL
+ * @brief Create a method-dispatcher instance.
+ * @param max_methods Max number of supported methods
+ * @return Dispatcher pointer, NULL on failure
  *
- * 内部实现：分配哈希表和数组存储，O(1) 空间复杂度
+ * Internally allocates a hash table plus array storage, O(1) space
  */
 method_dispatcher_t *method_dispatcher_create(size_t max_methods);
 
 /**
- * @brief 销毁分发器并释放所有资源
- * @param disp 分发器实例（可为 NULL，安全无操作）
+ * @brief Destroy the dispatcher and release all resources.
+ * @param disp Dispatcher instance (may be NULL, safe no-op)
  *
- * 注意：不会销毁注册时传入的 user_data
+ * Note: does not destroy the user_data passed at registration
  */
 void method_dispatcher_destroy(method_dispatcher_t *disp);
 
 /**
- * @brief 注册方法处理器
- * @param disp 分发器实例
- * @param method 方法名（如 "complete", "register"）
- * @param handler 处理函数指针
- * @param user_data 传递给处理器的用户数据（可为 NULL）
- * @return 0 成功，-1 失败（已存在或参数无效）
+ * @brief Register a method handler.
+ * @param disp Dispatcher instance
+ * @param method Method name (e.g. "complete", "register")
+ * @param handler Handler function pointer
+ * @param user_data User data passed to the handler (may be NULL)
+ * @return 0 on success, -1 on failure (already exists or invalid params)
  *
- * 如果方法已存在，将覆盖旧处理器并返回警告日志
+ * If the method already exists, the old handler is overwritten with a
+ * warning log
  */
 int method_dispatcher_register(method_dispatcher_t *disp, const char *method, method_fn handler,
                                void *user_data);
 
 /**
- * @brief 分发 JSON-RPC 请求到对应的处理器
- * @param disp 分发器实例
- * @param request 完整的 JSON-RPC 请求对象
- * @param error_response_fn 错误响应构建函数（用于未找到方法时）
- * @param user_data 传递给处理器的用户数据（通常为 client_fd）
- * @return 0 成功分发，-1 方法未找到或错误
+ * @brief Dispatch a JSON-RPC request to the matching handler.
+ * @param disp Dispatcher instance
+ * @param request Full JSON-RPC request object
+ * @param error_response_fn Error-response builder (used when method not found)
+ * @param user_data User data passed to the handler (usually client_fd)
+ * @return 0 on successful dispatch, -1 if method not found or on error
  *
- * 处理流程：
- * 1. 从 request 中提取 "method" 字段
- * 2. 在注册表中查找匹配的处理器
- * 3. 调用处理器，传入 params, id, user_data
- * 4. 如果方法未找到，调用 error_response_fn 构建错误响应
+ * Flow:
+ * 1. Extract the "method" field from request
+ * 2. Look up the matching handler in the registry
+ * 3. Call the handler with params, id, user_data
+ * 4. If not found, call error_response_fn to build the error response
  */
 int method_dispatcher_dispatch(method_dispatcher_t *disp, cJSON *request,
                                char *(*error_response_fn)(int, const char *, int), void *user_data);
