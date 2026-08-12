@@ -101,12 +101,16 @@ static char *secrets_env_read(const char *key_name)
 }
 
 /**
- * @brief 请求时热加载 api_key：每次请求重新解析（环境变量优先，secrets.env 兜底）
+ * @brief Hot-reload api_key on request: re-resolve on every request (env var
+ *        first, secrets.env as fallback)
  *
- * 设计意图：普通用户无需重启 llm_d——在 $AIRY_HOME/config/secrets.env
- * 填入 API key 后保存，下一次请求自动生效；后续修改 key 同样即时生效。
- * 优先级：环境变量（bootstrap 启动时 source 的 secrets.env）> secrets.env 文件。
- * 安全性：key 值不写入日志（仅记录 env 名与来源）；临时缓冲用后清零。
+ * Design intent: ordinary users need not restart llm_d — fill the API key in
+ * $AIRY_HOME/config/secrets.env and save; the next request picks it up
+ * automatically; later key changes take effect immediately.
+ * Priority: environment variable (secrets.env sourced at bootstrap) >
+ * secrets.env file.
+ * Security: key values are never written to logs (only the env name and
+ * source are recorded); temporary buffers are zeroed after use.
  */
 void provider_refresh_api_key(provider_base_ctx_t *base_ctx)
 {
@@ -203,8 +207,9 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, cons
 
     __builtin_memset(base_ctx, 0, sizeof(provider_base_ctx_t));
 
-    /* 记录 api_key_env 名（供请求时 secrets.env 热加载）。
-     * 优先从 "env:NAME" 前缀提取；否则按 provider/base_url 推断标准环境变量名。 */
+    /* Record the api_key_env name (for secrets.env hot-reload on request).
+     * Prefer extracting from the "env:NAME" prefix; otherwise infer the
+     * standard env var name from the provider/base_url. */
     base_ctx->api_key_env[0] = '\0';
     if (api_key && strncmp(api_key, "env:", 4) == 0) {
         const char *env_name = api_key + 4;
@@ -593,10 +598,12 @@ static int sse_feed_line(sse_stream_ctx_t *sse, const char *line, size_t len)
         size_t data_len = len - (size_t)(data_start - line);
 
         if (data_len >= 6 && memcmp(data_start, "[DONE]", 6) == 0) {
-            /* 正常流结束：[DONE] 是 SSE 协议的标准收尾，不是错误。
-             * 仅置 done 标记；cancelled 留给 on_chunk 错误取消使用，
-             * 否则 curl 写回调因 cancelled 返回 0 会误报 CURLE_WRITE_ERROR
-             * 并把正常完成当成 STREAM-FAIL（历史缺陷，真实流式调用方暴露）。 */
+            /* Normal stream end: [DONE] is the standard SSE-protocol
+             * terminator, not an error. Only set the done flag; cancelled is
+             * left for on_chunk error cancellation — otherwise the curl write
+             * callback returning 0 due to cancelled would falsely report
+             * CURLE_WRITE_ERROR and treat a normal completion as STREAM-FAIL
+             * (historical defect exposed by real streaming callers). */
             sse->done = 1;
             return 0;
         }

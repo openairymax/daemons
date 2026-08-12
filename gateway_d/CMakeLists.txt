@@ -53,13 +53,23 @@ set(PROTOCOLS_COMMON_INCLUDE_DIR ${PROTOCOLS_DIR}/common/include)
 option(AIRY_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
 
 # ==================== Gateway 服务静态库 ====================
-# 提取 service/gateway_svc_adapter/gateway_forward + protocol/* 为独立静态库，
+# 提取 service/gateway_svc_adapter/gateway_business_handler + protocol/* 为独立静态库，
 # 供 gateway_d 可执行文件和集成测试共用，消除桩函数依赖。
 # 排除 main.c（含 main()）。
+# gateway_business_handler.c 按单一职责拆分为四个文件（2026-08-11）：
+#   gateway_business_handler.c  主分发 + ctx 生命周期 + 协议入口
+#   gateway_biz_forward.c      命名空间转发（L2 协议客户端 + 白名单）
+#   gateway_biz_llm.c          LLM 调用 + 工具循环（ReAct）
+#   gateway_biz_agent.c        agent.run 编排（双思考注入 + 取消）
+#   gateway_biz_backend.c      MCP/OpenAI/A2A 协议后端
 set(GATEWAY_SERVICE_SOURCES
     src/service.c
     src/gateway_svc_adapter.c
     src/gateway_business_handler.c
+    src/gateway_biz_forward.c
+    src/gateway_biz_llm.c
+    src/gateway_biz_agent.c
+    src/gateway_biz_backend.c
 )
 
 if(AIRY_ENABLE_PROTOCOLS)
@@ -201,6 +211,12 @@ set(GATEWAY_LIB_SOURCES
     ${GATEWAY_SRC_DIR}/gateway/stdio_gateway.c
     ${GATEWAY_SRC_DIR}/utils/jsonrpc.c
     ${GATEWAY_SRC_DIR}/utils/syscall_router.c
+    ${GATEWAY_SRC_DIR}/utils/syscall_router_agent.c
+    ${GATEWAY_SRC_DIR}/utils/syscall_router_memory.c
+    ${GATEWAY_SRC_DIR}/utils/syscall_router_runtime.c
+    ${GATEWAY_SRC_DIR}/utils/syscall_router_session.c
+    ${GATEWAY_SRC_DIR}/utils/syscall_router_task.c
+    ${GATEWAY_SRC_DIR}/utils/syscall_router_telemetry.c
     ${GATEWAY_SRC_DIR}/utils/gateway_rpc_handler.c
     ${GATEWAY_SRC_DIR}/utils/gateway_protocol_handler.c
     ${GATEWAY_SRC_DIR}/utils/gateway_rate_limiter.c
@@ -219,7 +235,16 @@ if(AIRY_HAS_HTTP2)
         )
     endif()
     if(NGHTTP2_LIBRARY)
-        list(APPEND GATEWAY_LIB_SOURCES ${GATEWAY_SRC_DIR}/gateway/http2_gateway.c)
+        list(APPEND GATEWAY_LIB_SOURCES
+            ${GATEWAY_SRC_DIR}/gateway/http2_gateway.c
+            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_event.c
+            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_frame.c
+            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_headers.c
+            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_response.c
+            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_route.c
+            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_session.c
+            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_stream.c
+        )
     else()
         set(AIRY_HAS_HTTP2 FALSE CACHE BOOL "nghttp2 available")
         airy_print_warn("[gateway_d] nghttp2 not found, HTTP/2 gateway disabled")
@@ -246,6 +271,13 @@ endif()
 if(AIRY_HAS_HTTP2 AND NGHTTP2_LIBRARY)
     set_source_files_properties(
         ${GATEWAY_SRC_DIR}/gateway/http2_gateway.c
+        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_event.c
+        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_frame.c
+        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_headers.c
+        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_response.c
+        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_route.c
+        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_session.c
+        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_stream.c
         PROPERTIES COMPILE_DEFINITIONS "AIRY_COMPLIANCE_IMPL"
     )
     # http2_gateway.c 内部使用 AIRY_HAS_HTTP2 宏控制真实/禁用实现

@@ -127,9 +127,13 @@ int agent_registry_core_get(agent_registry_t *registry, const char *agent_id, ag
     airy_mtx_lock(&registry->lock);
     for (size_t i = 0; i < registry->entry_count; i++) {
         if (strcmp(registry->entries[i].id, agent_id) == 0) {
-            /* P0-7 修复：在锁内完成浅拷贝后再解锁，避免调用方无锁访问内部 entries[]。
-             * 注意：description/author/tags 仍为内部指针，调用方不应在 unlock 后解引用；
-             * 如需长期持有应额外深拷贝。本修复聚焦消除返回内部数组指针的数据竞争。 */
+            /* P0-7 fix: complete the shallow copy under the lock before
+             * unlocking, avoiding the caller accessing the internal entries[]
+             * without the lock. Note: description/author/tags are still
+             * internal pointers; callers must not dereference them after
+             * unlock; deep-copy instead if long-term retention is needed.
+             * This fix focuses on eliminating the data race of returning an
+             * internal array pointer. */
             *out = registry->entries[i];
             airy_mtx_unlock(&registry->lock);
             return 0;
@@ -146,8 +150,10 @@ size_t agent_registry_core_list(agent_registry_t *registry, agent_entry_t *out_e
         return 0;
     airy_mtx_lock(&registry->lock);
     size_t count = (registry->entry_count < max_entries) ? registry->entry_count : max_entries;
-    /* P0-7 修复：在锁内按值拷贝条目快照，调用方解锁后访问的是独立拷贝，
-     * 不再持有指向内部 entries[] 的指针，消除 remove() 数组搬移导致的 use-after-free。 */
+    /* P0-7 fix: copy the entry snapshots by value under the lock; after the
+     * caller unlocks, it accesses independent copies and no longer holds
+     * pointers into the internal entries[], eliminating the use-after-free
+     * caused by remove() array shifting. */
     for (size_t i = 0; i < count; i++)
         out_entries[i] = registry->entries[i];
     airy_mtx_unlock(&registry->lock);
@@ -205,8 +211,10 @@ int agent_registry_core_get_latest_version(agent_registry_t *registry, const cha
     airy_mtx_lock(&registry->lock);
     for (size_t i = 0; i < registry->entry_count; i++) {
         if (strcmp(registry->entries[i].id, agent_id) == 0) {
-            /* P0-7 修复：在锁内拷贝 latest_version 字符串到调用方缓冲区后再解锁，
-             * 避免返回内部 char 数组指针后调用方无锁访问。 */
+            /* P0-7 fix: copy the latest_version string into the caller's
+             * buffer under the lock before unlocking, avoiding returning an
+             * internal char-array pointer that the caller accesses without
+             * the lock. */
             AIRY_STRNCPY_TERM(out, registry->entries[i].latest_version, out_size);
             out[out_size - 1] = '\0';
             airy_mtx_unlock(&registry->lock);
@@ -247,9 +255,12 @@ size_t agent_registry_core_search(agent_registry_t *registry, const char *query,
     for (size_t i = 0; i < registry->entry_count && count < max_entries; i++) {
         if (strstr(registry->entries[i].id, query) || strstr(registry->entries[i].name, query) ||
             (registry->entries[i].description && strstr(registry->entries[i].description, query))) {
-            /* P1-15 修复：在锁内按值拷贝匹配条目，调用方解锁后访问的是独立快照，
-             * 不再持有指向内部 entries[] 的指针，消除 remove() 数组搬移导致的 use-after-free。
-             * 参照 P0-7 修正的 agent_registry_core_search_by_tag 同模式。 */
+            /* P1-15 fix: copy matching entries by value under the lock;
+             * after the caller unlocks it accesses an independent snapshot and
+             * no longer holds pointers into the internal entries[], eliminating
+             * the use-after-free caused by remove() array shifting. Follows
+             * the same pattern as the P0-7-fixed
+             * agent_registry_core_search_by_tag. */
             out_entries[count] = registry->entries[i];
             count++;
         }

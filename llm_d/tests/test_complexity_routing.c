@@ -47,12 +47,14 @@ typedef enum {
 static const char *complexity_names[] = {"SIMPLE", "MODERATE", "COMPLEX"};
 
 /**
- * @brief 基于启发式规则评估输入复杂度
+ * @brief Assess input complexity with heuristic rules
  *
- * 规则:
- * - SIMPLE:   短文本(<50字), 无技术关键词, 日常问候
- * - MODERATE: 中等长度(50-500字), 含编程/技术关键词
- * - COMPLEX:  长文本(>500字), 含架构/设计/系统级关键词
+ * Rules:
+ * - SIMPLE:   short text (<50 chars), no technical keywords, everyday greeting
+ * - MODERATE: medium length (50-500 chars), contains programming/technical
+ *             keywords
+ * - COMPLEX:  long text (>500 chars), contains architecture/design/system-level
+ *             keywords
  */
 static complexity_level_t assess_complexity(const char *input)
 {
@@ -87,7 +89,7 @@ static complexity_level_t assess_complexity(const char *input)
 }
 
 /**
- * @brief 根据复杂度选择模型路由
+ * @brief Pick the model route by complexity
  */
 static const char *route_by_complexity(complexity_level_t level, const char *user_model)
 {

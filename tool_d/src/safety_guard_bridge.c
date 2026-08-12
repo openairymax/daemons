@@ -139,7 +139,7 @@ static uint64_t get_current_time_ms(void)
 }
 
 /**
- * @brief 检查速率限制窗口是否需要重置
+ * @brief Check whether the rate-limit window needs resetting
  */
 static void rate_limit_window_reset_if_needed(safety_guard_bridge_t *bridge)
 {
@@ -156,7 +156,7 @@ static void rate_limit_window_reset_if_needed(safety_guard_bridge_t *bridge)
 }
 
 /**
- * @brief 构建 Cupolas 安全事件
+ * @brief Build a Cupolas safety event
  */
 static void build_safety_event(safety_event_t *event, const tool_metadata_t *meta,
                                const char *params_json, const char *agent_id)
@@ -177,9 +177,9 @@ static void build_safety_event(safety_event_t *event, const tool_metadata_t *met
     }
 }
 
-/* 内部实现：以指定 agent_id 执行完整守卫链。
- * 权限守卫（SAFETY_GUARD_PERMISSION）与审计守卫使用传入的 agent_id，
- * 其余守卫与 agent 无关。 */
+/* Internal implementation: run the full guard chain with the given agent_id.
+ * The permission guard (SAFETY_GUARD_PERMISSION) and the audit guard use the
+ * passed-in agent_id; the other guards are agent-independent. */
 static int bridge_check_impl(safety_guard_bridge_t *bridge, const char *agent_id,
                              const tool_metadata_t *meta, const char *params_json,
                              safety_guard_bridge_result_t *result)

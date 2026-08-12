@@ -433,8 +433,10 @@ static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_
 {
     char buffer[NOTIFY_D_MAX_BUFFER];
 #ifndef _WIN32
-    /* 等待请求数据就绪后再 recv：airy_sock_recv 为 MSG_DONTWAIT 非阻塞读取，
-     * accept 后立即 recv 会因 EAGAIN 返回 0 而误判连接失败并关闭（RPC 时序竞态）。 */
+    /* Wait for request data to be ready before recv: airy_sock_recv is a
+     * non-blocking MSG_DONTWAIT read; recv immediately after accept returns 0
+     * on EAGAIN and would misjudge the connection as failed and close it (RPC
+     * timing race). */
     struct pollfd pfd;
     pfd.fd = (int)client_fd;
     pfd.events = POLLIN;
@@ -452,10 +454,12 @@ static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_
     }
     buffer[n] = '\0';
 
-    /* L2 命名空间方法（02-l2-service-protocol.md §6.1）：gateway 转发时已剥离
-     * <ns>. 前缀，此处直接匹配 publish/subscribe/unsubscribe/list/health 与
-     * 标准方法 shutdown/get_stats/health_check。命中则回 JSON-RPC 2.0 响应；
-     * 其余（SSE/WebSocket 升级/普通消息投递）保持原有逻辑，向后兼容。 */
+    /* L2 namespace methods (02-l2-service-protocol.md §6.1): gateway strips
+     * the <ns>. prefix during forwarding, so here match publish/subscribe/
+     * unsubscribe/list/health and the standard methods shutdown/get_stats/
+     * health_check directly; on a hit respond with JSON-RPC 2.0; everything
+     * else (SSE/WebSocket upgrade/plain message delivery) keeps the original
+     * logic, backward compatible. */
     char rpc_response[NOTIFY_D_MAX_BUFFER];
     int dispatch_rc = notify_d_dispatch_jsonrpc(svc, buffer, rpc_response, sizeof(rpc_response));
     if (dispatch_rc == NOTIFY_D_METHOD_SHUTDOWN) {

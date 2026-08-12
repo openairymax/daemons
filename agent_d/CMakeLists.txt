@@ -24,6 +24,10 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 # 消除桩函数依赖。排除 main.c（含 main()）。
 set(AGENT_SERVICE_SOURCES
     src/service.c
+    src/service_child.c   # Agent 服务-子进程通信域
+    src/service_spawn.c   # Agent 服务-spawn 域
+    src/service_invoke.c  # Agent 服务-调用/会话域
+    src/service_stats.c   # Agent 服务-状态/统计域
     src/agent_svc_adapter.c
 )
 

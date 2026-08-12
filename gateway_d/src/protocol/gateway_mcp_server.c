@@ -190,9 +190,11 @@ static char *build_tools_list_json(gw_mcp_server_t *server)
         if (i > 0)
             pos += snprintf(buf + pos, buf_size - pos, ",");
         gw_mcp_tool_entry_t *t = &server->tools[i];
-        /* MCP tools/list 规范：每个工具必须携带 inputSchema（注册时的 JSON
-         * 对象原样内嵌，非法 JSON 或过长会被截断），修复客户端无法获取
-         * 参数定义而无法正确调用工具的问题 */
+        /* MCP tools/list spec: every tool must carry an inputSchema (the JSON
+         * object registered at registration time, embedded as-is; invalid or
+         * overlong JSON is truncated), fixing the problem of clients being
+         * unable to obtain parameter definitions and thus unable to call tools
+         * correctly */
         pos += snprintf(buf + pos, buf_size - pos,
                         "{\"name\":\"%s\",\"description\":\"%s\",\"inputSchema\":%.*s}", t->name,
                         t->description, (int)sizeof(t->input_schema) - 1, t->input_schema);
@@ -298,9 +300,11 @@ static char *__attribute__((used)) extract_jsonrpc_id(const char *body)
 
 static char *extract_jsonrpc_id_raw(const char *body)
 {
-    /* 提取请求 id 的原始 JSON 文本（数字原样、字符串含引号），可直接内嵌
-     * 到响应（"id":%s），保证 JSON-RPC 2.0 响应 id 与请求 id 类型一致。
-     * 请求无 id / 格式非法时返回 NULL，调用方回退 "id":null。 */
+    /* Extract the raw JSON text of the request id (numbers as-is, strings
+     * with quotes), embeddable directly into the response ("id":%s),
+     * guaranteeing the JSON-RPC 2.0 response id type matches the request id.
+     * Returns NULL when the request has no id / the format is invalid; the
+     * caller falls back to "id":null. */
     if (!body) {
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
@@ -482,12 +486,13 @@ static char *extract_resource_uri_from_params(const char *params_json)
 }
 
 /**
- * @brief JSON-RPC 处理核心（含请求 id 回显）
+ * @brief JSON-RPC processing core (with request-id echo)
  *
- * @param id_json 请求 id 的原始 JSON 文本（数字原样 / 字符串含引号），
- *                可安全内嵌响应（"id":%s）；NULL 时回退 "id":null。
- *                MCP 基于 JSON-RPC 2.0，响应 id 必须与请求 id 一致，
- *                否则客户端无法将响应关联到原请求。
+ * @param id_json Raw JSON text of the request id (numbers as-is / strings with
+ *                quotes), safely embeddable in the response ("id":%s); NULL
+ *                falls back to "id":null. MCP is based on JSON-RPC 2.0: the
+ *                response id must match the request id, otherwise clients
+ *                cannot correlate the response to the original request.
  */
 static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *method,
                                            const char *params_json, const char *id_json,
@@ -518,8 +523,9 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
     }
 
     if (strcmp(method, "tools/list") == 0) {
-        /* MCP 规范：tools/list 响应须为 JSON-RPC result 包装
-         * {"jsonrpc","id","result":{"tools":[...]}}，保证外部标准客户端可解析。 */
+        /* MCP spec: the tools/list response must be a JSON-RPC result
+         * wrapper {"jsonrpc","id","result":{"tools":[...]}} so external
+         * standard clients can parse it. */
         char *inner = build_tools_list_json(server);
         if (!inner) {
             server->error_count++;

@@ -178,9 +178,12 @@ int daemon_security_init(const daemon_security_config_t *config, airy_err_t *err
         }
     }
 
-    /* 接线 cupolas_vault：凭据存储由 vault 加密保管（不再自维护明文内存数组）。
-     * 口令来源：AIRY_VAULT_PASSWORD 环境变量；未设置时使用空口令派生主密钥，
-     * 此时凭据仅混淆存储（非生产安全基线），生产部署必须配置该环境变量。 */
+    /* Wire up cupolas_vault: credential storage is encrypted and kept by the
+     * vault (no longer a self-maintained plaintext in-memory array). Passphrase
+     * source: the AIRY_VAULT_PASSWORD env var; when unset, an empty passphrase
+     * derives the master key and credentials are only obfuscated (not a
+     * production security baseline) — production deployments must configure
+     * this env var. */
     if (g_security_ctx.vault_enabled) {
         const char *vault_password = getenv(DAEMON_VAULT_PASSWORD_ENV);
         if (!vault_password) {
@@ -253,9 +256,10 @@ int daemon_sanitize_llm_input(const char *input, char *output, size_t output_siz
 
     ensure_mutex_initialized();
     airy_mtx_lock(&g_security_mutex);
-    /* P3.15 ACC-DT16: fail-safe — 不再 lazy-init。未初始化时使用最严格的
-     * SANITIZE_LEVEL_STRICT 继续净化（净化是保护性操作，拒绝会降低安全性）。
-     * 调用方应在 daemon 启动时通过 daemon_cupolas_init() 显式初始化。 */
+    /* P3.15 ACC-DT16: fail-safe — no more lazy-init. When uninitialized,
+     * keep sanitizing with the strictest SANITIZE_LEVEL_STRICT (sanitizing is
+     * a protective operation; refusing would reduce security). Callers should
+     * initialize explicitly via daemon_cupolas_init() at daemon startup. */
     sanitize_level_t level;
     if (!g_security_ctx.initialized) {
         level = SANITIZE_LEVEL_STRICT;
@@ -297,8 +301,8 @@ int daemon_sanitize_tool_params(const char *tool_name, const char *params, char 
 
     ensure_mutex_initialized();
     airy_mtx_lock(&g_security_mutex);
-    /* P3.15 ACC-DT16: fail-safe — 不再 lazy-init。未初始化时仍执行净化
-     *（净化是保护性操作），仅记录警告。 */
+    /* P3.15 ACC-DT16: fail-safe — no more lazy-init. When uninitialized,
+     * still sanitize (sanitizing is a protective operation), only warn. */
     bool sec_uninitialized = !g_security_ctx.initialized;
     airy_mtx_unlock(&g_security_mutex);
     if (sec_uninitialized) {
@@ -648,8 +652,9 @@ int daemon_store_credential(const char *cred_id, cupolas_vault_cred_type_t cred_
         return AIRY_ERR_UNKNOWN;
     }
 
-    /* 保留 owner_agent_id ACL 语义：存储者为默认授权人（读写删），
-     * 其他 agent 须显式 grant_access 后方可访问（vault fail-closed 默认拒绝）。 */
+    /* Keep the owner_agent_id ACL semantics: the storer is the default
+     * authorizer (read/write/delete); other agents must be explicitly granted
+     * access via grant_access (vault denies by default, fail-closed). */
     const char *owner = agent_id ? agent_id : "system";
     int acl_rc = cupolas_vault_grant_access(vault, cred_id, owner,
                                             CUPOLAS_VAULT_OP_READ | CUPOLAS_VAULT_OP_WRITE |
@@ -689,8 +694,9 @@ int daemon_retrieve_credential(const char *cred_id, const char *agent_id, uint8_
         AIRY_ERROR(AIRY_ERR_NOT_SUPPORTED, "vault is disabled or unavailable");
     }
 
-    /* 保留 "system" 豁免语义：system 级调用不附加 agent 约束，
-     * 交由 vault 的 ACL 裁决；其余请求以 agent_id 为准（fail-closed）。 */
+    /* Keep the "system" exemption semantics: system-level calls carry no
+     * agent constraint and are left to the vault's ACL; all other requests
+     * are scoped by agent_id (fail-closed). */
     const char *requester = agent_id ? agent_id : "system";
 
     size_t buf_len = *data_len;

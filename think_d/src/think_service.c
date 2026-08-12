@@ -156,9 +156,10 @@ think_service_t *think_service_create(const think_service_config_t *config)
     SVC_LOG_INFO("ThinkDual: llm_svc_adapter created (socket=%s)",
                  llm_svc_adapter_is_connected(svc->llm_adapter) ? "connected" : "pending");
 
-    /* 2. 认知引擎（带 feedback 回调收集思考事件）。
-     * plan_strategy 注入 reactive planner（llm=NULL 启发式），否则
-     * airy_cognition_process 的 Phase 1 规划返回 EUNKNOWN（plan_strat 恒空）。 */
+    /* 2. Cognitive engine (with a feedback callback collecting thinking
+     * events). plan_strategy injects the reactive planner (llm=NULL uses
+     * heuristics); otherwise airy_cognition_process's Phase 1 planning returns
+     * EUNKNOWN (plan_strat stays empty). */
     airy_plan_strategy_t *plan_strat = airy_plan_reactive_create(NULL);
     if (!plan_strat) {
         SVC_LOG_ERROR("ThinkDual: reactive planner create failed");
@@ -190,16 +191,19 @@ think_service_t *think_service_create(const think_service_config_t *config)
 
     airy_cognition_set_llm_adapter(svc->engine, svc->llm_adapter);
 
-    /* 4. 注入 t2/t1-f/t1-p 三独立模型槽位（NULL → provider 默认）。
-     * GRAD 三模型角色复用这些槽位：模型 A=t2 慢思考（生成）、模型 C=t1-p
-     * 专业思考（四验）、模型 B=t1-f 快思考（终裁）。 */
+    /* 4. Inject the t2/t1-f/t1-p three independent model slots (NULL ->
+     * provider default). GRAD's three-model roles reuse these slots: model
+     * A=t2 slow thinking (generation), model C=t1-p professional thinking
+     * (quadruple-check), model B=t1-f fast thinking (final ruling). */
     airy_cognition_set_tc3_models(svc->engine,
                                   svc->think2_slow_model[0] ? svc->think2_slow_model : NULL,
                                   svc->think1_fast_model[0] ? svc->think1_fast_model : NULL,
                                   svc->think1_prof_model[0] ? svc->think1_prof_model : NULL);
 
-    /* 5. 双思考开关：enabled=0 → 关闭 GRAD 计划级批判循环（退化单轮计划），
-     * 此时 t2/t1-f/t1-p 三角色不参与批判，走普通 GCCP → 计划路径。 */
+    /* 5. Dual-thinking switch: enabled=0 -> disable the GRAD plan-level
+     * critique loop (degrades to single-round planning); the t2/t1-f/t1-p
+     * three roles then do not participate in critique and the plain
+     * GCCP -> plan path is used. */
     if (config && config->enabled == 0) {
         airy_cognition_set_grad_enabled(svc->engine, 0);
         SVC_LOG_WARN("ThinkDual: dual-thinking disabled (enabled=0), GRAD off");
@@ -258,8 +262,9 @@ static cJSON *think_plan_to_json(const airy_task_plan_t *plan)
                 cJSON_AddItemToArray(deps, cJSON_CreateString(n->task_node_depends_on[d]));
         }
         cJSON_AddItemToObject(nj, "depends", deps);
-        /* GRAD 四验元数据（E-01 数据依赖 / E-03 资源守恒 / E-04 目的漂移）：
-         * 完整输出 inputs/outputs/cost/invariant_guard，证明 DAG 非纯展示。 */
+        /* GRAD quadruple-check metadata (E-01 data dependency / E-03
+         * resource conservation / E-04 purpose drift): outputs inputs/outputs/
+         * cost/invariant_guard in full, proving the DAG is not pure display. */
         cJSON *inputs = cJSON_CreateArray();
         for (size_t d = 0; d < n->task_node_inputs_count; d++) {
             if (n->task_node_inputs && n->task_node_inputs[d])
@@ -388,8 +393,9 @@ void think_result_free(think_process_result_t *res)
     res->json_len = 0;
 }
 
-/* 从 engine 读取真实双思考统计（engine 内部 dual_think_corrections 更新点：
- * Phase 1 S1 预验证失败 / TC3 修正 / GRAD rejections），回填 svc 统计。 */
+/* Read the real dual-thinking stats from the engine (engine-internal
+ * dual_think_corrections update points: Phase 1 S1 pre-validation failure /
+ * TC3 corrections / GRAD rejections) and backfill the svc stats. */
 static void think_sync_engine_stats(think_service_t *svc)
 {
     if (!svc || !svc->engine)

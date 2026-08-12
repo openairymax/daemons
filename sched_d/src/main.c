@@ -48,6 +48,7 @@ static sched_service_t *g_service = NULL;
 #define SCHED_ERR_STRATEGY_FAIL (AIRY_ERR_DAEMON_BASE + 0x02)
 
 static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_unregister_agent(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd);
@@ -69,6 +70,11 @@ static int sched_dispatch_task(const char *role, const char *task_description,
 static void on_register_agent_method(cJSON *params, int id, void *user_data)
 {
     handle_register_agent(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_unregister_agent_method(cJSON *params, int id, void *user_data)
+{
+    handle_unregister_agent(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_schedule_task_method(cJSON *params, int id, void *user_data)
@@ -130,9 +136,10 @@ static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent_id", id);
         return;
     }
-    /* agent_id/agent_name 为堆指针字段：须 AIRY_STRDUP 分配。
-     * 原 AIRY_STRNCPY_TERM(…, sizeof(char*)) 会向 NULL 指针写入 7 字节，
-     * 必然 SEGV（既有 P0 缺陷，本处一并修复）。 */
+    /* agent_id/agent_name are heap-pointer fields: must be allocated with
+     * AIRY_STRDUP. The original AIRY_STRNCPY_TERM(…, sizeof(char*)) wrote 7
+     * bytes to a NULL pointer, inevitably SEGV (a pre-existing P0 defect,
+     * fixed here). */
     info.agent_id = AIRY_STRDUP(aid);
     const char *aname = get_string_field(agent_json, "agent_name", NULL);
     info.agent_name = AIRY_STRDUP(aname ? aname : "");
@@ -166,6 +173,28 @@ static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
     AIRY_FREE(info.agent_name);
 }
 
+static void handle_unregister_agent(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *aid_json = cJSON_GetObjectItem(params, "agent_id");
+    if (!cJSON_IsString(aid_json) || !aid_json->valuestring || !*aid_json->valuestring) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent_id", id);
+        return;
+    }
+
+    int ret = sched_service_unregister_agent(g_service, aid_json->valuestring);
+    if (ret != AIRY_SUCCESS && ret != AIRY_ERR_NOT_FOUND) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Unregister failed", id);
+        SVC_LOG_ERROR("Failed to unregister agent: %s (error=%d)", aid_json->valuestring, ret);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "status", "unregistered");
+    cJSON_AddStringToObject(result, "agent_id", aid_json->valuestring);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    SVC_LOG_INFO("Agent unregistered: %s", aid_json->valuestring);
+}
+
 static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *task_json = jsonrpc_get_object_param(params, "task");
@@ -185,8 +214,10 @@ static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd)
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
         return;
     }
-    /* 空任务守卫：task_id 与 task_description 均缺失时拒绝入队，
-     * 防止无意义空任务进入异步队列（worker 无法据此选 agent/执行） */
+    /* Empty-task guard: refuse to enqueue when both task_id and
+     * task_description are missing, preventing meaningless empty tasks from
+     * entering the async queue (the worker cannot select an agent/execute
+     * from them) */
     if ((!tid || !*tid) && (!desc || !*desc)) {
         AIRY_FREE(task.task_id);
         AIRY_FREE(task.task_description);
@@ -198,8 +229,9 @@ static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd)
     task.priority = get_int_field(task_json, "priority", 0);
     task.timeout_ms = get_int_field(task_json, "timeout_ms", 30000);
 
-    /* 异步入队：立即返回 task_id + status=pending；
-     * 工作线程随后完成 选 agent → spawn → invoke → 状态回写（get_task 查询）。 */
+    /* Async enqueue: return task_id + status=pending immediately; the worker
+     * thread later completes select agent -> spawn -> invoke -> status
+     * write-back (queried via get_task). */
     char *assigned_id = NULL;
     int ret = sched_service_submit_task(g_service, &task, &assigned_id);
     AIRY_FREE(task.task_id);
@@ -452,11 +484,13 @@ static uint32_t sched_dispatch_timeout_ms(void)
 }
 
 /*
- * P2.2 真实派发：调度选定角色后，经 agent_d 的 Unix socket 调用
- * agent.spawn + agent.invoke，让该角色对应的真实 Agent 子进程
- * （Python runner → LLM）执行任务，并返回真实输出。
- * 失败时 *out_result 不置位并返回非 0 错误码——调用方必须如实上报，
- * 禁止以假数据替代真实执行（参照 gateway syscall_router 调用 agent.sock 的模式）。
+ * P2.2 real dispatch: after scheduling picks a role, call agent.spawn +
+ * agent.invoke over agent_d's Unix socket so the real Agent child process
+ * (Python runner -> LLM) for that role executes the task and returns real
+ * output. On failure, *out_result is not set and a non-zero error code is
+ * returned — the caller must report it faithfully; fake data must never
+ * substitute for real execution (following the gateway syscall_router
+ * agent.sock call pattern).
  */
 static int sched_dispatch_task(const char *role, const char *task_description,
                                sched_dispatch_result_t *out_result)
@@ -580,9 +614,10 @@ static int sched_dispatch_task(const char *role, const char *task_description,
 }
 
 /*
- * 任务执行回调（注入 sched_service，由工作线程调用）：
- * 复用 sched_dispatch_task 的真实链路（选 agent 已由 sched_service 完成，
- * 这里对选中 role 执行 spawn+invoke+terminate）。
+ * Task execution callback (injected into sched_service, called by the worker
+ * thread): reuses the real chain of sched_dispatch_task (agent selection is
+ * already done by sched_service; here spawn+invoke+terminate run for the
+ * selected role).
  */
 static int sched_dispatch_executor(const char *agent_id, const char *task_description,
                                    char **out_output)
@@ -644,14 +679,17 @@ int main(int argc, char **argv)
                              .enable_ml_strategy = false,
                              .ml_model_path = NULL,
                              .max_agents = 100,
-                             /* DAG 并行派发：0 = 串行（默认保持旧行为）。
-                              * 环境变量 AIRY_DAG_PARALLEL=N（N≥1）启用
-                              * mac_framework 委派模式并行，N 为并行度上限。 */
+                             /* DAG parallel dispatch: 0 = serial (default,
+                              * keeps legacy behavior). Env AIRY_DAG_PARALLEL=N
+                              * (N>=1) enables mac_framework delegation-mode
+                              * parallelism with N as the concurrency cap. */
                              .dag_max_parallel = 0,
                              .dag_batch_size = 0,
-                             /* 失败分级语义（改进3）：生产默认仅 FATAL
-                              * 级联取消整图，普通失败不中断独立分支。
-                              * AIRY_DAG_FATAL_CASCADE=0 恢复旧行为。 */
+                             /* Failure-grading semantics (improvement 3):
+                              * production defaults to only FATAL cascading
+                              * graph cancellation; ordinary failures do not
+                              * interrupt independent branches.
+                              * AIRY_DAG_FATAL_CASCADE=0 restores legacy. */
                              .dag_fatal_cascade = true};
     {
         const char *dag_fc = getenv("AIRY_DAG_FATAL_CASCADE");
@@ -719,6 +757,8 @@ int main(int argc, char **argv)
     g_dispatcher_sched_d = daemon_event_driver_get_dispatcher(g_event_driver_sched_d);
     method_dispatcher_register(g_dispatcher_sched_d, "register_agent", on_register_agent_method,
                                NULL);
+    method_dispatcher_register(g_dispatcher_sched_d, "unregister_agent",
+                               on_unregister_agent_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "schedule_task", on_schedule_task_method,
                                NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "get_task", on_get_task_method, NULL);
@@ -737,8 +777,9 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_sched_d, "shutdown", on_shutdown_method_sched_d, NULL);
     SVC_LOG_INFO("Registered %d RPC methods (sched.* namespace)", 13);
 
-    /* 注入任务执行回调并启动队列工作线程：schedule_task 入队后由工作线程
-     * 异步完成 选 agent → spawn → invoke（真实派发），get_task 查询状态 */
+    /* Inject the task execution callback and start the queue worker thread:
+     * after schedule_task enqueues, the worker asynchronously completes
+     * select agent -> spawn -> invoke (real dispatch); get_task queries status */
     sched_service_set_executor(g_service, sched_dispatch_executor);
     if (sched_service_start_workers(g_service) != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to start scheduler worker thread");

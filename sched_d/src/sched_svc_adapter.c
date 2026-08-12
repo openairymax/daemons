@@ -47,19 +47,23 @@ static void sched_config_from_common(sched_config_t *sched_cfg, const airy_svc_c
     sched_cfg->max_agents =
         (common_cfg && common_cfg->max_concurrent > 0) ? common_cfg->max_concurrent : 100;
 
-    /* DAG 并行派发透传（语义与 main.c AIRY_DAG_PARALLEL 一致：0 = 串行）：
-     * 服务声明 BATCH 能力（AIRY_SVC_CAP_BATCH）且 max_concurrent>0 时启用，
-     * 并行度取 max_concurrent。clamp 至 SCHED_DAG_MAX_NODES——线程池按并行度
-     * 创建常驻 worker（min=max），超限会创建失控数量的线程。
-     * dag_batch_size 留 0：sched_service_create 默认取 dag_max_parallel。 */
+    /* DAG parallel dispatch pass-through (semantics consistent with main.c's
+     * AIRY_DAG_PARALLEL: 0 = serial): enabled when the service declares the
+     * BATCH capability (AIRY_SVC_CAP_BATCH) and max_concurrent>0, with
+     * max_concurrent as the parallelism. Clamped to SCHED_DAG_MAX_NODES — the
+     * thread pool creates resident workers by parallelism (min=max); exceeding
+     * the limit would create an uncontrolled number of threads.
+     * dag_batch_size left 0: sched_service_create defaults it to
+     * dag_max_parallel. */
     if (common_cfg && (common_cfg->capabilities & AIRY_SVC_CAP_BATCH) &&
         common_cfg->max_concurrent > 0) {
         sched_cfg->dag_max_parallel = (common_cfg->max_concurrent > SCHED_DAG_MAX_NODES) ?
                                           SCHED_DAG_MAX_NODES :
                                           common_cfg->max_concurrent;
     }
-    /* 失败分级语义（改进3）：生产默认仅 FATAL 级联取消整图，
-     * 普通失败不中断图其余独立分支。 */
+    /* Failure-grading semantics (improvement 3): production defaults to only
+     * FATAL cascading whole-graph cancellation; ordinary failures do not
+     * interrupt the graph's other independent branches. */
     sched_cfg->dag_fatal_cascade = true;
 }
 

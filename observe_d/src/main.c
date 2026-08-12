@@ -466,8 +466,10 @@ static void observe_d_handle_request(observe_d_service_t *svc, airy_sock_t clien
 {
     char buffer[OBSERVE_D_MAX_BUFFER];
 #ifndef _WIN32
-    /* 等待请求数据就绪后再 recv：airy_sock_recv 为 MSG_DONTWAIT 非阻塞读取，
-     * accept 后立即 recv 会因 EAGAIN 返回 0 而误判连接失败并关闭（RPC 时序竞态）。 */
+    /* Wait for request data to be ready before recv: airy_sock_recv is a
+     * non-blocking MSG_DONTWAIT read; recv immediately after accept returns 0
+     * on EAGAIN and would misjudge the connection as failed and close it (RPC
+     * timing race). */
     struct pollfd pfd;
     pfd.fd = (int)client_fd;
     pfd.events = POLLIN;
@@ -485,9 +487,11 @@ static void observe_d_handle_request(observe_d_service_t *svc, airy_sock_t clien
     }
     buffer[n] = '\0';
 
-    /* L2 标准方法 <ns>.shutdown / <ns>.get_stats（02-l2-service-protocol.md §6.1）：
-     * 先尝试解析 JSON-RPC 请求，命中标准方法则按 JSON-RPC 2.0 响应并返回；
-     * 其余（Prometheus 抓取等原始请求）保持原有逻辑，向后兼容。 */
+    /* L2 standard methods <ns>.shutdown / <ns>.get_stats
+     * (02-l2-service-protocol.md §6.1): first try to parse the JSON-RPC
+     * request; on a standard-method hit, respond per JSON-RPC 2.0 and return;
+     * all other requests (raw requests such as Prometheus scraping) keep the
+     * original logic, backward compatible. */
     cJSON *req = cJSON_Parse(buffer);
     if (req) {
         cJSON *m = cJSON_GetObjectItem(req, "method");
@@ -592,8 +596,9 @@ static void observe_d_handle_request(observe_d_service_t *svc, airy_sock_t clien
                 return;
             } else if (strcmp(m->valuestring, "query_metrics") == 0 ||
                        strcmp(m->valuestring, "get_metrics") == 0) {
-                /* L2 命名空间方法 query_metrics/get_metrics（别名）：
-                 * params.name 可选，作为过滤条件；返回名称、值、类型、单位。 */
+                /* L2 namespace methods query_metrics/get_metrics (aliases):
+                 * params.name is optional and acts as a filter; returns name,
+                 * value, type and unit. */
                 cJSON *params = cJSON_GetObjectItem(req, "params");
                 const char *filter = NULL;
                 if (cJSON_IsObject(params)) {

@@ -33,6 +33,11 @@ set(MARKET_SERVICE_SOURCES
     src/installer.c
     src/publisher.c
     src/market_service_impl.c
+    src/market_service_registry.c  # 市场服务-注册域
+    src/market_service_search.c    # 市场服务-搜索域
+    src/market_service_install.c   # 市场服务-安装/卸载域
+    src/market_service_listing.c   # 市场服务-已安装列表/更新域
+    src/market_service_config.c    # 市场服务-配置/同步域
     src/market_svc_adapter.c
     src/agent_registry_core.c
 )

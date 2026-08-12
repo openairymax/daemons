@@ -69,7 +69,7 @@ static void cleanup_test_dir(void)
 }
 
 /* ========================================================================
- * 测试组1: 服务生命周期
+ * Test group 1: service lifecycle
  * ======================================================================== */
 
 static void test_lifecycle_create_destroy(void **state)
@@ -123,7 +123,7 @@ static void test_lifecycle_double_start(void **state)
 }
 
 /* ========================================================================
- * 测试组2: 健康检查
+ * Test group 2: health check
  * ======================================================================== */
 
 static void test_health_check(void **state)
@@ -140,7 +140,7 @@ static void test_health_check(void **state)
 }
 
 /* ========================================================================
- * 测试组3: 通道打开/关闭/列表
+ * Test group 3: channel open/close/list
  * ======================================================================== */
 
 static void test_channel_open_close_socket(void **state)
@@ -369,7 +369,7 @@ static void test_latency_stress(void **state)
 }
 
 /* ========================================================================
- * 测试组5: 回调机制
+ * Test group 5: callback mechanism
  * ======================================================================== */
 
 static int g_callback_invoked = 0;
@@ -480,7 +480,7 @@ static void test_error_max_channels(void **state)
 }
 
 /* ========================================================================
- * 主入口
+ * Main entry
  * ======================================================================== */
 
 int main(void)

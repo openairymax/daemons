@@ -43,8 +43,8 @@ static char *safe_strdup(const char *src)
 }
 
 /**
- * @brief 释放Agent信息
- * @param agent Agent指针
+ * @brief Free agent info
+ * @param agent Agent pointer
  */
 static void free_agent_info(agent_info_t *agent)
 {
@@ -62,9 +62,9 @@ static void free_agent_info(agent_info_t *agent)
 }
 
 /**
- * @brief 复制Agent信息
- * @param src 源Agent信息
- * @return 复制后的Agent信息，失败返回NULL
+ * @brief Copy agent info
+ * @param src Source agent info
+ * @return Copy of the agent info, NULL on failure
  */
 static agent_info_t *clone_agent_info(const agent_info_t *src)
 {
@@ -105,10 +105,10 @@ static agent_info_t *clone_agent_info(const agent_info_t *src)
 }
 
 /**
- * @brief 创建轮询调度策略
- * @param config 配置信息
- * @param data 输出参数，返回策略数据
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Create the round-robin scheduling strategy
+ * @param config Config info
+ * @param data Output param, returns the strategy data
+ * @return 0 on success, non-zero error code
  */
 static int round_robin_create(const sched_config_t *config, void **data)
 {
@@ -145,9 +145,9 @@ static int round_robin_create(const sched_config_t *config, void **data)
 }
 
 /**
- * @brief 销毁轮询调度策略
- * @param data 策略数据
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Destroy the round-robin scheduling strategy
+ * @param data Strategy data
+ * @return 0 on success, non-zero error code
  */
 static int round_robin_destroy(void *data)
 {
@@ -171,10 +171,10 @@ static int round_robin_destroy(void *data)
 }
 
 /**
- * @brief 注册 Agent
- * @param data 策略数据
- * @param agent_info Agent 信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Register an agent
+ * @param data Strategy data
+ * @param agent_info Agent info
+ * @return 0 on success, non-zero error code
  */
 static int round_robin_register_agent(void *data, const agent_info_t *agent_info)
 {
@@ -224,10 +224,10 @@ static int round_robin_register_agent(void *data, const agent_info_t *agent_info
 }
 
 /**
- * @brief 注销 Agent
- * @param data 策略数据
+ * @brief Unregister an agent
+ * @param data Strategy data
  * @param agent_id Agent ID
- * @return 0 表示成功，非 0 表示错误码
+ * @return 0 on success, non-zero error code
  */
 static int round_robin_unregister_agent(void *data, const char *agent_id)
 {
@@ -260,10 +260,10 @@ static int round_robin_unregister_agent(void *data, const char *agent_id)
 }
 
 /**
- * @brief 更新 Agent 状态
- * @param data 策略数据
- * @param agent_info Agent 信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Update agent status
+ * @param data Strategy data
+ * @param agent_info Agent info
+ * @return 0 on success, non-zero error code
  */
 static int round_robin_update_agent_status(void *data, const agent_info_t *agent_info)
 {
@@ -271,11 +271,11 @@ static int round_robin_update_agent_status(void *data, const agent_info_t *agent
 }
 
 /**
- * @brief 执行轮询调度
- * @param data 策略数据
- * @param task_info 任务信息
- * @param result 输出参数，返回调度结果
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Run round-robin scheduling
+ * @param data Strategy data
+ * @param task_info Task info
+ * @param result Output param, returns the scheduling result
+ * @return 0 on success, non-zero error code
  */
 static int round_robin_schedule(void *data, const task_info_t *task_info, sched_result_t **result)
 {
@@ -331,8 +331,8 @@ static int round_robin_schedule(void *data, const task_info_t *task_info, sched_
 }
 
 /**
- * @brief 获取轮询调度策略名称
- * @return 策略名称
+ * @brief Get the round-robin scheduling strategy name
+ * @return Strategy name
  */
 static const char *round_robin_get_name(void)
 {
@@ -340,9 +340,9 @@ static const char *round_robin_get_name(void)
 }
 
 /**
- * @brief 获取可用 Agent 数量
- * @param data 策略数据
- * @return 可用 Agent 数量
+ * @brief Get the number of available agents
+ * @param data Strategy data
+ * @return Number of available agents
  */
 static size_t round_robin_get_available_agent_count(void *data)
 {
@@ -363,9 +363,9 @@ static size_t round_robin_get_available_agent_count(void *data)
 }
 
 /**
- * @brief 获取总 Agent 数量
- * @param data 策略数据
- * @return 总 Agent 数量
+ * @brief Get the total number of agents
+ * @param data Strategy data
+ * @return Total number of agents
  */
 static size_t round_robin_get_total_agent_count(void *data)
 {
@@ -378,7 +378,7 @@ static size_t round_robin_get_total_agent_count(void *data)
 }
 
 /**
- * @brief 轮询调度策略接口
+ * @brief Round-robin scheduling strategy interface
  */
 static const strategy_interface_t round_robin_strategy = {
     .create = round_robin_create,
@@ -392,8 +392,8 @@ static const strategy_interface_t round_robin_strategy = {
     .get_total_agent_count = round_robin_get_total_agent_count};
 
 /**
- * @brief 获取轮询调度策略接口
- * @return 轮询调度策略接口
+ * @brief Get the round-robin scheduling strategy interface
+ * @return Round-robin scheduling strategy interface
  */
 const strategy_interface_t *get_round_robin_strategy(void)
 {
