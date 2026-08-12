@@ -3,10 +3,10 @@
 
 /**
  * @file svc_cache.h
- * @brief 缓存服务兼容层
+ * @brief Cache-service compatibility layer.
  *
- * 本文件是 agentrt/commons/utils/cache 的兼容层，提供向后兼容的 API。
- * 新代码应直接使用 #include <cache_common.h>
+ * Compat layer for agentrt/commons/utils/cache providing backward
+ * compatible APIs. New code should use #include <cache_common.h>.
  *
  * @see agentrt/commons/utils/cache/include/cache_common.h
  */
@@ -24,15 +24,13 @@ extern "C" {
 #endif
 
 
-/**
- * @brief 兼容旧缓存类型名
- * @deprecated 请使用 cache_t
+/** @brief Backward-compatible cache type name.
+ * @deprecated use cache_t
  */
 typedef cache_t svc_cache_t;
 
-/**
- * @brief 兼容旧缓存配置结构
- * @deprecated 请使用 cache_config_t
+/** @brief Backward-compatible cache config struct.
+ * @deprecated use cache_config_t
  */
 typedef struct {
     size_t capacity;
@@ -41,11 +39,10 @@ typedef struct {
 } svc_cache_config_t;
 
 
-/**
- * @brief 创建缓存（兼容层）
- * @param manager 缓存配置
- * @return 缓存指针，失败返回 NULL
- * @deprecated 请使用 cache_create()
+/** @brief Create a cache (compat layer).
+ * @param manager Cache config
+ * @return Cache pointer, NULL on failure
+ * @deprecated use cache_create()
  */
 static inline svc_cache_t *svc_cache_create(const svc_cache_config_t *manager)
 {
@@ -61,37 +58,34 @@ static inline svc_cache_t *svc_cache_create(const svc_cache_config_t *manager)
     return cache_create(&config);
 }
 
-/**
- * @brief 销毁缓存（兼容层）
- * @param cache 缓存指针
- * @deprecated 请使用 cache_destroy()
+/** @brief Destroy a cache (compat layer).
+ * @param cache Cache pointer
+ * @deprecated use cache_destroy()
  */
 static inline void svc_cache_destroy(svc_cache_t *cache)
 {
     cache_destroy(cache);
 }
 
-/**
- * @brief 获取缓存项（兼容层）
- * @param cache 缓存指针
- * @param key 缓存键
- * @param out_value 输出值
- * @return 1 表示命中，0 表示未命中，负数表示错误
- * @deprecated 请使用 cache_get()
+/** @brief Get a cache item (compat layer).
+ * @param cache Cache pointer
+ * @param key Cache key
+ * @param out_value Output value
+ * @return 1 hit, 0 miss, negative on error
+ * @deprecated use cache_get()
  */
 static inline int svc_cache_get(svc_cache_t *cache, const char *key, void **out_value)
 {
     return cache_get(cache, key, out_value);
 }
 
-/**
- * @brief 放入缓存项（兼容层）
- * @param cache 缓存指针
- * @param key 缓存键
- * @param value 缓存值
- * @param value_size 值大小（兼容层忽略此参数，使用指针存储）
- * @return 0 表示成功，非 0 表示错误
- * @deprecated 请使用 cache_put()
+/** @brief Put a cache item (compat layer).
+ * @param cache Cache pointer
+ * @param key Cache key
+ * @param value Cache value
+ * @param value_size Value size (ignored here; values stored as pointers)
+ * @return 0 on success, non-zero on error
+ * @deprecated use cache_put()
  */
 static inline int svc_cache_put(svc_cache_t *cache, const char *key, const void *value,
                                 size_t value_size __attribute__((unused)))
@@ -100,32 +94,29 @@ static inline int svc_cache_put(svc_cache_t *cache, const char *key, const void 
     return 0;
 }
 
-/**
- * @brief 清除所有缓存项（兼容层）
- * @param cache 缓存指针
- * @deprecated 请使用 cache_clear()
+/** @brief Clear all cache items (compat layer).
+ * @param cache Cache pointer
+ * @deprecated use cache_clear()
  */
 static inline void svc_cache_clear(svc_cache_t *cache)
 {
     cache_clear(cache);
 }
 
-/**
- * @brief 获取缓存项数量（兼容层）
- * @param cache 缓存指针
- * @return 缓存项数量
- * @deprecated 请使用 cache_get_size()
+/** @brief Get the number of cache items (compat layer).
+ * @param cache Cache pointer
+ * @return Item count
+ * @deprecated use cache_get_size()
  */
 static inline size_t svc_cache_size(svc_cache_t *cache)
 {
     return cache_get_size(cache);
 }
 
-/**
- * @brief 检查缓存是否为空（兼容层）
- * @param cache 缓存指针
- * @return true 表示为空
- * @deprecated 请使用 cache_get_size() == 0
+/** @brief Check whether the cache is empty (compat layer).
+ * @param cache Cache pointer
+ * @return true if empty
+ * @deprecated use cache_get_size() == 0
  */
 static inline bool svc_cache_is_empty(svc_cache_t *cache)
 {
@@ -133,11 +124,10 @@ static inline bool svc_cache_is_empty(svc_cache_t *cache)
 }
 
 
-/**
- * @brief 检查缓存是否存在键
- * @param cache 缓存指针
- * @param key 缓存键
- * @return true 表示存在
+/** @brief Check whether the cache contains a key.
+ * @param cache Cache pointer
+ * @param key Cache key
+ * @return true if present
  */
 static inline bool svc_cache_contains(svc_cache_t *cache, const char *key)
 {
@@ -151,40 +141,36 @@ static inline bool svc_cache_contains(svc_cache_t *cache, const char *key)
     return false;
 }
 
-/**
- * @brief 获取缓存容量
- * @param cache 缓存指针
- * @return 缓存容量
+/** @brief Get the cache capacity.
+ * @param cache Cache pointer
+ * @return Cache capacity
  */
 static inline size_t svc_cache_capacity(svc_cache_t *cache)
 {
     return cache_get_capacity(cache);
 }
 
-/**
- * @brief 设置缓存容量
- * @param cache 缓存指针
- * @param capacity 新容量
+/** @brief Set the cache capacity.
+ * @param cache Cache pointer
+ * @param capacity New capacity
  */
 static inline void svc_cache_set_capacity(svc_cache_t *cache, size_t capacity)
 {
     cache_set_capacity(cache, capacity);
 }
 
-/**
- * @brief 获取缓存 TTL
- * @param cache 缓存指针
- * @return TTL 秒数
+/** @brief Get the cache TTL.
+ * @param cache Cache pointer
+ * @return TTL in seconds
  */
 static inline int svc_cache_get_ttl(svc_cache_t *cache)
 {
     return cache_get_ttl(cache);
 }
 
-/**
- * @brief 设置缓存 TTL
- * @param cache 缓存指针
- * @param ttl_sec TTL 秒数
+/** @brief Set the cache TTL.
+ * @param cache Cache pointer
+ * @param ttl_sec TTL in seconds
  */
 static inline void svc_cache_set_ttl(svc_cache_t *cache, int ttl_sec)
 {

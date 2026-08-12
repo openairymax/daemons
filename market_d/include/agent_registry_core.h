@@ -3,7 +3,7 @@
 
 /**
  * @file agent_registry_core.h
- * @brief Agent注册表核心功能接口
+ * @brief Core agent-registry functionality interface.
  */
 
 #ifndef AIRY_RT_AGENT_REGISTRY_CORE_H
@@ -61,22 +61,24 @@ int agent_registry_core_add(agent_registry_t *registry, const agent_entry_t *reg
 int agent_registry_core_remove(agent_registry_t *registry, const char *agent_id);
 
 /**
- * @brief 按 agent_id 查询并拷贝条目到调用方缓冲区。
- * @param registry 注册表句柄。
- * @param agent_id 目标 agent ID。
- * @param out 调用方提供的缓冲区，命中时填充条目快照（浅拷贝）。
- * @return 0 成功；AIRY_ERR_INVALID_PARAM 参数非法；AIRY_ERR_NOT_FOUND 未命中。
- * @note 数据在锁内拷贝完成后解锁，避免调用方无锁访问内部 entries[]。
+ * @brief Look up an entry by agent_id and copy it into the caller's buffer.
+ * @param registry Registry handle.
+ * @param agent_id Target agent ID.
+ * @param out Caller-provided buffer; filled with an entry snapshot (shallow copy) on hit.
+ * @return 0 on success; AIRY_ERR_INVALID_PARAM bad args; AIRY_ERR_NOT_FOUND no hit.
+ * @note Data is copied under the lock and the lock released afterwards, so the
+ *       caller never touches internal entries[] unlocked.
  */
 int agent_registry_core_get(agent_registry_t *registry, const char *agent_id, agent_entry_t *out);
 
 /**
- * @brief 列出全部条目并拷贝到调用方缓冲区。
- * @param registry 注册表句柄。
- * @param out_entries 调用方提供的数组缓冲区（按值拷贝，非指针）。
- * @param max_entries 缓冲区最大容量。
- * @return 实际拷贝的条目数。
- * @note 拷贝在锁内完成，调用方解锁后访问的是独立快照。
+ * @brief List all entries and copy them into the caller's buffer.
+ * @param registry Registry handle.
+ * @param out_entries Caller-provided array buffer (copied by value, not pointers).
+ * @param max_entries Buffer capacity.
+ * @return Number of entries actually copied.
+ * @note Copying happens under the lock; after unlocking, the caller accesses
+ *       an independent snapshot.
  */
 size_t agent_registry_core_list(agent_registry_t *registry, agent_entry_t *out_entries,
                                 size_t max_entries);
@@ -86,38 +88,43 @@ int agent_registry_core_add_version(agent_registry_t *registry, const char *agen
                                     const agent_version_t *version);
 
 /**
- * @brief 查询指定 agent 的最新版本号并拷贝到调用方缓冲区。
- * @param registry 注册表句柄。
- * @param agent_id 目标 agent ID。
- * @param out 调用方提供的字符串缓冲区。
- * @param out_size 缓冲区字节数（含结尾 '\0'）。
- * @return 0 成功；AIRY_ERR_INVALID_PARAM 参数非法；AIRY_ERR_NOT_FOUND 未命中。
- * @note 字符串拷贝在锁内完成，避免返回内部指针后无锁访问。
+ * @brief Query the latest version of the given agent and copy it into the
+ *        caller's buffer.
+ * @param registry Registry handle.
+ * @param agent_id Target agent ID.
+ * @param out Caller-provided string buffer.
+ * @param out_size Buffer size in bytes (including trailing '\0').
+ * @return 0 on success; AIRY_ERR_INVALID_PARAM bad args; AIRY_ERR_NOT_FOUND no hit.
+ * @note The string is copied under the lock, avoiding unlocked access to an
+ *       internal pointer.
  */
 int agent_registry_core_get_latest_version(agent_registry_t *registry, const char *agent_id,
                                            char *out, size_t out_size);
 
 /**
- * @brief 按 tag 检索并拷贝匹配条目到调用方缓冲区。
- * @param registry 注册表句柄。
- * @param tag 目标标签。
- * @param out_entries 调用方提供的数组缓冲区（按值拷贝，非指针）。
- * @param max_entries 缓冲区最大容量。
- * @return 实际拷贝的匹配条目数。
- * @note 拷贝在锁内完成，调用方解锁后访问的是独立快照。
+ * @brief Search by tag and copy matching entries into the caller's buffer.
+ * @param registry Registry handle.
+ * @param tag Target tag.
+ * @param out_entries Caller-provided array buffer (copied by value, not pointers).
+ * @param max_entries Buffer capacity.
+ * @return Number of matching entries actually copied.
+ * @note Copying happens under the lock; after unlocking, the caller accesses
+ *       an independent snapshot.
  */
 size_t agent_registry_core_search_by_tag(agent_registry_t *registry, const char *tag,
                                          agent_entry_t *out_entries, size_t max_entries);
 
 /**
- * @brief 按关键词模糊检索并拷贝匹配条目到调用方缓冲区。
- * @param registry 注册表句柄。
- * @param query 查询关键词（匹配 id/name/description 子串）。
- * @param out_entries 调用方提供的数组缓冲区（按值拷贝，非指针）。
- * @param max_entries 缓冲区最大容量。
- * @return 实际拷贝的匹配条目数。
- * @note P1-15 修复：拷贝在锁内完成，调用方解锁后访问的是独立快照，
- *       不再返回指向内部 entries[] 的指针，消除数据竞争。
+ * @brief Fuzzy search by keyword and copy matching entries into the caller's
+ *        buffer.
+ * @param registry Registry handle.
+ * @param query Query keyword (matches id/name/description substrings).
+ * @param out_entries Caller-provided array buffer (copied by value, not pointers).
+ * @param max_entries Buffer capacity.
+ * @return Number of matching entries actually copied.
+ * @note P1-15 fix: copying happens under the lock; after unlocking, the
+ *       caller accesses an independent snapshot, no longer returning pointers
+ *       into the internal entries[], eliminating the data race.
  */
 size_t agent_registry_core_search(agent_registry_t *registry, const char *query,
                                   agent_entry_t *out_entries, size_t max_entries);

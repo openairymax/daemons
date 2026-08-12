@@ -3,8 +3,9 @@
 
 /**
  * @file service_invoke.c
- * @brief Agent 服务调用域：agent 终止/调用（子进程 stdin/stdout 管道
- *        协议）与 invoke 会话注册/注销/取消管理
+ * @brief Agent service invocation domain: agent terminate/invoke (child
+ *        stdin/stdout pipe protocol) and invoke-session
+ *        register/unregister/cancel management.
  */
 
 #include "airy_memory.h"

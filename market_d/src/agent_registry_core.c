@@ -5,7 +5,7 @@
 #include "error.h"
 /**
  * @file agent_registry_core.c
- * @brief Agent注册表核心功能实现
+ * @brief Core agent-registry functionality implementation.
  */
 
 #include "agent_registry_core.h"

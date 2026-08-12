@@ -3,12 +3,14 @@
 
 /**
  * @file tool_interactive_approval.h
- * @brief P0：工具级交互式权限审批（Claude Code 风格 permission prompt）
+ * @brief P0: tool-level interactive permission approval (Claude Code-style
+ *        permission prompt).
  *
- * 当 AIRY_TOOL_APPROVAL_MODE=interactive 时，被静态审批拒绝的工具执行不再
- * fail-closed 直接返回 EPERM，而是入队一个 pending 审批请求并阻塞等待外部
- * tool.approve 决议（allow/always/deny），超时默认 AIRY_TOOL_APPROVAL_TIMEOUT_MS
- * (120000ms)。
+ * When AIRY_TOOL_APPROVAL_MODE=interactive, tool executions rejected by
+ * static approval no longer fail closed with EPERM directly; instead they
+ * enqueue a pending approval request and block waiting for an external
+ * tool.approve decision (allow/always/deny), with a default timeout of
+ * AIRY_TOOL_APPROVAL_TIMEOUT_MS (120000ms).
  */
 
 #ifndef AIRY_RT_TOOL_INTERACTIVE_APPROVAL_H
@@ -22,9 +24,7 @@
 extern "C" {
 #endif
 
-/**
- * @brief 交互审批决议结果
- */
+/** @brief Interactive-approval decision result. */
 typedef enum {
     AIRY_APPROVAL_DENIED = 0,
     AIRY_APPROVAL_ALLOWED,
@@ -35,46 +35,50 @@ typedef enum {
 typedef struct interactive_approval interactive_approval_t;
 
 /**
- * @brief 创建交互审批管理器（读取环境变量决定是否启用）
- * @return 管理器句柄，失败返回 NULL
+ * @brief Create the interactive-approval manager (reads env vars to decide
+ *        whether to enable).
+ * @return Manager handle, NULL on failure
  *
- * 环境变量：
- * - AIRY_TOOL_APPROVAL_MODE：为 "interactive" 时启用交互审批（默认 static）
- * - AIRY_TOOL_APPROVAL_TIMEOUT_MS：阻塞等待超时（默认 120000ms）
+ * Environment variables:
+ * - AIRY_TOOL_APPROVAL_MODE: enables interactive approval when "interactive"
+ *   (default static)
+ * - AIRY_TOOL_APPROVAL_TIMEOUT_MS: blocking-wait timeout (default 120000ms)
  *
  * @ownership return: OWNER
  */
 interactive_approval_t *interactive_approval_create(void);
 
 /**
- * @brief 销毁交互审批管理器
- * @param mgr 管理器
+ * @brief Destroy the interactive-approval manager.
+ * @param mgr Manager
  *
  * @ownership mgr: TRANSFER
  */
 void interactive_approval_destroy(interactive_approval_t *mgr);
 
 /**
- * @brief 交互审批是否启用（AIRY_TOOL_APPROVAL_MODE=interactive）
- * @param mgr 管理器
- * @return true 启用，false 未启用
+ * @brief Whether interactive approval is enabled (AIRY_TOOL_APPROVAL_MODE=interactive).
+ * @param mgr Manager
+ * @return true enabled, false disabled
  *
  * @ownership mgr: BORROW
  */
 bool interactive_approval_is_enabled(const interactive_approval_t *mgr);
 
 /**
- * @brief 入队 pending 审批请求并阻塞等待外部决议
+ * @brief Enqueue a pending approval request and block for the external
+ *        decision.
  *
- * 调用线程阻塞直到 tool.approve 决议或超时。超时按 AIRY_TOOL_APPROVAL_TIMEOUT_MS
- * 计算，超时决议为 AIRY_APPROVAL_DENIED。
+ * The calling thread blocks until tool.approve decides or times out. The
+ * timeout follows AIRY_TOOL_APPROVAL_TIMEOUT_MS; on timeout the decision
+ * is AIRY_APPROVAL_DENIED.
  *
- * @param mgr 管理器
- * @param tool 工具名称
- * @param agent_id 调用者 Agent ID
- * @param params_json 工具参数 JSON（副本保存）
- * @param out_outcome 输出决议结果（allow/always/deny/超时）
- * @return 请求 ID 字符串（AIRY_MALLOC，调用者 AIRY_FREE），失败返回 NULL
+ * @param mgr Manager
+ * @param tool Tool name
+ * @param agent_id Caller Agent ID
+ * @param params_json Tool-parameter JSON (copied)
+ * @param out_outcome Output decision result (allow/always/deny/timeout)
+ * @return Request-ID string (AIRY_MALLOC, caller AIRY_FREEs), NULL on failure
  *
  * @ownership params_json: BORROW; return: OWNER
  */
@@ -83,11 +87,11 @@ char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
                                  airy_approval_outcome_t *out_outcome);
 
 /**
- * @brief 按 request_id 决议一个 pending 请求
- * @param mgr 管理器
- * @param request_id 请求 ID
- * @param decision 决议："allow" / "always" / "deny"
- * @return 0 成功；未找到请求 AIRY_ERR_NOT_FOUND；参数非法 AIRY_ERR_INVALID_PARAM
+ * @brief Resolve a pending request by request_id.
+ * @param mgr Manager
+ * @param request_id Request ID
+ * @param decision Decision: "allow" / "always" / "deny"
+ * @return 0 on success; AIRY_ERR_NOT_FOUND request not found; AIRY_ERR_INVALID_PARAM bad args
  *
  * @ownership mgr: BORROW
  */
@@ -95,11 +99,11 @@ int interactive_approval_resolve(interactive_approval_t *mgr, const char *reques
                                  const char *decision);
 
 /**
- * @brief 列出所有 pending 审批请求（JSON 数组字符串）
- * @param mgr 管理器
- * @return JSON 数组字符串（AIRY_MALLOC，调用者 AIRY_FREE），失败返回 NULL
+ * @brief List all pending approval requests (JSON array string).
+ * @param mgr Manager
+ * @return JSON array string (AIRY_MALLOC, caller AIRY_FREEs), NULL on failure
  *
- * 每个元素: {request_id, tool, agent_id, params, created_at}
+ * Each element: {request_id, tool, agent_id, params, created_at}
  *
  * @ownership return: OWNER
  */

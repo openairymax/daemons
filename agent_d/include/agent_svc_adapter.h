@@ -3,9 +3,9 @@
 
 /**
  * @file agent_svc_adapter.h
- * @brief Agent 服务适配器头文件
+ * @brief Agent service-adapter header.
  *
- * 将 agent_service_t 适配到统一 AgentRT 服务管理框架（airy_svc_t）。
+ * Adapts agent_service_t to the unified AgentRT service framework (airy_svc_t).
  *
  */
 

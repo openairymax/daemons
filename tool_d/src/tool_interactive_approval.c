@@ -3,7 +3,7 @@
 
 /**
  * @file tool_interactive_approval.c
- * @brief P0：工具级交互式权限审批实现
+ * @brief P0: tool-level interactive permission-approval implementation.
  */
 
 #include "airy_memory.h"
@@ -101,8 +101,9 @@ void interactive_approval_destroy(interactive_approval_t *mgr)
     if (!mgr)
         return;
 
-    /* 唤醒仍在阻塞等待的线程，避免销毁时挂起。
-     * 被唤醒的 wait 线程会因 req 未 resolved 而按超时（DENIED）处理。 */
+    /* Wake up threads still blocked waiting, to avoid hanging on destroy.
+     * Woken wait threads see the req as unresolved and handle it as a
+     * timeout (DENIED). */
     sync_condition_broadcast_ex(mgr->cond);
 
     sync_mutex_lock_ex(mgr->lock, NULL);

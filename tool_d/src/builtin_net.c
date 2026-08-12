@@ -3,7 +3,8 @@
 
 /**
  * @file builtin_net.c
- * @brief 内置工具网络域：web_fetch 网页抓取与 web_search 网页搜索工具实现
+ * @brief Built-in tool network domain: web_fetch page fetch and web_search
+ *        web-search tool implementations.
  */
 
 #include "airy_memory.h"

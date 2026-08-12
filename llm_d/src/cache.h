@@ -3,7 +3,7 @@
 
 /**
  * @file cache.h
- * @brief LRU 缓存接口
+ * @brief LRU cache interface.
  */
 
 #ifndef AIRY_RT_LLM_CACHE_H

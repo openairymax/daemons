@@ -3,9 +3,9 @@
 
 /**
  * @file ipc_backpressure.c
- * @brief IPC Bus 背压控制实现 — 三级策略
+ * @brief IPC Bus backpressure-control implementation - three-tier strategy.
  *
- * P1.24: 三级背压策略防止 IPC Bus 过载。
+ * P1.24: three-tier backpressure strategy preventing IPC Bus overload.
  */
 
 #include "ipc_backpressure.h"

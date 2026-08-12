@@ -3,7 +3,7 @@
 
 /**
  * @file svc_config.h
- * @brief 配置服务兼容层
+ * @brief Config-service compatibility layer.
  */
 
 #ifndef SVC_CONFIG_H

@@ -3,8 +3,8 @@
 
 /**
  * @file scheduler_service.h
- * @brief 调度服务接口定义
- * @details 负责任务调度，选择最合适的 Agent
+ * @brief Scheduler service interface definitions.
+ * @details Responsible for task scheduling and selecting the most suitable agent.
  */
 
 #ifndef AIRY_RT_SCHEDULER_SERVICE_H
@@ -14,9 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/**
- * @brief 调度策略类型
- */
+/** @brief Scheduling-strategy type. */
 typedef enum {
     SCHED_STRATEGY_ROUND_ROBIN,
     SCHED_STRATEGY_WEIGHTED,
@@ -25,9 +23,7 @@ typedef enum {
     SCHED_STRATEGY_COUNT
 } sched_strategy_t;
 
-/**
- * @brief 任务优先级
- */
+/** @brief Task priority. */
 typedef enum {
     TASK_PRIORITY_LOW,
     TASK_PRIORITY_NORMAL,
@@ -36,9 +32,7 @@ typedef enum {
     TASK_PRIORITY_COUNT
 } task_priority_t;
 
-/**
- * @brief 任务信息
- */
+/** @brief Task info. */
 typedef struct {
     char *task_id;
     char *task_description;
@@ -49,8 +43,10 @@ typedef struct {
 } task_info_t;
 
 /**
- * @brief 任务生命周期状态（异步队列：入队→选中→执行→完成/失败）
- * @note 命名用 SCHED_ 前缀：types.h 已占用 TASK_STATUS_* 宏，避免枚举名展开冲突
+ * @brief Task lifecycle status (async queue: enqueue -> selected -> execute
+ *        -> done/failed).
+ * @note Named with the SCHED_ prefix: types.h already occupies the
+ *       TASK_STATUS_* macros, avoiding enum-name expansion conflicts.
  */
 typedef enum {
     SCHED_TASK_STATUS_PENDING,
@@ -61,9 +57,7 @@ typedef enum {
     SCHED_TASK_STATUS_COUNT
 } task_status_t;
 
-/**
- * @brief 任务记录（队列条目，get_task 查询依据）
- */
+/** @brief Task record (queue entry; basis for get_task queries). */
 typedef struct {
     char *task_id;
     char *task_description;
@@ -78,11 +72,12 @@ typedef struct {
 } task_record_t;
 
 /**
- * @brief 任务执行回调（由 daemon 注入：选 agent + spawn + invoke）
- * @param agent_id 选中的 agent（role）
- * @param task_description 任务描述（作为 invoke 的 input）
- * @param out_output 执行输出（AIRY_MALLOC，调用方释放）
- * @return 0 成功，非 0 失败
+ * @brief Task-execution callback (injected by the daemon: select agent +
+ *        spawn + invoke).
+ * @param agent_id Selected agent (role)
+ * @param task_description Task description (used as invoke's input)
+ * @param out_output Execution output (AIRY_MALLOC, caller frees)
+ * @return 0 on success, non-zero on failure
  */
 typedef int (*sched_task_executor_t)(const char *agent_id, const char *task_description,
                                      char **out_output);
@@ -90,9 +85,7 @@ typedef int (*sched_task_executor_t)(const char *agent_id, const char *task_desc
 
 #define AIRY_CAP_MAX_TASKS 256
 
-/**
- * @brief Agent 信息
- */
+/** @brief Agent info. */
 typedef struct {
     char *agent_id; /**< Agent ID */
     char *agent_name;
@@ -103,18 +96,14 @@ typedef struct {
     float weight;
 } agent_info_t;
 
-/**
- * @brief 调度结果
- */
+/** @brief Scheduling result. */
 typedef struct {
     char *selected_agent_id;
     float confidence;
     uint32_t estimated_time_ms;
 } sched_result_t;
 
-/**
- * @brief 调度服务配置
- */
+/** @brief Scheduler service config. */
 typedef struct {
     sched_strategy_t strategy;
     uint32_t health_check_interval_ms;
@@ -122,154 +111,162 @@ typedef struct {
     bool enable_ml_strategy;
     char *ml_model_path;
     uint32_t max_agents;
-    /* ---- DAG 并行派发（mac_framework 委派模式接线，0 = 保持串行） ----
-     * dag_max_parallel: 单轮同时派发的就绪节点上限（≤ SCHED_DAG_MAX_NODES）。
-     *                    0 = 保持现有单节点串行派发（兼容旧行为）。
-     * dag_batch_size:   每轮就绪节点批大小（≤ dag_max_parallel，0 = 默认取
-     *                    dag_max_parallel）。批量收集后经 mac_framework 委派
-     *                    → 线程池并发执行 → 汇聚回写节点状态。 */
+    /* ---- DAG parallel dispatch (mac_framework delegation wiring;
+     * 0 = keep serial) ----
+     * dag_max_parallel: max ready nodes dispatched at once per round
+     *                   (<= SCHED_DAG_MAX_NODES). 0 = keep the existing
+     *                   single-node serial dispatch (legacy behavior).
+     * dag_batch_size:   ready-node batch size per round (<= dag_max_parallel,
+     *                   0 = default to dag_max_parallel). Batches are
+     *                   delegated via mac_framework -> thread-pool
+     *                   concurrent execution -> results gathered back into
+     *                   node states. */
     uint32_t dag_max_parallel;
     uint32_t dag_batch_size;
-    /* ---- 失败分级语义（改进3：Codex Fatal/普通 三态收敛到 sched 层） ----
-     * dag_fatal_cascade: true（生产默认）→ 仅 FATAL 类失败级联取消整个图
-     * （fail-closed），普通失败仅标记节点 FAILED 并取消依赖它的不可达下游，
-     * 图其余独立分支继续执行；false → 任意节点失败即级联取消整图（旧行为）。 */
+    /* ---- Failure-tier semantics (improvement 3: Codex Fatal/normal
+     * three-state converged at the sched layer) ----
+     * dag_fatal_cascade: true (production default) -> only FATAL-class
+     * failures cascade-cancel the whole graph (fail-closed); ordinary
+     * failures only mark the node FAILED and cancel its now-unreachable
+     * downstream, while other independent branches continue. false -> any
+     * node failure cascades-cancels the whole graph (legacy behavior). */
     bool dag_fatal_cascade;
 } sched_config_t;
 
-/**
- * @brief 调度服务句柄
- */
+/** @brief Scheduler service handle. */
 typedef struct sched_service sched_service_t;
 
 /**
- * @brief 创建调度服务
- * @param manager 配置信息
- * @param service 输出参数，返回创建的服务句柄
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Create a scheduler service.
+ * @param manager Config info
+ * @param service Output parameter, returns the created service handle
+ * @return 0 on success, non-zero error code
  */
 int sched_service_create(const sched_config_t *manager, sched_service_t **service);
 
 /**
- * @brief 销毁调度服务
- * @param service 服务句柄
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Destroy a scheduler service.
+ * @param service Service handle
+ * @return 0 on success, non-zero error code
  */
 int sched_service_destroy(sched_service_t *service);
 
 /**
- * @brief 注册 Agent
- * @param service 服务句柄
- * @param agent_info Agent 信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Register an agent.
+ * @param service Service handle
+ * @param agent_info Agent info
+ * @return 0 on success, non-zero error code
  */
 int sched_service_register_agent(sched_service_t *service, const agent_info_t *agent_info);
 
 /**
- * @brief 注销 Agent
- * @param service 服务句柄
+ * @brief Unregister an agent.
+ * @param service Service handle
  * @param agent_id Agent ID
- * @return 0 表示成功，非 0 表示错误码
+ * @return 0 on success, non-zero error code
  */
 int sched_service_unregister_agent(sched_service_t *service, const char *agent_id);
 
 /**
- * @brief 更新 Agent 状态
- * @param service 服务句柄
- * @param agent_info Agent 信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Update an agent's status.
+ * @param service Service handle
+ * @param agent_info Agent info
+ * @return 0 on success, non-zero error code
  */
 int sched_service_update_agent_status(sched_service_t *service, const agent_info_t *agent_info);
 
 /**
- * @brief 调度任务
- * @param service 服务句柄
- * @param task_info 任务信息
- * @param result 输出参数，返回调度结果
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Schedule a task.
+ * @param service Service handle
+ * @param task_info Task info
+ * @param result Output parameter, returns the scheduling result
+ * @return 0 on success, non-zero error code
  */
 int sched_service_schedule_task(sched_service_t *service, const task_info_t *task_info,
                                 sched_result_t **result);
 
 /**
- * @brief 获取调度统计信息
- * @param service 服务句柄
- * @param stats 输出参数，返回统计信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Get scheduler statistics.
+ * @param service Service handle
+ * @param stats Output parameter, returns statistics
+ * @return 0 on success, non-zero error code
  */
 int sched_service_get_stats(sched_service_t *service, void **stats);
 
 /**
- * @brief 健康检查
- * @param service 服务句柄
- * @param health_status 输出参数，返回健康状态
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Health check.
+ * @param service Service handle
+ * @param health_status Output parameter, returns health status
+ * @return 0 on success, non-zero error code
  */
 int sched_service_health_check(sched_service_t *service, bool *health_status);
 
 /**
- * @brief 重载配置
- * @param service 服务句柄
- * @param manager 新的配置信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Reload the config.
+ * @param service Service handle
+ * @param manager New config info
+ * @return 0 on success, non-zero error code
  */
 int sched_service_reload_config(sched_service_t *service, const sched_config_t *manager);
 
 /**
- * @brief 提交任务（异步队列）：入队后立即返回，工作线程随后执行
- * @param service 服务句柄
- * @param task_info 任务信息（task_id 为 NULL 时由服务端生成）
- * @param out_task_id 输出参数，返回实际生效的任务 ID（AIRY_MALLOC，调用方 AIRY_FREE）
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Submit a task (async queue): returns immediately after enqueue;
+ *        the worker thread executes it later.
+ * @param service Service handle
+ * @param task_info Task info (NULL task_id is generated server-side)
+ * @param out_task_id Output parameter, returns the effective task ID (AIRY_MALLOC, caller AIRY_FREEs)
+ * @return 0 on success, non-zero error code
  */
 int sched_service_submit_task(sched_service_t *service, const task_info_t *task_info,
                               char **out_task_id);
 
 /**
- * @brief 查询任务状态
- * @param service 服务句柄
- * @param task_id 任务 ID
- * @param out_json 输出参数，返回任务状态 JSON（AIRY_MALLOC，调用方 AIRY_FREE）
- * @return 0 表示成功；AIRY_ERR_NOT_FOUND 表示任务不存在
+ * @brief Query task status.
+ * @param service Service handle
+ * @param task_id Task ID
+ * @param out_json Output parameter, returns task-status JSON (AIRY_MALLOC, caller AIRY_FREEs)
+ * @return 0 on success; AIRY_ERR_NOT_FOUND if the task does not exist
  */
 int sched_service_get_task(sched_service_t *service, const char *task_id, char **out_json);
 
 /**
- * @brief 注入任务执行回调（必须在 start_workers 之前调用）
- * @param service 服务句柄
- * @param executor 执行回调（选中 agent 后由工作线程调用）
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Inject the task-execution callback (must be called before start_workers).
+ * @param service Service handle
+ * @param executor Execution callback (called by a worker thread after selecting an agent)
+ * @return 0 on success, non-zero error code
  */
 int sched_service_set_executor(sched_service_t *service, sched_task_executor_t executor);
 
 /**
- * @brief 启动任务队列工作线程（消费 pending 队列并执行）
- * @param service 服务句柄
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Start the task-queue worker threads (consume the pending queue and execute).
+ * @param service Service handle
+ * @return 0 on success, non-zero error code
  */
 int sched_service_start_workers(sched_service_t *service);
 
 /**
- * @brief 停止任务队列工作线程（destroy 前调用；幂等）
- * @param service 服务句柄
+ * @brief Stop the task-queue worker threads (call before destroy; idempotent).
+ * @param service Service handle
  */
 void sched_service_stop_workers(sched_service_t *service);
 
 /**
- * @brief 取消任务（仅 PENDING 可取消；RUNNING/终态返回 AIRY_ERR_BUSY）
- * @param service 服务句柄
- * @param task_id 任务 ID
- * @return 0 成功；AIRY_ERR_NOT_FOUND 任务不存在；AIRY_ERR_BUSY 不可取消
+ * @brief Cancel a task (only PENDING is cancelable; RUNNING/terminal states return AIRY_ERR_BUSY).
+ * @param service Service handle
+ * @param task_id Task ID
+ * @return 0 on success; AIRY_ERR_NOT_FOUND task missing; AIRY_ERR_BUSY not cancelable
  */
 int sched_service_cancel_task(sched_service_t *service, const char *task_id);
 
 /* ============================================================================
- * DAG 任务图执行引擎（工作大厅机制，见 08-work-hall.md）
+ * DAG task-graph execution engine (work-hall mechanism, see 08-work-hall.md)
  *
- * 提交一个带依赖的任务图：dag 工作线程按拓扑顺序派发就绪节点（依赖全部
- * 完成后），每个节点经注入的 executor（sched_dispatch_executor → agent_d
- * spawn/invoke）真实执行；节点失败即中止该图并取消其余未完成节点。
- * 数据来源：think_d 的 GCCP+GRAD 计划（nodes: id/goal/depends[role]）。
+ * Submit a task graph with dependencies: the dag worker thread dispatches
+ * ready nodes (all deps completed) in topological order; each node really
+ * executes via the injected executor (sched_dispatch_executor -> agent_d
+ * spawn/invoke). A node failure aborts the graph and cancels its remaining
+ * unfinished nodes. Data source: think_d's GCCP+GRAD plan
+ * (nodes: id/goal/depends[role]).
  * ============================================================================ */
 
 
@@ -298,45 +295,50 @@ typedef enum {
 #define SCHED_DAG_MAX_DAGS 32
 
 /**
- * @brief 提交 DAG 任务图（异步：入图后 dag 工作线程按拓扑执行）
- * @param service 服务句柄
- * @param dag_json 图描述 JSON 字符串：
+ * @brief Submit a DAG task graph (async: the dag worker thread executes it
+ *        topologically after insertion).
+ * @param service Service handle
+ * @param dag_json Graph-description JSON string:
  *   {"name":"...","nodes":[{"id":"S_01","goal":"...","role":"coding",
  *    "depends":["S_02",...]}, ...]}
- *   - role 缺省 "coding"；depends 缺省空（入口节点）
- *   - 图必须无环（Kahn 拓扑校验，有环返回 AIRY_ERR_CYCLE_DETECTED）
- * @param out_dag_id 输出参数，返回 dag_id（AIRY_MALLOC，调用方 AIRY_FREE）
- * @return 0 成功；AIRY_ERR_INVALID_PARAM 非法 JSON/空节点/超上限；
- *         AIRY_ERR_CYCLE_DETECTED 存在依赖环
+ *   - role defaults to "coding"; depends defaults to empty (entry node)
+ *   - the graph must be acyclic (Kahn topological check; cycles return AIRY_ERR_CYCLE_DETECTED)
+ * @param out_dag_id Output parameter, returns the dag_id (AIRY_MALLOC, caller AIRY_FREEs)
+ * @return 0 on success; AIRY_ERR_INVALID_PARAM invalid JSON/empty nodes/over caps;
+ *         AIRY_ERR_CYCLE_DETECTED dependency cycle exists
  */
 int sched_service_submit_dag(sched_service_t *service, const char *dag_json, char **out_dag_id);
 
 /**
- * @brief 查询 DAG 状态（看板快照：图状态/节点状态/进度/输出）
- * @param service 服务句柄
+ * @brief Query DAG status (board snapshot: graph status/node status/progress/output).
+ * @param service Service handle
  * @param dag_id DAG ID
- * @param out_json 输出参数，返回 JSON（AIRY_MALLOC，调用方 AIRY_FREE）
- * @return 0 成功；AIRY_ERR_NOT_FOUND 不存在
+ * @param out_json Output parameter, returns JSON (AIRY_MALLOC, caller AIRY_FREEs)
+ * @return 0 on success; AIRY_ERR_NOT_FOUND does not exist
  */
 int sched_service_get_dag(sched_service_t *service, const char *dag_id, char **out_json);
 
 /**
- * @brief 取消 DAG（未完成节点全部置 canceled；RUNNING 节点完成后不再上屏输出）
- * @param service 服务句柄
+ * @brief Cancel a DAG (all unfinished nodes set to canceled; a RUNNING node
+ *        no longer posts output after finishing).
+ * @param service Service handle
  * @param dag_id DAG ID
- * @return 0 成功；AIRY_ERR_NOT_FOUND 不存在
+ * @return 0 on success; AIRY_ERR_NOT_FOUND does not exist
  */
 int sched_service_cancel_dag(sched_service_t *service, const char *dag_id);
 
 /**
- * @brief 保存调度检查点（L2 协议标准方法 sched.checkpoint_save）
- * @param service 服务句柄
- * @param out_json 输出参数，返回当前队列/DAG 状态快照 JSON（AIRY_MALLOC，调用方 AIRY_FREE）：
+ * @brief Save a scheduler checkpoint (L2 protocol standard method
+ *        sched.checkpoint_save).
+ * @param service Service handle
+ * @param out_json Output parameter, returns the current queue/DAG state
+ *        snapshot JSON (AIRY_MALLOC, caller AIRY_FREEs):
  *   {"agent_count":N,"total_tasks":T,"pending":P,"running":R,
  *    "dag_count":D,"active_dags":A,"completed_dags":C,"timestamp_ms":...}
- * @return 0 成功；AIRY_ERR_INVALID_PARAM 参数非法
- * @note 快照为内存视图（不落盘），由上层（如 monit_d / 集群管理器）决定持久化；
- *       供调度状态观测与故障恢复前的状态导出。
+ * @return 0 on success; AIRY_ERR_INVALID_PARAM bad args
+ * @note The snapshot is an in-memory view (not persisted); the upper layer
+ *       (e.g. monit_d / cluster manager) decides persistence; used for
+ *       scheduling-state observation and pre-recovery state export.
  */
 int sched_service_checkpoint_save(sched_service_t *service, char **out_json);
 

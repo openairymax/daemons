@@ -3,9 +3,10 @@
 
 /**
  * @file circuit_breaker.c
- * @brief 熔断器与自愈框架实现
+ * @brief Circuit-breaker and self-healing framework implementation.
  *
- * 实现三态熔断器模式，支持自动故障检测、渐进恢复和故障转移。
+ * Implements the three-state circuit-breaker pattern, supporting automatic
+ * fault detection, gradual recovery and failover.
  *
  * @see circuit_breaker.h
  */

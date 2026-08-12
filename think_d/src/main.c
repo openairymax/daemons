@@ -5,14 +5,14 @@
 #include "error.h"
 /*
  * @file main.c
- * @brief 双思考系统守护进程主入口（think.* 命名空间）
+ * @brief Dual-think system daemon main entry (think.* namespace).
  *
- * 暴露 JSON-RPC 方法：
- *   - think.process     : 双思考处理（prompt → plan + 思考事件 JSON）
- *   - think.get_stats   : 双思考统计（engine 健康 + 调用次数）
- *   - think.health_check: 服务健康检查
+ * Exposes JSON-RPC methods:
+ *   - think.process     : dual-think processing (prompt -> plan + thinking-event JSON)
+ *   - think.get_stats   : dual-think statistics (engine health + call count)
+ *   - think.health_check: service health check
  *
- * Unix socket 路径：${AIRY_RUNTIME_DIR}/think.sock
+ * Unix socket path: ${AIRY_RUNTIME_DIR}/think.sock
  */
 
 #include "daemon_main.h"
@@ -218,9 +218,11 @@ static int load_daemon_config(const char *config_path)
         }
     }
 
-    /* ── 模型 SSoT：$AIRY_CONFIG_DIR/model.yaml 的 think 段（三角色唯一配置源）。
-     * 优先级：env（AIRY_THINK_*）> model.yaml think 段 > -c JSON（兼容旧）> 默认。
-     * 与 gateway_d 读 global 段同一模式（svc_model_defaults 公共层 libyaml）。 */
+    /* Model SSoT: the think section of $AIRY_CONFIG_DIR/model.yaml (single
+     * config source for the three roles). Priority: env (AIRY_THINK_*) >
+     * model.yaml think section > -c JSON (legacy compat) > defaults. Same
+     * pattern as gateway_d reading the global section (svc_model_defaults
+     * common layer via libyaml). */
     {
         char model_path[1024];
         const char *cfg_dir = airy_config_dir();

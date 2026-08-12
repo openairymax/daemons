@@ -3,10 +3,10 @@
 
 /**
  * @file error.h
- * @brief 错误处理兼容层
+ * @brief Error-handling compatibility layer.
  *
- * 本文件是 agentrt/commons/utils/error 的兼容层，提供向后兼容的 API。
- * 新代码应直接使用 #include <error.h>
+ * Compat layer for agentrt/commons/utils/error providing backward
+ * compatible APIs. New code should use #include <error.h> directly.
  *
  * @see agentrt/commons/utils/error/include/error.h
  */
@@ -97,29 +97,28 @@
 #define AIRY_ERROR_MONITOR_TRACE AIRY_ERR_SYS_RESOURCE
 #define AIRY_ERROR_MONITOR_ALERT AIRY_ERR_SYS_RESOURCE
 
-/* Daemon 服务层错误码（commons 未定义，daemon 模块扩展）
- * P0.17 阶段 2：已迁移至独立的 daemon_errors.h 头文件，
- * 错误码段从 -900 迁移至 -910（消除与 commons AIRY_ERR_PROTOCOL 的冲突）。
- * daemons 内部源文件可直接 #include "daemon_errors.h" 获取这些错误码。 */
+/* Daemon service-layer error codes (not defined in commons; daemon-module
+ * extension). P0.17 phase 2 moved them to the standalone daemon_errors.h,
+ * relocating the range from -900 to -910 (resolving the conflict with
+ * commons AIRY_ERR_PROTOCOL). Daemon sources can include "daemon_errors.h"
+ * directly for these codes. */
 #include "daemon_errors.h"
 
 
 /**
- * @brief 兼容旧函数名
- * @deprecated 请使用 airy_err_str
+ * @brief Backward-compatible function name.
+ * @deprecated use airy_err_str
  */
 #define airy_strerror(code) airy_err_str(code)
 
 /**
- * @brief 兼容旧函数名
- * @deprecated 请使用 airy_err_str
+ * @brief Backward-compatible function name.
+ * @deprecated use airy_err_str
  */
 #define airy_err_name(code) airy_err_str(code)
 
 
-/**
- * @brief 错误码检查宏（兼容旧代码）
- */
+/** @brief Error-code check macro (backward compatible). */
 #define AIRY_IS_ERROR(code) ((code) != AIRY_OK)
 #define AIRY_IS_SUCCESS(code) ((code) == AIRY_OK)
 

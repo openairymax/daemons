@@ -3,9 +3,9 @@
 
 /**
  * @file router_context.h
- * @brief 路由器共享上下文 — 全局状态、辅助函数、端点管理
+ * @brief Router shared context - global state, helpers, endpoint management.
  *
- * 所有路由器实现文件共享此头文件，避免循环依赖。
+ * Shared by all router implementation files to avoid circular deps.
  *
  */
 
@@ -16,8 +16,9 @@
 #include "cost_tracker.h"
 #include "token_counter.h"
 #include "airy_memory.h"
-/* d8 清理：移除 sync_compat.h（本文件仅用 airy_mtx_t 类型，通过
- * airy_memory.h → error.h → types.h → platform.h 间接获得，无需 sync_compat.h） */
+/* d8 cleanup: removed sync_compat.h (this file only uses airy_mtx_t,
+ * obtained transitively via airy_memory.h -> error.h -> types.h ->
+ * platform.h; sync_compat.h is not needed) */
 
 #include "platform.h"
 
@@ -52,15 +53,11 @@ typedef struct {
     size_t round_robin_index;
 } router_ctx_t;
 
-/**
- * @brief 获取全局路由器上下文
- */
+/** @brief Get the global router context. */
 router_ctx_t *router_ctx_get(void);
 
 
-/**
- * @brief 估算请求的 token 数
- */
+/** @brief Estimate the token count of a request. */
 static inline size_t router_estimate_tokens(const char *prompt, size_t prompt_len)
 {
     router_ctx_t *ctx = router_ctx_get();
@@ -70,9 +67,7 @@ static inline size_t router_estimate_tokens(const char *prompt, size_t prompt_le
     return token_counter_count(ctx->token_counter, prompt);
 }
 
-/**
- * @brief 计算端点成本
- */
+/** @brief Compute the endpoint cost. */
 static inline double router_estimate_cost(const llm_endpoint_t *ep, size_t input_tokens,
                                           size_t output_tokens)
 {
@@ -80,17 +75,13 @@ static inline double router_estimate_cost(const llm_endpoint_t *ep, size_t input
            (ep->cost_per_1k_output * output_tokens / 1000.0);
 }
 
-/**
- * @brief 检查端点是否满足能力要求
- */
+/** @brief Check whether an endpoint satisfies the capability requirement. */
 static inline bool router_has_capabilities(const llm_endpoint_t *ep, uint32_t required_caps)
 {
     return (ep->capabilities & required_caps) == required_caps;
 }
 
-/**
- * @brief 获取能力匹配的端点列表
- */
+/** @brief Get the list of capability-matching endpoints. */
 static inline size_t router_get_eligible(const llm_route_request_t *request,
                                          llm_endpoint_t **out_array, size_t max_count)
 {
@@ -110,9 +101,7 @@ static inline size_t router_get_eligible(const llm_route_request_t *request,
     return count;
 }
 
-/**
- * @brief 填充路由结果的基础字段
- */
+/** @brief Fill the base fields of a routing result. */
 static inline void router_fill_result(llm_route_result_t *result, const llm_endpoint_t *ep,
                                       llm_route_strategy_t strategy, int confidence,
                                       size_t input_tokens, size_t output_tokens)
@@ -126,9 +115,7 @@ static inline void router_fill_result(llm_route_result_t *result, const llm_endp
     result->confidence = confidence;
 }
 
-/**
- * @brief 设置降级端点
- */
+/** @brief Set the fallback endpoint. */
 static inline void router_set_fallback(llm_route_result_t *result, const llm_endpoint_t *fallback)
 {
     if (!fallback)

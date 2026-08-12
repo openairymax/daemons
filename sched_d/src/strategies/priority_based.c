@@ -5,8 +5,8 @@
 #include "error.h"
 /**
  * @file priority_based.c
- * @brief 基于优先级的调度策略实现
- * @details 根据任务优先级和Agent权重进行智能调度
+ * @brief Priority-based scheduling-strategy implementation.
+ * @details Schedules intelligently by task priority and agent weights.
  */
 
 #include "scheduler_service.h"
@@ -17,9 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/**
- * @brief 基于优先级的调度策略数据
- */
+/** @brief Priority-based scheduling-strategy data. */
 typedef struct {
     agent_info_t **agents;
     size_t agent_count;
@@ -29,10 +27,10 @@ typedef struct {
 } priority_based_data_t;
 
 /**
- * @brief 创建基于优先级的调度策略
- * @param manager 配置信息
- * @param data 输出参数，返回策略数据
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Create the priority-based scheduling strategy.
+ * @param manager Config info
+ * @param data Output parameter, returns the strategy data
+ * @return 0 on success, non-zero error code
  */
 static int priority_based_create(const sched_config_t *manager, void **data)
 {

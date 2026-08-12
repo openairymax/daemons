@@ -1,10 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* */
 /* @file os_sandbox.h */
-
-/* */
 
 
 #ifndef AIRY_RT_TOOL_OS_SANDBOX_H
@@ -16,11 +13,15 @@
 extern "C" {
 #endif
 
-/* 沙箱模式（对标 Codex linux-sandbox 的 Landlock 文件系统沙箱）：
- * - OFF：不启用 OS 级隔离（仅保留既有超时/输出截断），用于无沙箱内核平台
- * - WORKSPACE：全局只读 + 工作区可写（默认；shell 命令可读系统/读工作区，
- *   但任何对系统目录的写入/删除均被 Landlock 拒绝）
- * - STRICT：仅系统基础路径 + 工作区可读可执行，工作区可写；网络默认禁用 */
+/* Sandbox modes (mirroring the Landlock filesystem sandbox of Codex
+ * linux-sandbox):
+ * - OFF: no OS-level isolation (only existing timeout/output truncation),
+ *   for platforms without a sandbox-capable kernel
+ * - WORKSPACE: global read-only + workspace writable (default; shell
+ *   commands can read the system and the workspace, but any write/delete
+ *   to system dirs is denied by Landlock)
+ * - STRICT: only system base paths + workspace readable/executable,
+ *   workspace writable; network disabled by default */
 typedef enum {
     OS_SANDBOX_MODE_OFF = 0,
     OS_SANDBOX_MODE_WORKSPACE = 1,
@@ -40,16 +41,18 @@ typedef struct {
 
 int os_sandbox_landlock_available(void);
 
-/* 由环境变量构造默认配置：
- *   AIRY_TOOL_SANDBOX_MODE=off|workspace|strict （默认 workspace）
- *   AIRY_TOOL_SANDBOX_WORKSPACE=<绝对路径>     （默认 getcwd）
- *   AIRY_TOOL_SANDBOX_NET=0|1                   （覆盖 net_access） */
+/* Build a default config from environment variables:
+ *   AIRY_TOOL_SANDBOX_MODE=off|workspace|strict (default workspace)
+ *   AIRY_TOOL_SANDBOX_WORKSPACE=<absolute path> (default getcwd)
+ *   AIRY_TOOL_SANDBOX_NET=0|1                   (overrides net_access) */
 void os_sandbox_cfg_from_env(os_sandbox_cfg_t *cfg);
 
-/* fork 后、exec 前调用：应用 rlimit + seccomp + Landlock。
- * 返回 0 成功；失败返回负值（fail-closed：调用方应拒绝执行）。
- * 注意：mode==STRICT 且 Landlock 不可用时返回失败（严格模式不允许降级）；
- * mode==WORKSPACE 且 Landlock 不可用时降级执行（返回 0，日志记录警告）。 */
+/* Call after fork, before exec: apply rlimit + seccomp + Landlock.
+ * Returns 0 on success; negative on failure (fail-closed: the caller
+ * should refuse to execute).
+ * Note: mode==STRICT returns failure when Landlock is unavailable (strict
+ * mode does not allow degradation); mode==WORKSPACE degrades gracefully
+ * when Landlock is unavailable (returns 0, logs a warning). */
 int os_sandbox_apply(const os_sandbox_cfg_t *cfg);
 
 #ifdef __cplusplus

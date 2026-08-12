@@ -3,24 +3,27 @@
 
 /**
  * @file main.c
- * @brief Plugin 守护进程入口 — P2.2 完整实现（事件驱动模式）
+ * @brief Plugin daemon entry - P2.2 full implementation (event-driven).
  *
- * 启动流程：SD 注册 → IPC 路由 → 插件发现 → 权限校验 → 扫描加载 → 事件驱动 accept
+ * Startup flow: SD registration -> IPC routing -> plugin discovery ->
+ * permission check -> scan and load -> event-driven accept.
  *
- * 暴露 JSON-RPC 方法（plugin.* 命名空间）：
- *   - plugin.load          : 从动态库加载插件
- *   - plugin.unload        : 卸载插件
- *   - plugin.start         : 启动插件
- *   - plugin.stop          : 停止插件
- *   - plugin.execute       : 执行插件（调用插件导出的 plugin_execute，JSON 入参→出参）
- *   - plugin.get_metadata  : 获取插件元数据
- *   - plugin.get_state     : 获取插件状态
- *   - plugin.get_stats     : 获取插件统计
- *   - plugin.list          : 列出已加载插件
+ * Exposes JSON-RPC methods (plugin.* namespace):
+ *   - plugin.load          : load a plugin from a dynamic library
+ *   - plugin.unload        : unload a plugin
+ *   - plugin.start         : start a plugin
+ *   - plugin.stop          : stop a plugin
+ *   - plugin.execute       : execute a plugin (calls the exported
+ *                            plugin_execute, JSON in -> out)
+ *   - plugin.get_metadata  : get plugin metadata
+ *   - plugin.get_state     : get plugin state
+ *   - plugin.get_stats     : get plugin statistics
+ *   - plugin.list          : list loaded plugins
  *
- * 修复历史：原实现事件循环为 while(g_running) sleep(1)，从不 accept、
- * 不注册 RPC 方法（僵尸服务）。重写为 daemon_event_driver 事件驱动，
- * 与 mem_d/agent_d 等标准 daemon 保持一致。
+ * History: the original implementation ran an event loop of
+ * while(g_running) sleep(1), never accepted connections and never
+ * registered RPC methods (zombie service). Rewritten as an event-driven
+ * daemon_event_driver, consistent with standard daemons like mem_d/agent_d.
  */
 
 #include "airy_memory.h"
@@ -447,10 +450,11 @@ int main(int argc, char **argv)
         SVC_LOG_WARN("Plugin_d: permission module init failed");
     }
 
-    /* P2.2.1: 初始化插件发现模块
-     * plugins_dir 必须为绝对路径：$AIRY_HOME/ecosystem/plugins。
-     * 历史上硬编码 "ecosystem/plugins/" 相对路径，随进程 CWD 漂移，
-     * daemon 从任意目录启动都会扫描失败（插件列表为空）。 */
+    /* P2.2.1: initialize the plugin-discovery module.
+     * plugins_dir must be an absolute path: $AIRY_HOME/ecosystem/plugins.
+     * Historically "ecosystem/plugins/" was hardcoded as a relative path,
+     * drifting with the process CWD, so the daemon's scan failed from any
+     * other start directory (empty plugin list). */
     char plugins_dir[AIRY_PATH_MAX];
     snprintf(plugins_dir, sizeof(plugins_dir), "%s/ecosystem/plugins", airy_home_dir());
     plugin_discovery_config_t disc_cfg;
@@ -515,8 +519,8 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_plugin_d, "get_state", on_get_state_method, NULL);
     method_dispatcher_register(g_dispatcher_plugin_d, "get_stats", on_get_stats_method, NULL);
     method_dispatcher_register(g_dispatcher_plugin_d, "list", on_list_method, NULL);
-    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：plugin.install / plugin.uninstall /
-     * plugin.health_check）
+    /* L2 protocol standard methods + aliases (02-l2-service-protocol.md:
+     * plugin.install / plugin.uninstall / plugin.health_check)
      */
     method_dispatcher_register(g_dispatcher_plugin_d, "install", on_load_method, NULL);
     method_dispatcher_register(g_dispatcher_plugin_d, "uninstall", on_unload_method, NULL);

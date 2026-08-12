@@ -3,7 +3,7 @@
 
 /**
  * @file alert_manager.c
- * @brief 智能告警管理系统实现
+ * @brief Intelligent alert-management system implementation.
  *
  * @see alert_manager.h
  */

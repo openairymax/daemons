@@ -3,15 +3,18 @@
 
 /**
  * @file svc_client.c
- * @brief 服务通信客户端（client 域）
+ * @brief Service communication client (client domain).
  *
- * 实现 svc_common.h 中定义的服务客户端接口：按协议创建/销毁客户端。
- * 支持 SVC_PROTO_HTTP（libcurl 远程调用或本地服务句柄直连）与
- * SVC_PROTO_MEMORY（本地服务句柄直连，未命中时回退 IPC RPC）。
+ * Implements the service-client interface defined in svc_common.h: creates
+ * and destroys clients per protocol. Supports SVC_PROTO_HTTP (libcurl
+ * remote call or local service-handle direct connect) and SVC_PROTO_MEMORY
+ * (local service-handle direct connect, falling back to IPC RPC on miss).
  *
- * 本地直连路径通过 svc_common_internal.h 暴露的 airy_svc_internal_t
- * 直接访问服务实例的 iface/user_data 字段（与 service 生命周期域共享
- * 该结构定义），其余仅依赖 svc_common.h 的公共 API。
+ * The local direct-connect path accesses the service instance's
+ * iface/user_data fields directly via airy_svc_internal_t exposed by
+ * svc_common_internal.h (sharing that struct definition with the service
+ * lifecycle domain); everything else relies only on svc_common.h public
+ * APIs.
  *
  * @see agentrt/daemons/common/include/svc_common.h
  * @see agentrt/daemons/common/src/svc_common.c

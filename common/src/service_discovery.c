@@ -3,9 +3,9 @@
 
 /**
  * @file service_discovery.c
- * @brief 跨进程服务发现机制实现
+ * @brief Cross-process service-discovery mechanism implementation.
  *
- * 基于共享内存的跨进程服务注册中心实现。
+ * Shared-memory based cross-process service-registry implementation.
  *
  * @see service_discovery.h
  */

@@ -3,7 +3,7 @@
 
 /**
  * @file manager.h
- * @brief 工具服务配置结构
+ * @brief Tool-service config structures.
  */
 
 #ifndef TOOL_CONFIG_H

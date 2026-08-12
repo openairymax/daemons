@@ -3,19 +3,20 @@
 
 /**
  * @file safety_guard_bridge.c
- * @brief C-L05: Cupolas SafetyGuard → tool_d 桥接层实现
+ * @brief C-L05: Cupolas SafetyGuard -> tool_d bridge-layer implementation.
  *
- * 将 Cupolas 安全穹顶的 safety_guard_check_chain() API
- * 桥接到 tool_d 的工具审批流程中，实现 6 种守卫类型的
- * 权限检查、速率限制、内容过滤等安全控制。
+ * Bridges the cupolas security dome's safety_guard_check_chain() API into
+ * the tool_d tool-approval flow, implementing permission checks, rate
+ * limiting, content filtering and other security controls for the 6 guard
+ * types.
  *
- * 守卫类型映射：
- *   SAFETY_GUARD_PERMISSION   → RBAC 权限检查
- *   SAFETY_GUARD_RATE_LIMIT   → 工具调用频率限制
- *   SAFETY_GUARD_CONTENT_FILTER → 输入内容过滤
- *   SAFETY_GUARD_INPUT        → 参数净化
- *   SAFETY_GUARD_RESOURCE     → 资源配额检查
- *   SAFETY_GUARD_AUDIT        → 审计日志记录
+ * Guard-type mapping:
+ *   SAFETY_GUARD_PERMISSION   -> RBAC permission check
+ *   SAFETY_GUARD_RATE_LIMIT   -> tool-call rate limiting
+ *   SAFETY_GUARD_CONTENT_FILTER -> input content filtering
+ *   SAFETY_GUARD_INPUT        -> parameter sanitization
+ *   SAFETY_GUARD_RESOURCE     -> resource-quota check
+ *   SAFETY_GUARD_AUDIT        -> audit-log recording
  */
 
 #include "safety_guard_bridge.h"
@@ -128,9 +129,7 @@ void safety_guard_bridge_destroy(safety_guard_bridge_t *bridge)
     AIRY_FREE(bridge);
 }
 
-/**
- * @brief 获取当前时间戳（毫秒）
- */
+/** @brief Get the current timestamp (ms). */
 static uint64_t get_current_time_ms(void)
 {
     struct timespec ts;

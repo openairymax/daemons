@@ -4,17 +4,20 @@
 // @owner: team-B
 /**
  * @file gateway_business_handler.c
- * @brief 网关业务请求处理器：ctx 生命周期 + 主分发 + 协议入口
+ * @brief Gateway business-request handler: ctx lifecycle + main dispatch +
+ *        protocol entry.
  *
- * SEC-017 合规：所有功能均为真实实现，无桩函数。
- * 处理链：HTTP JSON-RPC agent.run → 双思考/编排 → 返回对话结果。
+ * SEC-017 compliant: all features are real implementations, no stubs.
+ * Chain: HTTP JSON-RPC agent.run -> dual-think/orchestration -> returns
+ * the chat result.
  *
- * 本文件按单一职责拆分自原 2608 行单体（2026-08-11）：
- *   - gateway_biz_forward.c  命名空间转发（L2 协议客户端 + 白名单）
- *   - gateway_biz_llm.c      LLM 调用 + 工具循环（ReAct）
- *   - gateway_biz_agent.c    agent.run 编排（双思考注入 + 取消）
- *   - gateway_biz_backend.c  MCP/OpenAI/A2A 协议后端
- * 本文件保留：ctx 生命周期、JSON-RPC 主分发、协议检测入口。
+ * Split from the original 2608-line monolith by single responsibility
+ * (2026-08-11):
+ *   - gateway_biz_forward.c  namespace forwarding (L2 protocol client + whitelist)
+ *   - gateway_biz_llm.c      LLM calls + tool loop (ReAct)
+ *   - gateway_biz_agent.c    agent.run orchestration (dual-think injection + cancel)
+ *   - gateway_biz_backend.c  MCP/OpenAI/A2A protocol backends
+ * This file keeps: ctx lifecycle, JSON-RPC main dispatch, protocol-detection entry.
  */
 
 #include "gateway_business_handler.h"

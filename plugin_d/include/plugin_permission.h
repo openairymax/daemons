@@ -3,20 +3,22 @@
 
 /**
  * @file plugin_permission.h
- * @brief P2.2.4: 插件权限校验 — manifest 权限 ↔ Cupolas 守卫类型映射
+ * @brief P2.2.4: plugin permission checks - manifest permissions to
+ *        Cupolas guard-type mapping.
  *
- * 将插件 manifest 中声明的权限映射到 Cupolas 安全穹顶的守卫类型。
- * 加载插件时自动校验权限，不符合安全策略的插件拒绝加载。
+ * Maps permissions declared in a plugin manifest to the guard types of the
+ * Cupolas security dome. Permissions are validated automatically at plugin
+ * load; plugins that do not match the security policy are refused.
  *
- * 权限映射：
- *   file_read        → SAFETY_GUARD_FILE_READ
- *   file_write       → SAFETY_GUARD_FILE_WRITE
- *   network_outbound → SAFETY_GUARD_NETWORK
- *   tool_execute     → SAFETY_GUARD_TOOL_EXEC
- *   memory_access    → SAFETY_GUARD_MEMORY
- *   hook_register    → SAFETY_GUARD_HOOK
- *   system_call      → SAFETY_GUARD_SYSTEM
- *   process_spawn    → SAFETY_GUARD_PROCESS
+ * Permission mapping:
+ *   file_read        -> SAFETY_GUARD_FILE_READ
+ *   file_write       -> SAFETY_GUARD_FILE_WRITE
+ *   network_outbound -> SAFETY_GUARD_NETWORK
+ *   tool_execute     -> SAFETY_GUARD_TOOL_EXEC
+ *   memory_access    -> SAFETY_GUARD_MEMORY
+ *   hook_register    -> SAFETY_GUARD_HOOK
+ *   system_call      -> SAFETY_GUARD_SYSTEM
+ *   process_spawn    -> SAFETY_GUARD_PROCESS
  */
 
 #ifndef AIRY_RT_PLUGIN_PERMISSION_H
@@ -51,30 +53,28 @@ typedef struct {
 
 
 /**
- * @brief 初始化权限校验模块
+ * @brief Initialize the permission-check module.
  *
- * @param config 配置（NULL 使用默认）
- * @return 0 成功，非0 失败
+ * @param config Config (NULL = defaults)
+ * @return 0 on success, non-zero on failure
  */
 int plugin_permission_init(const plugin_permission_config_t *config);
 
-/**
- * @brief 销毁权限校验模块
- */
+/** @brief Destroy the permission-check module. */
 void plugin_permission_destroy(void);
 
 /**
- * @brief 校验插件权限声明
+ * @brief Validate a plugin's declared permissions.
  *
- * 将 manifest 中的权限声明映射到 Cupolas 守卫类型，
- * 逐项检查每个权限是否被安全策略允许。
+ * Maps the manifest's permission declarations to Cupolas guard types and
+ * checks each permission against the security policy.
  *
- * @param permissions       权限声明数组
- * @param permission_count  权限数量
- * @param plugin_name       插件名称（用于审计）
- * @param out_denied        输出被拒绝的权限（逗号分隔）
- * @param out_denied_size   缓冲区大小
- * @return PLUGIN_PERM_ALLOWED 全部通过，否则返回第一个拒绝原因
+ * @param permissions       Permission-declaration array
+ * @param permission_count  Permission count
+ * @param plugin_name       Plugin name (for audit)
+ * @param out_denied        Output denied permissions (comma-separated)
+ * @param out_denied_size   Buffer size
+ * @return PLUGIN_PERM_ALLOWED if all pass; otherwise the first denial reason
  */
 plugin_permission_result_t plugin_permission_check(const char (*permissions)[64],
                                                    uint32_t permission_count,
@@ -82,28 +82,28 @@ plugin_permission_result_t plugin_permission_check(const char (*permissions)[64]
                                                    size_t out_denied_size);
 
 /**
- * @brief 将权限字符串映射到 Cupolas 守卫类型
+ * @brief Map a permission string to a Cupolas guard type.
  *
- * @param permission 权限字符串
- * @param out_guard  输出守卫类型
- * @return 0 成功，-1 未知权限
+ * @param permission Permission string
+ * @param out_guard  Output guard type
+ * @return 0 on success, -1 for unknown permission
  */
 int plugin_permission_map_to_guard(const char *permission, safety_guard_type_t *out_guard);
 
 /**
- * @brief 获取权限的人类可读描述
+ * @brief Get the human-readable description of a permission.
  *
- * @param permission 权限字符串
- * @return 描述字符串
+ * @param permission Permission string
+ * @return Description string
  */
 const char *plugin_permission_description(const char *permission);
 
 /**
- * @brief 获取支持的权限列表
+ * @brief Get the list of supported permissions.
  *
- * @param out_permissions 输出权限数组
- * @param out_count       输出数量
- * @return 0 成功
+ * @param out_permissions Output permission array
+ * @param out_count       Output count
+ * @return 0 on success
  */
 int plugin_permission_list_supported(char ***out_permissions, size_t *out_count);
 

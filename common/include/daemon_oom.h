@@ -3,10 +3,10 @@
 
 /**
  * @file daemon_oom.h
- * @brief Daemon OOM 降级回调注册辅助
+ * @brief Daemon OOM degradation callback registration helper.
  *
- * P1.22: 为每个 daemon 提供标准化的 OOM 降级回调。
- * WARNING 级丢弃缓存，CRITICAL 级拒绝请求。
+ * P1.22: standardized OOM degradation callbacks for every daemon.
+ * WARNING-level drops caches, CRITICAL-level rejects requests.
  */
 
 #ifndef AIRY_RT_DAEMON_OOM_H
@@ -20,9 +20,7 @@
 extern "C" {
 #endif
 
-/**
- * @brief Daemon OOM 降级配置
- */
+/** @brief Daemon OOM degradation configuration. */
 typedef struct {
     const char *daemon_name;
     bool drop_cache_on_warning;
@@ -31,21 +29,21 @@ typedef struct {
 } daemon_oom_config_t;
 
 /**
- * @brief 为 daemon 注册标准 OOM 降级回调
+ * @brief Register the standard OOM degradation callbacks for a daemon.
  *
- * 注册 WARNING 和 CRITICAL 两个级别的回调：
- *   - WARNING:  丢弃缓存、降低日志级别
- *   - CRITICAL: 拒绝新请求、暂停非关键功能
+ * Registers WARNING and CRITICAL callbacks:
+ *   - WARNING:  drop caches, lower log level
+ *   - CRITICAL: reject new requests, suspend non-critical features
  *
- * @param config 配置
- * @return 0 成功，非0 失败
+ * @param config Configuration
+ * @return 0 on success, non-zero on failure
  */
 int daemon_oom_register(const daemon_oom_config_t *config);
 
 /**
- * @brief 注销 daemon 的 OOM 降级回调
+ * @brief Unregister a daemon's OOM degradation callbacks.
  *
- * @param daemon_name Daemon 名称
+ * @param daemon_name Daemon name
  */
 void daemon_oom_unregister(const char *daemon_name);
 

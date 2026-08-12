@@ -3,10 +3,10 @@
 
 /**
  * @file daemon_bootstrap_sd.c
- * @brief P1.7 C-L08: daemon ServiceDiscovery 一键引导实现
+ * @brief P1.7 C-L08: daemon ServiceDiscovery one-call bootstrap implementation.
  *
  * @see daemon_bootstrap_sd.h
- * @see P1.7 C-L08 连接线
+ * @see P1.7 C-L08 wiring
  */
 
 #include "daemon_bootstrap_sd.h"

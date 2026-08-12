@@ -3,7 +3,8 @@
 
 /**
  * @file market_service_internal.h
- * @brief 市场服务内部跨文件共享声明（market_service_impl.c 拆分后各域共用）
+ * @brief Internal cross-file shared declarations of the market service
+ *        (shared by the domains after market_service_impl.c split).
  */
 
 #ifndef AIRY_RT_DAEMON_MARKET_D_MARKET_SERVICE_INTERNAL_H

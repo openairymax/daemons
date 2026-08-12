@@ -3,13 +3,14 @@
 
 /**
  * @file svc_model_defaults.c
- * @brief model.yaml global 段默认模型提取实现
+ * @brief Default-model extraction implementation for the model.yaml global section.
  *
- * libyaml 事件流解析。状态机：
- *   - pending_global：刚读到顶层键 "global"，等待其 mapping 开始
- *   - global_depth：global mapping 嵌套深度（global 自身为 1）
- * 仅提取 global 顶层（depth==1）的 default_model / default_provider，
- * 嵌套子段（如 default_retry:）与其余字段一律忽略。
+ * libyaml event-stream parsing. State machine:
+ *   - pending_global: just read the top-level key "global", waiting for its mapping to start
+ *   - global_depth: nesting depth of the global mapping (global itself is 1)
+ * Only the top-level (depth==1) default_model / default_provider of global
+ * are extracted; nested subsections (e.g. default_retry:) and other fields
+ * are ignored.
  */
 
 #include "svc_model_defaults.h"

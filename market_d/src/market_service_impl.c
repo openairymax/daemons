@@ -5,8 +5,9 @@
 #include "error.h"
 /**
  * @file market_service_impl.c
- * @brief 市场服务核心实现
- * @details 定义 struct market_service 并实现 market_service.h 中的所有公共API
+ * @brief Market service core implementation.
+ * @details Defines struct market_service and implements all public APIs in
+ *          market_service.h.
  */
 
 #include "daemon_errors.h"

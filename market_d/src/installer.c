@@ -3,8 +3,9 @@
 
 /**
  * @file installer.c
- * @brief 安装管理模块
- * @details 基于 market_service 公共 API 实现安装和卸载功能
+ * @brief Installation-management module.
+ * @details Implements install and uninstall on top of the market_service
+ *          public API.
  */
 
 #include "market_service.h"

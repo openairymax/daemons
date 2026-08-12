@@ -232,8 +232,9 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
         return AIRY_ERR_INVALID_PARAM;
     handler->request_count++;
 
-    /* 动作判定：优先 path（/a2a/agent-card、/a2a/task），
-     * path 不可用时按 body 的 JSON-RPC method（tasks/send 等）判定（body-only 路由） */
+    /* Action decision: path takes precedence (/a2a/agent-card, /a2a/task);
+     * when no path is available, decide by the body's JSON-RPC method
+     * (tasks/send etc.) for body-only routing */
     int is_agent_card = (path && strcmp(path, "/a2a/agent-card") == 0);
     int is_task = (path && strcmp(path, "/a2a/task") == 0);
     if (!is_agent_card && !is_task && body_json) {

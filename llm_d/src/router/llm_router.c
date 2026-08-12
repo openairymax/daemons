@@ -3,16 +3,18 @@
 
 /**
  * @file llm_router.c
- * @brief P3.1.5: LLM 路由器编排器 — 统一选择接口 + 端点管理 + 统计
+ * @brief P3.1.5: LLM router orchestrator - unified select + endpoint mgmt + stats.
  *
- * 编排四种路由策略，提供统一的 airy_router_select_provider() 接口。
- * 负责端点注册/注销、统计收集、默认策略管理。
+ * Orchestrates the four routing strategies and provides the unified
+ * airy_router_select_provider() interface. Handles endpoint
+ * register/unregister, statistics collection and default-strategy
+ * management.
  *
- * 路由策略（独立文件实现）：
- *   - P3.1.1 cost_aware_router.c:     成本感知路由（决策树）
- *   - P3.1.2 round_robin_router.c:    轮询路由
- *   - P3.1.3 least_latency_router.c:  最低延迟路由
- *   - P3.1.4 quality_first_router.c:  质量优先路由
+ * Routing strategies (implemented in separate files):
+ *   - P3.1.1 cost_aware_router.c:     cost-aware routing (decision tree)
+ *   - P3.1.2 round_robin_router.c:    round-robin routing
+ *   - P3.1.3 least_latency_router.c:  least-latency routing
+ *   - P3.1.4 quality_first_router.c:  quality-first routing
  *
  */
 
@@ -325,10 +327,10 @@ int llm_router_set_default_strategy(llm_route_strategy_t strategy)
 }
 
 /**
- * @brief airy_router_select_provider — 统一提供者选择接口
+ * @brief airy_router_select_provider - unified provider-selection interface.
  *
- * 包装 llm_router_route，提供更简洁的 API。
- * 外部调用者无需构造 llm_route_request_t 结构体。
+ * Wraps llm_router_route with a simpler API. External callers need not
+ * construct the llm_route_request_t struct.
  */
 int airy_router_select_provider(const char *prompt, size_t prompt_len, uint32_t required_caps,
                                 uint32_t max_tokens, double max_cost, uint32_t max_latency_ms,

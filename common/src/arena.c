@@ -3,16 +3,16 @@
 
 /**
  * @file arena.c
- * @brief P1.19: Arena 线性分配器实现
+ * @brief P1.19: Arena linear allocator implementation.
  *
- * 基于区块链的线性分配器。
- * 每个区块在内部线性分配，用完自动创建新区块。
- * arena_reset() 将所有区块指针重置到起始位置。
+ * Block-chain based linear allocator. Each block allocates linearly
+ * internally; when exhausted a new block is created. arena_reset() resets
+ * all block pointers to their start.
  *
- * 区块管理：
- *   arena_t → block_1 → block_2 → ... → block_N
+ * Block management:
+ *   arena_t -> block_1 -> block_2 -> ... -> block_N
  *   block: [header][...data...]
- *   header 包含 offset 和 next 指针
+ *   header holds the offset and next pointer
  */
 
 #include "arena.h"
@@ -28,12 +28,8 @@
 #define DEFAULT_ALIGNMENT 16
 #define BLOCK_HEADER_SIZE 64
 
-/**
- * @brief Arena 区块
- *
- * 每个区块在独立分配的内存块中，
- * 区块头紧接在数据区前面。
- */
+/** @brief Arena block. Each block lives in its own memory chunk, with the
+ * block header immediately before the data area. */
 typedef struct arena_block_s {
     struct arena_block_s *next;
     size_t capacity;
@@ -53,9 +49,7 @@ struct arena_s {
     size_t peak_usage;
 };
 
-/**
- * @brief 对齐到指定边界
- */
+/** @brief Align a size up to the given boundary. */
 static inline size_t align_up(size_t size, size_t alignment)
 {
     size_t align_mask = alignment - 1;
@@ -65,17 +59,13 @@ static inline size_t align_up(size_t size, size_t alignment)
     return (size + align_mask) & ~align_mask;
 }
 
-/**
- * @brief 获取区块的数据区起始地址
- */
+/** @brief Get the start address of a block's data area. */
 static inline uint8_t *block_data(arena_block_t *block)
 {
     return ((uint8_t *)block) + BLOCK_HEADER_SIZE;
 }
 
-/**
- * @brief 创建新区块并链入当前区块之后
- */
+/** @brief Create a new block and chain it after the current one. */
 static arena_block_t *arena_block_create(size_t capacity, size_t alignment)
 {
 
@@ -110,9 +100,7 @@ static arena_block_t *arena_block_create(size_t capacity, size_t alignment)
     return block;
 }
 
-/**
- * @brief 在区块中分配内存
- */
+/** @brief Allocate memory inside a block. */
 static void *arena_block_alloc(arena_block_t *block, size_t size, size_t alignment)
 {
     size_t effective_alignment = (alignment > block->alignment) ? alignment : block->alignment;

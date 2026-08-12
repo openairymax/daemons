@@ -3,8 +3,9 @@
 
 /**
  * @file service_discovery_stats.c
- * @brief 跨进程服务发现统计域：事件回调注册、统计查询/导出、
- *        服务计数、策略字符串映射与统计摘要输出
+ * @brief Cross-process service-discovery statistics domain: event-callback
+ *        registration, statistics query/export, service counting,
+ *        strategy-string mapping and statistics-summary output.
  */
 
 #include "service_discovery_internal.h"

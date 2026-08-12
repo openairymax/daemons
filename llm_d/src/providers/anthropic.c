@@ -5,12 +5,12 @@
 #include "error.h"
 /**
  * @file anthropic.c
- * @brief Anthropic 适配器实现
+ * @brief Anthropic adapter implementation.
  *
- * 改进说明：
- * 1. 使用公共 Provider 基础设施
- * 2. 代码量从 340 行减少到约 200 行
- * 3. 保留 Anthropic 特有的 system prompt 和响应解析逻辑
+ * Improvements:
+ * 1. Uses the common Provider infrastructure
+ * 2. Code reduced from ~340 to ~200 lines
+ * 3. Keeps Anthropic-specific system-prompt and response-parsing logic
  */
 
 #include "daemon_errors.h"

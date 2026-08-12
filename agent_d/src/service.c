@@ -4,19 +4,19 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file service.c
- * @brief Agent 服务实现：Agent 派生/终止/调用/列表
+ * @brief Agent service implementation: spawn/terminate/invoke/list.
  *
- * 从 gateway/src/utils/syscall_router.c 抽离的 g_runtime.agents[] 逻辑，
- * 重构为独立的、自包含的服务模块。守护进程 agent_d 持有 agent_service_t
- * 实例并通过 Unix socket 暴露 agent.* 命名空间方法。
+ * Extracted from g_runtime.agents[] logic in gateway/src/utils/syscall_router.c
+ * and refactored into a standalone, self-contained service module. The
+ * agent_d daemon holds an agent_service_t instance and exposes the agent.*
+ * namespace over a Unix socket.
  *
- * 设计要点：
- * - 自带哈希表（djb2 算法，与 syscall_router.c 同源但解耦）
- * - 线程安全：所有公共接口持锁
- * - Agent ID：32 字符十六进制（基于时间戳 + 计数器，无外部依赖）
- * - 终止不回收槽位：仅置 status=3，不压缩数组（与原实现一致）
+ * Design notes:
+ * - Own hash table (djb2, same origin as syscall_router.c but decoupled)
+ * - Thread safety: all public interfaces take the lock
+ * - Agent ID: 32-char hex (timestamp + counter, no external deps)
+ * - Terminate does not reclaim slots: only sets status=3, no compaction
  */
 
 #include "service.h"
@@ -31,17 +31,18 @@
 #include <time.h>
 
 #if AIRY_PLATFORM_POSIX
-/* Stage5+ 待办4：真实 spawn 所需的 POSIX 原语。
- * platform.h 已引入 unistd.h / signal.h / errno.h / fcntl.h / sys/types.h，
- * 这里补充 waitpid 与 select 所在头文件。 */
+/* Stage5+ todo4: POSIX primitives needed for real spawn. platform.h already
+ * brings in unistd.h / signal.h / errno.h / fcntl.h / sys/types.h; add the
+ * headers for waitpid and select here. */
 #include <sys/select.h>
 #include <sys/wait.h>
 #endif
 
 #include "agent_service_internal.h"
 
-/* 默认最大并发 Agent 数：支持上千 Agent 并行（用户设计预期）。
- * 可通过 AIRY_MAX_AGENTS 环境变量或 daemon 配置 max_agents 覆盖（上限 65535）。 */
+/* Default max concurrent agents: supports thousands in parallel (design
+ * intent). Overridable via AIRY_MAX_AGENTS env var or daemon config
+ * max_agents (capped at 65535). */
 #define AGENT_DEFAULT_MAX_AGENTS 10000
 
 #define AGENT_HASH_LOAD_FACTOR 4 /* capacity = max_agents * 4 */

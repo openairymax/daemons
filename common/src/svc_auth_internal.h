@@ -3,7 +3,8 @@
 
 /**
  * @file svc_auth_internal.h
- * @brief Daemon 服务层认证中间件内部跨文件共享声明（svc_auth.c 拆分后各域共用）
+ * @brief Internal cross-file shared declarations of the daemon service-layer
+ *        auth middleware (shared by the domains after svc_auth.c split).
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_SVC_AUTH_INTERNAL_H

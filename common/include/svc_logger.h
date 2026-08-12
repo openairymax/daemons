@@ -3,11 +3,13 @@
 
 /**
  * @file svc_logger.h
- * @brief 日志服务兼容层（重导出）
+ * @brief Logging-service compatibility layer (re-export).
  *
- * P0.17 阶段 2：实际定义已迁移至 commons/utils/logging/include/svc_logger.h，
- * 消除 atoms→daemons 编译期反向依赖（IRON-6）。本文件保留为重导出
- * 兼容头，使 daemons 内部源文件无需立即修改 #include 路径。
+ * P0.17 phase 2: the actual definitions moved to
+ * commons/utils/logging/include/svc_logger.h, removing the compile-time
+ * reverse dependency atoms->daemons (IRON-6). This file stays as a
+ * re-export compat header so daemon sources need no immediate #include
+ * path changes.
  *
  * @see commons/utils/logging/include/svc_logger.h
  */
@@ -15,14 +17,15 @@
 #ifndef AIRY_RT_DAEMON_COMMON_SVC_LOGGER_H
 #define AIRY_RT_DAEMON_COMMON_SVC_LOGGER_H
 
-/* P0.17 阶段 2: 包含 daemon 扩展错误码（DAEMON_EINIT/ESTATE/EHEALTH 等）。
- * 迁移前 daemons 版 svc_logger.h 间接包含 daemons 版 error.h 提供这些错误码，
- * 迁移后 commons 版 svc_logger.h 不再包含 daemons 版 error.h，需在此显式包含。 */
+/* P0.17 phase 2: include daemon extension error codes (DAEMON_EINIT/
+ * ESTATE/EHEALTH etc.). Before the migration the daemons svc_logger.h
+ * transitively included the daemons error.h for these codes; after it the
+ * commons svc_logger.h no longer does, so include it explicitly here. */
 #include "daemon_errors.h"
 
-/* P0.17 阶段 2: 需要 daemons 特有函数声明（airy_dl_*、airy_sock_* 等）
- * 的源文件应直接 #include "daemon_platform_ext.h"，不通过 svc_logger.h 间接获取。
- * 参见 daemon_platform_ext.h 了解 daemons 特有平台扩展声明。 */
+/* P0.17 phase 2: sources needing daemon-specific declarations (airy_dl_*,
+ * airy_sock_*, ...) should #include "daemon_platform_ext.h" directly,
+ * not transitively via svc_logger.h. See daemon_platform_ext.h. */
 
 
 #include "../../../commons/utils/logging/include/svc_logger.h"

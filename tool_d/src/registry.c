@@ -4,7 +4,7 @@
 #include "airy_memory.h"
 /**
  * @file registry.c
- * @brief 工具注册表实现（内存哈希表）
+ * @brief Tool-registry implementation (in-memory hash table).
  */
 
 #include "error.h"

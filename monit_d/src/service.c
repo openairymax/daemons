@@ -4,12 +4,12 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file service.c
- * @brief 监控服务核心实现
+ * @brief Monitoring service core implementation.
  *
- * 实现 monitor_service_t 结构体和所有 monitor_service_* 公共API。
- * 整合指标采集、告警管理、分布式追踪和结构化日志四大子系统。
+ * Implements the monitor_service_t struct and all monitor_service_*
+ * public APIs. Integrates the four subsystems: metrics collection, alert
+ * management, distributed tracing and structured logging.
  */
 
 #include "daemon_errors.h"

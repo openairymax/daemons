@@ -3,13 +3,13 @@
 
 /**
  * @file ipc_bus_helper.c
- * @brief C-L09: IPC Bus → daemon 自动注册便捷层实现
+ * @brief C-L09: IPC Bus -> daemon auto-registration convenience layer impl.
  *
- * 封装 ipc_service_bus 核心 API，提供 daemon 一键注册、消息路由
- * 和协议透明转发的便捷接口。
+ * Wraps the ipc_service_bus core API, providing one-call daemon
+ * registration, message routing and protocol-transparent forwarding.
  *
  * @see ipc_bus_helper.h
- * @see P1.8 C-L09 连接线
+ * @see P1.8 C-L09 wiring
  */
 
 #include "ipc_bus_helper.h"

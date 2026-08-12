@@ -5,12 +5,12 @@
 #include "error.h"
 /**
  * @file provider.c
- * @brief 提供商通用工具实现
+ * @brief Provider common utilities implementation.
  *
- * 改进说明：
- * 1. 提取公共代码到通用函数
- * 2. 提供 OpenAI 兼容的请求构建和响应解析
- * 3. 统一的 HTTP 请求处理
+ * Improvements:
+ * 1. Common code extracted into generic functions
+ * 2. OpenAI-compatible request building and response parsing
+ * 3. Unified HTTP request handling
  */
 
 #include "provider.h"
@@ -38,8 +38,9 @@ static void secrets_lock_ensure(void)
 }
 
 /**
- * @brief 从 $AIRY_HOME/config/secrets.env 读取指定 key 的值
- * @return 动态分配字符串（调用方 AIRY_FREE），未找到/读取失败返回 NULL
+ * @brief Read the value of the given key from $AIRY_HOME/config/secrets.env.
+ * @return Dynamically-allocated string (caller AIRY_FREEs), NULL if not
+ *         found or read failed
  */
 static char *secrets_env_read(const char *key_name)
 {

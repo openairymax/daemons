@@ -3,7 +3,7 @@
 
 /**
  * @file daemon_cupolas_bootstrap.c
- * @brief P3.14 (ACC-DT15): daemon 统一 cupolas 安全穹顶引导实现
+ * @brief P3.14 (ACC-DT15): unified cupolas security dome bootstrap impl.
  */
 
 #include "daemon_cupolas_bootstrap.h"
@@ -30,14 +30,16 @@ airy_err_t daemon_cupolas_init(const char *daemon_name)
         return AIRY_SUCCESS;
     }
 
-    /* AIRY_HOME 路径体系：所有 daemon 启动即确保目录就绪（幂等）。
-     * 审计日志、socket、agent 子进程日志均收敛于其下。 */
+    /* AIRY_HOME path layout: every daemon ensures its dirs exist at startup
+     * (idempotent). Audit logs, sockets and agent child logs live under it. */
     airy_paths_init();
 
-    /* P3.15 ACC-DT16: 显式初始化 daemon_security 层（非 NULL config）。
-     * 历史代码在各 security 函数内部 lazy-init（daemon_security_init(NULL,NULL)），
-     * 掩盖了 daemon 未显式初始化安全层的问题。改为在 cupolas bootstrap 时统一显式初始化，
-     * security 函数内部改为 fail-closed（未初始化 = 拒绝）。*/
+    /* P3.15 ACC-DT16: explicitly initialize the daemon_security layer
+     * (non-NULL config). Legacy code lazy-initialized inside each security
+     * function (daemon_security_init(NULL,NULL)), hiding the fact that a
+     * daemon never explicitly initialized the security layer. Now the
+     * cupolas bootstrap does one explicit init; security functions are
+     * fail-closed (uninitialized = denied). */
     daemon_security_config_t sec_config;
     __builtin_memset(&sec_config, 0, sizeof(sec_config));
     sec_config.sanitize_level = SANITIZE_LEVEL_STRICT;
@@ -71,10 +73,13 @@ airy_err_t daemon_cupolas_init(const char *daemon_name)
         return cupolas_err;
     }
 
-    /* 接线：vault / entitlements / network 三个安全子模块接入 daemon 运行链路。
-     * 此前仅 permission_engine + sanitizer + workbench + audit 四层接线，
-     * vault/entitlements/network 零调用方（仅测试引用），安全能力未真正生效。
-     * 三模块 init 均失败非致命：由上层 service 层 fail-closed 拦截特权的操作。 */
+    /* Wiring: vault / entitlements / network security submodules hooked
+     * into the daemon runtime chain. Previously only the four layers
+     * permission_engine + sanitizer + workbench + audit were wired;
+     * vault/entitlements/network had zero callers (test-only references),
+     * so those security capabilities never took effect. Failure of any of
+     * the three inits is non-fatal: the service layer's fail-closed logic
+     * blocks privileged operations. */
     int vault_rc = cupolas_vault_init(NULL);
     if (vault_rc != 0) {
         SVC_LOG_ERROR("daemon_cupolas_init: cupolas_vault_init FAILED for daemon='%s' (rc=%d)",

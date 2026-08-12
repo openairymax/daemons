@@ -6,13 +6,13 @@
 
 /**
  * @file metrics.c
- * @brief 监控指标采集实现（生产级版本）
+ * @brief Monitoring metrics-collection implementation (production-grade).
  *
- * 功能：
- * 1. 指标采集与聚合
- * 2. OpenTelemetry 兼容
- * 3. 指标导出（Prometheus 格式）
- * 4. 线程安全
+ * Features:
+ * 1. Metrics collection and aggregation
+ * 2. OpenTelemetry compatibility
+ * 3. Metrics export (Prometheus format)
+ * 4. Thread safety
  */
 
 #include "daemon_errors.h"

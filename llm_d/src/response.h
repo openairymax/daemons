@@ -3,7 +3,7 @@
 
 /**
  * @file response.h
- * @brief 响应序列化接口
+ * @brief Response serialization interface.
  */
 
 #ifndef AIRY_RT_LLM_RESPONSE_H

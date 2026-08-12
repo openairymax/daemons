@@ -5,8 +5,9 @@
 #include "error.h"
 /**
  * @file skill_registry.c
- * @brief Skill 注册管理模块
- * @details 基于 market_service 公共 API 实现 Skill 的注册、查询和管理
+ * @brief Skill registration-management module.
+ * @details Implements skill registration, query and management on top of
+ *          the market_service public API.
  */
 
 #include "daemon_errors.h"

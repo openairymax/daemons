@@ -3,7 +3,8 @@
 
 /**
  * @file market_service_registry.c
- * @brief 市场服务注册域：agent/skill 注册（含同名更新与字段深拷贝）
+ * @brief Market service registration domain: agent/skill registration
+ *        (including same-name update and deep field copy).
  */
 
 #include "airy_memory.h"

@@ -3,17 +3,17 @@
 
 /**
  * @file config_manager.h
- * @brief 统一配置管理系统
+ * @brief Unified configuration management system.
  *
- * 提供跨守护进程的统一配置管理，支持：
- * - 多格式配置（JSON/YAML/INI/ENV）
- * - 配置热更新（文件监视+回调通知）
- * - 配置版本控制（变更历史+回滚）
- * - 环境差异化配置（dev/staging/prod）
- * - 配置校验与默认值
- * - 跨进程配置同步（基于共享内存）
+ * Cross-daemon unified configuration management supporting:
+ * - Multi-format config (JSON/YAML/INI/ENV)
+ * - Hot config reload (file watch + callback notification)
+ * - Config versioning (change history + rollback)
+ * - Environment-specific config (dev/staging/prod)
+ * - Config validation and defaults
+ * - Cross-process config sync (shared memory based)
  *
- * @see svc_common.h 服务管理框架
+ * @see svc_common.h service-management framework
  */
 
 #ifndef AIRY_RT_CONFIG_MANAGER_H
@@ -89,197 +89,195 @@ typedef bool (*cm_validator_t)(const char *key, const char *value, char *error_m
 
 
 /**
- * @brief 初始化配置管理器
- * @param config 配置参数（NULL使用默认）
- * @return 0成功，非0失败
+ * @brief Initialize the config manager.
+ * @param config Config params (NULL = defaults)
+ * @return 0 on success, non-zero on failure
  */
 int cm_init(const cm_config_t *config);
 
-/**
- * @brief 关闭配置管理器
- */
+/** @brief Shut down the config manager. */
 void cm_shutdown(void);
 
 
 /**
- * @brief 获取配置值
- * @param key 配置键（格式：namespace.key 或 key）
- * @param default_value 默认值（配置不存在时返回）
- * @return 配置值字符串
+ * @brief Get a config value.
+ * @param key Config key (format: namespace.key or key)
+ * @param default_value Default value (returned when key absent)
+ * @return Config value string
  */
 const char *cm_get(const char *key, const char *default_value);
 
 /**
- * @brief 获取整数配置值
- * @param key 配置键
- * @param default_value 默认值
- * @return 配置值
+ * @brief Get an integer config value.
+ * @param key Config key
+ * @param default_value Default value
+ * @return Config value
  */
 int64_t cm_get_int(const char *key, int64_t default_value);
 
 /**
- * @brief 获取浮点配置值
- * @param key 配置键
- * @param default_value 默认值
- * @return 配置值
+ * @brief Get a floating-point config value.
+ * @param key Config key
+ * @param default_value Default value
+ * @return Config value
  */
 double cm_get_double(const char *key, double default_value);
 
 /**
- * @brief 获取布尔配置值
- * @param key 配置键
- * @param default_value 默认值
- * @return 配置值
+ * @brief Get a boolean config value.
+ * @param key Config key
+ * @param default_value Default value
+ * @return Config value
  */
 bool cm_get_bool(const char *key, bool default_value);
 
 /**
- * @brief 设置配置值
- * @param key 配置键
- * @param value 配置值
- * @param source 来源标识
- * @return 0成功，非0失败
+ * @brief Set a config value.
+ * @param key Config key
+ * @param value Config value
+ * @param source Source identifier
+ * @return 0 on success, non-zero on failure
  */
 int cm_set(const char *key, const char *value, const char *source);
 
 /**
- * @brief 设置带命名空间的配置值
- * @param namespace_ 命名空间
- * @param key 配置键
- * @param value 配置值
- * @param source 来源标识
- * @return 0成功，非0失败
+ * @brief Set a namespaced config value.
+ * @param namespace_ Namespace
+ * @param key Config key
+ * @param value Config value
+ * @param source Source identifier
+ * @return 0 on success, non-zero on failure
  */
 int cm_set_namespaced(const char *namespace_, const char *key, const char *value,
                       const char *source);
 
 
 /**
- * @brief 从配置文件加载配置
+ * @brief Load config from a config file.
  *
- * 支持 JSON、YAML、INI 格式的配置文件。
- * 自动检测文件格式并使用对应的解析器。
- * 对于简单键值对格式（key=value 或 key: value），使用行解析。
+ * Supports JSON, YAML and INI config files. The format is auto-detected
+ * and the matching parser used. Simple key=value or key: value lines are
+ * parsed line-wise.
  *
- * @param path 文件路径
- * @param namespace_ 命名空间（NULL使用默认）
- * @return 加载的配置项数量，-1表示失败
+ * @param path File path
+ * @param namespace_ Namespace (NULL = default)
+ * @return Number of loaded items, -1 on failure
  */
 int cm_load_json(const char *path, const char *namespace_);
 
 /**
- * @brief 从环境变量加载配置
- * @param prefix 环境变量前缀（如"AIRY_"）
- * @param namespace_ 命名空间
- * @return 加载的配置项数量
+ * @brief Load config from environment variables.
+ * @param prefix Env-var prefix (e.g. "AIRY_")
+ * @param namespace_ Namespace
+ * @return Number of loaded items
  */
 int cm_load_env(const char *prefix, const char *namespace_);
 
 /**
- * @brief 从命令行参数加载配置
- * @param argc 参数数量
- * @param argv 参数数组
- * @return 加载的配置项数量
+ * @brief Load config from command-line arguments.
+ * @param argc Argument count
+ * @param argv Argument array
+ * @return Number of loaded items
  */
 int cm_load_args(int argc, char **argv);
 
 
 /**
- * @brief 注册配置变更回调
- * @param key_pattern 键模式（支持通配符*，NULL监视所有）
- * @param callback 回调函数
- * @param user_data 用户数据
- * @return 0成功，非0失败
+ * @brief Register a config-change callback.
+ * @param key_pattern Key pattern (supports * wildcards, NULL = watch all)
+ * @param callback Callback function
+ * @param user_data User data
+ * @return 0 on success, non-zero on failure
  */
 int cm_watch(const char *key_pattern, cm_change_callback_t callback, void *user_data);
 
 /**
- * @brief 取消配置监视
- * @param key_pattern 键模式
- * @param callback 回调函数
- * @return 0成功，非0失败
+ * @brief Cancel a config watch.
+ * @param key_pattern Key pattern
+ * @param callback Callback function
+ * @return 0 on success, non-zero on failure
  */
 int cm_unwatch(const char *key_pattern, cm_change_callback_t callback);
 
 /**
- * @brief 手动触发配置重新加载
- * @return 0成功，非0失败
+ * @brief Manually trigger a config reload.
+ * @return 0 on success, non-zero on failure
  */
 int cm_reload(void);
 
 
 /**
- * @brief 注册配置校验器
- * @param key_pattern 键模式
- * @param validator 校验函数
- * @return 0成功，非0失败
+ * @brief Register a config validator.
+ * @param key_pattern Key pattern
+ * @param validator Validator function
+ * @return 0 on success, non-zero on failure
  */
 int cm_register_validator(const char *key_pattern, cm_validator_t validator);
 
 /**
- * @brief 校验所有配置
- * @return 校验失败的配置数量
+ * @brief Validate all config.
+ * @return Number of failed validations
  */
 int cm_validate_all(void);
 
 
 /**
- * @brief 获取配置变更历史
- * @param key 配置键（NULL表示所有）
- * @param records [out] 变更记录数组
- * @param max_count 数组最大容量
- * @param found_count [out] 实际数量
- * @return 0成功，非0失败
+ * @brief Get the config change history.
+ * @param key Config key (NULL = all)
+ * @param records [out] Change-record array
+ * @param max_count Array capacity
+ * @param found_count [out] Actual count
+ * @return 0 on success, non-zero on failure
  */
 int cm_get_history(const char *key, cm_change_record_t *records, uint32_t max_count,
                    uint32_t *found_count);
 
 /**
- * @brief 回滚配置到指定版本
- * @param key 配置键
- * @param version 目标版本（0表示上一版本）
- * @return 0成功，非0失败
+ * @brief Roll config back to a given version.
+ * @param key Config key
+ * @param version Target version (0 = previous version)
+ * @return 0 on success, non-zero on failure
  */
 int cm_rollback(const char *key, uint64_t version);
 
 
 /**
- * @brief 获取当前环境
- * @return 环境名称
+ * @brief Get the current environment.
+ * @return Environment name
  */
 const char *cm_get_environment(void);
 
 /**
- * @brief 设置环境
- * @param env 环境名称（dev/staging/prod）
- * @return 0成功，非0失败
+ * @brief Set the environment.
+ * @param env Environment name (dev/staging/prod)
+ * @return 0 on success, non-zero on failure
  */
 int cm_set_environment(const char *env);
 
 /**
- * @brief 加载环境特定配置
- * @param env 环境名称
- * @return 加载的配置项数量
+ * @brief Load environment-specific config.
+ * @param env Environment name
+ * @return Number of loaded items
  */
 int cm_load_environment_config(const char *env);
 
 
 /**
- * @brief 导出配置为JSON字符串
- * @param namespace_ 命名空间（NULL导出全部）
- * @return JSON字符串（需调用者释放），失败返回NULL
+ * @brief Export config as a JSON string.
+ * @param namespace_ Namespace (NULL = export all)
+ * @return JSON string (caller frees), NULL on failure
  */
 char *cm_export_json(const char *namespace_);
 
 /**
- * @brief 获取配置条目数量
- * @return 条目数量
+ * @brief Get the number of config entries.
+ * @return Entry count
  */
 uint32_t cm_entry_count(void);
 
 /**
- * @brief 创建默认配置
- * @return 默认配置
+ * @brief Create a default config.
+ * @return Default config
  */
 cm_config_t cm_create_default_config(void);
 

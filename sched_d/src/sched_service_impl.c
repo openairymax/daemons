@@ -5,10 +5,11 @@
 #include "error.h"
 /**
  * @file sched_service_impl.c
- * @brief 调度服务核心实现（任务调度域）
- * @details 定义 struct sched_service（布局见 sched_service_internal.h）并实现
- *          scheduler_service.h 中任务调度域公共 API（队列/选路/worker 线程）；
- *          蓝图调度（DAG）域见 sched_dag_impl.c
+ * @brief Scheduler service core implementation (task-scheduling domain).
+ * @details Defines struct sched_service (layout in sched_service_internal.h)
+ *          and implements the task-scheduling public APIs in
+ *          scheduler_service.h (queue/routing/worker threads); the blueprint
+ *          (DAG) scheduling domain lives in sched_dag_impl.c.
  */
 
 #include "scheduler_service.h"

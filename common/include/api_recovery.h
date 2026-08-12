@@ -3,14 +3,15 @@
 
 /**
  * @file api_recovery.h
- * @brief API错误恢复系统：多凭证池 + 降级策略 + 熔断集成
+ * @brief API error-recovery system: multi-credential pool + degrade
+ *        strategy + circuit-breaker integration.
  *
- * 核心能力：
- * - 多凭证轮换池（Round-Robin + 健康度追踪）
- * - 模型降级链（primary → fallback1 → fallback2 → ...）
- * - 与熔断器深度集成
- * - 指数退避重试 + 抖动
- * - 恢复成功率统计 (>95% 目标)
+ * Core capabilities:
+ * - Multi-credential rotation pool (Round-Robin + health tracking)
+ * - Model degradation chain (primary -> fallback1 -> fallback2 -> ...)
+ * - Deep circuit-breaker integration
+ * - Exponential backoff retry + jitter
+ * - Recovery success-rate stats (>95% target)
  */
 
 #ifndef API_RECOVERY_H

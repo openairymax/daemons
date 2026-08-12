@@ -3,18 +3,19 @@
 
 /**
  * @file main.c
- * @brief Hook 守护进程入口（P0.18.1 样板宏化）
+ * @brief Hook daemon entry (P0.18.1 boilerplate macros).
  * @owner team-A
  *
- * 暴露 JSON-RPC 方法（hook.* 命名空间）：
- *   - hook.health : 注册表健康状态 + 已注册 Hook 总数
- *   - hook.ping   : 存活探针（含 uptime）
- *   - hook.status : 真实状态（总数 / 各类型计数）
- *   - hook.list   : 列出已注册（启用）的 Hook 及其统计
- *   - hook.stats  : 按名称查询单个 Hook 统计
+ * Exposes JSON-RPC methods (hook.* namespace):
+ *   - hook.health : registry health status + total registered Hook count
+ *   - hook.ping   : liveness probe (with uptime)
+ *   - hook.status : real status (total / per-type counts)
+ *   - hook.list   : list registered (enabled) Hooks with their stats
+ *   - hook.stats  : query a single Hook's stats by name
  *
- * 数据源：atoms/coreloopthree/src/hook/ 的 hook_registry（经 airy_coreloopthree 链接）。
- * Unix socket 路径：${AIRY_RUNTIME_DIR}/hook.sock
+ * Data source: the hook_registry in atoms/coreloopthree/src/hook/ (linked
+ * via airy_coreloopthree).
+ * Unix socket path: ${AIRY_RUNTIME_DIR}/hook.sock
  */
 
 #include "airy_memory.h"

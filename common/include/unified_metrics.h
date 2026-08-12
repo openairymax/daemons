@@ -3,16 +3,16 @@
 
 /**
  * @file unified_metrics.h
- * @brief 统一指标收集器 - 聚合所有守护进程指标
+ * @brief Unified metrics collector - aggregates all daemon metrics.
  *
- * 提供全局统一的指标收集入口，将所有守护进程的指标
- * 聚合到一个Prometheus端点，支持：
- * - 全局指标注册中心
- * - 按模块/守护进程分组导出
- * - Prometheus格式全覆盖导出
- * - 指标自动标注（模块名、实例ID等）
+ * Provides a single global metrics-collection entry, aggregating the
+ * metrics of every daemon into one Prometheus endpoint, supporting:
+ * - Global metric registry
+ * - Export grouped by module/daemon
+ * - Full Prometheus-format export
+ * - Automatic metric annotation (module name, instance ID, etc.)
  *
- * @see metrics.h 基础指标收集
+ * @see metrics.h  basic metrics collection
  */
 
 #ifndef AIRY_RT_UNIFIED_METRICS_H
@@ -81,122 +81,118 @@ typedef struct {
 
 
 /**
- * @brief 初始化统一指标收集器
- * @param config 配置参数（NULL使用默认）
- * @return 0成功，非0失败
+ * @brief Initialize the unified metrics collector.
+ * @param config Config params (NULL = defaults)
+ * @return 0 on success, non-zero on failure
  */
 int um_init(const um_config_t *config);
 
-/**
- * @brief 关闭统一指标收集器
- */
+/** @brief Shut down the unified metrics collector. */
 void um_shutdown(void);
 
 /**
- * @brief 检查是否已初始化
- * @return true已初始化，false未初始化
+ * @brief Check whether initialized.
+ * @return true if initialized, false otherwise
  */
 bool um_is_initialized(void);
 
 
 /**
- * @brief 注册指标模块
- * @param module_name 模块名称（如"gateway_d"、"sched_d"）
- * @param instance_id 实例ID（NULL使用默认）
- * @return 0成功，非0失败
+ * @brief Register a metrics module.
+ * @param module_name Module name (e.g. "gateway_d", "sched_d")
+ * @param instance_id Instance ID (NULL = default)
+ * @return 0 on success, non-zero on failure
  */
 int um_register_module(const char *module_name, const char *instance_id);
 
 /**
- * @brief 注销指标模块
- * @param module_name 模块名称
- * @return 0成功，非0失败
+ * @brief Unregister a metrics module.
+ * @param module_name Module name
+ * @return 0 on success, non-zero on failure
  */
 int um_unregister_module(const char *module_name);
 
 
 /**
- * @brief 注册指标定义
- * @param module_name 模块名称
- * @param name 指标名称
- * @param type 指标类型
- * @param help 帮助文本
- * @param labels 标签（如"method=\"GET\",path=\"/api\""）
- * @return 0成功，非0失败
+ * @brief Register a metric definition.
+ * @param module_name Module name
+ * @param name Metric name
+ * @param type Metric type
+ * @param help Help text
+ * @param labels Labels (e.g. "method=\"GET\",path=\"/api\"")
+ * @return 0 on success, non-zero on failure
  */
 int um_register_metric(const char *module_name, const char *name, um_metric_type_t type,
                        const char *help, const char *labels);
 
 /**
- * @brief 增加计数器
- * @param module_name 模块名称
- * @param name 指标名称
- * @param value 增加值
- * @return 0成功，非0失败
+ * @brief Increment a counter.
+ * @param module_name Module name
+ * @param name Metric name
+ * @param value Increment value
+ * @return 0 on success, non-zero on failure
  */
 int um_increment(const char *module_name, const char *name, uint64_t value);
 
 /**
- * @brief 设置仪表值
- * @param module_name 模块名称
- * @param name 指标名称
- * @param value 值
- * @return 0成功，非0失败
+ * @brief Set a gauge value.
+ * @param module_name Module name
+ * @param name Metric name
+ * @param value Value
+ * @return 0 on success, non-zero on failure
  */
 int um_gauge_set(const char *module_name, const char *name, double value);
 
 /**
- * @brief 观察直方图/摘要值
- * @param module_name 模块名称
- * @param name 指标名称
- * @param value 观察值
- * @return 0成功，非0失败
+ * @brief Observe a histogram/summary value.
+ * @param module_name Module name
+ * @param name Metric name
+ * @param value Observed value
+ * @return 0 on success, non-zero on failure
  */
 int um_observe(const char *module_name, const char *name, double value);
 
 
 /**
- * @brief 导出所有指标为Prometheus格式
- * @return Prometheus格式字符串（需调用者释放），失败返回NULL
+ * @brief Export all metrics in Prometheus format.
+ * @return Prometheus-format string (caller frees), NULL on failure
  */
 char *um_export_prometheus(void);
 
 /**
- * @brief 导出指定模块指标为Prometheus格式
- * @param module_name 模块名称（NULL导出全部）
- * @return Prometheus格式字符串（需调用者释放），失败返回NULL
+ * @brief Export one module's metrics in Prometheus format.
+ * @param module_name Module name (NULL = export all)
+ * @return Prometheus-format string (caller frees), NULL on failure
  */
 char *um_export_prometheus_module(const char *module_name);
 
 /**
- * @brief 导出所有指标为JSON格式
- * @return JSON字符串（需调用者释放），失败返回NULL
+ * @brief Export all metrics in JSON format.
+ * @return JSON string (caller frees), NULL on failure
  */
 char *um_export_json(void);
 
 
 /**
- * @brief 注册默认系统指标（CPU/内存/线程等）
- * @return 0成功，非0失败
+ * @brief Register default system metrics (CPU/memory/threads, etc.).
+ * @return 0 on success, non-zero on failure
  */
 int um_register_default_metrics(void);
 
-/**
- * @brief 更新默认系统指标
- */
+/** @brief Update the default system metrics. */
 void um_update_default_metrics(void);
 
 
 /**
- * @brief 获取统一指标统计
- * @param stats [out] 统计信息
- * @return 0成功，非0失败
+ * @brief Get unified-metrics statistics.
+ * @param stats [out] Statistics
+ * @return 0 on success, non-zero on failure
  */
 int um_get_stats(um_stats_t *stats);
 
 /**
- * @brief 创建默认配置
- * @return 默认配置
+ * @brief Create a default config.
+ * @return Default config
  */
 um_config_t um_create_default_config(void);
 

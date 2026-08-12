@@ -4,25 +4,26 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file main.c
- * @brief Cupolas 安全穹顶服务守护进程主入口（遵循 daemon 模块统一规范）
+ * @brief Cupolas security-dome service daemon main entry (daemon module
+ *        conventions).
  *
- * cupolas_d 将 cupolas 安全库拆分为独立 daemon，暴露 JSON-RPC 方法
- * （cupolas.* 命名空间）：
- *   - cupolas.check_permission : 权限裁决（1 允许 / 0 拒绝）
- *   - cupolas.sanitize         : 输入净化
- *   - cupolas.execute_command  : 隔离工位命令执行
- *   - cupolas.add_rule         : 动态添加权限规则
- *   - cupolas.audit_flush      : 刷新审计日志
- *   - cupolas.get_stats        : 服务统计（真实计数）
- *   - cupolas.shutdown         : 优雅退出
+ * cupolas_d splits the cupolas security library into a standalone daemon,
+ * exposing JSON-RPC methods (cupolas.* namespace):
+ *   - cupolas.check_permission : permission decision (1 allow / 0 deny)
+ *   - cupolas.sanitize         : input sanitization
+ *   - cupolas.execute_command  : isolated workbench command execution
+ *   - cupolas.add_rule         : dynamically add a permission rule
+ *   - cupolas.audit_flush      : flush audit logs
+ *   - cupolas.get_stats        : service stats (real counters)
+ *   - cupolas.shutdown         : graceful exit
  *
- * cupolas_d 自身是 cupolas 安全库的宿主进程：main() 通过
- * daemon_cupolas_init("cupolas_d") 初始化安全穹顶（权限引擎 + 输入净化 +
- * 审计日志 + daemon_security），退出前 daemon_cupolas_cleanup() 刷新审计。
+ * cupolas_d itself hosts the cupolas security library: main() initializes
+ * the security dome (permission engine + input sanitization + audit logs +
+ * daemon_security) via daemon_cupolas_init("cupolas_d"), and flushes the
+ * audit log via daemon_cupolas_cleanup() before exit.
  *
- * Unix socket 路径：${AIRY_RUNTIME_DIR}/cupolas.sock
+ * Unix socket path: ${AIRY_RUNTIME_DIR}/cupolas.sock
  */
 
 #include "daemon_main.h"
@@ -875,8 +876,9 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    /* cupolas_d 自身是 cupolas 安全库的宿主：
-     * 初始化安全穹顶（permission_engine + sanitizer + audit_logger + daemon_security） */
+    /* cupolas_d itself hosts the cupolas security library: initialize the
+     * security dome (permission_engine + sanitizer + audit_logger +
+     * daemon_security) */
     daemon_cupolas_init("cupolas_d");
 
     load_daemon_config(config_path);
@@ -940,8 +942,8 @@ int main(int argc, char **argv)
                                NULL);
     method_dispatcher_register(g_dispatcher_cupolas_d, "add_rule", on_add_rule_method, NULL);
     method_dispatcher_register(g_dispatcher_cupolas_d, "audit_flush", on_audit_flush_method, NULL);
-    /* L2 协议标准方法（02-l2-service-protocol.md：cupolas.health_check / cupolas.get_stats /
-     * cupolas.shutdown） */
+    /* L2 protocol standard methods (02-l2-service-protocol.md:
+     * cupolas.health_check / cupolas.get_stats / cupolas.shutdown) */
     method_dispatcher_register(g_dispatcher_cupolas_d, "health_check", on_health_check_method,
                                NULL);
     method_dispatcher_register(g_dispatcher_cupolas_d, "get_stats", on_get_stats_method, NULL);

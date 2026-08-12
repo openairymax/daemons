@@ -3,10 +3,11 @@
 
 /**
  * @file ipc_service_bus.c
- * @brief IPC服务总线实现 - 守护进程间统一通信框架
+ * @brief IPC service-bus implementation - unified inter-daemon comm framework.
  *
- * 实现守护进程间的高效通信抽象层，集成UnifiedProtocol协议栈，
- * 支持多协议消息传递、服务发现和负载均衡。
+ * Implements an efficient communication-abstraction layer between daemons,
+ * integrating the UnifiedProtocol stack, supporting multi-protocol message
+ * passing, service discovery and load balancing.
  *
  * @see ipc_service_bus.h
  */

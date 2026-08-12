@@ -2,9 +2,8 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
 /*
- *
  * @file tool_svc_adapter.h
- * @brief 工具服务适配器头文件
+ * @brief Tool service-adapter header.
  *
  */
 

@@ -3,10 +3,10 @@
 
 /**
  * @file cupolas_svc_adapter.h
- * @brief Cupolas 服务适配器头文件
+ * @brief Cupolas service-adapter header.
  *
- * 将 cupolas_service_t 适配到统一 AgentRT 服务管理框架（airy_svc_t），
- * 参照 mem_d 的 mem_svc_adapter.h 结构。
+ * Adapts cupolas_service_t to the unified AgentRT service framework
+ * (airy_svc_t), following the mem_svc_adapter.h structure of mem_d.
  *
  */
 

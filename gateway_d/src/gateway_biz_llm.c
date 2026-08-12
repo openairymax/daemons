@@ -4,13 +4,16 @@
 // @owner: team-B
 /**
  * @file gateway_biz_llm.c
- * @brief 网关 LLM 调用层与 agent 工具循环（ReAct）
+ * @brief Gateway LLM-call layer and agent tool loop (ReAct).
  *
- * 封装 llm_d 直连（complete）与 tool_d 执行（execute_tool），实现
- * LLM -> tool_calls -> 执行 -> 回灌的 ReAct 工具循环。双思考产物
- * （GCCP+GRAD DAG 计划）由上层注入 messages 后经本循环执行。
+ * Wraps the llm_d direct connection (complete) and tool_d execution
+ * (execute_tool), implementing the ReAct tool loop
+ * LLM -> tool_calls -> execute -> feed back. Dual-think products (GCCP+GRAD
+ * DAG plans) are injected into messages by the upper layer and executed
+ * through this loop.
  *
- * 从 gateway_business_handler.c 拆分（单一职责：LLM/工具执行）。
+ * Split from gateway_business_handler.c (single responsibility: LLM/tool
+ * execution).
  */
 
 #include "gateway_biz_internal.h"

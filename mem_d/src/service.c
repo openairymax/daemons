@@ -4,22 +4,24 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file service.c
- * @brief Memory 服务实现：记忆记录 CRUD + 向量检索
+ * @brief Memory service implementation: record CRUD + vector search.
  *
- * 从 gateway/src/utils/syscall_router.c 抽离的 g_runtime.records[] 逻辑，
- * 重构为独立的、自包含的服务模块。守护进程 mem_d 持有 mem_service_t
- * 实例并通过 Unix socket 暴露 mem.* 命名空间方法。
+ * Extracted from g_runtime.records[] logic in gateway/src/utils/syscall_router.c
+ * and refactored into a standalone, self-contained service module. The
+ * mem_d daemon holds a mem_service_t instance and exposes the mem.*
+ * namespace over a Unix socket.
  *
- * 设计要点：
- * - 自带哈希表（djb2 算法，与 syscall_router.c 同源但解耦）
- * - 线程安全：所有公共接口持锁
- * - 记录 ID：32 字符十六进制（基于时间戳 + 计数器，无外部依赖）
- * - 检索：自研 TF-IDF 向量余弦相似度（vector.c）与原子串评分按 0.6/0.4
- *   加权融合（权重可配置 AIRY_MEM_TFIDF_WEIGHT）；可选 embedding 后端
- *   （emb_client.c，AIRY_MEM_EMBEDDING_URL/KEY）增强，调用失败自动降级
- *   TF-IDF；记录无向量时退化为纯子串评分，保持向后兼容
+ * Design notes:
+ * - Own hash table (djb2, same origin as syscall_router.c but decoupled)
+ * - Thread safety: all public interfaces take the lock
+ * - Record ID: 32-char hex (timestamp + counter, no external deps)
+ * - Search: own TF-IDF vector cosine similarity (vector.c) fused with
+ *   substring scoring weighted 0.6/0.4 (weight configurable via
+ *   AIRY_MEM_TFIDF_WEIGHT); optional embedding backend (emb_client.c,
+ *   AIRY_MEM_EMBEDDING_URL/KEY) enhances and degrades to TF-IDF on call
+ *   failure; records without a vector fall back to pure substring scoring
+ *   for backward compatibility
  */
 
 #include "service.h"

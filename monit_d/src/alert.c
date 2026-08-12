@@ -4,16 +4,15 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file alert.c
- * @brief 告警管理系统实现
+ * @brief Alert-management system implementation.
  *
- * 功能：
- * 1. 告警生命周期管理（创建、触发、确认、解决）
- * 2. 告警规则引擎（阈值、趋势、组合条件）
- * 3. 告警通知渠道（日志、回调、升级）
- * 4. 告警去重和抑制
- * 5. 线程安全
+ * Features:
+ * 1. Alert lifecycle management (create, trigger, acknowledge, resolve)
+ * 2. Alert rule engine (threshold, trend, composite conditions)
+ * 3. Alert notification channels (log, callback, escalation)
+ * 4. Alert deduplication and suppression
+ * 5. Thread safety
  */
 
 #include "monitor_service.h"

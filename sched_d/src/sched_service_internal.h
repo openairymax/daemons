@@ -3,10 +3,12 @@
 
 /**
  * @file sched_service_internal.h
- * @brief 调度服务内部共享定义（任务调度域 + 蓝图调度 DAG 域）
- * @details 定义 struct sched_service（对外 opaque，此处为完整布局）与 DAG
- *          任务图内部结构；声明跨文件共享的辅助函数。仅供
- *          sched_service_impl.c 与 sched_dag_impl.c 两个翻译单元使用。
+ * @brief Internal shared definitions of the scheduler service (task-scheduling
+ *        domain + blueprint-scheduling DAG domain).
+ * @details Defines struct sched_service (opaque externally; full layout
+ *          here) and the DAG task-graph internal structures; declares
+ *          cross-file shared helpers. For use only by the sched_service_impl.c
+ *          and sched_dag_impl.c translation units.
  */
 
 #ifndef AIRY_RT_SCHED_SERVICE_INTERNAL_H
@@ -20,7 +22,8 @@
 #include <cjson/cJSON.h>
 
 /* ============================================================================
- * DAG 任务图内部结构（工作大厅机制：节点依赖 → 拓扑派发 → 状态看板）
+ * DAG task-graph internal structures (work-hall mechanism: node deps ->
+ * topological dispatch -> status board)
  * ============================================================================ */
 
 typedef struct sched_dag_node {
@@ -107,17 +110,20 @@ struct sched_service {
     airy_cond_t batch_cond;
 };
 
-/* 跨域共享辅助（sched_service_impl.c 与 sched_dag_impl.c 均使用）：
- * sched_now_ms —— 近似毫秒时钟（任务队列与 DAG 引擎共用，定义于
- * sched_service_impl.c）；
- * sched_dag_worker_thread —— DAG 工作线程入口（定义于 sched_dag_impl.c，
- * 由 sched_service_start_workers/stop_workers 启动与停止）。 */
+/* Cross-domain shared helpers (used by both sched_service_impl.c and
+ * sched_dag_impl.c):
+ * sched_now_ms - approximate millisecond clock (shared by the task queue
+ *   and the DAG engine, defined in sched_service_impl.c);
+ * sched_dag_worker_thread - DAG worker-thread entry (defined in
+ *   sched_dag_impl.c, started/stopped by sched_service_start_workers/
+ *   stop_workers). */
 uint64_t sched_now_ms(void);
 void *sched_dag_worker_thread(void *arg);
 
-/* DAG JSON 解析与拓扑校验（定义于 sched_dag_parse.c，由
- * sched_service_submit_dag 调用）：校验通过时返回新构建的 sched_dag_t，
- * 失败时内部完整回滚并返回具体错误码。 */
+/* DAG JSON parsing and topological validation (defined in
+ * sched_dag_parse.c, called by sched_service_submit_dag): on success
+ * returns a newly built sched_dag_t; on failure rolls back internally and
+ * returns the specific error code. */
 int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag);
 
 #endif /* AIRY_RT_SCHED_SERVICE_INTERNAL_H */

@@ -3,7 +3,7 @@
 
 /**
  * @file service.h
- * @brief 服务内部结构声明
+ * @brief Internal service structure declarations.
  */
 
 #ifndef AIRY_RT_LLM_SERVICE_INTERNAL_H
