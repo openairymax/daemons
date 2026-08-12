@@ -3,17 +3,17 @@
 
 /**
  * @file plugin_service.h
- * @brief Plugin 守护进程服务接口
+ * @brief Plugin daemon service interface.
  *
- * Plugin daemon 管理动态插件的加载、卸载、生命周期和沙箱。
- * 支持的插件类型：
- *   - TOOL_PROVIDER:  工具提供者插件
- *   - PROTOCOL_ADAPTER: 协议适配器插件
- *   - MEMORY_PROVIDER:  记忆提供商插件
- *   - HOOK_EXTENSION:   Hook 扩展插件
+ * The Plugin daemon manages dynamic-plugin loading, unloading, lifecycle
+ * and sandboxing. Supported plugin types:
+ *   - TOOL_PROVIDER:     tool-provider plugin
+ *   - PROTOCOL_ADAPTER:  protocol-adapter plugin
+ *   - MEMORY_PROVIDER:   memory-provider plugin
+ *   - HOOK_EXTENSION:    hook-extension plugin
  *
  * @owner team-A
- * @see contracts/contract_A_B.h 第3节（协议适配器 vtable）
+ * @see contracts/contract_A_B.h section 3 (protocol-adapter vtable)
  */
 
 #ifndef AIRY_RT_DAEMON_PLUGIN_D_PLUGIN_SERVICE_H
@@ -60,30 +60,30 @@ typedef struct {
 
 
 /**
- * @brief 插件初始化回调
- * @param config_path 配置文件路径
- * @param user_data   用户数据输出
- * @return 0 成功，非0失败
+ * @brief Plugin-init callback.
+ * @param config_path Config file path
+ * @param user_data   User-data output
+ * @return 0 on success, non-zero on failure
  */
 typedef int (*plugin_init_fn)(const char *config_path, void **user_data);
 
 /**
- * @brief 插件销毁回调
- * @param user_data 用户数据
+ * @brief Plugin-destroy callback.
+ * @param user_data User data
  */
 typedef void (*plugin_destroy_fn)(void *user_data);
 
 /**
- * @brief 插件启动回调
- * @param user_data 用户数据
- * @return 0 成功，非0失败
+ * @brief Plugin-start callback.
+ * @param user_data User data
+ * @return 0 on success, non-zero on failure
  */
 typedef int (*plugin_start_fn)(void *user_data);
 
 /**
- * @brief 插件停止回调
- * @param user_data 用户数据
- * @return 0 成功，非0失败
+ * @brief Plugin-stop callback.
+ * @param user_data User data
+ * @return 0 on success, non-zero on failure
  */
 typedef int (*plugin_stop_fn)(void *user_data);
 
@@ -111,79 +111,80 @@ typedef struct {
 
 
 /**
- * @brief 从动态库加载插件
- * @param library_path 动态库路径
- * @param config_path  配置文件路径
- * @param out_name     输出插件名称
- * @return 0 成功，非0失败
+ * @brief Load a plugin from a dynamic library.
+ * @param library_path Dynamic-library path
+ * @param config_path  Config file path
+ * @param out_name     Output plugin name
+ * @return 0 on success, non-zero on failure
  */
 int plugin_service_load(const char *library_path, const char *config_path, const char **out_name);
 
 /**
- * @brief 卸载插件
- * @param name 插件名称
- * @return 0 成功，非0失败
+ * @brief Unload a plugin.
+ * @param name Plugin name
+ * @return 0 on success, non-zero on failure
  */
 int plugin_service_unload(const char *name);
 
 /**
- * @brief 启动插件
- * @param name 插件名称
- * @return 0 成功，非0失败
+ * @brief Start a plugin.
+ * @param name Plugin name
+ * @return 0 on success, non-zero on failure
  */
 int plugin_service_start(const char *name);
 
 /**
- * @brief 停止插件
- * @param name 插件名称
- * @return 0 成功，非0失败
+ * @brief Stop a plugin.
+ * @param name Plugin name
+ * @return 0 on success, non-zero on failure
  */
 int plugin_service_stop(const char *name);
 
 /**
- * @brief 获取插件元数据
- * @param name     插件名称
- * @param metadata 输出元数据
- * @return 0 成功，非0失败
+ * @brief Get plugin metadata.
+ * @param name     Plugin name
+ * @param metadata Output metadata
+ * @return 0 on success, non-zero on failure
  */
 int plugin_service_get_metadata(const char *name, plugin_metadata_t *metadata);
 
 /**
- * @brief 获取插件状态
- * @param name  插件名称
- * @return 插件状态
+ * @brief Get the plugin state.
+ * @param name  Plugin name
+ * @return Plugin state
  */
 plugin_state_t plugin_service_get_state(const char *name);
 
 /**
- * @brief 获取插件统计
- * @param name  插件名称
- * @param stats 输出统计
- * @return 0 成功，非0失败
+ * @brief Get plugin statistics.
+ * @param name  Plugin name
+ * @param stats Output statistics
+ * @return 0 on success, non-zero on failure
  */
 int plugin_service_get_stats(const char *name, plugin_stats_t *stats);
 
 /**
- * @brief 列出所有已加载插件
- * @param names    输出名称数组（需调用者释放）
- * @param count    输出数量
- * @param type_filter 类型过滤（-1 表示所有类型）
- * @return 0 成功，非0失败
+ * @brief List all loaded plugins.
+ * @param names       Output name array (caller frees)
+ * @param count       Output count
+ * @param type_filter Type filter (-1 = all types)
+ * @return 0 on success, non-zero on failure
  */
 int plugin_service_list(char ***names, size_t *count, int type_filter);
 
 /**
- * @brief 执行插件（调用插件导出的 plugin_execute 符号）
+ * @brief Execute a plugin (calls the plugin_execute symbol it exports).
  *
- * 技能类插件通过 plugin_execute 提供 JSON 入参 → JSON 出参的执行入口，
- * 与设计文档 airy_sys_skill_execute() 的契约一致。plugin_d 通过 dlsym
- * 解析可选符号 plugin_execute，未导出该符号的插件执行将返回
- * AIRY_ERR_NOT_FOUND。
+ * Skill-type plugins expose a JSON-input -> JSON-output execution entry
+ * via plugin_execute, matching the airy_sys_skill_execute() contract in
+ * the design docs. plugin_d resolves the optional plugin_execute symbol
+ * via dlsym; executing a plugin that does not export it returns
+ * AIRY_ERR_NOT_FOUND.
  *
- * @param name       插件名称
- * @param json_input 输入 JSON 字符串
- * @param json_output 输出 JSON 字符串（由插件分配，调用者负责 AIRY_FREE）
- * @return 0 成功，非0失败
+ * @param name        Plugin name
+ * @param json_input  Input JSON string
+ * @param json_output Output JSON string (allocated by the plugin, caller AIRY_FREEs)
+ * @return 0 on success, non-zero on failure
  */
 int plugin_service_execute(const char *name, const char *json_input, char **json_output);
 

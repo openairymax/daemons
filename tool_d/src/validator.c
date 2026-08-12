@@ -5,7 +5,7 @@
 #include "error.h"
 /**
  * @file validator.c
- * @brief 工具参数验证器实现（基于 cJSON Schema 验证）
+ * @brief Tool parameter-validator implementation (cJSON Schema based).
  */
 
 #include "svc_logger.h"
@@ -177,8 +177,9 @@ int tool_validator_validate(tool_validator_t *val __attribute__((unused)),
             const char *pschema = meta->params[i].schema;
             cJSON *item = cJSON_GetObjectItem(root, pname);
 
-            /* 可选参数缺省（如 fs_list.path）直接跳过——与 gateway 工具 schema
-             * required 数组一致（SSoT，T2 修复）；仅必需参数缺一即拒。 */
+            /* Optional params omitted (e.g. fs_list.path) are skipped -
+             * consistent with the gateway tool schema's required array
+             * (SSoT, T2 fix); only a missing required param is rejected. */
             if (!item) {
                 if (meta->params[i].required) {
                     SVC_LOG_WARN("Missing required parameter '%s' for tool %s", pname, meta->id);

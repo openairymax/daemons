@@ -3,7 +3,7 @@
 
 /**
  * @file cost_tracker.h
- * @brief 成本跟踪接口（支持配置定价）
+ * @brief Cost-tracking interface (configurable pricing).
  */
 
 #ifndef AIRY_RT_LLM_COST_TRACKER_H

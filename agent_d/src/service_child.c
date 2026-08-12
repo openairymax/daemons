@@ -3,8 +3,9 @@
 
 /**
  * @file service_child.c
- * @brief Agent 服务子进程通信域：runner 子进程 fork/双向管道/就绪握手/
- *        超时读写/终止回收（Python/Rust 双语言启动）
+ * @brief Agent service child-process communication domain: runner child
+ *        fork / bidirectional pipes / readiness handshake / timed reads and
+ *        writes / terminate-and-reap (Python/Rust dual-language startup).
  */
 
 #include "airy_memory.h"

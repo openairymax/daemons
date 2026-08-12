@@ -5,7 +5,7 @@
 #include "error.h"
 /**
  * @file weighted.c
- * @brief 加权调度策略实现（基于实际API定义）
+ * @brief Weighted scheduling-strategy implementation (based on the real API).
  */
 
 #include "daemon_errors.h"

@@ -3,8 +3,9 @@
 
 /**
  * @file service_metrics.c
- * @brief LLM 服务统计域：输入复杂度评估、路由决策审计日志、
- *        服务统计导出与模型列表/默认模型查询
+ * @brief LLM service statistics domain: input-complexity evaluation,
+ *        routing-decision audit logs, service-stats export and
+ *        model-list/default-model queries.
  */
 
 #include "airy_memory.h"

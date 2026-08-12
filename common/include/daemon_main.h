@@ -3,20 +3,24 @@
 
 /**
  * @file daemon_main.h
- * @brief Daemon 主函数样板宏与公共辅助函数
+ * @brief Daemon main() boilerplate macros and common helpers.
  *
- * P0.18.1: 消除 12 个 daemon main.c 的重复样板代码（约 5,956 → 约 1,500 行）。
+ * P0.18.1: eliminates duplicated boilerplate across the 12 daemon main.c
+ * files (about 5,956 -> about 1,500 lines).
  *
- * 架构设计（P1.23 + daemon_startup.h）：
- * - 12 daemon 的主函数结构本质相同：init → create → run → cleanup
- * - 差异点仅在于：服务创建函数、方法注册表、服务销毁函数
- * - 本文件将完全相同的样板提取为 inline 函数，差异点通过模板宏注入
+ * Architecture (P1.23 + daemon_startup.h):
+ * - The 12 daemon main() structures are essentially identical:
+ *   init -> create -> run -> cleanup
+ * - The only differences: service-create function, method registration
+ *   table, service-destroy function
+ * - This file extracts the identical boilerplate into inline functions;
+ *   the differences are injected via template macros
  *
- * 使用方法：
- *   在每个 daemon 的 main.c 中，只需要：
- *   1. 定义服务全局变量
- *   2. 定义方法处理器
- *   3. 调用 DAEMON_MAIN_BOILERPLATE() 生成主函数
+ * Usage:
+ *   In each daemon's main.c, you only need to:
+ *   1. define service global variables
+ *   2. define method handlers
+ *   3. call DAEMON_MAIN_BOILERPLATE() to generate main()
  *
  * @see ARCHITECTURAL_PRINCIPLES.md E-3~E-6
  */
@@ -54,12 +58,13 @@ extern "C" {
 
 
 /**
- * @brief 生成 daemon main.c 的公共全局变量和信号处理声明
+ * @brief Generate the common global variables and signal-handler
+ *        declarations for a daemon main.c.
  *
- * @param daemon_name  daemon 进程名（如 "sched_d"）
- * @param daemon_cname daemon 配置和服务名（如 "scheduler"）
+ * @param daemon_name  Daemon process name (e.g. "sched_d")
+ * @param daemon_cname Daemon config and service name (e.g. "scheduler")
  *
- * 生成变量：
+ * Generates variables:
  *   - static atomic_int g_running = 1
  *   - static airy_mtx_t g_running_lock
  *   - static method_dispatcher_t *g_dispatcher = NULL
@@ -67,16 +72,18 @@ extern "C" {
  *   - static daemon_bootstrap_sd_t *g_bsd = NULL
  *   - static daemon_bootstrap_ipc_t *g_bipc = NULL
  *
- * 生成函数：
+ * Generates functions:
  *   - static void signal_handler(int sig)
  *   - static void svc_log_toggle_handler(int sig)
  *   - static void print_usage(const char *prog, const char *service_name)
  *   - static int daemon_handle_client(daemon_event_driver_t *driver,
  *         airy_sock_t client_fd, method_dispatcher_t *dispatcher)
  */
-/* SIGTERM 接收埋点：write 直接写 stderr（async-signal-safe，绕过日志锁）。
- * 必须在宏外做平台条件分支——预处理器指令（#if/#endif）不能出现在宏体内，
- * 否则 '#' 会被当作字符串化运算符导致 "'#' is not followed by a macro parameter"。 */
+/* SIGTERM receipt trace: write directly to stderr (async-signal-safe,
+ * bypasses the logging lock). The platform conditional must be outside
+ * the macro - preprocessor directives (#if/#endif) cannot appear inside a
+ * macro body, or '#' is taken as the stringize operator, causing "'#' is
+ * not followed by a macro parameter". */
 #if AIRY_PLATFORM_POSIX
 #define DAEMON_SIG_RECEIVED_TRACE(daemon_name)                                                 \
     do {                                                                                       \
@@ -84,7 +91,7 @@ extern "C" {
             "[SIG] shutdown signal received, initiating graceful shutdown\n";                  \
         if (write(STDERR_FILENO, _sig_msg_##daemon_name, sizeof(_sig_msg_##daemon_name) - 1) < \
             0) {                                                                               \
-            /* 忽略：stderr 不可写时信号埋点丢弃（信号路径无日志系统可用） */                  \
+            /* Ignored: signal trace dropped when stderr is unwritable    */                  \
         }                                                                                      \
     } while (0)
 #else
@@ -104,14 +111,16 @@ extern "C" {
     static void signal_handler_##daemon_name(int sig)                                                              \
     {                                                                                                              \
         (void)sig;                                                                                                 \
-        /* 信号处理器必须保持 async-signal-safe：不锁互斥锁、不调用日志系统，         \
-         * 仅做原子置位 + eventfd 异步安全唤醒，避免与日志锁死锁导致无法退出。       \
-         * 由 daemon_event_driver_stop_async 保持纯异步安全路径。                    */    \
+        /* Signal handlers must stay async-signal-safe: no mutex locks,     \
+         * no logging calls - only an atomic flag set plus eventfd async-   \
+         * safe wakeup, avoiding deadlock with the logging lock on exit.    \
+         * daemon_event_driver_stop_async keeps the path purely async-safe.*/\
         atomic_store_explicit(&g_running_##daemon_name, 0, memory_order_seq_cst);                                  \
         if (g_event_driver_##daemon_name)                                                                          \
             daemon_event_driver_stop_async(g_event_driver_##daemon_name);                                          \
-        /* 关键节点埋点：信号接收（write 为 async-signal-safe，绕过日志系统           \
-         * 避免锁死，输出到 stderr 便于排查）                                       */        \
+        /* Key-point trace: signal received (write is async-signal-safe,     \
+         * bypasses the logging system to avoid deadlock; stderr for easy    \
+         * diagnosis)                                                       */\
         DAEMON_SIG_RECEIVED_TRACE(daemon_name);                                                                    \
     }                                                                                                              \
                                                                                                                    \
@@ -146,11 +155,13 @@ extern "C" {
         airy_sock_t client_fd, method_dispatcher_t *dispatcher)                                                    \
     {                                                                                                              \
         char buffer[MAX_BUFFER];                                                                                   \
-        /* 等待请求数据就绪后再 recv。accept 返回的 fd 由事件驱动在 epoll 可读      \
-         * 事件中 accept，但数据可能尚未到达；airy_sock_recv 为 MSG_DONTWAIT 非阻塞  \
-         * 读取，立即 recv 会因 EAGAIN 返回 0 而误判连接失败并关闭，导致客户端       \
-         * send 时 SIGPIPE/请求丢失（RPC 时序竞态）。此处先 poll 等待 POLLIN。       \
-         * 5s 超时与客户端 daemon_rpc_call 默认 30s 相比足够，超时视为请求丢失。   */        \
+        /* Wait for request data before recv. The fd accepted by the event  \
+         * driver may not have data yet; airy_sock_recv is a MSG_DONTWAIT   \
+         * non-blocking read, so an immediate recv can return 0 on EAGAIN,   \
+         * be mistaken for a failed connection and closed, causing SIGPIPE / \
+         * lost requests on the client send (RPC timing race). Poll for     \
+         * POLLIN first. 5s timeout is ample vs the client daemon_rpc_call  \
+         * default of 30s; on timeout the request is treated as lost.      */\
         if (AIRY_PLATFORM_POSIX) {                                                                                 \
             struct pollfd pfd;                                                                                     \
             pfd.fd = (int)client_fd;                                                                               \
@@ -173,7 +184,7 @@ extern "C" {
             airy_sock_close(client_fd);                                                                            \
             return AIRY_ERR_FAIL;                                                                                  \
         }                                                                                                          \
-        /* P0.18.2: 模式 A — CJSON_PARSE_GUARD 自动释放 + NULL 检查 */                                             \
+        /* P0.18.2: mode A - CJSON_PARSE_GUARD auto-free + NULL check */                                             \
         CJSON_PARSE_GUARD(req, buffer, {                                                                           \
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR, "Parse error: invalid JSON", -1);                   \
             airy_sock_close(client_fd);                                                                            \
@@ -189,7 +200,7 @@ extern "C" {
         if (!cJSON_IsString(jsonrpc) || strcmp(jsonrpc->valuestring, "2.0") != 0 ||                                \
             !cJSON_IsString(method) || !id) {                                                                      \
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid Request", -1);                         \
-            /* req 由 CJSON_AUTO_FREE 自动释放 */                                                                  \
+            /* req is auto-freed by CJSON_AUTO_FREE */                                                            \
             airy_sock_close(client_fd);                                                                            \
             return AIRY_ERR_FAIL;                                                                                  \
         }                                                                                                          \
@@ -197,8 +208,9 @@ extern "C" {
         SVC_LOG_DEBUG("Processing request: method=%s, id=%d", method->valuestring, req_id);                        \
         int dr = method_dispatcher_dispatch(dispatcher, req, jsonrpc_build_error, &client_fd);                     \
         if (dr != 0) {                                                                                             \
-            /* dispatch 的错误路径只构建错误字符串不发送（历史缺陷），此处补发，     \
-               避免客户端收到空响应/EOF 无从诊断。 */ \
+            /* dispatch's error path only builds the error string without  \
+             * sending it (historical defect); resend here so the client   \
+             * does not receive an empty response/EOF with no diagnosis. */\
             if (dr == AIRY_ERR_NOT_FOUND) {                                                                        \
                 JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Method not found",                        \
                                    req_id);                                                                        \
@@ -208,7 +220,7 @@ extern "C" {
                 JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Internal error", req_id);                   \
             }                                                                                                      \
         }                                                                                                          \
-        /* req 由 CJSON_AUTO_FREE 自动释放 */                                                                      \
+        /* req is auto-freed by CJSON_AUTO_FREE */                                                                \
         airy_sock_close(client_fd);                                                                                \
         return 0;                                                                                                  \
     }                                                                                                              \
@@ -222,26 +234,31 @@ extern "C" {
 
 
 /**
- * @brief 生成标准 L2 <ns>.shutdown 方法处理器（02-l2-service-protocol.md §6.1）
+ * @brief Generate the standard L2 <ns>.shutdown method handler
+ *        (02-l2-service-protocol.md §6.1).
  *
- * 该方法与信号处理路径保持一致：原子置位 g_running_<daemon> + 唤醒事件驱动
- * （daemon_event_driver_stop_async），使主循环优雅退出（真实生效，非桩），
- * 随后向调用方返回成功响应。
+ * This method stays consistent with the signal-handling path: atomically
+ * clears g_running_<daemon> + wakes the event driver
+ * (daemon_event_driver_stop_async), so the main loop exits gracefully
+ * (really effective, not a stub), then returns a success response to the
+ * caller.
  *
- * 使用方式（main.c）：
- *   1. 在 DAEMON_DECLARE_COMMON(...) 之后（文件顶层）展开本宏生成处理器；
- *   2. 在 register_rpc_methods() 中注册：
+ * Usage (main.c):
+ *   1. Expand this macro after DAEMON_DECLARE_COMMON(...) (file top level)
+ *      to generate the handler;
+ *   2. Register it in register_rpc_methods():
  *        method_dispatcher_register(g_dispatcher_<daemon>, "shutdown",
  *                                   on_shutdown_method_<daemon>, NULL);
  *
- * @note user_data 由 daemon_handle_client_<daemon> 传入 &client_fd，
- *       因此 *(airy_sock_t *)user_data 为客户端 socket。
+ * @note user_data is passed &client_fd by daemon_handle_client_<daemon>,
+ *       so *(airy_sock_t *)user_data is the client socket.
  */
 #define DAEMON_DECLARE_SHUTDOWN_METHOD(daemon_name)                                      \
     static void on_shutdown_method_##daemon_name(cJSON *params, int id, void *user_data) \
     {                                                                                    \
         (void)params;                                                                    \
-        /* 与信号处理器一致：原子置位 + 事件驱动异步唤醒（async-signal-safe 路径）*/     \
+        /* Same as the signal handler: atomic flag + event-driver async-   \
+         * wakeup (async-signal-safe path)                                  */          \
         atomic_store_explicit(&g_running_##daemon_name, 0, memory_order_seq_cst);        \
         if (g_event_driver_##daemon_name)                                                \
             daemon_event_driver_stop_async(g_event_driver_##daemon_name);                \
@@ -252,13 +269,13 @@ extern "C" {
     }
 
 /**
- * @brief 跨平台信号处理设置
+ * @brief Cross-platform signal setup.
  *
- * @param daemon_name 用于生成独特的信号处理函数名称
+ * @param daemon_name Used to generate unique signal-handler function names
  *
- * 在所有 daemon 中相同：
- * - POSIX: SIGINT/SIGTERM → signal_handler, SIGPIPE → IGN, SIGUSR1 → svc_log_toggle
- * - Windows: SetConsoleCtrlHandler → console_handler
+ * Same in every daemon:
+ * - POSIX: SIGINT/SIGTERM -> signal_handler, SIGPIPE -> IGN, SIGUSR1 -> svc_log_toggle
+ * - Windows: SetConsoleCtrlHandler -> console_handler
  */
 #define DAEMON_SETUP_SIGNALS(daemon_name)                      \
     do {                                                       \
@@ -269,12 +286,12 @@ extern "C" {
     } while (0)
 
 /**
- * @brief 命令行参数解析（--manager, --tcp, --help）
+ * @brief Command-line argument parsing (--manager, --tcp, --help).
  *
- * @param config_path 配置路径指针，会被修改
- * @param use_tcp     TCP 标记指针，会被修改
+ * @param config_path Config-path pointer, will be modified
+ * @param use_tcp     TCP flag pointer, will be modified
  *
- * 返回值：0=继续, >0=exit(code), <0=error
+ * Return value: 0=continue, >0=exit(code), <0=error
  */
 static inline int daemon_parse_args(int argc, char **argv, const char **config_path, int *use_tcp,
                                     void (*print_usage_fn)(const char *))
@@ -299,15 +316,16 @@ static inline int daemon_parse_args(int argc, char **argv, const char **config_p
 }
 
 /**
- * @brief 创建服务器 Socket（TCP 或 Unix）
+ * @brief Create a server socket (TCP or Unix).
  *
- * 统一封装 TCP/Unix Socket 创建逻辑，消除各 daemon 的重复分支。
+ * Unifies TCP/Unix socket creation, removing duplicated branches in each
+ * daemon.
  *
- * @param use_tcp     是否使用 TCP
- * @param tcp_port    TCP 端口号（use_tcp=true 时使用）
- * @param unix_path   Unix Socket 路径（use_tcp=false 时使用）
- * @param win_pipe    Windows Named Pipe 路径
- * @return            成功返回 socket fd，失败返回 < 0
+ * @param use_tcp     Whether to use TCP
+ * @param tcp_port    TCP port (used when use_tcp=true)
+ * @param unix_path   Unix Socket path (used when use_tcp=false)
+ * @param win_pipe    Windows Named Pipe path
+ * @return            Socket fd on success, < 0 on failure
  */
 static inline airy_sock_t daemon_create_server_socket(int use_tcp, int tcp_port,
                                                       const char *unix_path, const char *win_pipe)
@@ -325,19 +343,19 @@ static inline airy_sock_t daemon_create_server_socket(int use_tcp, int tcp_port,
 }
 
 /**
- * @brief 创建并启动 Event Driver 与 Bootstrap 服务
+ * @brief Create and start the Event Driver and Bootstrap services.
  *
- * @param daemon_name  daemon 名（如 "sched_d"）
- * @param service_type 服务发现类型（如 "scheduler"）
- * @param socket_path  Socket 路径（Unix）或 "127.0.0.1"（TCP）
- * @param tcp_port     TCP 端口（0=Unix）
- * @param tags         服务标签（如 "scheduler,core"）
- * @param use_tcp      是否 TCP 模式
- * @param ev_config    事件驱动配置
- * @param p_event_driver 输出：事件驱动实例
- * @param p_bsd        输出：SD bootstrap 实例
- * @param p_bipc       输出：IPC bootstrap 实例
- * @return             AIRY_SUCCESS 或错误码
+ * @param daemon_name  Daemon name (e.g. "sched_d")
+ * @param service_type Service-discovery type (e.g. "scheduler")
+ * @param socket_path  Socket path (Unix) or "127.0.0.1" (TCP)
+ * @param tcp_port     TCP port (0=Unix)
+ * @param tags         Service tags (e.g. "scheduler,core")
+ * @param use_tcp      Whether TCP mode
+ * @param ev_config    Event-driver config
+ * @param p_event_driver Output: event-driver instance
+ * @param p_bsd        Output: SD bootstrap instance
+ * @param p_bipc       Output: IPC bootstrap instance
+ * @return             AIRY_SUCCESS or error code
  */
 static inline int daemon_init_event_driver(const char *daemon_name, const char *service_type,
                                            const char *socket_path, int tcp_port, const char *tags,
@@ -370,10 +388,10 @@ static inline int daemon_init_event_driver(const char *daemon_name, const char *
 }
 
 /**
- * @brief 标准 daemon 资源清理链
+ * @brief Standard daemon resource cleanup chain.
  *
- * 按照与 init 相反的顺序清理所有资源：
- *   bootstrap_ipc → bootstrap_sd → event_driver → socket → service → mutex → socket_cleanup → cupolas → log
+ * Cleans up all resources in reverse order of init:
+ *   bootstrap_ipc -> bootstrap_sd -> event_driver -> socket -> service -> mutex -> socket_cleanup -> cupolas -> log
  */
 static inline void daemon_cleanup_standard(daemon_bootstrap_ipc_t *bipc, daemon_bootstrap_sd_t *bsd,
                                            daemon_event_driver_t *event_driver,

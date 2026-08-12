@@ -3,33 +3,33 @@
 
 /**
  * @file daemon_platform_ext.h
- * @brief Daemon 模块平台扩展声明
+ * @brief Daemon-module platform extension declarations.
  *
- * P0.17 阶段 2：将 daemons 特有的平台函数声明和类型从 daemons 版
- * platform.h 中独立出来。由于 -I 路径顺序中 commons/platform/include
- * 排在 daemons/common/include 之前，daemons 子模块源文件的
- * #include "platform.h" 总是找到 commons 版 platform.h（无 daemons 特有
- * 函数声明，如 airy_dl_*、airy_sock_create_tcp_server 等）。
+ * P0.17 phase 2: split daemon-specific platform declarations and types out
+ * of the daemons platform.h. Due to -I path ordering (commons/platform/include
+ * precedes daemons/common/include), #include "platform.h" in daemon sources
+ * always resolves to the commons version (which lacks daemon-specific
+ * declarations such as airy_dl_*, airy_sock_create_tcp_server).
  *
- * 本文件解决此问题：daemons 子模块源文件通过
- * #include "daemon_platform_ext.h" 获取 daemons 特有声明，不依赖
- * platform.h 的同名覆盖机制。
+ * This file solves that: daemon sources include "daemon_platform_ext.h" to
+ * get daemon-specific declarations, without relying on platform.h name
+ * overriding.
  *
- * 设计原则：
- * - 不重复 commons 版 platform.h 已有的声明（airy_sleep_ms、
- *   airy_get_sysinfo、AIRY_THREAD_LOCAL 等）
- * - 只包含 daemons 特有的函数声明、类型和兼容别名
- * - 函数实现在 daemons/common/src/platform_compat.c
+ * Design principles:
+ * - No duplication of commons platform.h declarations (airy_sleep_ms,
+ *   airy_get_sysinfo, AIRY_THREAD_LOCAL, etc.)
+ * - Only daemon-specific function declarations, types and compat aliases
+ * - Implementations live in daemons/common/src/platform_compat.c
  *
- * @see agentrt/commons/platform/include/platform.h  (commons 权威平台抽象)
- * @see agentrt/daemons/common/src/platform_compat.c (daemons 特有实现)
+ * @see agentrt/commons/platform/include/platform.h  (commons authoritative)
+ * @see agentrt/daemons/common/src/platform_compat.c (daemon-specific impl)
  */
 
 #ifndef AIRY_RT_DAEMON_PLATFORM_EXT_H
 #define AIRY_RT_DAEMON_PLATFORM_EXT_H
 
-/* 确保 commons 版 platform.h 已被包含（提供 airy_mtx_t、airy_cond_t、
- * airy_thread_t、airy_sock_t、AIRY_PLATFORM_POSIX 等基础类型和宏） */
+/* Ensure the commons platform.h is included (provides airy_mtx_t,
+ * airy_cond_t, airy_thread_t, airy_sock_t, AIRY_PLATFORM_POSIX, ...) */
 #include <platform.h>
 
 #ifdef __cplusplus

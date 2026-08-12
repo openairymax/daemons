@@ -2,11 +2,11 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
 /*
- *
  * @file llm_svc_adapter.h
- * @brief LLM服务适配器头文件
+ * @brief LLM service-adapter header.
  *
- * 提供LLM服务与AgentRT统一服务管理框架的适配接口。
+ * Provides the adapter interface between the LLM service and the AgentRT
+ * unified service-management framework.
  *
  */
 

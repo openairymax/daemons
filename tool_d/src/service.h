@@ -3,7 +3,7 @@
 
 /**
  * @file service.h
- * @brief 工具服务内部结构声明
+ * @brief Tool-service internal structure declarations.
  */
 
 #ifndef TOOL_SERVICE_INTERNAL_H

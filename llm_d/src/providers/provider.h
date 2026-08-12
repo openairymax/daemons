@@ -3,7 +3,7 @@
 
 /**
  * @file provider.h
- * @brief 提供商适配器接口定义
+ * @brief Provider adapter interface definitions.
  */
 
 #ifndef AIRY_RT_LLM_PROVIDER_H
@@ -23,8 +23,9 @@ typedef struct provider_ctx provider_ctx_t;
 
 typedef struct {
     char api_key[256];
-    char api_key_env[128]; /* 记录 model.yaml api_key_env 名（如 DEEPSEEK_API_KEY），
-                             * 用于请求时从 secrets.env 热加载（启动后填 key 无需重启） */
+    char api_key_env[128]; /* model.yaml api_key_env name (e.g. DEEPSEEK_API_KEY);
+                            * hot-loaded from secrets.env per request, so keys
+                            * filled after startup need no restart */
     char api_base[512];
     char organization[128];
     double timeout_sec;
@@ -66,8 +67,9 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, cons
                         const char *organization, double timeout_sec, int max_retries,
                         const char *default_base);
 
-/* 热加载：每次请求前调用，若当前 api_key 为空则从 $AIRY_HOME/config/secrets.env
- * 读取 base_ctx->api_key_env 对应的值填充（启动后填 key 无需重启）。 */
+/* Hot reload: called before each request; if the current api_key is empty,
+ * fills it from $AIRY_HOME/config/secrets.env using base_ctx->api_key_env
+ * (keys filled after startup need no restart). */
 void provider_refresh_api_key(provider_base_ctx_t *base_ctx);
 
 int provider_http_post(const char *url, struct curl_slist *headers, const char *body,

@@ -3,11 +3,13 @@
 
 /**
  * @file notify_service.c
- * @brief 通知服务核心实现（notify.* 命名空间）
+ * @brief Notification service core implementation (notify.* namespace).
  *
- * 提供频道订阅注册表（subscribe/unsubscribe）、环形事件队列（enqueue）、
- * 多协议广播引擎（broadcast_event）与 JSON-RPC 方法分发（dispatch_jsonrpc）。
- * 方法名不带命名空间前缀——gateway 转发时已剥离 <ns>. 前缀（02-l2-service-protocol.md §5）。
+ * Provides the channel subscription registry (subscribe/unsubscribe), ring
+ * event queue (enqueue), multi-protocol broadcast engine (broadcast_event)
+ * and JSON-RPC method dispatch (dispatch_jsonrpc). Method names carry no
+ * namespace prefix - the gateway strips the <ns>. prefix when forwarding
+ * (02-l2-service-protocol.md §5).
  *
  */
 

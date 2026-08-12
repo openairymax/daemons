@@ -3,9 +3,9 @@
 
 /**
  * @file mem_svc_adapter.h
- * @brief Memory 服务适配器头文件
+ * @brief Memory service adapter header.
  *
- * 将 mem_service_t 适配到统一 AgentRT 服务管理框架（airy_svc_t）。
+ * Adapts mem_service_t to the unified AgentRT service framework (airy_svc_t).
  *
  */
 

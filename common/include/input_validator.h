@@ -3,7 +3,7 @@
 
 /**
  * @file input_validator.h
- * @brief 输入验证框架
+ * @brief Input-validation framework.
  */
 
 #ifndef AIRY_RT_INPUT_VALIDATOR_H

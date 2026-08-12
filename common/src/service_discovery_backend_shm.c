@@ -3,7 +3,8 @@
 
 /**
  * @file service_discovery_backend_shm.c
- * @brief 跨进程服务发现 shm 后端：内存注册表（默认，跨进程共享内存语义）
+ * @brief Cross-process service-discovery shm backend: in-memory registry
+ *        (default, cross-process shared-memory semantics).
  */
 
 #include "service_discovery_internal.h"

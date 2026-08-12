@@ -3,15 +3,18 @@
 
 /**
  * @file emb_client.c
- * @brief Memory 服务可选 embedding 后端客户端实现（libcurl + cJSON）
+ * @brief Optional embedding backend client implementation for the memory
+ *        service (libcurl + cJSON).
  *
- * 实现细节：
- * - 配置：AIRY_MEM_EMBEDDING_URL（base url）+ AIRY_MEM_EMBEDDING_KEY（可选 Bearer）
- * - 请求：POST {url}/embeddings，body={"model":"text-embedding-3-small","input":["<text>"]}
- * - 响应解析：data[0].embedding 浮点数组
- * - 降级：任何失败（HTTP 非 200 / 超时 / JSON 解析失败）标记 unhealthy 并记录冷却时间，
- *   冷却期（默认 60s，可用 AIRY_MEM_EMB_RETRY_SECONDS 调整）内不再发起网络请求，
- *   由上层自动降级为 TF-IDF 检索；冷却期后自动重试恢复
+ * Implementation details:
+ * - Config: AIRY_MEM_EMBEDDING_URL (base url) + AIRY_MEM_EMBEDDING_KEY (optional Bearer)
+ * - Request: POST {url}/embeddings, body={"model":"text-embedding-3-small","input":["<text>"]}
+ * - Response parsing: data[0].embedding float array
+ * - Degradation: any failure (non-200 HTTP / timeout / JSON parse failure)
+ *   marks unhealthy and records a cooldown time; during the cooldown
+ *   (default 60s, adjustable via AIRY_MEM_EMB_RETRY_SECONDS) no network
+ *   requests are made and the caller degrades to TF-IDF search; after the
+ *   cooldown it auto-retries to recover
  */
 
 #include "emb_client.h"

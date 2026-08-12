@@ -4,16 +4,15 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file tracing.c
- * @brief 分布式追踪系统实现
+ * @brief Distributed-tracing system implementation.
  *
- * 功能：
- * 1. 追踪和Span生命周期管理
- * 2. 上下文传播（W3C TraceContext兼容）
- * 3. 采样策略（始终/概率/速率限制）
- * 4. Span属性和事件
- * 5. 线程安全
+ * Features:
+ * 1. Trace and span lifecycle management
+ * 2. Context propagation (W3C TraceContext compatible)
+ * 3. Sampling policies (always/probability/rate limit)
+ * 4. Span attributes and events
+ * 5. Thread safety
  */
 
 #include "monitor_service.h"

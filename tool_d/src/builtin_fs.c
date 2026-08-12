@@ -3,8 +3,8 @@
 
 /**
  * @file builtin_fs.c
- * @brief 内置工具文件域：fs_read / fs_write / fs_list / fs_glob / fs_grep /
- *        fs_edit 文件系统操作工具实现
+ * @brief Built-in tool file domain: fs_read / fs_write / fs_list /
+ *        fs_glob / fs_grep / fs_edit filesystem-operation tool impls.
  */
 
 #include "airy_memory.h"

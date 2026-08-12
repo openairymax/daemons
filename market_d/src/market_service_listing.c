@@ -3,7 +3,8 @@
 
 /**
  * @file market_service_listing.c
- * @brief 市场服务列表域：已安装 agent/skill 列表查询与更新检查
+ * @brief Market service listing domain: installed agent/skill list queries
+ *        and update checks.
  */
 
 #include "airy_memory.h"

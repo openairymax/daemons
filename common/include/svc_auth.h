@@ -3,12 +3,12 @@
 
 /**
  * @file svc_auth.h
- * @brief Daemon 服务层认证中间件 - JWT/API Key/速率限制
+ * @brief Daemon service-layer auth middleware - JWT/API Key/rate limiting.
  *
- * 设计原则 (遵循 ARCHITECTURAL_PRINCIPLES.md):
- * - E-1 安全内生: 默认安全，所有请求必须验证
- * - E-4 跨平台一致性: Windows/Linux/macOS 统一实现
- * - E-5 命名语义化: 清晰的 API 命名
+ * Design principles (following ARCHITECTURAL_PRINCIPLES.md):
+ * - E-1 security built-in: secure by default, all requests must be verified
+ * - E-4 cross-platform consistency: uniform Windows/Linux/macOS implementation
+ * - E-5 semantic naming: clear API naming
  */
 
 #ifndef SVC_AUTH_H
@@ -38,9 +38,7 @@ extern "C" {
 #define AUTH_MISSING_CREDENTIALS (AIRY_ERR_DAEMON_BASE + 0x34)
 
 
-/**
- * @brief JWT 认证配置结构体
- */
+/** @brief JWT authentication config struct. */
 typedef struct jwt_config {
     const char *secret;
     size_t secret_len;
@@ -50,9 +48,7 @@ typedef struct jwt_config {
 } jwt_config_t;
 
 
-/**
- * @brief API Key 验证配置结构体
- */
+/** @brief API Key verification config struct. */
 typedef struct apikey_config {
     const char **allowed_keys;
     size_t key_count;
@@ -60,9 +56,7 @@ typedef struct apikey_config {
 } apikey_config_t;
 
 
-/**
- * @brief 速率限制器配置结构体
- */
+/** @brief Rate-limiter config struct. */
 typedef struct rate_limit_config {
     uint32_t requests_per_sec;
     uint32_t burst_size;
@@ -70,9 +64,7 @@ typedef struct rate_limit_config {
 } rate_limit_config_t;
 
 
-/**
- * @brief 认证结果上下文
- */
+/** @brief Authentication result context. */
 typedef struct auth_result {
     int status;
     const char *error_message;
@@ -83,123 +75,115 @@ typedef struct auth_result {
 
 
 /**
- * @brief 初始化 JWT 认证模块
- * @param config JWT 配置
- * @return 0 成功，非0 失败
+ * @brief Initialize the JWT auth module.
+ * @param config JWT config
+ * @return 0 on success, non-zero on failure
  *
- * @note 必须在服务启动时调用一次
+ * @note Must be called once at service startup
  */
 int auth_jwt_init(const jwt_config_t *config);
 
 /**
- * @brief 生成 JWT Token
- * @param subject 主体标识（用户ID或Agent ID）
- * @param role 角色（admin/user/agent）
- * @param out_token 输出的 Token 字符串（需调用者释放）
- * @return 0 成功，非0 失败
+ * @brief Generate a JWT token.
+ * @param subject Subject (user ID or agent ID)
+ * @param role Role (admin/user/agent)
+ * @param out_token Output token string (caller frees)
+ * @return 0 on success, non-zero on failure
  *
- * @ownership out_token: 调用者负责释放内存
+ * @ownership out_token: caller frees the memory
  */
 int auth_jwt_generate_token(const char *subject, const char *role, char **out_token);
 
 /**
- * @brief 验证 JWT Token
- * @param token 待验证的 Token
- * @param result 输出验证结果
- * @return 0 验证成功，非0 失败
+ * @brief Verify a JWT token.
+ * @param token Token to verify
+ * @param result Output verification result
+ * @return 0 on success, non-zero on failure
  *
- * @note 结果中的指针指向内部缓冲区，无需释放
+ * @note Pointers in the result reference internal buffers; no free needed
  */
 int auth_jwt_verify_token(const char *token, auth_result_t *result);
 
 /**
- * @brief 刷新 JWT Token
- * @param old_token 旧 Token
- * @param out_new_token 新 Token（需调用者释放）
- * @return 0 成功，非0 失败
+ * @brief Refresh a JWT token.
+ * @param old_token Old token
+ * @param out_new_token New token (caller frees)
+ * @return 0 on success, non-zero on failure
  */
 int auth_jwt_refresh_token(const char *old_token, char **out_new_token);
 
-/**
- * @brief 清理 JWT 模块资源
- */
+/** @brief Clean up JWT module resources. */
 void auth_jwt_cleanup(void);
 
 
 /**
- * @brief 初始化 API Key 验证模块
- * @param config API Key 配置
- * @return 0 成功，非0 失败
+ * @brief Initialize the API Key verification module.
+ * @param config API Key config
+ * @return 0 on success, non-zero on failure
  */
 int auth_apikey_init(const apikey_config_t *config);
 
 /**
- * @brief 验证 API Key
- * @param api_key 待验证的 Key
- * @param result 输出验证结果
- * @return 0 验证成功，非0 失败
+ * @brief Verify an API key.
+ * @param api_key Key to verify
+ * @param result Output verification result
+ * @return 0 on success, non-zero on failure
  */
 int auth_apikey_verify(const char *api_key, auth_result_t *result);
 
 /**
- * @brief 动态添加允许的 API Key
- * @param new_key 新的 Key
- * @return 0 成功，非0 失败
+ * @brief Dynamically add an allowed API key.
+ * @param new_key New key
+ * @return 0 on success, non-zero on failure
  */
 int auth_apikey_add(const char *new_key);
 
 /**
- * @brief 移除 API Key
- * @param key 要移除的 Key
- * @return 0 成功，非0 失败
+ * @brief Remove an API key.
+ * @param key Key to remove
+ * @return 0 on success, non-zero on failure
  */
 int auth_apikey_remove(const char *key);
 
-/**
- * @brief 清理 API Key 模块资源
- */
+/** @brief Clean up API Key module resources. */
 void auth_apikey_cleanup(void);
 
 
 /**
- * @brief 初始化速率限制器
- * @param config 速率限制配置
- * @return 0 成功，非0 失败
+ * @brief Initialize the rate limiter.
+ * @param config Rate-limit config
+ * @return 0 on success, non-zero on failure
  */
 int auth_ratelimit_init(const rate_limit_config_t *config);
 
 /**
- * @brief 检查是否允许请求
- * @param client_id 客户端标识（IP地址或连接ID）
- * @return 0 允许，AUTH_RATE_LIMIT_EXCEEDED 如果超限
+ * @brief Check whether a request is allowed.
+ * @param client_id Client identifier (IP address or connection ID)
+ * @return 0 allowed, AUTH_RATE_LIMIT_EXCEEDED if over the limit
  */
 int auth_ratelimit_check(const char *client_id);
 
 /**
- * @brief 重置客户端速率限制计数器
- * @param client_id 客户端标识
- * @return 0 成功
+ * @brief Reset a client's rate-limit counters.
+ * @param client_id Client identifier
+ * @return 0 on success
  */
 int auth_ratelimit_reset(const char *client_id);
 
 /**
- * @brief 获取当前速率限制统计信息
- * @param client_id 客户端标识
- * @param remaining 剩余可用请求数
- * @param reset_time 重置时间戳
- * @return 0 成功
+ * @brief Get current rate-limit statistics.
+ * @param client_id Client identifier
+ * @param remaining Remaining allowed requests
+ * @param reset_time Reset timestamp
+ * @return 0 on success
  */
 int auth_ratelimit_get_stats(const char *client_id, uint32_t *remaining, int64_t *reset_time);
 
-/**
- * @brief 清理速率限制器资源
- */
+/** @brief Clean up rate-limiter resources. */
 void auth_ratelimit_cleanup(void);
 
 
-/**
- * @brief 认证配置（统一初始化）
- */
+/** @brief Auth config (unified init). */
 typedef struct auth_config {
     jwt_config_t jwt;
     apikey_config_t apikey;
@@ -210,33 +194,31 @@ typedef struct auth_config {
 } auth_config_t;
 
 /**
- * @brief 初始化所有认证模块
- * @param config 统一认证配置
- * @return 0 成功，非0 失败
+ * @brief Initialize all auth modules.
+ * @param config Unified auth config
+ * @return 0 on success, non-zero on failure
  */
 int auth_init(const auth_config_t *config);
 
 /**
- * @brief 执行完整认证流程
- * @param auth_header Authorization 头部值（Bearer token 或 ApiKey xxx）
- * @param client_id 客户端标识
- * @param result 输出认证结果
- * @return 0 认证成功，非0 失败
+ * @brief Run the full authentication flow.
+ * @param auth_header Authorization header value (Bearer token or ApiKey xxx)
+ * @param client_id Client identifier
+ * @param result Output auth result
+ * @return 0 on success, non-zero on failure
  *
  * @details
- * 自动按顺序执行:
- * 1. 速率限制检查
- * 2. JWT 或 API Key 验证
+ * Runs automatically, in order:
+ * 1. Rate-limit check
+ * 2. JWT or API Key verification
  *
- * 支持两种格式:
+ * Supports two formats:
  * - Bearer <jwt_token>
  * - ApiKey <api_key>
  */
 int auth_authenticate(const char *auth_header, const char *client_id, auth_result_t *result);
 
-/**
- * @brief 清理所有认证模块
- */
+/** @brief Clean up all auth modules. */
 void auth_cleanup(void);
 
 #ifdef __cplusplus

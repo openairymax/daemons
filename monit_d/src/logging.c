@@ -4,16 +4,15 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file logging.c
- * @brief 结构化日志系统实现
+ * @brief Structured logging system implementation.
  *
- * 功能：
- * 1. 结构化日志记录（JSON格式）
- * 2. 日志级别过滤
- * 3. 多输出目标（文件、回调、环形缓冲区）
- * 4. 日志上下文传播
- * 5. 线程安全
+ * Features:
+ * 1. Structured log records (JSON format)
+ * 2. Log-level filtering
+ * 3. Multiple output targets (file, callback, ring buffer)
+ * 4. Log-context propagation
+ * 5. Thread safety
  */
 
 #include "monitor_service.h"

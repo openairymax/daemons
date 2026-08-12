@@ -3,10 +3,10 @@
 
 /**
  * @file daemon_bootstrap_ipc.c
- * @brief P1.8 C-L09: daemon IPC Bus 一键引导实现
+ * @brief P1.8 C-L09: daemon IPC Bus one-call bootstrap implementation.
  *
  * @see daemon_bootstrap_ipc.h
- * @see P1.8 C-L09 连接线
+ * @see P1.8 C-L09 wiring
  */
 
 #include "daemon_bootstrap_ipc.h"

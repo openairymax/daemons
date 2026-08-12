@@ -3,9 +3,9 @@
 
 /**
  * @file channel_service.h
- * @brief UnifiedChannel 统一通道服务 API
+ * @brief Unified channel service API.
  *
- * IMP-08: 统一通道服务，支持 SOCKET/SHM 通道类型
+ * IMP-08: unified channel service supporting SOCKET/SHM channel types.
  */
 
 #ifndef AIRY_RT_CHANNEL_SERVICE_H

@@ -2,20 +2,19 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
 /*
- *
  * @file gateway_service.h
- * @brief Gateway守护进程服务接口
+ * @brief Gateway daemon service interface.
  *
- * gateway_d 是 AgentRT 的网关守护进程，负责：
- * 1. 管理 HTTP/WebSocket/Stdio 网关实例
- * 2. 提供统一的配置管理
- * 3. 实现服务生命周期管理
- * 4. 对接系统调用接口
+ * gateway_d is AgentRT's gateway daemon, responsible for:
+ * 1. Managing HTTP/WebSocket/Stdio gateway instances
+ * 2. Providing unified configuration management
+ * 3. Implementing service lifecycle management
+ * 4. Interfacing with the syscall layer
  *
- * 架构定位：
- *   gateway_d/ → agentrt/gateway/ → agentrt/atoms/syscall/
- *       ↑           ↑
- *    守护进程    协议转换层
+ * Architecture:
+ *   gateway_d/ -> agentrt/gateway/ -> agentrt/atoms/syscall/
+ *       ^           ^
+ *    daemon      protocol-translation layer
  *
  */
 
@@ -32,9 +31,7 @@ extern "C" {
 #endif
 
 
-/**
- * @brief 网关类型枚举
- */
+/** @brief Gateway type enum. */
 typedef enum {
     GATEWAY_DAEMON_TYPE_HTTP = 0,
     GATEWAY_DAEMON_TYPE_WS,
@@ -42,9 +39,7 @@ typedef enum {
 } gateway_daemon_type_t;
 
 
-/**
- * @brief 单个网关配置
- */
+/** @brief Single gateway config. */
 typedef struct {
     gateway_daemon_type_t type;
     const char *host;
@@ -54,9 +49,7 @@ typedef struct {
     uint32_t timeout_ms;
 } gateway_daemon_config_t;
 
-/**
- * @brief 网关服务配置
- */
+/** @brief Gateway service config. */
 typedef struct {
     const char *name;
     const char *version;
@@ -70,115 +63,116 @@ typedef struct {
 } gateway_service_config_t;
 
 
-/**
- * @brief 网关服务句柄
- */
+/** @brief Gateway service handle. */
 typedef struct gateway_service_s *gateway_service_t;
 
 
 /**
- * @brief 创建网关服务
- * @param[out] service 服务句柄输出
- * @param[in] config 服务配置
- * @return AIRY_SUCCESS 成功
+ * @brief Create a gateway service.
+ * @param[out] service Service-handle output
+ * @param[in] config Service config
+ * @return AIRY_SUCCESS on success
  */
 AIRY_API airy_err_t gateway_service_create(gateway_service_t *service,
                                            const gateway_service_config_t *config);
 
 /**
- * @brief 销毁网关服务
- * @param[in] service 服务句柄
+ * @brief Destroy a gateway service.
+ * @param[in] service Service handle
  */
 AIRY_API void gateway_service_destroy(gateway_service_t service);
 
 /**
- * @brief 初始化网关服务
- * @param[in] service 服务句柄
- * @return AIRY_SUCCESS 成功
+ * @brief Initialize a gateway service.
+ * @param[in] service Service handle
+ * @return AIRY_SUCCESS on success
  */
 AIRY_API airy_err_t gateway_service_init(gateway_service_t service);
 
 /**
- * @brief 启动网关服务
- * @param[in] service 服务句柄
- * @return AIRY_SUCCESS 成功
+ * @brief Start a gateway service.
+ * @param[in] service Service handle
+ * @return AIRY_SUCCESS on success
  */
 AIRY_API airy_err_t gateway_service_start(gateway_service_t service);
 
 /**
- * @brief 停止网关服务
- * @param[in] service 服务句柄
- * @param[in] force 是否强制停止
- * @return AIRY_SUCCESS 成功
+ * @brief Stop a gateway service.
+ * @param[in] service Service handle
+ * @param[in] force Whether to force stop
+ * @return AIRY_SUCCESS on success
  */
 AIRY_API airy_err_t gateway_service_stop(gateway_service_t service, bool force);
 
 
 /**
- * @brief 获取服务状态
- * @param[in] service 服务句柄
- * @return 服务状态
+ * @brief Get the service state.
+ * @param[in] service Service handle
+ * @return Service state
  */
 AIRY_API airy_svc_state_t gateway_service_get_state(gateway_service_t service);
 
 /**
- * @brief 检查服务是否运行中
- * @param[in] service 服务句柄
- * @return true 运行中
+ * @brief Check whether the service is running.
+ * @param[in] service Service handle
+ * @return true if running
  */
 AIRY_API bool gateway_service_is_running(gateway_service_t service);
 
 /**
- * @brief 获取服务统计信息
- * @param[in] service 服务句柄
- * @param[out] stats 统计信息输出
- * @return AIRY_SUCCESS 成功
+ * @brief Get service statistics.
+ * @param[in] service Service handle
+ * @param[out] stats Statistics output
+ * @return AIRY_SUCCESS on success
  */
 AIRY_API airy_err_t gateway_service_get_stats(gateway_service_t service, airy_svc_stats_t *stats);
 
 /**
- * @brief 执行健康检查
- * @param[in] service 服务句柄
- * @return AIRY_SUCCESS 健康
+ * @brief Run a health check.
+ * @param[in] service Service handle
+ * @return AIRY_SUCCESS if healthy
  */
 AIRY_API airy_err_t gateway_service_healthcheck(gateway_service_t service);
 
 
 /**
- * @brief 从配置文件加载配置
- * @param[out] config 配置输出
- * @param[in] config_path 配置文件路径
- * @return AIRY_SUCCESS 成功
+ * @brief Load config from a config file.
+ * @param[out] config Config output
+ * @param[in] config_path Config file path
+ * @return AIRY_SUCCESS on success
  */
 AIRY_API airy_err_t gateway_service_load_config(gateway_service_config_t *config,
                                                 const char *config_path);
 
 /**
- * @brief 获取默认配置
- * @param[out] config 配置输出
+ * @brief Get the default config.
+ * @param[out] config Config output
  */
 AIRY_API void gateway_service_get_default_config(gateway_service_config_t *config);
 
 
 /**
- * @brief 网关业务请求处理器（内部签名，与 http_gateway 底层 handler 对齐）
+ * @brief Gateway business-request handler (internal signature, aligned with
+ *        the http_gateway underlying handler).
  *
- * @param request 标准 JSON-RPC 请求字符串（UTF-8，由多协议处理器标准化）
- * @param user_data 注册时传入的用户数据
- * @return JSON 响应字符串（AIRY_MALLOC 分配，调用方负责释放），失败返回 NULL
+ * @param request Standard JSON-RPC request string (UTF-8, normalized by the
+ *                multi-protocol handler)
+ * @param user_data User data passed at registration
+ * @return JSON response string (AIRY_MALLOC-allocated, caller frees), NULL on failure
  */
 typedef char *(*gateway_service_handler_t)(void *request, void *user_data);
 
 /**
- * @brief 注册网关业务请求处理器
+ * @brief Register the gateway business-request handler.
  *
- * 未注册时 HTTP JSON-RPC 请求返回 "Custom handler failed"（handler 为 NULL）。
- * 必须在 gateway_service_start() 之前调用才生效。
+ * Without registration, HTTP JSON-RPC requests return "Custom handler failed"
+ * (handler is NULL). Must be called before gateway_service_start() to take
+ * effect.
  *
- * @param[in] service 服务句柄
- * @param[in] handler 业务处理器
- * @param[in] user_data 用户数据（随 handler 透传）
- * @return AIRY_SUCCESS 成功
+ * @param[in] service Service handle
+ * @param[in] handler Business handler
+ * @param[in] user_data User data (passed through to the handler)
+ * @return AIRY_SUCCESS on success
  */
 AIRY_API airy_err_t gateway_service_set_handler(gateway_service_t service,
                                                 gateway_service_handler_t handler, void *user_data);

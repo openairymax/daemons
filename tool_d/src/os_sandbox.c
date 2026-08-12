@@ -3,19 +3,25 @@
 
 //
 // @file os_sandbox.c
-// @brief shell_run OS 级沙箱实现（Landlock + seccomp + rlimit）
+// @brief shell_run OS-level sandbox implementation (Landlock + seccomp + rlimit)
 //
-// 实现说明（对标 Codex linux-sandbox）：
-// - Landlock：内核 LSM 提供的用户态文件系统沙箱。白名单语义——
-//   restrict_self 之后，进程只能访问显式放行的路径，其余一律 EACCES。
-//   无需 root，无能力依赖，是 shell_run 防"写系统目录/读越权文件"的核心。
-// - seccomp：BPF 黑名单过滤，禁止 mount/umount2/ptrace/unshare/setns 等
-//   特权与命名空间 syscall，防止沙箱内进程获得更高权限。
-// - rlimit：RLIMIT_AS/NOFILE/NPROC/CPU/CORE，防止 fork 炸弹/内存耗尽。
+// Implementation notes (mirroring Codex linux-sandbox):
+// - Landlock: kernel-LSM user-space filesystem sandbox. Whitelist
+//   semantics - after restrict_self, the process can only access explicitly
+//   allowed paths; everything else is EACCES. No root needed, no capability
+//   dependency; this is the core of shell_run's protection against
+//   "writing system dirs / reading unauthorized files".
+// - seccomp: BPF blacklist filtering, forbidding privileged and namespace
+//   syscalls such as mount/umount2/ptrace/unshare/setns, preventing the
+//   sandboxed process from gaining higher privileges.
+// - rlimit: RLIMIT_AS/NOFILE/NPROC/CPU/CORE, preventing fork bombs /
+//   memory exhaustion.
 //
-// Landlock ABI 常量自包含定义（对齐 Linux UAPI，不依赖内核头版本）。
+// Landlock ABI constants are defined self-contained (aligned with Linux
+// UAPI, not depending on kernel-header versions).
 //
-// 平台支持：仅 Linux。macOS/Windows 编译为空实现（OS_SANDBOX_MODE_OFF）。
+// Platform support: Linux only. macOS/Windows compile to an empty
+// implementation (OS_SANDBOX_MODE_OFF).
 
 #include "os_sandbox.h"
 #include "airy_memory.h"

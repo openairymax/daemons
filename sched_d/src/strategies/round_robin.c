@@ -5,8 +5,8 @@
 #include "error.h"
 /**
  * @file round_robin.c
- * @brief 轮询调度策略实现
- * @details 按照注册顺序依次选择可用的 Agent
+ * @brief Round-robin scheduling-strategy implementation.
+ * @details Selects available agents in registration order.
  */
 
 #include "scheduler_service.h"
@@ -18,9 +18,7 @@
 
 #include "../../../../commons/utils/error/include/error.h"
 
-/**
- * @brief 轮询调度策略数据
- */
+/** @brief Round-robin scheduling-strategy data. */
 typedef struct {
     agent_info_t **agents;
     size_t agent_count;
@@ -28,10 +26,9 @@ typedef struct {
     size_t max_agents;
 } round_robin_data_t;
 
-/**
- * @brief 安全复制字符串
- * @param src 源字符串
- * @return 复制后的字符串，失败返回NULL
+/** @brief Safely copy a string.
+ * @param src Source string
+ * @return Copied string, NULL on failure
  */
 static char *safe_strdup(const char *src)
 {

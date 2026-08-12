@@ -3,7 +3,7 @@
 
 /**
  * @file config_manager.c
- * @brief 统一配置管理系统实现
+ * @brief Unified configuration management system implementation.
  *
  * @see config_manager.h
  */
@@ -14,8 +14,9 @@
 #include "daemon_platform_ext.h"
 #include "safe_string_utils.h"
 #include "svc_logger.h"
-/* P0.17 阶段 2: commons 版 error.h 已通过 svc_logger.h 间接包含，
- * 此处包含 daemon_errors.h 获取 daemon 模块扩展错误码（如 AIRY_ERR_DAEMON_INIT_FAILED） */
+/* P0.17 phase 2: commons error.h is included transitively via svc_logger.h;
+ * include daemon_errors.h here for the daemon extension codes (e.g.
+ * AIRY_ERR_DAEMON_INIT_FAILED). */
 #include "daemon_errors.h"
 
 #include <stdio.h>

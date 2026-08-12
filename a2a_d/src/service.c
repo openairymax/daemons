@@ -4,19 +4,19 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file service.c
- * @brief A2A 服务实现：封装 a2a_v03_adapter 库
+ * @brief A2A service implementation wrapping the a2a_v03_adapter library.
  *
- * 将 a2a_v03_adapter 库的 C API 适配为面向 a2a_d 守护进程的服务模块。
- * 守护进程 a2a_d 持有 a2a_service_t 实例并通过 Unix socket 暴露
- * a2a.* 命名空间方法（智能体注册/发现、任务生命周期、消息传递）。
+ * Adapts the a2a_v03_adapter C API into a service module for the a2a_d
+ * daemon. The daemon holds an a2a_service_t instance and exposes the
+ * a2a.* namespace over a Unix socket (agent registration/discovery,
+ * task lifecycle, messaging).
  *
- * 设计要点：
- * - 持有 a2a_v03_context_t*，所有操作委托给 adapter 库
- * - 线程安全：所有公共接口持锁
- * - JSON 序列化：使用 cJSON 构建，返回 AIRY_STRDUP'd 字符串
- * - 内存所有权遵循 adapter 库契约（见各函数注释）
+ * Design notes:
+ * - Holds a2a_v03_context_t*, all operations delegate to the adapter lib
+ * - Thread safety: all public interfaces take the lock
+ * - JSON serialization via cJSON, returns AIRY_STRDUP'd strings
+ * - Memory ownership follows the adapter lib contract (see function docs)
  */
 
 #include "service.h"
@@ -481,9 +481,10 @@ int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id, co
     message.type = A2A_MSG_TEXT;
     message.content_json = (char *)content_json;
 
-    /* 网络往返在全局锁外执行：不同目标的消息发送可并行，
-     * 不阻塞其他 A2A 操作（a2a_v03_send_message 内部经 handler
-     * 分发，ctx 为协议上下文，调用本身不依赖本服务共享状态） */
+    /* Network round-trip runs outside the global lock so sends to
+     * different targets can proceed in parallel without blocking other
+     * A2A operations (send is dispatched via the protocol context and
+     * does not depend on this service's shared state). */
     a2a_message_t *response = NULL;
     size_t response_count = 0;
     int rc = a2a_v03_send_message(svc->ctx, target_agent_id, &message, &response, &response_count);
@@ -510,8 +511,8 @@ int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id, co
     char *str = cJSON_PrintUnformatted(arr);
     cJSON_Delete(arr);
 
-    /* 释放 adapter 分配的响应消息：a2a_message_destroy 已释放 struct 本身，
-     * 不可再次 AIRY_FREE(response) 否则 double-free */
+    /* a2a_message_destroy already frees the struct itself, so do not
+     * AIRY_FREE(response) again (double free). */
     if (response) {
         for (size_t i = 0; i < response_count; i++)
             a2a_message_destroy(&response[i]);

@@ -3,11 +3,12 @@
 
 /**
  * @file notify_service.h
- * @brief 通知服务核心（notify.* 命名空间）
+ * @brief Notification service core (notify.* namespace).
  *
- * 承载 notify_d 的服务核心逻辑：频道订阅注册表、环形事件队列、
- * 多协议（WebSocket / SSE / Unix Socket）广播引擎与 JSON-RPC 方法分发。
- * 网络层（accept 循环、WS 握手、客户端生命周期）由 src/main.c 编排。
+ * Carries the notify_d service core: channel subscription registry, ring
+ * event queue, multi-protocol (WebSocket / SSE / Unix Socket) broadcast
+ * engine and JSON-RPC method dispatch. The network layer (accept loop, WS
+ * handshake, client lifecycle) is orchestrated by src/main.c.
  *
  */
 
@@ -97,8 +98,9 @@ int notify_d_has_subscription(notify_d_service_t *svc, const char *channel, cons
 size_t notify_d_subscription_count(notify_d_service_t *svc, const char *channel);
 
 
-/* 注意：notify_d_enqueue 不持有锁，调用方须保证持锁（与消费线程互斥），
- * 或在单线程上下文（单元测试）中调用。 */
+/* Note: notify_d_enqueue does not take the lock; the caller must hold it
+ * (mutually exclusive with the consumer thread), or call it in a
+ * single-threaded context (unit tests). */
 int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char *channel,
                      const char *event_type);
 int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *event);

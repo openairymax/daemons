@@ -3,7 +3,7 @@
 
 /**
  * @file tool_helpers.h
- * @brief 工具辅助函数头文件
+ * @brief Tool helper-function header.
  */
 
 #ifndef TOOL_HELPERS_H

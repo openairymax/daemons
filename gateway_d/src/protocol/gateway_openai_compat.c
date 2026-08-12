@@ -318,9 +318,10 @@ static int handle_chat_completions(gw_openai_compat_t *compat, const char *body_
                                  temperature, max_tokens, &llm_response, compat->llm_call_data);
 
     if (rc != 0 || !llm_response) {
-        /* 注意：model/messages/functions 在此处仍有效，须在错误分支打印
-         * 完成之后再释放，避免 use-after-free（此前先释放后引用导致
-         * ASan heap-use-after-free 崩溃）。 */
+        /* Note: model/messages/functions are still valid here; print them
+         * in the error branch before freeing, to avoid use-after-free (the
+         * previous code freed then referenced, causing an ASan
+         * heap-use-after-free crash). */
         LOG_ERROR("LLM call failed: model=%s, rc=%d", model ? model : compat->config.default_model,
                   rc);
         AIRY_FREE(llm_response);

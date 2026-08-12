@@ -130,9 +130,10 @@ int method_dispatcher_dispatch(method_dispatcher_t *disp, cJSON *request,
 
     int index = find_method_index(disp, method);
     if (index < 0) {
-        /* 命名空间兼容：外部客户端按 "namespace.method"（如 agent.spawn）调用，
-           而各 daemon 注册使用短名（spawn）。剥离命名空间前缀后二次匹配，
-           避免按文档全名调用时 method not found。 */
+        /* Namespace compatibility: external clients call by
+         * "namespace.method" (e.g. agent.spawn) while each daemon registers
+         * short names (spawn). Strip the namespace prefix and retry, so
+         * full documented names do not yield method-not-found. */
         const char *dot = strchr(method, '.');
         if (dot && dot[1] != '\0') {
             index = find_method_index(disp, dot + 1);

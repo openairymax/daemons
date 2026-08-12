@@ -3,7 +3,8 @@
 
 /**
  * @file svc_auth_apikey.c
- * @brief Daemon 认证中间件 API Key 域：密钥校验与动态增删管理
+ * @brief Daemon auth-middleware API Key domain: key verification and dynamic
+ *        add/remove management.
  */
 
 #include "airy_memory.h"

@@ -3,8 +3,9 @@
 
 /**
  * @file monitor_service.h
- * @brief 监控服务接口定义
- * @details 负责系统监控、指标收集、告警管理和日志记录
+ * @brief Monitoring-service interface definitions.
+ * @details Handles system monitoring, metrics collection, alert management
+ *          and log recording.
  */
 
 #ifndef AIRY_RT_MONITOR_SERVICE_H
@@ -14,9 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/**
- * @brief 监控服务配置
- */
+/** @brief Monitoring-service config. */
 typedef struct {
     uint32_t metrics_collection_interval_ms;
     uint32_t health_check_interval_ms;
@@ -29,9 +28,7 @@ typedef struct {
     double loop_threshold;
 } monitor_config_t;
 
-/**
- * @brief 指标类型
- */
+/** @brief Metric type. */
 typedef enum {
     METRIC_TYPE_COUNTER,
     METRIC_TYPE_GAUGE, /**<  gauge */
@@ -40,9 +37,7 @@ typedef enum {
     METRIC_TYPE_COUNT
 } metric_type_t;
 
-/**
- * @brief 告警级别
- */
+/** @brief Alert level. */
 typedef enum {
     ALERT_LEVEL_INFO,
     ALERT_LEVEL_WARNING,
@@ -51,9 +46,7 @@ typedef enum {
     ALERT_LEVEL_COUNT
 } alert_level_t;
 
-/**
- * @brief 指标信息
- */
+/** @brief Metric info. */
 typedef struct {
     char *name;
     char *description;
@@ -64,9 +57,7 @@ typedef struct {
     uint64_t timestamp;
 } metric_info_t;
 
-/**
- * @brief 告警信息
- */
+/** @brief Alert info. */
 typedef struct {
     char *alert_id;
     char *message;
@@ -79,17 +70,13 @@ typedef struct {
     bool is_resolved;
 } alert_info_t;
 
-/**
- * @brief 日志级别
- */
+/** @brief Log level. */
 #include <logging.h>
 #ifndef LOG_LEVEL_WARNING
 #define LOG_LEVEL_WARNING LOG_LEVEL_WARN
 #endif
 
-/**
- * @brief 日志信息
- */
+/** @brief Log info. */
 typedef struct {
     log_level_t level;
     char *message;
@@ -102,9 +89,7 @@ typedef struct {
     size_t context_count;
 } log_info_t;
 
-/**
- * @brief 健康检查结果
- */
+/** @brief Health-check result. */
 typedef struct {
     char *service_name;
     bool is_healthy;
@@ -113,108 +98,104 @@ typedef struct {
     int error_code;
 } health_check_result_t;
 
-/**
- * @brief 监控服务句柄
- */
+/** @brief Monitoring-service handle. */
 typedef struct monitor_service monitor_service_t;
 
 /**
- * @brief 创建监控服务
- * @param manager 配置信息
- * @param service 输出参数，返回创建的服务句柄
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Create a monitoring service.
+ * @param manager Config info
+ * @param service Output parameter, returns the created service handle
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_create(const monitor_config_t *manager, monitor_service_t **service);
 
 /**
- * @brief 销毁监控服务
- * @param service 服务句柄
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Destroy a monitoring service.
+ * @param service Service handle
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_destroy(monitor_service_t *service);
 
 /**
- * @brief 记录指标
- * @param service 服务句柄
- * @param metric 指标信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Record a metric.
+ * @param service Service handle
+ * @param metric Metric info
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_record_metric(monitor_service_t *service, const metric_info_t *metric);
 
 /**
- * @brief 记录日志
- * @param service 服务句柄
- * @param log 日志信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Record a log entry.
+ * @param service Service handle
+ * @param log Log info
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_log(monitor_service_t *service, const log_info_t *log);
 
 /**
- * @brief 触发告警
- * @param service 服务句柄
- * @param alert 告警信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Trigger an alert.
+ * @param service Service handle
+ * @param alert Alert info
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_trigger_alert(monitor_service_t *service, const alert_info_t *alert);
 
 /**
- * @brief 解决告警
- * @param service 服务句柄
- * @param alert_id 告警 ID
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Resolve an alert.
+ * @param service Service handle
+ * @param alert_id Alert ID
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_resolve_alert(monitor_service_t *service, const char *alert_id);
 
 /**
- * @brief 执行健康检查
- * @param service 服务句柄
- * @param service_name 服务名称
- * @param result 输出参数，返回健康检查结果
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Run a health check.
+ * @param service Service handle
+ * @param service_name Service name
+ * @param result Output parameter, returns the health-check result
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_health_check(monitor_service_t *service, const char *service_name,
                                  health_check_result_t **result);
 
 /**
- * @brief 获取指标数据
- * @param service 服务句柄
- * @param metric_name 指标名称
- * @param metrics 输出参数，返回指标数据数组
- * @param count 输出参数，返回指标数量
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Get metric data.
+ * @param service Service handle
+ * @param metric_name Metric name
+ * @param metrics Output parameter, returns the metric-data array
+ * @param count Output parameter, returns the metric count
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_get_metrics(monitor_service_t *service, const char *metric_name,
                                 metric_info_t ***metrics, size_t *count);
 
 /**
- * @brief 获取告警列表
- * @param service 服务句柄
- * @param alerts 输出参数，返回告警数组
- * @param count 输出参数，返回告警数量
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Get the alert list.
+ * @param service Service handle
+ * @param alerts Output parameter, returns the alert array
+ * @param count Output parameter, returns the alert count
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_get_alerts(monitor_service_t *service, alert_info_t ***alerts, size_t *count);
 
 /**
- * @brief 重载配置
- * @param service 服务句柄
- * @param manager 新的配置信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Reload the config.
+ * @param service Service handle
+ * @param manager New config info
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_reload_config(monitor_service_t *service, const monitor_config_t *manager);
 
 /**
- * @brief 生成监控报告
- * @param service 服务句柄
- * @param report 输出参数，返回报告内容
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Generate a monitoring report.
+ * @param service Service handle
+ * @param report Output parameter, returns the report content
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_generate_report(monitor_service_t *service, char **report);
 
 
-/**
- * @brief Agent 执行状态
- */
+/** @brief Agent execution state. */
 typedef enum {
     AGENT_STATE_CREATED = 0,
     AGENT_STATE_INITIALIZING,
@@ -232,9 +213,7 @@ typedef enum {
     AGENT_STATE_COUNT
 } agent_execution_state_t;
 
-/**
- * @brief 死循环检测模式
- */
+/** @brief Loop-detection mode. */
 typedef enum {
     LOOP_DETECTION_TIME_BASED = 0,
     LOOP_DETECTION_PATTERN_BASED,
@@ -242,9 +221,7 @@ typedef enum {
     LOOP_DETECTION_HYBRID
 } loop_detection_mode_t;
 
-/**
- * @brief Agent 执行轨迹点
- */
+/** @brief Agent execution trace point. */
 typedef struct {
     uint64_t timestamp;
     agent_execution_state_t state;
@@ -254,9 +231,7 @@ typedef struct {
     double cpu_usage;
 } agent_trace_point_t;
 
-/**
- * @brief Agent 执行轨迹
- */
+/** @brief Agent execution trace. */
 typedef struct {
     char *agent_id; /**< Agent ID */
     char *task_id;
@@ -279,9 +254,7 @@ typedef struct {
     size_t location_count;
 } agent_execution_trace_t;
 
-/**
- * @brief 死循环检测配置
- */
+/** @brief Loop-detection config. */
 typedef struct {
     loop_detection_mode_t mode;
     uint64_t max_execution_time_ms;
@@ -292,9 +265,7 @@ typedef struct {
     bool enable_alerting;
 } loop_detection_config_t;
 
-/**
- * @brief 默认死循环检测配置
- */
+/** @brief Default loop-detection config. */
 #define LOOP_DETECTION_CONFIG_DEFAULT \
     {.mode = LOOP_DETECTION_HYBRID,   \
      .max_execution_time_ms = 30000,  \
@@ -305,14 +276,14 @@ typedef struct {
      .enable_alerting = true}
 
 /**
- * @brief 开始监控 Agent 执行
+ * @brief Start monitoring an agent execution.
  *
- * @param service 监控服务句柄
+ * @param service Monitoring-service handle
  * @param agent_id Agent ID
- * @param task_id 任务 ID
- * @param loop_config 死循环检测配置（可为 NULL 使用默认配置）
- * @param trace 输出参数，返回执行轨迹句柄
- * @return 0 表示成功，非 0 表示错误码
+ * @param task_id Task ID
+ * @param loop_config Loop-detection config (NULL = default config)
+ * @param trace Output parameter, returns the execution-trace handle
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_start_agent_trace(monitor_service_t *service, const char *agent_id,
                                       const char *task_id,
@@ -320,82 +291,82 @@ int monitor_service_start_agent_trace(monitor_service_t *service, const char *ag
                                       agent_execution_trace_t **trace);
 
 /**
- * @brief 更新 Agent 执行状态
+ * @brief Update the agent execution state.
  *
- * @param service 监控服务句柄
- * @param trace 执行轨迹句柄
- * @param new_state 新状态
- * @param location 位置信息
- * @return 0 表示成功，非 0 表示错误码
+ * @param service Monitoring-service handle
+ * @param trace Execution-trace handle
+ * @param new_state New state
+ * @param location Location info
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_update_agent_state(monitor_service_t *service, agent_execution_trace_t *trace,
                                        agent_execution_state_t new_state, const char *location);
 
 /**
- * @brief 检查死循环
+ * @brief Check for a loop.
  *
- * @param service 监控服务句柄
- * @param trace 执行轨迹句柄
- * @param is_loop 输出参数，是否为死循环
- * @param confidence 输出参数，检测置信度（0.0-1.0）
- * @return 0 表示成功，非 0 表示错误码
+ * @param service Monitoring-service handle
+ * @param trace Execution-trace handle
+ * @param is_loop Output parameter, whether it is a loop
+ * @param confidence Output parameter, detection confidence (0.0-1.0)
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_check_loop(monitor_service_t *service, agent_execution_trace_t *trace,
                                bool *is_loop, double *confidence);
 
 /**
- * @brief 结束 Agent 执行监控
+ * @brief End agent-execution monitoring.
  *
- * @param service 监控服务句柄
- * @param trace 执行轨迹句柄
- * @param final_state 最终状态
- * @return 0 表示成功，非 0 表示错误码
+ * @param service Monitoring-service handle
+ * @param trace Execution-trace handle
+ * @param final_state Final state
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_end_agent_trace(monitor_service_t *service, agent_execution_trace_t *trace,
                                     agent_execution_state_t final_state);
 
 /**
- * @brief 获取 Agent 执行摘要
+ * @brief Get the agent-execution summary.
  *
- * @param service 监控服务句柄
- * @param agent_id Agent ID（可为 NULL 获取所有）
- * @param start_time 开始时间（可为 0）
- * @param end_time 结束时间（可为 0）
- * @param summary 输出参数，返回摘要信息
- * @return 0 表示成功，非 0 表示错误码
+ * @param service Monitoring-service handle
+ * @param agent_id Agent ID (NULL = all)
+ * @param start_time Start time (may be 0)
+ * @param end_time End time (may be 0)
+ * @param summary Output parameter, returns the summary
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_get_agent_summary(monitor_service_t *service, const char *agent_id,
                                       uint64_t start_time, uint64_t end_time, char **summary);
 
 /**
- * @brief 导出 Agent 执行轨迹
+ * @brief Export an agent-execution trace.
  *
- * @param service 监控服务句柄
- * @param trace 执行轨迹句柄
- * @param format 导出格式（"json", "csv", "text"）
- * @param data 输出参数，返回导出数据
- * @param size 输出参数，返回数据大小
- * @return 0 表示成功，非 0 表示错误码
+ * @param service Monitoring-service handle
+ * @param trace Execution-trace handle
+ * @param format Export format ("json", "csv", "text")
+ * @param data Output parameter, returns the exported data
+ * @param size Output parameter, returns the data size
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_export_agent_trace(monitor_service_t *service, agent_execution_trace_t *trace,
                                        const char *format, char **data, size_t *size);
 
 /**
- * @brief 获取活跃 Agent 列表
+ * @brief Get the active-agent list.
  *
- * @param service 监控服务句柄
- * @param agent_ids 输出参数，返回 Agent ID 数组
- * @param count 输出参数，返回 Agent 数量
- * @return 0 表示成功，非 0 表示错误码
+ * @param service Monitoring-service handle
+ * @param agent_ids Output parameter, returns the Agent-ID array
+ * @param count Output parameter, returns the agent count
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_get_active_agents(monitor_service_t *service, char ***agent_ids, size_t *count);
 
 /**
- * @brief 重置死循环检测
+ * @brief Reset loop detection.
  *
- * @param service 监控服务句柄
- * @param trace 执行轨迹句柄
- * @return 0 表示成功，非 0 表示错误码
+ * @param service Monitoring-service handle
+ * @param trace Execution-trace handle
+ * @return 0 on success, non-zero error code
  */
 int monitor_service_reset_loop_detection(monitor_service_t *service,
                                          agent_execution_trace_t *trace);

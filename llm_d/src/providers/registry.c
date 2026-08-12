@@ -4,7 +4,7 @@
 #include "airy_memory.h"
 /**
  * @file registry.c
- * @brief 提供商注册表实现
+ * @brief Provider registry implementation.
  */
 
 #include "daemon_platform_ext.h"

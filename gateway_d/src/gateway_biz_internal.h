@@ -4,14 +4,16 @@
 /* @owner: team-B */
 /**
  * @file gateway_biz_internal.h
- * @brief 网关业务处理器内部共享定义（模块内私有，勿对外导出）
+ * @brief Internal shared definitions of the gateway business handler
+ *        (module-private, not for external export).
  *
- * 将 2608 行的 gateway_business_handler.c 按单一职责拆分为四个文件，
- * 本头承载它们之间的共享契约：
- *   - gateway_biz_forward.c  命名空间转发（L2 协议客户端 + 白名单）
- *   - gateway_biz_agent.c    agent.run 编排（双思考 + 工具循环 + 取消）
- *   - gateway_biz_backend.c  MCP/OpenAI/A2A 协议后端
- *   - gateway_business_handler.c  主分发与 ctx 生命周期
+ * Splits the 2608-line gateway_business_handler.c into four files by
+ * single responsibility; this header carries the shared contract among
+ * them:
+ *   - gateway_biz_forward.c  namespace forwarding (L2 protocol client + whitelist)
+ *   - gateway_biz_agent.c    agent.run orchestration (dual-think + tool loop + cancel)
+ *   - gateway_biz_backend.c  MCP/OpenAI/A2A protocol backends
+ *   - gateway_business_handler.c  main dispatch and ctx lifecycle
  */
 
 #ifndef AIRY_RT_DAEMON_GATEWAY_BIZ_INTERNAL_H
@@ -117,7 +119,7 @@ typedef struct {
     int timeout_ms;
 } gw_ns_forward_rule_t;
 
-/* ---- gateway_biz_forward.c（L2 协议客户端 + 白名单转发） ---- */
+/* ---- gateway_biz_forward.c (L2 protocol client + whitelist forwarding) ---- */
 char *jsonrpc_error(int code, const char *msg, const cJSON *id);
 char *gw_svc_call(const char *sock_path, const char *method, const char *params_json,
                   int timeout_ms);
@@ -147,12 +149,12 @@ extern const gw_ns_forward_rule_t GW_NS_MONIT;
 extern const gw_ns_forward_rule_t GW_NS_CHANNEL;
 extern const gw_ns_forward_rule_t GW_NS_CUPOLAS;
 
-/* ---- gateway_biz_llm.c（LLM 调用 + 工具循环） ---- */
+/* ---- gateway_biz_llm.c (LLM calls + tool loop) ---- */
 int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model, const char *prompt,
                      const cJSON *history, gw_active_request_t *active, cJSON **out_trace,
                      char **out_text, uint64_t *out_tokens, double *out_cost);
 
-/* ---- gateway_biz_agent.c（agent.run 编排） ---- */
+/* ---- gateway_biz_agent.c (agent.run orchestration) ---- */
 bool gw_active_is_cancelled(gw_active_request_t *entry);
 char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx);
 char *handle_agent_cancel(cJSON *root, gateway_business_ctx_t *ctx);

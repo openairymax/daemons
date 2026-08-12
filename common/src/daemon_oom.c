@@ -3,9 +3,9 @@
 
 /**
  * @file daemon_oom.c
- * @brief Daemon OOM 降级回调注册辅助实现
+ * @brief Daemon OOM degradation callback registration helper impl.
  *
- * P1.22: 为每个 daemon 提供标准化的 OOM 降级回调。
+ * P1.22: standardized OOM degradation callbacks for every daemon.
  */
 
 #include "daemon_oom.h"
@@ -14,9 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/**
- * @brief Daemon OOM 降级上下文
- */
+/** @brief Daemon OOM degradation context. */
 typedef struct {
     char daemon_name[64];
     bool drop_cache_on_warning;

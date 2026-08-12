@@ -3,19 +3,19 @@
 
 /**
  * @file tcache.c
- * @brief P1.20: per-Thread 缓存层实现
+ * @brief P1.20: per-thread caching layer implementation.
  *
- * 在每个线程的 TLS 中维护一个小型分配缓存。
- * 小对象（≤ max_cache_size_class）从缓存获取，
- * 缓存未命中时批量从全局分配器获取。
+ * Maintains a small allocation cache in each thread's TLS. Small objects
+ * (<= max_cache_size_class) come from the cache; on a miss, objects are
+ * fetched in batch from the global allocator.
  *
- * 大小类分桶策略：
+ * Size-class bucketing:
  *   8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096
- *   每个大小类有独立的缓存栈。
+ *   Each size class has an independent cache stack.
  *
- * 批量操作：
- *   - batch_fill: 一次从全局分配器获取 batch_fill_count 个对象
- *   - batch_flush: 缓存满时归还 batch_fill_count 个对象
+ * Batch operations:
+ *   - batch_fill: fetch batch_fill_count objects from the global allocator
+ *   - batch_flush: return batch_fill_count objects when the cache is full
  */
 
 #include "tcache.h"
@@ -50,9 +50,7 @@ struct tcache_s {
     tcache_stats_t stats;
 };
 
-/**
- * @brief 根据大小找到对应的大小类索引
- */
+/** @brief Find the size-class index for a given size. */
 static int find_size_class(size_t size)
 {
     for (int i = 0; i < NUM_SIZE_CLASSES; i++) {
@@ -63,9 +61,7 @@ static int find_size_class(size_t size)
     return -1;
 }
 
-/**
- * @brief 从全局分配器批量填充缓存
- */
+/** @brief Batch-fill the cache from the global allocator. */
 static int bin_batch_fill(tcache_t *tc, tcache_bin_t *bin)
 {
     if (bin->count >= bin->max_count)
@@ -106,9 +102,7 @@ static int bin_batch_fill(tcache_t *tc, tcache_bin_t *bin)
     return (int)filled;
 }
 
-/**
- * @brief 批量归还缓存到全局分配器
- */
+/** @brief Batch-return cache objects to the global allocator. */
 static void bin_batch_flush(tcache_t *tc, tcache_bin_t *bin)
 {
     uint32_t to_flush = bin->count;

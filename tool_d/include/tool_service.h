@@ -3,7 +3,7 @@
 
 /**
  * @file tool_service.h
- * @brief 工具服务对外接口
+ * @brief Public tool service interface.
  */
 
 #ifndef AIRY_RT_TOOL_SERVICE_H
@@ -20,31 +20,30 @@ extern "C" {
 typedef struct tool_service tool_service_t;
 
 /**
- * @brief 工具访问类型（改进1 P1d：并行工具并发门控）
+ * @brief Tool access type (improvement 1 P1d: parallel-tool concurrency gating).
  *
- * READ 工具只读无副作用 → 并发门控 read 锁（多工具并行执行）；
- * WRITE 工具有副作用 → 并发门控 write 锁（互斥串行执行）。
- * 枚举首项为 WRITE（=0），零初始化默认互斥串行（安全默认）。
+ * READ tools are read-only with no side effects -> concurrency gate read
+ * lock (multiple tools run in parallel); WRITE tools have side effects ->
+ * concurrency gate write lock (mutually exclusive, serial execution).
+ * The first enum entry is WRITE (=0), so zero-initialized defaults to
+ * mutually-exclusive serial execution (safe default).
  */
 typedef enum {
     TOOL_ACCESS_WRITE = 0,
     TOOL_ACCESS_READ = 1,
 } tool_access_t;
 
-/**
- * @brief 工具参数定义（JSON Schema 格式字符串）
- */
+/** @brief Tool parameter definition (JSON Schema-format string). */
 typedef struct {
     const char *name;
     const char *schema;
-    int required; /* 是否必需（0=可选，1=必需）。与 gateway 工具 schema 的
-                         * required 数组一致（SSoT）：fs_list.path 可选（省略时
-                         * 默认列出当前目录），fs_read/fs_write/shell_run 必填。 */
+    int required; /* Whether required (0=optional, 1=required). Consistent
+                   * with the gateway tool schema's required array (SSoT):
+                   * fs_list.path is optional (omitted -> list the current
+                   * dir), fs_read/fs_write/shell_run are required. */
 } tool_param_t;
 
-/**
- * @brief 工具元数据
- */
+/** @brief Tool metadata. */
 typedef struct {
     char *id;
     char *name;
@@ -58,9 +57,7 @@ typedef struct {
     char *permission_rule;
 } tool_metadata_t;
 
-/**
- * @brief 工具执行请求
- */
+/** @brief Tool-execution request. */
 typedef struct {
     const char *tool_id;
     const char *params_json;
@@ -70,12 +67,17 @@ typedef struct {
 } tool_execute_request_t;
 
 /**
- * @brief 工具执行失败分级（改进3：Codex Fatal/RespondToModel/普通 三态）
+ * @brief Tool-execution failure tiers (improvement 3: Codex
+ *        Fatal/RespondToModel/normal three-state).
  *
- * 上层（taskflow/工作大厅/蓝图调度）依据分级决定任务语义：
- *   - FATAL             → 终止任务（fail-closed），级联取消相关执行
- *   - RESPOND_TO_MODEL  → 结果回传上层，任务不终止（启动失败/审批拒绝等）
- *   - NORMAL_FAIL       → 封装 success:false 回传，任务继续（可配重试）
+ * Upper layers (taskflow/work-hall/blueprint scheduling) decide task
+ * semantics by tier:
+ *   - FATAL             -> terminate the task (fail-closed), cascade-cancel
+ *                          related executions
+ *   - RESPOND_TO_MODEL  -> return the result to the upper layer, task keeps
+ *                          running (start failure/approval denial, etc.)
+ *   - NORMAL_FAIL       -> return wrapped success:false, task continues
+ *                          (retry configurable)
  */
 typedef enum {
     TOOL_RESULT_CLASS_SUCCESS = 0,
@@ -84,9 +86,7 @@ typedef enum {
     TOOL_RESULT_CLASS_NORMAL_FAIL,
 } tool_result_class_t;
 
-/**
- * @brief 工具执行结果（非流式）
- */
+/** @brief Tool-execution result (non-streaming). */
 typedef struct {
     int success;
     char *output;
@@ -97,10 +97,10 @@ typedef struct {
 } tool_result_t;
 
 /**
- * @brief 流式输出回调
- * @param chunk  输出数据块
- * @param is_stderr 是否为错误输出
- * @param user_data 用户数据
+ * @brief Streaming-output callback.
+ * @param chunk  Output data chunk
+ * @param is_stderr Whether it is error output
+ * @param user_data User data
  */
 typedef void (*tool_stream_callback_t)(const char *chunk, int is_stderr, void *user_data);
 
@@ -127,31 +127,32 @@ void tool_result_free(tool_result_t *res);
 
 
 /**
- * @brief 获取工具服务运行统计（L2 标准方法 tool.get_stats）
- * @param svc 工具服务实例
- * @return JSON 字符串（AIRY_MALLOC，调用者 AIRY_FREE），失败返回 NULL
+ * @brief Get tool-service runtime stats (L2 standard method tool.get_stats).
+ * @param svc Tool-service instance
+ * @return JSON string (AIRY_MALLOC, caller AIRY_FREEs), NULL on failure
  *
- * 返回字段：daemon、tools（注册工具数）、exec_total（执行总次数）、
- * exec_fail（失败次数）、exec_ms_total（累计耗时 ms）、avg_exec_ms。
+ * Returned fields: daemon, tools (registered tool count), exec_total (total
+ * executions), exec_fail (failure count), exec_ms_total (cumulative ms),
+ * avg_exec_ms.
  */
 char *tool_service_get_stats(tool_service_t *svc);
 
 
 /**
- * @brief 列出所有 pending 审批请求（JSON 数组字符串）
- * @param svc 工具服务实例
- * @return JSON 数组字符串（AIRY_MALLOC，调用者 AIRY_FREE），失败返回 NULL
+ * @brief List all pending approval requests (JSON array string).
+ * @param svc Tool-service instance
+ * @return JSON array string (AIRY_MALLOC, caller AIRY_FREEs), NULL on failure
  *
- * 每个元素: {request_id, tool, agent_id, params, created_at}
+ * Each element: {request_id, tool, agent_id, params, created_at}
  */
 char *tool_service_interactive_pending_list(tool_service_t *svc);
 
 /**
- * @brief 按 request_id 决议一个 pending 审批请求
- * @param svc 工具服务实例
- * @param request_id 请求 ID
- * @param decision 决议："allow" / "always" / "deny"
- * @return 0 成功；未找到 AIRY_ERR_NOT_FOUND；参数非法 AIRY_ERR_INVALID_PARAM
+ * @brief Resolve a pending approval request by request_id.
+ * @param svc Tool-service instance
+ * @param request_id Request ID
+ * @param decision Decision: "allow" / "always" / "deny"
+ * @return 0 on success; AIRY_ERR_NOT_FOUND not found; AIRY_ERR_INVALID_PARAM bad args
  */
 int tool_service_interactive_resolve(tool_service_t *svc, const char *request_id,
                                      const char *decision);

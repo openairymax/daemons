@@ -3,10 +3,11 @@
 
 /**
  * @file plugin_discovery.c
- * @brief P2.2.1: 插件发现实现 — 扫描目录 + 解析 manifest.yaml
+ * @brief P2.2.1: plugin-discovery implementation - scan directories +
+ *        parse manifest.yaml.
  *
- * 扫描 ecosystem/plugins/ 目录下的每个子目录，
- * 查找并解析 manifest.yaml，提取插件元数据。
+ * Scans every subdirectory under ecosystem/plugins/, finds and parses
+ * manifest.yaml, extracting plugin metadata.
  */
 
 #include "plugin_discovery.h"

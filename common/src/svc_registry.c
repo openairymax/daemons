@@ -3,19 +3,22 @@
 
 /**
  * @file svc_registry.c
- * @brief 服务注册中心客户端（registry 域）
+ * @brief Service-registry client (registry domain).
  *
- * 实现 svc_common.h 中定义的跨进程注册中心接口：服务注册、注销、
- * 发现、心跳与清理。本域维护独立的 g_cross_registry 全局状态，
- * 与 service 生命周期（svc_common.c）解耦；发现/心跳仅通过公共 API
- * （airy_svc_get_state/healthcheck/get_stats）访问服务实例，不触碰
- * 服务内部结构。
+ * Implements the cross-process registry interface defined in svc_common.h:
+ * service register, unregister, discovery, heartbeat and cleanup. This
+ * domain keeps its own g_cross_registry global state, decoupled from the
+ * service lifecycle (svc_common.c); discovery/heartbeat access service
+ * instances only through the public APIs (airy_svc_get_state/healthcheck/
+ * get_stats), never touching service internals.
  *
- * 设计原则：
- * 1. 本地进程内注册表（entries[]），模拟跨进程注册中心客户端行为
- * 2. 单一全局互斥锁保护全部条目，保证线程安全（E-5 并发安全）
- * 3. 由 airy_svc_common_cleanup()（svc_common.c）调用 airy_registry_cleanup()
- *    完成退出路径清理（E-6 错误可追溯）
+ * Design principles:
+ * 1. Local in-process registry (entries[]), simulating cross-process
+ *    registry-client behavior
+ * 2. A single global mutex protects all entries, ensuring thread safety
+ *    (E-5 concurrency safety)
+ * 3. airy_registry_cleanup() is called by airy_svc_common_cleanup()
+ *    (svc_common.c) for exit-path cleanup (E-6 traceable errors)
  *
  * @see agentrt/daemons/common/include/svc_common.h
  * @see agentrt/daemons/common/src/svc_common.c

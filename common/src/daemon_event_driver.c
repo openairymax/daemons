@@ -7,8 +7,9 @@
 #include "airy_memory.h"
 #include "method_dispatcher.h"
 #include "svc_logger.h"
-/* P0.17 阶段 2: daemon_event_driver.c 使用 airy_sock_* daemons 特有函数，
- * 需包含 daemon_platform_ext.h 获取声明（commons 版 platform.h 无这些函数）。 */
+/* P0.17 phase 2: daemon_event_driver.c uses airy_sock_* daemon-specific
+ * functions, so include daemon_platform_ext.h for their declarations (the
+ * commons platform.h lacks them). */
 #include "daemon_platform_ext.h"
 
 #include <stdlib.h>
@@ -33,8 +34,9 @@ static void socket_close_wrapper(void *arg)
     airy_sock_close((airy_sock_t)(uintptr_t)arg);
 }
 
-/* 并发客户端处理任务：封装 on_client 回调 + service_ctx + client_fd，
- * 由线程池 worker 线程执行，避免阻塞事件循环线程（交互审批需要）。 */
+/* Concurrent client-processing task: wraps the on_client callback +
+ * service_ctx + client_fd, executed by a thread-pool worker so the
+ * event-loop thread is not blocked (needed for interactive approval). */
 typedef struct on_client_task {
     daemon_on_client_cb cb;
     void *service_ctx;

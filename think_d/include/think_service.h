@@ -3,16 +3,19 @@
 
 /**
  * @file think_service.h
- * @brief 双思考系统（Thinkdual）服务对外接口
+ * @brief Public interface of the dual-think system (Thinkdual) service.
  *
- * think_d 承载 CoreLoopThree 认知引擎，将双思考系统接入 15 daemon 运行时：
- *   - t2（慢思考主模型）：TC3 批判循环主生成
- *   - t1-f（快思考-事实）：验证模型
- *   - t1-p（快思考-专业）：专家仲裁模型
- *   - dual_coordinate：双模型交叉验证（TC3 成功后激活，写入 working memory）
+ * think_d hosts the CoreLoopThree cognitive engine, integrating the
+ * dual-think system into the 15-daemon runtime:
+ *   - t2 (slow-think main model): TC3 critique-loop primary generation
+ *   - t1-f (fast-think - facts): verification model
+ *   - t1-p (fast-think - professional): expert-arbitration model
+ *   - dual_coordinate: dual-model cross-validation (activated after TC3
+ *     succeeds; written to working memory)
  *
- * LLM 调用经 llm_svc_adapter 直连 llm_d Unix socket（daemon_rpc_call），
- * 与 15 daemon 架构原生互通。
+ * LLM calls go through llm_svc_adapter directly to the llm_d Unix socket
+ * (daemon_rpc_call), interoperating natively with the 15-daemon
+ * architecture.
  */
 
 #ifndef AIRY_RT_THINK_SERVICE_H
@@ -28,9 +31,7 @@ extern "C" {
 
 typedef struct think_service think_service_t;
 
-/**
- * @brief 双思考服务配置
- */
+/** @brief Dual-think service config. */
 typedef struct {
     int enabled;
     const char *think2_slow_model;
@@ -41,9 +42,9 @@ typedef struct {
 } think_service_config_t;
 
 /**
- * @brief 思考处理结果（JSON 字符串，调用者 AIRY_FREE）
+ * @brief Thinking-process result (JSON string, caller AIRY_FREEs).
  *
- * 形如：
+ * Shaped like:
  * {
  *   "plan": {"task_plan_id","node_count","nodes":[{id,goal,handler,role,depends}]},
  *   "feedback": [{level,module,event,data}...],
@@ -61,11 +62,12 @@ void think_service_destroy(think_service_t *svc);
 
 
 /**
- * @brief 双思考处理：输入 prompt → 认知引擎（TC3 + dual_coordinate）→ JSON 结果
- * @param svc 服务句柄
- * @param prompt 用户输入（UTF-8）
- * @param out_result 输出结果（OWNER，调用者 think_result_free）
- * @return 0 成功，非 0 失败
+ * @brief Dual-think processing: input prompt -> cognitive engine (TC3 +
+ *        dual_coordinate) -> JSON result.
+ * @param svc Service handle
+ * @param prompt User input (UTF-8)
+ * @param out_result Output result (OWNER, caller frees via think_result_free)
+ * @return 0 on success, non-zero on failure
  */
 int think_service_process(think_service_t *svc, const char *prompt,
                           think_process_result_t *out_result);
@@ -74,15 +76,14 @@ void think_result_free(think_process_result_t *res);
 
 
 /**
- * @brief 获取双思考统计（JSON 字符串，调用者 AIRY_FREE）
- * @param svc 服务句柄
- * @return JSON 字符串（含 dual_invocations/corrections/llm_backed 等），失败返回 NULL
+ * @brief Get dual-think statistics (JSON string, caller AIRY_FREEs).
+ * @param svc Service handle
+ * @return JSON string (with dual_invocations/corrections/llm_backed, etc.),
+ *         NULL on failure
  */
 char *think_service_stats_json(think_service_t *svc);
 
-/**
- * @brief 检查服务是否就绪（engine + adapter 均已创建）
- */
+/** @brief Check whether the service is ready (engine + adapter created). */
 int think_service_ready(const think_service_t *svc);
 
 #ifdef __cplusplus

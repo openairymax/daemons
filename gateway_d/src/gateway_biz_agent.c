@@ -4,14 +4,18 @@
 // @owner: team-B
 /**
  * @file gateway_biz_agent.c
- * @brief 网关 agent.run 编排：双思考注入 + 编排分支 + 会话取消
+ * @brief Gateway agent.run orchestration: dual-think injection +
+ *        orchestration branches + session cancellation.
  *
- * 主对话路径（无 agent 编排）先经 think_d 双思考（GCCP 目标确认 + GRAD
- * 计划批判）产生收敛 DAG 计划，注入 LLM 请求上下文后交给工具循环执行；
- * 显式提供 params.agent 时走 agent_d 编排（spawn + invoke）。支持
- * agent.cancel 手工中止（会话注册表 + 工具循环轮间检查）。
+ * The main chat path (no agent orchestration) first goes through think_d
+ * dual-think (GCCP goal confirmation + GRAD plan critique) producing a
+ * converged DAG plan, injects it into the LLM request context and hands it
+ * to the tool loop; when params.agent is explicitly provided, it uses
+ * agent_d orchestration (spawn + invoke). Supports agent.cancel manual
+ * abort (session registry + tool-loop between-round checks).
  *
- * 从 gateway_business_handler.c 拆分（单一职责：agent.run 编排）。
+ * Split from gateway_business_handler.c (single responsibility: agent.run
+ * orchestration).
  */
 
 #include "gateway_biz_internal.h"

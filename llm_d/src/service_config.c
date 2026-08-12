@@ -3,8 +3,8 @@
 
 /**
  * @file service_config.c
- * @brief LLM 服务配置加载域：JSON/YAML 配置解析、provider/模型配置加载、
- *        pricing 规则解析与释放
+ * @brief LLM service config-loading domain: JSON/YAML parsing, provider/
+ *        model config loading, pricing-rule parsing and release.
  */
 
 #include "airy_memory.h"
@@ -27,8 +27,9 @@
 #include "llm_service_internal.h"
 
 #ifdef HAVE_YAML
-/* P0.18.3 修复: YAML 分支被 HAVE_YAML 开启后才编译，需前向声明后置定义，
- * 否则 -Werror=implicit-function-declaration 在 svc_config_load 处报错。 */
+/* P0.18.3 fix: the YAML branch is only compiled when HAVE_YAML is on, so
+ * forward-declare before the later definition, otherwise
+ * -Werror=implicit-function-declaration fires at svc_config_load. */
 int svc_config_load_yaml(const char *config_path, service_config_t *cfg);
 #endif
 

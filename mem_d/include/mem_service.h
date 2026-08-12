@@ -3,10 +3,11 @@
 
 /**
  * @file mem_service.h
- * @brief Memory 服务对外接口（mem.* 命名空间）
+ * @brief Public Memory service interface (mem.* namespace).
  *
- * 承载原 syscall_router.c 中 airy_sys_memory_write/search/get/delete
- * 的运行时记忆管理逻辑，作为 mem_d 守护进程的服务核心对外暴露。
+ * Carries the runtime memory-management logic of the former syscall_router.c
+ * (airy_sys_memory_write/search/get/delete), exposed as the service core of
+ * the mem_d daemon.
  *
  */
 
@@ -22,26 +23,20 @@ extern "C" {
 
 typedef struct mem_service mem_service_t;
 
-/**
- * @brief 记忆写入参数
- */
+/** @brief Memory-write parameters. */
 typedef struct {
     const void *data;
     size_t len;
     const char *metadata;
 } mem_write_request_t;
 
-/**
- * @brief 记忆检索结果项
- */
+/** @brief Memory-search result item. */
 typedef struct {
     char *record_id;
     float score;
 } mem_search_hit_t;
 
-/**
- * @brief 记录读取结果
- */
+/** @brief Record-read result. */
 typedef struct {
     void *data;
     size_t len;
@@ -54,27 +49,28 @@ void mem_service_destroy(mem_service_t *svc);
 
 
 /**
- * @brief 写入记忆记录
- * @return AIRY_SUCCESS 成功，*out_record_id 输出新记录 ID（调用方负责 AIRY_FREE）
+ * @brief Write a memory record.
+ * @return AIRY_SUCCESS on success; *out_record_id holds the new record ID
+ *         (caller AIRY_FREEs)
  */
 int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char **out_record_id);
 
 /**
- * @brief 检索记忆记录（按相关性倒序）
- * @return AIRY_SUCCESS 成功，*out_hits 输出命中数组，*out_count 输出命中数
+ * @brief Search memory records (descending relevance).
+ * @return AIRY_SUCCESS on success; *out_hits holds the hit array,
+ *         *out_count the hit count
  */
 int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
                        mem_search_hit_t **out_hits, size_t *out_count);
 
 /**
- * @brief 读取记忆记录
- * @return AIRY_SUCCESS 成功，*out_record 输出记录内容（调用方负责 mem_record_free）
+ * @brief Read a memory record.
+ * @return AIRY_SUCCESS on success; *out_record holds the record content
+ *         (caller frees via mem_record_free)
  */
 int mem_service_get(mem_service_t *svc, const char *record_id, mem_record_t *out_record);
 
-/**
- * @brief 删除记忆记录
- */
+/** @brief Delete a memory record. */
 int mem_service_delete(mem_service_t *svc, const char *record_id);
 
 

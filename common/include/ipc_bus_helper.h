@@ -3,10 +3,12 @@
 
 /**
  * @file ipc_bus_helper.h
- * @brief C-L09: IPC Bus → daemon 自动注册便捷层 — 重导出兼容头
+ * @brief C-L09: IPC Bus -> daemon auto-registration convenience layer -
+ *        re-export compat header.
  *
- * P0.17 阶段 4：实际定义已迁移至 commons/utils/ipc/include/ipc_bus_helper.h。
- * 本文件仅作为向后兼容的重导出层。
+ * P0.17 phase 4: the real definitions moved to
+ * commons/utils/ipc/include/ipc_bus_helper.h. This file is only a
+ * backward-compatible re-export layer.
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_IPC_BUS_HELPER_H

@@ -5,7 +5,8 @@
 #include "error.h"
 /**
  * @file api_recovery.c
- * @brief API错误恢复系统实现 — 多凭证池 + 降级策略 + 熔断集成
+ * @brief API error-recovery system impl - multi-credential pool + degrade
+ *        strategy + circuit-breaker integration.
  */
 
 #include "api_recovery.h"

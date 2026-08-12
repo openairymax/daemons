@@ -3,7 +3,7 @@
 
 /**
  * @file token_counter.h
- * @brief Token 计数接口
+ * @brief Token counting interface.
  */
 
 #ifndef AIRY_RT_LLM_TOKEN_COUNTER_H

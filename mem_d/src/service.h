@@ -3,7 +3,7 @@
 
 /**
  * @file service.h
- * @brief Memory 服务内部结构声明
+ * @brief Memory service internal structure declarations.
  */
 
 #ifndef MEM_SERVICE_INTERNAL_H

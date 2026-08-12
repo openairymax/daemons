@@ -17,7 +17,7 @@
 #include "logging.h"
 
 /**
- * @brief 将协议类型枚举转换为可读字符串
+ * @brief Convert a protocol-type enum to a readable string.
  */
 static const char *proto_type_name(gw_proto_detect_result_t proto_type)
 {
@@ -94,8 +94,9 @@ static gw_proto_detect_result_t detect_from_body(const char *body)
             strstr(body, "\"prompts/")) {
             return GW_PROTO_DETECT_MCP;
         }
-        /* A2A 基于 JSON-RPC 2.0（tasks/send 等）：须在 jsonrpc 分支内检测，
-         * 否则含 jsonrpc 的 A2A 请求会被永久误判为 JSONRPC */
+        /* A2A is based on JSON-RPC 2.0 (tasks/send etc.): detect it inside
+         * the jsonrpc branch, otherwise A2A requests containing jsonrpc
+         * would be permanently misclassified as JSONRPC */
         if (strstr(body, "\"tasks/") || strstr(body, "\"task/") || strstr(body, "\"agentCard\"") ||
             strstr(body, "\"message/")) {
             return GW_PROTO_DETECT_A2A;
@@ -265,12 +266,13 @@ static gw_proto_request_handler_t find_handler(gw_proto_router_t *router,
 }
 
 /**
- * @brief 统计协议请求计数
+ * @brief Count protocol requests.
  *
- * 根据协议类型递增对应的统计计数器，并输出详细调试日志。
+ * Increments the matching statistics counter per protocol type and emits
+ * detailed debug logs.
  *
- * @param stats 统计结构体指针
- * @param proto_type 协议类型
+ * @param stats Statistics struct pointer
+ * @param proto_type Protocol type
  */
 static void record_proto_stats(gw_proto_router_stats_t *stats, gw_proto_detect_result_t proto_type)
 {

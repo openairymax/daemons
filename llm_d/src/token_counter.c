@@ -5,7 +5,7 @@
 #include "error.h"
 /**
  * @file token_counter.c
- * @brief Token 计数实现
+ * @brief Token counting implementation.
  */
 
 #include "svc_logger.h"

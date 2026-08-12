@@ -9,12 +9,12 @@
 #include "error.h"
 /**
  * @file deepseek.c
- * @brief DeepSeek 适配器（兼容 OpenAI 格式）
+ * @brief DeepSeek adapter (OpenAI-compatible format).
  *
- * 改进说明：
- * 1. 使用公共 Provider 基础设施
- * 2. 代码量从 360 行减少到约 150 行
- * 3. 消除了与 openai.c/local.c 的重复代码
+ * Improvements:
+ * 1. Uses the common Provider infrastructure
+ * 2. Code reduced from ~360 to ~150 lines
+ * 3. Duplication with openai.c/local.c eliminated
  */
 
 #include "daemon_errors.h"

@@ -5,7 +5,7 @@
 #include "error.h"
 /*
  * @file main.c
- * @brief Channel 守护进程主入口（P0.18.1 样板宏化）
+ * @brief Channel daemon main entry (P0.18.1 boilerplate macros).
  */
 
 #include "channel_service.h"

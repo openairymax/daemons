@@ -4,22 +4,21 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file main.c
- * @brief A2A 服务守护进程主入口（遵循 daemon 模块统一规范）
+ * @brief A2A service daemon main entry (daemon module conventions).
  *
- * 暴露 JSON-RPC 方法（a2a.* 命名空间）：
- *   - a2a.register_agent   : 注册智能体
- *   - a2a.unregister_agent : 注销智能体
- *   - a2a.discover_agents  : 发现智能体
- *   - a2a.create_task      : 创建任务
- *   - a2a.update_task      : 更新任务状态
- *   - a2a.cancel_task      : 取消任务
- *   - a2a.get_task         : 获取任务
- *   - a2a.send_message     : 发送消息
- *   - a2a.count            : 返回智能体/任务数（健康检查辅助）
+ * Exposes JSON-RPC methods (a2a.* namespace):
+ *   - a2a.register_agent   : register an agent
+ *   - a2a.unregister_agent : unregister an agent
+ *   - a2a.discover_agents  : discover agents
+ *   - a2a.create_task      : create a task
+ *   - a2a.update_task      : update task state
+ *   - a2a.cancel_task      : cancel a task
+ *   - a2a.get_task         : get a task
+ *   - a2a.send_message     : send a message
+ *   - a2a.count            : agent/task counts (health-check helper)
  *
- * Unix socket 路径：${AIRY_RUNTIME_DIR}/a2a.sock
+ * Unix socket path: ${AIRY_RUNTIME_DIR}/a2a.sock
  */
 
 #include "daemon_main.h"
@@ -611,8 +610,8 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_a2a_d, "get_task", on_get_task_method, NULL);
     method_dispatcher_register(g_dispatcher_a2a_d, "send_message", on_send_message_method, NULL);
     method_dispatcher_register(g_dispatcher_a2a_d, "count", on_count_method, NULL);
-    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：a2a.send / a2a.receive /
-     * a2a.health_check）
+    /* L2 protocol standard methods + aliases (a2a.send / a2a.receive /
+     * a2a.health_check, see 02-l2-service-protocol.md)
      */
     method_dispatcher_register(g_dispatcher_a2a_d, "send", on_send_message_method, NULL);
     method_dispatcher_register(g_dispatcher_a2a_d, "receive", on_get_task_method, NULL);

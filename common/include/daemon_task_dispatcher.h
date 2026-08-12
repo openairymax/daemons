@@ -2,14 +2,17 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
 /*
- * daemon_task_dispatcher.h — Daemon 层并行任务调度器
+ * daemon_task_dispatcher.h - Daemon-layer parallel task dispatcher.
  *
- * 职责：基于线程池的并行工具执行引擎，供 daemon 层的 orchestrator/scheduler 使用。
- * 字段约定：tool_id / params_json / duration_ms（毫秒）。
+ * Role: thread-pool based parallel tool-execution engine for the daemon
+ * layer's orchestrator/scheduler. Field conventions: tool_id / params_json
+ * / duration_ms (milliseconds).
  *
- * 注意：本头文件与 atoms/coreloopthree/src/cognition/dispatch/parallel_dispatcher.h
- * 同名但职责完全不同（后者为认知层工具调度，字段为 tool_name/arguments/elapsed_ns）。
- * 为消除 include guard 冲突，本头文件使用 AIRY_DAEMON_TASK_DISPATCHER_H 守卫。
+ * Note: this header shares its name with
+ * atoms/coreloopthree/src/cognition/dispatch/parallel_dispatcher.h but has
+ * an entirely different role (the latter is cognition-layer tool dispatch
+ * with fields tool_name/arguments/elapsed_ns). To avoid include-guard
+ * conflicts, this header uses the AIRY_DAEMON_TASK_DISPATCHER_H guard.
  */
 #ifndef AIRY_RT_DAEMON_TASK_DISPATCHER_H
 #define AIRY_RT_DAEMON_TASK_DISPATCHER_H

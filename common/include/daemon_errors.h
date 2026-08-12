@@ -3,18 +3,19 @@
 
 /**
  * @file daemon_errors.h
- * @brief Daemon 模块扩展错误码定义
+ * @brief Daemon-module extension error codes.
  *
- * P0.17 阶段 2：从 daemons/common/include/error.h 中提取 daemon 模块
- * 扩展错误码至独立头文件，使 daemons 内部源文件可直接包含此文件获取
- * daemon 扩展错误码，而不依赖 daemons 版 error.h（因 -I 路径顺序，
- * #include "error.h" 会优先找到 commons 版 error.h）。
+ * P0.17 phase 2: extracted the daemon-module extension codes from
+ * daemons/common/include/error.h into this standalone header, so daemon
+ * sources can include it directly to get the daemon extension codes,
+ * without depending on the daemons error.h (due to -I path ordering,
+ * #include "error.h" resolves to the commons error.h first).
  *
- * 错误码段：-910 到 -949（原 -900 段与 commons 的 AIRY_ERR_PROTOCOL
- * 冲突，G2.2 迁移至 -910 空闲段）。
+ * Code range: -910 to -949 (the original -900 range collided with
+ * commons' AIRY_ERR_PROTOCOL; moved to the free -910 range in G2.2).
  *
- * @see commons/utils/error/include/error.h  commons 权威错误码定义
- * @see daemons/common/include/error.h       daemons 兼容层（包含本文件）
+ * @see commons/utils/error/include/error.h  commons authoritative codes
+ * @see daemons/common/include/error.h       daemons compat layer (includes this)
  */
 
 #ifndef AIRY_RT_DAEMON_ERRORS_H
@@ -22,11 +23,11 @@
 
 
 /*
- * 错误码段：-910 到 -949
+ * Code range: -910 to -949
  *
- * 历史：原使用 -900 段（G2.2 迁移自 -600），但 commons 后续在 -900/-901
- * 定义了 AIRY_ERR_PROTOCOL/AIRY_ERR_CHECKSUM，导致冲突。
- * P0.17 阶段 2 迁移至 -910 段以消除冲突。
+ * History: originally -900 (migrated from -600 in G2.2), but commons later
+ * defined AIRY_ERR_PROTOCOL/AIRY_ERR_CHECKSUM at -900/-901, causing a
+ * conflict. Migrated to the -910 range in P0.17 phase 2.
  */
 #ifndef AIRY_ERR_DAEMON_BASE
 #define AIRY_ERR_DAEMON_BASE (-910)
@@ -51,8 +52,9 @@
 
 
 /*
- * P0.17 阶段 2：以下别名统一 daemons 内部源文件中使用的旧式 DAEMON_E* 错误码
- * 名称，映射到 commons 权威错误码或 daemon 扩展错误码。
+ * P0.17 phase 2: aliases unifying the legacy DAEMON_E* codes used in
+ * daemon sources, mapping them to commons authoritative codes or daemon
+ * extension codes.
  */
 #ifndef DAEMON_EINIT
 #define DAEMON_EINIT AIRY_ERR_DAEMON_INIT_FAILED

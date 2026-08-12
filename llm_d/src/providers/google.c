@@ -5,13 +5,13 @@
 #include "error.h"
 /**
  * @file google.c
- * @brief Google Gemini 适配器实现
+ * @brief Google Gemini adapter implementation.
  *
- * Gemini API 特点：
- * 1. 认证使用 x-goog-api-key 头（非 Bearer token）
- * 2. 请求格式：contents 数组 + systemInstruction
- * 3. 响应格式：candidates[].content.parts[].text
- * 4. SSE 流式：使用自定义 SSE 解析器处理 Gemini 格式
+ * Gemini API specifics:
+ * 1. Auth via the x-goog-api-key header (not a Bearer token)
+ * 2. Request format: contents array + systemInstruction
+ * 3. Response format: candidates[].content.parts[].text
+ * 4. SSE streaming: custom SSE parser handling the Gemini format
  */
 
 #include "daemon_errors.h"

@@ -4,23 +4,24 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file main.c
- * @brief LLM 服务守护进程主入口（遵循 daemon 模块统一规范）
+ * @brief LLM service daemon main entry (daemon module conventions).
  *
- * 规范遵循:
- * - ARCHITECTURAL_PRINCIPLES.md E-3 资源确定性(成对管理)
- * - ARCHITECTURAL_PRINCIPLES.md E-4 跨平台一致性(platform.h)
- * - ARCHITECTURAL_PRINCIPLES.md E-5 命名语义化(SVC_LOG_*)
- * - ARCHITECTURAL_PRINCIPLES.md E-6 错误可追溯(AIRY_ERR_*)
+ * Conventions followed:
+ * - ARCHITECTURAL_PRINCIPLES.md E-3 resource determinism (paired management)
+ * - ARCHITECTURAL_PRINCIPLES.md E-4 cross-platform consistency (platform.h)
+ * - ARCHITECTURAL_PRINCIPLES.md E-5 semantic naming (SVC_LOG_*)
+ * - ARCHITECTURAL_PRINCIPLES.md E-6 traceable errors (AIRY_ERR_*)
  */
 
-/* P0.18.1: 引入 daemon_main.h 提供 DAEMON_DECLARE_COMMON/DAEMON_SETUP_SIGNALS/
- * daemon_parse_args/daemon_create_server_socket/daemon_init_event_driver/daemon_cleanup_standard
- * 等样板宏与内联辅助函数。daemon_main.h 已传递性包含 atomic_compat.h、daemon_bootstrap_*.h、
- * daemon_cupolas_bootstrap.h、daemon_event_driver.h、daemon_platform_ext.h、jsonrpc_helpers.h、
- * logging.h、method_dispatcher.h、svc_logger.h、cjson/cJSON.h、cjson_helpers.h 等头文件，
- * 故此处仅保留业务逻辑直接依赖的头文件。 */
+/* P0.18.1: daemon_main.h provides DAEMON_DECLARE_COMMON/DAEMON_SETUP_SIGNALS/
+ * daemon_parse_args/daemon_create_server_socket/daemon_init_event_driver/
+ * daemon_cleanup_standard boilerplate macros and inline helpers. It
+ * transitively includes atomic_compat.h, daemon_bootstrap_*.h,
+ * daemon_cupolas_bootstrap.h, daemon_event_driver.h, daemon_platform_ext.h,
+ * jsonrpc_helpers.h, logging.h, method_dispatcher.h, svc_logger.h,
+ * cjson/cJSON.h, cjson_helpers.h, so only business-logic headers are kept
+ * here. */
 #include "llm_service.h"
 #include "response.h"
 #include "token_counter.h"

@@ -4,12 +4,12 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file sched_svc_adapter.c
- * @brief 调度器服务适配器：将调度器服务适配到统一的AgentRT服务管理框架
+ * @brief Adapts the scheduler service to the unified AgentRT service
+ *        framework.
  *
- * 使用 airy_svc_set/get_user_data 存取适配器上下文，
- * 避免类型强转导致的类型安全问题。
+ * Stores adapter context via airy_svc_set/get_user_data to avoid unsafe
+ * type casts.
  */
 
 #include "scheduler_service.h"

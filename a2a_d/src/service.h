@@ -3,7 +3,7 @@
 
 /**
  * @file service.h
- * @brief A2A 服务内部结构声明
+ * @brief A2A service internal structure declarations.
  */
 
 #ifndef A2A_SERVICE_INTERNAL_H

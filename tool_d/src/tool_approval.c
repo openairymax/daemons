@@ -3,7 +3,7 @@
 
 /**
  * @file tool_approval.c
- * @brief C-L05: Cupolas SafetyGuard → tool_d 工具审批适配器实现
+ * @brief C-L05: Cupolas SafetyGuard -> tool_d tool-approval adapter impl.
  */
 
 #include "tool_approval.h"

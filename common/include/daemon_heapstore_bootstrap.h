@@ -3,17 +3,20 @@
 
 /**
  * @file daemon_heapstore_bootstrap.h
- * @brief daemon 统一 heapstore 运行时数据存储引导
+ * @brief Unified heapstore runtime data-store bootstrap for daemons.
  *
- * heapstore 是 agentrt 运行时数据存储（KER-05~07：syscall 会话/追踪
- * 持久化，airy_core 链接）。本引导为 daemon 层提供统一初始化入口：
- *   - daemon_heapstore_init()：在 main() 中 airy_log_init() 之后、
- *     socket/service 创建之前调用，初始化 heapstore（幂等）
- *   - daemon_heapstore_cleanup()：main() 退出前调用
- *   - daemon_heapstore_log()：服务访问日志写入（gateway 转发链使用）
+ * heapstore is the agentrt runtime data store (KER-05~07: syscall
+ * session/trace persistence, linked by airy_core). This bootstrap gives
+ * the daemon layer a unified init entry point:
+ *   - daemon_heapstore_init(): in main() after airy_log_init(), before
+ *     socket/service creation, initializes heapstore (idempotent)
+ *   - daemon_heapstore_cleanup(): call before main() exits
+ *   - daemon_heapstore_log(): service access-log write (used by gateway
+ *     forwarding chains)
  *
- * 与 daemon_cupolas_init 同模式：init 失败记录 FATAL 日志但不 abort，
- * 服务层对不可用存储降级（非致命，保持 daemon 可运行）。
+ * Same pattern as daemon_cupolas_init: init failure logs FATAL but does
+ * not abort; service layers degrade on unavailable storage (non-fatal,
+ * keeping the daemon runnable).
  */
 
 #ifndef AIRY_RT_DAEMON_HEAPSTORE_BOOTSTRAP_H
@@ -25,33 +28,36 @@ extern "C" {
 #endif
 
 /**
-     * @brief 初始化 heapstore 运行时数据存储（统一引导）
-     *
-     * 在 daemon main() 中 airy_log_init() 之后调用（与 daemon_cupolas_init
-     * 并列）。存储根目录取 $AIRY_HOME/data/agentrt/heapstore。
-     *
-     * @param daemon_name daemon 名称（如 "gateway_d"），用于日志标识
-     * @return AIRY_SUCCESS 成功；错误码失败（FATAL 日志已记录，服务可降级）
-     */
+ * @brief Initialize the heapstore runtime data store (unified bootstrap).
+ *
+ * Call in daemon main() after airy_log_init() (alongside
+ * daemon_cupolas_init). Store root is $AIRY_HOME/data/agentrt/heapstore.
+ *
+ * @param daemon_name Daemon name (e.g. "gateway_d"), used in logs
+ * @return AIRY_SUCCESS on success; error code on failure (FATAL logged,
+ *         service may degrade)
+ */
 airy_err_t daemon_heapstore_init(const char *daemon_name);
 
 /**
-     * @brief 清理 heapstore 运行时数据存储
-     * 幂等：重复调用安全。
-     */
+ * @brief Clean up the heapstore runtime data store.
+ * Idempotent: repeated calls are safe.
+ */
 void daemon_heapstore_cleanup(void);
 
 /**
-     * @brief 写入服务访问日志（gateway 转发链等 daemon 调用）
-     *
-     * heapstore 不可用（未初始化/写失败）时静默忽略，返回非 0。
-     *
-     * @param module 模块名（如 "gateway_d"）
-     * @param level  日志级别（0=DEBUG,1=INFO,2=WARN,3=ERROR）
-     * @param msg    日志消息
-     * @param trace_id 追踪 ID（可 NULL）
-     * @return 0 成功；非 0 存储不可用/失败
-     */
+ * @brief Write a service access log (called by gateway forwarding chains
+ *        and other daemons).
+ *
+ * Silently ignored when heapstore is unavailable (uninitialized/write
+ * failure); returns non-zero.
+ *
+ * @param module Module name (e.g. "gateway_d")
+ * @param level  Log level (0=DEBUG, 1=INFO, 2=WARN, 3=ERROR)
+ * @param msg    Log message
+ * @param trace_id Trace ID (may be NULL)
+ * @return 0 on success; non-zero if store unavailable/failed
+ */
 int daemon_heapstore_log(const char *module, int level, const char *msg, const char *trace_id);
 
 #ifdef __cplusplus

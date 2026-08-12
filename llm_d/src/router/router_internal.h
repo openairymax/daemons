@@ -3,9 +3,9 @@
 
 /**
  * @file router_internal.h
- * @brief 路由器内部接口 — 各路由策略函数声明
+ * @brief Router internal interface - routing-strategy function decls.
  *
- * 由 llm_router.c（编排器）调用各路由策略实现。
+ * Called by llm_router.c (the orchestrator) to invoke each strategy impl.
  *
  */
 

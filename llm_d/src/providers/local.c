@@ -9,12 +9,12 @@
 #include "error.h"
 /**
  * @file local.c
- * @brief 本地模型适配器（兼容 OpenAI 格式）
+ * @brief Local-model adapter (OpenAI-compatible format).
  *
- * 改进说明：
- * 1. 使用公共 Provider 基础设施
- * 2. 代码量从 370 行减少到约 140 行
- * 3. 消除了与 openai.c/deepseek.c 的重复代码
+ * Improvements:
+ * 1. Uses the common Provider infrastructure
+ * 2. Code reduced from ~370 to ~140 lines
+ * 3. Duplication with openai.c/deepseek.c eliminated
  */
 
 #include "daemon_errors.h"

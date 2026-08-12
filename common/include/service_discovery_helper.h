@@ -3,10 +3,12 @@
 
 /**
  * @file service_discovery_helper.h
- * @brief C-L08: ServiceDiscovery → daemon 自动注册便捷层 — 重导出兼容头
+ * @brief C-L08: ServiceDiscovery -> daemon auto-registration convenience
+ *        layer - re-export compat header.
  *
- * P0.17 阶段 4：实际定义已迁移至 commons/utils/sd/include/service_discovery_helper.h。
- * 本文件仅作为向后兼容的重导出层。
+ * P0.17 phase 4: the real definitions moved to
+ * commons/utils/sd/include/service_discovery_helper.h. This file is only a
+ * backward-compatible re-export layer.
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_SERVICE_DISCOVERY_HELPER_H

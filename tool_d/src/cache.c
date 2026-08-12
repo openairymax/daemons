@@ -5,7 +5,7 @@
 #include "error.h"
 /**
  * @file cache.c
- * @brief 工具结果缓存实现（LRU?
+ * @brief Tool-result cache implementation (LRU).
  */
 
 #include "cache.h"

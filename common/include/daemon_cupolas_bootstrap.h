@@ -3,22 +3,25 @@
 
 /**
  * @file daemon_cupolas_bootstrap.h
- * @brief P3.14 (ACC-DT15): daemon 统一 cupolas 安全穹顶引导
+ * @brief P3.14 (ACC-DT15): unified cupolas security dome bootstrap.
  *
- * 为所有 daemon 提供统一的 cupolas 安全穹顶初始化与清理接口，
- * 避免在 12 个 main.c 中重复代码。
+ * Provides a single init/cleanup interface for the cupolas security dome
+ * across all daemons, avoiding duplicated code in the 12 main.c files.
  *
- * 调用契约：
- *   - main() 中 airy_log_init() 之后、socket/service 创建之前调用 daemon_cupolas_init()
- *   - main() 退出前调用 daemon_cupolas_cleanup()
- *   - init 失败时已自动清理，无需再调 cleanup
+ * Call contract:
+ *   - call daemon_cupolas_init() in main() after airy_log_init(), before
+ *     socket/service creation
+ *   - call daemon_cupolas_cleanup() before main() exits
+ *   - on init failure resources are already released; no cleanup needed
  *
- * 安全语义：
- *   - cupolas_init 使用默认配置（NULL config_path），启用 permission_engine +
- *     sanitizer + audit_logger 三大子模块
- *   - 失败时记录 FATAL 日志但**不 abort**（daemon 可降级运行，由各 service 层
- *     fail-closed 逻辑拦截危险操作；此设计避免安全模块初始化失败导致系统不可启动）
- *   - 重复调用 init 是幂等的（cupolas_init 内部有守卫）
+ * Security semantics:
+ *   - cupolas_init uses the default config (NULL config_path), enabling the
+ *     permission_engine + sanitizer + audit_logger submodules
+ *   - on failure a FATAL log is emitted but the process is not aborted (the
+ *     daemon may run degraded; each service layer's fail-closed logic blocks
+ *     dangerous operations; this avoids a system that cannot start merely
+ *     because the security module failed to initialize)
+ *   - repeated init calls are idempotent (guarded inside cupolas_init)
  */
 
 #ifndef AIRY_RT_DAEMON_CUPOLAS_BOOTSTRAP_H
@@ -30,24 +33,24 @@ extern "C" {
 #endif
 
 /**
-     * @brief 初始化 cupolas 安全穹顶（统一引导）
-     *
-     * 在 daemon main() 中 airy_log_init() 之后调用。
-     * 初始化 permission_engine、sanitizer、audit_logger 三大子模块。
-     *
-     * @param daemon_name daemon 名称（如 "tool_d"、"llm_d"），用于审计日志标识
-     * @return AIRY_SUCCESS 成功；错误码失败（FATAL 日志已记录）
-     *
-     * @ownership daemon_name: BORROW (调用方保留所有权)
-     */
+ * @brief Initialize the cupolas security dome (unified bootstrap).
+ *
+ * Call in daemon main() after airy_log_init(). Initializes the
+ * permission_engine, sanitizer and audit_logger submodules.
+ *
+ * @param daemon_name Daemon name (e.g. "tool_d", "llm_d"), used for audit logs
+ * @return AIRY_SUCCESS on success; error code on failure (FATAL already logged)
+ *
+ * @ownership daemon_name: BORROW (caller keeps ownership)
+ */
 airy_err_t daemon_cupolas_init(const char *daemon_name);
 
 /**
-     * @brief 清理 cupolas 安全穹顶
-     *
-     * 在 daemon main() 退出前调用。刷新审计日志、释放资源。
-     * 幂等：重复调用安全。
-     */
+ * @brief Clean up the cupolas security dome.
+ *
+ * Call before daemon main() exits. Flushes audit logs and releases
+ * resources. Idempotent: repeated calls are safe.
+ */
 void daemon_cupolas_cleanup(void);
 
 #ifdef __cplusplus

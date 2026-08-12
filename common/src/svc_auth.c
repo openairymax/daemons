@@ -5,13 +5,13 @@
 #include "error.h"
 /**
  * @file svc_auth.c
- * @brief Daemon 服务层认证中间件实现
+ * @brief Daemon service-layer auth middleware implementation.
  *
- * 实现内容:
- * - JWT Token 生成和验证（HS256）
- * - API Key 验证和动态管理
- * - 令牌桶速率限制器
- * - 统一认证入口
+ * Implements:
+ * - JWT token generation and verification (HS256)
+ * - API Key verification and dynamic management
+ * - Token-bucket rate limiter
+ * - Unified authentication entry
  */
 
 #include "daemon_defaults.h"

@@ -5,12 +5,13 @@
 #include "error.h"
 /**
  * @file executor.c
- * @brief 工具执行器实现（生产级进程管理）
- * @details 基于popen/pclose的真实工具执行，支持超时、输出捕获、错误处理
+ * @brief Tool-executor implementation (production-grade process management).
+ * @details Real tool execution based on popen/pclose, supporting timeout,
+ *          output capture and error handling.
  */
 
-/* P3.18 (ACC-DT27): sandbox 公共 API（airy_sandbox_t, permission_type_t,
- * airy_sandbox_create_default, airy_sandbox_invoke 等） */
+/* P3.18 (ACC-DT27): sandbox public API (airy_sandbox_t, permission_type_t,
+ * airy_sandbox_create_default, airy_sandbox_invoke, etc.) */
 #include "airy_sandbox.h"
 
 #include "syscalls.h"
@@ -32,11 +33,14 @@
 #include <sys/wait.h>
 #endif
 
-/* ---------- 改进1（P1d）：并行工具并发门控（writer-preferring RwLock） ----------
+/* ---------- Improvement 1 (P1d): parallel-tool concurrency gating
+ * (writer-preferring RwLock) ----------
  *
- * 语义：READ 工具持读门并发执行；WRITE 工具持写门互斥串行。
- * writer-preferring：等待的写者阻塞新读者，保证写工具不被读工具饿死。
- * exec->lock 仅保护统计字段（不再全段持锁，避免串行化所有工具）。 */
+ * Semantics: READ tools hold the read gate and run concurrently; WRITE
+ * tools hold the write gate and run mutually exclusive/serially.
+ * writer-preferring: waiting writers block new readers, so write tools
+ * are never starved by read tools. exec->lock only guards the stats
+ * fields (no whole-section locking, avoiding serializing all tools). */
 
 typedef struct {
     airy_mtx_t lock;

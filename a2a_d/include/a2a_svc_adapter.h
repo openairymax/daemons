@@ -3,9 +3,9 @@
 
 /**
  * @file a2a_svc_adapter.h
- * @brief A2A 服务适配器头文件
+ * @brief A2A service-adapter header.
  *
- * 将 a2a_service_t 适配到统一 AgentRT 服务管理框架（airy_svc_t）。
+ * Adapts a2a_service_t to the unified AgentRT service framework (airy_svc_t).
  *
  */
 

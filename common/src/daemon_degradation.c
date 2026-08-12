@@ -3,16 +3,16 @@
 
 /**
  * @file daemon_degradation.c
- * @brief Daemon 层优雅降级处理器实现（SEC-14 合规）
+ * @brief Daemon-layer graceful degradation handler implementation (SEC-14).
  *
- * 实现五类标准化降级处理器:
- *   1. 缓存容量降级  — WARNING: 容量减半 / 恢复时还原
- *   2. 日志级别降级  — WARNING: 提升至 ERROR / 恢复时还原
- *   3. 批处理降级    — HIGH: 批次大小减半 / 恢复时还原
- *   4. 连接拒绝降级  — CRITICAL: 拒绝新连接 / 恢复时接受
- *   5. 自定义降级    — 任意水位触发任意回调
+ * Implements five standardized degradation handlers:
+ *   1. Cache capacity  - WARNING: halve capacity / restore on recovery
+ *   2. Log level       - WARNING: raise to ERROR / restore on recovery
+ *   3. Batch           - HIGH: halve batch size / restore on recovery
+ *   4. Reject conn     - CRITICAL: reject new connections / accept on recovery
+ *   5. Custom          - arbitrary watermark triggers arbitrary callback
  *
- * @see oom_handler.h  OOM 分级响应框架
+ * @see oom_handler.h  OOM tiered response framework
  */
 
 #include "daemon_degradation.h"
@@ -23,13 +23,13 @@
 #include <string.h>
 
 /* ============================================================================
- * 常量
+ * Constants
  * ============================================================================ */
 
 #define MAX_DEGRADATION_HANDLERS 16
 
 /* ============================================================================
- * 全局状态
+ * Global state
  * ============================================================================ */
 
 static degradation_handler_t g_degradation_handlers[MAX_DEGRADATION_HANDLERS];
@@ -40,11 +40,11 @@ static degrade_conn_ctx_t g_conn_contexts[MAX_DEGRADATION_HANDLERS];
 static int g_handler_count = 0;
 
 /* ============================================================================
- * 降级回调实现
+ * Degradation callback implementations
  * ============================================================================ */
 
 /**
- * @brief Cache degradation callback — halve the cache capacity
+ * @brief Cache degradation callback - halve the cache capacity
  */
 static int on_cache_degrade(degradation_handler_t *handler, watermark_level_t old_level,
                             watermark_level_t new_level)

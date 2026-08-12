@@ -2,15 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /*
- *
  * @file main.c
- * @brief Gateway守护进程主入口（遵循 daemon 模块统一规范）
+ * @brief Gateway daemon main entry (daemon module conventions).
  *
- * 规范遵循:
- * - ARCHITECTURAL_PRINCIPLES.md E-3 资源确定性(成对管理)
- * - ARCHITECTURAL_PRINCIPLES.md E-4 跨平台一致性(platform.h)
- * - ARCHITECTURAL_PRINCIPLES.md E-5 命名语义化(SVC_LOG_*)
- * - ARCHITECTURAL_PRINCIPLES.md E-6 错误可追溯(AIRY_ERR_*)
+ * Conventions followed:
+ * - ARCHITECTURAL_PRINCIPLES.md E-3 resource determinism (paired management)
+ * - ARCHITECTURAL_PRINCIPLES.md E-4 cross-platform consistency (platform.h)
+ * - ARCHITECTURAL_PRINCIPLES.md E-5 semantic naming (SVC_LOG_*)
+ * - ARCHITECTURAL_PRINCIPLES.md E-6 traceable errors (AIRY_ERR_*)
  */
 
 #include "atomic_compat.h"

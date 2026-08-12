@@ -3,7 +3,8 @@
 
 /**
  * @file tool_builtin_internal.h
- * @brief 内置工具集内部跨文件共享声明（builtin.c 拆分后各功能域共用）
+ * @brief Internal cross-file shared declarations of the built-in tool set
+ *        (shared by the functional domains after builtin.c was split).
  */
 
 #ifndef AIRY_RT_TOOL_BUILTIN_INTERNAL_H
@@ -22,7 +23,7 @@ extern "C" {
 #define BUILTIN_OUTPUT_CAP (1U << 20) /* 1MB */
 #define BUILTIN_SHELL_TIMEOUT_MS 60000
 
-/* 公共 I/O 辅助（builtin.c） */
+/* Common I/O helpers (builtin.c) */
 char *builtin_read_all(FILE *fp, int *out_truncated);
 
 #ifndef _WIN32
@@ -31,7 +32,8 @@ int builtin_shell_run(const char *cmd, char **out, int *exit_code, uint32_t time
                       int *out_truncated, const os_sandbox_cfg_t *sandbox);
 #endif
 
-/* 内置工具实现（builtin_fs.c / builtin_shell.c / builtin_net.c / builtin_git.c） */
+/* Built-in tool implementations (builtin_fs.c / builtin_shell.c /
+ * builtin_net.c / builtin_git.c) */
 int fs_read_tool(const char *params_json, tool_result_t *res);
 int fs_write_tool(const char *params_json, tool_result_t *res);
 int fs_list_tool(const char *params_json, tool_result_t *res);

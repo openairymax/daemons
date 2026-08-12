@@ -3,7 +3,7 @@
 
 /**
  * @file agent_service_internal.h
- * @brief Agent 服务内部跨文件共享声明（service.c 拆分后各域共用）
+ * @brief Internal declarations shared across agent service files.
  */
 
 #ifndef AIRY_RT_DAEMON_AGENT_D_AGENT_SERVICE_INTERNAL_H
@@ -21,18 +21,18 @@ extern "C" {
 #define AGENT_ID_LEN 33
 #define AGENT_RESP_BUF_SIZE 65536
 
-/* 哈希表与 ID 生成（service.c） */
+/* Hash table and ID generation (service.c) */
 int agent_ht_insert(agent_hash_table_t *ht, const char *key, size_t index);
 ssize_t agent_ht_lookup(agent_hash_table_t *ht, const char *key);
 void agent_generate_agent_id(char *buf, size_t buf_size);
 
-/* 性能/锁工具（service.c） */
+/* Perf/lock helpers (service.c) */
 uint64_t agent_perf_now_us(void);
 void agent_lock_svc(agent_service_t *svc);
 void agent_perf_accumulate(atomic_ullong *us_total, atomic_ullong *us_max, uint64_t elapsed_us);
 
 #if AIRY_PLATFORM_POSIX
-/* 子进程通信（service_child.c） */
+/* Child process communication (service_child.c) */
 int agent_invoke_timeout_s(void);
 int agent_spawn_ready_timeout_s(void);
 int agent_write_all(int fd, const char *buf, size_t len);

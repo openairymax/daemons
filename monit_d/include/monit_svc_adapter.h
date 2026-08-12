@@ -2,9 +2,8 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
 /*
- *
  * @file monit_svc_adapter.h
- * @brief 监控服务适配器头文件
+ * @brief Monitoring service-adapter header.
  *
  */
 

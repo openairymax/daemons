@@ -3,16 +3,20 @@
 
 /**
  * @file svc_config.c
- * @brief 服务配置文件加载与监视（config 域）
+ * @brief Service config-file loading and watching (config domain).
  *
- * 实现 svc_common.h 中定义的配置接口：加载服务配置文件（json/yaml/toml
- * 依次尝试）、注册/取消配置变更监视、释放配置资源。本域维护独立的
- * g_config_mgr 全局状态，不依赖 service 生命周期域的任何内部结构。
+ * Implements the config interface defined in svc_common.h: loads service
+ * config files (tries json/yaml/toml in order), registers/unregisters
+ * config-change watchers and releases config resources. This domain keeps
+ * its own g_config_mgr global state and does not depend on any internal
+ * structure of the service-lifecycle domain.
  *
- * 设计原则：
- * 1. 懒初始化（config_mgr_init），首次调用时创建互斥锁
- * 2. 配置文件缺失时返回空配置而非报错，保证服务可无配置启动
- * 3. 单一全局互斥锁保护监视器表，保证线程安全（E-5 并发安全）
+ * Design principles:
+ * 1. Lazy init (config_mgr_init), creating the mutex on first call
+ * 2. A missing config file returns an empty config instead of an error, so
+ *    services can start without config
+ * 3. A single global mutex protects the watcher table, ensuring thread
+ *    safety (E-5 concurrency safety)
  *
  * @see agentrt/daemons/common/include/svc_common.h
  * @see agentrt/daemons/common/src/svc_common.c

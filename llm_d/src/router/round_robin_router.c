@@ -3,24 +3,24 @@
 
 /**
  * @file round_robin_router.c
- * @brief P3.1.2: 轮询路由
+ * @brief P3.1.2: round-robin routing.
  *
- * 在所有满足能力要求的端点中按轮询顺序选择，
- * 确保请求均匀分布到各端点。
+ * Selects endpoints in round-robin order among those meeting the
+ * capability requirements, spreading requests evenly across endpoints.
  *
  */
 
 #include "router/router_context.h"
 
 /**
- * @brief 轮询路由 — 在所有满足能力的端点中按顺序轮询
+ * @brief Round-robin routing - cycle through all capable endpoints.
  *
- * 使用全局计数器 round_robin_index 确保每次请求
- * 分发到不同的端点，实现负载均衡。
+ * Uses the global round_robin_index counter so each request goes to a
+ * different endpoint, achieving load balancing.
  *
- * @param request 路由请求
- * @param result  路由结果输出
- * @return 0 成功，-1 无可用端点
+ * @param request Routing request
+ * @param result  Routing-result output
+ * @return 0 on success, -1 if no eligible endpoint
  */
 int route_round_robin(const llm_route_request_t *request, llm_route_result_t *result)
 {

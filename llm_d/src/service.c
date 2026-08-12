@@ -4,13 +4,13 @@
 #include "airy_memory.h"
 /**
  * @file service.c
- * @brief LLM 服务核心逻辑实现
+ * @brief LLM service core logic implementation.
  *
- * 改进说明：
- * 1. 修复 stpcpy 不可移植问题
- * 2. 统一错误码为 AIRY_ERR_*
- * 3. 完善 YAML 解析逻辑
- * 4. 线程安全
+ * Improvements:
+ * 1. Fixed the non-portable stpcpy issue
+ * 2. Unified error codes to AIRY_ERR_*
+ * 3. Completed the YAML parsing logic
+ * 4. Thread safety
  */
 
 #include "daemon_defaults.h"

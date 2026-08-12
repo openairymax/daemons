@@ -28,9 +28,12 @@ typedef struct daemon_event_config {
     int thread_pool_queue_size;
     int health_check_interval_sec;
     bool use_jsonrpc;
-    /* 若为 true 且配置了池 + on_client，则每个客户端请求被分派到线程池并发处理，
-     * 事件循环线程不再被单个长请求（如阻塞等待交互审批的 execute）卡住。
-     * 默认 false：保持原有同步逐请求处理语义（不影响其他 daemon）。 */
+    /* If true and a pool + on_client are configured, each client request
+     * is dispatched to the thread pool for concurrent processing so the
+     * event-loop thread is no longer blocked by a single long request
+     * (e.g. an execute blocking on interactive approval). Default false:
+     * keep the original synchronous per-request semantics (does not affect
+     * other daemons). */
     bool concurrent_clients;
     daemon_on_client_cb on_client;
     daemon_on_timer_cb on_timer;
@@ -56,10 +59,11 @@ int daemon_event_driver_run(daemon_event_driver_t *driver);
 void daemon_event_driver_stop(daemon_event_driver_t *driver);
 
 /**
- * @brief 异步安全停止事件驱动（可在信号处理器中安全调用）
+ * @brief Async-safe stop of the event driver (safe in signal handlers).
  *
- * 仅触发底层事件循环的异步安全停止（原子置位 + eventfd 唤醒），
- * 不执行任何日志/锁操作，保持 async-signal-safe。
+ * Only triggers the underlying event loop's async-safe stop (atomic flag
+ * set + eventfd wakeup); performs no logging or locking, keeping it
+ * async-signal-safe.
  */
 void daemon_event_driver_stop_async(daemon_event_driver_t *driver);
 

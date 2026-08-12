@@ -4,7 +4,7 @@
 #include "airy_memory.h"
 /**
  * @file service.c
- * @brief 网关服务核心实现
+ * @brief Gateway service core implementation.
  */
 
 #include "gateway_service.h"

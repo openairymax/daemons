@@ -3,7 +3,7 @@
 
 /**
  * @file service.h
- * @brief Agent 服务内部结构声明
+ * @brief Agent service internal structure declarations.
  */
 
 #ifndef AGENT_SERVICE_INTERNAL_H
@@ -17,8 +17,9 @@
 #include <stdint.h>
 
 
-/* 活跃 invoke 会话上限（并发取消查找为线性扫描，上限防资源失控）。
- * 每会话持有独立 cancel_token：handle_invoke 注册、agent.cancel 查表取消。 */
+/* Active invoke session cap (concurrent cancel lookup is a linear scan;
+ * the cap prevents unbounded resources). Each session holds its own
+ * cancel_token: handle_invoke registers, agent.cancel looks up and cancels. */
 #define AGENT_INVOKE_SESSIONS_MAX 1024
 
 typedef struct {
@@ -41,11 +42,11 @@ typedef struct {
 } agent_hash_table_t;
 
 
-/* 槽位状态机：
- *   0 = 空闲（可复用，spawn 失败回滚后）
- *   1 = running（已注册到哈希表，子进程存活）
- *   3 = terminated（terminate 后不回收槽位，保持原语义）
- *   4 = spawning（槽位已预占，子进程启动中，尚未注册哈希表） */
+/* Slot state machine:
+ *   0 = free (reusable after spawn-failure rollback)
+ *   1 = running (registered in hash table, child alive)
+ *   3 = terminated (slot not reclaimed after terminate, keeps old semantics)
+ *   4 = spawning (slot reserved, child starting, not yet in hash table) */
 #define AGENT_STATUS_FREE 0
 #define AGENT_STATUS_RUNNING 1
 #define AGENT_STATUS_TERMINATED 3
@@ -56,17 +57,20 @@ typedef struct {
     char *spec;
     int status;
     uint64_t spawned_at;
-    /* 细粒度锁：保护本条目的 status/child 句柄，避免全局锁持有期间
-     * 做 fork / 子进程 IO 而串行化所有 agent 操作。每个 spawn/invoke/
-     * terminate 仅在索引查找时短暂持有全局锁，子进程生命周期操作
-     * 在本锁保护下进行，从而支持上千 Agent 真正并行。 */
+    /* Fine-grained lock protecting this entry's status/child handles, so
+     * fork / child IO never happens while holding the global lock (which
+     * would serialize all agent operations). Each spawn/invoke/terminate
+     * holds the global lock only briefly for index lookup; child lifecycle
+     * operations run under this lock, allowing true parallelism for
+     * thousands of agents. */
     airy_mtx_t entry_lock;
 #if AIRY_PLATFORM_POSIX
-    /* Stage5+ 待办4：真实 spawn — fork Agent runner 子进程后的句柄
-     * （Python/Rust 双语言支持）。
-     * child_pid>0 表示有活跃子进程；-1 表示无子进程（回退旧逻辑）。
-     * stdin_fd 用于向子进程写请求，stdout_fd 用于读响应。
-     * last_active：最近一次成功与子进程通信的时间（秒），空闲回收依据。 */
+    /* Stage5+ todo4: real spawn - handles after forking the agent runner
+     * child (Python/Rust dual-language support).
+     * child_pid > 0 means an active child; -1 means none (old logic fallback).
+     * stdin_fd writes requests to the child, stdout_fd reads responses.
+     * last_active: last successful child communication time (s), basis for
+     * idle reaping. */
     pid_t child_pid;
     int stdin_fd;
     int stdout_fd;
@@ -79,17 +83,20 @@ struct agent_service {
     size_t agent_count;
     size_t max_agents;
     agent_hash_table_t agent_index;
-    /* 全局锁：仅保护 agent_count、哈希表与槽位分配（快路径）。
-     * 禁止在持有本锁期间做 fork / 网络 / 子进程 IO 等阻塞操作。 */
+    /* Global lock guarding only agent_count, the hash table and slot
+     * allocation (fast path). Never do fork / network / child IO while
+     * holding this lock. */
     airy_mtx_t lock;
     int initialized;
 
-    /* ---- 性能监控计数器（10000 并发验证，原子无锁更新） ----
-     * 10000 并发下逐请求打日志会刷爆 IO，因此只做原子计数与耗时
-     * 聚合（累计/最大），由 agent_d 的 perf 监控线程周期采样输出。
-     * - 计数：spawn/invoke/terminate 请求总数与成败
-     * - lock_wait_total：全局锁 trylock 探测失败的次数（锁竞争信号）
-     * - 耗时：以微秒聚合，64 位防止累计溢出 */
+    /* ---- Perf monitor counters (10000-concurrency verified, atomic
+     * lock-free updates) ----
+     * At 10000 concurrency, per-request logging would flood IO, so only
+     * atomic counting and duration aggregation (cumulative/max) are done,
+     * sampled periodically by agent_d's perf monitor thread.
+     * - Counts: spawn/invoke/terminate request totals and outcomes
+     * - lock_wait_total: failed global-lock trylock probes (contention signal)
+     * - Durations: aggregated in microseconds, 64-bit prevents overflow */
     airy_atomic_int_t m_spawn_total;
     airy_atomic_int_t m_spawn_ok;
     airy_atomic_int_t m_spawn_fail;
@@ -104,9 +111,12 @@ struct agent_service {
     atomic_ullong m_invoke_us_total;
     atomic_ullong m_invoke_us_max;
 
-    /* ---- invoke 会话表（改进1 "取消下探"：跨进程取消） ----
-     * 保护锁独立于 svc->lock（invoke 路径持 entry_lock 做子进程 IO，
-     * 会话注册/注销/取消为短临界区，独立锁避免全局锁长时间占用）。 */
+    /* ---- Invoke session table (improvement 1 "cancel down-probe":
+     * cross-process cancellation) ----
+     * Guard lock is independent of svc->lock (invoke path holds entry_lock
+     * during child IO; session register/unregister/cancel are short
+     * critical sections; the separate lock avoids holding the global lock
+     * for long periods). */
     airy_mtx_t session_lock;
     agent_invoke_session_t sessions[AGENT_INVOKE_SESSIONS_MAX];
 };

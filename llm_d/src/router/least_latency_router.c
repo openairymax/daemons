@@ -3,24 +3,25 @@
 
 /**
  * @file least_latency_router.c
- * @brief P3.1.3: 最低延迟路由
+ * @brief P3.1.3: least-latency routing.
  *
- * 在所有满足能力要求的端点中选择平均延迟最低的，
- * 适用于对响应时间敏感的场景。
+ * Selects the endpoint with the lowest average latency among those meeting
+ * the capability requirements, for latency-sensitive scenarios.
  *
  */
 
 #include "router/router_context.h"
 
 /**
- * @brief 最低延迟路由 — 选择 avg_latency_ms 最小的端点
+ * @brief Least-latency routing - pick the endpoint with the smallest
+ *        avg_latency_ms.
  *
- * 遍历所有满足能力要求的端点，比较平均延迟，
- * 选择延迟最低的端点。如果延迟相同，选择成本更低的。
+ * Walks all endpoints meeting the capability requirements, comparing
+ * average latency and choosing the lowest. On a tie, picks the cheaper one.
  *
- * @param request 路由请求
- * @param result  路由结果输出
- * @return 0 成功，-1 无可用端点
+ * @param request Routing request
+ * @param result  Routing-result output
+ * @return 0 on success, -1 if no eligible endpoint
  */
 int route_least_latency(const llm_route_request_t *request, llm_route_result_t *result)
 {

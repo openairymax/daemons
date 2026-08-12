@@ -4,12 +4,11 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file mem_svc_adapter.c
- * @brief Memory 服务适配器：将 mem_service_t 适配到统一 AgentRT 服务管理框架
+ * @brief Adapts mem_service_t to the unified AgentRT service framework.
  *
- * 使用 airy_svc_set/get_user_data 存取适配器上下文，
- * 避免类型强转导致的类型安全问题。仿照 tool_svc_adapter.c 结构。
+ * Stores adapter context via airy_svc_set/get_user_data to avoid unsafe
+ * type casts. Modeled on tool_svc_adapter.c.
  */
 
 #include "mem_service.h"

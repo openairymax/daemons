@@ -3,7 +3,7 @@
 
 /**
  * @file unified_metrics.c
- * @brief 统一指标收集器实现
+ * @brief Unified metrics collector implementation.
  *
  * @see unified_metrics.h
  */
@@ -35,9 +35,11 @@ static um_module_metrics_t *find_module(const char *name)
         if (strcmp(g_um.modules[i].module_name, name) == 0)
             return &g_um.modules[i];
     }
-    /* "未找到"是正常控制流（调用者通过返回值判断并记录具体错误日志），
-     * 不应在此分配 error context，否则导致内存泄漏。
-     * 之前还错误使用了 AIRY_ERR_OVERFLOW（"limit exceeded"）码，语义不符。 */
+    /* "Not found" is normal control flow (the caller checks the return
+     * value and logs the specific error), so do not allocate an error
+     * context here - that would leak memory. Previously this also wrongly
+     * used AIRY_ERR_OVERFLOW ("limit exceeded"), which did not match the
+     * semantics. */
     return NULL;
 }
 

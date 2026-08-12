@@ -3,10 +3,12 @@
 
 /**
  * @file sched_dag_impl.c
- * @brief 调度服务 · 蓝图调度（DAG）域实现
- * @details 工作大厅机制：实现 scheduler_service.h 中 DAG 域公共 API
- *          （submit_dag/get_dag/cancel_dag/checkpoint_save）与 sched_dag_*
- *          内部引擎（依赖解析、并行批派发、失败分级、重试背压、拓扑校验）。
+ * @brief Scheduler service - blueprint scheduling (DAG) domain implementation.
+ * @details Work-hall mechanism: implements the DAG public APIs in
+ *          scheduler_service.h (submit_dag/get_dag/cancel_dag/checkpoint_save)
+ *          and the sched_dag_* internal engine (dependency resolution,
+ *          parallel batch dispatch, failure tiers, retry backpressure,
+ *          topological validation).
  */
 
 #include "sched_service_internal.h"

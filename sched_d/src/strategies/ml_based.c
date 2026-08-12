@@ -5,8 +5,9 @@
 #include "error.h"
 /**
  * @file ml_based.c
- * @brief 基于机器学习的调度策略实现（生产级）
- * @details 使用加权特征融合模型进行Agent选择预测，包含完整的特征工程和评分函数
+ * @brief ML-based scheduling-strategy implementation (production-grade).
+ * @details Predicts agent selection with a weighted feature-fusion model,
+ *          including full feature engineering and scoring functions.
  */
 
 #include "../../include/scheduler_service.h"

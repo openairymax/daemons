@@ -3,7 +3,7 @@
 
 /**
  * @file registry.h
- * @brief 提供商注册表接口
+ * @brief Provider registry interface.
  */
 
 #ifndef AIRY_RT_LLM_PROVIDER_REGISTRY_H
@@ -44,15 +44,17 @@ void provider_registry_destroy(provider_registry_t *reg);
 const provider_t *provider_registry_find(provider_registry_t *reg, const char *model);
 
 /**
- * @brief 枚举注册表中所有 (provider, model) 对
+ * @brief Enumerate all (provider, model) pairs in the registry.
  *
- * P3.16 (ACC-DT17): 为 llm_router 端点注册提供遍历接口。
- * 对每个已注册 provider 的每个 model，调用回调 (provider_name, model_name, user_data)。
+ * P3.16 (ACC-DT17): traversal interface for llm_router endpoint
+ * registration. For every model of every registered provider, calls the
+ * callback (provider_name, model_name, user_data).
  *
- * @param reg 注册表
- * @param cb  回调（不可为 NULL）；回调返回非 0 时停止枚举
- * @param user_data 透传给回调的用户数据
- * @return 回调累计返回非 0 的次数（用于短路）；reg/cb 为 NULL 时返回 0
+ * @param reg Registry
+ * @param cb  Callback (must not be NULL); enumeration stops when it returns non-zero
+ * @param user_data User data passed through to the callback
+ * @return Number of non-zero callback returns (for short-circuiting);
+ *         0 if reg/cb is NULL
  */
 int provider_registry_enumerate(provider_registry_t *reg,
                                 int (*cb)(const char *provider_name, const char *model_name,

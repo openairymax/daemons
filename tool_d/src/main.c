@@ -4,9 +4,8 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file main.c
- * @brief Tool 服务守护进程主入口（遵循 daemon 模块统一规范）
+ * @brief Tool service daemon main entry (daemon module conventions).
  */
 
 #include "daemon_main.h"

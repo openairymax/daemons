@@ -5,13 +5,13 @@
 #include "error.h"
 /**
  * @file ipc_client.c
- * @brief IPC 客户端实现（线程安全版本）
+ * @brief IPC client implementation (thread-safe version).
  *
- * 改进：
- * 1. 线程安全的连接池
- * 2. 修复内存安全问题
- * 3. 支持连接复用
- * 4. 添加超时和重试机制
+ * Improvements:
+ * 1. Thread-safe connection pool
+ * 2. Memory-safety fixes
+ * 3. Connection reuse
+ * 4. Timeout and retry support
  */
 
 #include "daemon_platform_ext.h"

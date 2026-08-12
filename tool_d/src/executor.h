@@ -3,7 +3,7 @@
 
 /**
  * @file executor.h
- * @brief 工具执行器接口
+ * @brief Tool-executor interface.
  */
 
 #ifndef TOOL_EXECUTOR_H
@@ -31,13 +31,13 @@ tool_executor_t *tool_executor_create_ex(const tool_executor_config_t *ecfg);
 void tool_executor_destroy(tool_executor_t *exec);
 
 /**
- * @brief 执行工具
- * @param exec 执行器
- * @param meta 工具元数据
- * @param params_json 参数 JSON
- * @param agent_id 调用方 Agent ID（NULL/空串回退审批上下文默认，"tool_d"）
- * @param out_result 输出结果
- * @return 0 成功，其他错误码
+ * @brief Execute a tool.
+ * @param exec Executor
+ * @param meta Tool metadata
+ * @param params_json Parameter JSON
+ * @param agent_id Caller Agent ID (NULL/empty = fall back to approval-context default, "tool_d")
+ * @param out_result Output result
+ * @return 0 on success, other error codes
  */
 int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const char *params_json,
                       const char *agent_id, tool_result_t **out_result);
@@ -53,29 +53,29 @@ void tool_executor_set_approval_ctx(tool_executor_t *exec, tool_approval_ctx_t *
 
 
 /**
- * @brief 交互式审批是否启用
- * @param exec 执行器
- * @return true 启用，false 未启用
+ * @brief Whether interactive approval is enabled.
+ * @param exec Executor
+ * @return true enabled, false disabled
  *
  * @ownership exec: BORROW
  */
 bool tool_executor_interactive_enabled(tool_executor_t *exec);
 
 /**
- * @brief 列出所有 pending 审批请求（JSON 数组字符串）
- * @param exec 执行器
- * @return JSON 数组字符串（AIRY_MALLOC，调用者 AIRY_FREE），失败返回 NULL
+ * @brief List all pending approval requests (JSON array string).
+ * @param exec Executor
+ * @return JSON array string (AIRY_MALLOC, caller AIRY_FREEs), NULL on failure
  *
  * @ownership exec: BORROW; return: OWNER
  */
 char *tool_executor_interactive_pending_list(tool_executor_t *exec);
 
 /**
- * @brief 按 request_id 决议一个 pending 审批请求
- * @param exec 执行器
- * @param request_id 请求 ID
- * @param decision 决议："allow" / "always" / "deny"
- * @return 0 成功；未找到 AIRY_ERR_NOT_FOUND；参数非法 AIRY_ERR_INVALID_PARAM
+ * @brief Resolve a pending approval request by request_id.
+ * @param exec Executor
+ * @param request_id Request ID
+ * @param decision Decision: "allow" / "always" / "deny"
+ * @return 0 on success; AIRY_ERR_NOT_FOUND not found; AIRY_ERR_INVALID_PARAM bad args
  *
  * @ownership exec: BORROW
  */

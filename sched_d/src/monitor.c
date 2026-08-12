@@ -3,8 +3,8 @@
 
 /**
  * @file monitor.c
- * @brief 监控模块实现
- * @details 监控 Agent 健康状态和系统运行状态
+ * @brief Monitoring-module implementation.
+ * @details Monitors agent health status and system running state.
  */
 
 #include "airy_memory.h"
@@ -17,9 +17,7 @@
 #include <time.h>
 #include "error.h"
 
-/**
- * @brief 监控数据
- */
+/** @brief Monitoring data. */
 typedef struct {
     uint64_t total_tasks;
     uint64_t successful_tasks;
@@ -32,9 +30,9 @@ typedef struct {
 } monitor_data_t;
 
 /**
- * @brief 创建监控模块
- * @param data 输出参数，返回监控数据
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Create the monitoring module.
+ * @param data Output parameter, returns the monitoring data
+ * @return 0 on success, non-zero error code
  */
 int monitor_create(void **data)
 {

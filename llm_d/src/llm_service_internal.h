@@ -3,7 +3,7 @@
 
 /**
  * @file llm_service_internal.h
- * @brief LLM 服务内部跨文件共享声明（service.c 拆分后各功能域共用）
+ * @brief Internal declarations shared across the LLM service files.
  */
 
 #ifndef AIRY_RT_LLM_SERVICE_SPLIT_INTERNAL_H
@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-/* ---- 配置加载域（service_config.c） ---- */
+/* ---- Config-loading domain (service_config.c) ---- */
 
 int ends_with(const char *str, const char *suffix);
 pricing_rule_t *load_pricing_rules(cJSON *root, int *count);
@@ -29,7 +29,7 @@ void free_pricing_rules(pricing_rule_t *rules, int count);
 int svc_load_model_config(const char *config_path, provider_config_t **out_providers,
                           size_t *out_count);
 
-/* ---- provider 管理域（service_providers.c） ---- */
+/* ---- Provider-management domain (service_providers.c) ---- */
 
 void free_provider_configs(provider_config_t *providers, size_t count);
 void merge_provider_configs(const provider_config_t *main_provs, size_t main_cnt,
@@ -37,7 +37,7 @@ void merge_provider_configs(const provider_config_t *main_provs, size_t main_cnt
                             provider_config_t **out, size_t *out_cnt);
 void register_router_endpoints(llm_service_t *svc);
 
-/* ---- 复杂度评估与统计域（service_metrics.c） ---- */
+/* ---- Complexity-evaluation and statistics domain (service_metrics.c) ---- */
 
 /**
  * @brief Complexity assessment levels (BAN-133 coding contract)

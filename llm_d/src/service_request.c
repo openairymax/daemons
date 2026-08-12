@@ -3,8 +3,9 @@
 
 /**
  * @file service_request.c
- * @brief LLM 服务请求处理域：缓存键生成、provider 路由选择、
- *        完整/流式补全请求处理与成本追踪
+ * @brief LLM service request-handling domain: cache-key generation,
+ *        provider routing selection, full/streaming completion handling
+ *        and cost tracking.
  */
 
 #include "airy_memory.h"

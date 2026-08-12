@@ -3,8 +3,9 @@
 
 /**
  * @file service_spawn.c
- * @brief Agent 服务 spawn 域：派生 agent 子进程、就绪握手验证与
- *        哈希表注册（AIRY_AGENT_NO_SPAWN 确定性模式支持）
+ * @brief Agent service spawn domain: spawns the agent child, verifies the
+ *        readiness handshake and registers in the hash table (with
+ *        AIRY_AGENT_NO_SPAWN deterministic-mode support).
  */
 
 #include "airy_memory.h"

@@ -3,7 +3,7 @@
 
 /**
  * @file param_validator.h
- * @brief JSON-RPC 参数验证工具（统一验证逻辑，消除重复代码）
+ * @brief JSON-RPC parameter validation helpers (unified logic, removes dup).
  */
 
 #ifndef AIRY_RT_PARAM_VALIDATOR_H
@@ -18,11 +18,11 @@ extern "C" {
 #endif
 
 /**
- * @brief 验证 JSON 对象是否存在且类型正确
- * @param obj JSON 对象
- * @param key 字段名
- * @param expected_type 期望类型
- * @return true 如果存在且类型正确
+ * @brief Validate that a JSON object field exists and has the right type.
+ * @param obj JSON object
+ * @param key Field name
+ * @param expected_type Expected type
+ * @return true if present and correctly typed
  */
 static inline bool validate_json_field(cJSON *obj, const char *key, int expected_type)
 {
@@ -31,11 +31,11 @@ static inline bool validate_json_field(cJSON *obj, const char *key, int expected
 }
 
 /**
- * @brief 获取字符串字段（带默认值）
- * @param obj JSON 对象
- * @param key 字段名
- * @param default_value 默认值
- * @return 字符串值或默认值
+ * @brief Get a string field (with default).
+ * @param obj JSON object
+ * @param key Field name
+ * @param default_value Default value
+ * @return String value or default
  */
 static inline const char *get_string_field(cJSON *obj, const char *key, const char *default_value)
 {
@@ -44,11 +44,11 @@ static inline const char *get_string_field(cJSON *obj, const char *key, const ch
 }
 
 /**
- * @brief 获取整数字段（带默认值）
- * @param obj JSON 对象
- * @param key 字段名
- * @param default_value 默认值
- * @return 整数值或默认值
+ * @brief Get an integer field (with default).
+ * @param obj JSON object
+ * @param key Field name
+ * @param default_value Default value
+ * @return Integer value or default
  */
 static inline int get_int_field(cJSON *obj, const char *key, int default_value)
 {
@@ -57,11 +57,11 @@ static inline int get_int_field(cJSON *obj, const char *key, int default_value)
 }
 
 /**
- * @brief 获取双精度浮点字段（带默认值）
- * @param obj JSON 对象
- * @param key 字段名
- * @param default_value 默认值
- * @return 浮点值或默认值
+ * @brief Get a double field (with default).
+ * @param obj JSON object
+ * @param key Field name
+ * @param default_value Default value
+ * @return Floating-point value or default
  */
 static inline double get_double_field(cJSON *obj, const char *key, double default_value)
 {
@@ -70,11 +70,11 @@ static inline double get_double_field(cJSON *obj, const char *key, double defaul
 }
 
 /**
- * @brief 获取布尔字段（带默认值）
- * @param obj JSON 对象
- * @param key 字段名
- * @param default_value 默认值
- * @return 布尔值或默认值
+ * @brief Get a boolean field (with default).
+ * @param obj JSON object
+ * @param key Field name
+ * @param default_value Default value
+ * @return Boolean value or default
  */
 static inline bool get_bool_field(cJSON *obj, const char *key, bool default_value)
 {
@@ -89,17 +89,17 @@ static inline bool get_bool_field(cJSON *obj, const char *key, bool default_valu
 }
 
 /**
- * @brief 验证必需字段是否存在
- * @param obj JSON 对象
- * @param ... 必需字段名列表（以 NULL 结尾）
- * @return 0 成功，-1 失败
+ * @brief Validate that required fields are present.
+ * @param obj JSON object
+ * @param ... Required field-name list (NULL-terminated)
+ * @return 0 on success, -1 on failure
  */
 int validate_required_fields(cJSON *obj, ...);
 
 /**
- * @brief 验证请求 ID 并返回整数值
- * @param id JSON 请求 ID 字段
- * @return 请求 ID 整数值
+ * @brief Validate a request ID and return its integer value.
+ * @param id JSON request ID field
+ * @return Request ID integer value
  */
 static inline int get_request_id(cJSON *id)
 {
@@ -107,13 +107,13 @@ static inline int get_request_id(cJSON *id)
 }
 
 /**
- * @brief 验证 JSON-RPC 请求的基本结构
- * @param req JSON 请求对象
- * @param jsonrpc jsonrpc 字段
- * @param method method 字段
- * @param params params 字段
- * @param id id 字段
- * @return 0 成功，-1 失败
+ * @brief Validate the basic structure of a JSON-RPC request.
+ * @param req JSON request object
+ * @param jsonrpc jsonrpc field
+ * @param method method field
+ * @param params params field
+ * @param id id field
+ * @return 0 on success, -1 on failure
  */
 int validate_jsonrpc_request(cJSON *req, cJSON **jsonrpc, cJSON **method, cJSON **params,
                              cJSON **id);

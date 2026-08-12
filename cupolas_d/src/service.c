@@ -4,22 +4,24 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file service.c
- * @brief Cupolas 安全穹顶服务实现：权限裁决/输入净化/命令执行/规则管理/审计
+ * @brief Cupolas security-dome service impl: permission decision / input
+ *        sanitization / command execution / rule management / audit.
  *
- * cupolas_d 将 cupolas 安全库（agentrt/cupolas）封装为独立 daemon 服务。
- * 本服务真实调用 cupolas.h 公共 API（IRON-2：所有方法无桩）：
+ * cupolas_d wraps the cupolas security library (agentrt/cupolas) into a
+ * standalone daemon service. This service really calls the public cupolas.h
+ * API (IRON-2: no stubbed methods):
  *   - cupolas_check_permission / cupolas_add_permission_rule
  *   - cupolas_sanitize_input / cupolas_execute_command
  *   - cupolas_flush_audit_log / cupolas_version
  *
- * 设计要点：
- * - cupolas 为进程级单例库（cupolas_init），模块初始化由 main() 通过
- *   daemon_cupolas_init("cupolas_d") 完成；本服务实例仅承载配置元数据与
- *   真实运行统计（原子计数器：权限检查次数 / 净化次数）。
- * - 统计为真实计数：每次 check_permission / sanitize 调用都会递增，
- *   供 cupolas.get_stats 返回。
+ * Design notes:
+ * - cupolas is a process-level singleton library (cupolas_init); module
+ *   initialization is done by main() via daemon_cupolas_init("cupolas_d");
+ *   this service instance only carries config metadata and real runtime
+ *   stats (atomic counters: permission-check count / sanitize count).
+ * - Stats are real counts: incremented on every check_permission /
+ *   sanitize call, returned by cupolas.get_stats.
  */
 
 #include "cupolas_service.h"

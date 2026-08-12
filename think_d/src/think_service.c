@@ -5,17 +5,23 @@
 #include "error.h"
 /**
  * @file think_service.c
- * @brief 双思考系统服务实现（Thinkdual: t2/t1-f/t1-p + dual_coordinate）
+ * @brief Dual-think system service implementation (Thinkdual: t2/t1-f/t1-p
+ *        + dual_coordinate).
  *
- * 设计说明：
- * - 承载 CoreLoopThree 认知引擎（airy_cognition_*），经 llm_svc_adapter
- *   直连 llm_d Unix socket，与 15 daemon 架构原生互通。
- * - t2/t1-f/t1-p 三模型经 airy_cognition_set_tc3_models 注入（NULL 用默认）。
- * - dual_coordinate（D3 断链修复）：注入自定义 airy_coordinator_strategy_t，
- *   coordinate 回调内真实调用 LLM 对 t1-f 输出与 LLM seed 做交叉一致性裁决，
- *   裁决结果写入 working memory 供 Phase 3 审计 / Phase 4 对齐读取。
- * - 思考事件（feedback callback）收集到环形缓冲，随 think.process 结果返回，
- *   供 TUI/上层做过程可视化。
+ * Design notes:
+ * - Hosts the CoreLoopThree cognitive engine (airy_cognition_*), connecting
+ *   directly to the llm_d Unix socket via llm_svc_adapter, interoperating
+ *   natively with the 15-daemon architecture.
+ * - The t2/t1-f/t1-p models are injected via airy_cognition_set_tc3_models
+ *   (NULL = defaults).
+ * - dual_coordinate (D3 link-failure fix): injects a custom
+ *   airy_coordinator_strategy_t whose coordinate callback really calls the
+ *   LLM to cross-check t1-f's output against the LLM seed for consistency;
+ *   the verdict is written to working memory for Phase-3 audit / Phase-4
+ *   alignment.
+ * - Thinking events (feedback callback) are collected into a ring buffer
+ *   and returned with the think.process result for TUI/upper-layer process
+ *   visualization.
  */
 
 #include "think_service.h"
@@ -27,10 +33,11 @@
 #include <cjson/cJSON.h>
 #include <string.h>
 
-/* 外部声明：reactive planner 创建函数（coreloopthree 内部 planner）。
- * llm 参数传 NULL → 启发式规则规划（匹配意图规则 + 复杂度判断），
- * 不依赖 airy_llm_service_t（与 15 daemon 的 llm_svc_adapter 类型不互通），
- * 真实 LLM 规划/生成仍由 engine 的 llm_adapter 路径完成。 */
+/* External declaration: reactive-planner factory (coreloopthree internal
+ * planner). NULL llm -> heuristic rule planning (intent-rule matching +
+ * complexity decision), independent of airy_llm_service_t (not
+ * interoperable with the 15-daemon llm_svc_adapter type); real LLM
+ * planning/generation still happens via the engine's llm_adapter path. */
 extern airy_plan_strategy_t *airy_plan_reactive_create(void *llm);
 
 #define THINK_DEFAULT_TIMEOUT_MS 120000u

@@ -4,9 +4,8 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file main.c
- * @brief 市场服务守护进程主入口（遵循 daemon 模块统一规范）
+ * @brief Market service daemon main entry (daemon module conventions).
  */
 
 #include "daemon_main.h"
@@ -105,8 +104,8 @@ static int register_rpc_methods(void)
     method_dispatcher_register(g_dispatcher_market_d, "search_skills", on_search_skills_method,
                                NULL);
     method_dispatcher_register(g_dispatcher_market_d, "health_check", on_health_check_method, NULL);
-    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：market.publish / market.search /
-     * market.install）
+    /* L2 protocol standard methods + aliases (02-l2-service-protocol.md:
+     * market.publish / market.search / market.install)
      */
     method_dispatcher_register(g_dispatcher_market_d, "publish", on_publish_method, NULL);
     method_dispatcher_register(g_dispatcher_market_d, "search", on_search_agents_method, NULL);
@@ -383,9 +382,10 @@ static void handle_get_stats(int id, airy_sock_t client_fd)
 }
 
 /*
- * L2 标准方法 market.publish（02-l2-service-protocol.md）：
- * 复用现有 install 逻辑，接受 params.agent 或 params.skill 对象，
- * 落盘到 $AIRY_HOME/agents 或 $AIRY_HOME/skills 并返回安装路径。
+ * L2 standard method market.publish (02-l2-service-protocol.md):
+ * reuses the existing install logic, accepts a params.agent or
+ * params.skill object, persists to $AIRY_HOME/agents or $AIRY_HOME/skills
+ * and returns the install path.
  */
 static void handle_publish(cJSON *params, int id, airy_sock_t client_fd)
 {
@@ -486,8 +486,10 @@ int main(int argc, char **argv)
 
     SVC_LOG_INFO("Market service starting, manager=%s", config_path);
 
-    /* 创建配置：storage_path 为 NULL → service 层回落 $AIRY_HOME/agents（/skills），
-     * 不再使用 "./agents" 相对路径（随 CWD 漂移）或误把日志名当存储目录 */
+    /* Config creation: NULL storage_path -> the service layer falls back
+     * to $AIRY_HOME/agents (or /skills); no longer uses the "./agents"
+     * relative path (which drifts with CWD) or mistakes a log name for the
+     * storage dir */
     market_config_t config = {.registry_url = NULL,
                               .storage_path = NULL,
                               .sync_interval_ms = 30000,

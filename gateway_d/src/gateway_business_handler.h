@@ -4,11 +4,12 @@
 /* @owner: team-B */
 /**
  * @file gateway_business_handler.h
- * @brief 网关业务请求处理器（agent.run → llm_d 转发）
+ * @brief Gateway business-request handler (agent.run -> llm_d forwarding).
  *
- * 提供 HTTP 网关的默认业务处理链：
- *   标准 JSON-RPC agent.run → llm_d(complete) → JSON-RPC result
- * 修复此前 HTTP 网关 handler 从未接线（恒返回 "Custom handler failed"）的缺口。
+ * Provides the HTTP gateway's default business chain:
+ *   standard JSON-RPC agent.run -> llm_d(complete) -> JSON-RPC result
+ * Fixes the previous gap where the HTTP gateway handler was never wired up
+ * (always returning "Custom handler failed").
  */
 
 #ifndef AIRY_RT_DAEMON_GATEWAY_BUSINESS_HANDLER_H
@@ -23,115 +24,115 @@ extern "C" {
 
 typedef struct gw_proto_router gw_proto_router_t;
 
-/**
- * @brief 业务处理器上下文
- */
+/** @brief Business-handler context. */
 typedef struct gateway_business_ctx_s gateway_business_ctx_t;
 
-/**
- * @brief 统一协议入口上下文：协议路由 + JSON-RPC 业务处理
- */
+/** @brief Unified protocol-entry context: protocol router + JSON-RPC biz. */
 typedef struct {
     gateway_business_ctx_t *biz_ctx;
     gw_proto_router_t *router;
 } gateway_entry_ctx_t;
 
 /**
- * @brief 创建业务处理器上下文
+ * @brief Create a business-handler context.
  *
- * 从环境变量解析 llm_d 端点：
- *   - AIRY_LLM_SOCK：POSIX Unix socket 路径（默认 $AIRY_RUNTIME_DIR/llm.sock）
- *   - AIRY_LLM_TCP_ADDR / AIRY_LLM_TCP_PORT：Windows TCP 端点（默认 127.0.0.1:8080）
+ * Resolves the llm_d endpoint from environment variables:
+ *   - AIRY_LLM_SOCK: POSIX Unix socket path (default $AIRY_RUNTIME_DIR/llm.sock)
+ *   - AIRY_LLM_TCP_ADDR / AIRY_LLM_TCP_PORT: Windows TCP endpoint
+ *     (default 127.0.0.1:8080)
  *
- * @return 上下文指针，失败返回 NULL
+ * @return Context pointer, NULL on failure
  */
 gateway_business_ctx_t *gateway_business_ctx_create(void);
 
 /**
- * @brief 销毁业务处理器上下文
- * @param ctx 上下文指针
+ * @brief Destroy a business-handler context.
+ * @param ctx Context pointer
  */
 void gateway_business_ctx_destroy(gateway_business_ctx_t *ctx);
 
 /**
- * @brief L2 标准方法 <ns>.shutdown 回调类型（02-l2-service-protocol.md §6.1）
+ * @brief L2 standard method <ns>.shutdown callback type
+ *        (02-l2-service-protocol.md §6.1).
  *
- * gateway_business_handle 收到 "shutdown" 方法时调用，由宿主（gateway_d main）
- * 负责触发真实优雅退出（如原子置位 g_running 让主循环退出）。
+ * Called by gateway_business_handle on the "shutdown" method; the host
+ * (gateway_d main) triggers the real graceful exit (e.g. atomically
+ * clearing g_running so the main loop exits).
  */
 typedef void (*gateway_shutdown_fn_t)(void *user_data);
 
 /**
- * @brief 设置 shutdown 回调（L2 <ns>.shutdown 支持）
- * @param ctx 业务处理器上下文
- * @param cb  shutdown 回调（可传 NULL 表示不支持）
- * @param user_data 回调用户数据（如 &g_running）
- * @return 0 成功，非 0 失败
+ * @brief Set the shutdown callback (L2 <ns>.shutdown support).
+ * @param ctx Business-handler context
+ * @param cb  Shutdown callback (NULL = unsupported)
+ * @param user_data Callback user data (e.g. &g_running)
+ * @return 0 on success, non-zero on failure
  */
 int gateway_business_ctx_set_shutdown_cb(gateway_business_ctx_t *ctx, gateway_shutdown_fn_t cb,
                                          void *user_data);
 
 /**
- * @brief 网关业务请求处理器（gateway_service_handler_t 签名）
+ * @brief Gateway business-request handler (gateway_service_handler_t sig).
  *
- * 输入标准 JSON-RPC 请求字符串，支持：
- *   - "ping"      → {"result":{"status":"ok"}}
- *   - "agent.run" → 转发 llm_d.complete，返回对话结果
- *   - 其他        → -32601 Method not found
+ * Takes a standard JSON-RPC request string; supports:
+ *   - "ping"      -> {"result":{"status":"ok"}}
+ *   - "agent.run" -> forwards to llm_d.complete, returns the chat result
+ *   - other       -> -32601 Method not found
  *
- * @param request JSON-RPC 请求字符串
+ * @param request JSON-RPC request string
  * @param user_data gateway_business_ctx_t*
- * @return JSON 响应字符串（AIRY_MALLOC 分配），失败返回 NULL
+ * @return JSON response string (AIRY_MALLOC-allocated), NULL on failure
  */
 char *gateway_business_handle(void *request, void *user_data);
 
 
 /**
- * @brief 统一协议入口（替换 gateway_business_handle 作为 HTTP 唯一 handler）
+ * @brief Unified protocol entry (replaces gateway_business_handle as the
+ *        sole HTTP handler).
  *
- * 按 body 检测协议并路由：
- *   - MCP / OpenAI / A2A → 对应适配器（内部服务调用见下）
- *   - 其余 JSON-RPC（agent.run/ping）→ gateway_business_handle
+ * Detects the protocol from the body and routes:
+ *   - MCP / OpenAI / A2A -> matching adapter (internal service calls below)
+ *   - other JSON-RPC (agent.run/ping) -> gateway_business_handle
  *
- * @param request JSON-RPC 请求字符串
+ * @param request JSON-RPC request string
  * @param user_data gateway_entry_ctx_t*
- * @return JSON 响应字符串（AIRY_MALLOC 分配），失败返回 NULL
+ * @return JSON response string (AIRY_MALLOC-allocated), NULL on failure
  */
 char *gateway_protocol_entry(void *request, void *user_data);
 
 /**
- * @brief MCP 工具执行 backend：tools/call → tool_d.execute_tool
- * @param tool_name 工具名（fs_read/fs_write/fs_list/shell_run）
- * @param arguments_json 工具参数 JSON 字符串
- * @param result_json 输出结果（合法 JSON 字符串，AIRY_MALLOC，调用者 AIRY_FREE）
+ * @brief MCP tool-execution backend: tools/call -> tool_d.execute_tool.
+ * @param tool_name Tool name (fs_read/fs_write/fs_list/shell_run)
+ * @param arguments_json Tool-argument JSON string
+ * @param result_json Output result (valid JSON string, AIRY_MALLOC, caller AIRY_FREEs)
  * @param user_data gateway_business_ctx_t*
- * @return 0 成功，非 0 失败
+ * @return 0 on success, non-zero on failure
  */
 int gw_biz_tool_exec(const char *tool_name, const char *arguments_json, char **result_json,
                      void *user_data);
 
 /**
- * @brief OpenAI LLM backend：chat/completions → llm_d.complete
- * @param model 模型名
- * @param messages_json 对话消息数组 JSON
- * @param functions_json OpenAI tools/functions 数组 JSON（可为 NULL）
- * @param temperature 采样温度
- * @param max_tokens 最大 token 数
- * @param response_json OpenAI chat.completion 格式响应（AIRY_MALLOC，调用者 AIRY_FREE）
+ * @brief OpenAI LLM backend: chat/completions -> llm_d.complete.
+ * @param model Model name
+ * @param messages_json Chat-messages array JSON
+ * @param functions_json OpenAI tools/functions array JSON (may be NULL)
+ * @param temperature Sampling temperature
+ * @param max_tokens Max token count
+ * @param response_json OpenAI chat.completion-format response (AIRY_MALLOC, caller AIRY_FREEs)
  * @param user_data gateway_business_ctx_t*
- * @return 0 成功，非 0 失败
+ * @return 0 on success, non-zero on failure
  */
 int gw_biz_llm_complete(const char *model, const char *messages_json, const char *functions_json,
                         double temperature, int max_tokens, char **response_json, void *user_data);
 
 /**
- * @brief A2A 任务 backend：task → sched_d.schedule_task
- * @param task_id 任务 ID
- * @param task_type 任务类型（编码/分析等）
- * @param input_json 任务输入 JSON 字符串
- * @param output_json 调度结果（合法 JSON，AIRY_MALLOC，调用者 AIRY_FREE）
+ * @brief A2A task backend: task -> sched_d.schedule_task.
+ * @param task_id Task ID
+ * @param task_type Task type (encoding/analysis, etc.)
+ * @param input_json Task-input JSON string
+ * @param output_json Scheduling result (valid JSON, AIRY_MALLOC, caller AIRY_FREEs)
  * @param user_data gateway_business_ctx_t*
- * @return 0 成功，非 0 失败
+ * @return 0 on success, non-zero on failure
  */
 int gw_biz_sched_schedule(const char *task_id, const char *task_type, const char *input_json,
                           char **output_json, void *user_data);

@@ -3,8 +3,8 @@
 
 /**
  * @file svc_auth_ratelimit.c
- * @brief Daemon 认证中间件限流域：令牌桶速率限制器的初始化/检查/
- *        重置/统计/清理
+ * @brief Daemon auth-middleware rate-limit domain: token-bucket rate
+ *        limiter init/check/reset/stats/cleanup.
  */
 
 #include "airy_memory.h"

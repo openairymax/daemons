@@ -3,7 +3,7 @@
 
 /**
  * @file tool_errors.h
- * @brief 工具服务特有错误码
+ * @brief Tool-service-specific error codes.
  */
 
 #ifndef TOOL_ERRORS_H

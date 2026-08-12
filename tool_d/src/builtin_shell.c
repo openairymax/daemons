@@ -3,8 +3,9 @@
 
 /**
  * @file builtin_shell.c
- * @brief 内置工具 shell 执行域：带超时/输出截断的子进程命令执行
- *        （fork + pipe + poll + waitpid）与 shell_run 工具实现
+ * @brief Built-in tool shell-execution domain: subprocess command execution
+ *        with timeout/output truncation (fork + pipe + poll + waitpid) and
+ *        the shell_run tool implementation.
  */
 
 #include "airy_memory.h"

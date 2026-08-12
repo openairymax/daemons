@@ -4,13 +4,16 @@
 // @owner: team-B
 /**
  * @file gateway_biz_forward.c
- * @brief 网关命名空间转发：L2 协议客户端 + 方法白名单
+ * @brief Gateway namespace forwarding: L2 protocol client + method whitelist.
  *
- * 作为 gateway -> daemon 的 L2 服务协议客户端（<daemon>.<method>），
- * 提供统一的 Unix socket JSON-RPC 调用（gw_svc_call），并为每个外部
- * 命名空间维护方法白名单，未列入的方法一律返回 -32601（防任意方法透传）。
+ * Acts as the gateway -> daemon L2 service-protocol client
+ * (<daemon>.<method>), providing a unified Unix-socket JSON-RPC call
+ * (gw_svc_call), and maintains a method whitelist per external namespace;
+ * methods not listed always return -32601 (preventing arbitrary method
+ * passthrough).
  *
- * 从 gateway_business_handler.c 拆分（单一职责：命名空间转发）。
+ * Split from gateway_business_handler.c (single responsibility: namespace
+ * forwarding).
  */
 
 #include "gateway_biz_internal.h"

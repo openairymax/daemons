@@ -5,13 +5,14 @@
 #include "error.h"
 /**
  * @file response.c
- * @brief 响应序列化实现
+ * @brief Response serialization implementation.
  */
 
 #include "response.h"
 
-/* P0.18.2: 引入 cjson_helpers.h 提供 CJSON_PARSE_GUARD/CJSON_AUTO_FREE 宏
- * （response.h 已传递 <cjson/cJSON.h>，cjson_helpers.h 依赖 AIRY_HAS_CJSON） */
+/* P0.18.2: cjson_helpers.h provides the CJSON_PARSE_GUARD/CJSON_AUTO_FREE
+ * macros (response.h already pulls in <cjson/cJSON.h>; cjson_helpers.h
+ * depends on AIRY_HAS_CJSON). */
 #include <cjson_helpers.h>
 
 #include <stdlib.h>
@@ -37,8 +38,9 @@ char *response_to_json(const llm_response_t *resp)
     cJSON_AddNumberToObject(root, "total_tokens", resp->total_tokens);
 
     cJSON_AddNumberToObject(root, "cost_usd", resp->cost_usd);
-    /* usage 嵌套对象：OpenAI chat.completions 兼容格式，网关 parse_llm_result
-     * 与 OpenAI 适配器均读取此节点；顶层 prompt/completion/total_tokens 保留兼容 */
+    /* usage nested object: OpenAI chat.completions-compatible format; both
+     * the gateway parse_llm_result and the OpenAI adapter read this node;
+     * top-level prompt/completion/total_tokens kept for compatibility */
     cJSON *usage = cJSON_CreateObject();
     cJSON_AddNumberToObject(usage, "prompt_tokens", resp->prompt_tokens);
     cJSON_AddNumberToObject(usage, "completion_tokens", resp->completion_tokens);
@@ -51,9 +53,10 @@ char *response_to_json(const llm_response_t *resp)
     for (size_t i = 0; i < resp->choice_count; ++i) {
         cJSON *choice = cJSON_CreateObject();
         cJSON_AddStringToObject(choice, "role", resp->choices[i].role);
-        /* LLM 工具调用轮 content 常为 NULL（响应仅含 tool_calls），
-         * cJSON_AddStringToObject 对 NULL 行为不确定，显式回退空字符串
-         * 保证 choices[i].content 字段恒为合法字符串（网关可解析） */
+        /* In LLM tool-calling turns content is often NULL (response only
+         * carries tool_calls); cJSON_AddStringToObject's behavior with NULL
+         * is unspecified, so explicitly fall back to an empty string to
+         * keep choices[i].content always a valid string (gateway-parseable) */
         cJSON_AddStringToObject(choice, "content",
                                 resp->choices[i].content ? resp->choices[i].content : "");
 

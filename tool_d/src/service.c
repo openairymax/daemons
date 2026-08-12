@@ -4,12 +4,12 @@
 #include "airy_memory.h"
 /**
  * @file service.c
- * @brief 工具服务核心逻辑
+ * @brief Tool service core logic.
  *
- * 改进说明：
- * 1. 统一错误码为 AIRY_ERR_*
- * 2. 完善流式执行功能
- * 3. 线程安全
+ * Improvements:
+ * 1. Unified error codes to AIRY_ERR_*
+ * 2. Completed streaming execution
+ * 3. Thread safety
  */
 
 #include "daemon_defaults.h"
@@ -26,16 +26,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---------- 内置基础工具注册（fs_read / fs_write / fs_list / shell_run） ----------
+/* ---------- Built-in basic tool registration (fs_read / fs_write /
+ * fs_list / shell_run) ----------
  *
- * 通过 daemon_security ACL 显式授权（fail-closed：未授权一律拒绝）。
- * executable 使用 "builtin:<id>" 标记，由 executor 分派到 builtin.c 真实实现。 */
+ * Explicitly authorized via the daemon_security ACL (fail-closed:
+ * unauthorized is always refused). executable uses "builtin:<id>" markers,
+ * dispatched by the executor to the real implementations in builtin.c. */
 
 static void register_builtin_tools(tool_service_t *svc)
 {
-    /* 静态元数据（params schema 与 OpenStandards 工具描述对齐）
-     * required 标志与 gateway 工具 schema required 数组一致（SSoT，T2 修复）：
-     * fs_list.path 可选（builtin 实现省略时默认 "."），其余参数必需。 */
+    /* Static metadata (params schema aligned with the OpenStandards tool
+     * description). The required flags match the gateway tool schema's
+     * required array (SSoT, T2 fix): fs_list.path is optional (builtin
+     * defaults to "." when omitted), the rest are required. */
     static tool_param_t fs_path_params[] = {
         {"path", "{\"type\":\"string\"}", 1},
     };

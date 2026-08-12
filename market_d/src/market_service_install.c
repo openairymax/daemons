@@ -3,7 +3,8 @@
 
 /**
  * @file market_service_install.c
- * @brief 市场服务安装域：agent/skill 安装（含下载解包）与卸载（含目录清理）
+ * @brief Market service install domain: agent/skill install (including
+ *        download and unpack) and uninstall (including directory cleanup).
  */
 
 #include "airy_memory.h"

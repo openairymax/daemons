@@ -3,8 +3,8 @@
 
 /**
  * @file market_service_config.c
- * @brief 市场服务配置域：配置热加载与远端注册中心同步（下载索引并
- *        增量注册新 agent）
+ * @brief Market service config domain: config hot-reload and remote-registry
+ *        sync (downloads the index and incrementally registers new agents).
  */
 
 #include "airy_memory.h"

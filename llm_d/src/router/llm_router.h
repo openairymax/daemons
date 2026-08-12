@@ -3,20 +3,20 @@
 
 /**
  * @file llm_router.h
- * @brief LLM 路由器接口
+ * @brief LLM router interface.
  *
- * LLM Router 负责根据请求特征（复杂度、成本、延迟等）
- * 将 LLM 请求路由到最合适的提供商和模型。
+ * The LLM Router routes LLM requests to the most suitable provider and
+ * model based on request characteristics (complexity, cost, latency, etc.).
  *
- * 路由策略：
- *   - COMPLEXITY_BASED:  基于任务复杂度路由
- *   - COST_OPTIMIZED:    成本优化路由
- *   - LATENCY_OPTIMIZED: 延迟优化路由
- *   - FALLBACK:          降级路由（主提供商失败时切换）
- *   - ROUND_ROBIN:       轮询路由
+ * Routing strategies:
+ *   - COMPLEXITY_BASED:  route by task complexity
+ *   - COST_OPTIMIZED:    cost-optimized routing
+ *   - LATENCY_OPTIMIZED: latency-optimized routing
+ *   - FALLBACK:          fallback routing (switch when primary fails)
+ *   - ROUND_ROBIN:       round-robin routing
  *
  * @owner team-A
- * @see contracts/contract_A_B.h 第3节（协议路由表）
+ * @see contracts/contract_A_B.h section 3 (protocol routing table)
  */
 
 #ifndef AIRY_RT_DAEMON_LLM_D_ROUTER_LLM_ROUTER_H
@@ -106,51 +106,49 @@ typedef struct {
 
 
 /**
- * @brief 初始化 LLM 路由器
- * @param config_path 配置文件路径
- * @return 0 成功，非0失败
+ * @brief Initialize the LLM router.
+ * @param config_path Config file path
+ * @return 0 on success, non-zero on failure
  */
 int llm_router_init(const char *config_path);
 
-/**
- * @brief 销毁 LLM 路由器
- */
+/** @brief Destroy the LLM router. */
 void llm_router_destroy(void);
 
 /**
- * @brief 注册提供商端点
- * @param endpoint 端点信息
- * @return 0 成功，非0失败
+ * @brief Register a provider endpoint.
+ * @param endpoint Endpoint info
+ * @return 0 on success, non-zero on failure
  */
 int llm_router_register_endpoint(const llm_endpoint_t *endpoint);
 
 /**
- * @brief 注销提供商端点
- * @param provider_name 提供商名称
- * @param model_name    模型名称
- * @return 0 成功，非0失败
+ * @brief Unregister a provider endpoint.
+ * @param provider_name Provider name
+ * @param model_name    Model name
+ * @return 0 on success, non-zero on failure
  */
 int llm_router_unregister_endpoint(const char *provider_name, const char *model_name);
 
 /**
- * @brief 路由 LLM 请求
- * @param request 路由请求
- * @param result  路由结果
- * @return 0 成功，非0失败
+ * @brief Route an LLM request.
+ * @param request Routing request
+ * @param result  Routing result
+ * @return 0 on success, non-zero on failure
  */
 int llm_router_route(const llm_route_request_t *request, llm_route_result_t *result);
 
 /**
- * @brief 获取路由器统计
- * @param stats 输出统计
- * @return 0 成功，非0失败
+ * @brief Get router statistics.
+ * @param stats Output statistics
+ * @return 0 on success, non-zero on failure
  */
 int llm_router_get_stats(llm_router_stats_t *stats);
 
 /**
- * @brief 设置默认路由策略
- * @param strategy 路由策略
- * @return 0 成功，非0失败
+ * @brief Set the default routing strategy.
+ * @param strategy Routing strategy
+ * @return 0 on success, non-zero on failure
  */
 int llm_router_set_default_strategy(llm_route_strategy_t strategy);
 

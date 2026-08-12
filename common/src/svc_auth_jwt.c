@@ -3,8 +3,9 @@
 
 /**
  * @file svc_auth_jwt.c
- * @brief Daemon 认证中间件 JWT 域：HS256 Token 生成/验证/刷新，
- *        含 OpenSSL/mbedTLS/内置 HMAC-SHA256 运行时选择
+ * @brief Daemon auth-middleware JWT domain: HS256 token
+ *        generation/verification/refresh, with runtime selection of
+ *        OpenSSL/mbedTLS/built-in HMAC-SHA256.
  */
 
 #include "airy_memory.h"

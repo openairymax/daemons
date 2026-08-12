@@ -2,12 +2,11 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
 /*
- *
  * @file prometheus_exporter.h
- * @brief C-L10: Prometheus scrape endpoint for monit_d
+ * @brief C-L10: Prometheus scrape endpoint for monit_d.
  *
- * 提供 /metrics HTTP 端点暴露 Prometheus 格式指标，
- * 包含 14 项必需指标的注册和导出。
+ * Provides a /metrics HTTP endpoint exposing Prometheus-format metrics,
+ * including registration and export of the 14 required metrics.
  */
 
 #ifndef AIRY_RT_PROMETHEUS_EXPORTER_H
@@ -23,72 +22,67 @@ extern "C" {
 
 
 /**
- * @brief C-L10: 初始化 Prometheus exporter
+ * @brief C-L10: initialize the Prometheus exporter.
  *
- * 初始化统一指标收集器并注册 14 项必需指标。
- * @param service_name 服务名称（如 "monit_d"）
- * @return 0 成功，非 0 失败
+ * Initializes the unified metrics collector and registers the 14 required
+ * metrics.
+ * @param service_name Service name (e.g. "monit_d")
+ * @return 0 on success, non-zero on failure
  */
 int prometheus_exporter_init(const char *service_name);
 
-/**
- * @brief C-L10: 关闭 Prometheus exporter
- */
+/** @brief C-L10: shut down the Prometheus exporter. */
 void prometheus_exporter_shutdown(void);
 
 
 /**
- * @brief C-L10: 注册 14 项必需指标
+ * @brief C-L10: register the 14 required metrics.
  *
- * 注册工程标准规范手册 16.1 定义的 10 项核心指标 +
- * 内存可观测性 4 项指标。
- * @return 0 成功，非 0 失败
+ * Registers the 10 core metrics defined in engineering-standards manual
+ * 16.1 plus the 4 memory-observability metrics.
+ * @return 0 on success, non-zero on failure
  */
 int prometheus_exporter_register_required_metrics(void);
 
 
 /**
- * @brief C-L10: 处理 Prometheus scrape HTTP 请求
+ * @brief C-L10: handle a Prometheus scrape HTTP request.
  *
- * 检测是否为 "GET /metrics" HTTP 请求，如果是则响应 Prometheus 格式指标。
+ * Detects whether this is a "GET /metrics" HTTP request; if so, responds
+ * with Prometheus-format metrics.
  *
- * @param request 接收到的请求数据
- * @param request_len 请求数据长度
- * @param response 输出参数，HTTP 响应数据（需调用者释放）
- * @param response_len 输出参数，响应数据长度
- * @return 0 表示已处理（是 /metrics 请求），-1 表示非 Prometheus 请求（需其他处理）
+ * @param request Received request data
+ * @param request_len Request data length
+ * @param response Output parameter, HTTP response data (caller frees)
+ * @param response_len Output parameter, response data length
+ * @return 0 if handled (is a /metrics request), -1 for non-Prometheus
+ *         requests (needs other handling)
  */
 int prometheus_exporter_handle_http(const char *request, size_t request_len, char **response,
                                     size_t *response_len);
 
 
-/**
- * @brief 递增计数器指标
- */
+/** @brief Increment a counter metric. */
 void prometheus_counter_inc(const char *name, double value);
 
-/**
- * @brief 设置 Gauge 指标值
- */
+/** @brief Set a gauge metric value. */
 void prometheus_gauge_set(const char *name, double value);
 
-/**
- * @brief 记录 Histogram 观察值
- */
+/** @brief Record a histogram observation. */
 void prometheus_histogram_observe(const char *name, double value);
 
 /**
- * @brief 获取 Prometheus 格式的完整指标导出
- * @return Prometheus 格式字符串（需调用者释放），失败返回 NULL
+ * @brief Get the full Prometheus-format metrics export.
+ * @return Prometheus-format string (caller frees), NULL on failure
  */
 char *prometheus_exporter_get_metrics(void);
 
 
 /**
- * @brief C-L10: 获取 Prometheus scrape 统计
+ * @brief C-L10: get Prometheus scrape statistics.
  *
- * @param out_count  输出：总抓取次数（可为 NULL）
- * @param out_errors 输出：抓取错误次数（可为 NULL）
+ * @param out_count  Output: total scrape count (may be NULL)
+ * @param out_errors Output: scrape-error count (may be NULL)
  */
 void prometheus_exporter_get_scrape_stats(uint64_t *out_count, uint64_t *out_errors);
 

@@ -3,15 +3,21 @@
 
 /**
  * @file vector.c
- * @brief Memory 服务向量检索实现（自研 TF-IDF，无外部依赖）
+ * @brief Memory service vector-search implementation (own TF-IDF, no
+ *        external deps).
  *
- * 设计要点：
- * - tokenizer：英文按小写单词切分（可选去停用词），中文按单字 + 相邻双字 bigram 切分，
- *   其余 UTF-8 多字节字符（emoji 等）与标点作为分隔符
- * - TF 向量缓存：每条记录在写入时构建去重词频向量，存于内存记录条目
- * - DF 表：全局文档频率统计（开放寻址哈希 + 墓碑删除），删除记录时同步维护
- * - IDF：平滑 IDF = ln((N+1)/(df+1)) + 1，保证恒正；search 时按当前全局 DF 实时计算
- * - 余弦相似度：TF-IDF 加权点积 / L2 范数乘积，结果恒在 [0,1]
+ * Design notes:
+ * - tokenizer: English split into lowercase words (optional stopword
+ *   removal), Chinese split into single chars plus adjacent char bigrams;
+ *   other UTF-8 multibyte chars (emoji etc.) and punctuation act as delimiters
+ * - TF vector cache: each record builds a de-duplicated term-frequency
+ *   vector on write, stored in the in-memory record entry
+ * - DF table: global document-frequency stats (open-addressing hash with
+ *   tombstone deletion), maintained on record deletion
+ * - IDF: smoothed IDF = ln((N+1)/(df+1)) + 1, always positive; computed in
+ *   real time from the current global DF during search
+ * - Cosine similarity: TF-IDF weighted dot product / L2 norm product,
+ *   result always in [0,1]
  */
 
 #include "vector.h"

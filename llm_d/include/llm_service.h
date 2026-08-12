@@ -3,7 +3,7 @@
 
 /**
  * @file llm_service.h
- * @brief LLM 服务对外接口
+ * @brief Public LLM service interface.
  */
 
 #ifndef AIRY_RT_LLM_SERVICE_H
@@ -22,10 +22,11 @@ typedef struct llm_service llm_service_t;
 typedef struct {
     const char *role;
     const char *content;
-    /* Function calling（OpenAI 兼容）：
-     * - role="tool" 的消息携带 tool_call_id（对应 assistant 的 tool_call id）
-     * - role="assistant" 的消息可携带 tool_calls（JSON 数组字符串，含
-     *   id/type/function.name/function.arguments） */
+    /* Function calling (OpenAI-compatible):
+     * - role="tool" messages carry tool_call_id (matching the assistant's
+     *   tool_call id)
+     * - role="assistant" messages may carry tool_calls (JSON array string
+     *   with id/type/function.name/function.arguments) */
     const char *tool_call_id;
     const char *tool_calls_json;
 } llm_message_t;
@@ -42,8 +43,9 @@ typedef struct {
     size_t stop_count;
     double presence_penalty;
     double frequency_penalty;
-    /* OpenAI tools 数组的 JSON 字符串（function calling 工具定义，
-     * 如 [{"type":"function","function":{"name":"fs_read","parameters":{...}}}]） */
+    /* JSON string of the OpenAI tools array (function-calling tool
+     * definitions, e.g. [{"type":"function","function":{"name":"fs_read",
+     * "parameters":{...}}}]) */
     const char *tools_json;
     void *user_data;
 } llm_request_config_t;
@@ -82,19 +84,21 @@ int llm_service_stats(llm_service_t *svc, char **out_json);
 
 
 /**
- * @brief 返回 registry 中全部可用模型列表（JSON 字符串，调用者 AIRY_FREE）
+ * @brief Return the list of all models available in the registry (JSON
+ *        string, caller AIRY_FREEs).
  *
- * @param svc 服务上下文
- * @return 形如 {"models":[{"name","provider","default"}],"default_model","default_provider"}
- *         的 JSON；svc 为 NULL 或内存不足返回 NULL
+ * @param svc Service context
+ * @return JSON like {"models":[{"name","provider","default"}],
+ *         "default_model","default_provider"}; NULL if svc is NULL or OOM
  */
 char *llm_service_list_models(llm_service_t *svc);
 
 
 /**
- * @brief 返回服务默认模型名（global.default_model，主配置 + 用户覆盖）
- * @param svc 服务上下文
- * @return 默认模型名；未配置或 svc 为 NULL 返回 NULL（不可 free）
+ * @brief Return the service default model name (global.default_model,
+ *        main config + user override).
+ * @param svc Service context
+ * @return Default model name; NULL if unset or svc is NULL (not to be freed)
  */
 const char *llm_service_default_model(const llm_service_t *svc);
 

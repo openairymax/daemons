@@ -52,10 +52,11 @@ int airy_event_loop_run(airy_event_loop_t *loop);
 void airy_event_loop_stop(airy_event_loop_t *loop);
 
 /**
- * @brief 异步安全停止事件循环（可在信号处理器中安全调用）
+ * @brief Async-safe stop of the event loop (safe in signal handlers).
  *
- * 仅执行原子置位 + eventfd/事件唤醒，不调用任何日志或锁原语，
- * 保持 async-signal-safe，避免信号处理器与日志锁死锁导致无法退出。
+ * Only performs an atomic flag set plus eventfd/event wakeup; calls no log
+ * or lock primitives, keeping it async-signal-safe and avoiding deadlock
+ * between a signal handler and the logging lock.
  */
 void airy_event_loop_stop_async(airy_event_loop_t *loop);
 

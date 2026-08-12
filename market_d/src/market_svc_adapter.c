@@ -4,12 +4,11 @@
 #include "airy_memory.h"
 #include "error.h"
 /*
- *
  * @file market_svc_adapter.c
- * @brief 市场服务适配器：将市场服务适配到统一的AgentRT服务管理框架
+ * @brief Adapts the market service to the unified AgentRT service framework.
  *
- * 使用 airy_svc_set/get_user_data 存取适配器上下文，
- * 避免类型强转导致的类型安全问题。
+ * Stores adapter context via airy_svc_set/get_user_data to avoid unsafe
+ * type casts.
  */
 
 #include "market_service.h"

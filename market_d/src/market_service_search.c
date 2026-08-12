@@ -3,7 +3,8 @@
 
 /**
  * @file market_service_search.c
- * @brief 市场服务搜索域：按查询关键字检索 agent/skill，结果数组动态扩容
+ * @brief Market service search domain: searches agents/skills by query
+ *        keyword, result array grows dynamically.
  */
 
 #include "airy_memory.h"

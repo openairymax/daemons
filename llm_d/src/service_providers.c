@@ -3,8 +3,9 @@
 
 /**
  * @file service_providers.c
- * @brief LLM 服务 provider 管理域：provider 配置拷贝/合并/释放，
- *        默认模型元数据与 llm_router 端点注册
+ * @brief LLM service provider-management domain: provider-config
+ *        copy/merge/release, default-model metadata and llm_router
+ *        endpoint registration.
  */
 
 #include "airy_memory.h"
