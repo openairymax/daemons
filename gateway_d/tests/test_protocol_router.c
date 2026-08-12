@@ -60,9 +60,10 @@ static const char *proto_label(gw_proto_detect_result_t t)
 }
 
 /**
- * @brief 测试场景A: handler 存在时的统计计数
+ * @brief Test scenario A: statistics counting when the handler exists
  *
- * 注册 mock handler → 对每种协议调用 route → 验证各计数器为 1
+ * Register a mock handler -> call route for each protocol -> verify each
+ * counter is 1
  */
 static void test_stats_with_handler(void)
 {
@@ -108,10 +109,10 @@ static void test_stats_with_handler(void)
 }
 
 /**
- * @brief 测试场景B: handler 不存在的统计计数
+ * @brief Test scenario B: statistics counting when the handler does not exist
  *
- * 不注册任何 handler → 每次 route 应走 if(!handler) 分支 →
- * route_errors 递增 + proto 计数器递增
+ * Register no handler -> each route should take the if(!handler) branch ->
+ * route_errors increments + the proto counter increments
  */
 static void test_stats_without_handler(void)
 {
@@ -152,11 +153,11 @@ static void test_stats_without_handler(void)
 }
 
 /**
- * @brief 测试场景C: 混合场景 — handler 存在 + 不存在混合
+ * @brief Test scenario C: mixed — handler exists + does not exist
  *
- * 只注册 MCP 和 A2A 的 handler，验证:
- *   MCP/A2A 走正常路径，route_errors=0
- *   OpenAI/JSONRPC/Unknown 走 404 路径，route_errors 递增
+ * Register only MCP and A2A handlers, verifying:
+ *   MCP/A2A take the normal path, route_errors=0
+ *   OpenAI/JSONRPC/Unknown take the 404 path, route_errors increments
  */
 static void test_stats_mixed(void)
 {

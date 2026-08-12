@@ -57,9 +57,9 @@ int monitor_create(void **data)
 }
 
 /**
- * @brief 销毁监控模块
- * @param data 监控数据
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Destroy the monitor module
+ * @param data Monitor data
+ * @return 0 on success, non-zero error code
  */
 int monitor_destroy(void *data)
 {
@@ -72,11 +72,11 @@ int monitor_destroy(void *data)
 }
 
 /**
- * @brief 记录任务执行结果
- * @param data 监控数据
- * @param success 是否成功
- * @param execution_time_ms 执行时间（毫秒）
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Record a task execution result
+ * @param data              Monitor data
+ * @param success           Whether it succeeded
+ * @param execution_time_ms Execution time (ms)
+ * @return 0 on success, non-zero error code
  */
 int monitor_record_task(void *data, bool success, uint32_t execution_time_ms)
 {
@@ -98,11 +98,11 @@ int monitor_record_task(void *data, bool success, uint32_t execution_time_ms)
 }
 
 /**
- * @brief 更新 Agent 状态
- * @param data 监控数据
- * @param available_count 可用 Agent 数量
- * @param total_count 总 Agent 数量
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Update agent status
+ * @param data            Monitor data
+ * @param available_count Number of available agents
+ * @param total_count     Total number of agents
+ * @return 0 on success, non-zero error code
  */
 int monitor_update_agent_status(void *data, size_t available_count, size_t total_count)
 {
@@ -118,10 +118,10 @@ int monitor_update_agent_status(void *data, size_t available_count, size_t total
 }
 
 /**
- * @brief 执行健康检查
- * @param data 监控数据
- * @param health_status 输出参数，返回健康状态
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Run a health check
+ * @param data          Monitor data
+ * @param health_status Output param, returns the health status
+ * @return 0 on success, non-zero error code
  */
 int monitor_health_check(void *data, bool *health_status)
 {
@@ -153,10 +153,10 @@ int monitor_health_check(void *data, bool *health_status)
 }
 
 /**
- * @brief 获取统计信息
- * @param data 监控数据
- * @param stats 输出参数，返回统计信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Get statistics
+ * @param data  Monitor data
+ * @param stats Output param, returns the statistics
+ * @return 0 on success, non-zero error code
  */
 int monitor_get_stats(void *data, void **stats)
 {
@@ -200,9 +200,9 @@ int monitor_get_stats(void *data, void **stats)
 }
 
 /**
- * @brief 生成统计报告
- * @param data 监控数据
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Generate a statistics report
+ * @param data Monitor data
+ * @return 0 on success, non-zero error code
  */
 int monitor_generate_report(void *data)
 {

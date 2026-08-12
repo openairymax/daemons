@@ -42,9 +42,10 @@
 #define LLM_MAX_RETRIES 3
 #define LLM_BASE_DELAY_MS 100
 
-/* P0.18.1: 生成公共全局变量（g_running_llm_d 等）、信号处理（signal_handler_llm_d、
- * svc_log_toggle_handler_llm_d）、print_usage_llm_d、daemon_handle_client_llm_d、
- * daemon_on_client_llm_d 等样板，消除手工重复代码。 */
+/* P0.18.1: generate the common globals (g_running_llm_d etc.), signal
+ * handling (signal_handler_llm_d, svc_log_toggle_handler_llm_d),
+ * print_usage_llm_d, daemon_handle_client_llm_d, daemon_on_client_llm_d
+ * boilerplate, eliminating hand-written duplication. */
 DAEMON_DECLARE_COMMON(llm_d, llm, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN,
                       DEFAULT_TCP_PORT, MAX_BUFFER)
 
@@ -73,7 +74,7 @@ typedef struct {
 } request_context_t;
 
 /**
- * @brief 创建请求上下文
+ * @brief Create the request context
  */
 static request_context_t *request_context_create(void)
 {
@@ -95,7 +96,7 @@ static request_context_t *request_context_create(void)
 }
 
 /**
- * @brief 销毁请求上下文
+ * @brief Destroy the request context
  */
 static void request_context_destroy(request_context_t *ctx)
 {
@@ -115,11 +116,11 @@ static void request_context_destroy(request_context_t *ctx)
 }
 
 /**
- * @brief 解析请求参数为 llm_request_config_t
- * @param params JSON 参数对象
- * @param ctx 请求上下文（用于存储消息）
- * @param cfg 输出配置
- * @return 0 成功，非0 失败
+ * @brief Parse request params into llm_request_config_t
+ * @param params JSON params object
+ * @param ctx    Request context (used to store messages)
+ * @param cfg    Output config
+ * @return 0 on success, non-zero on failure
  */
 static void parse_params_cleanup(request_context_t *ctx, llm_request_config_t *cfg)
 {
@@ -150,8 +151,9 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
     if (cJSON_IsString(model)) {
         cfg->model = AIRY_STRDUP(model->valuestring);
     } else {
-        /* A2-2: model 缺省时回落 global.default_model（此前 llm_d 无缺省概念，
-         * 空 model 一律报 INVALID_PARAM，导致客户端必须显式指定模型） */
+        /* A2-2: when model is omitted, fall back to global.default_model
+         * (previously llm_d had no default concept; an empty model always
+         * returned INVALID_PARAM, forcing clients to specify a model) */
         const char *def = g_service ? llm_service_default_model(g_service) : NULL;
         if (def) {
             cfg->model = AIRY_STRDUP(def);
@@ -277,8 +279,9 @@ static char *handle_list_models(cJSON *params __attribute__((unused)), int id)
     if (!root)
         return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Invalid list result", id);
 
-    /* 所有权语义：jsonrpc_build_success 通过 cJSON_AddItemToObject 将 root
-     * 挂到响应对象后由 cJSON_Delete 递归释放，此处不可再 Delete（否则 double-free） */
+    /* Ownership semantics: jsonrpc_build_success attaches root to the
+     * response object via cJSON_AddItemToObject and cJSON_Delete frees it
+     * recursively; it must NOT be deleted here (otherwise double-free) */
     return jsonrpc_build_success(root, id);
 }
 
@@ -382,8 +385,9 @@ static char *handle_get_stats(cJSON *params __attribute__((unused)), int id)
     if (!root)
         return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Invalid stats result", id);
 
-    /* 所有权语义：jsonrpc_build_success 通过 cJSON_AddItemToObject 将 root
-     * 挂到响应对象后由 cJSON_Delete 递归释放，此处不可再 Delete */
+    /* Ownership semantics: jsonrpc_build_success attaches root to the
+     * response object via cJSON_AddItemToObject and cJSON_Delete frees it
+     * recursively; it must NOT be deleted here */
     return jsonrpc_build_success(root, id);
 }
 
@@ -398,7 +402,8 @@ static void on_get_stats_method(cJSON *params, int id, void *user_data)
 }
 
 /**
- * @brief complete 方法的包装器（适配 method_dispatcher 接口）
+ * @brief Wrapper for the complete method (adapts the method_dispatcher
+ *        interface)
  */
 static void on_complete_method(cJSON *params, int id, void *user_data __attribute__((unused)))
 {
@@ -418,7 +423,7 @@ static void on_complete_method(cJSON *params, int id, void *user_data __attribut
 }
 
 /**
- * @brief complete_stream 方法的包装器
+ * @brief Wrapper for the complete_stream method
  */
 static void on_complete_stream_method(cJSON *params, int id,
                                       void *user_data __attribute__((unused)))
@@ -432,7 +437,7 @@ static void on_complete_stream_method(cJSON *params, int id,
 }
 
 /**
- * @brief 处理 complete 方法
+ * @brief Handle the complete method
  */
 static char *handle_complete(cJSON *params, int id)
 {
@@ -494,9 +499,10 @@ static char *handle_complete(cJSON *params, int id)
     AIRY_FREE(resp_json);
 
     char *success = jsonrpc_build_success(result, id);
-    /* P0.20.8 修复：jsonrpc_build_success 通过 cJSON_AddItemToObject 转移 result 所有权到
-     * root，cJSON_Delete(root) 递归释放了 result。必须置 NULL 防止 CJSON_AUTO_FREE
-     * 清理时 cJSON_Delete(result) double-free。 */
+    /* P0.20.8 fix: jsonrpc_build_success transfers result ownership to root
+     * via cJSON_AddItemToObject; cJSON_Delete(root) frees result recursively.
+     * Must set NULL to prevent CJSON_AUTO_FREE cleanup from double-freeing
+     * via cJSON_Delete(result). */
     result = NULL;
 
     request_context_destroy(ctx);
@@ -504,7 +510,7 @@ static char *handle_complete(cJSON *params, int id)
 }
 
 /**
- * @brief 处理 complete_stream 方法
+ * @brief Handle the complete_stream method
  */
 typedef struct {
     airy_sock_t fd;
@@ -517,14 +523,17 @@ typedef struct {
 #endif
 
 /**
- * @brief 阻塞式完整发送（流式专用）
+ * @brief Blocking full send (streaming only)
  *
- * llm_d 流式回调由 curl 写回调驱动：LLM 推送节奏可能快于对端（gateway SSE
- * 拉取）消费速度。airy_sock_send 使用 MSG_DONTWAIT，缓冲满时返回 EAGAIN，
- * 导致 curl 写回调失败 → STREAM-FAIL 且流中断。
+ * llm_d's streaming callback is driven by the curl write callback: the LLM
+ * push rate can exceed the peer's (gateway SSE pull) consumption rate.
+ * airy_sock_send uses MSG_DONTWAIT and returns EAGAIN when the buffer is full,
+ * making the curl write callback fail -> STREAM-FAIL and the stream breaks.
  *
- * 此处改为阻塞式：send 循环 + poll(POLLOUT) 等待可写，保证增量块完整送达
- * 对端后再返回。对端关闭（EPIPE/ECONNRESET）时静默放弃，不触发流失败。
+ * This switches to blocking mode: send loop + poll(POLLOUT) waiting for
+ * writability, guaranteeing each incremental chunk is fully delivered before
+ * returning. On peer close (EPIPE/ECONNRESET), silently give up without
+ * triggering a stream failure.
  */
 static void llm_stream_send_all(airy_sock_t fd, const char *buf, size_t len)
 {
@@ -604,7 +613,7 @@ static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd
 }
 
 /**
- * @brief 加载守护进程配置
+ * @brief Load the daemon config
  */
 static int load_daemon_config(const char *config_path)
 {
@@ -635,9 +644,10 @@ static int load_daemon_config(const char *config_path)
                 if (nread == (size_t)len) {
                     content[len] = '\0';
 
-                    /* P0.18.2: CJSON_PARSE_GUARD 替代 cJSON_Parse + if (root) + 手动 cJSON_Delete
-                      * 使用 do { ... } while (0) + break 保持原 if (root)
-                      * 块语义：解析失败时跳过配置提取 */
+                    /* P0.18.2: CJSON_PARSE_GUARD replaces cJSON_Parse + if
+                     * (root) + manual cJSON_Delete, using do { ... } while (0)
+                     * + break to preserve the original if (root) block
+                     * semantics: skip config extraction on parse failure */
                     do {
                         CJSON_PARSE_GUARD(root, content, { break; });
                         cJSON *daemon = cJSON_GetObjectItem(root, "daemon");
@@ -672,7 +682,7 @@ static int load_daemon_config(const char *config_path)
 }
 
 /**
- * @brief 释放配置资源
+ * @brief Release the config resources
  */
 static void free_daemon_config(void)
 {
@@ -708,8 +718,9 @@ int main(int argc, char **argv)
     DAEMON_SETUP_SIGNALS(llm_d);
 #endif
 
-    /* 保留初始日志级别 WARN（SIGUSR1 切换在 DEBUG/INFO 间切换，详见生成的
-     * svc_log_toggle_handler_llm_d）调试：AIRY_LLM_D_DEBUG=1 时输出 DEBUG 级日志 */
+    /* Keep the initial log level WARN (SIGUSR1 toggles between DEBUG/INFO,
+     * see the generated svc_log_toggle_handler_llm_d). Debugging:
+     * AIRY_LLM_D_DEBUG=1 outputs DEBUG-level logs */
     airy_logger_config_t log_cfg = {0};
     const char *dbg = getenv("AIRY_LLM_D_DEBUG");
     log_cfg.level = (dbg && dbg[0] == '1') ? (airy_log_level_t)LOG_LEVEL_DEBUG :
@@ -776,8 +787,8 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_llm_d, "complete_stream", on_complete_stream_method,
                                NULL);
     method_dispatcher_register(g_dispatcher_llm_d, "list_models", on_list_models_method, NULL);
-    /* L2 协议标准方法（02-l2-service-protocol.md：llm.count_tokens / llm.health_check /
-     * llm.get_stats）
+    /* Standard L2 protocol methods (02-l2-service-protocol.md:
+     * llm.count_tokens / llm.health_check / llm.get_stats)
      */
     method_dispatcher_register(g_dispatcher_llm_d, "count_tokens", on_count_tokens_method, NULL);
     method_dispatcher_register(g_dispatcher_llm_d, "health_check", on_health_check_method, NULL);

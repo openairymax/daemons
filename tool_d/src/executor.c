@@ -105,15 +105,19 @@ struct tool_executor {
 
     tool_approval_ctx_t *approval_ctx;
     safety_guard_bridge_t *safety_bridge;
-    /* P3.18 (ACC-DT27): 工具执行沙箱 — 强制安全层（非可选增强）。
-     * 与 approval_ctx 形成"审批 + 拦截"双层 fail-closed 安全架构：
-     *   - approval_ctx: 基于工具元数据和参数的策略审批
-     *   - sandbox: 基于 syscall 号的权限/配额/审计拦截
-     * sandbox 为 NULL（初始化失败）时 tool_executor_run 拒绝执行任何工具。 */
+    /* P3.18 (ACC-DT27): tool execution sandbox — a mandatory security layer
+     * (not an optional enhancement). Together with approval_ctx it forms a
+     * two-tier fail-closed security architecture:
+     *   - approval_ctx: policy approval based on tool metadata and params
+     *   - sandbox: permission/quota/audit interception based on syscall number
+     * When sandbox is NULL (init failed), tool_executor_run refuses to execute
+     * any tool. */
     airy_sandbox_t *sandbox;
-    /* P0: 工具级交互式权限审批（Claude Code 风格 permission prompt）。
-     * 创建时读取 AIRY_TOOL_APPROVAL_MODE，为"interactive"时启用。
-     * 静态审批拒绝时，若此处启用则入队 pending 并阻塞等待 tool.approve 决议。 */
+    /* P0: tool-level interactive permission approval (Claude Code style
+     * permission prompt). Enabled at creation when AIRY_TOOL_APPROVAL_MODE is
+     * "interactive". When static approval denies, if this is enabled the
+     * request is queued as pending and blocks waiting for a tool.approve
+     * decision. */
     interactive_approval_t *interactive;
 };
 
@@ -148,19 +152,25 @@ tool_executor_t *tool_executor_create(const tool_executor_config_t *cfg)
     exec->approval_ctx = NULL;
     exec->safety_bridge = NULL;
     exec->sandbox = NULL;
-    /* P0: 创建交互式审批管理器（读取 AIRY_TOOL_APPROVAL_MODE 决定是否启用）。
-     * 创建失败仅禁用交互审批，不阻断 executor 正常创建与静态 fail-closed 审批。 */
+    /* P0: create the interactive approval manager (reads
+     * AIRY_TOOL_APPROVAL_MODE to decide whether to enable). Creation failure
+     * only disables interactive approval; it does not block normal executor
+     * creation nor static fail-closed approval. */
     exec->interactive = interactive_approval_create();
 
-    /* P3.18 (ACC-DT27): 初始化工具执行沙箱。
+    /* P3.18 (ACC-DT27): initialize the tool execution sandbox.
      *
-     * 设计说明：
-     * - sandbox 是强制安全层（非可选增强），与 approval_ctx 不同。
-     *   approval_ctx 为 NULL 时 fail-closed 拒绝；sandbox 为 NULL 时同样 fail-closed。
-     * - 创建失败时 exec->sandbox 保持 NULL，tool_executor_run 会拒绝执行任何工具。
-     * - airy_sandbox_manager_init 幂等，重复调用安全（进程级单例）。
-     * - 显式添加 PERM_ALLOW SYS_TOOL_EXECUTE 规则，使意图明确（虽默认即允许），
-     *   便于审计和未来默认策略变更时的前向兼容。 */
+     * Design notes:
+     * - sandbox is a mandatory security layer (not an optional enhancement),
+     *   unlike approval_ctx. NULL approval_ctx denies fail-closed; NULL
+     *   sandbox likewise denies fail-closed.
+     * - On creation failure exec->sandbox stays NULL and tool_executor_run
+     *   refuses to execute any tool.
+     * - airy_sandbox_manager_init is idempotent; repeated calls are safe
+     *   (process-level singleton).
+     * - Explicitly add the PERM_ALLOW SYS_TOOL_EXECUTE rule to make the intent
+     *   clear (allowed by default anyway), for auditability and forward
+     *   compatibility with future default-policy changes. */
     airy_err_t sb_init = airy_sandbox_manager_init();
     if (sb_init != AIRY_SUCCESS) {
         SVC_LOG_WARN("C-L08: sandbox_manager_init failed (rc=%d) — tools will be fail-closed",
@@ -198,8 +208,9 @@ void tool_executor_destroy(tool_executor_t *exec)
     SVC_LOG_INFO("Executor destroyed: total=%llu, success=%llu",
                  (unsigned long long)exec->total_executions,
                  (unsigned long long)exec->success_count);
-    /* P3.17: executor 拥有 approval_ctx（tool_executor_set_approval_ctx 转移所有权）。
-     * safety_bridge 在 set_approval_ctx 中创建，也由 executor 拥有。*/
+    /* P3.17: the executor owns approval_ctx (tool_executor_set_approval_ctx
+     * transfers ownership). safety_bridge is created in set_approval_ctx and
+     * is also owned by the executor. */
     if (exec->approval_ctx) {
         tool_approval_destroy(exec->approval_ctx);
         exec->approval_ctx = NULL;
@@ -208,9 +219,10 @@ void tool_executor_destroy(tool_executor_t *exec)
         safety_guard_bridge_destroy(exec->safety_bridge);
         exec->safety_bridge = NULL;
     }
-    /* P3.18 (ACC-DT27): 销毁沙箱。注意：不调用 airy_sandbox_manager_destroy，
-     * 因为管理器是进程级单例，可能被其他 executor 共享。管理器生命周期由
-     * 进程退出或显式清理管理。 */
+    /* P3.18 (ACC-DT27): destroy the sandbox. Note: airy_sandbox_manager_destroy
+     * is NOT called because the manager is a process-level singleton possibly
+     * shared by other executors; its lifecycle is managed by process exit or
+     * explicit cleanup. */
     if (exec->sandbox) {
         airy_sandbox_destroy(exec->sandbox);
         exec->sandbox = NULL;
@@ -280,8 +292,10 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    /* 改进1（P1d）：并发门控 — READ 工具读门并发执行，WRITE 工具写门互斥串行。
-     * exec->lock 仅保护统计字段（不再全段持锁，避免串行化所有工具）。 */
+    /* Improvement 1 (P1d): concurrency gating — READ tools run concurrently
+     * under a read gate, WRITE tools serialize under a write gate.
+     * exec->lock only protects the stats fields (no longer held for the whole
+     * section, avoiding serializing all tools). */
     if (meta->access == TOOL_ACCESS_READ)
         tool_rw_gate_rdlock(&exec->rw_gate);
     else
@@ -306,15 +320,18 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* BAN-211/235: 使用 execvp 直接执行（不经 shell），无需 SEC-011 shell 元字符检查。
-     * params_json 作为单个 argv 元素传递给工具，工具自行解析 JSON。 */
+    /* BAN-211/235: execute directly via execvp (no shell), no SEC-011 shell
+     * metacharacter check needed. params_json is passed as a single argv
+     * element to the tool, which parses the JSON itself. */
 
-    /* ── C-L05: Cupolas SafetyGuard → tool_d 工具审批 ──
-     * P3.17 (ACC-DT18) fail-closed：approval_ctx 为 NULL 时拒绝执行。
-     * 历史代码 `if (exec->approval_ctx)` 在 ctx 未设置时跳过审批直接执行，
-     * 等同于安全系统未启用——违反零债务安全原则。
-     * 修正：ctx 未设置 = 安全系统未配置 = 拒绝执行（fail-closed）。
-     * service.c 在创建 executor 后立即注入默认 approval_ctx（enable_approval=true）。*/
+    /* ── C-L05: Cupolas SafetyGuard -> tool_d tool approval ──
+     * P3.17 (ACC-DT18) fail-closed: refuse execution when approval_ctx is NULL.
+     * Legacy code `if (exec->approval_ctx)` skipped approval and executed when
+     * the ctx was not set, equivalent to the security system being disabled —
+     * violating the zero-debt security principle.
+     * Fix: ctx unset = security system not configured = refuse execution
+     * (fail-closed). service.c injects a default approval_ctx
+     * (enable_approval=true) right after creating the executor. */
     if (!exec->approval_ctx) {
         SVC_LOG_ERROR("C-L05: approval_ctx is NULL — tool execution DENIED (fail-closed). "
                       "Call tool_executor_set_approval_ctx() before executing tools.");
@@ -334,20 +351,25 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         int app_ret = tool_approval_check_for_agent(exec->approval_ctx, caller_agent, meta,
                                                     params_json, &approval_detail);
         if (app_ret != 0) {
-            /* P0: 工具级交互式权限审批。
-             * 启用时（AIRY_TOOL_APPROVAL_MODE=interactive）被静态审批拒绝不再直接
-             * fail-closed，而是入队 pending 并阻塞等待 tool.approve 决议：
-             *   - allow    → 放行本次执行
-             *   - always   → 放行并加入持久 ACL 规则
-             *   - deny/超时 → 返回 EPERM（错误信息含 "User denied tool execution"） */
+            /* P0: tool-level interactive permission approval.
+             * When enabled (AIRY_TOOL_APPROVAL_MODE=interactive), a static
+             * approval denial no longer fails closed directly; instead the
+             * request is queued as pending and blocks waiting for a
+             * tool.approve decision:
+             *   - allow    -> let this execution through
+             *   - always   -> allow and add a persistent ACL rule
+             *   - deny/timeout -> return EPERM (error contains "User denied
+             *     tool execution") */
             if (exec->interactive && interactive_approval_is_enabled(exec->interactive)) {
 
                 const char *agent = caller_agent;
                 if (!agent) {
                     agent = tool_approval_get_agent_id(exec->approval_ctx);
                 }
-                /* 交互阻塞期间不持有 exec->lock（P1d：锁仅保护统计字段），
-                 * 但保留并发门控（write 工具审批未决时阻塞其他工具，语义正确）。 */
+                /* During interactive blocking, exec->lock is not held (P1d:
+                 * the lock only protects stats), but concurrency gating is
+                 * retained (a pending write-tool approval blocks other tools,
+                 * which is semantically correct). */
                 airy_approval_outcome_t outcome = AIRY_APPROVAL_DENIED;
                 char *request_id =
                     interactive_approval_block(exec->interactive, meta->name ? meta->name : "?",
@@ -362,8 +384,9 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
                 } else if (outcome == AIRY_APPROVAL_ALWAYS) {
                     SVC_LOG_INFO("C-L05: Tool '%s' approved by user (interactive, always)",
                                  meta->name ? meta->name : "?");
-                    /* 加入持久 ACL 规则（agent_id + 工具名 + allow），
-                     * 使后续同类调用直接通过静态审批。 */
+                    /* Add a persistent ACL rule (agent_id + tool name +
+                     * allow) so subsequent identical calls pass static
+                     * approval directly. */
                     if (agent && meta->name) {
                         int ar = daemon_security_add_acl_rule(agent, meta->name, true);
                         if (ar != 0) {
@@ -405,8 +428,9 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
                      (int)approval_detail.decision);
     }
 
-    /* 内置工具（builtin:xxx）：真实实现直接分派（fs_read/fs_write/fs_list/shell_run），
-     * 已通过上方 approval（fail-closed ACL），无需 execvp 外部进程。 */
+    /* Builtin tools (builtin:xxx): real implementations dispatch directly
+     * (fs_read/fs_write/fs_list/shell_run), already passed approval above
+     * (fail-closed ACL), no external execvp process needed. */
     if (tool_builtin_is_builtin(meta->executable)) {
         int brc = tool_builtin_run(meta->id, params_json, result);
         result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
@@ -424,8 +448,9 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         return brc;
     }
 
-    /* BAN-211/235: 构建 argv 并通过 execvp 直接执行（不经 shell），消除命令注入风险。
-     * params_json 作为单个 argv 元素传递给工具，工具自行解析。 */
+    /* BAN-211/235: build argv and execute directly via execvp (no shell),
+     * eliminating command-injection risk. params_json is passed as a single
+     * argv element; the tool parses it itself. */
     const char *argv[3];
     int arg_count = 0;
     argv[arg_count++] = meta->executable;
@@ -452,15 +477,19 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
 
     uint32_t timeout_ms = (uint32_t)exec->manager.timeout_sec * 1000;
 
-    /* P3.18 (ACC-DT27): 经 sandbox 执行工具 — permission/quota/audit 三层拦截。
+    /* P3.18 (ACC-DT27): execute the tool through the sandbox — three layers of
+     * permission/quota/audit interception.
      *
-     * 双层 fail-closed 安全架构：
-     * 1. SafetyGuard 审批（上方 L189-209）：基于工具元数据和参数的策略审批
-     * 2. Sandbox 拦截（下方）：基于 syscall 号的权限/配额/审计拦截
-     * 任一层拒绝则工具不执行。sandbox 为 NULL（初始化失败）同样拒绝。
+     * Two-tier fail-closed security architecture:
+     * 1. SafetyGuard approval (above): policy approval based on tool metadata
+     *    and params
+     * 2. Sandbox interception (below): permission/quota/audit based on syscall
+     *    number
+     * If either layer denies, the tool does not run. NULL sandbox (init
+     * failed) also denies.
      *
-     * 执行路径：airy_sandbox_invoke → permission_check → quota_check →
-     * airy_syscall_invoke → sys_tool_execute → airy_process_run_capture
+     * Execution path: airy_sandbox_invoke -> permission_check -> quota_check ->
+     * airy_syscall_invoke -> sys_tool_execute -> airy_process_run_capture
      */
     if (!exec->sandbox) {
         SVC_LOG_ERROR("C-L08: sandbox is NULL — tool execution DENIED (fail-closed). "
@@ -502,8 +531,9 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         return AIRY_EPERM;
     }
 
-    /* sandbox_invoke 成功：targs.exec_result 含 airy_process_run_capture 返回值
-     * (0-255=exit code; -1=启动失败; -2=超时) */
+    /* sandbox_invoke succeeded: targs.exec_result holds the
+     * airy_process_run_capture return value (0-255=exit code; -1=start
+     * failure; -2=timeout) */
     int ret = targs.exec_result;
     (void)sb_out_result;
 

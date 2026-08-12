@@ -67,7 +67,7 @@ static airy_err_t gateway_adapter_init(airy_svc_t service, const airy_svc_config
     }
 
     if (ctx->common_cfg.capabilities & AIRY_SVC_CAP_TIMEOUT) {
-        // 使用配置的超时设置
+        // Use the configured timeout
         ctx->gateway_cfg.http.timeout_ms = ctx->common_cfg.timeout_ms;
         ctx->gateway_cfg.ws.timeout_ms = ctx->common_cfg.timeout_ms;
     }
@@ -94,7 +94,7 @@ static airy_err_t gateway_adapter_init(airy_svc_t service, const airy_svc_config
 }
 
 /**
- * @brief 适配器启动函数
+ * @brief Adapter start function
  */
 static airy_err_t gateway_adapter_start(airy_svc_t service)
 {
@@ -122,7 +122,7 @@ static airy_err_t gateway_adapter_start(airy_svc_t service)
 }
 
 /**
- * @brief 适配器停止函数
+ * @brief Adapter stop function
  */
 static airy_err_t gateway_adapter_stop(airy_svc_t service, bool force)
 {
@@ -150,7 +150,7 @@ static airy_err_t gateway_adapter_stop(airy_svc_t service, bool force)
 }
 
 /**
- * @brief 适配器销毁函数
+ * @brief Adapter destroy function
  */
 static void gateway_adapter_destroy(airy_svc_t service)
 {
@@ -181,7 +181,7 @@ static void gateway_adapter_destroy(airy_svc_t service)
 }
 
 /**
- * @brief 适配器健康检查函数
+ * @brief Adapter health-check function
  */
 static airy_err_t gateway_adapter_healthcheck(airy_svc_t service)
 {
@@ -202,7 +202,7 @@ static airy_err_t gateway_adapter_healthcheck(airy_svc_t service)
 }
 
 /**
- * @brief 网关服务适配器接口
+ * @brief Gateway service adapter interface
  */
 static const airy_svc_interface_t gateway_adapter_iface = {
     .init = gateway_adapter_init,
@@ -213,13 +213,14 @@ static const airy_svc_interface_t gateway_adapter_iface = {
 };
 
 /**
- * @brief 创建网关服务适配器
+ * @brief Create a gateway service adapter
  *
- * 此函数创建一个网关服务的适配器实例，使其能够通过统一的airy_svc_t接口进行管理。
+ * Creates an adapter instance for the gateway service so it can be managed
+ * through the unified airy_svc_t interface.
  *
- * @param[out] out_service 输出服务句柄
- * @param[in] config 通用服务配置
- * @return 错误码
+ * @param[out] out_service Output service handle
+ * @param[in] config       Generic service config
+ * @return Error code
  */
 airy_err_t gateway_service_adapter_create(airy_svc_t *out_service, const airy_svc_config_t *config)
 {
@@ -257,7 +258,7 @@ airy_err_t gateway_service_adapter_create(airy_svc_t *out_service, const airy_sv
         return err;
     }
 
-    // 而不是将service句柄强转为适配器上下文（避免类型混淆）
+    // instead of casting the service handle to the adapter context (avoids type confusion)
     err = airy_svc_set_user_data(svc_handle, ctx);
     if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("gateway_service_adapter_create: set_user_data failed, err=%d", err);
@@ -271,12 +272,12 @@ airy_err_t gateway_service_adapter_create(airy_svc_t *out_service, const airy_sv
 }
 
 /**
- * @brief 获取原始网关服务句柄
+ * @brief Get the original gateway service handle
  *
- * 用于需要直接访问网关服务特定功能的场景。
+ * For scenarios that need direct access to gateway-service-specific functions.
  *
- * @param service 适配器服务句柄
- * @return 原始网关服务句柄，或NULL
+ * @param service Adapter service handle
+ * @return Original gateway service handle, or NULL
  */
 gateway_service_t gateway_service_adapter_get_original(airy_svc_t service)
 {
@@ -289,14 +290,15 @@ gateway_service_t gateway_service_adapter_get_original(airy_svc_t service)
 }
 
 /**
- * @brief 将现有网关服务包装为适配器
+ * @brief Wrap an existing gateway service as an adapter
  *
- * 此函数将已存在的网关服务实例包装为适配器，使其能够集成到服务管理框架中。
+ * Wraps an existing gateway service instance as an adapter so it can be
+ * integrated into the service management framework.
  *
- * @param[out] out_service 输出服务句柄
- * @param[in] gateway_svc 原始网关服务句柄
- * @param[in] config 通用服务配置
- * @return 错误码
+ * @param[out] out_service Output service handle
+ * @param[in] gateway_svc  Original gateway service handle
+ * @param[in] config       Generic service config
+ * @return Error code
  */
 airy_err_t gateway_service_adapter_wrap(airy_svc_t *out_service, gateway_service_t gateway_svc,
                                         const airy_svc_config_t *config)
@@ -345,7 +347,7 @@ airy_err_t gateway_service_adapter_wrap(airy_svc_t *out_service, gateway_service
 }
 
 /**
- * @brief 适配器服务初始化（代理函数）
+ * @brief Adapter service init (proxy function)
  */
 airy_err_t gateway_service_adapter_init(airy_svc_t service)
 {
@@ -357,7 +359,7 @@ airy_err_t gateway_service_adapter_init(airy_svc_t service)
 }
 
 /**
- * @brief 适配器服务启动（代理函数）
+ * @brief Adapter service start (proxy function)
  */
 airy_err_t gateway_service_adapter_start(airy_svc_t service)
 {
@@ -369,7 +371,7 @@ airy_err_t gateway_service_adapter_start(airy_svc_t service)
 }
 
 /**
- * @brief 适配器服务停止（代理函数）
+ * @brief Adapter service stop (proxy function)
  */
 airy_err_t gateway_service_adapter_stop(airy_svc_t service, bool force)
 {
@@ -381,7 +383,7 @@ airy_err_t gateway_service_adapter_stop(airy_svc_t service, bool force)
 }
 
 /**
- * @brief 适配器服务销毁（代理函数）
+ * @brief Adapter service destroy (proxy function)
  */
 void gateway_service_adapter_destroy(airy_svc_t service)
 {
@@ -389,7 +391,7 @@ void gateway_service_adapter_destroy(airy_svc_t service)
 }
 
 /**
- * @brief 适配器服务健康检查（代理函数）
+ * @brief Adapter service health-check (proxy function)
  */
 airy_err_t gateway_service_adapter_healthcheck(airy_svc_t service)
 {
@@ -401,7 +403,7 @@ airy_err_t gateway_service_adapter_healthcheck(airy_svc_t service)
 }
 
 /**
- * @brief 获取适配器服务状态
+ * @brief Get the adapter service state
  */
 airy_svc_state_t gateway_service_adapter_get_state(airy_svc_t service)
 {
@@ -418,7 +420,7 @@ airy_svc_state_t gateway_service_adapter_get_state(airy_svc_t service)
 }
 
 /**
- * @brief 检查适配器服务是否运行中
+ * @brief Check whether the adapter service is running
  */
 bool gateway_service_adapter_is_running(airy_svc_t service)
 {
@@ -435,7 +437,7 @@ bool gateway_service_adapter_is_running(airy_svc_t service)
 }
 
 /**
- * @brief 获取适配器服务统计信息
+ * @brief Get the adapter service statistics
  */
 airy_err_t gateway_service_adapter_get_stats(airy_svc_t service, airy_svc_stats_t *stats)
 {

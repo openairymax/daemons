@@ -57,7 +57,7 @@ int test_jwt_init(void)
 }
 
 /**
- * @brief 测试 JWT Token 生成
+ * @brief Test JWT token generation
  */
 int test_jwt_generate_token(void)
 {
@@ -90,7 +90,7 @@ int test_jwt_generate_token(void)
 }
 
 /**
- * @brief 测试 JWT Token 验证
+ * @brief Test JWT token validation
  */
 int test_jwt_verify_token(void)
 {
@@ -128,7 +128,7 @@ int test_jwt_verify_token(void)
 }
 
 /**
- * @brief 测试 JWT Token 刷新
+ * @brief Test JWT token refresh
  */
 int test_jwt_refresh_token(void)
 {
@@ -167,7 +167,7 @@ int test_jwt_refresh_token(void)
 }
 
 /**
- * @brief 测试 API Key 初始化和验证
+ * @brief Test API key initialization and validation
  */
 int test_apikey_init_and_verify(void)
 {
@@ -200,7 +200,7 @@ int test_apikey_init_and_verify(void)
 }
 
 /**
- * @brief 测试 API Key 动态添加和移除
+ * @brief Test API key dynamic add and remove
  */
 int test_apikey_add_remove(void)
 {
@@ -237,7 +237,7 @@ int test_apikey_add_remove(void)
 }
 
 /**
- * @brief 测试速率限制器初始化和检查
+ * @brief Test rate-limiter initialization and checks
  */
 int test_ratelimit_init_and_check(void)
 {
@@ -269,7 +269,7 @@ int test_ratelimit_init_and_check(void)
 }
 
 /**
- * @brief 测试速率限制统计信息
+ * @brief Test rate-limit statistics
  */
 int test_ratelimit_stats(void)
 {
@@ -296,7 +296,7 @@ int test_ratelimit_stats(void)
 }
 
 /**
- * @brief 测试统一认证流程
+ * @brief Test the unified auth flow
  */
 int test_unified_authenticate(void)
 {
@@ -349,7 +349,7 @@ int test_unified_authenticate(void)
 }
 
 /**
- * @brief 测试边界条件和错误处理
+ * @brief Test boundary conditions and error handling
  */
 int test_edge_cases(void)
 {

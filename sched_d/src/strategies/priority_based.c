@@ -69,9 +69,9 @@ static int priority_based_create(const sched_config_t *manager, void **data)
 }
 
 /**
- * @brief 销毁基于优先级的调度策略
- * @param data 策略数据
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Destroy the priority-based scheduling strategy
+ * @param data Strategy data
+ * @return 0 on success, non-zero error code
  */
 static int priority_based_destroy(void *data)
 {
@@ -101,10 +101,10 @@ static int priority_based_destroy(void *data)
 }
 
 /**
- * @brief 注册 Agent
- * @param data 策略数据
- * @param agent_info Agent 信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Register an agent
+ * @param data Strategy data
+ * @param agent_info Agent info
+ * @return 0 on success, non-zero error code
  */
 static int priority_based_register_agent(void *data, const agent_info_t *agent_info)
 {
@@ -166,10 +166,10 @@ static int priority_based_register_agent(void *data, const agent_info_t *agent_i
 }
 
 /**
- * @brief 注销 Agent
- * @param data 策略数据
+ * @brief Unregister an agent
+ * @param data Strategy data
  * @param agent_id Agent ID
- * @return 0 表示成功，非 0 表示错误码
+ * @return 0 on success, non-zero error code
  */
 static int priority_based_unregister_agent(void *data, const char *agent_id)
 {
@@ -198,10 +198,10 @@ static int priority_based_unregister_agent(void *data, const char *agent_id)
 }
 
 /**
- * @brief 更新 Agent 状态
- * @param data 策略数据
- * @param agent_info Agent 信息
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Update agent status
+ * @param data Strategy data
+ * @param agent_info Agent info
+ * @return 0 on success, non-zero error code
  */
 static int priority_based_update_agent_status(void *data, const agent_info_t *agent_info)
 {
@@ -209,11 +209,11 @@ static int priority_based_update_agent_status(void *data, const agent_info_t *ag
 }
 
 /**
- * @brief 计算任务-Agent匹配分数
- * @param agent Agent信息
- * @param task 任务信息
- * @param priority_weight 优先级权重
- * @return 匹配分数
+ * @brief Calculate the task-agent match score
+ * @param agent Agent info
+ * @param task Task info
+ * @param priority_weight Priority weight
+ * @return Match score
  */
 static float calculate_match_score(const agent_info_t *agent, const task_info_t *task,
                                    float priority_weight)
@@ -239,11 +239,11 @@ static float calculate_match_score(const agent_info_t *agent, const task_info_t 
 }
 
 /**
- * @brief 执行基于优先级的调度
- * @param data 策略数据
- * @param task_info 任务信息
- * @param result 输出参数，返回调度结果
- * @return 0 表示成功，非 0 表示错误码
+ * @brief Run priority-based scheduling
+ * @param data Strategy data
+ * @param task_info Task info
+ * @param result Output param, returns the scheduling result
+ * @return 0 on success, non-zero error code
  */
 static int priority_based_schedule(void *data, const task_info_t *task_info,
                                    sched_result_t **result)
@@ -263,7 +263,7 @@ static int priority_based_schedule(void *data, const task_info_t *task_info,
         task_priority = task_info->priority;
     }
 
-    // 限制优先级在有效范围内
+    // Clamp the priority to the valid range
     if (task_priority < 0)
         task_priority = 0;
     if (task_priority >= (int)pbd->priority_levels)
@@ -305,8 +305,8 @@ static int priority_based_schedule(void *data, const task_info_t *task_info,
 }
 
 /**
- * @brief 获取基于优先级的调度策略名称
- * @return 策略名称
+ * @brief Get the priority-based scheduling strategy name
+ * @return Strategy name
  */
 static const char *priority_based_get_name()
 {
@@ -314,9 +314,9 @@ static const char *priority_based_get_name()
 }
 
 /**
- * @brief 获取可用 Agent 数量
- * @param data 策略数据
- * @return 可用 Agent 数量
+ * @brief Get the number of available agents
+ * @param data Strategy data
+ * @return Number of available agents
  */
 static size_t priority_based_get_available_agent_count(void *data)
 {
@@ -337,9 +337,9 @@ static size_t priority_based_get_available_agent_count(void *data)
 }
 
 /**
- * @brief 获取总 Agent 数量
- * @param data 策略数据
- * @return 总 Agent 数量
+ * @brief Get the total number of agents
+ * @param data Strategy data
+ * @return Total number of agents
  */
 static size_t priority_based_get_total_agent_count(void *data)
 {
@@ -352,7 +352,7 @@ static size_t priority_based_get_total_agent_count(void *data)
 }
 
 /**
- * @brief 基于优先级的调度策略接口
+ * @brief Priority-based scheduling strategy interface
  */
 static const strategy_interface_t priority_based_strategy = {
     .create = priority_based_create,
@@ -366,8 +366,8 @@ static const strategy_interface_t priority_based_strategy = {
     .get_total_agent_count = priority_based_get_total_agent_count};
 
 /**
- * @brief 获取基于优先级的调度策略接口
- * @return 基于优先级的调度策略接口
+ * @brief Get the priority-based scheduling strategy interface
+ * @return Priority-based scheduling strategy interface
  */
 const strategy_interface_t *get_priority_based_strategy()
 {

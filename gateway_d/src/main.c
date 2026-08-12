@@ -66,9 +66,9 @@ static gw_proto_router_t *g_proto_router = NULL;
 #define GW_MCP_CLIENT_NAME_LEN 64
 
 /**
- * @brief 单个外部 MCP server 的运行时上下文
- * @note 一个配置项的所有外部工具共享同一个 ctx（user_data），
- *       exec_fn 依据 ctx->name 从 "<client>_<tool>" 剥离前缀。
+ * @brief Runtime context of a single external MCP server
+ * @note All external tools of one config entry share the same ctx (user_data);
+ *       exec_fn strips the prefix from "<client>_<tool>" using ctx->name.
  */
 typedef struct {
     char name[GW_MCP_CLIENT_NAME_LEN];
@@ -79,11 +79,13 @@ static gw_mcp_client_ctx_t g_mcp_clients[GW_MCP_CLIENTS_MAX];
 static size_t g_mcp_client_count = 0;
 
 /**
- * @brief 外部工具转发 exec_fn：<client>_<tool> → 外部 server tools/call
+ * @brief External tool forwarding exec_fn: <client>_<tool> -> external server
+ *        tools/call
  *
- * 结果处理：外部 server 返回完整 JSON-RPC 响应（"结果 JSON 原样返回"），
- * 提取首个 text content 的 JSON 字符串后交还 gateway_mcp_server 层
- * （其 tools/call 响应以 "text":%s 内嵌），保持 MCP 规范输出。
+ * Result handling: the external server returns a complete JSON-RPC response
+ * ("result JSON returned as-is"); the first text content's JSON string is
+ * extracted and handed back to the gateway_mcp_server layer (whose tools/call
+ * response embeds it as "text":%s), keeping MCP-compliant output.
  */
 static int gw_mcp_client_tool_exec(const char *tool_name, const char *arguments_json,
                                    char **result_json, void *user_data)
@@ -120,7 +122,8 @@ static int gw_mcp_client_tool_exec(const char *tool_name, const char *arguments_
 }
 
 /**
- * @brief 断开全部外部 MCP server 并复位（main 退出路径调用）
+ * @brief Disconnect all external MCP servers and reset (called from the main
+ *        exit path)
  */
 static void gw_mcp_client_cleanup(void)
 {
@@ -135,17 +138,17 @@ static void gw_mcp_client_cleanup(void)
 }
 
 /**
- * @brief 读取 AIRY_MCP_CLIENTS 环境变量并连接外部 MCP server
+ * @brief Read the AIRY_MCP_CLIENTS env var and connect external MCP servers
  *
- * 配置格式（JSON 数组）：
+ * Config format (JSON array):
  * 
  * [{"name":"filesystem","command":"npx","args":["-y",
  *   "@modelcontextprotocol/server-filesystem","/tmp"]}]
  *   [{"name":"remote","type":"http","url":"http://127.0.0.1:3001/mcp"}]
  *
- * 对每个配置项：连接 → tools/list → 以 "<client>_<tool>" 前缀注册进
- * gateway MCP 工具表（exec_fn 转发外部调用）。连接/拉取失败仅告警，
- * 不阻断 gateway 启动。
+ * For each entry: connect -> tools/list -> register into the gateway MCP tool
+ * table with the "<client>_<tool>" prefix (exec_fn forwards external calls).
+ * Connect/fetch failures only warn and do not block gateway startup.
  */
 static void gw_mcp_clients_setup(gw_mcp_server_t *mcp)
 {
@@ -270,16 +273,20 @@ static void gw_mcp_clients_setup(gw_mcp_server_t *mcp)
 }
 
 /**
- * @brief 注册外部协议默认 ACL 规则（fail-closed 需显式授权）
+ * @brief Register default ACL rules for external protocols (fail-closed
+ *        requires explicit authorization)
  *
- * 外部协议请求统一身份 "external"（见 gateway_business_handler.c）：
- *   - fs_read/fs_write/fs_list 基础工具默认允许（不误拦正常请求）
- *   - shell_run 默认允许（与基础工具一致）：gateway 已把 shell_run 作为工具
- *     schema 暴露给 LLM（GW_TOOLS_JSON），若默认拒绝则 LLM 一调用即被 ACL 拦截，
- *     导致工具链路整体不可用；如需关闭可设 AIRY_GATEWAY_ACL_ALLOW_SHELL=false
- *     显式拒绝（仅 "false"/"0" 视为关闭，其余取值默认放行）。
+ * External protocol requests use the unified identity "external" (see
+ * gateway_business_handler.c):
+ *   - fs_read/fs_write/fs_list basic tools allowed by default (do not block
+ *     legitimate requests)
+ *   - shell_run allowed by default (same as basic tools): gateway exposes
+ *     shell_run as a tool schema to the LLM (GW_TOOLS_JSON); if denied by
+ *     default, the LLM is ACL-blocked on first call, breaking the whole tool
+ *     chain. To disable, set AIRY_GATEWAY_ACL_ALLOW_SHELL=false to deny
+ *     explicitly (only "false"/"0" count as off; other values allow).
  *
- * 须在 daemon_security 初始化后（daemon_cupolas_init）调用。
+ * Must run after daemon_security initialization (daemon_cupolas_init).
  */
 static void gw_acl_register_defaults(void)
 {
@@ -288,15 +295,18 @@ static void gw_acl_register_defaults(void)
     daemon_security_add_acl_rule("external", "fs_list", true);
 
     daemon_security_add_acl_rule("external", "web_fetch", true);
-    /* fs_glob/fs_grep 只读检索、fs_edit 受控替换、web_search 只读联网搜索，
-     * 与 fs_* 基础工具同级信任，默认放行（否则 LLM 一经 MCP 调用即被 ACL 拦截） */
+    /* fs_glob/fs_grep read-only search, fs_edit controlled replacement,
+     * web_search read-only web search — same trust level as the fs_* basic
+     * tools, allowed by default (otherwise the LLM is ACL-blocked as soon as
+     * it calls them via MCP) */
     daemon_security_add_acl_rule("external", "fs_glob", true);
     daemon_security_add_acl_rule("external", "fs_grep", true);
     daemon_security_add_acl_rule("external", "fs_edit", true);
     daemon_security_add_acl_rule("external", "web_search", true);
 
-    /* shell_run 默认放行：与 fs_* 一致，修复「LLM 一调用 shell_run 即被 ACL 拒绝」。
-     * 仅当显式设置 AIRY_GATEWAY_ACL_ALLOW_SHELL=false/0 时才拒绝。 */
+    /* shell_run allowed by default: same as fs_*; fixes "the LLM is
+     * ACL-rejected as soon as it calls shell_run". Only explicitly setting
+     * AIRY_GATEWAY_ACL_ALLOW_SHELL=false/0 denies it. */
     const char *shell = getenv("AIRY_GATEWAY_ACL_ALLOW_SHELL");
     bool shell_allowed = !(shell && (strcmp(shell, "false") == 0 || strcmp(shell, "0") == 0));
     daemon_security_add_acl_rule("external", "shell_run", shell_allowed);
@@ -307,10 +317,12 @@ static void gw_acl_register_defaults(void)
 }
 
 /**
- * @brief L2 标准方法 <ns>.shutdown 回调（02-l2-service-protocol.md §6.1）
+ * @brief L2 standard method <ns>.shutdown callback (02-l2-service-protocol.md
+ *        §6.1)
  *
- * 与信号处理路径一致：原子置位 g_running，主循环 1s 轮询内优雅退出。
- * 由 gateway_business_handle 收到 "shutdown" RPC 时经回调触发。
+ * Consistent with the signal-handling path: atomically clear g_running; the
+ * main loop exits gracefully within its 1s poll. Triggered via the callback
+ * when gateway_business_handle receives a "shutdown" RPC.
  */
 static void gw_rpc_shutdown(void *user_data)
 {
@@ -319,10 +331,12 @@ static void gw_rpc_shutdown(void *user_data)
 }
 
 /**
- * @brief 信号处理函数（async-signal-safe：仅原子置位，真实停止动作由主循环完成）
+ * @brief Signal handler (async-signal-safe: only sets an atomic flag; the
+ *        actual stop action is done by the main loop)
  *
- * 禁止在信号处理器中调用锁/分配/日志（airy_mtx_lock、gateway_service_stop 等
- * 均非 async-signal-safe），否则主循环持锁时收到信号会死锁。
+ * Must not call lock/alloc/log inside a signal handler (airy_mtx_lock,
+ * gateway_service_stop etc. are not async-signal-safe); otherwise a signal
+ * received while the main loop holds a lock would deadlock.
  */
 static void signal_handler(int sig __attribute__((unused)))
 {
@@ -338,7 +352,7 @@ static void signal_handler(int sig __attribute__((unused)))
 
 #ifdef _WIN32
 /**
- * @brief Windows控制台事件处理函数
+ * @brief Windows console event handler
  */
 static BOOL WINAPI console_handler(DWORD fdwCtrlType)
 {
@@ -487,9 +501,10 @@ int main(int argc, char *argv[])
         goto cleanup_service;
     }
 
-    /* L2 标准方法 <ns>.shutdown（02-l2-service-protocol.md §6.1）：
-     * 注入回调，收到 "shutdown" RPC 后触发与信号处理一致的优雅退出
-     * （原子置位 g_running，主循环 1s 轮询内退出）。 */
+    /* L2 standard method <ns>.shutdown (02-l2-service-protocol.md §6.1):
+     * inject the callback so that after receiving a "shutdown" RPC, graceful
+     * exit identical to signal handling is triggered (atomically clear
+     * g_running; the main loop exits within its 1s poll). */
     gateway_business_ctx_set_shutdown_cb(g_biz_ctx, gw_rpc_shutdown, NULL);
 
     gw_acl_register_defaults();
@@ -510,8 +525,9 @@ int main(int argc, char *argv[])
         goto cleanup_service;
     }
 
-    /* Phase 2: 适配器接线 —— MCP 工具 → tool_d / OpenAI → llm_d / A2A → sched_d
-     * （协议翻译集中在网关，daemon 侧零协议知识，D2） */
+    /* Phase 2: adapter wiring — MCP tools -> tool_d / OpenAI -> llm_d /
+     * A2A -> sched_d (protocol translation is concentrated in the gateway;
+     * daemons have zero protocol knowledge, D2) */
     {
 
         gw_mcp_server_t *mcp = gw_proto_router_get_mcp(g_proto_router);
@@ -528,9 +544,13 @@ int main(int argc, char *argv[])
                 gw_biz_tool_exec, g_biz_ctx);
             gw_mcp_server_register_tool(mcp, "fs_list",
                                         "List entries of a local directory (JSON array)",
-                                        /* 与 tool_d 注册一致：path 必填（tool_d validator
-                                         * 对注册参数一律校验存在性，schema 声明可选会导致
-                                         * LLM/MCP 不传 path 而 tool_d 校验失败） */
+                                        /* Consistent with tool_d registration:
+                                         * path is required (the tool_d
+                                         * validator checks existence of every
+                                         * registered parameter; a schema
+                                         * declaring it optional would let
+                                         * LLM/MCP omit path and tool_d
+                                         * validation fails) */
                                         "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":"
                                         "\"string\"}},\"required\":[\"path\"]}",
                                         gw_biz_tool_exec, g_biz_ctx);

@@ -36,6 +36,10 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 # 消除桩函数依赖。排除 main.c（含 main()）。
 set(LLM_SERVICE_SOURCES
     src/service.c
+    src/service_config.c
+    src/service_providers.c
+    src/service_request.c
+    src/service_metrics.c
     src/cache.c
     src/cost_tracker.c
     src/token_counter.c

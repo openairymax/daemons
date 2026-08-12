@@ -281,11 +281,13 @@ tool_service_t *tool_service_create(const char *config_path __attribute__((unuse
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    /* P3.17 (ACC-DT18): 默认启用工具审批（enable_approval=true）。
-     * 创建 approval_ctx 并注入 executor，使所有工具执行必须通过 Cupolas 安全穹顶审批。
-     * executor.c 已改为 fail-closed：未注入 approval_ctx 时拒绝执行。
-     * daemon_security 采用 fail-closed ACL：无 ACL 条目 = 拒绝。
-     * 部署时需通过 daemon_security_add_acl_rule() 注册授权的工具。*/
+    /* P3.17 (ACC-DT18): enable tool approval by default
+     * (enable_approval=true). Create approval_ctx and inject it into the
+     * executor so every tool execution must pass Cupolas safety-dome
+     * approval. executor.c is fail-closed: without an injected approval_ctx
+     * it refuses execution. daemon_security uses a fail-closed ACL: no ACL
+     * entry = denied. Deployment must register authorized tools via
+     * daemon_security_add_acl_rule(). */
     daemon_security_init(NULL, NULL);
 
     register_builtin_tools(svc);
@@ -417,7 +419,7 @@ char *tool_service_list(tool_service_t *svc)
 }
 
 /**
- * @brief 获取工具元数据
+ * @brief Get tool metadata
  */
 static tool_metadata_t *get_tool_metadata(tool_service_t *svc, const char *tool_id)
 {
@@ -433,7 +435,7 @@ static tool_metadata_t *get_tool_metadata(tool_service_t *svc, const char *tool_
 }
 
 /**
- * @brief 验证工具参数
+ * @brief Validate tool params
  */
 static int validate_tool_params(tool_service_t *svc, tool_metadata_t *meta, const char *tool_id,
                                 const char *params_json)
@@ -453,7 +455,8 @@ static int validate_tool_params(tool_service_t *svc, tool_metadata_t *meta, cons
 }
 
 /**
- * @brief 获取缓存的工具结果（缓存键含 agent_id，避免跨主体缓存绕过审批）
+ * @brief Get the cached tool result (cache key includes agent_id, avoiding
+ *        cross-subject cache that would bypass approval)
  */
 static tool_result_t *get_cached_result(tool_service_t *svc, tool_metadata_t *meta,
                                         const char *tool_id, const char *params_json,
@@ -491,7 +494,8 @@ static tool_result_t *get_cached_result(tool_service_t *svc, tool_metadata_t *me
 }
 
 /**
- * @brief 缓存工具结果（缓存键含 agent_id，与获取路径保持一致）
+ * @brief Cache the tool result (cache key includes agent_id, consistent with
+ *        the get path)
  */
 static void cache_tool_result(tool_service_t *svc, tool_metadata_t *meta, const char *tool_id,
                               const char *params_json, const char *agent_id, tool_result_t *res)
@@ -521,7 +525,7 @@ static void cache_tool_result(tool_service_t *svc, tool_metadata_t *meta, const 
 }
 
 /**
- * @brief 执行工具
+ * @brief Execute a tool
  */
 static int do_execute_tool(tool_service_t *svc, tool_metadata_t *meta, const char *params_json,
                            const char *agent_id, tool_result_t **out_result)
@@ -535,8 +539,9 @@ static int do_execute_tool(tool_service_t *svc, tool_metadata_t *meta, const cha
 
     if (ret != 0) {
         SVC_LOG_ERROR("Tool execution failed, error: %d", ret);
-        /* 保留 result 供上层读取 res->error（如交互审批 deny/超时的
-         * "User denied tool execution"），由调用方 tool_service_execute 释放。 */
+        /* Keep result so the upper layer can read res->error (e.g. the
+         * "User denied tool execution" of interactive approval deny/timeout);
+         * released by the caller tool_service_execute. */
         *out_result = res;
         return ret;
     }
@@ -569,10 +574,12 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
         return AIRY_ERROR_TOOL_VALIDATION;
     }
 
-    /* 3. 检查缓存。
-     * P0 交互式审批语义：仅静态 ACL 已授权的主体可命中缓存。未授权主体
-     * （需人工决议，allow 为一次性授予）每次调用必须重新走审批——即使
-     * 上次被批准过并已缓存，也不能跳过本次权限确认。 */
+    /* 3. Check the cache.
+     * P0 interactive-approval semantics: only subjects already authorized by
+     * the static ACL may hit the cache. Unauthorized subjects (needing human
+     * decision; allow is a one-time grant) must go through approval on every
+     * call — even if previously approved and cached, this call's permission
+     * confirmation cannot be skipped. */
     tool_result_t *cached_result = NULL;
     const char *subject = (req->agent_id && req->agent_id[0]) ? req->agent_id : "tool_d";
     if (daemon_check_tool_permission(subject, req->tool_id, "execute") == 0) {

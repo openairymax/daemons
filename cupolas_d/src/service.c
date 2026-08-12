@@ -125,8 +125,10 @@ int cupolas_service_sanitize(cupolas_service_t *svc, const cupolas_sanitize_para
 
     int ret = cupolas_sanitize_input(params->input, buf, out_size);
 
-    /* 严格模式下危险输入被拒绝（SANITIZE_REJECTED/ERROR 或 guard 拦截），
-     * 输出缓冲区为空且返回非 0 —— 无净化产物，按拒绝处理（fail-closed）。 */
+    /* In strict mode, dangerous input is rejected (SANITIZE_REJECTED/ERROR
+     * or guard interception): the output buffer stays empty and a non-zero
+     * code is returned — no sanitized artifact, treated as denied
+     * (fail-closed). */
     if (ret != CUPOLAS_OK && buf[0] == '\0') {
         SVC_LOG_WARN("cupolas.sanitize: input rejected (rc=%d)", ret);
         AIRY_FREE(buf);
@@ -253,9 +255,10 @@ char *cupolas_service_get_stats_json(cupolas_service_t *svc)
     return json;
 }
 
-/* vault 实例由 daemon_security 打开（daemon_cupolas_init -> daemon_security_init），
- * 本服务经 daemon_security_get_vault() 复用同一实例，与 daemon_store/retrieve_credential
- * 读写一致。 */
+/* The vault instance is opened by daemon_security (daemon_cupolas_init ->
+ * daemon_security_init); this service reuses the same instance via
+ * daemon_security_get_vault(), consistent with
+ * daemon_store/retrieve_credential reads and writes. */
 
 int cupolas_service_vault_store(cupolas_service_t *svc, const cupolas_vault_store_params_t *params,
                                 cupolas_vault_store_result_t *out)
@@ -307,8 +310,9 @@ int cupolas_service_vault_retrieve(cupolas_service_t *svc,
 
     const char *requester = params->agent_id ? params->agent_id : "system";
 
-    /* vault 不支持 NULL data_out 探测长度：首次用默认缓冲调用，
-     * 若返回 BUFFER_TOO_SMALL 则按 vault 返回的所需长度扩容重试。 */
+    /* The vault does not support NULL data_out to probe the length: first
+     * call with a default buffer; if BUFFER_TOO_SMALL is returned, grow
+     * according to the length the vault reports and retry. */
     size_t buf_len = 4096;
     uint8_t *buf = AIRY_MALLOC(buf_len);
     if (!buf)

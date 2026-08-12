@@ -36,8 +36,20 @@ set(TEST_SOURCES
 foreach(TEST_SRC ${TEST_SOURCES})
     get_filename_component(TEST_NAME ${TEST_SRC} NAME_WE)
     set(TARGET_NAME "svc_${TEST_NAME}")
-    
-    add_executable(${TARGET_NAME} ${TEST_SRC})
+
+    # test_service_discovery.c 已按功能域拆分，需一并编译各域文件
+    set(EXTRA_SRCS "")
+    if(TEST_SRC STREQUAL "test_service_discovery.c")
+        set(EXTRA_SRCS
+            test_service_discovery_lifecycle.c
+            test_service_discovery_discover.c
+            test_service_discovery_select.c
+            test_service_discovery_health.c
+            test_service_discovery_misc.c
+        )
+    endif()
+
+    add_executable(${TARGET_NAME} ${TEST_SRC} ${EXTRA_SRCS})
     
     target_include_directories(${TARGET_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../include

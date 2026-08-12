@@ -77,9 +77,11 @@ static long long threads_total_ms(const exec_thread_arg_t *a, const exec_thread_
     return max_end - min_start;
 }
 
-/* 说明：start_ms 记录于门控获取之前。READ 工具无等锁等待，区间重叠与总耗时
- * 均能证明并发；WRITE 工具后到者等待门控（start 提前记录），区间必然重叠，
- * 因此写串行只能用总耗时判定：串行总耗时 ≈ 2×单次执行，并发 ≈ 单次执行。 */
+/* Note: start_ms is recorded BEFORE acquiring the gate. READ tools have no
+ * lock-wait, so interval overlap and total time both prove concurrency; WRITE
+ * tools arriving later wait on the gate (start recorded early), so intervals
+ * necessarily overlap — write serialization can only be judged by total time:
+ * serial total ~= 2x single execution, concurrent ~= single execution. */
 
 static void test_executor_read_concurrent(void)
 {
@@ -104,9 +106,11 @@ static void test_executor_read_concurrent(void)
     b.meta.id = "sleep_read_2";
 
     pthread_t ta, tb;
-    /* create/join 必须独立于 assert 执行：Release（NDEBUG）下 assert 参数不求值，
-     * 若以 assert(pthread_create(...)) 包裹，线程创建会被整体优化掉——join 时
-     * 线程参数结构为 0，触发 libsanitizer ThreadArgRetval::BeforeJoin CHECK。 */
+    /* create/join must run independently of assert: in Release (NDEBUG),
+     * assert arguments are not evaluated; wrapping pthread_create(...) in
+     * assert would let the thread creation be optimized away entirely — the
+     * join then sees a zeroed thread-arg struct and triggers libsanitizer's
+     * ThreadArgRetval::BeforeJoin CHECK. */
     int rc_ta = pthread_create(&ta, NULL, exec_thread_fn, &a);
     assert(rc_ta == 0);
     int rc_tb = pthread_create(&tb, NULL, exec_thread_fn, &b);
@@ -222,8 +226,8 @@ static void test_executor_run(void)
             printf("    Output: %s\n", result->output);
         tool_result_free(result);
     } else {
-        /* P3.17: fail-closed 路径仍可能分配 result（executor 在审批前已 calloc），
-         * 必须释放避免内存泄漏。*/
+        /* P3.17: the fail-closed path may still allocate result (the executor
+         * calloc'd before approval); must free to avoid a memory leak. */
         if (result)
             tool_result_free(result);
         printf("    Execution skipped or failed (expected in test env, ret=%d)\n", ret);

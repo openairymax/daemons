@@ -241,12 +241,17 @@ static void handle_count(int id, airy_sock_t client_fd)
 }
 
 /*
- * L2 标准方法 mem.evolve（02-l2-service-protocol.md）：
- * 基于现有检索/写入 API 的「记忆演化」真实行为——
- *   - params.query（推荐）：检索相关记录，将命中内容归并为一条强化记忆写入，
- *     元数据记录来源 record_id、相关度分数与演化时间（标记访问来源）；
- *   - params.record_id：读取单条记录，写回一条携带 evolve 元数据的增强副本。
- * 服务层无独立 evolve 函数，故在 daemon 层用现有 mem_service_search/get/write 组合实现。
+ * L2 standard method mem.evolve (02-l2-service-protocol.md):
+ * real "memory evolution" behavior built on the existing retrieval/write
+ * APIs —
+ *   - params.query (recommended): retrieve related records and merge the hit
+ *     content into one reinforced memory record, with metadata recording the
+ *     source record_id, relevance score and evolution time (marking the access
+ *     source);
+ *   - params.record_id: read a single record and write back an enhanced copy
+ *     carrying evolve metadata.
+ * The service layer has no standalone evolve function, so the daemon layer
+ * composes it from the existing mem_service_search/get/write.
  */
 static void handle_evolve(cJSON *params, int id, airy_sock_t client_fd)
 {

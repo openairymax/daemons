@@ -54,8 +54,9 @@ struct gateway_service_s {
     void *handler_data;
 };
 
-/* stdio 网关 start 为阻塞事件循环（select 循环），放入独立线程运行，
- * 避免阻塞 HTTP/WS/HTTP2 等其余传输的启动。 */
+/* The stdio gateway start is a blocking event loop (select loop); run it on a
+ * dedicated thread so it does not block the startup of the other transports
+ * (HTTP/WS/HTTP2). */
 static void *gateway_stdio_thread_main(void *arg)
 {
     gateway_t *gw = (gateway_t *)arg;
@@ -89,9 +90,11 @@ void gateway_service_get_default_config(gateway_service_config_t *config)
     config->ws.timeout_ms = 30000;
 
     config->stdio.type = GATEWAY_DAEMON_TYPE_STDIO;
-    /* stdio 传输默认关闭：仅当显式传入 -s（或配置文件启用）时才启动。
-     * 若默认开启，gateway_d 以 -h/-p TCP 模式运行时 stdin 往往被重定向
-     * （/dev/null 或已关闭管道），select 恒可读导致 stdio 线程 100% CPU 忙循环。 */
+    /* stdio transport is off by default: it starts only when -s is passed
+     * explicitly (or enabled in the config file). If enabled by default, in
+     * gateway_d's -h/-p TCP mode stdin is usually redirected (/dev/null or a
+     * closed pipe), select stays readable and the stdio thread busy-loops at
+     * 100% CPU. */
     config->stdio.enabled = false;
     config->stdio.max_request_size = 1048576;
     config->stdio.timeout_ms = 30000;
@@ -135,9 +138,12 @@ airy_err_t gateway_service_load_config(gateway_service_config_t *config, const c
         if (strcmp(key, "http.port") == 0) {
             config->http.port = (uint16_t)strtol(val, NULL, 10);
         } else if (strcmp(key, "http.host") == 0) {
-            /* 默认值为字符串字面量 "0.0.0.0"（gateway_service_get_default_config），
-             * 直接释放属 UB（free 非堆内存）。仅当已被配置文件替换为堆分配值
-             * （非默认字面量）时才释放，与 gateway_svc_adapter.c 的保护写法一致。 */
+            /* The default value is the string literal "0.0.0.0"
+             * (gateway_service_get_default_config); freeing it directly is UB
+             * (freeing non-heap memory). Only free when it has been replaced
+             * by a heap-allocated value from the config file (not the default
+             * literal), consistent with the protective pattern in
+             * gateway_svc_adapter.c. */
             if (config->http.host && strcmp(config->http.host, "0.0.0.0") != 0)
                 AIRY_FREE((void *)config->http.host);
             config->http.host = AIRY_STRDUP(val);
@@ -304,8 +310,9 @@ airy_err_t gateway_service_start(gateway_service_t service)
 
 #ifdef GATEWAY_HAS_HTTP2
     if (service->config.http.enabled) {
-        /* HTTP/2 需要独立监听端口（默认 http.port+2，可用 AIRY_GATEWAY_HTTP2_PORT
-         * 覆盖），避免与 HTTP/1.1 网关同端口 bind 冲突 */
+        /* HTTP/2 needs its own listening port (default http.port+2,
+         * overridable via AIRY_GATEWAY_HTTP2_PORT), avoiding a bind conflict
+         * with the HTTP/1.1 gateway on the same port */
         const char *h2port_env = getenv("AIRY_GATEWAY_HTTP2_PORT");
         uint16_t h2_port = (h2port_env && *h2port_env) ? (uint16_t)atoi(h2port_env) :
                                                          (uint16_t)(service->config.http.port + 2);

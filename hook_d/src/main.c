@@ -213,15 +213,18 @@ static void hook_on_get_stats(cJSON *params __attribute__((unused)), int id, voi
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* ==================== L2 标准方法（02-l2-service-protocol.md：hook.register / hook.unregister /
- * hook.trigger / hook.health_check） ====================
+/* ==================== L2 standard methods (02-l2-service-protocol.md:
+ * hook.register / hook.unregister / hook.trigger / hook.health_check)
+ * ====================
  */
 
 /*
- * hook.register：向 hook_registry 注册脚本类 Hook（RPC 无法传递 C 回调，
- * 因此支持 shell/python/webhook 实现类型；CALLBACK 类型仅限内置处理器）。
- * params：name(必填)、type(字符串或整数，如 "pre_exec")、impl("shell"/"python"/"webhook")、
- *        script_path(脚本路径或 Webhook URL)、priority(默认 0)、enabled(默认 true)
+ * hook.register: register script-type Hooks into the hook_registry (RPC
+ * cannot pass C callbacks, so shell/python/webhook implementation types are
+ * supported; the CALLBACK type is limited to built-in handlers).
+ * params: name(required), type(string or int, e.g. "pre_exec"),
+ * impl("shell"/"python"/"webhook"), script_path(script path or Webhook URL),
+ * priority(default 0), enabled(default true)
  */
 static void hook_on_register(cJSON *params, int id, void *user_data)
 {
@@ -320,8 +323,9 @@ static void hook_on_unregister(cJSON *params, int id, void *user_data)
     SVC_LOG_INFO("hook.unregister OK: name=%s", name);
 }
 
-/* hook.trigger：按 type 触发 Hook 链（hook_service_fire 聚合决策）
- * params：type(字符串或整数)、operation(可选)、input(可选文本) */
+/* hook.trigger: trigger the hook chain by type (hook_service_fire aggregates
+ * the decision)
+ * params: type(string or int), operation(optional), input(optional text) */
 static void hook_on_trigger(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
@@ -421,8 +425,9 @@ int main(int argc, char *argv[])
     if (hook_registry_init() == 0) {
         g_registry_initialized = 1;
         SVC_LOG_INFO("hook_d: hook registry initialized");
-        /* 注册内置生产 Hook 处理器（audit/metrics/trace，共 12 个），
-           status/list 由此返回真实已加载的 hook 模块信息 */
+        /* Register the built-in production hook handlers (audit/metrics/
+         * trace, 12 in total); status/list thus returns real loaded hook
+         * module info */
         airy_hook_register_builtin_handlers();
     } else {
         SVC_LOG_ERROR("hook_d: hook registry init failed");
@@ -467,8 +472,8 @@ int main(int argc, char *argv[])
     method_dispatcher_register(g_dispatcher_hook_d, "status", hook_on_status, NULL);
     method_dispatcher_register(g_dispatcher_hook_d, "list", hook_on_list, NULL);
     method_dispatcher_register(g_dispatcher_hook_d, "stats", hook_on_stats, NULL);
-    /* L2 协议标准方法（02-l2-service-protocol.md：hook.register / hook.unregister / hook.trigger /
-     * hook.health_check）
+    /* Standard L2 protocol methods (02-l2-service-protocol.md: hook.register /
+     * hook.unregister / hook.trigger / hook.health_check)
      */
     method_dispatcher_register(g_dispatcher_hook_d, "register", hook_on_register, NULL);
     method_dispatcher_register(g_dispatcher_hook_d, "unregister", hook_on_unregister, NULL);

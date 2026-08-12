@@ -408,11 +408,14 @@ AIRY_API airy_err_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
             pending->completed = 0;
         }
     } else {
-        /* RPC 调用失败：不创建错误响应消息，由函数返回 svc_err 表示传输失败。
-         * 调用者通过返回值区分"传输失败"（err != SUCCESS，response 未填充）
-         * 和"业务错误"（err == SUCCESS，response.payload 包含业务层错误信息）。
-         * 之前在此处创建 {"error":{"code":...}} 消息并返回 SUCCESS，
-         * 混淆了传输错误与业务错误，违反 API 契约"0成功，非0失败"。 */
+        /* RPC call failed: do not create an error response message; the
+         * function returns svc_err to indicate transport failure. The caller
+         * distinguishes "transport failure" (err != SUCCESS, response not
+         * filled) from "business error" (err == SUCCESS, response.payload
+         * carries the business-layer error info). Previously an
+         * {"error":{"code":...}} message was created here and SUCCESS
+         * returned, conflating transport errors with business errors and
+         * violating the API contract "0=success, non-zero=failure". */
         if (resp_json) {
             AIRY_FREE(resp_json);
             resp_json = NULL;
@@ -430,13 +433,15 @@ AIRY_API airy_err_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
     }
 
     if (pending->completed && pending->response) {
-        /* 将响应消息（含 payload 所有权）转移给调用者。
-         * 注意：此处只释放 pending->response 结构体本身，payload 所有权归调用者，
-         * 由调用者在用完后通过 AIRY_FREE(response->payload) 释放。
-         * 不能调用 ipc_bus_message_free()，因为它会同时释放 payload，
-         * 会导致调用者的 response->payload 变成悬垂指针（use-after-free）。
-         * 所有调用者（orchestrator.c, daemon_task_dispatcher.c, ipc_bus_helper.c）
-         * 都已遵循"调用者负责释放 response.payload"的契约。 */
+        /* Transfer the response message (including payload ownership) to the
+         * caller. Note: only the pending->response struct itself is freed
+         * here; payload ownership goes to the caller, who must release it via
+         * AIRY_FREE(response->payload) after use. ipc_bus_message_free() must
+         * NOT be called, since it also frees the payload and would leave the
+         * caller's response->payload as a dangling pointer (use-after-free).
+         * All callers (orchestrator.c, daemon_task_dispatcher.c,
+         * ipc_bus_helper.c) already follow the "caller frees response.payload"
+         * contract. */
         __builtin_memcpy(response, pending->response, sizeof(ipc_bus_message_t));
         AIRY_FREE(pending->response);
         pending->response = NULL;
@@ -455,8 +460,8 @@ AIRY_API airy_err_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
 
     LOG_DEBUG("Bus '%s': request to '%s' completed in %llums (completed=%d)", bus->name,
               target_service, (unsigned long long)latency, pending->completed);
-    /* RPC 成功返回 SUCCESS；RPC 失败返回 svc_err（AIRY_EIO 等）。
-     * 遵循 API 契约"0成功，非0失败"。 */
+    /* RPC success returns SUCCESS; RPC failure returns svc_err (AIRY_EIO
+     * etc.), following the API contract "0=success, non-zero=failure". */
     return svc_err;
 }
 

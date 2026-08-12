@@ -47,7 +47,7 @@
 #define PLUGIN_NAME_MAX_LEN 64
 
 /**
- * @brief 插件注册表节点
+ * @brief Plugin registry node
  */
 typedef struct plugin_node {
     plugin_descriptor_t desc;
@@ -57,7 +57,7 @@ typedef struct plugin_node {
 } plugin_node_t;
 
 /**
- * @brief 全局插件注册表
+ * @brief Global plugin registry
  */
 static struct {
     plugin_node_t *head;
@@ -67,8 +67,8 @@ static struct {
 } g_plugin_registry;
 
 /**
- * @brief 按名称查找插件节点
- * @return 节点指针，未找到返回 NULL
+ * @brief Find a plugin node by name
+ * @return Node pointer, NULL if not found
  */
 static plugin_node_t *find_node(const char *name)
 {
@@ -84,7 +84,7 @@ static plugin_node_t *find_node(const char *name)
 }
 
 /**
- * @brief 从动态库加载符号
+ * @brief Load a symbol from the dynamic library
  */
 static void *load_symbol(void *handle, const char *name)
 {
@@ -96,7 +96,7 @@ static void *load_symbol(void *handle, const char *name)
 }
 
 /**
- * @brief 初始化插件注册表
+ * @brief Initialize the plugin registry
  */
 static int registry_init(void)
 {
@@ -260,8 +260,9 @@ int plugin_service_start(const char *name)
     if (!name)
         return AIRY_ERR_INVALID_PARAM;
 
-    /* 锁内查找 + 快照回调（用户回调可能在插件初始化时耗时/阻塞，
-     * 移出写锁以避免阻塞 registry 的所有读操作） */
+    /* Look up under the lock + snapshot the callback (user callbacks may be
+     * slow/blocking during plugin init; moved out of the write lock to avoid
+     * blocking all registry reads) */
     int (*start_fn)(void *) = NULL;
     void *user_data = NULL;
 
@@ -448,8 +449,9 @@ int plugin_service_execute(const char *name, const char *json_input, char **json
         return AIRY_ERR_INVALID_PARAM;
     *json_output = NULL;
 
-    /* 锁内快照执行函数与 user_data（与 plugin_service_start 同模式，
-     * 避免 dlclose 竞态；用户回调移出锁外执行） */
+    /* Snapshot the exec function and user_data under the lock (same pattern
+     * as plugin_service_start, avoiding the dlclose race; user callbacks run
+     * outside the lock) */
     int (*exec_fn)(const char *, char **) = NULL;
     sync_rwlock_read_lock_ex(g_plugin_registry.rwlock, NULL);
     plugin_node_t *node = find_node(name);

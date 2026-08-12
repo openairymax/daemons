@@ -41,10 +41,10 @@ static struct {
 } g_discovery;
 
 /**
- * @brief 简单 YAML 键值解析（不依赖第三方库）
+ * @brief Simple YAML key-value parsing (no third-party dependency)
  *
- * 仅解析 manifest.yaml 中的简单键值对。
- * 格式: key: value
+ * Only parses the simple key-value pairs in manifest.yaml.
+ * Format: key: value
  */
 static char *parse_yaml_value(const char *line, const char *key)
 {
@@ -82,7 +82,7 @@ static char *parse_yaml_value(const char *line, const char *key)
 }
 
 /**
- * @brief 解析插件类型字符串
+ * @brief Parse the plugin type string
  */
 static plugin_type_t parse_plugin_type(const char *type_str)
 {
@@ -102,7 +102,7 @@ static plugin_type_t parse_plugin_type(const char *type_str)
 }
 
 /**
- * @brief 检查目录是否存在
+ * @brief Check whether the directory exists
  */
 static bool dir_exists(const char *path)
 {
@@ -111,7 +111,7 @@ static bool dir_exists(const char *path)
 }
 
 /**
- * @brief 检查文件是否存在
+ * @brief Check whether the file exists
  */
 static bool file_exists(const char *path)
 {
@@ -270,7 +270,7 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results, size_t *out_c
 
     AIRY_LOG_INFO("PluginDiscovery: scanning '%s'...", plugins_dir);
 
-    /* 跨平台目录遍历初始化：
+    /* Cross-platform directory traversal setup:
      * POSIX: opendir/readdir/closedir
      * Windows: FindFirstFile/FindNextFile/FindClose */
 #ifndef _WIN32

@@ -85,7 +85,7 @@ typedef struct {
 static metrics_storage_t g_metrics = {0};
 
 /**
- * @brief 查找指标索引
+ * @brief Find the metric index
  */
 static int find_metric_index(const char *name)
 {
@@ -98,7 +98,7 @@ static int find_metric_index(const char *name)
 }
 
 /**
- * @brief 查找时间序列索引
+ * @brief Find the time-series index
  */
 static int find_series_index(metric_t *metric, const metric_label_t *labels, size_t label_count)
 {
@@ -130,7 +130,7 @@ static int find_series_index(metric_t *metric, const metric_label_t *labels, siz
 }
 
 /**
- * @brief 创建时间序列
+ * @brief Create a time series
  */
 static int create_series(metric_t *metric, const metric_label_t *labels, size_t label_count)
 {
@@ -171,7 +171,7 @@ static int create_series(metric_t *metric, const metric_label_t *labels, size_t 
 }
 
 /**
- * @brief 格式化标签为 Prometheus 格式
+ * @brief Format labels in Prometheus format
  */
 static void format_labels(char *buf, size_t buf_size, const metric_label_t *labels,
                           size_t label_count)
@@ -202,7 +202,7 @@ static void format_labels(char *buf, size_t buf_size, const metric_label_t *labe
 }
 
 /**
- * @brief 初始化指标系统
+ * @brief Initialize the metrics system
  */
 int metrics_init(const metrics_config_t *manager)
 {
@@ -226,7 +226,7 @@ int metrics_init(const metrics_config_t *manager)
 }
 
 /**
- * @brief 关闭指标系统
+ * @brief Shut down the metrics system
  */
 void metrics_shutdown(void)
 {
@@ -269,7 +269,7 @@ void metrics_shutdown(void)
 }
 
 /**
- * @brief 注册指标
+ * @brief Register a metric
  */
 int metrics_register(const char *name, const char *description, const char *unit,
                      metric_type_t type, const double *histogram_buckets, size_t bucket_count)
@@ -338,7 +338,7 @@ int metrics_register(const char *name, const char *description, const char *unit
 }
 
 /**
- * @brief 记录 Counter
+ * @brief Record a Counter
  */
 int metrics_counter_inc(const char *name, const metric_label_t *labels, size_t label_count)
 {
@@ -374,7 +374,7 @@ int metrics_counter_inc(const char *name, const metric_label_t *labels, size_t l
 }
 
 /**
- * @brief 记录 Counter（增加值）
+ * @brief Record a Counter (increment by value)
  */
 int metrics_counter_add(const char *name, double value, const metric_label_t *labels,
                         size_t label_count)
@@ -411,7 +411,7 @@ int metrics_counter_add(const char *name, double value, const metric_label_t *la
 }
 
 /**
- * @brief 设置 Gauge
+ * @brief Set a Gauge
  */
 int metrics_gauge_set(const char *name, double value, const metric_label_t *labels,
                       size_t label_count)
@@ -448,7 +448,7 @@ int metrics_gauge_set(const char *name, double value, const metric_label_t *labe
 }
 
 /**
- * @brief 记录 Histogram
+ * @brief Record a Histogram
  */
 int metrics_histogram_observe(const char *name, double value, const metric_label_t *labels,
                               size_t label_count)
@@ -494,7 +494,7 @@ int metrics_histogram_observe(const char *name, double value, const metric_label
 }
 
 /**
- * @brief 导出为 Prometheus 格式
+ * @brief Export in Prometheus format
  */
 char *metrics_export_prometheus(void)
 {
@@ -576,7 +576,7 @@ char *metrics_export_prometheus(void)
 }
 
 /**
- * @brief 获取指标值
+ * @brief Get a metric value
  */
 int metrics_get_value(const char *name, const metric_label_t *labels, size_t label_count,
                       double *value)
@@ -610,7 +610,7 @@ int metrics_get_value(const char *name, const metric_label_t *labels, size_t lab
 }
 
 /**
- * @brief 获取所有指标数量
+ * @brief Get the total metric count
  */
 size_t metrics_get_count(void)
 {
@@ -618,7 +618,7 @@ size_t metrics_get_count(void)
 }
 
 /**
- * @brief 获取时间序列数量
+ * @brief Get the time-series count
  */
 size_t metrics_get_series_count(const char *name)
 {

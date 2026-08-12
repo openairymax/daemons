@@ -189,9 +189,11 @@ int agent_registry_get(const char *agent_id, agent_info_t *out_info)
     return AIRY_OK;
 }
 
-/* P2-6 修复：agent_registry_get 的不加锁版本，供已持锁的内部函数调用。
- * 避免嵌套加锁（agent_registry_search 持锁时调用 agent_registry_get 会再次获取同一锁）。
- * 调用方必须已持有 g_registry.lock。 */
+/* P2-6 fix: the lock-free version of agent_registry_get, for internal
+ * functions that already hold the lock. Avoids nested locking
+ * (agent_registry_search calling agent_registry_get while holding the lock
+ * would re-acquire the same lock). The caller must already hold
+ * g_registry.lock. */
 static int agent_registry_get_locked(const char *agent_id, agent_info_t *out_info)
 {
     if (!agent_id || !out_info)
@@ -261,9 +263,11 @@ int agent_registry_search(const search_params_t *params, agent_info_t ***results
 
             (*results)[result_idx] = (agent_info_t *)AIRY_CALLOC(1, sizeof(agent_info_t));
             if ((*results)[result_idx]) {
-                /* P2-6 修复：调用 _locked 版本避免嵌套加锁。
-                 * 当前线程已持有 g_registry.lock，若调用 agent_registry_get 会再次
-                 * 尝试获取同一锁（当前依赖 PTHREAD_MUTEX_RECURSIVE 才不致死锁）。 */
+                /* P2-6 fix: call the _locked version to avoid nested locking.
+                 * The current thread already holds g_registry.lock; calling
+                 * agent_registry_get would try to acquire the same lock again
+                 * (currently only avoids deadlock because
+                 * PTHREAD_MUTEX_RECURSIVE is relied upon). */
                 agent_registry_get_locked(entry->info.agent_id, (*results)[result_idx]);
                 result_idx++;
             }

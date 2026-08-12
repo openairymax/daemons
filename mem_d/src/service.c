@@ -139,8 +139,8 @@ static void mem_ht_remove(mem_hash_table_t *ht, const char *key)
 
 static void mem_generate_record_id(char *buf, size_t buf_size)
 {
-    /* 32 字符十六进制：8 字符时间戳 + 8 字符计数器 + 16 字符随机
-     * 无外部 libuuid 依赖，保证 daemon 可独立运行 */
+    /* 32-char hex: 8-char timestamp + 8-char counter + 16-char random.
+     * No external libuuid dependency, so the daemon can run standalone. */
     static uint64_t counter = 0;
     static airy_mtx_t counter_lock;
     static int counter_initialized = 0;
@@ -232,9 +232,9 @@ static void mem_record_free_vector(mem_record_entry_t *rec)
     rec->emb_dim = 0;
 }
 
-/* JSON 字符串字面量内容转义（不含外层引号）。
- * 返回 malloc 缓冲（调用方负责 AIRY_FREE），返回写入长度。
- * 失败时 *out = NULL，返回 0。 */
+/* Escape JSON string literal content (excluding the outer quotes).
+ * Returns a malloc'd buffer (caller AIRY_FREE) and the written length.
+ * On failure *out = NULL and returns 0. */
 static size_t mem_json_escape(const char *in, size_t len, char **out)
 {
     if (!out)
@@ -462,8 +462,9 @@ static void mem_persist_load_existing(mem_service_t *svc)
                             __builtin_memcpy(rec->data, data_str, data_len);
                             ((char *)rec->data)[data_len] = '\0';
                             rec->len = data_len;
-                            /* metadata 可能是任意 JSON 值（对象/数组/字符串等），
-                             * 用 cJSON_PrintUnformatted 原样回序列化以保证 round-trip */
+                            /* metadata can be any JSON value (object/array/
+                             * string etc.); reserialize as-is with
+                             * cJSON_PrintUnformatted to guarantee round-trip */
                             if (meta && !cJSON_IsNull(meta)) {
                                 char *meta_str = cJSON_PrintUnformatted(meta);
                                 if (meta_str) {
@@ -477,8 +478,10 @@ static void mem_persist_load_existing(mem_service_t *svc)
                                                   (uint64_t)time(NULL);
                             if (mem_ht_insert(&svc->record_index, rec->record_id, idx) ==
                                 AIRY_SUCCESS) {
-                                /* 重启时从 JSONL 原文重建 TF-IDF 向量并登记全局 DF
-                                 * （JSONL 只持久化原文，向量仅存内存） */
+                                /* On restart, rebuild the TF-IDF vector from
+                                 * the JSONL original text and register the
+                                 * global DF (JSONL persists only the original
+                                 * text; vectors live in memory only) */
                                 mem_record_build_vector(svc, rec);
                                 svc->record_count++;
                                 loaded++;
@@ -648,8 +651,10 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char *
 
     airy_mtx_unlock(&svc->lock);
 
-    /* 可选 embedding 增强：锁外发起网络调用（避免持锁阻塞），
-     * 成功则回填向量；失败已由 emb_client 标记 unhealthy 进入冷却，自动降级 TF-IDF */
+    /* Optional embedding enhancement: make the network call outside the lock
+     * (avoid blocking while holding it); on success backfill the vector; on
+     * failure emb_client already marks unhealthy and cools down, degrading to
+     * TF-IDF automatically */
     if (mem_emb_should_try(&svc->emb)) {
         float *emb_vec = NULL;
         size_t emb_dim = 0;
@@ -685,8 +690,10 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
     if (limit == 0)
         limit = 10;
 
-    /* 锁外准备（网络调用不持锁，避免阻塞写/删）：
-     * 1) 查询 TF-IDF 词频向量；2) 可选查询 embedding（失败自动降级） */
+    /* Prepare outside the lock (network calls do not hold the lock, avoiding
+     * blocking writes/deletes):
+     * 1) query the TF-IDF term vector; 2) optionally query embedding
+     * (degrades automatically on failure) */
     mem_tfidf_vec_t qvec;
     AIRY_MEMSET(&qvec, 0, sizeof(qvec));
     (void)mem_vec_build(query, strlen(query), &qvec);
@@ -722,8 +729,9 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
     for (size_t i = 0; i < svc->record_count; i++) {
         const mem_record_entry_t *rec = &svc->records[i];
 
-        /* 向量相似度：embedding 可用且记录有向量时用 embedding 余弦，
-         * 否则用 TF-IDF 余弦；记录无向量（或查询无词项）时该分量为 0 */
+        /* Vector similarity: use embedding cosine when embedding is available
+         * and the record has a vector, otherwise TF-IDF cosine; when the
+         * record has no vector (or the query has no terms) this component is 0 */
         float vec_score = 0.0f;
         if (use_emb && rec->emb && rec->emb_dim == qemb_dim) {
             vec_score = mem_emb_cosine(qemb, rec->emb, qemb_dim);
@@ -743,8 +751,9 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
         }
     }
 
-    /* 先按 score 降序排序全部命中（冒泡，规模小，O(N^2) 可接受），
-     * 再截取前 limit 项，避免高分命中被错误丢弃 */
+    /* Sort all hits by score descending first (bubble sort; small scale,
+     * O(N^2) acceptable), then truncate to the first limit entries, avoiding
+     * high-scoring hits being wrongly dropped */
     for (size_t i = 0; i + 1 < hit_count; i++) {
         for (size_t j = 0; j + 1 < hit_count - i; j++) {
             if (hits[j].score < hits[j + 1].score) {
@@ -776,8 +785,9 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
         return AIRY_SUCCESS;
     }
 
-    /* 缩容到实际命中数（先做乘法溢出检查，避免 hit_count * sizeof 回绕，
-     * 溢出时保留原缓冲区，不缩容） */
+    /* Shrink to the actual hit count (do the multiplication overflow check
+     * first to avoid hit_count * sizeof wrapping; on overflow keep the
+     * original buffer, no shrink) */
     mem_search_hit_t *shrunk = NULL;
     if (hit_count <= SIZE_MAX / sizeof(mem_search_hit_t)) {
         shrunk = (mem_search_hit_t *)AIRY_REALLOC(hits, hit_count * sizeof(mem_search_hit_t));

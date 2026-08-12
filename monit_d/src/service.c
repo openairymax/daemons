@@ -454,9 +454,11 @@ int monitor_service_get_alerts(monitor_service_t *service, alert_info_t ***alert
     for (size_t i = 0; i < service->alert_count; i++) {
         alert_info_t *info = (alert_info_t *)AIRY_CALLOC(1, sizeof(alert_info_t));
         if (info) {
-            /* 深拷贝字符串字段：原实现直接指向内部条目，锁释放后调用方读取
-             * 与并发 trigger_alert 驱逐（free）构成 use-after-free 竞态。
-             * 调用方须配合释放（AIRY_FREE 各字符串 + 元素）。 */
+            /* Deep-copy the string fields: the original implementation
+             * pointed directly into internal entries; after the lock is
+             * released, the caller reading them races with concurrent
+             * trigger_alert eviction (free) into a use-after-free. The caller
+             * must release them too (AIRY_FREE each string + the element). */
             info->alert_id =
                 service->alerts[i].alert_id ? AIRY_STRDUP(service->alerts[i].alert_id) : NULL;
             info->message =
@@ -639,9 +641,10 @@ int monitor_service_start_agent_trace(monitor_service_t *service,
         }
     }
     if (t) {
-        /* 回填 trace_id：外部 trace 句柄必须携带内部生成的 tid，否则
-         * end_agent_trace 的 trace_id 匹配永不命中，end_time 恒为 0，
-         * get_active_agents 会把已结束的 trace 恒报为活跃（原缺陷）。 */
+        /* Backfill trace_id: the external trace handle must carry the
+         * internally generated tid; otherwise end_agent_trace's trace_id
+         * matching never hits, end_time stays 0, and get_active_agents always
+         * reports ended traces as active (original defect). */
         t->trace_id = AIRY_STRDUP(tid);
         if (!t->trace_id) {
             AIRY_FREE(t->agent_id);

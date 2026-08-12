@@ -246,8 +246,10 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *tid = get_string_field(params, "tool_id", NULL);
     cJSON *jparams = jsonrpc_get_object_param(params, "params");
-    /* P0 交互式审批：可选透传调用方 agent_id（如 agent 子进程的 coding_v1），
-     * 使 ACL 按真实主体判定；未传时回退 "tool_d" 默认（既有行为不变）。 */
+    /* P0 interactive approval: optionally pass through the caller's agent_id
+     * (e.g. an agent child process's coding_v1) so the ACL judges by the real
+     * subject; when absent, fall back to the "tool_d" default (existing
+     * behavior unchanged). */
     const char *agent_id = get_string_field(params, "agent_id", NULL);
 
     if (!tid || !jparams) {
@@ -272,8 +274,9 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
     AIRY_FREE((void *)params_json);
 
     if (ret != AIRY_SUCCESS || !res) {
-        /* 优先透传 executor 的错误描述（如交互审批 deny/超时的
-         * "User denied tool execution"），否则回退通用信息。 */
+        /* Prefer passing through the executor's error description (e.g. the
+         * "User denied tool execution" of interactive approval deny/timeout),
+         * otherwise fall back to generic info. */
         const char *emsg = (res && res->error) ? res->error : "Execution failed";
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, emsg, id);
         if (res) {
@@ -494,9 +497,10 @@ int main(int argc, char **argv)
     ev_config.use_jsonrpc = true;
     ev_config.on_client = daemon_on_client_tool_d;
     ev_config.service_ctx = NULL;
-    /* P0 交互式审批：客户端请求分派到线程池并发处理。
-     * 否则 execute 在阻塞等待 tool.approve 决议期间会卡住事件循环线程，
-     * 导致 pending/approve 请求无法被处理。 */
+    /* P0 interactive approval: client requests are dispatched to the thread
+     * pool for concurrent handling. Otherwise, execute blocking on a
+     * tool.approve decision would stall the event-loop thread and pending/
+     * approve requests could never be processed. */
     ev_config.concurrent_clients = true;
 
     const char *sock_addr = g_config.use_tcp ? g_config.tcp_host : g_config.socket_path;
@@ -519,8 +523,8 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_tool_d, "list_tools", on_list_method, NULL);
     method_dispatcher_register(g_dispatcher_tool_d, "get_tool", on_get_method, NULL);
     method_dispatcher_register(g_dispatcher_tool_d, "execute_tool", on_execute_method, NULL);
-    /* L2 协议标准方法 + 标准名别名（02-l2-service-protocol.md：tool.execute / tool.list /
-     * tool.health_check）
+    /* Standard L2 protocol methods + standard-name aliases
+     * (02-l2-service-protocol.md: tool.execute / tool.list / tool.health_check)
      */
     method_dispatcher_register(g_dispatcher_tool_d, "execute", on_execute_method, NULL);
     method_dispatcher_register(g_dispatcher_tool_d, "list", on_list_method, NULL);

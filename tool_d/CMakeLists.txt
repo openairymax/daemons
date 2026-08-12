@@ -37,6 +37,10 @@ set(TOOL_SERVICE_SOURCES
     src/safety_guard_bridge.c
     src/tool_svc_adapter.c
     src/builtin.c
+    src/builtin_shell.c
+    src/builtin_fs.c
+    src/builtin_net.c
+    src/builtin_git.c
     src/tool_interactive_approval.c
     src/os_sandbox.c
 )

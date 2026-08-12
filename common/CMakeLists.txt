@@ -26,17 +26,29 @@ endif()
 set(ATOMS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../atoms")
 
 set(SVC_COMMON_SOURCES
-    src/svc_common.c          # 服务框架核心实现
+    src/svc_common.c          # 服务框架核心实现（service 生命周期域）
+    src/svc_registry.c        # 跨进程注册中心客户端（registry 域）
+    src/svc_config.c          # 配置文件加载与监视（config 域）
+    src/svc_monitor.c         # 服务监控与降级处理（monitor/degradation 域）
+    src/svc_client.c          # 服务通信客户端（client 域）
     src/ipc_client.c
     src/ipc_service_bus.c     # IPC服务总线
     src/ipc_bus_helper.c       # C-L09: daemon IPC Bus 自动注册便捷层
     src/service_discovery.c   # 跨进程服务发现
+    src/service_discovery_lb.c # 跨进程服务发现-负载均衡
+    src/service_discovery_api.c # 跨进程服务发现-操作 API
+    src/service_discovery_stats.c # 跨进程服务发现-统计
+    src/service_discovery_backend_shm.c # 跨进程服务发现-shm 后端
+    src/service_discovery_backend_file.c # 跨进程服务发现-file 后端
     src/service_discovery_helper.c  # C-L08: daemon 自动注册便捷层
     src/circuit_breaker.c     # 熔断器与自愈
     src/unified_metrics.c     # 统一指标收集
     src/alert_manager.c       # 智能告警管理
     src/config_manager.c      # 统一配置管理
     src/svc_auth.c
+    src/svc_auth_jwt.c       # 认证中间件-JWT 域
+    src/svc_auth_apikey.c    # 认证中间件-API Key 域
+    src/svc_auth_ratelimit.c # 认证中间件-限流域
     src/daemon_security.c
     src/jsonrpc_helpers.c
     src/method_dispatcher.c
