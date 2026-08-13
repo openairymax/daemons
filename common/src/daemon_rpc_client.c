@@ -304,6 +304,150 @@ int daemon_rpc_call(const char *socket_path, const char *method, const char *par
                                       NULL, NULL, NULL);
 }
 
+#if AIRY_PLATFORM_POSIX
+
+/**
+ * @brief Connect + send a JSON-RPC request, returning the live socket.
+ *
+ * Shared prefix of daemon_rpc_call_cancelable and daemon_rpc_call_stream:
+ * builds the JSON-RPC 2.0 request object, serializes it and sends it over a
+ * freshly connected Unix socket. The caller owns the returned fd (>= 0) and
+ * must close it; on failure a negative AIRY_ERR_* code is returned.
+ */
+static int rpc_connect_send(const char *socket_path, const char *method, const char *params_json)
+{
+    int fd = rpc_connect_unix(socket_path);
+    if (fd < 0)
+        return fd;
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        close(fd);
+        return -AIRY_ERR_OUT_OF_MEMORY;
+    }
+    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
+    cJSON_AddStringToObject(root, "method", method);
+    if (params_json && params_json[0] != '\0') {
+        cJSON *params = cJSON_Parse(params_json);
+        if (params) {
+            cJSON_AddItemToObject(root, "params", params);
+        } else {
+            cJSON_AddStringToObject(root, "params", params_json);
+        }
+    } else {
+        cJSON_AddObjectToObject(root, "params");
+    }
+    cJSON_AddNumberToObject(root, "id", 1);
+
+    char *request_str = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!request_str) {
+        close(fd);
+        return -AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    size_t req_len = strlen(request_str);
+    ssize_t sent = send(fd, request_str, req_len, 0);
+    AIRY_FREE(request_str);
+    if (sent < 0 || (size_t)sent != req_len) {
+        close(fd);
+        SVC_LOG_ERROR("daemon_rpc_call: send failed (method=%s)", method);
+        return -AIRY_ERR_FAIL;
+    }
+    return fd;
+}
+
+int daemon_rpc_call_stream(const char *socket_path, const char *method, const char *params_json,
+                           daemon_rpc_stream_cb_t on_chunk, void *user_data, uint32_t timeout_ms)
+{
+    if (!socket_path || !method)
+        return AIRY_ERR_INVALID_PARAM;
+    if (timeout_ms == 0)
+        timeout_ms = DAEMON_RPC_DEFAULT_TIMEOUT_MS;
+
+    int fd = rpc_connect_send(socket_path, method, params_json);
+    if (fd < 0)
+        return -fd;
+
+    /* Streaming read loop: every recv() payload is delivered to the callback
+     * as it arrives; recv() == 0 (peer closed the connection) marks the end
+     * of the stream (daemons are single-request-single-response-then-close).
+     * Timeout slices keep the loop responsive; the caller gets a partial
+     * prefix via the callback when it fires. */
+    uint32_t elapsed_ms = 0;
+    const uint32_t step_ms = 200;
+    int rc = AIRY_ERR_TIMEOUT;
+
+    while (elapsed_ms < timeout_ms) {
+        struct pollfd pfd;
+        pfd.fd = fd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+
+        int remain = (int)((timeout_ms - elapsed_ms) < step_ms ? (timeout_ms - elapsed_ms)
+                                                               : step_ms);
+        int pr = poll(&pfd, 1, remain);
+        if (pr < 0) {
+            if (errno == EINTR)
+                continue;
+            rc = AIRY_ERR_FAIL;
+            break;
+        }
+        if (pr == 0) {
+            elapsed_ms += (uint32_t)remain;
+            continue;
+        }
+        if (!(pfd.revents & POLLIN)) {
+            /* HUP/POLERR without readable data: treat as end of stream only
+             * if the server already finished writing (EOF). Without data we
+             * cannot distinguish an early hangup from a finished stream; the
+             * daemon writes the final chunk before closing, so a clean
+             * completion is reported as POLLIN+EOF in the same poll cycle. */
+            rc = (pfd.revents & POLLHUP) ? AIRY_SUCCESS : AIRY_ERR_FAIL;
+            break;
+        }
+
+        char chunk[4096];
+        ssize_t n = recv(fd, chunk, sizeof(chunk), 0);
+        if (n < 0) {
+            if (errno == EINTR || errno == EAGAIN)
+                continue;
+            rc = AIRY_ERR_FAIL;
+            break;
+        }
+        if (n == 0) {
+            /* EOF: the server finished the stream and closed the connection. */
+            rc = AIRY_SUCCESS;
+            break;
+        }
+        if (on_chunk)
+            on_chunk(chunk, (size_t)n, user_data);
+        elapsed_ms += 1;
+    }
+
+    close(fd);
+    if (rc != AIRY_SUCCESS)
+        SVC_LOG_ERROR("daemon_rpc_call_stream: stream ended rc=%d (method=%s, timeout=%u)", rc,
+                      method, timeout_ms);
+    return rc;
+}
+
+#elif AIRY_PLATFORM_WINDOWS
+
+int daemon_rpc_call_stream(const char *socket_path, const char *method, const char *params_json,
+                           daemon_rpc_stream_cb_t on_chunk, void *user_data, uint32_t timeout_ms)
+{
+    (void)socket_path;
+    (void)method;
+    (void)params_json;
+    (void)on_chunk;
+    (void)user_data;
+    (void)timeout_ms;
+    return AIRY_ERR_NOT_SUPPORTED;
+}
+
+#endif /* AIRY_PLATFORM_WINDOWS / POSIX */
+
 int daemon_rpc_call_cancelable(const char *socket_path, const char *method, const char *params_json,
                                char **out_result_json, uint32_t timeout_ms,
                                airy_cancel_token_t *cancel_token, const char *cancel_method,
