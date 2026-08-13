@@ -85,6 +85,14 @@ int builtin_shell_run(const char *cmd, char **out, int *exit_code, uint32_t time
         dup2(pipefd[1], STDOUT_FILENO);
         dup2(pipefd[1], STDERR_FILENO);
         close(pipefd[1]);
+        /* Tool isolation: do not leak external LD_PRELOAD injections (sandbox
+         * shims, tracing agents) into the command process.  Injected shims
+         * can install seccomp filters or interpose libc calls and crash
+         * standard tools such as curl, violating the tool isolation contract.
+         * The agentrt runtime itself never relies on LD_PRELOAD, so clearing
+         * it is safe and makes subprocess behavior deterministic. */
+        unsetenv("LD_PRELOAD");
+        unsetenv("LD_AUDIT");
         /* P2 OS-level sandbox: apply after fork, before exec
          * (Landlock/seccomp/rlimit). Apply failure denies execution
          * fail-closed (126 matches the bash convention). */
