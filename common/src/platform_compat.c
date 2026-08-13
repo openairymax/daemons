@@ -15,7 +15,9 @@
 #ifndef _WIN32
 #include <dlfcn.h>
 #include <errno.h>
+#ifdef __linux__
 #include <sys/sysinfo.h>
+#endif
 #include <unistd.h>
 #ifdef __APPLE__
 #include <sys/sysctl.h>

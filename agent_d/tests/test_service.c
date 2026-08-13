@@ -389,8 +389,9 @@ static void test_invoke_session_capacity(void)
         assert(rc == AIRY_SUCCESS && tokens[i] != NULL);
     }
 
-    int rc = agent_service_invoke_begin(svc, "req-cap-overflow", NULL);
-    assert(rc == AIRY_ERR_BUSY);
+    airy_cancel_token_t *overflow = NULL;
+    int rc = agent_service_invoke_begin(svc, "req-cap-overflow", &overflow);
+    assert(rc == AIRY_ERR_BUSY && overflow == NULL);
 
     agent_service_invoke_end(svc, "req-cap-0");
     airy_cancel_token_t *t2 = NULL;

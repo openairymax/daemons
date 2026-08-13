@@ -254,6 +254,7 @@ int main(void)
     failed += test_dag_cancel();
     failed += test_dag_invalid_node_ids();
     failed += test_priority_queue_order();
+    failed += test_dag_input_fallback();
     failed += test_dag_parallel_delegation();
     failed += test_dag_group_consensus_collab();
 

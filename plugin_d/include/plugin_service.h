@@ -164,6 +164,17 @@ plugin_state_t plugin_service_get_state(const char *name);
 int plugin_service_get_stats(const char *name, plugin_stats_t *stats);
 
 /**
+ * @brief Get daemon-level aggregate statistics across all loaded plugins.
+ * @param out_count  Output loaded-plugin count
+ * @param out_loads  Output total load count
+ * @param out_errors Output total error count
+ * @param out_memory Output summed memory_bytes
+ * @return 0 on success
+ */
+int plugin_service_get_daemon_stats(size_t *out_count, uint64_t *out_loads,
+                                    uint64_t *out_errors, uint64_t *out_memory);
+
+/**
  * @brief List all loaded plugins.
  * @param names       Output name array (caller frees)
  * @param count       Output count

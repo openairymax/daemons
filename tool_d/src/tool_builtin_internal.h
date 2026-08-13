@@ -22,6 +22,7 @@ extern "C" {
 
 #define BUILTIN_OUTPUT_CAP (1U << 20) /* 1MB */
 #define BUILTIN_SHELL_TIMEOUT_MS 60000
+#define BUILTIN_OUTPUT_DRAIN_MS 1000 /* tail-flush bound after exit */
 
 /* Common I/O helpers (builtin.c) */
 char *builtin_read_all(FILE *fp, int *out_truncated);

@@ -442,6 +442,15 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
         cJSON_AddStringToObject(msg, "role", role);
         cJSON_AddStringToObject(msg, "content", content);
 
+        /* Reasoning models (DeepSeek/Kimi) require the assistant turn's
+         * reasoning_content to be echoed back on re-send; dropping it
+         * between tool-loop turns yields HTTP 400 from the upstream API. */
+        if (manager->messages[i].reasoning_content &&
+            manager->messages[i].reasoning_content[0]) {
+            cJSON_AddStringToObject(msg, "reasoning_content",
+                                    manager->messages[i].reasoning_content);
+        }
+
         if (manager->messages[i].tool_call_id && manager->messages[i].tool_call_id[0]) {
             cJSON_AddStringToObject(msg, "tool_call_id", manager->messages[i].tool_call_id);
         }
@@ -523,6 +532,11 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
                     resp->choices[i].content = AIRY_STRDUP(content->valuestring);
                 }
 
+                cJSON *reasoning = cJSON_GetObjectItem(message, "reasoning_content");
+                if (cJSON_IsString(reasoning) && reasoning->valuestring) {
+                    resp->choices[i].reasoning_content = AIRY_STRDUP(reasoning->valuestring);
+                }
+
                 cJSON *tool_calls = cJSON_GetObjectItem(message, "tool_calls");
                 if (cJSON_IsArray(tool_calls) && cJSON_GetArraySize(tool_calls) > 0) {
                     char *tc_json = cJSON_PrintUnformatted(tool_calls);
@@ -553,6 +567,31 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
 
     *out = resp;
     return AIRY_OK;
+}
+
+char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text)
+{
+    if (!text)
+        return buf;
+    size_t tlen = strlen(text);
+    if (tlen == 0)
+        return buf;
+
+    size_t needed = *len + tlen + 1;
+    if (needed > *cap) {
+        size_t new_cap = *cap > 0 ? *cap : 4096;
+        while (new_cap < needed)
+            new_cap *= 2;
+        char *ptr = (char *)AIRY_REALLOC(buf, new_cap);
+        if (!ptr)
+            return NULL;
+        buf = ptr;
+        *cap = new_cap;
+    }
+    __builtin_memcpy(buf + *len, text, tlen);
+    *len += tlen;
+    buf[*len] = '\0';
+    return buf;
 }
 
 typedef struct {

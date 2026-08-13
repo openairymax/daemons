@@ -22,6 +22,15 @@ typedef struct llm_service llm_service_t;
 typedef struct {
     const char *role;
     const char *content;
+    /* Reasoning trace (reasoning models, e.g. DeepSeek-R1 / Kimi-K2):
+     * - Request side: an assistant message produced by a reasoning model must
+     *   echo its reasoning_content when the turn is re-sent; DeepSeek and
+     *   Kimi reject a tool-loop request with HTTP 400 if the field is
+     *   dropped between turns.
+     * - Response side: choices[].reasoning_content carries the reasoning
+     *   trace of the current completion.
+     * NULL when the message/choice has no reasoning. */
+    const char *reasoning_content;
     /* Function calling (OpenAI-compatible):
      * - role="tool" messages carry tool_call_id (matching the assistant's
      *   tool_call id)

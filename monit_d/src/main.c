@@ -415,6 +415,24 @@ static void handle_alert_resolve(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_client(airy_sock_t client_fd)
 {
     char buffer[MAX_BUFFER];
+#if AIRY_PLATFORM_POSIX
+    /* Wait for request data before recv. The fd accepted by the event
+     * driver may not have data yet; airy_sock_recv is a MSG_DONTWAIT
+     * non-blocking read, so an immediate recv can return 0 on EAGAIN, be
+     * mistaken for a failed connection and closed, causing SIGPIPE / lost
+     * requests on the client send (RPC timing race). Poll for POLLIN first.
+     * 5s timeout is ample vs the client daemon_rpc_call default of 30s; on
+     * timeout the request is treated as lost (matches daemon_main.h). */
+    struct pollfd pfd;
+    pfd.fd = (int)client_fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    int pr = poll(&pfd, 1, 5000);
+    if (pr <= 0 || !(pfd.revents & POLLIN)) {
+        airy_sock_close(client_fd);
+        return;
+    }
+#endif
     ssize_t n = airy_sock_recv(client_fd, buffer, sizeof(buffer) - 1);
 
     if (n <= 0) {

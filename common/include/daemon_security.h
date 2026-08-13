@@ -427,6 +427,33 @@ int daemon_security_get_status(int *sanitizer_status, int *permission_status, in
 int daemon_security_add_acl_rule(const char *agent_id, const char *resource, bool allowed);
 
 /**
+ * @brief Load tool-level permission rules from a YAML file into the ACL table.
+ *
+ * Rule schema (tool-level, matches daemon_check_tool_permission()'s
+ * (agent, tool) lookup):
+ *
+ * @code
+ * rules:
+ *   - agent: "coding_v1"
+ *     tool: "fs_read"
+ *     effect: "allow"
+ *   - agent: "coding_v1"
+ *     tool: "shell_run"
+ *     effect: "deny"
+ * @endcode
+ *
+ * Only rules with a non-empty agent, tool and effect ("allow"/"deny") are
+ * applied; malformed entries are skipped. Missing files return
+ * AIRY_ERR_NOT_FOUND, unreadable files AIRY_ERR_PARSE_ERROR. The table
+ * stays fail-closed: tools without an allow rule are denied.
+ *
+ * @param path Absolute path of the permission rules YAML file
+ * @return AIRY_OK on success (0 rules loaded counts as success when the
+ *         file parsed), error code otherwise
+ */
+int daemon_security_load_rules_file(const char *path);
+
+/**
  * @brief Get the cupolas vault instance opened by daemon_security.
  * @return Vault handle; NULL if not enabled or not opened
  * @note Opened by daemon_security_init(), consistent with the reads/writes

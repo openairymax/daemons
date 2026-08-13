@@ -370,387 +370,365 @@ typedef struct {
     int max_retries;
 } model_entry_t;
 
-int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_providers,
-                               size_t *out_count)
-{
-    if (!config_path || !out_providers || !out_count)
-        return AIRY_ERR_INVALID_PARAM;
+typedef struct {
+    char name[64];
+    char api_key_env[128];
+    char base_url[512];
+    int timeout_sec;
+    int max_retries;
+    char *model_names[64];
+    size_t model_count;
+} prov_cfg_t;
 
-    *out_providers = NULL;
-    *out_count = 0;
+typedef struct {
+    char name[64];
+    char api_key_env[128];
+    char base_url[512];
+    int timeout_sec;
+    int max_retries;
+    char *model_names[64];
+    size_t model_count;
+} provider_agg_t;
 
-    FILE *f = fopen(config_path, "rb");
-    if (!f) {
-        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN cannot open model config, STACK: "
-                     "svc_load_model_config_yaml");
-        return 0;
-    }
-
-    yaml_parser_t parser;
-    if (!yaml_parser_initialize(&parser)) {
-        fclose(f);
-        SVC_LOG_WARN(
-            "C-L02: SVC: MODEL-CONFIG-WARN YAML parser init, STACK: svc_load_model_config_yaml");
-        return 0;
-    }
-    yaml_parser_set_input_file(&parser, f);
-
-    yaml_event_t event;
-    model_entry_t models[64];
-    size_t model_count = 0;
-    int map_depth = 0;
-    int seq_depth = 0;
-    int in_models = 0;
-    int in_providers = 0;
-    int item_depth = 0;
-    int nested = 0;
-    char pending_key[128];
-    int has_pending_key = 0;
+typedef struct {
     yaml_map_t item_map;
-    yaml_map_init(&item_map);
-    /* providers section parsing (P0.20: the providers section is the
-     * authoritative base_url/api_key_env source; previously the YAML loader
-     * only parsed the top-level models list and ignored the providers section,
-     * so OpenAI-compatible vendors such as glm/qwen/moonshot could not be
-     * registered) */
-    typedef struct {
-        char name[64];
-        char api_key_env[128];
-        char base_url[512];
-        int timeout_sec;
-        int max_retries;
-        char *model_names[64];
-        size_t model_count;
-    } prov_cfg_t;
     yaml_map_t prov_map;
-    yaml_map_init(&prov_map);
-    prov_cfg_t pcfg[16];
-    size_t pcfg_count = 0;
     prov_cfg_t cur_p;
-    int done = 0;
+    prov_cfg_t pcfg[16];
+    size_t pcfg_count;
+    model_entry_t models[64];
+    size_t model_count;
+    int map_depth;
+    int seq_depth;
+    int in_models;
+    int in_providers;
+    int item_depth;
+    int nested;
+    char pending_key[128];
+    int has_pending_key;
+} svc_yaml_state_t;
 
-    while (!done) {
-        if (!yaml_parser_parse(&parser, &event))
+static void svc_yaml_handle_mapping_start(svc_yaml_state_t *st)
+{
+    st->map_depth++;
+    if (st->in_models || st->in_providers) {
+        st->item_depth++;
+        if (st->item_depth == 1) {
+            st->nested = 0;
+            st->has_pending_key = 0;
+            if (st->in_providers) {
+                yaml_map_free(&st->prov_map);
+                yaml_map_init(&st->prov_map);
+                __builtin_memset(&st->cur_p, 0, sizeof(st->cur_p));
+            } else {
+                yaml_map_free(&st->item_map);
+                yaml_map_init(&st->item_map);
+            }
+        } else {
+            st->nested++;
+            st->has_pending_key = 0;
+        }
+    }
+}
+
+static void svc_yaml_finalize_provider(svc_yaml_state_t *st)
+{
+    const char *pn = yaml_map_get(&st->prov_map, "name");
+    if (pn && pn[0]) {
+        AIRY_STRNCPY_TERM(st->cur_p.name, pn, sizeof(st->cur_p.name));
+        const char *pke = yaml_map_get(&st->prov_map, "api_key_env");
+        if (pke)
+            AIRY_STRNCPY_TERM(st->cur_p.api_key_env, pke, sizeof(st->cur_p.api_key_env));
+        const char *pb = yaml_map_get(&st->prov_map, "base_url");
+        if (pb)
+            AIRY_STRNCPY_TERM(st->cur_p.base_url, pb, sizeof(st->cur_p.base_url));
+        const char *pt = yaml_map_get(&st->prov_map, "timeout_sec");
+        if (pt)
+            st->cur_p.timeout_sec = (int)strtol(pt, NULL, 10);
+        const char *pr = yaml_map_get(&st->prov_map, "max_retries");
+        if (pr)
+            st->cur_p.max_retries = (int)strtol(pr, NULL, 10);
+        if (st->pcfg_count < 16) {
+            st->pcfg[st->pcfg_count++] = st->cur_p;
+        } else {
+            for (size_t k = 0; k < st->cur_p.model_count; ++k)
+                AIRY_FREE(st->cur_p.model_names[k]);
+        }
+    } else {
+        for (size_t k = 0; k < st->cur_p.model_count; ++k)
+            AIRY_FREE(st->cur_p.model_names[k]);
+    }
+}
+
+static void svc_yaml_finalize_model(svc_yaml_state_t *st)
+{
+    if (st->model_count >= 64)
+        return;
+    const char *n = yaml_map_get(&st->item_map, "name");
+    const char *p = yaml_map_get(&st->item_map, "provider");
+    const char *e = yaml_map_get(&st->item_map, "api_key_env");
+    const char *ep = yaml_map_get(&st->item_map, "endpoint");
+    const char *t = yaml_map_get(&st->item_map, "timeout_sec");
+    const char *r = yaml_map_get(&st->item_map, "max_retries");
+
+    if (n && p) {
+        __builtin_memset(&st->models[st->model_count], 0, sizeof(model_entry_t));
+        AIRY_STRNCPY_TERM(st->models[st->model_count].name, n,
+                          sizeof(st->models[st->model_count].name));
+        AIRY_STRNCPY_TERM(st->models[st->model_count].provider, p,
+                          sizeof(st->models[st->model_count].provider));
+        if (e)
+            AIRY_STRNCPY_TERM(st->models[st->model_count].api_key_env, e,
+                              sizeof(st->models[st->model_count].api_key_env));
+        if (ep)
+            AIRY_STRNCPY_TERM(st->models[st->model_count].endpoint, ep,
+                              sizeof(st->models[st->model_count].endpoint));
+        if (t)
+            st->models[st->model_count].timeout_sec = (int)strtol(t, NULL, 10);
+        if (r)
+            st->models[st->model_count].max_retries = (int)strtol(r, NULL, 10);
+        st->model_count++;
+    }
+}
+
+static void svc_yaml_handle_mapping_end(svc_yaml_state_t *st)
+{
+    if (st->in_models || st->in_providers) {
+        if (st->item_depth == 1 && st->nested == 0) {
+            if (st->in_providers)
+                svc_yaml_finalize_provider(st);
+            else
+                svc_yaml_finalize_model(st);
+        }
+        st->item_depth--;
+        if (st->item_depth == 0) {
+            st->nested = 0;
+        } else if (st->nested > 0) {
+            st->nested--;
+        }
+    }
+    st->map_depth--;
+}
+
+static void svc_yaml_handle_sequence_end(svc_yaml_state_t *st)
+{
+    st->seq_depth--;
+    if ((st->in_models || st->in_providers) && st->item_depth >= 1 && st->nested > 0)
+        st->nested--;
+    if (st->in_models && st->item_depth == 0 && st->seq_depth <= 1)
+        st->in_models = 0;
+    if (st->in_providers && st->item_depth == 0 && st->seq_depth <= 1)
+        st->in_providers = 0;
+    if (st->in_providers && st->item_depth == 1 && st->has_pending_key &&
+        strcmp(st->pending_key, "models") == 0)
+        st->has_pending_key = 0;
+}
+
+static void svc_yaml_handle_scalar(svc_yaml_state_t *st, const char *val)
+{
+    if (!st->in_models && !st->in_providers && st->map_depth == 1 && val) {
+        if (strcmp(val, "models") == 0) {
+            st->in_models = 1;
+            st->has_pending_key = 0;
+        } else if (strcmp(val, "providers") == 0) {
+            st->in_providers = 1;
+            st->has_pending_key = 0;
+        }
+    } else if ((st->in_models || st->in_providers) && st->item_depth == 1 &&
+               st->nested == 0 && val) {
+        if (!st->has_pending_key) {
+            AIRY_STRNCPY_TERM(st->pending_key, val, sizeof(st->pending_key));
+            st->has_pending_key = 1;
+        } else {
+            if (st->in_models)
+                yaml_map_add(&st->item_map, st->pending_key, val);
+            else
+                yaml_map_add(&st->prov_map, st->pending_key, val);
+            st->has_pending_key = 0;
+        }
+    } else if (st->in_providers && st->item_depth == 1 && st->nested >= 1 && val &&
+               st->has_pending_key && strcmp(st->pending_key, "models") == 0) {
+        if (st->cur_p.model_count < 64)
+            st->cur_p.model_names[st->cur_p.model_count++] = AIRY_STRDUP(val);
+    }
+}
+
+static void svc_yaml_event_loop(yaml_parser_t *parser, svc_yaml_state_t *st, int *done)
+{
+    yaml_event_t event;
+    while (!*done) {
+        if (!yaml_parser_parse(parser, &event))
             break;
-
         switch (event.type) {
         case YAML_STREAM_END_EVENT:
-            done = 1;
+            *done = 1;
             break;
-
         case YAML_MAPPING_START_EVENT:
-            map_depth++;
-            if (in_models || in_providers) {
-                item_depth++;
-                if (item_depth == 1) {
-
-                    nested = 0;
-                    has_pending_key = 0;
-                    if (in_providers) {
-                        yaml_map_free(&prov_map);
-                        yaml_map_init(&prov_map);
-                        __builtin_memset(&cur_p, 0, sizeof(cur_p));
-                    } else {
-                        yaml_map_free(&item_map);
-                        yaml_map_init(&item_map);
-                    }
-                } else {
-
-                    nested++;
-                    has_pending_key = 0;
-                }
-            }
+            svc_yaml_handle_mapping_start(st);
             break;
-
         case YAML_MAPPING_END_EVENT:
-            if (in_models || in_providers) {
-                if (item_depth == 1 && nested == 0) {
-                    if (in_providers) {
-
-                        const char *pn = yaml_map_get(&prov_map, "name");
-                        if (pn && pn[0]) {
-                            AIRY_STRNCPY_TERM(cur_p.name, pn, sizeof(cur_p.name));
-                            const char *pke = yaml_map_get(&prov_map, "api_key_env");
-                            if (pke)
-                                AIRY_STRNCPY_TERM(cur_p.api_key_env, pke,
-                                                  sizeof(cur_p.api_key_env));
-                            const char *pb = yaml_map_get(&prov_map, "base_url");
-                            if (pb)
-                                AIRY_STRNCPY_TERM(cur_p.base_url, pb, sizeof(cur_p.base_url));
-                            const char *pt = yaml_map_get(&prov_map, "timeout_sec");
-                            if (pt)
-                                cur_p.timeout_sec = (int)strtol(pt, NULL, 10);
-                            const char *pr = yaml_map_get(&prov_map, "max_retries");
-                            if (pr)
-                                cur_p.max_retries = (int)strtol(pr, NULL, 10);
-                            if (pcfg_count < 16) {
-                                pcfg[pcfg_count++] = cur_p;
-                            } else {
-                                for (size_t k = 0; k < cur_p.model_count; ++k)
-                                    AIRY_FREE(cur_p.model_names[k]);
-                            }
-                        } else {
-                            for (size_t k = 0; k < cur_p.model_count; ++k)
-                                AIRY_FREE(cur_p.model_names[k]);
-                        }
-                    } else if (model_count < 64) {
-
-                        const char *n = yaml_map_get(&item_map, "name");
-                        const char *p = yaml_map_get(&item_map, "provider");
-                        const char *e = yaml_map_get(&item_map, "api_key_env");
-                        const char *ep = yaml_map_get(&item_map, "endpoint");
-                        const char *t = yaml_map_get(&item_map, "timeout_sec");
-                        const char *r = yaml_map_get(&item_map, "max_retries");
-
-                        if (n && p) {
-                            __builtin_memset(&models[model_count], 0, sizeof(model_entry_t));
-                            AIRY_STRNCPY_TERM(models[model_count].name, n,
-                                              sizeof(models[model_count].name));
-                            AIRY_STRNCPY_TERM(models[model_count].provider, p,
-                                              sizeof(models[model_count].provider));
-                            if (e)
-                                AIRY_STRNCPY_TERM(models[model_count].api_key_env, e,
-                                                  sizeof(models[model_count].api_key_env));
-                            if (ep)
-                                AIRY_STRNCPY_TERM(models[model_count].endpoint, ep,
-                                                  sizeof(models[model_count].endpoint));
-                            if (t)
-                                models[model_count].timeout_sec = (int)strtol(t, NULL, 10);
-                            if (r)
-                                models[model_count].max_retries = (int)strtol(r, NULL, 10);
-                            model_count++;
-                        }
-                    }
-                }
-                item_depth--;
-                if (item_depth == 0) {
-                    nested = 0;
-                } else if (nested > 0) {
-                    nested--;
-                }
-            }
-            map_depth--;
+            svc_yaml_handle_mapping_end(st);
             break;
-
         case YAML_SEQUENCE_START_EVENT:
-            seq_depth++;
-            if ((in_models || in_providers) && item_depth >= 1)
-                nested++;
+            st->seq_depth++;
+            if ((st->in_models || st->in_providers) && st->item_depth >= 1)
+                st->nested++;
             break;
-
         case YAML_SEQUENCE_END_EVENT:
-            seq_depth--;
-            if ((in_models || in_providers) && item_depth >= 1 && nested > 0)
-                nested--;
-            if (in_models && item_depth == 0 && seq_depth <= 1)
-                in_models = 0;
-            if (in_providers && item_depth == 0 && seq_depth <= 1)
-                in_providers = 0;
-            if (in_providers && item_depth == 1 && has_pending_key &&
-                strcmp(pending_key, "models") == 0)
-                has_pending_key = 0;
+            svc_yaml_handle_sequence_end(st);
             break;
-
-        case YAML_SCALAR_EVENT: {
-            const char *val = (const char *)event.data.scalar.value;
-            if (!in_models && !in_providers && map_depth == 1 && val) {
-
-                if (strcmp(val, "models") == 0) {
-                    in_models = 1;
-                    has_pending_key = 0;
-                } else if (strcmp(val, "providers") == 0) {
-                    in_providers = 1;
-                    has_pending_key = 0;
-                }
-            } else if ((in_models || in_providers) && item_depth == 1 && nested == 0 && val) {
-
-                if (!has_pending_key) {
-                    AIRY_STRNCPY_TERM(pending_key, val, sizeof(pending_key));
-                    has_pending_key = 1;
-                } else {
-                    if (in_models)
-                        yaml_map_add(&item_map, pending_key, val);
-                    else
-                        yaml_map_add(&prov_map, pending_key, val);
-                    has_pending_key = 0;
-                }
-            } else if (in_providers && item_depth == 1 && nested >= 1 && val && has_pending_key &&
-                       strcmp(pending_key, "models") == 0) {
-
-                if (cur_p.model_count < 64)
-                    cur_p.model_names[cur_p.model_count++] = AIRY_STRDUP(val);
-            }
-
+        case YAML_SCALAR_EVENT:
+            svc_yaml_handle_scalar(st, (const char *)event.data.scalar.value);
             break;
-        }
         default:
-
             break;
         }
         yaml_event_delete(&event);
     }
+}
 
-    yaml_parser_delete(&parser);
-    fclose(f);
-    yaml_map_free(&item_map);
-    yaml_map_free(&prov_map);
-
-    /* Simplified llm section expansion: when the top-level llm: mapping
-     * exists and model is non-empty, it takes precedence over the full
-     * providers/models (the minimal config entry for ordinary users; api_format
-     * supports only the openai/anthropic adapters). Advanced users delete the
-     * llm section to use the full schema; when both coexist, the llm section
-     * wins (ordinary users need not understand full providers/models).
-     * Must free the strdup'd model names of the parsed providers section to
-     * avoid leaks after overwriting. */
-    {
-        svc_model_llm_config_t llm_cfg;
-        __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
-        if (svc_model_defaults_llm_from_yaml(config_path, &llm_cfg) == 0 && llm_cfg.model[0]) {
-            for (size_t pi = 0; pi < pcfg_count; ++pi) {
-                for (size_t k = 0; k < pcfg[pi].model_count; ++k)
-                    AIRY_FREE(pcfg[pi].model_names[k]);
-                pcfg[pi].model_count = 0;
-            }
-            pcfg_count = 0;
-            const char *adapter = "openai";
-            if (strcasecmp(llm_cfg.api_format, "anthropic") == 0)
-                adapter = "anthropic";
-            __builtin_memset(&models[0], 0, sizeof(models[0]));
-            AIRY_STRNCPY_TERM(models[0].name, llm_cfg.model, sizeof(models[0].name));
-            AIRY_STRNCPY_TERM(models[0].provider, adapter, sizeof(models[0].provider));
-            if (llm_cfg.api_key_env[0])
-                AIRY_STRNCPY_TERM(models[0].api_key_env, llm_cfg.api_key_env,
-                                  sizeof(models[0].api_key_env));
-            if (llm_cfg.base_url[0]) {
-
-                if (strcmp(adapter, "anthropic") == 0)
-                    snprintf(models[0].endpoint, sizeof(models[0].endpoint), "%s/messages",
-                             llm_cfg.base_url);
-                else
-                    snprintf(models[0].endpoint, sizeof(models[0].endpoint), "%s/chat/completions",
-                             llm_cfg.base_url);
-            }
-            model_count = 1;
-            SVC_LOG_INFO("C-L02: SVC: expanded simplified llm section "
-                         "(format=%s base_url=%s model=%s)",
-                         llm_cfg.api_format[0] ? llm_cfg.api_format : "openai",
-                         llm_cfg.base_url[0] ? llm_cfg.base_url : "(default)", llm_cfg.model);
+/* Expand the simplified top-level llm: section: when it exists it takes
+ * precedence over the full providers/models schema (see the comment in the
+ * caller about the llm-wins precedence rule). */
+static void svc_yaml_expand_llm(svc_yaml_state_t *st, const char *config_path)
+{
+    svc_model_llm_config_t llm_cfg;
+    __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
+    if (svc_model_defaults_llm_from_yaml(config_path, &llm_cfg) == 0 && llm_cfg.model[0]) {
+        for (size_t pi = 0; pi < st->pcfg_count; ++pi) {
+            for (size_t k = 0; k < st->pcfg[pi].model_count; ++k)
+                AIRY_FREE(st->pcfg[pi].model_names[k]);
+            st->pcfg[pi].model_count = 0;
         }
+        st->pcfg_count = 0;
+        const char *adapter = "openai";
+        if (strcasecmp(llm_cfg.api_format, "anthropic") == 0)
+            adapter = "anthropic";
+        __builtin_memset(&st->models[0], 0, sizeof(st->models[0]));
+        AIRY_STRNCPY_TERM(st->models[0].name, llm_cfg.model, sizeof(st->models[0].name));
+        AIRY_STRNCPY_TERM(st->models[0].provider, adapter, sizeof(st->models[0].provider));
+        if (llm_cfg.api_key_env[0])
+            AIRY_STRNCPY_TERM(st->models[0].api_key_env, llm_cfg.api_key_env,
+                              sizeof(st->models[0].api_key_env));
+        if (llm_cfg.base_url[0]) {
+            if (strcmp(adapter, "anthropic") == 0)
+                snprintf(st->models[0].endpoint, sizeof(st->models[0].endpoint), "%s/messages",
+                         llm_cfg.base_url);
+            else
+                snprintf(st->models[0].endpoint, sizeof(st->models[0].endpoint),
+                         "%s/chat/completions", llm_cfg.base_url);
+        }
+        st->model_count = 1;
+        SVC_LOG_INFO("C-L02: SVC: expanded simplified llm section "
+                     "(format=%s base_url=%s model=%s)",
+                     llm_cfg.api_format[0] ? llm_cfg.api_format : "openai",
+                     llm_cfg.base_url[0] ? llm_cfg.base_url : "(default)", llm_cfg.model);
     }
-    if (model_count == 0 && pcfg_count == 0) {
-        SVC_LOG_WARN(
-            "C-L02: SVC: MODEL-CONFIG-WARN no models found, STACK: svc_load_model_config_yaml");
-        return 0;
-    }
+}
 
-    typedef struct {
-        char name[64];
-        char api_key_env[128];
-        char base_url[512];
-        int timeout_sec;
-        int max_retries;
-        char *model_names[64];
-        size_t model_count;
-    } provider_agg_t;
-
-    provider_agg_t provs[16];
-    size_t prov_count = 0;
-
-    for (size_t i = 0; i < model_count; ++i) {
+/* Aggregate providers from the models list: first model of a provider seeds
+ * the provider record, later models append to its model_names. */
+static void svc_yaml_aggregate_providers(svc_yaml_state_t *st, provider_agg_t *provs,
+                                         size_t *prov_count)
+{
+    for (size_t i = 0; i < st->model_count; ++i) {
         size_t j = 0;
-        for (; j < prov_count; ++j) {
-            if (strcmp(provs[j].name, models[i].provider) == 0)
+        for (; j < *prov_count; ++j) {
+            if (strcmp(provs[j].name, st->models[i].provider) == 0)
                 break;
         }
-        if (j == prov_count) {
-            if (prov_count >= 16)
+        if (j == *prov_count) {
+            if (*prov_count >= 16)
                 break;
-            __builtin_memset(&provs[prov_count], 0, sizeof(provider_agg_t));
-            AIRY_STRNCPY_TERM(provs[prov_count].name, models[i].provider,
-                              sizeof(provs[prov_count].name));
-            if (models[i].api_key_env[0])
-                AIRY_STRNCPY_TERM(provs[prov_count].api_key_env, models[i].api_key_env,
-                                  sizeof(provs[prov_count].api_key_env));
-            prov_count++;
+            __builtin_memset(&provs[*prov_count], 0, sizeof(provider_agg_t));
+            AIRY_STRNCPY_TERM(provs[*prov_count].name, st->models[i].provider,
+                              sizeof(provs[*prov_count].name));
+            if (st->models[i].api_key_env[0])
+                AIRY_STRNCPY_TERM(provs[*prov_count].api_key_env, st->models[i].api_key_env,
+                                  sizeof(provs[*prov_count].api_key_env));
+            (*prov_count)++;
         }
         if (provs[j].model_count < 64) {
-            provs[j].model_names[provs[j].model_count++] = AIRY_STRDUP(models[i].name);
+            provs[j].model_names[provs[j].model_count++] = AIRY_STRDUP(st->models[i].name);
         }
-        if (!provs[j].base_url[0] && models[i].endpoint[0]) {
-            /* The model's endpoint looks like "https://..." (the provider side
-             * appends /chat/completions or /messages), so strip the suffix to
-             * avoid duplicated path segments causing 404/empty responses. */
-            const char *suffix = strstr(models[i].endpoint, "/chat/completions");
+        if (!provs[j].base_url[0] && st->models[i].endpoint[0]) {
+            const char *suffix = strstr(st->models[i].endpoint, "/chat/completions");
             if (!suffix)
-                suffix = strstr(models[i].endpoint, "/messages");
-            if (suffix && suffix != models[i].endpoint) {
-                size_t base_len = (size_t)(suffix - models[i].endpoint);
+                suffix = strstr(st->models[i].endpoint, "/messages");
+            if (suffix && suffix != st->models[i].endpoint) {
+                size_t base_len = (size_t)(suffix - st->models[i].endpoint);
                 if (base_len < sizeof(provs[j].base_url)) {
-                    __builtin_memcpy(provs[j].base_url, models[i].endpoint, base_len);
+                    __builtin_memcpy(provs[j].base_url, st->models[i].endpoint, base_len);
                     provs[j].base_url[base_len] = '\0';
                 }
             } else {
-                AIRY_STRNCPY_TERM(provs[j].base_url, models[i].endpoint, sizeof(provs[j].base_url));
+                AIRY_STRNCPY_TERM(provs[j].base_url, st->models[i].endpoint,
+                                  sizeof(provs[j].base_url));
             }
         }
-        if (models[i].timeout_sec > provs[j].timeout_sec)
-            provs[j].timeout_sec = models[i].timeout_sec;
-        if (models[i].max_retries > provs[j].max_retries)
-            provs[j].max_retries = models[i].max_retries;
+        if (st->models[i].timeout_sec > provs[j].timeout_sec)
+            provs[j].timeout_sec = st->models[i].timeout_sec;
+        if (st->models[i].max_retries > provs[j].max_retries)
+            provs[j].max_retries = st->models[i].max_retries;
     }
+}
 
-    /* P0.20: merge the providers-section parse results (the providers section
-     * is the authoritative base_url/api_key_env source). Previously the YAML
-     * loader only aggregated providers by the top-level models list; the
-     * providers section (containing base_url of OpenAI-compatible vendors
-     * such as glm/qwen/moonshot) was ignored entirely. */
-    for (size_t pi = 0; pi < pcfg_count; ++pi) {
+/* Merge the providers-section parse results (authoritative base_url/
+ * api_key_env source) into the aggregated provider records. */
+static void svc_yaml_merge_provider_cfgs(svc_yaml_state_t *st, provider_agg_t *provs,
+                                         size_t *prov_count)
+{
+    for (size_t pi = 0; pi < st->pcfg_count; ++pi) {
         size_t j = 0;
-        for (; j < prov_count; ++j) {
-            if (strcmp(provs[j].name, pcfg[pi].name) == 0)
+        for (; j < *prov_count; ++j) {
+            if (strcmp(provs[j].name, st->pcfg[pi].name) == 0)
                 break;
         }
-        if (j == prov_count) {
-            if (prov_count >= 16) {
-                for (size_t k = 0; k < pcfg[pi].model_count; ++k)
-                    AIRY_FREE(pcfg[pi].model_names[k]);
+        if (j == *prov_count) {
+            if (*prov_count >= 16) {
+                for (size_t k = 0; k < st->pcfg[pi].model_count; ++k)
+                    AIRY_FREE(st->pcfg[pi].model_names[k]);
                 continue;
             }
-            __builtin_memset(&provs[prov_count], 0, sizeof(provider_agg_t));
-            AIRY_STRNCPY_TERM(provs[prov_count].name, pcfg[pi].name,
-                              sizeof(provs[prov_count].name));
-            prov_count++;
+            __builtin_memset(&provs[*prov_count], 0, sizeof(provider_agg_t));
+            AIRY_STRNCPY_TERM(provs[*prov_count].name, st->pcfg[pi].name,
+                              sizeof(provs[*prov_count].name));
+            (*prov_count)++;
         }
 
-        if (pcfg[pi].base_url[0])
-            AIRY_STRNCPY_TERM(provs[j].base_url, pcfg[pi].base_url, sizeof(provs[j].base_url));
-        if (pcfg[pi].api_key_env[0])
-            AIRY_STRNCPY_TERM(provs[j].api_key_env, pcfg[pi].api_key_env,
+        if (st->pcfg[pi].base_url[0])
+            AIRY_STRNCPY_TERM(provs[j].base_url, st->pcfg[pi].base_url,
+                              sizeof(provs[j].base_url));
+        if (st->pcfg[pi].api_key_env[0])
+            AIRY_STRNCPY_TERM(provs[j].api_key_env, st->pcfg[pi].api_key_env,
                               sizeof(provs[j].api_key_env));
-        if (pcfg[pi].timeout_sec > provs[j].timeout_sec)
-            provs[j].timeout_sec = pcfg[pi].timeout_sec;
-        if (pcfg[pi].max_retries > provs[j].max_retries)
-            provs[j].max_retries = pcfg[pi].max_retries;
+        if (st->pcfg[pi].timeout_sec > provs[j].timeout_sec)
+            provs[j].timeout_sec = st->pcfg[pi].timeout_sec;
+        if (st->pcfg[pi].max_retries > provs[j].max_retries)
+            provs[j].max_retries = st->pcfg[pi].max_retries;
 
-        for (size_t k = 0; k < pcfg[pi].model_count; ++k) {
+        for (size_t k = 0; k < st->pcfg[pi].model_count; ++k) {
             int dup = 0;
             for (size_t m = 0; m < provs[j].model_count; ++m) {
-                if (strcmp(provs[j].model_names[m], pcfg[pi].model_names[k]) == 0) {
+                if (strcmp(provs[j].model_names[m], st->pcfg[pi].model_names[k]) == 0) {
                     dup = 1;
                     break;
                 }
             }
             if (dup) {
-                AIRY_FREE(pcfg[pi].model_names[k]);
+                AIRY_FREE(st->pcfg[pi].model_names[k]);
             } else if (provs[j].model_count < 64) {
-                provs[j].model_names[provs[j].model_count++] = pcfg[pi].model_names[k];
+                provs[j].model_names[provs[j].model_count++] = st->pcfg[pi].model_names[k];
             } else {
-                AIRY_FREE(pcfg[pi].model_names[k]);
+                AIRY_FREE(st->pcfg[pi].model_names[k]);
             }
         }
     }
+}
 
+static int svc_yaml_build_result(provider_agg_t *provs, size_t prov_count,
+                                 provider_config_t **out_providers, size_t *out_count)
+{
     provider_config_t *result =
         (provider_config_t *)AIRY_CALLOC(prov_count + 1, sizeof(provider_config_t));
     if (!result) {
@@ -793,10 +771,68 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
 
     *out_providers = result;
     *out_count = prov_count;
-    SVC_LOG_INFO(
-        "C-L02: SVC: MODEL-CONFIG-OK YAML providers=%zu, STACK: svc_load_model_config_yaml",
-        prov_count);
     return AIRY_OK;
+}
+
+int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_providers,
+                               size_t *out_count)
+{
+    if (!config_path || !out_providers || !out_count)
+        return AIRY_ERR_INVALID_PARAM;
+
+    *out_providers = NULL;
+    *out_count = 0;
+
+    FILE *f = fopen(config_path, "rb");
+    if (!f) {
+        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN cannot open model config, STACK: "
+                     "svc_load_model_config_yaml");
+        return 0;
+    }
+
+    yaml_parser_t parser;
+    if (!yaml_parser_initialize(&parser)) {
+        fclose(f);
+        SVC_LOG_WARN(
+            "C-L02: SVC: MODEL-CONFIG-WARN YAML parser init, STACK: svc_load_model_config_yaml");
+        return 0;
+    }
+    yaml_parser_set_input_file(&parser, f);
+
+    svc_yaml_state_t st;
+    __builtin_memset(&st, 0, sizeof(st));
+    yaml_map_init(&st.item_map);
+    yaml_map_init(&st.prov_map);
+    int done = 0;
+    svc_yaml_event_loop(&parser, &st, &done);
+
+    yaml_parser_delete(&parser);
+    fclose(f);
+    yaml_map_free(&st.item_map);
+    yaml_map_free(&st.prov_map);
+
+    /* Simplified llm section expansion: when the top-level llm: mapping
+     * exists and model is non-empty, it takes precedence over the full
+     * providers/models (see svc_yaml_expand_llm). */
+    svc_yaml_expand_llm(&st, config_path);
+    if (st.model_count == 0 && st.pcfg_count == 0) {
+        SVC_LOG_WARN(
+            "C-L02: SVC: MODEL-CONFIG-WARN no models found, STACK: svc_load_model_config_yaml");
+        return 0;
+    }
+
+    provider_agg_t provs[16];
+    size_t prov_count = 0;
+    svc_yaml_aggregate_providers(&st, provs, &prov_count);
+    svc_yaml_merge_provider_cfgs(&st, provs, &prov_count);
+
+    int rc = svc_yaml_build_result(provs, prov_count, out_providers, out_count);
+    if (rc == AIRY_OK) {
+        SVC_LOG_INFO(
+            "C-L02: SVC: MODEL-CONFIG-OK YAML providers=%zu, STACK: svc_load_model_config_yaml",
+            prov_count);
+    }
+    return rc;
 }
 
 #endif /* HAVE_YAML */

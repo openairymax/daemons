@@ -26,6 +26,16 @@
  * DAG task graph execution engine implementation (work-hall mechanism)
  * ============================================================================ */
 
+/* Agent input for a node: the node goal when it carries real intent, else the
+ * graph-level task input. A goal that equals the node id (e.g. "reactive_1_step1")
+ * or is empty is only a plan label, not a task description. */
+static const char *sched_dag_agent_input(const sched_dag_t *dag, const sched_dag_node_t *node)
+{
+    if (node->goal && node->goal[0] && strcmp(node->goal, node->id) != 0)
+        return node->goal;
+    return (dag->input && dag->input[0]) ? dag->input : "";
+}
+
 static int sched_dag_node_ready(const sched_dag_t *dag, size_t idx)
 {
     const sched_dag_node_t *node = dag->nodes[idx];
@@ -413,7 +423,7 @@ static void sched_dag_batch_worker(void *arg)
 
     char *output = NULL;
     int dret = svc->executor ? svc->executor(item->agent_id ? item->agent_id : "coding",
-                                             node->goal ? node->goal : "", &output) :
+                                             sched_dag_agent_input(item->dag, node), &output) :
                                AIRY_ERR_SVC_NOT_READY;
 
     if (svc->mac && node->id) {
@@ -507,7 +517,7 @@ void *sched_dag_worker_thread(void *arg)
             for (size_t i = 0; i < batch_n; i++) {
                 AIRY_STRNCPY_TERM(tasks[i].id, batch[i]->id, sizeof(tasks[i].id));
                 tasks[i].id[sizeof(tasks[i].id) - 1] = '\0';
-                tasks[i].input_json = batch[i]->goal;
+                tasks[i].input_json = (char *)sched_dag_agent_input(batch_dags[i], batch[i]);
                 SVC_LOG_INFO("sched: DAG node dispatch (parallel): %s/%s role=%s deps=%zu",
                              batch_dags[i]->dag_id, batch[i]->id,
                              batch[i]->role ? batch[i]->role : "coding", batch[i]->dep_count);
@@ -581,7 +591,7 @@ void *sched_dag_worker_thread(void *arg)
         node->started_at_ms = sched_now_ms();
 
         const char *role = node->role ? node->role : "coding";
-        const char *goal = node->goal ? node->goal : "";
+        const char *goal = sched_dag_agent_input(dag, node);
         SVC_LOG_INFO("sched: DAG node dispatch: %s/%s role=%s deps=%zu "
                      "(wait since dag create=%llu ms, executor=%s)",
                      dag->dag_id, node->id, role, node->dep_count,
@@ -666,6 +676,7 @@ int sched_service_submit_dag(sched_service_t *service, const char *dag_json, cha
             AIRY_FREE(node);
         }
         AIRY_FREE(dag->name);
+        AIRY_FREE(dag->input);
         AIRY_FREE(dag);
         cJSON_Delete(root);
         return AIRY_ERR_OUT_OF_MEMORY;

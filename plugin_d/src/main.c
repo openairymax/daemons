@@ -291,7 +291,21 @@ static void handle_get_stats(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *name = cJSON_GetObjectItem(params, "name");
     if (!name || !cJSON_IsString(name)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing name string", id);
+        /* No name: return daemon-level aggregate stats, matching the other
+         * daemons' get_stats convention used by the CLI /stats command. */
+        size_t count = 0;
+        uint64_t loads = 0, errors = 0, memory = 0;
+        if (plugin_service_get_daemon_stats(&count, &loads, &errors, &memory) != 0) {
+            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Aggregate stats failed", id);
+            return;
+        }
+        cJSON *result = cJSON_CreateObject();
+        cJSON_AddStringToObject(result, "daemon", "plugin_d");
+        cJSON_AddNumberToObject(result, "plugins", (double)count);
+        cJSON_AddNumberToObject(result, "load_total", (double)loads);
+        cJSON_AddNumberToObject(result, "error_total", (double)errors);
+        cJSON_AddNumberToObject(result, "memory_bytes", (double)memory);
+        JSONRPC_SEND_SUCCESS(client_fd, result, id);
         return;
     }
 

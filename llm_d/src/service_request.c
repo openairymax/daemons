@@ -39,7 +39,9 @@ static char *make_cache_key(const llm_request_config_t *manager)
     for (size_t i = 0; i < manager->message_count; ++i) {
         const char *role = manager->messages[i].role ? manager->messages[i].role : "";
         const char *content = manager->messages[i].content ? manager->messages[i].content : "";
-        len += strlen(role) + 1 + strlen(content) + 1;
+        const char *reasoning =
+            manager->messages[i].reasoning_content ? manager->messages[i].reasoning_content : "";
+        len += strlen(role) + 1 + strlen(content) + 1 + strlen(reasoning) + 1;
     }
 
     char *key = (char *)AIRY_MALLOC(len);
@@ -63,8 +65,10 @@ static char *make_cache_key(const llm_request_config_t *manager)
     for (size_t i = 0; i < manager->message_count; ++i) {
         const char *role = manager->messages[i].role ? manager->messages[i].role : "";
         const char *content = manager->messages[i].content ? manager->messages[i].content : "";
+        const char *reasoning =
+            manager->messages[i].reasoning_content ? manager->messages[i].reasoning_content : "";
         size_t remaining = (pos < len) ? (len - pos) : 0;
-        written = (size_t)snprintf(p + pos, remaining, "%s:%s|", role, content);
+        written = (size_t)snprintf(p + pos, remaining, "%s:%s:%s|", role, content, reasoning);
         if (written < remaining) {
             pos += written;
         } else {
