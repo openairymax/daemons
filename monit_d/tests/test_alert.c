@@ -122,6 +122,10 @@ static void test_alert_get_alerts(void)
 
     if (alerts) {
         for (size_t i = 0; i < count; i++) {
+            AIRY_FREE(alerts[i]->alert_id);
+            AIRY_FREE(alerts[i]->message);
+            AIRY_FREE(alerts[i]->service_name);
+            AIRY_FREE(alerts[i]->resource_id);
             AIRY_FREE(alerts[i]);
         }
         AIRY_FREE(alerts);

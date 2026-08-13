@@ -82,6 +82,11 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
 
 int provider_parse_openai_response(const char *body, llm_response_t **out);
 
+/* Grow-on-demand string append used by the streaming accumulators (content
+ * and reasoning_content). Returns the (possibly reallocated) buffer; on
+ * allocation failure returns NULL and leaves the input buffer untouched. */
+char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text);
+
 
 typedef int (*provider_stream_chunk_cb_t)(const char *data_line, void *user_data);
 

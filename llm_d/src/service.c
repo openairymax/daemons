@@ -368,6 +368,7 @@ void llm_response_free(llm_response_t *resp)
         for (size_t i = 0; i < resp->choice_count; i++) {
             AIRY_FREE((void *)resp->choices[i].role);
             AIRY_FREE((void *)resp->choices[i].content);
+            AIRY_FREE((void *)resp->choices[i].reasoning_content);
             AIRY_FREE((void *)resp->choices[i].tool_call_id);
             AIRY_FREE((void *)resp->choices[i].tool_calls_json);
         }

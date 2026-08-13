@@ -392,6 +392,9 @@ typedef struct {
     char *acc_content;
     size_t acc_cap;
     size_t acc_len;
+    char *acc_reasoning;
+    size_t acc_reasoning_cap;
+    size_t acc_reasoning_len;
     char *resp_id;
     char *resp_model;
     uint64_t resp_created;
@@ -431,29 +434,29 @@ static int oai_stream_on_chunk(const char *json_line, void *userdata)
             cJSON *content = cJSON_GetObjectItem(delta, "content");
             if (cJSON_IsString(content) && content->valuestring) {
                 const char *text = content->valuestring;
-                size_t tlen = strlen(text);
 
                 if (acc->user_cb) {
                     acc->user_cb(text, acc->user_data);
                 }
 
-                if (tlen > 0) {
-                    size_t needed = acc->acc_len + tlen + 1;
-                    if (needed > acc->acc_cap) {
-                        size_t new_cap = acc->acc_cap * 2;
-                        while (new_cap < needed)
-                            new_cap *= 2;
-                        char *ptr = (char *)AIRY_REALLOC(acc->acc_content, new_cap);
-                        if (ptr) {
-                            acc->acc_content = ptr;
-                            acc->acc_cap = new_cap;
-                        }
-                    }
-                    if (acc->acc_content && acc->acc_len + tlen < acc->acc_cap) {
-                        __builtin_memcpy(acc->acc_content + acc->acc_len, text, tlen);
-                        acc->acc_len += tlen;
-                        acc->acc_content[acc->acc_len] = '\0';
-                    }
+                char *grown =
+                    provider_buf_append(acc->acc_content, &acc->acc_cap, &acc->acc_len, text);
+                if (grown) {
+                    acc->acc_content = grown;
+                }
+            }
+
+            /* Reasoning trace arrives in the same delta stream (DeepSeek/
+             * Kimi); accumulate it out-of-band (not forwarded to user_cb).
+             * It must survive to the assembled response so the client can
+             * echo it back on the next tool-loop turn. */
+            cJSON *reasoning = cJSON_GetObjectItem(delta, "reasoning_content");
+            if (cJSON_IsString(reasoning) && reasoning->valuestring) {
+                char *grown =
+                    provider_buf_append(acc->acc_reasoning, &acc->acc_reasoning_cap,
+                                        &acc->acc_reasoning_len, reasoning->valuestring);
+                if (grown) {
+                    acc->acc_reasoning = grown;
                 }
             }
         }
@@ -495,6 +498,8 @@ static llm_response_t *oai_build_stream_response(oai_stream_acc_t *acc)
         resp->choices[0].role = AIRY_STRDUP("assistant");
         resp->choices[0].content = acc->acc_content;
         acc->acc_content = NULL;
+        resp->choices[0].reasoning_content = acc->acc_reasoning;
+        acc->acc_reasoning = NULL;
     } else {
         resp->choice_count = 0;
     }
@@ -573,6 +578,7 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
                           model, http_code);
         }
         AIRY_FREE(acc.acc_content);
+        AIRY_FREE(acc.acc_reasoning);
         AIRY_FREE(acc.resp_id);
         AIRY_FREE(acc.resp_model);
         AIRY_FREE(acc.finish_reason);
@@ -581,6 +587,7 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
 
     llm_response_t *resp = oai_build_stream_response(&acc);
     AIRY_FREE(acc.acc_content);
+    AIRY_FREE(acc.acc_reasoning);
     AIRY_FREE(acc.resp_id);
     AIRY_FREE(acc.resp_model);
     AIRY_FREE(acc.finish_reason);

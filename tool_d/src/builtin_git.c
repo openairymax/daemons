@@ -164,9 +164,9 @@ static int builtin_git_run(char *const argv[], const char *stdin_data, size_t st
             break;
         }
 
-        struct pollfd pfd = {.fd = outfd[0], .events = POLLIN};
+        struct pollfd pfd = {.fd = outfd[0], .events = POLLIN | POLLHUP};
         int pr = poll(&pfd, 1, 100);
-        if (pr > 0 && (pfd.revents & POLLIN)) {
+        if (pr > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
             char chunk[4096];
             ssize_t n = read(outfd[0], chunk, sizeof(chunk));
             if (n > 0) {
@@ -192,6 +192,10 @@ static int builtin_git_run(char *const argv[], const char *stdin_data, size_t st
                 }
                 __builtin_memcpy(buf + len, chunk, (size_t)n);
                 len += (size_t)n;
+            } else if (n == 0) {
+                /* Child closed its output but is still alive; avoid
+                 * busy-spinning on immediate POLLHUP until the deadline. */
+                usleep(10000);
             }
         }
     }
@@ -201,7 +205,23 @@ static int builtin_git_run(char *const argv[], const char *stdin_data, size_t st
         waitpid(pid, NULL, 0);
     }
 
+    /* Flush remaining output with a bounded drain: a descendant holding
+     * the pipe write end must not block the daemon forever. */
+    clock_gettime(CLOCK_MONOTONIC, &ts_now);
+    uint64_t drain_deadline_ms =
+        (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 + BUILTIN_OUTPUT_DRAIN_MS;
     for (;;) {
+        clock_gettime(CLOCK_MONOTONIC, &ts_now);
+        uint64_t now_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000;
+        if (now_ms >= drain_deadline_ms)
+            break;
+
+        struct pollfd pfd = {.fd = outfd[0], .events = POLLIN | POLLHUP};
+        int pr = poll(&pfd, 1, 100);
+        if (pr <= 0)
+            continue;
+        if (!(pfd.revents & (POLLIN | POLLHUP)))
+            break;
         char chunk[4096];
         ssize_t n = read(outfd[0], chunk, sizeof(chunk));
         if (n <= 0)

@@ -183,6 +183,7 @@ int sched_service_destroy(sched_service_t *service)
         }
         AIRY_FREE(dag->dag_id);
         AIRY_FREE(dag->name);
+        AIRY_FREE(dag->input);
         AIRY_FREE(dag);
     }
     service->dag_count = 0;

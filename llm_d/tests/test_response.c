@@ -160,6 +160,40 @@ static void test_response_null_handling(void)
     printf("    PASSED\n");
 }
 
+static void test_response_reasoning_roundtrip(void)
+{
+    printf("  test_response_reasoning_roundtrip...\n");
+
+    llm_response_t *resp = (llm_response_t *)calloc(1, sizeof(llm_response_t));
+    assert(resp != NULL);
+    resp->id = strdup("chatcmpl-reason-1");
+    resp->model = strdup("deepseek-reasoner");
+    resp->choice_count = 1;
+    resp->choices = (llm_message_t *)calloc(1, sizeof(llm_message_t));
+    assert(resp->choices != NULL);
+    resp->choices[0].role = strdup("assistant");
+    resp->choices[0].content = strdup("The answer is 42.");
+    resp->choices[0].reasoning_content = strdup("Let me verify: 6*7 = 42. Confirmed.");
+
+    char *json = response_to_json(resp);
+    assert(json != NULL);
+    assert(strstr(json, "reasoning_content") != NULL);
+    assert(strstr(json, "Let me verify: 6*7 = 42. Confirmed.") != NULL);
+
+    llm_response_t *parsed = response_from_json(json);
+    assert(parsed != NULL);
+    assert(parsed->choices != NULL && parsed->choice_count == 1);
+    assert(strcmp(parsed->choices[0].reasoning_content,
+                  "Let me verify: 6*7 = 42. Confirmed.") == 0);
+    assert(strcmp(parsed->choices[0].content, "The answer is 42.") == 0);
+
+    llm_response_free(parsed);
+    free(json);
+    llm_response_free(resp);
+
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=========================================\n");
@@ -171,6 +205,7 @@ int main(void)
     test_response_with_choices();
     test_response_from_json();
     test_response_null_handling();
+    test_response_reasoning_roundtrip();
 
     printf("\nAll LLM response tests PASSED\n");
     return 0;

@@ -28,6 +28,8 @@
 
 #include "daemon_security.h"
 
+#include "yaml_minimal.h"
+
 #ifndef SVC_LOG_SECURITY
 #define SVC_LOG_SECURITY(...) LOG_WARN(__VA_ARGS__)
 #endif
@@ -209,6 +211,20 @@ int daemon_security_init(const daemon_security_config_t *config, airy_err_t *err
     airy_mtx_unlock(&g_security_mutex);
     SVC_LOG_INFO("Daemon security: initialized in production mode (sanitize_level=%d)",
                  g_security_ctx.current_sanitize_level);
+
+    /* Load tool-level permission rules (fail-closed: absent file means no
+     * ACL entries, so every tool permission check denies). */
+    if (config && config->permission_rules_path && config->permission_rules_path[0]) {
+        int lrc = daemon_security_load_rules_file(config->permission_rules_path);
+        if (lrc == AIRY_ERR_NOT_FOUND) {
+            SVC_LOG_WARN("daemon_security: no permission rules file at %s — "
+                         "tool permission checks will deny (fail-closed)",
+                         config->permission_rules_path);
+        } else if (lrc != AIRY_OK) {
+            SVC_LOG_WARN("daemon_security: permission rules load skipped for %s (rc=%d)",
+                         config->permission_rules_path, lrc);
+        }
+    }
     return 0;
 }
 
@@ -848,5 +864,54 @@ int daemon_security_add_acl_rule(const char *agent_id, const char *resource, boo
 
     SVC_LOG_INFO("ACL rule added: agent=%s resource=%s allowed=%d (count=%zu/%d)", agent_id,
                  resource, allowed ? 1 : 0, g_security_ctx.acl_count, MAX_ACL_ENTRIES);
+    return AIRY_OK;
+}
+
+int daemon_security_load_rules_file(const char *path)
+{
+    if (!path || !path[0])
+        return AIRY_ERR_INVALID_PARAM;
+
+    FILE *fp = fopen(path, "r");
+    if (!fp)
+        return AIRY_ERR_NOT_FOUND;
+    fclose(fp);
+
+    yaml_document_t *doc = yaml_create();
+    if (!doc)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    if (yaml_parse_file(doc, path) != 0) {
+        SVC_LOG_ERROR("daemon_security: failed to parse permission rules file: %s (%s)", path,
+                      yaml_get_error(doc) ? yaml_get_error(doc) : "parse error");
+        yaml_destroy(doc);
+        return AIRY_ERR_PARSE_ERROR;
+    }
+
+    struct yaml_node *root = yaml_root(doc);
+    struct yaml_node *rules = root ? yaml_get(root, "rules") : NULL;
+    if (!rules) {
+        SVC_LOG_WARN("daemon_security: permission rules file has no 'rules' section: %s", path);
+        yaml_destroy(doc);
+        return AIRY_ERR_PARSE_ERROR;
+    }
+
+    size_t total = yaml_size(rules);
+    size_t added = 0;
+    for (size_t i = 0; i < total; i++) {
+        struct yaml_node *r = yaml_get_index(rules, i);
+        if (!r)
+            continue;
+        const char *agent = yaml_as_string(yaml_get(r, "agent"), NULL);
+        const char *tool = yaml_as_string(yaml_get(r, "tool"), NULL);
+        const char *effect = yaml_as_string(yaml_get(r, "effect"), "deny");
+        if (!agent || !tool || !effect || agent[0] == '\0' || tool[0] == '\0')
+            continue;
+        bool allowed = (strcmp(effect, "allow") == 0);
+        if (daemon_security_add_acl_rule(agent, tool, allowed) == AIRY_OK)
+            added++;
+    }
+    yaml_destroy(doc);
+
+    SVC_LOG_INFO("daemon_security: loaded %zu/%zu permission rules from %s", added, total, path);
     return AIRY_OK;
 }
