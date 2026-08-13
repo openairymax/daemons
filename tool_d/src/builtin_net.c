@@ -436,14 +436,17 @@ static int web_search_via_bing(const char *query, int max_results, char *buf, si
     char enc[2048];
     builtin_url_encode(query, enc, sizeof(enc));
     char cmd[8192];
+    /* Primary search backend. Bing answers fast on most networks, so it is
+     * tried first; the tight --max-time keeps the whole IPC round trip
+     * inside the agent's 30s timeout even when the endpoint is unreachable. */
     snprintf(cmd, sizeof(cmd),
-             "curl -sSL --max-time 30 -A \"Mozilla/5.0 (compatible; AirymaxRT/0.1.1 "
+             "curl -sSL --max-time 20 -A \"Mozilla/5.0 (compatible; AirymaxRT/0.1.1 "
              "web_search)\" 'https://www.bing.com/search?q=%s'",
              enc);
     char *out = NULL;
     int exit_code = -1;
 
-    if (builtin_shell_run(cmd, &out, &exit_code, 45000, NULL, NULL) != 0 || !out)
+    if (builtin_shell_run(cmd, &out, &exit_code, 25000, NULL, NULL) != 0 || !out)
         return -1;
     if (exit_code != 0 || strstr(out, "command not found")) {
         AIRY_FREE(out);
@@ -481,19 +484,25 @@ int web_search_tool(const char *params_json, tool_result_t *res)
     size_t buf_len = 0;
     int count = 0;
 
-    {
+    /* Primary path: Bing (fast on most networks), then DuckDuckGo as a
+     * fallback for networks where Bing is blocked. Each endpoint is given a
+     * tight --max-time so an unreachable search provider cannot stall the
+     * IPC round trip beyond the agent's 30s timeout. */
+    if (web_search_via_bing(q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len,
+                            &count) != 0 ||
+        count == 0) {
         char enc[2048];
         builtin_url_encode(q->valuestring, enc, sizeof(enc));
         char cmd[8192];
         snprintf(cmd, sizeof(cmd),
-                 "curl -sSL --max-time 30 -A \"Mozilla/5.0 (compatible; "
+                 "curl -sSL --max-time 15 -A \"Mozilla/5.0 (compatible; "
                  "AirymaxRT/0.1.1 web_search)\" "
                  "'https://html.duckduckgo.com/html/?q=%s'",
                  enc);
         char *out = NULL;
         int exit_code = -1;
 
-        int curl_ok = (builtin_shell_run(cmd, &out, &exit_code, 45000, NULL, NULL) == 0 && out &&
+        int curl_ok = (builtin_shell_run(cmd, &out, &exit_code, 20000, NULL, NULL) == 0 && out &&
                        exit_code == 0 && !strstr(out, "command not found"));
         if (curl_ok) {
             web_search_extract(out, "class=\"result__a\" href=\"([^\"]+)\"[^>]*>([^<]+)</a>",
@@ -505,12 +514,8 @@ int web_search_tool(const char *params_json, tool_result_t *res)
     }
 
     if (count == 0) {
-        web_search_via_bing(q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len, &count);
-    }
-
-    if (count == 0) {
         char msg[512];
-        snprintf(msg, sizeof(msg), "No web results for query: %s (DuckDuckGo & Bing unreachable)",
+        snprintf(msg, sizeof(msg), "No web results for query: %s (Bing & DuckDuckGo unreachable)",
                  q->valuestring);
         res->error = AIRY_STRDUP(msg);
         AIRY_FREE(buf);

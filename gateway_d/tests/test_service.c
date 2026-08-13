@@ -30,7 +30,7 @@ static void test_default_config(void)
     assert(config.http.enabled == true);
     assert(config.ws.port == 8081);
     assert(config.ws.enabled == true);
-    assert(config.stdio.enabled == true);
+    assert(config.stdio.enabled == false);
 
     printf("PASSED\n");
 }

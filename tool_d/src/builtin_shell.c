@@ -134,9 +134,9 @@ int builtin_shell_run(const char *cmd, char **out, int *exit_code, uint32_t time
             break;
         }
 
-        struct pollfd pfd = {.fd = pipefd[0], .events = POLLIN};
+        struct pollfd pfd = {.fd = pipefd[0], .events = POLLIN | POLLHUP};
         int pr = poll(&pfd, 1, 100);
-        if (pr > 0 && (pfd.revents & POLLIN)) {
+        if (pr > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
             char chunk[4096];
             ssize_t n = read(pipefd[0], chunk, sizeof(chunk));
             if (n > 0) {
@@ -162,6 +162,11 @@ int builtin_shell_run(const char *cmd, char **out, int *exit_code, uint32_t time
                 }
                 __builtin_memcpy(buf + len, chunk, (size_t)n);
                 len += (size_t)n;
+            } else if (n == 0) {
+                /* Child closed its output but is still alive; poll would
+                 * otherwise return POLLHUP immediately and busy-spin the
+                 * loop until the deadline. */
+                usleep(10000);
             }
         }
     }
@@ -171,7 +176,26 @@ int builtin_shell_run(const char *cmd, char **out, int *exit_code, uint32_t time
         waitpid(pid, NULL, 0);
     }
 
+    /* Flush the remaining output.  A descendant that inherited the pipe
+     * write end (e.g. a backgrounded child) would otherwise keep the
+     * blocking read below open forever and wedge the tool daemon, so the
+     * drain is bounded: once the flush deadline passes the rest of the
+     * output is abandoned. */
+    clock_gettime(CLOCK_MONOTONIC, &ts_now);
+    uint64_t drain_deadline_ms =
+        (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 + BUILTIN_OUTPUT_DRAIN_MS;
     for (;;) {
+        clock_gettime(CLOCK_MONOTONIC, &ts_now);
+        uint64_t now_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000;
+        if (now_ms >= drain_deadline_ms)
+            break;
+
+        struct pollfd pfd = {.fd = pipefd[0], .events = POLLIN | POLLHUP};
+        int pr = poll(&pfd, 1, 100);
+        if (pr <= 0)
+            continue;
+        if (!(pfd.revents & (POLLIN | POLLHUP)))
+            break;
         char chunk[4096];
         ssize_t n = read(pipefd[0], chunk, sizeof(chunk));
         if (n <= 0)

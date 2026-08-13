@@ -60,6 +60,11 @@ char *response_to_json(const llm_response_t *resp)
         cJSON_AddStringToObject(choice, "content",
                                 resp->choices[i].content ? resp->choices[i].content : "");
 
+        if (resp->choices[i].reasoning_content && resp->choices[i].reasoning_content[0]) {
+            cJSON_AddStringToObject(choice, "reasoning_content",
+                                    resp->choices[i].reasoning_content);
+        }
+
         if (resp->choices[i].tool_calls_json && resp->choices[i].tool_calls_json[0]) {
             CJSON_PARSE_GUARD(tc, resp->choices[i].tool_calls_json, {});
             if (cJSON_IsArray(tc)) {
@@ -151,6 +156,10 @@ llm_response_t *response_from_json(const char *json)
                 resp->choices[i].role = AIRY_STRDUP(role->valuestring);
             if (cJSON_IsString(content))
                 resp->choices[i].content = AIRY_STRDUP(content->valuestring);
+
+            cJSON *reasoning = cJSON_GetObjectItem(choice, "reasoning_content");
+            if (cJSON_IsString(reasoning))
+                resp->choices[i].reasoning_content = AIRY_STRDUP(reasoning->valuestring);
 
             cJSON *tool_calls = cJSON_GetObjectItem(choice, "tool_calls");
             if (cJSON_IsArray(tool_calls) && cJSON_GetArraySize(tool_calls) > 0) {

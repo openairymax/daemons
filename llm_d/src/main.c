@@ -107,6 +107,7 @@ static void request_context_destroy(request_context_t *ctx)
     for (size_t i = 0; i < ctx->message_count; i++) {
         AIRY_FREE((void *)ctx->messages[i].role);
         AIRY_FREE((void *)ctx->messages[i].content);
+        AIRY_FREE((void *)ctx->messages[i].reasoning_content);
         AIRY_FREE((void *)ctx->messages[i].tool_call_id);
         AIRY_FREE((void *)ctx->messages[i].tool_calls_json);
     }
@@ -132,10 +133,12 @@ static void parse_params_cleanup(request_context_t *ctx, llm_request_config_t *c
     for (size_t i = 0; i < ctx->message_count; i++) {
         AIRY_FREE((void *)ctx->messages[i].role);
         AIRY_FREE((void *)ctx->messages[i].content);
+        AIRY_FREE((void *)ctx->messages[i].reasoning_content);
         AIRY_FREE((void *)ctx->messages[i].tool_call_id);
         AIRY_FREE((void *)ctx->messages[i].tool_calls_json);
         ctx->messages[i].role = NULL;
         ctx->messages[i].content = NULL;
+        ctx->messages[i].reasoning_content = NULL;
         ctx->messages[i].tool_call_id = NULL;
         ctx->messages[i].tool_calls_json = NULL;
     }
@@ -196,6 +199,16 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
                 ctx->message_count = i;
                 parse_params_cleanup(ctx, cfg);
                 AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate message role or content");
+            }
+
+            cJSON *reasoning = cJSON_GetObjectItem(item, "reasoning_content");
+            if (cJSON_IsString(reasoning) && reasoning->valuestring && reasoning->valuestring[0]) {
+                ctx->messages[i].reasoning_content = AIRY_STRDUP(reasoning->valuestring);
+                if (!ctx->messages[i].reasoning_content) {
+                    ctx->message_count = i + 1;
+                    parse_params_cleanup(ctx, cfg);
+                    AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate reasoning_content");
+                }
             }
 
             cJSON *tcid = cJSON_GetObjectItem(item, "tool_call_id");

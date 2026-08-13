@@ -21,10 +21,17 @@
 #include <time.h>
 
 #ifndef _WIN32
-#include <sys/statvfs.h>
+#ifdef __linux__
 #include <sys/sysinfo.h>
+#endif
+#include <sys/statvfs.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#include <sys/time.h>
+#include <mach/mach.h>
+#endif
 #endif
 
 #define INFO_D_DEFAULT_PORT 8083
@@ -150,6 +157,39 @@ static int info_d_collect_system_info(system_info_snapshot_t *snap)
     long nproc = sysconf(_SC_NPROCESSORS_ONLN);
     snap->cpu_cores = (int)(nproc > 0 ? nproc : 1);
 
+#ifdef __APPLE__
+    /* macOS: sysctl for physical memory, host_statistics for free pages,
+     * KERN_BOOTTIME for uptime (no sysinfo(2) on macOS). */
+    int mib[2] = {CTL_HW, HW_MEMSIZE};
+    int64_t memsize = 0;
+    size_t len = sizeof(memsize);
+    if (sysctl(mib, 2, &memsize, &len, NULL, 0) == 0 && memsize > 0)
+        snap->total_memory_kb = (uint64_t)(memsize / 1024);
+
+    vm_size_t page_size = 0;
+    mach_msg_type_number_t cnt = HOST_VM_INFO64_COUNT;
+    vm_statistics64_data_t vm_stat;
+    mach_port_t host = mach_host_self();
+    if (host_statistics64(host, HOST_VM_INFO64, (host_info64_t)&vm_stat, &cnt) ==
+            KERN_SUCCESS &&
+        host_page_size(host, &page_size) == KERN_SUCCESS) {
+        uint64_t free_pages = vm_stat.free_count + vm_stat.inactive_count;
+        snap->free_memory_kb = free_pages * page_size / 1024;
+    }
+    mach_port_deallocate(mach_task_self(), host);
+    snap->used_memory_kb = snap->total_memory_kb - snap->free_memory_kb;
+    if (snap->total_memory_kb > 0)
+        snap->memory_usage_pct =
+            (double)snap->used_memory_kb / (double)snap->total_memory_kb * 100.0;
+
+    struct timeval boottime, now;
+    len = sizeof(boottime);
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_BOOTTIME;
+    if (sysctl(mib, 2, &boottime, &len, NULL, 0) == 0 &&
+        gettimeofday(&now, NULL) == 0 && now.tv_sec >= boottime.tv_sec)
+        snap->uptime_sec = (uint64_t)(now.tv_sec - boottime.tv_sec);
+#else
     struct sysinfo si;
     if (sysinfo(&si) == 0) {
         snap->total_memory_kb = (uint64_t)(si.totalram / 1024);
@@ -160,6 +200,7 @@ static int info_d_collect_system_info(system_info_snapshot_t *snap)
                 (double)snap->used_memory_kb / (double)snap->total_memory_kb * 100.0;
         snap->uptime_sec = (uint64_t)si.uptime;
     }
+#endif
 
     struct statvfs vfs;
     if (statvfs("/", &vfs) == 0) {

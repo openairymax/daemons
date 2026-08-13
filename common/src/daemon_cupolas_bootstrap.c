@@ -44,7 +44,12 @@ airy_err_t daemon_cupolas_init(const char *daemon_name)
     __builtin_memset(&sec_config, 0, sizeof(sec_config));
     sec_config.sanitize_level = SANITIZE_LEVEL_STRICT;
     sec_config.sanitizer_rules_path = NULL;
-    sec_config.permission_rules_path = NULL;
+    /* Tool-level permission rules (SSoT): $AIRY_CONFIG_DIR/cupolas/permission_rules.yaml.
+     * Absent file keeps the ACL empty (fail-closed) so tool_d denies all tools. */
+    static char g_perm_rules_path[512];
+    snprintf(g_perm_rules_path, sizeof(g_perm_rules_path), "%s/cupolas/permission_rules.yaml",
+             airy_config_dir());
+    sec_config.permission_rules_path = g_perm_rules_path;
     sec_config.enable_permission_cache = true;
     sec_config.enable_signature_verification = false;
     sec_config.trusted_ca_path = NULL;

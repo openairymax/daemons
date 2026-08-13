@@ -28,7 +28,55 @@
 
 /* ---------- Built-in basic tool registration (fs_read / fs_write /
  * fs_list / shell_run) ----------
+ */
+
+/**
+ * @brief Grant static tool ACL rules from the AIRY_AGENT_ACL env var.
  *
+ * Fail-closed daemon_security denies every agent/tool pair without an ACL
+ * entry; on servers without an interactive approver this would block all
+ * agent tool use. This entry lets deployments pre-authorize built-in tools:
+ *
+ *   AIRY_AGENT_ACL="coding_v1=fs_read,fs_glob,shell_run;reviewer=fs_read"
+ *
+ * Format: ';'-separated agent rules, each "agent=tool1,tool2,...". Parsing
+ * never fails the daemon: malformed segments are skipped with a warning.
+ */
+static void tool_service_register_acl_from_env(void)
+{
+    const char *rules = getenv("AIRY_AGENT_ACL");
+    if (!rules || rules[0] == '\0')
+        return;
+
+    char buf[2048];
+    snprintf(buf, sizeof(buf), "%s", rules);
+    char *save1 = NULL;
+    for (char *agent_rule = strtok_r(buf, ";", &save1); agent_rule;
+         agent_rule = strtok_r(NULL, ";", &save1)) {
+        char *eq = strchr(agent_rule, '=');
+        if (!eq || eq == agent_rule) {
+            SVC_LOG_WARN("AIRY_AGENT_ACL: malformed rule '%s' (expected agent=tool,...)",
+                         agent_rule);
+            continue;
+        }
+        *eq = '\0';
+        char *save2 = NULL;
+        for (char *tool = strtok_r(eq + 1, ",", &save2); tool;
+             tool = strtok_r(NULL, ",", &save2)) {
+            if (tool[0] == '\0')
+                continue;
+            int rc = daemon_security_add_acl_rule(agent_rule, tool, true);
+            if (rc != 0)
+                SVC_LOG_WARN("AIRY_AGENT_ACL: grant failed agent=%s tool=%s rc=%d", agent_rule,
+                             tool, rc);
+            else
+                SVC_LOG_INFO("AIRY_AGENT_ACL: granted agent=%s tool=%s", agent_rule, tool);
+        }
+    }
+}
+
+/* ---------- Built-in tools registration (fs_read / fs_write / fs_list /
+ * shell_run / web_fetch / fs_glob / fs_grep / fs_edit / web_search) ----------
  * Explicitly authorized via the daemon_security ACL (fail-closed:
  * unauthorized is always refused). executable uses "builtin:<id>" markers,
  * dispatched by the executor to the real implementations in builtin.c. */
@@ -292,6 +340,10 @@ tool_service_t *tool_service_create(const char *config_path __attribute__((unuse
      * entry = denied. Deployment must register authorized tools via
      * daemon_security_add_acl_rule(). */
     daemon_security_init(NULL, NULL);
+
+    /* Static ACL pre-authorization from AIRY_AGENT_ACL (server deployments
+     * without an interactive approver). Must run after daemon_security_init. */
+    tool_service_register_acl_from_env();
 
     register_builtin_tools(svc);
 

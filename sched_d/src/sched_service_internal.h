@@ -49,6 +49,10 @@ typedef struct sched_dag_node {
 typedef struct sched_dag {
     char *dag_id;
     char *name;
+    /* Top-level task input (raw user task text, optional): used as the agent
+     * input for nodes whose goal is only a plan label (goal==id or empty),
+     * so remote submissions still carry the actual task. */
+    char *input;
     sched_dag_node_t *nodes[SCHED_DAG_MAX_NODES];
     size_t node_count;
     sched_dag_status_t status;

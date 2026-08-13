@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/eventfd.h>
+#include <fcntl.h>
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -39,6 +39,24 @@ static int tests_passed = 0;
     } while (0)
 
 static int timer_fired_count = 0;
+
+/* Cross-platform test fd: eventfd(2) is Linux-specific; a non-blocking pipe
+ * read end is POSIX and works on macOS too.  The tests only need an fd that
+ * can be watched by the event loop. */
+static int test_make_fd(void)
+{
+    int fds[2];
+    if (pipe(fds) != 0)
+        return -1;
+    int flags = fcntl(fds[0], F_GETFL, 0);
+    if (flags < 0 || fcntl(fds[0], F_SETFL, flags | O_NONBLOCK) != 0) {
+        close(fds[0]);
+        close(fds[1]);
+        return -1;
+    }
+    close(fds[1]);
+    return fds[0];
+}
 
 static void timer_cb(airy_event_loop_t *loop, uint64_t timer_id, void *user_data)
 {
@@ -88,7 +106,7 @@ static void test_add_fd(void)
     airy_event_loop_t *loop = airy_event_loop_create(512);
     ASSERT(loop != NULL, "create");
 
-    int efd = eventfd(0, EFD_NONBLOCK);
+    int efd = test_make_fd();
     ASSERT(efd >= 0, "create eventfd");
 
     int ret = airy_event_loop_add_fd(loop, efd, AIRY_EVENT_TYPE_READ, fd_cb, NULL);
@@ -109,7 +127,7 @@ static void test_add_fd_with_callback(void)
     airy_event_loop_t *loop = airy_event_loop_create(512);
     ASSERT(loop != NULL, "create");
 
-    int efd = eventfd(0, EFD_NONBLOCK);
+    int efd = test_make_fd();
     ASSERT(efd >= 0, "create eventfd");
 
     int ret = airy_event_loop_add_fd(loop, efd, AIRY_EVENT_TYPE_READ, fd_cb, NULL);
@@ -137,7 +155,7 @@ static void test_add_fd_invalid(void)
 static void test_add_fd_null_loop(void)
 {
     TEST("Add fd to NULL loop rejected");
-    int efd = eventfd(0, EFD_NONBLOCK);
+    int efd = test_make_fd();
     int ret = airy_event_loop_add_fd(NULL, efd, AIRY_EVENT_TYPE_READ, fd_cb, NULL);
     ASSERT(ret != 0, "NULL loop should be rejected");
     close(efd);
@@ -150,7 +168,7 @@ static void test_add_fd_null_callback(void)
     airy_event_loop_t *loop = airy_event_loop_create(512);
     ASSERT(loop != NULL, "create");
 
-    int efd = eventfd(0, EFD_NONBLOCK);
+    int efd = test_make_fd();
     ASSERT(efd >= 0, "create eventfd");
 
     int ret = airy_event_loop_add_fd(loop, efd, AIRY_EVENT_TYPE_READ, NULL, NULL);
@@ -167,7 +185,7 @@ static void test_remove_fd(void)
     airy_event_loop_t *loop = airy_event_loop_create(512);
     ASSERT(loop != NULL, "create");
 
-    int efd = eventfd(0, EFD_NONBLOCK);
+    int efd = test_make_fd();
     ASSERT(efd >= 0, "create eventfd");
 
     airy_event_loop_add_fd(loop, efd, AIRY_EVENT_TYPE_READ, fd_cb, NULL);
@@ -196,8 +214,8 @@ static void test_get_fd_count(void)
     airy_event_loop_t *loop = airy_event_loop_create(512);
     ASSERT(loop != NULL, "create");
 
-    int efd1 = eventfd(0, EFD_NONBLOCK);
-    int efd2 = eventfd(0, EFD_NONBLOCK);
+    int efd1 = test_make_fd();
+    int efd2 = test_make_fd();
     ASSERT(efd1 >= 0 && efd2 >= 0, "create eventfds");
 
     int ret1 = airy_event_loop_add_fd(loop, efd1, AIRY_EVENT_TYPE_READ, fd_cb, NULL);
@@ -289,7 +307,7 @@ static void test_multiple_fds_remove(void)
 
     int fds[5];
     for (int i = 0; i < 5; i++) {
-        fds[i] = eventfd(0, EFD_NONBLOCK);
+        fds[i] = test_make_fd();
         ASSERT(fds[i] >= 0, "create eventfd");
         int ret = airy_event_loop_add_fd(loop, fds[i], AIRY_EVENT_TYPE_READ, fd_cb, NULL);
         ASSERT(ret == 0, "add fd");
@@ -317,7 +335,7 @@ static void test_multiple_cycles(void)
         airy_event_loop_t *loop = airy_event_loop_create(64);
         ASSERT(loop != NULL, "repeat create");
 
-        int efd = eventfd(0, EFD_NONBLOCK);
+        int efd = test_make_fd();
         airy_event_loop_add_fd(loop, efd, AIRY_EVENT_TYPE_READ, fd_cb, NULL);
         uint64_t tid = airy_event_loop_add_timer(loop, 10, timer_cb, NULL);
 

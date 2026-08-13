@@ -258,3 +258,67 @@ int test_priority_queue_order(void)
     sched_service_destroy(svc);
     return 0;
 }
+
+/* 节点 goal 仅为计划标签（等于节点 id）时，executor 应回退到 DAG 顶层
+ * input（原始任务描述），而不是把标签当任务发给 agent。 */
+int test_dag_input_fallback(void)
+{
+    printf("=== test_dag_input_fallback ===\n");
+
+    sched_service_t *svc = make_service();
+    if (!svc) {
+        printf("  FAILED: service create\n");
+        return 1;
+    }
+    g_exec_count = 0;
+    g_fail_goal = NULL;
+    g_block = 0;
+
+    const char *dag_json =
+        "{\"name\":\"input_fallback\",\"input\":\"读取 /etc/hostname\",\"nodes\":["
+        "{\"id\":\"reactive_1_step1\",\"goal\":\"reactive_1_step1\",\"role\":\"coding\",\"depends\":[]},"
+        "{\"id\":\"reactive_1_step2\",\"goal\":\"\",\"role\":\"coding\",\"depends\":[\"reactive_1_step1\"]}"
+        "]}";
+
+    char *dag_id = NULL;
+    int ret = sched_service_submit_dag(svc, dag_json, &dag_id);
+    if (ret != AIRY_SUCCESS || !dag_id) {
+        printf("  FAILED: submit_dag rc=%d\n", ret);
+        sched_service_destroy(svc);
+        return 1;
+    }
+
+    if (wait_dag_terminal(svc, dag_id, 5000) != 0) {
+        printf("  FAILED: dag timeout\n");
+        AIRY_FREE(dag_id);
+        sched_service_destroy(svc);
+        return 1;
+    }
+
+    char st[32];
+    get_dag_status_str(svc, dag_id, st, sizeof(st));
+    AIRY_FREE(dag_id);
+    if (strcmp(st, "completed") != 0) {
+        printf("  FAILED: dag status=%s (expect completed)\n", st);
+        sched_service_destroy(svc);
+        return 1;
+    }
+
+    if (g_exec_count != 2) {
+        printf("  FAILED: executor called %zu times (expect 2)\n", g_exec_count);
+        sched_service_destroy(svc);
+        return 1;
+    }
+    for (size_t i = 0; i < g_exec_count; i++) {
+        if (strstr(g_exec_log[i], "|读取 /etc/hostname") == NULL) {
+            printf("  FAILED: dispatch[%zu] goal=%s (expect task input fallback)\n", i,
+                   g_exec_log[i]);
+            sched_service_destroy(svc);
+            return 1;
+        }
+    }
+
+    printf("  PASSED (both nodes dispatched with task input: %s)\n\n", g_exec_log[0]);
+    sched_service_destroy(svc);
+    return 0;
+}

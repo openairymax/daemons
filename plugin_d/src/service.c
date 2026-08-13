@@ -408,6 +408,32 @@ int plugin_service_get_stats(const char *name, plugin_stats_t *stats)
     return 0;
 }
 
+int plugin_service_get_daemon_stats(size_t *out_count, uint64_t *out_loads,
+                                    uint64_t *out_errors, uint64_t *out_memory)
+{
+    if (!out_count || !out_loads || !out_errors || !out_memory)
+        return AIRY_ERR_INVALID_PARAM;
+
+    sync_rwlock_read_lock_ex(g_plugin_registry.rwlock, NULL);
+    size_t count = 0;
+    uint64_t loads = 0, errors = 0, memory = 0;
+    plugin_node_t *node = g_plugin_registry.head;
+    while (node) {
+        count++;
+        loads += node->stats.load_count;
+        errors += node->stats.error_count;
+        memory += node->stats.memory_bytes;
+        node = node->next;
+    }
+    sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
+
+    *out_count = count;
+    *out_loads = loads;
+    *out_errors = errors;
+    *out_memory = memory;
+    return 0;
+}
+
 int plugin_service_list(char ***names, size_t *count, int type_filter)
 {
     if (!names || !count)

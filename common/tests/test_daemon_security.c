@@ -7,6 +7,7 @@
 
 #include "../include/daemon_security.h"
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -478,7 +479,17 @@ static void test_credential_access_control(void)
 
     len = sizeof(buf);
     ret = daemon_retrieve_credential("owned_key", "system", buf, &len);
-    ASSERT(ret == 0, "system agent should be allowed");
+    ASSERT(ret != 0, "system agent denied by default (fail-closed)");
+
+    /* Explicit grant then allow: system must be authorized, not implicitly
+     * privileged (least-privilege / fail-closed ACL model). */
+    cupolas_vault_t *vault = daemon_security_get_vault();
+    assert(vault != NULL);
+    int grc = cupolas_vault_grant_access(vault, "owned_key", "system", CUPOLAS_VAULT_OP_READ, 0);
+    assert(grc == 0);
+    len = sizeof(buf);
+    ret = daemon_retrieve_credential("owned_key", "system", buf, &len);
+    ASSERT(ret == 0, "system agent allowed after explicit grant");
 
     daemon_security_shutdown();
     PASS();
@@ -498,6 +509,47 @@ static void test_sanitize_llm_input_special_chars(void)
     ASSERT(strchr(output, '\t') == NULL, "tabs should be removed");
 
     daemon_security_shutdown();
+    PASS();
+}
+
+static void test_rules_file_loading(void)
+{
+    TEST("Load tool permission rules file");
+    const char *path = "/tmp/airy_test_permission_rules.yaml";
+    FILE *fp = fopen(path, "w");
+    ASSERT(fp != NULL, "cannot create temp rules file");
+    fputs("rules:\n"
+          "  - agent: \"coding_v1\"\n"
+          "    tool: \"fs_read\"\n"
+          "    effect: \"allow\"\n"
+          "  - agent: \"coding_v1\"\n"
+          "    tool: \"shell_run\"\n"
+          "    effect: \"deny\"\n",
+          fp);
+    fclose(fp);
+
+    daemon_security_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.sanitize_level = SANITIZE_LEVEL_STRICT;
+    cfg.enable_permission_cache = true;
+    cfg.enable_vault = true;
+    cfg.enable_audit_logging = true;
+    cfg.permission_rules_path = path;
+
+    airy_err_t err;
+    memset(&err, 0, sizeof(err));
+    int ret = daemon_security_init(&cfg, &err);
+    ASSERT(ret == 0, "init with rules file should succeed");
+
+    ASSERT(daemon_check_tool_permission("coding_v1", "fs_read", "execute") == AIRY_OK,
+           "granted tool should be allowed");
+    ASSERT(daemon_check_tool_permission("coding_v1", "shell_run", "execute") != AIRY_OK,
+           "denied tool should be blocked");
+    ASSERT(daemon_check_tool_permission("coding_v1", "web_search", "execute") != AIRY_OK,
+           "unlisted tool should be denied (fail-closed)");
+
+    daemon_security_shutdown();
+    remove(path);
     PASS();
 }
 
@@ -531,6 +583,7 @@ int main(void)
     test_store_credential_overwrite();
     test_credential_access_control();
     test_sanitize_llm_input_special_chars();
+    test_rules_file_loading();
 
     printf("\n=== Results: %d/%d tests passed ===\n\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;

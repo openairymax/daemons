@@ -12,6 +12,10 @@ set(COREKERN_INCLUDE_DIR ${ATOMIC_DIR}/corekern/include)
 
 set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_config.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_providers.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_request.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_metrics.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/cache.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/token_counter.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/response.c
@@ -40,6 +44,8 @@ set(LLM_TEST_SOURCES
     test_complexity_routing.c
     bench_routing_latency.c
     test_cost_tracker.c
+    # reasoning_content 请求/响应透传（DeepSeek/Kimi 思考模式工具循环硬性要求）
+    test_provider_reasoning.c
     # P3.16 (ACC-DT17): 路由器集成测试
     test_router_integration.c
 )
