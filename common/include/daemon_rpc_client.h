@@ -72,6 +72,42 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
                                airy_cancel_token_t *cancel_token, const char *cancel_method,
                                const char *cancel_params_json);
 
+/**
+ * @brief Callback invoked for each received chunk during a streaming RPC.
+ *
+ * @param data      chunk payload (may contain arbitrary text, not NUL-terminated)
+ * @param len       chunk length in bytes
+ * @param user_data opaque caller data passed to daemon_rpc_call_stream
+ */
+typedef void (*daemon_rpc_stream_cb_t)(const char *data, size_t len, void *user_data);
+
+/**
+ * @brief Stream a JSON-RPC method call, invoking the callback per received chunk.
+ *
+ * Same request framing as daemon_rpc_call, but the response is delivered
+ * incrementally: every recv() payload is forwarded to `on_chunk` as it
+ * arrives (token-level streaming for daemons that push, e.g. llm_d's
+ * "complete_stream" method, which writes raw SSE-derived text chunks to the
+ * socket and finishes by closing the connection).
+ *
+ * The call succeeds when the peer closes the connection (recv() == 0) before
+ * the timeout — that is the daemon-side EOF that marks the end of the
+ * stream. On timeout / connection errors a non-zero code is returned and the
+ * callback may have been invoked for the already-received prefix.
+ *
+ * @param socket_path  Daemon Unix socket path (non-NULL)
+ * @param method       JSON-RPC method name (e.g. "complete_stream")
+ * @param params_json  Serialized params object (may be NULL)
+ * @param on_chunk     chunk callback (may be NULL to just drain)
+ * @param user_data    opaque data passed through to on_chunk
+ * @param timeout_ms   Timeout in ms, 0 = default 30000ms
+ * @return AIRY_SUCCESS on stream completion (EOF); other codes on failure
+ *
+ * @note Available on POSIX only; returns AIRY_ERR_NOT_SUPPORTED on Windows.
+ */
+int daemon_rpc_call_stream(const char *socket_path, const char *method, const char *params_json,
+                           daemon_rpc_stream_cb_t on_chunk, void *user_data, uint32_t timeout_ms);
+
 #ifdef __cplusplus
 }
 #endif
