@@ -206,7 +206,7 @@ int web_fetch_tool(const char *params_json, tool_result_t *res)
      * curl interpret \n as newline); -A declares the UA */
     char cmd[8192];
     snprintf(cmd, sizeof(cmd),
-             "curl -sSL --max-time 30 -A \"AirymaxRT/0.1.1 web_fetch\" "
+             "curl -sSL --max-time 30 -A \"AirymaxRT/0.1.2 web_fetch\" "
              "-w '\\n__AIRY_STATUS__:%%{http_code}' '%s'",
              url_str);
 
@@ -496,7 +496,7 @@ int web_search_tool(const char *params_json, tool_result_t *res)
         char cmd[8192];
         snprintf(cmd, sizeof(cmd),
                  "curl -sSL --max-time 15 -A \"Mozilla/5.0 (compatible; "
-                 "AirymaxRT/0.1.1 web_search)\" "
+                 "AirymaxRT/0.1.2 web_search)\" "
                  "'https://html.duckduckgo.com/html/?q=%s'",
                  enc);
         char *out = NULL;
