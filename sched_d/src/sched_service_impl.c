@@ -184,6 +184,7 @@ int sched_service_destroy(sched_service_t *service)
         AIRY_FREE(dag->dag_id);
         AIRY_FREE(dag->name);
         AIRY_FREE(dag->input);
+        AIRY_FREE(dag->workspace_dir);
         AIRY_FREE(dag);
     }
     service->dag_count = 0;
@@ -625,7 +626,7 @@ static void *sched_worker_thread(void *arg)
             } else {
                 SVC_LOG_INFO("sched: dispatching task %s to agent %s", rec->task_id,
                              sel->selected_agent_id);
-                sret = svc->executor(sel->selected_agent_id, rec->task_description, &output);
+                sret = svc->executor(sel->selected_agent_id, rec->task_description, NULL, &output);
                 if (sret != AIRY_SUCCESS || !output) {
                     SVC_LOG_ERROR("sched: executor returned failure for task %s "
                                   "(rc=%d, output=%p)",

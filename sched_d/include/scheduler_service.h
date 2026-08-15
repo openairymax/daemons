@@ -72,15 +72,17 @@ typedef struct {
 } task_record_t;
 
 /**
- * @brief Task-execution callback (injected by the daemon: select agent +
- *        spawn + invoke).
+ * @brief Execution callback: dispatch a scheduled task to a real agent.
+ *
  * @param agent_id Selected agent (role)
  * @param task_description Task description (used as invoke's input)
+ * @param workspace_dir Optional task workspace (runner chdir's into it; NULL
+ *                      means the daemon's cwd is used)
  * @param out_output Execution output (AIRY_MALLOC, caller frees)
  * @return 0 on success, non-zero on failure
  */
 typedef int (*sched_task_executor_t)(const char *agent_id, const char *task_description,
-                                     char **out_output);
+                                     const char *workspace_dir, char **out_output);
 
 
 #define AIRY_CAP_MAX_TASKS 256
