@@ -170,7 +170,7 @@ static int agent_spawn_finish(agent_service_t *svc, agent_entry_internal_t *agen
     agent_perf_accumulate(&svc->m_spawn_us_total, &svc->m_spawn_us_max,
                           agent_perf_now_us() - perf_t0);
 
-    return spawn_ok ? AIRY_ERR_FAIL : AIRY_ERR_SVC_NOT_READY;
+    return spawn_ok ? AIRY_ERR_GENERIC_FAIL : AIRY_ERR_SVC_NOT_READY;
 }
 
 int agent_service_spawn(agent_service_t *svc, const char *spec, char **out_agent_id)

@@ -86,7 +86,7 @@ static airy_err_t http_client_call(const char *service_name, const char *method,
         return AIRY_EINVAL;
     }
 
-    LOG_DEBUG("HTTP client call: %s/%s (timeout=%ums)", service_name, method, timeout_ms);
+    AIRY_LOG_DEBUG("HTTP client call: %s/%s (timeout=%ums)", service_name, method, timeout_ms);
 
     *response_json = NULL;
 
@@ -98,7 +98,7 @@ static airy_err_t http_client_call(const char *service_name, const char *method,
             airy_err_t err = internal->iface.handle_request(svc, method, params_json, response_json,
                                                             internal->user_data);
             if (err != AIRY_SUCCESS) {
-                LOG_WARN("Service '%s' handle_request('%s') failed: %d", service_name, method, err);
+                AIRY_LOG_WARN("Service '%s' handle_request('%s') failed: %d", service_name, method, err);
                 return err;
             }
             if (!*response_json) {
@@ -113,12 +113,12 @@ static airy_err_t http_client_call(const char *service_name, const char *method,
 
         airy_svc_state_t state = airy_svc_get_state(svc);
         if (state != AIRY_SVC_STATE_RUNNING) {
-            LOG_WARN("Service '%s' not running (state=%s), cannot handle request", service_name,
+            AIRY_LOG_WARN("Service '%s' not running (state=%s), cannot handle request", service_name,
                      airy_svc_state_to_string(state));
             return DAEMON_ESTATE;
         }
 
-        LOG_WARN("Service '%s' has no handle_request callback", service_name);
+        AIRY_LOG_WARN("Service '%s' has no handle_request callback", service_name);
         return AIRY_ESERVICE;
     }
 
@@ -129,7 +129,7 @@ static airy_err_t http_client_call(const char *service_name, const char *method,
     airy_err_t ret_err = AIRY_SUCCESS;
     CURL *curl = curl_easy_init();
     if (!curl) {
-        LOG_ERROR("Failed to initialize CURL for remote call to '%s'", service_name);
+        AIRY_LOG_ERROR("Failed to initialize CURL for remote call to '%s'", service_name);
         return DAEMON_EINIT;
     }
 
@@ -156,13 +156,13 @@ static airy_err_t http_client_call(const char *service_name, const char *method,
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-        LOG_ERROR("CURL call to '%s' failed: %s", url, curl_easy_strerror(res));
+        AIRY_LOG_ERROR("CURL call to '%s' failed: %s", url, curl_easy_strerror(res));
         ret_err = AIRY_EIO;
         goto cleanup;
     }
 
     if (http_code >= 400) {
-        LOG_ERROR("Service '%s' returned HTTP %ld", service_name, http_code);
+        AIRY_LOG_ERROR("Service '%s' returned HTTP %ld", service_name, http_code);
         ret_err = AIRY_EIO;
         goto cleanup;
     }
@@ -183,7 +183,7 @@ cleanup:
     AIRY_FREE(resp_buf.data);
     return ret_err;
 #else
-    LOG_ERROR("Remote call to '%s' failed: libcurl not available", service_name);
+    AIRY_LOG_ERROR("Remote call to '%s' failed: libcurl not available", service_name);
     return AIRY_EIO;
 #endif
 }
@@ -196,7 +196,7 @@ static airy_err_t http_client_stream(const char *service_name, const char *metho
         return AIRY_EINVAL;
     }
 
-    LOG_DEBUG("HTTP client stream: %s/%s", service_name, method);
+    AIRY_LOG_DEBUG("HTTP client stream: %s/%s", service_name, method);
 
     airy_svc_t svc = airy_svc_find(service_name);
     if (svc) {
@@ -240,7 +240,7 @@ static airy_err_t memory_client_call(const char *service_name, const char *metho
             airy_err_t err = internal->iface.handle_request(svc, method, params_json, response_json,
                                                             internal->user_data);
             if (err != AIRY_SUCCESS) {
-                LOG_WARN("Service '%s' handle_request('%s') failed: %d", service_name, method, err);
+                AIRY_LOG_WARN("Service '%s' handle_request('%s') failed: %d", service_name, method, err);
                 return err;
             }
             if (!*response_json) {
@@ -253,11 +253,11 @@ static airy_err_t memory_client_call(const char *service_name, const char *metho
             return AIRY_SUCCESS;
         }
 
-        LOG_WARN("Service '%s' has no handle_request callback", service_name);
+        AIRY_LOG_WARN("Service '%s' has no handle_request callback", service_name);
         return AIRY_ESERVICE;
     }
 
-    LOG_INFO("Memory client: service '%s' not found locally, trying IPC RPC", service_name);
+    AIRY_LOG_INFO("Memory client: service '%s' not found locally, trying IPC RPC", service_name);
 
     char rpc_method[256];
     snprintf(rpc_method, sizeof(rpc_method), "%s.%s", service_name, method);
@@ -265,11 +265,11 @@ static airy_err_t memory_client_call(const char *service_name, const char *metho
     int rpc_err =
         svc_rpc_call(rpc_method, params_json, response_json, timeout_ms ? timeout_ms : 30000);
     if (rpc_err != 0 || !(*response_json)) {
-        LOG_WARN("IPC RPC call to '%s' failed: %d", rpc_method, rpc_err);
+        AIRY_LOG_WARN("IPC RPC call to '%s' failed: %d", rpc_method, rpc_err);
         return AIRY_EIO;
     }
 
-    LOG_INFO("IPC RPC call to '%s' succeeded", rpc_method);
+    AIRY_LOG_INFO("IPC RPC call to '%s' succeeded", rpc_method);
     return AIRY_SUCCESS;
 }
 
@@ -353,14 +353,14 @@ airy_err_t airy_svc_client_create(airy_svc_protocol_type_t protocol, const char 
     default:
         cli->call = http_client_call;
         cli->stream = http_client_stream;
-        LOG_WARN("Protocol %d not fully implemented, using HTTP fallback", protocol);
+        AIRY_LOG_WARN("Protocol %d not fully implemented, using HTTP fallback", protocol);
         break;
     }
 
     *client = cli;
     cli->internal = internal;
 
-    LOG_INFO("Service client created (protocol=%d, base_url=%s)", protocol, internal->base_url);
+    AIRY_LOG_INFO("Service client created (protocol=%d, base_url=%s)", protocol, internal->base_url);
     return AIRY_SUCCESS;
 }
 
@@ -374,5 +374,5 @@ void airy_svc_client_destroy(airy_svc_client_t *client)
         client->internal = NULL;
     }
     AIRY_FREE(client);
-    LOG_DEBUG("Service client destroyed");
+    AIRY_LOG_DEBUG("Service client destroyed");
 }

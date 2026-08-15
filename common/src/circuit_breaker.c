@@ -103,7 +103,7 @@ static void transition_state(cb_internal_t *cb, cb_manager_internal_t *mgr, cb_s
     snprintf(msg, sizeof(msg), "State: %s -> %s", state_names[old_state], state_names[new_state]);
     event.message = msg;
 
-    LOG_INFO("Circuit breaker '%s': %s", cb->name, msg);
+    AIRY_LOG_INFO("Circuit breaker '%s': %s", cb->name, msg);
     notify_event(mgr, &event);
 }
 
@@ -181,7 +181,7 @@ AIRY_API cb_manager_t cb_manager_create(void)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    LOG_INFO("Circuit breaker manager created");
+    AIRY_LOG_INFO("Circuit breaker manager created");
     return (cb_manager_t)mgr;
 }
 
@@ -206,7 +206,7 @@ AIRY_API void cb_manager_destroy(cb_manager_t manager)
     airy_mtx_destroy(&mgr->mutex);
     AIRY_FREE(mgr);
 
-    LOG_INFO("Circuit breaker manager destroyed");
+    AIRY_LOG_INFO("Circuit breaker manager destroyed");
 }
 
 AIRY_API circuit_breaker_t cb_create(cb_manager_t manager, const char *name,
@@ -270,7 +270,7 @@ AIRY_API circuit_breaker_t cb_create(cb_manager_t manager, const char *name,
 
     airy_mtx_unlock(&mgr->mutex);
 
-    LOG_INFO("Circuit breaker '%s' created (failure_threshold=%u, timeout=%ums)", name,
+    AIRY_LOG_INFO("Circuit breaker '%s' created (failure_threshold=%u, timeout=%ums)", name,
              cb->config.failure_threshold, cb->config.timeout_ms);
     return (circuit_breaker_t)cb;
 }
@@ -304,7 +304,7 @@ AIRY_API void cb_destroy(circuit_breaker_t breaker)
     cb->destroying = true;
     airy_mtx_unlock(&cb->mutex);
 
-    LOG_INFO("Circuit breaker '%s' destroyed", cb->name);
+    AIRY_LOG_INFO("Circuit breaker '%s' destroyed", cb->name);
 
     airy_mtx_destroy(&cb->mutex);
     AIRY_FREE(cb);
@@ -446,7 +446,7 @@ AIRY_API void cb_record_failure(circuit_breaker_t breaker, int32_t error_code)
 
     airy_mtx_unlock(&cb->mutex);
 
-    LOG_DEBUG("Circuit breaker '%s': failure recorded (error=%d, consecutive=%u)", cb->name,
+    AIRY_LOG_DEBUG("Circuit breaker '%s': failure recorded (error=%d, consecutive=%u)", cb->name,
               error_code, cb->stats.consecutive_failures);
 }
 
@@ -495,7 +495,7 @@ AIRY_API void cb_record_timeout(circuit_breaker_t breaker)
 
     airy_mtx_unlock(&cb->mutex);
 
-    LOG_DEBUG("Circuit breaker '%s': timeout recorded", cb->name);
+    AIRY_LOG_DEBUG("Circuit breaker '%s': timeout recorded", cb->name);
 }
 
 AIRY_API cb_state_t cb_get_state(circuit_breaker_t breaker)
@@ -573,7 +573,7 @@ AIRY_API void cb_reset(circuit_breaker_t breaker)
 
     airy_mtx_unlock(&cb->mutex);
 
-    LOG_INFO("Circuit breaker '%s' reset to CLOSED", cb->name);
+    AIRY_LOG_INFO("Circuit breaker '%s' reset to CLOSED", cb->name);
 }
 
 AIRY_API void cb_force_open(circuit_breaker_t breaker)
@@ -632,7 +632,7 @@ AIRY_API airy_err_t cb_set_failover_config(circuit_breaker_t breaker,
     __builtin_memcpy(&cb->failover_config, config, sizeof(cb_failover_config_t));
     airy_mtx_unlock(&cb->mutex);
 
-    LOG_INFO("Circuit breaker '%s': failover config updated (strategy=%d)", cb->name,
+    AIRY_LOG_INFO("Circuit breaker '%s': failover config updated (strategy=%d)", cb->name,
              config->strategy);
     return AIRY_SUCCESS;
 }
@@ -697,7 +697,7 @@ AIRY_API airy_err_t cb_execute_failover(circuit_breaker_t breaker, int32_t origi
 
     airy_mtx_unlock(&cb->mutex);
 
-    LOG_INFO("Circuit breaker '%s': failover executed (strategy=%d, error=%d)", cb->name,
+    AIRY_LOG_INFO("Circuit breaker '%s': failover executed (strategy=%d, error=%d)", cb->name,
              fc->strategy, original_error);
     return err;
 }

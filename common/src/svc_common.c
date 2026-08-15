@@ -83,7 +83,7 @@ static airy_err_t svc_common_module_init(void)
 
     err = airy_mtx_init(&g_registry.registry_mutex);
     if (err != AIRY_SUCCESS) {
-        LOG_ERROR("Failed to initialize registry mutex: %d", err);
+        AIRY_LOG_ERROR("Failed to initialize registry mutex: %d", err);
         AIRY_ERROR(DAEMON_EINIT, "svc_common: registry mutex init failed");
     }
 
@@ -92,7 +92,7 @@ static airy_err_t svc_common_module_init(void)
     /* Initialize memory stats reporter (SEC-15) */
     airy_mem_stats_reporter_init();
 
-    LOG_DEBUG("Service common module initialized");
+    AIRY_LOG_DEBUG("Service common module initialized");
 
     return AIRY_SUCCESS;
 }
@@ -109,7 +109,7 @@ static void svc_common_module_cleanup(void)
     airy_mtx_destroy(&g_registry.registry_mutex);
     g_registry.initialized = 0;
 
-    LOG_DEBUG("Service common module cleaned up");
+    AIRY_LOG_DEBUG("Service common module cleaned up");
 }
 
 /**
@@ -154,7 +154,7 @@ static airy_err_t register_service_internal(airy_svc_internal_t *service)
 
     airy_mtx_unlock(&g_registry.registry_mutex);
 
-    LOG_INFO("Service '%s' registered internally", service->name);
+    AIRY_LOG_INFO("Service '%s' registered internally", service->name);
 
     return AIRY_SUCCESS;
 }
@@ -179,7 +179,7 @@ static airy_err_t unregister_service_internal(airy_svc_internal_t *service)
             g_registry.service_count--;
 
             airy_mtx_unlock(&g_registry.registry_mutex);
-            LOG_INFO("Service '%s' unregistered internally", service->name);
+            AIRY_LOG_INFO("Service '%s' unregistered internally", service->name);
             return AIRY_SUCCESS;
         }
 
@@ -300,7 +300,7 @@ airy_err_t airy_svc_create(airy_svc_t *out_service, const char *name,
 
     *out_service = (airy_svc_t)service;
 
-    LOG_INFO("Service '%s' created successfully", name);
+    AIRY_LOG_INFO("Service '%s' created successfully", name);
 
     return AIRY_SUCCESS;
 }
@@ -320,7 +320,7 @@ void airy_svc_destroy(airy_svc_t svc)
     {
         airy_err_t unreg_err = unregister_service_internal(service);
         if (unreg_err != AIRY_SUCCESS && unreg_err != AIRY_ENOENT) {
-            LOG_WARN("Service '%s' unregister during destroy returned %d - continuing cleanup",
+            AIRY_LOG_WARN("Service '%s' unregister during destroy returned %d - continuing cleanup",
                      service->name, unreg_err);
         }
     }
@@ -339,7 +339,7 @@ void airy_svc_destroy(airy_svc_t svc)
     }
     AIRY_FREE(service);
 
-    LOG_INFO("Service destroyed");
+    AIRY_LOG_INFO("Service destroyed");
 }
 
 airy_err_t airy_svc_init(airy_svc_t svc)
@@ -354,7 +354,7 @@ airy_err_t airy_svc_init(airy_svc_t svc)
 
     if (service->state != AIRY_SVC_STATE_CREATED) {
         airy_mtx_unlock(&service->state_mutex);
-        LOG_ERROR("Service '%s' cannot initialize from state %d", service->name, service->state);
+        AIRY_LOG_ERROR("Service '%s' cannot initialize from state %d", service->name, service->state);
         return DAEMON_ESTATE;
     }
 
@@ -369,10 +369,10 @@ airy_err_t airy_svc_init(airy_svc_t svc)
     airy_mtx_lock(&service->state_mutex);
     if (err == AIRY_SUCCESS) {
         service->state = AIRY_SVC_STATE_READY;
-        LOG_INFO("Service '%s' initialized successfully", service->name);
+        AIRY_LOG_INFO("Service '%s' initialized successfully", service->name);
     } else {
         service->state = AIRY_SVC_STATE_ERROR;
-        LOG_ERROR("Service '%s' initialization failed: %d", service->name, err);
+        AIRY_LOG_ERROR("Service '%s' initialization failed: %d", service->name, err);
     }
 
     airy_mtx_unlock(&service->state_mutex);
@@ -393,7 +393,7 @@ airy_err_t airy_svc_start(airy_svc_t svc)
     if (service->state != AIRY_SVC_STATE_READY && service->state != AIRY_SVC_STATE_STOPPED &&
         service->state != AIRY_SVC_STATE_PAUSED && service->state != AIRY_SVC_STATE_ZOMBIE) {
         airy_mtx_unlock(&service->state_mutex);
-        LOG_ERROR("Service '%s' cannot start from state %d", service->name, service->state);
+        AIRY_LOG_ERROR("Service '%s' cannot start from state %d", service->name, service->state);
         return DAEMON_ESTATE;
     }
 
@@ -411,11 +411,11 @@ airy_err_t airy_svc_start(airy_svc_t svc)
         service->state = old_state;
         airy_mtx_unlock(&service->state_mutex);
 
-        LOG_ERROR("Service '%s' start failed: %d", service->name, err);
+        AIRY_LOG_ERROR("Service '%s' start failed: %d", service->name, err);
         return err;
     }
 
-    LOG_INFO("Service '%s' started successfully", service->name);
+    AIRY_LOG_INFO("Service '%s' started successfully", service->name);
 
     return AIRY_SUCCESS;
 }
@@ -446,7 +446,7 @@ airy_err_t airy_svc_stop(airy_svc_t svc, bool force)
 
     if (service->state != AIRY_SVC_STATE_RUNNING && service->state != AIRY_SVC_STATE_PAUSED) {
         airy_mtx_unlock(&service->state_mutex);
-        LOG_WARN("Service '%s' cannot stop from state %d", service->name, service->state);
+        AIRY_LOG_WARN("Service '%s' cannot stop from state %d", service->name, service->state);
         return DAEMON_ESTATE;
     }
 
@@ -476,12 +476,12 @@ airy_err_t airy_svc_stop(airy_svc_t svc, bool force)
             sigaction(SIGALRM, &old_act, NULL);
             if (g_svc_stop_timeout_flag) {
                 zombie = true;
-                LOG_ERROR("Service '%s' force stop timed out after %d seconds - marking ZOMBIE",
+                AIRY_LOG_ERROR("Service '%s' force stop timed out after %d seconds - marking ZOMBIE",
                           service->name, FORCE_STOP_TIMEOUT_SEC);
 
 #ifdef AIRY_OS_UNIX
                 if (service->threads && service->thread_count > 0) {
-                    LOG_WARN("Service '%s' attempting deadlock recovery for %d threads",
+                    AIRY_LOG_WARN("Service '%s' attempting deadlock recovery for %d threads",
                              service->name, (int)service->thread_count);
                     for (size_t i = 0; i < service->thread_count; i++) {
                         pthread_t tid = service->threads[i];
@@ -489,12 +489,12 @@ airy_err_t airy_svc_stop(airy_svc_t svc, bool force)
                             void *retval = NULL;
                             int join_rc = pthread_tryjoin_np(tid, &retval);
                             if (join_rc == EBUSY) {
-                                LOG_ERROR("Service '%s' thread[%zu] deadlocked - cancelling",
+                                AIRY_LOG_ERROR("Service '%s' thread[%zu] deadlocked - cancelling",
                                           service->name, i);
                                 pthread_cancel(tid);
                                 pthread_join(tid, NULL);
                             } else if (join_rc == 0) {
-                                LOG_INFO("Service '%s' thread[%zu] joined with retval=%p",
+                                AIRY_LOG_INFO("Service '%s' thread[%zu] joined with retval=%p",
                                          service->name, i, retval);
                             }
                         }
@@ -511,7 +511,7 @@ airy_err_t airy_svc_stop(airy_svc_t svc, bool force)
          * (ARCHITECTURAL_PRINCIPLES E-6 error traceability). The normal
          * (non-force) stop path is unaffected. */
         if (force) {
-            LOG_WARN("Service '%s' force stop timeout not supported on Windows "
+            AIRY_LOG_WARN("Service '%s' force stop timeout not supported on Windows "
                      "(SIGALRM/alarm unavailable) - force stop may hang",
                      service->name);
         }
@@ -522,11 +522,11 @@ airy_err_t airy_svc_stop(airy_svc_t svc, bool force)
     airy_mtx_lock(&service->state_mutex);
     if (err == AIRY_SUCCESS || force) {
         service->state = zombie ? AIRY_SVC_STATE_ZOMBIE : AIRY_SVC_STATE_STOPPED;
-        LOG_INFO("Service '%s' stopped %s", service->name,
+        AIRY_LOG_INFO("Service '%s' stopped %s", service->name,
                  force ? (zombie ? "(ZOMBIE)" : "(forced)") : "gracefully");
     } else {
         service->state = AIRY_SVC_STATE_ERROR;
-        LOG_ERROR("Service '%s' stop failed: %d", service->name, err);
+        AIRY_LOG_ERROR("Service '%s' stop failed: %d", service->name, err);
     }
 
     airy_mtx_unlock(&service->state_mutex);
@@ -625,20 +625,20 @@ airy_err_t airy_svc_pause(airy_svc_t svc)
 
     if (service->state != AIRY_SVC_STATE_RUNNING) {
         airy_mtx_unlock(&service->state_mutex);
-        LOG_ERROR("Service '%s' cannot pause from state %d", service->name, service->state);
+        AIRY_LOG_ERROR("Service '%s' cannot pause from state %d", service->name, service->state);
         return DAEMON_ESTATE;
     }
 
     if (!(service->capabilities & AIRY_SVC_CAP_PAUSEABLE)) {
         airy_mtx_unlock(&service->state_mutex);
-        LOG_ERROR("Service '%s' does not support pause", service->name);
+        AIRY_LOG_ERROR("Service '%s' does not support pause", service->name);
         return AIRY_EPROTONOSUPPORT;
     }
 
     service->state = AIRY_SVC_STATE_PAUSED;
     airy_mtx_unlock(&service->state_mutex);
 
-    LOG_INFO("Service '%s' paused", service->name);
+    AIRY_LOG_INFO("Service '%s' paused", service->name);
 
     return AIRY_SUCCESS;
 }
@@ -655,14 +655,14 @@ airy_err_t airy_svc_resume(airy_svc_t svc)
 
     if (service->state != AIRY_SVC_STATE_PAUSED) {
         airy_mtx_unlock(&service->state_mutex);
-        LOG_ERROR("Service '%s' cannot resume from state %d", service->name, service->state);
+        AIRY_LOG_ERROR("Service '%s' cannot resume from state %d", service->name, service->state);
         return DAEMON_ESTATE;
     }
 
     service->state = AIRY_SVC_STATE_RUNNING;
     airy_mtx_unlock(&service->state_mutex);
 
-    LOG_INFO("Service '%s' resumed", service->name);
+    AIRY_LOG_INFO("Service '%s' resumed", service->name);
 
     return AIRY_SUCCESS;
 }
@@ -742,7 +742,7 @@ void airy_svc_reset_stats(airy_svc_t svc)
     __builtin_memset(&service->stats, 0, sizeof(airy_svc_stats_t));
     airy_mtx_unlock(&service->stats_mutex);
 
-    LOG_DEBUG("Service '%s' stats reset", service->name);
+    AIRY_LOG_DEBUG("Service '%s' stats reset", service->name);
 }
 
 airy_err_t airy_svc_healthcheck(airy_svc_t svc)
@@ -761,7 +761,7 @@ airy_err_t airy_svc_healthcheck(airy_svc_t svc)
 
         if (err != AIRY_SUCCESS) {
             service->healthcheck_failures++;
-            LOG_WARN("Service '%s' health check failed: %d (failures: %d)", service->name, err,
+            AIRY_LOG_WARN("Service '%s' health check failed: %d (failures: %d)", service->name, err,
                      service->healthcheck_failures);
         } else {
             service->healthcheck_failures = 0;
@@ -858,7 +858,7 @@ airy_err_t airy_svc_register(airy_svc_t svc)
     for (airy_svc_internal_t *current = g_registry.services; current; current = current->next) {
         if (current == internal) {
             airy_mtx_unlock(&g_registry.registry_mutex);
-            LOG_DEBUG("Service '%s' already registered", internal->name);
+            AIRY_LOG_DEBUG("Service '%s' already registered", internal->name);
             return AIRY_SUCCESS;
         }
     }
@@ -869,7 +869,7 @@ airy_err_t airy_svc_register(airy_svc_t svc)
 
     airy_mtx_unlock(&g_registry.registry_mutex);
 
-    LOG_INFO("Service '%s' explicitly registered (total: %u)", internal->name,
+    AIRY_LOG_INFO("Service '%s' explicitly registered (total: %u)", internal->name,
              g_registry.service_count);
     return AIRY_SUCCESS;
 }
@@ -896,7 +896,7 @@ airy_err_t airy_svc_unregister(airy_svc_t svc)
             g_registry.service_count--;
 
             airy_mtx_unlock(&g_registry.registry_mutex);
-            LOG_INFO("Service '%s' unregistered (remaining: %u)", internal->name,
+            AIRY_LOG_INFO("Service '%s' unregistered (remaining: %u)", internal->name,
                      g_registry.service_count);
             return AIRY_SUCCESS;
         }
@@ -906,7 +906,7 @@ airy_err_t airy_svc_unregister(airy_svc_t svc)
     }
 
     airy_mtx_unlock(&g_registry.registry_mutex);
-    LOG_WARN("Service '%s' not found in registry for unregistration", internal->name);
+    AIRY_LOG_WARN("Service '%s' not found in registry for unregistration", internal->name);
     return AIRY_ENOENT;
 }
 

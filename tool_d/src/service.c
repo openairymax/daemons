@@ -339,7 +339,23 @@ tool_service_t *tool_service_create(const char *config_path __attribute__((unuse
      * it refuses execution. daemon_security uses a fail-closed ACL: no ACL
      * entry = denied. Deployment must register authorized tools via
      * daemon_security_add_acl_rule(). */
-    daemon_security_init(NULL, NULL);
+    {
+        /* 工具授权 ACL 的权威源：$AIRY_CONFIG_DIR/permission_rules.yaml
+         * （默认随 AIRY_HOME 初始化落地）。此前仅依赖 AIRY_AGENT_ACL 环境
+         * 变量，daemon 由 /daemon start 拉起时环境变量易丢失，导致 ACL 空、
+         * 所有 agent 工具调用被 fail-closed 拒绝（agent 任务无法执行）。
+         * 文件不存在时仅告警（保持 fail-closed 语义），不阻断启动。 */
+        static daemon_security_config_t sec_cfg;
+        __builtin_memset(&sec_cfg, 0, sizeof(sec_cfg));
+        static char rules_path[1024];
+        const char *cfg_dir = airy_config_dir();
+        if (cfg_dir && cfg_dir[0]) {
+            int plen = snprintf(rules_path, sizeof(rules_path), "%s/permission_rules.yaml", cfg_dir);
+            if (plen > 0 && plen < (int)sizeof(rules_path))
+                sec_cfg.permission_rules_path = rules_path;
+        }
+        daemon_security_init(&sec_cfg, NULL);
+    }
 
     /* Static ACL pre-authorization from AIRY_AGENT_ACL (server deployments
      * without an interactive approver). Must run after daemon_security_init. */

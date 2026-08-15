@@ -124,7 +124,7 @@ static bool validate_value(const char *key, const char *value)
         if (pattern_matches(g_cm.validators[i].pattern, key)) {
             char error_msg[256] = {0};
             if (!g_cm.validators[i].validator(key, value, error_msg, sizeof(error_msg))) {
-                LOG_WARN("Config validation failed for '%s': %s", key, error_msg);
+                AIRY_LOG_WARN("Config validation failed for '%s': %s", key, error_msg);
                 return false;
             }
         }
@@ -171,7 +171,7 @@ AIRY_API int cm_init(const cm_config_t *config)
 
     cm_load_env("AIRY_", "env");
 
-    LOG_INFO("Config manager initialized (env=%s, base_path=%s)", g_cm.config.environment,
+    AIRY_LOG_INFO("Config manager initialized (env=%s, base_path=%s)", g_cm.config.environment,
              g_cm.config.base_path);
     return 0;
 }
@@ -187,7 +187,7 @@ AIRY_API void cm_shutdown(void)
 
     airy_mtx_destroy(&g_cm.mutex);
 
-    LOG_INFO("Config manager shutdown");
+    AIRY_LOG_INFO("Config manager shutdown");
 }
 
 AIRY_API const char *cm_get(const char *key, const char *default_value)
@@ -324,7 +324,7 @@ AIRY_API int cm_load_json(const char *path, const char *namespace_)
 
     FILE *fp = fopen(path, "rb");
     if (!fp) {
-        LOG_WARN("Config file not found: %s", path);
+        AIRY_LOG_WARN("Config file not found: %s", path);
         return AIRY_ERR_IO;
     }
 
@@ -412,7 +412,7 @@ AIRY_API int cm_load_json(const char *path, const char *namespace_)
     AIRY_FREE(data);
     data = NULL;
 
-    LOG_INFO("Loaded %d config entries from %s (namespace=%s)", count, path,
+    AIRY_LOG_INFO("Loaded %d config entries from %s (namespace=%s)", count, path,
              namespace_ ? namespace_ : "default");
     return count;
 }
@@ -478,7 +478,7 @@ AIRY_API int cm_load_env(const char *prefix, const char *namespace_)
     }
 #endif
 
-    LOG_DEBUG("Loaded %d config entries from environment (prefix=%s)", count, prefix);
+    AIRY_LOG_DEBUG("Loaded %d config entries from environment (prefix=%s)", count, prefix);
     return count;
 }
 
@@ -567,7 +567,7 @@ AIRY_API int cm_reload(void)
     if (!g_cm.initialized)
         return AIRY_ERR_UNKNOWN;
 
-    LOG_INFO("Config reload triggered");
+    AIRY_LOG_INFO("Config reload triggered");
     return cm_load_json(g_cm.config.base_path[0] ? g_cm.config.base_path : "./config", NULL);
 }
 
@@ -677,7 +677,7 @@ AIRY_API int cm_set_environment(const char *env)
 
     cm_load_environment_config(env);
 
-    LOG_INFO("Environment set to: %s", env);
+    AIRY_LOG_INFO("Environment set to: %s", env);
     return 0;
 }
 

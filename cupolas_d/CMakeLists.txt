@@ -142,7 +142,7 @@ target_link_libraries(cupolas_d PRIVATE
     airy_cupolas_service
     airy_common
     Threads::Threads
-    m
+    airy_platform_libs
 )
 
 target_compile_options(cupolas_d PRIVATE

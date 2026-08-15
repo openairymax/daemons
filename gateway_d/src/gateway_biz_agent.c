@@ -60,7 +60,7 @@ static gw_active_request_t *gw_active_register(gateway_business_ctx_t *ctx, cons
     entry->next = ctx->active_requests;
     ctx->active_requests = entry;
     airy_mtx_unlock(&ctx->active_lock);
-    LOG_INFO("gateway: agent.run registered (session=%s)", entry->session_id);
+    AIRY_LOG_INFO("gateway: agent.run registered (session=%s)", entry->session_id);
     return entry;
 }
 
@@ -81,7 +81,7 @@ static void gw_active_unregister(gateway_business_ctx_t *ctx, gw_active_request_
         pp = &(*pp)->next;
     }
     airy_mtx_unlock(&ctx->active_lock);
-    LOG_INFO("gateway: agent.run unregistered (session=%s)", entry->session_id);
+    AIRY_LOG_INFO("gateway: agent.run unregistered (session=%s)", entry->session_id);
     AIRY_FREE(entry);
 }
 
@@ -252,7 +252,7 @@ static cJSON *gw_agent_spec_from_agent_file(const cJSON *params)
 
     FILE *f = fopen(af->valuestring, "rb");
     if (!f) {
-        LOG_WARN("gateway: agent_file unreadable: %s", af->valuestring);
+        AIRY_LOG_WARN("gateway: agent_file unreadable: %s", af->valuestring);
         return NULL;
     }
     char *buf = (char *)AIRY_MALLOC(GW_AGENT_FILE_MAX + 1);
@@ -297,11 +297,11 @@ static cJSON *gw_agent_spec_from_agent_file(const cJSON *params)
             AIRY_MEMCPY(role, src + start, rlen);
             role[rlen] = '\0';
             cJSON_AddStringToObject(spec, "role", role);
-            LOG_INFO("gateway: agent spec built from agent_file (role=%s, file=%s)", role,
+            AIRY_LOG_INFO("gateway: agent spec built from agent_file (role=%s, file=%s)", role,
                      af->valuestring);
         }
     } else {
-        LOG_WARN("gateway: agent_file contains no usable role: %s", af->valuestring);
+        AIRY_LOG_WARN("gateway: agent_file contains no usable role: %s", af->valuestring);
     }
     AIRY_FREE(buf);
     return spec;
@@ -354,12 +354,12 @@ static void gw_persist_conversation(const gateway_business_ctx_t *ctx, const cha
     char *resp = gw_svc_call(ctx->mem_sock_path, "write", params_str, GW_TOOL_TIMEOUT_MS);
     AIRY_FREE(params_str);
     if (!resp) {
-        LOG_WARN("gateway: mem.write failed (mem_d unreachable, session=%s)",
+        AIRY_LOG_WARN("gateway: mem.write failed (mem_d unreachable, session=%s)",
                  session_id ? session_id : "?");
         return;
     }
     AIRY_FREE(resp);
-    LOG_INFO("gateway: conversation persisted to mem_d (session=%s)",
+    AIRY_LOG_INFO("gateway: conversation persisted to mem_d (session=%s)",
              session_id ? session_id : "?");
 }
 
@@ -435,7 +435,7 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
         agent_spec_owned = gw_agent_spec_from_agent_file(params);
         agent_spec = agent_spec_owned;
     }
-    LOG_INFO("gateway: agent.run start (session=%s, model=%s, orchestrate=%d)", session_id,
+    AIRY_LOG_INFO("gateway: agent.run start (session=%s, model=%s, orchestrate=%d)", session_id,
              model ? model : "(default)", agent_spec ? 1 : 0);
     int run_rc = -1;
 
@@ -522,7 +522,7 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
         }
     }
     gw_active_unregister(ctx, active);
-    LOG_INFO("gateway: agent.run done (session=%s, rc=%d, tokens=%llu, cost=%.4f)", session_id,
+    AIRY_LOG_INFO("gateway: agent.run done (session=%s, rc=%d, tokens=%llu, cost=%.4f)", session_id,
              run_rc, (unsigned long long)total_tokens, total_cost);
 
     /* Persist the conversation to mem_d automatically at the end (M6 fix:
@@ -634,12 +634,12 @@ char *handle_agent_cancel(cJSON *root, gateway_business_ctx_t *ctx)
     }
     if (entry) {
         atomic_store_explicit(&entry->cancelled, 1, memory_order_relaxed);
-        LOG_INFO("gateway: agent.cancel set (session=%s)", sid->valuestring);
+        AIRY_LOG_INFO("gateway: agent.cancel set (session=%s)", sid->valuestring);
     }
     airy_mtx_unlock(&ctx->active_lock);
 
     if (!entry) {
-        LOG_DEBUG("gateway: agent.cancel miss (session=%s, 请求已完成或不存在)", sid->valuestring);
+        AIRY_LOG_DEBUG("gateway: agent.cancel miss (session=%s, 请求已完成或不存在)", sid->valuestring);
         return jsonrpc_error(-32004, "No active request with given session_id", id);
     }
 

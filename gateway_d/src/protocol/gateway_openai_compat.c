@@ -287,7 +287,7 @@ static int handle_chat_completions(gw_openai_compat_t *compat, const char *body_
                                    char **response_json)
 {
     if (!compat->llm_call_fn) {
-        LOG_ERROR("no LLM backend configured for chat completions");
+        AIRY_LOG_ERROR("no LLM backend configured for chat completions");
         *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"No LLM backend configured\","
                                      "\"type\":\"server_error\",\"code\":503}}");
         compat->error_count++;
@@ -295,7 +295,7 @@ static int handle_chat_completions(gw_openai_compat_t *compat, const char *body_
     }
 
     if (!check_rate_limit(compat)) {
-        LOG_WARN("rate limit exceeded: window_requests=%u, limit=%u", compat->window_requests,
+        AIRY_LOG_WARN("rate limit exceeded: window_requests=%u, limit=%u", compat->window_requests,
                  compat->config.rate_limit_rpm);
         *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"Rate limit exceeded\","
                                      "\"type\":\"rate_limit_error\",\"code\":429}}");
@@ -322,7 +322,7 @@ static int handle_chat_completions(gw_openai_compat_t *compat, const char *body_
          * in the error branch before freeing, to avoid use-after-free (the
          * previous code freed then referenced, causing an ASan
          * heap-use-after-free crash). */
-        LOG_ERROR("LLM call failed: model=%s, rc=%d", model ? model : compat->config.default_model,
+        AIRY_LOG_ERROR("LLM call failed: model=%s, rc=%d", model ? model : compat->config.default_model,
                   rc);
         AIRY_FREE(llm_response);
         AIRY_FREE(model);
@@ -346,7 +346,7 @@ static int handle_embeddings(gw_openai_compat_t *compat, const char *body_json,
                              char **response_json)
 {
     if (!compat->embed_fn) {
-        LOG_ERROR("no embedding backend configured for embeddings endpoint");
+        AIRY_LOG_ERROR("no embedding backend configured for embeddings endpoint");
         *response_json = AIRY_STRDUP("{\"error\":{\"message\":\"No embedding backend configured\","
                                      "\"type\":\"server_error\",\"code\":503}}");
         compat->error_count++;
@@ -396,7 +396,7 @@ static int handle_embeddings(gw_openai_compat_t *compat, const char *body_json,
                               input_json ? input_json : "[]", &embed_response, compat->embed_data);
 
     if (rc != 0 || !embed_response) {
-        LOG_ERROR("embedding call failed: model=%s, rc=%d",
+        AIRY_LOG_ERROR("embedding call failed: model=%s, rc=%d",
                   model ? model : "text-embedding-ada-002", rc);
         AIRY_FREE(embed_response);
         AIRY_FREE(model);

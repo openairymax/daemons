@@ -87,7 +87,7 @@ static char *llm_call_complete(const gateway_business_ctx_t *ctx, const char *re
     fd = llm_connect_unix(ctx->llm_sock_path);
 #endif
     if (fd < 0) {
-        LOG_WARN("gateway handler: cannot connect to llm_d (sock=%s)", ctx->llm_sock_path);
+        AIRY_LOG_WARN("gateway handler: cannot connect to llm_d (sock=%s)", ctx->llm_sock_path);
         return NULL;
     }
 
@@ -222,7 +222,7 @@ static char *tool_call_rpc(const gateway_business_ctx_t *ctx, const char *req_js
     addr.sun_family = AF_UNIX;
     AIRY_STRNCPY_TERM(addr.sun_path, ctx->tool_sock_path, sizeof(addr.sun_path));
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        LOG_WARN("gateway handler: cannot connect to tool_d (sock=%s)", ctx->tool_sock_path);
+        AIRY_LOG_WARN("gateway handler: cannot connect to tool_d (sock=%s)", ctx->tool_sock_path);
         close(fd);
         return NULL;
     }
@@ -302,7 +302,7 @@ static int parse_llm_result(const char *llm_resp, char **out_text, uint64_t *out
     cJSON *err = cJSON_GetObjectItem(root, "error");
     if (err) {
         cJSON *msg = cJSON_GetObjectItem(err, "message");
-        LOG_WARN("gateway handler: llm_d error: %s", cJSON_IsString(msg) ? msg->valuestring : "?");
+        AIRY_LOG_WARN("gateway handler: llm_d error: %s", cJSON_IsString(msg) ? msg->valuestring : "?");
         cJSON_Delete(root);
         return -1;
     }
@@ -561,7 +561,7 @@ int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model, const
     for (int loops = 0; loops < GW_MAX_TOOL_LOOPS; loops++) {
 
         if (gw_active_is_cancelled(active)) {
-            LOG_INFO("gateway: agent.run cancelled by user (session=%s)",
+            AIRY_LOG_INFO("gateway: agent.run cancelled by user (session=%s)",
                      active ? active->session_id : "?");
             rc = 1;
             break;

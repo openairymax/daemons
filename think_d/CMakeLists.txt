@@ -118,7 +118,7 @@ target_link_libraries(think_d PRIVATE
     airy_think_service
     airy_common
     Threads::Threads
-    m
+    airy_platform_libs
 )
 
 # coreloopthree ↔ cognition ↔ llm_service/tool_service 存在静态库循环依赖

@@ -460,8 +460,13 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
 
     uint64_t perf_t0 = perf_now_us();
     char *out_output = NULL;
-    int ret = agent_service_invoke(g_service, agent_id->valuestring, input_str, input_len, token,
-                                   &out_output);
+    cJSON *ws_item = cJSON_GetObjectItem(params, "workspace_dir");
+    const char *workspace_dir = (ws_item && cJSON_IsString(ws_item) && ws_item->valuestring &&
+                                 ws_item->valuestring[0]) ?
+                                    ws_item->valuestring :
+                                    NULL;
+    int ret = agent_service_invoke(g_service, agent_id->valuestring, input_str, input_len,
+                                   workspace_dir, token, &out_output);
 
     {
         uint64_t elapsed = perf_now_us() - perf_t0;

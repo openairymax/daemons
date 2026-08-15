@@ -322,7 +322,7 @@ char *gateway_business_handle(void *request, void *user_data)
         if (ctx->on_shutdown) {
             ctx->on_shutdown(ctx->shutdown_user_data);
         } else {
-            LOG_WARN("gateway: shutdown requested but no shutdown callback registered");
+            AIRY_LOG_WARN("gateway: shutdown requested but no shutdown callback registered");
         }
     } else {
         cJSON *id = cJSON_GetObjectItem(root, "id");

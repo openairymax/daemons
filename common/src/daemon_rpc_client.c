@@ -95,13 +95,16 @@ static int rpc_buf_append(rpc_buf_t *buf, const char *src, size_t len)
 
 /**
  * @brief Connect to a Unix socket
- * @return fd >= 0 on success; < 0 on failure (returns negative AIRY_ERR_* code)
+ * @return fd >= 0 on success; -1 on failure (errno logged; the caller maps
+ *         the sentinel to an AIRY_ERR_* code)
  */
 static int rpc_connect_unix(const char *socket_path)
 {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0)
-        return -AIRY_ERR_FAIL;
+    if (fd < 0) {
+        SVC_LOG_ERROR("rpc_connect_unix: socket() failed: %s", strerror(errno));
+        return -1;
+    }
 
     struct sockaddr_un addr;
     __builtin_memset(&addr, 0, sizeof(addr));
@@ -111,8 +114,15 @@ static int rpc_connect_unix(const char *socket_path)
     __builtin_strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        int saved_errno = errno;
         close(fd);
-        return -AIRY_ERR_NOT_FOUND;
+        /* Return a plain negative sentinel, NOT a negated AIRY_ERR_* code:
+         * error codes are already negative (e.g. AIRY_ERR_NOT_FOUND = -6),
+         * so negating them yields a positive value that callers misread as
+         * a valid fd and send() on it (misleading "send failed" reports). */
+        SVC_LOG_ERROR("rpc_connect_unix: connect(%s) failed: %s", socket_path,
+                      strerror(saved_errno));
+        return -1;
     }
     return fd;
 }
@@ -173,7 +183,7 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
         if (pr < 0) {
             if (errno == EINTR)
                 continue;
-            return AIRY_ERR_FAIL;
+            return AIRY_ERR_GENERIC_FAIL;
         }
         if (pr == 0) {
             elapsed_ms += (uint32_t)remain;
@@ -208,7 +218,7 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
                     continue;
                 if (getenv("AIRY_RPC_DIAG"))
                     SVC_LOG_ERROR("rpc diag: recv<0 errno=%d buf_size=%zu", errno, buf->size);
-                return AIRY_ERR_FAIL;
+                return AIRY_ERR_GENERIC_FAIL;
             }
             if (n == 0) {
 
@@ -222,7 +232,7 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
                 if (getenv("AIRY_RPC_DIAG"))
                     SVC_LOG_ERROR("rpc diag: EOF buf_size=%zu head=%.120s", buf->size,
                                   buf->data ? buf->data : "");
-                return AIRY_ERR_FAIL;
+                return AIRY_ERR_GENERIC_FAIL;
             }
             int rc = rpc_buf_append(buf, chunk, (size_t)n);
             if (rc != AIRY_SUCCESS)
@@ -245,7 +255,7 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
                             continue;
                         if (errno == EAGAIN)
                             break;
-                        return AIRY_ERR_FAIL;
+                        return AIRY_ERR_GENERIC_FAIL;
                     }
                     if (n2 == 0)
                         break;
@@ -261,14 +271,14 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
                 if (getenv("AIRY_RPC_DIAG"))
                     SVC_LOG_ERROR("rpc diag: hangup json-incomplete buf_size=%zu head=%.120s",
                                   buf->size, buf->data ? buf->data : "");
-                return AIRY_ERR_FAIL;
+                return AIRY_ERR_GENERIC_FAIL;
             }
             elapsed_ms += 1;
         } else if (hangup || (pfd.revents & POLLERR)) {
             if (getenv("AIRY_RPC_DIAG"))
                 SVC_LOG_ERROR("rpc diag: hangup-no-POLLIN revents=0x%x buf_size=%zu", pfd.revents,
                               buf->size);
-            return AIRY_ERR_FAIL;
+            return AIRY_ERR_GENERIC_FAIL;
         }
     }
     return AIRY_ERR_TIMEOUT;
@@ -279,7 +289,7 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
 static int rpc_connect_unix(const char *socket_path)
 {
     (void)socket_path;
-    return -AIRY_ERR_NOT_SUPPORTED;
+    return AIRY_ERR_NOT_SUPPORTED;
 }
 
 static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
@@ -318,12 +328,12 @@ static int rpc_connect_send(const char *socket_path, const char *method, const c
 {
     int fd = rpc_connect_unix(socket_path);
     if (fd < 0)
-        return fd;
+        return AIRY_ERR_NOT_FOUND;
 
     cJSON *root = cJSON_CreateObject();
     if (!root) {
         close(fd);
-        return -AIRY_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
     cJSON_AddStringToObject(root, "jsonrpc", "2.0");
     cJSON_AddStringToObject(root, "method", method);
@@ -343,7 +353,7 @@ static int rpc_connect_send(const char *socket_path, const char *method, const c
     cJSON_Delete(root);
     if (!request_str) {
         close(fd);
-        return -AIRY_ERR_OUT_OF_MEMORY;
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     size_t req_len = strlen(request_str);
@@ -351,8 +361,8 @@ static int rpc_connect_send(const char *socket_path, const char *method, const c
     AIRY_FREE(request_str);
     if (sent < 0 || (size_t)sent != req_len) {
         close(fd);
-        SVC_LOG_ERROR("daemon_rpc_call: send failed (method=%s)", method);
-        return -AIRY_ERR_FAIL;
+        SVC_LOG_ERROR("daemon_rpc_call: send failed (method=%s): %s", method, strerror(errno));
+        return AIRY_ERR_GENERIC_FAIL;
     }
     return fd;
 }
@@ -367,7 +377,7 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
 
     int fd = rpc_connect_send(socket_path, method, params_json);
     if (fd < 0)
-        return -fd;
+        return fd;
 
     /* Streaming read loop: every recv() payload is delivered to the callback
      * as it arrives; recv() == 0 (peer closed the connection) marks the end
@@ -390,7 +400,7 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
         if (pr < 0) {
             if (errno == EINTR)
                 continue;
-            rc = AIRY_ERR_FAIL;
+            rc = AIRY_ERR_GENERIC_FAIL;
             break;
         }
         if (pr == 0) {
@@ -403,7 +413,7 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
              * cannot distinguish an early hangup from a finished stream; the
              * daemon writes the final chunk before closing, so a clean
              * completion is reported as POLLIN+EOF in the same poll cycle. */
-            rc = (pfd.revents & POLLHUP) ? AIRY_SUCCESS : AIRY_ERR_FAIL;
+            rc = (pfd.revents & POLLHUP) ? AIRY_SUCCESS : AIRY_ERR_GENERIC_FAIL;
             break;
         }
 
@@ -412,7 +422,7 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
         if (n < 0) {
             if (errno == EINTR || errno == EAGAIN)
                 continue;
-            rc = AIRY_ERR_FAIL;
+            rc = AIRY_ERR_GENERIC_FAIL;
             break;
         }
         if (n == 0) {
@@ -462,7 +472,7 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
 
     int fd = rpc_connect_unix(socket_path);
     if (fd < 0)
-        return -fd;
+        return AIRY_ERR_NOT_FOUND;
 
     cJSON *root = cJSON_CreateObject();
     if (!root) {
@@ -506,8 +516,8 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
 #if AIRY_PLATFORM_POSIX
         close(fd);
 #endif
-        SVC_LOG_ERROR("daemon_rpc_call: send failed (method=%s)", method);
-        return AIRY_ERR_FAIL;
+        SVC_LOG_ERROR("daemon_rpc_call: send failed (method=%s): %s", method, strerror(errno));
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     rpc_buf_t buf;
@@ -536,7 +546,7 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
     rpc_buf_free(&buf);
     if (!resp) {
         SVC_LOG_ERROR("daemon_rpc_call: response parse failed (method=%s)", method);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     cJSON *err_obj = cJSON_GetObjectItem(resp, "error");
@@ -548,14 +558,14 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
         SVC_LOG_WARN("daemon_rpc_call: daemon returned error (method=%s, code=%d, msg=%s)", method,
                      code, msg);
         cJSON_Delete(resp);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     cJSON *result = cJSON_GetObjectItem(resp, "result");
     if (!result) {
         SVC_LOG_ERROR("daemon_rpc_call: missing result field (method=%s)", method);
         cJSON_Delete(resp);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     char *result_str = cJSON_PrintUnformatted(result);

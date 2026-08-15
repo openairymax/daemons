@@ -107,7 +107,7 @@ static void dispatch_notifications(const am_alert_t *alert)
 
         switch (ch->type) {
         case AM_CHANNEL_LOG:
-            LOG_WARN("[ALERT][%s] %s: %s (source=%s)", am_level_to_string(alert->level),
+            AIRY_LOG_WARN("[ALERT][%s] %s: %s (source=%s)", am_level_to_string(alert->level),
                      alert->name, alert->message, alert->source);
             break;
         case AM_CHANNEL_FILE: {
@@ -174,7 +174,7 @@ AIRY_API int am_init(const am_config_t *config)
     log_channel.enabled = true;
     am_register_channel(&log_channel);
 
-    LOG_INFO("Alert manager initialized (eval_interval=%ums, dedup=%s)",
+    AIRY_LOG_INFO("Alert manager initialized (eval_interval=%ums, dedup=%s)",
              g_am.config.evaluation_interval_ms, g_am.config.enable_deduplication ? "on" : "off");
     return 0;
 }
@@ -190,7 +190,7 @@ AIRY_API void am_shutdown(void)
 
     airy_mtx_destroy(&g_am.mutex);
 
-    LOG_INFO("Alert manager shutdown");
+    AIRY_LOG_INFO("Alert manager shutdown");
 }
 
 AIRY_API int am_add_rule(const am_rule_t *rule)
@@ -219,7 +219,7 @@ AIRY_API int am_add_rule(const am_rule_t *rule)
 
     airy_mtx_unlock(&g_am.mutex);
 
-    LOG_INFO("Alert rule added: %s (type=%d, level=%s)", rule->name, rule->type,
+    AIRY_LOG_INFO("Alert rule added: %s (type=%d, level=%s)", rule->name, rule->type,
              am_level_to_string(rule->level));
     return 0;
 }
@@ -305,7 +305,7 @@ AIRY_API int am_fire(const char *name, am_level_t level, const char *message, co
 
     if (g_am.active_alert_count >= AM_MAX_ACTIVE_ALERTS) {
         airy_mtx_unlock(&g_am.mutex);
-        LOG_ERROR("Max active alerts reached");
+        AIRY_LOG_ERROR("Max active alerts reached");
         return AIRY_ERR_OVERFLOW;
     }
 
@@ -329,7 +329,7 @@ AIRY_API int am_fire(const char *name, am_level_t level, const char *message, co
 
     airy_mtx_unlock(&g_am.mutex);
 
-    LOG_WARN("Alert fired: %s [%s] - %s", name, am_level_to_string(level),
+    AIRY_LOG_WARN("Alert fired: %s [%s] - %s", name, am_level_to_string(level),
              message ? message : "no message");
     return 0;
 }
@@ -359,7 +359,7 @@ AIRY_API int am_resolve(const char *name)
 
     airy_mtx_unlock(&g_am.mutex);
 
-    LOG_INFO("Alert resolved: %s", name);
+    AIRY_LOG_INFO("Alert resolved: %s", name);
     return 0;
 }
 
@@ -381,7 +381,7 @@ AIRY_API int am_acknowledge(const char *name)
 
     airy_mtx_unlock(&g_am.mutex);
 
-    LOG_INFO("Alert acknowledged: %s", name);
+    AIRY_LOG_INFO("Alert acknowledged: %s", name);
     return 0;
 }
 
@@ -581,7 +581,7 @@ AIRY_API int am_register_channel(const am_channel_t *channel)
 
     airy_mtx_unlock(&g_am.mutex);
 
-    LOG_INFO("Alert channel registered: %s (type=%d)", channel->name, channel->type);
+    AIRY_LOG_INFO("Alert channel registered: %s (type=%d)", channel->name, channel->type);
     return 0;
 }
 

@@ -173,7 +173,7 @@ airy_err_t gateway_service_create(gateway_service_t *service,
         return AIRY_EINVAL;
     gateway_service_t svc = (gateway_service_t)AIRY_CALLOC(1, sizeof(struct gateway_service_s));
     if (!svc) {
-        LOG_ERROR("service allocation failed, size=%zu", sizeof(struct gateway_service_s));
+        AIRY_LOG_ERROR("service allocation failed, size=%zu", sizeof(struct gateway_service_s));
         return AIRY_ENOMEM;
     }
     if (config) {
@@ -231,7 +231,7 @@ airy_err_t gateway_service_start(gateway_service_t service)
     if (service->state == GW_STATE_RUNNING)
         return AIRY_SUCCESS;
     if (service->state != GW_STATE_INITIALIZED && service->state != GW_STATE_STOPPED) {
-        LOG_ERROR("service start rejected: invalid state=%d", service->state);
+        AIRY_LOG_ERROR("service start rejected: invalid state=%d", service->state);
         return AIRY_EPERM;
     }
     service->state = GW_STATE_RUNNING;
@@ -241,7 +241,7 @@ airy_err_t gateway_service_start(gateway_service_t service)
         service->http_gateway =
             http_gateway_create(service->config.http.host, service->config.http.port);
         if (!service->http_gateway) {
-            LOG_ERROR("http_gateway_create failed: host=%s, port=%d", service->config.http.host,
+            AIRY_LOG_ERROR("http_gateway_create failed: host=%s, port=%d", service->config.http.host,
                       service->config.http.port);
             service->state = GW_STATE_STOPPED;
             return AIRY_ENOMEM;
@@ -264,7 +264,7 @@ airy_err_t gateway_service_start(gateway_service_t service)
         service->ws_gateway = ws_gateway_create(service->config.ws.host, service->config.ws.port);
         if (!service->ws_gateway) {
 
-            LOG_ERROR("ws_gateway_create failed: host=%s, port=%d", service->config.ws.host,
+            AIRY_LOG_ERROR("ws_gateway_create failed: host=%s, port=%d", service->config.ws.host,
                       service->config.ws.port);
         } else {
             if (service->handler && service->ws_gateway->ops &&
@@ -273,22 +273,22 @@ airy_err_t gateway_service_start(gateway_service_t service)
                                                       service->handler_data);
             }
             if (gateway_start(service->ws_gateway) == AIRY_SUCCESS) {
-                LOG_INFO("WS gateway started on %s:%d", service->config.ws.host,
+                AIRY_LOG_INFO("WS gateway started on %s:%d", service->config.ws.host,
                          service->config.ws.port);
             } else {
-                LOG_ERROR("WS gateway start failed on %s:%d", service->config.ws.host,
+                AIRY_LOG_ERROR("WS gateway start failed on %s:%d", service->config.ws.host,
                           service->config.ws.port);
             }
         }
     } else if (!service->config.ws.enabled) {
-        LOG_INFO("WS gateway disabled by config");
+        AIRY_LOG_INFO("WS gateway disabled by config");
     }
 #endif
 
     if (service->config.stdio.enabled) {
         service->stdio_gateway = stdio_gateway_create();
         if (!service->stdio_gateway) {
-            LOG_ERROR("stdio_gateway_create failed");
+            AIRY_LOG_ERROR("stdio_gateway_create failed");
         } else {
             if (service->handler && service->stdio_gateway->ops &&
                 service->stdio_gateway->ops->set_handler) {
@@ -298,12 +298,12 @@ airy_err_t gateway_service_start(gateway_service_t service)
 
             if (airy_thread_create(&service->stdio_thread, gateway_stdio_thread_main,
                                    service->stdio_gateway) != 0) {
-                LOG_ERROR("stdio gateway thread create failed");
+                AIRY_LOG_ERROR("stdio gateway thread create failed");
                 gateway_destroy(service->stdio_gateway);
                 service->stdio_gateway = NULL;
             } else {
                 service->stdio_thread_started = 1;
-                LOG_INFO("Stdio gateway started");
+                AIRY_LOG_INFO("Stdio gateway started");
             }
         }
     }
@@ -318,7 +318,7 @@ airy_err_t gateway_service_start(gateway_service_t service)
                                                          (uint16_t)(service->config.http.port + 2);
         service->http2_gateway = http2_gateway_create(service->config.http.host, h2_port);
         if (!service->http2_gateway) {
-            LOG_ERROR("http2_gateway_create failed: host=%s, port=%d", service->config.http.host,
+            AIRY_LOG_ERROR("http2_gateway_create failed: host=%s, port=%d", service->config.http.host,
                       h2_port);
         } else {
             if (service->handler && service->http2_gateway->ops &&
@@ -327,9 +327,9 @@ airy_err_t gateway_service_start(gateway_service_t service)
                                                          service->handler, service->handler_data);
             }
             if (gateway_start(service->http2_gateway) == AIRY_SUCCESS) {
-                LOG_INFO("HTTP/2 gateway started on %s:%d", service->config.http.host, h2_port);
+                AIRY_LOG_INFO("HTTP/2 gateway started on %s:%d", service->config.http.host, h2_port);
             } else {
-                LOG_ERROR("HTTP/2 gateway start failed on %s:%d", service->config.http.host,
+                AIRY_LOG_ERROR("HTTP/2 gateway start failed on %s:%d", service->config.http.host,
                           h2_port);
             }
         }
@@ -344,7 +344,7 @@ airy_err_t gateway_service_set_handler(gateway_service_t service, gateway_servic
     if (!service)
         return AIRY_EINVAL;
     if (service->state == GW_STATE_RUNNING) {
-        LOG_ERROR("gateway_service_set_handler rejected: service running");
+        AIRY_LOG_ERROR("gateway_service_set_handler rejected: service running");
         return AIRY_EPERM;
     }
     service->handler = handler;
@@ -358,19 +358,19 @@ airy_err_t gateway_service_stop(gateway_service_t service, bool force __attribut
         return AIRY_EINVAL;
     if (service->state != GW_STATE_RUNNING)
         return AIRY_SUCCESS;
-    LOG_INFO("gateway_service_stop: begin (http/ws/stdio/http2 teardown)");
+    AIRY_LOG_INFO("gateway_service_stop: begin (http/ws/stdio/http2 teardown)");
 #ifdef GATEWAY_HAS_HTTP
     if (service->http_gateway) {
         gateway_destroy(service->http_gateway);
         service->http_gateway = NULL;
-        LOG_INFO("gateway_service_stop: HTTP gateway destroyed");
+        AIRY_LOG_INFO("gateway_service_stop: HTTP gateway destroyed");
     }
 #endif
 #ifdef GATEWAY_HAS_WS
     if (service->ws_gateway) {
         gateway_destroy(service->ws_gateway);
         service->ws_gateway = NULL;
-        LOG_INFO("gateway_service_stop: WS gateway destroyed");
+        AIRY_LOG_INFO("gateway_service_stop: WS gateway destroyed");
     }
 #endif
     if (service->stdio_gateway) {
@@ -380,17 +380,17 @@ airy_err_t gateway_service_stop(gateway_service_t service, bool force __attribut
             airy_thread_join(service->stdio_thread, NULL);
             service->stdio_thread_started = 0;
         }
-        LOG_INFO("gateway_service_stop: Stdio gateway destroyed");
+        AIRY_LOG_INFO("gateway_service_stop: Stdio gateway destroyed");
     }
 #ifdef GATEWAY_HAS_HTTP2
     if (service->http2_gateway) {
         gateway_destroy(service->http2_gateway);
         service->http2_gateway = NULL;
-        LOG_INFO("gateway_service_stop: HTTP/2 gateway destroyed");
+        AIRY_LOG_INFO("gateway_service_stop: HTTP/2 gateway destroyed");
     }
 #endif
     service->state = GW_STATE_STOPPED;
-    LOG_INFO("gateway_service_stop: complete");
+    AIRY_LOG_INFO("gateway_service_stop: complete");
     return AIRY_SUCCESS;
 }
 

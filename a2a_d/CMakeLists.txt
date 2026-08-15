@@ -146,7 +146,7 @@ target_link_libraries(a2a_d PRIVATE
     airy_protocols
     airy_common
     Threads::Threads
-    m
+    airy_platform_libs
 )
 
 target_compile_options(a2a_d PRIVATE

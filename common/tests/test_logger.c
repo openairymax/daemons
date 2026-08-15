@@ -90,14 +90,14 @@ static void test_logger_macros(void)
 
     airy_log_init(&config);
 
-    LOG_DEBUG("Test debug message: %d", 42);
-    LOG_INFO("Test info message");
-    LOG_WARN("Test warn message");
-    LOG_ERROR("Test error message");
+    AIRY_LOG_DEBUG("Test debug message: %d", 42);
+    AIRY_LOG_INFO("Test info message");
+    AIRY_LOG_WARN("Test warn message");
+    AIRY_LOG_ERROR("Test error message");
 
     airy_trace_context_t ctx;
     airy_trace_new(&ctx);
-    LOG_INFO_T(&ctx, "Test message with trace context");
+    AIRY_LOG_INFO_T(&ctx, "Test message with trace context");
 
     airy_log_shutdown();
 

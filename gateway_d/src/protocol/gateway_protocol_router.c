@@ -282,27 +282,27 @@ static void record_proto_stats(gw_proto_router_stats_t *stats, gw_proto_detect_r
     switch (proto_type) {
     case GW_PROTO_DETECT_MCP:
         stats->mcp_requests++;
-        LOG_DEBUG("protocol=%-8s count=%llu (mcp_requests)", name,
+        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (mcp_requests)", name,
                   (unsigned long long)stats->mcp_requests);
         break;
     case GW_PROTO_DETECT_A2A:
         stats->a2a_requests++;
-        LOG_DEBUG("protocol=%-8s count=%llu (a2a_requests)", name,
+        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (a2a_requests)", name,
                   (unsigned long long)stats->a2a_requests);
         break;
     case GW_PROTO_DETECT_OPENAI:
         stats->openai_requests++;
-        LOG_DEBUG("protocol=%-8s count=%llu (openai_requests)", name,
+        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (openai_requests)", name,
                   (unsigned long long)stats->openai_requests);
         break;
     case GW_PROTO_DETECT_JSONRPC:
         stats->jsonrpc_requests++;
-        LOG_DEBUG("protocol=%-8s count=%llu (jsonrpc_requests)", name,
+        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (jsonrpc_requests)", name,
                   (unsigned long long)stats->jsonrpc_requests);
         break;
     default:
         stats->unknown_requests++;
-        LOG_DEBUG("protocol=%-8s count=%llu (unknown_requests)", name,
+        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (unknown_requests)", name,
                   (unsigned long long)stats->unknown_requests);
         break;
     }
@@ -321,7 +321,7 @@ int gw_proto_router_route(gw_proto_router_t *router, gw_proto_detect_result_t pr
     gw_proto_request_handler_t handler = find_handler(router, proto_type, &user_data);
 
     if (!handler) {
-        LOG_WARN("no handler found for protocol type=%d, route_errors=%llu", proto_type,
+        AIRY_LOG_WARN("no handler found for protocol type=%d, route_errors=%llu", proto_type,
                  (unsigned long long)router->stats.route_errors);
         router->stats.route_errors++;
         record_proto_stats(&router->stats, proto_type);
@@ -332,7 +332,7 @@ int gw_proto_router_route(gw_proto_router_t *router, gw_proto_detect_result_t pr
 
     int result = handler(method, path, body_json, response_json, user_data);
     if (result != 0) {
-        LOG_WARN("handler returned error: proto_type=%d, result=%d, path=%s", proto_type, result,
+        AIRY_LOG_WARN("handler returned error: proto_type=%d, result=%d, path=%s", proto_type, result,
                  path ? path : "(null)");
         router->stats.route_errors++;
     }

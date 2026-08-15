@@ -72,7 +72,7 @@ foreach(TEST_SRC ${SCHED_TEST_SOURCES})
         airy_common
         airy_coreloopthree
         Threads::Threads
-        m
+        airy_platform_libs
     )
 
     target_compile_options(test_sched_${TEST_NAME} PRIVATE

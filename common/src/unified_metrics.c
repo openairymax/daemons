@@ -124,7 +124,7 @@ AIRY_API int um_init(const um_config_t *config)
         um_register_default_metrics();
     }
 
-    LOG_INFO("Unified metrics collector initialized (service=%s)", g_um.config.service_name);
+    AIRY_LOG_INFO("Unified metrics collector initialized (service=%s)", g_um.config.service_name);
     return 0;
 }
 
@@ -139,7 +139,7 @@ AIRY_API void um_shutdown(void)
 
     airy_mtx_destroy(&g_um.mutex);
 
-    LOG_INFO("Unified metrics collector shutdown");
+    AIRY_LOG_INFO("Unified metrics collector shutdown");
 }
 
 AIRY_API bool um_is_initialized(void)
@@ -167,7 +167,7 @@ AIRY_API int um_register_module(const char *module_name, const char *instance_id
         airy_mtx_unlock(&g_um.mutex);
         SVC_LOG_ERROR("um_register_module: max modules reached count=%u max=%u module='%s'",
                       g_um.module_count, UM_MAX_MODULES, module_name);
-        LOG_ERROR("Max metric modules reached");
+        AIRY_LOG_ERROR("Max metric modules reached");
         return AIRY_ERR_OVERFLOW;
     }
 
@@ -191,7 +191,7 @@ AIRY_API int um_register_module(const char *module_name, const char *instance_id
 
     airy_mtx_unlock(&g_um.mutex);
 
-    LOG_INFO("Metrics module registered: %s (instance=%s)", module_name, mod->instance_id);
+    AIRY_LOG_INFO("Metrics module registered: %s (instance=%s)", module_name, mod->instance_id);
     return 0;
 }
 
