@@ -53,6 +53,10 @@ typedef struct sched_dag {
      * input for nodes whose goal is only a plan label (goal==id or empty),
      * so remote submissions still carry the actual task. */
     char *input;
+    /* Optional task workspace (top-level "workspace_dir"): forwarded to the
+     * agent runner so it chdir()s into the task directory before executing
+     * (NULL = daemon cwd). */
+    char *workspace_dir;
     sched_dag_node_t *nodes[SCHED_DAG_MAX_NODES];
     size_t node_count;
     sched_dag_status_t status;

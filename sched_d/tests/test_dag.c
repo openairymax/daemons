@@ -53,8 +53,10 @@ void exec_log_push(const char *role, const char *goal)
     }
 }
 
-int fake_executor(const char *agent_id, const char *task_description, char **out_output)
+int fake_executor(const char *agent_id, const char *task_description, const char *workspace_dir,
+                  char **out_output)
 {
+    (void)workspace_dir;
     exec_log_push(agent_id ? agent_id : "?", task_description ? task_description : "");
 
     if (g_block) {
@@ -230,8 +232,10 @@ int get_dag_status_str(sched_service_t *svc, const char *dag_id, char *out, size
  *     (B/C are same-layer, dependency-free; after batch collection they run
  *     concurrently via the thread pool)
  */
-int parallel_executor(const char *agent_id, const char *task_description, char **out_output)
+int parallel_executor(const char *agent_id, const char *task_description,
+                      const char *workspace_dir, char **out_output)
 {
+    (void)workspace_dir;
     exec_log_push(agent_id ? agent_id : "?", task_description ? task_description : "");
     int now = ++g_concurrent_now;
     if (now > g_concurrent_max)
