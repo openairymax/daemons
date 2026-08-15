@@ -129,7 +129,7 @@ int ipc_bus_helper_register_channel(ipc_bus_helper_t *ibh, const char *channel_n
     if (!ibh->channel) {
         SVC_LOG_ERROR("Failed to create channel '%s' for daemon '%s'", channel_name,
                       ibh->daemon_name);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     ibh->channel_registered = true;
@@ -163,7 +163,7 @@ int ipc_bus_helper_register_endpoint(ipc_bus_helper_t *ibh, const char *service_
     if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to register endpoint '%s' for daemon '%s' (err=%d)", service_name,
                       ibh->daemon_name, err);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     ibh->endpoint_registered = true;
@@ -182,7 +182,7 @@ int ipc_bus_helper_register_handler(ipc_bus_helper_t *ibh, ipc_bus_message_handl
     if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to register message handler for daemon '%s' (err=%d)",
                       ibh->daemon_name, err);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     SVC_LOG_INFO("Message handler registered for daemon '%s'", ibh->daemon_name);
@@ -200,7 +200,7 @@ int ipc_bus_helper_register_event_handler(ipc_bus_helper_t *ibh, const char *eve
     if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to register event handler '%s' for daemon '%s' (err=%d)", event_name,
                       ibh->daemon_name, err);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     SVC_LOG_INFO("Event handler '%s' registered for daemon '%s'", event_name, ibh->daemon_name);
@@ -225,7 +225,7 @@ int ipc_bus_helper_send(ipc_bus_helper_t *ibh, const char *target_service,
         ibh->send_failures++;
         SVC_LOG_ERROR("C-L09: Failed to create message [%s] → [%s]", ibh->daemon_name,
                       target_service);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     safe_strcpy(msg->header.source, ibh->daemon_name, sizeof(msg->header.source));
@@ -243,7 +243,7 @@ int ipc_bus_helper_send(ipc_bus_helper_t *ibh, const char *target_service,
         ibh->send_failures++;
         SVC_LOG_WARN("C-L09: SEND FAILED [%s] → [%s] proto=%s err=%d", ibh->daemon_name,
                      target_service, ipc_bus_proto_to_string(protocol), (int)err);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 }
 
@@ -265,7 +265,7 @@ int ipc_bus_helper_request(ipc_bus_helper_t *ibh, const char *target_service,
     } else {
         SVC_LOG_WARN("C-L09: REQUEST FAILED [%s] → [%s] err=%d", ibh->daemon_name, target_service,
                      (int)err);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 }
 
@@ -283,7 +283,7 @@ int ipc_bus_helper_broadcast(ipc_bus_helper_t *ibh, const ipc_bus_message_t *mes
         return 0;
     } else {
         SVC_LOG_WARN("C-L09: BROADCAST FAILED [%s] err=%d", ibh->daemon_name, (int)err);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 }
 
@@ -402,7 +402,7 @@ int ipc_bus_helper_enable_backpressure(ipc_bus_helper_t *ibh, const ipc_bp_confi
     ibh->bp_ctrl = ipc_bp_create(config);
     if (!ibh->bp_ctrl) {
         SVC_LOG_ERROR("P1.24: Failed to create backpressure controller for '%s'", ibh->daemon_name);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     SVC_LOG_INFO("P1.24: Backpressure enabled for daemon '%s'", ibh->daemon_name);

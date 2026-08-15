@@ -181,8 +181,7 @@ target_link_libraries(tool_d PRIVATE
     airy_common
     airy_llm_service
     Threads::Threads
-    uuid
-    m
+    airy_platform_libs
 )
 
 target_compile_options(tool_d PRIVATE

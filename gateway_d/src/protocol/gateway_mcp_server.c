@@ -53,7 +53,7 @@ gw_mcp_server_t *gw_mcp_server_create(const gw_mcp_server_config_t *config)
 {
     gw_mcp_server_t *server = (gw_mcp_server_t *)AIRY_CALLOC(1, sizeof(gw_mcp_server_t));
     if (!server) {
-        LOG_ERROR("server allocation failed, size=%zu", sizeof(gw_mcp_server_t));
+        AIRY_LOG_ERROR("server allocation failed, size=%zu", sizeof(gw_mcp_server_t));
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     if (config) {
@@ -546,14 +546,14 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
         char *tool_name = extract_tool_name_from_params(params_json);
         char *tool_args = extract_tool_args_from_params(params_json);
         if (!tool_name) {
-            LOG_WARN("failed to extract tool name from params in tools/call");
+            AIRY_LOG_WARN("failed to extract tool name from params in tools/call");
             AIRY_FREE(tool_args);
             server->error_count++;
             return AIRY_ERR_PARSE_ERROR;
         }
         gw_mcp_tool_entry_t *tool = find_tool(server, tool_name);
         if (!tool) {
-            LOG_WARN("tool not found: tool_name=%s, tool_count=%zu", tool_name, server->tool_count);
+            AIRY_LOG_WARN("tool not found: tool_name=%s, tool_count=%zu", tool_name, server->tool_count);
             const char *err = "{\"jsonrpc\":\"2.0\",\"error\":"
                               "{\"code\":-32601,\"message\":\"Tool not found: %s\"}}";
             size_t elen = snprintf(NULL, 0, err, tool_name);
@@ -569,7 +569,7 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
         char *tool_result = NULL;
         int rc = tool->exec_fn(tool_name, tool_args, &tool_result, tool->user_data);
         if (rc != 0 || !tool_result) {
-            LOG_ERROR("tool execution failed: tool_name=%s, rc=%d", tool_name, rc);
+            AIRY_LOG_ERROR("tool execution failed: tool_name=%s, rc=%d", tool_name, rc);
             AIRY_FREE(tool_name);
             tool_name = NULL;
             AIRY_FREE(tool_args);
@@ -617,13 +617,13 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
     if (strcmp(method, "resources/read") == 0) {
         char *uri = extract_resource_uri_from_params(params_json);
         if (!uri) {
-            LOG_WARN("failed to extract URI from params in resources/read");
+            AIRY_LOG_WARN("failed to extract URI from params in resources/read");
             server->error_count++;
             return AIRY_ERR_PARSE_ERROR;
         }
         gw_mcp_resource_entry_t *res = find_resource(server, uri);
         if (!res) {
-            LOG_WARN("resource not found: uri=%s, resource_count=%zu", uri, server->resource_count);
+            AIRY_LOG_WARN("resource not found: uri=%s, resource_count=%zu", uri, server->resource_count);
             AIRY_FREE(uri);
             server->error_count++;
             return AIRY_ERR_NOT_FOUND;
@@ -634,7 +634,7 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
         AIRY_FREE(uri);
         uri = NULL;
         if (rc != 0 || !content) {
-            LOG_ERROR("resource read failed: uri=%s, rc=%d", res->uri, rc);
+            AIRY_LOG_ERROR("resource read failed: uri=%s, rc=%d", res->uri, rc);
             AIRY_FREE(content);
             AIRY_FREE(mime);
             server->error_count++;
@@ -675,7 +675,7 @@ int gw_mcp_server_handle_request(gw_mcp_server_t *server, const char *method, co
 
     char *rpc_method = extract_jsonrpc_method(body_json);
     if (!rpc_method) {
-        LOG_WARN("failed to extract JSON-RPC method from request body");
+        AIRY_LOG_WARN("failed to extract JSON-RPC method from request body");
         server->error_count++;
         return AIRY_ERR_PARSE_ERROR;
     }

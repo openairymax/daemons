@@ -190,7 +190,7 @@ int sd_helper_register(sd_helper_t *sdh, const char *name, const char *type, con
     airy_err_t err = sd_register(sdh->sd, name, type, &inst, tags ? tags : "", "");
     if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to register service '%s' (err=%d)", name, err);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     safe_strcpy(sdh->service_name, name, sizeof(sdh->service_name));
@@ -233,7 +233,7 @@ int sd_helper_register_unix(sd_helper_t *sdh, const char *name, const char *type
     airy_err_t err = sd_register(sdh->sd, name, type, &inst, tags ? tags : "", "");
     if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to register Unix service '%s' (err=%d)", name, err);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     safe_strcpy(sdh->service_name, name, sizeof(sdh->service_name));

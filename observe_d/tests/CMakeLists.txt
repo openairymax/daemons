@@ -42,7 +42,6 @@ foreach(TEST_SRC ${OBSERVE_TEST_SOURCES})
         svc_common
         airy_platform_libs
         Threads::Threads
-        m
     )
 
     # svc_common PUBLIC 传递链接 cjson（AIRY_HAS_CJSON 时）

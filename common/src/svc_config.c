@@ -122,7 +122,7 @@ airy_err_t airy_config_load(const char *service_name, airy_config_t **config)
         cfg->last_modified = time(NULL);
         cfg->checksum[0] = '\0';
         *config = cfg;
-        LOG_WARN("No config file found for service '%s', using empty config", service_name);
+        AIRY_LOG_WARN("No config file found for service '%s', using empty config", service_name);
         return AIRY_SUCCESS;
     }
 
@@ -163,7 +163,7 @@ airy_err_t airy_config_load(const char *service_name, airy_config_t **config)
 
     *config = cfg;
 
-    LOG_INFO("Config loaded for service '%s': %zu bytes from %s", service_name, bytes_read,
+    AIRY_LOG_INFO("Config loaded for service '%s': %zu bytes from %s", service_name, bytes_read,
              config_path);
     return AIRY_SUCCESS;
 }
@@ -206,7 +206,7 @@ airy_err_t airy_config_watch(const char *service_name, airy_config_change_callba
 
     airy_mtx_unlock(&g_config_mgr.mutex);
 
-    LOG_INFO("Config watcher registered for service '%s'", service_name);
+    AIRY_LOG_INFO("Config watcher registered for service '%s'", service_name);
     return AIRY_SUCCESS;
 }
 

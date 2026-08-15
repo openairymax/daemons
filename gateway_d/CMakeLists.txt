@@ -127,6 +127,8 @@ target_include_directories(airy_gateway_service PUBLIC
     ${COMMONS_INCLUDE_DIR}/platform/include
     ${COMMONS_INCLUDE_DIR}/utils/error/include
     ${COMMONS_INCLUDE_DIR}/utils/logging/include
+    # S-2 收敛 (2026-08-14): AIRY_LOG_* 权威宏源（logging.h 统一入口已引用）
+    ${COMMONS_INCLUDE_DIR}/utils/observability/include
     ${COMMONS_INCLUDE_DIR}/utils/config_unified/include
     ${COMMONS_INCLUDE_DIR}/utils/memory/include
     ${COMMONS_INCLUDE_DIR}/utils/string/include
@@ -293,6 +295,8 @@ target_include_directories(gateway_lib_obj PUBLIC
     ${CJSON_INCLUDE_DIRS}
     ${COMMONS_DIR}/platform/include
     ${COMMONS_DIR}/utils/logging/include
+    # S-2 收敛 (2026-08-14): AIRY_LOG_* 权威宏源（logging.h 统一入口已引用）
+    ${COMMONS_DIR}/utils/observability/include
     ${COMMONS_DIR}/utils/error/include
     ${COMMONS_DIR}/utils/sync/include
     ${COMMONS_DIR}/utils/compat/include
@@ -379,6 +383,8 @@ target_include_directories(gateway_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/platform/include
     ${COMMONS_INCLUDE_DIR}/utils/error/include
     ${COMMONS_INCLUDE_DIR}/utils/logging/include
+    # S-2 收敛 (2026-08-14): AIRY_LOG_* 权威宏源（logging.h 统一入口已引用）
+    ${COMMONS_INCLUDE_DIR}/utils/observability/include
     ${COMMONS_INCLUDE_DIR}/utils/config_unified/include
     ${COMMONS_INCLUDE_DIR}/utils/memory/include
     ${COMMONS_INCLUDE_DIR}/utils/string/include

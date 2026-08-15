@@ -138,7 +138,7 @@ target_link_libraries(agent_d PRIVATE
     airy_agent_service
     airy_common
     Threads::Threads
-    m
+    airy_platform_libs
 )
 
 target_compile_options(agent_d PRIVATE

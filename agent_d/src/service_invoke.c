@@ -59,7 +59,8 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id)
 }
 
 int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char *input, size_t len,
-                         airy_cancel_token_t *cancel_token, char **out_output)
+                         const char *workspace_dir, airy_cancel_token_t *cancel_token,
+                         char **out_output)
 {
     if (!svc || !svc->initialized || !agent_id || !out_output)
         return AIRY_ERR_INVALID_PARAM;
@@ -104,6 +105,13 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char 
         cJSON *req = cJSON_CreateObject();
         cJSON_AddStringToObject(req, "agent_id", agent_id);
         cJSON_AddStringToObject(req, "input", input ? input : "");
+        /* Decision E workspace isolation: forward the isolated workspace dir
+         * to the runner so the child chdir()s into it before executing.
+         * Without this the agent runs in the daemon's cwd and spends its tool
+         * rounds exploring the host tree instead of acting on the task
+         * (P0-1 end-to-end failure: tool loop exhausted on fs_read/fs_list). */
+        if (workspace_dir && workspace_dir[0])
+            cJSON_AddStringToObject(req, "workspace_dir", workspace_dir);
         char *req_str = cJSON_PrintUnformatted(req);
         cJSON_Delete(req);
 
@@ -185,14 +193,30 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char 
 
         /* Parse the response JSON and extract the output field (runner.py
          * convention). Success: {"success":true,"output":"..."}
-         * Failure: {"success":false,"error":"..."} */
+         * Failure: {"success":false,"error":"..."}
+         * P0-1 L2-poisoning root cause: a failure must NOT be flattened to
+         * plain text with a SUCCESS return, otherwise upper layers (work
+         * hall / CLI) treat the error string as a valid task result and
+         * absorb it as SUCCESS into the semantic cache. Keep the structured
+         * {"success":false,"error":...} JSON so callers can distinguish a
+         * real agent failure from a successful answer. */
         cJSON *resp = cJSON_Parse(resp_buf);
         if (resp) {
             cJSON *success_item = cJSON_GetObjectItem(resp, "success");
             cJSON *err_item = cJSON_GetObjectItem(resp, "error");
             if (success_item && cJSON_IsFalse(success_item) && err_item &&
                 cJSON_IsString(err_item)) {
-                *out_output = AIRY_STRDUP(err_item->valuestring);
+                cJSON *fobj = cJSON_CreateObject();
+                if (fobj) {
+                    cJSON_AddBoolToObject(fobj, "success", 0);
+                    cJSON_AddStringToObject(fobj, "error", err_item->valuestring);
+                    char *fstr = cJSON_PrintUnformatted(fobj);
+                    cJSON_Delete(fobj);
+                    *out_output = fstr ? fstr :
+                                          AIRY_STRDUP("{\"success\":false,\"error\":\"agent failed\"}");
+                } else {
+                    *out_output = AIRY_STRDUP("{\"success\":false,\"error\":\"agent failed\"}");
+                }
             } else {
                 cJSON *output_item = cJSON_GetObjectItem(resp, "output");
                 if (output_item && cJSON_IsString(output_item)) {
@@ -265,12 +289,16 @@ int agent_service_invoke_begin(agent_service_t *svc, const char *request_id,
         agent_invoke_session_t *s = &svc->sessions[i];
         if (s->active && strcmp(s->request_id, request_id) == 0) {
 
-            s->active = 0;
-            if (s->token) {
-                airy_cancel_token_destroy(s->token);
-                AIRY_FREE(s->token);
-                s->token = NULL;
-            }
+            /* Concurrent invoke with the same request_id: the previous
+             * session's token is still polled by another worker thread
+             * (agent_read_line_timeout_ex). Destroying it here is a
+             * heap-use-after-free (see ASan report on agent_d invoke).
+             * The cancel key must be unique per in-flight invoke; reject
+             * the duplicate and let the caller fail cleanly. */
+            airy_mtx_unlock(&svc->session_lock);
+            airy_cancel_token_destroy(token);
+            AIRY_FREE(token);
+            return AIRY_ERR_BUSY;
         }
     }
     for (size_t i = 0; i < AGENT_INVOKE_SESSIONS_MAX; i++) {
@@ -323,6 +351,11 @@ int agent_service_invoke_cancel(agent_service_t *svc, const char *request_id)
         agent_invoke_session_t *s = &svc->sessions[i];
         if (s->active && strcmp(s->request_id, request_id) == 0) {
             token = s->token;
+            /* Cancel while holding the session lock: the invoke thread's
+             * agent_service_invoke_end could otherwise free the token
+             * between our unlock and the cancel call (use-after-free). */
+            if (token)
+                airy_cancel_token_cancel(token);
             break;
         }
     }

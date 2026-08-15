@@ -102,7 +102,7 @@ static void *monitor_thread_func(void *arg)
     if (interval_ms == 0)
         interval_ms = 30000;
 
-    LOG_INFO("Monitor thread started for service '%s' (interval=%ums)", svc_name, interval_ms);
+    AIRY_LOG_INFO("Monitor thread started for service '%s' (interval=%ums)", svc_name, interval_ms);
 
     while (!mon->stop_requested && mon->active) {
         airy_sleep_ms(interval_ms);
@@ -115,7 +115,7 @@ static void *monitor_thread_func(void *arg)
 
         if (err != AIRY_SUCCESS) {
             mon->consecutive_failures++;
-            LOG_WARN("Service '%s' health check failed (consecutive: %u)", svc_name,
+            AIRY_LOG_WARN("Service '%s' health check failed (consecutive: %u)", svc_name,
                      mon->consecutive_failures);
 
             if (mon->config.enable_degradation &&
@@ -126,7 +126,7 @@ static void *monitor_thread_func(void *arg)
                 snprintf(reason, sizeof(reason), "consecutive_failures=%u >= threshold=%u",
                          mon->consecutive_failures, mon->config.degradation_threshold);
                 mon->degradation_handler(mon->service, reason, mon->degradation_user_data);
-                LOG_WARN("Service '%s' degraded: %s", svc_name, reason);
+                AIRY_LOG_WARN("Service '%s' degraded: %s", svc_name, reason);
             }
 
             if (mon->config.auto_restart &&
@@ -134,28 +134,28 @@ static void *monitor_thread_func(void *arg)
                 uint64_t now = airy_time_ms();
                 if (now >= mon->next_restart_time) {
                     mon->restart_attempts++;
-                    LOG_INFO("Auto-restarting service '%s' (attempt %u/%u)", svc_name,
+                    AIRY_LOG_INFO("Auto-restarting service '%s' (attempt %u/%u)", svc_name,
                              mon->restart_attempts, mon->config.max_restart_attempts);
                     airy_svc_stop(mon->service, true);
                     airy_err_t start_err = airy_svc_start(mon->service);
                     if (start_err == AIRY_SUCCESS) {
                         mon->consecutive_failures = 0;
                         mon->degraded = false;
-                        LOG_INFO("Service '%s' restarted successfully", svc_name);
+                        AIRY_LOG_INFO("Service '%s' restarted successfully", svc_name);
                     } else {
                         uint32_t backoff = mon->config.restart_backoff_base_ms *
                                            (1 << (mon->restart_attempts - 1));
                         if (backoff > mon->config.restart_backoff_max_ms)
                             backoff = mon->config.restart_backoff_max_ms;
                         mon->next_restart_time = now + backoff;
-                        LOG_ERROR("Service '%s' restart failed, next retry in %ums", svc_name,
+                        AIRY_LOG_ERROR("Service '%s' restart failed, next retry in %ums", svc_name,
                                   backoff);
                     }
                 }
             }
         } else {
             if (mon->consecutive_failures > 0)
-                LOG_INFO("Service '%s' recovered after %u failures", svc_name,
+                AIRY_LOG_INFO("Service '%s' recovered after %u failures", svc_name,
                          mon->consecutive_failures);
             mon->consecutive_failures = 0;
             mon->restart_attempts = 0;
@@ -163,7 +163,7 @@ static void *monitor_thread_func(void *arg)
         }
     }
 
-    LOG_INFO("Monitor thread stopped for service '%s'", svc_name);
+    AIRY_LOG_INFO("Monitor thread stopped for service '%s'", svc_name);
     AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
@@ -199,13 +199,13 @@ airy_err_t airy_svc_monitor_start(airy_svc_t service, const airy_monitor_config_
             if (thread_err != 0) {
                 g_monitor.services[i].active = false;
                 airy_mtx_unlock(&g_monitor.mutex);
-                LOG_ERROR("Failed to create monitor thread for service '%s'",
+                AIRY_LOG_ERROR("Failed to create monitor thread for service '%s'",
                           airy_svc_get_name(service));
                 return DAEMON_EINIT;
             }
 
             airy_mtx_unlock(&g_monitor.mutex);
-            LOG_INFO("Service monitoring updated for '%s'", airy_svc_get_name(service));
+            AIRY_LOG_INFO("Service monitoring updated for '%s'", airy_svc_get_name(service));
             return AIRY_SUCCESS;
         }
     }
@@ -233,7 +233,7 @@ airy_err_t airy_svc_monitor_start(airy_svc_t service, const airy_monitor_config_
     if (thread_err != 0) {
         mon->active = false;
         airy_mtx_unlock(&g_monitor.mutex);
-        LOG_ERROR("Failed to create monitor thread for service '%s'", airy_svc_get_name(service));
+        AIRY_LOG_ERROR("Failed to create monitor thread for service '%s'", airy_svc_get_name(service));
         return DAEMON_EINIT;
     }
 
@@ -241,7 +241,7 @@ airy_err_t airy_svc_monitor_start(airy_svc_t service, const airy_monitor_config_
 
     airy_mtx_unlock(&g_monitor.mutex);
 
-    LOG_INFO("Service monitoring started for '%s' (interval=%ums, auto_restart=%s)",
+    AIRY_LOG_INFO("Service monitoring started for '%s' (interval=%ums, auto_restart=%s)",
              airy_svc_get_name(service), config->healthcheck_interval_ms,
              config->auto_restart ? "true" : "false");
     return AIRY_SUCCESS;
@@ -276,7 +276,7 @@ airy_err_t airy_svc_monitor_stop(airy_svc_t service)
 
             for (uint32_t j = 0; j < g_monitor.count; j++) {
                 if (g_monitor.services[j].service == service) {
-                    LOG_INFO("Service monitoring stopped for '%s'", airy_svc_get_name(service));
+                    AIRY_LOG_INFO("Service monitoring stopped for '%s'", airy_svc_get_name(service));
                     if (j < g_monitor.count - 1) {
                         g_monitor.services[j] = g_monitor.services[g_monitor.count - 1];
                     }
@@ -312,7 +312,7 @@ airy_err_t airy_svc_set_degrad_hdlr(airy_svc_t service, airy_degradation_handler
             g_monitor.services[i].degradation_handler = handler;
             g_monitor.services[i].degradation_user_data = user_data;
             airy_mtx_unlock(&g_monitor.mutex);
-            LOG_INFO("Degradation handler set for service '%s'", airy_svc_get_name(service));
+            AIRY_LOG_INFO("Degradation handler set for service '%s'", airy_svc_get_name(service));
             return AIRY_SUCCESS;
         }
     }
@@ -329,7 +329,7 @@ airy_err_t airy_svc_set_degrad_hdlr(airy_svc_t service, airy_degradation_handler
         g_monitor.count++;
 
         airy_mtx_unlock(&g_monitor.mutex);
-        LOG_INFO("Degradation handler set for unmonitored service '%s'",
+        AIRY_LOG_INFO("Degradation handler set for unmonitored service '%s'",
                  airy_svc_get_name(service));
         return AIRY_SUCCESS;
     }

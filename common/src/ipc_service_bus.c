@@ -179,7 +179,7 @@ AIRY_API ipc_service_bus_t ipc_service_bus_create(const char *bus_name,
     bus->next_msg_id = 1;
     g_bus_instance_count++;
 
-    LOG_INFO("IPC service bus '%s' created", bus_name);
+    AIRY_LOG_INFO("IPC service bus '%s' created", bus_name);
     return (ipc_service_bus_t)bus;
 }
 
@@ -210,7 +210,7 @@ AIRY_API void ipc_service_bus_destroy(ipc_service_bus_t bus_handle)
     airy_mtx_destroy(&bus->mutex);
     AIRY_FREE(bus);
 
-    LOG_INFO("IPC service bus destroyed");
+    AIRY_LOG_INFO("IPC service bus destroyed");
 }
 
 AIRY_API airy_err_t ipc_service_bus_start(ipc_service_bus_t bus_handle)
@@ -229,7 +229,7 @@ AIRY_API airy_err_t ipc_service_bus_start(ipc_service_bus_t bus_handle)
     bus->running = true;
     airy_mtx_unlock(&bus->mutex);
 
-    LOG_INFO("IPC service bus '%s' started", bus->name);
+    AIRY_LOG_INFO("IPC service bus '%s' started", bus->name);
     return AIRY_SUCCESS;
 }
 
@@ -244,7 +244,7 @@ AIRY_API airy_err_t ipc_service_bus_stop(ipc_service_bus_t bus_handle)
     bus->running = false;
     airy_mtx_unlock(&bus->mutex);
 
-    LOG_INFO("IPC service bus '%s' stopped", bus->name);
+    AIRY_LOG_INFO("IPC service bus '%s' stopped", bus->name);
     return AIRY_SUCCESS;
 }
 
@@ -261,13 +261,13 @@ AIRY_API ipc_bus_channel_t ipc_bus_channel_create(ipc_service_bus_t bus_handle,
 
     if (bus->channel_count >= IPC_BUS_MAX_CHANNELS) {
         airy_mtx_unlock(&bus->mutex);
-        LOG_ERROR("Cannot create channel: max channels reached");
+        AIRY_LOG_ERROR("Cannot create channel: max channels reached");
         AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
     }
 
     if (find_channel(bus, config->name)) {
         airy_mtx_unlock(&bus->mutex);
-        LOG_ERROR("Channel '%s' already exists", config->name);
+        AIRY_LOG_ERROR("Channel '%s' already exists", config->name);
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
     }
 
@@ -287,7 +287,7 @@ AIRY_API ipc_bus_channel_t ipc_bus_channel_create(ipc_service_bus_t bus_handle,
 
     airy_mtx_unlock(&bus->mutex);
 
-    LOG_INFO("Channel '%s' created on bus '%s'", config->name, bus->name);
+    AIRY_LOG_INFO("Channel '%s' created on bus '%s'", config->name, bus->name);
     return (ipc_bus_channel_t)ch;
 }
 
@@ -299,7 +299,7 @@ AIRY_API void ipc_bus_channel_destroy(ipc_bus_channel_t channel)
     ipc_bus_channel_internal_t *ch = (ipc_bus_channel_internal_t *)channel;
     ch->active = false;
 
-    LOG_INFO("Channel '%s' destroyed", ch->name);
+    AIRY_LOG_INFO("Channel '%s' destroyed", ch->name);
 }
 
 AIRY_API const char *ipc_bus_channel_get_name(ipc_bus_channel_t channel)
@@ -331,7 +331,7 @@ AIRY_API airy_err_t ipc_service_bus_send(ipc_service_bus_t bus_handle, const cha
 
     airy_mtx_unlock(&bus->mutex);
 
-    LOG_DEBUG("Bus '%s': sent message to '%s' (type=%d, proto=%d, size=%zu)", bus->name,
+    AIRY_LOG_DEBUG("Bus '%s': sent message to '%s' (type=%d, proto=%d, size=%zu)", bus->name,
               target_service, message->header.msg_type, message->header.protocol,
               message->payload_size);
     return AIRY_SUCCESS;
@@ -459,7 +459,7 @@ AIRY_API airy_err_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
 
     airy_mtx_unlock(&bus->mutex);
 
-    LOG_DEBUG("Bus '%s': request to '%s' completed in %llums (completed=%d)", bus->name,
+    AIRY_LOG_DEBUG("Bus '%s': request to '%s' completed in %llums (completed=%d)", bus->name,
               target_service, (unsigned long long)latency, pending->completed);
     /* RPC success returns SUCCESS; RPC failure returns svc_err (AIRY_EIO
      * etc.), following the API contract "0=success, non-zero=failure". */
@@ -506,7 +506,7 @@ AIRY_API airy_err_t ipc_service_bus_broadcast(ipc_service_bus_t bus_handle,
         }
     }
 
-    LOG_DEBUG("Bus '%s': broadcast to %u/%u endpoints succeeded", bus->name, sent_count,
+    AIRY_LOG_DEBUG("Bus '%s': broadcast to %u/%u endpoints succeeded", bus->name, sent_count,
               target_count);
     return (sent_count > 0) ? AIRY_SUCCESS : first_error;
 }
@@ -571,7 +571,7 @@ AIRY_API airy_err_t ipc_service_bus_register_handler(ipc_service_bus_t bus_handl
 
     airy_mtx_unlock(&bus->mutex);
 
-    LOG_INFO("Message handler registered on bus '%s'", bus->name);
+    AIRY_LOG_INFO("Message handler registered on bus '%s'", bus->name);
     return AIRY_SUCCESS;
 }
 
@@ -628,7 +628,7 @@ AIRY_API airy_err_t ipc_service_bus_register_event_handler(ipc_service_bus_t bus
 
     airy_mtx_unlock(&bus->mutex);
 
-    LOG_INFO("Event handler registered for '%s' on bus '%s'", event_name, bus->name);
+    AIRY_LOG_INFO("Event handler registered for '%s' on bus '%s'", event_name, bus->name);
     return AIRY_SUCCESS;
 }
 
@@ -647,7 +647,7 @@ AIRY_API airy_err_t ipc_service_bus_register_endpoint(ipc_service_bus_t bus_hand
         __builtin_memcpy(&bus->endpoints[idx], endpoint, sizeof(ipc_bus_endpoint_t));
         bus->endpoints[idx].last_heartbeat = airy_time_ms();
         airy_mtx_unlock(&bus->mutex);
-        LOG_INFO("Endpoint '%s' updated on bus '%s'", endpoint->service_name, bus->name);
+        AIRY_LOG_INFO("Endpoint '%s' updated on bus '%s'", endpoint->service_name, bus->name);
         return AIRY_SUCCESS;
     }
 
@@ -663,7 +663,7 @@ AIRY_API airy_err_t ipc_service_bus_register_endpoint(ipc_service_bus_t bus_hand
 
     airy_mtx_unlock(&bus->mutex);
 
-    LOG_INFO("Endpoint '%s' registered on bus '%s' (endpoint=%s)", endpoint->service_name,
+    AIRY_LOG_INFO("Endpoint '%s' registered on bus '%s' (endpoint=%s)", endpoint->service_name,
              bus->name, endpoint->endpoint);
     return AIRY_SUCCESS;
 }
@@ -693,7 +693,7 @@ AIRY_API airy_err_t ipc_service_bus_unregister_endpoint(ipc_service_bus_t bus_ha
 
     airy_mtx_unlock(&bus->mutex);
 
-    LOG_INFO("Endpoint '%s' unregistered from bus '%s'", service_name, bus->name);
+    AIRY_LOG_INFO("Endpoint '%s' unregistered from bus '%s'", service_name, bus->name);
     return AIRY_SUCCESS;
 }
 
@@ -735,7 +735,7 @@ AIRY_API airy_err_t ipc_service_bus_discover(ipc_service_bus_t bus_handle, const
     *found_count = count;
     airy_mtx_unlock(&bus->mutex);
 
-    LOG_DEBUG("Service discovery: found %u endpoints (name=%s, proto=%d)", count,
+    AIRY_LOG_DEBUG("Service discovery: found %u endpoints (name=%s, proto=%d)", count,
               service_name ? service_name : "*", protocol);
     return AIRY_SUCCESS;
 }
@@ -820,9 +820,9 @@ AIRY_API airy_err_t ipc_service_bus_update_endpoint_health(ipc_service_bus_t bus
     airy_mtx_unlock(&bus->mutex);
 
     if (was_healthy && !healthy) {
-        LOG_WARN("Endpoint '%s' became unhealthy on bus '%s'", service_name, bus->name);
+        AIRY_LOG_WARN("Endpoint '%s' became unhealthy on bus '%s'", service_name, bus->name);
     } else if (!was_healthy && healthy) {
-        LOG_INFO("Endpoint '%s' recovered on bus '%s'", service_name, bus->name);
+        AIRY_LOG_INFO("Endpoint '%s' recovered on bus '%s'", service_name, bus->name);
     }
 
     return AIRY_SUCCESS;

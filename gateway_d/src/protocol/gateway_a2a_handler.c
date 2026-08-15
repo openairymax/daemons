@@ -37,7 +37,7 @@ gw_a2a_handler_t *gw_a2a_handler_create(const gw_a2a_handler_config_t *config)
 {
     gw_a2a_handler_t *handler = (gw_a2a_handler_t *)AIRY_CALLOC(1, sizeof(gw_a2a_handler_t));
     if (!handler) {
-        LOG_ERROR("handler allocation failed, size=%zu", sizeof(gw_a2a_handler_t));
+        AIRY_LOG_ERROR("handler allocation failed, size=%zu", sizeof(gw_a2a_handler_t));
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     if (config) {
@@ -261,7 +261,7 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
         char *input_json = extract_a2a_object_field(body_json, "message");
 
         if (!task_type) {
-            LOG_WARN("missing task type in A2A request, path=%s", path ? path : "(null)");
+            AIRY_LOG_WARN("missing task type in A2A request, path=%s", path ? path : "(null)");
             AIRY_FREE(task_id);
             AIRY_FREE(input_json);
             handler->error_count++;
@@ -270,7 +270,7 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
 
         gw_a2a_task_type_entry_t *entry = find_task_type(handler, task_type);
         if (!entry) {
-            LOG_WARN("unknown task type: task_type=%s, registered=%zu", task_type,
+            AIRY_LOG_WARN("unknown task type: task_type=%s, registered=%zu", task_type,
                      handler->task_type_count);
             const char *err = "{\"error\":{\"code\":-32601,\"message\":\"Unknown task type: %s\"}}";
             size_t elen = snprintf(NULL, 0, err, task_type);
@@ -290,7 +290,7 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
                                 input_json ? input_json : "{}", &output, entry->user_data);
 
         if (rc != 0 || !output) {
-            LOG_ERROR("task execution failed: task_type=%s, rc=%d", task_type, rc);
+            AIRY_LOG_ERROR("task execution failed: task_type=%s, rc=%d", task_type, rc);
             AIRY_FREE(task_type);
             AIRY_FREE(task_id);
             AIRY_FREE(input_json);

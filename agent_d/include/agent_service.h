@@ -56,7 +56,8 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id);
  *         AIRY_ERR_CANCELED execution cancelled (AbortedOutput)
  */
 int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char *input, size_t len,
-                         airy_cancel_token_t *cancel_token, char **out_output);
+                         const char *workspace_dir, airy_cancel_token_t *cancel_token,
+                         char **out_output);
 
 /**
  * @brief List all agent IDs.

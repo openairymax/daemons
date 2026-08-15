@@ -83,7 +83,7 @@ airy_err_t airy_cross_registry_init(const char *registry_url)
 
     airy_mtx_unlock(&g_cross_registry.mutex);
 
-    LOG_INFO("Service registry client initialized: %s", registry_url);
+    AIRY_LOG_INFO("Service registry client initialized: %s", registry_url);
     return AIRY_SUCCESS;
 }
 
@@ -94,14 +94,14 @@ airy_err_t airy_registry_register(airy_svc_t service, const airy_svc_metadata_t 
     }
 
     if (!g_cross_registry.initialized) {
-        LOG_WARN("Registry not initialized, using local-only registration");
+        AIRY_LOG_WARN("Registry not initialized, using local-only registration");
     }
 
     airy_mtx_lock(&g_cross_registry.mutex);
 
     if (g_cross_registry.entry_count >= MAX_REGISTRY_ENTRIES) {
         airy_mtx_unlock(&g_cross_registry.mutex);
-        LOG_ERROR("Registry full, cannot register service '%s'", metadata->name);
+        AIRY_LOG_ERROR("Registry full, cannot register service '%s'", metadata->name);
         return AIRY_ENOMEM;
     }
 
@@ -111,7 +111,7 @@ airy_err_t airy_registry_register(airy_svc_t service, const airy_svc_metadata_t 
                              sizeof(airy_svc_metadata_t));
             g_cross_registry.entries[i].metadata.last_heartbeat = airy_time_ms();
             airy_mtx_unlock(&g_cross_registry.mutex);
-            LOG_INFO("Service '%s' re-registered in cross-process registry", metadata->name);
+            AIRY_LOG_INFO("Service '%s' re-registered in cross-process registry", metadata->name);
             return AIRY_SUCCESS;
         }
     }
@@ -126,7 +126,7 @@ airy_err_t airy_registry_register(airy_svc_t service, const airy_svc_metadata_t 
 
     airy_mtx_unlock(&g_cross_registry.mutex);
 
-    LOG_INFO("Service '%s' registered in cross-process registry (type=%s, endpoint=%s)",
+    AIRY_LOG_INFO("Service '%s' registered in cross-process registry (type=%s, endpoint=%s)",
              metadata->name, metadata->service_type, metadata->endpoint);
     return AIRY_SUCCESS;
 }
@@ -141,7 +141,7 @@ airy_err_t airy_registry_deregister(airy_svc_t service)
 
     for (uint32_t i = 0; i < g_cross_registry.entry_count; i++) {
         if (g_cross_registry.entries[i].service == service) {
-            LOG_INFO("Service '%s' deregistered from cross-process registry",
+            AIRY_LOG_INFO("Service '%s' deregistered from cross-process registry",
                      g_cross_registry.entries[i].metadata.name);
 
             if (i < g_cross_registry.entry_count - 1) {
@@ -247,7 +247,7 @@ airy_svc_metadata_t *airy_registry_discover(const char *service_type, const char
     *result_count = match_count;
     airy_mtx_unlock(&g_cross_registry.mutex);
 
-    LOG_DEBUG("Service discovery: found %zu services (type=%s, tags=%s)", match_count,
+    AIRY_LOG_DEBUG("Service discovery: found %zu services (type=%s, tags=%s)", match_count,
               service_type ? service_type : "*", filter_tags ? filter_tags : "*");
     return results;
 }
@@ -304,5 +304,5 @@ void airy_registry_cleanup(void)
     airy_mtx_unlock(&g_cross_registry.mutex);
     airy_mtx_destroy(&g_cross_registry.mutex);
 
-    LOG_INFO("Service registry client cleaned up");
+    AIRY_LOG_INFO("Service registry client cleaned up");
 }

@@ -121,12 +121,12 @@ int plugin_service_load(const char *library_path, const char *config_path, const
         return AIRY_ERR_INVALID_PARAM;
 
     if (registry_init() != 0)
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
 
     void *handle = airy_dl_open(library_path);
     if (!handle) {
         SVC_LOG_ERROR("P2.2: PluginD: dlopen failed: %s (%s)", library_path, airy_dl_error());
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     typedef const plugin_metadata_t *(*metadata_fn_t)(void);

@@ -57,7 +57,7 @@ int llm_router_init(const char *config_path)
     if (!ctx->cost_tracker) {
         AIRY_LOG_ERROR("C-L02: LLMRouter: failed to create cost_tracker STACK: llm_router_init");
         AIRY_MUTEX_DESTROY(&ctx->mutex);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
     AIRY_LOG_INFO("C-L02: LLMRouter: cost_tracker initialized with %zu pricing rules",
                   sizeof(default_rules) / sizeof(default_rules[0]));
