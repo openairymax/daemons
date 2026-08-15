@@ -232,6 +232,10 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
             cJSON *tcalls = cJSON_GetObjectItem(item, "tool_calls");
             if (cJSON_IsArray(tcalls) && cJSON_GetArraySize(tcalls) > 0) {
                 ctx->messages[i].tool_calls_json = cJSON_PrintUnformatted(tcalls);
+                SVC_LOG_INFO("C-L02: SVC: msg[%zu] role=%s tool_calls=%.400s", i,
+                             ctx->messages[i].role ? ctx->messages[i].role : "?",
+                             ctx->messages[i].tool_calls_json ? ctx->messages[i].tool_calls_json
+                                                              : "(null)");
                 if (!ctx->messages[i].tool_calls_json) {
                     ctx->message_count = i + 1;
                     parse_params_cleanup(ctx, cfg);

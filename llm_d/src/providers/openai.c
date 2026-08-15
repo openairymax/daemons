@@ -360,8 +360,9 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
                           model, http_code);
         } else {
             SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld "
-                          "DIAGNOSIS=http_request_failed",
-                          model, http_code);
+                          "DIAGNOSIS=http_request_failed body=%.600s",
+                          model, http_code,
+                          http_resp && http_resp->data ? http_resp->data : "");
         }
         if (http_resp)
             provider_http_resp_free(http_resp);
