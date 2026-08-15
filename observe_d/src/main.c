@@ -66,6 +66,10 @@ typedef struct {
 
 static observe_d_service_t g_service = {0};
 static atomic_int g_shutdown = 0;
+/* 并发连接上限：每连接一线程，无上限时恶意连接风暴可耗尽线程资源
+ * （工业场景 DoS 防护）。超过上限的新连接直接关闭。 */
+#define OBSERVE_D_MAX_CONN 128
+static atomic_int g_conns = 0;
 static daemon_bootstrap_sd_t *g_bsd = NULL;
 static daemon_bootstrap_ipc_t *g_bipc = NULL;
 
@@ -679,6 +683,18 @@ static void observe_d_handle_request(observe_d_service_t *svc, airy_sock_t clien
     airy_sock_close(client_fd);
 }
 
+/* 连接处理线程（detached）：每连接独立处理，避免慢/保持连接在
+ * observe_d_handle_request 内 poll 等待数据（最多 5s）期间阻塞 accept
+ * 循环，导致并发的 health_check 等 RPC 偶发超时（实测 max~4.5s）。
+ * 共享状态（metrics 数组 / 计数）已由 svc->lock 保护，并发安全。 */
+static void *observe_d_conn_thread(void *arg)
+{
+    airy_sock_t client = (airy_sock_t)(intptr_t)arg;
+    observe_d_handle_request(&g_service, client);
+    atomic_fetch_sub_explicit(&g_conns, 1, memory_order_relaxed);
+    return NULL;
+}
+
 int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
 {
 
@@ -709,7 +725,18 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     while (!g_shutdown && g_service.running) {
         airy_sock_t client = airy_sock_accept(g_service.server_fd, 1000);
         if (client != AIRY_INVALID_SOCKET) {
-            observe_d_handle_request(&g_service, client);
+            if (atomic_load_explicit(&g_conns, memory_order_relaxed) >= OBSERVE_D_MAX_CONN) {
+                airy_sock_close(client); /* 过载：拒绝新连接 */
+                continue;
+            }
+            atomic_fetch_add_explicit(&g_conns, 1, memory_order_relaxed);
+            airy_thread_t th;
+            if (airy_thread_create(&th, observe_d_conn_thread, (void *)(intptr_t)client) == 0)
+                airy_thread_detach(th);
+            else {
+                atomic_fetch_sub_explicit(&g_conns, 1, memory_order_relaxed);
+                airy_sock_close(client);
+            }
         }
     }
 
