@@ -36,6 +36,10 @@
 
 static notify_d_service_t g_service = {0};
 static atomic_int g_shutdown = 0;
+/* 并发连接上限：每连接一线程，无上限时恶意连接风暴可耗尽线程资源
+ * （工业场景 DoS 防护）。超过上限的新连接直接关闭。 */
+#define NOTIFY_D_MAX_CONN 128
+static atomic_int g_conns = 0;
 static daemon_bootstrap_sd_t *g_bsd = NULL;
 static daemon_bootstrap_ipc_t *g_bipc = NULL;
 
@@ -431,6 +435,20 @@ static int notify_d_healthcheck(notify_d_service_t *svc)
     return healthy;
 }
 
+static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_fd);
+
+/* 连接处理线程（detached）：每连接独立处理。notify_d_handle_request 在
+ * recv 前 poll 等待首包最多 5s，单线程 accept 循环下慢连接会阻塞全部
+ * RPC（health_check 偶发超时，实测 max~4.5s）。SSE/WebSocket 长连接
+ * 注册进 svc->clients 后由事件线程推送，与本线程无关。 */
+static void *notify_d_conn_thread(void *arg)
+{
+    airy_sock_t client = (airy_sock_t)(intptr_t)arg;
+    notify_d_handle_request(&g_service, client);
+    atomic_fetch_sub_explicit(&g_conns, 1, memory_order_relaxed);
+    return NULL;
+}
+
 static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_fd)
 {
     char buffer[NOTIFY_D_MAX_BUFFER];
@@ -629,7 +647,18 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     while (!g_shutdown && g_service.running) {
         airy_sock_t client = airy_sock_accept(g_service.server_fd, 1000);
         if (client != AIRY_INVALID_SOCKET) {
-            notify_d_handle_request(&g_service, client);
+            if (atomic_load_explicit(&g_conns, memory_order_relaxed) >= NOTIFY_D_MAX_CONN) {
+                airy_sock_close(client); /* 过载：拒绝新连接 */
+                continue;
+            }
+            atomic_fetch_add_explicit(&g_conns, 1, memory_order_relaxed);
+            airy_thread_t th;
+            if (airy_thread_create(&th, notify_d_conn_thread, (void *)(intptr_t)client) == 0)
+                airy_thread_detach(th);
+            else {
+                atomic_fetch_sub_explicit(&g_conns, 1, memory_order_relaxed);
+                airy_sock_close(client);
+            }
         }
     }
 
