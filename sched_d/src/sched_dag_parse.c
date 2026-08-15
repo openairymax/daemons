@@ -155,6 +155,7 @@ static void sched_dag_free_on_error(sched_dag_t *dag)
     AIRY_FREE(dag->dag_id);
     AIRY_FREE(dag->name);
     AIRY_FREE(dag->input);
+    AIRY_FREE(dag->workspace_dir);
     AIRY_FREE(dag);
 }
 
@@ -179,6 +180,9 @@ int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
     cJSON *input = cJSON_GetObjectItem(root, "input");
     dag->input =
         AIRY_STRDUP(cJSON_IsString(input) && input->valuestring ? input->valuestring : "");
+    cJSON *ws = cJSON_GetObjectItem(root, "workspace_dir");
+    dag->workspace_dir =
+        AIRY_STRDUP(cJSON_IsString(ws) && ws->valuestring ? ws->valuestring : "");
     /* Graded retry (improvement 4): graph-level shared retry budget window ms
      * (0 = unlimited). The total retry deadline for all nodes is
      * created_at + retry_budget_ms; exceeding the budget stops retries. */

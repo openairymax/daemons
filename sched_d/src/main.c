@@ -64,7 +64,7 @@ typedef struct {
 } sched_dispatch_result_t;
 static int sched_dispatch_enabled(void);
 static int sched_dispatch_task(const char *role, const char *task_description,
-                               sched_dispatch_result_t *out_result);
+                               const char *workspace_dir, sched_dispatch_result_t *out_result);
 
 static void on_register_agent_method(cJSON *params, int id, void *user_data)
 {
@@ -492,7 +492,7 @@ static uint32_t sched_dispatch_timeout_ms(void)
  * agent.sock call pattern).
  */
 static int sched_dispatch_task(const char *role, const char *task_description,
-                               sched_dispatch_result_t *out_result)
+                               const char *workspace_dir, sched_dispatch_result_t *out_result)
 {
     if (!role || !out_result)
         return AIRY_ERR_INVALID_PARAM;
@@ -547,6 +547,8 @@ static int sched_dispatch_task(const char *role, const char *task_description,
     cJSON *invoke_params = cJSON_CreateObject();
     cJSON_AddStringToObject(invoke_params, "agent_id", agent_id);
     cJSON_AddStringToObject(invoke_params, "input", task_description ? task_description : "");
+    if (workspace_dir && workspace_dir[0])
+        cJSON_AddStringToObject(invoke_params, "workspace_dir", workspace_dir);
     char *invoke_params_str = cJSON_PrintUnformatted(invoke_params);
     cJSON_Delete(invoke_params);
     if (!invoke_params_str) {
@@ -619,7 +621,7 @@ static int sched_dispatch_task(const char *role, const char *task_description,
  * selected role).
  */
 static int sched_dispatch_executor(const char *agent_id, const char *task_description,
-                                   char **out_output)
+                                   const char *workspace_dir, char **out_output)
 {
 
     if (!sched_dispatch_enabled()) {
@@ -628,7 +630,7 @@ static int sched_dispatch_executor(const char *agent_id, const char *task_descri
     }
 
     sched_dispatch_result_t dispatch = {0};
-    int dret = sched_dispatch_task(agent_id, task_description, &dispatch);
+    int dret = sched_dispatch_task(agent_id, task_description, workspace_dir, &dispatch);
     if (dret != AIRY_SUCCESS || !dispatch.output || !dispatch.agent_id) {
         AIRY_FREE(dispatch.agent_id);
         AIRY_FREE(dispatch.output);

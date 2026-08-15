@@ -39,13 +39,15 @@ extern int g_concurrent_max;
 
 /* ---- 共享辅助函数（定义于 test_dag.c） ---- */
 void exec_log_push(const char *role, const char *goal);
-int fake_executor(const char *agent_id, const char *task_description, char **out_output);
+int fake_executor(const char *agent_id, const char *task_description, const char *workspace_dir,
+                  char **out_output);
 sched_service_t *make_service(void);
 sched_service_t *make_service_graded(bool fatal_cascade, uint32_t parallel);
 sched_service_t *make_parallel_service(void);
 int wait_dag_terminal(sched_service_t *svc, const char *dag_id, int timeout_ms);
 int get_dag_status_str(sched_service_t *svc, const char *dag_id, char *out, size_t cap);
-int parallel_executor(const char *agent_id, const char *task_description, char **out_output);
+int parallel_executor(const char *agent_id, const char *task_description,
+                      const char *workspace_dir, char **out_output);
 
 /* ---- 各域文件的测试函数（main() 直接调用，调用语句保持原样） ---- */
 /* test_dag_core.c */

@@ -423,7 +423,8 @@ static void sched_dag_batch_worker(void *arg)
 
     char *output = NULL;
     int dret = svc->executor ? svc->executor(item->agent_id ? item->agent_id : "coding",
-                                             sched_dag_agent_input(item->dag, node), &output) :
+                                             sched_dag_agent_input(item->dag, node),
+                                             item->dag->workspace_dir, &output) :
                                AIRY_ERR_SVC_NOT_READY;
 
     if (svc->mac && node->id) {
@@ -600,7 +601,8 @@ void *sched_dag_worker_thread(void *arg)
         airy_mtx_unlock(&svc->lock);
 
         char *output = NULL;
-        int dret = svc->executor ? svc->executor(role, goal, &output) : AIRY_ERR_SVC_NOT_READY;
+        int dret = svc->executor ? svc->executor(role, goal, dag->workspace_dir, &output) :
+                                   AIRY_ERR_SVC_NOT_READY;
 
         airy_mtx_lock(&svc->lock);
         sched_dag_write_back_node(svc, dag, node, dret, output);
@@ -654,6 +656,8 @@ int sched_service_submit_dag(sched_service_t *service, const char *dag_json, cha
             AIRY_FREE(node);
         }
         AIRY_FREE(dag->name);
+        AIRY_FREE(dag->input);
+        AIRY_FREE(dag->workspace_dir);
         AIRY_FREE(dag);
         cJSON_Delete(root);
         return AIRY_ERR_OVERFLOW;
@@ -677,6 +681,7 @@ int sched_service_submit_dag(sched_service_t *service, const char *dag_json, cha
         }
         AIRY_FREE(dag->name);
         AIRY_FREE(dag->input);
+        AIRY_FREE(dag->workspace_dir);
         AIRY_FREE(dag);
         cJSON_Delete(root);
         return AIRY_ERR_OUT_OF_MEMORY;
