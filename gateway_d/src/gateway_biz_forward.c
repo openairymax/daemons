@@ -214,7 +214,7 @@ int gw_think_process(const gateway_business_ctx_t *ctx, const char *prompt, cJSO
     char *resp = gw_svc_call(ctx->think_sock_path, "process", params_str, GW_THINK_TIMEOUT_MS);
     AIRY_FREE(params_str);
     if (!resp) {
-        LOG_WARN("gateway: think.process failed (think_d unreachable at %s), "
+        AIRY_LOG_WARN("gateway: think.process failed (think_d unreachable at %s), "
                  "degrading to direct LLM",
                  ctx->think_sock_path);
         return -1;
@@ -226,7 +226,7 @@ int gw_think_process(const gateway_business_ctx_t *ctx, const char *prompt, cJSO
         return -1;
     cJSON *err = cJSON_GetObjectItem(root, "error");
     if (err) {
-        LOG_WARN("gateway: think.process returned error");
+        AIRY_LOG_WARN("gateway: think.process returned error");
         cJSON_Delete(root);
         return -1;
     }
@@ -241,7 +241,7 @@ int gw_think_process(const gateway_business_ctx_t *ctx, const char *prompt, cJSO
     if (!think)
         return -1;
     *out_think = think;
-    LOG_INFO("gateway: think.process ok (dual-thinking engaged)");
+    AIRY_LOG_INFO("gateway: think.process ok (dual-thinking engaged)");
     return 0;
 }
 
@@ -262,7 +262,7 @@ int gw_acl_check_tool(const char *tool_name)
         return -1;
     int rc = daemon_check_tool_permission(GW_EXTERNAL_AGENT_ID, tool_name, "execute");
     if (rc != 0) {
-        LOG_WARN("gateway ACL DENY: agent=%s tool=%s (fail-closed)", GW_EXTERNAL_AGENT_ID,
+        AIRY_LOG_WARN("gateway ACL DENY: agent=%s tool=%s (fail-closed)", GW_EXTERNAL_AGENT_ID,
                  tool_name);
         return -1;
     }

@@ -91,13 +91,13 @@ int prometheus_exporter_init(const char *service_name)
 
     if (um_init(&config) != 0) {
         SVC_LOG_ERROR("C-L10: Failed to initialize unified metrics for '%s'", g_module_name);
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     if (um_register_module(g_module_name, NULL) != 0) {
         SVC_LOG_ERROR("C-L10: Failed to register metrics module '%s'", g_module_name);
         um_shutdown();
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     }
 
     g_initialized = 1;

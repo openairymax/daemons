@@ -30,10 +30,10 @@
 extern "C" {
 #endif
 
-#define SD_LOG_INFO(fmt, ...) LOG_INFO("C-L08: " fmt, ##__VA_ARGS__)
-#define SD_LOG_WARN(fmt, ...) LOG_WARN("C-L08: " fmt, ##__VA_ARGS__)
-#define SD_LOG_ERROR(fmt, ...) LOG_ERROR("C-L08: " fmt, ##__VA_ARGS__)
-#define SD_LOG_DEBUG(fmt, ...) LOG_DEBUG("C-L08: " fmt, ##__VA_ARGS__)
+#define SD_LOG_INFO(fmt, ...) AIRY_LOG_INFO("C-L08: " fmt, ##__VA_ARGS__)
+#define SD_LOG_WARN(fmt, ...) AIRY_LOG_WARN("C-L08: " fmt, ##__VA_ARGS__)
+#define SD_LOG_ERROR(fmt, ...) AIRY_LOG_ERROR("C-L08: " fmt, ##__VA_ARGS__)
+#define SD_LOG_DEBUG(fmt, ...) AIRY_LOG_DEBUG("C-L08: " fmt, ##__VA_ARGS__)
 
 #define SD_MAX_CALLBACKS 8
 #define SD_REGISTRY_VERSION 1

@@ -149,7 +149,7 @@ target_link_libraries(mem_d PRIVATE
     airy_mem_service
     airy_common
     Threads::Threads
-    m
+    airy_platform_libs
 )
 
 target_compile_options(mem_d PRIVATE

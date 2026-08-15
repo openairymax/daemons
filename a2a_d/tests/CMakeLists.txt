@@ -52,7 +52,6 @@ foreach(TEST_SRC ${A2A_TEST_SOURCES})
         airy_common
         Threads::Threads
         airy_platform_libs
-        m
     )
 
     if(AIRY_HAS_CJSON)

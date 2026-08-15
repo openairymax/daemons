@@ -568,6 +568,11 @@ static void info_d_handle_request(info_d_service_t *svc, airy_sock_t client_fd)
             if (strcmp(m->valuestring, "shutdown") == 0) {
 
                 atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
+                /* 与信号处理器一致：同步停止事件循环（写 wakeup eventfd
+                 * 唤醒 epoll_wait），否则仅置 flag 会导致主循环残留、进程
+                 * 在 shutdown RPC 后不退出（此前 RPC shutdown 失效的根因）。 */
+                if (g_event_loop)
+                    airy_event_loop_stop(g_event_loop);
                 cJSON *result = cJSON_CreateObject();
                 cJSON_AddStringToObject(result, "status", "shutting_down");
                 JSONRPC_SEND_SUCCESS(client_fd, result, rid);
@@ -716,7 +721,7 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
 
     g_event_loop = airy_event_loop_create(64);
     if (!g_event_loop) {
-        LOG_ERROR("Failed to create event loop");
+        AIRY_LOG_ERROR("Failed to create event loop");
         info_d_stop(&g_service, 1);
         info_d_destroy(&g_service);
         return EXIT_FAILURE;
@@ -725,7 +730,7 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     airy_event_loop_add_fd(g_event_loop, (int)g_service.server_fd, AIRY_EVENT_TYPE_READ,
                            info_d_on_client, &g_service);
 
-    LOG_INFO("info_d running with epoll event loop on fd=%d", (int)g_service.server_fd);
+    AIRY_LOG_INFO("info_d running with epoll event loop on fd=%d", (int)g_service.server_fd);
     airy_event_loop_run(g_event_loop);
 
     airy_event_loop_destroy(g_event_loop);

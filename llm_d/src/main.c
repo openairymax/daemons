@@ -32,6 +32,14 @@
 #include <string.h>
 #include <time.h>
 
+/* macOS/BSD 无 MSG_NOSIGNAL（Linux 专有 send flag）：非 Linux POSIX 平台
+ * 定义为 0，避免编译失败。等价语义由 DAEMON_SETUP_SIGNALS 的
+ * signal(SIGPIPE, SIG_IGN) 保证——peer 关闭时 send 返回 EPIPE 而非触发
+ * SIGPIPE 杀进程（对齐 daemons/common platform_compat.c 的兜底做法）。 */
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+
 #define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("llm.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_llm"
 #define DEFAULT_TCP_PORT 8080
@@ -723,6 +731,22 @@ int main(int argc, char **argv)
     if (parse_rc > 0)
         return parse_rc == 1 ? 0 : 1;
 
+    /* Model SSoT fallback: when no --manager is given (e.g. started by the
+     * CLI /daemon command or a plain exec), load $AIRY_CONFIG_DIR/model.yaml
+     * so the provider registry / llm_router always see the configured
+     * endpoints. Same pattern as think_d / gateway_d reading model.yaml from
+     * airy_config_dir(). Kept in a static buffer for the process lifetime. */
+    if (!config_path) {
+        static char default_model_path[1024];
+        const char *cfg_dir = airy_config_dir();
+        if (cfg_dir) {
+            int plen = snprintf(default_model_path, sizeof(default_model_path), "%s/model.yaml",
+                                cfg_dir);
+            if (plen > 0 && plen < (int)sizeof(default_model_path))
+                config_path = default_model_path;
+        }
+    }
+
     airy_sock_init();
     airy_mtx_init(&g_running_lock_llm_d);
 
@@ -737,8 +761,8 @@ int main(int argc, char **argv)
      * AIRY_LLM_D_DEBUG=1 outputs DEBUG-level logs */
     airy_logger_config_t log_cfg = {0};
     const char *dbg = getenv("AIRY_LLM_D_DEBUG");
-    log_cfg.level = (dbg && dbg[0] == '1') ? (airy_log_level_t)LOG_LEVEL_DEBUG :
-                                             (airy_log_level_t)LOG_LEVEL_WARN;
+    log_cfg.level = (dbg && dbg[0] == '1') ? (log_level_t)LOG_LEVEL_DEBUG :
+                                             (log_level_t)LOG_LEVEL_WARN;
     airy_log_init(&log_cfg);
     atexit(log_cleanup);
 

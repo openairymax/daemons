@@ -234,6 +234,9 @@ int api_rec_mark_cred_failure(api_rec_pool_t *pool, api_rec_error_code_t err)
 
 double api_rec_cred_health(const api_rec_pool_t *pool, size_t index)
 {
+    /* 本函数返回 double 健康度，错误约定为负值（调用方以 health < 0.0
+     * 判定失败）。AIRY_EINVAL 为用户态负值 errno（-22），直接返回即可，
+     * 越界/NULL 不会被误判为健康度。 */
     if (!pool || index >= pool->cred_count)
         return AIRY_EINVAL;
     return pool->credentials[index].health_score;

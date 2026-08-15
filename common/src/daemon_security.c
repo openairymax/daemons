@@ -31,7 +31,7 @@
 #include "yaml_minimal.h"
 
 #ifndef SVC_LOG_SECURITY
-#define SVC_LOG_SECURITY(...) LOG_WARN(__VA_ARGS__)
+#define SVC_LOG_SECURITY(...) AIRY_LOG_WARN(__VA_ARGS__)
 #endif
 
 #include "daemon_platform_ext.h"

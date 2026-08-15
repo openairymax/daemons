@@ -89,9 +89,7 @@ foreach(TEST_SRC ${TOOL_TEST_SOURCES})
         airy_common
         airy_llm_service
         Threads::Threads
-        uuid
         airy_platform_libs
-        m
     )
 
     # cJSON found by root CMakeLists.txt (AIRY_HAS_CJSON)

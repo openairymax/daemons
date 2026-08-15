@@ -57,7 +57,6 @@ elseif(UNIX)
         airy_common
         Threads::Threads
         airy_platform_libs
-        m
     )
 endif()
 

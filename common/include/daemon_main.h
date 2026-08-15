@@ -170,25 +170,25 @@ extern "C" {
             int pr = poll(&pfd, 1, 5000);                                                                          \
             if (pr <= 0 || !(pfd.revents & POLLIN)) {                                                              \
                 airy_sock_close(client_fd);                                                                        \
-                return AIRY_ERR_FAIL;                                                                              \
+                return AIRY_ERR_GENERIC_FAIL;                                                                              \
             }                                                                                                      \
         }                                                                                                          \
         ssize_t n = airy_sock_recv(client_fd, buffer, sizeof(buffer) - 1);                                         \
         if (n <= 0) {                                                                                              \
             airy_sock_close(client_fd);                                                                            \
-            return AIRY_ERR_FAIL;                                                                                  \
+            return AIRY_ERR_GENERIC_FAIL;                                                                                  \
         }                                                                                                          \
         buffer[n] = '\0';                                                                                          \
         if ((size_t)n >= sizeof(buffer) - 1) {                                                                     \
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Request too large", -1);                       \
             airy_sock_close(client_fd);                                                                            \
-            return AIRY_ERR_FAIL;                                                                                  \
+            return AIRY_ERR_GENERIC_FAIL;                                                                                  \
         }                                                                                                          \
         /* P0.18.2: mode A - CJSON_PARSE_GUARD auto-free + NULL check */                                             \
         CJSON_PARSE_GUARD(req, buffer, {                                                                           \
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR, "Parse error: invalid JSON", -1);                   \
             airy_sock_close(client_fd);                                                                            \
-            return AIRY_ERR_FAIL;                                                                                  \
+            return AIRY_ERR_GENERIC_FAIL;                                                                                  \
         });                                                                                                        \
         if (getenv("AIRY_DAEMON_DUMP_REQ")) {                                                                      \
             __builtin_fprintf(stderr, "[AIRY-DUMP] %s req[%zd]=\"%.400s\"\n", #daemon_name, n,                     \
@@ -202,7 +202,7 @@ extern "C" {
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid Request", -1);                         \
             /* req is auto-freed by CJSON_AUTO_FREE */                                                            \
             airy_sock_close(client_fd);                                                                            \
-            return AIRY_ERR_FAIL;                                                                                  \
+            return AIRY_ERR_GENERIC_FAIL;                                                                                  \
         }                                                                                                          \
         int req_id = cJSON_IsNumber(id) ? id->valueint : 0;                                                        \
         SVC_LOG_DEBUG("Processing request: method=%s, id=%d", method->valuestring, req_id);                        \
