@@ -128,6 +128,14 @@ airy_sock_t airy_sock_accept(airy_sock_t server_fd, uint32_t timeout_ms);
 ssize_t airy_sock_recv(airy_sock_t sock, void *buf, size_t len);
 ssize_t airy_sock_send(airy_sock_t sock, const void *buf, size_t len);
 
+/* Read a complete JSON-RPC request frame from a daemon client socket.
+ * Loop poll+recv probing JSON completeness (mirrors the client-side
+ * rpc_recv_response), lifting the historical single-recv 64 KiB cap so
+ * multi-round tool-loop requests (e.g. llm.complete feeding back large
+ * web_fetch results) are no longer truncated. Returns an AIRY_MALLOC buffer
+ * (caller frees) with *out_len set; NULL + *err (static string) on failure. */
+char *airy_daemon_read_request(airy_sock_t client_fd, size_t *out_len, const char **err);
+
 #ifdef __cplusplus
 }
 #endif

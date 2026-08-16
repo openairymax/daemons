@@ -119,6 +119,10 @@ static void register_builtin_tools(tool_service_t *svc)
         {"new", "{\"type\":\"string\"}", 1},
         {"count", "{\"type\":\"integer\"}", 0},
     };
+    static tool_param_t delete_params[] = {
+        {"path", "{\"type\":\"string\"}", 1},
+        {"recursive", "{\"type\":\"boolean\"}", 0},
+    };
     static tool_param_t web_search_params[] = {
         {"query", "{\"type\":\"string\"}", 1},
         {"max_results", "{\"type\":\"integer\"}", 0},
@@ -136,7 +140,7 @@ static void register_builtin_tools(tool_service_t *svc)
         {"check_only", "{\"type\":\"boolean\"}", 0},
     };
 
-    tool_metadata_t tools[12] = {
+    tool_metadata_t tools[13] = {
         {
             .id = "fs_read",
             .name = "fs_read",
@@ -231,6 +235,19 @@ static void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 30,
             .cacheable = 0,
             .permission_rule = "fs_edit",
+            .access = TOOL_ACCESS_WRITE,
+        },
+        {
+            .id = "fs_delete",
+            .name = "fs_delete",
+            .description = "Delete a local file, or a directory (recursive=1 "
+                           "for non-empty trees; destructive)",
+            .executable = "builtin:fs_delete",
+            .params = delete_params,
+            .param_count = 2,
+            .timeout_sec = 30,
+            .cacheable = 0,
+            .permission_rule = "fs_delete",
             .access = TOOL_ACCESS_WRITE,
         },
         {

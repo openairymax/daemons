@@ -21,6 +21,14 @@
 #include "logging.h"
 #include "platform.h"
 
+/* Builtin tool OpenAI tools schema (SSoT): one-to-one with the tools
+ * registered in tool_d builtin.c/service.c. All "required" fields must
+ * match the parameter sets registered in tool_d: its validator treats
+ * every registered parameter as mandatory, so if the schema marks one
+ * optional while tool_d requires it (e.g. fs_list's path), the LLM may
+ * omit it and tool validation fails. */
+#include "../../../gateway/src/gateway/gateway_tools_schema.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -178,34 +186,7 @@ static char *llm_call_complete(const gateway_business_ctx_t *ctx, const char *re
     return resp;
 }
 
-/* Builtin tool OpenAI tools schema (one-to-one with the tools registered in
- * tool_d builtin.c). All "required" fields must match the parameter sets
- * registered in tool_d: its validator treats every registered parameter as
- * mandatory, so if the schema marks one optional while tool_d requires it
- * (e.g. fs_list's path), the LLM may omit it and tool validation fails. */
-static const char GW_TOOLS_JSON[] =
-    "["
-    "{\"type\":\"function\",\"function\":{\"name\":\"fs_read\","
-    "\"description\":\"Read a file's content from the local filesystem\","
-    "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},"
-    "\"required\":[\"path\"]}}}"
-    ",{\"type\":\"function\",\"function\":{\"name\":\"fs_write\","
-    "\"description\":\"Write content to a local file (creates or overwrites)\","
-    "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},"
-    "\"content\":{\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}}}"
-    ",{\"type\":\"function\",\"function\":{\"name\":\"fs_list\","
-    "\"description\":\"List entries of a local directory (JSON array)\","
-    "\"parameters\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},"
-    "\"required\":[\"path\"]}}}"
-    ",{\"type\":\"function\",\"function\":{\"name\":\"shell_run\","
-    "\"description\":\"Execute a shell command and capture its output\","
-    "\"parameters\":{\"type\":\"object\",\"properties\":{\"command\":{\"type\":\"string\"}},"
-    "\"required\":[\"command\"]}}}"
-    ",{\"type\":\"function\",\"function\":{\"name\":\"web_fetch\","
-    "\"description\":\"Fetch a web page over HTTP(S) and return its body text\","
-    "\"parameters\":{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},"
-    "\"required\":[\"url\"]}}}"
-    "]";
+static const char GW_TOOLS_JSON[] = GW_TOOLS_JSON_SOURCE;
 
 /**
  * @brief Send a JSON-RPC request to tool_d and read the response (POSIX Unix socket)

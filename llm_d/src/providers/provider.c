@@ -598,6 +598,12 @@ typedef struct {
     char *line_buf;
     size_t line_cap;
     size_t line_len;
+    /* Raw response body (all bytes, SSE or not): kept so an error status
+     * (e.g. upstream 400) can surface its JSON error body in the daemon log
+     * instead of being silently dropped by the SSE line parser (2026-08-16). */
+    char *raw_buf;
+    size_t raw_cap;
+    size_t raw_len;
     provider_stream_chunk_cb_t on_chunk;
     void *chunk_user_data;
     int cancelled;
@@ -614,6 +620,13 @@ static void sse_ctx_init(sse_stream_ctx_t *sse, provider_stream_chunk_cb_t cb, v
                       "STACK: sse_ctx_init",
                       sse->line_cap);
     }
+    sse->raw_cap = 4096;
+    sse->raw_buf = (char *)AIRY_MALLOC(sse->raw_cap);
+    if (!sse->raw_buf) {
+        SVC_LOG_ERROR("C-L02: PROVIDER: SSE-INIT-FAIL reason=oom_raw_cap=%zu "
+                      "STACK: sse_ctx_init",
+                      sse->raw_cap);
+    }
     sse->on_chunk = cb;
     sse->chunk_user_data = user_data;
 }
@@ -623,7 +636,30 @@ static void sse_ctx_destroy(sse_stream_ctx_t *sse)
     if (sse) {
         AIRY_FREE(sse->line_buf);
         sse->line_buf = NULL;
+        AIRY_FREE(sse->raw_buf);
+        sse->raw_buf = NULL;
     }
+}
+
+/* Accumulate every received byte so an error body survives SSE parsing. */
+static void sse_raw_append(sse_stream_ctx_t *sse, const char *data, size_t len)
+{
+    if (!sse->raw_buf || len == 0)
+        return;
+    size_t need = sse->raw_len + len + 1;
+    if (need > sse->raw_cap) {
+        size_t cap = sse->raw_cap * 2;
+        while (cap < need)
+            cap *= 2;
+        char *grown = (char *)AIRY_REALLOC(sse->raw_buf, cap);
+        if (!grown)
+            return;
+        sse->raw_buf = grown;
+        sse->raw_cap = cap;
+    }
+    __builtin_memcpy(sse->raw_buf + sse->raw_len, data, len);
+    sse->raw_len += len;
+    sse->raw_buf[sse->raw_len] = '\0';
 }
 
 static int sse_feed_line(sse_stream_ctx_t *sse, const char *line, size_t len)
@@ -725,6 +761,8 @@ static size_t sse_write_callback(void *contents, size_t size, size_t nmemb, void
     sse->line_len += realsize;
     sse->line_buf[sse->line_len] = '\0';
 
+    sse_raw_append(sse, (const char *)contents, realsize);
+
     sse_process_buffer(sse);
 
     if (sse->cancelled)
@@ -776,6 +814,16 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
 
     if (sse.line_len > 0) {
         sse_process_buffer(&sse);
+    }
+
+    /* Error status: surface the upstream body (kept raw) so failures are
+     * diagnosable from the daemon log instead of a bare http_code. */
+    if (http_code >= 400 && sse.raw_buf && sse.raw_len > 0) {
+        size_t n = sse.raw_len;
+        if (n > 1024)
+            n = 1024;
+        SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-HTTP-ERROR url=%s http_code=%ld body=%.*s",
+                      url, http_code, (int)n, sse.raw_buf);
     }
 
     sse_ctx_destroy(&sse);

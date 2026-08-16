@@ -20,6 +20,9 @@
 
 #include "gateway_biz_internal.h"
 
+/* Gateway-side hall event recording (write side of the SSoT event flow) */
+#include "gateway_hall_store.h"
+
 #include "logging.h"
 #include "platform.h"
 
@@ -44,6 +47,19 @@ static void gw_gen_session_id(char *out, size_t out_size)
     }
     snprintf(out, out_size, "sess_%016llx_%04llx", (unsigned long long)(now ^ rand_bits),
              (unsigned long long)(s & 0xFFFF));
+}
+
+/* Record one hall event for an agent.run session (best effort; a failed
+ * event write never fails the run). `content` must be a JSON object. */
+static void gw_agent_record_event(const char *session_id, const char *category, cJSON *content)
+{
+    if (!session_id || !session_id[0] || !content)
+        return;
+    char *content_str = cJSON_PrintUnformatted(content);
+    if (!content_str)
+        return;
+    (void)gw_hall_store_event(session_id, category, NULL, content_str);
+    AIRY_FREE(content_str);
 }
 
 /**
@@ -424,6 +440,19 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
 
     gw_active_request_t *active = gw_active_register(ctx, session_id);
 
+    /* Record the run start into the hall event flow (SSoT write side). */
+    {
+        cJSON *evt = cJSON_CreateObject();
+        if (evt) {
+            cJSON_AddStringToObject(evt, "event", "run_start");
+            char pbuf[520];
+            AIRY_STRNCPY_TERM(pbuf, prompt, sizeof(pbuf));
+            cJSON_AddStringToObject(evt, "prompt", pbuf);
+            gw_agent_record_event(session_id, "chain", evt);
+            cJSON_Delete(evt);
+        }
+    }
+
     cJSON *agent_spec = params ? cJSON_GetObjectItem(params, "agent") : NULL;
     /* When params.agent is not provided, fall back to parsing
      * params.agent_file to build the spec: keeps old clients that only pass
@@ -471,6 +500,18 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
             if (plan) {
                 char *plan_str = cJSON_PrintUnformatted(plan);
                 if (plan_str) {
+                    /* Record the converged plan into the hall event flow. */
+                    {
+                        cJSON *pevt = cJSON_CreateObject();
+                        if (pevt) {
+                            cJSON_AddStringToObject(pevt, "event", "plan");
+                            char pbuf[1024];
+                            AIRY_STRNCPY_TERM(pbuf, plan_str, sizeof(pbuf));
+                            cJSON_AddStringToObject(pevt, "plan", pbuf);
+                            gw_agent_record_event(session_id, "chain", pevt);
+                            cJSON_Delete(pevt);
+                        }
+                    }
                     /* Build a system message carrying the dual-thinking plan
                      * and insert it at the head of messages: the LLM structures
                      * its answer around the GCCP+GRAD converged DAG plan,
@@ -521,6 +562,62 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
                                       &total_tokens, &total_cost);
         }
     }
+    /* Record the tool-call summary and the run result into the hall event
+     * flow (SSoT write side). */
+    if (tool_trace && cJSON_IsArray(tool_trace) && cJSON_GetArraySize(tool_trace) > 0) {
+        cJSON *tevt = cJSON_CreateObject();
+        if (tevt) {
+            cJSON_AddStringToObject(tevt, "event", "tools");
+            cJSON *tarr = cJSON_CreateArray();
+            if (tarr) {
+                int tn = cJSON_GetArraySize(tool_trace);
+                for (int i = 0; i < tn && i < 32; i++) {
+                    cJSON *t = cJSON_GetArrayItem(tool_trace, i);
+                    cJSON *titem = cJSON_CreateObject();
+                    if (titem) {
+                        const char *tool = NULL;
+                        const char *args = NULL;
+                        const char *result = NULL;
+                        cJSON *tf = cJSON_GetObjectItem(t, "tool");
+                        cJSON *af = cJSON_GetObjectItem(t, "arguments");
+                        cJSON *rf = cJSON_GetObjectItem(t, "result");
+                        if (cJSON_IsString(tf))
+                            tool = tf->valuestring;
+                        if (cJSON_IsString(af))
+                            args = af->valuestring;
+                        if (cJSON_IsString(rf))
+                            result = rf->valuestring;
+                        cJSON_AddStringToObject(titem, "tool", tool ? tool : "");
+                        char abuf[160];
+                        AIRY_STRNCPY_TERM(abuf, args ? args : "", sizeof(abuf));
+                        cJSON_AddStringToObject(titem, "args", abuf);
+                        char rbuf[160];
+                        AIRY_STRNCPY_TERM(rbuf, result ? result : "", sizeof(rbuf));
+                        cJSON_AddStringToObject(titem, "result", rbuf);
+                        cJSON_AddItemToArray(tarr, titem);
+                    }
+                }
+                cJSON_AddItemToObject(tevt, "tools", tarr);
+            }
+            gw_agent_record_event(session_id, "chain", tevt);
+            cJSON_Delete(tevt);
+        }
+    }
+    {
+        cJSON *revt = cJSON_CreateObject();
+        if (revt) {
+            cJSON_AddStringToObject(revt, "event", "run_result");
+            cJSON_AddNumberToObject(revt, "rc", run_rc);
+            cJSON_AddNumberToObject(revt, "tokens", (double)total_tokens);
+            cJSON_AddNumberToObject(revt, "cost", total_cost);
+            char tbuf[520];
+            AIRY_STRNCPY_TERM(tbuf, final_text ? final_text : "", sizeof(tbuf));
+            cJSON_AddStringToObject(revt, "text", tbuf);
+            gw_agent_record_event(session_id, "result", revt);
+            cJSON_Delete(revt);
+        }
+    }
+
     gw_active_unregister(ctx, active);
     AIRY_LOG_INFO("gateway: agent.run done (session=%s, rc=%d, tokens=%llu, cost=%.4f)", session_id,
              run_rc, (unsigned long long)total_tokens, total_cost);

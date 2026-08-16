@@ -18,11 +18,14 @@
 #ifdef __linux__
 #include <sys/sysinfo.h>
 #endif
+#include <poll.h>
 #include <unistd.h>
 #ifdef __APPLE__
 #include <sys/sysctl.h>
 #endif
 #endif
+
+#include <cjson/cJSON.h>
 
 #ifndef AIRY_TIMESTAMP_T_DEFINED
 typedef uint64_t airy_timestamp_t;
@@ -556,5 +559,178 @@ ssize_t airy_sock_send(airy_sock_t sock, const void *buf, size_t len)
         total_sent += sent;
     }
     return total_sent;
+#endif
+}
+
+/* ---------------------------------------------------------------------------
+ * Daemon request frame reading
+ * ---------------------------------------------------------------------------
+ *
+ * Airymax daemons are "single-request-single-response-then-close": the
+ * client sends one JSON-RPC request frame over a fresh connection and keeps
+ * the socket open while waiting for the reply, so there is no EOF/close to
+ * delimit the request. The historical daemon_main.h handler performed a
+ * SINGLE airy_sock_recv() capped at MAX_BUFFER (64 KiB): any request that
+ * grew past 64 KiB was truncated, failed the JSON parse and was rejected.
+ * Multi-round tool loops hit this in practice -- llm.complete after feeding
+ * back web_fetch results carries tens/hundreds of KiB of HTML, so the final
+ * tool-loop round was silently killed (daily chat showed tool cards but
+ * never streamed the final answer).
+ *
+ * airy_daemon_read_request() mirrors the client-side rpc_recv_response()
+ * loop (daemon_rpc_client.c): poll in slices, recv what is available, probe
+ * cJSON_Parse for a complete frame, grow the buffer up to
+ * AIRY_DAEMON_REQ_MAX_CAP (8 MiB). A parseable frame ends the request; a
+ * read budget (5 s) guards against stalled peers. On success the caller owns
+ * the returned AIRY_MALLOC buffer (*out_len set); on failure NULL is
+ * returned and *err (if non-NULL) points to a static reason string.
+ */
+#define AIRY_DAEMON_REQ_INITIAL_CAP (64 * 1024)
+#define AIRY_DAEMON_REQ_MAX_CAP (8 * 1024 * 1024)
+#define AIRY_DAEMON_REQ_FIRST_POLL_MS 5000
+#define AIRY_DAEMON_REQ_SLICE_MS 200
+
+char *airy_daemon_read_request(airy_sock_t client_fd, size_t *out_len, const char **err)
+{
+    if (out_len)
+        *out_len = 0;
+    if (err)
+        *err = NULL;
+    if (client_fd < 0)
+        return NULL;
+
+#if AIRY_PLATFORM_POSIX
+    /* Wait for the first byte (5 s). The fd accepted by the event driver may
+     * not have data yet; airy_sock_recv is MSG_DONTWAIT, so an immediate recv
+     * can return 0 on EAGAIN, be mistaken for a failed connection and closed
+     * (SIGPIPE / lost request race). */
+    {
+        struct pollfd pfd;
+        pfd.fd = (int)client_fd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        int pr = poll(&pfd, 1, AIRY_DAEMON_REQ_FIRST_POLL_MS);
+        if (pr <= 0 || !(pfd.revents & POLLIN)) {
+            if (err)
+                *err = "Request read timeout";
+            return NULL;
+        }
+    }
+
+    size_t cap = AIRY_DAEMON_REQ_INITIAL_CAP;
+    char *buf = (char *)AIRY_MALLOC(cap);
+    if (!buf) {
+        if (err)
+            *err = "Out of memory";
+        return NULL;
+    }
+    size_t used = 0;
+    uint32_t elapsed = 0;
+
+    for (;;) {
+        if (used >= cap - 1) {
+            size_t new_cap = cap * 2;
+            if (new_cap > AIRY_DAEMON_REQ_MAX_CAP)
+                new_cap = AIRY_DAEMON_REQ_MAX_CAP;
+            if (new_cap <= cap) {
+                if (err)
+                    *err = "Request too large";
+                AIRY_FREE(buf);
+                return NULL;
+            }
+            char *np = (char *)AIRY_REALLOC(buf, new_cap);
+            if (!np) {
+                if (err)
+                    *err = "Out of memory";
+                AIRY_FREE(buf);
+                return NULL;
+            }
+            buf = np;
+            cap = new_cap;
+        }
+
+        ssize_t n = airy_sock_recv(client_fd, buf + used, cap - used - 1);
+        if (n < 0) {
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+                /* no data at this instant: fall through to the poll below */
+            } else {
+                if (err)
+                    *err = "Request read error";
+                AIRY_FREE(buf);
+                return NULL;
+            }
+        } else if (n > 0) {
+            used += (size_t)n;
+            buf[used] = '\0';
+        }
+
+        /* A parseable frame ends the request (the client keeps the connection
+         * open while waiting for the reply, so there is no EOF to rely on). */
+        if (used > 0) {
+            cJSON *probe = cJSON_Parse(buf);
+            if (probe) {
+                cJSON_Delete(probe);
+                break;
+            }
+        }
+
+        if (elapsed >= AIRY_DAEMON_REQ_FIRST_POLL_MS) {
+            /* Read budget exhausted without a complete frame. */
+            if (err)
+                *err = "Request read timeout";
+            AIRY_FREE(buf);
+            return NULL;
+        }
+        struct pollfd pfd;
+        pfd.fd = (int)client_fd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        uint32_t remain = (AIRY_DAEMON_REQ_FIRST_POLL_MS - elapsed) < AIRY_DAEMON_REQ_SLICE_MS
+                              ? (AIRY_DAEMON_REQ_FIRST_POLL_MS - elapsed)
+                              : AIRY_DAEMON_REQ_SLICE_MS;
+        int pr = poll(&pfd, 1, (int)remain);
+        if (pr < 0) {
+            if (errno == EINTR)
+                continue;
+            if (err)
+                *err = "Request read error";
+            AIRY_FREE(buf);
+            return NULL;
+        }
+        if (pr == 0) {
+            elapsed += remain;
+            continue;
+        }
+        if (!(pfd.revents & POLLIN)) {
+            /* Hangup before a complete frame. */
+            if (err)
+                *err = "Request read error";
+            AIRY_FREE(buf);
+            return NULL;
+        }
+        elapsed += 1;
+    }
+
+    *out_len = used;
+    return buf;
+#else
+    /* Windows fallback: mirror the historical single-recv read (64 KiB cap);
+     * named-pipe transports never deliver frames larger than this today. */
+    char *buf = (char *)AIRY_MALLOC(AIRY_DAEMON_REQ_INITIAL_CAP);
+    if (!buf) {
+        if (err)
+            *err = "Out of memory";
+        return NULL;
+    }
+    ssize_t n = airy_sock_recv(client_fd, buf, AIRY_DAEMON_REQ_INITIAL_CAP - 1);
+    if (n <= 0) {
+        if (err)
+            *err = "Request read error";
+        AIRY_FREE(buf);
+        return NULL;
+    }
+    buf[n] = '\0';
+    *out_len = (size_t)n;
+    return buf;
 #endif
 }

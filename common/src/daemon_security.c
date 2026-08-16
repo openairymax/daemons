@@ -69,7 +69,11 @@ static struct {
 #include <openssl/pem.h>
 #endif
 
-#define MAX_ACL_ENTRIES 128
+/* ACL 表容量：每个 agent 注册 12 个 builtin 工具 + 各服务主体（tool_d、
+ * external 等）。128 曾因 AIRY_AGENT_ACL 注入 11 个 agent × 12 工具
+ * （132 条）而溢出，导致 tool_d 主体规则添加失败、全部工具 fail-closed
+ * 拒绝。256 覆盖 16 个 agent × 12 工具 + 保留余量。 */
+#define MAX_ACL_ENTRIES 256
 #define MAX_AUDIT_LOG_SIZE 1024
 #define DAEMON_VAULT_ID "agentrt"
 #define DAEMON_VAULT_PASSWORD_ENV "AIRY_VAULT_PASSWORD"

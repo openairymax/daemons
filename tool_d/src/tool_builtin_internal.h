@@ -15,6 +15,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,6 +46,7 @@ int web_fetch_tool(const char *params_json, tool_result_t *res);
 int fs_glob_tool(const char *params_json, tool_result_t *res);
 int fs_grep_tool(const char *params_json, tool_result_t *res);
 int fs_edit_tool(const char *params_json, tool_result_t *res);
+int fs_delete_tool(const char *params_json, tool_result_t *res);
 int web_search_tool(const char *params_json, tool_result_t *res);
 int git_exec_tool(const char *params_json, tool_result_t *res);
 int git_diff_tool(const char *params_json, tool_result_t *res);

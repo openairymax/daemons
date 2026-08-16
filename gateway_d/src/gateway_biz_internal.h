@@ -132,6 +132,9 @@ char *handle_llm_list_models(cJSON *root, const gateway_business_ctx_t *ctx);
 char *handle_tool_approval_call(cJSON *root, const gateway_business_ctx_t *ctx,
                                 const char *tool_method);
 
+/* ---- gateway_biz_hall.c (hall.* — task board / event stream / chain) ---- */
+char *handle_hall_call(cJSON *root, gateway_business_ctx_t *ctx);
+
 /* Namespace forwarding rules (const, defined in gateway_biz_forward.c) */
 extern const gw_ns_forward_rule_t GW_NS_LLM;
 extern const gw_ns_forward_rule_t GW_NS_AGENT;

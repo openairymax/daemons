@@ -62,6 +62,7 @@ option(AIRY_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
 #   gateway_biz_llm.c          LLM 调用 + 工具循环（ReAct）
 #   gateway_biz_agent.c        agent.run 编排（双思考注入 + 取消）
 #   gateway_biz_backend.c      MCP/OpenAI/A2A 协议后端
+#   gateway_biz_hall.c         hall.* 任务看板/事件流/决策链（网关内实现）
 set(GATEWAY_SERVICE_SOURCES
     src/service.c
     src/gateway_svc_adapter.c
@@ -70,6 +71,7 @@ set(GATEWAY_SERVICE_SOURCES
     src/gateway_biz_llm.c
     src/gateway_biz_agent.c
     src/gateway_biz_backend.c
+    src/gateway_biz_hall.c
 )
 
 if(AIRY_ENABLE_PROTOCOLS)
@@ -207,6 +209,7 @@ endif()
 if(AIRY_HAS_CJSON)
 set(GATEWAY_LIB_SOURCES
     ${GATEWAY_SRC_DIR}/gateway/gateway_api.c
+    ${GATEWAY_SRC_DIR}/gateway/gateway_hall_store.c
     ${GATEWAY_SRC_DIR}/gateway/http_gateway.c
     ${GATEWAY_SRC_DIR}/gateway/http_gateway_routes.c
     ${GATEWAY_SRC_DIR}/gateway/ws_gateway.c

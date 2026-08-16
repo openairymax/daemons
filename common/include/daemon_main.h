@@ -154,46 +154,36 @@ extern "C" {
     __attribute__((unused)) static int daemon_handle_client_##daemon_name(                                         \
         airy_sock_t client_fd, method_dispatcher_t *dispatcher)                                                    \
     {                                                                                                              \
-        char buffer[MAX_BUFFER];                                                                                   \
-        /* Wait for request data before recv. The fd accepted by the event  \
-         * driver may not have data yet; airy_sock_recv is a MSG_DONTWAIT   \
-         * non-blocking read, so an immediate recv can return 0 on EAGAIN,   \
-         * be mistaken for a failed connection and closed, causing SIGPIPE / \
-         * lost requests on the client send (RPC timing race). Poll for     \
-         * POLLIN first. 5s timeout is ample vs the client daemon_rpc_call  \
-         * default of 30s; on timeout the request is treated as lost.      */\
-        if (AIRY_PLATFORM_POSIX) {                                                                                 \
-            struct pollfd pfd;                                                                                     \
-            pfd.fd = (int)client_fd;                                                                               \
-            pfd.events = POLLIN;                                                                                   \
-            pfd.revents = 0;                                                                                       \
-            int pr = poll(&pfd, 1, 5000);                                                                          \
-            if (pr <= 0 || !(pfd.revents & POLLIN)) {                                                              \
-                airy_sock_close(client_fd);                                                                        \
-                return AIRY_ERR_GENERIC_FAIL;                                                                              \
-            }                                                                                                      \
-        }                                                                                                          \
-        ssize_t n = airy_sock_recv(client_fd, buffer, sizeof(buffer) - 1);                                         \
-        if (n <= 0) {                                                                                              \
-            airy_sock_close(client_fd);                                                                            \
-            return AIRY_ERR_GENERIC_FAIL;                                                                                  \
-        }                                                                                                          \
-        buffer[n] = '\0';                                                                                          \
-        if ((size_t)n >= sizeof(buffer) - 1) {                                                                     \
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Request too large", -1);                       \
+        /* Read the full JSON-RPC request frame. airy_daemon_read_request   \
+         * loop-poll+recv's probing JSON completeness (mirroring the         \
+         * client-side rpc_recv_response), so requests larger than the old  \
+         * 64 KiB single-recv cap are no longer truncated and rejected.     \
+         * This was a real failure path: llm.complete after a tool loop     \
+         * feeds back large web_fetch results, grew past 64 KiB, got        \
+         * truncated into a JSON parse error, and the final answer round    \
+         * was silently killed (daily chat showed tool cards but never      \
+         * streamed the final answer). */                                    \
+        size_t req_len = 0;                                                                                         \
+        const char *req_err = NULL;                                                                                 \
+        char *req_text = airy_daemon_read_request(client_fd, &req_len, &req_err);                                    \
+        if (!req_text) {                                                                                            \
+            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST,                                                   \
+                               req_err ? req_err : "Request read failed", -1);                                      \
             airy_sock_close(client_fd);                                                                            \
             return AIRY_ERR_GENERIC_FAIL;                                                                                  \
         }                                                                                                          \
         /* P0.18.2: mode A - CJSON_PARSE_GUARD auto-free + NULL check */                                             \
-        CJSON_PARSE_GUARD(req, buffer, {                                                                           \
+        CJSON_PARSE_GUARD(req, req_text, {                                                                           \
+            AIRY_FREE(req_text);                                                                                    \
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR, "Parse error: invalid JSON", -1);                   \
             airy_sock_close(client_fd);                                                                            \
             return AIRY_ERR_GENERIC_FAIL;                                                                                  \
         });                                                                                                        \
         if (getenv("AIRY_DAEMON_DUMP_REQ")) {                                                                      \
-            __builtin_fprintf(stderr, "[AIRY-DUMP] %s req[%zd]=\"%.400s\"\n", #daemon_name, n,                     \
-                              buffer);                                                                             \
+            __builtin_fprintf(stderr, "[AIRY-DUMP] %s req[%zu]=\"%.400s\"\n", #daemon_name, req_len,                \
+                              req_text);                                                                             \
         }                                                                                                          \
+        AIRY_FREE(req_text);                                                                                        \
         cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");                                                      \
         cJSON *method = cJSON_GetObjectItem(req, "method");                                                        \
         cJSON *id = cJSON_GetObjectItem(req, "id");                                                                \
