@@ -3,7 +3,7 @@
 #
 # think_d 承载 CoreLoopThree 认知引擎（Thinkdual: t2/t1-f/t1-p + dual_coordinate），
 # LLM 调用经 llm_svc_adapter 直连 llm_d Unix socket。链接 airy_coreloopthree
-# （其 PUBLIC 传递 airy_cognition/airy_execution/airy_core/airy_memory/
+# （其 PUBLIC 传递 airy_cognition/airy_core/airy_memory/
 # airy_taskflow/svc_common 及 coreloopthree include 路径）。
 
 set(CMAKE_C_STANDARD 11)
