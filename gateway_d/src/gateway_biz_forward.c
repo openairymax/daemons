@@ -170,11 +170,109 @@ char *gw_svc_call(const char *sock_path, const char *method, const char *params_
     close(fd);
     return resp;
 #else
-    (void)sock_path;
-    (void)method;
-    (void)params_json;
-    (void)timeout_ms;
-    return NULL;
+    /* Windows：daemon 统一走 TCP 回环（daemon_main.h parse_args 强制），
+     * sock_path 参数约定为 "host:port"（如 "127.0.0.1:8086"），与
+     * daemon_rpc_client 及 gateway 的 AIRY_LLM_TCP_ADDR/PORT 约定一致。 */
+    SOCKET fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd == INVALID_SOCKET)
+        return NULL;
+
+    char host[128];
+    char port_str[16];
+    const char *colon = sock_path ? strrchr(sock_path, ':') : NULL;
+    if (!colon || colon == sock_path || (size_t)(colon - sock_path) >= sizeof(host) ||
+        strlen(colon + 1) >= sizeof(port_str)) {
+        closesocket(fd);
+        return NULL;
+    }
+    size_t host_len = (size_t)(colon - sock_path);
+    AIRY_MEMCPY(host, sock_path, host_len);
+    host[host_len] = '\0';
+    AIRY_STRNCPY_TERM(port_str, colon + 1, sizeof(port_str));
+    struct sockaddr_in addr;
+    AIRY_MEMSET(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)atoi(port_str));
+    if (inet_pton(AF_INET, host, &addr.sin_addr) <= 0)
+        addr.sin_addr.s_addr = INADDR_LOOPBACK;
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        closesocket(fd);
+        return NULL;
+    }
+
+    int timeout_ms_win = timeout_ms > 0 ? timeout_ms : GW_LLM_DEFAULT_TIMEOUT_MS;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout_ms_win,
+               sizeof(timeout_ms_win));
+
+    cJSON *req = cJSON_CreateObject();
+    if (!req) {
+        closesocket(fd);
+        return NULL;
+    }
+    cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+    cJSON_AddNumberToObject(req, "id", 1);
+    cJSON_AddStringToObject(req, "method", method);
+    if (params_json && params_json[0]) {
+        cJSON *p = cJSON_Parse(params_json);
+        cJSON_AddItemToObject(req, "params", p ? p : cJSON_CreateObject());
+    } else {
+        cJSON_AddItemToObject(req, "params", cJSON_CreateObject());
+    }
+    char *req_str = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    if (!req_str) {
+        closesocket(fd);
+        return NULL;
+    }
+
+    size_t len = strlen(req_str);
+    size_t sent = 0;
+    while (sent < len) {
+        int n = send(fd, req_str + sent, (int)(len - sent), 0);
+        if (n <= 0) {
+            AIRY_FREE(req_str);
+            closesocket(fd);
+            return NULL;
+        }
+        sent += (size_t)n;
+    }
+    AIRY_FREE(req_str);
+
+    size_t cap = 65536;
+    size_t used = 0;
+    char *resp = (char *)AIRY_MALLOC(cap);
+    if (!resp) {
+        closesocket(fd);
+        return NULL;
+    }
+    resp[0] = '\0';
+    char buf[4096];
+    for (;;) {
+        int n = recv(fd, buf, sizeof(buf), 0);
+        if (n <= 0)
+            break;
+        if (used + (size_t)n + 1 > cap) {
+            size_t new_cap = (used + (size_t)n + 1) * 2;
+            if (new_cap > GW_LLM_MAX_RESP) {
+                AIRY_FREE(resp);
+                closesocket(fd);
+                return NULL;
+            }
+            char *np = (char *)AIRY_REALLOC(resp, new_cap);
+            if (!np) {
+                AIRY_FREE(resp);
+                closesocket(fd);
+                return NULL;
+            }
+            resp = np;
+            cap = new_cap;
+        }
+        AIRY_MEMCPY(resp + used, buf, (size_t)n);
+        used += (size_t)n;
+        resp[used] = '\0';
+    }
+    closesocket(fd);
+    return resp;
 #endif
 }
 

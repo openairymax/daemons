@@ -18,8 +18,10 @@
 
 #define CHANNEL_D_SOCKET_PATH airy_runtime_dir_socket("channel.sock")
 #define CHANNEL_D_PIPE_PATH "\\\\.\\pipe\\airy_channel"
+#define CHANNEL_D_DEFAULT_PORT 8094
 
-DAEMON_DECLARE_COMMON(channel_d, channel, CHANNEL_D_SOCKET_PATH, CHANNEL_D_PIPE_PATH, 0, 65536)
+DAEMON_DECLARE_COMMON(channel_d, channel, CHANNEL_D_SOCKET_PATH, CHANNEL_D_PIPE_PATH,
+                      CHANNEL_D_DEFAULT_PORT, 65536)
 
 DAEMON_DECLARE_SHUTDOWN_METHOD(channel_d)
 
@@ -327,6 +329,11 @@ int main(int argc, char *argv[])
 {
     const char *socket_dir = NULL;
     uint32_t max_channels = CHANNEL_MAX_CHANNELS;
+    int use_tcp = 0;
+#if defined(AIRY_PLATFORM_WINDOWS)
+    /* Windows：IPC 统一走 TCP 回环（事件循环仅支持 socket）。 */
+    use_tcp = 1;
+#endif
 
     for (int i = 1; i < argc; i++) {
         if ((strcmp(argv[i], "--manager") == 0 || strcmp(argv[i], "-c") == 0) && i + 1 < argc) {
@@ -335,13 +342,15 @@ int main(int argc, char *argv[])
             socket_dir = argv[++i];
         } else if (strcmp(argv[i], "-n") == 0 && i + 1 < argc) {
             max_channels = (uint32_t)strtol(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--tcp") == 0) {
+            use_tcp = 1;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            fputs("Usage: channel_d [--manager config] [-s socket_dir] [-n max_channels] [-h]\n",
+            fputs("Usage: channel_d [--manager config] [-s socket_dir] [-n max_channels] [--tcp] [-h]\n",
                   stdout);
             return 0;
         } else {
             SVC_LOG_ERROR("Unknown option: %s", argv[i]);
-            fputs("Usage: channel_d [--manager config] [-s socket_dir] [-n max_channels] [-h]\n",
+            fputs("Usage: channel_d [--manager config] [-s socket_dir] [-n max_channels] [--tcp] [-h]\n",
                   stderr);
             return 1;
         }
@@ -388,8 +397,8 @@ int main(int argc, char *argv[])
     SVC_LOG_INFO("channel_d started (max_channels=%u, socket_dir=%s)", config.max_channels,
                  config.socket_dir);
 
-    airy_sock_t server_fd =
-        daemon_create_server_socket(0, 0, CHANNEL_D_SOCKET_PATH, CHANNEL_D_PIPE_PATH);
+    airy_sock_t server_fd = daemon_create_server_socket(use_tcp, CHANNEL_D_DEFAULT_PORT,
+                                                        CHANNEL_D_SOCKET_PATH, CHANNEL_D_PIPE_PATH);
     if (server_fd < 0) {
         SVC_LOG_ERROR("channel_d: failed to create socket at %s", CHANNEL_D_SOCKET_PATH);
         channel_service_destroy(g_svc);
@@ -410,8 +419,10 @@ int main(int argc, char *argv[])
     ev_config.on_client = daemon_on_client_channel_d;
     ev_config.service_ctx = NULL;
 
-    int ret = daemon_init_event_driver("channel_d", "channel", CHANNEL_D_SOCKET_PATH, 0,
-                                       "channel,core", 0, &ev_config, &g_event_driver_channel_d,
+    const char *sock_addr = use_tcp ? "127.0.0.1" : CHANNEL_D_SOCKET_PATH;
+    int ret = daemon_init_event_driver("channel_d", "channel", sock_addr,
+                                       use_tcp ? CHANNEL_D_DEFAULT_PORT : 0, "channel,core",
+                                       use_tcp, &ev_config, &g_event_driver_channel_d,
                                        &g_bsd_channel_d, &g_bipc_channel_d);
     if (ret != AIRY_SUCCESS || !g_event_driver_channel_d) {
         SVC_LOG_ERROR("channel_d: failed to create event driver");

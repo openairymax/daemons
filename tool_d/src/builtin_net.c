@@ -22,9 +22,7 @@
 
 #include "network_common.h"
 
-#ifndef _WIN32
-#include <regex.h>
-#endif
+#include "airy_regex.h"
 
 #include "tool_builtin_internal.h"
 
@@ -199,8 +197,7 @@ int web_fetch_tool(const char *params_json, tool_result_t *res)
         return AIRY_ERR_INVALID_PARAM;
     }
 
-#ifndef _WIN32
-    /* Main path: curl child process.
+    /* Main path: curl child process (curl.exe ships with Windows 10+).
      * -sS silences progress but keeps errors; -L follows redirects;
      * --max-time prevents hangs; -w appends a status marker (single quotes let
      * curl interpret \n as newline); -A declares the UA */
@@ -215,21 +212,24 @@ int web_fetch_tool(const char *params_json, tool_result_t *res)
 
     int rc = builtin_shell_run(cmd, &out, &exit_code, 45000, NULL, NULL);
     if (rc != 0) {
-        res->error = AIRY_STRDUP("Failed to execute web fetch (fork/pipe failed)");
+        res->error = AIRY_STRDUP("Failed to execute web fetch (pipe/process creation failed)");
         return AIRY_ERR_EXEC_FAIL;
     }
 
     if (exit_code == 127 || (out && strstr(out, "command not found"))) {
         AIRY_FREE(out);
-        if (strcmp(u.scheme, "http") != 0) {
-            char err[512];
-            snprintf(err, sizeof(err),
-                     "curl is not available and https:// requires curl (TLS not "
-                     "supported by the built-in network layer)");
-            res->error = AIRY_STRDUP(err);
-            return AIRY_ERR_NOT_SUPPORTED;
-        }
-        return web_fetch_via_network(&u, res);
+#ifndef _WIN32
+        /* Fallback: plain-HTTP via the built-in network layer (no TLS). */
+        if (strcmp(u.scheme, "http") == 0)
+            return web_fetch_via_network(&u, res);
+#endif
+        char err[512];
+        snprintf(err, sizeof(err),
+                 "curl is not available and %s:// requires curl (TLS not supported by the "
+                 "built-in network layer)",
+                 u.scheme);
+        res->error = AIRY_STRDUP(err);
+        return AIRY_ERR_NOT_SUPPORTED;
     }
 
     long http_status = 0;
@@ -261,15 +261,10 @@ int web_fetch_tool(const char *params_json, tool_result_t *res)
         res->exit_code = exit_code;
     }
     return AIRY_OK;
-#else
-    res->error = AIRY_STRDUP("web_fetch is not supported on this platform");
-    return AIRY_ERR_NOT_SUPPORTED;
-#endif
 }
 
-#ifndef _WIN32
 /* ============================================================================
- * web_search: DuckDuckGo HTML search (modeled on Atom Code WebSearchTool)
+ * web_search: Bing / DuckDuckGo HTML search (modeled on Atom Code WebSearchTool)
  *   params: query (required), max_results (optional 8)
  *   output: title / URL / summary groups, line-separated
  * ============================================================================ */
@@ -528,4 +523,3 @@ int web_search_tool(const char *params_json, tool_result_t *res)
     res->exit_code = 0;
     return AIRY_OK;
 }
-#endif /* !_WIN32 */

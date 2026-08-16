@@ -34,9 +34,11 @@
 
 #define HOOK_D_SOCKET_PATH airy_runtime_dir_socket("hook.sock")
 #define HOOK_D_PIPE_PATH "\\\\.\\pipe\\airy_hook"
+#define HOOK_D_DEFAULT_PORT 8093
 #define HOOK_D_MAX_BUFFER 4096
 
-DAEMON_DECLARE_COMMON(hook_d, hook, HOOK_D_SOCKET_PATH, HOOK_D_PIPE_PATH, 0, HOOK_D_MAX_BUFFER)
+DAEMON_DECLARE_COMMON(hook_d, hook, HOOK_D_SOCKET_PATH, HOOK_D_PIPE_PATH, HOOK_D_DEFAULT_PORT,
+                      HOOK_D_MAX_BUFFER)
 
 DAEMON_DECLARE_SHUTDOWN_METHOD(hook_d)
 
@@ -435,7 +437,7 @@ int main(int argc, char *argv[])
     }
 
     airy_sock_t server_fd =
-        daemon_create_server_socket(use_tcp, 0, HOOK_D_SOCKET_PATH, HOOK_D_PIPE_PATH);
+        daemon_create_server_socket(use_tcp, HOOK_D_DEFAULT_PORT, HOOK_D_SOCKET_PATH, HOOK_D_PIPE_PATH);
     if (server_fd < 0) {
         SVC_LOG_ERROR("hook_d: failed to create socket at %s (errno=%d: %s)", HOOK_D_SOCKET_PATH,
                       errno, strerror(errno));
@@ -456,9 +458,9 @@ int main(int argc, char *argv[])
     ev_config.service_ctx = NULL;
 
     const char *sock_addr = use_tcp ? "127.0.0.1" : HOOK_D_SOCKET_PATH;
-    int ret =
-        daemon_init_event_driver("hook_d", "hook", sock_addr, use_tcp ? 0 : 0, "hook,core", use_tcp,
-                                 &ev_config, &g_event_driver_hook_d, &g_bsd_hook_d, &g_bipc_hook_d);
+    int ret = daemon_init_event_driver("hook_d", "hook", sock_addr, use_tcp ? HOOK_D_DEFAULT_PORT : 0,
+                                       "hook,core", use_tcp, &ev_config, &g_event_driver_hook_d,
+                                       &g_bsd_hook_d, &g_bipc_hook_d);
     if (ret != AIRY_SUCCESS || !g_event_driver_hook_d) {
         SVC_LOG_ERROR("hook_d: failed to create event driver");
         airy_sock_close(server_fd);

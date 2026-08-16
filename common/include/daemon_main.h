@@ -267,6 +267,15 @@ extern "C" {
  * - POSIX: SIGINT/SIGTERM -> signal_handler, SIGPIPE -> IGN, SIGUSR1 -> svc_log_toggle
  * - Windows: SetConsoleCtrlHandler -> console_handler
  */
+#if AIRY_PLATFORM_WINDOWS
+/* MSVC CRT 不定义 SIGPIPE/SIGUSR1：Windows 构建只注册 SIGINT/SIGTERM，
+ * Ctrl+C 由 SetConsoleCtrlHandler（platform_compat.c）另行处理。 */
+#define DAEMON_SETUP_SIGNALS(daemon_name)              \
+    do {                                               \
+        signal(SIGINT, signal_handler_##daemon_name);  \
+        signal(SIGTERM, signal_handler_##daemon_name); \
+    } while (0)
+#else
 #define DAEMON_SETUP_SIGNALS(daemon_name)                      \
     do {                                                       \
         signal(SIGINT, signal_handler_##daemon_name);          \
@@ -274,6 +283,7 @@ extern "C" {
         signal(SIGPIPE, SIG_IGN);                              \
         signal(SIGUSR1, svc_log_toggle_handler_##daemon_name); \
     } while (0)
+#endif
 
 /**
  * @brief Command-line argument parsing (--manager, --tcp, --help).
@@ -286,6 +296,11 @@ extern "C" {
 static inline int daemon_parse_args(int argc, char **argv, const char **config_path, int *use_tcp,
                                     void (*print_usage_fn)(const char *))
 {
+#if defined(AIRY_PLATFORM_WINDOWS)
+    /* Windows：IPC 统一走 TCP 回环（事件循环仅支持 socket，命名管道
+     * 无法接入 WSAEventSelect）；--tcp 参数保留为显式语义一致性。 */
+    *use_tcp = 1;
+#endif
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--manager") == 0 && i + 1 < argc) {
             *config_path = argv[++i];
@@ -324,8 +339,11 @@ static inline airy_sock_t daemon_create_server_socket(int use_tcp, int tcp_port,
         return airy_sock_create_tcp_server("127.0.0.1", tcp_port);
     }
 #if defined(AIRY_PLATFORM_WINDOWS)
+    /* Windows：事件循环（WSAEventSelect）仅接受 socket，命名管道句柄
+     * 无法接入；daemon 统一走 TCP 回环（parse_args 亦强制 use_tcp）。 */
     (void)unix_path;
-    return airy_sock_create_named_pipe_server(win_pipe);
+    (void)win_pipe;
+    return airy_sock_create_tcp_server("127.0.0.1", tcp_port);
 #else
     (void)win_pipe;
     return airy_sock_create_unix_server(unix_path);

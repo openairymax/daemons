@@ -34,7 +34,7 @@
 #endif
 #endif
 
-#define INFO_D_DEFAULT_PORT 8083
+#define INFO_D_DEFAULT_PORT 8088
 #define INFO_D_MAX_BUFFER 65536
 #define INFO_D_DEFAULT_SOCKET airy_runtime_dir_socket("info.sock")
 #define INFO_D_COLLECT_INTERVAL_SEC 5
