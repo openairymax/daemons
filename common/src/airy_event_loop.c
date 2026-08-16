@@ -715,7 +715,10 @@ void airy_event_loop_stop_async(airy_event_loop_t *loop)
     loop->stop_requested = true;
     if (loop->wakeup_fd >= 0) {
         uint64_t val = 1;
-        (void)write(loop->wakeup_fd, &val, sizeof(val));
+        /* eventfd wakeup is best-effort: a failed write leaves the loop
+         * waiting until the next poll tick, never deadlocks. */
+        ssize_t n = write(loop->wakeup_fd, &val, sizeof(val));
+        (void)n;
     }
 }
 
