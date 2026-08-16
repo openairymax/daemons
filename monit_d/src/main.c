@@ -627,7 +627,7 @@ int main(int argc, char **argv)
     daemon_event_driver_run(g_event_driver_monit_d);
 
     daemon_cleanup_standard(g_bipc_monit_d, g_bsd_monit_d, g_event_driver_monit_d, server_fd,
-                            destroy_service, &g_running_lock_monit_d);
+                            DEFAULT_SOCKET_PATH_UNIX, destroy_service, &g_running_lock_monit_d);
 
     SVC_LOG_INFO("Monitor service stopped");
     daemon_cupolas_cleanup();

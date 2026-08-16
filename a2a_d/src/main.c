@@ -637,7 +637,7 @@ int main(int argc, char **argv)
     daemon_event_driver_run(g_event_driver_a2a_d);
 
     daemon_cleanup_standard(g_bipc_a2a_d, g_bsd_a2a_d, g_event_driver_a2a_d, server_fd,
-                            destroy_service, &g_running_lock_a2a_d);
+                            g_config.socket_path, destroy_service, &g_running_lock_a2a_d);
     free_daemon_config();
 
     SVC_LOG_INFO("A2A service stopped");
