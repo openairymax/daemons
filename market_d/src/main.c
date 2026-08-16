@@ -565,8 +565,8 @@ int main(int argc, char **argv)
         thread_pool_submit(pool, handle_client_wrapper, (void *)(uintptr_t)client_fd);
     }
 
-    daemon_cleanup_standard(g_bipc_market_d, g_bsd_market_d, NULL, server_fd, destroy_service,
-                            &g_running_lock_market_d);
+    daemon_cleanup_standard(g_bipc_market_d, g_bsd_market_d, NULL, server_fd,
+                            DEFAULT_SOCKET_PATH_UNIX, destroy_service, &g_running_lock_market_d);
     thread_pool_destroy(pool);
     if (g_dispatcher_market_d)
         method_dispatcher_destroy(g_dispatcher_market_d);

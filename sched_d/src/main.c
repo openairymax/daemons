@@ -797,7 +797,7 @@ int main(int argc, char **argv)
     daemon_event_driver_run(g_event_driver_sched_d);
 
     daemon_cleanup_standard(g_bipc_sched_d, g_bsd_sched_d, g_event_driver_sched_d, server_fd,
-                            destroy_service, &g_running_lock_sched_d);
+                            DEFAULT_SOCKET_PATH_UNIX, destroy_service, &g_running_lock_sched_d);
 
     daemon_cupolas_cleanup();
     log_cleanup();
