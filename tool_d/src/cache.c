@@ -96,19 +96,6 @@ static void lru_remove(tool_cache_t *cache, cache_entry_t *e)
     e->prev = e->next = NULL;
 }
 
-static void lru_move_to_head(tool_cache_t *cache, cache_entry_t *e)
-{
-    if (cache->lru_head == e)
-        return;
-    lru_remove(cache, e);
-    e->next = cache->lru_head;
-    if (cache->lru_head)
-        cache->lru_head->prev = e;
-    cache->lru_head = e;
-    if (!cache->lru_tail)
-        cache->lru_tail = e;
-}
-
 static void evict_lru(tool_cache_t *cache)
 {
     airy_mtx_lock(&cache->lru_lock);
