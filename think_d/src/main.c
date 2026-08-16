@@ -391,7 +391,7 @@ int main(int argc, char **argv)
     daemon_event_driver_run(g_event_driver_think_d);
 
     daemon_cleanup_standard(g_bipc_think_d, g_bsd_think_d, g_event_driver_think_d, server_fd,
-                            destroy_service, &g_running_lock_think_d);
+                            g_config.socket_path, destroy_service, &g_running_lock_think_d);
     free_daemon_config();
 
     SVC_LOG_INFO("ThinkDual service stopped");

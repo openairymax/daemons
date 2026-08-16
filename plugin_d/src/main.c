@@ -558,7 +558,7 @@ int main(int argc, char **argv)
     daemon_event_driver_run(g_event_driver_plugin_d);
 
     daemon_cleanup_standard(g_bipc_plugin_d, g_bsd_plugin_d, g_event_driver_plugin_d, server_fd,
-                            destroy_service, &g_running_lock_plugin_d);
+                            DEFAULT_SOCKET_PATH_UNIX, destroy_service, &g_running_lock_plugin_d);
 
     SVC_LOG_INFO("Plugin_d: stopped");
     log_cleanup();

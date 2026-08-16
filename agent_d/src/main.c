@@ -816,7 +816,7 @@ int main(int argc, char **argv)
 #endif
 
     daemon_cleanup_standard(g_bipc_agent_d, g_bsd_agent_d, g_event_driver_agent_d, server_fd,
-                            destroy_service, &g_running_lock_agent_d);
+                            g_config.socket_path, destroy_service, &g_running_lock_agent_d);
     free_daemon_config();
 
     SVC_LOG_INFO("Agent service stopped");

@@ -400,11 +400,17 @@ static inline int daemon_init_event_driver(const char *daemon_name, const char *
  *
  * Cleans up all resources in reverse order of init:
  *   bootstrap_ipc -> bootstrap_sd -> event_driver -> socket -> service -> mutex -> socket_cleanup -> cupolas -> log
+ *
+ * @param unix_socket_path Unix domain socket path to unlink on graceful
+ *   stop (POSIX only, skipped on Windows TCP/pipe mode). Passing NULL is
+ *   safe. Fixes stale-socket residue: previously only bind()-time unlink
+ *   cleaned leftover files, so a gracefully stopped daemon left a DEAD
+ *   socket file behind that the next start had to scavenge.
  */
 static inline void daemon_cleanup_standard(daemon_bootstrap_ipc_t *bipc, daemon_bootstrap_sd_t *bsd,
                                            daemon_event_driver_t *event_driver,
-                                           airy_sock_t server_fd, void (*destroy_service)(void),
-                                           airy_mtx_t *running_lock)
+                                           airy_sock_t server_fd, const char *unix_socket_path,
+                                           void (*destroy_service)(void), airy_mtx_t *running_lock)
 {
     SVC_LOG_WARN("Service stopping...");
 
@@ -416,6 +422,12 @@ static inline void daemon_cleanup_standard(daemon_bootstrap_ipc_t *bipc, daemon_
         daemon_event_driver_destroy(event_driver);
     if (server_fd >= 0)
         airy_sock_close(server_fd);
+#if AIRY_PLATFORM_POSIX
+    /* Unlink the listening socket file after closing the fd. Ignore
+     * ENOENT: TCP mode or an already-removed file is normal. */
+    if (unix_socket_path && unix_socket_path[0])
+        (void)unlink(unix_socket_path);
+#endif
     if (destroy_service)
         destroy_service();
     if (running_lock)

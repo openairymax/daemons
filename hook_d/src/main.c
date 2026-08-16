@@ -502,7 +502,7 @@ int main(int argc, char *argv[])
 
     SVC_LOG_INFO("hook_d: shutting down");
     daemon_cleanup_standard(g_bipc_hook_d, g_bsd_hook_d, g_event_driver_hook_d, server_fd,
-                            destroy_service_hook_d, &g_running_lock_hook_d);
+                            HOOK_D_SOCKET_PATH, destroy_service_hook_d, &g_running_lock_hook_d);
     log_cleanup();
     return EXIT_SUCCESS;
 }

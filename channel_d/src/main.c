@@ -466,7 +466,8 @@ int main(int argc, char *argv[])
 
     SVC_LOG_INFO("channel_d shutting down");
     daemon_cleanup_standard(g_bipc_channel_d, g_bsd_channel_d, g_event_driver_channel_d, server_fd,
-                            destroy_service_channel_d, &g_running_lock_channel_d);
+                            CHANNEL_D_SOCKET_PATH, destroy_service_channel_d,
+                            &g_running_lock_channel_d);
     log_cleanup();
     return 0;
 }

@@ -634,7 +634,7 @@ int main(int argc, char **argv)
     daemon_event_driver_run(g_event_driver_mem_d);
 
     daemon_cleanup_standard(g_bipc_mem_d, g_bsd_mem_d, g_event_driver_mem_d, server_fd,
-                            destroy_service, &g_running_lock_mem_d);
+                            g_config.socket_path, destroy_service, &g_running_lock_mem_d);
     free_daemon_config();
 
     SVC_LOG_INFO("Memory service stopped");

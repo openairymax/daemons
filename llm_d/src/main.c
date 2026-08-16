@@ -852,7 +852,7 @@ int main(int argc, char **argv)
     SVC_LOG_INFO("LLM service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_llm_d);
 
-    daemon_cleanup_standard(g_bipc_llm_d, g_bsd_llm_d, g_event_driver_llm_d, server_fd,
+    daemon_cleanup_standard(g_bipc_llm_d, g_bsd_llm_d, g_event_driver_llm_d, server_fd, unix_path,
                             destroy_service_llm_d, &g_running_lock_llm_d);
 
     daemon_cupolas_cleanup();
