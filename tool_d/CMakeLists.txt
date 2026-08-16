@@ -174,7 +174,6 @@ target_link_libraries(tool_d PRIVATE
     airy_coreloopthree
     -Wl,--no-whole-archive
     airy_cognition
-    airy_execution
     airy_core
     airy_memory
     airy_atoms

@@ -82,7 +82,6 @@ foreach(TEST_SRC ${TOOL_TEST_SOURCES})
         airy_coreloopthree
         -Wl,--no-whole-archive
         airy_cognition
-        airy_execution
         airy_core
         airy_memory
         airy_atoms
