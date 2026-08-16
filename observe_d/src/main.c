@@ -27,8 +27,8 @@
 #include <unistd.h>
 #endif
 
-#define OBSERVE_D_DEFAULT_PORT 8085
-#define OBSERVE_D_METRICS_PORT 9090
+#define OBSERVE_D_DEFAULT_PORT 8091
+#define OBSERVE_D_METRICS_PORT 9091
 #define OBSERVE_D_MAX_BUFFER 65536
 #define OBSERVE_D_DEFAULT_SOCKET airy_runtime_dir_socket("observe.sock")
 #define OBSERVE_D_MAX_METRICS 256

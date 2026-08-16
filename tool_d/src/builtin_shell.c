@@ -33,8 +33,6 @@
 
 #include "tool_builtin_internal.h"
 
-#ifndef _WIN32
-
 void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const char *mark)
 {
     size_t mlen = strlen(mark);
@@ -45,6 +43,8 @@ void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const char *ma
         buf[len] = '\0';
     }
 }
+
+#ifndef _WIN32
 
 /**
  * @brief Run a shell command with timeout and capture stdout/stderr
@@ -263,7 +263,197 @@ int builtin_shell_run(const char *cmd, char **out, int *exit_code, uint32_t time
     *out = buf;
     return 0;
 }
-#endif
+
+#else /* _WIN32 */
+
+#include <windows.h>
+
+/* Append read bytes to the growable capture buffer, mirroring the POSIX
+ * version's capacity/truncation policy. */
+static void win_capture_append(char **buf, size_t *cap, size_t *len, const char *chunk, DWORD n,
+                               int *truncated)
+{
+    if (len + (size_t)n + 1 > *cap) {
+        size_t new_cap = *cap * 2;
+        if (new_cap > BUILTIN_OUTPUT_CAP)
+            new_cap = BUILTIN_OUTPUT_CAP;
+        if (new_cap <= *cap) {
+            *truncated = 1;
+            return;
+        }
+        char *nb = (char *)AIRY_REALLOC(*buf, new_cap);
+        if (!nb) {
+            *truncated = 1;
+            return;
+        }
+        *buf = nb;
+        *cap = new_cap;
+    }
+    if (*len + (size_t)n >= *cap) {
+        n = (DWORD)(*cap - *len - 1);
+        *truncated = 1;
+    }
+    __builtin_memcpy(*buf + *len, chunk, (size_t)n);
+    *len += (size_t)n;
+    (*buf)[*len] = '\0';
+}
+
+/**
+ * @brief Run a shell command with timeout and capture stdout/stderr
+ *        (Windows: CreateProcess + anonymous pipe)
+ *
+ * Semantics match the POSIX version: commands exceeding timeout_ms are
+ * terminated so tool_d never blocks forever; output is capped at
+ * BUILTIN_OUTPUT_CAP. The command is executed by cmd.exe /S /C (quoting
+ * preserved), on Windows the OS-level sandbox is unavailable so
+ * os_sandbox_cfg_t is ignored (mode is always OFF).
+ */
+int builtin_shell_run(const char *cmd, char **out, int *exit_code, uint32_t timeout_ms,
+                      int *out_truncated, const os_sandbox_cfg_t *sandbox)
+{
+    (void)sandbox; /* Windows has no OS-level sandbox (mode is always OFF) */
+    *out = NULL;
+    *exit_code = -1;
+    if (out_truncated)
+        *out_truncated = 0;
+
+    HANDLE h_read = NULL;
+    HANDLE h_write = NULL;
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+    if (!CreatePipe(&h_read, &h_write, &sa, 0))
+        return -1;
+    /* Non-inheritable read end: descendants of the command process cannot
+     * keep the pipe open after the command exits (mirrors the POSIX
+     * drain-bound design). */
+    if (!SetHandleInformation(h_read, HANDLE_FLAG_INHERIT, 0)) {
+        CloseHandle(h_read);
+        CloseHandle(h_write);
+        return -1;
+    }
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    __builtin_memset(&si, 0, sizeof(si));
+    __builtin_memset(&pi, 0, sizeof(pi));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = h_write;
+    si.hStdError = h_write;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+
+    size_t cmd_len = strlen(cmd);
+    char *line = (char *)AIRY_MALLOC(cmd_len + 32);
+    if (!line) {
+        CloseHandle(h_read);
+        CloseHandle(h_write);
+        return -1;
+    }
+    /* /S keeps the original quoting of cmd (nested quotes survive), /C runs
+     * the command and exits; CREATE_NO_WINDOW keeps the daemon console clean. */
+    snprintf(line, cmd_len + 32, "cmd.exe /S /C %s", cmd);
+    BOOL spawned =
+        CreateProcessA(NULL, line, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+    AIRY_FREE(line);
+    CloseHandle(h_write); /* the child holds the write end */
+    if (!spawned) {
+        CloseHandle(h_read);
+        *exit_code = 127; /* command not runnable (mirrors POSIX sh 127) */
+        return 0;
+    }
+
+    size_t cap = 4096;
+    size_t len = 0;
+    char *buf = (char *)AIRY_MALLOC(cap);
+    if (!buf) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        CloseHandle(h_read);
+        return -1;
+    }
+    buf[0] = '\0';
+
+    int timed_out = 0;
+    int truncated = 0;
+    uint64_t deadline_ms = GetTickCount64() + timeout_ms;
+
+    for (;;) {
+        if (WaitForSingleObject(pi.hProcess, 100) == WAIT_OBJECT_0)
+            break;
+        if (GetTickCount64() >= deadline_ms) {
+            timed_out = 1;
+            break;
+        }
+        for (;;) {
+            DWORD avail = 0;
+            if (!PeekNamedPipe(h_read, NULL, 0, NULL, &avail, NULL) || avail == 0)
+                break;
+            char chunk[4096];
+            DWORD n = (avail < (DWORD)sizeof(chunk)) ? avail : (DWORD)sizeof(chunk);
+            if (!ReadFile(h_read, chunk, n, &n, NULL) || n == 0)
+                break;
+            win_capture_append(&buf, &cap, &len, chunk, n, &truncated);
+        }
+    }
+
+    DWORD proc_exit = 0;
+    if (timed_out) {
+        TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        proc_exit = 1;
+    } else {
+        GetExitCodeProcess(pi.hProcess, &proc_exit);
+    }
+
+    /* Drain remaining buffered output after exit (bounded by
+     * BUILTIN_OUTPUT_DRAIN_MS, mirroring the POSIX flush loop). */
+    uint64_t drain_deadline_ms = GetTickCount64() + BUILTIN_OUTPUT_DRAIN_MS;
+    for (;;) {
+        if (GetTickCount64() >= drain_deadline_ms)
+            break;
+        DWORD avail = 0;
+        if (!PeekNamedPipe(h_read, NULL, 0, NULL, &avail, NULL) || avail == 0) {
+            Sleep(10);
+            continue;
+        }
+        char chunk[4096];
+        DWORD n = (avail < (DWORD)sizeof(chunk)) ? avail : (DWORD)sizeof(chunk);
+        if (!ReadFile(h_read, chunk, n, &n, NULL) || n == 0)
+            break;
+        win_capture_append(&buf, &cap, &len, chunk, n, &truncated);
+    }
+    CloseHandle(h_read);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+
+    if (timed_out) {
+        const char mark[] = "\n[command timed out after 60s]";
+        builtin_append_trunc_mark(buf, cap, len, mark);
+        len += sizeof(mark) - 1;
+        if (len >= cap)
+            len = cap - 1;
+        buf[len] = '\0';
+        *exit_code = -1;
+    } else {
+        *exit_code = (int)proc_exit;
+    }
+    if (truncated) {
+        const char mark[] = "\n[output truncated at 1MB]";
+        builtin_append_trunc_mark(buf, cap, len, mark);
+        len += sizeof(mark) - 1;
+        if (len >= cap)
+            len = cap - 1;
+        buf[len] = '\0';
+    }
+    if (out_truncated)
+        *out_truncated = truncated;
+    *out = buf;
+    return 0;
+}
+#endif /* _WIN32 */
 
 int shell_run_tool(const char *params_json, tool_result_t *res)
 {
@@ -276,11 +466,9 @@ int shell_run_tool(const char *params_json, tool_result_t *res)
         res->error = AIRY_STRDUP("Missing string parameter: command");
         return AIRY_ERR_INVALID_PARAM;
     }
-#ifndef _WIN32
     /* P2 OS-level sandbox: shell_run is enabled by default per environment
-     * config (Landlock/seccomp/rlimit); the command may only write the
-     * workspace and /tmp, system directories are read-only, and privileged
-     * syscalls are rejected by seccomp */
+     * config (Landlock/seccomp/rlimit on Linux; Windows/macOS resolve to
+     * OS_SANDBOX_MODE_OFF, keeping the identical call path). */
     os_sandbox_cfg_t sandbox_cfg;
     os_sandbox_cfg_from_env(&sandbox_cfg);
     char *out = NULL;
@@ -288,7 +476,7 @@ int shell_run_tool(const char *params_json, tool_result_t *res)
     int rc = builtin_shell_run(cmd->valuestring, &out, &exit_code, BUILTIN_SHELL_TIMEOUT_MS, NULL,
                                &sandbox_cfg);
     if (rc != 0) {
-        res->error = AIRY_STRDUP("Failed to execute command (fork/pipe failed)");
+        res->error = AIRY_STRDUP("Failed to execute command (pipe/process creation failed)");
         return AIRY_ERR_EXEC_FAIL;
     }
     res->output = out ? out : AIRY_STRDUP("");
@@ -300,8 +488,4 @@ int shell_run_tool(const char *params_json, tool_result_t *res)
         res->error = AIRY_STRDUP(err);
     }
     return AIRY_OK;
-#else
-    res->error = AIRY_STRDUP("shell_run is not supported on this platform");
-    return AIRY_ERR_NOT_SUPPORTED;
-#endif
 }

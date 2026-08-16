@@ -714,23 +714,78 @@ char *airy_daemon_read_request(airy_sock_t client_fd, size_t *out_len, const cha
     *out_len = used;
     return buf;
 #else
-    /* Windows fallback: mirror the historical single-recv read (64 KiB cap);
-     * named-pipe transports never deliver frames larger than this today. */
+    /* Windows fallback：与 POSIX 主路径相同的循环读 + JSON 完整性探测，
+     * 消除历史单次 recv 的 64 KiB 截断（llm.complete 携带大 tool 结果时
+     * 会超限被截成 JSON 解析错误）。命名管道/TCP 均按完整帧语义读取。 */
     char *buf = (char *)AIRY_MALLOC(AIRY_DAEMON_REQ_INITIAL_CAP);
     if (!buf) {
         if (err)
             *err = "Out of memory";
         return NULL;
     }
-    ssize_t n = airy_sock_recv(client_fd, buf, AIRY_DAEMON_REQ_INITIAL_CAP - 1);
-    if (n <= 0) {
-        if (err)
-            *err = "Request read error";
-        AIRY_FREE(buf);
-        return NULL;
+    size_t cap = AIRY_DAEMON_REQ_INITIAL_CAP;
+    size_t used = 0;
+    uint32_t elapsed = 0;
+
+    for (;;) {
+        if (used >= cap - 1) {
+            size_t new_cap = cap * 2;
+            if (new_cap > AIRY_DAEMON_REQ_MAX_CAP)
+                new_cap = AIRY_DAEMON_REQ_MAX_CAP;
+            if (new_cap <= cap) {
+                if (err)
+                    *err = "Request too large";
+                AIRY_FREE(buf);
+                return NULL;
+            }
+            char *np = (char *)AIRY_REALLOC(buf, new_cap);
+            if (!np) {
+                if (err)
+                    *err = "Out of memory";
+                AIRY_FREE(buf);
+                return NULL;
+            }
+            buf = np;
+            cap = new_cap;
+        }
+
+        ssize_t n = airy_sock_recv(client_fd, buf + used, cap - used - 1);
+        if (n > 0) {
+            used += (size_t)n;
+            buf[used] = '\0';
+            cJSON *probe = cJSON_Parse(buf);
+            if (probe) {
+                cJSON_Delete(probe);
+                break;
+            }
+            continue;
+        }
+
+        if (elapsed >= AIRY_DAEMON_REQ_FIRST_POLL_MS) {
+            if (err)
+                *err = "Request read timeout";
+            AIRY_FREE(buf);
+            return NULL;
+        }
+        /* Windows 无 poll：以 50ms select 切片刻轮询（等价 POSIX 切片） */
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET((SOCKET)client_fd, &rfds);
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = AIRY_DAEMON_REQ_SLICE_MS * 1000;
+        int pr = select(0, &rfds, NULL, NULL, &tv);
+        if (pr < 0) {
+            if (err)
+                *err = "Request read error";
+            AIRY_FREE(buf);
+            return NULL;
+        }
+        if (pr == 0)
+            elapsed += AIRY_DAEMON_REQ_SLICE_MS;
     }
-    buf[n] = '\0';
-    *out_len = (size_t)n;
+
+    *out_len = used;
     return buf;
 #endif
 }

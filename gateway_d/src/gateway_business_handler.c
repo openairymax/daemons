@@ -41,10 +41,13 @@
 #include <string.h>
 #include <time.h>
 
-/* Resolve the daemon Unix socket path: <ENV_NAME> override ->
+/* Resolve the daemon endpoint: <ENV_NAME> override ->
  * airy_runtime_dir()/<sock_name> -> <sock_name>. Kept consistent with the
  * daemon-side single source of truth: airy_runtime_dir() resolves $AIRY_HOME/run,
- * defaulting to ~/.airymaxrt/run */
+ * defaulting to ~/.airymaxrt/run.
+ *
+ * Windows: daemon IPC 走 TCP 回环（daemon_main.h parse_args 强制），
+ * 端点约定为 "host:port"，端口与各 daemon DEFAULT_TCP_PORT 对齐。 */
 static void gw_resolve_daemon_sock(char *out, size_t out_size, const char *env_name,
                                    const char *sock_name)
 {
@@ -53,12 +56,32 @@ static void gw_resolve_daemon_sock(char *out, size_t out_size, const char *env_n
         AIRY_STRNCPY_TERM(out, env, out_size);
         return;
     }
+#ifdef _WIN32
+    static const struct { const char *ns; const char *ep; } WIN_SOCK_TCP[] = {
+        {"llm.sock", "127.0.0.1:8080"},     {"tool.sock", "127.0.0.1:8081"},
+        {"market.sock", "127.0.0.1:8082"},   {"sched.sock", "127.0.0.1:8083"},
+        {"notify.sock", "127.0.0.1:8084"},   {"mem.sock", "127.0.0.1:8085"},
+        {"agent.sock", "127.0.0.1:8086"},    {"a2a.sock", "127.0.0.1:8087"},
+        {"info.sock", "127.0.0.1:8088"},     {"cupolas.sock", "127.0.0.1:8089"},
+        {"think.sock", "127.0.0.1:8090"},    {"observe.sock", "127.0.0.1:8091"},
+        {"plugin.sock", "127.0.0.1:8092"},   {"hook.sock", "127.0.0.1:8093"},
+        {"channel.sock", "127.0.0.1:8094"},  {"monit.sock", "127.0.0.1:9090"},
+    };
+    for (size_t i = 0; i < sizeof(WIN_SOCK_TCP) / sizeof(WIN_SOCK_TCP[0]); i++) {
+        if (strcmp(sock_name, WIN_SOCK_TCP[i].ns) == 0) {
+            AIRY_STRNCPY_TERM(out, WIN_SOCK_TCP[i].ep, out_size);
+            return;
+        }
+    }
+    AIRY_STRNCPY_TERM(out, sock_name, out_size);
+#else
     const char *run_dir = airy_runtime_dir();
     if (run_dir && *run_dir) {
         snprintf(out, out_size, "%s/%s", run_dir, sock_name);
     } else {
         AIRY_STRNCPY_TERM(out, sock_name, out_size);
     }
+#endif
 }
 
 gateway_business_ctx_t *gateway_business_ctx_create(void)

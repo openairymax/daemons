@@ -28,11 +28,9 @@ extern "C" {
 /* Common I/O helpers (builtin.c) */
 char *builtin_read_all(FILE *fp, int *out_truncated);
 
-#ifndef _WIN32
 void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const char *mark);
 int builtin_shell_run(const char *cmd, char **out, int *exit_code, uint32_t timeout_ms,
                       int *out_truncated, const os_sandbox_cfg_t *sandbox);
-#endif
 
 /* Built-in tool implementations (builtin_fs.c / builtin_shell.c /
  * builtin_net.c / builtin_git.c) */
@@ -41,13 +39,13 @@ int fs_write_tool(const char *params_json, tool_result_t *res);
 int fs_list_tool(const char *params_json, tool_result_t *res);
 int shell_run_tool(const char *params_json, tool_result_t *res);
 int web_fetch_tool(const char *params_json, tool_result_t *res);
-
-#ifndef _WIN32
 int fs_glob_tool(const char *params_json, tool_result_t *res);
 int fs_grep_tool(const char *params_json, tool_result_t *res);
 int fs_edit_tool(const char *params_json, tool_result_t *res);
 int fs_delete_tool(const char *params_json, tool_result_t *res);
 int web_search_tool(const char *params_json, tool_result_t *res);
+
+#ifndef _WIN32
 int git_exec_tool(const char *params_json, tool_result_t *res);
 int git_diff_tool(const char *params_json, tool_result_t *res);
 int git_apply_tool(const char *params_json, tool_result_t *res);

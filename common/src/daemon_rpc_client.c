@@ -28,7 +28,10 @@
 #include <string.h>
 
 #if AIRY_PLATFORM_WINDOWS
-
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
 #elif AIRY_PLATFORM_POSIX
 #include <poll.h>
 #include <sys/socket.h>
@@ -89,6 +92,19 @@ static int rpc_buf_append(rpc_buf_t *buf, const char *src, size_t len)
     buf->size += len;
     buf->data[buf->size] = '\0';
     return AIRY_SUCCESS;
+}
+
+/* 平台统一的连接关闭（POSIX: close / Windows: closesocket），供公共
+ * daemon_rpc_call_cancelable 在两种平台复用同一清理路径。 */
+static void rpc_close_fd(int fd)
+{
+    if (fd < 0)
+        return;
+#if AIRY_PLATFORM_WINDOWS
+    closesocket((SOCKET)fd);
+#else
+    close(fd);
+#endif
 }
 
 #if AIRY_PLATFORM_POSIX
@@ -286,24 +302,121 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
 
 #elif AIRY_PLATFORM_WINDOWS
 
+/* Windows daemon IPC：daemon 统一走 TCP 回环（见 daemon_main.h
+ * DAEMON_DECLARE_COMMON / parse_args）。socket_path 参数约定为
+ * "host:port"（如 "127.0.0.1:8086"），与 gateway 的 AIRY_LLM_TCP_ADDR/PORT
+ * 约定一致；CLI/gateway 在 Windows 下传入 TCP 端点。 */
+
+/** @brief 解析 "host:port" 并 TCP connect，返回 SOCKET（int）或 -1。 */
 static int rpc_connect_unix(const char *socket_path)
 {
-    (void)socket_path;
-    return AIRY_ERR_NOT_SUPPORTED;
+    char host[128];
+    char port_str[16];
+    const char *colon = socket_path ? strrchr(socket_path, ':') : NULL;
+    if (!colon || colon == socket_path || (size_t)(colon - socket_path) >= sizeof(host) ||
+        strlen(colon + 1) >= sizeof(port_str)) {
+        SVC_LOG_ERROR("rpc_connect_unix: invalid TCP endpoint '%s'", socket_path ? socket_path : "");
+        return -1;
+    }
+    size_t host_len = (size_t)(colon - socket_path);
+    __builtin_memcpy(host, socket_path, host_len);
+    host[host_len] = '\0';
+    strcpy(port_str, colon + 1);
+    uint16_t port = (uint16_t)atoi(port_str);
+    if (port == 0) {
+        SVC_LOG_ERROR("rpc_connect_unix: invalid port in '%s'", socket_path);
+        return -1;
+    }
+
+    SOCKET fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd == INVALID_SOCKET)
+        return -1;
+
+    struct sockaddr_in addr;
+    __builtin_memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, host, &addr.sin_addr) <= 0) {
+        addr.sin_addr.s_addr = INADDR_LOOPBACK;
+    }
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        SVC_LOG_ERROR("rpc_connect_unix: connect(%s) failed: %d", socket_path, WSAGetLastError());
+        closesocket(fd);
+        return -1;
+    }
+    return (int)fd;
 }
 
+/** @brief select 版 recv 循环（等价 POSIX poll 语义）。 */
 static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
                              airy_cancel_token_t *cancel_token, const char *cancel_socket_path,
                              const char *cancel_method, const char *cancel_params_json)
 {
-    (void)fd;
-    (void)buf;
-    (void)timeout_ms;
-    (void)cancel_token;
-    (void)cancel_socket_path;
-    (void)cancel_method;
-    (void)cancel_params_json;
-    return AIRY_ERR_NOT_SUPPORTED;
+    uint32_t elapsed_ms = 0;
+    const uint32_t step_ms = 200;
+
+    while (elapsed_ms < timeout_ms) {
+        if (cancel_token && airy_cancel_token_is_canceled(cancel_token)) {
+            closesocket((SOCKET)fd);
+            if (cancel_method && cancel_method[0]) {
+                char *cancel_result = NULL;
+                int crc = daemon_rpc_call(cancel_socket_path, cancel_method, cancel_params_json,
+                                          &cancel_result, 5000);
+                AIRY_FREE(cancel_result);
+                if (crc != AIRY_SUCCESS)
+                    SVC_LOG_WARN("rpc cancel request failed (method=%s, rc=%d)", cancel_method, crc);
+            }
+            return AIRY_ERR_CANCELED;
+        }
+
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET((SOCKET)fd, &rfds);
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = (long)(step_ms * 1000);
+
+        int pr = select(0, &rfds, NULL, NULL, &tv);
+        if (pr < 0)
+            return AIRY_ERR_GENERIC_FAIL;
+        if (pr == 0) {
+            elapsed_ms += step_ms;
+            if (buf->size > 0) {
+                cJSON *probe = cJSON_Parse(buf->data);
+                if (probe) {
+                    cJSON_Delete(probe);
+                    return AIRY_SUCCESS;
+                }
+            }
+            continue;
+        }
+
+        char chunk[4096];
+        int n = recv((SOCKET)fd, chunk, sizeof(chunk), 0);
+        if (n < 0)
+            return AIRY_ERR_GENERIC_FAIL;
+        if (n == 0) {
+            if (buf->size > 0) {
+                cJSON *probe = cJSON_Parse(buf->data);
+                if (probe) {
+                    cJSON_Delete(probe);
+                    return AIRY_SUCCESS;
+                }
+            }
+            return AIRY_ERR_GENERIC_FAIL;
+        }
+        int rc = rpc_buf_append(buf, chunk, (size_t)n);
+        if (rc != AIRY_SUCCESS)
+            return rc;
+
+        cJSON *probe = cJSON_Parse(buf->data);
+        if (probe) {
+            cJSON_Delete(probe);
+            return AIRY_SUCCESS;
+        }
+        elapsed_ms += 1;
+    }
+    return AIRY_ERR_TIMEOUT;
 }
 
 #endif /* AIRY_PLATFORM_WINDOWS / POSIX */
@@ -444,16 +557,110 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
 
 #elif AIRY_PLATFORM_WINDOWS
 
+/** @brief Windows 版 connect+send（等价 POSIX rpc_connect_send）。 */
+static int rpc_connect_send(const char *socket_path, const char *method, const char *params_json)
+{
+    int fd = rpc_connect_unix(socket_path);
+    if (fd < 0)
+        return AIRY_ERR_NOT_FOUND;
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        rpc_close_fd(fd);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
+    cJSON_AddStringToObject(root, "method", method);
+    if (params_json && params_json[0] != '\0') {
+        cJSON *params = cJSON_Parse(params_json);
+        if (params) {
+            cJSON_AddItemToObject(root, "params", params);
+        } else {
+            cJSON_AddStringToObject(root, "params", params_json);
+        }
+    } else {
+        cJSON_AddObjectToObject(root, "params");
+    }
+    cJSON_AddNumberToObject(root, "id", 1);
+
+    char *request_str = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!request_str) {
+        rpc_close_fd(fd);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    size_t req_len = strlen(request_str);
+    size_t sent_total = 0;
+    while (sent_total < req_len) {
+        int n = send((SOCKET)fd, request_str + sent_total, (int)(req_len - sent_total), 0);
+        if (n <= 0)
+            break;
+        sent_total += (size_t)n;
+    }
+    AIRY_FREE(request_str);
+    if (sent_total != req_len) {
+        rpc_close_fd(fd);
+        SVC_LOG_ERROR("daemon_rpc_call: send failed (method=%s)", method);
+        return AIRY_ERR_GENERIC_FAIL;
+    }
+    return fd;
+}
+
 int daemon_rpc_call_stream(const char *socket_path, const char *method, const char *params_json,
                            daemon_rpc_stream_cb_t on_chunk, void *user_data, uint32_t timeout_ms)
 {
-    (void)socket_path;
-    (void)method;
-    (void)params_json;
-    (void)on_chunk;
-    (void)user_data;
-    (void)timeout_ms;
-    return AIRY_ERR_NOT_SUPPORTED;
+    if (!socket_path || !method)
+        return AIRY_ERR_INVALID_PARAM;
+    if (timeout_ms == 0)
+        timeout_ms = DAEMON_RPC_DEFAULT_TIMEOUT_MS;
+
+    int fd = rpc_connect_send(socket_path, method, params_json);
+    if (fd < 0)
+        return fd;
+
+    uint32_t elapsed_ms = 0;
+    const uint32_t step_ms = 200;
+    int rc = AIRY_ERR_TIMEOUT;
+
+    while (elapsed_ms < timeout_ms) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET((SOCKET)fd, &rfds);
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = (long)(step_ms * 1000);
+
+        int pr = select(0, &rfds, NULL, NULL, &tv);
+        if (pr < 0) {
+            rc = AIRY_ERR_GENERIC_FAIL;
+            break;
+        }
+        if (pr == 0) {
+            elapsed_ms += step_ms;
+            continue;
+        }
+
+        char chunk[4096];
+        int n = recv((SOCKET)fd, chunk, sizeof(chunk), 0);
+        if (n < 0) {
+            rc = AIRY_ERR_GENERIC_FAIL;
+            break;
+        }
+        if (n == 0) {
+            rc = AIRY_SUCCESS;
+            break;
+        }
+        if (on_chunk)
+            on_chunk(chunk, (size_t)n, user_data);
+        elapsed_ms += 1;
+    }
+
+    rpc_close_fd(fd);
+    if (rc != AIRY_SUCCESS)
+        SVC_LOG_ERROR("daemon_rpc_call_stream: stream ended rc=%d (method=%s, timeout=%u)", rc,
+                      method, timeout_ms);
+    return rc;
 }
 
 #endif /* AIRY_PLATFORM_WINDOWS / POSIX */
@@ -476,9 +683,7 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
 
     cJSON *root = cJSON_CreateObject();
     if (!root) {
-#if AIRY_PLATFORM_POSIX
-        close(fd);
-#endif
+        rpc_close_fd(fd);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
     cJSON_AddStringToObject(root, "jsonrpc", "2.0");
@@ -499,23 +704,25 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
     char *request_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (!request_str) {
-#if AIRY_PLATFORM_POSIX
-        close(fd);
-#endif
+        rpc_close_fd(fd);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     size_t req_len = strlen(request_str);
-#if AIRY_PLATFORM_POSIX
-    ssize_t sent = send(fd, request_str, req_len, 0);
+    size_t sent_total = 0;
+    while (sent_total < req_len) {
+#if AIRY_PLATFORM_WINDOWS
+        int n = send((SOCKET)fd, request_str + sent_total, (int)(req_len - sent_total), 0);
 #else
-    ssize_t sent = -1;
+        ssize_t n = send(fd, request_str + sent_total, req_len - sent_total, 0);
 #endif
+        if (n <= 0)
+            break;
+        sent_total += (size_t)n;
+    }
     AIRY_FREE(request_str);
-    if (sent < 0 || (size_t)sent != req_len) {
-#if AIRY_PLATFORM_POSIX
-        close(fd);
-#endif
+    if (sent_total != req_len) {
+        rpc_close_fd(fd);
         SVC_LOG_ERROR("daemon_rpc_call: send failed (method=%s): %s", method, strerror(errno));
         return AIRY_ERR_GENERIC_FAIL;
     }
@@ -523,17 +730,13 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
     rpc_buf_t buf;
     int rc = rpc_buf_init(&buf);
     if (rc != AIRY_SUCCESS) {
-#if AIRY_PLATFORM_POSIX
-        close(fd);
-#endif
+        rpc_close_fd(fd);
         return rc;
     }
 
     rc = rpc_recv_response(fd, &buf, timeout_ms, cancel_token, socket_path, cancel_method,
                            cancel_params_json);
-#if AIRY_PLATFORM_POSIX
-    close(fd);
-#endif
+    rpc_close_fd(fd);
     if (rc != AIRY_SUCCESS) {
         if (rc != AIRY_ERR_CANCELED)
             SVC_LOG_ERROR("daemon_rpc_call: recv failed (method=%s, rc=%d, timeout=%u)", method, rc,

@@ -10,6 +10,8 @@
 #include "airy_memory.h"
 #include "error.h"
 
+#include "airy_dirent.h"
+#include "airy_regex.h"
 #include "builtin.h"
 #include "svc_logger.h"
 
@@ -19,13 +21,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #ifndef _WIN32
-#include <dirent.h>
-#include <errno.h>
-#include <regex.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#else
+#include <direct.h>
+#include <io.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#define lstat _stat
+#define unlink _unlink
+#define rmdir _rmdir
+#define S_ISDIR(m) (((m)&_S_IFDIR) != 0)
+#define S_ISREG(m) (((m)&_S_IFREG) != 0)
+#ifndef ENAMETOOLONG
+#define ENAMETOOLONG 206 /* MSVC errno.h lacks ENAMETOOLONG */
+#endif
 #endif
 
 #include "tool_builtin_internal.h"
@@ -41,7 +54,6 @@ int fs_read_tool(const char *params_json, tool_result_t *res)
         res->error = AIRY_STRDUP("Missing string parameter: path");
         return AIRY_ERR_INVALID_PARAM;
     }
-#ifndef _WIN32
     FILE *fp = fopen(path->valuestring, "rb");
     if (!fp) {
         char err[512];
@@ -65,10 +77,6 @@ int fs_read_tool(const char *params_json, tool_result_t *res)
     res->success = 1;
     res->exit_code = 0;
     return AIRY_OK;
-#else
-    res->error = AIRY_STRDUP("fs_read is not supported on this platform");
-    return AIRY_ERR_NOT_SUPPORTED;
-#endif
 }
 
 int fs_write_tool(const char *params_json, tool_result_t *res)
@@ -87,7 +95,6 @@ int fs_write_tool(const char *params_json, tool_result_t *res)
         res->error = AIRY_STRDUP("Missing string parameter: content");
         return AIRY_ERR_INVALID_PARAM;
     }
-#ifndef _WIN32
     FILE *fp = fopen(path->valuestring, "wb");
     if (!fp) {
         char err[512];
@@ -112,10 +119,6 @@ int fs_write_tool(const char *params_json, tool_result_t *res)
     res->success = 1;
     res->exit_code = 0;
     return AIRY_OK;
-#else
-    res->error = AIRY_STRDUP("fs_write is not supported on this platform");
-    return AIRY_ERR_NOT_SUPPORTED;
-#endif
 }
 
 int fs_list_tool(const char *params_json, tool_result_t *res)
@@ -129,7 +132,6 @@ int fs_list_tool(const char *params_json, tool_result_t *res)
     if (cJSON_IsString(path) && path->valuestring && path->valuestring[0]) {
         dir = path->valuestring;
     }
-#ifndef _WIN32
     DIR *d = opendir(dir ? dir : ".");
     if (!d) {
         char err[512];
@@ -147,6 +149,13 @@ int fs_list_tool(const char *params_json, tool_result_t *res)
         cJSON_AddStringToObject(item, "name", ent->d_name);
 #ifdef DT_DIR
         cJSON_AddStringToObject(item, "type", ent->d_type == DT_DIR ? "dir" : "file");
+#else
+        /* Windows: no d_type; classify via stat. */
+        char full[AIRY_PATH_MAX];
+        snprintf(full, sizeof(full), "%s/%s", dir ? dir : ".", ent->d_name);
+        struct stat st;
+        if (stat(full, &st) == 0)
+            cJSON_AddStringToObject(item, "type", S_ISDIR(st.st_mode) ? "dir" : "file");
 #endif
         cJSON_AddItemToArray(arr, item);
     }
@@ -160,13 +169,8 @@ int fs_list_tool(const char *params_json, tool_result_t *res)
     res->success = 1;
     res->exit_code = 0;
     return AIRY_OK;
-#else
-    res->error = AIRY_STRDUP("fs_list is not supported on this platform");
-    return AIRY_ERR_NOT_SUPPORTED;
-#endif
 }
 
-#ifndef _WIN32
 /* ============================================================================
  * fs_glob: recursive wildcard file listing (modeled on Atom Code GlobTool /
  * Codex find guidance)
@@ -405,6 +409,43 @@ int fs_glob_tool(const char *params_json, tool_result_t *res)
  *   .git/.venv and binaries
  * ============================================================================ */
 
+/* Portable getline replacement: read one line (bytes up to and including
+ * '\n' or EOF); returns a NULL-terminated AIRY_MALLOC buffer (caller frees)
+ * or NULL on EOF/OOM. *out_len receives the byte count including the
+ * newline, so embedded NUL bytes can be detected by the caller. */
+static char *builtin_read_line(FILE *fp, size_t *out_len)
+{
+    size_t cap = 256;
+    size_t len = 0;
+    char *buf = (char *)AIRY_MALLOC(cap);
+    if (!buf)
+        return NULL;
+    int c;
+    while ((c = fgetc(fp)) != EOF) {
+        if (len + 2 > cap) {
+            size_t nc = cap * 2;
+            char *nb = (char *)AIRY_REALLOC(buf, nc);
+            if (!nb) {
+                AIRY_FREE(buf);
+                return NULL;
+            }
+            buf = nb;
+            cap = nc;
+        }
+        buf[len++] = (char)c;
+        if (c == '\n')
+            break;
+    }
+    if (len == 0) {
+        AIRY_FREE(buf);
+        return NULL;
+    }
+    buf[len] = '\0';
+    if (out_len)
+        *out_len = len;
+    return buf;
+}
+
 static int builtin_grep_dir(const char *base, const char *root, regex_t *re,
                             const char *glob_filter, int max_results, char *out, size_t out_cap,
                             size_t *out_len, int *count, int *done)
@@ -452,21 +493,24 @@ static int builtin_grep_dir(const char *base, const char *root, regex_t *re,
         FILE *fp = fopen(full, "rb");
         if (!fp)
             continue;
-        char *line = NULL;
-        size_t lcap = 0;
-        ssize_t llen;
         long lineno = 0;
-        while ((llen = getline(&line, &lcap, fp)) >= 0) {
+        char *line;
+        size_t llen;
+        while ((line = builtin_read_line(fp, &llen)) != NULL) {
             lineno++;
-            if (memchr(line, '\0', (size_t)llen) != NULL)
+            if (memchr(line, '\0', llen) != NULL) {
+                AIRY_FREE(line);
                 break;
+            }
 
-            size_t tlen = (size_t)llen;
+            size_t tlen = llen;
             while (tlen > 0 && (line[tlen - 1] == '\n' || line[tlen - 1] == '\r'))
                 tlen--;
             if (regexec(re, line, 0, NULL, 0) == 0) {
-                if (*count >= max_results)
+                if (*count >= max_results) {
+                    AIRY_FREE(line);
                     break;
+                }
 
                 const char *rel = full;
                 if (strncmp(root, full, strlen(root)) == 0 && full[strlen(root)] == '/')
@@ -476,6 +520,7 @@ static int builtin_grep_dir(const char *base, const char *root, regex_t *re,
                     builtin_append_trunc_mark(out, out_cap, *out_len,
                                               "\n[grep truncated: output cap]");
                     *done = 1;
+                    AIRY_FREE(line);
                     break;
                 }
                 int w = snprintf(out + *out_len, out_cap - *out_len, "%s:%ld:", rel, lineno);
@@ -487,8 +532,8 @@ static int builtin_grep_dir(const char *base, const char *root, regex_t *re,
                 out[*out_len] = '\0';
                 (*count)++;
             }
+            AIRY_FREE(line);
         }
-        AIRY_FREE(line);
         fclose(fp);
     }
     closedir(d);
@@ -802,4 +847,3 @@ int fs_delete_tool(const char *params_json, tool_result_t *res)
     res->exit_code = 0;
     return AIRY_OK;
 }
-#endif /* !_WIN32 */

@@ -119,7 +119,6 @@ int tool_builtin_run(const char *tool_id, const char *params_json, tool_result_t
         return shell_run_tool(params_json, res);
     if (strcmp(tool_id, "web_fetch") == 0)
         return web_fetch_tool(params_json, res);
-#ifndef _WIN32
     if (strcmp(tool_id, "fs_glob") == 0)
         return fs_glob_tool(params_json, res);
     if (strcmp(tool_id, "fs_grep") == 0)
@@ -130,6 +129,7 @@ int tool_builtin_run(const char *tool_id, const char *params_json, tool_result_t
         return fs_delete_tool(params_json, res);
     if (strcmp(tool_id, "web_search") == 0)
         return web_search_tool(params_json, res);
+#ifndef _WIN32
     if (strcmp(tool_id, "git_exec") == 0)
         return git_exec_tool(params_json, res);
     if (strcmp(tool_id, "git_diff") == 0)

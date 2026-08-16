@@ -145,7 +145,17 @@ daemon_event_driver_t *daemon_event_driver_create(const daemon_event_config_t *c
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
-    int max_events = config->max_events > 0 ? config->max_events : 64;
+    /* 工业级目标（大型服务器）：单 daemon 默认并发 fd 上限从 64 提升到
+     * 256，避免高并发下 accept 的新连接因 fd 超过上限被事件循环拒绝。
+     * 各 daemon 可通过 ev_config.max_events 显式覆盖（如 agent_d=256、
+     * llm_d/tool_d=256）；低端设备可用 AIRY_DAEMON_MAX_EVENTS 收紧。 */
+    int max_events = config->max_events > 0 ? config->max_events : 256;
+    const char *env_ev = getenv("AIRY_DAEMON_MAX_EVENTS");
+    if (env_ev) {
+        long v = strtol(env_ev, NULL, 10);
+        if (v >= 16 && v <= 65536)
+            max_events = (int)v;
+    }
     driver->loop = airy_event_loop_create(max_events);
     if (!driver->loop) {
         SVC_LOG_ERROR("C-L02: EVENT-DRIVER: CREATE-FAIL loop, STACK: daemon_event_driver_create");
