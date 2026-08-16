@@ -126,6 +126,8 @@ int tool_builtin_run(const char *tool_id, const char *params_json, tool_result_t
         return fs_grep_tool(params_json, res);
     if (strcmp(tool_id, "fs_edit") == 0)
         return fs_edit_tool(params_json, res);
+    if (strcmp(tool_id, "fs_delete") == 0)
+        return fs_delete_tool(params_json, res);
     if (strcmp(tool_id, "web_search") == 0)
         return web_search_tool(params_json, res);
     if (strcmp(tool_id, "git_exec") == 0)

@@ -17,6 +17,7 @@
  *   - gateway_biz_llm.c      LLM calls + tool loop (ReAct)
  *   - gateway_biz_agent.c    agent.run orchestration (dual-think injection + cancel)
  *   - gateway_biz_backend.c  MCP/OpenAI/A2A protocol backends
+ *   - gateway_biz_hall.c     hall.* task board / event stream / chain (in-gateway)
  * This file keeps: ctx lifecycle, JSON-RPC main dispatch, protocol-detection entry.
  */
 
@@ -287,6 +288,11 @@ char *gateway_business_handle(void *request, void *user_data)
         gw_ns_forward_rule_t r2 = GW_NS_CUPOLAS;
         r2.sock_path = ctx->cupolas_sock_path;
         resp = handle_ns_forward(root, &r2);
+    } else if (strncmp(method->valuestring, "hall.", 5) == 0) {
+        /* hall.* is implemented inside the gateway itself (reads the
+         * persisted work-hall board + hall-store event files under
+         * $AIRY_HOME, plus live agent.list); not a daemon forward. */
+        resp = handle_hall_call(root, ctx);
     } else if (strcmp(method->valuestring, "ping") == 0) {
         cJSON *id = cJSON_GetObjectItem(root, "id");
         cJSON *out = cJSON_CreateObject();
