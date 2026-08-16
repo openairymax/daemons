@@ -258,9 +258,88 @@ static char *tool_call_rpc(const gateway_business_ctx_t *ctx, const char *req_js
     close(fd);
     return resp;
 #else
-    (void)ctx;
-    (void)req_json;
-    return NULL;
+    /* Windows：daemon 统一走 TCP 回环（见 daemon_main.h parse_args），
+     * ctx->tool_sock_path 约定为 "host:port"（如 "127.0.0.1:8081"）。 */
+    SOCKET fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd == INVALID_SOCKET)
+        return NULL;
+
+    char host[128];
+    char port_str[16];
+    const char *colon = ctx->tool_sock_path ? strrchr(ctx->tool_sock_path, ':') : NULL;
+    if (!colon || colon == ctx->tool_sock_path ||
+        (size_t)(colon - ctx->tool_sock_path) >= sizeof(host) ||
+        strlen(colon + 1) >= sizeof(port_str)) {
+        closesocket(fd);
+        return NULL;
+    }
+    size_t host_len = (size_t)(colon - ctx->tool_sock_path);
+    AIRY_MEMCPY(host, ctx->tool_sock_path, host_len);
+    host[host_len] = '\0';
+    AIRY_STRNCPY_TERM(port_str, colon + 1, sizeof(port_str));
+    struct sockaddr_in addr;
+    AIRY_MEMSET(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)atoi(port_str));
+    if (inet_pton(AF_INET, host, &addr.sin_addr) <= 0)
+        addr.sin_addr.s_addr = INADDR_LOOPBACK;
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        AIRY_LOG_WARN("gateway handler: cannot connect to tool_d (%s)",
+                      ctx->tool_sock_path);
+        closesocket(fd);
+        return NULL;
+    }
+
+    int timeout_ms_win = GW_TOOL_TIMEOUT_MS;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout_ms_win,
+               sizeof(timeout_ms_win));
+
+    size_t len = strlen(req_json);
+    size_t sent = 0;
+    while (sent < len) {
+        int n = send(fd, req_json + sent, (int)(len - sent), 0);
+        if (n <= 0) {
+            closesocket(fd);
+            return NULL;
+        }
+        sent += (size_t)n;
+    }
+
+    size_t cap = 65536;
+    size_t used = 0;
+    char *resp = (char *)AIRY_MALLOC(cap);
+    if (!resp) {
+        closesocket(fd);
+        return NULL;
+    }
+    resp[0] = '\0';
+    char buf[4096];
+    for (;;) {
+        int n = recv(fd, buf, sizeof(buf), 0);
+        if (n <= 0)
+            break;
+        if (used + (size_t)n + 1 > cap) {
+            size_t new_cap = (used + (size_t)n + 1) * 2;
+            if (new_cap > GW_LLM_MAX_RESP) {
+                AIRY_FREE(resp);
+                closesocket(fd);
+                return NULL;
+            }
+            char *np = (char *)AIRY_REALLOC(resp, new_cap);
+            if (!np) {
+                AIRY_FREE(resp);
+                closesocket(fd);
+                return NULL;
+            }
+            resp = np;
+            cap = new_cap;
+        }
+        AIRY_MEMCPY(resp + used, buf, (size_t)n);
+        used += (size_t)n;
+        resp[used] = '\0';
+    }
+    closesocket(fd);
+    return resp;
 #endif
 }
 
