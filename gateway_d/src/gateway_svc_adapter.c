@@ -55,7 +55,7 @@ static airy_err_t gateway_adapter_init(airy_svc_t service, const airy_svc_config
     gateway_service_get_default_config(&ctx->gateway_cfg);
 
     ctx->gateway_cfg.name = ctx->common_cfg.name ? ctx->common_cfg.name : "gateway_d";
-    ctx->gateway_cfg.version = ctx->common_cfg.version ? ctx->common_cfg.version : "0.1.1";
+    ctx->gateway_cfg.version = ctx->common_cfg.version ? ctx->common_cfg.version : "0.1.2";
 
     if (ctx->common_cfg.capabilities & AIRY_SVC_CAP_ASYNC) {
     }
@@ -236,7 +236,7 @@ airy_err_t gateway_service_adapter_create(airy_svc_t *out_service, const airy_sv
         AIRY_MEMCPY(&ctx->common_cfg, config, sizeof(airy_svc_config_t));
     } else {
         ctx->common_cfg.name = "gateway_d";
-        ctx->common_cfg.version = "0.1.1";
+        ctx->common_cfg.version = "0.1.2";
         ctx->common_cfg.capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_STREAMING;
         ctx->common_cfg.max_concurrent = 1000;
         ctx->common_cfg.timeout_ms = 30000;
@@ -316,7 +316,7 @@ airy_err_t gateway_service_adapter_wrap(airy_svc_t *out_service, gateway_service
         AIRY_MEMCPY(&ctx->common_cfg, config, sizeof(airy_svc_config_t));
     } else {
         ctx->common_cfg.name = "gateway_d";
-        ctx->common_cfg.version = "0.1.1";
+        ctx->common_cfg.version = "0.1.2";
         ctx->common_cfg.capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_STREAMING;
         ctx->common_cfg.max_concurrent = 1000;
         ctx->common_cfg.timeout_ms = 30000;
@@ -511,7 +511,7 @@ airy_err_t gateway_service_adapter_create_from_config(airy_svc_t *out_service,
     airy_svc_config_t config;
     AIRY_MEMSET(&config, 0, sizeof(config));
     config.name = "gateway_d";
-    config.version = "0.1.1";
+    config.version = "0.1.2";
     config.capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_STREAMING;
     config.max_concurrent = 1000;
     config.timeout_ms = 30000;
