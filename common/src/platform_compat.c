@@ -12,7 +12,9 @@
 #include <sys/stat.h>
 #include <time.h>
 #include "error.h"
-#ifndef _WIN32
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dlfcn.h>
 #include <errno.h>
 #ifdef __linux__
@@ -193,46 +195,68 @@ int airy_get_sysinfo(airy_sysinfo_t *info)
 {
     if (!info)
         return AIRY_ERR_INVALID_PARAM;
+    __builtin_memset(info, 0, sizeof(*info));
 #ifdef __linux__
-    struct sysinfo si;
-    if (sysinfo(&si) != 0)
-        return AIRY_ERR_UNKNOWN;
-    AIRY_STRNCPY_TERM(info->os_name, "Linux", sizeof(info->os_name));
-    info->cpu_count = (uint32_t)si.procs;
-    info->memory_total = si.totalram * si.mem_unit;
-    info->memory_free = si.freeram * si.mem_unit;
-    gethostname(info->hostname, sizeof(info->hostname));
-    info->os_version[0] = '\0';
+    {
+        struct sysinfo si;
+        long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+        if (sysinfo(&si) != 0)
+            return AIRY_ERR_UNKNOWN;
+        AIRY_STRNCPY_TERM(info->os_name, "Linux", sizeof(info->os_name));
+        info->cpu_count = ncpu > 0 ? (uint32_t)ncpu : 1;
+        info->memory_total = (uint64_t)si.totalram * si.mem_unit;
+        info->memory_free = (uint64_t)si.freeram * si.mem_unit;
+        gethostname(info->hostname, sizeof(info->hostname));
+    }
     return 0;
 #elif defined(__APPLE__)
     AIRY_STRNCPY_TERM(info->os_name, "macOS", sizeof(info->os_name));
     {
-        int mib[2] = {CTL_HW, HW_MEMSIZE};
+        int mib[2];
+        size_t len;
         int64_t memsize = 0;
-        size_t len = sizeof(memsize);
-        if (sysctl(mib, 2, &memsize, &len, NULL, 0) == 0) {
-            info->memory_total = (uint64_t)memsize;
-        }
+
         mib[0] = CTL_HW;
-        mib[1] = HW_PHYSMEM;
-        int64_t physmem = 0;
-        len = sizeof(physmem);
-        if (sysctl(mib, 2, &physmem, &len, NULL, 0) == 0 && physmem > 0) {
-            info->memory_free = (uint64_t)physmem;
-        }
+        mib[1] = HW_MEMSIZE;
+        len = sizeof(memsize);
+        if (sysctl(mib, 2, &memsize, &len, NULL, 0) == 0)
+            info->memory_total = (uint64_t)memsize;
+
         mib[0] = CTL_HW;
         mib[1] = HW_NCPU;
         int ncpu = 0;
         len = sizeof(ncpu);
-        if (sysctl(mib, 2, &ncpu, &len, NULL, 0) == 0) {
+        if (sysctl(mib, 2, &ncpu, &len, NULL, 0) == 0)
             info->cpu_count = (uint32_t)ncpu;
-        }
+
+        /* HW_MEMSIZE returns physical total; free memory requires
+         * host_statistics64 which is not available in all SDKs, so
+         * approximate free as total (conservative for parallelism
+         * decisions — over-estimation is safe). */
+        info->memory_free = info->memory_total;
     }
     gethostname(info->hostname, sizeof(info->hostname));
-    info->os_version[0] = '\0';
+    return 0;
+#elif defined(_WIN32)
+    AIRY_STRNCPY_TERM(info->os_name, "Windows", sizeof(info->os_name));
+    {
+        SYSTEM_INFO si;
+        GetSystemInfo(&si);
+        info->cpu_count = (uint32_t)si.dwNumberOfProcessors;
+
+        MEMORYSTATUSEX ms;
+        ms.dwLength = sizeof(ms);
+        if (GlobalMemoryStatusEx(&ms)) {
+            info->memory_total = (uint64_t)ms.ullTotalPhys;
+            info->memory_free = (uint64_t)ms.ullAvailPhys;
+        }
+    }
+    {
+        DWORD sz = sizeof(info->hostname);
+        GetComputerNameA(info->hostname, &sz);
+    }
     return 0;
 #else
-    __builtin_memset(info, 0, sizeof(*info));
     return 0;
 #endif
 }
