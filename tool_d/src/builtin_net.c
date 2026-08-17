@@ -447,9 +447,16 @@ static int web_search_via_bing(const char *query, int max_results, char *buf, si
         AIRY_FREE(out);
         return -1;
     }
-    int rc = web_search_extract(out, "<h2[^>]*><a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a></h2>",
-                                "class=\"b_lineclamp[^\"]*\"[^>]*>(.*?)</p>", max_results, buf,
-                                buf_cap, buf_len, count);
+    /* POSIX ERE（glibc regcomp REG_EXTENDED）不支持非贪婪 `.*?`——它会被
+     * 解析为贪婪 `.*` 加可选字面 `?`，导致一次匹配吞掉整页所有结果（实测
+     * Bing SERP 10 条被压成 1 条巨型 blob）。标题/摘要文本用
+     * `[^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*` 跨强调标签提取（Bing 关键词
+     * 包在 <strong> 中），标签迭代仅限强调标签，不会吞掉下一结果的
+     * `<h2>/<a>/</a>`，从而逐条干净截断。 */
+    int rc = web_search_extract(out,
+                                "<h2[^>]*><a[^>]*href=\"([^\"]+)\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a></h2>",
+                                "class=\"b_lineclamp[^\"]*\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</p>",
+                                max_results, buf, buf_cap, buf_len, count);
     AIRY_FREE(out);
     return rc;
 }
@@ -490,19 +497,22 @@ int web_search_tool(const char *params_json, tool_result_t *res)
         builtin_url_encode(q->valuestring, enc, sizeof(enc));
         char cmd[8192];
         snprintf(cmd, sizeof(cmd),
-                 "curl -sSL --max-time 15 -A \"Mozilla/5.0 (compatible; "
+                 "curl -sSL --max-time 8 -A \"Mozilla/5.0 (compatible; "
                  "AirymaxRT/0.1.2 web_search)\" "
                  "'https://html.duckduckgo.com/html/?q=%s'",
                  enc);
         char *out = NULL;
         int exit_code = -1;
 
-        int curl_ok = (builtin_shell_run(cmd, &out, &exit_code, 20000, NULL, NULL) == 0 && out &&
+        int curl_ok = (builtin_shell_run(cmd, &out, &exit_code, 12000, NULL, NULL) == 0 && out &&
                        exit_code == 0 && !strstr(out, "command not found"));
         if (curl_ok) {
-            web_search_extract(out, "class=\"result__a\" href=\"([^\"]+)\"[^>]*>([^<]+)</a>",
-                               "class=\"result__snippet\"[^>]*>([^<]+)</a>", max_results, buf,
-                               BUILTIN_OUTPUT_CAP, &buf_len, &count);
+            /* DDG 标题同样可能含 <b> 强调标签，用与 Bing 一致的
+             * 强调标签受限模式逐条提取（POSIX ERE 无懒量词）。 */
+            web_search_extract(out,
+                               "class=\"result__a\" href=\"([^\"]+)\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a>",
+                               "class=\"result__snippet\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a>",
+                               max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len, &count);
         }
         if (out)
             AIRY_FREE(out);
