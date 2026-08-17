@@ -210,7 +210,7 @@ int web_fetch_tool(const char *params_json, tool_result_t *res)
     char *out = NULL;
     int exit_code = -1;
 
-    int rc = builtin_shell_run(cmd, &out, &exit_code, 45000, NULL, NULL);
+    int rc = builtin_shell_run(cmd, NULL, &out, &exit_code, 45000, NULL, NULL);
     if (rc != 0) {
         res->error = AIRY_STRDUP("Failed to execute web fetch (pipe/process creation failed)");
         return AIRY_ERR_EXEC_FAIL;
@@ -441,7 +441,7 @@ static int web_search_via_bing(const char *query, int max_results, char *buf, si
     char *out = NULL;
     int exit_code = -1;
 
-    if (builtin_shell_run(cmd, &out, &exit_code, 25000, NULL, NULL) != 0 || !out)
+    if (builtin_shell_run(cmd, NULL, &out, &exit_code, 25000, NULL, NULL) != 0 || !out)
         return -1;
     if (exit_code != 0 || strstr(out, "command not found")) {
         AIRY_FREE(out);
@@ -504,7 +504,7 @@ int web_search_tool(const char *params_json, tool_result_t *res)
         char *out = NULL;
         int exit_code = -1;
 
-        int curl_ok = (builtin_shell_run(cmd, &out, &exit_code, 12000, NULL, NULL) == 0 && out &&
+        int curl_ok = (builtin_shell_run(cmd, NULL, &out, &exit_code, 12000, NULL, NULL) == 0 && out &&
                        exit_code == 0 && !strstr(out, "command not found"));
         if (curl_ok) {
             /* DDG 标题同样可能含 <b> 强调标签，用与 Bing 一致的

@@ -96,6 +96,7 @@ static void register_builtin_tools(tool_service_t *svc)
     };
     static tool_param_t shell_params[] = {
         {"command", "{\"type\":\"string\"}", 1},
+        {"cwd", "{\"type\":\"string\"}", 0},
     };
     static tool_param_t fs_list_params[] = {
         {"path", "{\"type\":\"string\"}", 0},

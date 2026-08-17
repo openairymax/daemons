@@ -51,6 +51,64 @@
 #define LLM_MAX_RETRIES 3
 #define LLM_BASE_DELAY_MS 100
 
+/**
+ * @brief Build a "current host time" system context string
+ *
+ * 时间感知（2026-08-17）：agentrt 必须准确识别宿主机系统时间——模型对
+ * "今天/现在/几点了/星期几/时效性" 等问题的回答依赖此上下文，且多轮对话
+ * 拼接时时间漂移会让模型产生幻觉。注入格式（含时区与星期，便于模型理解）：
+ *   当前时间：2026-08-17 星期一 22:59（Asia/Shanghai）
+ * @param out 输出缓冲（>= LLM_TIME_CTX_CAP）
+ * @param cap 缓冲容量
+ */
+#define LLM_TIME_CTX_CAP 256
+static void llm_build_time_context(char *out, size_t cap)
+{
+    out[0] = '\0';
+    if (!out || cap < 8)
+        return;
+    /* 宿主机本地时间（TZ 环境变量决定时区，默认 Asia/Shanghai） */
+    time_t now = time(NULL);
+    struct tm tmv;
+    AIRY_MEMSET(&tmv, 0, sizeof(tmv));
+#if defined(_WIN32)
+    localtime_s(&tmv, &now);
+#else
+    localtime_r(&now, &tmv);
+#endif
+    char when[48];
+    /* %z 时区偏移；无偏移时回退为空 */
+    size_t used = strftime(when, sizeof(when), "%Y-%m-%d %A %H:%M (%z)", &tmv);
+    if (used == 0) {
+        AIRY_STRNCPY_TERM(when, "unknown", sizeof(when));
+    }
+    /* 时区偏移（%z 输出 +0800）转成可读 IANA 风格：+0800 → UTC+8 */
+    char tz_hint[24] = "";
+    if (used > 0 && strlen(when) >= 5) {
+        char *paren = strrchr(when, '(');
+        if (paren && strlen(paren) >= 7) {
+            char off[8];
+            AIRY_STRNCPY_TERM(off, paren + 1, sizeof(off));
+            /* 移除右括号 */
+            size_t ol = strlen(off);
+            if (ol > 0 && off[ol - 1] == ')')
+                off[ol - 1] = '\0';
+            if (strlen(off) == 5 && (off[0] == '+' || off[0] == '-')) {
+                char sign = off[0];
+                char hh[3] = {off[1], off[2], '\0'};
+                snprintf(tz_hint, sizeof(tz_hint), "UTC%c%d", sign, atoi(hh));
+            }
+        }
+    }
+    /* 注入文案要足够强势：模型有 web_search 等实时工具时，若只说"以此为准"
+     * 仍可能为查时间去联网（CLI 实测绕 web 查时间且网络时间缓存冲突易错）。
+     * 明确指令：时间类问题直接用本时间作答，禁止为查时间调用工具。 */
+    snprintf(out, cap,
+             "当前时间：%s%s%s（宿主机系统时间；回答时间相关问题时以此为准，"
+             "直接使用该时间作答，禁止为查询时间调用任何工具）",
+             when, tz_hint[0] ? " " : "", tz_hint);
+}
+
 /* P0.18.1: generate the common globals (g_running_llm_d etc.), signal
  * handling (signal_handler_llm_d, svc_log_toggle_handler_llm_d),
  * print_usage_llm_d, daemon_handle_client_llm_d, daemon_on_client_llm_d
@@ -186,11 +244,59 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
             AIRY_ERROR(AIRY_ERR_OVERFLOW, "too many messages");
         }
 
-        ctx->message_count = count;
-        cfg->message_count = count;
+        /* 时间感知注入（2026-08-17）：把宿主机当前时间作为 system 消息
+         * 注入到消息数组头部。模型据此感知"今天/现在/星期几"，多轮上下文
+         * 拼接不再时间漂移。仅当首条 system 消息已包含**真实日期时间戳**
+         * （YYYY-MM-DD 形式，客户端主动注入）时跳过；提示词中仅提及
+         * "当前时间"字样（如 CLI 系统提示词描述"系统上下文已注入当前时间"）
+         * 不代表真实时间已注入，仍须补注，避免模型幻觉。 */
+        int time_injected = 0;
+        if (count > 0) {
+            cJSON *first = cJSON_GetArrayItem(messages, 0);
+            cJSON *frole = cJSON_GetObjectItem(first, "role");
+            cJSON *fcontent = cJSON_GetObjectItem(first, "content");
+            if (cJSON_IsString(frole) && strcmp(frole->valuestring, "system") == 0 &&
+                cJSON_IsString(fcontent) && fcontent->valuestring &&
+                fcontent->valuestring[0]) {
+                /* 检测真实日期时间戳：YYYY-MM-DD（客户端注入的时间上下文
+                 * 形如 "当前时间：2026-08-17 星期一 23:18 ..."）。 */
+                const char *p = fcontent->valuestring;
+                for (; *p; ++p) {
+                    if (p[0] >= '0' && p[0] <= '9' && p[1] >= '0' && p[1] <= '9' &&
+                        p[2] >= '0' && p[2] <= '9' && p[3] >= '0' && p[3] <= '9' &&
+                        p[4] == '-' && p[5] >= '0' && p[5] <= '9' && p[6] >= '0' &&
+                        p[6] <= '9' && p[7] == '-' && p[8] >= '0' && p[8] <= '9' &&
+                        p[9] >= '0' && p[9] <= '9') {
+                        time_injected = 1;
+                        break;
+                    }
+                }
+            }
+        }
+        size_t base = 0;
+        if (!time_injected) {
+            if (count + 1 > MAX_MESSAGES_PER_REQUEST) {
+                parse_params_cleanup(ctx, cfg);
+                AIRY_ERROR(AIRY_ERR_OVERFLOW, "too many messages");
+            }
+            char tbuf[LLM_TIME_CTX_CAP];
+            llm_build_time_context(tbuf, sizeof(tbuf));
+            ctx->messages[0].role = AIRY_STRDUP("system");
+            ctx->messages[0].content = AIRY_STRDUP(tbuf);
+            if (!ctx->messages[0].role || !ctx->messages[0].content) {
+                parse_params_cleanup(ctx, cfg);
+                AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to inject time context");
+            }
+            base = 1;
+            SVC_LOG_DEBUG("C-L02: SVC: injected host time context: %s", tbuf);
+        }
+
+        ctx->message_count = count + base;
+        cfg->message_count = count + base;
         cfg->messages = ctx->messages;
 
         for (size_t i = 0; i < count; ++i) {
+            size_t slot = i + base;
             cJSON *item = cJSON_GetArrayItem(messages, i);
             cJSON *role = cJSON_GetObjectItem(item, "role");
             cJSON *content = cJSON_GetObjectItem(item, "content");
@@ -200,20 +306,20 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
                 AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "message role or content is not a string");
             }
 
-            ctx->messages[i].role = AIRY_STRDUP(role->valuestring);
-            ctx->messages[i].content = AIRY_STRDUP(content->valuestring);
+            ctx->messages[slot].role = AIRY_STRDUP(role->valuestring);
+            ctx->messages[slot].content = AIRY_STRDUP(content->valuestring);
 
-            if (!ctx->messages[i].role || !ctx->messages[i].content) {
-                ctx->message_count = i;
+            if (!ctx->messages[slot].role || !ctx->messages[slot].content) {
+                ctx->message_count = slot;
                 parse_params_cleanup(ctx, cfg);
                 AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate message role or content");
             }
 
             cJSON *reasoning = cJSON_GetObjectItem(item, "reasoning_content");
             if (cJSON_IsString(reasoning) && reasoning->valuestring && reasoning->valuestring[0]) {
-                ctx->messages[i].reasoning_content = AIRY_STRDUP(reasoning->valuestring);
-                if (!ctx->messages[i].reasoning_content) {
-                    ctx->message_count = i + 1;
+                ctx->messages[slot].reasoning_content = AIRY_STRDUP(reasoning->valuestring);
+                if (!ctx->messages[slot].reasoning_content) {
+                    ctx->message_count = slot + 1;
                     parse_params_cleanup(ctx, cfg);
                     AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate reasoning_content");
                 }
@@ -221,9 +327,9 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
 
             cJSON *tcid = cJSON_GetObjectItem(item, "tool_call_id");
             if (cJSON_IsString(tcid) && tcid->valuestring && tcid->valuestring[0]) {
-                ctx->messages[i].tool_call_id = AIRY_STRDUP(tcid->valuestring);
-                if (!ctx->messages[i].tool_call_id) {
-                    ctx->message_count = i + 1;
+                ctx->messages[slot].tool_call_id = AIRY_STRDUP(tcid->valuestring);
+                if (!ctx->messages[slot].tool_call_id) {
+                    ctx->message_count = slot + 1;
                     parse_params_cleanup(ctx, cfg);
                     AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate tool_call_id");
                 }
@@ -231,13 +337,13 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
 
             cJSON *tcalls = cJSON_GetObjectItem(item, "tool_calls");
             if (cJSON_IsArray(tcalls) && cJSON_GetArraySize(tcalls) > 0) {
-                ctx->messages[i].tool_calls_json = cJSON_PrintUnformatted(tcalls);
-                SVC_LOG_INFO("C-L02: SVC: msg[%zu] role=%s tool_calls=%.400s", i,
-                             ctx->messages[i].role ? ctx->messages[i].role : "?",
-                             ctx->messages[i].tool_calls_json ? ctx->messages[i].tool_calls_json
-                                                              : "(null)");
-                if (!ctx->messages[i].tool_calls_json) {
-                    ctx->message_count = i + 1;
+                ctx->messages[slot].tool_calls_json = cJSON_PrintUnformatted(tcalls);
+                SVC_LOG_INFO("C-L02: SVC: msg[%zu] role=%s tool_calls=%.400s", slot,
+                             ctx->messages[slot].role ? ctx->messages[slot].role : "?",
+                             ctx->messages[slot].tool_calls_json ? ctx->messages[slot].tool_calls_json
+                                                                 : "(null)");
+                if (!ctx->messages[slot].tool_calls_json) {
+                    ctx->message_count = slot + 1;
                     parse_params_cleanup(ctx, cfg);
                     AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to serialize tool_calls");
                 }

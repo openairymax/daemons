@@ -357,10 +357,16 @@ static int ds_stream_on_chunk(const char *json_line, void *userdata)
             }
 
             /* DeepSeek reasoner streams the chain-of-thought in
-             * delta.reasoning_content; keep it out of user_cb and into the
-             * assembled response so clients can echo it back on re-send. */
+             * delta.reasoning_content. Forward each delta immediately as an
+             * RS 'R' control frame so IPC clients (gateway) can show the
+             * thinking chain live (2026-08-17: 思考链实时可见), while still
+             * accumulating it for the assembled response (tool-loop echo). */
             cJSON *reasoning = cJSON_GetObjectItem(delta, "reasoning_content");
             if (cJSON_IsString(reasoning) && reasoning->valuestring) {
+                if (acc->user_cb) {
+                    ds_emit_reasoning_frame(acc->user_cb, acc->user_data,
+                                            reasoning->valuestring);
+                }
                 char *grown =
                     provider_buf_append(acc->acc_reasoning, &acc->acc_reasoning_cap,
                                         &acc->acc_reasoning_len, reasoning->valuestring);
@@ -529,10 +535,8 @@ static int deepseek_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_c
     AIRY_FREE(acc.resp_model);
     AIRY_FREE(acc.finish_reason);
 
-    /* Streaming reasoning: DeepSeek thinking mode demands echoing
-     * reasoning_content on tool continuation rounds; surface as a frame. */
-    if (resp && resp->choices && resp->choice_count > 0 && resp->choices[0].reasoning_content)
-        ds_emit_reasoning_frame(callback, user_data, resp->choices[0].reasoning_content);
+    /* Streaming reasoning 已随 delta 实时发增量 RS 'R' 帧（思考链实时可见）；
+     * 不再在流末重复发完整帧（resp->reasoning_content 仍保留供 tool 续轮）。 */
 
     /* Streaming tool calls: emit the accumulated array as a control frame
      * before the stream closes so IPC clients (CLI tool loop) see the same
