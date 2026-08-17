@@ -582,11 +582,16 @@ static int oai_stream_on_chunk(const char *json_line, void *userdata)
             }
 
             /* Reasoning trace arrives in the same delta stream (DeepSeek/
-             * Kimi); accumulate it out-of-band (not forwarded to user_cb).
-             * It must survive to the assembled response so the client can
-             * echo it back on the next tool-loop turn. */
+             * Kimi). Forward each delta immediately as an RS 'R' control
+             * frame so IPC clients (gateway) can show the thinking chain
+             * live (2026-08-17), while still accumulating it for the
+             * assembled response (tool-loop echo). */
             cJSON *reasoning = cJSON_GetObjectItem(delta, "reasoning_content");
             if (cJSON_IsString(reasoning) && reasoning->valuestring) {
+                if (acc->user_cb) {
+                    oai_emit_reasoning_frame(acc->user_cb, acc->user_data,
+                                             reasoning->valuestring);
+                }
                 char *grown =
                     provider_buf_append(acc->acc_reasoning, &acc->acc_reasoning_cap,
                                         &acc->acc_reasoning_len, reasoning->valuestring);
@@ -768,11 +773,8 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     AIRY_FREE(acc.resp_model);
     AIRY_FREE(acc.finish_reason);
 
-    /* Streaming reasoning: thinking models (DeepSeek) demand the assistant
-     * turn's reasoning_content on re-send; surface it as a control frame so
-     * IPC clients can echo it back on tool continuation rounds. */
-    if (resp && resp->choices && resp->choice_count > 0 && resp->choices[0].reasoning_content)
-        oai_emit_reasoning_frame(callback, user_data, resp->choices[0].reasoning_content);
+    /* Streaming reasoning 已随 delta 实时发增量 RS 'R' 帧（思考链实时可见）；
+     * 不再在流末重复发完整帧（resp->reasoning_content 仍保留供 tool 续轮）。 */
 
     /* Streaming tool calls: emit the accumulated array as a control frame
      * right before the stream closes so IPC clients (CLI tool loop) see the

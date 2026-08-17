@@ -29,8 +29,8 @@ extern "C" {
 char *builtin_read_all(FILE *fp, int *out_truncated);
 
 void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const char *mark);
-int builtin_shell_run(const char *cmd, char **out, int *exit_code, uint32_t timeout_ms,
-                      int *out_truncated, const os_sandbox_cfg_t *sandbox);
+int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_code,
+                      uint32_t timeout_ms, int *out_truncated, const os_sandbox_cfg_t *sandbox);
 
 /* Built-in tool implementations (builtin_fs.c / builtin_shell.c /
  * builtin_net.c / builtin_git.c) */

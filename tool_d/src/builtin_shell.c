@@ -53,6 +53,10 @@ void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const char *ma
  * Replaces popen: commands exceeding timeout_ms get SIGKILLed so tool_d never
  * blocks forever.
  * @param cmd           Command string (interpreted by /bin/sh -c)
+ * @param cwd           Optional working directory for the child process
+ *                      (NULL/empty keeps tool_d's cwd; the child chdir()s
+ *                      into it before exec so relative paths in the command
+ *                      resolve against the task workspace, mirroring git -C)
  * @param out           Captured output (AIRY_MALLOC, caller frees)
  * @param exit_code     Process exit code (-1 on timeout, 126 on sandbox apply failure)
  * @param timeout_ms    Timeout in ms
@@ -62,8 +66,8 @@ void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const char *ma
  *                      command process and its descendants, not tool_d itself)
  * @return 0 on success, non-zero on failure (fork/pipe/OOM)
  */
-int builtin_shell_run(const char *cmd, char **out, int *exit_code, uint32_t timeout_ms,
-                      int *out_truncated, const os_sandbox_cfg_t *sandbox)
+int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_code,
+                      uint32_t timeout_ms, int *out_truncated, const os_sandbox_cfg_t *sandbox)
 {
     *out = NULL;
     *exit_code = -1;
@@ -93,6 +97,14 @@ int builtin_shell_run(const char *cmd, char **out, int *exit_code, uint32_t time
          * it is safe and makes subprocess behavior deterministic. */
         unsetenv("LD_PRELOAD");
         unsetenv("LD_AUDIT");
+        /* Task workspace: chdir into the optional cwd so relative paths in
+         * the command resolve against the task workspace, not tool_d's own
+         * cwd (the runner chdirs its own process, which never affects the
+         * daemon's working directory). chdir failure denies execution with
+         * exit code 127 (command not found convention). */
+        if (cwd && cwd[0] && chdir(cwd) != 0) {
+            _exit(127);
+        }
         /* P2 OS-level sandbox: apply after fork, before exec
          * (Landlock/seccomp/rlimit). Apply failure denies execution
          * fail-closed (126 matches the bash convention). */
@@ -308,8 +320,8 @@ static void win_capture_append(char **buf, size_t *cap, size_t *len, const char 
  * preserved), on Windows the OS-level sandbox is unavailable so
  * os_sandbox_cfg_t is ignored (mode is always OFF).
  */
-int builtin_shell_run(const char *cmd, char **out, int *exit_code, uint32_t timeout_ms,
-                      int *out_truncated, const os_sandbox_cfg_t *sandbox)
+int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_code,
+                      uint32_t timeout_ms, int *out_truncated, const os_sandbox_cfg_t *sandbox)
 {
     (void)sandbox; /* Windows has no OS-level sandbox (mode is always OFF) */
     *out = NULL;
@@ -354,8 +366,12 @@ int builtin_shell_run(const char *cmd, char **out, int *exit_code, uint32_t time
     /* /S keeps the original quoting of cmd (nested quotes survive), /C runs
      * the command and exits; CREATE_NO_WINDOW keeps the daemon console clean. */
     snprintf(line, cmd_len + 32, "cmd.exe /S /C %s", cmd);
+    /* lpCurrentDirectory: run in the task workspace when provided (mirrors
+     * the POSIX child chdir), so relative paths resolve against the
+     * workspace instead of the daemon's cwd. */
     BOOL spawned =
-        CreateProcessA(NULL, line, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+        CreateProcessA(NULL, line, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL,
+                       (cwd && cwd[0]) ? cwd : NULL, &si, &pi);
     AIRY_FREE(line);
     CloseHandle(h_write); /* the child holds the write end */
     if (!spawned) {
@@ -466,6 +482,13 @@ int shell_run_tool(const char *params_json, tool_result_t *res)
         res->error = AIRY_STRDUP("Missing string parameter: command");
         return AIRY_ERR_INVALID_PARAM;
     }
+    /* Optional working directory: when set, the child process chdir()s into
+     * it before executing so relative paths in the command resolve against
+     * the task workspace (base.py injects the runner workspace_dir). */
+    cJSON *cwd_item = cJSON_GetObjectItem(root, "cwd");
+    const char *cwd = (cJSON_IsString(cwd_item) && cwd_item->valuestring && cwd_item->valuestring[0])
+                          ? cwd_item->valuestring
+                          : NULL;
     /* P2 OS-level sandbox: shell_run is enabled by default per environment
      * config (Landlock/seccomp/rlimit on Linux; Windows/macOS resolve to
      * OS_SANDBOX_MODE_OFF, keeping the identical call path). */
@@ -473,8 +496,8 @@ int shell_run_tool(const char *params_json, tool_result_t *res)
     os_sandbox_cfg_from_env(&sandbox_cfg);
     char *out = NULL;
     int exit_code = -1;
-    int rc = builtin_shell_run(cmd->valuestring, &out, &exit_code, BUILTIN_SHELL_TIMEOUT_MS, NULL,
-                               &sandbox_cfg);
+    int rc = builtin_shell_run(cmd->valuestring, cwd, &out, &exit_code,
+                               BUILTIN_SHELL_TIMEOUT_MS, NULL, &sandbox_cfg);
     if (rc != 0) {
         res->error = AIRY_STRDUP("Failed to execute command (pipe/process creation failed)");
         return AIRY_ERR_EXEC_FAIL;
