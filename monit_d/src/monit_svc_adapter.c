@@ -15,6 +15,7 @@
 #include "monitor_service.h"
 #include "svc_common.h"
 #include "svc_logger.h"
+#include "platform.h" /* AIRY_HOME 权威路径：airy_log_dir()/airy_data_dir() */
 
 #include <stdlib.h>
 #include <string.h>
@@ -44,8 +45,14 @@ static void monit_config_from_common(monitor_config_t *monit_cfg,
         (common_cfg && common_cfg->timeout_ms > 0) ? common_cfg->timeout_ms : 10000;
     monit_cfg->log_flush_interval_ms = 1000;
     monit_cfg->alert_check_interval_ms = 5000;
-    monit_cfg->log_file_path = AIRY_STRDUP("./logs/monitor.log");
-    monit_cfg->metrics_storage_path = AIRY_STRDUP("./metrics");
+    /* 收敛到 AIRY_HOME：日志 → $AIRY_HOME/logs，指标 → $AIRY_HOME/data */
+    {
+        char path_buf[AIRY_PATH_MAX];
+        snprintf(path_buf, sizeof(path_buf), "%s/monitor.log", airy_log_dir());
+        monit_cfg->log_file_path = AIRY_STRDUP(path_buf);
+        snprintf(path_buf, sizeof(path_buf), "%s/metrics", airy_data_dir());
+        monit_cfg->metrics_storage_path = AIRY_STRDUP(path_buf);
+    }
     monit_cfg->enable_tracing = (common_cfg && common_cfg->enable_tracing);
     monit_cfg->enable_alerting = true;
 }
