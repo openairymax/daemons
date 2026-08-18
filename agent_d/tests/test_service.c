@@ -238,7 +238,8 @@ static void test_invoke_cancel(void)
     assert(ret == AIRY_SUCCESS && agent_id != NULL);
 
     int in_pipe[2], out_pipe[2];
-    assert(pipe(in_pipe) == 0 && pipe(out_pipe) == 0);
+    int rp1 = pipe(in_pipe), rp2 = pipe(out_pipe);
+    assert(rp1 == 0 && rp2 == 0);
     pid_t pid = fork();
     assert(pid >= 0);
     if (pid == 0) {
@@ -272,13 +273,16 @@ static void test_invoke_cancel(void)
     agent->last_active = (uint64_t)time(NULL);
 
     airy_cancel_token_t token;
-    assert(airy_cancel_token_init(&token) == 0);
+    int irc = airy_cancel_token_init(&token);
+    assert(irc == 0);
     airy_thread_t th;
-    assert(airy_platform_thread_create(&th, invoke_cancel_thread, &token) == 0);
+    int tcr = airy_platform_thread_create(&th, invoke_cancel_thread, &token);
+    assert(tcr == 0);
 
     char *out_output = NULL;
     ret = agent_service_invoke(svc, agent_id, "ping", 4, NULL, &token, &out_output);
-    assert(airy_platform_thread_join(th, NULL) == 0);
+    int jrc = airy_platform_thread_join(th, NULL);
+    assert(jrc == 0);
 
     assert(ret == AIRY_ERR_CANCELED);
     assert(out_output != NULL);
@@ -314,7 +318,8 @@ static void test_invoke_session_cancel(void)
     assert(ret == AIRY_SUCCESS && agent_id != NULL);
 
     int in_pipe[2], out_pipe[2];
-    assert(pipe(in_pipe) == 0 && pipe(out_pipe) == 0);
+    int rp1 = pipe(in_pipe), rp2 = pipe(out_pipe);
+    assert(rp1 == 0 && rp2 == 0);
     pid_t pid = fork();
     assert(pid >= 0);
     if (pid == 0) {
@@ -352,11 +357,13 @@ static void test_invoke_session_cancel(void)
     assert(ret == AIRY_SUCCESS && token != NULL);
 
     airy_thread_t th;
-    assert(airy_platform_thread_create(&th, session_cancel_thread, svc) == 0);
+    int tcr = airy_platform_thread_create(&th, session_cancel_thread, svc);
+    assert(tcr == 0);
 
     char *out_output = NULL;
     ret = agent_service_invoke(svc, agent_id, "ping", 4, NULL, token, &out_output);
-    assert(airy_platform_thread_join(th, NULL) == 0);
+    int jrc = airy_platform_thread_join(th, NULL);
+    assert(jrc == 0);
 
     assert(ret == AIRY_ERR_CANCELED);
     assert(out_output != NULL);

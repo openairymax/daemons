@@ -64,7 +64,8 @@ static airy_err_t config_mgr_init(void)
 
     __builtin_memset(g_config_mgr.watchers, 0, sizeof(g_config_mgr.watchers));
     g_config_mgr.watcher_count = 0;
-    if (safe_strcpy(g_config_mgr.config_base_path, "./config",
+    /* 收敛到 AIRY_HOME 配置目录：airy_config_dir() → $AIRY_HOME/config */
+    if (safe_strcpy(g_config_mgr.config_base_path, airy_config_dir(),
                     sizeof(g_config_mgr.config_base_path)) != 0) {
         airy_mtx_destroy(&g_config_mgr.mutex);
         return AIRY_EINVAL;

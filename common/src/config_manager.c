@@ -136,7 +136,8 @@ AIRY_API cm_config_t cm_create_default_config(void)
 {
     cm_config_t config;
     __builtin_memset(&config, 0, sizeof(cm_config_t));
-    safe_strcpy(config.base_path, "./config", sizeof(config.base_path));
+    /* 收敛到 AIRY_HOME 配置目录：airy_config_dir() → $AIRY_HOME/config */
+    safe_strcpy(config.base_path, airy_config_dir(), sizeof(config.base_path));
     safe_strcpy(config.environment, "development", sizeof(config.environment));
     config.watch_interval_ms = 5000;
     config.max_history = CM_MAX_HISTORY;
@@ -568,7 +569,8 @@ AIRY_API int cm_reload(void)
         return AIRY_ERR_UNKNOWN;
 
     AIRY_LOG_INFO("Config reload triggered");
-    return cm_load_json(g_cm.config.base_path[0] ? g_cm.config.base_path : "./config", NULL);
+    return cm_load_json(g_cm.config.base_path[0] ? g_cm.config.base_path : airy_config_dir(),
+                        NULL);
 }
 
 AIRY_API int cm_register_validator(const char *key_pattern, cm_validator_t validator)
@@ -690,12 +692,12 @@ AIRY_API int cm_load_environment_config(const char *env)
 #pragma GCC diagnostic ignored "-Wformat-truncation"
     char path[CM_MAX_PATH_LEN];
     snprintf(path, sizeof(path), "%s/%s.json",
-             g_cm.config.base_path[0] ? g_cm.config.base_path : "./config", env);
+             g_cm.config.base_path[0] ? g_cm.config.base_path : airy_config_dir(), env);
 
     int count = cm_load_json(path, env);
     if (count < 0) {
         snprintf(path, sizeof(path), "%s/%s.yaml",
-                 g_cm.config.base_path[0] ? g_cm.config.base_path : "./config", env);
+                 g_cm.config.base_path[0] ? g_cm.config.base_path : airy_config_dir(), env);
         count = cm_load_json(path, env);
     }
 #pragma GCC diagnostic pop

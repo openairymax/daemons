@@ -20,6 +20,10 @@
 #include <string.h>
 #include "error.h"
 
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#endif
+
 static struct {
     um_config_t config;
     um_module_metrics_t modules[UM_MAX_MODULES];
@@ -587,6 +591,18 @@ AIRY_API void um_update_default_metrics(void)
     ms.dwLength = sizeof(ms);
     if (GlobalMemoryStatusEx(&ms)) {
         um_gauge_set("system", "process_memory_bytes", (double)ms.dwMemoryLoad);
+    }
+#elif defined(__APPLE__)
+    /* macOS 无 /proc：用 task_info(TASK_VM_INFO) 取进程常驻内存（resident_size）。
+     * mach/mach.h 声明 task_info；mach_task_self() 为自进程任务端口。 */
+    {
+        mach_msg_type_number_t info_count = TASK_VM_INFO_COUNT;
+        task_vm_info_data_t vm_info;
+        kern_return_t kr = task_info(mach_task_self(), TASK_VM_INFO,
+                                     (task_info_t)&vm_info, &info_count);
+        if (kr == KERN_SUCCESS) {
+            um_gauge_set("system", "process_memory_bytes", (double)vm_info.resident_size);
+        }
     }
 #else
     FILE *f = fopen("/proc/self/statm", "r");

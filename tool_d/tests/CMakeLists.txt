@@ -39,8 +39,12 @@ set(TOOL_TEST_SOURCES
     test_validator.c
     test_registry.c
     test_sandbox_integration.c
-    test_os_sandbox.c
 )
+# os_sandbox 测试依赖 Landlock/seccomp/unshare/mount 等 Linux-only 能力，
+# macOS/BSD 上 os_sandbox.c 为空实现（OS_SANDBOX_MODE_OFF），该测试不适用。
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND TOOL_TEST_SOURCES test_os_sandbox.c)
+endif()
 
 set(TOOL_COMMON_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/../include

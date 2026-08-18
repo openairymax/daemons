@@ -14,6 +14,7 @@
 #include "market_service.h"
 #include "svc_common.h"
 #include "svc_logger.h"
+#include "platform.h" /* AIRY_HOME 权威路径：airy_data_dir() */
 
 #include <stdlib.h>
 #include <string.h>
@@ -44,7 +45,12 @@ static void market_config_from_common(market_config_t *market_cfg,
     market_cfg->enable_remote_registry = true;
     market_cfg->enable_auto_update = false;
     market_cfg->registry_url = AIRY_STRDUP("https://registry.agentrt.io");
-    market_cfg->storage_path = AIRY_STRDUP("./market_data");
+    /* 收敛到 AIRY_HOME：市场数据 → $AIRY_HOME/data */
+    {
+        char path_buf[AIRY_PATH_MAX];
+        snprintf(path_buf, sizeof(path_buf), "%s/market_data", airy_data_dir());
+        market_cfg->storage_path = AIRY_STRDUP(path_buf);
+    }
 }
 
 static airy_err_t market_adapter_init(airy_svc_t service, const airy_svc_config_t *config)

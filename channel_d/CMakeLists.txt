@@ -37,12 +37,15 @@ if(UNIX)
         Threads::Threads
         airy_platform_libs
     )
-    target_compile_definitions(channel_d PRIVATE
-        _GNU_SOURCE
-        # R-09-119: use platform.h default
-        AIRY_CONFIG_DIR="/etc/agentrt"
-        AIRY_LOG_DIR="/var/log/agentrt"
-    )
+    # R-09-119: Linux FHS 路径宏仅在 Linux 设置；macOS 使用 platform.h 的
+    # 默认路径（./agentrt/config、./agentrt/logs），避免覆盖后无写权限。
+    if(NOT APPLE)
+        target_compile_definitions(channel_d PRIVATE
+            _GNU_SOURCE
+            AIRY_CONFIG_DIR="/etc/agentrt"
+            AIRY_LOG_DIR="/var/log/agentrt"
+        )
+    endif()
 endif()
 
 if(NOT MSVC)
@@ -98,10 +101,14 @@ else()
     target_compile_options(test_channel_e2e PRIVATE -Wall -Wextra)
     target_compile_definitions(test_channel_e2e PRIVATE
         USE_CMOCKA_STUB
-        # R-09-119: use platform.h default
-        AIRY_CONFIG_DIR="/etc/agentrt"
-        AIRY_LOG_DIR="/var/log/agentrt"
     )
+    if(NOT APPLE)
+        target_compile_definitions(test_channel_e2e PRIVATE
+            # R-09-119: Linux FHS 路径宏仅在 Linux 设置（macOS 用 platform.h 默认）
+            AIRY_CONFIG_DIR="/etc/agentrt"
+            AIRY_LOG_DIR="/var/log/agentrt"
+        )
+    endif()
     add_test(NAME channel_e2e COMMAND test_channel_e2e)
 endif()
 endif() # BUILD_TESTS
