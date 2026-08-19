@@ -9,7 +9,7 @@
  * Unlike the other namespaces (pure <ns>.<method> forwarding to a daemon),
  * hall.* is implemented directly inside the gateway: it reads the persisted
  * single-source-of-truth files that the runtime writes under AIRY_HOME —
- *   - work hall board : $AIRY_HOME/state/work_hall_state.json
+ *   - work hall board : $AIRY_HOME/data/agentrt/state/work_hall_state.json
  *   - hall store      : $AIRY_HOME/data/agentrt/hall/<tenant>/<task>/<cat>/events.json
  * and merges in the live agent roster from agent_d (agent.list). Any client
  * (Rust TUI / C CLI / HTTP) therefore sees the same board / event stream /
@@ -37,7 +37,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define GW_HALL_STATE_REL "state/work_hall_state.json"
+#define GW_HALL_STATE_REL "agentrt/state/work_hall_state.json"
 #define GW_HALL_ROOT_REL "agentrt/hall"
 #define GW_HALL_DEFAULT_STREAM_LIMIT 512
 #define GW_HALL_MAX_LIMIT 8192
@@ -79,9 +79,11 @@ static char *gw_hall_read_file(const char *path)
 
 static void gw_hall_state_path(char *buf, size_t cap)
 {
-    const char *home = airy_home_dir();
-    if (home && home[0])
-        snprintf(buf, cap, "%s/%s", home, GW_HALL_STATE_REL);
+    /* 收敛到 data/agentrt/state（AIRY_HOME 路径体系），与写入方
+     * work_hall_persist.c 一致。 */
+    const char *data = airy_data_dir();
+    if (data && data[0])
+        snprintf(buf, cap, "%s/%s", data, GW_HALL_STATE_REL);
     else
         snprintf(buf, cap, "%s", GW_HALL_STATE_REL);
 }

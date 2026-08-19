@@ -28,7 +28,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define DEFAULT_SOCKET_PATH_UNIX AIRY_RUNTIME_DIR "/agent.sock"
+#define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("agent.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_agent"
 #define DEFAULT_TCP_PORT 8086
 #define MAX_BUFFER 65536
