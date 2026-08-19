@@ -197,7 +197,7 @@ if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
    AND TARGET observe_d AND TARGET hook_d AND TARGET plugin_d
    AND TARGET mem_d AND TARGET agent_d AND TARGET a2a_d
    AND TARGET think_d AND TARGET cupolas_d)
-    # 注意：仅导出 16 个 daemon 可执行文件（svc_common 导出限制见下）。
+    # 注意：仅导出 17 个 daemon 可执行文件（svc_common 导出限制见下）。
     # svc_common 是 STATIC 库且 PUBLIC 链接 airy_common/airy_compile_defs/
     # cupolas/airy_platform_libs，若将其加入 export(TARGETS) 列表，
     # 则要求上述 4 个传递依赖也在同一 export set（它们定义于 commons/cupolas 等
