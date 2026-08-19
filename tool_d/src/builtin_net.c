@@ -200,17 +200,23 @@ int web_fetch_tool(const char *params_json, tool_result_t *res)
     /* Main path: curl child process (curl.exe ships with Windows 10+).
      * -sS silences progress but keeps errors; -L follows redirects;
      * --max-time prevents hangs; -w appends a status marker (single quotes let
-     * curl interpret \n as newline); -A declares the UA */
+     * curl interpret \n as newline); -A declares the UA.
+     *
+     * 超时预算（2026-08-19）：CLI 侧工具 RPC 超时为 30s（cli_chat.c
+     * CLI_TOOL_RPC_TIMEOUT_MS），curl --max-time 若同样 30s，慢网页会先
+     * 撞 RPC 超时（实测 rc=-31 超时）。curl 降到 20s、shell_run 降到
+     * 25s，给 RPC 返回留出余量——20s 足够绝大多数页面（大文件/流式站点
+     * 快速失败，不拖垮整个工具轮）。 */
     char cmd[8192];
     snprintf(cmd, sizeof(cmd),
-             "curl -sSL --max-time 30 -A \"AirymaxRT/0.1.2 web_fetch\" "
+             "curl -sSL --max-time 20 -A \"AirymaxRT/0.1.2 web_fetch\" "
              "-w '\\n__AIRY_STATUS__:%%{http_code}' '%s'",
              url_str);
 
     char *out = NULL;
     int exit_code = -1;
 
-    int rc = builtin_shell_run(cmd, NULL, &out, &exit_code, 45000, NULL, NULL);
+    int rc = builtin_shell_run(cmd, NULL, &out, &exit_code, 25000, NULL, NULL);
     if (rc != 0) {
         res->error = AIRY_STRDUP("Failed to execute web fetch (pipe/process creation failed)");
         return AIRY_ERR_EXEC_FAIL;
@@ -433,15 +439,17 @@ static int web_search_via_bing(const char *query, int max_results, char *buf, si
     char cmd[8192];
     /* Primary search backend. Bing answers fast on most networks, so it is
      * tried first; the tight --max-time keeps the whole IPC round trip
-     * inside the agent's 30s timeout even when the endpoint is unreachable. */
+     * inside the agent's 30s timeout even when the endpoint is unreachable.
+     * 2026-08-19: Bing 降到 12s（shell 15s）——Bing 失败后还要试 DDG，
+     * 串联预算必须压在 30s RPC 内（原 20s+8s 会超）。 */
     snprintf(cmd, sizeof(cmd),
-             "curl -sSL --max-time 20 -A \"Mozilla/5.0 (compatible; AirymaxRT/0.1.1 "
+             "curl -sSL --max-time 12 -A \"Mozilla/5.0 (compatible; AirymaxRT/0.1.2 "
              "web_search)\" 'https://www.bing.com/search?q=%s'",
              enc);
     char *out = NULL;
     int exit_code = -1;
 
-    if (builtin_shell_run(cmd, NULL, &out, &exit_code, 25000, NULL, NULL) != 0 || !out)
+    if (builtin_shell_run(cmd, NULL, &out, &exit_code, 15000, NULL, NULL) != 0 || !out)
         return -1;
     if (exit_code != 0 || strstr(out, "command not found")) {
         AIRY_FREE(out);
@@ -504,7 +512,7 @@ int web_search_tool(const char *params_json, tool_result_t *res)
         char *out = NULL;
         int exit_code = -1;
 
-        int curl_ok = (builtin_shell_run(cmd, NULL, &out, &exit_code, 12000, NULL, NULL) == 0 && out &&
+        int curl_ok = (builtin_shell_run(cmd, NULL, &out, &exit_code, 10000, NULL, NULL) == 0 && out &&
                        exit_code == 0 && !strstr(out, "command not found"));
         if (curl_ok) {
             /* DDG 标题同样可能含 <b> 强调标签，用与 Bing 一致的
