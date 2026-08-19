@@ -246,10 +246,10 @@ int agent_spawn_child(const char *spec, const char *agent_id, pid_t *out_pid, in
         close(stdout_pipe[1]);
 
         /* stderr -> log file (best-effort; on failure inherit parent stderr).
-         * Logs are collected under AIRY_HOME/run (same directory as sockets,
-         * for easier troubleshooting). */
+         * Logs are collected under AIRY_HOME/logs (run/ holds only sockets
+         * and pid files; agent logs belong with the other daemon logs). */
         char log_path[AIRY_PATH_MAX];
-        snprintf(log_path, sizeof(log_path), "%s/agent_%s.log", airy_runtime_dir(), agent_id);
+        snprintf(log_path, sizeof(log_path), "%s/agent_%s.log", airy_log_dir(), agent_id);
         int log_fd = open(log_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (log_fd >= 0) {
             dup2(log_fd, STDERR_FILENO);
