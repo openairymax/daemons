@@ -306,18 +306,21 @@ static int mem_jsonl_path_resolve(char **out_path)
         return AIRY_ERR_INVALID_PARAM;
     *out_path = NULL;
 
-    const char *dir = getenv("AIRY_RUNTIME_DIR");
+    /* 持久记忆数据落 data/（run/ 仅承载 socket/pid 等易失运行时文件；
+     * 记忆随会话留存，属持久数据，与 heapstore/hall 同一分区）。 */
+    const char *dir = airy_data_dir();
     if (!dir || !dir[0])
-        dir = AIRY_RUNTIME_DIR;
+        return AIRY_ERR_INVALID_PARAM;
 
     (void)airy_mkdir_p(dir);
 
     size_t dir_len = strlen(dir);
-    size_t need = dir_len + 1 + strlen(MEM_JSONL_FILENAME) + 1;
+    size_t need = dir_len + 1 + strlen("agentrt") + 1 + strlen("memory") + 1 +
+                  strlen(MEM_JSONL_FILENAME) + 1;
     char *path = (char *)AIRY_MALLOC(need);
     if (!path)
         return AIRY_ERR_OUT_OF_MEMORY;
-    snprintf(path, need, "%s/%s", dir, MEM_JSONL_FILENAME);
+    snprintf(path, need, "%s/agentrt/memory/%s", dir, MEM_JSONL_FILENAME);
     *out_path = path;
     return AIRY_SUCCESS;
 }
@@ -648,6 +651,7 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char *
     *out_record_id = AIRY_STRDUP(rec->record_id);
     svc->record_count++;
     uint64_t total_writes = svc->record_count;
+    (void)total_writes; /* 仅用于 DEBUG 日志（Release 下宏为空，避免 unused） */
 
     mem_persist_append_record(svc, rec);
 
