@@ -395,6 +395,9 @@ void os_sandbox_cfg_from_env(os_sandbox_cfg_t *cfg)
 int os_sandbox_apply(const os_sandbox_cfg_t *cfg)
 {
     (void)cfg;
+    SVC_LOG_WARN("os_sandbox: non-Linux platform, sandbox unavailable "
+                 "(requested mode=%d); tool execution runs unsandboxed",
+                 cfg ? cfg->mode : -1);
     return 0;
 }
 
