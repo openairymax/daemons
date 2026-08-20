@@ -6,16 +6,28 @@
  * @brief Public interface of the dual-think system (Thinkdual) service.
  *
  * think_d hosts the CoreLoopThree cognitive engine, integrating the
- * dual-think system into the 15-daemon runtime:
- *   - t2 (slow-think main model): TC3 critique-loop primary generation
- *   - t1-f (fast-think - facts): verification model
- *   - t1-p (fast-think - professional): expert-arbitration model
- *   - dual_coordinate: dual-model cross-validation (activated after TC3
- *     succeeds; written to working memory)
+ * dual-think system into the daemon runtime:
+ *   - t2 (slow-think, model A): planner + Phase-2 generation (GRAD s2)
+ *   - t1-f (fast-think, model B): context arbiter (GRAD s1 final
+ *     accept/reject call; daily-chat route)
+ *   - t1-p (professional, model C): logic verifier — deterministic
+ *     four-check (zero-token) gate in GRAD, not an LLM arbitration
+ *
+ * Dual-thinking model (2026-08-07 decision): GCCP fact lock (Phase 0
+ * intent confirmation) + GRAD logic lock (Phase-1 plan-level critique
+ * loop over the generated plan; the old text-level TC3 critique and the
+ * dual_coordinate cross-validation were removed). GRAD loop: model A
+ * (t2) drafts the plan -> model C (t1-p) runs the deterministic
+ * verifier -> model B (t1-f) arbitrates -> converge or fall back to the
+ * seed plan. Working-memory keys: "gccp_goal", "cog_review_decision".
  *
  * LLM calls go through llm_svc_adapter directly to the llm_d Unix socket
- * (daemon_rpc_call), interoperating natively with the 15-daemon
- * architecture.
+ * (daemon_rpc_call), interoperating natively with the daemon
+ * architecture. End-cloud hybrid: both local endpoints (Ollama/vLLM via
+ * the local/custom providers) and cloud APIs (deepseek/openai/anthropic
+ * /google/glm/qwen/moonshot/siliconflow/spark/custom) are reached
+ * through the same llm_d socket; the router applies policy-level
+ * fallback (cost-aware -> round-robin chain).
  */
 
 #ifndef AIRY_RT_THINK_SERVICE_H
@@ -62,8 +74,8 @@ void think_service_destroy(think_service_t *svc);
 
 
 /**
- * @brief Dual-think processing: input prompt -> cognitive engine (TC3 +
- *        dual_coordinate) -> JSON result.
+ * @brief Dual-think processing: input prompt -> cognitive engine (GCCP +
+ *        GRAD) -> JSON result.
  * @param svc Service handle
  * @param prompt User input (UTF-8)
  * @param out_result Output result (OWNER, caller frees via think_result_free)

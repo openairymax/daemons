@@ -27,6 +27,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* 代码级默认端点：仅当调用方未传 base_url 时使用。部署标准配置
+ * （model.yaml local provider / llm: 段）显式传 base_url —— Ollama 默认
+ * http://localhost:11434，vLLM 走 OpenAI 兼容格式 8080/v1——实际以
+ * yaml 传入值为准（2026-08-20 审查：代码默认与 yaml 默认的差异为
+ * 文档级，非功能缺陷）。 */
 #define LOCAL_DEFAULT_BASE "http://localhost:8080/v1"
 #define LOCAL_DEFAULT_MODEL "gpt-3.5-turbo"
 #define LOCAL_DEFAULT_TIMEOUT 60.0
