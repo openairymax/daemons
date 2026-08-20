@@ -5,20 +5,20 @@
 #include "error.h"
 /**
  * @file think_service.c
- * @brief Dual-think system service implementation (Thinkdual: t2/t1-f/t1-p
- *        + dual_coordinate).
+ * @brief Dual-think system service implementation (Thinkdual: t2/t1-f/t1-p).
  *
  * Design notes:
  * - Hosts the CoreLoopThree cognitive engine (airy_cognition_*), connecting
  *   directly to the llm_d Unix socket via llm_svc_adapter, interoperating
- *   natively with the 15-daemon architecture.
+ *   natively with the daemon architecture.
  * - The t2/t1-f/t1-p models are injected via airy_cognition_set_tc3_models
  *   (NULL = defaults).
- * - dual_coordinate (D3 link-failure fix): injects a custom
- *   airy_coordinator_strategy_t whose coordinate callback really calls the
- *   LLM to cross-check t1-f's output against the LLM seed for consistency;
- *   the verdict is written to working memory for Phase-3 audit / Phase-4
- *   alignment.
+ * - Dual-thinking model (2026-08-07): GCCP fact lock + GRAD plan-level
+ *   logic lock. GRAD loop: t2 (A) drafts the plan -> t1-p (C) runs the
+ *   deterministic four-check verifier (zero token) -> t1-f (B) makes the
+ *   final accept/reject call -> converge or fall back to the seed plan.
+ *   The old text-level TC3 critique loop and the dual_coordinate
+ *   cross-validation were removed.
  * - Thinking events (feedback callback) are collected into a ring buffer
  *   and returned with the think.process result for TUI/upper-layer process
  *   visualization.
