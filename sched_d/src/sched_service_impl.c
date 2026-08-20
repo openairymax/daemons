@@ -18,6 +18,7 @@
 #include "platform.h"
 #include "thread_pool.h"
 #include "multi_agent_collaboration.h"
+#include "hall_writer.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +30,50 @@
 uint64_t sched_now_ms(void)
 {
     return (uint64_t)time(NULL) * 1000ull;
+}
+
+/* 执行链事件接线（2.8b）：将调度任务生命周期事件写入事件流单一真相源。
+ * best-effort：写失败仅记录日志，绝不失败任务流程。 */
+static void sched_hall_progress(const char *task_id, const char *event, int priority)
+{
+    if (!task_id || !task_id[0] || !event)
+        return;
+    cJSON *evt = cJSON_CreateObject();
+    if (!evt)
+        return;
+    cJSON_AddStringToObject(evt, "event", event);
+    cJSON_AddNumberToObject(evt, "priority", (double)priority);
+    char *s = cJSON_PrintUnformatted(evt);
+    if (s) {
+        (void)daemon_hall_write(task_id, "progress", NULL, s);
+        cJSON_free(s);
+    }
+    cJSON_Delete(evt);
+}
+
+static void sched_hall_result(const char *task_id, const char *agent, const char *status,
+                              uint64_t elapsed_ms, const char *output, const char *error)
+{
+    if (!task_id || !task_id[0] || !status)
+        return;
+    cJSON *evt = cJSON_CreateObject();
+    if (!evt)
+        return;
+    cJSON_AddStringToObject(evt, "event", "task_done");
+    cJSON_AddStringToObject(evt, "status", status);
+    if (agent && agent[0])
+        cJSON_AddStringToObject(evt, "agent", agent);
+    cJSON_AddNumberToObject(evt, "elapsed_ms", (double)elapsed_ms);
+    if (output && output[0])
+        cJSON_AddNumberToObject(evt, "output_len", (double)strlen(output));
+    if (error && error[0])
+        cJSON_AddStringToObject(evt, "error", error);
+    char *s = cJSON_PrintUnformatted(evt);
+    if (s) {
+        (void)daemon_hall_write(task_id, "result", NULL, s);
+        cJSON_free(s);
+    }
+    cJSON_Delete(evt);
 }
 
 /* Sync an agent to mac_framework (parallel delegation mode).
@@ -626,6 +671,8 @@ static void *sched_worker_thread(void *arg)
             } else {
                 SVC_LOG_INFO("sched: dispatching task %s to agent %s", rec->task_id,
                              sel->selected_agent_id);
+                /* 执行链事件（2.8b）：任务开始执行 → progress 事件。 */
+                sched_hall_progress(rec->task_id, "task_started", (int)rec->priority);
                 sret = svc->executor(sel->selected_agent_id, rec->task_description, NULL, &output);
                 if (sret != AIRY_SUCCESS || !output) {
                     SVC_LOG_ERROR("sched: executor returned failure for task %s "
@@ -675,6 +722,16 @@ static void *sched_worker_thread(void *arg)
                           rec->error ? rec->error : "unknown");
         }
         airy_mtx_unlock(&svc->lock);
+
+        /* 执行链事件（2.8b）：任务终态 → result 事件（completed/failed/canceled）。
+         * best-effort，绝不影响任务结果回写。 */
+        static const char *hw_status_names[] = {"pending", "running", "completed", "failed",
+                                                "canceled"};
+        const char *sname2 = (rec->status < SCHED_TASK_STATUS_COUNT) ?
+                                 hw_status_names[rec->status] :
+                                 "unknown";
+        sched_hall_result(rec->task_id, rec->selected_agent_id, sname2, exec_elapsed_ms,
+                          rec->output, rec->error);
 
         AIRY_FREE(selected);
         AIRY_FREE(output);
@@ -760,6 +817,9 @@ int sched_service_submit_task(sched_service_t *service, const task_info_t *task_
                  id_buf, (int)task_info->priority, task_info->timeout_ms, qlen + 1,
                  rec->task_description ? strlen(rec->task_description) : 0,
                  service->worker_run ? "running" : "NOT STARTED (task will stay pending)");
+
+    /* 执行链事件（2.8b）：任务入队 → progress 事件。 */
+    sched_hall_progress(id_buf, "task_queued", (int)task_info->priority);
     return AIRY_SUCCESS;
 }
 
@@ -936,6 +996,10 @@ int sched_service_cancel_task(sched_service_t *service, const char *task_id)
         break;
     }
     airy_mtx_unlock(&service->lock);
+
+    /* 执行链事件（2.8b）：任务取消 → progress 事件。 */
+    if (found)
+        sched_hall_progress(task_id, "task_canceled", 0);
 
     return found ? AIRY_SUCCESS : AIRY_ERR_NOT_FOUND;
 }

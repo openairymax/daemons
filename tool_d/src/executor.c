@@ -23,11 +23,13 @@
 #include "safety_guard_bridge.h"
 #include "svc_logger.h"
 #include "tool_approval.h"
+#include "hall_writer.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <cjson/cJSON.h>
 
 #ifndef _WIN32
 #include <sys/wait.h>
@@ -593,6 +595,31 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     }
 
     result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
+
+    /* 执行链事件（2.8b）：工具执行结果 → result 事件。best-effort，
+     * 写失败绝不影响工具结果返回。task 分组键取调用 agent（无则工具 id）。 */
+    {
+        const char *evt_task =
+            (caller_agent && caller_agent[0]) ? caller_agent :
+                                                (meta->id && meta->id[0] ? meta->id : "tools");
+        cJSON *evt = cJSON_CreateObject();
+        if (evt) {
+            cJSON_AddStringToObject(evt, "event", "tool_result");
+            cJSON_AddStringToObject(evt, "tool", meta->id ? meta->id : "");
+            cJSON_AddStringToObject(evt, "name", meta->name ? meta->name : "");
+            cJSON_AddNumberToObject(evt, "success", result->success ? 1 : 0);
+            cJSON_AddNumberToObject(evt, "exit_code", (double)result->exit_code);
+            cJSON_AddNumberToObject(evt, "duration_ms", (double)result->duration_ms);
+            if (result->error && result->error[0])
+                cJSON_AddStringToObject(evt, "error", result->error);
+            char *s = cJSON_PrintUnformatted(evt);
+            if (s) {
+                (void)daemon_hall_write(evt_task, "result", meta->id, s);
+                cJSON_free(s);
+            }
+            cJSON_Delete(evt);
+        }
+    }
 
     *out_result = result;
     tool_rw_gate_unlock(&exec->rw_gate);
