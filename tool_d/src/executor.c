@@ -280,6 +280,35 @@ void tool_executor_set_approval_ctx(tool_executor_t *exec, tool_approval_ctx_t *
     }
 }
 
+/* 执行链事件（2.8b）：工具执行结果 → result 事件。best-effort，写失败
+ * 绝不影响工具结果返回。task 分组键取调用 agent（无则工具 id）。
+ * 内置工具（builtin:xxx）与外部 execvp 两条路径共用，保证所有真实执行
+ * 都进入事件流单一真相源。 */
+static void tool_hall_emit_result(const tool_metadata_t *meta, const char *caller_agent,
+                                  const tool_result_t *result)
+{
+    const char *evt_task =
+        (caller_agent && caller_agent[0]) ? caller_agent :
+                                            (meta->id && meta->id[0] ? meta->id : "tools");
+    cJSON *evt = cJSON_CreateObject();
+    if (!evt)
+        return;
+    cJSON_AddStringToObject(evt, "event", "tool_result");
+    cJSON_AddStringToObject(evt, "tool", meta->id ? meta->id : "");
+    cJSON_AddStringToObject(evt, "name", meta->name ? meta->name : "");
+    cJSON_AddNumberToObject(evt, "success", result->success ? 1 : 0);
+    cJSON_AddNumberToObject(evt, "exit_code", (double)result->exit_code);
+    cJSON_AddNumberToObject(evt, "duration_ms", (double)result->duration_ms);
+    if (result->error && result->error[0])
+        cJSON_AddStringToObject(evt, "error", result->error);
+    char *s = cJSON_PrintUnformatted(evt);
+    if (s) {
+        (void)daemon_hall_write(evt_task, "result", meta->id, s);
+        cJSON_free(s);
+    }
+    cJSON_Delete(evt);
+}
+
 int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const char *params_json,
                       const char *agent_id, tool_result_t **out_result)
 {
@@ -449,6 +478,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
 
             result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
         }
+        tool_hall_emit_result(meta, caller_agent, result);
         *out_result = result;
         tool_rw_gate_unlock(&exec->rw_gate);
         return brc;
@@ -596,30 +626,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
 
     result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
 
-    /* 执行链事件（2.8b）：工具执行结果 → result 事件。best-effort，
-     * 写失败绝不影响工具结果返回。task 分组键取调用 agent（无则工具 id）。 */
-    {
-        const char *evt_task =
-            (caller_agent && caller_agent[0]) ? caller_agent :
-                                                (meta->id && meta->id[0] ? meta->id : "tools");
-        cJSON *evt = cJSON_CreateObject();
-        if (evt) {
-            cJSON_AddStringToObject(evt, "event", "tool_result");
-            cJSON_AddStringToObject(evt, "tool", meta->id ? meta->id : "");
-            cJSON_AddStringToObject(evt, "name", meta->name ? meta->name : "");
-            cJSON_AddNumberToObject(evt, "success", result->success ? 1 : 0);
-            cJSON_AddNumberToObject(evt, "exit_code", (double)result->exit_code);
-            cJSON_AddNumberToObject(evt, "duration_ms", (double)result->duration_ms);
-            if (result->error && result->error[0])
-                cJSON_AddStringToObject(evt, "error", result->error);
-            char *s = cJSON_PrintUnformatted(evt);
-            if (s) {
-                (void)daemon_hall_write(evt_task, "result", meta->id, s);
-                cJSON_free(s);
-            }
-            cJSON_Delete(evt);
-        }
-    }
+    tool_hall_emit_result(meta, caller_agent, result);
 
     *out_result = result;
     tool_rw_gate_unlock(&exec->rw_gate);
