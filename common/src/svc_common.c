@@ -192,44 +192,6 @@ static airy_err_t unregister_service_internal(airy_svc_internal_t *service)
     return AIRY_ENOENT;
 }
 
-/**
- * @brief Update service statistics
- */
-static void __attribute__((unused)) update_service_stats(airy_svc_internal_t *service, bool success,
-                                                         uint64_t process_time_ms)
-{
-    if (!service) {
-        return;
-    }
-
-    airy_mtx_lock(&service->stats_mutex);
-
-    service->stats.request_count++;
-
-    if (success) {
-        service->stats.success_count++;
-    } else {
-        service->stats.error_count++;
-    }
-
-    service->stats.total_time_ms += process_time_ms;
-
-    if (process_time_ms > service->stats.max_time_ms) {
-        service->stats.max_time_ms = process_time_ms;
-    }
-
-    if (service->stats.min_time_ms == 0 || process_time_ms < service->stats.min_time_ms) {
-        service->stats.min_time_ms = process_time_ms;
-    }
-
-    if (service->stats.request_count > 0) {
-        service->stats.avg_time_ms =
-            (double)service->stats.total_time_ms / service->stats.request_count;
-    }
-
-    airy_mtx_unlock(&service->stats_mutex);
-}
-
 airy_err_t airy_svc_create(airy_svc_t *out_service, const char *name,
                            const airy_svc_interface_t *iface, const airy_svc_config_t *config)
 {
