@@ -21,6 +21,7 @@ set(PROTOCOL_ROUTER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../src/protocol)
 set(TEST_SOURCES
     test_service.c
     test_protocol_router.c
+    test_gateway_hall_store.c
 )
 
 foreach(TEST_SRC ${TEST_SOURCES})
