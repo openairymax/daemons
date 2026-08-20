@@ -69,6 +69,7 @@ set(SVC_COMMON_SOURCES
     src/daemon_rpc_client.c       # Phase 3: gateway→daemon thin IPC client (Unix socket JSON-RPC)
     src/svc_model_defaults.c      # A2-1: model.yaml global 段默认模型提取（llm_d/gateway_d 共用）
     src/daemon_heapstore_bootstrap.c # KER-05~07: daemon 统一 heapstore 运行时数据存储引导
+    src/hall_writer.c          # 2.8: daemon 侧事件流写端（单一真相源 hall 事件）
 )
 
 # 创建静态库
