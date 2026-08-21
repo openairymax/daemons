@@ -309,6 +309,52 @@ static void tool_hall_emit_result(const tool_metadata_t *meta, const char *calle
     cJSON_Delete(evt);
 }
 
+/* P1-2 工具调用级日志（可观测性）：每次工具执行输出一条结构化调用记录，
+ * 含调用方 agent / 工具名 / 参数摘要 / 耗时 / 结果状态。用于 CLI 与日志
+ * 分析定位"任务执行链路"（哪个 agent 调了什么工具、成功与否、耗时）。 */
+static void tool_call_log(const tool_metadata_t *meta, const char *caller_agent,
+                          const char *params_json, const tool_result_t *result)
+{
+    char params[192];
+    size_t plen = params_json ? strlen(params_json) : 0;
+    if (plen >= sizeof(params)) {
+        __builtin_memcpy(params, params_json, sizeof(params) - 5);
+        __builtin_memcpy(params + sizeof(params) - 5, "...", 4);
+        params[sizeof(params) - 1] = '\0';
+    } else if (plen > 0) {
+        __builtin_memcpy(params, params_json, plen + 1);
+    } else {
+        params[0] = '\0';
+    }
+    /* 参数 JSON 压缩为单行，避免换行破坏日志记录结构 */
+    for (char *q = params; *q; q++)
+        if (*q == '\n' || *q == '\r')
+            *q = ' ';
+
+    const char *st = "?";
+    if (result) {
+        switch (result->failure_class) {
+        case TOOL_RESULT_CLASS_SUCCESS:
+            st = result->success ? "success" : "fail";
+            break;
+        case TOOL_RESULT_CLASS_NORMAL_FAIL:
+            st = "fail";
+            break;
+        case TOOL_RESULT_CLASS_RESPOND_TO_MODEL:
+            st = "respond";
+            break;
+        default:
+            st = "fatal";
+            break;
+        }
+    }
+    const char *err = (result && result->error && result->error[0]) ? result->error : NULL;
+    SVC_LOG_INFO("[tool] call agent=%s tool=%s dur=%ums status=%s exit=%d params=%s%s%s",
+                 caller_agent ? caller_agent : "?", meta->name ? meta->name : "?",
+                 result ? result->duration_ms : 0u, st, result ? result->exit_code : -1,
+                 params, err ? " err=" : "", err ? err : "");
+}
+
 int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const char *params_json,
                       const char *agent_id, tool_result_t **out_result)
 {
@@ -478,6 +524,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
 
             result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
         }
+        tool_call_log(meta, caller_agent, params_json, result);
         tool_hall_emit_result(meta, caller_agent, result);
         *out_result = result;
         tool_rw_gate_unlock(&exec->rw_gate);
@@ -626,6 +673,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
 
     result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
 
+    tool_call_log(meta, caller_agent, params_json, result);
     tool_hall_emit_result(meta, caller_agent, result);
 
     *out_result = result;
