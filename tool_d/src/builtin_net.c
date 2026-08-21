@@ -431,6 +431,126 @@ static int web_search_extract(const char *html, const char *res_pattern, const c
     return 0;
 }
 
+/* ---- 中文查询兜底（2026-08-20）----
+ * Bing 对「无空格长中文查询」分词退化：返回汉字字典/拼音词条而非网页
+ * 结果（实测 "宇树科技 上市 时间 股票代码" 返回"宇（汉语汉字）_百度百科"
+ * 等，用户会话中 agent 报"一直返回字典结果"即此现象）。行业级搜索依赖
+ * 查询改写；无分词器时用两条启发式兜底：
+ *   1) 移除高频查询意图词（时间/股票代码/是什么…），保留核心实体；
+ *   2) 对剩余连续中文每 4 字插入空格（"宇树科技上市" → "宇树科技 上市"）。
+ * 组合实测可将退化查询恢复为正常新闻结果。改写仅在检测到退化时启用，
+ * 正常查询零开销。 */
+
+/* 标题是否命中字典特征（Bing 分词退化时的典型产物）。 */
+static int web_search_is_dict_hit(const char *title)
+{
+    static const char *const dict_markers[] = {
+        "汉字", "拼音", "部首", "笔顺", "组词", "词典", "字典",
+        "汉语", "意思", "释义", "笔画",
+    };
+    for (size_t i = 0; i < sizeof(dict_markers) / sizeof(dict_markers[0]); i++) {
+        if (strstr(title, dict_markers[i]))
+            return 1;
+    }
+    return 0;
+}
+
+/* 扫描提取结果（"[N] title\n    url\n    snippet\n"），条目 ≥2 且过半
+ * 命中字典特征 → 判定该查询分词退化。 */
+static int web_search_results_degraded(const char *buf)
+{
+    int total = 0, dict = 0;
+    const char *p = buf;
+    while (p && *p) {
+        const char *nl = strchr(p, '\n');
+        if (!nl)
+            break;
+        const char *title = strchr(p, ']');
+        if (title && title < nl) {
+            total++;
+            if (web_search_is_dict_hit(title + 1))
+                dict++;
+        }
+        p = nl + 1;
+    }
+    return (total >= 2 && dict >= (total + 1) / 2) ? 1 : 0;
+}
+
+/* 移除高频查询意图词（触发 Bing 词典分词的词），其余字符原样保留。 */
+static void web_search_strip_intent(const char *in, char *out, size_t cap)
+{
+    static const char *const intent_words[] = {
+        "股票代码", "时间", "是什么", "怎么回事", "为什么", "什么时候",
+        "多久", "多少", "哪个", "哪里", "如何", "怎么", "是否", "有没有",
+    };
+    size_t o = 0;
+    const char *p = in;
+    while (*p && o + 1 < cap) {
+        int removed = 0;
+        for (size_t i = 0; i < sizeof(intent_words) / sizeof(intent_words[0]); i++) {
+            size_t wl = strlen(intent_words[i]);
+            /* strnlen 保护：p 剩余字节不足 wl 时不 strncmp（防越界读） */
+            if (strnlen(p, wl) == wl && strncmp(p, intent_words[i], wl) == 0) {
+                p += wl;
+                removed = 1;
+                break;
+            }
+        }
+        if (!removed)
+            out[o++] = *p++;
+    }
+    out[o] = '\0';
+}
+
+/* 对连续非 ASCII 段（中文等，≥5 字符）每 4 字符插入空格，修复 Bing
+ * 对长中文串的分词退化。原地改写（s 是调用方的可写缓冲）。 */
+static void web_search_space_cjk(char *s, size_t cap)
+{
+    char tmp[2048];
+    size_t o = 0;
+    const unsigned char *p = (const unsigned char *)s;
+    while (*p && o + 1 < cap && o + 1 < sizeof(tmp)) {
+        if (*p >= 0x80) {
+            const unsigned char *q = p;
+            size_t chars = 0;
+            while (*q >= 0x80 && (size_t)(q - (const unsigned char *)s) < cap) {
+                q += (*q >= 0xF0) ? 4 : (*q >= 0xE0) ? 3 : 2;
+                chars++;
+            }
+            if (chars >= 5) {
+                const unsigned char *r = p;
+                size_t idx = 0;
+                while (r < q && o + 1 < cap && o + 1 < sizeof(tmp)) {
+                    size_t bl = (*r >= 0xF0) ? 4 : (*r >= 0xE0) ? 3 : 2;
+                    for (size_t k = 0; k < bl && o + 1 < cap && o + 1 < sizeof(tmp); k++)
+                        tmp[o++] = (char)*r++;
+                    idx++;
+                    if (idx % 4 == 0 && r < q && o + 1 < cap && o + 1 < sizeof(tmp))
+                        tmp[o++] = ' ';
+                }
+                p = q;
+                continue;
+            }
+        }
+        if (o + 1 < cap && o + 1 < sizeof(tmp))
+            tmp[o++] = (char)*p++;
+    }
+    tmp[o] = '\0';
+    if (o < cap)
+        snprintf(s, cap, "%s", tmp);
+}
+
+/* 改写退化查询：移除意图词 → 连续中文插空格。改写后与原查询相同（无
+ * 中文长串可改）返回 0。 */
+static int web_search_rewrite_query(const char *in, char *out, size_t cap)
+{
+    char tmp[2048];
+    web_search_strip_intent(in, tmp, sizeof(tmp));
+    web_search_space_cjk(tmp, sizeof(tmp));
+    snprintf(out, cap, "%s", tmp);
+    return (strcmp(in, out) != 0) ? 1 : 0;
+}
+
 static int web_search_via_bing(const char *query, int max_results, char *buf, size_t buf_cap,
                                size_t *buf_len, int *count)
 {
@@ -524,6 +644,41 @@ int web_search_tool(const char *params_json, tool_result_t *res)
         }
         if (out)
             AIRY_FREE(out);
+    } else if (web_search_results_degraded(buf)) {
+        /* Bing 命中但结果是汉字字典/词条（中文长查询分词退化）：改写查询
+         * 后重试；改写仍退化/失败则清空走 DDG 兜底（2026-08-20）。 */
+        char rq[2048];
+        int rewrote = web_search_rewrite_query(q->valuestring, rq, sizeof(rq));
+        buf_len = 0;
+        count = 0;
+        if (rewrote && web_search_via_bing(rq, max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len,
+                                           &count) == 0 &&
+            count > 0 && !web_search_results_degraded(buf)) {
+            /* 改写后的查询返回正常结果，采用 */
+        } else {
+            buf_len = 0;
+            count = 0;
+            char enc[2048];
+            builtin_url_encode(q->valuestring, enc, sizeof(enc));
+            char cmd[8192];
+            snprintf(cmd, sizeof(cmd),
+                     "curl -sSL --max-time 8 -A \"Mozilla/5.0 (compatible; "
+                     "AirymaxRT/0.1.2 web_search)\" "
+                     "'https://html.duckduckgo.com/html/?q=%s'",
+                     enc);
+            char *out = NULL;
+            int exit_code = -1;
+            int curl_ok = (builtin_shell_run(cmd, NULL, &out, &exit_code, 10000, NULL, NULL) == 0 &&
+                           out && exit_code == 0 && !strstr(out, "command not found"));
+            if (curl_ok) {
+                web_search_extract(out,
+                                   "class=\"result__a\" href=\"([^\"]+)\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a>",
+                                   "class=\"result__snippet\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a>",
+                                   max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len, &count);
+            }
+            if (out)
+                AIRY_FREE(out);
+        }
     }
 
     if (count == 0) {
