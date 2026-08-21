@@ -441,7 +441,7 @@ static const char *GW_SCHED_METHODS[] = {"register_agent",
                                          "get_stats",
                                          "health_check",
                                          NULL};
-static const char *GW_THINK_METHODS[] = {"process", "health_check", "get_stats", NULL};
+static const char *GW_THINK_METHODS[] = {"process", "orchestrate", "health_check", "get_stats", NULL};
 static const char *GW_MONIT_METHODS[] = {"record_metric", "get_metrics",  "trigger_alert",
                                          "get_alerts",    "health_check", "generate_report",
                                          "heartbeat",     "metrics",      "alert_raise",

@@ -9,6 +9,7 @@
  *
  * Exposes JSON-RPC methods:
  *   - think.process     : dual-think processing (prompt -> plan + thinking-event JSON)
+ *   - think.orchestrate : 流程编排执行（S-5 orchestrator 管线，7 阶段）
  *   - think.get_stats   : dual-think statistics (engine health + call count)
  *   - think.health_check: service health check
  *
@@ -72,10 +73,16 @@ static BOOL WINAPI console_handler(DWORD fdwCtrlType)
 static void handle_process(cJSON *params, int id, airy_sock_t fd);
 static void handle_get_stats(cJSON *params, int id, airy_sock_t fd);
 static void handle_health_check(cJSON *params, int id, airy_sock_t fd);
+static void handle_orchestrate(cJSON *params, int id, airy_sock_t fd);
 
 static void on_process_method(cJSON *params, int id, void *user_data)
 {
     handle_process(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_orchestrate_method(cJSON *params, int id, void *user_data)
+{
+    handle_orchestrate(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
@@ -141,6 +148,38 @@ static void handle_health_check(cJSON *params __attribute__((unused)), int id,
     cJSON_AddBoolToObject(result, "healthy", think_service_ready(g_service) ? true : false);
     cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+/* S-5 (2026-08-21): think.orchestrate — 流程编排执行（orchestrator 管线：
+ * 分解→规划→生成→批判→验证→审计→对齐）。入参 input 为自然语言任务；
+ * 可选 timeout_ms 覆盖默认超时。 */
+static void handle_orchestrate(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *input = cJSON_GetObjectItem(params, "input");
+    if (!input || !cJSON_IsString(input) || !input->valuestring[0]) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing input string", id);
+        return;
+    }
+
+    uint32_t timeout_ms = 0;
+    cJSON *timeout = cJSON_GetObjectItem(params, "timeout_ms");
+    if (cJSON_IsNumber(timeout) && timeout->valueint > 0)
+        timeout_ms = (uint32_t)timeout->valueint;
+
+    char *json = NULL;
+    int ret = think_service_orchestrate(g_service, input->valuestring, timeout_ms, &json);
+    if (ret != 0 || !json) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Orchestrate failed", id);
+        AIRY_FREE(json);
+        return;
+    }
+    cJSON *res_obj = cJSON_Parse(json);
+    AIRY_FREE(json);
+    if (!res_obj) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid orchestrate result", id);
+        return;
+    }
+    JSONRPC_SEND_SUCCESS(client_fd, res_obj, id);
 }
 
 static int load_daemon_config(const char *config_path)
@@ -370,11 +409,12 @@ int main(int argc, char **argv)
 
     g_dispatcher_think_d = daemon_event_driver_get_dispatcher(g_event_driver_think_d);
     method_dispatcher_register(g_dispatcher_think_d, "process", on_process_method, NULL);
+    method_dispatcher_register(g_dispatcher_think_d, "orchestrate", on_orchestrate_method, NULL);
     method_dispatcher_register(g_dispatcher_think_d, "get_stats", on_get_stats_method, NULL);
     method_dispatcher_register(g_dispatcher_think_d, "health_check", on_health_check_method, NULL);
 
     method_dispatcher_register(g_dispatcher_think_d, "shutdown", on_shutdown_method_think_d, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (think.* namespace)", 4);
+    SVC_LOG_INFO("Registered %d RPC methods (think.* namespace)", 5);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_think_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
