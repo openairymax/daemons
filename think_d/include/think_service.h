@@ -88,6 +88,34 @@ void think_result_free(think_process_result_t *res);
 
 
 /**
+ * @brief 流程编排执行（S-5 恢复的 orchestrator 管线：分解→规划→生成→
+ *        批判→验证→审计→对齐，含熔断/重试/超时/进度回调）。
+ *
+ * 与 think.process（单次五阶段认知引擎）双管线并存：orchestrate 面向
+ * 多任务/多阶段编排场景（子任务分发、自定义 pipeline）。
+ *
+ * @param svc Service handle
+ * @param input 编排输入（自然语言任务）
+ * @param timeout_ms 超时毫秒（0=使用编排器默认）
+ * @param out_json 输出 JSON（OWNER，调用方 AIRY_FREE）：
+ *        {"run_id","phases":[{phase,status,error_code,duration_ms,output}],"success"}
+ * @return 0 成功；非 0 失败（管线中途失败时返回 0 且 success=false）
+ */
+int think_service_orchestrate(think_service_t *svc, const char *input, uint32_t timeout_ms,
+                              char **out_json);
+
+/**
+ * @brief 注入 orchestrator ops 表（airy_orch_ops_t）。
+ *
+ * think_d 实现编排接口并注入 ops 注入框架；atoms 侧组件（如工作大厅）
+ * 可经 are_ops_get_orch() 调度编排，无需链接 daemons。
+ *
+ * @param svc Service handle（create 成功后调用）
+ */
+void think_orch_ops_inject(think_service_t *svc);
+
+
+/**
  * @brief Get dual-think statistics (JSON string, caller AIRY_FREEs).
  * @param svc Service handle
  * @return JSON string (with dual_invocations/corrections/llm_backed, etc.),
