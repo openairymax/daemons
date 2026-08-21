@@ -184,6 +184,35 @@ channel_service_t *channel_service_create(const channel_config_t *config)
         svc->config = defaults;
     }
 
+    /* 自举 socket_dir（SOCKET/PIPE 通道端点目录）：新系统上默认目录
+     * /var/tmp/agentrt/channels 不存在，create_socket_channel() 的 bind()
+     * 会因 ENOENT 失败（channel.* 返回 -32603）。daemon 自管运行目录，
+     * 不依赖外部预创建——幂等逐级 mkdir。 */
+    char dir_buf[256];
+    size_t dir_len = strlen(svc->config.socket_dir);
+    if (dir_len == 0 || dir_len >= sizeof(dir_buf)) {
+        fprintf(stderr, "channel: invalid socket_dir (len=%zu)\n", dir_len);
+        AIRY_FREE(svc);
+        return NULL;
+    }
+    __builtin_memcpy(dir_buf, svc->config.socket_dir, dir_len + 1);
+    for (char *p = dir_buf + 1; *p; p++) {
+        if (*p != '/')
+            continue;
+        *p = '\0';
+        if (mkdir(dir_buf, 0755) != 0 && errno != EEXIST) {
+            fprintf(stderr, "channel: mkdir %s failed: %s\n", dir_buf, strerror(errno));
+            AIRY_FREE(svc);
+            return NULL;
+        }
+        *p = '/';
+    }
+    if (mkdir(dir_buf, 0755) != 0 && errno != EEXIST) {
+        fprintf(stderr, "channel: mkdir %s failed: %s\n", dir_buf, strerror(errno));
+        AIRY_FREE(svc);
+        return NULL;
+    }
+
     for (size_t i = 0; i < CHANNEL_MAX_CHANNELS; i++) {
         svc->channels[i].socket_fd = -1;
         svc->channels[i].shm_fd = -1;
