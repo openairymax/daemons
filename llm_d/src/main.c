@@ -237,6 +237,10 @@ static int parse_params(cJSON *params, request_context_t *ctx, llm_request_confi
     }
 
     cJSON *messages = cJSON_GetObjectItem(params, "messages");
+    if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) == 0) {
+        parse_params_cleanup(ctx, cfg);
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "messages must be a non-empty array");
+    }
     if (cJSON_IsArray(messages)) {
         size_t count = cJSON_GetArraySize(messages);
         if (count > MAX_MESSAGES_PER_REQUEST) {
