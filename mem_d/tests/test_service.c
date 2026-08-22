@@ -17,10 +17,19 @@
 
 static void mem_test_clean_persist(void)
 {
+    /* mem_d 持久路径由 AIRY_HOME 体系解析（airy_data_dir → $AIRY_HOME/data），
+     * AIRY_RUNTIME_DIR 仅承载易失运行时文件，二者都清理，避免测试触碰
+     * 真实生产记忆库（~/.airymaxrt/data/agentrt/memory/mem.jsonl）。 */
     const char *rt = getenv("AIRY_RUNTIME_DIR");
     if (rt && rt[0]) {
         char path[4096];
         snprintf(path, sizeof(path), "%s/mem.jsonl", rt);
+        remove(path);
+    }
+    const char *home = getenv("AIRY_HOME");
+    if (home && home[0]) {
+        char path[4096];
+        snprintf(path, sizeof(path), "%s/data/agentrt/memory/mem.jsonl", home);
         remove(path);
     }
 }
@@ -491,9 +500,126 @@ static void test_embedding_fallback(void)
     printf("    PASSED\n");
 }
 
+/* KB 一等抽象：ingest → kb_search → kb_list → kb_delete 完整往返 */
+static void test_kb_roundtrip(void)
+{
+    printf("  test_kb_roundtrip...\n");
+    mem_test_clean_persist();
+
+    mem_service_t *svc = mem_service_create(64);
+    assert(svc != NULL);
+
+    const char *doc = "Linux kernel scheduling policy for CPU load balancing "
+                      "across multiple cores and memory management in kernel space";
+    size_t count = 0;
+    int ret = mem_service_kb_ingest(svc, "kb-linux", "doc-sched", doc,
+                                    strlen(doc), 32, &count);
+    assert(ret == AIRY_SUCCESS);
+    assert(count >= 2); /* 长文本按 32 字节分块，至少两块 */
+
+    /* kb_search 仅命中该 KB 内的记录 */
+    mem_search_hit_t *hits = NULL;
+    size_t hit_count = 0;
+    ret = mem_service_kb_search(svc, "kb-linux", "scheduling", 10, &hits, &hit_count);
+    assert(ret == AIRY_SUCCESS);
+    assert(hit_count >= 1);
+    for (size_t i = 0; i < hit_count; i++) {
+        assert(hits[i].record_id != NULL);
+        assert(hits[i].score > 0.0f);
+    }
+    mem_search_hits_free(hits, hit_count);
+
+    /* 另一个 KB 不应相互污染：在 kb-other 上搜索同样的词应无命中 */
+    ret = mem_service_kb_search(svc, "kb-other", "scheduling", 10, &hits, &hit_count);
+    assert(ret == AIRY_SUCCESS);
+    assert(hit_count == 0);
+    assert(hits == NULL);
+
+    /* kb_list 去重列出 KB id */
+    char **kb_ids = NULL;
+    size_t kb_count = 0;
+    ret = mem_service_kb_list(svc, &kb_ids, &kb_count);
+    assert(ret == AIRY_SUCCESS);
+    assert(kb_count == 1);
+    assert(kb_ids != NULL);
+    assert(strcmp(kb_ids[0], "kb-linux") == 0);
+    mem_kb_list_free(kb_ids, kb_count);
+
+    /* 再灌入第二个 KB，list 应为 2 */
+    const char *doc2 = "network protocol stack implementation details";
+    ret = mem_service_kb_ingest(svc, "kb-net", "doc-tcp", doc2, strlen(doc2), 32, &count);
+    assert(ret == AIRY_SUCCESS);
+    ret = mem_service_kb_list(svc, &kb_ids, &kb_count);
+    assert(ret == AIRY_SUCCESS);
+    assert(kb_count == 2);
+    int has_linux = 0, has_net = 0;
+    for (size_t i = 0; i < kb_count; i++) {
+        if (strcmp(kb_ids[i], "kb-linux") == 0)
+            has_linux = 1;
+        if (strcmp(kb_ids[i], "kb-net") == 0)
+            has_net = 1;
+    }
+    assert(has_linux && has_net);
+    mem_kb_list_free(kb_ids, kb_count);
+
+    /* kb_delete 只删指定 KB，另一 KB 保留 */
+    size_t deleted = 0;
+    ret = mem_service_kb_delete(svc, "kb-linux", &deleted);
+    assert(ret == AIRY_SUCCESS);
+    assert(deleted >= 1);
+    assert(mem_service_kb_search(svc, "kb-linux", "scheduling", 10, &hits, &hit_count) == AIRY_SUCCESS);
+    assert(hit_count == 0);
+    assert(mem_service_kb_search(svc, "kb-net", "network", 10, &hits, &hit_count) == AIRY_SUCCESS);
+    assert(hit_count >= 1);
+    mem_search_hits_free(hits, hit_count);
+
+    ret = mem_service_kb_delete(svc, "kb-net", &deleted);
+    assert(ret == AIRY_SUCCESS);
+    assert(deleted >= 1);
+    assert(mem_service_count(svc) == 0);
+
+    /* 参数校验：缺 kb_id / 空文本应拒绝 */
+    assert(mem_service_kb_ingest(svc, NULL, "d", "x", 1, 0, &count) != AIRY_SUCCESS);
+    assert(mem_service_kb_ingest(svc, "kb-x", "d", "x", 0, 0, &count) != AIRY_SUCCESS);
+
+    mem_service_destroy(svc);
+
+    printf("    PASSED\n");
+}
+
+/* UTF-8 安全分块：多字节字符不被从中截断 */
+static void test_kb_utf8_chunking(void)
+{
+    printf("  test_kb_utf8_chunking...\n");
+    mem_test_clean_persist();
+
+    mem_service_t *svc = mem_service_create(64);
+    assert(svc != NULL);
+
+    /* 中文每字 3 字节，chunk_size=7 会切在多字节序列中间，实现必须回退 */
+    const char *cn = "内存管理系统性能优化与调度";
+    size_t count = 0;
+    int ret = mem_service_kb_ingest(svc, "kb-cn", "doc-1", cn, strlen(cn), 7, &count);
+    assert(ret == AIRY_SUCCESS);
+    assert(count >= 1);
+
+    /* 每个 chunk 都以完整 UTF-8 字符结尾：末字节不得为连续字节 0x80-0xBF */
+    mem_search_hit_t *hits = NULL;
+    size_t hit_count = 0;
+    ret = mem_service_kb_search(svc, "kb-cn", "内存", 10, &hits, &hit_count);
+    assert(ret == AIRY_SUCCESS);
+    assert(hit_count >= 1);
+    mem_search_hits_free(hits, hit_count);
+
+    mem_service_destroy(svc);
+
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
 
+    setenv("AIRY_HOME", "/tmp/agentrt_mem_test_home", 1);
     setenv("AIRY_RUNTIME_DIR", "/tmp/agentrt_mem_test", 1);
 
     unsetenv("AIRY_MEM_EMBEDDING_URL");
@@ -514,6 +640,8 @@ int main(void)
     test_chinese_search();
     test_write_search_consistency();
     test_embedding_fallback();
+    test_kb_roundtrip();
+    test_kb_utf8_chunking();
     printf("=== All tests PASSED ===\n");
     return 0;
 }

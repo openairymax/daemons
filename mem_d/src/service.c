@@ -312,8 +312,9 @@ static int mem_jsonl_path_resolve(char **out_path)
     if (!dir || !dir[0])
         return AIRY_ERR_INVALID_PARAM;
 
-    (void)airy_mkdir_p(dir);
-
+    /* 确保完整父目录存在：仅 airy_mkdir_p(dir) 只建了 data 目录，
+     * agentrt/memory 子目录缺失时首次运行 append/rewrite 静默失败
+     * （errno=2），记忆不落盘。必须递归创建完整父路径。 */
     size_t dir_len = strlen(dir);
     size_t need = dir_len + 1 + strlen("agentrt") + 1 + strlen("memory") + 1 +
                   strlen(MEM_JSONL_FILENAME) + 1;
@@ -321,6 +322,11 @@ static int mem_jsonl_path_resolve(char **out_path)
     if (!path)
         return AIRY_ERR_OUT_OF_MEMORY;
     snprintf(path, need, "%s/agentrt/memory/%s", dir, MEM_JSONL_FILENAME);
+
+    char parent[4096];
+    snprintf(parent, sizeof(parent), "%s/agentrt/memory", dir);
+    (void)airy_mkdir_p(parent);
+
     *out_path = path;
     return AIRY_SUCCESS;
 }
@@ -684,8 +690,234 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char *
     return AIRY_SUCCESS;
 }
 
+/* ==================== KB (knowledge base) ====================
+ *
+ * 2.1.2.3：RAG 知识库一等抽象。开发者通过 kb.* 命名空间把文档摄入
+ * （自动 UTF-8 安全分块）、在库内检索、整库删除与列出，作为 mem_d
+ * 之上的"知识库"层，复用既有 record 存储/TF-IDF+embedding 混合检索。
+ * 每条 chunk 记录的 metadata 携带 {"kb_id":..,"doc_id":..,"chunk":N}。
+ */
+
+#define MEM_KB_DEFAULT_CHUNK_SIZE 512
+
+/* 共享检索核心：kb_id 非空时仅在属于该知识库的记录中打分。 */
+static int mem_service_search_filtered(mem_service_t *svc, const char *kb_id, const char *query,
+                                       uint32_t limit, mem_search_hit_t **out_hits,
+                                       size_t *out_count);
+
+/* 交换删除指定下标记录（见定义处注释）；mem_service_kb_delete 复用 */
+static void mem_remove_record_at(mem_service_t *svc, size_t idx);
+
+/* 解析 record 的 metadata JSON，返回其中 kb_id 字符串（静态缓冲）。
+ * 非 KB 记录（无 kb_id 字段）返回 NULL。 */
+static const char *mem_rec_kb_id(const mem_record_entry_t *rec)
+{
+    if (!rec || !rec->metadata || !rec->metadata[0])
+        return NULL;
+    cJSON *root = cJSON_Parse(rec->metadata);
+    if (!root)
+        return NULL;
+    cJSON *kb = cJSON_GetObjectItem(root, "kb_id");
+    const char *id = (cJSON_IsString(kb) && kb->valuestring) ? kb->valuestring : NULL;
+    if (id) {
+        static char s_kb_buf[256];
+        size_t n = strlen(id);
+        if (n >= sizeof(s_kb_buf))
+            n = sizeof(s_kb_buf) - 1;
+        __builtin_memcpy(s_kb_buf, id, n);
+        s_kb_buf[n] = '\0';
+        cJSON_Delete(root);
+        return s_kb_buf;
+    }
+    cJSON_Delete(root);
+    return NULL;
+}
+
+static int mem_rec_in_kb(const mem_record_entry_t *rec, const char *kb_id)
+{
+    const char *id = mem_rec_kb_id(rec);
+    return id && strcmp(id, kb_id) == 0;
+}
+
+/* UTF-8 安全分块：从 off 起取至多 chunk_size 字节，若切点落在多字节
+ * 序列的连续字节（0x80-0xBF）中间则回退到该序列首字节，保证 chunk
+ * 不以半个字符结尾。返回本块字节数（>0）；文本取尽返回 0。 */
+static size_t mem_kb_chunk_len(const unsigned char *text, size_t len, size_t off,
+                               size_t chunk_size)
+{
+    size_t end = off + chunk_size;
+    if (end >= len) {
+        return len - off; /* 末块（可能为空，调用方据此终止） */
+    }
+    size_t p = end;
+    while (p > off && (text[p] & 0xC0) == 0x80) /* 连续字节 → 回退到首字节 */
+        p--;
+    return p - off;
+}
+
+static int mem_kb_build_meta(const char *kb_id, const char *doc_id, size_t chunk, char **out_meta)
+{
+    cJSON *meta = cJSON_CreateObject();
+    if (!meta)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    cJSON_AddStringToObject(meta, "kb_id", kb_id);
+    cJSON_AddStringToObject(meta, "doc_id", doc_id ? doc_id : "");
+    cJSON_AddNumberToObject(meta, "chunk", (double)chunk);
+    char *s = cJSON_PrintUnformatted(meta);
+    cJSON_Delete(meta);
+    if (!s)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    *out_meta = s;
+    return AIRY_SUCCESS;
+}
+
+int mem_service_kb_ingest(mem_service_t *svc, const char *kb_id, const char *doc_id,
+                          const void *text, size_t len, size_t chunk_size, size_t *out_count)
+{
+    if (!svc || !svc->initialized || !kb_id || !kb_id[0] || !text || len == 0)
+        return AIRY_ERR_INVALID_PARAM;
+    if (chunk_size == 0)
+        chunk_size = MEM_KB_DEFAULT_CHUNK_SIZE;
+
+    const unsigned char *bytes = (const unsigned char *)text;
+    size_t off = 0;
+    size_t written = 0;
+    size_t chunk_idx = 0;
+    int rc = AIRY_SUCCESS;
+
+    while (off < len) {
+        size_t clen = mem_kb_chunk_len(bytes, len, off, chunk_size);
+        if (clen == 0)
+            break;
+
+        char *meta = NULL;
+        rc = mem_kb_build_meta(kb_id, doc_id, chunk_idx, &meta);
+        if (rc != AIRY_SUCCESS)
+            break;
+
+        mem_write_request_t req = {.data = bytes + off, .len = clen, .metadata = meta};
+        char *rid = NULL;
+        int wret = mem_service_write(svc, &req, &rid);
+        AIRY_FREE(meta);
+        AIRY_FREE(rid);
+
+        if (wret != AIRY_SUCCESS) {
+            rc = wret;
+            break;
+        }
+        written++;
+        chunk_idx++;
+        off += clen;
+    }
+
+    if (out_count)
+        *out_count = written;
+    return rc;
+}
+
+int mem_service_kb_search(mem_service_t *svc, const char *kb_id, const char *query,
+                          uint32_t limit, mem_search_hit_t **out_hits, size_t *out_count)
+{
+    return mem_service_search_filtered(svc, kb_id, query, limit, out_hits, out_count);
+}
+
+int mem_service_kb_delete(mem_service_t *svc, const char *kb_id, size_t *out_deleted)
+{
+    if (!svc || !svc->initialized || !kb_id || !kb_id[0])
+        return AIRY_ERR_INVALID_PARAM;
+
+    airy_mtx_lock(&svc->lock);
+
+    /* 逐条交换删除：mem_remove_record_at 将尾部记录搬入当前位置，
+     * 因此 i 不可自增（须重查当前位置），保证数组始终紧凑、
+     * 无游离记录（record_count 语义正确，destroy 可完整回收）。 */
+    size_t deleted = 0;
+    for (size_t i = 0; i < svc->record_count;) {
+        if (mem_rec_in_kb(&svc->records[i], kb_id)) {
+            mem_remove_record_at(svc, i);
+            deleted++;
+        } else {
+            i++;
+        }
+    }
+    if (deleted > 0)
+        mem_persist_rewrite_all(svc);
+
+    airy_mtx_unlock(&svc->lock);
+    if (out_deleted)
+        *out_deleted = deleted;
+    SVC_LOG_INFO("mem.kb_delete: kb=%s deleted=%zu", kb_id, deleted);
+    return AIRY_SUCCESS;
+}
+
+int mem_service_kb_list(mem_service_t *svc, char ***out_kb_ids, size_t *out_count)
+{
+    if (!svc || !svc->initialized || !out_kb_ids || !out_count)
+        return AIRY_ERR_INVALID_PARAM;
+    *out_kb_ids = NULL;
+    *out_count = 0;
+
+    airy_mtx_lock(&svc->lock);
+    char **ids = NULL;
+    size_t count = 0;
+    for (size_t i = 0; i < svc->record_count; i++) {
+        const char *kb = mem_rec_kb_id(&svc->records[i]);
+        if (!kb)
+            continue;
+        int dup = 0;
+        for (size_t j = 0; j < count; j++) {
+            if (strcmp(ids[j], kb) == 0) {
+                dup = 1;
+                break;
+            }
+        }
+        if (!dup) {
+            char **grown = (char **)AIRY_REALLOC(ids, (count + 1) * sizeof(char *));
+            if (!grown) {
+                for (size_t j = 0; j < count; j++)
+                    AIRY_FREE(ids[j]);
+                AIRY_FREE(ids);
+                airy_mtx_unlock(&svc->lock);
+                return AIRY_ERR_OUT_OF_MEMORY;
+            }
+            ids = grown;
+            ids[count] = AIRY_STRDUP(kb);
+            if (!ids[count]) {
+                for (size_t j = 0; j < count; j++)
+                    AIRY_FREE(ids[j]);
+                AIRY_FREE(ids);
+                airy_mtx_unlock(&svc->lock);
+                return AIRY_ERR_OUT_OF_MEMORY;
+            }
+            count++;
+        }
+    }
+    airy_mtx_unlock(&svc->lock);
+
+    *out_kb_ids = ids;
+    *out_count = count;
+    return AIRY_SUCCESS;
+}
+
+void mem_kb_list_free(char **kb_ids, size_t count)
+{
+    if (!kb_ids)
+        return;
+    for (size_t i = 0; i < count; i++)
+        AIRY_FREE(kb_ids[i]);
+    AIRY_FREE(kb_ids);
+}
+
 int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
                        mem_search_hit_t **out_hits, size_t *out_count)
+{
+    return mem_service_search_filtered(svc, NULL, query, limit, out_hits, out_count);
+}
+
+/* 共享检索核心：kb_id 非空时仅在属于该知识库的记录中打分。 */
+static int mem_service_search_filtered(mem_service_t *svc, const char *kb_id, const char *query,
+                                       uint32_t limit, mem_search_hit_t **out_hits,
+                                       size_t *out_count)
 {
     if (!svc || !svc->initialized || !query || !out_hits || !out_count)
         return AIRY_ERR_INVALID_PARAM;
@@ -734,6 +966,10 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
     const float w = svc->tfidf_weight;
     for (size_t i = 0; i < svc->record_count; i++) {
         const mem_record_entry_t *rec = &svc->records[i];
+
+        /* KB 过滤：仅对属于该知识库的记录打分 */
+        if (kb_id && !mem_rec_in_kb(rec, kb_id))
+            continue;
 
         /* Vector similarity: use embedding cosine when embedding is available
          * and the record has a vector, otherwise TF-IDF cosine; when the
@@ -835,6 +1071,39 @@ int mem_service_get(mem_service_t *svc, const char *record_id, mem_record_t *out
     return AIRY_SUCCESS;
 }
 
+/**
+ * @brief 交换删除指定下标记录（调用方须持有 svc->lock）。
+ *
+ * 释放向量/字段，将尾部记录搬入当前位置（数组保持紧凑），并同步
+ * 维护 DF 表与 record_index 哈希。既有 mem_service_delete 与
+ * mem_service_kb_delete 共用此路径，避免两套删除语义不一致。
+ */
+static void mem_remove_record_at(mem_service_t *svc, size_t idx)
+{
+    mem_record_entry_t *rec = &svc->records[idx];
+    const char *removed_id = rec->record_id;
+
+    /* 先移除哈希索引（removed_id 此时仍有效），再释放各字段 */
+    mem_ht_remove(&svc->record_index, removed_id);
+
+    mem_df_remove_doc(&svc->df_table, &rec->vec);
+    mem_record_free_vector(rec);
+
+    AIRY_FREE(rec->record_id);
+    AIRY_FREE(rec->data);
+    AIRY_FREE(rec->metadata);
+
+    size_t last = svc->record_count - 1;
+    if (idx != last) {
+        svc->records[idx] = svc->records[last];
+        /* 尾部记录被搬入 idx，更新其哈希索引指向 */
+        mem_ht_remove(&svc->record_index, svc->records[idx].record_id);
+        mem_ht_insert(&svc->record_index, svc->records[idx].record_id, idx);
+    }
+    __builtin_memset(&svc->records[last], 0, sizeof(mem_record_entry_t));
+    svc->record_count--;
+}
+
 int mem_service_delete(mem_service_t *svc, const char *record_id)
 {
     if (!svc || !svc->initialized || !record_id)
@@ -848,25 +1117,7 @@ int mem_service_delete(mem_service_t *svc, const char *record_id)
         return AIRY_ERR_NOT_FOUND;
     }
 
-    mem_df_remove_doc(&svc->df_table, &svc->records[idx].vec);
-    mem_record_free_vector(&svc->records[idx]);
-
-    AIRY_FREE(svc->records[idx].record_id);
-    AIRY_FREE(svc->records[idx].data);
-    AIRY_FREE(svc->records[idx].metadata);
-
-    size_t last = svc->record_count - 1;
-    if ((size_t)idx != last) {
-        svc->records[idx] = svc->records[last];
-
-        mem_ht_remove(&svc->record_index, svc->records[idx].record_id);
-        mem_ht_insert(&svc->record_index, svc->records[idx].record_id, idx);
-    }
-    __builtin_memset(&svc->records[last], 0, sizeof(mem_record_entry_t));
-    svc->record_count--;
-
-    mem_ht_remove(&svc->record_index, record_id);
-
+    mem_remove_record_at(svc, (size_t)idx);
     mem_persist_rewrite_all(svc);
 
     airy_mtx_unlock(&svc->lock);
