@@ -14,6 +14,7 @@
  */
 
 #include "gateway_protocol_router.h"
+#include "http_gateway.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -220,6 +221,74 @@ static void test_invalid_params(void)
     gw_proto_router_destroy(router);
 }
 
+/**
+ * @brief Test scenario E: path-aware detection for OpenAI endpoints
+ *
+ * Regression for the /v1/embeddings routing gap: the embeddings body
+ * {"input":[...],"model":...} contains no "messages" field, so body-only
+ * detection returns UNKNOWN. The HTTP transport now forwards the request
+ * path (via gateway_http_request_t); gw_proto_detect must use it to
+ * classify /v1 and /openai endpoints as OpenAI.
+ */
+static void test_detect_openai_by_path(void)
+{
+    printf("\n--- Scenario E: OpenAI detection via path ---\n");
+
+    const char *embed_body = "{\"model\":\"test-embed\",\"input\":[\"hello\"]}";
+
+    /* Body alone (no path): previously misrouted to JSON-RPC -32600 */
+    gw_proto_detect_result_t no_path = gw_proto_detect(NULL, NULL, embed_body);
+    assert(no_path != GW_PROTO_DETECT_OPENAI &&
+           "embeddings body alone must not be detected as OpenAI");
+
+    /* With the HTTP path preserved: must classify as OpenAI */
+    gw_proto_detect_result_t by_path = gw_proto_detect(NULL, "/v1/embeddings", embed_body);
+    assert(by_path == GW_PROTO_DETECT_OPENAI && "/v1/embeddings must be OpenAI");
+
+    by_path = gw_proto_detect(NULL, "/openai/v1/embeddings", embed_body);
+    assert(by_path == GW_PROTO_DETECT_OPENAI && "/openai/v1/embeddings must be OpenAI");
+
+    by_path = gw_proto_detect(NULL, "/v1/chat/completions",
+                              "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+    assert(by_path == GW_PROTO_DETECT_OPENAI && "/v1/chat/completions must be OpenAI");
+
+    /* JSON-RPC path must not be hijacked by the OpenAI rule */
+    gw_proto_detect_result_t jrpc = gw_proto_detect(NULL, "/api", embed_body);
+    assert(jrpc == GW_PROTO_DETECT_JSONRPC || jrpc == GW_PROTO_DETECT_UNKNOWN);
+
+    printf("  >>> PASSED\n");
+}
+
+/**
+ * @brief Test scenario F: gateway_http_request_t magic recognition
+ *
+ * The HTTP transport wraps the body in gateway_http_request_t. Verify the
+ * magic byte pattern is distinct from plain JSON bodies (which start with
+ * '{'/'['), so gateway_protocol_entry can disambiguate the two shapes.
+ */
+static void test_http_request_magic(void)
+{
+    printf("\n--- Scenario F: HTTP request context magic ---\n");
+
+    char body[] = "{\"model\":\"m\"}";
+    gateway_http_request_t req = {0};
+    req.magic = GATEWAY_HTTP_REQUEST_MAGIC;
+    req.method = "POST";
+    req.path = "/v1/embeddings";
+    req.body = body;
+    req.body_len = strlen(body);
+
+    const unsigned char *raw = (const unsigned char *)&req;
+    assert(raw[0] != '{' && raw[0] != '[' &&
+           "http request context must not look like a JSON body");
+
+    uint32_t magic = 0;
+    __builtin_memcpy(&magic, raw, sizeof(uint32_t));
+    assert(magic == GATEWAY_HTTP_REQUEST_MAGIC && "magic must round-trip");
+
+    printf("  >>> PASSED\n");
+}
+
 int main(void)
 {
     printf("\n=== Gateway Protocol Router Stats Tests ===\n");
@@ -230,6 +299,8 @@ int main(void)
     test_stats_with_handler();
     test_stats_without_handler();
     test_stats_mixed();
+    test_detect_openai_by_path();
+    test_http_request_magic();
 
     printf("\n=== All tests passed ===\n\n");
     return 0;

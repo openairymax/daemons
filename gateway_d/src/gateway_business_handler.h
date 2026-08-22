@@ -126,6 +126,17 @@ int gw_biz_llm_complete(const char *model, const char *messages_json, const char
                         double temperature, int max_tokens, char **response_json, void *user_data);
 
 /**
+ * @brief OpenAI embeddings backend: /v1/embeddings -> llm_d.embeddings.
+ * @param model Embedding model name (may be NULL/empty → gateway default)
+ * @param input_json OpenAI input field JSON ("text" or ["t1","t2"])
+ * @param response_json Upstream OpenAI-format embeddings JSON (AIRY_MALLOC, caller AIRY_FREEs)
+ * @param user_data gateway_business_ctx_t*
+ * @return 0 on success, non-zero on failure
+ */
+int gw_biz_llm_embeddings(const char *model, const char *input_json, char **response_json,
+                          void *user_data);
+
+/**
  * @brief A2A task backend: task -> sched_d.schedule_task.
  * @param task_id Task ID
  * @param task_type Task type (encoding/analysis, etc.)

@@ -113,6 +113,59 @@ int gw_biz_tool_exec(const char *tool_name, const char *arguments_json, char **r
 }
 
 /**
+ * @brief OpenAI embeddings backend: /v1/embeddings -> llm_d.embeddings
+ *
+ * Forwards the OpenAI-format embeddings request to llm_d, which proxies it to
+ * the owning provider's $api_base/embeddings; the upstream OpenAI-format JSON
+ * (data[].embedding) is returned verbatim so clients never see the internal
+ * JSON-RPC.
+ */
+int gw_biz_llm_embeddings(const char *model, const char *input_json, char **response_json,
+                          void *user_data)
+{
+    const gateway_business_ctx_t *ctx = (const gateway_business_ctx_t *)user_data;
+    *response_json = NULL;
+    if (!ctx)
+        return -1;
+
+    cJSON *params = cJSON_CreateObject();
+    if (!params)
+        return -1;
+    cJSON_AddStringToObject(params, "model", (model && model[0]) ? model : ctx->default_model);
+    cJSON *input = cJSON_Parse(input_json && input_json[0] ? input_json : "[]");
+    cJSON_AddItemToObject(params, "input", input ? input : cJSON_CreateArray());
+    char *params_str = cJSON_PrintUnformatted(params);
+    cJSON_Delete(params);
+    if (!params_str)
+        return -1;
+
+    char *resp =
+        gw_svc_call(ctx->llm_sock_path, "embeddings", params_str, GW_LLM_DEFAULT_TIMEOUT_MS);
+    AIRY_FREE(params_str);
+    if (!resp)
+        return -1;
+
+    cJSON *root = cJSON_Parse(resp);
+    AIRY_FREE(resp);
+    if (!root)
+        return -1;
+
+    cJSON *err = cJSON_GetObjectItem(root, "error");
+    if (err) {
+        *response_json = cJSON_PrintUnformatted(root);
+        cJSON_Delete(root);
+        return 0;
+    }
+
+    cJSON *result = cJSON_GetObjectItem(root, "result");
+    *response_json = cJSON_PrintUnformatted(result ? result : root);
+    cJSON_Delete(root);
+    if (!*response_json)
+        return -1;
+    return 0;
+}
+
+/**
  * @brief OpenAI LLM backend: chat/completions -> llm_d.complete
  *
  * Calls llm_d and converts the response into the OpenAI chat.completion format

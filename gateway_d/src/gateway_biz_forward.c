@@ -395,6 +395,14 @@ const char *gw_mem_method_allowlist(const char *method)
         return "health_check";
     if (strcmp(method, "mem.get_stats") == 0)
         return "get_stats";
+    if (strcmp(method, "mem.kb_ingest") == 0)
+        return "kb_ingest";
+    if (strcmp(method, "mem.kb_search") == 0)
+        return "kb_search";
+    if (strcmp(method, "mem.kb_delete") == 0)
+        return "kb_delete";
+    if (strcmp(method, "mem.kb_list") == 0)
+        return "kb_list";
     return NULL;
 }
 
