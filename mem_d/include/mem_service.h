@@ -78,6 +78,58 @@ size_t mem_service_count(mem_service_t *svc);
 void mem_search_hits_free(mem_search_hit_t *hits, size_t count);
 void mem_record_free(mem_record_t *rec);
 
+/**
+ * @brief Ingest a document into a knowledge base (KB).
+ *
+ * Splits the text into fixed-size chunks (UTF-8 safe boundary) and writes
+ * each chunk as a memory record tagged with the KB id (metadata
+ * {"kb_id":..,"doc_id":..,"chunk":N}). Records are searchable via
+ * mem_service_kb_search and managed (listed/deleted) per KB.
+ *
+ * @param svc       Memory service
+ * @param kb_id     Knowledge-base identifier (required)
+ * @param doc_id    Document identifier within the KB (required)
+ * @param text      Document text
+ * @param len       Text length in bytes
+ * @param chunk_size Chunk size in bytes (0 → default 512)
+ * @param out_count Written-chunk count (optional)
+ * @return AIRY_SUCCESS on success
+ */
+int mem_service_kb_ingest(mem_service_t *svc, const char *kb_id, const char *doc_id,
+                          const void *text, size_t len, size_t chunk_size, size_t *out_count);
+
+/**
+ * @brief Search within a knowledge base only.
+ * @param svc    Memory service
+ * @param kb_id  KB id to filter by
+ * @param query  Search query
+ * @param limit  Max hits (0 → 10)
+ * @param out_hits  Hit array (free with mem_search_hits_free)
+ * @param out_count Hit count
+ * @return AIRY_SUCCESS on success
+ */
+int mem_service_kb_search(mem_service_t *svc, const char *kb_id, const char *query,
+                          uint32_t limit, mem_search_hit_t **out_hits, size_t *out_count);
+
+/**
+ * @brief Delete all records belonging to a knowledge base.
+ * @param svc         Memory service
+ * @param kb_id       KB id to delete
+ * @param out_deleted Deleted-record count (optional)
+ * @return AIRY_SUCCESS on success (even when the KB is empty)
+ */
+int mem_service_kb_delete(mem_service_t *svc, const char *kb_id, size_t *out_deleted);
+
+/**
+ * @brief List all knowledge-base ids (deduplicated).
+ * @param svc       Memory service
+ * @param out_kb_ids Malloc'd string array (free with mem_kb_list_free)
+ * @param out_count  KB count
+ * @return AIRY_SUCCESS on success
+ */
+int mem_service_kb_list(mem_service_t *svc, char ***out_kb_ids, size_t *out_count);
+void mem_kb_list_free(char **kb_ids, size_t count);
+
 #ifdef __cplusplus
 }
 #endif
