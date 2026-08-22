@@ -67,6 +67,10 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, cons
                         const char *organization, double timeout_sec, int max_retries,
                         const char *default_base);
 
+/* 获取 provider 的 base 上下文（api_base/api_key/timeout_sec 等）。
+ * 约定：所有 provider 的 ctx 首字段均为 provider_base_ctx_t base。 */
+provider_base_ctx_t *provider_base_ctx(provider_ctx_t *ctx);
+
 /* Hot reload: called before each request; if the current api_key is empty,
  * fills it from $AIRY_HOME/config/secrets.env using base_ctx->api_key_env
  * (keys filled after startup need no restart). */

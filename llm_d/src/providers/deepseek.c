@@ -209,6 +209,11 @@ typedef struct {
     char *resp_model;
     uint64_t resp_created;
     char *finish_reason;
+    /* 2.1.1.5 修复：流式 usage 累计（DeepSeek 在末尾 chunk 附带 usage，
+     * 此前完全不解析，流式 token 统计恒为 0）。 */
+    uint32_t prompt_tokens;
+    uint32_t completion_tokens;
+    uint32_t total_tokens;
     ds_tool_acc_t tools[DS_STREAM_MAX_TOOL_CALLS];
     size_t tool_count;
 } ds_stream_acc_t;
@@ -422,6 +427,21 @@ static int ds_stream_on_chunk(const char *json_line, void *userdata)
         }
     }
 
+    /* 2.1.1.5 修复：流式末尾 chunk 携带 usage（DeepSeek 默认在最后 chunk
+     * 附带；该 chunk 无 choices，仅 usage）。最后一次解析覆盖前面。 */
+    cJSON *usage = cJSON_GetObjectItem(root, "usage");
+    if (cJSON_IsObject(usage)) {
+        cJSON *pt = cJSON_GetObjectItem(usage, "prompt_tokens");
+        cJSON *ct = cJSON_GetObjectItem(usage, "completion_tokens");
+        cJSON *tt = cJSON_GetObjectItem(usage, "total_tokens");
+        if (cJSON_IsNumber(pt))
+            acc->prompt_tokens = (uint32_t)pt->valuedouble;
+        if (cJSON_IsNumber(ct))
+            acc->completion_tokens = (uint32_t)ct->valuedouble;
+        if (cJSON_IsNumber(tt))
+            acc->total_tokens = (uint32_t)tt->valuedouble;
+    }
+
     return 0;
 }
 
@@ -450,6 +470,9 @@ static llm_response_t *ds_build_stream_response(ds_stream_acc_t *acc)
     }
     resp->finish_reason = acc->finish_reason ? acc->finish_reason : AIRY_STRDUP("stop");
     acc->finish_reason = NULL;
+    resp->prompt_tokens = acc->prompt_tokens;
+    resp->completion_tokens = acc->completion_tokens;
+    resp->total_tokens = acc->total_tokens;
     return resp;
 }
 
