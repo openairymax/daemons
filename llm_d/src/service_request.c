@@ -16,6 +16,7 @@
 #include "service.h"
 #include "svc_logger.h"
 
+#include <curl/curl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -382,4 +383,67 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
     }
 
     return ret;
+}
+
+int llm_service_embeddings(llm_service_t *svc, const char *model, const char *request_body,
+                           char **out_json)
+{
+    if (!svc || !request_body || !request_body[0] || !out_json)
+        return AIRY_ERR_INVALID_PARAM;
+    *out_json = NULL;
+
+    const char *m = (model && model[0]) ? model : svc->default_model;
+    const provider_t *prov = find_provider(svc, m ? m : "");
+    if (!prov || !prov->ctx) {
+        SVC_LOG_ERROR("embeddings: no provider for model=%s", m ? m : "(default)");
+        return AIRY_ERR_LLM_INVALID_MODEL;
+    }
+
+    provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
+    provider_refresh_api_key(base);
+
+    /* OpenAI 兼容 embeddings 端点：$api_base/embeddings（去掉尾部斜杠防双斜杠） */
+    char url[1024];
+    size_t blen = strlen(base->api_base);
+    while (blen > 0 && (base->api_base[blen - 1] == '/' || base->api_base[blen - 1] == '\\'))
+        blen--;
+    if (blen == 0) {
+        SVC_LOG_ERROR("embeddings: empty api_base for provider=%s", prov->name ? prov->name : "?");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    snprintf(url, sizeof(url), "%.*s/embeddings", (int)blen, base->api_base);
+
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    if (base->api_key[0]) {
+        char auth[320];
+        snprintf(auth, sizeof(auth), "Authorization: Bearer %s", base->api_key);
+        headers = curl_slist_append(headers, auth);
+    }
+
+    provider_http_resp_t *resp = NULL;
+    long http_code = 0;
+    int rc = provider_http_post(url, headers, request_body, base->timeout_sec, base->max_retries,
+                                &resp, &http_code);
+    if (headers)
+        curl_slist_free_all(headers);
+
+    if (rc != 0 || !resp) {
+        provider_http_resp_free(resp);
+        SVC_LOG_ERROR("embeddings: HTTP request failed url=%s rc=%d", url, rc);
+        return AIRY_ERR_IO;
+    }
+
+    if (http_code >= 400) {
+        SVC_LOG_WARN("embeddings: upstream HTTP %ld url=%s", http_code, url);
+        AIRY_FREE(resp->data);
+        AIRY_FREE(resp);
+        return AIRY_ERR_IO;
+    }
+
+    *out_json = AIRY_STRDUP(resp->data ? resp->data : "{}");
+    provider_http_resp_free(resp);
+    if (!*out_json)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    return AIRY_SUCCESS;
 }

@@ -415,6 +415,11 @@ typedef struct {
     char *resp_model;
     uint64_t resp_created;
     char *finish_reason;
+    /* 2.1.1.5 修复：流式 usage 累计（OpenAI/DeepSeek 在末尾 chunk 附带
+     * usage，此前完全不解析，流式 token 统计恒为 0）。 */
+    uint32_t prompt_tokens;
+    uint32_t completion_tokens;
+    uint32_t total_tokens;
     /* Tool-call deltas (OpenAI streaming): fragments arrive across SSE
      * events; accumulate per index so the assembled response carries the
      * full tool_calls array (the CLI tool loop consumes it). */
@@ -648,6 +653,22 @@ static int oai_stream_on_chunk(const char *json_line, void *userdata)
         }
     }
 
+    /* 2.1.1.5 修复：流式末尾 chunk 携带 usage（OpenAI stream_options
+     * include_usage / DeepSeek 默认在最后 chunk 附带；该 chunk 无 choices，
+     * 仅 usage）。最后一次解析覆盖前面（usage 在流末尾最完整）。 */
+    cJSON *usage = cJSON_GetObjectItem(root, "usage");
+    if (cJSON_IsObject(usage)) {
+        cJSON *pt = cJSON_GetObjectItem(usage, "prompt_tokens");
+        cJSON *ct = cJSON_GetObjectItem(usage, "completion_tokens");
+        cJSON *tt = cJSON_GetObjectItem(usage, "total_tokens");
+        if (cJSON_IsNumber(pt))
+            acc->prompt_tokens = (uint32_t)pt->valuedouble;
+        if (cJSON_IsNumber(ct))
+            acc->completion_tokens = (uint32_t)ct->valuedouble;
+        if (cJSON_IsNumber(tt))
+            acc->total_tokens = (uint32_t)tt->valuedouble;
+    }
+
     return 0;
 }
 
@@ -690,6 +711,10 @@ static llm_response_t *oai_build_stream_response(oai_stream_acc_t *acc)
     } else {
         resp->finish_reason = AIRY_STRDUP("stop");
     }
+
+    resp->prompt_tokens = acc->prompt_tokens;
+    resp->completion_tokens = acc->completion_tokens;
+    resp->total_tokens = acc->total_tokens;
 
     return resp;
 }

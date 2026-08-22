@@ -111,6 +111,22 @@ char *llm_service_list_models(llm_service_t *svc);
  */
 const char *llm_service_default_model(const llm_service_t *svc);
 
+/**
+ * @brief Proxy an OpenAI-compatible embeddings request to the provider.
+ *
+ * The request body ({"model":..,"input":..}) is forwarded verbatim to
+ * $api_base/embeddings of the provider that owns @a model (default model
+ * when NULL/empty), returning the upstream OpenAI-format JSON untouched.
+ *
+ * @param svc   Service context
+ * @param model Model name; NULL/empty → default model
+ * @param request_body OpenAI embeddings request JSON (non-empty)
+ * @param out_json     Malloc'd upstream response JSON (caller AIRY_FREEs)
+ * @return AIRY_SUCCESS on success; *out_json holds the upstream response
+ */
+int llm_service_embeddings(llm_service_t *svc, const char *model, const char *request_body,
+                           char **out_json);
+
 #ifdef __cplusplus
 }
 #endif

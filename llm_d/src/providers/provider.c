@@ -215,6 +215,7 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, cons
     if (api_key && strncmp(api_key, "env:", 4) == 0) {
         const char *env_name = api_key + 4;
         size_t env_len = strlen(env_name);
+
         if (env_len > 0 && env_len < sizeof(base_ctx->api_key_env)) {
             __builtin_memcpy(base_ctx->api_key_env, env_name, env_len + 1);
         }
@@ -281,6 +282,12 @@ void provider_http_resp_free(provider_http_resp_t *resp)
         AIRY_FREE(resp->data);
         AIRY_FREE(resp);
     }
+}
+
+provider_base_ctx_t *provider_base_ctx(provider_ctx_t *ctx)
+{
+    /* 约定：所有 provider 的 ctx 首字段均为 provider_base_ctx_t base */
+    return (provider_base_ctx_t *)ctx;
 }
 
 static size_t http_write_callback(void *contents, size_t size, size_t nmemb, void *userp)
@@ -409,6 +416,16 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
 
     if (manager->stream) {
         cJSON_AddBoolToObject(root, "stream", 1);
+        /* 2.1.1.5 修复：流式请求必须显式声明 include_usage——OpenAI 及其
+         * 兼容端点（vLLM/llama.cpp 等）默认在流式 chunk 中不回传 usage，
+         * 不声明则 prompt/completion/total_tokens 恒为 0，真实 token 消耗
+         * 与计费无法体现。DeepSeek 默认在末尾 chunk 附带 usage，显式声明
+         * 后同样生效（幂等）。 */
+        cJSON *stream_options = cJSON_CreateObject();
+        if (stream_options) {
+            cJSON_AddBoolToObject(stream_options, "include_usage", 1);
+            cJSON_AddItemToObject(root, "stream_options", stream_options);
+        }
     }
 
     if (manager->presence_penalty != 0) {

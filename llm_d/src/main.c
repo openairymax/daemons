@@ -431,6 +431,54 @@ static void on_list_models_method(cJSON *params, int id, void *user_data)
     }
 }
 
+/**
+ * @brief Handle the embeddings method
+ *
+ * Forwards the OpenAI-format request ({"model":..,"input":..}) verbatim to
+ * the owning provider's $api_base/embeddings and returns the upstream JSON.
+ */
+static char *handle_embeddings(cJSON *params, int id)
+{
+    if (!params || !g_service)
+        return jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "Invalid params", id);
+
+    char *model = NULL;
+    cJSON *m = cJSON_GetObjectItem(params, "model");
+    if (cJSON_IsString(m) && m->valuestring && m->valuestring[0])
+        model = AIRY_STRDUP(m->valuestring);
+
+    char *body = cJSON_PrintUnformatted(params);
+    if (!body) {
+        AIRY_FREE(model);
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+    }
+
+    char *out = NULL;
+    int rc = llm_service_embeddings(g_service, model, body, &out);
+    AIRY_FREE(body);
+    AIRY_FREE(model);
+
+    if (rc != 0 || !out)
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Embedding failed", id);
+
+    cJSON *result = cJSON_Parse(out);
+    AIRY_FREE(out);
+    if (!result)
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Invalid embedding response", id);
+
+    return jsonrpc_build_success(result, id);
+}
+
+static void on_embeddings_method(cJSON *params, int id, void *user_data)
+{
+    char *response = handle_embeddings(params, id);
+    if (response) {
+        airy_sock_t client_fd = *(airy_sock_t *)user_data;
+        airy_sock_send(client_fd, response, strlen(response));
+        AIRY_FREE(response);
+    }
+}
+
 static const char *llm_encoding_for_model(const char *model)
 {
     if (!model || model[0] == '\0')
@@ -740,6 +788,16 @@ static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd
     }
 
     if (resp) {
+        /* 2.1.1.5 修复：流式结束发送 usage 控制帧（RS 'U' body RS），
+         * 携带真实 token 消耗——此前流式路径完全不回传 usage，IPC 客户端
+         * 的流式 token 统计与计费恒为 0。adapter 侧按帧协议解析。 */
+        char usage_frame[256];
+        int ufn = snprintf(usage_frame, sizeof(usage_frame),
+                           "\x1eU{\"prompt_tokens\":%u,\"completion_tokens\":%u,"
+                           "\"total_tokens\":%u}\x1e",
+                           resp->prompt_tokens, resp->completion_tokens, resp->total_tokens);
+        if (ufn > 0)
+            llm_stream_send_all(client_fd, usage_frame, (size_t)ufn);
         llm_response_free(resp);
     }
 
@@ -945,9 +1003,10 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_llm_d, "count_tokens", on_count_tokens_method, NULL);
     method_dispatcher_register(g_dispatcher_llm_d, "health_check", on_health_check_method, NULL);
     method_dispatcher_register(g_dispatcher_llm_d, "get_stats", on_get_stats_method, NULL);
+    method_dispatcher_register(g_dispatcher_llm_d, "embeddings", on_embeddings_method, NULL);
 
     method_dispatcher_register(g_dispatcher_llm_d, "shutdown", on_shutdown_method_llm_d, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (llm.* namespace)", 7);
+    SVC_LOG_INFO("Registered %d RPC methods (llm.* namespace)", 8);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_llm_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
