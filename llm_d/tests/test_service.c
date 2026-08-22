@@ -7,6 +7,7 @@
  */
 
 #include "llm_service.h"
+#include "error.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -112,6 +113,33 @@ static void test_service_stats(void)
     printf("    PASSED\n");
 }
 
+/* embeddings 代理：参数校验 + 无 provider 降级（不发真实网络请求） */
+static void test_embeddings_validation(void)
+{
+    printf("  test_embeddings_validation...\n");
+
+    llm_service_t *svc = llm_service_create(NULL);
+    assert(svc != NULL);
+
+    char *out = (char *)0x1; /* 哨兵：验证被置 NULL */
+
+    /* NULL 参数 / 空 body → INVALID_PARAM，out 不被写入 */
+    assert(llm_service_embeddings(NULL, "m", "{\"input\":\"x\"}", &out) != AIRY_SUCCESS);
+    assert(llm_service_embeddings(svc, NULL, NULL, &out) != AIRY_SUCCESS);
+    assert(llm_service_embeddings(svc, "m", "", &out) != AIRY_SUCCESS);
+    assert(llm_service_embeddings(svc, "m", "{}", NULL) != AIRY_SUCCESS);
+
+    /* 未配置任何 provider 时（默认配置无 model.yaml），应明确失败而不崩溃 */
+    out = NULL;
+    int rc = llm_service_embeddings(svc, "no-such-model", "{\"input\":\"hello\"}", &out);
+    assert(rc != AIRY_SUCCESS);
+    assert(out == NULL);
+
+    llm_service_destroy(svc);
+
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=========================================\n");
@@ -124,6 +152,7 @@ int main(void)
     test_request_config();
     test_response_free();
     test_service_stats();
+    test_embeddings_validation();
 
     printf("\nAll LLM service tests PASSED\n");
     return 0;
