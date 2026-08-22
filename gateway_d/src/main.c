@@ -596,7 +596,9 @@ int main(int argc, char *argv[])
         gw_openai_compat_t *openai = gw_proto_router_get_openai(g_proto_router);
         if (openai) {
             gw_openai_compat_set_llm_call(openai, gw_biz_llm_complete, g_biz_ctx);
-            SVC_LOG_INFO("Phase 2: OpenAI adapter wired — chat/completions → llm_d");
+            /* OpenAI: embeddings → llm_d.embeddings（RAG/知识库生态接入点） */
+            gw_openai_compat_set_embed_fn(openai, gw_biz_llm_embeddings, g_biz_ctx);
+            SVC_LOG_INFO("Phase 2: OpenAI adapter wired — chat/completions + embeddings → llm_d");
         }
 
         gw_a2a_handler_t *a2a = gw_proto_router_get_a2a(g_proto_router);

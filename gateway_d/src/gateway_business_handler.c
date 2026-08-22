@@ -29,6 +29,7 @@
 #include "platform.h"
 #include "gateway_protocol_router.h"
 #include "daemon_security.h"
+#include "http_gateway.h"
 
 #include "svc_model_defaults.h"
 
@@ -405,13 +406,35 @@ static int is_a2a_jsonrpc_method(const char *method)
 
 char *gateway_protocol_entry(void *request, void *user_data)
 {
-    const char *body = (const char *)request;
     const gateway_entry_ctx_t *ectx = (const gateway_entry_ctx_t *)user_data;
-    if (!body || !ectx || !ectx->biz_ctx || !ectx->router) {
+    if (!request || !ectx || !ectx->biz_ctx || !ectx->router) {
         return jsonrpc_error(-32600, "Invalid request", NULL);
     }
 
-    gw_proto_detect_result_t proto = gw_proto_detect(NULL, NULL, body);
+    /* HTTP transport wraps non-JSON-RPC bodies in gateway_http_request_t to
+     * preserve method/path; other transports (stdio/ws) pass the plain body.
+     * Path is essential for OpenAI routing (/v1/embeddings has no "messages"
+     * field in its body, so body-only detection would misclassify it). */
+    const char *method = "POST";
+    const char *path = NULL;
+    const char *body = (const char *)request;
+    /* HTTP transport passes gateway_http_request_t (first byte '1' of the
+     * "HTT1" magic); plain JSON bodies (stdio/ws) start with '{'/'['. Check
+     * the first byte before the 4-byte magic compare to avoid over-read on
+     * very short body strings. */
+    const unsigned char *req0 = (const unsigned char *)request;
+    if (req0[0] != '{' && req0[0] != '[') {
+        uint32_t magic = 0;
+        __builtin_memcpy(&magic, request, sizeof(uint32_t));
+        if (magic == GATEWAY_HTTP_REQUEST_MAGIC) {
+            const gateway_http_request_t *http_req = (const gateway_http_request_t *)request;
+            method = http_req->method ? http_req->method : "POST";
+            path = http_req->path;
+            body = http_req->body ? http_req->body : "";
+        }
+    }
+
+    gw_proto_detect_result_t proto = gw_proto_detect(NULL, path, body);
 
     if (proto == GW_PROTO_DETECT_JSONRPC) {
         cJSON *root = cJSON_Parse(body);
@@ -431,7 +454,7 @@ char *gateway_protocol_entry(void *request, void *user_data)
     if (proto == GW_PROTO_DETECT_MCP || proto == GW_PROTO_DETECT_OPENAI ||
         proto == GW_PROTO_DETECT_A2A) {
         char *resp = NULL;
-        int rc = gw_proto_router_route((gw_proto_router_t *)ectx->router, proto, "POST", NULL, body,
+        int rc = gw_proto_router_route((gw_proto_router_t *)ectx->router, proto, method, path, body,
                                        &resp);
         if (rc != 0 || !resp) {
             char msg[256];
@@ -441,5 +464,5 @@ char *gateway_protocol_entry(void *request, void *user_data)
         return resp;
     }
 
-    return gateway_business_handle(request, ectx->biz_ctx);
+    return gateway_business_handle((void *)body, ectx->biz_ctx);
 }
