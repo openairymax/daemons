@@ -98,6 +98,13 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
                               double timeout_sec, provider_stream_chunk_cb_t on_chunk,
                               void *chunk_user_data, long *out_http_code);
 
+/* 流式控制帧发射（SSoT 唯一实现，收敛 openai/deepseek/local 的同构 static
+ * 副本）。帧格式：工具帧 RS 'T' <json> RS；推理帧 RS 'R' <reasoning> RS。
+ * RS(0x1E) 不出现在 cJSON 输出与 LLM 文本中，分帧无歧义；各段均 NUL 结尾
+ * （llm_stream_callback 对 chunk 调 strlen()）。 */
+void provider_emit_tool_frame(llm_stream_callback_t cb, void *ud, const char *tc_json);
+void provider_emit_reasoning_frame(llm_stream_callback_t cb, void *ud, const char *reasoning);
+
 #ifdef __cplusplus
 }
 #endif

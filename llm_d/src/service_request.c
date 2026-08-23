@@ -164,9 +164,11 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
                          manager->model, exact->name ? exact->name : "?");
             return exact;
         }
-        SVC_LOG_DEBUG("C-L02: SVC: explicit model %s not in registry, "
-                      "falling back to router",
-                      manager->model);
+        SVC_LOG_WARN("C-L02: SVC: explicit model %s not in registry (simplified "
+                     "llm section exposes one model only), falling back to router — "
+                     "think section models outside the registry are served by the "
+                     "default model",
+                     manager->model ? manager->model : "(null)");
     }
 
     llm_route_request_t req;
@@ -243,6 +245,13 @@ static void update_cost_tracking(llm_service_t *svc, const char *model, llm_resp
     cost_tracker_add(svc->cost, model, resp->prompt_tokens, resp->completion_tokens);
     resp->cost_usd =
         cost_tracker_estimate(svc->cost, model, resp->prompt_tokens, resp->completion_tokens);
+
+    /* 2.1.1.5 修复：每次真实调用后兜底持久化——防 daemon 异常退出
+     * （SIGKILL/崩溃）丢失本次累计（优雅退出路径在 llm_service_destroy
+     * 再保存一次，幂等）。 */
+    const char *usage_path = llm_usage_state_path();
+    if (usage_path)
+        (void)cost_tracker_save(svc->cost, usage_path);
 }
 
 int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager,
@@ -268,6 +277,11 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     llm_response_t *cached_resp = NULL;
     int cache_status = get_cached_response(svc, cache_key, &cached_resp);
     if (cache_status > 0 && cached_resp) {
+        /* 2.1.1.5 修复：缓存命中同样计入 cost_tracker——此前命中直接
+         * 返回跳过计费，累计金额低于逐轮显示之和（缓存响应仍消耗上游
+         * token 配额，只是本侧免去一次转发）。按缓存响应自带的 token
+         * 数计费，金额语义一致。 */
+        update_cost_tracking(svc, manager->model, cached_resp);
         AIRY_FREE(cache_key);
         *out_response = cached_resp;
         return AIRY_OK;

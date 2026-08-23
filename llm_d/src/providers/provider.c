@@ -580,6 +580,17 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
             resp->completion_tokens = (uint32_t)completion->valuedouble;
         if (cJSON_IsNumber(total))
             resp->total_tokens = (uint32_t)total->valuedouble;
+        /* Thinking tokens: either top-level usage.reasoning_tokens (some
+         * endpoints) or nested completion_tokens_details.reasoning_tokens
+         * (DeepSeek/OpenAI). Parse both so the count survives everywhere. */
+        cJSON *rt = cJSON_GetObjectItem(usage, "reasoning_tokens");
+        if (!cJSON_IsNumber(rt)) {
+            cJSON *details = cJSON_GetObjectItem(usage, "completion_tokens_details");
+            if (cJSON_IsObject(details))
+                rt = cJSON_GetObjectItem(details, "reasoning_tokens");
+        }
+        if (cJSON_IsNumber(rt))
+            resp->reasoning_tokens = (uint32_t)rt->valuedouble;
     }
 
     *out = resp;
@@ -609,6 +620,38 @@ char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text)
     *len += tlen;
     buf[*len] = '\0';
     return buf;
+}
+
+/* ── 流式控制帧发射（SSoT：openai/deepseek/local 共用，见 provider.h） ──
+ * 帧各段须 NUL 结尾：llm_stream_callback 对 chunk 调 strlen()，非结尾数组
+ * 会栈越界（ASan 2026-08-16 实测捕获）。 */
+#define LLM_STREAM_FRAME_RS 0x1e
+#define LLM_STREAM_FRAME_TAG 'T'
+#define LLM_STREAM_FRAME_REASON_TAG 'R'
+
+void provider_emit_tool_frame(llm_stream_callback_t cb, void *ud, const char *tc_json)
+{
+    if (!cb || !tc_json)
+        return;
+    char pre[3] = {(char)LLM_STREAM_FRAME_RS, LLM_STREAM_FRAME_TAG, '\0'};
+    char post[2] = {(char)LLM_STREAM_FRAME_RS, '\0'};
+    cb(pre, ud);
+    cb(tc_json, ud);
+    cb(post, ud);
+}
+
+/* Reasoning frame: RS 'R' <reasoning_content> RS。DeepSeek thinking 模式要求
+ * assistant 轮的 reasoning_content 在工具续接轮回传（否则上游 400），流式
+ * 路径必须透出，否则工具循环断裂。 */
+void provider_emit_reasoning_frame(llm_stream_callback_t cb, void *ud, const char *reasoning)
+{
+    if (!cb || !reasoning || !reasoning[0])
+        return;
+    char pre[3] = {(char)LLM_STREAM_FRAME_RS, LLM_STREAM_FRAME_REASON_TAG, '\0'};
+    char post[2] = {(char)LLM_STREAM_FRAME_RS, '\0'};
+    cb(pre, ud);
+    cb(reasoning, ud);
+    cb(post, ud);
 }
 
 typedef struct {

@@ -28,4 +28,9 @@ struct llm_service {
     char default_provider[64]; /* global.default_provider */
 };
 
+/* 2.1.1.5 修复：计费/用量持久化文件路径（$AIRY_DATA_DIR/agentrt/
+ * llm_usage.json），service 内部各模块共享（create 加载 / 每次真实调用
+ * 后兜底保存 / destroy 保存）。 */
+const char *llm_usage_state_path(void);
+
 #endif /* AIRY_RT_LLM_SERVICE_INTERNAL_H */

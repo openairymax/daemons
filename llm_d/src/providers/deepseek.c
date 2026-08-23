@@ -184,7 +184,7 @@ static int deepseek_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t
 /* Streaming tool-call accumulation: DeepSeek is OpenAI-compatible, so the
  * SSE tool_call deltas follow the same {index, id?} then
  * {index, function.{name?, arguments}} fragment shape. The complete array
- * is emitted once at stream end as a control frame (see ds_emit_tool_frame). */
+ * is emitted once at stream end as a control frame (see provider_emit_tool_frame). */
 #define DS_STREAM_MAX_TOOL_CALLS 16
 
 typedef struct {
@@ -214,6 +214,7 @@ typedef struct {
     uint32_t prompt_tokens;
     uint32_t completion_tokens;
     uint32_t total_tokens;
+    uint32_t reasoning_tokens;
     ds_tool_acc_t tools[DS_STREAM_MAX_TOOL_CALLS];
     size_t tool_count;
 } ds_stream_acc_t;
@@ -283,36 +284,6 @@ static char *ds_build_tool_calls_json(const ds_stream_acc_t *acc)
     return js;
 }
 
-/* Control frame: RS 'T' <json> RS (see oai.c for the framing rationale). */
-#define DS_STREAM_FRAME_RS 0x1e
-#define DS_STREAM_FRAME_TAG 'T'
-#define DS_STREAM_FRAME_REASON_TAG 'R'
-
-static void ds_emit_tool_frame(llm_stream_callback_t cb, void *ud, const char *tc_json)
-{
-    if (!cb || !tc_json)
-        return;
-    /* 帧各段须 NUL 结尾：llm_stream_callback 对 chunk 调 strlen()。 */
-    char pre[3] = {(char)DS_STREAM_FRAME_RS, DS_STREAM_FRAME_TAG, '\0'};
-    char post[2] = {(char)DS_STREAM_FRAME_RS, '\0'};
-    cb(pre, ud);
-    cb(tc_json, ud);
-    cb(post, ud);
-}
-
-/* Reasoning frame: RS 'R' <reasoning_content> RS (DeepSeek thinking mode
- * requires echoing it on tool continuation rounds; see oai.c). */
-static void ds_emit_reasoning_frame(llm_stream_callback_t cb, void *ud, const char *reasoning)
-{
-    if (!cb || !reasoning || !reasoning[0])
-        return;
-    char pre[3] = {(char)DS_STREAM_FRAME_RS, DS_STREAM_FRAME_REASON_TAG, '\0'};
-    char post[2] = {(char)DS_STREAM_FRAME_RS, '\0'};
-    cb(pre, ud);
-    cb(reasoning, ud);
-    cb(post, ud);
-}
-
 static void ds_stream_tools_cleanup(ds_stream_acc_t *acc)
 {
     for (size_t i = 0; i < acc->tool_count; i++)
@@ -369,7 +340,7 @@ static int ds_stream_on_chunk(const char *json_line, void *userdata)
             cJSON *reasoning = cJSON_GetObjectItem(delta, "reasoning_content");
             if (cJSON_IsString(reasoning) && reasoning->valuestring) {
                 if (acc->user_cb) {
-                    ds_emit_reasoning_frame(acc->user_cb, acc->user_data,
+                    provider_emit_reasoning_frame(acc->user_cb, acc->user_data,
                                             reasoning->valuestring);
                 }
                 char *grown =
@@ -440,6 +411,14 @@ static int ds_stream_on_chunk(const char *json_line, void *userdata)
             acc->completion_tokens = (uint32_t)ct->valuedouble;
         if (cJSON_IsNumber(tt))
             acc->total_tokens = (uint32_t)tt->valuedouble;
+        cJSON *rt = cJSON_GetObjectItem(usage, "reasoning_tokens");
+        if (!cJSON_IsNumber(rt)) {
+            cJSON *details = cJSON_GetObjectItem(usage, "completion_tokens_details");
+            if (cJSON_IsObject(details))
+                rt = cJSON_GetObjectItem(details, "reasoning_tokens");
+        }
+        if (cJSON_IsNumber(rt))
+            acc->reasoning_tokens = (uint32_t)rt->valuedouble;
     }
 
     return 0;
@@ -473,6 +452,7 @@ static llm_response_t *ds_build_stream_response(ds_stream_acc_t *acc)
     resp->prompt_tokens = acc->prompt_tokens;
     resp->completion_tokens = acc->completion_tokens;
     resp->total_tokens = acc->total_tokens;
+    resp->reasoning_tokens = acc->reasoning_tokens;
     return resp;
 }
 
@@ -567,7 +547,7 @@ static int deepseek_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_c
     if (acc.tool_count > 0) {
         char *tc_json = ds_build_tool_calls_json(&acc);
         if (tc_json) {
-            ds_emit_tool_frame(callback, user_data, tc_json);
+            provider_emit_tool_frame(callback, user_data, tc_json);
             if (resp && resp->choices && resp->choice_count > 0 && !resp->choices[0].tool_calls_json)
                 resp->choices[0].tool_calls_json = tc_json;
             else

@@ -153,3 +153,126 @@ cJSON *cost_tracker_export(cost_tracker_t *ct)
     airy_mtx_unlock(&ct->lock);
     return root;
 }
+
+/* 2.1.1.5 修复：计费/用量持久化。save 原子写（临时文件 + rename 防
+ * 半写文件）；load 解析 JSON 并按模型合并累计（幂等）。 */
+int cost_tracker_save(cost_tracker_t *ct, const char *path)
+{
+    if (!ct || !path || !path[0])
+        return -1;
+
+    cJSON *root = cost_tracker_export(ct);
+    if (!root)
+        return -1;
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!json)
+        return -1;
+
+    char tmp[1024];
+    int tlen = snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    if (tlen < 0 || tlen >= (int)sizeof(tmp)) {
+        AIRY_FREE(json);
+        return -1;
+    }
+
+    FILE *f = fopen(tmp, "wb");
+    if (!f) {
+        AIRY_FREE(json);
+        return -1;
+    }
+    size_t jlen = strlen(json);
+    int wok = fwrite(json, 1, jlen, f) == jlen;
+    fclose(f);
+    AIRY_FREE(json);
+    if (!wok) {
+        remove(tmp);
+        return -1;
+    }
+    if (rename(tmp, path) != 0) {
+        remove(tmp);
+        return -1;
+    }
+    return 0;
+}
+
+int cost_tracker_load(cost_tracker_t *ct, const char *path)
+{
+    if (!ct || !path || !path[0])
+        return -1;
+
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return 0; /* 无历史文件不是错误 */
+
+    long sz = 0;
+    if (fseek(f, 0, SEEK_END) != 0 || (sz = ftell(f)) < 0 || fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return -1;
+    }
+    if (sz == 0) {
+        fclose(f);
+        return 0;
+    }
+    if (sz > (long)(16 * 1024 * 1024)) { /* 16MiB 上限防畸形文件 */
+        fclose(f);
+        return -1;
+    }
+    char *buf = (char *)AIRY_MALLOC((size_t)sz + 1);
+    if (!buf) {
+        fclose(f);
+        return -1;
+    }
+    size_t rn = fread(buf, 1, (size_t)sz, f);
+    fclose(f);
+    if (rn != (size_t)sz) {
+        AIRY_FREE(buf);
+        return -1;
+    }
+    buf[rn] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    AIRY_FREE(buf);
+    if (!root)
+        return -1;
+    cJSON *arr = cJSON_GetObjectItem(root, "models");
+    if (!cJSON_IsArray(arr)) {
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    airy_mtx_lock(&ct->lock);
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, arr) {
+        cJSON *mn = cJSON_GetObjectItem(item, "model");
+        if (!cJSON_IsString(mn) || !mn->valuestring || !mn->valuestring[0])
+            continue;
+        cJSON *pt = cJSON_GetObjectItem(item, "prompt_tokens");
+        cJSON *ctok = cJSON_GetObjectItem(item, "completion_tokens");
+        cJSON *cost = cJSON_GetObjectItem(item, "cost_usd");
+        uint32_t p = cJSON_IsNumber(pt) ? (uint32_t)pt->valuedouble : 0;
+        uint32_t c = cJSON_IsNumber(ctok) ? (uint32_t)ctok->valuedouble : 0;
+        double d = cJSON_IsNumber(cost) ? cost->valuedouble : 0.0;
+
+        model_cost_t *m = ct->models;
+        while (m) {
+            if (strcmp(m->model, mn->valuestring) == 0)
+                break;
+            m = m->next;
+        }
+        if (!m) {
+            m = (model_cost_t *)AIRY_CALLOC(1, sizeof(model_cost_t));
+            if (!m)
+                continue;
+            m->model = AIRY_STRDUP(mn->valuestring);
+            m->next = ct->models;
+            ct->models = m;
+        }
+        m->prompt_tokens += p;
+        m->completion_tokens += c;
+        m->cost_usd += d;
+    }
+    airy_mtx_unlock(&ct->lock);
+    cJSON_Delete(root);
+    return 0;
+}

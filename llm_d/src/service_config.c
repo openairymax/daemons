@@ -373,6 +373,11 @@ typedef struct {
      * 价格，计费全部落到默认价 0.001/0.002，金额不真实。 */
     double input_cost_per_k;
     double output_cost_per_k;
+    /* 价格字段是否在 YAML 中显式声明（区分"免费模型：显式 0"与
+     * "未配置价格：字段缺失"）。免费模型（llama 等）显式 0.0 必须保留
+     * 为零价规则，未配置的模型落默认价。 */
+    int has_input_price;
+    int has_output_price;
 } model_entry_t;
 
 typedef struct {
@@ -494,10 +499,14 @@ static void svc_yaml_finalize_model(svc_yaml_state_t *st)
             st->models[st->model_count].timeout_sec = (int)strtol(t, NULL, 10);
         if (r)
             st->models[st->model_count].max_retries = (int)strtol(r, NULL, 10);
-        if (ic)
+        if (ic) {
             st->models[st->model_count].input_cost_per_k = atof(ic);
-        if (oc)
+            st->models[st->model_count].has_input_price = 1;
+        }
+        if (oc) {
             st->models[st->model_count].output_cost_per_k = atof(oc);
+            st->models[st->model_count].has_output_price = 1;
+        }
         st->model_count++;
     }
 }
@@ -890,6 +899,16 @@ int load_pricing_rules_from_yaml(const char *config_path, pricing_rule_t **out_r
     yaml_map_free(&st.item_map);
     yaml_map_free(&st.prov_map);
 
+    /* 释放 providers 段解析时 strdup 的 model_names。finalize_provider
+     * 成功时把 cur_p 浅拷贝进 pcfg（指针共享），下一 provider 的
+     * mapping_start 会 memset 清空 cur_p——因此 pcfg 数组是这些字符串
+     * 的唯一持有者，只清理 pcfg 即可（cur_p 副本已清零，不重复释放）。 */
+    for (size_t pi = 0; pi < st.pcfg_count; ++pi) {
+        for (size_t k = 0; k < st.pcfg[pi].model_count; ++k)
+            AIRY_FREE(st.pcfg[pi].model_names[k]);
+        st.pcfg[pi].model_count = 0;
+    }
+
     /* 注意：此处不调用 svc_yaml_expand_llm —— llm 简化段只有模型名没有
      * 价格，若替换 models 会把价格全丢。价格规则覆盖完整 models 列表，
      * 名字匹配到 llm 段扩展出的模型同样能查到价（SSoT：价格只定义在
@@ -897,7 +916,11 @@ int load_pricing_rules_from_yaml(const char *config_path, pricing_rule_t **out_r
 
     int n = 0;
     for (size_t i = 0; i < st.model_count; ++i) {
-        if (st.models[i].input_cost_per_k > 0.0 || st.models[i].output_cost_per_k > 0.0)
+        /* 只注册"显式声明了价格"的模型：显式 0（免费模型，如 llama 本地
+         * 推理）保留为零价规则，字段缺失（未配置价格）的模型跳过并落
+         * 默认价——此前 `> 0.0` 过滤把免费模型也踢掉，导致其被默认价
+         * 计费，金额失真。 */
+        if (st.models[i].has_input_price || st.models[i].has_output_price)
             n++;
     }
     if (n == 0)
@@ -908,7 +931,7 @@ int load_pricing_rules_from_yaml(const char *config_path, pricing_rule_t **out_r
         return 0;
     int idx = 0;
     for (size_t i = 0; i < st.model_count; ++i) {
-        if (st.models[i].input_cost_per_k <= 0.0 && st.models[i].output_cost_per_k <= 0.0)
+        if (!st.models[i].has_input_price && !st.models[i].has_output_price)
             continue;
         rules[idx].model_pattern = AIRY_STRDUP(st.models[i].name);
         if (!rules[idx].model_pattern) {
