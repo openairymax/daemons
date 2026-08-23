@@ -418,6 +418,14 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
         history = NULL;
     }
 
+    /* GCCP 两段式交互第二段（P-A）：可选 gccp_answers（用户答案 JSON）。
+     * 缺省/空串视为第一段（无答案），think_d 判定需要澄清时返回问题集
+     * 挂起；携带时走正常 GCCP+GRAD 完整链路。 */
+    const char *gccp_answers = NULL;
+    cJSON *ga = params ? cJSON_GetObjectItem(params, "gccp_answers") : NULL;
+    if (cJSON_IsString(ga) && ga->valuestring && *ga->valuestring)
+        gccp_answers = ga->valuestring;
+
     /* Branch: params.agent present -> agent_d orchestration (spawn+invoke);
      * otherwise keep the llm_d direct tool loop (backward compatible, D4). */
     cJSON *tool_trace = NULL;
@@ -425,6 +433,7 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
     uint64_t total_tokens = 0;
     double total_cost = 0.0;
     char *reasoning_acc = NULL; /* 2.1.1.6：非流式思考链（agent.run 保留） */
+    int gccp_interact_round = 0; /* P-A：GCCP 交互轮（问题集挂起，不跑工具循环） */
 
     /* Session ID: the client may pre-assign one (agent.cancel needs to know
      * session_id before the request); otherwise the gateway generates a unique
@@ -496,11 +505,24 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
          * the LLM answers/executes according to the plan. If think_d is
          * unreachable/timed out, degrade to the original direct call (dialog
          * availability is unaffected). */
-        if (gw_think_process(ctx, prompt, &think_result) == 0 && think_result) {
-            cJSON *plan = cJSON_GetObjectItem(think_result, "plan");
-            if (plan) {
-                char *plan_str = cJSON_PrintUnformatted(plan);
-                if (plan_str) {
+        if (gw_think_process(ctx, prompt, gccp_answers, &think_result) == 0 && think_result) {
+            /* GCCP 两段式交互第一段（P-A）：think_d 判定输入需要澄清并已挂起，
+             * 返回问题集（gccp_need_interaction=1）。不进入工具循环（避免在
+             * 降级目标上消耗 token/产生无意义回答），把问题集随 thinking 字段
+             * 回给客户端；客户端展示问题、收集答案后携带 gccp_answers 重新
+             * 发起 agent.run（第二段，携带答案走正常 GCCP+GRAD 规划链路）。 */
+            cJSON *gccp_need = cJSON_GetObjectItem(think_result, "gccp_need_interaction");
+            if (cJSON_IsTrue(gccp_need)) {
+                gccp_interact_round = 1;
+                tool_trace = cJSON_CreateArray();
+                run_rc = 0;
+                AIRY_LOG_INFO("gateway: GCCP interaction round (session=%s, questions returned)",
+                         session_id);
+            } else {
+                cJSON *plan = cJSON_GetObjectItem(think_result, "plan");
+                if (plan) {
+                    char *plan_str = cJSON_PrintUnformatted(plan);
+                    if (plan_str) {
                     /* Record the converged plan into the hall event flow. */
                     {
                         cJSON *pevt = cJSON_CreateObject();
@@ -559,6 +581,7 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
                 run_rc = gw_run_tool_loop(ctx, model, prompt, history, active, &tool_trace,
                                           &final_text, &total_tokens, &total_cost, &reasoning_acc);
             }
+        }
         } else {
 
             run_rc = gw_run_tool_loop(ctx, model, prompt, history, active, &tool_trace, &final_text,
@@ -606,7 +629,9 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
             cJSON_Delete(tevt);
         }
     }
-    {
+    /* GCCP 交互轮（P-A）：不落 run_result 事件（本轮只是问答澄清，无
+     * 实际运行结果；问题集已随 thinking 字段返回客户端）。 */
+    if (!gccp_interact_round) {
         cJSON *revt = cJSON_CreateObject();
         if (revt) {
             cJSON_AddStringToObject(revt, "event", "run_result");
@@ -626,9 +651,11 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
              run_rc, (unsigned long long)total_tokens, total_cost);
 
     /* Persist the conversation to mem_d automatically at the end (M6 fix:
-     * mem_d is no longer a dangling service). Only written on success (rc==0);
-     * user cancellation/failure produces no partial memory. */
-    if (run_rc == 0) {
+     * mem_d is no longer a dangling service). Only written on success (rc==0)
+     * and non-interaction rounds (GCCP 问答轮不写入记忆，答案将随第二段
+     * 完整结果一起沉淀）；user cancellation/failure produces no partial
+     * memory. */
+    if (run_rc == 0 && !gccp_interact_round) {
         gw_persist_conversation(ctx, session_id, prompt, final_text ? final_text : "");
     }
 
