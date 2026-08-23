@@ -424,6 +424,7 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
     char *final_text = NULL;
     uint64_t total_tokens = 0;
     double total_cost = 0.0;
+    char *reasoning_acc = NULL; /* 2.1.1.6：非流式思考链（agent.run 保留） */
 
     /* Session ID: the client may pre-assign one (agent.cancel needs to know
      * session_id before the request); otherwise the gateway generates a unique
@@ -546,20 +547,22 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
                     AIRY_FREE(plan_str);
 
                     run_rc = gw_run_tool_loop(ctx, model, prompt, messages_with_plan, active,
-                                              &tool_trace, &final_text, &total_tokens, &total_cost);
+                                              &tool_trace, &final_text, &total_tokens, &total_cost,
+                                              &reasoning_acc);
                     cJSON_Delete(messages_with_plan);
                 } else {
                     run_rc = gw_run_tool_loop(ctx, model, prompt, history, active, &tool_trace,
-                                              &final_text, &total_tokens, &total_cost);
+                                              &final_text, &total_tokens, &total_cost,
+                                              &reasoning_acc);
                 }
             } else {
                 run_rc = gw_run_tool_loop(ctx, model, prompt, history, active, &tool_trace,
-                                          &final_text, &total_tokens, &total_cost);
+                                          &final_text, &total_tokens, &total_cost, &reasoning_acc);
             }
         } else {
 
             run_rc = gw_run_tool_loop(ctx, model, prompt, history, active, &tool_trace, &final_text,
-                                      &total_tokens, &total_cost);
+                                      &total_tokens, &total_cost, &reasoning_acc);
         }
     }
     /* Record the tool-call summary and the run result into the hall event
@@ -681,6 +684,9 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
     cJSON_AddStringToObject(result, "response", final_text ? final_text : "");
     cJSON_AddNumberToObject(result, "tokens_used", (double)total_tokens);
     cJSON_AddNumberToObject(result, "cost_usd", total_cost);
+    /* 2.1.1.6：思考链保留（非流式每轮 reasoning_content 拼接，缺失时省略） */
+    if (reasoning_acc && reasoning_acc[0])
+        cJSON_AddStringToObject(result, "reasoning", reasoning_acc);
     if (tool_trace) {
         cJSON_AddItemToObject(result, "tool_trace", tool_trace);
     } else {
@@ -699,6 +705,8 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
     cJSON_Delete(out);
     if (final_text)
         AIRY_FREE(final_text);
+    if (reasoning_acc)
+        AIRY_FREE(reasoning_acc);
     if (agent_spec_owned)
         cJSON_Delete(agent_spec_owned);
     return out_str;

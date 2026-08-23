@@ -344,16 +344,18 @@ static char *tool_call_rpc(const gateway_business_ctx_t *ctx, const char *req_js
 }
 
 /**
- * @brief Extract reply text and token usage from the llm response
+ * @brief Extract reply text, reasoning and token usage from the llm response
  * @return 0 on success (*out_text / *out_tokens / *out_cost valid), non-zero on failure
  */
 static int parse_llm_result(const char *llm_resp, char **out_text, uint64_t *out_tokens,
-                            double *out_cost)
+                            double *out_cost, char **out_reasoning)
 {
     *out_text = NULL;
     *out_tokens = 0;
     if (out_cost)
         *out_cost = 0.0;
+    if (out_reasoning)
+        *out_reasoning = NULL;
 
     cJSON *root = cJSON_Parse(llm_resp);
     if (!root)
@@ -379,6 +381,15 @@ static int parse_llm_result(const char *llm_resp, char **out_text, uint64_t *out
          * only tool_calls); fall back to an empty string instead of failing so
          * the tool loop can continue. */
         *out_text = AIRY_STRDUP("");
+    }
+
+    /* 2.1.1.6：非流式路径保留思考链（llm_d 已在 choices[0] 透传
+     * reasoning_content，gateway 此前直接丢弃，agent.run 结果不含思考
+     * token）。 */
+    if (out_reasoning) {
+        cJSON *reasoning = choice0 ? cJSON_GetObjectItem(choice0, "reasoning_content") : NULL;
+        if (cJSON_IsString(reasoning) && reasoning->valuestring && reasoning->valuestring[0])
+            *out_reasoning = AIRY_STRDUP(reasoning->valuestring);
     }
 
     /* tokens: prefer usage.total_tokens (OpenAI compatible), then top-level
@@ -584,13 +595,16 @@ static char *gw_build_llm_request(const char *model, const cJSON *messages)
  */
 int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model, const char *prompt,
                      const cJSON *history, gw_active_request_t *active, cJSON **out_trace,
-                     char **out_text, uint64_t *out_tokens, double *out_cost)
+                     char **out_text, uint64_t *out_tokens, double *out_cost,
+                     char **out_reasoning)
 {
     *out_trace = NULL;
     *out_text = NULL;
     *out_tokens = 0;
     if (out_cost)
         *out_cost = 0.0;
+    if (out_reasoning)
+        *out_reasoning = NULL;
 
     cJSON *messages = NULL;
     if (history && cJSON_IsArray(history) && cJSON_GetArraySize(history) > 0) {
@@ -616,6 +630,7 @@ int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model, const
     char *final_text = NULL;
     uint64_t total_tokens = 0;
     double total_cost = 0.0;
+    char *reasoning_acc = NULL; /* 2.1.1.6：多轮思考链拼接（换行分隔） */
     int rc = -1;
 
     for (int loops = 0; loops < GW_MAX_TOOL_LOOPS; loops++) {
@@ -643,9 +658,24 @@ int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model, const
         char *text = NULL;
         uint64_t tokens = 0;
         double cost = 0.0;
-        parse_llm_result(llm_resp, &text, &tokens, &cost);
+        char *reasoning = NULL;
+        parse_llm_result(llm_resp, &text, &tokens, &cost, &reasoning);
         total_tokens += tokens;
         total_cost += cost;
+        /* 2.1.1.6：累积思考链（多轮工具循环时每轮各自产生 reasoning） */
+        if (reasoning && reasoning[0]) {
+            size_t old = reasoning_acc ? strlen(reasoning_acc) : 0;
+            size_t add = strlen(reasoning);
+            char *np = (char *)AIRY_REALLOC(reasoning_acc, old + add + 2);
+            if (np) {
+                reasoning_acc = np;
+                if (old > 0)
+                    reasoning_acc[old++] = '\n';
+                AIRY_MEMCPY(reasoning_acc + old, reasoning, add);
+                reasoning_acc[old + add] = '\0';
+            }
+        }
+        AIRY_FREE(reasoning);
 
         cJSON *assistant_msg = cJSON_CreateObject();
         cJSON_AddStringToObject(assistant_msg, "role", "assistant");
@@ -709,10 +739,17 @@ int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model, const
         *out_tokens = total_tokens;
         if (out_cost)
             *out_cost = total_cost;
+        if (out_reasoning) {
+            *out_reasoning = reasoning_acc;
+            reasoning_acc = NULL;
+        }
     } else {
         if (final_text)
             AIRY_FREE(final_text);
         cJSON_Delete(tool_trace);
+        if (out_reasoning)
+            *out_reasoning = NULL; /* 失败时已释放，避免调用方双重释放 */
     }
+    AIRY_FREE(reasoning_acc);
     return rc;
 }
