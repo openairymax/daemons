@@ -20,7 +20,6 @@
 #include "router/llm_router.h"
 #include "service.h"
 #include "svc_logger.h"
-
 #include "svc_model_defaults.h"
 
 #include <cjson/cJSON.h>
@@ -56,6 +55,32 @@ static char *safe_strcat(char *dest, size_t dest_size, const char *src)
     }
 
     return dest + dest_len + copy_len;
+}
+
+/* 2.1.1.5 修复：计费/用量持久化文件路径（$AIRY_DATA_DIR/agentrt/
+ * llm_usage.json）。llm_d 启动时加载历史累计，每次真实调用后兜底保存、
+ * 退出时保存，daemon 重启后金额与 token 历史不清零。 */
+const char *llm_usage_state_path(void)
+{
+    static char path[1024];
+    static int built = 0;
+    if (!built) {
+        const char *data_dir = airy_data_dir();
+        if (!data_dir) {
+            return NULL;
+        }
+        char dir[1024];
+        int dlen = snprintf(dir, sizeof(dir), "%s/agentrt", data_dir);
+        if (dlen < 0 || dlen >= (int)sizeof(dir))
+            return NULL;
+        if (airy_mkdir_p(dir) != 0)
+            return NULL;
+        int plen = snprintf(path, sizeof(path), "%s/llm_usage.json", dir);
+        if (plen < 0 || plen >= (int)sizeof(path))
+            return NULL;
+        built = 1;
+    }
+    return path;
 }
 
 llm_service_t *llm_service_create(const char *config_path)
@@ -295,6 +320,15 @@ llm_service_t *llm_service_create(const char *config_path)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
+    /* 2.1.1.5 修复：加载历史计费/用量累计（幂等，无文件则跳过） */
+    const char *usage_path = llm_usage_state_path();
+    if (usage_path) {
+        if (cost_tracker_load(svc->cost, usage_path) == 0)
+            SVC_LOG_INFO("C-L02: SVC: cost state loaded from %s", usage_path);
+        else
+            SVC_LOG_WARN("C-L02: SVC: cost state load failed (ignored) path=%s", usage_path);
+    }
+
     svc->token_counter = token_counter_create(base_cfg.token_encoding);
     if (!svc->token_counter) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL token_counter, STACK: llm_service_create");
@@ -340,6 +374,10 @@ void llm_service_destroy(llm_service_t *svc)
     }
 
     if (svc->cost) {
+        /* 2.1.1.5 修复：退出前保存计费/用量累计，重启后不清零 */
+        const char *usage_path = llm_usage_state_path();
+        if (usage_path && cost_tracker_save(svc->cost, usage_path) == 0)
+            SVC_LOG_INFO("C-L02: SVC: cost state saved to %s", usage_path);
         cost_tracker_destroy(svc->cost);
         svc->cost = NULL;
     }

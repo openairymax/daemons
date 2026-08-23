@@ -123,6 +123,10 @@ static tool_metadata_t *dup_metadata(const tool_metadata_t *src)
                 AIRY_FREE(dst);
                 AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate param schema");
             }
+            /* required 必须随参数复制：validator 依据 required 拦截必填参数
+             * 缺失。此前漏复制导致 calloc 清零后 required==0，必填参数缺失
+             * 被放行到执行层（SSoT: gateway tool schema 的 required 数组）。 */
+            dst->params[i].required = src->params[i].required;
         }
         dst->param_count = src->param_count;
     }

@@ -390,7 +390,7 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
 /* Streaming tool-call accumulation: OpenAI SSE sends tool_call deltas as
  * separate events ({index, id?} then {index, function.{name?, arguments}}
  * fragments). Slots are keyed by index; arguments fragments concatenate.
- * The full array is emitted once at stream end (see oai_emit_tool_frame). */
+ * The full array is emitted once at stream end (see provider_emit_tool_frame). */
 #define OAI_STREAM_MAX_TOOL_CALLS 16
 
 typedef struct {
@@ -420,6 +420,7 @@ typedef struct {
     uint32_t prompt_tokens;
     uint32_t completion_tokens;
     uint32_t total_tokens;
+    uint32_t reasoning_tokens;
     /* Tool-call deltas (OpenAI streaming): fragments arrive across SSE
      * events; accumulate per index so the assembled response carries the
      * full tool_calls array (the CLI tool loop consumes it). */
@@ -497,42 +498,6 @@ static char *oai_build_tool_calls_json(const oai_stream_acc_t *acc)
     return js;
 }
 
-/* Control frame: RS 'T' <json> RS. Raw text chunks pass through unchanged;
- * only this frame carries structured tool_calls (the IPC adapter demuxes
- * it). RS (0x1E) never appears in JSON output (cJSON escapes control chars)
- * nor in LLM-generated text, so the framing is unambiguous. */
-#define LLM_STREAM_FRAME_RS 0x1e
-#define LLM_STREAM_FRAME_TAG 'T'
-#define LLM_STREAM_FRAME_REASON_TAG 'R'
-
-static void oai_emit_tool_frame(llm_stream_callback_t cb, void *ud, const char *tc_json)
-{
-    if (!cb || !tc_json)
-        return;
-    /* 帧各段须 NUL 结尾：llm_stream_callback 对 chunk 调 strlen()，
-     * 非结尾数组会栈越界（ASan 2026-08-16 实测捕获）。 */
-    char pre[3] = {(char)LLM_STREAM_FRAME_RS, LLM_STREAM_FRAME_TAG, '\0'};
-    char post[2] = {(char)LLM_STREAM_FRAME_RS, '\0'};
-    cb(pre, ud);
-    cb(tc_json, ud);
-    cb(post, ud);
-}
-
-/* Reasoning frame: RS 'R' <reasoning_content> RS. DeepSeek thinking mode
- * requires the assistant turn's reasoning_content to be echoed on tool
- * continuation rounds (upstream 400 "reasoning_content must be passed back"
- * otherwise); the streaming path must surface it or the tool loop breaks. */
-static void oai_emit_reasoning_frame(llm_stream_callback_t cb, void *ud, const char *reasoning)
-{
-    if (!cb || !reasoning || !reasoning[0])
-        return;
-    char pre[3] = {(char)LLM_STREAM_FRAME_RS, LLM_STREAM_FRAME_REASON_TAG, '\0'};
-    char post[2] = {(char)LLM_STREAM_FRAME_RS, '\0'};
-    cb(pre, ud);
-    cb(reasoning, ud);
-    cb(post, ud);
-}
-
 /* Free accumulated tool-call slots (arguments buffers) after the stream. */
 static void oai_stream_tools_cleanup(oai_stream_acc_t *acc)
 {
@@ -594,7 +559,7 @@ static int oai_stream_on_chunk(const char *json_line, void *userdata)
             cJSON *reasoning = cJSON_GetObjectItem(delta, "reasoning_content");
             if (cJSON_IsString(reasoning) && reasoning->valuestring) {
                 if (acc->user_cb) {
-                    oai_emit_reasoning_frame(acc->user_cb, acc->user_data,
+                    provider_emit_reasoning_frame(acc->user_cb, acc->user_data,
                                              reasoning->valuestring);
                 }
                 char *grown =
@@ -667,6 +632,14 @@ static int oai_stream_on_chunk(const char *json_line, void *userdata)
             acc->completion_tokens = (uint32_t)ct->valuedouble;
         if (cJSON_IsNumber(tt))
             acc->total_tokens = (uint32_t)tt->valuedouble;
+        cJSON *rt = cJSON_GetObjectItem(usage, "reasoning_tokens");
+        if (!cJSON_IsNumber(rt)) {
+            cJSON *details = cJSON_GetObjectItem(usage, "completion_tokens_details");
+            if (cJSON_IsObject(details))
+                rt = cJSON_GetObjectItem(details, "reasoning_tokens");
+        }
+        if (cJSON_IsNumber(rt))
+            acc->reasoning_tokens = (uint32_t)rt->valuedouble;
     }
 
     return 0;
@@ -715,6 +688,7 @@ static llm_response_t *oai_build_stream_response(oai_stream_acc_t *acc)
     resp->prompt_tokens = acc->prompt_tokens;
     resp->completion_tokens = acc->completion_tokens;
     resp->total_tokens = acc->total_tokens;
+    resp->reasoning_tokens = acc->reasoning_tokens;
 
     return resp;
 }
@@ -808,7 +782,7 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     if (acc.tool_count > 0) {
         char *tc_json = oai_build_tool_calls_json(&acc);
         if (tc_json) {
-            oai_emit_tool_frame(callback, user_data, tc_json);
+            provider_emit_tool_frame(callback, user_data, tc_json);
             if (resp && resp->choices && resp->choice_count > 0 && !resp->choices[0].tool_calls_json)
                 resp->choices[0].tool_calls_json = tc_json;
             else

@@ -68,6 +68,10 @@ typedef struct {
     uint32_t prompt_tokens;
     uint32_t completion_tokens;
     uint32_t total_tokens;
+    /* Thinking (reasoning) tokens reported by the upstream usage block
+     * (e.g. DeepSeek/OpenAI completion_tokens_details.reasoning_tokens).
+     * Zero when the upstream does not report it. */
+    uint32_t reasoning_tokens;
     double cost_usd;
     char *finish_reason;
 } llm_response_t;
