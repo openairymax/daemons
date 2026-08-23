@@ -26,6 +26,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* 版本 SSoT：agentrt 全系统版本单一权威源（与 CMakeLists project() 同步）。
+ * 其余模块（CLI/协议/MCP server）一律引用本宏，禁止散落硬编码版本串。 */
+#define AIRYRT_VERSION "0.1.3"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
