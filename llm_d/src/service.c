@@ -245,8 +245,19 @@ llm_service_t *llm_service_create(const char *config_path)
             }
         }
     } else if (config_path) {
-        SVC_LOG_DEBUG("pricing rules: YAML config has no cJSON pricing section, "
-                      "degraded to no cost rules");
+        /* 2.1.1.5 修复：YAML 配置（model.yaml，当前唯一入口）此前完全不
+         * 加载价格，计费全部落到默认价 0.001/0.002，金额不真实。现在从
+         * models[].input/output_cost_per_1k 生成 pricing rules。 */
+        pricing_rule_t *yaml_rules = NULL;
+        int yaml_rule_count = 0;
+        if (load_pricing_rules_from_yaml(config_path, &yaml_rules, &yaml_rule_count) == 0 &&
+            yaml_rules && yaml_rule_count > 0) {
+            svc->rules = yaml_rules;
+            svc->rule_count = yaml_rule_count;
+            SVC_LOG_INFO("Loaded %d pricing rules from YAML model config", yaml_rule_count);
+        } else if (yaml_rules) {
+            AIRY_FREE(yaml_rules);
+        }
     }
 
     svc->registry = provider_registry_create(&base_cfg);

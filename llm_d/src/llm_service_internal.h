@@ -26,6 +26,8 @@ extern "C" {
 int ends_with(const char *str, const char *suffix);
 pricing_rule_t *load_pricing_rules(cJSON *root, int *count);
 void free_pricing_rules(pricing_rule_t *rules, int count);
+int load_pricing_rules_from_yaml(const char *config_path, pricing_rule_t **out_rules,
+                                 int *out_count);
 int svc_load_model_config(const char *config_path, provider_config_t **out_providers,
                           size_t *out_count);
 

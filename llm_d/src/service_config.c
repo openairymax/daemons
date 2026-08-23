@@ -368,6 +368,11 @@ typedef struct {
     char endpoint[512];
     int timeout_sec;
     int max_retries;
+    /* 2.1.1.5 修复：模型单价（model.yaml models[].input/output_cost_per_1k），
+     * 用于生成 cost_tracker 的 pricing rules——此前 YAML 配置完全不加载
+     * 价格，计费全部落到默认价 0.001/0.002，金额不真实。 */
+    double input_cost_per_k;
+    double output_cost_per_k;
 } model_entry_t;
 
 typedef struct {
@@ -470,6 +475,8 @@ static void svc_yaml_finalize_model(svc_yaml_state_t *st)
     const char *ep = yaml_map_get(&st->item_map, "endpoint");
     const char *t = yaml_map_get(&st->item_map, "timeout_sec");
     const char *r = yaml_map_get(&st->item_map, "max_retries");
+    const char *ic = yaml_map_get(&st->item_map, "input_cost_per_1k");
+    const char *oc = yaml_map_get(&st->item_map, "output_cost_per_1k");
 
     if (n && p) {
         __builtin_memset(&st->models[st->model_count], 0, sizeof(model_entry_t));
@@ -487,6 +494,10 @@ static void svc_yaml_finalize_model(svc_yaml_state_t *st)
             st->models[st->model_count].timeout_sec = (int)strtol(t, NULL, 10);
         if (r)
             st->models[st->model_count].max_retries = (int)strtol(r, NULL, 10);
+        if (ic)
+            st->models[st->model_count].input_cost_per_k = atof(ic);
+        if (oc)
+            st->models[st->model_count].output_cost_per_k = atof(oc);
         st->model_count++;
     }
 }
@@ -825,7 +836,6 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
     size_t prov_count = 0;
     svc_yaml_aggregate_providers(&st, provs, &prov_count);
     svc_yaml_merge_provider_cfgs(&st, provs, &prov_count);
-
     int rc = svc_yaml_build_result(provs, prov_count, out_providers, out_count);
     if (rc == AIRY_OK) {
         SVC_LOG_INFO(
@@ -833,6 +843,88 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
             prov_count);
     }
     return rc;
+}
+
+/**
+ * @brief Load pricing rules from a YAML model config (model.yaml).
+ *
+ * 2.1.1.5 修复：cost_tracker 的价格此前仅从 JSON 配置的 pricing 数组加载，
+ * YAML 配置（当前唯一入口）完全不加载价格，全部模型落到默认价
+ * 0.001/0.002，计费金额不真实。本函数复用 svc_yaml 解析状态机，将
+ * models[].{name, input_cost_per_1k, output_cost_per_1k} 转换为
+ * pricing_rule_t（model_pattern=模型名精确匹配）。
+ *
+ * @param config_path YAML 文件路径
+ * @param out_rules  输出规则数组（AIRY_MALLOC，调用方 free_pricing_rules 释放）
+ * @param out_count  输出规则数
+ * @return 0 成功；无价格模型或文件不可读时 *out_count=0（非错误）
+ */
+int load_pricing_rules_from_yaml(const char *config_path, pricing_rule_t **out_rules,
+                                 int *out_count)
+{
+    if (!config_path || !out_rules || !out_count)
+        return AIRY_ERR_INVALID_PARAM;
+    *out_rules = NULL;
+    *out_count = 0;
+
+    FILE *f = fopen(config_path, "rb");
+    if (!f)
+        return 0;
+
+    yaml_parser_t parser;
+    if (!yaml_parser_initialize(&parser)) {
+        fclose(f);
+        return 0;
+    }
+    yaml_parser_set_input_file(&parser, f);
+
+    svc_yaml_state_t st;
+    __builtin_memset(&st, 0, sizeof(st));
+    yaml_map_init(&st.item_map);
+    yaml_map_init(&st.prov_map);
+    int done = 0;
+    svc_yaml_event_loop(&parser, &st, &done);
+
+    yaml_parser_delete(&parser);
+    fclose(f);
+    yaml_map_free(&st.item_map);
+    yaml_map_free(&st.prov_map);
+
+    /* 注意：此处不调用 svc_yaml_expand_llm —— llm 简化段只有模型名没有
+     * 价格，若替换 models 会把价格全丢。价格规则覆盖完整 models 列表，
+     * 名字匹配到 llm 段扩展出的模型同样能查到价（SSoT：价格只定义在
+     * models[].input/output_cost_per_1k）。 */
+
+    int n = 0;
+    for (size_t i = 0; i < st.model_count; ++i) {
+        if (st.models[i].input_cost_per_k > 0.0 || st.models[i].output_cost_per_k > 0.0)
+            n++;
+    }
+    if (n == 0)
+        return 0;
+
+    pricing_rule_t *rules = (pricing_rule_t *)AIRY_CALLOC((size_t)n, sizeof(pricing_rule_t));
+    if (!rules)
+        return 0;
+    int idx = 0;
+    for (size_t i = 0; i < st.model_count; ++i) {
+        if (st.models[i].input_cost_per_k <= 0.0 && st.models[i].output_cost_per_k <= 0.0)
+            continue;
+        rules[idx].model_pattern = AIRY_STRDUP(st.models[i].name);
+        if (!rules[idx].model_pattern) {
+            for (int j = 0; j < idx; ++j)
+                AIRY_FREE((void *)rules[j].model_pattern);
+            AIRY_FREE(rules);
+            return 0;
+        }
+        rules[idx].input_price_per_k = st.models[i].input_cost_per_k;
+        rules[idx].output_price_per_k = st.models[i].output_cost_per_k;
+        idx++;
+    }
+    *out_rules = rules;
+    *out_count = n;
+    SVC_LOG_INFO("C-L02: SVC: pricing rules from YAML models=%d", n);
+    return 0;
 }
 
 #endif /* HAVE_YAML */
