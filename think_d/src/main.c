@@ -103,8 +103,15 @@ static void handle_process(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
+    /* GCCP 两段式交互第二段（P-A）：可选 gccp_answers（用户答案 JSON），
+     * 缺省/空串视为第一段（无答案），引擎可能返回问题集挂起。 */
+    const char *gccp_answers = NULL;
+    cJSON *answers = cJSON_GetObjectItem(params, "gccp_answers");
+    if (cJSON_IsString(answers) && answers->valuestring && answers->valuestring[0])
+        gccp_answers = answers->valuestring;
+
     think_process_result_t res = {0};
-    int ret = think_service_process(g_service, prompt->valuestring, &res);
+    int ret = think_service_process(g_service, prompt->valuestring, gccp_answers, &res);
     if (ret != AIRY_SUCCESS || !res.json) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Think process failed", id);
         think_result_free(&res);

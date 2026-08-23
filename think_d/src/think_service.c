@@ -91,6 +91,12 @@ struct think_service {
     uint32_t dual_invocations;
     uint32_t dual_corrections;
     airy_mtx_t lock;
+
+    /* P-A (2026-08-23): GCCP 两段式交互状态。交互回调与 think_service_process
+     * 在同一线程同步执行（process 持 svc->lock 串行化引擎调用），故回调内
+     * 直接读写本字段无需重复加锁（svc->lock 非递归，重入即死锁）。 */
+    char *gccp_pending_questions; /* 第一段：probe 问题集 JSON（OWNER） */
+    char *gccp_pending_answers;   /* 第二段：客户端携带的用户答案 JSON（OWNER，单次有效） */
 };
 
 static void think_sync_engine_stats(think_service_t *svc);
@@ -131,6 +137,55 @@ static void think_feedback_cb(int level, const char *module, const char *event, 
 
     SVC_LOG_DEBUG("ThinkDual feedback: level=%d module=%s event=%s", level, module ? module : "?",
                   event ? event : "?");
+}
+
+/* ── GCCP 交互回调（两段式协议, P-A 2026-08-23）─────────────────────
+ *
+ * think_d↔客户端是异步 RPC 往返，回调内无法同步收集答案，因此：
+ *   第一段（无 gccp_answers）：把 probe 的问题集序列化进服务状态
+ *     （svc->gccp_pending_questions），返回哨兵 AIRY_GCCP_INTERACT_PENDING
+ *     ——引擎返回 AIRY_ERR_GCCP_INTERACTION，think_service_process 捕获后
+ *     把问题集随结果 JSON 回给客户端（gccp_need_interaction=1）。
+ *   第二段（携带 gccp_answers 重发）：直接返回上一轮暂存的答案 JSON，
+ *     引擎据此完成目标确认并正常进入后续 Phase（GCCP+GRAD 完整链路）。
+ * 调用约定：svc->lock 已由 think_service_process 持有（引擎调用串行化），
+ * 本回调与 process 同线程执行，直接读写 svc->gccp_* 字段，不得重复加锁。 */
+static char *think_gccp_interact_cb(const airy_gccp_probe_t *probe, void *user_data)
+{
+    think_service_t *svc = (think_service_t *)user_data;
+    if (!svc || !probe)
+        return NULL;
+
+    /* 第二段：本请求携带了答案，直接交给引擎确认（单次有效，用完即清）。 */
+    if (svc->gccp_pending_answers) {
+        char *answers = svc->gccp_pending_answers;
+        svc->gccp_pending_answers = NULL;
+        SVC_LOG_INFO("ThinkDual: GCCP answers consumed (pass 2), resuming confirmation");
+        return answers; /* OWNER -> airy_gccp_confirm 释放 */
+    }
+
+    /* 第一段：序列化问题集到服务状态，返回哨兵挂起本轮处理。 */
+    cJSON *qarr = cJSON_CreateArray();
+    if (qarr) {
+        for (size_t i = 0; i < probe->question_count; i++) {
+            const airy_gccp_question_t *q = &probe->questions[i];
+            cJSON *qj = cJSON_CreateObject();
+            cJSON_AddStringToObject(qj, "id", q->id);
+            cJSON_AddStringToObject(qj, "question", q->question);
+            cJSON_AddStringToObject(qj, "hint", q->hint);
+            cJSON_AddBoolToObject(qj, "required", q->required ? 1 : 0);
+            cJSON_AddItemToArray(qarr, qj);
+        }
+        char *qjson = cJSON_PrintUnformatted(qarr);
+        cJSON_Delete(qarr);
+        if (qjson) {
+            AIRY_FREE(svc->gccp_pending_questions);
+            svc->gccp_pending_questions = qjson;
+            SVC_LOG_INFO("ThinkDual: GCCP questions captured (%zu), pending interaction",
+                         probe->question_count);
+        }
+    }
+    return AIRY_STRDUP(AIRY_GCCP_INTERACT_PENDING);
 }
 
 think_service_t *think_service_create(const think_service_config_t *config)
@@ -230,6 +285,12 @@ think_service_t *think_service_create(const think_service_config_t *config)
                                   svc->think1_fast_model[0] ? svc->think1_fast_model : NULL,
                                   svc->think1_prof_model[0] ? svc->think1_prof_model : NULL);
 
+    /* P-A (2026-08-23): 注册 GCCP 交互回调——两段式交互协议（无答案首轮
+     * 返回问题集挂起，携带答案次轮回调返回答案继续）。此前缺失注册导致
+     * 主链路走无交互降级（实测 feedback intent_confirmed 恒 interacted:0）。 */
+    airy_cognition_set_gccp_interact(svc->engine, think_gccp_interact_cb, svc);
+    SVC_LOG_INFO("ThinkDual: GCCP interact callback registered (two-pass protocol)");
+
     /* 5. Dual-thinking switch: enabled=0 -> disable the GRAD plan-level
      * critique loop (degrades to single-round planning); the t2/t1-f/t1-p
      * three roles then do not participate in critique and the plain
@@ -310,6 +371,10 @@ void think_service_destroy(think_service_t *svc)
     }
     AIRY_FREE(svc->events);
     svc->events = NULL;
+    AIRY_FREE(svc->gccp_pending_questions);
+    svc->gccp_pending_questions = NULL;
+    AIRY_FREE(svc->gccp_pending_answers);
+    svc->gccp_pending_answers = NULL;
     airy_mtx_destroy(&svc->lock);
     AIRY_FREE(svc);
 }
@@ -666,7 +731,7 @@ static cJSON *think_plan_to_json(const airy_task_plan_t *plan)
     return root;
 }
 
-int think_service_process(think_service_t *svc, const char *prompt,
+int think_service_process(think_service_t *svc, const char *prompt, const char *gccp_answers,
                           think_process_result_t *out_result)
 {
     if (!svc || !prompt || !out_result)
@@ -683,10 +748,61 @@ int think_service_process(think_service_t *svc, const char *prompt,
     svc->event_count = 0;
     svc->dual_invocations++;
 
+    /* GCCP 两段式交互第二段：客户端携带答案重发——暂存答案，引擎 Phase 0
+     * 的交互回调（think_gccp_interact_cb）会取走它完成目标确认。单次有效，
+     * 无论引擎是否消费，process 结束统一清理，避免泄漏到下一轮调用。 */
+    if (gccp_answers && *gccp_answers) {
+        AIRY_FREE(svc->gccp_pending_answers);
+        svc->gccp_pending_answers = AIRY_STRDUP(gccp_answers);
+    }
+
     airy_task_plan_t *plan = NULL;
     airy_err_t err = airy_cognition_process(svc->engine, prompt, plen, &plan);
     if (err != AIRY_SUCCESS || !plan) {
         int err_code = (int)err;
+
+        /* GCCP 两段式交互第一段（P-A）：引擎挂起（交互回调返回哨兵），
+         * 问题集已捕获到 svc->gccp_pending_questions——返回给客户端，
+         * 语义为成功（客户端据 gccp_need_interaction 进入问答轮）。 */
+        if (err_code == AIRY_ERR_GCCP_INTERACTION) {
+            SVC_LOG_INFO("ThinkDual: GCCP interaction pending, returning questions to client");
+            cJSON *root = cJSON_CreateObject();
+            if (root) {
+                cJSON_AddBoolToObject(root, "gccp_need_interaction", 1);
+                cJSON_AddStringToObject(root, "gccp_questions",
+                                        svc->gccp_pending_questions ?
+                                            svc->gccp_pending_questions :
+                                            "[]");
+                cJSON *st = cJSON_CreateObject();
+                cJSON_AddNumberToObject(st, "dual_invocations", svc->dual_invocations);
+                cJSON_AddNumberToObject(st, "dual_corrections", svc->dual_corrections);
+                cJSON_AddItemToObject(root, "stats", st);
+                cJSON *events_arr = cJSON_CreateArray();
+                for (uint32_t i = 0; i < svc->event_count; i++) {
+                    const think_feedback_event_t *ev = &svc->events[i];
+                    cJSON *ej = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(ej, "level", ev->level);
+                    cJSON_AddStringToObject(ej, "module", ev->module);
+                    cJSON_AddStringToObject(ej, "event", ev->event);
+                    cJSON_AddStringToObject(ej, "data", ev->data);
+                    cJSON_AddItemToArray(events_arr, ej);
+                }
+                cJSON_AddItemToObject(root, "feedback", events_arr);
+                out_result->json = cJSON_PrintUnformatted(root);
+                cJSON_Delete(root);
+            }
+            AIRY_FREE(svc->gccp_pending_answers);
+            svc->gccp_pending_answers = NULL;
+            airy_mtx_unlock(&svc->lock);
+            if (!out_result->json)
+                return AIRY_ERR_OUT_OF_MEMORY;
+            out_result->json_len = strlen(out_result->json);
+            return AIRY_SUCCESS;
+        }
+
+        /* 清理本轮暂存的交互答案（真实失败路径，防泄漏到下一轮） */
+        AIRY_FREE(svc->gccp_pending_answers);
+        svc->gccp_pending_answers = NULL;
         airy_mtx_unlock(&svc->lock);
         SVC_LOG_ERROR("ThinkDual: cognition process failed (err=%d)", err_code);
 
@@ -717,6 +833,9 @@ int think_service_process(think_service_t *svc, const char *prompt,
     cJSON *root = cJSON_CreateObject();
     if (!root) {
         airy_task_plan_free(plan);
+        /* 清理本轮暂存的交互答案（未消费场景：need_interaction=0） */
+        AIRY_FREE(svc->gccp_pending_answers);
+        svc->gccp_pending_answers = NULL;
         airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
@@ -747,6 +866,9 @@ int think_service_process(think_service_t *svc, const char *prompt,
     out_result->json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     airy_task_plan_free(plan);
+    /* 清理本轮暂存的交互答案（第二段回调已消费则指针已置 NULL） */
+    AIRY_FREE(svc->gccp_pending_answers);
+    svc->gccp_pending_answers = NULL;
     airy_mtx_unlock(&svc->lock);
 
     if (!out_result->json)

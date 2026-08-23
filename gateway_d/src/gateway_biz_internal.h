@@ -123,7 +123,8 @@ typedef struct {
 char *jsonrpc_error(int code, const char *msg, const cJSON *id);
 char *gw_svc_call(const char *sock_path, const char *method, const char *params_json,
                   int timeout_ms);
-int gw_think_process(const gateway_business_ctx_t *ctx, const char *prompt, cJSON **out_think);
+int gw_think_process(const gateway_business_ctx_t *ctx, const char *prompt,
+                     const char *gccp_answers, cJSON **out_think);
 int gw_acl_check_tool(const char *tool_name);
 const char *gw_mem_method_allowlist(const char *method);
 char *handle_ns_forward(cJSON *root, const gw_ns_forward_rule_t *rule);

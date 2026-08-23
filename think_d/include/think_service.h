@@ -76,12 +76,23 @@ void think_service_destroy(think_service_t *svc);
 /**
  * @brief Dual-think processing: input prompt -> cognitive engine (GCCP +
  *        GRAD) -> JSON result.
+ *
+ * GCCP 两段式交互（P-A, 2026-08-23）：当 GCCP 判定输入需要澄清时——
+ *   第一段：gccp_answers 传 NULL。引擎挂起并返回问题集，结果 JSON 含
+ *     {"gccp_need_interaction":1,"gccp_questions":[{id,question,hint,
+ *     required}...]}（返回 0，客户端据此进入问答轮，不浪费后续 Phase token）。
+ *   第二段：客户端收集答案后以 answers JSON（如 {"endpoint":"...",
+ *     "start":"...","bottleneck":"...","audience":"..."}）重发，引擎据此
+ *     完成目标确认并继续 GCCP+GRAD 完整链路（结果含 plan/feedback/stats）。
+ *   用户放弃问答：直接省略重发即可（无副作用）。
+ *
  * @param svc Service handle
  * @param prompt User input (UTF-8)
+ * @param gccp_answers 用户答案 JSON（可 NULL；第二段携带）
  * @param out_result Output result (OWNER, caller frees via think_result_free)
- * @return 0 on success, non-zero on failure
+ * @return 0 on success (含 gccp_need_interaction=1 的问答轮), non-zero on failure
  */
-int think_service_process(think_service_t *svc, const char *prompt,
+int think_service_process(think_service_t *svc, const char *prompt, const char *gccp_answers,
                           think_process_result_t *out_result);
 
 void think_result_free(think_process_result_t *res);

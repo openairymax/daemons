@@ -288,12 +288,15 @@ char *gw_svc_call(const char *sock_path, const char *method, const char *params_
  *
  * @param ctx       Gateway context
  * @param prompt    User input
+ * @param gccp_answers GCCP 两段式交互第二段答案 JSON（可 NULL；见 think_service.h）
  * @param out_think Dual-thinking result JSON (cJSON object, caller cJSON_Delete):
- *        {plan:{...DAG...}, feedback:[...], stats:{...}}
+ *        {plan:{...DAG...}, feedback:[...], stats:{...}}；交互轮时含
+ *        {gccp_need_interaction:1, gccp_questions:[...]}（第一段挂起返回）
  * @return 0 on success (*out_think valid); non-zero on failure
  *         (think_d unreachable/timed out, degraded to direct call)
  */
-int gw_think_process(const gateway_business_ctx_t *ctx, const char *prompt, cJSON **out_think)
+int gw_think_process(const gateway_business_ctx_t *ctx, const char *prompt,
+                     const char *gccp_answers, cJSON **out_think)
 {
     *out_think = NULL;
     if (!ctx || !prompt || !*prompt)
@@ -304,6 +307,9 @@ int gw_think_process(const gateway_business_ctx_t *ctx, const char *prompt, cJSO
         return -1;
     cJSON *p = cJSON_CreateString(prompt);
     cJSON_AddItemToObject(params, "prompt", p);
+    if (gccp_answers && *gccp_answers) {
+        cJSON_AddStringToObject(params, "gccp_answers", gccp_answers);
+    }
     char *params_str = cJSON_PrintUnformatted(params);
     cJSON_Delete(params);
     if (!params_str)
