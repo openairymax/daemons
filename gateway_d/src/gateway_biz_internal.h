@@ -155,7 +155,8 @@ extern const gw_ns_forward_rule_t GW_NS_CUPOLAS;
 /* ---- gateway_biz_llm.c (LLM calls + tool loop) ---- */
 int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model, const char *prompt,
                      const cJSON *history, gw_active_request_t *active, cJSON **out_trace,
-                     char **out_text, uint64_t *out_tokens, double *out_cost);
+                     char **out_text, uint64_t *out_tokens, double *out_cost,
+                     char **out_reasoning);
 
 /* ---- gateway_biz_agent.c (agent.run orchestration) ---- */
 bool gw_active_is_cancelled(gw_active_request_t *entry);
