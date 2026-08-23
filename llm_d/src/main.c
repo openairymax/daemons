@@ -789,13 +789,16 @@ static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd
 
     if (resp) {
         /* 2.1.1.5 修复：流式结束发送 usage 控制帧（RS 'U' body RS），
-         * 携带真实 token 消耗——此前流式路径完全不回传 usage，IPC 客户端
-         * 的流式 token 统计与计费恒为 0。adapter 侧按帧协议解析。 */
+         * 携带真实 token 消耗与计费金额——此前流式路径完全不回传 usage，
+         * IPC 客户端的流式 token 统计与计费恒为 0。adapter 侧按帧协议
+         * 解析；cost_usd 由 update_cost_tracking 回填（该帧同步带上，
+         * 使 gateway SSE 透传的 usage 事件包含真实费用）。 */
         char usage_frame[256];
         int ufn = snprintf(usage_frame, sizeof(usage_frame),
                            "\x1eU{\"prompt_tokens\":%u,\"completion_tokens\":%u,"
-                           "\"total_tokens\":%u}\x1e",
-                           resp->prompt_tokens, resp->completion_tokens, resp->total_tokens);
+                           "\"total_tokens\":%u,\"cost_usd\":%.6f}\x1e",
+                           resp->prompt_tokens, resp->completion_tokens, resp->total_tokens,
+                           resp->cost_usd);
         if (ufn > 0)
             llm_stream_send_all(client_fd, usage_frame, (size_t)ufn);
         llm_response_free(resp);
