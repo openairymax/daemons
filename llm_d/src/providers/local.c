@@ -174,7 +174,7 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
 /* Streaming tool-call accumulation: local (OpenAI-compatible) providers
  * stream tool_call deltas in the standard {index, id?} then
  * {index, function.{name?, arguments}} shape. The complete array is emitted
- * once at stream end as a control frame (see loc_emit_tool_frame). */
+ * once at stream end as a control frame (see provider_emit_tool_frame). */
 #define LOC_STREAM_MAX_TOOL_CALLS 16
 
 typedef struct {
@@ -196,6 +196,14 @@ typedef struct {
     char *resp_model;
     uint64_t resp_created;
     char *finish_reason;
+    /* Streaming usage accumulation: local OpenAI-compatible endpoints
+     * (Ollama/vLLM/llama.cpp) attach the usage block in the final chunk when
+     * stream_options.include_usage is set; parse it so streaming token
+     * stats are not always zero. */
+    uint32_t prompt_tokens;
+    uint32_t completion_tokens;
+    uint32_t total_tokens;
+    uint32_t reasoning_tokens;
     loc_tool_acc_t tools[LOC_STREAM_MAX_TOOL_CALLS];
     size_t tool_count;
 } loc_stream_acc_t;
@@ -263,22 +271,6 @@ static char *loc_build_tool_calls_json(const loc_stream_acc_t *acc)
     char *js = cJSON_PrintUnformatted(arr);
     cJSON_Delete(arr);
     return js;
-}
-
-/* Control frame: RS 'T' <json> RS (see oai.c for the framing rationale). */
-#define LOC_STREAM_FRAME_RS 0x1e
-#define LOC_STREAM_FRAME_TAG 'T'
-
-static void loc_emit_tool_frame(llm_stream_callback_t cb, void *ud, const char *tc_json)
-{
-    if (!cb || !tc_json)
-        return;
-    /* 帧各段须 NUL 结尾：llm_stream_callback 对 chunk 调 strlen()。 */
-    char pre[3] = {(char)LOC_STREAM_FRAME_RS, LOC_STREAM_FRAME_TAG, '\0'};
-    char post[2] = {(char)LOC_STREAM_FRAME_RS, '\0'};
-    cb(pre, ud);
-    cb(tc_json, ud);
-    cb(post, ud);
 }
 
 static void loc_stream_tools_cleanup(loc_stream_acc_t *acc)
@@ -390,6 +382,29 @@ static int loc_stream_on_chunk(const char *json_line, void *userdata)
         }
     }
 
+    /* 流式末尾 chunk 携带 usage（include_usage 时最后 chunk 仅 usage 无
+     * choices）。最后一次解析覆盖前面（usage 在流末尾最完整）。 */
+    cJSON *usage = cJSON_GetObjectItem(root, "usage");
+    if (cJSON_IsObject(usage)) {
+        cJSON *pt = cJSON_GetObjectItem(usage, "prompt_tokens");
+        cJSON *ct = cJSON_GetObjectItem(usage, "completion_tokens");
+        cJSON *tt = cJSON_GetObjectItem(usage, "total_tokens");
+        if (cJSON_IsNumber(pt))
+            acc->prompt_tokens = (uint32_t)pt->valuedouble;
+        if (cJSON_IsNumber(ct))
+            acc->completion_tokens = (uint32_t)ct->valuedouble;
+        if (cJSON_IsNumber(tt))
+            acc->total_tokens = (uint32_t)tt->valuedouble;
+        cJSON *rt = cJSON_GetObjectItem(usage, "reasoning_tokens");
+        if (!cJSON_IsNumber(rt)) {
+            cJSON *details = cJSON_GetObjectItem(usage, "completion_tokens_details");
+            if (cJSON_IsObject(details))
+                rt = cJSON_GetObjectItem(details, "reasoning_tokens");
+        }
+        if (cJSON_IsNumber(rt))
+            acc->reasoning_tokens = (uint32_t)rt->valuedouble;
+    }
+
     return 0;
 }
 
@@ -416,6 +431,10 @@ static llm_response_t *loc_build_stream_response(loc_stream_acc_t *acc)
     }
     resp->finish_reason = acc->finish_reason ? acc->finish_reason : AIRY_STRDUP("stop");
     acc->finish_reason = NULL;
+    resp->prompt_tokens = acc->prompt_tokens;
+    resp->completion_tokens = acc->completion_tokens;
+    resp->total_tokens = acc->total_tokens;
+    resp->reasoning_tokens = acc->reasoning_tokens;
     return resp;
 }
 
@@ -500,7 +519,7 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
     if (acc.tool_count > 0) {
         char *tc_json = loc_build_tool_calls_json(&acc);
         if (tc_json) {
-            loc_emit_tool_frame(callback, user_data, tc_json);
+            provider_emit_tool_frame(callback, user_data, tc_json);
             if (resp && resp->choices && resp->choice_count > 0 && !resp->choices[0].tool_calls_json)
                 resp->choices[0].tool_calls_json = tc_json;
             else
