@@ -405,6 +405,12 @@ static int parse_args(int argc, char *argv[], gateway_service_config_t *config)
         if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             exit(0);
+        } else if (strcmp(argv[i], "--manager") == 0 && i + 1 < argc) {
+            /* 兼容 bootstrap 统一 daemon 启动参数：--manager 指向 agentrt.yaml
+             * 全局配置（bootstrap 对全部 daemon 一致传参）。gateway_d 细粒度
+             * 配置仍以默认值 + 环境变量为准（load_config 仅解析 key=value，
+             * 不解析 YAML；缺失时保持默认 8080/8081，与 agentrt.yaml 一致）。 */
+            i++;
         } else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
             airy_err_t err = gateway_service_load_config(config, argv[++i]);
             if (err != AIRY_SUCCESS) {
