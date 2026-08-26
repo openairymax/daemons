@@ -12,6 +12,7 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 set(MATHS_D_SOURCES
     src/main.c
     src/maths_service.c
+    src/expr_eval.c
     src/python_backend.c
 )
 
