@@ -12,6 +12,7 @@
  */
 
 #include "svc_common.h"
+#include "airyrt_version.h"
 #include "svc_logger.h"
 #include "tool_service.h"
 
@@ -197,7 +198,7 @@ airy_err_t tool_service_adapter_create(airy_svc_t *out_service, const airy_svc_c
         }
     } else {
         ctx->common_cfg.name = "tool_d";
-        ctx->common_cfg.version = "0.1.1";
+        ctx->common_cfg.version = AIRYRT_VERSION;
         ctx->common_cfg.capabilities = AIRY_SVC_CAP_ASYNC;
         ctx->common_cfg.enable_metrics = true;
     }
@@ -251,7 +252,7 @@ airy_err_t tool_service_adapter_wrap(airy_svc_t *out_service, tool_service_t *to
         ctx->common_cfg.enable_tracing = config->enable_tracing;
     } else {
         ctx->common_cfg.name = "tool_d";
-        ctx->common_cfg.version = "0.1.1";
+        ctx->common_cfg.version = AIRYRT_VERSION;
     }
 
     airy_svc_t svc_handle = NULL;
