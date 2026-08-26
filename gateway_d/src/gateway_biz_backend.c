@@ -21,6 +21,8 @@
 #include "logging.h"
 #include "platform.h"
 
+#include "syscalls.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,9 +65,12 @@ int gw_biz_tool_exec(const char *tool_name, const char *arguments_json, char **r
         return -1;
     }
 
-    char *resp = gw_svc_call(ctx->tool_sock_path, "execute_tool", params_str, GW_TOOL_TIMEOUT_MS);
+    /* 架构约束 2026-08-25 "必须走 syscall": tool.execute_tool 经 SYS_SVC_CALL 派发 */
+    char *resp = NULL;
+    airy_err_t rc = airy_sys_svc_call("tool", "execute_tool", params_str, GW_TOOL_TIMEOUT_MS,
+                                      &resp);
     AIRY_FREE(params_str);
-    if (!resp) {
+    if (rc != AIRY_SUCCESS || !resp) {
         *result_json = AIRY_STRDUP("\"Tool service unreachable\"");
         return -1;
     }
@@ -139,10 +144,12 @@ int gw_biz_llm_embeddings(const char *model, const char *input_json, char **resp
     if (!params_str)
         return -1;
 
-    char *resp =
-        gw_svc_call(ctx->llm_sock_path, "embeddings", params_str, GW_LLM_DEFAULT_TIMEOUT_MS);
+    /* 架构约束 2026-08-25 "必须走 syscall": llm.embeddings 经 SYS_SVC_CALL 派发 */
+    char *resp = NULL;
+    airy_err_t rc = airy_sys_svc_call("llm", "embeddings", params_str, GW_LLM_DEFAULT_TIMEOUT_MS,
+                                      &resp);
     AIRY_FREE(params_str);
-    if (!resp)
+    if (rc != AIRY_SUCCESS || !resp)
         return -1;
 
     cJSON *root = cJSON_Parse(resp);
@@ -203,9 +210,12 @@ int gw_biz_llm_complete(const char *model, const char *messages_json, const char
     if (!params_str)
         return -1;
 
-    char *resp = gw_svc_call(ctx->llm_sock_path, "complete", params_str, GW_LLM_DEFAULT_TIMEOUT_MS);
+    /* 架构约束 2026-08-25 "必须走 syscall": llm.complete 经 SYS_SVC_CALL 派发 */
+    char *resp = NULL;
+    airy_err_t rc = airy_sys_svc_call("llm", "complete", params_str, GW_LLM_DEFAULT_TIMEOUT_MS,
+                                      &resp);
     AIRY_FREE(params_str);
-    if (!resp)
+    if (rc != AIRY_SUCCESS || !resp)
         return -1;
 
     cJSON *root = cJSON_Parse(resp);
@@ -308,9 +318,12 @@ int gw_biz_sched_schedule(const char *task_id, const char *task_type, const char
     if (!params_str)
         return -1;
 
-    char *resp = gw_svc_call(ctx->sched_sock_path, "schedule_task", params_str, GW_TOOL_TIMEOUT_MS);
+    /* 架构约束 2026-08-25 "必须走 syscall": sched.schedule_task 经 SYS_SVC_CALL 派发 */
+    char *resp = NULL;
+    airy_err_t svc_rc = airy_sys_svc_call("sched", "schedule_task", params_str,
+                                          GW_TOOL_TIMEOUT_MS, &resp);
     AIRY_FREE(params_str);
-    if (!resp)
+    if (svc_rc != AIRY_SUCCESS || !resp)
         return -1;
 
     cJSON *root = cJSON_Parse(resp);

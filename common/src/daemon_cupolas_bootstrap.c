@@ -45,10 +45,16 @@ airy_err_t daemon_cupolas_init(const char *daemon_name)
     sec_config.sanitize_level = SANITIZE_LEVEL_STRICT;
     sec_config.sanitizer_rules_path = NULL;
     /* Tool-level permission rules (SSoT): $AIRY_CONFIG_DIR/cupolas/permission_rules.yaml.
-     * Absent file keeps the ACL empty (fail-closed) so tool_d denies all tools. */
+     * Absent file keeps the ACL empty (fail-closed) so tool_d denies all tools.
+     * 兼容旧部署：cupolas/ 子目录缺失时回退到 $AIRY_CONFIG_DIR/permission_rules.yaml，
+     * 避免规则文件存在却因目录约定不一致导致 ACL 为空（subagent 工具全部被拒）。 */
     static char g_perm_rules_path[512];
     snprintf(g_perm_rules_path, sizeof(g_perm_rules_path), "%s/cupolas/permission_rules.yaml",
              airy_config_dir());
+    if (!airy_file_exists(g_perm_rules_path)) {
+        snprintf(g_perm_rules_path, sizeof(g_perm_rules_path), "%s/permission_rules.yaml",
+                 airy_config_dir());
+    }
     sec_config.permission_rules_path = g_perm_rules_path;
     sec_config.enable_permission_cache = true;
     sec_config.enable_signature_verification = false;

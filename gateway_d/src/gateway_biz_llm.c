@@ -21,6 +21,8 @@
 #include "logging.h"
 #include "platform.h"
 
+#include "syscalls.h"
+
 /* Builtin tool OpenAI tools schema (SSoT): one-to-one with the tools
  * registered in tool_d builtin.c/service.c. All "required" fields must
  * match the parameter sets registered in tool_d: its validator treats
@@ -34,313 +36,31 @@
 #include <string.h>
 #include <time.h>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <sys/time.h>
-#include <unistd.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#endif
-
-#ifdef _WIN32
-static int llm_connect_tcp(const gateway_business_ctx_t *ctx)
-{
-    SOCKET fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd == INVALID_SOCKET)
-        return -1;
-    struct sockaddr_in addr;
-    AIRY_MEMSET(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(ctx->llm_tcp_port);
-    inet_pton(AF_INET, ctx->llm_tcp_addr, &addr.sin_addr);
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        closesocket(fd);
-        return -1;
-    }
-    return (int)fd;
-}
-#else
-static int llm_connect_unix(const char *sock_path)
-{
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0)
-        return -1;
-    struct sockaddr_un addr;
-    AIRY_MEMSET(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    AIRY_STRNCPY_TERM(addr.sun_path, sock_path, sizeof(addr.sun_path));
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        close(fd);
-        return -1;
-    }
-    return fd;
-}
-#endif
-
-/**
- * @brief Send a JSON-RPC complete request to llm_d and read the response
- * @return Response string (AIRY_MALLOC), or NULL on failure
- */
-static char *llm_call_complete(const gateway_business_ctx_t *ctx, const char *req_json)
-{
-    int fd;
-#ifdef _WIN32
-    fd = llm_connect_tcp(ctx);
-#else
-    fd = llm_connect_unix(ctx->llm_sock_path);
-#endif
-    if (fd < 0) {
-        AIRY_LOG_WARN("gateway handler: cannot connect to llm_d (sock=%s)", ctx->llm_sock_path);
-        return NULL;
-    }
-
-#ifdef _WIN32
-    int timeout_ms = GW_LLM_DEFAULT_TIMEOUT_MS;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout_ms, sizeof(timeout_ms));
-#else
-    struct timeval tv = {GW_LLM_DEFAULT_TIMEOUT_MS / 1000,
-                         (GW_LLM_DEFAULT_TIMEOUT_MS % 1000) * 1000};
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-#endif
-
-    size_t len = strlen(req_json);
-    size_t sent_total = 0;
-    while (sent_total < len) {
-#ifdef _WIN32
-        int n = send(fd, req_json + sent_total, (int)(len - sent_total), 0);
-#else
-        ssize_t n = send(fd, req_json + sent_total, len - sent_total, 0);
-#endif
-        if (n <= 0) {
-#ifdef _WIN32
-            closesocket(fd);
-#else
-            close(fd);
-#endif
-            return NULL;
-        }
-        sent_total += (size_t)n;
-    }
-
-    size_t cap = 4096;
-    size_t used = 0;
-    char *resp = (char *)AIRY_MALLOC(cap);
-    if (!resp) {
-#ifdef _WIN32
-        closesocket(fd);
-#else
-        close(fd);
-#endif
-        return NULL;
-    }
-    resp[0] = '\0';
-
-    char buf[4096];
-    for (;;) {
-#ifdef _WIN32
-        int n = recv(fd, buf, sizeof(buf), 0);
-#else
-        ssize_t n = recv(fd, buf, sizeof(buf), 0);
-#endif
-        if (n <= 0)
-            break;
-        if (used + (size_t)n + 1 > cap) {
-            size_t new_cap = (used + (size_t)n + 1) * 2;
-            if (new_cap > GW_LLM_MAX_RESP) {
-                AIRY_FREE(resp);
-#ifdef _WIN32
-                closesocket(fd);
-#else
-                close(fd);
-#endif
-                return NULL;
-            }
-            char *np = (char *)AIRY_REALLOC(resp, new_cap);
-            if (!np) {
-                AIRY_FREE(resp);
-#ifdef _WIN32
-                closesocket(fd);
-#else
-                close(fd);
-#endif
-                return NULL;
-            }
-            resp = np;
-            cap = new_cap;
-        }
-        AIRY_MEMCPY(resp + used, buf, (size_t)n);
-        used += (size_t)n;
-        resp[used] = '\0';
-    }
-
-#ifdef _WIN32
-    closesocket(fd);
-#else
-    close(fd);
-#endif
-    return resp;
-}
-
 static const char GW_TOOLS_JSON[] = GW_TOOLS_JSON_SOURCE;
 
 /**
- * @brief Send a JSON-RPC request to tool_d and read the response (POSIX Unix socket)
- * @return Response string (AIRY_MALLOC), or NULL on failure
+ * @brief Build the llm_d complete JSON-RPC request (passes through the tools array)
+ * @param model    Model name
+ * @param messages Conversation history (cJSON array, deep-copied into the request)
+ * @return JSON request string (AIRY_MALLOC), or NULL on failure
  */
-static char *tool_call_rpc(const gateway_business_ctx_t *ctx, const char *req_json)
+static char *gw_build_llm_params(const char *model, const cJSON *messages)
 {
-#ifndef _WIN32
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0)
+    cJSON *llm_params = cJSON_CreateObject();
+    if (!llm_params)
         return NULL;
-    struct sockaddr_un addr;
-    AIRY_MEMSET(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    AIRY_STRNCPY_TERM(addr.sun_path, ctx->tool_sock_path, sizeof(addr.sun_path));
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        AIRY_LOG_WARN("gateway handler: cannot connect to tool_d (sock=%s)", ctx->tool_sock_path);
-        close(fd);
-        return NULL;
+    cJSON_AddStringToObject(llm_params, "model", model);
+    cJSON_AddItemToObject(llm_params, "messages", cJSON_Duplicate(messages, 1));
+    cJSON *tools = cJSON_Parse(GW_TOOLS_JSON);
+    if (tools) {
+        cJSON_AddItemToObject(llm_params, "tools", tools);
     }
+    cJSON_AddNumberToObject(llm_params, "max_tokens", 2048);
+    cJSON_AddNumberToObject(llm_params, "temperature", 0.7);
 
-    struct timeval tv = {GW_TOOL_TIMEOUT_MS / 1000, (GW_TOOL_TIMEOUT_MS % 1000) * 1000};
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    size_t len = strlen(req_json);
-    size_t sent = 0;
-    while (sent < len) {
-        ssize_t n = send(fd, req_json + sent, len - sent, 0);
-        if (n <= 0) {
-            close(fd);
-            return NULL;
-        }
-        sent += (size_t)n;
-    }
-
-    size_t cap = 65536;
-    size_t used = 0;
-    char *resp = (char *)AIRY_MALLOC(cap);
-    if (!resp) {
-        close(fd);
-        return NULL;
-    }
-    resp[0] = '\0';
-    char buf[4096];
-    for (;;) {
-        ssize_t n = recv(fd, buf, sizeof(buf), 0);
-        if (n <= 0)
-            break;
-        if (used + (size_t)n + 1 > cap) {
-            size_t new_cap = (used + (size_t)n + 1) * 2;
-            if (new_cap > GW_LLM_MAX_RESP) {
-                AIRY_FREE(resp);
-                close(fd);
-                return NULL;
-            }
-            char *np = (char *)AIRY_REALLOC(resp, new_cap);
-            if (!np) {
-                AIRY_FREE(resp);
-                close(fd);
-                return NULL;
-            }
-            resp = np;
-            cap = new_cap;
-        }
-        AIRY_MEMCPY(resp + used, buf, (size_t)n);
-        used += (size_t)n;
-        resp[used] = '\0';
-    }
-    close(fd);
-    return resp;
-#else
-    /* Windows：daemon 统一走 TCP 回环（见 daemon_main.h parse_args），
-     * ctx->tool_sock_path 约定为 "host:port"（如 "127.0.0.1:8081"）。 */
-    SOCKET fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd == INVALID_SOCKET)
-        return NULL;
-
-    char host[128];
-    char port_str[16];
-    const char *colon = ctx->tool_sock_path ? strrchr(ctx->tool_sock_path, ':') : NULL;
-    if (!colon || colon == ctx->tool_sock_path ||
-        (size_t)(colon - ctx->tool_sock_path) >= sizeof(host) ||
-        strlen(colon + 1) >= sizeof(port_str)) {
-        closesocket(fd);
-        return NULL;
-    }
-    size_t host_len = (size_t)(colon - ctx->tool_sock_path);
-    AIRY_MEMCPY(host, ctx->tool_sock_path, host_len);
-    host[host_len] = '\0';
-    AIRY_STRNCPY_TERM(port_str, colon + 1, sizeof(port_str));
-    struct sockaddr_in addr;
-    AIRY_MEMSET(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)atoi(port_str));
-    if (inet_pton(AF_INET, host, &addr.sin_addr) <= 0)
-        addr.sin_addr.s_addr = INADDR_LOOPBACK;
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        AIRY_LOG_WARN("gateway handler: cannot connect to tool_d (%s)",
-                      ctx->tool_sock_path);
-        closesocket(fd);
-        return NULL;
-    }
-
-    int timeout_ms_win = GW_TOOL_TIMEOUT_MS;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout_ms_win,
-               sizeof(timeout_ms_win));
-
-    size_t len = strlen(req_json);
-    size_t sent = 0;
-    while (sent < len) {
-        int n = send(fd, req_json + sent, (int)(len - sent), 0);
-        if (n <= 0) {
-            closesocket(fd);
-            return NULL;
-        }
-        sent += (size_t)n;
-    }
-
-    size_t cap = 65536;
-    size_t used = 0;
-    char *resp = (char *)AIRY_MALLOC(cap);
-    if (!resp) {
-        closesocket(fd);
-        return NULL;
-    }
-    resp[0] = '\0';
-    char buf[4096];
-    for (;;) {
-        int n = recv(fd, buf, sizeof(buf), 0);
-        if (n <= 0)
-            break;
-        if (used + (size_t)n + 1 > cap) {
-            size_t new_cap = (used + (size_t)n + 1) * 2;
-            if (new_cap > GW_LLM_MAX_RESP) {
-                AIRY_FREE(resp);
-                closesocket(fd);
-                return NULL;
-            }
-            char *np = (char *)AIRY_REALLOC(resp, new_cap);
-            if (!np) {
-                AIRY_FREE(resp);
-                closesocket(fd);
-                return NULL;
-            }
-            resp = np;
-            cap = new_cap;
-        }
-        AIRY_MEMCPY(resp + used, buf, (size_t)n);
-        used += (size_t)n;
-        resp[used] = '\0';
-    }
-    closesocket(fd);
-    return resp;
-#endif
+    char *params_str = cJSON_PrintUnformatted(llm_params);
+    cJSON_Delete(llm_params);
+    return params_str;
 }
 
 /**
@@ -458,33 +178,32 @@ static int gw_execute_tool(const gateway_business_ctx_t *ctx, const char *name,
                            const char *args_json, char **out_text)
 {
     *out_text = NULL;
+    (void)ctx; /* 端点解析统一由 svc dispatch 钩子按命名空间完成 */
 
     if (gw_acl_check_tool(name) != 0) {
         *out_text = AIRY_STRDUP("Permission denied: tool not authorized");
         return -1;
     }
 
-    cJSON *req = cJSON_CreateObject();
-    if (!req)
-        return -1;
-    cJSON_AddStringToObject(req, "jsonrpc", "2.0");
-    cJSON_AddNumberToObject(req, "id", 1);
-    cJSON_AddStringToObject(req, "method", "execute_tool");
     cJSON *params = cJSON_CreateObject();
+    if (!params)
+        return -1;
     cJSON_AddStringToObject(params, "tool_id", name);
     cJSON *pargs = cJSON_Parse(args_json && args_json[0] ? args_json : "{}");
     if (!pargs)
         pargs = cJSON_CreateObject();
     cJSON_AddItemToObject(params, "params", pargs);
-    cJSON_AddItemToObject(req, "params", params);
-    char *req_str = cJSON_PrintUnformatted(req);
-    cJSON_Delete(req);
-    if (!req_str)
+    char *params_str = cJSON_PrintUnformatted(params);
+    cJSON_Delete(params);
+    if (!params_str)
         return -1;
 
-    char *resp = tool_call_rpc(ctx, req_str);
-    AIRY_FREE(req_str);
-    if (!resp) {
+    /* 架构约束 2026-08-25 "必须走 syscall": tool.execute_tool 经 SYS_SVC_CALL 派发 */
+    char *resp = NULL;
+    airy_err_t rc = airy_sys_svc_call("tool", "execute_tool", params_str, GW_TOOL_TIMEOUT_MS,
+                                      &resp);
+    AIRY_FREE(params_str);
+    if (rc != AIRY_SUCCESS || !resp) {
         *out_text = AIRY_STRDUP("Tool service unreachable");
         return -1;
     }
@@ -532,40 +251,6 @@ static int gw_execute_tool(const gateway_business_ctx_t *ctx, const char *name,
     *out_text = text;
     cJSON_Delete(root);
     return tool_ok ? 0 : -1;
-}
-
-/**
- * @brief Build the llm_d complete JSON-RPC request (passes through the tools array)
- * @param model    Model name
- * @param messages Conversation history (cJSON array, deep-copied into the request)
- * @return JSON request string (AIRY_MALLOC), or NULL on failure
- */
-static char *gw_build_llm_request(const char *model, const cJSON *messages)
-{
-    cJSON *llm_req = cJSON_CreateObject();
-    if (!llm_req)
-        return NULL;
-    cJSON_AddStringToObject(llm_req, "jsonrpc", "2.0");
-    cJSON_AddNumberToObject(llm_req, "id", 1);
-    cJSON_AddStringToObject(llm_req, "method", "complete");
-    cJSON *llm_params = cJSON_CreateObject();
-    if (!llm_params) {
-        cJSON_Delete(llm_req);
-        return NULL;
-    }
-    cJSON_AddStringToObject(llm_params, "model", model);
-    cJSON_AddItemToObject(llm_params, "messages", cJSON_Duplicate(messages, 1));
-    cJSON *tools = cJSON_Parse(GW_TOOLS_JSON);
-    if (tools) {
-        cJSON_AddItemToObject(llm_params, "tools", tools);
-    }
-    cJSON_AddNumberToObject(llm_params, "max_tokens", 2048);
-    cJSON_AddNumberToObject(llm_params, "temperature", 0.7);
-    cJSON_AddItemToObject(llm_req, "params", llm_params);
-
-    char *req_str = cJSON_PrintUnformatted(llm_req);
-    cJSON_Delete(llm_req);
-    return req_str;
 }
 
 /**
@@ -642,13 +327,16 @@ int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model, const
             break;
         }
 
-        char *llm_req_str = gw_build_llm_request(model, messages);
-        if (!llm_req_str) {
+        char *llm_params_str = gw_build_llm_params(model, messages);
+        if (!llm_params_str) {
             break;
         }
-        char *llm_resp = llm_call_complete(ctx, llm_req_str);
-        AIRY_FREE(llm_req_str);
-        if (!llm_resp) {
+        /* 架构约束 2026-08-25 "必须走 syscall": llm.complete 经 SYS_SVC_CALL 派发 */
+        char *llm_resp = NULL;
+        airy_err_t lrc = airy_sys_svc_call("llm", "complete", llm_params_str,
+                                           GW_LLM_DEFAULT_TIMEOUT_MS, &llm_resp);
+        AIRY_FREE(llm_params_str);
+        if (lrc != AIRY_SUCCESS || !llm_resp) {
             break;
         }
 

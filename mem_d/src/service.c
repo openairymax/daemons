@@ -35,6 +35,14 @@
 #include <string.h>
 #include <time.h>
 
+#ifndef _WIN32
+#include <unistd.h>
+#else
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <io.h>
+#endif
+
 #define MEM_DEFAULT_MAX_RECORDS 1024
 #define MEM_RECORD_ID_LEN 33
 #define MEM_HASH_LOAD_FACTOR 4 /* capacity = max_records * 4 */
@@ -377,9 +385,19 @@ static void mem_persist_rewrite_all(mem_service_t *svc)
         svc->jsonl_append_fp = NULL;
     }
 
-    FILE *f = fopen(svc->jsonl_path, "w");
+    /* P2: write to a temp file in the same directory, fsync, then rename over
+     * the target so a crash mid-rewrite never truncates the whole memory
+     * store. */
+    char tmppath[4096];
+    if (snprintf(tmppath, sizeof(tmppath), "%s.tmp", svc->jsonl_path) >=
+        (int)sizeof(tmppath)) {
+        SVC_LOG_WARN("mem_d persist: rewrite tmp path too long (path=%s)", svc->jsonl_path);
+        return;
+    }
+
+    FILE *f = fopen(tmppath, "w");
     if (!f) {
-        SVC_LOG_WARN("mem_d persist: open rewrite failed (path=%s errno=%d)", svc->jsonl_path,
+        SVC_LOG_WARN("mem_d persist: open rewrite tmp failed (path=%s errno=%d)", tmppath,
                      errno);
         return;
     }
@@ -393,17 +411,53 @@ static void mem_persist_rewrite_all(mem_service_t *svc)
         if (!data_esc)
             continue;
         const char *meta = rec->metadata ? rec->metadata : "null";
-        fprintf(f,
-                "{\"record_id\":\"%s\",\"data\":\"%s\",\"metadata\":%s,\"created_at\":%llu,\"len\":"
-                "%zu}\n",
-                rec->record_id, data_esc, meta, (unsigned long long)rec->created_at, rec->len);
+        int wrc = fprintf(f,
+                          "{\"record_id\":\"%s\",\"data\":\"%s\",\"metadata\":%s,\"created_at\":"
+                          "%llu,\"len\":%zu}\n",
+                          rec->record_id, data_esc, meta, (unsigned long long)rec->created_at,
+                          rec->len);
         AIRY_FREE(data_esc);
+        if (wrc < 0) {
+            /* 写失败（ENOSPC/EIO）：终止全量重写并告警，避免静默丢记忆 */
+            SVC_LOG_WARN("mem_d persist: rewrite write failed (errno=%d)", errno);
+            fclose(f);
+            remove(tmppath);
+            return;
+        }
     }
 
-    if (fflush(f) != 0) {
-        SVC_LOG_WARN("mem_d persist: rewrite fflush failed (errno=%d)", errno);
+    int failed = (fflush(f) != 0);
+#ifndef _WIN32
+    if (!failed) {
+        int fd = fileno(f);
+        if (fd >= 0 && fsync(fd) != 0)
+            failed = 1;
     }
-    fclose(f);
+#else
+    if (!failed) {
+        int fd = _fileno(f);
+        if (fd >= 0 && _commit(fd) != 0)
+            failed = 1;
+    }
+#endif
+    if (fclose(f) != 0)
+        failed = 1;
+
+    if (failed) {
+        SVC_LOG_WARN("mem_d persist: rewrite flush failed (errno=%d)", errno);
+        remove(tmppath);
+        return;
+    }
+
+#ifndef _WIN32
+    if (rename(tmppath, svc->jsonl_path) != 0) {
+#else
+    if (!MoveFileExA(tmppath, svc->jsonl_path, MOVEFILE_REPLACE_EXISTING)) {
+#endif
+        SVC_LOG_WARN("mem_d persist: rewrite rename failed (errno=%d)", errno);
+        remove(tmppath);
+        return;
+    }
 }
 
 static void mem_persist_load_existing(mem_service_t *svc)
@@ -661,16 +715,29 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char *
 
     mem_persist_append_record(svc, rec);
 
+    /* 解锁前先拷贝内容到本地缓冲：rec->data 属于服务内部记录，并发
+     * mem_service_delete 在锁内 AIRY_FREE(rec->data) 并搬移数组，锁外
+     * 再读 rec->data 构成 use-after-free（P0，2026-08-25 修复）。仅在
+     * 确实需要 embedding 时拷贝，避免无 embedding 后端时的浪费。 */
+    char *data_copy = NULL;
+    if (mem_emb_should_try(&svc->emb) && rec->data && rec->len > 0) {
+        data_copy = (char *)AIRY_MALLOC(rec->len + 1);
+        if (data_copy) {
+            __builtin_memcpy(data_copy, rec->data, rec->len);
+            data_copy[rec->len] = '\0';
+        }
+    }
+
     airy_mtx_unlock(&svc->lock);
 
     /* Optional embedding enhancement: make the network call outside the lock
      * (avoid blocking while holding it); on success backfill the vector; on
      * failure emb_client already marks unhealthy and cools down, degrading to
      * TF-IDF automatically */
-    if (mem_emb_should_try(&svc->emb)) {
+    if (data_copy) {
         float *emb_vec = NULL;
         size_t emb_dim = 0;
-        if (mem_emb_embed(&svc->emb, (const char *)rec->data, &emb_vec, &emb_dim) == AIRY_SUCCESS &&
+        if (mem_emb_embed(&svc->emb, data_copy, &emb_vec, &emb_dim) == AIRY_SUCCESS &&
             emb_vec && emb_dim > 0) {
             airy_mtx_lock(&svc->lock);
             ssize_t eidx = mem_ht_lookup(&svc->record_index, *out_record_id);
@@ -682,6 +749,7 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char *
             }
             airy_mtx_unlock(&svc->lock);
         }
+        AIRY_FREE(data_copy);
         AIRY_FREE(emb_vec);
     }
 
@@ -1134,6 +1202,85 @@ size_t mem_service_count(mem_service_t *svc)
     size_t c = svc->record_count;
     airy_mtx_unlock(&svc->lock);
     return c;
+}
+
+#define MEM_RECENT_DEFAULT_LIMIT 10
+
+int mem_service_recent(mem_service_t *svc, uint32_t limit,
+                       mem_recent_item_t **out_items, size_t *out_count)
+{
+    if (!svc || !svc->initialized || !out_items || !out_count)
+        return AIRY_ERR_INVALID_PARAM;
+    *out_items = NULL;
+    *out_count = 0;
+
+    if (limit == 0)
+        limit = MEM_RECENT_DEFAULT_LIMIT;
+
+    airy_mtx_lock(&svc->lock);
+
+    size_t total = svc->record_count;
+    if (total == 0) {
+        airy_mtx_unlock(&svc->lock);
+        return AIRY_SUCCESS;
+    }
+
+    size_t take = total < limit ? total : limit;
+    /* 越界防溢出（take 已 ≤ total，total 受 max_records 约束，安全） */
+    mem_recent_item_t *items =
+        (mem_recent_item_t *)AIRY_CALLOC(take, sizeof(mem_recent_item_t));
+    if (!items) {
+        airy_mtx_unlock(&svc->lock);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    size_t n = 0;
+    /* 数组按写入序排列，尾部最新；倒序返回（新 → 旧） */
+    for (size_t i = 0; i < take; i++) {
+        const mem_record_entry_t *rec = &svc->records[total - 1 - i];
+        if (!rec->record_id || !rec->data)
+            continue;
+        mem_recent_item_t *it = &items[n];
+        it->record_id = AIRY_STRDUP(rec->record_id);
+        it->data = AIRY_MALLOC(rec->len + 1);
+        if (!it->record_id || !it->data) {
+            AIRY_FREE(it->record_id);
+            AIRY_FREE(it->data);
+            it->record_id = NULL;
+            it->data = NULL;
+            continue;
+        }
+        __builtin_memcpy(it->data, rec->data, rec->len);
+        ((char *)it->data)[rec->len] = '\0';
+        it->len = rec->len;
+        it->metadata = rec->metadata ? AIRY_STRDUP(rec->metadata) : NULL;
+        it->created_at = rec->created_at;
+        n++;
+    }
+
+    airy_mtx_unlock(&svc->lock);
+
+    if (n == 0) {
+        AIRY_FREE(items);
+        return AIRY_SUCCESS;
+    }
+
+    mem_recent_item_t *shrunk = (mem_recent_item_t *)AIRY_REALLOC(items, n * sizeof(*items));
+    *out_items = shrunk ? shrunk : items;
+    *out_count = n;
+    return AIRY_SUCCESS;
+}
+
+void mem_recent_items_free(mem_recent_item_t *items, size_t count)
+{
+    if (!items)
+        return;
+    for (size_t i = 0; i < count; i++) {
+        AIRY_FREE(items[i].record_id);
+        AIRY_FREE(items[i].data);
+        AIRY_FREE(items[i].metadata);
+    }
+    AIRY_FREE(items);
 }
 
 void mem_search_hits_free(mem_search_hit_t *hits, size_t count)

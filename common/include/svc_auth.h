@@ -71,6 +71,13 @@ typedef struct auth_result {
     const char *subject;
     const char *role;
     int64_t expires_at;
+    /* 内嵌 subject/role 存储（t11-02）：verify 时拷贝到 result 自带缓冲，
+     * subject/role 指向本结构内嵌存储，避免指向模块全局缓冲而被并发
+     * 请求覆盖（此前 auth_apikey_verify/auth_jwt_verify 均把 result 字段
+     * 指向 g_apikey.subject_buf / g_jwt.subject_buf，锁释放后即产生竞争）。
+     * 大小与 svc_auth_internal.h 的 MAX_SUBJECT_SIZE/MAX_ROLE_SIZE 对齐。 */
+    char subject_storage[256];
+    char role_storage[64];
 } auth_result_t;
 
 
