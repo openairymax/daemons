@@ -16,6 +16,7 @@
 
 #include "llm_service.h"
 #include "svc_common.h"
+#include "airyrt_version.h"
 #include "svc_logger.h"
 
 #include <stdlib.h>
@@ -176,7 +177,7 @@ airy_err_t llm_service_adapter_create(airy_svc_t *out_service, const airy_svc_co
         }
     } else {
         ctx->common_cfg.name = "llm_d";
-        ctx->common_cfg.version = "0.1.1";
+        ctx->common_cfg.version = AIRYRT_VERSION;
         ctx->common_cfg.capabilities = AIRY_SVC_CAP_ASYNC;
         ctx->common_cfg.enable_metrics = true;
     }
@@ -221,7 +222,7 @@ airy_err_t llm_service_adapter_wrap(airy_svc_t *out_service, llm_service_t *llm_
         __builtin_memcpy(&ctx->common_cfg, config, sizeof(airy_svc_config_t));
     } else {
         ctx->common_cfg.name = "llm_d";
-        ctx->common_cfg.version = "0.1.1";
+        ctx->common_cfg.version = AIRYRT_VERSION;
     }
 
     airy_svc_t svc_handle = NULL;
