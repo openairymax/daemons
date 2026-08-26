@@ -1,254 +1,95 @@
-# Info Daemon — 系统信息守护进程
+# info_d — 系统信息守护进程
 
-> **模块路径**: `agentrt/daemons/info_d/` | **版本**: v0.1.0
+> 命名空间：无前缀（gateway_d 转发时剥离 `<daemon>.` 前缀，daemon 内部按裸方法名分发）
+> Unix socket：`${AIRY_RUNTIME_DIR}/info.sock`（Windows：`127.0.0.1:8088` TCP）
+> TCP 端口：8088（仅 Windows 默认使用 TCP；POSIX 默认 Unix socket）
 
-## 概述
+## 定位
 
-`daemons/info_d/` 是 AgentRT 的系统信息采集守护进程，负责周期性采集 CPU、内存、磁盘等系统资源指标，并通过 JSON-RPC 2.0 接口对外提供实时和历史系统信息查询服务。它是 AgentRT 可观测性体系的基础数据源，为调度、监控和告警等上层服务提供系统运行状态数据支撑。
+`info_d` 是 AgentRT 的系统信息采集守护进程：周期采集 CPU、内存、磁盘、系统
+运行时长等资源指标，通过 JSON-RPC 2.0 对外提供实时与历史快照查询，是调度、
+监控、告警等上层服务的基础数据源。
 
-### 架构定位
+关键能力：
 
-```
-info_d/ → IPC Service Bus → sched_d / monit_d / observe_d
-    ↑
- 系统指标采集层（CPU/内存/磁盘）
-```
+- **周期性采集**：后台采集线程每 5s 生成一次系统快照，维护最新快照 +
+  64 条环形缓冲历史（`INFO_D_HISTORY_SIZE`）。
+- **跨平台采集**：Linux 经 `sysinfo`/`statvfs`/`sysconf`/`uname`；macOS 经
+  `sysctl`/`host_statistics64`（`KERN_BOOTTIME`）；Windows 经
+  `GlobalMemoryStatusEx`/`GetDiskFreeSpaceExW`。
+- **健康检测**：最近采集时间超过 3 个采集间隔（15s）判定为 `degraded`。
+- **自定义事件循环**：不使用 `DAEMON_DECLARE_COMMON` 样板，采用自定义
+  `airy_event_loop`（epoll）+ 采集线程，请求处理在事件循环内同步完成。
 
-### 核心职责
-
-- **周期性指标采集**：每 5 秒采集一次系统资源快照，存储最新快照 + 环形缓冲区历史记录
-- **多维度系统指标**：CPU 使用率、内存使用率、磁盘使用率、CPU 核心数、系统运行时间
-- **历史数据管理**：64 条环形缓冲区历史快照，支持趋势分析
-- **跨平台采集**：Linux 通过 sysinfo/statvfs/sysconf 采集，Windows 通过 GlobalMemoryStatusEx/GetDiskFreeSpaceExW 采集
-- **健康状态检测**：自动检测采集线程是否正常工作
-
-## 目录结构
-
-```
-info_d/
-├── CMakeLists.txt                    # 构建配置
-├── README.md                         # 本文件
-├── src/                              # 实现文件
-│   └── main.c                        # 守护进程入口（含采集逻辑与请求处理）
-└── tests/                            # 单元测试（CTest）
-    ├── CMakeLists.txt
-    └── test_info_service.c           # 方法分发响应格式 + 环形历史缓冲测试
-```
-
-## 核心组件说明
-
-### 系统信息快照（system_info_snapshot_t）
-
-每次采集生成一个系统资源快照，包含以下指标：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `cpu_usage_pct` | double | CPU 使用率（百分比） |
-| `total_memory_kb` | uint64_t | 总内存（KB） |
-| `free_memory_kb` | uint64_t | 空闲内存（KB） |
-| `used_memory_kb` | uint64_t | 已用内存（KB） |
-| `memory_usage_pct` | double | 内存使用率（百分比） |
-| `disk_total_kb` | uint64_t | 磁盘总容量（KB） |
-| `disk_free_kb` | uint64_t | 磁盘空闲容量（KB） |
-| `disk_used_kb` | uint64_t | 磁盘已用容量（KB） |
-| `disk_usage_pct` | double | 磁盘使用率（百分比） |
-| `cpu_cores` | int | CPU 核心数 |
-| `uptime_sec` | uint64_t | 系统运行时间（秒） |
-| `timestamp` | uint64_t | 采集时间戳 |
-
-### 采集机制
-
-- **采集间隔**：5 秒
-- **存储策略**：最新快照（`latest_snapshot`）+ 环形缓冲区历史（容量 64 条）
-- **后台线程**：独立采集线程，周期性执行采集并更新快照数据
-- **线程安全**：快照读写通过适当的同步机制保护
-
-### 事件循环
-
-- 基于 `airy_event_loop`（epoll）实现
-- 监听 `server_fd` 上的客户端连接
-- 请求处理在事件循环中完成
-
-## 接口说明
-
-### 请求处理
-
-请求处理器返回 JSON 格式的系统信息，包含以下字段：
-
-```json
-{
-    "platform": "linux",
-    "uptime": 86400,
-    "request_count": 42,
-    "error_count": 0,
-    "cpu": {
-        "usage_pct": 23.5,
-        "cores": 8
-    },
-    "memory": {
-        "total_kb": 16777216,
-        "free_kb": 8388608,
-        "used_kb": 8388608,
-        "usage_pct": 50.0
-    },
-    "disk": {
-        "total_kb": 524288000,
-        "free_kb": 262144000,
-        "used_kb": 262144000,
-        "usage_pct": 50.0
-    },
-    "collection": {
-        "interval_sec": 5,
-        "history_capacity": 64,
-        "last_collection_ts": 1717660800
-    }
-}
-```
-
-### JSON-RPC 2.0 方法
-
-方法遵循 L2 服务通信协议标准（`02-l2-service-protocol.md` §5/§6）的 `<ns>.<method>` 命名空间格式（`info.*`）。gateway_d 转发时已剥离 `<daemon>.` 前缀，daemon 内部按不带前缀的方法名分发。
-
-| 方法 | 说明 | 参数 |
-|------|------|------|
-| `info.system` | 获取当前系统信息快照（CPU/内存/磁盘/uptime/hostname/内核版本） | 无 |
-| `info.history` | 获取环形历史快照列表（按时间升序，最旧 → 最新） | `N`（可选，返回最近 N 条，默认全部 64 条；支持对象参数 `N`/`n`/`count`/`limit` 或数组参数首个元素） |
-| `info.health` | 查询采集服务健康状态（采集线程是否活跃、最近采集时间、运行时长） | 无 |
-| `info.health_check` | 标准健康检查（L2 §6.1，无副作用） | 无 |
-| `info.get_stats` | 查询服务统计（请求数/错误数/历史条数/运行时长） | 无 |
-| `info.shutdown` | 优雅停止 daemon（L2 §6.1） | 无 |
-
-#### `info.system` 响应示例
-
-```json
-{
-    "jsonrpc": "2.0",
-    "result": {
-        "service": "info_d",
-        "platform": "Linux",
-        "hostname": "host-01",
-        "kernel_version": "6.8.0-45-generic",
-        "system": {
-            "timestamp": 1717660800,
-            "cpu_cores": 8,
-            "cpu_usage_pct": 23.5,
-            "total_memory_kb": 16777216,
-            "free_memory_kb": 8388608,
-            "used_memory_kb": 8388608,
-            "memory_usage_pct": 50.0,
-            "disk_total_kb": 524288000,
-            "disk_free_kb": 262144000,
-            "disk_used_kb": 262144000,
-            "disk_usage_pct": 50.0,
-            "uptime_sec": 86400
-        }
-    },
-    "id": 1
-}
-```
-
-#### `info.history` 响应示例
-
-```json
-{
-    "jsonrpc": "2.0",
-    "result": [
-        { "timestamp": 1717660800, "cpu_cores": 8, "cpu_usage_pct": 23.5, "uptime_sec": 86400 },
-        { "timestamp": 1717660805, "cpu_cores": 8, "cpu_usage_pct": 24.1, "uptime_sec": 86405 }
-    ],
-    "id": 2
-}
-```
-
-#### `info.health` 响应示例
-
-```json
-{
-    "jsonrpc": "2.0",
-    "result": {
-        "status": "ok",
-        "service": "info_d",
-        "collecting": true,
-        "running": true,
-        "last_collect_time": 1717660805,
-        "staleness_sec": 1,
-        "uptime_s": 3600,
-        "timestamp": 1717660806
-    },
-    "id": 3
-}
-```
-
-`status` 取值：`ok`（采集线程活跃且最近采集未超过 3 个采集间隔）或 `degraded`（采集停滞或服务未运行）。
-
-## 通信方式
-
-| 方向 | 协议 | 说明 |
-|------|------|------|
-| 入站 | JSON-RPC 2.0 | 通过 IPC Service Bus 接收请求 |
-| 入站 | TCP | 默认监听端口 8083 |
-| 入站 | Unix Socket | `AIRY_RUNTIME_DIR/info.sock` |
-
-## 配置选项
-
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| TCP 端口 | 8083 | HTTP/TCP 监听端口 |
-| Unix Socket | `AIRY_RUNTIME_DIR/info.sock` | IPC 通信 Socket 路径 |
-| 采集间隔 | 5 秒 | 系统指标采集周期 |
-| 历史容量 | 64 | 环形缓冲区历史快照条数 |
-
-## 健康检查机制
-
-- **采集线程检测**：检查最近一次采集时间是否超过 3 个采集间隔（15 秒），若超时则判定为不健康
-- **运行状态检查**：验证服务是否处于正常运行状态
-- **错误计数**：跟踪请求处理错误数，辅助故障诊断
-
-## 跨平台支持
-
-| 平台 | 采集方式 | 说明 |
-|------|----------|------|
-| Linux | sysinfo / statvfs / sysconf | 原生系统调用 |
-| Windows | GlobalMemoryStatusEx / GetDiskFreeSpaceExW | Windows API |
-
-## 依赖关系
+## 架构
 
 ```
-info_d
-├── common (airy_common, svc_common)
-├── Threads::Threads
-└── Windows 额外: ws2_32
+调用方 ──(JSON-RPC 2.0 / Unix socket)──▶ info_d
+      │                                   ├─ 采集线程（每 5s 快照 → 环形历史 64 条）
+      │                                   ├─ airy_event_loop（epoll）请求分发
+      │                                   └─ L2 方法：system / history / health /
+      │                                      health_check / get_stats / shutdown
+      └─ 非 JSON-RPC 请求 → 返回自描述 JSON 字符串（旧格式兼容）
 ```
 
-## 构建说明
+- 单文件实现（`src/main.c`），无独立 include 目录。
+- 快照字段：`cpu_cores`、`cpu_usage_pct`、`total/free/used_memory_kb`、
+  `memory_usage_pct`、`total/free/used_disk_kb`、`disk_usage_pct`、`uptime_sec`、
+  `timestamp`。
+- 方法分发：先尝试按 JSON-RPC 2.0 解析；命中 L2 标准方法（`shutdown` /
+  `get_stats` / `health_check`）或自定义方法（`system` / `history` / `health`）
+  按 JSON-RPC 响应；其余请求保持旧格式——返回内联 `system` + `collection`
+  的自描述 JSON 字符串（向后兼容）。
+
+## JSON-RPC 接口
+
+| 方法 | 参数 | 返回 | 描述 |
+|------|------|------|------|
+| `system` | `{}` | `{service, platform, hostname, kernel_version, system: {…快照…}}` | 当前系统信息快照 |
+| `history` | `{N?: int}`（也接受 `n`/`count`/`limit` 或数组首个元素） | `[快照…]` | 环形历史快照列表（最旧→最新；N=0 返回空数组，上限 64） |
+| `health` | `{}` | `{status, service, collecting, running, last_collect_time, staleness_sec, uptime_s, timestamp}` | 采集服务健康状态（status ∈ ok/degraded） |
+| `health_check` | `{}` | `{status: "ok", service, uptime_s, timestamp}` | L2 标准健康检查（无副作用） |
+| `get_stats` | `{}` | `{daemon, uptime_s, requests, errors, history_count}` | 服务统计 |
+| `shutdown` | `{}` | `{status: "shutting_down"}` | 优雅停止（同步停止事件循环后进程退出） |
+
+## 配置
+
+本 daemon 不读取配置文件（`main()` 忽略 argc/argv），以下为编译期常量：
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| `INFO_D_DEFAULT_PORT` | 8088 | TCP 端口（仅 Windows 默认使用） |
+| `INFO_D_DEFAULT_SOCKET` | `${AIRY_RUNTIME_DIR}/info.sock` | Unix socket 路径 |
+| `INFO_D_COLLECT_INTERVAL_SEC` | 5 | 采集间隔（秒） |
+| `INFO_D_HISTORY_SIZE` | 64 | 环形历史容量 |
+| `INFO_D_MAX_BUFFER` | 65536 | 请求缓冲上限 |
+
+信号：`SIGINT`/`SIGTERM` 优雅关闭；`SIGUSR1` 切换日志级别（INFO ↔ DEBUG）；
+`SIGPIPE` 忽略。
+
+## 依赖与构建
+
+依赖：`airy_common`、`svc_common`（daemon 公共层）、`Threads::Threads`、
+`airy_platform_libs`（Windows 另需 `ws2_32`）、cJSON。
 
 ```bash
-# 构建系统信息守护进程
 cmake -B build -DBUILD_TESTS=ON
 cmake --build build --target info_d
 ```
 
-## 使用示例
+安装：`cmake --install` 将 `info_d` 装入 `bin`。
 
-### 启动系统信息守护进程
+## 测试
 
 ```bash
-# 默认启动（TCP 端口 8083）
-./info_d
-
-# 指定配置文件
-./info_d --config info_config.json
+ctest --test-dir build -R info_ --output-on-failure
 ```
 
-### 信号处理
+单元测试（`tests/test_info_service.c`，将 `src/main.c` 直接编译进测试单元、
+`main()` 重命名规避入口冲突）覆盖：
 
-| 信号 | 行为 |
-|------|------|
-| SIGINT | 优雅关闭 |
-| SIGTERM | 优雅关闭 |
-| SIGUSR1 | 动态调整日志级别 |
-| SIGPIPE | 忽略（防止写入已关闭连接导致进程终止） |
-
----
-
-© 2025-2026 SPHARX Ltd. All Rights Reserved.
+- 环形历史缓冲：追加/回绕/容量上限，`history` 按 `N` 截取（对象 `N`/`count`
+  或数组参数）；
+- `system`/`history`/`health` 方法响应结构与字段完整性；
+- 请求分发：JSON-RPC `system` 方法命中返回 `result.system`；未知方法回退旧格式
+  （返回内联 `system` 字段）。
