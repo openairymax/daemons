@@ -140,8 +140,15 @@ static void register_builtin_tools(tool_service_t *svc)
         {"patch", "{\"type\":\"string\"}", 1},
         {"check_only", "{\"type\":\"boolean\"}", 0},
     };
+    static tool_param_t maths_eval_params[] = {
+        {"expression", "{\"type\":\"string\"}", 1},
+    };
+    static tool_param_t maths_stats_params[] = {
+        {"op", "{\"type\":\"string\"}", 1},
+        {"values", "{\"type\":\"array\",\"items\":{\"type\":\"number\"}}", 1},
+    };
 
-    tool_metadata_t tools[13] = {
+    tool_metadata_t tools[15] = {
         {
             .id = "fs_read",
             .name = "fs_read",
@@ -299,6 +306,33 @@ static void register_builtin_tools(tool_service_t *svc)
             .cacheable = 0,
             .permission_rule = "git_apply",
             .access = TOOL_ACCESS_WRITE,
+        },
+        {
+            .id = "maths.eval",
+            .name = "maths.eval",
+            .description = "Evaluate a math expression precisely (arithmetic, "
+                           "powers, factorial, sqrt/sin/cos/tan/ln/log10/log2/"
+                           "exp/abs/min/max/floor/ceil etc.)",
+            .executable = "builtin:maths.eval",
+            .params = maths_eval_params,
+            .param_count = 1,
+            .timeout_sec = 10,
+            .cacheable = 1,
+            .permission_rule = "maths.eval",
+            .access = TOOL_ACCESS_READ,
+        },
+        {
+            .id = "maths.stats",
+            .name = "maths.stats",
+            .description = "Compute descriptive statistics of a numeric array "
+                           "(sum/mean/median/min/max/variance/stddev)",
+            .executable = "builtin:maths.stats",
+            .params = maths_stats_params,
+            .param_count = 2,
+            .timeout_sec = 10,
+            .cacheable = 1,
+            .permission_rule = "maths.stats",
+            .access = TOOL_ACCESS_READ,
         },
     };
 

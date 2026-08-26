@@ -137,6 +137,10 @@ int tool_builtin_run(const char *tool_id, const char *params_json, tool_result_t
     if (strcmp(tool_id, "git_apply") == 0)
         return git_apply_tool(params_json, res);
 #endif
+    if (strcmp(tool_id, "maths.eval") == 0)
+        return maths_eval_tool(params_json, res);
+    if (strcmp(tool_id, "maths.stats") == 0)
+        return maths_stats_tool(params_json, res);
     SVC_LOG_ERROR("builtin: unknown builtin tool '%s'", tool_id);
     res->error = AIRY_STRDUP("Unknown builtin tool");
     return AIRY_ERR_EXEC_NOT_FOUND;
