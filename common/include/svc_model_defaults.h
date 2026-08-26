@@ -114,6 +114,22 @@ typedef struct {
  */
 int svc_model_defaults_llm_from_yaml(const char *path, svc_model_llm_config_t *out);
 
+/**
+ * @brief Extract the primary connection config from the models table
+ *        (v2 table format, 2026-08-26).
+ *
+ * Reads the first item of the top-level models: list (api_format /
+ * base_url / api_key_env / model_id). Fallback source for llm_d /
+ * gateway_d when the llm section is absent; models[0].model_id is the
+ * default model.
+ *
+ * @param path YAML file path
+ * @param out  Output struct (non-NULL; caller should zero it first)
+ * @return 0 on success; AIRY_ERR_INVALID_PARAM / AIRY_ERR_IO /
+ *         AIRY_ERR_NOT_FOUND / AIRY_ERR_NOT_SUPPORTED
+ */
+int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_t *out);
+
 #ifdef __cplusplus
 }
 #endif

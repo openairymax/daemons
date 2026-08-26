@@ -36,6 +36,13 @@
 
 #include "daemon_platform_ext.h"
 #include "svc_logger.h"
+#include "atomic_compat.h"
+
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 /* pthread.h provided by platform.h — no direct pthread include (CROSS-01) */
 /* Internal state structure */
@@ -100,13 +107,21 @@ static struct {
 } g_security_ctx = {0};
 
 static airy_mtx_t g_security_mutex; /* CROSS-01: initialized via airy_mtx_init() */
-static bool g_security_mutex_initialized = false;
+/* 三态惰性初始化（P1-3）：0=未初始化，2=初始化中，1=就绪。
+ * 对齐 hall_writer/gateway_hall_store 的 CAS 范式，杜绝并发重复
+ * pthread_mutex_init（UB）。 */
+static atomic_int g_security_mutex_ready = 0;
 
 static void ensure_mutex_initialized(void)
 {
-    if (!g_security_mutex_initialized) {
-        airy_mtx_init(&g_security_mutex);
-        g_security_mutex_initialized = true;
+    while (atomic_load_explicit(&g_security_mutex_ready, memory_order_acquire) != 1) {
+        int expected = 0;
+        if (atomic_compare_exchange_strong_explicit(&g_security_mutex_ready, &expected, 2,
+                                                    memory_order_acq_rel, memory_order_acquire)) {
+            airy_mtx_init(&g_security_mutex);
+            atomic_store_explicit(&g_security_mutex_ready, 1, memory_order_release);
+            break;
+        }
     }
 }
 
@@ -264,7 +279,7 @@ void daemon_security_shutdown(void)
     g_security_ctx.audit_enabled = false;
     airy_mtx_unlock(&g_security_mutex);
     airy_mtx_destroy(&g_security_mutex);
-    g_security_mutex_initialized = false;
+    atomic_store_explicit(&g_security_mutex_ready, 0, memory_order_release);
     SVC_LOG_INFO("Daemon security: shutdown complete");
 }
 
@@ -754,15 +769,16 @@ int daemon_audit_log_event(const char *service_name, const char *operation, cons
         return AIRY_ERR_INVALID_PARAM;
     }
 
+    ensure_mutex_initialized();
+    airy_mtx_lock(&g_security_mutex);
+    /* P2-3：状态检查移入锁内，避免与 shutdown 的时序竞态 */
     if (!g_security_ctx.initialized) {
+        airy_mtx_unlock(&g_security_mutex);
         SVC_LOG_ERROR(
             "daemon_audit_log_event: daemon_security not initialized — "
             "call daemon_cupolas_init() during startup. Audit event DROPPED (fail-closed).");
         return AIRY_ERR_STATE_ERROR;
     }
-
-    ensure_mutex_initialized();
-    airy_mtx_lock(&g_security_mutex);
     if (!g_security_ctx.audit_enabled) {
         airy_mtx_unlock(&g_security_mutex);
         return 0;
@@ -783,14 +799,26 @@ int daemon_audit_log_event(const char *service_name, const char *operation, cons
              agent_id ? agent_id : "system", result_str);
 
     if (g_security_ctx.audit_fp) {
-        fwrite(log_msg, 1, strlen(log_msg), g_security_ctx.audit_fp);
-        fflush(g_security_ctx.audit_fp);
+        /* P1-4：审计是安全追踪证据（E-6），fflush 只刷到内核页缓存，
+         * 断电/崩溃会丢事件；写后 fsync 保证落盘。 */
+        if (fwrite(log_msg, 1, strlen(log_msg), g_security_ctx.audit_fp) == strlen(log_msg) &&
+            fflush(g_security_ctx.audit_fp) == 0) {
+#ifdef _WIN32
+            _commit(_fileno(g_security_ctx.audit_fp));
+#else
+            fsync(fileno(g_security_ctx.audit_fp));
+#endif
+        }
     } else {
+        /* P2-4：SVC_LOG 内部取 g_log_file_mutex，移到解锁后再调用，
+         * 消除 security→logger 双锁序耦合（锁内只做文件 I/O）。 */
+        airy_mtx_unlock(&g_security_mutex);
         if (result == 0) {
             SVC_LOG_INFO("[AUDIT] %s", log_msg);
         } else {
             SVC_LOG_WARN("[AUDIT] %s", log_msg);
         }
+        return AIRY_OK;
     }
     airy_mtx_unlock(&g_security_mutex);
 

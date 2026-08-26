@@ -152,7 +152,7 @@ if(WIN32)
     target_compile_definitions(llm_d PRIVATE
         AIRY_PLATFORM_WINDOWS=1
         WIN32_LEAN_AND_MEAN
-        NOMINAX
+        NOMINMAX
         _CRT_SECURE_NO_WARNINGS
     )
     target_link_libraries(llm_d PRIVATE ws2_32 bcrypt)

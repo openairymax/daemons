@@ -95,10 +95,11 @@ static void test_gccp_twopass(void)
     }
 
     const char *prompt = "为项目实现一个带登录、检索与报表的完整系统，并保证生产级可用";
+    const char *sess = "test-session-1";
 
     /* ── 第一段：无答案 → 挂起并返回问题集 ── */
     think_process_result_t pass1 = {0};
-    int rc = think_service_process(svc, prompt, NULL, &pass1);
+    int rc = think_service_process(svc, sess, prompt, NULL, &pass1);
     CHECK(rc == 0 && pass1.json, "pass1: rc==0 (interaction is success semantics)",
           "pass1 failed");
     if (rc == 0 && pass1.json) {
@@ -139,7 +140,7 @@ static void test_gccp_twopass(void)
                           "\"bottleneck\":\"需补齐登录与报表模块并做生产加固\","
                           "\"audience\":\"平台运维团队按验收标准验收\"}";
     think_process_result_t pass2 = {0};
-    rc = think_service_process(svc, prompt, answers, &pass2);
+    rc = think_service_process(svc, sess, prompt, answers, &pass2);
     CHECK(rc == 0 && pass2.json, "pass2: rc==0 (answers consumed)", "pass2 failed");
     if (rc == 0 && pass2.json) {
 #ifdef AIRY_HAS_CJSON
@@ -174,7 +175,7 @@ static void test_gccp_twopass(void)
 
     /* ── 第三段：答案单次有效，再次不带答案 → 重新挂起（不泄漏） ── */
     think_process_result_t pass3 = {0};
-    rc = think_service_process(svc, prompt, NULL, &pass3);
+    rc = think_service_process(svc, sess, prompt, NULL, &pass3);
     CHECK(rc == 0 && pass3.json, "pass3: rc==0 (answers not leaked)", "pass3 failed");
     if (rc == 0 && pass3.json) {
 #ifdef AIRY_HAS_CJSON

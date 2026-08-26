@@ -77,7 +77,8 @@ void think_service_destroy(think_service_t *svc);
  * @brief Dual-think processing: input prompt -> cognitive engine (GCCP +
  *        GRAD) -> JSON result.
  *
- * GCCP 两段式交互（P-A, 2026-08-23）：当 GCCP 判定输入需要澄清时——
+ * GCCP 两段式交互（P-A, 2026-08-23；会话隔离加固 2026-08-25）：当 GCCP
+ * 判定输入需要澄清时——
  *   第一段：gccp_answers 传 NULL。引擎挂起并返回问题集，结果 JSON 含
  *     {"gccp_need_interaction":1,"gccp_questions":[{id,question,hint,
  *     required}...]}（返回 0，客户端据此进入问答轮，不浪费后续 Phase token）。
@@ -86,14 +87,20 @@ void think_service_destroy(think_service_t *svc);
  *     完成目标确认并继续 GCCP+GRAD 完整链路（结果含 plan/feedback/stats）。
  *   用户放弃问答：直接省略重发即可（无副作用）。
  *
+ * 会话隔离（2026-08-25 修复）：GCCP 交互状态（问题集/答案）按 session_id
+ * 隔离存储，杜绝多客户端并发串台——此前为服务级单份状态，请求 B 的第一段
+ * 会覆盖请求 A 的问题集，A 的第二段答案可能被 B 消费，触发"二次挂起"与
+ * 重复提问。session_id 为 NULL/空时使用 "default" 兜底（单会话兼容）。
+ *
  * @param svc Service handle
+ * @param session_id 会话标识（可 NULL；GCCP 交互状态隔离维度）
  * @param prompt User input (UTF-8)
  * @param gccp_answers 用户答案 JSON（可 NULL；第二段携带）
  * @param out_result Output result (OWNER, caller frees via think_result_free)
  * @return 0 on success (含 gccp_need_interaction=1 的问答轮), non-zero on failure
  */
-int think_service_process(think_service_t *svc, const char *prompt, const char *gccp_answers,
-                          think_process_result_t *out_result);
+int think_service_process(think_service_t *svc, const char *session_id, const char *prompt,
+                          const char *gccp_answers, think_process_result_t *out_result);
 
 void think_result_free(think_process_result_t *res);
 

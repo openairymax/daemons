@@ -21,6 +21,7 @@
 #include "airy_memory.h"
 #include "airy_dirent.h"
 #include "atomic_compat.h"
+#include "io.h"
 #include "platform.h"
 #include "svc_logger.h"
 
@@ -202,15 +203,14 @@ int daemon_hall_write(const char *task_id, const char *category, const char *nod
 
     char path[HW_PATH_MAX];
     snprintf(path, sizeof(path), "%s/%s", dir, file_id);
-    FILE *fp = fopen(path, "w");
-    if (!fp) {
+    /* P1-5：原子写（同目录 tmp + fsync + rename），崩溃/断电不会在
+     * 事件流根目录留下半写 JSON 文件（事件流是单一真相源）。 */
+    if (airy_io_write_file(path, json, strlen(json)) != 0) {
         AIRY_FREE(json);
         airy_mtx_unlock(&g_hw_lock);
         SVC_LOG_WARN("hall_writer: write failed (path=%s)", path);
         return -1;
     }
-    fputs(json, fp);
-    fclose(fp);
     AIRY_FREE(json);
     airy_mtx_unlock(&g_hw_lock);
 

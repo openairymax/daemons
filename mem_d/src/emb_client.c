@@ -121,8 +121,8 @@ int mem_emb_client_init(mem_emb_client_t *client)
     }
 
     client->enabled = 1;
-    client->healthy = 1;
-    client->last_fail_time = 0;
+    atomic_init(&client->healthy, 1);
+    atomic_init(&client->last_fail_time, 0);
 
     mem_curl_global_init_once();
     SVC_LOG_INFO("mem_d embedding backend enabled (url=%s)", client->url);
@@ -136,27 +136,32 @@ void mem_emb_client_destroy(mem_emb_client_t *client)
         return;
     AIRY_FREE(client->url);
     AIRY_FREE(client->api_key);
-    AIRY_MEMSET(client, 0, sizeof(*client));
+    client->url = NULL;
+    client->api_key = NULL;
+    client->enabled = 0;
+    /* 注意：不整体 AIRY_MEMSET —— healthy/last_fail_time 是 C11 atomic，
+     * memset 清零属于 UB */
 }
 
 int mem_emb_should_try(const mem_emb_client_t *client)
 {
     if (!client || !client->enabled)
         return 0;
-    if (client->healthy)
+    if (atomic_load_explicit(&client->healthy, memory_order_acquire))
         return 1;
     uint64_t now = airy_time_ms();
-    if (now < client->last_fail_time)
+    uint64_t last_fail = atomic_load_explicit(&client->last_fail_time, memory_order_acquire);
+    if (now < last_fail)
         return 0;
-    return (now - client->last_fail_time) >= client->retry_after_ms;
+    return (now - last_fail) >= client->retry_after_ms;
 }
 
 #ifdef AIRY_HAS_CURL
 
 static void mem_emb_mark_fail(mem_emb_client_t *client)
 {
-    client->healthy = 0;
-    client->last_fail_time = airy_time_ms();
+    atomic_store_explicit(&client->healthy, 0, memory_order_release);
+    atomic_store_explicit(&client->last_fail_time, airy_time_ms(), memory_order_release);
 }
 
 int mem_emb_embed(mem_emb_client_t *client, const char *text, float **out_vec, size_t *out_dim)
@@ -279,7 +284,7 @@ int mem_emb_embed(mem_emb_client_t *client, const char *text, float **out_vec, s
 
     *out_vec = vec;
     *out_dim = (size_t)n;
-    client->healthy = 1;
+    atomic_store_explicit(&client->healthy, 1, memory_order_release);
     return AIRY_SUCCESS;
 #else
     (void)client;

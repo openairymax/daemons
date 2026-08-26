@@ -169,6 +169,15 @@ gateway_business_ctx_t *gateway_business_ctx_create(void)
                             llm_cfg.model[0]) {
                             AIRY_STRNCPY_TERM(um, llm_cfg.model, sizeof(um));
                             has_user_cfg = 1;
+                        } else {
+                            /* v2 表格格式（2026-08-26）：llm 段缺省时回退
+                             * models 表首个条目 */
+                            AIRY_MEMSET(&llm_cfg, 0, sizeof(llm_cfg));
+                            if (svc_model_defaults_models0_from_yaml(user_path, &llm_cfg) == 0 &&
+                                llm_cfg.model[0]) {
+                                AIRY_STRNCPY_TERM(um, llm_cfg.model, sizeof(um));
+                                has_user_cfg = 1;
+                            }
                         }
                     }
                 }
@@ -177,6 +186,11 @@ gateway_business_ctx_t *gateway_business_ctx_create(void)
         AIRY_STRNCPY_TERM(ctx->default_model, has_user_cfg ? um : GW_LLM_DEFAULT_MODEL,
                           sizeof(ctx->default_model));
     }
+
+    /* 架构约束 2026-08-25 "必须走 syscall": 注入微核心服务统一派发钩子，
+     * gateway 对 daemon 的所有派发经 airy_sys_svc_call() (SYS_SVC_CALL)
+     * 完成（见 gateway_biz_svcdispatch.c）。 */
+    gw_sys_svc_dispatch_init(ctx);
 
     return ctx;
 }
@@ -206,6 +220,7 @@ void gateway_business_ctx_destroy(gateway_business_ctx_t *ctx)
         entry = next;
     }
     airy_mtx_destroy(&ctx->active_lock);
+    gw_sys_svc_dispatch_cleanup();
     AIRY_FREE(ctx);
 }
 

@@ -22,10 +22,13 @@
 
 #if AIRY_PLATFORM_POSIX
 #include <sys/select.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #endif
 
 #include "agent_service_internal.h"
+
+#include "airy_dirent.h"
 
 #if AIRY_PLATFORM_POSIX
 
@@ -199,6 +202,74 @@ static void spec_resolve_rust_binary(const char *spec, const char *agent_id, cha
     (void)agent_id;
 }
 
+/* ── agent 子进程日志保留策略（2026-08-25）────────────────────────
+ * agent_<id>.log 随每次 spawn 创建，长期运行会无限堆积（实测数百个、
+ * 数十 MB 量级）。每次 spawn 成功后清理，仅保留最近 AGENT_LOG_KEEP_MAX
+ * 个（按 mtime，最旧优先删除），防止日志目录失控（AIRY_LOG_DIR 现
+ * 统一收敛于 $AIRY_HOME/data/agentrt/logs）。 */
+#define AGENT_LOG_KEEP_MAX 64
+#define AGENT_LOG_SCAN_MAX 512
+
+static void agent_logs_prune(void)
+{
+    const char *logdir = airy_log_dir();
+    if (!logdir || !logdir[0])
+        return;
+
+    DIR *dir = opendir(logdir);
+    if (!dir)
+        return;
+
+    char *paths[AGENT_LOG_SCAN_MAX] = {0};
+    time_t mtimes[AGENT_LOG_SCAN_MAX] = {0};
+    size_t count = 0;
+
+    struct dirent *entry;
+    while (count < AGENT_LOG_SCAN_MAX && (entry = readdir(dir)) != NULL) {
+        if (strncmp(entry->d_name, "agent_", 6) != 0)
+            continue;
+        size_t nlen = strlen(entry->d_name);
+        if (nlen < 5 || strcmp(entry->d_name + nlen - 4, ".log") != 0)
+            continue;
+
+        char full[AIRY_PATH_MAX];
+        snprintf(full, sizeof(full), "%s/%s", logdir, entry->d_name);
+        struct stat st;
+        if (stat(full, &st) != 0 || !S_ISREG(st.st_mode))
+            continue;
+
+        char *copy = AIRY_STRDUP(full);
+        if (!copy)
+            continue;
+
+        /* 插入排序维持 mtime 升序（最旧在前，便于批量删除）。 */
+        size_t pos = count;
+        while (pos > 0 && mtimes[pos - 1] > st.st_mtime) {
+            paths[pos] = paths[pos - 1];
+            mtimes[pos] = mtimes[pos - 1];
+            pos--;
+        }
+        paths[pos] = copy;
+        mtimes[pos] = st.st_mtime;
+        count++;
+    }
+    closedir(dir);
+
+    if (count <= (size_t)AGENT_LOG_KEEP_MAX) {
+        for (size_t i = 0; i < count; i++)
+            AIRY_FREE(paths[i]);
+        return;
+    }
+
+    size_t excess = count - (size_t)AGENT_LOG_KEEP_MAX;
+    for (size_t i = 0; i < excess; i++) {
+        remove(paths[i]);
+        AIRY_FREE(paths[i]);
+    }
+    for (size_t i = excess; i < count; i++)
+        AIRY_FREE(paths[i]);
+}
+
 /* fork the Agent runner child process and set up bidirectional stdin/stdout
  * pipes. Startup is chosen by spec.language:
  *   - "python" (default): python3 -m airymax_agents.runner --spec <spec>
@@ -303,6 +374,9 @@ int agent_spawn_child(const char *spec, const char *agent_id, pid_t *out_pid, in
     *out_pid = pid;
     *out_stdin = stdin_pipe[1];
     *out_stdout = stdout_pipe[0];
+
+    /* 2026-08-25：spawn 成功后收敛 agent 子进程日志数量（保留最近 64 个）。 */
+    agent_logs_prune();
     return 0;
 }
 

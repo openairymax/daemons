@@ -183,7 +183,9 @@ void *airy_dl_sym(airy_dl_t dl, const char *symbol)
 const char *airy_dl_error(void)
 {
 #ifdef _WIN32
-    static char buf[256];
+    /* P3-2：线程局部缓冲，多线程下错误消息互不覆盖（POSIX dlerror
+     * 语义一致） */
+    static AIRY_THREAD_LOCAL char buf[256];
     FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(), 0, buf, sizeof(buf), NULL);
     return buf;
 #else
@@ -444,8 +446,10 @@ airy_sock_t airy_sock_accept(airy_sock_t server_fd, uint32_t timeout_ms)
     int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
 
     if (client_fd >= 0) {
+        /* P2-2：F_GETFL 失败时 flags=-1，F_SETFL 会破坏 fd 标志位 */
         int flags = fcntl(client_fd, F_GETFL, 0);
-        fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
+        if (flags >= 0)
+            fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
 #ifdef SO_NOSIGPIPE
 
         {

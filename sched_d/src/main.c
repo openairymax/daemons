@@ -19,6 +19,7 @@
 #include "daemon_rpc_client.h"
 #include "platform.h"
 #include "param_validator.h"
+#include "roadmap_rpc.h"
 #include "scheduler_service.h"
 #include "strategy_interface.h"
 #include "svc_logger.h"
@@ -643,6 +644,7 @@ static int sched_dispatch_executor(const char *agent_id, const char *task_descri
 
 static void destroy_service(void)
 {
+    roadmap_rpc_cleanup();
     if (g_service) {
         sched_service_destroy(g_service);
         g_service = NULL;
@@ -721,6 +723,14 @@ int main(int argc, char **argv)
         goto out_mtx_sock;
     }
 
+    /* 蓝图调度接线（2026-08-25 修复）：创建 roadmap_sched 实例（L1 状态机 +
+     * L2 语义缓存 + L3 全量规划三级路由），注册 roadmap.* RPC 方法族。 */
+    if (roadmap_rpc_init() == AIRY_SUCCESS) {
+        SVC_LOG_INFO("Roadmap scheduler (blueprint 3-tier) initialized");
+    } else {
+        SVC_LOG_WARN("Roadmap scheduler init failed - blueprint plan/absorb will be unavailable");
+    }
+
     SVC_LOG_INFO("Scheduler service created with strategy: round_robin");
 
     airy_sock_t server_fd =
@@ -775,8 +785,12 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_sched_d, "submit", on_schedule_task_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "query", on_get_task_method, NULL);
 
+    /* 蓝图调度方法族（2026-08-25 接线）：plan（三级路由）/ absorb（蓝图注册
+     * 与执行结果回灌）/ roadmap_cancel / roadmap_replan / roadmap_stats。 */
+    roadmap_rpc_register(g_dispatcher_sched_d);
+
     method_dispatcher_register(g_dispatcher_sched_d, "shutdown", on_shutdown_method_sched_d, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (sched.* namespace)", 13);
+    SVC_LOG_INFO("Registered %d RPC methods (sched.* namespace)", 18);
 
     /* Inject the task execution callback and start the queue worker thread:
      * after schedule_task enqueues, the worker asynchronously completes

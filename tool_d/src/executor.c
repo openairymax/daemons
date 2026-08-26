@@ -649,7 +649,11 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         result->success = 1;
         result->exit_code = 0;
         result->failure_class = TOOL_RESULT_CLASS_SUCCESS;
+        /* P2: keep the counter update under exec->lock (as the builtin branch
+         * above does) - it was racing with concurrent tool invocations. */
+        airy_mtx_lock(&exec->lock);
         exec->success_count++;
+        airy_mtx_unlock(&exec->lock);
     } else if (ret > 0) {
         SVC_LOG_ERROR("tool_executor_run: command failed with exit code %d (executable=%s)", ret,
                       meta->executable ? meta->executable : "NULL");

@@ -700,18 +700,21 @@ int auth_jwt_verify_token(const char *token, auth_result_t *result)
     cJSON *exp = cJSON_GetObjectItem(payload, "exp");
 
     if (cJSON_IsString(sub)) {
-        AIRY_STRNCPY_TERM(g_jwt.subject_buf, sub->valuestring, MAX_SUBJECT_SIZE);
-        g_jwt.subject_buf[MAX_SUBJECT_SIZE - 1] = '\0';
-        if (strlen(sub->valuestring) >= MAX_SUBJECT_SIZE) {
-            SVC_LOG_WARN("JWT subject truncated to %d chars: original length=%zu", MAX_SUBJECT_SIZE,
-                         strlen(sub->valuestring));
+        /* t11-02: 拷贝到 result 内嵌存储而非全局 g_jwt.subject_buf，
+         * 避免锁释放后并发请求覆盖 subject */
+        AIRY_STRNCPY_TERM(result->subject_storage, sub->valuestring,
+                          sizeof(result->subject_storage));
+        result->subject_storage[sizeof(result->subject_storage) - 1] = '\0';
+        if (strlen(sub->valuestring) >= sizeof(result->subject_storage)) {
+            SVC_LOG_WARN("JWT subject truncated to %zu chars: original length=%zu",
+                         sizeof(result->subject_storage) - 1, strlen(sub->valuestring));
         }
-        result->subject = g_jwt.subject_buf;
+        result->subject = result->subject_storage;
     }
     if (cJSON_IsString(role)) {
-        AIRY_STRNCPY_TERM(g_jwt.role_buf, role->valuestring, MAX_ROLE_SIZE);
-        g_jwt.role_buf[MAX_ROLE_SIZE - 1] = '\0';
-        result->role = g_jwt.role_buf;
+        AIRY_STRNCPY_TERM(result->role_storage, role->valuestring, sizeof(result->role_storage));
+        result->role_storage[sizeof(result->role_storage) - 1] = '\0';
+        result->role = result->role_storage;
     }
 
     if (cJSON_IsNumber(exp)) {

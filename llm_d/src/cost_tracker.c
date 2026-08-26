@@ -14,6 +14,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 typedef struct model_cost {
     char *model;
     uint64_t prompt_tokens;
@@ -183,6 +189,16 @@ int cost_tracker_save(cost_tracker_t *ct, const char *path)
     }
     size_t jlen = strlen(json);
     int wok = fwrite(json, 1, jlen, f) == jlen;
+    if (wok && fflush(f) != 0)
+        wok = 0;
+    /* 落盘后 rename，防断电丢数据（rename 前不 fsync 只保证页缓存顺序） */
+    if (wok) {
+#ifdef _WIN32
+        wok = (_commit(_fileno(f)) == 0);
+#else
+        wok = (fsync(fileno(f)) == 0);
+#endif
+    }
     fclose(f);
     AIRY_FREE(json);
     if (!wok) {

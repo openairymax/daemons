@@ -49,6 +49,19 @@ extern airy_plan_strategy_t *airy_plan_reactive_create(void *llm);
 #define THINK_ORCH_MAX_RUNS 32u
 #define THINK_ORCH_RUN_ID_LEN 48u
 
+/* GCCP 交互状态会话隔离（2026-08-25 加固）：问题集/答案按 session_id 维度
+ * 存取，杜绝多客户端并发串台。槽位满时按最近使用时间 LRU 驱逐最旧会话。 */
+#define THINK_GCCP_MAX_SESSIONS 64u
+#define THINK_GCCP_SESSION_ID_LEN 96u
+#define THINK_GCCP_TTL_MS (30u * 60u * 1000u) /* 30 分钟无交互过期清理 */
+
+typedef struct {
+    char session_id[THINK_GCCP_SESSION_ID_LEN];
+    char *questions;   /* OWNER：第一段问题集 JSON */
+    char *answers;     /* OWNER：第二段用户答案 JSON（单次有效，消费即清） */
+    uint64_t updated_ms;
+} think_gccp_session_t;
+
 typedef struct {
     int level;
     char module[64];
@@ -94,12 +107,99 @@ struct think_service {
 
     /* P-A (2026-08-23): GCCP 两段式交互状态。交互回调与 think_service_process
      * 在同一线程同步执行（process 持 svc->lock 串行化引擎调用），故回调内
-     * 直接读写本字段无需重复加锁（svc->lock 非递归，重入即死锁）。 */
-    char *gccp_pending_questions; /* 第一段：probe 问题集 JSON（OWNER） */
-    char *gccp_pending_answers;   /* 第二段：客户端携带的用户答案 JSON（OWNER，单次有效） */
+     * 直接读写本字段无需重复加锁。
+     * 会话隔离（2026-08-25 加固）：问题集/答案按 session_id 维度存于
+     * gccp_sessions[]，active_session 记录当前 process 的会话（进程持锁
+     * 串行执行，回调读取它是安全的）。 */
+    think_gccp_session_t gccp_sessions[THINK_GCCP_MAX_SESSIONS];
+    char active_session[THINK_GCCP_SESSION_ID_LEN]; /* 当前 process 的会话 key */
+    uint64_t gccp_last_expire_ms; /* 上次过期清理时间戳（节流） */
 };
 
 static void think_sync_engine_stats(think_service_t *svc);
+
+/* ── GCCP 会话表管理（2026-08-25 加固，调用方须已持有 svc->lock）────── */
+
+static uint64_t think_gccp_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)(ts.tv_nsec / 1000000L);
+}
+
+static void think_gccp_free_session(think_gccp_session_t *s)
+{
+    if (!s)
+        return;
+    AIRY_FREE(s->questions);
+    s->questions = NULL;
+    AIRY_FREE(s->answers);
+    s->answers = NULL;
+    s->session_id[0] = '\0';
+    s->updated_ms = 0;
+}
+
+/* 过期会话清理（TTL 节流：每 60s 至多全表扫描一次）。 */
+static void think_gccp_expire_old(think_service_t *svc)
+{
+    uint64_t now = think_gccp_now_ms();
+    if (now - svc->gccp_last_expire_ms < 60000u)
+        return;
+    svc->gccp_last_expire_ms = now;
+    for (uint32_t i = 0; i < THINK_GCCP_MAX_SESSIONS; i++) {
+        think_gccp_session_t *s = &svc->gccp_sessions[i];
+        if (s->session_id[0] && (s->questions || s->answers) &&
+            now - s->updated_ms > THINK_GCCP_TTL_MS)
+            think_gccp_free_session(s);
+    }
+}
+
+static think_gccp_session_t *think_gccp_find(think_service_t *svc, const char *session_id)
+{
+    if (!svc || !session_id)
+        return NULL;
+    for (uint32_t i = 0; i < THINK_GCCP_MAX_SESSIONS; i++) {
+        think_gccp_session_t *s = &svc->gccp_sessions[i];
+        if (s->session_id[0] && strcmp(s->session_id, session_id) == 0)
+            return s;
+    }
+    return NULL;
+}
+
+/* 查找或创建会话；槽位满时 LRU 驱逐最旧会话。 */
+static think_gccp_session_t *think_gccp_get_or_create(think_service_t *svc,
+                                                      const char *session_id)
+{
+    think_gccp_session_t *hit = think_gccp_find(svc, session_id);
+    if (hit)
+        return hit;
+
+    think_gccp_session_t *free_slot = NULL;
+    uint64_t oldest = UINT64_MAX;
+    for (uint32_t i = 0; i < THINK_GCCP_MAX_SESSIONS; i++) {
+        think_gccp_session_t *s = &svc->gccp_sessions[i];
+        if (!s->session_id[0]) {
+            free_slot = s;
+            break;
+        }
+        if (s->updated_ms < oldest) {
+            oldest = s->updated_ms;
+            free_slot = s;
+        }
+    }
+    if (!free_slot)
+        return NULL;
+    think_gccp_free_session(free_slot); /* 驱逐旧会话（若为 LRU 槽） */
+    AIRY_STRNCPY_TERM(free_slot->session_id, session_id, sizeof(free_slot->session_id));
+    free_slot->updated_ms = think_gccp_now_ms();
+    return free_slot;
+}
+
+static void think_gccp_cleanup_all(think_service_t *svc)
+{
+    for (uint32_t i = 0; i < THINK_GCCP_MAX_SESSIONS; i++)
+        think_gccp_free_session(&svc->gccp_sessions[i]);
+}
 
 static void think_feedback_cb(int level, const char *module, const char *event, const char *data,
                               size_t data_len, void *user_data)
@@ -142,29 +242,42 @@ static void think_feedback_cb(int level, const char *module, const char *event, 
 /* ── GCCP 交互回调（两段式协议, P-A 2026-08-23）─────────────────────
  *
  * think_d↔客户端是异步 RPC 往返，回调内无法同步收集答案，因此：
- *   第一段（无 gccp_answers）：把 probe 的问题集序列化进服务状态
- *     （svc->gccp_pending_questions），返回哨兵 AIRY_GCCP_INTERACT_PENDING
- *     ——引擎返回 AIRY_ERR_GCCP_INTERACTION，think_service_process 捕获后
- *     把问题集随结果 JSON 回给客户端（gccp_need_interaction=1）。
- *   第二段（携带 gccp_answers 重发）：直接返回上一轮暂存的答案 JSON，
+ *   第一段（无 gccp_answers）：把 probe 的问题集序列化进当前会话
+ *     （svc->active_session 对应的 gccp_sessions[] 条目），返回哨兵
+ *     AIRY_GCCP_INTERACT_PENDING——引擎返回 AIRY_ERR_GCCP_INTERACTION，
+ *     think_service_process 捕获后把问题集随结果 JSON 回给客户端
+ *     （gccp_need_interaction=1）。
+ *   第二段（携带 gccp_answers 重发）：从当前会话取出暂存的答案 JSON，
  *     引擎据此完成目标确认并正常进入后续 Phase（GCCP+GRAD 完整链路）。
  * 调用约定：svc->lock 已由 think_service_process 持有（引擎调用串行化），
- * 本回调与 process 同线程执行，直接读写 svc->gccp_* 字段，不得重复加锁。 */
+ * 本回调与 process 同线程执行，直接读写 svc->gccp_sessions[] 字段，
+ * 不得重复加锁。 */
 static char *think_gccp_interact_cb(const airy_gccp_probe_t *probe, void *user_data)
 {
     think_service_t *svc = (think_service_t *)user_data;
     if (!svc || !probe)
         return NULL;
 
-    /* 第二段：本请求携带了答案，直接交给引擎确认（单次有效，用完即清）。 */
-    if (svc->gccp_pending_answers) {
-        char *answers = svc->gccp_pending_answers;
-        svc->gccp_pending_answers = NULL;
-        SVC_LOG_INFO("ThinkDual: GCCP answers consumed (pass 2), resuming confirmation");
+    think_gccp_session_t *sess = think_gccp_get_or_create(svc, svc->active_session);
+    if (!sess) {
+        SVC_LOG_ERROR("ThinkDual: GCCP session table full, cannot record interaction");
+        return AIRY_STRDUP(AIRY_GCCP_INTERACT_PENDING); /* 兜底挂起，避免误收敛 */
+    }
+
+    /* 第二段：本会话已暂存答案，直接交给引擎确认（单次有效，用完即清；
+     * 同时清理问题集，避免残留到下一轮第一段）。 */
+    if (sess->answers) {
+        char *answers = sess->answers;
+        sess->answers = NULL;
+        AIRY_FREE(sess->questions);
+        sess->questions = NULL;
+        sess->updated_ms = think_gccp_now_ms();
+        SVC_LOG_INFO("ThinkDual: GCCP answers consumed (pass 2, session=%s), resuming",
+                     sess->session_id);
         return answers; /* OWNER -> airy_gccp_confirm 释放 */
     }
 
-    /* 第一段：序列化问题集到服务状态，返回哨兵挂起本轮处理。 */
+    /* 第一段：序列化问题集到当前会话，返回哨兵挂起本轮处理。 */
     cJSON *qarr = cJSON_CreateArray();
     if (qarr) {
         for (size_t i = 0; i < probe->question_count; i++) {
@@ -179,10 +292,11 @@ static char *think_gccp_interact_cb(const airy_gccp_probe_t *probe, void *user_d
         char *qjson = cJSON_PrintUnformatted(qarr);
         cJSON_Delete(qarr);
         if (qjson) {
-            AIRY_FREE(svc->gccp_pending_questions);
-            svc->gccp_pending_questions = qjson;
-            SVC_LOG_INFO("ThinkDual: GCCP questions captured (%zu), pending interaction",
-                         probe->question_count);
+            AIRY_FREE(sess->questions);
+            sess->questions = qjson;
+            sess->updated_ms = think_gccp_now_ms();
+            SVC_LOG_INFO("ThinkDual: GCCP questions captured (%zu, session=%s), pending",
+                         probe->question_count, sess->session_id);
         }
     }
     return AIRY_STRDUP(AIRY_GCCP_INTERACT_PENDING);
@@ -371,10 +485,7 @@ void think_service_destroy(think_service_t *svc)
     }
     AIRY_FREE(svc->events);
     svc->events = NULL;
-    AIRY_FREE(svc->gccp_pending_questions);
-    svc->gccp_pending_questions = NULL;
-    AIRY_FREE(svc->gccp_pending_answers);
-    svc->gccp_pending_answers = NULL;
+    think_gccp_cleanup_all(svc);
     airy_mtx_destroy(&svc->lock);
     AIRY_FREE(svc);
 }
@@ -731,8 +842,8 @@ static cJSON *think_plan_to_json(const airy_task_plan_t *plan)
     return root;
 }
 
-int think_service_process(think_service_t *svc, const char *prompt, const char *gccp_answers,
-                          think_process_result_t *out_result)
+int think_service_process(think_service_t *svc, const char *session_id, const char *prompt,
+                          const char *gccp_answers, think_process_result_t *out_result)
 {
     if (!svc || !prompt || !out_result)
         return AIRY_ERR_INVALID_PARAM;
@@ -748,12 +859,20 @@ int think_service_process(think_service_t *svc, const char *prompt, const char *
     svc->event_count = 0;
     svc->dual_invocations++;
 
-    /* GCCP 两段式交互第二段：客户端携带答案重发——暂存答案，引擎 Phase 0
-     * 的交互回调（think_gccp_interact_cb）会取走它完成目标确认。单次有效，
-     * 无论引擎是否消费，process 结束统一清理，避免泄漏到下一轮调用。 */
-    if (gccp_answers && *gccp_answers) {
-        AIRY_FREE(svc->gccp_pending_answers);
-        svc->gccp_pending_answers = AIRY_STRDUP(gccp_answers);
+    /* GCCP 会话隔离（2026-08-25 加固）：交互状态按 session_id 维度存取，
+     * 杜绝多客户端并发串台。active_session 供回调在引擎同步调用中读取。 */
+    const char *sid = (session_id && *session_id) ? session_id : "default";
+    AIRY_STRNCPY_TERM(svc->active_session, sid, sizeof(svc->active_session));
+    think_gccp_expire_old(svc);
+    think_gccp_session_t *sess = think_gccp_get_or_create(svc, sid);
+
+    /* GCCP 两段式交互第二段：客户端携带答案重发——暂存到当前会话，引擎
+     * Phase 0 的交互回调（think_gccp_interact_cb）会取走它完成目标确认。
+     * 单次有效，无论引擎是否消费，process 结束统一清理，避免泄漏到下一轮。 */
+    if (gccp_answers && *gccp_answers && sess) {
+        AIRY_FREE(sess->answers);
+        sess->answers = AIRY_STRDUP(gccp_answers);
+        sess->updated_ms = think_gccp_now_ms();
     }
 
     airy_task_plan_t *plan = NULL;
@@ -762,17 +881,16 @@ int think_service_process(think_service_t *svc, const char *prompt, const char *
         int err_code = (int)err;
 
         /* GCCP 两段式交互第一段（P-A）：引擎挂起（交互回调返回哨兵），
-         * 问题集已捕获到 svc->gccp_pending_questions——返回给客户端，
-         * 语义为成功（客户端据 gccp_need_interaction 进入问答轮）。 */
+         * 问题集已捕获到当前会话——返回给客户端，语义为成功
+         * （客户端据 gccp_need_interaction 进入问答轮）。 */
         if (err_code == AIRY_ERR_GCCP_INTERACTION) {
-            SVC_LOG_INFO("ThinkDual: GCCP interaction pending, returning questions to client");
+            SVC_LOG_INFO("ThinkDual: GCCP interaction pending (session=%s), returning questions",
+                         sid);
             cJSON *root = cJSON_CreateObject();
             if (root) {
                 cJSON_AddBoolToObject(root, "gccp_need_interaction", 1);
                 cJSON_AddStringToObject(root, "gccp_questions",
-                                        svc->gccp_pending_questions ?
-                                            svc->gccp_pending_questions :
-                                            "[]");
+                                        (sess && sess->questions) ? sess->questions : "[]");
                 cJSON *st = cJSON_CreateObject();
                 cJSON_AddNumberToObject(st, "dual_invocations", svc->dual_invocations);
                 cJSON_AddNumberToObject(st, "dual_corrections", svc->dual_corrections);
@@ -791,8 +909,11 @@ int think_service_process(think_service_t *svc, const char *prompt, const char *
                 out_result->json = cJSON_PrintUnformatted(root);
                 cJSON_Delete(root);
             }
-            AIRY_FREE(svc->gccp_pending_answers);
-            svc->gccp_pending_answers = NULL;
+            /* 清理本轮暂存的答案（第一段无答案；防泄漏） */
+            if (sess) {
+                AIRY_FREE(sess->answers);
+                sess->answers = NULL;
+            }
             airy_mtx_unlock(&svc->lock);
             if (!out_result->json)
                 return AIRY_ERR_OUT_OF_MEMORY;
@@ -801,8 +922,10 @@ int think_service_process(think_service_t *svc, const char *prompt, const char *
         }
 
         /* 清理本轮暂存的交互答案（真实失败路径，防泄漏到下一轮） */
-        AIRY_FREE(svc->gccp_pending_answers);
-        svc->gccp_pending_answers = NULL;
+        if (sess) {
+            AIRY_FREE(sess->answers);
+            sess->answers = NULL;
+        }
         airy_mtx_unlock(&svc->lock);
         SVC_LOG_ERROR("ThinkDual: cognition process failed (err=%d)", err_code);
 
@@ -834,8 +957,10 @@ int think_service_process(think_service_t *svc, const char *prompt, const char *
     if (!root) {
         airy_task_plan_free(plan);
         /* 清理本轮暂存的交互答案（未消费场景：need_interaction=0） */
-        AIRY_FREE(svc->gccp_pending_answers);
-        svc->gccp_pending_answers = NULL;
+        if (sess) {
+            AIRY_FREE(sess->answers);
+            sess->answers = NULL;
+        }
         airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
@@ -867,8 +992,10 @@ int think_service_process(think_service_t *svc, const char *prompt, const char *
     cJSON_Delete(root);
     airy_task_plan_free(plan);
     /* 清理本轮暂存的交互答案（第二段回调已消费则指针已置 NULL） */
-    AIRY_FREE(svc->gccp_pending_answers);
-    svc->gccp_pending_answers = NULL;
+    if (sess) {
+        AIRY_FREE(sess->answers);
+        sess->answers = NULL;
+    }
     airy_mtx_unlock(&svc->lock);
 
     if (!out_result->json)

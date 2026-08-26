@@ -29,6 +29,8 @@
 
 #include "gateway_biz_internal.h"
 
+#include "syscalls.h"
+
 #include "logging.h"
 #include "platform.h"
 #include "airy_dirent.h"
@@ -362,9 +364,11 @@ static char *gw_hall_board(const gateway_business_ctx_t *ctx, const cJSON *id)
     /* Live agent roster from agent_d (best effort; failure -> empty list) */
     cJSON *agents = cJSON_CreateArray();
     cJSON_AddItemToObject(result, "agents", agents);
-    if (ctx && ctx->agent_sock_path[0]) {
-        char *resp = gw_svc_call(ctx->agent_sock_path, "list", "{}", GW_TOOL_TIMEOUT_MS);
-        if (resp) {
+    if (ctx) {
+        /* 架构约束 2026-08-25 "必须走 syscall": agent.list 经 SYS_SVC_CALL 派发 */
+        char *resp = NULL;
+        airy_err_t rc = airy_sys_svc_call("agent", "list", "{}", GW_TOOL_TIMEOUT_MS, &resp);
+        if (rc == AIRY_SUCCESS && resp) {
             cJSON *r = cJSON_Parse(resp);
             AIRY_FREE(resp);
             if (r) {

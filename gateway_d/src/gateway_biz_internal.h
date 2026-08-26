@@ -123,8 +123,8 @@ typedef struct {
 char *jsonrpc_error(int code, const char *msg, const cJSON *id);
 char *gw_svc_call(const char *sock_path, const char *method, const char *params_json,
                   int timeout_ms);
-int gw_think_process(const gateway_business_ctx_t *ctx, const char *prompt,
-                     const char *gccp_answers, cJSON **out_think);
+int gw_think_process(const gateway_business_ctx_t *ctx, const char *session_id,
+                     const char *prompt, const char *gccp_answers, cJSON **out_think);
 int gw_acl_check_tool(const char *tool_name);
 const char *gw_mem_method_allowlist(const char *method);
 char *handle_ns_forward(cJSON *root, const gw_ns_forward_rule_t *rule);
@@ -132,6 +132,10 @@ char *handle_mem_call(cJSON *root, const gateway_business_ctx_t *ctx);
 char *handle_llm_list_models(cJSON *root, const gateway_business_ctx_t *ctx);
 char *handle_tool_approval_call(cJSON *root, const gateway_business_ctx_t *ctx,
                                 const char *tool_method);
+
+/* ---- gateway_biz_svcdispatch.c (微核心服务统一派发钩子, 2026-08-25) ---- */
+int gw_sys_svc_dispatch_init(gateway_business_ctx_t *ctx);
+void gw_sys_svc_dispatch_cleanup(void);
 
 /* ---- gateway_biz_hall.c (hall.* — task board / event stream / chain) ---- */
 char *handle_hall_call(cJSON *root, gateway_business_ctx_t *ctx);

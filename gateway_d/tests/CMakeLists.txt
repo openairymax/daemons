@@ -73,7 +73,24 @@ foreach(TEST_SRC ${TEST_SOURCES})
     )
 
     if(AIRY_HAS_CJSON AND TARGET gateway_lib_obj AND AIRY_HAS_MICROHTTPD)
-        target_link_libraries(${TEST_NAME} PRIVATE $<TARGET_OBJECTS:gateway_lib_obj>)
+        # 架构约束 2026-08-25 "必须走 syscall": gateway 测试目标经
+        # gateway_lib_obj（OBJECT 形式）引用 airy_sys_svc_call（atoms/syscall
+        # svc_dispatch.o），不经 gateway 库目标故无 PUBLIC 传递，必须显式
+        # 链接 airy_syscall。Linux 用 --start-group 兜底静态库循环引用
+        # （与 gateway_d 主目标同模式）；macOS ld64 不支持该标志直接链接。
+        if(UNIX AND NOT APPLE)
+            target_link_libraries(${TEST_NAME} PRIVATE
+                "-Wl,--start-group"
+                $<TARGET_OBJECTS:gateway_lib_obj>
+                airy_syscall
+                "-Wl,--end-group"
+            )
+        else()
+            target_link_libraries(${TEST_NAME} PRIVATE
+                $<TARGET_OBJECTS:gateway_lib_obj>
+                airy_syscall
+            )
+        endif()
     endif()
 
     if(AIRY_HAS_MICROHTTPD)

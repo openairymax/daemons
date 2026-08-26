@@ -76,6 +76,7 @@ static void handle_count(int id, airy_sock_t fd);
 static void handle_evolve(cJSON *params, int id, airy_sock_t fd);
 static void handle_health_check(int id, airy_sock_t fd);
 static void handle_get_stats(int id, airy_sock_t fd);
+static void handle_recent(cJSON *params, int id, airy_sock_t fd);
 static void handle_kb_ingest(cJSON *params, int id, airy_sock_t fd);
 static void handle_kb_search(cJSON *params, int id, airy_sock_t fd);
 static void handle_kb_delete(cJSON *params, int id, airy_sock_t fd);
@@ -104,6 +105,11 @@ static void on_delete_method(cJSON *params, int id, void *user_data)
 static void on_count_method(cJSON *params __attribute__((unused)), int id, void *user_data)
 {
     handle_count(id, *(airy_sock_t *)user_data);
+}
+
+static void on_recent_method(cJSON *params, int id, void *user_data)
+{
+    handle_recent(params, id, *(airy_sock_t *)user_data);
 }
 
 static void on_evolve_method(cJSON *params, int id, void *user_data)
@@ -261,6 +267,40 @@ static void handle_count(int id, airy_sock_t client_fd)
     cJSON *result = cJSON_CreateObject();
     cJSON_AddNumberToObject(result, "count", (double)n);
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+/* ---- 记忆链（mem.recent，2026-08-25）：最近写入记录倒序返回 ----
+ * 供 CLI/TUI 记忆链展示面板使用：每条含完整内容/metadata/created_at。 */
+static void handle_recent(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *limit = params ? cJSON_GetObjectItem(params, "limit") : NULL;
+    uint32_t lim = limit && cJSON_IsNumber(limit) ? (uint32_t)limit->valueint : 0;
+
+    mem_recent_item_t *items = NULL;
+    size_t count = 0;
+    int ret = mem_service_recent(g_service, lim, &items, &count);
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Memory recent failed", id);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON *arr = cJSON_CreateArray();
+    for (size_t i = 0; i < count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "record_id", items[i].record_id);
+        cJSON_AddNumberToObject(item, "created_at", (double)items[i].created_at);
+        cJSON_AddNumberToObject(item, "len", (double)items[i].len);
+        cJSON_AddStringToObject(item, "data", items[i].data ? (const char *)items[i].data : "");
+        if (items[i].metadata)
+            cJSON_AddStringToObject(item, "metadata", items[i].metadata);
+        cJSON_AddItemToArray(arr, item);
+    }
+    cJSON_AddItemToObject(result, "records", arr);
+    cJSON_AddNumberToObject(result, "total", (double)count);
+
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    mem_recent_items_free(items, count);
 }
 
 /* ---- KB 知识库（2.1.2.3 RAG 一等抽象）----
@@ -758,6 +798,7 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_mem_d, "get", on_get_method, NULL);
     method_dispatcher_register(g_dispatcher_mem_d, "delete", on_delete_method, NULL);
     method_dispatcher_register(g_dispatcher_mem_d, "count", on_count_method, NULL);
+    method_dispatcher_register(g_dispatcher_mem_d, "recent", on_recent_method, NULL);
 
     method_dispatcher_register(g_dispatcher_mem_d, "evolve", on_evolve_method, NULL);
     method_dispatcher_register(g_dispatcher_mem_d, "health_check", on_health_check_method, NULL);

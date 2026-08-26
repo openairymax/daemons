@@ -53,6 +53,26 @@ static uint64_t get_time_ms(void)
     return airy_time_ms();
 }
 
+/* P2: write() may perform a short (partial) write or return EINTR; a single
+ * call can silently truncate a frame. Loop until all bytes are written. */
+static ssize_t channel_write_all(int fd, const void *buf, size_t len)
+{
+    const char *p = (const char *)buf;
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = write(fd, p + off, len - off);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        if (n == 0)
+            return -1; /* sink closed / zero capacity */
+        off += (size_t)n;
+    }
+    return (ssize_t)off;
+}
+
 static channel_entry_t *find_channel(channel_service_t *svc, const char *channel_id)
 {
     for (size_t i = 0; i < svc->channel_count; i++) {
@@ -466,8 +486,8 @@ int channel_service_send(channel_service_t *svc, const char *channel_id, const v
             return (errno == EAGAIN || errno == ETIMEDOUT) ? AIRY_ERR_TIMEOUT : AIRY_ERR_IO;
         }
         uint32_t net_len = htonl((uint32_t)data_len);
-        ssize_t w1 = write(client_fd, &net_len, sizeof(net_len));
-        ssize_t w2 = write(client_fd, data, data_len);
+        ssize_t w1 = channel_write_all(client_fd, &net_len, sizeof(net_len));
+        ssize_t w2 = (w1 >= 0) ? channel_write_all(client_fd, data, data_len) : -1;
         close(client_fd);
         if (w1 < 0 || w2 < 0) {
             io_rc = (errno == EAGAIN || errno == ETIMEDOUT) ? AIRY_ERR_TIMEOUT : AIRY_ERR_IO;
@@ -482,14 +502,10 @@ int channel_service_send(channel_service_t *svc, const char *channel_id, const v
                 return AIRY_ERR_IO;
             }
             uint32_t net_len = htonl((uint32_t)data_len);
-            if (write(fd, &net_len, sizeof(net_len)) < 0) {
+            if (channel_write_all(fd, &net_len, sizeof(net_len)) < 0 ||
+                channel_write_all(fd, data, data_len) < 0) {
                 close(fd);
-                AIRY_ERROR(AIRY_ERR_IO, "pipe write header failed");
-                return AIRY_ERR_IO;
-            }
-            if (write(fd, data, data_len) < 0) {
-                close(fd);
-                AIRY_ERROR(AIRY_ERR_IO, "pipe write data failed");
+                AIRY_ERROR(AIRY_ERR_IO, "pipe write failed");
                 return AIRY_ERR_IO;
             }
             close(fd);

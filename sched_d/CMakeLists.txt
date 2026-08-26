@@ -26,6 +26,7 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 set(SCHED_D_SOURCES
     src/main.c
     src/monitor.c
+    src/roadmap_rpc.c
     src/sched_service_impl.c
     src/sched_dag_impl.c
     src/sched_dag_parse.c
@@ -82,11 +83,28 @@ target_include_directories(sched_d PRIVATE
 )
 
 # 链接库
+# coreloopthree 的 cognition 引擎（engine.c）引用 hook/config 子系统符号，
+# 需 whole-archive 强制包含 coreloopthree 全部 .o（GNU ld 按序扫描，否则
+# airy_cognition 库被拉取后其 hook/config 引用无法回头解析，见 tool_d 同款修复）。
+target_link_libraries(sched_d PRIVATE svc_common)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(sched_d PRIVATE
+        -Wl,--whole-archive
+        airy_coreloopthree
+        -Wl,--no-whole-archive)
+else()
+    target_link_libraries(sched_d PRIVATE airy_coreloopthree)
+endif()
 target_link_libraries(sched_d PRIVATE
-    svc_common
-    airy_coreloopthree
+    airy_cognition
+    airy_core
+    airy_memory
+    airy_atoms
+    airy_common
+    airy_llm_service
+    airy_tool_service
     Threads::Threads
-    ${CJSON_LIBRARIES}
+    airy_platform_libs
 )
 
 # DAG 并行派发（mac_framework 委派模式）：multi_agent_collaboration.h 位于

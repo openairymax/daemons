@@ -43,6 +43,15 @@ typedef struct {
     char *metadata;
 } mem_record_t;
 
+/** @brief Recent-record list item（记忆链展示：含内容与时间戳）。 */
+typedef struct {
+    char *record_id;
+    void *data;
+    size_t len;
+    char *metadata;
+    uint64_t created_at;
+} mem_recent_item_t;
+
 
 mem_service_t *mem_service_create(size_t max_records);
 void mem_service_destroy(mem_service_t *svc);
@@ -77,6 +86,21 @@ int mem_service_delete(mem_service_t *svc, const char *record_id);
 size_t mem_service_count(mem_service_t *svc);
 void mem_search_hits_free(mem_search_hit_t *hits, size_t count);
 void mem_record_free(mem_record_t *rec);
+
+/**
+ * @brief 列出最近写入的 N 条记忆记录（记忆链展示）。
+ *
+ * 按写入顺序取数组尾部（最新）limit 条，倒序返回（新 → 旧），每条
+ * 含完整内容与 created_at。limit 为 0 时取默认 10 条。
+ * @param svc         Memory service
+ * @param limit       最大条数（0 → 10）
+ * @param out_items   Malloc'd 数组（按新→旧；用 mem_recent_items_free 释放）
+ * @param out_count   返回条数
+ * @return AIRY_SUCCESS on success
+ */
+int mem_service_recent(mem_service_t *svc, uint32_t limit,
+                       mem_recent_item_t **out_items, size_t *out_count);
+void mem_recent_items_free(mem_recent_item_t *items, size_t count);
 
 /**
  * @brief Ingest a document into a knowledge base (KB).

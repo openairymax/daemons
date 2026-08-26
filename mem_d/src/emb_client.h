@@ -20,13 +20,17 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdatomic.h>
 
 typedef struct {
     char *url;
     char *api_key;
     int enabled;
-    int healthy;
-    uint64_t last_fail_time;
+    /* 熔断状态（t11-03）：healthy/last_fail_time 被 mem_emb_should_try /
+     * mem_emb_mark_fail / mem_emb_embed 并发读写，改用 C11 atomics 保证
+     * 无锁一致性（此前为普通 int/uint64_t，多线程竞争时熔断窗口失效） */
+    atomic_int healthy;
+    atomic_uint_fast64_t last_fail_time;
     uint64_t retry_after_ms;
 } mem_emb_client_t;
 

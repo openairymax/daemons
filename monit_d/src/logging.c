@@ -236,31 +236,43 @@ static void format_json_log(const ring_entry_t *entry, char *buf, size_t buf_siz
 {
     size_t pos = 0;
 
-    pos += snprintf(buf + pos, buf_size - pos,
-                    "{\"timestamp\":\"%llu\","
-                    "\"level\":\"%s\","
-                    "\"message\":\"%s\","
-                    "\"service\":\"%s\","
-                    "\"file\":\"%s\","
-                    "\"line\":%d,"
-                    "\"function\":\"%s\"",
-                    (unsigned long long)entry->timestamp,
-                    entry->level < LOG_LEVEL_COUNT ? level_names[entry->level] : "UNKNOWN",
-                    entry->message, entry->service_name, entry->file, entry->line, entry->function);
+    /* P1: snprintf returns the would-be length; blind accumulation lets pos
+     * exceed buf_size and underflow later size args. Append with clamping. */
+#define JSON_APPEND(...)                                                  \
+    do {                                                                  \
+        if (pos >= buf_size)                                              \
+            break;                                                        \
+        int _w = snprintf(buf + pos, buf_size - pos, __VA_ARGS__);        \
+        if (_w < 0)                                                       \
+            break;                                                        \
+        pos += ((size_t)_w < buf_size - pos) ? (size_t)_w                 \
+                                             : buf_size - pos - 1;        \
+    } while (0)
+
+    JSON_APPEND("{\"timestamp\":\"%llu\","
+                "\"level\":\"%s\","
+                "\"message\":\"%s\","
+                "\"service\":\"%s\","
+                "\"file\":\"%s\","
+                "\"line\":%d,"
+                "\"function\":\"%s\"",
+                (unsigned long long)entry->timestamp,
+                entry->level < LOG_LEVEL_COUNT ? level_names[entry->level] : "UNKNOWN",
+                entry->message, entry->service_name, entry->file, entry->line, entry->function);
 
     if (entry->trace_id[0]) {
-        pos += snprintf(buf + pos, buf_size - pos, ",\"traceId\":\"%s\"", entry->trace_id);
+        JSON_APPEND(",\"traceId\":\"%s\"", entry->trace_id);
     }
     if (entry->span_id[0]) {
-        pos += snprintf(buf + pos, buf_size - pos, ",\"spanId\":\"%s\"", entry->span_id);
+        JSON_APPEND(",\"spanId\":\"%s\"", entry->span_id);
     }
 
-    for (size_t i = 0; i < entry->context_count && pos < buf_size - 128; i++) {
-        pos += snprintf(buf + pos, buf_size - pos, ",\"%s\":\"%s\"", entry->context[i].key,
-                        entry->context[i].value);
+    for (size_t i = 0; i < entry->context_count; i++) {
+        JSON_APPEND(",\"%s\":\"%s\"", entry->context[i].key, entry->context[i].value);
     }
 
-    pos += snprintf(buf + pos, buf_size - pos, "}");
+    JSON_APPEND("}");
+#undef JSON_APPEND
 }
 
 static void dispatch_to_targets(const ring_entry_t *entry)
@@ -277,18 +289,32 @@ static void dispatch_to_targets(const ring_entry_t *entry)
 
         switch (target->type) {
         case TARGET_FILE:
+            /* fp 失效（轮转 fopen 失败 / 写失败主动关闭）时尝试重开，
+             * 避免日志静默丢弃（P1，2026-08-25）。轮转用 "a" 追加而非
+             * "w" 覆盖，防止多次失败时反复截断文件。 */
+            if (!target->config.file.fp) {
+                target->config.file.fp = fopen(target->config.file.path, "a");
+                if (target->config.file.fp)
+                    target->config.file.current_size = 0;
+            }
             if (target->config.file.fp) {
-                fputs(json_buf, target->config.file.fp);
-                fputc('\n', target->config.file.fp);
-                fflush(target->config.file.fp);
+                if (fputs(json_buf, target->config.file.fp) < 0 ||
+                    fputc('\n', target->config.file.fp) < 0) {
+                    fclose(target->config.file.fp);
+                    target->config.file.fp = NULL;
+                    break;
+                }
+                if (fflush(target->config.file.fp) != 0) {
+                    fclose(target->config.file.fp);
+                    target->config.file.fp = NULL;
+                    break;
+                }
                 target->config.file.current_size += strlen(json_buf) + 1;
 
                 if (target->config.file.current_size >= target->config.file.max_size_bytes) {
                     fclose(target->config.file.fp);
-                    target->config.file.fp = fopen(target->config.file.path, "w");
-                    if (target->config.file.fp) {
-                        target->config.file.current_size = 0;
-                    }
+                    target->config.file.fp = NULL;
+                    target->config.file.current_size = 0;
                 }
             }
             break;

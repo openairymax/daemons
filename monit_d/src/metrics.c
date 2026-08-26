@@ -190,11 +190,14 @@ static void format_labels(char *buf, size_t buf_size, const metric_label_t *labe
             buf[pos++] = ' ';
         }
 
-        int written =
-            snprintf(buf + pos, buf_size - pos, "%s=\"%s\"", labels[i].key, labels[i].value);
-        if (written > 0) {
-            pos += (size_t)written;
+        /* P1: clamp against would-be length so pos never overflows the
+         * buffer and later writes cannot underflow their size arg. */
+        size_t room = buf_size - pos;
+        int written = snprintf(buf + pos, room, "%s=\"%s\"", labels[i].key, labels[i].value);
+        if (written < 0) {
+            break;
         }
+        pos += ((size_t)written < room) ? (size_t)written : room - 1;
     }
 
     buf[pos++] = '}';
@@ -512,13 +515,25 @@ char *metrics_export_prometheus(void)
 
     airy_mtx_lock(&g_metrics.global_lock);
 
-    for (size_t i = 0; i < g_metrics.metric_count && pos < buf_size - 1024; i++) {
+    /* P1: snprintf returns the would-be length; blind accumulation lets pos
+     * overflow buf_size and underflow later size args. Append with clamping. */
+#define PROM_APPEND(...)                                                  \
+    do {                                                                  \
+        if (pos >= buf_size)                                              \
+            break;                                                        \
+        size_t _room = buf_size - pos;                                    \
+        int _w = snprintf(buf + pos, _room, __VA_ARGS__);                 \
+        if (_w < 0)                                                       \
+            break;                                                        \
+        pos += ((size_t)_w < _room) ? (size_t)_w : _room - 1;             \
+    } while (0)
+
+    for (size_t i = 0; i < g_metrics.metric_count; i++) {
         metric_t *metric = &g_metrics.metrics[i];
         airy_mtx_lock(&metric->lock);
 
         if (metric->description) {
-            pos += snprintf(buf + pos, buf_size - pos, "# HELP %s %s\n", metric->name,
-                            metric->description);
+            PROM_APPEND("# HELP %s %s\n", metric->name, metric->description);
         }
 
         const char *type_str = "untyped";
@@ -539,36 +554,36 @@ char *metrics_export_prometheus(void)
             type_str = "untyped";
             break;
         }
-        pos += snprintf(buf + pos, buf_size - pos, "# TYPE %s %s\n", metric->name, type_str);
+        PROM_APPEND("# TYPE %s %s\n", metric->name, type_str);
 
-        for (size_t j = 0; j < metric->series_count && pos < buf_size - 256; j++) {
+        for (size_t j = 0; j < metric->series_count; j++) {
             metric_series_t *series = &metric->series[j];
 
             char labels_buf[1024];
             format_labels(labels_buf, sizeof(labels_buf), series->labels, series->label_count);
 
-            pos += snprintf(buf + pos, buf_size - pos, "%s%s %.17g %llu\n", metric->name,
-                            labels_buf, series->value, (unsigned long long)series->timestamp);
+            PROM_APPEND("%s%s %.17g %llu\n", metric->name, labels_buf, series->value,
+                        (unsigned long long)series->timestamp);
         }
 
         if (metric->type == METRIC_TYPE_HISTOGRAM && metric->histogram.bucket_count > 0) {
-            for (size_t b = 0; b < metric->histogram.bucket_count && pos < buf_size - 256; b++) {
-                pos += snprintf(buf + pos, buf_size - pos, "%s_bucket{le=\"%.17g\"} %llu\n",
-                                metric->name, metric->histogram.buckets[b].boundary,
-                                (unsigned long long)metric->histogram.buckets[b].count);
+            for (size_t b = 0; b < metric->histogram.bucket_count; b++) {
+                PROM_APPEND("%s_bucket{le=\"%.17g\"} %llu\n", metric->name,
+                            metric->histogram.buckets[b].boundary,
+                            (unsigned long long)metric->histogram.buckets[b].count);
             }
-            pos += snprintf(buf + pos, buf_size - pos, "%s_bucket{le=\"+Inf\"} %llu\n",
-                            metric->name, (unsigned long long)metric->histogram.count);
-            pos += snprintf(buf + pos, buf_size - pos, "%s_sum %.17g\n", metric->name,
-                            metric->histogram.sum);
-            pos += snprintf(buf + pos, buf_size - pos, "%s_count %llu\n", metric->name,
-                            (unsigned long long)metric->histogram.count);
+            PROM_APPEND("%s_bucket{le=\"+Inf\"} %llu\n", metric->name,
+                        (unsigned long long)metric->histogram.count);
+            PROM_APPEND("%s_sum %.17g\n", metric->name, metric->histogram.sum);
+            PROM_APPEND("%s_count %llu\n", metric->name,
+                        (unsigned long long)metric->histogram.count);
         }
 
-        pos += snprintf(buf + pos, buf_size - pos, "\n");
+        PROM_APPEND("\n");
 
         airy_mtx_unlock(&metric->lock);
     }
+#undef PROM_APPEND
 
     airy_mtx_unlock(&g_metrics.global_lock);
 

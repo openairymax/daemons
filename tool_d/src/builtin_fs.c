@@ -26,7 +26,10 @@
 #ifndef _WIN32
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 #else
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include <direct.h>
 #include <io.h>
 #include <sys/stat.h>
@@ -42,6 +45,65 @@
 #endif
 
 #include "tool_builtin_internal.h"
+
+/* ============================================================================
+ * 原子写（t11-01）：写同目录临时文件 + fsync + rename 替换。
+ * 直接 fopen(path,"wb") 覆盖写在中途失败/崩溃时会留下半写文件；
+ * 改为先写 "<path>.tmp"（同目录保证同卷 rename 原子性）再原子替换，
+ * 读取方永远只能看到旧内容或新内容，不会看到损坏的中间态。
+ * 返回 0 成功；非 0 失败（errno 描述原因）。
+ * ============================================================================ */
+static int fs_atomic_write(const char *path, const char *buf, size_t len)
+{
+    char tmppath[4096];
+    if (snprintf(tmppath, sizeof(tmppath), "%s.tmp", path) >= (int)sizeof(tmppath))
+        return -1;
+
+    FILE *wfp = fopen(tmppath, "wb");
+    if (!wfp)
+        return -1;
+
+    int failed = 0;
+    size_t wr = fwrite(buf, 1, len, wfp);
+    if (wr != len)
+        failed = 1;
+    if (!failed && fflush(wfp) != 0)
+        failed = 1;
+#ifndef _WIN32
+    if (!failed) {
+        int fd = fileno(wfp);
+        if (fd >= 0 && fsync(fd) != 0)
+            failed = 1;
+    }
+#else
+    if (!failed) {
+        int fd = _fileno(wfp);
+        if (fd >= 0 && _commit(fd) != 0)
+            failed = 1;
+    }
+#endif
+    if (fclose(wfp) != 0)
+        failed = 1;
+
+    if (failed) {
+        remove(tmppath);
+        return -1;
+    }
+
+#ifndef _WIN32
+    if (rename(tmppath, path) != 0) {
+        remove(tmppath);
+        return -1;
+    }
+#else
+    /* MoveFileExA 可原子替换已存在的目标（C 标准 rename 在目标存在时会失败） */
+    if (!MoveFileExA(tmppath, path, MOVEFILE_REPLACE_EXISTING)) {
+        remove(tmppath);
+        return -1;
+    }
+#endif
+    return 0;
+}
 
 int fs_read_tool(const char *params_json, tool_result_t *res)
 {
@@ -95,26 +157,16 @@ int fs_write_tool(const char *params_json, tool_result_t *res)
         res->error = AIRY_STRDUP("Missing string parameter: content");
         return AIRY_ERR_INVALID_PARAM;
     }
-    FILE *fp = fopen(path->valuestring, "wb");
-    if (!fp) {
+    size_t clen = strlen(content->valuestring);
+    if (fs_atomic_write(path->valuestring, content->valuestring, clen) != 0) {
         char err[512];
         snprintf(err, sizeof(err), "Cannot write file '%s': %s", path->valuestring,
                  strerror(errno));
         res->error = AIRY_STRDUP(err);
         return AIRY_ERR_IO;
     }
-    size_t clen = strlen(content->valuestring);
-    size_t written = fwrite(content->valuestring, 1, clen, fp);
-    fclose(fp);
-    if (written != clen) {
-        char err[256];
-        snprintf(err, sizeof(err), "Short write to '%s' (%zu/%zu bytes)", path->valuestring,
-                 written, clen);
-        res->error = AIRY_STRDUP(err);
-        return AIRY_ERR_IO;
-    }
     char ok[512];
-    snprintf(ok, sizeof(ok), "Written %zu bytes to %s", written, path->valuestring);
+    snprintf(ok, sizeof(ok), "Written %zu bytes to %s (atomic)", clen, path->valuestring);
     res->output = AIRY_STRDUP(ok);
     res->success = 1;
     res->exit_code = 0;
@@ -683,8 +735,7 @@ int fs_edit_tool(const char *params_json, tool_result_t *res)
     buf[w] = '\0';
     AIRY_FREE(content);
 
-    FILE *wfp = fopen(path->valuestring, "wb");
-    if (!wfp) {
+    if (fs_atomic_write(path->valuestring, buf, w) != 0) {
         char err[512];
         snprintf(err, sizeof(err), "Cannot write file '%s': %s", path->valuestring,
                  strerror(errno));
@@ -692,13 +743,11 @@ int fs_edit_tool(const char *params_json, tool_result_t *res)
         AIRY_FREE(buf);
         return AIRY_ERR_IO;
     }
-    size_t wr = fwrite(buf, 1, w, wfp);
-    fclose(wfp);
     char ok[512];
     snprintf(ok, sizeof(ok),
              "Replaced %d occurrence(s) of %zu-byte string in '%s' "
-             "(total matches: %d, %zu bytes written)",
-             reps, olen, path->valuestring, total, wr);
+             "(total matches: %d, %zu bytes written, atomic)",
+             reps, olen, path->valuestring, total, w);
     AIRY_FREE(buf);
     res->output = AIRY_STRDUP(ok);
     res->success = 1;

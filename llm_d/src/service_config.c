@@ -378,6 +378,16 @@ typedef struct {
      * 为零价规则，未配置的模型落默认价。 */
     int has_input_price;
     int has_output_price;
+    /* v2 表格格式扩展字段（2026-08-26）：
+     * mode / api_format / context_window / max_output / tool_rounds /
+     * vision / thinking 来自模型连接表的每行配置。 */
+    char mode[8];
+    char api_format[16];
+    char context_window[16];
+    char max_output[16];
+    int tool_rounds;
+    int vision;
+    char thinking[8];
 } model_entry_t;
 
 typedef struct {
@@ -482,12 +492,26 @@ static void svc_yaml_finalize_model(svc_yaml_state_t *st)
     const char *r = yaml_map_get(&st->item_map, "max_retries");
     const char *ic = yaml_map_get(&st->item_map, "input_cost_per_1k");
     const char *oc = yaml_map_get(&st->item_map, "output_cost_per_1k");
+    /* v2 表格格式（2026-08-26）：连接表每行 name=展示名 / model_id=模型名。
+     * 模型名优先取 model_id（缺省退回 name）；provider 用展示名（缺省
+     * 退回 name），作为 provider 键参与聚合与路由。 */
+    const char *mid = yaml_map_get(&st->item_map, "model_id");
+    const char *mode = yaml_map_get(&st->item_map, "mode");
+    const char *fmt = yaml_map_get(&st->item_map, "api_format");
+    const char *bu = yaml_map_get(&st->item_map, "base_url");
+    const char *cw = yaml_map_get(&st->item_map, "context_window");
+    const char *mo = yaml_map_get(&st->item_map, "max_output");
+    const char *tr = yaml_map_get(&st->item_map, "tool_rounds");
+    const char *vi = yaml_map_get(&st->item_map, "vision");
+    const char *th = yaml_map_get(&st->item_map, "thinking");
 
-    if (n && p) {
+    const char *model_name = (mid && mid[0]) ? mid : (n ? n : NULL);
+    const char *prov_name = p ? p : (n ? n : NULL);
+    if (model_name && model_name[0] && prov_name && prov_name[0]) {
         __builtin_memset(&st->models[st->model_count], 0, sizeof(model_entry_t));
-        AIRY_STRNCPY_TERM(st->models[st->model_count].name, n,
+        AIRY_STRNCPY_TERM(st->models[st->model_count].name, model_name,
                           sizeof(st->models[st->model_count].name));
-        AIRY_STRNCPY_TERM(st->models[st->model_count].provider, p,
+        AIRY_STRNCPY_TERM(st->models[st->model_count].provider, prov_name,
                           sizeof(st->models[st->model_count].provider));
         if (e)
             AIRY_STRNCPY_TERM(st->models[st->model_count].api_key_env, e,
@@ -495,6 +519,15 @@ static void svc_yaml_finalize_model(svc_yaml_state_t *st)
         if (ep)
             AIRY_STRNCPY_TERM(st->models[st->model_count].endpoint, ep,
                               sizeof(st->models[st->model_count].endpoint));
+        else if (bu && bu[0]) {
+            /* v2：base_url 为服务根地址，按 api_format 补后缀 */
+            const char *adapter = "openai";
+            if (fmt && strcasecmp(fmt, "anthropic") == 0)
+                adapter = "anthropic";
+            snprintf(st->models[st->model_count].endpoint,
+                     sizeof(st->models[st->model_count].endpoint), "%s%s", bu,
+                     (strcmp(adapter, "anthropic") == 0) ? "/messages" : "/chat/completions");
+        }
         if (t)
             st->models[st->model_count].timeout_sec = (int)strtol(t, NULL, 10);
         if (r)
@@ -507,6 +540,28 @@ static void svc_yaml_finalize_model(svc_yaml_state_t *st)
             st->models[st->model_count].output_cost_per_k = atof(oc);
             st->models[st->model_count].has_output_price = 1;
         }
+        if (mode)
+            AIRY_STRNCPY_TERM(st->models[st->model_count].mode, mode,
+                              sizeof(st->models[st->model_count].mode));
+        if (fmt)
+            AIRY_STRNCPY_TERM(st->models[st->model_count].api_format, fmt,
+                              sizeof(st->models[st->model_count].api_format));
+        if (cw)
+            AIRY_STRNCPY_TERM(st->models[st->model_count].context_window, cw,
+                              sizeof(st->models[st->model_count].context_window));
+        if (mo)
+            AIRY_STRNCPY_TERM(st->models[st->model_count].max_output, mo,
+                              sizeof(st->models[st->model_count].max_output));
+        if (tr)
+            st->models[st->model_count].tool_rounds = (int)strtol(tr, NULL, 10);
+        if (vi) {
+            if (strcasecmp(vi, "true") == 0 || strcmp(vi, "1") == 0 ||
+                strcasecmp(vi, "yes") == 0)
+                st->models[st->model_count].vision = 1;
+        }
+        if (th)
+            AIRY_STRNCPY_TERM(st->models[st->model_count].thinking, th,
+                              sizeof(st->models[st->model_count].thinking));
         st->model_count++;
     }
 }

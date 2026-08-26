@@ -30,22 +30,22 @@ target_include_directories(channel_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/compat/include
 )
 
-if(UNIX)
-    target_link_libraries(channel_d PRIVATE
-        svc_common
-        airy_common
-        Threads::Threads
-        airy_platform_libs
+# 平台无关链接：svc_common/airy_common/Threads 为三平台共有，ws2_32 等
+# 平台库由 airy_platform_libs 统一映射（Windows 分支此前缺失链接 → 构建失败）。
+target_link_libraries(channel_d PRIVATE
+    svc_common
+    airy_common
+    Threads::Threads
+    airy_platform_libs
+)
+# R-09-119: Linux FHS 路径宏仅在 Linux 设置；macOS 使用 platform.h 的
+# 默认路径（./agentrt/config、./agentrt/logs），避免覆盖后无写权限。
+if(UNIX AND NOT APPLE)
+    target_compile_definitions(channel_d PRIVATE
+        _GNU_SOURCE
+        AIRY_CONFIG_DIR="/etc/agentrt"
+        AIRY_LOG_DIR="/var/log/agentrt"
     )
-    # R-09-119: Linux FHS 路径宏仅在 Linux 设置；macOS 使用 platform.h 的
-    # 默认路径（./agentrt/config、./agentrt/logs），避免覆盖后无写权限。
-    if(NOT APPLE)
-        target_compile_definitions(channel_d PRIVATE
-            _GNU_SOURCE
-            AIRY_CONFIG_DIR="/etc/agentrt"
-            AIRY_LOG_DIR="/var/log/agentrt"
-        )
-    endif()
 endif()
 
 if(NOT MSVC)

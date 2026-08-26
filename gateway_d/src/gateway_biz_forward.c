@@ -22,6 +22,8 @@
 #include "platform.h"
 #include "daemon_security.h"
 
+#include "syscalls.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -287,6 +289,7 @@ char *gw_svc_call(const char *sock_path, const char *method, const char *params_
  * gateway -> llm_d single-model direct call (D4 fix).
  *
  * @param ctx       Gateway context
+ * @param session_id 会话标识（可 NULL；透传给 think_d 做 GCCP 交互状态隔离）
  * @param prompt    User input
  * @param gccp_answers GCCP 两段式交互第二段答案 JSON（可 NULL；见 think_service.h）
  * @param out_think Dual-thinking result JSON (cJSON object, caller cJSON_Delete):
@@ -295,8 +298,8 @@ char *gw_svc_call(const char *sock_path, const char *method, const char *params_
  * @return 0 on success (*out_think valid); non-zero on failure
  *         (think_d unreachable/timed out, degraded to direct call)
  */
-int gw_think_process(const gateway_business_ctx_t *ctx, const char *prompt,
-                     const char *gccp_answers, cJSON **out_think)
+int gw_think_process(const gateway_business_ctx_t *ctx, const char *session_id,
+                     const char *prompt, const char *gccp_answers, cJSON **out_think)
 {
     *out_think = NULL;
     if (!ctx || !prompt || !*prompt)
@@ -307,6 +310,8 @@ int gw_think_process(const gateway_business_ctx_t *ctx, const char *prompt,
         return -1;
     cJSON *p = cJSON_CreateString(prompt);
     cJSON_AddItemToObject(params, "prompt", p);
+    if (session_id && *session_id)
+        cJSON_AddStringToObject(params, "session_id", session_id);
     if (gccp_answers && *gccp_answers) {
         cJSON_AddStringToObject(params, "gccp_answers", gccp_answers);
     }
@@ -315,9 +320,13 @@ int gw_think_process(const gateway_business_ctx_t *ctx, const char *prompt,
     if (!params_str)
         return -1;
 
-    char *resp = gw_svc_call(ctx->think_sock_path, "process", params_str, GW_THINK_TIMEOUT_MS);
+    /* 架构约束 2026-08-25 "必须走 syscall": think.process 经 SYS_SVC_CALL
+     * 派发（钩子按命名空间路由到 think_d 端点，见 gateway_biz_svcdispatch.c）。 */
+    char *resp = NULL;
+    airy_err_t rc =
+        airy_sys_svc_call("think", "process", params_str, GW_THINK_TIMEOUT_MS, &resp);
     AIRY_FREE(params_str);
-    if (!resp) {
+    if (rc != AIRY_SUCCESS || !resp) {
         AIRY_LOG_WARN("gateway: think.process failed (think_d unreachable at %s), "
                  "degrading to direct LLM",
                  ctx->think_sock_path);
@@ -395,6 +404,8 @@ const char *gw_mem_method_allowlist(const char *method)
         return "delete";
     if (strcmp(method, "mem.count") == 0)
         return "count";
+    if (strcmp(method, "mem.recent") == 0)
+        return "recent";
     if (strcmp(method, "mem.evolve") == 0)
         return "evolve";
     if (strcmp(method, "mem.health_check") == 0)
@@ -539,9 +550,13 @@ char *handle_ns_forward(cJSON *root, const gw_ns_forward_rule_t *rule)
     if (!params_str)
         return jsonrpc_error(-32603, "Out of memory", id);
 
-    char *resp = gw_svc_call(rule->sock_path, inner, params_str, rule->timeout_ms);
+    /* 架构约束 2026-08-25 "必须走 syscall": 命名空间转发统一经 SYS_SVC_CALL
+     * 派发（钩子按命名空间路由到对应 daemon 端点，见 gateway_biz_svcdispatch.c）。 */
+    char *resp = NULL;
+    airy_err_t rc = airy_sys_svc_call(rule->ns, inner, params_str, (uint32_t)rule->timeout_ms,
+                                      &resp);
     AIRY_FREE(params_str);
-    if (!resp)
+    if (rc != AIRY_SUCCESS || !resp)
         return jsonrpc_error(-32603, "Service unreachable", id);
 
     cJSON *rroot = cJSON_Parse(resp);
@@ -599,9 +614,11 @@ char *handle_mem_call(cJSON *root, const gateway_business_ctx_t *ctx)
         return jsonrpc_error(-32603, "Out of memory", id);
     }
 
-    char *resp = gw_svc_call(ctx->mem_sock_path, mem_method, params_str, GW_TOOL_TIMEOUT_MS);
+    /* 架构约束 2026-08-25 "必须走 syscall": mem.* 经 SYS_SVC_CALL 派发 */
+    char *resp = NULL;
+    airy_err_t rc = airy_sys_svc_call("mem", mem_method, params_str, GW_TOOL_TIMEOUT_MS, &resp);
     AIRY_FREE(params_str);
-    if (!resp) {
+    if (rc != AIRY_SUCCESS || !resp) {
         return jsonrpc_error(-32603, "Memory service unreachable", id);
     }
 
@@ -641,9 +658,13 @@ char *handle_mem_call(cJSON *root, const gateway_business_ctx_t *ctx)
 char *handle_llm_list_models(cJSON *root, const gateway_business_ctx_t *ctx)
 {
     cJSON *id = cJSON_GetObjectItem(root, "id");
+    (void)ctx; /* 端点解析统一由 svc dispatch 钩子按命名空间完成 */
 
-    char *resp = gw_svc_call(ctx->llm_sock_path, "list_models", "{}", GW_LLM_DEFAULT_TIMEOUT_MS);
-    if (!resp) {
+    /* 架构约束 2026-08-25 "必须走 syscall": llm.list_models 经 SYS_SVC_CALL 派发 */
+    char *resp = NULL;
+    airy_err_t rc = airy_sys_svc_call("llm", "list_models", "{}", GW_LLM_DEFAULT_TIMEOUT_MS,
+                                      &resp);
+    if (rc != AIRY_SUCCESS || !resp) {
         return jsonrpc_error(-32603, "LLM service unreachable", id);
     }
 
@@ -682,6 +703,7 @@ char *handle_tool_approval_call(cJSON *root, const gateway_business_ctx_t *ctx,
 {
     cJSON *id = cJSON_GetObjectItem(root, "id");
     cJSON *params = cJSON_GetObjectItem(root, "params");
+    (void)ctx; /* 端点解析统一由 svc dispatch 钩子按命名空间完成 */
 
     if (strcmp(tool_method, "approve") == 0) {
         const cJSON *req_id = params ? cJSON_GetObjectItem(params, "request_id") : NULL;
@@ -702,9 +724,11 @@ char *handle_tool_approval_call(cJSON *root, const gateway_business_ctx_t *ctx,
         return jsonrpc_error(-32603, "Out of memory", id);
     }
 
-    char *resp = gw_svc_call(ctx->tool_sock_path, tool_method, params_str, GW_TOOL_TIMEOUT_MS);
+    /* 架构约束 2026-08-25 "必须走 syscall": tool.pending/approve 经 SYS_SVC_CALL 派发 */
+    char *resp = NULL;
+    airy_err_t rc = airy_sys_svc_call("tool", tool_method, params_str, GW_TOOL_TIMEOUT_MS, &resp);
     AIRY_FREE(params_str);
-    if (!resp) {
+    if (rc != AIRY_SUCCESS || !resp) {
         return jsonrpc_error(-32603, "Tool service unreachable", id);
     }
 
