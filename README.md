@@ -1,23 +1,23 @@
-# daemons — Runtime Daemon Services (12 Daemons)
+# daemons — Runtime Daemon Services (17 Daemons)
 
-> The user-space service layer of the Airymax agent runtime: twelve independent daemon processes that together form the backend-service substrate sitting on top of the Airymax kernel.
+> The user-space service layer of the Airymax agent runtime: seventeen independent daemon processes that together form the backend-service substrate sitting on top of the Airymax kernel.
 > Leaf repository under the [agentrt](../) management repo.
 
 **Language:** English | [简体中文](README_zh.md)
 
-[![Version](https://img.shields.io/badge/version-0.1.1-5a6b7e)](https://atomgit.com/openairymax/daemons)
+[![Version](https://img.shields.io/badge/version-0.1.3-5a6b7e)](https://atomgit.com/openairymax/daemons)
 [![License](https://img.shields.io/badge/license-AGPL--3.0+Apache--2.0-4a90d9)](LICENSE)
 [![C11](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/11)
 
 - **Repository:** `git@atomgit.com:openairymax/daemons.git`
-- **Branch:** `feature/official-hubs-01`
-- **Version:** 0.1.1 (Airymax foundational release)
+- **Branch:** `develop/hubs-01`
+- **Version:** 0.1.3 (aligned with agentrt management repo)
 
 ---
 
 ## Overview
 
-**daemons** is the **user-space service layer** of the Airymax agent runtime. It is composed of **12 independent daemon processes** — `gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d` — together with a shared static library `svc_common` (in `common/`). Every daemon follows the **single-responsibility principle**: it runs as its own process, communicates with peers through the unified IPC service bus, and together they form a high-availability, scalable, pluggable micro-service architecture sitting on top of the Airymax kernel.
+**daemons** is the **user-space service layer** of the Airymax agent runtime. It is composed of **17 independent daemon processes** — `gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d` — together with a shared static library `svc_common` (in `common/`). Every daemon follows the **single-responsibility principle**: it runs as its own process, communicates with peers through the unified IPC service bus, and together they form a high-availability, scalable, pluggable micro-service architecture sitting on top of the Airymax kernel.
 
 ```
 External client → gateway_d → (other daemons via ipc_service_bus) → atoms/syscall → kernel services
@@ -33,7 +33,7 @@ Design goals:
 - **Endogenous security** — `svc_common` PUBLIC-links `cupolas` (`daemon_cupolas_bootstrap.c`), so every daemon automatically inherits Cupolas security: request authentication, input sanitization, audit, sandbox.
 - **Unified protocols** — all daemons communicate over JSON-RPC 2.0; MCP / A2A / OpenAI-API protocol conversion happens at the gateway boundary.
 
-Within the Airymax 0.1.1 release, the workspace is partitioned into **38 repositories** (1 umbrella + 5 management + 29 leaf + 3 top-level); `daemons` is one of the 7 leaf repositories aggregated by the [agentrt](../) management repo, forming the **Service Layer** in the cyclic architecture (above the Gateway Layer `gateway`, below the Ecosystem Layer `sdk`/`ecosystem`). It is the topmost agentrt-internal leaf repository — every daemon dispatches business logic downward through `atoms/syscall` into the kernel.
+Within the Airymax 0.1.3 release, the workspace is partitioned into **multiple repositories** aggregated by the [agentrt](../) management repo; `daemons` is one of the 7 leaf repositories, forming the **Service Layer** in the cyclic architecture (above the Gateway Layer `gateway`, below the Ecosystem Layer `sdk`/`ecosystem`). It is the topmost agentrt-internal leaf repository — every daemon dispatches business logic downward through `atoms/syscall` into the kernel.
 
 ## Module Classification
 
@@ -45,7 +45,7 @@ daemons is a service/composition module: it does not provide foundational primit
 
 ```
 daemons/
-├── CMakeLists.txt                 # Top-level build file; manages all 12 daemons + svc_common
+├── CMakeLists.txt                 # Top-level build file; manages all 17 daemons + svc_common
 ├── Dockerfile.ci                  # CI environment Docker image
 ├── README.md                      # This file (English)
 ├── README_zh.md                   # Chinese version
@@ -54,8 +54,8 @@ daemons/
 ├── common/                        # Shared service library (svc_common)
 │   ├── CMakeLists.txt             # svc_common static library target
 │   ├── README.md                  # svc_common documentation
-│   ├── include/                   # 39 shared headers
-│   ├── src/                       # 32 source files (30+ utility components)
+│   ├── include/                   # Shared headers
+│   ├── src/                       # Source files (utility components)
 │   └── tests/                     # svc_common unit tests
 ├── gateway_d/                     # API gateway daemon
 ├── llm_d/                         # LLM service daemon
@@ -69,6 +69,11 @@ daemons/
 ├── observe_d/                     # Observability (OpenTelemetry) daemon
 ├── hook_d/                        # Hook daemon (thin shell; core in atoms/coreloopthree)
 ├── plugin_d/                      # Plugin daemon
+├── mem_d/                         # Memory daemon (mem.* namespace, JSONL persistence)
+├── agent_d/                       # Agent execution daemon (agent.* namespace)
+├── a2a_d/                         # Agent-to-Agent (A2A) protocol daemon (a2a.* namespace)
+├── think_d/                       # Dual-think / GRAD cognition daemon (think.* namespace)
+├── cupolas_d/                     # Cupolas security-dome daemon (cupolas.* namespace)
 ├── examples/                      # Usage examples (example_svc_usage.c)
 └── scripts/                       # Build / CI / analysis scripts
     ├── ci.sh                      # CI pipeline build script
@@ -96,7 +101,7 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 
 ## Core Components
 
-### The 12 Daemons
+### The 17 Daemons
 
 | # | Daemon | Directory | Responsibility | CMake Target |
 |---|--------|-----------|----------------|--------------|
@@ -112,8 +117,15 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 | 10 | **Observability Service** | `observe_d/` | OpenTelemetry observability data collection | `observe_d` |
 | 11 | **Hook Daemon** | `hook_d/` | Thin daemon shell; the hook system core lives in `atoms/coreloopthree/src/hook/` and is obtained by linking `airy_coreloopthree` | `hook_d` |
 | 12 | **Plugin Daemon** | `plugin_d/` | Plugin lifecycle management and isolation | `plugin_d` |
+| 13 | **Memory Daemon** | `mem_d/` | Runtime memory management (`mem.*` namespace): write / search / get / delete of long-term memory records, JSONL persistence | `mem_d` |
+| 14 | **Agent Execution** | `agent_d/` | Agent orchestration (`agent.*` namespace): spawn / invoke / health-check of agent subprocesses | `agent_d` |
+| 15 | **A2A Protocol** | `a2a_d/` | Agent-to-Agent communication (`a2a.*` namespace): A2A protocol message exchange between agents | `a2a_d` |
+| 16 | **Dual-Think Cognition** | `think_d/` | Dual-think / GRAD critical-loop engine (`think.*` namespace): think.process / think.orchestrate / think.get_stats | `think_d` |
+| 17 | **Cupolas Security Dome** | `cupolas_d/` | Standalone security dome (`cupolas.*` namespace): permission engine, sanitizer, audit logger, isolation workers | `cupolas_d` |
 
-> **Binary naming convention:** every daemon executable keeps the `*_d` suffix (`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d`). Per the 2026-07-05 naming decision, the module name was unified from `daemon` → `daemons` (directory, CMake target `airy_daemons`, repo `daemons.git`), but the 12 process binary names were deliberately preserved.
+> **Binary naming convention:** every daemon executable keeps the `*_d` suffix (`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d`). Per the 2026-07-05 naming decision, the module name was unified from `daemon` → `daemons` (directory, CMake target `airy_daemons`, repo `daemons.git`), but the 17 process binary names were deliberately preserved.
+
+> **Phase 3 refactor (0.1.3):** `mem_d / agent_d / a2a_d / think_d / cupolas_d` were split out of the gateway process into independent daemons (execution-body centralization). `gateway_d` now forwards their namespaces through the syscall layer (`airy_sys_svc_call`), keeping the gateway as a pure protocol boundary.
 
 ## Architecture
 
@@ -123,7 +135,7 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 ├──────────────────────────────────────────────────────────────┤
 │   SDK (sdk-python / sdk-go / sdk-rust / sdk-typescript ...)   │
 ├──────────────────────────────────────────────────────────────┤
-│   ★ daemons (Service Layer — 12 daemons + svc_common) ★     │
+│   ★ daemons (Service Layer — 17 daemons + svc_common) ★     │
 │                                                               │
 │   gateway_d ─→ HTTP / WS / Stdio / MCP / A2A / OpenAI API     │
 │              ↓                                                │
@@ -131,11 +143,13 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 │   │ llm_d  │tool_d  │sched_d │market_d│monit_d │channel_d│   │
 │   ├────────┼────────┼────────┼────────┼────────┼─────────┤    │
 │   │ info_d │notify_d│observe_d│hook_d │plugin_d│         │    │
+│   ├────────┼────────┼────────┼────────┼────────┼─────────┤    │
+│   │ mem_d  │agent_d │a2a_d   │think_d│cupolas_d│        │    │
 │   └────────┴────────┴────────┴────────┴────────┴─────────┘    │
 │              ↑ ipc_service_bus (JSON-RPC 2.0)                 │
 │   ┌─────────────────────────────────────────────────────────┐ │
-│   │ common (svc_common — 30+ components, PUBLIC-links       │ │
-│   │ Cupolas → every daemon inherits security)               │ │
+│   │ common (svc_common — components, PUBLIC-links Cupolas   │ │
+│   │ → every daemon inherits security)                       │ │
 │   └─────────────────────────────────────────────────────────┘ │
 ├──────────────────────────────────────────────────────────────┤
 │   gateway / protocols / heapstore / cupolas                   │
@@ -159,6 +173,11 @@ svc_common  ←  gateway_d  ←  external clients
           ←  observe_d    ←  monit_d (observability)
           ←  hook_d       ←  sched_d, tool_d (hook injection)
           ←  plugin_d     ←  market_d, tool_d (plugin lifecycle)
+          ←  mem_d        ←  gateway_d, CLI/TUI (memory read/write)
+          ←  agent_d      ←  gateway_d (agent spawn/invoke)
+          ←  a2a_d        ←  gateway_d (A2A message exchange)
+          ←  think_d      ←  gateway_d, CLI (dual-think / GRAD)
+          ←  cupolas_d    ←  gateway_d, all daemons (security policy)
 ```
 
 **Design principles:** service-oriented (independent processes, IPC cooperation); single responsibility per daemon; pluggability (deploy / upgrade / replace independently); high availability (primary/backup, circuit breaker, failover); endogenous security (Cupolas transitively linked via svc_common); unified protocols (JSON-RPC 2.0 over IPC service bus).
@@ -226,7 +245,7 @@ cmake -S . -B /tmp/daemons-build -DBUILD_ALL_PLATFORMS=ON
 
 ### Build artifacts
 
-- 12 daemon executables: `gateway_d`, `llm_d`, `tool_d`, `sched_d`, `market_d`, `monit_d`, `channel_d`, `info_d`, `notify_d`, `observe_d`, `hook_d`, `plugin_d` — output to `${CMAKE_BINARY_DIR}/bin/`
+- 17 daemon executables: `gateway_d`, `llm_d`, `tool_d`, `sched_d`, `market_d`, `monit_d`, `channel_d`, `info_d`, `notify_d`, `observe_d`, `hook_d`, `plugin_d`, `mem_d`, `agent_d`, `a2a_d`, `think_d`, `cupolas_d` — output to `${CMAKE_BINARY_DIR}/bin/`
 - `svc_common` — shared static library consumed (PRIVATE-linked) by every daemon
 - Public headers installed under `include/agentrt/`
 
