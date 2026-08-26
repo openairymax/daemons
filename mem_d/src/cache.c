@@ -250,7 +250,11 @@ static void token_set_build(const char *text, token_set_t *out)
                     if (!nt) break;
                     out->tokens = nt;
                 }
-                out->tokens[out->count++] = AIRY_STRDUP(word);
+                {
+                    char *dup = AIRY_STRDUP(word);
+                    if (dup)
+                        out->tokens[out->count++] = dup;
+                }
                 wlen = 0;
             }
             /* 单字节 UTF-8 前缀 */
@@ -269,7 +273,11 @@ static void token_set_build(const char *text, token_set_t *out)
                     if (!nt) break;
                     out->tokens = nt;
                 }
-                out->tokens[out->count++] = AIRY_STRDUP(buf);
+                {
+                    char *dup = AIRY_STRDUP(buf);
+                    if (dup)
+                        out->tokens[out->count++] = dup;
+                }
                 p += avail;
                 continue;
             }
@@ -291,7 +299,11 @@ static void token_set_build(const char *text, token_set_t *out)
                     if (!nt) break;
                     out->tokens = nt;
                 }
-                out->tokens[out->count++] = AIRY_STRDUP(word);
+                {
+                    char *dup = AIRY_STRDUP(word);
+                    if (dup)
+                        out->tokens[out->count++] = dup;
+                }
                 wlen = 0;
             }
         }
@@ -302,10 +314,13 @@ static void token_set_build(const char *text, token_set_t *out)
         if (out->count == cap) {
             cap *= 2;
             char **nt = AIRY_REALLOC(out->tokens, sizeof(char *) * cap);
-            if (nt)
-                out->tokens = nt;
+            if (!nt)
+                return;
+            out->tokens = nt;
         }
-        out->tokens[out->count++] = AIRY_STRDUP(word);
+        char *dup = AIRY_STRDUP(word);
+        if (dup)
+            out->tokens[out->count++] = dup;
     }
 }
 
@@ -381,6 +396,16 @@ mem_cache_t *mem_cache_create(size_t max_entries, size_t max_bytes,
                                     ? semantic_threshold
                                     : DEFAULT_THRESHOLD;
     cache->seq = 0;
+    /* 一次性播种 rand()（cache_id_gen 使用），避免进程内全部 cache_id 可预测 */
+    {
+        static int seeded;
+        if (!seeded) {
+            struct timespec ts;
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            srand((unsigned int)(ts.tv_nsec ^ (uint64_t)(uintptr_t)cache));
+            seeded = 1;
+        }
+    }
     return cache;
 }
 
@@ -418,6 +443,20 @@ static void entry_unlink(mem_cache_t *cache, cache_entry_t *prev, cache_entry_t 
     AIRY_FREE(e);
 }
 
+/* 过期判断：ttl_ms 转 ns 时防 uint64 溢出（饱和为 UINT64_MAX） */
+static int entry_expired(const cache_entry_t *e, uint64_t now)
+{
+    uint64_t ttl_ns;
+
+    if (e->ttl_ms == 0)
+        return 0;
+    if (e->ttl_ms > (UINT64_MAX / 1000000ULL))
+        ttl_ns = UINT64_MAX;
+    else
+        ttl_ns = e->ttl_ms * 1000000ULL;
+    return now - e->created_at >= ttl_ns;
+}
+
 /* 淘汰：先过期，再按 access_count 升序 + last_access 最旧（LRU） */
 static void cache_evict(mem_cache_t *cache)
 {
@@ -428,7 +467,7 @@ static void cache_evict(mem_cache_t *cache)
         cache_entry_t *prev = NULL;
         cache_entry_t *e = cache->buckets[i];
         while (e) {
-            if (e->ttl_ms > 0 && now - e->created_at >= e->ttl_ms * 1000000ULL) {
+            if (entry_expired(e, now)) {
                 cache_entry_t *victim = e;
                 e = e->next;
                 entry_unlink(cache, prev, victim);
@@ -580,7 +619,7 @@ int mem_cache_get(mem_cache_t *cache, const char *text, const char *model_id,
 
     /* L0 精确 */
     if ((e = entry_find_exact(cache, exact_key)) != NULL) {
-        if (e->ttl_ms > 0 && now - e->created_at >= e->ttl_ms * 1000000ULL) {
+        if (entry_expired(e, now)) {
             uint64_t eh = cache_hash64(exact_key) % CACHE_HASH_BUCKETS;
             cache_entry_t *prev = NULL;
             cache_entry_t *cur = cache->buckets[eh];
@@ -606,11 +645,11 @@ int mem_cache_get(mem_cache_t *cache, const char *text, const char *model_id,
     {
         double best = 0.0;
         cache_entry_t *best_e = NULL;
-        for (int i = 0; i < CACHE_HASH_BUCKETS && !best_e; i++) {
+        for (int i = 0; i < CACHE_HASH_BUCKETS; i++) {
             for (cache_entry_t *cur = cache->buckets[i]; cur; cur = cur->next) {
                 if (strcmp(cur->model_id, model_id) != 0)
                     continue;
-                if (cur->ttl_ms > 0 && now - cur->created_at >= cur->ttl_ms * 1000000ULL)
+                if (entry_expired(cur, now))
                     continue; /* 过期条目不参与命中（后续淘汰清理） */
                 double s = semantic_score(text, cur->text);
                 if (s > best) {

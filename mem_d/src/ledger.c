@@ -22,6 +22,8 @@
 #define DEFAULT_BUDGET 32768UL
 #define DEFAULT_WARN_RATIO 0.8
 #define MAX_SESSION_ID_LEN 255
+#define DEFAULT_MAX_SESSIONS 1024UL   /* 会话数上限：防 session 洪水 DoS */
+#define DEFAULT_MAX_ENTRIES 200000UL  /* 全局条目上限：防台账无限增长 DoS */
 
 /* ─── 内部结构 ─────────────────────────────────────────────────────────── */
 
@@ -56,6 +58,8 @@ struct mem_ledger {
     size_t total_tokens;
     size_t default_budget;
     double warn_ratio;
+    size_t max_sessions;
+    size_t max_entries;
     airy_token_counter_t *counter;
     unsigned long seq;
 };
@@ -134,6 +138,8 @@ mem_ledger_t *mem_ledger_create(size_t default_budget, double warn_ratio)
         return NULL;
     ledger->default_budget = default_budget > 0 ? default_budget : DEFAULT_BUDGET;
     ledger->warn_ratio = warn_ratio > 0.0 && warn_ratio <= 1.0 ? warn_ratio : DEFAULT_WARN_RATIO;
+    ledger->max_sessions = DEFAULT_MAX_SESSIONS;
+    ledger->max_entries = DEFAULT_MAX_ENTRIES;
     ledger->counter = airy_token_counter_create("gpt-4");
     if (!ledger->counter) {
         AIRY_FREE(ledger);
@@ -174,17 +180,31 @@ int mem_ledger_append(mem_ledger_t *ledger, const char *session_id,
                       char **out_ledger_id)
 {
     ledger_session_t *s;
+    ledger_entry_t **batch;
     char first_id[LEDGER_ENTRY_ID_HEX + 1] = {0};
     size_t len;
 
+    if (out_ledger_id)
+        *out_ledger_id = NULL;
     if (!ledger || !session_id || (!entries && count > 0))
         return AIRY_ERR_INVALID_PARAM;
     len = strlen(session_id);
     if (len == 0 || len > MAX_SESSION_ID_LEN)
         return AIRY_ERR_INVALID_PARAM;
+    if (count == 0)
+        return AIRY_SUCCESS;
+    for (size_t i = 0; i < count; i++) {
+        if (entries[i].entry_type < LEDGER_ENTRY_SYSTEM ||
+            entries[i].entry_type > LEDGER_ENTRY_CACHE_HIT)
+            return AIRY_ERR_INVALID_PARAM;
+    }
+    if (ledger->entry_count + count > ledger->max_entries)
+        return AIRY_ERR_OVERFLOW;
 
     s = session_find(ledger, session_id);
     if (!s) {
+        if (ledger->session_count >= ledger->max_sessions)
+            return AIRY_ERR_OVERFLOW;
         s = AIRY_CALLOC(1, sizeof(ledger_session_t));
         if (!s)
             return AIRY_ERR_OUT_OF_MEMORY;
@@ -194,20 +214,54 @@ int mem_ledger_append(mem_ledger_t *ledger, const char *session_id,
             AIRY_FREE(s);
             return AIRY_ERR_OUT_OF_MEMORY;
         }
-        s->next = ledger->sessions;
-        ledger->sessions = s;
-        ledger->session_count++;
+        /* 新会话暂不入链：批内失败时整体回滚（不残留空会话） */
     }
 
+    /* 两阶段：先全部分配，成功后才链接 —— append 原子性，杜绝部分成功 */
+    batch = AIRY_MALLOC(sizeof(ledger_entry_t *) * count);
+    if (!batch) {
+        if (!s->head) {
+            AIRY_FREE(s->session_id);
+            AIRY_FREE(s);
+        }
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
     for (size_t i = 0; i < count; i++) {
         const ledger_entry_in_t *in = &entries[i];
         ledger_entry_t *e = AIRY_CALLOC(1, sizeof(ledger_entry_t));
-        if (!e)
+        if (!e) {
+            for (size_t j = 0; j < i; j++) {
+                AIRY_FREE(batch[j]->session_id);
+                AIRY_FREE(batch[j]->source);
+                AIRY_FREE(batch[j]->ref_id);
+                AIRY_FREE(batch[j]);
+            }
+            AIRY_FREE(batch);
+            if (!s->head) {
+                AIRY_FREE(s->session_id);
+                AIRY_FREE(s);
+            }
             return AIRY_ERR_OUT_OF_MEMORY;
+        }
         entry_id_gen(ledger, e->entry_id);
         if (i == 0)
             AIRY_STRNCPY_TERM(first_id, e->entry_id, LEDGER_ENTRY_ID_HEX + 1);
         e->session_id = AIRY_STRDUP(session_id);
+        if (!e->session_id) {
+            AIRY_FREE(e);
+            for (size_t j = 0; j < i; j++) {
+                AIRY_FREE(batch[j]->session_id);
+                AIRY_FREE(batch[j]->source);
+                AIRY_FREE(batch[j]->ref_id);
+                AIRY_FREE(batch[j]);
+            }
+            AIRY_FREE(batch);
+            if (!s->head) {
+                AIRY_FREE(s->session_id);
+                AIRY_FREE(s);
+            }
+            return AIRY_ERR_OUT_OF_MEMORY;
+        }
         e->entry_type = in->entry_type;
         e->token_in = in->token_in > 0
                           ? in->token_in
@@ -218,7 +272,17 @@ int mem_ledger_append(mem_ledger_t *ledger, const char *session_id,
         e->created_at = ledger_now_ns();
         e->ref_id = in->ref_id ? AIRY_STRDUP(in->ref_id) : NULL;
         e->seq = ++ledger->seq;
+        batch[i] = e;
+    }
 
+    /* 批全部就绪：链接到会话，新会话此刻才入链 */
+    if (!s->head) {
+        s->next = ledger->sessions;
+        ledger->sessions = s;
+        ledger->session_count++;
+    }
+    for (size_t i = 0; i < count; i++) {
+        ledger_entry_t *e = batch[i];
         if (s->tail)
             s->tail->next = e;
         else
@@ -229,6 +293,7 @@ int mem_ledger_append(mem_ledger_t *ledger, const char *session_id,
         ledger->entry_count++;
         ledger->total_tokens += e->token_in;
     }
+    AIRY_FREE(batch);
 
     if (out_ledger_id)
         *out_ledger_id = AIRY_STRDUP(first_id);
@@ -312,6 +377,9 @@ int mem_ledger_mark(mem_ledger_t *ledger, const char *session_id,
 
     if (!ledger || !session_id || (!entry_ids && count > 0))
         return AIRY_ERR_INVALID_PARAM;
+    /* 非法 status 拒绝：防止把 ACTIVE 条目错误"复活"/迁移到未知状态 */
+    if (status < LEDGER_STATUS_ACTIVE || status > LEDGER_STATUS_DEDUPED)
+        return AIRY_ERR_INVALID_PARAM;
     s = session_find(ledger, session_id);
     if (!s)
         return AIRY_ERR_NOT_FOUND;
@@ -320,19 +388,28 @@ int mem_ledger_mark(mem_ledger_t *ledger, const char *session_id,
         ledger_entry_t *e = entry_find_by_id(s, entry_ids[i]);
         if (!e)
             continue;
+        if (e->status == status)
+            continue; /* 幂等：同状态不重复记录（防重复压缩叠加块） */
         /* append-only：不修改原条目，追加一条 status 变更记录 */
         ledger_entry_t *rec = AIRY_CALLOC(1, sizeof(ledger_entry_t));
         if (!rec)
             return AIRY_ERR_OUT_OF_MEMORY;
         entry_id_gen(ledger, rec->entry_id);
         rec->session_id = AIRY_STRDUP(session_id);
+        rec->source = AIRY_STRDUP("ledger");
+        rec->ref_id = AIRY_STRDUP(e->entry_id); /* 指向被标记的原始条目 */
+        if (!rec->session_id || !rec->source || !rec->ref_id) {
+            AIRY_FREE(rec->session_id);
+            AIRY_FREE(rec->source);
+            AIRY_FREE(rec->ref_id);
+            AIRY_FREE(rec);
+            return AIRY_ERR_OUT_OF_MEMORY;
+        }
         rec->entry_type = e->entry_type;
         rec->token_in = 0; /* 状态变更记录不占预算 */
         rec->token_out = 0;
-        rec->source = AIRY_STRDUP("ledger");
         rec->status = status;
         rec->created_at = ledger_now_ns();
-        rec->ref_id = AIRY_STRDUP(e->entry_id); /* 指向被标记的原始条目 */
         rec->seq = ++ledger->seq;
 
         if (s->tail)
@@ -379,7 +456,7 @@ int mem_ledger_history(mem_ledger_t *ledger, const char *session_id, size_t limi
     if (!arr)
         return AIRY_ERR_OUT_OF_MEMORY;
 
-    /* 返回最近 take 条（新 → 旧） */
+    /* 返回最近 take 条（旧 → 新，与链序一致） */
     size_t written = 0;
     ledger_entry_t *walk = s->head;
     /* 先定位到第 (total - take) 个 */
@@ -417,4 +494,9 @@ void mem_ledger_stats(mem_ledger_t *ledger, mem_ledger_stats_t *out)
     out->sessions = ledger->session_count;
     out->entries = ledger->entry_count;
     out->total_tokens = ledger->total_tokens;
+}
+
+double mem_ledger_warn_ratio(const mem_ledger_t *ledger)
+{
+    return ledger ? ledger->warn_ratio : DEFAULT_WARN_RATIO;
 }

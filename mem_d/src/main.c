@@ -38,6 +38,16 @@
 #define MAX_CLIENTS 64
 #define MEM_DEFAULT_MAX_RECORDS 1024
 
+/* 数值钳制：负数按默认值、超上限按上限（防 RPC 传负值/超大值转无符号回绕） */
+static uint32_t clamp_u32(int64_t v, uint32_t def, uint32_t max_v)
+{
+    if (v < 0)
+        return def;
+    if ((uint64_t)v > (uint64_t)max_v)
+        return max_v;
+    return (uint32_t)v;
+}
+
 DAEMON_DECLARE_COMMON(mem_d, mem, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_WIN,
                       DEFAULT_TCP_PORT, MAX_BUFFER)
 
@@ -272,7 +282,7 @@ static void handle_search(cJSON *params, int id, airy_sock_t client_fd)
 
     mem_search_hit_t *hits = NULL;
     size_t count = 0;
-    uint32_t lim = limit && cJSON_IsNumber(limit) ? (uint32_t)limit->valueint : 10;
+    uint32_t lim = limit && cJSON_IsNumber(limit) ? clamp_u32(limit->valueint, 10, 100) : 10;
 
     int ret = mem_service_search(g_service, query->valuestring, lim, &hits, &count);
     if (ret != AIRY_SUCCESS) {
@@ -352,7 +362,7 @@ static void handle_count(int id, airy_sock_t client_fd)
 static void handle_recent(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *limit = params ? cJSON_GetObjectItem(params, "limit") : NULL;
-    uint32_t lim = limit && cJSON_IsNumber(limit) ? (uint32_t)limit->valueint : 0;
+    uint32_t lim = limit && cJSON_IsNumber(limit) ? clamp_u32(limit->valueint, 0, 1000) : 0;
 
     mem_recent_item_t *items = NULL;
     size_t count = 0;
@@ -436,7 +446,7 @@ static void handle_kb_search(cJSON *params, int id, airy_sock_t client_fd)
 
     mem_search_hit_t *hits = NULL;
     size_t count = 0;
-    uint32_t lim = limit && cJSON_IsNumber(limit) ? (uint32_t)limit->valueint : 10;
+    uint32_t lim = limit && cJSON_IsNumber(limit) ? clamp_u32(limit->valueint, 10, 100) : 10;
 
     int ret = mem_service_kb_search(g_service, kb_id->valuestring, query->valuestring, lim, &hits,
                                     &count);
@@ -522,7 +532,9 @@ static void handle_cache_put(cJSON *params, int id, airy_sock_t client_fd)
     }
 
     char *cache_id = NULL, *exact_key = NULL;
-    uint64_t ttl_ms = ttl && cJSON_IsNumber(ttl) ? (uint64_t)ttl->valuedouble : 0;
+    uint64_t ttl_ms = ttl && cJSON_IsNumber(ttl) && ttl->valuedouble >= 0
+                          ? (uint64_t)ttl->valuedouble
+                          : 0;
     int ret = mem_cache_put(g_cache, text->valuestring, response->valuestring,
                             model_id->valuestring, ttl_ms, &cache_id, &exact_key);
     if (ret != AIRY_SUCCESS || !cache_id) {
@@ -615,10 +627,11 @@ static void handle_cache_stats(int id, airy_sock_t client_fd)
 
 static int ledger_status_from_string(const char *s)
 {
+    if (strcmp(s, "active") == 0) return LEDGER_STATUS_ACTIVE;
     if (strcmp(s, "evicted") == 0) return LEDGER_STATUS_EVICTED;
     if (strcmp(s, "compressed") == 0) return LEDGER_STATUS_COMPRESSED;
     if (strcmp(s, "deduped") == 0) return LEDGER_STATUS_DEDUPED;
-    return LEDGER_STATUS_ACTIVE;
+    return -1; /* 未知状态：调用方必须拒绝，防误把 ACTIVE 当目标 */
 }
 
 static int ledger_type_from_string(const char *s)
@@ -661,8 +674,12 @@ static void handle_ledger_append(cJSON *params, int id, airy_sock_t client_fd)
                                ? ledger_type_from_string(type->valuestring)
                                : LEDGER_ENTRY_SYSTEM;
         in[i].text = text && cJSON_IsString(text) ? text->valuestring : NULL;
-        in[i].token_in = token_in && cJSON_IsNumber(token_in) ? (size_t)token_in->valuedouble : 0;
-        in[i].token_out = token_out && cJSON_IsNumber(token_out) ? (size_t)token_out->valuedouble : 0;
+        in[i].token_in = token_in && cJSON_IsNumber(token_in) && token_in->valuedouble > 0
+                             ? (size_t)token_in->valuedouble
+                             : 0;
+        in[i].token_out = token_out && cJSON_IsNumber(token_out) && token_out->valuedouble > 0
+                              ? (size_t)token_out->valuedouble
+                              : 0;
         in[i].source = source && cJSON_IsString(source) ? source->valuestring : NULL;
         in[i].ref_id = ref_id && cJSON_IsString(ref_id) ? ref_id->valuestring : NULL;
     }
@@ -752,8 +769,14 @@ static void handle_ledger_mark(cJSON *params, int id, airy_sock_t client_fd)
         ids[i] = cJSON_IsString(e) ? e->valuestring : "";
     }
     size_t updated = 0;
-    int ret = mem_ledger_mark(g_ledger, session->valuestring, ids, (size_t)n,
-                              ledger_status_from_string(status->valuestring), &updated);
+    int st = ledger_status_from_string(status->valuestring);
+    if (st < 0) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           "ledger_mark 的 status 非法（active|evicted|compressed|deduped）", id);
+        AIRY_FREE(ids);
+        return;
+    }
+    int ret = mem_ledger_mark(g_ledger, session->valuestring, ids, (size_t)n, st, &updated);
     AIRY_FREE(ids);
     if (ret != AIRY_SUCCESS && ret != AIRY_ERR_NOT_FOUND) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "ledger_mark 失败", id);
@@ -774,7 +797,7 @@ static void handle_ledger_history(cJSON *params, int id, airy_sock_t client_fd)
     }
     ledger_entry_view_t *items = NULL;
     size_t count = 0;
-    size_t lim = limit && cJSON_IsNumber(limit) ? (size_t)limit->valueint : 0;
+    size_t lim = limit && cJSON_IsNumber(limit) ? clamp_u32(limit->valueint, 0, 10000) : 0;
     int ret = mem_ledger_history(g_ledger, session->valuestring, lim, &items, &count);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "ledger_history 失败", id);
@@ -861,23 +884,28 @@ static void handle_compress(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    /* 台账联动：压缩条目 mark(COMPRESSED)，追加 compressed 块（可回放） */
+    /* 台账联动：按 action 映射状态（DROP→EVICTED / DEDUP→DEDUPED /
+     * TRUNCATE|EXTRACT→COMPRESSED）。仅当有实际状态迁移（marked>0）才追加
+     * 压缩块：防重复压缩已标记条目时 budget 不降反升（每次叠加新块）。 */
     size_t marked = 0;
     if (action_count > 0) {
-        const char **ids = AIRY_CALLOC(action_count, sizeof(char *));
-        if (ids) {
-            for (size_t i = 0; i < action_count; i++)
-                ids[i] = actions[i].entry_id;
-            mem_ledger_mark(g_ledger, session->valuestring, ids, action_count,
-                            LEDGER_STATUS_COMPRESSED, &marked);
-            AIRY_FREE(ids);
+        for (size_t i = 0; i < action_count; i++) {
+            int st = LEDGER_STATUS_COMPRESSED;
+            if (actions[i].action == COMPRESS_ACTION_DROP)
+                st = LEDGER_STATUS_EVICTED;
+            else if (actions[i].action == COMPRESS_ACTION_DEDUP)
+                st = LEDGER_STATUS_DEDUPED;
+            const char *one = actions[i].entry_id;
+            mem_ledger_mark(g_ledger, session->valuestring, &one, 1, st, &marked);
         }
-        ledger_entry_in_t block = {0};
-        block.entry_type = LEDGER_ENTRY_COMPRESSED;
-        block.text = ctx;
-        block.source = "ledger";
-        block.ref_id = actions[0].entry_id;
-        mem_ledger_append(g_ledger, session->valuestring, &block, 1, NULL);
+        if (marked > 0 && ctx && ctx[0]) {
+            ledger_entry_in_t block = {0};
+            block.entry_type = LEDGER_ENTRY_COMPRESSED;
+            block.text = ctx;
+            block.source = "ledger";
+            block.ref_id = actions[0].entry_id;
+            mem_ledger_append(g_ledger, session->valuestring, &block, 1, NULL);
+        }
     }
 
     cJSON *result = cJSON_CreateObject();
@@ -917,8 +945,9 @@ static void handle_evolve(cJSON *params, int id, airy_sock_t client_fd)
 
     if (cJSON_IsString(query) && query->valuestring) {
         cJSON *limit_json = cJSON_GetObjectItem(params, "limit");
-        uint32_t lim =
-            limit_json && cJSON_IsNumber(limit_json) ? (uint32_t)limit_json->valueint : 10;
+        uint32_t lim = limit_json && cJSON_IsNumber(limit_json)
+                           ? clamp_u32(limit_json->valueint, 10, 100)
+                           : 10;
 
         mem_search_hit_t *hits = NULL;
         size_t count = 0;
@@ -955,8 +984,16 @@ static void handle_evolve(cJSON *params, int id, airy_sock_t client_fd)
         for (size_t i = 0; i < count; i++) {
             mem_record_t rec = {0};
             if (mem_service_get(g_service, hits[i].record_id, &rec) == AIRY_SUCCESS) {
-                data_parts[i] = (char *)rec.data;
-                total_len += rec.len;
+                /* 拷贝 data 后立即 mem_record_free：防 rec.metadata 泄漏 */
+                size_t dlen = rec.len;
+                char *copy = AIRY_MALLOC(dlen + 1);
+                if (copy) {
+                    AIRY_MEMCPY(copy, rec.data, dlen);
+                    copy[dlen] = '\0';
+                    data_parts[i] = copy;
+                    total_len += dlen;
+                }
+                mem_record_free(&rec);
                 cJSON *src = cJSON_CreateObject();
                 cJSON_AddStringToObject(src, "record_id", hits[i].record_id);
                 cJSON_AddNumberToObject(src, "score", (double)hits[i].score);
@@ -1149,7 +1186,8 @@ static int load_daemon_config(const char *config_path)
                                     g_config.socket_path = AIRY_STRDUP(socket_path->valuestring);
                                 }
                                 cJSON *tcp_port = cJSON_GetObjectItem(daemon_cfg, "tcp_port");
-                                if (cJSON_IsNumber(tcp_port)) {
+                                if (cJSON_IsNumber(tcp_port) && tcp_port->valueint > 0 &&
+                                    tcp_port->valueint <= 65535) {
                                     g_config.tcp_port = (uint16_t)tcp_port->valueint;
                                     g_config.use_tcp = 1;
                                 }
