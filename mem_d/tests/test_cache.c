@@ -331,6 +331,80 @@ static void test_stats(void)
     printf("    PASSED\n");
 }
 
+/* L1 全局最优（H1 回归）：候选分数非最高时不得提前终止扫描，
+ * 必须返回全局最高分条目（跨桶完整扫描）。
+ * 构造：1 个高相似目标 + 8 个仅共享个别 token 的低分候选。
+ * 旧实现遇首个分数>0 的候选即停 → 极大概率停到低分候选上而 miss；
+ * 修复后全桶扫描 → 必命中高相似目标。 */
+static void test_l1_global_best(void)
+{
+    printf("  test_l1_global_best...\n");
+    mem_cache_t *c = mem_cache_create(64, 0, 0, 0.85);
+    assert(c != NULL);
+
+    const char *q_best = "how to implement semantic caching for llm agents";
+    const char *plants[] = {
+        "how to write a python web server",
+        "how to bake a chocolate cake",
+        "semantic versioning best practices",
+        "caching strategies for databases",
+        "llm agents in production",
+        "implement a linked list in c",
+        "for the love of coding",
+        "the art of machine learning",
+    };
+    char *cid = NULL, *key = NULL;
+    assert(mem_cache_put(c, q_best, "resp-best", "gpt-4", 0, &cid, &key) == AIRY_SUCCESS);
+    AIRY_FREE(cid);
+    AIRY_FREE(key);
+    for (size_t i = 0; i < sizeof(plants) / sizeof(plants[0]); i++) {
+        assert(mem_cache_put(c, plants[i], "resp-plant", "gpt-4", 0, &cid, &key) == AIRY_SUCCESS);
+        AIRY_FREE(cid);
+        AIRY_FREE(key);
+    }
+
+    /* 查询：与 q_best 仅多一个 "the"（jaccard 8/9≈0.889，score≈0.911 ≥ 0.85） */
+    int hit = 0;
+    double score = 0.0;
+    char *out = NULL;
+    assert(mem_cache_get(c, "how to implement semantic caching for the llm agents", "gpt-4",
+                         0.85, &hit, &score, NULL, &out) == AIRY_SUCCESS);
+    assert(hit == 1);
+    assert(out != NULL && strcmp(out, "resp-best") == 0);
+    assert(score >= 0.85);
+    AIRY_FREE(out);
+
+    mem_cache_destroy(c);
+    printf("    PASSED\n");
+}
+
+/* TTL 溢出饱和（H3 回归）：UINT64_MAX 级 TTL 不得回绕成"立即过期" */
+static void test_ttl_overflow_saturate(void)
+{
+    printf("  test_ttl_overflow_saturate...\n");
+    mem_cache_t *c = mem_cache_create(64, 0, 0, 0.85);
+    assert(c != NULL);
+
+    const char *q = "ttl overflow query";
+    char *cid = NULL, *key = NULL;
+    assert(mem_cache_put(c, q, "resp-ttl-max", "gpt-4", UINT64_MAX, &cid, &key) == AIRY_SUCCESS);
+    AIRY_FREE(cid);
+    AIRY_FREE(key);
+
+    int hit = 0;
+    char *out = NULL;
+    assert(mem_cache_get(c, q, "gpt-4", 0, &hit, NULL, NULL, &out) == AIRY_SUCCESS);
+    assert(hit == 1); /* 不因乘法回绕而过期 */
+    AIRY_FREE(out);
+
+    mem_cache_stats_t st;
+    mem_cache_stats(c, &st);
+    assert(st.entries == 1); /* 未被误判过期清理 */
+
+    mem_cache_destroy(c);
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=== Semantic Cache Unit Tests ===\n");
@@ -339,6 +413,8 @@ int main(void)
     test_model_isolation();
     test_semantic_hit_and_miss();
     test_ttl_expiry();
+    test_ttl_overflow_saturate();
+    test_l1_global_best();
     test_lru_eviction();
     test_byte_capacity();
     test_delete();

@@ -142,6 +142,9 @@ void mem_ledger_history_free(ledger_entry_view_t *items, size_t count);
 /** @brief 台账统计。 */
 void mem_ledger_stats(mem_ledger_t *ledger, mem_ledger_stats_t *out);
 
+/** @brief 预算告警比例（压缩 L2 阈值等决策数据源，SSoT）。 */
+double mem_ledger_warn_ratio(const mem_ledger_t *ledger);
+
 #ifdef __cplusplus
 }
 #endif
