@@ -1,182 +1,88 @@
 # Hook Daemon — Hook 事件注入守护进程
 
-> **模块路径**: `agentrt/daemons/hook_d/` | **版本**: v0.1.1
+> **模块路径**: `agentrt/daemons/hook_d/`
 
-## 概述
+## 定位
 
-`daemons/hook_d/` 是 AgentRT 十二大运行时守护进程之一，负责 Hook 事件系统的守护进程生命周期管理。在 SP04 重构后，Hook 系统核心（hook_registry / executor / interceptor / timeout / handlers，共 9 个 .c + 7 个 .h）已迁移至 `atoms/coreloopthree/src/hook/`，`hook_d` 退化为仅含 `main.c` 的薄 daemon 壳，通过链接 `airy_coreloopthree` 获取 Hook 系统全部能力。
+`hook_d` 是 AgentRT 的 Hook 事件注入守护进程。SP04 重构后，Hook 系统核心
+（hook_registry / executor / interceptor / timeout / handlers，位于
+`atoms/coreloopthree/src/hook/`）已迁移至 atoms 层，`hook_d` 退化为仅含 `main.c` 的
+薄 daemon 壳，通过链接 `airy_coreloopthree` 获得全部 Hook 能力，负责 socket + 服务发现 +
+IPC + cupolas 守护进程生命周期，并对外暴露 `hook.*` JSON-RPC 方法族（L2 服务协议）。
 
-### 架构定位
-
-```
-hook_d (daemon shell) → airy_coreloopthree (hook 系统核心) → cupolas (安全穹顶)
-         ↑                              ↑
-    守护进程生命周期              Hook 注册/执行/拦截/超时
-    (socket + SD + IPC)          (9 个 .c + 7 个 .h)
-```
-
-### 核心职责
-
-- **Unix Socket 服务**：在 `AIRY_RUNTIME_DIR/hook.sock` 上监听 Unix Socket，接收来自 `sched_d` 和 `tool_d` 的 Hook 注入请求
-- **ServiceDiscovery 注册**：通过 `daemon_bootstrap_sd` 在服务发现总线上注册自身，注册 tag 为 `hook,core`
-- **IPC Bus 消息路由**：通过 `daemon_bootstrap_ipc` 接入 JSON-RPC 2.0 统一 IPC 服务总线
-- **Cupolas 安全穹顶集成**：启动时初始化 cupolas 安全穹顶（permission_engine + sanitizer + audit_logger），继承内生安全能力
-- **跨平台信号处理**：Linux 支持 SIGINT/SIGTERM/SIGPIPE/SIGUSR1（日志级别热切换），Windows 支持控制台事件处理
-
-## 目录结构
+## 架构
 
 ```
-hook_d/
-├── CMakeLists.txt       # 构建配置（仅编译 main.c，链接 airy_coreloopthree）
-├── README.md            # 本文件
-├── src/
-│   └── main.c           # 守护进程入口（薄 daemon 壳）
-└── tests/
-    └── CMakeLists.txt   # 单元测试构建配置
+gateway_d ──(hook.* JSON-RPC)──▶ hook_d（薄 daemon 壳）
+                                   │ 链接 airy_coreloopthree
+                                   ▼
+                  atoms/coreloopthree/src/hook/（hook 系统核心）
+                    ├─ hook_registry     注册表（按类型分组，上限 HOOK_REGISTRY_MAX）
+                    ├─ hook_service      触发链聚合（hook_service_fire 决策）
+                    ├─ hook_executor     执行器（shell/python/webhook/callback）
+                    ├─ hook_interceptor  拦截器
+                    ├─ hook_timeout      超时控制
+                    ├─ hook_audit_handler / hook_metrics_handler / hook_trace_handler
+                    └─ hook_builtin_handlers（统一注册入口，共 12 个内置 handler）
 ```
 
-## 核心组件说明
+- Hook 类型（8 种）：`pre_exec` `post_exec` `pre_llm` `post_llm` `pre_tool`
+  `post_tool` `on_error` `on_memory_evolve`。
+- 实现类型：`shell` / `python` / `webhook` / `callback`。RPC 注册仅支持
+  shell/python/webhook（RPC 无法传递 C 回调），`callback` 类型限内置 handler。
+- 触发返回聚合决策 `decision`：`continue`(0) / `skip` / `retry` / `abort` / `modify`。
 
-### 启动流程
+## JSON-RPC 接口表
 
-```
-1. 信号处理注册 (SIGINT/SIGTERM → graceful shutdown)
-2. Cupolas 安全穹顶初始化 (daemon_cupolas_init)
-3. Unix Socket 服务器创建 (AIRY_RUNTIME_DIR/hook.sock)
-4. ServiceDiscovery 自动注册 (daemon_bootstrap_sd_start)
-5. IPC Bus 消息路由注册 (daemon_bootstrap_ipc_start)
-6. 进入事件循环，等待 shutdown 信号
-7. 优雅停机：清理 IPC → SD → socket → cupolas
-```
+监听端点：Unix socket `$AIRY_RUNTIME_DIR/hook.sock`（`--tcp` 或 Windows 下为
+TCP `127.0.0.1:8093`，Windows pipe `\\.\pipe\airy_hook`）。以下方法由
+`method_dispatcher_register` 实际注册（main.c），共 11 个：
 
-### Hook 系统核心（位于 atoms/coreloopthree）
+| 方法 | 参数 | 返回要点 | 说明 |
+|------|------|----------|------|
+| `health` | 无 | `{"healthy":bool,"hook_count":N}` | 注册表健康 + 已注册 Hook 总数 |
+| `ping` | 无 | `{"status":"ok","uptime_sec":N}` | 存活探测（含运行时长） |
+| `status` | 无 | `{"service":"hook_d","hook_count","registry_initialized","by_type":{...}}` | 真实状态：总数 + 各类型计数 |
+| `list` | 无 | `{"hooks":[{name,type,type_id,impl_type,priority,enabled,invoke_count,skip_count,abort_count,total_duration_ns,script_path?},...],"count":N}` | 列出已注册（enabled）Hook 及统计 |
+| `stats` | `name`（必填） | `{name,invoke_count,skip_count,abort_count,retry_count,modify_count,total_duration_ns,max_duration_ns}` | 单个 Hook 的统计 |
+| `register` | `name`（必填）、`type`（字符串或 int）、`impl`（shell/python/webhook/callback，默认 shell）、`script_path`、`priority`（默认 0）、`enabled`（默认 true） | `{"status":"registered","name","type","enabled"}` | 注册 script/webhook 类型 Hook；重名 -32603，注册表满 -32603 |
+| `unregister` | `name`（必填） | `{"status":"unregistered","name"}` | 注销 Hook；未找到 -32601 |
+| `trigger` | `type`（必填，字符串或 int）、`operation`（可选）、`input`（可选）、`hook_name`（可选） | `{"decision":N,"decision_name":"continue\|skip\|retry\|abort\|modify","type"}` | 触发指定类型 Hook 链并返回聚合决策 |
+| `health_check` | 无 | `{"service":"hook_d","healthy","hook_count","timestamp"}` | L2 标准方法 |
+| `shutdown` | 无 | — | L2 标准方法，触发优雅退出 |
+| `get_stats` | 无 | `{"daemon":"hook_d","hooks":N,"uptime_s":N}` | daemon 级统计 |
 
-Hook 系统核心在 `atoms/coreloopthree/src/hook/` 中实现，`hook_d` 通过 `target_link_libraries(hook_d PRIVATE airy_coreloopthree)` 获取。核心组件包括：
+- 内置 handler 共 12 个：metrics 8（全部事件类型，priority=50）+ audit 2
+  （`on_error` + `post_tool`，priority=80）+ trace 2（`pre_exec` + `post_exec`，
+  priority=90/10）；启动时经 `airy_hook_register_builtin_handlers()` 注册，
+  `status`/`list` 返回真实已加载模块信息。
 
-| 组件 | 说明 |
-|------|------|
-| **hook_registry** | Hook 注册表，管理 Hook 的注册、注销和查找 |
-| **hook_executor** | Hook 执行器，按优先级顺序执行注册的 Hook 链 |
-| **hook_interceptor** | Hook 拦截器，在关键事件点（任务提交/执行/完成）触发 Hook |
-| **hook_timeout** | Hook 超时管理，防止单个 Hook 阻塞整个执行链 |
-| **hook_handlers** | 内置 Hook 处理器集合（日志/审计/安全/监控） |
+## 配置
 
-### 守护进程生命周期
+- 默认配置路径：由 `daemon_parse_args` 解析（`--manager <config>` / `-c`），当前
+  `config_path` 未参与 hook 逻辑（daemon 配置以内置默认 + 环境变量为主）。
+- 命令行参数：`--manager <config>` / `-c <config>`、`--tcp`（TCP 回环，Windows 强制）、
+  `-h` / `--help`。
+- 事件驱动：线程池 2~4，队列 128，`max_events=64`。
 
-`hook_d` 本身不包含 Hook 业务逻辑，仅负责守护进程生命周期管理：
+## 依赖与构建
 
-| 阶段 | 操作 | 说明 |
-|------|------|------|
-| 启动 | `daemon_cupolas_init` | 初始化安全穹顶 |
-| 启动 | `airy_socket_create_unix_server` | 创建 Unix Socket |
-| 注册 | `daemon_bootstrap_sd_start` | 向 ServiceDiscovery 注册 |
-| 注册 | `daemon_bootstrap_ipc_start` | 向 IPC Bus 注册 |
-| 运行 | `sleep(1)` 循环 | 等待关闭信号 |
-| 停止 | `daemon_bootstrap_ipc_stop` | 注销 IPC 路由 |
-| 停止 | `daemon_bootstrap_sd_stop` | 注销服务发现 |
-| 停止 | `airy_socket_close` | 关闭 Socket |
-| 清理 | `daemon_cupolas_cleanup` | 清理安全穹顶 |
-
-## 上游依赖
-
-| 依赖 | 来源 | 用途 |
-|------|------|------|
-| **airy_coreloopthree** | `agentrt/atoms/coreloopthree/` | Hook 系统核心（registry / executor / interceptor / timeout / handlers） |
-| **svc_common** | `agentrt/daemons/common/` | 守护进程框架（ServiceDiscovery / IPC Bus / Cupolas bootstrap / 日志 / 配置） |
-| **cupolas** | `agentrt/cupolas/` | 安全穹顶（permission_engine + sanitizer + audit_logger），通过 `daemon_cupolas_bootstrap` 集成 |
-| **commons** | `agentrt/commons/` | 基础库（logging / config_unified / network / memory / sync / string / cache / compat / error / ipc） |
-| cJSON / libcurl / libyaml | 外部 | JSON 解析 / HTTP 客户端 / YAML 配置 |
-
-## 下游消费者
-
-| 消费者 | 使用方式 |
-|--------|----------|
-| **sched_d** | 在任务调度关键节点（任务提交/分配/完成）通过 Unix Socket 注入 Hook |
-| **tool_d** | 在工具执行前后通过 Unix Socket 注入 Hook（审计/日志/安全校验） |
-| **其他 daemon** | 通过 IPC Bus 请求 Hook 注入服务 |
-
-## 构建
-
-### 前置条件
-
-- CMake ≥ 3.16
-- C11 编译器（GCC / Clang / MSVC）
-- `airy_coreloopthree` 已构建（atoms 子项目）
-- `svc_common` 已构建（daemons/common 子项目）
-
-### 编译选项
+- 依赖：`airy_coreloopthree`（hook 系统核心，GNU ld 下 `--start-group/--end-group`）、
+  `svc_common`、`cupolas`、`Threads::Threads`；可选 `YAML`（libyaml）、`CURL`（webhook 实现）。
+- 构建：
 
 ```bash
-# 标准构建
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target hook_d
-
-# 启用测试
-cmake -S . -B build -DBUILD_TESTS=ON
-cmake --build build --target hook_d
-ctest --test-dir build
-
-# 启用覆盖率
-cmake -S . -B build -DBUILD_COVERAGE=ON
+cmake -B build -DBUILD_TESTS=ON
 cmake --build build --target hook_d
 ```
 
-### 链接策略
+## 测试
 
-Linux 平台使用 `--start-group/--end-group` 避免 LTO + ASan 下符号扫描遗漏：
-
-```cmake
-target_link_libraries(hook_d PRIVATE
-    "-Wl,--start-group"
-    airy_coreloopthree
-    svc_common
-    cupolas
-    "-Wl,--end-group"
-    Threads::Threads
-)
-```
-
-## 运行时
-
-### 启动
+- `tests/test_hook_daemon.c`（`hook_d_test_hook_daemon`）：hook_d JSON-RPC 冒烟测试
+  （按 `TEST_BIN_DIR` 定位二进制，覆盖 health/ping/status/list/stats/register/
+  unregister/trigger/health_check/get_stats 等方法的真实往返）。
+- 运行：
 
 ```bash
-# 直接启动
-./build/bin/hook_d
-
-# 通过 daemon_manager 启动
-./daemon_manager --start hook_d
+ctest --test-dir build -R "hook_d_" -V
 ```
-
-### Unix Socket
-
-- 路径：`${AIRY_RUNTIME_DIR}/hook.sock`（默认 `/var/run/agentrt/hook.sock`）
-- 协议：JSON-RPC 2.0 over Unix Socket
-
-### 信号
-
-| 信号 | 平台 | 行为 |
-|------|------|------|
-| SIGINT | Linux | 优雅停机 |
-| SIGTERM | Linux | 优雅停机 |
-| SIGPIPE | Linux | 忽略（Socket 层独立处理） |
-| SIGUSR1 | Linux | 日志级别热切换（INFO ↔ DEBUG） |
-| CTRL_C_EVENT | Windows | 优雅停机 |
-| CTRL_CLOSE_EVENT | Windows | 优雅停机 |
-
-## 设计原则
-
-- **薄 daemon 壳**：Hook 业务逻辑位于 `atoms/coreloopthree`，`hook_d` 仅负责进程生命周期
-- **单一职责**：每个 daemon 独立进程，通过 IPC 协作
-- **内生安全**：通过 `svc_common` 继承 Cupolas 安全穹顶能力
-- **跨平台**：Linux 和 Windows 双平台支持，通过 `daemon_platform_ext.h` 适配
-
-## 许可证
-
-Copyright (c) 2025-2026 SPHARX Ltd. All Rights Reserved.
-
-双许可证：**AGPL-3.0-or-later OR Apache-2.0**（SPDX: `AGPL-3.0-or-later OR Apache-2.0`）。详见 [LICENSE](../../LICENSE)。
-
----
-
-> **文档结束** | 0.1.1（SP04 重构后：Hook 系统核心已迁移至 atoms/coreloopthree，hook_d 退化为薄 daemon 壳）

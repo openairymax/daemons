@@ -1,209 +1,123 @@
 # Channel Daemon — IPC 通道守护进程
 
-> **模块路径**: `agentrt/daemons/channel_d/` | **版本**: v0.1.0
+> **模块路径**: `agentrt/daemons/channel_d/`
 
-## 概述
+## 定位
 
-`daemons/channel_d/` 是 AgentRT 的进程间通信通道管理守护进程，负责管理 IPC 通道的创建、销毁、数据收发和状态监控。它支持 Unix Socket、共享内存和命名管道三种通道类型，为 AgentRT 各守护进程间的高效通信提供统一的通道抽象层（IMP-08），是 IPC Service Bus 的底层传输基础设施。
+`channel_d` 是 AgentRT 的 IPC 通道管理守护进程（IMP-08：统一通道服务），为各守护进程提供
+SOCKET / SHM / PIPE 三类 IPC 通道的创建、打开、关闭、数据收发与健康监控。它向上层暴露
+`channel.*` JSON-RPC 方法族（L2 服务协议，`02-l2-service-protocol.md` §6.1），是
+AgentRT IPC 基础设施的组成部分，常由 gateway_d 通过 `channel.*` 命名空间转发调用。
 
-### 架构定位
-
-```
-channel_d/ → IPC Service Bus → 各守护进程间通信
-    ↑
- 通道管理层（Socket/SHM/Pipe）
-```
-
-### 核心职责
-
-- **多通道类型支持**：Unix Socket、共享内存（SHM）、命名管道（Pipe）三种通道类型
-- **通道生命周期管理**：通道的创建、销毁、启动、停止、打开、关闭
-- **数据收发**：统一的 send/receive 接口，屏蔽不同通道类型的传输细节
-- **状态监控**：通道状态跟踪（CLOSED/OPEN/ERROR/DRAINING）与健康检查
-- **回调机制**：支持设置通道事件回调，实现事件驱动通信
-- **延迟测量**：Ping/Pong 机制测量通道往返延迟
-
-## 目录结构
+## 架构
 
 ```
-channel_d/
-├── CMakeLists.txt                    # 构建配置
-├── README.md                         # 本文件
-├── include/                          # 公共头文件
-│   └── channel_service.h             # 通道服务统一接口（IMP-08）
-├── src/                              # 实现文件
-│   ├── main.c                        # 守护进程入口
-│   └── channel_service.c             # 通道服务核心实现
-└── tests/                            # 测试代码
-    └── test_channel_e2e.c            # E2E 测试（P3-B01）
+gateway_d ──(channel.* JSON-RPC)──▶ channel_d
+                                      │ channel_service（SOCKET/SHM/PIPE 通道表）
+                                      │  ├─ SOCKET: AF_UNIX SOCK_STREAM（backlog=128，非阻塞）
+                                      │  ├─ SHM:    shm_open + mmap + 标志位 + 内存栅栏
+                                      │  └─ PIPE:   mkfifo 命名管道
+                                      ▼
+                              各守护进程间 IPC 传输
 ```
 
-## 核心组件说明
+- 单文件 service（`src/channel_service.c`）持有通道表（上限 `CHANNEL_MAX_CHANNELS=256`），
+  全部操作经互斥锁串行化。
+- 事件驱动模式：`daemon_event_driver`（线程池 4~8，队列 256，`max_events=64`）接收
+  JSON-RPC 请求并派发到已注册方法。
+- 通道端点目录（默认 `$AIRY_TMP_DIR/channels`）由 daemon 启动时幂等逐级 `mkdir` 自管，
+  不依赖外部预创建（避免 bind 因 ENOENT 返回 -32603）。
 
-### 通道类型
+### 通道类型与状态
 
 | 通道类型 | 枚举值 | 说明 |
 |----------|--------|------|
-| Unix Socket | `CHANNEL_TYPE_SOCKET` (0) | AF_UNIX SOCK_STREAM，非阻塞模式，backlog=128 |
-| 共享内存 | `CHANNEL_TYPE_SHM` (1) | shm_open + mmap，消息格式 `[4字节长度][4字节标志][数据]`，atomic_thread_fence 同步 |
-| 命名管道 | `CHANNEL_TYPE_PIPE` (2) | mkfifo 命名管道，非阻塞读写 |
+| SOCKET | `CHANNEL_TYPE_SOCKET` (0) | AF_UNIX SOCK_STREAM，非阻塞，backlog=128 |
+| SHM | `CHANNEL_TYPE_SHM` (1) | `shm_open` + `mmap`，帧格式 `[4B 长度][4B 标志][数据]`，`atomic_thread_fence` 同步 |
+| PIPE | `CHANNEL_TYPE_PIPE` (2) | `mkfifo` 命名管道，非阻塞读写 |
 
-### 通道状态
+| 通道状态 | 枚举值 |
+|----------|--------|
+| CLOSED | 0 |
+| OPEN | 1 |
+| ERROR | 2 |
+| DRAINING | 3 |
 
-| 状态 | 说明 |
-|------|------|
-| CLOSED | 通道已关闭 |
-| OPEN | 通道已打开，可正常通信 |
-| ERROR | 通道处于错误状态 |
-| DRAINING | 通道正在排空，等待剩余消息处理完毕 |
+传输帧格式：SOCKET/PIPE 为 `[4 字节网络序长度][数据]`；SHM 通过写共享内存 + 置标志位
+（`memory_order_seq_cst` 栅栏）传递消息，接收侧读后清标志。
 
-### 传输协议
+## JSON-RPC 接口表
 
-- **Socket 传输**：`[4字节网络序长度][数据]`
-- **SHM 传输**：写入共享内存 + 标志位，对端通过标志位检测并读取数据，使用 atomic_thread_fence 保证内存可见性
-- **Pipe 传输**：非阻塞写入，直接传输原始数据
+监听端点：Unix socket `$AIRY_RUNTIME_DIR/channel.sock`（`--tcp` 或 Windows 下为
+TCP `127.0.0.1:8094`，Windows pipe `\\.\pipe\airy_channel`）。以下方法由
+`method_dispatcher_register` 实际注册（main.c），共 9 个：
 
-## 接口说明
+| 方法 | 参数 | 返回要点 | 说明 |
+|------|------|----------|------|
+| `ping` | `id`（可选，字符串或数字） | 无 `id`：`{"status":"ok"\|"degraded"}`；有 `id`：`{"status":"ok","channel_id","latency_ms"}` | 健康探测或通道往返延迟测量（SOCKET 实际 connect，SHM/PIPE 探测端点） |
+| `list` | 无 | `{"channels":[{"id","name","type","status","sent","recv"},...]}` | 列出全部通道 |
+| `open` | `id`, `name`, `type`（0~2，缺省 SOCKET） | `{"status":"opened"}` | 打开通道；重名返回错误 |
+| `close` | `id` | `{"status":"closed"}` | 关闭并销毁通道 |
+| `send` | `id`, `data`（必须为字符串，否则 fail-closed 报错） | `{"status":"sent"}` | 向通道发送数据 |
+| `health` | 无 | `{"healthy":true\|false}` | 健康状态 |
+| `health_check` | 无 | `{"healthy":true\|false}` | L2 标准方法，同 `health` |
+| `shutdown` | 无 | — | L2 标准方法，触发优雅退出 |
+| `get_stats` | 无 | `{"daemon":"channel_d","channels":N,"messages_sent":N,"messages_received":N}` | 通道数 + 累计收发消息数（真实统计） |
 
-### 通道服务生命周期（channel_service.h）
+错误码约定：参数校验失败（缺 id/data、类型非法）映射 JSON-RPC `-32602`（Invalid params）；
+其余服务错误映射 `-32603`（Internal error）。
 
-```c
-airy_error_t channel_service_create(channel_service_t *service,
-                                       const channel_service_config_t *config);
-void channel_service_destroy(channel_service_t service);
-airy_error_t channel_service_start(channel_service_t service);
-airy_error_t channel_service_stop(channel_service_t service);
-```
+### 服务 API（channel_service_*）
 
-### 通道操作接口
+`include/channel_service.h`（安装至 `include/agentrt/daemons/channel_d`）：
 
-```c
-airy_error_t channel_open(channel_service_t service, channel_type_t type,
-                             const char *name, channel_handle_t *handle);
-airy_error_t channel_close(channel_service_t service, channel_handle_t handle);
-airy_error_t channel_send(channel_service_t service, channel_handle_t handle,
-                             const void *data, size_t len);
-airy_error_t channel_receive(channel_service_t service, channel_handle_t handle,
-                                void *buffer, size_t buf_size, size_t *out_len);
-```
+- 生命周期：`channel_service_create/destroy/start/stop`
+- 通道操作：`channel_service_open/close/send/receive`
+- 查询：`channel_service_list/get_info`
+- 事件：`channel_service_set_callback`（`channel_message_cb_t`）
+- 探测：`channel_service_ping`（返回 `latency_ms`）、`channel_service_is_healthy`
 
-### 查询与回调接口
+## 配置
 
-```c
-airy_error_t channel_list(channel_service_t service, char **out_json);
-airy_error_t channel_get_info(channel_service_t service, channel_handle_t handle,
-                                 channel_info_t *info);
-airy_error_t channel_set_callback(channel_service_t service, channel_handle_t handle,
-                                     channel_event_cb_t callback, void *user_data);
-airy_error_t channel_ping(channel_service_t service, channel_handle_t handle,
-                             uint64_t *out_latency_ms);
-bool channel_is_healthy(channel_service_t service, channel_handle_t handle);
-```
+- 默认配置 `CHANNEL_CONFIG_DEFAULTS`：
 
-### 配置结构体
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `max_channels` | 256 | 最大通道数 |
+| `default_buffer_size` | 65536 | 默认缓冲区/消息上限 |
+| `socket_backlog` | 128 | SOCKET 监听 backlog |
+| `socket_dir` | `$AIRY_TMP_DIR/channels` | SOCKET/PIPE 端点目录（自管 mkdir） |
+| `shm_prefix` | `/airy_ch_` | SHM 名称前缀 |
+| `idle_timeout_ms` | 30000 | 空闲超时 |
 
-```c
-typedef struct {
-    size_t max_channels;          // 最大通道数，默认 256
-    size_t default_buffer_size;   // 默认缓冲区大小，默认 65536
-    int socket_backlog;           // Socket 监听 backlog，默认 128
-    uint32_t idle_timeout_ms;     // 空闲超时时间，默认 30000ms
-} channel_service_config_t;
-```
-
-## 通信方式
-
-| 方向 | 协议 | 说明 |
-|------|------|------|
-| 入站 | JSON-RPC 2.0 | 通过 IPC Service Bus 接收请求 |
-| 通道传输 | Unix Socket | AF_UNIX SOCK_STREAM 非阻塞通信 |
-| 通道传输 | 共享内存 | shm_open + mmap 高速通信 |
-| 通道传输 | 命名管道 | mkfifo 进程间通信 |
-
-### JSON-RPC 2.0 方法
-
-| 方法 | 说明 |
-|------|------|
-| `channel.ping` | 测量通道往返延迟 |
-| `channel.list` | 列出所有通道信息 |
-| `channel.open` | 打开指定通道 |
-| `channel.close` | 关闭指定通道 |
-| `channel.send` | 通过通道发送数据 |
-| `channel.health` | 查询通道健康状态 |
-
-## 健康检查机制
-
-- **Ping 延迟检测**：通过 `channel.ping` 测量往返延迟，E2E 验收标准 < 10ms
-- **通道状态检查**：`channel_is_healthy` 检查通道是否处于 OPEN 状态
-- **E2E 测试覆盖**（P3-B01）：6 个测试组
-  - 生命周期测试
-  - 健康检查测试
-  - 打开/关闭/列表测试
-  - 发送/接收 + 延迟测试（验收：往返 < 10ms）
-  - 回调机制测试
-  - 错误处理测试
-
-## 跨平台支持
-
-| 平台 | Unix Socket | 共享内存 | 命名管道 |
-|------|-------------|----------|----------|
-| Linux | ✅ AF_UNIX | ✅ shm_open + mmap | ✅ mkfifo |
-| Windows | ⚠️ 有限支持 | ⚠️ 有限支持 | ⚠️ 有限支持 |
-
-## 依赖关系
-
-```
-channel_d
-├── common (svc_common, airy_common)
-└── Threads::Threads
-```
-
-## 构建说明
-
-```bash
-# 构建通道守护进程
-cmake -B build -DBUILD_TESTS=ON
-cmake --build build --target channel_d
-
-# 运行 E2E 测试
-ctest --test-dir build -R "test_channel_e2e" -V
-```
-
-## 使用示例
-
-### 启动通道守护进程
-
-```bash
-# 默认启动
-./channel_d
-
-# 指定配置文件
-./channel_d -c channel_config.json
-
-# 指定服务名称
-./channel_d -n my-channel-service
-
-# 查看帮助
-./channel_d -h
-```
-
-### 命令行参数
+- 命令行参数：
 
 | 参数 | 说明 |
 |------|------|
-| `-c <path>` | 指定配置文件路径 |
-| `-s <path>` | 指定 Socket 路径 |
-| `-n <name>` | 指定服务名称 |
-| `-h` | 显示帮助信息 |
+| `--manager <config>` / `-c <config>` | 兼容 bootstrap 统一启动参数（忽略） |
+| `-s <dir>` | 覆盖 socket 目录 |
+| `-n <n>` | 覆盖最大通道数 |
+| `--tcp` | 以 TCP 回环模式监听（Windows 强制） |
+| `-h` / `--help` | 帮助 |
 
-### 信号处理
+## 依赖与构建
 
-| 信号 | 行为 |
-|------|------|
-| SIGINT | 优雅关闭 |
-| SIGTERM | 优雅关闭 |
-| SIGUSR1 | 动态调整日志级别 |
+- 依赖：`svc_common`（daemon 公共库）、`airy_common`（commons 统一基础库）、
+  `Threads::Threads`、`airy_platform_libs`。
+- Linux 构建时定义 `AIRY_CONFIG_DIR=/etc/agentrt`、`AIRY_LOG_DIR=/var/log/agentrt`。
+- 构建：
 
----
+```bash
+cmake -B build -DBUILD_TESTS=ON
+cmake --build build --target channel_d
+```
 
-© 2025-2026 SPHARX Ltd. All Rights Reserved.
+## 测试
+
+- `tests/test_channel_e2e.c`（`channel_e2e`）：E2E 覆盖生命周期、健康检查、open/close/list、
+  send/receive 与延迟、回调机制、错误处理；支持 cmocka 或内置 stub 两种构建路径。
+- 运行：
+
+```bash
+ctest --test-dir build -R channel_e2e -V
+```

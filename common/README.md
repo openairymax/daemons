@@ -1,408 +1,107 @@
-# Common — AgentRT 公共服务库
+# Common — AgentRT 守护进程公共库
 
-> **模块路径**: `agentrt/daemons/common/` | **版本**: v0.1.0
+> **模块路径**: `agentrt/daemons/common/`
 
-## 概述
+## 定位
 
-`daemons/common/` 是所有守护进程共享的基础库，提供兼容层、工具函数和通用服务组件。它为上层守护进程屏蔽了操作系统差异，提供统一的服务生命周期管理、IPC 通信、日志、配置、安全、缓存等基础设施，是整个 Daemon 层的基石。
+`common` 是所有 AgentRT 守护进程共享的静态库（目标名 `svc_common`），既是服务框架
+兼容层，也是 daemon 层组件集。它屏蔽操作系统差异，为各 daemon 提供统一的服务生命周期、
+IPC 通信、JSON-RPC 分发、服务发现、安全认证、容错恢复、并发调度与配置管理等基础设施；
+`svc_common` 也是 daemon 与 commons/atoms 之间的依赖枢纽（所有 daemon 均链接它）。
 
-### 设计原则
-
-- **接口契约化**（K-2）：统一的服务接口定义，明确的生命周期管理
-- **安全内生**（E-1）：默认安全，所有请求必须验证，零信任架构
-- **跨平台一致性**（E-4）：Windows/Linux/macOS 统一实现
-- **资源确定性**（E-3）：Fail-closed 模式，外部依赖不可用时安全降级
-- **错误可追溯**（E-6）：降级模式下记录明确的降级警告日志
-
-## 目录结构
+## 架构
 
 ```
-common/
-├── CMakeLists.txt                   # 构建配置
-├── README.md                        # 本文件
-├── include/                         # 公共头文件
-│   ├── airy_event_loop.h         # 事件循环
-│   ├── alert_manager.h              # 智能告警管理器
-│   ├── api_recovery.h               # API 恢复策略
-│   ├── checkpoint.h                 # 任务检查点/状态持久化
-│   ├── circuit_breaker.h            # 熔断器与自愈框架
-│   ├── compat.h                     # 兼容性定义
-│   ├── config_manager.h             # 配置管理器
-│   ├── daemon_defaults.h            # 守护进程默认值
-│   ├── daemon_errors.h              # 守护进程错误码
-│   ├── daemon_event_driver.h        # 事件驱动框架
-│   ├── daemon_security.h            # 安全框架集成（cupolas）
-│   ├── error.h                      # 统一错误处理
-│   ├── input_validator.h            # 输入校验器
-│   ├── ipc_client.h                 # IPC 客户端
-│   ├── ipc_service_bus.h            # IPC 服务总线
-│   ├── jsonrpc_helpers.h            # JSON-RPC 2.0 辅助函数
-│   ├── log_sanitizer.h              # 日志清洗器
-│   ├── method_dispatcher.h          # 方法分发器
-│   ├── orchestrator.h               # 编排器
-│   ├── parallel_dispatcher.h        # 并行分发器
-│   ├── param_validator.h            # 参数校验器
-│   ├── platform.h                   # 平台兼容层
-│   ├── safe_string_utils.h          # 安全字符串操作
-│   ├── service_discovery.h          # 跨进程服务发现
-│   ├── svc_auth.h                   # 认证中间件（JWT/API Key/速率限制）
-│   ├── svc_cache.h                  # 缓存服务兼容层
-│   ├── svc_common.h                 # 服务公共定义与生命周期管理
-│   ├── svc_config.h                 # 配置服务兼容层
-│   ├── svc_logger.h                 # 日志服务兼容层
-│   ├── thread_pool.h                # 线程池
-│   └── unified_metrics.h            # 统一指标采集
-├── src/                             # 实现文件
-│   ├── airy_event_loop.c
-│   ├── alert_manager.c
-│   ├── api_recovery.c
-│   ├── checkpoint.c
-│   ├── circuit_breaker.c
-│   ├── config_manager.c
-│   ├── daemon_event_driver.c
-│   ├── daemon_security.c
-│   ├── input_validator.c
-│   ├── ipc_client.c
-│   ├── ipc_service_bus.c
-│   ├── jsonrpc_helpers.c
-│   ├── log_sanitizer.c
-│   ├── method_dispatcher.c
-│   ├── orchestrator.c
-│   ├── daemon_task_dispatcher.c
-│   ├── param_validator.c
-│   ├── platform_compat.c
-│   ├── safe_string_utils.c
-│   ├── service_discovery.c
-│   ├── svc_auth.c
-│   ├── svc_common.c
-│   ├── thread_pool.c
-│   └── unified_metrics.c
-└── tests/                           # 单元测试
-    ├── CMakeLists.txt
-    ├── test_config.c
-    ├── test_daemon_common.c
-    ├── test_error.c
-    ├── test_input_validator.c
-    ├── test_ipc_client.c
-    ├── test_ipc_service_bus.c
-    ├── test_jsonrpc_helpers.c
-    ├── test_logger.c
-    ├── test_platform.c
-    ├── test_safe_string_utils.c
-    ├── test_strategies_recovery.c
-    ├── test_svc_auth.c
-    ├── test_svc_stop.c
-    ├── test_daemon_security.c
-    ├── test_service_discovery.c
-    ├── test_thread_pool.c
-    ├── test_log_sanitizer.c
-    ├── test_api_recovery.c
-    ├── test_airy_event_loop.c
-    └── test_checkpoint.c
+各 daemon（channel_d / hook_d / sched_d / tool_d / gateway_d / ...）
+        │ 链接
+        ▼
+   svc_common（本模块，静态库）
+        │ PUBLIC 传播
+        ├─ commons（airy_common：统一基础库）
+        ├─ cupolas（安全穹顶，可选）
+        ├─ airy_heapstore（运行时数据存储，可选）
+        └─ OpenSSL / cJSON / YAML / CURL / Threads（可选）
 ```
 
-## 核心组件说明
+### re-export 兼容层机制（P0.17 / IRON-6）
 
-### 1. 服务基础设施
+- 本模块 `include/` 下多个头文件（`svc_common.h` 等）是 **re-export 兼容头**：真实定义
+  已迁移到 commons（如 `commons/utils/ipc/include/svc_common.h`），兼容头仅 `#include`
+  权威版本，使 daemon 源码无需改动包含路径，同时消除编译期 atoms→daemons 反向依赖
+  （IRON-6 跨层耦合禁令）。
+- 未迁移的头（`platform.h` / `error.h` / `compat.h` / `circuit_breaker.h` /
+  `thread_pool.h` 等）仍由本模块 `include/` 提供，daemon 自身源码可解析。
+- CMake 包含路径顺序：commons 权威路径声明在 `daemons/common/include` **之前**，确保
+  atoms 代码优先解析 commons 版本。
 
-| 组件 | 头文件 | 说明 |
-|------|--------|------|
-| **svc_common** | `svc_common.h` | 服务公共定义、生命周期管理、服务注册表、服务元数据、跨进程注册中心 |
-| **svc_logger** | `svc_logger.h` | 统一日志接口，兼容 commons/logging，支持追踪上下文（TraceID/SpanID/SessionID） |
-| **svc_config** | `svc_config.h` | 配置服务兼容层，支持配置加载、监视和热更新 |
-| **svc_auth** | `svc_auth.h` | 认证中间件，支持 JWT Token、API Key、速率限制 |
-| **svc_cache** | `svc_cache.h` | 缓存服务兼容层，基于 commons/cache，支持 TTL 和容量管理 |
+## 组件集（src/ 共 44 个 C 源文件）
 
-### 2. IPC 通信
+| 域 | 组件 | 说明 |
+|----|------|------|
+| 服务框架 | `svc_common` / `svc_registry` / `svc_config` / `svc_monitor` / `svc_client` | 服务生命周期、注册中心客户端、配置加载与监视、监控降级、服务通信客户端 |
+| IPC 通信 | `ipc_client` / `ipc_service_bus` / `ipc_bus_helper` / `ipc_backpressure` / `daemon_rpc_client` / `daemon_bootstrap_ipc` | IPC 总线、背压控制、daemon↔daemon 精简 JSON-RPC 客户端、IPC 引导 |
+| 服务发现 | `service_discovery` / `service_discovery_lb` / `service_discovery_api` / `service_discovery_stats` / `service_discovery_backend_shm` / `service_discovery_backend_file` / `service_discovery_helper` / `daemon_bootstrap_sd` | 跨进程注册/发现/负载均衡，shm/file 后端，一键引导 |
+| JSON-RPC | `jsonrpc_helpers` / `method_dispatcher` | JSON-RPC 2.0 辅助（请求解析/响应构建）与方法分发器（注册表模式，O(1) 路由） |
+| 安全 | `svc_auth` / `svc_auth_jwt` / `svc_auth_apikey` / `svc_auth_ratelimit` / `daemon_security` / `input_validator` / `param_validator` / `log_sanitizer` | JWT/API Key/限流认证中间件、cupolas 安全集成、输入/参数校验、日志清洗 |
+| 容错恢复 | `circuit_breaker` / `api_recovery` / `alert_manager` | 熔断器（关闭→开启→半开）、API 恢复策略、智能告警 |
+| 并发调度 | `thread_pool` / `airy_event_loop` / `daemon_event_driver` / `daemon_task_dispatcher` | 线程池、事件循环、统一事件驱动框架（各 daemon 主循环）、工具并行执行引擎 |
+| 平台兼容 | `platform_compat` | daemon 平台扩展实现（socket/dl/线程名/时间等） |
+| 监控指标 | `unified_metrics` | 统一指标采集 |
+| 配置 | `config_manager` / `svc_model_defaults` | 统一配置管理、model.yaml 全局默认模型提取（llm_d/gateway_d 共用） |
+| 引导 | `daemon_cupolas_bootstrap` / `daemon_heapstore_bootstrap` | cupolas 安全穹顶引导、heapstore 运行时数据存储引导 |
+| 其他 | `daemon_oom` / `hall_writer` | OOM 降级回调注册、daemon 侧事件流写端（hall 事件单一真相源） |
 
-| 组件 | 头文件 | 说明 |
-|------|--------|------|
-| **ipc_service_bus** | `ipc_service_bus.h` | IPC 服务总线，守护进程间统一通信框架，支持多协议（JSON-RPC/MCP/A2A/OpenAI）、服务发现、负载均衡 |
-| **ipc_client** | `ipc_client.h` | IPC 客户端，简化版 RPC 调用接口，支持连接池 |
-| **service_discovery** | `service_discovery.h` | 跨进程服务发现，基于共享内存，支持心跳、负载均衡（轮询/加权/最少连接）、依赖追踪 |
+## JSON-RPC 接口表
 
-### 3. JSON-RPC 2.0
+本模块为**静态库，不暴露独立 JSON-RPC 端点**；它向各 daemon 提供方法分发基础设施：
 
-| 组件 | 头文件 | 说明 |
-|------|--------|------|
-| **jsonrpc_helpers** | `jsonrpc_helpers.h` | JSON-RPC 2.0 辅助函数，请求解析、响应构建、参数提取、批量请求支持 |
-| **method_dispatcher** | `method_dispatcher.h` | 方法分发器，基于注册表模式的高效路由，O(1) 查找，线程安全 |
+- `method_dispatcher_create / destroy / register / dispatch`：各 daemon main.c 通过
+  `method_dispatcher_register` 注册 `ping` / `health` / `get_stats` / `shutdown` 等
+  L2 标准方法（见各 daemon README 的接口表）。
+- `jsonrpc_helpers`：`jsonrpc_build_error / jsonrpc_build_success / jsonrpc_parse_request /
+  jsonrpc_get_string_param / jsonrpc_get_int_param` 等。
+- `daemon_rpc_client`：`daemon_rpc_call`（Unix socket JSON-RPC 客户端，gateway 转发与
+  sched_d 真实派发均使用）。
 
-### 4. 容错与恢复
+## 配置
 
-| 组件 | 头文件 | 说明 |
-|------|--------|------|
-| **circuit_breaker** | `circuit_breaker.h` | 熔断器，三态模型（关闭→开启→半开），支持故障转移、慢调用检测、事件回调 |
-| **checkpoint** | `checkpoint.h` | 任务检查点，状态持久化与恢复，支持快照、自动检查点钩子 |
-| **alert_manager** | `alert_manager.h` | 智能告警管理，多级告警、规则引擎、告警抑制与去重、多通道通知 |
-| **api_recovery** | `api_recovery.h` | API 恢复策略，支持重试、降级、回退等恢复模式 |
+- 本模块无独立运行时配置；配置项通过 `daemon_defaults.h` / `svc_config` /
+  `config_manager` 暴露给各 daemon。
+- Linux 构建时各 daemon 定义 `AIRY_CONFIG_DIR=/etc/agentrt`、`AIRY_LOG_DIR=/var/log/agentrt`
+  （macOS 使用 `platform.h` 默认 `./agentrt/config`、`./agentrt/logs`）。
 
-### 5. 安全
+## 依赖与构建
 
-| 组件 | 头文件 | 说明 |
-|------|--------|------|
-| **daemon_security** | `daemon_security.h` | 安全框架集成，对接 cupolas 模块，提供输入清洗、权限检查、签名验证、安全凭据存储、审计日志 |
-| **input_validator** | `input_validator.h` | 输入校验器，防止注入攻击 |
-| **param_validator** | `param_validator.h` | 参数校验器，类型和格式验证 |
-| **log_sanitizer** | `log_sanitizer.h` | 日志清洗器，防止敏感信息泄露 |
-| **safe_string_utils** | `safe_string_utils.h` | 安全字符串操作，防止缓冲区溢出 |
-
-### 6. 并发与调度
-
-| 组件 | 头文件 | 说明 |
-|------|--------|------|
-| **thread_pool** | `thread_pool.h` | 线程池，支持任务队列和并发控制 |
-| **airy_event_loop** | `airy_event_loop.h` | 事件循环，异步 I/O 处理 |
-| **daemon_event_driver** | `daemon_event_driver.h` | 事件驱动框架 |
-| **parallel_dispatcher** | `parallel_dispatcher.h` | 并行分发器 |
-| **orchestrator** | `orchestrator.h` | 编排器，多服务协调 |
-
-### 7. 平台与工具
-
-| 组件 | 头文件 | 说明 |
-|------|--------|------|
-| **platform** | `platform.h` | 平台兼容层，操作系统差异屏蔽 |
-| **compat** | `compat.h` | 兼容性定义 |
-| **daemon_defaults** | `daemon_defaults.h` | 守护进程默认值常量 |
-| **daemon_errors** | `daemon_errors.h` | 守护进程错误码定义 |
-| **error** | `error.h` | 统一错误处理 |
-| **unified_metrics** | `unified_metrics.h` | 统一指标采集 |
-| **config_manager** | `config_manager.h` | 配置管理器 |
-
-## 接口说明
-
-### 服务生命周期管理（svc_common.h）
-
-```c
-airy_error_t airy_service_create(airy_service_t *service, const char *name,
-                                       const airy_svc_interface_t *iface,
-                                       const airy_svc_config_t *config);
-airy_error_t airy_service_init(airy_service_t service);
-airy_error_t airy_service_start(airy_service_t service);
-airy_error_t airy_service_stop(airy_service_t service, bool force);
-void airy_service_destroy(airy_service_t service);
-airy_svc_state_t airy_service_get_state(airy_service_t service);
-bool airy_service_is_ready(airy_service_t service);
-bool airy_service_is_running(airy_service_t service);
-airy_error_t airy_service_healthcheck(airy_service_t service);
-airy_error_t airy_service_get_stats(airy_service_t service,
-                                          airy_svc_stats_t *stats);
-```
-
-### IPC 服务总线（ipc_service_bus.h）
-
-```c
-ipc_service_bus_t ipc_service_bus_create(const char *bus_name,
-                                         const ipc_bus_channel_config_t *config);
-airy_error_t ipc_service_bus_start(ipc_service_bus_t bus);
-airy_error_t ipc_service_bus_stop(ipc_service_bus_t bus);
-airy_error_t ipc_service_bus_send(ipc_service_bus_t bus, const char *target_service,
-                                     const ipc_bus_message_t *message);
-airy_error_t ipc_service_bus_request(ipc_service_bus_t bus, const char *target_service,
-                                        const ipc_bus_message_t *request,
-                                        ipc_bus_message_t *response, uint32_t timeout_ms);
-airy_error_t ipc_service_bus_broadcast(ipc_service_bus_t bus,
-                                          const ipc_bus_message_t *message);
-airy_error_t ipc_service_bus_register_handler(ipc_service_bus_t bus,
-                                                 ipc_bus_message_handler_t handler,
-                                                 void *user_data);
-```
-
-### JSON-RPC 辅助（jsonrpc_helpers.h）
-
-```c
-char *jsonrpc_build_error(int code, const char *message, int id);
-char *jsonrpc_build_success(cJSON *result, int id);
-int jsonrpc_parse_request(const char *raw, char **out_method, cJSON **out_params, int *out_id);
-int jsonrpc_validate_request(cJSON *req);
-const char *jsonrpc_get_string_param(cJSON *params, const char *key, const char *default_value);
-int jsonrpc_get_int_param(cJSON *params, const char *key, int default_value);
-```
-
-### 方法分发器（method_dispatcher.h）
-
-```c
-method_dispatcher_t *method_dispatcher_create(size_t max_methods);
-void method_dispatcher_destroy(method_dispatcher_t *disp);
-int method_dispatcher_register(method_dispatcher_t *disp, const char *method,
-                               method_fn handler, void *user_data);
-int method_dispatcher_dispatch(method_dispatcher_t *disp, cJSON *request,
-                               char *(*error_response_fn)(int, const char *, int),
-                               void *user_data);
-```
-
-### 熔断器（circuit_breaker.h）
-
-```c
-cb_manager_t cb_manager_create(void);
-circuit_breaker_t cb_create(cb_manager_t manager, const char *name, const cb_config_t *config);
-bool cb_allow_request(circuit_breaker_t breaker);
-void cb_record_success(circuit_breaker_t breaker, uint32_t duration_ms);
-void cb_record_failure(circuit_breaker_t breaker, int32_t error_code);
-cb_state_t cb_get_state(circuit_breaker_t breaker);
-airy_error_t cb_execute_failover(circuit_breaker_t breaker, int32_t original_error,
-                                    char *fallback_result, size_t result_size);
-```
-
-### 认证中间件（svc_auth.h）
-
-```c
-int auth_init(const auth_config_t *config);
-int auth_authenticate(const char *auth_header, const char *client_id, auth_result_t *result);
-int auth_jwt_generate_token(const char *subject, const char *role, char **out_token);
-int auth_jwt_verify_token(const char *token, auth_result_t *result);
-int auth_apikey_verify(const char *api_key, auth_result_t *result);
-int auth_ratelimit_check(const char *client_id);
-void auth_cleanup(void);
-```
-
-### 安全框架（daemon_security.h）
-
-```c
-int daemon_security_init(const daemon_security_config_t *config, airy_error_t *error);
-int daemon_sanitize_llm_input(const char *input, char *output, size_t output_size);
-int daemon_sanitize_tool_params(const char *tool_name, const char *params,
-                                char *sanitized_tool, size_t tool_buf_size,
-                                char *sanitized_params, size_t param_buf_size);
-int daemon_check_tool_permission(const char *agent_id, const char *tool_name,
-                                 const char *action);
-int daemon_verify_package_signature(const char *package_path, bool *is_valid,
-                                    cupolas_signer_info_t *signer_info);
-int daemon_store_credential(const char *cred_id, cupolas_vault_cred_type_t cred_type,
-                            const uint8_t *data, size_t data_len, const char *agent_id);
-int daemon_audit_log_event(const char *service_name, const char *operation,
-                           const char *resource, int result, const char *agent_id);
-```
-
-### 服务发现（service_discovery.h）
-
-```c
-service_discovery_t sd_create(const sd_config_t *config);
-airy_error_t sd_register(service_discovery_t sd, const char *service_name,
-                            const char *service_type, const sd_instance_t *instance,
-                            const char *tags, const char *dependencies);
-airy_error_t sd_discover(service_discovery_t sd, const char *service_name,
-                            sd_instance_t *instances, uint32_t max_count,
-                            uint32_t *found_count);
-airy_error_t sd_select_instance(service_discovery_t sd, const char *service_name,
-                                   sd_lb_strategy_t strategy, sd_instance_t *instance);
-airy_error_t sd_heartbeat(service_discovery_t sd, const char *service_name,
-                             const char *instance_id);
-```
-
-### 告警管理器（alert_manager.h）
-
-```c
-int am_init(const am_config_t *config);
-int am_add_rule(const am_rule_t *rule);
-int am_fire(const char *name, am_level_t level, const char *message,
-            const char *source, const char *labels);
-int am_resolve(const char *name);
-int am_acknowledge(const char *name);
-int am_evaluate(const char *metric_name, double value);
-int am_get_active_alerts(am_alert_t *alerts, uint32_t max_count, uint32_t *found_count);
-```
-
-## 通信方式
-
-common 模块本身不直接参与守护进程间通信，但提供了 IPC 通信的底层基础设施：
-
-| 组件 | 通信方式 | 适用场景 |
-|------|----------|----------|
-| `ipc_service_bus` | Unix Socket / TCP | 守护进程间请求/响应通信 |
-| `ipc_client` | Unix Socket / TCP | 简化版 RPC 客户端调用 |
-| `service_discovery` | 共享内存 | 跨进程服务注册与发现 |
-
-## 依赖关系
-
-```
-common
-├── commons/utils/logging     # 统一日志系统
-├── commons/utils/cache       # 统一缓存库
-├── cupolas                   # 安全框架（可选，Fail-closed 模式）
-├── cjson                     # JSON 解析库
-└── platform                  # 操作系统抽象层
-```
-
-## 构建说明
-
-common 模块作为静态库 `svc_common` 构建，被所有守护进程链接：
+- 必须依赖：`airy_common`（commons，`add_subdirectory` 引入）、`airy_compile_defs`、
+  `Threads::Threads`、`airy_platform_libs`。
+- 可选依赖（根级探测）：`cupolas`（`if(TARGET cupolas)`，PUBLIC 传播使所有链接 daemon
+  自动获得）、`airy_heapstore`（`BUILD_HEAPSTORE`）、OpenSSL、cJSON、YAML、CURL。
+- Windows 链接 `ws2_32 bcrypt advapi32`；Unix 定义 `AIRY_PLATFORM_LINUX` / `_GNU_SOURCE`。
+- 构建：
 
 ```bash
-# 构建 common 模块（包含在 daemon 顶层构建中）
 cmake -B build -DBUILD_TESTS=ON
-cmake --build build
-
-# 仅运行 common 测试
-ctest --test-dir build -R "test_daemon_common|test_ipc|test_jsonrpc|test_logger|test_config|test_auth|test_safe_string|test_input_validator|test_platform|test_error|test_svc_stop|test_strategies_recovery"
+cmake --build build --target svc_common
 ```
 
-## 使用示例
+- 安装：`svc_common` 静态库 → `lib/`；兼容层头文件 → `include/agentrt/`（30+ 个头）。
 
-### 初始化守护进程服务
+## 测试
 
-```c
-#include "daemons/common/svc_common.h"
-#include "daemons/common/svc_logger.h"
-#include "daemons/common/ipc_service_bus.h"
+`tests/`（`svc_*` 目标，`BUILD_TESTS` 开启，每个测试注册为 ctest 用例）：
 
-airy_svc_config_t config = {
-    .name = "my_daemon",
-    .version = "1.0.0",
-    .capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_CANCELABLE,
-    .max_concurrent = 16,
-    .timeout_ms = 5000,
-    .auto_start = true,
-    .enable_metrics = true,
-    .enable_tracing = true
-};
+- 基础：`test_error` / `test_platform` / `test_logger` / `test_config` /
+  `test_safe_string_utils` / `test_input_validator` / `test_param_validator`
+- JSON-RPC/分发：`test_jsonrpc_helpers` / `test_daemon_common`（P1-C06 深度单测）
+- 安全：`test_svc_auth` / `test_daemon_security` / `test_log_sanitizer`
+- IPC/发现：`test_ipc_service_bus` / `test_ipc_client` / `test_ipc_backpressure` /
+  `test_service_discovery`（含 lifecycle/discover/select/health/misc 域拆分文件）
+- 容错/并发：`test_strategies_recovery` / `test_api_recovery` / `test_thread_pool` /
+  `test_airy_event_loop` / `test_checkpoint` / `test_svc_stop`
+- 其他：`test_svc_model_defaults` / `test_hall_writer`
 
-airy_service_t service;
-airy_service_create(&service, "my_daemon", &iface, &config);
-airy_service_init(service);
-airy_service_start(service);
+运行：
+
+```bash
+ctest --test-dir build -R "svc_test_" -V
 ```
-
-### 使用 IPC 服务总线
-
-```c
-ipc_service_bus_t bus = ipc_service_bus_create("main_bus", NULL);
-ipc_service_bus_start(bus);
-
-ipc_bus_message_t *msg = ipc_bus_message_create(
-    IPC_BUS_MSG_REQUEST, IPC_BUS_PROTO_JSON_RPC, payload, payload_size);
-
-ipc_bus_message_t response;
-ipc_service_bus_request(bus, "llm_d", msg, &response, 5000);
-```
-
-### 使用方法分发器
-
-```c
-method_dispatcher_t *disp = method_dispatcher_create(32);
-method_dispatcher_register(disp, "llm.generate", on_llm_generate, NULL);
-method_dispatcher_register(disp, "llm.chat", on_llm_chat, NULL);
-method_dispatcher_dispatch(disp, request, jsonrpc_build_error, &client_fd);
-```
-
-### 使用熔断器
-
-```c
-cb_manager_t cb_mgr = cb_manager_create();
-circuit_breaker_t cb = cb_create(cb_mgr, "llm_service", NULL);
-
-if (cb_allow_request(cb)) {
-    airy_error_t err = call_llm_service();
-    if (err == AIRY_OK) {
-        cb_record_success(cb, duration_ms);
-    } else {
-        cb_record_failure(cb, err);
-    }
-} else {
-    cb_execute_failover(cb, err, fallback_result, sizeof(fallback_result));
-}
-```
-
----
-
-© 2025-2026 SPHARX Ltd. All Rights Reserved.

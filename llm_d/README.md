@@ -1,270 +1,95 @@
-# LLM Daemon — LLM 服务守护进程
+# llm_d — LLM 服务守护进程（llm.* 命名空间）
 
-> **模块路径**: `agentrt/daemons/llm_d/` | **版本**: v0.1.0
+> **模块路径**: `agentrt/daemons/llm_d/`
+> **命名空间**: `llm.*`（gateway 转发时剥离前缀，方法名不带 `llm.`）
+> **默认监听**: Unix socket `${AIRY_RUNTIME_DIR}/llm.sock`（TCP 8080 可选，Windows 命名管道 `\\.\pipe\airy_llm`）
 
-## 概述
+## 定位
 
-`daemons/llm_d/` 是 AgentRT 的大语言模型服务守护进程，提供统一的模型调用接口，屏蔽不同 LLM 提供商的 API 差异。它支持多提供商（OpenAI、Anthropic、DeepSeek、Google、本地模型），提供响应缓存、Token 计数、成本追踪等核心能力，是 AgentRT 智能体与 LLM 交互的关键桥梁。
+`llm_d` 是 AgentRT 的大模型服务守护进程，向上层（gateway、agent_d、CLI）提供统一的
+模型调用、流式输出、Token 计数、Embeddings 代理与成本统计接口，屏蔽不同 LLM 提供商的
+API 差异。内置多提供商适配（OpenAI / Anthropic / DeepSeek / Google / 本地模型）、
+响应缓存、成本追踪与模型路由（cost_aware / round_robin / least_latency /
+quality_first）。
 
-### 核心职责
-
-- **多提供商支持**：OpenAI、Anthropic、DeepSeek、Google、本地模型等，可扩展的 Provider 注册机制
-- **统一接口**：屏蔽不同提供商 API 差异，对外暴露一致的 JSON-RPC 2.0 接口
-- **响应缓存**：缓存相同请求的响应，降低延迟和成本
-- **Token 计数**：精确计算输入/输出 Token 数量，支持多种模型
-- **成本追踪**：记录每次调用的 Token 消耗和费用，支持预算控制
-- **流式输出**：支持 Server-Sent Events 流式响应
-- **安全集成**：通过 daemon_security 进行输入清洗和权限检查
-
-## 目录结构
+## 架构
 
 ```
-llm_d/
-├── CMakeLists.txt                    # 构建配置
-├── README.md                         # 本文件
-├── include/                          # 公共头文件
-│   ├── llm_service.h                 # LLM 服务对外接口
-│   └── llm_svc_adapter.h             # LLM 服务适配器接口
-├── src/                              # 实现文件
-│   ├── main.c                        # 守护进程入口
-│   ├── service.c                     # 服务核心实现
-│   ├── service.h                     # 服务内部头文件
-│   ├── llm_svc_adapter.c             # 请求解析与标准化适配器
-│   ├── cache.h                       # 缓存模块头文件
-│   ├── cache.c                       # 响应缓存实现
-│   ├── token_counter.h               # Token 计数器头文件
-│   ├── token_counter.c               # Token 计数实现
-│   ├── cost_tracker.h                # 成本追踪器头文件
-│   ├── cost_tracker.c                # 成本追踪实现
-│   ├── response.h                    # 响应处理头文件
-│   ├── response.c                    # 响应构建与解析
-│   └── providers/                    # Provider 适配层
-│       ├── provider.h                # Provider 接口定义
-│       ├── provider.c                # Provider 基础实现
-│       ├── registry.h                # Provider 注册表头文件
-│       ├── registry.c                # Provider 注册与查找
-│       ├── openai.c                  # OpenAI API 适配
-│       ├── anthropic.c               # Anthropic API 适配
-│       ├── deepseek.c                # DeepSeek API 适配
-│       ├── google.c                  # Google AI API 适配
-│       └── local.c                   # 本地模型推理适配
-└── tests/                            # 单元测试
-    ├── CMakeLists.txt
-    ├── test_llm.c                    # 集成测试
-    ├── test_service.c                # 服务测试
-    ├── test_cache.c                  # 缓存测试
-    ├── test_token_counter.c          # Token 计数测试
-    ├── test_cost_tracker.c           # 成本追踪测试
-    ├── test_response.c               # 响应处理测试
-    ├── test_complexity_routing.c     # 复杂度路由测试
-    ├── test_routing_e2e.c            # 路由端到端测试
-    └── bench_routing_latency.c       # 路由延迟基准测试
+客户端 (JSON-RPC 2.0 over Unix socket / TCP)
+        ↓
+  main.c（daemon_main 事件驱动样板 + 方法分发）
+        ↓
+  llm_service（缓存 / 成本追踪 / 路由 / 请求解析）
+        ↓
+  providers/（openai / anthropic / deepseek / google / local + registry）
 ```
 
-## 核心组件说明
+- 事件驱动模型：`daemon_event_driver` 承载连接，线程池默认 8 线程、队列 256；
+- 启动时若无 `--manager` 参数，自动回退加载 `${AIRY_CONFIG_DIR}/model.yaml`
+  （与 think_d / gateway_d 一致）；
+- 流式输出：`complete_stream` 通过 RS 帧（`0x1E`）分片推送增量，结束帧 `U`
+  携带真实 usage（prompt/completion/reasoning tokens 与 `cost_usd`）；
+- 时间感知注入：`complete` / `complete_stream` 在消息头注入宿主机当前时间
+  （`YYYY-MM-DD 星期 HH:MM (UTC±N)` 格式的 system 消息），避免多轮拼接时间漂移；
+  若首条 system 消息已含真实日期戳（`YYYY-MM-DD`）则跳过；
+- 重试：`complete` 失败最多重试 3 次，指数退避（基础 100ms）。
 
-### 适配器架构
+## JSON-RPC 接口
 
-```
-客户端请求 (JSON-RPC 2.0)
-       ↓
-  llm_svc_adapter  ← 请求解析与标准化
-       ↓
-  llm_service      ← 核心服务逻辑（缓存、限流、路由）
-       ↓
-  providers/        ← Provider 适配层
-    ├─ openai.c      OpenAI API (GPT-4, GPT-3.5)
-    ├─ anthropic.c   Anthropic API (Claude)
-    ├─ deepseek.c    DeepSeek API
-    ├─ google.c      Google AI API (Gemini)
-    └─ local.c       本地模型推理
-```
+以下方法表以 `main.c` 中 `method_dispatcher_register` 的真实注册为准（共 8 个方法）：
 
-### Provider 注册机制
+| 方法 | 参数（params） | 说明 |
+|------|----------------|------|
+| `complete` | `model`(可选，默认取 `global.default_model`)、`messages`(必填，≤128 条，role/content/reasoning_content/tool_call_id/tool_calls)、`temperature`/`top_p`/`max_tokens`/`presence_penalty`/`frequency_penalty`/`stream`(可选)、`tools`(可选) | 非流式文本生成；失败指数退避重试 3 次 |
+| `complete_stream` | 同 `complete` | 流式生成，RS 帧分片推送，结束发 usage 控制帧 |
+| `list_models` | — | 返回模型清单 `{"models":[{name,provider,default}],"default_model",...}` |
+| `count_tokens` | `text`(必填)、`model`(可选) | 按模型编码计数（claude→`claude`、gpt-3.5/text-davinci→`p50k_base`、其余默认 `cl100k_base`），返回 `{model,text,tokens,encoding}` |
+| `embeddings` | `model`(可选)、`input` 等（OpenAI 格式原样转发） | 代理到所属 provider 的 `$api_base/embeddings`，返回上游 JSON |
+| `health_check` | — | `{service:"llm_d",healthy,timestamp}` |
+| `get_stats` | — | 服务统计（经 `llm_service_stats` 生成） |
+| `shutdown` | — | 优雅关闭 |
 
-llm_d 采用可扩展的 Provider 注册机制，每个 Provider 实现统一的 `provider.h` 接口，通过 `registry` 动态注册和查找：
+## 配置
 
-| Provider | 文件 | 支持模型 |
-|----------|------|----------|
-| OpenAI | `openai.c` | GPT-4, GPT-3.5-turbo, GPT-4o 等 |
-| Anthropic | `anthropic.c` | Claude 3.5, Claude 3 等 |
-| DeepSeek | `deepseek.c` | DeepSeek-V2, DeepSeek-Coder 等 |
-| Google | `google.c` | Gemini Pro, Gemini Ultra 等 |
-| Local | `local.c` | 本地部署的模型（llama.cpp 等） |
+- **daemon 配置**（JSON，经 `--config` 传入，无则用默认值）：
+  `daemon.socket_path`、`daemon.tcp_port`（设置即启用 TCP）、`daemon.max_threads`；
+- **模型/提供商配置**：`model.yaml`（`$AIRY_CONFIG_DIR/model.yaml`），含
+  provider/model 注册、`global.default_model`、`pricing` 定价规则
+  （`pattern` / `input_price_per_k` / `output_price_per_k`）；
+- 环境变量：`AIRY_LLM_D_DEBUG=1` 输出 DEBUG 日志；`AIRY_LLM_D_DIAG` 打印
+  complete 发送诊断日志。
 
-### 缓存模块（cache）
+## 依赖与构建
 
-基于请求参数的哈希缓存，避免重复调用 LLM API：
-
-- 支持可配置的缓存容量和 TTL
-- 自动淘汰过期缓存项
-- 支持手动清除缓存
-
-### Token 计数器（token_counter）
-
-精确计算输入和输出的 Token 数量：
-
-- 支持多种模型的 Token 计数规则
-- 用于成本估算和预算控制
-- 与 cost_tracker 联动
-
-### 成本追踪器（cost_tracker）
-
-记录每次 LLM 调用的费用：
-
-- 按模型和提供商分别统计
-- 支持预算上限设置
-- 提供费用查询接口
-
-## 接口说明
-
-### LLM 服务生命周期（llm_service.h）
-
-```c
-llm_service_t *llm_service_create(const char *config_path);
-void llm_service_destroy(llm_service_t *svc);
-```
-
-### 请求接口
-
-```c
-int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager,
-                         llm_response_t **out_response);
-int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *manager,
-                                llm_stream_callback_t callback, void *callback_data,
-                                llm_response_t **out_response);
-void llm_response_free(llm_response_t *resp);
-```
-
-### 统计接口
-
-```c
-int llm_service_stats(llm_service_t *svc, char **out_json);
-```
-
-### 核心数据结构
-
-```c
-typedef struct {
-    const char *role;       // "system" | "user" | "assistant"
-    const char *content;
-} llm_message_t;
-
-typedef struct {
-    const char *model;
-    const llm_message_t *messages;
-    size_t message_count;
-    float temperature;
-    float top_p;
-    int max_tokens;
-    int stream;
-    const char **stop;
-    size_t stop_count;
-    double presence_penalty;
-    double frequency_penalty;
-    void *user_data;
-} llm_request_config_t;
-
-typedef struct {
-    char *id;
-    char *model;
-    llm_message_t *choices;
-    size_t choice_count;
-    uint64_t created;
-    uint32_t prompt_tokens;
-    uint32_t completion_tokens;
-    uint32_t total_tokens;
-    char *finish_reason;
-} llm_response_t;
-
-typedef void (*llm_stream_callback_t)(const char *chunk, void *user_data);
-```
-
-### JSON-RPC 2.0 方法
-
-| 方法 | 说明 |
-|------|------|
-| `llm.generate` | 文本生成（非流式） |
-| `llm.chat` | 对话交互（支持流式） |
-| `llm.embed` | 文本嵌入向量 |
-| `llm.tokenize` | Token 计数 |
-| `llm.models` | 可用模型列表 |
-| `llm.cache.clear` | 清除响应缓存 |
-
-## 通信方式
-
-| 方向 | 协议 | 说明 |
-|------|------|------|
-| 入站 | JSON-RPC 2.0 | 通过 IPC Service Bus 接收 gateway_d 转发的请求 |
-| 出站 | HTTPS | 调用外部 LLM 提供商 API（OpenAI/Anthropic/DeepSeek/Google） |
-| 出站 | 本地调用 | 调用本地模型推理引擎 |
-
-## 依赖关系
-
-```
-llm_d
-├── common (svc_common, svc_logger, svc_config, svc_cache, ipc_service_bus,
-│           method_dispatcher, jsonrpc_helpers, daemon_security, circuit_breaker)
-├── cupolas (daemon_security)  # 输入清洗和权限检查
-└── 外部 LLM API               # OpenAI/Anthropic/DeepSeek/Google
-```
-
-## 构建说明
+- 依赖：`svc_common`（daemons/common）、`commons` 基础库、libcurl（LLM 远端
+  API）、cJSON、libyaml（可选，`HAVE_YAML` 开关）；Windows 额外 `ws2_32 bcrypt`；
+- 构建产物：静态库 `airy_llm_service`（service/providers/router/…，供 llm_d 与
+  测试共用）+ 可执行文件 `llm_d`。
 
 ```bash
-# 构建 LLM 守护进程
 cmake -B build -DBUILD_TESTS=ON
 cmake --build build --target llm_d
-
-# 运行 LLM 测试
-ctest --test-dir build -R "test_llm|test_service|test_cache|test_token_counter|test_cost_tracker|test_response" -V
 ```
 
-## 使用示例
+## 测试
 
-### 启动 LLM 守护进程
+CTest 测试（`llm_d_*`）：
+
+| 测试 | 覆盖点 |
+|------|--------|
+| `llm_d_test_service` | 服务核心 |
+| `llm_d_test_cache` | 响应缓存 |
+| `llm_d_test_token_counter` | Token 计数 |
+| `llm_d_test_response` | 响应构建/解析 |
+| `llm_d_test_cost_tracker` | 成本追踪 |
+| `llm_d_test_complexity_routing` | 复杂度路由 |
+| `llm_d_test_routing_e2e` | 路由端到端 |
+| `llm_d_test_router_integration` | 路由器集成（P3.16） |
+| `llm_d_test_provider_reasoning` | reasoning_content 透传（DeepSeek/Kimi） |
+| `llm_d_bench_routing_latency` | 路由延迟基准 |
 
 ```bash
-# 启动 LLM 守护进程
-./llm_d --config llm_config.json
-
-# 指定默认模型
-./llm_d --default-model gpt-4
-
-# 启用详细日志
-./llm_d --verbose
-```
-
-### 代码调用示例
-
-```c
-#include "daemons/llm_d/include/llm_service.h"
-
-llm_service_t *svc = llm_service_create("llm_config.json");
-
-llm_message_t messages[] = {
-    {.role = "system", .content = "You are a helpful assistant."},
-    {.role = "user",   .content = "Hello, how are you?"}
-};
-
-llm_request_config_t req = {
-    .model = "gpt-4",
-    .messages = messages,
-    .message_count = 2,
-    .temperature = 0.7,
-    .max_tokens = 1024,
-    .stream = 0
-};
-
-llm_response_t *resp = NULL;
-llm_service_complete(svc, &req, &resp);
-
-printf("Response: %s\n", resp->choices[0].content);
-printf("Tokens: prompt=%u, completion=%u, total=%u\n",
-       resp->prompt_tokens, resp->completion_tokens, resp->total_tokens);
-
-llm_response_free(resp);
-llm_service_destroy(svc);
+ctest --test-dir build -R "llm_d_" -V
 ```
 
 ---
