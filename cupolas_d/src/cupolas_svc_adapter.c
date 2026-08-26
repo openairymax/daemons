@@ -14,6 +14,7 @@
 #include "cupolas_svc_adapter.h"
 
 #include "cupolas.h"
+#include "airyrt_version.h"
 #include "svc_logger.h"
 
 #include <stdlib.h>
@@ -198,7 +199,7 @@ int cupolas_service_adapter_create(airy_svc_t *out_service, const airy_svc_confi
         }
     } else {
         ctx->common_cfg.name = "cupolas_d";
-        ctx->common_cfg.version = "0.1.1";
+        ctx->common_cfg.version = AIRYRT_VERSION;
         ctx->common_cfg.capabilities = AIRY_SVC_CAP_ASYNC;
         ctx->common_cfg.enable_metrics = true;
     }
@@ -252,7 +253,7 @@ int cupolas_service_adapter_wrap(airy_svc_t *out_service, cupolas_service_t *cup
         ctx->common_cfg.enable_tracing = config->enable_tracing;
     } else {
         ctx->common_cfg.name = "cupolas_d";
-        ctx->common_cfg.version = "0.1.1";
+        ctx->common_cfg.version = AIRYRT_VERSION;
     }
 
     airy_svc_t svc_handle = NULL;

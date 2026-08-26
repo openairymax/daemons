@@ -39,6 +39,7 @@
 #include "svc_common_internal.h"
 
 #include "airy_memory.h"
+#include "airyrt_version.h"
 #include "daemon_platform_ext.h"
 #include "memory_stats_reporter.h"
 #include "safe_string_utils.h"
@@ -673,7 +674,7 @@ const char *airy_svc_get_version(airy_svc_t svc)
     }
 
     airy_svc_internal_t *service = (airy_svc_internal_t *)svc;
-    return service->version[0] ? service->version : "0.1.1";
+    return service->version[0] ? service->version : AIRYRT_VERSION;
 }
 
 airy_err_t airy_svc_get_stats(airy_svc_t svc, airy_svc_stats_t *out_stats)

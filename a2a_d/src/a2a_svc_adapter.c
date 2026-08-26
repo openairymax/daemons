@@ -13,6 +13,7 @@
 
 #include "a2a_service.h"
 #include "a2a_svc_adapter.h"
+#include "airyrt_version.h"
 #include "svc_logger.h"
 
 #include <stdlib.h>
@@ -186,7 +187,7 @@ int a2a_service_adapter_create(airy_svc_t *out_service, const airy_svc_config_t 
         ctx->common_cfg.enable_tracing = config->enable_tracing;
     } else {
         ctx->common_cfg.name = "a2a_d";
-        ctx->common_cfg.version = "0.1.1";
+        ctx->common_cfg.version = AIRYRT_VERSION;
         ctx->common_cfg.capabilities = AIRY_SVC_CAP_ASYNC;
         ctx->common_cfg.enable_metrics = true;
     }
@@ -238,7 +239,7 @@ int a2a_service_adapter_wrap(airy_svc_t *out_service, a2a_service_t *a2a_svc,
         ctx->common_cfg.enable_tracing = config->enable_tracing;
     } else {
         ctx->common_cfg.name = "a2a_d";
-        ctx->common_cfg.version = "0.1.1";
+        ctx->common_cfg.version = AIRYRT_VERSION;
     }
 
     airy_svc_t svc_handle = NULL;

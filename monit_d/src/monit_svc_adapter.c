@@ -14,6 +14,7 @@
 
 #include "monitor_service.h"
 #include "svc_common.h"
+#include "airyrt_version.h"
 #include "svc_logger.h"
 #include "platform.h" /* AIRY_HOME 权威路径：airy_log_dir()/airy_data_dir() */
 
@@ -196,7 +197,7 @@ airy_err_t monit_service_adapter_create(airy_svc_t *out_service, const airy_svc_
         __builtin_memcpy(&ctx->common_cfg, config, sizeof(airy_svc_config_t));
     } else {
         ctx->common_cfg.name = "monit_d";
-        ctx->common_cfg.version = "0.1.1";
+        ctx->common_cfg.version = AIRYRT_VERSION;
         ctx->common_cfg.enable_metrics = true;
         ctx->common_cfg.enable_tracing = true;
     }
@@ -239,7 +240,7 @@ airy_err_t monit_service_adapter_wrap(airy_svc_t *out_service, void *monit_svc,
         __builtin_memcpy(&ctx->common_cfg, config, sizeof(airy_svc_config_t));
     } else {
         ctx->common_cfg.name = "monit_d";
-        ctx->common_cfg.version = "0.1.1";
+        ctx->common_cfg.version = AIRYRT_VERSION;
     }
 
     airy_svc_t svc_handle = NULL;

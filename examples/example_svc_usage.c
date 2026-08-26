@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 #include "airy_memory.h"
+#include "airyrt_version.h"
 /**
  * @file example_svc_usage.c
  * @brief 服务管理框架使用示例
@@ -108,7 +109,7 @@ int main(void)
     airy_svc_t service = NULL;
 
     airy_svc_config_t config = {.name = "example-service",
-                                .version = "0.1.1",
+                                .version = AIRYRT_VERSION,
                                 .capabilities = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_PAUSEABLE,
                                 .max_concurrent = 10,
                                 .timeout_ms = 5000,
