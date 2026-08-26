@@ -114,16 +114,16 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 | 6 | **Monitoring & Alerting** | `monit_d/` | Metric collection, health checks, alert management, agent-infinite-loop detection | `monit_d` |
 | 7 | **Channel Service** | `channel_d/` | Communication-channel management and message routing | `channel_d` |
 | 8 | **Information Service** | `info_d/` | System information query and status reporting | `info_d` |
-| 9 | **Notification Service** | `notify_d/` | Multi-channel notification push (email / Slack / Discord) | `notify_d` |
-| 10 | **Observability Service** | `observe_d/` | OpenTelemetry observability data collection | `observe_d` |
+| 9 | **Notification Service** | `notify_d/` | WebSocket / Unix Socket / SSE 三协议事件广播与频道订阅（环形事件队列） | `notify_d` |
+| 10 | **Observability Service** | `observe_d/` | Prometheus 格式指标采集与 HTTP `/metrics` 暴露（内置 5 个默认指标） | `observe_d` |
 | 11 | **Hook Daemon** | `hook_d/` | Thin daemon shell; the hook system core lives in `atoms/coreloopthree/src/hook/` and is obtained by linking `airy_coreloopthree` | `hook_d` |
-| 12 | **Plugin Daemon** | `plugin_d/` | Plugin lifecycle management and isolation | `plugin_d` |
-| 13 | **Memory Daemon** | `mem_d/` | Runtime memory management (`mem.*` namespace): write / search / get / delete of long-term memory records, JSONL persistence | `mem_d` |
-| 14 | **Agent Execution** | `agent_d/` | Agent orchestration (`agent.*` namespace): spawn / invoke / health-check of agent subprocesses | `agent_d` |
-| 15 | **A2A Protocol** | `a2a_d/` | Agent-to-Agent communication (`a2a.*` namespace): A2A protocol message exchange between agents | `a2a_d` |
-| 16 | **Dual-Think Cognition** | `think_d/` | Dual-think / GRAD critical-loop engine (`think.*` namespace): think.process / think.orchestrate / think.get_stats | `think_d` |
-| 17 | **Cupolas Security Dome** | `cupolas_d/` | Standalone security dome (`cupolas.*` namespace): permission engine, sanitizer, audit logger, isolation workers | `cupolas_d` |
-| 18 | **Mathematics Coprocessor** | `maths_d/` | Math-expression evaluation / statistics / expression recognition (`maths.*` namespace): pure-C recursive-descent evaluator, no external deps, sandboxed numeric evaluation only | `maths_d` |
+| 12 | **Plugin Daemon** | `plugin_d/` | Plugin discovery / manifest 解析 / 权限校验 / 动态库加载与生命周期管理 | `plugin_d` |
+| 13 | **Memory Daemon** | `mem_d/` | Runtime memory management (`mem.*` namespace): write / search / get / delete / recent / evolve，TF-IDF+embedding 混合检索，KB 知识库，JSONL 持久化 | `mem_d` |
+| 14 | **Agent Execution** | `agent_d/` | Agent orchestration (`agent.*` namespace): spawn / terminate / invoke / cancel / list / count + 健康检查，空闲回收与性能监控 | `agent_d` |
+| 15 | **A2A Protocol** | `a2a_d/` | Agent-to-Agent communication (`a2a.*` namespace): A2A 协议 agent 注册/发现/任务生命周期/消息交换 | `a2a_d` |
+| 16 | **Dual-Think Cognition** | `think_d/` | Dual-think / GRAD critical-loop engine (`think.*` namespace): think.process（GCCP 两段式交互）/ think.orchestrate（7 阶段管线）/ think.get_stats | `think_d` |
+| 17 | **Cupolas Security Dome** | `cupolas_d/` | Standalone security dome (`cupolas.*` namespace): permission engine, sanitizer, audit logger, vault, net 策略, entitlements | `cupolas_d` |
+| 18 | **Mathematics Coprocessor** | `maths_d/` | Math-expression evaluation / statistics / recognition (`maths.*` namespace): 纯 C 快速路径 + Python 符号后端（MCP-Mathematics + sympy-mcp，12 个转发方法） | `maths_d` |
 
 > **Binary naming convention:** every daemon executable keeps the `*_d` suffix (`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d`). Per the 2026-07-05 naming decision, the module name was unified from `daemon` → `daemons` (directory, CMake target `airy_daemons`, repo `daemons.git`), but the 18 process binary names were deliberately preserved.
 
@@ -171,8 +171,8 @@ svc_common  ←  gateway_d  ←  external clients
           ←  monit_d      ←  all daemons (metric reporting)
           ←  channel_d    ←  gateway_d
           ←  info_d       ←  gateway_d
-          ←  notify_d     ←  monit_d (alert notifications)
-          ←  observe_d    ←  monit_d (observability)
+          ←  notify_d     ←  gateway_d (事件广播)
+          ←  observe_d    ←  gateway_d (Prometheus 指标)
           ←  hook_d       ←  sched_d, tool_d (hook injection)
           ←  plugin_d     ←  market_d, tool_d (plugin lifecycle)
           ←  mem_d        ←  gateway_d, CLI/TUI (memory read/write)

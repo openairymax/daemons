@@ -1,232 +1,113 @@
-# Plugin Daemon — 插件管理守护进程
+# plugin_d — 插件管理守护进程（plugin.* 命名空间）
 
-> **模块路径**: `agentrt/daemons/plugin_d/` | **版本**: v0.1.1
+> **模块路径**: `agentrt/daemons/plugin_d/`
+> **命名空间**: `plugin.*`（gateway 转发时剥离前缀，方法名不带 `plugin.`）
+> **默认监听**: Unix socket `${AIRY_RUNTIME_DIR}/plugin.sock`（TCP 8092 可选，Windows 命名管道 `\\.\pipe\airy_plugin`）
+> **插件目录**: `${AIRY_HOME}/ecosystem/plugins`（绝对路径）
 
-## 概述
+## 定位
 
-`daemons/plugin_d/` 是 AgentRT 十二大运行时守护进程之一，负责动态插件的发现、加载、权限校验、生命周期管理和沙箱隔离。它支持四种插件类型（工具提供者 / 协议适配器 / 记忆提供商 / Hook 扩展），通过 `manifest.yaml` 声明式管理插件元数据，并与 Cupolas 安全穹顶深度集成，确保每个插件在加载前都经过严格的权限校验。
+`plugin_d` 是 AgentRT 的插件管理守护进程，负责动态插件的发现（目录扫描 +
+`manifest.yaml` 解析）、权限校验（manifest 权限 → Cupolas 守卫映射）、动态库加载
+（dlopen）与生命周期管理（load/unload/start/stop/execute），并与 Cupolas 安全穹顶
+集成做加载前强制权限裁决。
 
-### 架构定位
-
-```
-plugin_d → plugin_discovery → plugin_permission → plugin_service → cupolas (安全穹顶)
-    ↑            ↑                    ↑                ↑
- 守护进程    manifest.yaml        Cupolas 守卫      动态库加载
- 生命周期    目录扫描              权限映射          dlopen/dlsym
-```
-
-### 核心职责
-
-- **插件发现（Discovery）**：扫描 `ecosystem/plugins/` 目录，解析 `manifest.yaml` 发现可用插件
-- **权限校验（Permission）**：将 manifest 中声明的权限映射到 Cupolas 安全穹顶守卫类型，逐项校验
-- **动态加载（Load）**：通过 `dlopen` 加载插件动态库，调用 `plugin_init` 入口点
-- **生命周期管理**：插件状态机（UNLOADED → LOADED → INITIALIZED → RUNNING → ERROR / DISABLED）
-- **自动启动**：权限校验通过后自动加载并启动插件
-- **服务发现注册**：通过 ServiceDiscovery 和 IPC Bus 在运行时注册自身服务
-
-## 目录结构
+## 架构
 
 ```
-plugin_d/
-├── CMakeLists.txt              # 构建配置（4 个源文件）
-├── README.md                   # 本文件
-├── include/                    # 公共头文件
-│   ├── plugin_service.h        # 插件服务 API（加载/卸载/启动/停止/元数据/统计）
-│   ├── plugin_discovery.h      # 插件发现（目录扫描 + manifest.yaml 解析）
-│   └── plugin_permission.h     # 插件权限校验（manifest 权限 ↔ Cupolas 守卫映射）
-├── src/                        # 实现文件
-│   ├── main.c                  # 守护进程入口（P2.2 完整实现）
-│   ├── service.c               # 插件服务核心实现（加载/卸载/状态机）
-│   ├── plugin_discovery.c      # 插件发现实现（目录扫描/manifest 解析/自动加载）
-│   └── plugin_permission.c     # 权限校验实现（8 种守卫类型映射）
-└── tests/
-    └── CMakeLists.txt          # 单元测试构建配置
+main.c（事件驱动 daemon_event_driver，线程池 4~8、队列 256）
+  ├── plugin_discovery    # 扫描 ${AIRY_HOME}/ecosystem/plugins，解析 manifest.yaml
+  ├── plugin_permission   # manifest 权限 → safety_guard 守卫类型，逐项裁决
+  └── plugin_service      # dlopen/dlsym 加载、状态机、执行、统计
 ```
 
-## 核心组件说明
+- 启动流程：Cupolas 初始化 → 权限模块初始化（strict_mode=true、audit_log=true、
+  agent_id="plugin_d"）→ 发现模块初始化（`plugins_dir` 为 `${AIRY_HOME}/ecosystem/
+  plugins` 绝对路径，`auto_load=false`、`fail_on_invalid=false`、`scan_depth=1`）→
+  扫描并对每个插件做「权限校验 → 加载 → 自动启动」→ 进入事件循环；
+- 插件状态机：UNLOADED → LOADED → INITIALIZED → RUNNING → ERROR/DISABLED；
+- 权限模块无 Cupolas 上下文（`safety_guard_create` 失败）时降级为本地校验，
+  仅记录告警。
 
-### 插件类型
+## JSON-RPC 接口
 
-| 类型 | 枚举值 | 说明 |
-|------|--------|------|
-| **工具提供者** | `PLUGIN_TYPE_TOOL_PROVIDER` | 提供外部工具能力（如 web_search / code_exec / file_ops） |
-| **协议适配器** | `PLUGIN_TYPE_PROTOCOL_ADAPTER` | 协议转换适配（如自定义 RPC 协议 → JSON-RPC 2.0） |
-| **记忆提供商** | `PLUGIN_TYPE_MEMORY_PROVIDER` | 记忆存储后端（如向量数据库 / 知识图谱） |
-| **Hook 扩展** | `PLUGIN_TYPE_HOOK_EXTENSION` | Hook 事件扩展（如自定义审计/日志处理器） |
+以下方法表以 `main.c` 中 `method_dispatcher_register` 的真实注册为准（共 13 个方法）：
 
-### 插件状态机
+| 方法 | 参数（params） | 说明 |
+|------|----------------|------|
+| `load` | `library_path`(必填)、`config_path`(可选) | dlopen 加载插件，返回 `{name}` |
+| `unload` | `name`(必填) | 卸载插件，返回 `{unloaded:true}` |
+| `start` | `name`(必填) | 启动插件，返回 `{started:true}` |
+| `stop` | `name`(必填) | 停止插件，返回 `{stopped:true}` |
+| `execute` | `name`(必填)、`input`(必填) | 调用导出入口执行（JSON 入 → 出），返回 `{output}` |
+| `get_metadata` | `name`(必填) | 元数据 `{name,version,author,description,type,api_version,min_airy_version}` |
+| `get_state` | `name`(必填) | 插件状态 `{state}` |
+| `get_stats` | `name`(可选) | 无 `name` 返回 daemon 聚合统计 `{daemon:"plugin_d",plugins,load_total,error_total,memory_bytes}`；有 `name` 返回单插件 `{load_count,error_count,uptime_ns,memory_bytes}` |
+| `list` | `type_filter`(可选) | 已加载插件列表 `{plugins:[...],total}` |
+| `install` | 同 `load` | `load` 的别名（L2 协议标准方法） |
+| `uninstall` | 同 `unload` | `unload` 的别名（L2 协议标准方法） |
+| `health_check` | — | `{service:"plugin_d",healthy,plugin_count,timestamp}` |
+| `shutdown` | — | 优雅关闭 |
 
-```
-UNLOADED → LOADED → INITIALIZED → RUNNING
-    ↓         ↓          ↓            ↓
-    └─────────┴──────────┴────→ ERROR / DISABLED
-```
+## 权限体系（16 项）
 
-| 状态 | 枚举值 | 说明 |
-|------|--------|------|
-| UNLOADED | `PLUGIN_STATE_UNLOADED` | 未加载 |
-| LOADED | `PLUGIN_STATE_LOADED` | 已加载（dlopen 成功） |
-| INITIALIZED | `PLUGIN_STATE_INITIALIZED` | 已初始化（plugin_init 回调成功） |
-| RUNNING | `PLUGIN_STATE_RUNNING` | 运行中（plugin_start 回调成功） |
-| ERROR | `PLUGIN_STATE_ERROR` | 错误状态 |
-| DISABLED | `PLUGIN_STATE_DISABLED` | 已禁用 |
+`plugin_permission.c` 的 `SUPPORTED_PERMISSIONS`（manifest 声明 → Cupolas 守卫）：
 
-### 插件入口点回调
-
-每个插件动态库必须导出四个标准回调函数：
-
-| 回调 | 签名 | 说明 |
-|------|------|------|
-| `plugin_init` | `int (*)(const char *config_path, void **user_data)` | 初始化：读取配置，分配资源 |
-| `plugin_destroy` | `void (*)(void *user_data)` | 销毁：释放资源 |
-| `plugin_start` | `int (*)(void *user_data)` | 启动：开始服务 |
-| `plugin_stop` | `int (*)(void *user_data)` | 停止：暂停服务 |
-
-### manifest.yaml 格式
-
-每个插件在 `ecosystem/plugins/<name>/manifest.yaml` 中声明元数据：
-
-```yaml
-name: my_plugin
-version: 1.0.0
-author: SPHARX
-description: My plugin description
-type: tool_provider          # tool_provider | protocol_adapter | memory_provider | hook_extension
-api_version: 1
-min_airy_version: 0.1.1
-library: libmy_plugin.so
-permissions:                 # 权限声明，与 Cupolas 守卫映射
-  - file_read
-  - file_write
-  - network_outbound
-  - tool_execute
-  - memory_access
-  - hook_register
-  - system_call
-  - process_spawn
-config:
-  timeout_ms: 5000
-```
-
-### 权限映射（manifest → Cupolas）
-
-| manifest 权限 | Cupolas 守卫类型 | 说明 |
-|---------------|-----------------|------|
+| 权限 | 守卫类型 | 说明 |
+|------|----------|------|
 | `file_read` | `SAFETY_GUARD_FILE_READ` | 文件读取 |
 | `file_write` | `SAFETY_GUARD_FILE_WRITE` | 文件写入 |
-| `network_outbound` | `SAFETY_GUARD_NETWORK` | 网络出站 |
-| `tool_execute` | `SAFETY_GUARD_TOOL_EXEC` | 工具执行 |
-| `memory_access` | `SAFETY_GUARD_MEMORY` | 内存访问 |
-| `hook_register` | `SAFETY_GUARD_HOOK` | Hook 注册 |
+| `network_outbound` | `SAFETY_GUARD_NETWORK` | 出站网络 |
+| `network_inbound` | `SAFETY_GUARD_NETWORK` | 入站网络 |
+| `tool_execute` | `SAFETY_GUARD_TOOL_EXEC` | 经 tool_d 执行工具 |
+| `memory_access` | `SAFETY_GUARD_MEMORY` | 访问记忆 |
+| `hook_register` | `SAFETY_GUARD_HOOK` | 注册 Hook |
 | `system_call` | `SAFETY_GUARD_SYSTEM` | 系统调用 |
-| `process_spawn` | `SAFETY_GUARD_PROCESS` | 进程派生 |
+| `process_spawn` | `SAFETY_GUARD_PROCESS` | 派生子进程 |
+| `ipc_connect` | `SAFETY_GUARD_IPC` | 连接 IPC 总线 |
+| `service_discovery` | `SAFETY_GUARD_SERVICE_DISCOVERY` | 服务发现 |
+| `config_read` | `SAFETY_GUARD_CONFIG` | 读配置 |
+| `config_write` | `SAFETY_GUARD_CONFIG` | 写配置 |
+| `log_write` | `SAFETY_GUARD_LOGGING` | 写日志 |
+| `metrics_export` | `SAFETY_GUARD_METRICS` | 导出指标 |
+| `audit_trigger` | `SAFETY_GUARD_AUDIT` | 触发审计事件 |
 
-### 启动流程
+- 严格模式（默认开启）：未声明权限、声明未知权限或任一权限被拒 → 拒绝加载；
+- 审计日志（默认开启）：记录 plugin / result / denied 列表。
 
-```
-1. 信号处理注册 (SIGINT/SIGTERM → graceful shutdown)
-2. Cupolas 安全穹顶初始化 (daemon_cupolas_init)
-3. Unix Socket 服务器创建 (AIRY_RUNTIME_DIR/plugin.sock)
-4. ServiceDiscovery 自动注册 (tag: plugin,core)
-5. IPC Bus 消息路由注册 (JSON-RPC 2.0)
-6. 权限校验模块初始化 (strict_mode + audit_log)
-7. 插件发现模块初始化 (扫描 ecosystem/plugins/)
-8. 扫描插件目录，解析 manifest.yaml
-9. 对每个发现的插件：权限校验 → 加载 → 自动启动
-10. 进入事件循环，等待 shutdown 信号
-```
+## 配置
 
-## 上游依赖
+- `plugin_permission_config_t`：`enable_strict_mode=true`、`enable_audit_log=true`、
+  `agent_id="plugin_d"`（`safety_policy_path` 未设置）；
+- `plugin_discovery_config_t`：`plugins_dir=${AIRY_HOME}/ecosystem/plugins`（绝对
+  路径，历史相对路径导致 CWD 漂移扫描为空的问题已修复）、`auto_load=false`、
+  `fail_on_invalid=false`、`scan_depth=1`；
+- daemon 级：`daemon_parse_args` 支持 `--config`；TCP 8092 需显式启用。
 
-| 依赖 | 来源 | 用途 |
-|------|------|------|
-| **svc_common** | `agentrt/daemons/common/` | 守护进程框架（ServiceDiscovery / IPC Bus / Cupolas bootstrap / 日志） |
-| **cupolas** | `agentrt/cupolas/` | 安全穹顶（permission_engine + safety_guard），提供守卫类型枚举与权限裁决 |
-| **commons** | `agentrt/commons/` | 基础库（logging / config_unified / memory / sync / string / error） |
-| **airy_common** | `agentrt/commons/` | 通用运行时库 |
-| libdl | 系统 | 动态库加载（dlopen / dlsym / dlclose） |
-| libyaml | 外部 | manifest.yaml 解析 |
-| cJSON | 外部 | JSON 配置解析 |
+## 依赖与构建
 
-## 下游消费者
-
-| 消费者 | 使用方式 |
-|--------|----------|
-| **market_d** | 通过 IPC Bus 调用 plugin_service API 管理插件安装/卸载 |
-| **tool_d** | 通过 plugin_d 加载工具提供者插件，扩展工具执行能力 |
-| **gateway_d** | 通过 plugin_d 加载协议适配器插件，扩展协议转换能力 |
-| **Agent 开发者** | 编写符合 manifest.yaml 规范的插件动态库，放入 `ecosystem/plugins/` |
-
-## 构建
-
-### 前置条件
-
-- CMake ≥ 3.16
-- C11 编译器（GCC / Clang / MSVC）
-- `svc_common` 已构建（daemons/common 子项目）
-- `cupolas` 已构建
-- libdl（Linux）/ 系统动态库加载支持
-
-### 编译选项
+- 依赖：`svc_common`（daemons/common）、`cupolas`（safety_guard 守卫裁决）、
+  `commons` 基础库、libdl（dlopen/dlsym/dlclose）、libyaml（manifest 解析）、
+  cJSON；Windows 额外 `ws2_32`；
+- 构建产物：可执行文件 `plugin_d`。
 
 ```bash
-# 标准构建
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target plugin_d
-
-# 启用测试
-cmake -S . -B build -DBUILD_TESTS=ON
-cmake --build build --target plugin_d
-ctest --test-dir build
-
-# 启用覆盖率
-cmake -S . -B build -DBUILD_COVERAGE=ON
+cmake -B build -DBUILD_TESTS=ON
 cmake --build build --target plugin_d
 ```
 
-## 运行时
+## 测试
 
-### 启动
+CTest 测试（`plugin_d_*`）：
+
+| 测试 | 覆盖点 |
+|------|--------|
+| `plugin_d_test_plugin_permission` | 权限映射 / 严格模式 / 未知权限裁决 |
 
 ```bash
-# 直接启动
-./build/bin/plugin_d
-
-# 通过 daemon_manager 启动
-./daemon_manager --start plugin_d
+ctest --test-dir build -R "plugin_d_" -V
 ```
-
-### Unix Socket
-
-- 路径：`${AIRY_RUNTIME_DIR}/plugin.sock`（默认 `/var/run/agentrt/plugin.sock`）
-- 协议：JSON-RPC 2.0 over Unix Socket
-
-### 服务 API
-
-| API | 说明 |
-|-----|------|
-| `plugin_service_load` | 从动态库加载插件 |
-| `plugin_service_unload` | 卸载插件 |
-| `plugin_service_start` | 启动插件 |
-| `plugin_service_stop` | 停止插件 |
-| `plugin_service_get_metadata` | 获取插件元数据 |
-| `plugin_service_get_state` | 获取插件状态 |
-| `plugin_service_get_stats` | 获取插件统计（加载次数/错误次数/运行时间/内存） |
-| `plugin_service_list` | 列出所有已加载插件（可按类型过滤） |
-
-## 设计原则
-
-- **声明式管理**：通过 `manifest.yaml` 声明插件元数据和权限，避免硬编码
-- **安全优先**：加载前强制权限校验，严格模式（`strict_mode`）拒绝未声明权限
-- **可插拔架构**：插件独立动态库，支持热加载/热卸载
-- **内生安全**：通过 Cupolas 安全穹顶进行权限裁决，审计日志记录所有操作
-
-## 许可证
-
-Copyright (c) 2025-2026 SPHARX Ltd. All Rights Reserved.
-
-双许可证：**AGPL-3.0-or-later OR Apache-2.0**（SPDX: `AGPL-3.0-or-later OR Apache-2.0`）。详见 [LICENSE](../../LICENSE)。
 
 ---
 
-> **文档结束** | 0.1.1（P2.2 完整实现：插件发现 + 权限校验 + 动态加载 + 生命周期管理）
+© 2025-2026 SPHARX Ltd. All Rights Reserved.
