@@ -12,6 +12,9 @@ set(COREKERN_INCLUDE_DIR ${ATOMIC_DIR}/corekern/include)
 
 set(MEM_TEST_SOURCES
     test_service.c
+    test_cache.c
+    test_ledger.c
+    test_compress.c
 )
 
 set(MEM_COMMON_INCLUDES
