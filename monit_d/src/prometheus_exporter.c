@@ -163,13 +163,15 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len, cha
         return AIRY_ERR_INVALID_PARAM;
 
     SVC_LOG_DEBUG("C-L10: Prometheus scrape request received (scrape #%llu)",
-                  (unsigned long long)(g_scrape_count + 1));
+                  (unsigned long long)(__atomic_load_n(&g_scrape_count, __ATOMIC_RELAXED) + 1));
 
     char *metrics_text = prometheus_exporter_get_metrics();
     if (!metrics_text) {
-        g_scrape_errors++;
+        /* P2: counters are updated from HTTP handler threads and read from the
+         * monitor thread; use atomic ops instead of plain increments. */
+        __atomic_fetch_add(&g_scrape_errors, 1, __ATOMIC_RELAXED);
         SVC_LOG_ERROR("C-L10: Failed to collect metrics for scrape #%llu",
-                      (unsigned long long)(g_scrape_count + 1));
+                      (unsigned long long)(__atomic_load_n(&g_scrape_count, __ATOMIC_RELAXED) + 1));
         /* 500 Internal Server Error */
         const char *err_body = "Failed to collect metrics\n";
         size_t body_len = strlen(err_body);
@@ -192,11 +194,12 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len, cha
         return 0;
     }
 
-    g_scrape_count++;
+    __atomic_fetch_add(&g_scrape_count, 1, __ATOMIC_RELAXED);
     size_t metrics_len = strlen(metrics_text);
 
     SVC_LOG_INFO("C-L10: Prometheus scrape #%llu — %zu bytes of metrics",
-                 (unsigned long long)g_scrape_count, metrics_len);
+                 (unsigned long long)__atomic_load_n(&g_scrape_count, __ATOMIC_RELAXED),
+                 metrics_len);
 
     char header_buf[256];
     int header_len = snprintf(header_buf, sizeof(header_buf),
@@ -255,8 +258,10 @@ char *prometheus_exporter_get_metrics(void)
 
     um_update_default_metrics();
 
-    prometheus_gauge_set("airy_monit_scrape_count", (double)g_scrape_count);
-    prometheus_gauge_set("airy_monit_scrape_errors", (double)g_scrape_errors);
+    prometheus_gauge_set("airy_monit_scrape_count",
+                         (double)__atomic_load_n(&g_scrape_count, __ATOMIC_RELAXED));
+    prometheus_gauge_set("airy_monit_scrape_errors",
+                         (double)__atomic_load_n(&g_scrape_errors, __ATOMIC_RELAXED));
 
     char *result = um_export_prometheus_module(g_module_name);
     if (!result) {
@@ -269,7 +274,7 @@ char *prometheus_exporter_get_metrics(void)
 void prometheus_exporter_get_scrape_stats(uint64_t *out_count, uint64_t *out_errors)
 {
     if (out_count)
-        *out_count = g_scrape_count;
+        *out_count = __atomic_load_n(&g_scrape_count, __ATOMIC_RELAXED);
     if (out_errors)
-        *out_errors = g_scrape_errors;
+        *out_errors = __atomic_load_n(&g_scrape_errors, __ATOMIC_RELAXED);
 }

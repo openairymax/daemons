@@ -9,6 +9,7 @@
 
 #include "airy_memory.h"
 #include "error.h"
+#include "io.h"
 #include "market_service.h"
 #include "platform.h"
 #include "svc_logger.h"
@@ -148,26 +149,30 @@ int market_service_install_agent(market_service_t *service, const install_reques
 #pragma GCC diagnostic ignored "-Wformat-truncation"
     snprintf(meta_path, sizeof(meta_path), "%s/agent.json", install_dir);
 #pragma GCC diagnostic pop
-    FILE *meta_fp = fopen(meta_path, "w");
-    if (meta_fp) {
-        char _mi_buf[1024];
-        fputs("{\n", meta_fp);
-        snprintf(_mi_buf, sizeof(_mi_buf), "  \"agent_id\": \"%s\",\n",
-                 snap_agent_id ? snap_agent_id : "");
-        fputs(_mi_buf, meta_fp);
-        snprintf(_mi_buf, sizeof(_mi_buf), "  \"name\": \"%s\",\n", snap_name ? snap_name : "");
-        fputs(_mi_buf, meta_fp);
-        snprintf(_mi_buf, sizeof(_mi_buf), "  \"version\": \"%s\",\n",
-                 request->version ? request->version : (snap_version ? snap_version : "0.0.1"));
-        fputs(_mi_buf, meta_fp);
-        snprintf(_mi_buf, sizeof(_mi_buf), "  \"author\": \"%s\",\n",
-                 snap_author ? snap_author : "");
-        fputs(_mi_buf, meta_fp);
-        fputs("  \"status\": \"installed\",\n", meta_fp);
-        snprintf(_mi_buf, sizeof(_mi_buf), "  \"installed_at\": %lld\n", (long long)time(NULL));
-        fputs(_mi_buf, meta_fp);
-        fputs("}\n", meta_fp);
-        fclose(meta_fp);
+    /* P1-6：安装元数据原子写（同目录 tmp + fsync + rename）。半写的
+     * agent.json 会使已安装状态不可识别，且失败不得静默（原实现
+     * fopen 失败仅跳过，后续仍返回 success）。 */
+    char meta_json[2048];
+    int mlen = snprintf(meta_json, sizeof(meta_json),
+                        "{\n  \"agent_id\": \"%s\",\n  \"name\": \"%s\",\n"
+                        "  \"version\": \"%s\",\n  \"author\": \"%s\",\n"
+                        "  \"status\": \"installed\",\n  \"installed_at\": %lld\n}\n",
+                        snap_agent_id ? snap_agent_id : "", snap_name ? snap_name : "",
+                        request->version ? request->version : (snap_version ? snap_version : "0.0.1"),
+                        snap_author ? snap_author : "", (long long)time(NULL));
+    if (mlen < 0 || mlen >= (int)sizeof(meta_json) ||
+        airy_io_write_file(meta_path, meta_json, (size_t)mlen) != 0) {
+        res->success = false;
+        res->message = AIRY_STRDUP("Failed to write install metadata");
+        res->error_code = -5;
+        *result = res;
+        AIRY_FREE(snap_agent_id);
+        AIRY_FREE(snap_name);
+        AIRY_FREE(snap_version);
+        AIRY_FREE(snap_author);
+        AIRY_FREE(snap_repo);
+        AIRY_FREE(snap_storage);
+        return 0;
     }
 
     if (snap_repo && strlen(snap_repo) > 0 && is_valid_url(snap_repo)) {

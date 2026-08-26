@@ -554,12 +554,13 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
         gw_mcp_tool_entry_t *tool = find_tool(server, tool_name);
         if (!tool) {
             AIRY_LOG_WARN("tool not found: tool_name=%s, tool_count=%zu", tool_name, server->tool_count);
-            const char *err = "{\"jsonrpc\":\"2.0\",\"error\":"
+            const char *err = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":"
                               "{\"code\":-32601,\"message\":\"Tool not found: %s\"}}";
-            size_t elen = snprintf(NULL, 0, err, tool_name);
+            const char *id_json = rid ? rid : "null";
+            size_t elen = snprintf(NULL, 0, err, id_json, tool_name);
             char *ebuf = (char *)AIRY_MALLOC(elen + 1);
             if (ebuf)
-                snprintf(ebuf, elen + 1, err, tool_name);
+                snprintf(ebuf, elen + 1, err, id_json, tool_name);
             *response_json = ebuf;
             AIRY_FREE(tool_name);
             AIRY_FREE(tool_args);
@@ -574,9 +575,14 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
             tool_name = NULL;
             AIRY_FREE(tool_args);
             tool_args = NULL;
-            const char *err = "{\"jsonrpc\":\"2.0\",\"error\":"
+            const char *err = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":"
                               "{\"code\":-32603,\"message\":\"Tool execution failed\"}}";
-            *response_json = AIRY_STRDUP(err);
+            const char *id_json = rid ? rid : "null";
+            size_t elen = snprintf(NULL, 0, err, id_json);
+            char *ebuf = (char *)AIRY_MALLOC(elen + 1);
+            if (ebuf)
+                snprintf(ebuf, elen + 1, err, id_json);
+            *response_json = ebuf;
             AIRY_FREE(tool_result);
             server->error_count++;
             return AIRY_ERR_EXEC_FAIL;
@@ -640,12 +646,13 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
             server->error_count++;
             return AIRY_ERR_IO;
         }
-        const char *resp_fmt = "{\"jsonrpc\":\"2.0\",\"result\":{"
+        const char *resp_fmt = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
                                "\"contents\":[{\"uri\":\"%s\",\"mimeType\":\"%s\",\"text\":%s}]}}";
-        size_t rlen = snprintf(NULL, 0, resp_fmt, res->uri, mime ? mime : "text/plain", content);
+        const char *id_json = rid ? rid : "null";
+        size_t rlen = snprintf(NULL, 0, resp_fmt, id_json, res->uri, mime ? mime : "text/plain", content);
         char *buf = (char *)AIRY_MALLOC(rlen + 1);
         if (buf)
-            snprintf(buf, rlen + 1, resp_fmt, res->uri, mime ? mime : "text/plain", content);
+            snprintf(buf, rlen + 1, resp_fmt, id_json, res->uri, mime ? mime : "text/plain", content);
         *response_json = buf;
         AIRY_FREE(content);
         AIRY_FREE(mime);
@@ -653,7 +660,12 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
     }
 
     if (strcmp(method, "ping") == 0) {
-        *response_json = AIRY_STRDUP("{\"jsonrpc\":\"2.0\",\"result\":{}}");
+        const char *id_json = rid ? rid : "null";
+        size_t rlen = snprintf(NULL, 0, "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{}}", id_json);
+        char *buf = (char *)AIRY_MALLOC(rlen + 1);
+        if (buf)
+            snprintf(buf, rlen + 1, "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{}}", id_json);
+        *response_json = buf;
         return 0;
     }
 

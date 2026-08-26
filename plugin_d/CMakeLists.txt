@@ -36,8 +36,12 @@ if(WIN32)
     )
     target_link_libraries(plugin_d PRIVATE airy_common ws2_32 bcrypt)
 elseif(UNIX)
-    target_link_libraries(plugin_d PRIVATE
-        airy_common Threads::Threads airy_platform_libs dl)
+    target_link_libraries(plugin_d PRIVATE airy_common Threads::Threads airy_platform_libs)
+    # dl 为 GNU/Linux libdl（glibc≥2.34 并入 libc）；macOS ld64 无 -ldl
+    # （dlopen 在 libSystem），此处按平台区分。
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(plugin_d PRIVATE dl)
+    endif()
 endif()
 
 target_include_directories(plugin_d PRIVATE

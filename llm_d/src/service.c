@@ -196,7 +196,8 @@ llm_service_t *llm_service_create(const char *config_path)
     }
     if (global_model[0]) {
         AIRY_STRNCPY_TERM(svc->default_model, global_model, sizeof(svc->default_model));
-        SVC_LOG_INFO("C-L02: SVC: default_model=%s (from global config)", svc->default_model);
+        SVC_LOG_INFO("C-L02: SVC: default_model=%s (from default_model config)",
+                     svc->default_model);
     } else if (config_path) {
 
         svc_model_llm_config_t llm_cfg;
@@ -209,6 +210,22 @@ llm_service_t *llm_service_create(const char *config_path)
                 AIRY_STRNCPY_TERM(svc->default_provider, adapter, sizeof(svc->default_provider));
             }
             SVC_LOG_INFO("C-L02: SVC: default_model=%s (from llm section)", svc->default_model);
+        } else {
+            /* v2 表格格式（2026-08-26）：llm 段缺省时回退 models 表首个条目 */
+            __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
+            if (svc_model_defaults_models0_from_yaml(config_path, &llm_cfg) == 0 &&
+                llm_cfg.model[0]) {
+                AIRY_STRNCPY_TERM(svc->default_model, llm_cfg.model, sizeof(svc->default_model));
+                if (!global_provider[0] && llm_cfg.api_format[0]) {
+                    const char *adapter = (strcasecmp(llm_cfg.api_format, "anthropic") == 0)
+                                              ? "anthropic"
+                                              : "openai";
+                    AIRY_STRNCPY_TERM(svc->default_provider, adapter,
+                                      sizeof(svc->default_provider));
+                }
+                SVC_LOG_INFO("C-L02: SVC: default_model=%s (from models table)",
+                             svc->default_model);
+            }
         }
     }
     if (global_provider[0])
@@ -273,6 +290,7 @@ llm_service_t *llm_service_create(const char *config_path)
         /* 2.1.1.5 修复：YAML 配置（model.yaml，当前唯一入口）此前完全不
          * 加载价格，计费全部落到默认价 0.001/0.002，金额不真实。现在从
          * models[].input/output_cost_per_1k 生成 pricing rules。 */
+#ifdef HAVE_YAML
         pricing_rule_t *yaml_rules = NULL;
         int yaml_rule_count = 0;
         if (load_pricing_rules_from_yaml(config_path, &yaml_rules, &yaml_rule_count) == 0 &&
@@ -283,6 +301,11 @@ llm_service_t *llm_service_create(const char *config_path)
         } else if (yaml_rules) {
             AIRY_FREE(yaml_rules);
         }
+#else
+        /* libyaml 缺失（HAVE_YAML 未定义）：实现函数不存在，调用必须
+         * 一并关闭，否则链接失败（未定义引用 load_pricing_rules_from_yaml） */
+        SVC_LOG_WARN("YAML pricing config '%s' requested but libyaml unavailable", config_path);
+#endif
     }
 
     svc->registry = provider_registry_create(&base_cfg);

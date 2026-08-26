@@ -74,10 +74,12 @@ int auth_apikey_verify(const char *api_key, auth_result_t *result)
 
             result->status = AUTH_SUCCESS;
             result->error_message = NULL;
-            AIRY_STRNCPY_TERM(g_apikey.subject_buf, api_key, sizeof(g_apikey.subject_buf));
-            (g_apikey.subject_buf)[sizeof(g_apikey.subject_buf) - 1] = '\0';
-            g_apikey.subject_buf[sizeof(g_apikey.subject_buf) - 1] = '\0';
-            result->subject = g_apikey.subject_buf;
+            /* t11-02: 拷贝到 result 内嵌存储而非全局 g_apikey.subject_buf，
+             * 避免锁释放后并发请求覆盖 subject */
+            AIRY_STRNCPY_TERM(result->subject_storage, api_key,
+                              sizeof(result->subject_storage));
+            result->subject_storage[sizeof(result->subject_storage) - 1] = '\0';
+            result->subject = result->subject_storage;
             result->role = "api_user";
 
             airy_mtx_unlock(&g_apikey.lock);

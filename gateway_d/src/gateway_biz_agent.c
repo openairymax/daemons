@@ -26,6 +26,8 @@
 #include "logging.h"
 #include "platform.h"
 
+#include "syscalls.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -149,10 +151,12 @@ static int gw_agent_run_orchestrate(const gateway_business_ctx_t *ctx, const cJS
     snprintf(spawn_params, spawn_n, "{\"agent_spec\":%s}", spec_str);
     AIRY_FREE(spec_str);
 
-    char *spawn_resp =
-        gw_svc_call(ctx->agent_sock_path, "spawn", spawn_params, GW_AGENT_SPAWN_TIMEOUT_MS);
+    /* 架构约束 2026-08-25 "必须走 syscall": agent.spawn 经 SYS_SVC_CALL 派发 */
+    char *spawn_resp = NULL;
+    airy_err_t spawn_rc = airy_sys_svc_call("agent", "spawn", spawn_params,
+                                            GW_AGENT_SPAWN_TIMEOUT_MS, &spawn_resp);
     AIRY_FREE(spawn_params);
-    if (!spawn_resp) {
+    if (spawn_rc != AIRY_SUCCESS || !spawn_resp) {
         *out_err = AIRY_STRDUP("agent_d unreachable (spawn)");
         return -1;
     }
@@ -198,10 +202,12 @@ static int gw_agent_run_orchestrate(const gateway_business_ctx_t *ctx, const cJS
         return -1;
     }
 
-    char *invoke_resp =
-        gw_svc_call(ctx->agent_sock_path, "invoke", invoke_params_str, GW_AGENT_INVOKE_TIMEOUT_MS);
+    /* 架构约束 2026-08-25 "必须走 syscall": agent.invoke 经 SYS_SVC_CALL 派发 */
+    char *invoke_resp = NULL;
+    airy_err_t invoke_rc = airy_sys_svc_call("agent", "invoke", invoke_params_str,
+                                             GW_AGENT_INVOKE_TIMEOUT_MS, &invoke_resp);
     AIRY_FREE(invoke_params_str);
-    if (!invoke_resp) {
+    if (invoke_rc != AIRY_SUCCESS || !invoke_resp) {
         *out_err = AIRY_STRDUP("agent_d unreachable (invoke)");
         return -1;
     }
@@ -367,9 +373,11 @@ static void gw_persist_conversation(const gateway_business_ctx_t *ctx, const cha
     if (!params_str)
         return;
 
-    char *resp = gw_svc_call(ctx->mem_sock_path, "write", params_str, GW_TOOL_TIMEOUT_MS);
+    /* 架构约束 2026-08-25 "必须走 syscall": mem.write 经 SYS_SVC_CALL 派发 */
+    char *resp = NULL;
+    airy_err_t mrc = airy_sys_svc_call("mem", "write", params_str, GW_TOOL_TIMEOUT_MS, &resp);
     AIRY_FREE(params_str);
-    if (!resp) {
+    if (mrc != AIRY_SUCCESS || !resp) {
         AIRY_LOG_WARN("gateway: mem.write failed (mem_d unreachable, session=%s)",
                  session_id ? session_id : "?");
         return;
@@ -505,7 +513,8 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
          * the LLM answers/executes according to the plan. If think_d is
          * unreachable/timed out, degrade to the original direct call (dialog
          * availability is unaffected). */
-        if (gw_think_process(ctx, prompt, gccp_answers, &think_result) == 0 && think_result) {
+        if (gw_think_process(ctx, session_id, prompt, gccp_answers, &think_result) == 0 &&
+            think_result) {
             /* GCCP 两段式交互第一段（P-A）：think_d 判定输入需要澄清并已挂起，
              * 返回问题集（gccp_need_interaction=1）。不进入工具循环（避免在
              * 降级目标上消耗 token/产生无意义回答），把问题集随 thinking 字段
@@ -723,6 +732,21 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
      * stats). NULL when think_d was unreachable; the field is omitted for
      * backward compatibility with old clients. */
     if (think_result) {
+        /* GCCP 交互轮协议化（2026-08-25 修复）：第一段挂起时顶层显式携带
+         * interaction_required=1 与 gccp_questions，客户端无需解析 thinking
+         * 内部结构即可识别问答轮（此前仅有 result.response="" + thinking 内
+         * 嵌套字段，纯 HTTP/JSON-RPC 调用方看到的是"空回复 + JSON"）。 */
+        if (gccp_interact_round) {
+            cJSON_AddBoolToObject(result, "interaction_required", 1);
+            cJSON *qstr = cJSON_GetObjectItem(think_result, "gccp_questions");
+            if (cJSON_IsString(qstr) && qstr->valuestring) {
+                cJSON *qjson = cJSON_Parse(qstr->valuestring);
+                if (qjson)
+                    cJSON_AddItemToObject(result, "gccp_questions", qjson);
+                else
+                    cJSON_AddStringToObject(result, "gccp_questions", qstr->valuestring);
+            }
+        }
         cJSON_AddItemToObject(result, "thinking", think_result);
         think_result = NULL;
     }

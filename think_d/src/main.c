@@ -110,9 +110,29 @@ static void handle_process(cJSON *params, int id, airy_sock_t client_fd)
     if (cJSON_IsString(answers) && answers->valuestring && answers->valuestring[0])
         gccp_answers = answers->valuestring;
 
+    /* GCCP 会话隔离（2026-08-25）：客户端会话标识，交互状态按此维度隔离，
+     * 杜绝多客户端并发串台。缺省/空串使用 "default" 兜底。 */
+    const char *session_id = NULL;
+    cJSON *sid = cJSON_GetObjectItem(params, "session_id");
+    if (cJSON_IsString(sid) && sid->valuestring && sid->valuestring[0])
+        session_id = sid->valuestring;
+
     think_process_result_t res = {0};
-    int ret = think_service_process(g_service, prompt->valuestring, gccp_answers, &res);
+    int ret = think_service_process(g_service, session_id, prompt->valuestring, gccp_answers,
+                                    &res);
     if (ret != AIRY_SUCCESS || !res.json) {
+        /* 错误码细节保留（2026-08-25 修复）：think_service_process 失败时
+         * 已在 res.json 内置含 err_code 的诊断 JSON（err_code/feedback/stats），
+         * 优先原样返回，客户端可据此区分真实失败与可降级路径；仅当 JSON
+         * 缺失时才回退通用 -32603。 */
+        if (res.json) {
+            cJSON *err_obj = cJSON_Parse(res.json);
+            if (err_obj) {
+                JSONRPC_SEND_SUCCESS(client_fd, err_obj, id);
+                think_result_free(&res);
+                return;
+            }
+        }
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Think process failed", id);
         think_result_free(&res);
         return;
