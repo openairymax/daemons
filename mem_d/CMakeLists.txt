@@ -28,6 +28,9 @@ set(MEM_SERVICE_SOURCES
     src/mem_svc_adapter.c
     src/vector.c
     src/emb_client.c
+    src/cache.c
+    src/ledger.c
+    src/compress.c
 )
 
 add_library(airy_mem_service STATIC ${MEM_SERVICE_SOURCES})
@@ -63,6 +66,7 @@ target_include_directories(airy_mem_service PUBLIC
     ${COMMONS_INCLUDE_DIR}/utils/compat/include
     ${COMMONS_INCLUDE_DIR}/utils/network/include
     ${COMMONS_INCLUDE_DIR}/utils/ipc/include
+    ${COMMONS_INCLUDE_DIR}/utils/token/include
 )
 
 target_include_directories(airy_mem_service PRIVATE
@@ -141,6 +145,7 @@ target_include_directories(mem_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/compat/include
     ${COMMONS_INCLUDE_DIR}/utils/network/include
     ${COMMONS_INCLUDE_DIR}/utils/ipc/include
+    ${COMMONS_INCLUDE_DIR}/utils/token/include
     ${CJSON_INCLUDE_DIRS}
     ${YAML_INCLUDE_DIRS}
 )

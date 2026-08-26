@@ -20,6 +20,9 @@
 #include "daemon_main.h"
 #include "platform.h"
 #include "mem_service.h"
+#include "cache.h"
+#include "ledger.h"
+#include "compress.h"
 #include "param_validator.h"
 #include "svc_logger.h"
 #include "thread_pool.h"
@@ -41,6 +44,9 @@ DAEMON_DECLARE_COMMON(mem_d, mem, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_PATH_
 DAEMON_DECLARE_SHUTDOWN_METHOD(mem_d)
 
 static mem_service_t *g_service = NULL;
+/* 语义缓存 + 上下文台账（0.1.5：13-semantic-cache-context-ledger.md 实现） */
+static mem_cache_t *g_cache = NULL;
+static mem_ledger_t *g_ledger = NULL;
 
 typedef struct {
     char *socket_path;
@@ -81,6 +87,23 @@ static void handle_kb_ingest(cJSON *params, int id, airy_sock_t fd);
 static void handle_kb_search(cJSON *params, int id, airy_sock_t fd);
 static void handle_kb_delete(cJSON *params, int id, airy_sock_t fd);
 static void handle_kb_list(cJSON *params, int id, airy_sock_t fd);
+
+/* 语义缓存（mem.cache_*，0.1.5） */
+static void handle_cache_put(cJSON *params, int id, airy_sock_t fd);
+static void handle_cache_get(cJSON *params, int id, airy_sock_t fd);
+static void handle_cache_del(cJSON *params, int id, airy_sock_t fd);
+static void handle_cache_stats(int id, airy_sock_t fd);
+
+/* 上下文台账（mem.ledger_*，0.1.5） */
+static void handle_ledger_append(cJSON *params, int id, airy_sock_t fd);
+static void handle_ledger_window(cJSON *params, int id, airy_sock_t fd);
+static void handle_ledger_budget(cJSON *params, int id, airy_sock_t fd);
+static void handle_ledger_mark(cJSON *params, int id, airy_sock_t fd);
+static void handle_ledger_history(cJSON *params, int id, airy_sock_t fd);
+static void handle_ledger_stats(int id, airy_sock_t fd);
+
+/* 提示词压缩（mem.compress，0.1.5） */
+static void handle_compress(cJSON *params, int id, airy_sock_t fd);
 
 static void on_write_method(cJSON *params, int id, void *user_data)
 {
@@ -145,6 +168,61 @@ static void on_kb_delete_method(cJSON *params, int id, void *user_data)
 static void on_kb_list_method(cJSON *params, int id, void *user_data)
 {
     handle_kb_list(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_cache_put_method(cJSON *params, int id, void *user_data)
+{
+    handle_cache_put(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_cache_get_method(cJSON *params, int id, void *user_data)
+{
+    handle_cache_get(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_cache_del_method(cJSON *params, int id, void *user_data)
+{
+    handle_cache_del(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_cache_stats_method(cJSON *params, int id, void *user_data)
+{
+    handle_cache_stats(id, *(airy_sock_t *)user_data);
+}
+
+static void on_ledger_append_method(cJSON *params, int id, void *user_data)
+{
+    handle_ledger_append(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_ledger_window_method(cJSON *params, int id, void *user_data)
+{
+    handle_ledger_window(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_ledger_budget_method(cJSON *params, int id, void *user_data)
+{
+    handle_ledger_budget(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_ledger_mark_method(cJSON *params, int id, void *user_data)
+{
+    handle_ledger_mark(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_ledger_history_method(cJSON *params, int id, void *user_data)
+{
+    handle_ledger_history(params, id, *(airy_sock_t *)user_data);
+}
+
+static void on_ledger_stats_method(cJSON *params, int id, void *user_data)
+{
+    handle_ledger_stats(id, *(airy_sock_t *)user_data);
+}
+
+static void on_compress_method(cJSON *params, int id, void *user_data)
+{
+    handle_compress(params, id, *(airy_sock_t *)user_data);
 }
 
 static void handle_write(cJSON *params, int id, airy_sock_t client_fd)
@@ -425,6 +503,398 @@ static void handle_kb_list(cJSON *params, int id, airy_sock_t client_fd)
 
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
     mem_kb_list_free(kb_ids, count);
+}
+
+/* ─── 语义缓存 handlers（mem.cache_*，0.1.5） ───────────────────────────── */
+
+static void handle_cache_put(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *text = cJSON_GetObjectItem(params, "text");
+    cJSON *response = cJSON_GetObjectItem(params, "response");
+    cJSON *model_id = cJSON_GetObjectItem(params, "model_id");
+    cJSON *ttl = cJSON_GetObjectItem(params, "ttl");
+
+    if (!g_cache || !text || !cJSON_IsString(text) || !response || !cJSON_IsString(response) ||
+        !model_id || !cJSON_IsString(model_id)) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           "cache_put 需 text/response/model_id 字符串", id);
+        return;
+    }
+
+    char *cache_id = NULL, *exact_key = NULL;
+    uint64_t ttl_ms = ttl && cJSON_IsNumber(ttl) ? (uint64_t)ttl->valuedouble : 0;
+    int ret = mem_cache_put(g_cache, text->valuestring, response->valuestring,
+                            model_id->valuestring, ttl_ms, &cache_id, &exact_key);
+    if (ret != AIRY_SUCCESS || !cache_id) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "cache_put 失败", id);
+        AIRY_FREE(cache_id);
+        AIRY_FREE(exact_key);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "cache_id", cache_id);
+    cJSON_AddStringToObject(result, "exact_key", exact_key);
+    cJSON_AddBoolToObject(result, "ok", 1);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    AIRY_FREE(cache_id);
+    AIRY_FREE(exact_key);
+}
+
+static void handle_cache_get(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *text = cJSON_GetObjectItem(params, "text");
+    cJSON *model_id = cJSON_GetObjectItem(params, "model_id");
+    cJSON *threshold = cJSON_GetObjectItem(params, "threshold");
+
+    if (!g_cache || !text || !cJSON_IsString(text) || !model_id || !cJSON_IsString(model_id)) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "cache_get 需 text/model_id", id);
+        return;
+    }
+
+    int hit = 0;
+    double score = 0.0;
+    char *cache_id = NULL, *response = NULL;
+    double thr = threshold && cJSON_IsNumber(threshold) ? threshold->valuedouble : 0.0;
+    int ret = mem_cache_get(g_cache, text->valuestring, model_id->valuestring, thr,
+                            &hit, &score, &cache_id, &response);
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "cache_get 失败", id);
+        AIRY_FREE(cache_id);
+        AIRY_FREE(response);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddBoolToObject(result, "hit", hit ? 1 : 0);
+    cJSON_AddBoolToObject(result, "cache_hit", hit ? 1 : 0);
+    cJSON_AddNumberToObject(result, "score", score);
+    if (hit && response)
+        cJSON_AddStringToObject(result, "response", response);
+    if (hit && cache_id)
+        cJSON_AddStringToObject(result, "cache_id", cache_id);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    AIRY_FREE(cache_id);
+    AIRY_FREE(response);
+}
+
+static void handle_cache_del(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *cache_id = cJSON_GetObjectItem(params, "cache_id");
+    if (!g_cache || !cache_id || !cJSON_IsString(cache_id)) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "cache_del 需 cache_id", id);
+        return;
+    }
+
+    int deleted = 0;
+    mem_cache_del(g_cache, cache_id->valuestring, &deleted);
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddBoolToObject(result, "deleted", deleted ? 1 : 0);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+static void handle_cache_stats(int id, airy_sock_t client_fd)
+{
+    if (!g_cache) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "cache 未初始化", id);
+        return;
+    }
+    mem_cache_stats_t st;
+    mem_cache_stats(g_cache, &st);
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddNumberToObject(result, "entries", (double)st.entries);
+    cJSON_AddNumberToObject(result, "hits", (double)st.hits);
+    cJSON_AddNumberToObject(result, "misses", (double)st.misses);
+    cJSON_AddNumberToObject(result, "hit_rate", st.hit_rate);
+    cJSON_AddNumberToObject(result, "evictions", (double)st.evictions);
+    cJSON_AddNumberToObject(result, "bytes", (double)st.bytes);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+/* ─── 上下文台账 handlers（mem.ledger_*，0.1.5） ───────────────────────── */
+
+static int ledger_status_from_string(const char *s)
+{
+    if (strcmp(s, "evicted") == 0) return LEDGER_STATUS_EVICTED;
+    if (strcmp(s, "compressed") == 0) return LEDGER_STATUS_COMPRESSED;
+    if (strcmp(s, "deduped") == 0) return LEDGER_STATUS_DEDUPED;
+    return LEDGER_STATUS_ACTIVE;
+}
+
+static int ledger_type_from_string(const char *s)
+{
+    if (strcmp(s, "tool_def") == 0) return LEDGER_ENTRY_TOOL_DEF;
+    if (strcmp(s, "user") == 0) return LEDGER_ENTRY_USER;
+    if (strcmp(s, "tool_result") == 0) return LEDGER_ENTRY_TOOL_RESULT;
+    if (strcmp(s, "assistant") == 0) return LEDGER_ENTRY_ASSISTANT;
+    if (strcmp(s, "compressed") == 0) return LEDGER_ENTRY_COMPRESSED;
+    if (strcmp(s, "cache_hit") == 0) return LEDGER_ENTRY_CACHE_HIT;
+    return LEDGER_ENTRY_SYSTEM;
+}
+
+static void handle_ledger_append(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *session = cJSON_GetObjectItem(params, "session_id");
+    cJSON *entries = cJSON_GetObjectItem(params, "entries");
+
+    if (!g_ledger || !session || !cJSON_IsString(session) || !entries || !cJSON_IsArray(entries)) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           "ledger_append 需 session_id + entries[]", id);
+        return;
+    }
+
+    int n = cJSON_GetArraySize(entries);
+    ledger_entry_in_t *in = AIRY_CALLOC(n > 0 ? (size_t)n : 1, sizeof(ledger_entry_in_t));
+    if (!in) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "OOM", id);
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        cJSON *e = cJSON_GetArrayItem(entries, i);
+        cJSON *type = cJSON_GetObjectItem(e, "entry_type");
+        cJSON *text = cJSON_GetObjectItem(e, "text");
+        cJSON *token_in = cJSON_GetObjectItem(e, "token_in");
+        cJSON *token_out = cJSON_GetObjectItem(e, "token_out");
+        cJSON *source = cJSON_GetObjectItem(e, "source");
+        cJSON *ref_id = cJSON_GetObjectItem(e, "ref_id");
+        in[i].entry_type = type && cJSON_IsString(type)
+                               ? ledger_type_from_string(type->valuestring)
+                               : LEDGER_ENTRY_SYSTEM;
+        in[i].text = text && cJSON_IsString(text) ? text->valuestring : NULL;
+        in[i].token_in = token_in && cJSON_IsNumber(token_in) ? (size_t)token_in->valuedouble : 0;
+        in[i].token_out = token_out && cJSON_IsNumber(token_out) ? (size_t)token_out->valuedouble : 0;
+        in[i].source = source && cJSON_IsString(source) ? source->valuestring : NULL;
+        in[i].ref_id = ref_id && cJSON_IsString(ref_id) ? ref_id->valuestring : NULL;
+    }
+
+    char *ledger_id = NULL;
+    int ret = mem_ledger_append(g_ledger, session->valuestring, in, (size_t)n, &ledger_id);
+    AIRY_FREE(in);
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "ledger_append 失败", id);
+        AIRY_FREE(ledger_id);
+        return;
+    }
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "ledger_id", ledger_id ? ledger_id : "");
+    cJSON_AddNumberToObject(result, "appended", (double)n);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    AIRY_FREE(ledger_id);
+}
+
+static void handle_ledger_window(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *session = cJSON_GetObjectItem(params, "session_id");
+    if (!g_ledger || !session || !cJSON_IsString(session)) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "ledger_window 需 session_id", id);
+        return;
+    }
+    ledger_window_t win;
+    int ret = mem_ledger_window(g_ledger, session->valuestring, &win);
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "ledger_window 失败", id);
+        return;
+    }
+    cJSON *result = cJSON_CreateObject();
+    cJSON *arr = cJSON_CreateArray();
+    for (size_t i = 0; i < win.count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "entry_id", win.entries[i].entry_id);
+        cJSON_AddNumberToObject(item, "seq", (double)win.entries[i].seq);
+        cJSON_AddNumberToObject(item, "token_in", (double)win.entries[i].token_in);
+        cJSON_AddNumberToObject(item, "token_out", (double)win.entries[i].token_out);
+        cJSON_AddStringToObject(item, "source", win.entries[i].source ? win.entries[i].source : "");
+        cJSON_AddStringToObject(item, "ref_id", win.entries[i].ref_id ? win.entries[i].ref_id : "");
+        cJSON_AddItemToArray(arr, item);
+    }
+    cJSON_AddItemToObject(result, "entries", arr);
+    cJSON_AddNumberToObject(result, "total_tokens", (double)win.total_tokens);
+    cJSON_AddBoolToObject(result, "warn", win.warn ? 1 : 0);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    mem_ledger_window_free(&win);
+}
+
+static void handle_ledger_budget(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *session = cJSON_GetObjectItem(params, "session_id");
+    if (!g_ledger || !session || !cJSON_IsString(session)) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "ledger_budget 需 session_id", id);
+        return;
+    }
+    size_t used = 0, limit = 0, headroom = 0;
+    mem_ledger_budget(g_ledger, session->valuestring, &used, &limit, &headroom);
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddNumberToObject(result, "used", (double)used);
+    cJSON_AddNumberToObject(result, "limit", (double)limit);
+    cJSON_AddNumberToObject(result, "headroom", (double)headroom);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+static void handle_ledger_mark(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *session = cJSON_GetObjectItem(params, "session_id");
+    cJSON *entry_ids = cJSON_GetObjectItem(params, "entry_ids");
+    cJSON *status = cJSON_GetObjectItem(params, "status");
+    if (!g_ledger || !session || !cJSON_IsString(session) || !entry_ids || !cJSON_IsArray(entry_ids) ||
+        !status || !cJSON_IsString(status)) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           "ledger_mark 需 session_id + entry_ids[] + status", id);
+        return;
+    }
+    int n = cJSON_GetArraySize(entry_ids);
+    const char **ids = AIRY_CALLOC(n > 0 ? (size_t)n : 1, sizeof(char *));
+    if (!ids) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "OOM", id);
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        cJSON *e = cJSON_GetArrayItem(entry_ids, i);
+        ids[i] = cJSON_IsString(e) ? e->valuestring : "";
+    }
+    size_t updated = 0;
+    int ret = mem_ledger_mark(g_ledger, session->valuestring, ids, (size_t)n,
+                              ledger_status_from_string(status->valuestring), &updated);
+    AIRY_FREE(ids);
+    if (ret != AIRY_SUCCESS && ret != AIRY_ERR_NOT_FOUND) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "ledger_mark 失败", id);
+        return;
+    }
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddNumberToObject(result, "updated", (double)updated);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+static void handle_ledger_history(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *session = cJSON_GetObjectItem(params, "session_id");
+    cJSON *limit = cJSON_GetObjectItem(params, "limit");
+    if (!g_ledger || !session || !cJSON_IsString(session)) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "ledger_history 需 session_id", id);
+        return;
+    }
+    ledger_entry_view_t *items = NULL;
+    size_t count = 0;
+    size_t lim = limit && cJSON_IsNumber(limit) ? (size_t)limit->valueint : 0;
+    int ret = mem_ledger_history(g_ledger, session->valuestring, lim, &items, &count);
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "ledger_history 失败", id);
+        return;
+    }
+    cJSON *result = cJSON_CreateObject();
+    cJSON *events = cJSON_CreateArray();
+    for (size_t i = 0; i < count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "entry_id", items[i].entry_id);
+        cJSON_AddNumberToObject(item, "seq", (double)items[i].seq);
+        cJSON_AddNumberToObject(item, "entry_type", (double)items[i].entry_type);
+        cJSON_AddNumberToObject(item, "token_in", (double)items[i].token_in);
+        cJSON_AddNumberToObject(item, "token_out", (double)items[i].token_out);
+        cJSON_AddNumberToObject(item, "status", (double)items[i].status);
+        cJSON_AddStringToObject(item, "source", items[i].source ? items[i].source : "");
+        cJSON_AddStringToObject(item, "ref_id", items[i].ref_id ? items[i].ref_id : "");
+        cJSON_AddItemToArray(events, item);
+    }
+    cJSON_AddItemToObject(result, "events", events);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    mem_ledger_history_free(items, count);
+}
+
+static void handle_ledger_stats(int id, airy_sock_t client_fd)
+{
+    if (!g_ledger) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "ledger 未初始化", id);
+        return;
+    }
+    mem_ledger_stats_t st;
+    mem_ledger_stats(g_ledger, &st);
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddNumberToObject(result, "sessions", (double)st.sessions);
+    cJSON_AddNumberToObject(result, "entries", (double)st.entries);
+    cJSON_AddNumberToObject(result, "total_tokens", (double)st.total_tokens);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+/* 提示词压缩（mem.compress，14-prompt-compression.md §3：L1+L2 默认开）。
+ * 入参：{session_id, entries:[{entry_id, entry_type, text}]}
+ * 返回：{context, saved_tokens, actions:[{entry_id, entry_type, action}], marked}
+ * 联动：对压缩条目 ledger.mark(COMPRESSED)，追加 compressed 块条目（可回放）。 */
+static void handle_compress(cJSON *params, int id, airy_sock_t client_fd)
+{
+    cJSON *session = cJSON_GetObjectItem(params, "session_id");
+    cJSON *entries = cJSON_GetObjectItem(params, "entries");
+
+    if (!g_ledger || !session || !cJSON_IsString(session) || !entries || !cJSON_IsArray(entries)) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
+                           "compress 需 session_id + entries[]", id);
+        return;
+    }
+
+    int n = cJSON_GetArraySize(entries);
+    compress_entry_in_t *in = AIRY_CALLOC(n > 0 ? (size_t)n : 1, sizeof(compress_entry_in_t));
+    if (!in) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "OOM", id);
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        cJSON *e = cJSON_GetArrayItem(entries, i);
+        cJSON *eid = cJSON_GetObjectItem(e, "entry_id");
+        cJSON *etype = cJSON_GetObjectItem(e, "entry_type");
+        cJSON *text = cJSON_GetObjectItem(e, "text");
+        in[i].entry_id = eid && cJSON_IsString(eid) ? eid->valuestring : "";
+        in[i].entry_type = etype && cJSON_IsString(etype)
+                               ? ledger_type_from_string(etype->valuestring)
+                               : LEDGER_ENTRY_SYSTEM;
+        in[i].text = text && cJSON_IsString(text) ? text->valuestring : NULL;
+        in[i].token_in = 0; /* 由 plan 用 token_standard 估算 */
+    }
+
+    char *ctx = NULL;
+    size_t saved = 0;
+    compress_plan_item_t *actions = NULL;
+    size_t action_count = 0;
+    int ret = mem_compress_plan(g_ledger, session->valuestring, in, (size_t)n, NULL, &ctx, &saved,
+                                &actions, &action_count);
+    AIRY_FREE(in);
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "compress 失败", id);
+        mem_compress_plan_free(ctx, actions, action_count);
+        return;
+    }
+
+    /* 台账联动：压缩条目 mark(COMPRESSED)，追加 compressed 块（可回放） */
+    size_t marked = 0;
+    if (action_count > 0) {
+        const char **ids = AIRY_CALLOC(action_count, sizeof(char *));
+        if (ids) {
+            for (size_t i = 0; i < action_count; i++)
+                ids[i] = actions[i].entry_id;
+            mem_ledger_mark(g_ledger, session->valuestring, ids, action_count,
+                            LEDGER_STATUS_COMPRESSED, &marked);
+            AIRY_FREE(ids);
+        }
+        ledger_entry_in_t block = {0};
+        block.entry_type = LEDGER_ENTRY_COMPRESSED;
+        block.text = ctx;
+        block.source = "ledger";
+        block.ref_id = actions[0].entry_id;
+        mem_ledger_append(g_ledger, session->valuestring, &block, 1, NULL);
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "context", ctx ? ctx : "");
+    cJSON_AddNumberToObject(result, "saved_tokens", (double)saved);
+    cJSON_AddNumberToObject(result, "marked", (double)marked);
+    cJSON *acts = cJSON_CreateArray();
+    for (size_t i = 0; i < action_count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "entry_id", actions[i].entry_id);
+        cJSON_AddNumberToObject(item, "entry_type", (double)actions[i].entry_type);
+        cJSON_AddNumberToObject(item, "action", (double)actions[i].action);
+        cJSON_AddItemToArray(acts, item);
+    }
+    cJSON_AddItemToObject(result, "actions", acts);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    mem_compress_plan_free(ctx, actions, action_count);
 }
 
 /*
@@ -714,6 +1184,14 @@ static void destroy_service(void)
         mem_service_destroy(g_service);
         g_service = NULL;
     }
+    if (g_cache) {
+        mem_cache_destroy(g_cache);
+        g_cache = NULL;
+    }
+    if (g_ledger) {
+        mem_ledger_destroy(g_ledger);
+        g_ledger = NULL;
+    }
 }
 
 int main(int argc, char **argv)
@@ -753,6 +1231,14 @@ int main(int argc, char **argv)
         airy_sock_cleanup();
         return EXIT_FAILURE;
     }
+
+    /* 0.1.5：语义缓存 + 上下文台账（渐进式降级：创建失败仅告警，不阻断服务） */
+    g_cache = mem_cache_create(4096, 64UL * 1024 * 1024, 3600000ULL, 0.85);
+    if (!g_cache)
+        SVC_LOG_WARN("Semantic cache init failed, caching disabled (degraded mode)");
+    g_ledger = mem_ledger_create(0, 0);
+    if (!g_ledger)
+        SVC_LOG_WARN("Context ledger init failed, ledger disabled (degraded mode)");
 
     airy_sock_t server_fd = daemon_create_server_socket(g_config.use_tcp, g_config.tcp_port,
                                                         g_config.socket_path, g_config.socket_path);
@@ -812,7 +1298,24 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_mem_d, "kb_search", on_kb_search_method, NULL);
     method_dispatcher_register(g_dispatcher_mem_d, "kb_delete", on_kb_delete_method, NULL);
     method_dispatcher_register(g_dispatcher_mem_d, "kb_list", on_kb_list_method, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (mem.* namespace)", 13);
+
+    /* 0.1.5：语义缓存（13-semantic-cache-context-ledger.md §3） */
+    method_dispatcher_register(g_dispatcher_mem_d, "cache_put", on_cache_put_method, NULL);
+    method_dispatcher_register(g_dispatcher_mem_d, "cache_get", on_cache_get_method, NULL);
+    method_dispatcher_register(g_dispatcher_mem_d, "cache_del", on_cache_del_method, NULL);
+    method_dispatcher_register(g_dispatcher_mem_d, "cache_stats", on_cache_stats_method, NULL);
+
+    /* 0.1.5：上下文台账（13-semantic-cache-context-ledger.md §4） */
+    method_dispatcher_register(g_dispatcher_mem_d, "ledger_append", on_ledger_append_method, NULL);
+    method_dispatcher_register(g_dispatcher_mem_d, "ledger_window", on_ledger_window_method, NULL);
+    method_dispatcher_register(g_dispatcher_mem_d, "ledger_budget", on_ledger_budget_method, NULL);
+    method_dispatcher_register(g_dispatcher_mem_d, "ledger_mark", on_ledger_mark_method, NULL);
+    method_dispatcher_register(g_dispatcher_mem_d, "ledger_history", on_ledger_history_method, NULL);
+    method_dispatcher_register(g_dispatcher_mem_d, "ledger_stats", on_ledger_stats_method, NULL);
+
+    /* 0.1.5：提示词压缩（14-prompt-compression.md §3 L1+L2） */
+    method_dispatcher_register(g_dispatcher_mem_d, "compress", on_compress_method, NULL);
+    SVC_LOG_INFO("Registered 25 RPC methods (mem.* namespace)");
 
     if (daemon_event_driver_add_server_fd(g_event_driver_mem_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
