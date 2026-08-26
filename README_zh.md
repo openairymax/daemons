@@ -1,23 +1,23 @@
-# daemons — 运行时守护进程服务
+# daemons — 运行时守护进程服务（17 个守护进程）
 
 > Airymax 智能体运行时的用户态服务层：Airymax 内核之上的后端服务支撑。
 > [agentrt](../) 管理仓下的叶子仓。
 
 **语言:** [English](README.md) | 简体中文
 
-[![Version](https://img.shields.io/badge/version-0.1.1-5a6b7e)](https://atomgit.com/openairymax/daemons)
+[![Version](https://img.shields.io/badge/version-0.1.3-5a6b7e)](https://atomgit.com/openairymax/daemons)
 [![License](https://img.shields.io/badge/license-AGPL--3.0+Apache--2.0-4a90d9)](LICENSE)
 [![C11](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/11)
 
 - **仓库：** `git@atomgit.com:openairymax/daemons.git`
-- **分支：** `feature/official-hubs-01`
-- **版本：** 0.1.1（Airymax 奠基发行版）
+- **分支：** `develop/hubs-01`
+- **版本：** 0.1.3（与 agentrt 管理仓对齐）
 
 ---
 
 ## 概览
 
-**daemons** 是 Airymax 智能体运行时的**用户态服务层**。它由 **12 个独立守护进程**——`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d`——以及共享静态库 `svc_common`（位于 `common/`）共同组成。每个守护进程遵循**职责单一原则**：独立进程运行，通过统一 IPC 服务总线协作通信，共同构成位于 Airymax 内核之上的高可用、可扩展、可插拔微服务架构。
+**daemons** 是 Airymax 智能体运行时的**用户态服务层**。它由 **17 个独立守护进程**——`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d`——以及共享静态库 `svc_common`（位于 `common/`）共同组成。每个守护进程遵循**职责单一原则**：独立进程运行，通过统一 IPC 服务总线协作通信，共同构成位于 Airymax 内核之上的高可用、可扩展、可插拔微服务架构。
 
 ```
 外部客户端 → gateway_d → (其他守护进程经 ipc_service_bus) → atoms/syscall → 内核服务
@@ -33,7 +33,7 @@
 - **安全内生** —— `svc_common` 以 `PUBLIC` 形式链接 `cupolas`（`daemon_cupolas_bootstrap.c`），每个守护进程自动继承 Cupolas 安全：请求鉴权、输入净化、审计、沙箱。
 - **协议统一** —— 所有守护进程通过 JSON-RPC 2.0 通信；MCP / A2A / OpenAI-API 协议转换发生在网关边界。
 
-在 Airymax 0.1.1 发行版中，工作区被拆分为 **38 个仓库**（1 个伞仓 + 5 个管理仓 + 29 个叶子仓 + 3 个顶层仓）；`daemons` 是 [agentrt](../) 管理仓聚合的 7 个叶子仓之一，构成循环分层架构中的**服务层**（位于网关层 `gateway` 之上、生态层 `sdk`/`ecosystem` 之下）。它是 agentrt 内部最顶层的叶子仓——每个守护进程的业务逻辑通过 `atoms/syscall` 向下派发至内核。
+在 Airymax 0.1.3 发行版中，`daemons` 是 [agentrt](../) 管理仓聚合的 7 个叶子仓之一，构成循环分层架构中的**服务层**（位于网关层 `gateway` 之上、生态层 `sdk`/`ecosystem` 之下）。它是 agentrt 内部最顶层的叶子仓——每个守护进程的业务逻辑通过 `atoms/syscall` 向下派发至内核。
 
 ## 模块分类
 
@@ -45,7 +45,7 @@ daemons 是服务/组合模块：它不提供基础原语，而是将原语组�
 
 ```
 daemons/
-├── CMakeLists.txt                 # 顶层构建文件；管理全部 12 个守护进程 + svc_common
+├── CMakeLists.txt                 # 顶层构建文件；管理全部 17 个守护进程 + svc_common
 ├── Dockerfile.ci                  # CI 环境 Docker 镜像
 ├── README.md                      # 英文版
 ├── README_zh.md                   # 本文件（中文）
@@ -54,8 +54,8 @@ daemons/
 ├── common/                        # 共享服务库（svc_common）
 │   ├── CMakeLists.txt             # svc_common 静态库 target
 │   ├── README.md                  # svc_common 文档
-│   ├── include/                   # 39 个共享头文件
-│   ├── src/                       # 32 个源文件（30+ 工具组件）
+│   ├── include/                   # 共享头文件
+│   ├── src/                       # 源文件（工具组件）
 │   └── tests/                     # svc_common 单元测试
 ├── gateway_d/                     # API 网关守护进程
 ├── llm_d/                         # LLM 服务守护进程
@@ -69,6 +69,11 @@ daemons/
 ├── observe_d/                     # 观测服务（OpenTelemetry）守护进程
 ├── hook_d/                        # Hook 守护进程（薄壳；核心在 atoms/coreloopthree）
 ├── plugin_d/                      # Plugin 守护进程
+├── mem_d/                         # 记忆守护进程（mem.* 命名空间，JSONL 持久化）
+├── agent_d/                       # Agent 执行守护进程（agent.* 命名空间）
+├── a2a_d/                         # Agent 间通信（A2A）守护进程（a2a.* 命名空间）
+├── think_d/                       # 双思考 / GRAD 认知守护进程（think.* 命名空间）
+├── cupolas_d/                     # Cupolas 安全穹顶守护进程（cupolas.* 命名空间）
 ├── examples/                      # 使用示例（example_svc_usage.c）
 └── scripts/                       # 构建 / CI / 分析脚本
     ├── ci.sh                      # CI 流水线构建脚本
@@ -96,7 +101,7 @@ daemons/
 
 ## 核心组件
 
-### 12 个守护进程
+### 17 个守护进程
 
 | # | 守护进程 | 目录 | 职责 | CMake Target |
 |---|----------|------|------|--------------|
@@ -112,8 +117,15 @@ daemons/
 | 10 | **观测服务** | `observe_d/` | OpenTelemetry 可观测性数据采集 | `observe_d` |
 | 11 | **Hook 守护进程** | `hook_d/` | 薄守护进程壳；Hook 系统核心位于 `atoms/coreloopthree/src/hook/`，通过链接 `airy_coreloopthree` 获取 | `hook_d` |
 | 12 | **Plugin 守护进程** | `plugin_d/` | 插件生命周期管理与隔离 | `plugin_d` |
+| 13 | **记忆守护进程** | `mem_d/` | 运行时记忆管理（`mem.*` 命名空间）：长时记忆的写入 / 检索 / 读取 / 删除，JSONL 持久化 | `mem_d` |
+| 14 | **Agent 执行** | `agent_d/` | Agent 编排（`agent.*` 命名空间）：Agent 子进程 spawn / invoke / 健康检查 | `agent_d` |
+| 15 | **A2A 协议** | `a2a_d/` | Agent 间通信（`a2a.*` 命名空间）：A2A 协议消息交换 | `a2a_d` |
+| 16 | **双思考认知** | `think_d/` | 双思考 / GRAD 批判循环引擎（`think.*` 命名空间）：think.process / think.orchestrate / think.get_stats | `think_d` |
+| 17 | **Cupolas 安全穹顶** | `cupolas_d/` | 独立安全穹顶（`cupolas.*` 命名空间）：权限引擎、输入净化、审计日志、隔离工位 | `cupolas_d` |
 
-> **二进制命名规范：** 每个守护进程可执行文件保留 `*_d` 后缀（`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d`）。根据 2026-07-05 改名决策，模块名从 `daemon` 统一为 `daemons`（目录、CMake target `airy_daemons`、仓库 `daemons.git`），但 12 个进程二进制名被刻意保留。
+> **二进制命名规范：** 每个守护进程可执行文件保留 `*_d` 后缀（`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d`）。根据 2026-07-05 改名决策，模块名从 `daemon` 统一为 `daemons`（目录、CMake target `airy_daemons`、仓库 `daemons.git`），但 17 个进程二进制名被刻意保留。
+
+> **0.1.3 阶段 3 重构：** `mem_d / agent_d / a2a_d / think_d / cupolas_d` 从 gateway 进程拆分为独立 daemon（执行体集中化）。`gateway_d` 现在经 syscall 层（`airy_sys_svc_call`）转发这些命名空间，保持网关为纯协议边界。
 
 ## 架构
 
@@ -123,7 +135,7 @@ daemons/
 ├──────────────────────────────────────────────────────────────┤
 │   SDK (sdk-python / sdk-go / sdk-rust / sdk-typescript ...)   │
 ├──────────────────────────────────────────────────────────────┤
-│   ★ daemons (服务层 — 12 个守护进程 + svc_common) ★          │
+│   ★ daemons (服务层 — 17 个守护进程 + svc_common) ★          │
 │                                                               │
 │   gateway_d ─→ HTTP / WS / Stdio / MCP / A2A / OpenAI API     │
 │              ↓                                                │
@@ -131,10 +143,12 @@ daemons/
 │   │ llm_d  │tool_d  │sched_d │market_d│monit_d │channel_d│   │
 │   ├────────┼────────┼────────┼────────┼────────┼─────────┤    │
 │   │ info_d │notify_d│observe_d│hook_d │plugin_d│         │    │
+│   ├────────┼────────┼────────┼────────┼────────┼─────────┤    │
+│   │ mem_d  │agent_d │a2a_d   │think_d│cupolas_d│        │    │
 │   └────────┴────────┴────────┴────────┴────────┴─────────┘    │
 │              ↑ ipc_service_bus (JSON-RPC 2.0)                 │
 │   ┌─────────────────────────────────────────────────────────┐ │
-│   │ common (svc_common — 30+ 组件，PUBLIC 链接              │ │
+│   │ common (svc_common — 组件，PUBLIC 链接                  │ │
 │   │ Cupolas → 每个守护进程继承安全)                         │ │
 │   └─────────────────────────────────────────────────────────┘ │
 ├──────────────────────────────────────────────────────────────┤
@@ -159,6 +173,11 @@ svc_common  ←  gateway_d  ←  外部客户端
           ←  observe_d    ←  monit_d（可观测性）
           ←  hook_d       ←  sched_d, tool_d（Hook 注入）
           ←  plugin_d     ←  market_d, tool_d（插件生命周期）
+          ←  mem_d        ←  gateway_d, CLI/TUI（记忆读写）
+          ←  agent_d      ←  gateway_d（Agent spawn/invoke）
+          ←  a2a_d        ←  gateway_d（A2A 消息交换）
+          ←  think_d      ←  gateway_d, CLI（双思考 / GRAD）
+          ←  cupolas_d    ←  gateway_d, 所有守护进程（安全策略）
 ```
 
 **设计原则：** 服务化（独立进程，IPC 协作）；每个守护进程职责单一；可插拔（独立部署 / 升级 / 替换）；高可用（主备、熔断器、故障转移）；安全内生（Cupolas 经 svc_common 传递链接）；协议统一（IPC 服务总线上的 JSON-RPC 2.0）。
@@ -226,7 +245,7 @@ cmake -S . -B /tmp/daemons-build -DBUILD_ALL_PLATFORMS=ON
 
 ### 构建产物
 
-- 12 个守护进程可执行文件：`gateway_d`、`llm_d`、`tool_d`、`sched_d`、`market_d`、`monit_d`、`channel_d`、`info_d`、`notify_d`、`observe_d`、`hook_d`、`plugin_d`——输出到 `${CMAKE_BINARY_DIR}/bin/`
+- 17 个守护进程可执行文件：`gateway_d`、`llm_d`、`tool_d`、`sched_d`、`market_d`、`monit_d`、`channel_d`、`info_d`、`notify_d`、`observe_d`、`hook_d`、`plugin_d`、`mem_d`、`agent_d`、`a2a_d`、`think_d`、`cupolas_d`——输出到 `${CMAKE_BINARY_DIR}/bin/`
 - `svc_common` —— 每个守护进程消费（PRIVATE 链接）的共享静态库
 - 公共头文件安装到 `include/agentrt/`
 
