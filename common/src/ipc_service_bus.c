@@ -121,8 +121,10 @@ static void init_message_header(ipc_bus_message_header_t *header, ipc_bus_msg_ty
                                 ipc_bus_proto_t protocol, const char *source, const char *target)
 {
     __builtin_memset(header, 0, sizeof(ipc_bus_message_header_t));
-    header->magic = IPC_BUS_MESSAGE_MAGIC;
-    header->version = IPC_BUS_MESSAGE_VERSION;
+    /* [SC] A-IPC 标准头（Layout C v4 前置 128B，与 agentrt-linux wire 兼容） */
+    header->aipc.magic = AIRY_IPC_MAGIC;
+    header->aipc.opcode = AIRY_IPC_OP_SEND;
+    /* 扩展段：service bus 语义字段 */
     header->msg_type = msg_type;
     header->protocol = protocol;
     header->timestamp = airy_time_ms();
@@ -519,7 +521,7 @@ AIRY_API airy_err_t ipc_service_bus_notify(ipc_service_bus_t bus_handle, const c
 
     init_message_header(&msg->header, IPC_BUS_MSG_NOTIFICATION, protocol, bus->name,
                         target_service);
-    msg->header.payload_len = (uint32_t)payload_size;
+    msg->header.aipc.payload_len = (uint32_t)payload_size;
 
     airy_err_t err = ipc_service_bus_send(bus_handle, target_service, msg);
     ipc_bus_message_free(msg);
@@ -831,7 +833,7 @@ AIRY_API ipc_bus_message_t *ipc_bus_message_create(ipc_bus_msg_type_t msg_type,
 
     init_message_header(&msg->header, msg_type, protocol, NULL, NULL);
     msg->header.msg_id = (uint64_t)airy_time_ms();
-    msg->header.payload_len = (uint32_t)payload_size;
+    msg->header.aipc.payload_len = (uint32_t)payload_size;
 
     if (payload && payload_size > 0) {
         msg->payload = AIRY_CALLOC(1, payload_size);
@@ -843,6 +845,7 @@ AIRY_API ipc_bus_message_t *ipc_bus_message_create(ipc_bus_msg_type_t msg_type,
         __builtin_memcpy(msg->payload, payload, payload_size);
         msg->payload_size = payload_size;
         msg->header.checksum = compute_checksum(payload, payload_size);
+        msg->header.aipc.crc32 = msg->header.checksum; /* [SC] A-IPC crc32 同步 */
     }
 
     return msg;

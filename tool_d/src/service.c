@@ -164,7 +164,7 @@ static void register_builtin_tools(tool_service_t *svc)
         {
             .id = "fs_write",
             .name = "fs_write",
-            .description = "Write content to a local file (creates or overwrites)",
+            .description = "Write content to a file (create/overwrite)",
             .executable = "builtin:fs_write",
             .params = fs_write_params,
             .param_count = 2,
@@ -200,7 +200,7 @@ static void register_builtin_tools(tool_service_t *svc)
         {
             .id = "web_fetch",
             .name = "web_fetch",
-            .description = "Fetch a web page over HTTP(S) and return its body text",
+            .description = "Fetch a URL, return page body text",
             .executable = "builtin:web_fetch",
             .params = web_fetch_params,
             .param_count = 1,
@@ -261,7 +261,7 @@ static void register_builtin_tools(tool_service_t *svc)
         {
             .id = "web_search",
             .name = "web_search",
-            .description = "Search the web (DuckDuckGo) and return ranked results",
+            .description = "Search the web, return ranked results",
             .executable = "builtin:web_search",
             .params = web_search_params,
             .param_count = 2,
@@ -298,7 +298,7 @@ static void register_builtin_tools(tool_service_t *svc)
         {
             .id = "git_apply",
             .name = "git_apply",
-            .description = "Apply a unified diff to the working tree (git apply [--check] -)",
+            .description = "Apply a unified diff to the working tree",
             .executable = "builtin:git_apply",
             .params = git_apply_params,
             .param_count = 2,
@@ -324,8 +324,7 @@ static void register_builtin_tools(tool_service_t *svc)
         {
             .id = "maths.stats",
             .name = "maths.stats",
-            .description = "Compute descriptive statistics of a numeric array "
-                           "(sum/mean/median/min/max/variance/stddev)",
+            .description = "Compute numeric statistics (sum/mean/median/min/max/var/stddev)",
             .executable = "builtin:maths.stats",
             .params = maths_stats_params,
             .param_count = 2,

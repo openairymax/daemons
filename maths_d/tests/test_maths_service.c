@@ -7,6 +7,7 @@
  */
 
 #include "maths_service.h"
+#include "airy_memory.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -174,6 +175,60 @@ static void test_recognize(void)
     }
 }
 
+/* 数学后端方法路由：numerical/finance/number_theory 与符号方法必须被识别
+ * 为后端方法（backend 不可用时返回 backend 错误，而非 "method not found"）。 */
+static void test_backend_method_routing(void)
+{
+    maths_d_service_t svc;
+    AIRY_MEMSET(&svc, 0, sizeof(svc));
+    svc.py_backend.in_fd = -1;
+    svc.py_backend.out_fd = -1;
+    svc.py_backend.available = 0; /* 模拟未部署 maths-toolkit */
+
+    const char *methods[] = {
+        "solve", "differentiate", "integrate", "limit", "simplify",
+        "factor", "expand", "matrix", "units", "numerical", "finance",
+        "number_theory"
+    };
+    size_t i;
+    for (i = 0; i < sizeof(methods) / sizeof(methods[0]); i++) {
+        char req[256];
+        char resp[2048];
+        snprintf(req, sizeof(req),
+                 "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"%s\",\"params\":{}}",
+                 methods[i]);
+        if (maths_d_dispatch_jsonrpc(&svc, req, resp, sizeof(resp)) !=
+            MATHS_METHOD_HANDLED) {
+            printf("FAIL routing %s (not handled)\n", methods[i]);
+            g_fail++;
+            continue;
+        }
+        /* backend 不可用时应返回 backend 错误，而非 method not found */
+        if (strstr(resp, "method not found")) {
+            printf("FAIL routing %s (fell through to method not found)\n",
+                   methods[i]);
+            g_fail++;
+        }
+        if (!strstr(resp, "backend unavailable")) {
+            printf("FAIL routing %s (missing backend-unavailable error)\n",
+                   methods[i]);
+            g_fail++;
+        }
+    }
+
+    /* 未知方法仍应返回 method not found */
+    char req[256];
+    char resp[2048];
+    snprintf(req, sizeof(req),
+             "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"bogus_math\",\"params\":{}}");
+    if (maths_d_dispatch_jsonrpc(&svc, req, resp, sizeof(resp)) !=
+        MATHS_METHOD_HANDLED ||
+        !strstr(resp, "method not found")) {
+        printf("FAIL unknown method should be method not found\n");
+        g_fail++;
+    }
+}
+
 int main(void)
 {
     test_basic_arithmetic();
@@ -181,6 +236,7 @@ int main(void)
     test_error_cases();
     test_stats();
     test_recognize();
+    test_backend_method_routing();
 
     if (g_fail == 0) {
         printf("maths_service tests: ALL PASSED\n");
