@@ -23,6 +23,7 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_fs.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_net.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_git.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_maths.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/os_sandbox.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tool_interactive_approval.c
 )

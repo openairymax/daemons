@@ -41,6 +41,7 @@ set(TOOL_SERVICE_SOURCES
     src/builtin_fs.c
     src/builtin_net.c
     src/builtin_git.c
+    src/builtin_maths.c
     src/tool_interactive_approval.c
     src/os_sandbox.c
 )
