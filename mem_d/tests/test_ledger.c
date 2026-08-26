@@ -241,6 +241,116 @@ static void test_stats_and_validation(void)
     printf("    PASSED\n");
 }
 
+/* 容量上限（H6 回归）：会话数超过 max_sessions 拒绝（防 session 洪水 DoS）；
+ * count==0 幂等成功且不出 ledger_id。 */
+static void test_capacity_limits(void)
+{
+    printf("  test_capacity_limits...\n");
+    mem_ledger_t *l = mem_ledger_create(0, 0);
+    assert(l != NULL);
+
+    ledger_entry_in_t in = {.entry_type = LEDGER_ENTRY_USER, .text = "cap", .source = "gateway"};
+    /* DEFAULT_MAX_SESSIONS=1024：第 1025 个会话应被拒 */
+    int rejected = 0;
+    for (int i = 0; i < 1025; i++) {
+        char sid[32];
+        snprintf(sid, sizeof(sid), "sess-cap-%d", i);
+        int ret = mem_ledger_append(l, sid, &in, 1, NULL);
+        if (ret != AIRY_SUCCESS) {
+            rejected++;
+            assert(ret == AIRY_ERR_OVERFLOW);
+            break;
+        }
+    }
+    assert(rejected == 1);
+    mem_ledger_stats_t st;
+    mem_ledger_stats(l, &st);
+    assert(st.sessions == 1024);
+
+    /* count==0：成功、无 ledger_id、不产生会话 */
+    char *lid = (char *)0x1; /* 哨兵：必须被置 NULL */
+    assert(mem_ledger_append(l, "never-created", NULL, 0, &lid) == AIRY_SUCCESS);
+    assert(lid == NULL);
+    mem_ledger_stats(l, &st);
+    assert(st.sessions == 1024);
+
+    mem_ledger_destroy(l);
+    printf("    PASSED\n");
+}
+
+/* mark 幂等与状态校验（H17/H10 回归）：同状态重复 mark 不再叠加记录；
+ * 非法 status 拒绝。 */
+static void test_mark_idempotent_and_validate(void)
+{
+    printf("  test_mark_idempotent_and_validate...\n");
+    mem_ledger_t *l = mem_ledger_create(0, 0);
+    assert(l != NULL);
+
+    ledger_entry_in_t in = {.entry_type = LEDGER_ENTRY_USER, .text = "x", .source = "gateway"};
+    char *lid = NULL;
+    assert(mem_ledger_append(l, "sess-idem", &in, 1, &lid) == AIRY_SUCCESS);
+    assert(lid != NULL);
+    AIRY_FREE(lid);
+
+    ledger_window_t win;
+    assert(mem_ledger_window(l, "sess-idem", &win) == AIRY_SUCCESS);
+    char target_id[33];
+    memcpy(target_id, win.entries[0].entry_id, sizeof(target_id));
+    const char *ids[1] = {target_id};
+    mem_ledger_window_free(&win);
+
+    size_t updated = 0;
+    assert(mem_ledger_mark(l, "sess-idem", ids, 1, LEDGER_STATUS_COMPRESSED, &updated) == AIRY_SUCCESS);
+    assert(updated == 1);
+    /* 重复 mark 同状态：幂等，updated=0，不追加记录 */
+    updated = 0;
+    assert(mem_ledger_mark(l, "sess-idem", ids, 1, LEDGER_STATUS_COMPRESSED, &updated) == AIRY_SUCCESS);
+    assert(updated == 0);
+
+    ledger_entry_view_t *hist = NULL;
+    size_t hcount = 0;
+    assert(mem_ledger_history(l, "sess-idem", 0, &hist, &hcount) == AIRY_SUCCESS);
+    assert(hcount == 2); /* 1 原始 + 1 状态变更（幂等不叠加） */
+    mem_ledger_history_free(hist, hcount);
+
+    /* 非法 status（越界值）拒绝 */
+    const char *bad_status[] = {target_id};
+    assert(mem_ledger_mark(l, "sess-idem", bad_status, 1, 99, NULL) == AIRY_ERR_INVALID_PARAM);
+    assert(mem_ledger_mark(l, "sess-idem", bad_status, 1, -1, NULL) == AIRY_ERR_INVALID_PARAM);
+
+    mem_ledger_destroy(l);
+    printf("    PASSED\n");
+}
+
+/* 批量 append 原子性（H8 回归）：非法 entry_type 在写入前整体拒绝，
+ * 不产生部分成功/残留会话。 */
+static void test_append_atomic_reject(void)
+{
+    printf("  test_append_atomic_reject...\n");
+    mem_ledger_t *l = mem_ledger_create(0, 0);
+    assert(l != NULL);
+
+    ledger_entry_in_t in[2] = {
+        {.entry_type = LEDGER_ENTRY_USER, .text = "ok", .source = "gateway"},
+        {.entry_type = 777, .text = "bad type", .source = "gateway"}, /* 越界类型 */
+    };
+    char *lid = NULL;
+    assert(mem_ledger_append(l, "sess-atomic", in, 2, &lid) == AIRY_ERR_INVALID_PARAM);
+    assert(lid == NULL);
+
+    /* 不得残留会话或条目 */
+    mem_ledger_stats_t st;
+    mem_ledger_stats(l, &st);
+    assert(st.sessions == 0 && st.entries == 0);
+    ledger_window_t win;
+    assert(mem_ledger_window(l, "sess-atomic", &win) == AIRY_SUCCESS);
+    assert(win.count == 0);
+    mem_ledger_window_free(&win);
+
+    mem_ledger_destroy(l);
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=== Context Ledger Unit Tests ===\n");
@@ -250,6 +360,9 @@ int main(void)
     test_append_only_mark();
     test_token_consistency();
     test_stats_and_validation();
+    test_capacity_limits();
+    test_mark_idempotent_and_validate();
+    test_append_atomic_reject();
     printf("=== All ledger tests PASSED ===\n");
     return 0;
 }

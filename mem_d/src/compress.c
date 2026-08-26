@@ -37,7 +37,9 @@ static void strvec_push(strvec_t *v, const char *s)
         v->items = ni;
         v->cap = ncap;
     }
-    v->items[v->count++] = AIRY_STRDUP(s);
+    char *d = AIRY_STRDUP(s);
+    if (d)
+        v->items[v->count++] = d;
 }
 
 static void strvec_free(strvec_t *v)
@@ -48,13 +50,27 @@ static void strvec_free(strvec_t *v)
     AIRY_MEMSET(v, 0, sizeof(*v));
 }
 
+/* UTF-8 字节序列前缀匹配（避免 CJK 标点多字符常量告警 + 误匹配） */
+static int starts_with_utf8(const unsigned char *p, const char *seq)
+{
+    for (int i = 0; seq[i]; i++) {
+        if (p[i] != (unsigned char)seq[i])
+            return 0;
+    }
+    return 1;
+}
+
 /* 句子切分：按 。！？!?；; . 或换行切分 */
 static void split_sentences(const char *text, strvec_t *out)
 {
-    const char *start = text;
-    for (const char *p = text;; p++) {
-        if (*p == '\0' || *p == '。' || *p == '！' || *p == '？' || *p == '!' ||
-            *p == '?' || *p == '；' || *p == ';' || *p == '.' || *p == '\n') {
+    const unsigned char *start = (const unsigned char *)text;
+    for (const unsigned char *p = (const unsigned char *)text;; p++) {
+        /* CJK 标点：。=E3 80 82，！=EF BC 81，？=EF BC 9F，；=EF BC 9B */
+        int is_sep = *p == '\0' || *p == '!' || *p == '?' || *p == ';' || *p == '.' ||
+                     *p == '\n' || starts_with_utf8(p, "\xE3\x80\x82") ||
+                     starts_with_utf8(p, "\xEF\xBC\x81") || starts_with_utf8(p, "\xEF\xBC\x9F") ||
+                     starts_with_utf8(p, "\xEF\xBC\x9B");
+        if (is_sep) {
             if (p > start) {
                 size_t len = (size_t)(p - start);
                 char *buf = AIRY_MALLOC(len + 1);
@@ -122,8 +138,8 @@ static void wordfreq_add(wordfreq_t *wf, const char *word)
         wf->cap = ncap;
     }
     wf->words[wf->count] = AIRY_STRDUP(word);
-    wf->freq[wf->count] = 1;
-    wf->count++;
+    if (wf->words[wf->count])
+        wf->freq[wf->count++] = 1;
 }
 
 static void wordfreq_build(const char *text, wordfreq_t *wf)
@@ -278,8 +294,8 @@ static char *extract_key_sentences(const char *text, const wordfreq_t *wf)
         for (size_t i = 0; i < n; i++) {
             if (!picked[i])
                 continue;
-            strncat(out, sents.items[i], total);
-            strncat(out, "\n", 2);
+            strncat(out, sents.items[i], strlen(sents.items[i]));
+            strncat(out, "\n", 1);
         }
     }
 
@@ -480,7 +496,8 @@ int mem_compress_plan(mem_ledger_t *ledger, const char *session_id,
         if (ledger)
             mem_ledger_budget(ledger, session_id, NULL, &budget, &headroom);
         size_t remaining = used > l1_saved ? used - l1_saved : 0;
-        double warn_at = (double)budget * 0.8;
+        double warn_at = (double)budget *
+                         (ledger ? mem_ledger_warn_ratio(ledger) : 0.8); /* SSoT：台账告警比例 */
         int over_budget = budget > 0 && remaining >= (size_t)warn_at;
         if (over_budget || total_turns > (int)dc.max_turns) {
             wordfreq_t wf;
@@ -551,8 +568,8 @@ int mem_compress_plan(mem_ledger_t *ledger, const char *session_id,
             continue; /* 不进重组上下文 */
         const char *piece = repl[i] ? repl[i] : (entries[i].text ? entries[i].text : "");
         if (ctx[0])
-            strncat(ctx, "\n", 2);
-        strncat(ctx, piece, ctx_len);
+            strncat(ctx, "\n", 1);
+        strncat(ctx, piece, strlen(piece));
     }
 
     size_t saved = 0;
