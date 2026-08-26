@@ -1,23 +1,23 @@
-# daemons — Runtime Daemon Services (17 Daemons)
+# daemons — Runtime Daemon Services (18 Daemons)
 
-> The user-space service layer of the Airymax agent runtime: seventeen independent daemon processes that together form the backend-service substrate sitting on top of the Airymax kernel.
+> The user-space service layer of the Airymax agent runtime: eighteen independent daemon processes that together form the backend-service substrate sitting on top of the Airymax kernel.
 > Leaf repository under the [agentrt](../) management repo.
 
 **Language:** English | [简体中文](README_zh.md)
 
-[![Version](https://img.shields.io/badge/version-0.1.3-5a6b7e)](https://atomgit.com/openairymax/daemons)
+[![Version](https://img.shields.io/badge/version-0.1.4-5a6b7e)](https://atomgit.com/openairymax/daemons)
 [![License](https://img.shields.io/badge/license-AGPL--3.0+Apache--2.0-4a90d9)](LICENSE)
 [![C11](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/11)
 
 - **Repository:** `git@atomgit.com:openairymax/daemons.git`
 - **Branch:** `develop/hubs-01`
-- **Version:** 0.1.3 (aligned with agentrt management repo)
+- **Version:** 0.1.4 (aligned with agentrt management repo)
 
 ---
 
 ## Overview
 
-**daemons** is the **user-space service layer** of the Airymax agent runtime. It is composed of **17 independent daemon processes** — `gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d` — together with a shared static library `svc_common` (in `common/`). Every daemon follows the **single-responsibility principle**: it runs as its own process, communicates with peers through the unified IPC service bus, and together they form a high-availability, scalable, pluggable micro-service architecture sitting on top of the Airymax kernel.
+**daemons** is the **user-space service layer** of the Airymax agent runtime. It is composed of **18 independent daemon processes** — `gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d` — together with a shared static library `svc_common` (in `common/`). Every daemon follows the **single-responsibility principle**: it runs as its own process, communicates with peers through the unified IPC service bus, and together they form a high-availability, scalable, pluggable micro-service architecture sitting on top of the Airymax kernel.
 
 ```
 External client → gateway_d → (other daemons via ipc_service_bus) → atoms/syscall → kernel services
@@ -74,6 +74,7 @@ daemons/
 ├── a2a_d/                         # Agent-to-Agent (A2A) protocol daemon (a2a.* namespace)
 ├── think_d/                       # Dual-think / GRAD cognition daemon (think.* namespace)
 ├── cupolas_d/                     # Cupolas security-dome daemon (cupolas.* namespace)
+├── maths_d/                       # Mathematics coprocessor daemon (maths.* namespace)
 ├── examples/                      # Usage examples (example_svc_usage.c)
 └── scripts/                       # Build / CI / analysis scripts
     ├── ci.sh                      # CI pipeline build script
@@ -101,7 +102,7 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 
 ## Core Components
 
-### The 17 Daemons
+### The 18 Daemons
 
 | # | Daemon | Directory | Responsibility | CMake Target |
 |---|--------|-----------|----------------|--------------|
@@ -122,8 +123,9 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 | 15 | **A2A Protocol** | `a2a_d/` | Agent-to-Agent communication (`a2a.*` namespace): A2A protocol message exchange between agents | `a2a_d` |
 | 16 | **Dual-Think Cognition** | `think_d/` | Dual-think / GRAD critical-loop engine (`think.*` namespace): think.process / think.orchestrate / think.get_stats | `think_d` |
 | 17 | **Cupolas Security Dome** | `cupolas_d/` | Standalone security dome (`cupolas.*` namespace): permission engine, sanitizer, audit logger, isolation workers | `cupolas_d` |
+| 18 | **Mathematics Coprocessor** | `maths_d/` | Math-expression evaluation / statistics / expression recognition (`maths.*` namespace): pure-C recursive-descent evaluator, no external deps, sandboxed numeric evaluation only | `maths_d` |
 
-> **Binary naming convention:** every daemon executable keeps the `*_d` suffix (`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d`). Per the 2026-07-05 naming decision, the module name was unified from `daemon` → `daemons` (directory, CMake target `airy_daemons`, repo `daemons.git`), but the 17 process binary names were deliberately preserved.
+> **Binary naming convention:** every daemon executable keeps the `*_d` suffix (`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d`). Per the 2026-07-05 naming decision, the module name was unified from `daemon` → `daemons` (directory, CMake target `airy_daemons`, repo `daemons.git`), but the 18 process binary names were deliberately preserved.
 
 > **Phase 3 refactor (0.1.3):** `mem_d / agent_d / a2a_d / think_d / cupolas_d` were split out of the gateway process into independent daemons (execution-body centralization). `gateway_d` now forwards their namespaces through the syscall layer (`airy_sys_svc_call`), keeping the gateway as a pure protocol boundary.
 
@@ -245,7 +247,7 @@ cmake -S . -B /tmp/daemons-build -DBUILD_ALL_PLATFORMS=ON
 
 ### Build artifacts
 
-- 17 daemon executables: `gateway_d`, `llm_d`, `tool_d`, `sched_d`, `market_d`, `monit_d`, `channel_d`, `info_d`, `notify_d`, `observe_d`, `hook_d`, `plugin_d`, `mem_d`, `agent_d`, `a2a_d`, `think_d`, `cupolas_d` — output to `${CMAKE_BINARY_DIR}/bin/`
+- 18 daemon executables: `gateway_d`, `llm_d`, `tool_d`, `sched_d`, `market_d`, `monit_d`, `channel_d`, `info_d`, `notify_d`, `observe_d`, `hook_d`, `plugin_d`, `mem_d`, `agent_d`, `a2a_d`, `think_d`, `cupolas_d`, `maths_d` — output to `${CMAKE_BINARY_DIR}/bin/`
 - `svc_common` — shared static library consumed (PRIVATE-linked) by every daemon
 - Public headers installed under `include/agentrt/`
 

@@ -1,17 +1,17 @@
-# daemons — 运行时守护进程服务（17 个守护进程）
+# daemons — 运行时守护进程服务（18 个守护进程）
 
 > Airymax 智能体运行时的用户态服务层：Airymax 内核之上的后端服务支撑。
 > [agentrt](../) 管理仓下的叶子仓。
 
 **语言:** [English](README.md) | 简体中文
 
-[![Version](https://img.shields.io/badge/version-0.1.3-5a6b7e)](https://atomgit.com/openairymax/daemons)
+[![Version](https://img.shields.io/badge/version-0.1.4-5a6b7e)](https://atomgit.com/openairymax/daemons)
 [![License](https://img.shields.io/badge/license-AGPL--3.0+Apache--2.0-4a90d9)](LICENSE)
 [![C11](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/11)
 
 - **仓库：** `git@atomgit.com:openairymax/daemons.git`
 - **分支：** `develop/hubs-01`
-- **版本：** 0.1.3（与 agentrt 管理仓对齐）
+- **版本：** 0.1.4（与 agentrt 管理仓对齐）
 
 ---
 
@@ -74,6 +74,7 @@ daemons/
 ├── a2a_d/                         # Agent 间通信（A2A）守护进程（a2a.* 命名空间）
 ├── think_d/                       # 双思考 / GRAD 认知守护进程（think.* 命名空间）
 ├── cupolas_d/                     # Cupolas 安全穹顶守护进程（cupolas.* 命名空间）
+├── maths_d/                       # 数学外挂计算守护进程（maths.* 命名空间）
 ├── examples/                      # 使用示例（example_svc_usage.c）
 └── scripts/                       # 构建 / CI / 分析脚本
     ├── ci.sh                      # CI 流水线构建脚本
@@ -101,7 +102,7 @@ daemons/
 
 ## 核心组件
 
-### 17 个守护进程
+### 18 个守护进程
 
 | # | 守护进程 | 目录 | 职责 | CMake Target |
 |---|----------|------|------|--------------|
@@ -122,8 +123,9 @@ daemons/
 | 15 | **A2A 协议** | `a2a_d/` | Agent 间通信（`a2a.*` 命名空间）：A2A 协议消息交换 | `a2a_d` |
 | 16 | **双思考认知** | `think_d/` | 双思考 / GRAD 批判循环引擎（`think.*` 命名空间）：think.process / think.orchestrate / think.get_stats | `think_d` |
 | 17 | **Cupolas 安全穹顶** | `cupolas_d/` | 独立安全穹顶（`cupolas.*` 命名空间）：权限引擎、输入净化、审计日志、隔离工位 | `cupolas_d` |
+| 18 | **数学外挂计算** | `maths_d/` | 数学表达式求值 / 统计 / 表达式识别（`maths.*` 命名空间）：纯 C 递归下降求值器，零外部依赖，仅沙箱数值求值 | `maths_d` |
 
-> **二进制命名规范：** 每个守护进程可执行文件保留 `*_d` 后缀（`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d`）。根据 2026-07-05 改名决策，模块名从 `daemon` 统一为 `daemons`（目录、CMake target `airy_daemons`、仓库 `daemons.git`），但 17 个进程二进制名被刻意保留。
+> **二进制命名规范：** 每个守护进程可执行文件保留 `*_d` 后缀（`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d`）。根据 2026-07-05 改名决策，模块名从 `daemon` 统一为 `daemons`（目录、CMake target `airy_daemons`、仓库 `daemons.git`），但 18 个进程二进制名被刻意保留。
 
 > **0.1.3 阶段 3 重构：** `mem_d / agent_d / a2a_d / think_d / cupolas_d` 从 gateway 进程拆分为独立 daemon（执行体集中化）。`gateway_d` 现在经 syscall 层（`airy_sys_svc_call`）转发这些命名空间，保持网关为纯协议边界。
 
@@ -135,7 +137,7 @@ daemons/
 ├──────────────────────────────────────────────────────────────┤
 │   SDK (sdk-python / sdk-go / sdk-rust / sdk-typescript ...)   │
 ├──────────────────────────────────────────────────────────────┤
-│   ★ daemons (服务层 — 17 个守护进程 + svc_common) ★          │
+│   ★ daemons (服务层 — 18 个守护进程 + svc_common) ★          │
 │                                                               │
 │   gateway_d ─→ HTTP / WS / Stdio / MCP / A2A / OpenAI API     │
 │              ↓                                                │
@@ -245,7 +247,7 @@ cmake -S . -B /tmp/daemons-build -DBUILD_ALL_PLATFORMS=ON
 
 ### 构建产物
 
-- 17 个守护进程可执行文件：`gateway_d`、`llm_d`、`tool_d`、`sched_d`、`market_d`、`monit_d`、`channel_d`、`info_d`、`notify_d`、`observe_d`、`hook_d`、`plugin_d`、`mem_d`、`agent_d`、`a2a_d`、`think_d`、`cupolas_d`——输出到 `${CMAKE_BINARY_DIR}/bin/`
+- 18 个守护进程可执行文件：`gateway_d`、`llm_d`、`tool_d`、`sched_d`、`market_d`、`monit_d`、`channel_d`、`info_d`、`notify_d`、`observe_d`、`hook_d`、`plugin_d`、`mem_d`、`agent_d`、`a2a_d`、`think_d`、`cupolas_d`、`maths_d`——输出到 `${CMAKE_BINARY_DIR}/bin/`
 - `svc_common` —— 每个守护进程消费（PRIVATE 链接）的共享静态库
 - 公共头文件安装到 `include/agentrt/`
 
