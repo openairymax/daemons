@@ -513,9 +513,20 @@ static void svc_yaml_finalize_model(svc_yaml_state_t *st)
                           sizeof(st->models[st->model_count].name));
         AIRY_STRNCPY_TERM(st->models[st->model_count].provider, prov_name,
                           sizeof(st->models[st->model_count].provider));
-        if (e)
+        if (e && e[0]) {
             AIRY_STRNCPY_TERM(st->models[st->model_count].api_key_env, e,
                               sizeof(st->models[st->model_count].api_key_env));
+        } else if (!(mode && strcasecmp(mode, "local") == 0)) {
+            /* api_key_env 自动映射（q7）：连接表行留空/缺省时按行号生成
+             * MODEL_<序号>_API_KEY（序号 = 表中行序，1 起）。用户接入新
+             * 模型只需在 secrets.env 增加 MODEL_N_API_KEY=xxx 一个 Key 位，
+             * 无需理解 env 变量名与表格行的映射关系。local 模式无 key，
+             * 保持空。 */
+            char auto_env[64];
+            snprintf(auto_env, sizeof(auto_env), "MODEL_%zu_API_KEY", st->model_count + 1);
+            AIRY_STRNCPY_TERM(st->models[st->model_count].api_key_env, auto_env,
+                              sizeof(st->models[st->model_count].api_key_env));
+        }
         if (ep)
             AIRY_STRNCPY_TERM(st->models[st->model_count].endpoint, ep,
                               sizeof(st->models[st->model_count].endpoint));
