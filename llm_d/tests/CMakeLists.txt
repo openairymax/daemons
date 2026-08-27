@@ -28,8 +28,14 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/response.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/cost_tracker.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/registry.c
+    # provider.c / openai.c 域拆分（2026-08-27）：与主目标 LLM_SERVICE_SOURCES 同步
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/provider.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/provider_http.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/provider_codec.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/provider_stream.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/openai.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/openai_rate_limit.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/openai_stream.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/anthropic.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/deepseek.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/google.c
