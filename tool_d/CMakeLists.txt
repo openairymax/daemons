@@ -27,8 +27,14 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 # tool_svc_adapter 为独立静态库，供 tool_d 可执行文件、atoms/coreloopthree
 # 测试和集成测试共用，消除桩函数依赖。
 # 排除 main.c（含 main()）、config.c、utils/tool_helpers.c（daemon 专用工具函数）。
+# service.c 按单一职责拆分（2026-08-27）：
+#   service.c            生命周期/注册表/统计/资源释放/交互审批域
+#   service_builtin.c    builtin 工具注册 + AIRY_AGENT_ACL 预授权域
+#   service_execute.c    工具执行域（同步/流式 + 缓存）
 set(TOOL_SERVICE_SOURCES
     src/service.c
+    src/service_builtin.c
+    src/service_execute.c
     src/registry.c
     src/executor.c
     src/validator.c
