@@ -163,10 +163,25 @@ int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model, const
                      char **out_text, uint64_t *out_tokens, double *out_cost,
                      char **out_reasoning);
 
-/* ---- gateway_biz_agent.c (agent.run orchestration) ---- */
+/* ---- gateway_biz_agent.c / gateway_biz_agent_session.c (agent.run
+ *       orchestration + session registry) ----
+ * 2026-08-27：gateway_biz_agent.c 按单一职责再拆分，会话注册表 / 编排
+ * 辅助 / spec 解析 / 记忆持久化迁至 gateway_biz_agent_session.c，
+ * 原 static 函数提升为非 static 并在此声明。 */
 bool gw_active_is_cancelled(gw_active_request_t *entry);
 char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx);
 char *handle_agent_cancel(cJSON *root, gateway_business_ctx_t *ctx);
+
+/* ---- gateway_biz_agent_session.c（agent.run 会话/编排域） ---- */
+void gw_gen_session_id(char *out, size_t out_size);
+void gw_agent_record_event(const char *session_id, const char *category, cJSON *content);
+gw_active_request_t *gw_active_register(gateway_business_ctx_t *ctx, const char *session_id);
+void gw_active_unregister(gateway_business_ctx_t *ctx, gw_active_request_t *entry);
+int gw_agent_run_orchestrate(const gateway_business_ctx_t *ctx, const cJSON *agent_spec,
+                             const char *prompt, char **out_text, char **out_err);
+cJSON *gw_agent_spec_from_agent_file(const cJSON *params);
+void gw_persist_conversation(const gateway_business_ctx_t *ctx, const char *session_id,
+                             const char *user_prompt, const char *assistant_text);
 
 #ifdef __cplusplus
 }
