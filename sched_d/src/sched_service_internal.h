@@ -7,8 +7,9 @@
  *        domain + blueprint-scheduling DAG domain).
  * @details Defines struct sched_service (opaque externally; full layout
  *          here) and the DAG task-graph internal structures; declares
- *          cross-file shared helpers. For use only by the sched_service_impl.c
- *          and sched_dag_impl.c translation units.
+ *          cross-file shared helpers. For use only by the sched_service_*.c
+ *          and sched_dag_*.c translation units (split by functional domain:
+ *          impl/agent/task/worker + dag_impl/engine/worker/parse).
  */
 
 #ifndef AIRY_RT_SCHED_SERVICE_INTERNAL_H
@@ -127,6 +128,13 @@ struct sched_service {
  *   stop_workers). */
 uint64_t sched_now_ms(void);
 void *sched_dag_worker_thread(void *arg);
+
+/* Work-hall event wiring (2.8b, best-effort progress/result writes; defined
+ * in sched_service_task.c, shared with the worker thread in
+ * sched_service_worker.c). */
+void sched_hall_progress(const char *task_id, const char *event, int priority);
+void sched_hall_result(const char *task_id, const char *agent, const char *status,
+                       uint64_t elapsed_ms, const char *output, const char *error);
 
 /* DAG JSON parsing and topological validation (defined in
  * sched_dag_parse.c, called by sched_service_submit_dag): on success
