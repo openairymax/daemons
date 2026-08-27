@@ -27,9 +27,18 @@ set(SCHED_D_SOURCES
     src/main.c
     src/monitor.c
     src/roadmap_rpc.c
+    # sched_service_impl.c / sched_dag_impl.c / main.c 已按功能域拆分
+    # （单一职责），新增域文件如下：
     src/sched_service_impl.c
+    src/sched_service_agent.c
+    src/sched_service_task.c
+    src/sched_service_worker.c
     src/sched_dag_impl.c
+    src/sched_dag_engine.c
+    src/sched_dag_worker.c
     src/sched_dag_parse.c
+    src/sched_rpc_handlers.c
+    src/sched_dispatch.c
     src/sched_svc_adapter.c
     src/strategies/weighted.c
     src/strategies/round_robin.c
