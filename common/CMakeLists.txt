@@ -25,51 +25,65 @@ endif()
 
 set(ATOMS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../atoms")
 
+# 2026-08-27 目录原子化：src/ 按功能域组织为 8 个子目录
+#   svc/ 服务框架 · auth/ 认证中间件 · ipc/ IPC 总线与客户端 · discovery/ 服务发现
+#   security/ daemon 安全 · daemon/ daemon 引导与生命周期 · event/ 事件循环 · util/ 通用设施
 set(SVC_COMMON_SOURCES
-    src/svc_common.c          # 服务框架核心实现（service 生命周期域）
-    src/svc_registry.c        # 跨进程注册中心客户端（registry 域）
-    src/svc_config.c          # 配置文件加载与监视（config 域）
-    src/svc_monitor.c         # 服务监控与降级处理（monitor/degradation 域）
-    src/svc_client.c          # 服务通信客户端（client 域）
-    src/ipc_client.c
-    src/ipc_service_bus.c     # IPC服务总线
-    src/ipc_bus_helper.c       # C-L09: daemon IPC Bus 自动注册便捷层
-    src/service_discovery.c   # 跨进程服务发现
-    src/service_discovery_lb.c # 跨进程服务发现-负载均衡
-    src/service_discovery_api.c # 跨进程服务发现-操作 API
-    src/service_discovery_stats.c # 跨进程服务发现-统计
-    src/service_discovery_backend_shm.c # 跨进程服务发现-shm 后端
-    src/service_discovery_backend_file.c # 跨进程服务发现-file 后端
-    src/service_discovery_helper.c  # C-L08: daemon 自动注册便捷层
-    src/circuit_breaker.c     # 熔断器与自愈
-    src/unified_metrics.c     # 统一指标收集
-    src/alert_manager.c       # 智能告警管理
-    src/config_manager.c      # 统一配置管理
-    src/svc_auth.c
-    src/svc_auth_jwt.c       # 认证中间件-JWT 域
-    src/svc_auth_apikey.c    # 认证中间件-API Key 域
-    src/svc_auth_ratelimit.c # 认证中间件-限流域
-    src/daemon_security.c
-    src/jsonrpc_helpers.c
-    src/method_dispatcher.c
-    src/input_validator.c
-    src/param_validator.c
-    src/log_sanitizer.c
-    src/platform_compat.c     # 平台兼容层实现
-    src/airy_event_loop.c  # 事件驱动循环
-    src/daemon_event_driver.c # 统一事件驱动框架
-    src/api_recovery.c        # API恢复系统
-    src/thread_pool.c         # 工作线程池
-    src/daemon_task_dispatcher.c # 工具并行执行引擎（原 parallel_dispatcher.c，重命名以消除与 atoms/coreloopthree 同名冲突）
-    src/daemon_oom.c          # P1.22: Daemon OOM 降级回调注册
-    src/ipc_backpressure.c    # P1.24: IPC Bus 背压控制
-    src/daemon_bootstrap_sd.c    # P1.7 C-L08: daemon ServiceDiscovery 一键引导
-    src/daemon_bootstrap_ipc.c   # P1.7 C-L09: daemon IPC Bus 一键引导
-    src/daemon_cupolas_bootstrap.c # P3.14 ACC-DT15: daemon 统一 cupolas 安全穹顶引导
-    src/daemon_rpc_client.c       # Phase 3: gateway→daemon thin IPC client (Unix socket JSON-RPC)
-    src/svc_model_defaults.c      # A2-1: model.yaml global 段默认模型提取（llm_d/gateway_d 共用）
-    src/daemon_heapstore_bootstrap.c # KER-05~07: daemon 统一 heapstore 运行时数据存储引导
-    src/hall_writer.c          # 2.8: daemon 侧事件流写端（单一真相源 hall 事件）
+    src/svc/svc_common.c          # 服务框架核心实现（service 生命周期域）
+    src/svc/svc_common_registry.c # Phase 2.3a: 进程内服务注册表域（从 svc_common.c 拆分）
+    src/svc/svc_common_ops.c      # Phase 2.3a: 状态查询/异步请求域（从 svc_common.c 拆分）
+    src/svc/svc_registry.c        # 跨进程注册中心客户端（registry 域）
+    src/svc/svc_config.c          # 配置文件加载与监视（config 域）
+    src/svc/svc_monitor.c         # 服务监控与降级处理（monitor/degradation 域）
+    src/svc/svc_client.c          # 服务通信客户端（client 域）
+    src/svc/svc_model_defaults.c  # A2-1: model.yaml global 段默认模型提取（llm_d/gateway_d 共用）
+    src/ipc/ipc_client.c
+    src/ipc/ipc_service_bus.c     # IPC服务总线（总线核心域）
+    src/ipc/ipc_service_bus_endpoint.c # Phase 2.3a: IPC服务总线-处理器/端点注册发现域（从 ipc_service_bus.c 拆分）
+    src/ipc/ipc_service_bus_message.c  # Phase 2.3a: IPC服务总线-消息域（从 ipc_service_bus.c 拆分）
+    src/ipc/ipc_bus_helper.c       # C-L09: daemon IPC Bus 自动注册便捷层
+    src/ipc/ipc_backpressure.c    # P1.24: IPC Bus 背压控制
+    src/discovery/service_discovery.c   # 跨进程服务发现
+    src/discovery/service_discovery_lb.c # 跨进程服务发现-负载均衡
+    src/discovery/service_discovery_api.c # 跨进程服务发现-操作 API
+    src/discovery/service_discovery_stats.c # 跨进程服务发现-统计
+    src/discovery/service_discovery_backend_shm.c # 跨进程服务发现-shm 后端
+    src/discovery/service_discovery_backend_file.c # 跨进程服务发现-file 后端
+    src/discovery/service_discovery_helper.c  # C-L08: daemon 自动注册便捷层
+    src/util/circuit_breaker.c     # 熔断器与自愈
+    src/util/unified_metrics.c     # 统一指标收集
+    src/util/alert_manager.c       # 智能告警管理
+    src/util/config_manager.c      # 统一配置管理
+    src/auth/svc_auth.c
+    src/auth/svc_auth_jwt.c       # 认证中间件-JWT 域
+    src/auth/svc_auth_apikey.c    # 认证中间件-API Key 域
+    src/auth/svc_auth_ratelimit.c # 认证中间件-限流域
+    src/security/daemon_security.c     # daemon 安全集成（初始化/消毒域）
+    src/security/daemon_security_acl.c       # Phase 2.3a: daemon 安全-ACL 权限域（从 daemon_security.c 拆分）
+    src/security/daemon_security_signature.c # Phase 2.3a: daemon 安全-包签名验证域（从 daemon_security.c 拆分）
+    src/security/daemon_security_vault.c     # Phase 2.3a: daemon 安全-凭据/审计域（从 daemon_security.c 拆分）
+    src/util/jsonrpc_helpers.c
+    src/util/method_dispatcher.c
+    src/util/input_validator.c
+    src/util/param_validator.c
+    src/util/log_sanitizer.c
+    src/util/platform_compat.c     # 平台兼容层实现
+    src/event/airy_event_loop.c  # 事件驱动循环（核心门面：stop/定时器委托）
+    src/event/airy_event_loop_epoll.c  # 事件循环-Linux epoll 后端（IO 多路复用+回调分发，从 event_loop 拆分）
+    src/event/airy_event_loop_win.c    # 事件循环-Windows WSA 后端（从 event_loop 拆分）
+    src/event/airy_event_loop_kqueue.c # 事件循环-macOS/BSD kqueue 后端（从 event_loop 拆分）
+    src/event/airy_event_timer.c   # 事件循环定时器管理（从 event_loop 拆分）
+    src/daemon/daemon_event_driver.c # 统一事件驱动框架
+    src/util/api_recovery.c        # API恢复系统
+    src/util/thread_pool.c         # 工作线程池
+    src/daemon/daemon_task_dispatcher.c # 工具并行执行引擎（原 parallel_dispatcher.c，重命名以消除与 atoms/coreloopthree 同名冲突）
+    src/daemon/daemon_oom.c          # P1.22: Daemon OOM 降级回调注册
+    src/daemon/daemon_bootstrap_sd.c    # P1.7 C-L08: daemon ServiceDiscovery 一键引导
+    src/daemon/daemon_bootstrap_ipc.c   # P1.7 C-L09: daemon IPC Bus 一键引导
+    src/daemon/daemon_cupolas_bootstrap.c # P3.14 ACC-DT15: daemon 统一 cupolas 安全穹顶引导
+    src/daemon/daemon_rpc_client.c       # Phase 3: gateway→daemon thin IPC client (Unix socket JSON-RPC)
+    src/daemon/daemon_heapstore_bootstrap.c # KER-05~07: daemon 统一 heapstore 运行时数据存储引导
+    src/util/hall_writer.c          # 2.8: daemon 侧事件流写端（单一真相源 hall 事件）
 )
 
 # 创建静态库
@@ -169,6 +183,15 @@ target_include_directories(svc_common PUBLIC
     $<BUILD_INTERFACE:${COMMONS_DIR}/include>
     # daemons/common/include 兼容层路径（放最后，避免 atoms 误命中重导出兼容头）
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    # 2026-08-27 目录原子化：src/ 子目录供内部裸名 include 解析（私有实现细节）
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/svc>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/auth>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/ipc>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/discovery>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/security>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/daemon>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/event>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/util>
     $<INSTALL_INTERFACE:include/agentrt>
 )
 

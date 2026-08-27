@@ -10,14 +10,14 @@
 [![C11](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/11)
 
 - **仓库：** `git@atomgit.com:openairymax/daemons.git`
-- **分支：** `develop/hubs-01`
+- **分支：** `feature/official-hubs-01`
 - **版本：** 0.1.5（与 agentrt 管理仓对齐）
 
 ---
 
 ## 概览
 
-**daemons** 是 Airymax 智能体运行时的**用户态服务层**。它由 **17 个独立守护进程**——`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d`——以及共享静态库 `svc_common`（位于 `common/`）共同组成。每个守护进程遵循**职责单一原则**：独立进程运行，通过统一 IPC 服务总线协作通信，共同构成位于 Airymax 内核之上的高可用、可扩展、可插拔微服务架构。
+**daemons** 是 Airymax 智能体运行时的**用户态服务层**。它由 **18 个独立守护进程**——`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d`——以及共享静态库 `svc_common`（位于 `common/`）共同组成。每个守护进程遵循**职责单一原则**：独立进程运行，通过统一 IPC 服务总线协作通信，共同构成位于 Airymax 内核之上的高可用、可扩展、可插拔微服务架构。
 
 ```
 外部客户端 → gateway_d → (其他守护进程经 ipc_service_bus) → atoms/syscall → 内核服务
@@ -45,7 +45,7 @@ daemons 是服务/组合模块：它不提供基础原语，而是将原语组�
 
 ```
 daemons/
-├── CMakeLists.txt                 # 顶层构建文件；管理全部 17 个守护进程 + svc_common
+├── CMakeLists.txt                 # 顶层构建文件；管理全部 18 个守护进程 + svc_common
 ├── Dockerfile.ci                  # CI 环境 Docker 镜像
 ├── README.md                      # 英文版
 ├── README_zh.md                   # 本文件（中文）
@@ -75,7 +75,6 @@ daemons/
 ├── think_d/                       # 双思考 / GRAD 认知守护进程（think.* 命名空间）
 ├── cupolas_d/                     # Cupolas 安全穹顶守护进程（cupolas.* 命名空间）
 ├── maths_d/                       # 数学外挂计算守护进程（maths.* 命名空间）
-├── examples/                      # 使用示例（example_svc_usage.c）
 └── scripts/                       # 构建 / CI / 分析脚本
     ├── ci.sh                      # CI 流水线构建脚本
     ├── local-ci.sh                # 本地 CI 模拟脚本

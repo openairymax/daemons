@@ -13,6 +13,13 @@ set(COREKERN_INCLUDE_DIR ${ATOMIC_DIR}/corekern/include)
 set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_config.c
+    # service_config.c 域拆分（2026-08-27）：核心 + 5 个职责模块，须与主目标同步；
+    # yaml 四件整体受 #ifdef HAVE_YAML 保护，非 YAML 构建下为空翻译单元
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_config_json.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_config_yaml.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_config_yaml_models.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_config_yaml_providers.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_config_yaml_pricing.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_providers.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_request.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_metrics.c

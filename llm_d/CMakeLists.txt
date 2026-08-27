@@ -37,6 +37,13 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 set(LLM_SERVICE_SOURCES
     src/service.c
     src/service_config.c
+    # service_config.c 域拆分（2026-08-27：1159 行 → 核心 + 5 个职责模块；
+    # yaml 四件整体受 #ifdef HAVE_YAML 保护，非 YAML 构建下为空翻译单元，无条件列出无害）
+    src/service_config_json.c
+    src/service_config_yaml.c
+    src/service_config_yaml_models.c
+    src/service_config_yaml_providers.c
+    src/service_config_yaml_pricing.c
     src/service_providers.c
     src/service_request.c
     src/service_metrics.c
@@ -143,9 +150,14 @@ else()
 endif()
 
 # ==================== LLM daemon 可执行文件 ====================
-# main.c 仅属于 daemon 可执行文件；llm_svc_adapter.c 已纳入 airy_llm_service 库
+# main.c 域拆分（2026-08-27：1033 行 → 纯入口 + 3 个 daemon 模块）。
+# daemon 四件共享 DAEMON_DECLARE_COMMON 宏实例化产生的 static 符号，仅随
+# llm_d 可执行目标构建，不入 airy_llm_service 静态库（main.c 同理）。
 add_executable(llm_d
     src/main.c
+    src/llm_daemon_request.c
+    src/llm_daemon_methods.c
+    src/llm_daemon_config.c
 )
 
 if(WIN32)

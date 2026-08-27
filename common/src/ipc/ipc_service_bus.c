@@ -3,99 +3,41 @@
 
 /**
  * @file ipc_service_bus.c
- * @brief IPC service-bus implementation - unified inter-daemon comm framework.
+ * @brief IPC service-bus implementation - bus core domain.
  *
  * Implements an efficient communication-abstraction layer between daemons,
  * integrating the UnifiedProtocol stack, supporting multi-protocol message
  * passing, service discovery and load balancing.
  *
+ * Phase 2.3a split: this file keeps the bus lifecycle (create/destroy/
+ * start/stop), channel basics, send/request/broadcast/notify transport and
+ * stats; the other domains were split out:
+ * - handler/endpoint registry + discovery -> ipc_service_bus_endpoint.c
+ * - message factory + header init         -> ipc_service_bus_message.c
+ * Cross-file shared structs and init_message_header() are declared in
+ * ipc_service_bus_internal.h (internal to this static lib, not public API).
+ *
  * @see ipc_service_bus.h
+ * @see agentrt/daemons/common/src/ipc_service_bus_internal.h
  */
 
 #include "ipc_service_bus.h"
+#include "ipc_service_bus_internal.h"
 
-#include "atomic_compat.h"
 #include "ipc_client.h"
 #include "airy_memory.h"
-#include "platform.h"
 #include "safe_string_utils.h"
 #include "svc_common.h"
 #include "svc_logger.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include "error.h"
 
 #include "daemon_errors.h"
 
-#define IPC_BUS_MAX_HANDLERS 16
-#define IPC_BUS_MAX_EVENTS 32
-#define IPC_BUS_MAX_PENDING 256
-#define IPC_BUS_HASH_SEED 0x9e3779b9
-
-typedef struct {
-    ipc_bus_message_handler_t handler;
-    void *user_data;
-} message_handler_entry_t;
-
-typedef struct {
-    char event_name[64];
-    ipc_bus_event_handler_t handler;
-    void *user_data;
-} event_handler_entry_t;
-
-typedef struct {
-    uint64_t msg_id;
-    ipc_bus_message_t *response;
-    atomic_int completed;
-    airy_mtx_t mutex;
-    airy_cond_t cond;
-} pending_request_t;
-
-typedef struct ipc_bus_channel_s {
-    char name[IPC_BUS_CHANNEL_NAME_LEN];
-    ipc_bus_channel_config_t config;
-    message_handler_entry_t handlers[IPC_BUS_MAX_HANDLERS];
-    uint32_t handler_count;
-    bool active;
-    struct ipc_bus_channel_s *next;
-} ipc_bus_channel_internal_t;
-
-typedef struct ipc_service_bus_s {
-    char name[IPC_BUS_SERVICE_ID_LEN];
-    ipc_bus_channel_config_t default_config;
-    ipc_bus_endpoint_t endpoints[IPC_BUS_MAX_SERVICES];
-    uint32_t endpoint_count;
-    ipc_bus_channel_internal_t *channels;
-    uint32_t channel_count;
-    event_handler_entry_t event_handlers[IPC_BUS_MAX_EVENTS];
-    uint32_t event_handler_count;
-    pending_request_t pending[IPC_BUS_MAX_PENDING];
-    uint32_t pending_count;
-    ipc_bus_stats_t stats;
-    bool running;
-    airy_mtx_t mutex;
-    uint64_t next_msg_id;
-} ipc_service_bus_internal_t;
-
 static uint64_t g_bus_instance_count = 0;
-
-static uint32_t compute_checksum(const void *data, size_t len)
-{
-    const uint8_t *bytes = (const uint8_t *)data;
-    uint32_t crc = 0xFFFFFFFF;
-    for (size_t i = 0; i < len; i++) {
-        crc ^= bytes[i];
-        for (int j = 0; j < 8; j++) {
-            if (crc & 1)
-                crc = (crc >> 1) ^ 0xEDB88320;
-            else
-                crc >>= 1;
-        }
-    }
-    return ~crc;
-}
 
 static ipc_bus_channel_internal_t *find_channel(ipc_service_bus_internal_t *bus, const char *name)
 {
@@ -106,32 +48,6 @@ static ipc_bus_channel_internal_t *find_channel(ipc_service_bus_internal_t *bus,
         ch = ch->next;
     }
     AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
-}
-
-static int32_t find_endpoint_index(ipc_service_bus_internal_t *bus, const char *service_name)
-{
-    for (uint32_t i = 0; i < bus->endpoint_count; i++) {
-        if (strcmp(bus->endpoints[i].service_name, service_name) == 0)
-            return (int32_t)i;
-    }
-    return AIRY_ERR_NOT_FOUND;
-}
-
-static void init_message_header(ipc_bus_message_header_t *header, ipc_bus_msg_type_t msg_type,
-                                ipc_bus_proto_t protocol, const char *source, const char *target)
-{
-    __builtin_memset(header, 0, sizeof(ipc_bus_message_header_t));
-    /* [SC] A-IPC 标准头（Layout C v4 前置 128B，与 agentrt-linux wire 兼容） */
-    header->aipc.magic = AIRY_IPC_MAGIC;
-    header->aipc.opcode = AIRY_IPC_OP_SEND;
-    /* 扩展段：service bus 语义字段 */
-    header->msg_type = msg_type;
-    header->protocol = protocol;
-    header->timestamp = airy_time_ms();
-    if (source)
-        safe_strcpy(header->source, source, IPC_BUS_SERVICE_ID_LEN);
-    if (target)
-        safe_strcpy(header->target, target, IPC_BUS_SERVICE_ID_LEN);
 }
 
 AIRY_API ipc_service_bus_t ipc_service_bus_create(const char *bus_name,
@@ -155,7 +71,7 @@ AIRY_API ipc_service_bus_t ipc_service_bus_create(const char *bus_name,
     if (config) {
         __builtin_memcpy(&bus->default_config, config, sizeof(ipc_bus_channel_config_t));
     } else {
-        __builtin_memset(&bus->default_config, 0, sizeof(ipc_bus_channel_config_t));
+        AIRY_MEMSET(&bus->default_config, 0, sizeof(ipc_bus_channel_config_t));
         safe_strcpy(bus->default_config.name, "default", IPC_BUS_CHANNEL_NAME_LEN);
         bus->default_config.default_protocol = IPC_BUS_PROTO_JSON_RPC;
         bus->default_config.timeout_ms = IPC_BUS_DEFAULT_TIMEOUT_MS;
@@ -529,382 +445,6 @@ AIRY_API airy_err_t ipc_service_bus_notify(ipc_service_bus_t bus_handle, const c
     return err;
 }
 
-AIRY_API airy_err_t ipc_service_bus_register_handler(ipc_service_bus_t bus_handle,
-                                                     ipc_bus_message_handler_t handler,
-                                                     void *user_data)
-{
-    if (!bus_handle || !handler)
-        return AIRY_EINVAL;
-
-    ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
-
-    airy_mtx_lock(&bus->mutex);
-
-    if (bus->channel_count == 0) {
-        ipc_bus_channel_config_t config;
-        __builtin_memcpy(&config, &bus->default_config, sizeof(ipc_bus_channel_config_t));
-        safe_strcpy(config.name, "default", IPC_BUS_CHANNEL_NAME_LEN);
-        airy_mtx_unlock(&bus->mutex);
-
-        ipc_bus_channel_t ch = ipc_bus_channel_create(bus_handle, &config);
-        if (!ch)
-            return AIRY_ENOMEM;
-
-        airy_mtx_lock(&bus->mutex);
-    }
-
-    ipc_bus_channel_internal_t *ch = bus->channels;
-    if (!ch || ch->handler_count >= IPC_BUS_MAX_HANDLERS) {
-        airy_mtx_unlock(&bus->mutex);
-        return AIRY_ENOMEM;
-    }
-
-    ch->handlers[ch->handler_count].handler = handler;
-    ch->handlers[ch->handler_count].user_data = user_data;
-    ch->handler_count++;
-
-    airy_mtx_unlock(&bus->mutex);
-
-    AIRY_LOG_INFO("Message handler registered on bus '%s'", bus->name);
-    return AIRY_SUCCESS;
-}
-
-AIRY_API airy_err_t ipc_service_bus_unregister_handler(ipc_service_bus_t bus_handle,
-                                                       ipc_bus_message_handler_t handler)
-{
-    if (!bus_handle || !handler)
-        return AIRY_EINVAL;
-
-    ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
-
-    airy_mtx_lock(&bus->mutex);
-
-    ipc_bus_channel_internal_t *ch = bus->channels;
-    while (ch) {
-        for (uint32_t i = 0; i < ch->handler_count; i++) {
-            if (ch->handlers[i].handler == handler) {
-                if (i < ch->handler_count - 1) {
-                    ch->handlers[i] = ch->handlers[ch->handler_count - 1];
-                }
-                ch->handler_count--;
-                break;
-            }
-        }
-        ch = ch->next;
-    }
-
-    airy_mtx_unlock(&bus->mutex);
-    return AIRY_SUCCESS;
-}
-
-AIRY_API airy_err_t ipc_service_bus_register_event_handler(ipc_service_bus_t bus_handle,
-                                                           const char *event_name,
-                                                           ipc_bus_event_handler_t handler,
-                                                           void *user_data)
-{
-    if (!bus_handle || !event_name || !handler)
-        return AIRY_EINVAL;
-
-    ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
-
-    airy_mtx_lock(&bus->mutex);
-
-    if (bus->event_handler_count >= IPC_BUS_MAX_EVENTS) {
-        airy_mtx_unlock(&bus->mutex);
-        return AIRY_ENOMEM;
-    }
-
-    event_handler_entry_t *entry = &bus->event_handlers[bus->event_handler_count];
-    safe_strcpy(entry->event_name, event_name, sizeof(entry->event_name));
-    entry->handler = handler;
-    entry->user_data = user_data;
-    bus->event_handler_count++;
-
-    airy_mtx_unlock(&bus->mutex);
-
-    AIRY_LOG_INFO("Event handler registered for '%s' on bus '%s'", event_name, bus->name);
-    return AIRY_SUCCESS;
-}
-
-AIRY_API airy_err_t ipc_service_bus_register_endpoint(ipc_service_bus_t bus_handle,
-                                                      const ipc_bus_endpoint_t *endpoint)
-{
-    if (!bus_handle || !endpoint)
-        return AIRY_EINVAL;
-
-    ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
-
-    airy_mtx_lock(&bus->mutex);
-
-    int32_t idx = find_endpoint_index(bus, endpoint->service_name);
-    if (idx >= 0) {
-        __builtin_memcpy(&bus->endpoints[idx], endpoint, sizeof(ipc_bus_endpoint_t));
-        bus->endpoints[idx].last_heartbeat = airy_time_ms();
-        airy_mtx_unlock(&bus->mutex);
-        AIRY_LOG_INFO("Endpoint '%s' updated on bus '%s'", endpoint->service_name, bus->name);
-        return AIRY_SUCCESS;
-    }
-
-    if (bus->endpoint_count >= IPC_BUS_MAX_SERVICES) {
-        airy_mtx_unlock(&bus->mutex);
-        return AIRY_ENOMEM;
-    }
-
-    __builtin_memcpy(&bus->endpoints[bus->endpoint_count], endpoint, sizeof(ipc_bus_endpoint_t));
-    bus->endpoints[bus->endpoint_count].last_heartbeat = airy_time_ms();
-    bus->endpoint_count++;
-    bus->stats.active_endpoints = bus->endpoint_count;
-
-    airy_mtx_unlock(&bus->mutex);
-
-    AIRY_LOG_INFO("Endpoint '%s' registered on bus '%s' (endpoint=%s)", endpoint->service_name,
-             bus->name, endpoint->endpoint);
-    return AIRY_SUCCESS;
-}
-
-AIRY_API airy_err_t ipc_service_bus_unregister_endpoint(ipc_service_bus_t bus_handle,
-                                                        const char *service_name)
-{
-    if (!bus_handle || !service_name)
-        return AIRY_EINVAL;
-
-    ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
-
-    airy_mtx_lock(&bus->mutex);
-
-    int32_t idx = find_endpoint_index(bus, service_name);
-    if (idx < 0) {
-        airy_mtx_unlock(&bus->mutex);
-        return AIRY_ENOENT;
-    }
-
-    if ((uint32_t)idx < bus->endpoint_count - 1) {
-        bus->endpoints[idx] = bus->endpoints[bus->endpoint_count - 1];
-    }
-    __builtin_memset(&bus->endpoints[bus->endpoint_count - 1], 0, sizeof(ipc_bus_endpoint_t));
-    bus->endpoint_count--;
-    bus->stats.active_endpoints = bus->endpoint_count;
-
-    airy_mtx_unlock(&bus->mutex);
-
-    AIRY_LOG_INFO("Endpoint '%s' unregistered from bus '%s'", service_name, bus->name);
-    return AIRY_SUCCESS;
-}
-
-AIRY_API airy_err_t ipc_service_bus_discover(ipc_service_bus_t bus_handle, const char *service_name,
-                                             ipc_bus_proto_t protocol,
-                                             ipc_bus_endpoint_t *endpoints, uint32_t max_count,
-                                             uint32_t *found_count)
-{
-    if (!bus_handle || !endpoints || !found_count)
-        return AIRY_EINVAL;
-
-    ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
-
-    airy_mtx_lock(&bus->mutex);
-
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < bus->endpoint_count && count < max_count; i++) {
-        ipc_bus_endpoint_t *ep = &bus->endpoints[i];
-
-        if (service_name && service_name[0] && strcmp(ep->service_name, service_name) != 0)
-            continue;
-
-        if (protocol != IPC_BUS_PROTO_AUTO) {
-            bool proto_match = false;
-            for (uint32_t p = 0; p < ep->protocol_count; p++) {
-                if (ep->supported_protocols[p] == protocol) {
-                    proto_match = true;
-                    break;
-                }
-            }
-            if (!proto_match)
-                continue;
-        }
-
-        __builtin_memcpy(&endpoints[count], ep, sizeof(ipc_bus_endpoint_t));
-        count++;
-    }
-
-    *found_count = count;
-    airy_mtx_unlock(&bus->mutex);
-
-    AIRY_LOG_DEBUG("Service discovery: found %u endpoints (name=%s, proto=%d)", count,
-              service_name ? service_name : "*", protocol);
-    return AIRY_SUCCESS;
-}
-
-AIRY_API airy_err_t ipc_service_bus_select_endpoint(ipc_service_bus_t bus_handle,
-                                                    const char *service_name,
-                                                    ipc_bus_proto_t protocol,
-                                                    ipc_bus_endpoint_t *endpoint)
-{
-    if (!bus_handle || !service_name || !endpoint)
-        return AIRY_EINVAL;
-
-    ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
-
-    airy_mtx_lock(&bus->mutex);
-
-    ipc_bus_endpoint_t *best = NULL;
-    uint32_t best_load = UINT32_MAX;
-
-    for (uint32_t i = 0; i < bus->endpoint_count; i++) {
-        ipc_bus_endpoint_t *ep = &bus->endpoints[i];
-
-        if (strcmp(ep->service_name, service_name) != 0)
-            continue;
-        if (!ep->healthy)
-            continue;
-
-        if (protocol != IPC_BUS_PROTO_AUTO) {
-            bool proto_match = false;
-            for (uint32_t p = 0; p < ep->protocol_count; p++) {
-                if (ep->supported_protocols[p] == protocol) {
-                    proto_match = true;
-                    break;
-                }
-            }
-            if (!proto_match)
-                continue;
-        }
-
-        uint32_t load =
-            ep->max_connections > 0 ? ep->active_connections * 100 / ep->max_connections : 0;
-        if (ep->weight > 0)
-            load = load / ep->weight;
-
-        if (load < best_load) {
-            best_load = load;
-            best = ep;
-        }
-    }
-
-    if (!best) {
-        airy_mtx_unlock(&bus->mutex);
-        return AIRY_ENOENT;
-    }
-
-    __builtin_memcpy(endpoint, best, sizeof(ipc_bus_endpoint_t));
-    airy_mtx_unlock(&bus->mutex);
-
-    return AIRY_SUCCESS;
-}
-
-AIRY_API airy_err_t ipc_service_bus_update_endpoint_health(ipc_service_bus_t bus_handle,
-                                                           const char *service_name, bool healthy)
-{
-    if (!bus_handle || !service_name)
-        return AIRY_EINVAL;
-
-    ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
-
-    airy_mtx_lock(&bus->mutex);
-
-    int32_t idx = find_endpoint_index(bus, service_name);
-    if (idx < 0) {
-        airy_mtx_unlock(&bus->mutex);
-        return AIRY_ENOENT;
-    }
-
-    bool was_healthy = bus->endpoints[idx].healthy;
-    bus->endpoints[idx].healthy = healthy;
-    bus->endpoints[idx].last_heartbeat = airy_time_ms();
-
-    airy_mtx_unlock(&bus->mutex);
-
-    if (was_healthy && !healthy) {
-        AIRY_LOG_WARN("Endpoint '%s' became unhealthy on bus '%s'", service_name, bus->name);
-    } else if (!was_healthy && healthy) {
-        AIRY_LOG_INFO("Endpoint '%s' recovered on bus '%s'", service_name, bus->name);
-    }
-
-    return AIRY_SUCCESS;
-}
-
-AIRY_API ipc_bus_message_t *ipc_bus_message_create(ipc_bus_msg_type_t msg_type,
-                                                   ipc_bus_proto_t protocol, const void *payload,
-                                                   size_t payload_size)
-{
-    ipc_bus_message_t *msg = (ipc_bus_message_t *)AIRY_CALLOC(1, sizeof(ipc_bus_message_t));
-    if (!msg) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-
-    init_message_header(&msg->header, msg_type, protocol, NULL, NULL);
-    msg->header.msg_id = (uint64_t)airy_time_ms();
-    msg->header.aipc.payload_len = (uint32_t)payload_size;
-
-    if (payload && payload_size > 0) {
-        msg->payload = AIRY_CALLOC(1, payload_size);
-        if (!msg->payload) {
-            AIRY_FREE(msg);
-            AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-        }
-
-        __builtin_memcpy(msg->payload, payload, payload_size);
-        msg->payload_size = payload_size;
-        msg->header.checksum = compute_checksum(payload, payload_size);
-        msg->header.aipc.crc32 = msg->header.checksum; /* [SC] A-IPC crc32 同步 */
-    }
-
-    return msg;
-}
-
-AIRY_API void ipc_bus_message_free(ipc_bus_message_t *message)
-{
-    if (!message)
-        return;
-    if (message->payload) {
-        AIRY_FREE(message->payload);
-        message->payload = NULL;
-    }
-    AIRY_FREE(message);
-}
-
-AIRY_API ipc_bus_message_t *ipc_bus_message_clone(const ipc_bus_message_t *message)
-{
-    if (!message) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-
-    ipc_bus_message_t *clone =
-        ipc_bus_message_create(message->header.msg_type, message->header.protocol, message->payload,
-                               message->payload_size);
-    if (!clone) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-
-    clone->header = message->header;
-    return clone;
-}
-
-AIRY_API const char *ipc_bus_proto_to_string(ipc_bus_proto_t proto)
-{
-    static const char *proto_strings[] = {"JSON-RPC", "MCP", "A2A", "OpenAI", "AUTO"};
-
-    if (proto < 0 || proto > IPC_BUS_PROTO_AUTO)
-        return "UNKNOWN";
-    return proto_strings[proto];
-}
-
-AIRY_API ipc_bus_proto_t ipc_bus_proto_from_string(const char *str)
-{
-    if (!str)
-        return IPC_BUS_PROTO_AUTO;
-
-    if (strcasecmp(str, "JSON-RPC") == 0 || strcasecmp(str, "jsonrpc") == 0)
-        return IPC_BUS_PROTO_JSON_RPC;
-    if (strcasecmp(str, "MCP") == 0)
-        return IPC_BUS_PROTO_MCP;
-    if (strcasecmp(str, "A2A") == 0)
-        return IPC_BUS_PROTO_A2A;
-    if (strcasecmp(str, "OpenAI") == 0 || strcasecmp(str, "openai") == 0)
-        return IPC_BUS_PROTO_OPENAI;
-
-    return IPC_BUS_PROTO_AUTO;
-}
-
 AIRY_API airy_err_t ipc_service_bus_get_stats(ipc_service_bus_t bus_handle, ipc_bus_stats_t *stats)
 {
     if (!bus_handle || !stats)
@@ -929,7 +469,7 @@ AIRY_API airy_err_t ipc_service_bus_reset_stats(ipc_service_bus_t bus_handle)
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
     airy_mtx_lock(&bus->mutex);
-    __builtin_memset(&bus->stats, 0, sizeof(ipc_bus_stats_t));
+    AIRY_MEMSET(&bus->stats, 0, sizeof(ipc_bus_stats_t));
     airy_mtx_unlock(&bus->mutex);
 
     return AIRY_SUCCESS;
