@@ -12,7 +12,12 @@ set(COREKERN_INCLUDE_DIR ${ATOMIC_DIR}/corekern/include)
 
 set(SCHED_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_service_impl.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_service_agent.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_service_task.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_service_worker.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_dag_impl.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_dag_engine.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_dag_worker.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_dag_parse.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_svc_adapter.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/strategies/round_robin.c
