@@ -23,14 +23,19 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 # 提取 service/mem_svc_adapter 为独立静态库，供 mem_d 可执行文件与单元测试共用，
 # 消除桩函数依赖。排除 main.c（含 main()）。
 # vector.c 提供自研 TF-IDF 向量检索；emb_client.c 提供可选 embedding 后端（AIRY_HAS_CURL）
+# 2026-08-27 目录原子化：src/ 按功能域组织
+#   core/ daemon 入口与服务核心 · handlers/ IPC 请求处理器 · engine/ 记忆引擎实现
 set(MEM_SERVICE_SOURCES
-    src/service.c
-    src/mem_svc_adapter.c
-    src/vector.c
-    src/emb_client.c
-    src/cache.c
-    src/ledger.c
-    src/compress.c
+    src/core/service.c
+    src/core/mem_svc_adapter.c
+    src/engine/mem_hash.c
+    src/engine/mem_persist.c
+    src/engine/kb.c
+    src/engine/vector.c
+    src/engine/emb_client.c
+    src/engine/cache.c
+    src/engine/ledger.c
+    src/engine/compress.c
 )
 
 add_library(airy_mem_service STATIC ${MEM_SERVICE_SOURCES})
@@ -52,7 +57,9 @@ endif()
 
 target_include_directories(airy_mem_service PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/handlers
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/engine
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/platform/include
@@ -114,7 +121,11 @@ target_compile_options(airy_mem_service PRIVATE
 
 # ==================== Memory daemon 可执行文件 ====================
 add_executable(mem_d
-    src/main.c
+    src/core/main.c
+    src/handlers/mem_handlers.c
+    src/handlers/kb_handlers.c
+    src/handlers/cache_handlers.c
+    src/handlers/ledger_handlers.c
 )
 
 if(WIN32)
@@ -131,7 +142,9 @@ endif()
 
 target_include_directories(mem_d PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/handlers
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/engine
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/platform/include

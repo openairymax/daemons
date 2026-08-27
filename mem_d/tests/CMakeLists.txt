@@ -19,7 +19,9 @@ set(MEM_TEST_SOURCES
 
 set(MEM_COMMON_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/handlers
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/engine
     ${COMMONS_DIR}
     ${COMMONS_DIR}/platform/include
     ${COMMONS_DIR}/utils/error/include

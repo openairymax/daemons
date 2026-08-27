@@ -121,6 +121,7 @@ target_include_directories(airy_gateway_service PUBLIC
     ${GATEWAY_SRC_DIR}
     ${GATEWAY_SRC_DIR}/gateway
     ${GATEWAY_SRC_DIR}/utils
+    ${GATEWAY_SRC_DIR}/utils/syscall
     # Atom 模块（service.c 引用 "syscalls.h", "airy_rt.h"）
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
@@ -215,16 +216,20 @@ set(GATEWAY_LIB_SOURCES
     ${GATEWAY_SRC_DIR}/gateway/http_gateway.c
     ${GATEWAY_SRC_DIR}/gateway/http_gateway_routes.c
     ${GATEWAY_SRC_DIR}/gateway/http_gateway_sse.c
+    ${GATEWAY_SRC_DIR}/gateway/gateway_sse_stream.c
+    ${GATEWAY_SRC_DIR}/gateway/gateway_sse_tool.c
+    ${GATEWAY_SRC_DIR}/gateway/gateway_sse_memory.c
+    ${GATEWAY_SRC_DIR}/gateway/gateway_sse_hall_watch.c
     ${GATEWAY_SRC_DIR}/gateway/ws_gateway.c
     ${GATEWAY_SRC_DIR}/gateway/stdio_gateway.c
     ${GATEWAY_SRC_DIR}/utils/jsonrpc.c
-    ${GATEWAY_SRC_DIR}/utils/syscall_router.c
-    ${GATEWAY_SRC_DIR}/utils/syscall_router_agent.c
-    ${GATEWAY_SRC_DIR}/utils/syscall_router_memory.c
-    ${GATEWAY_SRC_DIR}/utils/syscall_router_runtime.c
-    ${GATEWAY_SRC_DIR}/utils/syscall_router_session.c
-    ${GATEWAY_SRC_DIR}/utils/syscall_router_task.c
-    ${GATEWAY_SRC_DIR}/utils/syscall_router_telemetry.c
+    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router.c
+    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router_agent.c
+    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router_memory.c
+    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router_runtime.c
+    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router_session.c
+    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router_task.c
+    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router_telemetry.c
     ${GATEWAY_SRC_DIR}/utils/gateway_rpc_handler.c
     ${GATEWAY_SRC_DIR}/utils/gateway_protocol_handler.c
     ${GATEWAY_SRC_DIR}/utils/gateway_rate_limiter.c
@@ -296,6 +301,7 @@ target_include_directories(gateway_lib_obj PUBLIC
     ${GATEWAY_SRC_DIR}
     ${GATEWAY_SRC_DIR}/gateway
     ${GATEWAY_SRC_DIR}/utils
+    ${GATEWAY_SRC_DIR}/utils/syscall
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
     ${CJSON_INCLUDE_DIRS}

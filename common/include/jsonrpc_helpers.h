@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "airy_memory.h"
 #include "error.h"
 
 #ifndef AIRY_API
