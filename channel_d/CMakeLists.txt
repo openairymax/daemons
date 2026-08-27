@@ -9,9 +9,13 @@ set(DAEMON_COMMON_INCLUDE_DIR ${DAEMON_COMMON_DIR}/include)
 set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
+# channel_service.c 按单一职责拆分（2026-08-27）：
+#   channel_service.c   生命周期/打开/关闭/查询域
+#   channel_io.c        收发（send/receive）与连通性探测（ping）域
 set(CHANNEL_D_SOURCES
     src/main.c
     src/channel_service.c
+    src/channel_io.c
 )
 
 add_executable(channel_d ${CHANNEL_D_SOURCES})
@@ -72,7 +76,7 @@ install(FILES
 if(BUILD_TESTS)
 if(AIRY_HAS_CMOCKA)
     enable_testing()
-    add_executable(test_channel_e2e tests/test_channel_e2e.c src/channel_service.c)
+    add_executable(test_channel_e2e tests/test_channel_e2e.c src/channel_service.c src/channel_io.c)
     target_compile_definitions(test_channel_e2e PRIVATE AIRY_COMPLIANCE_IMPL)
     target_include_directories(test_channel_e2e PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -89,7 +93,7 @@ if(AIRY_HAS_CMOCKA)
     add_test(NAME channel_e2e COMMAND test_channel_e2e)
 else()
     enable_testing()
-    add_executable(test_channel_e2e tests/test_channel_e2e.c src/channel_service.c)
+    add_executable(test_channel_e2e tests/test_channel_e2e.c src/channel_service.c src/channel_io.c)
     target_compile_definitions(test_channel_e2e PRIVATE AIRY_COMPLIANCE_IMPL)
     target_include_directories(test_channel_e2e PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
