@@ -22,6 +22,8 @@ set(CORELOOPTHREE_DIR ${ATOMS_DIR}/coreloopthree)
 # ==================== Think 服务静态库 ====================
 set(THINK_SERVICE_SOURCES
     src/think_service.c
+    # think_service.c 域拆分（2026-08-27：1067 行 → 2 个职责模块）
+    src/think_orch.c
 )
 
 add_library(airy_think_service STATIC ${THINK_SERVICE_SOURCES})

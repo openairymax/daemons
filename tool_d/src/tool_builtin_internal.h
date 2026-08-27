@@ -51,6 +51,10 @@ int git_diff_tool(const char *params_json, tool_result_t *res);
 int git_apply_tool(const char *params_json, tool_result_t *res);
 #endif
 
+/* Glob wildcard segment matcher shared by builtin_fs_glob.c and
+ * builtin_fs_grep.c (supports * and ? within one path segment) */
+int builtin_glob_seg_match(const char *pat, const char *str);
+
 /* Built-in maths tools (builtin_maths.c) — 委托 maths_d 数学外挂服务 */
 int maths_eval_tool(const char *params_json, tool_result_t *res);
 int maths_stats_tool(const char *params_json, tool_result_t *res);

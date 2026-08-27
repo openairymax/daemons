@@ -7,8 +7,10 @@
  *        (not public API).
  *
  * After the P1.x modular split of svc_common.c into svc_registry.c /
- * svc_config.c / svc_monitor.c / svc_client.c, the following definitions
- * are shared across multiple source files:
+ * svc_config.c / svc_monitor.c / svc_client.c, and the Phase 2.3a split of
+ * the remaining lifecycle core into svc_common.c / svc_common_registry.c /
+ * svc_common_ops.c, the following definitions are shared across multiple
+ * source files:
  *
  * - airy_svc_internal_t: internal service-instance struct. Both
  *   svc_common.c (lifecycle/internal registry) and svc_client.c (local
@@ -80,6 +82,24 @@ typedef struct airy_svc_internal {
  *       svc_common.c on the process-exit path.
  */
 void monitor_shutdown(void);
+
+/**
+ * @brief Lazy-initialize the in-process service registry (mutex + memory
+ *        stats reporter).
+ * @note Implementation lives in svc_common_registry.c (g_registry state is
+ *       private to the registry domain); called by airy_svc_create() in
+ *       svc_common.c before registering a new service instance.
+ */
+airy_err_t svc_common_module_init(void);
+
+/**
+ * @brief Insert/remove a service instance into/from the internal registry
+ *        (thread-safe, duplicate names rejected).
+ * @note Implementation lives in svc_common_registry.c; used by the
+ *       lifecycle domain (svc_common.c) during create/destroy.
+ */
+airy_err_t register_service_internal(airy_svc_internal_t *service);
+airy_err_t unregister_service_internal(airy_svc_internal_t *service);
 
 #ifdef __cplusplus
 }

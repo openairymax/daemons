@@ -7,7 +7,7 @@
  * @file service.c
  * @brief Agent service implementation: spawn/terminate/invoke/list.
  *
- * Extracted from g_runtime.agents[] logic in gateway/src/utils/syscall_router.c
+ * Extracted from g_runtime.agents[] logic in gateway/src/utils/syscall/syscall_router.c
  * and refactored into a standalone, self-contained service module. The
  * agent_d daemon holds an agent_service_t instance and exposes the agent.*
  * namespace over a Unix socket.

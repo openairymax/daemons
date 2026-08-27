@@ -5,12 +5,12 @@
 
 **Language:** English | [简体中文](README_zh.md)
 
-[![Version](https://img.shields.io/badge/version-0.1.4-5a6b7e)](https://atomgit.com/openairymax/daemons)
+[![Version](https://img.shields.io/badge/version-0.1.5-5a6b7e)](https://atomgit.com/openairymax/daemons)
 [![License](https://img.shields.io/badge/license-AGPL--3.0+Apache--2.0-4a90d9)](LICENSE)
 [![C11](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/11)
 
 - **Repository:** `git@atomgit.com:openairymax/daemons.git`
-- **Branch:** `develop/hubs-01`
+- **Branch:** `feature/official-hubs-01`
 - **Version:** 0.1.5 (aligned with agentrt management repo)
 
 ---
@@ -45,7 +45,7 @@ daemons is a service/composition module: it does not provide foundational primit
 
 ```
 daemons/
-├── CMakeLists.txt                 # Top-level build file; manages all 17 daemons + svc_common
+├── CMakeLists.txt                 # Top-level build file; manages all 18 daemons + svc_common
 ├── Dockerfile.ci                  # CI environment Docker image
 ├── README.md                      # This file (English)
 ├── README_zh.md                   # Chinese version
@@ -75,7 +75,6 @@ daemons/
 ├── think_d/                       # Dual-think / GRAD cognition daemon (think.* namespace)
 ├── cupolas_d/                     # Cupolas security-dome daemon (cupolas.* namespace)
 ├── maths_d/                       # Mathematics coprocessor daemon (maths.* namespace)
-├── examples/                      # Usage examples (example_svc_usage.c)
 └── scripts/                       # Build / CI / analysis scripts
     ├── ci.sh                      # CI pipeline build script
     ├── local-ci.sh                # Local CI simulation
@@ -137,7 +136,7 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 ├──────────────────────────────────────────────────────────────┤
 │   SDK (sdk-python / sdk-go / sdk-rust / sdk-typescript ...)   │
 ├──────────────────────────────────────────────────────────────┤
-│   ★ daemons (Service Layer — 17 daemons + svc_common) ★     │
+│   ★ daemons (Service Layer — 18 daemons + svc_common) ★     │
 │                                                               │
 │   gateway_d ─→ HTTP / WS / Stdio / MCP / A2A / OpenAI API     │
 │              ↓                                                │

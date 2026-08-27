@@ -21,6 +21,9 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_shell.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_fs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_fs_dir.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_fs_glob.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_fs_grep.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_net.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_git.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_maths.c

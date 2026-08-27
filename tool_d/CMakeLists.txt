@@ -39,6 +39,9 @@ set(TOOL_SERVICE_SOURCES
     src/builtin.c
     src/builtin_shell.c
     src/builtin_fs.c
+    src/builtin_fs_dir.c
+    src/builtin_fs_glob.c
+    src/builtin_fs_grep.c
     src/builtin_net.c
     src/builtin_git.c
     src/builtin_maths.c
