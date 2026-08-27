@@ -11,7 +11,7 @@
 
 - **Repository:** `git@atomgit.com:openairymax/daemons.git`
 - **Branch:** `develop/hubs-01`
-- **Version:** 0.1.4 (aligned with agentrt management repo)
+- **Version:** 0.1.5 (aligned with agentrt management repo)
 
 ---
 
