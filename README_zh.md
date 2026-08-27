@@ -5,13 +5,13 @@
 
 **语言:** [English](README.md) | 简体中文
 
-[![Version](https://img.shields.io/badge/version-0.1.4-5a6b7e)](https://atomgit.com/openairymax/daemons)
+[![Version](https://img.shields.io/badge/version-0.1.5-5a6b7e)](https://atomgit.com/openairymax/daemons)
 [![License](https://img.shields.io/badge/license-AGPL--3.0+Apache--2.0-4a90d9)](LICENSE)
 [![C11](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/11)
 
 - **仓库：** `git@atomgit.com:openairymax/daemons.git`
 - **分支：** `develop/hubs-01`
-- **版本：** 0.1.4（与 agentrt 管理仓对齐）
+- **版本：** 0.1.5（与 agentrt 管理仓对齐）
 
 ---
 
