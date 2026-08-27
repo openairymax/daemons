@@ -12,6 +12,8 @@ set(COREKERN_INCLUDE_DIR ${ATOMIC_DIR}/corekern/include)
 
 set(MONIT_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_subsystems.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_agent_trace.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/metrics.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/alert.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tracing.c
