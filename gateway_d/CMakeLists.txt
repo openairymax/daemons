@@ -214,6 +214,7 @@ set(GATEWAY_LIB_SOURCES
     ${GATEWAY_SRC_DIR}/gateway/gateway_hall_store.c
     ${GATEWAY_SRC_DIR}/gateway/http_gateway.c
     ${GATEWAY_SRC_DIR}/gateway/http_gateway_routes.c
+    ${GATEWAY_SRC_DIR}/gateway/http_gateway_sse.c
     ${GATEWAY_SRC_DIR}/gateway/ws_gateway.c
     ${GATEWAY_SRC_DIR}/gateway/stdio_gateway.c
     ${GATEWAY_SRC_DIR}/utils/jsonrpc.c
