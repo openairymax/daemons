@@ -894,5 +894,16 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
         return AIRY_ERR_IO;
     }
 
+    /* HTTP >= 400 is a failed completion, not a success with an empty body.
+     * Falling through here previously surfaced provider rejections (e.g.
+     * DeepSeek "tools[13].function.name" 400) as OK with a zero-token empty
+     * stream, which clients rendered as "no reply / thinking only". */
+    if (http_code >= 400) {
+        SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s http_code=%ld "
+                      "DIAGNOSIS=upstream_http_error",
+                      url, http_code);
+        return AIRY_ERR_IO;
+    }
+
     return AIRY_OK;
 }
