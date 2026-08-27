@@ -24,12 +24,12 @@ gateway_d / 其他调用方 ──(tool.* JSON-RPC)──▶ tool_d
                                                 │   └─ cache：结果缓存
                                                 ▼
                                         builtin.c / builtin_{fs,shell,net,git,maths}.c
-                                        maths.* → maths_d（maths.sock）
+                                        maths_* → maths_d（maths.sock）
 ```
 
 - 内置工具 15 个：`fs_read` `fs_write` `fs_list` `shell_run` `web_fetch` `fs_glob`
   `fs_grep` `fs_edit` `fs_delete` `web_search` `git_exec` `git_diff` `git_apply`
-  `maths.eval`（转发 maths_d）`maths.stats`（转发 maths_d）；`executable` 使用
+  `maths_eval`（转发 maths_d）`maths_stats`（转发 maths_d）；`executable` 使用
   `builtin:<id>` 标记，由执行器派发到真实实现。
 - 参数校验（fail-closed）：注册表校验每个已注册参数的存在性与类型（JSON Schema），
   缺失/非法即拒绝执行。
