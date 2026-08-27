@@ -214,34 +214,12 @@ endif()
 # ==================== Gateway 库对象（gateway 模块源码） ====================
 # gateway 库大量依赖 cJSON，不可用时整个库跳过
 if(AIRY_HAS_CJSON)
-set(GATEWAY_LIB_SOURCES
-    ${GATEWAY_SRC_DIR}/gateway/gateway_api.c
-    ${GATEWAY_SRC_DIR}/gateway/gateway_hall_store.c
-    ${GATEWAY_SRC_DIR}/gateway/http_gateway.c
-    ${GATEWAY_SRC_DIR}/gateway/http_gateway_routes.c
-    ${GATEWAY_SRC_DIR}/gateway/http_gateway_sse.c
-    ${GATEWAY_SRC_DIR}/gateway/gateway_sse_stream.c
-    ${GATEWAY_SRC_DIR}/gateway/gateway_sse_tool.c
-    ${GATEWAY_SRC_DIR}/gateway/gateway_sse_memory.c
-    ${GATEWAY_SRC_DIR}/gateway/gateway_sse_hall_watch.c
-    ${GATEWAY_SRC_DIR}/gateway/ws_gateway.c
-    ${GATEWAY_SRC_DIR}/gateway/ws_gateway_message.c
-    ${GATEWAY_SRC_DIR}/gateway/ws_gateway_callback.c
-    ${GATEWAY_SRC_DIR}/gateway/stdio_gateway.c
-    ${GATEWAY_SRC_DIR}/utils/jsonrpc.c
-    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router.c
-    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router_agent.c
-    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router_memory.c
-    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router_runtime.c
-    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router_session.c
-    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router_task.c
-    ${GATEWAY_SRC_DIR}/utils/syscall/syscall_router_telemetry.c
-    ${GATEWAY_SRC_DIR}/utils/gateway_rpc_handler.c
-    ${GATEWAY_SRC_DIR}/utils/gateway_protocol_handler.c
-    ${GATEWAY_SRC_DIR}/utils/gateway_protocol_convert.c
-    ${GATEWAY_SRC_DIR}/utils/gateway_protocol_detect.c
-    ${GATEWAY_SRC_DIR}/utils/gateway_rate_limiter.c
-)
+# 源码清单单一权威源（SSoT）：与 gateway 模块共用 cmake/gateway-sources.cmake，
+# 禁止在两侧各自维护源清单（历史教训：双份清单漂移导致 create_error_result
+# 未定义链接失败）。
+set(GATEWAY_SRC_BASE ${GATEWAY_DIR})
+include(${GATEWAY_DIR}/cmake/gateway-sources.cmake)
+set(GATEWAY_LIB_SOURCES ${GATEWAY_COMMON_SOURCES})
 
 # nghttp2（HTTP/2 支持）：根级缓存变量 AIRY_HAS_HTTP2 由 gateway 模块探测；
 # 若 NGHTTP2_LIBRARY 未缓存则在此补充查找（运行时库可能仅有 .so.14 无 .so 软链接）
@@ -255,18 +233,7 @@ if(AIRY_HAS_HTTP2)
             PATHS /usr/lib/x86_64-linux-gnu /usr/lib /usr/local/lib
         )
     endif()
-    if(NGHTTP2_LIBRARY)
-        list(APPEND GATEWAY_LIB_SOURCES
-            ${GATEWAY_SRC_DIR}/gateway/http2_gateway.c
-            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_event.c
-            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_frame.c
-            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_headers.c
-            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_response.c
-            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_route.c
-            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_session.c
-            ${GATEWAY_SRC_DIR}/gateway/http2_gateway_stream.c
-        )
-    else()
+    if(NOT NGHTTP2_LIBRARY)
         set(AIRY_HAS_HTTP2 FALSE CACHE BOOL "nghttp2 available")
         airy_print_warn("[gateway_d] nghttp2 not found, HTTP/2 gateway disabled")
     endif()
@@ -291,19 +258,21 @@ endif()
 # nghttp2 头文件内部使用 malloc/free/memcpy/memset 等函数，
 # 在 AIRY_COMPLIANCE_STRICT 模式下会被 banned_functions.h 毒化，
 # 需通过 AIRY_COMPLIANCE_IMPL 豁免（与 ws_gateway.c 同策略）。
+# http2_gateway*.c 经共享清单无条件参与编译（缺库为空 TU），豁免必须
+# 无条件生效（与 gateway 模块一致），否则缺库平台会因 poisoned 失败。
+set_source_files_properties(
+    ${GATEWAY_SRC_DIR}/gateway/http2_gateway.c
+    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_event.c
+    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_frame.c
+    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_headers.c
+    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_response.c
+    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_route.c
+    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_session.c
+    ${GATEWAY_SRC_DIR}/gateway/http2_gateway_stream.c
+    PROPERTIES COMPILE_DEFINITIONS "AIRY_COMPLIANCE_IMPL"
+)
+# http2_gateway.c 内部使用 AIRY_HAS_HTTP2 宏控制真实/禁用实现
 if(AIRY_HAS_HTTP2 AND NGHTTP2_LIBRARY)
-    set_source_files_properties(
-        ${GATEWAY_SRC_DIR}/gateway/http2_gateway.c
-        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_event.c
-        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_frame.c
-        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_headers.c
-        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_response.c
-        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_route.c
-        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_session.c
-        ${GATEWAY_SRC_DIR}/gateway/http2_gateway_stream.c
-        PROPERTIES COMPILE_DEFINITIONS "AIRY_COMPLIANCE_IMPL"
-    )
-    # http2_gateway.c 内部使用 AIRY_HAS_HTTP2 宏控制真实/禁用实现
     target_compile_definitions(gateway_lib_obj PUBLIC GATEWAY_HAS_HTTP2=1 AIRY_HAS_HTTP2=1)
 endif()
 target_include_directories(gateway_lib_obj PUBLIC
@@ -329,6 +298,12 @@ target_include_directories(gateway_lib_obj PUBLIC
      ${DAEMON_COMMON_DIR}/src
      ${PROTOCOLS_INCLUDE_DIR}
      ${PROTOCOLS_COMMON_INCLUDE_DIR}
+    # protocols core 子目录（gateway_protocol_bridge.c 依赖，
+    # 与 gateway 模块 include 集一致，2026-08-27 SSoT 收敛时补齐）
+     ${PROTOCOLS_DIR}/core/router/include
+     ${PROTOCOLS_DIR}/core/registry/include
+     ${PROTOCOLS_DIR}/core/adapter/include
+     ${PROTOCOLS_DIR}/core/transformers/include
     # P0.18.2: cJSON 三步曲宏化辅助头文件（cjson_helpers.h）
     ${COMMONS_DIR}/utils/cjson/include
     # nghttp2 头文件（HTTP/2 支持）— 项目本地副本 commons/include/third_party/
