@@ -159,7 +159,7 @@ static cJSON *maths_parse_response(const char *resp, tool_result_t *res)
 #endif /* _WIN32 */
 
 /**
- * @brief maths.eval — 数学表达式求值（委托 maths_d）
+ * @brief maths_eval — 数学表达式求值（委托 maths_d）
  * 参数：{"expression":"sqrt(144)+2"}  或  {"expr":"..."}
  */
 int maths_eval_tool(const char *params_json, tool_result_t *res)
@@ -167,7 +167,7 @@ int maths_eval_tool(const char *params_json, tool_result_t *res)
     if (!res)
         return AIRY_ERR_INVALID_PARAM;
 #ifdef _WIN32
-    res->error = AIRY_STRDUP("maths.eval is not supported on Windows");
+    res->error = AIRY_STRDUP("maths_eval is not supported on Windows");
     return AIRY_ERR_NOT_SUPPORTED;
 #else
     /* CJSON_PARSE_GUARD 使用 CJSON_AUTO_FREE（作用域结束时自动释放），
@@ -224,7 +224,7 @@ int maths_eval_tool(const char *params_json, tool_result_t *res)
     cJSON *value = cJSON_GetObjectItem(result, "result");
     if (!cJSON_IsNumber(value)) {
         cJSON_Delete(rroot);
-        res->error = AIRY_STRDUP("maths.eval: unexpected response shape");
+        res->error = AIRY_STRDUP("maths_eval: unexpected response shape");
         return AIRY_ERR_EXEC_FAIL;
     }
     char out[64];
@@ -238,7 +238,7 @@ int maths_eval_tool(const char *params_json, tool_result_t *res)
 }
 
 /**
- * @brief maths.stats — 描述性统计（委托 maths_d）
+ * @brief maths_stats — 描述性统计（委托 maths_d）
  * 参数：{"op":"mean|median|variance|stddev|sum|min|max","values":[1,2,3]}
  */
 int maths_stats_tool(const char *params_json, tool_result_t *res)
@@ -246,7 +246,7 @@ int maths_stats_tool(const char *params_json, tool_result_t *res)
     if (!res)
         return AIRY_ERR_INVALID_PARAM;
 #ifdef _WIN32
-    res->error = AIRY_STRDUP("maths.stats is not supported on Windows");
+    res->error = AIRY_STRDUP("maths_stats is not supported on Windows");
     return AIRY_ERR_NOT_SUPPORTED;
 #else
     /* CJSON_PARSE_GUARD 使用 CJSON_AUTO_FREE（作用域结束时自动释放），
@@ -315,7 +315,7 @@ int maths_stats_tool(const char *params_json, tool_result_t *res)
     cJSON *value = cJSON_GetObjectItem(result, "result");
     if (!cJSON_IsNumber(value)) {
         cJSON_Delete(rroot);
-        res->error = AIRY_STRDUP("maths.stats: unexpected response shape");
+        res->error = AIRY_STRDUP("maths_stats: unexpected response shape");
         return AIRY_ERR_EXEC_FAIL;
     }
     char out[64];
