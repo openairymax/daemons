@@ -26,8 +26,14 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 # 提取 service/metrics/prometheus_exporter/logging/tracing/alert/monit_svc_adapter
 # 为独立静态库，供 monit_d 可执行文件和集成测试共用，消除桩函数依赖。
 # 排除 main.c（含 main()）。
+# service.c 按单一职责拆分（2026-08-27）：
+#   service.c               生命周期与配置域（create/destroy/reload_config）
+#   service_subsystems.c    指标/日志/告警/健康/报告域
+#   service_agent_trace.c   Agent 执行追踪域（loop 检测等）
 set(MONIT_SERVICE_SOURCES
     src/service.c
+    src/service_subsystems.c
+    src/service_agent_trace.c
     src/metrics.c
     src/prometheus_exporter.c
     src/logging.c
