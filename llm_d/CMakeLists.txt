@@ -52,8 +52,15 @@ set(LLM_SERVICE_SOURCES
     src/token_counter.c
     src/response.c
     src/providers/registry.c
+    # provider.c 域拆分（2026-08-27：909 行 → 生命周期 + http/codec/stream 三模块）
     src/providers/provider.c
+    src/providers/provider_http.c
+    src/providers/provider_codec.c
+    src/providers/provider_stream.c
+    # openai.c 域拆分（2026-08-27：820 行 → 生命周期 + 限流/重试 + 流式）
     src/providers/openai.c
+    src/providers/openai_rate_limit.c
+    src/providers/openai_stream.c
     src/providers/anthropic.c
     src/providers/deepseek.c
     src/providers/google.c
