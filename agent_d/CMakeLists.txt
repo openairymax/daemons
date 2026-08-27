@@ -98,8 +98,14 @@ target_compile_options(airy_agent_service PRIVATE
 )
 
 # ==================== Agent daemon 可执行文件 ====================
+# main.c 按单一职责拆分（2026-08-27）：
+#   main.c            入口引导 + daemon 配置装配 + 方法注册
+#   agent_d_rpc.c     agent.* RPC 方法（spawn/terminate/invoke/cancel/...）
+#   agent_d_monitor.c 空闲回收线程 + 性能采样线程（POSIX）
 add_executable(agent_d
     src/main.c
+    src/agent_d_rpc.c
+    src/agent_d_monitor.c
 )
 
 if(WIN32)
