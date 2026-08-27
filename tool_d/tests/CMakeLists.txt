@@ -12,6 +12,8 @@ set(COREKERN_INCLUDE_DIR ${ATOMIC_DIR}/corekern/include)
 
 set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_builtin.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_execute.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/cache.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/executor.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/validator.c
