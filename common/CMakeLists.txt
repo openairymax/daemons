@@ -55,7 +55,9 @@ set(SVC_COMMON_SOURCES
     src/util/alert_manager.c       # 智能告警管理
     src/util/config_manager.c      # 统一配置管理
     src/auth/svc_auth.c
-    src/auth/svc_auth_jwt.c       # 认证中间件-JWT 域
+    src/auth/svc_auth_jwt.c       # 认证中间件-JWT 域：生命周期/令牌生成/刷新（从 svc_auth_jwt.c 拆分）
+    src/auth/svc_auth_jwt_crypto.c # 认证中间件-JWT 域：HMAC 实现/Base64 编解码原语（从 svc_auth_jwt.c 拆分）
+    src/auth/svc_auth_jwt_verify.c # 认证中间件-JWT 域：令牌验证/签名校验（从 svc_auth_jwt.c 拆分）
     src/auth/svc_auth_apikey.c    # 认证中间件-API Key 域
     src/auth/svc_auth_ratelimit.c # 认证中间件-限流域
     src/security/daemon_security.c     # daemon 安全集成（初始化/消毒域）
