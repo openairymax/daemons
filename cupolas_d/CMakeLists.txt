@@ -101,8 +101,16 @@ target_compile_options(airy_cupolas_service PRIVATE
 )
 
 # ==================== Cupolas daemon 可执行文件 ====================
+# main.c 按单一职责拆分（2026-08-27）：
+#   main.c                          入口引导 + daemon 配置装配 + 方法注册
+#   src/cupolas_rpc_core.c          cupolas.* 核心方法（权限/净化/命令/规则/审计/健康/统计）
+#   src/cupolas_rpc_vault.c         cupolas.* vault 方法（含 hex 编解码）
+#   src/cupolas_rpc_net_entitlements.c  cupolas.* net/entitlements 方法
 add_executable(cupolas_d
     src/main.c
+    src/cupolas_rpc_core.c
+    src/cupolas_rpc_vault.c
+    src/cupolas_rpc_net_entitlements.c
 )
 
 if(WIN32)
