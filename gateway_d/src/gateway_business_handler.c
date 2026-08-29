@@ -301,6 +301,30 @@ char *gateway_business_handle(void *request, void *user_data)
             cJSON_Delete(root);
             return resp;
         }
+        /* SSoT 契约版本校验（0.1.6 P1-4）：调用方可经 params.cap_version 声明
+         * 期望契约版本；不匹配即拒绝，防止按过时契约调用。未声明不强制。 */
+        cJSON *params = cJSON_GetObjectItem(root, "params");
+        cJSON *ver = params ? cJSON_GetObjectItem(params, "cap_version") : NULL;
+        if (ver && cJSON_IsNumber(ver) && ver->valuedouble > 0 &&
+            gw_cap_check_version(cap->cap_key, (int)ver->valuedouble) != 0) {
+            gw_cap_emit(cap->cap_key, "deny", "contract version mismatch");
+            resp = jsonrpc_error(-32602, "Capability contract version mismatch",
+                                 cJSON_GetObjectItem(root, "id"));
+            cJSON_Delete(root);
+            return resp;
+        }
+        /* SSoT 权限校验（0.1.6 P1-4）：高敏能力需显式 ACL 授权（fail-closed，
+         * 未注册规则即拒绝）；未声明权限的能力默认放行（核心链路不变量）。 */
+        const char *perm = gw_cap_perm_for(cap->cap_key);
+        if (perm && daemon_check_tool_permission(GW_EXTERNAL_AGENT_ID, perm, "execute") != 0) {
+            gw_cap_emit(cap->cap_key, "deny", "permission denied");
+            AIRY_LOG_WARN("gateway cap DENY: cap=%s perm=%s (fail-closed)",
+                     cap->cap_key, perm);
+            resp = jsonrpc_error(-32603, "Permission denied",
+                                 cJSON_GetObjectItem(root, "id"));
+            cJSON_Delete(root);
+            return resp;
+        }
         gw_cap_emit(cap->cap_key, "ok", NULL);
         switch (cap->kind) {
         case GW_CAP_KIND_AGENT_RUN:

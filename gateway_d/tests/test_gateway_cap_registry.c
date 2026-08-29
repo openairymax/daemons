@@ -183,6 +183,47 @@ static void test_emit_event(void)
     TEST_PASS();
 }
 
+static void test_contract_version(void)
+{
+    TEST_BEGIN("contract version (P1-4 SSoT)");
+    /* 显式登记版本的能力 */
+    ASSERT_EQ_INT(gw_cap_version("llm.complete"), 1);
+    ASSERT_EQ_INT(gw_cap_version("agent.run"), 1);
+    /* 未登记版本的能力 = 默认契约版本 1 */
+    ASSERT_EQ_INT(gw_cap_version("llm.health_check"), 1);
+    ASSERT_EQ_INT(gw_cap_version("mem.recent"), 1);
+    /* 未登记能力 = -1 */
+    ASSERT_EQ_INT(gw_cap_version("unknown.cap"), -1);
+    ASSERT_EQ_INT(gw_cap_version(NULL), -1);
+    /* 版本比对：匹配通过 / 不匹配拒绝 / 未声明通过 / 未登记 -1 */
+    ASSERT_EQ_INT(gw_cap_check_version("llm.complete", 1), 0);
+    ASSERT_EQ_INT(gw_cap_check_version("llm.complete", 2), 1);
+    ASSERT_EQ_INT(gw_cap_check_version("llm.complete", 0), 0);
+    ASSERT_EQ_INT(gw_cap_check_version("llm.complete", -1), 0);
+    ASSERT_EQ_INT(gw_cap_check_version("unknown.cap", 1), -1);
+    ASSERT_EQ_INT(gw_cap_check_version(NULL, 1), -1);
+    TEST_PASS();
+}
+
+static void test_perm_requirements(void)
+{
+    TEST_BEGIN("perm requirements (P1-4 SSoT)");
+    /* 高敏能力声明所需权限 */
+    ASSERT_TRUE(strcmp(gw_cap_perm_for("agent.spawn"), "cap:agent.control") == 0);
+    ASSERT_TRUE(strcmp(gw_cap_perm_for("plugin.load"), "cap:plugin.admin") == 0);
+    ASSERT_TRUE(strcmp(gw_cap_perm_for("mem.delete"), "cap:mem.admin") == 0);
+    ASSERT_TRUE(strcmp(gw_cap_perm_for("cupolas.add_rule"), "cap:cupolas.admin") == 0);
+    /* 日常核心链路能力：无额外权限要求（默认放行） */
+    ASSERT_TRUE(gw_cap_perm_for("llm.complete") == NULL);
+    ASSERT_TRUE(gw_cap_perm_for("think.process") == NULL);
+    ASSERT_TRUE(gw_cap_perm_for("agent.run") == NULL);
+    ASSERT_TRUE(gw_cap_perm_for("mem.write") == NULL);
+    /* 未登记能力：NULL */
+    ASSERT_TRUE(gw_cap_perm_for("unknown.cap") == NULL);
+    ASSERT_TRUE(gw_cap_perm_for(NULL) == NULL);
+    TEST_PASS();
+}
+
 int main(void)
 {
     printf("test_gateway_cap_registry: AIRY_HOME isolated to /tmp\n");
@@ -190,6 +231,8 @@ int main(void)
     test_key_caps();
     test_fail_closed();
     test_ns_timeout();
+    test_contract_version();
+    test_perm_requirements();
     test_emit_event();
     printf("test_gateway_cap_registry: %d/%d passed\n", g_tests_passed, g_tests_run);
     return g_tests_passed == g_tests_run ? 0 : 1;
