@@ -13,17 +13,21 @@
  *
  * Split from the original 2608-line monolith by single responsibility
  * (2026-08-11):
- *   - gateway_biz_forward.c  namespace forwarding (L2 protocol client + whitelist)
+ *   - gateway_biz_forward.c  namespace forwarding (L2 protocol client)
  *   - gateway_biz_llm.c      LLM calls + tool loop (ReAct)
  *   - gateway_biz_agent.c    agent.run orchestration (dual-think injection + cancel)
  *   - gateway_biz_backend.c  MCP/OpenAI/A2A protocol backends
  *   - gateway_biz_hall.c     hall.* task board / event stream / chain (in-gateway)
+ *   - gateway_cap_registry.c unified capability registry (0.1.6 P1-4: cap_key
+ *                            single source of truth for external capabilities)
  * This file keeps: ctx lifecycle, JSON-RPC main dispatch, protocol-detection entry.
  */
 
 #include "gateway_business_handler.h"
 
 #include "gateway_biz_internal.h"
+
+#include "gateway_cap_registry.h"
 
 #include "logging.h"
 #include "platform.h"
@@ -246,93 +250,9 @@ char *gateway_business_handle(void *request, void *user_data)
     daemon_heapstore_log("gateway_d", 1, method->valuestring, NULL);
 
     char *resp = NULL;
-    if (strcmp(method->valuestring, "agent.run") == 0) {
-        resp = handle_agent_run(root, ctx);
-    } else if (strcmp(method->valuestring, "agent.cancel") == 0) {
-        resp = handle_agent_cancel(root, ctx);
-    } else if (strcmp(method->valuestring, "llm.list_models") == 0) {
-        resp = handle_llm_list_models(root, ctx);
-    } else if (strncmp(method->valuestring, "llm.", 4) == 0) {
-        /* llm.list_models is handled by the dedicated branch above (adds
-         * default_model/default_provider); all other llm.* methods
-         * (complete/count_tokens/health_check/get_stats) forward generically */
-        gw_ns_forward_rule_t r2 = GW_NS_LLM;
-        r2.sock_path = ctx->llm_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "mem.", 4) == 0) {
-        resp = handle_mem_call(root, ctx);
-    } else if (strcmp(method->valuestring, "tool.pending") == 0) {
-        resp = handle_tool_approval_call(root, ctx, "pending");
-    } else if (strcmp(method->valuestring, "tool.approve") == 0) {
-        resp = handle_tool_approval_call(root, ctx, "approve");
-    } else if (strncmp(method->valuestring, "agent.", 6) == 0) {
-        /* agent.run / agent.cancel use the dedicated orchestration branches
-         * above; other agent.* methods (spawn/list/count/health_check/get_stats)
-         * forward generically */
-        gw_ns_forward_rule_t r2 = GW_NS_AGENT;
-        r2.sock_path = ctx->agent_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "tool.", 5) == 0) {
-        /* tool.pending / tool.approve use the dedicated branches above
-         * (approval flow); other tool.* methods (list/execute/health_check)
-         * forward generically */
-        gw_ns_forward_rule_t r2 = GW_NS_TOOL;
-        r2.sock_path = ctx->tool_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "a2a.", 4) == 0) {
-        gw_ns_forward_rule_t r2 = GW_NS_A2A;
-        r2.sock_path = ctx->a2a_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "plugin.", 7) == 0) {
-        gw_ns_forward_rule_t r2 = GW_NS_PLUGIN;
-        r2.sock_path = ctx->plugin_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "info.", 5) == 0) {
-        gw_ns_forward_rule_t r2 = GW_NS_INFO;
-        r2.sock_path = ctx->info_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "notify.", 7) == 0) {
-        gw_ns_forward_rule_t r2 = GW_NS_NOTIFY;
-        r2.sock_path = ctx->notify_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "observe.", 8) == 0) {
-        gw_ns_forward_rule_t r2 = GW_NS_OBSERVE;
-        r2.sock_path = ctx->observe_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "market.", 7) == 0) {
-        gw_ns_forward_rule_t r2 = GW_NS_MARKET;
-        r2.sock_path = ctx->market_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "hook.", 5) == 0) {
-        gw_ns_forward_rule_t r2 = GW_NS_HOOK;
-        r2.sock_path = ctx->hook_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "sched.", 6) == 0) {
-        gw_ns_forward_rule_t r2 = GW_NS_SCHED;
-        r2.sock_path = ctx->sched_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "think.", 6) == 0) {
-        gw_ns_forward_rule_t r2 = GW_NS_THINK;
-        r2.sock_path = ctx->think_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "monit.", 6) == 0) {
-        gw_ns_forward_rule_t r2 = GW_NS_MONIT;
-        r2.sock_path = ctx->monit_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "channel.", 8) == 0) {
-        gw_ns_forward_rule_t r2 = GW_NS_CHANNEL;
-        r2.sock_path = ctx->channel_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "cupolas.", 8) == 0) {
-        gw_ns_forward_rule_t r2 = GW_NS_CUPOLAS;
-        r2.sock_path = ctx->cupolas_sock_path;
-        resp = handle_ns_forward(root, &r2);
-    } else if (strncmp(method->valuestring, "hall.", 5) == 0) {
-        /* hall.* is implemented inside the gateway itself (reads the
-         * persisted work-hall board + hall-store event files under
-         * $AIRY_HOME, plus live agent.list); not a daemon forward. */
-        resp = handle_hall_call(root, ctx);
-    } else if (strcmp(method->valuestring, "ping") == 0) {
+
+    /* L0 传输级方法（非能力，不入能力注册表）：ping / shutdown */
+    if (strcmp(method->valuestring, "ping") == 0) {
         cJSON *id = cJSON_GetObjectItem(root, "id");
         cJSON *out = cJSON_CreateObject();
         cJSON_AddStringToObject(out, "jsonrpc", "2.0");
@@ -370,8 +290,44 @@ char *gateway_business_handle(void *request, void *user_data)
             AIRY_LOG_WARN("gateway: shutdown requested but no shutdown callback registered");
         }
     } else {
-        cJSON *id = cJSON_GetObjectItem(root, "id");
-        resp = jsonrpc_error(-32601, "Method not found", id);
+        /* 统一能力网关（0.1.6 P1-4）：cap_key 单一权威源查表分派。
+         * 能力注册表（gateway_cap_registry.h）是外部可调用能力的唯一
+         * 枚举；未登记能力 fail-closed 拒绝（-32601），防止任意方法透传。 */
+        const gw_cap_t *cap = gw_cap_find(method->valuestring);
+        if (!cap) {
+            gw_cap_emit(method->valuestring, "deny", "unregistered capability");
+            cJSON *id = cJSON_GetObjectItem(root, "id");
+            resp = jsonrpc_error(-32601, "Method not found", id);
+            cJSON_Delete(root);
+            return resp;
+        }
+        gw_cap_emit(cap->cap_key, "ok", NULL);
+        switch (cap->kind) {
+        case GW_CAP_KIND_AGENT_RUN:
+            resp = (strcmp(cap->method, "run") == 0) ? handle_agent_run(root, ctx)
+                                                     : handle_agent_cancel(root, ctx);
+            break;
+        case GW_CAP_KIND_LLM_LIST:
+            resp = handle_llm_list_models(root, ctx);
+            break;
+        case GW_CAP_KIND_MEM:
+            resp = handle_mem_call(root);
+            break;
+        case GW_CAP_KIND_TOOL_APPROVE:
+            resp = handle_tool_approval_call(root, ctx, cap->method);
+            break;
+        case GW_CAP_KIND_HALL:
+            resp = handle_hall_call(root, ctx);
+            break;
+        case GW_CAP_KIND_FWD: {
+            gw_ns_forward_rule_t rule = {cap->ns, gw_cap_ns_timeout(cap->ns)};
+            resp = handle_ns_forward(root, &rule);
+            break;
+        }
+        default:
+            resp = jsonrpc_error(-32601, "Method not found", cJSON_GetObjectItem(root, "id"));
+            break;
+        }
     }
 
     cJSON_Delete(root);

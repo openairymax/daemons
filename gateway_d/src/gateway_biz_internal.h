@@ -107,28 +107,25 @@ struct gateway_business_ctx_s {
 };
 
 /* @brief Namespace forwarding rule: <ns>.<method> -> target daemon <method>
- *        (whitelist)
  *
- * Only L2 methods registered by each daemon are allowed
- * (02-l2-service-protocol.md §6), preventing arbitrary method pass-through.
- * Sensitive methods such as execute must be listed explicitly by the caller. */
+ * 0.1.6 P1-4 收敛：方法白名单不再由 rule 携带——能力存在性校验统一走
+ * 能力注册表（gateway_cap_registry.h，cap_key 单一权威源）。rule 仅承载
+ * 命名空间（裸名，无尾点）与转发超时；daemon 端点由 svc dispatch 钩子
+ * 按命名空间解析（gw_svc_sock_for_ns），无需在此维护。 */
 typedef struct {
     const char *ns;
-    const char *sock_path;
-    const char *const *methods;
     int timeout_ms;
 } gw_ns_forward_rule_t;
 
-/* ---- gateway_biz_forward.c (L2 protocol client + whitelist forwarding) ---- */
+/* ---- gateway_biz_forward.c (L2 protocol client + namespace forwarding) ---- */
 char *jsonrpc_error(int code, const char *msg, const cJSON *id);
 char *gw_svc_call(const char *sock_path, const char *method, const char *params_json,
                   int timeout_ms);
 int gw_think_process(const gateway_business_ctx_t *ctx, const char *session_id,
                      const char *prompt, const char *gccp_answers, cJSON **out_think);
 int gw_acl_check_tool(const char *tool_name);
-const char *gw_mem_method_allowlist(const char *method);
 char *handle_ns_forward(cJSON *root, const gw_ns_forward_rule_t *rule);
-char *handle_mem_call(cJSON *root, const gateway_business_ctx_t *ctx);
+char *handle_mem_call(cJSON *root);
 char *handle_llm_list_models(cJSON *root, const gateway_business_ctx_t *ctx);
 char *handle_tool_approval_call(cJSON *root, const gateway_business_ctx_t *ctx,
                                 const char *tool_method);
@@ -139,23 +136,6 @@ void gw_sys_svc_dispatch_cleanup(void);
 
 /* ---- gateway_biz_hall.c (hall.* — task board / event stream / chain) ---- */
 char *handle_hall_call(cJSON *root, gateway_business_ctx_t *ctx);
-
-/* Namespace forwarding rules (const, defined in gateway_biz_forward.c) */
-extern const gw_ns_forward_rule_t GW_NS_LLM;
-extern const gw_ns_forward_rule_t GW_NS_AGENT;
-extern const gw_ns_forward_rule_t GW_NS_TOOL;
-extern const gw_ns_forward_rule_t GW_NS_A2A;
-extern const gw_ns_forward_rule_t GW_NS_PLUGIN;
-extern const gw_ns_forward_rule_t GW_NS_INFO;
-extern const gw_ns_forward_rule_t GW_NS_NOTIFY;
-extern const gw_ns_forward_rule_t GW_NS_OBSERVE;
-extern const gw_ns_forward_rule_t GW_NS_MARKET;
-extern const gw_ns_forward_rule_t GW_NS_HOOK;
-extern const gw_ns_forward_rule_t GW_NS_SCHED;
-extern const gw_ns_forward_rule_t GW_NS_THINK;
-extern const gw_ns_forward_rule_t GW_NS_MONIT;
-extern const gw_ns_forward_rule_t GW_NS_CHANNEL;
-extern const gw_ns_forward_rule_t GW_NS_CUPOLAS;
 
 /* ---- gateway_biz_llm.c (LLM calls + tool loop) ---- */
 int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model, const char *prompt,
