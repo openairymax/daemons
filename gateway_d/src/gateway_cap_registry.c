@@ -246,6 +246,57 @@ static const gw_cap_t GW_CAP_REGISTRY[] = {
 
 #define GW_CAP_COUNT (sizeof(GW_CAP_REGISTRY) / sizeof(GW_CAP_REGISTRY[0]))
 
+/* 能力契约版本（0.1.6 P1-4 SSoT 契约版本校验维度）。
+ * 仅登记需版本约束的能力；未登记能力视为默认契约版本 1。
+ * 契约版本变更 = 语义破坏性变更（参数/返回结构不兼容），须显式递增，
+ * 并同步通知客户端更新声明版本。 */
+#define GW_CAP_VERSION_DEFAULT 1
+static const struct {
+    const char *cap_key;
+    int version;
+} GW_CAP_CONTRACT_VERSION[] = {
+    {"llm.complete", 1},
+    {"llm.list_models", 1},
+    {"think.process", 1},
+    {"agent.run", 1},
+    {"agent.cancel", 1},
+    {"tool.execute", 1},
+    {"tool.pending", 1},
+    {"tool.approve", 1},
+    {"mem.write", 1},
+    {"mem.search", 1},
+    {"plugin.execute", 1},
+};
+
+/* 高敏能力所需权限（0.1.6 P1-4 SSoT 权限校验维度）。
+ * 仅此表列出的能力在分发时做 ACL 授权检查（fail-closed：未注册规则拒绝，
+ * 管理员在 permission_rules.yaml / daemon_security_add_acl_rule 显式授权）。
+ * 日常核心链路能力（llm/think/agent/tool/mem 读等）不在表中 → 默认放行，
+ * 保持现有调用行为不变。 */
+static const struct {
+    const char *cap_key;
+    const char *perm;
+} GW_CAP_EXTRA_PERM[] = {
+    {"agent.spawn", "cap:agent.control"},
+    {"agent.terminate", "cap:agent.control"},
+    {"agent.invoke", "cap:agent.control"},
+    {"plugin.load", "cap:plugin.admin"},
+    {"plugin.unload", "cap:plugin.admin"},
+    {"plugin.install", "cap:plugin.admin"},
+    {"plugin.uninstall", "cap:plugin.admin"},
+    {"mem.delete", "cap:mem.admin"},
+    {"mem.kb_delete", "cap:mem.admin"},
+    {"sched.cancel", "cap:sched.admin"},
+    {"sched.dag_cancel", "cap:sched.admin"},
+    {"sched.checkpoint_save", "cap:sched.admin"},
+    {"cupolas.add_rule", "cap:cupolas.admin"},
+    {"cupolas.audit_flush", "cap:cupolas.admin"},
+    {"cupolas.vault_store", "cap:cupolas.admin"},
+    {"cupolas.vault_delete", "cap:cupolas.admin"},
+    {"cupolas.vault_rotate", "cap:cupolas.admin"},
+    {"cupolas.net_add_rule", "cap:cupolas.admin"},
+};
+
 const gw_cap_t *gw_cap_find(const char *cap_key)
 {
     if (!cap_key)
@@ -278,6 +329,37 @@ int gw_cap_ns_timeout(const char *ns)
             return GW_NS_TIMEOUT[i].timeout_ms;
     }
     return GW_TOOL_TIMEOUT_MS;
+}
+
+int gw_cap_version(const char *cap_key)
+{
+    if (!cap_key || !gw_cap_find(cap_key))
+        return -1;
+    for (size_t i = 0; i < sizeof(GW_CAP_CONTRACT_VERSION) / sizeof(GW_CAP_CONTRACT_VERSION[0]); ++i) {
+        if (strcmp(GW_CAP_CONTRACT_VERSION[i].cap_key, cap_key) == 0)
+            return GW_CAP_CONTRACT_VERSION[i].version;
+    }
+    return GW_CAP_VERSION_DEFAULT;
+}
+
+int gw_cap_check_version(const char *cap_key, int req_version)
+{
+    if (!cap_key || !gw_cap_find(cap_key))
+        return -1;
+    if (req_version <= 0)
+        return 0; /* 调用方未声明版本：仅存在性校验（由 gw_cap_find 保证） */
+    return (req_version == gw_cap_version(cap_key)) ? 0 : 1;
+}
+
+const char *gw_cap_perm_for(const char *cap_key)
+{
+    if (!cap_key || !gw_cap_find(cap_key))
+        return NULL;
+    for (size_t i = 0; i < sizeof(GW_CAP_EXTRA_PERM) / sizeof(GW_CAP_EXTRA_PERM[0]); ++i) {
+        if (strcmp(GW_CAP_EXTRA_PERM[i].cap_key, cap_key) == 0)
+            return GW_CAP_EXTRA_PERM[i].perm;
+    }
+    return NULL; /* 未声明权限 = 默认放行 */
 }
 
 void gw_cap_emit(const char *cap_key, const char *status, const char *detail)
