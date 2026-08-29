@@ -48,6 +48,15 @@ foreach(TEST_SRC ${TEST_SOURCES})
             test_service_discovery_health.c
             test_service_discovery_misc.c
         )
+    elseif(TEST_SRC STREQUAL "test_api_recovery.c")
+        set(EXTRA_SRCS
+            test_api_recovery_pool.c
+            test_api_recovery_cred.c
+            test_api_recovery_health.c
+            test_api_recovery_fallback.c
+            test_api_recovery_config.c
+            test_api_recovery_misc.c
+        )
     endif()
 
     add_executable(${TARGET_NAME} ${TEST_SRC} ${EXTRA_SRCS})
@@ -97,8 +106,15 @@ endforeach()
 
 airy_print_info("  svc_common_tests: ${TEST_SOURCES}")
 
-# ===== P1-C06 深度单元测试 (test_daemon_common.c) =====
-add_executable(svc_test_daemon_common test_daemon_common.c)
+# ===== P1-C06 深度单元测试 (test_daemon_common.c，已按功能域拆分) =====
+add_executable(svc_test_daemon_common
+    test_daemon_common.c
+    test_daemon_common_cb.c
+    test_daemon_common_cm.c
+    test_daemon_common_md.c
+    test_daemon_common_am.c
+    test_daemon_common_svc.c
+)
 
 target_include_directories(svc_test_daemon_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
