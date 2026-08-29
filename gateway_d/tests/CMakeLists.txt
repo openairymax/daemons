@@ -83,12 +83,14 @@ foreach(TEST_SRC ${TEST_SOURCES})
                 "-Wl,--start-group"
                 $<TARGET_OBJECTS:gateway_lib_obj>
                 airy_syscall
+                airy_protocols
                 "-Wl,--end-group"
             )
         else()
             target_link_libraries(${TEST_NAME} PRIVATE
                 $<TARGET_OBJECTS:gateway_lib_obj>
                 airy_syscall
+                airy_protocols
             )
         endif()
     endif()

@@ -200,7 +200,7 @@ target_include_directories(svc_common PUBLIC
 target_include_directories(svc_common PUBLIC
     $<BUILD_INTERFACE:${ATOMS_DIR}/coreloopthree/include>
     $<BUILD_INTERFACE:${ATOMS_DIR}/coreloopthree/src/cognition>
-    $<BUILD_INTERFACE:${ATOMS_DIR}/coreloopthree/src/cognition/critique>
+    $<BUILD_INTERFACE:${ATOMS_DIR}/coreloopthree/src/cognition/grad>
     $<BUILD_INTERFACE:${ATOMS_DIR}/coreloopthree/src/cognition/foundation>
     $<BUILD_INTERFACE:${ATOMS_DIR}/memory>
     $<BUILD_INTERFACE:${ATOMS_DIR}/memory/src>
