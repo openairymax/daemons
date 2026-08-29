@@ -83,12 +83,16 @@ static char *parse_yaml_value(const char *line, const char *key)
 }
 
 /**
- * @brief Parse the plugin type string
+ * @brief Parse the plugin type string.
+ *
+ * 0.1.6 生态 SSoT（S-4）：未知 type 返回 PLUGIN_TYPE_COUNT 哨兵，
+ * 由调用方判为非法 manifest（此前静默回退 TOOL_PROVIDER，掩盖
+ * 拼写错误）。
  */
 static plugin_type_t parse_plugin_type(const char *type_str)
 {
     if (!type_str)
-        return PLUGIN_TYPE_TOOL_PROVIDER;
+        return PLUGIN_TYPE_COUNT;
 
     if (strcmp(type_str, "tool_provider") == 0)
         return PLUGIN_TYPE_TOOL_PROVIDER;
@@ -99,7 +103,7 @@ static plugin_type_t parse_plugin_type(const char *type_str)
     if (strcmp(type_str, "hook_extension") == 0)
         return PLUGIN_TYPE_HOOK_EXTENSION;
 
-    return PLUGIN_TYPE_TOOL_PROVIDER;
+    return PLUGIN_TYPE_COUNT;
 }
 
 /**
@@ -182,6 +186,7 @@ int plugin_discovery_parse_manifest(const char *yaml_path, const char *plugin_di
     }
 
     char line[512];
+    char raw_type[64] = "";
     while (fgets(line, sizeof(line), fp)) {
         char *value = NULL;
 
@@ -194,6 +199,7 @@ int plugin_discovery_parse_manifest(const char *yaml_path, const char *plugin_di
         } else if ((value = parse_yaml_value(line, "description"))) {
             safe_strcpy(out_result->description, value, sizeof(out_result->description));
         } else if ((value = parse_yaml_value(line, "type"))) {
+            safe_strcpy(raw_type, value, sizeof(raw_type));
             out_result->type = parse_plugin_type(value);
         } else if ((value = parse_yaml_value(line, "api_version"))) {
             out_result->api_version = (uint32_t)atoi(value);
@@ -234,6 +240,36 @@ int plugin_discovery_parse_manifest(const char *yaml_path, const char *plugin_di
     if (out_result->library_path[0] == '\0') {
         out_result->valid = false;
         safe_strcpy(out_result->error_reason, "Missing required field: library",
+                    sizeof(out_result->error_reason));
+        return AIRY_ERR_PARSE_ERROR;
+    }
+
+    /* 0.1.6 生态 SSoT（S-4）：manifest 必填约束对齐
+     * manager/schema/plugin-manifest.schema.json——type 必须存在且合法，
+     * api_version / min_airy_version 必填（此前静默以 0/默认 type 接受）。 */
+    if (raw_type[0] == '\0') {
+        out_result->valid = false;
+        safe_strcpy(out_result->error_reason, "Missing required field: type",
+                    sizeof(out_result->error_reason));
+        return AIRY_ERR_PARSE_ERROR;
+    }
+    if (out_result->type == PLUGIN_TYPE_COUNT) {
+        out_result->valid = false;
+        snprintf(out_result->error_reason, sizeof(out_result->error_reason),
+                 "Invalid plugin type: %s (expect tool_provider|protocol_adapter|"
+                 "memory_provider|hook_extension)",
+                 raw_type);
+        return AIRY_ERR_PARSE_ERROR;
+    }
+    if (out_result->api_version == 0) {
+        out_result->valid = false;
+        safe_strcpy(out_result->error_reason, "Missing required field: api_version",
+                    sizeof(out_result->error_reason));
+        return AIRY_ERR_PARSE_ERROR;
+    }
+    if (out_result->min_airy_version == 0) {
+        out_result->valid = false;
+        safe_strcpy(out_result->error_reason, "Missing required field: min_airy_version",
                     sizeof(out_result->error_reason));
         return AIRY_ERR_PARSE_ERROR;
     }
