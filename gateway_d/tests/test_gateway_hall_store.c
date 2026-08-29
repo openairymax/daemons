@@ -155,6 +155,79 @@ static int json_str_field(const char *json, const char *key, char *out, size_t s
     return 0;
 }
 
+/* 提取 JSON 数字字段值（"gseq":N）；缺省返回 -1。 */
+static long json_num_field(const char *json, const char *key)
+{
+    char pat[64];
+    snprintf(pat, sizeof(pat), "\"%s\":", key);
+    const char *p = strstr(json, pat);
+    if (!p)
+        return -1;
+    p += strlen(pat);
+    while (*p == ' ' || *p == '\t')
+        p++;
+    return strtol(p, NULL, 10);
+}
+
+/* 递归建目录（gseq 续接测试预置磁盘事件用；父链可能不存在）。 */
+static void mkdir_p(const char *path)
+{
+    char tmp[1024];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    size_t len = strlen(tmp);
+    for (size_t i = 1; i < len; i++) {
+        if (tmp[i] == '/') {
+            tmp[i] = '\0';
+            mkdir(tmp, 0755);
+            tmp[i] = '/';
+        }
+    }
+    mkdir(tmp, 0755);
+}
+
+/* P2-2：gseq 全局因果序续接——首次写入前把本进程 gseq 计数器续接到
+ * 磁盘最大 gseq（与 coreloopthree hall_store create()/rescan() 语义
+ * 对齐），跨写者进程（runtime/gateway/CLI）事件流 gseq 不撞号。
+ * 必须在本进程第一次 gw_hall_store_event 调用前预置磁盘事件，故
+ * main 中排在首位。 */
+static void test_gseq_resumption(void)
+{
+    TEST_BEGIN("gseq_resumption");
+    /* 预置磁盘事件（模拟 runtime 写者已写 gseq=5） */
+    const char *task = "gw-sse-5";
+    const char *cat = "chain";
+    char dir[1024];
+    snprintf(dir, sizeof(dir), "%s/%s/%s/%s", g_home, GW_HALL_TEST_ROOT_REL, task, cat);
+    mkdir_p(dir);
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/%s", dir,
+             "default.gw-sse-5.chain.20260829T000000000.0001.json");
+    FILE *fp = fopen(path, "w");
+    ASSERT_TRUE(fp != NULL);
+    fputs("{\"file\":{\"id\":\"default.gw-sse-5.chain.20260829T000000000.0001.json\","
+          "\"category\":\"chain\",\"schema\":\"task-file-v1\",\"tenant_id\":\"default\","
+          "\"task_id\":\"gw-sse-5\",\"node_id\":\"\",\"ts_utc\":\"20260829T000000000\",\"seq\":1,"
+          "\"gseq\":5,\"prev_file\":\"\"},"
+          "\"access\":{\"owner_role\":\"cognition\",\"write_roles\":[\"cognition\"],"
+          "\"read_roles\":[\"cognition\"]},\"content\":{\"event\":\"seeded\"}}",
+          fp);
+    fclose(fp);
+
+    /* gateway 首次写入：gseq 必须续接到磁盘最大（=6），不撞号 */
+    ASSERT_EQ_INT(0, gw_hall_store_event(task, cat, NULL, "{\"event\":\"after_seed\"}"));
+    char fname[512];
+    ASSERT_EQ_INT(0, max_seq_file(dir, fname, sizeof(fname)));
+    ASSERT_TRUE(strcmp(fname,
+                       "default.gw-sse-5.chain.20260829T000000000.0001.json") != 0);
+    snprintf(path, sizeof(path), "%s/%s", dir, fname);
+    char buf[2048];
+    ASSERT_TRUE(read_text_file(path, buf, sizeof(buf)) > 0);
+    ASSERT_TRUE(strstr(buf, "\"event\":\"after_seed\"") != NULL);
+    long g = json_num_field(buf, "gseq");
+    ASSERT_TRUE(g == 6); /* 续接：磁盘 max=5 → 新事件 gseq=6 */
+    TEST_PASS();
+}
+
 static void test_event_write_readback(void)
 {
     TEST_BEGIN("event_write_readback");
@@ -291,6 +364,7 @@ int main(void)
     isolate_data_dir();
     printf("test_gateway_hall_store: AIRY_HOME=%s\n", g_home);
 
+    test_gseq_resumption(); /* 首位：须在首次 gw_hall_store_event 前预置磁盘事件 */
     test_event_write_readback();
     test_prev_file_links();
     test_prev_file_category_isolated();
