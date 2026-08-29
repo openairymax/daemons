@@ -223,6 +223,33 @@ static void test_register_trigger_unregister(void)
     assert(strstr(res, "unregistered") != NULL);
     AIRY_FREE(res);
 
+    /* P1-5：session_start 会话级 hook 的 register + trigger + unregister 往返 */
+    const char *sess_reg = "{\"name\":\"smoke_session_start\",\"type\":\"session_start\","
+                           "\"impl\":\"shell\",\"script_path\":\"/bin/true\","
+                           "\"priority\":10,\"enabled\":true}";
+    res = NULL;
+    ret = daemon_rpc_call(g_socket_path, "register", sess_reg, &res, 5000);
+    assert(ret == AIRY_SUCCESS);
+    (void)ret;
+    assert(res != NULL && strstr(res, "registered") != NULL);
+    AIRY_FREE(res);
+    res = NULL;
+    ret = daemon_rpc_call(g_socket_path, "trigger",
+                          "{\"type\":\"session_start\",\"operation\":\"smoke_session\","
+                          "\"input\":\"hello\"}",
+                          &res, 5000);
+    assert(ret == AIRY_SUCCESS);
+    (void)ret;
+    assert(res != NULL && strstr(res, "\"decision_name\"") != NULL);
+    AIRY_FREE(res);
+    res = NULL;
+    ret = daemon_rpc_call(g_socket_path, "unregister", "{\"name\":\"smoke_session_start\"}",
+                          &res, 5000);
+    assert(ret == AIRY_SUCCESS);
+    (void)ret;
+    assert(res != NULL && strstr(res, "unregistered") != NULL);
+    AIRY_FREE(res);
+
     /* 重复注册同名 hook 应失败（幂等校验） */
     res = NULL;
     ret = daemon_rpc_call(g_socket_path, "register", reg_params, &res, 5000);

@@ -9,10 +9,15 @@ set(CUPOLAS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../cupolas)
 
 set(PLUGIN_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin_permission.c
+    # P1-5 离线扩展校验器测试：需编译 discovery 实现（依赖
+    # plugin_service_load，由 service.c 提供）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin_discovery.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service.c
 )
 
 set(PLUGIN_TEST_SOURCES
     test_plugin_permission.c
+    test_plugin_discovery.c
 )
 
 set(PLUGIN_COMMON_INCLUDES

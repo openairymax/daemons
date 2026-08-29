@@ -73,26 +73,9 @@ static BOOL WINAPI console_handler_hook_d(DWORD fdwCtrlType)
 
 static const char *hook_type_name(hook_type_t type)
 {
-    switch (type) {
-    case HOOK_TYPE_PRE_EXEC:
-        return "pre_exec";
-    case HOOK_TYPE_POST_EXEC:
-        return "post_exec";
-    case HOOK_TYPE_PRE_LLM:
-        return "pre_llm";
-    case HOOK_TYPE_POST_LLM:
-        return "post_llm";
-    case HOOK_TYPE_PRE_TOOL:
-        return "pre_tool";
-    case HOOK_TYPE_POST_TOOL:
-        return "post_tool";
-    case HOOK_TYPE_ON_ERROR:
-        return "on_error";
-    case HOOK_TYPE_ON_MEMORY_EVOLVE:
-        return "on_memory_evolve";
-    default:
-        return "unknown";
-    }
+    /* P1-5：类型名单一权威源（airy_hook_type_name），禁止本文件重复
+     * 维护类型名数组（漂移即越界）。 */
+    return airy_hook_type_name(type);
 }
 
 static int hook_type_from_name(const char *name)

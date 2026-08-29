@@ -17,6 +17,7 @@
 #include "logger.h"
 #include "airy_memory.h"
 #include "string_compat.h"
+#include "platform.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,7 +31,6 @@
 #include <windows.h>
 #endif
 
-#define DEFAULT_PLUGINS_DIR "ecosystem/plugins/"
 #define DEFAULT_SCAN_DEPTH 1
 
 static struct {
@@ -144,7 +144,12 @@ int plugin_discovery_init(const plugin_discovery_config_t *config)
     }
 
     if (g_discovery.plugins_dir[0] == '\0') {
-        safe_strcpy(g_discovery.plugins_dir, DEFAULT_PLUGINS_DIR, sizeof(g_discovery.plugins_dir));
+        /* P1-5：默认目录必须解析为绝对路径 $AIRY_HOME/ecosystem/plugins
+         * （与 plugin_d main.c 显式配置同源）。历史上回退值是相对路径
+         * "ecosystem/plugins/"，随进程 CWD 漂移，daemon 从其他启动目录
+         * 扫描恒为空（根因修复，与调用方两处路径约定一致）。 */
+        snprintf(g_discovery.plugins_dir, sizeof(g_discovery.plugins_dir),
+                 "%s/ecosystem/plugins", airy_home_dir());
     }
 
     g_discovery.initialized = true;
@@ -459,6 +464,80 @@ int plugin_discovery_auto_load(void)
 size_t plugin_discovery_count(void)
 {
     return g_discovery.count;
+}
+
+int plugin_discovery_validate_plugin(const char *plugin_dir, plugin_discovery_result_t *out_result)
+{
+    if (out_result)
+        __builtin_memset(out_result, 0, sizeof(*out_result));
+
+    if (!plugin_dir || !plugin_dir[0]) {
+        if (out_result) {
+            out_result->valid = false;
+            safe_strcpy(out_result->error_reason, "Invalid plugin directory",
+                        sizeof(out_result->error_reason));
+        }
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    /* fail-closed：目录必须存在 */
+    if (!dir_exists(plugin_dir)) {
+        if (out_result) {
+            out_result->valid = false;
+            safe_strcpy(out_result->error_reason, "Plugin directory does not exist",
+                        sizeof(out_result->error_reason));
+        }
+        return AIRY_ERR_IO;
+    }
+
+    /* manifest.yaml 必须存在 */
+    char manifest_path[PLUGIN_DISCOVERY_MAX_PATH];
+    snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.yaml", plugin_dir);
+    if (!file_exists(manifest_path)) {
+        if (out_result) {
+            out_result->valid = false;
+            safe_strcpy(out_result->error_reason, "Missing manifest.yaml",
+                        sizeof(out_result->error_reason));
+        }
+        return AIRY_ERR_IO;
+    }
+
+    /* schema 必须合法（name/type/library/api_version/min_airy_version） */
+    plugin_discovery_result_t parsed;
+    int ret = plugin_discovery_parse_manifest(manifest_path, plugin_dir, &parsed);
+    if (ret != 0 || !parsed.valid) {
+        if (out_result) {
+            out_result->valid = false;
+            safe_strcpy(out_result->error_reason,
+                        parsed.error_reason[0] ? parsed.error_reason : "Manifest parse failed",
+                        sizeof(out_result->error_reason));
+        }
+        return AIRY_ERR_PARSE_ERROR;
+    }
+
+    /* 库文件必须存在（provider/adapter/hook 类均为 .so/.dll，fail-closed） */
+    if (!file_exists(parsed.library_path)) {
+        parsed.valid = false;
+        snprintf(parsed.error_reason, sizeof(parsed.error_reason), "Library not found: %s",
+                 parsed.library_path);
+        if (out_result)
+            *out_result = parsed;
+        return AIRY_ERR_IO;
+    }
+
+    /* 权限声明必须非空（fail-closed：无权限声明不接受，防越权后门） */
+    if (parsed.permission_count == 0) {
+        parsed.valid = false;
+        safe_strcpy(parsed.error_reason, "No permissions declared (fail-closed)",
+                    sizeof(parsed.error_reason));
+        if (out_result)
+            *out_result = parsed;
+        return AIRY_ERR_PERMISSION_DENIED;
+    }
+
+    if (out_result)
+        *out_result = parsed;
+    return 0;
 }
 
 void plugin_discovery_free_results(plugin_discovery_result_t *results, size_t count)

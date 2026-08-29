@@ -23,11 +23,11 @@ gateway_d ──(hook.* JSON-RPC)──▶ hook_d（薄 daemon 壳）
                     ├─ hook_interceptor  拦截器
                     ├─ hook_timeout      超时控制
                     ├─ hook_audit_handler / hook_metrics_handler / hook_trace_handler
-                    └─ hook_builtin_handlers（统一注册入口，共 12 个内置 handler）
+                    └─ hook_builtin_handlers（统一注册入口，共 13 个内置 handler）
 ```
 
-- Hook 类型（8 种）：`pre_exec` `post_exec` `pre_llm` `post_llm` `pre_tool`
-  `post_tool` `on_error` `on_memory_evolve`。
+- Hook 类型（9 种）：`pre_exec` `post_exec` `pre_llm` `post_llm` `pre_tool`
+  `post_tool` `on_error` `on_memory_evolve` `session_start`（P1-5 会话启动注入）。
 - 实现类型：`shell` / `python` / `webhook` / `callback`。RPC 注册仅支持
   shell/python/webhook（RPC 无法传递 C 回调），`callback` 类型限内置 handler。
 - 触发返回聚合决策 `decision`：`continue`(0) / `skip` / `retry` / `abort` / `modify`。
@@ -52,8 +52,8 @@ TCP `127.0.0.1:8093`，Windows pipe `\\.\pipe\airy_hook`）。以下方法由
 | `shutdown` | 无 | — | L2 标准方法，触发优雅退出 |
 | `get_stats` | 无 | `{"daemon":"hook_d","hooks":N,"uptime_s":N}` | daemon 级统计 |
 
-- 内置 handler 共 12 个：metrics 8（全部事件类型，priority=50）+ audit 2
-  （`on_error` + `post_tool`，priority=80）+ trace 2（`pre_exec` + `post_exec`，
+- 内置 handler 共 13 个：metrics 9（全部事件类型含 session_start，priority=50）+
+  audit 2（`on_error` + `post_tool`，priority=80）+ trace 2（`pre_exec` + `post_exec`，
   priority=90/10）；启动时经 `airy_hook_register_builtin_handlers()` 注册，
   `status`/`list` 返回真实已加载模块信息。
 
