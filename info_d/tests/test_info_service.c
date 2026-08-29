@@ -290,6 +290,73 @@ static void test_health_method_response(void)
     printf("    PASSED\n");
 }
 
+static void test_hardware_method_response(void)
+{
+    printf("  test_hardware_method_response...\n");
+
+    /* SSoT 判据断言：阈值宏与 install.sh/airymaxrt assess_hardware 同口径
+     * （minimal：MemTotal < 2.5GiB 或 MemAvailable < 1.5GiB 或 CPU < 3） */
+    assert(AIRY_HW_MIN_MEM_TOTAL_KIB == 2560u * 1024u);
+    assert(AIRY_HW_MIN_MEM_AVAIL_KIB == 1536u * 1024u);
+    assert(AIRY_HW_MIN_CPU_COUNT == 3u);
+
+    /* 直接调用画像 API（真实系统值，仅断言结构合法性与判定自洽） */
+    airy_hw_profile_t hw;
+    assert(airy_get_hw_profile(&hw) == AIRY_SUCCESS);
+    assert(hw.cpu_count > 0);
+    assert(hw.mem_total_kib > 0);
+    assert(hw.profile == AIRY_HW_PROFILE_MINIMAL ||
+           hw.profile == AIRY_HW_PROFILE_FULL);
+    /* 判定自洽：full 必须满足全部阈值 */
+    if (hw.profile == AIRY_HW_PROFILE_FULL) {
+        assert(hw.mem_total_kib >= AIRY_HW_MIN_MEM_TOTAL_KIB);
+        assert(hw.mem_avail_kib >= AIRY_HW_MIN_MEM_AVAIL_KIB);
+        assert(hw.cpu_count >= AIRY_HW_MIN_CPU_COUNT);
+    }
+    if (hw.accel_present) {
+        assert(hw.accel_count >= 1);
+        assert(hw.accel_model[0] != '\0');
+    }
+    assert(airy_get_hw_profile(NULL) == AIRY_EINVAL);
+
+    info_d_service_t svc;
+    test_svc_init(&svc);
+
+    int sv[2];
+    make_sockpair(sv);
+    handle_hardware(&svc, NULL, 10, sv[1]);
+    close(sv[1]);
+
+    cJSON *resp = check_rpc_ok("info.hardware", sv[0], 10);
+    cJSON *result = cJSON_GetObjectItem(resp, "result");
+    cJSON *cores = cJSON_GetObjectItem(result, "cpu_count");
+    assert(cJSON_IsNumber(cores) && cores->valueint > 0);
+    cJSON *mem = cJSON_GetObjectItem(result, "mem_total_kib");
+    assert(cJSON_IsNumber(mem) && mem->valuedouble > 0);
+    cJSON *avail = cJSON_GetObjectItem(result, "mem_avail_kib");
+    assert(cJSON_IsNumber(avail));
+    cJSON *profile = cJSON_GetObjectItem(result, "profile");
+    assert(cJSON_IsString(profile));
+    assert(strcmp(profile->valuestring, "full") == 0 ||
+           strcmp(profile->valuestring, "minimal") == 0);
+    cJSON *accel = cJSON_GetObjectItem(result, "accel_present");
+    assert(cJSON_IsBool(accel));
+    cJSON *accel_count = cJSON_GetObjectItem(result, "accel_count");
+    assert(cJSON_IsNumber(accel_count));
+    assert(cJSON_GetObjectItem(result, "accel_model") != NULL);
+    (void)cores;
+    (void)mem;
+    (void)avail;
+    (void)profile;
+    (void)accel;
+    (void)accel_count;
+    cJSON_Delete(resp);
+    close(sv[0]);
+
+    test_svc_destroy(&svc);
+    printf("    PASSED\n");
+}
+
 static void test_request_dispatch(void)
 {
     printf("  test_request_dispatch...\n");
@@ -343,6 +410,7 @@ int main(void)
     test_system_method_response();
     test_history_method_response();
     test_health_method_response();
+    test_hardware_method_response();
     test_request_dispatch();
 
     printf("\nAll info service tests PASSED\n");
