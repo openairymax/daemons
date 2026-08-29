@@ -530,6 +530,37 @@ static void handle_health(info_d_service_t *svc, cJSON *params, int id, airy_soc
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
+/* 硬件画像查询（0.1.6 P1-3/d）：CPU/内存/画像(minimal|full)/加速器聚合。
+ * 与 install.sh/airymaxrt assess_hardware 同口径（C 侧 SSoT 判据）。
+ * 上层（gateway/CLI/监控）可据此判断外设增强（插卡/扩容）后应恢复的能力。 */
+static cJSON *info_d_build_hardware_result(void)
+{
+    cJSON *result = cJSON_CreateObject();
+    airy_hw_profile_t hw;
+    if (airy_get_hw_profile(&hw) != AIRY_SUCCESS) {
+        cJSON_AddStringToObject(result, "status", "unavailable");
+        return result;
+    }
+    cJSON_AddNumberToObject(result, "cpu_count", hw.cpu_count);
+    cJSON_AddNumberToObject(result, "mem_total_kib", (double)hw.mem_total_kib);
+    cJSON_AddNumberToObject(result, "mem_avail_kib", (double)hw.mem_avail_kib);
+    cJSON_AddStringToObject(result, "profile",
+        hw.profile == AIRY_HW_PROFILE_FULL ? "full" : "minimal");
+    cJSON_AddBoolToObject(result, "accel_present", hw.accel_present);
+    cJSON_AddNumberToObject(result, "accel_count", hw.accel_count);
+    cJSON_AddStringToObject(result, "accel_model",
+        hw.accel_model[0] ? hw.accel_model : "");
+    return result;
+}
+
+static void handle_hardware(info_d_service_t *svc, cJSON *params, int id, airy_sock_t client_fd)
+{
+    (void)svc;
+    (void)params;
+    cJSON *result = info_d_build_hardware_result();
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
 static void info_d_handle_request(info_d_service_t *svc, airy_sock_t client_fd)
 {
     char buffer[INFO_D_MAX_BUFFER];
@@ -622,6 +653,12 @@ static void info_d_handle_request(info_d_service_t *svc, airy_sock_t client_fd)
             } else if (strcmp(m->valuestring, "health") == 0) {
                 cJSON *params = cJSON_GetObjectItem(req, "params");
                 handle_health(svc, params, rid, client_fd);
+                cJSON_Delete(req);
+                airy_sock_close(client_fd);
+                return;
+            } else if (strcmp(m->valuestring, "hardware") == 0) {
+                cJSON *params = cJSON_GetObjectItem(req, "params");
+                handle_hardware(svc, params, rid, client_fd);
                 cJSON_Delete(req);
                 airy_sock_close(client_fd);
                 return;
