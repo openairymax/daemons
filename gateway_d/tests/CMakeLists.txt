@@ -22,6 +22,7 @@ set(TEST_SOURCES
     test_service.c
     test_protocol_router.c
     test_gateway_hall_store.c
+    test_gateway_cap_registry.c
 )
 
 foreach(TEST_SRC ${TEST_SOURCES})
@@ -41,6 +42,17 @@ foreach(TEST_SRC ${TEST_SOURCES})
         )
         target_include_directories(${TEST_NAME} PRIVATE
             ${PROTOCOL_ROUTER_DIR}
+        )
+    endif()
+
+    # 统一能力网关（0.1.6 P1-4）：注册表测试需编译注册表实现
+    # （含 cJSON 头依赖），网关业务头不参与测试目标。
+    if(${TEST_NAME} STREQUAL "test_gateway_cap_registry")
+        target_sources(${TEST_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/gateway_cap_registry.c
+        )
+        target_include_directories(${TEST_NAME} PRIVATE
+            ${CJSON_INCLUDE_DIRS}
         )
     endif()
 

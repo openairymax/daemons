@@ -67,6 +67,7 @@ option(AIRY_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
 #   gateway_biz_backend.c      MCP/OpenAI/A2A 协议后端
 #   gateway_biz_hall.c         hall.* 任务看板/事件流/决策链（网关内实现）
 #   gateway_biz_svcdispatch.c 微核心服务统一派发钩子（2026-08-25 "必须走 syscall"）
+#   gateway_cap_registry.c    统一能力注册表（0.1.6 P1-4：cap_key 单一权威源）
 set(GATEWAY_SERVICE_SOURCES
     src/service.c
     src/gateway_svc_adapter.c
@@ -78,6 +79,7 @@ set(GATEWAY_SERVICE_SOURCES
     src/gateway_biz_backend.c
     src/gateway_biz_hall.c
     src/gateway_biz_svcdispatch.c
+    src/gateway_cap_registry.c
 )
 
 if(AIRY_ENABLE_PROTOCOLS)

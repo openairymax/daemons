@@ -4,13 +4,16 @@
 // @owner: team-B
 /**
  * @file gateway_biz_forward.c
- * @brief Gateway namespace forwarding: L2 protocol client + method whitelist.
+ * @brief Gateway namespace forwarding: L2 protocol client.
  *
  * Acts as the gateway -> daemon L2 service-protocol client
  * (<daemon>.<method>), providing a unified Unix-socket JSON-RPC call
- * (gw_svc_call), and maintains a method whitelist per external namespace;
- * methods not listed always return -32601 (preventing arbitrary method
- * passthrough).
+ * (gw_svc_call) and the namespace forwarding handlers.
+ *
+ * 0.1.6 P1-4 收敛：外部可调用方法的枚举/白名单统一由能力注册表
+ * （gateway_cap_registry.h，cap_key 单一权威源）承载，本文件不再维护
+ * 任何方法清单；未登记能力在 gateway_business_handler.c 主派发处
+ * fail-closed 拒绝（-32601），防止任意方法透传。
  *
  * Split from gateway_business_handler.c (single responsibility: namespace
  * forwarding).
@@ -383,142 +386,16 @@ int gw_acl_check_tool(const char *tool_name)
 }
 
 /**
- * @brief mem.* method whitelist: returns the internal mem_d method name,
- *        NULL if not whitelisted
- *
- * Passes through mem_d's registered methods
- * (write/search/get/delete/count/evolve/health_check/get_stats) and rejects
- * all other mem.* methods, preventing arbitrary methods from reaching mem_d.
- */
-const char *gw_mem_method_allowlist(const char *method)
-{
-    if (!method)
-        return NULL;
-    if (strcmp(method, "mem.write") == 0)
-        return "write";
-    if (strcmp(method, "mem.search") == 0)
-        return "search";
-    if (strcmp(method, "mem.get") == 0)
-        return "get";
-    if (strcmp(method, "mem.delete") == 0)
-        return "delete";
-    if (strcmp(method, "mem.count") == 0)
-        return "count";
-    if (strcmp(method, "mem.recent") == 0)
-        return "recent";
-    if (strcmp(method, "mem.evolve") == 0)
-        return "evolve";
-    if (strcmp(method, "mem.health_check") == 0)
-        return "health_check";
-    if (strcmp(method, "mem.get_stats") == 0)
-        return "get_stats";
-    if (strcmp(method, "mem.kb_ingest") == 0)
-        return "kb_ingest";
-    if (strcmp(method, "mem.kb_search") == 0)
-        return "kb_search";
-    if (strcmp(method, "mem.kb_delete") == 0)
-        return "kb_delete";
-    if (strcmp(method, "mem.kb_list") == 0)
-        return "kb_list";
-    return NULL;
-}
-
-/* Namespace forwarding method whitelists (one per daemon, L2 methods only) */
-static const char *GW_A2A_METHODS[] = {
-    "register_agent", "unregister_agent", "discover_agents", "create_task", "update_task",
-    "cancel_task",    "get_task",         "send_message",    "count",       "send",
-    "receive",        "health_check",     "get_stats",       NULL};
-static const char *GW_PLUGIN_METHODS[] = {"load",    "unload",       "start",     "stop",
-                                          "execute", "get_metadata", "get_state", "get_stats",
-                                          "list",    "install",      "uninstall", "health_check",
-                                          NULL};
-static const char *GW_INFO_METHODS[] = {"system",       "history",   "health",
-                                        "health_check", "get_stats", NULL};
-static const char *GW_NOTIFY_METHODS[] = {"publish", "subscribe",    "unsubscribe", "list",
-                                          "health",  "health_check", "get_stats",   NULL};
-static const char *GW_OBSERVE_METHODS[] = {"record_metric", "query_metrics", "get_metrics",
-                                           "get_stats",     "health_check",  NULL};
-static const char *GW_MARKET_METHODS[] = {"register_agent",
-                                          "search_agents",
-                                          "install_agent",
-                                          "register_skill",
-                                          "search_skills",
-                                          "health_check",
-                                          "publish",
-                                          "search",
-                                          "install",
-                                          "get_stats",
-                                          NULL};
-static const char *GW_HOOK_METHODS[] = {"register",     "unregister", "trigger", "list",
-                                        "status",       "stats",      "health",  "ping",
-                                        "health_check", "get_stats",  NULL};
-static const char *GW_SCHED_METHODS[] = {"register_agent",
-                                         "unregister_agent",
-                                         "schedule_task",
-                                         "get_task",
-                                         "cancel",
-                                         "dag_submit",
-                                         "dag_status",
-                                         "dag_cancel",
-                                         "checkpoint_save",
-                                         "submit",
-                                         "query",
-                                         "get_stats",
-                                         "health_check",
-                                         NULL};
-static const char *GW_THINK_METHODS[] = {"process", "orchestrate", "health_check", "get_stats", NULL};
-static const char *GW_MONIT_METHODS[] = {"record_metric", "get_metrics",  "trigger_alert",
-                                         "get_alerts",    "health_check", "generate_report",
-                                         "heartbeat",     "metrics",      "alert_raise",
-                                         "alert_resolve", "get_stats",    NULL};
-static const char *GW_CHANNEL_METHODS[] = {"ping",   "list",         "open",      "close", "send",
-                                           "health", "health_check", "get_stats", NULL};
-static const char *GW_CUPOLAS_METHODS[] = {"check_permission",   "sanitize",
-                                           "execute_command",    "add_rule",
-                                           "audit_flush",        "health_check",
-                                           "get_stats",          "vault_store",
-                                           "vault_retrieve",     "vault_delete",
-                                           "vault_list",         "vault_rotate",
-                                           "net_add_rule",       "net_check_access",
-                                           "net_get_stats",      "entitlements_load",
-                                           "entitlements_check", NULL};
-static const char *GW_AGENT_METHODS[] = {"spawn", "terminate",    "invoke",    "cancel", "list",
-                                         "count", "health_check", "get_stats", NULL};
-static const char *GW_LLM_METHODS[] = {"complete",     "list_models", "count_tokens",
-                                       "health_check", "get_stats",   NULL};
-static const char *GW_TOOL_METHODS[] = {"register",     "list_tools", "get_tool",
-                                        "execute_tool", "execute",    "list",
-                                        "health_check", "get_stats",  NULL};
-
-/* Namespace forwarding rules referenced by the main dispatcher */
-const gw_ns_forward_rule_t GW_NS_LLM = {"llm.", NULL, GW_LLM_METHODS, GW_LLM_DEFAULT_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_AGENT = {"agent.", NULL, GW_AGENT_METHODS, GW_TOOL_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_TOOL = {"tool.", NULL, GW_TOOL_METHODS, GW_TOOL_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_A2A = {"a2a.", NULL, GW_A2A_METHODS, GW_LLM_DEFAULT_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_PLUGIN = {"plugin.", NULL, GW_PLUGIN_METHODS, GW_TOOL_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_INFO = {"info.", NULL, GW_INFO_METHODS, GW_TOOL_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_NOTIFY = {"notify.", NULL, GW_NOTIFY_METHODS, GW_TOOL_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_OBSERVE = {"observe.", NULL, GW_OBSERVE_METHODS,
-                                            GW_TOOL_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_MARKET = {"market.", NULL, GW_MARKET_METHODS, GW_TOOL_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_HOOK = {"hook.", NULL, GW_HOOK_METHODS, GW_TOOL_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_SCHED = {"sched.", NULL, GW_SCHED_METHODS, GW_TOOL_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_THINK = {"think.", NULL, GW_THINK_METHODS, GW_THINK_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_MONIT = {"monit.", NULL, GW_MONIT_METHODS, GW_TOOL_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_CHANNEL = {"channel.", NULL, GW_CHANNEL_METHODS,
-                                            GW_TOOL_TIMEOUT_MS};
-const gw_ns_forward_rule_t GW_NS_CUPOLAS = {"cupolas.", NULL, GW_CUPOLAS_METHODS,
-                                            GW_TOOL_TIMEOUT_MS};
-
-/**
  * @brief Namespace method forwarding: gateway JSON-RPC <ns>.<method> ->
  *        daemon <method>
  *
  * Same pass-through mode as handle_mem_call: params/response are forwarded
- * as-is, the response id is rewritten to the request id. Methods inside the
- * whitelist are allowed, everything else returns -32601.
+ * as-is, the response id is rewritten to the request id.
  *
- * @param rule Forwarding rule (ns/sock/whitelist/timeout)
+ * 0.1.6 P1-4：方法存在性校验已由主派发经能力注册表（gw_cap_find）完成，
+ * 本函数仅做命名空间前缀的防御性校验（防内部误用/透传格式错误）。
+ *
+ * @param rule Forwarding rule (ns/timeout，由能力注册表派生)
  * @return Complete JSON-RPC response string from the target daemon
  *         (AIRY_MALLOC), or an error response on failure
  */
@@ -527,22 +404,15 @@ char *handle_ns_forward(cJSON *root, const gw_ns_forward_rule_t *rule)
     cJSON *id = cJSON_GetObjectItem(root, "id");
     cJSON *method = cJSON_GetObjectItem(root, "method");
     const char *method_str = cJSON_IsString(method) ? method->valuestring : NULL;
-    if (!method_str || !rule)
+    if (!method_str || !rule || !rule->ns)
         return jsonrpc_error(-32601, "Method not found", id);
 
     size_t ns_len = strlen(rule->ns);
-    if (strncmp(method_str, rule->ns, ns_len) != 0)
+    /* 裸命名空间（如 "llm"）+ "." 前缀防御性校验 */
+    if (strncmp(method_str, rule->ns, ns_len) != 0 || method_str[ns_len] != '.')
         return jsonrpc_error(-32601, "Method not found", id);
-    const char *inner = method_str + ns_len;
-
-    int allow = 0;
-    for (const char *const *m = rule->methods; m && *m; ++m) {
-        if (strcmp(inner, *m) == 0) {
-            allow = 1;
-            break;
-        }
-    }
-    if (!allow)
+    const char *inner = method_str + ns_len + 1;
+    if (!*inner)
         return jsonrpc_error(-32601, "Method not found", id);
 
     cJSON *params = cJSON_GetObjectItem(root, "params");
@@ -583,21 +453,25 @@ char *handle_ns_forward(cJSON *root, const gw_ns_forward_rule_t *rule)
 /**
  * @brief mem.* forwarding: gateway JSON-RPC -> mem_d (params/response pass-through)
  *
+ * 0.1.6 P1-4：mem.* 方法枚举由能力注册表（GW_CAP_KIND_MEM）承载，主派发
+ * 已保证方法已登记；本函数直接转发内层方法名（<ns>.<method> 的 method）。
+ *
  * Env-gated by AIRY_GATEWAY_MEM_PUBLIC (default true: internal memory service
  * traffic passes; false disables external mem access without affecting the TUI
  * local JSONL).
  */
-char *handle_mem_call(cJSON *root, const gateway_business_ctx_t *ctx)
+char *handle_mem_call(cJSON *root)
 {
     cJSON *id = cJSON_GetObjectItem(root, "id");
     cJSON *method = cJSON_GetObjectItem(root, "method");
+    const char *method_str = cJSON_IsString(method) ? method->valuestring : NULL;
     cJSON *params = cJSON_GetObjectItem(root, "params");
 
-    const char *mem_method =
-        gw_mem_method_allowlist(cJSON_IsString(method) ? method->valuestring : NULL);
-    if (!mem_method) {
+    const char *mem_method = NULL;
+    if (method_str && strncmp(method_str, "mem.", 4) == 0)
+        mem_method = method_str + 4;
+    if (!mem_method || !*mem_method)
         return jsonrpc_error(-32601, "Method not found", id);
-    }
 
     const char *pub = getenv("AIRY_GATEWAY_MEM_PUBLIC");
     if (pub && (strcmp(pub, "false") == 0 || strcmp(pub, "0") == 0)) {
