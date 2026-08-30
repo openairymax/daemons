@@ -45,6 +45,27 @@ DAEMON_DECLARE_SHUTDOWN_METHOD(hook_d)
 static int g_registry_initialized = 0;
 static uint64_t g_start_time = 0;
 
+/* P1-5：SessionStart 会话级上下文注入通道（改 hook_d，不改底座）。
+ * 上游（agent 会话建立方）调用 hook.session.start：hook_d 触发
+ * SESSION_START 事件链（插件在此注入上下文/规则），并把注入的上下文
+ * 存入会话级存储；下游经 hook.session.get 取回，实现会话生命周期内
+ * 的上下文注入通道。会话条目有界（覆盖最旧），防止内存无界增长。 */
+#define AIRY_HOOK_MAX_SESSIONS 32
+#define AIRY_HOOK_CTX_LEN 4096
+
+typedef struct {
+    char session_id[64];
+    bool active;
+    uint64_t started_ns;
+    char decision[16];
+    size_t hook_count;
+    char context[AIRY_HOOK_CTX_LEN]; /* 注入的会话上下文（session.start 的 input） */
+    size_t context_len;
+} hook_session_entry_t;
+
+static hook_session_entry_t g_hook_sessions[AIRY_HOOK_MAX_SESSIONS];
+static airy_mtx_t g_hook_sessions_lock;
+
 static void destroy_service_hook_d(void)
 {
     if (g_registry_initialized) {
@@ -53,6 +74,57 @@ static void destroy_service_hook_d(void)
         g_registry_initialized = 0;
     }
     daemon_cupolas_cleanup();
+}
+
+static hook_session_entry_t *hook_session_find(const char *session_id)
+{
+    for (size_t i = 0; i < AIRY_HOOK_MAX_SESSIONS; i++) {
+        if (g_hook_sessions[i].active &&
+            strcmp(g_hook_sessions[i].session_id, session_id) == 0)
+            return &g_hook_sessions[i];
+    }
+    return NULL;
+}
+
+static hook_session_entry_t *hook_session_upsert(const char *session_id)
+{
+    hook_session_entry_t *e = hook_session_find(session_id);
+    if (e)
+        return e;
+    size_t slot = AIRY_HOOK_MAX_SESSIONS;
+    size_t oldest = 0;
+    for (size_t i = 0; i < AIRY_HOOK_MAX_SESSIONS; i++) {
+        if (!g_hook_sessions[i].active) {
+            slot = i;
+            break;
+        }
+        if (g_hook_sessions[i].started_ns < g_hook_sessions[oldest].started_ns)
+            oldest = i;
+    }
+    if (slot == AIRY_HOOK_MAX_SESSIONS)
+        slot = oldest; /* 全满：覆盖最旧会话 */
+    AIRY_MEMSET(&g_hook_sessions[slot], 0, sizeof(g_hook_sessions[slot]));
+    AIRY_STRNCPY_TERM(g_hook_sessions[slot].session_id, session_id,
+                      sizeof(g_hook_sessions[slot].session_id));
+    g_hook_sessions[slot].active = true;
+    g_hook_sessions[slot].started_ns = (uint64_t)time(NULL) * 1000000000ull;
+    return &g_hook_sessions[slot];
+}
+
+static const char *hook_decision_name(hook_decision_t decision)
+{
+    switch (decision) {
+    case HOOK_DECISION_SKIP:
+        return "skip";
+    case HOOK_DECISION_RETRY:
+        return "retry";
+    case HOOK_DECISION_ABORT:
+        return "abort";
+    case HOOK_DECISION_MODIFY:
+        return "modify";
+    default:
+        return "continue";
+    }
 }
 
 #ifdef _WIN32
@@ -331,6 +403,7 @@ static void hook_on_trigger(cJSON *params, int id, void *user_data)
     const char *operation = jsonrpc_get_string_param(params, "operation", NULL);
     const char *input = jsonrpc_get_string_param(params, "input", NULL);
     const char *hook_name = jsonrpc_get_string_param(params, "hook_name", NULL);
+    const char *session_id = jsonrpc_get_string_param(params, "session_id", NULL);
 
     hook_context_t ctx;
     __builtin_memset(&ctx, 0, sizeof(ctx));
@@ -340,34 +413,99 @@ static void hook_on_trigger(cJSON *params, int id, void *user_data)
     ctx.input_data = input;
     ctx.input_data_len = input ? strlen(input) : 0;
     ctx.timestamp_ns = (uint64_t)time(NULL) * 1000000000ull;
+    if (session_id)
+        AIRY_STRNCPY_TERM(ctx.session_id, session_id, sizeof(ctx.session_id));
 
     hook_decision_t decision = hook_service_fire(&ctx);
 
-    const char *decision_name = "continue";
-    switch (decision) {
-    case HOOK_DECISION_SKIP:
-        decision_name = "skip";
-        break;
-    case HOOK_DECISION_RETRY:
-        decision_name = "retry";
-        break;
-    case HOOK_DECISION_ABORT:
-        decision_name = "abort";
-        break;
-    case HOOK_DECISION_MODIFY:
-        decision_name = "modify";
-        break;
-    default:
-        break;
-    }
-
     cJSON *result = cJSON_CreateObject();
     cJSON_AddNumberToObject(result, "decision", (double)decision);
-    cJSON_AddStringToObject(result, "decision_name", decision_name);
+    cJSON_AddStringToObject(result, "decision_name", hook_decision_name(decision));
     cJSON_AddStringToObject(result, "type", hook_type_name((hook_type_t)type));
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
     SVC_LOG_INFO("hook.trigger OK: type=%s decision=%s", hook_type_name((hook_type_t)type),
-                 decision_name);
+                 hook_decision_name(decision));
+}
+
+/* hook.session.start: 会话建立时触发 SESSION_START 事件链并注入会话上下文
+ * （P1-5 通道：改 hook_d，不改底座）。会话级 hooks 可在此时注入上下文/规则；
+ * 注入的 input 存入会话级存储，下游经 hook.session.get 取回。
+ * params: session_id(required), operation(optional), input(optional) */
+static void hook_on_session_start(cJSON *params, int id, void *user_data)
+{
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
+    const char *session_id = jsonrpc_get_string_param(params, "session_id", NULL);
+    if (!session_id || !session_id[0]) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing session_id", id);
+        return;
+    }
+    const char *operation = jsonrpc_get_string_param(params, "operation", NULL);
+    const char *input = jsonrpc_get_string_param(params, "input", NULL);
+
+    hook_context_t ctx;
+    __builtin_memset(&ctx, 0, sizeof(ctx));
+    ctx.type = HOOK_TYPE_SESSION_START;
+    ctx.operation = operation;
+    ctx.input_data = input;
+    ctx.input_data_len = input ? strlen(input) : 0;
+    ctx.timestamp_ns = (uint64_t)time(NULL) * 1000000000ull;
+    AIRY_STRNCPY_TERM(ctx.session_id, session_id, sizeof(ctx.session_id));
+
+    hook_decision_t decision = hook_service_fire(&ctx);
+
+    airy_mtx_lock(&g_hook_sessions_lock);
+    hook_session_entry_t *se = hook_session_upsert(session_id);
+    if (se) {
+        se->hook_count++;
+        AIRY_STRNCPY_TERM(se->decision, hook_decision_name(decision), sizeof(se->decision));
+        if (input) {
+            size_t n = strlen(input);
+            if (n >= sizeof(se->context))
+                n = sizeof(se->context) - 1;
+            AIRY_MEMCPY(se->context, input, n);
+            se->context[n] = '\0';
+            se->context_len = n;
+        }
+    }
+    airy_mtx_unlock(&g_hook_sessions_lock);
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "session_id", session_id);
+    cJSON_AddNumberToObject(result, "decision", (double)decision);
+    cJSON_AddStringToObject(result, "decision_name", hook_decision_name(decision));
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    SVC_LOG_INFO("hook.session.start OK: session=%s decision=%s hooks=%zu", session_id,
+                 hook_decision_name(decision), se ? se->hook_count : 0);
+}
+
+/* hook.session.get: 取回会话级注入上下文（P1-5 通道读取端）。
+ * params: session_id(required) */
+static void hook_on_session_get(cJSON *params, int id, void *user_data)
+{
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
+    const char *session_id = jsonrpc_get_string_param(params, "session_id", NULL);
+    if (!session_id || !session_id[0]) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing session_id", id);
+        return;
+    }
+
+    airy_mtx_lock(&g_hook_sessions_lock);
+    hook_session_entry_t *se = hook_session_find(session_id);
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "session_id", session_id);
+    if (se) {
+        cJSON_AddBoolToObject(result, "active", true);
+        cJSON_AddNumberToObject(result, "started_at", (double)se->started_ns);
+        cJSON_AddStringToObject(result, "decision", se->decision);
+        cJSON_AddNumberToObject(result, "hook_count", (double)se->hook_count);
+        if (se->context_len > 0)
+            cJSON_AddStringToObject(result, "injected_context", se->context);
+    } else {
+        cJSON_AddBoolToObject(result, "active", false);
+    }
+    airy_mtx_unlock(&g_hook_sessions_lock);
+
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
 static void hook_on_health_check(cJSON *params, int id, void *user_data)
@@ -394,6 +532,7 @@ int main(int argc, char *argv[])
 
     airy_sock_init();
     airy_mtx_init(&g_running_lock_hook_d);
+    airy_mtx_init(&g_hook_sessions_lock);
 
 #ifdef _WIN32
     SetConsoleCtrlHandler(console_handler_hook_d, TRUE);
@@ -464,6 +603,10 @@ int main(int argc, char *argv[])
     method_dispatcher_register(g_dispatcher_hook_d, "register", hook_on_register, NULL);
     method_dispatcher_register(g_dispatcher_hook_d, "unregister", hook_on_unregister, NULL);
     method_dispatcher_register(g_dispatcher_hook_d, "trigger", hook_on_trigger, NULL);
+    /* P1-5：SessionStart 会话级上下文注入通道（hook.session.start 触发 +
+     * 注入存储 / hook.session.get 取回） */
+    method_dispatcher_register(g_dispatcher_hook_d, "session_start", hook_on_session_start, NULL);
+    method_dispatcher_register(g_dispatcher_hook_d, "session_get", hook_on_session_get, NULL);
     method_dispatcher_register(g_dispatcher_hook_d, "health_check", hook_on_health_check, NULL);
 
     method_dispatcher_register(g_dispatcher_hook_d, "shutdown", on_shutdown_method_hook_d, NULL);

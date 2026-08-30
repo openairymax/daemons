@@ -250,6 +250,55 @@ static void test_register_trigger_unregister(void)
     assert(res != NULL && strstr(res, "unregistered") != NULL);
     AIRY_FREE(res);
 
+    /* P1-5：hook.session.start + hook.session.get 会话级上下文注入通道往返。
+     * 注册会话级 hook → session.start 触发（注入 input 至会话存储）→
+     * session.get 取回注入上下文 → 缺失 session_id 时拒绝。 */
+    res = NULL;
+    ret = daemon_rpc_call(g_socket_path, "register",
+                          "{\"name\":\"smoke_session_inject\",\"type\":\"session_start\","
+                          "\"impl\":\"shell\",\"script_path\":\"/bin/true\","
+                          "\"priority\":10,\"enabled\":true}",
+                          &res, 5000);
+    assert(ret == AIRY_SUCCESS);
+    assert(res != NULL && strstr(res, "registered") != NULL);
+    AIRY_FREE(res);
+
+    res = NULL;
+    ret = daemon_rpc_call(g_socket_path, "session_start",
+                          "{\"session_id\":\"sess-inject-01\",\"operation\":\"chat\","
+                          "\"input\":\"injected-context-v1\"}",
+                          &res, 5000);
+    assert(ret == AIRY_SUCCESS);
+    assert(res != NULL && strstr(res, "\"decision_name\"") != NULL);
+    assert(strstr(res, "sess-inject-01") != NULL);
+    AIRY_FREE(res);
+
+    res = NULL;
+    ret = daemon_rpc_call(g_socket_path, "session_get",
+                          "{\"session_id\":\"sess-inject-01\"}", &res, 5000);
+    assert(ret == AIRY_SUCCESS);
+    assert(res != NULL);
+    assert(strstr(res, "\"active\":true") != NULL);
+    assert(strstr(res, "injected-context-v1") != NULL);
+    AIRY_FREE(res);
+
+    /* 缺失 session_id 应拒绝（fail-closed） */
+    res = NULL;
+    ret = daemon_rpc_call(g_socket_path, "session_start", "{}", &res, 5000);
+    assert(res == NULL);
+    AIRY_FREE(res);
+    res = NULL;
+    ret = daemon_rpc_call(g_socket_path, "session_get", "{}", &res, 5000);
+    assert(res == NULL);
+    AIRY_FREE(res);
+
+    res = NULL;
+    ret = daemon_rpc_call(g_socket_path, "unregister", "{\"name\":\"smoke_session_inject\"}",
+                          &res, 5000);
+    assert(ret == AIRY_SUCCESS);
+    assert(res != NULL && strstr(res, "unregistered") != NULL);
+    AIRY_FREE(res);
+
     /* 重复注册同名 hook 应失败（幂等校验） */
     res = NULL;
     ret = daemon_rpc_call(g_socket_path, "register", reg_params, &res, 5000);
