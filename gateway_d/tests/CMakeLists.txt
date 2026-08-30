@@ -138,7 +138,10 @@ foreach(TEST_SRC ${TEST_SOURCES})
     endif()
 
     if(AIRY_HAS_LIBWEBSOCKETS)
-        if(libwebsockets_FOUND)
+        # 优先自编译 4.3.3 的 websockets_shared imported target（libssl.so.3）
+        if(TARGET websockets_shared)
+            target_link_libraries(${TEST_NAME} PRIVATE websockets_shared)
+        elseif(TARGET websockets)
             target_link_libraries(${TEST_NAME} PRIVATE websockets)
         elseif(LIBWEBSOCKETS_FOUND)
             target_include_directories(${TEST_NAME} PRIVATE ${LIBWEBSOCKETS_INCLUDE_DIRS})
