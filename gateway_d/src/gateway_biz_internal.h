@@ -26,6 +26,7 @@
 #include <cjson/cJSON.h>
 
 #include "gateway_business_handler.h"
+#include "protocol/gateway_mcp_server.h"
 
 #include "airy_memory.h"
 #include "atomic_compat.h"
@@ -116,6 +117,10 @@ typedef struct {
     const char *ns;
     int timeout_ms;
 } gw_ns_forward_rule_t;
+
+/* ---- gateway_biz_tools.c（内置 MCP 工具注册 SSoT, 2026-08-30 S-6）----
+ * 内置工具 JSON schema 唯一权威源；返回注册失败数（0 = 全成功）。 */
+int gw_biz_mcp_register_tools(gw_mcp_server_t *mcp, void *user_data);
 
 /* ---- gateway_biz_forward.c (L2 protocol client + namespace forwarding) ---- */
 char *jsonrpc_error(int code, const char *msg, const cJSON *id);

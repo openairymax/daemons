@@ -79,6 +79,7 @@ set(GATEWAY_SERVICE_SOURCES
     src/gateway_biz_backend.c
     src/gateway_biz_hall.c
     src/gateway_biz_svcdispatch.c
+    src/gateway_biz_tools.c
     src/gateway_cap_registry.c
 )
 
