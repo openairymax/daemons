@@ -454,7 +454,12 @@ if(AIRY_HAS_MICROHTTPD)
     endif()
 endif()
 if(AIRY_HAS_LIBWEBSOCKETS)
-    if(libwebsockets_FOUND)
+    # 自编译 lws 4.3.3 的 cmake config 导出 imported target
+    # websockets_shared（无 websockets 目标），须优先命中，否则回退裸
+    # 库名 -lwebsockets 会解析到系统 apt 版（libssl.so.1.1 崩溃链）
+    if(TARGET websockets_shared)
+        target_link_libraries(gateway_d PRIVATE websockets_shared)
+    elseif(TARGET websockets)
         target_link_libraries(gateway_d PRIVATE websockets)
     elseif(LIBWEBSOCKETS_FOUND)
         target_link_libraries(gateway_d PRIVATE ${LIBWEBSOCKETS_LIBRARIES})
