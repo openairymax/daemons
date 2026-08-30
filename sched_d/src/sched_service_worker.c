@@ -56,10 +56,9 @@ static task_record_t *sched_queue_take_highest(sched_service_t *svc)
         dst = (dst + 1) % AIRY_CAP_MAX_TASKS;
     }
     svc->queue_tail = (svc->queue_tail + AIRY_CAP_MAX_TASKS - 1) % AIRY_CAP_MAX_TASKS;
-    size_t remain = (svc->queue_tail + AIRY_CAP_MAX_TASKS - svc->queue_head) % AIRY_CAP_MAX_TASKS;
     SVC_LOG_DEBUG("sched: queue take: task=%s priority=%d wait_ms=%llu remain=%zu", rec->task_id,
                   (int)rec->priority, (unsigned long long)(sched_now_ms() - rec->created_at_ms),
-                  remain);
+                  (size_t)((svc->queue_tail + AIRY_CAP_MAX_TASKS - svc->queue_head) % AIRY_CAP_MAX_TASKS));
     return rec;
 }
 
