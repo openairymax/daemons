@@ -25,7 +25,9 @@
 
 uint64_t get_timestamp_ms(void)
 {
-    return airy_time_ms();
+    /* 校正后逻辑墙钟：联网以时区标准时间为准，离线回退系统时间，
+     * 单调递增不受系统时间跳变影响（任务1，0.1.6f）。 */
+    return airy_time_wall_ms();
 }
 
 int monitor_service_create(const monitor_config_t *config, monitor_service_t **service)
