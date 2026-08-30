@@ -43,10 +43,21 @@
 #include <sys/resource.h>
 #include <sys/syscall.h>
 
-#if defined(__x86_64__) || defined(__aarch64__) || defined(__riscv)
+/* Landlock syscall 号按架构 syscall 表（arch/<arch>/syscall*.tbl）：
+ * i386 表较 x86_64 少 1（443/444/445）；arm EABI / aarch64 / riscv 与
+ * x86_64 一致（444/445/446）。32 位目标缺 __i386__/__arm__ 分支时
+ * OS_LL_* 未定义，i686 编译直接报错（i686/armv7l 六架构实测）。 */
+#if defined(__x86_64__) || defined(__i386__) || defined(__aarch64__) || \
+    defined(__arm__) || defined(__riscv)
+#if defined(__i386__)
+#define OS_LL_CREATE_RULESET 443
+#define OS_LL_ADD_RULE 444
+#define OS_LL_RESTRICT_SELF 445
+#else
 #define OS_LL_CREATE_RULESET 444
 #define OS_LL_ADD_RULE 445
 #define OS_LL_RESTRICT_SELF 446
+#endif
 #else
 
 #define OS_LL_NO_SUPPORT 1
