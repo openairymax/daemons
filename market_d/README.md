@@ -52,8 +52,10 @@
 
 ## 配置
 
-- `config_path` 默认 `agentrt/manager/service/market_d/market.yaml`，经
-  `daemon_parse_args` 处理（`--config` 覆盖）；
+- 配置：默认使用内置 `market_config_t` 默认值（数据落盘 `$AIRY_HOME/agents`
+  与 `$AIRY_HOME/skills`），可经 `--config <path>` 覆盖（YAML）；仓库内
+  不随附 market_d 默认配置文件（S-7 收敛：不再引用已废弃的
+  `agentrt/manager/service/` 相对布局）；
 - `market_config_t`：`registry_url`、`storage_path`、`sync_interval_ms`、
   `cache_ttl_ms`、`enable_remote_registry`、`enable_auto_update`；
 - 数据落盘：`$AIRY_HOME/agents`（Agent）与 `$AIRY_HOME/skills`（Skill）。
