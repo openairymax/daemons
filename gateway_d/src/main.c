@@ -20,6 +20,7 @@
 #include "daemon_heapstore_bootstrap.h"
 #include "gateway_service.h"
 #include "gateway_business_handler.h"
+#include "gateway_biz_internal.h"
 #include "daemon_security.h"
 #include "logging.h"
 #include "daemon_platform_ext.h"
@@ -537,62 +538,13 @@ int main(int argc, char *argv[])
 
         gw_mcp_server_t *mcp = gw_proto_router_get_mcp(g_proto_router);
         if (mcp) {
-            gw_mcp_server_register_tool(mcp, "fs_read",
-                                        "Read a file's content from the local filesystem",
-                                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":"
-                                        "\"string\"}},\"required\":[\"path\"]}",
-                                        gw_biz_tool_exec, g_biz_ctx);
-            gw_mcp_server_register_tool(
-                mcp, "fs_write", "Write content to a local file (creates or overwrites)",
-                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"content\":{"
-                "\"type\":\"string\"}},\"required\":[\"path\",\"content\"]}",
-                gw_biz_tool_exec, g_biz_ctx);
-            gw_mcp_server_register_tool(mcp, "fs_list",
-                                        "List entries of a local directory (JSON array)",
-                                        /* Consistent with tool_d registration:
-                                         * path is required (the tool_d
-                                         * validator checks existence of every
-                                         * registered parameter; a schema
-                                         * declaring it optional would let
-                                         * LLM/MCP omit path and tool_d
-                                         * validation fails) */
-                                        "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":"
-                                        "\"string\"}},\"required\":[\"path\"]}",
-                                        gw_biz_tool_exec, g_biz_ctx);
-            gw_mcp_server_register_tool(mcp, "shell_run",
-                                        "Execute a shell command and capture its output",
-                                        "{\"type\":\"object\",\"properties\":{\"command\":{"
-                                        "\"type\":\"string\"}},\"required\":[\"command\"]}",
-                                        gw_biz_tool_exec, g_biz_ctx);
-            gw_mcp_server_register_tool(mcp, "web_fetch",
-                                        "Fetch a web page over HTTP(S) and return its body text",
-                                        "{\"type\":\"object\",\"properties\":{\"url\":{\"type\":"
-                                        "\"string\"}},\"required\":[\"url\"]}",
-                                        gw_biz_tool_exec, g_biz_ctx);
-
-            gw_mcp_server_register_tool(
-                mcp, "fs_glob", "List files matching a glob pattern (supports * ? and **)",
-                "{\"type\":\"object\",\"properties\":{\"pattern\":{\"type\":\"string\"},\"base\":{"
-                "\"type\":\"string\"}},\"required\":[\"pattern\"]}",
-                gw_biz_tool_exec, g_biz_ctx);
-            gw_mcp_server_register_tool(
-                mcp, "fs_grep",
-                "Search file contents with a regular expression (relpath:line:text)",
-                "{\"type\":\"object\",\"properties\":{\"pattern\":{\"type\":\"string\"},\"path\":{"
-                "\"type\":\"string\"},\"glob\":{\"type\":\"string\"},\"max_results\":{\"type\":"
-                "\"integer\"}},\"required\":[\"pattern\"]}",
-                gw_biz_tool_exec, g_biz_ctx);
-            gw_mcp_server_register_tool(
-                mcp, "fs_edit", "Replace an exact string in a file (search-and-replace edit)",
-                "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"old\":{"
-                "\"type\":\"string\"},\"new\":{\"type\":\"string\"},\"count\":{\"type\":"
-                "\"integer\"}},\"required\":[\"path\",\"old\",\"new\"]}",
-                gw_biz_tool_exec, g_biz_ctx);
-            gw_mcp_server_register_tool(
-                mcp, "web_search", "Search the web (DuckDuckGo) and return ranked results",
-                "{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"},\"max_"
-                "results\":{\"type\":\"integer\"}},\"required\":[\"query\"]}",
-                gw_biz_tool_exec, g_biz_ctx);
+            /* 内置工具 schema 唯一权威在 gateway_biz_tools.c（S-6 SSoT），
+             * 与 tool_d service_builtin.c 参数定义一致；一致性由
+             * tests/test_mcp_tools_schema.c 门禁。 */
+            int t_failed = gw_biz_mcp_register_tools(mcp, g_biz_ctx);
+            if (t_failed != 0) {
+                SVC_LOG_WARN("Phase 2: %d builtin tool(s) failed to register", t_failed);
+            }
             SVC_LOG_INFO("Phase 2: MCP adapter wired — 9 tools → tool_d");
 
             gw_mcp_clients_setup(mcp);
