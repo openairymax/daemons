@@ -626,6 +626,8 @@ int main(int argc, char **argv)
     SVC_LOG_INFO("Monitor service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_monit_d);
 
+    airy_time_sync_stop();
+
     daemon_cleanup_standard(g_bipc_monit_d, g_bsd_monit_d, g_event_driver_monit_d, server_fd,
                             DEFAULT_SOCKET_PATH_UNIX, destroy_service, &g_running_lock_monit_d);
 
