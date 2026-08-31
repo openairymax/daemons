@@ -416,6 +416,9 @@ int main(int argc, char **argv)
     ev_config.thread_pool_max = 4;
     ev_config.thread_pool_queue_size = 32;
     ev_config.use_jsonrpc = true;
+    /* 0.1.6h：think.process 含 LLM 长思考（数分钟），同步模式会阻塞
+     * 事件循环——其他连接排队、CLI health_check 误报掉线。同 llm_d。 */
+    ev_config.concurrent_clients = true;
     ev_config.on_client = daemon_on_client_think_d;
     ev_config.service_ctx = NULL;
 
