@@ -344,6 +344,21 @@ add_executable(gateway_d
     src/main.c
 )
 
+# 版本 SSoT：GATEWAY_VERSION 从 agentrt 根 VERSION 文件注入（gateway_internal.h
+# 内 #define 仅作缺省回退）。gateway_lib_obj/airy_gateway_service 与本 daemon
+# 均需注入——独立 gateway 模块的注入（gateway/CMakeLists.txt，PRIVATE）不会
+# 传递到本目录目标，缺失注入时版本回退缺省值，曾导致 0.1.6h 包 gateway_d
+# /health 仍报告 0.1.6c。
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../../VERSION" GATEWAY_VERSION_RAW LIMIT_COUNT 1)
+string(STRIP "${GATEWAY_VERSION_RAW}" GATEWAY_VERSION_RAW)
+if(GATEWAY_VERSION_RAW)
+    target_compile_definitions(airy_gateway_service PRIVATE GATEWAY_VERSION="${GATEWAY_VERSION_RAW}")
+    if(TARGET gateway_lib_obj)
+        target_compile_definitions(gateway_lib_obj PUBLIC GATEWAY_VERSION="${GATEWAY_VERSION_RAW}")
+    endif()
+    target_compile_definitions(gateway_d PRIVATE GATEWAY_VERSION="${GATEWAY_VERSION_RAW}")
+endif()
+
 if(AIRY_ENABLE_PROTOCOLS)
     target_compile_definitions(gateway_d PRIVATE AIRY_HAS_PROTOCOLS=1)
 endif()
