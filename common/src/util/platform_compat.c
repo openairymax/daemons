@@ -294,6 +294,20 @@ airy_sock_t airy_sock_create_tcp_server(const char *host, uint16_t port)
     int opt = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&opt, sizeof(opt));
+    /* 0.1.6h：对外 TCP 长连接开内核 keepalive——半开连接（客户端崩溃/
+     * 网络闪断）由内核探活回收，避免连接数只增不减。服务端 listen fd
+     * 的 keepalive 会经 accept 继承到每个连接。 */
+    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (const char *)&opt, sizeof(opt));
+#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
+    {
+        int idle = 30;   /* 空闲 30s 后开始探测 */
+        int intvl = 10;  /* 每 10s 重试 */
+        int cnt = 3;     /* 3 次失败判死 */
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, (const char *)&idle, sizeof(idle));
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, (const char *)&intvl, sizeof(intvl));
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, (const char *)&cnt, sizeof(cnt));
+    }
+#endif
 
     struct sockaddr_in addr;
     __builtin_memset(&addr, 0, sizeof(addr));
@@ -545,8 +559,21 @@ ssize_t airy_sock_send(airy_sock_t sock, const void *buf, size_t len)
  */
 #define AIRY_DAEMON_REQ_INITIAL_CAP (64 * 1024)
 #define AIRY_DAEMON_REQ_MAX_CAP (8 * 1024 * 1024)
+/* 0.1.6h：请求读取预算默认 5s 对慢客户端/gateway 转发链过紧，可经
+ * AIRY_DAEMON_REQ_TIMEOUT_MS 覆盖（1000..60000），默认保持 5s。 */
 #define AIRY_DAEMON_REQ_FIRST_POLL_MS 5000
 #define AIRY_DAEMON_REQ_SLICE_MS 200
+
+static uint32_t airy_daemon_req_timeout_ms(void)
+{
+    const char *env = getenv("AIRY_DAEMON_REQ_TIMEOUT_MS");
+    if (env && *env) {
+        long v = strtol(env, NULL, 10);
+        if (v >= 1000 && v <= 60000)
+            return (uint32_t)v;
+    }
+    return AIRY_DAEMON_REQ_FIRST_POLL_MS;
+}
 
 char *airy_daemon_read_request(airy_sock_t client_fd, size_t *out_len, const char **err)
 {
@@ -567,7 +594,7 @@ char *airy_daemon_read_request(airy_sock_t client_fd, size_t *out_len, const cha
         pfd.fd = (int)client_fd;
         pfd.events = POLLIN;
         pfd.revents = 0;
-        int pr = poll(&pfd, 1, AIRY_DAEMON_REQ_FIRST_POLL_MS);
+        int pr = poll(&pfd, 1, (int)airy_daemon_req_timeout_ms());
         if (pr <= 0 || !(pfd.revents & POLLIN)) {
             if (err)
                 *err = "Request read timeout";
@@ -584,6 +611,7 @@ char *airy_daemon_read_request(airy_sock_t client_fd, size_t *out_len, const cha
     }
     size_t used = 0;
     uint32_t elapsed = 0;
+    uint32_t req_budget = airy_daemon_req_timeout_ms();
 
     for (;;) {
         if (used >= cap - 1) {
@@ -632,7 +660,7 @@ char *airy_daemon_read_request(airy_sock_t client_fd, size_t *out_len, const cha
             }
         }
 
-        if (elapsed >= AIRY_DAEMON_REQ_FIRST_POLL_MS) {
+        if (elapsed >= req_budget) {
             /* Read budget exhausted without a complete frame. */
             if (err)
                 *err = "Request read timeout";
@@ -643,8 +671,8 @@ char *airy_daemon_read_request(airy_sock_t client_fd, size_t *out_len, const cha
         pfd.fd = (int)client_fd;
         pfd.events = POLLIN;
         pfd.revents = 0;
-        uint32_t remain = (AIRY_DAEMON_REQ_FIRST_POLL_MS - elapsed) < AIRY_DAEMON_REQ_SLICE_MS
-                              ? (AIRY_DAEMON_REQ_FIRST_POLL_MS - elapsed)
+        uint32_t remain = (req_budget - elapsed) < AIRY_DAEMON_REQ_SLICE_MS
+                              ? (req_budget - elapsed)
                               : AIRY_DAEMON_REQ_SLICE_MS;
         int pr = poll(&pfd, 1, (int)remain);
         if (pr < 0) {

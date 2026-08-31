@@ -128,6 +128,11 @@ int main(int argc, char **argv)
     ev_config.thread_pool_max = g_config.max_threads > 0 ? g_config.max_threads : 8;
     ev_config.thread_pool_queue_size = 256;
     ev_config.use_jsonrpc = true;
+    /* 0.1.6h：llm_d complete_stream 是长流（每 chunk 持续写 socket）。
+     * 原同步模式在事件循环线程内阻塞流式写：长思考期间其他连接排队、
+     * CLI health_check（6s 超时）误报掉线、健康定时器失效——表现为
+     * "daemon 总是掉线"。开启并发，把 on_client 提交线程池处理。 */
+    ev_config.concurrent_clients = true;
     ev_config.on_client = daemon_on_client_llm_d;
     ev_config.service_ctx = NULL;
 
