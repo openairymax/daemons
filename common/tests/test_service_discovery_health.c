@@ -8,7 +8,7 @@
 
 #include "test_service_discovery_internal.h"
 #include "../include/service_discovery.h"
-#include "../include/safe_string_utils.h"
+#include "safe_string_utils.h"
 
 #include <stdio.h>
 #include <stdlib.h>

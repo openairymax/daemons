@@ -6,12 +6,12 @@
  * @brief Logging-service compatibility layer (re-export).
  *
  * P0.17 phase 2: the actual definitions moved to
- * commons/utils/logging/include/svc_logger.h, removing the compile-time
+ * commons/utils/logging/svc_logger.h, removing the compile-time
  * reverse dependency atoms->daemons (IRON-6). This file stays as a
  * re-export compat header so daemon sources need no immediate #include
  * path changes.
  *
- * @see commons/utils/logging/include/svc_logger.h
+ * @see commons/utils/logging/svc_logger.h
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_SVC_LOGGER_H
@@ -28,6 +28,6 @@
  * not transitively via svc_logger.h. See daemon_platform_ext.h. */
 
 
-#include "../../../commons/utils/logging/include/svc_logger.h"
+#include "../../../commons/utils/logging/svc_logger.h"
 
 #endif /* AIRY_RT_DAEMON_COMMON_SVC_LOGGER_H */
