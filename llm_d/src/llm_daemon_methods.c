@@ -37,6 +37,46 @@
 #define LLM_MAX_RETRIES 3
 #define LLM_BASE_DELAY_MS 100
 
+/* 0.1.8 社区缺陷修复：此前流式失败统一回 "Service error"（-32603），
+ * 用户与 TUI 均无法得知真实原因（模型未配置/无 provider/网络失败），
+ * 是"对话不能正常进行且无从排查"的直接根因。按 llm_service_* 返回的
+ * AIRY_ERR_* 透传具体信息；未知错误附带错误码便于日志对照。 */
+static const char *llm_error_message(int ret)
+{
+    switch (ret) {
+    case AIRY_ERR_INVALID_PARAM:
+        return "Missing model: configure AIRY_AGENT_MODEL or config/model.yaml";
+    case AIRY_ERR_LLM_INVALID_MODEL:
+        return "Model not found in provider registry (check config/model.yaml and provider API key)";
+    case AIRY_ERR_LLM_NO_PROVIDER:
+        return "No LLM provider configured (set provider API key in config/secrets.env)";
+    case AIRY_ERR_LLM_AUTH_FAIL:
+        return "Provider authentication failed (check API key in config/secrets.env)";
+    case AIRY_ERR_LLM_RATE_LIMIT:
+        return "Provider rate limited (HTTP 429), retry later";
+    case AIRY_ERR_LLM_CONTEXT_LEN:
+        return "Context length exceeded for model";
+    case AIRY_ERR_NOT_SUPPORTED:
+        return "Selected provider does not support streaming";
+    case AIRY_ERR_IO:
+        return "Network request to provider failed (check connectivity and provider base_url)";
+    case AIRY_ERR_TIMEOUT:
+        return "Provider request timed out";
+    default:
+        return NULL;
+    }
+}
+
+/* 未知错误码拼接进调用方栈缓冲，仅在同一次响应构建内使用。 */
+static const char *llm_error_message_fmt(int ret, char *buf, size_t buf_len)
+{
+    const char *msg = llm_error_message(ret);
+    if (msg)
+        return msg;
+    snprintf(buf, buf_len, "LLM request failed (error=%d)", ret);
+    return buf;
+}
+
 static char *handle_complete(cJSON *params, int id);
 static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd);
 
@@ -300,8 +340,9 @@ static char *handle_complete(cJSON *params, int id)
                       (unsigned long long)(end_time - start_time));
         AIRY_FREE((void *)cfg.model);
         request_context_destroy(ctx);
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "LLM service unavailable after retries",
-                                   id);
+        char ebuf[128];
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR,
+                                   llm_error_message_fmt(ret, ebuf, sizeof(ebuf)), id);
     }
 
     char *resp_json = response_to_json(resp);
@@ -422,7 +463,8 @@ static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd
     if (ret != 0) {
         AIRY_FREE((void *)cfg.model);
         request_context_destroy(ctx);
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Service error", id);
+        char ebuf[128];
+        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, llm_error_message_fmt(ret, ebuf, sizeof(ebuf)), id);
     }
 
     if (resp) {
