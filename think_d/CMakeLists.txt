@@ -87,6 +87,8 @@ target_compile_options(airy_think_service PRIVATE
 # ==================== Think daemon 可执行文件 ====================
 add_executable(think_d
     src/main.c
+    # M1-1c：推理语言网关服务面（think.lang_process/postprocess/stats）
+    src/lang_svc.c
 )
 
 if(WIN32)

@@ -23,6 +23,7 @@
 #include "thread_pool.h"
 #include "think_service.h"
 #include "svc_model_defaults.h"
+#include "lang_svc.h"
 
 #include <stdlib.h>
 #include <strings.h>
@@ -396,6 +397,10 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
+    /* M1-1c：推理语言网关服务面初始化（lang_gateway 懒创建，此处仅 mutex） */
+    if (lang_svc_init() != 0)
+        SVC_LOG_WARN("lang_svc_init failed, think.lang_* unavailable");
+
     airy_sock_t server_fd = daemon_create_server_socket(g_config.use_tcp, g_config.tcp_port,
                                                         g_config.socket_path, g_config.socket_path);
     if (server_fd < 0) {
@@ -442,9 +447,15 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_think_d, "orchestrate", on_orchestrate_method, NULL);
     method_dispatcher_register(g_dispatcher_think_d, "get_stats", on_get_stats_method, NULL);
     method_dispatcher_register(g_dispatcher_think_d, "health_check", on_health_check_method, NULL);
+    /* M1-1c：推理语言网关服务面（CLI 原进程内直连 lang_gateway，现经
+     * gateway → think.lang_process/postprocess/stats） */
+    method_dispatcher_register(g_dispatcher_think_d, "lang_process", lang_svc_process, NULL);
+    method_dispatcher_register(g_dispatcher_think_d, "lang_postprocess", lang_svc_postprocess,
+                               NULL);
+    method_dispatcher_register(g_dispatcher_think_d, "lang_stats", lang_svc_stats, NULL);
 
     method_dispatcher_register(g_dispatcher_think_d, "shutdown", on_shutdown_method_think_d, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (think.* namespace)", 5);
+    SVC_LOG_INFO("Registered %d RPC methods (think.* namespace)", 8);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_think_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
@@ -462,6 +473,7 @@ int main(int argc, char **argv)
 
     daemon_cleanup_standard(g_bipc_think_d, g_bsd_think_d, g_event_driver_think_d, server_fd,
                             g_config.socket_path, destroy_service, &g_running_lock_think_d);
+    lang_svc_cleanup(); /* M1-1c：释放 lang_gateway 句柄 */
     free_daemon_config();
 
     SVC_LOG_INFO("ThinkDual service stopped");
