@@ -6,13 +6,13 @@
  * @brief Generic worker thread pool - re-export compat header.
  *
  * P0.17 phase 5: the real definitions moved to
- * commons/utils/sync/include/thread_pool.h. This file is only a
+ * commons/utils/sync/thread_pool.h. This file is only a
  * backward-compatible re-export layer.
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_THREAD_POOL_H
 #define AIRY_RT_DAEMON_COMMON_THREAD_POOL_H
 
-#include "../../../commons/utils/sync/include/thread_pool.h"
+#include "../../../commons/utils/sync/thread_pool.h"
 
 #endif /* AIRY_RT_DAEMON_COMMON_THREAD_POOL_H */

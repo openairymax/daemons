@@ -157,25 +157,25 @@ endif()
 target_include_directories(svc_common PUBLIC
     # commons 权威路径（优先）
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/include>
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/compat/include>
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/compat>
     $<BUILD_INTERFACE:${COMMONS_DIR}>
     $<BUILD_INTERFACE:${COMMONS_DIR}/platform/include>
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/error/include>
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/logging/include>
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/config_unified/include>
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/memory/include>
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/string/include>
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/sync/include>
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/observability/include>
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/io/include>
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/types/include>
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/cache/include>
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/error>
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/logging>
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/config_unified>
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/memory>
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/string>
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/sync>
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/observability>
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/io>
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/types>
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/cache>
     # 新增网络和IPC模块
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/network/include>
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/ipc/include>
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/network>
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/ipc>
     # P0.17 阶段 4: service_discovery.h/service_discovery_helper.h/daemon_bootstrap_sd.h
-    # 迁移至 commons/utils/sd/include（daemons 版保留为重导出兼容头）
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/sd/include>
+    # 迁移至 commons/utils/sd（daemons 版保留为重导出兼容头）
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/sd>
     # P0.17 阶段 1: daemon_defaults.h 重导出 airy_defaults.h（位于 commons/include）
     $<BUILD_INTERFACE:${COMMONS_DIR}/include>
     # daemons/common/include 兼容层路径（放最后，避免 atoms 误命中重导出兼容头）

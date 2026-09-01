@@ -66,16 +66,16 @@ target_include_directories(airy_market_service PUBLIC
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/platform/include
-    ${COMMONS_INCLUDE_DIR}/utils/error/include
-    ${COMMONS_INCLUDE_DIR}/utils/logging/include
-    ${COMMONS_INCLUDE_DIR}/utils/config_unified/include
-    ${COMMONS_INCLUDE_DIR}/utils/memory/include
-    ${COMMONS_INCLUDE_DIR}/utils/string/include
-    ${COMMONS_INCLUDE_DIR}/utils/sync/include
-    ${COMMONS_INCLUDE_DIR}/utils/cache/include
-    ${COMMONS_INCLUDE_DIR}/utils/compat/include
-    ${COMMONS_INCLUDE_DIR}/utils/network/include
-    ${COMMONS_INCLUDE_DIR}/utils/ipc/include
+    ${COMMONS_INCLUDE_DIR}/utils/error
+    ${COMMONS_INCLUDE_DIR}/utils/logging
+    ${COMMONS_INCLUDE_DIR}/utils/config_unified
+    ${COMMONS_INCLUDE_DIR}/utils/memory
+    ${COMMONS_INCLUDE_DIR}/utils/string
+    ${COMMONS_INCLUDE_DIR}/utils/sync
+    ${COMMONS_INCLUDE_DIR}/utils/cache
+    ${COMMONS_INCLUDE_DIR}/utils/compat
+    ${COMMONS_INCLUDE_DIR}/utils/network
+    ${COMMONS_INCLUDE_DIR}/utils/ipc
 )
 
 target_include_directories(airy_market_service PRIVATE
@@ -134,16 +134,16 @@ target_include_directories(market_d PRIVATE
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/platform/include
-    ${COMMONS_INCLUDE_DIR}/utils/error/include
-    ${COMMONS_INCLUDE_DIR}/utils/logging/include
-    ${COMMONS_INCLUDE_DIR}/utils/config_unified/include
-    ${COMMONS_INCLUDE_DIR}/utils/memory/include
-    ${COMMONS_INCLUDE_DIR}/utils/string/include
-    ${COMMONS_INCLUDE_DIR}/utils/sync/include
-    ${COMMONS_INCLUDE_DIR}/utils/cache/include
-    ${COMMONS_INCLUDE_DIR}/utils/compat/include
-    ${COMMONS_INCLUDE_DIR}/utils/network/include
-    ${COMMONS_INCLUDE_DIR}/utils/ipc/include
+    ${COMMONS_INCLUDE_DIR}/utils/error
+    ${COMMONS_INCLUDE_DIR}/utils/logging
+    ${COMMONS_INCLUDE_DIR}/utils/config_unified
+    ${COMMONS_INCLUDE_DIR}/utils/memory
+    ${COMMONS_INCLUDE_DIR}/utils/string
+    ${COMMONS_INCLUDE_DIR}/utils/sync
+    ${COMMONS_INCLUDE_DIR}/utils/cache
+    ${COMMONS_INCLUDE_DIR}/utils/compat
+    ${COMMONS_INCLUDE_DIR}/utils/network
+    ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${CJSON_INCLUDE_DIRS}
     ${YAML_INCLUDE_DIRS}
 )

@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../../../commons/utils/error/include/error.h"
+#include "../../../../commons/utils/error/error.h"
 
 /** @brief Round-robin scheduling-strategy data. */
 typedef struct {

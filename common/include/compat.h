@@ -8,7 +8,7 @@
  * Compat layer for agentrt/commons/utils/compat providing backward
  * compatible APIs. New code should use #include <compat.h> directly.
  *
- * @see agentrt/commons/utils/compat/include/compat.h
+ * @see agentrt/commons/utils/compat/compat.h
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_COMPAT_H

@@ -6,13 +6,13 @@
  * @brief IPC Bus backpressure control - re-export compat header.
  *
  * P0.17 phase 4: the real definitions moved to
- * commons/utils/ipc/include/ipc_backpressure.h. This file is only a
+ * commons/utils/ipc/ipc_backpressure.h. This file is only a
  * backward-compatible re-export layer.
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_IPC_BACKPRESSURE_H
 #define AIRY_RT_DAEMON_COMMON_IPC_BACKPRESSURE_H
 
-#include "../../../commons/utils/ipc/include/ipc_backpressure.h"
+#include "../../../commons/utils/ipc/ipc_backpressure.h"
 
 #endif /* AIRY_RT_DAEMON_COMMON_IPC_BACKPRESSURE_H */

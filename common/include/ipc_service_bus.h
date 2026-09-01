@@ -6,18 +6,18 @@
  * @brief IPC service bus (daemons re-export compat header).
  *
  * P0.17 phase 3: the real definitions moved to
- * commons/utils/ipc/include/ipc_service_bus.h, removing the compile-time
+ * commons/utils/ipc/ipc_service_bus.h, removing the compile-time
  * reverse dependency atoms->daemons (IRON-6). This file stays as a
  * re-export compat header, so daemon sources need no immediate #include
  * changes.
  *
- * @see commons/utils/ipc/include/ipc_service_bus.h (commons authoritative)
+ * @see commons/utils/ipc/ipc_service_bus.h (commons authoritative)
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_IPC_SERVICE_BUS_H
 #define AIRY_RT_DAEMON_COMMON_IPC_SERVICE_BUS_H
 
 
-#include "../../../commons/utils/ipc/include/ipc_service_bus.h"
+#include "../../../commons/utils/ipc/ipc_service_bus.h"
 
 #endif /* AIRY_RT_DAEMON_COMMON_IPC_SERVICE_BUS_H */

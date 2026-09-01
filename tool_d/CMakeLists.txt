@@ -79,18 +79,18 @@ target_include_directories(airy_tool_service PUBLIC
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/platform/include
-    ${COMMONS_INCLUDE_DIR}/utils/error/include
-    ${COMMONS_INCLUDE_DIR}/utils/logging/include
-    ${COMMONS_INCLUDE_DIR}/utils/config_unified/include
-    ${COMMONS_INCLUDE_DIR}/utils/memory/include
-    ${COMMONS_INCLUDE_DIR}/utils/string/include
-    ${COMMONS_INCLUDE_DIR}/utils/sync/include
-    ${COMMONS_INCLUDE_DIR}/utils/cache/include
-    ${COMMONS_INCLUDE_DIR}/utils/compat/include
+    ${COMMONS_INCLUDE_DIR}/utils/error
+    ${COMMONS_INCLUDE_DIR}/utils/logging
+    ${COMMONS_INCLUDE_DIR}/utils/config_unified
+    ${COMMONS_INCLUDE_DIR}/utils/memory
+    ${COMMONS_INCLUDE_DIR}/utils/string
+    ${COMMONS_INCLUDE_DIR}/utils/sync
+    ${COMMONS_INCLUDE_DIR}/utils/cache
+    ${COMMONS_INCLUDE_DIR}/utils/compat
     # C-L05: Cupolas SafetyGuard 头文件路径
     ${CMAKE_CURRENT_SOURCE_DIR}/../../cupolas/include
-    ${COMMONS_INCLUDE_DIR}/utils/network/include
-    ${COMMONS_INCLUDE_DIR}/utils/ipc/include
+    ${COMMONS_INCLUDE_DIR}/utils/network
+    ${COMMONS_INCLUDE_DIR}/utils/ipc
     # P3.18 (ACC-DT27): sandbox 公共 API（airy_sandbox.h）和 syscall 号（syscalls.h）
     ${CMAKE_CURRENT_SOURCE_DIR}/../../atoms/syscall/include
 )
@@ -160,17 +160,17 @@ target_include_directories(tool_d PRIVATE
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/platform/include
-    ${COMMONS_INCLUDE_DIR}/utils/error/include
-    ${COMMONS_INCLUDE_DIR}/utils/logging/include
-    ${COMMONS_INCLUDE_DIR}/utils/config_unified/include
-    ${COMMONS_INCLUDE_DIR}/utils/memory/include
-    ${COMMONS_INCLUDE_DIR}/utils/string/include
-    ${COMMONS_INCLUDE_DIR}/utils/sync/include
-    ${COMMONS_INCLUDE_DIR}/utils/cache/include
-    ${COMMONS_INCLUDE_DIR}/utils/compat/include
+    ${COMMONS_INCLUDE_DIR}/utils/error
+    ${COMMONS_INCLUDE_DIR}/utils/logging
+    ${COMMONS_INCLUDE_DIR}/utils/config_unified
+    ${COMMONS_INCLUDE_DIR}/utils/memory
+    ${COMMONS_INCLUDE_DIR}/utils/string
+    ${COMMONS_INCLUDE_DIR}/utils/sync
+    ${COMMONS_INCLUDE_DIR}/utils/cache
+    ${COMMONS_INCLUDE_DIR}/utils/compat
     ${CMAKE_CURRENT_SOURCE_DIR}/../../cupolas/include
-    ${COMMONS_INCLUDE_DIR}/utils/network/include
-    ${COMMONS_INCLUDE_DIR}/utils/ipc/include
+    ${COMMONS_INCLUDE_DIR}/utils/network
+    ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${CJSON_INCLUDE_DIRS}
     ${YAML_INCLUDE_DIRS}
 )

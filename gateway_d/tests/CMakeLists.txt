@@ -89,14 +89,14 @@ foreach(TEST_SRC ${TEST_SOURCES})
         ${COREKERN_INCLUDE_DIR}
         ${COMMONS_DIR}
         ${COMMONS_DIR}/platform/include
-        ${COMMONS_DIR}/utils/error/include
-        ${COMMONS_DIR}/utils/logging/include
-        ${COMMONS_DIR}/utils/config_unified/include
-        ${COMMONS_DIR}/utils/memory/include
-        ${COMMONS_DIR}/utils/string/include
-        ${COMMONS_DIR}/utils/sync/include
-        ${COMMONS_DIR}/utils/cache/include
-        ${COMMONS_DIR}/utils/compat/include
+        ${COMMONS_DIR}/utils/error
+        ${COMMONS_DIR}/utils/logging
+        ${COMMONS_DIR}/utils/config_unified
+        ${COMMONS_DIR}/utils/memory
+        ${COMMONS_DIR}/utils/string
+        ${COMMONS_DIR}/utils/sync
+        ${COMMONS_DIR}/utils/cache
+        ${COMMONS_DIR}/utils/compat
     )
 
     target_link_libraries(${TEST_NAME}

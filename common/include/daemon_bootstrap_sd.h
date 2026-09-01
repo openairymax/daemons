@@ -7,13 +7,13 @@
  *        re-export compat header.
  *
  * P0.17 phase 4: the real definitions moved to
- * commons/utils/sd/include/daemon_bootstrap_sd.h. This file is only a
+ * commons/utils/sd/daemon_bootstrap_sd.h. This file is only a
  * backward-compatible re-export layer.
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_DAEMON_BOOTSTRAP_SD_H
 #define AIRY_RT_DAEMON_COMMON_DAEMON_BOOTSTRAP_SD_H
 
-#include "../../../commons/utils/sd/include/daemon_bootstrap_sd.h"
+#include "../../../commons/utils/sd/daemon_bootstrap_sd.h"
 
 #endif /* AIRY_RT_DAEMON_COMMON_DAEMON_BOOTSTRAP_SD_H */

@@ -21,14 +21,14 @@ set(OBSERVE_TEST_INCLUDES
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_DIR}
     ${COMMONS_DIR}/platform/include
-    ${COMMONS_DIR}/utils/error/include
-    ${COMMONS_DIR}/utils/logging/include
-    ${COMMONS_DIR}/utils/memory/include
-    ${COMMONS_DIR}/utils/string/include
-    ${COMMONS_DIR}/utils/sync/include
-    ${COMMONS_DIR}/utils/network/include
-    ${COMMONS_DIR}/utils/ipc/include
-    ${COMMONS_DIR}/utils/compat/include
+    ${COMMONS_DIR}/utils/error
+    ${COMMONS_DIR}/utils/logging
+    ${COMMONS_DIR}/utils/memory
+    ${COMMONS_DIR}/utils/string
+    ${COMMONS_DIR}/utils/sync
+    ${COMMONS_DIR}/utils/network
+    ${COMMONS_DIR}/utils/ipc
+    ${COMMONS_DIR}/utils/compat
 )
 
 foreach(TEST_SRC ${OBSERVE_TEST_SOURCES})

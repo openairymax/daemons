@@ -51,11 +51,11 @@ target_include_directories(plugin_d PRIVATE
     ${CUPOLAS_DIR}/include
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/platform/include
-    ${COMMONS_INCLUDE_DIR}/utils/error/include
-    ${COMMONS_INCLUDE_DIR}/utils/logging/include
-    ${COMMONS_INCLUDE_DIR}/utils/config_unified/include
-    ${COMMONS_INCLUDE_DIR}/utils/memory/include
-    ${COMMONS_INCLUDE_DIR}/utils/sync/include
+    ${COMMONS_INCLUDE_DIR}/utils/error
+    ${COMMONS_INCLUDE_DIR}/utils/logging
+    ${COMMONS_INCLUDE_DIR}/utils/config_unified
+    ${COMMONS_INCLUDE_DIR}/utils/memory
+    ${COMMONS_INCLUDE_DIR}/utils/sync
     ${YAML_INCLUDE_DIRS}
 )
 

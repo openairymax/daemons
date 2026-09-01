@@ -6,13 +6,13 @@
  * @brief API error-recovery system - re-export compat header.
  *
  * 0.1.9 0c (IRON-6 归位): the authoritative definitions moved to
- * commons/utils/resource/src/api_recovery.h. This file is only a
+ * commons/utils/resource/api_recovery.h. This file is only a
  * backward-compatible re-export layer.
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_API_RECOVERY_H
 #define AIRY_RT_DAEMON_COMMON_API_RECOVERY_H
 
-#include "../../../commons/utils/resource/src/api_recovery.h"
+#include "../../../commons/utils/resource/api_recovery.h"
 
 #endif /* AIRY_RT_DAEMON_COMMON_API_RECOVERY_H */

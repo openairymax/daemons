@@ -26,12 +26,12 @@ target_include_directories(channel_d PRIVATE
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/platform/include
-    ${COMMONS_INCLUDE_DIR}/utils/error/include
-    ${COMMONS_INCLUDE_DIR}/utils/logging/include
-    ${COMMONS_INCLUDE_DIR}/utils/memory/include
-    ${COMMONS_INCLUDE_DIR}/utils/string/include
-    ${COMMONS_INCLUDE_DIR}/utils/sync/include
-    ${COMMONS_INCLUDE_DIR}/utils/compat/include
+    ${COMMONS_INCLUDE_DIR}/utils/error
+    ${COMMONS_INCLUDE_DIR}/utils/logging
+    ${COMMONS_INCLUDE_DIR}/utils/memory
+    ${COMMONS_INCLUDE_DIR}/utils/string
+    ${COMMONS_INCLUDE_DIR}/utils/sync
+    ${COMMONS_INCLUDE_DIR}/utils/compat
 )
 
 # 平台无关链接：svc_common/airy_common/Threads 为三平台共有，ws2_32 等
@@ -81,7 +81,7 @@ if(AIRY_HAS_CMOCKA)
     target_include_directories(test_channel_e2e PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${COMMONS_INCLUDE_DIR}/utils/string/include
+        ${COMMONS_INCLUDE_DIR}/utils/string
     )
     target_link_libraries(test_channel_e2e PRIVATE
         ${CMOCKA_LIBRARIES}
@@ -99,7 +99,7 @@ else()
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${COMMONS_DIR}/tests/utils
-        ${COMMONS_INCLUDE_DIR}/utils/string/include
+        ${COMMONS_INCLUDE_DIR}/utils/string
     )
     target_link_libraries(test_channel_e2e PRIVATE Threads::Threads airy_platform_libs svc_common airy_common)
     target_compile_options(test_channel_e2e PRIVATE -Wall -Wextra)

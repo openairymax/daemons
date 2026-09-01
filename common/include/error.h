@@ -8,14 +8,14 @@
  * Compat layer for agentrt/commons/utils/error providing backward
  * compatible APIs. New code should use #include <error.h> directly.
  *
- * @see agentrt/commons/utils/error/include/error.h
+ * @see agentrt/commons/utils/error/error.h
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_ERROR_H
 #define AIRY_RT_DAEMON_COMMON_ERROR_H
 
 
-#include "../../../commons/utils/error/include/error.h"
+#include "../../../commons/utils/error/error.h"
 
 
 #define AIRY_ERROR_UNKNOWN AIRY_ERR_UNKNOWN

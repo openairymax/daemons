@@ -6,13 +6,13 @@
  * @brief Log sanitization filter - re-export compat header.
  *
  * 0.1.9 0c (IRON-6 归位): the authoritative definitions moved to
- * commons/utils/security/src/log_sanitizer.h. This file is only a
+ * commons/utils/security/log_sanitizer.h. This file is only a
  * backward-compatible re-export layer.
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_LOG_SANITIZER_H
 #define AIRY_RT_DAEMON_COMMON_LOG_SANITIZER_H
 
-#include "../../../commons/utils/security/src/log_sanitizer.h"
+#include "../../../commons/utils/security/log_sanitizer.h"
 
 #endif /* AIRY_RT_DAEMON_COMMON_LOG_SANITIZER_H */

@@ -6,7 +6,7 @@
  * @brief Common service definitions (daemons re-export compat header).
  *
  * P0.17 phase 3: the real definitions moved to
- * commons/utils/ipc/include/svc_common.h, removing the compile-time reverse
+ * commons/utils/ipc/svc_common.h, removing the compile-time reverse
  * dependency atoms->daemons (IRON-6). This file stays as a re-export
  * compat header, so daemon sources need no immediate #include changes.
  *
@@ -14,7 +14,7 @@
  * error codes (DAEMON_E* aliases), which the commons svc_common.h does not
  * include.
  *
- * @see commons/utils/ipc/include/svc_common.h (commons authoritative)
+ * @see commons/utils/ipc/svc_common.h (commons authoritative)
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_SVC_COMMON_H
@@ -24,6 +24,6 @@
 #include "daemon_errors.h"
 
 
-#include "../../../commons/utils/ipc/include/svc_common.h"
+#include "../../../commons/utils/ipc/svc_common.h"
 
 #endif /* AIRY_RT_DAEMON_COMMON_SVC_COMMON_H */

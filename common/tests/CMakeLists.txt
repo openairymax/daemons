@@ -66,9 +66,9 @@ foreach(TEST_SRC ${TEST_SOURCES})
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/include
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/platform/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/error/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/types/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/memory/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/error
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/types
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/memory
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/tests/utils
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../atoms/corekern/include
     )
@@ -160,9 +160,9 @@ target_include_directories(svc_test_checkpoint PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/platform/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/error/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/types/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/memory/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/error
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/types
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/memory
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../atoms/corekern/include
 )
 
@@ -201,9 +201,9 @@ target_include_directories(svc_test_ipc_backpressure PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/platform/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/error/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/types/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/memory/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/error
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/types
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/memory
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../atoms/corekern/include
 )
 
