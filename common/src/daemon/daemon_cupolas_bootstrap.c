@@ -17,16 +17,20 @@
 #include "svc_logger.h"
 
 static int g_cupolas_initialized = 0;
+static int g_cupolas_pep_mode = 0;
 
-airy_err_t daemon_cupolas_init(const char *daemon_name)
+/* 共享引导：daemon_security + cupolas 四层（sanitizer/workbench/audit）。
+ * pep_mode=1 时跳过 vault/entitlements/net_security（PDP 集中持有，
+ * PEP 经 RPC 转发访问——0.1.9 M2 §3.2）。 */
+static airy_err_t cupolas_bootstrap(const char *daemon_name, int pep_mode)
 {
     if (!daemon_name) {
-        SVC_LOG_ERROR("daemon_cupolas_init: NULL daemon_name");
+        SVC_LOG_ERROR("cupolas_bootstrap: NULL daemon_name");
         return AIRY_EINVAL;
     }
 
     if (g_cupolas_initialized) {
-        SVC_LOG_DEBUG("daemon_cupolas_init: cupolas already initialized (daemon=%s)", daemon_name);
+        SVC_LOG_DEBUG("cupolas_bootstrap: cupolas already initialized (daemon=%s)", daemon_name);
         return AIRY_SUCCESS;
     }
 
@@ -68,7 +72,7 @@ airy_err_t daemon_cupolas_init(const char *daemon_name)
     airy_err_t sec_err = AIRY_OK;
     int sec_rc = daemon_security_init(&sec_config, &sec_err);
     if (sec_rc != 0) {
-        SVC_LOG_ERROR("daemon_cupolas_init: daemon_security_init FAILED for daemon='%s' "
+        SVC_LOG_ERROR("cupolas_bootstrap: daemon_security_init FAILED for daemon='%s' "
                       "(rc=%d, err=%d) — security layer unavailable, "
                       "service-layer fail-closed will deny all privileged operations",
                       daemon_name, sec_rc, (int)sec_err);
@@ -77,11 +81,23 @@ airy_err_t daemon_cupolas_init(const char *daemon_name)
     airy_err_t cupolas_err = AIRY_OK;
     int rc = cupolas_init(NULL, &cupolas_err);
     if (rc != 0) {
-        SVC_LOG_ERROR("daemon_cupolas_init: cupolas_init FAILED for daemon='%s' "
+        SVC_LOG_ERROR("cupolas_bootstrap: cupolas_init FAILED for daemon='%s' "
                       "(rc=%d, err=%d) — security dome unavailable, "
                       "service-layer fail-closed will deny all privileged operations",
                       daemon_name, rc, (int)cupolas_err);
         return cupolas_err;
+    }
+
+    if (pep_mode) {
+        /* PEP 最小 guard：本地 vault/entitlements/netsec 不初始化，
+         * 由 PDP（cupolas_d）集中持有，PEP 经 RPC 转发访问。 */
+        g_cupolas_pep_mode = 1;
+        g_cupolas_initialized = 1;
+        SVC_LOG_INFO("cupolas_bootstrap: cupolas PEP minimal-guard initialized for '%s' "
+                     "(sanitizer + workbench + audit_logger + daemon_security; "
+                     "vault/entitlements/netsec via PDP RPC)",
+                     daemon_name);
+        return AIRY_SUCCESS;
     }
 
     /* Wiring: vault / entitlements / network security submodules hooked
@@ -93,30 +109,40 @@ airy_err_t daemon_cupolas_init(const char *daemon_name)
      * blocks privileged operations. */
     int vault_rc = cupolas_vault_init(NULL);
     if (vault_rc != 0) {
-        SVC_LOG_ERROR("daemon_cupolas_init: cupolas_vault_init FAILED for daemon='%s' (rc=%d)",
+        SVC_LOG_ERROR("cupolas_bootstrap: cupolas_vault_init FAILED for daemon='%s' (rc=%d)",
                       daemon_name, vault_rc);
     }
 
     int entitlements_rc = cupolas_entitlements_init();
     if (entitlements_rc != 0) {
         SVC_LOG_ERROR(
-            "daemon_cupolas_init: cupolas_entitlements_init FAILED for daemon='%s' (rc=%d)",
+            "cupolas_bootstrap: cupolas_entitlements_init FAILED for daemon='%s' (rc=%d)",
             daemon_name, entitlements_rc);
     }
 
     int net_rc = cupolas_net_security_init(NULL);
     if (net_rc != 0) {
         SVC_LOG_ERROR(
-            "daemon_cupolas_init: cupolas_net_security_init FAILED for daemon='%s' (rc=%d)",
+            "cupolas_bootstrap: cupolas_net_security_init FAILED for daemon='%s' (rc=%d)",
             daemon_name, net_rc);
     }
 
     g_cupolas_initialized = 1;
-    SVC_LOG_INFO("daemon_cupolas_init: cupolas security dome initialized for '%s' "
+    SVC_LOG_INFO("cupolas_bootstrap: cupolas security dome initialized for '%s' "
                  "(permission_engine + sanitizer + workbench + audit_logger + daemon_security "
                  "+ vault + entitlements + network_security)",
                  daemon_name);
     return AIRY_SUCCESS;
+}
+
+airy_err_t daemon_cupolas_init(const char *daemon_name)
+{
+    return cupolas_bootstrap(daemon_name, 0);
+}
+
+airy_err_t daemon_cupolas_init_pep(const char *daemon_name)
+{
+    return cupolas_bootstrap(daemon_name, 1);
 }
 
 void daemon_cupolas_cleanup(void)
@@ -124,13 +150,16 @@ void daemon_cupolas_cleanup(void)
     if (!g_cupolas_initialized)
         return;
 
-    cupolas_vault_cleanup();
-    cupolas_entitlements_cleanup();
-    cupolas_net_security_cleanup();
+    if (!g_cupolas_pep_mode) {
+        cupolas_vault_cleanup();
+        cupolas_entitlements_cleanup();
+        cupolas_net_security_cleanup();
+    }
 
     cupolas_flush_audit_log();
     cupolas_cleanup();
     daemon_security_shutdown();
     g_cupolas_initialized = 0;
+    g_cupolas_pep_mode = 0;
     SVC_LOG_INFO("daemon_cupolas_cleanup: cupolas security dome shut down");
 }

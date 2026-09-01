@@ -18,6 +18,8 @@
 #include "param_validator.h"
 #include "svc_logger.h"
 
+#include "dynamic_policy_engine.h"
+
 #include <time.h>
 
 static void handle_check_permission(cJSON *params, int id, airy_sock_t fd);
@@ -95,6 +97,11 @@ static void handle_check_permission(cJSON *params, int id, airy_sock_t client_fd
 
     cJSON *result = cJSON_CreateObject();
     cJSON_AddBoolToObject(result, "allowed", res.allowed ? true : false);
+    /* M2-S5 (0.1.9 §3.2 PEP)：权威 epoch 随裁定返回——PEP 缓存以
+     * 该值对齐失效键（epoch 是策略版本 SSoT，见 policy_status）。 */
+    if (g_dpolicy)
+        cJSON_AddNumberToObject(result, "epoch",
+                                (double)dpolicy_engine_get_epoch(g_dpolicy));
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 

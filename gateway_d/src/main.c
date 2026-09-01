@@ -286,7 +286,7 @@ static void gw_mcp_clients_setup(gw_mcp_server_t *mcp)
  *     chain. To disable, set AIRY_GATEWAY_ACL_ALLOW_SHELL=false to deny
  *     explicitly (only "false"/"0" count as off; other values allow).
  *
- * Must run after daemon_security initialization (daemon_cupolas_init).
+ * Must run after daemon_security initialization (daemon_cupolas_init_pep).
  */
 static void gw_acl_register_defaults(void)
 {
@@ -478,7 +478,7 @@ int main(int argc, char *argv[])
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    daemon_cupolas_init("gateway_d");
+    daemon_cupolas_init_pep("gateway_d");
 
     daemon_heapstore_init("gateway_d");
 
