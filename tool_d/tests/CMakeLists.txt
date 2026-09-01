@@ -57,6 +57,7 @@ set(TOOL_COMMON_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
     ${COMMONS_DIR}
+    ${COMMONS_DIR}/include
     ${COMMONS_DIR}/platform/include
     ${COMMONS_DIR}/utils/error
     ${COMMONS_DIR}/utils/logging
