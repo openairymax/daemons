@@ -28,12 +28,20 @@ extern "C" {
 /* ---- 工具循环域（agent_run_loop.c） ---- */
 
 /**
+ * @brief 组装 §2.4 v1 事件信封 JSON 并交给 sink->emit（agent_run_engine.c）。
+ * data 所有权转移给本函数；emit 不得阻塞。sink 类型见 agent_run_engine.h。
+ */
+void agent_run_emit_event(const agent_run_event_sink_t *sink, uint64_t *seq,
+                          const char *session_id, const char *type, cJSON *data);
+
+/**
  * @brief ReAct 工具循环：LLM complete -> tool_calls -> tool_d 执行 -> 回填。
  *
  * @param prompt    用户输入（history 为空时构造首条消息）
  * @param history   OpenAI messages 数组（可 NULL）
  * @param model     模型名（非 NULL）
  * @param session   会话（轮间取消检查；可 NULL 表示无取消能力）
+ * @param sink      run_stream 事件推送 sink（可 NULL 表示非流式）
  * @param out_trace 工具 trace 数组（成功时非 NULL，调用方 cJSON_Delete）
  * @param out_text  最终回复文本（AIRY_* 分配，调用方 AIRY_FREE）
  * @param out_tokens 累计 token
@@ -42,8 +50,9 @@ extern "C" {
  * @return 0 成功；1 用户取消；非零失败
  */
 int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *model,
-                        const agent_run_session_t *session, cJSON **out_trace, char **out_text,
-                        uint64_t *out_tokens, double *out_cost, char **out_reasoning);
+                        const agent_run_session_t *session, const agent_run_event_sink_t *sink,
+                        cJSON **out_trace, char **out_text, uint64_t *out_tokens, double *out_cost,
+                        char **out_reasoning);
 
 /* ---- 编排域（agent_run_engine.c） ---- */
 
