@@ -4,24 +4,36 @@
 // @owner: team-B
 /**
  * @file gateway_biz_agent.c
- * @brief Gateway agent.run 主入口与 agent.cancel 取消（handle_agent_run /
- *        handle_agent_cancel）。
+ * @brief Gateway agent.run / agent.cancel 转发域（M1-1a 引擎下沉）。
  *
- * 2026-08-27 按单一职责拆分：会话 ID 生成 / in-flight 注册表 / agent_d
- * 编排（spawn+invoke）/ agent_file spec 解析 / mem_d 会话持久化迁至
- * gateway_biz_agent_session.c，共享符号经 gateway_biz_internal.h 声明。
+ * agent.run 进程内引擎（会话注册表 / GCCP 双思考 / 编排 / ReAct 工具循环 /
+ * mem 持久化 / hall 事件）已迁入 agent_d（agent_run_engine.c +
+ * agent_run_loop.c），gateway 本文件仅做协议转发：
+ *   - agent.run        -> agent_d "run"（参数原样透传，响应 id 重写）
+ *   - agent.cancel     -> agent_d "run_cancel"（session_id 透传）
+ * gateway 不再承载任何 agent.run 业务分支（K-1 纯翻译）。
  */
 
 #include "gateway_biz_internal.h"
 
 #include "logging.h"
+#include "platform.h"
+#include "syscalls.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/* agent.run 长耗时（LLM 往返 + 工具循环），转发超时取最大档 */
+#define GW_RUN_FWD_TIMEOUT_MS 600000
+
+/**
+ * @brief agent.run 转发：解析最小入参契约（prompt 存在性校验），其余
+ *        参数原样透传 agent_d "run"，响应 id 重写为请求 id。
+ */
 char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
 {
+    (void)ctx; /* 端点解析统一由 svc dispatch 钩子按命名空间完成 */
     cJSON *id = cJSON_GetObjectItem(root, "id");
     cJSON *params = cJSON_GetObjectItem(root, "params");
 
@@ -44,369 +56,48 @@ char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx)
         return jsonrpc_error(-32602, "Invalid params: missing prompt", id);
     }
 
-    const char *model = ctx->default_model;
-    if (params) {
-        cJSON *m = cJSON_GetObjectItem(params, "model");
-        if (cJSON_IsString(m) && m->valuestring && *m->valuestring)
-            model = m->valuestring;
+    char *params_str = params ? cJSON_PrintUnformatted(params) : AIRY_STRDUP("{}");
+    if (!params_str) {
+        return jsonrpc_error(-32603, "Out of memory", id);
     }
 
-    /* Full conversation history (OpenAI messages array, optional): when
-     * non-empty it seeds the tool loop (M1/M2 fix — real multi-turn context
-     * across requests); empty history degrades to a single prompt. */
-    cJSON *history = params ? cJSON_GetObjectItem(params, "messages") : NULL;
-    if (history && (!cJSON_IsArray(history) || cJSON_GetArraySize(history) == 0)) {
-        history = NULL;
+    /* 架构约束 2026-08-25 "必须走 syscall": agent.run 经 SYS_SVC_CALL 派发 */
+    char *resp = NULL;
+    airy_err_t rc = airy_sys_svc_call("agent", "run", params_str, GW_RUN_FWD_TIMEOUT_MS, &resp);
+    AIRY_FREE(params_str);
+    if (rc != AIRY_SUCCESS || !resp) {
+        return jsonrpc_error(-32603, "Agent service unreachable", id);
     }
 
-    /* GCCP 两段式交互第二段（P-A）：可选 gccp_answers（用户答案 JSON）。
-     * 缺省/空串视为第一段（无答案），think_d 判定需要澄清时返回问题集
-     * 挂起；携带时走正常 GCCP+GRAD 完整链路。 */
-    const char *gccp_answers = NULL;
-    cJSON *ga = params ? cJSON_GetObjectItem(params, "gccp_answers") : NULL;
-    if (cJSON_IsString(ga) && ga->valuestring && *ga->valuestring)
-        gccp_answers = ga->valuestring;
+    cJSON *rroot = cJSON_Parse(resp);
+    AIRY_FREE(resp);
+    if (!rroot) {
+        return jsonrpc_error(-32603, "Agent service returned invalid response", id);
+    }
 
-    /* Branch: params.agent present -> agent_d orchestration (spawn+invoke);
-     * otherwise keep the llm_d direct tool loop (backward compatible, D4). */
-    cJSON *tool_trace = NULL;
-    char *final_text = NULL;
-    uint64_t total_tokens = 0;
-    double total_cost = 0.0;
-    char *reasoning_acc = NULL; /* 2.1.1.6：非流式思考链（agent.run 保留） */
-    int gccp_interact_round = 0; /* P-A：GCCP 交互轮（问题集挂起，不跑工具循环） */
-
-    /* Session ID: the client may pre-assign one (agent.cancel needs to know
-     * session_id before the request); otherwise the gateway generates a unique
-     * ID (time + counter + random bits, not a time(NULL) pseudo-session). */
-    char session_id[GW_SESSION_ID_LEN];
-    cJSON *sid_param = params ? cJSON_GetObjectItem(params, "session_id") : NULL;
-    if (cJSON_IsString(sid_param) && sid_param->valuestring && *sid_param->valuestring &&
-        strlen(sid_param->valuestring) < GW_SESSION_ID_LEN &&
-        strncmp(sid_param->valuestring, "sess_", 5) == 0) {
-        AIRY_STRNCPY_TERM(session_id, sid_param->valuestring, sizeof(session_id));
+    cJSON *req_id = cJSON_GetObjectItem(root, "id");
+    cJSON *svc_id = cJSON_GetObjectItem(rroot, "id");
+    if (svc_id)
+        cJSON_DeleteItemFromObject(rroot, "id");
+    if (req_id && cJSON_IsString(req_id)) {
+        cJSON_AddStringToObject(rroot, "id", req_id->valuestring);
+    } else if (req_id && cJSON_IsNumber(req_id)) {
+        cJSON_AddNumberToObject(rroot, "id", req_id->valuedouble);
     } else {
-        gw_gen_session_id(session_id, sizeof(session_id));
+        cJSON_AddNullToObject(rroot, "id");
     }
-
-    gw_active_request_t *active = gw_active_register(ctx, session_id);
-
-    /* Record the run start into the hall event flow (SSoT write side). */
-    {
-        cJSON *evt = cJSON_CreateObject();
-        if (evt) {
-            cJSON_AddStringToObject(evt, "event", "run_start");
-            char pbuf[520];
-            AIRY_STRNCPY_TERM(pbuf, prompt, sizeof(pbuf));
-            cJSON_AddStringToObject(evt, "prompt", pbuf);
-            gw_agent_record_event(session_id, "chain", evt);
-            cJSON_Delete(evt);
-        }
-    }
-
-    cJSON *agent_spec = params ? cJSON_GetObjectItem(params, "agent") : NULL;
-    /* When params.agent is not provided, fall back to parsing
-     * params.agent_file to build the spec: keeps old clients that only pass
-     * agent_file working, so the orchestration branch still triggers.
-     * agent_spec_owned must be freed at every exit of this function (unlike
-     * agent_spec which points into params). */
-    cJSON *agent_spec_owned = NULL;
-    if (!agent_spec && params) {
-        agent_spec_owned = gw_agent_spec_from_agent_file(params);
-        agent_spec = agent_spec_owned;
-    }
-    AIRY_LOG_INFO("gateway: agent.run start (session=%s, model=%s, orchestrate=%d)", session_id,
-             model ? model : "(default)", agent_spec ? 1 : 0);
-    int run_rc = -1;
-
-    cJSON *think_result = NULL;
-    if (agent_spec) {
-        char *err_msg = NULL;
-        run_rc = gw_agent_run_orchestrate(ctx, agent_spec, prompt, &final_text, &err_msg);
-        if (run_rc != 0) {
-            char msg[512];
-            snprintf(msg, sizeof(msg), "Agent orchestration failed: %s",
-                     err_msg ? err_msg : "unknown error");
-            AIRY_FREE(err_msg);
-            gw_active_unregister(ctx, active);
-            if (agent_spec_owned)
-                cJSON_Delete(agent_spec_owned);
-            return jsonrpc_error(-32603, msg, id);
-        }
-        /* On the orchestration path the tool trace is produced internally by
-         * the runner (ecosystem/agents), invisible to the gateway; set
-         * tool_trace to an empty array to keep the field contract. */
-        tool_trace = cJSON_CreateArray();
-    } else {
-        /* The main dialog path uses dual thinking (D4 fix, 2026-08-07):
-         * without agent orchestration, think_d runs GCCP (fact-lock goal
-         * confirmation) + GRAD (logic-lock plan quadruple-check/final ruling)
-         * first, producing a converged DAG plan and thinking events; the plan
-         * is then injected into the LLM request context (system message) so
-         * the LLM answers/executes according to the plan. If think_d is
-         * unreachable/timed out, degrade to the original direct call (dialog
-         * availability is unaffected). */
-        if (gw_think_process(ctx, session_id, prompt, gccp_answers, &think_result) == 0 &&
-            think_result) {
-            /* GCCP 两段式交互第一段（P-A）：think_d 判定输入需要澄清并已挂起，
-             * 返回问题集（gccp_need_interaction=1）。不进入工具循环（避免在
-             * 降级目标上消耗 token/产生无意义回答），把问题集随 thinking 字段
-             * 回给客户端；客户端展示问题、收集答案后携带 gccp_answers 重新
-             * 发起 agent.run（第二段，携带答案走正常 GCCP+GRAD 规划链路）。 */
-            cJSON *gccp_need = cJSON_GetObjectItem(think_result, "gccp_need_interaction");
-            if (cJSON_IsTrue(gccp_need)) {
-                gccp_interact_round = 1;
-                tool_trace = cJSON_CreateArray();
-                run_rc = 0;
-                AIRY_LOG_INFO("gateway: GCCP interaction round (session=%s, questions returned)",
-                         session_id);
-            } else {
-                cJSON *plan = cJSON_GetObjectItem(think_result, "plan");
-                if (plan) {
-                    char *plan_str = cJSON_PrintUnformatted(plan);
-                    if (plan_str) {
-                    /* Record the converged plan into the hall event flow. */
-                    {
-                        cJSON *pevt = cJSON_CreateObject();
-                        if (pevt) {
-                            cJSON_AddStringToObject(pevt, "event", "plan");
-                            char pbuf[1024];
-                            AIRY_STRNCPY_TERM(pbuf, plan_str, sizeof(pbuf));
-                            cJSON_AddStringToObject(pevt, "plan", pbuf);
-                            gw_agent_record_event(session_id, "chain", pevt);
-                            cJSON_Delete(pevt);
-                        }
-                    }
-                    /* Build a system message carrying the dual-thinking plan
-                     * and insert it at the head of messages: the LLM structures
-                     * its answer around the GCCP+GRAD converged DAG plan,
-                     * avoiding made-up steps. */
-                    cJSON *messages_with_plan = NULL;
-                    if (history && cJSON_IsArray(history) && cJSON_GetArraySize(history) > 0) {
-                        messages_with_plan = cJSON_Duplicate(history, 1);
-                    } else {
-                        messages_with_plan = cJSON_CreateArray();
-                    }
-                    cJSON *sys = cJSON_CreateObject();
-                    char sys_content[8192];
-                    int sn = snprintf(sys_content, sizeof(sys_content),
-                                      "You are executing a task under the AgentRT "
-                                      "dual-thinking system (GCCP goal confirmation + "
-                                      "GRAD plan critique). A verified action plan has "
-                                      "been produced. Follow this DAG plan strictly:\n%s",
-                                      plan_str);
-                    if (sn > 0 && sn < (int)sizeof(sys_content))
-                        cJSON_AddStringToObject(sys, "content", sys_content);
-                    else
-                        cJSON_AddStringToObject(sys, "content",
-                                                "Execute the user request following "
-                                                "the verified action plan.");
-                    cJSON_AddStringToObject(sys, "role", "system");
-                    cJSON_AddItemToArray(messages_with_plan, sys);
-
-                    cJSON *usr = cJSON_CreateObject();
-                    cJSON_AddStringToObject(usr, "role", "user");
-                    cJSON_AddStringToObject(usr, "content", prompt);
-                    cJSON_AddItemToArray(messages_with_plan, usr);
-                    AIRY_FREE(plan_str);
-
-                    run_rc = gw_run_tool_loop(ctx, model, prompt, messages_with_plan, active,
-                                              &tool_trace, &final_text, &total_tokens, &total_cost,
-                                              &reasoning_acc);
-                    cJSON_Delete(messages_with_plan);
-                } else {
-                    run_rc = gw_run_tool_loop(ctx, model, prompt, history, active, &tool_trace,
-                                              &final_text, &total_tokens, &total_cost,
-                                              &reasoning_acc);
-                }
-            } else {
-                run_rc = gw_run_tool_loop(ctx, model, prompt, history, active, &tool_trace,
-                                          &final_text, &total_tokens, &total_cost, &reasoning_acc);
-            }
-        }
-        } else {
-
-            run_rc = gw_run_tool_loop(ctx, model, prompt, history, active, &tool_trace, &final_text,
-                                      &total_tokens, &total_cost, &reasoning_acc);
-        }
-    }
-    /* Record the tool-call summary and the run result into the hall event
-     * flow (SSoT write side). */
-    if (tool_trace && cJSON_IsArray(tool_trace) && cJSON_GetArraySize(tool_trace) > 0) {
-        cJSON *tevt = cJSON_CreateObject();
-        if (tevt) {
-            cJSON_AddStringToObject(tevt, "event", "tools");
-            cJSON *tarr = cJSON_CreateArray();
-            if (tarr) {
-                int tn = cJSON_GetArraySize(tool_trace);
-                for (int i = 0; i < tn && i < 32; i++) {
-                    cJSON *t = cJSON_GetArrayItem(tool_trace, i);
-                    cJSON *titem = cJSON_CreateObject();
-                    if (titem) {
-                        const char *tool = NULL;
-                        const char *args = NULL;
-                        const char *result = NULL;
-                        cJSON *tf = cJSON_GetObjectItem(t, "tool");
-                        cJSON *af = cJSON_GetObjectItem(t, "arguments");
-                        cJSON *rf = cJSON_GetObjectItem(t, "result");
-                        if (cJSON_IsString(tf))
-                            tool = tf->valuestring;
-                        if (cJSON_IsString(af))
-                            args = af->valuestring;
-                        if (cJSON_IsString(rf))
-                            result = rf->valuestring;
-                        cJSON_AddStringToObject(titem, "tool", tool ? tool : "");
-                        char abuf[160];
-                        AIRY_STRNCPY_TERM(abuf, args ? args : "", sizeof(abuf));
-                        cJSON_AddStringToObject(titem, "args", abuf);
-                        char rbuf[160];
-                        AIRY_STRNCPY_TERM(rbuf, result ? result : "", sizeof(rbuf));
-                        cJSON_AddStringToObject(titem, "result", rbuf);
-                        cJSON_AddItemToArray(tarr, titem);
-                    }
-                }
-                cJSON_AddItemToObject(tevt, "tools", tarr);
-            }
-            gw_agent_record_event(session_id, "chain", tevt);
-            cJSON_Delete(tevt);
-        }
-    }
-    /* GCCP 交互轮（P-A）：不落 run_result 事件（本轮只是问答澄清，无
-     * 实际运行结果；问题集已随 thinking 字段返回客户端）。 */
-    if (!gccp_interact_round) {
-        cJSON *revt = cJSON_CreateObject();
-        if (revt) {
-            cJSON_AddStringToObject(revt, "event", "run_result");
-            cJSON_AddNumberToObject(revt, "rc", run_rc);
-            cJSON_AddNumberToObject(revt, "tokens", (double)total_tokens);
-            cJSON_AddNumberToObject(revt, "cost", total_cost);
-            char tbuf[520];
-            AIRY_STRNCPY_TERM(tbuf, final_text ? final_text : "", sizeof(tbuf));
-            cJSON_AddStringToObject(revt, "text", tbuf);
-            gw_agent_record_event(session_id, "result", revt);
-            cJSON_Delete(revt);
-        }
-    }
-
-    gw_active_unregister(ctx, active);
-    AIRY_LOG_INFO("gateway: agent.run done (session=%s, rc=%d, tokens=%llu, cost=%.4f)", session_id,
-             run_rc, (unsigned long long)total_tokens, total_cost);
-
-    /* Persist the conversation to mem_d automatically at the end (M6 fix:
-     * mem_d is no longer a dangling service). Only written on success (rc==0)
-     * and non-interaction rounds (GCCP 问答轮不写入记忆，答案将随第二段
-     * 完整结果一起沉淀）；user cancellation/failure produces no partial
-     * memory. */
-    if (run_rc == 0 && !gccp_interact_round) {
-        gw_persist_conversation(ctx, session_id, prompt, final_text ? final_text : "");
-    }
-
-    if (run_rc == 1) {
-
-        cJSON *err_out = cJSON_CreateObject();
-        cJSON_AddStringToObject(err_out, "jsonrpc", "2.0");
-        if (id && cJSON_IsNumber(id)) {
-            cJSON_AddNumberToObject(err_out, "id", id->valuedouble);
-        } else {
-            cJSON_AddNullToObject(err_out, "id");
-        }
-        cJSON *err = cJSON_CreateObject();
-        cJSON_AddNumberToObject(err, "code", -32800);
-        cJSON_AddStringToObject(err, "message", "Request cancelled by user");
-        cJSON_AddStringToObject(err, "data", session_id);
-        cJSON_AddItemToObject(err_out, "error", err);
-        char *err_str = cJSON_PrintUnformatted(err_out);
-        cJSON_Delete(err_out);
-        if (tool_trace)
-            cJSON_Delete(tool_trace);
-        if (think_result)
-            cJSON_Delete(think_result);
-        if (final_text)
-            AIRY_FREE(final_text);
-        if (agent_spec_owned)
-            cJSON_Delete(agent_spec_owned);
-        return err_str;
-    }
-    if (run_rc != 0) {
-
-        if (tool_trace)
-            cJSON_Delete(tool_trace);
-        if (think_result)
-            cJSON_Delete(think_result);
-        if (final_text)
-            AIRY_FREE(final_text);
-        if (agent_spec_owned)
-            cJSON_Delete(agent_spec_owned);
-        return jsonrpc_error(-32603, "agent.run failed: tool loop exhausted or LLM service error",
-                             id);
-    }
-
-    cJSON *out = cJSON_CreateObject();
-    cJSON_AddStringToObject(out, "jsonrpc", "2.0");
-    if (id && cJSON_IsNumber(id)) {
-        cJSON_AddNumberToObject(out, "id", id->valuedouble);
-    } else {
-        cJSON_AddNullToObject(out, "id");
-    }
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "session_id", session_id);
-    cJSON_AddStringToObject(result, "response", final_text ? final_text : "");
-    cJSON_AddNumberToObject(result, "tokens_used", (double)total_tokens);
-    cJSON_AddNumberToObject(result, "cost_usd", total_cost);
-    /* 2.1.1.6：思考链保留（非流式每轮 reasoning_content 拼接，缺失时省略） */
-    if (reasoning_acc && reasoning_acc[0])
-        cJSON_AddStringToObject(result, "reasoning", reasoning_acc);
-    if (tool_trace) {
-        cJSON_AddItemToObject(result, "tool_trace", tool_trace);
-    } else {
-        cJSON_AddItemToObject(result, "tool_trace", cJSON_CreateArray());
-    }
-    /* Attach the dual-thinking result (GCCP+GRAD DAG plan + thinking events +
-     * stats). NULL when think_d was unreachable; the field is omitted for
-     * backward compatibility with old clients. */
-    if (think_result) {
-        /* GCCP 交互轮协议化（2026-08-25 修复）：第一段挂起时顶层显式携带
-         * interaction_required=1 与 gccp_questions，客户端无需解析 thinking
-         * 内部结构即可识别问答轮（此前仅有 result.response="" + thinking 内
-         * 嵌套字段，纯 HTTP/JSON-RPC 调用方看到的是"空回复 + JSON"）。 */
-        if (gccp_interact_round) {
-            cJSON_AddBoolToObject(result, "interaction_required", 1);
-            cJSON *qstr = cJSON_GetObjectItem(think_result, "gccp_questions");
-            if (cJSON_IsString(qstr) && qstr->valuestring) {
-                cJSON *qjson = cJSON_Parse(qstr->valuestring);
-                if (qjson)
-                    cJSON_AddItemToObject(result, "gccp_questions", qjson);
-                else
-                    cJSON_AddStringToObject(result, "gccp_questions", qstr->valuestring);
-            }
-        }
-        cJSON_AddItemToObject(result, "thinking", think_result);
-        think_result = NULL;
-    }
-    cJSON_AddItemToObject(out, "result", result);
-
-    char *out_str = cJSON_PrintUnformatted(out);
-    cJSON_Delete(out);
-    if (final_text)
-        AIRY_FREE(final_text);
-    if (reasoning_acc)
-        AIRY_FREE(reasoning_acc);
-    if (agent_spec_owned)
-        cJSON_Delete(agent_spec_owned);
-    return out_str;
+    char *out = cJSON_PrintUnformatted(rroot);
+    cJSON_Delete(rroot);
+    return out;
 }
 
 /**
- * @brief agent.cancel: manually abort an in-flight agent.run request
- *
- * params.session_id -> look up the entry in the in-flight registry and set
- * cancelled. The tool loop checks this flag between rounds and stops, then
- * returns a -32800 error to the original request.
- *
- * @return JSON-RPC response (result.status="cancelling" on success; error if not found)
+ * @brief agent.cancel 转发：params.session_id 原样透传 agent_d "run_cancel"，
+ *        响应 id 重写为请求 id。
  */
 char *handle_agent_cancel(cJSON *root, gateway_business_ctx_t *ctx)
 {
+    (void)ctx; /* 端点解析统一由 svc dispatch 钩子按命名空间完成 */
     cJSON *id = cJSON_GetObjectItem(root, "id");
     cJSON *params = cJSON_GetObjectItem(root, "params");
     cJSON *sid = params ? cJSON_GetObjectItem(params, "session_id") : NULL;
@@ -414,36 +105,38 @@ char *handle_agent_cancel(cJSON *root, gateway_business_ctx_t *ctx)
         return jsonrpc_error(-32602, "Invalid params: missing session_id", id);
     }
 
-    airy_mtx_lock(&ctx->active_lock);
-    gw_active_request_t *entry = ctx->active_requests;
-    while (entry) {
-        if (strcmp(entry->session_id, sid->valuestring) == 0)
-            break;
-        entry = entry->next;
-    }
-    if (entry) {
-        atomic_store_explicit(&entry->cancelled, 1, memory_order_relaxed);
-        AIRY_LOG_INFO("gateway: agent.cancel set (session=%s)", sid->valuestring);
-    }
-    airy_mtx_unlock(&ctx->active_lock);
-
-    if (!entry) {
-        AIRY_LOG_DEBUG("gateway: agent.cancel miss (session=%s, 请求已完成或不存在)", sid->valuestring);
-        return jsonrpc_error(-32004, "No active request with given session_id", id);
+    char *params_str = params ? cJSON_PrintUnformatted(params) : AIRY_STRDUP("{}");
+    if (!params_str) {
+        return jsonrpc_error(-32603, "Out of memory", id);
     }
 
-    cJSON *out = cJSON_CreateObject();
-    cJSON_AddStringToObject(out, "jsonrpc", "2.0");
-    if (id && cJSON_IsNumber(id)) {
-        cJSON_AddNumberToObject(out, "id", id->valuedouble);
+    /* 架构约束 2026-08-25 "必须走 syscall": agent.run_cancel 经 SYS_SVC_CALL 派发 */
+    char *resp = NULL;
+    airy_err_t rc = airy_sys_svc_call("agent", "run_cancel", params_str, GW_TOOL_TIMEOUT_MS,
+                                      &resp);
+    AIRY_FREE(params_str);
+    if (rc != AIRY_SUCCESS || !resp) {
+        return jsonrpc_error(-32603, "Agent service unreachable", id);
+    }
+
+    cJSON *rroot = cJSON_Parse(resp);
+    AIRY_FREE(resp);
+    if (!rroot) {
+        return jsonrpc_error(-32603, "Agent service returned invalid response", id);
+    }
+
+    cJSON *req_id = cJSON_GetObjectItem(root, "id");
+    cJSON *svc_id = cJSON_GetObjectItem(rroot, "id");
+    if (svc_id)
+        cJSON_DeleteItemFromObject(rroot, "id");
+    if (req_id && cJSON_IsString(req_id)) {
+        cJSON_AddStringToObject(rroot, "id", req_id->valuestring);
+    } else if (req_id && cJSON_IsNumber(req_id)) {
+        cJSON_AddNumberToObject(rroot, "id", req_id->valuedouble);
     } else {
-        cJSON_AddNullToObject(out, "id");
+        cJSON_AddNullToObject(rroot, "id");
     }
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "status", "cancelling");
-    cJSON_AddStringToObject(result, "session_id", sid->valuestring);
-    cJSON_AddItemToObject(out, "result", result);
-    char *out_str = cJSON_PrintUnformatted(out);
-    cJSON_Delete(out);
-    return out_str;
+    char *out = cJSON_PrintUnformatted(rroot);
+    cJSON_Delete(rroot);
+    return out;
 }

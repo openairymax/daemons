@@ -46,34 +46,12 @@ extern "C" {
 #define GW_THINK_TIMEOUT_MS 120000
 #define GW_LLM_MAX_RESP 1048576
 #define GW_LLM_DEFAULT_TCP_PORT 8080
-#define GW_SESSION_ID_LEN 64
 #define GW_EXTERNAL_AGENT_ID "external"
 
-#define GW_MAX_TOOL_LOOPS 8
 /* Tool execution timeout 90s: shell_run itself times out at 60s; the old 30s
  * value would hit recv timeout before the tool finished, making the gateway
  * wrongly report long commands as failed. */
 #define GW_TOOL_TIMEOUT_MS 90000
-
-#define GW_AGENT_SPAWN_TIMEOUT_MS 90000
-#define GW_AGENT_INVOKE_TIMEOUT_MS 180000
-
-#define GW_AGENT_FILE_MAX (64 * 1024)
-
-/* @brief In-flight agent.run request entry
- *
- * agent.run is a synchronous blocking path (LLM round-trip + tool loop) and a
- * single run can take minutes. To support manual cancellation after a task
- * starts, the gateway keeps a registry of in-flight requests:
- *   - handle_agent_run registers an entry (session_id -> cancelled=0) and
- *     removes it on completion;
- *   - agent.cancel(session_id) sets cancelled, checked between tool-loop rounds.
- */
-typedef struct gw_active_request_s {
-    char session_id[GW_SESSION_ID_LEN];
-    atomic_int cancelled;
-    struct gw_active_request_s *next;
-} gw_active_request_t;
 
 /* @brief Gateway business context: resolved daemon socket paths + model config
  *
@@ -100,9 +78,6 @@ struct gateway_business_ctx_s {
     char cupolas_sock_path[256];
     char default_model[128];
 
-    airy_mtx_t active_lock;
-    gw_active_request_t *active_requests;
-
     gateway_shutdown_fn_t on_shutdown;
     void *shutdown_user_data;
 };
@@ -126,8 +101,6 @@ int gw_biz_mcp_register_tools(gw_mcp_server_t *mcp, void *user_data);
 char *jsonrpc_error(int code, const char *msg, const cJSON *id);
 char *gw_svc_call(const char *sock_path, const char *method, const char *params_json,
                   int timeout_ms);
-int gw_think_process(const gateway_business_ctx_t *ctx, const char *session_id,
-                     const char *prompt, const char *gccp_answers, cJSON **out_think);
 int gw_acl_check_tool(const char *tool_name);
 char *handle_ns_forward(cJSON *root, const gw_ns_forward_rule_t *rule);
 char *handle_mem_call(cJSON *root);
@@ -142,31 +115,10 @@ void gw_sys_svc_dispatch_cleanup(void);
 /* ---- gateway_biz_hall.c (hall.* — task board / event stream / chain) ---- */
 char *handle_hall_call(cJSON *root, gateway_business_ctx_t *ctx);
 
-/* ---- gateway_biz_llm.c (LLM calls + tool loop) ---- */
-int gw_run_tool_loop(const gateway_business_ctx_t *ctx, const char *model, const char *prompt,
-                     const cJSON *history, gw_active_request_t *active, cJSON **out_trace,
-                     char **out_text, uint64_t *out_tokens, double *out_cost,
-                     char **out_reasoning);
-
-/* ---- gateway_biz_agent.c / gateway_biz_agent_session.c (agent.run
- *       orchestration + session registry) ----
- * 2026-08-27：gateway_biz_agent.c 按单一职责再拆分，会话注册表 / 编排
- * 辅助 / spec 解析 / 记忆持久化迁至 gateway_biz_agent_session.c，
- * 原 static 函数提升为非 static 并在此声明。 */
-bool gw_active_is_cancelled(gw_active_request_t *entry);
+/* ---- gateway_biz_agent.c (agent.run / agent.cancel 转发, M1-1a 引擎下沉) ----
+ * agent.run 引擎（会话注册表/编排/工具循环）已迁 agent_d；gateway 仅转发。 */
 char *handle_agent_run(cJSON *root, gateway_business_ctx_t *ctx);
 char *handle_agent_cancel(cJSON *root, gateway_business_ctx_t *ctx);
-
-/* ---- gateway_biz_agent_session.c（agent.run 会话/编排域） ---- */
-void gw_gen_session_id(char *out, size_t out_size);
-void gw_agent_record_event(const char *session_id, const char *category, cJSON *content);
-gw_active_request_t *gw_active_register(gateway_business_ctx_t *ctx, const char *session_id);
-void gw_active_unregister(gateway_business_ctx_t *ctx, gw_active_request_t *entry);
-int gw_agent_run_orchestrate(const gateway_business_ctx_t *ctx, const cJSON *agent_spec,
-                             const char *prompt, char **out_text, char **out_err);
-cJSON *gw_agent_spec_from_agent_file(const cJSON *params);
-void gw_persist_conversation(const gateway_business_ctx_t *ctx, const char *session_id,
-                             const char *user_prompt, const char *assistant_text);
 
 #ifdef __cplusplus
 }

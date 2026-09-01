@@ -59,11 +59,8 @@ option(AIRY_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
 # gateway_business_handler.c 按单一职责拆分为四个文件（2026-08-11）：
 #   gateway_business_handler.c  主分发 + ctx 生命周期 + 协议入口
 #   gateway_biz_forward.c      命名空间转发（L2 协议客户端 + 白名单）
-#   gateway_biz_llm.c          LLM 调用 + 工具循环（ReAct）
-#   gateway_biz_agent.c        agent.run 编排（双思考注入 + 取消）
-#   gateway_biz_agent_session.c agent.run 会话/编排域（2026-08-27 拆分自
-#                               gateway_biz_agent.c：会话 ID/注册表/orchestrate/
-#                               agent_file spec/mem 持久化）
+#   gateway_biz_agent.c        agent.run/agent.cancel 转发（M1-1a 引擎下沉后
+#                              仅协议转发；引擎见 agent_d agent_run_*）
 #   gateway_biz_backend.c      MCP/OpenAI/A2A 协议后端
 #   gateway_biz_hall.c         hall.* 任务看板/事件流/决策链（网关内实现）
 #   gateway_biz_svcdispatch.c 微核心服务统一派发钩子（2026-08-25 "必须走 syscall"）
@@ -73,9 +70,7 @@ set(GATEWAY_SERVICE_SOURCES
     src/gateway_svc_adapter.c
     src/gateway_business_handler.c
     src/gateway_biz_forward.c
-    src/gateway_biz_llm.c
     src/gateway_biz_agent.c
-    src/gateway_biz_agent_session.c
     src/gateway_biz_backend.c
     src/gateway_biz_hall.c
     src/gateway_biz_svcdispatch.c
