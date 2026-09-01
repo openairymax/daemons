@@ -144,6 +144,15 @@ char *think_service_stats_json(think_service_t *svc);
 /** @brief Check whether the service is ready (engine + adapter created). */
 int think_service_ready(const think_service_t *svc);
 
+struct llm_svc_adapter_s; /* 前向声明，避免在公共头引入 llm_svc_adapter.h */
+
+/**
+ * @brief 获取 llm 适配器（M1-1c：think.review 服务面注入用，不持有）。
+ * @param svc Service handle
+ * @return llm_svc_adapter 指针（属于 svc，调用方不得释放）；NULL 若未创建
+ */
+struct llm_svc_adapter_s *think_service_llm_adapter(think_service_t *svc);
+
 #ifdef __cplusplus
 }
 #endif

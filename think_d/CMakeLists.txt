@@ -89,6 +89,8 @@ add_executable(think_d
     src/main.c
     # M1-1c：推理语言网关服务面（think.lang_process/postprocess/stats）
     src/lang_svc.c
+    # M1-1c：执行复核服务面（think.review，t2/t1-f 语义判断策略收拢）
+    src/review_svc.c
 )
 
 if(WIN32)

@@ -683,3 +683,8 @@ int think_service_ready(const think_service_t *svc)
 {
     return (svc && svc->engine && svc->llm_adapter) ? 1 : 0;
 }
+
+struct llm_svc_adapter_s *think_service_llm_adapter(think_service_t *svc)
+{
+    return svc ? svc->llm_adapter : NULL;
+}

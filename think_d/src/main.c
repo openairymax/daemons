@@ -24,6 +24,7 @@
 #include "think_service.h"
 #include "svc_model_defaults.h"
 #include "lang_svc.h"
+#include "review_svc.h"
 
 #include <stdlib.h>
 #include <strings.h>
@@ -401,6 +402,11 @@ int main(int argc, char **argv)
     if (lang_svc_init() != 0)
         SVC_LOG_WARN("lang_svc_init failed, think.lang_* unavailable");
 
+    /* M1-1c：执行复核服务面初始化（t2/t1-f 语义判断策略收拢到 think_d） */
+    if (review_svc_init(think_service_llm_adapter(g_service), g_config.think2_slow_model,
+                        g_config.think1_fast_model) != 0)
+        SVC_LOG_WARN("review_svc_init failed, think.review unavailable");
+
     airy_sock_t server_fd = daemon_create_server_socket(g_config.use_tcp, g_config.tcp_port,
                                                         g_config.socket_path, g_config.socket_path);
     if (server_fd < 0) {
@@ -453,9 +459,12 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_think_d, "lang_postprocess", lang_svc_postprocess,
                                NULL);
     method_dispatcher_register(g_dispatcher_think_d, "lang_stats", lang_svc_stats, NULL);
+    /* M1-1c：执行复核服务面（CLI 原进程内嵌 t2/t1-f 判断策略，现经
+     * gateway → think.review 获取语义判断） */
+    method_dispatcher_register(g_dispatcher_think_d, "review", review_svc_process, NULL);
 
     method_dispatcher_register(g_dispatcher_think_d, "shutdown", on_shutdown_method_think_d, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (think.* namespace)", 8);
+    SVC_LOG_INFO("Registered %d RPC methods (think.* namespace)", 9);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_think_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
@@ -473,6 +482,7 @@ int main(int argc, char **argv)
 
     daemon_cleanup_standard(g_bipc_think_d, g_bsd_think_d, g_event_driver_think_d, server_fd,
                             g_config.socket_path, destroy_service, &g_running_lock_think_d);
+    review_svc_cleanup(); /* M1-1c：释放复核服务面引用 */
     lang_svc_cleanup(); /* M1-1c：释放 lang_gateway 句柄 */
     free_daemon_config();
 
