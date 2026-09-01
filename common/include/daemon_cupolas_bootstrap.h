@@ -46,6 +46,20 @@ extern "C" {
 airy_err_t daemon_cupolas_init(const char *daemon_name);
 
 /**
+ * @brief Initialize cupolas security dome in PEP (Policy Enforcement Point)
+ *        minimal-guard mode (0.1.9 M2, §3.2).
+ *
+ * 与 daemon_cupolas_init() 相同初始化本地必需的 sanitizer/workbench/audit
+ * 与 daemon_security（PDP 不可达时的 fallback ACL），但**跳过本地
+ * vault / entitlements / network_security**——这些由 PDP（cupolas_d）
+ * 集中持有，PEP 经 RPC 转发访问（gateway cap 注册表 GW_CAP_KIND_FWD）。
+ *
+ * @param daemon_name Daemon name (e.g. "gateway_d"), used for audit logs
+ * @return AIRY_SUCCESS on success; error code on failure (FATAL already logged)
+ */
+airy_err_t daemon_cupolas_init_pep(const char *daemon_name);
+
+/**
  * @brief Clean up the cupolas security dome.
  *
  * Call before daemon main() exits. Flushes audit logs and releases
