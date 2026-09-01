@@ -47,9 +47,10 @@ foreach(TEST_SRC ${TEST_SOURCES})
 
     # 统一能力网关（0.1.6 P1-4）：注册表测试需编译注册表实现
     # （含 cJSON 头依赖），网关业务头不参与测试目标。
+    # P9 归一（2026-09-02）：gateway_cap_registry.c 已并入 gateway/src/biz/
     if(${TEST_NAME} STREQUAL "test_gateway_cap_registry")
         target_sources(${TEST_NAME} PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/gateway_cap_registry.c
+            ${GATEWAY_DIR}/src/biz/gateway_cap_registry.c
         )
         target_include_directories(${TEST_NAME} PRIVATE
             ${CJSON_INCLUDE_DIRS}
@@ -59,10 +60,13 @@ foreach(TEST_SRC ${TEST_SOURCES})
     target_include_directories(${TEST_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/protocol
         ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
         ${GATEWAY_INCLUDE_DIR}
         ${GATEWAY_SRC_DIR}
         ${GATEWAY_SRC_DIR}/gateway
+        # P9 归一（2026-09-02）：biz 处理器并入 gateway/src/biz/
+        ${GATEWAY_SRC_DIR}/biz
         ${GATEWAY_SRC_DIR}/utils
         ${SYSCALL_INCLUDE_DIR}
         ${COREKERN_INCLUDE_DIR}
