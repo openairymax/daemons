@@ -26,6 +26,13 @@
 
 #include "dynamic_policy_engine.h"
 
+#ifndef _WIN32
+#include <poll.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#endif
+
 static const char *strategy_str(dpolicy_conflict_strategy_t s)
 {
     switch (s) {
@@ -48,6 +55,60 @@ static int require_engine(airy_sock_t client_fd, int id)
     JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
                        "Dynamic policy engine not ready", id);
     return -1;
+}
+
+/* M2-S4 (0.1.9 §3.2)：epoch 变更广播至 notify_d topic=airy.cupolas.epoch。
+ * 广播为尽力而为通知面（fail-open）：notify_d 不在线/失败仅告警，
+ * 不阻断策略已生效的事实（PEP 下次调用仍会经 policy_status 对齐 epoch）。 */
+static void broadcast_epoch(uint64_t epoch)
+{
+    const char *sp = airy_runtime_dir_socket("notify.sock");
+    if (!sp || !sp[0]) {
+        SVC_LOG_WARN("policy: notify socket path unavailable, epoch broadcast skipped");
+        return;
+    }
+
+    char req[512];
+    snprintf(req, sizeof(req),
+             "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"publish\",\"params\":{"
+             "\"channel\":\"airy.cupolas.epoch\",\"event\":\"epoch_change\","
+             "\"payload\":\"{\\\"epoch\\\":%llu}\"}}",
+             (unsigned long long)epoch);
+
+#ifdef _WIN32
+    /* Windows 侧 notify_d 未启用命名管道；广播降级为日志（尽力而为） */
+    SVC_LOG_INFO("policy: epoch=%llu broadcast logged (win32 no-op)",
+                 (unsigned long long)epoch);
+    (void)sp;
+    (void)req;
+#else
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+        SVC_LOG_WARN("policy: socket() failed, epoch broadcast skipped");
+        return;
+    }
+    struct sockaddr_un addr;
+    __builtin_memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", sp);
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+        SVC_LOG_WARN("policy: notify_d unreachable, epoch broadcast skipped");
+        close(fd);
+        return;
+    }
+    (void)send(fd, req, strlen(req), 0);
+    char buf[1024];
+    struct pollfd pfd = {.fd = fd, .events = POLLIN, .revents = 0};
+    if (poll(&pfd, 1, 1000) > 0 && (pfd.revents & POLLIN)) {
+        ssize_t n = recv(fd, buf, sizeof(buf) - 1, 0);
+        if (n > 0) {
+            buf[n] = '\0';
+            SVC_LOG_INFO("policy: epoch=%llu broadcast ack: %.120s",
+                         (unsigned long long)epoch, buf);
+        }
+    }
+    close(fd);
+#endif
 }
 
 static void handle_policy_load(cJSON *params, int id, airy_sock_t client_fd)
@@ -122,6 +183,7 @@ static void handle_policy_activate(cJSON *params, int id, airy_sock_t client_fd)
     SVC_LOG_INFO("policy.activate: epoch=%llu",
                  (unsigned long long)dpolicy_engine_get_epoch(g_dpolicy));
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    broadcast_epoch(dpolicy_engine_get_epoch(g_dpolicy));
 }
 
 static void handle_policy_rollback(cJSON *params, int id, airy_sock_t client_fd)
@@ -159,6 +221,7 @@ static void handle_policy_rollback(cJSON *params, int id, airy_sock_t client_fd)
     SVC_LOG_INFO("policy.rollback: %s, epoch=%llu", version,
                  (unsigned long long)dpolicy_engine_get_epoch(g_dpolicy));
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    broadcast_epoch(dpolicy_engine_get_epoch(g_dpolicy));
 }
 
 static void handle_policy_status(cJSON *params __attribute__((unused)), int id,
