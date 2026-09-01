@@ -29,14 +29,14 @@
  * every registered parameter as mandatory, so if the schema marks one
  * optional while tool_d requires it (e.g. fs_list's path), the LLM may
  * omit it and tool validation fails. */
-#include "../../../gateway/src/gateway/gateway_tools_schema.h"
+#include "../../../commons/include/airy_tool_schema.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-static const char GW_TOOLS_JSON[] = GW_TOOLS_JSON_SOURCE;
+static const char GW_TOOLS_JSON[] = AIRY_TOOLS_JSON_SOURCE;
 
 /**
  * @brief Build the llm_d complete JSON-RPC request (passes through the tools array)
