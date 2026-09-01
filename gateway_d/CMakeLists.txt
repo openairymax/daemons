@@ -53,10 +53,11 @@ set(PROTOCOLS_COMMON_INCLUDE_DIR ${PROTOCOLS_DIR}/common/include)
 option(AIRY_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
 
 # ==================== Gateway 服务静态库 ====================
-# 提取 service/gateway_svc_adapter/gateway_business_handler + protocol/* 为独立静态库，
+# 提取 service + biz（P9 归一后经 gateway-sources.cmake 单一权威清单引用，
+# 物理位置在 gateway/src/biz/，2026-09-02）+ protocol/* 为独立静态库，
 # 供 gateway_d 可执行文件和集成测试共用，消除桩函数依赖。
 # 排除 main.c（含 main()）。
-# gateway_business_handler.c 按单一职责拆分为四个文件（2026-08-11）：
+# biz 处理器按单一职责拆分（2026-08-11）：
 #   gateway_business_handler.c  主分发 + ctx 生命周期 + 协议入口
 #   gateway_biz_forward.c      命名空间转发（L2 协议客户端 + 白名单）
 #   gateway_biz_agent.c        agent.run/agent.cancel 转发（M1-1a 引擎下沉后
@@ -65,17 +66,11 @@ option(AIRY_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
 #   gateway_biz_hall.c         hall.* 任务看板/事件流/决策链（网关内实现）
 #   gateway_biz_svcdispatch.c 微核心服务统一派发钩子（2026-08-25 "必须走 syscall"）
 #   gateway_cap_registry.c    统一能力注册表（0.1.6 P1-4：cap_key 单一权威源）
+set(GATEWAY_SRC_BASE ${GATEWAY_DIR})
+include(${GATEWAY_DIR}/cmake/gateway-sources.cmake)
 set(GATEWAY_SERVICE_SOURCES
     src/service.c
-    src/gateway_svc_adapter.c
-    src/gateway_business_handler.c
-    src/gateway_biz_forward.c
-    src/gateway_biz_agent.c
-    src/gateway_biz_backend.c
-    src/gateway_biz_hall.c
-    src/gateway_biz_svcdispatch.c
-    src/gateway_biz_tools.c
-    src/gateway_cap_registry.c
+    ${GATEWAY_BIZ_SOURCES}
 )
 
 if(AIRY_ENABLE_PROTOCOLS)
@@ -122,6 +117,8 @@ target_include_directories(airy_gateway_service PUBLIC
     # Gateway 内部头文件（gateway_api.c 引用 http_gateway.h 等）
     ${GATEWAY_SRC_DIR}
     ${GATEWAY_SRC_DIR}/gateway
+    # P9 归一（2026-09-02）：biz 处理器并入 gateway/src/biz/
+    ${GATEWAY_SRC_DIR}/biz
     ${GATEWAY_SRC_DIR}/utils
     ${GATEWAY_SRC_DIR}/utils/syscall
     # Atom 模块（service.c 引用 "syscalls.h", "airy_rt.h"）
@@ -385,6 +382,8 @@ target_include_directories(gateway_d PRIVATE
     ${GATEWAY_INCLUDE_DIR}
     ${GATEWAY_SRC_DIR}
     ${GATEWAY_SRC_DIR}/gateway
+    # P9 归一（2026-09-02）：biz 处理器并入 gateway/src/biz/
+    ${GATEWAY_SRC_DIR}/biz
     ${GATEWAY_SRC_DIR}/utils
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
