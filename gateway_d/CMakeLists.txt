@@ -128,6 +128,7 @@ target_include_directories(airy_gateway_service PUBLIC
     ${DAEMON_COMMON_INCLUDE_DIR}
     # Commons 统一基础库
     ${COMMONS_INCLUDE_DIR}
+    ${COMMONS_INCLUDE_DIR}/include
     ${COMMONS_INCLUDE_DIR}/platform/include
     ${COMMONS_INCLUDE_DIR}/utils/error
     ${COMMONS_INCLUDE_DIR}/utils/logging
@@ -279,6 +280,7 @@ target_include_directories(gateway_lib_obj PUBLIC
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
     ${CJSON_INCLUDE_DIRS}
+    ${COMMONS_DIR}/include
     ${COMMONS_DIR}/platform/include
     ${COMMONS_DIR}/utils/logging
     # S-2 收敛 (2026-08-14): AIRY_LOG_* 权威宏源（logging.h 统一入口已引用）
