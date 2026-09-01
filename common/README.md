@@ -25,16 +25,18 @@ IPC 通信、JSON-RPC 分发、服务发现、安全认证、容错恢复、并�
 
 ### re-export 兼容层机制（P0.17 / IRON-6）
 
-- 本模块 `include/` 下多个头文件（`svc_common.h` 等）是 **re-export 兼容头**：真实定义
-  已迁移到 commons（如 `commons/utils/ipc/include/svc_common.h`），兼容头仅 `#include`
-  权威版本，使 daemon 源码无需改动包含路径，同时消除编译期 atoms→daemons 反向依赖
-  （IRON-6 跨层耦合禁令）。
-- 未迁移的头（`platform.h` / `error.h` / `compat.h` / `circuit_breaker.h` /
-  `thread_pool.h` 等）仍由本模块 `include/` 提供，daemon 自身源码可解析。
+- 本模块 `include/` 下多个头文件（`svc_common.h` / `circuit_breaker.h` /
+  `thread_pool.h` 等）是 **re-export 兼容头**：真实定义已迁移到 commons
+  （如 `commons/utils/ipc/include/svc_common.h`、`commons/utils/ipc/include/
+  circuit_breaker.h`、`commons/utils/sync/include/thread_pool.h`），兼容头仅
+  `#include` 权威版本，使 daemon 源码无需改动包含路径，同时消除编译期
+  atoms→daemons 反向依赖（IRON-6 跨层耦合禁令）。
+- 未迁移的头（`platform.h` / `error.h` / `compat.h` 等）仍由本模块 `include/`
+  提供，daemon 自身源码可解析。
 - CMake 包含路径顺序：commons 权威路径声明在 `daemons/common/include` **之前**，确保
   atoms 代码优先解析 commons 版本。
 
-## 组件集（src/ 共 44 个 C 源文件）
+## 组件集（src/ 共 53 个 C 源文件，0.1.9 0c 迁出 circuit_breaker/thread_pool）
 
 | 域 | 组件 | 说明 |
 |----|------|------|
@@ -43,8 +45,8 @@ IPC 通信、JSON-RPC 分发、服务发现、安全认证、容错恢复、并�
 | 服务发现 | `service_discovery` / `service_discovery_lb` / `service_discovery_api` / `service_discovery_stats` / `service_discovery_backend_shm` / `service_discovery_backend_file` / `service_discovery_helper` / `daemon_bootstrap_sd` | 跨进程注册/发现/负载均衡，shm/file 后端，一键引导 |
 | JSON-RPC | `jsonrpc_helpers` / `method_dispatcher` | JSON-RPC 2.0 辅助（请求解析/响应构建）与方法分发器（注册表模式，O(1) 路由） |
 | 安全 | `svc_auth` / `svc_auth_jwt` / `svc_auth_apikey` / `svc_auth_ratelimit` / `daemon_security` / `input_validator` / `param_validator` / `log_sanitizer` | JWT/API Key/限流认证中间件、cupolas 安全集成、输入/参数校验、日志清洗 |
-| 容错恢复 | `circuit_breaker` / `api_recovery` / `alert_manager` | 熔断器（关闭→开启→半开）、API 恢复策略、智能告警 |
-| 并发调度 | `thread_pool` / `airy_event_loop` / `daemon_event_driver` / `daemon_task_dispatcher` | 线程池、事件循环、统一事件驱动框架（各 daemon 主循环）、工具并行执行引擎 |
+| 容错恢复 | `api_recovery` / `alert_manager` | API 恢复策略、智能告警（熔断器 `circuit_breaker` 权威实现已迁 commons/utils/ipc，经 re-export 头接入） |
+| 并发调度 | `airy_event_loop` / `daemon_event_driver` / `daemon_task_dispatcher` | 事件循环、统一事件驱动框架（各 daemon 主循环）、工具并行执行引擎（线程池 `thread_pool` 权威实现已迁 commons/utils/sync） |
 | 平台兼容 | `platform_compat` | daemon 平台扩展实现（socket/dl/线程名/时间等） |
 | 监控指标 | `unified_metrics` | 统一指标采集 |
 | 配置 | `config_manager` / `svc_model_defaults` | 统一配置管理、model.yaml 全局默认模型提取（llm_d/gateway_d 共用） |
