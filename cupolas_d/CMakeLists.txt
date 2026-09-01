@@ -111,7 +111,11 @@ add_executable(cupolas_d
     src/cupolas_rpc_core.c
     src/cupolas_rpc_vault.c
     src/cupolas_rpc_net_entitlements.c
+    src/cupolas_rpc_policy.c
 )
+
+# M2-S3 (0.1.9 §3.2 PDP)：policy.* RPC 需要 dynamic_policy_engine V2 API
+target_compile_definitions(cupolas_d PRIVATE AIRY_ENABLE_V2_API=1)
 
 if(WIN32)
     target_compile_definitions(cupolas_d PRIVATE

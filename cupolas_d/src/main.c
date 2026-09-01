@@ -35,6 +35,7 @@
 #include "daemon_main.h"
 #include "platform.h"
 #include "cupolas_d_internal.h"
+#include "dynamic_policy_engine.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,6 +53,9 @@ DAEMON_DECLARE_COMMON(cupolas_d, cupolas, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCK
 DAEMON_DECLARE_SHUTDOWN_METHOD(cupolas_d)
 
 cupolas_service_t *g_service = NULL;
+
+/* PDP：动态策略引擎（M2-S3，唯一策略持有者）。创建/销毁于 main() */
+dpolicy_engine_t *g_dpolicy = NULL;
 
 typedef struct {
     char *socket_path;
@@ -153,6 +157,10 @@ static void destroy_service(void)
         cupolas_service_destroy(g_service);
         g_service = NULL;
     }
+    if (g_dpolicy) {
+        dpolicy_engine_destroy(g_dpolicy);
+        g_dpolicy = NULL;
+    }
 }
 
 int main(int argc, char **argv)
@@ -180,6 +188,16 @@ int main(int argc, char **argv)
      * security dome (permission_engine + sanitizer + audit_logger +
      * daemon_security) */
     daemon_cupolas_init("cupolas_d");
+
+    /* PDP：动态策略引擎（M2-S3）——cupolas_d 作为唯一策略持有者 */
+    g_dpolicy = dpolicy_engine_create(DPOLICY_CONFLICT_DENY_WINS);
+    if (!g_dpolicy) {
+        SVC_LOG_ERROR("Failed to create dynamic policy engine");
+        free_daemon_config();
+        airy_mtx_destroy(&g_running_lock_cupolas_d);
+        airy_sock_cleanup();
+        return EXIT_FAILURE;
+    }
 
     load_daemon_config(config_path);
     if (use_tcp)
@@ -235,40 +253,45 @@ int main(int argc, char **argv)
     }
 
     g_dispatcher_cupolas_d = daemon_event_driver_get_dispatcher(g_event_driver_cupolas_d);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "check_permission",
-                               on_check_permission_method, NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "sanitize", on_sanitize_method, NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "execute_command", on_execute_command_method,
-                               NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "add_rule", on_add_rule_method, NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "audit_flush", on_audit_flush_method, NULL);
+
+    /* 方法注册点驱动（SSoT）：计数源自注册本身，避免硬编码漂移 */
+    size_t g_method_count = 0;
+#define REG_RPC(disp, name, fn)                                             \
+    do {                                                                    \
+        method_dispatcher_register((disp), (name), (fn), NULL);             \
+        g_method_count++;                                                   \
+    } while (0)
+
+    REG_RPC(g_dispatcher_cupolas_d, "check_permission", on_check_permission_method);
+    REG_RPC(g_dispatcher_cupolas_d, "sanitize", on_sanitize_method);
+    REG_RPC(g_dispatcher_cupolas_d, "execute_command", on_execute_command_method);
+    REG_RPC(g_dispatcher_cupolas_d, "add_rule", on_add_rule_method);
+    REG_RPC(g_dispatcher_cupolas_d, "audit_flush", on_audit_flush_method);
     /* L2 protocol standard methods (02-l2-service-protocol.md:
      * cupolas.health_check / cupolas.get_stats / cupolas.shutdown) */
-    method_dispatcher_register(g_dispatcher_cupolas_d, "health_check", on_health_check_method,
-                               NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "get_stats", on_get_stats_method, NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "shutdown", on_shutdown_method_cupolas_d,
-                               NULL);
+    REG_RPC(g_dispatcher_cupolas_d, "health_check", on_health_check_method);
+    REG_RPC(g_dispatcher_cupolas_d, "get_stats", on_get_stats_method);
+    REG_RPC(g_dispatcher_cupolas_d, "shutdown", on_shutdown_method_cupolas_d);
 
-    method_dispatcher_register(g_dispatcher_cupolas_d, "vault_store", on_vault_store_method, NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "vault_retrieve", on_vault_retrieve_method,
-                               NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "vault_delete", on_vault_delete_method,
-                               NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "vault_list", on_vault_list_method, NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "vault_rotate", on_vault_rotate_method,
-                               NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "net_add_rule", on_net_add_rule_method,
-                               NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "net_check_access",
-                               on_net_check_access_method, NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "net_get_stats", on_net_get_stats_method,
-                               NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "entitlements_load",
-                               on_entitlements_load_method, NULL);
-    method_dispatcher_register(g_dispatcher_cupolas_d, "entitlements_check",
-                               on_entitlements_check_method, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (cupolas.* namespace)", 18);
+    REG_RPC(g_dispatcher_cupolas_d, "vault_store", on_vault_store_method);
+    REG_RPC(g_dispatcher_cupolas_d, "vault_retrieve", on_vault_retrieve_method);
+    REG_RPC(g_dispatcher_cupolas_d, "vault_delete", on_vault_delete_method);
+    REG_RPC(g_dispatcher_cupolas_d, "vault_list", on_vault_list_method);
+    REG_RPC(g_dispatcher_cupolas_d, "vault_rotate", on_vault_rotate_method);
+    REG_RPC(g_dispatcher_cupolas_d, "net_add_rule", on_net_add_rule_method);
+    REG_RPC(g_dispatcher_cupolas_d, "net_check_access", on_net_check_access_method);
+    REG_RPC(g_dispatcher_cupolas_d, "net_get_stats", on_net_get_stats_method);
+    REG_RPC(g_dispatcher_cupolas_d, "entitlements_load", on_entitlements_load_method);
+    REG_RPC(g_dispatcher_cupolas_d, "entitlements_check", on_entitlements_check_method);
+    /* M2-S3 (0.1.9 §3.2 PDP)：策略演化——cupolas_d 唯一策略持有者 */
+    REG_RPC(g_dispatcher_cupolas_d, "policy_load", on_policy_load_method);
+    REG_RPC(g_dispatcher_cupolas_d, "policy_activate", on_policy_activate_method);
+    REG_RPC(g_dispatcher_cupolas_d, "policy_rollback", on_policy_rollback_method);
+    REG_RPC(g_dispatcher_cupolas_d, "policy_status", on_policy_status_method);
+
+#undef REG_RPC
+    SVC_LOG_INFO("Registered %zu RPC methods (cupolas.* / policy.* namespace)",
+                 g_method_count);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_cupolas_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
