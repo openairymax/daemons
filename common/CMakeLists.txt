@@ -42,7 +42,8 @@ set(SVC_COMMON_SOURCES
     src/ipc/ipc_service_bus_endpoint.c # Phase 2.3a: IPC服务总线-处理器/端点注册发现域（从 ipc_service_bus.c 拆分）
     src/ipc/ipc_service_bus_message.c  # Phase 2.3a: IPC服务总线-消息域（从 ipc_service_bus.c 拆分）
     src/ipc/ipc_bus_helper.c       # C-L09: daemon IPC Bus 自动注册便捷层
-    src/ipc/ipc_backpressure.c    # P1.24: IPC Bus 背压控制
+    # 0c A 类直搬：ipc_backpressure/jsonrpc_helpers/method_dispatcher/param_validator
+    # 权威实现迁 commons/utils/ipc，符号经 airy_common 提供（daemons 留 re-export 头）
     src/discovery/service_discovery.c   # 跨进程服务发现
     src/discovery/service_discovery_lb.c # 跨进程服务发现-负载均衡
     src/discovery/service_discovery_api.c # 跨进程服务发现-操作 API
@@ -50,10 +51,13 @@ set(SVC_COMMON_SOURCES
     src/discovery/service_discovery_backend_shm.c # 跨进程服务发现-shm 后端
     src/discovery/service_discovery_backend_file.c # 跨进程服务发现-file 后端
     src/discovery/service_discovery_helper.c  # C-L08: daemon 自动注册便捷层
-    src/util/circuit_breaker.c     # 熔断器与自愈
-    src/util/unified_metrics.c     # 统一指标收集
-    src/util/alert_manager.c       # 智能告警管理
+    # 0c SSoT 收敛：熔断器权威实现迁 commons/utils/ipc（src/circuit_breaker.c），
+    # 符号经 airy_common PUBLIC 链接提供，daemons 仅留 include/circuit_breaker.h 兼容头。
+    # 0c A 类直搬：unified_metrics/alert_manager/jsonrpc_helpers/method_dispatcher/
+    # param_validator/log_sanitizer/api_recovery/airy_event_loop 家族权威实现均迁
+    # commons（utils/observability|ipc|security|resource|sync），daemons 留 re-export 头。
     src/util/config_manager.c      # 统一配置管理
+    src/util/input_validator.c     # cJSON 规则校验器（validator_*，测试消费，留守 daemons）
     src/auth/svc_auth.c
     src/auth/svc_auth_jwt.c       # 认证中间件-JWT 域：生命周期/令牌生成/刷新（从 svc_auth_jwt.c 拆分）
     src/auth/svc_auth_jwt_crypto.c # 认证中间件-JWT 域：HMAC 实现/Base64 编解码原语（从 svc_auth_jwt.c 拆分）
@@ -64,20 +68,11 @@ set(SVC_COMMON_SOURCES
     src/security/daemon_security_acl.c       # Phase 2.3a: daemon 安全-ACL 权限域（从 daemon_security.c 拆分）
     src/security/daemon_security_signature.c # Phase 2.3a: daemon 安全-包签名验证域（从 daemon_security.c 拆分）
     src/security/daemon_security_vault.c     # Phase 2.3a: daemon 安全-凭据/审计域（从 daemon_security.c 拆分）
-    src/util/jsonrpc_helpers.c
-    src/util/method_dispatcher.c
-    src/util/input_validator.c
-    src/util/param_validator.c
-    src/util/log_sanitizer.c
-    src/util/platform_compat.c     # 平台兼容层实现
-    src/event/airy_event_loop.c  # 事件驱动循环（核心门面：stop/定时器委托）
-    src/event/airy_event_loop_epoll.c  # 事件循环-Linux epoll 后端（IO 多路复用+回调分发，从 event_loop 拆分）
-    src/event/airy_event_loop_win.c    # 事件循环-Windows WSA 后端（从 event_loop 拆分）
-    src/event/airy_event_loop_kqueue.c # 事件循环-macOS/BSD kqueue 后端（从 event_loop 拆分）
-    src/event/airy_event_timer.c   # 事件循环定时器管理（从 event_loop 拆分）
+    # 0c A 类直搬：platform_compat 实现迁 commons/platform（src/platform_compat.c），
+    # 声明平台扩展头 daemon_platform_ext.h 亦迁 commons，daemons 留 re-export。
     src/daemon/daemon_event_driver.c # 统一事件驱动框架
-    src/util/api_recovery.c        # API恢复系统
-    src/util/thread_pool.c         # 工作线程池
+    # 0c IRON-6 归位：工作线程池实现迁 commons/utils/sync（src/thread_pool.c），
+    # 符号经 airy_common PUBLIC 链接提供，daemons 仅留 include/thread_pool.h 兼容头。
     src/daemon/daemon_task_dispatcher.c # 工具并行执行引擎（原 parallel_dispatcher.c，重命名以消除与 atoms/coreloopthree 同名冲突）
     src/daemon/daemon_oom.c          # P1.22: Daemon OOM 降级回调注册
     src/daemon/daemon_bootstrap_sd.c    # P1.7 C-L08: daemon ServiceDiscovery 一键引导
