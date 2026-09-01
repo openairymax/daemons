@@ -513,3 +513,9 @@ if(BUILD_TESTS)
         add_subdirectory(tests)
     endif()
 endif()
+
+# ==================== M1-1b 链接白名单 ====================
+# "认知引擎只对 think_d 暴露服务面"（0.1.9 §2.2）：gateway 系目标禁链
+# coreloopthree/cognition。实际链接经 airy_depgraph --links 校验。
+airy_linkgate_collect(airy_gateway_service "${CMAKE_CURRENT_SOURCE_DIR}/../../link-whitelist.txt")
+airy_linkgate_collect(gateway_d "${CMAKE_CURRENT_SOURCE_DIR}/../../link-whitelist.txt")
