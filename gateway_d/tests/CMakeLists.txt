@@ -23,6 +23,7 @@ set(TEST_SOURCES
     test_protocol_router.c
     test_gateway_hall_store.c
     test_gateway_cap_registry.c
+    test_gateway_pep_cache.c
 )
 
 foreach(TEST_SRC ${TEST_SOURCES})
@@ -55,6 +56,31 @@ foreach(TEST_SRC ${TEST_SOURCES})
         target_include_directories(${TEST_NAME} PRIVATE
             ${CJSON_INCLUDE_DIRS}
         )
+    endif()
+
+    # M2-S5 (0.1.9 §3.2 PEP)：PEP 裁定缓存测试——编译实现源；
+    # gw_svc_call 符号由 airy_gateway_service（含 biz 全部源）提供，
+    # 需 start-group 兜底与 svc_common/airy_syscall 的静态库循环依赖。
+    if(${TEST_NAME} STREQUAL "test_gateway_pep_cache")
+        target_sources(${TEST_NAME} PRIVATE
+            ${GATEWAY_DIR}/src/biz/gateway_pep_cache.c
+        )
+        target_include_directories(${TEST_NAME} PRIVATE
+            ${CJSON_INCLUDE_DIRS}
+        )
+        if(UNIX AND NOT APPLE)
+            target_link_libraries(${TEST_NAME} PRIVATE
+                "-Wl,--start-group"
+                airy_gateway_service
+                airy_syscall
+                "-Wl,--end-group"
+            )
+        else()
+            target_link_libraries(${TEST_NAME} PRIVATE
+                airy_gateway_service
+                airy_syscall
+            )
+        endif()
     endif()
 
     target_include_directories(${TEST_NAME} PRIVATE
