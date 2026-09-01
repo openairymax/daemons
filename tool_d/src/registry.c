@@ -328,6 +328,29 @@ char *tool_registry_list_json(tool_registry_t *reg)
             cJSON_AddStringToObject(obj, "description",
                                     e->meta->description ? e->meta->description : "");
             cJSON_AddNumberToObject(obj, "cacheable", e->meta->cacheable);
+            /* M1-1a 工具目录 SSoT：list_tools 输出每个工具的 inputSchema
+             * （OpenAI tools parameters 格式，从 tool_param_t 构造），
+             * 使 tool_d 成为工具目录唯一权威，gateway MCP 注册从本 RPC 拉取。 */
+            cJSON *schema = cJSON_CreateObject();
+            if (schema) {
+                cJSON_AddStringToObject(schema, "type", "object");
+                cJSON *props = cJSON_CreateObject();
+                cJSON *required = cJSON_CreateArray();
+                for (size_t p = 0; p < e->meta->param_count; p++) {
+                    cJSON *ps = cJSON_Parse(e->meta->params[p].schema);
+                    if (ps)
+                        cJSON_AddItemToObject(props, e->meta->params[p].name, ps);
+                    if (e->meta->params[p].required)
+                        cJSON_AddItemToArray(required,
+                                             cJSON_CreateString(e->meta->params[p].name));
+                }
+                cJSON_AddItemToObject(schema, "properties", props);
+                if (cJSON_GetArraySize(required) > 0)
+                    cJSON_AddItemToObject(schema, "required", required);
+                else
+                    cJSON_Delete(required);
+                cJSON_AddItemToObject(obj, "input_schema", schema);
+            }
             cJSON_AddItemToArray(arr, obj);
         }
     }
