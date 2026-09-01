@@ -73,6 +73,18 @@ void agent_run_gen_session_id(char *out, size_t out_size);
 /* ---- run 引擎主入口（原 gateway handle_agent_run 迁移） ---- */
 
 /**
+ * @brief run_stream 事件推送 sink（M1-1d 协议先行）。
+ *
+ * 引擎在 run_start / plan / tool_start / tool_end / token_delta /
+ * message / run_end / error 节点调用 emit，把结构化事件信封推送出去。
+ * emit 回调不得阻塞（写 socket 失败即丢弃）；ud 为回调上下文。
+ */
+typedef struct {
+    void (*emit)(const char *type, cJSON *data, void *ud);
+    void *ud;
+} agent_run_event_sink_t;
+
+/**
  * @brief 执行一次 agent.run（同步阻塞，事件驱动并发客户端下每请求一线程）。
  *
  * @param prompt       用户输入（非空）
@@ -82,13 +94,15 @@ void agent_run_gen_session_id(char *out, size_t out_size);
  * @param agent_spec   params.agent 对象（可 NULL；存在时走编排分支）
  * @param agent_file   params.agent_file 路径（可 NULL；回退构建 spec）
  * @param session_id   调用方预分配会话 ID（可 NULL；为空则引擎生成）
+ * @param sink         run_stream 事件推送 sink（可 NULL 表示非流式）
  * @param out_result   JSON-RPC result 对象（AIRY_* 成功时非 NULL，调用方
  *                     cJSON_Delete；GCCP 交互轮含 interaction_required 等）
  * @return 0 成功；1 用户取消；非零失败（*out_result 为 NULL）
  */
 int agent_run_execute(const char *prompt, const char *model, const cJSON *history,
                       const char *gccp_answers, const cJSON *agent_spec,
-                      const char *agent_file, const char *session_id, cJSON **out_result);
+                      const char *agent_file, const char *session_id,
+                      const agent_run_event_sink_t *sink, cJSON **out_result);
 
 #ifdef __cplusplus
 }

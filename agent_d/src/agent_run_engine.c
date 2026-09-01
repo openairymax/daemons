@@ -22,6 +22,7 @@
 #include "agent_d_internal.h"
 #include "agent_service.h"
 #include "airy_memory.h"
+#include "airy_run_stream.h"
 #include "atomic_compat.h"
 #include "daemon_rpc_client.h"
 #include "hall_writer.h"
@@ -37,6 +38,35 @@
 #define AGENT_RUN_MODEL_DEFAULT "deepseek-v4-flash"
 #define AGENT_RUN_LLM_MAX_RESP 1048576
 #define AGENT_RUN_SOCK_BUF AIRY_PATH_MAX
+
+/* ---- run_stream 事件信封推送（M1-1d 协议先行） ---- */
+
+/**
+ * @brief 组装 §2.4 v1 事件信封 JSON 并交给 sink->emit。
+ * data 所有权转移给本函数（内部 cJSON_Print 后 Delete），emit 不得阻塞。
+ */
+void agent_run_emit_event(const agent_run_event_sink_t *sink, uint64_t *seq,
+                          const char *session_id, const char *type, cJSON *data)
+{
+    if (!sink || !sink->emit || !type)
+        return;
+    cJSON *env = cJSON_CreateObject();
+    if (!env) {
+        if (data)
+            cJSON_Delete(data);
+        return;
+    }
+    cJSON_AddNumberToObject(env, AIRY_RS_K_V, AIRY_RS_VERSION);
+    cJSON_AddStringToObject(env, AIRY_RS_K_TYPE, type);
+    cJSON_AddNumberToObject(env, AIRY_RS_K_ID, (double)(*seq)++);
+    if (session_id && session_id[0])
+        cJSON_AddStringToObject(env, AIRY_RS_K_SESSION, session_id);
+    cJSON_AddNumberToObject(env, AIRY_RS_K_TS, (double)airy_time_ms());
+    cJSON_AddNumberToObject(env, AIRY_RS_K_EPOCH, 0);
+    if (data)
+        cJSON_AddItemToObject(env, AIRY_RS_K_DATA, data);
+    sink->emit(type, env, sink->ud);
+}
 
 /* 会话注册表（agent.cancel 按 session_id 置位；并发客户端模型需加锁） */
 static agent_run_session_t *g_run_sessions = NULL;
@@ -337,7 +367,8 @@ cJSON *agent_run_spec_from_file(const cJSON *params)
 
 int agent_run_execute(const char *prompt, const char *model, const cJSON *history,
                       const char *gccp_answers, const cJSON *agent_spec,
-                      const char *agent_file, const char *session_id, cJSON **out_result)
+                      const char *agent_file, const char *session_id,
+                      const agent_run_event_sink_t *sink, cJSON **out_result)
 {
     *out_result = NULL;
     if (!prompt || !prompt[0])
@@ -355,7 +386,9 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     if (!active)
         return -1;
 
-    /* run_start 事件（决策链写侧） */
+    uint64_t seq = 0;
+
+    /* run_start 事件（决策链写侧 + run_stream 流式推送） */
     {
         cJSON *evt = cJSON_CreateObject();
         if (evt) {
@@ -365,6 +398,15 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
             cJSON_AddStringToObject(evt, "prompt", pbuf);
             agent_run_record_event(sess, "chain", evt);
             cJSON_Delete(evt);
+        }
+        cJSON *rs = cJSON_CreateObject();
+        if (rs) {
+            char pbuf[520];
+            AIRY_STRNCPY_TERM(pbuf, prompt, sizeof(pbuf));
+            cJSON_AddStringToObject(rs, AIRY_RS_K_PROMPT, pbuf);
+            if (model && model[0])
+                cJSON_AddStringToObject(rs, AIRY_RS_K_MODEL, model);
+            agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_RUN_START, rs);
         }
     }
 
@@ -449,21 +491,35 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
                         cJSON_AddStringToObject(usr, "content", prompt);
                         cJSON_AddItemToArray(messages, usr);
                         AIRY_FREE(plan_str);
-                        run_rc = agent_run_tool_loop(prompt, messages, mname, active, &tool_trace,
-                                                     &final_text, &total_tokens, &total_cost,
-                                                     &reasoning_acc);
+                        /* plan 事件（run_stream 流式推送） */
+                        if (plan) {
+                            char *pstr = cJSON_PrintUnformatted(plan);
+                            if (pstr) {
+                                cJSON *ps = cJSON_CreateObject();
+                                if (ps) {
+                                    char plbuf[2048];
+                                    AIRY_STRNCPY_TERM(plbuf, pstr, sizeof(plbuf));
+                                    cJSON_AddStringToObject(ps, AIRY_RS_K_PLAN, plbuf);
+                                    agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_PLAN, ps);
+                                }
+                                AIRY_FREE(pstr);
+                            }
+                        }
+                        run_rc = agent_run_tool_loop(prompt, messages, mname, active, sink,
+                                                     &tool_trace, &final_text, &total_tokens,
+                                                     &total_cost, &reasoning_acc);
                         cJSON_Delete(messages);
                     }
                 }
             }
         }
         if (run_rc < 0 && !gccp_interact_round && !think_result) {
-            run_rc = agent_run_tool_loop(prompt, history, mname, active, &tool_trace, &final_text,
-                                         &total_tokens, &total_cost, &reasoning_acc);
+            run_rc = agent_run_tool_loop(prompt, history, mname, active, sink, &tool_trace,
+                                         &final_text, &total_tokens, &total_cost, &reasoning_acc);
         } else if (run_rc < 0 && !gccp_interact_round && think_result) {
             /* think_d 可达但无 plan：仍走工具循环（保持既有降级语义） */
-            run_rc = agent_run_tool_loop(prompt, history, mname, active, &tool_trace, &final_text,
-                                         &total_tokens, &total_cost, &reasoning_acc);
+            run_rc = agent_run_tool_loop(prompt, history, mname, active, sink, &tool_trace,
+                                         &final_text, &total_tokens, &total_cost, &reasoning_acc);
         }
     }
 
@@ -570,6 +626,45 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     }
     if (run_rc == 0 && !gccp_interact_round) {
         agent_run_persist(sess, prompt, final_text ? final_text : "");
+    }
+
+    /* run_stream 流式收尾：message（整条最终消息）→ run_end / error */
+    if (sink && sink->emit) {
+        if (run_rc == 0 && !gccp_interact_round && final_text) {
+            cJSON *msg = cJSON_CreateObject();
+            if (msg) {
+                cJSON_AddStringToObject(msg, AIRY_RS_K_ROLE, "assistant");
+                cJSON_AddStringToObject(msg, AIRY_RS_K_CONTENT, final_text);
+                if (reasoning_acc && reasoning_acc[0])
+                    cJSON_AddStringToObject(msg, AIRY_RS_K_REASONING, reasoning_acc);
+                agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_MESSAGE, msg);
+            }
+        }
+        cJSON *rend = cJSON_CreateObject();
+        if (rend) {
+            const char *status = "completed";
+            if (cancelled)
+                status = "cancelled";
+            else if (run_rc != 0)
+                status = "failed";
+            cJSON_AddStringToObject(rend, AIRY_RS_K_STATUS, status);
+            cJSON_AddNumberToObject(rend, AIRY_RS_K_DURATION, (double)airy_time_ms());
+            cJSON_AddNumberToObject(rend, AIRY_RS_K_USE_TICKS, (double)total_tokens);
+            agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_RUN_END, rend);
+        }
+        if (run_rc != 0 && !cancelled) {
+            cJSON *err = cJSON_CreateObject();
+            if (err) {
+                cJSON_AddNumberToObject(err, AIRY_RS_K_CODE, -32603);
+                cJSON_AddStringToObject(err, AIRY_RS_K_MSG,
+                                        final_text && final_text[0] ?
+                                            final_text :
+                                            "agent.run failed: tool loop exhausted or LLM "
+                                            "service error");
+                cJSON_AddBoolToObject(err, AIRY_RS_K_RECOVER, 1);
+                agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_ERROR, err);
+            }
+        }
     }
 
     /* 用户取消：走 -32800 错误语义由上层 RPC 适配（此处以 rc=1 透传） */
