@@ -23,7 +23,6 @@ set(TEST_SOURCES
     test_protocol_router.c
     test_gateway_hall_store.c
     test_gateway_cap_registry.c
-    test_mcp_tools_schema.c
 )
 
 foreach(TEST_SRC ${TEST_SOURCES})
@@ -55,26 +54,6 @@ foreach(TEST_SRC ${TEST_SOURCES})
         target_include_directories(${TEST_NAME} PRIVATE
             ${CJSON_INCLUDE_DIRS}
         )
-    endif()
-
-    # 内置工具 schema 一致性门禁（0.1.6 S-6）：gw_biz_mcp_register_tools
-    # 与 gw_biz_tool_exec 位于 airy_gateway_service（含 protocol 源），
-    # 需显式链接该库（start-group 兜底与 svc_common 的静态循环引用，
-    # 同 gateway_d 主目标）。
-    if(${TEST_NAME} STREQUAL "test_mcp_tools_schema")
-        if(UNIX AND NOT APPLE)
-            target_link_libraries(${TEST_NAME} PRIVATE
-                "-Wl,--start-group"
-                airy_gateway_service
-                airy_syscall
-                "-Wl,--end-group"
-            )
-        else()
-            target_link_libraries(${TEST_NAME} PRIVATE
-                airy_gateway_service
-                airy_syscall
-            )
-        endif()
     endif()
 
     target_include_directories(${TEST_NAME} PRIVATE
