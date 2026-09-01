@@ -14,7 +14,7 @@
  * Code range: -910 to -949 (the original -900 range collided with
  * commons' AIRY_ERR_PROTOCOL; moved to the free -910 range in G2.2).
  *
- * @see commons/utils/error/include/error.h  commons authoritative codes
+ * @see commons/utils/error/error.h  commons authoritative codes
  * @see daemons/common/include/error.h       daemons compat layer (includes this)
  */
 

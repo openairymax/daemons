@@ -137,19 +137,19 @@ target_include_directories(airy_gateway_service PUBLIC
     # Commons 统一基础库
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/platform/include
-    ${COMMONS_INCLUDE_DIR}/utils/error/include
-    ${COMMONS_INCLUDE_DIR}/utils/logging/include
+    ${COMMONS_INCLUDE_DIR}/utils/error
+    ${COMMONS_INCLUDE_DIR}/utils/logging
     # S-2 收敛 (2026-08-14): AIRY_LOG_* 权威宏源（logging.h 统一入口已引用）
-    ${COMMONS_INCLUDE_DIR}/utils/observability/include
-    ${COMMONS_INCLUDE_DIR}/utils/config_unified/include
-    ${COMMONS_INCLUDE_DIR}/utils/memory/include
-    ${COMMONS_INCLUDE_DIR}/utils/string/include
-    ${COMMONS_INCLUDE_DIR}/utils/sync/include
-    ${COMMONS_INCLUDE_DIR}/utils/cache/include
-    ${COMMONS_INCLUDE_DIR}/utils/compat/include
+    ${COMMONS_INCLUDE_DIR}/utils/observability
+    ${COMMONS_INCLUDE_DIR}/utils/config_unified
+    ${COMMONS_INCLUDE_DIR}/utils/memory
+    ${COMMONS_INCLUDE_DIR}/utils/string
+    ${COMMONS_INCLUDE_DIR}/utils/sync
+    ${COMMONS_INCLUDE_DIR}/utils/cache
+    ${COMMONS_INCLUDE_DIR}/utils/compat
     # 网络和IPC模块
-    ${COMMONS_INCLUDE_DIR}/utils/network/include
-    ${COMMONS_INCLUDE_DIR}/utils/ipc/include
+    ${COMMONS_INCLUDE_DIR}/utils/network
+    ${COMMONS_INCLUDE_DIR}/utils/ipc
     # 协议栈
     ${PROTOCOLS_INCLUDE_DIR}
     ${PROTOCOLS_COMMON_INCLUDE_DIR}
@@ -288,14 +288,14 @@ target_include_directories(gateway_lib_obj PUBLIC
     ${COREKERN_INCLUDE_DIR}
     ${CJSON_INCLUDE_DIRS}
     ${COMMONS_DIR}/platform/include
-    ${COMMONS_DIR}/utils/logging/include
+    ${COMMONS_DIR}/utils/logging
     # S-2 收敛 (2026-08-14): AIRY_LOG_* 权威宏源（logging.h 统一入口已引用）
-    ${COMMONS_DIR}/utils/observability/include
-    ${COMMONS_DIR}/utils/error/include
-    ${COMMONS_DIR}/utils/sync/include
-    ${COMMONS_DIR}/utils/compat/include
-    ${COMMONS_DIR}/utils/memory/include
-    ${COMMONS_DIR}/utils/string/include
+    ${COMMONS_DIR}/utils/observability
+    ${COMMONS_DIR}/utils/error
+    ${COMMONS_DIR}/utils/sync
+    ${COMMONS_DIR}/utils/compat
+    ${COMMONS_DIR}/utils/memory
+    ${COMMONS_DIR}/utils/string
      ${COMMONS_DIR}/utils/include
      ${DAEMON_COMMON_INCLUDE_DIR}
      ${DAEMON_COMMON_DIR}/src
@@ -308,7 +308,7 @@ target_include_directories(gateway_lib_obj PUBLIC
      ${PROTOCOLS_DIR}/core/adapter/include
      ${PROTOCOLS_DIR}/core/transformers/include
     # P0.18.2: cJSON 三步曲宏化辅助头文件（cjson_helpers.h）
-    ${COMMONS_DIR}/utils/cjson/include
+    ${COMMONS_DIR}/utils/cjson
     # nghttp2 头文件（HTTP/2 支持）— 项目本地副本 commons/include/third_party/
     ${COMMONS_DIR}/include/third_party
 )
@@ -396,18 +396,18 @@ target_include_directories(gateway_d PRIVATE
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/platform/include
-    ${COMMONS_INCLUDE_DIR}/utils/error/include
-    ${COMMONS_INCLUDE_DIR}/utils/logging/include
+    ${COMMONS_INCLUDE_DIR}/utils/error
+    ${COMMONS_INCLUDE_DIR}/utils/logging
     # S-2 收敛 (2026-08-14): AIRY_LOG_* 权威宏源（logging.h 统一入口已引用）
-    ${COMMONS_INCLUDE_DIR}/utils/observability/include
-    ${COMMONS_INCLUDE_DIR}/utils/config_unified/include
-    ${COMMONS_INCLUDE_DIR}/utils/memory/include
-    ${COMMONS_INCLUDE_DIR}/utils/string/include
-    ${COMMONS_INCLUDE_DIR}/utils/sync/include
-    ${COMMONS_INCLUDE_DIR}/utils/cache/include
-    ${COMMONS_INCLUDE_DIR}/utils/compat/include
-    ${COMMONS_INCLUDE_DIR}/utils/network/include
-    ${COMMONS_INCLUDE_DIR}/utils/ipc/include
+    ${COMMONS_INCLUDE_DIR}/utils/observability
+    ${COMMONS_INCLUDE_DIR}/utils/config_unified
+    ${COMMONS_INCLUDE_DIR}/utils/memory
+    ${COMMONS_INCLUDE_DIR}/utils/string
+    ${COMMONS_INCLUDE_DIR}/utils/sync
+    ${COMMONS_INCLUDE_DIR}/utils/cache
+    ${COMMONS_INCLUDE_DIR}/utils/compat
+    ${COMMONS_INCLUDE_DIR}/utils/network
+    ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${PROTOCOLS_INCLUDE_DIR}
     ${PROTOCOLS_COMMON_INCLUDE_DIR}
     ${PROTOCOLS_MCP_DIR}/include

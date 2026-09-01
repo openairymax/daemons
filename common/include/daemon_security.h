@@ -31,7 +31,7 @@
  * features (signature verification / credential vault / audit logging /
  * input sanitization / ACL) are all really implemented in daemon_security.c.
  *
- * Type definitions reuse the canonical headers under commons/utils/types/include/:
+ * Type definitions reuse the canonical headers under commons/utils/types/:
  * - cupolas_signer_info.h: signer-info structure
  * - cupolas_vault_cred_type.h: credential-type enum
  *

@@ -8,7 +8,7 @@
  * Compat layer for agentrt/commons/utils/cache providing backward
  * compatible APIs. New code should use #include <cache_common.h>.
  *
- * @see agentrt/commons/utils/cache/include/cache_common.h
+ * @see agentrt/commons/utils/cache/cache_common.h
  */
 
 #ifndef SVC_CACHE_H
