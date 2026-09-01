@@ -62,6 +62,10 @@ void on_count_method(cJSON *params, int id, void *user_data);
 void on_health_check_method(cJSON *params, int id, void *user_data);
 void on_get_stats_method(cJSON *params, int id, void *user_data);
 
+/* ---- run 引擎 RPC 适配器（agent_run_rpc.c，M1-1a 引擎下沉） ---- */
+void on_run_method(cJSON *params, int id, void *user_data);
+void on_run_cancel_method(cJSON *params, int id, void *user_data);
+
 #ifdef __cplusplus
 }
 #endif

@@ -240,12 +240,17 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_agent_d, "list", on_list_method, NULL);
     method_dispatcher_register(g_dispatcher_agent_d, "count", on_count_method, NULL);
 
+    /* M1-1a 引擎下沉：agent.run（进程内引擎）/ agent.run_cancel（会话取消）
+     * 由 agent_d 承载，gateway 仅转发（见 gateway_d 转发改造）。 */
+    method_dispatcher_register(g_dispatcher_agent_d, "run", on_run_method, NULL);
+    method_dispatcher_register(g_dispatcher_agent_d, "run_cancel", on_run_cancel_method, NULL);
+
     method_dispatcher_register(g_dispatcher_agent_d, "health_check", on_health_check_method, NULL);
 
     method_dispatcher_register(g_dispatcher_agent_d, "shutdown", on_shutdown_method_agent_d, NULL);
 
     method_dispatcher_register(g_dispatcher_agent_d, "get_stats", on_get_stats_method, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (agent.* namespace)", 9);
+    SVC_LOG_INFO("Registered %d RPC methods (agent.* namespace)", 11);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_agent_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
