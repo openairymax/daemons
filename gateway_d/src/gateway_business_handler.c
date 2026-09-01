@@ -96,9 +96,6 @@ gateway_business_ctx_t *gateway_business_ctx_create(void)
     if (!ctx)
         return NULL;
 
-    airy_mtx_init(&ctx->active_lock);
-    ctx->active_requests = NULL;
-
     /* Each daemon socket: <DAEMON>_SOCK env -> $AIRY_RUNTIME_DIR/<name>.sock ->
      * $AIRY_HOME/run/<name>.sock */
     gw_resolve_daemon_sock(ctx->llm_sock_path, sizeof(ctx->llm_sock_path), "AIRY_LLM_SOCK",
@@ -214,16 +211,6 @@ void gateway_business_ctx_destroy(gateway_business_ctx_t *ctx)
     if (!ctx)
         return;
 
-    airy_mtx_lock(&ctx->active_lock);
-    gw_active_request_t *entry = ctx->active_requests;
-    ctx->active_requests = NULL;
-    airy_mtx_unlock(&ctx->active_lock);
-    while (entry) {
-        gw_active_request_t *next = entry->next;
-        AIRY_FREE(entry);
-        entry = next;
-    }
-    airy_mtx_destroy(&ctx->active_lock);
     gw_sys_svc_dispatch_cleanup();
     AIRY_FREE(ctx);
 }
