@@ -538,14 +538,15 @@ int main(int argc, char *argv[])
 
         gw_mcp_server_t *mcp = gw_proto_router_get_mcp(g_proto_router);
         if (mcp) {
-            /* 内置工具 schema 唯一权威在 gateway_biz_tools.c（S-6 SSoT），
-             * 与 tool_d service_builtin.c 参数定义一致；一致性由
-             * tests/test_mcp_tools_schema.c 门禁。 */
+            /* 内置工具目录唯一权威在 tool_d（registry + list_tools 输出
+             * input_schema），gateway 启动时拉取注册（M1-1a SSoT 收敛）。 */
             int t_failed = gw_biz_mcp_register_tools(mcp, g_biz_ctx);
-            if (t_failed != 0) {
+            if (t_failed < 0) {
+                SVC_LOG_WARN("Phase 2: MCP tool catalog unavailable (tool_d down?)");
+            } else if (t_failed != 0) {
                 SVC_LOG_WARN("Phase 2: %d builtin tool(s) failed to register", t_failed);
             }
-            SVC_LOG_INFO("Phase 2: MCP adapter wired — 9 tools → tool_d");
+            SVC_LOG_INFO("Phase 2: MCP adapter wired — tool catalog from tool_d");
 
             gw_mcp_clients_setup(mcp);
         }
