@@ -3,7 +3,12 @@
 
 /**
  * @file input_validator.h
- * @brief Input-validation framework.
+ * @brief cJSON 规则校验器（validator_* API）——daemons 权威实现。
+ *
+ * 0.1.9 0c 复核澄清：本组件与 commons/utils/security 的 input_validator
+ * （airy_validate_* 字符串/路径/URL 安全校验 API）是**两个不同组件**，
+ * 并非重复实现，故不合并、不迁移。当前仅被 daemons/common/tests 与
+ * tools/tests/unit/daemon/common 的单元测试消费。
  */
 
 #ifndef AIRY_RT_INPUT_VALIDATOR_H
