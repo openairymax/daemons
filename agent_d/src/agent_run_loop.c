@@ -13,6 +13,7 @@
 #include "agent_run_internal.h"
 
 #include "airy_memory.h"
+#include "airy_run_stream.h"
 #include "airy_tool_schema.h"
 #include "daemon_rpc_client.h"
 #include "platform.h"
@@ -25,6 +26,7 @@
 #include <string.h>
 
 #define AGENT_RUN_SOCK_BUF AIRY_PATH_MAX
+#define AGENT_RUN_DELTA_MAX 512
 
 /* 构建 llm_d complete 请求（透传 tools 数组与常规生成参数）。 */
 static char *run_build_llm_params(const char *model, const cJSON *messages)
@@ -190,8 +192,9 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
 }
 
 int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *model,
-                        const agent_run_session_t *session, cJSON **out_trace, char **out_text,
-                        uint64_t *out_tokens, double *out_cost, char **out_reasoning)
+                        const agent_run_session_t *session, const agent_run_event_sink_t *sink,
+                        cJSON **out_trace, char **out_text, uint64_t *out_tokens, double *out_cost,
+                        char **out_reasoning)
 {
     *out_trace = NULL;
     *out_text = NULL;
@@ -226,6 +229,8 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
     uint64_t total_tokens = 0;
     double total_cost = 0.0;
     int rc = -1;
+    uint64_t seq = 0;
+    const char *sess = session ? session->session_id : NULL;
 
     char llm_sock[AGENT_RUN_SOCK_BUF];
     snprintf(llm_sock, sizeof(llm_sock), "%s", airy_runtime_dir_socket("llm.sock"));
@@ -279,6 +284,17 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
             cJSON_AddItemToObject(assistant_msg, "tool_calls", cJSON_Duplicate(tool_calls, 1));
         cJSON_AddItemToArray(messages, assistant_msg);
 
+        /* token_delta 事件（run_stream 流式推送；整块文本一次推送） */
+        if (sink && sink->emit && text && text[0]) {
+            cJSON *td = cJSON_CreateObject();
+            if (td) {
+                char dbuf[AGENT_RUN_DELTA_MAX];
+                AIRY_STRNCPY_TERM(dbuf, text, sizeof(dbuf));
+                cJSON_AddStringToObject(td, AIRY_RS_K_DELTA, dbuf);
+                agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_TOKEN_DELTA, td);
+            }
+        }
+
         if (!tool_calls) {
             final_text = text ? text : AIRY_STRDUP("");
             AIRY_FREE(llm_resp);
@@ -298,8 +314,34 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
             const char *targs = cJSON_IsString(fn_args) ? fn_args->valuestring : "{}";
             const char *tid = cJSON_IsString(tc_id) ? tc_id->valuestring : "";
 
+            /* tool_start 事件（run_stream 流式推送） */
+            if (sink && sink->emit) {
+                cJSON *ts = cJSON_CreateObject();
+                if (ts) {
+                    cJSON_AddStringToObject(ts, AIRY_RS_K_TOOL, tname);
+                    cJSON_AddStringToObject(ts, AIRY_RS_K_TOOL_ID, tid);
+                    char abuf[160];
+                    AIRY_STRNCPY_TERM(abuf, targs, sizeof(abuf));
+                    cJSON_AddStringToObject(ts, AIRY_RS_K_ARGS, abuf);
+                    agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_TOOL_START, ts);
+                }
+            }
+
             char *result_text = NULL;
             int erc = run_execute_tool(tname, targs, &result_text);
+
+            /* tool_end 事件（run_stream 流式推送） */
+            if (sink && sink->emit) {
+                cJSON *te = cJSON_CreateObject();
+                if (te) {
+                    cJSON_AddStringToObject(te, AIRY_RS_K_TOOL_ID, tid);
+                    cJSON_AddStringToObject(te, AIRY_RS_K_STATUS, erc == 0 ? "ok" : "error");
+                    char rbuf[160];
+                    AIRY_STRNCPY_TERM(rbuf, result_text ? result_text : "", sizeof(rbuf));
+                    cJSON_AddStringToObject(te, AIRY_RS_K_RESULT_HASH, rbuf);
+                    agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_TOOL_END, te);
+                }
+            }
 
             cJSON *tool_msg = cJSON_CreateObject();
             cJSON_AddStringToObject(tool_msg, "role", "tool");
