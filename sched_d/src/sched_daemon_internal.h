@@ -34,6 +34,7 @@ void on_get_task_method(cJSON *params, int id, void *user_data);
 void on_cancel_task_method(cJSON *params, int id, void *user_data);
 void on_dag_submit_method(cJSON *params, int id, void *user_data);
 void on_dag_status_method(cJSON *params, int id, void *user_data);
+void on_dag_list_method(cJSON *params, int id, void *user_data);
 void on_dag_cancel_method(cJSON *params, int id, void *user_data);
 void on_get_stats_method(cJSON *params, int id, void *user_data);
 void on_health_check_method(cJSON *params, int id, void *user_data);

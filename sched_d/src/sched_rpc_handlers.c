@@ -5,8 +5,8 @@
  * @file sched_rpc_handlers.c
  * @brief Scheduler daemon - JSON-RPC method handlers domain.
  * @details Implements the sched.* RPC method handlers (agent register/
- *          unregister, task schedule/get/cancel, DAG submit/status/cancel,
- *          stats/health/checkpoint). The on_*_method entry points were
+ *          unregister, task schedule/get/cancel, DAG submit/status/list/
+ *          cancel, stats/health/checkpoint). The on_*_method entry points were
  *          promoted from static when main.c was split by functional domain
  *          (main.c registers them into the method dispatcher; declarations
  *          in sched_daemon_internal.h); the handle_* helpers remain static
@@ -35,6 +35,7 @@ static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_dag_submit(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_dag_status(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_dag_list(int id, airy_sock_t client_fd);
 static void handle_dag_cancel(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_get_stats(int id, airy_sock_t client_fd);
 static void handle_health_check(int id, airy_sock_t client_fd);
@@ -73,6 +74,11 @@ void on_dag_submit_method(cJSON *params, int id, void *user_data)
 void on_dag_status_method(cJSON *params, int id, void *user_data)
 {
     handle_dag_status(params, id, *(airy_sock_t *)user_data);
+}
+
+void on_dag_list_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+{
+    handle_dag_list(id, *(airy_sock_t *)user_data);
 }
 
 void on_dag_cancel_method(cJSON *params, int id, void *user_data)
@@ -337,6 +343,26 @@ static void handle_dag_status(cJSON *params, int id, airy_sock_t client_fd)
     CJSON_PARSE_GUARD(report_json, json_out, {
         AIRY_FREE(json_out);
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid DAG data", id);
+        return;
+    });
+    AIRY_FREE(json_out);
+
+    JSONRPC_SEND_SUCCESS(client_fd, report_json, id);
+    report_json = NULL;
+}
+
+static void handle_dag_list(int id, airy_sock_t client_fd)
+{
+    char *json_out = NULL;
+    int ret = sched_service_list_dags(g_service, &json_out);
+    if (ret != AIRY_SUCCESS || !json_out) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "List DAGs failed", id);
+        return;
+    }
+
+    CJSON_PARSE_GUARD(report_json, json_out, {
+        AIRY_FREE(json_out);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invalid DAG list data", id);
         return;
     });
     AIRY_FREE(json_out);

@@ -5,7 +5,7 @@
  * @file sched_dag_impl.c
  * @brief Scheduler service - blueprint scheduling (DAG) public APIs domain.
  * @details Implements the DAG public APIs in scheduler_service.h
- *          (submit_dag/get_dag/cancel_dag/checkpoint_save). Moved out of the
+ *          (submit_dag/get_dag/list_dags/cancel_dag/checkpoint_save). Moved out of the
  *          original monolithic file by functional domain: the execution
  *          engine (dependency resolution, failure tiers, retry backpressure,
  *          topological convergence) lives in sched_dag_engine.c, the worker
@@ -191,6 +191,53 @@ int sched_service_get_dag(sched_service_t *service, const char *dag_id, char **o
             cJSON_AddItemToArray(nodes, nj);
         }
         cJSON_AddItemToObject(root, "nodes", nodes);
+    }
+    airy_mtx_unlock(&service->lock);
+
+    if (!root)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    *out_json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return *out_json ? AIRY_SUCCESS : AIRY_ERR_OUT_OF_MEMORY;
+}
+
+int sched_service_list_dags(sched_service_t *service, char **out_json)
+{
+    if (!service || !out_json || !service->initialized) {
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    *out_json = NULL;
+
+    static const char *dag_status_names[] = {"active", "completed", "failed", "canceled"};
+
+    airy_mtx_lock(&service->lock);
+    cJSON *root = cJSON_CreateObject();
+    if (root) {
+        cJSON *dags = cJSON_CreateArray();
+        for (size_t i = 0; i < service->dag_count; i++) {
+            sched_dag_t *dag = service->dags[i];
+            cJSON *dj = cJSON_CreateObject();
+            if (!dj)
+                continue;
+            cJSON_AddStringToObject(dj, "dag_id", dag->dag_id);
+            cJSON_AddStringToObject(dj, "name", dag->name ? dag->name : "");
+            cJSON_AddStringToObject(dj, "status",
+                                    dag_status_names[dag->status % SCHED_DAG_STATUS_COUNT]);
+            cJSON_AddNumberToObject(dj, "node_count", (double)dag->node_count);
+            size_t done = 0;
+            for (size_t j = 0; j < dag->node_count; j++) {
+                sched_dag_node_status_t st = dag->nodes[j]->status;
+                if (st == SCHED_DAG_NODE_COMPLETED || st == SCHED_DAG_NODE_FAILED ||
+                    st == SCHED_DAG_NODE_CANCELED)
+                    done++;
+            }
+            cJSON_AddNumberToObject(dj, "progress", (double)done);
+            cJSON_AddNumberToObject(dj, "created_at_ms", (double)dag->created_at_ms);
+            cJSON_AddNumberToObject(dj, "finished_at_ms", (double)dag->finished_at_ms);
+            cJSON_AddItemToArray(dags, dj);
+        }
+        cJSON_AddItemToObject(root, "dags", dags);
+        cJSON_AddNumberToObject(root, "count", (double)service->dag_count);
     }
     airy_mtx_unlock(&service->lock);
 
