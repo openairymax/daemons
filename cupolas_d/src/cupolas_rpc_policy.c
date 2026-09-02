@@ -127,7 +127,7 @@ static void handle_policy_load(cJSON *params, int id, airy_sock_t client_fd)
 
     /* M2-S2 两段式生效（§3.3.1）：load 仅装载入暂存集——不改变运行裁决，
      * epoch 不变；冲突报告针对暂存文档；客户端据报告决定是否 activate。 */
-    int rc = dpolicy_engine_stage_json(g_dpolicy, json);
+    int rc = dpolicy_stage_json(g_dpolicy, json);
     if (rc == -1) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
                            "Policy document is not valid JSON", id);
@@ -141,12 +141,12 @@ static void handle_policy_load(cJSON *params, int id, airy_sock_t client_fd)
 
     dpolicy_conflict_t *conflicts = NULL;
     size_t n = 0;
-    dpolicy_engine_detect_staged_conflicts(g_dpolicy, &conflicts, &n);
+    dpolicy_stage_check(g_dpolicy, &conflicts, &n);
 
     cJSON *result = cJSON_CreateObject();
     cJSON_AddBoolToObject(result, "staged", true);
     cJSON_AddNumberToObject(result, "rule_count",
-                            (double)dpolicy_engine_get_staged_count(g_dpolicy));
+                            (double)dpolicy_staged_count(g_dpolicy));
     cJSON_AddNumberToObject(result, "conflict_count", (double)n);
     cJSON_AddStringToObject(result, "strategy",
                             strategy_str(dpolicy_engine_get_strategy(g_dpolicy)));
@@ -167,7 +167,7 @@ static void handle_policy_load(cJSON *params, int id, airy_sock_t client_fd)
     AIRY_FREE(conflicts);
 
     SVC_LOG_INFO("policy.load: %zu rules staged (activate to apply), %zu conflicts",
-                 dpolicy_engine_get_staged_count(g_dpolicy), n);
+                 dpolicy_staged_count(g_dpolicy), n);
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
@@ -179,7 +179,7 @@ static void handle_policy_activate(cJSON *params, int id, airy_sock_t client_fd)
     const char *desc = get_string_field(params, "description", NULL);
     /* M2-S2：activate = 暂存集提交运行集 + 版本固化 + epoch+1 + 广播
      * （热更新唯一生效点，epoch SSoT 单调推进触发 PEP 缓存失效）。 */
-    int rc = dpolicy_engine_activate(g_dpolicy, desc ? desc : "");
+    int rc = dpolicy_activate(g_dpolicy, desc ? desc : "");
     if (rc == -5) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
                            "No staged policy document (call policy.load first)", id);
@@ -260,9 +260,9 @@ static void handle_policy_status(cJSON *params __attribute__((unused)), int id,
                             (double)dpolicy_engine_get_rule_count(g_dpolicy));
     /* 暂存状态：load 后未 activate 的候选集（不参与运行裁决） */
     cJSON_AddBoolToObject(result, "staged",
-                          dpolicy_engine_has_staged(g_dpolicy) ? true : false);
+                          dpolicy_has_staged(g_dpolicy) ? true : false);
     cJSON_AddNumberToObject(result, "staged_rule_count",
-                            (double)dpolicy_engine_get_staged_count(g_dpolicy));
+                            (double)dpolicy_staged_count(g_dpolicy));
     cJSON_AddStringToObject(result, "strategy",
                             strategy_str(dpolicy_engine_get_strategy(g_dpolicy)));
     cJSON_AddNumberToObject(result, "max_versions", DPOLICY_MAX_VERSIONS);

@@ -57,7 +57,7 @@ struct cupolas_service {
     struct dpolicy_engine_s *dpolicy; /* PDP 动态策略引擎（M2-S2，非拥有） */
 };
 
-void cupolas_service_set_policy_engine(cupolas_service_t *svc, struct dpolicy_engine_s *dpolicy)
+void cupolas_set_dpolicy(cupolas_service_t *svc, struct dpolicy_engine_s *dpolicy)
 {
     if (!svc)
         return;
@@ -105,7 +105,7 @@ int cupolas_service_check_permission(cupolas_service_t *svc,
     dpolicy_engine_t *dp = svc->dpolicy;
     if (dp && dpolicy_engine_get_rule_count(dp) > 0) {
         int matched = 0;
-        dpolicy_effect_t eff = dpolicy_engine_eval_match(dp, params->agent_id, params->action,
+        dpolicy_effect_t eff = dpolicy_eval_match(dp, params->agent_id, params->action,
                                                          params->resource, params->context,
                                                          &matched);
         if (matched) {
