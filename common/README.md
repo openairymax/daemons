@@ -44,7 +44,7 @@ IPC 通信、JSON-RPC 分发、服务发现、安全认证、容错恢复、并�
 | IPC 通信 | `ipc_client` / `ipc_service_bus` / `ipc_bus_helper` / `ipc_backpressure` / `daemon_rpc_client` / `daemon_bootstrap_ipc` | IPC 总线、背压控制、daemon↔daemon 精简 JSON-RPC 客户端、IPC 引导 |
 | 服务发现 | `service_discovery` / `service_discovery_lb` / `service_discovery_api` / `service_discovery_stats` / `service_discovery_backend_shm` / `service_discovery_backend_file` / `service_discovery_helper` / `daemon_bootstrap_sd` | 跨进程注册/发现/负载均衡，shm/file 后端，一键引导 |
 | JSON-RPC | `jsonrpc_helpers` / `method_dispatcher` | JSON-RPC 2.0 辅助（请求解析/响应构建）与方法分发器（注册表模式，O(1) 路由） |
-| 安全 | `svc_auth` / `svc_auth_jwt` / `svc_auth_apikey` / `svc_auth_ratelimit` / `daemon_security` / `validator_cjson` / `param_validator` / `log_sanitizer` | JWT/API Key/限流认证中间件、cupolas 安全集成、输入/参数校验、日志清洗。`validator_cjson` 是 cJSON 规则校验器（`validator_*`），与 commons/utils/security 的 `input_validator`（`airy_validate_*` 字符串/路径安全校验）是两个不同组件 |
+| 安全 | `svc_auth` / `svc_auth_jwt` / `svc_auth_apikey` / `svc_auth_ratelimit` / `daemon_security` / `param_validator` / `log_sanitizer` | JWT/API Key/限流认证中间件、cupolas 安全集成、参数校验、日志清洗（字符串/路径/URL 安全校验权威实现位于 commons/utils/security） |
 | 容错恢复 | `api_recovery` / `alert_manager` | API 恢复策略、智能告警（熔断器 `circuit_breaker` 权威实现已迁 commons/utils/ipc，经 re-export 头接入） |
 | 并发调度 | `airy_event_loop` / `daemon_event_driver` / `daemon_task_dispatcher` | 事件循环、统一事件驱动框架（各 daemon 主循环）、工具并行执行引擎（线程池 `thread_pool` 权威实现已迁 commons/utils/sync） |
 | 平台兼容 | `platform_compat` | daemon 平台扩展实现（socket/dl/线程名/时间等） |
