@@ -1,8 +1,8 @@
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
 # Hook 守护进程构建文件
-# SP04: hook 系统核心（9 个 .c + 7 个 .h）已迁移到 atoms/coreloopthree/src/hook/
-#       和 atoms/coreloopthree/include/。hook_d 退化为仅含 main.c 的薄 daemon 壳，
-#       hook 系统通过 link airy_coreloopthree 获取。
+# M3 (0.1.9 §4.2-2): hook 系统核心已拆独立库 airy_coreloop_hooks。
+# hook_d 只链接口库（registry/executor/interceptor/timeout/handlers），
+# 不再链接整个认知引擎 airy_coreloopthree——消费者减重。
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -64,18 +64,18 @@ target_include_directories(hook_d PRIVATE
 )
 
 # 链接策略：LTO + ASan 下使用 --start-group/--end-group 避免符号扫描遗漏
-# SP04: airy_hook_service 已删除，改为 link airy_coreloopthree（含 hook 系统核心）
+# M3: airy_coreloop_hooks（hook 系统核心）替代 airy_coreloopthree 全量引擎
 if(NOT MSVC AND NOT APPLE)
     target_link_libraries(hook_d PRIVATE
         "-Wl,--start-group"
-        airy_coreloopthree
+        airy_coreloop_hooks
         svc_common
         cupolas
         "-Wl,--end-group"
         Threads::Threads
     )
 else()
-    target_link_libraries(hook_d PRIVATE airy_coreloopthree svc_common cupolas Threads::Threads)
+    target_link_libraries(hook_d PRIVATE airy_coreloop_hooks svc_common cupolas Threads::Threads)
 endif()
 
 if(AIRY_HAS_YAML AND YAML_FOUND AND YAML_LIBRARIES)
