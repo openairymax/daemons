@@ -188,7 +188,7 @@ int plugin_service_list(char ***names, size_t *count, int type_filter);
  *
  * Skill-type plugins expose a JSON-input -> JSON-output execution entry
  * via plugin_execute, matching the airy_sys_skill_execute() contract in
- * the design docs. plugin_d resolves the optional plugin_execute symbol
+ * the design docs. tool_d resolves the optional plugin_execute symbol
  * via dlsym; executing a plugin that does not export it returns
  * AIRY_ERR_NOT_FOUND.
  *
