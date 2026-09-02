@@ -282,40 +282,10 @@ install(TARGETS svc_common
     RUNTIME DESTINATION bin
 )
 
-# 安装兼容层头文件
-install(FILES
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/svc_common.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/platform.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/error.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/svc_logger.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/svc_config.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/svc_cache.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/compat.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/svc_auth.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_security.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/jsonrpc_helpers.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/method_dispatcher.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/param_validator.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/log_sanitizer.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/ipc_service_bus.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/ipc_bus_helper.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/service_discovery.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/service_discovery_helper.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/circuit_breaker.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/unified_metrics.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/alert_manager.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/config_manager.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/api_recovery.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/thread_pool.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_defaults.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_task_dispatcher.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/airy_event_loop.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/ipc_backpressure.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_event_driver.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_cupolas_bootstrap.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_errors.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_platform_ext.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_rpc_client.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/svc_model_defaults.h
-    DESTINATION include/agentrt
-)
+# M0-L5（0.1.9）：不再安装兼容层头文件到 include/agentrt。
+# 实测：include/ 下 33 头多为 IRON-6 迁移后的 re-export 兼容头（内容仅为
+# #include "../../../commons/..." 相对引用，安装位置无法解析——commons 权威头
+# 未随装），daemon 框架自有头亦仅源码树内消费；全仓（agentrt/tools/products）
+# 零消费者使用该安装面。继续安装只会形成误导性的"第二公共 API 面"。
+# 权威 API 头由各库自装（corekern/coreloopthree/commons 等）；daemon 框架对外
+# 安装面设计并入 0d/0.2.x 统一规划。
