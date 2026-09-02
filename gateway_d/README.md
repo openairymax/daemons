@@ -61,9 +61,9 @@ gateway 不采用 `method_dispatcher_register`，而是统一经 `gateway_protoc
 | `tool.*` | `register` `list_tools` `get_tool` `execute_tool` `execute` `list` `health_check` `get_stats` | tool_d |
 | `a2a.*` | `register_agent` `unregister_agent` `discover_agents` `create_task` `update_task` `cancel_task` `get_task` `send_message` `count` `send` `receive` `health_check` `get_stats` | a2a_d |
 | `plugin.*` | `load` `unload` `start` `stop` `execute` `get_metadata` `get_state` `get_stats` `list` `install` `uninstall` `health_check` | tool_d（M4 整编，转发 `plugin_*` 方法） |
-| `info.*` | `system` `history` `health` `health_check` `get_stats` | info_d |
+| `info.*` | `system` `history` `health` `hardware` `health_check` `get_stats` | monit_d（M4 整编，转发 `info_*` 前缀方法；`health_check`/`get_stats` 透传 monit 宿主） |
 | `notify.*` | `publish` `subscribe` `unsubscribe` `list` `health` `health_check` `get_stats` | notify_d |
-| `observe.*` | `record_metric` `query_metrics` `get_metrics` `get_stats` `health_check` | observe_d |
+| `observe.*` | `record_metric` `query_metrics` `get_metrics` `get_stats` `health_check` | monit_d（M4 整编，转发 `observe_*` 前缀方法；`get_stats`/`health_check` 透传 monit 宿主） |
 | `market.*` | `register_agent` `search_agents` `install_agent` `register_skill` `search_skills` `health_check` `publish` `search` `install` `get_stats` | market_d |
 | `hook.*` | `register` `unregister` `trigger` `list` `status` `stats` `health` `ping` `health_check` `get_stats` | hook_d |
 | `sched.*` | `register_agent` `unregister_agent` `schedule_task` `get_task` `cancel` `dag_submit` `dag_status` `dag_cancel` `checkpoint_save` `submit` `query` `get_stats` `health_check` | sched_d |
