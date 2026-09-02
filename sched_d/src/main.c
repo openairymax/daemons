@@ -83,7 +83,7 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    daemon_cupolas_init("sched_d");
+    daemon_cupolas_init_pep("sched_d");
 
     SVC_LOG_INFO("Scheduler service starting, manager=%s", config_path);
 

@@ -368,7 +368,7 @@ int main(int argc, char *argv[])
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    daemon_cupolas_init("channel_d");
+    daemon_cupolas_init_pep("channel_d");
 
     channel_config_t config = CHANNEL_CONFIG_DEFAULTS;
     config.max_channels = max_channels;

@@ -162,7 +162,7 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    daemon_cupolas_init("maths_d");
+    daemon_cupolas_init_pep("maths_d");
 
     if (maths_d_init(&g_service, MATHS_DEFAULT_SOCKET, MATHS_DEFAULT_PORT) != 0)
         return EXIT_FAILURE;

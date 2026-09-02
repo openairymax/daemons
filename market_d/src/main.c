@@ -482,7 +482,7 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    daemon_cupolas_init("market_d");
+    daemon_cupolas_init_pep("market_d");
 
     SVC_LOG_INFO("Market service starting, manager=%s", config_path);
 

@@ -543,7 +543,7 @@ int main(int argc, char *argv[])
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    daemon_cupolas_init("hook_d");
+    daemon_cupolas_init_pep("hook_d");
     g_start_time = (uint64_t)time(NULL);
     SVC_LOG_INFO("hook_d: starting");
 
