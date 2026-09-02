@@ -6,8 +6,8 @@
  * @brief Provider adapter interface definitions.
  */
 
-#ifndef AIRY_RT_LLM_PROVIDER_H
-#define AIRY_RT_LLM_PROVIDER_H
+#ifndef LLM_D_PROVIDERS_PROVIDER_H
+#define LLM_D_PROVIDERS_PROVIDER_H
 
 #include "llm_service.h"
 
@@ -109,4 +109,4 @@ void provider_emit_reasoning_frame(llm_stream_callback_t cb, void *ud, const cha
 }
 #endif
 
-#endif /* AIRY_RT_LLM_PROVIDER_H */
+#endif /* LLM_D_PROVIDERS_PROVIDER_H */
