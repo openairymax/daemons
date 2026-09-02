@@ -105,24 +105,24 @@ daemons/
 
 | # | 守护进程 | 目录 | 职责 | CMake Target |
 |---|----------|------|------|--------------|
-| 1 | **API 网关** | `gateway_d/` | 外部请求接入；协议转换（HTTP / WS / MCP / A2A / OpenAI API）与路由——封装 `gateway` 库 | `gateway_d` |
-| 2 | **LLM 服务** | `llm_d/` | 大语言模型调用、Token 计数、成本追踪、响应缓存 | `llm_d` |
-| 3 | **工具执行** | `tool_d/` | 工具注册 / 发现、沙箱执行、参数校验、结果缓存 | `tool_d` |
-| 4 | **任务调度** | `sched_d/` | 任务分发，4 种调度策略（轮询 / 加权 / 优先级 / ML） | `sched_d` |
-| 5 | **应用市场** | `market_d/` | Agent / Skill / Tool / Template 资源管理、安装、版本控制 | `market_d` |
-| 6 | **监控告警** | `monit_d/` | 指标采集、健康检查、告警管理、Agent 死循环检测 | `monit_d` |
-| 7 | **通道服务** | `channel_d/` | 通信通道管理与消息路由 | `channel_d` |
-| 8 | **信息服务** | `info_d/` | 系统信息查询与状态报告 | `info_d` |
-| 9 | **通知服务** | `notify_d/` | 多渠道通知推送（邮件 / Slack / Discord） | `notify_d` |
-| 10 | **观测服务** | `observe_d/` | OpenTelemetry 可观测性数据采集 | `observe_d` |
-| 11 | **Hook 守护进程** | `hook_d/` | 薄守护进程壳；Hook 系统核心位于 `atoms/coreloopthree/src/hook/`，经 M3（§4.2-2）拆独立库 `airy_coreloop_hooks` 链接获取（不再链整引擎） | `hook_d` |
-| 12 | **Plugin 守护进程** | `plugin_d/` | 插件生命周期管理与隔离 | `plugin_d` |
-| 13 | **记忆守护进程** | `mem_d/` | 运行时记忆管理（`mem.*` 命名空间）：长时记忆的写入 / 检索 / 读取 / 删除，JSONL 持久化 | `mem_d` |
-| 14 | **Agent 执行** | `agent_d/` | Agent 编排（`agent.*` 命名空间）：Agent 子进程 spawn / invoke / 健康检查 | `agent_d` |
-| 15 | **A2A 协议** | `a2a_d/` | Agent 间通信（`a2a.*` 命名空间）：A2A 协议消息交换 | `a2a_d` |
-| 16 | **双思考认知** | `think_d/` | 双思考 / GRAD 批判循环引擎（`think.*` 命名空间）：think.process / think.orchestrate / think.get_stats | `think_d` |
-| 17 | **Cupolas 安全穹顶** | `cupolas_d/` | 独立安全穹顶（`cupolas.*` 命名空间）：权限引擎、输入净化、审计日志、隔离工位 | `cupolas_d` |
-| 18 | **数学外挂计算** | `maths_d/` | 数学表达式求值 / 统计 / 表达式识别（`maths.*` 命名空间）：纯 C 递归下降求值器，零外部依赖，仅沙箱数值求值 | `maths_d` |
+| 1 | **API 网关** | `gateway_d/` | 唯一进程边界——协议翻译（HTTP / WS / SSE / MCP / A2A / OpenAI API ↔ JSON-RPC）与路由；`agent.run_stream` SSE 帧纯翻译（M1-1d 协议先行）；零业务逻辑 | `gateway_d` |
+| 2 | **LLM 服务** | `llm_d/` | LLM 推理服务（`llm.*`）：流式补全、token 计数、成本追踪、响应缓存 | `llm_d` |
+| 3 | **工具执行** | `tool_d/` | 工具注册 / 发现、沙箱执行、参数校验、结果缓存（`tool.*`） | `tool_d` |
+| 4 | **任务调度** | `sched_d/` | 调度域（`sched.*`）：任务 / DAG 图调度 + roadmap 蓝图三级路由（plan/absorb/cancel/replan/stats）+ 4 种调度策略（轮询 / 加权 / 优先级 / ML） | `sched_d` |
+| 5 | **应用市场** | `market_d/` | Agent / Skill / Tool / Template 工件分发、安装、版本控制（`market.*`） | `market_d` |
+| 6 | **监控告警** | `monit_d/` | 可观测域（`monit.*`）：指标采集、健康检查、告警管理、Agent 死循环检测 | `monit_d` |
+| 7 | **通道服务** | `channel_d/` | 数据面应用级通道（`channel.*`）：socket/shm 通道管理与消息路由（`/airy_ch_*`） | `channel_d` |
+| 8 | **信息服务** | `info_d/` | 系统信息查询与状态报告（`info.*`） | `info_d` |
+| 9 | **通知服务** | `notify_d/` | 事件扇出 pub/sub（`notify.*`，topic 语义）：WS / SSE / Unix socket 三协议广播 + 环形事件队列 | `notify_d` |
+| 10 | **观测服务** | `observe_d/` | Prometheus 指标采集与 HTTP `/metrics` 暴露（内置 5 个默认指标） | `observe_d` |
+| 11 | **Hook 守护进程** | `hook_d/` | 薄守护进程壳（`hook.*`）；Hook 系统核心位于 `atoms/coreloopthree/src/hook/`，经 M3（§4.2-2）拆独立库 `airy_coreloop_hooks` 链接获取（不再链整引擎） | `hook_d` |
+| 12 | **Plugin 守护进程** | `plugin_d/` | 插件发现 / manifest 解析 / 权限校验 / 动态库加载与生命周期管理（`plugin.*`） | `plugin_d` |
+| 13 | **记忆守护进程** | `mem_d/` | 持久化记忆服务（`mem.*`）：写入 / 检索 / 读取 / 删除 / recent / evolve，TF-IDF+embedding 混合检索，KB 知识库，JSONL 持久化 | `mem_d` |
+| 14 | **Agent 执行** | `agent_d/` | Agent 本地生命周期 + 执行循环引擎（`agent.*`）：`run` / `run_stream` / `run_cancel`（M1 会话注册表与工具循环下沉）+ `spawn` / `invoke` / `terminate` / `cancel` / `list` / `count` + 健康检查 | `agent_d` |
+| 15 | **A2A 协议** | `a2a_d/` | 跨 Agent 协议（`a2a.*`）：Agent Card 注册 / 发现、A2A 任务状态机、消息投递 | `a2a_d` |
+| 16 | **双思考认知** | `think_d/` | 认知服务面（`think.*`）：`process`（GCCP 两段式交互）/ `orchestrate`（七阶段管线）/ `lang_process`·`lang_postprocess`（M3 语言前置）/ `review` / `get_stats`——认知引擎唯一服务面 | `think_d` |
+| 17 | **Cupolas 安全穹顶** | `cupolas_d/` | 安全 PDP（`cupolas.*` / `policy.*`）：权限引擎 + 策略版本化（policy.load / activate / rollback / status，M2）+ vault / entitlements / netsec + sanitizer / audit | `cupolas_d` |
+| 18 | **数学外挂计算** | `maths_d/` | 数学引擎（`maths.*`）：纯 C 递归下降数值求值 + 可选 Python 符号后端（sympy-mcp / MCP-Mathematics） | `maths_d` |
 
 > **二进制命名规范：** 每个守护进程可执行文件保留 `*_d` 后缀（`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d`）。根据 2026-07-05 改名决策，模块名从 `daemon` 统一为 `daemons`（目录、CMake target `airy_daemons`、仓库 `daemons.git`），但 18 个进程二进制名被刻意保留。
 
