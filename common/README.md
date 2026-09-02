@@ -36,7 +36,7 @@ IPC 通信、JSON-RPC 分发、服务发现、安全认证、容错恢复、并�
 - CMake 包含路径顺序：commons 权威路径声明在 `daemons/common/include` **之前**，确保
   atoms 代码优先解析 commons 版本。
 
-## 组件集（src/ 共 41 个 C 源文件，0.1.9 0c 迁出 circuit_breaker/thread_pool）
+## 组件集（src/ 共 40 个 C 源文件，0.1.9 0c 迁出 circuit_breaker/thread_pool、移除桩件 daemon_oom）
 
 | 域 | 组件 | 说明 |
 |----|------|------|
@@ -51,7 +51,7 @@ IPC 通信、JSON-RPC 分发、服务发现、安全认证、容错恢复、并�
 | 监控指标 | `unified_metrics` | 统一指标采集 |
 | 配置 | `config_manager` / `svc_model_defaults` | 统一配置管理、model.yaml 全局默认模型提取（llm_d/gateway_d 共用） |
 | 引导 | `daemon_cupolas_bootstrap` / `daemon_heapstore_bootstrap` | cupolas 安全穹顶引导、heapstore 运行时数据存储引导 |
-| 其他 | `daemon_oom` / `hall_writer` | OOM 降级回调注册、daemon 侧事件流写端（hall 事件单一真相源） |
+| 其他 | `hall_writer` | daemon 侧事件流写端（hall 事件单一真相源） |
 
 ## JSON-RPC 接口表
 
