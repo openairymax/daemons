@@ -130,7 +130,7 @@ void safety_guard_bridge_destroy(safety_guard_bridge_t *bridge)
 }
 
 /** @brief Get the current timestamp (ms). */
-static uint64_t get_current_time_ms(void)
+static uint64_t mono_now_ms(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -140,9 +140,9 @@ static uint64_t get_current_time_ms(void)
 /**
  * @brief Check whether the rate-limit window needs resetting
  */
-static void rate_limit_window_reset_if_needed(safety_guard_bridge_t *bridge)
+static void rate_window_sync(safety_guard_bridge_t *bridge)
 {
-    uint64_t now = get_current_time_ms();
+    uint64_t now = mono_now_ms();
     if (bridge->rate_limit_window_start == 0) {
         bridge->rate_limit_window_start = now;
         return;
@@ -162,7 +162,7 @@ static void build_safety_event(safety_event_t *event, const tool_metadata_t *met
 {
     __builtin_memset(event, 0, sizeof(*event));
     event->type = SAFETY_EVENT_EXECUTION_START;
-    event->timestamp = get_current_time_ms();
+    event->timestamp = mono_now_ms();
 
     if (meta) {
         snprintf(event->action, sizeof(event->action), "%s", meta->name ? meta->name : "unknown");
@@ -221,7 +221,7 @@ static int bridge_check_impl(safety_guard_bridge_t *bridge, const char *agent_id
 
     if (bridge->config.enable_rate_limit_guard && bridge->config.rate_limit_per_minute > 0) {
         guard_chain_length++;
-        rate_limit_window_reset_if_needed(bridge);
+        rate_window_sync(bridge);
 
         bridge->rate_limit_call_count++;
         if (bridge->rate_limit_call_count > bridge->config.rate_limit_per_minute) {
@@ -415,7 +415,7 @@ int safety_guard_bridge_check_rate_limit(safety_guard_bridge_t *bridge, const ch
         return 0;
     }
 
-    rate_limit_window_reset_if_needed(bridge);
+    rate_window_sync(bridge);
     bridge->rate_limit_call_count++;
 
     if (bridge->rate_limit_call_count > bridge->config.rate_limit_per_minute) {
@@ -484,7 +484,7 @@ int safety_guard_bridge_audit_log(safety_guard_bridge_t *bridge, const char *eve
         __builtin_memset(&result, 0, sizeof(result));
 
         event.type = SAFETY_EVENT_EXECUTION_COMPLETE;
-        event.timestamp = get_current_time_ms();
+        event.timestamp = mono_now_ms();
         snprintf(event.action, sizeof(event.action), "%s", tool_name);
         snprintf(event.subject, sizeof(event.subject), "%s",
                  agent_id ? agent_id : bridge->agent_id);

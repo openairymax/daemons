@@ -30,7 +30,7 @@
 #include <winsock2.h>
 #endif
 
-static void maths_build_error_response(char *resp, size_t resp_sz, int id,
+static void maths_make_error(char *resp, size_t resp_sz, int id,
                                        const char *msg);
 
 /* ==================== 统计引擎 ==================== */
@@ -307,7 +307,7 @@ static int json_get_object(const char *json, const char *key, char *out,
 
 /* 后端响应转发：后端返回 {"id":1,"result":{...}} 或 {"id":1,"error":{...}}，
  * 这里按请求 id 重新构造标准 JSON-RPC 响应。 */
-static void maths_forward_symbolic_response(const char *backend_resp, int id,
+static void maths_fwd_symbolic(const char *backend_resp, int id,
                                             char *response,
                                             size_t response_size)
 {
@@ -322,11 +322,11 @@ static void maths_forward_symbolic_response(const char *backend_resp, int id,
                  "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":%s}", id, obj);
         return;
     }
-    maths_build_error_response(response, response_size, id,
+    maths_make_error(response, response_size, id,
                                "malformed backend response");
 }
 
-static void maths_build_error_response(char *resp, size_t resp_sz, int id,
+static void maths_make_error(char *resp, size_t resp_sz, int id,
                                        const char *msg)
 {
     snprintf(resp, resp_sz,
@@ -408,7 +408,7 @@ int maths_d_dispatch_jsonrpc(maths_d_service_t *svc, const char *request,
     if (strcmp(method, "eval") == 0) {
         char expr[MATHS_MAX_EXPR_LEN] = "";
         if (json_get_string(request, "expr", expr, sizeof(expr)) != 0) {
-            maths_build_error_response(response, response_size, id,
+            maths_make_error(response, response_size, id,
                                        "missing expr");
             return MATHS_METHOD_HANDLED;
         }
@@ -427,7 +427,7 @@ int maths_d_dispatch_jsonrpc(maths_d_service_t *svc, const char *request,
         airy_mtx_unlock(&svc->lock);
 
         if (rc != 0) {
-            maths_build_error_response(response, response_size, id, err);
+            maths_make_error(response, response_size, id, err);
             return MATHS_METHOD_HANDLED;
         }
         snprintf(response, response_size,
@@ -444,7 +444,7 @@ int maths_d_dispatch_jsonrpc(maths_d_service_t *svc, const char *request,
         if (json_get_string(request, "op", op, sizeof(op)) != 0 ||
             json_get_array(request, "values", values, MATHS_MAX_VALUES, &count) != 0 ||
             count == 0) {
-            maths_build_error_response(response, response_size, id,
+            maths_make_error(response, response_size, id,
                                        "invalid stats params (op + values[])");
             return MATHS_METHOD_HANDLED;
         }
@@ -460,7 +460,7 @@ int maths_d_dispatch_jsonrpc(maths_d_service_t *svc, const char *request,
         airy_mtx_unlock(&svc->lock);
 
         if (rc != 0) {
-            maths_build_error_response(response, response_size, id, err);
+            maths_make_error(response, response_size, id, err);
             return MATHS_METHOD_HANDLED;
         }
         snprintf(response, response_size,
@@ -480,7 +480,7 @@ int maths_d_dispatch_jsonrpc(maths_d_service_t *svc, const char *request,
         strcmp(method, "units") == 0 || strcmp(method, "numerical") == 0 ||
         strcmp(method, "finance") == 0 || strcmp(method, "number_theory") == 0) {
         if (!maths_backend_available(&svc->py_backend)) {
-            maths_build_error_response(
+            maths_make_error(
                 response, response_size, id,
                 "math backend unavailable (install maths-toolkit: "
                 "sh install.sh --with-maths)");
@@ -495,7 +495,7 @@ int maths_d_dispatch_jsonrpc(maths_d_service_t *svc, const char *request,
         char resp[16384];
         if (maths_backend_call(&svc->py_backend, method, params, resp,
                                sizeof(resp)) != 0) {
-            maths_build_error_response(response, response_size, id,
+            maths_make_error(response, response_size, id,
                                        "symbolic backend call failed");
             return MATHS_METHOD_HANDLED;
         }
@@ -504,11 +504,11 @@ int maths_d_dispatch_jsonrpc(maths_d_service_t *svc, const char *request,
         svc->symbolic_count++;
         airy_mtx_unlock(&svc->lock);
 
-        maths_forward_symbolic_response(resp, id, response, response_size);
+        maths_fwd_symbolic(resp, id, response, response_size);
         return MATHS_METHOD_HANDLED;
     }
 
-    maths_build_error_response(response, response_size, id, "method not found");
+    maths_make_error(response, response_size, id, "method not found");
     return MATHS_METHOD_HANDLED;
 }
 
