@@ -31,8 +31,9 @@ IPC 通信、JSON-RPC 分发、服务发现、安全认证、容错恢复、并�
   circuit_breaker.h`、`commons/utils/sync/include/thread_pool.h`），兼容头仅
   `#include` 权威版本，使 daemon 源码无需改动包含路径，同时消除编译期
   atoms→daemons 反向依赖（IRON-6 跨层耦合禁令）。
-- 未迁移的头（`platform.h` / `error.h` / `compat.h` 等）仍由本模块 `include/`
-  提供，daemon 自身源码可解析。
+- 其余头（`platform.h` / `compat.h` / `svc_config.h` / `daemon_*` 等）为本模块
+  在源码树内的自有/桥接头，仅 daemon 源码树内消费（M0-L5：全部不随库安装，
+  权威 API 头由各库自装）。
 - CMake 包含路径顺序：commons 权威路径声明在 `daemons/common/include` **之前**，确保
   atoms 代码优先解析 commons 版本。
 
@@ -86,7 +87,9 @@ cmake -B build -DBUILD_TESTS=ON
 cmake --build build --target svc_common
 ```
 
-- 安装：`svc_common` 静态库 → `lib/`；兼容层头文件 → `include/agentrt/`（30+ 个头）。
+- 安装：`svc_common` 静态库 → `lib/`。**不安装兼容层/桥接头（M0-L5，0.1.9）**：
+  `include/` 下头仅源码树内消费，权威 API 头由各库自装（corekern/coreloopthree/
+  commons 等），避免在 `include/agentrt/` 形成误导性的"第二公共 API 面"。
 
 ## 测试
 
