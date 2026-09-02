@@ -2,17 +2,20 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
 /**
- * @file input_validator.h
+ * @file validator_cjson.h
  * @brief cJSON 规则校验器（validator_* API）——daemons 权威实现。
  *
  * 0.1.9 0c 复核澄清：本组件与 commons/utils/security 的 input_validator
  * （airy_validate_* 字符串/路径/URL 安全校验 API）是**两个不同组件**，
- * 并非重复实现，故不合并、不迁移。当前仅被 daemons/common/tests 与
- * tools/tests/unit/daemon/common 的单元测试消费。
+ * 并非重复实现，故不合并、不迁移。当前仅被 daemons/common/tests 消费。
+ *
+ * 0.1.9 M0-L2 更名：原名 input_validator.h 与 commons 权威头同名，且两者
+ * 曾共用 include guard，同一 TU 先后包含时后者被静默跳过。现以独立 guard
+ * 与独立文件名彻底解耦。
  */
 
-#ifndef AIRY_RT_INPUT_VALIDATOR_H
-#define AIRY_RT_INPUT_VALIDATOR_H
+#ifndef AIRY_RT_VALIDATOR_CJSON_H
+#define AIRY_RT_VALIDATOR_CJSON_H
 
 #include <cjson/cJSON.h>
 #include <stdbool.h>
@@ -69,4 +72,4 @@ int security_check_string(const char *input, unsigned int flags, char **out_viol
 }
 #endif
 
-#endif /* AIRY_RT_INPUT_VALIDATOR_H */
+#endif /* AIRY_RT_VALIDATOR_CJSON_H */

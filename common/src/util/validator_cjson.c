@@ -1,14 +1,15 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
-#include "airy_memory.h"
-#include "error.h"
 /**
- * @file input_validator.c
- * @brief Input-validation framework implementation.
+ * @file validator_cjson.c
+ * @brief cJSON 规则校验器实现（validator_* API）。
  */
 
-#include "input_validator.h"
+#include "validator_cjson.h"
+
+#include "airy_memory.h"
+#include "error.h"
 #include "svc_logger.h"
 
 #include <stdio.h>
@@ -20,7 +21,7 @@ validation_result_t *validator_create(void)
 {
     validation_result_t *v = (validation_result_t *)AIRY_CALLOC(1, sizeof(validation_result_t));
     if (!v) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validator_cjson: out of memory");
     }
     v->valid = 1;
     v->rule_count = 0;
@@ -42,10 +43,10 @@ void validator_destroy(validation_result_t *v)
 int validator_add_rule(validation_result_t *validator, const validation_rule_t *rule)
 {
     if (!validator || !rule) {
-        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "input_validator: null input");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "validator_cjson: null input");
     }
     if (validator->rule_count >= MAX_RULES) {
-        AIRY_ERROR(AIRY_ERR_OVERFLOW, "input_validator: input too long");
+        AIRY_ERROR(AIRY_ERR_OVERFLOW, "validator_cjson: too many rules");
     }
 
     validation_rule_t *r = &validator->rules[validator->rule_count];
@@ -57,7 +58,7 @@ int validator_add_rule(validation_result_t *validator, const validation_rule_t *
     if (rule->field_name) {
         r->field_name = AIRY_STRDUP(rule->field_name);
         if (!r->field_name) {
-            AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "input_validator: malloc failed");
+            AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "validator_cjson: field name copy failed");
         }
     }
     r->pattern = rule->pattern;
@@ -71,14 +72,14 @@ int security_check_string(const char *input, unsigned int flags, char **out_viol
     if (!input) {
         if (out_violation)
             *out_violation = AIRY_STRDUP("NULL input");
-        AIRY_ERROR(AIRY_ERR_NULL_POINTER, "input_validator: null pointer");
+        AIRY_ERROR(AIRY_ERR_NULL_POINTER, "validator_cjson: null pointer");
     }
 
     size_t len = strlen(input);
     if (len == 0) {
         if (out_violation)
             *out_violation = AIRY_STRDUP("Empty string");
-        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "input_validator: invalid length");
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "validator_cjson: empty input");
     }
 
     if (flags & 0x01) {
@@ -91,7 +92,7 @@ int security_check_string(const char *input, unsigned int flags, char **out_viol
                     snprintf(err, sizeof(err), "SQL injection pattern: %s", sql_patterns[i]);
                     *out_violation = AIRY_STRDUP(err);
                 }
-                AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "input_validator: contains null byte");
+                AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "validator_cjson: SQL injection pattern");
             }
         }
     }
@@ -101,7 +102,7 @@ int security_check_string(const char *input, unsigned int flags, char **out_viol
             strstr(input, "onload=")) {
             if (out_violation)
                 *out_violation = AIRY_STRDUP("XSS pattern detected");
-            AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "input_validator: contains control chars");
+            AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "validator_cjson: XSS pattern");
         }
     }
 
@@ -111,7 +112,7 @@ int security_check_string(const char *input, unsigned int flags, char **out_viol
             if (c < 0x20 && c != '\t' && c != '\n' && c != '\r') {
                 if (out_violation)
                     *out_violation = AIRY_STRDUP("Control character detected");
-                AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "input_validator: SQL injection pattern");
+                AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "validator_cjson: control character");
             }
         }
     }
@@ -120,7 +121,7 @@ int security_check_string(const char *input, unsigned int flags, char **out_viol
         if (strstr(input, "../") || strstr(input, "..\\") || strstr(input, "%2e%2e")) {
             if (out_violation)
                 *out_violation = AIRY_STRDUP("Path traversal pattern");
-            AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "input_validator: XSS pattern");
+            AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "validator_cjson: path traversal pattern");
         }
     }
 
@@ -144,7 +145,7 @@ static int apply_single_rule(const validation_rule_t *rule, const cJSON *data, c
                     snprintf(*out_error, len, "Missing required field: %s",
                              rule->field_name ? rule->field_name : "?");
             }
-            AIRY_ERROR(AIRY_ERR_NOT_FOUND, "input_validator: string not valid");
+            AIRY_ERROR(AIRY_ERR_NOT_FOUND, "validator_cjson: missing required field");
         }
         break;
 
@@ -235,7 +236,7 @@ static int apply_single_rule(const validation_rule_t *rule, const cJSON *data, c
 validation_result_t *validator_validate(validation_result_t *v, const cJSON *data)
 {
     if (!v) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validator_cjson: null validator");
     }
     if (!data) {
         v->valid = 0;

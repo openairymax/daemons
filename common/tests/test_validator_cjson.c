@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /**
- * @file test_input_validator.c
- * @brief 输入验证器单元测试 (TeamC)
- * 对齐: 新版 input_validator.h API (VALIDATE_STRING+min_len/max_len)
+ * @file test_validator_cjson.c
+ * @brief cJSON 规则校验器（validator_* API）单元测试。
  */
 
-#include "input_validator.h"
+#include "validator_cjson.h"
 
 #include <assert.h>
 #include <stdio.h>
