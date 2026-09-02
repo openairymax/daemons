@@ -79,7 +79,9 @@ static airy_err_t cupolas_bootstrap(const char *daemon_name, int pep_mode)
     }
 
     airy_err_t cupolas_err = AIRY_OK;
-    int rc = cupolas_init(NULL, &cupolas_err);
+    /* M2-S5（0.1.9 §3.2）：pep 最小 guard 不构造本地 permission 引擎
+     * （策略由 PDP cupolas_d 唯一持有），sanitizer/workbench/audit 保留。 */
+    int rc = pep_mode ? cupolas_init_pep(NULL, &cupolas_err) : cupolas_init(NULL, &cupolas_err);
     if (rc != 0) {
         SVC_LOG_ERROR("cupolas_bootstrap: cupolas_init FAILED for daemon='%s' "
                       "(rc=%d, err=%d) — security dome unavailable, "
