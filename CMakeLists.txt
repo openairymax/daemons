@@ -126,10 +126,12 @@ airy_print_info("  - maths_d   : ${CMAKE_CURRENT_SOURCE_DIR}/maths_d (数学外�
 airy_print_info("")
 
 # 安装支持
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/common/include/
-    DESTINATION include/agentrt
-    FILES_MATCHING PATTERN "*.h"
-)
+# M0-L5（0.1.9）：不再批量安装 common/include/* 到 include/agentrt。
+# 该目录为 IRON-6 迁移后的兼容层（纯 re-export 头内容为相对 ../commons 引用，
+# 安装后不可解析）+ daemon 框架源码树内头；全仓（agentrt/tools/products）
+# 零消费者使用该安装面，继续安装只会形成误导性的"第二公共 API 面"。
+# daemon 服务头（下方各 daemon include/）按各自意图保留；daemon 框架对外
+# 统一安装面设计并入 0d/0.2.x（权威头随装 + re-export 退役）。
 
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/gateway_d/include/
     DESTINATION include/agentrt
