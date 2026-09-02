@@ -321,6 +321,19 @@ int sched_service_submit_dag(sched_service_t *service, const char *dag_json, cha
 int sched_service_get_dag(sched_service_t *service, const char *dag_id, char **out_json);
 
 /**
+ * @brief Enumerate all DAGs (lightweight board snapshot: id/name/status/
+ *        progress, no per-node detail).
+ * @param service Service handle
+ * @param out_json Output parameter, returns JSON (AIRY_MALLOC, caller
+ *                 AIRY_FREEs):
+ *   {"dags":[{"dag_id":"...","name":"...","status":"active",
+ *             "node_count":N,"progress":D,"created_at_ms":...,"finished_at_ms":...},
+ *            ...],"count":N}
+ * @return 0 on success; AIRY_ERR_INVALID_PARAM bad args
+ */
+int sched_service_list_dags(sched_service_t *service, char **out_json);
+
+/**
  * @brief Cancel a DAG (all unfinished nodes set to canceled; a RUNNING node
  *        no longer posts output after finishing).
  * @param service Service handle

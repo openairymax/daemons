@@ -187,6 +187,7 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_sched_d, "cancel", on_cancel_task_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "dag_submit", on_dag_submit_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "dag_status", on_dag_status_method, NULL);
+    method_dispatcher_register(g_dispatcher_sched_d, "dag_list", on_dag_list_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "dag_cancel", on_dag_cancel_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "get_stats", on_get_stats_method, NULL);
     method_dispatcher_register(g_dispatcher_sched_d, "health_check", on_health_check_method, NULL);
@@ -201,7 +202,7 @@ int main(int argc, char **argv)
     roadmap_rpc_register(g_dispatcher_sched_d);
 
     method_dispatcher_register(g_dispatcher_sched_d, "shutdown", on_shutdown_method_sched_d, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (sched.* namespace)", 18);
+    SVC_LOG_INFO("Registered %d RPC methods (sched.* namespace)", 19);
 
     /* Inject the task execution callback and start the queue worker thread:
      * after schedule_task enqueues, the worker asynchronously completes

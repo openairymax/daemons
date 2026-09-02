@@ -259,6 +259,88 @@ int test_priority_queue_order(void)
     return 0;
 }
 
+/* 0.1.9 M1-1c：DAG 轻量看板枚举（sched.dag_list 的服务端数据源，
+ * CLI /status 与 TUI board 面板经网关消费）。验证空表、参数守卫、
+ * 提交两图后 count/id/name/status/progress 字段齐备。 */
+int test_dag_list(void)
+{
+    printf("=== test_dag_list ===\n");
+
+    sched_service_t *svc = make_service();
+    if (!svc) {
+        printf("  FAILED: service create\n");
+        return 1;
+    }
+    g_exec_count = 0;
+    g_fail_goal = NULL;
+    g_block = 0;
+
+    if (sched_service_list_dags(NULL, NULL) != AIRY_ERR_INVALID_PARAM) {
+        printf("  FAILED: NULL params accepted\n");
+        sched_service_destroy(svc);
+        return 1;
+    }
+
+    char *json = NULL;
+    if (sched_service_list_dags(svc, &json) != AIRY_SUCCESS || !json) {
+        printf("  FAILED: empty list rc/bad json\n");
+        sched_service_destroy(svc);
+        return 1;
+    }
+    if (!strstr(json, "\"count\":0") || !strstr(json, "\"dags\":[]")) {
+        printf("  FAILED: empty list payload (%s)\n", json);
+        AIRY_FREE(json);
+        sched_service_destroy(svc);
+        return 1;
+    }
+    AIRY_FREE(json);
+
+    char *id1 = NULL, *id2 = NULL;
+    const char *dag1 = "{\"name\":\"l1\",\"nodes\":[{\"id\":\"A\",\"goal\":\"goal-A\"}]}";
+    const char *dag2 = "{\"name\":\"l2\",\"nodes\":["
+                       "{\"id\":\"B\",\"goal\":\"goal-B\"},"
+                       "{\"id\":\"C\",\"goal\":\"goal-C\",\"depends\":[\"B\"]}]}";
+    if (sched_service_submit_dag(svc, dag1, &id1) != AIRY_SUCCESS || !id1 ||
+        sched_service_submit_dag(svc, dag2, &id2) != AIRY_SUCCESS || !id2) {
+        printf("  FAILED: submit_dag\n");
+        AIRY_FREE(id1);
+        AIRY_FREE(id2);
+        sched_service_destroy(svc);
+        return 1;
+    }
+    if (wait_dag_terminal(svc, id1, 5000) != 0 || wait_dag_terminal(svc, id2, 5000) != 0) {
+        printf("  FAILED: dag timeout\n");
+        AIRY_FREE(id1);
+        AIRY_FREE(id2);
+        sched_service_destroy(svc);
+        return 1;
+    }
+
+    if (sched_service_list_dags(svc, &json) != AIRY_SUCCESS || !json) {
+        printf("  FAILED: list rc/bad json\n");
+        AIRY_FREE(id1);
+        AIRY_FREE(id2);
+        sched_service_destroy(svc);
+        return 1;
+    }
+    int ok = strstr(json, "\"count\":2") != NULL && strstr(json, id1) != NULL &&
+             strstr(json, id2) != NULL && strstr(json, "\"name\":\"l1\"") != NULL &&
+             strstr(json, "\"name\":\"l2\"") != NULL &&
+             strstr(json, "\"status\":\"completed\"") != NULL &&
+             strstr(json, "\"progress\":2") != NULL;
+    if (!ok)
+        printf("  FAILED: list payload missing fields (%s)\n", json);
+    AIRY_FREE(json);
+    AIRY_FREE(id1);
+    AIRY_FREE(id2);
+    sched_service_destroy(svc);
+    if (!ok)
+        return 1;
+
+    printf("  PASSED (empty list + 2-dag enumeration)\n\n");
+    return 0;
+}
+
 /* 节点 goal 仅为计划标签（等于节点 id）时，executor 应回退到 DAG 顶层
  * input（原始任务描述），而不是把标签当任务发给 agent。 */
 int test_dag_input_fallback(void)
