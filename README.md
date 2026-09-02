@@ -115,7 +115,7 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 | 8 | **Information Service** | `info_d/` | System information query and status reporting | `info_d` |
 | 9 | **Notification Service** | `notify_d/` | WebSocket / Unix Socket / SSE 三协议事件广播与频道订阅（环形事件队列） | `notify_d` |
 | 10 | **Observability Service** | `observe_d/` | Prometheus 格式指标采集与 HTTP `/metrics` 暴露（内置 5 个默认指标） | `observe_d` |
-| 11 | **Hook Daemon** | `hook_d/` | Thin daemon shell; the hook system core lives in `atoms/coreloopthree/src/hook/` and is obtained by linking `airy_coreloopthree` | `hook_d` |
+| 11 | **Hook Daemon** | `hook_d/` | Thin daemon shell; the hook system core lives in `atoms/coreloopthree/src/hook/`, linked via the split `airy_coreloop_hooks` library (M3 §4.2-2, no longer the full engine) | `hook_d` |
 | 12 | **Plugin Daemon** | `plugin_d/` | Plugin discovery / manifest 解析 / 权限校验 / 动态库加载与生命周期管理 | `plugin_d` |
 | 13 | **Memory Daemon** | `mem_d/` | Runtime memory management (`mem.*` namespace): write / search / get / delete / recent / evolve，TF-IDF+embedding 混合检索，KB 知识库，JSONL 持久化 | `mem_d` |
 | 14 | **Agent Execution** | `agent_d/` | Agent orchestration (`agent.*` namespace): spawn / terminate / invoke / cancel / list / count + 健康检查，空闲回收与性能监控 | `agent_d` |
@@ -189,7 +189,7 @@ svc_common  ←  gateway_d  ←  external clients
 
 | Dependency | Source | Purpose |
 |------------|--------|---------|
-| **atoms** | `agentrt/atoms/` | CoreLoopThree (cognition / execution / memory loops), Syscall entry surface, TaskFlow orchestration, Memory primitives — `hook_d` directly links `airy_coreloopthree`; every daemon dispatches business logic through `atoms/syscall` |
+| **atoms** | `agentrt/atoms/` | CoreLoopThree (cognition / execution / memory loops), Syscall entry surface, TaskFlow orchestration, Memory primitives — `hook_d` links the split `airy_coreloop_hooks` (M3 §4.2-2); every daemon dispatches business logic through `atoms/syscall` |
 | **commons** | `agentrt/commons/` | Logging, config_unified, network, token, cost, observability, cognition, strategy — linked transitively through `svc_common`. The authoritative `svc_common.h` / `ipc_service_bus.h` now live here (`commons/utils/ipc/include/`) per IRON-6 |
 | **cupolas** | `agentrt/cupolas/` | `svc_common` PUBLIC-links Cupolas (`daemon_cupolas_bootstrap.c`), so every daemon automatically inherits Cupolas security — request authentication, input sanitization, audit, sandbox |
 | **protocols** | `agentrt/protocols/` | JSON-RPC 2.0 / AgentsIPC envelope used by the IPC service bus; A2A / MCP adapters used at the gateway boundary |

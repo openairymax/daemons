@@ -14,7 +14,7 @@
  *   - hook.stats  : query a single Hook's stats by name
  *
  * Data source: the hook_registry in atoms/coreloopthree/src/hook/ (linked
- * via airy_coreloopthree).
+ * via airy_coreloop_hooks, M3 0.1.9 §4.2-2).
  * Unix socket path: ${AIRY_RUNTIME_DIR}/hook.sock
  */
 
