@@ -74,7 +74,7 @@ static void test_snapshot_json(void)
 {
     printf("  test_snapshot_json...\n");
     info_snapshot_t s = make_snap(1234);
-    cJSON *o = info_rpc_snapshot_json(&s);
+    cJSON *o = info_rpc_snap_json(&s);
     assert(o != NULL);
     static const char *keys[] = {"timestamp",   "cpu_cores",       "cpu_usage_pct",
                                  "total_memory_kb", "free_memory_kb", "used_memory_kb",
