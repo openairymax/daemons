@@ -5,11 +5,11 @@
  * @file daemon_main.h
  * @brief Daemon main() boilerplate macros and common helpers.
  *
- * P0.18.1: eliminates duplicated boilerplate across the 12 daemon main.c
+ * P0.18.1: eliminates duplicated boilerplate across the daemon main.c
  * files (about 5,956 -> about 1,500 lines).
  *
- * Architecture (P1.23 + daemon_startup.h):
- * - The 12 daemon main() structures are essentially identical:
+ * Architecture (P1.23):
+ * - The daemon main() structures are essentially identical:
  *   init -> create -> run -> cleanup
  * - The only differences: service-create function, method registration
  *   table, service-destroy function

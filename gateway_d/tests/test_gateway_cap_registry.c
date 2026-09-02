@@ -263,6 +263,26 @@ static void test_perm_requirements(void)
     TEST_PASS();
 }
 
+static void test_ns_ownership(void)
+{
+    TEST_BEGIN("namespace exclusive ownership (0.1.9 S5)");
+    /* 全表一致性：命名空间均有归属、FWD 转发目标与归属一致 → 0 */
+    ASSERT_EQ_INT(gw_cap_ns_validate(), 0);
+    /* M4 整编归属：旧命名空间归宿主 daemon 独占 */
+    const gw_cap_t *c = gw_cap_find("plugin.load");
+    ASSERT_TRUE(c && strcmp(c->ns, "tool") == 0);
+    c = gw_cap_find("info.system");
+    ASSERT_TRUE(c && strcmp(c->ns, "monit") == 0);
+    c = gw_cap_find("observe.record_metric");
+    ASSERT_TRUE(c && strcmp(c->ns, "monit") == 0);
+    /* 特殊处理项（网关内）不受 FWD 归属检查约束但须已登记 */
+    c = gw_cap_find("hall.board");
+    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_HALL);
+    c = gw_cap_find("mem.write");
+    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_MEM && strcmp(c->ns, "mem") == 0);
+    TEST_PASS();
+}
+
 int main(void)
 {
     printf("test_gateway_cap_registry: AIRY_HOME isolated to /tmp\n");
@@ -272,6 +292,7 @@ int main(void)
     test_ns_timeout();
     test_contract_version();
     test_perm_requirements();
+    test_ns_ownership();
     test_emit_event();
     printf("test_gateway_cap_registry: %d/%d passed\n", g_tests_passed, g_tests_run);
     return g_tests_passed == g_tests_run ? 0 : 1;
