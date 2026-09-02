@@ -3,7 +3,7 @@
 
 /**
  * @file test_plugin_permission.c
- * @brief plugin_d 权限模块单元测试：manifest 权限到 Cupolas 守卫类型映射与校验。
+ * @brief tool_d 插件域权限模块单元测试：manifest 权限到 Cupolas 守卫类型映射与校验。
  */
 
 #include "plugin_permission.h"
@@ -201,7 +201,7 @@ static void test_list_supported(void)
 
 int main(void)
 {
-    printf("plugin_d permission tests\n");
+    printf("tool_d plugin permission tests\n");
 
     test_map_all_permissions();
     test_map_invalid();

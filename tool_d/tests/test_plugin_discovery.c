@@ -3,7 +3,7 @@
 
 /**
  * @file test_plugin_discovery.c
- * @brief plugin_d 离线扩展校验器单元测试（0.1.6 P1-5）。
+ * @brief tool_d 插件域离线扩展校验器单元测试（0.1.6 P1-5）。
  *
  * 覆盖 plugin_discovery_validate_plugin() 的 fail-closed 校验面：
  * - 合法插件（manifest schema 齐全 + 库文件存在 + 权限非空）通过
