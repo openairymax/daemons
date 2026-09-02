@@ -23,6 +23,7 @@
 
 #include <assert.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -152,6 +153,25 @@ static void t_failclosed(void)
     TEST_PASS("fail_closed");
 }
 
+static void t_epoch_parse(void)
+{
+    /* M2-S4：订阅帧解析（notify_d 广播 message 内层 JSON 未转义） */
+    CHECK(gw_pep_epoch_parse(NULL) == 0);
+    CHECK(gw_pep_epoch_parse("") == 0);
+    /* 非目标 topic：即使含 epoch 键也不解析 */
+    CHECK(gw_pep_epoch_parse("{\"topic\":\"airy.hall\",\"message\":\"{\"epoch\":7}\"}") == 0);
+    /* 目标 topic 广播帧 → 权威 epoch */
+    CHECK(gw_pep_epoch_parse("{\"event\":\"epoch_change\",\"topic\":\"airy.cupolas.epoch\","
+                             "\"message\":\"{\"epoch\":3}\"}") == 3);
+    /* 目标 topic 但缺 epoch 键 → 0 */
+    CHECK(gw_pep_epoch_parse("{\"topic\":\"airy.cupolas.epoch\",\"message\":\"n/a\"}") == 0);
+    /* 大位数（单调推进不截断） */
+    CHECK(gw_pep_epoch_parse("{\"topic\":\"airy.cupolas.epoch\","
+                             "\"message\":\"{\"epoch\":18446744073709551615}\"}") ==
+          UINT64_MAX);
+    TEST_PASS("epoch_parse");
+}
+
 static void t_fallback_acl(void)
 {
     /* PDP 不可达（无 socket 路径）→ 降级本地 ACL */
@@ -237,6 +257,7 @@ int main(void)
 {
     gw_pep_init();
     t_failclosed();
+    t_epoch_parse();
     t_fallback_acl();
 #ifndef _WIN32
     t_cache_hit();
