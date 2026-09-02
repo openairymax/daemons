@@ -34,6 +34,10 @@ set(CUPOLAS_SERVICE_SOURCES
 
 add_library(airy_cupolas_service STATIC ${CUPOLAS_SERVICE_SOURCES})
 
+# M2-S2（0.1.9 §3.2 PDP）：service 层裁决面引入 dpolicy overlay，需
+# dynamic_policy_engine V2 API 声明（引擎实现随 cupolas 库以同宏编译）
+target_compile_definitions(airy_cupolas_service PRIVATE AIRY_ENABLE_V2_API=1)
+
 # 平台特定配置
 if(WIN32)
     target_compile_definitions(airy_cupolas_service PRIVATE

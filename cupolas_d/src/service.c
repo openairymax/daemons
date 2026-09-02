@@ -32,6 +32,7 @@
 #include "cupolas_network_security.h"
 #include "cupolas_vault.h"
 #include "daemon_security.h"
+#include "dynamic_policy_engine.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -53,7 +54,15 @@ struct cupolas_service {
     atomic_uint_fast64_t sanitize_count;
     cupolas_entitlements_t *entitlements;
     char *entitlements_path;
+    struct dpolicy_engine_s *dpolicy; /* PDP 动态策略引擎（M2-S2，非拥有） */
 };
+
+void cupolas_service_set_policy_engine(cupolas_service_t *svc, struct dpolicy_engine_s *dpolicy)
+{
+    if (!svc)
+        return;
+    svc->dpolicy = dpolicy;
+}
 
 cupolas_service_t *cupolas_service_create(const char *config_path)
 {
@@ -89,6 +98,28 @@ int cupolas_service_check_permission(cupolas_service_t *svc,
         return AIRY_ERR_INVALID_PARAM;
 
     atomic_fetch_add_explicit(&svc->permission_checks, 1, memory_order_relaxed);
+
+    /* M2-S2 PDP overlay（0.1.9 §3.2）：已激活的动态策略命中即权威
+     * （含显式 DENY，deny-wins）；未命中回退基础 ACL（下面原链路）。
+     * 空运行集跳过评估：未加载动态策略时行为与既往完全一致（零回归）。 */
+    dpolicy_engine_t *dp = svc->dpolicy;
+    if (dp && dpolicy_engine_get_rule_count(dp) > 0) {
+        int matched = 0;
+        dpolicy_effect_t eff = dpolicy_engine_eval_match(dp, params->agent_id, params->action,
+                                                         params->resource, params->context,
+                                                         &matched);
+        if (matched) {
+            /* CONDITIONAL 求值未启用：执行面按 fail-closed 视为拒绝 */
+            out->allowed = (eff == DPOLICY_EFFECT_ALLOW) ? 1 : 0;
+            out->err = 0;
+            SVC_LOG_INFO("cupolas.check_permission: agent=%s action=%s resource=%s -> %s "
+                         "(dpolicy epoch=%llu)",
+                         params->agent_id, params->action, params->resource,
+                         out->allowed ? "allowed" : "denied",
+                         (unsigned long long)dpolicy_engine_get_epoch(dp));
+            return AIRY_SUCCESS;
+        }
+    }
 
     int ret = cupolas_check_permission(params->agent_id, params->action, params->resource,
                                        params->context);

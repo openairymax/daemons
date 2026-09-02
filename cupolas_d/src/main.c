@@ -214,6 +214,10 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
+    /* M2-S2（0.1.9 §3.2 PDP）：PDP 引擎注入服务层——check_permission
+     * 裁决先经动态策略运行集（命中即权威），未命中回退基础 ACL。 */
+    cupolas_service_set_policy_engine(g_service, g_dpolicy);
+
     airy_sock_t server_fd = daemon_create_server_socket(g_config.use_tcp, g_config.tcp_port,
                                                         g_config.socket_path, g_config.socket_path);
     if (server_fd < 0) {

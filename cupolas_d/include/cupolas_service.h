@@ -35,6 +35,12 @@ extern "C" {
 
 typedef struct cupolas_service cupolas_service_t;
 
+/* PDP 动态策略引擎句柄（前向声明，非拥有引用；main() 装配后注入）。
+ * M2-S2（0.1.9 §3.2 PDP）：注入后 check_permission 裁决先经动态策略
+ * 运行集（命中即权威，含显式 DENY），未命中回退基础 ACL。 */
+struct dpolicy_engine_s;
+void cupolas_service_set_policy_engine(cupolas_service_t *svc, struct dpolicy_engine_s *dpolicy);
+
 
 typedef struct {
     const char *agent_id;
