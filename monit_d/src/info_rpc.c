@@ -177,7 +177,7 @@ cJSON *info_rpc_hist_json(int limit)
     size_t take = g_info_hist_count < (size_t)limit ? g_info_hist_count : (size_t)limit;
     for (size_t i = 0; i < take; i++) {
         size_t idx = (g_info_hist_head + INFO_RPC_HIST_SIZE - take + i) % INFO_RPC_HIST_SIZE;
-        cJSON_AddItemToArray(arr, info_rpc_snapshot_json(&g_info_hist[idx]));
+        cJSON_AddItemToArray(arr, info_rpc_snap_json(&g_info_hist[idx]));
     }
     airy_mtx_unlock(&g_info_lock);
     return arr;
@@ -220,7 +220,7 @@ static void *info_collect_loop(void *arg)
 
 /* ── 响应构建 ──────────────────────────────────────────────────────── */
 
-cJSON *info_rpc_snapshot_json(const info_snapshot_t *snap)
+cJSON *info_rpc_snap_json(const info_snapshot_t *snap)
 {
     cJSON *item = cJSON_CreateObject();
     cJSON_AddNumberToObject(item, "timestamp", (double)snap->timestamp);
@@ -261,7 +261,7 @@ static cJSON *build_sys_json(void)
     cJSON_AddStringToObject(result, "platform", platform_name);
     cJSON_AddStringToObject(result, "hostname", hostname);
     cJSON_AddStringToObject(result, "kernel_version", kernel_release);
-    cJSON_AddItemToObject(result, "system", info_rpc_snapshot_json(&snap));
+    cJSON_AddItemToObject(result, "system", info_rpc_snap_json(&snap));
     return result;
 }
 

@@ -36,7 +36,7 @@
 static plugin_discovery_result_t *g_discovered = NULL;
 static size_t g_discovered_count = 0;
 
-static void plugin_rpc_scan_and_load(void)
+static void prpc_scan_load(void)
 {
     if (plugin_discovery_scan(&g_discovered, &g_discovered_count) != 0) {
         SVC_LOG_WARN("plugin_rpc: discovery scan failed");
@@ -98,7 +98,7 @@ int plugin_rpc_init(void)
     if (plugin_discovery_init(&disc_cfg) != 0)
         SVC_LOG_ERROR("plugin_rpc: plugin discovery init failed");
 
-    plugin_rpc_scan_and_load();
+    prpc_scan_load();
     return 0;
 }
 
@@ -112,8 +112,9 @@ void plugin_rpc_cleanup(void)
 }
 
 /* ── RPC 处理器（自 plugin_d main.c 移植，语义不变） ───────────────── */
-static void plugin_rpc_handle_load(cJSON *params, int id, airy_sock_t client_fd)
+static void prpc_handle_load(cJSON *params, int id, void *user_data)
 {
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *library_path = cJSON_GetObjectItem(params, "library_path");
     cJSON *config_path = cJSON_GetObjectItem(params, "config_path");
     if (!library_path || !cJSON_IsString(library_path)) {
@@ -137,8 +138,9 @@ static void plugin_rpc_handle_load(cJSON *params, int id, airy_sock_t client_fd)
     SVC_LOG_INFO("plugin.load OK: name=%s library=%s", out_name, library_path->valuestring);
 }
 
-static void plugin_rpc_handle_unload(cJSON *params, int id, airy_sock_t client_fd)
+static void prpc_handle_unload(cJSON *params, int id, void *user_data)
 {
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *name = cJSON_GetObjectItem(params, "name");
     if (!name || !cJSON_IsString(name)) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing name string", id);
@@ -155,8 +157,9 @@ static void plugin_rpc_handle_unload(cJSON *params, int id, airy_sock_t client_f
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-static void plugin_rpc_handle_start(cJSON *params, int id, airy_sock_t client_fd)
+static void prpc_handle_start(cJSON *params, int id, void *user_data)
 {
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *name = cJSON_GetObjectItem(params, "name");
     if (!name || !cJSON_IsString(name)) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing name string", id);
@@ -172,8 +175,9 @@ static void plugin_rpc_handle_start(cJSON *params, int id, airy_sock_t client_fd
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-static void plugin_rpc_handle_stop(cJSON *params, int id, airy_sock_t client_fd)
+static void prpc_handle_stop(cJSON *params, int id, void *user_data)
 {
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *name = cJSON_GetObjectItem(params, "name");
     if (!name || !cJSON_IsString(name)) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing name string", id);
@@ -189,8 +193,9 @@ static void plugin_rpc_handle_stop(cJSON *params, int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-static void plugin_rpc_handle_execute(cJSON *params, int id, airy_sock_t client_fd)
+static void prpc_handle_exec(cJSON *params, int id, void *user_data)
 {
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *name = cJSON_GetObjectItem(params, "name");
     cJSON *input = cJSON_GetObjectItem(params, "input");
     if (!name || !cJSON_IsString(name) || !input || !cJSON_IsString(input)) {
@@ -209,8 +214,9 @@ static void plugin_rpc_handle_execute(cJSON *params, int id, airy_sock_t client_
     AIRY_FREE(output);
 }
 
-static void plugin_rpc_handle_get_metadata(cJSON *params, int id, airy_sock_t client_fd)
+static void prpc_handle_metadata(cJSON *params, int id, void *user_data)
 {
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *name = cJSON_GetObjectItem(params, "name");
     if (!name || !cJSON_IsString(name)) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing name string", id);
@@ -233,8 +239,9 @@ static void plugin_rpc_handle_get_metadata(cJSON *params, int id, airy_sock_t cl
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-static void plugin_rpc_handle_get_state(cJSON *params, int id, airy_sock_t client_fd)
+static void prpc_handle_state(cJSON *params, int id, void *user_data)
 {
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *name = cJSON_GetObjectItem(params, "name");
     if (!name || !cJSON_IsString(name)) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing name string", id);
@@ -245,8 +252,9 @@ static void plugin_rpc_handle_get_state(cJSON *params, int id, airy_sock_t clien
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-static void plugin_rpc_handle_get_stats(cJSON *params, int id, airy_sock_t client_fd)
+static void prpc_handle_stats(cJSON *params, int id, void *user_data)
 {
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *name = cJSON_GetObjectItem(params, "name");
     if (!name || !cJSON_IsString(name)) {
         size_t count = 0;
@@ -278,8 +286,9 @@ static void plugin_rpc_handle_get_stats(cJSON *params, int id, airy_sock_t clien
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-static void plugin_rpc_handle_list(cJSON *params, int id, airy_sock_t client_fd)
+static void prpc_handle_list(cJSON *params, int id, void *user_data)
 {
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *type_filter = cJSON_GetObjectItem(params, "type_filter");
     int filter = type_filter && cJSON_IsNumber(type_filter) ? type_filter->valueint : -1;
     char **names = NULL;
@@ -304,8 +313,10 @@ static void plugin_rpc_handle_list(cJSON *params, int id, airy_sock_t client_fd)
     }
 }
 
-static void plugin_rpc_handle_health_check(int id, airy_sock_t client_fd)
+static void prpc_handle_health(cJSON *params, int id, void *user_data)
 {
+    airy_sock_t client_fd = *(airy_sock_t *)user_data;
+    (void)params;
     bool healthy = true;
     size_t plugin_count = 0;
     char **names = NULL;
@@ -324,28 +335,6 @@ static void plugin_rpc_handle_health_check(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-#define PLUGIN_DECLARE(name, fn)                                                              \
-    static void plugin_##name##_method(cJSON *params, int id, void *user_data)               \
-    {                                                                                         \
-        fn(params, id, *(airy_sock_t *)user_data);                                            \
-    }
-
-PLUGIN_DECLARE(load, plugin_rpc_handle_load)
-PLUGIN_DECLARE(unload, plugin_rpc_handle_unload)
-PLUGIN_DECLARE(start, plugin_rpc_handle_start)
-PLUGIN_DECLARE(stop, plugin_rpc_handle_stop)
-PLUGIN_DECLARE(execute, plugin_rpc_handle_execute)
-PLUGIN_DECLARE(get_metadata, plugin_rpc_handle_get_metadata)
-PLUGIN_DECLARE(get_state, plugin_rpc_handle_get_state)
-PLUGIN_DECLARE(get_stats, plugin_rpc_handle_get_stats)
-PLUGIN_DECLARE(list, plugin_rpc_handle_list)
-
-static void plugin_health_check_method(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    plugin_rpc_handle_health_check(id, *(airy_sock_t *)user_data);
-}
-
 void plugin_rpc_register(void *disp)
 {
     method_dispatcher_t *d = (method_dispatcher_t *)disp;
@@ -353,19 +342,19 @@ void plugin_rpc_register(void *disp)
         return;
     /* plugin_* 前缀登记：与 tool.execute/list 等既有方法名区分，避免
      * 覆盖 tool 语义（tool.execute=工具执行，plugin_execute=插件执行）。 */
-    method_dispatcher_register(d, "plugin_load", plugin_load_method, NULL);
-    method_dispatcher_register(d, "plugin_unload", plugin_unload_method, NULL);
-    method_dispatcher_register(d, "plugin_start", plugin_start_method, NULL);
-    method_dispatcher_register(d, "plugin_stop", plugin_stop_method, NULL);
-    method_dispatcher_register(d, "plugin_execute", plugin_execute_method, NULL);
-    method_dispatcher_register(d, "plugin_get_metadata", plugin_get_metadata_method, NULL);
-    method_dispatcher_register(d, "plugin_get_state", plugin_get_state_method, NULL);
-    method_dispatcher_register(d, "plugin_get_stats", plugin_get_stats_method, NULL);
-    method_dispatcher_register(d, "plugin_list", plugin_list_method, NULL);
+    method_dispatcher_register(d, "plugin_load", prpc_handle_load, NULL);
+    method_dispatcher_register(d, "plugin_unload", prpc_handle_unload, NULL);
+    method_dispatcher_register(d, "plugin_start", prpc_handle_start, NULL);
+    method_dispatcher_register(d, "plugin_stop", prpc_handle_stop, NULL);
+    method_dispatcher_register(d, "plugin_execute", prpc_handle_exec, NULL);
+    method_dispatcher_register(d, "plugin_get_metadata", prpc_handle_metadata, NULL);
+    method_dispatcher_register(d, "plugin_get_state", prpc_handle_state, NULL);
+    method_dispatcher_register(d, "plugin_get_stats", prpc_handle_stats, NULL);
+    method_dispatcher_register(d, "plugin_list", prpc_handle_list, NULL);
     /* L2 协议标准方法 + 别名（plugin.install / uninstall / health_check） */
-    method_dispatcher_register(d, "plugin_install", plugin_load_method, NULL);
-    method_dispatcher_register(d, "plugin_uninstall", plugin_unload_method, NULL);
-    method_dispatcher_register(d, "plugin_health_check", plugin_health_check_method, NULL);
+    method_dispatcher_register(d, "plugin_install", prpc_handle_load, NULL);
+    method_dispatcher_register(d, "plugin_uninstall", prpc_handle_unload, NULL);
+    method_dispatcher_register(d, "plugin_health_check", prpc_handle_health, NULL);
     SVC_LOG_INFO("plugin_rpc: registered plugin.* methods on tool_d dispatcher "
                  "(plugin_load/unload/start/stop/execute/metadata/state/stats/list/"
                  "install/uninstall/health_check)");

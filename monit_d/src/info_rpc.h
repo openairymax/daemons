@@ -60,7 +60,7 @@ void info_rpc_hist_add(const info_snapshot_t *snap);
 cJSON *info_rpc_hist_json(int limit);
 
 /* 由快照构建 JSON 对象（system/history 响应共用）。 */
-cJSON *info_rpc_snapshot_json(const info_snapshot_t *snap);
+cJSON *info_rpc_snap_json(const info_snapshot_t *snap);
 
 #ifdef __cplusplus
 }
