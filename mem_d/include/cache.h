@@ -85,7 +85,7 @@ int mem_cache_get(mem_cache_t *cache, const char *text, const char *model_id,
  */
 int mem_cache_del(mem_cache_t *cache, const char *cache_id, int *out_deleted);
 
-/** @brief 缓存统计（命中率供 observe_d 聚合）。 */
+/** @brief 缓存统计（命中率供 monit_d observe 模块聚合）。 */
 void mem_cache_stats(mem_cache_t *cache, mem_cache_stats_t *out);
 
 #ifdef __cplusplus
