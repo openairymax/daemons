@@ -18,8 +18,11 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== Hook daemon 可执行文件 ====================
-# SP04: hook 系统核心（hook_registry/executor/interceptor/timeout/handlers）
-# 已迁移到 atoms/coreloopthree/src/hook/，通过 link airy_coreloopthree 获取。
+# M3 (0.1.9 §4.2-2): hook 系统核心已拆独立库 airy_coreloop_hooks
+# （registry/executor/interceptor/timeout/handlers，源码位于
+# atoms/coreloopthree/src/hook/，target 定义见 coreloopthree/CMakeLists.txt）。
+# hook_d 仅链接口库 airy_coreloop_hooks，不再链接整个认知引擎
+# airy_coreloopthree——消费者减重（link-whitelist L39 登记）。
 # hook_d 仅保留 main.c（daemon 进程入口：socket + SD + IPC + cupolas 守护进程生命周期）。
 add_executable(hook_d
     src/main.c
