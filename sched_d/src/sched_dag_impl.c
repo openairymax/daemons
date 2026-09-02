@@ -201,7 +201,7 @@ int sched_service_get_dag(sched_service_t *service, const char *dag_id, char **o
     return *out_json ? AIRY_SUCCESS : AIRY_ERR_OUT_OF_MEMORY;
 }
 
-int sched_service_list_dags(sched_service_t *service, char **out_json)
+int sched_dag_list_json(sched_service_t *service, char **out_json)
 {
     if (!service || !out_json || !service->initialized) {
         return AIRY_ERR_INVALID_PARAM;
