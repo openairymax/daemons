@@ -105,24 +105,24 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 
 | # | Daemon | Directory | Responsibility | CMake Target |
 |---|--------|-----------|----------------|--------------|
-| 1 | **API Gateway** | `gateway_d/` | External request intake; protocol conversion (HTTP / WS / MCP / A2A / OpenAI API) and routing — wraps the `gateway` library | `gateway_d` |
-| 2 | **LLM Service** | `llm_d/` | Large-language-model invocation, token counting, cost tracking, response caching | `llm_d` |
-| 3 | **Tool Execution** | `tool_d/` | Tool registration / discovery, sandboxed execution, parameter validation, result caching | `tool_d` |
-| 4 | **Task Scheduler** | `sched_d/` | Task dispatch with 4 scheduling strategies (round-robin / weighted / priority / ML) | `sched_d` |
-| 5 | **Application Marketplace** | `market_d/` | Agent / Skill / Tool / Template resource management, install, versioning | `market_d` |
-| 6 | **Monitoring & Alerting** | `monit_d/` | Metric collection, health checks, alert management, agent-infinite-loop detection | `monit_d` |
-| 7 | **Channel Service** | `channel_d/` | Communication-channel management and message routing | `channel_d` |
-| 8 | **Information Service** | `info_d/` | System information query and status reporting | `info_d` |
-| 9 | **Notification Service** | `notify_d/` | WebSocket / Unix Socket / SSE 三协议事件广播与频道订阅（环形事件队列） | `notify_d` |
-| 10 | **Observability Service** | `observe_d/` | Prometheus 格式指标采集与 HTTP `/metrics` 暴露（内置 5 个默认指标） | `observe_d` |
-| 11 | **Hook Daemon** | `hook_d/` | Thin daemon shell; the hook system core lives in `atoms/coreloopthree/src/hook/`, linked via the split `airy_coreloop_hooks` library (M3 §4.2-2, no longer the full engine) | `hook_d` |
-| 12 | **Plugin Daemon** | `plugin_d/` | Plugin discovery / manifest 解析 / 权限校验 / 动态库加载与生命周期管理 | `plugin_d` |
-| 13 | **Memory Daemon** | `mem_d/` | Runtime memory management (`mem.*` namespace): write / search / get / delete / recent / evolve，TF-IDF+embedding 混合检索，KB 知识库，JSONL 持久化 | `mem_d` |
-| 14 | **Agent Execution** | `agent_d/` | Agent orchestration (`agent.*` namespace): spawn / terminate / invoke / cancel / list / count + 健康检查，空闲回收与性能监控 | `agent_d` |
-| 15 | **A2A Protocol** | `a2a_d/` | Agent-to-Agent communication (`a2a.*` namespace): A2A 协议 agent 注册/发现/任务生命周期/消息交换 | `a2a_d` |
-| 16 | **Dual-Think Cognition** | `think_d/` | Dual-think / GRAD critical-loop engine (`think.*` namespace): think.process（GCCP 两段式交互）/ think.orchestrate（7 阶段管线）/ think.get_stats | `think_d` |
-| 17 | **Cupolas Security Dome** | `cupolas_d/` | Standalone security dome (`cupolas.*` namespace): permission engine, sanitizer, audit logger, vault, net 策略, entitlements | `cupolas_d` |
-| 18 | **Mathematics Coprocessor** | `maths_d/` | Math-expression evaluation / statistics / recognition (`maths.*` namespace): 纯 C 快速路径 + Python 符号后端（MCP-Mathematics + sympy-mcp，12 个转发方法） | `maths_d` |
+| 1 | **API Gateway** | `gateway_d/` | Sole process boundary — protocol translation (HTTP / WS / SSE / MCP / A2A / OpenAI API ↔ JSON-RPC) and routing; `agent.run_stream` translated to SSE frames only (M1-1d); zero business logic | `gateway_d` |
+| 2 | **LLM Service** | `llm_d/` | LLM inference service (`llm.*`): streaming completion, token counting, cost tracking, response caching | `llm_d` |
+| 3 | **Tool Execution** | `tool_d/` | Tool registration / discovery, sandboxed execution, parameter validation, result caching (`tool.*`) | `tool_d` |
+| 4 | **Task Scheduler** | `sched_d/` | Scheduling domain (`sched.*`): task / DAG graph scheduling + roadmap 3-tier blueprint routing (plan/absorb/cancel/replan/stats) + 4 scheduling strategies (round-robin / weighted / priority / ML) | `sched_d` |
+| 5 | **Application Marketplace** | `market_d/` | Agent / Skill / Tool / Template artifact distribution, install, versioning (`market.*`) | `market_d` |
+| 6 | **Monitoring & Alerting** | `monit_d/` | Observability domain (`monit.*`): metric collection, health checks, alert management, agent-infinite-loop detection | `monit_d` |
+| 7 | **Channel Service** | `channel_d/` | Data-plane application channel (`channel.*`): socket/shm channel management and message routing (`/airy_ch_*`) | `channel_d` |
+| 8 | **Information Service** | `info_d/` | System information query and status reporting (`info.*`) | `info_d` |
+| 9 | **Notification Service** | `notify_d/` | Event fan-out pub/sub (`notify.*`, topic semantics): broadcast over WS / SSE / Unix socket with a ring event queue | `notify_d` |
+| 10 | **Observability Service** | `observe_d/` | Prometheus metric collection and HTTP `/metrics` exposure (5 built-in default metrics) | `observe_d` |
+| 11 | **Hook Daemon** | `hook_d/` | Thin daemon shell (`hook.*`); the hook system core lives in `atoms/coreloopthree/src/hook/`, linked via the split `airy_coreloop_hooks` library (M3 §4.2-2, no longer the full engine) | `hook_d` |
+| 12 | **Plugin Daemon** | `plugin_d/` | Plugin discovery / manifest parsing / permission checks / dynamic-load and lifecycle management (`plugin.*`) | `plugin_d` |
+| 13 | **Memory Daemon** | `mem_d/` | Persistent memory service (`mem.*`): write / search / get / delete / recent / evolve, TF-IDF+embedding hybrid retrieval, KB knowledge base, JSONL persistence | `mem_d` |
+| 14 | **Agent Execution** | `agent_d/` | Agent local lifecycle + execution-loop engine (`agent.*`): `run` / `run_stream` / `run_cancel` (M1 session registry + tool loop) + `spawn` / `invoke` / `terminate` / `cancel` / `list` / `count` + health check | `agent_d` |
+| 15 | **A2A Protocol** | `a2a_d/` | Cross-agent protocol (`a2a.*`): Agent Card registration / discovery, A2A task state machine, message delivery | `a2a_d` |
+| 16 | **Dual-Think Cognition** | `think_d/` | Cognition service face (`think.*`): `process` (two-pass GCCP) / `orchestrate` (7-stage pipeline) / `lang_process`·`lang_postprocess` (M3 language front-end) / `review` / `get_stats` — sole service face of the cognition engine | `think_d` |
+| 17 | **Cupolas Security Dome** | `cupolas_d/` | Security PDP (`cupolas.*` / `policy.*`): permission engine + policy versioning (policy.load / activate / rollback / status, M2) + vault / entitlements / netsec + sanitizer / audit | `cupolas_d` |
+| 18 | **Mathematics Coprocessor** | `maths_d/` | Mathematics engine (`maths.*`): pure-C recursive-descent numeric evaluation + optional Python symbolic backend (sympy-mcp / MCP-Mathematics) | `maths_d` |
 
 > **Binary naming convention:** every daemon executable keeps the `*_d` suffix (`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d`). Per the 2026-07-05 naming decision, the module name was unified from `daemon` → `daemons` (directory, CMake target `airy_daemons`, repo `daemons.git`), but the 18 process binary names were deliberately preserved.
 
