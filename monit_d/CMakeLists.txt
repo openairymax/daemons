@@ -40,6 +40,8 @@ set(MONIT_SERVICE_SOURCES
     src/tracing.c
     src/alert.c
     src/monit_svc_adapter.c
+    src/observe_rpc.c
+    src/info_rpc.c
 )
 
 add_library(airy_monit_service STATIC ${MONIT_SERVICE_SOURCES})

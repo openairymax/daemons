@@ -9,9 +9,11 @@
  */
 
 #include "daemon_main.h"
-#include "platform.h"
+#include "info_rpc.h"
 #include "monitor_service.h"
+#include "observe_rpc.h"
 #include "param_validator.h"
+#include "platform.h"
 #include "prometheus_exporter.h"
 #include "svc_logger.h"
 #include "thread_pool.h"
@@ -449,8 +451,8 @@ static void handle_client(airy_sock_t client_fd)
 
     char *http_response = NULL;
     size_t http_response_len = 0;
-    if (prometheus_exporter_handle_http(buffer, (size_t)n, &http_response, &http_response_len) ==
-        0) {
+    /* /metrics 融合导出：动态指标表 + user-managed 指标（内部含 prometheus_exporter 通路） */
+    if (obs_rpc_handle_http(buffer, (size_t)n, &http_response, &http_response_len) == 0) {
         airy_sock_send(client_fd, http_response, http_response_len);
         AIRY_FREE(http_response);
         airy_sock_close(client_fd);
@@ -476,9 +478,8 @@ static void handle_client(airy_sock_t client_fd)
         return;
     }
 
-    int req_id = cJSON_IsNumber(id) ? id->valueint : 0;
-
-    SVC_LOG_DEBUG("Processing request: method=%s, id=%d", method->valuestring, req_id);
+    SVC_LOG_DEBUG("Processing request: method=%s, id=%d", method->valuestring,
+                  cJSON_IsNumber(id) ? id->valueint : 0);
 
     method_dispatcher_dispatch(g_dispatcher_monit_d, req, jsonrpc_build_error, &client_fd);
 
@@ -487,6 +488,8 @@ static void handle_client(airy_sock_t client_fd)
 
 static void destroy_service(void)
 {
+    observe_rpc_cleanup();
+    info_rpc_cleanup();
     prometheus_exporter_shutdown();
     if (g_service) {
         monitor_service_destroy(g_service);
@@ -549,6 +552,16 @@ int main(int argc, char **argv)
         SVC_LOG_ERROR("C-L10: Failed to initialize Prometheus exporter");
     }
 
+    /* M4 整编：observe/info 作为 monit_d 内建模块初始化（失败仅降级，不阻断启动） */
+    if (observe_rpc_init() != AIRY_SUCCESS) {
+        SVC_LOG_ERROR("observe module init failed, observe_* methods unavailable");
+    }
+    if (info_rpc_init() != AIRY_SUCCESS) {
+        SVC_LOG_ERROR("info module init failed, info_* methods unavailable");
+    } else if (info_rpc_start() != AIRY_SUCCESS) {
+        SVC_LOG_WARN("info collector thread not started, info history will be stale");
+    }
+
     airy_sock_t server_fd =
         daemon_create_server_socket(use_tcp, DEFAULT_TCP_PORT, DEFAULT_SOCKET_PATH_UNIX,
                                     DEFAULT_SOCKET_PATH_WIN);
@@ -608,7 +621,9 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_monit_d, "shutdown", on_shutdown_method_monit_d, NULL);
 
     method_dispatcher_register(g_dispatcher_monit_d, "get_stats", on_get_stats_method, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (monit.* namespace)", 12);
+    observe_rpc_register(g_dispatcher_monit_d);
+    info_rpc_register(g_dispatcher_monit_d);
+    SVC_LOG_INFO("Registered %d RPC methods (monit.* namespace)", 19);
 
     daemon_event_driver_add_timer(g_event_driver_monit_d, 30000, monit_on_metrics_timer, NULL);
     SVC_LOG_INFO("C-L10: Metrics report timer registered (30s interval)");
