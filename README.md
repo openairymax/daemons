@@ -88,7 +88,7 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 
 | Category | Components |
 |----------|-----------|
-| **Service framework** | `svc_common.c`, `svc_auth.c`, `svc_cache.h`, `svc_config.h`, `svc_logger.h`, `service_discovery.c`, `service_discovery_helper.c`, `daemon_bootstrap_ipc.c`, `daemon_bootstrap_sd.c`, `daemon_cupolas_bootstrap.c`, `daemon_startup.h`, `daemon_event_driver.c`, `daemon_task_dispatcher.c` |
+| **Service framework** | `svc_common.c`, `svc_auth.c`, `svc_cache.h`, `svc_config.h`, `svc_logger.h`, `service_discovery.c`, `service_discovery_helper.c`, `daemon_bootstrap_ipc.c`, `daemon_bootstrap_sd.c`, `daemon_cupolas_bootstrap.c`, `daemon_event_driver.c`, `daemon_task_dispatcher.c` |
 | **Resilience & safety** | `circuit_breaker.c`, `api_recovery.c`, `daemon_degradation.c`, `daemon_security.c`, `daemon_oom.c`, `input_validator.c`, `log_sanitizer.c`, `ipc_backpressure.c` |
 | **IPC & messaging** | `ipc_service_bus.c`, `ipc_client.c`, `ipc_bus_helper.c`, `daemon_bootstrap_ipc.h`, `method_dispatcher.c`, `jsonrpc_helpers.c`, `param_validator.c` |
 | **Event & concurrency** | `airy_event_loop.c`, `thread_pool.c`, `refcount.c` |
