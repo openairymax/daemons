@@ -89,7 +89,7 @@ daemons/
 | 分类 | 组件 |
 |------|------|
 | **服务框架** | `svc_common.c`、`svc_auth.c`、`svc_cache.h`、`svc_config.h`、`svc_logger.h`、`service_discovery.c`、`service_discovery_helper.c`、`daemon_bootstrap_ipc.c`、`daemon_bootstrap_sd.c`、`daemon_cupolas_bootstrap.c`、`daemon_event_driver.c`、`daemon_task_dispatcher.c` |
-| **韧性与安全** | `daemon_security.c`、`validator_cjson.c`（熔断器、api_recovery、input_validator、log_sanitizer、ipc_backpressure 的权威实现位于 `commons/`） |
+| **韧性与安全** | `daemon_security.c`（熔断器、api_recovery、input_validator、log_sanitizer、ipc_backpressure 的权威实现位于 `commons/`） |
 | **IPC 与消息** | `ipc_service_bus.c`、`ipc_client.c`、`ipc_bus_helper.c`、`daemon_bootstrap_ipc.h`、`method_dispatcher.c`、`jsonrpc_helpers.c`、`param_validator.c` |
 | **事件与并发** | `airy_event_loop.c`、`thread_pool.c`、`refcount.c` |
 | **指标与告警** | `unified_metrics.c`、`alert_manager.c` |
