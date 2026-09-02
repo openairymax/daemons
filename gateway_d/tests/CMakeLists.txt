@@ -24,6 +24,7 @@ set(TEST_SOURCES
     test_gateway_hall_store.c
     test_gateway_cap_registry.c
     test_gateway_pep_cache.c
+    bench_gateway_pep.c
 )
 
 foreach(TEST_SRC ${TEST_SOURCES})
@@ -61,7 +62,9 @@ foreach(TEST_SRC ${TEST_SOURCES})
     # M2-S5 (0.1.9 §3.2 PEP)：PEP 裁定缓存测试——编译实现源；
     # gw_svc_call 符号由 airy_gateway_service（含 biz 全部源）提供，
     # 需 start-group 兜底与 svc_common/airy_syscall 的静态库循环依赖。
-    if(${TEST_NAME} STREQUAL "test_gateway_pep_cache")
+    # bench_gateway_pep（M2-S1 端到端基准）同一装配。
+    if(${TEST_NAME} STREQUAL "test_gateway_pep_cache" OR
+       ${TEST_NAME} STREQUAL "bench_gateway_pep")
         target_sources(${TEST_NAME} PRIVATE
             ${GATEWAY_DIR}/src/biz/gateway_pep_cache.c
         )
