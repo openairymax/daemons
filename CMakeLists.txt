@@ -43,7 +43,8 @@ add_subdirectory(info_d)
 add_subdirectory(notify_d)
 add_subdirectory(observe_d)
 add_subdirectory(hook_d)
-add_subdirectory(plugin_d)
+# 0.1.9 M4（daemon 整编 18→15）：plugin_d → tool_d（插件 dlopen 执行域
+# 随迁 tool_d，plugin_* 方法在 tool 命名空间登记，gateway 改路由）。
 # Phase 3：执行体集中化重构 — 新增 daemon（mem.* / agent.* / a2a.* 命名空间）
 add_subdirectory(mem_d)
 add_subdirectory(agent_d)
@@ -118,7 +119,6 @@ airy_print_info("  - info_d    : ${CMAKE_CURRENT_SOURCE_DIR}/info_d")
 airy_print_info("  - notify_d  : ${CMAKE_CURRENT_SOURCE_DIR}/notify_d")
 airy_print_info("  - observe_d : ${CMAKE_CURRENT_SOURCE_DIR}/observe_d")
 airy_print_info("  - hook_d    : ${CMAKE_CURRENT_SOURCE_DIR}/hook_d")
-airy_print_info("  - plugin_d  : ${CMAKE_CURRENT_SOURCE_DIR}/plugin_d")
 airy_print_info("  - mem_d     : ${CMAKE_CURRENT_SOURCE_DIR}/mem_d")
 airy_print_info("  - agent_d   : ${CMAKE_CURRENT_SOURCE_DIR}/agent_d")
 airy_print_info("  - a2a_d     : ${CMAKE_CURRENT_SOURCE_DIR}/a2a_d")
@@ -163,11 +163,6 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/market_d/include/
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/plugin_d/include/
-    DESTINATION include/agentrt
-    FILES_MATCHING PATTERN "*.h"
-)
-
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/mem_d/include/
     DESTINATION include/agentrt
     FILES_MATCHING PATTERN "*.h"
@@ -202,10 +197,10 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/maths_d/include/
 if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
    AND TARGET monit_d AND TARGET sched_d AND TARGET market_d
    AND TARGET channel_d AND TARGET info_d AND TARGET notify_d
-   AND TARGET observe_d AND TARGET hook_d AND TARGET plugin_d
+   AND TARGET observe_d AND TARGET hook_d
    AND TARGET mem_d AND TARGET agent_d AND TARGET a2a_d
    AND TARGET think_d AND TARGET cupolas_d AND TARGET maths_d)
-    # 注意：仅导出 18 个 daemon 可执行文件（svc_common 导出限制见下）。
+    # 注意：仅导出 daemon 可执行文件（svc_common 导出限制见下）。
     # svc_common 是 STATIC 库且 PUBLIC 链接 airy_common/airy_compile_defs/
     # cupolas/airy_platform_libs，若将其加入 export(TARGETS) 列表，
     # 则要求上述 4 个传递依赖也在同一 export set（它们定义于 commons/cupolas 等
@@ -215,7 +210,7 @@ if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
     export(TARGETS gateway_d llm_d tool_d
                   monit_d sched_d market_d channel_d
                   info_d notify_d observe_d
-                  hook_d plugin_d
+                  hook_d
                   mem_d agent_d a2a_d
                   think_d cupolas_d maths_d
         FILE "${CMAKE_CURRENT_BINARY_DIR}/agentrt-daemon-targets.cmake"
@@ -224,13 +219,13 @@ if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
 endif()
 
 # ==================== 生产安装：daemon 二进制 ====================
-# cmake --install --prefix $AIRY_HOME → 18 个 daemon 装到 $AIRY_HOME/bin。
+# cmake --install --prefix $AIRY_HOME → daemon 装到 $AIRY_HOME/bin。
 # 与 bootstrap AIRY_HOME/bin、agent_build_agents_pypath 的 AIRY_LIB_DIR
 # 回退组成完整生产安装（AIRY_HOME 体系，K8s 节点运行时根类比）。
 install(TARGETS gateway_d llm_d tool_d
                 monit_d sched_d market_d channel_d
                 info_d notify_d observe_d
-                hook_d plugin_d
+                hook_d
                 mem_d agent_d a2a_d think_d cupolas_d maths_d
     RUNTIME DESTINATION bin
 )

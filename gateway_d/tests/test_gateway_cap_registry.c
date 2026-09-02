@@ -80,11 +80,22 @@ static void test_count_and_uniqueness(void)
         ASSERT_TRUE(ci->cap_key && ci->ns && ci->method);
         size_t nsl = strlen(ci->ns);
         size_t ml = strlen(ci->method);
-        /* cap_key 语义必须可重构为 "<ns>.<method>" */
-        ASSERT_TRUE(strlen(ci->cap_key) == nsl + ml + 1);
-        ASSERT_TRUE(strncmp(ci->cap_key, ci->ns, nsl) == 0);
-        ASSERT_TRUE(ci->cap_key[nsl] == '.');
-        ASSERT_TRUE(strcmp(ci->cap_key + nsl + 1, ci->method) == 0);
+        /* cap_key 语义：默认 "<ns>.<method>"（SSoT 不变量）。
+         * 0.1.9 M4 例外（plugin.* → tool_d 整编）：cap_key 保持
+         * "plugin.<method>" 外部契约不变，路由目标 ns=tool、
+         * method="plugin_<method>"（tool_d 登记的 wire 方法名），
+         * 故 plugin 组不满足重构等式，单独断言路由语义。 */
+        if (strncmp(ci->cap_key, "plugin.", 7) == 0) {
+            ASSERT_TRUE(strcmp(ci->ns, "tool") == 0);
+            ASSERT_TRUE(ml > 7);
+            ASSERT_TRUE(strncmp(ci->method, "plugin_", 7) == 0);
+            ASSERT_TRUE(strcmp(ci->cap_key + 7, ci->method + 7) == 0);
+        } else {
+            ASSERT_TRUE(strlen(ci->cap_key) == nsl + ml + 1);
+            ASSERT_TRUE(strncmp(ci->cap_key, ci->ns, nsl) == 0);
+            ASSERT_TRUE(ci->cap_key[nsl] == '.');
+            ASSERT_TRUE(strcmp(ci->cap_key + nsl + 1, ci->method) == 0);
+        }
         /* cap_key 唯一性（SSoT：禁止重复登记） */
         for (size_t j = 0; j < i; ++j) {
             ASSERT_TRUE(strcmp(ci->cap_key, gw_cap_at(j)->cap_key) != 0);
