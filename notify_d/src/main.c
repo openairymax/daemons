@@ -630,7 +630,7 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    daemon_cupolas_init("notify_d");
+    daemon_cupolas_init_pep("notify_d");
 
     if (notify_d_init(&g_service, NOTIFY_D_DEFAULT_PORT, NOTIFY_D_DEFAULT_SOCKET) != AIRY_SUCCESS)
         return EXIT_FAILURE;

@@ -459,7 +459,7 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    daemon_cupolas_init("tool_d");
+    daemon_cupolas_init_pep("tool_d");
 
     /* 0.1.9 M4：plugin_d → tool_d 整编——插件执行域（dlopen）随迁，
      * 权限/发现/扫描加载在 tool_d 进程内初始化。 */
