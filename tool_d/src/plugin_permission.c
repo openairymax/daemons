@@ -60,7 +60,7 @@ int plugin_permission_init(const plugin_permission_config_t *config)
         g_permission.config.enable_strict_mode = true;
         g_permission.config.enable_audit_log = true;
         g_permission.config.safety_policy_path[0] = '\0';
-        g_permission.config.agent_id = "plugin_d";
+        g_permission.config.agent_id = "tool_d";
     }
 
     g_permission.guard_ctx = safety_guard_create();
@@ -185,7 +185,7 @@ plugin_permission_result_t plugin_permission_check(const char (*permissions)[64]
             int check_ret = safety_guard_check_permission(g_permission.guard_ctx, guard_type,
                                                           g_permission.config.agent_id ?
                                                               g_permission.config.agent_id :
-                                                              "plugin_d",
+                                                              "tool_d",
                                                           &allowed);
 
             if (check_ret != 0 || !allowed) {
