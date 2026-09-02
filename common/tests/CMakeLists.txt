@@ -20,7 +20,7 @@ set(TEST_SOURCES
     test_svc_auth.c
     test_jsonrpc_helpers.c
     test_safe_string_utils.c
-    test_input_validator.c
+    test_validator_cjson.c
     test_svc_stop.c
     test_ipc_service_bus.c
     test_strategies_recovery.c
