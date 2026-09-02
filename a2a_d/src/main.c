@@ -543,7 +543,7 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    daemon_cupolas_init("a2a_d");
+    daemon_cupolas_init_pep("a2a_d");
 
     load_daemon_config(config_path);
     if (use_tcp)

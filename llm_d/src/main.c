@@ -90,7 +90,7 @@ int main(int argc, char **argv)
     airy_log_init(&log_cfg);
     atexit(log_cleanup);
 
-    daemon_cupolas_init("llm_d");
+    daemon_cupolas_init_pep("llm_d");
 
     load_daemon_config(config_path);
     use_tcp = use_tcp || g_config.use_tcp;
