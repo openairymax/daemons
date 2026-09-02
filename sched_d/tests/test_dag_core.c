@@ -275,14 +275,14 @@ int test_dag_list(void)
     g_fail_goal = NULL;
     g_block = 0;
 
-    if (sched_service_list_dags(NULL, NULL) != AIRY_ERR_INVALID_PARAM) {
+    if (sched_dag_list_json(NULL, NULL) != AIRY_ERR_INVALID_PARAM) {
         printf("  FAILED: NULL params accepted\n");
         sched_service_destroy(svc);
         return 1;
     }
 
     char *json = NULL;
-    if (sched_service_list_dags(svc, &json) != AIRY_SUCCESS || !json) {
+    if (sched_dag_list_json(svc, &json) != AIRY_SUCCESS || !json) {
         printf("  FAILED: empty list rc/bad json\n");
         sched_service_destroy(svc);
         return 1;
@@ -316,7 +316,7 @@ int test_dag_list(void)
         return 1;
     }
 
-    if (sched_service_list_dags(svc, &json) != AIRY_SUCCESS || !json) {
+    if (sched_dag_list_json(svc, &json) != AIRY_SUCCESS || !json) {
         printf("  FAILED: list rc/bad json\n");
         AIRY_FREE(id1);
         AIRY_FREE(id2);

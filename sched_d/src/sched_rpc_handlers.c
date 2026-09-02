@@ -354,7 +354,7 @@ static void handle_dag_status(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_dag_list(int id, airy_sock_t client_fd)
 {
     char *json_out = NULL;
-    int ret = sched_service_list_dags(g_service, &json_out);
+    int ret = sched_dag_list_json(g_service, &json_out);
     if (ret != AIRY_SUCCESS || !json_out) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "List DAGs failed", id);
         return;
