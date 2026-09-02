@@ -44,6 +44,9 @@ extern "C" {
 
 typedef struct agent_run_session_s {
     char session_id[AGENT_RUN_SESSION_ID_LEN];
+    /* 运行标识（§2.4.2 信封 run_id）：每次 agent.run 独立生成，跨重连/多
+     * 请求辨识同一次运行；与 session_id（会话槽位）解耦。 */
+    char run_id[AGENT_RUN_SESSION_ID_LEN];
     volatile int cancelled;
     struct agent_run_session_s *next;
 } agent_run_session_t;
@@ -69,6 +72,12 @@ int agent_run_cancel_by_session(const char *session_id);
  * 保证 agent.cancel 的 sess_ 前缀兼容）。
  */
 void agent_run_gen_session_id(char *out, size_t out_size);
+
+/**
+ * @brief 生成唯一运行 ID（"run_<hex>_<seq>"，§2.4.2 信封 run_id）。
+ * 每次 agent.run 独立调用；与会话 ID 生成同构但独立计数/时间基底。
+ */
+void agent_run_gen_run_id(char *out, size_t out_size);
 
 /* ---- run 引擎主入口（原 gateway handle_agent_run 迁移） ---- */
 
