@@ -23,14 +23,10 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== Market 服务静态库 ====================
-# 提取 agent_registry/skill_registry/installer/publisher/market_service_impl/
-# market_svc_adapter/agent_registry_core 为独立静态库，
-# 供 market_d 可执行文件和集成测试共用，消除桩函数依赖。
+# publisher/market_service 六域/market_svc_adapter 编译为独立静态库，
+# 供 market_d 可执行文件与集成测试共用。
 # 排除 main.c（含 main()）。
 set(MARKET_SERVICE_SOURCES
-    src/agent_registry.c
-    src/skill_registry.c
-    src/installer.c
     src/publisher.c
     src/market_service_impl.c
     src/market_service_registry.c  # 市场服务-注册域
@@ -39,7 +35,6 @@ set(MARKET_SERVICE_SOURCES
     src/market_service_listing.c   # 市场服务-已安装列表/更新域
     src/market_service_config.c    # 市场服务-配置/同步域
     src/market_svc_adapter.c
-    src/agent_registry_core.c
 )
 
 add_library(airy_market_service STATIC ${MARKET_SERVICE_SOURCES})
