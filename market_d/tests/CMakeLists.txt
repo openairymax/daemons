@@ -18,17 +18,11 @@ set(MARKET_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/market_service_listing.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/market_service_config.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/market_svc_adapter.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/agent_registry.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/agent_registry_core.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/skill_registry.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/installer.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/publisher.c
 )
 
 set(MARKET_TEST_SOURCES
-    test_agent_registry.c
-    test_skill_registry.c
-    test_installer.c
+    test_market.c
 )
 
 set(MARKET_COMMON_INCLUDES
