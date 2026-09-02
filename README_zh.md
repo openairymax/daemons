@@ -115,7 +115,7 @@ daemons/
 | 8 | **信息服务** | `info_d/` | 系统信息查询与状态报告 | `info_d` |
 | 9 | **通知服务** | `notify_d/` | 多渠道通知推送（邮件 / Slack / Discord） | `notify_d` |
 | 10 | **观测服务** | `observe_d/` | OpenTelemetry 可观测性数据采集 | `observe_d` |
-| 11 | **Hook 守护进程** | `hook_d/` | 薄守护进程壳；Hook 系统核心位于 `atoms/coreloopthree/src/hook/`，通过链接 `airy_coreloopthree` 获取 | `hook_d` |
+| 11 | **Hook 守护进程** | `hook_d/` | 薄守护进程壳；Hook 系统核心位于 `atoms/coreloopthree/src/hook/`，经 M3（§4.2-2）拆独立库 `airy_coreloop_hooks` 链接获取（不再链整引擎） | `hook_d` |
 | 12 | **Plugin 守护进程** | `plugin_d/` | 插件生命周期管理与隔离 | `plugin_d` |
 | 13 | **记忆守护进程** | `mem_d/` | 运行时记忆管理（`mem.*` 命名空间）：长时记忆的写入 / 检索 / 读取 / 删除，JSONL 持久化 | `mem_d` |
 | 14 | **Agent 执行** | `agent_d/` | Agent 编排（`agent.*` 命名空间）：Agent 子进程 spawn / invoke / 健康检查 | `agent_d` |
@@ -189,7 +189,7 @@ svc_common  ←  gateway_d  ←  外部客户端
 
 | 依赖 | 来源 | 用途 |
 |------|------|------|
-| **atoms** | `agentrt/atoms/` | CoreLoopThree（认知 / 执行 / 记忆循环）、Syscall 入口表面、TaskFlow 编排、Memory 原语——`hook_d` 直接链接 `airy_coreloopthree`；每个守护进程通过 `atoms/syscall` 派发业务逻辑 |
+| **atoms** | `agentrt/atoms/` | CoreLoopThree（认知 / 执行 / 记忆循环）、Syscall 入口表面、TaskFlow 编排、Memory 原语——`hook_d` 链接拆库 `airy_coreloop_hooks`（M3 §4.2-2）；每个守护进程通过 `atoms/syscall` 派发业务逻辑 |
 | **commons** | `agentrt/commons/` | 日志、config_unified、网络、令牌、成本、可观测性、认知、策略——通过 `svc_common` 传递链接。`svc_common.h` / `ipc_service_bus.h` 的权威定义按 IRON-6 现位于此（`commons/utils/ipc/include/`） |
 | **cupolas** | `agentrt/cupolas/` | `svc_common` 以 `PUBLIC` 形式链接 Cupolas（`daemon_cupolas_bootstrap.c`），每个守护进程自动继承 Cupolas 安全——请求鉴权、输入净化、审计、沙箱 |
 | **protocols** | `agentrt/protocols/` | IPC 服务总线使用的 JSON-RPC 2.0 / AgentsIPC 信封；网关边界使用 A2A / MCP 适配器 |

@@ -4,19 +4,20 @@
 
 ## 定位
 
-`hook_d` 是 AgentRT 的 Hook 事件注入守护进程。SP04 重构后，Hook 系统核心
+`hook_d` 是 AgentRT 的 Hook 事件注入守护进程。M3（0.1.9 §4.2-2）后，Hook 系统核心
 （hook_registry / executor / interceptor / timeout / handlers，位于
-`atoms/coreloopthree/src/hook/`）已迁移至 atoms 层，`hook_d` 退化为仅含 `main.c` 的
-薄 daemon 壳，通过链接 `airy_coreloopthree` 获得全部 Hook 能力，负责 socket + 服务发现 +
+`atoms/coreloopthree/src/hook/`）已拆独立库 `airy_coreloop_hooks`，`hook_d` 退化为仅含
+`main.c` 的薄 daemon 壳，通过链接 `airy_coreloop_hooks` 获得 Hook 能力（不再链接整个
+认知引擎 `airy_coreloopthree`——消费者减重），负责 socket + 服务发现 +
 IPC + cupolas 守护进程生命周期，并对外暴露 `hook.*` JSON-RPC 方法族（L2 服务协议）。
 
 ## 架构
 
 ```
 gateway_d ──(hook.* JSON-RPC)──▶ hook_d（薄 daemon 壳）
-                                   │ 链接 airy_coreloopthree
+                                   │ 链接 airy_coreloop_hooks（独立小库）
                                    ▼
-                  atoms/coreloopthree/src/hook/（hook 系统核心）
+                  atoms/coreloopthree/src/hook/（hook 系统核心，编译入 airy_coreloop_hooks）
                     ├─ hook_registry     注册表（按类型分组，上限 HOOK_REGISTRY_MAX）
                     ├─ hook_service      触发链聚合（hook_service_fire 决策）
                     ├─ hook_executor     执行器（shell/python/webhook/callback）
@@ -67,7 +68,7 @@ TCP `127.0.0.1:8093`，Windows pipe `\\.\pipe\airy_hook`）。以下方法由
 
 ## 依赖与构建
 
-- 依赖：`airy_coreloopthree`（hook 系统核心，GNU ld 下 `--start-group/--end-group`）、
+- 依赖：`airy_coreloop_hooks`（hook 系统核心独立库，GNU ld 下 `--start-group/--end-group`）、
   `svc_common`、`cupolas`、`Threads::Threads`；可选 `YAML`（libyaml）、`CURL`（webhook 实现）。
 - 构建：
 
