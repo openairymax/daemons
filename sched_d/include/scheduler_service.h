@@ -331,7 +331,7 @@ int sched_service_get_dag(sched_service_t *service, const char *dag_id, char **o
  *            ...],"count":N}
  * @return 0 on success; AIRY_ERR_INVALID_PARAM bad args
  */
-int sched_service_list_dags(sched_service_t *service, char **out_json);
+int sched_dag_list_json(sched_service_t *service, char **out_json);
 
 /**
  * @brief Cancel a DAG (all unfinished nodes set to canceled; a RUNNING node
