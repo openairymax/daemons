@@ -31,6 +31,10 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_maths.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/os_sandbox.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tool_interactive_approval.c
+    # 0.1.9 M4：plugin_d → tool_d 整编——插件执行域源随迁测试
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin_service.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin_discovery.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin_permission.c
 )
 
 # YAML found by root CMakeLists.txt (AIRY_HAS_YAML)
@@ -46,6 +50,9 @@ set(TOOL_TEST_SOURCES
     test_registry.c
     test_sandbox_integration.c
     test_fs_e2e.c
+    # 0.1.9 M4：plugin_d → tool_d 整编——插件测试随迁
+    test_plugin_permission.c
+    test_plugin_discovery.c
 )
 # os_sandbox 测试依赖 Landlock/seccomp/unshare/mount 等 Linux-only 能力，
 # macOS/BSD 上 os_sandbox.c 为空实现（OS_SANDBOX_MODE_OFF），该测试不适用。
