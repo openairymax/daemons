@@ -57,7 +57,7 @@ static void notify_d_signal_handler(int sig)
 #endif
 }
 
-static int notify_d_compute_ws_accept_key(const char *client_key, char *out_key, size_t out_size)
+static int notify_ws_accept_key(const char *client_key, char *out_key, size_t out_size)
 {
     if (!client_key || !out_key || out_size < 64) {
         AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "null parameter");
@@ -199,7 +199,7 @@ static int notify_d_handle_ws_upgrade(notify_d_service_t *svc, notify_client_t *
     client_key[key_len] = '\0';
 
     char accept_key[64];
-    if (notify_d_compute_ws_accept_key(client_key, accept_key, sizeof(accept_key)) != 0) {
+    if (notify_ws_accept_key(client_key, accept_key, sizeof(accept_key)) != 0) {
         AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to compute WebSocket accept key");
     }
 
