@@ -7,10 +7,13 @@
  *
  * 覆盖：
  *  - publish / enqueue 后事件进入环形队列
- *  - subscribe / unsubscribe 对频道订阅注册表的增删
+ *  - subscribe / unsubscribe 对 topic 订阅注册表的增删
  *  - JSON-RPC 方法分发响应为合法 JSON（publish/subscribe/unsubscribe/list/health/
  *    get_stats/health_check/shutdown）
- *  - 订阅注册表驱动的频道过滤广播（POSIX socketpair 端到端）
+ *  - 订阅注册表驱动的 topic 过滤广播（POSIX socketpair 端到端）
+ *
+ * 0.1.9 M4-S3：订阅键 wire 名为 topic（原 channel 语义改名，与
+ * channel_d 数据面传输通道划清界限）。
  *
  */
 
@@ -52,20 +55,20 @@ static void test_publish_enqueues_event(void)
     assert(g_svc.pending_count == 1);
     assert(g_svc.pending[g_svc.pending_head] != NULL);
     assert(strcmp(g_svc.pending[g_svc.pending_head]->message, "hello notify") == 0);
-    assert(strcmp(g_svc.pending[g_svc.pending_head]->channel, "alerts") == 0);
+    assert(strcmp(g_svc.pending[g_svc.pending_head]->topic, "alerts") == 0);
     assert(strcmp(g_svc.pending[g_svc.pending_head]->event_type, "alert") == 0);
 
     char resp[4096];
     int rc = notify_d_dispatch_jsonrpc(
         &g_svc,
         "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{\"event\":\"deploy\","
-        "\"channel\":\"ops\",\"message\":\"build #42 ok\"},\"id\":7}",
+        "\"topic\":\"ops\",\"message\":\"build #42 ok\"},\"id\":7}",
         resp, sizeof(resp));
     assert(rc == NOTIFY_D_METHOD_HANDLED);
     assert(g_svc.pending_count == 2);
     size_t tail = (g_svc.pending_head + 1) % NOTIFY_D_MAX_PENDING;
     assert(strcmp(g_svc.pending[tail]->message, "build #42 ok") == 0);
-    assert(strcmp(g_svc.pending[tail]->channel, "ops") == 0);
+    assert(strcmp(g_svc.pending[tail]->topic, "ops") == 0);
     assert(strcmp(g_svc.pending[tail]->event_type, "deploy") == 0);
 
     rc = notify_d_dispatch_jsonrpc(
@@ -77,7 +80,7 @@ static void test_publish_enqueues_event(void)
     assert(g_svc.pending_count == 3);
     size_t tail2 = (g_svc.pending_head + 2) % NOTIFY_D_MAX_PENDING;
     assert(strcmp(g_svc.pending[tail2]->message, "via payload") == 0);
-    assert(strcmp(g_svc.pending[tail2]->channel, "default") == 0);
+    assert(strcmp(g_svc.pending[tail2]->topic, "default") == 0);
     assert(strcmp(g_svc.pending[tail2]->event_type, "message") == 0);
 
     g_svc.pending_count = NOTIFY_D_MAX_PENDING;
@@ -143,11 +146,11 @@ static void test_dispatch_responses_valid_json(void)
         "{\"jsonrpc\":\"2.0\",\"method\":\"get_stats\",\"params\":{},\"id\":2}",
         "{\"jsonrpc\":\"2.0\",\"method\":\"health_check\",\"params\":{},\"id\":3}",
         "{\"jsonrpc\":\"2.0\",\"method\":\"list\",\"params\":{},\"id\":4}",
-        "{\"jsonrpc\":\"2.0\",\"method\":\"subscribe\",\"params\":{\"channel\":\"alerts\","
+        "{\"jsonrpc\":\"2.0\",\"method\":\"subscribe\",\"params\":{\"topic\":\"alerts\","
         "\"client_id\":\"agent-9\"},\"id\":5}",
-        "{\"jsonrpc\":\"2.0\",\"method\":\"unsubscribe\",\"params\":{\"channel\":\"alerts\","
+        "{\"jsonrpc\":\"2.0\",\"method\":\"unsubscribe\",\"params\":{\"topic\":\"alerts\","
         "\"client_id\":\"agent-9\"},\"id\":6}",
-        "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{\"channel\":\"alerts\","
+        "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{\"topic\":\"alerts\","
         "\"message\":\"ping\"},\"id\":9}",
     };
     for (size_t i = 0; i < sizeof(reqs) / sizeof(reqs[0]); i++) {
@@ -170,7 +173,7 @@ static void test_dispatch_responses_valid_json(void)
     char resp[8192];
     notify_d_dispatch_jsonrpc(
         &g_svc,
-        "{\"jsonrpc\":\"2.0\",\"method\":\"subscribe\",\"params\":{\"channel\":\"alerts\","
+        "{\"jsonrpc\":\"2.0\",\"method\":\"subscribe\",\"params\":{\"topic\":\"alerts\","
         "\"client_id\":\"agent-9\"},\"id\":5}",
         resp, sizeof(resp));
     notify_d_dispatch_jsonrpc(&g_svc,
@@ -179,15 +182,15 @@ static void test_dispatch_responses_valid_json(void)
     cJSON *parsed = cJSON_Parse(resp);
     assert(parsed != NULL);
     cJSON *result = cJSON_GetObjectItem(parsed, "result");
-    cJSON *channels = cJSON_GetObjectItem(result, "channels");
-    assert(cJSON_IsArray(channels));
+    cJSON *topics = cJSON_GetObjectItem(result, "topics");
+    assert(cJSON_IsArray(topics));
     int found = 0;
     cJSON *item = NULL;
-    cJSON_ArrayForEach(item, channels)
+    cJSON_ArrayForEach(item, topics)
     {
-        cJSON *ch = cJSON_GetObjectItem(item, "channel");
-        assert(cJSON_IsString(ch));
-        if (strcmp(ch->valuestring, "alerts") == 0) {
+        cJSON *tp = cJSON_GetObjectItem(item, "topic");
+        assert(cJSON_IsString(tp));
+        if (strcmp(tp->valuestring, "alerts") == 0) {
             found = 1;
             cJSON *subs = cJSON_GetObjectItem(item, "subscribers");
             assert(cJSON_IsNumber(subs));
@@ -260,12 +263,12 @@ static void test_broadcast_to_subscribed_client(void)
     client->type = NOTIFY_CLIENT_SOCKET;
     client->active = 1;
     client->client_id = AIRY_STRDUP("agent-1");
-    client->channel = AIRY_STRDUP("none");
+    client->topic = AIRY_STRDUP("none");
     g_svc.client_count = 1;
 
     notify_event_t ev = {0};
     ev.message = "alert msg";
-    ev.channel = "alerts";
+    ev.topic = "alerts";
     ev.event_type = "alert";
     ev.timestamp = 12345;
     assert(notify_d_broadcast_event(&g_svc, &ev) == 1);
@@ -277,13 +280,13 @@ static void test_broadcast_to_subscribed_client(void)
     assert(strstr(buf, "\"alert msg\"") != NULL);
     assert(strstr(buf, "\"alerts\"") != NULL);
 
-    ev.channel = "other";
+    ev.topic = "other";
     assert(notify_d_broadcast_event(&g_svc, &ev) == 0);
     got = recv(sp[1], buf, sizeof(buf), MSG_DONTWAIT);
     assert(got < 0); /* EAGAIN */
 
     assert(notify_d_unsubscribe(&g_svc, "alerts", "agent-1") == AIRY_SUCCESS);
-    ev.channel = "alerts";
+    ev.topic = "alerts";
     assert(notify_d_broadcast_event(&g_svc, &ev) == 0);
     got = recv(sp[1], buf, sizeof(buf), MSG_DONTWAIT);
     assert(got < 0);

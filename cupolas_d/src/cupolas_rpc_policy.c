@@ -71,7 +71,7 @@ static void broadcast_epoch(uint64_t epoch)
     char req[512];
     snprintf(req, sizeof(req),
              "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"publish\",\"params\":{"
-             "\"channel\":\"airy.cupolas.epoch\",\"event\":\"epoch_change\","
+             "\"topic\":\"airy.cupolas.epoch\",\"event\":\"epoch_change\","
              "\"payload\":\"{\\\"epoch\\\":%llu}\"}}",
              (unsigned long long)epoch);
 

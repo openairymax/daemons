@@ -5,7 +5,7 @@
  * @file notify_service.c
  * @brief Notification service core implementation (notify.* namespace).
  *
- * Provides the channel subscription registry (subscribe/unsubscribe), ring
+ * Provides the topic subscription registry (subscribe/unsubscribe), ring
  * event queue (enqueue), multi-protocol broadcast engine (broadcast_event)
  * and JSON-RPC method dispatch (dispatch_jsonrpc). Method names carry no
  * namespace prefix - the gateway strips the <ns>. prefix when forwarding
@@ -68,12 +68,12 @@ int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *even
         snprintf(json_msg, sizeof(json_msg),
                  "{"
                  "\"event\":\"%s\","
-                 "\"channel\":\"%s\","
+                 "\"topic\":\"%s\","
                  "\"message\":\"%s\","
                  "\"timestamp\":%llu"
                  "}",
                  event->event_type ? event->event_type : "message",
-                 event->channel ? event->channel : "default", event->message ? event->message : "",
+                 event->topic ? event->topic : "default", event->message ? event->message : "",
                  (unsigned long long)event->timestamp);
 
     size_t broadcast_count = 0;
@@ -83,12 +83,12 @@ int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *even
         if (!client->active)
             continue;
 
-        int subscribed = !event->channel || !client->channel ||
-                         strcmp(event->channel, "broadcast") == 0 ||
-                         strcmp(client->channel, event->channel) == 0;
+        int subscribed = !event->topic || !client->topic ||
+                         strcmp(event->topic, "broadcast") == 0 ||
+                         strcmp(client->topic, event->topic) == 0;
 
-        if (!subscribed && event->channel && client->client_id)
-            subscribed = notify_d_has_subscription(svc, event->channel, client->client_id);
+        if (!subscribed && event->topic && client->client_id)
+            subscribed = notify_d_has_subscription(svc, event->topic, client->client_id);
 
         if (!subscribed)
             continue;
@@ -114,7 +114,7 @@ int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *even
     return (int)broadcast_count;
 }
 
-int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char *channel,
+int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char *topic,
                      const char *event_type)
 {
     if (!svc || !msg) {
@@ -130,7 +130,7 @@ int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char *chann
     }
 
     event->message = AIRY_STRDUP(msg);
-    event->channel = channel ? AIRY_STRDUP(channel) : AIRY_STRDUP("default");
+    event->topic = topic ? AIRY_STRDUP(topic) : AIRY_STRDUP("default");
     event->event_type = event_type ? AIRY_STRDUP(event_type) : AIRY_STRDUP("message");
     event->timestamp = (uint64_t)time(NULL);
 
@@ -162,9 +162,9 @@ void notify_d_service_destroy(notify_d_service_t *svc)
         notify_subscription_t *sub = &svc->subscriptions[i];
         if (sub->active) {
             AIRY_FREE(sub->client_id);
-            AIRY_FREE(sub->channel);
+            AIRY_FREE(sub->topic);
             sub->client_id = NULL;
-            sub->channel = NULL;
+            sub->topic = NULL;
             sub->active = 0;
         }
     }
@@ -175,7 +175,7 @@ void notify_d_service_destroy(notify_d_service_t *svc)
         notify_event_t *event = svc->pending[idx];
         if (event) {
             AIRY_FREE(event->message);
-            AIRY_FREE(event->channel);
+            AIRY_FREE(event->topic);
             AIRY_FREE(event->event_type);
             AIRY_FREE(event);
         }
@@ -186,9 +186,9 @@ void notify_d_service_destroy(notify_d_service_t *svc)
     svc->pending_tail = 0;
 
     for (size_t i = 0; i < svc->client_count; i++) {
-        AIRY_FREE(svc->clients[i].channel);
+        AIRY_FREE(svc->clients[i].topic);
         AIRY_FREE(svc->clients[i].client_id);
-        svc->clients[i].channel = NULL;
+        svc->clients[i].topic = NULL;
         svc->clients[i].client_id = NULL;
     }
     svc->client_count = 0;
@@ -197,27 +197,27 @@ void notify_d_service_destroy(notify_d_service_t *svc)
 }
 
 static notify_subscription_t *notify_d_find_subscription(notify_d_service_t *svc,
-                                                         const char *channel, const char *client_id)
+                                                         const char *topic, const char *client_id)
 {
     for (size_t i = 0; i < svc->subscription_count; i++) {
         notify_subscription_t *sub = &svc->subscriptions[i];
         if (!sub->active)
             continue;
-        if (strcmp(sub->channel, channel) == 0 && strcmp(sub->client_id, client_id) == 0)
+        if (strcmp(sub->topic, topic) == 0 && strcmp(sub->client_id, client_id) == 0)
             return sub;
     }
     return NULL;
 }
 
-int notify_d_subscribe(notify_d_service_t *svc, const char *channel, const char *client_id)
+int notify_d_subscribe(notify_d_service_t *svc, const char *topic, const char *client_id)
 {
-    if (!svc || !channel || !client_id || !channel[0] || !client_id[0]) {
-        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "channel and client_id are required");
+    if (!svc || !topic || !client_id || !topic[0] || !client_id[0]) {
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "topic and client_id are required");
     }
 
     airy_mtx_lock(&svc->lock);
 
-    if (notify_d_find_subscription(svc, channel, client_id)) {
+    if (notify_d_find_subscription(svc, topic, client_id)) {
         airy_mtx_unlock(&svc->lock);
         return AIRY_SUCCESS;
     }
@@ -238,12 +238,12 @@ int notify_d_subscribe(notify_d_service_t *svc, const char *channel, const char 
     }
 
     slot->client_id = AIRY_STRDUP(client_id);
-    slot->channel = AIRY_STRDUP(channel);
-    if (!slot->client_id || !slot->channel) {
+    slot->topic = AIRY_STRDUP(topic);
+    if (!slot->client_id || !slot->topic) {
         AIRY_FREE(slot->client_id);
-        AIRY_FREE(slot->channel);
+        AIRY_FREE(slot->topic);
         slot->client_id = NULL;
-        slot->channel = NULL;
+        slot->topic = NULL;
         airy_mtx_unlock(&svc->lock);
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "strdup failed for subscription");
     }
@@ -257,19 +257,19 @@ int notify_d_subscribe(notify_d_service_t *svc, const char *channel, const char 
     return AIRY_SUCCESS;
 }
 
-int notify_d_unsubscribe(notify_d_service_t *svc, const char *channel, const char *client_id)
+int notify_d_unsubscribe(notify_d_service_t *svc, const char *topic, const char *client_id)
 {
-    if (!svc || !channel || !client_id || !channel[0] || !client_id[0]) {
-        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "channel and client_id are required");
+    if (!svc || !topic || !client_id || !topic[0] || !client_id[0]) {
+        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "topic and client_id are required");
     }
 
     airy_mtx_lock(&svc->lock);
-    notify_subscription_t *sub = notify_d_find_subscription(svc, channel, client_id);
+    notify_subscription_t *sub = notify_d_find_subscription(svc, topic, client_id);
     if (sub) {
         AIRY_FREE(sub->client_id);
-        AIRY_FREE(sub->channel);
+        AIRY_FREE(sub->topic);
         sub->client_id = NULL;
-        sub->channel = NULL;
+        sub->topic = NULL;
         sub->active = 0;
     }
     airy_mtx_unlock(&svc->lock);
@@ -277,27 +277,27 @@ int notify_d_unsubscribe(notify_d_service_t *svc, const char *channel, const cha
     return AIRY_SUCCESS;
 }
 
-int notify_d_has_subscription(notify_d_service_t *svc, const char *channel, const char *client_id)
+int notify_d_has_subscription(notify_d_service_t *svc, const char *topic, const char *client_id)
 {
-    if (!svc || !channel || !client_id)
+    if (!svc || !topic || !client_id)
         return 0;
 
     airy_mtx_lock(&svc->lock);
-    int found = notify_d_find_subscription(svc, channel, client_id) != NULL;
+    int found = notify_d_find_subscription(svc, topic, client_id) != NULL;
     airy_mtx_unlock(&svc->lock);
     return found;
 }
 
-size_t notify_d_subscription_count(notify_d_service_t *svc, const char *channel)
+size_t notify_d_subscription_count(notify_d_service_t *svc, const char *topic)
 {
-    if (!svc || !channel)
+    if (!svc || !topic)
         return 0;
 
     airy_mtx_lock(&svc->lock);
     size_t count = 0;
     for (size_t i = 0; i < svc->subscription_count; i++) {
         notify_subscription_t *sub = &svc->subscriptions[i];
-        if (sub->active && strcmp(sub->channel, channel) == 0)
+        if (sub->active && strcmp(sub->topic, topic) == 0)
             count++;
     }
     airy_mtx_unlock(&svc->lock);
@@ -345,7 +345,7 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request, char
     if (strcmp(method, "publish") == 0) {
 
         cJSON *params = cJSON_GetObjectItem(req, "params");
-        const char *channel = jsonrpc_get_string_param(params, "channel", "default");
+        const char *topic = jsonrpc_get_string_param(params, "topic", "default");
         const char *message = jsonrpc_get_string_param(params, "message", NULL);
         if (!message || !message[0])
             message = jsonrpc_get_string_param(params, "payload", NULL);
@@ -357,7 +357,7 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request, char
         } else {
 
             airy_mtx_lock(&svc->lock);
-            int rc = notify_d_enqueue(svc, message, channel, event_type);
+            int rc = notify_d_enqueue(svc, message, topic, event_type);
             airy_mtx_unlock(&svc->lock);
             if (rc != AIRY_SUCCESS) {
                 out = jsonrpc_build_error(JSONRPC_INTERNAL_ERROR,
@@ -370,61 +370,61 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request, char
                 airy_mtx_unlock(&svc->lock);
                 result = cJSON_CreateObject();
                 cJSON_AddBoolToObject(result, "queued", 1);
-                cJSON_AddStringToObject(result, "channel", channel);
+                cJSON_AddStringToObject(result, "topic", topic);
                 cJSON_AddStringToObject(result, "event", event_type);
                 cJSON_AddNumberToObject(result, "pending", (double)pending);
                 cJSON_AddNumberToObject(result, "subscribers",
-                                        (double)notify_d_subscription_count(svc, channel));
+                                        (double)notify_d_subscription_count(svc, topic));
             }
         }
     } else if (strcmp(method, "subscribe") == 0) {
 
         cJSON *params = cJSON_GetObjectItem(req, "params");
-        const char *channel = jsonrpc_get_string_param(params, "channel", NULL);
+        const char *topic = jsonrpc_get_string_param(params, "topic", NULL);
         const char *client_id = jsonrpc_get_string_param(params, "client_id", NULL);
 
-        if (!channel || !channel[0] || !client_id || !client_id[0]) {
-            out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "channel and client_id are required",
+        if (!topic || !topic[0] || !client_id || !client_id[0]) {
+            out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "topic and client_id are required",
                                       rid);
         } else {
-            int rc = notify_d_subscribe(svc, channel, client_id);
+            int rc = notify_d_subscribe(svc, topic, client_id);
             if (rc != AIRY_SUCCESS) {
                 out = jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "failed to subscribe", rid);
             } else {
                 result = cJSON_CreateObject();
                 cJSON_AddStringToObject(result, "status", "subscribed");
-                cJSON_AddStringToObject(result, "channel", channel);
+                cJSON_AddStringToObject(result, "topic", topic);
                 cJSON_AddStringToObject(result, "client_id", client_id);
                 cJSON_AddNumberToObject(result, "subscribers",
-                                        (double)notify_d_subscription_count(svc, channel));
+                                        (double)notify_d_subscription_count(svc, topic));
             }
         }
     } else if (strcmp(method, "unsubscribe") == 0) {
 
         cJSON *params = cJSON_GetObjectItem(req, "params");
-        const char *channel = jsonrpc_get_string_param(params, "channel", NULL);
+        const char *topic = jsonrpc_get_string_param(params, "topic", NULL);
         const char *client_id = jsonrpc_get_string_param(params, "client_id", NULL);
 
-        if (!channel || !channel[0] || !client_id || !client_id[0]) {
-            out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "channel and client_id are required",
+        if (!topic || !topic[0] || !client_id || !client_id[0]) {
+            out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "topic and client_id are required",
                                       rid);
         } else {
-            int rc = notify_d_unsubscribe(svc, channel, client_id);
+            int rc = notify_d_unsubscribe(svc, topic, client_id);
             if (rc != AIRY_SUCCESS) {
                 out = jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "failed to unsubscribe", rid);
             } else {
                 result = cJSON_CreateObject();
                 cJSON_AddStringToObject(result, "status", "unsubscribed");
-                cJSON_AddStringToObject(result, "channel", channel);
+                cJSON_AddStringToObject(result, "topic", topic);
                 cJSON_AddStringToObject(result, "client_id", client_id);
                 cJSON_AddNumberToObject(result, "subscribers",
-                                        (double)notify_d_subscription_count(svc, channel));
+                                        (double)notify_d_subscription_count(svc, topic));
             }
         }
     } else if (strcmp(method, "list") == 0) {
 
-        const char *chan_names[NOTIFY_D_MAX_SUBSCRIPTIONS + NOTIFY_D_MAX_CLIENTS];
-        size_t chan_count = 0;
+        const char *topic_names[NOTIFY_D_MAX_SUBSCRIPTIONS + NOTIFY_D_MAX_CLIENTS];
+        size_t topic_count = 0;
         size_t active_clients = 0;
         size_t total_subs = 0;
 
@@ -433,17 +433,17 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request, char
             if (!svc->clients[i].active)
                 continue;
             active_clients++;
-            const char *ch = svc->clients[i].channel;
-            if (ch && ch[0]) {
+            const char *tp = svc->clients[i].topic;
+            if (tp && tp[0]) {
                 int known = 0;
-                for (size_t k = 0; k < chan_count; k++) {
-                    if (strcmp(chan_names[k], ch) == 0) {
+                for (size_t k = 0; k < topic_count; k++) {
+                    if (strcmp(topic_names[k], tp) == 0) {
                         known = 1;
                         break;
                     }
                 }
-                if (!known && chan_count < (sizeof(chan_names) / sizeof(chan_names[0])))
-                    chan_names[chan_count++] = ch;
+                if (!known && topic_count < (sizeof(topic_names) / sizeof(topic_names[0])))
+                    topic_names[topic_count++] = tp;
             }
         }
         for (size_t i = 0; i < svc->subscription_count; i++) {
@@ -452,38 +452,38 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request, char
                 continue;
             total_subs++;
             int known = 0;
-            for (size_t k = 0; k < chan_count; k++) {
-                if (strcmp(chan_names[k], sub->channel) == 0) {
+            for (size_t k = 0; k < topic_count; k++) {
+                if (strcmp(topic_names[k], sub->topic) == 0) {
                     known = 1;
                     break;
                 }
             }
-            if (!known && chan_count < (sizeof(chan_names) / sizeof(chan_names[0])))
-                chan_names[chan_count++] = sub->channel;
+            if (!known && topic_count < (sizeof(topic_names) / sizeof(topic_names[0])))
+                topic_names[topic_count++] = sub->topic;
         }
         airy_mtx_unlock(&svc->lock);
 
         result = cJSON_CreateObject();
         cJSON_AddNumberToObject(result, "clients", (double)active_clients);
         cJSON_AddNumberToObject(result, "subscriptions", (double)total_subs);
-        cJSON *channels_arr = cJSON_CreateArray();
-        for (size_t k = 0; k < chan_count; k++) {
-            size_t subs = notify_d_subscription_count(svc, chan_names[k]);
+        cJSON *topics_arr = cJSON_CreateArray();
+        for (size_t k = 0; k < topic_count; k++) {
+            size_t subs = notify_d_subscription_count(svc, topic_names[k]);
             size_t act = 0;
             airy_mtx_lock(&svc->lock);
             for (size_t i = 0; i < svc->client_count; i++) {
-                if (svc->clients[i].active && svc->clients[i].channel &&
-                    strcmp(svc->clients[i].channel, chan_names[k]) == 0)
+                if (svc->clients[i].active && svc->clients[i].topic &&
+                    strcmp(svc->clients[i].topic, topic_names[k]) == 0)
                     act++;
             }
             airy_mtx_unlock(&svc->lock);
             cJSON *item = cJSON_CreateObject();
-            cJSON_AddStringToObject(item, "channel", chan_names[k]);
+            cJSON_AddStringToObject(item, "topic", topic_names[k]);
             cJSON_AddNumberToObject(item, "subscribers", (double)subs);
             cJSON_AddNumberToObject(item, "active_clients", (double)act);
-            cJSON_AddItemToArray(channels_arr, item);
+            cJSON_AddItemToArray(topics_arr, item);
         }
-        cJSON_AddItemToObject(result, "channels", channels_arr);
+        cJSON_AddItemToObject(result, "topics", topics_arr);
     } else if (strcmp(method, "health") == 0) {
 
         size_t pending = 0;
