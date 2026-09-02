@@ -7,8 +7,10 @@
 ## 定位
 
 `notify_d` 是 AgentRT 的多协议通知守护进程，向外部客户端提供 WebSocket、SSE 与
-Unix Socket 三种事件订阅/广播通道，内置频道订阅注册表、环形事件队列（容量 1024）
-与后台广播线程，是 AgentRT 事件驱动架构的通知枢纽。
+Unix Socket 三种事件订阅/广播通道，内置主题（topic）订阅注册表、环形事件队列
+（容量 1024）与后台广播线程，是 AgentRT 事件驱动架构的通知枢纽。
+订阅键统一为 topic；"channel" 一词在本项目中专指 channel_d 的数据面传输通道，
+与通知订阅无关。
 
 ## 架构
 
@@ -17,7 +19,7 @@ Unix Socket 三种事件订阅/广播通道，内置频道订阅注册表、环�
         ↓
   事件队列（ring buffer，容量 1024，后台线程消费）
         ↓
-  广播引擎（频道匹配 + 订阅注册表匹配）
+  广播引擎（topic 匹配 + 订阅注册表匹配）
         ├── WebSocket 客户端（文本帧 0x81）
         ├── SSE 客户端（event:/data: 格式）
         └── Unix Socket 客户端（原始 JSON）
@@ -28,8 +30,8 @@ Unix Socket 三种事件订阅/广播通道，内置频道订阅注册表、环�
   `258EAFA5-E914-47DA-95CA-C5AB0DC85B11`），无外部加密依赖；
 - 服务核心（`notify_service.c`）：订阅注册表（512 上限）、事件入队/广播、
   JSON-RPC 分发（`notify_d_dispatch_jsonrpc`）；
-- 客户端身份：连接时可通过 `X-Client-Id` 头声明身份；广播投递匹配「连接频道
-  （`X-Channel`）」或「订阅注册表 (channel, client_id)」；
+- 客户端身份：连接时可通过 `X-Client-Id` 头声明身份；广播投递匹配「连接主题
+  （`X-Topic`）」或「订阅注册表 (topic, client_id)」；
 - `main()` 不解析命令行参数（`argc/argv` 未使用），不接受 `--config`；
 - 健康判定：队列满或错误率 > 已通知数一半（且已通知 >10）判为不健康。
 
@@ -40,10 +42,10 @@ Unix Socket 三种事件订阅/广播通道，内置频道订阅注册表、环�
 
 | 方法 | 参数（params） | 说明 |
 |------|----------------|------|
-| `publish` | `message` 或 `payload`(必填)、`channel`(默认 "default")、`event`(默认 "message") | 事件入队广播，返回 `{queued:true,channel,event,pending,subscribers}` |
-| `subscribe` | `channel`(必填)、`client_id`(必填) | 加入订阅注册表（幂等），返回 `{status:"subscribed",channel,client_id,subscribers}` |
-| `unsubscribe` | `channel`(必填)、`client_id`(必填) | 移出订阅注册表（幂等），返回 `{status:"unsubscribed",...}` |
-| `list` | — | `{clients,subscriptions,channels:[{channel,subscribers,active_clients}]}` |
+| `publish` | `message` 或 `payload`(必填)、`topic`(默认 "default")、`event`(默认 "message") | 事件入队广播，返回 `{queued:true,topic,event,pending,subscribers}` |
+| `subscribe` | `topic`(必填)、`client_id`(必填) | 加入订阅注册表（幂等），返回 `{status:"subscribed",topic,client_id,subscribers}` |
+| `unsubscribe` | `topic`(必填)、`client_id`(必填) | 移出订阅注册表（幂等），返回 `{status:"unsubscribed",...}` |
+| `list` | — | `{clients,subscriptions,topics:[{topic,subscribers,active_clients}]}` |
 | `health` | — | `{status,service,queue_pending,queue_capacity,queue_occupancy,consumer_running,active_clients,subscriptions,notified,errors,uptime_s}` |
 | `get_stats` | — | `{daemon:"notify_d",uptime_s,notified,errors,clients,pending}` |
 | `health_check` | — | `{status:"ok",service:"notify_d",uptime_s,timestamp}` |

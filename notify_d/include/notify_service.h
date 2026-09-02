@@ -5,10 +5,13 @@
  * @file notify_service.h
  * @brief Notification service core (notify.* namespace).
  *
- * Carries the notify_d service core: channel subscription registry, ring
+ * Carries the notify_d service core: topic subscription registry, ring
  * event queue, multi-protocol (WebSocket / SSE / Unix Socket) broadcast
  * engine and JSON-RPC method dispatch. The network layer (accept loop, WS
  * handshake, client lifecycle) is orchestrated by src/main.c.
+ *
+ * 0.1.9 M4-S3：订阅键统一为 topic（wire 参数名、事件帧字段、HTTP 头
+ * X-Topic）。"channel" 一词专指 channel_d 数据面传输通道，两域不再混用。
  *
  */
 
@@ -38,7 +41,7 @@ typedef enum {
 typedef struct {
     airy_sock_t fd;
     notify_client_type_t type;
-    char *channel;
+    char *topic;
     char *client_id;
     uint64_t connected_at;
     uint64_t last_activity;
@@ -49,7 +52,7 @@ typedef struct {
 
 typedef struct {
     char *message;
-    char *channel;
+    char *topic;
     char *event_type;
     uint64_t timestamp;
 } notify_event_t;
@@ -57,7 +60,7 @@ typedef struct {
 
 typedef struct {
     char *client_id;
-    char *channel;
+    char *topic;
     int active;
 } notify_subscription_t;
 
@@ -92,16 +95,16 @@ int notify_d_service_init(notify_d_service_t *svc);
 void notify_d_service_destroy(notify_d_service_t *svc);
 
 
-int notify_d_subscribe(notify_d_service_t *svc, const char *channel, const char *client_id);
-int notify_d_unsubscribe(notify_d_service_t *svc, const char *channel, const char *client_id);
-int notify_d_has_subscription(notify_d_service_t *svc, const char *channel, const char *client_id);
-size_t notify_d_subscription_count(notify_d_service_t *svc, const char *channel);
+int notify_d_subscribe(notify_d_service_t *svc, const char *topic, const char *client_id);
+int notify_d_unsubscribe(notify_d_service_t *svc, const char *topic, const char *client_id);
+int notify_d_has_subscription(notify_d_service_t *svc, const char *topic, const char *client_id);
+size_t notify_d_subscription_count(notify_d_service_t *svc, const char *topic);
 
 
 /* Note: notify_d_enqueue does not take the lock; the caller must hold it
  * (mutually exclusive with the consumer thread), or call it in a
  * single-threaded context (unit tests). */
-int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char *channel,
+int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char *topic,
                      const char *event_type);
 int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *event);
 
