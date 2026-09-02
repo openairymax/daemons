@@ -1,6 +1,6 @@
-# daemons — Runtime Daemon Services (18 Daemons)
+# daemons — Runtime Daemon Services (15 Daemons, M4 steady state)
 
-> The user-space service layer of the Airymax agent runtime: eighteen independent daemon processes that together form the backend-service substrate sitting on top of the Airymax kernel.
+> The user-space service layer of the Airymax agent runtime: fifteen independent daemon processes (M4 steady state) that together form the backend-service substrate sitting on top of the Airymax kernel.
 > Leaf repository under the [agentrt](../) management repo.
 
 **Language:** English | [简体中文](README_zh.md)
@@ -17,7 +17,7 @@
 
 ## Overview
 
-**daemons** is the **user-space service layer** of the Airymax agent runtime. It is composed of **18 independent daemon processes** — `gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d` — together with a shared static library `svc_common` (in `common/`). Every daemon follows the **single-responsibility principle**: it runs as its own process, communicates with peers through the unified IPC service bus, and together they form a high-availability, scalable, pluggable micro-service architecture sitting on top of the Airymax kernel.
+**daemons** is the **user-space service layer** of the Airymax agent runtime. It is composed of **15 independent daemon processes** (M4 steady state, 0.1.9) — `gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / notify_d / hook_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d` — together with a shared static library `svc_common` (in `common/`). Every daemon follows the **single-responsibility principle**: it runs as its own process, communicates with peers through the unified IPC service bus, and together they form a high-availability, scalable, pluggable micro-service architecture sitting on top of the Airymax kernel.
 
 ```
 External client → gateway_d → (other daemons via ipc_service_bus) → atoms/syscall → kernel services
@@ -45,7 +45,7 @@ daemons is a service/composition module: it does not provide foundational primit
 
 ```
 daemons/
-├── CMakeLists.txt                 # Top-level build file; manages all 18 daemons + svc_common
+├── CMakeLists.txt                 # Top-level build file; manages all 15 daemons + svc_common
 ├── Dockerfile.ci                  # CI environment Docker image
 ├── README.md                      # This file (English)
 ├── README_zh.md                   # Chinese version
@@ -59,16 +59,13 @@ daemons/
 │   └── tests/                     # svc_common unit tests
 ├── gateway_d/                     # API gateway daemon
 ├── llm_d/                         # LLM service daemon
-├── tool_d/                        # Tool execution daemon
+├── tool_d/                        # Tool execution daemon (absorbs the plugin execution domain per M4)
 ├── sched_d/                       # Task scheduler daemon
 ├── market_d/                      # Application marketplace daemon
-├── monit_d/                       # Monitoring & alerting daemon
+├── monit_d/                       # Observability daemon (absorbs info/observe per M4)
 ├── channel_d/                     # Communication channel daemon
-├── info_d/                        # Information service daemon
 ├── notify_d/                      # Notification push daemon
-├── observe_d/                     # Observability (OpenTelemetry) daemon
 ├── hook_d/                        # Hook daemon (thin shell; core in atoms/coreloopthree)
-├── plugin_d/                      # Plugin daemon
 ├── mem_d/                         # Memory daemon (mem.* namespace, JSONL persistence)
 ├── agent_d/                       # Agent execution daemon (agent.* namespace)
 ├── a2a_d/                         # Agent-to-Agent (A2A) protocol daemon (a2a.* namespace)
@@ -101,30 +98,29 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 
 ## Core Components
 
-### The 18 Daemons
+### The 15 Daemons (M4 consolidation steady state, 0.1.9)
+
+> **M4 (0.1.9 §5):** `observe_d` / `info_d` were absorbed into `monit_d` (observability domain); `plugin_d` was absorbed into `tool_d` (execution domain). External RPC / capability semantics are now served via `monit_d:observe` / `monit_d:info` and `tool_d:plugin`; the gateway-side forwarding surface is unchanged.
 
 | # | Daemon | Directory | Responsibility | CMake Target |
 |---|--------|-----------|----------------|--------------|
 | 1 | **API Gateway** | `gateway_d/` | Sole process boundary — protocol translation (HTTP / WS / SSE / MCP / A2A / OpenAI API ↔ JSON-RPC) and routing; `agent.run_stream` translated to SSE frames only (M1-1d); zero business logic | `gateway_d` |
 | 2 | **LLM Service** | `llm_d/` | LLM inference service (`llm.*`): streaming completion, token counting, cost tracking, response caching | `llm_d` |
-| 3 | **Tool Execution** | `tool_d/` | Tool registration / discovery, sandboxed execution, parameter validation, result caching (`tool.*`) | `tool_d` |
+| 3 | **Tool Execution** | `tool_d/` | Tool registration / discovery, sandboxed execution, parameter validation, result caching (`tool.*`; M4 absorbed the `plugin.*` execution domain) | `tool_d` |
 | 4 | **Task Scheduler** | `sched_d/` | Scheduling domain (`sched.*`): task / DAG graph scheduling + roadmap 3-tier blueprint routing (plan/absorb/cancel/replan/stats) + 4 scheduling strategies (round-robin / weighted / priority / ML) | `sched_d` |
 | 5 | **Application Marketplace** | `market_d/` | Agent / Skill / Tool / Template artifact distribution, install, versioning (`market.*`) | `market_d` |
-| 6 | **Monitoring & Alerting** | `monit_d/` | Observability domain (`monit.*`): metric collection, health checks, alert management, agent-infinite-loop detection | `monit_d` |
+| 6 | **Monitoring & Alerting** | `monit_d/` | Observability domain (`monit.*`): metric collection (M4 absorbed the `observe` /metrics surface) and system-info queries (absorbed `info`), health checks, alert management, agent-infinite-loop detection | `monit_d` |
 | 7 | **Channel Service** | `channel_d/` | Data-plane application channel (`channel.*`): socket/shm channel management and message routing (`/airy_ch_*`) | `channel_d` |
-| 8 | **Information Service** | `info_d/` | System information query and status reporting (`info.*`) | `info_d` |
-| 9 | **Notification Service** | `notify_d/` | Event fan-out pub/sub (`notify.*`, topic semantics): broadcast over WS / SSE / Unix socket with a ring event queue | `notify_d` |
-| 10 | **Observability Service** | `observe_d/` | Prometheus metric collection and HTTP `/metrics` exposure (5 built-in default metrics) | `observe_d` |
-| 11 | **Hook Daemon** | `hook_d/` | Thin daemon shell (`hook.*`); the hook system core lives in `atoms/coreloopthree/src/hook/`, linked via the split `airy_coreloop_hooks` library (M3 §4.2-2, no longer the full engine) | `hook_d` |
-| 12 | **Plugin Daemon** | `plugin_d/` | Plugin discovery / manifest parsing / permission checks / dynamic-load and lifecycle management (`plugin.*`) | `plugin_d` |
-| 13 | **Memory Daemon** | `mem_d/` | Persistent memory service (`mem.*`): write / search / get / delete / recent / evolve, TF-IDF+embedding hybrid retrieval, KB knowledge base, JSONL persistence | `mem_d` |
-| 14 | **Agent Execution** | `agent_d/` | Agent local lifecycle + execution-loop engine (`agent.*`): `run` / `run_stream` / `run_cancel` (M1 session registry + tool loop) + `spawn` / `invoke` / `terminate` / `cancel` / `list` / `count` + health check | `agent_d` |
-| 15 | **A2A Protocol** | `a2a_d/` | Cross-agent protocol (`a2a.*`): Agent Card registration / discovery, A2A task state machine, message delivery | `a2a_d` |
-| 16 | **Dual-Think Cognition** | `think_d/` | Cognition service face (`think.*`): `process` (two-pass GCCP) / `orchestrate` (7-stage pipeline) / `lang_process`·`lang_postprocess` (M3 language front-end) / `review` / `get_stats` — sole service face of the cognition engine | `think_d` |
-| 17 | **Cupolas Security Dome** | `cupolas_d/` | Security PDP (`cupolas.*` / `policy.*`): permission engine + policy versioning (policy.load / activate / rollback / status, M2) + vault / entitlements / netsec + sanitizer / audit | `cupolas_d` |
-| 18 | **Mathematics Coprocessor** | `maths_d/` | Mathematics engine (`maths.*`): pure-C recursive-descent numeric evaluation + optional Python symbolic backend (sympy-mcp / MCP-Mathematics) | `maths_d` |
+| 8 | **Notification Service** | `notify_d/` | Event fan-out pub/sub (`notify.*`, topic semantics): broadcast over WS / SSE / Unix socket with a ring event queue | `notify_d` |
+| 9 | **Hook Daemon** | `hook_d/` | Thin daemon shell (`hook.*`); the hook system core lives in `atoms/coreloopthree/src/hook/`, linked via the split `airy_coreloop_hooks` library (M3 §4.2-2, no longer the full engine) | `hook_d` |
+| 10 | **Memory Daemon** | `mem_d/` | Persistent memory service (`mem.*`): write / search / get / delete / recent / evolve, TF-IDF+embedding hybrid retrieval, KB knowledge base, JSONL persistence | `mem_d` |
+| 11 | **Agent Execution** | `agent_d/` | Agent local lifecycle + execution-loop engine (`agent.*`): `run` / `run_stream` / `run_cancel` (M1 session registry + tool loop) + `spawn` / `invoke` / `terminate` / `cancel` / `list` / `count` + health check | `agent_d` |
+| 12 | **A2A Protocol** | `a2a_d/` | Cross-agent protocol (`a2a.*`): Agent Card registration / discovery, A2A task state machine, message delivery | `a2a_d` |
+| 13 | **Dual-Think Cognition** | `think_d/` | Cognition service face (`think.*`): `process` (two-pass GCCP) / `orchestrate` (7-stage pipeline) / `lang_process`·`lang_postprocess` (M3 language front-end) / `review` / `get_stats` — sole service face of the cognition engine | `think_d` |
+| 14 | **Cupolas Security Dome** | `cupolas_d/` | Security PDP (`cupolas.*` / `policy.*`): permission engine + policy versioning (policy.load / activate / rollback / status, M2) + vault / entitlements / netsec + sanitizer / audit | `cupolas_d` |
+| 15 | **Mathematics Coprocessor** | `maths_d/` | Mathematics engine (`maths.*`): pure-C recursive-descent numeric evaluation + optional Python symbolic backend (sympy-mcp / MCP-Mathematics) | `maths_d` |
 
-> **Binary naming convention:** every daemon executable keeps the `*_d` suffix (`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / info_d / notify_d / observe_d / hook_d / plugin_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d`). Per the 2026-07-05 naming decision, the module name was unified from `daemon` → `daemons` (directory, CMake target `airy_daemons`, repo `daemons.git`), but the 18 process binary names were deliberately preserved.
+> **Binary naming convention:** every daemon executable keeps the `*_d` suffix (`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / notify_d / hook_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d`). Per the 2026-07-05 naming decision, the module name was unified from `daemon` → `daemons` (directory, CMake target `airy_daemons`, repo `daemons.git`), and the process binary names are deliberately preserved. After the M4 consolidation the steady state is **15 binaries** (observe / info / plugin retired, capabilities absorbed into monit_d / tool_d).
 
 > **Phase 3 refactor (0.1.3):** `mem_d / agent_d / a2a_d / think_d / cupolas_d` were split out of the gateway process into independent daemons (execution-body centralization). `gateway_d` now forwards their namespaces through the syscall layer (`airy_sys_svc_call`), keeping the gateway as a pure protocol boundary.
 
@@ -136,16 +132,16 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 ├──────────────────────────────────────────────────────────────┤
 │   SDK (sdk-python / sdk-go / sdk-rust / sdk-typescript ...)   │
 ├──────────────────────────────────────────────────────────────┤
-│   ★ daemons (Service Layer — 18 daemons + svc_common) ★     │
+│   ★ daemons (Service Layer — 15 daemons + svc_common) ★     │
 │                                                               │
 │   gateway_d ─→ HTTP / WS / Stdio / MCP / A2A / OpenAI API     │
 │              ↓                                                │
 │   ┌────────┬────────┬────────┬────────┬────────┬─────────┐    │
 │   │ llm_d  │tool_d  │sched_d │market_d│monit_d │channel_d│   │
 │   ├────────┼────────┼────────┼────────┼────────┼─────────┤    │
-│   │ info_d │notify_d│observe_d│hook_d │plugin_d│         │    │
+│   │ notify_d│hook_d │mem_d   │agent_d │a2a_d   │think_d  │   │
 │   ├────────┼────────┼────────┼────────┼────────┼─────────┤    │
-│   │ mem_d  │agent_d │a2a_d   │think_d│cupolas_d│        │    │
+│   │ cupolas_d│maths_d│        │        │        │         │    │
 │   └────────┴────────┴────────┴────────┴────────┴─────────┘    │
 │              ↑ ipc_service_bus (JSON-RPC 2.0)                 │
 │   ┌─────────────────────────────────────────────────────────┐ │
@@ -167,13 +163,10 @@ svc_common  ←  gateway_d  ←  external clients
           ←  tool_d       ←  gateway_d, llm_d
           ←  sched_d      ←  gateway_d
           ←  market_d     ←  gateway_d
-          ←  monit_d      ←  all daemons (metric reporting)
+          ←  monit_d      ←  all daemons (metric / alert reporting)
           ←  channel_d    ←  gateway_d
-          ←  info_d       ←  gateway_d
-          ←  notify_d     ←  gateway_d (事件广播)
-          ←  observe_d    ←  gateway_d (Prometheus 指标)
+          ←  notify_d     ←  monit_d (alert fan-out)
           ←  hook_d       ←  sched_d, tool_d (hook injection)
-          ←  plugin_d     ←  market_d, tool_d (plugin lifecycle)
           ←  mem_d        ←  gateway_d, CLI/TUI (memory read/write)
           ←  agent_d      ←  gateway_d (agent spawn/invoke)
           ←  a2a_d        ←  gateway_d (A2A message exchange)
@@ -246,7 +239,7 @@ cmake -S . -B /tmp/daemons-build -DBUILD_ALL_PLATFORMS=ON
 
 ### Build artifacts
 
-- 18 daemon executables: `gateway_d`, `llm_d`, `tool_d`, `sched_d`, `market_d`, `monit_d`, `channel_d`, `info_d`, `notify_d`, `observe_d`, `hook_d`, `plugin_d`, `mem_d`, `agent_d`, `a2a_d`, `think_d`, `cupolas_d`, `maths_d` — output to `${CMAKE_BINARY_DIR}/bin/`
+- 15 daemon executables: `gateway_d`, `llm_d`, `tool_d`, `sched_d`, `market_d`, `monit_d`, `channel_d`, `notify_d`, `hook_d`, `mem_d`, `agent_d`, `a2a_d`, `think_d`, `cupolas_d`, `maths_d` — output to `${CMAKE_BINARY_DIR}/bin/` (observe / info / plugin retired into monit_d / tool_d after M4)
 - `svc_common` — shared static library consumed (PRIVATE-linked) by every daemon
 - Public headers installed under `include/agentrt/`
 
