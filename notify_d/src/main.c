@@ -250,7 +250,7 @@ static DWORD WINAPI notify_d_event_loop(LPVOID arg)
             notify_d_broadcast_event(svc, event);
 
             AIRY_FREE(event->message);
-            AIRY_FREE(event->channel);
+            AIRY_FREE(event->topic);
             AIRY_FREE(event->event_type);
             AIRY_FREE(event);
         } else {
@@ -368,7 +368,7 @@ static int notify_d_stop(notify_d_service_t *svc, int force)
             notify_event_t *event = svc->pending[idx];
             if (event) {
                 AIRY_FREE(event->message);
-                AIRY_FREE(event->channel);
+                AIRY_FREE(event->topic);
                 AIRY_FREE(event->event_type);
                 AIRY_FREE(event);
             }
@@ -554,27 +554,27 @@ static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_
     } else {
         client->type = NOTIFY_CLIENT_SOCKET;
 
-        const char *channel = "inbound";
-        const char *channel_hdr = "X-Channel: ";
-        const char *ch = strstr(buffer, channel_hdr);
-        if (ch) {
-            const char *che = strstr(ch + strlen(channel_hdr), "\r\n");
-            if (che) {
-                size_t clen = (size_t)(che - (ch + strlen(channel_hdr)));
-                char *cn = (char *)AIRY_MALLOC(clen + 1);
-                if (cn) {
-                    __builtin_memcpy(cn, ch + strlen(channel_hdr), clen);
-                    cn[clen] = '\0';
-                    channel = cn;
+        const char *topic = "inbound";
+        const char *topic_hdr = "X-Topic: ";
+        const char *th = strstr(buffer, topic_hdr);
+        if (th) {
+            const char *the = strstr(th + strlen(topic_hdr), "\r\n");
+            if (the) {
+                size_t tlen = (size_t)(the - (th + strlen(topic_hdr)));
+                char *tn = (char *)AIRY_MALLOC(tlen + 1);
+                if (tn) {
+                    __builtin_memcpy(tn, th + strlen(topic_hdr), tlen);
+                    tn[tlen] = '\0';
+                    topic = tn;
                 }
             }
         }
-        client->channel = AIRY_STRDUP(channel);
-        if (strcmp(channel, "inbound") != 0)
-            AIRY_FREE((void *)channel);
+        client->topic = AIRY_STRDUP(topic);
+        if (strcmp(topic, "inbound") != 0)
+            AIRY_FREE((void *)topic);
         svc->client_count++;
 
-        int ret = notify_d_enqueue(svc, buffer, client->channel, NULL);
+        int ret = notify_d_enqueue(svc, buffer, client->topic, NULL);
         if (ret == 0) {
             svc->notified_count++;
         } else {
