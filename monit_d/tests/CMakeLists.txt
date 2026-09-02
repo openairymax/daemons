@@ -65,4 +65,31 @@ foreach(TEST_SRC ${MONIT_TEST_SOURCES})
     add_test(NAME monit_d_${TEST_NAME} COMMAND test_monit_${TEST_NAME})
 endforeach()
 
+# M4-S2 内建模块测试：直接编译模块真实实现（observe 附编 prometheus_exporter
+# 提供 um_* 融合导出符号；info 仅依赖 svc_common 传递链）
+add_executable(test_monit_observe_rpc
+    test_observe_rpc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/observe_rpc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/prometheus_exporter.c
+)
+target_include_directories(test_monit_observe_rpc PRIVATE ${MONIT_COMMON_INCLUDES})
+target_link_libraries(test_monit_observe_rpc PRIVATE
+    svc_common
+    Threads::Threads
+)
+target_compile_options(test_monit_observe_rpc PRIVATE -Wall -Wextra -Wno-unused-function)
+add_test(NAME monit_d_observe_rpc COMMAND test_monit_observe_rpc)
+
+add_executable(test_monit_info_rpc
+    test_info_rpc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/info_rpc.c
+)
+target_include_directories(test_monit_info_rpc PRIVATE ${MONIT_COMMON_INCLUDES})
+target_link_libraries(test_monit_info_rpc PRIVATE
+    svc_common
+    Threads::Threads
+)
+target_compile_options(test_monit_info_rpc PRIVATE -Wall -Wextra -Wno-unused-function)
+add_test(NAME monit_d_info_rpc COMMAND test_monit_info_rpc)
+
 enable_testing()

@@ -7,7 +7,8 @@
  *
  * 覆盖 SSoT 不变量：
  * - cap_key 唯一性（全表扫描，重复即失败）
- * - cap_key 可重构性（"<ns>.<method>" 语义一致性，防登记漂移）
+ * - cap_key 可重构性（"<ns>.<method>" 语义一致性，防登记漂移；
+ *   legacy 整编条目——路由 ns 与 cap_key 首段不一致——按路由规则断言）
  * - 关键能力存在性 + 处理方式（kind）断言（防误删特殊处理器）
  * - fail-closed：未登记能力 gw_cap_find 返回 NULL（仅暴露已声明能力）
  * - gw_cap_ns_timeout 已知/未知命名空间回退
@@ -69,6 +70,37 @@ static int g_tests_passed = 0;
         }                       \
     } while (0)
 
+/* cap_key 首段（外部旧命名空间）!= 路由目标 ns → legacy 整编条目
+ * （0.1.9 M4：plugin.* → tool、info.* / observe.* → monit）。 */
+static int cap_external_ns(const gw_cap_t *ci)
+{
+    const char *dot = strchr(ci->cap_key, '.');
+    if (!dot)
+        return 0;
+    size_t l = (size_t)(dot - ci->cap_key);
+    return !(strlen(ci->ns) == l && strncmp(ci->cap_key, ci->ns, l) == 0);
+}
+
+/* legacy 整编条目路由断言：wire 方法为 "<旧ns>_<cap_key 尾段>" 前缀变体，
+ * 或宿主未登记前缀变体时透传的 L2 标准方法（与 cap_key 尾段同名）。 */
+static void cap_legacy_route(const gw_cap_t *ci)
+{
+    const char *dot = strchr(ci->cap_key, '.');
+    ASSERT_NOT_NULL(dot);
+    char prefix[64];
+    int pn = snprintf(prefix, sizeof(prefix), "%.*s_", (int)(dot - ci->cap_key), ci->cap_key);
+    ASSERT_TRUE(pn > 0 && (size_t)pn < sizeof(prefix));
+    size_t pl = (size_t)pn;
+    if (strncmp(ci->method, prefix, pl) == 0) {
+        ASSERT_TRUE(strcmp(ci->method + pl, dot + 1) == 0);
+    } else {
+        ASSERT_TRUE(strcmp(ci->method, dot + 1) == 0);
+        ASSERT_TRUE(strcmp(ci->method, "shutdown") == 0 ||
+                    strcmp(ci->method, "get_stats") == 0 ||
+                    strcmp(ci->method, "health_check") == 0);
+    }
+}
+
 static void test_count_and_uniqueness(void)
 {
     TEST_BEGIN("count + cap_key uniqueness/reconstruct");
@@ -81,15 +113,11 @@ static void test_count_and_uniqueness(void)
         size_t nsl = strlen(ci->ns);
         size_t ml = strlen(ci->method);
         /* cap_key 语义：默认 "<ns>.<method>"（SSoT 不变量）。
-         * 0.1.9 M4 例外（plugin.* → tool_d 整编）：cap_key 保持
-         * "plugin.<method>" 外部契约不变，路由目标 ns=tool、
-         * method="plugin_<method>"（tool_d 登记的 wire 方法名），
-         * 故 plugin 组不满足重构等式，单独断言路由语义。 */
-        if (strncmp(ci->cap_key, "plugin.", 7) == 0) {
-            ASSERT_TRUE(strcmp(ci->ns, "tool") == 0);
-            ASSERT_TRUE(ml > 7);
-            ASSERT_TRUE(strncmp(ci->method, "plugin_", 7) == 0);
-            ASSERT_TRUE(strcmp(ci->cap_key + 7, ci->method + 7) == 0);
+         * legacy 整编条目（0.1.9 M4：plugin.* → tool、info.* / observe.* →
+         * monit）cap_key 保持外部契约不变、路由目标与 wire 方法名单独
+         * 登记，不满足重构等式，按 cap_legacy_route 断言路由语义。 */
+        if (cap_external_ns(ci)) {
+            cap_legacy_route(ci);
         } else {
             ASSERT_TRUE(strlen(ci->cap_key) == nsl + ml + 1);
             ASSERT_TRUE(strncmp(ci->cap_key, ci->ns, nsl) == 0);

@@ -39,12 +39,12 @@ add_subdirectory(monit_d)
 add_subdirectory(sched_d)
 add_subdirectory(market_d)
 add_subdirectory(channel_d)
-add_subdirectory(info_d)
 add_subdirectory(notify_d)
-add_subdirectory(observe_d)
 add_subdirectory(hook_d)
 # 0.1.9 M4（daemon 整编 18→15）：plugin_d → tool_d（插件 dlopen 执行域
-# 随迁 tool_d，plugin_* 方法在 tool 命名空间登记，gateway 改路由）。
+# 随迁 tool_d，plugin_* 方法在 tool 命名空间登记，gateway 改路由）；
+# observe_d / info_d → monit_d（双 Prometheus /metrics 收敛，系统信息
+# 采集与可观测同域，observe_* / info_* 方法在 monit 命名空间登记）。
 # Phase 3：执行体集中化重构 — 新增 daemon（mem.* / agent.* / a2a.* 命名空间）
 add_subdirectory(mem_d)
 add_subdirectory(agent_d)
@@ -115,9 +115,7 @@ airy_print_info("  - monit_d   : ${CMAKE_CURRENT_SOURCE_DIR}/monit_d")
 airy_print_info("  - sched_d   : ${CMAKE_CURRENT_SOURCE_DIR}/sched_d")
 airy_print_info("  - market_d  : ${CMAKE_CURRENT_SOURCE_DIR}/market_d")
 airy_print_info("  - channel_d : ${CMAKE_CURRENT_SOURCE_DIR}/channel_d")
-airy_print_info("  - info_d    : ${CMAKE_CURRENT_SOURCE_DIR}/info_d")
 airy_print_info("  - notify_d  : ${CMAKE_CURRENT_SOURCE_DIR}/notify_d")
-airy_print_info("  - observe_d : ${CMAKE_CURRENT_SOURCE_DIR}/observe_d")
 airy_print_info("  - hook_d    : ${CMAKE_CURRENT_SOURCE_DIR}/hook_d")
 airy_print_info("  - mem_d     : ${CMAKE_CURRENT_SOURCE_DIR}/mem_d")
 airy_print_info("  - agent_d   : ${CMAKE_CURRENT_SOURCE_DIR}/agent_d")
@@ -196,8 +194,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/maths_d/include/
 # 导出项目配置
 if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
    AND TARGET monit_d AND TARGET sched_d AND TARGET market_d
-   AND TARGET channel_d AND TARGET info_d AND TARGET notify_d
-   AND TARGET observe_d AND TARGET hook_d
+   AND TARGET channel_d AND TARGET notify_d AND TARGET hook_d
    AND TARGET mem_d AND TARGET agent_d AND TARGET a2a_d
    AND TARGET think_d AND TARGET cupolas_d AND TARGET maths_d)
     # 注意：仅导出 daemon 可执行文件（svc_common 导出限制见下）。
@@ -209,8 +206,7 @@ if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
     # 因此单独导出可执行文件即可满足 build-tree 消费场景。
     export(TARGETS gateway_d llm_d tool_d
                   monit_d sched_d market_d channel_d
-                  info_d notify_d observe_d
-                  hook_d
+                  notify_d hook_d
                   mem_d agent_d a2a_d
                   think_d cupolas_d maths_d
         FILE "${CMAKE_CURRENT_BINARY_DIR}/agentrt-daemon-targets.cmake"
@@ -224,8 +220,7 @@ endif()
 # 回退组成完整生产安装（AIRY_HOME 体系，K8s 节点运行时根类比）。
 install(TARGETS gateway_d llm_d tool_d
                 monit_d sched_d market_d channel_d
-                info_d notify_d observe_d
-                hook_d
+                notify_d hook_d
                 mem_d agent_d a2a_d think_d cupolas_d maths_d
     RUNTIME DESTINATION bin
 )
