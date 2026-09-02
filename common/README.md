@@ -36,7 +36,7 @@ IPC 通信、JSON-RPC 分发、服务发现、安全认证、容错恢复、并�
 - CMake 包含路径顺序：commons 权威路径声明在 `daemons/common/include` **之前**，确保
   atoms 代码优先解析 commons 版本。
 
-## 组件集（src/ 共 53 个 C 源文件，0.1.9 0c 迁出 circuit_breaker/thread_pool）
+## 组件集（src/ 共 41 个 C 源文件，0.1.9 0c 迁出 circuit_breaker/thread_pool）
 
 | 域 | 组件 | 说明 |
 |----|------|------|
