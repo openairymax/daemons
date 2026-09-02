@@ -167,6 +167,15 @@ static void test_key_caps(void)
     ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD);
     c = gw_cap_find("cupolas.vault_store");
     ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD);
+    /* M2-S3：policy.* 统一 RPC 面（外部 namespace policy → cupolas_d） */
+    c = gw_cap_find("policy.load");
+    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD && strcmp(c->ns, "cupolas") == 0);
+    c = gw_cap_find("policy.activate");
+    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD && strcmp(c->ns, "cupolas") == 0);
+    c = gw_cap_find("policy.rollback");
+    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD && strcmp(c->ns, "cupolas") == 0);
+    c = gw_cap_find("policy.status");
+    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD && strcmp(c->ns, "cupolas") == 0);
     c = gw_cap_find("monit.heartbeat");
     ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD);
     c = gw_cap_find("a2a.send_message");
@@ -252,6 +261,11 @@ static void test_perm_requirements(void)
     ASSERT_TRUE(strcmp(gw_cap_perm_for("plugin.load"), "cap:plugin.admin") == 0);
     ASSERT_TRUE(strcmp(gw_cap_perm_for("mem.delete"), "cap:mem.admin") == 0);
     ASSERT_TRUE(strcmp(gw_cap_perm_for("cupolas.add_rule"), "cap:cupolas.admin") == 0);
+    /* M2-S3：策略演化写操作管理员级，读操作默认放行 */
+    ASSERT_TRUE(strcmp(gw_cap_perm_for("policy.load"), "cap:cupolas.admin") == 0);
+    ASSERT_TRUE(strcmp(gw_cap_perm_for("policy.activate"), "cap:cupolas.admin") == 0);
+    ASSERT_TRUE(strcmp(gw_cap_perm_for("policy.rollback"), "cap:cupolas.admin") == 0);
+    ASSERT_TRUE(gw_cap_perm_for("policy.status") == NULL);
     /* 日常核心链路能力：无额外权限要求（默认放行） */
     ASSERT_TRUE(gw_cap_perm_for("llm.complete") == NULL);
     ASSERT_TRUE(gw_cap_perm_for("think.process") == NULL);
