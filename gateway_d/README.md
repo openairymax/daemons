@@ -60,7 +60,7 @@ gateway 不采用 `method_dispatcher_register`，而是统一经 `gateway_protoc
 | `mem.*` | `write` `search` `get` `delete` `count` `recent` `evolve` `health_check` `get_stats` `kb_ingest` `kb_search` `kb_delete` `kb_list` | mem_d（`AIRY_GATEWAY_MEM_PUBLIC=false` 时拒绝，-32001） |
 | `tool.*` | `register` `list_tools` `get_tool` `execute_tool` `execute` `list` `health_check` `get_stats` | tool_d |
 | `a2a.*` | `register_agent` `unregister_agent` `discover_agents` `create_task` `update_task` `cancel_task` `get_task` `send_message` `count` `send` `receive` `health_check` `get_stats` | a2a_d |
-| `plugin.*` | `load` `unload` `start` `stop` `execute` `get_metadata` `get_state` `get_stats` `list` `install` `uninstall` `health_check` | plugin_d |
+| `plugin.*` | `load` `unload` `start` `stop` `execute` `get_metadata` `get_state` `get_stats` `list` `install` `uninstall` `health_check` | tool_d（M4 整编，转发 `plugin_*` 方法） |
 | `info.*` | `system` `history` `health` `health_check` `get_stats` | info_d |
 | `notify.*` | `publish` `subscribe` `unsubscribe` `list` `health` `health_check` `get_stats` | notify_d |
 | `observe.*` | `record_metric` `query_metrics` `get_metrics` `get_stats` `health_check` | observe_d |
@@ -109,7 +109,7 @@ gateway 不采用 `method_dispatcher_register`，而是统一经 `gateway_protoc
 
 | 环境变量 | 作用 |
 |----------|------|
-| `AIRY_*_SOCK`（llm/tool/agent/mem/sched/think/a2a/plugin/info/notify/observe/market/hook/monit/channel/cupolas） | 覆盖对应 daemon 端点 |
+| `AIRY_*_SOCK`（llm/tool/agent/mem/sched/think/a2a/info/notify/observe/market/hook/monit/channel/cupolas） | 覆盖对应 daemon 端点 |
 | `AIRY_LLM_TCP_ADDR` / `AIRY_LLM_TCP_PORT` | LLM TCP 地址/端口 |
 | `AIRY_AGENT_MODEL` | 覆盖默认模型（其次 `$AIRY_CONFIG_DIR/model.yaml` 的 `global.default_model`） |
 | `AIRY_MCP_CLIENTS` | 外部 MCP 服务器 JSON 数组（stdio/http） |

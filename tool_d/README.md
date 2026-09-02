@@ -10,6 +10,11 @@
 （L2 服务协议），是 Agent 与外部世界交互的执行层，gateway 的 MCP 协议工具
 （`fs_read` 等）最终也转发到这里执行。
 
+**0.1.9 M4 整编（plugin_d → tool_d）**：动态插件执行域（dlopen）随迁本进程——
+插件发现（manifest.yaml 解析）、权限校验（Cupolas 守卫裁决）、加载/启停/执行全部
+在本进程内承载；`plugin_*` 方法在 `tool.*` 命名空间登记，gateway 旧 `plugin.*` cap
+改路由到本进程。插件目录 `${AIRY_HOME}/ecosystem/plugins`。
+
 ## 架构
 
 ```
@@ -22,6 +27,10 @@ gateway_d / 其他调用方 ──(tool.* JSON-RPC)──▶ tool_d
                                                 │   ├─ tool_approval：交互式审批（pending/approve）
                                                 │   ├─ os_sandbox：沙箱执行（Linux）
                                                 │   └─ cache：结果缓存
+                                                │   └─ plugin_*：插件执行域（M4 整编）
+                                                │         ├─ plugin_discovery：扫描 ${AIRY_HOME}/ecosystem/plugins
+                                                │         ├─ plugin_permission：manifest 权限 → 守卫类型
+                                                │         └─ plugin_service：dlopen/dlsym 状态机
                                                 ▼
                                         builtin.c / builtin_{fs,shell,net,git,maths}.c
                                         maths_* → maths_d（maths.sock）
@@ -61,6 +70,33 @@ TCP `127.0.0.1:8081`，Windows pipe `\\.\pipe\airy_tool`）。以下方法由
 `pending` 可查询 → `approve` 决策：`allow` 单次放行；`always` 放行并写入持久 ACL
 规则；`deny` 拒绝（执行失败描述「User denied tool execution」）。
 
+### 插件方法族（M4 整编，12 个）
+
+以下 `plugin_*` 方法由 `plugin_rpc.c` 在 tool 命名空间登记（gateway `plugin.*`
+cap 转发目标即这些方法）：
+
+| 方法 | 参数（params） | 说明 |
+|------|----------------|------|
+| `plugin_load` | `library_path`(必填)、`config_path`(可选) | dlopen 加载插件，返回 `{name}` |
+| `plugin_unload` | `name`(必填) | 卸载插件，返回 `{unloaded:true}` |
+| `plugin_start` | `name`(必填) | 启动插件，返回 `{started:true}` |
+| `plugin_stop` | `name`(必填) | 停止插件，返回 `{stopped:true}` |
+| `plugin_execute` | `name`(必填)、`input`(必填) | 调用导出入口执行（JSON 入 → 出），返回 `{output}` |
+| `plugin_get_metadata` | `name`(必填) | 元数据 `{name,version,author,description,type,api_version,min_airy_version}` |
+| `plugin_get_state` | `name`(必填) | 插件状态 `{state}` |
+| `plugin_get_stats` | `name`(可选) | 无 `name` 返回聚合统计；有 `name` 返回单插件统计 |
+| `plugin_list` | `type_filter`(可选) | 已加载插件列表 `{plugins:[...],total}` |
+| `plugin_install` | 同 `plugin_load` | `plugin_load` 的别名（L2 协议标准方法） |
+| `plugin_uninstall` | 同 `plugin_unload` | `plugin_unload` 的别名 |
+| `plugin_health_check` | — | `{service:"tool_d",healthy,plugin_count,timestamp}` |
+
+插件状态机：UNLOADED → LOADED → INITIALIZED → RUNNING → ERROR/DISABLED。权限
+体系（16 项）见 `plugin_permission.c` `SUPPORTED_PERMISSIONS`：file_read/file_write/
+network_outbound/network_inbound/tool_execute/memory_access/hook_register/system_call/
+process_spawn/ipc_connect/service_discovery/config_read/config_write/log_write/
+metrics_export/audit_trigger → 对应 `SAFETY_GUARD_*` 守卫类型。严格模式（默认）：
+未声明/未知/被拒权限 → 拒绝加载。
+
 ## 配置
 
 - 命令行：`--manager <config>` / `-c <config>`（配置文件）；`--tcp` 强制 TCP。
@@ -98,7 +134,8 @@ cmake --build build --target tool_d
 
 - `tests/`（`tool_d_*` ctest 用例）：`test_service` / `test_registry` /
   `test_executor` / `test_validator` / `test_cache` / `test_sandbox_integration` /
-  `test_fs_e2e`；`test_os_sandbox` 仅 Linux（依赖 Landlock/seccomp）。
+  `test_fs_e2e` / `test_plugin_permission`（权限映射与严格模式）/ `test_plugin_discovery`
+  （离线扩展校验器 fail-closed 面）；`test_os_sandbox` 仅 Linux（依赖 Landlock/seccomp）。
 - 运行：
 
 ```bash

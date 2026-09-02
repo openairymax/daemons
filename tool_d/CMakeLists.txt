@@ -53,6 +53,10 @@ set(TOOL_SERVICE_SOURCES
     src/builtin_maths.c
     src/tool_interactive_approval.c
     src/os_sandbox.c
+    # 0.1.9 M4：plugin_d → tool_d 整编——插件 dlopen 引擎随迁
+    src/plugin_service.c
+    src/plugin_discovery.c
+    src/plugin_permission.c
 )
 
 add_library(airy_tool_service STATIC ${TOOL_SERVICE_SOURCES})
@@ -140,6 +144,8 @@ add_executable(tool_d
     src/main.c
     src/config.c
     src/utils/tool_helpers.c
+    # 0.1.9 M4：plugin_d → tool_d 整编——插件 RPC 方法面
+    src/plugin_rpc.c
 )
 
 if(WIN32)
@@ -152,6 +158,9 @@ if(WIN32)
     target_link_libraries(tool_d PRIVATE airy_common ws2_32 bcrypt)
 elseif(UNIX)
     target_link_libraries(tool_d PRIVATE airy_common Threads::Threads airy_platform_libs)
+    # dlopen 插件加载：GNU/Linux libdl（glibc≥2.34 并入 libc）；macOS
+    # dlopen 在 libSystem，CMAKE_DL_LIBS 自动为空
+    target_link_libraries(tool_d PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
 target_include_directories(tool_d PRIVATE

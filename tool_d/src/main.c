@@ -11,6 +11,7 @@
 #include "daemon_main.h"
 #include "platform.h"
 #include "param_validator.h"
+#include "plugin_rpc.h"
 #include "svc_logger.h"
 #include "thread_pool.h"
 #include "tool_service.h"
@@ -429,6 +430,8 @@ static void free_daemon_config(void)
 
 static void destroy_service(void)
 {
+    /* 0.1.9 M4：插件执行域随 tool_d 回收 */
+    plugin_rpc_cleanup();
     if (g_service) {
         tool_service_destroy(g_service);
         g_service = NULL;
@@ -457,6 +460,10 @@ int main(int argc, char **argv)
     atexit(log_cleanup);
 
     daemon_cupolas_init("tool_d");
+
+    /* 0.1.9 M4：plugin_d → tool_d 整编——插件执行域（dlopen）随迁，
+     * 权限/发现/扫描加载在 tool_d 进程内初始化。 */
+    plugin_rpc_init();
 
     load_daemon_config(config_path);
     if (use_tcp)
@@ -536,6 +543,10 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_tool_d, "pending", on_pending_method, NULL);
     method_dispatcher_register(g_dispatcher_tool_d, "approve", on_approve_method, NULL);
     SVC_LOG_INFO("Registered %d RPC methods (tool.* namespace)", 11);
+
+    /* 0.1.9 M4：plugin_d → tool_d 整编——plugin_* 方法（dlopen 执行域）
+     * 登记到 tool 命名空间（gateway plugin.* cap 改路由到此）。 */
+    plugin_rpc_register(g_dispatcher_tool_d);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_tool_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
