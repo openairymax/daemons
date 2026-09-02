@@ -56,6 +56,7 @@ int test_dag_cycle_detection(void);
 int test_dag_invalid_node_ids(void);
 int test_priority_queue_order(void);
 int test_dag_input_fallback(void);
+int test_dag_list(void);
 /* test_dag_failure.c */
 int test_dag_failure_cascade(void);
 int test_dag_cancel(void);
