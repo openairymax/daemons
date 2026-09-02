@@ -39,7 +39,7 @@ typedef struct cupolas_service cupolas_service_t;
  * M2-S2（0.1.9 §3.2 PDP）：注入后 check_permission 裁决先经动态策略
  * 运行集（命中即权威，含显式 DENY），未命中回退基础 ACL。 */
 struct dpolicy_engine_s;
-void cupolas_service_set_policy_engine(cupolas_service_t *svc, struct dpolicy_engine_s *dpolicy);
+void cupolas_set_dpolicy(cupolas_service_t *svc, struct dpolicy_engine_s *dpolicy);
 
 
 typedef struct {
