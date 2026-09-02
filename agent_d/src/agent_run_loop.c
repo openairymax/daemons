@@ -291,7 +291,7 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
                 char dbuf[AGENT_RUN_DELTA_MAX];
                 AIRY_STRNCPY_TERM(dbuf, text, sizeof(dbuf));
                 cJSON_AddStringToObject(td, AIRY_RS_K_DELTA, dbuf);
-                agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_TOKEN_DELTA, td);
+                agent_run_emit_event(sink, &seq, session ? session->run_id : NULL, sess, AIRY_RS_TYPE_TOKEN_DELTA, td);
             }
         }
 
@@ -323,7 +323,7 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
                     char abuf[160];
                     AIRY_STRNCPY_TERM(abuf, targs, sizeof(abuf));
                     cJSON_AddStringToObject(ts, AIRY_RS_K_ARGS, abuf);
-                    agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_TOOL_START, ts);
+                    agent_run_emit_event(sink, &seq, session ? session->run_id : NULL, sess, AIRY_RS_TYPE_TOOL_START, ts);
                 }
             }
 
@@ -339,7 +339,7 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
                     char rbuf[160];
                     AIRY_STRNCPY_TERM(rbuf, result_text ? result_text : "", sizeof(rbuf));
                     cJSON_AddStringToObject(te, AIRY_RS_K_RESULT_HASH, rbuf);
-                    agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_TOOL_END, te);
+                    agent_run_emit_event(sink, &seq, session ? session->run_id : NULL, sess, AIRY_RS_TYPE_TOOL_END, te);
                 }
             }
 

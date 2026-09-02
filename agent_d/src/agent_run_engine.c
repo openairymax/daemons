@@ -46,7 +46,8 @@
  * data 所有权转移给本函数（内部 cJSON_Print 后 Delete），emit 不得阻塞。
  */
 void agent_run_emit_event(const agent_run_event_sink_t *sink, uint64_t *seq,
-                          const char *session_id, const char *type, cJSON *data)
+                          const char *run_id, const char *session_id, const char *type,
+                          cJSON *data)
 {
     if (!sink || !sink->emit || !type)
         return;
@@ -59,6 +60,8 @@ void agent_run_emit_event(const agent_run_event_sink_t *sink, uint64_t *seq,
     cJSON_AddNumberToObject(env, AIRY_RS_K_V, AIRY_RS_VERSION);
     cJSON_AddStringToObject(env, AIRY_RS_K_TYPE, type);
     cJSON_AddNumberToObject(env, AIRY_RS_K_ID, (double)(*seq)++);
+    if (run_id && run_id[0])
+        cJSON_AddStringToObject(env, AIRY_RS_K_RUN_ID, run_id);
     if (session_id && session_id[0])
         cJSON_AddStringToObject(env, AIRY_RS_K_SESSION, session_id);
     cJSON_AddNumberToObject(env, AIRY_RS_K_TS, (double)airy_time_ms());
@@ -147,6 +150,17 @@ void agent_run_gen_session_id(char *out, size_t out_size)
     uint64_t rand_bits = ((uint64_t *)&now)[0] ^ (s << 32);
     rand_bits = rand_bits * 6364136223846793005ULL;
     snprintf(out, out_size, "sess_%016llx_%04llx", (unsigned long long)(now ^ rand_bits),
+             (unsigned long long)(s & 0xFFFF));
+}
+
+void agent_run_gen_run_id(char *out, size_t out_size)
+{
+    static uint64_t seq = 0;
+    uint64_t now = (uint64_t)airy_time_ms();
+    uint64_t s = seq++;
+    uint64_t rand_bits = ((uint64_t *)&now)[0] ^ (s << 17);
+    rand_bits = rand_bits * 2862933555777941757ULL;
+    snprintf(out, out_size, "run_%016llx_%04llx", (unsigned long long)(now ^ rand_bits),
              (unsigned long long)(s & 0xFFFF));
 }
 
@@ -386,6 +400,9 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     if (!active)
         return -1;
 
+    /* 每次运行独立 run_id（§2.4.2 信封锚点；run_start 帧起每帧携带） */
+    agent_run_gen_run_id(active->run_id, sizeof(active->run_id));
+
     uint64_t seq = 0;
 
     /* run_start 事件（决策链写侧 + run_stream 流式推送） */
@@ -406,7 +423,7 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
             cJSON_AddStringToObject(rs, AIRY_RS_K_PROMPT, pbuf);
             if (model && model[0])
                 cJSON_AddStringToObject(rs, AIRY_RS_K_MODEL, model);
-            agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_RUN_START, rs);
+            agent_run_emit_event(sink, &seq, active->run_id, sess, AIRY_RS_TYPE_RUN_START, rs);
         }
     }
 
@@ -500,7 +517,7 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
                                     char plbuf[2048];
                                     AIRY_STRNCPY_TERM(plbuf, pstr, sizeof(plbuf));
                                     cJSON_AddStringToObject(ps, AIRY_RS_K_PLAN, plbuf);
-                                    agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_PLAN, ps);
+                                    agent_run_emit_event(sink, &seq, active->run_id, sess, AIRY_RS_TYPE_PLAN, ps);
                                 }
                                 AIRY_FREE(pstr);
                             }
@@ -637,7 +654,7 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
                 cJSON_AddStringToObject(msg, AIRY_RS_K_CONTENT, final_text);
                 if (reasoning_acc && reasoning_acc[0])
                     cJSON_AddStringToObject(msg, AIRY_RS_K_REASONING, reasoning_acc);
-                agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_MESSAGE, msg);
+                agent_run_emit_event(sink, &seq, active->run_id, sess, AIRY_RS_TYPE_MESSAGE, msg);
             }
         }
         cJSON *rend = cJSON_CreateObject();
@@ -650,7 +667,7 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
             cJSON_AddStringToObject(rend, AIRY_RS_K_STATUS, status);
             cJSON_AddNumberToObject(rend, AIRY_RS_K_DURATION, (double)airy_time_ms());
             cJSON_AddNumberToObject(rend, AIRY_RS_K_USE_TICKS, (double)total_tokens);
-            agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_RUN_END, rend);
+            agent_run_emit_event(sink, &seq, active->run_id, sess, AIRY_RS_TYPE_RUN_END, rend);
         }
         if (run_rc != 0 && !cancelled) {
             cJSON *err = cJSON_CreateObject();
@@ -662,7 +679,7 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
                                             "agent.run failed: tool loop exhausted or LLM "
                                             "service error");
                 cJSON_AddBoolToObject(err, AIRY_RS_K_RECOVER, 1);
-                agent_run_emit_event(sink, &seq, sess, AIRY_RS_TYPE_ERROR, err);
+                agent_run_emit_event(sink, &seq, active->run_id, sess, AIRY_RS_TYPE_ERROR, err);
             }
         }
     }
