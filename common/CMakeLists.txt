@@ -315,7 +315,6 @@ install(FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/include/airy_event_loop.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_oom.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/ipc_backpressure.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_startup.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_event_driver.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_cupolas_bootstrap.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/daemon_errors.h

@@ -21,6 +21,7 @@
 #include "gateway_service.h"
 #include "gateway_business_handler.h"
 #include "gateway_biz_internal.h"
+#include "gateway_cap_registry.h"
 #include "daemon_security.h"
 #include "logging.h"
 #include "daemon_platform_ext.h"
@@ -498,6 +499,15 @@ int main(int argc, char *argv[])
     err = gateway_service_init(g_service);
     if (err != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to init service (err=%d)", err);
+        goto cleanup_service;
+    }
+
+    /* 0.1.9 §5.1 namespace 独占性门禁：cap registry 每个命名空间须登记
+     * 独占 daemon、FWD 转发目标与归属一致；冲突 fail-closed 拒启
+     * （边界从约定升级为启动期断言）。 */
+    if (gw_cap_ns_validate() != 0) {
+        SVC_LOG_ERROR("cap registry namespace ownership check failed, "
+                      "refusing to start gateway");
         goto cleanup_service;
     }
 
