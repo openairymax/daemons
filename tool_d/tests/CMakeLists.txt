@@ -116,6 +116,11 @@ foreach(TEST_SRC ${TOOL_TEST_SOURCES})
     endif()
 
     if(AIRY_HAS_YAML)
+        # TOOL_IMPL_SOURCES 直编 ../src/config.c（无条件 #include <yaml.h>）；
+        # YAML_INCLUDE_DIRS 来自根 CMakeLists 的 pkg-config/FindYAML 探测。
+        # 缺失时 Linux 默认路径掩盖、macOS/Homebrew（keg-only 头）编译失败
+        # （tool_d 测试目标 yaml.h not found，build-test macOS 实证）。
+        target_include_directories(test_tool_${TEST_NAME} PRIVATE ${YAML_INCLUDE_DIRS})
         target_link_libraries(test_tool_${TEST_NAME} PRIVATE yaml)
     endif()
 
