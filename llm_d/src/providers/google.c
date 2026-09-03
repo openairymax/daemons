@@ -27,6 +27,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* macOS 严格 feature 宏（-std=c99 等）下 <string.h> 不声明 explicit_bzero，
+ * Windows UCRT 亦无；此处 <string.h> 已包含（若有系统声明已就位，宏不会
+ * 与其碰撞），随后所有调用点统一展开为 volatile 擦除，保证敏感内存清零
+ * 不被优化器消去。 */
+#ifndef explicit_bzero
+static inline void airy_provider_explicit_bzero(void *s, size_t n)
+{
+    volatile unsigned char *p = (volatile unsigned char *)s;
+    while (n-- > 0) {
+        *p++ = 0;
+    }
+}
+#define explicit_bzero(s, n) airy_provider_explicit_bzero((s), (n))
+#endif
+
+
 #define GOOGLE_DEFAULT_BASE "https://generativelanguage.googleapis.com/v1beta"
 #define GOOGLE_DEFAULT_MODEL "gemini-2.0-flash"
 
