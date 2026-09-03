@@ -5,13 +5,13 @@
 
 **Language:** English | [简体中文](README_zh.md)
 
-[![Version](https://img.shields.io/badge/version-0.1.5-5a6b7e)](https://atomgit.com/openairymax/daemons)
+[![Version](https://img.shields.io/badge/version-0.1.9-5a6b7e)](https://atomgit.com/openairymax/daemons)
 [![License](https://img.shields.io/badge/license-AGPL--3.0+Apache--2.0-4a90d9)](LICENSE)
 [![C11](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/11)
 
 - **Repository:** `git@atomgit.com:openairymax/daemons.git`
-- **Branch:** `feature/official-hubs-01`
-- **Version:** 0.1.5 (aligned with agentrt management repo)
+- **Branch:** `develop/hubs-01`
+- **Version:** 0.1.9 (aligned with agentrt management repo)
 
 ---
 
@@ -33,7 +33,7 @@ Design goals:
 - **Endogenous security** — `svc_common` PUBLIC-links `cupolas` (`daemon_cupolas_bootstrap.c`), so every daemon automatically inherits Cupolas security: request authentication, input sanitization, audit, sandbox.
 - **Unified protocols** — all daemons communicate over JSON-RPC 2.0; MCP / A2A / OpenAI-API protocol conversion happens at the gateway boundary.
 
-Within the Airymax 0.1.3 release, the workspace is partitioned into **multiple repositories** aggregated by the [agentrt](../) management repo; `daemons` is one of the 7 leaf repositories, forming the **Service Layer** in the cyclic architecture (above the Gateway Layer `gateway`, below the Ecosystem Layer `sdk`/`ecosystem`). It is the topmost agentrt-internal leaf repository — every daemon dispatches business logic downward through `atoms/syscall` into the kernel.
+`daemons` is one of the 7 leaf repositories aggregated by the [agentrt](../) management repo, forming the **Service Layer** in the cyclic architecture (above the Gateway Layer `gateway`, below the Ecosystem Layer `sdk`/`ecosystem`). It is the topmost agentrt-internal leaf repository — every daemon dispatches business logic downward through `atoms/syscall` into the kernel.
 
 ## Module Classification
 
@@ -122,7 +122,7 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 
 > **Binary naming convention:** every daemon executable keeps the `*_d` suffix (`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / notify_d / hook_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d`). Per the 2026-07-05 naming decision, the module name was unified from `daemon` → `daemons` (directory, CMake target `airy_daemons`, repo `daemons.git`), and the process binary names are deliberately preserved. After the M4 consolidation the steady state is **15 binaries** (observe / info / plugin retired, capabilities absorbed into monit_d / tool_d).
 
-> **Phase 3 refactor (0.1.3):** `mem_d / agent_d / a2a_d / think_d / cupolas_d` were split out of the gateway process into independent daemons (execution-body centralization). `gateway_d` now forwards their namespaces through the syscall layer (`airy_sys_svc_call`), keeping the gateway as a pure protocol boundary.
+> **Phase 3 refactor:** `mem_d / agent_d / a2a_d / think_d / cupolas_d` were split out of the gateway process into independent daemons (execution-body centralization). `gateway_d` now forwards their namespaces through the syscall layer (`airy_sys_svc_call`), keeping the gateway as a pure protocol boundary.
 
 ## Architecture
 
@@ -323,7 +323,7 @@ int main(void) {
     /* Daemon registers with the IPC service bus, advertising capabilities. */
     airy_svc_config_t cfg = {
         .name           = "my_daemon",
-        .version        = "0.1.1",
+        .version        = "0.1.9",
         .capabilities   = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_CANCELABLE,
         .max_concurrent = 64,
         .timeout_ms     = 5000,
