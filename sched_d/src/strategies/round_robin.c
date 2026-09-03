@@ -274,7 +274,7 @@ static int round_robin_update_agent_status(void *data, const agent_info_t *agent
  * @param result Output param, returns the scheduling result
  * @return 0 on success, non-zero error code
  */
-static int round_robin_schedule(void *data, const task_info_t *task_info, sched_result_t **result)
+static int round_robin_schedule(void *data, const sched_task_info_t *task_info, sched_result_t **result)
 {
     if (!data || !task_info || !result) {
         return AIRY_ERR_INVALID_PARAM;

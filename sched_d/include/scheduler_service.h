@@ -40,7 +40,7 @@ typedef struct {
     uint32_t timeout_ms;
     void *task_data;
     size_t task_data_size;
-} task_info_t;
+} sched_task_info_t;
 
 /**
  * @brief Task lifecycle status (async queue: enqueue -> selected -> execute
@@ -184,7 +184,7 @@ int sched_service_update_agent_status(sched_service_t *service, const agent_info
  * @param result Output parameter, returns the scheduling result
  * @return 0 on success, non-zero error code
  */
-int sched_service_schedule_task(sched_service_t *service, const task_info_t *task_info,
+int sched_service_schedule_task(sched_service_t *service, const sched_task_info_t *task_info,
                                 sched_result_t **result);
 
 /**
@@ -219,7 +219,7 @@ int sched_service_reload_config(sched_service_t *service, const sched_config_t *
  * @param out_task_id Output parameter, returns the effective task ID (AIRY_MALLOC, caller AIRY_FREEs)
  * @return 0 on success, non-zero error code
  */
-int sched_service_submit_task(sched_service_t *service, const task_info_t *task_info,
+int sched_service_submit_task(sched_service_t *service, const sched_task_info_t *task_info,
                               char **out_task_id);
 
 /**

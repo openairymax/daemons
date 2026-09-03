@@ -48,7 +48,7 @@ static void test_round_robin_strategy(void)
     ret = strategy->register_agent(data, &agent);
     assert(ret == 0);
 
-    task_info_t task;
+    sched_task_info_t task;
     AIRY_MEMSET(&task, 0, sizeof(task));
     task.task_id = "rr_task_1";
     task.task_description = "Round robin test task";
@@ -105,7 +105,7 @@ static void test_weighted_strategy(void)
     strategy->register_agent(data, &agent1);
     strategy->register_agent(data, &agent2);
 
-    task_info_t task;
+    sched_task_info_t task;
     AIRY_MEMSET(&task, 0, sizeof(task));
     task.task_id = "weighted_task_1";
     task.priority = TASK_PRIORITY_NORMAL;
@@ -148,7 +148,7 @@ static void test_ml_based_strategy(void)
 
         strategy->register_agent(data, &agent);
 
-        task_info_t task;
+        sched_task_info_t task;
         AIRY_MEMSET(&task, 0, sizeof(task));
         task.task_id = "ml_task_1";
         task.priority = TASK_PRIORITY_NORMAL;
@@ -193,12 +193,12 @@ static void test_priority_based_strategy(void)
 
     strategy->register_agent(data, &agent);
 
-    task_info_t low_task;
+    sched_task_info_t low_task;
     AIRY_MEMSET(&low_task, 0, sizeof(low_task));
     low_task.task_id = "low_priority_task";
     low_task.priority = TASK_PRIORITY_LOW;
 
-    task_info_t high_task;
+    sched_task_info_t high_task;
     AIRY_MEMSET(&high_task, 0, sizeof(high_task));
     high_task.task_id = "high_priority_task";
     high_task.priority = TASK_PRIORITY_HIGH;
@@ -294,7 +294,7 @@ static void test_round_robin_error_paths(void)
     assert(ret == AIRY_ERR_INVALID_PARAM);
 
     sched_result_t *result = NULL;
-    task_info_t task;
+    sched_task_info_t task;
     AIRY_MEMSET(&task, 0, sizeof(task));
     task.task_id = "err_task";
     task.priority = TASK_PRIORITY_NORMAL;

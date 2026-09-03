@@ -194,7 +194,7 @@ int test_priority_queue_order(void)
     g_fail_goal = NULL;
     g_block = 0;
 
-    task_info_t t = {0};
+    sched_task_info_t t = {0};
     char *tid = NULL;
     t.task_description = "goal-L";
     t.priority = TASK_PRIORITY_LOW;

@@ -196,7 +196,7 @@ int sched_service_update_agent_status(sched_service_t *service, const agent_info
     return AIRY_ERR_NOT_FOUND;
 }
 
-int sched_service_schedule_task(sched_service_t *service, const task_info_t *task_info,
+int sched_service_schedule_task(sched_service_t *service, const sched_task_info_t *task_info,
                                 sched_result_t **result)
 {
     if (!service || !task_info || !result || !service->initialized) {

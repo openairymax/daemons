@@ -60,7 +60,7 @@ typedef struct {
      * @param result Output parameter, returns the scheduling result
      * @return 0 on success, non-zero error code
      */
-    int (*schedule)(void *data, const task_info_t *task_info, sched_result_t **result);
+    int (*schedule)(void *data, const sched_task_info_t *task_info, sched_result_t **result);
 
     /**
      * @brief Get the strategy name.
