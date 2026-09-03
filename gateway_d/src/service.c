@@ -9,8 +9,11 @@
 
 #include "gateway_service.h"
 #include "daemon_platform_ext.h"
-/* airy_thread_create/airy_thread_join 是 platform_process.h 的宏别名；
- * macOS clang ≥16 将隐式函数声明视为错误，缺包含即编译失败。 */
+/* stdio 网关线程使用平台线程 API。airy_thread_create/join 是
+ * platform_process.h 的宏别名，但 airy_core 的 PUBLIC 编译定义
+ * AIRY_USE_SCHEDULER_THREAD_IMPL 会压制该别名，使本 TU 落到 corekern
+ * scheduler 内部函数（无公开声明，macOS clang 隐式声明即报错）。这里
+ * 直接调用有公开声明的 airy_platform_thread_*，语义不变（普通后台线程）。 */
 #include "platform_process.h"
 #ifdef GATEWAY_HAS_HTTP
 #include "http_gateway.h"
@@ -299,8 +302,8 @@ airy_err_t gateway_service_start(gateway_service_t service)
                                                          service->handler, service->handler_data);
             }
 
-            if (airy_thread_create(&service->stdio_thread, gateway_stdio_thread_main,
-                                   service->stdio_gateway) != 0) {
+            if (airy_platform_thread_create(&service->stdio_thread, gateway_stdio_thread_main,
+                                            service->stdio_gateway) != 0) {
                 AIRY_LOG_ERROR("stdio gateway thread create failed");
                 gateway_destroy(service->stdio_gateway);
                 service->stdio_gateway = NULL;
@@ -380,7 +383,7 @@ airy_err_t gateway_service_stop(gateway_service_t service, bool force __attribut
         gateway_destroy(service->stdio_gateway);
         service->stdio_gateway = NULL;
         if (service->stdio_thread_started) {
-            airy_thread_join(service->stdio_thread, NULL);
+            airy_platform_thread_join(service->stdio_thread, NULL);
             service->stdio_thread_started = 0;
         }
         AIRY_LOG_INFO("gateway_service_stop: Stdio gateway destroyed");
