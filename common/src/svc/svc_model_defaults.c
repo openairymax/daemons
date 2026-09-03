@@ -20,7 +20,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+/* MSVC 无 <strings.h>（C1083）且无 strcasecmp：映射为 _stricmp */
+#if defined(_WIN32)
+#define strcasecmp _stricmp
+#else
 #include <strings.h>
+#endif
 
 #ifdef HAVE_YAML
 #include <yaml.h>
