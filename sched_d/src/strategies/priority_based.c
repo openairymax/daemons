@@ -213,7 +213,7 @@ static int priority_based_update_agent_status(void *data, const agent_info_t *ag
  * @param priority_weight Priority weight
  * @return Match score
  */
-static float calculate_match_score(const agent_info_t *agent, const task_info_t *task,
+static float calculate_match_score(const agent_info_t *agent, const sched_task_info_t *task,
                                    float priority_weight)
 {
     if (!agent->is_available || agent->load_factor >= 0.9) {
@@ -243,7 +243,7 @@ static float calculate_match_score(const agent_info_t *agent, const task_info_t 
  * @param result Output param, returns the scheduling result
  * @return 0 on success, non-zero error code
  */
-static int priority_based_schedule(void *data, const task_info_t *task_info,
+static int priority_based_schedule(void *data, const sched_task_info_t *task_info,
                                    sched_result_t **result)
 {
     if (!data || !task_info || !result) {

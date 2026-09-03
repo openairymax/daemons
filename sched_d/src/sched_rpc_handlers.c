@@ -182,7 +182,7 @@ static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    task_info_t task = {0};
+    sched_task_info_t task = {0};
 
     const char *tid = get_string_field(task_json, "task_id", NULL);
     task.task_id = tid ? AIRY_STRDUP(tid) : NULL;

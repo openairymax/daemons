@@ -74,7 +74,7 @@ void sched_hall_result(const char *task_id, const char *agent, const char *statu
     cJSON_Delete(evt);
 }
 
-int sched_service_submit_task(sched_service_t *service, const task_info_t *task_info,
+int sched_service_submit_task(sched_service_t *service, const sched_task_info_t *task_info,
                               char **out_task_id)
 {
     if (!service || !task_info || !out_task_id || !service->initialized) {

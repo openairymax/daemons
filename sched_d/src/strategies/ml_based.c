@@ -320,7 +320,7 @@ static int ml_based_update_agent_status(void *data, const agent_info_t *agent_in
     return ml_based_register_agent(data, agent_info);
 }
 
-static int ml_based_schedule(void *data, const task_info_t *task_info, sched_result_t **result)
+static int ml_based_schedule(void *data, const sched_task_info_t *task_info, sched_result_t **result)
 {
     if (!data || !task_info || !result)
         return AIRY_ERR_INVALID_PARAM;

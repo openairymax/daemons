@@ -166,7 +166,7 @@ static int weighted_update_agent_status(void *raw_data, const agent_info_t *agen
     return AIRY_OK;
 }
 
-static int weighted_schedule(void *raw_data, const task_info_t *task_info __attribute__((unused)),
+static int weighted_schedule(void *raw_data, const sched_task_info_t *task_info __attribute__((unused)),
                              sched_result_t **out_result)
 {
     if (!raw_data || !out_result)

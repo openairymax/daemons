@@ -104,7 +104,7 @@ static void *sched_worker_thread(void *arg)
         char *error = NULL;
         const uint64_t exec_t0 = sched_now_ms();
 
-        task_info_t tinfo;
+        sched_task_info_t tinfo;
         __builtin_memset(&tinfo, 0, sizeof(tinfo));
         tinfo.task_id = rec->task_id;
         tinfo.task_description = rec->task_description;
