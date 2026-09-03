@@ -240,6 +240,16 @@ int parallel_executor(const char *agent_id, const char *task_description,
     int now = ++g_concurrent_now;
     if (now > g_concurrent_max)
         g_concurrent_max = now;
+    /* 并行层会合窗：同层 B/C 由线程池并发分发，但在高负载（并行 ctest
+     * 抢 CPU）下两个 worker 可能被错峰调度，30ms 重叠窗口太小导致
+     * g_concurrent_max==1 抖动失败（build-test 实证偶发）。等待最多 2s
+     * 直到出现第二个并发执行者，再保持窗口，证明真实并发成立；
+     * 池规模>1 时必有 peer 到达，不会死锁。 */
+    int waited = 0;
+    while (g_concurrent_now < 2 && waited < 2000) {
+        TEST_SLEEP_MS(10);
+        waited += 10;
+    }
     TEST_SLEEP_MS(30);
     --g_concurrent_now;
     char buf[128];
