@@ -5,13 +5,13 @@
 
 **语言:** [English](README.md) | 简体中文
 
-[![Version](https://img.shields.io/badge/version-0.1.5-5a6b7e)](https://atomgit.com/openairymax/daemons)
+[![Version](https://img.shields.io/badge/version-0.1.9-5a6b7e)](https://atomgit.com/openairymax/daemons)
 [![License](https://img.shields.io/badge/license-AGPL--3.0+Apache--2.0-4a90d9)](LICENSE)
 [![C11](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/11)
 
 - **仓库：** `git@atomgit.com:openairymax/daemons.git`
-- **分支：** `feature/official-hubs-01`
-- **版本：** 0.1.5（与 agentrt 管理仓对齐）
+- **分支：** `develop/hubs-01`
+- **版本：** 0.1.9（与 agentrt 管理仓对齐）
 
 ---
 
@@ -33,7 +33,7 @@
 - **安全内生** —— `svc_common` 以 `PUBLIC` 形式链接 `cupolas`（`daemon_cupolas_bootstrap.c`），每个守护进程自动继承 Cupolas 安全：请求鉴权、输入净化、审计、沙箱。
 - **协议统一** —— 所有守护进程通过 JSON-RPC 2.0 通信；MCP / A2A / OpenAI-API 协议转换发生在网关边界。
 
-在 Airymax 0.1.3 发行版中，`daemons` 是 [agentrt](../) 管理仓聚合的 7 个叶子仓之一，构成循环分层架构中的**服务层**（位于网关层 `gateway` 之上、生态层 `sdk`/`ecosystem` 之下）。它是 agentrt 内部最顶层的叶子仓——每个守护进程的业务逻辑通过 `atoms/syscall` 向下派发至内核。
+`daemons` 是 [agentrt](../) 管理仓聚合的 7 个叶子仓之一，构成循环分层架构中的**服务层**（位于网关层 `gateway` 之上、生态层 `sdk`/`ecosystem` 之下）。它是 agentrt 内部最顶层的叶子仓——每个守护进程的业务逻辑通过 `atoms/syscall` 向下派发至内核。
 
 ## 模块分类
 
@@ -122,7 +122,7 @@ daemons/
 
 > **二进制命名规范：** 每个守护进程可执行文件保留 `*_d` 后缀（`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / notify_d / hook_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d`）。根据 2026-07-05 改名决策，模块名从 `daemon` 统一为 `daemons`（目录、CMake target `airy_daemons`、仓库 `daemons.git`），进程二进制名刻意保留；M4 整编后稳态为 **15 个**（observe/info/plugin 二进制退役，能力并入 monit_d/tool_d）。
 
-> **0.1.3 阶段 3 重构：** `mem_d / agent_d / a2a_d / think_d / cupolas_d` 从 gateway 进程拆分为独立 daemon（执行体集中化）。`gateway_d` 现在经 syscall 层（`airy_sys_svc_call`）转发这些命名空间，保持网关为纯协议边界。
+> **阶段 3 重构：** `mem_d / agent_d / a2a_d / think_d / cupolas_d` 从 gateway 进程拆分为独立 daemon（执行体集中化）。`gateway_d` 现在经 syscall 层（`airy_sys_svc_call`）转发这些命名空间，保持网关为纯协议边界。
 
 ## 架构
 
@@ -323,7 +323,7 @@ int main(void) {
     /* 守护进程向 IPC 服务总线注册，声明能力。 */
     airy_svc_config_t cfg = {
         .name           = "my_daemon",
-        .version        = "0.1.1",
+        .version        = "0.1.9",
         .capabilities   = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_CANCELABLE,
         .max_concurrent = 64,
         .timeout_ms     = 5000,
