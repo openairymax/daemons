@@ -171,6 +171,10 @@ static void test_config_load_json(void)
 
     cm_init(NULL);
 
+    /* AIRY_TMP_DIR（/var/tmp/agentrt）在干净 runner 上不存在，fopen 直接失败
+     * （ci 实证：svc_test_config 0.00s 即败）。airy_mkdir 幂等预建目录。 */
+    (void)airy_mkdir(AIRY_TMP_DIR, 1);
+
     FILE *fp = fopen(AIRY_TMP_DIR "/test_airy_config.json", "w");
     TEST_ASSERT(fp != NULL, "create temp config file");
     if (!fp) {
