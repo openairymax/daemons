@@ -9,6 +9,9 @@
 
 #include "gateway_service.h"
 #include "daemon_platform_ext.h"
+/* airy_thread_create/airy_thread_join 是 platform_process.h 的宏别名；
+ * macOS clang ≥16 将隐式函数声明视为错误，缺包含即编译失败。 */
+#include "platform_process.h"
 #ifdef GATEWAY_HAS_HTTP
 #include "http_gateway.h"
 #endif
