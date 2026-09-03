@@ -93,22 +93,41 @@ foreach(TEST_SRC ${TOOL_TEST_SOURCES})
     # 后者引用 cognition/llm_service/checkpoint/hook_d 等符号，需完整传递依赖。
     # 仿照 test_syscall_extended 配置，但不链接 airy_tool_service（避免与
     # TOOL_IMPL_SOURCES 中的 executor.c/service.c 等重复符号）。
-    target_link_libraries(test_tool_${TEST_NAME} PRIVATE
-        svc_common
-        cupolas
-        airy_syscall
-        -Wl,--whole-archive
-        airy_coreloopthree
-        -Wl,--no-whole-archive
-        airy_cognition
-        airy_core
-        airy_memory
-        airy_atoms
-        airy_common
-        airy_llm_service
-        Threads::Threads
-        airy_platform_libs
-    )
+    # --whole-archive 为 GNU ld 专有（macOS ld64 / MSVC 不识别，对齐
+    # tool_d 主目标三分支写法，这两平台直接链接）。
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(test_tool_${TEST_NAME} PRIVATE
+            svc_common
+            cupolas
+            airy_syscall
+            -Wl,--whole-archive
+            airy_coreloopthree
+            -Wl,--no-whole-archive
+            airy_cognition
+            airy_core
+            airy_memory
+            airy_atoms
+            airy_common
+            airy_llm_service
+            Threads::Threads
+            airy_platform_libs
+        )
+    else()
+        target_link_libraries(test_tool_${TEST_NAME} PRIVATE
+            svc_common
+            cupolas
+            airy_syscall
+            airy_coreloopthree
+            airy_cognition
+            airy_core
+            airy_memory
+            airy_atoms
+            airy_common
+            airy_llm_service
+            Threads::Threads
+            airy_platform_libs
+        )
+    endif()
 
     # cJSON found by root CMakeLists.txt (AIRY_HAS_CJSON)
     if(AIRY_HAS_CJSON)
