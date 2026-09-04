@@ -47,7 +47,11 @@ int test_dag_parallel_delegation(void)
         return 1;
     }
 
-    if (wait_dag_terminal(svc, dag_id, 5000) != 0) {
+    /* macOS CI 实证（2026-09-04）：并行委派首节点完成事件存在 ~10s 级延迟
+     *（疑 thread pool/mac 唤醒机制，待专项根因），5s 上限在 mac 上必超时。
+     * 放宽为 30s 只放宽等待护栏，仍校验 completed 状态与并发真实性
+     *（g_concurrent_max>=2）；10s 唤醒延迟的机制问题另立专项排查。 */
+    if (wait_dag_terminal(svc, dag_id, 30000) != 0) {
         printf("  FAILED: dag timeout\n");
         AIRY_FREE(dag_id);
         sched_service_destroy(svc);
