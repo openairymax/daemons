@@ -634,6 +634,8 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     if (ret == -1) {
         SVC_LOG_ERROR("tool_executor_run: failed to start command '%s'",
                       meta->executable ? meta->executable : "NULL");
+        if (output_buffer && output_buffer[0])
+            SVC_LOG_ERROR("tool_executor_run: start-fail stderr: %.200s", output_buffer);
         result->success = 0;
         result->error = AIRY_STRDUP("Failed to execute command: execvp failed");
         result->exit_code = -1;
@@ -657,6 +659,8 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     } else if (ret > 0) {
         SVC_LOG_ERROR("tool_executor_run: command failed with exit code %d (executable=%s)", ret,
                       meta->executable ? meta->executable : "NULL");
+        if (output_buffer && output_buffer[0])
+            SVC_LOG_ERROR("tool_executor_run: child stderr: %.200s", output_buffer);
         result->success = 0;
         char err_msg[256];
         snprintf(err_msg, sizeof(err_msg), "Command exited with code %d", ret);
