@@ -54,7 +54,7 @@ static tool_execute_args_t *make_echo_args(const char *message, uint32_t timeout
     if (!t)
         return NULL;
 
-    /* argv: {"/usr/bin/echo", "<message>", NULL}
+    /* argv: {"/bin/echo", "<message>", NULL}
      * argv[0] is conventionally the program name; execvp uses the executable
      * field to locate the binary. */
     char **argv = (char **)malloc(3 * sizeof(char *));
@@ -62,7 +62,7 @@ static tool_execute_args_t *make_echo_args(const char *message, uint32_t timeout
         free(t);
         return NULL;
     }
-    argv[0] = strdup("/usr/bin/echo");
+    argv[0] = strdup("/bin/echo");
     argv[1] = strdup(message);
     argv[2] = NULL;
     if (!argv[0] || !argv[1]) {
@@ -73,7 +73,7 @@ static tool_execute_args_t *make_echo_args(const char *message, uint32_t timeout
         return NULL;
     }
 
-    t->executable = "/usr/bin/echo";
+    t->executable = "/bin/echo";
     t->argv = (char *const *)argv;
     t->timeout_ms = timeout_ms;
     t->cap_size = 4096;
@@ -305,7 +305,7 @@ static void test_executor_sandbox_integration(void)
     AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "test_echo";
     meta.name = "echo_test";
-    meta.executable = "/usr/bin/echo";
+    meta.executable = "/bin/echo";
     meta.timeout_sec = 5;
 
     tool_result_t *result = NULL;

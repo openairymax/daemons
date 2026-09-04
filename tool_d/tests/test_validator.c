@@ -39,7 +39,7 @@ static void test_validator_string_type(void)
     AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "string_tool";
     meta.name = "String Tool";
-    meta.executable = "/usr/bin/echo";
+    meta.executable = "/bin/echo";
 
     const char *valid_params = "{\"input\": \"Hello, World!\"}";
     const char *invalid_params = "{\"input\": \"\"}";
@@ -66,7 +66,7 @@ static void test_validator_number_type(void)
     AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "number_tool";
     meta.name = "Number Tool";
-    meta.executable = "/usr/bin/echo";
+    meta.executable = "/bin/echo";
 
     const char *valid_params = "{\"value\": 50}";
     const char *invalid_params = "{\"value\": 150}";
@@ -93,7 +93,7 @@ static void test_validator_object_type(void)
     AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "object_tool";
     meta.name = "Object Tool";
-    meta.executable = "/usr/bin/echo";
+    meta.executable = "/bin/echo";
 
     const char *valid_params = "{\"name\": \"test\"}";
     const char *invalid_params = "{}";
