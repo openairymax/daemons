@@ -182,6 +182,14 @@ static char *rpc_roundtrip(const char *method, const char *params_json, int id)
     int fds[2];
     assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
 
+    /* macOS 实证（2026-09-04）：AF_UNIX socketpair 内核缓冲显著小于 Linux
+     * （Linux wmem 默认 ~208KB），64 条历史响应 ~20KB 由 handler 在调用线程
+     * 同步单次写入，对端同线程尚未读 → 写满缓冲即永久阻塞（test_rpc_history
+     * 240s 挂死真凶）。放大两端 SO_SNDBUF/SO_RCVBUF，使大响应单次写可完成。 */
+    int sockbuf = 1024 * 1024;
+    setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &sockbuf, (socklen_t)sizeof(sockbuf));
+    setsockopt(fds[1], SOL_SOCKET, SO_RCVBUF, &sockbuf, (socklen_t)sizeof(sockbuf));
+
     assert(method_dispatcher_dispatch(g_disp, root, jsonrpc_build_error, &fds[0]) == 0);
     cJSON_Delete(root);
 
