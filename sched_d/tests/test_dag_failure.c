@@ -272,8 +272,14 @@ int test_dag_fatal_cascade_whole(void)
         sched_service_destroy(svc);
         return 1;
     }
-    if (g_exec_count != 2) {
-        printf("  FAILED: executor called %zu times (expect 2: A+B, C canceled)\n", g_exec_count);
+    /* A 与 B 为两个无依赖的并行节点：B 触发 FATAL 时 A 可能在运行中被
+     * 级联取消（exec=1），也可能已执行完（exec=2）——两种都是正确行为
+     * （pending/未决节点在 FATAL 后统一 cancel）。只断言 C 永不执行、
+     * 图终态为 failed，不把 A 的执行次序当硬性约定（#46 Linux/macOS
+     * 时序竞态实证：B 先于 A 派发时 exec 恰为 1）。 */
+    if (g_exec_count != 1 && g_exec_count != 2) {
+        printf("  FAILED: executor called %zu times (expect 1 or 2: A±B ran, C must be canceled)\n",
+               g_exec_count);
         AIRY_FREE(dag_id);
         sched_service_destroy(svc);
         return 1;
