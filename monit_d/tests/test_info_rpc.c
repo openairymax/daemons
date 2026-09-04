@@ -314,6 +314,9 @@ static void test_rpc_hardware(void)
 
 int main(void)
 {
+    /* CI rerun 下 stdout 全缓冲：进程被 timeout 杀后中间进度全丢，无法定位
+     * mac 240s 挂点。改无缓冲，逐测试进度实时可读。 */
+    setvbuf(stdout, NULL, _IONBF, 0);
     printf("=========================================\n");
     printf("  Monit info_rpc Module Tests\n");
     printf("=========================================\n");

@@ -49,7 +49,7 @@ static void test_registry_add(void)
     meta.id = "test_tool_001";
     meta.name = "Test Tool";
     meta.description = "A test tool for unit testing";
-    meta.executable = "/usr/bin/echo";
+    meta.executable = "/bin/echo";
     meta.timeout_sec = 30;
     meta.cacheable = 1;
 
@@ -75,7 +75,7 @@ static void test_registry_add_duplicate(void)
     AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "duplicate_tool";
     meta.name = "Duplicate Tool";
-    meta.executable = "/usr/bin/echo";
+    meta.executable = "/bin/echo";
 
     int ret __attribute__((unused)) = tool_registry_add(reg, &meta);
     assert(ret == 0);
@@ -103,7 +103,7 @@ static void test_registry_get(void)
     meta.id = "get_test_tool";
     meta.name = "Get Test Tool";
     meta.description = "Tool for get testing";
-    meta.executable = "/usr/bin/cat";
+    meta.executable = "/bin/cat";
 
     tool_registry_add(reg, &meta);
 
@@ -150,7 +150,7 @@ static void test_registry_remove(void)
     AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "remove_test_tool";
     meta.name = "Remove Test Tool";
-    meta.executable = "/usr/bin/ls";
+    meta.executable = "/bin/ls";
 
     tool_registry_add(reg, &meta);
 
@@ -197,13 +197,13 @@ static void test_registry_list_json(void)
     AIRY_MEMSET(&meta1, 0, sizeof(meta1));
     meta1.id = "json_tool_1";
     meta1.name = "JSON Tool 1";
-    meta1.executable = "/usr/bin/echo";
+    meta1.executable = "/bin/echo";
 
     tool_metadata_t meta2;
     AIRY_MEMSET(&meta2, 0, sizeof(meta2));
     meta2.id = "json_tool_2";
     meta2.name = "JSON Tool 2";
-    meta2.executable = "/usr/bin/cat";
+    meta2.executable = "/bin/cat";
 
     tool_registry_add(reg, &meta1);
     tool_registry_add(reg, &meta2);

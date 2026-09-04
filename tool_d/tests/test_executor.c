@@ -99,7 +99,7 @@ static void test_executor_read_concurrent(void)
 
     a.meta.id = "sleep_read_1";
     a.meta.name = "sleep_read";
-    a.meta.executable = "/usr/bin/sleep";
+    a.meta.executable = "/bin/sleep";
     a.meta.timeout_sec = 5;
     a.meta.access = TOOL_ACCESS_READ;
     b.meta = a.meta;
@@ -149,7 +149,7 @@ static void test_executor_write_serial(void)
 
     a.meta.id = "sleep_write_1";
     a.meta.name = "sleep_write";
-    a.meta.executable = "/usr/bin/sleep";
+    a.meta.executable = "/bin/sleep";
     a.meta.timeout_sec = 5;
     a.meta.access = TOOL_ACCESS_WRITE;
     b.meta = a.meta;
@@ -216,7 +216,7 @@ static void test_executor_run(void)
     AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "test_echo";
     meta.name = "echo_test";
-    meta.executable = "/usr/bin/echo";
+    meta.executable = "/bin/echo";
     meta.timeout_sec = 5;
 
     tool_result_t *result = NULL;
@@ -249,7 +249,7 @@ static void test_executor_run_async(void)
     AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "test_echo_async";
     meta.name = "echo_async";
-    meta.executable = "/usr/bin/echo";
+    meta.executable = "/bin/echo";
     meta.timeout_sec = 5;
 
     tool_result_t *result = NULL;
@@ -278,7 +278,7 @@ static void test_executor_failure_class(void)
     AIRY_MEMSET(&meta, 0, sizeof(meta));
     meta.id = "fail_class";
     meta.name = "fail_class";
-    meta.executable = "/usr/bin/echo";
+    meta.executable = "/bin/echo";
     meta.timeout_sec = 5;
 
     tool_result_t *result = NULL;
