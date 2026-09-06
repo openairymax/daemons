@@ -268,7 +268,11 @@ set_target_properties(svc_common PROPERTIES
 )
 
 # 测试支持
-if(BUILD_TESTS)
+# P25 模式（Windows 排除）：daemon 链测试整目标守卫——svc_common 依赖的
+# 测试面在 MSVC 无 mmap/dirent 等 POSIX 运行语义（G1 wave-3 #106 实证
+# airy_mman.h C2059 等），覆盖由 POSIX 腿保障；Windows 侧 G2 只跑基础库层
+# ctest，daemon 面产品编译先行（G1）。
+if(BUILD_TESTS AND NOT WIN32)
     enable_testing()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests")
         add_subdirectory(tests)
