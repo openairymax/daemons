@@ -93,9 +93,12 @@ foreach(TEST_SRC ${TEST_SOURCES})
         target_link_libraries(${TARGET_NAME} PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     endif()
     
-    target_compile_options(${TARGET_NAME} PRIVATE
-        -Wall -Wextra -g -Wno-unused-function -Wno-unused-variable
-    )
+    # GNU 风格警告旗标：MSVC 不识别 -W*（D8021，windows-build #113 实证）
+    if(NOT MSVC)
+        target_compile_options(${TARGET_NAME} PRIVATE
+            -Wall -Wextra -g -Wno-unused-function -Wno-unused-variable
+        )
+    endif()
     
     add_test(NAME ${TARGET_NAME} COMMAND ${TARGET_NAME}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
@@ -142,9 +145,12 @@ if(AIRY_HAS_OPENSSL AND OPENSSL_FOUND)
     target_link_libraries(svc_test_daemon_common PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
-target_compile_options(svc_test_daemon_common PRIVATE
-    -Wall -Wextra -g -Wno-unused-function -Wno-unused-variable
-)
+# GNU 风格警告旗标：MSVC 不识别 -W*（D8021，windows-build #113 实证）
+if(NOT MSVC)
+    target_compile_options(svc_test_daemon_common PRIVATE
+        -Wall -Wextra -g -Wno-unused-function -Wno-unused-variable
+    )
+endif()
 
 add_test(NAME svc_test_daemon_common COMMAND svc_test_daemon_common
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
@@ -183,9 +189,12 @@ if(AIRY_HAS_OPENSSL AND OPENSSL_FOUND)
     target_link_libraries(svc_test_checkpoint PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
-target_compile_options(svc_test_checkpoint PRIVATE
-    -Wall -Wextra -g -Wno-unused-function -Wno-unused-variable
-)
+# GNU 风格警告旗标：MSVC 不识别 -W*（同上）
+if(NOT MSVC)
+    target_compile_options(svc_test_checkpoint PRIVATE
+        -Wall -Wextra -g -Wno-unused-function -Wno-unused-variable
+    )
+endif()
 
 add_test(NAME svc_test_checkpoint COMMAND svc_test_checkpoint
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

@@ -61,7 +61,10 @@ foreach(TEST_SRC ${A2A_TEST_SOURCES})
         target_link_libraries(test_a2a_${TEST_NAME} PRIVATE yaml)
     endif()
 
-    target_compile_options(test_a2a_${TEST_NAME} PRIVATE -Wall -Wextra -g -Wno-unused-function)
+    # GNU 风格警告旗标：MSVC 不识别 -W*（D8021，windows-build #113 实证）
+    if(NOT MSVC)
+        target_compile_options(test_a2a_${TEST_NAME} PRIVATE -Wall -Wextra -g -Wno-unused-function)
+    endif()
 
     add_test(NAME a2a_d_${TEST_NAME} COMMAND test_a2a_${TEST_NAME}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
