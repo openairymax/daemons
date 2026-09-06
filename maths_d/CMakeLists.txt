@@ -56,9 +56,14 @@ target_include_directories(maths_d PRIVATE
 target_link_libraries(maths_d PRIVATE
     svc_common
     Threads::Threads
-    m
 )
+# m（libm）：仅非 MSVC 平台存在；MSVC 数学函数内建在 CRT（wave-4 #110
+# LNK1181 m.lib 防护，与根 airy_platform_libs 同判据）。
+if(NOT MSVC)
+    target_link_libraries(maths_d PRIVATE m)
+endif()
 
+if(NOT MSVC)
 target_compile_options(maths_d PRIVATE
     -Wall
     -Wextra
@@ -67,6 +72,7 @@ target_compile_options(maths_d PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
+endif()
 
 install(TARGETS maths_d DESTINATION bin)
 

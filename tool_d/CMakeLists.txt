@@ -126,6 +126,7 @@ if(UNIX)
 endif()
 
 # 编译选项
+if(NOT MSVC)
 target_compile_options(airy_tool_service PRIVATE
     -Wall -Wextra -Wpedantic
     -Werror=implicit-function-declaration
@@ -133,6 +134,7 @@ target_compile_options(airy_tool_service PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
+endif()
 
 # C-L05: 启用 Cupolas SafetyGuard V2 API
 target_compile_definitions(airy_tool_service PRIVATE AIRY_ENABLE_V2_API=1)
@@ -210,6 +212,7 @@ target_link_libraries(tool_d PRIVATE
     airy_platform_libs
 )
 
+if(NOT MSVC)
 target_compile_options(tool_d PRIVATE
     -Wall -Wextra -Wpedantic
     -Werror=implicit-function-declaration
@@ -217,6 +220,7 @@ target_compile_options(tool_d PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
+endif()
 
 target_compile_definitions(tool_d PRIVATE AIRY_ENABLE_V2_API=1)
 

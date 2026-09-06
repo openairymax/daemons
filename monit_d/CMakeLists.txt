@@ -100,6 +100,7 @@ if(UNIX)
 endif()
 
 # 编译选项
+if(NOT MSVC)
 target_compile_options(airy_monit_service PRIVATE
     -Wall -Wextra -Wpedantic
     -Werror=implicit-function-declaration
@@ -107,6 +108,7 @@ target_compile_options(airy_monit_service PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
+endif()
 
 # ==================== Monitor daemon 可执行文件 ====================
 # main.c 仅属于 daemon 可执行文件；服务代码已纳入 airy_monit_service 库
@@ -157,6 +159,7 @@ else()
     target_link_libraries(monit_d PRIVATE airy_monit_service Threads::Threads)
 endif()
 
+if(NOT MSVC)
 target_compile_options(monit_d PRIVATE
     -Wall -Wextra -Wpedantic
     -Werror=implicit-function-declaration
@@ -164,6 +167,7 @@ target_compile_options(monit_d PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
+endif()
 
 # 测试支持
 if(BUILD_TESTS)

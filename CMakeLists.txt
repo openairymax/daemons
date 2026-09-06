@@ -14,6 +14,16 @@ option(BUILD_TESTS "Build all unit tests" ON)
 option(BUILD_COVERAGE "Build with code coverage support" OFF)
 option(BUILD_ALL_PLATFORMS "Build for all platforms (cross-compile)" OFF)
 
+# P25 模式（daemons 全树，2026-09-06 wave-4 #110 实证）：daemon 链测试
+# 整树在 Windows 排除——测试目标直接引用 POSIX 头面（sys/socket.h 等），
+# MSVC 无 mmap/dirent 运行语义，GNU warning flags 亦非 cl 合法参数
+# （D8021，40 处）。覆盖由 POSIX 腿保障；Windows 侧 G2 只跑基础库层
+# ctest，daemon 面产品编译先行（G1）。子目录已守卫的（common/tests
+# 等 NOT WIN32）与此中央开关双重保险。
+if(WIN32)
+    set(BUILD_TESTS OFF)
+endif()
+
 # 版本信息
 set(DAEMON_VERSION "${PROJECT_VERSION}")
 

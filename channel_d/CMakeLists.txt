@@ -73,7 +73,9 @@ install(FILES
     DESTINATION include/agentrt/daemons/channel_d
 )
 
-if(BUILD_TESTS)
+# P25：channel 链测试 Windows 排除（与 daemons 顶层中央关闭双保险）；
+# 测试源直引 sys/socket.h/AF_UNIX，MSVC 无对应运行语义（wave-4 #110）。
+if(BUILD_TESTS AND NOT WIN32)
 if(AIRY_HAS_CMOCKA)
     enable_testing()
     add_executable(test_channel_e2e tests/test_channel_e2e.c src/channel_service.c src/channel_io.c)

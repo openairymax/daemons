@@ -129,7 +129,8 @@ target_include_directories(sched_d PRIVATE
 # （commons 平台线程实现，随 airy_common 链接），与既有线程用法保持一致。
 target_compile_options(sched_d PRIVATE -UAIRY_USE_SCHEDULER_THREAD_IMPL)
 
-# 编译选项
+# 编译选项（-U 由 CMake 转 /U，MSVC 合法；-Wall/-Wextra 等 GNU 系需守卫）
+if(NOT MSVC)
 target_compile_options(sched_d PRIVATE
     -Wall
     -Wextra
@@ -139,6 +140,7 @@ target_compile_options(sched_d PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
+endif()
 
 # 测试支持
 if(BUILD_TESTS)
