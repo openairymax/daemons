@@ -93,13 +93,17 @@ if(UNIX)
     target_link_libraries(airy_a2a_service PUBLIC Threads::Threads airy_platform_libs)
 endif()
 
-target_compile_options(airy_a2a_service PRIVATE
-    -Wall -Wextra -Wpedantic
-    -Werror=implicit-function-declaration
-    -Werror=return-type
-    $<$<CONFIG:Debug>:-g -O0>
-    $<$<CONFIG:Release>:-O3 -DNDEBUG>
-)
+# GNU 风格警告旗标：MSVC 不识别 -W*（D8021，windows-build #113 实证），
+# 限定非 MSVC 工具链
+if(NOT MSVC)
+    target_compile_options(airy_a2a_service PRIVATE
+        -Wall -Wextra -Wpedantic
+        -Werror=implicit-function-declaration
+        -Werror=return-type
+        $<$<CONFIG:Debug>:-g -O0>
+        $<$<CONFIG:Release>:-O3 -DNDEBUG>
+    )
+endif()
 
 # ==================== A2A daemon 可执行文件 ====================
 add_executable(a2a_d
@@ -149,13 +153,16 @@ target_link_libraries(a2a_d PRIVATE
     airy_platform_libs
 )
 
-target_compile_options(a2a_d PRIVATE
-    -Wall -Wextra -Wpedantic
-    -Werror=implicit-function-declaration
-    -Werror=return-type
-    $<$<CONFIG:Debug>:-g -O0>
-    $<$<CONFIG:Release>:-O3 -DNDEBUG>
-)
+# GNU 风格警告旗标：MSVC 不识别 -W*（同上）
+if(NOT MSVC)
+    target_compile_options(a2a_d PRIVATE
+        -Wall -Wextra -Wpedantic
+        -Werror=implicit-function-declaration
+        -Werror=return-type
+        $<$<CONFIG:Debug>:-g -O0>
+        $<$<CONFIG:Release>:-O3 -DNDEBUG>
+    )
+endif()
 
 # 测试支持
 if(BUILD_TESTS)
