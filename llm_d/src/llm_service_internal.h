@@ -93,6 +93,12 @@ typedef struct {
     size_t response_size;
     size_t response_capacity;
     char *tools_json;
+    /* P24（0.1.12）：parse_params 失败的具体原因（"messages 缺失/为空数组"、
+     * "model 未配置且无默认模型" 等）。此前 complete/complete_stream 一律
+     * 回 -32602 "Invalid params"，客户端与用户都无法区分失败环节，社区
+     * 反馈（ubuntu airymaxrt v0.1.11 问答直接打印裸 JSON-RPC 错误）只能靠
+     * 猜测定位。填充后随 -32602 错误消息透传，使故障可自助识别。 */
+    char fail_reason[160];
 } request_context_t;
 
 /* llm_daemon_request.c */

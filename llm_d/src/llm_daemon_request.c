@@ -32,6 +32,18 @@
 
 #define LLM_TIME_CTX_CAP 256
 
+/* P24（0.1.12）：parse_params 失败前把具体原因写入 ctx->fail_reason，
+ * 使 complete/complete_stream 的 -32602 响应携带可辨识的失败环节（此前
+ * 一律笼统 "Invalid params"，社区用户拿到错误无从排障）。AIRY_ERROR
+ * 负责压错误栈并返回；本宏仅在其前填充 fail_reason。 */
+#define LLM_PARSE_FAIL(ctx, code, msg)                                      \
+    do {                                                                    \
+        if ((ctx)) {                                                        \
+            snprintf((ctx)->fail_reason, sizeof((ctx)->fail_reason), "%s", (msg)); \
+        }                                                                   \
+        AIRY_ERROR((code), (msg));                                          \
+    } while (0)
+
 /**
  * @brief Build a "current host time" system context string
  *
@@ -177,24 +189,24 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
         if (def) {
             cfg->model = AIRY_STRDUP(def);
         } else {
-            AIRY_ERROR(AIRY_ERR_INVALID_PARAM,
-                       "model parameter is not a string and no default model configured");
+            LLM_PARSE_FAIL(ctx, AIRY_ERR_INVALID_PARAM,
+                           "model parameter is not a string and no default model configured");
         }
     }
     if (!cfg->model) {
-        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate model string");
+        LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate model string");
     }
 
     cJSON *messages = cJSON_GetObjectItem(params, "messages");
     if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) == 0) {
         parse_params_cleanup(ctx, cfg);
-        AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "messages must be a non-empty array");
+        LLM_PARSE_FAIL(ctx, AIRY_ERR_INVALID_PARAM, "messages must be a non-empty array");
     }
     if (cJSON_IsArray(messages)) {
         size_t count = cJSON_GetArraySize(messages);
         if (count > MAX_MESSAGES_PER_REQUEST) {
             parse_params_cleanup(ctx, cfg);
-            AIRY_ERROR(AIRY_ERR_OVERFLOW, "too many messages");
+            LLM_PARSE_FAIL(ctx, AIRY_ERR_OVERFLOW, "too many messages");
         }
 
         /* 时间感知注入（2026-08-17）：把宿主机当前时间作为 system 消息
@@ -230,7 +242,7 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
         if (!time_injected) {
             if (count + 1 > MAX_MESSAGES_PER_REQUEST) {
                 parse_params_cleanup(ctx, cfg);
-                AIRY_ERROR(AIRY_ERR_OVERFLOW, "too many messages");
+                LLM_PARSE_FAIL(ctx, AIRY_ERR_OVERFLOW, "too many messages");
             }
             char tbuf[LLM_TIME_CTX_CAP];
             llm_build_time_context(tbuf, sizeof(tbuf));
@@ -238,7 +250,7 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
             ctx->messages[0].content = AIRY_STRDUP(tbuf);
             if (!ctx->messages[0].role || !ctx->messages[0].content) {
                 parse_params_cleanup(ctx, cfg);
-                AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to inject time context");
+                LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY, "failed to inject time context");
             }
             base = 1;
             SVC_LOG_DEBUG("C-L02: SVC: injected host time context: %s", tbuf);
@@ -256,7 +268,8 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
 
             if (!cJSON_IsString(role) || !cJSON_IsString(content)) {
                 parse_params_cleanup(ctx, cfg);
-                AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "message role or content is not a string");
+                LLM_PARSE_FAIL(ctx, AIRY_ERR_INVALID_PARAM,
+                               "message role or content is not a string");
             }
 
             ctx->messages[slot].role = AIRY_STRDUP(role->valuestring);
@@ -265,7 +278,8 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
             if (!ctx->messages[slot].role || !ctx->messages[slot].content) {
                 ctx->message_count = slot;
                 parse_params_cleanup(ctx, cfg);
-                AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate message role or content");
+                LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY,
+                               "failed to duplicate message role or content");
             }
 
             cJSON *reasoning = cJSON_GetObjectItem(item, "reasoning_content");
@@ -274,7 +288,8 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
                 if (!ctx->messages[slot].reasoning_content) {
                     ctx->message_count = slot + 1;
                     parse_params_cleanup(ctx, cfg);
-                    AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate reasoning_content");
+                    LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY,
+                                   "failed to duplicate reasoning_content");
                 }
             }
 
@@ -284,7 +299,8 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
                 if (!ctx->messages[slot].tool_call_id) {
                     ctx->message_count = slot + 1;
                     parse_params_cleanup(ctx, cfg);
-                    AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate tool_call_id");
+                    LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY,
+                                   "failed to duplicate tool_call_id");
                 }
             }
 
@@ -298,7 +314,7 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
                 if (!ctx->messages[slot].tool_calls_json) {
                     ctx->message_count = slot + 1;
                     parse_params_cleanup(ctx, cfg);
-                    AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to serialize tool_calls");
+                    LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY, "failed to serialize tool_calls");
                 }
             }
         }
@@ -339,7 +355,7 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
         ctx->tools_json = cJSON_PrintUnformatted(tools);
         if (!ctx->tools_json) {
             parse_params_cleanup(ctx, cfg);
-            AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to serialize tools");
+            LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY, "failed to serialize tools");
         }
         cfg->tools_json = ctx->tools_json;
     }
