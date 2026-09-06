@@ -27,9 +27,24 @@
 #include <sys/wait.h>
 #else
 #include <windows.h>
+#include <direct.h> /* _mkdir */
 #endif
 
 #include "market_service_internal.h"
+
+#ifdef _WIN32
+/* MSVC UCRT 在 NONSTDC 关闭路径不导出 POSIX 名 mkdir（L7 实证），改走
+ * _mkdir —— 与 commons platform.c airy_mkdir 同策略。模式位 Windows 忽略。 */
+static int market_dir_create(const char *path)
+{
+    return _mkdir(path);
+}
+#else
+static int market_dir_create(const char *path)
+{
+    return mkdir(path, 0755);
+}
+#endif
 
 int market_service_install_agent(market_service_t *service, const install_request_t *request,
                                  install_result_t **result)
@@ -107,7 +122,7 @@ int market_service_install_agent(market_service_t *service, const install_reques
         for (char *p = _par + 1; *p; p++) {
             if (*p == '/') {
                 *p = '\0';
-                int _m = mkdir(_par, 0755);
+                int _m = market_dir_create(_par);
                 *p = '/';
                 if (_m != 0 && errno != EEXIST) {
                     SVC_LOG_ERROR(
@@ -117,7 +132,7 @@ int market_service_install_agent(market_service_t *service, const install_reques
                 }
             }
         }
-        if (mkdir(_par, 0755) != 0 && errno != EEXIST) {
+        if (market_dir_create(_par) != 0 && errno != EEXIST) {
             SVC_LOG_ERROR(
                 "market_service_install_agent: mkdir failed for parent root (path=%s, errno=%d)",
                 _par, errno);
@@ -125,7 +140,7 @@ int market_service_install_agent(market_service_t *service, const install_reques
     }
 
     {
-        int mkret = mkdir(install_dir, 0755);
+        int mkret = market_dir_create(install_dir);
         if (mkret != 0 && errno != EEXIST) {
             SVC_LOG_ERROR("market_service_install_agent: mkdir failed for install directory "
                           "(path=%s, errno=%d)",
