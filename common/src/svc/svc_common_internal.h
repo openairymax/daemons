@@ -69,7 +69,10 @@ typedef struct airy_svc_internal {
     void *user_data;
 
     void *thread_pool;
-    pthread_t *threads;
+    /* 平台线程句柄数组（死锁恢复登记用）。POSIX 下 airy_thread_t ==
+     * pthread_t（platform_base.h），语义不变；Windows 下为 HANDLE，绕开
+     * MSVC 无 pthread_t 的整链 C2061/C2223 级联（G1 stage-1 #102 实证）。 */
+    airy_thread_t *threads;
     size_t thread_count;
 
     struct airy_svc_internal *next;
