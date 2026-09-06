@@ -310,8 +310,15 @@ static char *handle_complete(cJSON *params, int id)
 
     llm_request_config_t cfg;
     if (parse_params(params, ctx, &cfg) != 0) {
+        /* P24（0.1.12）：-32602 携带具体失败环节（此前笼统 "Invalid params"，
+         * 社区问答故障无法自助定位）。fail_reason 在 request_context_destroy
+         * 前拷贝到栈缓冲。 */
+        char ebuf[200];
+        snprintf(ebuf, sizeof(ebuf), "Invalid params: %s",
+                 (ctx && ctx->fail_reason[0]) ? ctx->fail_reason : "request params rejected");
+        SVC_LOG_ERROR("complete: %s", ebuf);
         request_context_destroy(ctx);
-        return jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "Invalid params", id);
+        return jsonrpc_build_error(JSONRPC_INVALID_PARAMS, ebuf, id);
     }
 
     uint64_t start_time = airy_time_ms();
@@ -440,6 +447,23 @@ static void llm_stream_callback(const char *chunk, void *user_data)
     llm_stream_send_all(sctx->fd, chunk, strlen(chunk));
 }
 
+/* P24（0.1.12）：complete_stream 参数解析失败 → RS 'E' 错误帧。此前把
+ * JSON-RPC 错误信封当普通字节推给流客户端：adapter 的流解复用器不识别
+ * 信封，把裸 JSON 当正文转发，CLI 直接把 {"jsonrpc":...,"error":...} 显示
+ * 成回复正文（社区 ubuntu v0.1.11 问答实证）。帧体为标准 JSON-RPC 错误
+ * 对象；新 adapter 解帧后按错误返回（不裸打），旧 adapter 不识别 'E' 标签
+ * → 整帧丢弃 → 空回复提示（可接受的降级）。 */
+static void llm_stream_send_error_frame(airy_sock_t fd, int id, int code, const char *message)
+{
+    char buf[400];
+    /* message 为内部固定文案（ASCII，无引号/反斜杠），无需 JSON 转义。 */
+    int n = snprintf(buf, sizeof(buf), "\x1eE{\"jsonrpc\":\"2.0\",\"id\":%d,"
+                                      "\"error\":{\"code\":%d,\"message\":\"%s\"}}\x1e",
+                     id, code, message);
+    if (n > 0 && (size_t)n < sizeof(buf))
+        llm_stream_send_all(fd, buf, (size_t)n);
+}
+
 static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd)
 {
     request_context_t *ctx = request_context_create();
@@ -449,8 +473,17 @@ static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd
 
     llm_request_config_t cfg;
     if (parse_params(params, ctx, &cfg) != 0) {
+        /* P24：错误帧携带具体原因；不再返回文本响应（on_ 包装器对非 NULL
+         * 返回值会按普通响应推送，破坏流协议）。llm_d 随后关闭连接 →
+         * adapter 收到 EOF 判定流结束。 */
+        const char *reason = (ctx && ctx->fail_reason[0]) ? ctx->fail_reason
+                                                          : "request params rejected";
+        char rbuf[200];
+        snprintf(rbuf, sizeof(rbuf), "Invalid params: %s", reason);
+        SVC_LOG_ERROR("complete_stream: %s", rbuf);
+        llm_stream_send_error_frame(client_fd, id, JSONRPC_INVALID_PARAMS, rbuf);
         request_context_destroy(ctx);
-        return jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "Invalid params", id);
+        return NULL;
     }
 
     cfg.stream = 1;
