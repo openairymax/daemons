@@ -176,7 +176,7 @@ static int think_orch_ops_schedule(const char *task_def, int priority)
         SVC_LOG_ERROR("orch.schedule: input strdup failed");
         return -1;
     }
-    if (pthread_create(&r->thread, NULL, think_orch_run_thread, r) != 0) {
+    if (airy_platform_thread_create(&r->thread, think_orch_run_thread, r) != 0) {
         airy_mtx_lock(&svc->orch_lock);
         r->run_id = 0;
         AIRY_FREE(r->input);

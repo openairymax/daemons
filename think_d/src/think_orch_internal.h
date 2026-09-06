@@ -24,8 +24,13 @@
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
-#include <pthread.h>
 #include <string.h>
+
+/* airy_thread_t/airy_platform_thread_create：跨平台线程原语（POSIX =
+ * pthread_t/pthread_create；WIN32 = HANDLE/CreateThread，platform_sync.c）。
+ * 原始 pthread_t/pthread_create 在 MSVC 无实现（#118 实证 think_d LNK2001
+ * pthread_create），wave-1（daemons/svc）同型收敛。 */
+#include <platform.h>
 
 #define THINK_DEFAULT_TIMEOUT_MS 120000u
 #define THINK_DEFAULT_MAX_EVENTS 64u
@@ -60,7 +65,7 @@ typedef struct {
     orch_result_t *results;
     size_t result_count;
     int exit_code;
-    pthread_t thread;
+    airy_thread_t thread;
 } think_orch_run_t;
 
 struct think_service {
