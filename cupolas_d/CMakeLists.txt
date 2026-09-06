@@ -96,6 +96,7 @@ if(UNIX)
     target_link_libraries(airy_cupolas_service PUBLIC Threads::Threads airy_platform_libs)
 endif()
 
+if(NOT MSVC)
 target_compile_options(airy_cupolas_service PRIVATE
     -Wall -Wextra -Wpedantic
     -Werror=implicit-function-declaration
@@ -103,6 +104,7 @@ target_compile_options(airy_cupolas_service PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
+endif()
 
 # ==================== Cupolas daemon 可执行文件 ====================
 # main.c 按单一职责拆分（2026-08-27）：
@@ -161,6 +163,7 @@ target_link_libraries(cupolas_d PRIVATE
     airy_platform_libs
 )
 
+if(NOT MSVC)
 target_compile_options(cupolas_d PRIVATE
     -Wall -Wextra -Wpedantic
     -Werror=implicit-function-declaration
@@ -168,6 +171,7 @@ target_compile_options(cupolas_d PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
+endif()
 
 # 测试支持
 if(BUILD_TESTS)

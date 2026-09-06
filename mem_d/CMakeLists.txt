@@ -111,6 +111,7 @@ if(UNIX)
     target_link_libraries(airy_mem_service PUBLIC Threads::Threads airy_platform_libs)
 endif()
 
+if(NOT MSVC)
 target_compile_options(airy_mem_service PRIVATE
     -Wall -Wextra -Wpedantic
     -Werror=implicit-function-declaration
@@ -118,6 +119,7 @@ target_compile_options(airy_mem_service PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
+endif()
 
 # ==================== Memory daemon 可执行文件 ====================
 add_executable(mem_d
@@ -170,6 +172,7 @@ target_link_libraries(mem_d PRIVATE
     airy_platform_libs
 )
 
+if(NOT MSVC)
 target_compile_options(mem_d PRIVATE
     -Wall -Wextra -Wpedantic
     -Werror=implicit-function-declaration
@@ -177,6 +180,7 @@ target_compile_options(mem_d PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
+endif()
 
 # 测试支持
 if(BUILD_TESTS)

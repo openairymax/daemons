@@ -76,6 +76,7 @@ if(UNIX)
     target_link_libraries(airy_think_service PUBLIC Threads::Threads airy_platform_libs)
 endif()
 
+if(NOT MSVC)
 target_compile_options(airy_think_service PRIVATE
     -Wall -Wextra -Wpedantic
     -Werror=implicit-function-declaration
@@ -83,6 +84,7 @@ target_compile_options(airy_think_service PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
+endif()
 
 # ==================== Think daemon 可执行文件 ====================
 add_executable(think_d
@@ -148,6 +150,7 @@ else()
     )
 endif()
 
+if(NOT MSVC)
 target_compile_options(think_d PRIVATE
     -Wall -Wextra -Wpedantic
     -Werror=implicit-function-declaration
@@ -155,6 +158,7 @@ target_compile_options(think_d PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
+endif()
 
 # 测试支持
 if(BUILD_TESTS)

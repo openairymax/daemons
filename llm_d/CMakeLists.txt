@@ -142,6 +142,7 @@ if(UNIX)
 endif()
 
 # 编译选项
+if(NOT MSVC)
 if(BUILD_COVERAGE)
     target_compile_options(airy_llm_service PRIVATE
         -Wall -Wextra -Wpedantic -fprofile-arcs -ftest-coverage -g -O0
@@ -154,6 +155,7 @@ else()
         $<$<CONFIG:Debug>:-g -O0>
         $<$<CONFIG:Release>:-O3 -DNDEBUG>
     )
+endif()
 endif()
 
 # ==================== LLM daemon 可执行文件 ====================
@@ -212,6 +214,7 @@ else()
     target_link_libraries(llm_d PRIVATE airy_llm_service Threads::Threads)
 endif()
 
+if(NOT MSVC)
 if(BUILD_COVERAGE)
     target_compile_options(llm_d PRIVATE
         -Wall -Wextra -Wpedantic -fprofile-arcs -ftest-coverage -g -O0
@@ -225,6 +228,7 @@ else()
         $<$<CONFIG:Debug>:-g -O0>
         $<$<CONFIG:Release>:-O3 -DNDEBUG>
     )
+endif()
 endif()
 
 # 测试支持

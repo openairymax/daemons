@@ -102,6 +102,7 @@ if(AIRY_HAS_CURL)
 endif()
 
 # 编译选项
+if(NOT MSVC)
 if(BUILD_COVERAGE)
     target_compile_options(hook_d PRIVATE
         -Wall -Wextra -Wpedantic -fprofile-arcs -ftest-coverage -g -O0)
@@ -113,6 +114,7 @@ else()
         $<$<CONFIG:Debug>:-g -O0>
         $<$<CONFIG:Release>:-O3 -DNDEBUG>
     )
+endif()
 endif()
 
 if(BUILD_TESTS)

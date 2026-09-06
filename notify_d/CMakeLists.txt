@@ -59,6 +59,7 @@ target_link_libraries(notify_d PRIVATE
     Threads::Threads
 )
 
+if(NOT MSVC)
 target_compile_options(notify_d PRIVATE
     -Wall
     -Wextra
@@ -67,6 +68,7 @@ target_compile_options(notify_d PRIVATE
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3 -DNDEBUG>
 )
+endif()
 
 install(TARGETS notify_d DESTINATION bin)
 
