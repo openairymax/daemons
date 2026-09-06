@@ -456,9 +456,15 @@ static void llm_stream_callback(const char *chunk, void *user_data)
 static void llm_stream_send_error_frame(airy_sock_t fd, int id, int code, const char *message)
 {
     char buf[400];
-    /* message 为内部固定文案（ASCII，无引号/反斜杠），无需 JSON 转义。 */
-    int n = snprintf(buf, sizeof(buf), "\x1eE{\"jsonrpc\":\"2.0\",\"id\":%d,"
-                                      "\"error\":{\"code\":%d,\"message\":\"%s\"}}\x1e",
+    /* message 为内部固定文案（ASCII，无引号/反斜杠），无需 JSON 转义。
+     * 注意 \x1e 与 'E' 必须分属两个字符串字面量：\x 十六进制转义会吞掉
+     * 紧随的十六进制字符（E 也是 hex digit），"\x1eE{..." 会解析成 0x1EE
+     * → clang "hex escape sequence out of range"（#132 macOS 实证）。 */
+    int n = snprintf(buf, sizeof(buf),
+                     "\x1e"
+                     "E{\"jsonrpc\":\"2.0\",\"id\":%d,"
+                     "\"error\":{\"code\":%d,\"message\":\"%s\"}}"
+                     "\x1e",
                      id, code, message);
     if (n > 0 && (size_t)n < sizeof(buf))
         llm_stream_send_all(fd, buf, (size_t)n);
