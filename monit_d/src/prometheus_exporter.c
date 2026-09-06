@@ -57,6 +57,26 @@ static int g_initialized = 0;
 static uint64_t g_scrape_count = 0;
 static uint64_t g_scrape_errors = 0;
 
+/* GCC/Clang 的 __atomic_load_n/__atomic_fetch_add 内建在 MSVC 无实现
+ * （#120 实证 monit_d LNK2001 x2）。两个计数器为 uint64_t 且 fetch_add
+ * 结果不使用：Windows 走 Interlocked*64（seq_cst；load=CompareExchange 哨
+ * 兵 0，fetch_add=ExchangeAdd 返回旧值），POSIX 保持原 relaxed 语义。 */
+#ifdef _WIN32
+static uint64_t pmx_atomic_load_u64(volatile uint64_t *p)
+{
+    return (uint64_t)InterlockedCompareExchange64((volatile LONG64 *)p, 0, 0);
+}
+static uint64_t pmx_atomic_fetch_add_u64(volatile uint64_t *p, uint64_t v)
+{
+    return (uint64_t)InterlockedExchangeAdd64((volatile LONG64 *)p, (LONG64)v);
+}
+#define PMX_ATOMIC_LOAD(p)       pmx_atomic_load_u64((p))
+#define PMX_ATOMIC_FETCH_ADD(p, v) pmx_atomic_fetch_add_u64((p), (v))
+#else
+#define PMX_ATOMIC_LOAD(p)       __atomic_load_n((p), __ATOMIC_RELAXED)
+#define PMX_ATOMIC_FETCH_ADD(p, v) __atomic_fetch_add((p), (v), __ATOMIC_RELAXED)
+#endif
+
 /** @brief Get the metric-type enum from a string name. */
 static um_metric_type_t parse_metric_type(const char *type_str)
 {
@@ -163,15 +183,15 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len, cha
         return AIRY_ERR_INVALID_PARAM;
 
     SVC_LOG_DEBUG("C-L10: Prometheus scrape request received (scrape #%llu)",
-                  (unsigned long long)(__atomic_load_n(&g_scrape_count, __ATOMIC_RELAXED) + 1));
+                  (unsigned long long)(PMX_ATOMIC_LOAD(&g_scrape_count) + 1));
 
     char *metrics_text = prometheus_exporter_get_metrics();
     if (!metrics_text) {
         /* P2: counters are updated from HTTP handler threads and read from the
          * monitor thread; use atomic ops instead of plain increments. */
-        __atomic_fetch_add(&g_scrape_errors, 1, __ATOMIC_RELAXED);
+        PMX_ATOMIC_FETCH_ADD(&g_scrape_errors, 1);
         SVC_LOG_ERROR("C-L10: Failed to collect metrics for scrape #%llu",
-                      (unsigned long long)(__atomic_load_n(&g_scrape_count, __ATOMIC_RELAXED) + 1));
+                      (unsigned long long)(PMX_ATOMIC_LOAD(&g_scrape_count) + 1));
         /* 500 Internal Server Error */
         const char *err_body = "Failed to collect metrics\n";
         size_t body_len = strlen(err_body);
@@ -194,11 +214,11 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len, cha
         return 0;
     }
 
-    __atomic_fetch_add(&g_scrape_count, 1, __ATOMIC_RELAXED);
+    PMX_ATOMIC_FETCH_ADD(&g_scrape_count, 1);
     size_t metrics_len = strlen(metrics_text);
 
     SVC_LOG_INFO("C-L10: Prometheus scrape #%llu — %zu bytes of metrics",
-                 (unsigned long long)__atomic_load_n(&g_scrape_count, __ATOMIC_RELAXED),
+                 (unsigned long long)(PMX_ATOMIC_LOAD(&g_scrape_count)),
                  metrics_len);
 
     char header_buf[256];
@@ -259,9 +279,9 @@ char *prometheus_exporter_get_metrics(void)
     um_update_default_metrics();
 
     prometheus_gauge_set("airy_monit_scrape_count",
-                         (double)__atomic_load_n(&g_scrape_count, __ATOMIC_RELAXED));
+                         (double)(PMX_ATOMIC_LOAD(&g_scrape_count)));
     prometheus_gauge_set("airy_monit_scrape_errors",
-                         (double)__atomic_load_n(&g_scrape_errors, __ATOMIC_RELAXED));
+                         (double)(PMX_ATOMIC_LOAD(&g_scrape_errors)));
 
     char *result = um_export_prometheus_module(g_module_name);
     if (!result) {
@@ -274,7 +294,7 @@ char *prometheus_exporter_get_metrics(void)
 void prometheus_exporter_get_scrape_stats(uint64_t *out_count, uint64_t *out_errors)
 {
     if (out_count)
-        *out_count = __atomic_load_n(&g_scrape_count, __ATOMIC_RELAXED);
+        *out_count = PMX_ATOMIC_LOAD(&g_scrape_count);
     if (out_errors)
-        *out_errors = __atomic_load_n(&g_scrape_errors, __ATOMIC_RELAXED);
+        *out_errors = PMX_ATOMIC_LOAD(&g_scrape_errors);
 }
