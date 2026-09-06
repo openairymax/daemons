@@ -43,7 +43,15 @@
 #include "unified_protocol.h"
 #endif
 
+/* P2-4 外部 MCP client 子系统（AIRY_MCP_CLIENTS env 桥）为 POSIX-only：
+ * protocols 库在 WIN32 下整块裁剪 mcp_client_*（mcp_client_internal.h
+ * 用 pid_t 且 stdio 传输依赖 fork/exec，见 protocols/CMakeLists.txt
+ * PROTOCOLS_ENABLE_MCP_TRANSPORT WIN32 恒 OFF）。Windows 构建沿用同一
+ * 决策，本 daemon 对 client 的引用一并编译排除（#112 实证 main.obj
+ * 9×LNK2001 mcp_client_*）。 */
+#ifndef _WIN32
 #include "mcp_client.h"
+#endif
 #include <cjson/cJSON.h>
 
 #include <signal.h>
@@ -63,6 +71,7 @@ static gateway_business_ctx_t *g_biz_ctx = NULL;
 static gateway_entry_ctx_t g_entry_ctx;
 static gw_proto_router_t *g_proto_router = NULL;
 
+#ifndef _WIN32
 #define GW_MCP_CLIENTS_MAX 32
 #define GW_MCP_CLIENT_NAME_LEN 64
 
@@ -272,6 +281,7 @@ static void gw_mcp_clients_setup(gw_mcp_server_t *mcp)
 
     cJSON_Delete(root);
 }
+#endif /* !_WIN32 */
 
 /**
  * @brief Register default ACL rules for external protocols (fail-closed
@@ -558,7 +568,9 @@ int main(int argc, char *argv[])
             }
             SVC_LOG_INFO("Phase 2: MCP adapter wired — tool catalog from tool_d");
 
+#ifndef _WIN32
             gw_mcp_clients_setup(mcp);
+#endif
         }
 
         /* OpenAI: chat/completions → llm_d.complete */
@@ -677,7 +689,9 @@ int main(int argc, char *argv[])
 
 cleanup_service:
 
+#ifndef _WIN32
     gw_mcp_client_cleanup();
+#endif
     if (g_proto_router) {
         gw_proto_router_destroy(g_proto_router);
         g_proto_router = NULL;
