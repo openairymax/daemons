@@ -142,6 +142,13 @@ static int eval_lookup_func(const char *name, size_t nlen, double (**out_fn1)(do
         const char *name;
         double (*fn)(double);
     };
+    /* MSVC /O2(/Oi) 会把 sqrt/sin 等 libm 符号 intrinsic 化，地址不再是
+     * 常量表达式 → C2099（#122 windows-build 实证 expr_eval.c(145,29)）。
+     * pragma function 让其回落真实函数地址；仅 MSVC 需要（clang 对未知
+     * pragma 告警，故守卫）。 */
+#ifdef _MSC_VER
+#pragma function(sqrt, sin, cos, tan, asin, acos, atan, exp, log, log10, log2, fabs, floor, ceil, round, sinh, cosh, tanh, cbrt)
+#endif
     static const struct fn1 tbl1[] = {
         { "sqrt", sqrt },       { "sin", sin },     { "cos", cos },
         { "tan", tan },         { "asin", asin },   { "acos", acos },

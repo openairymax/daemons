@@ -60,7 +60,7 @@ int win_run_command(const char *prog, const char *const args[])
     size_t off = 0;
     int n = snprintf(cmdline, sizeof(cmdline), "\"%s\"", prog);
     if (n < 0)
-        return AIRY_ERR_FAIL;
+        return AIRY_ERR_GENERIC_FAIL;
     off = (size_t)n;
     for (size_t i = 0; args && args[i] && off < sizeof(cmdline) - 1; i++) {
         const char *a = args[i];
@@ -190,7 +190,7 @@ int is_safe_path_component(const char *str)
  * after deployment to $AIRY_HOME/bin; unified into the AIRY_HOME path scheme. */
 const char *market_default_storage(const char *subdir)
 {
-    static __thread char s_path[AIRY_PATH_MAX];
+    static AIRY_THREAD_LOCAL char s_path[AIRY_PATH_MAX];
     snprintf(s_path, sizeof(s_path), "%s/%s", airy_home_dir(), subdir);
     return s_path;
 }
