@@ -27,7 +27,9 @@
 #include "review_svc.h"
 
 #include <stdlib.h>
-#include <strings.h>
+#ifndef _WIN32
+#include <strings.h> /* strcasecmp 等；Windows 映射在 windows_preinclude.h */
+#endif
 
 #define DEFAULT_SOCKET_PATH_UNIX airy_runtime_dir_socket("think.sock")
 #define DEFAULT_SOCKET_PATH_WIN "\\\\.\\pipe\\airy_think"
