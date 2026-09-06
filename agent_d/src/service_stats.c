@@ -87,6 +87,7 @@ int agent_service_reap_idle(agent_service_t *svc, uint64_t max_idle_s)
     uint64_t now = (uint64_t)time(NULL);
     size_t reaped = 0;
 
+#if AIRY_PLATFORM_POSIX
     /* Under the global lock only collect idle slot indexes (fast path); kill
      * runs outside the lock to avoid blocking other agent operations */
     size_t *candidates = NULL;
@@ -114,7 +115,6 @@ int agent_service_reap_idle(agent_service_t *svc, uint64_t max_idle_s)
         airy_mtx_unlock(&svc->lock);
     }
 
-#if AIRY_PLATFORM_POSIX
     for (size_t j = 0; j < candidate_count; j++) {
         agent_entry_internal_t *a = &svc->agents[candidates[j]];
         airy_mtx_lock(&a->entry_lock);
@@ -127,8 +127,14 @@ int agent_service_reap_idle(agent_service_t *svc, uint64_t max_idle_s)
         }
         airy_mtx_unlock(&a->entry_lock);
     }
-#endif
     AIRY_FREE(candidates);
+#else
+    /* Windows：child_pid/stdin_fd 等子进程域字段为 AIRY_PLATFORM_POSIX 专属
+     * （service.h），agent 子进程的 CreateProcess 映射尚未落地（G1 后续窗口）；
+     * 无 fork 子进程可回收，这里为空操作，避免引用不存在的成员（#124 C2039）。 */
+    (void)now;
+    (void)max_idle_s;
+#endif
 
     if (reaped > 0)
         SVC_LOG_INFO("Agent idle reclaim done: reaped=%zu", reaped);
