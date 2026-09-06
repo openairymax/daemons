@@ -30,7 +30,9 @@
 #include "thread_pool.h"
 
 #include <string.h>
+#if !defined(_WIN32)
 #include <strings.h>
+#endif
 
 typedef struct {
     airy_svc_t service;
