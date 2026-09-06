@@ -229,6 +229,30 @@ static airy_err_t sd_file_read_service(const char *name, sd_service_entry_t *out
     return AIRY_SUCCESS;
 }
 
+/* 单个注册文件刷新：dir 扫描（POSIX）与 FindFirstFile（Win32）共用，
+ * 避免双平台重复注册逻辑（0.1.13 G1 wave-2：MSVC 无 dirent/DIR，原循环
+ * 直用 opendir/readdir 致 C2065/C2037）。 */
+static void sd_file_refresh_name(sd_internal_t *sd, const char *dname)
+{
+    if (!dname || dname[0] == '.')
+        return;
+    size_t l = strlen(dname);
+    if (l < 6 || strcmp(dname + l - 5, ".json") != 0)
+        return;
+    char sname[SD_MAX_NAME_LEN];
+    sd_file_name_from_path(dname, sname, sizeof(sname));
+    if (sname[0] == '\0')
+        return;
+    sd_service_entry_t entry;
+    if (sd_file_read_service(sname, &entry) != AIRY_SUCCESS)
+        return;
+    int32_t idx = find_service_index(sd, sname);
+    if (idx >= 0)
+        sd->services[idx] = entry;
+    else if (sd->service_count < SD_MAX_SERVICES)
+        sd->services[sd->service_count++] = entry;
+}
+
 static airy_err_t file_refresh(sd_internal_t *sd, const char *name)
 {
     if (name) {
@@ -247,30 +271,34 @@ static airy_err_t file_refresh(sd_internal_t *sd, const char *name)
 
     char dir[512];
     sd_file_dir(dir, sizeof(dir));
+#if AIRY_PLATFORM_POSIX
     DIR *d = opendir(dir);
     if (!d)
         return (errno == ENOENT) ? AIRY_ENOENT : AIRY_ERR_SYS_FILE;
     struct dirent *de;
-    while ((de = readdir(d)) != NULL) {
-        if (de->d_name[0] == '.')
-            continue;
-        size_t l = strlen(de->d_name);
-        if (l < 6 || strcmp(de->d_name + l - 5, ".json") != 0)
-            continue;
-        char sname[SD_MAX_NAME_LEN];
-        sd_file_name_from_path(de->d_name, sname, sizeof(sname));
-        if (sname[0] == '\0')
-            continue;
-        sd_service_entry_t entry;
-        if (sd_file_read_service(sname, &entry) != AIRY_SUCCESS)
-            continue;
-        int32_t idx = find_service_index(sd, sname);
-        if (idx >= 0)
-            sd->services[idx] = entry;
-        else if (sd->service_count < SD_MAX_SERVICES)
-            sd->services[sd->service_count++] = entry;
-    }
+    while ((de = readdir(d)) != NULL)
+        sd_file_refresh_name(sd, de->d_name);
     closedir(d);
+#elif defined(_WIN32)
+    {
+        char pattern[520];
+        /* Win32 文件 API 接受正斜杠，避免路径尾分隔符拼接问题 */
+        snprintf(pattern, sizeof(pattern), "%s/*.json", dir);
+        WIN32_FIND_DATAA fd;
+        HANDLE h = FindFirstFileA(pattern, &fd);
+        if (h == INVALID_HANDLE_VALUE) {
+            DWORD e = GetLastError();
+            return (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND)
+                       ? AIRY_ENOENT : AIRY_ERR_SYS_FILE;
+        }
+        do {
+            sd_file_refresh_name(sd, fd.cFileName);
+        } while (FindNextFileA(h, &fd));
+        FindClose(h);
+    }
+#else
+    return AIRY_ERR_SYS_FILE;
+#endif
     return AIRY_SUCCESS;
 }
 
