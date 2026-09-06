@@ -12,11 +12,23 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 # channel_service.c 按单一职责拆分（2026-08-27）：
 #   channel_service.c   生命周期/打开/关闭/查询域
 #   channel_io.c        收发（send/receive）与连通性探测（ping）域
-set(CHANNEL_D_SOURCES
-    src/main.c
-    src/channel_service.c
-    src/channel_io.c
-)
+# Windows（G1 编译窗）：三种通道后端（AF_UNIX SOCKET / mkfifo PIPE /
+# shm_open SHM）在 UCRT/airy_mman 下均未映射（#124 C1083 实证），改用
+# channel_win32.c 纯内存服务层 stub（open/send/receive 显式 NOT_SUPPORTED），
+# 与 HTTP/2 网关 Windows 禁用、run_stream 501 stub 同策略；传输映射完成后
+# 恢复下方 POSIX 源清单并删除 win32 stub。
+if(WIN32)
+    set(CHANNEL_D_SOURCES
+        src/main.c
+        src/channel_win32.c
+    )
+else()
+    set(CHANNEL_D_SOURCES
+        src/main.c
+        src/channel_service.c
+        src/channel_io.c
+    )
+endif()
 
 add_executable(channel_d ${CHANNEL_D_SOURCES})
 
