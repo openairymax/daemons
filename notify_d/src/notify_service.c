@@ -114,6 +114,24 @@ int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *even
     return (int)broadcast_count;
 }
 
+void notify_d_sse_heartbeat(notify_d_service_t *svc)
+{
+    if (!svc)
+        return;
+
+    /* SSE 注释帧（":" 开头）按规范被客户端解析器忽略，仅维持空闲计数
+     * 复位（gateway epoch watch 侧 recv 到数据即清 idle）；调用方持锁，
+     * 9 字节短帧发送与 accept 路径持锁发 SSE 握手头同为既有模式。 */
+    for (size_t i = 0; i < svc->client_count; i++) {
+        notify_client_t *client = &svc->clients[i];
+        if (!client->active || client->type != NOTIFY_CLIENT_SSE ||
+            !client->handshake_done)
+            continue;
+        if (airy_sock_send(client->fd, ": ping\n\n", 8) > 0)
+            client->messages_sent++;
+    }
+}
+
 int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char *topic,
                      const char *event_type)
 {
