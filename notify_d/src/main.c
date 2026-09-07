@@ -254,6 +254,14 @@ static DWORD WINAPI notify_d_event_loop(LPVOID arg)
             AIRY_FREE(event->event_type);
             AIRY_FREE(event);
         } else {
+            /* SSE 保活心跳：空闲期按 NOTIFY_D_SSE_PING_INTERVAL 周期发
+             * 注释帧，防 SSE 客户端（gateway PEP epoch watch）空闲超时
+             * 断线重连（v0.1.12 实机 60s 节律断线 203 次的根因）。 */
+            uint64_t now = (uint64_t)time(NULL);
+            if (now - svc->last_sse_ping >= NOTIFY_D_SSE_PING_INTERVAL) {
+                svc->last_sse_ping = now;
+                notify_d_sse_heartbeat(svc);
+            }
             airy_mtx_unlock(&svc->lock);
 #ifndef _WIN32
 

@@ -31,6 +31,10 @@ extern "C" {
 #define NOTIFY_D_MAX_PENDING 1024
 #define NOTIFY_D_MAX_CLIENTS 128
 #define NOTIFY_D_MAX_SUBSCRIPTIONS 512
+/* SSE 心跳间隔（秒）：须显著小于 gateway PEP epoch watch 的 60s 空闲
+ * 超时（gateway_pep_cache.c idle>=12 × 5s poll），否则 watch 每 60s
+ * 必断线重连一次（v0.1.12 实机日志 203 次断线的根因）。 */
+#define NOTIFY_D_SSE_PING_INTERVAL 25
 
 typedef enum {
     NOTIFY_CLIENT_SOCKET,
@@ -72,6 +76,7 @@ typedef struct {
     atomic_int event_running;
     atomic_int force_stop;
     uint64_t start_time;
+    uint64_t last_sse_ping;
     uint64_t notified_count;
     uint64_t error_count;
     notify_client_t clients[NOTIFY_D_MAX_CLIENTS];
@@ -107,6 +112,11 @@ size_t notify_d_subscription_count(notify_d_service_t *svc, const char *topic);
 int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char *topic,
                      const char *event_type);
 int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *event);
+
+/* SSE 保活心跳帧（": ping\n\n" 注释帧，gateway/TUI 等 SSE 客户端据以判定
+ * 连接存活）：距上次心跳 >= NOTIFY_D_SSE_PING_INTERVAL 秒时由事件循环调用。
+ * 注意：notify_d_enqueue 同约定，调用方须持有 svc->lock。 */
+void notify_d_sse_heartbeat(notify_d_service_t *svc);
 
 
 size_t notify_d_active_client_count(notify_d_service_t *svc);
