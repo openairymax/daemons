@@ -258,7 +258,20 @@ airy_err_t gateway_service_start(gateway_service_t service)
             service->http_gateway->ops->set_handler(service->http_gateway->impl, service->handler,
                                                     service->handler_data);
         }
-        gateway_start(service->http_gateway);
+        /* HTTP/1.1 是 MCP/OpenAI 协议主端口：启动失败必须显性 fail
+         * （G4b 干净主机三轮实证 daemon 假活的教训）——返回错误让
+         * 上层退出，交给服务管理器重启；与 WS/H2（可选传输，仅
+         * 记日志）语义不同。 */
+        if (gateway_start(service->http_gateway) != AIRY_SUCCESS) {
+            AIRY_LOG_ERROR("HTTP gateway start failed on %s:%d", service->config.http.host,
+                      service->config.http.port);
+            gateway_destroy(service->http_gateway);
+            service->http_gateway = NULL;
+            service->state = GW_STATE_STOPPED;
+            return AIRY_EBUSY;
+        }
+        AIRY_LOG_INFO("HTTP gateway started on %s:%d", service->config.http.host,
+                 service->config.http.port);
     }
 #endif
 
