@@ -221,21 +221,14 @@ static int notify_d_handle_ws_upgrade(notify_d_service_t *svc, notify_client_t *
     return 0;
 }
 
-#ifndef _WIN32
+/* airy_thread_create 入口统一为 airy_thread_func_t（void *(*)(void *)），
+ * Windows 侧由 platform 层 airy_thread_start_routine 适配 __stdcall；
+ * DWORD WINAPI 直传在 x86-32 触发 C2440（probe-3 实证）。 */
 static void *notify_d_event_loop(void *arg)
 {
-#else
-static DWORD WINAPI notify_d_event_loop(LPVOID arg)
-{
-#endif
     notify_d_service_t *svc = (notify_d_service_t *)arg;
-    if (!svc) {
-#ifndef _WIN32
+    if (!svc)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-#else
-        return EXIT_FAILURE;
-#endif
-    }
 
     while (svc->event_running) {
         airy_mtx_lock(&svc->lock);
@@ -277,11 +270,7 @@ static DWORD WINAPI notify_d_event_loop(LPVOID arg)
         }
     }
 
-#ifndef _WIN32
     return NULL;
-#else
-    return 0;
-#endif
 }
 
 static notify_client_t *notify_d_find_client_slot(notify_d_service_t *svc)
