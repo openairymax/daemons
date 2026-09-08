@@ -183,13 +183,11 @@ cJSON *info_rpc_hist_json(int limit)
     return arr;
 }
 
-#ifdef _WIN32
-static DWORD WINAPI info_collect_loop(LPVOID arg)
-{
-#else
+/* airy_thread_create 入口统一为 airy_thread_func_t（void *(*)(void *)），
+ * Windows 侧由 platform 层 airy_thread_start_routine 适配 __stdcall；
+ * DWORD WINAPI 直传在 x86-32 触发 C2440（probe-3 实证）。 */
 static void *info_collect_loop(void *arg)
 {
-#endif
     (void)arg;
     while (atomic_load_explicit(&g_info_collect_running, memory_order_relaxed)) {
         info_snapshot_t snap;
@@ -211,11 +209,7 @@ static void *info_collect_loop(void *arg)
 #endif
         }
     }
-#ifdef _WIN32
-    return 0;
-#else
     return NULL;
-#endif
 }
 
 /* ── 响应构建 ──────────────────────────────────────────────────────── */
