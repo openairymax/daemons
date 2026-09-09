@@ -60,13 +60,15 @@ static int run_parse_result(const char *llm_resp, char **out_text, uint64_t *out
     cJSON *root = cJSON_Parse(llm_resp);
     if (!root)
         return -1;
-    cJSON *err = cJSON_GetObjectItem(root, "error");
-    if (err) {
-        cJSON_Delete(root);
-        return -1;
-    }
+    /* daemon_rpc_call 已解包 JSON-RPC 外层，out 是 {"id","model","choices",
+     * "usage"}（llm_d response_to_json）。这里兼容两种形状：若调用方传入
+     * 未解包的信封（含 "result"），先下钻一层（2026-09-09 修复：双重解包
+     * 导致 content 恒空、tokens 恒 0、tool_calls 恒缺失——agent 引擎全链
+     * 瘫痪，run_stream 空结果实锤复现）。 */
     cJSON *result = cJSON_GetObjectItem(root, "result");
-    cJSON *choices = result ? cJSON_GetObjectItem(result, "choices") : NULL;
+    if (!cJSON_IsObject(result))
+        result = root;
+    cJSON *choices = cJSON_GetObjectItem(result, "choices");
     cJSON *choice0 =
         (choices && cJSON_GetArraySize(choices) > 0) ? cJSON_GetArrayItem(choices, 0) : NULL;
     cJSON *content = choice0 ? cJSON_GetObjectItem(choice0, "content") : NULL;
@@ -112,8 +114,11 @@ static int run_parse_tool_calls(const char *llm_resp, cJSON **out_tool_calls)
     cJSON *root = cJSON_Parse(llm_resp);
     if (!root)
         return -1;
+    /* 与 run_parse_result 同一双重解包修复：daemon_rpc_call 已解包外层。 */
     cJSON *result = cJSON_GetObjectItem(root, "result");
-    cJSON *choices = result ? cJSON_GetObjectItem(result, "choices") : NULL;
+    if (!cJSON_IsObject(result))
+        result = root;
+    cJSON *choices = cJSON_GetObjectItem(result, "choices");
     cJSON *choice0 =
         (choices && cJSON_GetArraySize(choices) > 0) ? cJSON_GetArrayItem(choices, 0) : NULL;
     cJSON *tc = choice0 ? cJSON_GetObjectItem(choice0, "tool_calls") : NULL;
@@ -157,10 +162,15 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
         return -1;
     }
     char *text = NULL;
+    /* daemon_rpc_call 已解包 JSON-RPC 外层：resp 即 {"success","output",
+     * "error","exit_code"}（与 cli_chat_tools.c 2026-08-16 修复同源；
+     * 兼容未解包信封——有 "result" 先下钻）。 */
     cJSON *result = cJSON_GetObjectItem(root, "result");
+    if (!cJSON_IsObject(result))
+        result = root;
     cJSON *err = cJSON_GetObjectItem(root, "error");
     int tool_ok = 0;
-    if (result) {
+    if (!err && result) {
         cJSON *success = cJSON_GetObjectItem(result, "success");
         cJSON *output = cJSON_GetObjectItem(result, "output");
         cJSON *error = cJSON_GetObjectItem(result, "error");
