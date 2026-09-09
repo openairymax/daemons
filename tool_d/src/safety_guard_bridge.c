@@ -361,7 +361,9 @@ static int bridge_check_impl(safety_guard_bridge_t *bridge, const char *agent_id
                                       "safety_guard_bridge");
         }
 
-        daemon_audit_log_event("tool_d", "tool_execute_safety_guard", tool_name, 1, agent_id);
+        /* result=0 → SUCCESS。此处为 guard 链全部通过后的成功路径；原硬编码
+         * 1 使每次工具执行都被审计为 FAILED（假阳性遥测，误导排障）。 */
+        daemon_audit_log_event("tool_d", "tool_execute_safety_guard", tool_name, 0, agent_id);
 
         if (result)
             result->audit_recorded = 1;
@@ -497,7 +499,10 @@ int safety_guard_bridge_audit_log(safety_guard_bridge_t *bridge, const char *eve
         safety_guard_record_audit(bridge->guard_ctx, &event, &result, "safety_guard_bridge");
     }
 
-    int audit_decision = (decision == 0) ? 1 : 0;
+    /* audit result 语义与 daemon_audit_log_event 对齐：0=SUCCESS，非0=FAILED。
+     * decision==0 即 ALLOW（见上方 SAFETY_DECISION_ALLOW 映射）→ SUCCESS；
+     * 原取反映射使 ALLOW 记 FAILED、DENY 记 SUCCESS（语义反转）。 */
+    int audit_decision = (decision == 0) ? 0 : 1;
     daemon_audit_log_event("tool_d", event_type, tool_name, audit_decision,
                            agent_id ? agent_id : bridge->agent_id);
 
