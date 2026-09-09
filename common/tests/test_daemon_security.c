@@ -148,17 +148,22 @@ static void test_sanitize_tool_params_normal(void)
 
 static void test_sanitize_tool_params_dangerous(void)
 {
-    TEST("Sanitize tool params - dangerous pattern");
+    TEST("Sanitize tool params - shell-like data is not rejected (0.1.14)");
     airy_err_t err;
     memset(&err, 0, sizeof(err));
     daemon_security_init(NULL, &err);
 
     char sanitized_tool[128];
     char sanitized_params[256];
+    /* 0.1.14 语义变更：SEC-014 注入模式子串扫描已移除——工具参数是数据，
+     * 含 ; | > 等字符的合法数据（fs_write 写 HTML、grep 正则）此前被整段
+     * 误杀（0.1.13 实机回归）。sanitize 层仅做控制字符剥离留痕（审计/展示），
+     * 拒绝职责由 ACL + tool_approval + 沙箱配额承担（白名单化记入 0.2.x）。 */
     int ret = daemon_sanitize_tool_params("exec", "; cat /etc/passwd", sanitized_tool,
                                           sizeof(sanitized_tool), sanitized_params,
                                           sizeof(sanitized_params));
-    ASSERT(ret != 0, "dangerous params should be rejected");
+    ASSERT(ret == 0, "tool params are data: shell-like content must not be rejected here");
+    ASSERT(strchr(sanitized_params, ';') != NULL, "sanitized copy keeps displayable content");
 
     daemon_security_shutdown();
     PASS();
