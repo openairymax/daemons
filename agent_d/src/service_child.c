@@ -359,6 +359,15 @@ int agent_spawn_child(const char *spec, const char *agent_id, pid_t *out_pid, in
          * (removal of the historical P0-1 mechanism, see
          * docs-closed/agentrt/01-designs/_design_0.1.1/06-agent-gateway-wiring.md §3.1). */
         {
+            /* 0.1.14 修复：剥离运行时 lib 目录的 LD_LIBRARY_PATH 污染。
+             * agent_d 进程环境的 LD_LIBRARY_PATH 含 $AIRY_LIB_DIR（自包含
+             * 打包的 agentrt 私有 .so），子进程 python3 加载 _sqlite3 等
+             * 系统扩展时会优先解析到打包的旧版 libsqlite3.so.0（缺
+             * sqlite3_deserialize 符号）→ import 崩溃 → readiness 握手
+             * EOF → agent.spawn 全部失败 → DAG 任务节点执行必败
+             * （0.1.13 实机回归实锤）。Python runner 为纯 Python 自包含，
+             * 无需 runtime lib；系统库走默认加载路径即可。 */
+            unsetenv("LD_LIBRARY_PATH");
             char *argv[] = {
                 (char *)"python3", (char *)"-m", (char *)"airymax_agents.runner",
                 (char *)"--spec",  (char *)spec, NULL,
