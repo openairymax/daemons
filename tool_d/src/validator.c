@@ -17,7 +17,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_STRING_LEN 8192
+/* 参数字符串长度上限（0.1.14 由 8192 提升）：1MB 与 gateway 默认
+ * max_request_size 对齐。8192 上限使大文档 fs_write 必然被拒
+ * （"string exceeds max length 8192"，0.1.13 实机回归实锤），
+ * 文档增删改查场景无法工作；daemon RPC 服务端请求接收已支持
+ * 动态累积（daemon_main.h），gateway→tool_d 链路无 8KB 限制。 */
+#define MAX_STRING_LEN (1024 * 1024)
 #define MAX_ARRAY_LEN 256
 #define MIN_NUMBER_VAL -1e18
 #define MAX_NUMBER_VAL 1e18
