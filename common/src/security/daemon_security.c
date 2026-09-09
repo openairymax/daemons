@@ -310,12 +310,14 @@ int daemon_sanitize_tool_params(const char *tool_name, const char *params, char 
 
     sanitize_string(sanitized_tool, tool_name, tool_buf_size);
 
-    if (contains_dangerous_pattern(params)) {
-        SVC_LOG_SECURITY("SEC-014 VIOLATION: Tool params contain dangerous pattern - REJECTED");
-        snprintf(sanitized_params, param_buf_size, "[SANITIZED: params rejected]");
-        return AIRY_ERR_PERMISSION_DENIED;
-    }
-
+    /* 0.1.14 修复：移除对工具参数 JSON 的 SEC-014 注入模式子串拒绝。
+     * 原实现对 | < > \ && 等字符的整段子串扫描应用于所有工具参数：
+     *  - fs_write 写 HTML/XML（含 >）、grep 正则含 | 等合法数据必然被拒
+     *    （0.1.13 实机回归：SEC-014 VIOLATION 误杀 fs_grep/fs_write）；
+     *  - 对 shell_run 亦无实际防护价值：命令串本就来自模型并以 agent
+     *    权限执行，真正防线是 ACL + 审批（tool_approval）+ 沙箱配额。
+     * 参数仍经 sanitize_string 剥离控制字符后留痕（审计/展示用），
+     * 执行永远使用原始 params_json。命令白名单化设计记入 0.2.x。 */
     sanitize_string(sanitized_params, params, param_buf_size);
 
     if (strlen(params) > param_buf_size - 1) {
