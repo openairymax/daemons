@@ -413,3 +413,238 @@ int os_sandbox_apply(const os_sandbox_cfg_t *cfg)
 }
 
 #endif /* __linux__ */
+
+/* ------------------------------------------------------------------
+ * File-tool path confinement (cross-platform).
+ *
+ * Unlike os_sandbox_apply() (which confines shell subprocesses through
+ * Landlock on Linux), this confines individual file-tool operations
+ * lexically so it also protects hosts without Landlock: macOS, Windows
+ * and Linux kernels without Landlock all get workspace confinement for
+ * fs_read/fs_write/fs_edit/fs_list/fs_delete/fs_glob/fs_grep.
+ * ------------------------------------------------------------------ */
+
+#ifndef OS_FS_PATH_MAX
+#ifdef PATH_MAX
+#define OS_FS_PATH_MAX PATH_MAX
+#else
+#define OS_FS_PATH_MAX 4096
+#endif
+#endif
+
+/* Confine depth cap for the strip-segment loop (deepest existing
+ * ancestor search); also bounds the number of remembered tail segments. */
+#define OS_FS_CONFINE_MAX_DEPTH 128
+
+static int fs_confine_realpath(const char *path, char *out, size_t cap)
+{
+#if defined(_WIN32)
+    (void)cap;
+    return _fullpath(out, path, cap) != NULL ? 0 : -1;
+#else
+    (void)cap;
+    return realpath(path, out) != NULL ? 0 : -1;
+#endif
+}
+
+/* Canonical workspace for file-tool confinement. Same environment inputs
+ * as os_sandbox_cfg_from_env(), read independently so non-Linux hosts
+ * (where cfg_from_env pins mode to OFF) still get confinement. */
+static int fs_confine_workspace(char *ws, size_t cap)
+{
+    const char *env = getenv("AIRY_TOOL_SANDBOX_WORKSPACE");
+    if (env && env[0] != '\0') {
+        if (fs_confine_realpath(env, ws, cap) == 0) {
+            return 0;
+        }
+        /* Not canonicalizable (e.g. dangling path): use verbatim, the
+         * prefix check below then fails closed for anything that does
+         * not literally live underneath it. */
+        int pr = snprintf(ws, cap, "%s", env);
+        return (pr >= 0 && (size_t)pr < cap) ? 0 : -1;
+    }
+    if (getcwd(ws, cap) == NULL) {
+        return -1;
+    }
+    return 0;
+}
+
+/* Candidate must be the workspace itself or live underneath it. */
+static int fs_confine_check_prefix(const char *cand, const char *ws, const char *orig_path,
+                                   char *resolved, size_t resolved_cap)
+{
+    size_t n = strlen(ws);
+#if defined(_WIN32)
+    if (_strnicmp(cand, ws, n) != 0) {
+#else
+    if (strncmp(cand, ws, n) != 0) {
+#endif
+        SVC_LOG_WARN("os_sandbox: path escapes workspace sandbox: '%s'", orig_path);
+        return -1;
+    }
+    char next = cand[n];
+    if (next != '\0' && next != '/'
+#if defined(_WIN32)
+        && next != '\\'
+#endif
+    ) {
+        /* Sibling name sharing a prefix (e.g. /ws vs /ws-private). */
+        SVC_LOG_WARN("os_sandbox: path escapes workspace sandbox: '%s'", orig_path);
+        return -1;
+    }
+    int pr = snprintf(resolved, resolved_cap, "%s", cand);
+    if (pr < 0 || (size_t)pr >= resolved_cap) {
+        return -1;
+    }
+    return 0;
+}
+
+int os_sandbox_fs_confine(const char *path, int for_write, char *resolved, size_t resolved_cap)
+{
+    if (!path || path[0] == '\0' || !resolved || resolved_cap == 0) {
+        return -1;
+    }
+
+    const char *mode_env = getenv("AIRY_TOOL_SANDBOX_MODE");
+    if (mode_env && strcmp(mode_env, "off") == 0) {
+        int pr = snprintf(resolved, resolved_cap, "%s", path);
+        return (pr >= 0 && (size_t)pr < resolved_cap) ? 0 : -1;
+    }
+
+    char ws[OS_FS_PATH_MAX];
+    if (fs_confine_workspace(ws, sizeof(ws)) != 0 || ws[0] == '\0') {
+        SVC_LOG_WARN("os_sandbox: cannot resolve workspace, refusing path '%s'", path);
+        return -1;
+    }
+
+    int is_abs = (path[0] == '/');
+#if defined(_WIN32)
+    if ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) {
+        if (path[1] == ':' || path[1] == '/' || path[1] == '\\') {
+            is_abs = 1;
+        }
+    }
+#endif
+
+    char work[OS_FS_PATH_MAX];
+    int pr;
+    if (is_abs) {
+        pr = snprintf(work, sizeof(work), "%s", path);
+    } else {
+        pr = snprintf(work, sizeof(work), "%s/%s", ws, path);
+    }
+    if (pr < 0 || (size_t)pr >= sizeof(work)) {
+        return -1;
+    }
+
+    /* Strip trailing separators so realpath sees the real leaf. */
+    size_t wl = strlen(work);
+    while (wl > 1 && (work[wl - 1] == '/'
+#if defined(_WIN32)
+                      || work[wl - 1] == '\\'
+#endif
+                      )) {
+        work[--wl] = '\0';
+    }
+
+    /* Fast path: the full path already exists - realpath canonicalizes
+     * it (resolving any symlink) and the prefix check confines it. */
+    char base[OS_FS_PATH_MAX];
+    if (fs_confine_realpath(work, base, sizeof(base)) == 0) {
+        return fs_confine_check_prefix(base, ws, path, resolved, resolved_cap);
+    }
+
+    /* The path does not exist (yet). For reads this is not an error at
+     * this layer: confinement only decides *where* access is allowed;
+     * existence is reported by the subsequent I/O (a read of a missing
+     * file yields ENOENT -> NOT_FOUND instead of a misleading permission
+     * error). Canonicalize the deepest existing ancestor, remember the
+     * stripped tail, then re-join lexically. */
+    char *segs[OS_FS_CONFINE_MAX_DEPTH];
+    size_t seg_count = 0;
+
+    for (int depth = 0; depth < OS_FS_CONFINE_MAX_DEPTH; depth++) {
+        if (fs_confine_realpath(work, base, sizeof(base)) == 0) {
+            break;
+        }
+        if (errno != ENOENT && errno != ENOTDIR) {
+            SVC_LOG_WARN("os_sandbox: cannot resolve path '%s' (errno=%d)", path, errno);
+            return -1;
+        }
+        char *cut = strrchr(work, '/');
+#if defined(_WIN32)
+        char *cut_bk = strrchr(work, '\\');
+        if (cut_bk > cut) {
+            cut = cut_bk;
+        }
+#endif
+        if (!cut) {
+            SVC_LOG_WARN("os_sandbox: cannot anchor path '%s' inside workspace", path);
+            return -1;
+        }
+        if (seg_count >= OS_FS_CONFINE_MAX_DEPTH) {
+            return -1;
+        }
+        segs[seg_count++] = cut + 1;
+        if (cut == work) {
+            work[1] = '\0'; /* keep the root itself ("/") */
+        } else {
+            *cut = '\0';
+        }
+        if (work[0] == '\0') {
+            return -1;
+        }
+    }
+    if (seg_count >= OS_FS_CONFINE_MAX_DEPTH) {
+        SVC_LOG_WARN("os_sandbox: path '%s' too deep to confine", path);
+        return -1;
+    }
+
+    /* Lexical normalization of base + tail: "." dropped, ".." pops one
+     * segment, popping past the root means escape. Without this step a
+     * tail containing ".." could re-form a string that passes the
+     * textual prefix check while actually resolving outside. */
+    char norm[OS_FS_PATH_MAX];
+    pr = snprintf(norm, sizeof(norm), "%s", base);
+    if (pr < 0 || (size_t)pr >= sizeof(norm)) {
+        return -1;
+    }
+    for (size_t i = seg_count; i-- > 0;) {
+        const char *s = segs[i];
+        if (s[0] == '\0' || strcmp(s, ".") == 0) {
+            continue;
+        }
+        if (strcmp(s, "..") == 0) {
+            char *p = strrchr(norm, '/');
+            if (!p) {
+                SVC_LOG_WARN("os_sandbox: path escapes workspace sandbox: '%s'", path);
+                return -1;
+            }
+            if (p == norm) {
+                norm[1] = '\0'; /* "/.." stays at the root */
+            } else {
+                *p = '\0';
+            }
+            continue;
+        }
+        {
+            /* snprintf must not alias source and destination. */
+            char joined[OS_FS_PATH_MAX];
+            pr = snprintf(joined, sizeof(joined), "%s/%s", norm, s);
+            if (pr < 0 || (size_t)pr >= sizeof(joined)) {
+                return -1;
+            }
+            AIRY_MEMCPY(norm, joined, (size_t)pr + 1);
+        }
+    }
+
+    return fs_confine_check_prefix(norm, ws, path, resolved, resolved_cap);
+}
+
+int os_sandbox_fs_workspace(char *ws, size_t cap)
+{
+    if (!ws || cap == 0) {
+        return -1;
+    }
+    return fs_confine_workspace(ws, cap);
+}

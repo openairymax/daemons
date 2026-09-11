@@ -52,6 +52,17 @@
 
 #include "tool_builtin_internal.h"
 
+int builtin_fs_confine(const char *orig_path, int for_write, char *resolved, size_t resolved_cap,
+                       tool_result_t *res)
+{
+    if (os_sandbox_fs_confine(orig_path, for_write, resolved, resolved_cap) == 0)
+        return AIRY_OK;
+    char err[512];
+    snprintf(err, sizeof(err), "Path escapes workspace sandbox: '%s'", orig_path);
+    res->error = AIRY_STRDUP(err);
+    return AIRY_ERR_PERMISSION_DENIED;
+}
+
 char *builtin_read_all(FILE *fp, int *out_truncated)
 {
     if (out_truncated)

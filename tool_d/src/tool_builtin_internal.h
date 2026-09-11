@@ -28,6 +28,13 @@ extern "C" {
 /* Common I/O helpers (builtin.c) */
 char *builtin_read_all(FILE *fp, int *out_truncated);
 
+/* Confine a file-tool path into the workspace sandbox (T16). Wraps
+ * os_sandbox_fs_confine() with a uniform escape error for tool results.
+ * Returns AIRY_OK with resolved filled on success; otherwise sets
+ * res->error and returns AIRY_ERR_PERMISSION_DENIED. */
+int builtin_fs_confine(const char *orig_path, int for_write, char *resolved, size_t resolved_cap,
+                       tool_result_t *res);
+
 void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const char *mark);
 int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_code,
                       uint32_t timeout_ms, int *out_truncated, const os_sandbox_cfg_t *sandbox);

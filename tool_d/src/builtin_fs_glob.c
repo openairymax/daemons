@@ -198,6 +198,10 @@ int fs_glob_tool(const char *params_json, tool_result_t *res)
     const char *base_dir = (cJSON_IsString(base) && base->valuestring && base->valuestring[0]) ?
                                base->valuestring :
                                ".";
+    char resolved[4096];
+    int rc = builtin_fs_confine(base_dir, 0, resolved, sizeof(resolved), res);
+    if (rc != AIRY_OK)
+        return rc;
 
     const char *segs[64];
     size_t nsegs = 0;
@@ -241,7 +245,7 @@ int fs_glob_tool(const char *params_json, tool_result_t *res)
         return AIRY_ERR_OUT_OF_MEMORY;
     }
     size_t out_len = 0, count = 0;
-    builtin_glob_impl(base_dir, segs, nsegs, 0, path, 0, AIRY_PATH_MAX, out, BUILTIN_OUTPUT_CAP,
+    builtin_glob_impl(resolved, segs, nsegs, 0, path, 0, AIRY_PATH_MAX, out, BUILTIN_OUTPUT_CAP,
                       &out_len, &count, BUILTIN_GLOB_MAX);
 
     for (size_t k = 0; k < nsegs; k++)

@@ -237,6 +237,9 @@ int main(void)
     printf("  Tool Service Unit Tests\n");
     printf("=========================================\n");
 
+    /* T16: fs 工具在 workspace 围堵下运行；本测试的删除目标都在 /tmp。 */
+    setenv("AIRY_TOOL_SANDBOX_WORKSPACE", "/tmp", 1);
+
     test_service_create_destroy();
     test_service_register_tool();
     test_service_list_tools();
