@@ -225,6 +225,7 @@ int plugin_discovery_parse_manifest(const char *yaml_path, const char *plugin_di
                 safe_strcpy(out_result->permissions[out_result->permission_count], perm, 64);
                 out_result->permission_count++;
             }
+            AIRY_FREE(perm);
         }
 
         if (value)
