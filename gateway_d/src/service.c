@@ -26,6 +26,8 @@
 #ifdef GATEWAY_HAS_HTTP2
 #include "http2_gateway.h"
 #endif
+/* 入口鉴权纯策略（0.1.15 WS-2 T-11a bind 侧 fail-closed） */
+#include "gateway/gateway_auth.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -70,6 +72,31 @@ static void *gateway_stdio_thread_main(void *arg)
         gateway_start(gw);
     }
     return NULL;
+}
+
+/**
+ * @brief bind 侧 fail-closed 收敛（0.1.15 WS-2 T-11a）
+ *
+ * 未配置 GATEWAY_API_KEY 时，非回环监听地址强制收敛为 127.0.0.1，
+ * 与 WARN 日志同源（DoD：绑定地址与日志一致）。配置 GATEWAY_API_KEY
+ * 后用户显式声明的监听面原样生效（由请求侧门禁强制凭证）。
+ *
+ * @param transport 传输名（仅用于日志）
+ * @param host 配置内的监听地址（可被收敛改写）
+ */
+static void gateway_service_constrain_bind_host(const char *transport, const char **host)
+{
+    if (gw_auth_key_configured())
+        return; /* 有凭证：显式监听面原样生效 */
+    if (!*host || gw_auth_addr_is_loopback(*host))
+        return; /* 已是回环（或未配置） */
+    AIRY_LOG_WARN("gateway auth: GATEWAY_API_KEY not set; %s bind host '%s' constrained "
+                  "to 127.0.0.1 (loopback-only)", transport, *host);
+    /* 镜像 load_config 保护模式：仅堆分配值（非默认字面量 "0.0.0.0"）
+     * 可释放，字面量直接覆盖（free 字面量是 UB） */
+    if (strcmp(*host, "0.0.0.0") != 0)
+        AIRY_FREE((void *)*host);
+    *host = "127.0.0.1";
 }
 
 void gateway_service_get_default_config(gateway_service_config_t *config)
@@ -241,6 +268,11 @@ airy_err_t gateway_service_start(gateway_service_t service)
         return AIRY_EPERM;
     }
     service->state = GW_STATE_RUNNING;
+
+    /* WS-2 T-11a bind 侧 fail-closed：无凭证时非回环监听面强制收敛
+     * （HTTP/WS 共用 http.host 的 HTTP/2 随 http 收敛自动覆盖） */
+    gateway_service_constrain_bind_host("http", &service->config.http.host);
+    gateway_service_constrain_bind_host("ws", &service->config.ws.host);
 
 #ifdef GATEWAY_HAS_HTTP
     if (service->config.http.enabled) {
