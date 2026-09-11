@@ -33,6 +33,7 @@ typedef struct {
     os_sandbox_mode_t mode;
     char workspace[1024];
     int net_access;
+    int require_landlock;
     uint64_t mem_limit_mb;
     uint32_t nofile_limit;
     uint32_t nproc_limit;
@@ -45,7 +46,9 @@ int os_sandbox_landlock_available(void);
 /* Build a default config from environment variables:
  *   AIRY_TOOL_SANDBOX_MODE=off|workspace|strict (default workspace)
  *   AIRY_TOOL_SANDBOX_WORKSPACE=<absolute path> (default getcwd)
- *   AIRY_TOOL_SANDBOX_NET=0|1                   (overrides net_access) */
+ *   AIRY_TOOL_SANDBOX_NET=0|1                   (overrides net_access)
+ *   AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK=0|1      (fail closed when Landlock
+ *       is unavailable instead of degrading to rlimit+seccomp only) */
 void os_sandbox_cfg_from_env(os_sandbox_cfg_t *cfg);
 
 /* Call after fork, before exec: apply rlimit + seccomp + Landlock.
@@ -53,7 +56,9 @@ void os_sandbox_cfg_from_env(os_sandbox_cfg_t *cfg);
  * should refuse to execute).
  * Note: mode==STRICT returns failure when Landlock is unavailable (strict
  * mode does not allow degradation); mode==WORKSPACE degrades gracefully
- * when Landlock is unavailable (returns 0, logs a warning). */
+ * when Landlock is unavailable (returns 0, logs a warning) unless
+ * cfg->require_landlock is set, in which case it fails closed. The same
+ * knob applies to the non-Linux / no-Landlock-support builds. */
 int os_sandbox_apply(const os_sandbox_cfg_t *cfg);
 
 /* Resolve a tool-supplied path against the workspace sandbox and write the

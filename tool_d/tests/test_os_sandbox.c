@@ -184,6 +184,37 @@ static void test_env_config(void)
     CHECK(cfg.net_access == 1, "default net on (workspace)");
 }
 
+static void test_require_landlock_env(void)
+{
+    printf("== test_require_landlock_env ==\n");
+    os_sandbox_cfg_t cfg;
+    unsetenv("AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK");
+    os_sandbox_cfg_from_env(&cfg);
+    CHECK(cfg.require_landlock == 0, "require_landlock defaults to off");
+
+    setenv("AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK", "1", 1);
+    os_sandbox_cfg_from_env(&cfg);
+    CHECK(cfg.require_landlock == 1, "require_landlock=1 parsed");
+
+    setenv("AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK", "true", 1);
+    os_sandbox_cfg_from_env(&cfg);
+    CHECK(cfg.require_landlock == 1, "require_landlock=true parsed");
+
+    setenv("AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK", "0", 1);
+    os_sandbox_cfg_from_env(&cfg);
+    CHECK(cfg.require_landlock == 0, "require_landlock=0 parsed");
+
+    setenv("AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK", "false", 1);
+    os_sandbox_cfg_from_env(&cfg);
+    CHECK(cfg.require_landlock == 0, "require_landlock=false parsed");
+
+    unsetenv("AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK");
+    /* The fail-closed branch of os_sandbox_apply() only triggers on
+     * kernels/builds without Landlock, which cannot be simulated on a
+     * Landlock-enabled host; the env plumbing above is the portable
+     * contract under test. */
+}
+
 static void test_workspace_mode(void)
 {
     printf("== test_workspace_mode ==\n");
@@ -317,6 +348,7 @@ int main(void)
 
     test_landlock_available();
     test_env_config();
+    test_require_landlock_env();
     test_workspace_mode();
     test_strict_mode();
     test_off_mode();
