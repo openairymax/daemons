@@ -18,6 +18,7 @@
 #include "daemon_cupolas_bootstrap.h"
 
 #include "daemon_heapstore_bootstrap.h"
+#include "daemon_ipc_ops_bootstrap.h"
 #include "gateway_service.h"
 #include "gateway_business_handler.h"
 #include "gateway_biz_internal.h"
@@ -491,6 +492,12 @@ int main(int argc, char *argv[])
 
     daemon_cupolas_init_pep("gateway_d");
 
+    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
+     * dispatch without linking daemons symbols (ARC-02). gateway_d links no
+     * atoms engine target, but the table is process-wide and idempotent;
+     * init failure is non-fatal (BAN-319). */
+    daemon_ipc_ops_init("gateway_d");
+
     daemon_heapstore_init("gateway_d");
 
     if (parse_args(argc, argv, &config) != 0) {
@@ -705,6 +712,7 @@ cleanup:
     airy_sock_cleanup();
 
     SVC_LOG_INFO("Gateway daemon stopped");
+    daemon_ipc_ops_cleanup();
     daemon_heapstore_cleanup();
     daemon_cupolas_cleanup();
     log_cleanup();

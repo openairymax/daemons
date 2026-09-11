@@ -21,10 +21,13 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "daemon_main.h"
+#include "daemon_ipc_ops_bootstrap.h"
 #include "platform.h"
 #include "hook_service.h"
 #include "hook_registry.h"
 #include "hook_builtin_handlers.h"
+#include "airy_safety_ops.h"
+#include "safety_guard.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -66,6 +69,32 @@ typedef struct {
 static hook_session_entry_t g_hook_sessions[AIRY_HOOK_MAX_SESSIONS];
 static airy_mtx_t g_hook_sessions_lock;
 
+/* ARC-02/ARC-04: airy_coreloop_hooks no longer links cupolas. hook_d owns the
+ * SafetyGuard implementation and injects it through airy_safety_ops_t, so the
+ * interceptor keeps enforcing the guard chain at PRE_TOOL/PRE_EXEC. */
+static safety_guard_context_t *hook_safety_create(void)
+{
+    return safety_guard_create();
+}
+
+static safety_decision_t hook_safety_check_chain(safety_guard_context_t *ctx,
+                                                 const safety_event_t *event,
+                                                 safety_result_t **results, size_t *result_count)
+{
+    return safety_guard_check_chain(ctx, event, results, result_count);
+}
+
+static void hook_safety_destroy(safety_guard_context_t *ctx)
+{
+    safety_guard_destroy(ctx);
+}
+
+static const airy_safety_ops_t g_hook_safety_ops = {
+    .create = hook_safety_create,
+    .check_chain = hook_safety_check_chain,
+    .destroy = hook_safety_destroy,
+};
+
 static void destroy_service_hook_d(void)
 {
     if (g_registry_initialized) {
@@ -73,6 +102,8 @@ static void destroy_service_hook_d(void)
         hook_registry_destroy();
         g_registry_initialized = 0;
     }
+    are_ops_set_safety(NULL);
+    daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
 }
 
@@ -544,6 +575,12 @@ int main(int argc, char *argv[])
     atexit(log_cleanup);
 
     daemon_cupolas_init_pep("hook_d");
+
+    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
+     * dispatch without linking daemons symbols (ARC-02). Init failure is
+     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    daemon_ipc_ops_init("hook_d");
+    are_ops_set_safety(&g_hook_safety_ops);
     g_start_time = (uint64_t)time(NULL);
     SVC_LOG_INFO("hook_d: starting");
 

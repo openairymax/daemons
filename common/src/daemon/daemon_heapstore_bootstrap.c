@@ -8,11 +8,26 @@
 
 #include "daemon_heapstore_bootstrap.h"
 
+#include "airy_heapstore_ops.h"
 #include "platform.h"
 #include "heapstore_integration.h"
 #include "svc_logger.h"
 
 static int g_heapstore_initialized = 0;
+
+/*
+ * ARC-04: heapstore-backed implementation of the atoms persistence ops table.
+ * The atoms layer (airy_syscall session/telemetry) dispatches through this
+ * table without linking against heapstore (ARC-02); the upper layer owns the
+ * concrete implementation and injects it here. Cleared on cleanup, after which
+ * atoms callers degrade gracefully (BAN-319).
+ */
+static const airy_heapstore_ops_t g_daemon_heapstore_ops = {
+    .session_save = heapstore_syscall_session_save,
+    .session_delete = heapstore_syscall_session_delete,
+    .trace_save = heapstore_syscall_trace_save,
+    .trace_export = heapstore_syscall_trace_export,
+};
 
 airy_err_t daemon_heapstore_init(const char *daemon_name)
 {
@@ -48,6 +63,7 @@ airy_err_t daemon_heapstore_init(const char *daemon_name)
     }
 
     g_heapstore_initialized = 1;
+    are_ops_set_heapstore(&g_daemon_heapstore_ops);
     SVC_LOG_INFO("daemon_heapstore_init: heapstore runtime data store initialized for "
                  "'%s' (root=%s)",
                  daemon_name, root_path[0] ? root_path : "(default)");
@@ -60,6 +76,7 @@ void daemon_heapstore_cleanup(void)
         return;
 
     heapstore_integration_shutdown();
+    are_ops_set_heapstore(NULL);
     g_heapstore_initialized = 0;
     SVC_LOG_INFO("daemon_heapstore_cleanup: heapstore runtime data store shut down");
 }

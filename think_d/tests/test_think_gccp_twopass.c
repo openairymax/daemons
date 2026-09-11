@@ -23,6 +23,7 @@
 
 #include "think_service.h"
 #include "airy_memory.h"
+#include "daemon_ipc_ops_bootstrap.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -200,7 +201,19 @@ static void test_gccp_twopass(void)
 int main(void)
 {
     printf("[SUITE] test_think_gccp_twopass\n");
+
+    /* ARC-04: the atoms LLM adapter used by think_service reaches
+     * svc_common/llm_d through the injected IPC ops table instead of
+     * linking daemon symbols directly. This harness plays the daemon
+     * role and installs the real svc_common implementation before the
+     * service is exercised (idempotent). The "no external LLM" test
+     * semantics are preserved by llm_d not running, so RPC calls fail
+     * and fall back to the heuristic path. */
+    (void)daemon_ipc_ops_init("test_think_gccp_twopass");
+
     test_gccp_twopass();
+
+    daemon_ipc_ops_cleanup();
 
     printf("\n[RESULT] %d/%d passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;

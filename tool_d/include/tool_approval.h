@@ -19,48 +19,16 @@
 #ifndef AIRY_RT_TOOL_APPROVAL_H
 #define AIRY_RT_TOOL_APPROVAL_H
 
-#include "tool_service.h"
+#include "tool_approval_types.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 
-typedef struct safety_guard_bridge_s safety_guard_bridge_t;
-
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/** @brief Tool-approval result. */
-typedef enum {
-    TOOL_APPROVAL_ALLOWED = 0,
-    TOOL_APPROVAL_DENIED,
-    TOOL_APPROVAL_SANITIZED,
-    TOOL_APPROVAL_PENDING_AUDIT
-} tool_approval_result_t;
-
-/** @brief Tool-approval context. */
-typedef struct tool_approval_ctx tool_approval_ctx_t;
-
-/** @brief Tool-approval config. */
-typedef struct {
-    const char *agent_id;
-    bool enable_safety_guard_chain;
-    bool enable_audit_logging;
-    const char *permission_rules;
-} tool_approval_config_t;
-
-/** @brief Detailed approval result. */
-typedef struct {
-    tool_approval_result_t decision;
-    char reason[256];
-    char sanitized_params[4096];
-    int permission_check_passed;
-    int safety_guard_passed;
-    int params_were_sanitized;
-} tool_approval_detail_t;
-
 
 /**
  * @brief Create a tool-approval context.

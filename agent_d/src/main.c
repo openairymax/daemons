@@ -23,6 +23,7 @@
  */
 
 #include "daemon_main.h"
+#include "daemon_ipc_ops_bootstrap.h"
 #include "agent_d_internal.h"
 #include "platform.h"
 
@@ -173,6 +174,11 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("agent_d");
 
+    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
+     * dispatch without linking daemons symbols (ARC-02). Init failure is
+     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    daemon_ipc_ops_init("agent_d");
+
     load_daemon_config(config_path);
     if (use_tcp)
         g_config.use_tcp = 1;
@@ -284,6 +290,7 @@ int main(int argc, char **argv)
     free_daemon_config();
 
     SVC_LOG_INFO("Agent service stopped");
+    daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
     log_cleanup();
     return 0;

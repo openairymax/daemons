@@ -91,7 +91,6 @@ daemons/
 | **事件与并发** | `airy_event_loop.c`、`thread_pool.c`、`refcount.c` |
 | **指标与告警** | `unified_metrics.c`、`alert_manager.c` |
 | **配置** | `config_manager.c`、`daemon_defaults.h`、`daemon_errors.h`、`daemon_platform_ext.h` |
-| **内存** | `arena.c`、`tcache.c`（守护进程本地分配器） |
 | **平台** | `platform_compat.c`、`compat.h`、`platform.h` |
 
 > **P0.17 阶段 3 / IRON-6：** `svc_common.h` 与 `ipc_service_bus.h` 的权威定义已迁移至 `commons/utils/ipc/include/`。`common/include/` 下的 daemons 侧头文件保留为**重导出兼容头**，使内部源文件无需立即修改 `#include` 路径，消除 atoms→daemons 编译期反向依赖。

@@ -78,6 +78,7 @@ set(SVC_COMMON_SOURCES
     src/daemon/daemon_cupolas_bootstrap.c # P3.14 ACC-DT15: daemon 统一 cupolas 安全穹顶引导
     src/daemon/daemon_rpc_client.c       # Phase 3: gateway→daemon thin IPC client (Unix socket JSON-RPC)
     src/daemon/daemon_heapstore_bootstrap.c # KER-05~07: daemon 统一 heapstore 运行时数据存储引导
+    src/daemon/daemon_ipc_ops_bootstrap.c # ARC-04: 注入 atoms 侧 IPC/RPC/SD ops 抽象表
     src/util/hall_writer.c          # 2.8: daemon 侧事件流写端（单一真相源 hall 事件）
 )
 
@@ -98,7 +99,21 @@ if(BUILD_HEAPSTORE)
     target_link_libraries(svc_common PUBLIC airy_heapstore)
     target_include_directories(svc_common PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/../../heapstore/include)
+    # ARC-04: daemon_heapstore_bootstrap 注入 atoms 侧持久化 ops 抽象表。
+    # ops 存储（are_ops_set/get_heapstore）在独立小库 airy_syscall_ops 中，
+    # 而非 airy_syscall——否则 svc_common → airy_syscall → airy_coreloopthree
+    # → svc_common 构成静态库循环依赖。PRIVATE 链接保证最终可执行文件
+    # 链接行含该归档；接口 include 由 airy_syscall_ops 自身提供。
+    target_link_libraries(svc_common PRIVATE airy_syscall_ops)
 endif()
+
+# ARC-04: daemon_ipc_ops_bootstrap 注入 atoms 侧 IPC/RPC/SD ops 抽象表。
+# ops 存储（are_ops_set/get_ipc）在独立小库 airy_ipc_ops 中，而非 svc_common
+# 自身——否则 atoms 侧（coreloopthree IPC 适配器）消费 are_ops_get_ipc 时需
+# 反向链接 svc_common，构成 AIRY-02/IRON-6 违规。PRIVATE 链接保证最终可执行
+# 文件链接行含该归档；接口 include（airy_ipc_ops.h）由 coreloopthree/include
+# 提供（见本文件 PUBLIC include 第二段）。
+target_link_libraries(svc_common PRIVATE airy_ipc_ops)
 
 # P3.14 ACC-DT15: cupolas 安全穹顶（PUBLIC 使得所有链接 svc_common 的 daemon 自动获得 cupolas）
 if(TARGET cupolas)

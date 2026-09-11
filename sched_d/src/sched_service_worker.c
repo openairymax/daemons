@@ -18,6 +18,7 @@
 #include "scheduler_service.h"
 #include "sched_service_internal.h"
 #include "airy_memory.h"
+#include "airy_rt.h"
 #include "error.h"
 #include "svc_logger.h"
 #include "platform.h"

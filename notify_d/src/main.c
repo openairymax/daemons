@@ -14,6 +14,7 @@
  */
 
 #include "daemon_main.h"
+#include "daemon_ipc_ops_bootstrap.h"
 #include "notify_service.h"
 #include "platform.h"
 
@@ -629,6 +630,11 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
 
     daemon_cupolas_init_pep("notify_d");
 
+    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
+     * dispatch without linking daemons symbols (ARC-02). Init failure is
+     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    daemon_ipc_ops_init("notify_d");
+
     if (notify_d_init(&g_service, NOTIFY_D_DEFAULT_PORT, NOTIFY_D_DEFAULT_SOCKET) != AIRY_SUCCESS)
         return EXIT_FAILURE;
     if (notify_d_start(&g_service) != AIRY_SUCCESS) {
@@ -663,6 +669,7 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     daemon_bootstrap_sd_stop(g_bsd);
     notify_d_stop(&g_service, g_shutdown ? 1 : 0);
     notify_d_destroy(&g_service);
+    daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
     log_cleanup();
     return 0;

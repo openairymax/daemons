@@ -17,6 +17,9 @@
  */
 
 #include "daemon_main.h"
+#include "daemon_ipc_ops_bootstrap.h"
+#include "daemon_llm_ops_bootstrap.h"
+#include "daemon_tool_ops_bootstrap.h"
 #include "platform.h"
 #include "param_validator.h"
 #include "svc_logger.h"
@@ -377,6 +380,14 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("think_d");
 
+    /* ARC-04: think_d embeds the atoms cognition/coreloopthree engine, whose
+     * adapters dispatch through the IPC/LLM/tool ops tables instead of
+     * linking daemons symbols (ARC-02). Inject all three here; failures are
+     * non-fatal and atoms call sites degrade gracefully (BAN-319). */
+    daemon_ipc_ops_init("think_d");
+    daemon_llm_ops_init("think_d");
+    daemon_tool_ops_init("think_d");
+
     load_daemon_config(config_path);
     if (use_tcp)
         g_config.use_tcp = 1;
@@ -489,6 +500,9 @@ int main(int argc, char **argv)
     free_daemon_config();
 
     SVC_LOG_INFO("ThinkDual service stopped");
+    daemon_tool_ops_cleanup();
+    daemon_llm_ops_cleanup();
+    daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
     log_cleanup();
     return 0;

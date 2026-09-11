@@ -21,6 +21,7 @@
 #include "daemon_platform_ext.h"
 #include "jsonrpc_helpers.h"
 #include "llm_svc_adapter.h"
+#include "llm_service.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
