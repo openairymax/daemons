@@ -241,3 +241,50 @@ add_test(NAME svc_test_ipc_backpressure COMMAND svc_test_ipc_backpressure
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 airy_print_ok("  [test] svc_test_ipc_backpressure: P1.24.4 configured")
+
+# ===== WS-8 stage 3 (8.3.1) daemon L1 server mount unit tests =====
+add_executable(svc_test_daemon_l1_server test_daemon_l1_server.c)
+
+target_include_directories(svc_test_daemon_l1_server PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/platform/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/error
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/types
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/memory
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../atoms/corekern/include
+)
+
+# daemon_l1_server 显式链接：PUBLIC include 提供 daemon_l1_server.h；
+# corekern 符号与 svc_common 依赖经 $<LINK_ONLY> 闭包传播，测试 TU
+# 不直接吃 AIRY_USE_SCHEDULER_THREAD_IMPL（与 daemon_l1_server.h 的
+# svc_common 宏隔离边界一致）。
+target_link_libraries(svc_test_daemon_l1_server PRIVATE
+    daemon_l1_server
+    svc_common
+    Threads::Threads
+)
+
+if(AIRY_HAS_CJSON)
+    target_link_libraries(svc_test_daemon_l1_server PRIVATE cjson)
+endif()
+
+if(AIRY_HAS_CURL)
+    target_include_directories(svc_test_daemon_l1_server PRIVATE ${CURL_INCLUDE_DIRS})
+    target_link_libraries(svc_test_daemon_l1_server PRIVATE ${CURL_LIBRARIES})
+endif()
+
+if(AIRY_HAS_OPENSSL AND OPENSSL_FOUND)
+    target_link_libraries(svc_test_daemon_l1_server PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+endif()
+
+if(NOT MSVC)
+    target_compile_options(svc_test_daemon_l1_server PRIVATE
+        -Wall -Wextra -g -Wno-unused-function -Wno-unused-variable
+    )
+endif()
+
+add_test(NAME svc_test_daemon_l1_server COMMAND svc_test_daemon_l1_server
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+airy_print_ok("  [test] svc_test_daemon_l1_server: 8.3.1 configured")
