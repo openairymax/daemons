@@ -21,6 +21,21 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
+#include <ftw.h>
+
+/* 每进程唯一测试根：固定 /tmp 路径在多构建树同名测试并行时互相踩踏
+ * （2026-09-12 首次暴露于 sanitizer 全量回归）。PID 后缀保证隔离。 */
+static char g_t_root[128];
+
+static const char *t_root(void)
+{
+    if (g_t_root[0] == '\0')
+        snprintf(g_t_root, sizeof(g_t_root), "/tmp/airyt_plugin_disc_%d", (int)getpid());
+    return g_t_root;
+}
+
+#define T_ROOT t_root()
 
 static int g_failures = 0;
 
@@ -57,17 +72,17 @@ static void write_file(const char *path, const char *content)
     }
 }
 
-#define T_ROOT "/tmp/airyt_plugin_disc"
-
 static void test_valid_plugin(void)
 {
     printf("  test_valid_plugin...\n");
     char dir[512];
+    char path[512];
     snprintf(dir, sizeof(dir), "%s/valid", T_ROOT);
     mkdir_p(dir);
 
     /* 库文件必须存在（任意常规文件即可，校验只查存在性） */
-    write_file("/tmp/airyt_plugin_disc/valid/libtest.so", "ELF fake");
+    snprintf(path, sizeof(path), "%s/libtest.so", dir);
+    write_file(path, "ELF fake");
 
     const char *manifest =
         "name: test_plugin\n"
@@ -81,7 +96,8 @@ static void test_valid_plugin(void)
         "permissions:\n"
         "  - file_read\n"
         "  - tool_execute\n";
-    write_file("/tmp/airyt_plugin_disc/valid/manifest.yaml", manifest);
+    snprintf(path, sizeof(path), "%s/manifest.yaml", dir);
+    write_file(path, manifest);
 
     plugin_discovery_result_t res;
     int ret = plugin_discovery_validate_plugin(dir, &res);
@@ -89,15 +105,18 @@ static void test_valid_plugin(void)
     CHECK(res.valid, "valid plugin flagged valid");
     CHECK(strcmp(res.name, "test_plugin") == 0, "name parsed");
     CHECK(res.permission_count == 2, "permissions parsed");
-    CHECK(strcmp(res.library_path, "/tmp/airyt_plugin_disc/valid/libtest.so") == 0,
+    snprintf(path, sizeof(path), "%s/libtest.so", dir);
+    CHECK(strcmp(res.library_path, path) == 0,
           "library_path resolved under plugin dir");
 }
 
 static void test_missing_dir(void)
 {
     printf("  test_missing_dir...\n");
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s/no_such_dir", T_ROOT);
     plugin_discovery_result_t res;
-    int ret = plugin_discovery_validate_plugin("/tmp/airyt_plugin_disc/no_such_dir", &res);
+    int ret = plugin_discovery_validate_plugin(dir, &res);
     CHECK(ret != 0, "missing dir rejected");
     CHECK(!res.valid, "missing dir invalid");
 }
@@ -119,10 +138,13 @@ static void test_invalid_type(void)
 {
     printf("  test_invalid_type...\n");
     char dir[512];
+    char path[512];
     snprintf(dir, sizeof(dir), "%s/badtype", T_ROOT);
     mkdir_p(dir);
-    write_file("/tmp/airyt_plugin_disc/badtype/libtest.so", "x");
-    write_file("/tmp/airyt_plugin_disc/badtype/manifest.yaml",
+    snprintf(path, sizeof(path), "%s/libtest.so", dir);
+    write_file(path, "x");
+    snprintf(path, sizeof(path), "%s/manifest.yaml", dir);
+    write_file(path,
                "name: bad_type\n"
                "type: not_a_plugin_type\n"
                "api_version: 1\n"
@@ -140,10 +162,12 @@ static void test_missing_library(void)
 {
     printf("  test_missing_library...\n");
     char dir[512];
+    char path[512];
     snprintf(dir, sizeof(dir), "%s/nolib", T_ROOT);
     mkdir_p(dir);
     /* manifest 引用不存在的库文件 */
-    write_file("/tmp/airyt_plugin_disc/nolib/manifest.yaml",
+    snprintf(path, sizeof(path), "%s/manifest.yaml", dir);
+    write_file(path,
                "name: no_lib\n"
                "type: tool_provider\n"
                "api_version: 1\n"
@@ -162,11 +186,14 @@ static void test_no_permissions(void)
 {
     printf("  test_no_permissions...\n");
     char dir[512];
+    char path[512];
     snprintf(dir, sizeof(dir), "%s/noperm", T_ROOT);
     mkdir_p(dir);
-    write_file("/tmp/airyt_plugin_disc/noperm/libtest.so", "x");
+    snprintf(path, sizeof(path), "%s/libtest.so", dir);
+    write_file(path, "x");
     /* 缺 permissions 声明（fail-closed 拒绝，防越权后门） */
-    write_file("/tmp/airyt_plugin_disc/noperm/manifest.yaml",
+    snprintf(path, sizeof(path), "%s/manifest.yaml", dir);
+    write_file(path,
                "name: no_perm\n"
                "type: tool_provider\n"
                "api_version: 1\n"
@@ -187,6 +214,15 @@ static void test_null_args(void)
     CHECK(ret != 0 && !res.valid, "NULL dir rejected");
 }
 
+/* 递归删除测试根（nftw 后序遍历：先清子项再删目录本身） */
+static int rm_cb(const char *f, const struct stat *st, int flag, struct FTW *fb)
+{
+    (void)st;
+    (void)flag;
+    (void)fb;
+    return remove(f);
+}
+
 int main(void)
 {
     printf("test_plugin_discovery: offline validator (P1-5)\n");
@@ -197,6 +233,7 @@ int main(void)
     test_missing_library();
     test_no_permissions();
     test_null_args();
+    nftw(t_root(), rm_cb, 8, FTW_DEPTH | FTW_PHYS); /* 清理本进程测试根 */
     printf("  %s (%d failures)\n", g_failures == 0 ? "PASS" : "FAIL", g_failures);
     return g_failures == 0 ? 0 : 1;
 }
