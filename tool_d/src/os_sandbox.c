@@ -158,6 +158,11 @@ void os_sandbox_cfg_from_env(os_sandbox_cfg_t *cfg)
     if (net) {
         cfg->net_access = (strcmp(net, "0") != 0 && strcmp(net, "false") != 0) ? 1 : 0;
     }
+
+    const char *rq = getenv("AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK");
+    if (rq) {
+        cfg->require_landlock = (strcmp(rq, "0") != 0 && strcmp(rq, "false") != 0) ? 1 : 0;
+    }
 }
 
 static int os_sandbox_apply_rlimits(const os_sandbox_cfg_t *cfg)
@@ -358,6 +363,12 @@ int os_sandbox_apply(const os_sandbox_cfg_t *cfg)
         return 0;
     }
 #ifdef OS_LL_NO_SUPPORT
+    if (cfg->require_landlock) {
+        SVC_LOG_ERROR("os_sandbox: built without Landlock support and "
+                      "AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK=1, refusing to "
+                      "run unsandboxed");
+        return -1;
+    }
     return (cfg->mode == OS_SANDBOX_MODE_STRICT) ? -1 : 0;
 #else
     int ll_ok = os_sandbox_landlock_available();
@@ -383,9 +394,16 @@ int os_sandbox_apply(const os_sandbox_cfg_t *cfg)
             return -1;
         }
     } else {
-
+        if (cfg->require_landlock) {
+            SVC_LOG_ERROR("os_sandbox: Landlock unavailable and "
+                          "AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK=1, refusing to "
+                          "run with rlimit+seccomp only");
+            return -1;
+        }
         SVC_LOG_WARN("os_sandbox: Landlock unavailable, degraded to "
-                     "rlimit+seccomp only (workspace mode)");
+                     "rlimit+seccomp only (workspace mode); set "
+                     "AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK=1 to fail closed "
+                     "instead");
     }
     return 0;
 #endif
@@ -405,7 +423,11 @@ void os_sandbox_cfg_from_env(os_sandbox_cfg_t *cfg)
 
 int os_sandbox_apply(const os_sandbox_cfg_t *cfg)
 {
-    (void)cfg;
+    if (cfg && cfg->require_landlock) {
+        SVC_LOG_ERROR("os_sandbox: non-Linux platform has no sandbox and "
+                      "AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK=1, refusing to run");
+        return -1;
+    }
     SVC_LOG_WARN("os_sandbox: non-Linux platform, sandbox unavailable "
                  "(requested mode=%d); tool execution runs unsandboxed",
                  cfg ? cfg->mode : -1);

@@ -130,6 +130,22 @@ cmake -B build -DBUILD_TESTS=ON
 cmake --build build --target tool_d
 ```
 
+### 沙箱部署说明（重要）
+
+环境变量：
+
+- `AIRY_TOOL_SANDBOX_MODE=off|workspace|strict`（默认 `workspace`）
+- `AIRY_TOOL_SANDBOX_WORKSPACE=<绝对路径>`（默认进程 cwd；`fs_*` 七工具的
+  文件围堵同样以此为准，越界路径一律拒绝）
+- `AIRY_TOOL_SANDBOX_NET=0|1`
+- `AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK=0|1`（默认 `0`）
+
+风险声明：默认 `workspace` 模式下，若内核无 Landlock（Linux < 5.13 或裁剪内
+核）或平台为非 Linux，沙箱会**降级**为 rlimit+seccomp（非 Linux 完全无沙箱）
+并仅输出 WARN 日志——此时 shell 子进程与文件工具失去内核级写保护。对安全要
+求高的部署请设 `AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK=1`：Landlock 不可用时
+`os_sandbox_apply` 直接失败（fail-closed），拒绝执行而非静默降级。
+
 ## 测试
 
 - `tests/`（`tool_d_*` ctest 用例）：`test_service` / `test_registry` /
