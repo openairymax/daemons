@@ -269,8 +269,12 @@ static void test_perm_requirements(void)
     /* 日常核心链路能力：无额外权限要求（默认放行） */
     ASSERT_TRUE(gw_cap_perm_for("llm.complete") == NULL);
     ASSERT_TRUE(gw_cap_perm_for("think.process") == NULL);
-    ASSERT_TRUE(gw_cap_perm_for("agent.run") == NULL);
     ASSERT_TRUE(gw_cap_perm_for("mem.write") == NULL);
+    /* 0.1.15 WS-2 T-11b：agent.run 为外部主体可驱动的最高敏执行入口，
+     * 独立权限 cap:agent.run 门禁；agent.cancel 归既有 cap:agent.control。
+     * 旧契约「agent.run 默认放行」已废除——未显式 allow 时 PEP fail-closed。 */
+    ASSERT_TRUE(strcmp(gw_cap_perm_for("agent.run"), "cap:agent.run") == 0);
+    ASSERT_TRUE(strcmp(gw_cap_perm_for("agent.cancel"), "cap:agent.control") == 0);
     /* 未登记能力：NULL */
     ASSERT_TRUE(gw_cap_perm_for("unknown.cap") == NULL);
     ASSERT_TRUE(gw_cap_perm_for(NULL) == NULL);
