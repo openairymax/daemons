@@ -35,6 +35,12 @@
 
 #include "daemon_main.h"
 
+/* ARC-04: inject the atoms-side IPC and LLM ops tables (service impls live
+ * in svc_common / airy_llm_service, table storage in the zero-dependency
+ * airy_ipc_ops / airy_llm_ops libraries). */
+#include "daemon_ipc_ops_bootstrap.h"
+#include "daemon_llm_ops_bootstrap.h"
+
 /* P0.18.1: generate the common globals (g_running_llm_d etc.), signal
  * handling (signal_handler_llm_d, svc_log_toggle_handler_llm_d),
  * print_usage_llm_d, daemon_handle_client_llm_d, daemon_on_client_llm_d
@@ -91,6 +97,16 @@ int main(int argc, char **argv)
     atexit(log_cleanup);
 
     daemon_cupolas_init_pep("llm_d");
+
+    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
+     * dispatch without linking daemons symbols (ARC-02). Init failure is
+     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    daemon_ipc_ops_init("llm_d");
+
+    /* ARC-04: publish llm_service_complete / _complete_stream /
+     * llm_response_free to the atoms LLM ops table. Init failure is
+     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    daemon_llm_ops_init("llm_d");
 
     load_daemon_config(config_path);
     use_tcp = use_tcp || g_config.use_tcp;
@@ -181,6 +197,8 @@ int main(int argc, char **argv)
     daemon_cleanup_standard(g_bipc_llm_d, g_bsd_llm_d, g_event_driver_llm_d, server_fd, unix_path,
                             destroy_service_llm_d, &g_running_lock_llm_d);
 
+    daemon_llm_ops_cleanup();
+    daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
     log_cleanup();
     return 0;

@@ -123,13 +123,13 @@ target_include_directories(sched_d PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../atoms/corekern/include
 )
 
-# airy_coreloopthree → airy_core 会 PUBLIC 传播 AIRY_USE_SCHEDULER_THREAD_IMPL
-# （corekern 调度器线程实现）。sched_d 未初始化 corekern scheduler，撤销该宏
-# 恢复 platform.h 的 airy_thread_create → airy_platform_thread_create 宏路径
-# （commons 平台线程实现，随 airy_common 链接），与既有线程用法保持一致。
-target_compile_options(sched_d PRIVATE -UAIRY_USE_SCHEDULER_THREAD_IMPL)
+# WS-8 stage 1: sched_d now brings up corekern (airy_init in main.c), so the
+# AIRY_USE_SCHEDULER_THREAD_IMPL definition PUBLIC-propagated from airy_core
+# stays in effect: airy_thread_create/join resolve to the scheduler
+# implementation declared in corekern/include/task.h (no platform alias, no
+# private prototype). The former -U workaround is therefore removed.
 
-# 编译选项（-U 由 CMake 转 /U，MSVC 合法；-Wall/-Wextra 等 GNU 系需守卫）
+# 编译选项（-Wall/-Wextra 等 GNU 系需守卫）
 if(NOT MSVC)
 target_compile_options(sched_d PRIVATE
     -Wall

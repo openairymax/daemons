@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 #include "airy_memory.h"
+#include "airy_rt.h"
 #include "error.h"
 /*
  * @file main.c
@@ -21,6 +22,9 @@
 
 #include "../../monit_d/include/monitor_service.h"
 #include "daemon_main.h"
+#include "daemon_ipc_ops_bootstrap.h"
+#include "daemon_llm_ops_bootstrap.h"
+#include "daemon_tool_ops_bootstrap.h"
 #include "daemon_rpc_client.h"
 #include "platform.h"
 #include "param_validator.h"
@@ -83,7 +87,29 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
+    /* WS-8 stage 1 (ARC-05): bring up the corekern core (mem/oom/task/ipc/
+     * eventloop/persist) as the first link of the daemon boot chain, before
+     * the daemon's own subsystems. airy_init() is idempotent; if it fails the
+     * daemon still runs on the platform fallbacks (DSL degradation,
+     * non-fatal, badge=0). */
+    {
+        int core_ret = airy_init();
+        if (core_ret == AIRY_SUCCESS) {
+            SVC_LOG_INFO("corekern core initialized (sched_d runs on corekern)");
+        } else {
+            SVC_LOG_WARN("corekern init failed (%d) - running degraded (badge=0)", core_ret);
+        }
+    }
+
     daemon_cupolas_init_pep("sched_d");
+
+    /* ARC-04: sched_d whole-archives the atoms cognition/coreloopthree
+     * engine, whose adapters dispatch through the IPC/LLM/tool ops tables
+     * instead of linking daemons symbols (ARC-02). Inject all three here;
+     * failures are non-fatal and atoms call sites degrade (BAN-319). */
+    daemon_ipc_ops_init("sched_d");
+    daemon_llm_ops_init("sched_d");
+    daemon_tool_ops_init("sched_d");
 
     SVC_LOG_INFO("Scheduler service starting, manager=%s", config_path);
 
@@ -225,7 +251,11 @@ int main(int argc, char **argv)
     daemon_cleanup_standard(g_bipc_sched_d, g_bsd_sched_d, g_event_driver_sched_d, server_fd,
                             DEFAULT_SOCKET_PATH_UNIX, destroy_service, &g_running_lock_sched_d);
 
+    daemon_tool_ops_cleanup();
+    daemon_llm_ops_cleanup();
+    daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
+    airy_shutdown();
     log_cleanup();
     return 0;
 

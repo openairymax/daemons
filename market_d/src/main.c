@@ -9,6 +9,7 @@
  */
 
 #include "daemon_main.h"
+#include "daemon_ipc_ops_bootstrap.h"
 #include "platform.h"
 #include "market_service.h"
 #include "param_validator.h"
@@ -484,6 +485,11 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("market_d");
 
+    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
+     * dispatch without linking daemons symbols (ARC-02). Init failure is
+     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    daemon_ipc_ops_init("market_d");
+
     SVC_LOG_INFO("Market service starting, manager=%s", config_path);
 
     /* Config creation: NULL storage_path -> the service layer falls back
@@ -572,6 +578,7 @@ int main(int argc, char **argv)
         method_dispatcher_destroy(g_dispatcher_market_d);
 
     SVC_LOG_INFO("Market service stopped");
+    daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
     log_cleanup();
     return 0;

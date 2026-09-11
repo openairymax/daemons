@@ -57,6 +57,8 @@ set(TOOL_SERVICE_SOURCES
     src/plugin_service.c
     src/plugin_discovery.c
     src/plugin_permission.c
+    # ARC-04: 注入 atoms 侧 tool ops 抽象表（服务实现在本库，表存储在 airy_tool_ops）
+    src/daemon_tool_ops_bootstrap.c
 )
 
 add_library(airy_tool_service STATIC ${TOOL_SERVICE_SOURCES})
@@ -109,6 +111,14 @@ target_include_directories(airy_tool_service PRIVATE
 # 依赖链：airy_tool_service → airy_syscall → airy_coreloopthree → airy_core
 # 无循环依赖（coreloopthree 不链接 tool_service，仅 include 头文件）
 target_link_libraries(airy_tool_service PUBLIC svc_common cupolas airy_syscall)
+
+# ARC-04: daemon_tool_ops_bootstrap 注入 atoms 侧 tool ops 抽象表。
+# ops 存储（are_ops_set/get_tool）在独立小库 airy_tool_ops 中，而非
+# airy_tool_service 自身——否则 atoms 侧消费 are_ops_get_tool 时需反向链接
+# airy_tool_service，构成 AIRY-02/IRON-6 违规。PRIVATE 链接保证最终可执行
+# 文件链接行含该归档；接口 include（airy_tool_ops.h）由 svc_common PUBLIC
+# 传递的 atoms/coreloopthree/include 提供。
+target_link_libraries(airy_tool_service PRIVATE airy_tool_ops)
 
 if(AIRY_HAS_CJSON)
     if(cJSON_FOUND)

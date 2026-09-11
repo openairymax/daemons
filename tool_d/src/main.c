@@ -9,6 +9,9 @@
  */
 
 #include "daemon_main.h"
+#include "daemon_ipc_ops_bootstrap.h"
+#include "daemon_llm_ops_bootstrap.h"
+#include "daemon_tool_ops_bootstrap.h"
 #include "platform.h"
 #include "param_validator.h"
 #include "plugin_rpc.h"
@@ -461,6 +464,18 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("tool_d");
 
+    /* ARC-04: tool_d whole-archives the atoms coreloopthree engine, whose
+     * adapters dispatch through the IPC/LLM/tool ops tables instead of
+     * linking daemons symbols (ARC-02). Init failure is non-fatal: atoms
+     * callers degrade gracefully (BAN-319). */
+    daemon_ipc_ops_init("tool_d");
+    daemon_llm_ops_init("tool_d");
+
+    /* ARC-04: publish tool_approval_* / tool_service_execute /
+     * tool_result_free to the atoms tool ops table. Init failure is
+     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    daemon_tool_ops_init("tool_d");
+
     /* 0.1.9 M4：plugin_d → tool_d 整编——插件执行域（dlopen）随迁，
      * 权限/发现/扫描加载在 tool_d 进程内初始化。 */
     plugin_rpc_init();
@@ -567,6 +582,9 @@ int main(int argc, char **argv)
     free_daemon_config();
 
     SVC_LOG_INFO("Tool service stopped");
+    daemon_tool_ops_cleanup();
+    daemon_llm_ops_cleanup();
+    daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
     log_cleanup();
     return 0;
