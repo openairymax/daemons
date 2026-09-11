@@ -115,6 +115,25 @@ endif()
 # 提供（见本文件 PUBLIC include 第二段）。
 target_link_libraries(svc_common PRIVATE airy_ipc_ops)
 
+# WS-8 阶段 3（8.3.1）：daemon 侧 L1 server 挂载（corekern IPC 服务端骨架）。
+# 独立小库而非 svc_common 源文件：airy_core 以 PUBLIC 传播
+# AIRY_USE_SCHEDULER_THREAD_IMPL 编译定义，svc_common 源（svc_monitor.c 等）
+# 含 airy_thread_create 消费点，若 svc_common 直链 airy_core 会翻转其线程
+# 实现路径、违反开关默认零行为变化铁律。PRIVATE 链接把宏传染面锁死在本库
+# 编译单元内；svc_common PRIVATE 链本库获取 API（daemon_l1_server.h 不含
+# corekern 头，svc_common 消费者无 corekern include/宏泄漏）。
+add_library(daemon_l1_server STATIC
+    src/daemon/daemon_l1_server.c
+)
+target_include_directories(daemon_l1_server PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+target_link_libraries(daemon_l1_server PRIVATE
+    airy_core      # L1 API（airy_ipc_init/create_channel/close）
+    airy_common    # AIRY_CALLOC/SVC_LOG_*/airy_sleep_ms
+)
+target_link_libraries(svc_common PRIVATE daemon_l1_server)
+
 # P3.14 ACC-DT15: cupolas 安全穹顶（PUBLIC 使得所有链接 svc_common 的 daemon 自动获得 cupolas）
 if(TARGET cupolas)
     target_link_libraries(svc_common PUBLIC cupolas)
