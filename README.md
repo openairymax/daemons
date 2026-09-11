@@ -91,7 +91,6 @@ The `common/` subdirectory compiles into the `svc_common` static library, which 
 | **Event & concurrency** | `airy_event_loop.c`, `thread_pool.c`, `refcount.c` |
 | **Metrics & alerting** | `unified_metrics.c`, `alert_manager.c` |
 | **Configuration** | `config_manager.c`, `daemon_defaults.h`, `daemon_errors.h`, `daemon_platform_ext.h` |
-| **Memory** | `arena.c`, `tcache.c` (daemon-local allocators) |
 | **Platform** | `platform_compat.c`, `compat.h`, `platform.h` |
 
 > **P0.17 Phase 3 / IRON-6:** The authoritative definitions of `svc_common.h` and `ipc_service_bus.h` have been migrated to `commons/utils/ipc/include/`. The daemons-side headers under `common/include/` are kept as **re-export compatibility headers** so internal sources do not need immediate `#include` path changes, eliminating the atoms→daemons compile-time reverse dependency.

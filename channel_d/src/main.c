@@ -10,6 +10,7 @@
 
 #include "channel_service.h"
 #include "daemon_main.h"
+#include "daemon_ipc_ops_bootstrap.h"
 #include "platform.h"
 
 #include <inttypes.h>
@@ -34,6 +35,7 @@ static void destroy_service_channel_d(void)
         channel_service_destroy(g_svc);
         g_svc = NULL;
     }
+    daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
 }
 
@@ -369,6 +371,11 @@ int main(int argc, char *argv[])
     atexit(log_cleanup);
 
     daemon_cupolas_init_pep("channel_d");
+
+    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
+     * dispatch without linking daemons symbols (ARC-02). Init failure is
+     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    daemon_ipc_ops_init("channel_d");
 
     channel_config_t config = CHANNEL_CONFIG_DEFAULTS;
     config.max_channels = max_channels;

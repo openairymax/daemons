@@ -71,6 +71,8 @@ set(LLM_SERVICE_SOURCES
     src/router/least_latency_router.c
     src/router/quality_first_router.c
     src/llm_svc_adapter.c
+    # ARC-04: 注入 atoms 侧 LLM ops 抽象表（服务实现在本库，表存储在 airy_llm_ops）
+    src/daemon_llm_ops_bootstrap.c
 )
 
 add_library(airy_llm_service STATIC ${LLM_SERVICE_SOURCES})
@@ -117,6 +119,14 @@ target_include_directories(airy_llm_service PRIVATE
 
 # 链接库：svc_common 提供 daemon 公共层 + commons 传递依赖
 target_link_libraries(airy_llm_service PUBLIC svc_common)
+
+# ARC-04: daemon_llm_ops_bootstrap 注入 atoms 侧 LLM ops 抽象表。
+# ops 存储（are_ops_set/get_llm）在独立小库 airy_llm_ops 中，而非 airy_llm_service
+# 自身——否则 atoms 侧消费 are_ops_get_llm 时需反向链接 airy_llm_service，构成
+# AIRY-02/IRON-6 违规。PRIVATE 链接保证最终可执行文件链接行含该归档；
+# 接口 include（airy_llm_ops.h）由 svc_common PUBLIC 传递的
+# atoms/coreloopthree/include 提供。
+target_link_libraries(airy_llm_service PRIVATE airy_llm_ops)
 
 if(AIRY_HAS_CURL)
     if(CURL_FOUND AND CURL_LIBRARIES)

@@ -84,7 +84,6 @@ foreach(TEST_SRC ${SCHED_TEST_SOURCES})
         -Wall
         -Wextra
         -Wno-unused-function
-        -UAIRY_USE_SCHEDULER_THREAD_IMPL
     )
 
     add_test(NAME sched_d_${TEST_NAME} COMMAND test_sched_${TEST_NAME})

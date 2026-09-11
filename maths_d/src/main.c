@@ -15,6 +15,7 @@
 
 #include "airy_memory.h"
 #include "daemon_main.h"
+#include "daemon_ipc_ops_bootstrap.h"
 #include "maths_service.h"
 #include "platform.h"
 #include "svc_common.h"
@@ -164,6 +165,11 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("maths_d");
 
+    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
+     * dispatch without linking daemons symbols (ARC-02). Init failure is
+     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    daemon_ipc_ops_init("maths_d");
+
     if (maths_d_init(&g_service, MATHS_DEFAULT_SOCKET, MATHS_DEFAULT_PORT) != 0)
         return EXIT_FAILURE;
     if (maths_d_start(&g_service) != 0) {
@@ -185,6 +191,7 @@ int main(int argc, char **argv)
     daemon_bootstrap_ipc_stop(g_bipc);
     daemon_bootstrap_sd_stop(g_bsd);
     maths_d_destroy(&g_service);
+    daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
     log_cleanup();
     return 0;
