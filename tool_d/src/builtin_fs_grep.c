@@ -199,6 +199,11 @@ int fs_grep_tool(const char *params_json, tool_result_t *res)
     if (max_results > 1000)
         max_results = 1000;
 
+    char resolved[4096];
+    int rc = builtin_fs_confine(dir, 0, resolved, sizeof(resolved), res);
+    if (rc != AIRY_OK)
+        return rc;
+
     regex_t re;
     if (regcomp(&re, pat->valuestring, REG_EXTENDED | REG_NOSUB) != 0) {
         res->error = AIRY_STRDUP("Invalid regex pattern");
@@ -212,8 +217,8 @@ int fs_grep_tool(const char *params_json, tool_result_t *res)
     }
     size_t out_len = 0;
     int count = 0, done = 0;
-    builtin_grep_dir(dir, dir, &re, glob_filter, max_results, out, BUILTIN_OUTPUT_CAP, &out_len,
-                     &count, &done);
+    builtin_grep_dir(resolved, resolved, &re, glob_filter, max_results, out, BUILTIN_OUTPUT_CAP,
+                     &out_len, &count, &done);
     regfree(&re);
 
     if (count == 0) {

@@ -231,6 +231,85 @@ static void test_off_mode(void)
     CHECK(run_in_sandbox(&cfg, act_ptrace) == 0, "ptrace allowed without sandbox");
 }
 
+static void test_fs_confine(void)
+{
+    printf("== test_fs_confine ==\n");
+    char resolved[4096];
+    char path[512];
+
+    /* Prepare probes: a file and a subdirectory inside the workspace,
+     * plus a sibling directory sharing the workspace name prefix. */
+    snprintf(path, sizeof(path), "%s/sub", k_ws);
+    if (mkdir(path, 0755) != 0 && errno != EEXIST) {
+        CHECK(0, "mkdir ws/sub");
+    }
+    snprintf(path, sizeof(path), "%s/a.txt", k_ws);
+    FILE *f = fopen(path, "w");
+    CHECK(f != NULL, "create probe file");
+    if (f)
+        fclose(f);
+
+    const char *k_sibling = "/tmp/airy_os_sandbox_ws_priv";
+    if (mkdir(k_sibling, 0755) != 0 && errno != EEXIST) {
+        CHECK(0, "mkdir sibling");
+    }
+
+    setenv("AIRY_TOOL_SANDBOX_WORKSPACE", k_ws, 1);
+    unsetenv("AIRY_TOOL_SANDBOX_MODE");
+
+    snprintf(path, sizeof(path), "%s/a.txt", k_ws);
+    CHECK(os_sandbox_fs_confine("a.txt", 0, resolved, sizeof(resolved)) == 0 &&
+              strcmp(resolved, path) == 0,
+          "relative existing file confined into workspace");
+
+    CHECK(os_sandbox_fs_confine(path, 0, resolved, sizeof(resolved)) == 0 &&
+              strcmp(resolved, path) == 0,
+          "absolute path inside workspace confined");
+
+    CHECK(os_sandbox_fs_confine("/etc/passwd", 0, resolved, sizeof(resolved)) == -1,
+          "absolute path outside workspace rejected");
+
+    CHECK(os_sandbox_fs_confine("../escape.txt", 1, resolved, sizeof(resolved)) == -1,
+          "relative '..' escape rejected");
+
+    CHECK(os_sandbox_fs_confine("sub/../../escape.txt", 1, resolved, sizeof(resolved)) == -1,
+          "lexical '..' normalization rejects escape");
+
+    snprintf(path, sizeof(path), "%s/newdir/new.txt", k_ws);
+    CHECK(os_sandbox_fs_confine(path, 1, resolved, sizeof(resolved)) == 0 &&
+              strcmp(resolved, path) == 0,
+          "non-existing write target anchored inside workspace");
+
+    snprintf(path, sizeof(path), "%s/missing.txt", k_ws);
+    CHECK(os_sandbox_fs_confine(path, 0, resolved, sizeof(resolved)) == 0 &&
+              strcmp(resolved, path) == 0,
+          "missing read target confined (NOT_FOUND left to I/O)");
+
+    snprintf(path, sizeof(path), "%s_priv/x", k_ws);
+    CHECK(os_sandbox_fs_confine(path, 1, resolved, sizeof(resolved)) == -1,
+          "sibling directory sharing name prefix rejected");
+
+    CHECK(os_sandbox_fs_confine("", 0, resolved, sizeof(resolved)) == -1,
+          "empty path rejected");
+
+    setenv("AIRY_TOOL_SANDBOX_MODE", "off", 1);
+    CHECK(os_sandbox_fs_confine("/etc/passwd", 0, resolved, sizeof(resolved)) == 0 &&
+              strcmp(resolved, "/etc/passwd") == 0,
+          "mode=off passes paths through verbatim");
+    unsetenv("AIRY_TOOL_SANDBOX_MODE");
+
+    CHECK(os_sandbox_fs_workspace(resolved, sizeof(resolved)) == 0 &&
+              strcmp(resolved, k_ws) == 0,
+          "workspace root resolves to the sandbox root");
+
+    snprintf(path, sizeof(path), "%s/a.txt", k_ws);
+    unlink(path);
+    snprintf(path, sizeof(path), "%s/sub", k_ws);
+    rmdir(path);
+    rmdir(k_sibling);
+    unsetenv("AIRY_TOOL_SANDBOX_WORKSPACE");
+}
+
 int main(void)
 {
 
@@ -241,6 +320,7 @@ int main(void)
     test_workspace_mode();
     test_strict_mode();
     test_off_mode();
+    test_fs_confine();
 
     rmdir(k_ws);
 

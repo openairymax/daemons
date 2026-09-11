@@ -104,7 +104,11 @@ int fs_read_tool(const char *params_json, tool_result_t *res)
         res->error = AIRY_STRDUP("Missing string parameter: path");
         return AIRY_ERR_INVALID_PARAM;
     }
-    FILE *fp = fopen(path->valuestring, "rb");
+    char resolved[4096];
+    int rc = builtin_fs_confine(path->valuestring, 0, resolved, sizeof(resolved), res);
+    if (rc != AIRY_OK)
+        return rc;
+    FILE *fp = fopen(resolved, "rb");
     if (!fp) {
         char err[512];
         snprintf(err, sizeof(err), "Cannot open file '%s': %s", path->valuestring, strerror(errno));
@@ -146,7 +150,11 @@ int fs_write_tool(const char *params_json, tool_result_t *res)
         return AIRY_ERR_INVALID_PARAM;
     }
     size_t clen = strlen(content->valuestring);
-    if (fs_atomic_write(path->valuestring, content->valuestring, clen) != 0) {
+    char resolved[4096];
+    int rc = builtin_fs_confine(path->valuestring, 1, resolved, sizeof(resolved), res);
+    if (rc != AIRY_OK)
+        return rc;
+    if (fs_atomic_write(resolved, content->valuestring, clen) != 0) {
         char err[512];
         snprintf(err, sizeof(err), "Cannot write file '%s': %s", path->valuestring,
                  strerror(errno));
@@ -188,7 +196,12 @@ int fs_edit_tool(const char *params_json, tool_result_t *res)
     }
     int max_rep = (cJSON_IsNumber(cnt) && cnt->valueint > 0) ? cnt->valueint : 1;
 
-    FILE *fp = fopen(path->valuestring, "rb");
+    char resolved[4096];
+    int rc = builtin_fs_confine(path->valuestring, 1, resolved, sizeof(resolved), res);
+    if (rc != AIRY_OK)
+        return rc;
+
+    FILE *fp = fopen(resolved, "rb");
     if (!fp) {
         char err[512];
         snprintf(err, sizeof(err), "Cannot open file '%s': %s", path->valuestring, strerror(errno));
@@ -251,7 +264,7 @@ int fs_edit_tool(const char *params_json, tool_result_t *res)
     buf[w] = '\0';
     AIRY_FREE(content);
 
-    if (fs_atomic_write(path->valuestring, buf, w) != 0) {
+    if (fs_atomic_write(resolved, buf, w) != 0) {
         char err[512];
         snprintf(err, sizeof(err), "Cannot write file '%s': %s", path->valuestring,
                  strerror(errno));

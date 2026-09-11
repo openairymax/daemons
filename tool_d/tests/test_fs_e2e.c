@@ -247,6 +247,73 @@ static void test_e2e_coding_crud(tool_service_t *svc)
     }
 }
 
+static void test_e2e_escape(tool_service_t *svc)
+{
+    printf("\n[阶段 5] workspace 围堵（T16 越界拒绝）\n");
+
+    /* 13. fs_write 越界绝对路径 → PERMISSION_DENIED，且不得产生文件 */
+    cJSON *p = cJSON_CreateObject();
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "path", "/tmp/airy_e2e_escape.txt");
+    cJSON_AddStringToObject(p, "content", "should not exist");
+    int ret = -999;
+    tool_result_t *res = run_tool(svc, "fs_write", "tool_d", p, &ret);
+    cJSON_Delete(p);
+    TEST(ret == AIRY_ERR_PERMISSION_DENIED, "fs_write 越界绝对路径被拒绝");
+    if (res) {
+        printf("    fs_write -> %s\n", res->error ? res->error : "(no error)");
+        tool_result_free(res);
+    }
+#ifndef _WIN32
+    TEST(access("/tmp/airy_e2e_escape.txt", F_OK) != 0, "越界写未产生文件 (DoD)");
+#endif
+
+    /* 14. fs_write ".." 相对路径越界 → PERMISSION_DENIED */
+    p = cJSON_CreateObject();
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "path", "../airy_e2e_escape.txt");
+    cJSON_AddStringToObject(p, "content", "should not exist");
+    res = run_tool(svc, "fs_write", "tool_d", p, &ret);
+    cJSON_Delete(p);
+    TEST(ret == AIRY_ERR_PERMISSION_DENIED, "fs_write \"..\" 相对越界被拒绝");
+    if (res) {
+        tool_result_free(res);
+    }
+
+    /* 15. fs_read 沙箱外文件 → PERMISSION_DENIED */
+    p = cJSON_CreateObject();
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "path", "/etc/passwd");
+    res = run_tool(svc, "fs_read", "tool_d", p, &ret);
+    cJSON_Delete(p);
+    TEST(ret == AIRY_ERR_PERMISSION_DENIED, "fs_read 沙箱外路径被拒绝");
+    if (res) {
+        tool_result_free(res);
+    }
+
+    /* 16. fs_delete workspace 根 → PERMISSION_DENIED（根守卫） */
+    p = cJSON_CreateObject();
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "path", E2E_DIR);
+    res = run_tool(svc, "fs_delete", "tool_d", p, &ret);
+    cJSON_Delete(p);
+    TEST(ret == AIRY_ERR_PERMISSION_DENIED, "fs_delete workspace 根被拒绝");
+    if (res) {
+        tool_result_free(res);
+    }
+
+    /* 17. fs_list 沙箱外目录 → PERMISSION_DENIED */
+    p = cJSON_CreateObject();
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "path", "/tmp");
+    res = run_tool(svc, "fs_list", "tool_d", p, &ret);
+    cJSON_Delete(p);
+    TEST(ret == AIRY_ERR_PERMISSION_DENIED, "fs_list 沙箱外目录被拒绝");
+    if (res) {
+        tool_result_free(res);
+    }
+}
+
 static void test_e2e_fail_closed(tool_service_t *svc)
 {
     printf("\n[阶段 2] fail-closed 安全语义\n");
@@ -300,6 +367,9 @@ int main(void)
 {
     printf("=== t9/2.4.4: 认知层→执行层端到端（tool_service_execute 完整链路）===\n\n");
 
+    /* T16: 文件工具 workspace 围堵的沙箱根（先于任何工具调用设置） */
+    setenv("AIRY_TOOL_SANDBOX_WORKSPACE", E2E_DIR, 1);
+
     /* 初始化安全域（fail-closed ACL 的宿主） */
     CHECK(daemon_security_init(NULL, NULL) == 0);
 
@@ -316,6 +386,7 @@ int main(void)
     CHECK(svc != NULL);
 
     test_e2e_coding_crud(svc);
+    test_e2e_escape(svc);
     test_e2e_fail_closed(svc);
     test_e2e_not_found(svc);
     test_e2e_validation(svc);

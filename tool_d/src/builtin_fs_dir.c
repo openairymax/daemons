@@ -57,7 +57,11 @@ int fs_list_tool(const char *params_json, tool_result_t *res)
     if (cJSON_IsString(path) && path->valuestring && path->valuestring[0]) {
         dir = path->valuestring;
     }
-    DIR *d = opendir(dir ? dir : ".");
+    char resolved[4096];
+    int rc = builtin_fs_confine(dir ? dir : ".", 0, resolved, sizeof(resolved), res);
+    if (rc != AIRY_OK)
+        return rc;
+    DIR *d = opendir(resolved);
     if (!d) {
         char err[512];
         snprintf(err, sizeof(err), "Cannot open directory '%s': %s", dir ? dir : ".",
@@ -77,7 +81,7 @@ int fs_list_tool(const char *params_json, tool_result_t *res)
 #else
         /* Windows: no d_type; classify via stat. */
         char full[AIRY_PATH_MAX];
-        snprintf(full, sizeof(full), "%s/%s", dir ? dir : ".", ent->d_name);
+        snprintf(full, sizeof(full), "%s/%s", resolved, ent->d_name);
         struct stat st;
         if (stat(full, &st) == 0)
             cJSON_AddStringToObject(item, "type", S_ISDIR(st.st_mode) ? "dir" : "file");
@@ -162,6 +166,22 @@ int fs_delete_tool(const char *params_json, tool_result_t *res)
     }
     int recursive = (cJSON_IsBool(rec) && cJSON_IsTrue(rec)) ||
                     (cJSON_IsNumber(rec) && rec->valueint != 0);
+
+    /* Confinement (T16): resolve the path into the workspace before any
+     * filesystem access. "./", "sub/.." or an absolute path equal to the
+     * workspace root all normalize to the workspace itself, so the
+     * lexical guard above is not sufficient on its own. */
+    char resolved[4096];
+    int rc = builtin_fs_confine(p, 1, resolved, sizeof(resolved), res);
+    if (rc != AIRY_OK)
+        return rc;
+    char wsroot[4096];
+    if (os_sandbox_fs_workspace(wsroot, sizeof(wsroot)) == 0 &&
+        strcmp(resolved, wsroot) == 0) {
+        res->error = AIRY_STRDUP("Refusing to delete the workspace root");
+        return AIRY_ERR_PERMISSION_DENIED;
+    }
+    p = resolved;
 
     struct stat st;
     if (lstat(p, &st) != 0) {

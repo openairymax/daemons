@@ -7,6 +7,7 @@
 #ifndef AIRY_RT_TOOL_OS_SANDBOX_H
 #define AIRY_RT_TOOL_OS_SANDBOX_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -54,6 +55,38 @@ void os_sandbox_cfg_from_env(os_sandbox_cfg_t *cfg);
  * mode does not allow degradation); mode==WORKSPACE degrades gracefully
  * when Landlock is unavailable (returns 0, logs a warning). */
 int os_sandbox_apply(const os_sandbox_cfg_t *cfg);
+
+/* Resolve a tool-supplied path against the workspace sandbox and write the
+ * canonical result into `resolved`. Unlike os_sandbox_apply() (which only
+ * confines shell subprocesses via Landlock), this confines individual file
+ * tool operations lexically, so it also works on platforms without
+ * Landlock (macOS, Windows, kernels without Landlock).
+ *
+ * Behavior:
+ * - AIRY_TOOL_SANDBOX_MODE=off: `resolved` receives `path` verbatim,
+ *   return 0 (sandboxing disabled).
+ * - Otherwise the workspace is taken from AIRY_TOOL_SANDBOX_WORKSPACE
+ *   (canonicalized), falling back to the current working directory.
+ * - for_write == 0: `path` must resolve inside the workspace; a missing
+ *   path is confined normally and its absence is reported by the
+ *   subsequent I/O (e.g. fs_read returns NOT_FOUND, not a permission
+ *   error).
+ * - for_write == 1: same confinement; `for_write` documents the access
+ *   intent (the deepest existing ancestor is canonicalized and the
+ *   non-existing tail re-appended, so creating new files inside the
+ *   workspace works; the joined result is lexically normalized and must
+ *   stay inside the workspace).
+ *
+ * Returns 0 on success (path confined, `resolved` filled); -1 when the
+ * path escapes the workspace or resolution fails (fail-closed). */
+int os_sandbox_fs_confine(const char *path, int for_write, char *resolved,
+                          size_t resolved_cap);
+
+/* Resolve the canonical workspace root used by fs confinement (the
+ * AIRY_TOOL_SANDBOX_WORKSPACE entry canonicalized, or the current
+ * working directory when unset). Same resolution rules as
+ * os_sandbox_fs_confine(); returns 0 on success, -1 on failure. */
+int os_sandbox_fs_workspace(char *ws, size_t cap);
 
 #ifdef __cplusplus
 }
