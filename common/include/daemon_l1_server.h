@@ -242,6 +242,84 @@ int daemon_l2_envelope_decode(const void *buf, size_t buf_size, const void **out
                               size_t *out_payload_len, uint64_t *out_trace_id,
                               uint64_t *out_src_task);
 
+/**
+ * @brief Derive the corekern L2 channel name for a daemon socket path.
+ *
+ * Maps the basename "<ns>.sock" to the channel name "<ns>.rpc" that
+ * DAEMON_L2_ENABLE mounts. The derivation is gated on the transport
+ * switch: when the ns resolves to off (the default), no bridge listens on
+ * the channel and the caller must stay on the socket path, so this fails
+ * with AIRY_ERR_NOT_FOUND instead of returning a dead channel name.
+ *
+ * @param socket_path  [in] daemon socket path; the basename (after the
+ *                          last '/' or '\\') must end in ".sock"
+ * @param channel      [out] channel name buffer ("<ns>.rpc",
+ *                          NUL-terminated)
+ * @param channel_size [in] capacity of channel
+ * @return 0 on success; AIRY_EINVAL on NULL args, a basename without the
+ *         ".sock" suffix (TCP endpoint or foreign naming) or an empty
+ *         basename; AIRY_EMSGSIZE on ns/channel capacity violations;
+ *         AIRY_ERR_NOT_FOUND when the ns transport switch is off
+ */
+int daemon_l2_channel_for_socket(const char *socket_path, char *channel, size_t channel_size);
+
+/**
+ * @brief Synchronous JSON-RPC call over the L2 corekern channel.
+ *
+ * Wire-equivalent of daemon_rpc_call_cancelable on the socket path:
+ * builds the same JSON-RPC 2.0 request (id=1; params embedded when valid
+ * JSON, stringified otherwise, {} when empty), carries it as one L2
+ * envelope (trace_id 0, src_task = pid, dst_task 0) and parses the reply
+ * with the same folding rules — an "error" object or a missing "result"
+ * logs and folds to AIRY_ERR_GENERIC_FAIL with *out_result_json left
+ * NULL; AIRY_ERR_CANCELED from the binder (dropped/undispatched
+ * transaction, L2 §2.3) folds likewise.
+ *
+ * @param channel         [in] channel name from
+ *                             daemon_l2_channel_for_socket
+ * @param method          [in] JSON-RPC method (not NULL)
+ * @param params_json     [in] params; NULL/"" -> {}, embedded when valid
+ *                             JSON, stringified otherwise
+ * @param out_result_json [out] AIRY_MALLOC'd result string (caller
+ *                              frees); NULL on any failure
+ * @param timeout_ms      [in] L1 transaction timeout; 0 -> 30 s default
+ * @return AIRY_SUCCESS on success; AIRY_ERR_INVALID_PARAM on NULL args;
+ *         AIRY_ERR_OUT_OF_MEMORY on allocation failure;
+ *         AIRY_ERR_GENERIC_FAIL folded from transport loss, malformed
+ *         reply, error object or missing result; transport-layer codes
+ *         (e.g. AIRY_ENOENT: no bridge mounted) propagated as-is
+ */
+int daemon_l2_rpc_call(const char *channel, const char *method, const char *params_json,
+                       char **out_result_json, uint32_t timeout_ms);
+
+/**
+ * @brief Synchronous JSON-RPC call returning the complete daemon reply.
+ *
+ * Transport-only variant of daemon_l2_rpc_call for callers that must
+ * distinguish daemon business errors (an "error" object) from transport
+ * loss: on success *out_resp_json is the complete, NUL-terminated JSON-RPC
+ * response exactly as the daemon produced it — error responses included
+ * verbatim, nothing parsed or folded. On any transport failure
+ * (connect/call/decode) *out_resp_json stays NULL and the transport code
+ * propagates (e.g. AIRY_ENOENT: bridge not mounted — the gateway
+ * falls back to the socket path, blueprint 8.3.3 grey rollout).
+ *
+ * @param channel       [in] channel name from daemon_l2_channel_for_socket
+ * @param method        [in] JSON-RPC method (not NULL)
+ * @param params_json   [in] params; NULL/"" -> {}, embedded when valid
+ *                           JSON, stringified otherwise
+ * @param timeout_ms    [in] L1 transaction timeout; 0 -> 30 s default
+ * @param out_resp_json [out] AIRY_MALLOC'd full response string (caller
+ *                           frees); NULL on any failure
+ * @return AIRY_SUCCESS on success; AIRY_ERR_INVALID_PARAM on NULL args;
+ *         AIRY_ERR_OUT_OF_MEMORY on allocation failure;
+ *         AIRY_ERR_GENERIC_FAIL on empty/malformed reply or transport loss
+ *         (CANCELED folded); transport-layer codes (e.g. AIRY_ENOENT)
+ *         propagated as-is
+ */
+int daemon_l2_rpc_call_resp(const char *channel, const char *method, const char *params_json,
+                            uint32_t timeout_ms, char **out_resp_json);
+
 #ifdef __cplusplus
 }
 #endif
