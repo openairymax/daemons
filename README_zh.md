@@ -1,328 +1,210 @@
-# daemons — 运行时守护进程服务（15 个守护进程，M4 整编稳态）
+# daemons — 运行时守护进程服务
 
-> Airymax 智能体运行时的用户态服务层：Airymax 内核之上的后端服务支撑。
-> [agentrt](../) 管理仓下的叶子仓。
+> Airymax 智能体运行时的用户态服务层：15 个守护进程把 Airymax 内核变成一个真正在跑的
+> 系统，外加共享库 `svc_common`。
 
-**语言:** [English](README.md) | 简体中文
+**语言：** English | [简体中文](README_zh.md)
 
-[![Version](https://img.shields.io/badge/version-0.1.9-5a6b7e)](https://atomgit.com/openairymax/daemons)
+[![Version](https://img.shields.io/badge/version-0.1.15-5a6b7e)](https://atomgit.com/openairymax/daemons)
 [![License](https://img.shields.io/badge/license-AGPL--3.0+Apache--2.0-4a90d9)](LICENSE)
 [![C11](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/11)
 
-- **仓库：** `git@atomgit.com:openairymax/daemons.git`
-- **分支：** `develop/hubs-01`
-- **版本：** 0.1.9（与 agentrt 管理仓对齐）
+- **仓库：** <https://atomgit.com/openairymax/daemons>
+- **版本：** 0.1.15
+- **许可证：** AGPL-3.0-or-later OR Apache-2.0
 
 ---
 
-## 概览
+## 这是什么
 
-**daemons** 是 Airymax 智能体运行时的**用户态服务层**。它由 **15 个独立守护进程**（M4 整编稳态，0.1.9）——`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / notify_d / hook_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d`——以及共享静态库 `svc_common`（位于 `common/`）共同组成。每个守护进程遵循**职责单一原则**：独立进程运行，通过统一 IPC 服务总线协作通信，共同构成位于 Airymax 内核之上的高可用、可扩展、可插拔微服务架构。
+**daemons** 是 Airymax 智能体运行时的服务层，包含 **15 个长驻守护进程**——`gateway_d`、
+`llm_d`、`tool_d`、`sched_d`、`market_d`、`monit_d`、`channel_d`、`notify_d`、`hook_d`、
+`mem_d`、`agent_d`、`a2a_d`、`think_d`、`cupolas_d`、`maths_d`——以及共享静态库
+`svc_common`（位于 `common/`）。
+
+每个守护进程都是独立的操作系统进程，各自只负责一个领域，对外暴露 JSON-RPC 2.0 接口，
+并通过 IPC 服务总线与同伴通信。`gateway_d` 是唯一面向外部客户端的进程边界，其余守护进程
+都留在内部。
 
 ```
-外部客户端 → gateway_d → (其他守护进程经 ipc_service_bus) → atoms/syscall → 内核服务
-  (HTTP/WS/Stdio)  (守护进程)
+外部客户端 ──HTTP / WS / SSE / MCP / A2A / OpenAI API──▶ gateway_d
+                                                        │
+                                              IPC 总线上的 JSON-RPC 2.0
+                                                        ▼
+                        llm_d  tool_d  sched_d  mem_d  agent_d …（14 个后端）
+                                                        │
+                                              atoms / syscall ──▶ 内核
 ```
 
-设计目标：
+## 能力
 
-- **服务化架构** —— 每个守护进程独立运行，通过 IPC 协作，支持独立部署与扩缩容。
-- **职责单一** —— 每个守护进程只负责一个核心领域，降低耦合度。
-- **可插拔** —— 守护进程可独立部署、升级和替换，不影响其他服务。
-- **高可用** —— 支持主备切换、熔断器保护、故障转移和自动恢复。
-- **安全内生** —— `svc_common` 以 `PUBLIC` 形式链接 `cupolas`（`daemon_cupolas_bootstrap.c`），每个守护进程自动继承 Cupolas 安全：请求鉴权、输入净化、审计、沙箱。
-- **协议统一** —— 所有守护进程通过 JSON-RPC 2.0 通信；MCP / A2A / OpenAI-API 协议转换发生在网关边界。
+- **服务化** —— 独立进程、IPC 协作；每个守护进程可单独启动、扩缩、升级与替换。
+- **职责单一** —— 每个守护进程只负责一个核心领域，耦合度低。
+- **安全内生** —— `svc_common` 以 `PUBLIC` 形式链接 `cupolas`，每个守护进程无需自己编写
+  安全代码，即自动继承请求鉴权、输入净化、审计与沙箱。
+- **协议统一** —— 运行时内部一律 JSON-RPC 2.0；MCP / A2A / OpenAI-API 转换只发生在网关边界。
+- **韧性** —— 熔断器、带主备切换的 API 恢复、健康检查、降级服务自动恢复。
+- **可观测** —— 所有守护进程向 `monit_d` 上报指标、向 `notify_d` 上报事件，并按进程落盘
+  日志，用 `airymaxrt logs <daemon>_d` 即可查看。
+- **统一生命周期框架** —— 15 个进程共用一套 `airy_svc_t` 状态机与事件驱动主循环
+  （`daemon_event_driver`）。
 
-`daemons` 是 [agentrt](../) 管理仓聚合的 7 个叶子仓之一，构成循环分层架构中的**服务层**（位于网关层 `gateway` 之上、生态层 `sdk`/`ecosystem` 之下）。它是 agentrt 内部最顶层的叶子仓——每个守护进程的业务逻辑通过 `atoms/syscall` 向下派发至内核。
+## 15 个守护进程
 
-## 模块分类
+| # | 守护进程 | RPC 命名空间 | 职责 |
+|---|----------|--------------|------|
+| 1 | [gateway_d](gateway_d/README.md) | —（入口） | 唯一外部边界。把 HTTP / WebSocket / SSE / MCP / A2A / OpenAI API 翻译为 JSON-RPC 2.0，按命名空间转发到后端。不含业务逻辑。 |
+| 2 | [llm_d](llm_d/README.md) | `llm.*` | LLM 推理：流式补全、token 计数、成本核算、响应缓存。 |
+| 3 | [tool_d](tool_d/README.md) | `tool.*`、`plugin.*` | 工具与插件注册、发现、沙箱执行、参数校验、结果缓存。 |
+| 4 | [sched_d](sched_d/README.md) | `sched.*` | 任务与 DAG 调度、路线图规划、轮询 / 加权 / 优先级 / ML 四种调度策略。 |
+| 5 | [market_d](market_d/README.md) | `market.*` | Agent / Skill / Tool / Template 工件：检索、安装、版本管理、卸载。 |
+| 6 | [monit_d](monit_d/README.md) | `monit.*` | 指标采集与查询、系统与硬件信息、健康检查、告警规则、Agent 死循环检测。 |
+| 7 | [channel_d](channel_d/README.md) | `channel.*` | 数据面应用通道：通道创建 / 加入 / 收发与消息路由。 |
+| 8 | [notify_d](notify_d/README.md) | `notify.*` | 事件扇出：基于 topic 的发布订阅，覆盖 WebSocket、SSE 与 socket。 |
+| 9 | [hook_d](hook_d/README.md) | `hook.*` | Hook 与会话注册；Hook 引擎本体位于 `atoms/coreloopthree`。 |
+| 10 | [mem_d](mem_d/README.md) | `mem.*` | 持久化记忆：写入 / 检索 / 读取 / 删除 / recent / evolve，TF-IDF + embedding 混合检索，JSONL 存储。 |
+| 11 | [agent_d](agent_d/README.md) | `agent.*` | Agent 生命周期与执行循环：`run` / `run_stream` / `run_cancel`、spawn / invoke / terminate / cancel。 |
+| 12 | [a2a_d](a2a_d/README.md) | `a2a.*` | Agent 间协议：Agent Card 注册与发现、任务状态机、消息投递。 |
+| 13 | [think_d](think_d/README.md) | `think.*` | 认知服务：两段式交互、流程编排、语言前置、反思评审。 |
+| 14 | [cupolas_d](cupolas_d/README.md) | `cupolas.*`、`policy.*` | 安全策略决策点：权限校验、输入净化、审计、凭据库、网络规则、策略加载 / 生效 / 回滚。 |
+| 15 | [maths_d](maths_d/README.md) | `maths.*` | 数学外挂计算：纯 C 数值与统计求值，外加可选符号计算后端。 |
 
-**— 类（服务 / 组合层）。**
-
-daemons 是服务/组合模块：它不提供基础原语，而是将原语组合为运行中的进程。它依赖 `atoms`（CoreLoopThree / Syscall / TaskFlow / Memory 原语——`hook_d` 直接链接 `airy_coreloopthree`；每个守护进程通过 `atoms/syscall` 派发）、`commons`（日志、config_unified、网络、令牌、成本、可观测性、认知、策略——通过 `svc_common` 传递链接）、`cupolas`（安全穹顶，由 `svc_common` 以 `PUBLIC` 形式链接）、`protocols`（IPC 服务总线使用的 JSON-RPC 2.0 / AgentsIPC 信封；网关边界使用 A2A / MCP 适配器）、`heapstore`（守护进程状态持久化）、`gateway`（`gateway_d` 守护进程封装网关库）。它的主要消费者是 SDK / Agent 应用（通过网关的 JSON-RPC 2.0 表面）和 OpenLab 模块。
+可执行文件名保留 `*_d` 后缀，与 CMake target 名一一对应（`gateway_d`、`llm_d`……）。
+各目录内的 README 记录该进程的具体接口。
 
 ## 目录结构
 
 ```
 daemons/
-├── CMakeLists.txt                 # 顶层构建文件；管理全部 15 个守护进程 + svc_common
-├── Dockerfile.ci                  # CI 环境 Docker 镜像
-├── README.md                      # 英文版
-├── README_zh.md                   # 本文件（中文）
-├── LICENSE                        # 双许可证文本（AGPL-3.0 + Apache-2.0）
-├── NOTICE                         # 版权声明
-├── common/                        # 共享服务库（svc_common）
-│   ├── CMakeLists.txt             # svc_common 静态库 target
-│   ├── README.md                  # svc_common 文档
-│   ├── include/                   # 共享头文件
-│   ├── src/                       # 源文件（工具组件）
-│   └── tests/                     # svc_common 单元测试
-├── gateway_d/                     # API 网关守护进程
-├── llm_d/                         # LLM 服务守护进程
-├── tool_d/                        # 工具执行守护进程（M4 吸收 plugin 执行域）
-├── sched_d/                       # 任务调度守护进程（DAG + roadmap）
-├── market_d/                      # 应用市场守护进程
-├── monit_d/                       # 可观测守护进程（M4 吸收 info/observe）
-├── channel_d/                     # 通信通道守护进程
-├── notify_d/                      # 事件广播守护进程
-├── hook_d/                        # Hook 守护进程（薄壳；核心在 atoms/coreloopthree）
-├── mem_d/                         # 记忆守护进程（mem.* 命名空间，JSONL 持久化）
-├── agent_d/                       # Agent 执行守护进程（agent.* 命名空间）
-├── a2a_d/                         # Agent 间通信（A2A）守护进程（a2a.* 命名空间）
-├── think_d/                       # 双思考 / GRAD 认知守护进程（think.* 命名空间）
-├── cupolas_d/                     # Cupolas 安全穹顶守护进程（cupolas.* 命名空间）
-├── maths_d/                       # 数学外挂计算守护进程（maths.* 命名空间）
-└── scripts/                       # 构建 / CI / 分析脚本
-    ├── ci.sh                      # CI 流水线构建脚本
-    ├── local-ci.sh                # 本地 CI 模拟脚本
-    ├── static-analysis.sh         # 静态代码分析
-    └── verify-coverage.sh         # 覆盖率验证
+├── CMakeLists.txt      # 构建 15 个守护进程 + svc_common
+├── common/             # svc_common 静态库（共享服务框架）
+├── scripts/            # CI、本地验证、静态分析、覆盖率
+├── gateway_d/ … maths_d/   # 每个守护进程一个目录
+├── Dockerfile.ci       # CI 构建环境
+├── LICENSE             # AGPL-3.0 + Apache-2.0 双许可证全文
+└── NOTICE              # 版权与核心 IP 声明
 ```
 
-### svc_common 共享库（`common/`）
-
-`common/` 子目录编译为 `svc_common` 静态库，被每个守护进程以 `PRIVATE` 形式链接。它在单一 ABI 表面下聚合 30+ 工具组件：
-
-| 分类 | 组件 |
-|------|------|
-| **服务框架** | `svc_common.c`、`svc_auth.c`、`svc_cache.h`、`svc_config.h`、`svc_logger.h`、`service_discovery.c`、`service_discovery_helper.c`、`daemon_bootstrap_ipc.c`、`daemon_bootstrap_sd.c`、`daemon_cupolas_bootstrap.c`、`daemon_event_driver.c`、`daemon_task_dispatcher.c` |
-| **韧性与安全** | `daemon_security.c`（熔断器、api_recovery、input_validator、log_sanitizer 的权威实现位于 `commons/`） |
-| **IPC 与消息** | `ipc_service_bus.c`、`ipc_client.c`、`ipc_bus_helper.c`、`daemon_bootstrap_ipc.h`、`method_dispatcher.c`、`jsonrpc_helpers.c`、`param_validator.c` |
-| **事件与并发** | `airy_event_loop.c`、`thread_pool.c`、`refcount.c` |
-| **指标与告警** | `unified_metrics.c`、`alert_manager.c` |
-| **配置** | `config_manager.c`、`daemon_defaults.h`、`daemon_errors.h`、`daemon_platform_ext.h` |
-| **平台** | `platform_compat.c`、`compat.h`、`platform.h` |
-
-> **P0.17 阶段 3 / IRON-6：** `svc_common.h` 与 `ipc_service_bus.h` 的权威定义已迁移至 `commons/utils/ipc/include/`。`common/include/` 下的 daemons 侧头文件保留为**重导出兼容头**，使内部源文件无需立即修改 `#include` 路径，消除 atoms→daemons 编译期反向依赖。
-
-## 核心组件
-
-### 15 个守护进程（M4 整编稳态，0.1.9）
-
-> M4（0.1.9 §5）：`observe_d`/`info_d` 并入 `monit_d`（可观测域吸收），`plugin_d` 并入 `tool_d`（执行域吸收）；外部 RPC/cap 语义分别经 `monit_d:observe`/`monit_d:info` 与 `tool_d:plugin` 承接，网关侧转发不变。
-
-| # | 守护进程 | 目录 | 职责 | CMake Target |
-|---|----------|------|------|--------------|
-| 1 | **API 网关** | `gateway_d/` | 唯一进程边界——协议翻译（HTTP / WS / SSE / MCP / A2A / OpenAI API ↔ JSON-RPC）与路由；`agent.run_stream` SSE 帧纯翻译（M1-1d 协议先行）；零业务逻辑 | `gateway_d` |
-| 2 | **LLM 服务** | `llm_d/` | LLM 推理服务（`llm.*`）：流式补全、token 计数、成本追踪、响应缓存 | `llm_d` |
-| 3 | **工具执行** | `tool_d/` | 工具注册 / 发现、沙箱执行、参数校验、结果缓存（`tool.*`；M4 吸收 `plugin.*` 执行域） | `tool_d` |
-| 4 | **任务调度** | `sched_d/` | 调度域（`sched.*`）：任务 / DAG 图调度 + roadmap 蓝图三级路由（plan/absorb/cancel/replan/stats）+ 4 种调度策略（轮询 / 加权 / 优先级 / ML） | `sched_d` |
-| 5 | **应用市场** | `market_d/` | Agent / Skill / Tool / Template 工件分发、安装、版本控制（`market.*`） | `market_d` |
-| 6 | **监控告警** | `monit_d/` | 可观测域（`monit.*`）：指标采集（M4 吸收 `observe` /metrics 面）、系统信息查询（吸收 `info`）、健康检查、告警管理、Agent 死循环检测 | `monit_d` |
-| 7 | **通道服务** | `channel_d/` | 数据面应用级通道（`channel.*`）：socket/shm 通道管理与消息路由（`/airy_ch_*`） | `channel_d` |
-| 8 | **通知服务** | `notify_d/` | 事件扇出 pub/sub（`notify.*`，topic 语义）：WS / SSE / Unix socket 三协议广播 + 环形事件队列 | `notify_d` |
-| 9 | **Hook 守护进程** | `hook_d/` | 薄守护进程壳（`hook.*`）；Hook 系统核心位于 `atoms/coreloopthree/src/hook/`，经 M3（§4.2-2）拆独立库 `airy_coreloop_hooks` 链接获取（不再链整引擎） | `hook_d` |
-| 10 | **记忆守护进程** | `mem_d/` | 持久化记忆服务（`mem.*`）：写入 / 检索 / 读取 / 删除 / recent / evolve，TF-IDF+embedding 混合检索，KB 知识库，JSONL 持久化 | `mem_d` |
-| 11 | **Agent 执行** | `agent_d/` | Agent 本地生命周期 + 执行循环引擎（`agent.*`）：`run` / `run_stream` / `run_cancel`（M1 会话注册表与工具循环下沉）+ `spawn` / `invoke` / `terminate` / `cancel` / `list` / `count` + 健康检查 | `agent_d` |
-| 12 | **A2A 协议** | `a2a_d/` | 跨 Agent 协议（`a2a.*`）：Agent Card 注册 / 发现、A2A 任务状态机、消息投递 | `a2a_d` |
-| 13 | **双思考认知** | `think_d/` | 认知服务面（`think.*`）：`process`（GCCP 两段式交互）/ `orchestrate`（七阶段管线）/ `lang_process`·`lang_postprocess`（M3 语言前置）/ `review` / `get_stats`——认知引擎唯一服务面 | `think_d` |
-| 14 | **Cupolas 安全穹顶** | `cupolas_d/` | 安全 PDP（`cupolas.*` / `policy.*`）：权限引擎 + 策略版本化（policy.load / activate / rollback / status，M2）+ vault / entitlements / netsec + sanitizer / audit | `cupolas_d` |
-| 15 | **数学外挂计算** | `maths_d/` | 数学引擎（`maths.*`）：纯 C 递归下降数值求值 + 可选 Python 符号后端（sympy-mcp / MCP-Mathematics） | `maths_d` |
-
-> **二进制命名规范：** 每个守护进程可执行文件保留 `*_d` 后缀（`gateway_d / llm_d / tool_d / sched_d / market_d / monit_d / channel_d / notify_d / hook_d / mem_d / agent_d / a2a_d / think_d / cupolas_d / maths_d`）。根据 2026-07-05 改名决策，模块名从 `daemon` 统一为 `daemons`（目录、CMake target `airy_daemons`、仓库 `daemons.git`），进程二进制名刻意保留；M4 整编后稳态为 **15 个**（observe/info/plugin 二进制退役，能力并入 monit_d/tool_d）。
-
-> **阶段 3 重构：** `mem_d / agent_d / a2a_d / think_d / cupolas_d` 从 gateway 进程拆分为独立 daemon（执行体集中化）。`gateway_d` 现在经 syscall 层（`airy_sys_svc_call`）转发这些命名空间，保持网关为纯协议边界。
-
-## 架构
+每个守护进程目录结构一致：
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                  外部客户端 / Agent 应用                       │
-├──────────────────────────────────────────────────────────────┤
-│   SDK (sdk-python / sdk-go / sdk-rust / sdk-typescript ...)   │
-├──────────────────────────────────────────────────────────────┤
-│   ★ daemons (服务层 — 15 个守护进程 + svc_common) ★          │
-│                                                               │
-│   gateway_d ─→ HTTP / WS / Stdio / MCP / A2A / OpenAI API     │
-│              ↓                                                │
-│   ┌────────┬────────┬────────┬────────┬────────┬─────────┐    │
-│   │ llm_d  │tool_d  │sched_d │market_d│monit_d │channel_d│   │
-│   ├────────┼────────┼────────┼────────┼────────┼─────────┤    │
-│   │ notify_d│hook_d │mem_d   │agent_d │a2a_d   │think_d  │   │
-│   ├────────┼────────┼────────┼────────┼────────┼─────────┤    │
-│   │ cupolas_d│maths_d│        │        │        │         │    │
-│   └────────┴────────┴────────┴────────┴────────┴─────────┘    │
-│              ↑ ipc_service_bus (JSON-RPC 2.0)                 │
-│   ┌─────────────────────────────────────────────────────────┐ │
-│   │ common (svc_common — 组件，PUBLIC 链接                  │ │
-│   │ Cupolas → 每个守护进程继承安全)                         │ │
-│   └─────────────────────────────────────────────────────────┘ │
-├──────────────────────────────────────────────────────────────┤
-│   gateway / protocols / heapstore / cupolas                   │
-├──────────────────────────────────────────────────────────────┤
-│   atoms / commons / OS                                        │
-└──────────────────────────────────────────────────────────────┘
+<name>_d/
+├── CMakeLists.txt      # target <name>_d
+├── README.md           # 职责、RPC 接口、依赖、启动与排查方式
+├── include/            # 公共头文件
+├── src/                # 源码（main.c 注册 JSON-RPC 方法）
+└── tests/              # 单元测试
 ```
 
-**内部依赖图（svc_common ← 守护进程）：**
+### svc_common（`common/`）
 
-```
-svc_common  ←  gateway_d  ←  外部客户端
-          ←  llm_d        ←  gateway_d
-          ←  tool_d       ←  gateway_d, llm_d
-          ←  sched_d      ←  gateway_d
-          ←  market_d     ←  gateway_d
-          ←  monit_d      ←  所有守护进程（指标上报）
-          ←  channel_d    ←  gateway_d
-          ←  notify_d     ←  monit_d（告警通知）
-          ←  hook_d       ←  sched_d, tool_d（Hook 注入）
-          ←  mem_d        ←  gateway_d, CLI/TUI（记忆读写）
-          ←  agent_d      ←  gateway_d（Agent spawn/invoke）
-          ←  a2a_d        ←  gateway_d（A2A 消息交换）
-          ←  think_d      ←  gateway_d, CLI（双思考 / GRAD）
-          ←  cupolas_d    ←  gateway_d, 所有守护进程（安全策略）
-```
+`common/` 构建 `svc_common` 静态库，被每个守护进程以 `PRIVATE` 形式链接。它提供服务框架
+（`airy_svc_t`、事件驱动、任务派发器，以及 IPC / systemd / Cupolas 的 bootstrap）、IPC
+客户端与服务总线、JSON-RPC 方法派发器与参数校验、韧性组件（熔断器、API 恢复、输入校验、
+日志净化）、指标与告警、配置，以及平台兼容层。详见 [`common/README.md`](common/README.md)。
 
-**设计原则：** 服务化（独立进程，IPC 协作）；每个守护进程职责单一；可插拔（独立部署 / 升级 / 替换）；高可用（主备、熔断器、故障转移）；安全内生（Cupolas 经 svc_common 传递链接）；协议统一（IPC 服务总线上的 JSON-RPC 2.0）。
+## 用法
 
-## 上游依赖
+### 运行
 
-> `svc_common` 是集成点，链接基础模块（`commons`、`cupolas`）并暴露给每个守护进程。daemons 还依赖 `atoms`、`protocols`、`heapstore`、`gateway`。
-
-| 依赖 | 来源 | 用途 |
-|------|------|------|
-| **atoms** | `agentrt/atoms/` | CoreLoopThree（认知 / 执行 / 记忆循环）、Syscall 入口表面、TaskFlow 编排、Memory 原语——`hook_d` 链接拆库 `airy_coreloop_hooks`（M3 §4.2-2）；每个守护进程通过 `atoms/syscall` 派发业务逻辑 |
-| **commons** | `agentrt/commons/` | 日志、config_unified、网络、令牌、成本、可观测性、认知、策略——通过 `svc_common` 传递链接。`svc_common.h` / `ipc_service_bus.h` 的权威定义按 IRON-6 现位于此（`commons/utils/ipc/include/`） |
-| **cupolas** | `agentrt/cupolas/` | `svc_common` 以 `PUBLIC` 形式链接 Cupolas（`daemon_cupolas_bootstrap.c`），每个守护进程自动继承 Cupolas 安全——请求鉴权、输入净化、审计、沙箱 |
-| **protocols** | `agentrt/protocols/` | IPC 服务总线使用的 JSON-RPC 2.0 / AgentsIPC 信封；网关边界使用 A2A / MCP 适配器 |
-| **heapstore** | `agentrt/heapstore/` | 守护进程状态持久化——`market_d` / `tool_d` / `llm_d` 有专用数据目录；注册表追踪 Agent / Skill / Session；Token 引擎预算 LLM 用量 |
-| **gateway** | `agentrt/gateway/` | `gateway_d` 封装网关库并以系统服务形式暴露 |
-| cJSON / libcurl / libyaml / OpenSSL | 外部 | JSON 解析、HTTP 客户端、YAML 配置、TLS——由伞仓 CMake 自动检测（BAN-12） |
-
-## 下游消费者
-
-| 消费者 | 使用内容 |
-|--------|----------|
-| **SDK / Agent 应用** | SDK 内置守护进程客户端库；Agent 应用通过网关的 JSON-RPC 2.0 表面调用运行时，消费守护进程服务（LLM、工具、调度、市场等） |
-| OpenLab 应用 | OpenLab 模块通过 JSON-RPC 2.0 API 编排守护进程 |
-| 生态 ToolKit / Skills | Skills 与生态工具通过 SDK 访问守护进程服务 |
-
-## 构建
-
-### 前置依赖
-
-- CMake ≥ 3.16
-- C11 编译器（GCC / Clang / MSVC）
-- cJSON 库
-- GTest（可选，用于单元测试）
-- lcov / genhtml（可选，用于覆盖率报告）
-
-### 构建命令
+运行时由 `airymaxrt` 启动器管理，守护进程集群的拉起与收摊都由它负责，通常无需手动启动
+某个守护进程。
 
 ```bash
-# 标准构建
-cmake -S . -B /tmp/daemons-build -DCMAKE_BUILD_TYPE=Release
-cmake --build /tmp/daemons-build --parallel $(nproc)
-
-# 启用测试
-cmake -S . -B /tmp/daemons-build -DBUILD_TESTS=ON
-cmake --build /tmp/daemons-build --parallel $(nproc)
-ctest --test-dir /tmp/daemons-build --output-on-failure
-
-# 启用覆盖率
-cmake -S . -B /tmp/daemons-build -DBUILD_COVERAGE=ON
-cmake --build /tmp/daemons-build --parallel $(nproc)
-cmake --build /tmp/daemons-build --target coverage
-
-# 跨平台构建
-cmake -S . -B /tmp/daemons-build -DBUILD_ALL_PLATFORMS=ON
+airymaxrt                 # 终端界面——拉起运行时及其服务
+airymaxrt status          # 当前运行状态
+airymaxrt doctor          # 组件健康检查
+airymaxrt logs 100        # 最近 100 行运行日志
+airymaxrt logs llm_d      # 指定守护进程的日志
+airymaxrt monitor         # 持续观察
 ```
 
-### CMake 选项
+其余子命令为 `cli`、`profile`、`update`、`uninstall`、`reinstall`。
+**没有 `airymaxrt start`** —— 不带参数运行启动器即拉起全部服务。
 
-| 选项 | 默认 | 说明 |
-|------|------|------|
-| `BUILD_TESTS` | `ON` | 构建单元测试 |
-| `BUILD_COVERAGE` | `OFF` | 启用代码覆盖率 |
+若要单独验证某个守护进程的接口，可直接启动它并向其 socket 发送 JSON-RPC：
+
+```bash
+<build-dir>/bin/maths_d                     # 监听在运行时目录
+```
+
+POSIX 上端点是运行时目录下的 Unix socket `<runtime-dir>/<name>.sock`，从运行时根目录解析，
+手动启动的守护进程与由启动器拉起的处在同一条总线上。Windows 上守护进程监听本机 TCP 回环
+`127.0.0.1:<port>`，各守护进程的默认端口见其各自的 README。
+
+### 从源码构建
+
+前置依赖：CMake ≥ 3.16、C11 编译器（GCC / Clang / MSVC）、cJSON。
+可选：GTest（单元测试）、lcov + genhtml（覆盖率）、cppcheck（静态分析）。
+
+```bash
+cmake -S . -B ../daemons-build -DCMAKE_BUILD_TYPE=Release
+cmake --build ../daemons-build --parallel
+```
+
+构建目录需位于源码树之外。
+
+CMake 选项：
+
+| 选项 | 默认值 | 说明 |
+|------|--------|------|
+| `BUILD_DAEMON` | POSIX `ON`，Windows `OFF` | 构建守护进程集群（由上层构建设置） |
+| `BUILD_TESTS` | `ON`（Windows 上强制 `OFF`） | 构建单元测试并启用 CTest |
+| `BUILD_COVERAGE` | `OFF` | 覆盖率插桩并添加 `coverage` 目标 |
 | `BUILD_ALL_PLATFORMS` | `OFF` | 跨平台编译 |
 
-### 构建产物
-
-- 15 个守护进程可执行文件：`gateway_d`、`llm_d`、`tool_d`、`sched_d`、`market_d`、`monit_d`、`channel_d`、`notify_d`、`hook_d`、`mem_d`、`agent_d`、`a2a_d`、`think_d`、`cupolas_d`、`maths_d`——输出到 `${CMAKE_BINARY_DIR}/bin/`（M4 整编后 observe/info/plugin 退役并入 monit_d/tool_d）
-- `svc_common` —— 每个守护进程消费（PRIVATE 链接）的共享静态库
-- 公共头文件安装到 `include/agentrt/`
-
-### 安装
+以 `BUILD_DAEMON=OFF` 配置时，本模块会输出一条警告并跳过。在 Windows 上需要守护进程与
+CLI 时，显式开启：
 
 ```bash
-cmake --install /tmp/daemons-build --prefix /opt/airymax
+cmake -S . -B ../agentrt-build -DBUILD_DAEMON=ON -DBUILD_CLI=ON
 ```
 
-### 启动方式
+官方 Windows 发布包本身已包含守护进程与 CLI；只有纯源码构建默认关闭它们。
+
+产物与安装：
 
 ```bash
-# 启动单个守护进程
-/tmp/daemons-build/bin/gateway_d --config gateway_config.json
-
-# 使用管理器启动所有守护进程
-./daemon_manager --start-all
-
-# 查看守护进程状态
-./daemon_manager --status
+ctest --test-dir ../daemons-build --output-on-failure
+cmake --install ../daemons-build --prefix /opt/airymax   # 可执行文件 → <prefix>/bin
 ```
 
-### CI/CD 脚本
+- `${CMAKE_BINARY_DIR}/bin/` 下的 15 个守护进程可执行文件
+- `svc_common` 静态库，由各守护进程私有链接
+- 守护进程公共头文件安装到 `include/agentrt/`
+
+### CI 脚本
 
 | 脚本 | 用途 |
 |------|------|
-| `scripts/ci.sh` | CI 流水线构建脚本 |
-| `scripts/local-ci.sh` | 本地 CI 模拟脚本 |
-| `scripts/static-analysis.sh` | 静态代码分析 |
-| `scripts/verify-coverage.sh` | 覆盖率验证 |
+| [`scripts/`](scripts/README.md) | CI 入口：构建、测试、cppcheck、覆盖率 |
+| `scripts/local-ci.sh` | 本地 CI 模拟 |
+| `scripts/static-analysis.sh` | cppcheck 静态分析 |
+| `scripts/verify-coverage.sh` | 覆盖率收集与阈值验证 |
 
-## API
+## 接口
 
-### 服务生命周期
+**服务生命周期** —— 所有守护进程共用一套状态机（`airy_svc_state_t`）：
+`NONE → CREATED → INITIALIZING → READY → RUNNING → PAUSED → STOPPING → STOPPED`，
+另有停止超时对应的 `ZOMBIE` 与故障对应的 `ERROR`。启动次序为
+`初始化 → 加载配置 → 注册到服务发现 → 提供服务 → 优雅关闭`。
 
-服务状态枚举（`airy_svc_state_t`，定义于 `commons/utils/ipc/include/svc_common.h`）：
+**能力标志** —— 守护进程通过 `airy_svc_config_t.capabilities` 声明自己支持的能力：
+`AIRY_SVC_CAP_NONE / ASYNC / STREAMING / CANCELABLE / PAUSEABLE / THROTTLE / BATCH /
+PRIORITY / TIMEOUT`。
 
-| 状态 | 说明 |
-|------|------|
-| `AIRY_SVC_STATE_NONE` | 未初始化 |
-| `AIRY_SVC_STATE_CREATED` | 已创建 |
-| `AIRY_SVC_STATE_INITIALIZING` | 初始化中 |
-| `AIRY_SVC_STATE_READY` | 就绪 |
-| `AIRY_SVC_STATE_RUNNING` | 运行中 |
-| `AIRY_SVC_STATE_PAUSED` | 已暂停 |
-| `AIRY_SVC_STATE_STOPPING` | 停止中 |
-| `AIRY_SVC_STATE_STOPPED` | 已停止 |
-| `AIRY_SVC_STATE_ZOMBIE` | 僵尸状态（停止超时 / 部分清理） |
-| `AIRY_SVC_STATE_ERROR` | 错误状态 |
-
-生命周期推进：
-
-```
-INIT → CONFIG_LOAD → SERVICE_REGISTER → IDLE → BUSY → SHUTDOWN
- 初始化   加载配置    注册到服务发现     等待    处理    优雅关闭
-```
-
-### 服务能力标志（`airy_svc_capability_t`）
-
-`AIRY_SVC_CAP_NONE / ASYNC / STREAMING / CANCELABLE / PAUSEABLE / THROTTLE / BATCH / PRIORITY / TIMEOUT`——每个守护进程通过 `airy_svc_config_t.capabilities` 位掩码声明其能力。
-
-### IPC 服务总线
-
-| 通信方式 | 适用场景 | 延迟 | 协议 |
-|----------|----------|------|------|
-| Unix Socket | 同机守护进程 | < 100 μs | JSON-RPC 2.0 |
-| TCP | 跨机守护进程 | < 1 ms | JSON-RPC 2.0 |
-| 共享内存 | 高性能数据交换 | < 10 μs | 自定义 |
-
-### 错误码
-
-守护进程扩展错误码通过 `daemon_errors.h` 暴露（经 `common/include/svc_common.h` 重导出）：`DAEMON_EINIT / ESTATE / EHEALTH` 等兼容别名，叠加在 `commons/include/airy_types.h` 中定义的标准 `AIRY_E*` 错误码集合之上。
-
-### 使用示例
+**错误码** —— 使用 `commons` 中的标准 `AIRY_E*` 集合，并由 `daemon_errors.h` 叠加守护进程
+层面的别名。
 
 ```c
 #include "svc_common.h"
 #include "ipc_service_bus.h"
 
-int main(void) {
-    /* 守护进程向 IPC 服务总线注册，声明能力。 */
+int main(void)
+{
     airy_svc_config_t cfg = {
         .name           = "my_daemon",
-        .version        = "0.1.9",
+        .version        = "0.1.15",
         .capabilities   = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_CANCELABLE,
         .max_concurrent = 64,
         .timeout_ms     = 5000,
@@ -334,11 +216,36 @@ int main(void) {
 }
 ```
 
+## 关系
+
+daemons 是组合层：它不定义内核原语，而是把原语组织成运行中的进程。
+
+| 依赖 | daemons 使用它的什么 |
+|------|---------------------|
+| [commons](https://atomgit.com/openairymax/commons) | 日志、配置、网络、令牌、成本、可观测性、平台路径与权威 IPC 头文件——经 `svc_common` 传递链接 |
+| [atoms](https://atomgit.com/openairymax/atoms) | 向下游派发的 Syscall 入口表面；`hook_d` 直接链接 CoreLoopThree 的 hook 库 |
+| [cupolas](https://atomgit.com/openairymax/cupolas) | 安全穹顶，由 `svc_common` 以 `PUBLIC` 链接；`cupolas_d` 将其作为服务暴露 |
+| [protocols](https://atomgit.com/openairymax/protocols) | IPC 总线上的 JSON-RPC 2.0 / AgentsIPC 信封；网关边界的 A2A 与 MCP 适配器 |
+| [heapstore](https://atomgit.com/openairymax/heapstore) | 守护进程状态、注册表与配额的持久化 |
+| [gateway](https://atomgit.com/openairymax/gateway) | `gateway_d` 封装并作为系统服务暴露的网关库 |
+
+| 消费者 | 使用内容 |
+|--------|----------|
+| SDK / Agent 应用 | 网关的 JSON-RPC 2.0 表面，经 SDK 内置的守护进程客户端库访问 |
+| 命令行与终端界面 | 记忆读写、认知、状态查看与日志 |
+| 生态工具与 Skills | 通过 SDK 访问守护进程服务 |
+
+## 文档
+
+设计文档、接口参考与应用开发指南位于
+[Airymax 文档仓库](https://atomgit.com/openairymax/docs)的 `AirymaxRT/` 目录下。
+入口见 `AirymaxRT/README.md`，API 参考见 `AirymaxRT/30-interfaces/`。
+
 ## 许可证
 
-Copyright (c) 2025-2026 SPHARX Ltd. All Rights Reserved.
+Copyright (c) 2025-2026 SPHARX Ltd.
 
-本模块采用双许可证，您可以选择以下任一许可证遵守：
+本模块采用双许可证，可选择以下任一许可证遵守：
 
 - **GNU Affero General Public License v3.0 or later**
   ([AGPL-3.0-or-later](https://www.gnu.org/licenses/agpl-3.0.txt))，或
@@ -347,6 +254,5 @@ Copyright (c) 2025-2026 SPHARX Ltd. All Rights Reserved.
 
 SPDX-License-Identifier: `AGPL-3.0-or-later OR Apache-2.0`
 
-完整许可证文本见 [LICENSE](LICENSE) 文件，版权声明见 [NOTICE](NOTICE)。
-默认适用 AGPL-3.0-or-later 条款；Apache-2.0 备选用于 AGPL 无法覆盖的
-下游集成场景（如闭源或专有分发）。
+完整许可证文本见 [LICENSE](LICENSE)，版权与核心 IP 声明见 [NOTICE](NOTICE)。
+默认适用 AGPL-3.0-or-later 条款；Apache-2.0 备选用于 AGPL 无法覆盖的下游集成场景。
