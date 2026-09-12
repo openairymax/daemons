@@ -37,12 +37,12 @@ IPC 通信、JSON-RPC 分发、服务发现、安全认证、容错恢复、并�
 - CMake 包含路径顺序：commons 权威路径声明在 `daemons/common/include` **之前**，确保
   atoms 代码优先解析 commons 版本。
 
-## 组件集（src/ 共 40 个 C 源文件，0.1.9 0c 迁出 circuit_breaker/thread_pool、移除桩件 daemon_oom）
+## 组件集（src/ 共 41 个 C 源文件，0.1.9 0c 迁出 circuit_breaker/thread_pool、移除桩件 daemon_oom；8.3.4 删 ipc_backpressure）
 
 | 域 | 组件 | 说明 |
 |----|------|------|
 | 服务框架 | `svc_common` / `svc_registry` / `svc_config` / `svc_monitor` / `svc_client` | 服务生命周期、注册中心客户端、配置加载与监视、监控降级、服务通信客户端 |
-| IPC 通信 | `ipc_client` / `ipc_service_bus` / `ipc_bus_helper` / `ipc_backpressure` / `daemon_rpc_client` / `daemon_bootstrap_ipc` | IPC 总线、背压控制、daemon↔daemon 精简 JSON-RPC 客户端、IPC 引导 |
+| IPC 通信 | `ipc_client` / `ipc_service_bus` / `ipc_bus_helper` / `daemon_rpc_client` / `daemon_bootstrap_ipc` | IPC 总线、daemon↔daemon 精简 JSON-RPC 客户端、IPC 引导（send/broadcast/notify 家族与背压模块已随 8.3.4 删除，投递统一经 `request()`） |
 | 服务发现 | `service_discovery` / `service_discovery_lb` / `service_discovery_api` / `service_discovery_stats` / `service_discovery_backend_shm` / `service_discovery_backend_file` / `service_discovery_helper` / `daemon_bootstrap_sd` | 跨进程注册/发现/负载均衡，shm/file 后端，一键引导 |
 | JSON-RPC | `jsonrpc_helpers` / `method_dispatcher` | JSON-RPC 2.0 辅助（请求解析/响应构建）与方法分发器（注册表模式，O(1) 路由） |
 | 安全 | `svc_auth` / `svc_auth_jwt` / `svc_auth_apikey` / `svc_auth_ratelimit` / `daemon_security` / `param_validator` / `log_sanitizer` | JWT/API Key/限流认证中间件、cupolas 安全集成、参数校验、日志清洗（字符串/路径/URL 安全校验权威实现位于 commons/utils/security） |
@@ -99,7 +99,7 @@ cmake --build build --target svc_common
   `test_safe_string_utils` / `test_input_validator` / `test_param_validator`
 - JSON-RPC/分发：`test_jsonrpc_helpers` / `test_daemon_common`（P1-C06 深度单测）
 - 安全：`test_svc_auth` / `test_daemon_security` / `test_log_sanitizer`
-- IPC/发现：`test_ipc_service_bus` / `test_ipc_client` / `test_ipc_backpressure` /
+- IPC/发现：`test_ipc_service_bus` / `test_ipc_client` /
   `test_service_discovery`（含 lifecycle/discover/select/health/misc 域拆分文件）
 - 容错/并发：`test_strategies_recovery` / `test_api_recovery` / `test_thread_pool` /
   `test_airy_event_loop` / `test_checkpoint` / `test_svc_stop`
