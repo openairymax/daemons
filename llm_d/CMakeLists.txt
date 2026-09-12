@@ -218,10 +218,11 @@ if(NOT MSVC AND NOT APPLE)
         "-Wl,--start-group"
         airy_llm_service
         "-Wl,--end-group"
+        airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
         Threads::Threads
     )
 else()
-    target_link_libraries(llm_d PRIVATE airy_llm_service Threads::Threads)
+    target_link_libraries(llm_d PRIVATE airy_llm_service airy_core Threads::Threads)
 endif()
 
 if(NOT MSVC)

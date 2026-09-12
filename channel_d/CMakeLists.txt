@@ -50,6 +50,7 @@ target_include_directories(channel_d PRIVATE
 # 平台库由 airy_platform_libs 统一映射（Windows 分支此前缺失链接 → 构建失败）。
 target_link_libraries(channel_d PRIVATE
     svc_common
+    airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
     airy_common
     Threads::Threads
     airy_platform_libs

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 #include "airy_memory.h"
+#include "airy_rt.h"
 #include "error.h"
 /*
  * P0.18.1: daemon_main.h transitively provides atomic_compat,
@@ -629,6 +630,20 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
     airy_log_init(NULL);
     atexit(log_cleanup);
 
+    /* WS-8 stage 4 (8.4.1): bring up the corekern core (mem/oom/task/ipc/
+     * eventloop/persist) as the first link of the daemon boot chain, before
+     * the daemon's own subsystems. airy_init() is idempotent; if it fails
+     * the daemon still runs on the platform fallbacks (DSL degradation,
+     * non-fatal, badge=0). */
+    {
+        int core_ret = airy_init();
+        if (core_ret == AIRY_SUCCESS) {
+            SVC_LOG_INFO("corekern core initialized (notify_d runs on corekern)");
+        } else {
+            SVC_LOG_WARN("corekern init failed (%d) - running degraded (badge=0)", core_ret);
+        }
+    }
+
     daemon_cupolas_init_pep("notify_d");
 
     /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
@@ -657,8 +672,13 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
             }
             atomic_fetch_add_explicit(&g_conns, 1, memory_order_relaxed);
             airy_thread_t th;
-            if (airy_thread_create(&th, notify_d_conn_thread, (void *)(intptr_t)client) == 0)
-                airy_thread_detach(th);
+            /* fire-and-forget conn thread: platform primitives on purpose.
+             * Under AIRY_USE_SCHEDULER_THREAD_IMPL the scheduler owns
+             * airy_thread_create/join (join-oriented, no detach API); a
+             * per-conn blocking handler must not occupy the task table. */
+            if (airy_platform_thread_create(&th, notify_d_conn_thread,
+                                            (void *)(intptr_t)client) == 0)
+                airy_platform_thread_detach(th);
             else {
                 atomic_fetch_sub_explicit(&g_conns, 1, memory_order_relaxed);
                 airy_sock_close(client);

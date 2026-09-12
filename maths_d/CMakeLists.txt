@@ -55,6 +55,7 @@ target_include_directories(maths_d PRIVATE
 
 target_link_libraries(maths_d PRIVATE
     svc_common
+    airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
     Threads::Threads
 )
 # m（libm）：仅非 MSVC 平台存在；MSVC 数学函数内建在 CRT（wave-4 #110

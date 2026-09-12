@@ -12,6 +12,7 @@
  */
 
 #include "airy_memory.h"
+#include "airy_rt.h"
 #include "error.h"
 #include "agent_d_internal.h"
 
