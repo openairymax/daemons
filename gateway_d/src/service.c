@@ -9,11 +9,15 @@
 
 #include "gateway_service.h"
 #include "daemon_platform_ext.h"
-/* stdio 网关线程经 platform 线程抽象（airy_thread_*）。本 TU 属
- * airy_gateway_service，不带 AIRY_USE_SCHEDULER_THREAD_IMPL，故
- * platform_process.h 的别名生效，airy_thread_* 解析为平台原语
- * （普通后台线程，无需纳入调度器记账）。 */
+/* stdio 网关线程经 platform 线程抽象（airy_thread_*）。airy_core 以
+ * PUBLIC 传播 AIRY_USE_SCHEDULER_THREAD_IMPL（corekern CMakeLists 经
+ * gateway OBJECT 库传递到本 TU），故别名不生效、声明由 corekern task.h
+ * 提供（线程纳入调度器任务表记账）。无该定义的构建经 platform_process.h
+ * 别名解析为平台原语——两腿原型一致，调用点无需区分。 */
 #include "platform_process.h"
+#ifdef AIRY_USE_SCHEDULER_THREAD_IMPL
+#include "task.h"
+#endif
 #ifdef GATEWAY_HAS_HTTP
 #include "http_gateway.h"
 #endif
