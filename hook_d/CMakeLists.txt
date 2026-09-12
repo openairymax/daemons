@@ -75,10 +75,11 @@ if(NOT MSVC AND NOT APPLE)
         svc_common
         cupolas
         "-Wl,--end-group"
+        airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
         Threads::Threads
     )
 else()
-    target_link_libraries(hook_d PRIVATE airy_coreloop_hooks svc_common cupolas Threads::Threads)
+    target_link_libraries(hook_d PRIVATE airy_coreloop_hooks svc_common cupolas airy_core Threads::Threads)
 endif()
 
 if(AIRY_HAS_YAML AND YAML_FOUND AND YAML_LIBRARIES)
