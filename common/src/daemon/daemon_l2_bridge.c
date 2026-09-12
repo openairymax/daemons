@@ -45,6 +45,8 @@
 
 #include "airy_memory.h"
 
+#include <cjson/cJSON.h>
+#include <ctype.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,6 +56,10 @@
 #else
 #include <unistd.h>
 #endif
+
+/** Default call timeout, mirroring DAEMON_RPC_DEFAULT_TIMEOUT_MS on the
+ * socket path (daemon_rpc_client.c) — both transports must not drift. */
+#define DAEMON_L2_RPC_DEFAULT_TIMEOUT_MS 30000u
 
 struct daemon_l2_bridge {
     daemon_l2_dispatch_fn dispatch;
@@ -307,4 +313,243 @@ int daemon_l2_envelope_decode(const void *buf, size_t buf_size, const void **out
     *out_trace_id = hdr.trace_id;
     *out_src_task = hdr.src_task;
     return 0;
+}
+
+int daemon_l2_channel_for_socket(const char *socket_path, char *channel, size_t channel_size)
+{
+    if (!socket_path || !channel || channel_size == 0)
+        return AIRY_EINVAL;
+
+    const char *base = strrchr(socket_path, '/');
+#ifdef _WIN32
+    const char *wbase = strrchr(socket_path, '\\');
+    if (wbase && (!base || wbase > base))
+        base = wbase;
+#endif
+    base = base ? base + 1 : socket_path;
+
+    /* "<ns>.sock" -> "<ns>.rpc": the ".sock" suffix is the naming
+     * discriminator — anything else (TCP "host:port", foreign UDS names)
+     * stays on the socket path. */
+    size_t base_len = strlen(base);
+    const size_t suffix_len = 5; /* strlen(".sock") */
+    if (base_len <= suffix_len || strcmp(base + base_len - suffix_len, ".sock") != 0)
+        return AIRY_EINVAL;
+
+    size_t ns_len = base_len - suffix_len;
+    if (ns_len + sizeof(".rpc") > channel_size)
+        return AIRY_EMSGSIZE;
+
+    /* Gate on the transport switch (upper-case ns, daemon_l1_server.h):
+     * handing out a channel nobody mounts would silently move traffic
+     * onto a dead path. */
+    char ns_upper[64];
+    if (ns_len >= sizeof(ns_upper))
+        return AIRY_EMSGSIZE;
+    for (size_t i = 0; i < ns_len; i++)
+        ns_upper[i] = (char)toupper((unsigned char)base[i]);
+    ns_upper[ns_len] = '\0';
+    if (!daemon_l1_transport_enabled(ns_upper))
+        return AIRY_ERR_NOT_FOUND;
+
+    AIRY_MEMCPY(channel, base, ns_len);
+    AIRY_MEMCPY(channel + ns_len, ".rpc", sizeof(".rpc"));
+    return 0;
+}
+
+/**
+ * Serializes the JSON-RPC 2.0 request exactly as rpc_connect_send does on
+ * the socket path (id=1; params embedded when valid JSON, stringified
+ * otherwise, {} when empty) so the daemon sees identical requests on both
+ * transports. Returns the PrintUnformatted buffer (cJSON default
+ * allocator, AIRY_FREE-compatible) or NULL on OOM.
+ */
+static char *daemon_l2_build_request(const char *method, const char *params_json)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (!root)
+        return NULL;
+    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
+    cJSON_AddStringToObject(root, "method", method);
+    if (params_json && params_json[0] != '\0') {
+        cJSON *params = cJSON_Parse(params_json);
+        if (params) {
+            cJSON_AddItemToObject(root, "params", params);
+        } else {
+            cJSON_AddStringToObject(root, "params", params_json);
+        }
+    } else {
+        cJSON_AddObjectToObject(root, "params");
+    }
+    cJSON_AddNumberToObject(root, "id", 1);
+    char *request_str = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return request_str;
+}
+
+/**
+ * L2 transaction core: build -> envelope -> connect -> call -> decode. On
+ * success *out_resp_json is the daemon's complete reply payload as a
+ * NUL-terminated string — nothing parsed, nothing folded, error responses
+ * included verbatim. On any transport failure *out_resp_json stays NULL and
+ * the transport code propagates so callers can fall back to the socket path
+ * (blueprint 8.3.3 grey rollout).
+ */
+static int daemon_l2_rpc_transact(const char *channel, const char *method,
+                                  const char *params_json, uint32_t timeout_ms,
+                                  char **out_resp_json)
+{
+    if (!out_resp_json)
+        return AIRY_ERR_INVALID_PARAM;
+    *out_resp_json = NULL;
+    if (!channel || !method)
+        return AIRY_ERR_INVALID_PARAM;
+
+    char *request_str = daemon_l2_build_request(method, params_json);
+    if (!request_str)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    size_t req_len = strlen(request_str);
+
+    int rc = AIRY_ERR_GENERIC_FAIL;
+    uint8_t *req_env = NULL;
+    uint8_t *resp_env = NULL;
+    airy_ipc_channel_t *client = NULL;
+
+    if (req_len > DAEMON_L2_MAX_PAYLOAD) {
+        rc = AIRY_EMSGSIZE;
+        goto out;
+    }
+
+    /* 512 KiB response bound: heap, never stack. */
+    req_env = AIRY_MALLOC((size_t)AIRY_IPC_HDR_SIZE + req_len);
+    resp_env = AIRY_MALLOC((size_t)AIRY_IPC_HDR_SIZE + DAEMON_L2_MAX_PAYLOAD);
+    if (!req_env || !resp_env) {
+        rc = AIRY_ERR_OUT_OF_MEMORY;
+        goto out;
+    }
+    if (daemon_l2_envelope_encode(0, daemon_l2_self_task(), 0, request_str, req_len, req_env,
+                                  (size_t)AIRY_IPC_HDR_SIZE + req_len) != 0) {
+        rc = AIRY_EMSGSIZE;
+        goto out;
+    }
+
+    airy_err_t cerr = airy_ipc_connect(channel, &client);
+    if (cerr != AIRY_SUCCESS) {
+        /* Transport-layer code (e.g. NOT_FOUND: no bridge mounted)
+         * propagates so callers can fall back to the socket path. */
+        rc = (int)cerr;
+        goto out;
+    }
+
+    size_t resp_size = (size_t)AIRY_IPC_HDR_SIZE + DAEMON_L2_MAX_PAYLOAD;
+    airy_kernel_ipc_message_t msg = {.code = 1,
+                                     .data = req_env,
+                                     .size = (size_t)AIRY_IPC_HDR_SIZE + req_len,
+                                     .fd = -1,
+                                     .msg_id = 1};
+    airy_err_t err = airy_ipc_call(client, &msg, resp_env, &resp_size, timeout_ms);
+    if (err != AIRY_SUCCESS) {
+        SVC_LOG_WARN("daemon_l2_rpc: call failed (method=%s, err=%d)", method, (int)err);
+        /* CANCELED = dropped/undispatched transaction (L2 §2.3): the
+         * socket path folds transport loss into GENERIC_FAIL too. */
+        rc = (err == AIRY_ERR_CANCELED) ? AIRY_ERR_GENERIC_FAIL : (int)err;
+        goto out;
+    }
+
+    const void *resp_payload = NULL;
+    size_t resp_len = 0;
+    uint64_t trace_id = 0;
+    uint64_t src_task = 0;
+    if (daemon_l2_envelope_decode(resp_env, resp_size, &resp_payload, &resp_len, &trace_id,
+                                  &src_task) != 0) {
+        SVC_LOG_ERROR("daemon_l2_rpc: malformed reply envelope (method=%s)", method);
+        rc = AIRY_ERR_GENERIC_FAIL;
+        goto out;
+    }
+    if (resp_len == 0 || !resp_payload) {
+        /* A JSON-RPC reply is never empty: malformed exchange, not a
+         * transport loss — fold like daemon_rpc_call_cancelable. */
+        SVC_LOG_ERROR("daemon_l2_rpc: empty reply payload (method=%s)", method);
+        rc = AIRY_ERR_GENERIC_FAIL;
+        goto out;
+    }
+
+    /* Payload view has no NUL guarantee; JSON consumers need one. */
+    char *resp_json = AIRY_MALLOC(resp_len + 1);
+    if (!resp_json) {
+        rc = AIRY_ERR_OUT_OF_MEMORY;
+        goto out;
+    }
+    AIRY_MEMCPY(resp_json, resp_payload, resp_len);
+    resp_json[resp_len] = '\0';
+    *out_resp_json = resp_json;
+    rc = AIRY_SUCCESS;
+
+out:
+    if (client)
+        airy_ipc_close(client);
+    AIRY_FREE(resp_env);
+    AIRY_FREE(req_env);
+    AIRY_FREE(request_str);
+    return rc;
+}
+
+int daemon_l2_rpc_call_resp(const char *channel, const char *method, const char *params_json,
+                            uint32_t timeout_ms, char **out_resp_json)
+{
+    if (timeout_ms == 0)
+        timeout_ms = DAEMON_L2_RPC_DEFAULT_TIMEOUT_MS;
+    return daemon_l2_rpc_transact(channel, method, params_json, timeout_ms, out_resp_json);
+}
+
+int daemon_l2_rpc_call(const char *channel, const char *method, const char *params_json,
+                       char **out_result_json, uint32_t timeout_ms)
+{
+    if (!out_result_json)
+        return AIRY_ERR_INVALID_PARAM;
+    *out_result_json = NULL;
+    if (timeout_ms == 0)
+        timeout_ms = DAEMON_L2_RPC_DEFAULT_TIMEOUT_MS;
+
+    char *resp_json = NULL;
+    int rc = daemon_l2_rpc_transact(channel, method, params_json, timeout_ms, &resp_json);
+    if (rc != AIRY_SUCCESS)
+        return rc;
+
+    cJSON *resp = cJSON_Parse(resp_json);
+    AIRY_FREE(resp_json);
+    if (!resp) {
+        SVC_LOG_ERROR("daemon_l2_rpc_call: response parse failed (method=%s)", method);
+        return AIRY_ERR_GENERIC_FAIL;
+    }
+
+    /* Fold rules mirror daemon_rpc_call_cancelable (daemon_rpc_client.c). */
+    cJSON *err_obj = cJSON_GetObjectItem(resp, "error");
+    if (err_obj) {
+        cJSON *err_msg = cJSON_GetObjectItem(err_obj, "message");
+        const char *emsg =
+            (err_msg && cJSON_IsString(err_msg)) ? err_msg->valuestring : "unknown";
+        cJSON *err_code = cJSON_GetObjectItem(err_obj, "code");
+        int code = (err_code && cJSON_IsNumber(err_code)) ? err_code->valueint : -32000;
+        SVC_LOG_WARN("daemon_l2_rpc_call: daemon returned error (method=%s, code=%d, msg=%s)",
+                     method, code, emsg);
+        cJSON_Delete(resp);
+        return AIRY_ERR_GENERIC_FAIL;
+    }
+
+    cJSON *result = cJSON_GetObjectItem(resp, "result");
+    if (!result) {
+        SVC_LOG_ERROR("daemon_l2_rpc_call: missing result field (method=%s)", method);
+        cJSON_Delete(resp);
+        return AIRY_ERR_GENERIC_FAIL;
+    }
+
+    char *result_str = cJSON_PrintUnformatted(result);
+    cJSON_Delete(resp);
+    if (!result_str)
+        return AIRY_ERR_OUT_OF_MEMORY;
+
+    *out_result_json = AIRY_STRDUP(result_str);
+    AIRY_FREE(result_str);
+    return *out_result_json ? AIRY_SUCCESS : AIRY_ERR_OUT_OF_MEMORY;
 }
