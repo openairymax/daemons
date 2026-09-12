@@ -118,25 +118,6 @@ static void monit_on_metrics_timer(airy_event_loop_t *loop, uint64_t timer_id, v
 
     prometheus_gauge_set("airy_monit_scrape_count", (double)scrape_count);
     prometheus_gauge_set("airy_monit_scrape_errors", (double)scrape_errors);
-
-    if (g_bipc_monit_d) {
-        ipc_bus_helper_t *ibh = daemon_bootstrap_ipc_get_helper(g_bipc_monit_d);
-        if (ibh) {
-            uint64_t total_sends = 0, total_routes = 0, route_fallbacks = 0;
-            uint64_t send_failures = 0, bp_drops = 0, bp_rejects = 0;
-            if (ipc_bus_helper_get_routing_stats(ibh, &total_sends, &total_routes, &route_fallbacks,
-                                                 &send_failures, &bp_drops, &bp_rejects) == 0) {
-                if (total_sends > 0 || total_routes > 0) {
-                    SVC_LOG_INFO("C-L10: IPC Bus — sends=%llu routes=%llu fallbacks=%llu "
-                                 "failures=%llu bp_drops=%llu bp_rejects=%llu",
-                                 (unsigned long long)total_sends, (unsigned long long)total_routes,
-                                 (unsigned long long)route_fallbacks,
-                                 (unsigned long long)send_failures, (unsigned long long)bp_drops,
-                                 (unsigned long long)bp_rejects);
-                }
-            }
-        }
-    }
 }
 
 static void handle_record_metric(cJSON *params, int id, airy_sock_t client_fd)

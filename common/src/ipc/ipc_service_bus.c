@@ -5,16 +5,15 @@
  * @file ipc_service_bus.c
  * @brief IPC service-bus implementation - bus core domain.
  *
- * Implements an efficient communication-abstraction layer between daemons,
- * integrating the UnifiedProtocol stack, supporting multi-protocol message
- * passing, service discovery and load balancing.
+ * Implements the daemon request transport on top of svc_rpc_call (the L2
+ * JSON-RPC wire), plus bus lifecycle, channel basics, the message handler
+ * registry and stats.
  *
- * Phase 2.3a split: this file keeps the bus lifecycle (create/destroy/
- * start/stop), channel basics, send/request/broadcast/notify transport and
- * stats; the other domains were split out:
- * - handler/endpoint registry + discovery -> ipc_service_bus_endpoint.c
- * - message factory + header init         -> ipc_service_bus_message.c
- * Cross-file shared structs and init_message_header() are declared in
+ * 8.3.4 (0.1.15): the never-delivering send/broadcast/notify family and the
+ * endpoint/event registry ceremonies were removed; the only real delivery
+ * path is ipc_service_bus_request() -> svc_rpc_call(). Handler registration
+ * moved here when ipc_service_bus_endpoint.c was retired. The message
+ * factory stays in ipc_service_bus_message.c; shared structs live in
  * ipc_service_bus_internal.h (internal to this static lib, not public API).
  *
  * @see ipc_service_bus.h
@@ -86,7 +85,6 @@ AIRY_API ipc_service_bus_t ipc_service_bus_create(const char *bus_name,
     }
 
     bus->running = false;
-    bus->next_msg_id = 1;
     g_bus_instance_count++;
 
     AIRY_LOG_INFO("IPC service bus '%s' created", bus_name);
@@ -109,12 +107,6 @@ AIRY_API void ipc_service_bus_destroy(ipc_service_bus_t bus_handle)
         ipc_bus_channel_internal_t *next = ch->next;
         AIRY_FREE(ch);
         ch = next;
-    }
-
-    for (uint32_t i = 0; i < bus->pending_count; i++) {
-        if (bus->pending[i].response) {
-            ipc_bus_message_free(bus->pending[i].response);
-        }
     }
 
     airy_mtx_destroy(&bus->mutex);
@@ -221,29 +213,71 @@ AIRY_API const char *ipc_bus_channel_get_name(ipc_bus_channel_t channel)
     return ch->name;
 }
 
-AIRY_API airy_err_t ipc_service_bus_send(ipc_service_bus_t bus_handle, const char *target_service,
-                                         const ipc_bus_message_t *message)
+AIRY_API airy_err_t ipc_service_bus_register_handler(ipc_service_bus_t bus_handle,
+                                                     ipc_bus_message_handler_t handler,
+                                                     void *user_data)
 {
-    if (!bus_handle || !target_service || !message)
+    if (!bus_handle || !handler)
         return AIRY_EINVAL;
 
     ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
 
     airy_mtx_lock(&bus->mutex);
 
-    if (!bus->running) {
+    if (bus->channel_count == 0) {
+        ipc_bus_channel_config_t config;
+        __builtin_memcpy(&config, &bus->default_config, sizeof(ipc_bus_channel_config_t));
+        safe_strcpy(config.name, "default", IPC_BUS_CHANNEL_NAME_LEN);
         airy_mtx_unlock(&bus->mutex);
-        return DAEMON_ESTATE;
+
+        ipc_bus_channel_t ch = ipc_bus_channel_create(bus_handle, &config);
+        if (!ch)
+            return AIRY_ENOMEM;
+
+        airy_mtx_lock(&bus->mutex);
     }
 
-    bus->stats.messages_sent++;
-    bus->stats.bytes_sent += message->payload_size;
+    ipc_bus_channel_internal_t *ch = bus->channels;
+    if (!ch || ch->handler_count >= IPC_BUS_MAX_HANDLERS) {
+        airy_mtx_unlock(&bus->mutex);
+        return AIRY_ENOMEM;
+    }
+
+    ch->handlers[ch->handler_count].handler = handler;
+    ch->handlers[ch->handler_count].user_data = user_data;
+    ch->handler_count++;
 
     airy_mtx_unlock(&bus->mutex);
 
-    AIRY_LOG_DEBUG("Bus '%s': sent message to '%s' (type=%d, proto=%d, size=%zu)", bus->name,
-              target_service, message->header.msg_type, message->header.protocol,
-              message->payload_size);
+    AIRY_LOG_INFO("Message handler registered on bus '%s'", bus->name);
+    return AIRY_SUCCESS;
+}
+
+AIRY_API airy_err_t ipc_service_bus_unregister_handler(ipc_service_bus_t bus_handle,
+                                                       ipc_bus_message_handler_t handler)
+{
+    if (!bus_handle || !handler)
+        return AIRY_EINVAL;
+
+    ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
+
+    airy_mtx_lock(&bus->mutex);
+
+    ipc_bus_channel_internal_t *ch = bus->channels;
+    while (ch) {
+        for (uint32_t i = 0; i < ch->handler_count; i++) {
+            if (ch->handlers[i].handler == handler) {
+                if (i < ch->handler_count - 1) {
+                    ch->handlers[i] = ch->handlers[ch->handler_count - 1];
+                }
+                ch->handler_count--;
+                break;
+            }
+        }
+        ch = ch->next;
+    }
+
+    airy_mtx_unlock(&bus->mutex);
     return AIRY_SUCCESS;
 }
 
@@ -264,18 +298,13 @@ AIRY_API airy_err_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
         return DAEMON_ESTATE;
     }
 
-    if (bus->pending_count >= IPC_BUS_MAX_PENDING) {
+    if (bus->inflight_requests >= IPC_BUS_MAX_INFLIGHT) {
         airy_mtx_unlock(&bus->mutex);
         return AIRY_EBUSY;
     }
+    bus->inflight_requests++;
 
     uint64_t start_time = airy_time_ms();
-
-    pending_request_t *pending = &bus->pending[bus->pending_count];
-    pending->msg_id = request->header.msg_id;
-    pending->response = NULL;
-    pending->completed = 0;
-    bus->pending_count++;
 
     bus->stats.messages_sent++;
     bus->stats.bytes_sent += request->payload_size;
@@ -299,25 +328,24 @@ AIRY_API airy_err_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
     }
 
     airy_mtx_lock(&bus->mutex);
+    bus->inflight_requests--;
 
     if (svc_err == AIRY_SUCCESS && resp_json) {
-        size_t resp_len = strlen(resp_json) + 1;
-        pending->response = (ipc_bus_message_t *)AIRY_CALLOC(1, sizeof(ipc_bus_message_t));
-        if (pending->response) {
-            pending->response->header.msg_type = IPC_BUS_MSG_RESPONSE;
-            pending->response->header.protocol = request->header.protocol;
-            snprintf(pending->response->header.target, sizeof(pending->response->header.target),
-                     "%s", request->header.source);
-            snprintf(pending->response->header.source, sizeof(pending->response->header.source),
-                     "%s", target_service);
-            pending->response->payload = resp_json;
-            pending->response->payload_size = resp_len;
-            pending->completed = 1;
-        } else {
-            AIRY_FREE(resp_json);
-            resp_json = NULL;
-            pending->completed = 0;
-        }
+        /* Build the response message in the caller's storage (zeroed first,
+         * mirroring the factory guarantee). Payload ownership moves into it:
+         * the caller must release it via AIRY_FREE(response->payload) after
+         * use. ipc_bus_message_free() must NOT be called on the caller's
+         * stack copy, since it would free a stack address. All callers
+         * (orchestrator.c, daemon_task_dispatcher.c, ipc_bus_helper.c)
+         * already follow the "caller frees response.payload" contract. */
+        AIRY_MEMSET(response, 0, sizeof(*response));
+        response->header.msg_type = IPC_BUS_MSG_RESPONSE;
+        response->header.protocol = request->header.protocol;
+        snprintf(response->header.target, sizeof(response->header.target), "%s",
+                 request->header.source);
+        snprintf(response->header.source, sizeof(response->header.source), "%s", target_service);
+        response->payload = resp_json;
+        response->payload_size = strlen(resp_json) + 1;
     } else {
         /* RPC call failed: do not create an error response message; the
          * function returns svc_err to indicate transport failure. The caller
@@ -333,32 +361,6 @@ AIRY_API airy_err_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
         }
     }
 
-    uint64_t elapsed = airy_time_ms() - start_time;
-    if (elapsed >= (uint64_t)timeout_ms && !pending->completed) {
-        bus->stats.timeouts++;
-        bus->pending_count--;
-        if (resp_json)
-            AIRY_FREE(resp_json);
-        airy_mtx_unlock(&bus->mutex);
-        return AIRY_ETIMEDOUT;
-    }
-
-    if (pending->completed && pending->response) {
-        /* Transfer the response message (including payload ownership) to the
-         * caller. Note: only the pending->response struct itself is freed
-         * here; payload ownership goes to the caller, who must release it via
-         * AIRY_FREE(response->payload) after use. ipc_bus_message_free() must
-         * NOT be called, since it also frees the payload and would leave the
-         * caller's response->payload as a dangling pointer (use-after-free).
-         * All callers (orchestrator.c, daemon_task_dispatcher.c,
-         * ipc_bus_helper.c) already follow the "caller frees response.payload"
-         * contract. */
-        __builtin_memcpy(response, pending->response, sizeof(ipc_bus_message_t));
-        AIRY_FREE(pending->response);
-        pending->response = NULL;
-    }
-
-    bus->pending_count--;
     bus->stats.messages_received++;
     uint64_t latency = airy_time_ms() - start_time;
     bus->stats.avg_latency_us = bus->stats.avg_latency_us == 0 ?
@@ -369,80 +371,11 @@ AIRY_API airy_err_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
 
     airy_mtx_unlock(&bus->mutex);
 
-    AIRY_LOG_DEBUG("Bus '%s': request to '%s' completed in %llums (completed=%d)", bus->name,
-              target_service, (unsigned long long)latency, pending->completed);
+    AIRY_LOG_DEBUG("Bus '%s': request to '%s' completed in %llums", bus->name, target_service,
+              (unsigned long long)latency);
     /* RPC success returns SUCCESS; RPC failure returns svc_err (AIRY_EIO
      * etc.), following the API contract "0=success, non-zero=failure". */
     return svc_err;
-}
-
-AIRY_API airy_err_t ipc_service_bus_broadcast(ipc_service_bus_t bus_handle,
-                                              const ipc_bus_message_t *message)
-{
-    if (!bus_handle || !message)
-        return AIRY_EINVAL;
-
-    ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
-
-    airy_mtx_lock(&bus->mutex);
-
-    if (!bus->running) {
-        airy_mtx_unlock(&bus->mutex);
-        return DAEMON_ESTATE;
-    }
-
-    uint32_t target_count = 0;
-    for (uint32_t i = 0; i < bus->endpoint_count; i++) {
-        if (bus->endpoints[i].healthy)
-            target_count++;
-    }
-
-    bus->stats.messages_sent += target_count;
-    bus->stats.bytes_sent += message->payload_size * target_count;
-
-    airy_mtx_unlock(&bus->mutex);
-
-    airy_err_t first_error = AIRY_SUCCESS;
-    uint32_t sent_count = 0;
-    for (uint32_t i = 0; i < bus->endpoint_count; i++) {
-        if (bus->endpoints[i].healthy) {
-            airy_err_t err =
-                ipc_service_bus_send(bus_handle, bus->endpoints[i].service_name, message);
-            if (err == AIRY_SUCCESS) {
-                sent_count++;
-            } else if (first_error == AIRY_SUCCESS) {
-                first_error = err;
-            }
-        }
-    }
-
-    AIRY_LOG_DEBUG("Bus '%s': broadcast to %u/%u endpoints succeeded", bus->name, sent_count,
-              target_count);
-    return (sent_count > 0) ? AIRY_SUCCESS : first_error;
-}
-
-AIRY_API airy_err_t ipc_service_bus_notify(ipc_service_bus_t bus_handle, const char *target_service,
-                                           const void *payload, size_t payload_size,
-                                           ipc_bus_proto_t protocol)
-{
-    if (!bus_handle || !target_service || !payload)
-        return AIRY_EINVAL;
-
-    ipc_service_bus_internal_t *bus = (ipc_service_bus_internal_t *)bus_handle;
-
-    ipc_bus_message_t *msg =
-        ipc_bus_message_create(IPC_BUS_MSG_NOTIFICATION, protocol, payload, payload_size);
-    if (!msg)
-        return AIRY_ENOMEM;
-
-    init_message_header(&msg->header, IPC_BUS_MSG_NOTIFICATION, protocol, bus->name,
-                        target_service);
-    msg->header.aipc.payload_len = (uint32_t)payload_size;
-
-    airy_err_t err = ipc_service_bus_send(bus_handle, target_service, msg);
-    ipc_bus_message_free(msg);
-
-    return err;
 }
 
 AIRY_API airy_err_t ipc_service_bus_get_stats(ipc_service_bus_t bus_handle, ipc_bus_stats_t *stats)
@@ -455,7 +388,6 @@ AIRY_API airy_err_t ipc_service_bus_get_stats(ipc_service_bus_t bus_handle, ipc_
     airy_mtx_lock(&bus->mutex);
     __builtin_memcpy(stats, &bus->stats, sizeof(ipc_bus_stats_t));
     stats->active_channels = bus->channel_count;
-    stats->active_endpoints = bus->endpoint_count;
     airy_mtx_unlock(&bus->mutex);
 
     return AIRY_SUCCESS;
