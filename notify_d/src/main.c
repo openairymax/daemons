@@ -53,7 +53,8 @@ static void notify_d_signal_handler(int sig)
     {
         static const char sig_msg[] =
             "[SIG] shutdown signal received, initiating graceful shutdown\n";
-        (void)write(STDERR_FILENO, sig_msg, sizeof(sig_msg) - 1);
+        ssize_t written = write(STDERR_FILENO, sig_msg, sizeof(sig_msg) - 1);
+        (void)written; /* best-effort diagnostics inside a signal handler */
     }
 #endif
 }
