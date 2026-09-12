@@ -1,112 +1,178 @@
-# Common — AgentRT 守护进程公共库
+# common — 守护进程公共库
 
-> **模块路径**: `agentrt/daemons/common/`
+> **模块路径**: `agentrt/daemons/common/` · **CMake 目标**: `svc_common`（静态库）、
+> `daemon_l1_server`（静态库）
 
-## 定位
+[![version](https://img.shields.io/badge/version-0.1.15-blue)](https://atomgit.com/openairymax/daemons)
+[![license](https://img.shields.io/badge/license-AGPL--3.0--or--later%20OR%20Apache--2.0-green)](../LICENSE)
 
-`common` 是所有 AgentRT 守护进程共享的静态库（目标名 `svc_common`），既是服务框架
-兼容层，也是 daemon 层组件集。它屏蔽操作系统差异，为各 daemon 提供统一的服务生命周期、
-IPC 通信、JSON-RPC 分发、服务发现、安全认证、容错恢复、并发调度与配置管理等基础设施；
-`svc_common` 也是 daemon 与 commons/atoms 之间的依赖枢纽（所有 daemon 均链接它）。
+## 这是什么
+
+`common` 是 AgentRT 全部 15 个守护进程共享的**静态库**，不是可执行程序，也不监听任何
+socket。它把守护进程样板收敛成一套可复用设施：服务生命周期与注册、JSON-RPC 方法分发、
+IPC 总线与跨进程服务发现、认证与授权、事件驱动主循环、并行执行引擎、配置管理与统一日志。
+
+所有 daemon 的 `main.c` 都经由本模块的 `daemon_main.h` 获取启动骨架，因此它同时是
+`daemons` 层与下层 `commons` / `atoms` 之间的枢纽。
+
+## 能力
+
+- **启动骨架**：`daemon_main.h` 提供 `DAEMON_DECLARE_COMMON(<name>_d, <ns>, UNIX, WIN,
+  PORT, MAX_BUFFER)` 宏，统一生成 Unix socket（Windows 为 TCP 回环）端点、信号处理、
+  日志初始化与用法输出；`daemon_parse_args()` 解析 `--manager <path>`、`--tcp` 与
+  `--help` 三个选项。
+- **事件驱动主循环**：`daemon_event_driver` 提供连接池、任务队列与并发客户端处理，
+  各 daemon 主循环基于它跑通（含 JSON-RPC 分发）。
+- **JSON-RPC 分发**：`method_dispatcher_*` 注册表式方法路由，`jsonrpc_helpers_*` 负责
+  请求解析与成功/错误响应构建。
+- **跨进程通信**：`ipc_service_bus`（进程内/跨进程总线）、`ipc_client`、
+  `daemon_rpc_client`（Unix socket / Windows TCP 回环上的精简 JSON-RPC 客户端，
+  `gateway_d` 转发与各 daemon 互调都走它）。
+- **服务发现**：`service_discovery*` 提供注册、发现、健康、选择与负载均衡，后端可切
+  共享内存或文件；`daemon_bootstrap_sd` / `daemon_bootstrap_ipc` 是一键引导封装。
+- **安全**：`svc_auth*`（JWT / API Key / 限流）、`daemon_security*`（ACL 授权、输入消毒、
+  包签名校验、凭据与审计），并与 `cupolas` 安全穹顶集成。
+- **容错与可观测**：`api_recovery`（重试/降级/熔断策略）、`alert_manager`、
+  `unified_metrics`、`log_sanitizer`。
+- **运行时数据引导**：`daemon_cupolas_bootstrap`（安全穹顶）、`daemon_heapstore_bootstrap`
+  （运行时数据存储）。
+- **ops 表注入**：`daemon_ipc_ops_bootstrap` 把上述能力的函数表注入 `atoms` 侧抽象接口，
+  使 `atoms` 无需反向链接 `daemons` 即可调用 IPC/RPC/服务发现。
 
 ## 架构
 
 ```
-各 daemon（channel_d / hook_d / sched_d / tool_d / gateway_d / ...）
+各 daemon（gateway_d / llm_d / tool_d / sched_d / ...）
         │ 链接
         ▼
    svc_common（本模块，静态库）
-        │ PUBLIC 传播
-        ├─ commons（airy_common：统一基础库）
-        ├─ cupolas（安全穹顶，可选）
-        ├─ airy_heapstore（运行时数据存储，可选）
-        └─ OpenSSL / cJSON / YAML / CURL / Threads（可选）
+        ├─ PRIVATE → daemon_l1_server（corekern IPC 传输上的服务端挂载与消息封套桥接）
+        │               └─ airy_core / airy_common
+        └─ PUBLIC  → airy_common（commons 统一基础库）
+                     ├─ cupolas（可选，存在 target 时 PUBLIC 传播给所有 daemon）
+                     ├─ airy_heapstore（可选，BUILD_HEAPSTORE）
+                     └─ OpenSSL / cJSON / YAML / CURL / Threads（可选）
 ```
 
-### re-export 兼容层机制（P0.17 / IRON-6）
+### 兼容再导出头
 
-- 本模块 `include/` 下多个头文件（`svc_common.h` / `circuit_breaker.h` /
-  `thread_pool.h` 等）是 **re-export 兼容头**：真实定义已迁移到 commons
-  （如 `commons/utils/ipc/include/svc_common.h`、`commons/utils/ipc/include/
-  circuit_breaker.h`、`commons/utils/sync/include/thread_pool.h`），兼容头仅
-  `#include` 权威版本，使 daemon 源码无需改动包含路径，同时消除编译期
-  atoms→daemons 反向依赖（IRON-6 跨层耦合禁令）。
-- 其余头（`platform.h` / `compat.h` / `svc_config.h` / `daemon_*` 等）为本模块
-  在源码树内的自有/桥接头，仅 daemon 源码树内消费（M0-L5：全部不随库安装，
-  权威 API 头由各库自装）。
-- CMake 包含路径顺序：commons 权威路径声明在 `daemons/common/include` **之前**，确保
-  atoms 代码优先解析 commons 版本。
+`include/` 下共 40 个头文件，其中 **21 个是再导出兼容头**——本体只有一行
+`#include "…/commons/…"`，指向 `commons` 仓内的权威版本（例如 `svc_common.h`、
+`method_dispatcher.h`、`jsonrpc_helpers.h`、`param_validator.h`、`circuit_breaker.h`、
+`thread_pool.h`、`airy_event_loop.h`、`unified_metrics.h`、`alert_manager.h`、
+`api_recovery.h`、`log_sanitizer.h`、`service_discovery.h`、`error.h`）。保留它们的目的是
+让 daemon 源码无需改动包含路径。其余 19 个是本模块自有的框架/桥接头（`daemon_main.h`、
+`daemon_event_driver.h`、`daemon_security.h`、`svc_auth.h`、`svc_config.h`、
+`platform.h`、`hall_writer.h`、`config_manager.h` 等），仅在源码树内消费。
 
-## 组件集（src/ 共 41 个 C 源文件，0.1.9 0c 迁出 circuit_breaker/thread_pool、移除桩件 daemon_oom；8.3.4 删 ipc_backpressure）
+为此，`svc_common` 的 PUBLIC include 路径把 `commons` 各权威目录声明在
+`daemons/common/include` **之前**，保证下层代码优先解析到权威版本，不会出现跨层反向依赖。
 
-| 域 | 组件 | 说明 |
-|----|------|------|
-| 服务框架 | `svc_common` / `svc_registry` / `svc_config` / `svc_monitor` / `svc_client` | 服务生命周期、注册中心客户端、配置加载与监视、监控降级、服务通信客户端 |
-| IPC 通信 | `ipc_client` / `ipc_service_bus` / `ipc_bus_helper` / `daemon_rpc_client` / `daemon_bootstrap_ipc` | IPC 总线、daemon↔daemon 精简 JSON-RPC 客户端、IPC 引导（send/broadcast/notify 家族与背压模块已随 8.3.4 删除，投递统一经 `request()`） |
-| 服务发现 | `service_discovery` / `service_discovery_lb` / `service_discovery_api` / `service_discovery_stats` / `service_discovery_backend_shm` / `service_discovery_backend_file` / `service_discovery_helper` / `daemon_bootstrap_sd` | 跨进程注册/发现/负载均衡，shm/file 后端，一键引导 |
-| JSON-RPC | `jsonrpc_helpers` / `method_dispatcher` | JSON-RPC 2.0 辅助（请求解析/响应构建）与方法分发器（注册表模式，O(1) 路由） |
-| 安全 | `svc_auth` / `svc_auth_jwt` / `svc_auth_apikey` / `svc_auth_ratelimit` / `daemon_security` / `param_validator` / `log_sanitizer` | JWT/API Key/限流认证中间件、cupolas 安全集成、参数校验、日志清洗（字符串/路径/URL 安全校验权威实现位于 commons/utils/security） |
-| 容错恢复 | `api_recovery` / `alert_manager` | API 恢复策略、智能告警（熔断器 `circuit_breaker` 权威实现已迁 commons/utils/ipc，经 re-export 头接入） |
-| 并发调度 | `airy_event_loop` / `daemon_event_driver` / `daemon_task_dispatcher` | 事件循环、统一事件驱动框架（各 daemon 主循环）、工具并行执行引擎（线程池 `thread_pool` 权威实现已迁 commons/utils/sync） |
-| 平台兼容 | `platform_compat` | daemon 平台扩展实现（socket/dl/线程名/时间等） |
-| 监控指标 | `unified_metrics` | 统一指标采集 |
-| 配置 | `config_manager` / `svc_model_defaults` | 统一配置管理、model.yaml 全局默认模型提取（llm_d/gateway_d 共用） |
-| 引导 | `daemon_cupolas_bootstrap` / `daemon_heapstore_bootstrap` | cupolas 安全穹顶引导、heapstore 运行时数据存储引导 |
-| 其他 | `hall_writer` | daemon 侧事件流写端（hall 事件单一真相源） |
+## 构成
 
-## JSON-RPC 接口表
+`src/` 按功能域组织，共 41 个 C 源文件：
 
-本模块为**静态库，不暴露独立 JSON-RPC 端点**；它向各 daemon 提供方法分发基础设施：
+| 域 | 数量 | 源文件 |
+|----|------|--------|
+| `src/svc/` | 8 | `svc_common.c`（服务生命周期核心）、`svc_common_registry.c`（进程内注册表）、`svc_common_ops.c`（状态查询/异步请求）、`svc_registry.c`（跨进程注册中心客户端）、`svc_config.c`（配置加载与监视）、`svc_monitor.c`（监控与降级）、`svc_client.c`（服务通信客户端）、`svc_model_defaults.c`（`model.yaml` 全局默认模型提取，`llm_d` / `gateway_d` 共用） |
+| `src/auth/` | 6 | `svc_auth.c`（认证中间件聚合）、`svc_auth_jwt.c` / `svc_auth_jwt_crypto.c` / `svc_auth_jwt_verify.c`（JWT 生命周期、HMAC/Base64 原语、签名校验）、`svc_auth_apikey.c`、`svc_auth_ratelimit.c` |
+| `src/ipc/` | 4 | `ipc_client.c`、`ipc_service_bus.c`（总线核心）、`ipc_service_bus_message.c`（消息域）、`ipc_bus_helper.c`（自动注册便捷层） |
+| `src/discovery/` | 7 | `service_discovery.c`、`_lb.c`（负载均衡）、`_api.c`、`_stats.c`、`_backend_shm.c`、`_backend_file.c`、`_helper.c` |
+| `src/security/` | 4 | `daemon_security.c`（初始化/消毒）、`_acl.c`（ACL 授权）、`_signature.c`（包签名验证）、`_vault.c`（凭据与审计） |
+| `src/daemon/` | 10 | `daemon_event_driver.c`（事件驱动主循环）、`daemon_task_dispatcher.c`（并行执行引擎）、`daemon_rpc_client.c`、`daemon_bootstrap_sd.c`、`daemon_bootstrap_ipc.c`、`daemon_cupolas_bootstrap.c`、`daemon_heapstore_bootstrap.c`、`daemon_ipc_ops_bootstrap.c`、`daemon_l1_server.c`、`daemon_l2_bridge.c` |
+| `src/util/` | 2 | `config_manager.c`（统一配置管理）、`hall_writer.c`（daemon 侧事件流写端） |
 
-- `method_dispatcher_create / destroy / register / dispatch`：各 daemon main.c 通过
-  `method_dispatcher_register` 注册 `ping` / `health` / `get_stats` / `shutdown` 等
-  L2 标准方法（见各 daemon README 的接口表）。
-- `jsonrpc_helpers`：`jsonrpc_build_error / jsonrpc_build_success / jsonrpc_parse_request /
-  jsonrpc_get_string_param / jsonrpc_get_int_param` 等。
-- `daemon_rpc_client`：`daemon_rpc_call`（Unix socket JSON-RPC 客户端，gateway 转发与
-  sched_d 真实派发均使用）。
+> `daemon_l1_server.c` 与 `daemon_l2_bridge.c` 编译进独立的 `daemon_l1_server` 目标，
+> 不在 `svc_common` 源列表内；两者都以 PRIVATE 方式链接 `airy_core`，避免把 corekern 的
+> 编译定义传播给 `svc_common` 的其他编译单元。
+
+## 接口
+
+本模块**不暴露 JSON-RPC 端点**，它向各 daemon 提供 C API：
+
+- `method_dispatcher_create / destroy / register / dispatch`：daemon `main.c` 用
+  `method_dispatcher_register(disp, "<method>", handler, NULL)` 注册自己的方法。
+- `jsonrpc_build_success / jsonrpc_build_error / jsonrpc_parse_request /
+  jsonrpc_get_string_param / jsonrpc_get_int_param`：请求解析与响应封装。
+- `daemon_rpc_call` / `daemon_rpc_call_cancelable` / `daemon_rpc_call_stream`：
+  daemon 之间的 JSON-RPC 客户端调用（`gateway_d` 转发、`sched_d` 派发、流式响应均使用）。
+- `daemon_ipc_ops_init`：向 `atoms` 注入 IPC/RPC/服务发现能力函数表。LLM 与工具域的
+  同类引导分别由 `llm_d`、`tool_d` 自己提供。
+- 各 daemon 公共方法（`health_check` / `get_stats` / `shutdown` 等）的实现样板也来自这里，
+  具体方法名以各 daemon README 的接口表为准。
 
 ## 配置
 
-- 本模块无独立运行时配置；配置项通过 `daemon_defaults.h` / `svc_config` /
-  `config_manager` 暴露给各 daemon。
-- Linux 构建时各 daemon 定义 `AIRY_CONFIG_DIR=/etc/agentrt`、`AIRY_LOG_DIR=/var/log/agentrt`
-  （macOS 使用 `platform.h` 默认 `./agentrt/config`、`./agentrt/logs`）。
+本模块无独立运行时配置文件。路径由 `commons` 的平台路径系统决定：
 
-## 依赖与构建
+- 编译期默认：Linux/macOS `/etc/agentrt`（配置）、`/var/log/agentrt`（日志）、
+  `/tmp/agentrt`（运行时）；Windows `C:\ProgramData\agentrt\*`。
+- 运行期：`airy_paths_init()` 按 `$AIRY_HOME`（默认 `$HOME/.airymaxrt`）解析并创建目录，
+  同时导出 `AIRY_CONFIG_DIR` / `AIRY_LOG_DIR` / `AIRY_RUNTIME_DIR` 等环境变量，
+  因此实际生效路径是 `$AIRY_HOME/config`、`$AIRY_HOME/data/agentrt/logs`、
+  `$AIRY_HOME/run`。
 
-- 必须依赖：`airy_common`（commons，`add_subdirectory` 引入）、`airy_compile_defs`、
-  `Threads::Threads`、`airy_platform_libs`。
-- 可选依赖（根级探测）：`cupolas`（`if(TARGET cupolas)`，PUBLIC 传播使所有链接 daemon
-  自动获得）、`airy_heapstore`（`BUILD_HEAPSTORE`）、OpenSSL、cJSON、YAML、CURL。
-- Windows 链接 `ws2_32 bcrypt advapi32`；Unix 定义 `AIRY_PLATFORM_LINUX` / `_GNU_SOURCE`。
-- 构建：
+## 用法
+
+`common` 不单独运行，随任一 daemon 一起构建：
 
 ```bash
-cmake -B build -DBUILD_TESTS=ON
-cmake --build build --target svc_common
+# 在 agentrt/daemons 目录下
+cmake -S . -B ../daemons-build -DBUILD_TESTS=ON
+cmake --build ../daemons-build --target svc_common
 ```
 
-- 安装：`svc_common` 静态库 → `lib/`。**不安装兼容层/桥接头（M0-L5，0.1.9）**：
-  `include/` 下头仅源码树内消费，权威 API 头由各库自装（corekern/coreloopthree/
-  commons 等），避免在 `include/agentrt/` 形成误导性的"第二公共 API 面"。
+Windows 源码构建时守护进程默认关闭，需显式打开：
+
+```bash
+cmake -S . -B build -DBUILD_DAEMON=ON -DBUILD_CLI=ON
+```
 
 ## 测试
 
-`tests/`（`svc_*` 目标，`BUILD_TESTS` 开启，每个测试注册为 ctest 用例）：
+`tests/` 下的目标以 `svc_test_` 前缀注册进 CTest，共 22 个用例；`BUILD_TESTS` 为 `ON`
+且非 Windows 时才加入构建。
 
-- 基础：`test_error` / `test_platform` / `test_logger` / `test_config` /
-  `test_safe_string_utils` / `test_input_validator` / `test_param_validator`
-- JSON-RPC/分发：`test_jsonrpc_helpers` / `test_daemon_common`（P1-C06 深度单测）
-- 安全：`test_svc_auth` / `test_daemon_security` / `test_log_sanitizer`
-- IPC/发现：`test_ipc_service_bus` / `test_ipc_client` /
-  `test_service_discovery`（含 lifecycle/discover/select/health/misc 域拆分文件）
-- 容错/并发：`test_strategies_recovery` / `test_api_recovery` / `test_thread_pool` /
-  `test_airy_event_loop` / `test_checkpoint` / `test_svc_stop`
-- 其他：`test_svc_model_defaults` / `test_hall_writer`
-
-运行：
+- 基础：`svc_test_error` / `svc_test_platform` / `svc_test_logger` / `svc_test_config` /
+  `svc_test_safe_string_utils`
+- 服务框架与分发：`svc_test_svc_auth` / `svc_test_jsonrpc_helpers` / `svc_test_svc_stop` /
+  `svc_test_daemon_common`（按功能域拆分为 6 个测试文件）
+- 安全：`svc_test_daemon_security` / `svc_test_log_sanitizer`
+- IPC/总线/发现：`svc_test_ipc_service_bus` / `svc_test_service_discovery`
+  （含 lifecycle / discover / select / health / misc 五个域文件）
+- 容错与并发：`svc_test_strategies_recovery` / `svc_test_api_recovery`
+  （含 pool / cred / health / fallback / config / misc 六个域文件）/
+  `svc_test_thread_pool` / `svc_test_airy_event_loop` / `svc_test_checkpoint`
+- 引导与其他：`svc_test_svc_model_defaults` / `svc_test_hall_writer`，以及 corekern
+  服务端挂载与消息封套桥接的两个对应用例。
 
 ```bash
-ctest --test-dir build -R "svc_test_" -V
+ctest --test-dir ../daemons-build/common -R "^svc_test_" -V
 ```
+
+## 依赖
+
+| 依赖 | 用途 |
+|------|------|
+| [commons](https://atomgit.com/openairymax/commons) | `airy_common` 统一基础库：错误码、日志、内存、字符串、同步、缓存、可观测性、平台路径；21 个再导出头的权威实现所在地 |
+| [atoms](https://atomgit.com/openairymax/atoms) | `airy_core`（corekern IPC 通道/事务）、`airy_ipc_ops` 与 `airy_syscall_ops`（ops 表存储小库）、`coreloopthree` 头文件路径 |
+| [cupolas](https://atomgit.com/openairymax/cupolas) | 可选；存在时 PUBLIC 链接，所有 daemon 自动获得安全穹顶能力 |
+| [heapstore](https://atomgit.com/openairymax/heapstore) | 可选；`BUILD_HEAPSTORE=ON` 时 PUBLIC 链接 `airy_heapstore` |
+| 外部 | `Threads::Threads`；可选 `OpenSSL`、`cJSON`、`libyaml`、`CURL`；Windows 另链 `ws2_32`、`bcrypt`、`advapi32` |
+
+安装面只包含 `svc_common` 归档（`lib/`），`include/` 下的兼容层与桥接头不安装——
+对外 API 头由各下层库自行安装，避免出现第二个不一致的公共 API 面。
+
+## 关系
+
+- 被 [daemons](../README_zh.md) 下全部 15 个守护进程链接，是本层唯一的公共依赖入口。
+- 向 [atoms](https://atomgit.com/openairymax/atoms) 注入 IPC/RPC/服务发现 ops 表，
+  使下层保持对用户态运行时的无依赖。
+- 与 [gateway_d](../gateway_d/README.md) 的关系最紧密：网关到各 daemon 的转发客户端、
+  cap 白名单、鉴权与限流都建立在本模块之上。
+
+## 许可
+
+AGPL-3.0-or-later OR Apache-2.0，详见 [LICENSE](../LICENSE)。
+
+Copyright (c) 2025-2026 SPHARX Ltd.
