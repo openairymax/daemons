@@ -201,47 +201,6 @@ add_test(NAME svc_test_checkpoint COMMAND svc_test_checkpoint
 
 airy_print_ok("  [test] svc_test_checkpoint: configured")
 
-# ===== P1.24.4 IPC Backpressure Unit Tests (test_ipc_backpressure.c) =====
-add_executable(svc_test_ipc_backpressure test_ipc_backpressure.c)
-
-target_include_directories(svc_test_ipc_backpressure PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/platform/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/error
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/types
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/memory
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../atoms/corekern/include
-)
-
-target_link_libraries(svc_test_ipc_backpressure PRIVATE
-    svc_common
-    Threads::Threads
-)
-
-if(AIRY_HAS_CJSON)
-    target_link_libraries(svc_test_ipc_backpressure PRIVATE cjson)
-endif()
-
-if(AIRY_HAS_CURL)
-    target_include_directories(svc_test_ipc_backpressure PRIVATE ${CURL_INCLUDE_DIRS})
-    target_link_libraries(svc_test_ipc_backpressure PRIVATE ${CURL_LIBRARIES})
-endif()
-
-if(AIRY_HAS_OPENSSL AND OPENSSL_FOUND)
-    target_link_libraries(svc_test_ipc_backpressure PRIVATE OpenSSL::SSL OpenSSL::Crypto)
-endif()
-
-target_compile_options(svc_test_ipc_backpressure PRIVATE
-    -Wall -Wextra -g -Wno-unused-function -Wno-unused-variable
-)
-
-add_test(NAME svc_test_ipc_backpressure COMMAND svc_test_ipc_backpressure
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-
-airy_print_ok("  [test] svc_test_ipc_backpressure: P1.24.4 configured")
-
 # ===== WS-8 stage 3 (8.3.1) daemon L1 server mount unit tests =====
 add_executable(svc_test_daemon_l1_server test_daemon_l1_server.c)
 

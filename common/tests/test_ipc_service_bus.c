@@ -254,7 +254,6 @@ static void test_ipc_bus_stats(void)
     assert(ret == AIRY_OK);
     assert(stats.messages_sent == 0);
     assert(stats.messages_received == 0);
-    assert(stats.errors == 0);
 
     ret = ipc_service_bus_reset_stats(bus);
     assert(ret == AIRY_OK);

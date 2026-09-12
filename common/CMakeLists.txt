@@ -39,10 +39,9 @@ set(SVC_COMMON_SOURCES
     src/svc/svc_model_defaults.c  # A2-1: model.yaml global 段默认模型提取（llm_d/gateway_d 共用）
     src/ipc/ipc_client.c
     src/ipc/ipc_service_bus.c     # IPC服务总线（总线核心域）
-    src/ipc/ipc_service_bus_endpoint.c # Phase 2.3a: IPC服务总线-处理器/端点注册发现域（从 ipc_service_bus.c 拆分）
     src/ipc/ipc_service_bus_message.c  # Phase 2.3a: IPC服务总线-消息域（从 ipc_service_bus.c 拆分）
     src/ipc/ipc_bus_helper.c       # C-L09: daemon IPC Bus 自动注册便捷层
-    # 0c A 类直搬：ipc_backpressure/jsonrpc_helpers/method_dispatcher/param_validator
+    # 0c A 类直搬：jsonrpc_helpers/method_dispatcher/param_validator
     # 权威实现迁 commons/utils/ipc，符号经 airy_common 提供（daemons 留 re-export 头）
     src/discovery/service_discovery.c   # 跨进程服务发现
     src/discovery/service_discovery_lb.c # 跨进程服务发现-负载均衡
