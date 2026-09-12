@@ -5,11 +5,9 @@
  * @file ipc_service_bus_message.c
  * @brief IPC service-bus implementation - message domain.
  *
- * Phase 2.3a split from ipc_service_bus.c: message factory/lifecycle
- * (create/free/clone), the shared [SC] A-IPC message-header initializer,
- * payload CRC32 checksum and protocol string conversion helpers.
- *
- * The public API surface (ipc_service_bus.h) is unchanged by this split.
+ * Message factory/lifecycle (create/free), the shared [SC] A-IPC
+ * message-header initializer, payload CRC32 checksum and protocol string
+ * conversion helpers.
  *
  * @see agentrt/daemons/common/src/ipc_service_bus.c (bus core domain)
  * @see agentrt/daemons/common/src/ipc_service_bus_internal.h
@@ -45,7 +43,7 @@ static uint32_t compute_checksum(const void *data, size_t len)
     return ~crc;
 }
 
-void init_message_header(ipc_bus_message_header_t *header, ipc_bus_msg_type_t msg_type,
+static void init_message_header(ipc_bus_message_header_t *header, ipc_bus_msg_type_t msg_type,
                                 ipc_bus_proto_t protocol, const char *source, const char *target)
 {
     AIRY_MEMSET(header, 0, sizeof(ipc_bus_message_header_t));
@@ -100,23 +98,6 @@ AIRY_API void ipc_bus_message_free(ipc_bus_message_t *message)
         message->payload = NULL;
     }
     AIRY_FREE(message);
-}
-
-AIRY_API ipc_bus_message_t *ipc_bus_message_clone(const ipc_bus_message_t *message)
-{
-    if (!message) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-
-    ipc_bus_message_t *clone =
-        ipc_bus_message_create(message->header.msg_type, message->header.protocol, message->payload,
-                               message->payload_size);
-    if (!clone) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-
-    clone->header = message->header;
-    return clone;
 }
 
 AIRY_API const char *ipc_bus_proto_to_string(ipc_bus_proto_t proto)

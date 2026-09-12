@@ -25,19 +25,15 @@ struct daemon_bootstrap_ipc_s {
     ipc_bus_proto_t protocol;
 };
 
-static void build_endpoint(char *buf, size_t buf_size, const char *host, uint16_t port)
-{
-    if (port > 0) {
-        snprintf(buf, buf_size, "%s:%u", host ? host : "127.0.0.1", (unsigned int)port);
-    } else {
-        snprintf(buf, buf_size, "%s", host ? host : "unknown");
-    }
-}
-
 daemon_bootstrap_ipc_t *daemon_bootstrap_ipc_start(const char *daemon_name,
                                                    const char *channel_name, const char *host,
                                                    uint16_t port, ipc_bus_proto_t protocol)
 {
+    /* host/port stay in the signature for compatibility with the atoms ops
+     * table; the bus has no endpoint registry since 8.3.4 (0.1.15). */
+    (void)host;
+    (void)port;
+
     if (!daemon_name || !channel_name) {
         SVC_LOG_ERROR("daemon_bootstrap_ipc_start: invalid parameters");
         return NULL;
@@ -62,37 +58,13 @@ daemon_bootstrap_ipc_t *daemon_bootstrap_ipc_start(const char *daemon_name,
         return NULL;
     }
 
-    char endpoint[256];
-    build_endpoint(endpoint, sizeof(endpoint), host, port);
-
-    ipc_bus_proto_t protos[] = {protocol};
-    if (ipc_bus_helper_register_endpoint(bipc->ibh, daemon_name, endpoint, protos, 1) != 0) {
-        SVC_LOG_WARN("daemon_bootstrap_ipc_start: endpoint register failed for '%s'", daemon_name);
-    }
-
     AIRY_STRNCPY_TERM(bipc->daemon_name, daemon_name, sizeof(bipc->daemon_name) - 1);
     AIRY_STRNCPY_TERM(bipc->channel_name, channel_name, sizeof(bipc->channel_name) - 1);
     bipc->protocol = protocol;
     bipc->running = true;
 
-    {
-        ipc_bp_config_t bp_cfg;
-        __builtin_memset(&bp_cfg, 0, sizeof(bp_cfg));
-        bp_cfg.queue_capacity = 1024;
-        bp_cfg.slow_threshold_pct = 80;
-        bp_cfg.drop_threshold_pct = 90;
-        bp_cfg.reject_threshold_pct = 95;
-        bp_cfg.recover_threshold_pct = 60;
-        bp_cfg.sample_interval_ms = 5000;
-
-        if (ipc_bus_helper_enable_backpressure(bipc->ibh, &bp_cfg) == 0) {
-            SVC_LOG_INFO("C-L09: Backpressure enabled for '%s' (capacity=%zu)", daemon_name,
-                         bp_cfg.queue_capacity);
-        }
-    }
-
-    SVC_LOG_INFO("C-L09: IPC Bus bootstrapped for '%s' (channel=%s, proto=%s, endpoint=%s)",
-                 daemon_name, channel_name, ipc_bus_proto_to_string(protocol), endpoint);
+    SVC_LOG_INFO("C-L09: IPC Bus bootstrapped for '%s' (channel=%s, proto=%s)", daemon_name,
+                 channel_name, ipc_bus_proto_to_string(protocol));
     return bipc;
 }
 
@@ -124,29 +96,10 @@ daemon_bootstrap_ipc_t *daemon_bootstrap_ipc_start_unix(const char *daemon_name,
         return NULL;
     }
 
-    ipc_bus_proto_t protos[] = {protocol};
-    ipc_bus_helper_register_endpoint(bipc->ibh, daemon_name, socket_path, protos, 1);
-
     AIRY_STRNCPY_TERM(bipc->daemon_name, daemon_name, sizeof(bipc->daemon_name) - 1);
     AIRY_STRNCPY_TERM(bipc->channel_name, channel_name, sizeof(bipc->channel_name) - 1);
     bipc->protocol = protocol;
     bipc->running = true;
-
-    {
-        ipc_bp_config_t bp_cfg;
-        __builtin_memset(&bp_cfg, 0, sizeof(bp_cfg));
-        bp_cfg.queue_capacity = 1024;
-        bp_cfg.slow_threshold_pct = 80;
-        bp_cfg.drop_threshold_pct = 90;
-        bp_cfg.reject_threshold_pct = 95;
-        bp_cfg.recover_threshold_pct = 60;
-        bp_cfg.sample_interval_ms = 5000;
-
-        if (ipc_bus_helper_enable_backpressure(bipc->ibh, &bp_cfg) == 0) {
-            SVC_LOG_INFO("C-L09: Backpressure enabled for '%s' (capacity=%zu, unix)", daemon_name,
-                         bp_cfg.queue_capacity);
-        }
-    }
 
     SVC_LOG_INFO("C-L09: IPC Bus bootstrapped for '%s' (unix:%s, proto=%s)", daemon_name,
                  socket_path, ipc_bus_proto_to_string(protocol));
@@ -175,18 +128,6 @@ int daemon_bootstrap_ipc_register_handler(daemon_bootstrap_ipc_t *bipc,
     if (!bipc || !handler)
         return AIRY_ERR_INVALID_PARAM;
     return ipc_bus_helper_register_handler(bipc->ibh, handler, user_data);
-}
-
-int daemon_bootstrap_ipc_send(daemon_bootstrap_ipc_t *bipc, const char *target_service,
-                              const void *payload, size_t payload_size)
-{
-    if (!bipc || !target_service || !payload)
-        return AIRY_ERR_INVALID_PARAM;
-
-    SVC_LOG_DEBUG("C-L09: daemon_send [%s] → [%s] payload=%zub", bipc->daemon_name, target_service,
-                  payload_size);
-
-    return ipc_bus_helper_route_auto(bipc->ibh, target_service, payload, payload_size);
 }
 
 ipc_bus_helper_t *daemon_bootstrap_ipc_get_helper(daemon_bootstrap_ipc_t *bipc)
