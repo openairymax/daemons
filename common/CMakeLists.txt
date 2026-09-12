@@ -124,6 +124,10 @@ target_link_libraries(svc_common PRIVATE airy_ipc_ops)
 # corekern 头，svc_common 消费者无 corekern include/宏泄漏）。
 add_library(daemon_l1_server STATIC
     src/daemon/daemon_l1_server.c
+    # 8.3.2: L2 envelope bridge — sister module, same library. Both files are
+    # the daemon-side mount family on corekern L1; a separate target would
+    # add a link edge for no isolation benefit.
+    src/daemon/daemon_l2_bridge.c
 )
 target_include_directories(daemon_l1_server PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
