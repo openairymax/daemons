@@ -32,6 +32,7 @@
 #include "daemon_bootstrap_sd.h"
 #include "daemon_cupolas_bootstrap.h"
 #include "daemon_event_driver.h"
+#include "daemon_l1_server.h"
 #include "daemon_platform_ext.h"
 #include "jsonrpc_helpers.h"
 #include "logging.h"
@@ -151,6 +152,55 @@ extern "C" {
         fputs(buf, stdout);                                                                                        \
     }                                                                                                              \
                                                                                                                    \
+    __attribute__((unused)) static int daemon_handle_request_json_##daemon_name(                                   \
+        const char *req_text, size_t req_len, method_dispatcher_t *dispatcher, airy_sock_t client_fd)              \
+    {                                                                                                              \
+        /* Parse + validate + dispatch, then emit the response through the  \
+         * JSONRPC_SEND_* macros (routed to the thread's response sink when \
+         * one is active, else written to client_fd). This function never   \
+         * closes client_fd: the socket path closes it in                   \
+         * daemon_handle_client_<daemon>, while the corekern path passes -1 \
+         * and owns no fd at all (airy_sock_close(-1) is not called). */     \
+        /* P0.18.2: mode A - CJSON_PARSE_GUARD auto-free + NULL check */                                              \
+        CJSON_PARSE_GUARD(req, req_text, {                                                                           \
+            AIRY_FREE(req_text);                                                                                     \
+            JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR, "Parse error: invalid JSON", -1);                     \
+            return AIRY_ERR_GENERIC_FAIL;                                                                            \
+        });                                                                                                          \
+        if (getenv("AIRY_DAEMON_DUMP_REQ")) {                                                                        \
+            __builtin_fprintf(stderr, "[AIRY-DUMP] %s req[%zu]=\"%.400s\"\n", #daemon_name, req_len,                 \
+                              req_text);                                                                             \
+        }                                                                                                            \
+        AIRY_FREE(req_text);                                                                                        \
+        cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");                                                       \
+        cJSON *method = cJSON_GetObjectItem(req, "method");                                                         \
+        cJSON *id = cJSON_GetObjectItem(req, "id");                                                                 \
+        if (!cJSON_IsString(jsonrpc) || strcmp(jsonrpc->valuestring, "2.0") != 0 ||                                 \
+            !cJSON_IsString(method) || !id) {                                                                       \
+            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid Request", -1);                          \
+            /* req is auto-freed by CJSON_AUTO_FREE */                                                              \
+            return AIRY_ERR_GENERIC_FAIL;                                                                            \
+        }                                                                                                           \
+        int req_id = cJSON_IsNumber(id) ? id->valueint : 0;                                                         \
+        SVC_LOG_DEBUG("Processing request: method=%s, id=%d", method->valuestring, req_id);                         \
+        int dr = method_dispatcher_dispatch(dispatcher, req, jsonrpc_build_error, &client_fd);                      \
+        if (dr != 0) {                                                                                              \
+            /* dispatch's error path only builds the error string without  \
+             * sending it (historical defect); resend here so the client   \
+             * does not receive an empty response/EOF with no diagnosis. */\
+            if (dr == AIRY_ERR_NOT_FOUND) {                                                                         \
+                JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Method not found",                        \
+                                   req_id);                                                                        \
+            } else if (dr == AIRY_ERR_PARSE_ERROR) {                                                                \
+                JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid request", req_id);                 \
+            } else {                                                                                                \
+                JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Internal error", req_id);                   \
+            }                                                                                                       \
+        }                                                                                                           \
+        /* req is auto-freed by CJSON_AUTO_FREE */                                                                  \
+        return 0;                                                                                                   \
+    }                                                                                                              \
+                                                                                                                   \
     __attribute__((unused)) static int daemon_handle_client_##daemon_name(                                         \
         airy_sock_t client_fd, method_dispatcher_t *dispatcher)                                                    \
     {                                                                                                              \
@@ -172,47 +222,11 @@ extern "C" {
             airy_sock_close(client_fd);                                                                            \
             return AIRY_ERR_GENERIC_FAIL;                                                                                  \
         }                                                                                                          \
-        /* P0.18.2: mode A - CJSON_PARSE_GUARD auto-free + NULL check */                                             \
-        CJSON_PARSE_GUARD(req, req_text, {                                                                           \
-            AIRY_FREE(req_text);                                                                                    \
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_PARSE_ERROR, "Parse error: invalid JSON", -1);                   \
-            airy_sock_close(client_fd);                                                                            \
-            return AIRY_ERR_GENERIC_FAIL;                                                                                  \
-        });                                                                                                        \
-        if (getenv("AIRY_DAEMON_DUMP_REQ")) {                                                                      \
-            __builtin_fprintf(stderr, "[AIRY-DUMP] %s req[%zu]=\"%.400s\"\n", #daemon_name, req_len,                \
-                              req_text);                                                                             \
-        }                                                                                                          \
-        AIRY_FREE(req_text);                                                                                        \
-        cJSON *jsonrpc = cJSON_GetObjectItem(req, "jsonrpc");                                                      \
-        cJSON *method = cJSON_GetObjectItem(req, "method");                                                        \
-        cJSON *id = cJSON_GetObjectItem(req, "id");                                                                \
-        if (!cJSON_IsString(jsonrpc) || strcmp(jsonrpc->valuestring, "2.0") != 0 ||                                \
-            !cJSON_IsString(method) || !id) {                                                                      \
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid Request", -1);                         \
-            /* req is auto-freed by CJSON_AUTO_FREE */                                                            \
-            airy_sock_close(client_fd);                                                                            \
-            return AIRY_ERR_GENERIC_FAIL;                                                                                  \
-        }                                                                                                          \
-        int req_id = cJSON_IsNumber(id) ? id->valueint : 0;                                                        \
-        SVC_LOG_DEBUG("Processing request: method=%s, id=%d", method->valuestring, req_id);                        \
-        int dr = method_dispatcher_dispatch(dispatcher, req, jsonrpc_build_error, &client_fd);                     \
-        if (dr != 0) {                                                                                             \
-            /* dispatch's error path only builds the error string without  \
-             * sending it (historical defect); resend here so the client   \
-             * does not receive an empty response/EOF with no diagnosis. */\
-            if (dr == AIRY_ERR_NOT_FOUND) {                                                                        \
-                JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Method not found",                        \
-                                   req_id);                                                                        \
-            } else if (dr == AIRY_ERR_PARSE_ERROR) {                                                               \
-                JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_REQUEST, "Invalid request", req_id);                 \
-            } else {                                                                                               \
-                JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Internal error", req_id);                   \
-            }                                                                                                      \
-        }                                                                                                          \
-        /* req is auto-freed by CJSON_AUTO_FREE */                                                                \
+        int rc = daemon_handle_request_json_##daemon_name(req_text, req_len, dispatcher, client_fd);                \
+        /* req_text is owned and freed by handle_request_json (all paths); \
+         * the fd stays ours: single-request-single-response-then-close. */ \
         airy_sock_close(client_fd);                                                                                \
-        return 0;                                                                                                  \
+        return rc;                                                                                                 \
     }                                                                                                              \
                                                                                                                    \
     __attribute__((unused)) static int daemon_on_client_##daemon_name(void *service_ctx,                           \
@@ -256,6 +270,87 @@ extern "C" {
         cJSON_AddStringToObject(result, "status", "shutting_down");                      \
         JSONRPC_SEND_SUCCESS(*(airy_sock_t *)user_data, result, id);                     \
         SVC_LOG_INFO("RPC shutdown requested, initiating graceful shutdown");            \
+    }
+
+/**
+ * @brief Opt a daemon into the corekern same-process transport (blueprint
+ *        8.3.3, three-path replacement).
+ *
+ * Expands (after DAEMON_DECLARE_COMMON(daemon_name, ...)) into:
+ *   - g_l2_bridge_<daemon_name>: the mounted bridge handle (NULL = off)
+ *   - daemon_l2_dispatch_<daemon_name>: the L2 dispatch trampoline. It
+ *     installs a thread-local response sink, reuses the exact socket-path
+ *     request handling (daemon_handle_request_json_<daemon_name>) with
+ *     client_fd = -1, and hands the captured response to the bridge. Every
+ *     JSONRPC_SEND_ERROR path (parse/validate/dispatch failures) therefore
+ *     reaches the caller as a structured JSON-RPC error object instead of
+ *     a bare CANCELED.
+ *   - daemon_l2_mount_<daemon_name>(dispatcher): transport gate
+ *     (AIRY_<NS_UPPER>_IPC_TRANSPORT, default off) + bridge start. Returns
+ *     AIRY_ERR_NOT_FOUND when the transport is off so main() can log and
+ *     stay on the socket path with zero behavior change.
+ *   - daemon_l2_unmount_<daemon_name>(void): drain + free (stop is NULL-
+ *     safe), called from the daemon cleanup path.
+ *
+ * @param daemon_name Daemon token (must match DAEMON_DECLARE_COMMON)
+ * @param ns_upper    Transport-switch namespace, UPPER_SNAKE, derived from
+ *                    the socket basename (sched.sock -> SCHED, monit.sock
+ *                    -> MONIT; NOT the service cname)
+ * @param ns_lower    Channel namespace (sched.sock -> "sched" -> channel
+ *                    "sched.rpc")
+ */
+#define DAEMON_L2_ENABLE(daemon_name, ns_upper, ns_lower)                                               \
+    static daemon_l2_bridge_t *g_l2_bridge_##daemon_name = NULL;                                        \
+                                                                                                        \
+    __attribute__((unused)) static int daemon_l2_dispatch_##daemon_name(                                \
+        const char *req_json, size_t req_len, char **resp_json, size_t *resp_len, void *userdata)       \
+    {                                                                                                   \
+        method_dispatcher_t *dispatcher = (method_dispatcher_t *)userdata;                              \
+        /* The bridge hands a length-bounded payload view with no NUL      \
+         * guarantee, while handle_request_json parses via cJSON_Parse    \
+         * and unconditionally AIRY_FREEs the request text (socket-path  \
+         * ownership). Materialize an owned NUL-terminated copy so both  \
+         * contracts hold: the parser sees '\0' and the free sees a      \
+         * malloc'd base instead of an envelope interior pointer. */     \
+        char *req_copy = (char *)AIRY_MALLOC(req_len + 1);                                              \
+        if (!req_copy)                                                                                  \
+            return AIRY_ERR_OUT_OF_MEMORY;                                                              \
+        AIRY_MEMCPY(req_copy, req_json, req_len);                                                       \
+        req_copy[req_len] = '\0';                                                                       \
+        jsonrpc_resp_sink_t sink = {0};                                                                 \
+        jsonrpc_resp_sink_activate(&sink);                                                              \
+        (void)daemon_handle_request_json_##daemon_name(req_copy, req_len, dispatcher, -1);              \
+        jsonrpc_resp_sink_deactivate();                                                                 \
+        if (!sink.buf) {                                                                                \
+            /* No captured response (sink OOM): fail the transaction so the \
+             * caller surfaces CANCELED instead of an empty reply. */       \
+            return AIRY_ERR_GENERIC_FAIL;                                                               \
+        }                                                                                               \
+        *resp_json = sink.buf; /* AIRY_MALLOC domain; the bridge frees */                               \
+        *resp_len = sink.len;                                                                           \
+        return 0;                                                                                       \
+    }                                                                                                   \
+                                                                                                        \
+    __attribute__((unused)) static int daemon_l2_mount_##daemon_name(method_dispatcher_t *dispatcher)   \
+    {                                                                                                   \
+        if (!daemon_l1_transport_enabled(#ns_upper)) {                                                  \
+            SVC_LOG_INFO("l2 %s: transport off, staying on sockets", #ns_lower);                        \
+            return AIRY_ERR_NOT_FOUND;                                                                  \
+        }                                                                                               \
+        g_l2_bridge_##daemon_name =                                                                     \
+            daemon_l2_bridge_start(#ns_lower ".rpc", daemon_l2_dispatch_##daemon_name, dispatcher);     \
+        if (!g_l2_bridge_##daemon_name) {                                                               \
+            SVC_LOG_ERROR("l2 %s: bridge start failed, staying on sockets", #ns_lower);                 \
+            return AIRY_ERR_UNKNOWN;                                                                    \
+        }                                                                                               \
+        SVC_LOG_INFO("l2 %s: mounted corekern channel " #ns_lower ".rpc", #ns_lower);                   \
+        return 0;                                                                                       \
+    }                                                                                                   \
+                                                                                                        \
+    __attribute__((unused)) static void daemon_l2_unmount_##daemon_name(void)                           \
+    {                                                                                                   \
+        daemon_l2_bridge_stop(g_l2_bridge_##daemon_name);                                               \
+        g_l2_bridge_##daemon_name = NULL;                                                               \
     }
 
 /**
