@@ -19,6 +19,7 @@
  */
 
 #include "airy_memory.h"
+#include "airy_rt.h"
 #include "error.h"
 #include "daemon_main.h"
 #include "daemon_ipc_ops_bootstrap.h"
@@ -573,6 +574,20 @@ int main(int argc, char *argv[])
 
     airy_log_init(NULL);
     atexit(log_cleanup);
+
+    /* WS-8 stage 4 (8.4.1): bring up the corekern core (mem/oom/task/ipc/
+     * eventloop/persist) as the first link of the daemon boot chain, before
+     * the daemon's own subsystems. airy_init() is idempotent; if it fails
+     * the daemon still runs on the platform fallbacks (DSL degradation,
+     * non-fatal, badge=0). */
+    {
+        int core_ret = airy_init();
+        if (core_ret == AIRY_SUCCESS) {
+            SVC_LOG_INFO("corekern core initialized (hook_d runs on corekern)");
+        } else {
+            SVC_LOG_WARN("corekern init failed (%d) - running degraded (badge=0)", core_ret);
+        }
+    }
 
     daemon_cupolas_init_pep("hook_d");
 

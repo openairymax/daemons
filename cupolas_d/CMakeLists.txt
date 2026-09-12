@@ -158,6 +158,7 @@ target_include_directories(cupolas_d PRIVATE
 
 target_link_libraries(cupolas_d PRIVATE
     airy_cupolas_service
+    airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
     airy_common
     Threads::Threads
     airy_platform_libs

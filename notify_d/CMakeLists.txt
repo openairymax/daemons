@@ -56,6 +56,7 @@ target_include_directories(notify_d PRIVATE
 
 target_link_libraries(notify_d PRIVATE
     svc_common
+    airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
     Threads::Threads
 )
 
