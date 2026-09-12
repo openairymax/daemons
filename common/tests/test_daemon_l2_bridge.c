@@ -17,6 +17,11 @@
  *   6. E2E echo：call 全链（trace_id 贯穿、src_task 回显、payload 大写变换）
  *   7. E2E junk drop：非 envelope 输入 -> AIRY_ERR_CANCELED 且不触达 dispatch
  *   8. E2E dispatch 失败：非零返回 -> call 失败
+ *   9. 8.3.3 channel 派生：daemon_l2_channel_for_socket（.sock 命名判定 /
+ *      transport switch fail-closed / "<ns>.rpc" 派生 / 容量与 ns 长度守卫）
+ *  10. 8.3.3 rpc_call E2E：result 解包 / params 嵌入 / 业务错误与空载荷
+ *      折叠 GENERIC_FAIL / 未挂载 channel NOT_FOUND 透传
+ *  11. 8.3.3 rpc_call_resp E2E：完整 JSON-RPC 响应原样透传（含 error 对象）
  *
  * 客户端直接使用 corekern L1 API（airy_ipc_connect/call）模拟对端；
  * corekern 头仅在本测试 TU 使用，不违反 svc_common 的宏隔离边界。
@@ -28,6 +33,8 @@
 
 #include <airymax/ipc.h>       /* [SC] SSoT: AIRY_IPC_MAGIC */
 #include <airymax/task_desc.h> /* [SC] CRC-32 reference for field assertions */
+
+#include <cjson/cJSON.h> /* 8.3.3: rpc_dispatch mock 解析 JSON-RPC 请求 */
 
 #include "airy_memory.h"
 
@@ -440,6 +447,261 @@ static void test_e2e_dispatch_failure(void)
     TEST_END();
 }
 
+/* ---- 8.3.3：channel 派生 ---- */
+
+static void test_channel_for_socket_derivation(void)
+{
+    TEST_BEGIN("test_channel_for_socket_derivation");
+
+    char channel[64];
+
+    /* 参数校验 */
+    TEST_ASSERT(daemon_l2_channel_for_socket(NULL, channel, sizeof(channel)) == AIRY_EINVAL,
+                "NULL socket_path rejected");
+    TEST_ASSERT(daemon_l2_channel_for_socket("/run/airy/sched.sock", NULL, sizeof(channel)) ==
+                    AIRY_EINVAL,
+                "NULL channel rejected");
+    TEST_ASSERT(daemon_l2_channel_for_socket("/run/airy/sched.sock", channel, 0) == AIRY_EINVAL,
+                "zero size rejected");
+
+    /* 非 ".sock" 命名：TCP endpoint、无后缀 basename、空 ns —— 一律留在
+     * socket 路径（命名判别符语义，daemon_l2_bridge.c） */
+    TEST_ASSERT(daemon_l2_channel_for_socket("127.0.0.1:8086", channel, sizeof(channel)) ==
+                    AIRY_EINVAL,
+                "TCP endpoint stays on the socket path");
+    TEST_ASSERT(daemon_l2_channel_for_socket("/var/run/daemons", channel, sizeof(channel)) ==
+                    AIRY_EINVAL,
+                "basename without .sock rejected");
+    TEST_ASSERT(daemon_l2_channel_for_socket("/run/airy/.sock", channel, sizeof(channel)) ==
+                    AIRY_EINVAL,
+                "empty namespace rejected");
+
+    /* transport switch 关（默认 off）-> fail-closed：不发放无人挂载的 channel */
+    unsetenv("AIRY_IPC_TRANSPORT");
+    unsetenv("AIRY_SCHED_IPC_TRANSPORT");
+    TEST_ASSERT(daemon_l2_channel_for_socket("/run/airy/sched.sock", channel,
+                                             sizeof(channel)) == AIRY_ERR_NOT_FOUND,
+                "switch off -> NOT_FOUND (grey coexistence norm)");
+
+    /* scoped 开关放行 ns -> 派生 "<ns>.rpc" */
+    setenv("AIRY_SCHED_IPC_TRANSPORT", "corekern", 1);
+    TEST_ASSERT(daemon_l2_channel_for_socket("/run/airy/sched.sock", channel,
+                                             sizeof(channel)) == 0,
+                "scoped switch on -> channel derived");
+    TEST_ASSERT(strcmp(channel, "sched.rpc") == 0, "channel is sched.rpc");
+
+    /* 容量不足：守卫先于 transport 检查（"sched.rpc"+NUL 需 10 字节） */
+    TEST_ASSERT(daemon_l2_channel_for_socket("/run/airy/sched.sock", channel, 5) == AIRY_EMSGSIZE,
+                "undersized channel buffer -> EMSGSIZE");
+
+    /* ns 过长：>= 64 字符触发 ns_upper 守卫 */
+    char long_path[128];
+    TEST_ASSERT(snprintf(long_path, sizeof(long_path), "/tmp/%064d.sock", 1) > 0,
+                "over-long ns path built");
+    TEST_ASSERT(daemon_l2_channel_for_socket(long_path, channel, sizeof(channel)) ==
+                    AIRY_EMSGSIZE,
+                "over-long namespace -> EMSGSIZE");
+
+    unsetenv("AIRY_SCHED_IPC_TRANSPORT");
+
+    TEST_END();
+}
+
+/* ---- 8.3.3：rpc_call / rpc_call_resp E2E ---- */
+
+struct rpc_ctx {
+    int hits;
+    char last_method[32];
+    char last_params[64];
+    long last_id;
+    int has_params;
+};
+
+/* JSON-RPC mock：解析请求（记录 method/id/params），按 method 应答。
+ * 契约与 echo_dispatch 一致：resp_json 必须分配在 AIRY_MALLOC 域
+ * （bridge 以 AIRY_FREE 释放），resp_len 不含 NUL。请求侧同契约：
+ * 长度界定、无 NUL 保证，必须以长度感知 API 解析。 */
+static int rpc_dispatch(const char *req_json, size_t req_len, char **resp_json,
+                        size_t *resp_len, void *userdata)
+{
+    struct rpc_ctx *ctx = (struct rpc_ctx *)userdata;
+    ctx->hits++;
+
+    cJSON *req = cJSON_ParseWithLengthOpts(req_json, req_len, NULL, 0);
+    if (!req) {
+        return -1;
+    }
+    const cJSON *method = cJSON_GetObjectItem(req, "method");
+    const cJSON *id = cJSON_GetObjectItem(req, "id");
+    const cJSON *params = cJSON_GetObjectItem(req, "params");
+    if (method && cJSON_IsString(method)) {
+        snprintf(ctx->last_method, sizeof(ctx->last_method), "%s", method->valuestring);
+    }
+    if (id && cJSON_IsNumber(id)) {
+        ctx->last_id = (long)id->valuedouble;
+    }
+    ctx->has_params = params != NULL;
+    if (params) {
+        char *ps = cJSON_PrintUnformatted((cJSON *)params);
+        if (ps) {
+            snprintf(ctx->last_params, sizeof(ctx->last_params), "%s", ps);
+            AIRY_FREE(ps);
+        }
+    }
+
+    const char *body = NULL;
+    if (strcmp(ctx->last_method, "ok") == 0) {
+        body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"pong\":true}}";
+    } else if (strcmp(ctx->last_method, "bizerr") == 0) {
+        body = "{\"jsonrpc\":\"2.0\",\"id\":1,"
+               "\"error\":{\"code\":-32601,\"message\":\"no such method\"}}";
+    } else if (strcmp(ctx->last_method, "nores") == 0) {
+        body = "{\"jsonrpc\":\"2.0\",\"id\":1}";
+    } else if (strcmp(ctx->last_method, "garbage") == 0) {
+        body = "not-json-at-all";
+    } else if (strcmp(ctx->last_method, "empty") == 0) {
+        /* 空响应：bridge 编码为空 payload envelope，发送方按折叠规则处理 */
+        cJSON_Delete(req);
+        *resp_json = NULL;
+        *resp_len = 0;
+        return 0;
+    }
+    cJSON_Delete(req);
+    if (!body) {
+        return -1;
+    }
+
+    size_t blen = strlen(body);
+    char *resp = (char *)AIRY_MALLOC(blen + 1);
+    if (!resp) {
+        return -1;
+    }
+    AIRY_MEMCPY(resp, body, blen + 1);
+    *resp_json = resp;
+    *resp_len = blen;
+    return 0;
+}
+
+static void test_rpc_call_e2e(void)
+{
+    TEST_BEGIN("test_rpc_call_e2e");
+
+    /* 参数校验（不触达 transport；哨兵初值验证 out 被置 NULL） */
+    char *out = (char *)0x1;
+    TEST_ASSERT(daemon_l2_rpc_call(NULL, "m", NULL, &out, 1000) == AIRY_ERR_INVALID_PARAM &&
+                    out == NULL,
+                "NULL channel rejected");
+    TEST_ASSERT(daemon_l2_rpc_call("l2t.rpcx", "m", NULL, NULL, 1000) == AIRY_ERR_INVALID_PARAM,
+                "NULL out rejected");
+
+    struct rpc_ctx ctx = {0};
+    daemon_l2_bridge_t *bridge = daemon_l2_bridge_start("l2t.rpcx", rpc_dispatch, &ctx);
+    TEST_ASSERT(bridge != NULL, "bridge started");
+
+    /* result 解包 E2E */
+    out = NULL;
+    TEST_ASSERT(daemon_l2_rpc_call("l2t.rpcx", "ok", "{\"k\":1}", &out, 2000) == AIRY_SUCCESS,
+                "ok method succeeded over L2");
+    TEST_ASSERT(out && strcmp(out, "{\"pong\":true}") == 0, "result field extracted");
+    AIRY_FREE(out);
+    TEST_ASSERT(ctx.hits == 1, "dispatch invoked once");
+    TEST_ASSERT(strcmp(ctx.last_method, "ok") == 0, "method reached dispatch");
+    TEST_ASSERT(ctx.last_id == 1, "id fixed to 1 (rpc_connect_send parity)");
+    TEST_ASSERT(ctx.has_params && strcmp(ctx.last_params, "{\"k\":1}") == 0,
+                "valid JSON params embedded verbatim");
+
+    /* params NULL -> {}（与 socket 路径请求序列化对齐） */
+    out = NULL;
+    TEST_ASSERT(daemon_l2_rpc_call("l2t.rpcx", "ok", NULL, &out, 2000) == AIRY_SUCCESS,
+                "NULL params accepted");
+    TEST_ASSERT(ctx.has_params && strcmp(ctx.last_params, "{}") == 0,
+                "NULL params sent as {}");
+    AIRY_FREE(out);
+
+    /* daemon 业务错误 -> 折叠 GENERIC_FAIL（socket 路径同语义） */
+    out = (char *)0x1;
+    TEST_ASSERT(daemon_l2_rpc_call("l2t.rpcx", "bizerr", NULL, &out, 2000) ==
+                        AIRY_ERR_GENERIC_FAIL &&
+                    out == NULL,
+                "daemon error reply folded to GENERIC_FAIL");
+
+    /* 缺 result（也无 error）-> GENERIC_FAIL */
+    out = (char *)0x1;
+    TEST_ASSERT(daemon_l2_rpc_call("l2t.rpcx", "nores", NULL, &out, 2000) ==
+                        AIRY_ERR_GENERIC_FAIL &&
+                    out == NULL,
+                "missing result folded to GENERIC_FAIL");
+
+    /* 响应非 JSON -> GENERIC_FAIL */
+    out = (char *)0x1;
+    TEST_ASSERT(daemon_l2_rpc_call("l2t.rpcx", "garbage", NULL, &out, 2000) ==
+                        AIRY_ERR_GENERIC_FAIL &&
+                    out == NULL,
+                "non-JSON reply folded to GENERIC_FAIL");
+
+    /* 空 payload 响应 -> GENERIC_FAIL（空响应是畸形交换，非传输丢失） */
+    out = (char *)0x1;
+    TEST_ASSERT(daemon_l2_rpc_call("l2t.rpcx", "empty", NULL, &out, 2000) ==
+                        AIRY_ERR_GENERIC_FAIL &&
+                    out == NULL,
+                "empty reply payload folded to GENERIC_FAIL");
+
+    /* 未挂载 channel -> connect 失败码透传（corekern: ENOENT；8.3.3
+     * 回退 socket 路径的依据，回退判定用 != SUCCESS 不依赖具体码） */
+    out = (char *)0x1;
+    TEST_ASSERT(daemon_l2_rpc_call("l2t.nomount", "ok", NULL, &out, 2000) == AIRY_ENOENT &&
+                    out == NULL,
+                "unmounted channel propagates connect error (ENOENT)");
+
+    daemon_l2_bridge_stop(bridge);
+    airy_ipc_cleanup();
+
+    TEST_END();
+}
+
+static void test_rpc_call_resp_e2e(void)
+{
+    TEST_BEGIN("test_rpc_call_resp_e2e");
+
+    /* NULL out 校验 */
+    TEST_ASSERT(daemon_l2_rpc_call_resp("l2t.respx", "ok", NULL, 1000, NULL) ==
+                    AIRY_ERR_INVALID_PARAM,
+                "NULL out rejected");
+
+    struct rpc_ctx ctx = {0};
+    daemon_l2_bridge_t *bridge = daemon_l2_bridge_start("l2t.respx", rpc_dispatch, &ctx);
+    TEST_ASSERT(bridge != NULL, "bridge started");
+
+    /* 业务错误原样透传：SUCCESS + 完整 JSON-RPC 响应 —— gateway 双路
+     * 分发（gw_svc_call L2 先行路）与 socket 路径位对位的核心契约 */
+    char *resp = (char *)0x1;
+    TEST_ASSERT(daemon_l2_rpc_call_resp("l2t.respx", "bizerr", NULL, 2000, &resp) == AIRY_SUCCESS,
+                "daemon error reply is transport SUCCESS");
+    TEST_ASSERT(resp && strstr(resp, "\"error\"") && strstr(resp, "-32601") &&
+                    strstr(resp, "no such method"),
+                "error object carried verbatim");
+    AIRY_FREE(resp);
+
+    /* 成功响应完整透传；timeout 0 -> 默认 30s 归一路径 */
+    resp = (char *)0x1;
+    TEST_ASSERT(daemon_l2_rpc_call_resp("l2t.respx", "ok", NULL, 0, &resp) == AIRY_SUCCESS,
+                "timeout 0 -> default 30s path works");
+    TEST_ASSERT(resp && strstr(resp, "\"result\"") && strstr(resp, "\"jsonrpc\""),
+                "complete response carried verbatim");
+    AIRY_FREE(resp);
+
+    /* 未挂载 channel -> connect 失败码透传 + out NULL */
+    resp = (char *)0x1;
+    TEST_ASSERT(daemon_l2_rpc_call_resp("l2t.nomount", "ok", NULL, 2000, &resp) == AIRY_ENOENT &&
+                    resp == NULL,
+                "unmounted channel propagates connect error (ENOENT)");
+
+    daemon_l2_bridge_stop(bridge);
+    airy_ipc_cleanup();
+
+    TEST_END();
+}
+
 int main(void)
 {
     printf("========================================\n");
@@ -454,6 +716,9 @@ int main(void)
     test_e2e_echo_roundtrip();
     test_e2e_junk_envelope_dropped();
     test_e2e_dispatch_failure();
+    test_channel_for_socket_derivation();
+    test_rpc_call_e2e();
+    test_rpc_call_resp_e2e();
 
     printf("\n========================================\n");
     printf("  daemon_l2_bridge 测试结果汇总\n");
