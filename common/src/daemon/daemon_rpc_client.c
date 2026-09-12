@@ -19,6 +19,7 @@
  */
 
 #include "daemon_rpc_client.h"
+#include "daemon_l1_server.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -423,6 +424,21 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
 int daemon_rpc_call(const char *socket_path, const char *method, const char *params_json,
                     char **out_result_json, uint32_t timeout_ms)
 {
+    /* Blueprint 8.3.3 grey rollout: when the ns transport switch resolves
+     * to "corekern" (and only then, channel_for_socket gates on it), serve
+     * the call over the L2 channel. NOT_FOUND from channel_for_socket
+     * (switch off) and every non-".sock" path stay on the socket route
+     * below, bit-for-bit unchanged. Unlike the gateway's dual-path
+     * (gw_svc_call), a daemon-side miss — e.g. ENOENT: no bridge mounted —
+     * propagates fail-fast instead of silently falling back: the switch is
+     * an explicit operator action, so a missing bridge is a configuration
+     * inconsistency the caller must see. Stream and cancelable calls keep
+     * the socket path for now (chunked replies have no L2 mapping yet). */
+    char channel[64];
+    if (socket_path &&
+        daemon_l2_channel_for_socket(socket_path, channel, sizeof(channel)) == 0) {
+        return daemon_l2_rpc_call(channel, method, params_json, out_result_json, timeout_ms);
+    }
     return daemon_rpc_call_cancelable(socket_path, method, params_json, out_result_json, timeout_ms,
                                       NULL, NULL, NULL);
 }
