@@ -97,6 +97,16 @@ int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_co
          * it is safe and makes subprocess behavior deterministic. */
         unsetenv("LD_PRELOAD");
         unsetenv("LD_AUDIT");
+        /* R-3: the airymaxrt launcher exports $AIRY_HOME/lib through
+         * LD_LIBRARY_PATH for the runtime's own binaries. Leaking that into
+         * an arbitrary command makes system tools (curl, git, python) load
+         * the runtime's bundled .so files, which are frequently ABI-mismatched
+         * with the system binaries — e.g. curl then aborts with
+         * "libcurl.so.4: no version information available" and silently loses
+         * HTTP/2 and other features ("various tools unusable / cannot reach
+         * the network"). The daemon process keeps its own LD_LIBRARY_PATH;
+         * only the command process and its descendants are cleaned. */
+        unsetenv("LD_LIBRARY_PATH");
         /* Task workspace: chdir into the optional cwd so relative paths in
          * the command resolve against the task workspace, not tool_d's own
          * cwd (the runner chdirs its own process, which never affects the
