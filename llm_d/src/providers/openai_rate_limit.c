@@ -234,5 +234,17 @@ int openai_http_request_with_retry(openai_ctx_t *ctx, const char *url,
         break;
     }
 
-    return AIRY_ERR_IO;
+    /* R-1：把 provider 返回的 HTTP 状态码映射为具体错误码，避免调用方把
+     * 401/403（密钥无效）与 429（限流）统统当成"网络请求失败"上报。
+     * http_code == 0 表示 curl 根本没连上 provider（DNS/连接/超时），
+     * 此路径仍归 AIRY_ERR_IO。 */
+    switch (*out_http_code) {
+    case 401:
+    case 403:
+        return AIRY_ERR_LLM_AUTH_FAIL;
+    case 429:
+        return AIRY_ERR_LLM_RATE_LIMIT;
+    default:
+        return AIRY_ERR_IO;
+    }
 }
