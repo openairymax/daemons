@@ -379,12 +379,18 @@ int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     snprintf(url, sizeof(url), "%s/chat/completions", base->api_base);
 
     struct curl_slist *headers = NULL;
-    char auth_header[1024];
-    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s",
-             base->api_key[0] ? base->api_key : "");
-    headers = curl_slist_append(headers, auth_header);
+    if (base->api_key[0]) {
+        char auth_header[1024];
+        snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", base->api_key);
+        headers = curl_slist_append(headers, auth_header);
+        explicit_bzero(auth_header, sizeof(auth_header));
+    } else {
+        /* R-1：同非流式路径，未配置密钥时省略 Authorization 头。 */
+        SVC_LOG_WARN("C-L02: OPENAI: STREAM no API key configured, sending unauthenticated "
+                     "request model=%s",
+                     model);
+    }
     headers = curl_slist_append(headers, "Content-Type: application/json");
-    explicit_bzero(auth_header, sizeof(auth_header));
 
     oai_stream_acc_t acc;
     __builtin_memset(&acc, 0, sizeof(acc));
@@ -401,7 +407,11 @@ int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
-        if (http_code == 429) {
+        if (http_code == 401 || http_code == 403) {
+            SVC_LOG_ERROR("C-L02: OPENAI: STREAM-FAIL model=%s http_code=%ld "
+                          "DIAGNOSIS=auth_failed",
+                          model, http_code);
+        } else if (http_code == 429) {
             SVC_LOG_ERROR("C-L02: OPENAI: STREAM-FAIL model=%s http_code=%ld "
                           "DIAGNOSIS=rate_limit_exhausted",
                           model, http_code);
@@ -416,6 +426,11 @@ int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_config_t *
         AIRY_FREE(acc.resp_model);
         AIRY_FREE(acc.finish_reason);
         oai_stream_tools_cleanup(&acc);
+        /* R-1：按 HTTP 状态码归一为具体错误码（见 openai_rate_limit.c）。 */
+        if (http_code == 401 || http_code == 403)
+            return AIRY_ERR_LLM_AUTH_FAIL;
+        if (http_code == 429)
+            return AIRY_ERR_LLM_RATE_LIMIT;
         return ret;
     }
 
