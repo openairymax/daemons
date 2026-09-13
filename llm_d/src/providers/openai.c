@@ -110,12 +110,20 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     snprintf(url, sizeof(url), "%s/chat/completions", base->api_base);
 
     struct curl_slist *headers = NULL;
-    char auth_header[1024];
-    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s",
-             base->api_key[0] ? base->api_key : "");
-    headers = curl_slist_append(headers, auth_header);
+    if (base->api_key[0]) {
+        char auth_header[1024];
+        snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", base->api_key);
+        headers = curl_slist_append(headers, auth_header);
+        explicit_bzero(auth_header, sizeof(auth_header));
+    } else {
+        /* R-1：未配置密钥时不再拼出 "Authorization: Bearer "（空凭据），
+         * 部分网关会因此返回难以定位的 400/401；直接省略该头，本地
+         * OpenAI 兼容服务（无鉴权）也能正常工作。 */
+        SVC_LOG_WARN("C-L02: OPENAI: COMPLETE no API key configured, sending unauthenticated "
+                     "request model=%s",
+                     manager->model ? manager->model : OPENAI_DEFAULT_MODEL);
+    }
     headers = curl_slist_append(headers, "Content-Type: application/json");
-    explicit_bzero(auth_header, sizeof(auth_header));
 
     provider_http_resp_t *http_resp = NULL;
     long http_code = 0;
@@ -126,7 +134,12 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
-        if (http_code == 429) {
+        if (http_code == 401 || http_code == 403) {
+            SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld "
+                          "DIAGNOSIS=auth_failed body=%.600s",
+                          model, http_code,
+                          http_resp && http_resp->data ? http_resp->data : "");
+        } else if (http_code == 429) {
             SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld "
                           "DIAGNOSIS=rate_limit_exhausted",
                           model, http_code);
