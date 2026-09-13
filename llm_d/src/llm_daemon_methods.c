@@ -77,6 +77,25 @@ static const char *llm_error_message_fmt(int ret, char *buf, size_t buf_len)
     return buf;
 }
 
+/* R-4：只有瞬态错误才值得外层重试。鉴权失败、模型/配置错误属于确定性
+ * 失败，重试只会把一次请求放大成 4 次（外层）× 最多 5 次（openai 内层
+ * 重试）的打点风暴，既拖慢报错又可能触发 provider 侧风控。 */
+static int llm_error_is_retryable(int ret)
+{
+    switch (ret) {
+    case AIRY_ERR_LLM_AUTH_FAIL:
+    case AIRY_ERR_LLM_INVALID_MODEL:
+    case AIRY_ERR_LLM_NO_PROVIDER:
+    case AIRY_ERR_LLM_CONTEXT_LEN:
+    case AIRY_ERR_LLM_TOKEN_LIMIT:
+    case AIRY_ERR_INVALID_PARAM:
+    case AIRY_ERR_NOT_SUPPORTED:
+        return 0;
+    default:
+        return 1;
+    }
+}
+
 static char *handle_complete(cJSON *params, int id);
 static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd);
 
@@ -325,12 +344,19 @@ static char *handle_complete(cJSON *params, int id)
 
     llm_response_t *resp = NULL;
     int ret = -1;
+    int attempts_used = 0;
 
     for (int attempt = 0; attempt <= LLM_MAX_RETRIES; attempt++) {
+        attempts_used = attempt + 1;
         ret = llm_service_complete(g_service, &cfg, &resp);
 
         if (ret == 0)
             break;
+
+        if (!llm_error_is_retryable(ret)) {
+            SVC_LOG_ERROR("LLM complete aborted: non-retryable error (err=%d)", ret);
+            break;
+        }
 
         if (attempt < LLM_MAX_RETRIES) {
             unsigned delay_ms = LLM_BASE_DELAY_MS * (1U << (attempt > 15 ? 15 : attempt));
@@ -343,7 +369,7 @@ static char *handle_complete(cJSON *params, int id)
     uint64_t end_time = airy_time_ms();
 
     if (ret != 0) {
-        SVC_LOG_ERROR("LLM complete failed after %d attempts (total %llums)", LLM_MAX_RETRIES + 1,
+        SVC_LOG_ERROR("LLM complete failed after %d attempts (total %llums)", attempts_used,
                       (unsigned long long)(end_time - start_time));
         AIRY_FREE((void *)cfg.model);
         request_context_destroy(ctx);
