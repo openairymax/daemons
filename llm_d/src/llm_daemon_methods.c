@@ -37,6 +37,19 @@
 #define LLM_MAX_RETRIES 3
 #define LLM_BASE_DELAY_MS 100
 
+/* R-5：只有"快失败"才值得重试的耗时上界（ms）。
+ *
+ * 不变量（R-5）：llm_d 处理一次 complete 的总耗时必须严格小于网关的转发
+ * 超时背压（gateway_biz_internal.h 的 GW_LLM_DEFAULT_TIMEOUT_MS=90s），
+ * 否则网关先放弃请求，provider 侧已定位好的精确诊断（鉴权失败 / 限流 /
+ * 连接失败）回传不到用户，用户只看到笼统的 "invalid response"。
+ *
+ * 上界推导：每次重试的尝试要么在本上界内快失败，要么直接放弃重试——
+ * 因此最坏总耗时 = LLM_MAX_RETRIES × LLM_RETRY_FAST_FAIL_MS + 单次超时
+ * = 3 × 5s + 70s = 85s < 90s。若单次尝试已耗掉接近完整超时（对端不可达/
+ * 挂起），继续重试只会把结论推迟到网关超时之后，故不再重试。 */
+#define LLM_RETRY_FAST_FAIL_MS 5000
+
 /* 0.1.8 社区缺陷修复：此前流式失败统一回 "Service error"（-32603），
  * 用户与 TUI 均无法得知真实原因（模型未配置/无 provider/网络失败），
  * 是"对话不能正常进行且无从排查"的直接根因。按 llm_service_* 返回的
@@ -348,6 +361,7 @@ static char *handle_complete(cJSON *params, int id)
 
     for (int attempt = 0; attempt <= LLM_MAX_RETRIES; attempt++) {
         attempts_used = attempt + 1;
+        uint64_t attempt_start = airy_time_ms();
         ret = llm_service_complete(g_service, &cfg, &resp);
 
         if (ret == 0)
@@ -360,6 +374,16 @@ static char *handle_complete(cJSON *params, int id)
 
         if (attempt < LLM_MAX_RETRIES) {
             unsigned delay_ms = LLM_BASE_DELAY_MS * (1U << (attempt > 15 ? 15 : attempt));
+            /* R-5：慢失败不再重试——单次尝试已耗掉接近完整超时，说明对端
+             * 不可达或挂起，重试只会把结论推迟到网关背压之后，让精确诊断
+             * 被网关超时吞掉（详见 LLM_RETRY_FAST_FAIL_MS 注释）。 */
+            uint64_t attempt_ms = airy_time_ms() - attempt_start;
+            if (attempt_ms >= LLM_RETRY_FAST_FAIL_MS) {
+                SVC_LOG_WARN("LLM complete not retrying (err=%d): attempt took %llums, "
+                             "reporting diagnosis before gateway timeout",
+                             ret, (unsigned long long)attempt_ms);
+                break;
+            }
             SVC_LOG_WARN("LLM complete attempt %d/%d failed (err=%d), retrying in %ums",
                          attempt + 1, LLM_MAX_RETRIES + 1, ret, delay_ms);
             airy_sleep_ms(delay_ms);
