@@ -38,6 +38,20 @@ static inline void airy_provider_explicit_bzero(void *s, size_t n)
 #endif
 
 
+/* 单次 provider HTTP 调用默认超时（秒）。
+ *
+ * 不变量（R-5）：llm_d 处理一次 complete 的总耗时必须严格小于网关的转发
+ * 超时背压（gateway_biz_internal.h 的 GW_LLM_DEFAULT_TIMEOUT_MS=90s、
+ * GW_THINK_TIMEOUT_MS=120s）。否则网关会先于 llm_d 放弃请求，用户只能
+ * 看到笼统的 "invalid response"，而 provider 侧已经定位好的精确诊断
+ * （鉴权失败 / 限流 / 连接失败）永远回传不到用户。
+ *
+ * 该上界默认值单独保证"只发一次请求"的场景（70s < 90s）；多次重试的总
+ * 耗时上界由 llm_daemon_methods.c 的 LLM_RETRY_FAST_FAIL_MS 共同保证
+ * （3 × 5s + 70s = 85s < 90s）。模型行可用 timeout_sec 显式覆盖；覆盖后
+ * 须自行保证仍小于网关背压。 */
+#define PROVIDER_DEFAULT_TIMEOUT_SEC 70.0
+
 static airy_mtx_t g_secrets_refresh_lock;
 static bool g_secrets_lock_inited = false;
 
@@ -280,7 +294,7 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, cons
         }
     }
 
-    base_ctx->timeout_sec = timeout_sec > 0 ? timeout_sec : 120.0;
+    base_ctx->timeout_sec = timeout_sec > 0 ? timeout_sec : PROVIDER_DEFAULT_TIMEOUT_SEC;
     base_ctx->max_retries = max_retries > 0 ? max_retries : 3;
 
     SVC_LOG_INFO("C-L02: PROVIDER: BASE-INIT api_base=%s timeout=%.1fs retries=%d has_api_key=%d",
