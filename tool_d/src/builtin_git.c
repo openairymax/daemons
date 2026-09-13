@@ -104,6 +104,18 @@ static int builtin_git_run(char *const argv[], const char *stdin_data, size_t st
         dup2(infd[0], STDIN_FILENO);
         close(outfd[1]);
         close(infd[0]);
+        /* R-3: the airymaxrt launcher exports $AIRY_HOME/lib through
+         * LD_LIBRARY_PATH for the runtime's own binaries. Leaking that into
+         * git makes the system git load the runtime's bundled .so files,
+         * which are frequently ABI-mismatched with the system binary and
+         * break the tool ("various tools unusable / cannot reach the
+         * network"). LD_PRELOAD/LD_AUDIT are cleared for the same tool
+         * isolation contract as builtin_shell_run. The daemon process keeps
+         * its own LD_LIBRARY_PATH; only the git process and its descendants
+         * are cleaned. */
+        unsetenv("LD_PRELOAD");
+        unsetenv("LD_AUDIT");
+        unsetenv("LD_LIBRARY_PATH");
         execvp(argv[0], argv);
         _exit(127);
     }
