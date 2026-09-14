@@ -1,16 +1,16 @@
-# daemons — Runtime Daemon Services
+# daemons — User-space Service Layer
 
 > The user-space service layer of the Airymax agent runtime: 15 daemon processes that
 > turn the Airymax kernel into a running system, plus the shared `svc_common` library.
 
 **Language:** English | [简体中文](README_zh.md)
 
-[![Version](https://img.shields.io/badge/version-0.1.15-5a6b7e)](https://atomgit.com/openairymax/daemons)
+[![Version](https://img.shields.io/badge/version-0.1.16-5a6b7e)](https://atomgit.com/openairymax/daemons)
 [![License](https://img.shields.io/badge/license-AGPL--3.0+Apache--2.0-4a90d9)](LICENSE)
 [![C11](https://img.shields.io/badge/C-11-00599C?logo=c&logoColor=white)](https://en.cppreference.com/w/c/11)
 
 - **Repository:** <https://atomgit.com/openairymax/daemons>
-- **Version:** 0.1.15
+- **Version:** 0.1.16
 - **License:** AGPL-3.0-or-later OR Apache-2.0
 
 ---
@@ -214,7 +214,7 @@ int main(void)
 {
     airy_svc_config_t cfg = {
         .name           = "my_daemon",
-        .version        = "0.1.15",
+        .version        = "0.1.16",
         .capabilities   = AIRY_SVC_CAP_ASYNC | AIRY_SVC_CAP_CANCELABLE,
         .max_concurrent = 64,
         .timeout_ms     = 5000,
