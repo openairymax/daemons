@@ -818,14 +818,20 @@ static void test_e2e_typed_payload_demux(void)
                 "STREAM chunk 1 sent");
     TEST_ASSERT(daemon_l2_stream_send("l2t.typed", 0x5A5AULL, 1, AIRY_IPC_STREAM_FLAG_FIN,
                                       NULL, 0) == AIRY_SUCCESS,
-                "STREAM FIN (empty) sent");
+                "STREAM FIN (empty, EOF) sent");
+    TEST_ASSERT(daemon_l2_stream_send("l2t.typed", 0x5B5BULL, 0, AIRY_IPC_STREAM_FLAG_RST,
+                                      NULL, 0) == AIRY_SUCCESS,
+                "STREAM RST (abort) sent");
     TEST_ASSERT(daemon_l2_ctrl_send("l2t.typed", AIRY_IPC_CTRL_PING, 0xABCDu) == AIRY_SUCCESS,
                 "CONTROL PING sent");
+    TEST_ASSERT(daemon_l2_ctrl_send("l2t.typed", AIRY_IPC_CTRL_PONG, 0xABCDu) == AIRY_SUCCESS,
+                "CONTROL PONG sent");
 
     /* send 是同步派发（sender 线程回调），返回即已送达 */
-    TEST_ASSERT(ctx.n == 4, "notify received exactly four payloads");
+    TEST_ASSERT(ctx.n == 6, "notify received exactly six payloads");
     TEST_ASSERT(ctx.types[0] == AIRY_IPC_PT_EVENT && ctx.types[1] == AIRY_IPC_PT_STREAM &&
-                    ctx.types[2] == AIRY_IPC_PT_STREAM && ctx.types[3] == AIRY_IPC_PT_CONTROL,
+                    ctx.types[2] == AIRY_IPC_PT_STREAM && ctx.types[3] == AIRY_IPC_PT_STREAM &&
+                    ctx.types[4] == AIRY_IPC_PT_CONTROL && ctx.types[5] == AIRY_IPC_PT_CONTROL,
                 "payload types in send order");
 
     struct airy_ipc_event ev;
@@ -843,19 +849,71 @@ static void test_e2e_typed_payload_demux(void)
     struct airy_ipc_stream st1;
     AIRY_MEMCPY(&st1, ctx.bodies[2], sizeof(st1));
     TEST_ASSERT(st1.seq == 1 && st1.flags == AIRY_IPC_STREAM_FLAG_FIN && ctx.body_lens[2] == sizeof(st1),
-                "STREAM FIN empty chunk");
+                "STREAM FIN empty chunk (EOF)");
+    struct airy_ipc_stream st2;
+    AIRY_MEMCPY(&st2, ctx.bodies[3], sizeof(st2));
+    TEST_ASSERT(st2.stream_id == 0x5B5BULL && st2.seq == 0 &&
+                    st2.flags == AIRY_IPC_STREAM_FLAG_RST && ctx.body_lens[3] == sizeof(st2),
+                "STREAM RST empty chunk (abort)");
 
     struct airy_ipc_control ctrl;
-    AIRY_MEMCPY(&ctrl, ctx.bodies[3], sizeof(ctrl));
+    AIRY_MEMCPY(&ctrl, ctx.bodies[4], sizeof(ctrl));
     TEST_ASSERT(ctrl.opcode == AIRY_IPC_CTRL_PING && ctrl.arg == 0xABCDu &&
-                    ctx.body_lens[3] == sizeof(ctrl),
-                "CONTROL fields");
+                    ctx.body_lens[4] == sizeof(ctrl),
+                "CONTROL PING fields");
+    struct airy_ipc_control pong;
+    AIRY_MEMCPY(&pong, ctx.bodies[5], sizeof(pong));
+    TEST_ASSERT(pong.opcode == AIRY_IPC_CTRL_PONG && pong.arg == 0xABCDu &&
+                    ctx.body_lens[5] == sizeof(pong),
+                "CONTROL PONG fields");
 
     /* 参数校验 */
     TEST_ASSERT(daemon_l2_publish_event("l2t.typed", 1, 1, NULL, 4) == AIRY_ERR_INVALID_PARAM,
                 "EVENT NULL data with len>0 rejected");
     TEST_ASSERT(daemon_l2_publish_event("l2t.nomount", 1, 1, "x", 1) == AIRY_ENOENT,
                 "publish to unmounted channel propagates ENOENT");
+
+    daemon_l2_bridge_stop(bridge);
+    airy_ipc_cleanup();
+
+    TEST_END();
+}
+
+/* ---- B1：L2 桥是 typed 透传层 —— seq/flags 原样保真，不重排、不拒收 ---- */
+
+static void test_stream_seq_passthrough(void)
+{
+    TEST_BEGIN("test_stream_seq_passthrough");
+
+    struct typed_ctx ctx = {0};
+    daemon_l2_bridge_t *bridge =
+        daemon_l2_bridge_start_ex("l2t.seq", echo_dispatch, typed_notify, &ctx);
+    TEST_ASSERT(bridge != NULL, "bridge started with notify");
+
+    /* 故意乱序投递（seq=5 先于 seq=2）：传输层不得重排、不得拒收。
+     * 顺序判定与分片重组是消费方职责，L2 桥只保证 seq/flags 逐字段保真。 */
+    TEST_ASSERT(daemon_l2_stream_send("l2t.seq", 0x0101ULL, 5, AIRY_IPC_STREAM_FLAG_MORE, "e", 1) ==
+                    AIRY_SUCCESS,
+                "out-of-order chunk (seq=5) transported");
+    TEST_ASSERT(daemon_l2_stream_send("l2t.seq", 0x0101ULL, 2, AIRY_IPC_STREAM_FLAG_FIN, "d", 1) ==
+                    AIRY_SUCCESS,
+                "out-of-order chunk (seq=2) transported");
+
+    TEST_ASSERT(ctx.n == 2, "both chunks delivered");
+    struct airy_ipc_stream s0;
+    struct airy_ipc_stream s1;
+    AIRY_MEMCPY(&s0, ctx.bodies[0], sizeof(s0));
+    AIRY_MEMCPY(&s1, ctx.bodies[1], sizeof(s1));
+    TEST_ASSERT(s0.stream_id == 0x0101ULL && s0.seq == 5 &&
+                    s0.flags == AIRY_IPC_STREAM_FLAG_MORE &&
+                    ctx.body_lens[0] == sizeof(s0) + 1,
+                "chunk seq=5 preserved verbatim");
+    TEST_ASSERT(s1.stream_id == 0x0101ULL && s1.seq == 2 &&
+                    s1.flags == AIRY_IPC_STREAM_FLAG_FIN && ctx.body_lens[1] == sizeof(s1) + 1,
+                "chunk seq=2 preserved verbatim");
+    TEST_ASSERT(memcmp((const uint8_t *)ctx.bodies[0] + sizeof(s0), "e", 1) == 0 &&
+                    memcmp((const uint8_t *)ctx.bodies[1] + sizeof(s1), "d", 1) == 0,
+                "chunk bytes intact");
 
     daemon_l2_bridge_stop(bridge);
     airy_ipc_cleanup();
@@ -882,6 +940,7 @@ int main(void)
     test_rpc_call_resp_e2e();
     test_payload_frame_parse();
     test_e2e_typed_payload_demux();
+    test_stream_seq_passthrough();
 
     printf("\n========================================\n");
     printf("  daemon_l2_bridge 测试结果汇总\n");
