@@ -357,7 +357,7 @@ int agent_spawn_child(const char *spec, const char *agent_id, pid_t *out_pid, in
          * -e, see ecosystem three-package packaging); no more PYTHONPATH
          * injection or source-tree inference from the executable location
          * (removal of the historical P0-1 mechanism, see
-         * docs-closed/agentrt/01-designs/_design_0.1.1/06-agent-gateway-wiring.md §3.1). */
+         * 06-agent-gateway-wiring.md §3.1). */
         {
             /* 0.1.14 修复：剥离运行时 lib 目录的 LD_LIBRARY_PATH 污染。
              * agent_d 进程环境的 LD_LIBRARY_PATH 含 $AIRY_LIB_DIR（自包含
