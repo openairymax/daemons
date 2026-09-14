@@ -415,6 +415,12 @@ int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_config_t *
             SVC_LOG_ERROR("C-L02: OPENAI: STREAM-FAIL model=%s http_code=%ld "
                           "DIAGNOSIS=rate_limit_exhausted",
                           model, http_code);
+        } else if (http_code == 400 || http_code == 422) {
+            /* N-3（0.1.16）：provider 拒绝请求体（非法 JSON / 无效 UTF-8），
+             * 属确定性失败——单独诊断，便于从日志区分于"网络不可达"。 */
+            SVC_LOG_ERROR("C-L02: OPENAI: STREAM-FAIL model=%s http_code=%ld "
+                          "DIAGNOSIS=request_body_rejected",
+                          model, http_code);
         } else {
             SVC_LOG_ERROR("C-L02: OPENAI: STREAM-FAIL model=%s http_code=%ld "
                           "DIAGNOSIS=http_stream_error",
@@ -426,11 +432,14 @@ int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_config_t *
         AIRY_FREE(acc.resp_model);
         AIRY_FREE(acc.finish_reason);
         oai_stream_tools_cleanup(&acc);
-        /* R-1：按 HTTP 状态码归一为具体错误码（见 openai_rate_limit.c）。 */
+        /* R-1：按 HTTP 状态码归一为具体错误码（见 openai_rate_limit.c）。
+         * N-3（0.1.16）：400/422 归入 AIRY_ERR_LLM_BAD_REQUEST。 */
         if (http_code == 401 || http_code == 403)
             return AIRY_ERR_LLM_AUTH_FAIL;
         if (http_code == 429)
             return AIRY_ERR_LLM_RATE_LIMIT;
+        if (http_code == 400 || http_code == 422)
+            return AIRY_ERR_LLM_BAD_REQUEST;
         return ret;
     }
 

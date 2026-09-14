@@ -237,13 +237,19 @@ int openai_http_request_with_retry(openai_ctx_t *ctx, const char *url,
     /* R-1：把 provider 返回的 HTTP 状态码映射为具体错误码，避免调用方把
      * 401/403（密钥无效）与 429（限流）统统当成"网络请求失败"上报。
      * http_code == 0 表示 curl 根本没连上 provider（DNS/连接/超时），
-     * 此路径仍归 AIRY_ERR_IO。 */
+     * 此路径仍归 AIRY_ERR_IO。
+     * N-3（0.1.16）：400/422 是 provider 明确拒绝请求体（JSON 结构错误、
+     * 消息含无效 UTF-8 等），与"不可达"是两类失败——归入专用码
+     * AIRY_ERR_LLM_BAD_REQUEST，既不被外层重试，也能给用户正确指引。 */
     switch (*out_http_code) {
     case 401:
     case 403:
         return AIRY_ERR_LLM_AUTH_FAIL;
     case 429:
         return AIRY_ERR_LLM_RATE_LIMIT;
+    case 400:
+    case 422:
+        return AIRY_ERR_LLM_BAD_REQUEST;
     default:
         return AIRY_ERR_IO;
     }
