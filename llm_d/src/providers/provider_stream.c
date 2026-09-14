@@ -323,6 +323,14 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
      * Falling through here previously surfaced provider rejections (e.g.
      * DeepSeek "tools[13].function.name" 400) as OK with a zero-token empty
      * stream, which clients rendered as "no reply / thinking only". */
+    if (http_code == 400 || http_code == 422) {
+        /* N-3（0.1.16）：provider 明确拒绝请求体（非法 JSON / 无效 UTF-8），
+         * 归入专用码，避免与"网络不可达"（AIRY_ERR_IO）混为一谈。 */
+        SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s http_code=%ld "
+                      "DIAGNOSIS=request_body_rejected",
+                      url, http_code);
+        return AIRY_ERR_LLM_BAD_REQUEST;
+    }
     if (http_code >= 400) {
         SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s http_code=%ld "
                       "DIAGNOSIS=upstream_http_error",

@@ -67,6 +67,9 @@ static const char *llm_error_message(int ret)
         return "Provider authentication failed (check API key in config/secrets.env)";
     case AIRY_ERR_LLM_RATE_LIMIT:
         return "Provider rate limited (HTTP 429), retry later";
+    case AIRY_ERR_LLM_BAD_REQUEST:
+        return "Provider rejected the request body (HTTP 400/422): malformed JSON or "
+               "invalid UTF-8 in messages; check the message content";
     case AIRY_ERR_LLM_CONTEXT_LEN:
         return "Context length exceeded for model";
     case AIRY_ERR_NOT_SUPPORTED:
@@ -101,6 +104,7 @@ static int llm_error_is_retryable(int ret)
     case AIRY_ERR_LLM_NO_PROVIDER:
     case AIRY_ERR_LLM_CONTEXT_LEN:
     case AIRY_ERR_LLM_TOKEN_LIMIT:
+    case AIRY_ERR_LLM_BAD_REQUEST:
     case AIRY_ERR_INVALID_PARAM:
     case AIRY_ERR_NOT_SUPPORTED:
         return 0;
