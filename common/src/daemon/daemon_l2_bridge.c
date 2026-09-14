@@ -16,12 +16,20 @@
  *
  * Wire contract (L2 standard §1.3, [SC] SSoT airymax/ipc.h): one L1
  * transaction carries a bare struct airy_ipc_msg_hdr (128B Layout C v4)
- * followed by the JSON-RPC payload. magic is the discriminator; the
- * JSON-RPC body is self-describing, so encode() fills AIRY_IPC_OP_SEND and
- * decode() does not validate the opcode. Timestamps are monotonic via
- * airy_time_ns() (8.2.3 SSoT); the payload CRC32 is the IEEE 802.3
- * computation exposed by the [SC] contract layer (airy_task_desc_crc32 —
- * bit-identical to the IPC-domain helper, but public and all-platform).
+ * followed by the payload. magic is the discriminator; the JSON-RPC body is
+ * self-describing, so encode() fills AIRY_IPC_OP_SEND and decode() does not
+ * validate the opcode. Timestamps are monotonic via airy_time_ns() (8.2.3
+ * SSoT); the payload CRC32 is the IEEE 802.3 computation exposed by the
+ * [SC] contract layer (airy_task_desc_crc32 — bit-identical to the
+ * IPC-domain helper, but public and all-platform).
+ *
+ * Payload protocol layer (B1, 02-ipc-protocol.md §3): typed payloads carry
+ * an 8-byte struct airy_ipc_payload discriminator (AIRY_IPC_PT_*) before
+ * the body; legacy JSON-RPC text has no discriminator and is demultiplexed
+ * to the dispatch callback as the implicit REQUEST. EVENT / STREAM /
+ * CONTROL go to the notify callback (fire-and-forget, no reply); typed
+ * REQUEST/RESPONSE are dropped — the JSON dispatch boundary is untyped by
+ * contract.
  *
  * Drop policy (L2 §2.3): malformed envelopes are logged (WARN) and dropped
  * with no ERROR reply — the binder surfaces AIRY_ERR_CANCELED to the
@@ -63,6 +71,7 @@
 
 struct daemon_l2_bridge {
     daemon_l2_dispatch_fn dispatch;
+    daemon_l2_notify_fn notify; /**< typed EVENT/STREAM/CONTROL consumer; may be NULL */
     void *userdata;
     airy_ipc_channel_t *channel;
     atomic_bool detached; /**< stop() set: refuse and fail new transactions */
@@ -111,6 +120,38 @@ static airy_err_t daemon_l2_bridge_cb(airy_ipc_channel_t *channel,
         /* L2 §2.3: malformed envelope — log, drop, send no reply. */
         SVC_LOG_WARN("daemon_l2_bridge: dropped malformed envelope (%d) len=%zu", drc,
                      msg->size);
+        atomic_fetch_sub_explicit(&bridge->inflight, 1, memory_order_acq_rel);
+        return AIRY_ERR_CANCELED;
+    }
+
+    /* Payload protocol demultiplexing (B1): typed EVENT/STREAM/CONTROL go
+     * to the notify callback with no reply (fire-and-forget); typed
+     * REQUEST/RESPONSE are dropped (the JSON dispatch boundary is untyped
+     * by contract); legacy untyped payloads stay on the JSON path. */
+    uint32_t ptype = 0;
+    const void *body = NULL;
+    size_t body_len = 0;
+    int prc = daemon_l2_payload_parse(req_payload, req_len, &ptype, &body, &body_len);
+    if (prc != 0) {
+        SVC_LOG_WARN("daemon_l2_bridge: dropped payload with bad discriminator (%d) trace=%llu",
+                     prc, (unsigned long long)trace_id);
+        atomic_fetch_sub_explicit(&bridge->inflight, 1, memory_order_acq_rel);
+        return AIRY_ERR_CANCELED;
+    }
+    if (ptype == AIRY_IPC_PT_EVENT || ptype == AIRY_IPC_PT_STREAM ||
+        ptype == AIRY_IPC_PT_CONTROL) {
+        if (bridge->notify) {
+            bridge->notify(ptype, body, body_len, bridge->userdata);
+        } else {
+            SVC_LOG_WARN("daemon_l2_bridge: typed payload type=%u dropped (no notify consumer)",
+                         ptype);
+        }
+        atomic_fetch_sub_explicit(&bridge->inflight, 1, memory_order_acq_rel);
+        return AIRY_SUCCESS;
+    }
+    if (ptype != 0) {
+        SVC_LOG_WARN("daemon_l2_bridge: dropped typed payload type=%u (dispatch is untyped)",
+                     ptype);
         atomic_fetch_sub_explicit(&bridge->inflight, 1, memory_order_acq_rel);
         return AIRY_ERR_CANCELED;
     }
@@ -177,8 +218,15 @@ static airy_err_t daemon_l2_bridge_cb(airy_ipc_channel_t *channel,
 daemon_l2_bridge_t *daemon_l2_bridge_start(const char *channel_name,
                                            daemon_l2_dispatch_fn dispatch, void *userdata)
 {
+    return daemon_l2_bridge_start_ex(channel_name, dispatch, NULL, userdata);
+}
+
+daemon_l2_bridge_t *daemon_l2_bridge_start_ex(const char *channel_name,
+                                              daemon_l2_dispatch_fn dispatch,
+                                              daemon_l2_notify_fn notify, void *userdata)
+{
     if (!channel_name || *channel_name == '\0' || !dispatch) {
-        SVC_LOG_ERROR("daemon_l2_bridge_start: null/empty channel_name or dispatch");
+        SVC_LOG_ERROR("daemon_l2_bridge_start_ex: null/empty channel_name or dispatch");
         return NULL;
     }
     /* No name-length pre-check: corekern create_channel is the single
@@ -189,17 +237,18 @@ daemon_l2_bridge_t *daemon_l2_bridge_start(const char *channel_name,
      * airy_init() reach here initialized. */
     airy_err_t irc = airy_ipc_init();
     if (irc != AIRY_SUCCESS) {
-        SVC_LOG_ERROR("daemon_l2_bridge_start: airy_ipc_init failed (%d)", irc);
+        SVC_LOG_ERROR("daemon_l2_bridge_start_ex: airy_ipc_init failed (%d)", irc);
         return NULL;
     }
 
     daemon_l2_bridge_t *bridge = (daemon_l2_bridge_t *)AIRY_CALLOC(1, sizeof(*bridge));
     if (!bridge) {
-        SVC_LOG_ERROR("daemon_l2_bridge_start: alloc failed");
+        SVC_LOG_ERROR("daemon_l2_bridge_start_ex: alloc failed");
         return NULL;
     }
 
     bridge->dispatch = dispatch;
+    bridge->notify = notify;
     bridge->userdata = userdata;
     atomic_store_explicit(&bridge->detached, false, memory_order_relaxed);
     atomic_store_explicit(&bridge->inflight, 0, memory_order_relaxed);
@@ -207,7 +256,7 @@ daemon_l2_bridge_t *daemon_l2_bridge_start(const char *channel_name,
     airy_err_t rc = airy_ipc_create_channel(channel_name, daemon_l2_bridge_cb, bridge,
                                             &bridge->channel);
     if (rc != AIRY_SUCCESS) {
-        SVC_LOG_ERROR("daemon_l2_bridge_start: create_channel failed (%d) name=%s", rc,
+        SVC_LOG_ERROR("daemon_l2_bridge_start_ex: create_channel failed (%d) name=%s", rc,
                       channel_name);
         AIRY_FREE(bridge);
         return NULL;
@@ -313,6 +362,200 @@ int daemon_l2_envelope_decode(const void *buf, size_t buf_size, const void **out
     *out_trace_id = hdr.trace_id;
     *out_src_task = hdr.src_task;
     return 0;
+}
+
+int daemon_l2_payload_frame(uint32_t type, const void *body, size_t body_len, void *out,
+                            size_t out_cap, size_t *out_len)
+{
+    if (!out || (!body && body_len > 0) || type < AIRY_IPC_PT_REQUEST ||
+        type > AIRY_IPC_PT_CONTROL) {
+        return AIRY_EINVAL;
+    }
+    if (body_len > DAEMON_L2_MAX_PAYLOAD - sizeof(struct airy_ipc_payload) ||
+        out_cap < sizeof(struct airy_ipc_payload) + body_len) {
+        return AIRY_EMSGSIZE;
+    }
+
+    struct airy_ipc_payload disc;
+    disc.type = type;
+    disc.reserved = 0;
+    AIRY_MEMCPY(out, &disc, sizeof(disc));
+    if (body_len > 0) {
+        AIRY_MEMCPY((uint8_t *)out + sizeof(disc), body, body_len);
+    }
+    if (out_len) {
+        *out_len = sizeof(disc) + body_len;
+    }
+    return 0;
+}
+
+int daemon_l2_payload_parse(const void *payload, size_t len, uint32_t *out_type,
+                            const void **out_body, size_t *out_body_len)
+{
+    if (!out_type || !out_body || !out_body_len) {
+        return AIRY_EINVAL;
+    }
+    *out_type = 0;
+    *out_body = NULL;
+    *out_body_len = 0;
+    if (!payload && len > 0) {
+        return AIRY_EINVAL;
+    }
+    if (!payload || len == 0) {
+        return 0; /* legacy empty payload */
+    }
+
+    if (len >= sizeof(struct airy_ipc_payload)) {
+        struct airy_ipc_payload disc;
+        AIRY_MEMCPY(&disc, payload, sizeof(disc));
+        if (disc.type >= AIRY_IPC_PT_REQUEST && disc.type <= AIRY_IPC_PT_CONTROL) {
+            if (disc.reserved != 0) {
+                return AIRY_ERR_PROTOCOL;
+            }
+            *out_type = disc.type;
+            *out_body = (const uint8_t *)payload + sizeof(disc);
+            *out_body_len = len - sizeof(disc);
+            return 0;
+        }
+    }
+
+    /* No valid discriminator: legacy untyped (JSON-RPC text) payload. */
+    *out_body = payload;
+    *out_body_len = len;
+    return 0;
+}
+
+/** Fire-and-forget core: frame -> envelope -> connect -> airy_ipc_send.
+ * Used by the EVENT / STREAM / CONTROL senders; no reply is produced, the
+ * daemon-side notify callback is the only consumption point. */
+static int daemon_l2_send_typed(const char *channel, uint32_t type, const void *body,
+                                size_t body_len)
+{
+    if (!channel || *channel == '\0' || (!body && body_len > 0)) {
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    if (body_len > DAEMON_L2_MAX_PAYLOAD - sizeof(struct airy_ipc_payload)) {
+        return AIRY_EMSGSIZE;
+    }
+
+    size_t framed_len = 0;
+    size_t framed_cap = sizeof(struct airy_ipc_payload) + body_len;
+    uint8_t *framed = AIRY_MALLOC(framed_cap);
+    if (!framed) {
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+    int frc = daemon_l2_payload_frame(type, body, body_len, framed, framed_cap, &framed_len);
+    if (frc != 0) {
+        AIRY_FREE(framed);
+        return frc;
+    }
+
+    size_t wire_len = (size_t)AIRY_IPC_HDR_SIZE + framed_len;
+    uint8_t *wire = AIRY_MALLOC(wire_len);
+    if (!wire) {
+        AIRY_FREE(framed);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+    int erc = daemon_l2_envelope_encode(0, daemon_l2_self_task(), 0, framed, framed_len, wire,
+                                        wire_len);
+    AIRY_FREE(framed);
+    if (erc != 0) {
+        AIRY_FREE(wire);
+        return erc;
+    }
+
+    /* Idempotent (CAS swap inside corekern) — mirrors bridge_start_ex. */
+    airy_err_t irc = airy_ipc_init();
+    if (irc != AIRY_SUCCESS) {
+        AIRY_FREE(wire);
+        return (int)irc;
+    }
+
+    airy_ipc_channel_t *client = NULL;
+    airy_err_t cerr = airy_ipc_connect(channel, &client);
+    if (cerr != AIRY_SUCCESS) {
+        /* Transport codes propagate (ENOENT: no bridge mounted). */
+        AIRY_FREE(wire);
+        return (int)cerr;
+    }
+
+    airy_kernel_ipc_message_t msg = {.code = 1,
+                                     .data = wire,
+                                     .size = wire_len,
+                                     .fd = -1,
+                                     .msg_id = 0};
+    airy_err_t serr = airy_ipc_send(client, &msg);
+    airy_ipc_close(client);
+    AIRY_FREE(wire);
+
+    if (serr != AIRY_SUCCESS) {
+        SVC_LOG_WARN("daemon_l2_send_typed: send failed (type=%u, err=%d)", type, (int)serr);
+        return (serr == AIRY_ERR_CANCELED) ? AIRY_ERR_GENERIC_FAIL : (int)serr;
+    }
+    return AIRY_SUCCESS;
+}
+
+int daemon_l2_publish_event(const char *channel, uint32_t topic_id, uint32_t priority,
+                            const void *data, size_t len)
+{
+    if (!data && len > 0) {
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    struct airy_ipc_event ev;
+    AIRY_MEMSET(&ev, 0, sizeof(ev));
+    ev.event_id = airy_time_ns();
+    ev.topic_id = topic_id;
+    ev.priority = priority;
+
+    size_t body_len = sizeof(ev) + len;
+    uint8_t *body = AIRY_MALLOC(body_len);
+    if (!body) {
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+    AIRY_MEMCPY(body, &ev, sizeof(ev));
+    if (len > 0) {
+        AIRY_MEMCPY(body + sizeof(ev), data, len);
+    }
+    int rc = daemon_l2_send_typed(channel, AIRY_IPC_PT_EVENT, body, body_len);
+    AIRY_FREE(body);
+    return rc;
+}
+
+int daemon_l2_stream_send(const char *channel, uint64_t stream_id, uint32_t seq, uint32_t flags,
+                          const void *chunk, size_t len)
+{
+    if (!chunk && len > 0) {
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    struct airy_ipc_stream st;
+    AIRY_MEMSET(&st, 0, sizeof(st));
+    st.stream_id = stream_id;
+    st.seq = seq;
+    st.flags = flags;
+
+    size_t body_len = sizeof(st) + len;
+    uint8_t *body = AIRY_MALLOC(body_len);
+    if (!body) {
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+    AIRY_MEMCPY(body, &st, sizeof(st));
+    if (len > 0) {
+        AIRY_MEMCPY(body + sizeof(st), chunk, len);
+    }
+    int rc = daemon_l2_send_typed(channel, AIRY_IPC_PT_STREAM, body, body_len);
+    AIRY_FREE(body);
+    return rc;
+}
+
+int daemon_l2_ctrl_send(const char *channel, uint32_t opcode, uint32_t arg)
+{
+    struct airy_ipc_control ctrl;
+    AIRY_MEMSET(&ctrl, 0, sizeof(ctrl));
+    ctrl.opcode = opcode;
+    ctrl.arg = arg;
+    return daemon_l2_send_typed(channel, AIRY_IPC_PT_CONTROL, &ctrl, sizeof(ctrl));
 }
 
 int daemon_l2_channel_for_socket(const char *socket_path, char *channel, size_t channel_size)

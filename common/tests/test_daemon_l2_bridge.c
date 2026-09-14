@@ -704,6 +704,165 @@ static void test_rpc_call_resp_e2e(void)
     TEST_END();
 }
 
+/* ---- B1 payload 层：frame/parse 校验与 roundtrip ---- */
+
+static void test_payload_frame_parse(void)
+{
+    TEST_BEGIN("test_payload_frame_parse");
+
+    /* frame 参数校验 */
+    uint8_t buf[64];
+    size_t flen = 0;
+    TEST_ASSERT(daemon_l2_payload_frame(0x0009u, "x", 1, buf, sizeof(buf), &flen) ==
+                    AIRY_EINVAL,
+                "unknown payload type rejected");
+    TEST_ASSERT(daemon_l2_payload_frame(AIRY_IPC_PT_EVENT, NULL, 1, buf, sizeof(buf),
+                                        &flen) == AIRY_EINVAL,
+                "NULL body with len>0 rejected");
+    TEST_ASSERT(daemon_l2_payload_frame(AIRY_IPC_PT_EVENT, "x", 1, NULL, sizeof(buf),
+                                        &flen) == AIRY_EINVAL,
+                "NULL out rejected");
+    TEST_ASSERT(daemon_l2_payload_frame(AIRY_IPC_PT_EVENT, "xy", 2, buf, 8, &flen) ==
+                    AIRY_EMSGSIZE,
+                "undersized out rejected");
+
+    /* EVENT body roundtrip（字段级） */
+    struct airy_ipc_event ev_in = {.event_id = 0x1122334455667788ULL,
+                                   .topic_id = 42,
+                                   .priority = 7};
+    uint8_t ev_body[sizeof(ev_in) + 5];
+    AIRY_MEMCPY(ev_body, &ev_in, sizeof(ev_in));
+    AIRY_MEMCPY(ev_body + sizeof(ev_in), "hello", 5);
+    TEST_ASSERT(daemon_l2_payload_frame(AIRY_IPC_PT_EVENT, ev_body, sizeof(ev_body), buf,
+                                        sizeof(buf), &flen) == 0,
+                "EVENT frame succeeded");
+    TEST_ASSERT(flen == sizeof(struct airy_ipc_payload) + sizeof(ev_body),
+                "framed length = 8 + body");
+
+    uint32_t ptype = 0;
+    const void *body = NULL;
+    size_t body_len = 0;
+    TEST_ASSERT(daemon_l2_payload_parse(buf, flen, &ptype, &body, &body_len) == 0,
+                "parse succeeded");
+    TEST_ASSERT(ptype == AIRY_IPC_PT_EVENT, "type demultiplexed");
+    TEST_ASSERT(body_len == sizeof(ev_body), "body length preserved");
+    struct airy_ipc_event ev_out;
+    AIRY_MEMCPY(&ev_out, body, sizeof(ev_out));
+    TEST_ASSERT(ev_out.event_id == ev_in.event_id && ev_out.topic_id == 42 &&
+                    ev_out.priority == 7,
+                "EVENT header round-tripped");
+    TEST_ASSERT(memcmp((const uint8_t *)body + sizeof(ev_out), "hello", 5) == 0,
+                "EVENT data round-tripped");
+
+    /* parse 参数校验与 legacy 归类 */
+    TEST_ASSERT(daemon_l2_payload_parse(NULL, 4, &ptype, &body, &body_len) == AIRY_EINVAL,
+                "NULL payload with len>0 rejected");
+    TEST_ASSERT(daemon_l2_payload_parse(buf, flen, NULL, &body, &body_len) == AIRY_EINVAL,
+                "NULL out_type rejected");
+
+    const char *json = "{\"jsonrpc\":\"2.0\"}";
+    TEST_ASSERT(daemon_l2_payload_parse(json, strlen(json), &ptype, &body, &body_len) == 0,
+                "legacy parse succeeded");
+    TEST_ASSERT(ptype == 0, "legacy JSON text maps to untyped (0)");
+    TEST_ASSERT(body_len == strlen(json) && memcmp(body, json, body_len) == 0,
+                "legacy view covers whole payload");
+
+    /* 非零 reserved 判别头拒绝 */
+    uint8_t bad[16] = {0x03, 0x00, 0x00, 0x00, 0xAA, 0xBB, 0xCC, 0xDD};
+    TEST_ASSERT(daemon_l2_payload_parse(bad, sizeof(bad), &ptype, &body, &body_len) ==
+                    AIRY_ERR_PROTOCOL,
+                "non-zero reserved in discriminator rejected");
+
+    TEST_END();
+}
+
+/* ---- B1 E2E：typed payload 经 L2 通道端到端 demux ---- */
+
+struct typed_ctx {
+    uint32_t types[8];
+    size_t n;
+    uint8_t bodies[8][64];
+    size_t body_lens[8];
+};
+
+static void typed_notify(uint32_t payload_type, const void *body, size_t body_len, void *userdata)
+{
+    struct typed_ctx *ctx = (struct typed_ctx *)userdata;
+    if (ctx->n >= 8 || body_len > sizeof(ctx->bodies[0])) {
+        return;
+    }
+    ctx->types[ctx->n] = payload_type;
+    ctx->body_lens[ctx->n] = body_len;
+    if (body_len > 0 && body) {
+        AIRY_MEMCPY(ctx->bodies[ctx->n], body, body_len);
+    }
+    ctx->n++;
+}
+
+static void test_e2e_typed_payload_demux(void)
+{
+    TEST_BEGIN("test_e2e_typed_payload_demux");
+
+    struct typed_ctx ctx = {0};
+    daemon_l2_bridge_t *bridge =
+        daemon_l2_bridge_start_ex("l2t.typed", echo_dispatch, typed_notify, &ctx);
+    TEST_ASSERT(bridge != NULL, "bridge started with notify");
+
+    /* EVENT：发布并核对 body 字段 */
+    const char *evt_data = "evt-payload";
+    TEST_ASSERT(daemon_l2_publish_event("l2t.typed", 9, 3, evt_data, strlen(evt_data)) ==
+                    AIRY_SUCCESS,
+                "EVENT published");
+    TEST_ASSERT(daemon_l2_stream_send("l2t.typed", 0x5A5AULL, 0, AIRY_IPC_STREAM_FLAG_MORE,
+                                      "chunk-1", 7) == AIRY_SUCCESS,
+                "STREAM chunk 1 sent");
+    TEST_ASSERT(daemon_l2_stream_send("l2t.typed", 0x5A5AULL, 1, AIRY_IPC_STREAM_FLAG_FIN,
+                                      NULL, 0) == AIRY_SUCCESS,
+                "STREAM FIN (empty) sent");
+    TEST_ASSERT(daemon_l2_ctrl_send("l2t.typed", AIRY_IPC_CTRL_PING, 0xABCDu) == AIRY_SUCCESS,
+                "CONTROL PING sent");
+
+    /* send 是同步派发（sender 线程回调），返回即已送达 */
+    TEST_ASSERT(ctx.n == 4, "notify received exactly four payloads");
+    TEST_ASSERT(ctx.types[0] == AIRY_IPC_PT_EVENT && ctx.types[1] == AIRY_IPC_PT_STREAM &&
+                    ctx.types[2] == AIRY_IPC_PT_STREAM && ctx.types[3] == AIRY_IPC_PT_CONTROL,
+                "payload types in send order");
+
+    struct airy_ipc_event ev;
+    AIRY_MEMCPY(&ev, ctx.bodies[0], sizeof(ev));
+    TEST_ASSERT(ev.topic_id == 9 && ev.priority == 3, "EVENT header fields");
+    TEST_ASSERT(ctx.body_lens[0] == sizeof(ev) + strlen(evt_data) &&
+                memcmp(ctx.bodies[0] + sizeof(ev), evt_data, strlen(evt_data)) == 0,
+                "EVENT data intact");
+
+    struct airy_ipc_stream st0;
+    AIRY_MEMCPY(&st0, ctx.bodies[1], sizeof(st0));
+    TEST_ASSERT(st0.stream_id == 0x5A5AULL && st0.seq == 0 &&
+                    st0.flags == AIRY_IPC_STREAM_FLAG_MORE && ctx.body_lens[1] == sizeof(st0) + 7,
+                "STREAM chunk 1 fields");
+    struct airy_ipc_stream st1;
+    AIRY_MEMCPY(&st1, ctx.bodies[2], sizeof(st1));
+    TEST_ASSERT(st1.seq == 1 && st1.flags == AIRY_IPC_STREAM_FLAG_FIN && ctx.body_lens[2] == sizeof(st1),
+                "STREAM FIN empty chunk");
+
+    struct airy_ipc_control ctrl;
+    AIRY_MEMCPY(&ctrl, ctx.bodies[3], sizeof(ctrl));
+    TEST_ASSERT(ctrl.opcode == AIRY_IPC_CTRL_PING && ctrl.arg == 0xABCDu &&
+                    ctx.body_lens[3] == sizeof(ctrl),
+                "CONTROL fields");
+
+    /* 参数校验 */
+    TEST_ASSERT(daemon_l2_publish_event("l2t.typed", 1, 1, NULL, 4) == AIRY_ERR_INVALID_PARAM,
+                "EVENT NULL data with len>0 rejected");
+    TEST_ASSERT(daemon_l2_publish_event("l2t.nomount", 1, 1, "x", 1) == AIRY_ENOENT,
+                "publish to unmounted channel propagates ENOENT");
+
+    daemon_l2_bridge_stop(bridge);
+    airy_ipc_cleanup();
+
+    TEST_END();
+}
+
 int main(void)
 {
     printf("========================================\n");
@@ -721,6 +880,8 @@ int main(void)
     test_channel_for_socket_derivation();
     test_rpc_call_e2e();
     test_rpc_call_resp_e2e();
+    test_payload_frame_parse();
+    test_e2e_typed_payload_demux();
 
     printf("\n========================================\n");
     printf("  daemon_l2_bridge 测试结果汇总\n");

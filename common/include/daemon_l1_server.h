@@ -165,6 +165,25 @@ typedef int (*daemon_l2_dispatch_fn)(const char *req_json, size_t req_len,
                                      char **resp_json, size_t *resp_len, void *userdata);
 
 /**
+ * @brief L2 typed-payload notification callback (daemon side).
+ *
+ * Invoked on the sender's thread for every well-formed EVENT / STREAM /
+ * CONTROL payload arriving on the channel. REQUEST/RESPONSE continue to go
+ * through daemon_l2_dispatch_fn; PT_REQUEST/PT_RESPONSE arriving in typed
+ * form are dropped (the JSON-RPC dispatch boundary is untyped by contract).
+ *
+ * @param payload_type [in] AIRY_IPC_PT_EVENT / _STREAM / _CONTROL
+ *                               ([SC] airymax/ipc.h)
+ * @param body         [in] zero-copy view of the body section (after the
+ *                               8-byte discriminator); valid during the call
+ *                               only; NULL when body_len == 0
+ * @param body_len     [in] body length in bytes
+ * @param userdata     [in] the pointer given at daemon_l2_bridge_start_ex()
+ */
+typedef void (*daemon_l2_notify_fn)(uint32_t payload_type, const void *body, size_t body_len,
+                                    void *userdata);
+
+/**
  * @brief Mount an L2 envelope bridge on a corekern L1 channel.
  *
  * Same mount semantics as daemon_l1_server_start(): idempotent corekern IPC
@@ -181,6 +200,26 @@ typedef int (*daemon_l2_dispatch_fn)(const char *req_json, size_t req_len,
  */
 daemon_l2_bridge_t *daemon_l2_bridge_start(const char *channel_name,
                                            daemon_l2_dispatch_fn dispatch, void *userdata);
+
+/**
+ * @brief Mount an L2 envelope bridge with typed-payload notifications.
+ *
+ * Identical to daemon_l2_bridge_start() plus a notify callback: well-formed
+ * EVENT / STREAM / CONTROL payloads are demultiplexed to @p notify instead
+ * of the JSON dispatch boundary (fire-and-forget sends, no reply produced).
+ * @p notify may be NULL — typed notifications are then dropped with a WARN.
+ *
+ * @param channel_name [in] globally unique channel name (e.g. "sched.rpc")
+ * @param dispatch     [in] JSON-RPC dispatch callback (legacy/REQUEST path)
+ * @param notify       [in] typed-payload notification callback, may be NULL
+ * @param userdata     [in] opaque context passed through to both callbacks
+ * @return handle on success, NULL on failure (bad args, IPC init failure,
+ *         duplicate name)
+ * @ownership caller frees via daemon_l2_bridge_stop()
+ */
+daemon_l2_bridge_t *daemon_l2_bridge_start_ex(const char *channel_name,
+                                              daemon_l2_dispatch_fn dispatch,
+                                              daemon_l2_notify_fn notify, void *userdata);
 
 /**
  * @brief Unmount the L2 bridge and release all resources.
@@ -241,6 +280,99 @@ int daemon_l2_envelope_encode(uint64_t trace_id, uint64_t src_task, uint64_t dst
 int daemon_l2_envelope_decode(const void *buf, size_t buf_size, const void **out_payload,
                               size_t *out_payload_len, uint64_t *out_trace_id,
                               uint64_t *out_src_task);
+
+/**
+ * @brief Frame a typed payload: [8B discriminator][body].
+ *
+ * Prepends the [SC] struct airy_ipc_payload discriminator (AIRY_IPC_PT_* +
+ * zeroed reserved) to the body bytes. The framed payload is what goes into
+ * daemon_l2_envelope_encode()'s payload argument.
+ *
+ * @param type     [in] one of AIRY_IPC_PT_REQUEST..AIRY_IPC_PT_CONTROL
+ * @param body     [in] body bytes; NULL valid only when body_len == 0
+ * @param body_len [in] body length in bytes
+ * @param out      [out] output buffer (not NULL)
+ * @param out_cap  [in] capacity of out; must be >= 8 + body_len
+ * @param out_len  [out] framed length (8 + body_len); may be NULL
+ * @return 0 on success; AIRY_EINVAL on NULL/arg misuse or unknown type;
+ *         AIRY_EMSGSIZE on capacity violations
+ */
+int daemon_l2_payload_frame(uint32_t type, const void *body, size_t body_len, void *out,
+                            size_t out_cap, size_t *out_len);
+
+/**
+ * @brief Parse a payload into (type, zero-copy body view).
+ *
+ * Discriminator check: when the leading 8 bytes carry a valid
+ * AIRY_IPC_PT_* with a zero reserved field, *out_type is that type and the
+ * view aliases the body section. Otherwise the payload predates the typed
+ * framing (legacy JSON-RPC text) and *out_type is 0 with the view covering
+ * the whole payload — callers map it to the implicit REQUEST/RESPONSE pair.
+ *
+ * @param payload     [in] payload bytes (after the 128B envelope header);
+ *                         NULL valid only when len == 0
+ * @param len         [in] payload length in bytes
+ * @param out_type    [out] AIRY_IPC_PT_* or 0 for legacy untyped payloads
+ * @param out_body    [out] body view (aliases payload; NULL when empty)
+ * @param out_body_len [out] body length in bytes
+ * @return 0 on success; AIRY_EINVAL on NULL args; AIRY_ERR_PROTOCOL on a
+ *         non-zero reserved field in the discriminator
+ */
+int daemon_l2_payload_parse(const void *payload, size_t len, uint32_t *out_type,
+                            const void **out_body, size_t *out_body_len);
+
+/**
+ * @brief Publish one EVENT payload to an L2 channel (fire-and-forget).
+ *
+ * Frames the [SC] struct airy_ipc_event body (event_id is assigned from the
+ * monotonic clock), wraps it in an L2 envelope and delivers it with
+ * airy_ipc_send — no reply is produced, the daemon-side notify callback is
+ * the only consumption point.
+ *
+ * @param channel  [in] channel name from daemon_l2_channel_for_socket()
+ * @param topic_id [in] topic assigned at subscribe time
+ * @param priority [in] event priority (0-139)
+ * @param data     [in] event data; NULL valid only when len == 0
+ * @param len      [in] event data length in bytes
+ * @return AIRY_SUCCESS on delivery; AIRY_ERR_INVALID_PARAM on NULL args;
+ *         AIRY_EMSGSIZE when the framed payload exceeds DAEMON_L2_MAX_PAYLOAD;
+ *         transport codes propagate (e.g. AIRY_ENOENT: no bridge mounted)
+ */
+int daemon_l2_publish_event(const char *channel, uint32_t topic_id, uint32_t priority,
+                            const void *data, size_t len);
+
+/**
+ * @brief Send one STREAM chunk to an L2 channel (fire-and-forget).
+ *
+ * Frames the [SC] struct airy_ipc_stream body (stream_id/seq/flags) and
+ * delivers it like daemon_l2_publish_event(). Stream termination is
+ * in-band: the final chunk carries AIRY_IPC_STREAM_FLAG_FIN, an abort
+ * carries AIRY_IPC_STREAM_FLAG_RST (both may carry zero-length chunks).
+ *
+ * @param channel   [in] channel name from daemon_l2_channel_for_socket()
+ * @param stream_id [in] stream identifier (sender-assigned, monotonic seq)
+ * @param seq       [in] chunk sequence number
+ * @param flags     [in] AIRY_IPC_STREAM_FLAG_MORE / _FIN / _RST
+ * @param chunk     [in] chunk bytes; NULL valid only when len == 0
+ * @param len       [in] chunk length in bytes
+ * @return same contract as daemon_l2_publish_event()
+ */
+int daemon_l2_stream_send(const char *channel, uint64_t stream_id, uint32_t seq, uint32_t flags,
+                          const void *chunk, size_t len);
+
+/**
+ * @brief Send one CONTROL message to an L2 channel (fire-and-forget).
+ *
+ * Frames the [SC] struct airy_ipc_control body (opcode/arg, no attached
+ * data) and delivers it like daemon_l2_publish_event(). Used for link
+ * management: AIRY_IPC_CTRL_HELLO/BYE/PING/PONG/FLOW_OFF/FLOW_ON.
+ *
+ * @param channel [in] channel name from daemon_l2_channel_for_socket()
+ * @param opcode  [in] AIRY_IPC_CTRL_*
+ * @param arg     [in] operation argument
+ * @return same contract as daemon_l2_publish_event()
+ */
+int daemon_l2_ctrl_send(const char *channel, uint32_t opcode, uint32_t arg);
 
 /**
  * @brief Derive the corekern L2 channel name for a daemon socket path.

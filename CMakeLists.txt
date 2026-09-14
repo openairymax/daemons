@@ -9,6 +9,16 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # 统一 daemon 二进制输出目录
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+# 0.1.16 B4（include 面收口，2026-09-14 裁决③）：daemons 服务面是 corekern
+# 头（ipc.h/error.h/task.h 等）的唯一外部合法消费者（第 2 句架构铁律：内核
+# 机制只被 daemon 服务面访问）。此处目录级注入使 daemon 树的 include 解析
+# 行为与收口前一致；gateway/CLI/cupolas 等客户端面不在本目录作用域内，
+# 不再看见内核头。路径由根 CMakeLists 的 AIRY_COREKERN_INCLUDE_DIR 提供
+# （源码模式 = 源码树；预编译模式 = 预编译镜像）。
+if(AIRY_COREKERN_INCLUDE_DIR)
+    include_directories(${AIRY_COREKERN_INCLUDE_DIR})
+endif()
+
 # 构建选项
 option(BUILD_TESTS "Build all unit tests" ON)
 option(BUILD_COVERAGE "Build with code coverage support" OFF)
