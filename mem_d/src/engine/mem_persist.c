@@ -12,11 +12,14 @@
 
 #include "mem_persist.h"
 #include "airy_memory.h"
+#include "airy_string.h"
 #include "svc_logger.h"
 #include "platform.h"
 
 #include <cjson/cJSON.h>
 #include <errno.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -236,6 +239,112 @@ void mem_persist_rewrite_all(mem_service_t *svc)
 
 /* ── Load ────────────────────────────────────────────────────────────── */
 
+/* Write @p len bytes to @p path via a temp file + fsync + rename so a crash
+ * mid-write never truncates an existing file. Returns true on success. */
+static bool mem_write_file_atomic(const char *path, const char *data, size_t len)
+{
+    char tmppath[4096];
+    if (snprintf(tmppath, sizeof(tmppath), "%s.tmp", path) >= (int)sizeof(tmppath))
+        return false;
+
+    FILE *f = fopen(tmppath, "wb");
+    if (!f)
+        return false;
+
+    bool failed = (len > 0 && fwrite(data, 1, len, f) != len);
+    if (!failed && fflush(f) != 0)
+        failed = true;
+#ifndef _WIN32
+    if (!failed) {
+        int fd = fileno(f);
+        if (fd >= 0 && fsync(fd) != 0)
+            failed = true;
+    }
+#else
+    if (!failed) {
+        int fd = _fileno(f);
+        if (fd >= 0 && _commit(fd) != 0)
+            failed = true;
+    }
+#endif
+    if (fclose(f) != 0)
+        failed = true;
+
+    if (failed) {
+        remove(tmppath);
+        return false;
+    }
+
+#ifndef _WIN32
+    if (rename(tmppath, path) != 0) {
+#else
+    if (!MoveFileExA(tmppath, path, MOVEFILE_REPLACE_EXISTING)) {
+#endif
+        remove(tmppath);
+        return false;
+    }
+    return true;
+}
+
+/* One-time repair of records written by earlier versions, which truncated
+ * memory by byte index and could therefore persist a multi-byte UTF-8
+ * character cut in half. Such a record, once recalled and sent to a model
+ * provider, is rejected with HTTP 400 "invalid unicode code point" while the
+ * user only sees a generic connectivity failure.
+ *
+ * Replace every invalid sequence with U+FFFD, keeping a full backup of the
+ * original file first; without a successful backup the store is left
+ * untouched. Returns true when *content was replaced by a repaired buffer
+ * (the caller owns and must free the previous buffer). */
+static bool mem_persist_repair_utf8(mem_service_t *svc, char **content, size_t *len)
+{
+    if (!svc || !svc->jsonl_path || !content || !*content || !len || *len == 0)
+        return false;
+
+    size_t in_len = *len;
+    if (in_len > (SIZE_MAX - 1) / 3)
+        return false;
+
+    /* Each invalid byte may expand to a 3-byte U+FFFD. */
+    size_t cap = in_len * 3 + 1;
+    char *clean = (char *)AIRY_MALLOC(cap);
+    if (!clean)
+        return false;
+
+    size_t written = string_utf8_sanitize(*content, in_len, clean, cap);
+    if (written == in_len && memcmp(clean, *content, in_len) == 0) {
+        AIRY_FREE(clean); /* already valid UTF-8, nothing to repair */
+        return false;
+    }
+
+    char bak[4096];
+    if (snprintf(bak, sizeof(bak), "%s.bak", svc->jsonl_path) >= (int)sizeof(bak)) {
+        SVC_LOG_WARN("mem_d persist: repair backup path too long, skip repair");
+        AIRY_FREE(clean);
+        return false;
+    }
+
+    if (!mem_write_file_atomic(bak, *content, in_len)) {
+        SVC_LOG_WARN("mem_d persist: repair backup write failed, skip repair");
+        AIRY_FREE(clean);
+        return false;
+    }
+
+    if (!mem_write_file_atomic(svc->jsonl_path, clean, written)) {
+        SVC_LOG_WARN("mem_d persist: repair rewrite failed, backup kept at %s", bak);
+        AIRY_FREE(clean);
+        return false;
+    }
+
+    SVC_LOG_WARN("mem_d persist: repaired legacy invalid UTF-8 records (%zu -> %zu bytes), backup at %s",
+                 in_len, written, bak);
+
+    AIRY_FREE(*content);
+    *content = clean;
+    *len = written;
+    return true;
+}
+
 void mem_persist_load_existing(mem_service_t *svc)
 {
     if (!svc || !svc->jsonl_path)
@@ -265,6 +374,10 @@ void mem_persist_load_existing(mem_service_t *svc)
     size_t read_len = fread(content, 1, (size_t)fsize, f);
     fclose(f);
     content[read_len] = '\0';
+
+    /* 存量数据清洗：早期版本按字节截断写坏的记录在这里一次性修复
+     * （备份原文件后原地改写），随后按清洗后的内容加载。 */
+    (void)mem_persist_repair_utf8(svc, &content, &read_len);
 
     size_t loaded = 0;
     char *line_start = content;
