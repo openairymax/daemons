@@ -2,7 +2,7 @@
 
 > **模块路径**: `agentrt/daemons/scripts/`
 
-[![version](https://img.shields.io/badge/version-0.1.15-blue)](https://atomgit.com/openairymax/daemons)
+[![version](https://img.shields.io/badge/version-0.1.16-blue)](https://atomgit.com/openairymax/daemons)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later%20OR%20Apache--2.0-green)](../LICENSE)
 
 ## 这是什么

@@ -2,7 +2,7 @@
 
 > **模块路径**：`agentrt/daemons/market_d/` · **可执行文件 / CMake 目标**：`market_d` · **RPC 命名空间**：`market.*`
 
-[![Version](https://img.shields.io/badge/version-0.1.15-5a6b7e)](https://atomgit.com/openairymax/daemons)
+[![Version](https://img.shields.io/badge/version-0.1.16-5a6b7e)](https://atomgit.com/openairymax/daemons)
 [![License](https://img.shields.io/badge/license-AGPL--3.0+Apache--2.0-4a90d9)](../LICENSE)
 
 ## 这是什么
