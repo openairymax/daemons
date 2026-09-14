@@ -520,7 +520,9 @@ static void test_sanitize_llm_input_special_chars(void)
 static void test_rules_file_loading(void)
 {
     TEST("Load tool permission rules file");
-    const char *path = "/tmp/airy_test_permission_rules.yaml";
+    /* CI-2：PID 隔离，避免 ctest -j 并行互踩 */
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/airy_test_permission_rules_%d.yaml", (int)getpid());
     FILE *fp = fopen(path, "w");
     ASSERT(fp != NULL, "cannot create temp rules file");
     fputs("rules:\n"

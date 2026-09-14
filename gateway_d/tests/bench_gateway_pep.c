@@ -95,7 +95,8 @@ static void fake_start(void)
     g_allowed = 1;
     g_epoch = 1;
     g_stop = 0;
-    strcpy(g_sock_path, "/tmp/airy_pep_bench.sock");
+    /* CI-2：PID 隔离，避免 ctest -j 并行互踩 */
+    snprintf(g_sock_path, sizeof(g_sock_path), "/tmp/airy_pep_bench_%d.sock", (int)getpid());
     pthread_create(&g_srv, NULL, fake_pdp, NULL);
     /* 等待服务端就绪 */
     for (int i = 0; i < 50; i++) {
