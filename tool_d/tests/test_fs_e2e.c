@@ -56,8 +56,11 @@
     } while (0)
 #endif
 
-#define E2E_DIR  "/tmp/airy_e2e_coding"
-#define E2E_FILE E2E_DIR "/main.c"
+/* CI-2：PID 隔离，避免 ctest -j 并行互踩 */
+static char g_e2e_dir[256];
+static char g_e2e_file[256];
+#define E2E_DIR  g_e2e_dir
+#define E2E_FILE g_e2e_file
 
 /* coding 场景：Agent 创建的一个 C 源文件 */
 static const char kSource[] =
@@ -251,10 +254,14 @@ static void test_e2e_escape(tool_service_t *svc)
 {
     printf("\n[阶段 5] workspace 围堵（T16 越界拒绝）\n");
 
+    /* CI-2：PID 隔离，避免 ctest -j 并行互踩 */
+    char escape_path[256];
+    snprintf(escape_path, sizeof(escape_path), "/tmp/airy_e2e_escape_%d.txt", (int)getpid());
+
     /* 13. fs_write 越界绝对路径 → PERMISSION_DENIED，且不得产生文件 */
     cJSON *p = cJSON_CreateObject();
     CHECK(p != NULL);
-    cJSON_AddStringToObject(p, "path", "/tmp/airy_e2e_escape.txt");
+    cJSON_AddStringToObject(p, "path", escape_path);
     cJSON_AddStringToObject(p, "content", "should not exist");
     int ret = -999;
     tool_result_t *res = run_tool(svc, "fs_write", "tool_d", p, &ret);
@@ -265,7 +272,7 @@ static void test_e2e_escape(tool_service_t *svc)
         tool_result_free(res);
     }
 #ifndef _WIN32
-    TEST(access("/tmp/airy_e2e_escape.txt", F_OK) != 0, "越界写未产生文件 (DoD)");
+    TEST(access(escape_path, F_OK) != 0, "越界写未产生文件 (DoD)");
 #endif
 
     /* 14. fs_write ".." 相对路径越界 → PERMISSION_DENIED */
@@ -366,6 +373,10 @@ static void test_e2e_validation(tool_service_t *svc)
 int main(void)
 {
     printf("=== t9/2.4.4: 认知层→执行层端到端（tool_service_execute 完整链路）===\n\n");
+
+    /* CI-2：PID 隔离，避免 ctest -j 并行互踩 */
+    snprintf(g_e2e_dir, sizeof(g_e2e_dir), "/tmp/airy_e2e_coding_%d", (int)getpid());
+    snprintf(g_e2e_file, sizeof(g_e2e_file), "%s/main.c", g_e2e_dir);
 
     /* T16: 文件工具 workspace 围堵的沙箱根（先于任何工具调用设置） */
     setenv("AIRY_TOOL_SANDBOX_WORKSPACE", E2E_DIR, 1);

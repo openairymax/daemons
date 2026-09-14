@@ -496,7 +496,9 @@ static void test_channel_for_socket_derivation(void)
 
     /* ns 过长：>= 64 字符触发 ns_upper 守卫 */
     char long_path[128];
-    TEST_ASSERT(snprintf(long_path, sizeof(long_path), "/tmp/%064d.sock", 1) > 0,
+    /* CI-2：PID 隔离，避免 ctest -j 并行互踩（%04d 保底 4 位，ns 仍 >= 64） */
+    TEST_ASSERT(snprintf(long_path, sizeof(long_path), "/tmp/%04d-%059d.sock",
+                         (int)l2t_getpid(), 1) > 0,
                 "over-long ns path built");
     TEST_ASSERT(daemon_l2_channel_for_socket(long_path, channel, sizeof(channel)) ==
                     AIRY_EMSGSIZE,

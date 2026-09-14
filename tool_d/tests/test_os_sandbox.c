@@ -50,7 +50,8 @@ static int g_failures = 0;
         }                                             \
     } while (0)
 
-static const char *k_ws = "/tmp/airy_os_sandbox_ws";
+/* CI-2：PID 隔离，避免 ctest -j 并行互踩 */
+static char k_ws[256];
 
 static int run_in_sandbox(const os_sandbox_cfg_t *cfg, int (*action)(void))
 {
@@ -143,12 +144,15 @@ static int act_mount(void)
 
 static int act_write_tmp(void)
 {
-    int fd = open("/tmp/airy_sb_tmp_probe", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    /* CI-2：PID 隔离，避免 ctest -j 并行互踩 */
+    char path[128];
+    snprintf(path, sizeof(path), "/tmp/airy_sb_tmp_probe_%d", (int)getpid());
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
         return 1;
     }
     close(fd);
-    unlink("/tmp/airy_sb_tmp_probe");
+    unlink(path);
     return 0;
 }
 
@@ -280,7 +284,9 @@ static void test_fs_confine(void)
     if (f)
         fclose(f);
 
-    const char *k_sibling = "/tmp/airy_os_sandbox_ws_priv";
+    /* CI-2：PID 隔离，避免 ctest -j 并行互踩（与工作区同名前缀的兄弟目录） */
+    char k_sibling[320];
+    snprintf(k_sibling, sizeof(k_sibling), "%s_priv", k_ws);
     if (mkdir(k_sibling, 0755) != 0 && errno != EEXIST) {
         CHECK(0, "mkdir sibling");
     }
@@ -343,6 +349,8 @@ static void test_fs_confine(void)
 
 int main(void)
 {
+    /* CI-2：PID 隔离，避免 ctest -j 并行互踩 */
+    snprintf(k_ws, sizeof(k_ws), "/tmp/airy_os_sandbox_ws_%d", (int)getpid());
 
     mkdir(k_ws, 0755);
 
