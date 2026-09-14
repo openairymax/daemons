@@ -9,6 +9,7 @@
 #include "mem_service.h"
 
 #include "airy_memory.h"
+#include "airy_string.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -617,6 +618,82 @@ static void test_kb_utf8_chunking(void)
     printf("    PASSED\n");
 }
 
+/* 存量数据修复：早期版本按字节下标截断写坏的记忆记录，落盘后含有被腰斩
+ * 的多字节 UTF-8 序列；这类记录被召回并随请求体发给模型服务时会被拒绝
+ * （HTTP 400 invalid unicode code point），用户侧却只看到连通性故障。
+ * 载入时必须一次性清洗，且先备份原文件。 */
+static void test_persist_utf8_repair(void)
+{
+    printf("  test_persist_utf8_repair...\n");
+    mem_test_clean_persist();
+
+    /* 先建一次服务，确保 data/agentrt/memory 目录已创建 */
+    mem_service_t *boot = mem_service_create(16);
+    assert(boot != NULL);
+    mem_service_destroy(boot);
+
+    const char *home = getenv("AIRY_HOME");
+    assert(home != NULL && home[0] != '\0');
+    char path[4096];
+    char bak[4096];
+    snprintf(path, sizeof(path), "%s/data/agentrt/memory/mem.jsonl", home);
+    snprintf(bak, sizeof(bak), "%s.bak", path);
+    remove(bak);
+
+    /* 构造一条被字节截断的中文记录：data 尾部是被腰斩的 3 字节序列 */
+    const char *head = "{\"record_id\":\"0123456789abcdef0123456789abcdef\",\"data\":\"hi";
+    const unsigned char tail[2] = {0xE4, 0xB8};
+    char line[512];
+    int n = snprintf(line, sizeof(line),
+                     "%s%c%c\",\"metadata\":null,\"created_at\":1700000000,\"len\":5}\n",
+                     head, (char)tail[0], (char)tail[1]);
+    assert(n > 0 && (size_t)n < sizeof(line));
+
+    FILE *w = fopen(path, "wb");
+    assert(w != NULL);
+    assert(fwrite(line, 1, (size_t)n, w) == (size_t)n);
+    fclose(w);
+
+    /* 载入触发一次性清洗 */
+    mem_service_t *svc = mem_service_create(16);
+    assert(svc != NULL);
+    assert(mem_service_count(svc) == 1);
+
+    /* 原文件被完整备份（含原始非法字节） */
+    FILE *rb = fopen(bak, "rb");
+    assert(rb != NULL);
+    char raw[1024];
+    size_t raw_len = fread(raw, 1, sizeof(raw), rb);
+    fclose(rb);
+    assert(raw_len == (size_t)n);
+    assert(memcmp(raw, line, (size_t)n) == 0);
+
+    /* 主文件已被清洗为合法 UTF-8 */
+    FILE *rm = fopen(path, "rb");
+    assert(rm != NULL);
+    char cleaned[1024];
+    size_t clean_len = fread(cleaned, 1, sizeof(cleaned) - 1, rm);
+    fclose(rm);
+    cleaned[clean_len] = '\0';
+    assert(clean_len > 0);
+    assert(string_utf8_validate(cleaned, clean_len));
+
+    /* 召回内容同样为合法 UTF-8 */
+    mem_record_t rec = {0};
+    int ret = mem_service_get(svc, "0123456789abcdef0123456789abcdef", &rec);
+    assert(ret == AIRY_SUCCESS);
+    assert(rec.data != NULL);
+    assert(string_utf8_validate((const char *)rec.data, rec.len));
+    mem_record_free(&rec);
+
+    mem_service_destroy(svc);
+
+    remove(bak);
+    mem_test_clean_persist();
+
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
 
@@ -648,6 +725,7 @@ int main(void)
     test_embedding_fallback();
     test_kb_roundtrip();
     test_kb_utf8_chunking();
+    test_persist_utf8_repair();
     printf("=== All tests PASSED ===\n");
     return 0;
 }
