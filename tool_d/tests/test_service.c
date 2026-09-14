@@ -161,15 +161,19 @@ static void test_fs_delete_builtin(void)
 {
     printf("  test_fs_delete_builtin...\n");
 
-    const char *fpath = "/tmp/airy_test_fs_delete_file.txt";
-    const char *dpath = "/tmp/airy_test_fs_delete_dir";
+    /* CI-2：PID 隔离，避免 ctest -j 并行互踩 */
+    char fpath[256];
+    char dpath[256];
+    char subpath[320];
     char jbuf[512];
+    snprintf(fpath, sizeof(fpath), "/tmp/airy_test_fs_delete_file_%d.txt", (int)getpid());
+    snprintf(dpath, sizeof(dpath), "/tmp/airy_test_fs_delete_dir_%d", (int)getpid());
 
     /* 先清理上次运行可能残留的状态，避免 mkdir EEXIST / 非空目录误判。 */
     unlink(fpath);
+    snprintf(jbuf, sizeof(jbuf), "{\"path\":\"%s\",\"recursive\":true}", dpath);
     tool_result_t cleanup = {0};
-    (void)fs_delete_tool("{\"path\":\"/tmp/airy_test_fs_delete_dir\",\"recursive\":true}",
-                         &cleanup);
+    (void)fs_delete_tool(jbuf, &cleanup);
     AIRY_FREE(cleanup.output);
     AIRY_FREE(cleanup.error);
 
@@ -199,7 +203,8 @@ static void test_fs_delete_builtin(void)
 
     /* 3. 非空目录非递归 → 拒绝且目录保留 */
     CHECK(mkdir(dpath, 0755) == 0);
-    FILE *sub = fopen("/tmp/airy_test_fs_delete_dir/sub.txt", "wb");
+    snprintf(subpath, sizeof(subpath), "%s/sub.txt", dpath);
+    FILE *sub = fopen(subpath, "wb");
     CHECK(sub != NULL);
     fputs("x", sub);
     fclose(sub);

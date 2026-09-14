@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static void mem_test_clean_persist(void)
 {
@@ -619,8 +620,13 @@ static void test_kb_utf8_chunking(void)
 int main(void)
 {
 
-    setenv("AIRY_HOME", "/tmp/agentrt_mem_test_home", 1);
-    setenv("AIRY_RUNTIME_DIR", "/tmp/agentrt_mem_test", 1);
+    /* CI-2：PID 隔离，避免 ctest -j 并行互踩 */
+    char home[256];
+    char runtime_dir[256];
+    snprintf(home, sizeof(home), "/tmp/agentrt_mem_test_home_%d", (int)getpid());
+    snprintf(runtime_dir, sizeof(runtime_dir), "/tmp/agentrt_mem_test_%d", (int)getpid());
+    setenv("AIRY_HOME", home, 1);
+    setenv("AIRY_RUNTIME_DIR", runtime_dir, 1);
 
     unsetenv("AIRY_MEM_EMBEDDING_URL");
     unsetenv("AIRY_MEM_EMBEDDING_KEY");

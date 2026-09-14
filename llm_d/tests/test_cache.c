@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 static void test_llm_cache_create_destroy(void)
@@ -130,7 +131,16 @@ static void test_llm_cache_ttl(void)
 #ifdef _WIN32
     Sleep(2000);
 #else
-    sleep(2);
+    /* CI-2：不能依赖单次 sleep(2)——被信号中断时 sleep() 提前返回（返回
+     * 剩余秒数），偶发出现"TTL 未过期"假失败。改为按墙钟推进，循环等到
+     * time(NULL) 至少前进 2 秒，消除 EINTR 抖动。 */
+    {
+        time_t start = time(NULL);
+        while (time(NULL) - start < 2) {
+            struct timespec ts = {.tv_sec = 0, .tv_nsec = 50 * 1000 * 1000}; /* 50ms */
+            nanosleep(&ts, NULL);
+        }
+    }
 #endif
 
     retrieved = NULL;
