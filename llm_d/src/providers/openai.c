@@ -143,6 +143,13 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
             SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld "
                           "DIAGNOSIS=rate_limit_exhausted",
                           model, http_code);
+        } else if (http_code == 400 || http_code == 422) {
+            /* N-3（0.1.16）：provider 拒绝请求体（非法 JSON / 无效 UTF-8），
+             * 属确定性失败——单独诊断，便于从日志区分于"网络不可达"。 */
+            SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld "
+                          "DIAGNOSIS=request_body_rejected body=%.600s",
+                          model, http_code,
+                          http_resp && http_resp->data ? http_resp->data : "");
         } else {
             SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld "
                           "DIAGNOSIS=http_request_failed body=%.600s",
