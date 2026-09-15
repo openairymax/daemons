@@ -62,6 +62,19 @@ tool_service_t *tool_service_create(const char *config_path __attribute__((unuse
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
+    /* R1-a: 执行面隔离池——tool.execute 不再阻塞 RPC 共享处理池线程
+     * （慢工具挤占 approve/list/health_check、并发审批等待占满池导致
+     * 批准死锁的根因修复）。池创建失败视同服务创建失败。 */
+    svc->exec_pool = executor_pool_new(svc->executor);
+    if (!svc->exec_pool) {
+        SVC_LOG_ERROR("Failed to create executor pool");
+        tool_executor_destroy(svc->executor);
+        tool_registry_destroy(svc->registry);
+        airy_mtx_destroy(&svc->lock);
+        AIRY_FREE(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
+    }
+
     /* P3.17 (ACC-DT18): enable tool approval by default
      * (enable_approval=true). Create approval_ctx and inject it into the
      * executor so every tool execution must pass Cupolas safety-dome
@@ -131,6 +144,12 @@ void tool_service_destroy(tool_service_t *svc)
 {
     if (!svc)
         return;
+
+    /* 先收口执行面（drain 在途 job），再释放其依赖的 executor */
+    if (svc->exec_pool) {
+        executor_pool_free(svc->exec_pool);
+        svc->exec_pool = NULL;
+    }
 
     if (svc->registry) {
         tool_registry_destroy(svc->registry);

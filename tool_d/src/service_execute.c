@@ -128,6 +128,10 @@ static void cache_tool_result(tool_service_t *svc, tool_metadata_t *meta, const 
 
 /**
  * @brief Execute a tool
+ *
+ * R1-a: 执行经专用隔离池（不再占用 daemon RPC 共享处理池线程）；
+ * 队列满背压快失败（AIRY_ERR_BUSY），等待预算耗尽返回 AIRY_ERR_CANCELED
+ * 并附带合成取消结果。
  */
 static int do_execute_tool(tool_service_t *svc, tool_metadata_t *meta, const char *params_json,
                            const char *agent_id, tool_result_t **out_result)
@@ -136,8 +140,12 @@ static int do_execute_tool(tool_service_t *svc, tool_metadata_t *meta, const cha
         return AIRY_ERR_INVALID_PARAM;
     }
 
+    if (!svc->exec_pool) {
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
     tool_result_t *res = NULL;
-    int ret = tool_executor_run(svc->executor, meta, params_json, agent_id, &res);
+    int ret = executor_pool_run(svc->exec_pool, meta, params_json, agent_id, &res);
 
     if (ret != 0) {
         SVC_LOG_ERROR("Tool execution failed, error: %d", ret);
@@ -259,7 +267,8 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
     tool_result_t *res = NULL;
     airy_timestamp_t ts0, ts1;
     airy_time_monotonic(&ts0);
-    int ret = tool_executor_run(svc->executor, meta, req->params_json, req->agent_id, &res);
+    /* R1-a: 流式路径同步执行部分同样收口到隔离池（与 do_execute_tool 一致） */
+    int ret = executor_pool_run(svc->exec_pool, meta, req->params_json, req->agent_id, &res);
     airy_time_monotonic(&ts1);
     svc->exec_total++;
     svc->exec_ms_total += airy_time_to_ms(&ts1) - airy_time_to_ms(&ts0);

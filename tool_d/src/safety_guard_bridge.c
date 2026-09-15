@@ -31,6 +31,7 @@
 
 #include "platform.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,12 +43,17 @@ struct safety_guard_bridge_s {
     char agent_id[128];
     bool initialized;
 
+    /* 限流窗口专用小临界区：窗口起止与调用计数的读-改-写必须原子，
+     * 临界区内不得调用 cupolas/ACL 等外部接口（锁序安全）。 */
+    airy_mtx_t rl_lock;
     uint64_t rate_limit_window_start;
     uint64_t rate_limit_call_count;
 
-    uint64_t total_checks;
-    uint64_t denied_count;
-    uint64_t rate_limited;
+    /* R1-a (0.1.17): 执行面 worker 池并发后桥接检查可多线程同时进入，
+     * 统计计数器改为原子量（仅统计用途，relaxed 序即可）。 */
+    _Atomic uint64_t total_checks;
+    _Atomic uint64_t denied_count;
+    _Atomic uint64_t rate_limited;
 };
 
 static void bridge_config_defaults(safety_guard_bridge_config_t *cfg)
@@ -93,12 +99,15 @@ safety_guard_bridge_t *safety_guard_bridge_create(const safety_guard_bridge_conf
                       "guard checks will be skipped");
     }
 
-    bridge->rate_limit_window_start = 0;
-    bridge->rate_limit_call_count = 0;
+    if (airy_mtx_init(&bridge->rl_lock) != 0) {
+        AIRY_LOG_ERROR("C-L05: safety_guard_bridge_create: rl_lock init failed");
+        if (bridge->guard_ctx) {
+            safety_guard_destroy(bridge->guard_ctx);
+        }
+        AIRY_FREE(bridge);
+        return NULL;
+    }
 
-    bridge->total_checks = 0;
-    bridge->denied_count = 0;
-    bridge->rate_limited = 0;
     bridge->initialized = true;
 
     AIRY_LOG_INFO("C-L05: SafetyGuard bridge created (permission=%d, rate_limit=%d, "
@@ -117,15 +126,19 @@ void safety_guard_bridge_destroy(safety_guard_bridge_t *bridge)
 
     AIRY_LOG_INFO("C-L05: SafetyGuard bridge destroyed "
                   "(checks=%llu denied=%llu rate_limited=%llu)",
-                  (unsigned long long)bridge->total_checks,
-                  (unsigned long long)bridge->denied_count,
-                  (unsigned long long)bridge->rate_limited);
+                  (unsigned long long)atomic_load_explicit(&bridge->total_checks,
+                                                           memory_order_relaxed),
+                  (unsigned long long)atomic_load_explicit(&bridge->denied_count,
+                                                           memory_order_relaxed),
+                  (unsigned long long)atomic_load_explicit(&bridge->rate_limited,
+                                                           memory_order_relaxed));
 
     if (bridge->guard_ctx) {
         safety_guard_destroy(bridge->guard_ctx);
         bridge->guard_ctx = NULL;
     }
 
+    airy_mtx_destroy(&bridge->rl_lock);
     AIRY_FREE(bridge);
 }
 
@@ -138,7 +151,8 @@ static uint64_t mono_now_ms(void)
 }
 
 /**
- * @brief Check whether the rate-limit window needs resetting
+ * @brief Check whether the rate-limit window needs resetting.
+ * 调用方必须已持有 bridge->rl_lock。
  */
 static void rate_window_sync(safety_guard_bridge_t *bridge)
 {
@@ -194,7 +208,7 @@ static int bridge_check_impl(safety_guard_bridge_t *bridge, const char *agent_id
         __builtin_memset(result, 0, sizeof(*result));
     }
 
-    bridge->total_checks++;
+    atomic_fetch_add_explicit(&bridge->total_checks, 1, memory_order_relaxed);
 
     const char *tool_name = meta->name ? meta->name : "unknown";
     int guard_chain_length = 0;
@@ -211,7 +225,7 @@ static int bridge_check_impl(safety_guard_bridge_t *bridge, const char *agent_id
             }
             AIRY_LOG_WARN("C-L05: SAFETY_GUARD_PERMISSION denied for '%s' by '%s'", tool_name,
                           agent_id);
-            bridge->denied_count++;
+            atomic_fetch_add_explicit(&bridge->denied_count, 1, memory_order_relaxed);
             return AIRY_ERR_PERMISSION_DENIED;
         }
         if (result)
@@ -221,10 +235,21 @@ static int bridge_check_impl(safety_guard_bridge_t *bridge, const char *agent_id
 
     if (bridge->config.enable_rate_limit_guard && bridge->config.rate_limit_per_minute > 0) {
         guard_chain_length++;
-        rate_window_sync(bridge);
 
+        /* 窗口重置 + 计数 + 超限判定必须在同一临界区内完成，
+         * 否则并发下限流会失真（超发或误限）。 */
+        bool rate_allowed = true;
+        uint64_t call_count = 0;
+        airy_mtx_lock(&bridge->rl_lock);
+        rate_window_sync(bridge);
         bridge->rate_limit_call_count++;
-        if (bridge->rate_limit_call_count > bridge->config.rate_limit_per_minute) {
+        call_count = bridge->rate_limit_call_count;
+        if (call_count > bridge->config.rate_limit_per_minute) {
+            rate_allowed = false;
+        }
+        airy_mtx_unlock(&bridge->rl_lock);
+
+        if (!rate_allowed) {
             if (result) {
                 result->rate_limit_passed = 0;
                 snprintf(result->denial_reason, sizeof(result->denial_reason),
@@ -233,9 +258,9 @@ static int bridge_check_impl(safety_guard_bridge_t *bridge, const char *agent_id
             }
             AIRY_LOG_WARN("C-L05: SAFETY_GUARD_RATE_LIMIT exceeded for '%s' "
                           "(%llu calls)",
-                          tool_name, (unsigned long long)bridge->rate_limit_call_count);
-            bridge->rate_limited++;
-            bridge->denied_count++;
+                          tool_name, (unsigned long long)call_count);
+            atomic_fetch_add_explicit(&bridge->rate_limited, 1, memory_order_relaxed);
+            atomic_fetch_add_explicit(&bridge->denied_count, 1, memory_order_relaxed);
             return AIRY_ERR_BUSY;
         }
         if (result)
@@ -271,7 +296,8 @@ static int bridge_check_impl(safety_guard_bridge_t *bridge, const char *agent_id
                                       "denied pattern '%s' for '%s'",
                                       token, tool_name);
                         AIRY_FREE(patterns_copy);
-                        bridge->denied_count++;
+                        atomic_fetch_add_explicit(&bridge->denied_count, 1,
+                                                  memory_order_relaxed);
                         return AIRY_ERR_SEC_VIOLATION;
                     }
                     token = strtok_r(NULL, ",", &saveptr);
@@ -293,7 +319,7 @@ static int bridge_check_impl(safety_guard_bridge_t *bridge, const char *agent_id
                 AIRY_LOG_WARN("C-L05: SAFETY_GUARD_CONTENT_FILTER size limit "
                               "exceeded for '%s' (%zu > %u)",
                               tool_name, params_len, bridge->config.max_params_size);
-                bridge->denied_count++;
+                atomic_fetch_add_explicit(&bridge->denied_count, 1, memory_order_relaxed);
                 return AIRY_ERR_SEC_VIOLATION;
             }
         }
@@ -336,7 +362,7 @@ static int bridge_check_impl(safety_guard_bridge_t *bridge, const char *agent_id
                          "Resource quota exceeded for tool '%s'", tool_name);
             }
             AIRY_LOG_WARN("C-L05: SAFETY_GUARD_RESOURCE quota exceeded for '%s'", tool_name);
-            bridge->denied_count++;
+            atomic_fetch_add_explicit(&bridge->denied_count, 1, memory_order_relaxed);
             return AIRY_ERR_SEC_QUOTA;
         }
 
@@ -417,11 +443,14 @@ int safety_guard_bridge_check_rate_limit(safety_guard_bridge_t *bridge, const ch
         return 0;
     }
 
+    airy_mtx_lock(&bridge->rl_lock);
     rate_window_sync(bridge);
     bridge->rate_limit_call_count++;
+    uint64_t call_count = bridge->rate_limit_call_count;
+    airy_mtx_unlock(&bridge->rl_lock);
 
-    if (bridge->rate_limit_call_count > bridge->config.rate_limit_per_minute) {
-        bridge->rate_limited++;
+    if (call_count > bridge->config.rate_limit_per_minute) {
+        atomic_fetch_add_explicit(&bridge->rate_limited, 1, memory_order_relaxed);
         return AIRY_ERR_BUSY;
     }
 
@@ -523,9 +552,11 @@ void safety_guard_bridge_get_stats(safety_guard_bridge_t *bridge, uint64_t *out_
     }
 
     if (out_total_checks)
-        *out_total_checks = bridge->total_checks;
+        *out_total_checks =
+            atomic_load_explicit(&bridge->total_checks, memory_order_relaxed);
     if (out_denied_count)
-        *out_denied_count = bridge->denied_count;
+        *out_denied_count =
+            atomic_load_explicit(&bridge->denied_count, memory_order_relaxed);
     if (out_rate_limited)
-        *out_rate_limited = bridge->rate_limited;
+        *out_rate_limited = atomic_load_explicit(&bridge->rate_limited, memory_order_relaxed);
 }

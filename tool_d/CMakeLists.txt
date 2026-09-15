@@ -37,6 +37,8 @@ set(TOOL_SERVICE_SOURCES
     src/service_execute.c
     src/registry.c
     src/executor.c
+    # R1-a: 执行面专用有界 worker 池（隔离 RPC 共享池）
+    src/executor_pool.c
     src/validator.c
     src/cache.c
     src/tool_approval.c

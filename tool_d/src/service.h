@@ -12,6 +12,7 @@
 #include "cache.h"
 #include "config.h"
 #include "executor.h"
+#include "executor_pool.h"
 #include "daemon_platform_ext.h"
 #include "registry.h"
 #include "tool_service.h"
@@ -20,6 +21,7 @@
 struct tool_service {
     tool_registry_t *registry;
     tool_executor_t *executor;
+    executor_pool_t *exec_pool; /* R1-a: 执行面隔离池 */
     tool_validator_t *validator;
     tool_cache_t *cache;
     tool_config_t *manager;
