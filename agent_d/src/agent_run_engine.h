@@ -35,6 +35,10 @@ extern "C" {
 
 #define AGENT_RUN_SESSION_ID_LEN 64
 #define AGENT_RUN_MAX_TOOL_LOOPS 8
+/* 工具连败熔断：同一次 run 内连败 K 次即终止循环止损；rc 取
+ * TOOL_FUSE（终局失败，原因随 response / error 事件通道回传）。 */
+#define AGENT_RUN_TOOL_FAIL_LIMIT 3
+#define AGENT_RUN_RC_TOOL_FUSE 2
 #define AGENT_RUN_LLM_TIMEOUT_MS 90000
 #define AGENT_RUN_THINK_TIMEOUT_MS 120000
 #define AGENT_RUN_TOOL_TIMEOUT_MS 90000
