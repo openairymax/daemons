@@ -49,15 +49,14 @@ void lang_svc_cleanup(void)
     airy_mtx_destroy(&g_lang_mtx);
 }
 
-/* 懒创建：启动时不要求 llm_d 已就绪；lang_gateway 内部对校准失败
- * 降级为启发式决策（不影响主流程）。首次调用时创建一次。 */
+/* 懒创建：首次调用时创建一次，并发由 g_lang_mtx 串行化。 */
 static airy_lang_gateway_t *lang_gw_get(void)
 {
     if (g_lang_gw)
         return g_lang_gw;
     airy_lang_gateway_config_t cfg;
     __builtin_memset(&cfg, 0, sizeof(cfg));
-    cfg.auto_calibrate_on_create = 0; /* 按需校准：llm_d 就绪由调用时序保证 */
+    cfg.auto_calibrate_on_create = 1;
     airy_lang_gateway_t *gw = NULL;
     if (airy_lang_gateway_create(&cfg, &gw) == AIRY_EOK && gw) {
         g_lang_gw = gw;
