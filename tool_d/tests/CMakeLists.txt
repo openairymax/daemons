@@ -64,6 +64,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     list(APPEND TOOL_TEST_SOURCES test_os_sandbox.c)
 endif()
 
+# C-6/R1-a: 有界池端到端验收经 tool_service_execute 全链，慢会话依赖
+# POSIX shell 的 sleep 命令，Windows（cmd.exe）不适用。
+if(UNIX)
+    list(APPEND TOOL_TEST_SOURCES test_pool_e2e.c)
+endif()
+
 set(TOOL_COMMON_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../src

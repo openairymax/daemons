@@ -8,7 +8,7 @@
 ## 这是什么
 
 `tool_d` 是 AgentRT 的**工具执行层**：承载工具注册表、参数校验、权限判定、
-读写并发门、执行沙箱、结果缓存与交互式审批，并内置一组 `builtin:*` 工具
+有界并发池、执行沙箱、结果缓存与交互式审批，并内置一组 `builtin:*` 工具
 （文件系统 / shell / 网络 / git / 数学）。动态插件（`dlopen` 执行域）同样运行在
 本进程内，`plugin_*` 方法登记于 `tool.*` 命名空间。它是 Agent 与外部世界交互的
 唯一落地点，`gateway_d` 的 MCP 工具目录与执行请求最终都转发到这里。
@@ -28,8 +28,9 @@
   缺失或非法即拒绝执行。
 - **权限判定** — 执行前查 ACL：`(agent_id, tool)` 无授权条目即拒绝。ACL 有两个来源，
   文件为权威源、环境变量为预授权补充（见「配置」）。
-- **读写并发门** — `TOOL_ACCESS_READ` 工具持读门并发执行，`TOOL_ACCESS_WRITE`
-  工具持写门互斥串行，避免写写并发破坏外部状态。
+- **有界并发池** — 工具执行由有界 worker 池并发承载：worker 上限 + 队列 +
+  每工具等待预算兜底，一个慢工具只占自己的 worker，不阻塞其他会话（R1-a）。
+  `TOOL_ACCESS_READ/WRITE` 仅作元数据语义（审批/审计），不再施加执行闸门。
 - **交互式审批** — 置 `AIRY_TOOL_APPROVAL_MODE=interactive` 后，未授权工具的执行
   挂起并产生 `request_id`，由 `pending` 查询、`approve` 决策（默认关闭，服务端
   部署走 ACL 静态授权）。
@@ -47,7 +48,7 @@ CLI / SDK ──▶ gateway_d ──(tool.* / plugin.* JSON-RPC)──▶ tool_d
               tool_service ───────────────────────────────┤
               │  ├─ registry   元数据 + 参数 Schema 校验   │
               │  ├─ validator  JSON Schema 判定（fail-closed）
-              │  ├─ executor   内置/外部执行 + 读写并发门  │
+              │  ├─ executor   内置/外部执行（并发归池）   │
               │  │     ├─ tool_approval  Cupolas 守卫链 + 审计
               │  │     ├─ interactive    pending / approve 挂起队列
               │  │     └─ os_sandbox     Landlock / seccomp（Linux）
