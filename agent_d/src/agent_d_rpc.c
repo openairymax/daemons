@@ -229,13 +229,29 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
                                  request_id_item->valuestring :
                                  NULL;
 
+    /* Server-side fallback: every invoke gets a session. Without one the
+     * request has no cancel token, can never be cancelled, and on daemon
+     * shutdown holds a thread-pool worker for the full read timeout (the
+     * SIGTERM-hang half of incident 0.1.16). A monotonically increasing
+     * sequence keeps the id unique within this daemon process. */
+    char auto_request_id[64];
+    if (!request_id) {
+        static airy_atomic_int_t auto_seq;
+        long seq = (long)airy_atomic_fetch_add(&auto_seq, 1) + 1;
+        snprintf(auto_request_id, sizeof(auto_request_id), "auto-%ld", seq);
+        request_id = auto_request_id;
+    }
+
+    /* Request-scoped read budget (optional): deadline-aware callers (CLI
+     * review) keep the inner invoke timeout below their own outer deadline;
+     * absent or 0 = daemon default (300s). Clamped in the service layer. */
+    cJSON *to_item = cJSON_GetObjectItem(params, "timeout_s");
+    int timeout_s = (to_item && cJSON_IsNumber(to_item)) ? (int)to_item->valuedouble : 0;
+
     airy_cancel_token_t *token = NULL;
-    if (request_id) {
-        if (agent_service_invoke_begin(g_service, request_id, &token) != AIRY_SUCCESS) {
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invoke session register failed",
-                               id);
-            return;
-        }
+    if (agent_service_invoke_begin(g_service, request_id, &token) != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Invoke session register failed", id);
+        return;
     }
 
     uint64_t perf_t0 = perf_now_us();
@@ -246,7 +262,7 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
                                     ws_item->valuestring :
                                     NULL;
     int ret = agent_service_invoke(g_service, agent_id->valuestring, input_str, input_len,
-                                   workspace_dir, token, &out_output);
+                                   workspace_dir, timeout_s, token, &out_output);
 
     {
         uint64_t elapsed = perf_now_us() - perf_t0;
@@ -256,8 +272,7 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
                          (unsigned long long)elapsed, (long long)slow_us, agent_id->valuestring);
     }
 
-    if (request_id)
-        agent_service_invoke_end(g_service, request_id);
+    agent_service_invoke_end(g_service, request_id);
 
     if (ret == AIRY_SUCCESS && out_output) {
         cJSON *result = cJSON_CreateObject();

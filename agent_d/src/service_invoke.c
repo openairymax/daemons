@@ -10,6 +10,7 @@
 
 #include "airy_memory.h"
 #include "error.h"
+#include "platform_misc.h"
 #include "service.h"
 #include "svc_logger.h"
 
@@ -59,11 +60,21 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id)
 }
 
 int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char *input, size_t len,
-                         const char *workspace_dir, airy_cancel_token_t *cancel_token,
+                         const char *workspace_dir, int timeout_s, airy_cancel_token_t *cancel_token,
                          char **out_output)
 {
     if (!svc || !svc->initialized || !agent_id || !out_output)
         return AIRY_ERR_INVALID_PARAM;
+
+    /* Request-scoped read budget: clamp to the operator ceiling
+     * (default 300s, AIRY_AGENT_INVOKE_TIMEOUT_S). Callers running under
+     * their own outer deadline pass a smaller budget so this layer fails
+     * first and the worker is freed, instead of the caller abandoning a
+     * read that then keeps a thread-pool worker busy for the full default
+     * (0.1.16 budget inversion: inner 300s vs CLI review outer 180s). */
+    int read_timeout_s = agent_invoke_timeout_s();
+    if (timeout_s > 0 && timeout_s < read_timeout_s)
+        read_timeout_s = timeout_s;
 
     *out_output = NULL;
 
@@ -152,7 +163,7 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char 
             return AIRY_ERR_OUT_OF_MEMORY;
         }
         int rrc = agent_read_line_timeout_ex(sout_fd, resp_buf, AGENT_RESP_BUF_SIZE,
-                                             agent_invoke_timeout_s(), cancel_token);
+                                             read_timeout_s, cancel_token);
         if (rrc == -2) {
             /* Cancel: gracefully terminate the child (SIGTERM->2s->SIGKILL on
              * the process group), finishing with AbortedOutput, clearly
@@ -369,4 +380,51 @@ int agent_service_invoke_cancel(agent_service_t *svc, const char *request_id)
     airy_cancel_token_cancel(token);
     SVC_LOG_INFO("agent.cancel: requested cancel (request_id=%s)", request_id);
     return AIRY_SUCCESS;
+}
+
+int agent_service_invoke_cancel_all(agent_service_t *svc)
+{
+    if (!svc || !svc->initialized)
+        return 0;
+
+    int n = 0;
+    /* Same lock discipline as agent_service_invoke_cancel: the token cancel
+     * runs under the session lock so the invoke thread's invoke_end cannot
+     * free the token between our lookup and the cancel (use-after-free). */
+    airy_mtx_lock(&svc->session_lock);
+    for (size_t i = 0; i < AGENT_INVOKE_SESSIONS_MAX; i++) {
+        agent_invoke_session_t *s = &svc->sessions[i];
+        if (s->active && s->token) {
+            airy_cancel_token_cancel(s->token);
+            n++;
+        }
+    }
+    airy_mtx_unlock(&svc->session_lock);
+    return n;
+}
+
+void agent_service_invoke_wait_idle(agent_service_t *svc, uint32_t timeout_ms)
+{
+    if (!svc)
+        return;
+
+    uint64_t deadline = (uint64_t)time(NULL) * 1000ull + timeout_ms;
+    for (;;) {
+        int active = 0;
+        airy_mtx_lock(&svc->session_lock);
+        for (size_t i = 0; i < AGENT_INVOKE_SESSIONS_MAX; i++) {
+            if (svc->sessions[i].active) {
+                active = 1;
+                break;
+            }
+        }
+        airy_mtx_unlock(&svc->session_lock);
+        if (!active)
+            return;
+        if (timeout_ms && (uint64_t)time(NULL) * 1000ull >= deadline) {
+            SVC_LOG_WARN("Shutdown drain: invoke sessions still active after %ums", timeout_ms);
+            return;
+        }
+        airy_sleep_ms(100);
+    }
 }
