@@ -12,6 +12,7 @@ set(COREKERN_INCLUDE_DIR ${ATOMIC_DIR}/corekern/include)
 
 set(AGENT_TEST_SOURCES
     test_service.c
+    test_run_ledger.c
 )
 
 set(AGENT_COMMON_INCLUDES
@@ -27,6 +28,7 @@ set(AGENT_COMMON_INCLUDES
     ${COMMONS_DIR}/utils/sync
     ${COMMONS_DIR}/utils/cache
     ${COMMONS_DIR}/utils/compat
+    ${COMMONS_DIR}/utils/ipc
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include

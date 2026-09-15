@@ -242,8 +242,19 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
     uint64_t seq = 0;
     const char *sess = session ? session->session_id : NULL;
 
+    agent_ledger_t lg;
+    agent_ledger_init(&lg, sess);
+
     char llm_sock[AGENT_RUN_SOCK_BUF];
     snprintf(llm_sock, sizeof(llm_sock), "%s", airy_runtime_dir_socket("llm.sock"));
+
+    /* 台账入口记账：首条 user 消息（history 为空时即 prompt）。 */
+    if (lg.enabled) {
+        cJSON *m0 = cJSON_GetArrayItem(messages, 0);
+        cJSON *c0 = m0 ? cJSON_GetObjectItem(m0, "content") : NULL;
+        if (cJSON_IsString(c0))
+            agent_ledger_add(&lg, "user", c0->valuestring, 0, m0);
+    }
 
     for (int loops = 0; loops < AGENT_RUN_MAX_TOOL_LOOPS; loops++) {
         if (agent_run_is_cancelled(session)) {
@@ -252,6 +263,8 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
             rc = 1;
             break;
         }
+
+        agent_ledger_fit(&lg, messages);
 
         char *llm_params_str = run_build_llm_params(model, messages);
         if (!llm_params_str)
@@ -293,6 +306,7 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
         if (tool_calls)
             cJSON_AddItemToObject(assistant_msg, "tool_calls", cJSON_Duplicate(tool_calls, 1));
         cJSON_AddItemToArray(messages, assistant_msg);
+        agent_ledger_add(&lg, "assistant", text ? text : "", (size_t)tokens, assistant_msg);
 
         /* token_delta 事件（run_stream 流式推送；整块文本一次推送） */
         if (sink && sink->emit && text && text[0]) {
@@ -359,6 +373,7 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
             cJSON_AddStringToObject(tool_msg, "content",
                                     result_text ? result_text : "Tool execution failed");
             cJSON_AddItemToArray(messages, tool_msg);
+            agent_ledger_add(&lg, "tool_result", result_text ? result_text : NULL, 0, tool_msg);
 
             cJSON *tr = cJSON_CreateObject();
             cJSON_AddStringToObject(tr, "tool", tname);
@@ -375,6 +390,7 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
         AIRY_FREE(llm_resp);
     }
 
+    agent_ledger_free(&lg);
     cJSON_Delete(messages);
 
     if (rc == 0) {

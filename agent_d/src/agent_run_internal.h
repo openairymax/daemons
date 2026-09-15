@@ -20,10 +20,56 @@
 #include <cjson/cJSON.h>
 
 #include "agent_run_engine.h"
+#include "platform.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* ---- 上下文台账域（agent_run_ledger.c） ---- */
+
+#define AGENT_LEDGER_ID_LEN 33   /* mem_d entry_id：32 hex + NUL（ledger.h） */
+#define AGENT_LEDGER_TYPE_LEN 12 /* 入口类型字符串上界（含 NUL） */
+
+/** 台账条目 ↔ 消息映射（entry_id 为空表示已压缩的摘要占位）。 */
+typedef struct {
+    char entry_id[AGENT_LEDGER_ID_LEN];
+    char type[AGENT_LEDGER_TYPE_LEN];
+    cJSON *msg; /* messages 数组内节点引用（非拥有） */
+} agent_ledger_item_t;
+
+/** 会话台账客户端状态：mem_d socket + 记账映射（渐进降级，disabled 时不记账）。 */
+typedef struct {
+    int enabled;
+    char sock[AIRY_PATH_MAX];
+    char sess[AGENT_RUN_SESSION_ID_LEN];
+    agent_ledger_item_t *items;
+    size_t count;
+    size_t cap;
+} agent_ledger_t;
+
+/**
+ * @brief 初始化台账客户端（sess 为空或 socket 解析失败时置 disabled）。
+ * @return 恒为 0（enabled 状态经结构体表达）
+ */
+int agent_ledger_init(agent_ledger_t *lg, const char *sess);
+
+/** @brief 释放映射数组（不拥有 messages 节点，无需释放引用）。 */
+void agent_ledger_free(agent_ledger_t *lg);
+
+/**
+ * @brief 记账一条消息：ledger_append 落库并建立 entry_id ↔ msg 映射。
+ * 失败静默（渐进降级），不阻断主对话。
+ */
+void agent_ledger_add(agent_ledger_t *lg, const char *type, const char *text, size_t token_out,
+                      cJSON *msg);
+
+/**
+ * @brief 每轮 LLM 调用前预算适配：ledger_window warn 时对候选区
+ * （ReAct 轮次成组，入口 user 与末组受保护）执行 mem.compress，
+ * 用压缩上下文原位替换本地消息组。
+ */
+void agent_ledger_fit(agent_ledger_t *lg, cJSON *messages);
 
 /* ---- 工具循环域（agent_run_loop.c） ---- */
 
