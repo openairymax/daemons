@@ -31,6 +31,18 @@ tool_executor_t *tool_executor_create_ex(const tool_executor_config_t *ecfg);
 void tool_executor_destroy(tool_executor_t *exec);
 
 /**
+ * @brief Effective default per-tool budget in seconds (executor-wide).
+ * @param exec Executor
+ * @return Configured timeout (fallback applied at create time, always > 0)
+ *
+ * Single source for wait-budget derivation (mirrors the per-tool fallback
+ * used inside tool_executor_run).
+ *
+ * @ownership exec: BORROW
+ */
+int executor_timeout_sec(const tool_executor_t *exec);
+
+/**
  * @brief Execute a tool.
  * @param exec Executor
  * @param meta Tool metadata

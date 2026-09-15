@@ -207,6 +207,12 @@ tool_executor_t *tool_executor_create_ex(const tool_executor_config_t *ecfg)
     return tool_executor_create(ecfg);
 }
 
+int executor_timeout_sec(const tool_executor_t *exec)
+{
+    /* create 时 0 已回退为默认值，此处仅防御空指针 */
+    return (exec && exec->manager.timeout_sec > 0) ? exec->manager.timeout_sec : 30;
+}
+
 void tool_executor_destroy(tool_executor_t *exec)
 {
     if (!exec)

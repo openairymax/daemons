@@ -54,6 +54,17 @@ static void pending_req_free(interactive_pending_req_t *req)
     AIRY_FREE(req);
 }
 
+uint64_t approval_timeout_ms(void)
+{
+    const char *s = getenv(ENV_APPROVAL_TIMEOUT);
+    if (s && s[0]) {
+        long v = strtol(s, NULL, 10);
+        if (v > 0)
+            return (uint64_t)v;
+    }
+    return AIRY_APPROVAL_DEFAULT_TIMEOUT_MS;
+}
+
 interactive_approval_t *interactive_approval_create(void)
 {
     interactive_approval_t *mgr =
@@ -63,18 +74,10 @@ interactive_approval_t *interactive_approval_create(void)
         return NULL;
     }
 
-    mgr->timeout_ms = AIRY_APPROVAL_DEFAULT_TIMEOUT_MS;
+    mgr->timeout_ms = approval_timeout_ms();
 
     const char *mode = getenv(ENV_APPROVAL_MODE);
     mgr->enabled = (mode && strcmp(mode, ENV_MODE_INTERACTIVE) == 0);
-
-    const char *timeout_str = getenv(ENV_APPROVAL_TIMEOUT);
-    if (timeout_str) {
-        long v = strtol(timeout_str, NULL, 10);
-        if (v > 0) {
-            mgr->timeout_ms = (uint64_t)v;
-        }
-    }
 
     mgr->seq = 0;
     mgr->head = NULL;

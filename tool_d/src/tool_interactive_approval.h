@@ -35,6 +35,15 @@ typedef enum {
 typedef struct interactive_approval interactive_approval_t;
 
 /**
+ * @brief Interactive-approval blocking-wait ceiling in ms (SSoT).
+ * @return AIRY_TOOL_APPROVAL_TIMEOUT_MS when set (>0), else 120000
+ *
+ * Shared by the interactive manager itself and by the executor-pool wait
+ * budget, so both never drift apart.
+ */
+uint64_t approval_timeout_ms(void);
+
+/**
  * @brief Create the interactive-approval manager (reads env vars to decide
  *        whether to enable).
  * @return Manager handle, NULL on failure
