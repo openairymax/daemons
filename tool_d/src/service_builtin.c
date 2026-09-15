@@ -144,8 +144,14 @@ void register_builtin_tools(tool_service_t *svc)
         {"op", "{\"type\":\"string\"}", 1},
         {"values", "{\"type\":\"array\",\"items\":{\"type\":\"number\"}}", 1},
     };
+    static tool_param_t maths_plot_params[] = {
+        {"expression", "{\"type\":\"string\"}", 1},
+        {"xmin", "{\"type\":\"number\"}", 1},
+        {"xmax", "{\"type\":\"number\"}", 1},
+        {"samples", "{\"type\":\"integer\"}", 0},
+    };
 
-    tool_metadata_t tools[15] = {
+    tool_metadata_t tools[16] = {
         {
             .id = "fs_read",
             .name = "fs_read",
@@ -332,6 +338,18 @@ void register_builtin_tools(tool_service_t *svc)
             .timeout_sec = 10,
             .cacheable = 1,
             .permission_rule = "maths_stats",
+            .access = TOOL_ACCESS_READ,
+        },
+        {
+            .id = "maths_plot",
+            .name = "maths_plot",
+            .description = "Sample y=f(x) over [xmin,xmax] and return a ```plot block for TUI canvas rendering",
+            .executable = "builtin:maths_plot",
+            .params = maths_plot_params,
+            .param_count = 4,
+            .timeout_sec = 10,
+            .cacheable = 1,
+            .permission_rule = "maths_plot",
             .access = TOOL_ACCESS_READ,
         },
     };
