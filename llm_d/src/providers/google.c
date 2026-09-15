@@ -350,6 +350,7 @@ typedef struct {
     char *line_buf;
     size_t line_cap;
     size_t line_len;
+    size_t received; /* 已从上游收到的原始字节数：>0 表示首包已下发，不允许重试 */
     gg_stream_acc_t *acc;
     int cancelled;
 } gg_sse_ctx_t;
@@ -516,6 +517,7 @@ static size_t gg_sse_write_cb(void *contents, size_t size, size_t nmemb, void *u
     __builtin_memcpy(s->line_buf + s->line_len, contents, realsize);
     s->line_len += realsize;
     s->line_buf[s->line_len] = '\0';
+    s->received += realsize;
 
     gg_process_buffer(s);
     return s->cancelled ? 0 : realsize;
@@ -616,34 +618,65 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    CURL *curl = curl_easy_init();
     long http_code = 0;
     int ret = AIRY_ERR_IO;
+    int max_retries = base->max_retries > 0 ? base->max_retries : 0;
+    uint64_t start_ms = airy_time_ms();
 
-    if (curl) {
+    for (int attempt = 0; attempt <= max_retries; attempt++) {
+        double left = provider_left_sec(base->timeout_sec, start_ms);
+
+        CURL *curl = curl_easy_init();
+        if (!curl) {
+            SVC_LOG_ERROR("C-L02: GOOGLE: STREAM-FAIL model=%s reason=curl_init_failed", model);
+            break;
+        }
+
         curl_easy_setopt(curl, CURLOPT_URL, url);
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, req_body);
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, gg_sse_write_cb);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sse);
-        provider_http_setup(curl, base->timeout_sec);
+        provider_http_setup(curl, attempt == 0 ? base->timeout_sec : left);
 
         CURLcode cres = curl_easy_perform(curl);
+        http_code = 0;
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
         curl_easy_cleanup(curl);
 
         if (sse.line_len > 0)
             gg_process_buffer(&sse);
 
-        if (cres == CURLE_OK)
+        if (cres == CURLE_OK) {
             ret = AIRY_OK;
-        else {
-            SVC_LOG_WARN("C-L02: GOOGLE: STREAM-FAIL model=%s reason=curl_error diag=%s err=%s",
-                         model, provider_http_diag(cres), curl_easy_strerror(cres));
+            break;
         }
-    } else {
-        SVC_LOG_ERROR("C-L02: GOOGLE: STREAM-FAIL model=%s reason=curl_init_failed", model);
+
+        SVC_LOG_WARN("C-L02: GOOGLE: STREAM-FAIL model=%s reason=curl_error diag=%s err=%s",
+                     model, provider_http_diag(cres), curl_easy_strerror(cres));
+
+        /* 重试边界：仅"首包未下发"（http_code == 0 且 received == 0）的瞬时故障
+         * 才可重试，否则分片可能已交付用户，重试会造成重复输出。 */
+        if (attempt >= max_retries || http_code != 0 || sse.received > 0 ||
+            !provider_retryable(cres))
+            break;
+
+        uint32_t delay_ms = provider_backoff_ms(attempt);
+        if (!provider_retry_budget_ok(base->timeout_sec, start_ms, delay_ms)) {
+            SVC_LOG_WARN("C-L02: GOOGLE: STREAM-STOP model=%s retry=%d/%d "
+                         "reason=budget_spent left=%.1fs delay=%ums",
+                         model, attempt + 1, max_retries,
+                         provider_left_sec(base->timeout_sec, start_ms), delay_ms);
+            break;
+        }
+        SVC_LOG_WARN("C-L02: GOOGLE: STREAM-RETRY model=%s retry=%d/%d delay=%ums diag=%s", model,
+                     attempt + 1, max_retries, delay_ms, provider_http_diag(cres));
+        airy_sleep_ms(delay_ms);
+
+        sse.line_len = 0;
+        sse.received = 0;
+        sse.cancelled = 0;
     }
 
     gg_sse_destroy(&sse);
