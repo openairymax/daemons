@@ -71,7 +71,7 @@ static const char *const g_git_readonly_cmds[] = {
  * @return 0 on success, non-zero on failure (fork/pipe/OOM)
  */
 static int builtin_git_run(char *const argv[], const char *stdin_data, size_t stdin_len, char **out,
-                           int *exit_code, int *out_truncated)
+                           int *exit_code, int *out_truncated, uint32_t timeout_ms)
 {
     *out = NULL;
     *exit_code = -1;
@@ -157,8 +157,8 @@ static int builtin_git_run(char *const argv[], const char *stdin_data, size_t st
 
     struct timespec ts_now;
     clock_gettime(CLOCK_MONOTONIC, &ts_now);
-    uint64_t deadline_ms =
-        (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 + BUILTIN_SHELL_TIMEOUT_MS;
+    uint64_t deadline_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 +
+                           (timeout_ms ? timeout_ms : BUILTIN_SHELL_TIMEOUT_MS);
 
     for (;;) {
         if (!exited) {
@@ -294,7 +294,7 @@ static int builtin_git_run(char *const argv[], const char *stdin_data, size_t st
     return 0;
 }
 
-int git_exec_tool(const char *params_json, tool_result_t *res)
+int git_exec_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
         res->error = AIRY_STRDUP("Invalid params JSON");
@@ -354,7 +354,7 @@ int git_exec_tool(const char *params_json, tool_result_t *res)
 
     char *out = NULL;
     int exit_code = -1;
-    int rc = builtin_git_run(argv, NULL, 0, &out, &exit_code, NULL);
+    int rc = builtin_git_run(argv, NULL, 0, &out, &exit_code, NULL, timeout_ms);
     if (rc != 0) {
         res->error = AIRY_STRDUP("Failed to execute git (fork/pipe failed)");
         return AIRY_ERR_EXEC_FAIL;
@@ -370,7 +370,7 @@ int git_exec_tool(const char *params_json, tool_result_t *res)
     return AIRY_OK;
 }
 
-int git_diff_tool(const char *params_json, tool_result_t *res)
+int git_diff_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
         res->error = AIRY_STRDUP("Invalid params JSON");
@@ -395,7 +395,7 @@ int git_diff_tool(const char *params_json, tool_result_t *res)
 
     char *out = NULL;
     int exit_code = -1;
-    int rc = builtin_git_run(argv, NULL, 0, &out, &exit_code, NULL);
+    int rc = builtin_git_run(argv, NULL, 0, &out, &exit_code, NULL, timeout_ms);
     if (rc != 0) {
         res->error = AIRY_STRDUP("Failed to execute git diff (fork/pipe failed)");
         return AIRY_ERR_EXEC_FAIL;
@@ -411,7 +411,7 @@ int git_diff_tool(const char *params_json, tool_result_t *res)
     return AIRY_OK;
 }
 
-int git_apply_tool(const char *params_json, tool_result_t *res)
+int git_apply_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
         res->error = AIRY_STRDUP("Invalid params JSON");
@@ -437,7 +437,7 @@ int git_apply_tool(const char *params_json, tool_result_t *res)
     char *out = NULL;
     int exit_code = -1;
     int rc = builtin_git_run(argv, patch->valuestring, strlen(patch->valuestring), &out, &exit_code,
-                             NULL);
+                             NULL, timeout_ms);
     if (rc != 0) {
         res->error = AIRY_STRDUP("Failed to execute git apply (fork/pipe failed)");
         return AIRY_ERR_EXEC_FAIL;
