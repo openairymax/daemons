@@ -10,12 +10,14 @@
 
 #include "airy_memory.h"
 #include "daemon_platform_ext.h"
+#include "daemon_rpc_client.h"
 #include "error.h"
 #include "response.h"
 #include "router/llm_router.h"
 #include "service.h"
 #include "svc_logger.h"
 
+#include <cjson/cJSON.h>
 #include <curl/curl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,20 +25,27 @@
 
 #include "llm_service_internal.h"
 
+/* 语义缓存（mem_d）RPC 超时：缓存是可选加速层，本地 socket 往返毫秒级，
+ * 此处仅需给出上界以保证 mem_d 繁忙时不拖慢主链路（13-semantic-cache
+ * §3.5：缓存引擎异常必须降级为直连 LLM）。 */
+#define LLM_MEM_CACHE_TIMEOUT_MS 2000
+
 /**
- * @brief Generate a cache key
- * @param manager Request config
- * @return Cache key string (caller frees), NULL on failure
+ * @brief 构造请求的规范化文本（canonical text）：
+ *        "role:content:reasoning|" 逐条拼接。
+ *
+ * 该文本同时是本地 LRU 键与 mem_d 语义缓存 L0 键（sha256(text + "|"
+ * + model_id)）的输入，保证两级缓存对"同一请求"的判定一致。
+ *
+ * @return 文本串（调用方 AIRY_FREE），失败返回 NULL
  */
-static char *make_cache_key(const llm_request_config_t *manager)
+static char *make_cache_text(const llm_request_config_t *manager)
 {
-    if (!manager || !manager->model) {
-        SVC_LOG_ERROR("make_cache_key: NULL parameter (manager=%p, model=%p)",
-                      (const void *)manager, manager ? (const void *)manager->model : NULL);
-        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
+    if (!manager) {
+        return NULL;
     }
 
-    size_t len = strlen(manager->model) + 2;
+    size_t len = 1;
     for (size_t i = 0; i < manager->message_count; ++i) {
         const char *role = manager->messages[i].role ? manager->messages[i].role : "";
         const char *content = manager->messages[i].content ? manager->messages[i].content : "";
@@ -45,77 +54,191 @@ static char *make_cache_key(const llm_request_config_t *manager)
         len += strlen(role) + 1 + strlen(content) + 1 + strlen(reasoning) + 1;
     }
 
-    char *key = (char *)AIRY_MALLOC(len);
-    if (!key) {
-        SVC_LOG_ERROR("make_cache_key: malloc failed for cache key (len=%zu)", len);
-        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
+    char *text = (char *)AIRY_MALLOC(len);
+    if (!text) {
+        return NULL;
     }
-
-    char *p = key;
 
     size_t pos = 0;
-    size_t written = (size_t)snprintf(p, len, "%s", manager->model);
-    if (written < len) {
-        pos = written;
-    } else {
-        pos = len > 0 ? len - 1 : 0;
-    }
-    p[pos] = '|';
-    pos++;
-
     for (size_t i = 0; i < manager->message_count; ++i) {
         const char *role = manager->messages[i].role ? manager->messages[i].role : "";
         const char *content = manager->messages[i].content ? manager->messages[i].content : "";
         const char *reasoning =
             manager->messages[i].reasoning_content ? manager->messages[i].reasoning_content : "";
-        size_t remaining = (pos < len) ? (len - pos) : 0;
-        written = (size_t)snprintf(p + pos, remaining, "%s:%s:%s|", role, content, reasoning);
-        if (written < remaining) {
-            pos += written;
-        } else {
-            pos = len > 0 ? len - 1 : 0;
+
+        int written = snprintf(text + pos, len - pos, "%s:%s:%s|", role, content, reasoning);
+        if (written < 0 || (size_t)written >= len - pos) {
+            pos = len - 1;
             break;
         }
+        pos += (size_t)written;
     }
 
-    if (pos > 0 && key[pos - 1] == '|') {
-        key[pos - 1] = '\0';
-    } else if (pos < len) {
-        key[pos] = '\0';
-    } else {
-        key[len - 1] = '\0';
-    }
-
-    return key;
+    text[pos < len ? pos : len - 1] = '\0';
+    return text;
 }
 
 /**
- * @brief Get the response from the cache
+ * @brief 生成本地 LRU 缓存键："<model>|<canonical text>"
+ * @param manager 请求配置
+ * @param text    make_cache_text() 的输出
+ * @return 键串（调用方 AIRY_FREE），失败返回 NULL
  */
-static int get_cached_response(llm_service_t *svc, const char *cache_key,
-                               llm_response_t **out_response)
+static char *make_cache_key(const llm_request_config_t *manager, const char *text)
 {
-    if (!svc || !cache_key || !out_response) {
-        SVC_LOG_ERROR("get_cached_response: NULL parameter (svc=%p, cache_key=%p, out_response=%p)",
-                      (const void *)svc, (const void *)cache_key, (const void *)out_response);
-        return AIRY_ERR_INVALID_PARAM;
+    if (!manager || !manager->model || !text) {
+        return NULL;
+    }
+
+    size_t len = strlen(manager->model) + 1 + strlen(text) + 1;
+    char *key = (char *)AIRY_MALLOC(len);
+    if (!key) {
+        return NULL;
+    }
+
+    snprintf(key, len, "%s|%s", manager->model, text);
+    return key;
+}
+
+/* ── mem_d 跨进程语义缓存（A-IPC over Unix socket） ────────────────────
+ *
+ * 命中判定与存储都走 mem_d 的 cache_get / cache_put 方法（mem.sock）。
+ * 缓存是可选加速层：任何失败（daemon 未启动、超时、协议错误、g_cache
+ * 未初始化）一律按"未命中/未写入"处理，主流程继续直连上游 LLM，仅以
+ * DEBUG 记录，避免 mem_d 缺席时每次请求刷屏。
+ */
+
+static const char *mem_sock_path(void)
+{
+    const char *sock = airy_runtime_dir_socket("mem.sock");
+    return (sock && sock[0]) ? sock : NULL;
+}
+
+/**
+ * @brief 查询 mem_d 语义缓存
+ * @return 1 命中（*out_json 为响应 JSON，调用方 AIRY_FREE）；0 未命中或不可用
+ */
+static int mem_cache_fetch(const char *text, const char *model, char **out_json)
+{
+    const char *sock = mem_sock_path();
+    if (!sock || !text || !model || !out_json) {
+        return 0;
+    }
+    *out_json = NULL;
+
+    cJSON *req = cJSON_CreateObject();
+    if (!req) {
+        return 0;
+    }
+    cJSON_AddStringToObject(req, "text", text);
+    cJSON_AddStringToObject(req, "model_id", model);
+    char *params = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    if (!params) {
+        return 0;
+    }
+
+    char *result = NULL;
+    int rc = daemon_rpc_call(sock, "cache_get", params, &result, LLM_MEM_CACHE_TIMEOUT_MS);
+    AIRY_FREE(params);
+    if (rc != AIRY_SUCCESS || !result) {
+        SVC_LOG_DEBUG("mem.cache_get unavailable (rc=%d) — semantic cache bypassed", rc);
+        AIRY_FREE(result);
+        return 0;
+    }
+
+    int hit = 0;
+    cJSON *root = cJSON_Parse(result);
+    AIRY_FREE(result);
+    if (!root) {
+        return 0;
+    }
+
+    const cJSON *hit_item = cJSON_GetObjectItem(root, "hit");
+    const cJSON *body_item = cJSON_GetObjectItem(root, "response");
+    if (cJSON_IsBool(hit_item) && cJSON_IsTrue(hit_item) && cJSON_IsString(body_item) &&
+        body_item->valuestring && body_item->valuestring[0]) {
+        *out_json = AIRY_STRDUP(body_item->valuestring);
+        hit = (*out_json != NULL);
+    }
+    cJSON_Delete(root);
+    return hit;
+}
+
+/**
+ * @brief 写入 mem_d 语义缓存（失败仅 DEBUG，不阻断主流程）
+ */
+static void mem_cache_save(const char *text, const char *model, const char *resp_json)
+{
+    const char *sock = mem_sock_path();
+    if (!sock || !text || !model || !resp_json) {
+        return;
+    }
+
+    cJSON *req = cJSON_CreateObject();
+    if (!req) {
+        return;
+    }
+    cJSON_AddStringToObject(req, "text", text);
+    cJSON_AddStringToObject(req, "response", resp_json);
+    cJSON_AddStringToObject(req, "model_id", model);
+    char *params = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    if (!params) {
+        return;
+    }
+
+    char *result = NULL;
+    int rc = daemon_rpc_call(sock, "cache_put", params, &result, LLM_MEM_CACHE_TIMEOUT_MS);
+    AIRY_FREE(params);
+    AIRY_FREE(result);
+    if (rc != AIRY_SUCCESS) {
+        SVC_LOG_DEBUG("mem.cache_put unavailable (rc=%d) — semantic cache not updated", rc);
+    }
+}
+
+/**
+ * @brief 两级缓存查询：L0 进程内精确匹配 LRU → L1 mem_d 语义缓存。
+ *        L1 命中后回填 L0，后续同请求免 IPC。
+ * @return 1 命中（*out_response 已填充）；0 未命中
+ */
+static int cache_lookup(llm_service_t *svc, const char *key, const char *text, const char *model,
+                        llm_response_t **out_response)
+{
+    if (!svc || !key || !text || !model || !out_response) {
+        SVC_LOG_ERROR("cache_lookup: NULL parameter (svc=%p, key=%p, text=%p, model=%p, out=%p)",
+                      (const void *)svc, (const void *)key, (const void *)text, (const void *)model,
+                      (const void *)out_response);
+        return 0;
     }
 
     char *cached_json = NULL;
-    if (llm_cache_get(svc->cache, cache_key, &cached_json) == 1 && cached_json) {
-        llm_response_t *cached_resp = response_from_json(cached_json);
-        AIRY_FREE(cached_json);
-        cached_json = NULL;
-
-        if (cached_resp) {
-            *out_response = cached_resp;
-            SVC_LOG_DEBUG("Cache hit for key");
+    if (llm_cache_get(svc->cache, key, &cached_json) == 1 && cached_json) {
+        llm_response_t *local_resp = response_from_json(cached_json);
+        if (local_resp) {
+            AIRY_FREE(cached_json);
+            *out_response = local_resp;
+            SVC_LOG_DEBUG("L0 cache hit");
             return 1;
         }
-        SVC_LOG_WARN("Failed to parse cached response, fetching fresh data");
+        SVC_LOG_WARN("L0 cached response unparsable, falling back to semantic cache");
+    }
+    AIRY_FREE(cached_json);
+
+    char *sem_json = NULL;
+    if (mem_cache_fetch(text, model, &sem_json) != 1 || !sem_json) {
+        AIRY_FREE(sem_json);
+        return 0;
     }
 
-    return 0;
+    llm_response_t *sem_resp = response_from_json(sem_json);
+    if (sem_resp) {
+        llm_cache_put(svc->cache, key, sem_json);
+        *out_response = sem_resp;
+        SVC_LOG_DEBUG("L1 semantic cache hit (promoted to L0)");
+    }
+    AIRY_FREE(sem_json);
+    return sem_resp ? 1 : 0;
 }
 
 /**
@@ -216,20 +339,23 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
 }
 
 /**
- * @brief Store the response to the cache
+ * @brief 两级写入：L0 进程内 LRU + L1 mem_d 语义缓存
  */
-static void cache_response(llm_service_t *svc, const char *cache_key, llm_response_t *resp)
+static void cache_store(llm_service_t *svc, const char *key, const char *text, const char *model,
+                        llm_response_t *resp)
 {
-    if (!svc || !cache_key || !resp) {
+    if (!svc || !key || !text || !model || !resp) {
         return;
     }
 
     char *resp_json = response_to_json(resp);
-    if (resp_json) {
-        llm_cache_put(svc->cache, cache_key, resp_json);
-        AIRY_FREE(resp_json);
-        resp_json = NULL;
+    if (!resp_json) {
+        return;
     }
+
+    llm_cache_put(svc->cache, key, resp_json);
+    mem_cache_save(text, model, resp_json);
+    AIRY_FREE(resp_json);
 }
 
 /**
@@ -268,20 +394,24 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    char *cache_key = make_cache_key(manager);
-    if (!cache_key) {
-        SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL cache_key alloc, STACK: llm_service_complete");
+    char *cache_text = make_cache_text(manager);
+    char *cache_key = cache_text ? make_cache_key(manager, cache_text) : NULL;
+    if (!cache_text || !cache_key) {
+        SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL cache key alloc, STACK: llm_service_complete");
+        AIRY_FREE(cache_text);
+        AIRY_FREE(cache_key);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     llm_response_t *cached_resp = NULL;
-    int cache_status = get_cached_response(svc, cache_key, &cached_resp);
+    int cache_status = cache_lookup(svc, cache_key, cache_text, manager->model, &cached_resp);
     if (cache_status > 0 && cached_resp) {
         /* 2.1.1.5 修复：缓存命中同样计入 cost_tracker——此前命中直接
          * 返回跳过计费，累计金额低于逐轮显示之和（缓存响应仍消耗上游
          * token 配额，只是本侧免去一次转发）。按缓存响应自带的 token
          * 数计费，金额语义一致。 */
         update_cost_tracking(svc, manager->model, cached_resp);
+        AIRY_FREE(cache_text);
         AIRY_FREE(cache_key);
         *out_response = cached_resp;
         return AIRY_OK;
@@ -301,6 +431,7 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
         SVC_LOG_ERROR(
             "C-L02: SVC: COMPLETE-FAIL model=%s, error=INVALID_MODEL, STACK: llm_service_complete",
             manager->model);
+        AIRY_FREE(cache_text);
         AIRY_FREE(cache_key);
         cache_key = NULL;
         return AIRY_ERR_LLM_INVALID_MODEL;
@@ -323,15 +454,17 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     if (ret != 0) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL model=%s, error=%d, STACK: llm_service_complete",
                       manager->model, ret);
+        AIRY_FREE(cache_text);
         AIRY_FREE(cache_key);
         cache_key = NULL;
         return ret;
     }
 
     update_cost_tracking(svc, manager->model, resp);
-    cache_response(svc, cache_key, resp);
+    cache_store(svc, cache_key, cache_text, manager->model, resp);
 
     *out_response = resp;
+    AIRY_FREE(cache_text);
     AIRY_FREE(cache_key);
     cache_key = NULL;
     return AIRY_OK;
