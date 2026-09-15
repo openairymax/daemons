@@ -46,7 +46,7 @@
 
 #include "tool_builtin_internal.h"
 
-int fs_list_tool(const char *params_json, tool_result_t *res)
+int fs_list_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
         res->error = AIRY_STRDUP("Invalid params JSON");
@@ -69,11 +69,18 @@ int fs_list_tool(const char *params_json, tool_result_t *res)
         res->error = AIRY_STRDUP(err);
         return (errno == ENOENT) ? AIRY_ERR_NOT_FOUND : AIRY_ERR_IO;
     }
+    uint64_t deadline = builtin_deadline_ms(timeout_ms);
     cJSON *arr = cJSON_CreateArray();
+    int truncated = 0;
+    long nentries = 0;
     struct dirent *ent;
     while ((ent = readdir(d)) != NULL) {
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
             continue;
+        if (++nentries > BUILTIN_LIST_MAX_ENTRIES || builtin_deadline_hit(deadline)) {
+            truncated = 1;
+            break;
+        }
         cJSON *item = cJSON_CreateObject();
         cJSON_AddStringToObject(item, "name", ent->d_name);
 #ifdef DT_DIR
@@ -89,6 +96,11 @@ int fs_list_tool(const char *params_json, tool_result_t *res)
         cJSON_AddItemToArray(arr, item);
     }
     closedir(d);
+    if (truncated) {
+        cJSON *mark = cJSON_CreateObject();
+        cJSON_AddBoolToObject(mark, "truncated", 1);
+        cJSON_AddItemToArray(arr, mark);
+    }
     res->output = cJSON_PrintUnformatted(arr);
     cJSON_Delete(arr);
     if (!res->output) {
@@ -112,9 +124,14 @@ int fs_list_tool(const char *params_json, tool_result_t *res)
  *         the LLM to adjust.
  * ============================================================================ */
 
-/* 递归删除目录树（仅由 fs_delete_tool 的 recursive=1 路径调用）。 */
-static int fs_delete_tree(const char *path)
+/* 递归删除目录树（仅由 fs_delete_tool 的 recursive=1 路径调用）。
+ * depth 防线：超深嵌套树会导致栈溢出，超过上限按失败处理。 */
+static int fs_delete_tree(const char *path, int depth)
 {
+    if (depth > BUILTIN_SCAN_MAX_DEPTH) {
+        errno = ELOOP;
+        return -1;
+    }
     DIR *d = opendir(path);
     if (!d)
         return -1;
@@ -134,7 +151,7 @@ static int fs_delete_tree(const char *path)
             return -1;
         }
         if (S_ISDIR(st.st_mode)) {
-            if (fs_delete_tree(child) != 0) {
+            if (fs_delete_tree(child, depth + 1) != 0) {
                 closedir(d);
                 return -1;
             }
@@ -147,8 +164,9 @@ static int fs_delete_tree(const char *path)
     return rmdir(path);
 }
 
-int fs_delete_tool(const char *params_json, tool_result_t *res)
+int fs_delete_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
+    (void)timeout_ms;
     CJSON_PARSE_GUARD(root, params_json, {
         res->error = AIRY_STRDUP("Invalid params JSON");
         return AIRY_ERR_PARSE_ERROR;
@@ -230,7 +248,7 @@ int fs_delete_tool(const char *params_json, tool_result_t *res)
                 res->exit_code = 0;
                 return AIRY_OK;
             }
-        } else if (fs_delete_tree(p) == 0) {
+        } else if (fs_delete_tree(p, 0) == 0) {
             char ok[256];
             snprintf(ok, sizeof(ok), "Removed directory tree '%s'", p);
             res->output = AIRY_STRDUP(ok);

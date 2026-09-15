@@ -174,7 +174,7 @@ static int web_fetch_via_network(const builtin_url_t *u, tool_result_t *res)
 }
 #endif
 
-int web_fetch_tool(const char *params_json, tool_result_t *res)
+int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
         res->error = AIRY_STRDUP("Invalid params JSON");
@@ -216,7 +216,8 @@ int web_fetch_tool(const char *params_json, tool_result_t *res)
     char *out = NULL;
     int exit_code = -1;
 
-    int rc = builtin_shell_run(cmd, NULL, &out, &exit_code, 25000, NULL, NULL);
+    int rc = builtin_shell_run(cmd, NULL, &out, &exit_code, timeout_ms ? timeout_ms : 25000, NULL,
+                               NULL);
     if (rc != 0) {
         res->error = AIRY_STRDUP("Failed to execute web fetch (pipe/process creation failed)");
         return AIRY_ERR_EXEC_FAIL;
@@ -589,7 +590,7 @@ static int web_search_via_bing(const char *query, int max_results, char *buf, si
     return rc;
 }
 
-int web_search_tool(const char *params_json, tool_result_t *res)
+int web_search_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
         res->error = AIRY_STRDUP("Invalid params JSON");
@@ -617,10 +618,14 @@ int web_search_tool(const char *params_json, tool_result_t *res)
     /* Primary path: Bing (fast on most networks), then DuckDuckGo as a
      * fallback for networks where Bing is blocked. Each endpoint is given a
      * tight --max-time so an unreachable search provider cannot stall the
-     * IPC round trip beyond the agent's 30s timeout. */
-    if (web_search_via_bing(q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len,
-                            &count) != 0 ||
-        count == 0) {
+     * IPC round trip beyond the agent's 30s timeout. The stage budget
+     * (timeout_ms) gates the fallbacks so the sum of retries stays within
+     * the executor's per-tool budget. */
+    uint64_t deadline = builtin_deadline_ms(timeout_ms);
+    if ((web_search_via_bing(q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len,
+                             &count) != 0 ||
+         count == 0) &&
+        !builtin_deadline_hit(deadline)) {
         char enc[2048];
         builtin_url_encode(q->valuestring, enc, sizeof(enc));
         char cmd[8192];
@@ -644,7 +649,7 @@ int web_search_tool(const char *params_json, tool_result_t *res)
         }
         if (out)
             AIRY_FREE(out);
-    } else if (web_search_results_degraded(buf)) {
+    } else if (web_search_results_degraded(buf) && !builtin_deadline_hit(deadline)) {
         /* Bing 命中但结果是汉字字典/词条（中文长查询分词退化）：改写查询
          * 后重试；改写仍退化/失败则清空走 DDG 兜底（2026-08-20）。 */
         char rq[2048];

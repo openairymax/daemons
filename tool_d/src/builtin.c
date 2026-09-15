@@ -37,6 +37,13 @@
 
 #include "network_common.h"
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <time.h>
+#endif
+
 #ifndef _WIN32
 #include <dirent.h>
 #include <errno.h>
@@ -46,7 +53,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -115,43 +121,86 @@ int tool_builtin_is_builtin(const char *executable)
     return executable && strncmp(executable, "builtin:", 8) == 0;
 }
 
-int tool_builtin_run(const char *tool_id, const char *params_json, tool_result_t *res)
+uint64_t builtin_deadline_ms(uint32_t timeout_ms)
+{
+    if (timeout_ms == 0)
+        return UINT64_MAX;
+#if defined(_WIN32)
+    return (uint64_t)GetTickCount64() + timeout_ms;
+#else
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return UINT64_MAX;
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL + timeout_ms;
+#endif
+}
+
+int builtin_deadline_hit(uint64_t deadline_ms)
+{
+    if (deadline_ms == UINT64_MAX)
+        return 0;
+#if defined(_WIN32)
+    return GetTickCount64() >= deadline_ms;
+#else
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return 0;
+    uint64_t now = (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+    return now >= deadline_ms;
+#endif
+}
+
+int builtin_scan_noise_dir(const char *name)
+{
+    static const char *const noise[] = {".git",   "node_modules", "target",       ".venv",
+                                        "__pycache__",           ".airymaxrt",   "build",
+                                        "logs",  "dist",         ".idea",        ".vscode",
+                                        ".cache",                "vendor",       NULL};
+    for (int i = 0; noise[i]; i++) {
+        if (strcmp(name, noise[i]) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+int tool_builtin_run(const char *tool_id, const char *params_json, uint32_t timeout_ms,
+                     tool_result_t *res)
 {
     if (!tool_id || !res) {
         return AIRY_ERR_INVALID_PARAM;
     }
     if (strcmp(tool_id, "fs_read") == 0)
-        return fs_read_tool(params_json, res);
+        return fs_read_tool(params_json, timeout_ms, res);
     if (strcmp(tool_id, "fs_write") == 0)
-        return fs_write_tool(params_json, res);
+        return fs_write_tool(params_json, timeout_ms, res);
     if (strcmp(tool_id, "fs_list") == 0)
-        return fs_list_tool(params_json, res);
+        return fs_list_tool(params_json, timeout_ms, res);
     if (strcmp(tool_id, "shell_run") == 0)
-        return shell_run_tool(params_json, res);
+        return shell_run_tool(params_json, timeout_ms, res);
     if (strcmp(tool_id, "web_fetch") == 0)
-        return web_fetch_tool(params_json, res);
+        return web_fetch_tool(params_json, timeout_ms, res);
     if (strcmp(tool_id, "fs_glob") == 0)
-        return fs_glob_tool(params_json, res);
+        return fs_glob_tool(params_json, timeout_ms, res);
     if (strcmp(tool_id, "fs_grep") == 0)
-        return fs_grep_tool(params_json, res);
+        return fs_grep_tool(params_json, timeout_ms, res);
     if (strcmp(tool_id, "fs_edit") == 0)
-        return fs_edit_tool(params_json, res);
+        return fs_edit_tool(params_json, timeout_ms, res);
     if (strcmp(tool_id, "fs_delete") == 0)
-        return fs_delete_tool(params_json, res);
+        return fs_delete_tool(params_json, timeout_ms, res);
     if (strcmp(tool_id, "web_search") == 0)
-        return web_search_tool(params_json, res);
+        return web_search_tool(params_json, timeout_ms, res);
 #ifndef _WIN32
     if (strcmp(tool_id, "git_exec") == 0)
-        return git_exec_tool(params_json, res);
+        return git_exec_tool(params_json, timeout_ms, res);
     if (strcmp(tool_id, "git_diff") == 0)
-        return git_diff_tool(params_json, res);
+        return git_diff_tool(params_json, timeout_ms, res);
     if (strcmp(tool_id, "git_apply") == 0)
-        return git_apply_tool(params_json, res);
+        return git_apply_tool(params_json, timeout_ms, res);
 #endif
     if (strcmp(tool_id, "maths_eval") == 0)
-        return maths_eval_tool(params_json, res);
+        return maths_eval_tool(params_json, timeout_ms, res);
     if (strcmp(tool_id, "maths_stats") == 0)
-        return maths_stats_tool(params_json, res);
+        return maths_stats_tool(params_json, timeout_ms, res);
     SVC_LOG_ERROR("builtin: unknown builtin tool '%s'", tool_id);
     res->error = AIRY_STRDUP("Unknown builtin tool");
     return AIRY_ERR_EXEC_NOT_FOUND;

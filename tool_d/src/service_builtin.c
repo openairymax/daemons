@@ -177,7 +177,8 @@ void register_builtin_tools(tool_service_t *svc)
             .executable = "builtin:fs_list",
             .params = fs_list_params,
             .param_count = 1,
-            .timeout_sec = 30,
+            /* Budget chain: tool (20s) < runner IPC (30s) < agent invoke. */
+            .timeout_sec = 20,
             .cacheable = 1,
             .permission_rule = "fs_list",
             .access = TOOL_ACCESS_READ,
@@ -213,7 +214,8 @@ void register_builtin_tools(tool_service_t *svc)
             .executable = "builtin:fs_glob",
             .params = glob_params,
             .param_count = 2,
-            .timeout_sec = 30,
+            /* Budget chain: tool (20s) < runner IPC (30s) < agent invoke. */
+            .timeout_sec = 20,
             .cacheable = 0,
             .permission_rule = "fs_glob",
             .access = TOOL_ACCESS_READ,
@@ -225,7 +227,9 @@ void register_builtin_tools(tool_service_t *svc)
             .executable = "builtin:fs_grep",
             .params = grep_params,
             .param_count = 4,
-            .timeout_sec = 60,
+            /* Budget chain: tool (20s) < runner IPC (30s) < agent invoke.
+             * Incident 0.1.16: fs_grep ran 158s and stalled the DAG. */
+            .timeout_sec = 20,
             .cacheable = 0,
             .permission_rule = "fs_grep",
             .access = TOOL_ACCESS_READ,

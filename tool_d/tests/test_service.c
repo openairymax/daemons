@@ -173,7 +173,7 @@ static void test_fs_delete_builtin(void)
     unlink(fpath);
     snprintf(jbuf, sizeof(jbuf), "{\"path\":\"%s\",\"recursive\":true}", dpath);
     tool_result_t cleanup = {0};
-    (void)fs_delete_tool(jbuf, &cleanup);
+    (void)fs_delete_tool(jbuf, 0, &cleanup);
     AIRY_FREE(cleanup.output);
     AIRY_FREE(cleanup.error);
 
@@ -187,7 +187,7 @@ static void test_fs_delete_builtin(void)
     tool_result_t *res = (tool_result_t *)calloc(1, sizeof(tool_result_t));
     CHECK(res != NULL);
     snprintf(jbuf, sizeof(jbuf), "{\"path\":\"%s\"}", fpath);
-    int rc = fs_delete_tool(jbuf, res);
+    int rc = fs_delete_tool(jbuf, 0, res);
     CHECK(rc == 0 && res->success == 1);
     CHECK(access(fpath, F_OK) != 0);
     tool_result_free(res);
@@ -196,7 +196,7 @@ static void test_fs_delete_builtin(void)
     res = (tool_result_t *)calloc(1, sizeof(tool_result_t));
     CHECK(res != NULL);
     snprintf(jbuf, sizeof(jbuf), "{\"path\":\"%s\"}", dpath);
-    rc = fs_delete_tool(jbuf, res);
+    rc = fs_delete_tool(jbuf, 0, res);
     CHECK(rc == 0 && res->success == 1);
     CHECK(access(dpath, F_OK) != 0);
     tool_result_free(res);
@@ -211,7 +211,7 @@ static void test_fs_delete_builtin(void)
     res = (tool_result_t *)calloc(1, sizeof(tool_result_t));
     CHECK(res != NULL);
     snprintf(jbuf, sizeof(jbuf), "{\"path\":\"%s\"}", dpath);
-    rc = fs_delete_tool(jbuf, res);
+    rc = fs_delete_tool(jbuf, 0, res);
     CHECK(rc == 0 && res->success == 0);
     CHECK(access(dpath, F_OK) == 0);
     tool_result_free(res);
@@ -220,7 +220,7 @@ static void test_fs_delete_builtin(void)
     res = (tool_result_t *)calloc(1, sizeof(tool_result_t));
     CHECK(res != NULL);
     snprintf(jbuf, sizeof(jbuf), "{\"path\":\"%s\",\"recursive\":true}", dpath);
-    rc = fs_delete_tool(jbuf, res);
+    rc = fs_delete_tool(jbuf, 0, res);
     CHECK(rc == 0 && res->success == 1);
     CHECK(access(dpath, F_OK) != 0);
     tool_result_free(res);
@@ -228,7 +228,7 @@ static void test_fs_delete_builtin(void)
     /* 5. 根路径拒绝 */
     res = (tool_result_t *)calloc(1, sizeof(tool_result_t));
     CHECK(res != NULL);
-    rc = fs_delete_tool("{\"path\":\"/\"}", res);
+    rc = fs_delete_tool("{\"path\":\"/\"}", 0, res);
     CHECK(!(rc == 0 && res->success == 1));
     tool_result_free(res);
 

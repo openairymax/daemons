@@ -481,7 +481,7 @@ int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_co
 }
 #endif /* _WIN32 */
 
-int shell_run_tool(const char *params_json, tool_result_t *res)
+int shell_run_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
         res->error = AIRY_STRDUP("Invalid params JSON");
@@ -507,7 +507,8 @@ int shell_run_tool(const char *params_json, tool_result_t *res)
     char *out = NULL;
     int exit_code = -1;
     int rc = builtin_shell_run(cmd->valuestring, cwd, &out, &exit_code,
-                               BUILTIN_SHELL_TIMEOUT_MS, NULL, &sandbox_cfg);
+                               timeout_ms ? timeout_ms : BUILTIN_SHELL_TIMEOUT_MS, NULL,
+                               &sandbox_cfg);
     if (rc != 0) {
         res->error = AIRY_STRDUP("Failed to execute command (pipe/process creation failed)");
         return AIRY_ERR_EXEC_FAIL;

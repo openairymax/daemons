@@ -25,6 +25,24 @@ extern "C" {
 #define BUILTIN_SHELL_TIMEOUT_MS 60000
 #define BUILTIN_OUTPUT_DRAIN_MS 1000 /* tail-flush bound after exit */
 
+/* Directory-scan guards shared by the recursive fs tools (fs_grep /
+ * fs_glob / fs_list). Every scan runs on a monotonic-deadline budget:
+ * on expiry the tool returns the partial result plus a truncation mark
+ * instead of monopolizing the executor thread (tool_d is single-worker
+ * per access class; an unbounded scan stalls the whole tool plane). */
+#define BUILTIN_SCAN_MAX_DEPTH 48
+#define BUILTIN_SCAN_MAX_FILE_BYTES (4U << 20) /* skip files > 4MB in grep */
+#define BUILTIN_LIST_MAX_ENTRIES 10000
+
+/* Directories never worth scanning (VC metadata, package stores, build
+ * output). Shared by fs_grep and fs_glob so both stay consistent. */
+int builtin_scan_noise_dir(const char *name);
+
+/* Monotonic deadline helpers: deadline_ms(0) returns "no budget"
+ * (UINT64_MAX); deadline_hit() is a cheap compare. */
+uint64_t builtin_deadline_ms(uint32_t timeout_ms);
+int builtin_deadline_hit(uint64_t deadline_ms);
+
 /* Common I/O helpers (builtin.c) */
 char *builtin_read_all(FILE *fp, int *out_truncated);
 
@@ -40,22 +58,24 @@ int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_co
                       uint32_t timeout_ms, int *out_truncated, const os_sandbox_cfg_t *sandbox);
 
 /* Built-in tool implementations (builtin_fs.c / builtin_shell.c /
- * builtin_net.c / builtin_git.c) */
-int fs_read_tool(const char *params_json, tool_result_t *res);
-int fs_write_tool(const char *params_json, tool_result_t *res);
-int fs_list_tool(const char *params_json, tool_result_t *res);
-int shell_run_tool(const char *params_json, tool_result_t *res);
-int web_fetch_tool(const char *params_json, tool_result_t *res);
-int fs_glob_tool(const char *params_json, tool_result_t *res);
-int fs_grep_tool(const char *params_json, tool_result_t *res);
-int fs_edit_tool(const char *params_json, tool_result_t *res);
-int fs_delete_tool(const char *params_json, tool_result_t *res);
-int web_search_tool(const char *params_json, tool_result_t *res);
+ * builtin_net.c / builtin_git.c). Every tool takes a wall-clock budget
+ * in ms (0 = no budget); scanning tools bail out with a truncation mark
+ * on expiry, non-scanning tools may ignore it. */
+int fs_read_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+int fs_write_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+int fs_list_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+int shell_run_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+int fs_grep_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+int fs_delete_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+int web_search_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
 
 #ifndef _WIN32
-int git_exec_tool(const char *params_json, tool_result_t *res);
-int git_diff_tool(const char *params_json, tool_result_t *res);
-int git_apply_tool(const char *params_json, tool_result_t *res);
+int git_exec_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+int git_diff_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+int git_apply_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
 #endif
 
 /* Glob wildcard segment matcher shared by builtin_fs_glob.c and
@@ -63,8 +83,8 @@ int git_apply_tool(const char *params_json, tool_result_t *res);
 int builtin_glob_seg_match(const char *pat, const char *str);
 
 /* Built-in maths tools (builtin_maths.c) — 委托 maths_d 数学外挂服务 */
-int maths_eval_tool(const char *params_json, tool_result_t *res);
-int maths_stats_tool(const char *params_json, tool_result_t *res);
+int maths_eval_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+int maths_stats_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
 
 #ifdef __cplusplus
 }
