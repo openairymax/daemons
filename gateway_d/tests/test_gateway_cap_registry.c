@@ -157,6 +157,17 @@ static void test_key_caps(void)
     ASSERT_TRUE(c && c->kind == GW_CAP_KIND_MEM);
     c = gw_cap_find("mem.kb_search");
     ASSERT_TRUE(c && c->kind == GW_CAP_KIND_MEM);
+    /* W-4（0.1.17）：语义缓存 / 上下文台账 / 提示词压缩三类能力必须可在网关
+     * 层解析；缺失即 fail-closed（-32601），主链路无处接入。 */
+    static const char *const mem_caps[] = {
+        "mem.cache_put",      "mem.cache_get",     "mem.cache_del",     "mem.cache_stats",
+        "mem.ledger_append",  "mem.ledger_window", "mem.ledger_budget", "mem.ledger_mark",
+        "mem.ledger_history", "mem.ledger_stats",  "mem.compress",
+    };
+    for (size_t i = 0; i < sizeof(mem_caps) / sizeof(mem_caps[0]); ++i) {
+        c = gw_cap_find(mem_caps[i]);
+        ASSERT_TRUE(c && c->kind == GW_CAP_KIND_MEM);
+    }
     c = gw_cap_find("hall.board");
     ASSERT_TRUE(c && c->kind == GW_CAP_KIND_HALL);
     c = gw_cap_find("hall.stream");
