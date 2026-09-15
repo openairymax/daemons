@@ -35,79 +35,16 @@
 #include <sys/wait.h>
 #endif
 
-/* ---------- Improvement 1 (P1d): parallel-tool concurrency gating
- * (writer-preferring RwLock) ----------
- *
- * Semantics: READ tools hold the read gate and run concurrently; WRITE
- * tools hold the write gate and run mutually exclusive/serially.
- * writer-preferring: waiting writers block new readers, so write tools
- * are never starved by read tools. exec->lock only guards the stats
- * fields (no whole-section locking, avoiding serializing all tools). */
-
-typedef struct {
-    airy_mtx_t lock;
-    airy_cond_t cond;
-    int readers;
-    int writer;
-    int writer_waiting;
-} tool_rw_gate_t;
-
-static void tool_rw_gate_init(tool_rw_gate_t *g)
-{
-    airy_mtx_init(&g->lock);
-    airy_cond_init(&g->cond);
-    g->readers = 0;
-    g->writer = 0;
-    g->writer_waiting = 0;
-}
-
-static void tool_rw_gate_destroy(tool_rw_gate_t *g)
-{
-    airy_cond_destroy(&g->cond);
-    airy_mtx_destroy(&g->lock);
-}
-
-static void tool_rw_gate_rdlock(tool_rw_gate_t *g)
-{
-    airy_mtx_lock(&g->lock);
-    while (g->writer || g->writer_waiting > 0)
-        airy_cond_wait(&g->cond, &g->lock);
-    g->readers++;
-    airy_mtx_unlock(&g->lock);
-}
-
-static void tool_rw_gate_wrlock(tool_rw_gate_t *g)
-{
-    airy_mtx_lock(&g->lock);
-    g->writer_waiting++;
-    while (g->writer || g->readers > 0)
-        airy_cond_wait(&g->cond, &g->lock);
-    g->writer_waiting--;
-    g->writer = 1;
-    airy_mtx_unlock(&g->lock);
-}
-
-static void tool_rw_gate_unlock(tool_rw_gate_t *g)
-{
-    airy_mtx_lock(&g->lock);
-    if (g->writer) {
-        g->writer = 0;
-        airy_cond_broadcast(&g->cond);
-    } else if (g->readers > 0) {
-        g->readers--;
-        if (g->readers == 0)
-            airy_cond_broadcast(&g->cond);
-    }
-    airy_mtx_unlock(&g->lock);
-}
+/* Concurrency ownership note: tool concurrency is bounded solely by the
+ * executor pool (worker cap + queue + per-tool wait budget). Tools run
+ * concurrently across sessions; serialization would reintroduce the
+ * "one slow tool stalls all sessions" failure mode (R1-a). */
 
 struct tool_executor {
     tool_executor_config_t manager;
     airy_mtx_t lock;
     uint64_t total_executions;
     uint64_t success_count;
-
-    tool_rw_gate_t rw_gate;
 
     tool_approval_ctx_t *approval_ctx;
     safety_guard_bridge_t *safety_bridge;
@@ -152,7 +89,6 @@ tool_executor_t *tool_executor_create(const tool_executor_config_t *cfg)
         AIRY_FREE(exec);
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
-    tool_rw_gate_init(&exec->rw_gate);
     exec->total_executions = 0;
     exec->success_count = 0;
     exec->approval_ctx = NULL;
@@ -244,7 +180,6 @@ void tool_executor_destroy(tool_executor_t *exec)
         interactive_approval_destroy(exec->interactive);
         exec->interactive = NULL;
     }
-    tool_rw_gate_destroy(&exec->rw_gate);
     airy_mtx_destroy(&exec->lock);
     AIRY_FREE(exec);
 }
@@ -379,15 +314,6 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    /* Improvement 1 (P1d): concurrency gating — READ tools run concurrently
-     * under a read gate, WRITE tools serialize under a write gate.
-     * exec->lock only protects the stats fields (no longer held for the whole
-     * section, avoiding serializing all tools). */
-    if (meta->access == TOOL_ACCESS_READ)
-        tool_rw_gate_rdlock(&exec->rw_gate);
-    else
-        tool_rw_gate_wrlock(&exec->rw_gate);
-
     airy_mtx_lock(&exec->lock);
     exec->total_executions++;
     airy_mtx_unlock(&exec->lock);
@@ -403,7 +329,6 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
         result->duration_ms = 0;
         *out_result = result;
-        tool_rw_gate_unlock(&exec->rw_gate);
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -429,7 +354,6 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         result->failure_class = TOOL_RESULT_CLASS_FATAL;
         result->duration_ms = 0;
         *out_result = result;
-        tool_rw_gate_unlock(&exec->rw_gate);
         return AIRY_EPERM;
     }
 
@@ -453,10 +377,9 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
                 if (!agent) {
                     agent = tool_approval_get_agent_id(exec->approval_ctx);
                 }
-                /* During interactive blocking, exec->lock is not held (P1d:
-                 * the lock only protects stats), but concurrency gating is
-                 * retained (a pending write-tool approval blocks other tools,
-                 * which is semantically correct). */
+                /* Interactive approval blocks only this pool worker; other
+                 * sessions and tools keep running (pool budget bounds the
+                 * wait via executor_pool_run). */
                 airy_approval_outcome_t outcome = AIRY_APPROVAL_DENIED;
                 char *request_id =
                     interactive_approval_block(exec->interactive, meta->name ? meta->name : "?",
@@ -492,7 +415,6 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
                     result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
                     result->duration_ms = 0;
                     *out_result = result;
-                    tool_rw_gate_unlock(&exec->rw_gate);
                     return AIRY_EPERM;
                 }
             } else {
@@ -507,7 +429,6 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
                 result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
                 result->duration_ms = 0;
                 *out_result = result;
-                tool_rw_gate_unlock(&exec->rw_gate);
                 return AIRY_EPERM;
             }
         }
@@ -538,7 +459,6 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         tool_call_log(meta, caller_agent, params_json, result);
         tool_hall_emit_result(meta, caller_agent, result);
         *out_result = result;
-        tool_rw_gate_unlock(&exec->rw_gate);
         return brc;
     }
 
@@ -564,7 +484,6 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         result->failure_class = TOOL_RESULT_CLASS_FATAL;
         result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
         *out_result = result;
-        tool_rw_gate_unlock(&exec->rw_gate);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
     output_buffer[0] = '\0';
@@ -596,7 +515,6 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
         AIRY_FREE(output_buffer);
         *out_result = result;
-        tool_rw_gate_unlock(&exec->rw_gate);
         return AIRY_EPERM;
     }
 
@@ -621,7 +539,6 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
         AIRY_FREE(output_buffer);
         *out_result = result;
-        tool_rw_gate_unlock(&exec->rw_gate);
         return AIRY_EPERM;
     }
 
@@ -696,7 +613,6 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     tool_hall_emit_result(meta, caller_agent, result);
 
     *out_result = result;
-    tool_rw_gate_unlock(&exec->rw_gate);
     return AIRY_OK;
 }
 
