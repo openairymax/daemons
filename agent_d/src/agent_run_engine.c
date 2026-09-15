@@ -635,7 +635,8 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
         cJSON_AddItemToObject(result, "tool_trace", cJSON_CreateArray());
     }
     if (think_result) {
-        if (gccp_interact_round) {
+        /* 交互轮仅在成功时要求继续（失败/熔断轮不得引导用户进入第二段）。 */
+        if (gccp_interact_round && run_rc == 0) {
             cJSON_AddBoolToObject(result, "interaction_required", 1);
             cJSON *qstr = cJSON_GetObjectItem(think_result, "gccp_questions");
             if (cJSON_IsString(qstr) && qstr->valuestring) {

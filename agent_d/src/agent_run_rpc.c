@@ -188,8 +188,17 @@ static void handle_run(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
     if (rc != 0 || !result) {
+        /* 失败原因可判读：引擎把原因写入 response（如工具连败熔断说明）。 */
+        const char *detail = NULL;
+        if (result) {
+            cJSON *resp = cJSON_GetObjectItem(result, "response");
+            if (cJSON_IsString(resp) && resp->valuestring && resp->valuestring[0])
+                detail = resp->valuestring;
+        }
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
-                           "agent.run failed: tool loop exhausted or LLM service error", id);
+                           detail ? detail :
+                                     "agent.run failed: tool loop exhausted or LLM service error",
+                           id);
         if (result)
             cJSON_Delete(result);
         return;

@@ -13,6 +13,7 @@ set(COREKERN_INCLUDE_DIR ${ATOMIC_DIR}/corekern/include)
 set(AGENT_TEST_SOURCES
     test_service.c
     test_run_ledger.c
+    test_run_loop.c
 )
 
 set(AGENT_COMMON_INCLUDES
@@ -38,6 +39,14 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
     get_filename_component(TEST_NAME ${TEST_SRC} NAME_WE)
 
     add_executable(test_agent_${TEST_NAME} ${TEST_SRC})
+
+    # white-box include 引擎源的测试需同编引擎闭环符号（engine/ledger）。
+    if(TEST_NAME STREQUAL "test_run_loop")
+        target_sources(test_agent_${TEST_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/agent_run_engine.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/agent_run_ledger.c
+        )
+    endif()
 
     target_include_directories(test_agent_${TEST_NAME} PRIVATE ${AGENT_COMMON_INCLUDES})
 
