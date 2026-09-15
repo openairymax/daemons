@@ -21,11 +21,15 @@
  *      排除"桩恒返回失败导致断言伪绿"
  *   5. 出网策略：失败分诊映射表；以及死代理下的失败／清除代理后的成功
  *      对照，证明 AIRY_HTTP_PROXY 确被注入句柄（N-1/N-2）
+ *   6. 出网重试：瞬时故障（对端接受后立即关闭）必须真的重发，尝试次数严格
+ *      等于 max_retries；流式在首包下发前同样重发且不得交付半截输出
+ *      （N-3/N-4）
  *
  * 平台：daemon 测试在 Windows 整体关闭（daemons/CMakeLists.txt 的 WIN32 门），
  * 故本文件直接使用 POSIX socket/pthread，无需跨平台分支。
  */
 
+#include "daemon_platform_ext.h"
 #include "error.h"
 #include "provider.h"
 
@@ -51,12 +55,19 @@ typedef struct {
     pthread_t tid;
     pthread_mutex_t lock;
     volatile int stop;
+    volatile int drop;       /* 1 = 接受后立即关闭连接（模拟瞬时对端故障） */
+    volatile int conn_count; /* 已接受的连接数：用于证明重试真的发生了 */
     char status_line[64];
     char content_type[64];
     char *body;
 } mock_server_t;
 
 static mock_server_t g_srv;
+
+static void mock_set_drop(int on)
+{
+    g_srv.drop = on;
+}
 
 static void mock_set_response(int code, const char *reason, const char *content_type,
                               const char *body)
@@ -161,6 +172,13 @@ static void *mock_server_thread(void *arg)
             if (g_srv.stop)
                 break;
             continue; /* EINTR / transient accept error */
+        }
+        __atomic_fetch_add(&g_srv.conn_count, 1, __ATOMIC_SEQ_CST);
+        if (g_srv.drop) {
+            /* 连接已建立但一个字节都不回：curl 报 GOT_NOTHING/RECV_ERROR，
+             * 属可重试的瞬时故障（用于 N-3/N-4 重试回归）。 */
+            close(fd);
+            continue;
         }
         mock_serve_one(fd);
         close(fd);
@@ -459,6 +477,151 @@ static void test_proxy_env_injected(void)
             setenv(PROXY_ENV_NAMES[i], saved[i], 1);
 }
 
+/* ── N-3/N-4：出网重试策略 SSoT（provider_retryable / backoff / budget） ── */
+
+static uint32_t ideal_backoff(int attempt)
+{
+    uint32_t b = PROVIDER_RETRY_BASE_MS;
+    for (int i = 0; i < attempt && b < PROVIDER_RETRY_MAX_MS; i++)
+        b <<= 1;
+    return b > PROVIDER_RETRY_MAX_MS ? PROVIDER_RETRY_MAX_MS : b;
+}
+
+static void test_retry_policy(void)
+{
+    printf("  retry policy: classification + backoff bounds...\n");
+
+    /* 瞬时传输故障必须重试 */
+    assert(provider_retryable(CURLE_COULDNT_RESOLVE_PROXY) == 1);
+    assert(provider_retryable(CURLE_COULDNT_RESOLVE_HOST) == 1);
+    assert(provider_retryable(CURLE_COULDNT_CONNECT) == 1);
+    assert(provider_retryable(CURLE_OPERATION_TIMEDOUT) == 1);
+    assert(provider_retryable(CURLE_SSL_CONNECT_ERROR) == 1);
+    assert(provider_retryable(CURLE_GOT_NOTHING) == 1);
+    assert(provider_retryable(CURLE_SEND_ERROR) == 1);
+    assert(provider_retryable(CURLE_PARTIAL_FILE) == 1);
+    assert(provider_retryable(CURLE_RECV_ERROR) == 1);
+
+    /* 确定性失败与调用方主动取消不得消耗预算 */
+    assert(provider_retryable(CURLE_URL_MALFORMAT) == 0);
+    assert(provider_retryable(CURLE_UNSUPPORTED_PROTOCOL) == 0);
+    assert(provider_retryable(CURLE_WRITE_ERROR) == 0);
+    assert(provider_retryable(CURLE_PEER_FAILED_VERIFICATION) == 0);
+
+    /* 退避：随机抖动必须落在 [base-jitter, base+jitter]，且整体受上限约束 */
+    for (int a = 0; a < 8; a++) {
+        uint32_t ideal = ideal_backoff(a);
+        uint32_t jit = ideal * PROVIDER_RETRY_JITTER_PCT / 100U;
+        for (int s = 0; s < 64; s++) {
+            uint32_t v = provider_backoff_ms(a);
+            assert(v >= ideal - jit);
+            assert(v <= ideal + jit);
+            assert(v <= PROVIDER_RETRY_MAX_MS +
+                            PROVIDER_RETRY_MAX_MS * PROVIDER_RETRY_JITTER_PCT / 100U);
+        }
+    }
+
+    /* 抖动必须真的随时间变化：否则所有客户端同相位重试，"退避"退化为重试风暴 */
+    {
+        uint32_t first = provider_backoff_ms(2);
+        int varied = 0;
+        for (int s = 0; s < 64 && !varied; s++)
+            if (provider_backoff_ms(2) != first)
+                varied = 1;
+        assert(varied);
+    }
+
+    /* 首次尝试的退避不得为 0：否则重试与"立即重打"无差别 */
+    assert(provider_backoff_ms(0) > 0);
+    assert(ideal_backoff(3) > ideal_backoff(0));
+
+    /* 预算：耗尽即为 0（不得为负，否则外层会用负超时继续尝试）。
+     * 断言一律以实测起点取差值，不依赖 airy_time_ms 的零点量级。 */
+    uint64_t t0 = airy_time_ms();
+    assert(provider_left_sec(0.0, t0) == 0.0);
+    assert(provider_left_sec(1.0, t0) > 0.0);
+    assert(provider_left_sec(1.0, t0) <= 1.0);
+    assert(provider_left_sec(60.0, t0) > 59.0);
+    assert(provider_left_sec(1.0, t0 - 2000U) == 0.0);
+
+    /* 重试门槛：退避等待之后必须还放得下一次最小尝试窗口，否则不得重试。
+     * 这条判据此前用"剩余 >= 5s"的绝对下限，预算 <= 5s 时任何重试都被否决
+     * （重试策略形同虚设），故改为"退避 + 最小窗口"的相对判据。 */
+    assert(provider_retry_budget_ok(60.0, t0, 200U) == 1);
+    assert(provider_retry_budget_ok(5.0, t0, 2000U) == 1);
+    assert(provider_retry_budget_ok(2.0, t0, 2000U) == 0);
+    assert(provider_retry_budget_ok(1.0, t0, 200U) == 0);
+    assert(provider_retry_budget_ok(1.0, t0 - 500U, 800U) == 0);
+    assert(provider_retry_budget_ok(1.0, t0 - 2000U, 200U) == 0);
+}
+
+/* N-3 端到端：对端"接受后立即关闭"是典型瞬时故障；非流式路径必须真的重发，
+ * 且总尝试次数严格等于 max_retries（不得退化为无限重试或零重试）。 */
+static void test_nonstream_transient_retried(void)
+{
+    printf("  nonstream transient failure is retried...\n");
+
+    mock_set_drop(1);
+    char base[128];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d/v1", g_srv.port);
+
+    provider_ctx_t *ctx = openai_ops.init("openai", "", base, NULL, 5.0, 2);
+    assert(ctx != NULL);
+
+    llm_message_t msg;
+    llm_request_config_t cfg;
+    cfg_init(&cfg, &msg);
+
+    int before = __atomic_load_n(&g_srv.conn_count, __ATOMIC_SEQ_CST);
+    llm_response_t *resp = NULL;
+    int ret = openai_ops.complete(ctx, &cfg, &resp);
+    int attempts = __atomic_load_n(&g_srv.conn_count, __ATOMIC_SEQ_CST) - before;
+    if (resp)
+        llm_response_free(resp);
+
+    printf("    ret=%d attempts=%d expect=%d\n", ret, attempts, 3);
+    assert(ret == AIRY_ERR_IO);
+    /* max_retries 是"额外重试次数"：初次 + 2 次退避重试，既不得退化为
+     * 无限重试，也不得退化为零重试。 */
+    assert(attempts == 3);
+
+    openai_ops.destroy(ctx);
+    mock_set_drop(0);
+}
+
+/* N-4 端到端：流式路径在"首包未下发"时必须同样重发（此前完全无重试）。 */
+static void test_stream_transient_retried(void)
+{
+    printf("  stream transient failure before first byte is retried...\n");
+
+    mock_set_drop(1);
+    char base[128];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d/v1", g_srv.port);
+
+    provider_ctx_t *ctx = openai_ops.init("openai", "", base, NULL, 5.0, 2);
+    assert(ctx != NULL);
+
+    llm_message_t msg;
+    llm_request_config_t cfg;
+    cfg_init(&cfg, &msg);
+
+    int before = __atomic_load_n(&g_srv.conn_count, __ATOMIC_SEQ_CST);
+    g_stream_chunk_count = 0;
+    llm_response_t *resp = NULL;
+    int ret = openai_ops.complete_stream(ctx, &cfg, on_stream_chunk, NULL, &resp);
+    int attempts = __atomic_load_n(&g_srv.conn_count, __ATOMIC_SEQ_CST) - before;
+    if (resp)
+        llm_response_free(resp);
+
+    printf("    ret=%d attempts=%d expect=%d\n", ret, attempts, 3);
+    assert(ret == AIRY_ERR_IO);
+    assert(attempts == 3);
+    assert(g_stream_chunk_count == 0); /* 首包未下发，用户不得看到任何半截输出 */
+
+    openai_ops.destroy(ctx);
+    mock_set_drop(0);
+}
+
 static void test_unreachable_is_io(void)
 {
     printf("  nonstream connection-refused -> IO...\n");
@@ -529,6 +692,11 @@ int main(void)
     /* N-1/N-2：出网传输策略 SSoT 的分诊与代理注入。 */
     test_http_diag_map();
     test_proxy_env_injected();
+
+    /* N-3/N-4：重试策略 SSoT，以及瞬时故障下"重试真的发生"。 */
+    test_retry_policy();
+    test_nonstream_transient_retried();
+    test_stream_transient_retried();
 
     mock_server_stop();
 

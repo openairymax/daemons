@@ -401,7 +401,7 @@ int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_config_t *
 
     long http_code = 0;
     int ret = provider_http_post_stream(url, headers, req_body, base->timeout_sec,
-                                        oai_stream_on_chunk, &acc, &http_code);
+                                        base->max_retries, oai_stream_on_chunk, &acc, &http_code);
 
     curl_slist_free_all(headers);
     AIRY_FREE(req_body);

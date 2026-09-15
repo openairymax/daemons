@@ -13,6 +13,7 @@
  */
 
 #include "airy_memory.h"
+#include "daemon_platform_ext.h"
 #include "error.h"
 #include "provider.h"
 #include "svc_logger.h"
@@ -256,13 +257,16 @@ static size_t sse_write_callback(void *contents, size_t size, size_t nmemb, void
 }
 
 int provider_http_post_stream(const char *url, struct curl_slist *headers, const char *body,
-                              double timeout_sec, provider_stream_chunk_cb_t on_chunk,
-                              void *chunk_user_data, long *out_http_code)
+                              double timeout_sec, int max_retries,
+                              provider_stream_chunk_cb_t on_chunk, void *chunk_user_data,
+                              long *out_http_code)
 {
     if (!url || !body || !on_chunk || !out_http_code) {
         errno = EINVAL;
         return AIRY_ERR_INVALID_PARAM;
     }
+    if (max_retries < 0)
+        max_retries = 0;
 
     sse_stream_ctx_t sse;
     sse_ctx_init(&sse, on_chunk, chunk_user_data);
@@ -270,28 +274,70 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    CURL *curl = curl_easy_init();
-    if (!curl) {
-        sse_ctx_destroy(&sse);
-        SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d "
-                      "STACK: provider_http_post_stream curl_easy_init",
-                      url, errno);
-        return AIRY_ERR_UNKNOWN;
+    CURLcode res = CURLE_OK;
+    long http_code = 0;
+    uint64_t start_ms = airy_time_ms();
+
+    for (int retry = 0; retry <= max_retries; retry++) {
+        double left = provider_left_sec(timeout_sec, start_ms);
+
+        CURL *curl = curl_easy_init();
+        if (!curl) {
+            sse_ctx_destroy(&sse);
+            SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d "
+                          "STACK: provider_http_post_stream curl_easy_init",
+                          url, errno);
+            return AIRY_ERR_UNKNOWN;
+        }
+
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sse_write_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sse);
+        provider_http_setup(curl, retry == 0 ? timeout_sec : left);
+
+        res = curl_easy_perform(curl);
+        http_code = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        curl_easy_cleanup(curl);
+
+        if (res == CURLE_OK || retry >= max_retries)
+            break;
+        /* 只有上游一个字节都没下发（http_code == 0 且 raw_len == 0）才可重试：
+         * 一旦写回调收到过数据，分片可能已经经 on_chunk 交付用户，重试会造成
+         * 重复输出。 */
+        if (http_code != 0 || sse.raw_len > 0 || !provider_retryable(res)) {
+            SVC_LOG_WARN("C-L02: PROVIDER: STREAM-NORETRY url=%s attempts=%d/%d "
+                         "http_code=%ld received=%zu retryable=%d diag=%s",
+                         url, retry + 1, max_retries + 1, http_code, sse.raw_len,
+                         provider_retryable(res), provider_http_diag(res));
+            break;
+        }
+
+        uint32_t delay_ms = provider_backoff_ms(retry);
+        if (!provider_retry_budget_ok(timeout_sec, start_ms, delay_ms)) {
+            SVC_LOG_WARN("C-L02: PROVIDER: STREAM-STOP url=%s retry=%d/%d "
+                         "reason=budget_spent left=%.1fs delay=%ums timeout=%.1fs",
+                         url, retry + 1, max_retries,
+                         provider_left_sec(timeout_sec, start_ms), delay_ms, timeout_sec);
+            res = CURLE_OPERATION_TIMEDOUT;
+            break;
+        }
+        SVC_LOG_WARN("C-L02: PROVIDER: STREAM-RETRY url=%s retry=%d/%d delay=%ums "
+                     "diag=%s curl_error=%s",
+                     url, retry + 1, max_retries, delay_ms, provider_http_diag(res),
+                     curl_easy_strerror(res));
+        airy_sleep_ms(delay_ms);
+
+        sse.line_len = 0;
+        sse.raw_len = 0;
+        sse.done = 0;
+        sse.cancelled = 0;
     }
 
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sse_write_callback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sse);
-    provider_http_setup(curl, timeout_sec);
-
-    CURLcode res = curl_easy_perform(curl);
-    long http_code = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
     *out_http_code = http_code;
-    curl_easy_cleanup(curl);
 
     if (sse.line_len > 0) {
         sse_process_buffer(&sse);

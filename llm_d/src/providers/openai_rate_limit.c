@@ -181,8 +181,12 @@ int openai_http_request_with_retry(openai_ctx_t *ctx, const char *url,
         }
 
         *out_response = NULL;
-        ret = provider_http_post(url, headers, body, ctx->base.timeout_sec, 0, out_response,
-                                 out_http_code);
+        /* 两层重试职责正交：本层只按 HTTP 状态重试（429 限流 / 5xx 服务端错误），
+         * 传输层瞬时故障（DNS / 连接 / TLS 握手 / 超时）交 provider_http_post 的
+         * 退避重试处理（N-3）。此处传 0 会让"连不上"这类最常见故障完全不重试，
+         * 故必须把 provider 的重试预算透传下去。 */
+        ret = provider_http_post(url, headers, body, ctx->base.timeout_sec,
+                                 ctx->base.max_retries, out_response, out_http_code);
 
         if (ret == AIRY_OK && *out_http_code == 200) {
             openai_rl_reset_429(&ctx->rl);

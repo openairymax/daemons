@@ -78,12 +78,32 @@ void provider_refresh_api_key(provider_base_ctx_t *base_ctx);
 
 /* 出网传输策略唯一实现（SSoT）：连接超时 / 总超时 / 代理 / 自定义 CA /
  * 重定向与证书校验。所有出网调用点（非流式、流式、google、anthropic）
- * 一律经此施加，禁止各自 curl_easy_setopt 副本。 */
+ * 一律经此施加，禁止各自 curl_easy_setopt 副本。
+ * timeout_sec 是整次 POST（含全部重试）的墙钟预算，不是单次尝试的预算。 */
 void provider_http_setup(CURL *curl, double timeout_sec);
 
 /* 出网失败分诊：把 libcurl 错误码归为可判读类别（DNS/CONNECT/TIMEOUT/TLS/
  * PROXY/NET_IO/OTHER），供日志与用户面诊断使用。返回值恒非 NULL。 */
 const char *provider_http_diag(CURLcode code);
+
+/* 出网重试策略唯一实现（SSoT，实现见 provider_http.c）。四者配套使用：
+ *   retryable = provider_retryable(错误码)                  —— 是否值得重试
+ *   delay     = provider_backoff_ms(已重试次数)             —— 指数退避 + 抖动
+ *   left      = provider_left_sec(预算, 起始时刻)           —— 剩余墙钟秒数
+ *   ok        = provider_retry_budget_ok(预算, 起点, delay) —— 退避后是否仍够一次
+ * 只有四者同时成立才允许重试；流式还须满足"首包未下发"
+ * （见 provider_http_post_stream）。任何一处复制这些判断都会造成同构点漂移。 */
+#define PROVIDER_RETRY_BASE_MS 200U
+#define PROVIDER_RETRY_MAX_MS 2000U
+#define PROVIDER_RETRY_JITTER_PCT 25U
+/* 退避等待之后仍须剩下的最小尝试窗口：低于此值就放弃重试，避免把调用方的
+ * 墙钟预算空转在一次注定超时的尝试上。 */
+#define PROVIDER_RETRY_MIN_LEFT_MS 1000U
+
+int provider_retryable(CURLcode code);
+uint32_t provider_backoff_ms(int attempt);
+double provider_left_sec(double timeout_sec, uint64_t start_ms);
+int provider_retry_budget_ok(double timeout_sec, uint64_t start_ms, uint32_t delay_ms);
 
 int provider_http_post(const char *url, struct curl_slist *headers, const char *body,
                        double timeout_sec, int max_retries, provider_http_resp_t **out_response,
@@ -103,9 +123,14 @@ char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text)
 
 typedef int (*provider_stream_chunk_cb_t)(const char *data_line, void *user_data);
 
+/* 流式 POST。重试边界：只有"上游一个字节都没下发"的失败才可重试——一旦写回调
+ * 收到过数据，后续分片可能已经经 on_chunk 交付给用户，重试会造成重复输出，故
+ * 此时无论错误是否瞬时都直接失败。HTTP 状态码不为 0 表示请求已到达上游，其重试
+ * 策略归调用方（429/限流循环），此处不重试。 */
 int provider_http_post_stream(const char *url, struct curl_slist *headers, const char *body,
-                              double timeout_sec, provider_stream_chunk_cb_t on_chunk,
-                              void *chunk_user_data, long *out_http_code);
+                              double timeout_sec, int max_retries,
+                              provider_stream_chunk_cb_t on_chunk, void *chunk_user_data,
+                              long *out_http_code);
 
 /* 流式控制帧发射（SSoT 唯一实现，收敛 openai/deepseek/local 的同构 static
  * 副本）。帧格式：工具帧 RS 'T' <json> RS；推理帧 RS 'R' <reasoning> RS。

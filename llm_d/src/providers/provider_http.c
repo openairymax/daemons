@@ -10,6 +10,7 @@
  */
 
 #include "airy_memory.h"
+#include "daemon_platform_ext.h"
 #include "error.h"
 #include "provider.h"
 #include "svc_logger.h"
@@ -130,6 +131,59 @@ const char *provider_http_diag(CURLcode code)
     }
 }
 
+/* 出网重试策略唯一实现（SSoT）。与 provider_http_setup / provider_http_diag 同属
+ * 传输层策略：非流式与流式（provider_stream / google / anthropic）共用，禁止各自
+ * 复制"哪些错误值得重试"与"退避多久"的判断。 */
+
+int provider_retryable(CURLcode code)
+{
+    switch (code) {
+    case CURLE_COULDNT_RESOLVE_PROXY:
+    case CURLE_COULDNT_RESOLVE_HOST:
+    case CURLE_COULDNT_CONNECT:
+    case CURLE_OPERATION_TIMEDOUT:
+    case CURLE_SSL_CONNECT_ERROR:
+    case CURLE_GOT_NOTHING:
+    case CURLE_SEND_ERROR:
+    case CURLE_PARTIAL_FILE:
+    case CURLE_RECV_ERROR:
+        return 1;
+    default:
+        /* 请求本身非法（URL/协议）、调用方主动取消（WRITE_ERROR）、证书与
+         * 证书链不受信任（PEER_FAILED_VERIFICATION 等）都不是瞬时故障，
+         * 重试只会把调用方的预算空转掉。 */
+        return 0;
+    }
+}
+
+uint32_t provider_backoff_ms(int attempt)
+{
+    uint32_t backoff = PROVIDER_RETRY_BASE_MS;
+    for (int i = 0; i < attempt && backoff < PROVIDER_RETRY_MAX_MS; i++)
+        backoff <<= 1;
+    if (backoff > PROVIDER_RETRY_MAX_MS)
+        backoff = PROVIDER_RETRY_MAX_MS;
+
+    uint32_t jitter = backoff * PROVIDER_RETRY_JITTER_PCT / 100U;
+    if (jitter == 0)
+        return backoff;
+    return backoff - jitter + airy_random_uint32(0, jitter * 2U);
+}
+
+double provider_left_sec(double timeout_sec, uint64_t start_ms)
+{
+    double spent = (double)(airy_time_ms() - start_ms) / 1000.0;
+    if (spent >= timeout_sec)
+        return 0.0;
+    return timeout_sec - spent;
+}
+
+int provider_retry_budget_ok(double timeout_sec, uint64_t start_ms, uint32_t delay_ms)
+{
+    double left = provider_left_sec(timeout_sec, start_ms);
+    return left * 1000.0 >= (double)delay_ms + (double)PROVIDER_RETRY_MIN_LEFT_MS;
+}
+
 int provider_http_post(const char *url, struct curl_slist *headers, const char *body,
                        double timeout_sec, int max_retries, provider_http_resp_t **out_response,
                        long *out_http_code)
@@ -138,6 +192,8 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
         errno = EINVAL;
         return AIRY_ERR_INVALID_PARAM;
     }
+    if (max_retries < 0)
+        max_retries = 0;
 
     provider_http_resp_t *resp =
         (provider_http_resp_t *)AIRY_CALLOC(1, sizeof(provider_http_resp_t));
@@ -145,12 +201,14 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
         return AIRY_ERR_OUT_OF_MEMORY;
 
     CURL *curl = NULL;
-    int retry = 0;
-    int success = -1;
-    CURLcode res;
+    CURLcode res = CURLE_OK;
     long http_code = 0;
+    int success = -1;
+    uint64_t start_ms = airy_time_ms();
 
-    while (retry <= max_retries) {
+    for (int retry = 0; retry <= max_retries; retry++) {
+        double left = provider_left_sec(timeout_sec, start_ms);
+
         curl = curl_easy_init();
         if (!curl) {
             SVC_LOG_ERROR("C-L02: PROVIDER: HTTP-POST-FAIL url=%s errno=%d retry=%d/%d "
@@ -166,7 +224,7 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_write_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, resp);
-        provider_http_setup(curl, timeout_sec);
+        provider_http_setup(curl, retry == 0 ? timeout_sec : left);
 
         res = curl_easy_perform(curl);
         if (res == CURLE_OK) {
@@ -175,19 +233,33 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
             curl_easy_cleanup(curl);
             break;
         }
-
-        SVC_LOG_WARN("C-L02: PROVIDER: HTTP-POST-FAIL url=%s errno=%d retry=%d/%d "
-                     "diag=%s curl_error=%s",
-                     url, errno, retry + 1, max_retries, provider_http_diag(res),
-                     curl_easy_strerror(res));
-        retry++;
         curl_easy_cleanup(curl);
-        if (retry <= max_retries) {
-            AIRY_FREE(resp->data);
-            resp->data = NULL;
-            resp->size = 0;
-            resp->capacity = 0;
+
+        if (retry >= max_retries || !provider_retryable(res)) {
+            SVC_LOG_WARN("C-L02: PROVIDER: HTTP-POST-FAIL url=%s errno=%d attempts=%d/%d "
+                         "diag=%s curl_error=%s retryable=%d",
+                         url, errno, retry + 1, max_retries + 1, provider_http_diag(res),
+                         curl_easy_strerror(res), provider_retryable(res));
+            break;
         }
+
+        uint32_t delay_ms = provider_backoff_ms(retry);
+        if (!provider_retry_budget_ok(timeout_sec, start_ms, delay_ms)) {
+            SVC_LOG_WARN("C-L02: PROVIDER: HTTP-POST-STOP url=%s retry=%d/%d "
+                         "reason=budget_spent left=%.1fs delay=%ums timeout=%.1fs",
+                         url, retry + 1, max_retries, provider_left_sec(timeout_sec, start_ms),
+                         delay_ms, timeout_sec);
+            break;
+        }
+        SVC_LOG_WARN("C-L02: PROVIDER: HTTP-POST-RETRY url=%s retry=%d/%d delay=%ums "
+                     "diag=%s curl_error=%s",
+                     url, retry + 1, max_retries, delay_ms, provider_http_diag(res),
+                     curl_easy_strerror(res));
+        airy_sleep_ms(delay_ms);
+        AIRY_FREE(resp->data);
+        resp->data = NULL;
+        resp->size = 0;
+        resp->capacity = 0;
     }
 
     if (success != 0) {
