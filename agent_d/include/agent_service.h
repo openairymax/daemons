@@ -46,6 +46,12 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id);
 
 /**
  * @brief Invoke the given agent.
+ * @param timeout_s [in] Request-scoped read budget in seconds. 0 or negative
+ *        selects the daemon default (300s, AIRY_AGENT_INVOKE_TIMEOUT_S);
+ *        values above the operator ceiling clamp to it. Deadline-aware
+ *        callers (CLI review: 180s outer) pass a smaller budget so this
+ *        inner layer fails first with a structured error instead of the
+ *        caller abandoning a worker that keeps reading for the full default
  * @param cancel_token [in] Cancel token, may be NULL: while invoke blocks
  *        reading the response it short-polls this token; on hit it ends the
  *        child gracefully (SIGTERM->2s->SIGKILL), closes with AbortedOutput
@@ -56,7 +62,7 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id);
  *         AIRY_ERR_CANCELED execution cancelled (AbortedOutput)
  */
 int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char *input, size_t len,
-                         const char *workspace_dir, airy_cancel_token_t *cancel_token,
+                         const char *workspace_dir, int timeout_s, airy_cancel_token_t *cancel_token,
                          char **out_output);
 
 /**
@@ -101,6 +107,35 @@ void agent_service_invoke_end(agent_service_t *svc, const char *request_id);
  *         AIRY_ERR_NOT_FOUND no matching active session
  */
 int agent_service_invoke_cancel(agent_service_t *svc, const char *request_id);
+
+/**
+ * @brief Cancel every active invoke session (daemon-shutdown drain).
+ *
+ * Used on the daemon exit path (SIGTERM/SIGINT/shutdown RPC): the event
+ * loop has stopped, but in-flight agent.invoke workers stay blocked in
+ * the child read (up to the invoke timeout). Without this fan-out the
+ * thread-pool join in daemon cleanup waits the full read timeout and the
+ * daemon appears to hang on shutdown, while runner children write into
+ * closed pipes. Cancels via the same per-request token path as
+ * agent_service_invoke_cancel (idempotent; cancel happens under the
+ * session lock to avoid racing invoke_end's token free).
+ *
+ * @param svc Service instance
+ * @return Number of sessions cancellation was requested for
+ */
+int agent_service_invoke_cancel_all(agent_service_t *svc);
+
+/**
+ * @brief Block until no active invoke session remains, bounded.
+ *
+ * Companion to agent_service_invoke_cancel_all on the shutdown path: a
+ * cancelled worker wakes within the select poll slice, cascade-terminates
+ * its child (SIGTERM->2s->SIGKILL) and unregisters its session.
+ *
+ * @param svc Service instance
+ * @param timeout_ms Upper bound for the wait (0 = wait forever)
+ */
+void agent_service_invoke_wait_idle(agent_service_t *svc, uint32_t timeout_ms);
 
 
 size_t agent_service_count(agent_service_t *svc);

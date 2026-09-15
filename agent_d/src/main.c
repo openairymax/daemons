@@ -294,6 +294,21 @@ int main(int argc, char **argv)
     perf_monitor_start(g_event_driver_agent_d);
 #endif
     daemon_event_driver_run(g_event_driver_agent_d);
+
+    /* Graceful drain (incident 0.1.16): the event loop has stopped, but
+     * in-flight agent.invoke workers are still blocked reading their child
+     * (up to the invoke timeout). daemon_cleanup_standard destroys the
+     * thread pool, whose join would wait that full timeout — the SIGTERM
+     * hang — while runner children write responses into closed pipes.
+     * Cancel every session via the same request-level token path as
+     * agent.cancel: workers wake within the select poll slice,
+     * cascade-terminate their children (SIGTERM->2s->SIGKILL) and finish. */
+    int ncanceled = agent_service_invoke_cancel_all(g_service);
+    if (ncanceled > 0) {
+        SVC_LOG_WARN("Shutdown: canceled %d in-flight invoke session(s), draining", ncanceled);
+        agent_service_invoke_wait_idle(g_service, 10000);
+    }
+
 #if AIRY_PLATFORM_POSIX
 
     perf_monitor_stop();
