@@ -231,18 +231,29 @@ void handle_ledger_history(cJSON *params, int id, airy_sock_t client_fd)
 
 /* ── mem.ledger_stats ────────────────────────────────────────────────── */
 
-void handle_ledger_stats(int id, airy_sock_t client_fd)
+/* 台账统计口径唯一来源：mem.ledger_stats 与 mem.get_stats 均由此构造。 */
+cJSON *mem_ledger_stats_json(void)
 {
-    if (!g_ledger) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "ledger 未初始化", id);
-        return;
-    }
+    if (!g_ledger)
+        return NULL;
     mem_ledger_stats_t st;
     mem_ledger_stats(g_ledger, &st);
     cJSON *result = cJSON_CreateObject();
+    if (!result)
+        return NULL;
     cJSON_AddNumberToObject(result, "sessions", (double)st.sessions);
     cJSON_AddNumberToObject(result, "entries", (double)st.entries);
     cJSON_AddNumberToObject(result, "total_tokens", (double)st.total_tokens);
+    return result;
+}
+
+void handle_ledger_stats(int id, airy_sock_t client_fd)
+{
+    cJSON *result = mem_ledger_stats_json();
+    if (!result) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "ledger 未初始化", id);
+        return;
+    }
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 

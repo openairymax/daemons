@@ -14,6 +14,9 @@
 #include "mem_handlers.h"
 #include "mem_daemon_ctx.h"
 
+#include "cache_handlers.h"
+#include "ledger_handlers.h"
+
 #include "airy_memory.h"
 #include "error.h"
 #include "daemon_main.h"
@@ -398,15 +401,34 @@ void handle_health_check(int id, airy_sock_t client_fd)
 
 /* ── mem.get_stats ───────────────────────────────────────────────────── */
 
-void handle_get_stats(int id, airy_sock_t client_fd)
+/* 统计口径唯一来源：语义缓存与台账子对象一并返回，使 /stats mem 与
+ * mem.cache_stats / mem.ledger_stats 三路口径一致。 */
+cJSON *mem_stats_json(void)
 {
     cJSON *result = cJSON_CreateObject();
+    if (!result)
+        return NULL;
     cJSON_AddStringToObject(result, "daemon", "mem_d");
-    if (g_service) {
-        cJSON_AddNumberToObject(result, "records", (double)mem_service_count(g_service));
-    } else {
-        cJSON_AddNumberToObject(result, "records", 0);
-    }
+    cJSON_AddNumberToObject(result, "records",
+                            (double)(g_service ? mem_service_count(g_service) : 0));
     cJSON_AddNumberToObject(result, "max_records", (double)g_config.max_records);
+
+    cJSON *cache = mem_cache_stats_json();
+    if (cache)
+        cJSON_AddItemToObject(result, "cache", cache);
+    cJSON *ledger = mem_ledger_stats_json();
+    if (ledger)
+        cJSON_AddItemToObject(result, "ledger", ledger);
+
+    return result;
+}
+
+void handle_get_stats(int id, airy_sock_t client_fd)
+{
+    cJSON *result = mem_stats_json();
+    if (!result) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }

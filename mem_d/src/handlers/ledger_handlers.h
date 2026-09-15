@@ -24,6 +24,9 @@ void handle_ledger_mark(cJSON *params, int id, airy_sock_t fd);
 void handle_ledger_history(cJSON *params, int id, airy_sock_t fd);
 void handle_ledger_stats(int id, airy_sock_t fd);
 
+/* 返回调用方需自行释放的台账统计对象；台账未初始化时返回 NULL。 */
+cJSON *mem_ledger_stats_json(void);
+
 /* 提示词压缩（mem.compress，0.1.5） */
 void handle_compress(cJSON *params, int id, airy_sock_t fd);
 

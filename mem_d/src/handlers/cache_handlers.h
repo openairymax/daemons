@@ -21,6 +21,9 @@ void handle_cache_get(cJSON *params, int id, airy_sock_t fd);
 void handle_cache_del(cJSON *params, int id, airy_sock_t fd);
 void handle_cache_stats(int id, airy_sock_t fd);
 
+/* 返回调用方需自行释放的命中率统计对象；缓存未初始化时返回 NULL。 */
+cJSON *mem_cache_stats_json(void);
+
 #ifdef __cplusplus
 }
 #endif
