@@ -34,6 +34,7 @@ extern "C" {
 #define MATHS_MAX_DEPTH 64
 #define MATHS_MAX_VALUES 65536
 #define MATHS_MAX_FUNC_NAME 32
+#define MATHS_PLOT_MAX_SAMPLES 256 /* plot 采样上限（响应缓冲 8192 硬约束） */
 
 #define MATHS_METHOD_NOT_RPC 0
 #define MATHS_METHOD_HANDLED 1

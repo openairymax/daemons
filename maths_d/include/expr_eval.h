@@ -29,6 +29,15 @@ int maths_d_eval(const char *expr, double *out_result, char *err_msg,
                  size_t err_msg_size);
 
 /**
+ * @brief 带单变量绑定的表达式求值（函数绘制采样基础）。
+ * @param var_name 变量名（如 "x"；NULL 等价 maths_d_eval）。
+ * @param var_value 变量取值。
+ * @return 0 成功；非 0 失败（err_msg 填充可读错误）。
+ */
+int maths_d_eval_at(const char *expr, const char *var_name, double var_value,
+                    double *out_result, char *err_msg, size_t err_msg_size);
+
+/**
  * @brief 表达式字符集白名单预检（防注入）。
  * @return 1 字符集合法；0 含非法字符。
  */
