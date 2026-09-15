@@ -201,6 +201,8 @@ int tool_builtin_run(const char *tool_id, const char *params_json, uint32_t time
         return maths_eval_tool(params_json, timeout_ms, res);
     if (strcmp(tool_id, "maths_stats") == 0)
         return maths_stats_tool(params_json, timeout_ms, res);
+    if (strcmp(tool_id, "maths_plot") == 0)
+        return maths_plot_tool(params_json, timeout_ms, res);
     SVC_LOG_ERROR("builtin: unknown builtin tool '%s'", tool_id);
     res->error = AIRY_STRDUP("Unknown builtin tool");
     return AIRY_ERR_EXEC_NOT_FOUND;
