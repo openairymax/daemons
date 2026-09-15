@@ -32,6 +32,7 @@ extern size_t g_exec_count;
 extern const char *g_fail_goal;
 extern const char *g_fatal_goal;
 extern const char *g_flaky_goal;
+extern const char *g_empty_goal;
 extern int g_flaky_left;
 extern volatile int g_block;
 extern int g_concurrent_now;
@@ -65,6 +66,7 @@ int test_dag_normal_failure_no_cascade(void);
 int test_dag_fatal_cascade_whole(void);
 int test_dag_transient_retry(void);
 int test_dag_transient_retry_exhausted(void);
+int test_dag_semantic_failed(void);
 /* test_dag_parallel.c */
 int test_dag_parallel_delegation(void);
 int test_dag_upstream_inject_par(void);

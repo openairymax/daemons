@@ -61,7 +61,8 @@ static void sched_dag_batch_worker(void *arg)
 
     if (svc->mac && node->id) {
         mac_framework_complete_task(svc->mac, node->id,
-                                    (dret == AIRY_SUCCESS && output) ? output : NULL);
+                                    (dret == AIRY_SUCCESS && sched_dag_has_output(output)) ? output
+                                                                                          : NULL);
     }
 
     airy_mtx_lock(&svc->lock);

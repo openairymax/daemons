@@ -299,6 +299,119 @@ int test_dag_fatal_cascade_whole(void)
     return 0;
 }
 
+/* ---- Case 13: process-level success without an artifact is not a semantic
+ * success ----
+ * A exits 0 but produces only whitespace: it must be graded SEMANTIC_FAILED,
+ * its dependent C canceled, the independent branch B still completed, and the
+ * graph must converge to SEMANTIC_FAILED (never COMPLETED). */
+int test_dag_semantic_failed(void)
+{
+    printf("=== test_dag_semantic_failed ===\n");
+
+    sched_service_t *svc = make_service_graded(true, 0);
+    if (!svc) {
+        printf("  FAILED: service create\n");
+        return 1;
+    }
+    g_exec_count = 0;
+    g_fail_goal = NULL;
+    g_fatal_goal = NULL;
+    g_flaky_goal = NULL;
+    g_flaky_left = 0;
+    g_block = 0;
+    g_empty_goal = "empty-A";
+
+    const char *dag_json = "{\"name\":\"semantic\",\"nodes\":["
+                           "{\"id\":\"A\",\"goal\":\"empty-A\",\"depends\":[]},"
+                           "{\"id\":\"B\",\"goal\":\"ok-B\",\"depends\":[]},"
+                           "{\"id\":\"C\",\"goal\":\"never-C\",\"depends\":[\"A\"]}"
+                           "]}";
+    char *dag_id = NULL;
+    int ret = sched_service_submit_dag(svc, dag_json, &dag_id);
+    if (ret != AIRY_SUCCESS || !dag_id) {
+        printf("  FAILED: submit rc=%d\n", ret);
+        g_empty_goal = NULL;
+        sched_service_destroy(svc);
+        return 1;
+    }
+    if (wait_dag_terminal(svc, dag_id, 5000) != 0) {
+        printf("  FAILED: dag timeout\n");
+        AIRY_FREE(dag_id);
+        g_empty_goal = NULL;
+        sched_service_destroy(svc);
+        return 1;
+    }
+
+    char st[32];
+    get_dag_status_str(svc, dag_id, st, sizeof(st));
+    if (strcmp(st, "semantic_failed") != 0) {
+        printf("  FAILED: dag status=%s (expect semantic_failed)\n", st);
+        AIRY_FREE(dag_id);
+        g_empty_goal = NULL;
+        sched_service_destroy(svc);
+        return 1;
+    }
+
+    /* Node-level grading plus downstream cancellation must both be visible in
+     * the status payload. */
+    char *json = NULL;
+    if (sched_service_get_dag(svc, dag_id, &json) != AIRY_SUCCESS || !json) {
+        printf("  FAILED: get_dag after semantic failure\n");
+        AIRY_FREE(dag_id);
+        g_empty_goal = NULL;
+        sched_service_destroy(svc);
+        return 1;
+    }
+    const char *node_a = strstr(json, "\"goal\":\"empty-A\"");
+    if (!node_a || !strstr(node_a, "\"status\":\"semantic_failed\"")) {
+        printf("  FAILED: node A not graded semantic_failed: %s\n", json);
+        AIRY_FREE(json);
+        AIRY_FREE(dag_id);
+        g_empty_goal = NULL;
+        sched_service_destroy(svc);
+        return 1;
+    }
+    const char *node_c = strstr(json, "\"goal\":\"never-C\"");
+    if (!node_c || !strstr(node_c, "\"status\":\"canceled\"")) {
+        printf("  FAILED: dependent C not canceled: %s\n", json);
+        AIRY_FREE(json);
+        AIRY_FREE(dag_id);
+        g_empty_goal = NULL;
+        sched_service_destroy(svc);
+        return 1;
+    }
+    AIRY_FREE(json);
+
+    for (size_t i = 0; i < g_exec_count; i++) {
+        if (strstr(g_exec_log[i], "never-C")) {
+            printf("  FAILED: node C executed although A produced no artifact\n");
+            AIRY_FREE(dag_id);
+            g_empty_goal = NULL;
+            sched_service_destroy(svc);
+            return 1;
+        }
+    }
+    int b_ran = 0;
+    for (size_t i = 0; i < g_exec_count; i++) {
+        if (strstr(g_exec_log[i], "ok-B"))
+            b_ran = 1;
+    }
+    if (!b_ran) {
+        printf("  FAILED: independent branch B did not run (semantic failure must not cascade)\n");
+        AIRY_FREE(dag_id);
+        g_empty_goal = NULL;
+        sched_service_destroy(svc);
+        return 1;
+    }
+
+    printf("  PASSED (empty artifact graded semantic_failed, B continued, C canceled; exec=%zu)\n\n",
+           g_exec_count);
+    AIRY_FREE(dag_id);
+    g_empty_goal = NULL;
+    sched_service_destroy(svc);
+    return 0;
+}
+
 /* ---- Case 11: transient failure graded retry succeeds (improvement 4) ----
  * A fails transiently (timeout) the first 2 times -> exponential-backoff
  * retry -> succeeds on the 3rd; the graph is COMPLETED, node

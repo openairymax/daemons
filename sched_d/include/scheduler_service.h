@@ -277,6 +277,12 @@ typedef enum {
     SCHED_DAG_NODE_READY,
     SCHED_DAG_NODE_RUNNING,
     SCHED_DAG_NODE_COMPLETED,
+    /* The executor reported success but the node produced no artifact
+     * (NULL or whitespace-only output), so it has nothing to hand to its
+     * downstream nodes. A process-level success is therefore not a semantic
+     * success: the node is terminal like FAILED, but the graph reports it
+     * separately so a partial failure is not confused with an abort. */
+    SCHED_DAG_NODE_SEMANTIC_FAILED,
     SCHED_DAG_NODE_FAILED,
     SCHED_DAG_NODE_CANCELED,
     SCHED_DAG_NODE_COUNT
@@ -286,6 +292,9 @@ typedef enum {
 typedef enum {
     SCHED_DAG_STATUS_ACTIVE = 0,
     SCHED_DAG_STATUS_COMPLETED,
+    /* Converged with at least one SEMANTIC_FAILED node and no FAILED node:
+     * every node ran to completion, but at least one produced no artifact. */
+    SCHED_DAG_STATUS_SEMANTIC_FAILED,
     SCHED_DAG_STATUS_FAILED,
     SCHED_DAG_STATUS_CANCELED,
     SCHED_DAG_STATUS_COUNT

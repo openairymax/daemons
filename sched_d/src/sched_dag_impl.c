@@ -14,6 +14,7 @@
  */
 
 #include "sched_service_internal.h"
+#include "sched_dag_internal.h"
 #include "airy_memory.h"
 #include "error.h"
 #include "svc_logger.h"
@@ -22,6 +23,22 @@
 #include <string.h>
 #include <time.h>
 #include <cjson/cJSON.h>
+
+/* Status-name tables shared by the get/list JSON paths and indexed by the
+ * enum value modulo its count, so a state added to the enums is rendered
+ * everywhere or not at all. The static assertions turn a missing name into a
+ * compile error instead of a silently truncated table. */
+static const char *const sched_dag_state_names[SCHED_DAG_STATUS_COUNT] = {
+    "active", "completed", "semantic_failed", "failed", "canceled"};
+static const char *const sched_dag_node_names[SCHED_DAG_NODE_COUNT] = {
+    "pending", "ready", "running", "completed", "semantic_failed", "failed", "canceled"};
+
+_Static_assert(sizeof(sched_dag_state_names) / sizeof(sched_dag_state_names[0]) ==
+                   SCHED_DAG_STATUS_COUNT,
+               "graph status name table out of sync with sched_dag_status_t");
+_Static_assert(sizeof(sched_dag_node_names) / sizeof(sched_dag_node_names[0]) ==
+                   SCHED_DAG_NODE_COUNT,
+               "node status name table out of sync with sched_dag_node_status_t");
 
 int sched_service_submit_dag(sched_service_t *service, const char *dag_json, char **out_dag_id)
 {
@@ -142,22 +159,16 @@ int sched_service_get_dag(sched_service_t *service, const char *dag_id, char **o
         return AIRY_ERR_NOT_FOUND;
     }
 
-    static const char *dag_status_names[] = {"active", "completed", "failed", "canceled"};
-    static const char *node_status_names[] = {"pending",   "ready",  "running",
-                                              "completed", "failed", "canceled"};
-
     cJSON *root = cJSON_CreateObject();
     if (root) {
         cJSON_AddStringToObject(root, "dag_id", dag->dag_id);
         cJSON_AddStringToObject(root, "name", dag->name ? dag->name : "");
         cJSON_AddStringToObject(root, "status",
-                                dag_status_names[dag->status % SCHED_DAG_STATUS_COUNT]);
+                                sched_dag_state_names[dag->status % SCHED_DAG_STATUS_COUNT]);
         cJSON_AddNumberToObject(root, "node_count", (double)dag->node_count);
         size_t done = 0;
         for (size_t j = 0; j < dag->node_count; j++) {
-            sched_dag_node_status_t st = dag->nodes[j]->status;
-            if (st == SCHED_DAG_NODE_COMPLETED || st == SCHED_DAG_NODE_FAILED ||
-                st == SCHED_DAG_NODE_CANCELED)
+            if (sched_dag_node_done(dag->nodes[j]->status))
                 done++;
         }
         cJSON_AddNumberToObject(root, "progress", (double)done);
@@ -173,7 +184,7 @@ int sched_service_get_dag(sched_service_t *service, const char *dag_id, char **o
             cJSON_AddStringToObject(nj, "goal", node->goal ? node->goal : "");
             cJSON_AddStringToObject(nj, "role", node->role ? node->role : "");
             cJSON_AddStringToObject(nj, "status",
-                                    node_status_names[node->status % SCHED_DAG_NODE_COUNT]);
+                                    sched_dag_node_names[node->status % SCHED_DAG_NODE_COUNT]);
             cJSON *deps = cJSON_CreateArray();
             for (size_t k = 0; k < node->dep_count; k++)
                 cJSON_AddItemToArray(deps, cJSON_CreateString(node->depends[k]));
@@ -208,8 +219,6 @@ int sched_dag_list_json(sched_service_t *service, char **out_json)
     }
     *out_json = NULL;
 
-    static const char *dag_status_names[] = {"active", "completed", "failed", "canceled"};
-
     airy_mtx_lock(&service->lock);
     cJSON *root = cJSON_CreateObject();
     if (root) {
@@ -222,13 +231,11 @@ int sched_dag_list_json(sched_service_t *service, char **out_json)
             cJSON_AddStringToObject(dj, "dag_id", dag->dag_id);
             cJSON_AddStringToObject(dj, "name", dag->name ? dag->name : "");
             cJSON_AddStringToObject(dj, "status",
-                                    dag_status_names[dag->status % SCHED_DAG_STATUS_COUNT]);
+                                    sched_dag_state_names[dag->status % SCHED_DAG_STATUS_COUNT]);
             cJSON_AddNumberToObject(dj, "node_count", (double)dag->node_count);
             size_t done = 0;
             for (size_t j = 0; j < dag->node_count; j++) {
-                sched_dag_node_status_t st = dag->nodes[j]->status;
-                if (st == SCHED_DAG_NODE_COMPLETED || st == SCHED_DAG_NODE_FAILED ||
-                    st == SCHED_DAG_NODE_CANCELED)
+                if (sched_dag_node_done(dag->nodes[j]->status))
                     done++;
             }
             cJSON_AddNumberToObject(dj, "progress", (double)done);

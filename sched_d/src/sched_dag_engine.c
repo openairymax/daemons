@@ -130,8 +130,7 @@ int sched_dag_node_ready(const sched_dag_t *dag, size_t idx)
             if (strcmp(dag->nodes[j]->id, dep_id) == 0) {
                 if (dag->nodes[j]->status == SCHED_DAG_NODE_COMPLETED) {
                     dep_ok = 1;
-                } else if (dag->nodes[j]->status == SCHED_DAG_NODE_FAILED ||
-                           dag->nodes[j]->status == SCHED_DAG_NODE_CANCELED) {
+                } else if (sched_dag_dep_broken(dag->nodes[j]->status)) {
 
                     return -1;
                 }
@@ -168,9 +167,7 @@ long sched_dag_find_ready(sched_service_t *svc, sched_dag_node_t **out_node)
 static int sched_dag_all_terminal(sched_service_t *svc, sched_dag_t *dag)
 {
     for (size_t j = 0; j < dag->node_count; j++) {
-        sched_dag_node_status_t st = dag->nodes[j]->status;
-        if (st != SCHED_DAG_NODE_COMPLETED && st != SCHED_DAG_NODE_FAILED &&
-            st != SCHED_DAG_NODE_CANCELED)
+        if (!sched_dag_node_done(dag->nodes[j]->status))
             return 0;
     }
     return 1;
@@ -237,8 +234,12 @@ static int sched_dag_error_is_transient(int dret)
  * node->output on success; freed on cancel/failure branches), the caller must
  * not free it again.
  *
- * Failure grading (improvements 3/4):
+ * Outcome grading (improvements 3/4 plus semantic verification):
  *   - graph/node already canceled (or graph FAILED/converged) -> drop result
+ *   - success exit code without an artifact -> node SEMANTIC_FAILED, no
+ *     cascade: the node is terminal for its dependents but the rest of the
+ *     graph keeps running, so the graph can report a partial semantic failure
+ *     instead of a hollow success
  *   - FATAL (only when dag_fatal_cascade=true) -> node FAILED + cascade-cancel
  *     the whole graph
  *   - transient with retry not exhausted/under budget -> back to PENDING +
@@ -262,7 +263,7 @@ int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_
                      node->id);
         return 0;
     }
-    if (dret == AIRY_SUCCESS && output) {
+    if (dret == AIRY_SUCCESS && sched_dag_has_output(output)) {
         /* Improvement 2 (P2a): artifact verification (before write_back).
          * When a node declares validator rules, run deterministic validation
          * (built via air_artifact_validator_from_json):
@@ -313,6 +314,28 @@ int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_
                      node->output ? strlen(node->output) : 0);
         return 1;
     }
+
+    if (dret == AIRY_SUCCESS) {
+        /* Success exit code with no artifact (NULL, empty or whitespace-only):
+         * the node has nothing to hand to its dependents, so a process-level
+         * success is not a semantic success. The node becomes terminal without
+         * aborting the graph; its dependents are canceled by
+         * sched_dag_propagate_unreachable and the graph converges to
+         * SCHED_DAG_STATUS_SEMANTIC_FAILED. */
+        node->status = SCHED_DAG_NODE_SEMANTIC_FAILED;
+        if (node->error) {
+            AIRY_FREE(node->error);
+            node->error = NULL;
+        }
+        node->error = AIRY_STRDUP("agent produced no artifact");
+        node->retry_at_ms = 0;
+        node->finished_at_ms = sched_now_ms();
+        SVC_LOG_ERROR("DAG node produced no artifact: %s/%s", dag->dag_id, node->id);
+        if (output)
+            AIRY_FREE(output);
+        return 0;
+    }
+
     node->finished_at_ms = sched_now_ms();
 
     if (node->error) {
@@ -418,8 +441,7 @@ void sched_dag_propagate_unreachable(sched_service_t *svc)
                     for (size_t m = 0; m < dag->node_count; m++) {
                         if (strcmp(dag->nodes[m]->id, node->depends[k]) != 0)
                             continue;
-                        sched_dag_node_status_t dst = dag->nodes[m]->status;
-                        if (dst == SCHED_DAG_NODE_FAILED || dst == SCHED_DAG_NODE_CANCELED) {
+                        if (sched_dag_dep_broken(dag->nodes[m]->status)) {
                             node->status = SCHED_DAG_NODE_CANCELED;
                             node->finished_at_ms = sched_now_ms();
                             changed = 1;
@@ -433,9 +455,10 @@ void sched_dag_propagate_unreachable(sched_service_t *svc)
 }
 
 /* Graph terminal-state convergence: finalized once all nodes of every active
- * graph reach a terminal state. Any FAILED node -> graph FAILED (reporting
- * partial failure faithfully); all COMPLETED -> COMPLETED. Call with lock
- * held. */
+ * graph reach a terminal state. Any FAILED node -> graph FAILED (the graph
+ * was aborted or a node hard-failed); otherwise any SEMANTIC_FAILED node ->
+ * graph SEMANTIC_FAILED (everything ran, at least one node produced no
+ * artifact); all COMPLETED -> COMPLETED. Call with lock held. */
 void sched_dag_finalize_terminal(sched_service_t *svc)
 {
     for (size_t i = 0; i < svc->dag_count; i++) {
@@ -445,16 +468,28 @@ void sched_dag_finalize_terminal(sched_service_t *svc)
         if (!sched_dag_all_terminal(svc, dag))
             continue;
         int has_failed = 0;
+        int has_semantic = 0;
         for (size_t j = 0; j < dag->node_count; j++) {
             if (dag->nodes[j]->status == SCHED_DAG_NODE_FAILED) {
                 has_failed = 1;
                 break;
             }
+            if (dag->nodes[j]->status == SCHED_DAG_NODE_SEMANTIC_FAILED)
+                has_semantic = 1;
         }
-        dag->status = has_failed ? SCHED_DAG_STATUS_FAILED : SCHED_DAG_STATUS_COMPLETED;
+        const char *label;
+        if (has_failed) {
+            dag->status = SCHED_DAG_STATUS_FAILED;
+            label = "failed";
+        } else if (has_semantic) {
+            dag->status = SCHED_DAG_STATUS_SEMANTIC_FAILED;
+            label = "semantic_failed";
+        } else {
+            dag->status = SCHED_DAG_STATUS_COMPLETED;
+            label = "completed";
+        }
         dag->finished_at_ms = sched_now_ms();
-        SVC_LOG_INFO("DAG %s: %s (%zu nodes)", dag->dag_id, has_failed ? "failed" : "completed",
-                     dag->node_count);
+        SVC_LOG_INFO("DAG %s: %s (%zu nodes)", dag->dag_id, label, dag->node_count);
     }
 }
 
