@@ -66,4 +66,26 @@ foreach(TEST_SRC ${MEM_TEST_SOURCES})
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
 
+# mem.get_stats 统计构造测试：直接编译 handlers 以验证 RPC 层口径一致性
+add_executable(test_mem_stats_json
+    test_stats_json.c
+    ../src/handlers/mem_handlers.c
+    ../src/handlers/cache_handlers.c
+    ../src/handlers/ledger_handlers.c
+)
+target_include_directories(test_mem_stats_json PRIVATE ${MEM_COMMON_INCLUDES})
+target_link_libraries(test_mem_stats_json PRIVATE
+    airy_mem_service
+    svc_common
+    airy_common
+    Threads::Threads
+    airy_platform_libs
+)
+if(AIRY_HAS_CJSON)
+    target_link_libraries(test_mem_stats_json PRIVATE cjson)
+endif()
+target_compile_options(test_mem_stats_json PRIVATE -Wall -Wextra -g -Wno-unused-function)
+add_test(NAME mem_d_stats_json COMMAND test_mem_stats_json
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
 enable_testing()

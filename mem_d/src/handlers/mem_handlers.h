@@ -27,6 +27,9 @@ void handle_evolve(cJSON *params, int id, airy_sock_t fd);
 void handle_health_check(int id, airy_sock_t fd);
 void handle_get_stats(int id, airy_sock_t fd);
 
+/* 返回调用方需自行释放的内存服务统计对象（含 cache/ledger 子对象）。 */
+cJSON *mem_stats_json(void);
+
 #ifdef __cplusplus
 }
 #endif
