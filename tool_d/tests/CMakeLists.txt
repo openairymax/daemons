@@ -16,6 +16,8 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_execute.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/cache.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/executor.c
+    # R1-a: 执行面专用有界 worker 池（隔离 RPC 共享池）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/executor_pool.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/validator.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/registry.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tool_approval.c
@@ -46,6 +48,8 @@ set(TOOL_TEST_SOURCES
     test_service.c
     test_cache.c
     test_executor.c
+    # R1-a: 执行面隔离池（并发互不影响 / CANCELED / 背压 BUSY）
+    test_executor_pool.c
     test_validator.c
     test_registry.c
     test_sandbox_integration.c

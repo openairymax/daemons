@@ -17,14 +17,17 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 
 struct tool_approval_ctx {
     tool_approval_config_t config;
     char agent_id[128];
-    uint64_t total_checks;
-    uint64_t denied_count;
-    uint64_t sanitized_count;
+    /* R1-a (0.1.17): 执行面 worker 池并发后审批检查可多线程同时进入，
+     * 统计计数器改为原子量（仅统计用途，relaxed 序即可）。 */
+    _Atomic uint64_t total_checks;
+    _Atomic uint64_t denied_count;
+    _Atomic uint64_t sanitized_count;
 
     safety_guard_bridge_t *bridge;
 };
@@ -65,8 +68,12 @@ void tool_approval_destroy(tool_approval_ctx_t *ctx)
     if (!ctx)
         return;
     AIRY_LOG_INFO("C-L05: Tool approval destroyed (checks=%llu denied=%llu sanitized=%llu)",
-                  (unsigned long long)ctx->total_checks, (unsigned long long)ctx->denied_count,
-                  (unsigned long long)ctx->sanitized_count);
+                  (unsigned long long)atomic_load_explicit(&ctx->total_checks,
+                                                           memory_order_relaxed),
+                  (unsigned long long)atomic_load_explicit(&ctx->denied_count,
+                                                           memory_order_relaxed),
+                  (unsigned long long)atomic_load_explicit(&ctx->sanitized_count,
+                                                           memory_order_relaxed));
     AIRY_FREE(ctx);
 }
 
@@ -98,7 +105,7 @@ int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *tool_nam
 
         if (strcmp(params_json, sanitized_params) != 0) {
             AIRY_LOG_INFO("C-L05: Tool params sanitized for '%s'", tool_name);
-            ctx->sanitized_count++;
+            atomic_fetch_add_explicit(&ctx->sanitized_count, 1, memory_order_relaxed);
         }
     } else {
         AIRY_LOG_WARN("C-L05: Tool param sanitization failed for '%s': ret=%d", tool_name, ret);
@@ -107,13 +114,29 @@ int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *tool_nam
     return ret;
 }
 
+static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
+                             const tool_metadata_t *meta, const char *params_json,
+                             tool_approval_detail_t *detail);
+
 int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
                         const char *params_json, tool_approval_detail_t *detail)
 {
     if (!ctx || !meta) {
         return AIRY_ERR_INVALID_PARAM;
     }
+    const char *subject = ctx->config.agent_id ? ctx->config.agent_id : "unknown";
+    return approval_check_as(ctx, subject, meta, params_json, detail);
+}
 
+/* R1-a (0.1.17): 审批主体显式参数化。旧实现通过临时改写共享
+ * ctx->config.agent_id 再恢复来支持按主体审批，前提是 tool_d 单线程；
+ * 执行面 worker 池并发后该前提失效，会发生审批主体串写（agent A 的
+ * 请求以 agent B 的身份通过审批）与数据竞态。改为参数传递后
+ * ctx->config.agent_id 创建后不再被写，并发安全。 */
+static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
+                             const tool_metadata_t *meta, const char *params_json,
+                             tool_approval_detail_t *detail)
+{
     if (detail) {
         __builtin_memset(detail, 0, sizeof(*detail));
         detail->decision = TOOL_APPROVAL_DENIED;
@@ -122,10 +145,10 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
         detail->params_were_sanitized = 0;
     }
 
-    ctx->total_checks++;
+    atomic_fetch_add_explicit(&ctx->total_checks, 1, memory_order_relaxed);
 
     const char *tool_name = meta->name ? meta->name : "unknown";
-    const char *agent_id = ctx->config.agent_id ? ctx->config.agent_id : "unknown";
+    const char *agent_id = subject;
 
     if (ctx->bridge) {
         safety_guard_bridge_result_t bridge_result;
@@ -149,7 +172,7 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
                              bridge_result.sanitized_params);
                 }
             }
-            ctx->denied_count++;
+            atomic_fetch_add_explicit(&ctx->denied_count, 1, memory_order_relaxed);
 
             if (ctx->config.enable_audit_logging) {
                 daemon_audit_log_event("tool_d", "tool_execute_denied", tool_name, 0, agent_id);
@@ -216,7 +239,7 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
             snprintf(detail->reason, sizeof(detail->reason),
                      "Permission denied: agent '%s' cannot execute tool '%s'", agent_id, tool_name);
         }
-        ctx->denied_count++;
+        atomic_fetch_add_explicit(&ctx->denied_count, 1, memory_order_relaxed);
 
         if (ctx->config.enable_audit_logging) {
             daemon_audit_log_event("tool_d", "tool_execute_denied", tool_name, 0, agent_id);
@@ -259,11 +282,14 @@ void tool_approval_get_stats(tool_approval_ctx_t *ctx, uint64_t *out_total_check
     if (!ctx)
         return;
     if (out_total_checks)
-        *out_total_checks = ctx->total_checks;
+        *out_total_checks =
+            atomic_load_explicit(&ctx->total_checks, memory_order_relaxed);
     if (out_denied_count)
-        *out_denied_count = ctx->denied_count;
+        *out_denied_count =
+            atomic_load_explicit(&ctx->denied_count, memory_order_relaxed);
     if (out_sanitized_count)
-        *out_sanitized_count = ctx->sanitized_count;
+        *out_sanitized_count =
+            atomic_load_explicit(&ctx->sanitized_count, memory_order_relaxed);
 }
 
 const char *tool_approval_get_agent_id(const tool_approval_ctx_t *ctx)
@@ -285,14 +311,7 @@ int tool_approval_check_for_agent(tool_approval_ctx_t *ctx, const char *agent_id
         return tool_approval_check(ctx, meta, params_json, detail);
     }
 
-    /* Temporarily override the approval subject: save the original agent_id
-     * (ctx->config.agent_id points into the ctx->agent_id buffer) and restore
-     * it after the check. tool_d is a single-threaded event loop and the
-     * approval check does not block, so there is no concurrency race here;
-     * save/restore still keeps the caller-visible state consistent. */
-    const char *saved_agent = ctx->config.agent_id;
-    ctx->config.agent_id = agent_id;
-    int ret = tool_approval_check(ctx, meta, params_json, detail);
-    ctx->config.agent_id = saved_agent;
-    return ret;
+    /* R1-a (0.1.17): 主体经参数直传（见 approval_check_as 注释），
+     * 不再临时改写共享 ctx->config.agent_id，多 worker 并发安全。 */
+    return approval_check_as(ctx, agent_id, meta, params_json, detail);
 }
