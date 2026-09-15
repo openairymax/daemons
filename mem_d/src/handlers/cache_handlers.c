@@ -113,20 +113,31 @@ void handle_cache_del(cJSON *params, int id, airy_sock_t client_fd)
 
 /* ── mem.cache_stats ─────────────────────────────────────────────────── */
 
-void handle_cache_stats(int id, airy_sock_t client_fd)
+/* 命中率口径唯一来源：mem.cache_stats 与 mem.get_stats 均由此构造。 */
+cJSON *mem_cache_stats_json(void)
 {
-    if (!g_cache) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "cache 未初始化", id);
-        return;
-    }
+    if (!g_cache)
+        return NULL;
     mem_cache_stats_t st;
     mem_cache_stats(g_cache, &st);
     cJSON *result = cJSON_CreateObject();
+    if (!result)
+        return NULL;
     cJSON_AddNumberToObject(result, "entries", (double)st.entries);
     cJSON_AddNumberToObject(result, "hits", (double)st.hits);
     cJSON_AddNumberToObject(result, "misses", (double)st.misses);
     cJSON_AddNumberToObject(result, "hit_rate", st.hit_rate);
     cJSON_AddNumberToObject(result, "evictions", (double)st.evictions);
     cJSON_AddNumberToObject(result, "bytes", (double)st.bytes);
+    return result;
+}
+
+void handle_cache_stats(int id, airy_sock_t client_fd)
+{
+    cJSON *result = mem_cache_stats_json();
+    if (!result) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "cache 未初始化", id);
+        return;
+    }
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
