@@ -18,6 +18,8 @@
 #include "tool_service.h"
 #include "validator.h"
 
+#include <stdatomic.h>
+
 struct tool_service {
     tool_registry_t *registry;
     tool_executor_t *executor;
@@ -27,9 +29,10 @@ struct tool_service {
     tool_config_t *manager;
     airy_mtx_t lock;
 
-    volatile uint64_t exec_total;
-    volatile uint64_t exec_fail;
-    volatile uint64_t exec_ms_total;
+    /* 会话线程并发自增（跨会话并发执行），必须原子 */
+    _Atomic uint64_t exec_total;
+    _Atomic uint64_t exec_fail;
+    _Atomic uint64_t exec_ms_total;
 };
 
 #endif /* TOOL_SERVICE_INTERNAL_H */

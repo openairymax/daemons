@@ -255,12 +255,14 @@ char *tool_service_get_stats(tool_service_t *svc)
         return NULL;
     cJSON_AddStringToObject(root, "daemon", "tool_d");
     cJSON_AddNumberToObject(root, "tools", tool_count);
-    cJSON_AddNumberToObject(root, "exec_total", (double)svc->exec_total);
-    cJSON_AddNumberToObject(root, "exec_fail", (double)svc->exec_fail);
-    cJSON_AddNumberToObject(root, "exec_ms_total", (double)svc->exec_ms_total);
+    uint64_t exec_total = atomic_load_explicit(&svc->exec_total, memory_order_relaxed);
+    uint64_t exec_fail = atomic_load_explicit(&svc->exec_fail, memory_order_relaxed);
+    uint64_t exec_ms_total = atomic_load_explicit(&svc->exec_ms_total, memory_order_relaxed);
+    cJSON_AddNumberToObject(root, "exec_total", (double)exec_total);
+    cJSON_AddNumberToObject(root, "exec_fail", (double)exec_fail);
+    cJSON_AddNumberToObject(root, "exec_ms_total", (double)exec_ms_total);
     cJSON_AddNumberToObject(root, "avg_exec_ms",
-                            svc->exec_total ? (double)svc->exec_ms_total / (double)svc->exec_total :
-                                              0.0);
+                            exec_total ? (double)exec_ms_total / (double)exec_total : 0.0);
     char *out = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return out;

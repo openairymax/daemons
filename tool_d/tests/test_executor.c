@@ -77,11 +77,10 @@ static long long threads_total_ms(const exec_thread_arg_t *a, const exec_thread_
     return max_end - min_start;
 }
 
-/* Note: start_ms is recorded BEFORE acquiring the gate. READ tools have no
- * lock-wait, so interval overlap and total time both prove concurrency; WRITE
- * tools arriving later wait on the gate (start recorded early), so intervals
- * necessarily overlap — write serialization can only be judged by total time:
- * serial total ~= 2x single execution, concurrent ~= single execution. */
+/* Concurrency ownership is the executor pool's; the executor itself never
+ * serializes tools. Both READ and WRITE tools must run concurrently:
+ * interval overlap proves execution interleaving, total < 2x single run
+ * rules out serialization. */
 
 static void test_executor_read_concurrent(void)
 {
@@ -133,9 +132,9 @@ static void test_executor_read_concurrent(void)
     printf("    PASSED\n");
 }
 
-static void test_executor_write_serial(void)
+static void test_executor_write_concurrent(void)
 {
-    printf("  test_executor_write_serial...\n");
+    printf("  test_executor_write_concurrent...\n");
 
     tool_executor_t *exec = tool_executor_create(NULL);
     assert(exec != NULL);
@@ -171,7 +170,9 @@ static void test_executor_write_serial(void)
     printf("    write intervals: [%lld,%lld] [%lld,%lld] total=%lldms\n", a.start_ms, a.end_ms,
            b.start_ms, b.end_ms, total);
 
-    assert(total >= 700 - 150);
+    assert(total < 600);
+
+    assert(intervals_overlap(a.start_ms, a.end_ms, b.start_ms, b.end_ms));
 
     tool_executor_destroy(exec);
     printf("    PASSED\n");
@@ -325,7 +326,7 @@ int main(void)
     test_executor_failure_class();
 
     test_executor_read_concurrent();
-    test_executor_write_serial();
+    test_executor_write_concurrent();
 
     printf("\nAll tool executor tests PASSED\n");
     return 0;

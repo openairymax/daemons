@@ -198,7 +198,7 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
     if (cached_result) {
         tool_metadata_free(meta);
         *out_result = cached_result;
-        svc->exec_total++;
+        atomic_fetch_add_explicit(&svc->exec_total, 1, memory_order_relaxed);
         return AIRY_OK;
     }
 
@@ -207,10 +207,12 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
     airy_time_monotonic(&ts0);
     int ret = do_execute_tool(svc, meta, req->params_json, req->agent_id, &res);
     airy_time_monotonic(&ts1);
-    svc->exec_total++;
-    svc->exec_ms_total += airy_time_to_ms(&ts1) - airy_time_to_ms(&ts0);
+    atomic_fetch_add_explicit(&svc->exec_total, 1, memory_order_relaxed);
+    atomic_fetch_add_explicit(&svc->exec_ms_total,
+                              (uint64_t)(airy_time_to_ms(&ts1) - airy_time_to_ms(&ts0)),
+                              memory_order_relaxed);
     if (ret != 0) {
-        svc->exec_fail++;
+        atomic_fetch_add_explicit(&svc->exec_fail, 1, memory_order_relaxed);
         tool_metadata_free(meta);
         meta = NULL;
 
@@ -270,8 +272,10 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
     /* R1-a: 流式路径同步执行部分同样收口到隔离池（与 do_execute_tool 一致） */
     int ret = executor_pool_run(svc->exec_pool, meta, req->params_json, req->agent_id, &res);
     airy_time_monotonic(&ts1);
-    svc->exec_total++;
-    svc->exec_ms_total += airy_time_to_ms(&ts1) - airy_time_to_ms(&ts0);
+    atomic_fetch_add_explicit(&svc->exec_total, 1, memory_order_relaxed);
+    atomic_fetch_add_explicit(&svc->exec_ms_total,
+                              (uint64_t)(airy_time_to_ms(&ts1) - airy_time_to_ms(&ts0)),
+                              memory_order_relaxed);
 
     if (ret == 0 && res) {
         if (callback) {
@@ -292,7 +296,7 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
     }
 
     if (ret != 0) {
-        svc->exec_fail++;
+        atomic_fetch_add_explicit(&svc->exec_fail, 1, memory_order_relaxed);
         SVC_LOG_ERROR("Tool stream execution failed: %s, error: %d", req->tool_id, ret);
     }
 
