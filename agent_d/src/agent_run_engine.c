@@ -35,7 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define AGENT_RUN_MODEL_DEFAULT "deepseek-v4-flash"
+#define AGENT_RUN_MODEL_DEFAULT "deepseek-flash"
 #define AGENT_RUN_LLM_MAX_RESP 1048576
 #define AGENT_RUN_SOCK_BUF AIRY_PATH_MAX
 
