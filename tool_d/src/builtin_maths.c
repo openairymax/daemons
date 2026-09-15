@@ -3,7 +3,7 @@
 
 /**
  * @file builtin_maths.c
- * @brief Built-in tool maths domain: maths_eval / maths_stats.
+ * @brief Built-in tool maths domain: maths_eval / maths_stats / maths_plot.
  *
  * 接线：tool_d 内置工具经 Unix Socket（maths.sock）调用 maths_d 数学外挂
  * 计算服务（JSON-RPC 2.0 over unix socket）。把数学表达式求值从 LLM 推理
@@ -25,6 +25,7 @@
 #include <cjson/cJSON.h>
 #include <cjson_helpers.h>
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -156,6 +157,22 @@ static cJSON *maths_parse_response(const char *resp, tool_result_t *res)
     }
     return root;
 }
+
+/* plot fenced 块追加分片：off 为当前写入偏移，溢出返回 -1（调用方
+ * 整体降级为错误）。 */
+static int maths_plot_append(char *buf, size_t cap, int off, const char *fmt,
+                             ...)
+{
+    if (off < 0 || (size_t)off >= cap)
+        return -1;
+    va_list ap;
+    va_start(ap, fmt);
+    int w = vsnprintf(buf + off, cap - (size_t)off, fmt, ap);
+    va_end(ap);
+    if (w < 0 || (size_t)w >= cap - (size_t)off)
+        return -1;
+    return off + w;
+}
 #endif /* _WIN32 */
 
 /**
@@ -234,6 +251,149 @@ int maths_eval_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
     res->exit_code = 0;
     res->success = 1;
     cJSON_Delete(rroot);
+    return 0;
+#endif
+}
+
+/**
+ * @brief maths_plot — 函数绘图采样（委托 maths_d plot RPC）
+ * 参数：{"expression":"sin(x)+x/2","xmin":-10,"xmax":10,"samples":128}
+ * 输出 ```plot fenced 块（title/xs/ys），供模型原文嵌入回复、TUI 画板渲染。
+ */
+int maths_plot_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
+{
+    (void)timeout_ms;
+    if (!res)
+        return AIRY_ERR_INVALID_PARAM;
+#ifdef _WIN32
+    res->error = AIRY_STRDUP("maths_plot is not supported on Windows");
+    return AIRY_ERR_NOT_SUPPORTED;
+#else
+    /* CJSON_PARSE_GUARD 使用 CJSON_AUTO_FREE（作用域结束时自动释放），
+     * 因此本函数内不得再显式 cJSON_Delete(root)。 */
+    CJSON_PARSE_GUARD(root, params_json, {
+        res->error = AIRY_STRDUP("Invalid params JSON");
+        return AIRY_ERR_PARSE_ERROR;
+    });
+
+    cJSON *expr = cJSON_GetObjectItem(root, "expression");
+    if (!cJSON_IsString(expr))
+        expr = cJSON_GetObjectItem(root, "expr");
+    cJSON *xmin = cJSON_GetObjectItem(root, "xmin");
+    cJSON *xmax = cJSON_GetObjectItem(root, "xmax");
+    if (!cJSON_IsString(expr) || !expr->valuestring || !expr->valuestring[0] ||
+        !cJSON_IsNumber(xmin) || !cJSON_IsNumber(xmax)) {
+        res->error = AIRY_STRDUP(
+            "Missing params: expression (string) + xmin/xmax (number)");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    if (strlen(expr->valuestring) > 4096) {
+        res->error = AIRY_STRDUP("expression too long (max 4096 chars)");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    if (!(xmin->valuedouble < xmax->valuedouble)) {
+        res->error = AIRY_STRDUP("xmin must be strictly less than xmax");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    cJSON *params_obj = cJSON_CreateObject();
+    if (!params_obj) {
+        res->error = AIRY_STRDUP("OOM");
+        return AIRY_ERR_GENERIC_FAIL;
+    }
+    cJSON_AddItemToObject(params_obj, "expr",
+                          cJSON_CreateString(expr->valuestring));
+    cJSON_AddItemToObject(params_obj, "xmin",
+                          cJSON_CreateNumber(xmin->valuedouble));
+    cJSON_AddItemToObject(params_obj, "xmax",
+                          cJSON_CreateNumber(xmax->valuedouble));
+    cJSON *samples = cJSON_GetObjectItem(root, "samples");
+    if (cJSON_IsNumber(samples))
+        cJSON_AddItemToObject(params_obj, "samples",
+                              cJSON_CreateNumber(samples->valuedouble));
+    char *payload = cJSON_PrintUnformatted(params_obj);
+    cJSON_Delete(params_obj);
+    if (!payload) {
+        res->error = AIRY_STRDUP("OOM");
+        return AIRY_ERR_GENERIC_FAIL;
+    }
+
+    char params[8192];
+    if (strlen(payload) + 32 >= sizeof(params)) {
+        cJSON_free(payload);
+        res->error = AIRY_STRDUP("request too large");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    snprintf(params, sizeof(params), "%s", payload);
+    cJSON_free(payload);
+
+    char resp[MATHS_RESP_CAP];
+    int rc = maths_rpc_call("plot", params, resp, sizeof(resp), res);
+    if (rc != 0)
+        return rc;
+
+    cJSON *rroot = maths_parse_response(resp, res);
+    if (!rroot)
+        return AIRY_ERR_EXEC_FAIL;
+    cJSON *result = cJSON_GetObjectItem(rroot, "result");
+    cJSON *xs = cJSON_GetObjectItem(result, "xs");
+    cJSON *ys = cJSON_GetObjectItem(result, "ys");
+    if (!cJSON_IsArray(xs) || !cJSON_IsArray(ys) ||
+        cJSON_GetArraySize(xs) < 2 ||
+        cJSON_GetArraySize(xs) != cJSON_GetArraySize(ys)) {
+        cJSON_Delete(rroot);
+        res->error = AIRY_STRDUP("maths_plot: unexpected response shape");
+        return AIRY_ERR_EXEC_FAIL;
+    }
+
+    size_t n = (size_t)cJSON_GetArraySize(xs);
+    size_t cap = strlen(expr->valuestring) + 512 + 32 * n;
+    char *out = (char *)AIRY_MALLOC(cap);
+    if (!out) {
+        cJSON_Delete(rroot);
+        res->error = AIRY_STRDUP("OOM");
+        return AIRY_ERR_GENERIC_FAIL;
+    }
+
+    int off = snprintf(out, cap, "```plot\ntitle: %s\nxs: ", expr->valuestring);
+    if (off < 0 || (size_t)off >= cap) {
+        AIRY_FREE(out);
+        cJSON_Delete(rroot);
+        res->error = AIRY_STRDUP("maths_plot: output overflow");
+        return AIRY_ERR_EXEC_FAIL;
+    }
+    const cJSON *it = NULL;
+    int first = 1;
+    cJSON_ArrayForEach(it, xs) {
+        off = maths_plot_append(out, cap, off, "%s%.6g", first ? "" : ",",
+                                it->valuedouble);
+        first = 0;
+        if (off < 0)
+            break;
+    }
+    off = maths_plot_append(out, cap, off, "\nys: ");
+    first = 1;
+    cJSON_ArrayForEach(it, ys) {
+        if (cJSON_IsNull(it))
+            off = maths_plot_append(out, cap, off, "%snull", first ? "" : ",");
+        else
+            off = maths_plot_append(out, cap, off, "%s%.6g", first ? "" : ",",
+                                    it->valuedouble);
+        first = 0;
+        if (off < 0)
+            break;
+    }
+    if (off >= 0)
+        off = maths_plot_append(out, cap, off, "\n```");
+    cJSON_Delete(rroot);
+    if (off < 0) {
+        AIRY_FREE(out);
+        res->error = AIRY_STRDUP("maths_plot: output overflow");
+        return AIRY_ERR_EXEC_FAIL;
+    }
+    res->output = out;
+    res->exit_code = 0;
+    res->success = 1;
     return 0;
 #endif
 }

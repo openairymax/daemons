@@ -85,6 +85,7 @@ int builtin_glob_seg_match(const char *pat, const char *str);
 /* Built-in maths tools (builtin_maths.c) — 委托 maths_d 数学外挂服务 */
 int maths_eval_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
 int maths_stats_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+int maths_plot_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
 
 #ifdef __cplusplus
 }
