@@ -7,6 +7,7 @@
  */
 
 #include "maths_service.h"
+#include "expr_eval.h"
 #include "airy_memory.h"
 
 #include <math.h>
@@ -229,6 +230,107 @@ static void test_backend_method_routing(void)
     }
 }
 
+/* 变量绑定求值（绘图采样基础）：绑定变量参与运算、未绑定标识符仍报错、
+ * maths_d_eval 无绑定语义不变。 */
+static void test_eval_at(void)
+{
+    double r = 0.0;
+    char e[128] = "";
+
+    if (maths_d_eval_at("x^2", "x", 3.0, &r, e, sizeof(e)) != 0 ||
+        fabs(r - 9.0) > 1e-9) {
+        printf("FAIL eval_at x^2@3: %s\n", e);
+        g_fail++;
+    }
+    if (maths_d_eval_at("sin(x)+x", "x", 0.0, &r, e, sizeof(e)) != 0 ||
+        fabs(r - 0.0) > 1e-9) {
+        printf("FAIL eval_at sin(x)+x@0: %s\n", e);
+        g_fail++;
+    }
+    if (maths_d_eval_at("2*pi*x", "x", 1.0, &r, e, sizeof(e)) != 0 ||
+        fabs(r - 2.0 * 3.14159265358979323846) > 1e-9) {
+        printf("FAIL eval_at 2*pi*x@1: %s\n", e);
+        g_fail++;
+    }
+    if (maths_d_eval_at("y+1", "x", 1.0, &r, e, sizeof(e)) == 0) {
+        printf("FAIL eval_at unbound identifier should error\n");
+        g_fail++;
+    }
+    if (maths_d_eval("x+1", &r, e, sizeof(e)) == 0) {
+        printf("FAIL eval unbound x should error\n");
+        g_fail++;
+    }
+}
+
+/* plot RPC：正常采样、奇点 null、非法域、缺省与上限夹取。 */
+static void test_plot_rpc(void)
+{
+    maths_d_service_t svc;
+    AIRY_MEMSET(&svc, 0, sizeof(svc));
+    svc.py_backend.in_fd = -1;
+    svc.py_backend.out_fd = -1;
+    svc.py_backend.available = 0;
+
+    /* y=x^2 on [-2,2]，5 样本 → xs=[-2,-1,0,1,2] ys=[4,1,0,1,4] */
+    const char *req =
+        "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"plot\","
+        "\"params\":{\"expr\":\"x^2\",\"xmin\":-2,\"xmax\":2,\"samples\":5}}";
+    char resp[8192];
+    if (maths_d_dispatch_jsonrpc(&svc, req, resp, sizeof(resp)) !=
+            MATHS_METHOD_HANDLED ||
+        !strstr(resp, "\"xs\":[-2,-1,0,1,2]") ||
+        !strstr(resp, "\"ys\":[4,1,0,1,4]")) {
+        printf("FAIL plot y=x^2: %s\n", resp);
+        g_fail++;
+    }
+
+    /* 域内奇点（1/x @ x=0）→ null */
+    const char *req2 =
+        "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"plot\","
+        "\"params\":{\"expr\":\"1/x\",\"xmin\":-1,\"xmax\":1,\"samples\":3}}";
+    char resp2[8192];
+    if (maths_d_dispatch_jsonrpc(&svc, req2, resp2, sizeof(resp2)) !=
+            MATHS_METHOD_HANDLED ||
+        !strstr(resp2, "\"ys\":[-1,null,1]")) {
+        printf("FAIL plot singular point should be null: %s\n", resp2);
+        g_fail++;
+    }
+
+    /* 非法域：xmin >= xmax */
+    const char *req3 =
+        "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"plot\","
+        "\"params\":{\"expr\":\"x\",\"xmin\":2,\"xmax\":-2}}";
+    char resp3[1024];
+    if (maths_d_dispatch_jsonrpc(&svc, req3, resp3, sizeof(resp3)) !=
+            MATHS_METHOD_HANDLED ||
+        !strstr(resp3, "error")) {
+        printf("FAIL plot bad domain should error: %s\n", resp3);
+        g_fail++;
+    }
+
+    /* samples 缺省 → 128；超限 → 夹取 256 */
+    const char *req4 =
+        "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"plot\","
+        "\"params\":{\"expr\":\"x\",\"xmin\":0,\"xmax\":1}}";
+    char resp4[8192];
+    if (maths_d_dispatch_jsonrpc(&svc, req4, resp4, sizeof(resp4)) !=
+            MATHS_METHOD_HANDLED ||
+        !strstr(resp4, "\"samples\":128")) {
+        printf("FAIL plot default samples: %s\n", resp4);
+        g_fail++;
+    }
+    const char *req5 =
+        "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"plot\","
+        "\"params\":{\"expr\":\"x\",\"xmin\":0,\"xmax\":1,\"samples\":99999}}";
+    char resp5[8192];
+    if (maths_d_dispatch_jsonrpc(&svc, req5, resp5, sizeof(resp5)) !=
+            MATHS_METHOD_HANDLED ||
+        !strstr(resp5, "\"samples\":256")) {
+        printf("FAIL plot clamp samples: %s\n", resp5);
+        g_fail++;
+    }
+}
+
 int main(void)
 {
     test_basic_arithmetic();
@@ -237,6 +339,8 @@ int main(void)
     test_stats();
     test_recognize();
     test_backend_method_routing();
+    test_eval_at();
+    test_plot_rpc();
 
     if (g_fail == 0) {
         printf("maths_service tests: ALL PASSED\n");

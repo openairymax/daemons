@@ -14,7 +14,8 @@
  *   unary  := ('-'|'+') unary | power
  *   power  := primary ('^' unary)?          # 右结合
  *   postfix:= primary ('!')                 # 阶乘
- *   primary:= number | constant | func '(' args ')' | '(' expr ')'
+ *   primary:= number | constant | variable | func '(' args ')' | '(' expr ')'
+ *   variable: 单变量绑定（maths_d_eval_at，绘图采样求 y=f(x)）
  *
  * 函数表覆盖基础算术 + 初等函数（建议稿第一、二级）：sqrt/sin/cos/tan/
  * asin/acos/atan/exp/ln/log/log10/log2/abs/floor/ceil/round/sign/sinh/
@@ -49,6 +50,8 @@ typedef struct {
     const char *s;        /* 剩余输入 */
     const char *err;      /* 错误消息（解析失败时） */
     int depth;            /* 递归深度 */
+    const char *var;      /* 绑定变量名（NULL = 无变量绑定） */
+    double var_val;       /* 绑定变量取值 */
 } eval_ctx_t;
 
 /* 标识符首字符只能是字母/下划线；后续可含数字（log10/log2） */
@@ -229,6 +232,14 @@ static int eval_parse_primary(eval_ctx_t *ctx, double *out)
         }
         if (nlen == 1 && *start == 'e') {
             *out = 2.71828182845904523536;
+            ctx->depth--;
+            return 0;
+        }
+
+        /* 绑定变量（如绘图采样的 x） */
+        if (ctx->var && strlen(ctx->var) == nlen &&
+            strncmp(start, ctx->var, nlen) == 0) {
+            *out = ctx->var_val;
             ctx->depth--;
             return 0;
         }
@@ -488,8 +499,8 @@ static int eval_parse_expr(eval_ctx_t *ctx, double *out)
     return 0;
 }
 
-int maths_d_eval(const char *expr, double *out_result, char *err_msg,
-                 size_t err_msg_size)
+int maths_d_eval_at(const char *expr, const char *var_name, double var_value,
+                    double *out_result, char *err_msg, size_t err_msg_size)
 {
     if (!expr || !out_result || !err_msg || err_msg_size == 0)
         return -1;
@@ -503,6 +514,8 @@ int maths_d_eval(const char *expr, double *out_result, char *err_msg,
     ctx.s = expr;
     ctx.err = NULL;
     ctx.depth = 0;
+    ctx.var = var_name;
+    ctx.var_val = var_value;
 
     double result = 0.0;
     if (eval_parse_expr(&ctx, &result) != 0) {
@@ -523,4 +536,10 @@ int maths_d_eval(const char *expr, double *out_result, char *err_msg,
 
     *out_result = result;
     return 0;
+}
+
+int maths_d_eval(const char *expr, double *out_result, char *err_msg,
+                 size_t err_msg_size)
+{
+    return maths_d_eval_at(expr, NULL, 0.0, out_result, err_msg, err_msg_size);
 }
