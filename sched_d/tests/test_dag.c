@@ -40,6 +40,7 @@ size_t g_exec_count;
 const char *g_fail_goal;
 const char *g_fatal_goal;
 const char *g_flaky_goal;
+const char *g_empty_goal;
 int g_flaky_left;
 volatile int g_block;
 int g_concurrent_now;
@@ -74,6 +75,14 @@ int fake_executor(const char *agent_id, const char *task_description, const char
             g_flaky_left--;
             return AIRY_ERR_EXEC_TIMEOUT;
         }
+    }
+
+    /* Semantic-failure injection: the executor exits successfully but hands
+     * back no usable artifact (whitespace only), which must be graded as
+     * SEMANTIC_FAILED rather than COMPLETED. */
+    if (g_empty_goal && task_description && strstr(task_description, g_empty_goal)) {
+        *out_output = AIRY_STRDUP("  \n\t ");
+        return AIRY_SUCCESS;
     }
 
     char buf[128];
@@ -279,6 +288,7 @@ int main(void)
     failed += test_dag_fatal_cascade_whole();
     failed += test_dag_transient_retry();
     failed += test_dag_transient_retry_exhausted();
+    failed += test_dag_semantic_failed();
 
     if (failed) {
         printf("\nDAG tests: %d FAILED\n", failed);
