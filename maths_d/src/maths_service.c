@@ -21,6 +21,7 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -261,6 +262,28 @@ static int json_get_array(const char *json, const char *key, double *out,
     return 0;
 }
 
+/* 数值字段提取：{"key":<number>}。strtod 兼容整数与浮点字面量。 */
+static int json_get_double(const char *json, const char *key, double *out)
+{
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p)
+        return -1;
+    p = strchr(p + strlen(pattern), ':');
+    if (!p)
+        return -1;
+    p++;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    char *end = NULL;
+    double v = strtod(p, &end);
+    if (end == p)
+        return -1;
+    *out = v;
+    return 0;
+}
+
 /* 提取 JSON 对象字段：{"key":{...}}，把 {..}（含花括号）拷到 out。
  * 支持对象内嵌套花括号（按深度匹配）。返回 0 成功。 */
 static int json_get_object(const char *json, const char *key, char *out,
@@ -333,6 +356,22 @@ static void maths_make_error(char *resp, size_t resp_sz, int id,
              "{\"jsonrpc\":\"2.0\",\"id\":%d,\"error\":{\"code\":-32000,"
              "\"message\":\"%s\"}}",
              id, msg);
+}
+
+/* JSON-RPC 响应追加分片（plot 长响应增量拼装）：off 为当前写入偏移，
+ * 返回新偏移；缓冲不足返回 -1（调用方整体降级为错误响应）。 */
+static int maths_resp_append(char *resp, size_t cap, int off, const char *fmt,
+                             ...)
+{
+    if (off < 0 || (size_t)off >= cap)
+        return -1;
+    va_list ap;
+    va_start(ap, fmt);
+    int w = vsnprintf(resp + off, cap - (size_t)off, fmt, ap);
+    va_end(ap);
+    if (w < 0 || (size_t)w >= cap - (size_t)off)
+        return -1;
+    return off + w;
 }
 
 int maths_d_dispatch_jsonrpc(maths_d_service_t *svc, const char *request,
@@ -467,6 +506,62 @@ int maths_d_dispatch_jsonrpc(maths_d_service_t *svc, const char *request,
                  "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"op\":\"%s\","
                  "\"count\":%zu,\"result\":%.12g}}",
                  id, op, count, result);
+        return MATHS_METHOD_HANDLED;
+    }
+
+    if (strcmp(method, "plot") == 0) {
+        char expr[MATHS_MAX_EXPR_LEN] = "";
+        double xmin = 0.0, xmax = 0.0, samples_in = 128.0;
+        if (json_get_string(request, "expr", expr, sizeof(expr)) != 0 ||
+            json_get_double(request, "xmin", &xmin) != 0 ||
+            json_get_double(request, "xmax", &xmax) != 0 ||
+            isnan(xmin) || isnan(xmax) || !(xmin < xmax)) {
+            maths_make_error(response, response_size, id,
+                                       "invalid plot params (expr, xmin<xmax)");
+            return MATHS_METHOD_HANDLED;
+        }
+        json_get_double(request, "samples", &samples_in);
+        long n = (long)samples_in;
+        if (n < 2)
+            n = 2;
+        if (n > MATHS_PLOT_MAX_SAMPLES)
+            n = MATHS_PLOT_MAX_SAMPLES;
+
+        /* 均匀采样 y=f(x)；x 域固定满采样，y 域错误/NaN/Inf 记 null，
+         * 由渲染端断开连线。响应经增量拼装防溢出（8192 硬约束）。 */
+        double span = xmax - xmin;
+        int off = snprintf(response, response_size,
+                           "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":"
+                           "{\"expr\":\"%s\",\"xmin\":%.10g,\"xmax\":%.10g,"
+                           "\"samples\":%ld,\"xs\":[",
+                           id, expr, xmin, xmax, n);
+        for (long i = 0; i < n; i++) {
+            double x = xmin + span * (double)i / (double)(n - 1);
+            off = maths_resp_append(response, response_size, off, "%s%.10g",
+                                    i ? "," : "", x);
+        }
+        off = maths_resp_append(response, response_size, off, "],\"ys\":[");
+        for (long i = 0; i < n; i++) {
+            double x = xmin + span * (double)i / (double)(n - 1);
+            double y = 0.0;
+            char err[128] = "";
+            if (maths_d_eval_at(expr, "x", x, &y, err, sizeof(err)) != 0 ||
+                isnan(y) || isinf(y))
+                off = maths_resp_append(response, response_size, off, "%snull",
+                                        i ? "," : "");
+            else
+                off = maths_resp_append(response, response_size, off,
+                                        "%s%.10g", i ? "," : "", y);
+        }
+        off = maths_resp_append(response, response_size, off, "]}");
+        if (off < 0) {
+            maths_make_error(response, response_size, id,
+                                       "plot response overflow");
+            return MATHS_METHOD_HANDLED;
+        }
+        airy_mtx_lock(&svc->lock);
+        svc->eval_count++;
+        airy_mtx_unlock(&svc->lock);
         return MATHS_METHOD_HANDLED;
     }
 
