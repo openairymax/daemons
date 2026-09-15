@@ -43,6 +43,8 @@ typedef struct sched_dag_batch_item {
     sched_dag_t *dag;
     sched_dag_node_t *node;
     char *agent_id;
+    /* Composed node input (goal + upstream products); owned by this item. */
+    char *input;
 } sched_dag_batch_item_t;
 
 static void sched_dag_batch_worker(void *arg)
@@ -51,9 +53,9 @@ static void sched_dag_batch_worker(void *arg)
     sched_service_t *svc = item->svc;
     sched_dag_node_t *node = item->node;
 
+    const char *goal = item->input ? item->input : sched_dag_agent_input(item->dag, node);
     char *output = NULL;
-    int dret = svc->executor ? svc->executor(item->agent_id ? item->agent_id : "coding",
-                                             sched_dag_agent_input(item->dag, node),
+    int dret = svc->executor ? svc->executor(item->agent_id ? item->agent_id : "coding", goal,
                                              item->dag->workspace_dir, &output) :
                                AIRY_ERR_SVC_NOT_READY;
 
@@ -72,6 +74,7 @@ static void sched_dag_batch_worker(void *arg)
     }
     airy_mtx_unlock(&svc->lock);
 
+    AIRY_FREE(item->input);
     AIRY_FREE(item->agent_id);
     AIRY_FREE(item);
 }
@@ -143,12 +146,21 @@ void *sched_dag_worker_thread(void *arg)
 
             mac_collab_task_t tasks[SCHED_DAG_MAX_NODES];
             char *assigned[SCHED_DAG_MAX_NODES];
+            char *inputs[SCHED_DAG_MAX_NODES];
             __builtin_memset(tasks, 0, sizeof(tasks));
             __builtin_memset(assigned, 0, sizeof(assigned));
+            __builtin_memset(inputs, 0, sizeof(inputs));
             for (size_t i = 0; i < batch_n; i++) {
                 AIRY_STRNCPY_TERM(tasks[i].id, batch[i]->id, sizeof(tasks[i].id));
                 tasks[i].id[sizeof(tasks[i].id) - 1] = '\0';
-                tasks[i].input_json = (char *)sched_dag_agent_input(batch_dags[i], batch[i]);
+                /* Composed under the lock: upstream outputs are stable once
+                 * their node completed, and this node only became ready after
+                 * that. delegate_batch duplicates input_json, so the buffer
+                 * stays ours and is handed to the batch item below. */
+                inputs[i] = sched_dag_node_input(batch_dags[i], batch[i],
+                                                 SCHED_DAG_UPSTREAM_BUDGET);
+                tasks[i].input_json = inputs[i] ? inputs[i] :
+                                      (char *)sched_dag_agent_input(batch_dags[i], batch[i]);
                 SVC_LOG_INFO("sched: DAG node dispatch (parallel): %s/%s role=%s deps=%zu",
                              batch_dags[i]->dag_id, batch[i]->id,
                              batch[i]->role ? batch[i]->role : "coding", batch[i]->dep_count);
@@ -162,8 +174,8 @@ void *sched_dag_worker_thread(void *arg)
 
             /* Submit the batch to the thread pool for concurrent execution
              * (on submit failure, run synchronously as a fallback; ownership
-             * of assigned[i] transfers with the item and is freed by the batch
-             * worker) */
+             * of assigned[i] / inputs[i] transfers with the item and is freed
+             * by the batch worker) */
             for (size_t i = 0; i < batch_n; i++) {
                 sched_dag_batch_item_t *item =
                     (sched_dag_batch_item_t *)AIRY_CALLOC(1, sizeof(sched_dag_batch_item_t));
@@ -171,6 +183,8 @@ void *sched_dag_worker_thread(void *arg)
 
                     AIRY_FREE(assigned[i]);
                     assigned[i] = NULL;
+                    AIRY_FREE(inputs[i]);
+                    inputs[i] = NULL;
                     airy_mtx_lock(&svc->lock);
                     batch[i]->status = SCHED_DAG_NODE_FAILED;
                     batch[i]->error = AIRY_STRDUP("batch item alloc failed");
@@ -187,6 +201,7 @@ void *sched_dag_worker_thread(void *arg)
                 item->dag = batch_dags[i];
                 item->node = batch[i];
                 item->agent_id = assigned[i];
+                item->input = inputs[i];
                 if (thread_pool_submit(svc->dag_pool, sched_dag_batch_worker, item) != 0) {
                     SVC_LOG_WARN("sched: dag pool submit failed, run synchronously");
                     sched_dag_batch_worker(item);
@@ -222,7 +237,10 @@ void *sched_dag_worker_thread(void *arg)
         node->started_at_ms = sched_now_ms();
 
         const char *role = node->role ? node->role : "coding";
-        const char *goal = sched_dag_agent_input(dag, node);
+        /* Composed under the lock (see the parallel path above); owned here
+         * and released once the executor returns. */
+        char *goal_buf = sched_dag_node_input(dag, node, SCHED_DAG_UPSTREAM_BUDGET);
+        const char *goal = goal_buf ? goal_buf : sched_dag_agent_input(dag, node);
         SVC_LOG_INFO("sched: DAG node dispatch: %s/%s role=%s deps=%zu "
                      "(wait since dag create=%llu ms, executor=%s)",
                      dag->dag_id, node->id, role, node->dep_count,
@@ -233,6 +251,7 @@ void *sched_dag_worker_thread(void *arg)
         char *output = NULL;
         int dret = svc->executor ? svc->executor(role, goal, dag->workspace_dir, &output) :
                                    AIRY_ERR_SVC_NOT_READY;
+        AIRY_FREE(goal_buf);
 
         airy_mtx_lock(&svc->lock);
         sched_dag_write_back_node(svc, dag, node, dret, output);
