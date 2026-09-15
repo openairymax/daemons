@@ -76,6 +76,15 @@ provider_base_ctx_t *provider_base_ctx(provider_ctx_t *ctx);
  * (keys filled after startup need no restart). */
 void provider_refresh_api_key(provider_base_ctx_t *base_ctx);
 
+/* 出网传输策略唯一实现（SSoT）：连接超时 / 总超时 / 代理 / 自定义 CA /
+ * 重定向与证书校验。所有出网调用点（非流式、流式、google、anthropic）
+ * 一律经此施加，禁止各自 curl_easy_setopt 副本。 */
+void provider_http_setup(CURL *curl, double timeout_sec);
+
+/* 出网失败分诊：把 libcurl 错误码归为可判读类别（DNS/CONNECT/TIMEOUT/TLS/
+ * PROXY/NET_IO/OTHER），供日志与用户面诊断使用。返回值恒非 NULL。 */
+const char *provider_http_diag(CURLcode code);
+
 int provider_http_post(const char *url, struct curl_slist *headers, const char *body,
                        double timeout_sec, int max_retries, provider_http_resp_t **out_response,
                        long *out_http_code);
