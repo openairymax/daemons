@@ -114,6 +114,7 @@ add_executable(agent_d
     src/agent_d_rpc.c
     src/agent_d_monitor.c
     src/agent_run_engine.c
+    src/agent_run_ledger.c
     src/agent_run_loop.c
     src/agent_run_rpc.c
 )
