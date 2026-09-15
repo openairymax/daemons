@@ -323,11 +323,13 @@ static void test_builtin_catalog_matches_contract(void)
 {
     printf("  test_builtin_catalog_matches_contract...\n");
 
-    /* 契约层解析：AIRY_TOOLS_JSON_SOURCE -> {name: cJSON function} */
+    /* 契约层解析：AIRY_TOOLS_JSON_SOURCE -> {name: cJSON function}。
+     * 工具数量不作快照断言（加工具即过期）；一致性由下方双向
+     * 名字集合与参数 required 对比保证（契约本质）。 */
     cJSON *contract = cJSON_Parse(AIRY_TOOLS_JSON_SOURCE);
     assert(contract != NULL);
     int contract_n = cJSON_GetArraySize(contract);
-    assert(contract_n == 15);
+    assert(contract_n > 0);
 
     /* tool_d 内置工具目录：service_create 内已 register_builtin_tools */
     tool_service_t *svc = tool_service_create(NULL);
