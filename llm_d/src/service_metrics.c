@@ -133,6 +133,13 @@ int llm_service_stats(llm_service_t *svc, char **out_json)
     cJSON_AddNumberToObject(root, "llm_cache_size", llm_cache_size(svc->cache));
     cJSON_AddNumberToObject(root, "llm_cache_capacity", llm_cache_capacity(svc->cache));
 
+    llm_cache_stats_t cache_stats;
+    llm_cache_stats(svc->cache, &cache_stats);
+    cJSON_AddNumberToObject(root, "llm_cache_hits", (double)cache_stats.hits);
+    cJSON_AddNumberToObject(root, "llm_cache_misses", (double)cache_stats.misses);
+    cJSON_AddNumberToObject(root, "llm_cache_evictions", (double)cache_stats.evictions);
+    cJSON_AddNumberToObject(root, "llm_cache_hit_rate", cache_stats.hit_rate);
+
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
 

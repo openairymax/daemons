@@ -11,6 +11,7 @@
 #include "cache.h"
 #include "memory_common.h"
 #include "daemon_platform_ext.h"
+#include "atomic_compat.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +41,9 @@ struct llm_cache {
     size_t size;
     int ttl_sec;
     airy_mtx_t lru_lock;
+    atomic_uint64_t hits;
+    atomic_uint64_t misses;
+    atomic_uint64_t evictions;
 };
 
 static unsigned int hash_key(const char *key)
@@ -154,6 +158,7 @@ static void evict_lru(llm_cache_t *cache)
     lru_remove(cache, victim);
     entry_memory_safe_free(victim);
     cache->size--;
+    atomic_fetch_add(&cache->evictions, 1);
     airy_mtx_unlock(&cache->lru_lock);
 }
 
@@ -165,6 +170,9 @@ llm_cache_t *llm_cache_create(size_t capacity, int ttl_sec)
     }
     cache->capacity = capacity;
     cache->ttl_sec = ttl_sec;
+    atomic_init(&cache->hits, 0);
+    atomic_init(&cache->misses, 0);
+    atomic_init(&cache->evictions, 0);
     airy_mtx_init(&cache->lru_lock);
     for (int i = 0; i < HASH_SIZE; ++i)
         airy_mtx_init(&cache->buckets[i].lock);
@@ -207,12 +215,14 @@ int llm_cache_get(llm_cache_t *cache, const char *key, char **out_value)
 
     if (!e) {
         airy_mtx_unlock(&cache->buckets[idx].lock);
+        atomic_fetch_add(&cache->misses, 1);
         return 0;
     }
 
     if (cache->ttl_sec > 0 && (time(NULL) - e->timestamp) >= cache->ttl_sec) {
         airy_mtx_unlock(&cache->buckets[idx].lock);
         llm_cache_put(cache, key, NULL);
+        atomic_fetch_add(&cache->misses, 1);
         return 0;
     }
 
@@ -223,6 +233,7 @@ int llm_cache_get(llm_cache_t *cache, const char *key, char **out_value)
     lru_move_to_head(cache, e);
     airy_mtx_unlock(&cache->lru_lock);
 
+    atomic_fetch_add(&cache->hits, 1);
     return 1;
 }
 
@@ -314,4 +325,20 @@ size_t llm_cache_size(llm_cache_t *cache)
 size_t llm_cache_capacity(llm_cache_t *cache)
 {
     return cache ? cache->capacity : 0;
+}
+
+void llm_cache_stats(llm_cache_t *cache, llm_cache_stats_t *out)
+{
+    if (!cache || !out)
+        return;
+
+    uint64_t hits = (uint64_t)atomic_load(&cache->hits);
+    uint64_t misses = (uint64_t)atomic_load(&cache->misses);
+
+    out->entries = cache->size;
+    out->capacity = cache->capacity;
+    out->hits = (size_t)hits;
+    out->misses = (size_t)misses;
+    out->evictions = (size_t)(uint64_t)atomic_load(&cache->evictions);
+    out->hit_rate = (hits + misses) > 0 ? (double)hits / (double)(hits + misses) : 0.0;
 }

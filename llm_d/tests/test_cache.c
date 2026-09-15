@@ -40,10 +40,16 @@ static void test_llm_cache_put_get(void)
     llm_cache_put(cache, key, value);
 
     char *retrieved = NULL;
-    int ret __attribute__((unused)) = llm_cache_get(cache, key, &retrieved);
+    int ret = llm_cache_get(cache, key, &retrieved);
     assert(ret == 1);
     assert(retrieved != NULL);
     assert(strcmp(retrieved, value) == 0);
+
+    llm_cache_stats_t st;
+    llm_cache_stats(cache, &st);
+    assert(st.hits == 1);
+    assert(st.misses == 0);
+    assert(st.hit_rate == 1.0);
 
     free(retrieved);
     llm_cache_destroy(cache);
@@ -59,8 +65,15 @@ static void test_cache_miss(void)
     assert(cache != NULL);
 
     char *retrieved = NULL;
-    int ret __attribute__((unused)) = llm_cache_get(cache, "nonexistent_key", &retrieved);
-    assert(ret != 0 || retrieved == NULL);
+    int ret = llm_cache_get(cache, "nonexistent_key", &retrieved);
+    assert(ret == 0);
+    assert(retrieved == NULL);
+
+    llm_cache_stats_t st;
+    llm_cache_stats(cache, &st);
+    assert(st.hits == 0);
+    assert(st.misses == 1);
+    assert(st.hit_rate == 0.0);
 
     llm_cache_destroy(cache);
 
@@ -80,10 +93,19 @@ static void test_llm_cache_clear(void)
 
     llm_cache_clear(cache);
 
-    char *retrieved __attribute__((unused)) = NULL;
-    assert(llm_cache_get(cache, "key1", &retrieved) != 0 || retrieved == NULL);
-    assert(llm_cache_get(cache, "key2", &retrieved) != 0 || retrieved == NULL);
-    assert(llm_cache_get(cache, "key3", &retrieved) != 0 || retrieved == NULL);
+    char *retrieved = NULL;
+    assert(llm_cache_get(cache, "key1", &retrieved) == 0);
+    assert(retrieved == NULL);
+    assert(llm_cache_get(cache, "key2", &retrieved) == 0);
+    assert(retrieved == NULL);
+    assert(llm_cache_get(cache, "key3", &retrieved) == 0);
+    assert(retrieved == NULL);
+
+    llm_cache_stats_t st;
+    llm_cache_stats(cache, &st);
+    assert(st.entries == 0);
+    assert(st.hits == 0);
+    assert(st.misses == 3);
 
     llm_cache_destroy(cache);
 
@@ -102,6 +124,65 @@ static void test_llm_cache_size(void)
     llm_cache_put(cache, "key2", "value2");
 
     assert(llm_cache_size(cache) == 2);
+
+    llm_cache_stats_t st;
+    llm_cache_stats(cache, &st);
+    assert(st.entries == 2);
+    assert(st.capacity == 100);
+    assert(st.evictions == 0);
+
+    llm_cache_destroy(cache);
+
+    printf("    PASSED\n");
+}
+
+static void test_llm_cache_stats(void)
+{
+    printf("  test_llm_cache_stats...\n");
+
+    llm_cache_t *cache = llm_cache_create(100, 3600);
+    assert(cache != NULL);
+
+    llm_cache_put(cache, "hit1", "value1");
+    llm_cache_put(cache, "hit2", "value2");
+
+    char *retrieved = NULL;
+    assert(llm_cache_get(cache, "hit1", &retrieved) == 1);
+    free(retrieved);
+    assert(llm_cache_get(cache, "hit2", &retrieved) == 1);
+    free(retrieved);
+    assert(llm_cache_get(cache, "miss1", &retrieved) == 0);
+    assert(llm_cache_get(cache, "miss2", &retrieved) == 0);
+
+    llm_cache_stats_t st;
+    llm_cache_stats(cache, &st);
+    assert(st.hits == 2);
+    assert(st.misses == 2);
+    assert(st.hit_rate == 0.5);
+
+    llm_cache_destroy(cache);
+
+    printf("    PASSED\n");
+}
+
+static void test_llm_cache_eviction(void)
+{
+    printf("  test_llm_cache_eviction...\n");
+
+    llm_cache_t *cache = llm_cache_create(2, 3600);
+    assert(cache != NULL);
+
+    llm_cache_put(cache, "key1", "value1");
+    llm_cache_put(cache, "key2", "value2");
+    llm_cache_put(cache, "key3", "value3");
+
+    assert(llm_cache_size(cache) == 2);
+
+    llm_cache_stats_t st;
+    llm_cache_stats(cache, &st);
+    assert(st.entries == 2);
+    assert(st.capacity == 2);
+    assert(st.evictions == 1);
 
     llm_cache_destroy(cache);
 
@@ -145,10 +226,14 @@ static void test_llm_cache_ttl(void)
 
     retrieved = NULL;
     ret = llm_cache_get(cache, key, &retrieved);
-    assert(ret != 0 || retrieved == NULL);
-    if (retrieved) {
-        free(retrieved);
-    }
+    assert(ret == 0);
+    assert(retrieved == NULL);
+
+    llm_cache_stats_t st;
+    llm_cache_stats(cache, &st);
+    assert(st.hits == 1);
+    assert(st.misses == 1);
+    assert(st.entries == 0);
 
     llm_cache_destroy(cache);
 
@@ -166,6 +251,8 @@ int main(void)
     test_cache_miss();
     test_llm_cache_clear();
     test_llm_cache_size();
+    test_llm_cache_stats();
+    test_llm_cache_eviction();
     test_llm_cache_ttl();
 
     printf("\nAll LLM cache tests PASSED\n");
