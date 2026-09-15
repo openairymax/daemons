@@ -81,7 +81,9 @@ static int on_server_fd_event(int fd, uint32_t events, void *user_data)
             break;
         }
 
-        SVC_LOG_INFO("C-L02: EVENT-DRIVER: CLIENT-ACCEPT fd=%d", (int)(uintptr_t)client_fd);
+        /* 连接级 accept 为高频常态事件（客户端轮询 ~5Hz 起步），INFO 级
+         * 逐条打点会淹没有效日志；降为 DEBUG，异常路径仍走 ERROR。 */
+        SVC_LOG_DEBUG("C-L02: EVENT-DRIVER: CLIENT-ACCEPT fd=%d", (int)(uintptr_t)client_fd);
 
         if (driver->concurrent_clients && driver->on_client && driver->pool) {
             /* Concurrent mode: dispatch the client request to the thread
