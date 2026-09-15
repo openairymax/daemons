@@ -3,8 +3,8 @@
 
 /**
  * @file test_run_loop.c
- * @brief 工具循环纯函数直测（white-box include，无 daemon 依赖）：
- *        C-1 连败计数语义 + LLM 响应解析兼容。
+ * @brief 工具循环与编排失败语义直测（white-box include，无 daemon 依赖）：
+ *        C-1 连败计数语义 + LLM 响应解析兼容 + S-2 编排失败上抛。
  */
 
 #include "../src/agent_run_loop.c"
@@ -87,11 +87,39 @@ static void test_parse_result(void)
     AIRY_FREE(text);
 }
 
+/* S-2：编排分支失败必须给出可判读原因（阶段 + 契约错误符号 + 原码），
+ * 且终局失败档 rc 与 C-1 熔断档区分。 */
+static void test_orch_contract(void)
+{
+    char *text = NULL;
+    char *err = NULL;
+
+    CHECK(agent_run_orchestrate(NULL, "p", &text, &err) != 0 && !text && err,
+          "orch: non-object spec rejected");
+    CHECK(err && strstr(err, "JSON object") != NULL, "orch: rejection reason readable");
+    AIRY_FREE(err);
+
+    cJSON *spec = cJSON_CreateObject();
+    cJSON_AddStringToObject(spec, "role", "worker");
+    err = NULL;
+    /* 测试进程无 daemon 生命周期（g_service == NULL），spawn 必失败。 */
+    CHECK(agent_run_orchestrate(spec, "p", &text, &err) != 0 && !text, "orch: spawn failure rc");
+    CHECK(err && strstr(err, "agent.spawn failed") != NULL, "orch: failure stage named");
+    CHECK(err && strstr(err, "ERR_INVALID_PARAM") != NULL, "orch: err symbol present");
+    CHECK(err && strstr(err, "(-36)") != NULL, "orch: raw code present");
+    AIRY_FREE(err);
+    cJSON_Delete(spec);
+
+    CHECK(AGENT_RUN_RC_SUBAGENT_FAIL == 3, "orch: subagent fail rc is 3");
+    CHECK(AGENT_RUN_RC_SUBAGENT_FAIL != AGENT_RUN_RC_TOOL_FUSE, "orch: terminal rcs distinct");
+}
+
 int main(void)
 {
     test_fail_streak();
     test_parse_tool_calls();
     test_parse_result();
+    test_orch_contract();
     if (g_fail)
         printf("FAILURES: %d\n", g_fail);
     else
