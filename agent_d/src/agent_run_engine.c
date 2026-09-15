@@ -25,6 +25,7 @@
 #include "airy_run_stream.h"
 #include "atomic_compat.h"
 #include "daemon_rpc_client.h"
+#include "error.h"
 #include "hall_writer.h"
 #include "platform.h"
 #include "svc_logger.h"
@@ -263,6 +264,17 @@ void agent_run_persist(const char *session_id, const char *user_prompt, const ch
     }
 }
 
+/* 编排失败原因：把子服务返回码翻译成可判读文本（阶段 + 契约错误符号）。
+ * 该文本经 engine → response / error 事件 → RPC 逐层透出，是用户唯一的
+ * 判读入口；禁止退化为通用话术（S-2 收敛）。 */
+static char *agent_run_orch_reason(const char *stage, int rc)
+{
+    char buf[256];
+    snprintf(buf, sizeof(buf), "agent.%s failed: %s (%d)", stage,
+             airy_err_code_name((airy_err_t)rc), rc);
+    return AIRY_STRDUP(buf);
+}
+
 /* 编排分支：进程内 spawn+invoke（agent.run 单入口，无 RPC 环）。 */
 int agent_run_orchestrate(const cJSON *agent_spec, const char *prompt, char **out_text,
                           char **out_err)
@@ -283,7 +295,10 @@ int agent_run_orchestrate(const cJSON *agent_spec, const char *prompt, char **ou
     char *agent_id = NULL;
     int rc = agent_service_spawn(g_service, spec_str, &agent_id);
     if (rc != AIRY_SUCCESS || !agent_id) {
-        *out_err = AIRY_STRDUP("agent.spawn failed");
+        SVC_LOG_WARN("agent.run: spawn failed (rc=%d, %s)", rc,
+                     airy_err_code_name((airy_err_t)rc));
+        *out_err = agent_run_orch_reason("spawn", rc);
+        AIRY_FREE(agent_id);
         AIRY_FREE(spec_str);
         return -1;
     }
@@ -293,7 +308,9 @@ int agent_run_orchestrate(const cJSON *agent_spec, const char *prompt, char **ou
     AIRY_FREE(agent_id);
     AIRY_FREE(spec_str);
     if (ret != AIRY_SUCCESS || !*out_text) {
-        *out_err = AIRY_STRDUP("agent.invoke failed");
+        SVC_LOG_WARN("agent.run: invoke failed (rc=%d, %s)", ret,
+                     airy_err_code_name((airy_err_t)ret));
+        *out_err = agent_run_orch_reason("invoke", ret);
         return -1;
     }
     return 0;
@@ -454,9 +471,21 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     if (agent_spec) {
         char *err_msg = NULL;
         run_rc = agent_run_orchestrate(agent_spec, prompt, &final_text, &err_msg);
-        AIRY_FREE(err_msg);
         tool_trace = cJSON_CreateArray();
-        run_rc = (run_rc == 0 && final_text) ? 0 : -1;
+        if (run_rc != 0 || !final_text) {
+            /* S-2：subagent 全败必须上抛为节点失败（rc=SUBAGENT_FAIL），原因
+             * 走 C-1 同一出口——final_text → response 字段 + error 事件。
+             * 此前此处丢弃 err_msg，导致 RPC 只能回落通用话术（"tool loop
+             * exhausted or LLM service error"），与真实原因不符。 */
+            if (final_text)
+                AIRY_FREE(final_text);
+            final_text = err_msg ? err_msg : AIRY_STRDUP("agent orchestration failed");
+            err_msg = NULL;
+            run_rc = AGENT_RUN_RC_SUBAGENT_FAIL;
+        } else {
+            run_rc = 0;
+        }
+        AIRY_FREE(err_msg);
     } else {
         /* 主对话路径：GCCP 双思考 → 工具循环（降级容忍） */
         if (agent_run_think_process(sess, prompt, gccp_answers, &think_result) == 0 &&

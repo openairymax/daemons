@@ -116,6 +116,17 @@ static int agent_spawn_finish(agent_service_t *svc, agent_entry_internal_t *agen
                               int spawn_ok, pid_t child_pid, int child_sin, int child_sout,
                               char **out_agent_id, uint64_t perf_t0)
 {
+    /* 对外 agent_id 必须先复制成功：进入索引表后再失败已无法回滚（槽位
+     * 永久占用），而复制失败却返回成功会让调用方拿到 NULL id。复制失败
+     * 与 spawn 失败走同一回滚路径。 */
+    char *id_copy = spawn_ok ? AIRY_STRDUP(agent->agent_id) : NULL;
+    int fail_code = AIRY_ERR_SVC_NOT_READY;
+    if (spawn_ok && !id_copy) {
+        SVC_LOG_WARN("Agent spawn rejected: cannot duplicate agent id");
+        spawn_ok = 0;
+        fail_code = AIRY_ERR_OUT_OF_MEMORY;
+    }
+
     airy_mtx_lock(&agent->entry_lock);
 
     if (spawn_ok) {
@@ -136,7 +147,7 @@ static int agent_spawn_finish(agent_service_t *svc, agent_entry_internal_t *agen
             agent->status = AGENT_STATUS_RUNNING;
             airy_mtx_unlock(&svc->lock);
             airy_mtx_unlock(&agent->entry_lock);
-            *out_agent_id = AIRY_STRDUP(agent->agent_id);
+            *out_agent_id = id_copy;
 
             airy_atomic_fetch_add(&svc->m_spawn_ok, 1);
             agent_perf_accumulate(&svc->m_spawn_us_total, &svc->m_spawn_us_max,
@@ -158,6 +169,7 @@ static int agent_spawn_finish(agent_service_t *svc, agent_entry_internal_t *agen
      * freed under the global lock, consistent with list's concurrent reads) */
     agent->status = AGENT_STATUS_FREE;
     airy_mtx_unlock(&agent->entry_lock);
+    AIRY_FREE(id_copy);
 
     agent_lock_svc(svc);
     AIRY_FREE(agent->agent_id);
@@ -170,7 +182,7 @@ static int agent_spawn_finish(agent_service_t *svc, agent_entry_internal_t *agen
     agent_perf_accumulate(&svc->m_spawn_us_total, &svc->m_spawn_us_max,
                           agent_perf_now_us() - perf_t0);
 
-    return spawn_ok ? AIRY_ERR_GENERIC_FAIL : AIRY_ERR_SVC_NOT_READY;
+    return spawn_ok ? AIRY_ERR_GENERIC_FAIL : fail_code;
 }
 
 int agent_service_spawn(agent_service_t *svc, const char *spec, char **out_agent_id)

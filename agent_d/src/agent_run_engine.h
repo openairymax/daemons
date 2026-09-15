@@ -39,6 +39,9 @@ extern "C" {
  * TOOL_FUSE（终局失败，原因随 response / error 事件通道回传）。 */
 #define AGENT_RUN_TOOL_FAIL_LIMIT 3
 #define AGENT_RUN_RC_TOOL_FUSE 2
+/* S-2 收敛：编排分支（subagent spawn/invoke）失败同为终局失败，rc 取本值；
+ * 具体原因（阶段 + 契约错误符号）随 response / error 事件通道回传。 */
+#define AGENT_RUN_RC_SUBAGENT_FAIL 3
 #define AGENT_RUN_LLM_TIMEOUT_MS 90000
 #define AGENT_RUN_THINK_TIMEOUT_MS 120000
 #define AGENT_RUN_TOOL_TIMEOUT_MS 90000
@@ -110,7 +113,9 @@ typedef struct {
  * @param sink         run_stream 事件推送 sink（可 NULL 表示非流式）
  * @param out_result   JSON-RPC result 对象（AIRY_* 成功时非 NULL，调用方
  *                     cJSON_Delete；GCCP 交互轮含 interaction_required 等）
- * @return 0 成功；1 用户取消；非零失败（*out_result 为 NULL）
+ * @return 0 成功；1 用户取消；2 工具连败熔断（AGENT_RUN_RC_TOOL_FUSE）；
+ *         3 编排失败（AGENT_RUN_RC_SUBAGENT_FAIL）；其余非零失败
+ *         （失败时 *out_result 为 NULL）
  */
 int agent_run_execute(const char *prompt, const char *model, const cJSON *history,
                       const char *gccp_answers, const cJSON *agent_spec,

@@ -110,7 +110,9 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
  * @param agent_spec params.agent 对象（非 NULL）
  * @param prompt     invoke 输入
  * @param out_text   输出文本（AIRY_* 分配，调用方 AIRY_FREE）
- * @param out_err    失败原因（AIRY_* 分配；成功为 NULL）
+ * @param out_err    失败原因（AIRY_* 分配；成功为 NULL）；文本形如
+ *                   "agent.<stage> failed: <ERR_SYMBOL> (<rc>)"，是调用方
+ *                   唯一的失败判读入口，不得替换为通用话术
  * @return 0 成功；非零失败
  */
 int agent_run_orchestrate(const cJSON *agent_spec, const char *prompt, char **out_text,
