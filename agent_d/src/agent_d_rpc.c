@@ -10,6 +10,7 @@
  * 空闲回收/性能采样线程见 agent_d_monitor.c。
  */
 
+#include "agent_vocab.h"
 #include "airy_memory.h"
 #include "error.h"
 #include "agent_d_internal.h"
@@ -32,6 +33,7 @@ static void handle_list(int id, airy_sock_t fd);
 static void handle_count(int id, airy_sock_t fd);
 static void handle_health_check(int id, airy_sock_t fd);
 static void handle_get_stats(int id, airy_sock_t fd);
+static void handle_vocab(int id, airy_sock_t fd);
 
 /*
  * After agent.spawn succeeds, register the role with sched_d, solving the
@@ -397,4 +399,37 @@ static void handle_get_stats(int id, airy_sock_t client_fd)
         cJSON_AddNumberToObject(result, "agents", 0);
     }
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+static void handle_vocab(int id, airy_sock_t client_fd)
+{
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "fallback", AGENT_VOCAB_FALLBACK);
+
+    cJSON *roles = cJSON_AddArrayToObject(result, "roles");
+    for (size_t i = 0; i < agent_vocab_role_count(); i++) {
+        cJSON_AddItemToArray(roles, cJSON_CreateString(agent_vocab_role_at(i)));
+    }
+
+    cJSON *aliases = cJSON_AddArrayToObject(result, "aliases");
+    for (size_t i = 0; i < agent_vocab_alias_count(); i++) {
+        const char *target = NULL;
+        const char *alias = agent_vocab_alias_at(i, &target);
+        cJSON *entry = cJSON_CreateObject();
+        cJSON_AddStringToObject(entry, "alias", alias);
+        cJSON_AddStringToObject(entry, "role", target);
+        cJSON_AddItemToArray(aliases, entry);
+    }
+
+    cJSON *ro = cJSON_AddArrayToObject(result, "readonly");
+    for (size_t i = 0; i < agent_vocab_readonly_count(); i++) {
+        cJSON_AddItemToArray(ro, cJSON_CreateString(agent_vocab_readonly_at(i)));
+    }
+
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+}
+
+void on_vocab_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+{
+    handle_vocab(id, *(airy_sock_t *)user_data);
 }

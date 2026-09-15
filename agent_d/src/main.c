@@ -273,7 +273,8 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_agent_d, "shutdown", on_shutdown_method_agent_d, NULL);
 
     method_dispatcher_register(g_dispatcher_agent_d, "get_stats", on_get_stats_method, NULL);
-    SVC_LOG_INFO("Registered %d RPC methods (agent.* namespace)", 12);
+    method_dispatcher_register(g_dispatcher_agent_d, "vocab", on_vocab_method, NULL);
+    SVC_LOG_INFO("Registered %d RPC methods (agent.* namespace)", 13);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_agent_d, (int)server_fd) != 0) {
         SVC_LOG_ERROR("Failed to add server fd to event driver");
