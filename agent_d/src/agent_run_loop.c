@@ -201,6 +201,13 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
     return tool_ok ? 0 : -1;
 }
 
+/* 连败计数更新（C-1 熔断）：成功清零、失败累加；返回是否达到阈值。 */
+static int run_fail_streak_bump(int *streak, int tool_rc)
+{
+    *streak = (tool_rc == 0) ? 0 : *streak + 1;
+    return *streak >= AGENT_RUN_TOOL_FAIL_LIMIT;
+}
+
 int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *model,
                         const agent_run_session_t *session, const agent_run_event_sink_t *sink,
                         cJSON **out_trace, char **out_text, uint64_t *out_tokens, double *out_cost,
@@ -241,6 +248,13 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
     int rc = -1;
     uint64_t seq = 0;
     const char *sess = session ? session->session_id : NULL;
+
+    /* C-1 连败熔断状态：计数跨工具/跨轮累计（环境故障换工具照样失败），
+     * 触发时捕获末次工具名与错误文本（tool_calls 释放后仍需可引用）。 */
+    int fail_streak = 0;
+    int fused = 0;
+    char fuse_tool[64] = "";
+    char fuse_err[192] = "";
 
     agent_ledger_t lg;
     agent_ledger_init(&lg, sess);
@@ -354,6 +368,13 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
             char *result_text = NULL;
             int erc = run_execute_tool(tname, targs, &result_text);
 
+            /* C-1 连败计数：本次失败仍完整入账/推送后再判断熔断出口。 */
+            if (run_fail_streak_bump(&fail_streak, erc)) {
+                fused = 1;
+                AIRY_STRNCPY_TERM(fuse_tool, tname, sizeof(fuse_tool));
+                AIRY_STRNCPY_TERM(fuse_err, result_text ? result_text : "", sizeof(fuse_err));
+            }
+
             /* tool_end 事件（run_stream 流式推送） */
             if (sink && sink->emit) {
                 cJSON *te = cJSON_CreateObject();
@@ -384,16 +405,32 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
 
             if (result_text)
                 AIRY_FREE(result_text);
+
+            if (fused)
+                break;
         }
 
         cJSON_Delete(tool_calls);
         AIRY_FREE(llm_resp);
+
+        if (fused) {
+            /* C-1 熔断终局：止损退出（不再消耗 LLM 轮次），原因经
+             * final_text 回传，engine 侧 error 事件与 response 复用。 */
+            char fuse_msg[512];
+            snprintf(fuse_msg, sizeof(fuse_msg),
+                     "Tool execution failed %d times in a row; further attempts stopped "
+                     "(last tool=%s, error=%s)",
+                     fail_streak, fuse_tool, fuse_err);
+            final_text = AIRY_STRDUP(fuse_msg);
+            rc = AGENT_RUN_RC_TOOL_FUSE;
+            break;
+        }
     }
 
     agent_ledger_free(&lg);
     cJSON_Delete(messages);
 
-    if (rc == 0) {
+    if (rc == 0 || rc == AGENT_RUN_RC_TOOL_FUSE) {
         *out_trace = tool_trace;
         *out_text = final_text;
         *out_tokens = total_tokens;
