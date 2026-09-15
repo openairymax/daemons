@@ -600,11 +600,7 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, ant_sse_write_cb);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sse);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)base->timeout_sec);
-        curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+        provider_http_setup(curl, base->timeout_sec);
 
         CURLcode cres = curl_easy_perform(curl);
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
@@ -616,8 +612,8 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
         if (cres == CURLE_OK)
             ret = AIRY_OK;
         else
-            SVC_LOG_WARN("C-L02: ANTHROPIC: STREAM — curl error: %s (code=%d)",
-                         curl_easy_strerror(cres), (int)cres);
+            SVC_LOG_WARN("C-L02: ANTHROPIC: STREAM — curl error: %s (code=%d diag=%s)",
+                         curl_easy_strerror(cres), (int)cres, provider_http_diag(cres));
     } else {
         SVC_LOG_ERROR("C-L02: ANTHROPIC: STREAM-FAIL — curl_easy_init() failed");
     }

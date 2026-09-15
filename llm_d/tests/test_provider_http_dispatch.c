@@ -3,11 +3,12 @@
 
 /**
  * @file test_provider_http_dispatch.c
- * @brief N-3 运行级回归：provider HTTP 状态码 → 错误码分诊（端到端）。
+ * @brief 运行级回归：provider HTTP 传输层分诊与出网策略（端到端）。
  *
  * 单元测试此前只覆盖请求构造/响应解析（test_provider_reasoning.c），没有
  * 任何用例真正把 provider 跑到 HTTP 传输层。于是 "400 请求体被拒" 与
- * "网络不可达" 是否被混为一谈、流式路径是否也走了专用码，均无回归保护。
+ * "网络不可达" 是否被混为一谈、流式路径是否也走了专用码、出网代理是否
+ * 真被注入句柄，均无回归保护。
  *
  * 本测试在进程内起一个最小 HTTP 桩（POSIX 线程 + AF_INET 回环临时端口，
  * 零外部依赖），驱动 openai_ops.complete / complete_stream 走完整链路：
@@ -18,6 +19,8 @@
  *   3. 连接被拒（http_code==0）→ AIRY_ERR_IO，与 400 明确区分
  *   4. 200 正向对照（非流式 + 流式 SSE），证明桩确实能让成功路径通过，
  *      排除"桩恒返回失败导致断言伪绿"
+ *   5. 出网策略：失败分诊映射表；以及死代理下的失败／清除代理后的成功
+ *      对照，证明 AIRY_HTTP_PROXY 确被注入句柄（N-1/N-2）
  *
  * 平台：daemon 测试在 Windows 整体关闭（daemons/CMakeLists.txt 的 WIN32 门），
  * 故本文件直接使用 POSIX socket/pthread，无需跨平台分支。
@@ -369,6 +372,93 @@ static void test_stream_dispatch(int code, const char *reason, const char *conte
     openai_ops.destroy(ctx);
 }
 
+/* ── N-1/N-2：出网传输策略 SSoT（provider_http_setup / provider_http_diag） ── */
+
+static const char *const PROXY_ENV_NAMES[] = {
+    "AIRY_HTTP_PROXY", "HTTP_PROXY",  "http_proxy",
+    "HTTPS_PROXY",     "https_proxy", "ALL_PROXY",
+    "all_proxy",
+};
+
+static void test_http_diag_map(void)
+{
+    printf("  outbound failure classification...\n");
+
+    assert(strcmp(provider_http_diag(CURLE_COULDNT_RESOLVE_HOST), "DNS_FAIL") == 0);
+    assert(strcmp(provider_http_diag(CURLE_COULDNT_RESOLVE_PROXY), "DNS_FAIL") == 0);
+    assert(strcmp(provider_http_diag(CURLE_COULDNT_CONNECT), "CONNECT_FAIL") == 0);
+    assert(strcmp(provider_http_diag(CURLE_OPERATION_TIMEDOUT), "TIMEOUT") == 0);
+    assert(strcmp(provider_http_diag(CURLE_PEER_FAILED_VERIFICATION), "TLS_FAIL") == 0);
+    assert(strcmp(provider_http_diag(CURLE_SSL_CONNECT_ERROR), "TLS_FAIL") == 0);
+    assert(strcmp(provider_http_diag(CURLE_PROXY), "PROXY_FAIL") == 0);
+    assert(strcmp(provider_http_diag(CURLE_RECV_ERROR), "NET_IO_FAIL") == 0);
+    assert(strcmp(provider_http_diag(CURLE_GOT_NOTHING), "OTHER") == 0);
+    assert(provider_http_diag((CURLcode)0x7fffffff) != NULL);
+}
+
+/* N-2：AIRY_HTTP_PROXY 是 agentrt 自有变量，libcurl 不会自行读取。因此
+ * "设一个死代理 → 本可成功的请求必须失败；清除后必须恢复成功" 只有在
+ * provider_http_setup() 确实注入了 CURLOPT_PROXY 时才成立。宿主环境中的
+ * 标准代理变量先被隔离，确保观察到的行为只来自 AIRY_HTTP_PROXY。 */
+static void test_proxy_env_injected(void)
+{
+    printf("  outbound proxy injected (AIRY_HTTP_PROXY)...\n");
+
+    char saved[7][512];
+    int saved_set[7];
+    const size_t nenv = sizeof(PROXY_ENV_NAMES) / sizeof(PROXY_ENV_NAMES[0]);
+    for (size_t i = 0; i < nenv; i++) {
+        const char *v = getenv(PROXY_ENV_NAMES[i]);
+        saved_set[i] = (v && v[0]) ? 1 : 0;
+        saved[i][0] = '\0';
+        if (saved_set[i]) {
+            strncpy(saved[i], v, sizeof(saved[i]) - 1);
+            saved[i][sizeof(saved[i]) - 1] = '\0';
+        }
+        unsetenv(PROXY_ENV_NAMES[i]);
+    }
+
+    int dead_port = find_unused_port();
+    assert(dead_port > 0);
+
+    char proxy[64];
+    snprintf(proxy, sizeof(proxy), "http://127.0.0.1:%d", dead_port);
+
+    char base[128];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d/v1", g_srv.port);
+    mock_set_response(200, "OK", "application/json", OK_BODY);
+
+    llm_message_t msg;
+    llm_request_config_t cfg;
+    llm_response_t *resp = NULL;
+
+    assert(setenv("AIRY_HTTP_PROXY", proxy, 1) == 0);
+    provider_ctx_t *ctx = make_ctx(base);
+    cfg_init(&cfg, &msg);
+    int ret = openai_ops.complete(ctx, &cfg, &resp);
+    printf("    dead proxy  ret=%d expect=%d\n", ret, AIRY_ERR_IO);
+    assert(ret == AIRY_ERR_IO);
+    if (resp)
+        llm_response_free(resp);
+    openai_ops.destroy(ctx);
+
+    unsetenv("AIRY_HTTP_PROXY");
+
+    ctx = make_ctx(base);
+    cfg_init(&cfg, &msg);
+    resp = NULL;
+    ret = openai_ops.complete(ctx, &cfg, &resp);
+    printf("    no proxy    ret=%d expect=%d\n", ret, AIRY_OK);
+    assert(ret == AIRY_OK);
+    if (resp)
+        llm_response_free(resp);
+    openai_ops.destroy(ctx);
+
+    for (size_t i = 0; i < nenv; i++)
+        if (saved_set[i])
+            setenv(PROXY_ENV_NAMES[i], saved[i], 1);
+}
+
 static void test_unreachable_is_io(void)
 {
     printf("  nonstream connection-refused -> IO...\n");
@@ -435,6 +525,10 @@ int main(void)
 
     /* 网络不可达与请求体被拒必须可区分。 */
     test_unreachable_is_io();
+
+    /* N-1/N-2：出网传输策略 SSoT 的分诊与代理注入。 */
+    test_http_diag_map();
+    test_proxy_env_injected();
 
     mock_server_stop();
 

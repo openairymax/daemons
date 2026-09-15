@@ -285,11 +285,7 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sse_write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sse);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)timeout_sec);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    provider_http_setup(curl, timeout_sec);
 
     CURLcode res = curl_easy_perform(curl);
     long http_code = 0;
@@ -314,8 +310,8 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
     sse_ctx_destroy(&sse);
 
     if (res != CURLE_OK) {
-        SVC_LOG_WARN("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d curl_error=%s", url, errno,
-                     curl_easy_strerror(res));
+        SVC_LOG_WARN("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d diag=%s curl_error=%s", url,
+                     errno, provider_http_diag(res), curl_easy_strerror(res));
         return AIRY_ERR_IO;
     }
 
