@@ -288,7 +288,7 @@ int agent_run_orchestrate(const cJSON *agent_spec, const char *prompt, char **ou
         return -1;
     }
 
-    int ret = agent_service_invoke(g_service, agent_id, prompt, strlen(prompt), NULL, NULL,
+    int ret = agent_service_invoke(g_service, agent_id, prompt, strlen(prompt), NULL, 0, NULL,
                                    out_text);
     AIRY_FREE(agent_id);
     AIRY_FREE(spec_str);
