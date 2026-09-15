@@ -404,3 +404,66 @@ int test_dag_input_fallback(void)
     sched_service_destroy(svc);
     return 0;
 }
+
+/* 蓝图语义 B（0.1.17 R2-B）：依赖链下游节点的 agent input 必须携带直接上游
+ * 已产出节点的输出，否则多节点 DAG 各自为战、中间产物无法衔接。
+ * 串行路径覆盖（dag_max_parallel==0 时的单节点派发分支）。 */
+int test_dag_upstream_inject(void)
+{
+    printf("=== test_dag_upstream_inject ===\n");
+
+    sched_service_t *svc = make_service();
+    if (!svc) {
+        printf("  FAILED: service create\n");
+        return 1;
+    }
+    g_exec_count = 0;
+    g_fail_goal = NULL;
+    g_fatal_goal = NULL;
+    g_flaky_goal = NULL;
+    g_block = 0;
+
+    const char *dag_json =
+        "{\"name\":\"chain\",\"input\":\"顶层任务描述\",\"nodes\":["
+        "{\"id\":\"A\",\"goal\":\"goal-A\",\"role\":\"coding\",\"depends\":[]},"
+        "{\"id\":\"B\",\"goal\":\"goal-B\",\"role\":\"coding\",\"depends\":[\"A\"]}"
+        "]}";
+
+    char *dag_id = NULL;
+    if (sched_service_submit_dag(svc, dag_json, &dag_id) != AIRY_SUCCESS || !dag_id) {
+        printf("  FAILED: submit_dag\n");
+        sched_service_destroy(svc);
+        return 1;
+    }
+    if (wait_dag_terminal(svc, dag_id, 5000) != 0) {
+        printf("  FAILED: dag timeout\n");
+        AIRY_FREE(dag_id);
+        sched_service_destroy(svc);
+        return 1;
+    }
+    AIRY_FREE(dag_id);
+
+    if (g_exec_count != 2) {
+        printf("  FAILED: executor called %zu times (expect 2)\n", g_exec_count);
+        sched_service_destroy(svc);
+        return 1;
+    }
+    /* 上游 A 无依赖：输入即自身 goal，不得出现注入段 */
+    if (strstr(g_exec_log[0], "|goal-A") == NULL || strstr(g_exec_log[0], "上游产出")) {
+        printf("  FAILED: upstream input=%s\n", g_exec_log[0]);
+        sched_service_destroy(svc);
+        return 1;
+    }
+    /* 下游 B：自身 goal 之后追加 A 的输出（fake_executor 产出 done[goal-A]） */
+    if (strstr(g_exec_log[1], "|goal-B") == NULL ||
+        strstr(g_exec_log[1], "上游产出 [A]") == NULL ||
+        strstr(g_exec_log[1], "done[goal-A]") == NULL) {
+        printf("  FAILED: downstream input=%s\n", g_exec_log[1]);
+        sched_service_destroy(svc);
+        return 1;
+    }
+
+    printf("  PASSED (downstream input carries upstream product)\n\n");
+    sched_service_destroy(svc);
+    return 0;
+}

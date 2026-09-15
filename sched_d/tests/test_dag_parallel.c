@@ -85,6 +85,95 @@ int test_dag_parallel_delegation(void)
     return 0;
 }
 
+/* ---- Case 9: upstream product injection on the parallel batch path
+ * (0.1.17 R2-B) ----
+ * Two dependency-free roots (A, B) feeding one sink (C): the batch path collects
+ * {A, B} as the first parallel layer and C as the second, so C must receive both
+ * direct upstream products in its agent input. Covers the mac delegate_batch
+ * branch of sched_dag_worker.c, whose input composition is separate from the
+ * serial one exercised by test_dag_upstream_inject().
+ */
+int test_dag_upstream_inject_par(void)
+{
+    printf("=== test_dag_upstream_inject_par ===\n");
+
+    sched_service_t *svc = make_parallel_service();
+    if (!svc) {
+        printf("  FAILED: parallel service create\n");
+        return 1;
+    }
+    g_exec_count = 0;
+    g_concurrent_now = 0;
+    g_concurrent_max = 0;
+    g_fail_goal = NULL;
+    g_fatal_goal = NULL;
+    g_flaky_goal = NULL;
+    g_block = 0;
+    sched_service_set_executor(svc, parallel_executor);
+
+    const char *dag_json = "{\"name\":\"para_inject\",\"nodes\":["
+                           "{\"id\":\"A\",\"goal\":\"goal-A\",\"depends\":[]},"
+                           "{\"id\":\"B\",\"goal\":\"goal-B\",\"depends\":[]},"
+                           "{\"id\":\"C\",\"goal\":\"goal-C\",\"depends\":[\"A\",\"B\"]}"
+                           "]}";
+
+    char *dag_id = NULL;
+    if (sched_service_submit_dag(svc, dag_json, &dag_id) != AIRY_SUCCESS || !dag_id) {
+        printf("  FAILED: submit_dag\n");
+        sched_service_destroy(svc);
+        return 1;
+    }
+    if (wait_dag_terminal(svc, dag_id, 30000) != 0) {
+        printf("  FAILED: dag timeout\n");
+        AIRY_FREE(dag_id);
+        sched_service_destroy(svc);
+        return 1;
+    }
+    char st[32];
+    get_dag_status_str(svc, dag_id, st, sizeof(st));
+    AIRY_FREE(dag_id);
+    if (strcmp(st, "completed") != 0) {
+        printf("  FAILED: dag status=%s (expect completed)\n", st);
+        sched_service_destroy(svc);
+        return 1;
+    }
+    if (g_exec_count != 3) {
+        printf("  FAILED: executor called %zu times (expect 3)\n", g_exec_count);
+        sched_service_destroy(svc);
+        return 1;
+    }
+
+    const char *c_log = NULL;
+    for (size_t i = 0; i < g_exec_count; i++) {
+        /* 根节点不得被注入上游段 */
+        if (strstr(g_exec_log[i], "|goal-A") || strstr(g_exec_log[i], "|goal-B")) {
+            if (strstr(g_exec_log[i], "上游产出")) {
+                printf("  FAILED: root node got downstream injection: %s\n", g_exec_log[i]);
+                sched_service_destroy(svc);
+                return 1;
+            }
+        }
+        if (strstr(g_exec_log[i], "|goal-C"))
+            c_log = g_exec_log[i];
+    }
+    if (!c_log) {
+        printf("  FAILED: sink node C never dispatched\n");
+        sched_service_destroy(svc);
+        return 1;
+    }
+    /* C 的输入 = 自身 goal + A/B 两个上游产出（parallel_executor 产出 p[..:goal-X]） */
+    if (strstr(c_log, "上游产出 [A]") == NULL || strstr(c_log, "上游产出 [B]") == NULL ||
+        strstr(c_log, ":goal-A]") == NULL || strstr(c_log, ":goal-B]") == NULL) {
+        printf("  FAILED: sink input=%s\n", c_log);
+        sched_service_destroy(svc);
+        return 1;
+    }
+
+    printf("  PASSED (sink input carries both upstream products)\n\n");
+    sched_service_destroy(svc);
+    return 0;
+}
+
 /* ---- Case 8: delegation mode + group collaboration + consensus mechanism
  * (mac_framework direct verification) ----
  * Scenario: 3 review agents form a code-review group (COLLABORATIVE); 3 review

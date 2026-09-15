@@ -56,6 +56,7 @@ int test_dag_cycle_detection(void);
 int test_dag_invalid_node_ids(void);
 int test_priority_queue_order(void);
 int test_dag_input_fallback(void);
+int test_dag_upstream_inject(void);
 int test_dag_list(void);
 /* test_dag_failure.c */
 int test_dag_failure_cascade(void);
@@ -66,6 +67,7 @@ int test_dag_transient_retry(void);
 int test_dag_transient_retry_exhausted(void);
 /* test_dag_parallel.c */
 int test_dag_parallel_delegation(void);
+int test_dag_upstream_inject_par(void);
 int test_dag_group_consensus_collab(void);
 
 #endif /* TEST_DAG_INTERNAL_H */

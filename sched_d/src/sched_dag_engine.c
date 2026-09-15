@@ -40,6 +40,82 @@ const char *sched_dag_agent_input(const sched_dag_t *dag, const sched_dag_node_t
     return (dag->input && dag->input[0]) ? dag->input : "";
 }
 
+/* Node of a graph by id (NULL when absent). Graph layout is immutable after
+ * sched_dag_validate_and_build(), so read-only lookups need no ownership. */
+static const sched_dag_node_t *sched_dag_find_node(const sched_dag_t *dag, const char *id)
+{
+    for (size_t j = 0; j < dag->node_count; j++) {
+        if (strcmp(dag->nodes[j]->id, id) == 0)
+            return dag->nodes[j];
+    }
+    return NULL;
+}
+
+/* Upstream product injection (blueprint semantics B): the direct dependencies
+ * that already completed contribute their output excerpt to this node's agent
+ * input, so a chained graph really hands intermediate products forward instead
+ * of every node working from the bare goal. Release-order note: a node is only
+ * ready once its dependencies are COMPLETED, and a COMPLETED node's output is
+ * never rewritten, so reading it under service->lock is race-free. */
+char *sched_dag_node_input(const sched_dag_t *dag, const sched_dag_node_t *node,
+                           size_t budget)
+{
+    const char *base = sched_dag_agent_input(dag, node);
+    size_t base_len = strlen(base);
+
+    const sched_dag_node_t *dep_nodes[SCHED_DAG_MAX_DEPS];
+    size_t eligible = 0;
+    for (size_t k = 0; k < node->dep_count && k < SCHED_DAG_MAX_DEPS; k++) {
+        const sched_dag_node_t *dep = sched_dag_find_node(dag, node->depends[k]);
+        if (!dep || dep->status != SCHED_DAG_NODE_COMPLETED || !dep->output || !dep->output[0])
+            continue;
+        dep_nodes[eligible++] = dep;
+    }
+    if (eligible == 0)
+        return AIRY_STRDUP(base);
+
+    /* Equal share of the budget per dependency: a single oversized product must
+     * not crowd the other dependencies out of the graph's shared byte budget. */
+    size_t share = budget / eligible;
+
+    size_t dep_take[SCHED_DAG_MAX_DEPS];
+    size_t total = base_len + 1;
+    size_t used = 0;
+    size_t picks = 0;
+    for (size_t k = 0; k < eligible; k++) {
+        size_t take = strlen(dep_nodes[k]->output);
+        if (take > share)
+            take = share;
+        if (take > budget - used)
+            take = budget - used;
+        if (take == 0)
+            break;
+        dep_take[k] = take;
+        used += take;
+        picks++;
+        total += strlen(dep_nodes[k]->id) + take + 32;
+    }
+    if (picks == 0)
+        return AIRY_STRDUP(base);
+
+    char *out = (char *)AIRY_MALLOC(total);
+    if (!out)
+        return NULL;
+    AIRY_MEMCPY(out, base, base_len);
+    size_t off = base_len;
+    for (size_t k = 0; k < picks; k++) {
+        int w = snprintf(out + off, total - off, "\n\n--- 上游产出 [%s] ---\n",
+                         dep_nodes[k]->id);
+        if (w < 0 || (size_t)w >= total - off)
+            break;
+        off += (size_t)w;
+        AIRY_MEMCPY(out + off, dep_nodes[k]->output, dep_take[k]);
+        off += dep_take[k];
+    }
+    out[off] = '\0';
+    return out;
+}
+
 int sched_dag_node_ready(const sched_dag_t *dag, size_t idx)
 {
     const sched_dag_node_t *node = dag->nodes[idx];
