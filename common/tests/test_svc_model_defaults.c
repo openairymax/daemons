@@ -39,12 +39,12 @@ static int test_global_with_nested(void)
 {
     const char *yaml = "providers:\n"
                        "  - name: \"deepseek\"\n"
-                       "    models: [\"deepseek-v4-flash\"]\n"
+                       "    models: [\"deepseek-flash\"]\n"
                        "global:\n"
                        "  default_provider: \"deepseek\"\n"
                        "  default_retry:\n"
                        "    max_attempts: 3\n"
-                       "  default_model: \"deepseek-v4-flash\"\n"
+                       "  default_model: \"deepseek-flash\"\n"
                        "  default_timeout_sec: 60\n";
     if (write_tmp_yaml(yaml) != 0) {
         TEST_FAIL("global_with_nested", "cannot write temp yaml");
@@ -58,7 +58,7 @@ static int test_global_with_nested(void)
         TEST_FAIL("global_with_nested", "unexpected error code");
         return -1;
     }
-    if (strcmp(model, "deepseek-v4-flash") != 0) {
+    if (strcmp(model, "deepseek-flash") != 0) {
         char buf[192];
         snprintf(buf, sizeof(buf), "default_model=%s", model);
         TEST_FAIL("global_with_nested", buf);

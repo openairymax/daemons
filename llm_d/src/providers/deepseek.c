@@ -44,7 +44,7 @@ static inline void airy_provider_explicit_bzero(void *s, size_t n)
 
 
 #define DEEPSEEK_DEFAULT_BASE "https://api.deepseek.com/v1"
-#define DEEPSEEK_DEFAULT_MODEL "deepseek-chat"
+#define DEEPSEEK_DEFAULT_MODEL "deepseek-flash"
 
 typedef struct {
     provider_base_ctx_t base;

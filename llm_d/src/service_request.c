@@ -140,7 +140,7 @@ static const provider_t *find_provider(llm_service_t *svc, const char *model)
  *
  * Explicit model wins (GRAD three-model separation):
  *   When the caller explicitly specifies a model (e.g. t2=glm-4,
- *   t1-f=deepseek-chat) and it matches exactly in the registry, return that
+ *   t1-f=deepseek-flash) and it matches exactly in the registry, return that
  *   provider directly — COST_AWARE routing would pick the "cheapest endpoint"
  *   and may ignore the user-specified model (the risk of t2 being routed to
  *   deepseek). Only when the exact match fails, fall back to strategy routing.
