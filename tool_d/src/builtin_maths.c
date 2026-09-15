@@ -162,8 +162,9 @@ static cJSON *maths_parse_response(const char *resp, tool_result_t *res)
  * @brief maths_eval — 数学表达式求值（委托 maths_d）
  * 参数：{"expression":"sqrt(144)+2"}  或  {"expr":"..."}
  */
-int maths_eval_tool(const char *params_json, tool_result_t *res)
+int maths_eval_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
+    (void)timeout_ms;
     if (!res)
         return AIRY_ERR_INVALID_PARAM;
 #ifdef _WIN32
@@ -241,8 +242,9 @@ int maths_eval_tool(const char *params_json, tool_result_t *res)
  * @brief maths_stats — 描述性统计（委托 maths_d）
  * 参数：{"op":"mean|median|variance|stddev|sum|min|max","values":[1,2,3]}
  */
-int maths_stats_tool(const char *params_json, tool_result_t *res)
+int maths_stats_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
+    (void)timeout_ms;
     if (!res)
         return AIRY_ERR_INVALID_PARAM;
 #ifdef _WIN32

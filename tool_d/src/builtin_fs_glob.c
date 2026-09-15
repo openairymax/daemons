@@ -73,12 +73,21 @@ int builtin_glob_seg_match(const char *pat, const char *str)
     return *str == '\0';
 }
 
+/* Bounded glob walk: the wall-clock budget and the noise-dir table bound
+ * every level, including ** recursion which previously walked .git/
+ * node_modules/ unbounded (incident 0.1.16: fs_glob stalled the executor
+ * thread). On budget expiry the partial result is kept (*timed_out=1). */
 static void builtin_glob_impl(const char *base, const char **segs, size_t n, size_t i, char *path,
                               size_t path_len, size_t path_cap, char *out, size_t out_cap,
-                              size_t *out_len, size_t *count, size_t max)
+                              size_t *out_len, size_t *count, size_t max, int *timed_out,
+                              uint64_t deadline)
 {
     if (*count >= max || *out_len >= out_cap - 1)
         return;
+    if (builtin_deadline_hit(deadline)) {
+        *timed_out = 1;
+        return;
+    }
 
     char full[AIRY_PATH_MAX];
     if (path_len > 0)
@@ -104,7 +113,7 @@ static void builtin_glob_impl(const char *base, const char **segs, size_t n, siz
     if (is_recursive) {
 
         builtin_glob_impl(base, segs, n, i + 1, path, path_len, path_cap, out, out_cap, out_len,
-                          count, max);
+                          count, max, timed_out, deadline);
 
         DIR *d = opendir(full);
         if (d) {
@@ -113,6 +122,12 @@ static void builtin_glob_impl(const char *base, const char **segs, size_t n, siz
                 const char *nm = ent->d_name;
                 if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0)
                     continue;
+                if (builtin_scan_noise_dir(nm))
+                    continue;
+                if (builtin_deadline_hit(deadline)) {
+                    *timed_out = 1;
+                    break;
+                }
 #ifdef DT_DIR
                 int is_dir = (ent->d_type == DT_DIR);
 #else
@@ -132,7 +147,7 @@ static void builtin_glob_impl(const char *base, const char **segs, size_t n, siz
                 __builtin_memcpy(p, nm, strlen(nm) + 1);
                 builtin_glob_impl(base, segs, n, i, path,
                                   path_len + (path_len ? 1 : 0) + strlen(nm), path_cap, out,
-                                  out_cap, out_len, count, max);
+                                  out_cap, out_len, count, max, timed_out, deadline);
                 if (path_len)
                     path[path_len] = '\0';
             }
@@ -149,8 +164,14 @@ static void builtin_glob_impl(const char *base, const char **segs, size_t n, siz
         const char *nm = ent->d_name;
         if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0)
             continue;
+        if (builtin_scan_noise_dir(nm))
+            continue;
         if (!builtin_glob_seg_match(seg, nm))
             continue;
+        if (builtin_deadline_hit(deadline)) {
+            *timed_out = 1;
+            break;
+        }
 #ifdef DT_DIR
         int is_dir = (ent->d_type == DT_DIR);
 #else
@@ -171,11 +192,11 @@ static void builtin_glob_impl(const char *base, const char **segs, size_t n, siz
 
             builtin_glob_impl(base, segs, n, i + 1, path,
                               path_len + (path_len ? 1 : 0) + strlen(nm), path_cap, out, out_cap,
-                              out_len, count, max);
+                              out_len, count, max, timed_out, deadline);
         } else if (is_dir) {
             builtin_glob_impl(base, segs, n, i + 1, path,
                               path_len + (path_len ? 1 : 0) + strlen(nm), path_cap, out, out_cap,
-                              out_len, count, max);
+                              out_len, count, max, timed_out, deadline);
         }
         if (path_len)
             path[path_len] = '\0';
@@ -183,7 +204,7 @@ static void builtin_glob_impl(const char *base, const char **segs, size_t n, siz
     closedir(d);
 }
 
-int fs_glob_tool(const char *params_json, tool_result_t *res)
+int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
         res->error = AIRY_STRDUP("Invalid params JSON");
@@ -245,8 +266,10 @@ int fs_glob_tool(const char *params_json, tool_result_t *res)
         return AIRY_ERR_OUT_OF_MEMORY;
     }
     size_t out_len = 0, count = 0;
+    int timed_out = 0;
+    uint64_t deadline = builtin_deadline_ms(timeout_ms);
     builtin_glob_impl(resolved, segs, nsegs, 0, path, 0, AIRY_PATH_MAX, out, BUILTIN_OUTPUT_CAP,
-                      &out_len, &count, BUILTIN_GLOB_MAX);
+                      &out_len, &count, BUILTIN_GLOB_MAX, &timed_out, deadline);
 
     for (size_t k = 0; k < nsegs; k++)
         AIRY_FREE((void *)segs[k]);
@@ -254,13 +277,20 @@ int fs_glob_tool(const char *params_json, tool_result_t *res)
 
     if (count == 0) {
         char msg[512];
-        snprintf(msg, sizeof(msg), "No files match pattern '%s' under '%s'", pat->valuestring,
-                 base_dir);
+        if (timed_out)
+            snprintf(msg, sizeof(msg), "fs_glob timed out after %ums under '%s' (no matches)",
+                     (unsigned)timeout_ms, base_dir);
+        else
+            snprintf(msg, sizeof(msg), "No files match pattern '%s' under '%s'", pat->valuestring,
+                     base_dir);
         res->error = AIRY_STRDUP(msg);
         res->success = 0;
         res->exit_code = 1;
         return AIRY_OK;
     }
+    if (timed_out)
+        builtin_append_trunc_mark(out, BUILTIN_OUTPUT_CAP, out_len,
+                                  "\n[glob truncated: time budget]");
     if (count >= BUILTIN_GLOB_MAX)
         builtin_append_trunc_mark(out, BUILTIN_OUTPUT_CAP, out_len,
                                   "\n[glob truncated: too many matches]");

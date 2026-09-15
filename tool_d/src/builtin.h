@@ -17,10 +17,12 @@ extern "C" {
 int tool_builtin_is_builtin(const char *executable);
 
 /* Execute a built-in tool: tool_id in {fs_read, fs_write, fs_list,
- * shell_run, web_fetch}. params_json is the OpenAI tool_call arguments
- * (JSON object string); the result is written to res
- * (output/error/exit_code/success). */
-int tool_builtin_run(const char *tool_id, const char *params_json, tool_result_t *res);
+ * shell_run, web_fetch, ...}. params_json is the OpenAI tool_call
+ * arguments (JSON object string); the result is written to res
+ * (output/error/exit_code/success). timeout_ms is the execution budget
+ * from the tool metadata (0 = executor default). */
+int tool_builtin_run(const char *tool_id, const char *params_json, uint32_t timeout_ms,
+                     tool_result_t *res);
 
 #ifdef __cplusplus
 }

@@ -511,9 +511,14 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
 
     /* Builtin tools (builtin:xxx): real implementations dispatch directly
      * (fs_read/fs_write/fs_list/shell_run), already passed approval above
-     * (fail-closed ACL), no external execvp process needed. */
+     * (fail-closed ACL), no external execvp process needed.
+     * Incident 0.1.16: this path used to run unbounded — fs_grep held the
+     * executor thread for 158s and stalled the DAG pipeline. Every builtin
+     * now honors the per-tool metadata budget (fallback: manager default). */
     if (tool_builtin_is_builtin(meta->executable)) {
-        int brc = tool_builtin_run(meta->id, params_json, result);
+        uint32_t btimeout_ms = (meta->timeout_sec > 0) ? (uint32_t)meta->timeout_sec * 1000 :
+                                                         (uint32_t)exec->manager.timeout_sec * 1000;
+        int brc = tool_builtin_run(meta->id, params_json, btimeout_ms, result);
         result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
         if (brc == 0 && result->success) {
             result->failure_class = TOOL_RESULT_CLASS_SUCCESS;

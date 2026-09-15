@@ -93,8 +93,9 @@ static int fs_atomic_write(const char *path, const char *buf, size_t len)
     return 0;
 }
 
-int fs_read_tool(const char *params_json, tool_result_t *res)
+int fs_read_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
+    (void)timeout_ms;
     CJSON_PARSE_GUARD(root, params_json, {
         res->error = AIRY_STRDUP("Invalid params JSON");
         return AIRY_ERR_PARSE_ERROR;
@@ -133,8 +134,9 @@ int fs_read_tool(const char *params_json, tool_result_t *res)
     return AIRY_OK;
 }
 
-int fs_write_tool(const char *params_json, tool_result_t *res)
+int fs_write_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
+    (void)timeout_ms;
     CJSON_PARSE_GUARD(root, params_json, {
         res->error = AIRY_STRDUP("Invalid params JSON");
         return AIRY_ERR_PARSE_ERROR;
@@ -178,8 +180,9 @@ int fs_write_tool(const char *params_json, tool_result_t *res)
  *   (for the LLM to adjust)
  * ============================================================================ */
 
-int fs_edit_tool(const char *params_json, tool_result_t *res)
+int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
+    (void)timeout_ms;
     CJSON_PARSE_GUARD(root, params_json, {
         res->error = AIRY_STRDUP("Invalid params JSON");
         return AIRY_ERR_PARSE_ERROR;

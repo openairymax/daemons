@@ -46,28 +46,26 @@
 
 #define BUILTIN_GREP_MAX 200
 
-/* Portable getline replacement: read one line (bytes up to and including
- * '\n' or EOF); returns a NULL-terminated AIRY_MALLOC buffer (caller frees)
- * or NULL on EOF/OOM. *out_len receives the byte count including the
- * newline, so embedded NUL bytes can be detected by the caller. */
+/* Read one line of unbounded length via a doubling buffer. *out_len counts
+ * bytes including the trailing newline so the caller can detect embedded
+ * NULs. Returns NULL when EOF is hit before any byte was read. */
 static char *builtin_read_line(FILE *fp, size_t *out_len)
 {
-    size_t cap = 256;
-    size_t len = 0;
+    size_t cap = 256, len = 0;
     char *buf = (char *)AIRY_MALLOC(cap);
     if (!buf)
         return NULL;
     int c;
     while ((c = fgetc(fp)) != EOF) {
         if (len + 2 > cap) {
-            size_t nc = cap * 2;
-            char *nb = (char *)AIRY_REALLOC(buf, nc);
-            if (!nb) {
+            size_t ncap = cap * 2;
+            char *nbuf = (char *)AIRY_REALLOC(buf, ncap);
+            if (!nbuf) {
                 AIRY_FREE(buf);
                 return NULL;
             }
-            buf = nb;
-            cap = nc;
+            buf = nbuf;
+            cap = ncap;
         }
         buf[len++] = (char)c;
         if (c == '\n')
@@ -78,15 +76,30 @@ static char *builtin_read_line(FILE *fp, size_t *out_len)
         return NULL;
     }
     buf[len] = '\0';
-    if (out_len)
-        *out_len = len;
+    *out_len = len;
     return buf;
 }
 
+/* Bounded directory walk: every level checks the wall-clock budget and
+ * the depth cap; oversized files are skipped so a single huge log cannot
+ * monopolize the executor thread (incident 0.1.16: fs_grep ran 158s over
+ * the whole workspace and stalled the DAG pipeline). On budget expiry the
+ * partial result is returned with a truncation mark (*timed_out=1). */
 static int builtin_grep_dir(const char *base, const char *root, regex_t *re,
                             const char *glob_filter, int max_results, char *out, size_t out_cap,
-                            size_t *out_len, int *count, int *done)
+                            size_t *out_len, int *count, int *done, int *timed_out,
+                            uint64_t deadline, int depth)
 {
+    if (builtin_deadline_hit(deadline)) {
+        *done = 1;
+        *timed_out = 1;
+        return 0;
+    }
+    if (depth > BUILTIN_SCAN_MAX_DEPTH) {
+        *done = 1;
+        *timed_out = 1;
+        return 0;
+    }
     DIR *d = opendir(base);
     if (!d)
         return 0;
@@ -95,33 +108,22 @@ static int builtin_grep_dir(const char *base, const char *root, regex_t *re,
         const char *nm = ent->d_name;
         if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0)
             continue;
-        if (strcmp(nm, ".git") == 0 || strcmp(nm, "node_modules") == 0 ||
-            strcmp(nm, "target") == 0 || strcmp(nm, ".venv") == 0 ||
-            strcmp(nm, "__pycache__") == 0 || strcmp(nm, ".airymaxrt") == 0 ||
-            strcmp(nm, "build") == 0 || strcmp(nm, "logs") == 0)
+        if (builtin_scan_noise_dir(nm))
             continue;
         char full[AIRY_PATH_MAX];
         snprintf(full, sizeof(full), "%s/%s", base, nm);
-#ifdef DT_DIR
         if (ent->d_type == DT_DIR) {
             builtin_grep_dir(full, root, re, glob_filter, max_results, out, out_cap, out_len, count,
-                             done);
+                             done, timed_out, deadline, depth + 1);
             continue;
         }
-        if (ent->d_type != DT_REG)
-            continue;
-#else
+        /* Regular file check via stat: also covers DT_UNKNOWN mounts and
+         * applies the per-file size cap in one syscall. */
         struct stat st;
-        if (stat(full, &st) != 0)
+        if (stat(full, &st) != 0 || !S_ISREG(st.st_mode))
             continue;
-        if (S_ISDIR(st.st_mode)) {
-            builtin_grep_dir(full, root, re, glob_filter, max_results, out, out_cap, out_len, count,
-                             done);
+        if (st.st_size > BUILTIN_SCAN_MAX_FILE_BYTES)
             continue;
-        }
-        if (!S_ISREG(st.st_mode))
-            continue;
-#endif
         if (glob_filter && !builtin_glob_seg_match(glob_filter, nm))
             continue;
         if (*count >= max_results)
@@ -134,6 +136,12 @@ static int builtin_grep_dir(const char *base, const char *root, regex_t *re,
         char *line;
         size_t llen;
         while ((line = builtin_read_line(fp, &llen)) != NULL) {
+            if (builtin_deadline_hit(deadline)) {
+                *done = 1;
+                *timed_out = 1;
+                AIRY_FREE(line);
+                break;
+            }
             lineno++;
             if (memchr(line, '\0', llen) != NULL) {
                 AIRY_FREE(line);
@@ -177,7 +185,7 @@ static int builtin_grep_dir(const char *base, const char *root, regex_t *re,
     return 0;
 }
 
-int fs_grep_tool(const char *params_json, tool_result_t *res)
+int fs_grep_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
         res->error = AIRY_STRDUP("Invalid params JSON");
@@ -216,18 +224,29 @@ int fs_grep_tool(const char *params_json, tool_result_t *res)
         return AIRY_ERR_OUT_OF_MEMORY;
     }
     size_t out_len = 0;
-    int count = 0, done = 0;
+    int count = 0, done = 0, timed_out = 0;
+    uint64_t deadline = builtin_deadline_ms(timeout_ms);
     builtin_grep_dir(resolved, resolved, &re, glob_filter, max_results, out, BUILTIN_OUTPUT_CAP,
-                     &out_len, &count, &done);
+                     &out_len, &count, &done, &timed_out, deadline, 0);
     regfree(&re);
 
     if (count == 0) {
         char msg[512];
-        snprintf(msg, sizeof(msg), "No matches for pattern '%s' under '%s'", pat->valuestring, dir);
+        if (timed_out)
+            snprintf(msg, sizeof(msg), "fs_grep timed out after %ums under '%s' (no matches)",
+                     (unsigned)timeout_ms, dir);
+        else
+            snprintf(msg, sizeof(msg), "No matches for pattern '%s' under '%s'", pat->valuestring,
+                     dir);
         res->error = AIRY_STRDUP(msg);
         res->success = 0;
         res->exit_code = 1;
         return AIRY_OK;
+    }
+    if (timed_out) {
+        builtin_append_trunc_mark(out, BUILTIN_OUTPUT_CAP, out_len,
+                                  "\n[grep truncated: time budget]");
+        out[BUILTIN_OUTPUT_CAP - 1] = '\0';
     }
     res->output = out;
     res->success = 1;
