@@ -3,9 +3,9 @@
 
 /**
  * @file bench_gateway_pep.c
- * @brief gateway PEP 裁定路径端到端基准（M2-S1，0.1.9 §3.4 前置）。
+ * @brief gateway PEP 裁定路径端到端基准。
  *
- * 为 cupolas PDP 化（M2）建立 gateway PEP 端到端基线：
+ * 为 cupolas PDP 化建立 gateway PEP 端到端基线：
  *   - 冷路径（miss）：唯一 key 首次检查 → 一次 check_permission RPC 往返
  *   - 热路径（hit）：同 key 重复检查 → 缓存命中，零 RPC
  *   - epoch 失效：策略热更新（epoch+1）后缓存整体失效与重填成本
@@ -15,8 +15,8 @@
  * 与 test_gateway_pep_cache 同一框架（语义断言见该测试，本文件只测
  * 延迟/命中率基线，不做性能断言以免 CI 抖动）。
  *
- * 输出 p50/p99，供 M2-S5（PDP 收权后 check 走 cupolas_d RPC）与 S4
- * （epoch 主动失效）落地后对比回归。
+ * 输出 p50/p99，供 PDP 收权后 check 走 cupolas_d RPC 与
+ * epoch 主动失效落地后对比回归。
  */
 
 #include "gateway_pep_cache.h"
@@ -25,6 +25,7 @@
 #include "airy_memory.h"
 
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,11 +45,11 @@
 #ifndef _WIN32
 
 static char g_sock_path[128];
-static volatile int g_conns;      /* 假 PDP 收到的 RPC 次数 */
-static volatile int g_allowed;    /* 假 PDP 裁定：1 allow / 0 deny */
-static volatile uint64_t g_epoch; /* 假 PDP 权威 epoch */
+static _Atomic int g_conns;      /* 假 PDP 收到的 RPC 次数 */
+static _Atomic int g_allowed;    /* 假 PDP 裁定：1 allow / 0 deny */
+static _Atomic uint64_t g_epoch; /* 假 PDP 权威 epoch */
 static pthread_t g_srv;
-static volatile int g_stop;
+static _Atomic int g_stop;
 
 static void *fake_pdp(void *arg)
 {
@@ -273,7 +274,7 @@ int main(int argc, char *argv[])
 
     out("========================================\n");
     out("  AgentRT Gateway PEP End-to-End Baseline\n");
-    out("  Iterations: %d (S1, 0.1.9 3.4)\n", iters);
+    out("  Iterations: %d\n", iters);
     out("========================================\n");
 
     gw_pep_init();
@@ -300,7 +301,7 @@ int main(int argc, char *argv[])
 
     gw_pep_clear();
     out("========================================\n");
-    out("  Baseline complete (M2-S1)\n");
+    out("  Baseline complete\n");
     out("========================================\n");
     return 0;
 }

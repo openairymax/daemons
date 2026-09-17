@@ -47,7 +47,7 @@ foreach(TEST_SRC ${TEST_SOURCES})
         )
     endif()
 
-    # 统一能力网关（0.1.6 P1-4）：注册表测试需编译注册表实现
+    # 统一能力网关：注册表测试需编译注册表实现
     # （含 cJSON 头依赖），网关业务头不参与测试目标。
     # P9 归一（2026-09-02）：gateway_cap_registry.c 已并入 gateway/src/biz/
     if(${TEST_NAME} STREQUAL "test_gateway_cap_registry")
@@ -59,10 +59,10 @@ foreach(TEST_SRC ${TEST_SOURCES})
         )
     endif()
 
-    # M2-S5 (0.1.9 §3.2 PEP)：PEP 裁定缓存测试——编译实现源；
+    # PEP 裁定缓存测试——编译实现源；
     # gw_svc_call 符号由 airy_gateway_service（含 biz 全部源）提供，
     # 需 start-group 兜底与 svc_common/airy_syscall 的静态库循环依赖。
-    # bench_gateway_pep（M2-S1 端到端基准）同一装配。
+    # bench_gateway_pep（PEP 端到端基准）同一装配。
     if(${TEST_NAME} STREQUAL "test_gateway_pep_cache" OR
        ${TEST_NAME} STREQUAL "bench_gateway_pep")
         target_sources(${TEST_NAME} PRIVATE

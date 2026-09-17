@@ -202,7 +202,7 @@ int main(void)
 {
     printf("[SUITE] test_think_gccp_twopass\n");
 
-    /* ARC-04: the atoms LLM adapter used by think_service reaches
+    /* The atoms LLM adapter used by think_service reaches
      * svc_common/llm_d through the injected IPC ops table instead of
      * linking daemon symbols directly. This harness plays the daemon
      * role and installs the real svc_common implementation before the

@@ -181,9 +181,9 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("maths_d");
 
-    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
-     * dispatch without linking daemons symbols (ARC-02). Init failure is
-     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    /* Publish the IPC/RPC/SD ops table to atoms call sites so they dispatch
+     * without linking daemons symbols. Init failure is non-fatal: atoms
+     * callers degrade gracefully. */
     daemon_ipc_ops_init("maths_d");
 
     if (maths_d_init(&g_service, MATHS_DEFAULT_SOCKET, MATHS_DEFAULT_PORT) != 0)

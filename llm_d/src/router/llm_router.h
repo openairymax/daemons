@@ -31,6 +31,12 @@ extern "C" {
 #endif
 
 
+/* 路由成本估算用的输出 token 兜底值。调用方（service 层）已把引擎默认
+ * max_output 解析进 llm_route_request_t.max_tokens；仅当配置面完全未声明
+ * 输出上限时才落到此值。四个策略必须共用同一口径，否则同一请求在不同
+ * 策略下会得到不同的成本预期。 */
+#define LLM_ROUTE_EST_OUTPUT_TOKENS 1024U
+
 typedef enum {
     LLM_ROUTE_COMPLEXITY = 0,
     LLM_ROUTE_COST = 1,

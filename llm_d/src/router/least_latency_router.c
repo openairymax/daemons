@@ -68,7 +68,8 @@ int route_least_latency(const llm_route_request_t *request, llm_route_result_t *
 
     llm_endpoint_t *ep = eligible[best_idx];
     size_t input_tokens = router_estimate_tokens(request->prompt, request->prompt_len);
-    size_t output_tokens = request->max_tokens > 0 ? request->max_tokens : 1024;
+    size_t output_tokens =
+        request->max_tokens > 0 ? request->max_tokens : LLM_ROUTE_EST_OUTPUT_TOKENS;
 
     router_fill_result(result, ep, LLM_ROUTE_LATENCY, 85, input_tokens, output_tokens);
 
