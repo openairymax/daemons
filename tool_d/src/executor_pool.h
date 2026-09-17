@@ -9,8 +9,12 @@
  * 共享池导致 approve/list/health_check 饿死；多个并发 interactive-approval
  * 等待可占满池使 approve 自身排队（批准死锁）。本池把执行隔离到独立
  * 有界线程集，调用方带预算等待：超时返回 AIRY_ERR_CANCELED 并合成取消
- * 结果，job 与池脱钩（detach）由 worker 完成后自清理，不影响其它在途
- * 任务。
+ * 结果，不影响其它在途任务。
+ *
+ * 终止语义：真正的“到期终止”由执行面的单点 deadline 负责——外部进程
+ * 到期即 SIGKILL（executor_budget_ms 同时是空气与池等待的基准）。本池的
+ * detach 是兜底：仅当工具在预算内未返回（如内置调用阻塞在不可中断系统
+ * 调用中）时才把 job 与池脱钩，由 worker 完成后自清理，真实结果丢弃。
  */
 
 #ifndef TOOL_EXECUTOR_POOL_H
@@ -30,7 +34,8 @@ typedef struct executor_pool executor_pool_t;
  * @param exec Executor (BORROW; must outlive the pool)
  * @return Pool handle, NULL on failure
  *
- * Worker count: env AIRY_TOOL_EXEC_WORKERS in [1,8], default 2.
+ * Worker count, highest priority first: env AIRY_TOOL_EXEC_WORKERS in [1,8];
+ * else the executor's max_workers config; else 2.
  *
  * @ownership exec: BORROW; return: OWNER
  */
@@ -56,13 +61,18 @@ void executor_pool_free(executor_pool_t *pool);
  * @param out_result Output result (OWNER on return, caller AIRY_FREEs via
  *        tool_result_free)
  * @return 0 on success; AIRY_ERR_BUSY when the queue is full (backpressure
- *         fast-fail); AIRY_ERR_CANCELED when the wait budget expired (the
- *         job keeps running detached and its eventual real result is
- *         discarded); other error codes from tool_executor_run
+ *         fast-fail); AIRY_ERR_CANCELED when the wait budget expired before
+ *         the job finished - the caller gets a synthesized cancel result,
+ *         while the job keeps running detached as a last resort and its
+ *         eventual real result is discarded; other error codes from
+ *         tool_executor_run
  *
  * Wait budget: env AIRY_TOOL_WAIT_BUDGET_MS when set (>0), otherwise
- * max(meta, executor) timeout + slack (+ the interactive-approval ceiling
- * when interactive approval is enabled).
+ * executor_budget_ms(meta) + slack (+ the interactive-approval ceiling when
+ * interactive approval is enabled). Sharing that function with the executor
+ * keeps the process deadline and the wait deadline in lockstep, so a
+ * well-behaved tool is terminated at its own budget and the cancel path
+ * stays a fallback.
  *
  * @ownership pool: BORROW; meta/params_json/agent_id: BORROW
  */

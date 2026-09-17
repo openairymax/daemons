@@ -10,7 +10,7 @@
  *          output capture and error handling.
  */
 
-/* P3.18 (ACC-DT27): sandbox public API (airy_sandbox_t, permission_type_t,
+/* Sandbox public API (airy_sandbox_t, permission_type_t,
  * airy_sandbox_create_default, airy_sandbox_invoke, etc.) */
 #include "airy_sandbox.h"
 
@@ -48,7 +48,7 @@ struct tool_executor {
 
     tool_approval_ctx_t *approval_ctx;
     safety_guard_bridge_t *safety_bridge;
-    /* P3.18 (ACC-DT27): tool execution sandbox — a mandatory security layer
+    /* Tool execution sandbox — a mandatory security layer
      * (not an optional enhancement). Together with approval_ctx it forms a
      * two-tier fail-closed security architecture:
      *   - approval_ctx: policy approval based on tool metadata and params
@@ -69,7 +69,6 @@ tool_executor_t *tool_executor_create(const tool_executor_config_t *cfg)
     tool_executor_config_t local_cfg;
     if (!cfg) {
         __builtin_memset(&local_cfg, 0, sizeof(local_cfg));
-        local_cfg.max_workers = 1;
         local_cfg.timeout_sec = 30;
         cfg = &local_cfg;
     }
@@ -100,7 +99,7 @@ tool_executor_t *tool_executor_create(const tool_executor_config_t *cfg)
      * creation nor static fail-closed approval. */
     exec->interactive = interactive_approval_create();
 
-    /* P3.18 (ACC-DT27): initialize the tool execution sandbox.
+    /* Initialize the tool execution sandbox.
      *
      * Design notes:
      * - sandbox is a mandatory security layer (not an optional enhancement),
@@ -115,23 +114,23 @@ tool_executor_t *tool_executor_create(const tool_executor_config_t *cfg)
      *   compatibility with future default-policy changes. */
     airy_err_t sb_init = airy_sandbox_manager_init();
     if (sb_init != AIRY_SUCCESS) {
-        SVC_LOG_WARN("C-L08: sandbox_manager_init failed (rc=%d) — tools will be fail-closed",
+        SVC_LOG_WARN("sandbox_manager_init failed (rc=%d) — tools will be fail-closed",
                      (int)sb_init);
     } else {
         airy_err_t sb_create = airy_sandbox_create_default("tool_d", "tool_d", &exec->sandbox);
         if (sb_create != AIRY_SUCCESS || !exec->sandbox) {
             SVC_LOG_ERROR(
-                "C-L08: sandbox_create_default failed (rc=%d) — tools will be fail-closed",
+                "sandbox_create_default failed (rc=%d) — tools will be fail-closed",
                 (int)sb_create);
             exec->sandbox = NULL;
         } else {
             airy_err_t sb_rule =
                 airy_sandbox_add_rule(exec->sandbox, SYS_TOOL_EXECUTE, PERM_ALLOW, NULL);
             if (sb_rule != AIRY_SUCCESS) {
-                SVC_LOG_WARN("C-L08: sandbox_add_rule(SYS_TOOL_EXECUTE, ALLOW) failed (rc=%d)",
+                SVC_LOG_WARN("sandbox_add_rule(SYS_TOOL_EXECUTE, ALLOW) failed (rc=%d)",
                              (int)sb_rule);
             }
-            SVC_LOG_INFO("C-L08: Sandbox initialized for tool executor (allow SYS_TOOL_EXECUTE)");
+            SVC_LOG_INFO("Sandbox initialized for tool executor (allow SYS_TOOL_EXECUTE)");
         }
     }
 
@@ -147,6 +146,21 @@ int executor_timeout_sec(const tool_executor_t *exec)
 {
     /* create 时 0 已回退为默认值，此处仅防御空指针 */
     return (exec && exec->manager.timeout_sec > 0) ? exec->manager.timeout_sec : 30;
+}
+
+uint32_t executor_budget_ms(const tool_executor_t *exec, const tool_metadata_t *meta)
+{
+    /* R1-a 单点 deadline：per-tool 元数据优先，未声明回退 executor 默认。
+     * 内置路径、外部 execvp 路径与池等待预算共用本函数——此前外部路径只取
+     * manager 默认而池按 max(meta, manager) 等待，同一工具出现两套超时。 */
+    int per_tool = (meta && meta->timeout_sec > 0) ? meta->timeout_sec : 0;
+    int budget_sec = (per_tool > 0) ? per_tool : executor_timeout_sec(exec);
+    return (uint32_t)budget_sec * 1000u;
+}
+
+int executor_max_workers(const tool_executor_t *exec)
+{
+    return exec ? exec->manager.max_workers : 0;
 }
 
 void tool_executor_destroy(tool_executor_t *exec)
@@ -167,7 +181,7 @@ void tool_executor_destroy(tool_executor_t *exec)
         safety_guard_bridge_destroy(exec->safety_bridge);
         exec->safety_bridge = NULL;
     }
-    /* P3.18 (ACC-DT27): destroy the sandbox. Note: airy_sandbox_manager_destroy
+    /* Destroy the sandbox. Note: airy_sandbox_manager_destroy
      * is NOT called because the manager is a process-level singleton possibly
      * shared by other executors; its lifecycle is managed by process exit or
      * explicit cleanup. */
@@ -192,7 +206,7 @@ void tool_executor_set_approval_ctx(tool_executor_t *exec, tool_approval_ctx_t *
     exec->approval_ctx = approval_ctx;
     airy_mtx_unlock(&exec->lock);
     if (approval_ctx) {
-        SVC_LOG_INFO("C-L05: Approval context attached to executor");
+        SVC_LOG_INFO("Approval context attached to executor");
 
         if (!exec->safety_bridge) {
             safety_guard_bridge_config_t bridge_cfg;
@@ -210,9 +224,9 @@ void tool_executor_set_approval_ctx(tool_executor_t *exec, tool_approval_ctx_t *
 
             exec->safety_bridge = safety_guard_bridge_create(&bridge_cfg);
             if (exec->safety_bridge) {
-                SVC_LOG_INFO("C-L05: SafetyGuard bridge created for executor");
+                SVC_LOG_INFO("SafetyGuard bridge created for executor");
             } else {
-                SVC_LOG_WARN("C-L05: Failed to create SafetyGuard bridge, "
+                SVC_LOG_WARN("Failed to create SafetyGuard bridge, "
                              "falling back to local checks");
             }
         }
@@ -332,12 +346,12 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* BAN-211/235: execute directly via execvp (no shell), no SEC-011 shell
+    /* Execute directly via execvp (no shell), no SEC-011 shell
      * metacharacter check needed. params_json is passed as a single argv
      * element to the tool, which parses the JSON itself. */
 
-    /* ── C-L05: Cupolas SafetyGuard -> tool_d tool approval ──
-     * P3.17 (ACC-DT18) fail-closed: refuse execution when approval_ctx is NULL.
+    /* ── Cupolas SafetyGuard -> tool_d tool approval ──
+     * Fail-closed: refuse execution when approval_ctx is NULL.
      * Legacy code `if (exec->approval_ctx)` skipped approval and executed when
      * the ctx was not set, equivalent to the security system being disabled —
      * violating the zero-debt security principle.
@@ -345,7 +359,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
      * (fail-closed). service.c injects a default approval_ctx
      * (enable_approval=true) right after creating the executor. */
     if (!exec->approval_ctx) {
-        SVC_LOG_ERROR("C-L05: approval_ctx is NULL — tool execution DENIED (fail-closed). "
+        SVC_LOG_ERROR("approval_ctx is NULL — tool execution DENIED (fail-closed). "
                       "Call tool_executor_set_approval_ctx() before executing tools.");
         result->success = 0;
         result->output = AIRY_STRDUP("");
@@ -389,10 +403,10 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
                 }
 
                 if (outcome == AIRY_APPROVAL_ALLOWED) {
-                    SVC_LOG_INFO("C-L05: Tool '%s' approved by user (interactive, one-shot)",
+                    SVC_LOG_INFO("Tool '%s' approved by user (interactive, one-shot)",
                                  meta->name ? meta->name : "?");
                 } else if (outcome == AIRY_APPROVAL_ALWAYS) {
-                    SVC_LOG_INFO("C-L05: Tool '%s' approved by user (interactive, always)",
+                    SVC_LOG_INFO("Tool '%s' approved by user (interactive, always)",
                                  meta->name ? meta->name : "?");
                     /* Add a persistent ACL rule (agent_id + tool name +
                      * allow) so subsequent identical calls pass static
@@ -400,13 +414,13 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
                     if (agent && meta->name) {
                         int ar = daemon_security_add_acl_rule(agent, meta->name, true);
                         if (ar != 0) {
-                            SVC_LOG_WARN("C-L05: add_acl_rule('%s','%s') failed rc=%d", agent,
+                            SVC_LOG_WARN("add_acl_rule('%s','%s') failed rc=%d", agent,
                                          meta->name, ar);
                         }
                     }
                 } else {
 
-                    SVC_LOG_ERROR("C-L05: Tool '%s' denied by user (interactive) or timed out",
+                    SVC_LOG_ERROR("Tool '%s' denied by user (interactive) or timed out",
                                   meta->name ? meta->name : "?");
                     result->success = 0;
                     result->output = AIRY_STRDUP("");
@@ -418,7 +432,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
                     return AIRY_EPERM;
                 }
             } else {
-                SVC_LOG_ERROR("C-L05: Tool approval denied for '%s': %s",
+                SVC_LOG_ERROR("Tool approval denied for '%s': %s",
                               meta->name ? meta->name : "?", approval_detail.reason);
                 result->success = 0;
                 result->output = AIRY_STRDUP("");
@@ -432,19 +446,18 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
                 return AIRY_EPERM;
             }
         }
-        SVC_LOG_INFO("C-L05: Tool '%s' approved (decision=%d)", meta->name ? meta->name : "?",
+        SVC_LOG_INFO("Tool '%s' approved (decision=%d)", meta->name ? meta->name : "?",
                      (int)approval_detail.decision);
     }
 
     /* Builtin tools (builtin:xxx): real implementations dispatch directly
      * (fs_read/fs_write/fs_list/shell_run), already passed approval above
      * (fail-closed ACL), no external execvp process needed.
-     * Incident 0.1.16: this path used to run unbounded — fs_grep held the
+     * This path used to run unbounded — fs_grep held the
      * executor thread for 158s and stalled the DAG pipeline. Every builtin
      * now honors the per-tool metadata budget (fallback: manager default). */
     if (tool_builtin_is_builtin(meta->executable)) {
-        uint32_t btimeout_ms = (meta->timeout_sec > 0) ? (uint32_t)meta->timeout_sec * 1000 :
-                                                         (uint32_t)exec->manager.timeout_sec * 1000;
+        uint32_t btimeout_ms = executor_budget_ms(exec, meta);
         int brc = tool_builtin_run(meta->id, params_json, btimeout_ms, result);
         result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
         if (brc == 0 && result->success) {
@@ -462,7 +475,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         return brc;
     }
 
-    /* BAN-211/235: build argv and execute directly via execvp (no shell),
+    /* Build argv and execute directly via execvp (no shell),
      * eliminating command-injection risk. params_json is passed as a single
      * argv element; the tool parses it itself. */
     const char *argv[3];
@@ -488,9 +501,9 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     }
     output_buffer[0] = '\0';
 
-    uint32_t timeout_ms = (uint32_t)exec->manager.timeout_sec * 1000;
+    uint32_t timeout_ms = executor_budget_ms(exec, meta);
 
-    /* P3.18 (ACC-DT27): execute the tool through the sandbox — three layers of
+    /* Execute the tool through the sandbox — three layers of
      * permission/quota/audit interception.
      *
      * Two-tier fail-closed security architecture:
@@ -505,7 +518,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
      * airy_syscall_invoke -> sys_tool_execute -> airy_process_run_capture
      */
     if (!exec->sandbox) {
-        SVC_LOG_ERROR("C-L08: sandbox is NULL — tool execution DENIED (fail-closed). "
+        SVC_LOG_ERROR("sandbox is NULL — tool execution DENIED (fail-closed). "
                       "Sandbox initialization failed during executor creation.");
         result->success = 0;
         result->output = AIRY_STRDUP("");
@@ -529,7 +542,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     airy_err_t sb_ret =
         airy_sandbox_invoke(exec->sandbox, SYS_TOOL_EXECUTE, invoke_args, 1, &sb_out_result);
     if (sb_ret != AIRY_SUCCESS) {
-        SVC_LOG_ERROR("C-L08: sandbox denied tool '%s' execution (rc=%d) — fail-closed",
+        SVC_LOG_ERROR("sandbox denied tool '%s' execution (rc=%d) — fail-closed",
                       meta->name ? meta->name : "?", (int)sb_ret);
         result->success = 0;
         result->output = AIRY_STRDUP("");

@@ -5,12 +5,14 @@
  * @file test_executor_pool.c
  * @brief R1-a (0.1.17): 执行面隔离池验收测试。
  *
- * 覆盖三类验收（0.1.17 §3.1）：
+ * 覆盖四类验收（0.1.17 §3.1）：
  *   1. 并发两会话互不影响：一个会话注入超预算工具（CANCELED 兜底），
  *      另一会话的快速工具正常完成且先于超时返回；
  *   2. 取消返回明确错误码 AIRY_ERR_CANCELED + 合成 NORMAL_FAIL 结果；
  *   3. 队列满背压快失败 AIRY_ERR_BUSY；destroy 对 detach 在途 job 的
- *      drain 语义（不悬挂、不 UAF）。
+ *      drain 语义（不悬挂、不 UAF）；
+ *   4. per-tool 预算是唯一 deadline：meta 预算小于 executor 默认值时，
+ *      进程按 meta 被真正终止（不是被池误判为 detach 取消，也不等默认值）。
  */
 
 #include "airy_memory.h"
@@ -163,6 +165,47 @@ static void test_pool_concurrent_isolation(void)
     printf("    PASSED\n");
 }
 
+/* 用例 5：per-tool 预算即唯一 deadline（执行面与池同源） */
+static void test_pool_per_tool_budget(void)
+{
+    printf("  test_pool_per_tool_budget...\n");
+
+    unsetenv("AIRY_TOOL_EXEC_WORKERS");
+    unsetenv("AIRY_TOOL_WAIT_BUDGET_MS"); /* 走 executor_budget_ms 单点 */
+
+    tool_executor_config_t cfg;
+    AIRY_MEMSET(&cfg, 0, sizeof(cfg));
+    cfg.timeout_sec = 30; /* 远大于 per-tool：暴露旧的双口径错配 */
+    tool_executor_t *exec = tool_executor_create_ex(&cfg);
+    assert(exec != NULL);
+    setup_approval(exec, "pool_budget");
+
+    executor_pool_t *pool = executor_pool_new(exec);
+    assert(pool != NULL);
+
+    tool_metadata_t meta;
+    meta_fill(&meta, "pool_budget_tool", "pool_budget", "/bin/sleep", 1);
+    tool_result_t *res = NULL;
+    long long t0 = now_ms();
+    int ret = executor_pool_run(pool, &meta, "5", "tool_d", &res);
+    long long elapsed = now_ms() - t0;
+
+    /* 1s 预算必须真终止：若仍按 manager 默认 30s 计时，sleep 5 会自然结束 */
+    assert(ret == AIRY_OK);
+    assert(res != NULL);
+    assert(res->success == 0);
+    assert(res->failure_class == TOOL_RESULT_CLASS_NORMAL_FAIL);
+    assert(res->error != NULL && strstr(res->error, "timed out") != NULL);
+    printf("    per-tool budget 1s terminated in %lldms\n", elapsed);
+    assert(elapsed >= 900 && elapsed < 3000);
+    tool_result_free(res);
+    res = NULL;
+
+    executor_pool_free(pool);
+    tool_executor_destroy(exec);
+    printf("    PASSED\n");
+}
+
 #define BUSY_SUBMITTERS 65
 
 typedef struct {
@@ -294,6 +337,7 @@ int main(void)
 {
     printf("test_executor_pool:\n");
     test_pool_concurrent_isolation();
+    test_pool_per_tool_budget();
     test_pool_busy_backpressure();
     test_pool_destroy_drain();
     printf("ALL PASSED\n");
