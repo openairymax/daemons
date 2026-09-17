@@ -17,7 +17,7 @@ int test_dag_failure_cascade(void)
         printf("  FAILED: service create\n");
         return 1;
     }
-    g_exec_count = 0;
+    exec_log_reset();
     g_fail_goal = NULL;
     g_block = 0;
     g_fail_goal = "boom-B";
@@ -75,7 +75,7 @@ int test_dag_cancel(void)
         printf("  FAILED: service create\n");
         return 1;
     }
-    g_exec_count = 0;
+    exec_log_reset();
     g_fail_goal = NULL;
     g_block = 1;
 
@@ -158,7 +158,7 @@ int test_dag_normal_failure_no_cascade(void)
         printf("  FAILED: service create\n");
         return 1;
     }
-    g_exec_count = 0;
+    exec_log_reset();
     g_fail_goal = "boom-B";
     g_fatal_goal = NULL;
     g_flaky_goal = NULL;
@@ -238,7 +238,7 @@ int test_dag_fatal_cascade_whole(void)
         printf("  FAILED: service create\n");
         return 1;
     }
-    g_exec_count = 0;
+    exec_log_reset();
     g_fail_goal = NULL;
     g_fatal_goal = "fatal-B";
     g_flaky_goal = NULL;
@@ -313,7 +313,7 @@ int test_dag_semantic_failed(void)
         printf("  FAILED: service create\n");
         return 1;
     }
-    g_exec_count = 0;
+    exec_log_reset();
     g_fail_goal = NULL;
     g_fatal_goal = NULL;
     g_flaky_goal = NULL;
@@ -425,7 +425,7 @@ int test_dag_transient_retry(void)
         printf("  FAILED: service create\n");
         return 1;
     }
-    g_exec_count = 0;
+    exec_log_reset();
     g_fail_goal = NULL;
     g_fatal_goal = NULL;
     g_flaky_goal = "flaky-A";
@@ -497,7 +497,7 @@ int test_dag_transient_retry_exhausted(void)
         printf("  FAILED: service create\n");
         return 1;
     }
-    g_exec_count = 0;
+    exec_log_reset();
     g_fail_goal = NULL;
     g_fatal_goal = NULL;
     g_flaky_goal = "flaky-A";

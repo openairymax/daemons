@@ -47,7 +47,10 @@ static void test_mutex_operations(void)
     assert(ret == 0); /* recursive mutex: same thread can relock */
 
     ret = airy_mtx_unlock(&mutex);
-    assert(ret == 0); /* unlock the extra recursive lock */
+    assert(ret == 0); /* release the recursive relock */
+
+    ret = airy_mtx_unlock(&mutex);
+    assert(ret == 0); /* fully release before destroy */
 
     ret = airy_mtx_lock(&mutex); /* relock for later unlock test */
     assert(ret == 0);
