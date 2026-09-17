@@ -28,6 +28,14 @@ jwt_global_state_t g_jwt = {.initialized = 0};
 
 int auth_jwt_init(const jwt_config_t *config)
 {
+    if (g_jwt.initialized)
+        return AUTH_SUCCESS;
+
+    if (!g_jwt.lock_ready) {
+        airy_mtx_init(&g_jwt.lock);
+        g_jwt.lock_ready = 1;
+    }
+
     airy_mtx_lock(&g_jwt.lock);
 
     if (g_jwt.initialized) {
@@ -56,7 +64,6 @@ int auth_jwt_init(const jwt_config_t *config)
     g_hmac_impl = hmac_builtin;
 #endif
 
-    airy_mtx_init(&g_jwt.lock);
     g_jwt.initialized = 1;
     SVC_LOG_INFO("JWT authentication module initialized (TTL=%llu sec, HMAC=%s)",
                  (unsigned long long)g_jwt.config.token_ttl_sec, jwt_hmac_impl_name());
@@ -181,6 +188,9 @@ int auth_jwt_refresh_token(const char *old_token, char **out_new_token)
 
 void auth_jwt_cleanup(void)
 {
+    if (!g_jwt.lock_ready)
+        return;
+
     airy_mtx_lock(&g_jwt.lock);
     if (g_jwt.initialized) {
         g_hmac_impl = NULL;
@@ -192,4 +202,5 @@ void auth_jwt_cleanup(void)
     }
     airy_mtx_unlock(&g_jwt.lock);
     airy_mtx_destroy(&g_jwt.lock);
+    g_jwt.lock_ready = 0;
 }
