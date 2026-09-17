@@ -424,23 +424,30 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
 int daemon_rpc_call(const char *socket_path, const char *method, const char *params_json,
                     char **out_result_json, uint32_t timeout_ms)
 {
-    /* Blueprint 8.3.3 grey rollout: when the ns transport switch resolves
-     * to "corekern" (and only then, channel_for_socket gates on it), serve
-     * the call over the L2 channel. NOT_FOUND from channel_for_socket
-     * (switch off) and every non-".sock" path stay on the socket route
-     * below, bit-for-bit unchanged. Unlike the gateway's dual-path
-     * (gw_svc_call), a daemon-side miss — e.g. ENOENT: no bridge mounted —
-     * propagates fail-fast instead of silently falling back: the switch is
-     * an explicit operator action, so a missing bridge is a configuration
-     * inconsistency the caller must see. Stream and cancelable calls keep
-     * the socket path for now (chunked replies have no L2 mapping yet). */
+    /* Blueprint 8.3.3 grey rollout: when the ns transport switch resolves to
+     * "corekern" — since WS-8 stage 3 the resolution default, with "jsonrpc"
+     * as the operator escape hatch — the call rides the L2 channel first.
+     * Fallback discipline: only codes proving the request was never
+     * dispatched fall back to the socket path (ENOENT: no bridge in this
+     * process — the cross-process grey norm; CANCELED/ECANCELED: dead
+     * target or envelope dropped pre-dispatch). A folded daemon error
+     * (GENERIC_FAIL) or a post-dispatch loss (ETIMEDOUT) propagates: a
+     * blind retry could double-execute side-effectful methods. Stream and
+     * cancelable calls keep the socket path (chunked replies have no L2
+     * mapping yet). */
     char channel[64];
     if (socket_path &&
         daemon_l2_channel_for_socket(socket_path, channel, sizeof(channel)) == 0) {
-        return daemon_l2_rpc_call(channel, method, params_json, out_result_json, timeout_ms);
+        int rc = daemon_l2_rpc_call(channel, method, params_json, out_result_json, timeout_ms);
+        if (rc == AIRY_SUCCESS ||
+            (rc != AIRY_ENOENT && rc != AIRY_ERR_CANCELED && rc != AIRY_ECANCELED)) {
+            return rc;
+        }
+        SVC_LOG_DEBUG("daemon_rpc_call: L2 channel '%s' unserved (rc=%d) - socket fallback",
+                      channel, rc);
     }
-    return daemon_rpc_call_cancelable(socket_path, method, params_json, out_result_json, timeout_ms,
-                                      NULL, NULL, NULL);
+    return daemon_rpc_call_cancelable(socket_path, method, params_json, out_result_json,
+                                      timeout_ms, NULL, NULL, NULL);
 }
 
 #if AIRY_PLATFORM_POSIX

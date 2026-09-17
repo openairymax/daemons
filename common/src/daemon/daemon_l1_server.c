@@ -167,7 +167,9 @@ bool daemon_l1_transport_enabled(const char *ns_upper)
     }
     value = getenv("AIRY_IPC_TRANSPORT");
     if (!value || *value == '\0') {
-        return false; /* default: jsonrpc transport, L1 mount off */
+        /* WS-8 stage 3: 机制默认开启，未设置即 corekern 传输；
+         * "jsonrpc" 为运维回退逃生门，未知值仍 fail-closed。 */
+        return true;
     }
 
 resolve:

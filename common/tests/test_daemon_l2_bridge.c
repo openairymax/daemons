@@ -476,12 +476,20 @@ static void test_channel_for_socket_derivation(void)
                     AIRY_EINVAL,
                 "empty namespace rejected");
 
-    /* transport switch 关（默认 off）-> fail-closed：不发放无人挂载的 channel */
-    unsetenv("AIRY_IPC_TRANSPORT");
+    /* transport switch 关（运维逃生门 "jsonrpc"）-> fail-closed：
+     * 不发放无人挂载的 channel（stage 3 翻默认后 off 非默认，需显式设值） */
     unsetenv("AIRY_SCHED_IPC_TRANSPORT");
+    setenv("AIRY_IPC_TRANSPORT", "jsonrpc", 1);
     TEST_ASSERT(daemon_l2_channel_for_socket("/run/airy/sched.sock", channel,
                                              sizeof(channel)) == AIRY_ERR_NOT_FOUND,
                 "switch off -> NOT_FOUND (grey coexistence norm)");
+
+    /* 全局未设（stage 3 默认 corekern）-> 派生 "<ns>.rpc" */
+    unsetenv("AIRY_IPC_TRANSPORT");
+    TEST_ASSERT(daemon_l2_channel_for_socket("/run/airy/sched.sock", channel,
+                                             sizeof(channel)) == 0,
+                "default (stage 3 corekern) -> channel derived");
+    TEST_ASSERT(strcmp(channel, "sched.rpc") == 0, "channel is sched.rpc");
 
     /* scoped 开关放行 ns -> 派生 "<ns>.rpc" */
     setenv("AIRY_SCHED_IPC_TRANSPORT", "corekern", 1);
