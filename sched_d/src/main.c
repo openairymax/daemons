@@ -87,7 +87,7 @@ int main(int argc, char **argv)
     airy_log_init(NULL);
     atexit(log_cleanup);
 
-    /* WS-8 stage 1 (ARC-05): bring up the corekern core (mem/oom/task/ipc/
+    /* Bring up the corekern core (mem/oom/task/ipc/
      * eventloop/persist) as the first link of the daemon boot chain, before
      * the daemon's own subsystems. airy_init() is idempotent; if it fails the
      * daemon still runs on the platform fallbacks (DSL degradation,
@@ -103,10 +103,10 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("sched_d");
 
-    /* ARC-04: sched_d whole-archives the atoms cognition/coreloopthree
-     * engine, whose adapters dispatch through the IPC/LLM/tool ops tables
-     * instead of linking daemons symbols (ARC-02). Inject all three here;
-     * failures are non-fatal and atoms call sites degrade (BAN-319). */
+    /* sched_d whole-archives the atoms cognition/coreloopthree engine, whose
+     * adapters dispatch through the IPC/LLM/tool ops tables instead of linking
+     * daemons symbols. Inject all three here; failures are non-fatal and atoms
+     * call sites degrade. */
     daemon_ipc_ops_init("sched_d");
     daemon_llm_ops_init("sched_d");
     daemon_tool_ops_init("sched_d");

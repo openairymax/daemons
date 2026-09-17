@@ -37,7 +37,6 @@ set(SVC_COMMON_SOURCES
     src/svc/svc_monitor.c         # 服务监控与降级处理（monitor/degradation 域）
     src/svc/svc_client.c          # 服务通信客户端（client 域）
     src/svc/svc_model_defaults.c  # A2-1: model.yaml global 段默认模型提取（llm_d/gateway_d 共用）
-    src/svc/agent_vocab.c         # C-2: 执行体角色词汇表 SSoT（agent_d/sched_d/编排侧共源）
     src/ipc/ipc_client.c
     src/ipc/ipc_service_bus.c     # IPC服务总线（总线核心域）
     src/ipc/ipc_service_bus_message.c  # Phase 2.3a: IPC服务总线-消息域（从 ipc_service_bus.c 拆分）

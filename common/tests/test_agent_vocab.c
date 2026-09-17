@@ -7,10 +7,11 @@
  *
  * 覆盖：
  * 1. canonical：全部 13 条别名归一化、具体角色恒等、未知/空/NULL → 兜底
- * 2. is_readonly：归一化语义（validator/verifier → tester 判只读），
+ * 2. resolve：严格解析，别名/具体角色命中，未知/空/NULL → NULL（不回落兜底）
+ * 3. is_readonly：归一化语义（validator/verifier → tester 判只读），
  *    抽象别名直传不漏网（2026-08-19 tester_v1 越界根因残余回归）
- * 3. 遍历 API：数量一致、索引越界返回 NULL、alias→role 对有效
- * 4. fallback 常量与具体角色集合一致
+ * 4. 遍历 API：数量一致、索引越界返回 NULL、alias→role 对有效
+ * 5. fallback 常量与具体角色集合一致
  */
 
 #include "agent_vocab.h"
@@ -70,6 +71,39 @@ static int test_canonical_identity_and_fallback(void)
     failures += (expect_canonical(NULL, AGENT_VOCAB_FALLBACK) != 0);
     if (failures == 0)
         TEST_PASS("canonical_identity_and_fallback");
+    return failures;
+}
+
+static int expect_resolve(const char *in, const char *want)
+{
+    const char *got = agent_vocab_resolve(in);
+    int ok = want ? (got != NULL && strcmp(got, want) == 0) : (got == NULL);
+    if (!ok) {
+        char buf[192];
+        snprintf(buf, sizeof(buf), "resolve(%s)=%s, want %s", in ? in : "(null)",
+                 got ? got : "(null)", want ? want : "(null)");
+        TEST_FAIL("resolve", buf);
+        return -1;
+    }
+    return 0;
+}
+
+static int test_resolve_strict(void)
+{
+    int failures = 0;
+    failures += (expect_resolve("coding", "coding") != 0);
+    failures += (expect_resolve("tester", "tester") != 0);
+    /* 别名按归一化目标命中。 */
+    failures += (expect_resolve("creator", "coding") != 0);
+    failures += (expect_resolve("validator", "tester") != 0);
+    /* 未登记角色必须返回 NULL：安全判定不得回落兜底（fail-closed）。 */
+    failures += (expect_resolve("planner", NULL) != 0);
+    failures += (expect_resolve("watcher", NULL) != 0);
+    failures += (expect_resolve("xml-coding-helper", NULL) != 0);
+    failures += (expect_resolve("", NULL) != 0);
+    failures += (expect_resolve(NULL, NULL) != 0);
+    if (failures == 0)
+        TEST_PASS("resolve_strict");
     return failures;
 }
 
@@ -199,6 +233,7 @@ int main(void)
     int failures = 0;
     failures += (test_canonical_aliases() != 0);
     failures += (test_canonical_identity_and_fallback() != 0);
+    failures += (test_resolve_strict() != 0);
     failures += (test_is_readonly_normalized() != 0);
     failures += (test_traversals() != 0);
     failures += (test_fallback_in_roles() != 0);
