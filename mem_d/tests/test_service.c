@@ -694,6 +694,62 @@ static void test_persist_utf8_repair(void)
     printf("    PASSED\n");
 }
 
+/* 压缩后磁盘重载契约：删除/KB 删除触发 mem_persist_rewrite_all 之后，
+ * 新一轮 mem_persist_load_existing 必须还原重写后的状态——被删记录
+ * 不复活、保留记录内容往返一致。 */
+static void test_reload_after_rewrite(void)
+{
+    printf("  test_reload_after_rewrite...\n");
+    mem_test_clean_persist();
+
+    const char *texts[3] = {"alpha record", "beta record", "gamma record"};
+    char *ids[3] = {NULL, NULL, NULL};
+
+    mem_service_t *svc = mem_service_create(16);
+    assert(svc != NULL);
+    for (int i = 0; i < 3; i++) {
+        mem_write_request_t req = {
+            .data = (void *)texts[i],
+            .len = strlen(texts[i]),
+            .metadata = NULL,
+        };
+        int ret = mem_service_write(svc, &req, &ids[i]);
+        assert(ret == AIRY_SUCCESS && ids[i] != NULL);
+    }
+    mem_service_destroy(svc);
+
+    svc = mem_service_create(16);
+    assert(svc != NULL);
+    assert(mem_service_count(svc) == 3);
+
+    /* 删除中间一条：触发 rewrite_all 落盘 */
+    int ret = mem_service_delete(svc, ids[1]);
+    assert(ret == AIRY_SUCCESS);
+    assert(mem_service_count(svc) == 2);
+    mem_service_destroy(svc);
+
+    /* 重载：被删记录不复活，保留记录内容一致 */
+    svc = mem_service_create(16);
+    assert(svc != NULL);
+    assert(mem_service_count(svc) == 2);
+
+    mem_record_t rec = {0};
+    assert(mem_service_get(svc, ids[1], &rec) == AIRY_ERR_NOT_FOUND);
+    for (int i = 0; i < 3; i += 2) {
+        assert(mem_service_get(svc, ids[i], &rec) == AIRY_SUCCESS);
+        assert(rec.len == strlen(texts[i]));
+        assert(strncmp((const char *)rec.data, texts[i], rec.len) == 0);
+        mem_record_free(&rec);
+    }
+
+    for (int i = 0; i < 3; i++)
+        AIRY_FREE(ids[i]);
+    mem_service_destroy(svc);
+    mem_test_clean_persist();
+
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
 
@@ -726,6 +782,7 @@ int main(void)
     test_kb_roundtrip();
     test_kb_utf8_chunking();
     test_persist_utf8_repair();
+    test_reload_after_rewrite();
     printf("=== All tests PASSED ===\n");
     return 0;
 }
