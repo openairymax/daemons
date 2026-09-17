@@ -30,8 +30,6 @@
 
 #include "airy_dirent.h"
 
-#if AIRY_PLATFORM_POSIX
-
 /* invoke read-response timeout (seconds). Default 300s (5 min) covers real LLM
  * calls; overridable via AIRY_AGENT_INVOKE_TIMEOUT_S. */
 #define AGENT_INVOKE_TIMEOUT_S 300
@@ -41,6 +39,9 @@
  * AIRY_AGENT_SPAWN_TIMEOUT_S. */
 #define AGENT_SPAWN_READY_TIMEOUT_S 15
 
+/* Budget parsers are platform-neutral (getenv/strtol only): the platform-
+ * neutral invoke entry points reference them on every platform, so they must
+ * not live inside the POSIX-only section (0.1.17: MSVC LNK2001). */
 int agent_invoke_timeout_s(void)
 {
     const char *env = getenv("AIRY_AGENT_INVOKE_TIMEOUT_S");
@@ -62,6 +63,8 @@ int agent_spawn_ready_timeout_s(void)
     }
     return AGENT_SPAWN_READY_TIMEOUT_S;
 }
+
+#if AIRY_PLATFORM_POSIX
 
 /* Write all bytes to fd (handles EINTR and short writes).
  * Returns 0 on success, -1 on failure (including EPIPE — child exited). */

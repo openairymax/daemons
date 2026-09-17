@@ -31,10 +31,13 @@ uint64_t agent_perf_now_us(void);
 void agent_lock_svc(agent_service_t *svc);
 void agent_perf_accumulate(atomic_ullong *us_total, atomic_ullong *us_max, uint64_t elapsed_us);
 
-#if AIRY_PLATFORM_POSIX
-/* Child process communication (service_child.c) */
+/* Invoke/spawn budget parsers (service_child.c): platform-neutral so the
+ * platform-neutral invoke entry points can link them on every platform. */
 int agent_invoke_timeout_s(void);
 int agent_spawn_ready_timeout_s(void);
+
+#if AIRY_PLATFORM_POSIX
+/* Child process communication (service_child.c) */
 int agent_write_all(int fd, const char *buf, size_t len);
 int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeout_s);
 int agent_read_line_timeout_ex(int fd, char *buf, size_t buf_size, int timeout_s,

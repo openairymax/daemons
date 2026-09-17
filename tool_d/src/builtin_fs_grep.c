@@ -112,15 +112,18 @@ static int builtin_grep_dir(const char *base, const char *root, regex_t *re,
             continue;
         char full[AIRY_PATH_MAX];
         snprintf(full, sizeof(full), "%s/%s", base, nm);
-        if (ent->d_type == DT_DIR) {
+        /* Classify via stat only: portable (MSVC dirent has no d_type) and
+         * also covers DT_UNKNOWN mounts; the same syscall applies the
+         * per-file size cap. */
+        struct stat st;
+        if (stat(full, &st) != 0)
+            continue;
+        if (S_ISDIR(st.st_mode)) {
             builtin_grep_dir(full, root, re, glob_filter, max_results, out, out_cap, out_len, count,
                              done, timed_out, deadline, depth + 1);
             continue;
         }
-        /* Regular file check via stat: also covers DT_UNKNOWN mounts and
-         * applies the per-file size cap in one syscall. */
-        struct stat st;
-        if (stat(full, &st) != 0 || !S_ISREG(st.st_mode))
+        if (!S_ISREG(st.st_mode))
             continue;
         if (st.st_size > BUILTIN_SCAN_MAX_FILE_BYTES)
             continue;
