@@ -15,6 +15,7 @@
 #include "sched_service_internal.h"
 #include "airy_memory.h"
 #include "error.h"
+#include "agent_vocab.h"
 
 #include <string.h>
 #include <cjson/cJSON.h>
@@ -25,8 +26,8 @@ static void sched_dag_parse_node_fields(sched_dag_node_t *node, cJSON *nj, int *
     node->goal =
         AIRY_STRDUP(cJSON_IsString(goal) && goal->valuestring ? goal->valuestring : "");
     cJSON *role = cJSON_GetObjectItem(nj, "role");
-    node->role =
-        AIRY_STRDUP(cJSON_IsString(role) && role->valuestring ? role->valuestring : "coding");
+    node->role = AIRY_STRDUP(cJSON_IsString(role) && role->valuestring ? role->valuestring
+                                                                       : AGENT_VOCAB_FALLBACK);
 
     cJSON *mretry = cJSON_GetObjectItem(nj, "max_retries");
     if (cJSON_IsNumber(mretry) && mretry->valuedouble > 0) {
