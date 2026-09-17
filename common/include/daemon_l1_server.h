@@ -108,14 +108,16 @@ const char *daemon_l1_server_channel_name(const daemon_l1_server_t *svc);
  *
  * Three-level resolution aligned with the gateway sock resolution
  * (gw_resolve_daemon_sock): per-namespace override first, then the global
- * switch, then the default. The enabled value is "corekern"; the default
- * (nothing set) and the value "jsonrpc" keep the L1 mount off, preserving
- * the pre-mount behavior bit-for-bit. Any other value logs a warning and
- * resolves to off (fail-closed).
+ * switch, then the default. Since WS-8 stage 3 the default (nothing set)
+ * is "corekern" (stage 3 default flip); the value "jsonrpc" is the operator
+ * escape hatch that keeps the L1 mount off, restoring the pre-stage-3
+ * behavior bit-for-bit. Any other value logs a warning and resolves to off
+ * (fail-closed).
  *
  * @param ns_upper [in] namespace segment in upper case, e.g. "SCHED"
  *                     resolves AIRY_SCHED_IPC_TRANSPORT
- * @return true only when the switch resolves to "corekern"
+ * @return false only when the switch resolves to "jsonrpc" or an unknown
+ *         value
  */
 bool daemon_l1_transport_enabled(const char *ns_upper);
 
@@ -379,9 +381,10 @@ int daemon_l2_ctrl_send(const char *channel, uint32_t opcode, uint32_t arg);
  *
  * Maps the basename "<ns>.sock" to the channel name "<ns>.rpc" that
  * DAEMON_L2_ENABLE mounts. The derivation is gated on the transport
- * switch: when the ns resolves to off (the default), no bridge listens on
- * the channel and the caller must stay on the socket path, so this fails
- * with AIRY_ERR_NOT_FOUND instead of returning a dead channel name.
+ * switch: when the ns resolves to off (the "jsonrpc" escape hatch or an
+ * unknown value), no bridge listens on the channel and the caller must
+ * stay on the socket path, so this fails with AIRY_ERR_NOT_FOUND instead
+ * of returning a dead channel name.
  *
  * @param socket_path  [in] daemon socket path; the basename (after the
  *                          last '/' or '\\') must end in ".sock"
