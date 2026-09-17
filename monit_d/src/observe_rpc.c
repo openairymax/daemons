@@ -174,14 +174,14 @@ static void obs_start_http(void)
 
 static void obs_stop_http(void)
 {
-    atomic_store_explicit(&g_obs_http_running, 0, memory_order_relaxed);
-    if (g_obs_http_fd != AIRY_INVALID_SOCKET) {
-        airy_sock_close(g_obs_http_fd);
-        g_obs_http_fd = AIRY_INVALID_SOCKET;
-    }
+    atomic_store_explicit(&g_obs_http_running, 0, memory_order_release);
     if (g_obs_http_started) {
         airy_thread_join(g_obs_http_thread, NULL);
         g_obs_http_started = 0;
+    }
+    if (g_obs_http_fd != AIRY_INVALID_SOCKET) {
+        airy_sock_close(g_obs_http_fd);
+        g_obs_http_fd = AIRY_INVALID_SOCKET;
     }
 }
 #else
