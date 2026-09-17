@@ -106,6 +106,8 @@ AIRY_API void sd_dump_stats(service_discovery_t sd_handle)
         }
     }
 
+    bool running = sd->running;
+
     airy_mtx_unlock(&sd->mutex);
 
     SD_LOG_INFO("SD-STATS services=%u instances=%u (%u healthy) "
@@ -117,5 +119,5 @@ AIRY_API void sd_dump_stats(service_discovery_t sd_handle)
                 (unsigned long long)stats.registrations, (unsigned long long)stats.deregistrations,
                 (unsigned long long)stats.discoveries, (unsigned long long)stats.heartbeats,
                 (unsigned long long)stats.expirations, (unsigned long long)stats.lb_selections,
-                sd->running ? "yes" : "no");
+                running ? "yes" : "no");
 }
