@@ -40,6 +40,7 @@ extern "C" {
 typedef struct {
     jwt_config_t config;
     airy_mtx_t lock;
+    int lock_ready;
     int initialized;
     char subject_buf[MAX_SUBJECT_SIZE];
     char role_buf[MAX_ROLE_SIZE];
