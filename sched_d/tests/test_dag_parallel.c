@@ -25,7 +25,7 @@ int test_dag_parallel_delegation(void)
         printf("  FAILED: parallel service create\n");
         return 1;
     }
-    g_exec_count = 0;
+    exec_log_reset();
     g_concurrent_now = 0;
     g_concurrent_max = 0;
     g_fail_goal = NULL;
@@ -102,7 +102,7 @@ int test_dag_upstream_inject_par(void)
         printf("  FAILED: parallel service create\n");
         return 1;
     }
-    g_exec_count = 0;
+    exec_log_reset();
     g_concurrent_now = 0;
     g_concurrent_max = 0;
     g_fail_goal = NULL;
