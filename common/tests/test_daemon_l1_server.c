@@ -51,15 +51,16 @@ static int g_tests_failed = 0;
 
 /* ---- transport 开关解析 ---- */
 
-static void test_transport_default_off(void)
+static void test_transport_default_on(void)
 {
-    TEST_BEGIN("test_transport_default_off");
+    TEST_BEGIN("test_transport_default_on");
 
     unsetenv("AIRY_IPC_TRANSPORT");
     unsetenv("AIRY_SCHED_IPC_TRANSPORT");
 
-    TEST_ASSERT(!daemon_l1_transport_enabled("SCHED"), "no env -> off");
-    TEST_ASSERT(!daemon_l1_transport_enabled(NULL), "no env, ns=NULL -> off");
+    /* WS-8 stage 3: 默认 corekern（机制默认开启） */
+    TEST_ASSERT(daemon_l1_transport_enabled("SCHED"), "no env -> on (stage 3 default)");
+    TEST_ASSERT(daemon_l1_transport_enabled(NULL), "no env, ns=NULL -> on (stage 3 default)");
 
     TEST_END();
 }
@@ -74,7 +75,8 @@ static void test_transport_global_switch(void)
     TEST_ASSERT(daemon_l1_transport_enabled(NULL), "global corekern, ns=NULL -> on");
 
     setenv("AIRY_IPC_TRANSPORT", "jsonrpc", 1);
-    TEST_ASSERT(!daemon_l1_transport_enabled("SCHED"), "global jsonrpc -> off");
+    TEST_ASSERT(!daemon_l1_transport_enabled("SCHED"),
+                "global jsonrpc -> off (operator escape hatch)");
 
     setenv("AIRY_IPC_TRANSPORT", "bogus", 1);
     TEST_ASSERT(!daemon_l1_transport_enabled("SCHED"), "unknown value -> fail-closed off");
@@ -271,7 +273,7 @@ int main(void)
     printf("  daemon_l1_server unit tests (8.3.1)\n");
     printf("========================================\n");
 
-    test_transport_default_off();
+    test_transport_default_on();
     test_transport_global_switch();
     test_transport_ns_override();
     test_start_param_validation();
