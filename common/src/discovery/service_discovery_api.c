@@ -23,6 +23,8 @@ AIRY_API airy_err_t sd_register(service_discovery_t sd_handle, const char *servi
     airy_mtx_lock(&sd->mutex);
     airy_err_t err =
         sd->backend->register_service(sd, service_name, service_type, instance, tags, dependencies);
+    uint32_t total_svcs = sd->service_count;
+    uint32_t total_insts = sd->stats.active_instances;
     airy_mtx_unlock(&sd->mutex);
 
     if (err != AIRY_SUCCESS) {
@@ -35,8 +37,8 @@ AIRY_API airy_err_t sd_register(service_discovery_t sd_handle, const char *servi
 
     SD_LOG_INFO("REGISTER service='%s' instance='%s' type='%s' "
                 "endpoint='%s' (total_svcs=%u total_insts=%u)",
-                service_name, instance->instance_id, service_type, instance->endpoint,
-                sd->service_count, sd->stats.active_instances);
+                service_name, instance->instance_id, service_type, instance->endpoint, total_svcs,
+                total_insts);
     return AIRY_SUCCESS;
 }
 
@@ -59,6 +61,8 @@ AIRY_API airy_err_t sd_deregister(service_discovery_t sd_handle, const char *ser
             removed = sd->services[svc_idx].instances[inst_idx];
     }
     airy_err_t err = sd->backend->deregister_service(sd, service_name, instance_id);
+    uint32_t total_svcs = sd->service_count;
+    uint32_t total_insts = sd->stats.active_instances;
     airy_mtx_unlock(&sd->mutex);
 
     if (err != AIRY_SUCCESS)
@@ -68,7 +72,7 @@ AIRY_API airy_err_t sd_deregister(service_discovery_t sd_handle, const char *ser
 
     SD_LOG_INFO("DEREGISTER service='%s' instance='%s' "
                 "(total_svcs=%u total_insts=%u)",
-                service_name, instance_id, sd->service_count, sd->stats.active_instances);
+                service_name, instance_id, total_svcs, total_insts);
     return AIRY_SUCCESS;
 }
 
@@ -326,12 +330,14 @@ AIRY_API airy_err_t sd_update_health(service_discovery_t sd_handle, const char *
     entry->instances[inst_idx].last_heartbeat = airy_time_ms();
     entry->last_updated = airy_time_ms();
 
+    sd_instance_t snapshot = entry->instances[inst_idx];
+
     sd->backend->commit(sd, service_name);
     airy_mtx_unlock(&sd->mutex);
 
     if (was_healthy != healthy) {
         sd_event_type_t event = healthy ? SD_EVENT_INSTANCE_UP : SD_EVENT_INSTANCE_DOWN;
-        notify_event(sd, event, service_name, &entry->instances[inst_idx]);
+        notify_event(sd, event, service_name, &snapshot);
 
         if (!healthy) {
             SD_LOG_WARN("UNHEALTHY instance='%s' service='%s'", instance_id, service_name);
