@@ -21,6 +21,10 @@ extern "C" {
 typedef struct tool_executor tool_executor_t;
 
 typedef struct {
+    /* Execution-pool worker count. <= 0 means "pool default" (env
+     * AIRY_TOOL_EXEC_WORKERS, else 2); env still overrides a positive value.
+     * The executor itself never serializes tools - concurrency ownership
+     * belongs to the pool. */
     int max_workers;
     int timeout_sec;
     char *workbench_type;
@@ -35,12 +39,37 @@ void tool_executor_destroy(tool_executor_t *exec);
  * @param exec Executor
  * @return Configured timeout (fallback applied at create time, always > 0)
  *
- * Single source for wait-budget derivation (mirrors the per-tool fallback
- * used inside tool_executor_run).
+ * Fallback half of executor_budget_ms() - see that function for the
+ * per-call deadline (per-tool metadata wins over this default).
  *
  * @ownership exec: BORROW
  */
 int executor_timeout_sec(const tool_executor_t *exec);
+
+/**
+ * @brief Effective execution budget in milliseconds for one tool call.
+ * @param exec Executor
+ * @param meta Tool metadata (may be NULL)
+ * @return Budget in ms (always > 0)
+ *
+ * R1-a single source of the deadline: per-tool metadata wins, otherwise the
+ * executor default. Both execution paths inside tool_executor_run (builtin
+ * dispatch and the external execvp path) and the pool's wait budget derive
+ * from this function, so a tool can no longer be given one deadline by the
+ * executor and a different one by its waiter.
+ *
+ * @ownership exec: BORROW; meta: BORROW
+ */
+uint32_t executor_budget_ms(const tool_executor_t *exec, const tool_metadata_t *meta);
+
+/**
+ * @brief Configured execution-pool worker count (raw config value).
+ * @param exec Executor
+ * @return Configured max_workers; <= 0 when unset (caller applies its default)
+ *
+ * @ownership exec: BORROW
+ */
+int executor_max_workers(const tool_executor_t *exec);
 
 /**
  * @brief Execute a tool.
