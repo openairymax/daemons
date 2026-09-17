@@ -165,11 +165,11 @@ static uint64_t wait_budget_ms(const executor_pool_t *p, const tool_metadata_t *
         if (v > 0)
             return (uint64_t)v;
     }
-    int meta_s = (meta->timeout_sec > 0) ? meta->timeout_sec : 0;
-    int glob = executor_timeout_sec(p->exec);
-    /* executor_timeout_sec 自带默认值兜底（恒 >0），无需再判 */
-    int eff = (meta_s > glob) ? meta_s : glob;
-    uint64_t budget = (uint64_t)eff * 1000u + WAIT_SLACK_MS;
+    /* 与执行面同源：executor_budget_ms 是唯一 deadline 所有者。
+     * 此前这里按 max(meta, 默认) 等待而执行面只取默认值，meta 小于默认值时
+     * 进程会活过等待预算——取消永不在工具自然结束前生效。改为同一函数后，
+     * slack 只需覆盖 SIGKILL 后的 drain/reap 窗口。 */
+    uint64_t budget = (uint64_t)executor_budget_ms(p->exec, meta) + WAIT_SLACK_MS;
     /* 交互审批等待发生在 worker 内：预算须覆盖其上限，避免误报取消 */
     if (tool_executor_interactive_enabled(p->exec))
         budget += approval_timeout_ms();
@@ -221,7 +221,11 @@ executor_pool_t *executor_pool_new(tool_executor_t *exec)
     if (!exec)
         return NULL;
 
-    int workers = POOL_WORKER_DEFAULT;
+    /* 来源优先级：env AIRY_TOOL_EXEC_WORKERS > executor 配置 > 内置默认 2。
+     * 配置面此前是死字段（无消费点），此处接线后 service 可用它表达部署偏好。 */
+    int workers = executor_max_workers(exec);
+    if (workers < 1 || workers > POOL_WORKER_MAX)
+        workers = POOL_WORKER_DEFAULT;
     const char *ws = getenv(ENV_EXEC_WORKERS);
     if (ws && ws[0]) {
         long v = strtol(ws, NULL, 10);
@@ -361,8 +365,8 @@ int executor_pool_run(executor_pool_t *p, const tool_metadata_t *meta, const cha
 
     if (canceled) {
         airy_mtx_unlock(&p->lock);
-        SVC_LOG_WARN("executor_pool: '%s' exceeded wait budget (%llu ms) — report canceled, "
-                     "job detached",
+        SVC_LOG_WARN("executor_pool: '%s' still running after budget %llu ms — reporting canceled, "
+                     "job detached (tool did not honor its deadline)",
                      meta->id ? meta->id : "?", (unsigned long long)budget);
         *out_result = synth_cancel_result();
         return AIRY_ERR_CANCELED;
