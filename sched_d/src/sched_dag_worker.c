@@ -20,6 +20,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "svc_logger.h"
+#include "agent_vocab.h"
 #include "thread_pool.h"
 #include "multi_agent_collaboration.h"
 
@@ -55,8 +56,8 @@ static void sched_dag_batch_worker(void *arg)
 
     const char *goal = item->input ? item->input : sched_dag_agent_input(item->dag, node);
     char *output = NULL;
-    int dret = svc->executor ? svc->executor(item->agent_id ? item->agent_id : "coding", goal,
-                                             item->dag->workspace_dir, &output) :
+    const char *exec_role = item->agent_id ? item->agent_id : AGENT_VOCAB_FALLBACK;
+    int dret = svc->executor ? svc->executor(exec_role, goal, item->dag->workspace_dir, &output) :
                                AIRY_ERR_SVC_NOT_READY;
 
     if (svc->mac && node->id) {
@@ -164,7 +165,8 @@ void *sched_dag_worker_thread(void *arg)
                                       (char *)sched_dag_agent_input(batch_dags[i], batch[i]);
                 SVC_LOG_INFO("sched: DAG node dispatch (parallel): %s/%s role=%s deps=%zu",
                              batch_dags[i]->dag_id, batch[i]->id,
-                             batch[i]->role ? batch[i]->role : "coding", batch[i]->dep_count);
+                             batch[i]->role ? batch[i]->role : AGENT_VOCAB_FALLBACK,
+                             batch[i]->dep_count);
             }
             int dret = mac_framework_delegate_batch(svc->mac, NULL, tasks, batch_n, assigned);
             if (dret != 0)
@@ -237,7 +239,7 @@ void *sched_dag_worker_thread(void *arg)
         node->status = SCHED_DAG_NODE_RUNNING;
         node->started_at_ms = sched_now_ms();
 
-        const char *role = node->role ? node->role : "coding";
+        const char *role = node->role ? node->role : AGENT_VOCAB_FALLBACK;
         /* Composed under the lock (see the parallel path above); owned here
          * and released once the executor returns. */
         char *goal_buf = sched_dag_node_input(dag, node, SCHED_DAG_UPSTREAM_BUDGET);
