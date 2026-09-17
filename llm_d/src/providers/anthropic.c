@@ -188,6 +188,10 @@ static int anthropic_parse_response(const char *body, llm_response_t **out)
         resp->total_tokens = resp->prompt_tokens + resp->completion_tokens;
     }
 
+    cJSON *stop = cJSON_GetObjectItem(root, "stop_reason");
+    resp->finish_reason =
+        AIRY_STRDUP(llm_finish_reason_norm(cJSON_IsString(stop) ? stop->valuestring : NULL));
+
     *out = resp;
     return AIRY_OK;
 }
@@ -404,7 +408,7 @@ static int ant_feed_sse_event(ant_sse_ctx_t *s, const char *event, const char *d
             cJSON *fr = cJSON_GetObjectItem(delta, "stop_reason");
             if (cJSON_IsString(fr) && fr->valuestring) {
                 AIRY_FREE(acc->finish_reason);
-                acc->finish_reason = AIRY_STRDUP(fr->valuestring);
+                acc->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(fr->valuestring));
             }
         }
         cJSON *usage = cJSON_GetObjectItem(root, "usage");
@@ -521,7 +525,7 @@ static llm_response_t *ant_build_stream_response(ant_stream_acc_t *acc)
     } else {
         r->choice_count = 0;
     }
-    r->finish_reason = acc->finish_reason ? acc->finish_reason : AIRY_STRDUP("end_turn");
+    r->finish_reason = acc->finish_reason ? acc->finish_reason : AIRY_STRDUP(LLM_FINISH_STOP);
     acc->finish_reason = NULL;
     return r;
 }

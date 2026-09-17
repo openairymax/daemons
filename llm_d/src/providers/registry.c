@@ -71,8 +71,18 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
+    /* Compacting writer: the array is NUL-terminated by its trailing calloc'd
+     * slot, so every skipped entry (nameless / init failure / OOM) must NOT
+     * leave a hole. A hole would terminate the `p->name` walks in find /
+     * enumerate / destroy, silently hiding the providers behind it and
+     * leaking their ctx and model strings. */
+    size_t valid = 0;
     for (size_t i = 0; i < count; ++i) {
-        const provider_config_t *pcfg = (const provider_config_t *)&cfg->providers[i];
+        const provider_config_t *pcfg = &cfg->providers[i];
+        if (!pcfg->name || !pcfg->name[0]) {
+            SVC_LOG_WARN("Provider entry #%zu has no name, skipping", i);
+            continue;
+        }
         const provider_ops_t *ops = get_ops_by_name(pcfg->name);
         if (!ops) {
             SVC_LOG_WARN("Unknown provider: %s, skipping", pcfg->name);
@@ -87,6 +97,7 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
         }
 
         char **models = NULL;
+        int *caps = NULL;
         size_t model_cnt = 0;
         if (pcfg->models) {
             while (pcfg->models[model_cnt])
@@ -106,21 +117,31 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
                 }
             }
         }
+        if (models && pcfg->model_max_output && model_cnt > 0) {
+            caps = AIRY_CALLOC(model_cnt + 1, sizeof(*caps));
+            if (caps) {
+                for (size_t j = 0; j < model_cnt; ++j)
+                    caps[j] = pcfg->model_max_output[j];
+            }
+        }
 
-        reg->providers[i].name = AIRY_STRDUP(pcfg->name);
-        if (!reg->providers[i].name) {
+        reg->providers[valid].name = AIRY_STRDUP(pcfg->name);
+        if (!reg->providers[valid].name) {
             SVC_LOG_ERROR("Failed to duplicate provider name: out of memory");
             if (models) {
                 for (size_t j = 0; models[j]; ++j)
                     AIRY_FREE(models[j]);
                 AIRY_FREE(models);
             }
+            AIRY_FREE(caps);
             ops->destroy(ctx);
             continue;
         }
-        reg->providers[i].ops = ops;
-        reg->providers[i].ctx = ctx;
-        reg->providers[i].models = models;
+        reg->providers[valid].ops = ops;
+        reg->providers[valid].ctx = ctx;
+        reg->providers[valid].models = models;
+        reg->providers[valid].model_max_output = caps;
+        valid++;
     }
 
     return reg;
@@ -313,6 +334,7 @@ void provider_registry_destroy(provider_registry_t *reg)
                     AIRY_FREE(*m);
                 AIRY_FREE(p->models);
             }
+            AIRY_FREE(p->model_max_output);
         }
         AIRY_FREE(reg->providers);
         reg->providers = NULL;
@@ -344,6 +366,17 @@ const provider_t *provider_registry_find(provider_registry_t *reg, const char *m
     }
     airy_mtx_unlock(&reg->lock);
     AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
+}
+
+int provider_registry_model_max_output(const provider_t *prov, const char *model)
+{
+    if (!prov || !model || !prov->models || !prov->model_max_output)
+        return 0;
+    for (size_t i = 0; prov->models[i]; ++i) {
+        if (strcmp(prov->models[i], model) == 0)
+            return prov->model_max_output[i];
+    }
+    return 0;
 }
 
 int provider_registry_enumerate(provider_registry_t *reg,
