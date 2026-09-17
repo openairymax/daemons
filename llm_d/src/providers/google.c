@@ -189,18 +189,8 @@ static int google_parse_response(const char *body, llm_response_t **out)
         }
 
         cJSON *finish = cJSON_GetObjectItem(first, "finishReason");
-        if (cJSON_IsString(finish) && finish->valuestring) {
-            const char *fr = finish->valuestring;
-            if (strcmp(fr, "STOP") == 0) {
-                resp->finish_reason = AIRY_STRDUP("stop");
-            } else if (strcmp(fr, "MAX_TOKENS") == 0) {
-                resp->finish_reason = AIRY_STRDUP("length");
-            } else if (strcmp(fr, "SAFETY") == 0) {
-                resp->finish_reason = AIRY_STRDUP("content_filter");
-            } else {
-                resp->finish_reason = AIRY_STRDUP(fr);
-            }
-        }
+        if (cJSON_IsString(finish) && finish->valuestring)
+            resp->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(finish->valuestring));
     }
 
     cJSON *model = cJSON_GetObjectItem(root, "modelVersion");
@@ -423,14 +413,7 @@ static int gg_feed_sse_data(gg_sse_ctx_t *s, const char *data, size_t data_len)
         cJSON *finish = cJSON_GetObjectItem(first, "finishReason");
         if (cJSON_IsString(finish) && finish->valuestring) {
             AIRY_FREE(acc->finish_reason);
-            const char *fr = finish->valuestring;
-            if (strcmp(fr, "STOP") == 0) {
-                acc->finish_reason = AIRY_STRDUP("stop");
-            } else if (strcmp(fr, "MAX_TOKENS") == 0) {
-                acc->finish_reason = AIRY_STRDUP("length");
-            } else {
-                acc->finish_reason = AIRY_STRDUP(fr);
-            }
+            acc->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(finish->valuestring));
         }
     }
 
@@ -552,7 +535,7 @@ static llm_response_t *gg_build_stream_response(gg_stream_acc_t *acc)
     } else {
         r->choice_count = 0;
     }
-    r->finish_reason = acc->finish_reason ? acc->finish_reason : AIRY_STRDUP("stop");
+    r->finish_reason = acc->finish_reason ? acc->finish_reason : AIRY_STRDUP(LLM_FINISH_STOP);
     acc->finish_reason = NULL;
     return r;
 }

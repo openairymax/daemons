@@ -60,6 +60,9 @@ typedef struct {
     const provider_ops_t *ops;
     provider_ctx_t *ctx;
     char **models;
+    /* 与 models 同下标对齐的每模型输出上限（0 = 未配置）：registry 装配时
+     * 从 provider_config_t 复制，供生成参数解析查询。 */
+    int *model_max_output;
 } provider_t;
 
 
