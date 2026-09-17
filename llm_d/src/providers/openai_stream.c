@@ -268,7 +268,7 @@ static int oai_stream_on_chunk(const char *json_line, void *userdata)
         cJSON *fr = cJSON_GetObjectItem(choice, "finish_reason");
         if (cJSON_IsString(fr) && fr->valuestring && strcmp(fr->valuestring, "null") != 0) {
             AIRY_FREE(acc->finish_reason);
-            acc->finish_reason = AIRY_STRDUP(fr->valuestring);
+            acc->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(fr->valuestring));
         }
     }
 
@@ -336,7 +336,7 @@ static llm_response_t *oai_build_stream_response(oai_stream_acc_t *acc)
         resp->finish_reason = acc->finish_reason;
         acc->finish_reason = NULL;
     } else {
-        resp->finish_reason = AIRY_STRDUP("stop");
+        resp->finish_reason = AIRY_STRDUP(LLM_FINISH_STOP);
     }
 
     resp->prompt_tokens = acc->prompt_tokens;

@@ -197,7 +197,7 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
             }
             cJSON *finish = cJSON_GetObjectItem(choice, "finish_reason");
             if (cJSON_IsString(finish) && finish->valuestring && !resp->finish_reason) {
-                resp->finish_reason = AIRY_STRDUP(finish->valuestring);
+                resp->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(finish->valuestring));
             }
         }
     }
