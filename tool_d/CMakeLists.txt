@@ -55,11 +55,11 @@ set(TOOL_SERVICE_SOURCES
     src/builtin_maths.c
     src/tool_interactive_approval.c
     src/os_sandbox.c
-    # 0.1.9 M4：plugin_d → tool_d 整编——插件 dlopen 引擎随迁
+    # plugin_d → tool_d 整编——插件 dlopen 引擎随迁
     src/plugin_service.c
     src/plugin_discovery.c
     src/plugin_permission.c
-    # ARC-04: 注入 atoms 侧 tool ops 抽象表（服务实现在本库，表存储在 airy_tool_ops）
+    # 注入 atoms 侧 tool ops 抽象表（服务实现在本库，表存储在 airy_tool_ops）
     src/daemon_tool_ops_bootstrap.c
 )
 
@@ -95,11 +95,11 @@ target_include_directories(airy_tool_service PUBLIC
     ${COMMONS_INCLUDE_DIR}/utils/sync
     ${COMMONS_INCLUDE_DIR}/utils/cache
     ${COMMONS_INCLUDE_DIR}/utils/compat
-    # C-L05: Cupolas SafetyGuard 头文件路径
+    # Cupolas SafetyGuard 头文件路径
     ${CMAKE_CURRENT_SOURCE_DIR}/../../cupolas/include
     ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
-    # P3.18 (ACC-DT27): sandbox 公共 API（airy_sandbox.h）和 syscall 号（syscalls.h）
+    # sandbox 公共 API（airy_sandbox.h）和 syscall 号（syscalls.h）
     ${CMAKE_CURRENT_SOURCE_DIR}/../../atoms/syscall/include
 )
 
@@ -109,12 +109,12 @@ target_include_directories(airy_tool_service PRIVATE
 )
 
 # 链接库：svc_common 提供 daemon 公共层，cupolas 提供 SafetyGuard
-# P3.18 (ACC-DT27): airy_syscall 提供 sandbox 公共 API（airy_sandbox_invoke 等）
+# airy_syscall 提供 sandbox 公共 API（airy_sandbox_invoke 等）
 # 依赖链：airy_tool_service → airy_syscall → airy_coreloopthree → airy_core
 # 无循环依赖（coreloopthree 不链接 tool_service，仅 include 头文件）
 target_link_libraries(airy_tool_service PUBLIC svc_common cupolas airy_syscall)
 
-# ARC-04: daemon_tool_ops_bootstrap 注入 atoms 侧 tool ops 抽象表。
+# daemon_tool_ops_bootstrap 注入 atoms 侧 tool ops 抽象表。
 # ops 存储（are_ops_set/get_tool）在独立小库 airy_tool_ops 中，而非
 # airy_tool_service 自身——否则 atoms 侧消费 are_ops_get_tool 时需反向链接
 # airy_tool_service，构成 AIRY-02/IRON-6 违规。PRIVATE 链接保证最终可执行
@@ -148,7 +148,7 @@ target_compile_options(airy_tool_service PRIVATE
 )
 endif()
 
-# C-L05: 启用 Cupolas SafetyGuard V2 API
+# 启用 Cupolas SafetyGuard V2 API
 target_compile_definitions(airy_tool_service PRIVATE AIRY_ENABLE_V2_API=1)
 
 # ==================== Tool daemon 可执行文件 ====================
@@ -158,7 +158,7 @@ add_executable(tool_d
     src/main.c
     src/config.c
     src/utils/tool_helpers.c
-    # 0.1.9 M4：plugin_d → tool_d 整编——插件 RPC 方法面
+    # plugin_d → tool_d 整编——插件 RPC 方法面
     src/plugin_rpc.c
 )
 
@@ -198,7 +198,7 @@ target_include_directories(tool_d PRIVATE
     ${YAML_INCLUDE_DIRS}
 )
 
-# P3.18 (ACC-DT27): airy_tool_service → airy_syscall → airy_coreloopthree
+# airy_tool_service → airy_syscall → airy_coreloopthree
 # 传递依赖。coreloopthree 引用 cognition/llm/checkpoint/hook_d 等符号，
 # 需 whole-archive 强制包含 coreloopthree 全部 .o，且必须在 airy_llm_service
 # 之前链接（GNU ld 按序扫描：coreloopthree 的 llm_service 引用需在后续

@@ -3,7 +3,7 @@
 
 /**
  * @file tool_approval.c
- * @brief C-L05: Cupolas SafetyGuard -> tool_d tool-approval adapter impl.
+ * @brief Cupolas SafetyGuard -> tool_d tool-approval adapter impl.
  */
 
 #include "tool_approval.h"
@@ -23,7 +23,7 @@
 struct tool_approval_ctx {
     tool_approval_config_t config;
     char agent_id[128];
-    /* R1-a (0.1.17): 执行面 worker 池并发后审批检查可多线程同时进入，
+    /* 执行面 worker 池并发后审批检查可多线程同时进入，
      * 统计计数器改为原子量（仅统计用途，relaxed 序即可）。 */
     _Atomic uint64_t total_checks;
     _Atomic uint64_t denied_count;
@@ -58,7 +58,7 @@ tool_approval_ctx_t *tool_approval_create(const tool_approval_config_t *cfg)
     ctx->sanitized_count = 0;
     ctx->bridge = NULL;
 
-    AIRY_LOG_INFO("C-L05: Tool approval context created (safety_guard=%d, audit=%d)",
+    AIRY_LOG_INFO("Tool approval context created (safety_guard=%d, audit=%d)",
                   ctx->config.enable_safety_guard_chain, ctx->config.enable_audit_logging);
     return ctx;
 }
@@ -67,7 +67,7 @@ void tool_approval_destroy(tool_approval_ctx_t *ctx)
 {
     if (!ctx)
         return;
-    AIRY_LOG_INFO("C-L05: Tool approval destroyed (checks=%llu denied=%llu sanitized=%llu)",
+    AIRY_LOG_INFO("Tool approval destroyed (checks=%llu denied=%llu sanitized=%llu)",
                   (unsigned long long)atomic_load_explicit(&ctx->total_checks,
                                                            memory_order_relaxed),
                   (unsigned long long)atomic_load_explicit(&ctx->denied_count,
@@ -83,9 +83,9 @@ void tool_approval_set_safety_guard_bridge(tool_approval_ctx_t *ctx, safety_guar
         return;
     ctx->bridge = bridge;
     if (bridge) {
-        AIRY_LOG_INFO("C-L05: SafetyGuard bridge attached to approval context");
+        AIRY_LOG_INFO("SafetyGuard bridge attached to approval context");
     } else {
-        AIRY_LOG_INFO("C-L05: SafetyGuard bridge detached from approval context");
+        AIRY_LOG_INFO("SafetyGuard bridge detached from approval context");
     }
 }
 
@@ -94,7 +94,7 @@ int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *tool_nam
                                   size_t sanitized_size)
 {
     if (!ctx || !tool_name || !params_json || !sanitized_params || sanitized_size == 0) {
-        return AIRY_ERR_INVALID_PARAM; /* BAN-073 */
+        return AIRY_ERR_INVALID_PARAM;
     }
 
     char sanitized_tool[256];
@@ -104,11 +104,11 @@ int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *tool_nam
     if (ret == 0) {
 
         if (strcmp(params_json, sanitized_params) != 0) {
-            AIRY_LOG_INFO("C-L05: Tool params sanitized for '%s'", tool_name);
+            AIRY_LOG_INFO("Tool params sanitized for '%s'", tool_name);
             atomic_fetch_add_explicit(&ctx->sanitized_count, 1, memory_order_relaxed);
         }
     } else {
-        AIRY_LOG_WARN("C-L05: Tool param sanitization failed for '%s': ret=%d", tool_name, ret);
+        AIRY_LOG_WARN("Tool param sanitization failed for '%s': ret=%d", tool_name, ret);
     }
 
     return ret;
@@ -128,7 +128,7 @@ int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
     return approval_check_as(ctx, subject, meta, params_json, detail);
 }
 
-/* R1-a (0.1.17): 审批主体显式参数化。旧实现通过临时改写共享
+/* 审批主体显式参数化。旧实现通过临时改写共享
  * ctx->config.agent_id 再恢复来支持按主体审批，前提是 tool_d 单线程；
  * 执行面 worker 池并发后该前提失效，会发生审批主体串写（agent A 的
  * 请求以 agent B 的身份通过审批）与数据竞态。改为参数传递后
@@ -157,7 +157,7 @@ static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
 
         if (bridge_ret != 0) {
 
-            AIRY_LOG_WARN("C-L05: SafetyGuard bridge denied '%s' for '%s': %s", tool_name, agent_id,
+            AIRY_LOG_WARN("SafetyGuard bridge denied '%s' for '%s': %s", tool_name, agent_id,
                           bridge_result.denial_reason);
             if (detail) {
                 detail->decision = TOOL_APPROVAL_DENIED;
@@ -196,7 +196,7 @@ static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
                      bridge_result.guards_executed, bridge_result.guard_chain_length, tool_name);
         }
 
-        AIRY_LOG_INFO("C-L05: SafetyGuard bridge approved '%s' "
+        AIRY_LOG_INFO("SafetyGuard bridge approved '%s' "
                       "(%d/%d guards executed)",
                       tool_name, bridge_result.guards_executed, bridge_result.guard_chain_length);
         return 0;
@@ -220,7 +220,7 @@ static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
     }
 
     /* ── Step 2: permission check (Cupolas) ──
-     * P3.17 (ACC-DT18) return-code inversion fix:
+     * Return-code inversion fix:
      * daemon_check_tool_permission returns 0=allowed, non-zero=denied
      * (fail-closed). Legacy code `if (!perm_ret)` entered the deny path when
      * perm_ret==0 (allowed) and let perm_ret<0 (denied) through — the logic
@@ -232,7 +232,7 @@ static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
      * L218. */
     int perm_ret = daemon_check_tool_permission(agent_id, tool_name, "execute");
     if (perm_ret != 0) {
-        AIRY_LOG_WARN("C-L05: Permission denied for agent='%s' tool='%s' (perm_ret=%d)", agent_id,
+        AIRY_LOG_WARN("Permission denied for agent='%s' tool='%s' (perm_ret=%d)", agent_id,
                       tool_name, perm_ret);
         if (detail) {
             detail->permission_check_passed = 0;
@@ -311,7 +311,7 @@ int tool_approval_check_for_agent(tool_approval_ctx_t *ctx, const char *agent_id
         return tool_approval_check(ctx, meta, params_json, detail);
     }
 
-    /* R1-a (0.1.17): 主体经参数直传（见 approval_check_as 注释），
+    /* 主体经参数直传（见 approval_check_as 注释），
      * 不再临时改写共享 ctx->config.agent_id，多 worker 并发安全。 */
     return approval_check_as(ctx, agent_id, meta, params_json, detail);
 }

@@ -38,6 +38,7 @@
 #include <netinet/in.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,9 +55,9 @@ typedef struct {
     int port;
     pthread_t tid;
     pthread_mutex_t lock;
-    volatile int stop;
-    volatile int drop;       /* 1 = 接受后立即关闭连接（模拟瞬时对端故障） */
-    volatile int conn_count; /* 已接受的连接数：用于证明重试真的发生了 */
+    _Atomic int stop;
+    _Atomic int drop;        /* 1 = 接受后立即关闭连接（模拟瞬时对端故障） */
+    _Atomic int conn_count;  /* 已接受的连接数：用于证明重试真的发生了 */
     char status_line[64];
     char content_type[64];
     char *body;
@@ -173,7 +174,7 @@ static void *mock_server_thread(void *arg)
                 break;
             continue; /* EINTR / transient accept error */
         }
-        __atomic_fetch_add(&g_srv.conn_count, 1, __ATOMIC_SEQ_CST);
+        atomic_fetch_add(&g_srv.conn_count, 1);
         if (g_srv.drop) {
             /* 连接已建立但一个字节都不回：curl 报 GOT_NOTHING/RECV_ERROR，
              * 属可重试的瞬时故障（用于 N-3/N-4 重试回归）。 */
@@ -234,9 +235,10 @@ static void mock_server_stop(void)
     if (g_srv.listen_fd >= 0) {
         shutdown(g_srv.listen_fd, SHUT_RDWR);
         close(g_srv.listen_fd);
-        g_srv.listen_fd = -1;
     }
+    /* join 建立同步边沿后再置 -1，避免与 accept(g_srv.listen_fd) 竞态 */
     pthread_join(g_srv.tid, NULL);
+    g_srv.listen_fd = -1;
     pthread_mutex_destroy(&g_srv.lock);
     free(g_srv.body);
     g_srv.body = NULL;
@@ -572,10 +574,10 @@ static void test_nonstream_transient_retried(void)
     llm_request_config_t cfg;
     cfg_init(&cfg, &msg);
 
-    int before = __atomic_load_n(&g_srv.conn_count, __ATOMIC_SEQ_CST);
+    int before = atomic_load(&g_srv.conn_count);
     llm_response_t *resp = NULL;
     int ret = openai_ops.complete(ctx, &cfg, &resp);
-    int attempts = __atomic_load_n(&g_srv.conn_count, __ATOMIC_SEQ_CST) - before;
+    int attempts = atomic_load(&g_srv.conn_count) - before;
     if (resp)
         llm_response_free(resp);
 
@@ -605,11 +607,11 @@ static void test_stream_transient_retried(void)
     llm_request_config_t cfg;
     cfg_init(&cfg, &msg);
 
-    int before = __atomic_load_n(&g_srv.conn_count, __ATOMIC_SEQ_CST);
+    int before = atomic_load(&g_srv.conn_count);
     g_stream_chunk_count = 0;
     llm_response_t *resp = NULL;
     int ret = openai_ops.complete_stream(ctx, &cfg, on_stream_chunk, NULL, &resp);
-    int attempts = __atomic_load_n(&g_srv.conn_count, __ATOMIC_SEQ_CST) - before;
+    int attempts = atomic_load(&g_srv.conn_count) - before;
     if (resp)
         llm_response_free(resp);
 

@@ -434,7 +434,7 @@ static void free_daemon_config(void)
 
 static void destroy_service(void)
 {
-    /* 0.1.9 M4：插件执行域随 tool_d 回收 */
+    /* 插件执行域随 tool_d 回收 */
     plugin_rpc_cleanup();
     if (g_service) {
         tool_service_destroy(g_service);
@@ -479,19 +479,19 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("tool_d");
 
-    /* ARC-04: tool_d whole-archives the atoms coreloopthree engine, whose
-     * adapters dispatch through the IPC/LLM/tool ops tables instead of
-     * linking daemons symbols (ARC-02). Init failure is non-fatal: atoms
-     * callers degrade gracefully (BAN-319). */
+    /* tool_d whole-archives the atoms coreloopthree engine, whose adapters
+     * dispatch through the IPC/LLM/tool ops tables instead of linking
+     * daemons symbols. Init failure is non-fatal: atoms callers degrade
+     * gracefully. */
     daemon_ipc_ops_init("tool_d");
     daemon_llm_ops_init("tool_d");
 
-    /* ARC-04: publish tool_approval_* / tool_service_execute /
-     * tool_result_free to the atoms tool ops table. Init failure is
-     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    /* Publish tool_approval_* / tool_service_execute / tool_result_free
+     * to the atoms tool ops table. Init failure is non-fatal: atoms
+     * callers degrade gracefully. */
     daemon_tool_ops_init("tool_d");
 
-    /* 0.1.9 M4：plugin_d → tool_d 整编——插件执行域（dlopen）随迁，
+    /* plugin_d → tool_d 整编——插件执行域（dlopen）随迁，
      * 权限/发现/扫描加载在 tool_d 进程内初始化。 */
     plugin_rpc_init();
 
@@ -574,7 +574,7 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_tool_d, "approve", on_approve_method, NULL);
     SVC_LOG_INFO("Registered %d RPC methods (tool.* namespace)", 11);
 
-    /* 0.1.9 M4：plugin_d → tool_d 整编——plugin_* 方法（dlopen 执行域）
+    /* plugin_d → tool_d 整编——plugin_* 方法（dlopen 执行域）
      * 登记到 tool 命名空间（gateway plugin.* cap 改路由到此）。 */
     plugin_rpc_register(g_dispatcher_tool_d);
 

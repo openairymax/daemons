@@ -252,7 +252,7 @@ static void *notify_d_event_loop(void *arg)
         } else {
             /* SSE 保活心跳：空闲期按 NOTIFY_D_SSE_PING_INTERVAL 周期发
              * 注释帧，防 SSE 客户端（gateway PEP epoch watch）空闲超时
-             * 断线重连（v0.1.12 实机 60s 节律断线 203 次的根因）。 */
+             * 断线重连（实机 60s 节律断线 203 次的根因）。 */
             uint64_t now = (uint64_t)time(NULL);
             if (now - svc->last_sse_ping >= NOTIFY_D_SSE_PING_INTERVAL) {
                 svc->last_sse_ping = now;
@@ -646,9 +646,9 @@ int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
 
     daemon_cupolas_init_pep("notify_d");
 
-    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
-     * dispatch without linking daemons symbols (ARC-02). Init failure is
-     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    /* Publish the IPC/RPC/SD ops table to atoms call sites so they dispatch
+     * without linking daemons symbols. Init failure is non-fatal: atoms
+     * callers degrade gracefully. */
     daemon_ipc_ops_init("notify_d");
 
     if (notify_d_init(&g_service, NOTIFY_D_DEFAULT_PORT, NOTIFY_D_DEFAULT_SOCKET) != AIRY_SUCCESS)

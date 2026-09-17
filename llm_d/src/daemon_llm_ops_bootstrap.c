@@ -16,12 +16,11 @@
 static int g_llm_ops_initialized = 0;
 
 /*
- * ARC-04: airy_llm_service-backed implementation of the atoms LLM ops
- * table. The atoms layer (cognition engine, orchestrator, language
- * gateway) dispatches through this table without linking against daemons
- * symbols (ARC-02); the daemon layer owns the concrete implementation and
- * injects it here. Cleared on cleanup, after which atoms callers degrade
- * gracefully (BAN-319).
+ * airy_llm_service-backed implementation of the atoms LLM ops table. The
+ * atoms layer (cognition engine, orchestrator, language gateway) dispatches
+ * through this table without linking against daemons symbols; the daemon
+ * layer owns the concrete implementation and injects it here. Cleared on
+ * cleanup, after which atoms callers degrade gracefully.
  *
  * The table storage (are_ops_set/get_llm) lives in the zero-dependency
  * small library airy_llm_ops, not in airy_llm_service itself, so that

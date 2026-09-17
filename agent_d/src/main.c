@@ -189,9 +189,9 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("agent_d");
 
-    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
-     * dispatch without linking daemons symbols (ARC-02). Init failure is
-     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    /* Publish the IPC/RPC/SD ops table to atoms call sites so they
+     * dispatch without linking daemons symbols. Init failure is
+     * non-fatal: atoms callers degrade gracefully. */
     daemon_ipc_ops_init("agent_d");
 
     load_daemon_config(config_path);
@@ -296,7 +296,7 @@ int main(int argc, char **argv)
 #endif
     daemon_event_driver_run(g_event_driver_agent_d);
 
-    /* Graceful drain (incident 0.1.16): the event loop has stopped, but
+    /* Graceful drain: the event loop has stopped, but
      * in-flight agent.invoke workers are still blocked reading their child
      * (up to the invoke timeout). daemon_cleanup_standard destroys the
      * thread pool, whose join would wait that full timeout — the SIGTERM

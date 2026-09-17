@@ -36,8 +36,8 @@
 
 #include "daemon_main.h"
 
-/* ARC-04: inject the atoms-side IPC and LLM ops tables (service impls live
- * in svc_common / airy_llm_service, table storage in the zero-dependency
+/* Inject the atoms-side IPC and LLM ops tables (service impls live in
+ * svc_common / airy_llm_service, table storage in the zero-dependency
  * airy_ipc_ops / airy_llm_ops libraries). */
 #include "daemon_ipc_ops_bootstrap.h"
 #include "daemon_llm_ops_bootstrap.h"
@@ -113,14 +113,14 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("llm_d");
 
-    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
-     * dispatch without linking daemons symbols (ARC-02). Init failure is
-     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    /* Publish the IPC/RPC/SD ops table to atoms call sites so they dispatch
+     * without linking daemons symbols. Init failure is non-fatal: atoms
+     * callers degrade gracefully. */
     daemon_ipc_ops_init("llm_d");
 
-    /* ARC-04: publish llm_service_complete / _complete_stream /
-     * llm_response_free to the atoms LLM ops table. Init failure is
-     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    /* Publish llm_service_complete / _complete_stream / llm_response_free to
+     * the atoms LLM ops table. Init failure is non-fatal: atoms callers
+     * degrade gracefully. */
     daemon_llm_ops_init("llm_d");
 
     load_daemon_config(config_path);
@@ -159,7 +159,7 @@ int main(int argc, char **argv)
     ev_config.thread_pool_max = g_config.max_threads > 0 ? g_config.max_threads : 8;
     ev_config.thread_pool_queue_size = 256;
     ev_config.use_jsonrpc = true;
-    /* 0.1.6h：llm_d complete_stream 是长流（每 chunk 持续写 socket）。
+    /* llm_d complete_stream 是长流（每 chunk 持续写 socket）。
      * 原同步模式在事件循环线程内阻塞流式写：长思考期间其他连接排队、
      * CLI health_check（6s 超时）误报掉线、健康定时器失效——表现为
      * "daemon 总是掉线"。开启并发，把 on_client 提交线程池处理。 */

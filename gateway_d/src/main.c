@@ -509,10 +509,10 @@ int main(int argc, char *argv[])
 
     daemon_cupolas_init_pep("gateway_d");
 
-    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
-     * dispatch without linking daemons symbols (ARC-02). gateway_d links no
+    /* Publish the IPC/RPC/SD ops table to atoms call sites so they
+     * dispatch without linking daemons symbols. gateway_d links no
      * atoms engine target, but the table is process-wide and idempotent;
-     * init failure is non-fatal (BAN-319). */
+     * init failure is non-fatal. */
     daemon_ipc_ops_init("gateway_d");
 
     daemon_heapstore_init("gateway_d");
@@ -536,7 +536,7 @@ int main(int argc, char *argv[])
         goto cleanup_service;
     }
 
-    /* 0.1.9 §5.1 namespace 独占性门禁：cap registry 每个命名空间须登记
+    /* namespace 独占性门禁：cap registry 每个命名空间须登记
      * 独占 daemon、FWD 转发目标与归属一致；冲突 fail-closed 拒启
      * （边界从约定升级为启动期断言）。 */
     if (gw_cap_ns_validate() != 0) {
