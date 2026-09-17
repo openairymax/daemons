@@ -32,6 +32,16 @@ extern "C" {
 #endif
 
 /**
+ * @brief Built-in fallback default model.
+ *
+ * Used when neither the environment override nor the user model.yaml
+ * yields a model name. This is the single definition of that fallback:
+ * orchestration layers (gateway / agent_d runner) carrying their own copy
+ * is what splits the "default model" configuration face.
+ */
+#define SVC_MODEL_DEFAULT_FALLBACK "deepseek-flash"
+
+/**
  * @brief Extract default_model / default_provider from the global section
  *        of model.yaml.
  *
@@ -98,15 +108,29 @@ typedef struct {
     char base_url[512];
     char api_key_env[128];
     char model[128];
+    int max_output_tokens; /* llm.max_output / models[0].max_output; 0 = unset */
 } svc_model_llm_config_t;
+
+/**
+ * @brief Parse a token-count literal as used by model.yaml.
+ *
+ * Accepts the suffixed forms documented for context_window / max_output
+ * (4k / 16k / 128k / 256k / 1M / 2M, case-insensitive) and plain decimal
+ * digits. This is the single parser for those literals: duplicating it at
+ * each call site makes "16k" mean different numbers in different modules.
+ *
+ * @param text Literal (may be NULL)
+ * @return Token count; 0 when text is NULL, empty or not a valid literal
+ */
+int svc_tokens_parse(const char *text);
 
 /**
  * @brief Extract the simplified LLM config from the llm section.
  *
  * Same-origin libyaml state machine: only the api_format / base_url /
- * api_key_env / model keys inside the top-level llm: mapping are
- * considered. If no llm section is found, out keeps the caller's initial
- * value; not an error.
+ * api_key_env / model / max_output keys inside the top-level llm: mapping
+ * are considered. If no llm section is found, out keeps the caller's
+ * initial value; not an error.
  *
  * @param path YAML file path
  * @param out  Output struct (non-NULL; caller should zero it first)
@@ -119,9 +143,9 @@ int svc_model_defaults_llm_from_yaml(const char *path, svc_model_llm_config_t *o
  *        (v2 table format, 2026-08-26).
  *
  * Reads the first item of the top-level models: list (api_format /
- * base_url / api_key_env / model_id). Fallback source for llm_d /
- * gateway_d when the llm section is absent; models[0].model_id is the
- * default model.
+ * base_url / api_key_env / model_id / max_output). Fallback source for
+ * llm_d / gateway_d when the llm section is absent; models[0].model_id is
+ * the default model.
  *
  * @param path YAML file path
  * @param out  Output struct (non-NULL; caller should zero it first)
@@ -129,6 +153,33 @@ int svc_model_defaults_llm_from_yaml(const char *path, svc_model_llm_config_t *o
  *         AIRY_ERR_NOT_FOUND / AIRY_ERR_NOT_SUPPORTED
  */
 int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_t *out);
+
+/**
+ * @brief Resolve the effective default model / provider (single entry).
+ *
+ * Precedence (a later source overrides an earlier one):
+ *   1. base_model / base_provider  caller's own source (e.g. the repo
+ *      model.yaml); NULL or empty means "not supplied"
+ *   2. SVC_MODEL_DEFAULT_FALLBACK  when no base model was supplied
+ *   3. $AIRY_CONFIG_DIR/model.yaml user override: default_model, else
+ *      default_provider / llm.model, else models[0].model_id
+ *   4. AIRY_AGENT_MODEL            environment override, highest
+ *
+ * Every component that needs "the default model" (llm_d, gateway_d and
+ * the agent_d runner) must call this instead of scanning the file on its
+ * own, so that all of them observe the same answer for the same
+ * configuration and the config face keeps a single resolution entry.
+ *
+ * @param base_model    Caller base model (may be NULL)
+ * @param base_provider Caller base provider (may be NULL)
+ * @param out_model     Output buffer (non-NULL)
+ * @param model_sz      out_model buffer size
+ * @param out_provider  Output buffer for the provider (may be NULL to skip)
+ * @param prov_sz       out_provider buffer size
+ * @return 0 on success; AIRY_ERR_INVALID_PARAM when out_model is NULL or model_sz is 0
+ */
+int svc_model_defaults_resolve(const char *base_model, const char *base_provider, char *out_model,
+                               size_t model_sz, char *out_provider, size_t prov_sz);
 
 #ifdef __cplusplus
 }

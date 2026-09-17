@@ -16,7 +16,10 @@
 #include "svc_model_defaults.h"
 
 #include "error.h"
+#include "platform_paths.h"
 
+#include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +41,38 @@
         (dst)[(sz) - 1] = '\0';             \
     } while (0)
 #endif
+
+int svc_tokens_parse(const char *text)
+{
+    if (!text || !text[0])
+        return 0;
+
+    char *end = NULL;
+    long base = strtol(text, &end, 10);
+    if (end == text || base <= 0)
+        return 0;
+
+    long mult = 1;
+    if (*end) {
+        char suffix = (char)toupper((unsigned char)*end);
+        if (suffix == 'K')
+            mult = 1024;
+        else if (suffix == 'M')
+            mult = 1024L * 1024L;
+        else
+            return 0;
+        ++end;
+    }
+    while (*end == ' ' || *end == '\t')
+        ++end;
+    if (*end)
+        return 0;
+
+    long long total = (long long)base * mult;
+    if (total > INT_MAX)
+        return INT_MAX;
+    return (int)total;
+}
 
 int svc_model_defaults_from_yaml(const char *path, char *out_model, size_t model_sz,
                                  char *out_provider, size_t prov_sz)
@@ -148,6 +183,66 @@ int svc_model_defaults_from_yaml(const char *path, char *out_model, size_t model
 #endif
 }
 
+/* 用户覆盖文件的模型/供应方取值：default_model，缺省回退 llm.model，
+ * 再缺省回退 models[0].model_id（与 llm_d 的展开顺序一致）。 */
+static int svc_user_model_cfg(const char *user_path, char *out_model, size_t model_sz,
+                              char *out_provider, size_t prov_sz)
+{
+    char um[128] = {0};
+    char up[64] = {0};
+
+    if (svc_model_defaults_from_yaml(user_path, um, sizeof(um), up, sizeof(up)) != 0 || !um[0]) {
+        svc_model_llm_config_t llm_cfg;
+        __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
+        if (svc_model_defaults_llm_from_yaml(user_path, &llm_cfg) == 0 && llm_cfg.model[0]) {
+            AIRY_STRNCPY_TERM(um, llm_cfg.model, sizeof(um));
+        } else {
+            __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
+            if (svc_model_defaults_models0_from_yaml(user_path, &llm_cfg) == 0 && llm_cfg.model[0])
+                AIRY_STRNCPY_TERM(um, llm_cfg.model, sizeof(um));
+        }
+    }
+
+    if (um[0] && out_model && model_sz > 0)
+        AIRY_STRNCPY_TERM(out_model, um, model_sz);
+    if (up[0] && out_provider && prov_sz > 0)
+        AIRY_STRNCPY_TERM(out_provider, up, prov_sz);
+
+    return (um[0] || up[0]) ? 0 : AIRY_ERR_NOT_FOUND;
+}
+
+int svc_model_defaults_resolve(const char *base_model, const char *base_provider, char *out_model,
+                               size_t model_sz, char *out_provider, size_t prov_sz)
+{
+    if (!out_model || model_sz == 0)
+        return AIRY_ERR_INVALID_PARAM;
+
+    out_model[0] = '\0';
+    if (out_provider && prov_sz > 0)
+        out_provider[0] = '\0';
+
+    if (base_model && base_model[0])
+        AIRY_STRNCPY_TERM(out_model, base_model, model_sz);
+    if (base_provider && base_provider[0] && out_provider && prov_sz > 0)
+        AIRY_STRNCPY_TERM(out_provider, base_provider, prov_sz);
+    if (!out_model[0])
+        AIRY_STRNCPY_TERM(out_model, SVC_MODEL_DEFAULT_FALLBACK, model_sz);
+
+    const char *cfg_dir = airy_config_dir();
+    if (cfg_dir && cfg_dir[0]) {
+        char user_path[1024];
+        int plen = snprintf(user_path, sizeof(user_path), "%s/model.yaml", cfg_dir);
+        if (plen > 0 && plen < (int)sizeof(user_path))
+            svc_user_model_cfg(user_path, out_model, model_sz, out_provider, prov_sz);
+    }
+
+    const char *env_model = getenv("AIRY_AGENT_MODEL");
+    if (env_model && env_model[0])
+        AIRY_STRNCPY_TERM(out_model, env_model, model_sz);
+
+    return 0;
+}
+
 int svc_model_defaults_llm_from_yaml(const char *path, svc_model_llm_config_t *out)
 {
     if (!path || !path[0] || !out)
@@ -209,7 +304,8 @@ int svc_model_defaults_llm_from_yaml(const char *path, svc_model_llm_config_t *o
             } else if (llm_depth == 1) {
                 if (key[0] == '\0') {
                     if (strcmp(val, "api_format") == 0 || strcmp(val, "base_url") == 0 ||
-                        strcmp(val, "api_key_env") == 0 || strcmp(val, "model") == 0) {
+                        strcmp(val, "api_key_env") == 0 || strcmp(val, "model") == 0 ||
+                        strcmp(val, "max_output") == 0) {
                         AIRY_STRNCPY_TERM(key, val, sizeof(key));
                     } else {
                         key[0] = '\0';
@@ -223,6 +319,10 @@ int svc_model_defaults_llm_from_yaml(const char *path, svc_model_llm_config_t *o
                         AIRY_STRNCPY_TERM(out->api_key_env, val, sizeof(out->api_key_env));
                     } else if (strcmp(key, "model") == 0) {
                         AIRY_STRNCPY_TERM(out->model, val, sizeof(out->model));
+                    } else if (strcmp(key, "max_output") == 0) {
+                        int n = svc_tokens_parse(val);
+                        if (n > 0)
+                            out->max_output_tokens = n;
                     }
                     key[0] = '\0';
                 }
@@ -319,6 +419,11 @@ int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_
                         AIRY_STRNCPY_TERM(out->api_key_env, val, sizeof(out->api_key_env));
                     else if (strcmp(key, "model_id") == 0)
                         AIRY_STRNCPY_TERM(out->model, val, sizeof(out->model));
+                    else if (strcmp(key, "max_output") == 0) {
+                        int n = svc_tokens_parse(val);
+                        if (n > 0)
+                            out->max_output_tokens = n;
+                    }
                     have_key = 0;
                 }
             }

@@ -28,7 +28,9 @@
 #define AGENT_RUN_SOCK_BUF AIRY_PATH_MAX
 #define AGENT_RUN_DELTA_MAX 512
 
-/* 构建 llm_d complete 请求（透传 tools 数组与常规生成参数）。 */
+/* 构建 llm_d complete 请求（透传 tools 数组与常规生成参数）。
+ * 不在此处写 max_tokens：输出上限的权威在配置面（model.yaml max_output），
+ * 由 llm_d 的生成参数解析统一裁决；调用方写死一个数值会让该配置永久失效。 */
 static char *run_build_llm_params(const char *model, const cJSON *messages)
 {
     cJSON *params = cJSON_CreateObject();
@@ -39,7 +41,6 @@ static char *run_build_llm_params(const char *model, const cJSON *messages)
     cJSON *tools = cJSON_Parse(AIRY_TOOLS_JSON_SOURCE);
     if (tools)
         cJSON_AddItemToObject(params, "tools", tools);
-    cJSON_AddNumberToObject(params, "max_tokens", 2048);
     cJSON_AddNumberToObject(params, "temperature", 0.7);
     char *params_str = cJSON_PrintUnformatted(params);
     cJSON_Delete(params);
