@@ -310,7 +310,12 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
         req.required_caps |= LLM_CAP_STREAMING;
     }
 
-    req.max_tokens = (manager->max_tokens > 0) ? (uint32_t)manager->max_tokens : 0;
+    /* 成本估算用输出量：调用方未指定时用引擎默认上限，使路由估算与最终
+     * 实际发出的 max_tokens 同源（此前恒为 0，估算与实际脱节）。 */
+    {
+        int est = (manager->max_tokens > 0) ? manager->max_tokens : svc->default_max_output_tokens;
+        req.max_tokens = (est > 0) ? (uint32_t)est : 0;
+    }
     req.max_cost = 0;
     req.max_latency_ms = 0;
     req.strategy = LLM_ROUTE_COST;
@@ -356,6 +361,54 @@ static void cache_store(llm_service_t *svc, const char *key, const char *text, c
     llm_cache_put(svc->cache, key, resp_json);
     mem_cache_save(text, model, resp_json);
     AIRY_FREE(resp_json);
+}
+
+/**
+ * @brief 生成参数唯一解析点：把"用哪个模型、最多生成多少 token"从三处来源
+ *        （调用方显式值 / 注册表中该模型声明的上限 / 引擎默认上限）收敛为
+ *        一次判定，同步与流式两条路径共用，避免各自解析造成口径漂移。
+ *
+ * 显式 max_tokens 是意图，模型上限与引擎默认是边界：意图超过边界按边界截断
+ * （配置写了上限就必须兑现），未声明意图时取边界，边界也未配置则保持未设。
+ */
+void resolve_gen_params(const llm_service_t *svc, const provider_t *prov,
+                        const llm_request_config_t *manager, char *out_model, size_t model_size,
+                        int *out_max_tokens)
+{
+    const char *model = (manager->model && manager->model[0]) ? manager->model : svc->default_model;
+    if (!model || !model[0])
+        model = "";
+
+    int limit = provider_registry_model_max_output(prov, model);
+    if (limit <= 0)
+        limit = svc->default_max_output_tokens;
+
+    int want = manager->max_tokens;
+    int resolved = (limit > 0 && (want <= 0 || want > limit)) ? limit : want;
+    if (resolved < 0)
+        resolved = 0;
+
+    AIRY_STRNCPY_TERM(out_model, model, model_size);
+    *out_max_tokens = resolved;
+
+    if (want > 0 && limit > 0 && want > limit) {
+        SVC_LOG_WARN("C-L02: SVC: max_tokens=%d exceeds the cap (%d) of model=%s — clipped", want,
+                     limit, model);
+    } else if (resolved > 0) {
+        SVC_LOG_INFO("C-L02: SVC: max_tokens=%d resolved for model=%s (explicit=%d, cap=%d)",
+                     resolved, model, want, limit);
+    }
+}
+
+/* 0.1.17：上游因达到输出上限而截断时必须可判读。此前 finish_reason 只被透传，
+ * 引擎不做判定，用户看到"回答莫名中断"却无任何线索。 */
+static void note_truncation(const llm_response_t *resp, const char *model, int max_tokens)
+{
+    if (resp && llm_finish_is_truncated(resp->finish_reason)) {
+        SVC_LOG_WARN("C-L02: SVC: output truncated at max_tokens=%d (model=%s) — raise the model "
+                     "max_output in model.yaml or shorten the request",
+                     max_tokens, model ? model : "?");
+    }
 }
 
 /**
@@ -449,18 +502,26 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
         log_routing_decision(manager->model, complexity, input_len, "user_specified");
     }
 
+    llm_request_config_t eff = *manager;
+    char eff_model[128];
+    int eff_max_tokens = 0;
+    resolve_gen_params(svc, prov, manager, eff_model, sizeof(eff_model), &eff_max_tokens);
+    eff.model = eff_model;
+    eff.max_tokens = eff_max_tokens;
+
     llm_response_t *resp = NULL;
-    int ret = prov->ops->complete(prov->ctx, manager, &resp);
+    int ret = prov->ops->complete(prov->ctx, &eff, &resp);
     if (ret != 0) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL model=%s, error=%d, STACK: llm_service_complete",
-                      manager->model, ret);
+                      eff_model, ret);
         AIRY_FREE(cache_text);
         AIRY_FREE(cache_key);
         cache_key = NULL;
         return ret;
     }
 
-    update_cost_tracking(svc, manager->model, resp);
+    note_truncation(resp, eff_model, eff_max_tokens);
+    update_cost_tracking(svc, eff_model, resp);
     cache_store(svc, cache_key, cache_text, manager->model, resp);
 
     *out_response = resp;
@@ -520,12 +581,20 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
         return AIRY_ERR_NOT_SUPPORTED;
     }
 
-    int ret = prov->ops->complete_stream(prov->ctx, manager, callback, callback_data, out_response);
+    llm_request_config_t eff = *manager;
+    char eff_model[128];
+    int eff_max_tokens = 0;
+    resolve_gen_params(svc, prov, manager, eff_model, sizeof(eff_model), &eff_max_tokens);
+    eff.model = eff_model;
+    eff.max_tokens = eff_max_tokens;
+
+    int ret = prov->ops->complete_stream(prov->ctx, &eff, callback, callback_data, out_response);
 
     if (ret == 0 && out_response && *out_response) {
         llm_response_t *resp = *out_response;
-        cost_tracker_add(svc->cost, manager->model, resp->prompt_tokens, resp->completion_tokens);
-        resp->cost_usd = cost_tracker_estimate(svc->cost, manager->model, resp->prompt_tokens,
+        note_truncation(resp, eff_model, eff_max_tokens);
+        cost_tracker_add(svc->cost, eff_model, resp->prompt_tokens, resp->completion_tokens);
+        resp->cost_usd = cost_tracker_estimate(svc->cost, eff_model, resp->prompt_tokens,
                                                resp->completion_tokens);
     }
 

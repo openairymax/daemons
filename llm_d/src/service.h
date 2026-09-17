@@ -26,6 +26,10 @@ struct llm_service {
     size_t rule_count;
     char default_model[128];
     char default_provider[64]; /* global.default_provider */
+    /* 引擎级输出上限（model.yaml llm.max_output / models[0].max_output 的
+     * token 数，0 = 未配置）。请求未指定 max_tokens 且模型未在 provider
+     * 侧声明上限时的兜底值，使配置面写下的上限真正生效。 */
+    int default_max_output_tokens;
 };
 
 /* 2.1.1.5 修复：计费/用量持久化文件路径（$AIRY_DATA_DIR/agentrt/

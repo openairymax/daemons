@@ -34,6 +34,25 @@ int svc_load_model_config(const char *config_path, provider_config_t **out_provi
 int svc_load_model_config_json(const char *config_path, provider_config_t **out_providers,
                                size_t *out_count);
 
+/* ---- Request-handling domain (service_request.c) ---- */
+
+/**
+ * @brief 生成参数唯一解析点：模型名与输出上限的三方来源收敛。
+ *
+ * 三方来源：调用方显式值（意图）> 注册表中该模型声明的上限（边界）>
+ * 引擎默认上限（兜底）。同步与流式两条路径共用，避免口径漂移。
+ *
+ * @param svc          服务实例（取 default_model / default_max_output_tokens）
+ * @param prov         选定的 provider（取每模型上限，可为 NULL）
+ * @param manager      调用方请求配置
+ * @param out_model    输出模型名缓冲（非 NULL）
+ * @param model_size   out_model 容量
+ * @param out_max_tokens 输出解析后的 max_tokens（0 = 不设，交上游默认）
+ */
+void resolve_gen_params(const llm_service_t *svc, const provider_t *prov,
+                        const llm_request_config_t *manager, char *out_model, size_t model_size,
+                        int *out_max_tokens);
+
 /* ---- Provider-management domain (service_providers.c) ---- */
 
 void free_provider_configs(provider_config_t *providers, size_t count);
@@ -45,7 +64,7 @@ void register_router_endpoints(llm_service_t *svc);
 /* ---- Complexity-evaluation and statistics domain (service_metrics.c) ---- */
 
 /**
- * @brief Complexity assessment levels (BAN-133 coding contract)
+ * @brief Complexity assessment levels
  */
 typedef enum {
     LLM_COMPLEXITY_SIMPLE = 0,
@@ -93,11 +112,11 @@ typedef struct {
     size_t response_size;
     size_t response_capacity;
     char *tools_json;
-    /* P24（0.1.12）：parse_params 失败的具体原因（"messages 缺失/为空数组"、
-     * "model 未配置且无默认模型" 等）。此前 complete/complete_stream 一律
-     * 回 -32602 "Invalid params"，客户端与用户都无法区分失败环节，社区
-     * 反馈（ubuntu airymaxrt v0.1.11 问答直接打印裸 JSON-RPC 错误）只能靠
-     * 猜测定位。填充后随 -32602 错误消息透传，使故障可自助识别。 */
+    /* parse_params 失败的具体原因（"messages 缺失/为空数组"、"model 未配置
+     * 且无默认模型" 等）。此前 complete/complete_stream 一律回 -32602
+     * "Invalid params"，客户端与用户都无法区分失败环节，社区反馈（ubuntu
+     * airymaxrt 问答直接打印裸 JSON-RPC 错误）只能靠猜测定位。填充后随
+     * -32602 错误消息透传，使故障可自助识别。 */
     char fail_reason[160];
 } request_context_t;
 
@@ -168,7 +187,8 @@ typedef struct {
     char mode[8];
     char api_format[16];
     char context_window[16];
-    char max_output[16];
+    /* max_output 的 token 数（由 svc_tokens_parse 在解析点一次性解释）。 */
+    int max_output_tokens;
     int tool_rounds;
     int vision;
     char thinking[8];
@@ -191,6 +211,10 @@ typedef struct {
     int timeout_sec;
     int max_retries;
     char *model_names[64];
+    /* 与 model_names 同下标对齐：该模型的输出上限（model.yaml max_output
+     * 解析后的 token 数，0 = 未配置）。此前该字段止步于 model_entry_t，
+     * 在聚合/导出两处被丢弃，导致"配置了也不生效"。 */
+    int model_max_output[64];
     size_t model_count;
 } provider_agg_t;
 

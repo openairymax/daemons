@@ -174,6 +174,25 @@ llm_service_t *llm_service_create(const char *config_path)
     if (config_path)
         svc_model_defaults_from_yaml(config_path, global_model, sizeof(global_model),
                                      global_provider, sizeof(global_provider));
+
+    /* 生成默认（max_output 等）与默认模型的来源相互独立：即便默认模型由
+     * global 段给出，输出上限仍须从 llm 段（或 models 表首条）读出，否则
+     * 配置面写下的上限没有任何消费者。 */
+    svc_model_llm_config_t llm_cfg;
+    const char *gen_src = NULL;
+    __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
+    if (config_path) {
+        if (svc_model_defaults_llm_from_yaml(config_path, &llm_cfg) == 0 && llm_cfg.model[0]) {
+            gen_src = "llm section";
+        } else {
+            /* v2 表格格式（2026-08-26）：llm 段缺省时回退 models 表首个条目 */
+            __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
+            if (svc_model_defaults_models0_from_yaml(config_path, &llm_cfg) == 0 &&
+                llm_cfg.model[0])
+                gen_src = "models table";
+        }
+    }
+
     {
         char user_path[1024];
         const char *cfg_dir = airy_config_dir();
@@ -190,46 +209,45 @@ llm_service_t *llm_service_create(const char *config_path)
                         AIRY_STRNCPY_TERM(global_model, um, sizeof(global_model));
                     if (up[0])
                         AIRY_STRNCPY_TERM(global_provider, up, sizeof(global_provider));
+
+                    /* 用户覆盖同样 user wins：调低 max_output 须立即生效。 */
+                    svc_model_llm_config_t ucfg;
+                    __builtin_memset(&ucfg, 0, sizeof(ucfg));
+                    int u_ok = (svc_model_defaults_llm_from_yaml(user_path, &ucfg) == 0 &&
+                                ucfg.model[0]);
+                    if (!u_ok) {
+                        __builtin_memset(&ucfg, 0, sizeof(ucfg));
+                        u_ok = (svc_model_defaults_models0_from_yaml(user_path, &ucfg) == 0 &&
+                                ucfg.model[0]);
+                    }
+                    if (u_ok && ucfg.max_output_tokens > 0)
+                        llm_cfg.max_output_tokens = ucfg.max_output_tokens;
                 }
             }
         }
     }
+
     if (global_model[0]) {
         AIRY_STRNCPY_TERM(svc->default_model, global_model, sizeof(svc->default_model));
         SVC_LOG_INFO("C-L02: SVC: default_model=%s (from default_model config)",
                      svc->default_model);
-    } else if (config_path) {
-
-        svc_model_llm_config_t llm_cfg;
-        __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
-        if (svc_model_defaults_llm_from_yaml(config_path, &llm_cfg) == 0 && llm_cfg.model[0]) {
-            AIRY_STRNCPY_TERM(svc->default_model, llm_cfg.model, sizeof(svc->default_model));
-            if (!global_provider[0] && llm_cfg.api_format[0]) {
-                const char *adapter =
-                    (strcasecmp(llm_cfg.api_format, "anthropic") == 0) ? "anthropic" : "openai";
-                AIRY_STRNCPY_TERM(svc->default_provider, adapter, sizeof(svc->default_provider));
-            }
-            SVC_LOG_INFO("C-L02: SVC: default_model=%s (from llm section)", svc->default_model);
-        } else {
-            /* v2 表格格式（2026-08-26）：llm 段缺省时回退 models 表首个条目 */
-            __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
-            if (svc_model_defaults_models0_from_yaml(config_path, &llm_cfg) == 0 &&
-                llm_cfg.model[0]) {
-                AIRY_STRNCPY_TERM(svc->default_model, llm_cfg.model, sizeof(svc->default_model));
-                if (!global_provider[0] && llm_cfg.api_format[0]) {
-                    const char *adapter = (strcasecmp(llm_cfg.api_format, "anthropic") == 0)
-                                              ? "anthropic"
-                                              : "openai";
-                    AIRY_STRNCPY_TERM(svc->default_provider, adapter,
-                                      sizeof(svc->default_provider));
-                }
-                SVC_LOG_INFO("C-L02: SVC: default_model=%s (from models table)",
-                             svc->default_model);
-            }
+    } else if (gen_src) {
+        AIRY_STRNCPY_TERM(svc->default_model, llm_cfg.model, sizeof(svc->default_model));
+        if (!global_provider[0] && llm_cfg.api_format[0]) {
+            const char *adapter =
+                (strcasecmp(llm_cfg.api_format, "anthropic") == 0) ? "anthropic" : "openai";
+            AIRY_STRNCPY_TERM(svc->default_provider, adapter, sizeof(svc->default_provider));
         }
+        SVC_LOG_INFO("C-L02: SVC: default_model=%s (from %s)", svc->default_model, gen_src);
     }
     if (global_provider[0])
         AIRY_STRNCPY_TERM(svc->default_provider, global_provider, sizeof(svc->default_provider));
+
+    if (llm_cfg.max_output_tokens > 0) {
+        svc->default_max_output_tokens = llm_cfg.max_output_tokens;
+        SVC_LOG_INFO("C-L02: SVC: default_max_output_tokens=%d (from model config)",
+                     svc->default_max_output_tokens);
+    }
 
     /* Parse pricing rules (uses cJSON; JSON config only).
      * model.yaml is YAML; feeding YAML content straight to cJSON must fail

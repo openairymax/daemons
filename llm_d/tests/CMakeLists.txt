@@ -63,6 +63,10 @@ set(LLM_TEST_SOURCES
     test_provider_http_dispatch.c
     # P3.16 (ACC-DT17): 路由器集成测试
     test_router_integration.c
+    # C-4 (R3): 生成参数唯一解析点（三方优先级）与模型输出上限查表回归
+    test_gen_params.c
+    # C-4 (D): finish_reason canonical 词汇表归一化与截断判定回归
+    test_finish_reason.c
 )
 
 set(LLM_COMMON_INCLUDES
