@@ -158,8 +158,7 @@ static void svc_yaml_finalize_model(svc_yaml_state_t *st)
             AIRY_STRNCPY_TERM(st->models[st->model_count].context_window, cw,
                               sizeof(st->models[st->model_count].context_window));
         if (mo)
-            AIRY_STRNCPY_TERM(st->models[st->model_count].max_output, mo,
-                              sizeof(st->models[st->model_count].max_output));
+            st->models[st->model_count].max_output_tokens = svc_tokens_parse(mo);
         if (tr)
             st->models[st->model_count].tool_rounds = (int)strtol(tr, NULL, 10);
         if (vi) {
@@ -288,6 +287,7 @@ void svc_yaml_expand_llm(svc_yaml_state_t *st, const char *config_path)
         if (strcasecmp(llm_cfg.api_format, "anthropic") == 0)
             adapter = "anthropic";
         __builtin_memset(&st->models[0], 0, sizeof(st->models[0]));
+        st->models[0].max_output_tokens = llm_cfg.max_output_tokens;
         AIRY_STRNCPY_TERM(st->models[0].name, llm_cfg.model, sizeof(st->models[0].name));
         AIRY_STRNCPY_TERM(st->models[0].provider, adapter, sizeof(st->models[0].provider));
         if (llm_cfg.api_key_env[0])

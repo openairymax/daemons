@@ -29,6 +29,7 @@
 #include "hall_writer.h"
 #include "platform.h"
 #include "svc_logger.h"
+#include "svc_model_defaults.h"
 
 #include <cjson/cJSON.h>
 
@@ -36,7 +37,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define AGENT_RUN_MODEL_DEFAULT "deepseek-flash"
 #define AGENT_RUN_LLM_MAX_RESP 1048576
 #define AGENT_RUN_SOCK_BUF AIRY_PATH_MAX
 
@@ -423,6 +423,13 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
 
     uint64_t seq = 0;
 
+    /* 默认模型经 svc_model_defaults_resolve() 解析（唯一入口）：请求 model >
+     * 用户覆盖 $AIRY_CONFIG_DIR/model.yaml > 内建兜底；AIRY_AGENT_MODEL 最高
+     * 优先。run_start 事件与工具循环共用同一结果（此前事件缺字段而循环用
+     * 硬编码兜底，同一缺省两处语义不同）。 */
+    char mname[128];
+    svc_model_defaults_resolve(model, NULL, mname, sizeof(mname), NULL, 0);
+
     /* run_start 事件（决策链写侧 + run_stream 流式推送） */
     {
         cJSON *evt = cJSON_CreateObject();
@@ -439,13 +446,11 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
             char pbuf[520];
             AIRY_STRNCPY_TERM(pbuf, prompt, sizeof(pbuf));
             cJSON_AddStringToObject(rs, AIRY_RS_K_PROMPT, pbuf);
-            if (model && model[0])
-                cJSON_AddStringToObject(rs, AIRY_RS_K_MODEL, model);
+            cJSON_AddStringToObject(rs, AIRY_RS_K_MODEL, mname);
             agent_run_emit_event(sink, &seq, active->run_id, sess, AIRY_RS_TYPE_RUN_START, rs);
         }
     }
 
-    const char *mname = model && model[0] ? model : AGENT_RUN_MODEL_DEFAULT;
     int gccp_interact_round = 0;
     cJSON *think_result = NULL;
     cJSON *tool_trace = NULL;
