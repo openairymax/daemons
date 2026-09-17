@@ -14,6 +14,7 @@
 #include "error.h"
 #include "multi_agent_collaboration.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,18 +29,20 @@
 
 /* ---- 共享全局测试状态（定义于 test_dag.c，各域文件经此访问） ---- */
 extern char g_exec_log[64][256];
-extern size_t g_exec_count;
+extern _Atomic size_t g_exec_count;
+extern _Atomic size_t g_exec_reserved;
 extern const char *g_fail_goal;
 extern const char *g_fatal_goal;
 extern const char *g_flaky_goal;
 extern const char *g_empty_goal;
-extern int g_flaky_left;
-extern volatile int g_block;
-extern int g_concurrent_now;
-extern int g_concurrent_max;
+extern _Atomic int g_flaky_left;
+extern _Atomic int g_block;
+extern _Atomic int g_concurrent_now;
+extern _Atomic int g_concurrent_max;
 
 /* ---- 共享辅助函数（定义于 test_dag.c） ---- */
 void exec_log_push(const char *role, const char *goal);
+void exec_log_reset(void);
 int fake_executor(const char *agent_id, const char *task_description, const char *workspace_dir,
                   char **out_output);
 sched_service_t *make_service(void);

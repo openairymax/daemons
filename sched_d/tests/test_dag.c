@@ -36,22 +36,31 @@
 
 /* ---- 共享全局测试状态（非 static：各域文件经 test_dag_internal.h 访问） ---- */
 char g_exec_log[64][256];
-size_t g_exec_count;
+_Atomic size_t g_exec_count;
+_Atomic size_t g_exec_reserved;
 const char *g_fail_goal;
 const char *g_fatal_goal;
 const char *g_flaky_goal;
 const char *g_empty_goal;
-int g_flaky_left;
-volatile int g_block;
-int g_concurrent_now;
-int g_concurrent_max;
+_Atomic int g_flaky_left;
+_Atomic int g_block;
+_Atomic int g_concurrent_now;
+_Atomic int g_concurrent_max;
 
 void exec_log_push(const char *role, const char *goal)
 {
-    if (g_exec_count < 64) {
-        snprintf(g_exec_log[g_exec_count], sizeof(g_exec_log[0]), "%s|%s", role, goal);
-        g_exec_count++;
-    }
+    /* 并行 executor 多线程调用：reserved 占位选槽，snprintf 写回完成
+     * 后再递增发布计数——count 达标即全部槽位写回可见（RMW 链传递） */
+    size_t slot = atomic_fetch_add(&g_exec_reserved, 1);
+    if (slot < 64)
+        snprintf(g_exec_log[slot], sizeof(g_exec_log[0]), "%s|%s", role, goal);
+    atomic_fetch_add(&g_exec_count, 1);
+}
+
+void exec_log_reset(void)
+{
+    g_exec_count = 0;
+    g_exec_reserved = 0;
 }
 
 int fake_executor(const char *agent_id, const char *task_description, const char *workspace_dir,

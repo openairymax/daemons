@@ -17,7 +17,7 @@ int test_dag_topological_order(void)
         printf("  FAILED: service create\n");
         return 1;
     }
-    g_exec_count = 0;
+    exec_log_reset();
     g_fail_goal = NULL;
     g_block = 0;
 
@@ -190,7 +190,7 @@ int test_priority_queue_order(void)
     sched_service_register_agent(svc, &agent);
     sched_service_set_executor(svc, fake_executor);
 
-    g_exec_count = 0;
+    exec_log_reset();
     g_fail_goal = NULL;
     g_block = 0;
 
@@ -271,7 +271,7 @@ int test_dag_list(void)
         printf("  FAILED: service create\n");
         return 1;
     }
-    g_exec_count = 0;
+    exec_log_reset();
     g_fail_goal = NULL;
     g_block = 0;
 
@@ -352,7 +352,7 @@ int test_dag_input_fallback(void)
         printf("  FAILED: service create\n");
         return 1;
     }
-    g_exec_count = 0;
+    exec_log_reset();
     g_fail_goal = NULL;
     g_block = 0;
 
@@ -417,7 +417,7 @@ int test_dag_upstream_inject(void)
         printf("  FAILED: service create\n");
         return 1;
     }
-    g_exec_count = 0;
+    exec_log_reset();
     g_fail_goal = NULL;
     g_fatal_goal = NULL;
     g_flaky_goal = NULL;
