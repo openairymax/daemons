@@ -14,7 +14,7 @@
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# 使用根级依赖检测结果 (BAN-12: 单一依赖检测点)
+# 使用根级依赖检测结果（单一依赖检测点）
 # Threads, PkgConfig, OpenSSL, cJSON, libmicrohttpd, libwebsockets
 # 已在根 CMakeLists.txt 中统一查找
 
@@ -65,7 +65,7 @@ option(AIRY_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
 #   gateway_biz_backend.c      MCP/OpenAI/A2A 协议后端
 #   gateway_biz_hall.c         hall.* 任务看板/事件流/决策链（网关内实现）
 #   gateway_biz_svcdispatch.c 微核心服务统一派发钩子（2026-08-25 "必须走 syscall"）
-#   gateway_cap_registry.c    统一能力注册表（0.1.6 P1-4：cap_key 单一权威源）
+#   gateway_cap_registry.c    统一能力注册表（cap_key 单一权威源）
 set(GATEWAY_SRC_BASE ${GATEWAY_DIR})
 include(${GATEWAY_DIR}/cmake/gateway-sources.cmake)
 set(GATEWAY_SERVICE_SOURCES
@@ -341,8 +341,8 @@ add_executable(gateway_d
 # 版本 SSoT：GATEWAY_VERSION 从 agentrt 根 VERSION 文件注入（gateway_internal.h
 # 内 #define 仅作缺省回退）。gateway_lib_obj/airy_gateway_service 与本 daemon
 # 均需注入——独立 gateway 模块的注入（gateway/CMakeLists.txt，PRIVATE）不会
-# 传递到本目录目标，缺失注入时版本回退缺省值，曾导致 0.1.6h 包 gateway_d
-# /health 仍报告 0.1.6c。
+# 传递到本目录目标，缺失注入时版本回退缺省值，曾导致 gateway_d
+# /health 报告的版本与实际包版本不一致。
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../../VERSION" GATEWAY_VERSION_RAW LIMIT_COUNT 1)
 string(STRIP "${GATEWAY_VERSION_RAW}" GATEWAY_VERSION_RAW)
 if(GATEWAY_VERSION_RAW)
@@ -515,7 +515,7 @@ if(BUILD_TESTS)
 endif()
 
 # ==================== M1-1b 链接白名单 ====================
-# "认知引擎只对 think_d 暴露服务面"（0.1.9 §2.2）：gateway 系目标禁链
+# "认知引擎只对 think_d 暴露服务面"：gateway 系目标禁链
 # coreloopthree/cognition。实际链接经 airy_depgraph --links 校验。
 airy_linkgate_collect(airy_gateway_service "${CMAKE_CURRENT_SOURCE_DIR}/../../link-whitelist.txt")
 airy_linkgate_collect(gateway_d "${CMAKE_CURRENT_SOURCE_DIR}/../../link-whitelist.txt")

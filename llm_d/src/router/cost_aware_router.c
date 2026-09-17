@@ -48,7 +48,8 @@ int route_cost_aware(const llm_route_request_t *request, llm_route_result_t *res
     AIRY_LOG_DEBUG("C-L02: CostAware: evaluating %zu eligible endpoints", eligible_count);
 
     size_t input_tokens = router_estimate_tokens(request->prompt, request->prompt_len);
-    size_t output_tokens = request->max_tokens > 0 ? request->max_tokens : 1024;
+    size_t output_tokens =
+        request->max_tokens > 0 ? request->max_tokens : LLM_ROUTE_EST_OUTPUT_TOKENS;
 
     AIRY_LOG_DEBUG("C-L02: CostAware: estimated tokens input=%zu output=%zu "
                    "budget=$%.6f latency_limit=%ums",

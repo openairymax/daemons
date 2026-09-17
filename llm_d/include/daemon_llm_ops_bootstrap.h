@@ -3,9 +3,9 @@
 
 /**
  * @file daemon_llm_ops_bootstrap.h
- * @brief LLM service ops-table bootstrap (ARC-02/ARC-04).
+ * @brief LLM service ops-table bootstrap.
  *
- * ARC-02/ARC-04: atoms code (cognition engine, orchestrator, language
+ * Atoms code (cognition engine, orchestrator, language
  * gateway) must not link against daemons symbols. It dispatches through
  * airy_llm_ops_t instead; the daemon layer installs the concrete
  * implementation (airy_llm_service: completion, streaming completion and
@@ -15,7 +15,7 @@
  *   - daemon_llm_ops_cleanup(): call before main() exits
  *
  * After cleanup the table is detached and atoms call sites degrade
- * gracefully (BAN-319). Init failure is logged but never fatal: a daemon
+ * gracefully. Init failure is logged but never fatal: a daemon
  * without injected LLM ops stays runnable, only the atoms LLM path
  * degrades.
  */

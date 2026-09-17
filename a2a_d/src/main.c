@@ -561,9 +561,9 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("a2a_d");
 
-    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
-     * dispatch without linking daemons symbols (ARC-02). Init failure is
-     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    /* Publish the IPC/RPC/SD ops table to atoms call sites so they dispatch
+     * without linking daemons symbols. Init failure is non-fatal: atoms
+     * callers degrade gracefully. */
     daemon_ipc_ops_init("a2a_d");
 
     load_daemon_config(config_path);

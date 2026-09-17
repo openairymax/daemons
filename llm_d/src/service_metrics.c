@@ -20,7 +20,7 @@
 #include "llm_service_internal.h"
 
 /**
- * @brief Assess complexity from the input text (BAN-133: SIMPLE/MODERATE/COMPLEX)
+ * @brief Assess complexity from the input text (SIMPLE/MODERATE/COMPLEX)
  *
  * Scoring rules:
  *   - input length > 500 chars +2
@@ -83,7 +83,7 @@ llm_complexity_level_t assess_complexity(const char *input)
 }
 
 /**
- * @brief Pick the default model by complexity (BAN-133 coding contract)
+ * @brief Pick the default model by complexity
  */
 static __attribute__((unused)) const char *route_by_complexity(llm_complexity_level_t level)
 {
@@ -100,7 +100,7 @@ static __attribute__((unused)) const char *route_by_complexity(llm_complexity_le
 }
 
 /**
- * @brief Record the routing-decision audit log (BAN-137 coding contract)
+ * @brief Record the routing-decision audit log
  */
 void log_routing_decision(const char *model, llm_complexity_level_t complexity,
                           size_t input_len, const char *reason)

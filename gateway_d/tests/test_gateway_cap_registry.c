@@ -3,7 +3,7 @@
 
 /**
  * @file test_gateway_cap_registry.c
- * @brief 统一能力网关 — 能力注册表单元测试（0.1.6 P1-4）
+ * @brief 统一能力网关 — 能力注册表单元测试
  *
  * 覆盖 SSoT 不变量：
  * - cap_key 唯一性（全表扫描，重复即失败）
@@ -71,7 +71,7 @@ static int g_tests_passed = 0;
     } while (0)
 
 /* cap_key 首段（外部旧命名空间）!= 路由目标 ns → legacy 整编条目
- * （0.1.9 M4：plugin.* → tool、info.* / observe.* → monit）。 */
+ * （plugin.* → tool、info.* / observe.* → monit）。 */
 static int cap_external_ns(const gw_cap_t *ci)
 {
     const char *dot = strchr(ci->cap_key, '.');
@@ -113,7 +113,7 @@ static void test_count_and_uniqueness(void)
         size_t nsl = strlen(ci->ns);
         size_t ml = strlen(ci->method);
         /* cap_key 语义：默认 "<ns>.<method>"（SSoT 不变量）。
-         * legacy 整编条目（0.1.9 M4：plugin.* → tool、info.* / observe.* →
+         * legacy 整编条目（plugin.* → tool、info.* / observe.* →
          * monit）cap_key 保持外部契约不变、路由目标与 wire 方法名单独
          * 登记，不满足重构等式，按 cap_legacy_route 断言路由语义。 */
         if (cap_external_ns(ci)) {
@@ -157,7 +157,7 @@ static void test_key_caps(void)
     ASSERT_TRUE(c && c->kind == GW_CAP_KIND_MEM);
     c = gw_cap_find("mem.kb_search");
     ASSERT_TRUE(c && c->kind == GW_CAP_KIND_MEM);
-    /* W-4（0.1.17）：语义缓存 / 上下文台账 / 提示词压缩三类能力必须可在网关
+    /* 语义缓存 / 上下文台账 / 提示词压缩三类能力必须可在网关
      * 层解析；缺失即 fail-closed（-32601），主链路无处接入。 */
     static const char *const mem_caps[] = {
         "mem.cache_put",      "mem.cache_get",     "mem.cache_del",     "mem.cache_stats",
@@ -178,7 +178,7 @@ static void test_key_caps(void)
     ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD);
     c = gw_cap_find("cupolas.vault_store");
     ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD);
-    /* M2-S3：policy.* 统一 RPC 面（外部 namespace policy → cupolas_d） */
+    /* policy.* 统一 RPC 面（外部 namespace policy → cupolas_d） */
     c = gw_cap_find("policy.load");
     ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD && strcmp(c->ns, "cupolas") == 0);
     c = gw_cap_find("policy.activate");
@@ -272,7 +272,7 @@ static void test_perm_requirements(void)
     ASSERT_TRUE(strcmp(gw_cap_perm_for("plugin.load"), "cap:plugin.admin") == 0);
     ASSERT_TRUE(strcmp(gw_cap_perm_for("mem.delete"), "cap:mem.admin") == 0);
     ASSERT_TRUE(strcmp(gw_cap_perm_for("cupolas.add_rule"), "cap:cupolas.admin") == 0);
-    /* M2-S3：策略演化写操作管理员级，读操作默认放行 */
+    /* 策略演化写操作管理员级，读操作默认放行 */
     ASSERT_TRUE(strcmp(gw_cap_perm_for("policy.load"), "cap:cupolas.admin") == 0);
     ASSERT_TRUE(strcmp(gw_cap_perm_for("policy.activate"), "cap:cupolas.admin") == 0);
     ASSERT_TRUE(strcmp(gw_cap_perm_for("policy.rollback"), "cap:cupolas.admin") == 0);
@@ -281,7 +281,7 @@ static void test_perm_requirements(void)
     ASSERT_TRUE(gw_cap_perm_for("llm.complete") == NULL);
     ASSERT_TRUE(gw_cap_perm_for("think.process") == NULL);
     ASSERT_TRUE(gw_cap_perm_for("mem.write") == NULL);
-    /* 0.1.15 WS-2 T-11b：agent.run 为外部主体可驱动的最高敏执行入口，
+    /* agent.run 为外部主体可驱动的最高敏执行入口，
      * 独立权限 cap:agent.run 门禁；agent.cancel 归既有 cap:agent.control。
      * 旧契约「agent.run 默认放行」已废除——未显式 allow 时 PEP fail-closed。 */
     ASSERT_TRUE(strcmp(gw_cap_perm_for("agent.run"), "cap:agent.run") == 0);
@@ -294,7 +294,7 @@ static void test_perm_requirements(void)
 
 static void test_ns_ownership(void)
 {
-    TEST_BEGIN("namespace exclusive ownership (0.1.9 S5)");
+    TEST_BEGIN("namespace exclusive ownership");
     /* 全表一致性：命名空间均有归属、FWD 转发目标与归属一致 → 0 */
     ASSERT_EQ_INT(gw_cap_ns_validate(), 0);
     /* M4 整编归属：旧命名空间归宿主 daemon 独占 */

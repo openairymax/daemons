@@ -14,7 +14,7 @@
  *   - hook.stats  : query a single Hook's stats by name
  *
  * Data source: the hook_registry in atoms/coreloopthree/src/hook/ (linked
- * via airy_coreloop_hooks, M3 0.1.9 §4.2-2).
+ * via airy_coreloop_hooks).
  * Unix socket path: ${AIRY_RUNTIME_DIR}/hook.sock
  */
 
@@ -70,9 +70,9 @@ typedef struct {
 static hook_session_entry_t g_hook_sessions[AIRY_HOOK_MAX_SESSIONS];
 static airy_mtx_t g_hook_sessions_lock;
 
-/* ARC-02/ARC-04: airy_coreloop_hooks no longer links cupolas. hook_d owns the
- * SafetyGuard implementation and injects it through airy_safety_ops_t, so the
- * interceptor keeps enforcing the guard chain at PRE_TOOL/PRE_EXEC. */
+/* airy_coreloop_hooks no longer links cupolas. hook_d owns the SafetyGuard
+ * implementation and injects it through airy_safety_ops_t, so the interceptor
+ * keeps enforcing the guard chain at PRE_TOOL/PRE_EXEC. */
 static safety_guard_context_t *hook_safety_create(void)
 {
     return safety_guard_create();
@@ -591,9 +591,9 @@ int main(int argc, char *argv[])
 
     daemon_cupolas_init_pep("hook_d");
 
-    /* ARC-04: publish the IPC/RPC/SD ops table to atoms call sites so they
-     * dispatch without linking daemons symbols (ARC-02). Init failure is
-     * non-fatal: atoms callers degrade gracefully (BAN-319). */
+    /* Publish the IPC/RPC/SD ops table to atoms call sites so they dispatch
+     * without linking daemons symbols. Init failure is non-fatal: atoms
+     * callers degrade gracefully. */
     daemon_ipc_ops_init("hook_d");
     are_ops_set_safety(&g_hook_safety_ops);
     g_start_time = (uint64_t)time(NULL);

@@ -3,7 +3,7 @@
 
 /**
  * @file test_gateway_pep_cache.c
- * @brief gateway PEP 裁定缓存单元测试（M2-S5，0.1.9 §3.2）。
+ * @brief gateway PEP 裁定缓存单元测试。
  *
  * 覆盖：
  *   - fail-closed：空参数拒绝
@@ -23,6 +23,7 @@
 
 #include <assert.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,11 +53,11 @@ static int s_fail = 0;
 
 #ifndef _WIN32
 static char g_sock_path[128];
-static volatile int g_conns;      /* 假 PDP 收到的 RPC 次数 */
-static volatile int g_allowed;    /* 假 PDP 裁定：1 allow / 0 deny */
-static volatile uint64_t g_epoch; /* 假 PDP 权威 epoch */
+static _Atomic int g_conns;      /* 假 PDP 收到的 RPC 次数 */
+static _Atomic int g_allowed;    /* 假 PDP 裁定：1 allow / 0 deny */
+static _Atomic uint64_t g_epoch; /* 假 PDP 权威 epoch */
 static pthread_t g_srv;
-static volatile int g_stop;
+static _Atomic int g_stop;
 
 static void *fake_pdp(void *arg)
 {
@@ -156,7 +157,7 @@ static void t_failclosed(void)
 
 static void t_epoch_parse(void)
 {
-    /* M2-S4：订阅帧解析（notify_d 广播 message 内层 JSON 未转义） */
+    /* 订阅帧解析（notify_d 广播 message 内层 JSON 未转义） */
     CHECK(gw_pep_epoch_parse(NULL) == 0);
     CHECK(gw_pep_epoch_parse("") == 0);
     /* 非目标 topic：即使含 epoch 键也不解析 */

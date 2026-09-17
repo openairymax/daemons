@@ -395,10 +395,10 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("think_d");
 
-    /* ARC-04: think_d embeds the atoms cognition/coreloopthree engine, whose
-     * adapters dispatch through the IPC/LLM/tool ops tables instead of
-     * linking daemons symbols (ARC-02). Inject all three here; failures are
-     * non-fatal and atoms call sites degrade gracefully (BAN-319). */
+    /* think_d embeds the atoms cognition/coreloopthree engine, whose adapters
+     * dispatch through the IPC/LLM/tool ops tables instead of linking daemons
+     * symbols. Inject all three here; failures are non-fatal and atoms call
+     * sites degrade gracefully. */
     daemon_ipc_ops_init("think_d");
     daemon_llm_ops_init("think_d");
     daemon_tool_ops_init("think_d");
@@ -455,7 +455,7 @@ int main(int argc, char **argv)
     ev_config.thread_pool_max = 4;
     ev_config.thread_pool_queue_size = 32;
     ev_config.use_jsonrpc = true;
-    /* 0.1.6h：think.process 含 LLM 长思考（数分钟），同步模式会阻塞
+    /* think.process 含 LLM 长思考（数分钟），同步模式会阻塞
      * 事件循环——其他连接排队、CLI health_check 误报掉线。同 llm_d。 */
     ev_config.concurrent_clients = true;
     ev_config.on_client = daemon_on_client_think_d;

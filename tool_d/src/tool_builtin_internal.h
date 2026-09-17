@@ -28,8 +28,7 @@ extern "C" {
 /* Directory-scan guards shared by the recursive fs tools (fs_grep /
  * fs_glob / fs_list). Every scan runs on a monotonic-deadline budget:
  * on expiry the tool returns the partial result plus a truncation mark
- * instead of monopolizing the executor thread (tool_d is single-worker
- * per access class; an unbounded scan stalls the whole tool plane). */
+ * instead of holding a pool worker past its declared budget. */
 #define BUILTIN_SCAN_MAX_DEPTH 48
 #define BUILTIN_SCAN_MAX_FILE_BYTES (4U << 20) /* skip files > 4MB in grep */
 #define BUILTIN_LIST_MAX_ENTRIES 10000
