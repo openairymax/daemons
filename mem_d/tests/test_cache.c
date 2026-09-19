@@ -304,6 +304,12 @@ static void test_stats(void)
     mem_cache_t *c = mem_cache_create(64, 0, 0, 0.85);
     assert(c != NULL);
 
+    /* 无查询样本 → 命中率不可用（负值），不得伪零（§2.1-6） */
+    mem_cache_stats_t fresh;
+    mem_cache_stats(c, &fresh);
+    assert(fresh.hits == 0 && fresh.misses == 0);
+    assert(fresh.hit_rate < 0.0);
+
     const char *q = "statistics query here";
     char *cid = NULL, *key = NULL;
     assert(mem_cache_put(c, q, "resp-st", "gpt-4", 0, &cid, &key) == AIRY_SUCCESS);
@@ -405,6 +411,21 @@ static void test_ttl_overflow_saturate(void)
     printf("    PASSED\n");
 }
 
+/* B5-3 准入判定：敏感面（凭据 / 私有路径 / 密钥前缀）默认拒绝，普通文本放行 */
+static void test_admit_gate(void)
+{
+    printf("  test_admit_gate...\n");
+
+    assert(mem_cache_admit("explain how quicksort works") == 1);
+    assert(mem_cache_admit("api_key=sk-abc123") == 0);
+    assert(mem_cache_admit("please read /home/spharx/.ssh/id_rsa") == 0);
+    assert(mem_cache_admit("token: bearer abcdef") == 0);
+    assert(mem_cache_admit(NULL) == 0);
+    assert(mem_cache_admit("") == 0);
+
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=== Semantic Cache Unit Tests ===\n");
@@ -419,6 +440,7 @@ int main(void)
     test_byte_capacity();
     test_delete();
     test_stats();
+    test_admit_gate();
     printf("=== All cache tests PASSED ===\n");
     return 0;
 }

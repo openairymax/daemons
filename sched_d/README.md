@@ -85,7 +85,7 @@ gateway_d ──(sched.* JSON-RPC)──▶ sched_d
 | `absorb` | 形态 A：`{exec_id?, plan:{…}}` 注册蓝图；形态 B：`{exec_id, node_id, output_json?, result?, verify?, transient?, canceled?, is_user_intent?}` 回灌执行结果 | 形态 A：`{status:"blueprint_registered"}`；形态 B：`{status:"result_absorbed"}` | 蓝图注册 / 执行结果回灌（成功且校验通过的结果写入语义缓存） |
 | `roadmap_cancel` | `{node_id, exec_id?}` | `{status:"cancelled"}` | 取消事件注入：状态机回退 + 缓存失效 |
 | `roadmap_replan` | `{affected_nodes:[…], replan_reason?}` | `{status:"replanned", rerun_nodes:[…]}` | 蓝图修正：受影响节点回退 + 缓存失效，返回需重跑节点 |
-| `roadmap_stats` | `{}` | `{ready, service:"sched_d.roadmap"}` | 蓝图调度实例是否可用 |
+| `roadmap_status` | `{}` | `{ready, service:"sched_d.roadmap"}` | 蓝图调度实例状态（就绪态与服务标识） |
 
 外部调用方使用带命名空间前缀的形式（`sched.schedule_task`），由 `gateway_d` 剥离前缀后转发。
 

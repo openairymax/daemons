@@ -45,7 +45,7 @@ void on_roadmap_plan_method(cJSON *params, int id, void *user_data);
 void on_roadmap_absorb_method(cJSON *params, int id, void *user_data);
 void on_roadmap_cancel_method(cJSON *params, int id, void *user_data);
 void on_roadmap_replan_method(cJSON *params, int id, void *user_data);
-void on_roadmap_stats_method(cJSON *params, int id, void *user_data);
+void on_roadmap_status_method(cJSON *params, int id, void *user_data);
 
 #ifdef __cplusplus
 }

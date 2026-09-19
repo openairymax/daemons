@@ -259,9 +259,12 @@ void handle_ledger_stats(int id, airy_sock_t client_fd)
 
 /* ── mem.compress ────────────────────────────────────────────────────── */
 
-/* 提示词压缩（14-prompt-compression.md §3：L1+L2 默认开）。
+/* 提示词压缩（14-prompt-compression.md §3：L1 默认开；L2 默认关，
+ * 须过 A/B 门禁再灰度）。策略值来自声明面（config "compress" 段 / 环境变量），
+ * 默认 fail-closed。
  * 入参：{session_id, entries:[{entry_id, entry_type, text}]}
- * 返回：{context, saved_tokens, actions:[{entry_id, entry_type, action}], marked}
+ * 返回：{context, saved_tokens, actions:[{entry_id, entry_type, action}], marked,
+ *        gate:{grayscale, acr, ttft_ms, allowed}}
  * 联动：对压缩条目 ledger.mark(COMPRESSED)，追加 compressed 块条目（可回放）。 */
 void handle_compress(cJSON *params, int id, airy_sock_t client_fd)
 {
@@ -297,7 +300,20 @@ void handle_compress(cJSON *params, int id, airy_sock_t client_fd)
     size_t saved = 0;
     compress_plan_item_t *actions = NULL;
     size_t action_count = 0;
-    int ret = mem_compress_plan(g_ledger, session->valuestring, in, (size_t)n, NULL, &ctx, &saved,
+    /* B5：压缩策略从声明面注入（默认 fail-closed） */
+    compress_config_t cfg = {
+        .max_tool_tokens = COMPRESS_DEFAULT_MAX_TOOL_TOKENS,
+        .max_turns = COMPRESS_DEFAULT_MAX_TURNS,
+        .l1_enabled = g_config.compress_l1_enabled,
+        .l2_enabled = g_config.compress_l2_enabled,
+        .dedup = 1,
+        .gate = {
+            .grayscale_enabled = g_config.compress_gate_grayscale,
+            .acr = g_config.compress_gate_acr,
+            .ttft_ms = g_config.compress_gate_ttft_ms,
+        },
+    };
+    int ret = mem_compress_plan(g_ledger, session->valuestring, in, (size_t)n, &cfg, &ctx, &saved,
                                 &actions, &action_count);
     AIRY_FREE(in);
     if (ret != AIRY_SUCCESS) {
@@ -343,6 +359,13 @@ void handle_compress(cJSON *params, int id, airy_sock_t client_fd)
         cJSON_AddItemToArray(acts, item);
     }
     cJSON_AddItemToObject(result, "actions", acts);
+    /* 门禁快照：acr/ttft 为声明面注入的实测值（缺失为 -1，呈现"不可用"而非伪零） */
+    cJSON *gate = cJSON_CreateObject();
+    cJSON_AddBoolToObject(gate, "grayscale", cfg.gate.grayscale_enabled);
+    cJSON_AddNumberToObject(gate, "acr", cfg.gate.acr);
+    cJSON_AddNumberToObject(gate, "ttft_ms", cfg.gate.ttft_ms);
+    cJSON_AddBoolToObject(gate, "allowed", mem_compress_gate_pass(&cfg.gate));
+    cJSON_AddItemToObject(result, "gate", gate);
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
     mem_compress_plan_free(ctx, actions, action_count);
 }

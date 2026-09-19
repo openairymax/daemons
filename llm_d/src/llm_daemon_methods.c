@@ -556,8 +556,14 @@ static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd
     if (ret != 0) {
         AIRY_FREE((void *)cfg.model);
         request_context_destroy(ctx);
+        /* 与 parse_params 失败路径同因同治：非 NULL 返回值会被
+         * on_complete_stream_method 当普通响应推给流客户端，裸 JSON-RPC
+         * 信封混入正文（adapter 不识别信封，把 {"jsonrpc":...} 当回复显示）。 */
         char ebuf[128];
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, llm_error_message_fmt(ret, ebuf, sizeof(ebuf)), id);
+        const char *msg = llm_error_message_fmt(ret, ebuf, sizeof(ebuf));
+        SVC_LOG_ERROR("complete_stream: %s", msg);
+        llm_stream_send_error_frame(client_fd, id, JSONRPC_INTERNAL_ERROR, msg);
+        return NULL;
     }
 
     if (resp) {

@@ -340,6 +340,12 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
         cfg->stream = cJSON_IsTrue(stream) ? 1 : 0;
     }
 
+    /* B5-3 缓存准入声明：缺省 0（fail-closed），由本函数起手的 memset 保证 */
+    cJSON *cacheable = cJSON_GetObjectItem(params, "cacheable");
+    if (cJSON_IsBool(cacheable)) {
+        cfg->cacheable = cJSON_IsTrue(cacheable) ? 1 : 0;
+    }
+
     cJSON *presence_penalty = cJSON_GetObjectItem(params, "presence_penalty");
     if (cJSON_IsNumber(presence_penalty)) {
         cfg->presence_penalty = presence_penalty->valuedouble;

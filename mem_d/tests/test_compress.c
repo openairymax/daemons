@@ -263,7 +263,16 @@ static void test_l2_extract_and_budget(void)
     size_t saved = 0;
     compress_plan_item_t *acts = NULL;
     size_t n = 0;
-    assert(mem_compress_plan(l, "sess-l2", entries, 4, NULL, &ctx, &saved, &acts, &n) == AIRY_SUCCESS);
+    /* L2 默认关：本用例须显式开启并令门禁放行，方可验证 L2 抽取路径 */
+    compress_config_t cfg = {
+        .max_tool_tokens = COMPRESS_DEFAULT_MAX_TOOL_TOKENS,
+        .max_turns = COMPRESS_DEFAULT_MAX_TURNS,
+        .l1_enabled = 1,
+        .l2_enabled = 1,
+        .dedup = 1,
+        .gate = { .grayscale_enabled = 1, .acr = 0.99, .ttft_ms = 100.0 },
+    };
+    assert(mem_compress_plan(l, "sess-l2", entries, 4, &cfg, &ctx, &saved, &acts, &n) == AIRY_SUCCESS);
 
     /* 预算收敛：L2 抽取生效且 saved > 0 */
     assert(saved > 0);
@@ -300,6 +309,91 @@ static void test_l2_extract_and_budget(void)
     printf("    PASSED\n");
 }
 
+/* B5/V5.1 + V5.3：L2 默认不生效（门禁未过），门禁翻转后才生效 */
+static void test_l2_gate_fail_closed(void)
+{
+    printf("  test_l2_gate_fail_closed...\n");
+
+    /* 门禁判定本身：fail-closed 边界 */
+    assert(mem_compress_gate_pass(NULL) == 0);
+    compress_gate_t g = {.grayscale_enabled = 0, .acr = 0.99, .ttft_ms = 100.0};
+    assert(mem_compress_gate_pass(&g) == 0); /* 灰度未开 */
+    g.grayscale_enabled = 1;
+    assert(mem_compress_gate_pass(&g) == 1);
+    g.acr = -1.0; /* 数据不可用 */
+    assert(mem_compress_gate_pass(&g) == 0);
+    g.acr = 0.99;
+    g.ttft_ms = -1.0;
+    assert(mem_compress_gate_pass(&g) == 0);
+    g.ttft_ms = COMPRESS_GATE_MAX_TTFT_MS + 1.0; /* 越阈值 */
+    assert(mem_compress_gate_pass(&g) == 0);
+    g.ttft_ms = 100.0;
+    g.acr = COMPRESS_GATE_MIN_ACR - 0.01; /* 保真不足 */
+    assert(mem_compress_gate_pass(&g) == 0);
+    g.acr = 1.5; /* 越界 */
+    assert(mem_compress_gate_pass(&g) == 0);
+
+    /* 场景：小预算 + 长历史 assistant → 若 L2 生效必产生 EXTRACT */
+    mem_ledger_t *l = mem_ledger_create(20, 0.8);
+    assert(l != NULL);
+    char msg[600];
+    snprintf(msg, sizeof(msg),
+             "First we need to analyze the requirement and understand the constraints. "
+             "The system must ensure data safety and verify every step carefully. "
+             "We should document the design decisions and confirm the final result. "
+             "Please review the implementation and make sure nothing is missing. "
+             "The summary should include the conclusion and the open questions.");
+    ledger_entry_in_t app[3] = {
+        {.entry_type = LEDGER_ENTRY_SYSTEM, .text = "system prompt"},
+        {.entry_type = LEDGER_ENTRY_USER, .text = "first user message"},
+        {.entry_type = LEDGER_ENTRY_ASSISTANT, .text = msg},
+    };
+    assert(mem_ledger_append(l, "sess-gate", app, 3, NULL) == AIRY_SUCCESS);
+    ledger_entry_in_t cur = {.entry_type = LEDGER_ENTRY_USER, .text = "continue please"};
+    assert(mem_ledger_append(l, "sess-gate", &cur, 1, NULL) == AIRY_SUCCESS);
+
+    compress_entry_in_t entries[4] = {
+        {.entry_id = "g1", .entry_type = LEDGER_ENTRY_SYSTEM, .text = "system prompt"},
+        {.entry_id = "g2", .entry_type = LEDGER_ENTRY_USER, .text = "first user message"},
+        {.entry_id = "g3", .entry_type = LEDGER_ENTRY_ASSISTANT, .text = msg},
+        {.entry_id = "g4", .entry_type = LEDGER_ENTRY_USER, .text = "continue please"},
+    };
+    char *ctx = NULL;
+    size_t saved = 0;
+    compress_plan_item_t *acts = NULL;
+    size_t n = 0;
+
+    /* V5.1：默认配置（cfg=NULL → L2 关 + 门禁全关）→ L2 命中计数 0 */
+    assert(mem_compress_plan(l, "sess-gate", entries, 4, NULL, &ctx, &saved, &acts, &n) == AIRY_SUCCESS);
+    assert(!find_action(acts, n, COMPRESS_ACTION_EXTRACT));
+    assert(saved == 0);
+    mem_compress_plan_free(ctx, acts, n);
+
+    /* 显式开启 L2 但门禁未过 → 仍不生效（fail-closed） */
+    compress_config_t cfg = {
+        .max_tool_tokens = COMPRESS_DEFAULT_MAX_TOOL_TOKENS,
+        .max_turns = COMPRESS_DEFAULT_MAX_TURNS,
+        .l1_enabled = 1,
+        .l2_enabled = 1,
+        .dedup = 1,
+        .gate = {.grayscale_enabled = 1, .acr = -1.0, .ttft_ms = -1.0},
+    };
+    assert(mem_compress_plan(l, "sess-gate", entries, 4, &cfg, &ctx, &saved, &acts, &n) == AIRY_SUCCESS);
+    assert(!find_action(acts, n, COMPRESS_ACTION_EXTRACT));
+    mem_compress_plan_free(ctx, acts, n);
+
+    /* V5.3：门禁翻转（灰度开 + acr/ttft 达标）→ L2 生效 */
+    cfg.gate.acr = 0.99;
+    cfg.gate.ttft_ms = 100.0;
+    assert(mem_compress_plan(l, "sess-gate", entries, 4, &cfg, &ctx, &saved, &acts, &n) == AIRY_SUCCESS);
+    assert(find_action(acts, n, COMPRESS_ACTION_EXTRACT));
+    assert(saved > 0);
+    mem_compress_plan_free(ctx, acts, n);
+
+    mem_ledger_destroy(l);
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=== Prompt Compression Unit Tests ===\n");
@@ -309,6 +403,7 @@ int main(void)
     test_dedup();
     test_max_turns_drop();
     test_l2_extract_and_budget();
+    test_l2_gate_fail_closed();
     printf("=== All compress tests PASSED ===\n");
     return 0;
 }

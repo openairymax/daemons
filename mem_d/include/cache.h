@@ -10,7 +10,8 @@
  *   - L0 精确命中：SHA-256(canonical_text + model_id) 精确键（O(1)）
  *   - L1 语义命中：归一化 Jaccard token 集合相似度 + 长度比（可配阈值）
  *   - LRU + TTL 双维度淘汰，条目数/字节数双容量上限
- *   - 仅缓存 cacheable 调用（由调用方决定），命中附加 cache_hit/cache_id 元数据
+ *   - 仅缓存在 mem_cache_admit() 准入范围内的调用（B5 安全门禁，fail-closed），
+ *     命中附加 cache_hit/cache_id 元数据
  */
 
 #ifndef AIRY_RT_MEM_CACHE_H
@@ -30,7 +31,12 @@ typedef struct {
     size_t entries;     /**< 当前条目数 */
     size_t hits;        /**< 累计命中（L0+L1） */
     size_t misses;      /**< 累计未命中 */
-    double hit_rate;    /**< 命中率 hits/(hits+misses) */
+    /**
+     * 命中率 hits/(hits+misses)。
+     * 无查询样本（hits+misses == 0）时为 -1.0，表示数据不可用，
+     * 呈现层须显式标注不可用，不得当作 0（§2.1-6）。
+     */
+    double hit_rate;
     size_t evictions;   /**< 累计淘汰数（TTL 过期 + LRU） */
     size_t bytes;       /**< 当前占用字节（text+response 合计） */
 } mem_cache_stats_t;
@@ -47,6 +53,17 @@ mem_cache_t *mem_cache_create(size_t max_entries, size_t max_bytes,
 
 /** @brief 销毁缓存。 */
 void mem_cache_destroy(mem_cache_t *cache);
+
+/**
+ * @brief 缓存准入判定（B5 安全门禁，fail-closed）。
+ *
+ * 请求文本含用户敏感面（凭据字段 / 私有路径 / 密钥前缀）时拒绝入缓存；
+ * 未显式声明 cacheable 的调用方亦不得写入（由 RPC 层据此拒绝）。
+ *
+ * @param text 规范化请求文本
+ * @return 1 允许入缓存；0 拒绝（含 text 为 NULL / 空串）
+ */
+int mem_cache_admit(const char *text);
 
 /**
  * @brief 写入缓存条目。
