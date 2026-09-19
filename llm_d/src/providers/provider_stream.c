@@ -12,6 +12,7 @@
  * - 增长缓冲 provider_buf_append
  */
 
+#include "airy_llm_stream.h"
 #include "airy_memory.h"
 #include "daemon_platform_ext.h"
 #include "error.h"
@@ -48,19 +49,16 @@ char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text)
     return buf;
 }
 
-/* ── 流式控制帧发射（SSoT：openai/deepseek/local 共用，见 provider.h） ──
+/* ── 流式控制帧发射（帧格式权威：commons/include/airy_llm_stream.h，
+ * openai/deepseek/local 共用，见 provider.h） ──
  * 帧各段须 NUL 结尾：llm_stream_callback 对 chunk 调 strlen()，非结尾数组
  * 会栈越界（ASan 2026-08-16 实测捕获）。 */
-#define LLM_STREAM_FRAME_RS 0x1e
-#define LLM_STREAM_FRAME_TAG 'T'
-#define LLM_STREAM_FRAME_REASON_TAG 'R'
-
 void provider_emit_tool_frame(llm_stream_callback_t cb, void *ud, const char *tc_json)
 {
     if (!cb || !tc_json)
         return;
-    char pre[3] = {(char)LLM_STREAM_FRAME_RS, LLM_STREAM_FRAME_TAG, '\0'};
-    char post[2] = {(char)LLM_STREAM_FRAME_RS, '\0'};
+    char pre[3] = {(char)AIRY_LLM_STREAM_RS, AIRY_LLM_STREAM_TAG_TOOL, '\0'};
+    char post[2] = {(char)AIRY_LLM_STREAM_RS, '\0'};
     cb(pre, ud);
     cb(tc_json, ud);
     cb(post, ud);
@@ -73,8 +71,8 @@ void provider_emit_reasoning_frame(llm_stream_callback_t cb, void *ud, const cha
 {
     if (!cb || !reasoning || !reasoning[0])
         return;
-    char pre[3] = {(char)LLM_STREAM_FRAME_RS, LLM_STREAM_FRAME_REASON_TAG, '\0'};
-    char post[2] = {(char)LLM_STREAM_FRAME_RS, '\0'};
+    char pre[3] = {(char)AIRY_LLM_STREAM_RS, AIRY_LLM_STREAM_TAG_REASON, '\0'};
+    char post[2] = {(char)AIRY_LLM_STREAM_RS, '\0'};
     cb(pre, ud);
     cb(reasoning, ud);
     cb(post, ud);

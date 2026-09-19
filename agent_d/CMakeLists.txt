@@ -108,6 +108,7 @@ endif()
 # M1-1a 引擎下沉（2026-09-01）：agent.run 进程内引擎
 #   agent_run_engine.c 会话注册表 + 编排 + 主入口
 #   agent_run_loop.c   ReAct 工具循环
+#   agent_run_stream.c LLM 流式响应解复用（RS 分帧）
 #   agent_run_rpc.c    agent.run / agent.run_cancel RPC 适配
 add_executable(agent_d
     src/main.c
@@ -116,6 +117,7 @@ add_executable(agent_d
     src/agent_run_engine.c
     src/agent_run_ledger.c
     src/agent_run_loop.c
+    src/agent_run_stream.c
     src/agent_run_rpc.c
 )
 

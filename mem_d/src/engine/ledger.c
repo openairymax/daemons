@@ -12,6 +12,7 @@
 #include "ledger.h"
 #include "airy_memory.h"
 #include "token.h"
+#include "token_standard.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +20,7 @@
 #include <time.h>
 
 #define LEDGER_ENTRY_ID_HEX 32
+#define LEDGER_MODEL_NAME_MAX 64
 #define DEFAULT_BUDGET 32768UL
 #define DEFAULT_WARN_RATIO 0.8
 #define MAX_SESSION_ID_LEN 255
@@ -61,6 +63,7 @@ struct mem_ledger {
     size_t max_sessions;
     size_t max_entries;
     airy_token_counter_t *counter;
+    char token_model[LEDGER_MODEL_NAME_MAX];   /* 声明注入的计数模型（B5） */
     unsigned long seq;
 };
 
@@ -140,12 +143,37 @@ mem_ledger_t *mem_ledger_create(size_t default_budget, double warn_ratio)
     ledger->warn_ratio = warn_ratio > 0.0 && warn_ratio <= 1.0 ? warn_ratio : DEFAULT_WARN_RATIO;
     ledger->max_sessions = DEFAULT_MAX_SESSIONS;
     ledger->max_entries = DEFAULT_MAX_ENTRIES;
-    ledger->counter = airy_token_counter_create("gpt-4");
+    AIRY_STRNCPY_TERM(ledger->token_model, AIRY_TOKEN_MODEL_NAME_DEFAULT,
+                      sizeof(ledger->token_model));
+    ledger->counter = airy_token_counter_create(ledger->token_model);
     if (!ledger->counter) {
         AIRY_FREE(ledger);
         return NULL;
     }
     return ledger;
+}
+
+int mem_ledger_set_token_model(mem_ledger_t *ledger, const char *model_name)
+{
+    if (!ledger)
+        return AIRY_ERR_INVALID_PARAM;
+    const char *name =
+        (model_name && model_name[0]) ? model_name : AIRY_TOKEN_MODEL_NAME_DEFAULT;
+    if (strcmp(name, ledger->token_model) == 0)
+        return AIRY_SUCCESS;
+    /* 先建后换：创建失败时保留原模型，台账保持可用 */
+    airy_token_counter_t *counter = airy_token_counter_create(name);
+    if (!counter)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    airy_token_counter_destroy(ledger->counter);
+    ledger->counter = counter;
+    AIRY_STRNCPY_TERM(ledger->token_model, name, sizeof(ledger->token_model));
+    return AIRY_SUCCESS;
+}
+
+const char *mem_ledger_token_model(const mem_ledger_t *ledger)
+{
+    return ledger ? ledger->token_model : AIRY_TOKEN_MODEL_NAME_DEFAULT;
 }
 
 void mem_ledger_destroy(mem_ledger_t *ledger)

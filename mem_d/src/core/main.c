@@ -164,6 +164,14 @@ static int load_daemon_config(const char *config_path)
     g_config.use_tcp = 0;
     g_config.max_clients = MAX_CLIENTS;
     g_config.max_records = MEM_DEFAULT_MAX_RECORDS;
+    /* B5：L2 压缩门禁默认 fail-closed（L2 关、灰度关、acr/ttft 不可用） */
+    g_config.compress_l1_enabled = 1;
+    g_config.compress_l2_enabled = 0;
+    g_config.compress_gate_grayscale = 0;
+    g_config.compress_gate_acr = -1.0;
+    g_config.compress_gate_ttft_ms = -1.0;
+    /* B5：台账计数模型默认空（由 token_standard 默认模型兜底） */
+    g_config.token_model[0] = '\0';
 
 #if defined(AIRY_PLATFORM_WINDOWS)
     g_config.socket_path = AIRY_STRDUP(DEFAULT_SOCKET_PATH_WIN);
@@ -180,6 +188,33 @@ static int load_daemon_config(const char *config_path)
         if (v > 0 && v < 65536)
             g_config.max_records = (size_t)v;
     }
+
+    /* B5：压缩门禁策略可用环境变量翻转（策略值改动不触发重编译） */
+    const char *env_l2 = getenv("AIRY_MEM_COMPRESS_L2");
+    if (env_l2)
+        g_config.compress_l2_enabled = strtoul(env_l2, NULL, 10) != 0 ? 1 : 0;
+    const char *env_gs = getenv("AIRY_MEM_COMPRESS_GATE_GRAYSCALE");
+    if (env_gs)
+        g_config.compress_gate_grayscale = strtoul(env_gs, NULL, 10) != 0 ? 1 : 0;
+    const char *env_acr = getenv("AIRY_MEM_COMPRESS_GATE_ACR");
+    if (env_acr) {
+        char *end = NULL;
+        double v = strtod(env_acr, &end);
+        if (end != env_acr)
+            g_config.compress_gate_acr = v;
+    }
+    const char *env_ttft = getenv("AIRY_MEM_COMPRESS_GATE_TTFT_MS");
+    if (env_ttft) {
+        char *end = NULL;
+        double v = strtod(env_ttft, &end);
+        if (end != env_ttft)
+            g_config.compress_gate_ttft_ms = v;
+    }
+
+    /* B5：台账计数模型（按实际模型取，缺省回退默认模型） */
+    const char *env_model = getenv("AIRY_MEM_TOKEN_MODEL");
+    if (env_model && env_model[0])
+        AIRY_STRNCPY_TERM(g_config.token_model, env_model, sizeof(g_config.token_model));
 
     if (config_path) {
         FILE *f = fopen(config_path, "rb");
@@ -214,6 +249,36 @@ static int load_daemon_config(const char *config_path)
                                 cJSON *max_records = cJSON_GetObjectItem(daemon_cfg, "max_records");
                                 if (cJSON_IsNumber(max_records))
                                     g_config.max_records = (size_t)max_records->valuedouble;
+                            }
+                            /* B5：压缩门禁策略声明（缺省字段保持 fail-closed 初值） */
+                            cJSON *ccfg = cJSON_GetObjectItem(root, "compress");
+                            if (ccfg) {
+                                cJSON *l1 = cJSON_GetObjectItem(ccfg, "l1_enabled");
+                                if (cJSON_IsBool(l1))
+                                    g_config.compress_l1_enabled = cJSON_IsTrue(l1) ? 1 : 0;
+                                cJSON *l2 = cJSON_GetObjectItem(ccfg, "l2_enabled");
+                                if (cJSON_IsBool(l2))
+                                    g_config.compress_l2_enabled = cJSON_IsTrue(l2) ? 1 : 0;
+                                cJSON *gate = cJSON_GetObjectItem(ccfg, "gate");
+                                if (gate) {
+                                    cJSON *gs = cJSON_GetObjectItem(gate, "grayscale");
+                                    if (cJSON_IsBool(gs))
+                                        g_config.compress_gate_grayscale = cJSON_IsTrue(gs) ? 1 : 0;
+                                    cJSON *acr = cJSON_GetObjectItem(gate, "acr");
+                                    if (cJSON_IsNumber(acr))
+                                        g_config.compress_gate_acr = acr->valuedouble;
+                                    cJSON *ttft = cJSON_GetObjectItem(gate, "ttft_ms");
+                                    if (cJSON_IsNumber(ttft))
+                                        g_config.compress_gate_ttft_ms = ttft->valuedouble;
+                                }
+                            }
+                            /* B5：台账计数模型声明（缺省 → 默认模型，不得硬编码） */
+                            cJSON *tcfg = cJSON_GetObjectItem(root, "token");
+                            if (tcfg) {
+                                cJSON *model = cJSON_GetObjectItem(tcfg, "model");
+                                if (cJSON_IsString(model) && model->valuestring[0])
+                                    AIRY_STRNCPY_TERM(g_config.token_model, model->valuestring,
+                                                      sizeof(g_config.token_model));
                             }
                         } while (0);
                     }
@@ -293,6 +358,10 @@ int main(int argc, char **argv)
         g_config.use_tcp = 1;
 
     SVC_LOG_INFO("Memory service starting, manager=%s", config_path ? config_path : "default");
+    SVC_LOG_INFO("compress policy: l1=%d l2=%d gate{grayscale=%d acr=%.3f ttft=%.1fms}",
+                 g_config.compress_l1_enabled, g_config.compress_l2_enabled,
+                 g_config.compress_gate_grayscale, g_config.compress_gate_acr,
+                 g_config.compress_gate_ttft_ms);
 
     g_service = mem_service_create(g_config.max_records);
     if (!g_service) {
@@ -308,8 +377,17 @@ int main(int argc, char **argv)
     if (!g_cache)
         SVC_LOG_WARN("Semantic cache init failed, caching disabled (degraded mode)");
     g_ledger = mem_ledger_create(0, 0);
-    if (!g_ledger)
+    if (!g_ledger) {
         SVC_LOG_WARN("Context ledger init failed, ledger disabled (degraded mode)");
+    } else {
+        /* B5：按声明注入计数模型（空 → 默认模型），失败保留默认模型 */
+        int model_ret = mem_ledger_set_token_model(g_ledger, g_config.token_model);
+        if (model_ret != AIRY_SUCCESS)
+            SVC_LOG_WARN("Token model '%s' rejected (%d), fallback kept: %s",
+                         g_config.token_model[0] ? g_config.token_model : "(default)", model_ret,
+                         mem_ledger_token_model(g_ledger));
+        SVC_LOG_INFO("ledger token model: %s", mem_ledger_token_model(g_ledger));
+    }
 
     airy_sock_t server_fd = daemon_create_server_socket(g_config.use_tcp, g_config.tcp_port,
                                                         g_config.socket_path, g_config.socket_path);

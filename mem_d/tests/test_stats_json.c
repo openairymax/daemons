@@ -25,6 +25,8 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 mem_service_t *g_service = NULL;
 mem_cache_t *g_cache = NULL;
@@ -43,6 +45,59 @@ static void test_uninit_degrade(void)
     assert(cJSON_GetObjectItem(root, "cache") == NULL);
     assert(cJSON_GetObjectItem(root, "ledger") == NULL);
     cJSON_Delete(root);
+    printf("    PASSED\n");
+}
+
+/* B5-3（V5.2）：敏感面请求或未声明 cacheable 的请求不得产生缓存条目。 */
+static void test_cache_put_admission(void)
+{
+    printf("  test_cache_put_admission...\n");
+    g_cache = mem_cache_create(64, 0, 0, 0.85);
+    assert(g_cache != NULL);
+
+    int fds[2];
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+    mem_cache_stats_t st;
+
+    /* 含敏感标记（私有路径 + 凭据）⇒ 条目数为 0 */
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "text", "read ~/.ssh/id_rsa with api_key=abc");
+    cJSON_AddStringToObject(params, "response", "{\"answer\":\"x\"}");
+    cJSON_AddStringToObject(params, "model_id", "m1");
+    cJSON_AddBoolToObject(params, "cacheable", 1);
+    handle_cache_put(params, 1, fds[0]);
+    cJSON_Delete(params);
+
+    mem_cache_stats(g_cache, &st);
+    assert(st.entries == 0);
+
+    /* 普通文本但未显式声明 cacheable ⇒ 仍不入缓存（fail-closed） */
+    params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "text", "alpha query");
+    cJSON_AddStringToObject(params, "response", "alpha resp");
+    cJSON_AddStringToObject(params, "model_id", "m1");
+    handle_cache_put(params, 2, fds[0]);
+    cJSON_Delete(params);
+
+    mem_cache_stats(g_cache, &st);
+    assert(st.entries == 0);
+
+    /* 显式声明 cacheable 的普通文本 ⇒ 正常入缓存 */
+    params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "text", "alpha query");
+    cJSON_AddStringToObject(params, "response", "alpha resp");
+    cJSON_AddStringToObject(params, "model_id", "m1");
+    cJSON_AddBoolToObject(params, "cacheable", 1);
+    handle_cache_put(params, 3, fds[0]);
+    cJSON_Delete(params);
+
+    mem_cache_stats(g_cache, &st);
+    assert(st.entries == 1);
+
+    close(fds[0]);
+    close(fds[1]);
+    mem_cache_destroy(g_cache);
+    g_cache = NULL;
     printf("    PASSED\n");
 }
 
@@ -82,6 +137,7 @@ static void test_cache_scope_consistent(void)
     assert(cJSON_GetObjectItem(cache, "hits")->valueint == 1);
     assert(cJSON_GetObjectItem(cache, "misses")->valueint == 1);
     assert(fabs(cJSON_GetObjectItem(cache, "hit_rate")->valuedouble - st.hit_rate) < 1e-9);
+    assert(cJSON_IsTrue(cJSON_GetObjectItem(cache, "hit_rate_available")));
     assert(cJSON_GetObjectItem(cache, "evictions")->valueint == 0);
     assert(cJSON_GetObjectItem(cache, "bytes")->valueint == (int)st.bytes);
 
@@ -90,6 +146,19 @@ static void test_cache_scope_consistent(void)
     assert(cJSON_GetObjectItem(standalone, "hit_rate")->valuedouble ==
            cJSON_GetObjectItem(cache, "hit_rate")->valuedouble);
     cJSON_Delete(standalone);
+
+    /* 无查询样本 → hit_rate 不可用（负值 + available=false），不得伪零（§2.1-6） */
+    mem_cache_t *fresh = mem_cache_create(8, 0, 0, 0.85);
+    assert(fresh != NULL);
+    mem_cache_t *saved = g_cache;
+    g_cache = fresh;
+    cJSON *unavail = mem_cache_stats_json();
+    assert(cJSON_IsObject(unavail));
+    assert(cJSON_GetObjectItem(unavail, "hit_rate")->valuedouble < 0.0);
+    assert(cJSON_IsFalse(cJSON_GetObjectItem(unavail, "hit_rate_available")));
+    cJSON_Delete(unavail);
+    g_cache = saved;
+    mem_cache_destroy(fresh);
 
     cJSON_Delete(root);
     mem_cache_destroy(g_cache);
@@ -157,13 +226,120 @@ static void test_base_fields(void)
     printf("    PASSED\n");
 }
 
+/* 读取 socketpair 上的 JSON-RPC 响应（SOCK_STREAM 可能分片，读到可解析为止）。 */
+static cJSON *read_rpc_response(int fd)
+{
+    size_t cap = 4096, len = 0;
+    char *buf = AIRY_MALLOC(cap);
+    assert(buf != NULL);
+    cJSON *root = NULL;
+    while (len + 1 < cap) {
+        ssize_t r = read(fd, buf + len, cap - len - 1);
+        if (r <= 0)
+            break;
+        len += (size_t)r;
+        buf[len] = '\0';
+        root = cJSON_Parse(buf);
+        if (root)
+            break;
+    }
+    AIRY_FREE(buf);
+    assert(root != NULL);
+    return root;
+}
+
+/* B5/V5.1 + V5.3：mem.compress 门禁快照。
+ * 默认声明（L2 关 + 门禁全关）→ fail-closed：allowed=false、acr/ttft 不可用（负值）
+ * 且 L2 不生效；声明面注入实测值（灰度开 + acr/ttft 达标）→ allowed=true、
+ * acr/ttft 落数值记录（非桩值）且 L2 生效。 */
+static void test_compress_gate_snapshot(void)
+{
+    printf("  test_compress_gate_snapshot...\n");
+    g_ledger = mem_ledger_create(20, 0.8); /* 小预算：使 L2 具备触发条件 */
+    assert(g_ledger != NULL);
+
+    int fds[2];
+    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0);
+
+    const char *long_msg =
+        "First we need to analyze the requirement and understand the constraints. "
+        "The system must ensure data safety and verify every step carefully. "
+        "We should document the design decisions and confirm the final result. "
+        "Please review the implementation and make sure nothing is missing. "
+        "The summary should include the conclusion and the open questions.";
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "session_id", "sess-gate");
+    cJSON *entries = cJSON_CreateArray();
+    const char *eids[] = {"g1", "g2", "g3", "g4"};
+    const char *etypes[] = {"system", "user", "assistant", "user"};
+    const char *etexts[] = {"system prompt", "first user message", long_msg, "continue please"};
+    for (int i = 0; i < 4; i++) {
+        cJSON *e = cJSON_CreateObject();
+        cJSON_AddStringToObject(e, "entry_id", eids[i]);
+        cJSON_AddStringToObject(e, "entry_type", etypes[i]);
+        cJSON_AddStringToObject(e, "text", etexts[i]);
+        cJSON_AddItemToArray(entries, e);
+    }
+    cJSON_AddItemToObject(params, "entries", entries);
+
+    /* V5.1：默认声明 → fail-closed；acr/ttft 呈现"不可用"（负值）而非伪零 */
+    g_config.compress_l1_enabled = 1;
+    g_config.compress_l2_enabled = 0;
+    g_config.compress_gate_grayscale = 0;
+    g_config.compress_gate_acr = -1.0;
+    g_config.compress_gate_ttft_ms = -1.0;
+
+    handle_compress(params, 1, fds[0]);
+    cJSON *resp = read_rpc_response(fds[1]);
+    cJSON *result = cJSON_GetObjectItem(resp, "result");
+    assert(cJSON_IsObject(result));
+    cJSON *gate = cJSON_GetObjectItem(result, "gate");
+    assert(cJSON_IsObject(gate));
+    assert(cJSON_IsFalse(cJSON_GetObjectItem(gate, "allowed")));
+    assert(cJSON_GetObjectItem(gate, "acr")->valuedouble < 0.0);
+    assert(cJSON_GetObjectItem(gate, "ttft_ms")->valuedouble < 0.0);
+    assert(cJSON_GetObjectItem(result, "saved_tokens")->valuedouble == 0.0);
+    cJSON_Delete(resp);
+
+    /* V5.3：门禁翻转（灰度开 + acr/ttft 达标）→ L2 生效且数值记录非桩值 */
+    g_config.compress_l2_enabled = 1;
+    g_config.compress_gate_grayscale = 1;
+    g_config.compress_gate_acr = 0.99;
+    g_config.compress_gate_ttft_ms = 100.0;
+
+    handle_compress(params, 2, fds[0]);
+    resp = read_rpc_response(fds[1]);
+    result = cJSON_GetObjectItem(resp, "result");
+    assert(cJSON_IsObject(result));
+    gate = cJSON_GetObjectItem(result, "gate");
+    assert(cJSON_IsTrue(cJSON_GetObjectItem(gate, "allowed")));
+    assert(fabs(cJSON_GetObjectItem(gate, "acr")->valuedouble - 0.99) < 1e-9);
+    assert(fabs(cJSON_GetObjectItem(gate, "ttft_ms")->valuedouble - 100.0) < 1e-9);
+    assert(cJSON_GetObjectItem(result, "saved_tokens")->valuedouble > 0.0);
+    cJSON_Delete(resp);
+
+    cJSON_Delete(params);
+    close(fds[0]);
+    close(fds[1]);
+    mem_ledger_destroy(g_ledger);
+    g_ledger = NULL;
+    g_config.compress_l2_enabled = 0;
+    g_config.compress_gate_grayscale = 0;
+    g_config.compress_gate_acr = -1.0;
+    g_config.compress_gate_ttft_ms = -1.0;
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=== mem.get_stats JSON Unit Tests ===\n");
     test_uninit_degrade();
+    test_cache_put_admission();
     test_cache_scope_consistent();
     test_ledger_scope_consistent();
     test_base_fields();
+    test_compress_gate_snapshot();
     printf("=== All stats JSON tests PASSED ===\n");
     return 0;
 }

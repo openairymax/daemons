@@ -44,32 +44,49 @@
 
 /**
  * @brief 组装 §2.4 v1 事件信封 JSON 并交给 sink->emit。
- * data 所有权转移给本函数（内部 cJSON_Print 后 Delete），emit 不得阻塞。
+ * data 所有权由本函数接管（作为 env 子项释放）；env 所有权亦由本函数持有，
+ * sink 仅在调用期内借用（不得留存指针）。emit 不得阻塞。
  */
 void agent_run_emit_event(const agent_run_event_sink_t *sink, uint64_t *seq,
                           const char *run_id, const char *session_id, const char *type,
                           cJSON *data)
 {
-    if (!sink || !sink->emit || !type)
-        return;
-    cJSON *env = cJSON_CreateObject();
+    cJSON *env = NULL;
+    if (sink && sink->emit && type && seq) {
+        env = cJSON_CreateObject();
+        if (env) {
+            cJSON_AddNumberToObject(env, AIRY_RS_K_V, AIRY_RS_VERSION);
+            cJSON_AddStringToObject(env, AIRY_RS_K_TYPE, type);
+            cJSON_AddNumberToObject(env, AIRY_RS_K_ID, (double)(*seq)++);
+            if (run_id && run_id[0])
+                cJSON_AddStringToObject(env, AIRY_RS_K_RUN_ID, run_id);
+            if (session_id && session_id[0])
+                cJSON_AddStringToObject(env, AIRY_RS_K_SESSION, session_id);
+            cJSON_AddNumberToObject(env, AIRY_RS_K_TS, (double)airy_time_ms());
+            cJSON_AddNumberToObject(env, AIRY_RS_K_EPOCH, 0);
+            if (data)
+                cJSON_AddItemToObject(env, AIRY_RS_K_DATA, data);
+        }
+    }
     if (!env) {
         if (data)
             cJSON_Delete(data);
         return;
     }
-    cJSON_AddNumberToObject(env, AIRY_RS_K_V, AIRY_RS_VERSION);
-    cJSON_AddStringToObject(env, AIRY_RS_K_TYPE, type);
-    cJSON_AddNumberToObject(env, AIRY_RS_K_ID, (double)(*seq)++);
-    if (run_id && run_id[0])
-        cJSON_AddStringToObject(env, AIRY_RS_K_RUN_ID, run_id);
-    if (session_id && session_id[0])
-        cJSON_AddStringToObject(env, AIRY_RS_K_SESSION, session_id);
-    cJSON_AddNumberToObject(env, AIRY_RS_K_TS, (double)airy_time_ms());
-    cJSON_AddNumberToObject(env, AIRY_RS_K_EPOCH, 0);
-    if (data)
-        cJSON_AddItemToObject(env, AIRY_RS_K_DATA, data);
     sink->emit(type, env, sink->ud);
+    cJSON_Delete(env);
+}
+
+/* 工具循环产物回填引擎局部态（所有权移交后复位源，便于复用同一变量）。 */
+static void run_loop_adopt(agent_run_loop_result_t *lr, cJSON **trace, char **text,
+                           uint64_t *tokens, double *cost, char **reason)
+{
+    *trace = lr->trace;
+    *text = lr->text;
+    *tokens = lr->tokens;
+    *cost = lr->cost;
+    *reason = lr->reason;
+    AIRY_MEMSET(lr, 0, sizeof(*lr));
 }
 
 /* 会话注册表（agent.cancel 按 session_id 置位；并发客户端模型需加锁） */
@@ -458,7 +475,12 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     char *reasoning_acc = NULL;
     uint64_t total_tokens = 0;
     double total_cost = 0.0;
+    agent_run_loop_result_t lr;
+    uint64_t think_ms = 0;
+    uint64_t llm_ms = 0;
+    uint64_t tool_ms = 0;
     int run_rc = -1;
+    AIRY_MEMSET(&lr, 0, sizeof(lr));
 
     /* 编排分支：params.agent 存在（或经 agent_file 解析出 spec） */
     cJSON *spec_owned = NULL;
@@ -493,8 +515,10 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
         AIRY_FREE(err_msg);
     } else {
         /* 主对话路径：GCCP 双思考 → 工具循环（降级容忍） */
-        if (agent_run_think_process(sess, prompt, gccp_answers, &think_result) == 0 &&
-            think_result) {
+        uint64_t think_t0 = airy_time_ms();
+        int think_rc = agent_run_think_process(sess, prompt, gccp_answers, &think_result);
+        think_ms += airy_time_ms() - think_t0;
+        if (think_rc == 0 && think_result) {
             cJSON *gccp_need = cJSON_GetObjectItem(think_result, "gccp_need_interaction");
             if (cJSON_IsTrue(gccp_need)) {
                 gccp_interact_round = 1;
@@ -524,11 +548,16 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
                         }
                         cJSON *sys = cJSON_CreateObject();
                         char sys_content[8192];
+                        /* 0.1.18 B1：plan 注入 system 末尾附轮次归属约束——
+                         * history 携带旧轮对话时，回答只针对本任务 prompt。 */
                         int sn = snprintf(sys_content, sizeof(sys_content),
                                           "You are executing a task under the AgentRT "
                                           "dual-thinking system (GCCP goal confirmation + "
                                           "GRAD plan critique). A verified action plan has "
-                                          "been produced. Follow this DAG plan strictly:\n%s",
+                                          "been produced. Follow this DAG plan strictly:\n%s\n"
+                                          "【轮次边界】历史消息（若有）仅供指代消解；回答必须"
+                                          "直接针对本任务的最后一条用户消息，禁止延续历史"
+                                          "主题作答。",
                                           plan_str);
                         if (sn > 0 && sn < (int)sizeof(sys_content))
                             cJSON_AddStringToObject(sys, "content", sys_content);
@@ -557,22 +586,28 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
                                 AIRY_FREE(pstr);
                             }
                         }
-                        run_rc = agent_run_tool_loop(prompt, messages, mname, active, sink,
-                                                     &tool_trace, &final_text, &total_tokens,
-                                                     &total_cost, &reasoning_acc);
+                        agent_run_loop_args_t largs = {prompt, messages, mname, active, sink};
+                        run_rc = agent_run_tool_loop(&largs, &lr);
+                        llm_ms += lr.llm_ms;
+                        tool_ms += lr.tool_ms;
+                        run_loop_adopt(&lr, &tool_trace, &final_text, &total_tokens, &total_cost,
+                                       &reasoning_acc);
                         cJSON_Delete(messages);
                     }
                 }
             }
         }
         if (run_rc < 0 && !gccp_interact_round && !think_result) {
-            run_rc = agent_run_tool_loop(prompt, history, mname, active, sink, &tool_trace,
-                                         &final_text, &total_tokens, &total_cost, &reasoning_acc);
+            agent_run_loop_args_t largs = {prompt, history, mname, active, sink};
+            run_rc = agent_run_tool_loop(&largs, &lr);
         } else if (run_rc < 0 && !gccp_interact_round && think_result) {
             /* think_d 可达但无 plan：仍走工具循环（保持既有降级语义） */
-            run_rc = agent_run_tool_loop(prompt, history, mname, active, sink, &tool_trace,
-                                         &final_text, &total_tokens, &total_cost, &reasoning_acc);
+            agent_run_loop_args_t largs = {prompt, history, mname, active, sink};
+            run_rc = agent_run_tool_loop(&largs, &lr);
         }
+        llm_ms += lr.llm_ms;
+        tool_ms += lr.tool_ms;
+        run_loop_adopt(&lr, &tool_trace, &final_text, &total_tokens, &total_cost, &reasoning_acc);
     }
 
     /* 取消检查：用户取消（run_rc==1 来自工具循环）或此处标志位 */
@@ -661,8 +696,8 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     cJSON_AddStringToObject(result, "response", final_text ? final_text : "");
     cJSON_AddNumberToObject(result, "tokens_used", (double)total_tokens);
     cJSON_AddNumberToObject(result, "cost_usd", total_cost);
-    if (reasoning_acc && reasoning_acc[0])
-        cJSON_AddStringToObject(result, "reasoning", reasoning_acc);
+    /* 思考链不再随 result 直出：阻塞式返回体经 gateway 透传给任意客户端
+     * （SDK 侧 RunResponse 无 reasoning 字段，全链零消费方），属纯泄漏面。 */
     if (tool_trace) {
         cJSON_AddItemToObject(result, "tool_trace", tool_trace);
     } else {
@@ -694,6 +729,9 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
             if (msg) {
                 cJSON_AddStringToObject(msg, AIRY_RS_K_ROLE, "assistant");
                 cJSON_AddStringToObject(msg, AIRY_RS_K_CONTENT, final_text);
+                /* 思考链随 message 事件下发，但不再作为对话内容的一部分：
+                 * 客户端默认不上屏、不落长期记忆，仅由用户显式请求（Alt+E）
+                 * 时在独立视图中取用；该通道是「按需取用」的唯一数据源。 */
                 if (reasoning_acc && reasoning_acc[0])
                     cJSON_AddStringToObject(msg, AIRY_RS_K_REASONING, reasoning_acc);
                 agent_run_emit_event(sink, &seq, run_id_snapshot, sess, AIRY_RS_TYPE_MESSAGE, msg);
@@ -711,6 +749,11 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
              * 侧显示为运行开始以来的机器 uptime（协议语义错误）。 */
             cJSON_AddNumberToObject(rend, AIRY_RS_K_DURATION,
                                     (double)(airy_time_ms() - run_start_ms));
+            /* 分段耗时：think（双思考） / llm（生成） / tool（工具执行），
+             * 便于定位首字延迟与整轮延迟的构成。 */
+            cJSON_AddNumberToObject(rend, AIRY_RS_K_THINK_MS, (double)think_ms);
+            cJSON_AddNumberToObject(rend, AIRY_RS_K_LLM_MS, (double)llm_ms);
+            cJSON_AddNumberToObject(rend, AIRY_RS_K_TOOL_MS, (double)tool_ms);
             cJSON_AddNumberToObject(rend, AIRY_RS_K_USE_TICKS, (double)total_tokens);
             agent_run_emit_event(sink, &seq, run_id_snapshot, sess, AIRY_RS_TYPE_RUN_END, rend);
         }

@@ -351,6 +351,46 @@ static void test_append_atomic_reject(void)
     printf("    PASSED\n");
 }
 
+/* B5：台账计数模型由声明注入（不得硬编码厂商模型名）；空/NULL 回退默认模型。 */
+static void test_token_model_declaration(void)
+{
+    printf("  test_token_model_declaration...\n");
+    mem_ledger_t *l = mem_ledger_create(0, 0);
+    assert(l != NULL);
+
+    /* 默认模型：非空可读（缺省不得使台账不可用） */
+    const char *dflt = mem_ledger_token_model(l);
+    assert(dflt != NULL && dflt[0] != '\0');
+
+    /* 声明注入实际模型 */
+    assert(mem_ledger_set_token_model(l, "claude-3-opus") == AIRY_SUCCESS);
+    assert(strcmp(mem_ledger_token_model(l), "claude-3-opus") == 0);
+
+    /* 空串 / NULL → 回到默认模型 */
+    assert(mem_ledger_set_token_model(l, "") == AIRY_SUCCESS);
+    assert(strcmp(mem_ledger_token_model(l), dflt) == 0);
+    assert(mem_ledger_set_token_model(l, NULL) == AIRY_SUCCESS);
+    assert(strcmp(mem_ledger_token_model(l), dflt) == 0);
+
+    /* 模型切换后计数仍可用（不得破坏台账） */
+    ledger_entry_in_t in = {
+        .entry_type = LEDGER_ENTRY_USER, .text = "count my tokens please", .source = "gateway"};
+    char *lid = NULL;
+    assert(mem_ledger_append(l, "sess-model", &in, 1, &lid) == AIRY_SUCCESS);
+    AIRY_FREE(lid);
+    ledger_window_t win;
+    assert(mem_ledger_window(l, "sess-model", &win) == AIRY_SUCCESS);
+    assert(win.total_tokens > 0);
+    mem_ledger_window_free(&win);
+
+    /* 参数校验：ledger 为 NULL */
+    assert(mem_ledger_set_token_model(NULL, "gpt-4") == AIRY_ERR_INVALID_PARAM);
+    assert(mem_ledger_token_model(NULL) != NULL);
+
+    mem_ledger_destroy(l);
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=== Context Ledger Unit Tests ===\n");
@@ -363,6 +403,7 @@ int main(void)
     test_capacity_limits();
     test_mark_idempotent_and_validate();
     test_append_atomic_reject();
+    test_token_model_declaration();
     printf("=== All ledger tests PASSED ===\n");
     return 0;
 }

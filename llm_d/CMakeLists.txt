@@ -98,6 +98,7 @@ target_include_directories(airy_llm_service PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}
+    ${COMMONS_INCLUDE_DIR}/include
     ${COMMONS_INCLUDE_DIR}/platform/include
     ${COMMONS_INCLUDE_DIR}/utils/error
     ${COMMONS_INCLUDE_DIR}/utils/logging

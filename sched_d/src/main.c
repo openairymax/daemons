@@ -224,7 +224,7 @@ int main(int argc, char **argv)
     method_dispatcher_register(g_dispatcher_sched_d, "query", on_get_task_method, NULL);
 
     /* 蓝图调度方法族（2026-08-25 接线）：plan（三级路由）/ absorb（蓝图注册
-     * 与执行结果回灌）/ roadmap_cancel / roadmap_replan / roadmap_stats。 */
+     * 与执行结果回灌）/ roadmap_cancel / roadmap_replan / roadmap_status。 */
     roadmap_rpc_register(g_dispatcher_sched_d);
 
     method_dispatcher_register(g_dispatcher_sched_d, "shutdown", on_shutdown_method_sched_d, NULL);

@@ -422,8 +422,9 @@ static void roadmap_on_replan(cJSON *params, int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* ── roadmap_stats：实例状态 ───────────────────────────────────────── */
-static void roadmap_on_stats(cJSON *params, int id, airy_sock_t client_fd)
+/* ── roadmap_status：实例状态（V8.3 名实一致：仅就绪态与
+ * 服务标识，不含计数统计，故不名 stats）──────────────────────────── */
+static void roadmap_on_status(cJSON *params, int id, airy_sock_t client_fd)
 {
     (void)params;
     cJSON *result = cJSON_CreateObject();
@@ -458,9 +459,9 @@ void on_roadmap_replan_method(cJSON *params, int id, void *user_data)
     roadmap_on_replan(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_roadmap_stats_method(cJSON *params, int id, void *user_data)
+void on_roadmap_status_method(cJSON *params, int id, void *user_data)
 {
-    roadmap_on_stats(params, id, *(airy_sock_t *)user_data);
+    roadmap_on_status(params, id, *(airy_sock_t *)user_data);
 }
 
 void roadmap_rpc_register(void *disp)
@@ -472,6 +473,6 @@ void roadmap_rpc_register(void *disp)
     method_dispatcher_register(d, "absorb", on_roadmap_absorb_method, NULL);
     method_dispatcher_register(d, "roadmap_cancel", on_roadmap_cancel_method, NULL);
     method_dispatcher_register(d, "roadmap_replan", on_roadmap_replan_method, NULL);
-    method_dispatcher_register(d, "roadmap_stats", on_roadmap_stats_method, NULL);
-    SVC_LOG_INFO("roadmap_rpc: registered roadmap.* methods (plan/absorb/cancel/replan/stats)");
+    method_dispatcher_register(d, "roadmap_status", on_roadmap_status_method, NULL);
+    SVC_LOG_INFO("roadmap_rpc: registered roadmap methods (plan/absorb/cancel/replan/status)");
 }

@@ -5,9 +5,10 @@
  * @file agent_run_loop.c
  * @brief Agent run 工具循环（ReAct，M1-1a 引擎下沉）。
  *
- * 自 gateway_biz_llm.c 迁移：LLM complete -> tool_calls -> tool_d 执行
- * -> 回填上下文 -> 继续。工具 schema 单一权威经 commons 契约层
- * （airy_tool_schema.h）获取；llm_d/tool_d 经 daemon_rpc_client 直连。
+ * 自 gateway_biz_llm.c 迁移：LLM complete_stream -> 增量正文即时上屏 +
+ * tool_calls -> tool_d 执行 -> 回填上下文 -> 继续。工具 schema 单一权威经
+ * commons 契约层（airy_tool_schema.h）获取；llm_d/tool_d 经
+ * daemon_rpc_client 直连；RS 分帧解析由 agent_run_stream.c 承担。
  */
 
 #include "agent_run_internal.h"
@@ -26,9 +27,11 @@
 #include <string.h>
 
 #define AGENT_RUN_SOCK_BUF AIRY_PATH_MAX
-#define AGENT_RUN_DELTA_MAX 512
 
-/* 构建 llm_d complete 请求（透传 tools 数组与常规生成参数）。
+/* 增量上屏的栈缓冲上限：常见逐字/逐片增量远小于此值，超限走堆。 */
+#define RUN_DELTA_STACK 1024
+
+/* 构建 llm_d complete_stream 请求（透传 tools 数组与常规生成参数）。
  * 不在此处写 max_tokens：输出上限的权威在配置面（model.yaml max_output），
  * 由 llm_d 的生成参数解析统一裁决；调用方写死一个数值会让该配置永久失效。 */
 static char *run_build_llm_params(const char *model, const cJSON *messages)
@@ -47,86 +50,50 @@ static char *run_build_llm_params(const char *model, const cJSON *messages)
     return params_str;
 }
 
-/* 解析 llm_d 响应的文本/推理/用量。 */
-static int run_parse_result(const char *llm_resp, char **out_text, uint64_t *out_tokens,
-                            double *out_cost, char **out_reasoning)
+/* token_delta 推送上下文（流式期间由解帧器逐增量回调）。 */
+typedef struct {
+    const agent_run_event_sink_t *sink;
+    uint64_t *seq;
+    const char *run_id;
+    const char *sess;
+} run_delta_ctx_t;
+
+/* 真实增量即时上屏：载荷按解帧器给出的长度全量承载（不截断、不分片丢内容）；
+ * 空增量不产生事件，保证帧数与解帧器回调次数一一对应。
+ * dlen 是权威长度：不依赖缓冲区在 dlen 处已置 NUL（长度超过栈缓冲时走堆）。 */
+static void run_emit_delta(const char *delta, size_t dlen, void *ud)
 {
-    *out_text = NULL;
-    *out_tokens = 0;
-    if (out_cost)
-        *out_cost = 0.0;
-    if (out_reasoning)
-        *out_reasoning = NULL;
+    run_delta_ctx_t *c = (run_delta_ctx_t *)ud;
+    if (!c || !c->sink || !c->sink->emit || !delta || dlen == 0)
+        return;
 
-    cJSON *root = cJSON_Parse(llm_resp);
-    if (!root)
-        return -1;
-    /* daemon_rpc_call 已解包 JSON-RPC 外层，out 是 {"id","model","choices",
-     * "usage"}（llm_d response_to_json）。这里兼容两种形状：若调用方传入
-     * 未解包的信封（含 "result"），先下钻一层（2026-09-09 修复：双重解包
-     * 导致 content 恒空、tokens 恒 0、tool_calls 恒缺失——agent 引擎全链
-     * 瘫痪，run_stream 空结果实锤复现）。 */
-    cJSON *result = cJSON_GetObjectItem(root, "result");
-    if (!cJSON_IsObject(result))
-        result = root;
-    cJSON *choices = cJSON_GetObjectItem(result, "choices");
-    cJSON *choice0 =
-        (choices && cJSON_GetArraySize(choices) > 0) ? cJSON_GetArrayItem(choices, 0) : NULL;
-    cJSON *content = choice0 ? cJSON_GetObjectItem(choice0, "content") : NULL;
-    *out_text = AIRY_STRDUP(cJSON_IsString(content) ? content->valuestring : "");
+    char stackbuf[RUN_DELTA_STACK];
+    char *buf = stackbuf;
+    if (dlen >= sizeof(stackbuf)) {
+        buf = (char *)AIRY_MALLOC(dlen + 1);
+        if (!buf)
+            return;
+    }
+    AIRY_MEMCPY(buf, delta, dlen);
+    buf[dlen] = '\0';
 
-    if (out_reasoning) {
-        cJSON *reasoning = choice0 ? cJSON_GetObjectItem(choice0, "reasoning_content") : NULL;
-        if (cJSON_IsString(reasoning) && reasoning->valuestring && reasoning->valuestring[0])
-            *out_reasoning = AIRY_STRDUP(reasoning->valuestring);
+    cJSON *td = cJSON_CreateObject();
+    if (td) {
+        cJSON_AddStringToObject(td, AIRY_RS_K_DELTA, buf);
+        agent_run_emit_event(c->sink, c->seq, c->run_id, c->sess, AIRY_RS_TYPE_TOKEN_DELTA, td);
     }
-
-    cJSON *usage = result ? cJSON_GetObjectItem(result, "usage") : NULL;
-    cJSON *total = usage ? cJSON_GetObjectItem(usage, "total_tokens") : NULL;
-    if (!cJSON_IsNumber(total))
-        total = result ? cJSON_GetObjectItem(result, "total_tokens") : NULL;
-    if (!cJSON_IsNumber(total) && cJSON_IsObject(usage)) {
-        cJSON *u_pt = cJSON_GetObjectItem(usage, "prompt_tokens");
-        cJSON *u_ct = cJSON_GetObjectItem(usage, "completion_tokens");
-        if (cJSON_IsNumber(u_pt) || cJSON_IsNumber(u_ct)) {
-            uint64_t sum = 0;
-            if (cJSON_IsNumber(u_pt))
-                sum += (uint64_t)(u_pt->valuedouble > 0 ? u_pt->valuedouble : 0);
-            if (cJSON_IsNumber(u_ct))
-                sum += (uint64_t)(u_ct->valuedouble > 0 ? u_ct->valuedouble : 0);
-            *out_tokens = sum;
-        }
-    } else if (cJSON_IsNumber(total)) {
-        *out_tokens = (uint64_t)(total->valuedouble > 0 ? total->valuedouble : 0);
-    }
-    if (out_cost) {
-        cJSON *cost = result ? cJSON_GetObjectItem(result, "cost_usd") : NULL;
-        if (cJSON_IsNumber(cost))
-            *out_cost = cost->valuedouble;
-    }
-    cJSON_Delete(root);
-    return 0;
+    if (buf != stackbuf)
+        AIRY_FREE(buf);
 }
 
-/* 提取 llm_d 响应的 tool_calls 数组。 */
-static int run_parse_tool_calls(const char *llm_resp, cJSON **out_tool_calls)
+/* 释放一次流消费的产物（已接管字段调用方先行摘除）。 */
+static void run_stream_result_free(agent_stream_result_t *sr)
 {
-    *out_tool_calls = NULL;
-    cJSON *root = cJSON_Parse(llm_resp);
-    if (!root)
-        return -1;
-    /* 与 run_parse_result 同一双重解包修复：daemon_rpc_call 已解包外层。 */
-    cJSON *result = cJSON_GetObjectItem(root, "result");
-    if (!cJSON_IsObject(result))
-        result = root;
-    cJSON *choices = cJSON_GetObjectItem(result, "choices");
-    cJSON *choice0 =
-        (choices && cJSON_GetArraySize(choices) > 0) ? cJSON_GetArrayItem(choices, 0) : NULL;
-    cJSON *tc = choice0 ? cJSON_GetObjectItem(choice0, "tool_calls") : NULL;
-    if (cJSON_IsArray(tc) && cJSON_GetArraySize(tc) > 0)
-        *out_tool_calls = cJSON_Duplicate(tc, 1);
-    cJSON_Delete(root);
-    return *out_tool_calls ? 0 : -1;
+    AIRY_FREE(sr->text);
+    AIRY_FREE(sr->reason);
+    if (sr->tools)
+        cJSON_Delete(sr->tools);
+    AIRY_MEMSET(sr, 0, sizeof(*sr));
 }
 
 /* 单个工具执行：tool_d.execute_tool（结果文本化，失败转 Error: 前缀）。 */
@@ -209,18 +176,17 @@ static int run_fail_streak_bump(int *streak, int tool_rc)
     return *streak >= AGENT_RUN_TOOL_FAIL_LIMIT;
 }
 
-int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *model,
-                        const agent_run_session_t *session, const agent_run_event_sink_t *sink,
-                        cJSON **out_trace, char **out_text, uint64_t *out_tokens, double *out_cost,
-                        char **out_reasoning)
+int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result_t *out)
 {
-    *out_trace = NULL;
-    *out_text = NULL;
-    *out_tokens = 0;
-    if (out_cost)
-        *out_cost = 0.0;
-    if (out_reasoning)
-        *out_reasoning = NULL;
+    if (!args || !out)
+        return -1;
+    AIRY_MEMSET(out, 0, sizeof(*out));
+
+    const char *prompt = args->prompt;
+    const cJSON *history = args->history;
+    const char *model = args->model;
+    const agent_run_session_t *session = args->session;
+    const agent_run_event_sink_t *sink = args->sink;
 
     cJSON *messages = NULL;
     if (history && cJSON_IsArray(history) && cJSON_GetArraySize(history) > 0) {
@@ -232,6 +198,21 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
         cJSON_AddStringToObject(msg0, "role", "user");
         cJSON_AddStringToObject(msg0, "content", prompt);
         cJSON_AddItemToArray(messages, msg0);
+    }
+    /* 0.1.18 B1 轮次归属约束：请求携带多条消息（真实历史）时头插 system，
+     * 声明历史仅供指代消解——修复模型把多轮历史视为同一篇待续写文本、
+     * 对旧题续答的上下文串轮。单条消息无需注入（无串轮源）。 */
+    if (cJSON_GetArraySize(messages) > 1) {
+        cJSON *sys = cJSON_CreateObject();
+        if (sys) {
+            cJSON_AddStringToObject(sys, "role", "system");
+            cJSON_AddStringToObject(sys, "content",
+                "【轮次边界】本次请求携带了历史消息。历史消息仅供指代消解与背景"
+                "理解；你的回答必须直接回应最后一条用户消息。若历史主题与最后"
+                "一条用户消息不一致，以最后一条用户消息为准，禁止延续历史主题"
+                "作答，禁止续写历史中未完成的回答。");
+            cJSON_InsertItemInArray(messages, 0, sys);
+        }
     }
     cJSON *tool_trace = cJSON_CreateArray();
     if (!messages || !tool_trace) {
@@ -246,6 +227,8 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
     char *reasoning_acc = NULL;
     uint64_t total_tokens = 0;
     double total_cost = 0.0;
+    uint64_t llm_ms = 0;
+    uint64_t tool_ms = 0;
     int rc = -1;
     uint64_t seq = 0;
     const char *sess = session ? session->session_id : NULL;
@@ -284,23 +267,51 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
         char *llm_params_str = run_build_llm_params(model, messages);
         if (!llm_params_str)
             break;
-        char *llm_resp = NULL;
-        int lrc = daemon_rpc_call(llm_sock, "complete", llm_params_str, &llm_resp,
-                                  AGENT_RUN_LLM_TIMEOUT_MS);
+
+        /* complete_stream：正文增量在收流过程中即时上屏（run_emit_delta），
+         * 控制帧由解帧器累积为 tool_calls / reasoning / usage / error。 */
+        agent_stream_t stream;
+        run_delta_ctx_t dctx = {sink, &seq, session ? session->run_id : NULL, sess};
+        agent_stream_sink_t ssink = {run_emit_delta, &dctx};
+        agent_stream_init(&stream, &ssink);
+
+        uint64_t llm_t0 = airy_time_ms();
+        int lrc = daemon_rpc_call_stream(llm_sock, "complete_stream", llm_params_str,
+                                         agent_stream_on_chunk, &stream, AGENT_RUN_LLM_TIMEOUT_MS);
+        llm_ms += airy_time_ms() - llm_t0;
         AIRY_FREE(llm_params_str);
-        if (lrc != AIRY_SUCCESS || !llm_resp)
+        agent_stream_finish(&stream);
+
+        agent_stream_result_t sr;
+        agent_stream_take(&stream, &sr);
+        agent_stream_free(&stream);
+
+        if (lrc != AIRY_SUCCESS) {
+            SVC_LOG_ERROR("agent.run: llm complete_stream failed (rc=%d, session=%s)", lrc,
+                          sess ? sess : "?");
+            run_stream_result_free(&sr);
             break;
+        }
+        if (sr.error_code != 0) {
+            SVC_LOG_ERROR("agent.run: llm stream error %d (%s)", sr.error_code, sr.error_msg);
+            run_stream_result_free(&sr);
+            break;
+        }
 
-        cJSON *tool_calls = NULL;
-        run_parse_tool_calls(llm_resp, &tool_calls);
-
-        char *text = NULL;
-        char *reasoning = NULL;
-        uint64_t tokens = 0;
-        double cost = 0.0;
-        run_parse_result(llm_resp, &text, &tokens, &cost, &reasoning);
+        cJSON *tool_calls = sr.tools;
+        char *text = sr.text;
+        char *reasoning = sr.reason;
+        uint64_t tokens = sr.tokens;
+        sr.tools = NULL;
+        sr.text = NULL;
+        sr.reason = NULL;
+        /* 空数组与「无 tool_calls」同义（旧解析器同判）：本轮即终局回复。 */
+        if (tool_calls && cJSON_GetArraySize(tool_calls) == 0) {
+            cJSON_Delete(tool_calls);
+            tool_calls = NULL;
+        }
         total_tokens += tokens;
-        total_cost += cost;
+        total_cost += sr.cost;
         if (reasoning && reasoning[0]) {
             size_t old = reasoning_acc ? strlen(reasoning_acc) : 0;
             size_t add = strlen(reasoning);
@@ -323,20 +334,9 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
         cJSON_AddItemToArray(messages, assistant_msg);
         agent_ledger_add(&lg, "assistant", text ? text : "", (size_t)tokens, assistant_msg);
 
-        /* token_delta 事件（run_stream 流式推送；整块文本一次推送） */
-        if (sink && sink->emit && text && text[0]) {
-            cJSON *td = cJSON_CreateObject();
-            if (td) {
-                char dbuf[AGENT_RUN_DELTA_MAX];
-                AIRY_STRNCPY_TERM(dbuf, text, sizeof(dbuf));
-                cJSON_AddStringToObject(td, AIRY_RS_K_DELTA, dbuf);
-                agent_run_emit_event(sink, &seq, session ? session->run_id : NULL, sess, AIRY_RS_TYPE_TOKEN_DELTA, td);
-            }
-        }
-
         if (!tool_calls) {
-            final_text = text ? text : AIRY_STRDUP("");
-            AIRY_FREE(llm_resp);
+            final_text = text;
+            text = NULL;
             rc = 0;
             break;
         }
@@ -367,7 +367,9 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
             }
 
             char *result_text = NULL;
+            uint64_t tool_t0 = airy_time_ms();
             int erc = run_execute_tool(tname, targs, &result_text);
+            tool_ms += airy_time_ms() - tool_t0;
 
             /* C-1 连败计数：本次失败仍完整入账/推送后再判断熔断出口。 */
             if (run_fail_streak_bump(&fail_streak, erc)) {
@@ -412,7 +414,6 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
         }
 
         cJSON_Delete(tool_calls);
-        AIRY_FREE(llm_resp);
 
         if (fused) {
             /* C-1 熔断终局：止损退出（不再消耗 LLM 轮次），原因经
@@ -432,20 +433,18 @@ int agent_run_tool_loop(const char *prompt, const cJSON *history, const char *mo
     cJSON_Delete(messages);
 
     if (rc == 0 || rc == AGENT_RUN_RC_TOOL_FUSE) {
-        *out_trace = tool_trace;
-        *out_text = final_text;
-        *out_tokens = total_tokens;
-        if (out_cost)
-            *out_cost = total_cost;
-        if (out_reasoning) {
-            *out_reasoning = reasoning_acc;
-            reasoning_acc = NULL;
-        }
+        out->trace = tool_trace;
+        out->text = final_text;
+        out->reason = reasoning_acc;
+        out->tokens = total_tokens;
+        out->cost = total_cost;
+        out->llm_ms = llm_ms;
+        out->tool_ms = tool_ms;
     } else {
         if (final_text)
             AIRY_FREE(final_text);
         cJSON_Delete(tool_trace);
+        AIRY_FREE(reasoning_acc);
     }
-    AIRY_FREE(reasoning_acc);
     return rc;
 }

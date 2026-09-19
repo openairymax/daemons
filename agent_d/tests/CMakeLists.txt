@@ -14,12 +14,14 @@ set(AGENT_TEST_SOURCES
     test_service.c
     test_run_ledger.c
     test_run_loop.c
+    test_run_stream.c
 )
 
 set(AGENT_COMMON_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
     ${COMMONS_DIR}
+    ${COMMONS_DIR}/include
     ${COMMONS_DIR}/platform/include
     ${COMMONS_DIR}/utils/error
     ${COMMONS_DIR}/utils/logging
@@ -40,11 +42,12 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
 
     add_executable(test_agent_${TEST_NAME} ${TEST_SRC})
 
-    # white-box include 引擎源的测试需同编引擎闭环符号（engine/ledger）。
+    # white-box include 引擎源的测试需同编引擎闭环符号（engine/ledger/stream）。
     if(TEST_NAME STREQUAL "test_run_loop")
         target_sources(test_agent_${TEST_NAME} PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/agent_run_engine.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/agent_run_ledger.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/agent_run_stream.c
         )
     endif()
 

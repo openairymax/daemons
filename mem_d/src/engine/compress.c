@@ -5,8 +5,9 @@
  * @file compress.c
  * @brief 提示词压缩实现（见 compress.h）。
  *
- * L1 规则裁剪（默认开）→ L2 抽取式摘要（默认开），L3（LLM 摘要）按
- * 14-prompt-compression.md §3 需 A/B 门禁达标后才灰度，本版不实现。
+ * L1 规则裁剪（默认开）→ L2 抽取式摘要（默认关，须过 A/B 门禁再灰度），
+ * L3（LLM 摘要）按 14-prompt-compression.md §3 需 A/B 门禁达标后才灰度，
+ * 本版不实现。L2 门禁判定见 mem_compress_gate_pass（fail-closed）。
  * 压缩产物与原始条目映射保留于台账（ref_id），可经 ledger.history 回放。
  */
 
@@ -316,6 +317,25 @@ static uint64_t text_hash(const char *s)
     return h;
 }
 
+/* ─── L2 A/B 门禁 ─────────────────────────────────────────────────────── */
+
+int mem_compress_gate_pass(const compress_gate_t *gate)
+{
+    if (!gate)
+        return 0; /* fail-closed：无门禁输入不放行 */
+    if (!gate->grayscale_enabled)
+        return 0;
+    if (!(gate->acr >= 0.0) || gate->acr > 1.0)
+        return 0; /* 负数 / NaN / 越界 → 数据不可用 */
+    if (!(gate->ttft_ms >= 0.0))
+        return 0;
+    if (gate->acr < COMPRESS_GATE_MIN_ACR)
+        return 0;
+    if (gate->ttft_ms > COMPRESS_GATE_MAX_TTFT_MS)
+        return 0;
+    return 1;
+}
+
 /* ─── 主流程 ───────────────────────────────────────────────────────────── */
 
 int mem_compress_plan(mem_ledger_t *ledger, const char *session_id,
@@ -328,8 +348,9 @@ int mem_compress_plan(mem_ledger_t *ledger, const char *session_id,
         .max_tool_tokens = COMPRESS_DEFAULT_MAX_TOOL_TOKENS,
         .max_turns = COMPRESS_DEFAULT_MAX_TURNS,
         .l1_enabled = 1,
-        .l2_enabled = 1,
+        .l2_enabled = 0, /* 默认关：高风险改写须过 A/B 门禁再灰度 */
         .dedup = 1,
+        .gate = { .grayscale_enabled = 0, .acr = -1.0, .ttft_ms = -1.0 },
     };
     size_t i;
     int *act;
@@ -352,6 +373,7 @@ int mem_compress_plan(mem_ledger_t *ledger, const char *session_id,
         dc.l1_enabled = cfg->l1_enabled;
         dc.l2_enabled = cfg->l2_enabled;
         dc.dedup = cfg->dedup;
+        dc.gate = cfg->gate;
     }
     if (count == 0)
         return AIRY_SUCCESS; /* 空窗口 → 无压缩 */
@@ -361,7 +383,8 @@ int mem_compress_plan(mem_ledger_t *ledger, const char *session_id,
     hashes = AIRY_CALLOC(count, sizeof(uint64_t));
     tokens = AIRY_CALLOC(count, sizeof(size_t));
     actions = AIRY_CALLOC(count, sizeof(compress_plan_item_t));
-    counter = airy_token_counter_create("gpt-4");
+    /* 计数模型与台账同源（声明注入；ledger 为空 → 默认模型） */
+    counter = airy_token_counter_create(mem_ledger_token_model(ledger));
     if (!act || !repl || !hashes || !tokens || !actions || !counter) {
         AIRY_FREE(act);
         for (i = 0; i < count; i++) AIRY_FREE(repl ? repl[i] : NULL);
@@ -490,8 +513,10 @@ int mem_compress_plan(mem_ledger_t *ledger, const char *session_id,
             hashes[i] = text_hash(entries[i].text);
     }
 
-    /* L2：L1 后仍超预算则对历史 assistant/user 抽取关键句 */
-    if (dc.l2_enabled) {
+    /* L2：L1 后仍超预算则对历史 assistant/user 抽取关键句。
+     * 生效须双条件：显式开启 且 A/B 门禁放行（fail-closed）。 */
+    int l2_active = dc.l2_enabled && mem_compress_gate_pass(&dc.gate);
+    if (l2_active) {
         size_t budget = 0, headroom = 0;
         if (ledger)
             mem_ledger_budget(ledger, session_id, NULL, &budget, &headroom);

@@ -182,6 +182,8 @@ static void mem_cache_save(const char *text, const char *model, const char *resp
     cJSON_AddStringToObject(req, "text", text);
     cJSON_AddStringToObject(req, "response", resp_json);
     cJSON_AddStringToObject(req, "model_id", model);
+    /* B5-3：仅在 cache_store 准入门禁通过后才会到达此处，故显式声明可缓存 */
+    cJSON_AddBoolToObject(req, "cacheable", 1);
     char *params = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
     if (!params) {
@@ -345,11 +347,17 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
 
 /**
  * @brief 两级写入：L0 进程内 LRU + L1 mem_d 语义缓存
+ *
+ * B5-3 准入门禁（fail-closed）：调用方未显式声明 cacheable 时两级均不写入，
+ * 含敏感面的请求由 mem_d 侧 mem_cache_admit() 二次拒绝。
  */
 static void cache_store(llm_service_t *svc, const char *key, const char *text, const char *model,
-                        llm_response_t *resp)
+                        llm_response_t *resp, int cacheable)
 {
     if (!svc || !key || !text || !model || !resp) {
+        return;
+    }
+    if (!cacheable) {
         return;
     }
 
@@ -522,7 +530,7 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
 
     note_truncation(resp, eff_model, eff_max_tokens);
     update_cost_tracking(svc, eff_model, resp);
-    cache_store(svc, cache_key, cache_text, manager->model, resp);
+    cache_store(svc, cache_key, cache_text, manager->model, resp, manager->cacheable);
 
     *out_response = resp;
     AIRY_FREE(cache_text);
