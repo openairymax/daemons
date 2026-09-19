@@ -13,7 +13,9 @@
 #include "cache.h"
 #include "airy_memory.h"
 #include "error.h"
+#include "log_sanitizer.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -513,6 +515,56 @@ static void cache_id_gen(mem_cache_t *cache, char out[CACHE_ID_HEX + 1])
              (uint32_t)(r & 0xFFFFFFFFUL), (uint32_t)((unsigned long)++cache->seq & 0xFFFFFFFFUL));
 }
 
+/* ─── B5-3 缓存准入（fail-closed） ──────────────────────────────────── */
+
+/* 私有路径：命中即拒（不区分大小写）。 */
+static const char *const CACHE_DENY_PATHS[] = {
+    "/home/", "/users/", "/root/", "c:\\users\\", "~/",
+    ".ssh", ".aws", ".gnupg", ".netrc", ".kube/config",
+};
+
+/* 裸文本密钥前缀：log_sanitizer 默认模式仅覆盖属性式字段（api_key=…），
+ * 不含裸串，机制侧自行叠加（区分大小写）。 */
+static const char *const CACHE_DENY_PREFIXES[] = {
+    "sk-", "ghp_", "gho_", "github_pat_", "xoxb-", "xoxp-", "AKIA",
+    "-----BEGIN ",
+};
+
+static int cache_contains_ci(const char *haystack, const char *needle)
+{
+    size_t nl = strlen(needle);
+    if (nl == 0 || strlen(haystack) < nl)
+        return 0;
+    for (const char *p = haystack; *p; p++) {
+        size_t i = 0;
+        while (i < nl && p[i] != '\0' &&
+               tolower((unsigned char)p[i]) == tolower((unsigned char)needle[i]))
+            i++;
+        if (i == nl)
+            return 1;
+    }
+    return 0;
+}
+
+int mem_cache_admit(const char *text)
+{
+    if (!text || !*text)
+        return 0;
+
+    if (log_contains_sensitive(text))
+        return 0;
+
+    for (size_t i = 0; i < sizeof(CACHE_DENY_PATHS) / sizeof(CACHE_DENY_PATHS[0]); i++) {
+        if (cache_contains_ci(text, CACHE_DENY_PATHS[i]))
+            return 0;
+    }
+    for (size_t i = 0; i < sizeof(CACHE_DENY_PREFIXES) / sizeof(CACHE_DENY_PREFIXES[0]); i++) {
+        if (strstr(text, CACHE_DENY_PREFIXES[i]) != NULL)
+            return 0;
+    }
+    return 1;
+}
+
 int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
                   const char *model_id, uint64_t ttl_ms,
                   char **out_cache_id, char **out_exact_key)
@@ -712,7 +764,7 @@ void mem_cache_stats(mem_cache_t *cache, mem_cache_stats_t *out)
     out->misses = cache->misses;
     out->hit_rate = (cache->hits + cache->misses) > 0
                         ? (double)cache->hits / (double)(cache->hits + cache->misses)
-                        : 0.0;
+                        : -1.0; /* 无样本 → 不可用，不得伪零（§2.1-6） */
     out->evictions = cache->evictions;
     out->bytes = total;
 }

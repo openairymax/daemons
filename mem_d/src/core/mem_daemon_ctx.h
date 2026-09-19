@@ -29,6 +29,8 @@ extern "C" {
 
 #define MEM_DEFAULT_MAX_RECORDS 1024
 #define MAX_CLIENTS 64
+/* token 计数模型名上限（含终止符）；空串 → 默认模型 */
+#define MEM_TOKEN_MODEL_MAX 64
 
 typedef struct {
     char *socket_path;
@@ -37,6 +39,16 @@ typedef struct {
     int use_tcp;
     int max_clients;
     size_t max_records;
+    /* B5：L2 压缩 A/B 门禁策略（声明注入，默认 fail-closed 全关）。
+     * 策略值来自 config 的 "compress" 段 / 环境变量，改动不触发重编译。 */
+    int compress_l1_enabled;
+    int compress_l2_enabled;
+    int compress_gate_grayscale;
+    double compress_gate_acr;
+    double compress_gate_ttft_ms;
+    /* B5：台账计数模型（声明注入）。取自 config 的 "token.model" 段 /
+     * AIRY_MEM_TOKEN_MODEL；空 → 默认模型，不得硬编码厂商模型名。 */
+    char token_model[MEM_TOKEN_MODEL_MAX];
 } mem_daemon_config_t;
 
 /* ── Global service instances (defined in main.c) ─────────────────────── */

@@ -11,7 +11,7 @@
  *
  * 依赖调用面：
  *   - think_d.process      （GCCP 双思考）
- *   - llm_d.complete       （工具循环主模型）
+ *   - llm_d.complete_stream（工具循环主模型，RS 分帧增量）
  *   - tool_d.execute_tool  （工具执行）
  *   - mem_d.write          （会话持久化）
  * 统一经 daemon_rpc_client（Unix socket JSON-RPC）调用，与 agent_d

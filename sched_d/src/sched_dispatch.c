@@ -80,7 +80,7 @@ static int sched_dispatch_task(const char *role, const char *task_description,
 
     cJSON *spec = cJSON_CreateObject();
     cJSON_AddStringToObject(spec, "role", role);
-    cJSON_AddStringToObject(spec, "language", "python");
+    /* B7：不硬编码 language——未声明时由 agent_d 缺省兜底（python）。 */
     char *spec_str = cJSON_PrintUnformatted(spec);
     cJSON_Delete(spec);
     if (!spec_str)

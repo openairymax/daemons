@@ -25,11 +25,25 @@ void handle_cache_put(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *response = cJSON_GetObjectItem(params, "response");
     cJSON *model_id = cJSON_GetObjectItem(params, "model_id");
     cJSON *ttl = cJSON_GetObjectItem(params, "ttl");
+    cJSON *cacheable = cJSON_GetObjectItem(params, "cacheable");
 
     if (!g_cache || !text || !cJSON_IsString(text) || !response || !cJSON_IsString(response) ||
         !model_id || !cJSON_IsString(model_id)) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
                            "cache_put 需 text/response/model_id 字符串", id);
+        return;
+    }
+
+    /* B5-3 准入门禁（fail-closed）：未显式声明 cacheable，或文本命中
+     * 用户敏感面（凭据 / 私有路径 / 密钥前缀），均拒绝写入。 */
+    int declared_cacheable = cJSON_IsBool(cacheable) && cJSON_IsTrue(cacheable);
+    if (!declared_cacheable || !mem_cache_admit(text->valuestring)) {
+        cJSON *result = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result, "ok", 0);
+        cJSON_AddBoolToObject(result, "cached", 0);
+        cJSON_AddStringToObject(result, "reason",
+                                declared_cacheable ? "sensitive_text" : "not_cacheable");
+        JSONRPC_SEND_SUCCESS(client_fd, result, id);
         return;
     }
 
@@ -126,7 +140,9 @@ cJSON *mem_cache_stats_json(void)
     cJSON_AddNumberToObject(result, "entries", (double)st.entries);
     cJSON_AddNumberToObject(result, "hits", (double)st.hits);
     cJSON_AddNumberToObject(result, "misses", (double)st.misses);
+    /* hit_rate 为负表示无查询样本：显式标注不可用，不得伪零（§2.1-6） */
     cJSON_AddNumberToObject(result, "hit_rate", st.hit_rate);
+    cJSON_AddBoolToObject(result, "hit_rate_available", st.hit_rate >= 0.0 ? 1 : 0);
     cJSON_AddNumberToObject(result, "evictions", (double)st.evictions);
     cJSON_AddNumberToObject(result, "bytes", (double)st.bytes);
     return result;
