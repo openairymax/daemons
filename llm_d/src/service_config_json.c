@@ -23,7 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "llm_service_internal.h"
+#include "config/internal.h"
 
 /**
  * @brief Load model config from JSON (providers array).

@@ -8,7 +8,7 @@
  *        machine to convert models[].input/output_cost_per_1k into
  *        pricing_rule_t entries.
  *
- * 状态机与 kv map 经 llm_service_internal.h 的 HAVE_YAML 节共享。
+ * 状态机与 kv map 经 config/types.h 共享。
  */
 
 #include "airy_memory.h"
@@ -19,7 +19,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "llm_service_internal.h"
+#include "config/internal.h"
+#include "config/types.h"
 
 #ifdef HAVE_YAML
 

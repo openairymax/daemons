@@ -23,7 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "llm_service_internal.h"
+#include "rpc/internal.h"
 
 /* 语义缓存（mem_d）RPC 超时：缓存是可选加速层，本地 socket 往返毫秒级，
  * 此处仅需给出上界以保证 mem_d 繁忙时不拖慢主链路（13-semantic-cache
