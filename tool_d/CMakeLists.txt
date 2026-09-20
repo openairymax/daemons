@@ -106,6 +106,8 @@ target_include_directories(airy_tool_service PUBLIC
 target_include_directories(airy_tool_service PRIVATE
     ${CJSON_INCLUDE_DIRS}
     ${YAML_INCLUDE_DIRS}
+    # B16-S0：跨 daemon 头依赖显式化（svc_common 不再代传 llm_d/include）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../llm_d/include
 )
 
 # 链接库：svc_common 提供 daemon 公共层，cupolas 提供 SafetyGuard
