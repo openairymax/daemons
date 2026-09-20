@@ -38,7 +38,6 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/toolstream.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/openai.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/rate_limit.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/openai_stream.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/anthropic.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/deepseek.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/google.c

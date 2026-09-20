@@ -3,18 +3,16 @@
 
 #include "airy_memory.h"
 
-#include <cjson/cJSON.h>
-
-#include <cjson_helpers.h>
 #include "error.h"
 /**
  * @file local.c
- * @brief Local-model adapter (OpenAI-compatible format).
+ * @brief Local-model adapter（OpenAI 兼容协议，无鉴权本地端点）。
  *
- * Improvements:
- * 1. Uses the common Provider infrastructure
- * 2. Code reduced from ~370 to ~140 lines
- * 3. Duplication with openai.c/deepseek.c eliminated
+ * B16-S3 c6：流式累积器与流末装配收敛 core/toolstream.c（与 openai/
+ * deepseek 共用 provider_stream_acc_t 四件套；本地端点不产
+ * reasoning_content，core 对应分支自然旁路）。请求头保持 Content-Type
+ * 单头——本地服务无鉴权是设计使然，不走 provider_openai_headers 以免
+ * 无密钥告警噪音。适配层只留厂商差异面（默认端点/模型、超时、日志）。
  */
 
 #include "daemon_errors.h"
@@ -25,7 +23,6 @@
 
 #include <curl/curl.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 /* 代码级默认端点：仅当调用方未传 base_url 时使用。部署标准配置
@@ -101,9 +98,6 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    size_t req_body_len = strlen(req_body);
-    (void)req_body_len;
-
     char url[1024];
     snprintf(url, sizeof(url), "%s/chat/completions", base->api_base);
 
@@ -112,10 +106,6 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
 
     provider_http_resp_t *http_resp = NULL;
     long http_code = 0;
-
-    SVC_LOG_DEBUG("C-L02: LOCAL: HTTP-POST url=%s body_len=%zu timeout=%.1fs retries=%d "
-                  "(no auth, local endpoint)",
-                  url, req_body_len, base->timeout_sec, base->max_retries);
 
     int ret = provider_http_post(url, headers, req_body, base->timeout_sec, base->max_retries,
                                  &http_resp, &http_code);
@@ -132,32 +122,20 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
     }
 
     if (http_code != 200) {
-        size_t resp_body_len = http_resp ? strlen(http_resp->data) : 0;
-        SVC_LOG_ERROR(
-            "C-L02: LOCAL: COMPLETE-FAIL — HTTP error "
-            "url=%s http_code=%ld resp_body_len=%zu "
-            "DIAGNOSIS: %s "
-            "STACK: provider_http_post() → local_complete()",
-            url, http_code, resp_body_len,
-            (http_code == 401) ? "invalid API key (but local should not use auth)" :
-            (http_code == 429) ? "rate limited" :
-            (http_code == 500) ? "local server internal error" :
-            (http_code == 503) ? "local service unavailable — check if model server is running" :
-                                 "check local endpoint URL and model server status");
+        size_t resp_body_len = (http_resp && http_resp->data) ? strlen(http_resp->data) : 0;
+        SVC_LOG_ERROR("C-L02: LOCAL: COMPLETE-FAIL — HTTP error "
+                      "url=%s http_code=%ld resp_body_len=%zu DIAGNOSIS=%s BODY: %.300s",
+                      url, http_code, resp_body_len, provider_http_err_diag(http_code),
+                      (http_resp && http_resp->data) ? http_resp->data : "");
         provider_http_resp_free(http_resp);
-        return AIRY_ERR_IO;
+        return provider_http_err_map(http_code, AIRY_ERR_IO);
     }
-
-    size_t resp_body_len = http_resp ? strlen(http_resp->data) : 0;
-    SVC_LOG_DEBUG("C-L02: LOCAL: HTTP-RESPONSE http_code=%ld resp_body_len=%zu", http_code,
-                  resp_body_len);
 
     ret = provider_parse_openai_response(http_resp->data, out_response);
     if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: LOCAL: COMPLETE-FAIL — response parse failed "
-                      "ret=%d resp_body_len=%zu "
-                      "STACK: provider_parse_openai_response() → local_complete()",
-                      ret, resp_body_len);
+                      "ret=%d STACK: provider_parse_openai_response() → local_complete()",
+                      ret);
     } else if (*out_response) {
         SVC_LOG_INFO("C-L02: LOCAL: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
                      "finish_reason=%s",
@@ -172,148 +150,8 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
     return ret;
 }
 
-typedef struct {
-    llm_stream_callback_t user_cb;
-    void *user_data;
-    char *acc_content;
-    size_t acc_cap;
-    size_t acc_len;
-    char *resp_id;
-    char *resp_model;
-    uint64_t resp_created;
-    char *finish_reason;
-    /* Streaming usage accumulation: local OpenAI-compatible endpoints
-     * (Ollama/vLLM/llama.cpp) attach the usage block in the final chunk when
-     * stream_options.include_usage is set; parse it so streaming token
-     * stats are not always zero. */
-    uint32_t prompt_tokens;
-    uint32_t completion_tokens;
-    uint32_t total_tokens;
-    uint32_t reasoning_tokens;
-    provider_tool_acc_t tools;
-} loc_stream_acc_t;
-
-static int loc_stream_on_chunk(const char *json_line, void *userdata)
-{
-    loc_stream_acc_t *acc = (loc_stream_acc_t *)userdata;
-
-    CJSON_PARSE_GUARD(root, json_line, { return 0; });
-
-    if (!acc->resp_id) {
-        cJSON *id = cJSON_GetObjectItem(root, "id");
-        if (cJSON_IsString(id) && id->valuestring)
-            acc->resp_id = AIRY_STRDUP(id->valuestring);
-    }
-
-    if (!acc->resp_model) {
-        cJSON *model = cJSON_GetObjectItem(root, "model");
-        if (cJSON_IsString(model) && model->valuestring)
-            acc->resp_model = AIRY_STRDUP(model->valuestring);
-    }
-
-    cJSON *created = cJSON_GetObjectItem(root, "created");
-    if (cJSON_IsNumber(created) && acc->resp_created == 0)
-        acc->resp_created = (uint64_t)created->valuedouble;
-
-    cJSON *choices = cJSON_GetObjectItem(root, "choices");
-    if (cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0) {
-        cJSON *choice = cJSON_GetArrayItem(choices, 0);
-        cJSON *delta = cJSON_GetObjectItem(choice, "delta");
-        if (delta) {
-            cJSON *content = cJSON_GetObjectItem(delta, "content");
-            if (cJSON_IsString(content) && content->valuestring) {
-                const char *text = content->valuestring;
-                size_t tlen = strlen(text);
-
-                if (acc->user_cb)
-                    acc->user_cb(text, acc->user_data);
-
-                if (tlen > 0) {
-                    size_t needed = acc->acc_len + tlen + 1;
-                    if (needed > acc->acc_cap) {
-                        size_t new_cap = acc->acc_cap * 2;
-                        while (new_cap < needed)
-                            new_cap *= 2;
-                        char *ptr = (char *)AIRY_REALLOC(acc->acc_content, new_cap);
-                        if (ptr) {
-                            acc->acc_content = ptr;
-                            acc->acc_cap = new_cap;
-                        }
-                    }
-                    if (acc->acc_content && acc->acc_len + tlen < acc->acc_cap) {
-                        __builtin_memcpy(acc->acc_content + acc->acc_len, text, tlen);
-                        acc->acc_len += tlen;
-                        acc->acc_content[acc->acc_len] = '\0';
-                    }
-                }
-            }
-
-            provider_tool_delta(&acc->tools, delta);
-        }
-
-        cJSON *fr = cJSON_GetObjectItem(choice, "finish_reason");
-        if (cJSON_IsString(fr) && fr->valuestring && strcmp(fr->valuestring, "null") != 0) {
-            AIRY_FREE(acc->finish_reason);
-            acc->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(fr->valuestring));
-        }
-    }
-
-    /* 流式末尾 chunk 携带 usage（include_usage 时最后 chunk 仅 usage 无
-     * choices）。最后一次解析覆盖前面（usage 在流末尾最完整）。 */
-    cJSON *usage = cJSON_GetObjectItem(root, "usage");
-    if (cJSON_IsObject(usage)) {
-        cJSON *pt = cJSON_GetObjectItem(usage, "prompt_tokens");
-        cJSON *ct = cJSON_GetObjectItem(usage, "completion_tokens");
-        cJSON *tt = cJSON_GetObjectItem(usage, "total_tokens");
-        if (cJSON_IsNumber(pt))
-            acc->prompt_tokens = (uint32_t)pt->valuedouble;
-        if (cJSON_IsNumber(ct))
-            acc->completion_tokens = (uint32_t)ct->valuedouble;
-        if (cJSON_IsNumber(tt))
-            acc->total_tokens = (uint32_t)tt->valuedouble;
-        cJSON *rt = cJSON_GetObjectItem(usage, "reasoning_tokens");
-        if (!cJSON_IsNumber(rt)) {
-            cJSON *details = cJSON_GetObjectItem(usage, "completion_tokens_details");
-            if (cJSON_IsObject(details))
-                rt = cJSON_GetObjectItem(details, "reasoning_tokens");
-        }
-        if (cJSON_IsNumber(rt))
-            acc->reasoning_tokens = (uint32_t)rt->valuedouble;
-    }
-
-    return 0;
-}
-
-static llm_response_t *loc_build_stream_response(loc_stream_acc_t *acc)
-{
-    llm_response_t *resp = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
-    if (!resp) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-
-    resp->id = acc->resp_id ? acc->resp_id : AIRY_STRDUP("");
-    acc->resp_id = NULL;
-    resp->model = acc->resp_model ? acc->resp_model : AIRY_STRDUP("unknown");
-    acc->resp_model = NULL;
-    resp->created = acc->resp_created;
-    resp->choices = (llm_message_t *)AIRY_CALLOC(1, sizeof(llm_message_t));
-    if (resp->choices) {
-        resp->choice_count = 1;
-        resp->choices[0].role = AIRY_STRDUP("assistant");
-        resp->choices[0].content = acc->acc_content;
-        acc->acc_content = NULL;
-    } else {
-        resp->choice_count = 0;
-    }
-    resp->finish_reason = acc->finish_reason ? acc->finish_reason : AIRY_STRDUP(LLM_FINISH_STOP);
-    acc->finish_reason = NULL;
-    resp->prompt_tokens = acc->prompt_tokens;
-    resp->completion_tokens = acc->completion_tokens;
-    resp->total_tokens = acc->total_tokens;
-    resp->reasoning_tokens = acc->reasoning_tokens;
-    return resp;
-}
-
+/* 流式 completion：SSE 传输 → core 累积器（provider_openai_on_chunk）→
+ * 流末装配（provider_openai_stream_take）。本函数只编排，不持协议状态。 */
 static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_config_t *manager,
                                  llm_stream_callback_t callback, void *user_data,
                                  llm_response_t **out_response)
@@ -352,45 +190,28 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/json");
 
-    loc_stream_acc_t acc;
-    __builtin_memset(&acc, 0, sizeof(acc));
-    acc.user_cb = callback;
-    acc.user_data = user_data;
-    acc.acc_cap = 4096;
-    acc.acc_content = (char *)AIRY_MALLOC(acc.acc_cap);
-
-    SVC_LOG_DEBUG("C-L02: LOCAL: STREAM-HTTP-POST url=%s body_len=%zu timeout=%.1fs "
-                  "(no auth, local endpoint)",
-                  url, strlen(req_body), base->timeout_sec);
+    provider_stream_acc_t acc;
+    provider_stream_acc_init(&acc, callback, user_data);
 
     long http_code = 0;
     int ret = provider_http_post_stream(url, headers, req_body, base->timeout_sec,
-                                        base->max_retries, loc_stream_on_chunk, &acc, &http_code);
+                                        base->max_retries, provider_openai_on_chunk, &acc,
+                                        &http_code);
 
     curl_slist_free_all(headers);
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: LOCAL: STREAM-FAIL — HTTP stream error "
-                      "url=%s http_code=%ld ret=%d timeout=%.1fs "
-                      "STACK: provider_http_post_stream() → local_complete_stream()",
-                      url, http_code, ret, base->timeout_sec);
-        AIRY_FREE(acc.acc_content);
-        AIRY_FREE(acc.resp_id);
-        AIRY_FREE(acc.resp_model);
-        AIRY_FREE(acc.finish_reason);
-        provider_tool_free(&acc.tools);
-        return ret;
+                      "url=%s http_code=%ld ret=%d DIAGNOSIS=%s",
+                      url, http_code, ret, provider_http_err_diag(http_code));
+        provider_stream_acc_free(&acc);
+        return provider_http_err_map(http_code, ret);
     }
 
-    llm_response_t *resp = loc_build_stream_response(&acc);
-    AIRY_FREE(acc.acc_content);
-    AIRY_FREE(acc.resp_id);
-    AIRY_FREE(acc.resp_model);
-    AIRY_FREE(acc.finish_reason);
-
+    llm_response_t *resp = provider_openai_stream_take(&acc);
     provider_tool_flush(&acc.tools, resp, callback, user_data);
-    provider_tool_free(&acc.tools);
+    provider_stream_acc_free(&acc);
 
     if (resp) {
         SVC_LOG_INFO("C-L02: LOCAL: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
@@ -413,9 +234,9 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
 }
 
 const provider_adapter_t local_ops = {.init = local_init,
-                                  .destroy = local_destroy,
-                                  .complete = local_complete,
-                                  .complete_stream = local_complete_stream,
-                                  .name = "local",
-                                  .default_model = LOCAL_DEFAULT_MODEL,
-                                  .default_base_url = LOCAL_DEFAULT_BASE};
+                                      .destroy = local_destroy,
+                                      .complete = local_complete,
+                                      .complete_stream = local_complete_stream,
+                                      .name = "local",
+                                      .default_model = LOCAL_DEFAULT_MODEL,
+                                      .default_base_url = LOCAL_DEFAULT_BASE};

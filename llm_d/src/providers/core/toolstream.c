@@ -3,12 +3,16 @@
 
 /**
  * @file toolstream.c
- * @brief 流式 tool_calls 装配唯一实现（B16-S3 c5：收敛 openai_stream/
+ * @brief 流式响应装配唯一实现（B16-S3 c5/c6：收敛 openai_stream/
  * deepseek/local 三份逐字同构副本至此）。
  */
 
 #include "toolstream.h"
 #include "transport.h"
+
+#include "error.h"
+
+#include <cjson_helpers.h>
 
 #include <string.h>
 
@@ -138,4 +142,148 @@ void provider_tool_free(provider_tool_acc_t *acc)
     for (size_t i = 0; i < acc->count; i++)
         AIRY_FREE(acc->slot[i].args);
     acc->count = 0;
+}
+
+void provider_stream_acc_init(provider_stream_acc_t *acc, llm_stream_callback_t cb, void *ud)
+{
+    __builtin_memset(acc, 0, sizeof(*acc));
+    acc->user_cb = cb;
+    acc->user_data = ud;
+    acc->acc_cap = 4096;
+    acc->acc_content = (char *)AIRY_MALLOC(acc->acc_cap);
+}
+
+int provider_openai_on_chunk(const char *json_line, void *userdata)
+{
+    provider_stream_acc_t *acc = (provider_stream_acc_t *)userdata;
+
+    CJSON_PARSE_GUARD(root, json_line, { return 0; });
+
+    if (!acc->resp_id) {
+        cJSON *id = cJSON_GetObjectItem(root, "id");
+        if (cJSON_IsString(id) && id->valuestring)
+            acc->resp_id = AIRY_STRDUP(id->valuestring);
+    }
+
+    if (!acc->resp_model) {
+        cJSON *model = cJSON_GetObjectItem(root, "model");
+        if (cJSON_IsString(model) && model->valuestring)
+            acc->resp_model = AIRY_STRDUP(model->valuestring);
+    }
+
+    cJSON *created = cJSON_GetObjectItem(root, "created");
+    if (cJSON_IsNumber(created) && acc->resp_created == 0)
+        acc->resp_created = (uint64_t)created->valuedouble;
+
+    cJSON *choices = cJSON_GetObjectItem(root, "choices");
+    if (cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0) {
+        cJSON *choice = cJSON_GetArrayItem(choices, 0);
+        cJSON *delta = cJSON_GetObjectItem(choice, "delta");
+        if (delta) {
+            cJSON *content = cJSON_GetObjectItem(delta, "content");
+            if (cJSON_IsString(content) && content->valuestring) {
+                if (acc->user_cb)
+                    acc->user_cb(content->valuestring, acc->user_data);
+                char *grown = provider_buf_append(acc->acc_content, &acc->acc_cap, &acc->acc_len,
+                                                  content->valuestring);
+                if (grown)
+                    acc->acc_content = grown;
+            }
+
+            /* Reasoning trace arrives in the same delta stream (DeepSeek
+             * reasoner/Kimi). Forward each delta immediately as an RS 'R'
+             * control frame so IPC clients can show the thinking chain
+             * live, while still accumulating it for the assembled response
+             * (tool-loop echo). Endpoints without reasoning_content bypass
+             * this branch naturally. */
+            cJSON *reasoning = cJSON_GetObjectItem(delta, "reasoning_content");
+            if (cJSON_IsString(reasoning) && reasoning->valuestring) {
+                if (acc->user_cb)
+                    provider_emit_reasoning_frame(acc->user_cb, acc->user_data,
+                                                  reasoning->valuestring);
+                char *grown = provider_buf_append(acc->acc_reasoning, &acc->acc_reasoning_cap,
+                                                  &acc->acc_reasoning_len,
+                                                  reasoning->valuestring);
+                if (grown)
+                    acc->acc_reasoning = grown;
+            }
+
+            provider_tool_delta(&acc->tools, delta);
+        }
+
+        cJSON *fr = cJSON_GetObjectItem(choice, "finish_reason");
+        if (cJSON_IsString(fr) && fr->valuestring && strcmp(fr->valuestring, "null") != 0) {
+            AIRY_FREE(acc->finish_reason);
+            acc->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(fr->valuestring));
+        }
+    }
+
+    /* Streaming usage: OpenAI (stream_options.include_usage) / DeepSeek /
+     * local OpenAI-compatible endpoints attach the usage block in the final
+     * chunk, which has no choices. Last parse wins (usage is most complete
+     * at stream end). */
+    cJSON *usage = cJSON_GetObjectItem(root, "usage");
+    if (cJSON_IsObject(usage)) {
+        cJSON *pt = cJSON_GetObjectItem(usage, "prompt_tokens");
+        cJSON *ct = cJSON_GetObjectItem(usage, "completion_tokens");
+        cJSON *tt = cJSON_GetObjectItem(usage, "total_tokens");
+        if (cJSON_IsNumber(pt))
+            acc->prompt_tokens = (uint32_t)pt->valuedouble;
+        if (cJSON_IsNumber(ct))
+            acc->completion_tokens = (uint32_t)ct->valuedouble;
+        if (cJSON_IsNumber(tt))
+            acc->total_tokens = (uint32_t)tt->valuedouble;
+        cJSON *rt = cJSON_GetObjectItem(usage, "reasoning_tokens");
+        if (!cJSON_IsNumber(rt)) {
+            cJSON *details = cJSON_GetObjectItem(usage, "completion_tokens_details");
+            if (cJSON_IsObject(details))
+                rt = cJSON_GetObjectItem(details, "reasoning_tokens");
+        }
+        if (cJSON_IsNumber(rt))
+            acc->reasoning_tokens = (uint32_t)rt->valuedouble;
+    }
+
+    return 0;
+}
+
+llm_response_t *provider_openai_stream_take(provider_stream_acc_t *acc)
+{
+    llm_response_t *resp = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
+    if (!resp) {
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
+    }
+
+    resp->id = acc->resp_id ? acc->resp_id : AIRY_STRDUP("");
+    acc->resp_id = NULL;
+    resp->model = acc->resp_model ? acc->resp_model : AIRY_STRDUP("unknown");
+    acc->resp_model = NULL;
+    resp->created = acc->resp_created;
+    resp->choices = (llm_message_t *)AIRY_CALLOC(1, sizeof(llm_message_t));
+    if (resp->choices) {
+        resp->choice_count = 1;
+        resp->choices[0].role = AIRY_STRDUP("assistant");
+        resp->choices[0].content = acc->acc_content;
+        acc->acc_content = NULL;
+        resp->choices[0].reasoning_content = acc->acc_reasoning;
+        acc->acc_reasoning = NULL;
+    } else {
+        resp->choice_count = 0;
+    }
+    resp->finish_reason = acc->finish_reason ? acc->finish_reason : AIRY_STRDUP(LLM_FINISH_STOP);
+    acc->finish_reason = NULL;
+    resp->prompt_tokens = acc->prompt_tokens;
+    resp->completion_tokens = acc->completion_tokens;
+    resp->total_tokens = acc->total_tokens;
+    resp->reasoning_tokens = acc->reasoning_tokens;
+    return resp;
+}
+
+void provider_stream_acc_free(provider_stream_acc_t *acc)
+{
+    AIRY_FREE(acc->acc_content);
+    AIRY_FREE(acc->acc_reasoning);
+    AIRY_FREE(acc->resp_id);
+    AIRY_FREE(acc->resp_model);
+    AIRY_FREE(acc->finish_reason);
+    provider_tool_free(&acc->tools);
 }

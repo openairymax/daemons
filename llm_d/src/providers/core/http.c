@@ -311,3 +311,25 @@ const char *provider_http_err_diag(long http_code)
         return "http_error";
     }
 }
+
+struct curl_slist *provider_openai_headers(const provider_base_ctx_t *base, const char *path,
+                                           char *url_out, size_t url_cap)
+{
+    snprintf(url_out, url_cap, "%s%s", base->api_base, path);
+
+    struct curl_slist *headers = NULL;
+    if (base->api_key[0]) {
+        char auth_header[1024];
+        snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", base->api_key);
+        headers = curl_slist_append(headers, auth_header);
+        explicit_bzero(auth_header, sizeof(auth_header));
+    } else {
+        /* R-1：未配置密钥时不再拼出 "Authorization: Bearer "（空凭据），
+         * 部分网关会因此返回难以定位的 400/401；直接省略该头，本地
+         * OpenAI 兼容服务（无鉴权）也能正常工作。 */
+        SVC_LOG_WARN("C-L02: PROVIDER: no API key configured, sending unauthenticated request "
+                     "url=%s",
+                     url_out);
+    }
+    return curl_slist_append(headers, "Content-Type: application/json");
+}

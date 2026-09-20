@@ -3,18 +3,16 @@
 
 #include "airy_memory.h"
 
-#include <cjson/cJSON.h>
-
-#include <cjson_helpers.h>
 #include "error.h"
 /**
  * @file deepseek.c
- * @brief DeepSeek adapter (OpenAI-compatible format).
+ * @brief DeepSeek adapter（OpenAI 兼容协议）。
  *
- * Improvements:
- * 1. Uses the common Provider infrastructure
- * 2. Code reduced from ~360 to ~150 lines
- * 3. Duplication with openai.c/local.c eliminated
+ * B16-S3 c6：流式累积器与流末装配收敛 core/toolstream.c（与 openai/local
+ * 共用 provider_stream_acc_t 四件套）；请求头装配收敛 provider_openai_
+ * headers（无密钥省略 Authorization——R-1，修复旧实现拼空 Bearer 的
+ * 同构漂移，部分网关会因空凭据返回难以定位的 400/401）。适配层只留
+ * 厂商差异面（默认端点/模型、日志前缀）。
  */
 
 #include "daemon_errors.h"
@@ -25,8 +23,6 @@
 #include "svc_logger.h"
 
 #include <curl/curl.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 
@@ -104,15 +100,8 @@ static int deepseek_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t
     (void)req_body_len;
 
     char url[1024];
-    snprintf(url, sizeof(url), "%s/chat/completions", base->api_base);
-
-    struct curl_slist *headers = NULL;
-    char auth_header[1024];
-    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s",
-             base->api_key[0] ? base->api_key : "");
-    headers = curl_slist_append(headers, auth_header);
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    explicit_bzero(auth_header, sizeof(auth_header));
+    struct curl_slist *headers =
+        provider_openai_headers(base, "/chat/completions", url, sizeof(url));
 
     provider_http_resp_t *http_resp = NULL;
     long http_code = 0;
@@ -140,15 +129,10 @@ static int deepseek_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t
                       "url=%s http_code=%ld resp_body_len=%zu "
                       "DIAGNOSIS: %s"
                       " BODY: %.300s",
-                      url, http_code, resp_body_len,
-                      (http_code == 401) ? "invalid API key" :
-                      (http_code == 429) ? "rate limited" :
-                      (http_code == 500) ? "server error" :
-                      (http_code == 503) ? "service unavailable" :
-                                           "check API key and endpoint",
+                      url, http_code, resp_body_len, provider_http_err_diag(http_code),
                       (http_resp && http_resp->data) ? http_resp->data : "");
         provider_http_resp_free(http_resp);
-        return AIRY_ERR_IO;
+        return provider_http_err_map(http_code, AIRY_ERR_IO);
     }
 
     size_t resp_body_len = (http_resp && http_resp->data) ? strlen(http_resp->data) : 0;
@@ -184,156 +168,8 @@ static int deepseek_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t
     return ret;
 }
 
-typedef struct {
-    llm_stream_callback_t user_cb;
-    void *user_data;
-    char *acc_content;
-    size_t acc_cap;
-    size_t acc_len;
-    char *acc_reasoning;
-    size_t acc_reasoning_cap;
-    size_t acc_reasoning_len;
-    char *resp_id;
-    char *resp_model;
-    uint64_t resp_created;
-    char *finish_reason;
-    /* 2.1.1.5 修复：流式 usage 累计（DeepSeek 在末尾 chunk 附带 usage，
-     * 此前完全不解析，流式 token 统计恒为 0）。 */
-    uint32_t prompt_tokens;
-    uint32_t completion_tokens;
-    uint32_t total_tokens;
-    uint32_t reasoning_tokens;
-    provider_tool_acc_t tools;
-} ds_stream_acc_t;
-
-static int ds_stream_on_chunk(const char *json_line, void *userdata)
-{
-    ds_stream_acc_t *acc = (ds_stream_acc_t *)userdata;
-
-    CJSON_PARSE_GUARD(root, json_line, { return 0; });
-
-    if (!acc->resp_id) {
-        cJSON *id = cJSON_GetObjectItem(root, "id");
-        if (cJSON_IsString(id) && id->valuestring)
-            acc->resp_id = AIRY_STRDUP(id->valuestring);
-    }
-
-    if (!acc->resp_model) {
-        cJSON *model = cJSON_GetObjectItem(root, "model");
-        if (cJSON_IsString(model) && model->valuestring)
-            acc->resp_model = AIRY_STRDUP(model->valuestring);
-    }
-
-    cJSON *created = cJSON_GetObjectItem(root, "created");
-    if (cJSON_IsNumber(created) && acc->resp_created == 0)
-        acc->resp_created = (uint64_t)created->valuedouble;
-
-    cJSON *choices = cJSON_GetObjectItem(root, "choices");
-    if (cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0) {
-        cJSON *choice = cJSON_GetArrayItem(choices, 0);
-        cJSON *delta = cJSON_GetObjectItem(choice, "delta");
-        if (delta) {
-            cJSON *content = cJSON_GetObjectItem(delta, "content");
-            if (cJSON_IsString(content) && content->valuestring) {
-                const char *text = content->valuestring;
-
-                if (acc->user_cb)
-                    acc->user_cb(text, acc->user_data);
-
-                char *grown =
-                    provider_buf_append(acc->acc_content, &acc->acc_cap, &acc->acc_len, text);
-                if (grown) {
-                    acc->acc_content = grown;
-                }
-            }
-
-            /* DeepSeek reasoner streams the chain-of-thought in
-             * delta.reasoning_content. Forward each delta immediately as an
-             * RS 'R' control frame so IPC clients (gateway) can show the
-             * thinking chain live (2026-08-17: 思考链实时可见), while still
-             * accumulating it for the assembled response (tool-loop echo). */
-            cJSON *reasoning = cJSON_GetObjectItem(delta, "reasoning_content");
-            if (cJSON_IsString(reasoning) && reasoning->valuestring) {
-                if (acc->user_cb) {
-                    provider_emit_reasoning_frame(acc->user_cb, acc->user_data,
-                                            reasoning->valuestring);
-                }
-                char *grown =
-                    provider_buf_append(acc->acc_reasoning, &acc->acc_reasoning_cap,
-                                        &acc->acc_reasoning_len, reasoning->valuestring);
-                if (grown) {
-                    acc->acc_reasoning = grown;
-                }
-            }
-
-            provider_tool_delta(&acc->tools, delta);
-        }
-
-        cJSON *fr = cJSON_GetObjectItem(choice, "finish_reason");
-        if (cJSON_IsString(fr) && fr->valuestring && strcmp(fr->valuestring, "null") != 0) {
-            AIRY_FREE(acc->finish_reason);
-            acc->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(fr->valuestring));
-        }
-    }
-
-    /* 2.1.1.5 修复：流式末尾 chunk 携带 usage（DeepSeek 默认在最后 chunk
-     * 附带；该 chunk 无 choices，仅 usage）。最后一次解析覆盖前面。 */
-    cJSON *usage = cJSON_GetObjectItem(root, "usage");
-    if (cJSON_IsObject(usage)) {
-        cJSON *pt = cJSON_GetObjectItem(usage, "prompt_tokens");
-        cJSON *ct = cJSON_GetObjectItem(usage, "completion_tokens");
-        cJSON *tt = cJSON_GetObjectItem(usage, "total_tokens");
-        if (cJSON_IsNumber(pt))
-            acc->prompt_tokens = (uint32_t)pt->valuedouble;
-        if (cJSON_IsNumber(ct))
-            acc->completion_tokens = (uint32_t)ct->valuedouble;
-        if (cJSON_IsNumber(tt))
-            acc->total_tokens = (uint32_t)tt->valuedouble;
-        cJSON *rt = cJSON_GetObjectItem(usage, "reasoning_tokens");
-        if (!cJSON_IsNumber(rt)) {
-            cJSON *details = cJSON_GetObjectItem(usage, "completion_tokens_details");
-            if (cJSON_IsObject(details))
-                rt = cJSON_GetObjectItem(details, "reasoning_tokens");
-        }
-        if (cJSON_IsNumber(rt))
-            acc->reasoning_tokens = (uint32_t)rt->valuedouble;
-    }
-
-    return 0;
-}
-
-static llm_response_t *ds_build_stream_response(ds_stream_acc_t *acc)
-{
-    llm_response_t *resp = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
-    if (!resp) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-
-    resp->id = acc->resp_id ? acc->resp_id : AIRY_STRDUP("");
-    acc->resp_id = NULL;
-    resp->model = acc->resp_model ? acc->resp_model : AIRY_STRDUP("unknown");
-    acc->resp_model = NULL;
-    resp->created = acc->resp_created;
-    resp->choices = (llm_message_t *)AIRY_CALLOC(1, sizeof(llm_message_t));
-    if (resp->choices) {
-        resp->choice_count = 1;
-        resp->choices[0].role = AIRY_STRDUP("assistant");
-        resp->choices[0].content = acc->acc_content;
-        acc->acc_content = NULL;
-        resp->choices[0].reasoning_content = acc->acc_reasoning;
-        acc->acc_reasoning = NULL;
-    } else {
-        resp->choice_count = 0;
-    }
-    resp->finish_reason = acc->finish_reason ? acc->finish_reason : AIRY_STRDUP(LLM_FINISH_STOP);
-    acc->finish_reason = NULL;
-    resp->prompt_tokens = acc->prompt_tokens;
-    resp->completion_tokens = acc->completion_tokens;
-    resp->total_tokens = acc->total_tokens;
-    resp->reasoning_tokens = acc->reasoning_tokens;
-    return resp;
-}
-
+/* 流式 completion：SSE 传输 → core 累积器（provider_openai_on_chunk）→
+ * 流末装配（provider_openai_stream_take）。本函数只编排，不持协议状态。 */
 static int deepseek_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_config_t *manager,
                                     llm_stream_callback_t callback, void *user_data,
                                     llm_response_t **out_response)
@@ -368,58 +204,33 @@ static int deepseek_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_c
     }
 
     char url[1024];
-    snprintf(url, sizeof(url), "%s/chat/completions", base->api_base);
+    struct curl_slist *headers =
+        provider_openai_headers(base, "/chat/completions", url, sizeof(url));
 
-    struct curl_slist *headers = NULL;
-    char auth_header[1024];
-    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s",
-             base->api_key[0] ? base->api_key : "");
-    headers = curl_slist_append(headers, auth_header);
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    explicit_bzero(auth_header, sizeof(auth_header));
-
-    ds_stream_acc_t acc;
-    __builtin_memset(&acc, 0, sizeof(acc));
-    acc.user_cb = callback;
-    acc.user_data = user_data;
-    acc.acc_cap = 4096;
-    acc.acc_content = (char *)AIRY_MALLOC(acc.acc_cap);
+    provider_stream_acc_t acc;
+    provider_stream_acc_init(&acc, callback, user_data);
 
     SVC_LOG_DEBUG("C-L02: DEEPSEEK: STREAM-HTTP-POST url=%s body_len=%zu timeout=%.1fs", url,
                   strlen(req_body), base->timeout_sec);
 
     long http_code = 0;
     int ret = provider_http_post_stream(url, headers, req_body, base->timeout_sec,
-                                        base->max_retries, ds_stream_on_chunk, &acc, &http_code);
+                                        base->max_retries, provider_openai_on_chunk, &acc,
+                                        &http_code);
 
     curl_slist_free_all(headers);
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
-        SVC_LOG_ERROR("C-L02: DEEPSEEK: STREAM-FAIL url=%s http_code=%ld ret=%d DIAGNOSIS=%s "
-                      "STACK: provider_http_post_stream() → deepseek_complete_stream()",
+        SVC_LOG_ERROR("C-L02: DEEPSEEK: STREAM-FAIL url=%s http_code=%ld ret=%d DIAGNOSIS=%s",
                       url, http_code, ret, provider_http_err_diag(http_code));
-        AIRY_FREE(acc.acc_content);
-        AIRY_FREE(acc.acc_reasoning);
-        AIRY_FREE(acc.resp_id);
-        AIRY_FREE(acc.resp_model);
-        AIRY_FREE(acc.finish_reason);
-        provider_tool_free(&acc.tools);
+        provider_stream_acc_free(&acc);
         return provider_http_err_map(http_code, ret);
     }
 
-    llm_response_t *resp = ds_build_stream_response(&acc);
-    AIRY_FREE(acc.acc_content);
-    AIRY_FREE(acc.acc_reasoning);
-    AIRY_FREE(acc.resp_id);
-    AIRY_FREE(acc.resp_model);
-    AIRY_FREE(acc.finish_reason);
-
-    /* Streaming reasoning 已随 delta 实时发增量 RS 'R' 帧（思考链实时可见）；
-     * 不再在流末重复发完整帧（resp->reasoning_content 仍保留供 tool 续轮）。 */
-
+    llm_response_t *resp = provider_openai_stream_take(&acc);
     provider_tool_flush(&acc.tools, resp, callback, user_data);
-    provider_tool_free(&acc.tools);
+    provider_stream_acc_free(&acc);
 
     if (resp) {
         SVC_LOG_INFO(
@@ -441,9 +252,9 @@ static int deepseek_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_c
 }
 
 const provider_adapter_t deepseek_ops = {.init = deepseek_init,
-                                     .destroy = deepseek_destroy,
-                                     .complete = deepseek_complete,
-                                     .complete_stream = deepseek_complete_stream,
-                                     .name = "deepseek",
-                                     .default_model = DEEPSEEK_DEFAULT_MODEL,
-                                     .default_base_url = DEEPSEEK_DEFAULT_BASE};
+                                         .destroy = deepseek_destroy,
+                                         .complete = deepseek_complete,
+                                         .complete_stream = deepseek_complete_stream,
+                                         .name = "deepseek",
+                                         .default_model = DEEPSEEK_DEFAULT_MODEL,
+                                         .default_base_url = DEEPSEEK_DEFAULT_BASE};
