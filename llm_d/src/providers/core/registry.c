@@ -9,6 +9,7 @@
 
 #include "daemon_platform_ext.h"
 #include "registry.h"
+#include "secrets.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -417,4 +418,92 @@ int provider_registry_enumerate(provider_registry_t *reg,
 
     airy_mtx_unlock(&reg->lock);
     return short_circuit;
+}
+
+/* 单次 provider HTTP 调用默认超时（秒）。
+ *
+ * 不变量（R-5）：llm_d 处理一次 complete 的总耗时必须严格小于网关的转发
+ * 超时背压（gateway_biz_internal.h 的 GW_LLM_DEFAULT_TIMEOUT_MS=90s、
+ * GW_THINK_TIMEOUT_MS=120s）。否则网关会先于 llm_d 放弃请求，用户只能
+ * 看到笼统的 "invalid response"，而 provider 侧已经定位好的精确诊断
+ * （鉴权失败 / 限流 / 连接失败）永远回传不到用户。
+ *
+ * 该上界默认值单独保证"只发一次请求"的场景（70s < 90s）；多次重试的总
+ * 耗时上界由 llm_daemon_methods.c 的 LLM_RETRY_FAST_FAIL_MS 共同保证
+ * （3 × 5s + 70s = 85s < 90s）。模型行可用 timeout_sec 显式覆盖；覆盖后
+ * 须自行保证仍小于网关背压。 */
+#define PROVIDER_DEFAULT_TIMEOUT_SEC 70.0
+
+void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, const char *api_base,
+                        const char *organization, double timeout_sec, int max_retries,
+                        const char *default_base)
+{
+    if (!base_ctx)
+        return;
+
+    __builtin_memset(base_ctx, 0, sizeof(provider_base_ctx_t));
+
+    /* Record the api_key_env name (for secrets.env hot-reload on request).
+     * Prefer extracting from the "env:NAME" prefix; otherwise infer the
+     * standard env var name from the provider/base_url. */
+    base_ctx->api_key_env[0] = '\0';
+    if (api_key && strncmp(api_key, "env:", 4) == 0) {
+        const char *env_name = api_key + 4;
+        size_t env_len = strlen(env_name);
+
+        if (env_len > 0 && env_len < sizeof(base_ctx->api_key_env)) {
+            __builtin_memcpy(base_ctx->api_key_env, env_name, env_len + 1);
+        }
+    } else {
+        const char *env_name =
+            sec_env_for_provider(sec_guess_provider(api_base ? api_base : default_base));
+        if (env_name)
+            AIRY_STRNCPY_TERM(base_ctx->api_key_env, env_name, sizeof(base_ctx->api_key_env));
+    }
+
+    const char *resolved_key = sec_resolve_key(api_key);
+    if (!resolved_key || resolved_key[0] == '\0') {
+        const char *env_name =
+            sec_env_for_provider(sec_guess_provider(api_base ? api_base : default_base));
+        resolved_key = env_name ? getenv(env_name) : NULL;
+    }
+
+    if (resolved_key) {
+        size_t key_len = strlen(resolved_key);
+        if (key_len < sizeof(base_ctx->api_key)) {
+            __builtin_memcpy(base_ctx->api_key, resolved_key, key_len + 1);
+        }
+    }
+
+    if (api_base) {
+        size_t base_len = strlen(api_base);
+        if (base_len < sizeof(base_ctx->api_base)) {
+            __builtin_memcpy(base_ctx->api_base, api_base, base_len + 1);
+        }
+    } else if (default_base) {
+        size_t default_len = strlen(default_base);
+        if (default_len < sizeof(base_ctx->api_base)) {
+            __builtin_memcpy(base_ctx->api_base, default_base, default_len + 1);
+        }
+    }
+
+    if (organization) {
+        size_t org_len = strlen(organization);
+        if (org_len < sizeof(base_ctx->organization)) {
+            __builtin_memcpy(base_ctx->organization, organization, org_len + 1);
+        }
+    }
+
+    base_ctx->timeout_sec = timeout_sec > 0 ? timeout_sec : PROVIDER_DEFAULT_TIMEOUT_SEC;
+    base_ctx->max_retries = max_retries > 0 ? max_retries : 3;
+
+    SVC_LOG_INFO("C-L02: PROVIDER: BASE-INIT api_base=%s timeout=%.1fs retries=%d has_api_key=%d",
+                 base_ctx->api_base[0] ? base_ctx->api_base : "(none)", base_ctx->timeout_sec,
+                 base_ctx->max_retries, base_ctx->api_key[0] ? 1 : 0);
+}
+
+provider_base_ctx_t *provider_base_ctx(provider_ctx_t *ctx)
+{
+    /* 约定：所有 provider 的 ctx 首字段均为 provider_base_ctx_t base */
+    return (provider_base_ctx_t *)ctx;
 }

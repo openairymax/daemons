@@ -53,8 +53,8 @@ set(LLM_SERVICE_SOURCES
     src/response.c
     # B16-S3：providers 域内重排 core/（机制）+ adapters/（适配）
     src/providers/core/registry.c
-    # provider.c 域拆分（2026-08-27：909 行 → 生命周期 + http/codec/stream 三模块）
-    src/providers/core/provider.c
+    # B16-S3 c3：provider.c 两分消失——base 生命周期归 registry.c，密钥机制归 secrets.c
+    src/providers/core/secrets.c
     src/providers/core/http.c
     src/providers/core/envelope.c
     src/providers/core/sse.c
