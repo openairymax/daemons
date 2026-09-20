@@ -16,7 +16,7 @@
 #define AIRY_RT_LLM_PROVIDERS_CORE_RATE_LIMIT_H
 
 #include "daemon_platform_ext.h"
-#include "provider.h"
+#include "transport.h"
 
 #include <time.h>
 

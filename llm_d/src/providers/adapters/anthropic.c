@@ -15,7 +15,7 @@
 
 #include "daemon_errors.h"
 #include "daemon_platform_ext.h"
-#include "core/provider.h"
+#include "core/adapter.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -698,7 +698,7 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
     return AIRY_OK;
 }
 
-const provider_ops_t anthropic_ops = {.init = anthropic_init,
+const provider_adapter_t anthropic_ops = {.init = anthropic_init,
                                       .destroy = anthropic_destroy,
                                       .complete = anthropic_complete,
                                       .complete_stream = anthropic_complete_stream,
