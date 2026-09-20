@@ -11,6 +11,7 @@
 
 #include "airy_memory.h"
 #include "error.h"
+#include "rate_limit.h" /* provider_http_exec 的限流分支（provider_request_t.rl） */
 #include "transport.h"
 #include "svc_logger.h"
 
@@ -265,24 +266,76 @@ const char *provider_http_err_diag(long http_code)
     }
 }
 
-struct curl_slist *provider_openai_headers(const provider_base_ctx_t *base, const char *path,
-                                           char *url_out, size_t url_cap)
+/* 头链装配 SSoT（B16-S3.1）：鉴权样式 + Content-Type + 厂商静态附加头。适配层
+ * 只声明 provider_header_spec_t，拼装、鉴权缓冲擦除与头链释放全部由本件兜住
+ * （provider_http_exec 出口统一 free），故适配层不出现任何 curl_* 调用。 */
+static struct curl_slist *provider_headers_build(const provider_base_ctx_t *base,
+                                                 const provider_header_spec_t *spec)
 {
-    snprintf(url_out, url_cap, "%s%s", base->api_base, path);
-
     struct curl_slist *headers = NULL;
-    if (base->api_key[0]) {
-        char auth_header[1024];
-        snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", base->api_key);
-        headers = curl_slist_append(headers, auth_header);
-        explicit_bzero(auth_header, sizeof(auth_header));
-    } else {
-        /* R-1：未配置密钥时不再拼出 "Authorization: Bearer "（空凭据），
-         * 部分网关会因此返回难以定位的 400/401；直接省略该头，本地
-         * OpenAI 兼容服务（无鉴权）也能正常工作。 */
-        SVC_LOG_WARN("C-L02: PROVIDER: no API key configured, sending unauthenticated request "
-                     "url=%s",
-                     url_out);
+
+    if (spec && spec->auth != PROVIDER_AUTH_NONE) {
+        if (base->api_key[0]) {
+            char auth_header[1024];
+            snprintf(auth_header, sizeof(auth_header),
+                     spec->auth == PROVIDER_AUTH_X_API_KEY ? "x-api-key: %s"
+                                                           : "Authorization: Bearer %s",
+                     base->api_key);
+            headers = curl_slist_append(headers, auth_header);
+            explicit_bzero(auth_header, sizeof(auth_header));
+        } else {
+            /* R-1：未配置密钥时不拼空凭据——部分网关会因空 Bearer 返回难以定位
+             * 的 400/401。无鉴权的本地端点用 PROVIDER_AUTH_NONE，不进本分支，
+             * 因此不会产生本告警噪音。 */
+            SVC_LOG_WARN("C-L02: PROVIDER: no API key configured, sending unauthenticated "
+                         "request api_base=%s",
+                         base->api_base);
+        }
     }
-    return curl_slist_append(headers, "Content-Type: application/json");
+
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    if (spec) {
+        for (size_t i = 0; i < spec->extra_count; ++i)
+            headers = curl_slist_append(headers, spec->extra[i]);
+    }
+
+    return headers;
+}
+
+int provider_http_exec(const provider_request_t *req, provider_http_resp_t **out_response,
+                       long *out_http_code)
+{
+    int streaming = req && (req->on_event || req->on_chunk);
+    if (!req || !req->base || !req->path || !req->body || !out_http_code ||
+        (!streaming && !out_response)) {
+        errno = EINVAL;
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    char url[1024];
+    snprintf(url, sizeof(url), "%s%s", req->base->api_base, req->path);
+
+    struct curl_slist *headers = provider_headers_build(req->base, req->headers);
+
+    int rc;
+    if (req->on_event) {
+        rc = provider_http_post_stream_sse(url, headers, req->body, req->base->timeout_sec,
+                                           req->base->max_retries, req->on_event, req->user_data,
+                                           out_http_code);
+    } else if (req->on_chunk) {
+        rc = provider_http_post_stream(url, headers, req->body, req->base->timeout_sec,
+                                       req->base->max_retries, req->on_chunk, req->user_data,
+                                       out_http_code);
+    } else if (req->rl) {
+        rc = provider_http_request_with_retry(req->base, req->rl, url, headers, req->body,
+                                              out_http_code, out_response);
+    } else {
+        rc = provider_http_post(url, headers, req->body, req->base->timeout_sec,
+                                req->base->max_retries, out_response, out_http_code);
+    }
+
+    if (headers)
+        curl_slist_free_all(headers);
+    return rc;
 }

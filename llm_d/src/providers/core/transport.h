@@ -25,6 +25,10 @@
 extern "C" {
 #endif
 
+/* 限流器在本层只作不透明句柄（provider_request_t.rl）：完整定义在
+ * core/rate_limit.h，此处前置声明以避免 transport → rate_limit 的头文件环。 */
+struct provider_rate_limiter;
+
 typedef struct {
     char api_key[256];
     char api_key_env[128]; /* model.yaml api_key_env name (e.g. DEEPSEEK_API_KEY);
@@ -41,6 +45,24 @@ typedef struct {
     size_t size;
     size_t capacity;
 } provider_http_resp_t;
+
+/* 鉴权头样式（B16-S3.1 SSoT）：适配层只声明用哪一种，鉴权头的拼装、
+ * 缓冲擦除与头链释放全部由 core 接管——适配层因此无需也不得调用任何
+ * curl_* 接口，"适配层零 I/O"由此获得结构保证。 */
+typedef enum {
+    PROVIDER_AUTH_NONE = 0,  /* 本地 OpenAI 兼容端点（设计上无鉴权） */
+    PROVIDER_AUTH_BEARER,    /* Authorization: Bearer <api_key> */
+    PROVIDER_AUTH_X_API_KEY, /* x-api-key: <api_key>，anthropic 家族 */
+} provider_auth_kind_t;
+
+/* 请求头声明：auth 决定鉴权头样式，extra 为厂商静态附加头（形如
+ * "anthropic-version: 2023-06-01"）。Content-Type: application/json 由 core
+ * 统一附加，适配层无需重复声明。extra 指向静态生命周期字符串数组。 */
+typedef struct {
+    provider_auth_kind_t auth;
+    const char *const *extra;
+    size_t extra_count;
+} provider_header_spec_t;
 
 /* provider_name 用于 api_key_env 回落名推导（品牌无关统一约定，见
  * core/secrets.c sec_env_name_for）：未显式给出 "env:NAME" 时，以厂商名推
@@ -115,10 +137,12 @@ typedef struct {
  * 充足"时才退避等待并调用 reset。
  * 返回 AIRY_OK —— 循环正常结束，成败由 out_res / out_http_code 判定；
  * 返回 AIRY_ERR_UNKNOWN —— attempt 报致命错误，out_* 未被改写。
- * 适配层禁止调用本件自建循环，只能经 provider_http_post /
- * provider_http_post_stream 出网。 */
+ * 适配层禁止调用本件自建循环，只能经 provider_http_exec 出网。 */
 int provider_retry_run(const provider_retry_cfg_t *cfg, CURLcode *out_res, long *out_http_code);
 
+/* 传输原语（非流式）。仅 core 内部与 provider_http_exec 使用：url 与头链
+ * 由调用方持有，适配层不得直连本原语（B16-S3.1——否则头链生命周期又会外溢
+ * 到适配层，curl_* 亦随之回流）。 */
 int provider_http_post(const char *url, struct curl_slist *headers, const char *body,
                        double timeout_sec, int max_retries, provider_http_resp_t **out_response,
                        long *out_http_code);
@@ -128,13 +152,6 @@ void provider_http_resp_free(provider_http_resp_t *resp);
 char *provider_build_openai_request(const llm_request_config_t *manager, const char *default_model);
 
 int provider_parse_openai_response(const char *body, llm_response_t **out);
-
-/* OpenAI 兼容家族（openai/deepseek/local）请求装配 SSoT：api_base + path
- * 拼 URL、Bearer 鉴权头（R-1：无密钥省略该头，不拼空凭据——部分网关会因
- * 空 Bearer 返回难以定位的 400/401）、Content-Type: application/json。
- * 返回调用方须 curl_slist_free_all 的头链；鉴权头缓冲即拼即擦。 */
-struct curl_slist *provider_openai_headers(const provider_base_ctx_t *base, const char *path,
-                                           char *url_out, size_t url_cap);
 
 /* 域内析构器：providers 失败路径释放的是自己解析的中间产物，析构归 provider
  * 域所有（B16-S2 内层反依赖——不依赖发布头 llm_service_free 门面）。语义与
@@ -183,12 +200,36 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
                               long *out_http_code);
 
 /* 流式 POST·具名事件模式：event:/data: 双行解析，事件名随载荷交付 on_event，
- * 空行复位事件块。anthropic/google 走此入口；重试边界与行协议模式一致，
- * 分帧/错误体诊断/重试循环与 provider_http_post_stream 共享唯一实现。 */
+ * 空行复位事件块。anthropic 走此入口；重试边界与行协议模式一致，
+ * 分帧/错误体诊断/重试循环与 provider_http_post_stream 共享唯一实现。
+ * 与 provider_http_post 同属传输原语，适配层只经 provider_http_exec 到达。 */
 int provider_http_post_stream_sse(const char *url, struct curl_slist *headers, const char *body,
                                   double timeout_sec, int max_retries,
                                   provider_sse_event_cb_t on_event, void *event_user_data,
                                   long *out_http_code);
+
+/* 出网请求描述符（B16-S3.1）：唯一出网入口 provider_http_exec 的入参。适配层
+ * 只声明"发给谁、发什么、怎么收"；URL 拼装、头链生命周期、限流与退避重试全部
+ * 归 core——这是适配层零 I/O 的结构前提。 */
+typedef struct {
+    provider_base_ctx_t *base;        /* api_base / api_key / timeout_sec / max_retries */
+    struct provider_rate_limiter *rl; /* 可 NULL；非流式且非 NULL 时经限流器出网 */
+    const char *path;                 /* 追加在 api_base 之后，如 "/chat/completions" */
+    const provider_header_spec_t *headers; /* 可 NULL = 无鉴权单 Content-Type */
+    const char *body;
+    provider_stream_chunk_cb_t on_chunk; /* 流式·行协议回调；非流式留 NULL */
+    provider_sse_event_cb_t on_event;    /* 流式·具名事件回调；非流式留 NULL */
+    void *user_data;                     /* 交付给 on_chunk / on_event */
+} provider_request_t;
+
+/* 唯一出网入口（B16-S3.1 SSoT）。按 on_event / on_chunk 是否为 NULL 分派具名
+ * 事件流、行协议流或非流式；非流式且 rl 非 NULL 时叠加限流与 429/5xx 退避。
+ * out_response 仅非流式模式写出（流式传 NULL）；out_http_code 恒非 NULL。
+ * 返回值语义沿用各模式原入口：不限流的非流式返回 AIRY_OK 且成败看
+ * out_http_code（4xx/5xx 响应体对调用方有诊断价值，不在此处吞掉）；限流模式
+ * 与流式模式在 HTTP >= 400 时直接返回归一错误码。 */
+int provider_http_exec(const provider_request_t *req, provider_http_resp_t **out_response,
+                       long *out_http_code);
 
 /* R-1 / N-3：provider HTTP 状态码 → airy 错误码归一（SSoT，实现见 http.c）。
  * 未命中已知状态码时返回 fallback（通常是传输层返回码）。 */

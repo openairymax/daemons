@@ -31,8 +31,9 @@ extern "C" {
 #define PROVIDER_RL_MAX_DELAY_MS 60000
 #define PROVIDER_RL_JITTER_FACTOR 0.2
 
-/* 令牌桶限流器：RPM/TPM 窗口计数 + HTTP 429 退避状态 */
-typedef struct {
+/* 令牌桶限流器：RPM/TPM 窗口计数 + HTTP 429 退避状态。带 tag 定义，
+ * 供 transport.h 以不透明句柄前置声明（provider_request_t.rl）。 */
+typedef struct provider_rate_limiter {
     airy_mtx_t lock;
     time_t rpm_window_start;
     int rpm_count;

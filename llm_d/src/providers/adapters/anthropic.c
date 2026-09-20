@@ -1,42 +1,49 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
-#include "airy_memory.h"
-#include "error.h"
 /**
  * @file anthropic.c
- * @brief Anthropic adapter implementation.
+ * @brief Anthropic adapter：Messages API 的请求构造、响应解析与 SSE 事件累积。
  *
- * Improvements:
- * 1. Uses the common Provider infrastructure
- * 2. Code reduced from ~340 to ~200 lines
- * 3. Keeps Anthropic-specific system-prompt and response-parsing logic
+ * B16-S3：出网经 core/http.c provider_http_exec（URL 拼装、头链生命周期、
+ * 重试全归 core），鉴权以 PROVIDER_AUTH_X_API_KEY 声明、anthropic-version
+ * 走静态附加头，故本件不含任何 curl_* 调用。厂商差异面为：system 提取、
+ * content 块数组（tool_use / tool_result）、具名事件流（message_start /
+ * content_block_delta / message_delta）、stop_reason 归一。
  */
 
+#include "airy_memory.h"
+#include "error.h"
 #include "daemon_errors.h"
 #include "daemon_platform_ext.h"
 #include "core/adapter.h"
 #include "core/secrets.h"
+#include "core/toolstream.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
 
 #include <cjson_helpers.h>
-#include <curl/curl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-
 #define ANTHROPIC_DEFAULT_BASE "https://api.anthropic.com/v1"
 #define ANTHROPIC_DEFAULT_MODEL "claude-3-sonnet-20240229"
+#define ANTHROPIC_CHAT_PATH "/messages"
+
+/* 请求头声明：x-api-key 鉴权 + 协议版本附加头（Messages API 硬性要求）。 */
+static const char *const ANTHROPIC_EXTRA[] = {"anthropic-version: 2023-06-01"};
+static const provider_header_spec_t ANTHROPIC_HEADERS = {.auth = PROVIDER_AUTH_X_API_KEY,
+                                                         .extra = ANTHROPIC_EXTRA,
+                                                         .extra_count = 1};
 
 typedef struct {
     provider_base_ctx_t base;
 } anthropic_ctx_t;
 
 static provider_ctx_t *anthropic_init(const char *name, const char *api_key, const char *api_base,
-                                      const char *organization __attribute__((unused)),
+                                      const char *organization,
                                       double timeout_sec, int max_retries)
 {
 
@@ -212,51 +219,40 @@ static int anthropic_complete(provider_ctx_t *ctx_ptr, const llm_request_config_
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    char url[1024];
-    snprintf(url, sizeof(url), "%s/messages", base->api_base);
-
-    struct curl_slist *headers = NULL;
-    char auth_header[1024];
-    snprintf(auth_header, sizeof(auth_header), "x-api-key: %s",
-             base->api_key[0] ? base->api_key : "");
-    headers = curl_slist_append(headers, auth_header);
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
-    explicit_bzero(auth_header, sizeof(auth_header));
+    provider_request_t req = {
+        .base = base,
+        .path = ANTHROPIC_CHAT_PATH,
+        .headers = &ANTHROPIC_HEADERS,
+        .body = req_body,
+    };
 
     provider_http_resp_t *http_resp = NULL;
     long http_code = 0;
 
-    SVC_LOG_DEBUG("C-L02: ANTHROPIC: HTTP-POST url=%s body_len=%zu timeout=%.1fs retries=%d", url,
-                  strlen(req_body), base->timeout_sec, base->max_retries);
+    SVC_LOG_DEBUG("C-L02: ANTHROPIC: HTTP-POST api_base=%s body_len=%zu timeout=%.1fs "
+                  "retries=%d",
+                  base->api_base, strlen(req_body), base->timeout_sec, base->max_retries);
 
-    int ret = provider_http_post(url, headers, req_body, base->timeout_sec, base->max_retries,
-                                 &http_resp, &http_code);
+    int ret = provider_http_exec(&req, &http_resp, &http_code);
 
-    curl_slist_free_all(headers);
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: ANTHROPIC: COMPLETE-FAIL — HTTP request failed "
-                      "url=%s http_code=%ld ret=%d timeout=%.1fs "
-                      "STACK: provider_http_post() → anthropic_complete()",
-                      url, http_code, ret, base->timeout_sec);
+                      "api_base=%s http_code=%ld ret=%d timeout=%.1fs "
+                      "STACK: provider_http_exec() → anthropic_complete()",
+                      base->api_base, http_code, ret, base->timeout_sec);
         return ret;
     }
 
     if (http_code != 200) {
-        size_t resp_body_len = http_resp ? strlen(http_resp->data) : 0;
         SVC_LOG_ERROR("C-L02: ANTHROPIC: COMPLETE-FAIL — HTTP error "
-                      "url=%s http_code=%ld resp_body_len=%zu "
-                      "DIAGNOSIS: %s",
-                      url, http_code, resp_body_len,
-                      (http_code == 401) ? "invalid x-api-key" :
-                      (http_code == 403) ? "forbidden (check API key permissions)" :
-                      (http_code == 429) ? "rate limited" :
-                      (http_code == 529) ? "overloaded" :
-                                           "check API key and endpoint");
+                      "api_base=%s http_code=%ld resp_body_len=%zu DIAGNOSIS=%s",
+                      base->api_base, http_code,
+                      (http_resp && http_resp->data) ? strlen(http_resp->data) : 0,
+                      provider_http_err_diag(http_code));
         provider_http_resp_free(http_resp);
-        return AIRY_ERR_IO;
+        return provider_http_err_map(http_code, AIRY_ERR_IO);
     }
 
     size_t resp_body_len = http_resp ? strlen(http_resp->data) : 0;
@@ -444,18 +440,6 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    char url[1024];
-    snprintf(url, sizeof(url), "%s/messages", base->api_base);
-
-    struct curl_slist *headers = NULL;
-    char auth_header[1024];
-    snprintf(auth_header, sizeof(auth_header), "x-api-key: %s",
-             base->api_key[0] ? base->api_key : "");
-    headers = curl_slist_append(headers, auth_header);
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    headers = curl_slist_append(headers, "anthropic-version: 2023-06-01");
-    explicit_bzero(auth_header, sizeof(auth_header));
-
     ant_stream_acc_t acc;
     __builtin_memset(&acc, 0, sizeof(acc));
     acc.user_cb = callback;
@@ -463,20 +447,27 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
     acc.acc_cap = 4096;
     acc.acc_content = (char *)AIRY_MALLOC(acc.acc_cap);
 
-    SVC_LOG_DEBUG("C-L02: ANTHROPIC: STREAM-HTTP-POST url=%s body_len=%zu timeout=%.1fs", url,
-                  strlen(req_body), base->timeout_sec);
+    provider_request_t req = {
+        .base = base,
+        .path = ANTHROPIC_CHAT_PATH,
+        .headers = &ANTHROPIC_HEADERS,
+        .body = req_body,
+        .on_event = ant_feed_sse_event,
+        .user_data = &acc,
+    };
+
+    SVC_LOG_DEBUG("C-L02: ANTHROPIC: STREAM-HTTP-POST api_base=%s body_len=%zu timeout=%.1fs",
+                  base->api_base, strlen(req_body), base->timeout_sec);
 
     long http_code = 0;
-    int ret = provider_http_post_stream_sse(url, headers, req_body, base->timeout_sec,
-                                            base->max_retries, ant_feed_sse_event, &acc,
-                                            &http_code);
+    int ret = provider_http_exec(&req, NULL, &http_code);
 
-    curl_slist_free_all(headers);
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
-        SVC_LOG_ERROR("C-L02: ANTHROPIC: STREAM-FAIL url=%s http_code=%ld ret=%d DIAGNOSIS=%s",
-                      url, http_code, ret, provider_http_err_diag(http_code));
+        SVC_LOG_ERROR("C-L02: ANTHROPIC: STREAM-FAIL api_base=%s http_code=%ld ret=%d "
+                      "DIAGNOSIS=%s",
+                      base->api_base, http_code, ret, provider_http_err_diag(http_code));
         AIRY_FREE(acc.acc_content);
         AIRY_FREE(acc.resp_id);
         AIRY_FREE(acc.resp_model);

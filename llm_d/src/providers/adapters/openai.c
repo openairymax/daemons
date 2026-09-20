@@ -7,9 +7,10 @@
  *
  * B16-S3 c6：原 openai.c + openai_stream.c + openai_internal.h 三件合为
  * 本文件——按文件拆分曾是请求头装配、SSE 行协议、流末响应装配三重同构
- * 的载体。机制层已收敛：请求头走 core/http.c provider_openai_headers，
- * 行协议累积与流末装配走 core/toolstream.c（provider_stream_acc_t 四件
- * 套），适配层只保留厂商差异面（默认端点/模型、令牌桶限流、日志前缀）。
+ * 的载体。机制层已收敛：出网经 core/http.c provider_http_exec（URL 拼装、
+ * 头链生命周期、限流与退避全归 core），行协议累积与流末装配走
+ * core/toolstream.c（provider_stream_acc_t 四件套），适配层只保留厂商差异面
+ * （默认端点/模型、令牌桶限流、日志前缀），且不含任何 curl_* 调用。
  *
  * 对外公共符号 openai_ops 不变。
  */
@@ -23,11 +24,14 @@
 #include "core/toolstream.h"
 #include "svc_logger.h"
 
-#include <curl/curl.h>
 #include <stdio.h>
 
 #define OPENAI_DEFAULT_BASE "https://api.openai.com/v1"
 #define OPENAI_DEFAULT_MODEL "gpt-3.5-turbo"
+#define OPENAI_CHAT_PATH "/chat/completions"
+
+/* 请求头声明：Bearer 鉴权（core 按 R-1 省略空凭据），无厂商附加头。 */
+static const provider_header_spec_t OPENAI_HEADERS = {.auth = PROVIDER_AUTH_BEARER};
 
 /* 运行时上下文：首字段必须为 provider_base_ctx_t（provider_base_ctx()
  * 依赖此布局）。令牌桶限流为 OpenAI 云端专属（RPM/TPM + 429 退避）。 */
@@ -97,18 +101,18 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
                  model, manager->message_count, manager->max_tokens, manager->temperature,
                  manager->stream ? 1 : 0);
 
-    char url[1024];
-    struct curl_slist *headers =
-        provider_openai_headers(base, "/chat/completions", url, sizeof(url));
+    provider_request_t req = {
+        .base = base,
+        .rl = &ctx->rl,
+        .path = OPENAI_CHAT_PATH,
+        .headers = &OPENAI_HEADERS,
+        .body = req_body,
+    };
 
     provider_http_resp_t *http_resp = NULL;
     long http_code = 0;
+    int ret = provider_http_exec(&req, &http_resp, &http_code);
 
-    int ret =
-        provider_http_request_with_retry(base, &ctx->rl, url, headers, req_body, &http_code,
-                                         &http_resp);
-
-    curl_slist_free_all(headers);
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
@@ -172,19 +176,21 @@ static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     SVC_LOG_INFO("C-L02: OPENAI: STREAM-START model=%s msgs=%zu max_tokens=%d temp=%.2f", model,
                  manager->message_count, manager->max_tokens, manager->temperature);
 
-    char url[1024];
-    struct curl_slist *headers =
-        provider_openai_headers(base, "/chat/completions", url, sizeof(url));
-
     provider_stream_acc_t acc;
     provider_stream_acc_init(&acc, callback, user_data);
 
-    long http_code = 0;
-    int ret = provider_http_post_stream(url, headers, req_body, base->timeout_sec,
-                                        base->max_retries, provider_openai_on_chunk, &acc,
-                                        &http_code);
+    provider_request_t req = {
+        .base = base,
+        .path = OPENAI_CHAT_PATH,
+        .headers = &OPENAI_HEADERS,
+        .body = req_body,
+        .on_chunk = provider_openai_on_chunk,
+        .user_data = &acc,
+    };
 
-    curl_slist_free_all(headers);
+    long http_code = 0;
+    int ret = provider_http_exec(&req, NULL, &http_code);
+
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
