@@ -51,6 +51,19 @@ typedef struct {
  * 约定：所有 provider 的 ctx 首字段均为 provider_base_ctx_t base。 */
 provider_base_ctx_t *provider_base_ctx(provider_ctx_t *ctx);
 
+/**
+ * @brief 按厂商名查适配器 ops（装配 SSoT 在 adapters/adapter_table.c）。
+ *
+ * core 侧不持有任何厂商符号与厂商名分支；注册新适配仅在 adapter_table.c
+ * 表尾加一行。未知名回落 OpenAI 兼容适配：任一非内建厂商（glm / qwen /
+ * moonshot / siliconflow / spark / minimax / 自定义名）仅需 model.yaml 提
+ * 供 base_url + api_key 即以统一 OpenAI Chat Completions 协议接入。
+ *
+ * @param name 厂商名（可为 NULL，等价未知名）
+ * @return 适配器 ops（永不为 NULL）
+ */
+const provider_adapter_t *provider_adapter_lookup(const char *name);
+
 #ifdef __cplusplus
 }
 #endif
