@@ -15,12 +15,12 @@
  *
  * 两模式共享分帧（CR 剥离、缓冲扫描、重试复位）、错误体诊断（raw_buf）与
  * 重试循环；适配层只填回调，禁止自持 curl 循环副本。域拆分自 provider.c
- * （2026-08-27）；anthropic/google 私有 SSE 状态机于 c4 收敛至此。
+ * （2026-08-27）；anthropic/google 私有 SSE 状态机于 c4 收敛至此；流式重试
+ * 循环于 c8 收敛至 core/retry.c（本件只提供单次尝试与两个钩子）。
  */
 
 #include "airy_llm_stream.h"
 #include "airy_memory.h"
-#include "daemon_platform_ext.h"
 #include "error.h"
 #include "transport.h"
 #include "svc_logger.h"
@@ -285,74 +285,98 @@ static size_t sse_write_callback(void *contents, size_t size, size_t nmemb, void
     return realsize;
 }
 
-/* 重试循环唯一实现：两模式共用（c4 收敛 anthropic/google 的私有 curl 循环）。
- * 资源（line_buf/raw_buf）由公开入口持有，本函数任何路径不释放。 */
+/* 单次流式尝试的上下文：写回调绑定到分帧状态机。 */
+typedef struct {
+    const char *url;
+    struct curl_slist *headers;
+    const char *body;
+    double timeout_sec;
+    sse_stream_ctx_t *sse;
+} sse_try_ctx_t;
+
+/* 单次尝试：装配 curl、执行、取回响应码（重试壳在 core/retry.c）。 */
+static provider_attempt_t sse_try(void *ud, int retry, double left_sec, CURLcode *out_res,
+                                  long *out_http_code)
+{
+    sse_try_ctx_t *ctx = (sse_try_ctx_t *)ud;
+
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d retry=%d "
+                      "STACK: sse_try curl_easy_init",
+                      ctx->url, errno, retry);
+        return PROVIDER_TRY_FATAL;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, ctx->url);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, ctx->body);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, ctx->headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sse_write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, ctx->sse);
+    /* 首试给足全额预算；重试用整轮剩余墙钟，避免单次尝试越过总预算。 */
+    provider_http_setup(curl, retry == 0 ? ctx->timeout_sec : left_sec);
+
+    CURLcode res = curl_easy_perform(curl);
+    /* 失败路径也要取码：上游先回状态码再断流时，收尾要按状态码打印错误体
+     * 并归类（与 http_try 只在成功时取码不同）。 */
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, out_http_code);
+    curl_easy_cleanup(curl);
+
+    *out_res = res;
+    return res == CURLE_OK ? PROVIDER_TRY_DONE : PROVIDER_TRY_FAILED;
+}
+
+/* 流式重试闸门：只有上游一个字节都没下发（http_code == 0 且 raw_len == 0）才
+ * 允许重试。一旦写回调收到过数据，分片可能已经经回调交付用户，重试会造成
+ * 重复输出。 */
+static int sse_gate(void *ud, CURLcode res, long http_code)
+{
+    (void)res;
+    sse_stream_ctx_t *sse = ((sse_try_ctx_t *)ud)->sse;
+    return http_code == 0 && sse->raw_len == 0;
+}
+
+/* 重试前复位上一次尝试的分帧状态（闸门保证此时无字节下发，缓冲区保留复用）。 */
+static void sse_reset(void *ud)
+{
+    sse_stream_ctx_t *sse = ((sse_try_ctx_t *)ud)->sse;
+    sse->line_len = 0;
+    sse->raw_len = 0;
+    sse->done = 0;
+    sse->cancelled = 0;
+    sse->event_name[0] = '\0';
+}
+
+/* 两模式共用的流式入口：重试壳在 core/retry.c，本件只提供单次尝试与两个
+ * 钩子。资源（line_buf/raw_buf）由公开入口持有，本函数任何路径不释放。 */
 static int provider_stream_post(const char *url, struct curl_slist *headers, const char *body,
                                 double timeout_sec, int max_retries, sse_stream_ctx_t *sse,
                                 long *out_http_code)
 {
+    sse_try_ctx_t ctx = {
+        .url = url,
+        .headers = headers,
+        .body = body,
+        .timeout_sec = timeout_sec,
+        .sse = sse,
+    };
+    provider_retry_cfg_t cfg = {
+        .tag = "STREAM",
+        .url = url,
+        .timeout_sec = timeout_sec,
+        .max_retries = max_retries,
+        .attempt = sse_try,
+        .gate = sse_gate,
+        .reset = sse_reset,
+        .ud = &ctx,
+    };
+
     CURLcode res = CURLE_OK;
     long http_code = 0;
-    uint64_t start_ms = airy_time_ms();
-
-    for (int retry = 0; retry <= max_retries; retry++) {
-        double left = provider_left_sec(timeout_sec, start_ms);
-
-        CURL *curl = curl_easy_init();
-        if (!curl) {
-            SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d "
-                          "STACK: provider_stream_post curl_easy_init",
-                          url, errno);
-            return AIRY_ERR_UNKNOWN;
-        }
-
-        curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sse_write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, sse);
-        provider_http_setup(curl, retry == 0 ? timeout_sec : left);
-
-        res = curl_easy_perform(curl);
-        http_code = 0;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-        curl_easy_cleanup(curl);
-
-        if (res == CURLE_OK || retry >= max_retries)
-            break;
-        /* 只有上游一个字节都没下发（http_code == 0 且 raw_len == 0）才可重试：
-         * 一旦写回调收到过数据，分片可能已经经回调交付用户，重试会造成
-         * 重复输出。 */
-        if (http_code != 0 || sse->raw_len > 0 || !provider_retryable(res)) {
-            SVC_LOG_WARN("C-L02: PROVIDER: STREAM-NORETRY url=%s attempts=%d/%d "
-                         "http_code=%ld received=%zu retryable=%d diag=%s",
-                         url, retry + 1, max_retries + 1, http_code, sse->raw_len,
-                         provider_retryable(res), provider_http_diag(res));
-            break;
-        }
-
-        uint32_t delay_ms = provider_backoff_ms(retry);
-        if (!provider_retry_budget_ok(timeout_sec, start_ms, delay_ms)) {
-            SVC_LOG_WARN("C-L02: PROVIDER: STREAM-STOP url=%s retry=%d/%d "
-                         "reason=budget_spent left=%.1fs delay=%ums timeout=%.1fs",
-                         url, retry + 1, max_retries,
-                         provider_left_sec(timeout_sec, start_ms), delay_ms, timeout_sec);
-            res = CURLE_OPERATION_TIMEDOUT;
-            break;
-        }
-        SVC_LOG_WARN("C-L02: PROVIDER: STREAM-RETRY url=%s retry=%d/%d delay=%ums "
-                     "diag=%s curl_error=%s",
-                     url, retry + 1, max_retries, delay_ms, provider_http_diag(res),
-                     curl_easy_strerror(res));
-        airy_sleep_ms(delay_ms);
-
-        sse->line_len = 0;
-        sse->raw_len = 0;
-        sse->done = 0;
-        sse->cancelled = 0;
-        sse->event_name[0] = '\0';
-    }
+    int rc = provider_retry_run(&cfg, &res, &http_code);
+    if (rc != AIRY_OK)
+        return rc;
 
     *out_http_code = http_code;
 

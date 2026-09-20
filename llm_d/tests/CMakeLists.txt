@@ -35,6 +35,8 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/http.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/envelope.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/sse.c
+    # B16-S3 c8：退避重试循环壳（与主目标 LLM_SERVICE_SOURCES 同步）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/retry.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/toolstream.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/openai.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/rate_limit.c
