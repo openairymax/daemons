@@ -31,7 +31,7 @@
 
 #include "daemon_platform_ext.h"
 #include "error.h"
-#include "providers/core/provider.h"
+#include "providers/core/adapter.h"
 
 #include <arpa/inet.h>
 #include <assert.h>
@@ -46,7 +46,7 @@
 #include <unistd.h>
 
 /* openai_ops 定义于 openai.c:182，未在头文件声明（内部符号），此处 extern。 */
-extern const provider_ops_t openai_ops;
+extern const provider_adapter_t openai_ops;
 
 /* ── 极简 HTTP 桩 ─────────────────────────────────────────────────────── */
 
