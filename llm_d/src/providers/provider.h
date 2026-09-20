@@ -9,7 +9,11 @@
 #ifndef LLM_D_PROVIDERS_PROVIDER_H
 #define LLM_D_PROVIDERS_PROVIDER_H
 
-#include "llm_service.h"
+/* B16-S2 内层反依赖：providers 只依赖跨层类型契约（commons SSoT），
+ * 不依赖发布头 llm_service.h——发布头仅 rpc 域门面可见。 */
+#include "llm_service_types.h"
+
+#include "airy_memory.h"
 
 #include <curl/curl.h>
 
@@ -117,6 +121,29 @@ void provider_http_resp_free(provider_http_resp_t *resp);
 char *provider_build_openai_request(const llm_request_config_t *manager, const char *default_model);
 
 int provider_parse_openai_response(const char *body, llm_response_t **out);
+
+/* 域内析构器：providers 失败路径释放的是自己解析的中间产物，析构归 provider
+ * 域所有（B16-S2 内层反依赖——不依赖发布头 llm_service_free 门面）。语义与
+ * rpc 域 llm_response_free 一致；S3 拆分时随 provider.h 入 core/。 */
+static inline void provider_response_free(llm_response_t *resp)
+{
+    if (!resp)
+        return;
+    AIRY_FREE(resp->id);
+    AIRY_FREE(resp->model);
+    AIRY_FREE(resp->finish_reason);
+    if (resp->choices) {
+        for (size_t i = 0; i < resp->choice_count; i++) {
+            AIRY_FREE((void *)resp->choices[i].role);
+            AIRY_FREE((void *)resp->choices[i].content);
+            AIRY_FREE((void *)resp->choices[i].reasoning_content);
+            AIRY_FREE((void *)resp->choices[i].tool_call_id);
+            AIRY_FREE((void *)resp->choices[i].tool_calls_json);
+        }
+        AIRY_FREE(resp->choices);
+    }
+    AIRY_FREE(resp);
+}
 
 /* Grow-on-demand string append used by the streaming accumulators (content
  * and reasoning_content). Returns the (possibly reallocated) buffer; on

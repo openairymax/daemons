@@ -168,7 +168,7 @@ static int anthropic_parse_response(const char *body, llm_response_t **out)
             if (!resp->choices) {
                 resp->choice_count = 0;
 
-                llm_response_free(resp);
+                provider_response_free(resp);
                 return AIRY_ERR_OUT_OF_MEMORY;
             }
             resp->choice_count = 1;
@@ -693,7 +693,7 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
     if (out_response)
         *out_response = resp;
     else if (resp)
-        llm_response_free(resp);
+        provider_response_free(resp);
 
     return AIRY_OK;
 }

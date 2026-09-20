@@ -543,7 +543,7 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
     if (out_response)
         *out_response = resp;
     else if (resp)
-        llm_response_free(resp);
+        provider_response_free(resp);
 
     return AIRY_OK;
 }

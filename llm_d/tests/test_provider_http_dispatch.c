@@ -353,7 +353,7 @@ static void test_nonstream_dispatch(int code, const char *reason, const char *bo
         assert(strcmp(resp->choices[0].content, "pong") == 0);
     }
     if (resp)
-        llm_response_free(resp);
+        provider_response_free(resp);
 
     openai_ops.destroy(ctx);
 }
@@ -387,7 +387,7 @@ static void test_stream_dispatch(int code, const char *reason, const char *conte
         assert(g_stream_chunk_count >= 1); /* 增量确实透出给了流回调 */
     }
     if (resp)
-        llm_response_free(resp);
+        provider_response_free(resp);
 
     openai_ops.destroy(ctx);
 }
@@ -459,7 +459,7 @@ static void test_proxy_env_injected(void)
     printf("    dead proxy  ret=%d expect=%d\n", ret, AIRY_ERR_IO);
     assert(ret == AIRY_ERR_IO);
     if (resp)
-        llm_response_free(resp);
+        provider_response_free(resp);
     openai_ops.destroy(ctx);
 
     unsetenv("AIRY_HTTP_PROXY");
@@ -471,7 +471,7 @@ static void test_proxy_env_injected(void)
     printf("    no proxy    ret=%d expect=%d\n", ret, AIRY_OK);
     assert(ret == AIRY_OK);
     if (resp)
-        llm_response_free(resp);
+        provider_response_free(resp);
     openai_ops.destroy(ctx);
 
     for (size_t i = 0; i < nenv; i++)
@@ -579,7 +579,7 @@ static void test_nonstream_transient_retried(void)
     int ret = openai_ops.complete(ctx, &cfg, &resp);
     int attempts = atomic_load(&g_srv.conn_count) - before;
     if (resp)
-        llm_response_free(resp);
+        provider_response_free(resp);
 
     printf("    ret=%d attempts=%d expect=%d\n", ret, attempts, 3);
     assert(ret == AIRY_ERR_IO);
@@ -613,7 +613,7 @@ static void test_stream_transient_retried(void)
     int ret = openai_ops.complete_stream(ctx, &cfg, on_stream_chunk, NULL, &resp);
     int attempts = atomic_load(&g_srv.conn_count) - before;
     if (resp)
-        llm_response_free(resp);
+        provider_response_free(resp);
 
     printf("    ret=%d attempts=%d expect=%d\n", ret, attempts, 3);
     assert(ret == AIRY_ERR_IO);
@@ -642,7 +642,7 @@ static void test_unreachable_is_io(void)
     llm_response_t *resp = NULL;
     int ret = openai_ops.complete(ctx, &cfg, &resp);
     if (resp)
-        llm_response_free(resp);
+        provider_response_free(resp);
 
     printf("    ret=%d expect=%d\n", ret, AIRY_ERR_IO);
     /* 核心：不可达必须与"请求体被拒"区分，不得退化为 BAD_REQUEST。 */
