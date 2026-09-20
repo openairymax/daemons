@@ -75,6 +75,8 @@ add_subdirectory(think_d)
 add_subdirectory(cupolas_d)
 # 数学外挂计算服务（maths.* 命名空间）：表达式/统计求值，从 LLM 剥离计算
 add_subdirectory(maths_d)
+# daemon 集群监管者（0.1.18 §12.13 B13）：声明驱动调谐，V13.5 零项目库链接
+add_subdirectory(supervisor_d)
 
 # 全局测试支持
 if(BUILD_TESTS)
@@ -218,7 +220,8 @@ if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
    AND TARGET monit_d AND TARGET sched_d AND TARGET market_d
    AND TARGET channel_d AND TARGET notify_d AND TARGET hook_d
    AND TARGET mem_d AND TARGET agent_d AND TARGET a2a_d
-   AND TARGET think_d AND TARGET cupolas_d AND TARGET maths_d)
+   AND TARGET think_d AND TARGET cupolas_d AND TARGET maths_d
+   AND TARGET supervisor_d)
     # 注意：仅导出 daemon 可执行文件（svc_common 导出限制见下）。
     # svc_common 是 STATIC 库且 PUBLIC 链接 airy_common/airy_compile_defs/
     # cupolas/airy_platform_libs，若将其加入 export(TARGETS) 列表，
@@ -231,6 +234,7 @@ if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
                   notify_d hook_d
                   mem_d agent_d a2a_d
                   think_d cupolas_d maths_d
+                  supervisor_d
         FILE "${CMAKE_CURRENT_BINARY_DIR}/agentrt-daemon-targets.cmake"
     )
     export(PACKAGE agentrt-daemon)
@@ -244,6 +248,7 @@ install(TARGETS gateway_d llm_d tool_d
                 monit_d sched_d market_d channel_d
                 notify_d hook_d
                 mem_d agent_d a2a_d think_d cupolas_d maths_d
+                supervisor_d
     RUNTIME DESTINATION bin
 )
 
@@ -254,6 +259,6 @@ install(TARGETS gateway_d llm_d tool_d
 # 未来新增未登记的跨 daemon/模块链接即 fail-closed。
 # gateway_d 已在自身 CMakeLists 收集（含 airy_gateway_service），不重复。
 foreach(_dg llm_d tool_d monit_d sched_d market_d channel_d notify_d
-           hook_d mem_d agent_d a2a_d think_d cupolas_d maths_d)
+           hook_d mem_d agent_d a2a_d think_d cupolas_d maths_d supervisor_d)
     airy_linkgate_collect(${_dg} "${CMAKE_CURRENT_SOURCE_DIR}/../../link-whitelist.txt")
 endforeach()

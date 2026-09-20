@@ -1,7 +1,8 @@
 # daemons — User-space Service Layer
 
 > The user-space service layer of the Airymax agent runtime: 15 daemon processes that
-> turn the Airymax kernel into a running system, plus the shared `svc_common` library.
+> turn the Airymax kernel into a running system, one governance daemon (`supervisor_d`)
+> that keeps the cluster alive, plus the shared `svc_common` library.
 
 **Language:** English | [简体中文](README_zh.md)
 
@@ -17,10 +18,11 @@
 
 ## What this is
 
-**daemons** is the service layer of the Airymax agent runtime. It contains **15 long-running
+**daemons** is the service layer of the Airymax agent runtime. It contains **15 feature
 daemon processes** — `gateway_d`, `llm_d`, `tool_d`, `sched_d`, `market_d`, `monit_d`,
 `channel_d`, `notify_d`, `hook_d`, `mem_d`, `agent_d`, `a2a_d`, `think_d`, `cupolas_d`,
-`maths_d` — and the shared static library `svc_common` (in `common/`).
+`maths_d` — **one governance daemon** `supervisor_d` (resident cluster supervision),
+and the shared static library `svc_common` (in `common/`).
 
 Each daemon is its own OS process, owns exactly one domain, exposes a JSON-RPC 2.0
 interface, and reaches its peers through the IPC service bus. `gateway_d` is the only
@@ -51,9 +53,9 @@ External client ──HTTP / WS / SSE / MCP / A2A / OpenAI API──▶ gateway_
 - **Observability** — every daemon reports metrics to `monit_d` and events to `notify_d`,
   and writes a per-process log you can read with `airymaxrt logs <daemon>_d`.
 - **Lifecycle framework** — one `airy_svc_t` state machine and one event-driven
-  main loop (`daemon_event_driver`) shared by all 15 processes.
+  main loop (`daemon_event_driver`) shared by all 15 feature processes.
 
-## The 15 daemons
+## The daemons
 
 | # | Daemon | RPC namespace | Responsibility |
 |---|--------|---------------|----------------|
@@ -72,6 +74,7 @@ External client ──HTTP / WS / SSE / MCP / A2A / OpenAI API──▶ gateway_
 | 13 | [think_d](think_d/README.md) | `think.*` | Cognition service: two-pass interaction, pipeline orchestration, language front-end, review. |
 | 14 | [cupolas_d](cupolas_d/README.md) | `cupolas.*`, `policy.*` | Security policy decision point: permission checks, sanitization, audit, credential vault, network rules, policy load / activate / rollback. |
 | 15 | [maths_d](maths_d/README.md) | `maths.*` | Mathematics coprocessor: pure-C numeric and statistical evaluation, plus an optional symbolic backend. |
+| 16 | [supervisor_d](supervisor_d/README.md) | — (governance ctrl endpoint) | Governance daemon: declaration-driven reconcile of the cluster against the launch profile (spawn missing, reap stray), crash restart with exponential backoff, unified shutdown. Reconciles only, carries no business logic, links no business library (linkgate fail-closed). |
 
 Executable names keep the `*_d` suffix and match the CMake target names one for one
 (`gateway_d`, `llm_d`, …). Each subdirectory has its own README documenting its interface.
@@ -80,7 +83,7 @@ Executable names keep the `*_d` suffix and match the CMake target names one for 
 
 ```
 daemons/
-├── CMakeLists.txt      # builds the 15 daemons + svc_common
+├── CMakeLists.txt      # builds the 15 daemons + supervisor_d + svc_common
 ├── common/             # svc_common static library (shared service framework)
 ├── scripts/            # CI, local verification, static analysis, coverage
 ├── gateway_d/ … maths_d/   # one directory per daemon
@@ -104,7 +107,7 @@ Each daemon directory follows the same shape:
 
 `common/` builds the `svc_common` static library, which every daemon links `PRIVATE`.
 It provides the service framework (`airy_svc_t`, event driver, task dispatcher,
-bootstrap for IPC / systemd / Cupolas), the IPC client and service bus, the JSON-RPC
+bootstrap for IPC / ServiceDiscovery / Cupolas), the IPC client and service bus, the JSON-RPC
 method dispatcher and parameter validators, resilience components (circuit breaker,
 API recovery, input validator, log sanitizer), metrics and alerting, configuration,
 and the platform compatibility layer. See [`common/README.md`](common/README.md).
@@ -113,8 +116,12 @@ and the platform compatibility layer. See [`common/README.md`](common/README.md)
 
 ### Run
 
-The runtime is managed by the `airymaxrt` launcher; it brings the daemon cluster up
-and down for you, so you normally never start a daemon by hand.
+The runtime is brought up by the `airymaxrt` launcher; resident cluster supervision is
+owned by `supervisor_d` — declaration-driven reconcile against the launch profile
+(spawn missing, reap stray), crash restart with exponential backoff, and a unified
+shutdown. Aux daemons are activated on demand: when a first bus call finds its target
+unreachable, `gateway_d` sends a one-way `activate` request to the supervisor. You
+normally never start a daemon by hand.
 
 ```bash
 airymaxrt                 # terminal UI — starts the runtime and its services
@@ -136,7 +143,8 @@ socket:
 ```
 
 On POSIX the endpoint is a Unix socket `<runtime-dir>/<name>.sock`, resolved from the
-runtime root, so a manually started daemon joins the same bus as a launched one. On
+runtime root, so a manually started daemon joins the same bus as one reconciled by
+`supervisor_d`. On
 Windows the daemon serves the local TCP loopback `127.0.0.1:<port>`; the per-daemon
 default port is documented in its README.
 
@@ -178,7 +186,7 @@ ctest --test-dir ../daemons-build --output-on-failure
 cmake --install ../daemons-build --prefix /opt/airymax   # binaries → <prefix>/bin
 ```
 
-- 15 daemon executables in `${CMAKE_BINARY_DIR}/bin/`
+- 15 feature daemon executables plus `supervisor_d` in `${CMAKE_BINARY_DIR}/bin/`
 - `svc_common` static library, consumed privately by each daemon
 - Daemon public headers installed under `include/agentrt/`
 
