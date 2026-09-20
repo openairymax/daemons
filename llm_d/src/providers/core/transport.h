@@ -85,6 +85,13 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
 
 int provider_parse_openai_response(const char *body, llm_response_t **out);
 
+/* OpenAI 兼容家族（openai/deepseek/local）请求装配 SSoT：api_base + path
+ * 拼 URL、Bearer 鉴权头（R-1：无密钥省略该头，不拼空凭据——部分网关会因
+ * 空 Bearer 返回难以定位的 400/401）、Content-Type: application/json。
+ * 返回调用方须 curl_slist_free_all 的头链；鉴权头缓冲即拼即擦。 */
+struct curl_slist *provider_openai_headers(const provider_base_ctx_t *base, const char *path,
+                                           char *url_out, size_t url_cap);
+
 /* 域内析构器：providers 失败路径释放的是自己解析的中间产物，析构归 provider
  * 域所有（B16-S2 内层反依赖——不依赖发布头 llm_service_free 门面）。语义与
  * rpc 域 llm_response_free 一致。 */
