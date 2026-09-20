@@ -17,10 +17,10 @@
 
 ## 这是什么
 
-**daemons** 是 Airymax 智能体运行时的服务层，包含 **15 个长驻守护进程**——`gateway_d`、
+**daemons** 是 Airymax 智能体运行时的服务层，包含 **15 个功能守护进程**——`gateway_d`、
 `llm_d`、`tool_d`、`sched_d`、`market_d`、`monit_d`、`channel_d`、`notify_d`、`hook_d`、
-`mem_d`、`agent_d`、`a2a_d`、`think_d`、`cupolas_d`、`maths_d`——以及共享静态库
-`svc_common`（位于 `common/`）。
+`mem_d`、`agent_d`、`a2a_d`、`think_d`、`cupolas_d`、`maths_d`——**1 个治理守护进程**
+`supervisor_d`（集群常驻监管），以及共享静态库 `svc_common`（位于 `common/`）。
 
 每个守护进程都是独立的操作系统进程，各自只负责一个领域，对外暴露 JSON-RPC 2.0 接口，
 并通过 IPC 服务总线与同伴通信。`gateway_d` 是唯一面向外部客户端的进程边界，其余守护进程
@@ -46,10 +46,10 @@
 - **韧性** —— 熔断器、带主备切换的 API 恢复、健康检查、降级服务自动恢复。
 - **可观测** —— 所有守护进程向 `monit_d` 上报指标、向 `notify_d` 上报事件，并按进程落盘
   日志，用 `airymaxrt logs <daemon>_d` 即可查看。
-- **统一生命周期框架** —— 15 个进程共用一套 `airy_svc_t` 状态机与事件驱动主循环
+- **统一生命周期框架** —— 15 个功能进程共用一套 `airy_svc_t` 状态机与事件驱动主循环
   （`daemon_event_driver`）。
 
-## 15 个守护进程
+## 守护进程清单
 
 | # | 守护进程 | RPC 命名空间 | 职责 |
 |---|----------|--------------|------|
@@ -68,6 +68,7 @@
 | 13 | [think_d](think_d/README.md) | `think.*` | 认知服务：两段式交互、流程编排、语言前置、反思评审。 |
 | 14 | [cupolas_d](cupolas_d/README.md) | `cupolas.*`、`policy.*` | 安全策略决策点：权限校验、输入净化、审计、凭据库、网络规则、策略加载 / 生效 / 回滚。 |
 | 15 | [maths_d](maths_d/README.md) | `maths.*` | 数学外挂计算：纯 C 数值与统计求值，外加可选符号计算后端。 |
+| 16 | [supervisor_d](supervisor_d/README.md) | —（治理 ctrl 端点） | 治理守护进程：按启动画像声明常驻调谐（补齐缺失、收割多余）、崩溃重启与指数退避、收摊归一。只调谐、不承载业务，不链接任何业务库（linkgate fail-closed 断言）。 |
 
 可执行文件名保留 `*_d` 后缀，与 CMake target 名一一对应（`gateway_d`、`llm_d`……）。
 各目录内的 README 记录该进程的具体接口。
@@ -99,7 +100,7 @@ daemons/
 ### svc_common（`common/`）
 
 `common/` 构建 `svc_common` 静态库，被每个守护进程以 `PRIVATE` 形式链接。它提供服务框架
-（`airy_svc_t`、事件驱动、任务派发器，以及 IPC / systemd / Cupolas 的 bootstrap）、IPC
+（`airy_svc_t`、事件驱动、任务派发器，以及 IPC / ServiceDiscovery / Cupolas 的 bootstrap）、IPC
 客户端与服务总线、JSON-RPC 方法派发器与参数校验、韧性组件（熔断器、API 恢复、输入校验、
 日志净化）、指标与告警、配置，以及平台兼容层。详见 [`common/README.md`](common/README.md)。
 
@@ -107,8 +108,10 @@ daemons/
 
 ### 运行
 
-运行时由 `airymaxrt` 启动器管理，守护进程集群的拉起与收摊都由它负责，通常无需手动启动
-某个守护进程。
+运行时由 `airymaxrt` 启动器拉起，守护进程集群的常驻监管由 `supervisor_d` 负责——按启动
+画像声明周期调谐（补齐缺失、收割多余）、崩溃后按指数退避重启、`stop` 时统一收摊。aux 类
+守护进程按需激活：首次总线调用发现目标不可达时，由 `gateway_d` 向 supervisor 发起
+`activate` 单向请求。通常无需手动启动某个守护进程。
 
 ```bash
 airymaxrt                 # 终端界面——拉起运行时及其服务
@@ -129,8 +132,8 @@ airymaxrt monitor         # 持续观察
 ```
 
 POSIX 上端点是运行时目录下的 Unix socket `<runtime-dir>/<name>.sock`，从运行时根目录解析，
-手动启动的守护进程与由启动器拉起的处在同一条总线上。Windows 上守护进程监听本机 TCP 回环
-`127.0.0.1:<port>`，各守护进程的默认端口见其各自的 README。
+手动启动的守护进程与由 `supervisor_d` 调谐拉起的处在同一条总线上。Windows 上守护进程监听
+本机 TCP 回环 `127.0.0.1:<port>`，各守护进程的默认端口见其各自的 README。
 
 ### 从源码构建
 
