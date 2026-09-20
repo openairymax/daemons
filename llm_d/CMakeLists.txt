@@ -58,6 +58,8 @@ set(LLM_SERVICE_SOURCES
     src/providers/core/http.c
     src/providers/core/envelope.c
     src/providers/core/sse.c
+    # B16-S3 c8：退避重试循环壳（http 非流式 / sse 流式共用）
+    src/providers/core/retry.c
     # B16-S3 c5：流式 tool_calls 装配 SSoT（三份同构收敛）
     src/providers/core/toolstream.c
     # B16-S3 c6：openai 三件合一（openai.c + openai_stream.c + openai_internal.h → openai.c）
