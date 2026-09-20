@@ -10,6 +10,10 @@
 
 #include "response.h"
 
+/* B16-S2：本文件属 rpc 域（src 顶层），消费发布 API llm_response_free 合法；
+ * providers/ 与 router/ 内层则一律走 provider.h 的域内析构器。 */
+#include "llm_service.h"
+
 /* P0.18.2: cjson_helpers.h provides the CJSON_PARSE_GUARD/CJSON_AUTO_FREE
  * macros (response.h already pulls in <cjson/cJSON.h>; cjson_helpers.h
  * depends on AIRY_HAS_CJSON). */

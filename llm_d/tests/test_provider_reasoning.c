@@ -67,7 +67,7 @@ static void test_parse_response_reads_reasoning(void)
     assert(resp->choices[0].reasoning_content != NULL);
     assert(strcmp(resp->choices[0].reasoning_content, "6*7=42") == 0);
 
-    llm_response_free(resp);
+    provider_response_free(resp);
     printf("    PASSED\n");
 }
 
@@ -89,7 +89,7 @@ static void test_parse_response_without_reasoning(void)
     assert(resp->choice_count == 1);
     assert(resp->choices[0].reasoning_content == NULL);
 
-    llm_response_free(resp);
+    provider_response_free(resp);
     printf("    PASSED\n");
 }
 
