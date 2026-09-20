@@ -399,9 +399,9 @@ int provider_registry_enumerate(provider_registry_t *reg,
  * 须自行保证仍小于网关背压。 */
 #define PROVIDER_DEFAULT_TIMEOUT_SEC 70.0
 
-void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, const char *api_base,
-                        const char *organization, double timeout_sec, int max_retries,
-                        const char *default_base)
+void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name, const char *api_key,
+                        const char *api_base, const char *organization, double timeout_sec,
+                        int max_retries, const char *default_base)
 {
     if (!base_ctx)
         return;
@@ -409,8 +409,9 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, cons
     __builtin_memset(base_ctx, 0, sizeof(provider_base_ctx_t));
 
     /* Record the api_key_env name (for secrets.env hot-reload on request).
-     * Prefer extracting from the "env:NAME" prefix; otherwise infer the
-     * standard env var name from the provider/base_url. */
+     * Prefer extracting from the "env:NAME" prefix; otherwise derive the
+     * conventional env var name from the declared provider name (brand-neutral
+     * rule in core/secrets.c, no vendor table). */
     base_ctx->api_key_env[0] = '\0';
     if (api_key && strncmp(api_key, "env:", 4) == 0) {
         const char *env_name = api_key + 4;
@@ -420,17 +421,15 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, cons
             __builtin_memcpy(base_ctx->api_key_env, env_name, env_len + 1);
         }
     } else {
-        const char *env_name =
-            sec_env_for_provider(sec_guess_provider(api_base ? api_base : default_base));
-        if (env_name)
+        char env_name[128];
+        if (sec_env_name_for(provider_name, env_name, sizeof(env_name))) {
             AIRY_STRNCPY_TERM(base_ctx->api_key_env, env_name, sizeof(base_ctx->api_key_env));
+        }
     }
 
     const char *resolved_key = sec_resolve_key(api_key);
-    if (!resolved_key || resolved_key[0] == '\0') {
-        const char *env_name =
-            sec_env_for_provider(sec_guess_provider(api_base ? api_base : default_base));
-        resolved_key = env_name ? getenv(env_name) : NULL;
+    if ((!resolved_key || resolved_key[0] == '\0') && base_ctx->api_key_env[0]) {
+        resolved_key = getenv(base_ctx->api_key_env);
     }
 
     if (resolved_key) {
