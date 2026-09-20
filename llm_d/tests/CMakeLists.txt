@@ -30,7 +30,8 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/registry.c
     # provider.c / openai.c 域拆分（2026-08-27）：与主目标 LLM_SERVICE_SOURCES 同步
     # B16-S3：providers 域内重排 core/（机制）+ adapters/（适配）
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/provider.c
+    # B16-S3 c3：secrets.c（原 provider.c，与主目标 LLM_SERVICE_SOURCES 同步）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/secrets.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/http.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/envelope.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/sse.c

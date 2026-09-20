@@ -24,6 +24,7 @@
 #include <string.h>
 
 #include "rpc/internal.h"
+#include "providers/core/secrets.h"
 
 /* 语义缓存（mem_d）RPC 超时：缓存是可选加速层，本地 socket 往返毫秒级，
  * 此处仅需给出上界以保证 mem_d 繁忙时不拖慢主链路（13-semantic-cache
@@ -518,7 +519,7 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     eff.max_tokens = eff_max_tokens;
 
     llm_response_t *resp = NULL;
-    int ret = prov->ops->complete(prov->ctx, &eff, &resp);
+    int ret = prov->adapter->complete(prov->ctx, &eff, &resp);
     if (ret != 0) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL model=%s, error=%d, STACK: llm_service_complete",
                       eff_model, ret);
@@ -582,7 +583,7 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
         log_routing_decision(manager->model, complexity, input_len, "stream_user_specified");
     }
 
-    if (!prov->ops->complete_stream) {
+    if (!prov->adapter->complete_stream) {
         SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL model=%s, error=NOT_SUPPORTED, STACK: "
                       "llm_service_complete_stream",
                       manager->model);
@@ -596,7 +597,8 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
     eff.model = eff_model;
     eff.max_tokens = eff_max_tokens;
 
-    int ret = prov->ops->complete_stream(prov->ctx, &eff, callback, callback_data, out_response);
+    int ret = prov->adapter->complete_stream(prov->ctx, &eff, callback, callback_data,
+                                             out_response);
 
     if (ret == 0 && out_response && *out_response) {
         llm_response_t *resp = *out_response;

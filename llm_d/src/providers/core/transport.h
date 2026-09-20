@@ -46,11 +46,6 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, cons
                         const char *organization, double timeout_sec, int max_retries,
                         const char *default_base);
 
-/* Hot reload: called before each request; if the current api_key is empty,
- * fills it from $AIRY_HOME/config/secrets.env using base_ctx->api_key_env
- * (keys filled after startup need no restart). */
-void provider_refresh_api_key(provider_base_ctx_t *base_ctx);
-
 /* 出网传输策略唯一实现（SSoT）：连接超时 / 总超时 / 代理 / 自定义 CA /
  * 重定向与证书校验。所有出网调用点（非流式、流式、google、anthropic）
  * 一律经此施加，禁止各自 curl_easy_setopt 副本。
