@@ -215,16 +215,20 @@ target_include_directories(svc_common PUBLIC
     $<BUILD_INTERFACE:${COMMONS_DIR}/include>
     # daemons/common/include 兼容层路径（放最后，避免 atoms 误命中重导出兼容头）
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    # 2026-08-27 目录原子化：src/ 子目录供内部裸名 include 解析（私有实现细节）
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/svc>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/auth>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/ipc>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/discovery>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/security>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/daemon>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/event>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/util>
     $<INSTALL_INTERFACE:include/agentrt>
+)
+
+# B16-S0 传播面收敛（V16.13①）：src/ 子目录是私有实现细节，仅供 svc_common
+# 自身裸名 include 解析（internal 头 25 处消费全在本模块内），严禁 PUBLIC
+# 传播；下游一律走显式 target_link_libraries。src/event 为空目录不挂。
+target_include_directories(svc_common PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/svc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/auth
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ipc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/discovery
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/security
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/daemon
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/util
 )
 
 target_include_directories(svc_common PUBLIC
