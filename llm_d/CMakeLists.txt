@@ -51,20 +51,21 @@ set(LLM_SERVICE_SOURCES
     src/cost_tracker.c
     src/token_counter.c
     src/response.c
-    src/providers/registry.c
+    # B16-S3：providers 域内重排 core/（机制）+ adapters/（适配）
+    src/providers/core/registry.c
     # provider.c 域拆分（2026-08-27：909 行 → 生命周期 + http/codec/stream 三模块）
-    src/providers/provider.c
-    src/providers/provider_http.c
-    src/providers/provider_codec.c
-    src/providers/provider_stream.c
+    src/providers/core/provider.c
+    src/providers/core/http.c
+    src/providers/core/envelope.c
+    src/providers/core/sse.c
     # openai.c 域拆分（2026-08-27：820 行 → 生命周期 + 限流/重试 + 流式）
-    src/providers/openai.c
-    src/providers/openai_rate_limit.c
-    src/providers/openai_stream.c
-    src/providers/anthropic.c
-    src/providers/deepseek.c
-    src/providers/google.c
-    src/providers/local.c
+    src/providers/adapters/openai.c
+    src/providers/core/rate_limit.c
+    src/providers/adapters/openai_stream.c
+    src/providers/adapters/anthropic.c
+    src/providers/adapters/deepseek.c
+    src/providers/adapters/google.c
+    src/providers/adapters/local.c
     src/router/llm_router.c
     src/router/cost_aware_router.c
     src/router/round_robin_router.c
@@ -114,6 +115,7 @@ target_include_directories(airy_llm_service PUBLIC
 
 target_include_directories(airy_llm_service PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/providers
     ${CURL_INCLUDE_DIRS}
     ${CJSON_INCLUDE_DIRS}
     ${YAML_INCLUDE_DIRS}

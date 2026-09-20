@@ -20,7 +20,7 @@
 
 #include <yaml.h>
 
-#include "providers/registry.h"
+#include "providers/core/registry.h"
 
 #ifdef __cplusplus
 extern "C" {

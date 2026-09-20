@@ -10,7 +10,7 @@
 
 #include "cache.h"
 #include "llm_service.h"
-#include "providers/registry.h"
+#include "providers/core/registry.h"
 
 #include <assert.h>
 #include <stdio.h>

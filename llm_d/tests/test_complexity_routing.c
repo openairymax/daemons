@@ -15,8 +15,8 @@
 #include "cache.h"
 #include "cost_tracker.h"
 #include "llm_service.h"
-#include "providers/provider.h"
-#include "providers/registry.h"
+#include "providers/core/provider.h"
+#include "providers/core/registry.h"
 #include "airy_memory.h"
 
 #include <assert.h>
