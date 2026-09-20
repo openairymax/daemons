@@ -35,6 +35,7 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/http.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/envelope.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/sse.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/toolstream.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/openai.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/rate_limit.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/openai_stream.c

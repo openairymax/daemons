@@ -58,6 +58,8 @@ set(LLM_SERVICE_SOURCES
     src/providers/core/http.c
     src/providers/core/envelope.c
     src/providers/core/sse.c
+    # B16-S3 c5：流式 tool_calls 装配 SSoT（三份同构收敛）
+    src/providers/core/toolstream.c
     # openai.c 域拆分（2026-08-27：820 行 → 生命周期 + 限流/重试 + 流式）
     src/providers/adapters/openai.c
     src/providers/core/rate_limit.c

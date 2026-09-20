@@ -20,6 +20,7 @@
 #include "daemon_errors.h"
 #include "daemon_platform_ext.h"
 #include "core/adapter.h"
+#include "core/toolstream.h"
 #include "svc_logger.h"
 
 #include <curl/curl.h>
@@ -171,21 +172,6 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
     return ret;
 }
 
-/* Streaming tool-call accumulation: local (OpenAI-compatible) providers
- * stream tool_call deltas in the standard {index, id?} then
- * {index, function.{name?, arguments}} shape. The complete array is emitted
- * once at stream end as a control frame (see provider_emit_tool_frame). */
-#define LOC_STREAM_MAX_TOOL_CALLS 16
-
-typedef struct {
-    int index;
-    char id[128];
-    char name[128];
-    char *args;
-    size_t args_len;
-    size_t args_cap;
-} loc_tool_acc_t;
-
 typedef struct {
     llm_stream_callback_t user_cb;
     void *user_data;
@@ -204,81 +190,8 @@ typedef struct {
     uint32_t completion_tokens;
     uint32_t total_tokens;
     uint32_t reasoning_tokens;
-    loc_tool_acc_t tools[LOC_STREAM_MAX_TOOL_CALLS];
-    size_t tool_count;
+    provider_tool_acc_t tools;
 } loc_stream_acc_t;
-
-static loc_tool_acc_t *loc_tool_find_or_add(loc_stream_acc_t *acc, int index)
-{
-    for (size_t k = 0; k < acc->tool_count; k++) {
-        if (acc->tools[k].index == index)
-            return &acc->tools[k];
-    }
-    if (acc->tool_count >= LOC_STREAM_MAX_TOOL_CALLS)
-        return NULL;
-    loc_tool_acc_t *slot = &acc->tools[acc->tool_count++];
-    __builtin_memset(slot, 0, sizeof(*slot));
-    slot->index = index;
-    return slot;
-}
-
-static void loc_tool_append_args(loc_tool_acc_t *slot, const char *frag)
-{
-    size_t flen = strlen(frag);
-    if (flen == 0)
-        return;
-    size_t need = slot->args_len + flen + 1;
-    if (need > slot->args_cap) {
-        size_t cap = slot->args_cap ? slot->args_cap : 256;
-        while (cap < need)
-            cap *= 2;
-        char *grown = (char *)AIRY_REALLOC(slot->args, cap);
-        if (!grown)
-            return;
-        slot->args = grown;
-        slot->args_cap = cap;
-    }
-    __builtin_memcpy(slot->args + slot->args_len, frag, flen);
-    slot->args_len += flen;
-    slot->args[slot->args_len] = '\0';
-}
-
-static char *loc_build_tool_calls_json(const loc_stream_acc_t *acc)
-{
-    cJSON *arr = cJSON_CreateArray();
-    if (!arr)
-        return NULL;
-    for (size_t i = 0; i < acc->tool_count; i++) {
-        const loc_tool_acc_t *slot = &acc->tools[i];
-        cJSON *tc = cJSON_CreateObject();
-        cJSON *fn = cJSON_CreateObject();
-        if (!tc || !fn) {
-            if (tc)
-                cJSON_Delete(tc);
-            if (fn)
-                cJSON_Delete(fn);
-            cJSON_Delete(arr);
-            return NULL;
-        }
-        cJSON_AddStringToObject(tc, "id", slot->id[0] ? slot->id : "call_unknown");
-        cJSON_AddStringToObject(tc, "type", "function");
-        if (slot->name[0])
-            cJSON_AddStringToObject(fn, "name", slot->name);
-        cJSON_AddStringToObject(fn, "arguments", slot->args ? slot->args : "");
-        cJSON_AddItemToObject(tc, "function", fn);
-        cJSON_AddItemToArray(arr, tc);
-    }
-    char *js = cJSON_PrintUnformatted(arr);
-    cJSON_Delete(arr);
-    return js;
-}
-
-static void loc_stream_tools_cleanup(loc_stream_acc_t *acc)
-{
-    for (size_t i = 0; i < acc->tool_count; i++)
-        AIRY_FREE(acc->tools[i].args);
-    acc->tool_count = 0;
-}
 
 static int loc_stream_on_chunk(const char *json_line, void *userdata)
 {
@@ -335,44 +248,7 @@ static int loc_stream_on_chunk(const char *json_line, void *userdata)
                 }
             }
 
-            /* Tool-call deltas (OpenAI-compatible): accumulate fragments per
-             * index; the complete array is emitted as a control frame at
-             * stream end so streaming clients keep the tool loop. */
-            cJSON *tcs = cJSON_GetObjectItem(delta, "tool_calls");
-            if (cJSON_IsArray(tcs)) {
-                int tn = cJSON_GetArraySize(tcs);
-                for (int ti = 0; ti < tn; ti++) {
-                    cJSON *tc = cJSON_GetArrayItem(tcs, ti);
-                    cJSON *idxj = cJSON_GetObjectItem(tc, "index");
-                    int idx = (cJSON_IsNumber(idxj)) ? (int)idxj->valuedouble :
-                                                       (int)acc->tool_count;
-                    loc_tool_acc_t *slot = loc_tool_find_or_add(acc, idx);
-                    if (!slot)
-                        continue;
-                    cJSON *idj = cJSON_GetObjectItem(tc, "id");
-                    if (cJSON_IsString(idj) && idj->valuestring && !slot->id[0]) {
-                        size_t idlen = strlen(idj->valuestring);
-                        if (idlen >= sizeof(slot->id))
-                            idlen = sizeof(slot->id) - 1;
-                        __builtin_memcpy(slot->id, idj->valuestring, idlen);
-                        slot->id[idlen] = '\0';
-                    }
-                    cJSON *fn = cJSON_GetObjectItem(tc, "function");
-                    if (cJSON_IsObject(fn)) {
-                        cJSON *namej = cJSON_GetObjectItem(fn, "name");
-                        if (cJSON_IsString(namej) && namej->valuestring && !slot->name[0]) {
-                            size_t nlen = strlen(namej->valuestring);
-                            if (nlen >= sizeof(slot->name))
-                                nlen = sizeof(slot->name) - 1;
-                            __builtin_memcpy(slot->name, namej->valuestring, nlen);
-                            slot->name[nlen] = '\0';
-                        }
-                        cJSON *argj = cJSON_GetObjectItem(fn, "arguments");
-                        if (cJSON_IsString(argj) && argj->valuestring)
-                            loc_tool_append_args(slot, argj->valuestring);
-                    }
-                }
-            }
+            provider_tool_delta(&acc->tools, delta);
         }
 
         cJSON *fr = cJSON_GetObjectItem(choice, "finish_reason");
@@ -503,7 +379,7 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
         AIRY_FREE(acc.resp_id);
         AIRY_FREE(acc.resp_model);
         AIRY_FREE(acc.finish_reason);
-        loc_stream_tools_cleanup(&acc);
+        provider_tool_free(&acc.tools);
         return ret;
     }
 
@@ -513,20 +389,8 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
     AIRY_FREE(acc.resp_model);
     AIRY_FREE(acc.finish_reason);
 
-    /* Streaming tool calls: emit the accumulated array as a control frame
-     * before the stream closes so IPC clients (CLI tool loop) see the same
-     * tool_calls a non-streaming round would carry. */
-    if (acc.tool_count > 0) {
-        char *tc_json = loc_build_tool_calls_json(&acc);
-        if (tc_json) {
-            provider_emit_tool_frame(callback, user_data, tc_json);
-            if (resp && resp->choices && resp->choice_count > 0 && !resp->choices[0].tool_calls_json)
-                resp->choices[0].tool_calls_json = tc_json;
-            else
-                AIRY_FREE(tc_json);
-        }
-    }
-    loc_stream_tools_cleanup(&acc);
+    provider_tool_flush(&acc.tools, resp, callback, user_data);
+    provider_tool_free(&acc.tools);
 
     if (resp) {
         SVC_LOG_INFO("C-L02: LOCAL: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "

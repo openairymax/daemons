@@ -16,6 +16,7 @@
 #include "openai_internal.h"
 #include "core/adapter.h"
 #include "core/secrets.h"
+#include "core/toolstream.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -26,21 +27,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-
-/* Streaming tool-call accumulation: OpenAI SSE sends tool_call deltas as
- * separate events ({index, id?} then {index, function.{name?, arguments}}
- * fragments). Slots are keyed by index; arguments fragments concatenate.
- * The full array is emitted once at stream end (see provider_emit_tool_frame). */
-#define OAI_STREAM_MAX_TOOL_CALLS 16
-
-typedef struct {
-    int index;
-    char id[128];
-    char name[128];
-    char *args;
-    size_t args_len;
-    size_t args_cap;
-} oai_tool_acc_t;
 
 typedef struct {
     llm_stream_callback_t user_cb;
@@ -61,90 +47,8 @@ typedef struct {
     uint32_t completion_tokens;
     uint32_t total_tokens;
     uint32_t reasoning_tokens;
-    /* Tool-call deltas (OpenAI streaming): fragments arrive across SSE
-     * events; accumulate per index so the assembled response carries the
-     * full tool_calls array (the CLI tool loop consumes it). */
-    oai_tool_acc_t tools[OAI_STREAM_MAX_TOOL_CALLS];
-    size_t tool_count;
+    provider_tool_acc_t tools;
 } oai_stream_acc_t;
-
-static oai_tool_acc_t *oai_tool_find_or_add(oai_stream_acc_t *acc, int index)
-{
-    for (size_t k = 0; k < acc->tool_count; k++) {
-        if (acc->tools[k].index == index)
-            return &acc->tools[k];
-    }
-    if (acc->tool_count >= OAI_STREAM_MAX_TOOL_CALLS)
-        return NULL;
-    oai_tool_acc_t *slot = &acc->tools[acc->tool_count++];
-    __builtin_memset(slot, 0, sizeof(*slot));
-    slot->index = index;
-    return slot;
-}
-
-static void oai_tool_append_args(oai_tool_acc_t *slot, const char *frag)
-{
-    size_t flen = strlen(frag);
-    if (flen == 0)
-        return;
-    size_t need = slot->args_len + flen + 1;
-    if (need > slot->args_cap) {
-        size_t cap = slot->args_cap ? slot->args_cap : 256;
-        while (cap < need)
-            cap *= 2;
-        char *grown = (char *)AIRY_REALLOC(slot->args, cap);
-        if (!grown)
-            return;
-        slot->args = grown;
-        slot->args_cap = cap;
-    }
-    __builtin_memcpy(slot->args + slot->args_len, frag, flen);
-    slot->args_len += flen;
-    slot->args[slot->args_len] = '\0';
-}
-
-/* Build the complete tool_calls JSON array from accumulated slots (OpenAI
- * non-streaming response shape: [{id, function:{name, arguments}}]). */
-static char *oai_build_tool_calls_json(const oai_stream_acc_t *acc)
-{
-    cJSON *arr = cJSON_CreateArray();
-    if (!arr)
-        return NULL;
-    for (size_t i = 0; i < acc->tool_count; i++) {
-        const oai_tool_acc_t *slot = &acc->tools[i];
-        cJSON *tc = cJSON_CreateObject();
-        cJSON *fn = cJSON_CreateObject();
-        if (!tc || !fn) {
-            if (tc)
-                cJSON_Delete(tc);
-            if (fn)
-                cJSON_Delete(fn);
-            cJSON_Delete(arr);
-            return NULL;
-        }
-        cJSON_AddStringToObject(tc, "id", slot->id[0] ? slot->id : "call_unknown");
-        /* OpenAI 续轮必需：tool_calls 元素必须携带 "type":"function"，
-         * 缺失时 DeepSeek 等上游对 assistant tool_calls 严格校验并 400
-         * （2026-08-16 探针确认：no-type 0B / with-type 200）。 */
-        cJSON_AddStringToObject(tc, "type", "function");
-        if (slot->name[0])
-            cJSON_AddStringToObject(fn, "name", slot->name);
-        cJSON_AddStringToObject(fn, "arguments", slot->args ? slot->args : "");
-        cJSON_AddItemToObject(tc, "function", fn);
-        cJSON_AddItemToArray(arr, tc);
-    }
-    char *js = cJSON_PrintUnformatted(arr);
-    cJSON_Delete(arr);
-    return js;
-}
-
-/* Free accumulated tool-call slots (arguments buffers) after the stream. */
-static void oai_stream_tools_cleanup(oai_stream_acc_t *acc)
-{
-    for (size_t i = 0; i < acc->tool_count; i++)
-        AIRY_FREE(acc->tools[i].args);
-    acc->tool_count = 0;
-}
 
 static int oai_stream_on_chunk(const char *json_line, void *userdata)
 {
@@ -210,45 +114,7 @@ static int oai_stream_on_chunk(const char *json_line, void *userdata)
                 }
             }
 
-            /* Tool-call deltas: {index, id?} then {index,
-             * function:{name?, arguments}} fragments. Accumulate per index;
-             * the complete array is emitted as a control frame at stream
-             * end so streaming clients keep the tool loop. */
-            cJSON *tcs = cJSON_GetObjectItem(delta, "tool_calls");
-            if (cJSON_IsArray(tcs)) {
-                int tn = cJSON_GetArraySize(tcs);
-                for (int ti = 0; ti < tn; ti++) {
-                    cJSON *tc = cJSON_GetArrayItem(tcs, ti);
-                    cJSON *idxj = cJSON_GetObjectItem(tc, "index");
-                    int idx = (cJSON_IsNumber(idxj)) ? (int)idxj->valuedouble :
-                                                       (int)acc->tool_count;
-                    oai_tool_acc_t *slot = oai_tool_find_or_add(acc, idx);
-                    if (!slot)
-                        continue;
-                    cJSON *idj = cJSON_GetObjectItem(tc, "id");
-                    if (cJSON_IsString(idj) && idj->valuestring && !slot->id[0]) {
-                        size_t idlen = strlen(idj->valuestring);
-                        if (idlen >= sizeof(slot->id))
-                            idlen = sizeof(slot->id) - 1;
-                        __builtin_memcpy(slot->id, idj->valuestring, idlen);
-                        slot->id[idlen] = '\0';
-                    }
-                    cJSON *fn = cJSON_GetObjectItem(tc, "function");
-                    if (cJSON_IsObject(fn)) {
-                        cJSON *namej = cJSON_GetObjectItem(fn, "name");
-                        if (cJSON_IsString(namej) && namej->valuestring && !slot->name[0]) {
-                            size_t nlen = strlen(namej->valuestring);
-                            if (nlen >= sizeof(slot->name))
-                                nlen = sizeof(slot->name) - 1;
-                            __builtin_memcpy(slot->name, namej->valuestring, nlen);
-                            slot->name[nlen] = '\0';
-                        }
-                        cJSON *argj = cJSON_GetObjectItem(fn, "arguments");
-                        if (cJSON_IsString(argj) && argj->valuestring)
-                            oai_tool_append_args(slot, argj->valuestring);
-                    }
-                }
-            }
+            provider_tool_delta(&acc->tools, delta);
         }
 
         cJSON *fr = cJSON_GetObjectItem(choice, "finish_reason");
@@ -401,7 +267,7 @@ int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_config_t *
         AIRY_FREE(acc.resp_id);
         AIRY_FREE(acc.resp_model);
         AIRY_FREE(acc.finish_reason);
-        oai_stream_tools_cleanup(&acc);
+        provider_tool_free(&acc.tools);
         return provider_http_err_map(http_code, ret);
     }
 
@@ -415,21 +281,8 @@ int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     /* Streaming reasoning 已随 delta 实时发增量 RS 'R' 帧（思考链实时可见）；
      * 不再在流末重复发完整帧（resp->reasoning_content 仍保留供 tool 续轮）。 */
 
-    /* Streaming tool calls: emit the accumulated array as a control frame
-     * right before the stream closes so IPC clients (CLI tool loop) see the
-     * same tool_calls a non-streaming round would carry. The frame also
-     * lands in the response for in-process consumers. */
-    if (acc.tool_count > 0) {
-        char *tc_json = oai_build_tool_calls_json(&acc);
-        if (tc_json) {
-            provider_emit_tool_frame(callback, user_data, tc_json);
-            if (resp && resp->choices && resp->choice_count > 0 && !resp->choices[0].tool_calls_json)
-                resp->choices[0].tool_calls_json = tc_json;
-            else
-                AIRY_FREE(tc_json);
-        }
-    }
-    oai_stream_tools_cleanup(&acc);
+    provider_tool_flush(&acc.tools, resp, callback, user_data);
+    provider_tool_free(&acc.tools);
 
     if (resp) {
         SVC_LOG_INFO("C-L02: OPENAI: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
