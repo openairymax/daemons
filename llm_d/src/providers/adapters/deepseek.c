@@ -520,17 +520,16 @@ static int deepseek_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_c
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
-        SVC_LOG_ERROR("C-L02: DEEPSEEK: STREAM-FAIL — HTTP stream error "
-                      "url=%s http_code=%ld ret=%d timeout=%.1fs "
+        SVC_LOG_ERROR("C-L02: DEEPSEEK: STREAM-FAIL url=%s http_code=%ld ret=%d DIAGNOSIS=%s "
                       "STACK: provider_http_post_stream() → deepseek_complete_stream()",
-                      url, http_code, ret, base->timeout_sec);
+                      url, http_code, ret, provider_http_err_diag(http_code));
         AIRY_FREE(acc.acc_content);
         AIRY_FREE(acc.acc_reasoning);
         AIRY_FREE(acc.resp_id);
         AIRY_FREE(acc.resp_model);
         AIRY_FREE(acc.finish_reason);
         ds_stream_tools_cleanup(&acc);
-        return ret;
+        return provider_http_err_map(http_code, ret);
     }
 
     llm_response_t *resp = ds_build_stream_response(&acc);

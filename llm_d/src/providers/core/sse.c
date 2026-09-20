@@ -2,14 +2,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /**
- * @file provider_stream.c
- * @brief Provider 公共 SSE 流式传输与流式辅助。
+ * @file sse.c
+ * @brief Provider 域唯一 SSE 分帧状态机（B16-S3 c4：三套收敛为一套）。
  *
- * 域拆分自 provider.c（2026-08-27）：
- * - SSE 行解析与累积（sse_*）
- * - provider_http_post_stream（流式 HTTP POST）
- * - 流式控制帧发射（provider_emit_tool_frame / provider_emit_reasoning_frame）
- * - 增长缓冲 provider_buf_append
+ * 双模式：
+ * - 行协议模式（provider_http_post_stream）：SSE data 行载荷 NUL 终结后交付
+ *   provider_stream_chunk_cb_t，"[DONE]" 置正常终止。openai/deepseek/local
+ *   走此模式。
+ * - 具名事件模式（provider_http_post_stream_sse）：event:/data: 双行解析，
+ *   事件名与载荷一并交付 provider_sse_event_cb_t，空行复位事件块。
+ *   anthropic/google 走此模式。
+ *
+ * 两模式共享分帧（CR 剥离、缓冲扫描、重试复位）、错误体诊断（raw_buf）与
+ * 重试循环；适配层只填回调，禁止自持 curl 循环副本。域拆分自 provider.c
+ * （2026-08-27）；anthropic/google 私有 SSE 状态机于 c4 收敛至此。
  */
 
 #include "airy_llm_stream.h"
@@ -88,13 +94,17 @@ typedef struct {
     char *raw_buf;
     size_t raw_cap;
     size_t raw_len;
+    /* 双模式回调互斥：on_event 非空走具名事件模式，否则 on_chunk 行协议，
+     * 由两个公开入口分别保证。 */
     provider_stream_chunk_cb_t on_chunk;
+    provider_sse_event_cb_t on_event;
     void *chunk_user_data;
+    char event_name[64]; /* 具名事件模式：当前事件块缓存，空行复位 */
     int cancelled;
     int done;
 } sse_stream_ctx_t;
 
-static void sse_ctx_init(sse_stream_ctx_t *sse, provider_stream_chunk_cb_t cb, void *user_data)
+static void sse_ctx_init(sse_stream_ctx_t *sse, void *user_data)
 {
     __builtin_memset(sse, 0, sizeof(*sse));
     sse->line_cap = 4096;
@@ -111,7 +121,6 @@ static void sse_ctx_init(sse_stream_ctx_t *sse, provider_stream_chunk_cb_t cb, v
                       "STACK: sse_ctx_init",
                       sse->raw_cap);
     }
-    sse->on_chunk = cb;
     sse->chunk_user_data = user_data;
 }
 
@@ -151,6 +160,20 @@ static int sse_feed_line(sse_stream_ctx_t *sse, const char *line, size_t len)
     if (!line || len == 0)
         return 0;
 
+    /* 具名事件模式：缓存 event: 字段；其余非 data 字段（id:/retry:/注释行）
+     * 对两模式都无意义，落入下方前缀判断即被忽略。 */
+    if (sse->on_event && len >= 6 && memcmp(line, "event:", 6) == 0) {
+        const char *ev = line + 6;
+        while (*ev == ' ' || *ev == '\t')
+            ev++;
+        size_t elen = len - (size_t)(ev - line);
+        if (elen >= sizeof(sse->event_name))
+            elen = sizeof(sse->event_name) - 1;
+        __builtin_memcpy(sse->event_name, ev, elen);
+        sse->event_name[elen] = '\0';
+        return 0;
+    }
+
     if (len >= 5 && memcmp(line, "data:", 5) == 0) {
         const char *data_start = line + 5;
         while (*data_start == ' ' || *data_start == '\t')
@@ -168,12 +191,17 @@ static int sse_feed_line(sse_stream_ctx_t *sse, const char *line, size_t len)
             return 0;
         }
 
-        if (sse->on_chunk) {
+        if (sse->on_chunk || sse->on_event) {
+            /* 交付 NUL 终结副本：适配层回调（cJSON 解析 / strlen 语义）都
+             * 要求结尾字符串，line_buf 内部切片不满足。 */
             char *tmp = (char *)AIRY_MALLOC(data_len + 1);
             if (tmp) {
                 __builtin_memcpy(tmp, data_start, data_len);
                 tmp[data_len] = '\0';
-                int ret = sse->on_chunk(tmp, sse->chunk_user_data);
+                int ret = sse->on_event ?
+                              sse->on_event(sse->event_name[0] ? sse->event_name : NULL, tmp,
+                                            data_len, sse->chunk_user_data) :
+                              sse->on_chunk(tmp, sse->chunk_user_data);
                 AIRY_FREE(tmp);
                 if (ret != 0) {
                     sse->cancelled = 1;
@@ -207,6 +235,9 @@ static void sse_process_buffer(sse_stream_ctx_t *sse)
             int r = sse_feed_line(sse, p, line_len);
             if (r != 0 || sse->cancelled)
                 return;
+        } else if (sse->on_event) {
+            /* SSE 规范：空行终止一个事件块，具名事件缓存随之失效。 */
+            sse->event_name[0] = '\0';
         }
 
         p = nl + 1;
@@ -254,24 +285,12 @@ static size_t sse_write_callback(void *contents, size_t size, size_t nmemb, void
     return realsize;
 }
 
-int provider_http_post_stream(const char *url, struct curl_slist *headers, const char *body,
-                              double timeout_sec, int max_retries,
-                              provider_stream_chunk_cb_t on_chunk, void *chunk_user_data,
-                              long *out_http_code)
+/* 重试循环唯一实现：两模式共用（c4 收敛 anthropic/google 的私有 curl 循环）。
+ * 资源（line_buf/raw_buf）由公开入口持有，本函数任何路径不释放。 */
+static int provider_stream_post(const char *url, struct curl_slist *headers, const char *body,
+                                double timeout_sec, int max_retries, sse_stream_ctx_t *sse,
+                                long *out_http_code)
 {
-    if (!url || !body || !on_chunk || !out_http_code) {
-        errno = EINVAL;
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    if (max_retries < 0)
-        max_retries = 0;
-
-    sse_stream_ctx_t sse;
-    sse_ctx_init(&sse, on_chunk, chunk_user_data);
-    if (!sse.line_buf) {
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
     CURLcode res = CURLE_OK;
     long http_code = 0;
     uint64_t start_ms = airy_time_ms();
@@ -281,9 +300,8 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
 
         CURL *curl = curl_easy_init();
         if (!curl) {
-            sse_ctx_destroy(&sse);
             SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d "
-                          "STACK: provider_http_post_stream curl_easy_init",
+                          "STACK: provider_stream_post curl_easy_init",
                           url, errno);
             return AIRY_ERR_UNKNOWN;
         }
@@ -293,7 +311,7 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sse_write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sse);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, sse);
         provider_http_setup(curl, retry == 0 ? timeout_sec : left);
 
         res = curl_easy_perform(curl);
@@ -304,12 +322,12 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
         if (res == CURLE_OK || retry >= max_retries)
             break;
         /* 只有上游一个字节都没下发（http_code == 0 且 raw_len == 0）才可重试：
-         * 一旦写回调收到过数据，分片可能已经经 on_chunk 交付用户，重试会造成
+         * 一旦写回调收到过数据，分片可能已经经回调交付用户，重试会造成
          * 重复输出。 */
-        if (http_code != 0 || sse.raw_len > 0 || !provider_retryable(res)) {
+        if (http_code != 0 || sse->raw_len > 0 || !provider_retryable(res)) {
             SVC_LOG_WARN("C-L02: PROVIDER: STREAM-NORETRY url=%s attempts=%d/%d "
                          "http_code=%ld received=%zu retryable=%d diag=%s",
-                         url, retry + 1, max_retries + 1, http_code, sse.raw_len,
+                         url, retry + 1, max_retries + 1, http_code, sse->raw_len,
                          provider_retryable(res), provider_http_diag(res));
             break;
         }
@@ -329,29 +347,28 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
                      curl_easy_strerror(res));
         airy_sleep_ms(delay_ms);
 
-        sse.line_len = 0;
-        sse.raw_len = 0;
-        sse.done = 0;
-        sse.cancelled = 0;
+        sse->line_len = 0;
+        sse->raw_len = 0;
+        sse->done = 0;
+        sse->cancelled = 0;
+        sse->event_name[0] = '\0';
     }
 
     *out_http_code = http_code;
 
-    if (sse.line_len > 0) {
-        sse_process_buffer(&sse);
+    if (sse->line_len > 0) {
+        sse_process_buffer(sse);
     }
 
     /* Error status: surface the upstream body (kept raw) so failures are
      * diagnosable from the daemon log instead of a bare http_code. */
-    if (http_code >= 400 && sse.raw_buf && sse.raw_len > 0) {
-        size_t n = sse.raw_len;
+    if (http_code >= 400 && sse->raw_buf && sse->raw_len > 0) {
+        size_t n = sse->raw_len;
         if (n > 1024)
             n = 1024;
         SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-HTTP-ERROR url=%s http_code=%ld body=%.*s",
-                      url, http_code, (int)n, sse.raw_buf);
+                      url, http_code, (int)n, sse->raw_buf);
     }
-
-    sse_ctx_destroy(&sse);
 
     if (res != CURLE_OK) {
         SVC_LOG_WARN("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d diag=%s curl_error=%s", url,
@@ -379,4 +396,56 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
     }
 
     return AIRY_OK;
+}
+
+int provider_http_post_stream(const char *url, struct curl_slist *headers, const char *body,
+                              double timeout_sec, int max_retries,
+                              provider_stream_chunk_cb_t on_chunk, void *chunk_user_data,
+                              long *out_http_code)
+{
+    if (!url || !body || !on_chunk || !out_http_code) {
+        errno = EINVAL;
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    if (max_retries < 0)
+        max_retries = 0;
+
+    sse_stream_ctx_t sse;
+    sse_ctx_init(&sse, chunk_user_data);
+    sse.on_chunk = on_chunk;
+    if (!sse.line_buf) {
+        sse_ctx_destroy(&sse);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    int ret = provider_stream_post(url, headers, body, timeout_sec, max_retries, &sse,
+                                   out_http_code);
+    sse_ctx_destroy(&sse);
+    return ret;
+}
+
+int provider_http_post_stream_sse(const char *url, struct curl_slist *headers, const char *body,
+                                  double timeout_sec, int max_retries,
+                                  provider_sse_event_cb_t on_event, void *event_user_data,
+                                  long *out_http_code)
+{
+    if (!url || !body || !on_event || !out_http_code) {
+        errno = EINVAL;
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    if (max_retries < 0)
+        max_retries = 0;
+
+    sse_stream_ctx_t sse;
+    sse_ctx_init(&sse, event_user_data);
+    sse.on_event = on_event;
+    if (!sse.line_buf) {
+        sse_ctx_destroy(&sse);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    int ret = provider_stream_post(url, headers, body, timeout_sec, max_retries, &sse,
+                                   out_http_code);
+    sse_ctx_destroy(&sse);
+    return ret;
 }
