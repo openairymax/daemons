@@ -115,7 +115,14 @@ char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text)
 
 typedef int (*provider_stream_chunk_cb_t)(const char *data_line, void *user_data);
 
-/* 流式 POST。重试边界：只有"上游一个字节都没下发"的失败才可重试——一旦写回调
+/* 具名事件模式回调（SSE event:/data: 双行解析后交付；event 为 NULL 表示
+ * 事件块无 event: 字段；data 恒 NUL 终结，data_len 为其字节长度）。 */
+typedef int (*provider_sse_event_cb_t)(const char *event, const char *data, size_t data_len,
+                                       void *user_data);
+
+/* 流式 POST·行协议模式：SSE data 行载荷 NUL 终结后交付 on_chunk，
+ * "[DONE]" 置正常终止。openai/deepseek/local 走此入口。
+ * 重试边界：只有"上游一个字节都没下发"的失败才可重试——一旦写回调
  * 收到过数据，后续分片可能已经经 on_chunk 交付给用户，重试会造成重复输出，故
  * 此时无论错误是否瞬时都直接失败。HTTP 状态码不为 0 表示请求已到达上游，其重试
  * 策略归调用方（429/限流循环），此处不重试。 */
@@ -123,6 +130,21 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
                               double timeout_sec, int max_retries,
                               provider_stream_chunk_cb_t on_chunk, void *chunk_user_data,
                               long *out_http_code);
+
+/* 流式 POST·具名事件模式：event:/data: 双行解析，事件名随载荷交付 on_event，
+ * 空行复位事件块。anthropic/google 走此入口；重试边界与行协议模式一致，
+ * 分帧/错误体诊断/重试循环与 provider_http_post_stream 共享唯一实现。 */
+int provider_http_post_stream_sse(const char *url, struct curl_slist *headers, const char *body,
+                                  double timeout_sec, int max_retries,
+                                  provider_sse_event_cb_t on_event, void *event_user_data,
+                                  long *out_http_code);
+
+/* R-1 / N-3：provider HTTP 状态码 → airy 错误码归一（SSoT，实现见 http.c）。
+ * 未命中已知状态码时返回 fallback（通常是传输层返回码）。 */
+int provider_http_err_map(long http_code, int fallback);
+
+/* 状态码 → 日志诊断串（与 err_map 配套）。返回值恒非 NULL。 */
+const char *provider_http_err_diag(long http_code);
 
 /* 流式控制帧发射（SSoT 唯一实现，收敛 openai/deepseek/local 的同构 static
  * 副本）。帧格式：工具帧 RS 'T' <json> RS；推理帧 RS 'R' <reasoning> RS。

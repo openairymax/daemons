@@ -122,28 +122,12 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
-        if (http_code == 401 || http_code == 403) {
-            SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld "
-                          "DIAGNOSIS=auth_failed body=%.600s",
-                          model, http_code,
-                          http_resp && http_resp->data ? http_resp->data : "");
-        } else if (http_code == 429) {
-            SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld "
-                          "DIAGNOSIS=rate_limit_exhausted",
-                          model, http_code);
-        } else if (http_code == 400 || http_code == 422) {
-            /* N-3（0.1.16）：provider 拒绝请求体（非法 JSON / 无效 UTF-8），
-             * 属确定性失败——单独诊断，便于从日志区分于"网络不可达"。 */
-            SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld "
-                          "DIAGNOSIS=request_body_rejected body=%.600s",
-                          model, http_code,
-                          http_resp && http_resp->data ? http_resp->data : "");
-        } else {
-            SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld "
-                          "DIAGNOSIS=http_request_failed body=%.600s",
-                          model, http_code,
-                          http_resp && http_resp->data ? http_resp->data : "");
-        }
+        /* R-1/N-3：错误码已由 provider_http_request_with_retry 归一（core/http.c）；
+         * 此处仅按状态码出诊断串 + 透传错误体。 */
+        SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld ret=%d DIAGNOSIS=%s "
+                      "body=%.600s",
+                      model, http_code, ret, provider_http_err_diag(http_code),
+                      http_resp && http_resp->data ? http_resp->data : "");
         if (http_resp)
             provider_http_resp_free(http_resp);
         return ret;

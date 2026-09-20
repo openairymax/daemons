@@ -298,36 +298,12 @@ typedef struct {
     char *finish_reason;
 } ant_stream_acc_t;
 
-typedef struct {
-    char *line_buf;
-    size_t line_cap;
-    size_t line_len;
-    size_t received; /* 已从上游收到的原始字节数：>0 表示首包已下发，不允许重试 */
-    char current_event[64];
-    ant_stream_acc_t *acc;
-    int cancelled;
-} ant_sse_ctx_t;
-
-static void ant_sse_init(ant_sse_ctx_t *s, ant_stream_acc_t *a)
+/* SSE 具名事件回调（core/sse.c 双行解析后交付；data 恒 NUL 终结）。
+ * anthropic 事件语义在 data JSON 的 type 字段，event 行仅冗余。 */
+static int ant_feed_sse_event(const char *event __attribute__((unused)), const char *data,
+                              size_t data_len, void *user_data)
 {
-    __builtin_memset(s, 0, sizeof(*s));
-    s->line_cap = 4096;
-    s->line_buf = (char *)AIRY_MALLOC(s->line_cap);
-    s->acc = a;
-}
-
-static void ant_sse_destroy(ant_sse_ctx_t *s)
-{
-    if (s) {
-        AIRY_FREE(s->line_buf);
-        s->line_buf = NULL;
-    }
-}
-
-static int ant_feed_sse_event(ant_sse_ctx_t *s, const char *event, const char *data,
-                              size_t data_len)
-{
-    ant_stream_acc_t *acc = s->acc;
+    ant_stream_acc_t *acc = (ant_stream_acc_t *)user_data;
 
     if (!data || data_len == 0)
         return 0;
@@ -406,86 +382,6 @@ static int ant_feed_sse_event(ant_sse_ctx_t *s, const char *event, const char *d
     }
 
     return 0;
-}
-
-static void ant_process_buffer(ant_sse_ctx_t *s)
-{
-    if (s->line_len == 0)
-        return;
-
-    char *p = s->line_buf;
-    char *end = p + s->line_len;
-
-    while (p < end) {
-        char *nl = (char *)memchr(p, '\n', (size_t)(end - p));
-        if (!nl)
-            break;
-
-        size_t llen = (size_t)(nl - p);
-        if (llen > 0 && *(nl - 1) == '\r')
-            llen--;
-
-        if (llen > 0) {
-            if (llen >= 6 && memcmp(p, "event:", 6) == 0) {
-                const char *ev = p + 6;
-                while (*ev == ' ' || *ev == '\t')
-                    ev++;
-                size_t elen = llen - (size_t)(ev - p);
-                if (elen >= sizeof(s->current_event))
-                    elen = sizeof(s->current_event) - 1;
-                __builtin_memcpy(s->current_event, ev, elen);
-                s->current_event[elen] = '\0';
-            } else if (llen >= 5 && memcmp(p, "data:", 5) == 0) {
-                const char *ds = p + 5;
-                while (*ds == ' ' || *ds == '\t')
-                    ds++;
-                size_t dlen = llen - (size_t)(ds - p);
-                ant_feed_sse_event(s, s->current_event[0] ? s->current_event : NULL, ds, dlen);
-            }
-        }
-
-        if (*p == '\0' || (nl + 1 < end && *(nl + 1) == '\n')) {
-            s->current_event[0] = '\0';
-        }
-
-        p = nl + 1;
-    }
-
-    if (p < end) {
-        size_t rem = (size_t)(end - p);
-        __builtin_memmove(s->line_buf, p, rem);
-        s->line_len = rem;
-    } else {
-        s->line_len = 0;
-    }
-}
-
-static size_t ant_sse_write_cb(void *contents, size_t size, size_t nmemb, void *userp)
-{
-    size_t realsize = size * nmemb;
-    ant_sse_ctx_t *s = (ant_sse_ctx_t *)userp;
-    if (s->cancelled)
-        return 0;
-
-    size_t needed = s->line_len + realsize + 1;
-    if (needed > s->line_cap) {
-        size_t nc = s->line_cap * 2;
-        while (nc < needed)
-            nc *= 2;
-        char *ptr = (char *)AIRY_REALLOC(s->line_buf, nc);
-        if (!ptr)
-            return 0;
-        s->line_buf = ptr;
-        s->line_cap = nc;
-    }
-
-    __builtin_memcpy(s->line_buf + s->line_len, contents, realsize);
-    s->line_len += realsize;
-    s->line_buf[s->line_len] = '\0';
-    s->received += realsize;
-
-    ant_process_buffer(s);
-    return s->cancelled ? 0 : realsize;
 }
 
 static llm_response_t *ant_build_stream_response(ant_stream_acc_t *acc)
@@ -568,95 +464,25 @@ static int anthropic_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_
     acc.acc_cap = 4096;
     acc.acc_content = (char *)AIRY_MALLOC(acc.acc_cap);
 
-    ant_sse_ctx_t sse;
-    ant_sse_init(&sse, &acc);
-    if (!sse.line_buf) {
-        SVC_LOG_ERROR("C-L02: ANTHROPIC: STREAM-FAIL — SSE buffer alloc failed (OOM)");
-        AIRY_FREE(req_body);
-        curl_slist_free_all(headers);
-        AIRY_FREE(acc.acc_content);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
     SVC_LOG_DEBUG("C-L02: ANTHROPIC: STREAM-HTTP-POST url=%s body_len=%zu timeout=%.1fs", url,
                   strlen(req_body), base->timeout_sec);
 
     long http_code = 0;
-    int ret = AIRY_ERR_IO;
-    int max_retries = base->max_retries > 0 ? base->max_retries : 0;
-    uint64_t start_ms = airy_time_ms();
+    int ret = provider_http_post_stream_sse(url, headers, req_body, base->timeout_sec,
+                                            base->max_retries, ant_feed_sse_event, &acc,
+                                            &http_code);
 
-    for (int attempt = 0; attempt <= max_retries; attempt++) {
-        double left = provider_left_sec(base->timeout_sec, start_ms);
-
-        CURL *curl = curl_easy_init();
-        if (!curl) {
-            SVC_LOG_ERROR("C-L02: ANTHROPIC: STREAM-FAIL — curl_easy_init() failed");
-            break;
-        }
-
-        curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, req_body);
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, ant_sse_write_cb);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sse);
-        provider_http_setup(curl, attempt == 0 ? base->timeout_sec : left);
-
-        CURLcode cres = curl_easy_perform(curl);
-        http_code = 0;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-        curl_easy_cleanup(curl);
-
-        if (sse.line_len > 0)
-            ant_process_buffer(&sse);
-
-        if (cres == CURLE_OK) {
-            ret = AIRY_OK;
-            break;
-        }
-
-        SVC_LOG_WARN("C-L02: ANTHROPIC: STREAM — curl error: %s (code=%d diag=%s)",
-                     curl_easy_strerror(cres), (int)cres, provider_http_diag(cres));
-
-        /* 重试边界：仅"首包未下发"（http_code == 0 且 received == 0）的瞬时故障
-         * 才可重试，否则分片可能已交付用户，重试会造成重复输出。 */
-        if (attempt >= max_retries || http_code != 0 || sse.received > 0 ||
-            !provider_retryable(cres))
-            break;
-
-        uint32_t delay_ms = provider_backoff_ms(attempt);
-        if (!provider_retry_budget_ok(base->timeout_sec, start_ms, delay_ms)) {
-            SVC_LOG_WARN("C-L02: ANTHROPIC: STREAM-STOP retry=%d/%d reason=budget_spent "
-                         "left=%.1fs delay=%ums url=%s",
-                         attempt + 1, max_retries,
-                         provider_left_sec(base->timeout_sec, start_ms), delay_ms, url);
-            break;
-        }
-        SVC_LOG_WARN("C-L02: ANTHROPIC: STREAM-RETRY retry=%d/%d delay=%ums diag=%s", attempt + 1,
-                     max_retries, delay_ms, provider_http_diag(cres));
-        airy_sleep_ms(delay_ms);
-
-        sse.line_len = 0;
-        sse.received = 0;
-        sse.cancelled = 0;
-        sse.current_event[0] = '\0';
-    }
-
-    ant_sse_destroy(&sse);
     curl_slist_free_all(headers);
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
-        SVC_LOG_ERROR("C-L02: ANTHROPIC: STREAM-FAIL — HTTP stream error "
-                      "url=%s http_code=%ld ret=%d timeout=%.1fs "
-                      "STACK: curl_easy_perform() → anthropic_complete_stream()",
-                      url, http_code, ret, base->timeout_sec);
+        SVC_LOG_ERROR("C-L02: ANTHROPIC: STREAM-FAIL url=%s http_code=%ld ret=%d DIAGNOSIS=%s",
+                      url, http_code, ret, provider_http_err_diag(http_code));
         AIRY_FREE(acc.acc_content);
         AIRY_FREE(acc.resp_id);
         AIRY_FREE(acc.resp_model);
         AIRY_FREE(acc.finish_reason);
-        return ret;
+        return provider_http_err_map(http_code, ret);
     }
 
     llm_response_t *resp = ant_build_stream_response(&acc);

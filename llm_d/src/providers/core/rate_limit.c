@@ -238,23 +238,8 @@ int provider_http_request_with_retry(provider_base_ctx_t *base, provider_rate_li
         break;
     }
 
-    /* R-1：把 provider 返回的 HTTP 状态码映射为具体错误码，避免调用方把
-     * 401/403（密钥无效）与 429（限流）统统当成"网络请求失败"上报。
-     * http_code == 0 表示 curl 根本没连上 provider（DNS/连接/超时），
-     * 此路径仍归 AIRY_ERR_IO。
-     * N-3（0.1.16）：400/422 是 provider 明确拒绝请求体（JSON 结构错误、
-     * 消息含无效 UTF-8 等），与"不可达"是两类失败——归入专用码
-     * AIRY_ERR_LLM_BAD_REQUEST，既不被外层重试，也能给用户正确指引。 */
-    switch (*out_http_code) {
-    case 401:
-    case 403:
-        return AIRY_ERR_LLM_AUTH_FAIL;
-    case 429:
-        return AIRY_ERR_LLM_RATE_LIMIT;
-    case 400:
-    case 422:
-        return AIRY_ERR_LLM_BAD_REQUEST;
-    default:
-        return AIRY_ERR_IO;
-    }
+    /* R-1/N-3：HTTP 状态码 → 错误码归一收口于 core/http.c；
+     * 401/403→AUTH_FAIL、429→RATE_LIMIT、400/422→BAD_REQUEST，
+     * 其余（含 http_code == 0 的传输层失败）归 AIRY_ERR_IO。 */
+    return provider_http_err_map(*out_http_code, AIRY_ERR_IO);
 }
