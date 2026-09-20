@@ -271,3 +271,43 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
     *out_http_code = http_code;
     return AIRY_OK;
 }
+
+/* R-1 / N-3：provider HTTP 状态码 → airy 错误码归一（流式与非流式共用 SSoT，
+ * 收敛 openai_stream 内联 switch 与 rate_limit 非流式 switch 的同构副本）。
+ * 401/403（密钥无效）与 429（限流）此前被统称"网络请求失败"，用户无从排障；
+ * 400/422 是 provider 明确拒绝请求体（N-3，0.1.16），归专用码——不被外层
+ * 重试，也给用户正确指引。http_code == 0 表示请求未达上游，返回 fallback。 */
+int provider_http_err_map(long http_code, int fallback)
+{
+    switch (http_code) {
+    case 401:
+    case 403:
+        return AIRY_ERR_LLM_AUTH_FAIL;
+    case 429:
+        return AIRY_ERR_LLM_RATE_LIMIT;
+    case 400:
+    case 422:
+        return AIRY_ERR_LLM_BAD_REQUEST;
+    default:
+        return fallback;
+    }
+}
+
+/* 状态码 → 日志诊断串（与 err_map 配套，收敛各适配器 DIAGNOSIS= 分支）。 */
+const char *provider_http_err_diag(long http_code)
+{
+    switch (http_code) {
+    case 401:
+    case 403:
+        return "auth_failed";
+    case 429:
+        return "rate_limit_exhausted";
+    case 400:
+    case 422:
+        return "request_body_rejected";
+    case 0:
+        return "transport_error";
+    default:
+        return "http_error";
+    }
+}

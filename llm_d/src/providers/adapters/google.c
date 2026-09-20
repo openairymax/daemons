@@ -11,7 +11,7 @@
  * 1. Auth via the x-goog-api-key header (not a Bearer token)
  * 2. Request format: contents array + systemInstruction
  * 3. Response format: candidates[].content.parts[].text
- * 4. SSE streaming: custom SSE parser handling the Gemini format
+ * 4. SSE streaming via core/sse.c named-event mode (alt=sse)
  */
 
 #include "daemon_errors.h"
@@ -322,34 +322,12 @@ typedef struct {
     char *finish_reason;
 } gg_stream_acc_t;
 
-typedef struct {
-    char *line_buf;
-    size_t line_cap;
-    size_t line_len;
-    size_t received; /* 已从上游收到的原始字节数：>0 表示首包已下发，不允许重试 */
-    gg_stream_acc_t *acc;
-    int cancelled;
-} gg_sse_ctx_t;
-
-static void gg_sse_init(gg_sse_ctx_t *s, gg_stream_acc_t *a)
+/* SSE 具名事件回调（core/sse.c 分帧后交付；data 恒 NUL 终结）。
+ * google alt=sse 流只有 data: 行，event 恒为 NULL。 */
+static int gg_feed_sse_data(const char *event __attribute__((unused)), const char *data,
+                            size_t data_len, void *user_data)
 {
-    __builtin_memset(s, 0, sizeof(*s));
-    s->line_cap = 4096;
-    s->line_buf = (char *)AIRY_MALLOC(s->line_cap);
-    s->acc = a;
-}
-
-static void gg_sse_destroy(gg_sse_ctx_t *s)
-{
-    if (s) {
-        AIRY_FREE(s->line_buf);
-        s->line_buf = NULL;
-    }
-}
-
-static int gg_feed_sse_data(gg_sse_ctx_t *s, const char *data, size_t data_len)
-{
-    gg_stream_acc_t *acc = s->acc;
+    gg_stream_acc_t *acc = (gg_stream_acc_t *)user_data;
 
     if (!data || data_len == 0)
         return 0;
@@ -419,77 +397,6 @@ static int gg_feed_sse_data(gg_sse_ctx_t *s, const char *data, size_t data_len)
     }
 
     return 0;
-}
-
-static void gg_process_buffer(gg_sse_ctx_t *s)
-{
-    if (s->line_len == 0)
-        return;
-
-    char *p = s->line_buf;
-    char *end = p + s->line_len;
-
-    while (p < end) {
-        char *nl = (char *)memchr(p, '\n', (size_t)(end - p));
-        if (!nl)
-            break;
-
-        size_t llen = (size_t)(nl - p);
-        if (llen > 0 && *(nl - 1) == '\r')
-            llen--;
-
-        if (llen >= 5 && memcmp(p, "data:", 5) == 0) {
-            const char *ds = p + 5;
-            while (*ds == ' ' || *ds == '\t')
-                ds++;
-            size_t dlen = llen - (size_t)(ds - p);
-            char *data_copy = (char *)AIRY_MALLOC(dlen + 1);
-            if (data_copy) {
-                __builtin_memcpy(data_copy, ds, dlen);
-                data_copy[dlen] = '\0';
-                gg_feed_sse_data(s, data_copy, dlen);
-                AIRY_FREE(data_copy);
-            }
-        }
-
-        p = nl + 1;
-    }
-
-    if (p < end) {
-        size_t rem = (size_t)(end - p);
-        __builtin_memmove(s->line_buf, p, rem);
-        s->line_len = rem;
-    } else {
-        s->line_len = 0;
-    }
-}
-
-static size_t gg_sse_write_cb(void *contents, size_t size, size_t nmemb, void *userp)
-{
-    size_t realsize = size * nmemb;
-    gg_sse_ctx_t *s = (gg_sse_ctx_t *)userp;
-    if (s->cancelled)
-        return 0;
-
-    size_t needed = s->line_len + realsize + 1;
-    if (needed > s->line_cap) {
-        size_t nc = s->line_cap * 2;
-        while (nc < needed)
-            nc *= 2;
-        char *ptr = (char *)AIRY_REALLOC(s->line_buf, nc);
-        if (!ptr)
-            return 0;
-        s->line_buf = ptr;
-        s->line_cap = nc;
-    }
-
-    __builtin_memcpy(s->line_buf + s->line_len, contents, realsize);
-    s->line_len += realsize;
-    s->line_buf[s->line_len] = '\0';
-    s->received += realsize;
-
-    gg_process_buffer(s);
-    return s->cancelled ? 0 : realsize;
 }
 
 static llm_response_t *gg_build_stream_response(gg_stream_acc_t *acc)
@@ -577,91 +484,24 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     acc.acc_cap = 4096;
     acc.acc_content = (char *)AIRY_MALLOC(acc.acc_cap);
 
-    gg_sse_ctx_t sse;
-    gg_sse_init(&sse, &acc);
-    if (!sse.line_buf) {
-        SVC_LOG_ERROR("C-L02: GOOGLE: STREAM-FAIL model=%s reason=sse_alloc_failed", model);
-        AIRY_FREE(req_body);
-        curl_slist_free_all(headers);
-        AIRY_FREE(acc.acc_content);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
     long http_code = 0;
-    int ret = AIRY_ERR_IO;
-    int max_retries = base->max_retries > 0 ? base->max_retries : 0;
-    uint64_t start_ms = airy_time_ms();
+    int ret = provider_http_post_stream_sse(url, headers, req_body, base->timeout_sec,
+                                            base->max_retries, gg_feed_sse_data, &acc,
+                                            &http_code);
 
-    for (int attempt = 0; attempt <= max_retries; attempt++) {
-        double left = provider_left_sec(base->timeout_sec, start_ms);
-
-        CURL *curl = curl_easy_init();
-        if (!curl) {
-            SVC_LOG_ERROR("C-L02: GOOGLE: STREAM-FAIL model=%s reason=curl_init_failed", model);
-            break;
-        }
-
-        curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, req_body);
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, gg_sse_write_cb);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sse);
-        provider_http_setup(curl, attempt == 0 ? base->timeout_sec : left);
-
-        CURLcode cres = curl_easy_perform(curl);
-        http_code = 0;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-        curl_easy_cleanup(curl);
-
-        if (sse.line_len > 0)
-            gg_process_buffer(&sse);
-
-        if (cres == CURLE_OK) {
-            ret = AIRY_OK;
-            break;
-        }
-
-        SVC_LOG_WARN("C-L02: GOOGLE: STREAM-FAIL model=%s reason=curl_error diag=%s err=%s",
-                     model, provider_http_diag(cres), curl_easy_strerror(cres));
-
-        /* 重试边界：仅"首包未下发"（http_code == 0 且 received == 0）的瞬时故障
-         * 才可重试，否则分片可能已交付用户，重试会造成重复输出。 */
-        if (attempt >= max_retries || http_code != 0 || sse.received > 0 ||
-            !provider_retryable(cres))
-            break;
-
-        uint32_t delay_ms = provider_backoff_ms(attempt);
-        if (!provider_retry_budget_ok(base->timeout_sec, start_ms, delay_ms)) {
-            SVC_LOG_WARN("C-L02: GOOGLE: STREAM-STOP model=%s retry=%d/%d "
-                         "reason=budget_spent left=%.1fs delay=%ums",
-                         model, attempt + 1, max_retries,
-                         provider_left_sec(base->timeout_sec, start_ms), delay_ms);
-            break;
-        }
-        SVC_LOG_WARN("C-L02: GOOGLE: STREAM-RETRY model=%s retry=%d/%d delay=%ums diag=%s", model,
-                     attempt + 1, max_retries, delay_ms, provider_http_diag(cres));
-        airy_sleep_ms(delay_ms);
-
-        sse.line_len = 0;
-        sse.received = 0;
-        sse.cancelled = 0;
-    }
-
-    gg_sse_destroy(&sse);
     curl_slist_free_all(headers);
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
-        SVC_LOG_ERROR("C-L02: GOOGLE: STREAM-FAIL model=%s reason=http_error http_code=%ld ret=%d",
-                      model, http_code, ret);
+        SVC_LOG_ERROR("C-L02: GOOGLE: STREAM-FAIL url=%s http_code=%ld ret=%d DIAGNOSIS=%s", url,
+                      http_code, ret, provider_http_err_diag(http_code));
         SVC_LOG_ERROR(
             "C-L02: GOOGLE: STACK: google_complete_stream stream_failed url=%s http_code=%ld", url,
             http_code);
         AIRY_FREE(acc.acc_content);
         AIRY_FREE(acc.resp_model);
         AIRY_FREE(acc.finish_reason);
-        return ret;
+        return provider_http_err_map(http_code, ret);
     }
 
     llm_response_t *resp = gg_build_stream_response(&acc);
