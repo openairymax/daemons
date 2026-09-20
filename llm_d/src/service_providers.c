@@ -20,7 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "llm_service_internal.h"
+#include "rpc/internal.h"
 
 static void free_provider_fields(provider_config_t *prov)
 {

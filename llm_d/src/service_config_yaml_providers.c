@@ -9,7 +9,7 @@
  *        provider_config_t records.
  *
  * 解析状态来自 service_config_yaml_models.c 的状态机（经
- * llm_service_internal.h 的 HAVE_YAML 节共享）；本文件消费 state 后
+ * config/types.h 共享）；本文件消费 state 后
  * 通过 svc_yaml_build_result 统一释放或转移所有权。
  */
 
@@ -22,7 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "llm_service_internal.h"
+#include "config/types.h"
 
 #ifdef HAVE_YAML
 

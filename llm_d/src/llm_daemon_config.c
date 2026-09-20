@@ -14,7 +14,7 @@
  */
 
 #include "airy_memory.h"
-#include "llm_service_internal.h"
+#include "bootstrap/internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
