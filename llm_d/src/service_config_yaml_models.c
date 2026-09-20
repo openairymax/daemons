@@ -9,7 +9,7 @@
  *
  * 解析出的 models[] 与 providers 段 kv 对存入共享的 svc_yaml_state_t，
  * 由 service_config_yaml_providers.c 聚合导出、pricing 件读取价格字段；
- * 状态结构经 llm_service_internal.h 的 HAVE_YAML 节共享。
+ * 状态结构经 config/types.h 共享。
  */
 
 #include "airy_memory.h"
@@ -21,7 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "llm_service_internal.h"
+#include "config/types.h"
 
 #ifdef HAVE_YAML
 

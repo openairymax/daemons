@@ -10,12 +10,12 @@
  *
  * 2026-08-27 域拆分（main.c 1033 行 → 4 文件）：方法实现集中于此，
  * 入口引导在 main.c，请求解析在 llm_daemon_request.c，daemon 配置装配
- * 在 llm_daemon_config.c；共享符号经 llm_service_internal.h 声明。
+ * 在 llm_daemon_config.c；共享符号经 bootstrap/internal.h 声明。
  */
 
 #include "airy_memory.h"
 #include "error.h"
-#include "llm_service_internal.h"
+#include "bootstrap/internal.h"
 #include "response.h"
 #include "token_counter.h"
 

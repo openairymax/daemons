@@ -32,7 +32,8 @@
 #include <yaml.h>
 #endif
 
-#include "llm_service_internal.h"
+#include "config/internal.h"
+#include "rpc/internal.h"
 
 /**
  * @brief Safe string concatenation

@@ -16,7 +16,7 @@
  *   - service_config_yaml_providers.c provider 聚合导出
  *   - service_config_yaml_pricing.c   YAML 定价规则提取
  *
- * kv map 与解析状态结构经 llm_service_internal.h 的 HAVE_YAML 节共享，
+ * kv map 与解析状态结构经 config/types.h 共享，
  * 全部 YAML 函数体仅在开启 HAVE_YAML 时编译。
  */
 
@@ -30,7 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "llm_service_internal.h"
+#include "config/types.h"
 
 #ifdef HAVE_YAML
 

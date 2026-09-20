@@ -17,7 +17,7 @@
 
 #include <string.h>
 
-#include "llm_service_internal.h"
+#include "rpc/internal.h"
 
 /**
  * @brief Assess complexity from the input text (SIMPLE/MODERATE/COMPLEX)

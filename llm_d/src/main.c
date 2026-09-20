@@ -10,7 +10,7 @@
  * static 样板必须与引用它们的接线代码同 TU）、信号安装、日志初始化、
  * 方法注册与事件驱动循环；请求解析见 llm_daemon_request.c，RPC 方法
  * 见 llm_daemon_methods.c，daemon 配置装配见 llm_daemon_config.c，
- * 共享符号经 llm_service_internal.h 声明。
+ * 共享符号经 bootstrap/internal.h 声明。
  *
  * Conventions followed:
  * - ARCHITECTURAL_PRINCIPLES.md E-3 resource determinism (paired management)
@@ -29,7 +29,7 @@
  * here. */
 #include "platform.h"
 #include "airy_rt.h"
-#include "llm_service_internal.h"
+#include "bootstrap/internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>

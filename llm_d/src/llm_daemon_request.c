@@ -13,13 +13,13 @@
  *   - llm_daemon_methods.c  RPC 方法域（complete/embeddings/流式等）
  *   - llm_daemon_config.c   配置装配域（daemon 配置加载与服务销毁）
  *
- * 跨文件共享符号经 llm_service_internal.h 声明；daemon_main.h 生成的
+ * 跨文件共享符号经 bootstrap/internal.h 声明；daemon_main.h 生成的
  * static 样板（g_running_llm_d 等）仍留在 main.c 内。
  */
 
 #include "airy_memory.h"
 #include "error.h"
-#include "llm_service_internal.h"
+#include "bootstrap/internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
