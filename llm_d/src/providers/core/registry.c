@@ -20,39 +20,10 @@
 #include <string.h>
 #include "error.h"
 
-extern const provider_adapter_t openai_ops;
-extern const provider_adapter_t anthropic_ops;
-extern const provider_adapter_t deepseek_ops;
-extern const provider_adapter_t google_ops;
-extern const provider_adapter_t local_ops;
-
 struct provider_registry {
     provider_t *providers;
     airy_mtx_t lock;
 };
-
-static const provider_adapter_t *get_adapter_by_name(const char *name)
-{
-    if (strcmp(name, "openai") == 0)
-        return &openai_ops;
-    if (strcmp(name, "anthropic") == 0)
-        return &anthropic_ops;
-    if (strcmp(name, "deepseek") == 0)
-        return &deepseek_ops;
-    if (strcmp(name, "google") == 0)
-        return &google_ops;
-    if (strcmp(name, "local") == 0)
-        return &local_ops;
-    /* Unified OpenAI-compatible adapter (aligned with LiteLLM's openai_like
-     * mode): any non-built-in vendor (glm / qwen / moonshot / siliconflow /
-     * spark / minimax / custom names) only needs base_url + api_key in
-     * model.yaml to use the unified OpenAI Chat Completions protocol, with no
-     * new provider implementation needed. */
-    SVC_LOG_DEBUG("Provider '%s' falls back to OpenAI-compatible adapter "
-                  "(custom base_url)",
-                  name);
-    return &openai_ops;
-}
 
 provider_registry_t *provider_registry_create(const service_config_t *cfg)
 {
@@ -84,11 +55,8 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
             SVC_LOG_WARN("Provider entry #%zu has no name, skipping", i);
             continue;
         }
-        const provider_adapter_t *adapter = get_adapter_by_name(pcfg->name);
-        if (!adapter) {
-            SVC_LOG_WARN("Unknown provider: %s, skipping", pcfg->name);
-            continue;
-        }
+        /* provider_adapter_lookup 契约永不为 NULL：未知名回落 openai 兼容 */
+        const provider_adapter_t *adapter = provider_adapter_lookup(pcfg->name);
 
         provider_ctx_t *ctx = adapter->init(pcfg->name, pcfg->api_key, pcfg->api_base,
                                         pcfg->organization, pcfg->timeout_sec, pcfg->max_retries);
@@ -242,11 +210,8 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
             continue;
 
         const char *name_str = pname->valuestring;
-        const provider_adapter_t *adapter = get_adapter_by_name(name_str);
-        if (!adapter) {
-            SVC_LOG_WARN("Unknown provider in config: %s, skipping", name_str);
-            continue;
-        }
+        /* provider_adapter_lookup 契约永不为 NULL：未知名回落 openai 兼容 */
+        const provider_adapter_t *adapter = provider_adapter_lookup(name_str);
 
         char api_key_buf[512] = {0};
         if (cJSON_IsString(pkey_env) && pkey_env->valuestring[0]) {

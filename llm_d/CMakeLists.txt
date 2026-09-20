@@ -67,6 +67,8 @@ set(LLM_SERVICE_SOURCES
     src/providers/adapters/deepseek.c
     src/providers/adapters/google.c
     src/providers/adapters/local.c
+    # B16-S3 c7：适配器装配 SSoT——注册新适配的唯一改动点
+    src/providers/adapters/adapter_table.c
     src/router/llm_router.c
     src/router/cost_aware_router.c
     src/router/round_robin_router.c
