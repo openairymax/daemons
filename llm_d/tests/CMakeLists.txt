@@ -42,6 +42,8 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/deepseek.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/google.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/local.c
+    # B16-S3 c7：适配器装配 SSoT（与主目标同步）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/adapter_table.c
     # P3.16 (ACC-DT17): llm_router 集成 — 5 个路由器实现源码
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/llm_router.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/cost_aware_router.c
