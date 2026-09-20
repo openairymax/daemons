@@ -93,9 +93,9 @@ elseif(UNIX)
 endif()
 
 # 包含目录 - 兼容层和 commons
+# B16-S0 传播面收敛（V16.13①）：src/ 是内部实现细节，严禁 PUBLIC 传播
 target_include_directories(airy_llm_service PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/include
@@ -113,6 +113,7 @@ target_include_directories(airy_llm_service PUBLIC
 )
 
 target_include_directories(airy_llm_service PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CURL_INCLUDE_DIRS}
     ${CJSON_INCLUDE_DIRS}
     ${YAML_INCLUDE_DIRS}
