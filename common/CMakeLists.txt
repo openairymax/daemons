@@ -241,8 +241,6 @@ target_include_directories(svc_common PUBLIC
     # W18: taskflow_advanced.h 被 loop.h 包含（DAG 工作流集成），
     # orchestrator.c 包含 loop.h 因此间接依赖 taskflow 类型定义
     $<BUILD_INTERFACE:${ATOMS_DIR}/taskflow/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../daemons/llm_d/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../daemons/tool_d/include>
 )
 if(AIRY_HAS_CURL)
     target_compile_definitions(svc_common PUBLIC AIRY_HAS_CURL)

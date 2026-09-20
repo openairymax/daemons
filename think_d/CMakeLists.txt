@@ -59,6 +59,8 @@ target_include_directories(airy_think_service PUBLIC
 
 target_include_directories(airy_think_service PRIVATE
     ${CJSON_INCLUDE_DIRS}
+    # B16-S0：跨 daemon 头依赖显式化（svc_common 不再代传 llm_d/include）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../llm_d/include
 )
 
 # 核心依赖：CoreLoopThree 认知引擎（含 LLM 适配器、双思考、GCCP、WorkHall）
