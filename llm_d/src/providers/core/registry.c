@@ -19,18 +19,18 @@
 #include <string.h>
 #include "error.h"
 
-extern const provider_ops_t openai_ops;
-extern const provider_ops_t anthropic_ops;
-extern const provider_ops_t deepseek_ops;
-extern const provider_ops_t google_ops;
-extern const provider_ops_t local_ops;
+extern const provider_adapter_t openai_ops;
+extern const provider_adapter_t anthropic_ops;
+extern const provider_adapter_t deepseek_ops;
+extern const provider_adapter_t google_ops;
+extern const provider_adapter_t local_ops;
 
 struct provider_registry {
     provider_t *providers;
     airy_mtx_t lock;
 };
 
-static const provider_ops_t *get_ops_by_name(const char *name)
+static const provider_adapter_t *get_adapter_by_name(const char *name)
 {
     if (strcmp(name, "openai") == 0)
         return &openai_ops;
@@ -83,13 +83,13 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
             SVC_LOG_WARN("Provider entry #%zu has no name, skipping", i);
             continue;
         }
-        const provider_ops_t *ops = get_ops_by_name(pcfg->name);
-        if (!ops) {
+        const provider_adapter_t *adapter = get_adapter_by_name(pcfg->name);
+        if (!adapter) {
             SVC_LOG_WARN("Unknown provider: %s, skipping", pcfg->name);
             continue;
         }
 
-        provider_ctx_t *ctx = ops->init(pcfg->name, pcfg->api_key, pcfg->api_base,
+        provider_ctx_t *ctx = adapter->init(pcfg->name, pcfg->api_key, pcfg->api_base,
                                         pcfg->organization, pcfg->timeout_sec, pcfg->max_retries);
         if (!ctx) {
             SVC_LOG_ERROR("Failed to init provider: %s", pcfg->name);
@@ -134,10 +134,10 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
                 AIRY_FREE(models);
             }
             AIRY_FREE(caps);
-            ops->destroy(ctx);
+            adapter->destroy(ctx);
             continue;
         }
-        reg->providers[valid].ops = ops;
+        reg->providers[valid].adapter = adapter;
         reg->providers[valid].ctx = ctx;
         reg->providers[valid].models = models;
         reg->providers[valid].model_max_output = caps;
@@ -241,8 +241,8 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
             continue;
 
         const char *name_str = pname->valuestring;
-        const provider_ops_t *ops = get_ops_by_name(name_str);
-        if (!ops) {
+        const provider_adapter_t *adapter = get_adapter_by_name(name_str);
+        if (!adapter) {
             SVC_LOG_WARN("Unknown provider in config: %s, skipping", name_str);
             continue;
         }
@@ -266,7 +266,7 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
         double timeout = cJSON_IsNumber(ptimeout) ? ptimeout->valuedouble : 30.0;
         int retries = cJSON_IsNumber(pretries) ? pretries->valueint : 3;
 
-        provider_ctx_t *ctx = ops->init(name_str, api_key_buf[0] ? api_key_buf : NULL, base_str,
+        provider_ctx_t *ctx = adapter->init(name_str, api_key_buf[0] ? api_key_buf : NULL, base_str,
                                         NULL, timeout, retries);
         if (!ctx) {
             SVC_LOG_ERROR("Failed to init provider '%s' from config", name_str);
@@ -305,10 +305,10 @@ provider_registry_t *provider_registry_create_from_config(const service_config_t
                     AIRY_FREE(models[j]);
                 AIRY_FREE(models);
             }
-            ops->destroy(ctx);
+            adapter->destroy(ctx);
             continue;
         }
-        reg->providers[valid_idx].ops = ops;
+        reg->providers[valid_idx].adapter = adapter;
         reg->providers[valid_idx].ctx = ctx;
         reg->providers[valid_idx].models = models;
         valid_idx++;
@@ -327,7 +327,7 @@ void provider_registry_destroy(provider_registry_t *reg)
     airy_mtx_lock(&reg->lock);
     if (reg->providers) {
         for (provider_t *p = reg->providers; p->name; ++p) {
-            p->ops->destroy(p->ctx);
+            p->adapter->destroy(p->ctx);
             AIRY_FREE((void *)p->name);
             if (p->models) {
                 for (char **m = p->models; *m; ++m)

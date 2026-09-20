@@ -16,7 +16,7 @@
 
 #include "daemon_errors.h"
 #include "daemon_platform_ext.h"
-#include "core/provider.h"
+#include "core/adapter.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -702,7 +702,7 @@ static int google_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_con
     return AIRY_OK;
 }
 
-const provider_ops_t google_ops = {.init = google_init,
+const provider_adapter_t google_ops = {.init = google_init,
                                    .destroy = google_destroy,
                                    .complete = google_complete,
                                    .complete_stream = google_complete_stream,

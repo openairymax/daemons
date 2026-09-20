@@ -19,7 +19,7 @@
 
 #include "daemon_errors.h"
 #include "daemon_platform_ext.h"
-#include "core/provider.h"
+#include "core/adapter.h"
 #include "svc_logger.h"
 
 #include <curl/curl.h>
@@ -548,7 +548,7 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
     return AIRY_OK;
 }
 
-const provider_ops_t local_ops = {.init = local_init,
+const provider_adapter_t local_ops = {.init = local_init,
                                   .destroy = local_destroy,
                                   .complete = local_complete,
                                   .complete_stream = local_complete_stream,

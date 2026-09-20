@@ -14,7 +14,7 @@
 #include "daemon_platform_ext.h"
 #include "error.h"
 #include "openai_internal.h"
-#include "core/provider.h"
+#include "core/adapter.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>

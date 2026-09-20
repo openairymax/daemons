@@ -2,12 +2,16 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
 /**
- * @file provider.h
- * @brief Provider adapter interface definitions.
+ * @file transport.h
+ * @brief Provider 域机制层（B16-S3 拆分自 provider.h）。
+ *
+ * 出网传输、重试谓词、限流、请求骨架与响应解析的唯一实现（SSoT）。
+ * 适配层（adapters/）只实现 core/adapter.h 契约，禁止自持本层任何
+ * 副本；本头禁止出现厂商特判分支。
  */
 
-#ifndef LLM_D_PROVIDERS_PROVIDER_H
-#define LLM_D_PROVIDERS_PROVIDER_H
+#ifndef LLM_D_PROVIDERS_CORE_TRANSPORT_H
+#define LLM_D_PROVIDERS_CORE_TRANSPORT_H
 
 /* B16-S2 内层反依赖：providers 只依赖跨层类型契约（commons SSoT），
  * 不依赖发布头 llm_service.h——发布头仅 rpc 域门面可见。 */
@@ -21,10 +25,6 @@
 extern "C" {
 #endif
 
-
-typedef struct provider_ctx provider_ctx_t;
-
-
 typedef struct {
     char api_key[256];
     char api_key_env[128]; /* model.yaml api_key_env name (e.g. DEEPSEEK_API_KEY);
@@ -36,47 +36,15 @@ typedef struct {
     int max_retries;
 } provider_base_ctx_t;
 
-
 typedef struct {
     char *data;
     size_t size;
     size_t capacity;
 } provider_http_resp_t;
 
-
-typedef struct {
-    const char *name;
-    const char *default_model;
-    const char *default_base_url;
-    provider_ctx_t *(*init)(const char *name, const char *api_key, const char *api_base,
-                            const char *organization, double timeout_sec, int max_retries);
-    void (*destroy)(provider_ctx_t *ctx);
-    int (*complete)(provider_ctx_t *ctx, const llm_request_config_t *manager,
-                    llm_response_t **out_response);
-    int (*complete_stream)(provider_ctx_t *ctx, const llm_request_config_t *manager,
-                           llm_stream_callback_t callback, void *callback_data,
-                           llm_response_t **out_response);
-} provider_ops_t;
-
-
-typedef struct {
-    const char *name;
-    const provider_ops_t *ops;
-    provider_ctx_t *ctx;
-    char **models;
-    /* 与 models 同下标对齐的每模型输出上限（0 = 未配置）：registry 装配时
-     * 从 provider_config_t 复制，供生成参数解析查询。 */
-    int *model_max_output;
-} provider_t;
-
-
 void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, const char *api_base,
                         const char *organization, double timeout_sec, int max_retries,
                         const char *default_base);
-
-/* 获取 provider 的 base 上下文（api_base/api_key/timeout_sec 等）。
- * 约定：所有 provider 的 ctx 首字段均为 provider_base_ctx_t base。 */
-provider_base_ctx_t *provider_base_ctx(provider_ctx_t *ctx);
 
 /* Hot reload: called before each request; if the current api_key is empty,
  * fills it from $AIRY_HOME/config/secrets.env using base_ctx->api_key_env
@@ -93,7 +61,7 @@ void provider_http_setup(CURL *curl, double timeout_sec);
  * PROXY/NET_IO/OTHER），供日志与用户面诊断使用。返回值恒非 NULL。 */
 const char *provider_http_diag(CURLcode code);
 
-/* 出网重试策略唯一实现（SSoT，实现见 provider_http.c）。四者配套使用：
+/* 出网重试策略唯一实现（SSoT，实现见 http.c）。四者配套使用：
  *   retryable = provider_retryable(错误码)                  —— 是否值得重试
  *   delay     = provider_backoff_ms(已重试次数)             —— 指数退避 + 抖动
  *   left      = provider_left_sec(预算, 起始时刻)           —— 剩余墙钟秒数
@@ -124,7 +92,7 @@ int provider_parse_openai_response(const char *body, llm_response_t **out);
 
 /* 域内析构器：providers 失败路径释放的是自己解析的中间产物，析构归 provider
  * 域所有（B16-S2 内层反依赖——不依赖发布头 llm_service_free 门面）。语义与
- * rpc 域 llm_response_free 一致；S3 拆分时随 provider.h 入 core/。 */
+ * rpc 域 llm_response_free 一致。 */
 static inline void provider_response_free(llm_response_t *resp)
 {
     if (!resp)
@@ -150,7 +118,6 @@ static inline void provider_response_free(llm_response_t *resp)
  * allocation failure returns NULL and leaves the input buffer untouched. */
 char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text);
 
-
 typedef int (*provider_stream_chunk_cb_t)(const char *data_line, void *user_data);
 
 /* 流式 POST。重试边界：只有"上游一个字节都没下发"的失败才可重试——一旦写回调
@@ -173,4 +140,4 @@ void provider_emit_reasoning_frame(llm_stream_callback_t cb, void *ud, const cha
 }
 #endif
 
-#endif /* LLM_D_PROVIDERS_PROVIDER_H */
+#endif /* LLM_D_PROVIDERS_CORE_TRANSPORT_H */
