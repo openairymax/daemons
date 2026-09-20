@@ -36,9 +36,8 @@ typedef struct {
     provider_rate_limiter_t rl;
 } openai_ctx_t;
 
-static provider_ctx_t *openai_init(const char *name __attribute__((unused)), const char *api_key,
-                                   const char *api_base, const char *organization,
-                                   double timeout_sec, int max_retries)
+static provider_ctx_t *openai_init(const char *name, const char *api_key, const char *api_base,
+                                   const char *organization, double timeout_sec, int max_retries)
 {
     openai_ctx_t *ctx = (openai_ctx_t *)AIRY_CALLOC(1, sizeof(openai_ctx_t));
     if (!ctx) {
@@ -46,7 +45,7 @@ static provider_ctx_t *openai_init(const char *name __attribute__((unused)), con
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    provider_base_init(&ctx->base, api_key, api_base, organization, timeout_sec, max_retries,
+    provider_base_init(&ctx->base, name, api_key, api_base, organization, timeout_sec, max_retries,
                        OPENAI_DEFAULT_BASE);
 
     provider_rl_init(&ctx->rl);

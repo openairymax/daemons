@@ -42,9 +42,12 @@ typedef struct {
     size_t capacity;
 } provider_http_resp_t;
 
-void provider_base_init(provider_base_ctx_t *base_ctx, const char *api_key, const char *api_base,
-                        const char *organization, double timeout_sec, int max_retries,
-                        const char *default_base);
+/* provider_name 用于 api_key_env 回落名推导（品牌无关统一约定，见
+ * core/secrets.c sec_env_name_for）：未显式给出 "env:NAME" 时，以厂商名推
+ * 出标准环境变量名供 secrets.env 热重载。 */
+void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name, const char *api_key,
+                        const char *api_base, const char *organization, double timeout_sec,
+                        int max_retries, const char *default_base);
 
 /* 出网传输策略唯一实现（SSoT）：连接超时 / 总超时 / 代理 / 自定义 CA /
  * 重定向与证书校验。所有出网调用点（非流式、流式、google、anthropic）

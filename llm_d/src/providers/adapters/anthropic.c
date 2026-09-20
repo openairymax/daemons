@@ -35,8 +35,7 @@ typedef struct {
     provider_base_ctx_t base;
 } anthropic_ctx_t;
 
-static provider_ctx_t *anthropic_init(const char *name __attribute__((unused)), const char *api_key,
-                                      const char *api_base,
+static provider_ctx_t *anthropic_init(const char *name, const char *api_key, const char *api_base,
                                       const char *organization __attribute__((unused)),
                                       double timeout_sec, int max_retries)
 {
@@ -48,7 +47,7 @@ static provider_ctx_t *anthropic_init(const char *name __attribute__((unused)), 
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    provider_base_init(&ctx->base, api_key, api_base, organization, timeout_sec, max_retries,
+    provider_base_init(&ctx->base, name, api_key, api_base, organization, timeout_sec, max_retries,
                        ANTHROPIC_DEFAULT_BASE);
 
     SVC_LOG_INFO("C-L02: ANTHROPIC: INIT api_base=%s model=%s timeout=%.1fs max_retries=%d "
