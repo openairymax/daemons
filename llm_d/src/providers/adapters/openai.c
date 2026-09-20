@@ -19,7 +19,7 @@
 
 #include "daemon_platform_ext.h"
 #include "openai_internal.h"
-#include "core/provider.h"
+#include "core/adapter.h"
 #include "svc_logger.h"
 
 #include <curl/curl.h>
@@ -181,7 +181,7 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     return ret;
 }
 
-const provider_ops_t openai_ops = {.init = openai_init,
+const provider_adapter_t openai_ops = {.init = openai_init,
                                    .destroy = openai_destroy,
                                    .complete = openai_complete,
                                    .complete_stream = openai_complete_stream,

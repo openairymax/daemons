@@ -18,7 +18,7 @@
 #ifndef AIRY_RT_LLM_PROVIDERS_OPENAI_INTERNAL_H
 #define AIRY_RT_LLM_PROVIDERS_OPENAI_INTERNAL_H
 
-#include "core/provider.h"
+#include "core/adapter.h"
 #include "core/rate_limit.h"
 
 #ifdef __cplusplus

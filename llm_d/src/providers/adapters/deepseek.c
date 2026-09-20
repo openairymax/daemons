@@ -19,7 +19,7 @@
 
 #include "daemon_errors.h"
 #include "daemon_platform_ext.h"
-#include "core/provider.h"
+#include "core/adapter.h"
 #include "svc_logger.h"
 
 #include <curl/curl.h>
@@ -591,7 +591,7 @@ static int deepseek_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_c
     return AIRY_OK;
 }
 
-const provider_ops_t deepseek_ops = {.init = deepseek_init,
+const provider_adapter_t deepseek_ops = {.init = deepseek_init,
                                      .destroy = deepseek_destroy,
                                      .complete = deepseek_complete,
                                      .complete_stream = deepseek_complete_stream,

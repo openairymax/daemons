@@ -14,7 +14,7 @@
  * - provider_stream.c SSE 流式传输 / 流式控制帧 / 增长缓冲
  */
 
-#include "provider.h"
+#include "adapter.h"
 #include "svc_logger.h"
 #include "platform.h"
 
