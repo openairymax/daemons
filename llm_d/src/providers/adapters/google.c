@@ -16,7 +16,7 @@
 
 #include "daemon_errors.h"
 #include "daemon_platform_ext.h"
-#include "provider.h"
+#include "core/provider.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>

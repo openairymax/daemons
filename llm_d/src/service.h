@@ -13,7 +13,7 @@
 #include "cost_tracker.h"
 #include "llm_service.h"
 #include "daemon_platform_ext.h"
-#include "providers/registry.h"
+#include "providers/core/registry.h"
 #include "token_counter.h"
 
 struct llm_service {
