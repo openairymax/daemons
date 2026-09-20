@@ -165,7 +165,7 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
             SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=oom_choices "
                           "STACK: provider_parse_openai_response");
 
-            llm_response_free(resp);
+            provider_response_free(resp);
             return AIRY_ERR_OUT_OF_MEMORY;
         }
 

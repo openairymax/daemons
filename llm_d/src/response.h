@@ -9,7 +9,8 @@
 #ifndef AIRY_RT_LLM_RESPONSE_H
 #define AIRY_RT_LLM_RESPONSE_H
 
-#include "llm_service.h"
+/* B16-S2 内层反依赖：序列化层只依赖跨层类型契约（commons SSoT）。 */
+#include "llm_service_types.h"
 
 #include <cjson/cJSON.h>
 
