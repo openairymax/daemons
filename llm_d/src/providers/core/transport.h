@@ -56,13 +56,13 @@ void provider_http_setup(CURL *curl, double timeout_sec);
  * PROXY/NET_IO/OTHER），供日志与用户面诊断使用。返回值恒非 NULL。 */
 const char *provider_http_diag(CURLcode code);
 
-/* 出网重试策略唯一实现（SSoT，实现见 http.c）。四者配套使用：
+/* 出网重试策略唯一实现（SSoT，实现见 retry.c）：判断件与循环壳同处一件。
  *   retryable = provider_retryable(错误码)                  —— 是否值得重试
  *   delay     = provider_backoff_ms(已重试次数)             —— 指数退避 + 抖动
  *   left      = provider_left_sec(预算, 起始时刻)           —— 剩余墙钟秒数
  *   ok        = provider_retry_budget_ok(预算, 起点, delay) —— 退避后是否仍够一次
- * 只有四者同时成立才允许重试；流式还须满足"首包未下发"
- * （见 provider_http_post_stream）。任何一处复制这些判断都会造成同构点漂移。 */
+ * 只有四者同时成立才允许重试；流式还须满足"首包未下发"（provider_gate_fn）。
+ * 任何一处复制这些判断都会造成同构点漂移。 */
 #define PROVIDER_RETRY_BASE_MS 200U
 #define PROVIDER_RETRY_MAX_MS 2000U
 #define PROVIDER_RETRY_JITTER_PCT 25U
@@ -74,6 +74,47 @@ int provider_retryable(CURLcode code);
 uint32_t provider_backoff_ms(int attempt);
 double provider_left_sec(double timeout_sec, uint64_t start_ms);
 int provider_retry_budget_ok(double timeout_sec, uint64_t start_ms, uint32_t delay_ms);
+
+/* 单次尝试的结局。 */
+typedef enum {
+    PROVIDER_TRY_FATAL = -1, /* 不可恢复（本地资源申请失败），立即终止整轮 */
+    PROVIDER_TRY_FAILED = 0, /* 本次尝试失败，是否重试交循环壳判定 */
+    PROVIDER_TRY_DONE = 1,   /* 本次尝试成立（传输层无错），立即终止整轮 */
+} provider_attempt_t;
+
+/* 单次尝试装配与执行（core/http.c 非流式、core/sse.c 流式各自实现）：绑定写
+ * 回调、发起一次 curl_easy_perform 并回填 res / http_code。retry 为尝试序号
+ * （0 起）；left_sec 为本次尝试可用的墙钟剩余预算，首试为全额 timeout_sec。 */
+typedef provider_attempt_t (*provider_attempt_fn)(void *ud, int retry, double left_sec,
+                                                  CURLcode *out_res, long *out_http_code);
+
+/* 附加重试闸门（返回非 0 = 允许重试）：流式用它表达"上游已下发过字节即禁止
+ * 重试"（重试会造成重复输出）。可为 NULL（表示无附加约束）。 */
+typedef int (*provider_gate_fn)(void *ud, CURLcode res, long http_code);
+
+/* 重试间复位钩子：清空上一次尝试的累积（响应缓冲 / SSE 分片状态）。可为 NULL。 */
+typedef void (*provider_reset_fn)(void *ud);
+
+typedef struct {
+    const char *tag;    /* 日志标签（HTTP-POST / STREAM），恒非 NULL */
+    const char *url;    /* 日志用请求 URL */
+    double timeout_sec; /* 整轮重试的墙钟预算，非单次尝试预算 */
+    int max_retries;    /* 额外重试次数（0 = 只尝试一次），负值按 0 处理 */
+    provider_attempt_fn attempt;
+    provider_gate_fn gate;   /* 可 NULL */
+    provider_reset_fn reset; /* 可 NULL */
+    void *ud;
+} provider_retry_cfg_t;
+
+/* 退避重试循环唯一实现（SSoT）。任一条件成立即终止循环：attempt 回
+ * PROVIDER_TRY_DONE / PROVIDER_TRY_FATAL；已达 max_retries；gate 判定禁止
+ * 重试或错误码不可重试；退避后剩余预算不足一次有效尝试。仅"可重试且预算
+ * 充足"时才退避等待并调用 reset。
+ * 返回 AIRY_OK —— 循环正常结束，成败由 out_res / out_http_code 判定；
+ * 返回 AIRY_ERR_UNKNOWN —— attempt 报致命错误，out_* 未被改写。
+ * 适配层禁止调用本件自建循环，只能经 provider_http_post /
+ * provider_http_post_stream 出网。 */
+int provider_retry_run(const provider_retry_cfg_t *cfg, CURLcode *out_res, long *out_http_code);
 
 int provider_http_post(const char *url, struct curl_slist *headers, const char *body,
                        double timeout_sec, int max_retries, provider_http_resp_t **out_response,
