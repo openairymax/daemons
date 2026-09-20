@@ -8,9 +8,10 @@
  * core/registry.c 只经 provider_adapter_lookup() 查表取 ops，不持有任何
  * 厂商符号与厂商名分支。注册新适配 = 本表尾加一行 + 各 CMakeLists 登记
  * 源文件。未命中回落 OpenAI 兼容适配（对齐 LiteLLM 的 openai_like 模
- * 式）：glm / qwen / moonshot / siliconflow / spark / minimax 及自定义名
- * 仅需 model.yaml 提供 base_url + api_key 即以统一 OpenAI Chat
- * Completions 协议接入，无需新适配器实现。
+ * 式）：glm / qwen / moonshot / siliconflow / spark / minimax / deepseek /
+ * google 及自定义名仅需 model.yaml 提供 base_url（+ api_key）即以统一
+ * OpenAI Chat Completions 协议接入，无需新适配器实现——deepseek 适配已
+ * 随 B16-S4 清理，google 亦经变量端点声明式接入。
  */
 
 #include "core/adapter.h"
@@ -21,14 +22,12 @@
 
 extern const provider_adapter_t openai_ops;
 extern const provider_adapter_t anthropic_ops;
-extern const provider_adapter_t deepseek_ops;
-extern const provider_adapter_t google_ops;
 extern const provider_adapter_t local_ops;
 
 #define ADAPTER_TABLE_SIZE (sizeof(g_adapter_table) / sizeof(g_adapter_table[0]))
 
 static const provider_adapter_t *const g_adapter_table[] = {
-    &openai_ops, &anthropic_ops, &deepseek_ops, &google_ops, &local_ops,
+    &openai_ops, &anthropic_ops, &local_ops,
 };
 
 const provider_adapter_t *provider_adapter_lookup(const char *name)

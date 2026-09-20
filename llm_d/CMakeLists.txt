@@ -66,8 +66,7 @@ set(LLM_SERVICE_SOURCES
     src/providers/adapters/openai.c
     src/providers/core/rate_limit.c
     src/providers/adapters/anthropic.c
-    src/providers/adapters/deepseek.c
-    src/providers/adapters/google.c
+    # B16-S4：deepseek.c / google.c 清理（OpenAI 兼容遗留冗余，经 model.yaml base_url 声明式接入）
     src/providers/adapters/local.c
     # B16-S3 c7：适配器装配 SSoT——注册新适配的唯一改动点
     src/providers/adapters/adapter_table.c

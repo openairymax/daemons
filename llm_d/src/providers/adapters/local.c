@@ -38,8 +38,8 @@ typedef struct {
     provider_base_ctx_t base;
 } local_ctx_t;
 
-static provider_ctx_t *local_init(const char *name __attribute__((unused)),
-                                  const char *api_key __attribute__((unused)), const char *api_base,
+static provider_ctx_t *local_init(const char *name, const char *api_key __attribute__((unused)),
+                                  const char *api_base,
                                   const char *organization __attribute__((unused)),
                                   double timeout_sec, int max_retries)
 {
@@ -52,7 +52,8 @@ static provider_ctx_t *local_init(const char *name __attribute__((unused)),
     }
 
     double timeout = timeout_sec > 0 ? timeout_sec : LOCAL_DEFAULT_TIMEOUT;
-    provider_base_init(&ctx->base, NULL, api_base, NULL, timeout, max_retries, LOCAL_DEFAULT_BASE);
+    provider_base_init(&ctx->base, name, NULL, api_base, NULL, timeout, max_retries,
+                       LOCAL_DEFAULT_BASE);
 
     SVC_LOG_INFO("C-L02: LOCAL: INIT api_base=%s model=%s timeout=%.1fs max_retries=%d "
                  "has_api_key=%d (no auth, local endpoint, higher default timeout)",

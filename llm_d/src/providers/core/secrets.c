@@ -7,8 +7,12 @@
  *
  * B16-S3 c3：自 provider.c 收敛。六份逐字重复的 explicit_bzero shim 归一为
  * secrets.h 的唯一实现；api_key 生命周期（env 展开、secrets.env 热重载、
- * 厂商 env 名映射）集中于此，适配层禁止自持副本。密钥值永不写日志（仅记
+ * env 回落名推导）集中于此，适配层禁止自持副本。密钥值永不写日志（仅记
  * env 名与来源），临时缓冲用后即擦。
+ *
+ * B16-S4：env 回落名由厂商名经品牌无关统一约定推导（大写 + 非字母数字归
+ * 一为 '_' + "_API_KEY"），删除原按域名/厂商名硬编码的映射表——core/ 内
+ * 不再出现任何厂商特判分支。
  */
 
 #include "airy_memory.h"
@@ -160,34 +164,24 @@ const char *sec_resolve_key(const char *api_key)
     return api_key;
 }
 
-const char *sec_guess_provider(const char *url)
+bool sec_env_name_for(const char *provider_name, char *out, size_t out_size)
 {
-    if (!url) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    if (strstr(url, "openai.com"))
-        return "openai";
-    if (strstr(url, "anthropic.com"))
-        return "anthropic";
-    if (strstr(url, "deepseek.com"))
-        return "deepseek";
-    if (strstr(url, "googleapis.com"))
-        return "google";
-    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
-}
+    if (!provider_name || !provider_name[0] || !out || out_size == 0)
+        return false;
 
-const char *sec_env_for_provider(const char *name)
-{
-    if (!name) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
+    /* 品牌无关的统一约定：厂商名全大写、非字母数字归一为 '_'，追加
+     * "_API_KEY"。由此 openai/anthropic/deepseek 等自然得到其惯用
+     * 变量名，无需在 core 内维护厂商硬表。 */
+    static const char suffix[] = "_API_KEY";
+    size_t i = 0;
+    for (const char *p = provider_name; *p; ++p) {
+        char c = (*p >= 'a' && *p <= 'z') ? (char)(*p - 'a' + 'A') : *p;
+        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')))
+            c = '_';
+        if (i + sizeof(suffix) >= out_size)
+            return false;
+        out[i++] = c;
     }
-    if (strcmp(name, "openai") == 0)
-        return "OPENAI_API_KEY";
-    if (strcmp(name, "anthropic") == 0)
-        return "ANTHROPIC_API_KEY";
-    if (strcmp(name, "deepseek") == 0)
-        return "DEEPSEEK_API_KEY";
-    if (strcmp(name, "google") == 0)
-        return "GOOGLE_AI_API_KEY";
-    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
+    __builtin_memcpy(out + i, suffix, sizeof(suffix));
+    return true;
 }
