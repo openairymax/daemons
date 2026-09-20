@@ -1,27 +1,27 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
-#include "airy_memory.h"
-
-#include "error.h"
 /**
  * @file local.c
  * @brief Local-model adapter（OpenAI 兼容协议，无鉴权本地端点）。
  *
  * B16-S3 c6：流式累积器与流末装配收敛 core/toolstream.c（与 openai/
  * deepseek 共用 provider_stream_acc_t 四件套；本地端点不产
- * reasoning_content，core 对应分支自然旁路）。请求头保持 Content-Type
- * 单头——本地服务无鉴权是设计使然，不走 provider_openai_headers 以免
- * 无密钥告警噪音。适配层只留厂商差异面（默认端点/模型、超时、日志）。
+ * reasoning_content，core 对应分支自然旁路）。出网经 core/http.c
+ * provider_http_exec（URL 拼装、头链生命周期全归 core）；请求头以
+ * PROVIDER_AUTH_NONE 声明单 Content-Type——本地服务无鉴权是设计使然，
+ * 故不进无密钥告警分支。适配层只留厂商差异面（默认端点/模型、超时、
+ * 日志），且不含任何 curl_* 调用。
  */
 
+#include "airy_memory.h"
+#include "error.h"
 #include "daemon_errors.h"
 #include "daemon_platform_ext.h"
 #include "core/adapter.h"
 #include "core/toolstream.h"
 #include "svc_logger.h"
 
-#include <curl/curl.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -33,6 +33,10 @@
 #define LOCAL_DEFAULT_BASE "http://localhost:8080/v1"
 #define LOCAL_DEFAULT_MODEL "gpt-3.5-turbo"
 #define LOCAL_DEFAULT_TIMEOUT 60.0
+#define LOCAL_CHAT_PATH "/chat/completions"
+
+/* 请求头声明：本地端点无鉴权（设计使然），core 仅附加 Content-Type。 */
+static const provider_header_spec_t LOCAL_HEADERS = {.auth = PROVIDER_AUTH_NONE};
 
 typedef struct {
     provider_base_ctx_t base;
@@ -99,34 +103,33 @@ static int local_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *m
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    char url[1024];
-    snprintf(url, sizeof(url), "%s/chat/completions", base->api_base);
-
-    struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
+    provider_request_t req = {
+        .base = base,
+        .path = LOCAL_CHAT_PATH,
+        .headers = &LOCAL_HEADERS,
+        .body = req_body,
+    };
 
     provider_http_resp_t *http_resp = NULL;
     long http_code = 0;
 
-    int ret = provider_http_post(url, headers, req_body, base->timeout_sec, base->max_retries,
-                                 &http_resp, &http_code);
+    int ret = provider_http_exec(&req, &http_resp, &http_code);
 
-    curl_slist_free_all(headers);
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: LOCAL: COMPLETE-FAIL — HTTP request failed "
-                      "url=%s http_code=%ld ret=%d timeout=%.1fs "
-                      "STACK: provider_http_post() → local_complete()",
-                      url, http_code, ret, base->timeout_sec);
+                      "api_base=%s http_code=%ld ret=%d timeout=%.1fs "
+                      "STACK: provider_http_exec() → local_complete()",
+                      base->api_base, http_code, ret, base->timeout_sec);
         return ret;
     }
 
     if (http_code != 200) {
         size_t resp_body_len = (http_resp && http_resp->data) ? strlen(http_resp->data) : 0;
         SVC_LOG_ERROR("C-L02: LOCAL: COMPLETE-FAIL — HTTP error "
-                      "url=%s http_code=%ld resp_body_len=%zu DIAGNOSIS=%s BODY: %.300s",
-                      url, http_code, resp_body_len, provider_http_err_diag(http_code),
+                      "api_base=%s http_code=%ld resp_body_len=%zu DIAGNOSIS=%s BODY: %.300s",
+                      base->api_base, http_code, resp_body_len, provider_http_err_diag(http_code),
                       (http_resp && http_resp->data) ? http_resp->data : "");
         provider_http_resp_free(http_resp);
         return provider_http_err_map(http_code, AIRY_ERR_IO);
@@ -185,27 +188,27 @@ static int local_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_conf
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    char url[1024];
-    snprintf(url, sizeof(url), "%s/chat/completions", base->api_base);
-
-    struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-
     provider_stream_acc_t acc;
     provider_stream_acc_init(&acc, callback, user_data);
 
-    long http_code = 0;
-    int ret = provider_http_post_stream(url, headers, req_body, base->timeout_sec,
-                                        base->max_retries, provider_openai_on_chunk, &acc,
-                                        &http_code);
+    provider_request_t req = {
+        .base = base,
+        .path = LOCAL_CHAT_PATH,
+        .headers = &LOCAL_HEADERS,
+        .body = req_body,
+        .on_chunk = provider_openai_on_chunk,
+        .user_data = &acc,
+    };
 
-    curl_slist_free_all(headers);
+    long http_code = 0;
+    int ret = provider_http_exec(&req, NULL, &http_code);
+
     AIRY_FREE(req_body);
 
     if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: LOCAL: STREAM-FAIL — HTTP stream error "
-                      "url=%s http_code=%ld ret=%d DIAGNOSIS=%s",
-                      url, http_code, ret, provider_http_err_diag(http_code));
+                      "api_base=%s http_code=%ld ret=%d DIAGNOSIS=%s",
+                      base->api_base, http_code, ret, provider_http_err_diag(http_code));
         provider_stream_acc_free(&acc);
         return provider_http_err_map(http_code, ret);
     }
