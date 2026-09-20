@@ -12,7 +12,7 @@
  */
 
 #include "error.h"
-#include "provider.h"
+#include "providers/core/provider.h"
 
 #include <assert.h>
 #include <stdio.h>

@@ -14,7 +14,7 @@
 #define AIRY_RT_LLM_CONFIG_INTERNAL_H
 
 #include "cost_tracker.h"
-#include "providers/registry.h"
+#include "providers/core/registry.h"
 
 #include <cjson/cJSON.h>
 

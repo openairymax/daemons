@@ -31,7 +31,7 @@
 
 #include "daemon_platform_ext.h"
 #include "error.h"
-#include "provider.h"
+#include "providers/core/provider.h"
 
 #include <arpa/inet.h>
 #include <assert.h>
@@ -318,7 +318,7 @@ static void cfg_init(llm_request_config_t *cfg, llm_message_t *msg)
     cfg->temperature = 0.0f;
 }
 
-/* max_retries=1 → openai_http_request_with_retry 只发一次请求，测试确定。 */
+/* max_retries=1 → provider_http_request_with_retry 只发一次请求，测试确定。 */
 static provider_ctx_t *make_ctx(const char *base_url)
 {
     provider_ctx_t *ctx = openai_ops.init("openai", "", base_url, NULL, 5.0, 1);

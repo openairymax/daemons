@@ -19,7 +19,7 @@
 
 #include "daemon_platform_ext.h"
 #include "openai_internal.h"
-#include "provider.h"
+#include "core/provider.h"
 #include "svc_logger.h"
 
 #include <curl/curl.h>
@@ -57,7 +57,7 @@ static provider_ctx_t *openai_init(const char *name __attribute__((unused)), con
     provider_base_init(&ctx->base, api_key, api_base, organization, timeout_sec, max_retries,
                        OPENAI_DEFAULT_BASE);
 
-    openai_rl_init(&ctx->rl);
+    provider_rl_init(&ctx->rl);
 
     airy_random_init();
 
@@ -65,7 +65,7 @@ static provider_ctx_t *openai_init(const char *name __attribute__((unused)), con
                  "RPM=%d TPM=%ld",
                  ctx->base.api_base[0] ? ctx->base.api_base : OPENAI_DEFAULT_BASE,
                  ctx->base.timeout_sec, ctx->base.max_retries, ctx->base.api_key[0] ? 1 : 0,
-                 OPENAI_DEFAULT_RPM, (long)OPENAI_DEFAULT_TPM);
+                 PROVIDER_RL_DEFAULT_RPM, (long)PROVIDER_RL_DEFAULT_TPM);
 
     return (provider_ctx_t *)ctx;
 }
@@ -75,7 +75,7 @@ static void openai_destroy(provider_ctx_t *ctx_ptr)
     if (ctx_ptr) {
         openai_ctx_t *ctx = (openai_ctx_t *)ctx_ptr;
         SVC_LOG_INFO("C-L02: OPENAI: DESTROY ctx=%p", (void *)ctx_ptr);
-        openai_rl_destroy(&ctx->rl);
+        provider_rl_destroy(&ctx->rl);
         AIRY_FREE(ctx_ptr);
     }
 }
@@ -128,7 +128,9 @@ static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *
     provider_http_resp_t *http_resp = NULL;
     long http_code = 0;
 
-    int ret = openai_http_request_with_retry(ctx, url, headers, req_body, &http_code, &http_resp);
+    int ret =
+        provider_http_request_with_retry(base, &ctx->rl, url, headers, req_body, &http_code,
+                                         &http_resp);
 
     curl_slist_free_all(headers);
     AIRY_FREE(req_body);

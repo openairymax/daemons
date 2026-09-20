@@ -13,7 +13,7 @@
 #include "service.h"
 #include "svc_logger.h"
 
-#include "providers/registry.h"
+#include "providers/core/registry.h"
 #include "router/llm_router.h"
 
 #include <stdbool.h>
