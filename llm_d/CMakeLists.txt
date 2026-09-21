@@ -192,7 +192,7 @@ add_executable(llm_d
     src/main.c
     src/llm_daemon_request.c
     src/llm_daemon_methods.c
-    src/llm_daemon_config.c
+    src/config/llm_daemon_config.c
 )
 
 if(WIN32)
