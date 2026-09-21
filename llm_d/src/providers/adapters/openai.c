@@ -3,14 +3,10 @@
 
 /**
  * @file openai.c
- * @brief OpenAI adapter：生命周期与非流式/流式 completion（三件合一）。
- *
- * B16-S3 c6：原 openai.c + openai_stream.c + openai_internal.h 三件合为
- * 本文件——按文件拆分曾是请求头装配、SSE 行协议、流末响应装配三重同构
- * 的载体。机制层已收敛：出网经 core/http.c provider_http_exec（URL 拼装、
- * 头链生命周期、限流与退避全归 core），行协议累积与流末装配走
- * core/toolstream.c（provider_stream_acc_t 四件套），适配层只保留厂商差异面
- * （默认端点/模型、令牌桶限流、日志前缀），且不含任何 curl_* 调用。
+ * @brief OpenAI adapter（B16-S3.3）：五槽契约下的厂商差异面——默认端点/模型、
+ * Bearer 头声明、令牌桶限流（RPM/TPM + 429 退避为 OpenAI 云端专属）。
+ * 请求装配与响应解析复用 core/envelope.c 的 OpenAI 协议件（闭 default_model
+ * 参后交纯函数槽）；编排归 core/adapter.c driver，本文件不含任何完成流程。
  *
  * 对外公共符号 openai_ops 不变。
  */
@@ -20,11 +16,7 @@
 #include "daemon_platform_ext.h"
 #include "core/adapter.h"
 #include "core/rate_limit.h"
-#include "core/secrets.h"
-#include "core/toolstream.h"
 #include "svc_logger.h"
-
-#include <stdio.h>
 
 #define OPENAI_DEFAULT_BASE "https://api.openai.com/v1"
 #define OPENAI_DEFAULT_MODEL "gpt-3.5-turbo"
@@ -39,6 +31,8 @@ typedef struct {
     provider_base_ctx_t base;
     provider_rate_limiter_t rl;
 } openai_ctx_t;
+
+extern const provider_adapter_t openai_ops; /* shim 自引用 ops */
 
 static provider_ctx_t *openai_init(const char *name, const char *api_key, const char *api_base,
                                    const char *organization, double timeout_sec, int max_retries)
@@ -67,167 +61,48 @@ static provider_ctx_t *openai_init(const char *name, const char *api_key, const 
 
 static void openai_destroy(provider_ctx_t *ctx_ptr)
 {
-    if (ctx_ptr) {
-        openai_ctx_t *ctx = (openai_ctx_t *)ctx_ptr;
-        SVC_LOG_INFO("C-L02: OPENAI: DESTROY ctx=%p", (void *)ctx_ptr);
-        provider_rl_destroy(&ctx->rl);
-        AIRY_FREE(ctx_ptr);
-    }
+    if (!ctx_ptr)
+        return;
+    openai_ctx_t *ctx = (openai_ctx_t *)ctx_ptr;
+    SVC_LOG_INFO("C-L02: OPENAI: DESTROY ctx=%p", (void *)ctx_ptr);
+    provider_rl_destroy(&ctx->rl);
+    AIRY_FREE(ctx_ptr);
 }
 
-static int openai_complete(provider_ctx_t *ctx_ptr, const llm_request_config_t *manager,
+/* 纯函数槽：OpenAI 请求装配为 core 共享协议件（envelope.c），此处仅闭
+ * default_model 参。响应解析同理直接挂 provider_parse_openai_response。 */
+static char *openai_build_request(const llm_request_config_t *manager)
+{
+    return provider_build_openai_request(manager, OPENAI_DEFAULT_MODEL);
+}
+
+static struct provider_rate_limiter *openai_rate_limiter(provider_ctx_t *ctx)
+{
+    return &((openai_ctx_t *)ctx)->rl;
+}
+
+static int openai_complete(provider_ctx_t *ctx, const llm_request_config_t *manager,
                            llm_response_t **out_response)
 {
-    if (!ctx_ptr || !manager || !out_response) {
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    openai_ctx_t *ctx = (openai_ctx_t *)ctx_ptr;
-    provider_base_ctx_t *base = &ctx->base;
-
-    provider_refresh_api_key(base);
-
-    char *req_body = provider_build_openai_request(manager, OPENAI_DEFAULT_MODEL);
-    if (!req_body) {
-        SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s reason=build_request_oom "
-                      "STACK: openai_complete",
-                      manager->model ? manager->model : OPENAI_DEFAULT_MODEL);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
-    const char *model = manager->model && manager->model[0] ? manager->model : OPENAI_DEFAULT_MODEL;
-    SVC_LOG_INFO("C-L02: OPENAI: COMPLETE-START model=%s msgs=%zu max_tokens=%d temp=%.2f "
-                 "stream=%d",
-                 model, manager->message_count, manager->max_tokens, manager->temperature,
-                 manager->stream ? 1 : 0);
-
-    provider_request_t req = {
-        .base = base,
-        .rl = &ctx->rl,
-        .path = OPENAI_CHAT_PATH,
-        .headers = &OPENAI_HEADERS,
-        .body = req_body,
-    };
-
-    provider_http_resp_t *http_resp = NULL;
-    long http_code = 0;
-    int ret = provider_http_exec(&req, &http_resp, &http_code);
-
-    AIRY_FREE(req_body);
-
-    if (ret != AIRY_OK) {
-        /* R-1/N-3：错误码已由 provider_http_request_with_retry 归一（core/http.c）；
-         * 此处仅按状态码出诊断串 + 透传错误体。 */
-        SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld ret=%d DIAGNOSIS=%s "
-                      "body=%.600s",
-                      model, http_code, ret, provider_http_err_diag(http_code),
-                      http_resp && http_resp->data ? http_resp->data : "");
-        if (http_resp)
-            provider_http_resp_free(http_resp);
-        return ret;
-    }
-
-    ret = provider_parse_openai_response(http_resp->data, out_response);
-    provider_http_resp_free(http_resp);
-
-    if (ret == AIRY_OK && *out_response) {
-        SVC_LOG_INFO(
-            "C-L02: OPENAI: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
-            "http_code=%ld",
-            (*out_response)->model ? (*out_response)->model : model, (*out_response)->prompt_tokens,
-            (*out_response)->completion_tokens, (*out_response)->total_tokens, http_code);
-    } else {
-        SVC_LOG_ERROR("C-L02: OPENAI: COMPLETE-FAIL model=%s http_code=%ld "
-                      "DIAGNOSIS=parse_response_failed ret=%d",
-                      model, http_code, ret);
-    }
-
-    return ret;
+    return provider_driver_complete(ctx, &openai_ops, manager, out_response);
 }
 
-/* 流式 completion：SSE 传输（core/sse.c）→ 行协议累积与增量转发
- * （core/toolstream.c provider_openai_on_chunk）→ 流末装配
- * （provider_openai_stream_take）。本函数只编排，不持任何协议状态。 */
-static int openai_complete_stream(provider_ctx_t *ctx_ptr, const llm_request_config_t *manager,
-                                  llm_stream_callback_t callback, void *user_data,
+static int openai_complete_stream(provider_ctx_t *ctx, const llm_request_config_t *manager,
+                                  llm_stream_callback_t callback, void *callback_data,
                                   llm_response_t **out_response)
 {
-    if (!ctx_ptr || !manager || !callback) {
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    openai_ctx_t *ctx = (openai_ctx_t *)ctx_ptr;
-    provider_base_ctx_t *base = &ctx->base;
-
-    provider_refresh_api_key(base);
-
-    llm_request_config_t stream_cfg = *manager;
-    stream_cfg.stream = 1;
-
-    char *req_body = provider_build_openai_request(&stream_cfg, OPENAI_DEFAULT_MODEL);
-    if (!req_body) {
-        SVC_LOG_ERROR("C-L02: OPENAI: STREAM-FAIL model=%s reason=build_request_oom "
-                      "STACK: openai_complete_stream",
-                      manager->model ? manager->model : OPENAI_DEFAULT_MODEL);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
-    const char *model = manager->model && manager->model[0] ? manager->model : OPENAI_DEFAULT_MODEL;
-    SVC_LOG_INFO("C-L02: OPENAI: STREAM-START model=%s msgs=%zu max_tokens=%d temp=%.2f", model,
-                 manager->message_count, manager->max_tokens, manager->temperature);
-
-    provider_stream_acc_t acc;
-    provider_stream_acc_init(&acc, callback, user_data);
-
-    provider_request_t req = {
-        .base = base,
-        .path = OPENAI_CHAT_PATH,
-        .headers = &OPENAI_HEADERS,
-        .body = req_body,
-        .on_chunk = provider_openai_on_chunk,
-        .user_data = &acc,
-    };
-
-    long http_code = 0;
-    int ret = provider_http_exec(&req, NULL, &http_code);
-
-    AIRY_FREE(req_body);
-
-    if (ret != AIRY_OK) {
-        SVC_LOG_ERROR("C-L02: OPENAI: STREAM-FAIL model=%s http_code=%ld DIAGNOSIS=%s", model,
-                      http_code, provider_http_err_diag(http_code));
-        provider_stream_acc_free(&acc);
-        return provider_http_err_map(http_code, ret);
-    }
-
-    llm_response_t *resp = provider_openai_stream_take(&acc);
-    provider_tool_flush(&acc.tools, resp, callback, user_data);
-    provider_stream_acc_free(&acc);
-
-    if (resp) {
-        SVC_LOG_INFO("C-L02: OPENAI: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
-                     "http_code=%ld",
-                     resp->model ? resp->model : model, resp->prompt_tokens,
-                     resp->completion_tokens, resp->total_tokens, http_code);
-    } else {
-        SVC_LOG_WARN("C-L02: OPENAI: STREAM-FAIL model=%s http_code=%ld "
-                     "DIAGNOSIS=null_response_built",
-                     model, http_code);
-    }
-
-    if (out_response) {
-        *out_response = resp;
-    } else if (resp) {
-        provider_response_free(resp);
-    }
-
-    return AIRY_OK;
+    return provider_driver_complete_stream(ctx, &openai_ops, manager, callback, callback_data,
+                                           out_response);
 }
 
-const provider_adapter_t openai_ops = {.init = openai_init,
-                                       .destroy = openai_destroy,
-                                       .complete = openai_complete,
-                                       .complete_stream = openai_complete_stream,
-                                       .name = "openai",
-                                       .default_model = OPENAI_DEFAULT_MODEL,
-                                       .default_base_url = OPENAI_DEFAULT_BASE};
+/* 五槽装配：feed_event 留空（NULL）= OpenAI 行协议流，on_chunk 机制件由
+ * driver 挂 core provider_openai_on_chunk（core/adapter.c 分帧模式判定）。 */
+const provider_adapter_t openai_ops = {
+    .name = "openai", .tag = "OPENAI",
+    .default_model = OPENAI_DEFAULT_MODEL, .default_base_url = OPENAI_DEFAULT_BASE,
+    .chat_path = OPENAI_CHAT_PATH, .headers = &OPENAI_HEADERS,
+    .init = openai_init, .destroy = openai_destroy,
+    .rate_limiter = openai_rate_limiter,
+    .complete = openai_complete, .complete_stream = openai_complete_stream,
+    .build_request = openai_build_request, .parse_response = provider_parse_openai_response,
+};

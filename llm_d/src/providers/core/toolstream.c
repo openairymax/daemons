@@ -99,7 +99,8 @@ void provider_tool_delta(provider_tool_acc_t *acc, cJSON *delta)
         cJSON *namej = cJSON_IsObject(fn) ? cJSON_GetObjectItem(fn, "name") : NULL;
         cJSON *argj = cJSON_IsObject(fn) ? cJSON_GetObjectItem(fn, "arguments") : NULL;
         const char *id = (cJSON_IsString(idj) && idj->valuestring) ? idj->valuestring : NULL;
-        const char *name = (cJSON_IsString(namej) && namej->valuestring) ? namej->valuestring : NULL;
+        const char *name =
+            (cJSON_IsString(namej) && namej->valuestring) ? namej->valuestring : NULL;
         int idx = cJSON_IsNumber(idxj) ? (int)idxj->valuedouble : (int)acc->count;
         if (!provider_tool_begin(acc, idx, id, name))
             continue;
@@ -172,6 +173,17 @@ void provider_stream_acc_init(provider_stream_acc_t *acc, llm_stream_callback_t 
     acc->acc_content = (char *)AIRY_MALLOC(acc->acc_cap);
 }
 
+void provider_stream_text_push(provider_stream_acc_t *acc, const char *text)
+{
+    if (!acc || !text)
+        return;
+    if (acc->user_cb)
+        acc->user_cb(text, acc->user_data);
+    char *grown = provider_buf_append(acc->acc_content, &acc->acc_cap, &acc->acc_len, text);
+    if (grown)
+        acc->acc_content = grown;
+}
+
 int provider_openai_on_chunk(const char *json_line, void *userdata)
 {
     provider_stream_acc_t *acc = (provider_stream_acc_t *)userdata;
@@ -200,14 +212,8 @@ int provider_openai_on_chunk(const char *json_line, void *userdata)
         cJSON *delta = cJSON_GetObjectItem(choice, "delta");
         if (delta) {
             cJSON *content = cJSON_GetObjectItem(delta, "content");
-            if (cJSON_IsString(content) && content->valuestring) {
-                if (acc->user_cb)
-                    acc->user_cb(content->valuestring, acc->user_data);
-                char *grown = provider_buf_append(acc->acc_content, &acc->acc_cap, &acc->acc_len,
-                                                  content->valuestring);
-                if (grown)
-                    acc->acc_content = grown;
-            }
+            if (cJSON_IsString(content) && content->valuestring)
+                provider_stream_text_push(acc, content->valuestring);
 
             /* Reasoning trace arrives in the same delta stream (DeepSeek
              * reasoner/Kimi). Forward each delta immediately as an RS 'R'

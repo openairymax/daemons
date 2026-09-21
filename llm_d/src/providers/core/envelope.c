@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /**
- * @file provider_codec.c
- * @brief OpenAI 兼容协议编解码（请求组装 / 响应解析）。
+ * @file envelope.c
+ * @brief 请求/响应信封编解码（B16-S3 适配收敛的共享件 SSoT）。
  *
  * 域拆分自 provider.c（2026-08-27）：provider_build_openai_request /
- * provider_parse_openai_response，供 openai / deepseek / local 等
- * OpenAI 兼容 provider 共用。
+ * provider_parse_openai_response 供 openai / deepseek / local 等
+ * OpenAI 兼容 provider 共用。B16-S3.3 追加三家映射表的公共段下沉件：
+ * 参数段骨架（stop 键名表驱动）、响应身份段、OpenAI 形状 tools /
+ * tool_calls 遍历原语——适配层（含 anthropic）据此改写本家形状，
+ * 不再各自重写同构段。
  */
 
 #include "airy_memory.h"
@@ -34,21 +37,12 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
-    const char *model = manager->model && manager->model[0] ? manager->model : default_model;
-    cJSON_AddStringToObject(root, "model", model ? model : "gpt-3.5-turbo");
-    cJSON_AddNumberToObject(root, "temperature",
-                            manager->temperature > 0 ? manager->temperature : 0.7);
-
-    if (manager->top_p > 0) {
-        cJSON_AddNumberToObject(root, "top_p", manager->top_p);
-    }
-
-    if (manager->max_tokens > 0) {
-        cJSON_AddNumberToObject(root, "max_tokens", manager->max_tokens);
-    }
+    /* 参数段骨架（B16-S3.3 下沉件）：model / temperature / max_tokens /
+     * top_p / stream / stop 六项，stop 键名 "stop" 为 OpenAI 形状；
+     * max_tokens 兜底传 0 = 调用方未给则不写（OpenAI 语义：可缺省）。 */
+    provider_request_params_fill(root, manager, default_model, 0, "stop");
 
     if (manager->stream) {
-        cJSON_AddBoolToObject(root, "stream", 1);
         /* 2.1.1.5 修复：流式请求必须显式声明 include_usage——OpenAI 及其
          * 兼容端点（vLLM/llama.cpp 等）默认在流式 chunk 中不回传 usage，
          * 不声明则 prompt/completion/total_tokens 恒为 0，真实 token 消耗
@@ -67,14 +61,6 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
 
     if (manager->frequency_penalty != 0) {
         cJSON_AddNumberToObject(root, "frequency_penalty", manager->frequency_penalty);
-    }
-
-    if (manager->stop_count > 0 && manager->stop) {
-        cJSON *stop = cJSON_CreateArray();
-        for (size_t i = 0; i < manager->stop_count; ++i) {
-            cJSON_AddItemToArray(stop, cJSON_CreateString(manager->stop[i]));
-        }
-        cJSON_AddItemToObject(root, "stop", stop);
     }
 
     if (manager->tools_json && manager->tools_json[0]) {
@@ -140,15 +126,8 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    cJSON *id = cJSON_GetObjectItem(root, "id");
-    if (cJSON_IsString(id) && id->valuestring) {
-        resp->id = AIRY_STRDUP(id->valuestring);
-    }
-
-    cJSON *model = cJSON_GetObjectItem(root, "model");
-    if (cJSON_IsString(model) && model->valuestring) {
-        resp->model = AIRY_STRDUP(model->valuestring);
-    }
+    /* 身份段（B16-S3.3 下沉件）：id / model 两家响应同名同义。 */
+    provider_response_identity_load(resp, root);
 
     cJSON *created = cJSON_GetObjectItem(root, "created");
     if (cJSON_IsNumber(created)) {
@@ -228,4 +207,93 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
 
     *out = resp;
     return AIRY_OK;
+}
+
+void provider_request_params_fill(cJSON *root, const llm_request_config_t *manager,
+                                  const char *default_model, int default_max_tokens,
+                                  const char *stop_key)
+{
+    if (!root || !manager || !stop_key)
+        return;
+
+    const char *model = (manager->model && manager->model[0]) ? manager->model : default_model;
+    cJSON_AddStringToObject(root, "model", model ? model : "");
+    cJSON_AddNumberToObject(root, "temperature",
+                            manager->temperature > 0 ? manager->temperature : 0.7);
+
+    int max_tokens = manager->max_tokens > 0 ? manager->max_tokens : default_max_tokens;
+    if (max_tokens > 0)
+        cJSON_AddNumberToObject(root, "max_tokens", max_tokens);
+
+    if (manager->top_p > 0)
+        cJSON_AddNumberToObject(root, "top_p", manager->top_p);
+
+    if (manager->stream)
+        cJSON_AddBoolToObject(root, "stream", 1);
+
+    if (manager->stop_count > 0 && manager->stop) {
+        cJSON *stop = cJSON_CreateArray();
+        for (size_t i = 0; i < manager->stop_count; ++i)
+            cJSON_AddItemToArray(stop, cJSON_CreateString(manager->stop[i]));
+        cJSON_AddItemToObject(root, stop_key, stop);
+    }
+}
+
+void provider_response_identity_load(llm_response_t *resp, const cJSON *root)
+{
+    if (!resp || !root)
+        return;
+
+    cJSON *id = cJSON_GetObjectItem(root, "id");
+    if (cJSON_IsString(id) && id->valuestring)
+        resp->id = AIRY_STRDUP(id->valuestring);
+
+    cJSON *model = cJSON_GetObjectItem(root, "model");
+    if (cJSON_IsString(model) && model->valuestring)
+        resp->model = AIRY_STRDUP(model->valuestring);
+}
+
+void provider_openai_tools_foreach(const char *tools_json, provider_openai_tool_fn fn, void *ud)
+{
+    if (!tools_json || !tools_json[0] || !fn)
+        return;
+
+    CJSON_PARSE_GUARD(src, tools_json, { return; });
+    if (!cJSON_IsArray(src))
+        return;
+
+    int count = cJSON_GetArraySize(src);
+    for (int i = 0; i < count; ++i) {
+        cJSON *func = cJSON_GetObjectItem(cJSON_GetArrayItem(src, i), "function");
+        cJSON *name = cJSON_GetObjectItem(func, "name");
+        if (!cJSON_IsString(name) || !name->valuestring)
+            continue;
+        cJSON *desc = cJSON_GetObjectItem(func, "description");
+        fn(ud, name->valuestring,
+           (cJSON_IsString(desc) && desc->valuestring) ? desc->valuestring : NULL,
+           cJSON_GetObjectItem(func, "parameters"));
+    }
+}
+
+void provider_openai_tool_calls_foreach(const char *tool_calls_json,
+                                        provider_openai_tool_call_fn fn, void *ud)
+{
+    if (!tool_calls_json || !tool_calls_json[0] || !fn)
+        return;
+
+    CJSON_PARSE_GUARD(calls, tool_calls_json, { return; });
+    if (!cJSON_IsArray(calls))
+        return;
+
+    int count = cJSON_GetArraySize(calls);
+    for (int i = 0; i < count; ++i) {
+        cJSON *call = cJSON_GetArrayItem(calls, i);
+        cJSON *func = cJSON_GetObjectItem(call, "function");
+        cJSON *id = cJSON_GetObjectItem(call, "id");
+        cJSON *name = cJSON_GetObjectItem(func, "name");
+        cJSON *args = cJSON_GetObjectItem(func, "arguments");
+        fn(ud, (cJSON_IsString(id) && id->valuestring) ? id->valuestring : "",
+           (cJSON_IsString(name) && name->valuestring) ? name->valuestring : "",
+           (cJSON_IsString(args) && args->valuestring) ? args->valuestring : NULL);
+    }
 }
