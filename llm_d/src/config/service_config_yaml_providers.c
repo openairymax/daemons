@@ -8,8 +8,8 @@
  *        providers with the providers-section overrides and export them as
  *        provider_config_t records.
  *
- * 解析状态来自 service_config_yaml_models.c 的状态机（经
- * config/types.h 共享）；本文件消费 state 后
+ * 解析状态来自 service_config_yaml_models.c 对 commons yaml_minimal
+ * node 树的 walk（经 config/types.h 共享）；本文件消费 state 后
  * 通过 svc_yaml_build_result 统一释放或转移所有权。
  */
 
@@ -18,7 +18,6 @@
 #include "service.h"
 #include "svc_logger.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -197,33 +196,15 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
     *out_providers = NULL;
     *out_count = 0;
 
-    FILE *f = fopen(config_path, "rb");
-    if (!f) {
+    svc_yaml_state_t st;
+    __builtin_memset(&st, 0, sizeof(st));
+    if (svc_yaml_load_state(config_path, &st) != AIRY_OK) {
+        /* 文件不可读/超限/内存不足——与原 fopen / parser-init 失败同义，
+         * 按"非错误"返回 0。 */
         SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN cannot open model config, STACK: "
                      "svc_load_model_config_yaml");
         return 0;
     }
-
-    yaml_parser_t parser;
-    if (!yaml_parser_initialize(&parser)) {
-        fclose(f);
-        SVC_LOG_WARN(
-            "C-L02: SVC: MODEL-CONFIG-WARN YAML parser init, STACK: svc_load_model_config_yaml");
-        return 0;
-    }
-    yaml_parser_set_input_file(&parser, f);
-
-    svc_yaml_state_t st;
-    __builtin_memset(&st, 0, sizeof(st));
-    yaml_map_init(&st.item_map);
-    yaml_map_init(&st.prov_map);
-    int done = 0;
-    svc_yaml_event_loop(&parser, &st, &done);
-
-    yaml_parser_delete(&parser);
-    fclose(f);
-    yaml_map_free(&st.item_map);
-    yaml_map_free(&st.prov_map);
 
     /* Simplified llm section expansion: when the top-level llm: mapping
      * exists and model is non-empty, it takes precedence over the full

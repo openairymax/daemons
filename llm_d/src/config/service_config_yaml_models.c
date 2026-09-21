@@ -3,19 +3,24 @@
 
 /**
  * @file service_config_yaml_models.c
- * @brief LLM model.yaml models-section parsing (split from service_config.c,
- *        2026-08-27): libyaml event state machine over the models/providers
- *        arrays and the simplified top-level llm-section expansion.
+ * @brief LLM model.yaml models/providers-section parsing (split from
+ *        service_config.c, 2026-08-27): walks the commons yaml_minimal node
+ *        tree over the models/providers arrays and expands the simplified
+ *        top-level llm section.
  *
- * 解析出的 models[] 与 providers 段 kv 对存入共享的 svc_yaml_state_t，
+ * 解析出的 models[] 与 providers 段声明存入共享的 svc_yaml_state_t，
  * 由 service_config_yaml_providers.c 聚合导出、pricing 件读取价格字段；
- * 状态结构经 config/types.h 共享。
+ * 状态结构经 config/types.h 共享。装载器为 commons
+ * utils/config_unified/yaml_minimal（声明面只保留一个 YAML 装载器，B13），
+ * 不再内联 libyaml 事件状态机。
  */
 
 #include "airy_memory.h"
+#include "error.h"
 #include "service.h"
 #include "svc_logger.h"
 #include "svc_model_defaults.h"
+#include "yaml_minimal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,248 +30,173 @@
 
 #ifdef HAVE_YAML
 
-static void svc_yaml_handle_mapping_start(svc_yaml_state_t *st)
+/* 取映射 item 中 key 对应的标量字符串；键缺失或非标量返回 NULL，与原
+ * kv map 未命中语义一致。 */
+static const char *svc_yaml_item_str(struct yaml_node *item, const char *key)
 {
-    st->map_depth++;
-    if (st->in_models || st->in_providers) {
-        st->item_depth++;
-        if (st->item_depth == 1) {
-            st->nested = 0;
-            st->has_pending_key = 0;
-            if (st->in_providers) {
-                yaml_map_free(&st->prov_map);
-                yaml_map_init(&st->prov_map);
-                __builtin_memset(&st->cur_p, 0, sizeof(st->cur_p));
-            } else {
-                yaml_map_free(&st->item_map);
-                yaml_map_init(&st->item_map);
-            }
-        } else {
-            st->nested++;
-            st->has_pending_key = 0;
-        }
-    }
+    return yaml_as_string(yaml_get(item, key), NULL);
 }
 
-static void svc_yaml_finalize_provider(svc_yaml_state_t *st)
+/* providers 段的一段声明 → st->cur_p，并追加进 st->pcfg[16]。 */
+static void svc_yaml_parse_prov(svc_yaml_state_t *st, struct yaml_node *item)
 {
-    const char *pn = yaml_map_get(&st->prov_map, "name");
-    if (pn && pn[0]) {
-        AIRY_STRNCPY_TERM(st->cur_p.name, pn, sizeof(st->cur_p.name));
-        const char *pke = yaml_map_get(&st->prov_map, "api_key_env");
-        if (pke)
-            AIRY_STRNCPY_TERM(st->cur_p.api_key_env, pke, sizeof(st->cur_p.api_key_env));
-        const char *pb = yaml_map_get(&st->prov_map, "base_url");
-        if (pb)
-            AIRY_STRNCPY_TERM(st->cur_p.base_url, pb, sizeof(st->cur_p.base_url));
-        const char *pt = yaml_map_get(&st->prov_map, "timeout_sec");
-        if (pt)
-            st->cur_p.timeout_sec = (int)strtol(pt, NULL, 10);
-        const char *pr = yaml_map_get(&st->prov_map, "max_retries");
-        if (pr)
-            st->cur_p.max_retries = (int)strtol(pr, NULL, 10);
-        if (st->pcfg_count < 16) {
-            st->pcfg[st->pcfg_count++] = st->cur_p;
-        } else {
-            for (size_t k = 0; k < st->cur_p.model_count; ++k)
-                AIRY_FREE(st->cur_p.model_names[k]);
-        }
+    __builtin_memset(&st->cur_p, 0, sizeof(st->cur_p));
+
+    /* 嵌套 models: 序列 → cur_p.model_names。与原状态机一致，收集动作与
+     * name 是否存在无关：名称为空时在下方统一释放。 */
+    struct yaml_node *mn = yaml_get(item, "models");
+    size_t mc = yaml_size(mn);
+    for (size_t k = 0; k < mc && st->cur_p.model_count < 64; ++k) {
+        const char *mv = yaml_as_string(yaml_get_index(mn, k), NULL);
+        if (mv)
+            st->cur_p.model_names[st->cur_p.model_count++] = AIRY_STRDUP(mv);
+    }
+
+    const char *pn = svc_yaml_item_str(item, "name");
+    if (!(pn && pn[0])) {
+        for (size_t k = 0; k < st->cur_p.model_count; ++k)
+            AIRY_FREE(st->cur_p.model_names[k]);
+        st->cur_p.model_count = 0;
+        return;
+    }
+
+    AIRY_STRNCPY_TERM(st->cur_p.name, pn, sizeof(st->cur_p.name));
+    const char *pke = svc_yaml_item_str(item, "api_key_env");
+    if (pke)
+        AIRY_STRNCPY_TERM(st->cur_p.api_key_env, pke, sizeof(st->cur_p.api_key_env));
+    const char *pb = svc_yaml_item_str(item, "base_url");
+    if (pb)
+        AIRY_STRNCPY_TERM(st->cur_p.base_url, pb, sizeof(st->cur_p.base_url));
+    const char *pt = svc_yaml_item_str(item, "timeout_sec");
+    if (pt)
+        st->cur_p.timeout_sec = (int)strtol(pt, NULL, 10);
+    const char *pr = svc_yaml_item_str(item, "max_retries");
+    if (pr)
+        st->cur_p.max_retries = (int)strtol(pr, NULL, 10);
+
+    if (st->pcfg_count < 16) {
+        st->pcfg[st->pcfg_count++] = st->cur_p;
     } else {
         for (size_t k = 0; k < st->cur_p.model_count; ++k)
             AIRY_FREE(st->cur_p.model_names[k]);
+        st->cur_p.model_count = 0;
     }
 }
 
-static void svc_yaml_finalize_model(svc_yaml_state_t *st)
+/* models[] 的一行 → st->models[64]。 */
+static void svc_yaml_parse_model(svc_yaml_state_t *st, struct yaml_node *item)
 {
     if (st->model_count >= 64)
         return;
-    const char *n = yaml_map_get(&st->item_map, "name");
-    const char *p = yaml_map_get(&st->item_map, "provider");
-    const char *e = yaml_map_get(&st->item_map, "api_key_env");
-    const char *ep = yaml_map_get(&st->item_map, "endpoint");
-    const char *t = yaml_map_get(&st->item_map, "timeout_sec");
-    const char *r = yaml_map_get(&st->item_map, "max_retries");
-    const char *ic = yaml_map_get(&st->item_map, "input_cost_per_1k");
-    const char *oc = yaml_map_get(&st->item_map, "output_cost_per_1k");
+
+    const char *n = svc_yaml_item_str(item, "name");
+    const char *p = svc_yaml_item_str(item, "provider");
+    const char *e = svc_yaml_item_str(item, "api_key_env");
+    const char *ep = svc_yaml_item_str(item, "endpoint");
+    const char *t = svc_yaml_item_str(item, "timeout_sec");
+    const char *r = svc_yaml_item_str(item, "max_retries");
+    const char *ic = svc_yaml_item_str(item, "input_cost_per_1k");
+    const char *oc = svc_yaml_item_str(item, "output_cost_per_1k");
     /* v2 表格格式（2026-08-26）：连接表每行 name=展示名 / model_id=模型名。
      * 模型名优先取 model_id（缺省退回 name）；provider 用展示名（缺省
      * 退回 name），作为 provider 键参与聚合与路由。 */
-    const char *mid = yaml_map_get(&st->item_map, "model_id");
-    const char *mode = yaml_map_get(&st->item_map, "mode");
-    const char *fmt = yaml_map_get(&st->item_map, "api_format");
-    const char *bu = yaml_map_get(&st->item_map, "base_url");
-    const char *cw = yaml_map_get(&st->item_map, "context_window");
-    const char *mo = yaml_map_get(&st->item_map, "max_output");
-    const char *tr = yaml_map_get(&st->item_map, "tool_rounds");
-    const char *vi = yaml_map_get(&st->item_map, "vision");
-    const char *th = yaml_map_get(&st->item_map, "thinking");
+    const char *mid = svc_yaml_item_str(item, "model_id");
+    const char *mode = svc_yaml_item_str(item, "mode");
+    const char *fmt = svc_yaml_item_str(item, "api_format");
+    const char *bu = svc_yaml_item_str(item, "base_url");
+    const char *cw = svc_yaml_item_str(item, "context_window");
+    const char *mo = svc_yaml_item_str(item, "max_output");
+    const char *tr = svc_yaml_item_str(item, "tool_rounds");
+    const char *vi = svc_yaml_item_str(item, "vision");
+    const char *th = svc_yaml_item_str(item, "thinking");
 
     const char *model_name = (mid && mid[0]) ? mid : (n ? n : NULL);
     const char *prov_name = p ? p : (n ? n : NULL);
-    if (model_name && model_name[0] && prov_name && prov_name[0]) {
-        __builtin_memset(&st->models[st->model_count], 0, sizeof(model_entry_t));
-        AIRY_STRNCPY_TERM(st->models[st->model_count].name, model_name,
-                          sizeof(st->models[st->model_count].name));
-        AIRY_STRNCPY_TERM(st->models[st->model_count].provider, prov_name,
-                          sizeof(st->models[st->model_count].provider));
-        if (e && e[0]) {
-            AIRY_STRNCPY_TERM(st->models[st->model_count].api_key_env, e,
-                              sizeof(st->models[st->model_count].api_key_env));
-        } else if (!(mode && strcasecmp(mode, "local") == 0)) {
-            /* api_key_env 自动映射（q7）：连接表行留空/缺省时按行号生成
-             * MODEL_<序号>_API_KEY（序号 = 表中行序，1 起）。用户接入新
-             * 模型只需在 secrets.env 增加 MODEL_N_API_KEY=xxx 一个 Key 位，
-             * 无需理解 env 变量名与表格行的映射关系。local 模式无 key，
-             * 保持空。 */
-            char auto_env[64];
-            snprintf(auto_env, sizeof(auto_env), "MODEL_%zu_API_KEY", st->model_count + 1);
-            AIRY_STRNCPY_TERM(st->models[st->model_count].api_key_env, auto_env,
-                              sizeof(st->models[st->model_count].api_key_env));
-        }
-        if (ep)
-            AIRY_STRNCPY_TERM(st->models[st->model_count].endpoint, ep,
-                              sizeof(st->models[st->model_count].endpoint));
-        else if (bu && bu[0]) {
-            /* v2：base_url 为服务根地址，按 api_format 补后缀 */
-            const char *adapter = "openai";
-            if (fmt && strcasecmp(fmt, "anthropic") == 0)
-                adapter = "anthropic";
-            snprintf(st->models[st->model_count].endpoint,
-                     sizeof(st->models[st->model_count].endpoint), "%s%s", bu,
-                     (strcmp(adapter, "anthropic") == 0) ? "/messages" : "/chat/completions");
-        }
-        if (t)
-            st->models[st->model_count].timeout_sec = (int)strtol(t, NULL, 10);
-        if (r)
-            st->models[st->model_count].max_retries = (int)strtol(r, NULL, 10);
-        if (ic) {
-            st->models[st->model_count].input_cost_per_k = atof(ic);
-            st->models[st->model_count].has_input_price = 1;
-        }
-        if (oc) {
-            st->models[st->model_count].output_cost_per_k = atof(oc);
-            st->models[st->model_count].has_output_price = 1;
-        }
-        if (mode)
-            AIRY_STRNCPY_TERM(st->models[st->model_count].mode, mode,
-                              sizeof(st->models[st->model_count].mode));
-        if (fmt)
-            AIRY_STRNCPY_TERM(st->models[st->model_count].api_format, fmt,
-                              sizeof(st->models[st->model_count].api_format));
-        if (cw)
-            AIRY_STRNCPY_TERM(st->models[st->model_count].context_window, cw,
-                              sizeof(st->models[st->model_count].context_window));
-        if (mo)
-            st->models[st->model_count].max_output_tokens = svc_tokens_parse(mo);
-        if (tr)
-            st->models[st->model_count].tool_rounds = (int)strtol(tr, NULL, 10);
-        if (vi) {
-            if (strcasecmp(vi, "true") == 0 || strcmp(vi, "1") == 0 ||
-                strcasecmp(vi, "yes") == 0)
-                st->models[st->model_count].vision = 1;
-        }
-        if (th)
-            AIRY_STRNCPY_TERM(st->models[st->model_count].thinking, th,
-                              sizeof(st->models[st->model_count].thinking));
-        st->model_count++;
+    if (!(model_name && model_name[0] && prov_name && prov_name[0]))
+        return;
+
+    model_entry_t *m = &st->models[st->model_count];
+    __builtin_memset(m, 0, sizeof(*m));
+    AIRY_STRNCPY_TERM(m->name, model_name, sizeof(m->name));
+    AIRY_STRNCPY_TERM(m->provider, prov_name, sizeof(m->provider));
+    if (e && e[0]) {
+        AIRY_STRNCPY_TERM(m->api_key_env, e, sizeof(m->api_key_env));
+    } else if (!(mode && strcasecmp(mode, "local") == 0)) {
+        /* api_key_env 自动映射（q7）：连接表行留空/缺省时按行号生成
+         * MODEL_<序号>_API_KEY（序号 = 表中行序，1 起）。用户接入新
+         * 模型只需在 secrets.env 增加 MODEL_N_API_KEY=xxx 一个 Key 位，
+         * 无需理解 env 变量名与表格行的映射关系。local 模式无 key，
+         * 保持空。 */
+        char auto_env[64];
+        snprintf(auto_env, sizeof(auto_env), "MODEL_%zu_API_KEY", st->model_count + 1);
+        AIRY_STRNCPY_TERM(m->api_key_env, auto_env, sizeof(m->api_key_env));
     }
+    if (ep) {
+        AIRY_STRNCPY_TERM(m->endpoint, ep, sizeof(m->endpoint));
+    } else if (bu && bu[0]) {
+        /* v2：base_url 为服务根地址，按 api_format 补后缀 */
+        const char *adapter = "openai";
+        if (fmt && strcasecmp(fmt, "anthropic") == 0)
+            adapter = "anthropic";
+        snprintf(m->endpoint, sizeof(m->endpoint), "%s%s", bu,
+                 (strcmp(adapter, "anthropic") == 0) ? "/messages" : "/chat/completions");
+    }
+    if (t)
+        m->timeout_sec = (int)strtol(t, NULL, 10);
+    if (r)
+        m->max_retries = (int)strtol(r, NULL, 10);
+    if (ic) {
+        m->input_cost_per_k = atof(ic);
+        m->has_input_price = 1;
+    }
+    if (oc) {
+        m->output_cost_per_k = atof(oc);
+        m->has_output_price = 1;
+    }
+    if (mode)
+        AIRY_STRNCPY_TERM(m->mode, mode, sizeof(m->mode));
+    if (fmt)
+        AIRY_STRNCPY_TERM(m->api_format, fmt, sizeof(m->api_format));
+    if (cw)
+        AIRY_STRNCPY_TERM(m->context_window, cw, sizeof(m->context_window));
+    if (mo)
+        m->max_output_tokens = svc_tokens_parse(mo);
+    if (tr)
+        m->tool_rounds = (int)strtol(tr, NULL, 10);
+    if (vi) {
+        if (strcasecmp(vi, "true") == 0 || strcmp(vi, "1") == 0 ||
+            strcasecmp(vi, "yes") == 0)
+            m->vision = 1;
+    }
+    if (th)
+        AIRY_STRNCPY_TERM(m->thinking, th, sizeof(m->thinking));
+    st->model_count++;
 }
 
-static void svc_yaml_handle_mapping_end(svc_yaml_state_t *st)
+int svc_yaml_load_state(const char *config_path, svc_yaml_state_t *st)
 {
-    if (st->in_models || st->in_providers) {
-        if (st->item_depth == 1 && st->nested == 0) {
-            if (st->in_providers)
-                svc_yaml_finalize_provider(st);
-            else
-                svc_yaml_finalize_model(st);
-        }
-        st->item_depth--;
-        if (st->item_depth == 0) {
-            st->nested = 0;
-        } else if (st->nested > 0) {
-            st->nested--;
-        }
+    yaml_document_t *doc = yaml_create();
+    if (!doc)
+        return AIRY_EINVAL;
+    if (yaml_parse_file(doc, config_path) != 0) {
+        yaml_destroy(doc);
+        return AIRY_EINVAL;
     }
-    st->map_depth--;
-}
 
-static void svc_yaml_handle_sequence_end(svc_yaml_state_t *st)
-{
-    st->seq_depth--;
-    if ((st->in_models || st->in_providers) && st->item_depth >= 1 && st->nested > 0)
-        st->nested--;
-    if (st->in_models && st->item_depth == 0 && st->seq_depth <= 1)
-        st->in_models = 0;
-    if (st->in_providers && st->item_depth == 0 && st->seq_depth <= 1)
-        st->in_providers = 0;
-    if (st->in_providers && st->item_depth == 1 && st->has_pending_key &&
-        strcmp(st->pending_key, "models") == 0)
-        st->has_pending_key = 0;
-}
+    struct yaml_node *root = yaml_root(doc);
 
-static void svc_yaml_handle_scalar(svc_yaml_state_t *st, const char *val)
-{
-    if (!st->in_models && !st->in_providers && st->map_depth == 1 && val) {
-        if (strcmp(val, "models") == 0) {
-            st->in_models = 1;
-            st->has_pending_key = 0;
-        } else if (strcmp(val, "providers") == 0) {
-            st->in_providers = 1;
-            st->has_pending_key = 0;
-        }
-    } else if ((st->in_models || st->in_providers) && st->item_depth == 1 &&
-               st->nested == 0 && val) {
-        if (!st->has_pending_key) {
-            AIRY_STRNCPY_TERM(st->pending_key, val, sizeof(st->pending_key));
-            st->has_pending_key = 1;
-        } else {
-            if (st->in_models)
-                yaml_map_add(&st->item_map, st->pending_key, val);
-            else
-                yaml_map_add(&st->prov_map, st->pending_key, val);
-            st->has_pending_key = 0;
-        }
-    } else if (st->in_providers && st->item_depth == 1 && st->nested >= 1 && val &&
-               st->has_pending_key && strcmp(st->pending_key, "models") == 0) {
-        if (st->cur_p.model_count < 64)
-            st->cur_p.model_names[st->cur_p.model_count++] = AIRY_STRDUP(val);
-    }
-}
+    struct yaml_node *models = yaml_get(root, "models");
+    size_t mcount = yaml_size(models);
+    for (size_t i = 0; i < mcount; ++i)
+        svc_yaml_parse_model(st, yaml_get_index(models, i));
 
-void svc_yaml_event_loop(yaml_parser_t *parser, svc_yaml_state_t *st, int *done)
-{
-    yaml_event_t event;
-    while (!*done) {
-        if (!yaml_parser_parse(parser, &event))
-            break;
-        switch (event.type) {
-        case YAML_STREAM_END_EVENT:
-            *done = 1;
-            break;
-        case YAML_MAPPING_START_EVENT:
-            svc_yaml_handle_mapping_start(st);
-            break;
-        case YAML_MAPPING_END_EVENT:
-            svc_yaml_handle_mapping_end(st);
-            break;
-        case YAML_SEQUENCE_START_EVENT:
-            st->seq_depth++;
-            if ((st->in_models || st->in_providers) && st->item_depth >= 1)
-                st->nested++;
-            break;
-        case YAML_SEQUENCE_END_EVENT:
-            svc_yaml_handle_sequence_end(st);
-            break;
-        case YAML_SCALAR_EVENT:
-            svc_yaml_handle_scalar(st, (const char *)event.data.scalar.value);
-            break;
-        default:
-            break;
-        }
-        yaml_event_delete(&event);
-    }
+    struct yaml_node *provs = yaml_get(root, "providers");
+    size_t pcount = yaml_size(provs);
+    for (size_t i = 0; i < pcount; ++i)
+        svc_yaml_parse_prov(st, yaml_get_index(provs, i));
+
+    yaml_destroy(doc);
+    return AIRY_OK;
 }
 
 /* Expand the simplified top-level llm: section: when it exists it takes

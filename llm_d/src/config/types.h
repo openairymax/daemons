@@ -3,12 +3,14 @@
 
 /**
  * @file types.h
- * @brief llm_d config 域 YAML 解析状态机类型（HAVE_YAML 构建）。
+ * @brief llm_d config 域 YAML 解析结果类型（HAVE_YAML 构建）。
  *
- * 由 llm_service_internal.h（253 行枢纽头，B16-S1 拆片）迁入：扁平键值
- * 映射、模型表项、provider 聚合与全局解析状态。仅 service_config_yaml*.c
- * 与 service_config.c 消费；跨域禁止 include 本头。非 YAML 构建下本头
- * 为空翻译单元，无条件包含无害。
+ * 由 llm_service_internal.h（253 行枢纽头，B16-S1 拆片）迁入：模型表项、
+ * provider 聚合与解析结果状态。YAML 装载统一经 commons
+ * utils/config_unified/yaml_minimal 完成（声明面只保留一个装载器，B13），
+ * 本头不再暴露任何解析器类型。仅 service_config_yaml*.c 与
+ * service_config.c 消费；跨域禁止 include 本头。非 YAML 构建下本头为空
+ * 翻译单元，无条件包含无害。
  */
 
 #ifndef AIRY_RT_LLM_CONFIG_TYPES_H
@@ -18,34 +20,16 @@
 
 #ifdef HAVE_YAML
 
-#include <yaml.h>
-
 #include "providers/core/registry.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* ---- YAML config-parsing infrastructure (service_config_yaml*.c split,
- *      2026-08-27): flat key/value map + parse state shared by the global-
- *      section loader, the models state machine, provider aggregation and
- *      pricing-rule extraction. ---- */
-
-typedef struct {
-    char key[128];
-    char value[512];
-} yaml_kv_t;
-
-typedef struct {
-    yaml_kv_t *pairs;
-    size_t count;
-    size_t capacity;
-} yaml_map_t;
-
-void yaml_map_init(yaml_map_t *m);
-void yaml_map_add(yaml_map_t *m, const char *key, const char *value);
-const char *yaml_map_get(const yaml_map_t *m, const char *key);
-void yaml_map_free(yaml_map_t *m);
+/* ---- YAML config parse results (service_config_yaml*.c split, 2026-08-27):
+ *      model entries, provider aggregation and the shared parse-result state.
+ *      The node tree itself lives in commons (yaml_minimal) and is consumed
+ *      by service_config_yaml_models.c while walking it. ---- */
 
 typedef struct {
     char name[128];
@@ -101,26 +85,22 @@ typedef struct {
     size_t model_count;
 } provider_agg_t;
 
+/* YAML 装载结果：models[] 行解析结果 + providers 段声明。由
+ * service_config_yaml_models.c 的 node 树 walk 填充，providers / pricing
+ * 两件消费。 */
 typedef struct {
-    yaml_map_t item_map;
-    yaml_map_t prov_map;
-    prov_cfg_t cur_p;
+    prov_cfg_t cur_p; /* providers 段当前项的构造暂存 */
     prov_cfg_t pcfg[16];
     size_t pcfg_count;
     model_entry_t models[64];
     size_t model_count;
-    int map_depth;
-    int seq_depth;
-    int in_models;
-    int in_providers;
-    int item_depth;
-    int nested;
-    char pending_key[128];
-    int has_pending_key;
 } svc_yaml_state_t;
 
 /* service_config_yaml_models.c */
-void svc_yaml_event_loop(yaml_parser_t *parser, svc_yaml_state_t *st, int *done);
+/* 装载 YAML 并装配解析状态：AIRY_OK 成功；AIRY_EINVAL 表示文件不可读/
+ * 超限/内存不足（调用方按"非错误"处理，与原 fopen / parser-init 失败
+ * 分支语义一致）。 */
+int svc_yaml_load_state(const char *config_path, svc_yaml_state_t *st);
 void svc_yaml_expand_llm(svc_yaml_state_t *st, const char *config_path);
 
 /* service_config_yaml_providers.c */

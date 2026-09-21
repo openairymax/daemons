@@ -8,8 +8,7 @@
  *
  * 2026-08-27 域拆分收尾（原主文件 → 仅保留分发与 JSON 定价核心）：
  *   - service_config_json.c           JSON 模型配置加载
- *   - service_config_yaml.c           YAML 基础设施（kv map）
- *   - service_config_yaml_models.c    models 状态机 + 简化 llm 段展开
+ *   - service_config_yaml_models.c    models 行解析 + 简化 llm 段展开
  *   - service_config_yaml_providers.c provider 聚合导出
  *   - service_config_yaml_pricing.c   YAML 定价规则提取
  * 共享符号经 config/internal.h 声明；YAML 函数体仅开启 HAVE_YAML
