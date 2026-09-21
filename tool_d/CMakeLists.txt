@@ -23,8 +23,8 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== Tool 服务静态库 ====================
-# 提取 service/registry/executor/validator/cache/tool_approval/safety_guard_bridge/
-# tool_svc_adapter 为独立静态库，供 tool_d 可执行文件、atoms/coreloopthree
+# 提取 service/registry/executor/validator/cache/tool_approval/safety_guard_bridge
+# 为独立静态库，供 tool_d 可执行文件、atoms/coreloopthree
 # 测试和集成测试共用，消除桩函数依赖。
 # 排除 main.c（含 main()）、config.c、utils/tool_helpers.c（daemon 专用工具函数）。
 # service.c 按单一职责拆分（2026-08-27）：
@@ -43,7 +43,6 @@ set(TOOL_SERVICE_SOURCES
     src/cache.c
     src/tool_approval.c
     src/safety_guard_bridge.c
-    src/tool_svc_adapter.c
     src/builtin.c
     src/builtin_shell.c
     src/builtin_fs.c
@@ -154,8 +153,7 @@ endif()
 target_compile_definitions(airy_tool_service PRIVATE AIRY_ENABLE_V2_API=1)
 
 # ==================== Tool daemon 可执行文件 ====================
-# main.c 仅属于 daemon 可执行文件；config.c 和 utils/tool_helpers.c 为 daemon 专用工具函数；
-# tool_svc_adapter.c 已纳入 airy_tool_service 库
+# main.c 仅属于 daemon 可执行文件；config.c 和 utils/tool_helpers.c 为 daemon 专用工具函数。
 add_executable(tool_d
     src/main.c
     src/config.c
