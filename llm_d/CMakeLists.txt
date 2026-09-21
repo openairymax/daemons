@@ -122,6 +122,12 @@ target_include_directories(airy_llm_service PUBLIC
 target_include_directories(airy_llm_service PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/providers
+    # B16-S5 预置：顶层文件五域归位后的头搜索路径（纯重排，bare-name include 不变）
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/bootstrap
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/adapter
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rpc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/accounting
     ${CURL_INCLUDE_DIRS}
     ${CJSON_INCLUDE_DIRS}
     ${YAML_INCLUDE_DIRS}
@@ -204,6 +210,12 @@ endif()
 target_include_directories(llm_d PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    # B16-S5 预置：五域归位后的头搜索路径（与 airy_llm_service 同步）
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/bootstrap
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/adapter
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rpc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/accounting
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/platform/include
