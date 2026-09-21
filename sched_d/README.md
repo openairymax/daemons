@@ -95,7 +95,7 @@ gateway_d ──(sched.* JSON-RPC)──▶ sched_d
 
 | 字段 | 默认 | 说明 |
 |------|------|------|
-| `strategy` | `SCHED_STRATEGY_ROUND_ROBIN` | 另有 `weighted` / `priority_based` / `ml_based` |
+| `strategy` | `SCHED_STRATEGY_ROUND_ROBIN` | 打分表驱动，另支持 `weighted` / `priority_based` / `ml_based`（见 `sched_service_agent.c` 的 `SCHED_STRATEGY_TABLE`） |
 | `health_check_interval_ms` | 5000 | 健康检查周期 |
 | `stats_report_interval_ms` | 10000 | 统计上报周期 |
 | `enable_ml_strategy` | `false` | 是否启用 ML 调度策略 |

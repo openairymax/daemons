@@ -20,10 +20,6 @@ set(SCHED_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_dag_worker.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_dag_parse.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_svc_adapter.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/strategies/round_robin.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/strategies/weighted.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/strategies/ml_based.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/strategies/priority_based.c
 )
 
 set(SCHED_TEST_SOURCES
