@@ -191,7 +191,7 @@ endif()
 add_executable(llm_d
     src/bootstrap/main.c
     src/rpc/llm_daemon_request.c
-    src/llm_daemon_methods.c
+    src/rpc/llm_daemon_methods.c
     src/config/llm_daemon_config.c
 )
 
