@@ -10,6 +10,7 @@
 #define TOOL_SERVICE_INTERNAL_H
 
 #include "cache.h"
+#include "cache_common.h"
 #include "config.h"
 #include "executor.h"
 #include "executor_pool.h"
@@ -25,7 +26,7 @@ struct tool_service {
     tool_executor_t *executor;
     executor_pool_t *exec_pool; /* R1-a: 执行面隔离池 */
     tool_validator_t *validator;
-    tool_cache_t *cache;
+    cache_t cache; /* LRU 存储下沉 commons cache_common（表二 #1） */
     tool_config_t *manager;
     airy_mtx_t lock;
 

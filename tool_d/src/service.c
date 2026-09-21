@@ -131,7 +131,7 @@ tool_service_t *tool_service_create(const char *config_path __attribute__((unuse
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    svc->cache = tool_cache_create(1024, 3600);
+    svc->cache = cache_create_string_cache(1024, 3600);
     if (!svc->cache) {
         SVC_LOG_WARN("Cache creation failed, continuing without cache");
     }
@@ -167,7 +167,7 @@ void tool_service_destroy(tool_service_t *svc)
     }
 
     if (svc->cache) {
-        tool_cache_destroy(svc->cache);
+        cache_destroy(svc->cache);
         svc->cache = NULL;
     }
 
