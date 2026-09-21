@@ -506,22 +506,31 @@ static void llm_stream_callback(const char *chunk, void *user_data)
  * 信封，把裸 JSON 当正文转发，CLI 直接把 {"jsonrpc":...,"error":...} 显示
  * 成回复正文（社区 ubuntu v0.1.11 问答实证）。帧体为标准 JSON-RPC 错误
  * 对象；新 adapter 解帧后按错误返回（不裸打），旧 adapter 不识别 'E' 标签
- * → 整帧丢弃 → 空回复提示（可接受的降级）。 */
+ * → 整帧丢弃 → 空回复提示（可接受的降级）。
+ *
+ * 帧体改用 common jsonrpc_helpers 构造，llm_d 不再自行拼装 JSON-RPC 信封：
+ * 自行拼装须把 message 以 %s 原样嵌进 JSON，转义责任就落回每个调用点
+ * （当前两处恰为固定 ASCII 文案才侥幸合法）。
+ *
+ * '\x1e' 以字符字面量写出：\x 十六进制转义会吞掉紧随的十六进制字符
+ * （'E' 也是 hex digit），"\x1eE{..." 会解析成 0x1EE → clang
+ * "hex escape sequence out of range"（#132 macOS 实证）。 */
 static void llm_stream_send_error_frame(airy_sock_t fd, int id, int code, const char *message)
 {
-    char buf[400];
-    /* message 为内部固定文案（ASCII，无引号/反斜杠），无需 JSON 转义。
-     * 注意 \x1e 与 'E' 必须分属两个字符串字面量：\x 十六进制转义会吞掉
-     * 紧随的十六进制字符（E 也是 hex digit），"\x1eE{..." 会解析成 0x1EE
-     * → clang "hex escape sequence out of range"（#132 macOS 实证）。 */
-    int n = snprintf(buf, sizeof(buf),
-                     "\x1e"
-                     "E{\"jsonrpc\":\"2.0\",\"id\":%d,"
-                     "\"error\":{\"code\":%d,\"message\":\"%s\"}}"
-                     "\x1e",
-                     id, code, message);
-    if (n > 0 && (size_t)n < sizeof(buf))
-        llm_stream_send_all(fd, buf, (size_t)n);
+    char *body = jsonrpc_build_error(code, message, id);
+    if (!body)
+        return;
+
+    const size_t blen = strlen(body);
+    char buf[512];
+    if (blen + 3 <= sizeof(buf)) {
+        buf[0] = '\x1e';
+        buf[1] = 'E';
+        AIRY_MEMCPY(buf + 2, body, blen);
+        buf[blen + 2] = '\x1e';
+        llm_stream_send_all(fd, buf, blen + 3);
+    }
+    AIRY_FREE(body);
 }
 
 static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd)
