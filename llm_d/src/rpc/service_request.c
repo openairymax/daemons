@@ -10,10 +10,10 @@
 
 #include "airy_memory.h"
 #include "daemon_platform_ext.h"
-#include "daemon_rpc_client.h"
 #include "error.h"
 #include "response.h"
 #include "router/llm_router.h"
+#include "semantic_cache.h"
 #include "service.h"
 #include "svc_logger.h"
 
@@ -25,11 +25,6 @@
 #include "rpc/internal.h"
 #include "providers/core/secrets.h"
 #include "providers/core/transport.h"
-
-/* 语义缓存（mem_d）RPC 超时：缓存是可选加速层，本地 socket 往返毫秒级，
- * 此处仅需给出上界以保证 mem_d 繁忙时不拖慢主链路（13-semantic-cache
- * §3.5：缓存引擎异常必须降级为直连 LLM）。 */
-#define LLM_MEM_CACHE_TIMEOUT_MS 2000
 
 /**
  * @brief 构造请求的规范化文本（canonical text）：
@@ -101,117 +96,26 @@ static char *make_cache_key(const llm_request_config_t *manager, const char *tex
     return key;
 }
 
-/* ── mem_d 跨进程语义缓存（A-IPC over Unix socket） ────────────────────
- *
- * 命中判定与存储都走 mem_d 的 cache_get / cache_put 方法（mem.sock）。
- * 缓存是可选加速层：任何失败（daemon 未启动、超时、协议错误、g_cache
- * 未初始化）一律按"未命中/未写入"处理，主流程继续直连上游 LLM，仅以
- * DEBUG 记录，避免 mem_d 缺席时每次请求刷屏。
- */
-
-static const char *mem_sock_path(void)
-{
-    const char *sock = airy_runtime_dir_socket("mem.sock");
-    return (sock && sock[0]) ? sock : NULL;
-}
-
-/**
- * @brief 查询 mem_d 语义缓存
- * @return 1 命中（*out_json 为响应 JSON，调用方 AIRY_FREE）；0 未命中或不可用
- */
-static int mem_cache_fetch(const char *text, const char *model, char **out_json)
-{
-    const char *sock = mem_sock_path();
-    if (!sock || !text || !model || !out_json) {
-        return 0;
-    }
-    *out_json = NULL;
-
-    cJSON *req = cJSON_CreateObject();
-    if (!req) {
-        return 0;
-    }
-    cJSON_AddStringToObject(req, "text", text);
-    cJSON_AddStringToObject(req, "model_id", model);
-    char *params = cJSON_PrintUnformatted(req);
-    cJSON_Delete(req);
-    if (!params) {
-        return 0;
-    }
-
-    char *result = NULL;
-    int rc = daemon_rpc_call(sock, "cache_get", params, &result, LLM_MEM_CACHE_TIMEOUT_MS);
-    AIRY_FREE(params);
-    if (rc != AIRY_SUCCESS || !result) {
-        SVC_LOG_DEBUG("mem.cache_get unavailable (rc=%d) — semantic cache bypassed", rc);
-        AIRY_FREE(result);
-        return 0;
-    }
-
-    int hit = 0;
-    cJSON *root = cJSON_Parse(result);
-    AIRY_FREE(result);
-    if (!root) {
-        return 0;
-    }
-
-    const cJSON *hit_item = cJSON_GetObjectItem(root, "hit");
-    const cJSON *body_item = cJSON_GetObjectItem(root, "response");
-    if (cJSON_IsBool(hit_item) && cJSON_IsTrue(hit_item) && cJSON_IsString(body_item) &&
-        body_item->valuestring && body_item->valuestring[0]) {
-        *out_json = AIRY_STRDUP(body_item->valuestring);
-        hit = (*out_json != NULL);
-    }
-    cJSON_Delete(root);
-    return hit;
-}
-
-/**
- * @brief 写入 mem_d 语义缓存（失败仅 DEBUG，不阻断主流程）
- */
-static void mem_cache_save(const char *text, const char *model, const char *resp_json)
-{
-    const char *sock = mem_sock_path();
-    if (!sock || !text || !model || !resp_json) {
-        return;
-    }
-
-    cJSON *req = cJSON_CreateObject();
-    if (!req) {
-        return;
-    }
-    cJSON_AddStringToObject(req, "text", text);
-    cJSON_AddStringToObject(req, "response", resp_json);
-    cJSON_AddStringToObject(req, "model_id", model);
-    /* B5-3：仅在 cache_store 准入门禁通过后才会到达此处，故显式声明可缓存 */
-    cJSON_AddBoolToObject(req, "cacheable", 1);
-    char *params = cJSON_PrintUnformatted(req);
-    cJSON_Delete(req);
-    if (!params) {
-        return;
-    }
-
-    char *result = NULL;
-    int rc = daemon_rpc_call(sock, "cache_put", params, &result, LLM_MEM_CACHE_TIMEOUT_MS);
-    AIRY_FREE(params);
-    AIRY_FREE(result);
-    if (rc != AIRY_SUCCESS) {
-        SVC_LOG_DEBUG("mem.cache_put unavailable (rc=%d) — semantic cache not updated", rc);
-    }
-}
-
 /**
  * @brief 两级缓存查询：L0 进程内精确匹配 LRU → L1 mem_d 语义缓存。
  *        L1 命中后回填 L0，后续同请求免 IPC。
+ *
+ * B5-3 准入门禁（fail-closed）：调用方未显式声明 cacheable 时两级均旁路，
+ * 与 cache_store 的写入门禁同源同判，避免读侧绕过策略面。
+ *
  * @return 1 命中（*out_response 已填充）；0 未命中
  */
 static int cache_lookup(llm_service_t *svc, const char *key, const char *text, const char *model,
-                        llm_response_t **out_response)
+                        int cacheable, llm_response_t **out_response)
 {
     if (!svc || !key || !text || !model || !out_response) {
         SVC_LOG_ERROR("cache_lookup: NULL parameter (svc=%p, key=%p, text=%p, model=%p, out=%p)",
                       (const void *)svc, (const void *)key, (const void *)text, (const void *)model,
                       (const void *)out_response);
+        return 0;
+    }
+
+    if (!cacheable) {
         return 0;
     }
 
@@ -229,7 +133,7 @@ static int cache_lookup(llm_service_t *svc, const char *key, const char *text, c
     AIRY_FREE(cached_json);
 
     char *sem_json = NULL;
-    if (mem_cache_fetch(text, model, &sem_json) != 1 || !sem_json) {
+    if (llm_semantic_cache_fetch(text, model, &sem_json) != 1 || !sem_json) {
         AIRY_FREE(sem_json);
         return 0;
     }
@@ -368,7 +272,7 @@ static void cache_store(llm_service_t *svc, const char *key, const char *text, c
     }
 
     llm_cache_put(svc->cache, key, resp_json);
-    mem_cache_save(text, model, resp_json);
+    llm_semantic_cache_save(text, model, resp_json);
     AIRY_FREE(resp_json);
 }
 
@@ -466,7 +370,8 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     }
 
     llm_response_t *cached_resp = NULL;
-    int cache_status = cache_lookup(svc, cache_key, cache_text, manager->model, &cached_resp);
+    int cache_status =
+        cache_lookup(svc, cache_key, cache_text, manager->model, manager->cacheable, &cached_resp);
     if (cache_status > 0 && cached_resp) {
         /* 2.1.1.5 修复：缓存命中同样计入 cost_tracker——此前命中直接
          * 返回跳过计费，累计金额低于逐轮显示之和（缓存响应仍消耗上游

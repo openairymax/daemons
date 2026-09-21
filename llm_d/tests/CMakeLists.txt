@@ -24,6 +24,7 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_request.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/service_metrics.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/cache.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/semantic_cache.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/token_counter.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/response.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/cost_tracker.c
