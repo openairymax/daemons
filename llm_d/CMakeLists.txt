@@ -47,7 +47,7 @@ set(LLM_SERVICE_SOURCES
     src/service_providers.c
     src/service_request.c
     src/service_metrics.c
-    src/cache.c
+    src/accounting/cache.c
     src/cost_tracker.c
     src/token_counter.c
     src/response.c
