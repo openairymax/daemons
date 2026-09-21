@@ -24,7 +24,6 @@ set(SCHED_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/strategies/weighted.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/strategies/ml_based.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/strategies/priority_based.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/monitor.c
 )
 
 set(SCHED_TEST_SOURCES
