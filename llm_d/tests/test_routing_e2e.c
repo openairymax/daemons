@@ -106,9 +106,15 @@ static void test_cache_hit_miss(void)
 #ifdef _WIN32
     Sleep(1500);
 #else
+    /* 不能依赖单次 nanosleep(1.5s)——秒级时钟取整后 now - timestamp
+     * 可能只前进 1s，与 cache_common 严格大于(>ttl)的过期判定组合出
+     * "TTL 未过期"假失败。改为按墙钟推进，循环等到至少前进 2 秒。 */
     {
-        struct timespec ts = {1, 500000000L};
-        nanosleep(&ts, NULL);
+        time_t start = time(NULL);
+        while (time(NULL) - start < 2) {
+            struct timespec ts = {0, 50 * 1000 * 100L}; /* 50ms */
+            nanosleep(&ts, NULL);
+        }
     }
 #endif
 
