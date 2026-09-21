@@ -77,7 +77,7 @@ set(LLM_SERVICE_SOURCES
     src/router/round_robin_router.c
     src/router/least_latency_router.c
     src/router/quality_first_router.c
-    src/llm_svc_adapter.c
+    src/adapter/adapter.c
     # 注入 atoms 侧 LLM ops 抽象表（服务实现在本库，表存储在 airy_llm_ops）
     src/daemon_llm_ops_bootstrap.c
 )
