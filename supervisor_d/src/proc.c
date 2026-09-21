@@ -175,7 +175,10 @@ static int spawn_posix(sup_ctx_t *ctx, sup_proc_t *p)
     }
     argv[argc] = NULL;
 
+#ifdef __linux__
+    /* PDEATHSIG race 检查仅 Linux 可用，ppid 须在 fork 前采样 */
     pid_t ppid = getpid();
+#endif
     pid_t pid = fork();
     if (pid < 0) {
         sup_log("ERROR", "fork %s: %s", p->name, strerror(errno));
