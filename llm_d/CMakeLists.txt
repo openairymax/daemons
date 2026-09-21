@@ -35,7 +35,7 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 # 为独立静态库，供 llm_d 可执行文件、atoms/coreloopthree 测试和集成测试共用，
 # 消除桩函数依赖。排除 main.c（含 main()）。
 set(LLM_SERVICE_SOURCES
-    src/service.c
+    src/rpc/service.c
     src/config/service_config.c
     # service_config.c 域拆分（2026-08-27：1159 行 → 核心 + 5 个职责模块；
     # yaml 四件整体受 #ifdef HAVE_YAML 保护，非 YAML 构建下为空翻译单元，无条件列出无害）
