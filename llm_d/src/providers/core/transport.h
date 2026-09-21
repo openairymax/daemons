@@ -19,6 +19,8 @@
 
 #include "airy_memory.h"
 
+#include <cjson/cJSON.h>
+
 #include <curl/curl.h>
 
 #ifdef __cplusplus
@@ -67,9 +69,9 @@ typedef struct {
 /* provider_name 用于 api_key_env 回落名推导（品牌无关统一约定，见
  * core/secrets.c sec_env_name_for）：未显式给出 "env:NAME" 时，以厂商名推
  * 出标准环境变量名供 secrets.env 热重载。 */
-void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name, const char *api_key,
-                        const char *api_base, const char *organization, double timeout_sec,
-                        int max_retries, const char *default_base);
+void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name,
+                        const char *api_key, const char *api_base, const char *organization,
+                        double timeout_sec, int max_retries, const char *default_base);
 
 /* 出网传输策略唯一实现（SSoT）：连接超时 / 总超时 / 代理 / 自定义 CA /
  * 重定向与证书校验。所有出网调用点（非流式、流式、google、anthropic）
@@ -152,6 +154,65 @@ void provider_http_resp_free(provider_http_resp_t *resp);
 char *provider_build_openai_request(const llm_request_config_t *manager, const char *default_model);
 
 int provider_parse_openai_response(const char *body, llm_response_t **out);
+
+/* ── 请求/响应共享件（B16-S3 下沉，envelope.c 实现）：三家请求/响应映射表
+ * 的公共段，适配层不再各自重写。────────────────────────────────────── */
+
+/* 请求参数段骨架：model（default_model 回落）/ temperature（0.7 兜底）/
+ * max_tokens（default_max_tokens 兜底，0 = 调用方未给则不写）/ top_p /
+ * stream / stop 数组（stop_key：openai "stop"、anthropic "stop_sequences"）。 */
+void provider_request_params_fill(cJSON *root, const llm_request_config_t *manager,
+                                  const char *default_model, int default_max_tokens,
+                                  const char *stop_key);
+
+/* 响应身份段装载：id / model 两个字符串字段（两家响应同名同义）。 */
+void provider_response_identity_load(llm_response_t *resp, const cJSON *root);
+
+/* OpenAI 形状 tools 声明遍历：逐条提取 function 三元组（name 缺失条目
+ * 跳过），anthropic 等据此改写为本家声明形状。 */
+typedef void (*provider_openai_tool_fn)(void *ud, const char *name, const char *description,
+                                        const cJSON *parameters);
+void provider_openai_tools_foreach(const char *tools_json, provider_openai_tool_fn fn, void *ud);
+
+/* OpenAI 形状 assistant 轮 tool_calls 遍历：逐条 (id, name, arguments)
+ * 回调；arguments 为 JSON 字符串原样交付。 */
+typedef void (*provider_openai_tool_call_fn)(void *ud, const char *id, const char *name,
+                                             const char *arguments);
+void provider_openai_tool_calls_foreach(const char *tool_calls_json,
+                                        provider_openai_tool_call_fn fn, void *ud);
+
+/* JSON 对象字段条件存取惯用法（协议无关，适配层与 core 共用）：
+ * str_val——字段为合法字符串（含空串）时返回值串，否则 NULL；
+ * str_set——有效时赋 *dst（先释放原值，NULL 安全）；
+ * num_set——数值字段有效时赋 (uint32_t) 值；
+ * u32_get——数值字段取值（无效或 obj 为 NULL 时返回 0）。 */
+static inline const char *provider_json_str_val(const cJSON *obj, const char *key)
+{
+    cJSON *v = obj ? cJSON_GetObjectItem(obj, key) : NULL;
+    return (cJSON_IsString(v) && v->valuestring) ? v->valuestring : NULL;
+}
+
+static inline void provider_json_str_set(const cJSON *obj, const char *key, char **dst)
+{
+    const char *v = provider_json_str_val(obj, key);
+    if (v) {
+        AIRY_FREE(*dst);
+        *dst = AIRY_STRDUP(v);
+    }
+}
+
+static inline void provider_json_num_set(const cJSON *obj, const char *key, uint32_t *dst)
+{
+    cJSON *v = obj ? cJSON_GetObjectItem(obj, key) : NULL;
+    if (cJSON_IsNumber(v))
+        *dst = (uint32_t)v->valuedouble;
+}
+
+static inline uint32_t provider_json_u32_get(const cJSON *obj, const char *key)
+{
+    cJSON *v = obj ? cJSON_GetObjectItem(obj, key) : NULL;
+    return cJSON_IsNumber(v) ? (uint32_t)v->valuedouble : 0;
+}
 
 /* 域内析构器：providers 失败路径释放的是自己解析的中间产物，析构归 provider
  * 域所有（B16-S2 内层反依赖——不依赖发布头 llm_service_free 门面）。语义与

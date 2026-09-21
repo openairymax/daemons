@@ -107,6 +107,11 @@ void provider_stream_acc_init(provider_stream_acc_t *acc, llm_stream_callback_t 
  * data: JSON 载荷。本地端点不产 reasoning_content 时相应分支自然旁路。 */
 int provider_openai_on_chunk(const char *json_line, void *userdata);
 
+/* 流文本推送原语：user_cb 即时转发 + acc_content 累积双写。行协议
+ * （on_chunk content 分支）与具名事件协议（anthropic text_delta 分支）
+ * 共同消费，两种协议的增量交付形状由此唯一。 */
+void provider_stream_text_push(provider_stream_acc_t *acc, const char *text);
+
 /* 流末装配响应并转移缓冲所有权；acc 内已转移指针被复位。 */
 llm_response_t *provider_openai_stream_take(provider_stream_acc_t *acc);
 
