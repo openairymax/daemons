@@ -48,7 +48,7 @@ set(LLM_SERVICE_SOURCES
     src/service_request.c
     src/service_metrics.c
     src/accounting/cache.c
-    src/cost_tracker.c
+    src/accounting/cost_tracker.c
     src/token_counter.c
     src/response.c
     # B16-S3：providers 域内重排 core/（机制）+ adapters/（适配）
