@@ -39,7 +39,7 @@ set(LLM_SERVICE_SOURCES
     src/config/service_config.c
     # service_config.c 域拆分（2026-08-27：1159 行 → 核心 + 5 个职责模块；
     # yaml 四件整体受 #ifdef HAVE_YAML 保护，非 YAML 构建下为空翻译单元，无条件列出无害）
-    src/service_config_json.c
+    src/config/service_config_json.c
     src/service_config_yaml.c
     src/service_config_yaml_models.c
     src/service_config_yaml_providers.c
