@@ -25,7 +25,7 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/service_metrics.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/cache.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/token_counter.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/response.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/response.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/cost_tracker.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/registry.c
     # provider.c / openai.c 域拆分（2026-08-27）：与主目标 LLM_SERVICE_SOURCES 同步

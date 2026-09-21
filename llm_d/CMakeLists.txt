@@ -50,7 +50,7 @@ set(LLM_SERVICE_SOURCES
     src/accounting/cache.c
     src/accounting/cost_tracker.c
     src/accounting/token_counter.c
-    src/response.c
+    src/rpc/response.c
     # B16-S3：providers 域内重排 core/（机制）+ adapters/（适配）
     src/providers/core/registry.c
     # B16-S3 c3：provider.c 两分消失——base 生命周期归 registry.c，密钥机制归 secrets.c
