@@ -46,7 +46,7 @@ set(LLM_SERVICE_SOURCES
     src/service_config_yaml_pricing.c
     src/service_providers.c
     src/service_request.c
-    src/service_metrics.c
+    src/accounting/service_metrics.c
     src/accounting/cache.c
     src/accounting/cost_tracker.c
     src/accounting/token_counter.c
