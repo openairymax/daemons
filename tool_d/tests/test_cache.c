@@ -4,9 +4,14 @@
 /**
  * @file test_cache.c
  * @brief Tool 缓存模块单元测试
+ *
+ * LRU/TTL 存储已下沉 commons cache_common（表二 #1）：机制用例直接
+ * 消费 cache_common 原生 API（与 tool_service 持有的同一实现）；tool
+ * 专属的 key 构造用例保留。
  */
 
 #include "cache.h"
+#include "cache_common.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -17,10 +22,10 @@ static void test_cache_create_destroy(void)
 {
     printf("  test_cache_create_destroy...\n");
 
-    tool_cache_t *cache = tool_cache_create(100, 3600);
+    cache_t cache = cache_create_string_cache(100, 3600);
     assert(cache != NULL);
 
-    tool_cache_destroy(cache);
+    cache_destroy(cache);
 
     printf("    PASSED\n");
 }
@@ -68,22 +73,21 @@ static void test_cache_put_get(void)
 {
     printf("  test_cache_put_get...\n");
 
-    tool_cache_t *cache = tool_cache_create(100, 3600);
+    cache_t cache = cache_create_string_cache(100, 3600);
     assert(cache != NULL);
 
     const char *key = "test_key_123";
     const char *value = "cached_result_data";
 
-    tool_cache_put(cache, key, value);
+    cache_put_string(cache, key, value);
 
     char *retrieved = NULL;
-    int ret __attribute__((unused)) = tool_cache_get(cache, key, &retrieved);
-    assert(ret == 1);
+    assert(cache_get_string(cache, key, &retrieved) == 1);
     assert(retrieved != NULL);
     assert(strcmp(retrieved, value) == 0);
 
     free(retrieved);
-    tool_cache_destroy(cache);
+    cache_destroy(cache);
 
     printf("    PASSED\n");
 }
@@ -92,14 +96,13 @@ static void test_cache_miss(void)
 {
     printf("  test_cache_miss...\n");
 
-    tool_cache_t *cache = tool_cache_create(100, 3600);
+    cache_t cache = cache_create_string_cache(100, 3600);
     assert(cache != NULL);
 
     char *retrieved = NULL;
-    int ret __attribute__((unused)) = tool_cache_get(cache, "nonexistent_key", &retrieved);
-    assert(ret == 0);
+    assert(cache_get_string(cache, "nonexistent_key", &retrieved) == 0);
 
-    tool_cache_destroy(cache);
+    cache_destroy(cache);
 
     printf("    PASSED\n");
 }
@@ -108,21 +111,21 @@ static void test_cache_clear(void)
 {
     printf("  test_cache_clear...\n");
 
-    tool_cache_t *cache = tool_cache_create(100, 3600);
+    cache_t cache = cache_create_string_cache(100, 3600);
     assert(cache != NULL);
 
-    tool_cache_put(cache, "key1", "value1");
-    tool_cache_put(cache, "key2", "value2");
-    tool_cache_put(cache, "key3", "value3");
+    cache_put_string(cache, "key1", "value1");
+    cache_put_string(cache, "key2", "value2");
+    cache_put_string(cache, "key3", "value3");
 
-    tool_cache_clear(cache);
+    cache_clear(cache);
 
-    char *retrieved __attribute__((unused)) = NULL;
-    assert(tool_cache_get(cache, "key1", &retrieved) == 0);
-    assert(tool_cache_get(cache, "key2", &retrieved) == 0);
-    assert(tool_cache_get(cache, "key3", &retrieved) == 0);
+    char *retrieved = NULL;
+    assert(cache_get_string(cache, "key1", &retrieved) == 0);
+    assert(cache_get_string(cache, "key2", &retrieved) == 0);
+    assert(cache_get_string(cache, "key3", &retrieved) == 0);
 
-    tool_cache_destroy(cache);
+    cache_destroy(cache);
 
     printf("    PASSED\n");
 }
