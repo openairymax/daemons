@@ -25,7 +25,6 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 # Scheduler 服务源文件
 set(SCHED_D_SOURCES
     src/main.c
-    src/monitor.c
     src/roadmap_rpc.c
     # sched_service_impl.c / sched_dag_impl.c / main.c 已按功能域拆分
     # （单一职责），新增域文件如下：
