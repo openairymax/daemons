@@ -21,7 +21,7 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/config/service_config_yaml_providers.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/config/service_config_yaml_pricing.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_providers.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_request.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_request.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/service_metrics.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/cache.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/token_counter.c
