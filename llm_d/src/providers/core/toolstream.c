@@ -51,6 +51,40 @@ static void tool_args_append(provider_tool_slot_t *slot, const char *frag)
     slot->args[slot->args_len] = '\0';
 }
 
+/* 定长字段首值锁定：仅当目标为空且来源非空时写入，超出容量截断。 */
+static void tool_str_first(char *dst, size_t cap, const char *src)
+{
+    if (!src || !src[0] || dst[0])
+        return;
+    size_t n = strlen(src);
+    if (n >= cap)
+        n = cap - 1;
+    __builtin_memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+provider_tool_slot_t *provider_tool_begin(provider_tool_acc_t *acc, int index, const char *id,
+                                          const char *name)
+{
+    if (!acc)
+        return NULL;
+    provider_tool_slot_t *slot = tool_slot(acc, index);
+    if (!slot)
+        return NULL;
+    tool_str_first(slot->id, sizeof(slot->id), id);
+    tool_str_first(slot->name, sizeof(slot->name), name);
+    return slot;
+}
+
+void provider_tool_args_add(provider_tool_acc_t *acc, int index, const char *frag)
+{
+    if (!acc || !frag)
+        return;
+    provider_tool_slot_t *slot = tool_slot(acc, index);
+    if (slot)
+        tool_args_append(slot, frag);
+}
+
 void provider_tool_delta(provider_tool_acc_t *acc, cJSON *delta)
 {
     cJSON *tcs = cJSON_GetObjectItem(delta, "tool_calls");
@@ -60,32 +94,17 @@ void provider_tool_delta(provider_tool_acc_t *acc, cJSON *delta)
     for (int ti = 0; ti < tn; ti++) {
         cJSON *tc = cJSON_GetArrayItem(tcs, ti);
         cJSON *idxj = cJSON_GetObjectItem(tc, "index");
-        int idx = cJSON_IsNumber(idxj) ? (int)idxj->valuedouble : (int)acc->count;
-        provider_tool_slot_t *slot = tool_slot(acc, idx);
-        if (!slot)
-            continue;
         cJSON *idj = cJSON_GetObjectItem(tc, "id");
-        if (cJSON_IsString(idj) && idj->valuestring && !slot->id[0]) {
-            size_t idlen = strlen(idj->valuestring);
-            if (idlen >= sizeof(slot->id))
-                idlen = sizeof(slot->id) - 1;
-            __builtin_memcpy(slot->id, idj->valuestring, idlen);
-            slot->id[idlen] = '\0';
-        }
         cJSON *fn = cJSON_GetObjectItem(tc, "function");
-        if (!cJSON_IsObject(fn))
+        cJSON *namej = cJSON_IsObject(fn) ? cJSON_GetObjectItem(fn, "name") : NULL;
+        cJSON *argj = cJSON_IsObject(fn) ? cJSON_GetObjectItem(fn, "arguments") : NULL;
+        const char *id = (cJSON_IsString(idj) && idj->valuestring) ? idj->valuestring : NULL;
+        const char *name = (cJSON_IsString(namej) && namej->valuestring) ? namej->valuestring : NULL;
+        int idx = cJSON_IsNumber(idxj) ? (int)idxj->valuedouble : (int)acc->count;
+        if (!provider_tool_begin(acc, idx, id, name))
             continue;
-        cJSON *namej = cJSON_GetObjectItem(fn, "name");
-        if (cJSON_IsString(namej) && namej->valuestring && !slot->name[0]) {
-            size_t nlen = strlen(namej->valuestring);
-            if (nlen >= sizeof(slot->name))
-                nlen = sizeof(slot->name) - 1;
-            __builtin_memcpy(slot->name, namej->valuestring, nlen);
-            slot->name[nlen] = '\0';
-        }
-        cJSON *argj = cJSON_GetObjectItem(fn, "arguments");
         if (cJSON_IsString(argj) && argj->valuestring)
-            tool_args_append(slot, argj->valuestring);
+            provider_tool_args_add(acc, idx, argj->valuestring);
     }
 }
 
