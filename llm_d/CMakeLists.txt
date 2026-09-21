@@ -37,10 +37,9 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 set(LLM_SERVICE_SOURCES
     src/rpc/service.c
     src/config/service_config.c
-    # service_config.c 域拆分（2026-08-27：1159 行 → 核心 + 5 个职责模块；
-    # yaml 四件整体受 #ifdef HAVE_YAML 保护，非 YAML 构建下为空翻译单元，无条件列出无害）
+    # service_config.c 域拆分（2026-08-27：1159 行 → 核心 + 4 个职责模块；
+    # yaml 三件整体受 #ifdef HAVE_YAML 保护，非 YAML 构建下为空翻译单元，无条件列出无害）
     src/config/service_config_json.c
-    src/config/service_config_yaml.c
     src/config/service_config_yaml_models.c
     src/config/service_config_yaml_providers.c
     src/config/service_config_yaml_pricing.c

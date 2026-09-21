@@ -5,10 +5,10 @@
  * @file service_config_yaml_pricing.c
  * @brief LLM pricing-rule extraction from a YAML model config (split from
  *        service_config.c, 2026-08-27): reuse the shared yaml parse state
- *        machine to convert models[].input/output_cost_per_1k into
- *        pricing_rule_t entries.
+ *        produced by the commons yaml_minimal node-tree walk to convert
+ *        models[].input/output_cost_per_1k into pricing_rule_t entries.
  *
- * 状态机与 kv map 经 config/types.h 共享。
+ * 解析状态经 config/types.h 共享。
  */
 
 #include "airy_memory.h"
@@ -16,7 +16,6 @@
 #include "service.h"
 #include "svc_logger.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 
 #include "config/internal.h"
@@ -46,33 +45,14 @@ int load_pricing_rules_from_yaml(const char *config_path, pricing_rule_t **out_r
     *out_rules = NULL;
     *out_count = 0;
 
-    FILE *f = fopen(config_path, "rb");
-    if (!f)
-        return 0;
-
-    yaml_parser_t parser;
-    if (!yaml_parser_initialize(&parser)) {
-        fclose(f);
-        return 0;
-    }
-    yaml_parser_set_input_file(&parser, f);
-
     svc_yaml_state_t st;
     __builtin_memset(&st, 0, sizeof(st));
-    yaml_map_init(&st.item_map);
-    yaml_map_init(&st.prov_map);
-    int done = 0;
-    svc_yaml_event_loop(&parser, &st, &done);
+    if (svc_yaml_load_state(config_path, &st) != AIRY_OK)
+        return 0;
 
-    yaml_parser_delete(&parser);
-    fclose(f);
-    yaml_map_free(&st.item_map);
-    yaml_map_free(&st.prov_map);
-
-    /* 释放 providers 段解析时 strdup 的 model_names。finalize_provider
-     * 成功时把 cur_p 浅拷贝进 pcfg（指针共享），下一 provider 的
-     * mapping_start 会 memset 清空 cur_p——因此 pcfg 数组是这些字符串
-     * 的唯一持有者，只清理 pcfg 即可（cur_p 副本已清零，不重复释放）。 */
+    /* 释放 providers 段解析时 strdup 的 model_names。cur_p 是浅拷贝，
+     * pcfg 数组是这些字符串的唯一持有者，只清理 pcfg 即可（cur_p 副本
+     * 已由 parse_provider 的 memset 清零，不重复释放）。 */
     for (size_t pi = 0; pi < st.pcfg_count; ++pi) {
         for (size_t k = 0; k < st.pcfg[pi].model_count; ++k)
             AIRY_FREE(st.pcfg[pi].model_names[k]);

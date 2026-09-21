@@ -7,7 +7,7 @@
  *
  * 由 llm_service_internal.h（253 行枢纽头，B16-S1 拆片）迁入：YAML/JSON
  * 双格式的定价规则与模型配置装载入口。仅 service_config*.c 与 service.c
- * 消费；跨域禁止 include 本头。YAML 解析状态机类型见 config/types.h。
+ * 消费；跨域禁止 include 本头。YAML 解析结果类型见 config/types.h。
  */
 
 #ifndef AIRY_RT_LLM_CONFIG_INTERNAL_H

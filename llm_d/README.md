@@ -118,7 +118,7 @@ CTest 用例（`llm_d_*`）：
 | [commons](https://atomgit.com/openairymax/commons) | 平台路径、日志、HTTP、cJSON 封装 |
 | [corekern](https://atomgit.com/openairymax/atoms) | `airy_init()` 核心引导 |
 | libcurl | 调用 LLM 远端 API |
-| libyaml | 解析 `model.yaml`（`HAVE_YAML` 时启用） |
+| commons `yaml_minimal` | 解析 `model.yaml`（`HAVE_YAML` 时启用，随 commons 一并链接） |
 | [gateway_d](../gateway_d/README.md) | 上游：`llm.*` 命名空间转发方 |
 
 ## 关系
