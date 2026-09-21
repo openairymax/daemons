@@ -313,8 +313,18 @@ int provider_http_exec(const provider_request_t *req, provider_http_resp_t **out
         return AIRY_ERR_INVALID_PARAM;
     }
 
+    /* URL 拼装 SSoT（B16-S6）：api_base 尾部斜杠在此归一，调用方只声明 path
+     * （如 "/embeddings"）。此前该"防双斜杠"逻辑散落在 service 层调用点，
+     * 归一后所有出网点共用一条规则。 */
     char url[1024];
-    snprintf(url, sizeof(url), "%s%s", req->base->api_base, req->path);
+    size_t blen = strlen(req->base->api_base);
+    while (blen > 0 && (req->base->api_base[blen - 1] == '/' || req->base->api_base[blen - 1] == '\\'))
+        blen--;
+    if (blen == 0) {
+        errno = EINVAL;
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    snprintf(url, sizeof(url), "%.*s%s", (int)blen, req->base->api_base, req->path);
 
     struct curl_slist *headers = provider_headers_build(req->base, req->headers);
 

@@ -18,13 +18,13 @@
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
-#include <curl/curl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "rpc/internal.h"
 #include "providers/core/secrets.h"
+#include "providers/core/transport.h"
 
 /* 语义缓存（mem_d）RPC 超时：缓存是可选加速层，本地 socket 往返毫秒级，
  * 此处仅需给出上界以保证 mem_d 繁忙时不拖慢主链路（13-semantic-cache
@@ -611,6 +611,10 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
     return ret;
 }
 
+/* embeddings 端点为 OpenAI 兼容协议：仅 Bearer 鉴权，Content-Type 由 core 统一
+ * 附加（B16-S6：鉴权头拼装与缓冲擦除归 core，service 层不出现 curl_*）。 */
+static const provider_header_spec_t EMBEDDINGS_HEADERS = {.auth = PROVIDER_AUTH_BEARER};
+
 int llm_service_embeddings(llm_service_t *svc, const char *model, const char *request_body,
                            char **out_json)
 {
@@ -628,42 +632,35 @@ int llm_service_embeddings(llm_service_t *svc, const char *model, const char *re
     provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
     provider_refresh_api_key(base);
 
-    /* OpenAI 兼容 embeddings 端点：$api_base/embeddings（去掉尾部斜杠防双斜杠） */
-    char url[1024];
-    size_t blen = strlen(base->api_base);
-    while (blen > 0 && (base->api_base[blen - 1] == '/' || base->api_base[blen - 1] == '\\'))
-        blen--;
-    if (blen == 0) {
+    if (!base->api_base[0]) {
         SVC_LOG_ERROR("embeddings: empty api_base for provider=%s", prov->name ? prov->name : "?");
         return AIRY_ERR_INVALID_PARAM;
     }
-    snprintf(url, sizeof(url), "%.*s/embeddings", (int)blen, base->api_base);
 
-    struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    if (base->api_key[0]) {
-        char auth[320];
-        snprintf(auth, sizeof(auth), "Authorization: Bearer %s", base->api_key);
-        headers = curl_slist_append(headers, auth);
-    }
+    /* B16-S6：embeddings 出网收敛到 providers/core 唯一入口 provider_http_exec。
+     * service 层只声明"发给谁/发什么"，URL 拼装（含 api_base 尾斜杠归一）、头链
+     * 装配与释放、超时与重试全归 core——此前本处自持 curl 头链直调
+     * provider_http_post，使 providers 的传输收敛形同虚设。 */
+    provider_request_t req = {
+        .base = base,
+        .path = "/embeddings",
+        .headers = &EMBEDDINGS_HEADERS,
+        .body = request_body,
+    };
 
     provider_http_resp_t *resp = NULL;
     long http_code = 0;
-    int rc = provider_http_post(url, headers, request_body, base->timeout_sec, base->max_retries,
-                                &resp, &http_code);
-    if (headers)
-        curl_slist_free_all(headers);
+    int rc = provider_http_exec(&req, &resp, &http_code);
 
-    if (rc != 0 || !resp) {
+    if (rc != AIRY_OK || !resp) {
         provider_http_resp_free(resp);
-        SVC_LOG_ERROR("embeddings: HTTP request failed url=%s rc=%d", url, rc);
+        SVC_LOG_ERROR("embeddings: HTTP request failed api_base=%s rc=%d", base->api_base, rc);
         return AIRY_ERR_IO;
     }
 
     if (http_code >= 400) {
-        SVC_LOG_WARN("embeddings: upstream HTTP %ld url=%s", http_code, url);
-        AIRY_FREE(resp->data);
-        AIRY_FREE(resp);
+        SVC_LOG_WARN("embeddings: upstream HTTP %ld api_base=%s", http_code, base->api_base);
+        provider_http_resp_free(resp);
         return AIRY_ERR_IO;
     }
 
