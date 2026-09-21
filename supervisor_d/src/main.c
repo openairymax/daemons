@@ -19,13 +19,13 @@
 
 #include "supervisor_d.h"
 
+#include <signal.h> /* sig_atomic_t（标准头，Windows 亦提供） */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #ifndef _WIN32
 #include <errno.h>
-#include <signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
