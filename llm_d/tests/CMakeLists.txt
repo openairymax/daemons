@@ -80,6 +80,12 @@ set(LLM_COMMON_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers
+    # B16-S5 预置：五域归位后的头搜索路径（与主目标 airy_llm_service 同步）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/bootstrap
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/adapter
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting
     ${COMMONS_DIR}
     ${COMMONS_DIR}/platform/include
     ${COMMONS_DIR}/utils/error
