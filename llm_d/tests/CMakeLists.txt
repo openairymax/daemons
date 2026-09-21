@@ -19,7 +19,7 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/config/service_config_yaml.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/config/service_config_yaml_models.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/config/service_config_yaml_providers.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_config_yaml_pricing.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/config/service_config_yaml_pricing.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_providers.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_request.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/service_metrics.c
