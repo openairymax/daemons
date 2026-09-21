@@ -8,7 +8,12 @@
  * OpenAI 兼容流式协议（openai/deepseek/local）以 {index, id?} →
  * {index, function.{name?, arguments}} 分片下发 tool_calls 增量；本模块
  * 按 index 装配槽位，流末装配完整数组并发 RS 'T' 控制帧。适配层禁止
- * 自持副本，只在 on_chunk 内调用 provider_tool_delta 消费 delta。
+ * 自持副本：行协议适配在 on_chunk 内调用 provider_tool_delta 消费 delta，
+ * 事件协议适配（anthropic）在其 map_tool_delta 内调用 provider_tool_begin /
+ * provider_tool_args_add 两个槽位原语（B16-S3.2）。
+ *
+ * 流末一律由 provider_tool_json 产出 OpenAI 形状数组（{id, type, function}
+ * 三件套），厂商差异不泄漏到交付形状。
  *
  * c6 扩展：openai 家族的流式累积器（content/reasoning 增量、id/model/
  * created 抽取、finish_reason 归一、usage 累计）与流末响应装配同为三份
@@ -47,6 +52,16 @@ typedef struct {
     provider_tool_slot_t slot[PROVIDER_TOOL_MAX];
     size_t count;
 } provider_tool_acc_t;
+
+/* 槽位装配原语（厂商无关，B16-S3.2）：各厂商 map_tool_delta 只做本家事件到
+ * 本接口的 shape 抽取，槽位定位、首值锁定与参数拼接全在此处唯一实现。
+ * 按 index 定位（不存在则新建）；id/name 只在槽位首次非空时写入，可传 NULL。
+ * 返回 NULL 表示槽位已满——调用方应停止向该 index 追加。 */
+provider_tool_slot_t *provider_tool_begin(provider_tool_acc_t *acc, int index, const char *id,
+                                          const char *name);
+
+/* 向 index 槽追加一段 arguments 分片（槽位不存在时先新建）。 */
+void provider_tool_args_add(provider_tool_acc_t *acc, int index, const char *frag);
 
 /* 消费 choices[].delta：抽取 tool_calls 增量分片并按 index 装配。 */
 void provider_tool_delta(provider_tool_acc_t *acc, cJSON *delta);
