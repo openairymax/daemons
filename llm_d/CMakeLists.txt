@@ -79,7 +79,7 @@ set(LLM_SERVICE_SOURCES
     src/router/quality_first_router.c
     src/adapter/adapter.c
     # 注入 atoms 侧 LLM ops 抽象表（服务实现在本库，表存储在 airy_llm_ops）
-    src/daemon_llm_ops_bootstrap.c
+    src/bootstrap/daemon_llm_ops_bootstrap.c
 )
 
 add_library(airy_llm_service STATIC ${LLM_SERVICE_SOURCES})
