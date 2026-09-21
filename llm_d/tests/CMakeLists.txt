@@ -12,7 +12,7 @@ set(COREKERN_INCLUDE_DIR ${ATOMIC_DIR}/corekern/include)
 
 set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_config.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/config/service_config.c
     # service_config.c 域拆分（2026-08-27）：核心 + 5 个职责模块，须与主目标同步；
     # yaml 四件整体受 #ifdef HAVE_YAML 保护，非 YAML 构建下为空翻译单元
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_config_json.c
@@ -22,11 +22,11 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_config_yaml_pricing.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_providers.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_request.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_metrics.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/cache.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/token_counter.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/service_metrics.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/cache.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/token_counter.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/response.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/cost_tracker.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/cost_tracker.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/registry.c
     # provider.c / openai.c 域拆分（2026-08-27）：与主目标 LLM_SERVICE_SOURCES 同步
     # B16-S3：providers 域内重排 core/（机制）+ adapters/（适配）
