@@ -196,6 +196,96 @@ int sched_service_update_agent_status(sched_service_t *service, const agent_info
     return AIRY_ERR_NOT_FOUND;
 }
 
+/* Per-strategy scoring: pure functions of (service, task, agent, candidate
+ * index); higher score wins. The strategy dimension is declarative — adding
+ * a strategy means one table row plus one function below, and the dispatch
+ * loop never changes. Unknown enum values fall back to sched_score_default,
+ * matching the previous switch default. */
+typedef float (*sched_score_fn)(const sched_service_t *service,
+                                const sched_task_info_t *task_info,
+                                const agent_info_t *agent, size_t candidate_index);
+
+static float sched_score_weighted(const sched_service_t *service,
+                                  const sched_task_info_t *task_info,
+                                  const agent_info_t *agent, size_t candidate_index)
+{
+    (void)service;
+    (void)task_info;
+    (void)candidate_index;
+    return agent->weight * agent->success_rate * (1.0f - agent->load_factor);
+}
+
+/* "rr" = round robin (SCHED_RR convention), kept within the 20-byte
+ * function-name budget enforced by the R4 gate. */
+static float sched_score_rr(const sched_service_t *service,
+                            const sched_task_info_t *task_info,
+                            const agent_info_t *agent, size_t candidate_index)
+{
+    (void)task_info;
+    (void)agent;
+    if (service->agent_count == 0)
+        return 0.0f;
+    size_t slot = service->total_tasks_scheduled % service->agent_count;
+    return slot == candidate_index ? 100.0f : 0.0f;
+}
+
+static float sched_score_ml_based(const sched_service_t *service,
+                                  const sched_task_info_t *task_info,
+                                  const agent_info_t *agent, size_t candidate_index)
+{
+    (void)service;
+    (void)task_info;
+    (void)candidate_index;
+    return agent->success_rate * (1.0f - agent->load_factor);
+}
+
+static float sched_score_priority(const sched_service_t *service,
+                                  const sched_task_info_t *task_info,
+                                  const agent_info_t *agent, size_t candidate_index)
+{
+    (void)service;
+    /* Priority strategy: amplify the selection score by task priority on top
+     * of weighting (the more urgent the task, the more it prefers healthy,
+     * low-load agents). */
+    float pw = 1.0f;
+    if (task_info->priority >= TASK_PRIORITY_URGENT)
+        pw = 4.0f;
+    else if (task_info->priority >= TASK_PRIORITY_HIGH)
+        pw = 2.0f;
+    else if (task_info->priority >= TASK_PRIORITY_NORMAL)
+        pw = 1.5f;
+    return (agent->weight * agent->success_rate * (1.0f - agent->load_factor)) * pw;
+}
+
+static float sched_score_default(const sched_service_t *service,
+                                 const sched_task_info_t *task_info,
+                                 const agent_info_t *agent, size_t candidate_index)
+{
+    (void)service;
+    (void)task_info;
+    (void)candidate_index;
+    return agent->weight;
+}
+
+static const struct {
+    sched_strategy_t strategy;
+    sched_score_fn score;
+} SCHED_STRATEGY_TABLE[] = {
+    {SCHED_STRATEGY_WEIGHTED, sched_score_weighted},
+    {SCHED_STRATEGY_ROUND_ROBIN, sched_score_rr},
+    {SCHED_STRATEGY_ML_BASED, sched_score_ml_based},
+    {SCHED_STRATEGY_PRIORITY_BASED, sched_score_priority},
+};
+
+static sched_score_fn sched_strategy_score(sched_strategy_t strategy)
+{
+    for (size_t k = 0; k < sizeof(SCHED_STRATEGY_TABLE) / sizeof(SCHED_STRATEGY_TABLE[0]); k++) {
+        if (SCHED_STRATEGY_TABLE[k].strategy == strategy)
+            return SCHED_STRATEGY_TABLE[k].score;
+    }
+    return sched_score_default;
+}
+
 int sched_service_schedule_task(sched_service_t *service, const sched_task_info_t *task_info,
                                 sched_result_t **result)
 {
@@ -218,51 +308,15 @@ int sched_service_schedule_task(sched_service_t *service, const sched_task_info_
     agent_info_t *best_agent = NULL;
     float best_score = -1.0f;
 
+    /* The strategy is fixed for the whole scan: resolve the scoring function
+     * once, outside the candidate loop. */
+    sched_score_fn score_fn = sched_strategy_score(service->config.strategy);
+
     for (size_t i = 0; i < service->agent_count; i++) {
         if (!service->agents[i]->is_available)
             continue;
 
-        float score = 0.0f;
-        switch (service->config.strategy) {
-        case SCHED_STRATEGY_WEIGHTED:
-            score = service->agents[i]->weight * service->agents[i]->success_rate *
-                    (1.0f - service->agents[i]->load_factor);
-            break;
-        case SCHED_STRATEGY_ROUND_ROBIN:
-            if (service->agent_count == 0) {
-                score = 0.0f;
-            } else {
-                score = (float)(service->total_tasks_scheduled % service->agent_count);
-                if ((size_t)score == i)
-                    score = 100.0f;
-                else
-                    score = 0.0f;
-            }
-            break;
-        case SCHED_STRATEGY_ML_BASED:
-            score = service->agents[i]->success_rate * (1.0f - service->agents[i]->load_factor);
-            break;
-        case SCHED_STRATEGY_PRIORITY_BASED: {
-            /* Priority strategy: amplify the selection score by task priority
-             * on top of weighting (semantics aligned with priority_weight in
-             * strategies/priority_based.c: the more urgent the task, the more
-             * it prefers healthy, low-load agents). */
-            float pw = 1.0f;
-            if (task_info->priority >= TASK_PRIORITY_URGENT)
-                pw = 4.0f;
-            else if (task_info->priority >= TASK_PRIORITY_HIGH)
-                pw = 2.0f;
-            else if (task_info->priority >= TASK_PRIORITY_NORMAL)
-                pw = 1.5f;
-            score = (service->agents[i]->weight * service->agents[i]->success_rate *
-                     (1.0f - service->agents[i]->load_factor)) *
-                    pw;
-            break;
-        }
-        default:
-            score = service->agents[i]->weight;
-            break;
-        }
+        float score = score_fn(service, task_info, service->agents[i], i);
 
         if (score > best_score) {
             best_score = score;
