@@ -46,7 +46,6 @@ set(LLM_SERVICE_SOURCES
     src/rpc/service_providers.c
     src/rpc/service_request.c
     src/accounting/service_metrics.c
-    src/accounting/cache.c
     src/accounting/semantic_cache.c
     src/accounting/cost_tracker.c
     src/accounting/token_counter.c

@@ -22,7 +22,6 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_providers.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_request.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/service_metrics.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/cache.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/semantic_cache.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/token_counter.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/response.c
@@ -57,7 +56,6 @@ set(LLM_IMPL_SOURCES
 
 set(LLM_TEST_SOURCES
     test_service.c
-    test_cache.c
     test_token_counter.c
     test_response.c
     test_routing_e2e.c

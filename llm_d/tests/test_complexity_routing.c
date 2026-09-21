@@ -12,7 +12,7 @@
 #define _POSIX_C_SOURCE 199309L
 #endif
 
-#include "cache.h"
+#include "cache_common.h"
 #include "cost_tracker.h"
 #include "llm_service.h"
 #include "providers/core/registry.h"

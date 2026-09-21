@@ -8,7 +8,7 @@
  * 目标: 路由决策延迟 < 5ms
  */
 
-#include "cache.h"
+#include "cache_common.h"
 #include "llm_service.h"
 #include "providers/core/registry.h"
 
@@ -130,7 +130,7 @@ static void bench_cache_hit_latency(void)
 {
     printf("  [INT-18.2] Cache hit latency benchmark...\n");
 
-    llm_cache_t *cache = llm_cache_create(1000, 3600);
+    cache_t cache = cache_create_string_cache(1000, 3600);
     assert(cache != NULL);
 
     const char *test_key = "model:gpt-4o:hash_complex_key_12345";
@@ -138,21 +138,21 @@ static void bench_cache_hit_latency(void)
         "{\"id\":\"chatcmpl-123\",\"model\":\"gpt-4o\",\"choices\":[{\"message\":{\"content\":"
         "\"Benchmark response "
         "content\"}}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":50}}";
-    llm_cache_put(cache, test_key, test_value);
+    cache_put_string(cache, test_key, test_value);
 
     double *samples = (double *)malloc(BENCH_ITERATIONS * sizeof(double));
     assert(samples != NULL);
 
     for (int i = 0; i < 100; i++) {
         char *val = NULL;
-        llm_cache_get(cache, test_key, &val);
+        cache_get_string(cache, test_key, &val);
         free(val);
     }
 
     for (int i = 0; i < BENCH_ITERATIONS; i++) {
         double start = get_time_us();
         char *val = NULL;
-        llm_cache_get(cache, test_key, &val);
+        cache_get_string(cache, test_key, &val);
         double end = get_time_us();
         free(val);
         samples[i] = end - start;
@@ -170,7 +170,7 @@ static void bench_cache_hit_latency(void)
     }
 
     free(samples);
-    llm_cache_destroy(cache);
+    cache_destroy(cache);
     printf("    PASSED\n");
 }
 
@@ -178,7 +178,7 @@ static void bench_cache_miss_latency(void)
 {
     printf("  [INT-18.3] Cache miss latency benchmark...\n");
 
-    llm_cache_t *cache = llm_cache_create(1000, 3600);
+    cache_t cache = cache_create_string_cache(1000, 3600);
     assert(cache != NULL);
 
     double *samples = (double *)malloc(BENCH_ITERATIONS / 10 * sizeof(double));
@@ -191,7 +191,7 @@ static void bench_cache_miss_latency(void)
 
         double start = get_time_us();
         char *val = NULL;
-        llm_cache_get(cache, key, &val);
+        cache_get_string(cache, key, &val);
         double end = get_time_us();
         samples[i] = end - start;
     }
@@ -201,7 +201,7 @@ static void bench_cache_miss_latency(void)
     print_bench_result("Cache miss (hash lookup)", &result);
 
     free(samples);
-    llm_cache_destroy(cache);
+    cache_destroy(cache);
     printf("    PASSED\n");
 }
 
@@ -209,7 +209,7 @@ static void bench_full_routing_decision(void)
 {
     printf("  [INT-18.4] Full routing decision latency (cache + lookup)...\n");
 
-    llm_cache_t *cache = llm_cache_create(1000, 3600);
+    cache_t cache = cache_create_string_cache(1000, 3600);
     assert(cache != NULL);
 
     service_config_t cfg = {
@@ -231,10 +231,10 @@ static void bench_full_routing_decision(void)
     const char *model = "gpt-4o";
     const char *cache_key = "model:gpt-4o:hash_routing_bench";
 
-    llm_cache_put(cache, cache_key, "{\"cached\":true}");
+    cache_put_string(cache, cache_key, "{\"cached\":true}");
     for (int i = 0; i < 100; i++) {
         char *val = NULL;
-        if (llm_cache_get(cache, cache_key, &val) != 1) {
+        if (cache_get_string(cache, cache_key, &val) != 1) {
             provider_registry_find(reg, model);
         }
         free(val);
@@ -244,7 +244,7 @@ static void bench_full_routing_decision(void)
         double start = get_time_us();
 
         char *cached = NULL;
-        int cache_hit = llm_cache_get(cache, cache_key, &cached);
+        int cache_hit = cache_get_string(cache, cache_key, &cached);
 
         if (!cache_hit || !cached) {
 
@@ -269,7 +269,7 @@ static void bench_full_routing_decision(void)
 
     free(samples);
     provider_registry_destroy(reg);
-    llm_cache_destroy(cache);
+    cache_destroy(cache);
     printf("    PASSED\n");
 }
 

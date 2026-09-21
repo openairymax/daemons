@@ -12,7 +12,7 @@
 #define _POSIX_C_SOURCE 199309L
 #endif
 
-#include "cache.h"
+#include "cache_common.h"
 #include "cost_tracker.h"
 #include "llm_service.h"
 #include "providers/core/registry.h"
@@ -74,32 +74,32 @@ static void test_cache_hit_miss(void)
 {
     printf("  [INT-15.2] Cache hit/miss mechanism...\n");
 
-    llm_cache_t *cache = llm_cache_create(100, 3600);
+    cache_t cache = cache_create_string_cache(100, 3600);
     assert(cache != NULL);
 
     char *value = NULL;
-    int ret = llm_cache_get(cache, "model:gpt-4o:hash123", &value);
+    int ret = cache_get_string(cache, "model:gpt-4o:hash123", &value);
     assert(ret != 1 || value == NULL);
     (void)ret;
     printf("    Cache miss: OK\n");
 
     const char *response_json = "{\"id\":\"chatcmpl-123\",\"model\":\"gpt-4o\",\"choices\":[{"
                                 "\"message\":{\"content\":\"Hello\"}}]}";
-    llm_cache_put(cache, "model:gpt-4o:hash123", response_json);
+    cache_put_string(cache, "model:gpt-4o:hash123", response_json);
 
-    ret = llm_cache_get(cache, "model:gpt-4o:hash123", &value);
+    ret = cache_get_string(cache, "model:gpt-4o:hash123", &value);
     assert(ret == 1);
     assert(value != NULL);
     assert(strcmp(value, response_json) == 0);
     free(value);
     printf("    Cache hit: OK (same response)\n");
 
-    llm_cache_t *ttl_cache = llm_cache_create(10, 1);
+    cache_t ttl_cache = cache_create_string_cache(10, 1);
     assert(ttl_cache != NULL);
 
-    llm_cache_put(ttl_cache, "ttl_key", "ttl_value");
+    cache_put_string(ttl_cache, "ttl_key", "ttl_value");
     value = NULL;
-    ret = llm_cache_get(ttl_cache, "ttl_key", &value);
+    ret = cache_get_string(ttl_cache, "ttl_key", &value);
     assert(ret == 1);
     free(value);
 
@@ -113,12 +113,12 @@ static void test_cache_hit_miss(void)
 #endif
 
     value = NULL;
-    ret = llm_cache_get(ttl_cache, "ttl_key", &value);
+    ret = cache_get_string(ttl_cache, "ttl_key", &value);
     assert(ret != 1 || value == NULL);
     printf("    TTL expiry: OK (cache miss after %ds)\n", 1);
 
-    llm_cache_destroy(ttl_cache);
-    llm_cache_destroy(cache);
+    cache_destroy(ttl_cache);
+    cache_destroy(cache);
     TEST_PASS();
     printf("    PASSED\n");
 }

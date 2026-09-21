@@ -341,7 +341,7 @@ llm_service_t *llm_service_create(const char *config_path)
         model_providers = NULL;
     }
 
-    svc->cache = llm_cache_create(base_cfg.llm_cache_capacity, base_cfg.llm_cache_ttl_sec);
+    svc->cache = cache_create_string_cache(base_cfg.llm_cache_capacity, base_cfg.llm_cache_ttl_sec);
     if (!svc->cache) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL cache, STACK: llm_service_create");
         provider_registry_destroy(svc->registry);
@@ -353,7 +353,7 @@ llm_service_t *llm_service_create(const char *config_path)
     svc->cost = cost_tracker_create((const pricing_rule_t *)svc->rules, (int)svc->rule_count);
     if (!svc->cost) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL cost_tracker, STACK: llm_service_create");
-        llm_cache_destroy(svc->cache);
+        cache_destroy(svc->cache);
         provider_registry_destroy(svc->registry);
         airy_mtx_destroy(&svc->lock);
         AIRY_FREE(svc);
@@ -373,7 +373,7 @@ llm_service_t *llm_service_create(const char *config_path)
     if (!svc->token_counter) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL token_counter, STACK: llm_service_create");
         cost_tracker_destroy(svc->cost);
-        llm_cache_destroy(svc->cache);
+        cache_destroy(svc->cache);
         provider_registry_destroy(svc->registry);
         airy_mtx_destroy(&svc->lock);
         AIRY_FREE(svc);
@@ -409,7 +409,7 @@ void llm_service_destroy(llm_service_t *svc)
     }
 
     if (svc->cache) {
-        llm_cache_destroy(svc->cache);
+        cache_destroy(svc->cache);
         svc->cache = NULL;
     }
 
