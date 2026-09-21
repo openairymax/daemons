@@ -78,7 +78,7 @@ static tool_result_t *get_cached_result(tool_service_t *svc, tool_metadata_t *me
     }
 
     char *cached = NULL;
-    if (tool_cache_get(svc->cache, cache_key, &cached) == 1 && cached) {
+    if (cache_get_string(svc->cache, cache_key, &cached) == 1 && cached) {
         tool_result_t *res = tool_result_from_json(cached);
         AIRY_FREE(cached);
         cached = NULL;
@@ -117,7 +117,7 @@ static void cache_tool_result(tool_service_t *svc, tool_metadata_t *meta, const 
 
     char *res_json = tool_result_to_json(res);
     if (res_json) {
-        tool_cache_put(svc->cache, cache_key, res_json);
+        cache_put_string(svc->cache, cache_key, res_json);
         AIRY_FREE(res_json);
         res_json = NULL;
     }
