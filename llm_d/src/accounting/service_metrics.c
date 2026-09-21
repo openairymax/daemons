@@ -130,11 +130,11 @@ int llm_service_stats(llm_service_t *svc, char **out_json)
         cJSON_AddItemToObject(root, "cost", cost_json);
     }
 
-    cJSON_AddNumberToObject(root, "llm_cache_size", llm_cache_size(svc->cache));
-    cJSON_AddNumberToObject(root, "llm_cache_capacity", llm_cache_capacity(svc->cache));
+    cJSON_AddNumberToObject(root, "llm_cache_size", cache_get_size(svc->cache));
+    cJSON_AddNumberToObject(root, "llm_cache_capacity", cache_get_capacity(svc->cache));
 
-    llm_cache_stats_t cache_stats;
-    llm_cache_stats(svc->cache, &cache_stats);
+    cache_stats_t cache_stats;
+    cache_get_stats(svc->cache, &cache_stats);
     cJSON_AddNumberToObject(root, "llm_cache_hits", (double)cache_stats.hits);
     cJSON_AddNumberToObject(root, "llm_cache_misses", (double)cache_stats.misses);
     cJSON_AddNumberToObject(root, "llm_cache_evictions", (double)cache_stats.evictions);
