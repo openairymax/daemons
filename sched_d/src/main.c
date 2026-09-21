@@ -31,7 +31,6 @@
 #include "roadmap_rpc.h"
 #include "scheduler_service.h"
 #include "sched_daemon_internal.h"
-#include "strategy_interface.h"
 #include "svc_logger.h"
 #include "thread_pool.h"
 
