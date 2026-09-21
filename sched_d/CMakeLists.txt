@@ -39,10 +39,6 @@ set(SCHED_D_SOURCES
     src/sched_rpc_handlers.c
     src/sched_dispatch.c
     src/sched_svc_adapter.c
-    src/strategies/weighted.c
-    src/strategies/round_robin.c
-    src/strategies/ml_based.c
-    src/strategies/priority_based.c
 )
 
 # 创建可执行文件
