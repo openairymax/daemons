@@ -123,8 +123,7 @@ typedef struct {
 void svc_yaml_event_loop(yaml_parser_t *parser, svc_yaml_state_t *st, int *done);
 void svc_yaml_expand_llm(svc_yaml_state_t *st, const char *config_path);
 
-/* service_config_yaml.c / service_config_yaml_providers.c */
-int svc_config_load_yaml(const char *config_path, service_config_t *cfg);
+/* service_config_yaml_providers.c */
 int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_providers,
                                size_t *out_count);
 
