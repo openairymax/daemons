@@ -28,9 +28,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef HAVE_YAML
-#include <yaml.h>
-#endif
 
 #include "config/internal.h"
 #include "rpc/internal.h"
@@ -321,9 +318,10 @@ llm_service_t *llm_service_create(const char *config_path)
             AIRY_FREE(yaml_rules);
         }
 #else
-        /* libyaml 缺失（HAVE_YAML 未定义）：实现函数不存在，调用必须
-         * 一并关闭，否则链接失败（未定义引用 load_pricing_rules_from_yaml） */
-        SVC_LOG_WARN("YAML pricing config '%s' requested but libyaml unavailable", config_path);
+        /* HAVE_YAML 未定义：YAML 配置装载面未编译进本目标
+         * （load_pricing_rules_from_yaml 不存在），调用必须一并关闭，
+         * 否则链接失败（未定义引用 load_pricing_rules_from_yaml） */
+        SVC_LOG_WARN("YAML pricing config '%s' requested but YAML support unavailable", config_path);
 #endif
     }
 
