@@ -4,11 +4,11 @@
 /**
  * @file service_config.c
  * @brief LLM service config core: extension dispatch, JSON pricing-rule
- *        parsing/release and the service-config / model-config loaders.
+ *        parsing/release and the model-config loader.
  *
  * 2026-08-27 域拆分收尾（原主文件 → 仅保留分发与 JSON 定价核心）：
  *   - service_config_json.c           JSON 模型配置加载
- *   - service_config_yaml.c           YAML 基础设施 + global 段加载
+ *   - service_config_yaml.c           YAML 基础设施（kv map）
  *   - service_config_yaml_models.c    models 状态机 + 简化 llm 段展开
  *   - service_config_yaml_providers.c provider 聚合导出
  *   - service_config_yaml_pricing.c   YAML 定价规则提取
@@ -109,107 +109,6 @@ void free_pricing_rules(pricing_rule_t *rules, int count)
         AIRY_FREE((void *)rules[i].model_pattern);
     }
     AIRY_FREE(rules);
-}
-
-/**
- * @brief Load the service config
- * @param config_path Config file path
- * @param cfg         Output config
- * @return 0 on success, non-zero on failure
- */
-int svc_config_load(const char *config_path, service_config_t *cfg)
-{
-    if (!cfg || !config_path) {
-        SVC_LOG_ERROR("C-L02: SVC: CONFIG-FAIL NULL parameter, STACK: svc_config_load");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    if (ends_with(config_path, ".yaml") || ends_with(config_path, ".yml")) {
-#ifdef HAVE_YAML
-        return svc_config_load_yaml(config_path, cfg);
-#else
-        SVC_LOG_WARN("C-L02: SVC: CONFIG-WARN YAML not compiled, STACK: svc_config_load");
-        __builtin_memset(cfg, 0, sizeof(service_config_t));
-        cfg->llm_cache_capacity = AIRY_DEFAULT_CACHE_CAPACITY;
-        cfg->llm_cache_ttl_sec = AIRY_DEFAULT_CACHE_TTL_SEC;
-        cfg->max_retries = AIRY_DEFAULT_MAX_RETRIES;
-        cfg->timeout_ms = AIRY_DEFAULT_TIMEOUT_MS;
-        return 0;
-#endif
-    }
-
-    __builtin_memset(cfg, 0, sizeof(service_config_t));
-
-    cfg->llm_cache_capacity = AIRY_DEFAULT_CACHE_CAPACITY;
-    cfg->llm_cache_ttl_sec = AIRY_DEFAULT_CACHE_TTL_SEC;
-    cfg->max_retries = AIRY_DEFAULT_MAX_RETRIES;
-    cfg->timeout_ms = AIRY_DEFAULT_TIMEOUT_MS;
-
-    FILE *f = fopen(config_path, "rb");
-    if (!f) {
-        SVC_LOG_WARN("C-L02: SVC: CONFIG-WARN cannot open file, STACK: svc_config_load");
-        return 0;
-    }
-
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-
-    char *content = (char *)AIRY_MALLOC((size_t)len + 1);
-    if (!content) {
-        SVC_LOG_ERROR("C-L02: SVC: CONFIG-FAIL malloc, STACK: svc_config_load");
-        fclose(f);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
-    size_t read_len = fread(content, 1, (size_t)len, f);
-    if (read_len != (size_t)len) {
-        SVC_LOG_ERROR("C-L02: SVC: CONFIG-FAIL fread, STACK: svc_config_load");
-        AIRY_FREE(content);
-        fclose(f);
-        return AIRY_ERR_IO;
-    }
-    content[read_len] = '\0';
-    fclose(f);
-
-    CJSON_PARSE_GUARD(root, content, {
-        AIRY_FREE(content);
-        SVC_LOG_WARN("C-L02: SVC: CONFIG-WARN parse failed, STACK: svc_config_load");
-        return 0;
-    });
-    AIRY_FREE(content);
-
-    cJSON *item;
-
-    item = cJSON_GetObjectItem(root, "llm_cache_capacity");
-    if (item && cJSON_IsNumber(item)) {
-        cfg->llm_cache_capacity = item->valueint;
-    }
-
-    item = cJSON_GetObjectItem(root, "llm_cache_ttl_sec");
-    if (item && cJSON_IsNumber(item)) {
-        cfg->llm_cache_ttl_sec = item->valueint;
-    }
-
-    item = cJSON_GetObjectItem(root, "max_retries");
-    if (item && cJSON_IsNumber(item)) {
-        cfg->max_retries = item->valueint;
-    }
-
-    item = cJSON_GetObjectItem(root, "timeout_ms");
-    if (item && cJSON_IsNumber(item)) {
-        cfg->timeout_ms = item->valueint;
-    }
-
-    item = cJSON_GetObjectItem(root, "token_encoding");
-    if (item && cJSON_IsString(item)) {
-        size_t enc_len = strlen(item->valuestring);
-        if (enc_len < sizeof(cfg->token_encoding)) {
-            __builtin_memcpy((char *)cfg->token_encoding, item->valuestring, enc_len + 1);
-        }
-    }
-
-    return AIRY_OK;
 }
 
 int svc_load_model_config(const char *config_path, provider_config_t **out_providers,
