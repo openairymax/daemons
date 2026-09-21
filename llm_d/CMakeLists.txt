@@ -189,7 +189,7 @@ endif()
 # daemon 四件共享 DAEMON_DECLARE_COMMON 宏实例化产生的 static 符号，仅随
 # llm_d 可执行目标构建，不入 airy_llm_service 静态库（main.c 同理）。
 add_executable(llm_d
-    src/main.c
+    src/bootstrap/main.c
     src/llm_daemon_request.c
     src/llm_daemon_methods.c
     src/config/llm_daemon_config.c
