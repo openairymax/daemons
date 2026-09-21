@@ -62,6 +62,8 @@ set(LLM_SERVICE_SOURCES
     src/providers/core/retry.c
     # B16-S3 c5：流式 tool_calls 装配 SSoT（三份同构收敛）
     src/providers/core/toolstream.c
+    # B16-S3.3：通用 completion driver——适配层四槽入口的唯一编排实现
+    src/providers/core/adapter.c
     # B16-S3 c6：openai 三件合一（openai.c + openai_stream.c + openai_internal.h → openai.c）
     src/providers/adapters/openai.c
     src/providers/core/rate_limit.c
