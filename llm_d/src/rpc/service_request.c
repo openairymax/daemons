@@ -120,7 +120,7 @@ static int cache_lookup(llm_service_t *svc, const char *key, const char *text, c
     }
 
     char *cached_json = NULL;
-    if (llm_cache_get(svc->cache, key, &cached_json) == 1 && cached_json) {
+    if (cache_get_string(svc->cache, key, &cached_json) == 1 && cached_json) {
         llm_response_t *local_resp = response_from_json(cached_json);
         if (local_resp) {
             AIRY_FREE(cached_json);
@@ -140,7 +140,7 @@ static int cache_lookup(llm_service_t *svc, const char *key, const char *text, c
 
     llm_response_t *sem_resp = response_from_json(sem_json);
     if (sem_resp) {
-        llm_cache_put(svc->cache, key, sem_json);
+        cache_put_string(svc->cache, key, sem_json);
         *out_response = sem_resp;
         SVC_LOG_DEBUG("L1 semantic cache hit (promoted to L0)");
     }
@@ -271,7 +271,7 @@ static void cache_store(llm_service_t *svc, const char *key, const char *text, c
         return;
     }
 
-    llm_cache_put(svc->cache, key, resp_json);
+    cache_put_string(svc->cache, key, resp_json);
     llm_semantic_cache_save(text, model, resp_json);
     AIRY_FREE(resp_json);
 }

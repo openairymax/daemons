@@ -9,7 +9,7 @@
 #ifndef AIRY_RT_LLM_SERVICE_INTERNAL_H
 #define AIRY_RT_LLM_SERVICE_INTERNAL_H
 
-#include "cache.h"
+#include "cache_common.h"
 #include "cost_tracker.h"
 #include "llm_service.h"
 #include "daemon_platform_ext.h"
@@ -18,7 +18,7 @@
 
 struct llm_service {
     provider_registry_t *registry;
-    llm_cache_t *cache;
+    cache_t cache;
     cost_tracker_t *cost;
     token_counter_t *token_counter;
     airy_mtx_t lock;
