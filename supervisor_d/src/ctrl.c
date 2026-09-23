@@ -67,9 +67,8 @@ int sup_ctrl_listen(const sup_ctx_t *ctx)
     const char *colon = strrchr(ctx->ctrl_ep, ':');
     if (!colon || colon == ctx->ctrl_ep || (size_t)(colon - ctx->ctrl_ep) >= sizeof(host))
         return -1;
-    size_t hl = (size_t)(colon - ctx->ctrl_ep);
-    memcpy(host, ctx->ctrl_ep, hl);
-    host[hl] = '\0';
+    /* %.*s 截取 host 段：边界与终止由 snprintf 保证（BAN-154） */
+    snprintf(host, sizeof(host), "%.*s", (int)(colon - ctx->ctrl_ep), ctx->ctrl_ep);
     snprintf(port, sizeof(port), "%s", colon + 1);
 
     struct addrinfo hints, *res = NULL;
@@ -248,9 +247,9 @@ void sup_ctrl_serve(sup_ctx_t *ctx, int listen_fd, int timeout_ms)
             off = 0; /* 超长请求丢弃 */
             break;
         }
-        memcpy(req + off, chunk, (size_t)n);
+        /* %.*s 追加：容量与终止由 snprintf 保证（BAN-154） */
+        snprintf(req + off, sizeof(req) - off, "%.*s", (int)n, chunk);
         off += (size_t)n;
-        req[off] = '\0';
         if (memchr(req, '\n', off) || memchr(req, '}', off))
             break; /* 单行协议：读到行尾即处理 */
     }
