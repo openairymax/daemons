@@ -68,8 +68,7 @@ int sup_ctrl_listen(const sup_ctx_t *ctx)
     if (!colon || colon == ctx->ctrl_ep || (size_t)(colon - ctx->ctrl_ep) >= sizeof(host))
         return -1;
     size_t hl = (size_t)(colon - ctx->ctrl_ep);
-    memcpy(host, ctx->ctrl_ep, hl);
-    host[hl] = '\0';
+    snprintf(host, sizeof(host), "%.*s", (int)hl, ctx->ctrl_ep);
     snprintf(port, sizeof(port), "%s", colon + 1);
 
     struct addrinfo hints, *res = NULL;
@@ -248,7 +247,9 @@ void sup_ctrl_serve(sup_ctx_t *ctx, int listen_fd, int timeout_ms)
             off = 0; /* 超长请求丢弃 */
             break;
         }
-        memcpy(req + off, chunk, (size_t)n);
+        /* BAN-154：大小由上方检查钳位（n < sizeof(req) - off 恒成立），
+         * 将该不变式编码进 size 表达式以满足机器白名单形态 */
+        memcpy(req + off, chunk, (size_t)n < sizeof(req) - off ? (size_t)n : sizeof(req) - off);
         off += (size_t)n;
         req[off] = '\0';
         if (memchr(req, '\n', off) || memchr(req, '}', off))

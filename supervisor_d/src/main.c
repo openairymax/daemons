@@ -145,8 +145,7 @@ static int client_run(const sup_ctx_t *ctx, const char *req)
         (size_t)(colon - ctx->ctrl_ep) >= sizeof(host))
         return -1;
     size_t hl = (size_t)(colon - ctx->ctrl_ep);
-    memcpy(host, ctx->ctrl_ep, hl);
-    host[hl] = '\0';
+    snprintf(host, sizeof(host), "%.*s", (int)hl, ctx->ctrl_ep);
     snprintf(port, sizeof(port), "%s", colon + 1);
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
