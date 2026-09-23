@@ -85,9 +85,8 @@ static int probe_tcp(const char *ep)
     const char *colon = strrchr(ep, ':');
     if (!colon || colon == ep || (size_t)(colon - ep) >= sizeof(host))
         return -1;
-    size_t hl = (size_t)(colon - ep);
-    memcpy(host, ep, hl);
-    host[hl] = '\0';
+    /* %.*s 截取 host 段：边界与终止由 snprintf 保证（BAN-154） */
+    snprintf(host, sizeof(host), "%.*s", (int)(colon - ep), ep);
     snprintf(port, sizeof(port), "%s", colon + 1);
 
     struct addrinfo hints, *res = NULL;

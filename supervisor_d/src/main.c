@@ -144,9 +144,8 @@ static int client_run(const sup_ctx_t *ctx, const char *req)
     if (!colon || colon == ctx->ctrl_ep ||
         (size_t)(colon - ctx->ctrl_ep) >= sizeof(host))
         return -1;
-    size_t hl = (size_t)(colon - ctx->ctrl_ep);
-    memcpy(host, ctx->ctrl_ep, hl);
-    host[hl] = '\0';
+    /* %.*s 截取 host 段：边界与终止由 snprintf 保证（BAN-154） */
+    snprintf(host, sizeof(host), "%.*s", (int)(colon - ctx->ctrl_ep), ctx->ctrl_ep);
     snprintf(port, sizeof(port), "%s", colon + 1);
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
