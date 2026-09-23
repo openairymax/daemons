@@ -21,6 +21,7 @@
 #include "error.h"
 #include "executor.h"
 #include "executor_pool.h"
+#include "platform_misc.h"
 #include "platform_process.h"
 #include "svc_logger.h"
 #include "tool_interactive_approval.h"
@@ -345,22 +346,23 @@ int executor_pool_run(executor_pool_t *p, const tool_metadata_t *meta, const cha
     p->count++;
     airy_cond_signal(&p->work_cond);
 
-    uint64_t waited = 0;
+    /* 预算按单调钟实测：cond_timedwait 允许超时过睡（POSIX 语义，
+     * macOS 定时器合并 + CI 负载下 100ms 切片可实睡 135ms+），按切片
+     * 值累加会系统性低估真实流逝时间，预算晚于工具自然完成才生效
+     * （取消永不触发）。切片只作唤醒粒度，deadline 以 airy_time_ms
+     * 兜底判定。 */
+    uint64_t deadline = airy_time_ms() + budget;
     int canceled = 0;
     while (!job->done) {
-        uint64_t remain = (budget > waited) ? (budget - waited) : 0;
-        uint32_t slice = (remain > WAIT_SLICE_MS) ? WAIT_SLICE_MS : (uint32_t)remain;
-        if (slice == 0) {
+        uint64_t now = airy_time_ms();
+        if (now >= deadline) {
             job->detached = 1;
             canceled = 1;
             break;
         }
+        uint64_t remain = deadline - now;
+        uint32_t slice = (remain > WAIT_SLICE_MS) ? WAIT_SLICE_MS : (uint32_t)remain;
         airy_cond_timedwait(&p->done_cond, &p->lock, slice);
-        waited += slice;
-        if (waited >= budget && !job->done) {
-            job->detached = 1;
-            canceled = 1;
-        }
     }
 
     if (canceled) {
