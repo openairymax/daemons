@@ -80,8 +80,7 @@ static void ns_of(const char *name, char *out, size_t sz)
         n -= 2;
     if (n >= sz)
         n = sz - 1;
-    memcpy(out, name, n);
-    out[n] = '\0';
+    snprintf(out, sz, "%.*s", (int)n, name);
 }
 
 static void resolve_ep(sup_ctx_t *ctx, sup_proc_t *p)
