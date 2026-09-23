@@ -86,8 +86,7 @@ static int probe_tcp(const char *ep)
     if (!colon || colon == ep || (size_t)(colon - ep) >= sizeof(host))
         return -1;
     size_t hl = (size_t)(colon - ep);
-    memcpy(host, ep, hl);
-    host[hl] = '\0';
+    snprintf(host, sizeof(host), "%.*s", (int)hl, ep);
     snprintf(port, sizeof(port), "%s", colon + 1);
 
     struct addrinfo hints, *res = NULL;
