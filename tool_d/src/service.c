@@ -26,7 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-tool_service_t *tool_service_create(const char *config_path __attribute__((unused)))
+tool_service_t *tool_service_create(const char *config_path)
 {
 
     tool_service_t *svc = (tool_service_t *)AIRY_CALLOC(1, sizeof(tool_service_t));

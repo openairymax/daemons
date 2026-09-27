@@ -56,12 +56,14 @@ IPC 总线与跨进程服务发现、认证与授权、事件驱动主循环、�
 
 ### 兼容再导出头
 
-`include/` 下共 40 个头文件，其中 **21 个是再导出兼容头**——本体只有一行
+`include/` 下共 35 个头文件，其中 **17 个是再导出兼容头**——本体只有一行
 `#include "…/commons/…"`，指向 `commons` 仓内的权威版本（例如 `svc_common.h`、
-`method_dispatcher.h`、`jsonrpc_helpers.h`、`param_validator.h`、`circuit_breaker.h`、
-`thread_pool.h`、`airy_event_loop.h`、`unified_metrics.h`、`alert_manager.h`、
-`api_recovery.h`、`log_sanitizer.h`、`service_discovery.h`、`error.h`）。保留它们的目的是
-让 daemon 源码无需改动包含路径。其余 19 个是本模块自有的框架/桥接头（`daemon_main.h`、
+`method_dispatcher.h`、`param_validator.h`、`thread_pool.h`、`airy_event_loop.h`、
+`unified_metrics.h`、`api_recovery.h`、`log_sanitizer.h`）。保留它们的目的是
+让 daemon 源码无需改动包含路径。（原 `jsonrpc_helpers.h`、`alert_manager.h`、
+`circuit_breaker.h`、`service_discovery.h`、`error.h` 兼容头已删除：svc_common 的
+PUBLIC include 路径以 commons 权威目录优先，裸引直接解析权威版本，兼容头已无必要。）
+其余 18 个是本模块自有的框架/桥接头（`daemon_main.h`、
 `daemon_event_driver.h`、`daemon_security.h`、`svc_auth.h`、`svc_config.h`、
 `platform.h`、`hall_writer.h`、`config_manager.h` 等），仅在源码树内消费。
 

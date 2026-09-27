@@ -20,7 +20,7 @@
 
 #include "daemon_l1_server.h"
 
-#include "ipc.h"
+#include "kern_ipc.h"
 
 #include <stdio.h>
 #include <stdlib.h>

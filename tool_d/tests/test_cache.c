@@ -57,7 +57,7 @@ static void test_cache_key_null_inputs(void)
 {
     printf("  test_cache_key_null_inputs...\n");
 
-    char *key __attribute__((unused)) = tool_cache_key(NULL, "params", NULL);
+    char *key = tool_cache_key(NULL, "params", NULL);
     assert(key == NULL);
 
     key = tool_cache_key("tool_id", NULL, NULL);

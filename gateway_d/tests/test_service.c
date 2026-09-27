@@ -43,7 +43,7 @@ static void test_service_create(void)
     printf("Test: service create... ");
 
     gateway_service_t service = NULL;
-    airy_err_t err __attribute__((unused)) = gateway_service_create(&service, NULL);
+    airy_err_t err = gateway_service_create(&service, NULL);
     assert(err == AIRY_SUCCESS);
     assert(service != NULL);
     assert(gateway_service_get_state(service) == AIRY_SVC_STATE_CREATED);
@@ -68,7 +68,7 @@ static void test_service_lifecycle(void)
     config.stdio.enabled = false;
 
     gateway_service_t service = NULL;
-    airy_err_t err __attribute__((unused)) = gateway_service_create(&service, &config);
+    airy_err_t err = gateway_service_create(&service, &config);
     assert(err == AIRY_SUCCESS);
 
     err = gateway_service_init(service);
@@ -107,7 +107,7 @@ static void test_healthcheck(void)
     gateway_service_init(service);
     gateway_service_start(service);
 
-    airy_err_t err __attribute__((unused)) = gateway_service_healthcheck(service);
+    airy_err_t err = gateway_service_healthcheck(service);
     assert(err == AIRY_SUCCESS);
 
     gateway_service_stop(service, false);
@@ -135,7 +135,7 @@ static void test_stats(void)
     gateway_service_start(service);
 
     airy_svc_stats_t stats;
-    airy_err_t err __attribute__((unused)) = gateway_service_get_stats(service, &stats);
+    airy_err_t err = gateway_service_get_stats(service, &stats);
     assert(err == AIRY_SUCCESS);
 
     gateway_service_stop(service, false);

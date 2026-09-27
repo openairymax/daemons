@@ -297,7 +297,6 @@ static void test_send_receive_shm_roundtrip(void **state)
 
     uint64_t t0 = get_time_ns();
     int rc = channel_service_send(svc, ch_id, send_data, send_len);
-    uint64_t t1 __attribute__((unused)) = get_time_ns();
 
     assert_int_equal(rc, 0);
 

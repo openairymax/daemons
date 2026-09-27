@@ -178,8 +178,7 @@ airy_err_t gateway_service_load_config(gateway_service_config_t *config, const c
              * (gateway_service_get_default_config); freeing it directly is UB
              * (freeing non-heap memory). Only free when it has been replaced
              * by a heap-allocated value from the config file (not the default
-             * literal), consistent with the protective pattern in
-             * gateway_svc_adapter.c. */
+             * literal). */
             if (config->http.host && strcmp(config->http.host, "0.0.0.0") != 0)
                 AIRY_FREE((void *)config->http.host);
             config->http.host = AIRY_STRDUP(val);
@@ -406,7 +405,7 @@ airy_err_t gateway_service_set_handler(gateway_service_t service, gateway_servic
     return AIRY_SUCCESS;
 }
 
-airy_err_t gateway_service_stop(gateway_service_t service, bool force __attribute__((unused)))
+airy_err_t gateway_service_stop(gateway_service_t service, bool force)
 {
     if (!service)
         return AIRY_EINVAL;

@@ -42,9 +42,9 @@ typedef struct {
     provider_base_ctx_t base;
 } local_ctx_t;
 
-static provider_ctx_t *local_init(const char *name, const char *api_key __attribute__((unused)),
+static provider_ctx_t *local_init(const char *name, const char *api_key,
                                   const char *api_base,
-                                  const char *organization __attribute__((unused)),
+                                  const char *organization,
                                   double timeout_sec, int max_retries)
 {
 

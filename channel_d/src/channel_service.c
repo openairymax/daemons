@@ -85,7 +85,7 @@ static int create_socket_channel(channel_entry_t *entry, const char *endpoint)
     return 0;
 }
 
-static int create_shm_channel(channel_entry_t *entry, const char *endpoint __attribute__((unused)))
+static int create_shm_channel(channel_entry_t *entry, const char *endpoint)
 {
 
     char channel_id_copy[sizeof(entry->shm_name)];

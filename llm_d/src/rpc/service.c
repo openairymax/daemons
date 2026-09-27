@@ -32,29 +32,6 @@
 #include "config/internal.h"
 #include "rpc/internal.h"
 
-/**
- * @brief Safe string concatenation
- * @param dest      Destination string
- * @param dest_size Destination buffer size
- * @param src       Source string
- * @return End position after writing
- */
-static char *safe_strcat(char *dest, size_t dest_size, const char *src) __attribute__((unused));
-static char *safe_strcat(char *dest, size_t dest_size, const char *src)
-{
-    size_t dest_len = strlen(dest);
-    size_t remaining = dest_size - dest_len - 1;
-    size_t src_len = strlen(src);
-    size_t copy_len = (src_len < remaining) ? src_len : remaining;
-
-    if (copy_len > 0) {
-        __builtin_memcpy(dest + dest_len, src, copy_len);
-        dest[dest_len + copy_len] = '\0';
-    }
-
-    return dest + dest_len + copy_len;
-}
-
 /* 2.1.1.5 修复：计费/用量持久化文件路径（$AIRY_DATA_DIR/agentrt/
  * llm_usage.json）。llm_d 启动时加载历史累计，每次真实调用后兜底保存、
  * 退出时保存，daemon 重启后金额与 token 历史不清零。 */

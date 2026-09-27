@@ -63,8 +63,8 @@ CLI / SDK ──▶ gateway_d ──(tool.* / plugin.* JSON-RPC)──▶ tool_d
 
 - 服务与执行核心抽为静态库 `airy_tool_service`（`CMakeLists.txt` 中列出 24 个源文件，
   排除 `main.c` / `config.c` / `utils` / `tool_helpers.c`），守护进程与单元测试共用。
-- 守护进程在 GNU ld 下以 `-Wl,--whole-archive airy_coreloopthree -Wl,--no-whole-archive`
-  链接 atoms 引擎：其适配器经 IPC / LLM / tool ops 表回调（`daemon_ipc_ops_init` /
+- 守护进程直接链接 atoms 引擎 `airy_coreloopthree`：其适配器经 IPC / LLM / tool
+  ops 表回调（`daemon_ipc_ops_init` /
   `daemon_llm_ops_init` / `daemon_tool_ops_init`），atoms 不直接链接 daemons 符号；
   注入失败非致命，调用点自行降级。
 - `concurrent_clients = true`：客户端请求派发到线程池并发处理。否则阻塞在
@@ -246,7 +246,7 @@ ctest --test-dir ../daemons-build -R tool_d_ --output-on-failure
 
 | 依赖 | 用途 |
 |------|------|
-| [atoms](https://atomgit.com/openairymax/atoms) | `airy_coreloopthree`（`--whole-archive` 注入 ops 回调）、`airy_syscall`（沙箱 API）、`airy_cognition`、`airy_core` / `airy_memory` / `airy_atoms` / `airy_common` |
+| [atoms](https://atomgit.com/openairymax/atoms) | `airy_coreloopthree`（ops 回调注入端）、`airy_syscall`（沙箱 API）、`airy_cognition`、`airy_core` / `airy_memory` / `airy_atoms` / `airy_common` |
 | [cupolas](https://atomgit.com/openairymax/cupolas) | SafetyGuard 守卫裁决、审批链与审计 |
 | [maths_d](../maths_d/README.md) | `maths_eval` / `maths_stats` 的执行端 |
 | [`svc_common`](../common/README.md) | 守护进程样板、事件驱动、JSON-RPC dispatcher、`daemon_security*` ACL |

@@ -23,7 +23,7 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== Market 服务静态库 ====================
-# publisher/market_service 六域/market_svc_adapter 编译为独立静态库，
+# publisher/market_service 六域编译为独立静态库，
 # 供 market_d 可执行文件与集成测试共用。
 # 排除 main.c（含 main()）。
 set(MARKET_SERVICE_SOURCES
@@ -34,7 +34,6 @@ set(MARKET_SERVICE_SOURCES
     src/market_service_install.c   # 市场服务-安装/卸载域
     src/market_service_listing.c   # 市场服务-已安装列表/更新域
     src/market_service_config.c    # 市场服务-配置/同步域
-    src/market_svc_adapter.c
 )
 
 add_library(airy_market_service STATIC ${MARKET_SERVICE_SOURCES})
@@ -145,18 +144,11 @@ target_include_directories(market_d PRIVATE
     ${YAML_INCLUDE_DIRS}
 )
 
-# 链接策略：LTO + ASan 下使用 --start-group/--end-group 避免符号扫描遗漏
-if(NOT MSVC AND NOT APPLE)
-    target_link_libraries(market_d PRIVATE
-        "-Wl,--start-group"
-        airy_market_service
-        "-Wl,--end-group"
-        airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
-        Threads::Threads
-    )
-else()
-    target_link_libraries(market_d PRIVATE airy_market_service airy_core Threads::Threads)
-endif()
+target_link_libraries(market_d PRIVATE
+    airy_market_service
+    airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
+    Threads::Threads
+)
 
 if(NOT MSVC)
 target_compile_options(market_d PRIVATE

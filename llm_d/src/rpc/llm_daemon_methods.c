@@ -116,7 +116,7 @@ static int llm_error_is_retryable(int ret)
 static char *handle_complete(cJSON *params, int id);
 static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd);
 
-static char *handle_list_models(cJSON *params __attribute__((unused)), int id)
+static char *handle_list_models(cJSON *params, int id)
 {
     if (!g_service)
         return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Service not ready", id);
@@ -249,7 +249,7 @@ void on_count_tokens_method(cJSON *params, int id, void *user_data)
     }
 }
 
-static char *handle_health_check(cJSON *params __attribute__((unused)), int id)
+static char *handle_health_check(cJSON *params, int id)
 {
     cJSON *result = cJSON_CreateObject();
     if (!result)
@@ -270,7 +270,7 @@ void on_health_check_method(cJSON *params, int id, void *user_data)
     }
 }
 
-static char *handle_get_stats(cJSON *params __attribute__((unused)), int id)
+static char *handle_get_stats(cJSON *params, int id)
 {
     if (!g_service)
         return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Service not ready", id);
@@ -304,7 +304,7 @@ void on_get_stats_method(cJSON *params, int id, void *user_data)
  * @brief Wrapper for the complete method (adapts the method_dispatcher
  *        interface)
  */
-void on_complete_method(cJSON *params, int id, void *user_data __attribute__((unused)))
+void on_complete_method(cJSON *params, int id, void *user_data)
 {
     char *response = handle_complete(params, id);
     if (response) {
@@ -324,7 +324,7 @@ void on_complete_method(cJSON *params, int id, void *user_data __attribute__((un
 /**
  * @brief Wrapper for the complete_stream method
  */
-void on_complete_stream_method(cJSON *params, int id, void *user_data __attribute__((unused)))
+void on_complete_stream_method(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     char *response = handle_complete_stream(params, id, client_fd);

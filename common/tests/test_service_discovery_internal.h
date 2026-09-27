@@ -15,7 +15,7 @@
 #ifndef AIRY_RT_TEST_SERVICE_DISCOVERY_INTERNAL_H
 #define AIRY_RT_TEST_SERVICE_DISCOVERY_INTERNAL_H
 
-#include "../include/service_discovery.h"
+#include "service_discovery.h"
 
 #include <stdio.h>
 

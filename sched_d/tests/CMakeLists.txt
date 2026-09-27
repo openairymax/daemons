@@ -19,7 +19,6 @@ set(SCHED_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_dag_engine.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_dag_worker.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_dag_parse.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/sched_svc_adapter.c
 )
 
 set(SCHED_TEST_SOURCES

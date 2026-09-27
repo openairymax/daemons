@@ -53,7 +53,7 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
 
     target_include_directories(test_agent_${TEST_NAME} PRIVATE ${AGENT_COMMON_INCLUDES})
 
-    # 链接 airy_agent_service 静态库（已含 service.c + agent_svc_adapter.c）
+    # 链接 airy_agent_service 静态库（已含 service.c）
     target_link_libraries(test_agent_${TEST_NAME} PRIVATE
         airy_agent_service
         svc_common

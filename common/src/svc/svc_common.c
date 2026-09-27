@@ -257,7 +257,7 @@ airy_err_t airy_svc_start(airy_svc_t svc)
 
 static volatile sig_atomic_t g_svc_stop_timeout_flag = 0;
 
-static void svc_stop_timeout_handler(int signum __attribute__((unused)))
+static void svc_stop_timeout_handler(int signum)
 {
     g_svc_stop_timeout_flag = 1;
 }

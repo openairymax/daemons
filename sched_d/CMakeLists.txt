@@ -38,7 +38,6 @@ set(SCHED_D_SOURCES
     src/sched_dag_parse.c
     src/sched_rpc_handlers.c
     src/sched_dispatch.c
-    src/sched_svc_adapter.c
 )
 
 # 创建可执行文件
@@ -87,26 +86,18 @@ target_include_directories(sched_d PRIVATE
 )
 
 # 链接库
-# coreloopthree 的 cognition 引擎（engine.c）引用 hook/config 子系统符号，
-# 需 whole-archive 强制包含 coreloopthree 全部 .o（GNU ld 按序扫描，否则
-# airy_cognition 库被拉取后其 hook/config 引用无法回头解析，见 tool_d 同款修复）。
-target_link_libraries(sched_d PRIVATE svc_common)
-if(UNIX AND NOT APPLE)
-    target_link_libraries(sched_d PRIVATE
-        -Wl,--whole-archive
-        airy_coreloopthree
-        -Wl,--no-whole-archive)
-else()
-    target_link_libraries(sched_d PRIVATE airy_coreloopthree)
-endif()
+# 依赖拓扑序（成员级 DAG，单遍左到右解析完备，无需 whole-archive）：
+# cognition/engine.o -> coreloopthree（hook/config/gccp）-> llm_service/tool_service。
 target_link_libraries(sched_d PRIVATE
+    svc_common
     airy_cognition
+    airy_coreloopthree
+    airy_llm_service
+    airy_tool_service
     airy_core
     airy_memory
     airy_atoms
     airy_common
-    airy_llm_service
-    airy_tool_service
     Threads::Threads
     airy_platform_libs
 )

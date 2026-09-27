@@ -150,7 +150,6 @@ static void dispatch_worker(void *arg)
     ctx->result_slot->error = NULL;
 
     ipc_service_bus_t bus = ctx->dispatcher->bus;
-    bool ipc_ok __attribute__((unused)) = false;
 
     if (bus) {
         char request_payload[2048];
@@ -184,7 +183,6 @@ static void dispatch_worker(void *arg)
             if (result_str) {
                 ctx->result_slot->success = 1;
                 ctx->result_slot->output = result_str;
-                ipc_ok = true;
             }
             if (error_str) {
                 ctx->result_slot->error = error_str;

@@ -119,22 +119,22 @@ void on_cancel_method(cJSON *params, int id, void *user_data)
     handle_cancel(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_list_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+void on_list_method(cJSON *params, int id, void *user_data)
 {
     handle_list(id, *(airy_sock_t *)user_data);
 }
 
-void on_count_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+void on_count_method(cJSON *params, int id, void *user_data)
 {
     handle_count(id, *(airy_sock_t *)user_data);
 }
 
-void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+void on_health_check_method(cJSON *params, int id, void *user_data)
 {
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
 
-void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+void on_get_stats_method(cJSON *params, int id, void *user_data)
 {
     handle_get_stats(id, *(airy_sock_t *)user_data);
 }
@@ -429,7 +429,7 @@ static void handle_vocab(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-void on_vocab_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+void on_vocab_method(cJSON *params, int id, void *user_data)
 {
     handle_vocab(id, *(airy_sock_t *)user_data);
 }

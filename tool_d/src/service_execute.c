@@ -175,13 +175,13 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
     tool_metadata_t *meta = get_tool_metadata(svc, req->tool_id);
     if (!meta) {
         SVC_LOG_ERROR("Tool not found: %s", req->tool_id);
-        return AIRY_ERROR_TOOL_NOT_FOUND;
+        return AIRY_ERR_EXEC_NOT_FOUND;
     }
 
     int valid = validate_tool_params(svc, meta, req->tool_id, req->params_json);
     if (valid <= 0) {
         tool_metadata_free(meta);
-        return AIRY_ERROR_TOOL_VALIDATION;
+        return AIRY_ERR_EXEC_VALIDATION;
     }
 
     /* 3. Check the cache.
@@ -249,7 +249,7 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
 
     if (!meta) {
         SVC_LOG_ERROR("Tool not found: %s", req->tool_id);
-        return AIRY_ERROR_TOOL_NOT_FOUND;
+        return AIRY_ERR_EXEC_NOT_FOUND;
     }
 
     if (svc->validator) {
@@ -257,7 +257,7 @@ int tool_service_execute_stream(tool_service_t *svc, const tool_execute_request_
         if (!valid) {
             SVC_LOG_WARN("Parameter validation failed for tool: %s", req->tool_id);
             tool_metadata_free(meta);
-            return AIRY_ERROR_TOOL_VALIDATION;
+            return AIRY_ERR_EXEC_VALIDATION;
         }
     }
 

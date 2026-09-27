@@ -418,7 +418,7 @@ static void test_init_with_config(void)
     TEST("Init with explicit config");
     daemon_security_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    cfg.sanitize_level = SANITIZE_LEVEL_STRICT;
+    cfg.sanitize_level = SANITIZE_LEVEL_HIGH;
     cfg.enable_permission_cache = true;
     cfg.enable_signature_verification = true;
     cfg.enable_vault = true;
@@ -537,7 +537,7 @@ static void test_rules_file_loading(void)
 
     daemon_security_config_t cfg;
     memset(&cfg, 0, sizeof(cfg));
-    cfg.sanitize_level = SANITIZE_LEVEL_STRICT;
+    cfg.sanitize_level = SANITIZE_LEVEL_HIGH;
     cfg.enable_permission_cache = true;
     cfg.enable_vault = true;
     cfg.enable_audit_logging = true;

@@ -44,7 +44,7 @@
 
 #include "daemon_l1_server.h"
 
-#include "ipc.h"
+#include "kern_ipc.h"
 #include "platform_misc.h"
 #include "svc_logger.h"
 

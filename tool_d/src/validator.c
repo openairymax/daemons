@@ -165,7 +165,7 @@ cleanup:
     return valid;
 }
 
-int tool_validator_validate(tool_validator_t *val __attribute__((unused)),
+int tool_validator_validate(tool_validator_t *val,
                             const tool_metadata_t *meta, const char *params_json)
 {
     if (!meta || !params_json)

@@ -37,7 +37,7 @@ void on_net_check_access_method(cJSON *params, int id, void *user_data)
 }
 
 /* cupolas.net_get_stats */
-void on_net_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+void on_net_get_stats_method(cJSON *params, int id, void *user_data)
 {
     handle_net_get_stats(id, *(airy_sock_t *)user_data);
 }

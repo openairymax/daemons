@@ -37,7 +37,7 @@ static void test_mutex_operations(void)
     printf("  test_mutex_operations...\n");
 
     airy_mtx_t mutex;
-    int ret __attribute__((unused)) = airy_mtx_init(&mutex);
+    int ret = airy_mtx_init(&mutex);
     assert(ret == 0);
 
     ret = airy_mtx_lock(&mutex);
@@ -59,7 +59,6 @@ static void test_mutex_operations(void)
     assert(ret == 0);
 
     airy_mtx_destroy(&mutex);
-    assert(ret == 0);
 
     printf("    PASSED\n");
 }

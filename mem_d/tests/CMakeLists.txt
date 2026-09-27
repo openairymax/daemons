@@ -44,7 +44,7 @@ foreach(TEST_SRC ${MEM_TEST_SOURCES})
 
     target_include_directories(test_mem_${TEST_NAME} PRIVATE ${MEM_COMMON_INCLUDES})
 
-    # 链接 airy_mem_service 静态库（已含 service.c + mem_svc_adapter.c）
+    # 链接 airy_mem_service 静态库（已含 service.c）
     target_link_libraries(test_mem_${TEST_NAME} PRIVATE
         airy_mem_service
         svc_common

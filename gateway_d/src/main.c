@@ -351,7 +351,7 @@ static void gw_rpc_shutdown(void *user_data)
  * gateway_service_stop etc. are not async-signal-safe); otherwise a signal
  * received while the main loop holds a lock would deadlock.
  */
-static void signal_handler(int sig __attribute__((unused)))
+static void signal_handler(int sig)
 {
     atomic_store_explicit(&g_running, 0, memory_order_seq_cst);
 #ifndef _WIN32
@@ -455,9 +455,8 @@ static int parse_args(int argc, char *argv[], gateway_service_config_t *config)
                 exit(0);
             setsid();
             umask(022);
-            {
-                int __rc __attribute__((unused)) = chdir("/");
-            }
+            if (chdir("/") != 0)
+                SVC_LOG_ERROR("chdir(\"/\") failed during daemonize");
             fclose(stdin);
             fclose(stdout);
             fclose(stderr);

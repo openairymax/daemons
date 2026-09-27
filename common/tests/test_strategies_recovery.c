@@ -144,10 +144,10 @@ static void test_api_recovery_register_retry(void)
 static int g_mock_call_count = 0;
 static int g_mock_should_fail = 0;
 
-static int mock_request_success(void *ctx __attribute__((unused)),
-                                const char *url __attribute__((unused)),
-                                const char *body __attribute__((unused)),
-                                const char *cred __attribute__((unused)), char **resp_body,
+static int mock_request_success(void *ctx,
+                                const char *url,
+                                const char *body,
+                                const char *cred, char **resp_body,
                                 long *http_code)
 {
     g_mock_call_count++;
@@ -188,10 +188,10 @@ static void test_api_recovery_execute_success(void)
 static int g_mock_fail_count = 0;
 static int g_mock_fail_before_success = 2;
 
-static int mock_request_fail_then_succeed(void *ctx __attribute__((unused)),
-                                          const char *url __attribute__((unused)),
-                                          const char *body __attribute__((unused)),
-                                          const char *cred __attribute__((unused)),
+static int mock_request_fail_then_succeed(void *ctx,
+                                          const char *url,
+                                          const char *body,
+                                          const char *cred,
                                           char **resp_body, long *http_code)
 {
     g_mock_fail_count++;
@@ -238,10 +238,10 @@ static void test_api_recovery_execute_failure_with_retry(void)
     printf("      PASSED\n");
 }
 
-static int mock_request_always_fail(void *ctx __attribute__((unused)),
-                                    const char *url __attribute__((unused)),
-                                    const char *body __attribute__((unused)),
-                                    const char *cred __attribute__((unused)), char **resp_body,
+static int mock_request_always_fail(void *ctx,
+                                    const char *url,
+                                    const char *body,
+                                    const char *cred, char **resp_body,
                                     long *http_code)
 {
     g_mock_call_count++;

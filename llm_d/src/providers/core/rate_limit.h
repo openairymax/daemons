@@ -25,7 +25,6 @@ extern "C" {
 #endif
 
 #define PROVIDER_RL_DEFAULT_RPM 500 /* Requests per minute */
-#define PROVIDER_RL_DEFAULT_TPM 150000 /* Tokens per minute */
 #define PROVIDER_RL_MAX_RETRIES 5
 #define PROVIDER_RL_BASE_DELAY_MS 1000
 #define PROVIDER_RL_MAX_DELAY_MS 60000
@@ -38,9 +37,6 @@ typedef struct provider_rate_limiter {
     time_t rpm_window_start;
     int rpm_count;
     int rpm_limit;
-    long tpm_count;
-    time_t tpm_window_start;
-    long tpm_limit;
     time_t last_429_time;
     int retry_after_sec;
     int consecutive_429s;

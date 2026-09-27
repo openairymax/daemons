@@ -170,7 +170,7 @@ void lang_svc_postprocess(cJSON *params, int id, void *user_data)
 /* think.lang_stats：网关统计（可观测性）。
  * params: {}
  * result: 网关统计 JSON */
-void lang_svc_stats(cJSON *params __attribute__((unused)), int id, void *user_data)
+void lang_svc_stats(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     airy_mtx_lock(&g_lang_mtx);

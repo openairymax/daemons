@@ -198,28 +198,18 @@ target_include_directories(tool_d PRIVATE
     ${YAML_INCLUDE_DIRS}
 )
 
-# airy_tool_service → airy_syscall → airy_coreloopthree
-# 传递依赖。coreloopthree 引用 cognition/llm/checkpoint/hook_d 等符号，
-# 需 whole-archive 强制包含 coreloopthree 全部 .o，且必须在 airy_llm_service
-# 之前链接（GNU ld 按序扫描：coreloopthree 的 llm_service 引用需在后续
-# 库中解析）。--whole-archive 为 GNU ld 专有（macOS ld64 / MSVC 不识别，
-# 直接链接，循环符号由两平台链接器整体解析兜底）。
-target_link_libraries(tool_d PRIVATE airy_tool_service)
-if(UNIX AND NOT APPLE)
-    target_link_libraries(tool_d PRIVATE
-        -Wl,--whole-archive
-        airy_coreloopthree
-        -Wl,--no-whole-archive)
-else()
-    target_link_libraries(tool_d PRIVATE airy_coreloopthree)
-endif()
+# 依赖拓扑序（成员级 DAG，单遍左到右解析完备，无需 whole-archive）：
+# cognition/engine.o -> coreloopthree（hook/config/gccp）-> llm_service；
+# gccp.o -> llm_service/llm_service_complete；tool_service -> syscall 链。
 target_link_libraries(tool_d PRIVATE
+    airy_tool_service
     airy_cognition
+    airy_coreloopthree
+    airy_llm_service
     airy_core
     airy_memory
     airy_atoms
     airy_common
-    airy_llm_service
     Threads::Threads
     airy_platform_libs
 )

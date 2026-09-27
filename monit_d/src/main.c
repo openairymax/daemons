@@ -64,7 +64,7 @@ static void on_get_metrics_method(cJSON *params, int id, void *user_data)
     handle_get_metrics(params, id, *(airy_sock_t *)user_data);
 }
 
-static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+static void on_get_stats_method(cJSON *params, int id, void *user_data)
 {
     handle_get_stats(id, *(airy_sock_t *)user_data);
 }

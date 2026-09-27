@@ -77,7 +77,7 @@ jwt_hmac_fn_t g_hmac_impl = NULL;
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 
-__attribute__((unused)) void hmac_openssl(const char *key, const char *message,
+void hmac_openssl(const char *key, const char *message,
                                           uint8_t *output, size_t *out_len)
 {
     unsigned int len = 0;
@@ -138,7 +138,7 @@ void hmac_mbedtls(const char *key, const char *message, uint8_t *output, size_t 
 #define AUTH_ALLOW_INSECURE_HMAC
 #endif
 
-void __attribute__((unused)) hmac_builtin(const char *key, const char *message,
+void hmac_builtin(const char *key, const char *message,
                                           uint8_t *output, size_t *out_len)
 {
 

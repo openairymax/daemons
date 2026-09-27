@@ -25,11 +25,10 @@ set(PROTOCOLS_INCLUDE_DIR ${PROTOCOLS_DIR}/include)
 set(PROTOCOLS_COMMON_INCLUDE_DIR ${PROTOCOLS_DIR}/common/include)
 
 # ==================== A2A 服务静态库 ====================
-# 提取 service/a2a_svc_adapter 为独立静态库，供 a2a_d 可执行文件与单元测试共用，
+# 提取 service 为独立静态库，供 a2a_d 可执行文件与单元测试共用，
 # 消除桩函数依赖。排除 main.c（含 main()）。
 set(A2A_SERVICE_SOURCES
     src/service.c
-    src/a2a_svc_adapter.c
 )
 
 add_library(airy_a2a_service STATIC ${A2A_SERVICE_SOURCES})

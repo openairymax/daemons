@@ -51,7 +51,8 @@ set(SVC_COMMON_SOURCES
     src/discovery/service_discovery_backend_file.c # 跨进程服务发现-file 后端
     src/discovery/service_discovery_helper.c  # C-L08: daemon 自动注册便捷层
     # 0c SSoT 收敛：熔断器权威实现迁 commons/utils/ipc（src/circuit_breaker.c），
-    # 符号经 airy_common PUBLIC 链接提供，daemons 仅留 include/circuit_breaker.h 兼容头。
+    # 符号经 airy_common PUBLIC 链接提供（include/circuit_breaker.h 兼容头已删，
+    # 裸引经 PUBLIC include 路径直接解析 commons 权威）。
     # 0c A 类直搬：unified_metrics/alert_manager/jsonrpc_helpers/method_dispatcher/
     # param_validator/log_sanitizer/api_recovery/airy_event_loop 家族权威实现均迁
     # commons（utils/observability|ipc|security|resource|sync），daemons 留 re-export 头。
@@ -187,8 +188,8 @@ endif()
 # 会先命中 daemons 重导出兼容头（虽然内部经相对路径到达 commons，但仍构成编译期
 # atoms→daemons 反向依赖）。将 daemons/common/include 移至 commons 路径之后，
 # 确保 atoms 直接解析 commons 权威版本，完全消除 IRON-6 违规。
-# 注意：daemons/common/include 中仍有未迁移的头文件（platform.h/error.h/compat.h/
-# circuit_breaker.h/thread_pool.h 等），daemons 自己的源代码仍可通过此路径解析。
+# 注意：daemons/common/include 中仍有未迁移的头文件（platform.h/compat.h/
+# thread_pool.h 等），daemons 自己的源代码仍可通过此路径解析。
 target_include_directories(svc_common PUBLIC
     # commons 权威路径（优先）
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/include>
@@ -209,7 +210,7 @@ target_include_directories(svc_common PUBLIC
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/network>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/ipc>
     # P0.17 阶段 4: service_discovery.h/service_discovery_helper.h/daemon_bootstrap_sd.h
-    # 迁移至 commons/utils/sd（daemons 版保留为重导出兼容头）
+    # 迁移至 commons/utils/sd（daemons 版 service_discovery.h 兼容头已删，裸引直接解析权威）
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/sd>
     # P0.17 阶段 1: daemon_defaults.h 重导出 airy_defaults.h（位于 commons/include）
     $<BUILD_INTERFACE:${COMMONS_DIR}/include>

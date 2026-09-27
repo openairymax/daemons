@@ -76,7 +76,7 @@ static void on_register_method(cJSON *params, int id, void *user_data)
     handle_register(params, id, *(airy_sock_t *)user_data);
 }
 
-static void on_list_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+static void on_list_method(cJSON *params, int id, void *user_data)
 {
     handle_list(id, *(airy_sock_t *)user_data);
 }
@@ -91,12 +91,12 @@ static void on_execute_method(cJSON *params, int id, void *user_data)
     handle_execute(params, id, *(airy_sock_t *)user_data);
 }
 
-static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+static void on_health_check_method(cJSON *params, int id, void *user_data)
 {
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
 
-static void on_pending_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+static void on_pending_method(cJSON *params, int id, void *user_data)
 {
     handle_pending(id, *(airy_sock_t *)user_data);
 }
@@ -106,7 +106,7 @@ static void on_approve_method(cJSON *params, int id, void *user_data)
     handle_approve(params, id, *(airy_sock_t *)user_data);
 }
 
-static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+static void on_get_stats_method(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     if (!g_service) {

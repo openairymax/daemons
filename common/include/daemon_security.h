@@ -44,9 +44,6 @@
 #include "cupolas_vault.h"
 #include "cupolas_vault_cred_type.h"
 #include "sanitize_level.h"
-#define SANITIZE_LEVEL_NONE 0
-#define SANITIZE_LEVEL_NORMAL 1
-#define SANITIZE_LEVEL_STRICT 2
 
 #ifdef __cplusplus
 extern "C" {
@@ -109,7 +106,7 @@ typedef struct daemon_security_config {
  * Example usage:
  * @code
  * daemon_security_config_t sec_config = {
- *     .sanitize_level = SANITIZE_LEVEL_STRICT,
+ *     .sanitize_level = SANITIZE_LEVEL_HIGH,
  *     .sanitizer_rules_path = AIRY_CONFIG_DIR "/cupolas/sanitizer_rules.yaml",
  *     .permission_rules_path = AIRY_CONFIG_DIR "/cupolas/permission_rules.yaml",
  *     .enable_permission_cache = true,

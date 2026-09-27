@@ -55,12 +55,12 @@ void on_audit_flush_method(cJSON *params, int id, void *user_data)
     handle_audit_flush(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+void on_get_stats_method(cJSON *params, int id, void *user_data)
 {
     handle_get_stats(id, *(airy_sock_t *)user_data);
 }
 
-void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+void on_health_check_method(cJSON *params, int id, void *user_data)
 {
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
@@ -224,7 +224,7 @@ static void handle_add_rule(cJSON *params, int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-static void handle_audit_flush(cJSON *params __attribute__((unused)), int id, airy_sock_t client_fd)
+static void handle_audit_flush(cJSON *params, int id, airy_sock_t client_fd)
 {
     if (!g_service) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Cupolas service not ready", id);

@@ -7,7 +7,7 @@
  */
 
 #include "test_service_discovery_internal.h"
-#include "../include/service_discovery.h"
+#include "service_discovery.h"
 #include "safe_string_utils.h"
 #include "airy_memory.h"
 

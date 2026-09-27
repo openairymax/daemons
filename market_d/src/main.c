@@ -72,7 +72,7 @@ static void on_search_skills_method(cJSON *params, int id, void *user_data)
     handle_search_skills(params, id, *(airy_sock_t *)user_data);
 }
 
-static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+static void on_health_check_method(cJSON *params, int id, void *user_data)
 {
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
@@ -82,7 +82,7 @@ static void on_publish_method(cJSON *params, int id, void *user_data)
     handle_publish(params, id, *(airy_sock_t *)user_data);
 }
 
-static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+static void on_get_stats_method(cJSON *params, int id, void *user_data)
 {
     handle_get_stats(id, *(airy_sock_t *)user_data);
 }

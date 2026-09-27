@@ -233,18 +233,11 @@ target_include_directories(llm_d PRIVATE
     ${YAML_INCLUDE_DIRS}
 )
 
-# 链接策略：LTO + ASan 下使用 --start-group/--end-group 避免符号扫描遗漏
-if(NOT MSVC AND NOT APPLE)
-    target_link_libraries(llm_d PRIVATE
-        "-Wl,--start-group"
-        airy_llm_service
-        "-Wl,--end-group"
-        airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
-        Threads::Threads
-    )
-else()
-    target_link_libraries(llm_d PRIVATE airy_llm_service airy_core Threads::Threads)
-endif()
+target_link_libraries(llm_d PRIVATE
+    airy_llm_service
+    airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
+    Threads::Threads
+)
 
 if(NOT MSVC)
 if(BUILD_COVERAGE)

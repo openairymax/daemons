@@ -48,7 +48,7 @@ static void test_error_new_codes(void)
 
     /* v3.0 SSoT 统一收敛：与 POSIX errno 负值冲突的 AIRY_ERR_* 扩展码
      * 已迁移至 -36~-60 区间（第三轮迁移，避免与 IPC 码空间冲突）。
-     * 详见 error.h 注释（原 -2→-40→-36 等迁移轨迹）。 */
+     * 详见 commons/utils/error/error.h 注释（原 -2→-40→-36 等迁移轨迹）。 */
     assert(AIRY_ERR_INVALID_PARAM == -36);
     assert(AIRY_ERR_NULL_POINTER == -3);
     assert(AIRY_ERR_OUT_OF_MEMORY == -59);

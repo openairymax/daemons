@@ -93,12 +93,12 @@ static void on_orchestrate_method(cJSON *params, int id, void *user_data)
     handle_orchestrate(params, id, *(airy_sock_t *)user_data);
 }
 
-static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+static void on_get_stats_method(cJSON *params, int id, void *user_data)
 {
     handle_get_stats(params, id, *(airy_sock_t *)user_data);
 }
 
-static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+static void on_health_check_method(cJSON *params, int id, void *user_data)
 {
     handle_health_check(params, id, *(airy_sock_t *)user_data);
 }
@@ -155,7 +155,7 @@ static void handle_process(cJSON *params, int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, res_obj, id);
 }
 
-static void handle_get_stats(cJSON *params __attribute__((unused)), int id, airy_sock_t client_fd)
+static void handle_get_stats(cJSON *params, int id, airy_sock_t client_fd)
 {
     char *stats = think_service_stats_json(g_service);
     if (!stats) {
@@ -171,7 +171,7 @@ static void handle_get_stats(cJSON *params __attribute__((unused)), int id, airy
     JSONRPC_SEND_SUCCESS(client_fd, stats_obj, id);
 }
 
-static void handle_health_check(cJSON *params __attribute__((unused)), int id,
+static void handle_health_check(cJSON *params, int id,
                                 airy_sock_t client_fd)
 {
     cJSON *result = cJSON_CreateObject();

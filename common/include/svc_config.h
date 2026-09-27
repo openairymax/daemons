@@ -36,7 +36,7 @@ typedef struct {
 } svc_config_t;
 
 
-static inline int svc_config_load(const char *path __attribute__((unused)),
+static inline int svc_config_load(const char *path,
                                   svc_config_t **out_config)
 {
     if (!out_config)

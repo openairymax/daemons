@@ -23,7 +23,7 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== Monitor 服务静态库 ====================
-# 提取 service/metrics/prometheus_exporter/logging/tracing/alert/monit_svc_adapter
+# 提取 service/metrics/prometheus_exporter/logging/tracing/alert
 # 为独立静态库，供 monit_d 可执行文件和集成测试共用，消除桩函数依赖。
 # 排除 main.c（含 main()）。
 # service.c 按单一职责拆分（2026-08-27）：
@@ -39,7 +39,6 @@ set(MONIT_SERVICE_SOURCES
     src/logging.c
     src/tracing.c
     src/alert.c
-    src/monit_svc_adapter.c
     src/observe_rpc.c
     src/info_rpc.c
 )
@@ -147,18 +146,11 @@ target_include_directories(monit_d PRIVATE
     ${CJSON_INCLUDE_DIRS}
 )
 
-# 链接策略：LTO + ASan 下使用 --start-group/--end-group 避免符号扫描遗漏
-if(NOT MSVC AND NOT APPLE)
-    target_link_libraries(monit_d PRIVATE
-        "-Wl,--start-group"
-        airy_monit_service
-        "-Wl,--end-group"
-        airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
-        Threads::Threads
-    )
-else()
-    target_link_libraries(monit_d PRIVATE airy_monit_service airy_core Threads::Threads)
-endif()
+target_link_libraries(monit_d PRIVATE
+    airy_monit_service
+    airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
+    Threads::Threads
+)
 
 if(NOT MSVC)
 target_compile_options(monit_d PRIVATE
