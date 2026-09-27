@@ -244,7 +244,7 @@ static void handle_policy_rollback(cJSON *params, int id, airy_sock_t client_fd)
     broadcast_epoch(dpolicy_engine_get_epoch(g_dpolicy));
 }
 
-static void handle_policy_status(cJSON *params __attribute__((unused)), int id,
+static void handle_policy_status(cJSON *params, int id,
                                  airy_sock_t client_fd)
 {
     if (require_engine(client_fd, id) != 0)

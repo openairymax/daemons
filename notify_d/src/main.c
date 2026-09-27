@@ -618,7 +618,7 @@ static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_
     }
 }
 
-int main(int argc __attribute__((unused)), char **argv __attribute__((unused)))
+int main(int argc, char **argv)
 {
 
 #ifndef _WIN32

@@ -20,14 +20,13 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== Memory 服务静态库 ====================
-# 提取 service/mem_svc_adapter 为独立静态库，供 mem_d 可执行文件与单元测试共用，
+# 提取 service 为独立静态库，供 mem_d 可执行文件与单元测试共用，
 # 消除桩函数依赖。排除 main.c（含 main()）。
 # vector.c 提供自研 TF-IDF 向量检索；emb_client.c 提供可选 embedding 后端（AIRY_HAS_CURL）
 # 2026-08-27 目录原子化：src/ 按功能域组织
 #   core/ daemon 入口与服务核心 · handlers/ IPC 请求处理器 · engine/ 记忆引擎实现
 set(MEM_SERVICE_SOURCES
     src/core/service.c
-    src/core/mem_svc_adapter.c
     src/engine/mem_hash.c
     src/engine/mem_persist.c
     src/engine/kb.c

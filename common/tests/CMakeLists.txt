@@ -32,6 +32,7 @@ set(TEST_SOURCES
     test_svc_model_defaults.c
     test_agent_vocab.c
     test_hall_writer.c
+    test_ipc_client.c
 )
 
 foreach(TEST_SRC ${TEST_SOURCES})

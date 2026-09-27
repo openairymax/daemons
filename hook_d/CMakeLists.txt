@@ -66,21 +66,14 @@ target_include_directories(hook_d PRIVATE
     ${YAML_INCLUDE_DIRS}
 )
 
-# 链接策略：LTO + ASan 下使用 --start-group/--end-group 避免符号扫描遗漏
 # M3: airy_coreloop_hooks（hook 系统核心）替代 airy_coreloopthree 全量引擎
-if(NOT MSVC AND NOT APPLE)
-    target_link_libraries(hook_d PRIVATE
-        "-Wl,--start-group"
-        airy_coreloop_hooks
-        svc_common
-        cupolas
-        "-Wl,--end-group"
-        airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
-        Threads::Threads
-    )
-else()
-    target_link_libraries(hook_d PRIVATE airy_coreloop_hooks svc_common cupolas airy_core Threads::Threads)
-endif()
+target_link_libraries(hook_d PRIVATE
+    airy_coreloop_hooks
+    svc_common
+    cupolas
+    airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
+    Threads::Threads
+)
 
 if(AIRY_HAS_YAML AND YAML_FOUND AND YAML_LIBRARIES)
     target_link_libraries(hook_d PRIVATE ${YAML_LIBRARIES})

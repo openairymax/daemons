@@ -291,7 +291,7 @@ static void hook_on_stats(cJSON *params, int id, void *user_data)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-static void hook_on_get_stats(cJSON *params __attribute__((unused)), int id, void *user_data)
+static void hook_on_get_stats(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *result = cJSON_CreateObject();

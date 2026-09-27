@@ -252,7 +252,8 @@ static void test_invoke_cancel(void)
         close(out_pipe[1]);
         setpgid(0, 0);
         char buf[64];
-        (void)read(STDIN_FILENO, buf, sizeof(buf));
+        ssize_t _rd = read(STDIN_FILENO, buf, sizeof(buf));
+        (void)_rd;
         sleep(30);
         _exit(0);
     }
@@ -332,7 +333,8 @@ static void test_invoke_session_cancel(void)
         close(out_pipe[1]);
         setpgid(0, 0);
         char buf[64];
-        (void)read(STDIN_FILENO, buf, sizeof(buf));
+        ssize_t _rd = read(STDIN_FILENO, buf, sizeof(buf));
+        (void)_rd;
         sleep(30);
         _exit(0);
     }

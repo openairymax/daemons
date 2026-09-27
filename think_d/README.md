@@ -185,8 +185,8 @@ ctest --test-dir ../daemons-build -R think_d_ --output-on-failure
 | [`svc_common`](../common/README.md) | 守护进程样板、事件驱动、JSON-RPC dispatcher、`svc_model_defaults` |
 | [commons](https://atomgit.com/openairymax/commons) | 平台路径、日志、内存与同步原语、cJSON 封装 |
 
-静态库之间存在 `coreloopthree ↔ cognition ↔ llm_service / tool_service` 循环引用，
-GNU ld 下以 `-Wl,--start-group/--end-group` 链接（与 `gateway_d` 同款方案）；
+静态库符号级反向依赖（cognition → coreloopthree）由 cognition 目标显式声明，
+CMake 静态库环重复机制保证链接完备（跨平台链接器语义一致）；
 Windows 目标另链 `ws2_32`、`bcrypt`。
 
 ## 关系

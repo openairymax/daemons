@@ -6,7 +6,8 @@
  * @brief IPC客户端模块单元测试
  */
 
-#include "svc_common.h"
+#include "ipc_client.h"
+#include "svc_config.h"
 
 #include <assert.h>
 #include <stdio.h>

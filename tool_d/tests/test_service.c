@@ -61,7 +61,7 @@ static void test_service_register_tool(void)
     meta.executable = "/bin/echo";
     meta.timeout_sec = 10;
 
-    int ret __attribute__((unused)) = tool_service_register(svc, &meta);
+    int ret = tool_service_register(svc, &meta);
     CHECK(ret == 0);
 
     tool_service_destroy(svc);
@@ -119,7 +119,7 @@ static void test_service_get_tool(void)
 
     tool_service_register(svc, &meta);
 
-    tool_metadata_t *found __attribute__((unused)) = tool_service_get(svc, "get_test_tool");
+    tool_metadata_t *found = tool_service_get(svc, "get_test_tool");
     CHECK(found != NULL);
     CHECK(strcmp(found->name, "get_test_tool") == 0);
     tool_metadata_free(found);
@@ -145,10 +145,10 @@ static void test_service_unregister_tool(void)
 
     tool_service_register(svc, &meta);
 
-    int ret __attribute__((unused)) = tool_service_unregister(svc, "unregister_test");
+    int ret = tool_service_unregister(svc, "unregister_test");
     CHECK(ret == 0);
 
-    tool_metadata_t *found __attribute__((unused)) = tool_service_get(svc, "unregister_test");
+    tool_metadata_t *found = tool_service_get(svc, "unregister_test");
     CHECK(found == NULL);
 
     tool_service_destroy(svc);

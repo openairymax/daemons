@@ -429,28 +429,17 @@ endif()
 #   LTO + ASan 组合下，链接器扫描静态库时使用 LTO 符号摘要，可能漏掉符号
 #   （表现为 undefined reference to memory_alloc 等，但符号确实存在于 .a 中）。
 #   根 CMakeLists.txt 已添加 -ffat-lto-objects，让 LTO 对象同时包含机器代码，
-#   链接器可用传统符号表解析静态库，无需 --whole-archive。
-#   使用 --start-group/--end-group 处理 airy_gateway_service 与 svc_common/
-#   airy_protocols 之间的传递依赖符号解析。
+#   链接器可用传统符号表解析静态库。
 #   架构约束 2026-08-25 "必须走 syscall": 链接 atoms/syscall（airy_syscall），
 #   gateway 对 daemon 的派发经 airy_sys_svc_call() (SYS_SVC_CALL) 完成；
 #   svc_dispatch.o 为本链路唯一拉取的 syscall 成员（其余 airy_sys_* 由
 #   gateway_lib_obj 的 syscall_router_*.c 提供，避免重复符号）。
-if(NOT MSVC AND NOT APPLE)
-    target_link_libraries(gateway_d PRIVATE
-        "-Wl,--start-group"
-        airy_gateway_service
-        airy_syscall
-        "-Wl,--end-group"
-        Threads::Threads
-    )
-else()
-    target_link_libraries(gateway_d PRIVATE
-        airy_gateway_service
-        airy_syscall
-        Threads::Threads
-    )
-endif()
+#   依赖方向自上而下（gateway_service -> syscall），单遍左到右解析即完备。
+target_link_libraries(gateway_d PRIVATE
+    airy_gateway_service
+    airy_syscall
+    Threads::Threads
+)
 if(AIRY_HAS_CJSON)
     target_link_libraries(gateway_d PRIVATE
         $<TARGET_OBJECTS:gateway_lib_obj>
@@ -502,7 +491,6 @@ install(TARGETS gateway_d
 
 install(FILES
     include/gateway_service.h
-    include/gateway_svc_adapter.h
     DESTINATION include/agentrt/daemons/gateway_d
 )
 

@@ -43,7 +43,7 @@ foreach(TEST_SRC ${A2A_TEST_SOURCES})
 
     target_include_directories(test_a2a_${TEST_NAME} PRIVATE ${A2A_COMMON_INCLUDES})
 
-    # 链接 airy_a2a_service 静态库（已含 service.c + a2a_svc_adapter.c）
+    # 链接 airy_a2a_service 静态库（已含 service.c）
     # 与 airy_protocols（提供 a2a_v03_adapter 实现）
     target_link_libraries(test_a2a_${TEST_NAME} PRIVATE
         airy_a2a_service

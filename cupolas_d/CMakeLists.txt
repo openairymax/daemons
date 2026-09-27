@@ -25,11 +25,10 @@ set(CUPOLAS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../cupolas)
 set(CUPOLAS_INCLUDE_DIR ${CUPOLAS_DIR}/include)
 
 # ==================== Cupolas 服务静态库 ====================
-# 提取 service/cupolas_svc_adapter 为独立静态库，供 cupolas_d 可执行文件
+# 提取 service 为独立静态库，供 cupolas_d 可执行文件
 # 与单元测试共用，消除桩函数依赖。排除 main.c（含 main()）。
 set(CUPOLAS_SERVICE_SOURCES
     src/service.c
-    src/cupolas_svc_adapter.c
 )
 
 add_library(airy_cupolas_service STATIC ${CUPOLAS_SERVICE_SOURCES})
