@@ -54,11 +54,15 @@ elseif(UNIX)
     )
 endif()
 
-target_include_directories(airy_mem_service PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+# 内部头仅自用：src 区不对外传播（0.1.19 F4 收敛）
+target_include_directories(airy_mem_service PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
     ${CMAKE_CURRENT_SOURCE_DIR}/src/handlers
     ${CMAKE_CURRENT_SOURCE_DIR}/src/engine
+)
+
+target_include_directories(airy_mem_service PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/platform/include

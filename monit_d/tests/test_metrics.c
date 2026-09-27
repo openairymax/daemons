@@ -157,6 +157,30 @@ static void test_monitor_labels(void)
     printf("    PASSED\n");
 }
 
+static void test_monitor_service_create_with_config(void)
+{
+    printf("  test_monitor_service_create_with_config...\n");
+
+    monitor_config_t config = {.metrics_collection_interval_ms = 5000,
+                               .health_check_interval_ms = 10000,
+                               .log_flush_interval_ms = 30000,
+                               .alert_check_interval_ms = 5000,
+                               .log_file_path = "metrics_test.log",
+                               .metrics_storage_path = "metrics_test",
+                               .enable_tracing = true,
+                               .enable_alerting = true};
+
+    monitor_service_t *svc = NULL;
+    int ret = monitor_service_create(&config, &svc);
+    assert(ret == 0);
+    assert(svc != NULL);
+
+    ret = monitor_service_destroy(svc);
+    assert(ret == 0);
+
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=========================================\n");
@@ -169,6 +193,7 @@ int main(void)
     test_monitor_histogram_metric();
     test_monitor_get_metrics();
     test_monitor_labels();
+    test_monitor_service_create_with_config();
 
     printf("\nAll metrics tests PASSED\n");
     return 0;

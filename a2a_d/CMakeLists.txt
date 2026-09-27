@@ -48,9 +48,13 @@ elseif(UNIX)
     )
 endif()
 
+# 内部头仅自用：src 区不对外传播（0.1.19 F4 收敛）
+target_include_directories(airy_a2a_service PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
 target_include_directories(airy_a2a_service PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${DAEMON_COMMON_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}
     ${COMMONS_INCLUDE_DIR}/platform/include

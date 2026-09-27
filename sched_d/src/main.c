@@ -102,10 +102,10 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("sched_d");
 
-    /* sched_d whole-archives the atoms cognition/coreloopthree engine, whose
-     * adapters dispatch through the IPC/LLM/tool ops tables instead of linking
-     * daemons symbols. Inject all three here; failures are non-fatal and atoms
-     * call sites degrade. */
+    /* sched_d statically links the atoms cognition/coreloopthree engine
+     * (member-level DAG topo order), whose adapters dispatch through the
+     * IPC/LLM/tool ops tables instead of linking daemons symbols. Inject all
+     * three here; failures are non-fatal and atoms call sites degrade. */
     daemon_ipc_ops_init("sched_d");
     daemon_llm_ops_init("sched_d");
     daemon_tool_ops_init("sched_d");

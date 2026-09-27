@@ -17,6 +17,7 @@
 
 #include "error.h"
 #include "platform_paths.h"
+#include "airy_memory_inline.h"
 
 #include <ctype.h>
 #include <limits.h>
@@ -32,14 +33,6 @@
 
 #ifdef HAVE_YAML
 #include <yaml.h>
-#endif
-
-#ifndef AIRY_STRNCPY_TERM
-#define AIRY_STRNCPY_TERM(dst, src, sz)     \
-    do {                                    \
-        snprintf((dst), (sz), "%s", (src)); \
-        (dst)[(sz) - 1] = '\0';             \
-    } while (0)
 #endif
 
 int svc_tokens_parse(const char *text)

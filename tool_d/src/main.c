@@ -479,10 +479,10 @@ int main(int argc, char **argv)
 
     daemon_cupolas_init_pep("tool_d");
 
-    /* tool_d whole-archives the atoms coreloopthree engine, whose adapters
-     * dispatch through the IPC/LLM/tool ops tables instead of linking
-     * daemons symbols. Init failure is non-fatal: atoms callers degrade
-     * gracefully. */
+    /* tool_d statically links the atoms coreloopthree engine (member-level
+     * DAG topo order), whose adapters dispatch through the IPC/LLM/tool ops
+     * tables instead of linking daemons symbols. Init failure is non-fatal:
+     * atoms callers degrade gracefully. */
     daemon_ipc_ops_init("tool_d");
     daemon_llm_ops_init("tool_d");
 
