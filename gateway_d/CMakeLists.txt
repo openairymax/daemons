@@ -107,11 +107,15 @@ elseif(UNIX)
 endif()
 
 # ==================== 包含目录 ====================
+# 内部头仅自用：src 区不对外传播（0.1.19 F4 收敛）
+target_include_directories(airy_gateway_service PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/protocol
+)
+
 target_include_directories(airy_gateway_service PUBLIC
     # 本模块头文件
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/protocol
     # Gateway 公共 API（service.c 引用 "gateway.h"）
     ${GATEWAY_INCLUDE_DIR}
     # Gateway 内部头文件（gateway_api.c 引用 http_gateway.h 等）
