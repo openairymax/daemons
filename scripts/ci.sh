@@ -9,9 +9,17 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKS_DIR="$(dirname "$SCRIPT_DIR")"
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-BUILD_DIR="${PROJECT_ROOT}/../AgentRT-build"
-REPORT_DIR="${PROJECT_ROOT}/../AgentRT-build/reports"
+AGENTRT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# 构建目录必须在源码区之外（铁律）；可用 AIRYRT_BUILD_ROOT 覆盖
+BUILD_DIR="${AIRYRT_BUILD_ROOT:-${HOME}/.cache/agentrt/daemons}"
+REPORT_DIR="${BUILD_DIR}/reports"
+
+# 动态发现 daemons 模块（含 common 公共库目录）
+DAEMON_MODULES=()
+for _d in "${BACKS_DIR}"/*/CMakeLists.txt; do
+    [ -e "$_d" ] || continue
+    DAEMON_MODULES+=("$(basename "$(dirname "$_d")")")
+done
 
 # 颜色定义
 RED='\033[0;31m'
@@ -81,7 +89,11 @@ check_dependencies() {
 # 创建构建目录
 setup_build_dir() {
     log_info "设置构建目录..."
-    
+
+    case "${BUILD_DIR}" in
+        ""|"/") log_error "非法构建目录: ${BUILD_DIR}"; exit 1 ;;
+    esac
+
     rm -rf "${BUILD_DIR}"
     mkdir -p "${BUILD_DIR}"
     mkdir -p "${REPORT_DIR}"
@@ -94,7 +106,7 @@ cmake_configure() {
     log_info "CMake配置..."
     
     cd "${BUILD_DIR}"
-    cmake "${BACKS_DIR}" \
+    cmake "${AGENTRT_ROOT}" \
         -DCMAKE_BUILD_TYPE=Debug \
         -DCMAKE_C_FLAGS="--coverage -fprofile-arcs -ftest-coverage" \
         -DCMAKE_EXE_LINKER_FLAGS="--coverage"
@@ -115,39 +127,16 @@ build_all() {
 # 运行单元测试
 run_tests() {
     log_info "运行单元测试..."
-    
-    cd "${BUILD_DIR}"
-    
-    local test_failed=0
-    local test_passed=0
-    local test_total=0
-    
-    # 运行ctest
-    if command -v ctest &> /dev/null; then
-        ctest --output-on-failure -T Test || test_failed=1
-    fi
-    
-    # 运行各个测试可执行文件
-    for test_exe in "${BUILD_DIR}"/test_*; do
-        if [ -x "$test_exe" ]; then
-            test_total=$((test_total + 1))
-            log_info "运行: $(basename $test_exe)"
-            if "$test_exe"; then
-                test_passed=$((test_passed + 1))
-            else
-                test_failed=$((test_failed + 1))
-                log_error "测试失败: $(basename $test_exe)"
-            fi
-        fi
-    done
-    
-    log_info "测试统计: 通过=${test_passed}, 失败=${test_failed}, 总计=${test_total}"
-    
-    if [ $test_failed -gt 0 ]; then
-        log_error "有测试失败"
+
+    if ! command -v ctest &> /dev/null; then
+        log_error "ctest 未安装"
         return 1
     fi
-    
+
+    cd "${BUILD_DIR}"
+    # 单一构建树：ctest 统一执行全部注册测试，失败即失败（fail-closed）
+    ctest --output-on-failure -j"$(nproc 2>/dev/null || echo 4)"
+
     log_success "所有测试通过"
 }
 
@@ -173,11 +162,8 @@ run_cppcheck() {
         --suppress=unusedFunction \
         --check-level=exhaustive \
         --error-exitcode=1 \
-        "${BACKS_DIR}" 2>/dev/null || {
-            log_warning "cppcheck发现问题，请查看报告: ${CPPCHECK_REPORT}"
-            return 0
-        }
-    
+        "${BACKS_DIR}" 2>/dev/null
+
     log_success "cppcheck静态分析完成"
 }
 
@@ -206,12 +192,13 @@ run_coverage() {
     
     log_info "代码覆盖率: ${coverage_percent}"
     
-    # 检查是否达到80%
+    # 检查是否达到80%（fail-closed：未达标即失败）
     local coverage_value=$(echo "$coverage_percent" | sed 's/%//')
-    if (( $(echo "$coverage_value >= 80.0" | bc -l) )); then
+    if awk -v v="$coverage_value" 'BEGIN { exit !(v >= 80.0) }'; then
         log_success "代码覆盖率达标 (>= 80%)"
     else
-        log_warning "代码覆盖率未达标 (< 80%)"
+        log_error "代码覆盖率未达标 (< 80%): ${coverage_percent}"
+        return 1
     fi
     
     log_success "代码覆盖率报告已生成: ${REPORT_DIR}/coverage/"
@@ -232,8 +219,8 @@ generate_report() {
         echo "构建目录: ${BUILD_DIR}"
         echo ""
         echo "--- 模块状态 ---"
-        for module in commons llm_d tool_d market_d monit_d sched_d; do
-            if [ -f "${BUILD_DIR}/${module}/lib${module}.a" ] || [ -f "${BUILD_DIR}/${module}/agentrt-${module}.a" ]; then
+        for module in "${DAEMON_MODULES[@]}"; do
+            if [ -d "${BUILD_DIR}/daemons/${module}" ]; then
                 echo "  ${module}: ✓ 已构建"
             else
                 echo "  ${module}: ✗ 未构建"

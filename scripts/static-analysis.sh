@@ -9,8 +9,18 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKS_ROOT="$(dirname "$SCRIPT_DIR")"
-REPORT_DIR="${BACKS_ROOT}/reports"
+AGENTRT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# 报告落在源码区之外的构建目录；可用 AIRYRT_BUILD_ROOT 覆盖
+BUILD_DIR="${AIRYRT_BUILD_ROOT:-${HOME}/.cache/agentrt/daemons}"
+REPORT_DIR="${BUILD_DIR}/reports"
 CPPCHECK_CONFIG="${BACKS_ROOT}/cppcheck.xml"
+
+# 动态发现 daemons 模块（含 common 公共库目录）
+DAEMON_MODULES=()
+for _d in "${BACKS_ROOT}"/*/CMakeLists.txt; do
+    [ -e "$_d" ] || continue
+    DAEMON_MODULES+=("$(basename "$(dirname "$_d")")")
+done
 
 # 颜色定义
 RED='\033[0;31m'
@@ -57,13 +67,14 @@ run_analysis() {
     CPPCHECK_ARGS="$CPPCHECK_ARGS --check-level=exhaustive"
     CPPCHECK_ARGS="$CPPCHECK_ARGS --inline-suppr"
     
-    # 包含目录
-    CPPCHECK_ARGS="$CPPCHECK_ARGS -I ${BACKS_ROOT}/agentrt/commons/include"
-    CPPCHECK_ARGS="$CPPCHECK_ARGS -I ${BACKS_ROOT}/llm_d/include"
-    CPPCHECK_ARGS="$CPPCHECK_ARGS -I ${BACKS_ROOT}/tool_d/include"
-    CPPCHECK_ARGS="$CPPCHECK_ARGS -I ${BACKS_ROOT}/market_d/include"
-    CPPCHECK_ARGS="$CPPCHECK_ARGS -I ${BACKS_ROOT}/monit_d/include"
-    CPPCHECK_ARGS="$CPPCHECK_ARGS -I ${BACKS_ROOT}/sched_d/include"
+    # 包含目录：commons（agentrt 根）+ 各模块 include
+    CPPCHECK_ARGS="$CPPCHECK_ARGS -I ${AGENTRT_ROOT}/commons/include"
+    local module
+    for module in "${DAEMON_MODULES[@]}"; do
+        if [ -d "${BACKS_ROOT}/${module}/include" ]; then
+            CPPCHECK_ARGS="$CPPCHECK_ARGS -I ${BACKS_ROOT}/${module}/include"
+        fi
+    done
     
     # 定义
     CPPCHECK_ARGS="$CPPCHECK_ARGS -DAGENTRT_PLATFORM_LINUX=1"
@@ -80,17 +91,23 @@ run_analysis() {
     local XML_REPORT="$REPORT_DIR/cppcheck_report.xml"
     local TXT_REPORT="$REPORT_DIR/cppcheck_report.txt"
     
-    # 运行分析
-    log_info "分析源代码..."
+    # 分析对象：各模块 src/（fail-closed：空清单即失败）
+    local analysis_dirs=()
+    for module in "${DAEMON_MODULES[@]}"; do
+        if [ -d "${BACKS_ROOT}/${module}/src" ]; then
+            analysis_dirs+=("${BACKS_ROOT}/${module}/src")
+        fi
+    done
+
+    if [ ${#analysis_dirs[@]} -eq 0 ]; then
+        log_error "未找到任何模块源码目录"
+        return 1
+    fi
+
     cppcheck $CPPCHECK_ARGS \
         --output-file="$XML_REPORT" \
-        "${BACKS_ROOT}/agentrt/commons/src" \
-        "${BACKS_ROOT}/llm_d/src" \
-        "${BACKS_ROOT}/tool_d/src" \
-        "${BACKS_ROOT}/market_d/src" \
-        "${BACKS_ROOT}/monit_d/src" \
-        "${BACKS_ROOT}/sched_d/src" \
-        2>/dev/null || true
+        "${analysis_dirs[@]}" \
+        2>/dev/null
     
     # 生成文本报告
     if [ -f "$XML_REPORT" ]; then
