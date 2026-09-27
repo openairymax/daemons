@@ -26,6 +26,7 @@
 #include "platform.h"
 #include "hook_service.h"
 #include "hook_registry.h"
+#include "airy_hook.h"
 #include "hook_builtin_handlers.h"
 #include "airy_safety_ops.h"
 #include "safety_guard.h"
@@ -100,7 +101,11 @@ static void destroy_service_hook_d(void)
 {
     if (g_registry_initialized) {
         airy_hook_unregister_builtin_handlers();
-        hook_registry_destroy();
+        /* Release this daemon's hook-system reference. airy_hook_init() is
+         * the single lifecycle entry point (registry + timeout manager); the
+         * old code called hook_registry_destroy() directly, which skipped the
+         * timeout manager and bypassed the shared reference count. */
+        airy_hook_shutdown();
         g_registry_initialized = 0;
     }
     are_ops_set_safety(NULL);
@@ -599,15 +604,14 @@ int main(int argc, char *argv[])
     g_start_time = (uint64_t)time(NULL);
     SVC_LOG_INFO("hook_d: starting");
 
-    if (hook_registry_init() == 0) {
+    if (airy_hook_init() == 0) {
         g_registry_initialized = 1;
-        SVC_LOG_INFO("hook_d: hook registry initialized");
+        SVC_LOG_INFO("hook_d: hook system initialized (registry + timeout manager)");
         /* Register the built-in production hook handlers (audit/metrics/
-         * trace, 12 in total); status/list thus returns real loaded hook
-         * module info */
+         * trace); status/list thus returns real loaded hook module info */
         airy_hook_register_builtin_handlers();
     } else {
-        SVC_LOG_ERROR("hook_d: hook registry init failed");
+        SVC_LOG_ERROR("hook_d: hook system init failed");
     }
 
     airy_sock_t server_fd =
