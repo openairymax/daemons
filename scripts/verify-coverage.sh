@@ -9,10 +9,17 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKS_ROOT="$(dirname "$SCRIPT_DIR")"
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 COVERAGE_TARGET="${COVERAGE_TARGET:-80}"
-EXTERNAL_BUILD_DIR="${PROJECT_ROOT}/../AgentRT-build"
-REPORT_DIR="${EXTERNAL_BUILD_DIR}/reports"
+# 构建目录必须在源码区之外（铁律）；可用 AIRYRT_BUILD_ROOT 覆盖
+BUILD_DIR="${AIRYRT_BUILD_ROOT:-${HOME}/.cache/agentrt/daemons}"
+REPORT_DIR="${BUILD_DIR}/reports"
+
+# 动态发现 daemons 模块（含 common 公共库目录）
+DAEMON_MODULES=()
+for _d in "${BACKS_ROOT}"/*/CMakeLists.txt; do
+    [ -e "$_d" ] || continue
+    DAEMON_MODULES+=("$(basename "$(dirname "$_d")")")
+done
 
 # 颜色定义
 RED='\033[0;31m'
@@ -56,16 +63,16 @@ collect_coverage() {
     mkdir -p "$REPORT_DIR/coverage"
     local all_info_files=""
     
-    for module in commons llm_d tool_d monit_d sched_d market_d; do
-        local module_build="${EXTERNAL_BUILD_DIR}/daemons/${module}"
+    for module in "${DAEMON_MODULES[@]}"; do
+        local module_build="${BUILD_DIR}/daemons/${module}"
         if [ -d "$module_build" ]; then
             cd "$module_build"
-            
+
             # 查找 gcda 文件
             if find . -name "*.gcda" | grep -q .; then
                 log_info "  处理模块: $module"
-                lcov --capture --directory . --output-file "${module}_coverage.info" 2>/dev/null || true
-                
+                lcov --capture --directory . --output-file "${module}_coverage.info"
+
                 if [ -f "${module}_coverage.info" ]; then
                     all_info_files="$all_info_files -a ${module}_coverage.info"
                 fi
@@ -82,14 +89,12 @@ collect_coverage() {
     fi
     
     # 合并所有覆盖率数据
-    cd "${EXTERNAL_BUILD_DIR}"
-    lcov $all_info_files -o "$REPORT_DIR/coverage/total_coverage.info" 2>/dev/null || true
-    
-    # 过滤系统头文件
-    if [ -f "$REPORT_DIR/coverage/total_coverage.info" ]; then
-        lcov --remove "$REPORT_DIR/coverage/total_coverage.info" '/usr/*' --output-file "$REPORT_DIR/coverage/total_coverage.info" 2>/dev/null || true
-        lcov --remove "$REPORT_DIR/coverage/total_coverage.info" '*/tests/*' --output-file "$REPORT_DIR/coverage/total_coverage.info" 2>/dev/null || true
-    fi
+    cd "${BUILD_DIR}"
+    lcov $all_info_files -o "$REPORT_DIR/coverage/total_coverage.info"
+
+    # 过滤系统头文件与测试代码
+    lcov --remove "$REPORT_DIR/coverage/total_coverage.info" '/usr/*' --output-file "$REPORT_DIR/coverage/total_coverage.info"
+    lcov --remove "$REPORT_DIR/coverage/total_coverage.info" '*/tests/*' --output-file "$REPORT_DIR/coverage/total_coverage.info"
     
     log_success "覆盖率数据收集完成"
 }
@@ -103,8 +108,7 @@ generate_html_report() {
             --output-directory "$REPORT_DIR/coverage/html" \
             --title "AgentRT daemon Coverage Report" \
             --legend \
-            --show-details \
-            2>/dev/null || true
+            --show-details
         
         log_success "HTML报告已生成: $REPORT_DIR/coverage/html/index.html"
     else
@@ -139,10 +143,8 @@ verify_coverage() {
     if [ -n "$line_coverage" ]; then
         log_info "行覆盖率: ${line_coverage}%"
         
-        # 检查是否达到目标
-        local coverage_check=$(echo "$line_coverage >= $COVERAGE_TARGET" | bc -l 2>/dev/null || echo "0")
-        
-        if [ "$coverage_check" = "1" ]; then
+        # 检查是否达到目标（fail-closed）
+        if awk -v v="$line_coverage" -v t="$COVERAGE_TARGET" 'BEGIN { exit !(v >= t) }'; then
             log_success "覆盖率达标 (>= ${COVERAGE_TARGET}%)"
             echo ""
             echo "=========================================="
