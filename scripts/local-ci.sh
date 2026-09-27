@@ -2,20 +2,27 @@
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
 # SPDX-FileCopyrightText: 2026 SPHARX Ltd.
 # SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
-# AgentRT daemon CI/CD 本地验证脚本
-# 用于本地验证 CI/CD 流程
-# 包含：构建、测试、静态分析、代码覆盖率
+# AgentRT daemon 本地 CI/CD 验证脚本
+# 单一构建树验证：配置 → 构建 → ctest → 静态分析 → 覆盖率
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKS_ROOT="$(dirname "$SCRIPT_DIR")"
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+AGENTRT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 ENABLE_COVERAGE="${ENABLE_COVERAGE:-OFF}"
-EXTERNAL_BUILD_DIR="${PROJECT_ROOT}/../AgentRT-build"
-REPORT_DIR="${EXTERNAL_BUILD_DIR}/reports"
+# 构建目录必须在源码区之外（铁律）；可用 AIRYRT_BUILD_ROOT 覆盖
+BUILD_DIR="${AIRYRT_BUILD_ROOT:-${HOME}/.cache/agentrt/daemons}"
+REPORT_DIR="${BUILD_DIR}/reports"
+
+# 动态发现 daemons 模块（含 common 公共库目录）
+DAEMON_MODULES=()
+for _d in "${BACKS_ROOT}"/*/CMakeLists.txt; do
+    [ -e "$_d" ] || continue
+    DAEMON_MODULES+=("$(basename "$(dirname "$_d")")")
+done
 
 # 颜色定义
 RED='\033[0;31m'
@@ -33,14 +40,19 @@ echo "=========================================="
 echo "  AgentRT daemon Local CI/CD Validator"
 echo "=========================================="
 echo ""
-log_info "Build Root: $BACKS_ROOT"
-log_info "Build Type: $BUILD_TYPE"
+log_info "Source Root: $AGENTRT_ROOT"
+log_info "Build Dir:   $BUILD_DIR"
+log_info "Build Type:  $BUILD_TYPE"
 log_info "Parallel Jobs: $PARALLEL_JOBS"
 log_info "Coverage: $ENABLE_COVERAGE"
 echo ""
 
-# 创建报告目录
-mkdir -p "$REPORT_DIR"
+if [ ${#DAEMON_MODULES[@]} -eq 0 ]; then
+    log_error "未发现任何 daemons 模块"
+    exit 1
+fi
+log_info "发现模块: ${DAEMON_MODULES[*]}"
+echo ""
 
 # 检查依赖
 check_dependencies() {
@@ -48,7 +60,7 @@ check_dependencies() {
 
     local missing_deps=0
 
-    for cmd in cmake gcc; do
+    for cmd in cmake gcc ctest; do
         if ! command -v "$cmd" &> /dev/null; then
             log_error "缺少依赖: $cmd"
             missing_deps=1
@@ -83,49 +95,39 @@ check_dependencies() {
 # 清理构建目录
 clean() {
     log_info "清理构建目录..."
-    rm -rf "${EXTERNAL_BUILD_DIR}"
+    case "${BUILD_DIR}" in
+        ""|"/") log_error "非法构建目录: ${BUILD_DIR}"; exit 1 ;;
+    esac
+    rm -rf "${BUILD_DIR}"
     log_success "清理完成"
 }
 
-# 构建模块通用函数
-build_module() {
-    local module=$1
-    local module_dir="$BACKS_ROOT/$module"
-    local module_build_dir="${EXTERNAL_BUILD_DIR}/daemons/${module}"
-    
-    log_info "构建 $module..."
-    mkdir -p "$module_build_dir"
-    cd "$module_build_dir"
+# 配置单一构建树
+configure_tree() {
+    log_info "配置单一构建树..."
+    mkdir -p "$BUILD_DIR"
+    cd "$BUILD_DIR"
 
-    local cmake_args="-DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUILD_TESTS=ON"
-    
+    local cmake_args="-DCMAKE_BUILD_TYPE=$BUILD_TYPE"
+
     if [ "$ENABLE_COVERAGE" = "ON" ] && [ "$COVERAGE_AVAILABLE" = true ]; then
-        cmake_args="$cmake_args -DBUILD_COVERAGE=ON"
-        cmake_args="$cmake_args -DCMAKE_C_FLAGS=--coverage"
-        cmake_args="$cmake_args -DCMAKE_EXE_LINKER_FLAGS=--coverage"
+        cmake_args="$cmake_args -DCMAKE_C_FLAGS=--coverage -DCMAKE_EXE_LINKER_FLAGS=--coverage"
     fi
 
-    cmake "$module_dir" $cmake_args
-
-    make -j"$PARALLEL_JOBS"
-
-    log_info "运行 $module 测试..."
-    if [ -f "CTestTestfile.cmake" ]; then
-        ctest --output-on-failure -j"$PARALLEL_JOBS" || log_warn "$module 部分测试失败"
-    fi
-
-    log_success "$module 构建完成"
-    cd "$BACKS_ROOT"
+    cmake "${AGENTRT_ROOT}" $cmake_args
+    log_success "构建树配置完成"
 }
 
-# 构建所有模块
+# 构建并测试
 build_all() {
-    build_module "commons"
-    build_module "llm_d"
-    build_module "tool_d"
-    build_module "monit_d"
-    build_module "sched_d"
-    build_module "market_d"
+    configure_tree
+    log_info "构建（-j$PARALLEL_JOBS）..."
+    cmake --build . -j"$PARALLEL_JOBS"
+
+    log_info "运行全部测试（fail-closed）..."
+    ctest --output-on-failure -j"$PARALLEL_JOBS"
+
+    log_success "构建与测试完成"
 }
 
 # 代码静态分析
@@ -137,33 +139,42 @@ static_analysis() {
 
     log_info "运行静态分析..."
 
+    mkdir -p "$REPORT_DIR"
     local CPPCHECK_REPORT="$REPORT_DIR/cppcheck_report.xml"
 
-    cppcheck \
-        --enable=all \
-        --std=c11 \
-        --platform=unix64 \
-        --xml \
-        --xml-version=2 \
-        --output-file="$CPPCHECK_REPORT" \
-        --suppress=missingIncludeSystem \
-        --suppress=unusedFunction \
-        -j"$PARALLEL_JOBS" \
-        "$BACKS_ROOT/agentrt/commons/src" \
-        "$BACKS_ROOT/llm_d/src" \
-        "$BACKS_ROOT/tool_d/src" \
-        "$BACKS_ROOT/monit_d/src" \
-        "$BACKS_ROOT/sched_d/src" \
-        "$BACKS_ROOT/market_d/src" \
-        2>/dev/null || {
-            log_warn "cppcheck 发现问题，请查看报告: $CPPCHECK_REPORT"
-        }
+    local CPPCHECK_ARGS="--enable=all --std=c11 --platform=unix64"
+    CPPCHECK_ARGS="$CPPCHECK_ARGS --xml --xml-version=2"
+    CPPCHECK_ARGS="$CPPCHECK_ARGS --suppress=missingIncludeSystem"
+    CPPCHECK_ARGS="$CPPCHECK_ARGS --suppress=unusedFunction"
+    CPPCHECK_ARGS="$CPPCHECK_ARGS -j$PARALLEL_JOBS"
+    CPPCHECK_ARGS="$CPPCHECK_ARGS --error-exitcode=1"
 
-    # 统计错误数量
-    if [ -f "$CPPCHECK_REPORT" ]; then
-        local error_count=$(grep -c '<error' "$CPPCHECK_REPORT" 2>/dev/null || echo "0")
-        log_info "cppcheck 发现 $error_count 个问题"
+    # 包含目录：commons（agentrt 根）+ 各模块 include
+    CPPCHECK_ARGS="$CPPCHECK_ARGS -I ${AGENTRT_ROOT}/commons/include"
+    local module
+    for module in "${DAEMON_MODULES[@]}"; do
+        if [ -d "${BACKS_ROOT}/${module}/include" ]; then
+            CPPCHECK_ARGS="$CPPCHECK_ARGS -I ${BACKS_ROOT}/${module}/include"
+        fi
+    done
+
+    # 分析对象：各模块 src/
+    local analysis_dirs=()
+    for module in "${DAEMON_MODULES[@]}"; do
+        if [ -d "${BACKS_ROOT}/${module}/src" ]; then
+            analysis_dirs+=("${BACKS_ROOT}/${module}/src")
+        fi
+    done
+
+    if [ ${#analysis_dirs[@]} -eq 0 ]; then
+        log_error "未找到任何模块源码目录"
+        return 1
     fi
+
+    cppcheck $CPPCHECK_ARGS \
+        --output-file="$CPPCHECK_REPORT" \
+        "${analysis_dirs[@]}" \
+        2>/dev/null
 
     log_success "静态分析完成"
 }
@@ -185,73 +196,72 @@ coverage_analysis() {
     local COVERAGE_DIR="$REPORT_DIR/coverage"
     mkdir -p "$COVERAGE_DIR"
 
-    # 收集所有模块的覆盖率数据
+    # 按模块采集覆盖率数据（单树布局：BUILD_DIR/daemons/<module>/）
     local all_info_files=""
-    for module in commons llm_d tool_d monit_d sched_d market_d; do
-        local module_build_dir="${EXTERNAL_BUILD_DIR}/daemons/${module}"
-        if [ -d "$module_build_dir" ]; then
-            cd "$module_build_dir"
+    local module module_build
+    for module in "${DAEMON_MODULES[@]}"; do
+        module_build="${BUILD_DIR}/daemons/${module}"
+        if [ -d "$module_build" ]; then
+            cd "$module_build"
             if ls *.gcda 1>/dev/null 2>&1; then
-                lcov --capture --directory . --output-file "${module}_coverage.info" 2>/dev/null || true
-                if [ -f "${module}_coverage.info" ]; then
-                    all_info_files="$all_info_files ${module}_coverage.info"
-                fi
+                lcov --capture --directory . --output-file "${module}_coverage.info"
+                all_info_files="$all_info_files -a ${module}_coverage.info"
             fi
         fi
     done
 
-    # 合并覆盖率数据
-    if [ -n "$all_info_files" ]; then
-        cd "$BACKS_ROOT"
-        lcov --output-file "$COVERAGE_DIR/total_coverage.info" $all_info_files 2>/dev/null || true
-        
-        # 过滤系统头文件
-        lcov --remove "$COVERAGE_DIR/total_coverage.info" '/usr/*' --output-file "$COVERAGE_DIR/total_coverage.info" 2>/dev/null || true
-        
-        # 生成HTML报告
-        genhtml "$COVERAGE_DIR/total_coverage.info" --output-directory "$COVERAGE_DIR/html" 2>/dev/null || true
-
-        # 提取覆盖率百分比
-        if [ -f "$COVERAGE_DIR/total_coverage.info" ]; then
-            local coverage_output=$(lcov --summary "$COVERAGE_DIR/total_coverage.info" 2>&1)
-            local coverage_percent=$(echo "$coverage_output" | grep -oP 'lines.*: \K[\d.]+(?=%)' | head -1)
-            
-            if [ -n "$coverage_percent" ]; then
-                log_info "代码覆盖率: ${coverage_percent}%"
-                
-                # 检查是否达到80%
-                if (( $(echo "$coverage_percent >= 80.0" | bc -l 2>/dev/null || echo "0") )); then
-                    log_success "代码覆盖率达标 (>= 80%)"
-                else
-                    log_warn "代码覆盖率未达标 (< 80%)，当前: ${coverage_percent}%"
-                fi
-            fi
-        fi
-
-        log_success "覆盖率报告已生成: $COVERAGE_DIR/html/index.html"
-    else
-        log_warn "未找到覆盖率数据"
+    if [ -z "$all_info_files" ]; then
+        log_error "未找到任何覆盖率数据"
+        return 1
     fi
+
+    cd "$BUILD_DIR"
+    lcov $all_info_files -o "$COVERAGE_DIR/total_coverage.info"
+
+    # 过滤系统头文件
+    lcov --remove "$COVERAGE_DIR/total_coverage.info" '/usr/*' --output-file "$COVERAGE_DIR/total_coverage.info"
+
+    # 生成HTML报告
+    genhtml "$COVERAGE_DIR/total_coverage.info" --output-directory "$COVERAGE_DIR/html"
+
+    # 提取覆盖率百分比
+    local coverage_output coverage_percent
+    coverage_output=$(lcov --summary "$COVERAGE_DIR/total_coverage.info" 2>&1)
+    coverage_percent=$(echo "$coverage_output" | grep -oP 'lines.*: \K[\d.]+(?=%)' | head -1)
+
+    if [ -n "$coverage_percent" ]; then
+        log_info "代码覆盖率: ${coverage_percent}%"
+
+        # 检查是否达到80%（fail-closed：未达标即失败）
+        if awk -v v="$coverage_percent" 'BEGIN { exit !(v >= 80.0) }'; then
+            log_success "代码覆盖率达标 (>= 80%)"
+        else
+            log_error "代码覆盖率未达标 (< 80%): ${coverage_percent}%"
+            return 1
+        fi
+    fi
+
+    log_success "覆盖率报告已生成: $COVERAGE_DIR/html/index.html"
 }
 
 # 生成构建报告
 generate_report() {
     log_info "生成构建报告..."
-    
+
     local REPORT_FILE="$REPORT_DIR/build_report.txt"
-    
+
     {
         echo "========================================"
-        echo "AgentRT Backs模块构建报告"
+        echo "AgentRT daemon 构建报告"
         echo "========================================"
         echo ""
         echo "构建时间: $(date)"
         echo "构建类型: $BUILD_TYPE"
         echo ""
         echo "--- 模块状态 ---"
-        for module in commons llm_d tool_d market_d monit_d sched_d; do
-            local module_build_dir="${EXTERNAL_BUILD_DIR}/daemons/${module}"
-            if [ -d "$module_build_dir" ]; then
+        local module
+        for module in "${DAEMON_MODULES[@]}"; do
+            if [ -d "${BUILD_DIR}/daemons/${module}" ]; then
                 echo "  ${module}: ✓ 已构建"
             else
                 echo "  ${module}: ✗ 未构建"
@@ -267,7 +277,8 @@ generate_report() {
         echo ""
         echo "--- 静态分析 ---"
         if [ -f "$REPORT_DIR/cppcheck_report.xml" ]; then
-            local error_count=$(grep -c '<error' "$REPORT_DIR/cppcheck_report.xml" 2>/dev/null || echo "0")
+            local error_count
+            error_count=$(grep -c '<error' "$REPORT_DIR/cppcheck_report.xml" 2>/dev/null || echo "0")
             echo "  cppcheck问题数: ${error_count}"
         else
             echo "  cppcheck: 未运行"
@@ -275,7 +286,7 @@ generate_report() {
         echo ""
         echo "========================================"
     } > "$REPORT_FILE"
-    
+
     log_success "构建报告已生成: $REPORT_FILE"
 }
 
@@ -285,18 +296,19 @@ usage() {
     echo "用法: $0 [命令]"
     echo ""
     echo "命令:"
-    echo "  clean          清理所有构建目录"
-    echo "  build          构建所有模块"
-    echo "  all            构建所有模块并运行静态分析和覆盖率"
+    echo "  clean          清理构建目录"
+    echo "  build          配置、构建并运行全部测试"
+    echo "  all            构建 + 静态分析 + 覆盖率 + 报告（强制开启覆盖率）"
     echo "  analysis       仅运行静态分析"
     echo "  coverage       仅运行覆盖率分析（需先构建）"
     echo "  report         生成构建报告"
     echo "  help           显示此帮助信息"
     echo ""
     echo "环境变量:"
-    echo "  BUILD_TYPE     构建类型 (Release/Debug)，默认为 Release"
-    echo "  PARALLEL_JOBS  并行作业数，默认为 CPU 核心数"
-    echo "  ENABLE_COVERAGE 启用覆盖率 (ON/OFF)，默认为 OFF"
+    echo "  BUILD_TYPE          构建类型 (Release/Debug)，默认为 Release"
+    echo "  PARALLEL_JOBS       并行作业数，默认为 CPU 核心数"
+    echo "  ENABLE_COVERAGE     启用覆盖率 (ON/OFF)，默认为 OFF"
+    echo "  AIRYRT_BUILD_ROOT   构建目录，默认为 \$HOME/.cache/agentrt/daemons"
     echo ""
 }
 
@@ -308,7 +320,7 @@ case "${1:-build}" in
     build)
         check_dependencies
         build_all
-        log_success "所有模块构建完成!"
+        log_success "构建与测试完成!"
         ;;
     all)
         ENABLE_COVERAGE=ON
