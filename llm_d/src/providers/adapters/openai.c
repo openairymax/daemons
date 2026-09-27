@@ -51,10 +51,10 @@ static provider_ctx_t *openai_init(const char *name, const char *api_key, const 
     airy_random_init();
 
     SVC_LOG_INFO("C-L02: OPENAI: INIT api_base=%s timeout=%.1fs retries=%d has_api_key=%d "
-                 "RPM=%d TPM=%ld",
+                 "RPM=%d",
                  ctx->base.api_base[0] ? ctx->base.api_base : OPENAI_DEFAULT_BASE,
                  ctx->base.timeout_sec, ctx->base.max_retries, ctx->base.api_key[0] ? 1 : 0,
-                 PROVIDER_RL_DEFAULT_RPM, (long)PROVIDER_RL_DEFAULT_TPM);
+                 PROVIDER_RL_DEFAULT_RPM);
 
     return (provider_ctx_t *)ctx;
 }

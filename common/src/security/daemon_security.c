@@ -43,16 +43,6 @@
 #endif
 
 /* pthread.h provided by platform.h — no direct pthread include (CROSS-01) */
-/* Internal state structure (legacy unused descriptor, kept for compat) */
-static struct {
-    bool initialized;
-    sanitize_level_t current_sanitize_level;
-    bool permission_enabled;
-    bool signature_enabled;
-    bool vault_enabled;
-    bool audit_enabled;
-} g_daemons_security
-    __attribute__((unused)) = {false, SANITIZE_LEVEL_NORMAL, false, false, false, false};
 
 /* ---------- Initialization and Shutdown ---------- */
 #include "cupolas_vault.h"
@@ -128,7 +118,7 @@ int daemon_security_init(const daemon_security_config_t *config, airy_err_t *err
     }
 
     AIRY_MEMSET(&g_security_ctx, 0, sizeof(g_security_ctx));
-    g_security_ctx.current_sanitize_level = SANITIZE_LEVEL_STRICT;
+    g_security_ctx.current_sanitize_level = SANITIZE_LEVEL_HIGH;
     g_security_ctx.permission_enabled = true;
     g_security_ctx.signature_enabled = true;
     g_security_ctx.vault_enabled = true;
@@ -254,16 +244,16 @@ int daemon_sanitize_llm_input(const char *input, char *output, size_t output_siz
     ensure_mutex_initialized();
     airy_mtx_lock(&g_security_mutex);
     /* P3.15 ACC-DT16: fail-safe — no more lazy-init. When uninitialized,
-     * keep sanitizing with the strictest SANITIZE_LEVEL_STRICT (sanitizing is
+     * keep sanitizing with SANITIZE_LEVEL_HIGH (sanitizing is
      * a protective operation; refusing would reduce security). Callers should
      * initialize explicitly via daemon_cupolas_init() at daemon startup. */
     sanitize_level_t level;
     if (!g_security_ctx.initialized) {
-        level = SANITIZE_LEVEL_STRICT;
+        level = SANITIZE_LEVEL_HIGH;
         airy_mtx_unlock(&g_security_mutex);
         SVC_LOG_WARN(
             "daemon_sanitize_llm_input: daemon_security not initialized — "
-            "call daemon_cupolas_init() during startup. Using SANITIZE_LEVEL_STRICT (fail-safe).");
+            "call daemon_cupolas_init() during startup. Using SANITIZE_LEVEL_HIGH (fail-safe).");
     } else {
         level = g_security_ctx.current_sanitize_level;
         airy_mtx_unlock(&g_security_mutex);
@@ -278,7 +268,7 @@ int daemon_sanitize_llm_input(const char *input, char *output, size_t output_siz
 
     sanitize_string(output, input, output_size);
 
-    if (level >= SANITIZE_LEVEL_STRICT) {
+    if (level >= SANITIZE_LEVEL_HIGH) {
         for (size_t i = 0; output[i]; i++) {
             if ((unsigned char)output[i] > 127) {
                 output[i] = '?';

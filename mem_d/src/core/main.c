@@ -97,7 +97,7 @@ static void on_get_method(cJSON *params, int id, void *user_data)
 static void on_delete_method(cJSON *params, int id, void *user_data)
 { handle_delete(params, id, *(airy_sock_t *)user_data); }
 
-static void on_count_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+static void on_count_method(cJSON *params, int id, void *user_data)
 { handle_count(id, *(airy_sock_t *)user_data); }
 
 static void on_recent_method(cJSON *params, int id, void *user_data)
@@ -106,10 +106,10 @@ static void on_recent_method(cJSON *params, int id, void *user_data)
 static void on_evolve_method(cJSON *params, int id, void *user_data)
 { handle_evolve(params, id, *(airy_sock_t *)user_data); }
 
-static void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+static void on_health_check_method(cJSON *params, int id, void *user_data)
 { handle_health_check(id, *(airy_sock_t *)user_data); }
 
-static void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+static void on_get_stats_method(cJSON *params, int id, void *user_data)
 { handle_get_stats(id, *(airy_sock_t *)user_data); }
 
 static void on_kb_ingest_method(cJSON *params, int id, void *user_data)

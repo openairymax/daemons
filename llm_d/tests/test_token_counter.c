@@ -34,7 +34,7 @@ static void test_token_counter_count(void)
     assert(counter != NULL);
 
     const char *text = "Hello, world! This is a test.";
-    size_t count __attribute__((unused)) = token_counter_count(counter, text);
+    size_t count = token_counter_count(counter, text);
     assert(count > 0);
 
     token_counter_destroy(counter);
@@ -49,7 +49,7 @@ static void test_token_counter_empty_string(void)
     token_counter_t *counter = token_counter_create("gpt-4");
     assert(counter != NULL);
 
-    size_t count __attribute__((unused)) = token_counter_count(counter, "");
+    size_t count = token_counter_count(counter, "");
     assert(count == 0);
 
     token_counter_destroy(counter);
@@ -64,7 +64,7 @@ static void test_token_counter_null_input(void)
     token_counter_t *counter = token_counter_create("gpt-4");
     assert(counter != NULL);
 
-    size_t count __attribute__((unused)) = token_counter_count(counter, NULL);
+    size_t count = token_counter_count(counter, NULL);
     assert(count == 0);
 
     token_counter_destroy(counter);
@@ -80,7 +80,7 @@ static void test_token_counter_estimate(void)
     assert(counter != NULL);
 
     const char *text = "The quick brown fox jumps over the lazy dog.";
-    size_t estimated __attribute__((unused)) = token_counter_count(counter, text);
+    size_t estimated = token_counter_count(counter, text);
     assert(estimated > 0);
 
     token_counter_destroy(counter);

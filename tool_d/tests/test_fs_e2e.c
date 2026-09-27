@@ -348,7 +348,7 @@ static void test_e2e_not_found(tool_service_t *svc)
     int ret = -999;
     tool_result_t *res = run_tool(svc, "no_such_tool", "tool_d", p, &ret);
     cJSON_Delete(p);
-    TEST(ret == AIRY_ERROR_TOOL_NOT_FOUND, "未知工具返回 TOOL_NOT_FOUND");
+    TEST(ret == AIRY_ERR_EXEC_NOT_FOUND, "未知工具返回 TOOL_NOT_FOUND");
     if (res) {
         tool_result_free(res);
     }
@@ -364,7 +364,7 @@ static void test_e2e_validation(tool_service_t *svc)
     int ret = -999;
     tool_result_t *res = run_tool(svc, "fs_read", "tool_d", p, &ret);
     cJSON_Delete(p);
-    TEST(ret == AIRY_ERROR_TOOL_VALIDATION, "缺少必填参数返回 TOOL_VALIDATION");
+    TEST(ret == AIRY_ERR_EXEC_VALIDATION, "缺少必填参数返回 TOOL_VALIDATION");
     if (res) {
         tool_result_free(res);
     }

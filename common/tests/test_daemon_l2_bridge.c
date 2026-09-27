@@ -29,7 +29,7 @@
 
 #include "daemon_l1_server.h"
 
-#include "ipc.h"
+#include "kern_ipc.h"
 
 #include <airymax/ipc.h>       /* [SC] SSoT: AIRY_IPC_MAGIC */
 #include <airymax/task_desc.h> /* [SC] CRC-32 reference for field assertions */

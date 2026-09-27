@@ -21,10 +21,10 @@
 #include <string.h>
 
 int monitor_service_start_agent_trace(monitor_service_t *service,
-                                      const char *agent_id __attribute__((unused)),
-                                      const char *task_id __attribute__((unused)),
+                                      const char *agent_id,
+                                      const char *task_id,
                                       const loop_detection_config_t *loop_config
-                                      __attribute__((unused)),
+                                     ,
                                       agent_execution_trace_t **trace)
 {
     if (!service || !trace) {
@@ -202,7 +202,7 @@ int monitor_service_check_loop(monitor_service_t *service, agent_execution_trace
 }
 
 int monitor_service_end_agent_trace(monitor_service_t *service, agent_execution_trace_t *trace,
-                                    agent_execution_state_t final_state __attribute__((unused)))
+                                    agent_execution_state_t final_state)
 {
     if (!service || !trace) {
         return AIRY_ERR_INVALID_PARAM;

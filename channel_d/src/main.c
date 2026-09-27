@@ -27,7 +27,7 @@ DAEMON_DECLARE_COMMON(channel_d, channel, CHANNEL_D_SOCKET_PATH, CHANNEL_D_PIPE_
 
 DAEMON_DECLARE_SHUTDOWN_METHOD(channel_d)
 
-static channel_service_t *g_svc __attribute__((unused)) = NULL;
+static channel_service_t *g_svc = NULL;
 
 static void destroy_service_channel_d(void)
 {

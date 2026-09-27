@@ -175,8 +175,8 @@ ctest --test-dir ../daemons-build -R sched_d --output-on-failure
 | [daemons](https://atomgit.com/openairymax/daemons) | `airy_llm_service` / `airy_tool_service` 服务适配层 |
 
 sched_d 的全部源文件直接编入可执行文件（不额外抽服务静态库），单元测试通过重复编译
-`src/` 内的实现文件覆盖真实代码路径。GNU ld 下 `airy_coreloopthree` 以 `--whole-archive`
-强制纳入；Windows 额外链接 `ws2_32`、`bcrypt`。
+`src/` 内的实现文件覆盖真实代码路径。依赖库按成员级 DAG 拓扑序链接，单遍左到右
+解析完备；Windows 额外链接 `ws2_32`、`bcrypt`。
 
 ## 关系
 

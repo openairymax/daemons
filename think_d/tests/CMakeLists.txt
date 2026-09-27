@@ -49,24 +49,15 @@ foreach(TEST_SRC ${THINK_TEST_SOURCES})
         target_link_libraries(test_think_${TEST_NAME} PRIVATE cjson)
     endif()
 
-    # 与 think_d 主目标一致：coreloopthree ↔ cognition ↔ llm_service/
-    # tool_service 静态库循环依赖，需 --start-group/--end-group（仅 GNU ld）
-    if(NOT MSVC AND NOT APPLE)
-        target_link_libraries(test_think_${TEST_NAME} PRIVATE
-            "-Wl,--start-group"
-            airy_coreloopthree
-            airy_cognition
-            airy_llm_service
-            airy_tool_service
-            "-Wl,--end-group"
-        )
-    else()
-        target_link_libraries(test_think_${TEST_NAME} PRIVATE
-            airy_coreloopthree
-            airy_llm_service
-            airy_tool_service
-        )
-    endif()
+    # 与 think_d 主目标一致：库序即成员级 DAG 拓扑序，单遍左到右解析
+    # 完备；cognition<->coreloopthree 静态库环由 cognition 目标的显式
+    # 声明托管。
+    target_link_libraries(test_think_${TEST_NAME} PRIVATE
+        airy_coreloopthree
+        airy_cognition
+        airy_llm_service
+        airy_tool_service
+    )
 
     target_compile_options(test_think_${TEST_NAME} PRIVATE
         -Wall -Wextra -g -Wno-unused-function

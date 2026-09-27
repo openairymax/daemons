@@ -83,23 +83,6 @@ llm_complexity_level_t assess_complexity(const char *input)
 }
 
 /**
- * @brief Pick the default model by complexity
- */
-static __attribute__((unused)) const char *route_by_complexity(llm_complexity_level_t level)
-{
-    switch (level) {
-    case LLM_COMPLEXITY_SIMPLE:
-        return "gpt-4o-mini";
-    case LLM_COMPLEXITY_MODERATE:
-        return "gpt-4o";
-    case LLM_COMPLEXITY_COMPLEX:
-        return "claude-sonnet";
-    default:
-        return "gpt-4o-mini";
-    }
-}
-
-/**
  * @brief Record the routing-decision audit log
  */
 void log_routing_decision(const char *model, llm_complexity_level_t complexity,

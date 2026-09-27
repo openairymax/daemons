@@ -46,7 +46,7 @@ static airy_err_t cupolas_bootstrap(const char *daemon_name, int pep_mode)
      * fail-closed (uninitialized = denied). */
     daemon_security_config_t sec_config;
     __builtin_memset(&sec_config, 0, sizeof(sec_config));
-    sec_config.sanitize_level = SANITIZE_LEVEL_STRICT;
+    sec_config.sanitize_level = SANITIZE_LEVEL_HIGH;
     sec_config.sanitizer_rules_path = NULL;
     /* Tool-level permission rules (SSoT): $AIRY_CONFIG_DIR/cupolas/permission_rules.yaml.
      * Absent file keeps the ACL empty (fail-closed) so tool_d denies all tools.

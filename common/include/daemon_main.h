@@ -109,7 +109,7 @@ extern "C" {
     static daemon_bootstrap_sd_t *g_bsd_##daemon_name = NULL;                                                      \
     static daemon_bootstrap_ipc_t *g_bipc_##daemon_name = NULL;                                                    \
                                                                                                                    \
-    static void signal_handler_##daemon_name(int sig)                                                              \
+    static inline void signal_handler_##daemon_name(int sig)                                                       \
     {                                                                                                              \
         (void)sig;                                                                                                 \
         /* Signal handlers must stay async-signal-safe: no mutex locks,     \
@@ -125,7 +125,7 @@ extern "C" {
         DAEMON_SIG_RECEIVED_TRACE(daemon_name);                                                                    \
     }                                                                                                              \
                                                                                                                    \
-    static void svc_log_toggle_handler_##daemon_name(int sig)                                                      \
+    static inline void svc_log_toggle_handler_##daemon_name(int sig)                                               \
     {                                                                                                              \
         (void)sig;                                                                                                 \
         static int debug_mode = 0;                                                                                 \
@@ -133,7 +133,7 @@ extern "C" {
         log_set_module_level("*", debug_mode ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO);                                  \
     }                                                                                                              \
                                                                                                                    \
-    __attribute__((unused)) static void print_usage_##daemon_name(const char *prog)                                \
+    static inline void print_usage_##daemon_name(const char *prog)                                                 \
     {                                                                                                              \
         char buf[256];                                                                                             \
         fputs("AgentRT " #daemon_name " (" #daemon_cname ")\n", stdout);                                           \
@@ -152,7 +152,7 @@ extern "C" {
         fputs(buf, stdout);                                                                                        \
     }                                                                                                              \
                                                                                                                    \
-    __attribute__((unused)) static int daemon_handle_request_json_##daemon_name(                                   \
+    static inline int daemon_handle_request_json_##daemon_name(                                   \
         const char *req_text, size_t req_len, method_dispatcher_t *dispatcher, airy_sock_t client_fd)              \
     {                                                                                                              \
         /* Parse + validate + dispatch, then emit the response through the  \
@@ -201,7 +201,7 @@ extern "C" {
         return 0;                                                                                                   \
     }                                                                                                              \
                                                                                                                    \
-    __attribute__((unused)) static int daemon_handle_client_##daemon_name(                                         \
+    static inline int daemon_handle_client_##daemon_name(                                         \
         airy_sock_t client_fd, method_dispatcher_t *dispatcher)                                                    \
     {                                                                                                              \
         /* Read the full JSON-RPC request frame. airy_daemon_read_request   \
@@ -229,7 +229,7 @@ extern "C" {
         return rc;                                                                                                 \
     }                                                                                                              \
                                                                                                                    \
-    __attribute__((unused)) static int daemon_on_client_##daemon_name(void *service_ctx,                           \
+    static inline int daemon_on_client_##daemon_name(void *service_ctx,                    \
                                                                       airy_sock_t client_fd)                       \
     {                                                                                                              \
         (void)service_ctx;                                                                                         \
@@ -258,7 +258,7 @@ extern "C" {
  *       so *(airy_sock_t *)user_data is the client socket.
  */
 #define DAEMON_DECLARE_SHUTDOWN_METHOD(daemon_name)                                      \
-    static void on_shutdown_method_##daemon_name(cJSON *params, int id, void *user_data) \
+    static inline void on_shutdown_method_##daemon_name(cJSON *params, int id, void *user_data) \
     {                                                                                    \
         (void)params;                                                                    \
         /* Same as the signal handler: atomic flag + event-driver async-   \
@@ -302,7 +302,7 @@ extern "C" {
 #define DAEMON_L2_ENABLE(daemon_name, ns_upper, ns_lower)                                               \
     static daemon_l2_bridge_t *g_l2_bridge_##daemon_name = NULL;                                        \
                                                                                                         \
-    __attribute__((unused)) static int daemon_l2_dispatch_##daemon_name(                                \
+    static inline int daemon_l2_dispatch_##daemon_name(                                \
         const char *req_json, size_t req_len, char **resp_json, size_t *resp_len, void *userdata)       \
     {                                                                                                   \
         method_dispatcher_t *dispatcher = (method_dispatcher_t *)userdata;                              \
@@ -331,7 +331,7 @@ extern "C" {
         return 0;                                                                                       \
     }                                                                                                   \
                                                                                                         \
-    __attribute__((unused)) static int daemon_l2_mount_##daemon_name(method_dispatcher_t *dispatcher)   \
+    static inline int daemon_l2_mount_##daemon_name(method_dispatcher_t *dispatcher)   \
     {                                                                                                   \
         if (!daemon_l1_transport_enabled(#ns_upper)) {                                                  \
             SVC_LOG_INFO("l2 %s: transport off, staying on sockets", #ns_lower);                        \
@@ -347,7 +347,7 @@ extern "C" {
         return 0;                                                                                       \
     }                                                                                                   \
                                                                                                         \
-    __attribute__((unused)) static void daemon_l2_unmount_##daemon_name(void)                           \
+    static inline void daemon_l2_unmount_##daemon_name(void)                    \
     {                                                                                                   \
         daemon_l2_bridge_stop(g_l2_bridge_##daemon_name);                                               \
         g_l2_bridge_##daemon_name = NULL;                                                               \

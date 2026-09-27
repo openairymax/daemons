@@ -124,33 +124,19 @@ target_include_directories(think_d PRIVATE
     ${CJSON_INCLUDE_DIRS}
 )
 
+# 依赖拓扑序（成员级 DAG，单遍左到右解析完备）：
+# cognition/engine.o -> coreloopthree/gccp.o -> llm_service/llm_service_complete；
+# cognition/engine.o -> tool_service/tool_result_free。
 target_link_libraries(think_d PRIVATE
     airy_think_service
+    airy_cognition
+    airy_coreloopthree
+    airy_llm_service
+    airy_tool_service
     airy_common
     Threads::Threads
     airy_platform_libs
 )
-
-# coreloopthree ↔ cognition ↔ llm_service/tool_service 存在静态库循环依赖
-# （engine.o 引用 coreloopthree.a 的 gccp.o；gccp.o 引用 llm_service.a 的
-# llm_service_complete；engine.o 引用 tool_service.a 的 tool_result_free）。
-# 与 gateway_d 同款 --start-group/--end-group 方案（仅 GNU ld）。
-if(NOT MSVC AND NOT APPLE)
-    target_link_libraries(think_d PRIVATE
-        "-Wl,--start-group"
-        airy_coreloopthree
-        airy_cognition
-        airy_llm_service
-        airy_tool_service
-        "-Wl,--end-group"
-    )
-else()
-    target_link_libraries(think_d PRIVATE
-        airy_coreloopthree
-        airy_llm_service
-        airy_tool_service
-    )
-endif()
 
 if(NOT MSVC)
 target_compile_options(think_d PRIVATE

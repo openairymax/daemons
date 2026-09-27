@@ -76,7 +76,7 @@ void on_dag_status_method(cJSON *params, int id, void *user_data)
     handle_dag_status(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_dag_list_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+void on_dag_list_method(cJSON *params, int id, void *user_data)
 {
     handle_dag_list(id, *(airy_sock_t *)user_data);
 }
@@ -86,12 +86,12 @@ void on_dag_cancel_method(cJSON *params, int id, void *user_data)
     handle_dag_cancel(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_get_stats_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+void on_get_stats_method(cJSON *params, int id, void *user_data)
 {
     handle_get_stats(id, *(airy_sock_t *)user_data);
 }
 
-void on_health_check_method(cJSON *params __attribute__((unused)), int id, void *user_data)
+void on_health_check_method(cJSON *params, int id, void *user_data)
 {
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
@@ -434,7 +434,7 @@ static void handle_health_check(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-static void handle_checkpoint_save(cJSON *params __attribute__((unused)), int id,
+static void handle_checkpoint_save(cJSON *params, int id,
                                    airy_sock_t client_fd)
 {
     char *json_out = NULL;

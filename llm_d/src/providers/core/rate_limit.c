@@ -6,7 +6,7 @@
  * @brief provider 域通用令牌桶限流与重试。
  *
  * 自 openai 适配器提升为 core 机制（B16-S3，0.1.18 方案表 C）：
- * - RPM/TPM 令牌桶窗口计数
+ * - RPM 令牌桶窗口计数
  * - HTTP 429 检测与 Retry-After 解析
  * - 指数退避 + 抖动
  * - provider_http_request_with_retry（限流 + 429/5xx 退避的 HTTP POST）
@@ -33,9 +33,6 @@ void provider_rl_init(provider_rate_limiter_t *rl)
     rl->rpm_window_start = time(NULL);
     rl->rpm_count = 0;
     rl->rpm_limit = PROVIDER_RL_DEFAULT_RPM;
-    rl->tpm_count = 0;
-    rl->tpm_window_start = time(NULL);
-    rl->tpm_limit = PROVIDER_RL_DEFAULT_TPM;
     rl->last_429_time = 0;
     rl->retry_after_sec = 0;
     rl->consecutive_429s = 0;
@@ -62,26 +59,6 @@ static int rl_check_rpm(provider_rate_limiter_t *rl)
     }
 
     rl->rpm_count++;
-    airy_mtx_unlock(&rl->lock);
-    return 0;
-}
-
-static int __attribute__((unused)) rl_check_tpm(provider_rate_limiter_t *rl, int tokens)
-{
-    time_t now = time(NULL);
-    airy_mtx_lock(&rl->lock);
-
-    if (now - rl->tpm_window_start >= 60) {
-        rl->tpm_count = 0;
-        rl->tpm_window_start = now;
-    }
-
-    if (rl->tpm_count + tokens > rl->tpm_limit) {
-        airy_mtx_unlock(&rl->lock);
-        return AIRY_ERR_LLM_RATE_LIMIT;
-    }
-
-    rl->tpm_count += tokens;
     airy_mtx_unlock(&rl->lock);
     return 0;
 }

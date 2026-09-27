@@ -20,7 +20,7 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== Agent 服务静态库 ====================
-# 提取 service/agent_svc_adapter 为独立静态库，供 agent_d 可执行文件与单元测试共用，
+# 提取 service 为独立静态库，供 agent_d 可执行文件与单元测试共用，
 # 消除桩函数依赖。排除 main.c（含 main()）。
 set(AGENT_SERVICE_SOURCES
     src/service.c
@@ -28,7 +28,6 @@ set(AGENT_SERVICE_SOURCES
     src/service_spawn.c   # Agent 服务-spawn 域
     src/service_invoke.c  # Agent 服务-调用/会话域
     src/service_stats.c   # Agent 服务-状态/统计域
-    src/agent_svc_adapter.c
 )
 
 add_library(airy_agent_service STATIC ${AGENT_SERVICE_SOURCES})

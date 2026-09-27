@@ -17,7 +17,6 @@ set(MARKET_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/market_service_install.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/market_service_listing.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/market_service_config.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/market_svc_adapter.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/publisher.c
 )
 

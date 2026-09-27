@@ -7,15 +7,14 @@
  *
  * P0.17 phase 2: extracted the daemon-module extension codes from
  * daemons/common/include/error.h into this standalone header, so daemon
- * sources can include it directly to get the daemon extension codes,
- * without depending on the daemons error.h (due to -I path ordering,
- * #include "error.h" resolves to the commons error.h first).
+ * sources can include it directly to get the daemon extension codes.
+ * (The daemons error.h compat layer has since been removed; the bare
+ * #include "error.h" now resolves to the commons error.h only.)
  *
  * Code range: -910 to -949 (the original -900 range collided with
  * commons' AIRY_ERR_PROTOCOL; moved to the free -910 range in G2.2).
  *
  * @see commons/utils/error/error.h  commons authoritative codes
- * @see daemons/common/include/error.h       daemons compat layer (includes this)
  */
 
 #ifndef AIRY_RT_DAEMON_ERRORS_H

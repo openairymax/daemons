@@ -60,8 +60,8 @@ foreach(TEST_SRC ${TEST_SOURCES})
     endif()
 
     # PEP 裁定缓存测试——编译实现源；
-    # gw_svc_call 符号由 airy_gateway_service（含 biz 全部源）提供，
-    # 需 start-group 兜底与 svc_common/airy_syscall 的静态库循环依赖。
+    # gw_svc_call 符号由 airy_gateway_service（含 biz 全部源）提供。
+    # 依赖方向自上而下（gateway_service -> syscall），单遍左到右解析完备。
     # bench_gateway_pep（PEP 端到端基准）同一装配。
     if(${TEST_NAME} STREQUAL "test_gateway_pep_cache" OR
        ${TEST_NAME} STREQUAL "bench_gateway_pep")
@@ -71,19 +71,10 @@ foreach(TEST_SRC ${TEST_SOURCES})
         target_include_directories(${TEST_NAME} PRIVATE
             ${CJSON_INCLUDE_DIRS}
         )
-        if(UNIX AND NOT APPLE)
-            target_link_libraries(${TEST_NAME} PRIVATE
-                "-Wl,--start-group"
-                airy_gateway_service
-                airy_syscall
-                "-Wl,--end-group"
-            )
-        else()
-            target_link_libraries(${TEST_NAME} PRIVATE
-                airy_gateway_service
-                airy_syscall
-            )
-        endif()
+        target_link_libraries(${TEST_NAME} PRIVATE
+            airy_gateway_service
+            airy_syscall
+        )
     endif()
 
     target_include_directories(${TEST_NAME} PRIVATE
@@ -121,23 +112,13 @@ foreach(TEST_SRC ${TEST_SOURCES})
         # 架构约束 2026-08-25 "必须走 syscall": gateway 测试目标经
         # gateway_lib_obj（OBJECT 形式）引用 airy_sys_svc_call（atoms/syscall
         # svc_dispatch.o），不经 gateway 库目标故无 PUBLIC 传递，必须显式
-        # 链接 airy_syscall。Linux 用 --start-group 兜底静态库循环引用
-        # （与 gateway_d 主目标同模式）；macOS ld64 不支持该标志直接链接。
-        if(UNIX AND NOT APPLE)
-            target_link_libraries(${TEST_NAME} PRIVATE
-                "-Wl,--start-group"
-                $<TARGET_OBJECTS:gateway_lib_obj>
-                airy_syscall
-                airy_protocols
-                "-Wl,--end-group"
-            )
-        else()
-            target_link_libraries(${TEST_NAME} PRIVATE
-                $<TARGET_OBJECTS:gateway_lib_obj>
-                airy_syscall
-                airy_protocols
-            )
-        endif()
+        # 链接 airy_syscall。对象库直接参与链接无归档顺序问题，
+        # 依赖方向自上而下（syscall -> protocols），单遍左到右解析完备。
+        target_link_libraries(${TEST_NAME} PRIVATE
+            $<TARGET_OBJECTS:gateway_lib_obj>
+            airy_syscall
+            airy_protocols
+        )
     endif()
 
     if(AIRY_HAS_MICROHTTPD)
