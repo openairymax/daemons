@@ -43,13 +43,8 @@ set(SVC_COMMON_SOURCES
     src/ipc/ipc_bus_helper.c       # C-L09: daemon IPC Bus 自动注册便捷层
     # 0c A 类直搬：jsonrpc_helpers/method_dispatcher/param_validator
     # 权威实现迁 commons/utils/ipc，符号经 airy_common 提供（daemons 留 re-export 头）
-    src/discovery/service_discovery.c   # 跨进程服务发现
-    src/discovery/service_discovery_lb.c # 跨进程服务发现-负载均衡
-    src/discovery/service_discovery_api.c # 跨进程服务发现-操作 API
-    src/discovery/service_discovery_stats.c # 跨进程服务发现-统计
-    src/discovery/service_discovery_backend_shm.c # 跨进程服务发现-shm 后端
-    src/discovery/service_discovery_backend_file.c # 跨进程服务发现-file 后端
-    src/discovery/service_discovery_helper.c  # C-L08: daemon 自动注册便捷层
+    # 0c A 类直搬：跨进程服务发现全家族迁 commons/utils/sd（g14 补完 P0.17
+    # 阶段 4 半程迁移），符号经 airy_common PUBLIC 链接提供。
     # 0c SSoT 收敛：熔断器权威实现迁 commons/utils/ipc（src/circuit_breaker.c），
     # 符号经 airy_common PUBLIC 链接提供（include/circuit_breaker.h 兼容头已删，
     # 裸引经 PUBLIC include 路径直接解析 commons 权威）。
@@ -209,9 +204,6 @@ target_include_directories(svc_common PUBLIC
     # 新增网络和IPC模块
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/network>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/ipc>
-    # P0.17 阶段 4: service_discovery.h/service_discovery_helper.h/daemon_bootstrap_sd.h
-    # 迁移至 commons/utils/sd（daemons 版 service_discovery.h 兼容头已删，裸引直接解析权威）
-    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/sd>
     # P0.17 阶段 1: daemon_defaults.h 重导出 airy_defaults.h（位于 commons/include）
     $<BUILD_INTERFACE:${COMMONS_DIR}/include>
     # daemons/common/include 兼容层路径（放最后，避免 atoms 误命中重导出兼容头）
@@ -226,7 +218,6 @@ target_include_directories(svc_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/svc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/auth
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ipc
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/discovery
     ${CMAKE_CURRENT_SOURCE_DIR}/src/security
     ${CMAKE_CURRENT_SOURCE_DIR}/src/daemon
     ${CMAKE_CURRENT_SOURCE_DIR}/src/util
