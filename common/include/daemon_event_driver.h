@@ -4,6 +4,7 @@
 #ifndef DAEMON_EVENT_DRIVER_H
 #define DAEMON_EVENT_DRIVER_H
 
+#include "daemon_errors.h"
 #include "airy_event_loop.h"
 #include "method_dispatcher.h"
 #include "svc_common.h"
