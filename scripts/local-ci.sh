@@ -121,7 +121,7 @@ configure_tree() {
 # 构建并测试
 build_all() {
     configure_tree
-    log_info "构建（-j$PARALLEL_JOBS）..."
+    log_info "构建（-j${PARALLEL_JOBS}）..."
     cmake --build . -j"$PARALLEL_JOBS"
 
     log_info "运行全部测试（fail-closed）..."
