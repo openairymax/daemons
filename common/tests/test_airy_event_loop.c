@@ -5,7 +5,7 @@
  * test_airy_event_loop.c - AgentRT Event Loop Module Unit Tests
  */
 
-#include "../include/airy_event_loop.h"
+#include "airy_event_loop.h"
 
 #include <stdio.h>
 #include <stdlib.h>
