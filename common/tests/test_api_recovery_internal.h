@@ -18,7 +18,7 @@
 #ifndef TEST_API_RECOVERY_INTERNAL_H
 #define TEST_API_RECOVERY_INTERNAL_H
 
-#include "../include/api_recovery.h"
+#include "api_recovery.h"
 #include "error.h"
 
 #include <stdio.h>
