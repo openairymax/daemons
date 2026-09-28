@@ -235,7 +235,6 @@ target_include_directories(svc_common PRIVATE
 target_include_directories(svc_common PUBLIC
     $<BUILD_INTERFACE:${ATOMS_DIR}/coreloopthree/include>
     $<BUILD_INTERFACE:${ATOMS_DIR}/memory>
-    $<BUILD_INTERFACE:${ATOMS_DIR}/memory/src>
     # W18: taskflow_advanced.h 被 loop.h 包含（DAG 工作流集成），
     # orchestrator.c 包含 loop.h 因此间接依赖 taskflow 类型定义
     $<BUILD_INTERFACE:${ATOMS_DIR}/taskflow/include>
