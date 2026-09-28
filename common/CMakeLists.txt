@@ -184,8 +184,9 @@ endif()
 # 会先命中 daemons 重导出兼容头（虽然内部经相对路径到达 commons，但仍构成编译期
 # atoms→daemons 反向依赖）。将 daemons/common/include 移至 commons 路径之后，
 # 确保 atoms 直接解析 commons 权威版本，完全消除 IRON-6 违规。
-# 注意：daemons/common/include 中仍有未迁移的头文件（platform.h/compat.h/
-# thread_pool.h 等），daemons 自己的源代码仍可通过此路径解析。
+# 注意：daemons/common/include 中 platform.h / compat.h 两个重导出兼容头
+# 已随 0.1.19 施工线⑦拆除（消费者一律经 -I 直解 commons 权威版）；其余
+# 头文件均为 daemons 框架自有头，daemons 自己的源代码仍经此路径解析。
 target_include_directories(svc_common PUBLIC
     # commons 权威路径（优先）
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/include>
