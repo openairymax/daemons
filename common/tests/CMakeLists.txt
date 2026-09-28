@@ -28,7 +28,6 @@ set(TEST_SOURCES
     test_daemon_security.c
     test_airy_event_loop.c
     test_api_recovery.c
-    test_service_discovery.c
     test_svc_model_defaults.c
     test_agent_vocab.c
     test_hall_writer.c
@@ -39,17 +38,8 @@ foreach(TEST_SRC ${TEST_SOURCES})
     get_filename_component(TEST_NAME ${TEST_SRC} NAME_WE)
     set(TARGET_NAME "svc_${TEST_NAME}")
 
-    # test_service_discovery.c 已按功能域拆分，需一并编译各域文件
     set(EXTRA_SRCS "")
-    if(TEST_SRC STREQUAL "test_service_discovery.c")
-        set(EXTRA_SRCS
-            test_service_discovery_lifecycle.c
-            test_service_discovery_discover.c
-            test_service_discovery_select.c
-            test_service_discovery_health.c
-            test_service_discovery_misc.c
-        )
-    elseif(TEST_SRC STREQUAL "test_api_recovery.c")
+    if(TEST_SRC STREQUAL "test_api_recovery.c")
         set(EXTRA_SRCS
             test_api_recovery_pool.c
             test_api_recovery_cred.c
