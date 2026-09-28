@@ -257,8 +257,9 @@ install(TARGETS gateway_d llm_d tool_d
 # 此处统一收集实际链接供 airy_depgraph 构建期校验。架构约束：
 # daemon 之间禁进程内符号引用（跨界调用必须走 svc_common 总线）——
 # 未来新增未登记的跨 daemon/模块链接即 fail-closed。
+# 白名单路径由 airy_linkgate.cmake 单点定义，调用点零路径知识。
 # gateway_d 已在自身 CMakeLists 收集（含 airy_gateway_service），不重复。
 foreach(_dg llm_d tool_d monit_d sched_d market_d channel_d notify_d
            hook_d mem_d agent_d a2a_d think_d cupolas_d maths_d supervisor_d)
-    airy_linkgate_collect(${_dg} "${CMAKE_CURRENT_SOURCE_DIR}/../../link-whitelist.txt")
+    airy_linkgate_collect(${_dg})
 endforeach()
