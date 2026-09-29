@@ -5,10 +5,9 @@
  * @file llm_router.c
  * @brief P3.1.5: LLM router orchestrator - unified select + endpoint mgmt + stats.
  *
- * Orchestrates the four routing strategies and provides the unified
- * airy_router_select_provider() interface. Handles endpoint
- * register/unregister, statistics collection and default-strategy
- * management.
+ * Orchestrates the four routing strategies behind llm_router_route().
+ * Handles endpoint registration, statistics collection and the default
+ * routing strategy.
  *
  * Routing strategies (implemented in separate files):
  *   - P3.1.1 cost_aware_router.c:     cost-aware routing (decision tree)
@@ -143,41 +142,6 @@ int llm_router_register_endpoint(const llm_endpoint_t *endpoint)
     return 0;
 }
 
-int llm_router_unregister_endpoint(const char *provider_name, const char *model_name)
-{
-    router_ctx_t *ctx = router_ctx_get();
-
-    if (!provider_name || !model_name) {
-        AIRY_LOG_ERROR("C-L02: LLMRouter: unregister_endpoint with NULL params STACK: "
-                       "llm_router_unregister_endpoint");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    AIRY_MUTEX_LOCK(&ctx->mutex);
-
-    for (size_t i = 0; i < ctx->endpoint_count; i++) {
-        llm_endpoint_t *ep = &ctx->endpoints[i];
-        if (strcmp(ep->provider_name, provider_name) == 0 &&
-            strcmp(ep->model_name, model_name) == 0) {
-            AIRY_LOG_INFO("C-L02: LLMRouter: unregistering endpoint %s/%s", provider_name,
-                          model_name);
-
-            if (i < ctx->endpoint_count - 1) {
-                AIRY_MEMCPY(ep, &ctx->endpoints[ctx->endpoint_count - 1], sizeof(llm_endpoint_t));
-            }
-            ctx->endpoint_count--;
-            AIRY_MUTEX_UNLOCK(&ctx->mutex);
-            return 0;
-        }
-    }
-
-    AIRY_LOG_WARN("C-L02: LLMRouter: endpoint %s/%s not found for unregister "
-                  "(total_endpoints=%zu) STACK: llm_router_unregister_endpoint",
-                  provider_name, model_name, ctx->endpoint_count);
-    AIRY_MUTEX_UNLOCK(&ctx->mutex);
-    return AIRY_ERR_NOT_FOUND;
-}
-
 int llm_router_route(const llm_route_request_t *request, llm_route_result_t *result)
 {
     router_ctx_t *ctx = router_ctx_get();
@@ -303,49 +267,4 @@ int llm_router_get_stats(llm_router_stats_t *stats)
                    (unsigned long long)stats->total_requests, stats->total_cost);
 
     return 0;
-}
-
-int llm_router_set_default_strategy(llm_route_strategy_t strategy)
-{
-    router_ctx_t *ctx = router_ctx_get();
-
-    if (strategy >= LLM_ROUTE_COUNT) {
-        AIRY_LOG_ERROR(
-            "C-L02: LLMRouter: invalid strategy %d STACK: llm_router_set_default_strategy",
-            strategy);
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    AIRY_MUTEX_LOCK(&ctx->mutex);
-    llm_route_strategy_t old = ctx->default_strategy;
-    ctx->default_strategy = strategy;
-    AIRY_MUTEX_UNLOCK(&ctx->mutex);
-
-    AIRY_LOG_INFO("C-L02: LLMRouter: default strategy changed %d -> %d", old, strategy);
-
-    return 0;
-}
-
-/**
- * @brief airy_router_select_provider - unified provider-selection interface.
- *
- * Wraps llm_router_route with a simpler API. External callers need not
- * construct the llm_route_request_t struct.
- */
-int airy_router_select_provider(const char *prompt, size_t prompt_len, uint32_t required_caps,
-                                uint32_t max_tokens, double max_cost, uint32_t max_latency_ms,
-                                llm_route_strategy_t strategy, llm_route_result_t *result)
-{
-    llm_route_request_t request;
-    AIRY_MEMSET(&request, 0, sizeof(request));
-
-    request.prompt = prompt;
-    request.prompt_len = prompt_len;
-    request.required_caps = required_caps;
-    request.max_tokens = max_tokens;
-    request.max_cost = max_cost;
-    request.max_latency_ms = max_latency_ms;
-    request.strategy = strategy;
-
-    return llm_router_route(&request, result);
 }

@@ -184,7 +184,6 @@ void provider_openai_tool_calls_foreach(const char *tool_calls_json,
 /* JSON 对象字段条件存取惯用法（协议无关，适配层与 core 共用）：
  * str_val——字段为合法字符串（含空串）时返回值串，否则 NULL；
  * str_set——有效时赋 *dst（先释放原值，NULL 安全）；
- * num_set——数值字段有效时赋 (uint32_t) 值；
  * u32_get——数值字段取值（无效或 obj 为 NULL 时返回 0）。 */
 static inline const char *provider_json_str_val(const cJSON *obj, const char *key)
 {
@@ -199,13 +198,6 @@ static inline void provider_json_str_set(const cJSON *obj, const char *key, char
         AIRY_FREE(*dst);
         *dst = AIRY_STRDUP(v);
     }
-}
-
-static inline void provider_json_num_set(const cJSON *obj, const char *key, uint32_t *dst)
-{
-    cJSON *v = obj ? cJSON_GetObjectItem(obj, key) : NULL;
-    if (cJSON_IsNumber(v))
-        *dst = (uint32_t)v->valuedouble;
 }
 
 static inline uint32_t provider_json_u32_get(const cJSON *obj, const char *key)
