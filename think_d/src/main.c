@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.4.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.5.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -61,13 +61,13 @@ int main(int argc, char **argv)
     daemon_llm_ops_init("think_d");
     daemon_tool_ops_init("think_d");
 
-    if (svc_prepare_think_d(config_path) != 0) {
+    if (svc_prepare(config_path) != 0) {
         SVC_LOG_ERROR("Service prepare failed");
         goto fail_svc;
     }
 
     daemon_endpoint_t ep;
-    svc_endpoint_think_d(&ep, use_tcp);
+    svc_endpoint(&ep, use_tcp);
 
     airy_sock_t server_fd = daemon_create_server_socket(
         ep.use_tcp, ep.tcp_port, ep.sock_unix, ep.sock_win);
@@ -99,19 +99,19 @@ int main(int argc, char **argv)
     g_dispatcher_think_d = daemon_event_driver_get_dispatcher(
         g_event_driver_think_d);
     static const daemon_method_entry_t SVC_METHODS[] = {
-        {"process", svc_on_process_think_d},
-        {"orchestrate", svc_on_orchestrate_think_d},
-        {"get_stats", svc_on_get_stats_think_d},
-        {"health_check", svc_on_health_check_think_d},
-        {"lang_process", svc_on_lang_process_think_d},
-        {"lang_postprocess", svc_on_lang_postprocess_think_d},
-        {"lang_stats", svc_on_lang_stats_think_d},
-        {"review", svc_on_review_think_d},
+        {"process", m_process},
+        {"orchestrate", m_orchestrate},
+        {"get_stats", m_get_stats},
+        {"health_check", m_health_check},
+        {"lang_process", m_lang_process},
+        {"lang_postprocess", m_lang_postprocess},
+        {"lang_stats", m_lang_stats},
+        {"review", m_review},
         {"shutdown", on_shutdown_method_think_d},
     };
     DAEMON_REGISTER_METHODS(g_dispatcher_think_d, SVC_METHODS);
     SVC_LOG_INFO("Registered 9 RPC methods (think.* namespace)");
-    svc_attach_think_d(g_dispatcher_think_d);
+    svc_attach(g_dispatcher_think_d);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_think_d,
                                           (int)server_fd) != 0) {
@@ -119,7 +119,7 @@ int main(int argc, char **argv)
         goto fail_driver;
     }
 
-    if (svc_activate_think_d(g_event_driver_think_d, g_bsd_think_d) != 0) {
+    if (svc_activate(g_event_driver_think_d, g_bsd_think_d) != 0) {
         SVC_LOG_ERROR("Service activate failed");
         goto fail_driver;
     }
@@ -127,10 +127,10 @@ int main(int argc, char **argv)
     SVC_LOG_INFO("think service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_think_d);
 
-    svc_teardown_think_d();
+    svc_teardown();
     daemon_cleanup_standard(g_bipc_think_d, g_bsd_think_d,
                             g_event_driver_think_d, server_fd,
-                            THINK_D_SOCKET_UNIX, svc_destroy_think_d,
+                            THINK_D_SOCKET_UNIX, svc_destroy,
                             &g_running_lock_think_d);
     daemon_tool_ops_cleanup();
     daemon_llm_ops_cleanup();
@@ -143,7 +143,7 @@ fail_driver:
     daemon_event_driver_destroy(g_event_driver_think_d);
     airy_sock_close(server_fd);
 fail_svc:
-    svc_destroy_think_d();
+    svc_destroy();
     airy_mtx_destroy(&g_running_lock_think_d);
     airy_sock_cleanup();
     return EXIT_FAILURE;

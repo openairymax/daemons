@@ -47,7 +47,7 @@ static void sched_env_apply(sched_config_t *config)
     }
 }
 
-int svc_prepare_sched_d(const char *config_path)
+int svc_prepare(const char *config_path)
 {
     if (!config_path || !*config_path)
         config_path = SCHED_CONFIG_DEFAULT;
@@ -78,7 +78,7 @@ int svc_prepare_sched_d(const char *config_path)
     return 0;
 }
 
-void svc_endpoint_sched_d(daemon_endpoint_t *ep, int cmdline_tcp)
+void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
     ep->use_tcp = cmdline_tcp;
     ep->tcp_host = "127.0.0.1";
@@ -87,7 +87,7 @@ void svc_endpoint_sched_d(daemon_endpoint_t *ep, int cmdline_tcp)
     ep->sock_win = SCHED_D_SOCKET_WIN;
 }
 
-int svc_activate_sched_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
+int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
     (void)driver;
     (void)bsd;
@@ -99,12 +99,12 @@ int svc_activate_sched_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *b
     return 0;
 }
 
-void svc_teardown_sched_d(void)
+void svc_teardown(void)
 {
     /* worker 线程随 destroy 收束，无独立 teardown 策略 */
 }
 
-void svc_destroy_sched_d(void)
+void svc_destroy(void)
 {
     roadmap_rpc_cleanup();
     if (g_service) {
@@ -115,7 +115,7 @@ void svc_destroy_sched_d(void)
 
 /* 蓝图调度方法族（plan/absorb/cancel/replan/status）：注册逻辑内聚在
  * roadmap_rpc.c，此处仅透传 dispatcher */
-void svc_attach_sched_d(void *dispatcher)
+void svc_attach(void *dispatcher)
 {
     roadmap_rpc_register(dispatcher);
 }

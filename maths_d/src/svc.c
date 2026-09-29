@@ -23,7 +23,7 @@
 /* 服务单例：机制层经钩子间接驱动，不直接访问 */
 static maths_d_service_t g_svc_maths_d;
 
-int svc_prepare_maths_d(const char *config_path)
+int svc_prepare(const char *config_path)
 {
     (void)config_path;
     if (maths_d_service_init(&g_svc_maths_d) != 0) {
@@ -35,7 +35,7 @@ int svc_prepare_maths_d(const char *config_path)
     return 0;
 }
 
-void svc_endpoint_maths_d(daemon_endpoint_t *ep, int cmdline_tcp)
+void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
     ep->use_tcp = cmdline_tcp;
     ep->tcp_host = "127.0.0.1";
@@ -44,7 +44,7 @@ void svc_endpoint_maths_d(daemon_endpoint_t *ep, int cmdline_tcp)
     ep->sock_win = MATHS_D_SOCKET_WIN;
 }
 
-int svc_activate_maths_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
+int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
     (void)driver;
     (void)bsd;
@@ -52,19 +52,19 @@ int svc_activate_maths_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *b
     return 0;
 }
 
-void svc_teardown_maths_d(void)
+void svc_teardown(void)
 {
     atomic_store(&g_svc_maths_d.running, 0);
 }
 
-void svc_destroy_maths_d(void)
+void svc_destroy(void)
 {
     maths_backend_destroy(&g_svc_maths_d.py_backend);
     maths_d_service_destroy(&g_svc_maths_d);
 }
 
 /* 无静态表外动态注册（manifest methods 全量覆盖），空实现 */
-void svc_attach_maths_d(void *dispatcher)
+void svc_attach(void *dispatcher)
 {
     (void)dispatcher;
 }
@@ -94,7 +94,7 @@ static void svc_rpc_method(airy_sock_t client_fd, const char *method,
 /* handler 薄壳：user_data 为机制层注入的 &client_fd
  * （DAEMON_REGISTER_METHODS user_data=NULL 约定） */
 #define SVC_RPC_HANDLER(name)                                                  \
-    void svc_on_##name##_maths_d(cJSON *params, int id, void *user_data)       \
+    void m_##name(cJSON *params, int id, void *user_data)                      \
     {                                                                          \
         svc_rpc_method(*(airy_sock_t *)user_data, #name, params, id);          \
     }

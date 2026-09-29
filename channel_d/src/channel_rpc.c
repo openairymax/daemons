@@ -6,7 +6,7 @@
  * @brief channel.* RPC 方法域：ping / list / open / close / send /
  *        health / health_check / get_stats。
  *
- * cJSON 参数直接交 handle_service_request 解析（无字符串回环），
+ * cJSON 参数直接交 chan_rpc_call 解析（无字符串回环），
  * 结果 JSON 包装为 JSON-RPC success 响应；参数校验失败（fail-closed：
  * 缺 id/data、非法类型）映射 Invalid params(-32602)，其余服务错误
  * 映射 Internal error(-32603)。服务单例句柄 g_svc 由 svc.c 持有。
@@ -41,7 +41,7 @@ static char *channel_param_id_str(cJSON *params)
     return NULL;
 }
 
-static int handle_service_request(const char *method, cJSON *params,
+static int chan_rpc_call(const char *method, cJSON *params,
                                   char **response_json, void *user_data)
 {
     channel_service_t *svc = (channel_service_t *)user_data;
@@ -229,7 +229,7 @@ static int handle_service_request(const char *method, cJSON *params,
 }
 
 /**
- * @brief Hand cJSON params directly to handle_service_request (cJSON parsing,
+ * @brief Hand cJSON params directly to chan_rpc_call (cJSON parsing,
  *        no string round-trip) and wrap the returned JSON result as a
  *        JSON-RPC success response.
  *
@@ -240,7 +240,7 @@ static void channel_dispatch_method(cJSON *params, int id, void *user_data, cons
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
 
     char *result_json = NULL;
-    int rc = handle_service_request(method, params, &result_json, g_svc);
+    int rc = chan_rpc_call(method, params, &result_json, g_svc);
     if (rc != 0 || !result_json) {
         /* Param-validation failures (fail-closed: missing id/data, invalid
          * type) map to JSON-RPC Invalid params(-32602); other service errors
@@ -260,42 +260,42 @@ static void channel_dispatch_method(cJSON *params, int id, void *user_data, cons
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-void svc_on_ping_channel_d(cJSON *params, int id, void *user_data)
+void m_ping(cJSON *params, int id, void *user_data)
 {
     channel_dispatch_method(params, id, user_data, "ping");
 }
 
-void svc_on_list_channel_d(cJSON *params, int id, void *user_data)
+void m_list(cJSON *params, int id, void *user_data)
 {
     channel_dispatch_method(params, id, user_data, "list");
 }
 
-void svc_on_open_channel_d(cJSON *params, int id, void *user_data)
+void m_open(cJSON *params, int id, void *user_data)
 {
     channel_dispatch_method(params, id, user_data, "open");
 }
 
-void svc_on_close_channel_d(cJSON *params, int id, void *user_data)
+void m_close(cJSON *params, int id, void *user_data)
 {
     channel_dispatch_method(params, id, user_data, "close");
 }
 
-void svc_on_send_channel_d(cJSON *params, int id, void *user_data)
+void m_send(cJSON *params, int id, void *user_data)
 {
     channel_dispatch_method(params, id, user_data, "send");
 }
 
-void svc_on_health_channel_d(cJSON *params, int id, void *user_data)
+void m_health(cJSON *params, int id, void *user_data)
 {
     channel_dispatch_method(params, id, user_data, "health");
 }
 
-void svc_on_health_check_channel_d(cJSON *params, int id, void *user_data)
+void m_health_check(cJSON *params, int id, void *user_data)
 {
     channel_dispatch_method(params, id, user_data, "health");
 }
 
-void svc_on_get_stats_channel_d(cJSON *params, int id, void *user_data)
+void m_get_stats(cJSON *params, int id, void *user_data)
 {
     channel_dispatch_method(params, id, user_data, "stats");
 }

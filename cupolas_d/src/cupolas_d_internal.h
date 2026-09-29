@@ -5,7 +5,7 @@
  * @file cupolas_d_internal.h
  * @brief Internal shared declarations of the cupolas_d daemon translation
  *        units (svc.c / cupolas_rpc_*.c / service.c).
- * @details RPC method entry points (svc_on_*_cupolas_d) and the daemon
+ * @details RPC method entry points (m_*) and the daemon
  *          lifecycle hooks are declared in the generated svc_cupolas_d.h
  *          (L3 SSoT); this header only carries the daemon-wide cupolas
  *          service handle and the dynamic policy engine (PDP) handle.

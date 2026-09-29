@@ -100,42 +100,42 @@ static void sched_d_register_spawned_agent(const char *agent_id, const char *spe
     }
 }
 
-void svc_on_spawn_agent_d(cJSON *params, int id, void *user_data)
+void m_spawn(cJSON *params, int id, void *user_data)
 {
     handle_spawn(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_terminate_agent_d(cJSON *params, int id, void *user_data)
+void m_terminate(cJSON *params, int id, void *user_data)
 {
     handle_terminate(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_invoke_agent_d(cJSON *params, int id, void *user_data)
+void m_invoke(cJSON *params, int id, void *user_data)
 {
     handle_invoke(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_cancel_agent_d(cJSON *params, int id, void *user_data)
+void m_cancel(cJSON *params, int id, void *user_data)
 {
     handle_cancel(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_list_agent_d(cJSON *params, int id, void *user_data)
+void m_list(cJSON *params, int id, void *user_data)
 {
     handle_list(id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_count_agent_d(cJSON *params, int id, void *user_data)
+void m_count(cJSON *params, int id, void *user_data)
 {
     handle_count(id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_health_check_agent_d(cJSON *params, int id, void *user_data)
+void m_health_check(cJSON *params, int id, void *user_data)
 {
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_get_stats_agent_d(cJSON *params, int id, void *user_data)
+void m_get_stats(cJSON *params, int id, void *user_data)
 {
     handle_get_stats(id, *(airy_sock_t *)user_data);
 }
@@ -430,7 +430,7 @@ static void handle_vocab(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-void svc_on_vocab_agent_d(cJSON *params, int id, void *user_data)
+void m_vocab(cJSON *params, int id, void *user_data)
 {
     handle_vocab(id, *(airy_sock_t *)user_data);
 }

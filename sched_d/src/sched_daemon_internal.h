@@ -5,7 +5,7 @@
  * @file sched_daemon_internal.h
  * @brief Internal shared declarations of the sched_d daemon translation
  *        units (svc.c / sched_rpc_handlers.c / sched_dispatch.c).
- * @details RPC method entry points (svc_on_*_sched_d) and the daemon
+ * @details RPC method entry points (m_*) and the daemon
  *          lifecycle hooks are declared in the generated svc_sched_d.h
  *          (L3 SSoT); this header only carries the daemon-wide service
  *          handle and the agent_d dispatch executor. For use only by the

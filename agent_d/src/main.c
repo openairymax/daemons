@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.4.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.5.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -57,13 +57,13 @@ int main(int argc, char **argv)
     daemon_cupolas_init_pep("agent_d");
     daemon_ipc_ops_init("agent_d");
 
-    if (svc_prepare_agent_d(config_path) != 0) {
+    if (svc_prepare(config_path) != 0) {
         SVC_LOG_ERROR("Service prepare failed");
         goto fail_svc;
     }
 
     daemon_endpoint_t ep;
-    svc_endpoint_agent_d(&ep, use_tcp);
+    svc_endpoint(&ep, use_tcp);
 
     airy_sock_t server_fd = daemon_create_server_socket(
         ep.use_tcp, ep.tcp_port, ep.sock_unix, ep.sock_win);
@@ -95,23 +95,23 @@ int main(int argc, char **argv)
     g_dispatcher_agent_d = daemon_event_driver_get_dispatcher(
         g_event_driver_agent_d);
     static const daemon_method_entry_t SVC_METHODS[] = {
-        {"spawn", svc_on_spawn_agent_d},
-        {"terminate", svc_on_terminate_agent_d},
-        {"invoke", svc_on_invoke_agent_d},
-        {"cancel", svc_on_cancel_agent_d},
-        {"list", svc_on_list_agent_d},
-        {"count", svc_on_count_agent_d},
-        {"run", svc_on_run_agent_d},
-        {"run_cancel", svc_on_run_cancel_agent_d},
-        {"run_stream", svc_on_run_stream_agent_d},
-        {"health_check", svc_on_health_check_agent_d},
-        {"get_stats", svc_on_get_stats_agent_d},
-        {"vocab", svc_on_vocab_agent_d},
+        {"spawn", m_spawn},
+        {"terminate", m_terminate},
+        {"invoke", m_invoke},
+        {"cancel", m_cancel},
+        {"list", m_list},
+        {"count", m_count},
+        {"run", m_run},
+        {"run_cancel", m_run_cancel},
+        {"run_stream", m_run_stream},
+        {"health_check", m_health_check},
+        {"get_stats", m_get_stats},
+        {"vocab", m_vocab},
         {"shutdown", on_shutdown_method_agent_d},
     };
     DAEMON_REGISTER_METHODS(g_dispatcher_agent_d, SVC_METHODS);
     SVC_LOG_INFO("Registered 13 RPC methods (agent.* namespace)");
-    svc_attach_agent_d(g_dispatcher_agent_d);
+    svc_attach(g_dispatcher_agent_d);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_agent_d,
                                           (int)server_fd) != 0) {
@@ -119,7 +119,7 @@ int main(int argc, char **argv)
         goto fail_driver;
     }
 
-    if (svc_activate_agent_d(g_event_driver_agent_d, g_bsd_agent_d) != 0) {
+    if (svc_activate(g_event_driver_agent_d, g_bsd_agent_d) != 0) {
         SVC_LOG_ERROR("Service activate failed");
         goto fail_driver;
     }
@@ -127,10 +127,10 @@ int main(int argc, char **argv)
     SVC_LOG_INFO("agent service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_agent_d);
 
-    svc_teardown_agent_d();
+    svc_teardown();
     daemon_cleanup_standard(g_bipc_agent_d, g_bsd_agent_d,
                             g_event_driver_agent_d, server_fd,
-                            AGENT_D_SOCKET_UNIX, svc_destroy_agent_d,
+                            AGENT_D_SOCKET_UNIX, svc_destroy,
                             &g_running_lock_agent_d);
     daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
@@ -141,7 +141,7 @@ fail_driver:
     daemon_event_driver_destroy(g_event_driver_agent_d);
     airy_sock_close(server_fd);
 fail_svc:
-    svc_destroy_agent_d();
+    svc_destroy();
     airy_mtx_destroy(&g_running_lock_agent_d);
     airy_sock_cleanup();
     return EXIT_FAILURE;

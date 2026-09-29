@@ -7,7 +7,7 @@
  *
  * 五件套化后（L3 生成器推广）：main.c / svc_agent_d.h / sources.cmake
  * 由 daemon_gen.py 从 .manifest 生成，daemon 配置与端点解析策略在
- * svc.c；RPC 方法入口（svc_on_*_agent_d）与生命周期钩子声明于生成头
+ * svc.c；RPC 方法入口（m_*）与生命周期钩子声明于生成头
  * svc_agent_d.h（L3 SSoT），此处只承载跨文件的内部符号。
  */
 

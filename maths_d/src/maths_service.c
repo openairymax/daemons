@@ -411,7 +411,7 @@ static cJSON *maths_plot_result(maths_d_service_t *svc, const cJSON *params,
 /* 12 个符号方法名：MCP-Mathematics（numerical/finance/number_theory/
  * units）+ SymPy 符号族（solve/differentiate/integrate/limit/simplify/
  * factor/expand/matrix），委托 Python 后端（maths-toolkit）。 */
-static int maths_is_backend_method(const char *m)
+static int maths_py_method(const char *m)
 {
     static const char *const k_backend[] = {
         "solve",    "differentiate", "integrate", "limit",
@@ -426,7 +426,7 @@ static int maths_is_backend_method(const char *m)
 
 /* 后端响应剥壳：{"result":{...}} 深转移 / {"error":{...}} 归一为
  * -32000+message（wire 偏差：旧 wire 透传 error 对象含 data）。 */
-static cJSON *maths_backend_forward(maths_d_service_t *svc,
+static cJSON *maths_py_call(maths_d_service_t *svc,
                                     const char *method, const cJSON *params,
                                     char *err, size_t err_sz)
 {
@@ -512,8 +512,8 @@ maths_rpc_status_t maths_d_rpc_call(maths_d_service_t *svc,
         r = maths_stats_call(svc, params, err, err_sz);
     } else if (strcmp(method, "plot") == 0) {
         r = maths_plot_result(svc, params, err, err_sz);
-    } else if (maths_is_backend_method(method)) {
-        r = maths_backend_forward(svc, method, params, err, err_sz);
+    } else if (maths_py_method(method)) {
+        r = maths_py_call(svc, method, params, err, err_sz);
     } else {
         return MATHS_RPC_ERR_METHOD;
     }

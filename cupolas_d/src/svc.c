@@ -98,7 +98,7 @@ static void config_free(void)
     AIRY_MEMSET(&g_config, 0, sizeof(g_config));
 }
 
-void svc_endpoint_cupolas_d(daemon_endpoint_t *ep, int cmdline_tcp)
+void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
     ep->use_tcp = cmdline_tcp || g_config.use_tcp;
     ep->tcp_host = g_config.tcp_host;
@@ -107,7 +107,7 @@ void svc_endpoint_cupolas_d(daemon_endpoint_t *ep, int cmdline_tcp)
     ep->sock_win = g_config.socket_path;
 }
 
-int svc_prepare_cupolas_d(const char *config_path)
+int svc_prepare(const char *config_path)
 {
     airy_paths_init();
     config_load(config_path);
@@ -135,18 +135,18 @@ int svc_prepare_cupolas_d(const char *config_path)
     return 0;
 }
 
-int svc_activate_cupolas_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
+int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
     (void)driver;
     (void)bsd;
     return 0;
 }
 
-void svc_teardown_cupolas_d(void)
+void svc_teardown(void)
 {
 }
 
-void svc_destroy_cupolas_d(void)
+void svc_destroy(void)
 {
     if (g_service) {
         cupolas_service_destroy(g_service);
@@ -160,7 +160,7 @@ void svc_destroy_cupolas_d(void)
 }
 
 /* 无静态表外动态注册（manifest methods 全量覆盖），空实现 */
-void svc_attach_cupolas_d(void *dispatcher)
+void svc_attach(void *dispatcher)
 {
     (void)dispatcher;
 }

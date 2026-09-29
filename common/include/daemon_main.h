@@ -57,7 +57,7 @@
 extern "C" {
 #endif
 
-/* 服务端点五元组：svc_endpoint_<daemon> 解析产出（config/env 覆盖策略
+/* 服务端点五元组：svc_endpoint 解析产出（config/env 覆盖策略
  * 在各户 svc.c，机制载体在此），daemon_create_server_socket 与事件
  * 驱动装配按字段序消费。 */
 typedef struct {
