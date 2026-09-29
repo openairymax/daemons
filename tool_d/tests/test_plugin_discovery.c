@@ -14,7 +14,7 @@
  */
 
 // @owner: team-B
-#include "plugin_discovery.h"
+#include "plugin/plugin_discovery.h"
 
 #include <stdio.h>
 #include <stdlib.h>
