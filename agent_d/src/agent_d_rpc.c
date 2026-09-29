@@ -14,6 +14,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "agent_d_internal.h"
+#include "svc_agent_d.h"
 
 #include "daemon_main.h"
 #include "agent_service.h"
@@ -99,42 +100,42 @@ static void sched_d_register_spawned_agent(const char *agent_id, const char *spe
     }
 }
 
-void on_spawn_method(cJSON *params, int id, void *user_data)
+void svc_on_spawn_agent_d(cJSON *params, int id, void *user_data)
 {
     handle_spawn(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_terminate_method(cJSON *params, int id, void *user_data)
+void svc_on_terminate_agent_d(cJSON *params, int id, void *user_data)
 {
     handle_terminate(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_invoke_method(cJSON *params, int id, void *user_data)
+void svc_on_invoke_agent_d(cJSON *params, int id, void *user_data)
 {
     handle_invoke(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_cancel_method(cJSON *params, int id, void *user_data)
+void svc_on_cancel_agent_d(cJSON *params, int id, void *user_data)
 {
     handle_cancel(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_list_method(cJSON *params, int id, void *user_data)
+void svc_on_list_agent_d(cJSON *params, int id, void *user_data)
 {
     handle_list(id, *(airy_sock_t *)user_data);
 }
 
-void on_count_method(cJSON *params, int id, void *user_data)
+void svc_on_count_agent_d(cJSON *params, int id, void *user_data)
 {
     handle_count(id, *(airy_sock_t *)user_data);
 }
 
-void on_health_check_method(cJSON *params, int id, void *user_data)
+void svc_on_health_check_agent_d(cJSON *params, int id, void *user_data)
 {
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
 
-void on_get_stats_method(cJSON *params, int id, void *user_data)
+void svc_on_get_stats_agent_d(cJSON *params, int id, void *user_data)
 {
     handle_get_stats(id, *(airy_sock_t *)user_data);
 }
@@ -429,7 +430,7 @@ static void handle_vocab(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-void on_vocab_method(cJSON *params, int id, void *user_data)
+void svc_on_vocab_agent_d(cJSON *params, int id, void *user_data)
 {
     handle_vocab(id, *(airy_sock_t *)user_data);
 }
