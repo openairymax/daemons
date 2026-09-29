@@ -129,14 +129,6 @@ void llm_router_destroy(void);
 int llm_router_register_endpoint(const llm_endpoint_t *endpoint);
 
 /**
- * @brief Unregister a provider endpoint.
- * @param provider_name Provider name
- * @param model_name    Model name
- * @return 0 on success, non-zero on failure
- */
-int llm_router_unregister_endpoint(const char *provider_name, const char *model_name);
-
-/**
  * @brief Route an LLM request.
  * @param request Routing request
  * @param result  Routing result
@@ -150,13 +142,6 @@ int llm_router_route(const llm_route_request_t *request, llm_route_result_t *res
  * @return 0 on success, non-zero on failure
  */
 int llm_router_get_stats(llm_router_stats_t *stats);
-
-/**
- * @brief Set the default routing strategy.
- * @param strategy Routing strategy
- * @return 0 on success, non-zero on failure
- */
-int llm_router_set_default_strategy(llm_route_strategy_t strategy);
 
 #ifdef __cplusplus
 }
