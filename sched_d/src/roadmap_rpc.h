@@ -39,14 +39,6 @@ void roadmap_rpc_register(void *disp);
 /** @brief 实例是否可用。 */
 int roadmap_rpc_ready(void);
 
-/* 事件驱动回调包装（供 main.c 经 method_dispatcher_register 注册）：
- * user_data 携带客户端 socket fd。 */
-void on_roadmap_plan_method(cJSON *params, int id, void *user_data);
-void on_roadmap_absorb_method(cJSON *params, int id, void *user_data);
-void on_roadmap_cancel_method(cJSON *params, int id, void *user_data);
-void on_roadmap_replan_method(cJSON *params, int id, void *user_data);
-void on_roadmap_status_method(cJSON *params, int id, void *user_data);
-
 #ifdef __cplusplus
 }
 #endif

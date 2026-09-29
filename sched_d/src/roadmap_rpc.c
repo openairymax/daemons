@@ -437,29 +437,29 @@ static void roadmap_on_status(cJSON *params, int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-/* 事件驱动回调包装（与 main.c 既有方法一致：user_data 携带 socket fd）。
- * 非 static：sched_d main.c 在 method_dispatcher_register 中注册。 */
-void on_roadmap_plan_method(cJSON *params, int id, void *user_data)
+/* 事件驱动回调包装（method_fn 签名；user_data 携带客户端 socket fd）。
+ * 注册内聚于 roadmap_rpc_register，勿在外部引用。 */
+static void on_roadmap_plan_method(cJSON *params, int id, void *user_data)
 {
     roadmap_on_plan(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_roadmap_absorb_method(cJSON *params, int id, void *user_data)
+static void on_roadmap_absorb_method(cJSON *params, int id, void *user_data)
 {
     roadmap_on_absorb(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_roadmap_cancel_method(cJSON *params, int id, void *user_data)
+static void on_roadmap_cancel_method(cJSON *params, int id, void *user_data)
 {
     roadmap_on_cancel(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_roadmap_replan_method(cJSON *params, int id, void *user_data)
+static void on_roadmap_replan_method(cJSON *params, int id, void *user_data)
 {
     roadmap_on_replan(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_roadmap_status_method(cJSON *params, int id, void *user_data)
+static void on_roadmap_status_method(cJSON *params, int id, void *user_data)
 {
     roadmap_on_status(params, id, *(airy_sock_t *)user_data);
 }
