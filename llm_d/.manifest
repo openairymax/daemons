@@ -1,0 +1,26 @@
+{
+  "manifest_version": 1,
+  "daemon": "llm_d",
+  "cname": "llm",
+  "sd_type": "llm",
+  "ops": ["ipc", "llm"],
+  "facades": ["ingress", "execute", "state"],
+  "slots": ["compute", "route", "cache", "config", "stream", "resilience"],
+  "rpc": {
+    "unix": "llm.sock",
+    "win_pipe": "airy_llm",
+    "tcp": 8080,
+    "tags": "ai,core",
+    "buffer": 65536,
+    "concurrent": true,
+    "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },
+    "methods": [
+      "complete", "complete_stream", "list_models", "count_tokens",
+      "health_check", "get_stats", "embeddings"
+    ]
+  },
+  "deps": { "required": [], "optional": [] },
+  "modules": [
+    { "name": "rpc", "sources": ["llm_rpc.c", "llm_rpc_request.c"] }
+  ]
+}
