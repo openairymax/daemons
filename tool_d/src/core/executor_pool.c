@@ -21,6 +21,7 @@
 #include "error.h"
 #include "core/executor.h"
 #include "core/executor_pool.h"
+#include "tool_service.h"
 #include "platform_misc.h"
 #include "platform_process.h"
 #include "svc_logger.h"

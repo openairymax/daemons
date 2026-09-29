@@ -16,7 +16,6 @@
 #include "core/executor_pool.h"
 #include "daemon_platform_ext.h"
 #include "core/registry.h"
-#include "tool_service.h"
 #include "core/validator.h"
 
 #include <stdatomic.h>

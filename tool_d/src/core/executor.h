@@ -11,7 +11,7 @@
 
 #include "core/config.h"
 #include "approval_gate.h"
-#include "tool_service.h"
+#include "tool_service_types.h"
 
 #ifdef __cplusplus
 extern "C" {
