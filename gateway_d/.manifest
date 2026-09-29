@@ -1,0 +1,25 @@
+{
+  "manifest_version": 1,
+  "daemon": "gateway_d",
+  "cname": "gateway",
+  "sd_type": "gateway",
+  "codegen": false,
+  "facades": ["ingress", "execute", "state", "governance"],
+  "slots": ["comm", "route", "authz", "stream", "validate"],
+  "rpc": {
+    "unix": null,
+    "tcp": 8080,
+    "ws_tcp": 8081,
+    "tags": "gateway,core",
+    "buffer": 1048576,
+    "methods": ["ping", "shutdown", "health_check", "get_stats"]
+  },
+  "deps": { "required": [], "optional": ["tool_d", "llm_d", "sched_d"] },
+  "modules": [
+    { "name": "service", "sources": ["service.c"] },
+    { "name": "protocol", "sources": ["protocol/gateway_protocol_router.c", "protocol/gateway_mcp_server.c", "protocol/gateway_openai_compat.c", "protocol/gateway_a2a_handler.c"] },
+    { "name": "cli", "sources": ["gw_cli.c"] },
+    { "name": "acl", "sources": ["gw_acl.c"] },
+    { "name": "mcpclients", "sources": ["gw_mcpclients.c"] }
+  ]
+}

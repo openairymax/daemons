@@ -85,21 +85,17 @@ static void *gateway_stdio_thread_main(void *arg)
  * 后用户显式声明的监听面原样生效（由请求侧门禁强制凭证）。
  *
  * @param transport 传输名（仅用于日志）
- * @param host 配置内的监听地址（可被收敛改写）
+ * @param host 配置内的监听地址缓冲（可被收敛改写）
  */
-static void gateway_service_constrain_bind_host(const char *transport, const char **host)
+static void gw_guard_bind(const char *transport, char *host)
 {
     if (gw_auth_key_configured())
         return; /* 有凭证：显式监听面原样生效 */
-    if (!*host || gw_auth_addr_is_loopback(*host))
+    if (!host[0] || gw_auth_addr_is_loopback(host))
         return; /* 已是回环（或未配置） */
     AIRY_LOG_WARN("gateway auth: GATEWAY_API_KEY not set; %s bind host '%s' constrained "
-                  "to 127.0.0.1 (loopback-only)", transport, *host);
-    /* 镜像 load_config 保护模式：仅堆分配值（非默认字面量 "0.0.0.0"）
-     * 可释放，字面量直接覆盖（free 字面量是 UB） */
-    if (strcmp(*host, "0.0.0.0") != 0)
-        AIRY_FREE((void *)*host);
-    *host = "127.0.0.1";
+                  "to 127.0.0.1 (loopback-only)", transport, host);
+    AIRY_STRNCPY_TERM(host, "127.0.0.1", GATEWAY_HOST_MAX);
 }
 
 void gateway_service_get_default_config(gateway_service_config_t *config)
@@ -112,14 +108,14 @@ void gateway_service_get_default_config(gateway_service_config_t *config)
     config->version = AIRYRT_VERSION;
 
     config->http.type = GATEWAY_DAEMON_TYPE_HTTP;
-    config->http.host = "0.0.0.0";
+    AIRY_STRNCPY_TERM(config->http.host, "0.0.0.0", GATEWAY_HOST_MAX);
     config->http.port = 8080;
     config->http.enabled = true;
     config->http.max_request_size = 1048576;
     config->http.timeout_ms = 30000;
 
     config->ws.type = GATEWAY_DAEMON_TYPE_WS;
-    config->ws.host = "0.0.0.0";
+    AIRY_STRNCPY_TERM(config->ws.host, "0.0.0.0", GATEWAY_HOST_MAX);
     config->ws.port = 8081;
     config->ws.enabled = true;
     config->ws.max_request_size = 1048576;
@@ -174,14 +170,7 @@ airy_err_t gateway_service_load_config(gateway_service_config_t *config, const c
         if (strcmp(key, "http.port") == 0) {
             config->http.port = (uint16_t)strtol(val, NULL, 10);
         } else if (strcmp(key, "http.host") == 0) {
-            /* The default value is the string literal "0.0.0.0"
-             * (gateway_service_get_default_config); freeing it directly is UB
-             * (freeing non-heap memory). Only free when it has been replaced
-             * by a heap-allocated value from the config file (not the default
-             * literal). */
-            if (config->http.host && strcmp(config->http.host, "0.0.0.0") != 0)
-                AIRY_FREE((void *)config->http.host);
-            config->http.host = AIRY_STRDUP(val);
+            AIRY_STRNCPY_TERM(config->http.host, val, GATEWAY_HOST_MAX);
         } else if (strcmp(key, "http.enabled") == 0) {
             config->http.enabled = (strcmp(val, "true") == 0 || strcmp(val, "1") == 0);
         } else if (strcmp(key, "stdio.max_request_size") == 0) {
@@ -273,8 +262,8 @@ airy_err_t gateway_service_start(gateway_service_t service)
 
     /* WS-2 T-11a bind 侧 fail-closed：无凭证时非回环监听面强制收敛
      * （HTTP/WS 共用 http.host 的 HTTP/2 随 http 收敛自动覆盖） */
-    gateway_service_constrain_bind_host("http", &service->config.http.host);
-    gateway_service_constrain_bind_host("ws", &service->config.ws.host);
+    gw_guard_bind("http", service->config.http.host);
+    gw_guard_bind("ws", service->config.ws.host);
 
 #ifdef GATEWAY_HAS_HTTP
     if (service->config.http.enabled) {
@@ -470,6 +459,13 @@ bool gateway_service_is_running(gateway_service_t service)
     if (!service)
         return false;
     return service->state == GW_STATE_RUNNING;
+}
+
+const gateway_service_config_t *gateway_service_get_config(gateway_service_t service)
+{
+    if (!service)
+        return NULL;
+    return &service->config;
 }
 
 airy_err_t gateway_service_get_stats(gateway_service_t service, airy_svc_stats_t *stats)

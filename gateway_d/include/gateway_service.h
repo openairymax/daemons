@@ -44,11 +44,15 @@ typedef enum {
     GATEWAY_DAEMON_TYPE_STDIO
 } gateway_daemon_type_t;
 
+/** @brief Max length of a bind host string (covers IPv6 with zone). */
+#define GATEWAY_HOST_MAX 128
 
 /** @brief Single gateway config. */
 typedef struct {
     gateway_daemon_type_t type;
-    const char *host;
+    /* host 为定长内嵌缓冲：无堆所有权、无字面量/argv 指针混用，
+     * 拷贝即值语义（bind 侧 fail-closed 收敛可直接改写）。 */
+    char host[GATEWAY_HOST_MAX];
     uint16_t port;
     bool enabled;
     size_t max_request_size;
@@ -124,6 +128,16 @@ AIRY_API airy_svc_state_t gateway_service_get_state(gateway_service_t service);
  * @return true if running
  */
 AIRY_API bool gateway_service_is_running(gateway_service_t service);
+
+/**
+ * @brief Get the effective runtime config (after bind-side fail-closed
+ *        convergence). The returned pointer is owned by the service handle
+ *        and valid until destroy; log/registry must read the actual bind host
+ *        from here rather than the caller-supplied copy.
+ * @param[in] service Service handle
+ * @return Internal config pointer, NULL if service is NULL
+ */
+AIRY_API const gateway_service_config_t *gateway_service_get_config(gateway_service_t service);
 
 /**
  * @brief Get service statistics.
