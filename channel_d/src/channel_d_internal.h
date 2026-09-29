@@ -5,7 +5,7 @@
  * @file channel_d_internal.h
  * @brief channel_d 守护进程各编译单元共享的内部声明
  *        （svc.c / channel_rpc.c）。
- * @details RPC 方法入口（svc_on_*_channel_d）与生命周期钩子声明在
+ * @details RPC 方法入口（m_*）与生命周期钩子声明在
  *          生成的 svc_channel_d.h（L3 SSoT）；本头仅承载 daemon 全局
  *          channel 服务句柄。仅限 channel_d 守护进程编译单元使用。
  */

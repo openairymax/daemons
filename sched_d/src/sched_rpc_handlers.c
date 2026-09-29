@@ -6,7 +6,7 @@
  * @brief Scheduler daemon - JSON-RPC method handlers domain.
  * @details Implements the sched.* RPC method handlers (agent register/
  *          unregister, task schedule/get/cancel, DAG submit/status/list/
- *          cancel, stats/health/checkpoint). The svc_on_*_sched_d entry
+ *          cancel, stats/health/checkpoint). The m_* entry
  *          points translate the generated method_fn signature to the
  *          protocol-agnostic handle_* helpers; submit/query alias
  *          schedule_task/get_task. Declarations live in the generated
@@ -44,73 +44,73 @@ static void handle_get_stats(int id, airy_sock_t client_fd);
 static void handle_health_check(int id, airy_sock_t client_fd);
 static void handle_checkpoint_save(cJSON *params, int id, airy_sock_t client_fd);
 
-void svc_on_register_agent_sched_d(cJSON *params, int id, void *user_data)
+void m_register_agent(cJSON *params, int id, void *user_data)
 {
     handle_register_agent(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_unregister_agent_sched_d(cJSON *params, int id, void *user_data)
+void m_unregister_agent(cJSON *params, int id, void *user_data)
 {
     handle_unregister_agent(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_schedule_task_sched_d(cJSON *params, int id, void *user_data)
+void m_schedule_task(cJSON *params, int id, void *user_data)
 {
     handle_schedule_task(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_get_task_sched_d(cJSON *params, int id, void *user_data)
+void m_get_task(cJSON *params, int id, void *user_data)
 {
     handle_get_task(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_cancel_sched_d(cJSON *params, int id, void *user_data)
+void m_cancel(cJSON *params, int id, void *user_data)
 {
     handle_cancel_task(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_dag_submit_sched_d(cJSON *params, int id, void *user_data)
+void m_dag_submit(cJSON *params, int id, void *user_data)
 {
     handle_dag_submit(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_dag_status_sched_d(cJSON *params, int id, void *user_data)
+void m_dag_status(cJSON *params, int id, void *user_data)
 {
     handle_dag_status(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_dag_list_sched_d(cJSON *params, int id, void *user_data)
+void m_dag_list(cJSON *params, int id, void *user_data)
 {
     handle_dag_list(id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_dag_cancel_sched_d(cJSON *params, int id, void *user_data)
+void m_dag_cancel(cJSON *params, int id, void *user_data)
 {
     handle_dag_cancel(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_get_stats_sched_d(cJSON *params, int id, void *user_data)
+void m_get_stats(cJSON *params, int id, void *user_data)
 {
     handle_get_stats(id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_health_check_sched_d(cJSON *params, int id, void *user_data)
+void m_health_check(cJSON *params, int id, void *user_data)
 {
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_checkpoint_save_sched_d(cJSON *params, int id, void *user_data)
+void m_checkpoint_save(cJSON *params, int id, void *user_data)
 {
     handle_checkpoint_save(params, id, *(airy_sock_t *)user_data);
 }
 
 /* 短名别名：submit ≡ schedule_task，query ≡ get_task（历史契约保留） */
-void svc_on_submit_sched_d(cJSON *params, int id, void *user_data)
+void m_submit(cJSON *params, int id, void *user_data)
 {
     handle_schedule_task(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_query_sched_d(cJSON *params, int id, void *user_data)
+void m_query(cJSON *params, int id, void *user_data)
 {
     handle_get_task(params, id, *(airy_sock_t *)user_data);
 }

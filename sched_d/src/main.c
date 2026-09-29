@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.4.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.5.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -61,13 +61,13 @@ int main(int argc, char **argv)
     daemon_llm_ops_init("sched_d");
     daemon_tool_ops_init("sched_d");
 
-    if (svc_prepare_sched_d(config_path) != 0) {
+    if (svc_prepare(config_path) != 0) {
         SVC_LOG_ERROR("Service prepare failed");
         goto fail_svc;
     }
 
     daemon_endpoint_t ep;
-    svc_endpoint_sched_d(&ep, use_tcp);
+    svc_endpoint(&ep, use_tcp);
 
     airy_sock_t server_fd = daemon_create_server_socket(
         ep.use_tcp, ep.tcp_port, ep.sock_unix, ep.sock_win);
@@ -98,25 +98,25 @@ int main(int argc, char **argv)
     g_dispatcher_sched_d = daemon_event_driver_get_dispatcher(
         g_event_driver_sched_d);
     static const daemon_method_entry_t SVC_METHODS[] = {
-        {"register_agent", svc_on_register_agent_sched_d},
-        {"unregister_agent", svc_on_unregister_agent_sched_d},
-        {"schedule_task", svc_on_schedule_task_sched_d},
-        {"get_task", svc_on_get_task_sched_d},
-        {"cancel", svc_on_cancel_sched_d},
-        {"dag_submit", svc_on_dag_submit_sched_d},
-        {"dag_status", svc_on_dag_status_sched_d},
-        {"dag_list", svc_on_dag_list_sched_d},
-        {"dag_cancel", svc_on_dag_cancel_sched_d},
-        {"get_stats", svc_on_get_stats_sched_d},
-        {"health_check", svc_on_health_check_sched_d},
-        {"checkpoint_save", svc_on_checkpoint_save_sched_d},
-        {"submit", svc_on_submit_sched_d},
-        {"query", svc_on_query_sched_d},
+        {"register_agent", m_register_agent},
+        {"unregister_agent", m_unregister_agent},
+        {"schedule_task", m_schedule_task},
+        {"get_task", m_get_task},
+        {"cancel", m_cancel},
+        {"dag_submit", m_dag_submit},
+        {"dag_status", m_dag_status},
+        {"dag_list", m_dag_list},
+        {"dag_cancel", m_dag_cancel},
+        {"get_stats", m_get_stats},
+        {"health_check", m_health_check},
+        {"checkpoint_save", m_checkpoint_save},
+        {"submit", m_submit},
+        {"query", m_query},
         {"shutdown", on_shutdown_method_sched_d},
     };
     DAEMON_REGISTER_METHODS(g_dispatcher_sched_d, SVC_METHODS);
     SVC_LOG_INFO("Registered 15 RPC methods (scheduler.* namespace)");
-    svc_attach_sched_d(g_dispatcher_sched_d);
+    svc_attach(g_dispatcher_sched_d);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_sched_d,
                                           (int)server_fd) != 0) {
@@ -124,7 +124,7 @@ int main(int argc, char **argv)
         goto fail_driver;
     }
 
-    if (svc_activate_sched_d(g_event_driver_sched_d, g_bsd_sched_d) != 0) {
+    if (svc_activate(g_event_driver_sched_d, g_bsd_sched_d) != 0) {
         SVC_LOG_ERROR("Service activate failed");
         goto fail_driver;
     }
@@ -132,10 +132,10 @@ int main(int argc, char **argv)
     SVC_LOG_INFO("scheduler service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_sched_d);
 
-    svc_teardown_sched_d();
+    svc_teardown();
     daemon_cleanup_standard(g_bipc_sched_d, g_bsd_sched_d,
                             g_event_driver_sched_d, server_fd,
-                            SCHED_D_SOCKET_UNIX, svc_destroy_sched_d,
+                            SCHED_D_SOCKET_UNIX, svc_destroy,
                             &g_running_lock_sched_d);
     daemon_tool_ops_cleanup();
     daemon_llm_ops_cleanup();
@@ -148,7 +148,7 @@ fail_driver:
     daemon_event_driver_destroy(g_event_driver_sched_d);
     airy_sock_close(server_fd);
 fail_svc:
-    svc_destroy_sched_d();
+    svc_destroy();
     airy_mtx_destroy(&g_running_lock_sched_d);
     airy_sock_cleanup();
     return EXIT_FAILURE;

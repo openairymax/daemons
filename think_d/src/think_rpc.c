@@ -166,44 +166,44 @@ static void handle_orchestrate(cJSON *params, int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, res_obj, id);
 }
 
-void svc_on_process_think_d(cJSON *params, int id, void *user_data)
+void m_process(cJSON *params, int id, void *user_data)
 {
     handle_process(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_orchestrate_think_d(cJSON *params, int id, void *user_data)
+void m_orchestrate(cJSON *params, int id, void *user_data)
 {
     handle_orchestrate(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_get_stats_think_d(cJSON *params, int id, void *user_data)
+void m_get_stats(cJSON *params, int id, void *user_data)
 {
     handle_get_stats(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_health_check_think_d(cJSON *params, int id, void *user_data)
+void m_health_check(cJSON *params, int id, void *user_data)
 {
     handle_health_check(params, id, *(airy_sock_t *)user_data);
 }
 
 /* lang 与 review 服务面签名同生成器 handler 契约一致
  * （第三参为连接 fd 指针），直通转调零漂移。 */
-void svc_on_lang_process_think_d(cJSON *params, int id, void *user_data)
+void m_lang_process(cJSON *params, int id, void *user_data)
 {
     lang_svc_process(params, id, user_data);
 }
 
-void svc_on_lang_postprocess_think_d(cJSON *params, int id, void *user_data)
+void m_lang_postprocess(cJSON *params, int id, void *user_data)
 {
     lang_svc_postprocess(params, id, user_data);
 }
 
-void svc_on_lang_stats_think_d(cJSON *params, int id, void *user_data)
+void m_lang_stats(cJSON *params, int id, void *user_data)
 {
     lang_svc_stats(params, id, user_data);
 }
 
-void svc_on_review_think_d(cJSON *params, int id, void *user_data)
+void m_review(cJSON *params, int id, void *user_data)
 {
     review_svc_process(params, id, user_data);
 }

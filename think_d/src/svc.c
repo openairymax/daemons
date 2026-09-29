@@ -172,7 +172,7 @@ static void cfg_free(void)
     AIRY_MEMSET(&g_cfg, 0, sizeof(g_cfg));
 }
 
-void svc_endpoint_think_d(daemon_endpoint_t *ep, int cmdline_tcp)
+void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
     ep->use_tcp = cmdline_tcp ? 1 : (g_cfg.use_tcp ? 1 : 0);
     ep->tcp_host = "127.0.0.1";
@@ -181,7 +181,7 @@ void svc_endpoint_think_d(daemon_endpoint_t *ep, int cmdline_tcp)
     ep->sock_win = g_cfg.socket_path;
 }
 
-int svc_prepare_think_d(const char *config_path)
+int svc_prepare(const char *config_path)
 {
     airy_paths_init();
     cfg_load(config_path);
@@ -214,7 +214,7 @@ int svc_prepare_think_d(const char *config_path)
     return 0;
 }
 
-int svc_activate_think_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
+int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
     (void)driver;
 
@@ -231,11 +231,11 @@ int svc_activate_think_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *b
     return 0;
 }
 
-void svc_teardown_think_d(void)
+void svc_teardown(void)
 {
 }
 
-void svc_destroy_think_d(void)
+void svc_destroy(void)
 {
     /* M1-1c：先释放复核/语言网关服务面对 svc 的引用，再销毁本体 */
     review_svc_cleanup();
@@ -247,7 +247,7 @@ void svc_destroy_think_d(void)
     cfg_free();
 }
 
-void svc_attach_think_d(void *dispatcher)
+void svc_attach(void *dispatcher)
 {
     (void)dispatcher;
 }

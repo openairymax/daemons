@@ -100,7 +100,7 @@ static void config_free(void)
     AIRY_MEMSET(&g_config, 0, sizeof(g_config));
 }
 
-void svc_endpoint_agent_d(daemon_endpoint_t *ep, int cmdline_tcp)
+void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
     ep->use_tcp = cmdline_tcp || g_config.use_tcp;
     ep->tcp_host = g_config.tcp_host;
@@ -109,7 +109,7 @@ void svc_endpoint_agent_d(daemon_endpoint_t *ep, int cmdline_tcp)
     ep->sock_win = g_config.socket_path;
 }
 
-int svc_prepare_agent_d(const char *config_path)
+int svc_prepare(const char *config_path)
 {
     airy_paths_init();
     g_start_time = (uint64_t)time(NULL);
@@ -124,7 +124,7 @@ int svc_prepare_agent_d(const char *config_path)
     return 0;
 }
 
-int svc_activate_agent_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
+int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
     (void)bsd;
 #if AIRY_PLATFORM_POSIX
@@ -136,7 +136,7 @@ int svc_activate_agent_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *b
     return 0;
 }
 
-void svc_teardown_agent_d(void)
+void svc_teardown(void)
 {
     /* 优雅排水：事件循环停止后在途 invoke worker 仍阻塞读子进程（至
      * invoke 超时）；线程池 join 会等满该超时（SIGTERM 挂死），且
@@ -155,7 +155,7 @@ void svc_teardown_agent_d(void)
 #endif
 }
 
-void svc_destroy_agent_d(void)
+void svc_destroy(void)
 {
     if (g_service) {
         agent_service_destroy(g_service);
@@ -165,7 +165,7 @@ void svc_destroy_agent_d(void)
 }
 
 /* 无静态表外动态注册（manifest methods 全量覆盖），空实现 */
-void svc_attach_agent_d(void *dispatcher)
+void svc_attach(void *dispatcher)
 {
     (void)dispatcher;
 }

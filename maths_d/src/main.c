@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.4.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.5.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -57,13 +57,13 @@ int main(int argc, char **argv)
     daemon_cupolas_init_pep("maths_d");
     daemon_ipc_ops_init("maths_d");
 
-    if (svc_prepare_maths_d(config_path) != 0) {
+    if (svc_prepare(config_path) != 0) {
         SVC_LOG_ERROR("Service prepare failed");
         goto fail_svc;
     }
 
     daemon_endpoint_t ep;
-    svc_endpoint_maths_d(&ep, use_tcp);
+    svc_endpoint(&ep, use_tcp);
 
     airy_sock_t server_fd = daemon_create_server_socket(
         ep.use_tcp, ep.tcp_port, ep.sock_unix, ep.sock_win);
@@ -94,29 +94,29 @@ int main(int argc, char **argv)
     g_dispatcher_maths_d = daemon_event_driver_get_dispatcher(
         g_event_driver_maths_d);
     static const daemon_method_entry_t SVC_METHODS[] = {
-        {"health_check", svc_on_health_check_maths_d},
-        {"get_stats", svc_on_get_stats_maths_d},
-        {"recognize", svc_on_recognize_maths_d},
-        {"eval", svc_on_eval_maths_d},
-        {"stats", svc_on_stats_maths_d},
-        {"plot", svc_on_plot_maths_d},
-        {"solve", svc_on_solve_maths_d},
-        {"differentiate", svc_on_differentiate_maths_d},
-        {"integrate", svc_on_integrate_maths_d},
-        {"limit", svc_on_limit_maths_d},
-        {"simplify", svc_on_simplify_maths_d},
-        {"factor", svc_on_factor_maths_d},
-        {"expand", svc_on_expand_maths_d},
-        {"matrix", svc_on_matrix_maths_d},
-        {"units", svc_on_units_maths_d},
-        {"numerical", svc_on_numerical_maths_d},
-        {"finance", svc_on_finance_maths_d},
-        {"number_theory", svc_on_number_theory_maths_d},
+        {"health_check", m_health_check},
+        {"get_stats", m_get_stats},
+        {"recognize", m_recognize},
+        {"eval", m_eval},
+        {"stats", m_stats},
+        {"plot", m_plot},
+        {"solve", m_solve},
+        {"differentiate", m_differentiate},
+        {"integrate", m_integrate},
+        {"limit", m_limit},
+        {"simplify", m_simplify},
+        {"factor", m_factor},
+        {"expand", m_expand},
+        {"matrix", m_matrix},
+        {"units", m_units},
+        {"numerical", m_numerical},
+        {"finance", m_finance},
+        {"number_theory", m_number_theory},
         {"shutdown", on_shutdown_method_maths_d},
     };
     DAEMON_REGISTER_METHODS(g_dispatcher_maths_d, SVC_METHODS);
     SVC_LOG_INFO("Registered 19 RPC methods (maths.* namespace)");
-    svc_attach_maths_d(g_dispatcher_maths_d);
+    svc_attach(g_dispatcher_maths_d);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_maths_d,
                                           (int)server_fd) != 0) {
@@ -124,7 +124,7 @@ int main(int argc, char **argv)
         goto fail_driver;
     }
 
-    if (svc_activate_maths_d(g_event_driver_maths_d, g_bsd_maths_d) != 0) {
+    if (svc_activate(g_event_driver_maths_d, g_bsd_maths_d) != 0) {
         SVC_LOG_ERROR("Service activate failed");
         goto fail_driver;
     }
@@ -132,10 +132,10 @@ int main(int argc, char **argv)
     SVC_LOG_INFO("maths service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_maths_d);
 
-    svc_teardown_maths_d();
+    svc_teardown();
     daemon_cleanup_standard(g_bipc_maths_d, g_bsd_maths_d,
                             g_event_driver_maths_d, server_fd,
-                            MATHS_D_SOCKET_UNIX, svc_destroy_maths_d,
+                            MATHS_D_SOCKET_UNIX, svc_destroy,
                             &g_running_lock_maths_d);
     daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
@@ -146,7 +146,7 @@ fail_driver:
     daemon_event_driver_destroy(g_event_driver_maths_d);
     airy_sock_close(server_fd);
 fail_svc:
-    svc_destroy_maths_d();
+    svc_destroy();
     airy_mtx_destroy(&g_running_lock_maths_d);
     airy_sock_cleanup();
     return EXIT_FAILURE;

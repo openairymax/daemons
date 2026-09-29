@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.4.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.5.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -21,33 +21,31 @@
 #define THINK_D_MAX_BUFFER 1048576
 
 /* 端点解析钩子：常量户回填上方基线；可配置户在 svc.c 完成
- * config/env 覆盖后与 cmdline use_tcp 融合。实现: src/svc.c。
- * 命名豁免 15 字节（机械对齐户名）。 */
-void svc_endpoint_think_d(daemon_endpoint_t *ep, int cmdline_tcp);
+ * config/env 覆盖后与 cmdline use_tcp 融合。实现: src/svc.c。 */
+void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp);
 
 /* 生命周期钩子（实现: src/svc.c）；activate 收到事件驱动句柄与
  * SD bootstrap 句柄，供事件耦合激活策略（如监控采样线程）与
  * manifest deps 驱动的依赖探测健康面使用。 */
-int svc_prepare_think_d(const char *config_path);
-int svc_activate_think_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd);
-void svc_teardown_think_d(void);
-void svc_destroy_think_d(void);
+int svc_prepare(const char *config_path);
+int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd);
+void svc_teardown(void);
+void svc_destroy(void);
 
 /* 策略层附加装配挂点：静态注册表（SVC_METHODS）落库后的动态
  * 注册出口（如 roadmap.* 方法族）。实现: src/svc.c；无附加
- * 注册的户提供空实现。dispatcher 为 method_dispatcher_t。
- * 命名 <action>_<daemon> 豁免 15 字节（机械对齐户名）。 */
-void svc_attach_think_d(void *dispatcher);
+ * 注册的户提供空实现。dispatcher 为 method_dispatcher_t。 */
+void svc_attach(void *dispatcher);
 
-/* RPC handler 族（实现: src/svc.c）。签名对齐 method_fn；命名
- * <method>_<daemon> 三段式机械对齐注册表，豁免 15 字节。 */
-void svc_on_process_think_d(cJSON *params, int id, void *user_data);
-void svc_on_orchestrate_think_d(cJSON *params, int id, void *user_data);
-void svc_on_get_stats_think_d(cJSON *params, int id, void *user_data);
-void svc_on_health_check_think_d(cJSON *params, int id, void *user_data);
-void svc_on_lang_process_think_d(cJSON *params, int id, void *user_data);
-void svc_on_lang_postprocess_think_d(cJSON *params, int id, void *user_data);
-void svc_on_lang_stats_think_d(cJSON *params, int id, void *user_data);
-void svc_on_review_think_d(cJSON *params, int id, void *user_data);
+/* RPC handler 族（实现: src/svc.c）。签名对齐 method_fn；
+ * 命名 m_<method>，与 .manifest rpc.methods 一一对应。 */
+void m_process(cJSON *params, int id, void *user_data);
+void m_orchestrate(cJSON *params, int id, void *user_data);
+void m_get_stats(cJSON *params, int id, void *user_data);
+void m_health_check(cJSON *params, int id, void *user_data);
+void m_lang_process(cJSON *params, int id, void *user_data);
+void m_lang_postprocess(cJSON *params, int id, void *user_data);
+void m_lang_stats(cJSON *params, int id, void *user_data);
+void m_review(cJSON *params, int id, void *user_data);
 
 #endif /* SVC_THINK_D_H */

@@ -66,7 +66,7 @@ static void cfg_load(const char *config_path)
     fclose(f);
 }
 
-void svc_endpoint_channel_d(daemon_endpoint_t *ep, int cmdline_tcp)
+void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
     ep->use_tcp = cmdline_tcp;
     ep->tcp_host = "127.0.0.1";
@@ -75,7 +75,7 @@ void svc_endpoint_channel_d(daemon_endpoint_t *ep, int cmdline_tcp)
     ep->sock_win = CHANNEL_D_SOCKET_WIN;
 }
 
-int svc_prepare_channel_d(const char *config_path)
+int svc_prepare(const char *config_path)
 {
     airy_paths_init();
     cfg_load(config_path);
@@ -96,18 +96,18 @@ int svc_prepare_channel_d(const char *config_path)
     return 0;
 }
 
-int svc_activate_channel_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
+int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
     (void)driver;
     (void)bsd;
     return 0;
 }
 
-void svc_teardown_channel_d(void)
+void svc_teardown(void)
 {
 }
 
-void svc_destroy_channel_d(void)
+void svc_destroy(void)
 {
     if (g_svc) {
         channel_service_stop(g_svc);
@@ -117,7 +117,7 @@ void svc_destroy_channel_d(void)
 }
 
 /* 无静态表外动态注册（manifest methods 全量覆盖），空实现 */
-void svc_attach_channel_d(void *dispatcher)
+void svc_attach(void *dispatcher)
 {
     (void)dispatcher;
 }

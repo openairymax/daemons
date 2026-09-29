@@ -80,31 +80,31 @@ static void handle_vault_list(cJSON *params, int id, airy_sock_t fd);
 static void handle_vault_rotate(cJSON *params, int id, airy_sock_t fd);
 
 /* cupolas.vault_store */
-void svc_on_vault_store_cupolas_d(cJSON *params, int id, void *user_data)
+void m_vault_store(cJSON *params, int id, void *user_data)
 {
     handle_vault_store(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.vault_retrieve */
-void svc_on_vault_retrieve_cupolas_d(cJSON *params, int id, void *user_data)
+void m_vault_retrieve(cJSON *params, int id, void *user_data)
 {
     handle_vault_retrieve(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.vault_delete */
-void svc_on_vault_delete_cupolas_d(cJSON *params, int id, void *user_data)
+void m_vault_delete(cJSON *params, int id, void *user_data)
 {
     handle_vault_delete(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.vault_list */
-void svc_on_vault_list_cupolas_d(cJSON *params, int id, void *user_data)
+void m_vault_list(cJSON *params, int id, void *user_data)
 {
     handle_vault_list(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.vault_rotate */
-void svc_on_vault_rotate_cupolas_d(cJSON *params, int id, void *user_data)
+void m_vault_rotate(cJSON *params, int id, void *user_data)
 {
     handle_vault_rotate(params, id, *(airy_sock_t *)user_data);
 }

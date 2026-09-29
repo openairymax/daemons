@@ -26,31 +26,31 @@ static void handle_entitlements_load(cJSON *params, int id, airy_sock_t fd);
 static void handle_entitlements_check(cJSON *params, int id, airy_sock_t fd);
 
 /* cupolas.net_add_rule */
-void svc_on_net_add_rule_cupolas_d(cJSON *params, int id, void *user_data)
+void m_net_add_rule(cJSON *params, int id, void *user_data)
 {
     handle_net_add_rule(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.net_check_access */
-void svc_on_net_check_access_cupolas_d(cJSON *params, int id, void *user_data)
+void m_net_check_access(cJSON *params, int id, void *user_data)
 {
     handle_net_check_access(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.net_get_stats */
-void svc_on_net_get_stats_cupolas_d(cJSON *params, int id, void *user_data)
+void m_net_get_stats(cJSON *params, int id, void *user_data)
 {
     handle_net_get_stats(id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.entitlements_load */
-void svc_on_entitlements_load_cupolas_d(cJSON *params, int id, void *user_data)
+void m_entitlements_load(cJSON *params, int id, void *user_data)
 {
     handle_entitlements_load(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.entitlements_check */
-void svc_on_entitlements_check_cupolas_d(cJSON *params, int id, void *user_data)
+void m_entitlements_check(cJSON *params, int id, void *user_data)
 {
     handle_entitlements_check(params, id, *(airy_sock_t *)user_data);
 }
