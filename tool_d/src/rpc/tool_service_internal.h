@@ -16,7 +16,7 @@
 #ifndef AIRY_RT_TOOL_SERVICE_INTERNAL_H
 #define AIRY_RT_TOOL_SERVICE_INTERNAL_H
 
-#include "service.h"
+#include "rpc/service.h"
 
 #include <stddef.h>
 #include <stdint.h>

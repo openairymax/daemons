@@ -9,15 +9,15 @@
 #ifndef TOOL_SERVICE_INTERNAL_H
 #define TOOL_SERVICE_INTERNAL_H
 
-#include "cache.h"
+#include "core/cache.h"
 #include "cache_common.h"
-#include "config.h"
-#include "executor.h"
-#include "executor_pool.h"
+#include "core/config.h"
+#include "core/executor.h"
+#include "core/executor_pool.h"
 #include "daemon_platform_ext.h"
-#include "registry.h"
+#include "core/registry.h"
 #include "tool_service.h"
-#include "validator.h"
+#include "core/validator.h"
 
 #include <stdatomic.h>
 

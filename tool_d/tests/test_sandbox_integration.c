@@ -26,7 +26,7 @@
 #endif
 
 #include "airy_sandbox.h"
-#include "executor.h"
+#include "core/executor.h"
 #include "airy_memory.h"
 #include "syscalls.h"
 
