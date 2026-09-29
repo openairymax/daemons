@@ -17,7 +17,7 @@
 #include "error.h"
 #include "daemon_platform_ext.h"
 #include "response.h"
-#include "router/llm_router.h"
+#include "router/core/llm_router.h"
 #include "service.h"
 #include "svc_logger.h"
 #include "svc_model_defaults.h"

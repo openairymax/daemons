@@ -12,7 +12,7 @@
 #include "daemon_platform_ext.h"
 #include "error.h"
 #include "response.h"
-#include "router/llm_router.h"
+#include "router/core/llm_router.h"
 #include "semantic_cache.h"
 #include "service.h"
 #include "svc_logger.h"
