@@ -51,7 +51,7 @@ typedef struct {
     char token_model[MEM_TOKEN_MODEL_MAX];
 } mem_daemon_config_t;
 
-/* ── Global service instances (defined in main.c) ─────────────────────── */
+/* ── Global service instances (defined in svc.c) ──────────────────────── */
 
 extern mem_service_t  *g_service;
 extern mem_cache_t    *g_cache;
