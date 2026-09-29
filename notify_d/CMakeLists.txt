@@ -17,6 +17,10 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
 
 add_executable(notify_d ${NOTIFY_D_SOURCES})
 
+# R7 并户：safety_guard.h 的 safety_guard_create 等声明位于
+# AIRY_ENABLE_V2_API 门控块，与 hook_d 形态一致
+target_compile_definitions(notify_d PRIVATE AIRY_ENABLE_V2_API=1)
+
 if(WIN32)
     target_compile_definitions(notify_d PRIVATE
         AIRY_PLATFORM_WINDOWS=1
@@ -50,11 +54,13 @@ target_include_directories(notify_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${COMMONS_INCLUDE_DIR}/utils/compat
+    ${COMMONS_INCLUDE_DIR}/utils/cjson # R7 并户：CJSON_PARSE_GUARD（hook_rpc.c）
 )
 
 target_link_libraries(notify_d PRIVATE
     svc_common
     airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
+    airy_coreloop_hooks # R7 并户：hook registry/executor/builtin handlers
     Threads::Threads
 )
 

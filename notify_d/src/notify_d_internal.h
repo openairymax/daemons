@@ -21,6 +21,7 @@
 #include "notify_service.h"
 #include "platform_paths.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -52,6 +53,66 @@ int notify_d_healthcheck(notify_d_service_t *svc);
 
 /* 协议域（net.c 实现，main.c accept 循环派发） */
 void *notify_d_conn_thread(void *arg);
+
+/* ---- hook 面（R7 并户：原 hook_d 独立守护进程吸收为第二监听面）----
+ * socket-only 面路由（全 daemons 零 L2 挂载实证）：hook 客户端连接
+ * hook.sock（Windows TCP 8093），12 个 hook.* 方法载荷保真直迁；
+ * accept 循环按 face 打标，conn 线程按 face 分派。 */
+#define HOOK_D_SOCKET_UNIX airy_runtime_dir_socket("hook.sock")
+#define HOOK_D_TCP_PORT 8093
+#define AIRY_HOOK_MAX_SESSIONS 32
+#define AIRY_HOOK_CTX_LEN 4096
+
+typedef struct {
+    char session_id[64];
+    bool active;
+    uint64_t started_ns;
+    char decision[16];
+    size_t hook_count;
+    char context[AIRY_HOOK_CTX_LEN]; /* 注入的会话上下文（session.start 的 input） */
+    size_t context_len;
+} hook_session_entry_t;
+
+/* Hook 系统引导标志与启动时刻（hook_svc.c 拥有，hook_rpc.c 只读） */
+extern int g_hook_registry_ready;
+extern uint64_t g_hook_start_time;
+
+/* P1-5 会话级上下文注入通道存储（hook_svc.c 初始化/销毁锁，
+ * handler 经 hook_session_find / hook_session_upsert 访问） */
+extern hook_session_entry_t g_hook_sessions[AIRY_HOOK_MAX_SESSIONS];
+extern airy_mtx_t g_hook_sessions_lock;
+
+/* 会话表访问原语（hook_svc.c 实现；调用方负责持锁） */
+hook_session_entry_t *hook_session_find(const char *session_id);
+hook_session_entry_t *hook_session_upsert(const char *session_id);
+
+/* hook 面生命周期（hook_svc.c 实现，svc.c 装配调用；全部幂等） */
+int hook_svc_prepare(void);
+void hook_svc_destroy(void);
+int hook_svc_listen_start(void);
+void hook_svc_listen_stop(void);
+airy_sock_t hook_svc_listen_fd(void);
+
+/* hook 面单连接受理（hook_svc.c 实现，net.c conn 线程按 face 调用；
+ * read_request 失败回 -32600 后关连接，单请求单回包） */
+void hook_svc_serve_conn(airy_sock_t fd);
+
+/* hook 面 RPC 方法域单入口返回码 */
+#define HOOK_RPC_HANDLED 0
+#define HOOK_RPC_SHUTDOWN 1
+
+/* hook 面 RPC 单入口（hook_rpc.c 实现）：解析 + 校验 + 13 方法分派，
+ * 回包串交 *out（调用方发送后释放）；shutdown 返回 HOOK_RPC_SHUTDOWN */
+int hook_rpc_handle_json(const char *req_text, size_t req_len, char **out);
+
+/* accept 循环面标记与每连接参数（main.c 装配，net.c 消费） */
+#define NOTIFY_FACE_NOTIFY 0
+#define NOTIFY_FACE_HOOK 1
+
+typedef struct {
+    airy_sock_t fd;
+    int face;
+} notify_conn_arg_t;
 
 #ifdef __cplusplus
 }

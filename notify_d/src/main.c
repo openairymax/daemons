@@ -8,9 +8,11 @@
  * @details 本户单端口四协议多路复用（JSON-RPC / SSE / WebSocket /
  *        裸消息），每连接一线程，不使用 DAEMON_DECLARE_COMMON 生成
  *        样板。生命周期策略在 svc.c，协议嗅探与握手在 net.c，
- *        订阅/广播/分派核心在 notify_service.c。停机出口唯一：
- *        main 显式 stop(force) 后 destroy，destroy 不再隐式二次
- *        stop。
+ *        订阅/广播/分派核心在 notify_service.c。R7 并户后装配双
+ *        监听面：notify.sock（Windows TCP 8084）+ hook.sock（Windows
+ *        TCP 8093），accept 循环按面打标、conn 线程按面分派。停机
+ *        出口唯一：main 显式 stop(force) 后 destroy，destroy 不再
+ *        隐式二次 stop。
  */
 
 #include "airy_memory.h"
@@ -25,6 +27,7 @@
 #include <stdlib.h>
 
 #ifndef _WIN32
+#include <poll.h>
 #include <unistd.h>
 #endif
 
@@ -91,26 +94,62 @@ int main(int argc, char **argv)
     daemon_bootstrap_ipc_t *bipc = daemon_bootstrap_ipc_start(
         "notify_d", "notify", g_service.socket_path, 0, IPC_BUS_PROTO_JSON_RPC);
 
+    airy_sock_t hook_fd = hook_svc_listen_fd();
     while (!g_shutdown && g_service.running) {
-        airy_sock_t client = airy_sock_accept(g_service.server_fd, 1000);
+        int face;
+        airy_sock_t client;
+#ifndef _WIN32
+        /* 双面等待：poll 两 listener（notify.sock + hook.sock），1000ms
+         * 步进与停机检查节奏一致；命中后 accept 非阻塞取连接 */
+        struct pollfd pfds[2];
+        pfds[0].fd = (int)g_service.server_fd;
+        pfds[0].events = POLLIN;
+        pfds[0].revents = 0;
+        pfds[1].fd = (int)hook_fd;
+        pfds[1].events = POLLIN;
+        pfds[1].revents = 0;
+        if (poll(pfds, 2, 1000) <= 0)
+            continue;
+        face = (pfds[1].revents & POLLIN) ? NOTIFY_FACE_HOOK : NOTIFY_FACE_NOTIFY;
+        client = airy_sock_accept(
+            face == NOTIFY_FACE_HOOK ? hook_fd : g_service.server_fd, 0);
+#else
+        /* Windows 无跨族双 fd 等待：顺序短超时试探两面，50ms 步进
+         * 保持停机响应（timeout=0 在 select 路径是无限阻塞，禁用） */
+        client = airy_sock_accept(g_service.server_fd, 50);
         if (client != AIRY_INVALID_SOCKET) {
-            if (atomic_load_explicit(&g_conns, memory_order_relaxed) >= NOTIFY_D_MAX_CONN) {
-                airy_sock_close(client); /* 过载：拒绝新连接 */
-                continue;
-            }
-            atomic_fetch_add_explicit(&g_conns, 1, memory_order_relaxed);
-            airy_thread_t th;
-            /* fire-and-forget conn thread: platform primitives on purpose.
-             * Under AIRY_USE_SCHEDULER_THREAD_IMPL the scheduler owns
-             * airy_thread_create/join (join-oriented, no detach API); a
-             * per-conn blocking handler must not occupy the task table. */
-            if (airy_platform_thread_create(&th, notify_d_conn_thread,
-                                            (void *)(intptr_t)client) == 0)
-                airy_platform_thread_detach(th);
-            else {
-                atomic_fetch_sub_explicit(&g_conns, 1, memory_order_relaxed);
-                airy_sock_close(client);
-            }
+            face = NOTIFY_FACE_NOTIFY;
+        } else {
+            face = NOTIFY_FACE_HOOK;
+            client = airy_sock_accept(hook_fd, 50);
+        }
+#endif
+        if (client == AIRY_INVALID_SOCKET)
+            continue;
+        if (atomic_load_explicit(&g_conns, memory_order_relaxed) >= NOTIFY_D_MAX_CONN) {
+            airy_sock_close(client); /* 过载：拒绝新连接 */
+            continue;
+        }
+        atomic_fetch_add_explicit(&g_conns, 1, memory_order_relaxed);
+        notify_conn_arg_t *carg = AIRY_MALLOC(sizeof(*carg));
+        if (!carg) {
+            airy_sock_close(client);
+            atomic_fetch_sub_explicit(&g_conns, 1, memory_order_relaxed);
+            continue;
+        }
+        carg->fd = client;
+        carg->face = face;
+        airy_thread_t th;
+        /* fire-and-forget conn thread: platform primitives on purpose.
+         * Under AIRY_USE_SCHEDULER_THREAD_IMPL the scheduler owns
+         * airy_thread_create/join (join-oriented, no detach API); a
+         * per-conn blocking handler must not occupy the task table. */
+        if (airy_platform_thread_create(&th, notify_d_conn_thread, carg) == 0)
+            airy_platform_thread_detach(th);
+        else {
+            AIRY_FREE(carg);
+            atomic_fetch_sub_explicit(&g_conns, 1, memory_order_relaxed);
+            airy_sock_close(client);
         }
     }
 
