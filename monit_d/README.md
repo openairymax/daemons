@@ -8,20 +8,22 @@
 ## 这是什么
 
 `monit_d` 是 AgentRT 的可观测性守护进程：运行态指标采集与查询、健康检查、告警触发与
-解决、监控报告生成、分布式追踪，并把指标以 Prometheus 文本格式导出。除 JSON-RPC 之外，
-同一监听端点直接识别 `GET /metrics` 请求，供 Prometheus 抓取。
+解决、监控报告生成、分布式追踪，并把指标以 Prometheus 文本格式导出。JSON-RPC 与
+Prometheus 抓取完全分离：主端点只走 JSON-RPC，文本导出唯一走观测域独立 HTTP 出口。
 
-- 端点：POSIX Unix socket `<runtime-dir>/monit.sock`（`$AIRY_HOME/run/monit.sock`）；
-  Windows 固定为本机 TCP 回环 `127.0.0.1:9090`。
-- 可选 TCP：POSIX 上以 `--tcp` 启用，默认端口 `9090`（默认只监听 socket）。
-- 另有观测域独立 HTTP 抓取端点 `:9091/metrics`，端口被占用时自动降级，不影响启动。
+- 端点：三端同形态 —— POSIX Unix socket `<runtime-dir>/monit.sock`
+  （`$AIRY_HOME/run/monit.sock`），Windows 命名管 `\\.\pipe\airy_monit`。
+- 可选 TCP：以 `--tcp` 升级为本机回环 `127.0.0.1:9090`（默认只监听本地 IPC 端点）。
+- 观测域独立 HTTP 抓取端点 `:9091/metrics` 是 Prometheus 唯一出口，端口被占用时
+  自动降级，不影响启动。
 
 ## 能力
 
 - **指标域** — 记录 / 查询命名指标，心跳自动落 `heartbeat` counter，30s 周期上报统计。
 - **告警域** — 触发告警、按 `alert_id` 解决告警、列出活动与已解决告警。
 - **健康与报告** — 单服务健康检查、整体监控报告生成、`get_stats` 运行态自计数。
-- **Prometheus 导出** — 14 个必需指标 + 2 个抓取统计 gauge，与 JSON-RPC 共用监听端点。
+- **Prometheus 导出** — 14 个必需指标 + 2 个抓取统计 gauge，经观测域独立 HTTP
+  端点 `:9091/metrics` 导出。
 - **观测域（`observe_*`）** — 扁平参数风格的动态指标表（最多 256 条），并额外暴露独立
   HTTP `/metrics` 服务。
 - **系统信息域（`info_*`）** — 后台线程每 5s 采集一次 CPU / 内存 / 磁盘快照，保留 64 深度
@@ -30,29 +32,34 @@
 ## 架构
 
 ```
-客户端 (JSON-RPC 2.0) ─┐
-Prometheus scraper     ├─▶ main.c（事件驱动，先判 GET /metrics 再按 JSON-RPC 分发）
-(GET /metrics 同端点) ─┘                          │
-                    ┌─────────────────────────────┼───────────────────────────┐
-                    ▼                             ▼                           ▼
-      monitor_service（metrics / alert /   observe_rpc                info_rpc
-        tracing / logging / report）       （动态指标表 + :9091 HTTP） （5s 采集线程 + 环形历史）
-                    │
-                    ▼
-      prometheus_exporter（指标注册与文本导出）
+客户端 (JSON-RPC 2.0) ─▶ 端点（sock/管，`--tcp` 升级 9090）
+                             │ main.c（生成态）：标准 JSON-RPC 户，按 dispatcher 分发
+Prometheus scraper ─────▶ :9091（observe_rpc 独立 HTTP 出口，唯一 /metrics 文本导出）
+                             │
+              ┌──────────────┼──────────────────────────────┐
+              ▼              ▼                              ▼
+   monit_rpc.c +      observe_rpc                 info_rpc
+   monitor_service    （动态指标表 + :9091 HTTP） （5s 采集线程 + 环形历史）
+   （metrics / alert /
+    tracing / report）
+              │
+              ▼
+   prometheus_exporter（指标注册与文本导出）
 ```
 
 - 事件驱动模型：`daemon_event_driver`，线程池 2~4、队列 128、最大事件 64；
-- 请求分流顺序：`GET /metrics` 命中即返回 Prometheus 文本（`text/plain; version=0.0.4`），
-  否则按 JSON-RPC 2.0 分发；
+- JSON-RPC 与 HTTP 完全分离：主端点只按 JSON-RPC 2.0 分发；Prometheus 文本
+  （`text/plain; version=0.0.4`）仅由 `observe_rpc` 的独立 HTTP 端点 `:9091` 服务；
 - `observe_rpc` / `info_rpc` 与 `monitor_service` 同为内建模块，初始化失败只降级对应方法，
   不阻断守护进程启动。
 
 ## JSON-RPC 接口
 
-共 19 个方法，均由 `method_dispatcher_register` 注册，分布在三个源文件中。
+共 19 个方法，均由 `method_dispatcher_register` 注册：12 个静态表方法以 `.manifest`
+为唯一契约源（`daemon_gen.py` 生成态 `main.c` 装配），其余 7 个由观测域与系统信息域
+在 `svc_attach` 时动态注册。
 
-**核心监控域（`src/main.c`，12 个）**
+**核心监控域（`src/monit_rpc.c` 11 个 + 生成态 `shutdown`）**
 
 | 方法 | 参数 | 返回 | 描述 |
 |------|------|------|------|
@@ -119,7 +126,7 @@ Prometheus scraper     ├─▶ main.c（事件驱动，先判 GET /metrics 再
 
 ## 配置
 
-监控参数为进程内建默认值，写在 `src/main.c` 中：
+监控参数为进程内建默认值，写在 `src/svc.c`（`svc_prepare`）中：
 
 | 字段 | 默认 |
 |------|------|
@@ -152,7 +159,7 @@ airymaxrt logs monit_d        # 运行态日志
 ```bash
 SOCK="${AIRY_HOME:-$HOME/.airymaxrt}/run/monit.sock"
 printf '%s' '{"jsonrpc":"2.0","id":1,"method":"get_stats","params":{}}' | socat - UNIX-CONNECT:"$SOCK"
-printf 'GET /metrics HTTP/1.1\r\nHost: monit\r\n\r\n' | socat - UNIX-CONNECT:"$SOCK"
+curl http://127.0.0.1:9091/metrics
 ```
 
 构建（构建目录须位于源码树之外）：
