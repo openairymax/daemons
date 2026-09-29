@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.3.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.4.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -127,7 +127,7 @@ int main(int argc, char **argv)
         goto fail_driver;
     }
 
-    if (svc_activate_cupolas_d(g_event_driver_cupolas_d) != 0) {
+    if (svc_activate_cupolas_d(g_event_driver_cupolas_d, g_bsd_cupolas_d) != 0) {
         SVC_LOG_ERROR("Service activate failed");
         goto fail_driver;
     }

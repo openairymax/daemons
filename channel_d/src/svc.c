@@ -96,9 +96,10 @@ int svc_prepare_channel_d(const char *config_path)
     return 0;
 }
 
-int svc_activate_channel_d(daemon_event_driver_t *driver)
+int svc_activate_channel_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
     (void)driver;
+    (void)bsd;
     return 0;
 }
 
