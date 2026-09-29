@@ -1,5 +1,9 @@
 
-
+# Channel 通道服务构建文件（channel.* 命名空间）
+#
+# gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c /
+# daemon 配置与端点策略 svc.c 由 daemon_gen.py 生成；RPC 方法域
+# channel_rpc.c 与服务域 channel_service.c/channel_io.c 为手写业务源。
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -9,25 +13,19 @@ set(DAEMON_COMMON_INCLUDE_DIR ${DAEMON_COMMON_DIR}/include)
 set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
-# channel_service.c 按单一职责拆分（2026-08-27）：
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
+
+# 平台映射（策略层）：channel_service.c 按单一职责拆分（2026-08-27）：
 #   channel_service.c   生命周期/打开/关闭/查询域
 #   channel_io.c        收发（send/receive）与连通性探测（ping）域
 # Windows（G1 编译窗）：三种通道后端（AF_UNIX SOCKET / mkfifo PIPE /
 # shm_open SHM）在 UCRT/airy_mman 下均未映射（#124 C1083 实证），改用
 # channel_win32.c 纯内存服务层 stub（open/send/receive 显式 NOT_SUPPORTED），
 # 与 HTTP/2 网关 Windows 禁用、run_stream 501 stub 同策略；传输映射完成后
-# 恢复下方 POSIX 源清单并删除 win32 stub。
+# 删除本段并恢复 manifest 源清单直用。
 if(WIN32)
-    set(CHANNEL_D_SOURCES
-        src/main.c
-        src/channel_win32.c
-    )
-else()
-    set(CHANNEL_D_SOURCES
-        src/main.c
-        src/channel_service.c
-        src/channel_io.c
-    )
+    list(FILTER CHANNEL_D_SOURCES EXCLUDE REGEX "channel_(service|io)\\.c")
+    list(APPEND CHANNEL_D_SOURCES src/channel_win32.c)
 endif()
 
 add_executable(channel_d ${CHANNEL_D_SOURCES})
