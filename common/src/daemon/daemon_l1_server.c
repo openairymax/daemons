@@ -9,10 +9,10 @@
  *
  * Built as its own static library (not into svc_common) with a PRIVATE
  * link on airy_core: airy_core publishes AIRY_USE_SCHEDULER_THREAD_IMPL
- * as a PUBLIC compile definition, and svc_common sources contain
- * airy_thread_create call sites whose implementation selection must not
- * flip when this module is merely present. The tiny-library boundary
- * keeps the macro blast radius inside this translation unit.
+ * as a PUBLIC compile definition, and the tiny-library boundary keeps
+ * that macro's blast radius inside this translation unit instead of
+ * flipping the thread-implementation selection of svc_common's
+ * compilation units.
  *
  * Concurrency model: corekern L1 is a synchronous binder-style
  * transaction layer - the handler runs on the sender's thread. stop()
