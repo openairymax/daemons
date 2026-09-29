@@ -12,7 +12,7 @@
 
 #include "airy_dirent.h"
 #include "airy_regex.h"
-#include "builtin.h"
+#include "builtin/builtin.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -35,7 +35,7 @@
 #define S_ISREG(m) (((m)&_S_IFREG) != 0)
 #endif
 
-#include "tool_builtin_internal.h"
+#include "builtin/tool_builtin_internal.h"
 
 /* ============================================================================
  * fs_grep: regex content search (modeled on Atom Code GrepTool / Claude Code rg guidance)

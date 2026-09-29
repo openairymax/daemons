@@ -12,7 +12,7 @@
 #include "error.h"
 
 #include "airy_dirent.h"
-#include "builtin.h"
+#include "builtin/builtin.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -44,7 +44,7 @@
 #endif
 #endif
 
-#include "tool_builtin_internal.h"
+#include "builtin/tool_builtin_internal.h"
 
 int fs_list_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {

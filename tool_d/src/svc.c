@@ -14,7 +14,7 @@
 
 #include "daemon_main.h"
 #include "platform.h"
-#include "plugin_rpc.h"
+#include "plugin/plugin_rpc.h"
 #include "svc_logger.h"
 #include "svc_tool_d.h"
 #include "tool_d_internal.h"

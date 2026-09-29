@@ -11,7 +11,7 @@
 #include "airy_memory.h"
 #include "error.h"
 
-#include "builtin.h"
+#include "builtin/builtin.h"
 #include "os_sandbox.h"
 #include "svc_logger.h"
 
@@ -31,7 +31,7 @@
 #include <unistd.h>
 #endif
 
-#include "tool_builtin_internal.h"
+#include "builtin/tool_builtin_internal.h"
 
 void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const char *mark)
 {

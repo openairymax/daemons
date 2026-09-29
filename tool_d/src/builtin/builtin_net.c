@@ -10,7 +10,7 @@
 #include "airy_memory.h"
 #include "error.h"
 
-#include "builtin.h"
+#include "builtin/builtin.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -24,7 +24,7 @@
 
 #include "airy_regex.h"
 
-#include "tool_builtin_internal.h"
+#include "builtin/tool_builtin_internal.h"
 
 /* ============================================================================
  * web_fetch: fetch web page content over the network

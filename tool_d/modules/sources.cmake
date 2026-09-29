@@ -9,5 +9,5 @@ set(TOOL_D_SOURCES
     src/main.c
     src/svc.c
     src/rpc/tool_rpc.c
-    src/plugin_rpc.c
+    src/plugin/plugin_rpc.c
 )

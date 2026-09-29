@@ -13,7 +13,7 @@
 #include "airy_memory.h"
 #include "error.h"
 
-#include "builtin.h"
+#include "builtin/builtin.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -32,7 +32,7 @@
 #include <io.h>
 #endif
 
-#include "tool_builtin_internal.h"
+#include "builtin/tool_builtin_internal.h"
 
 /* ============================================================================
  * 原子写（t11-01）：写同目录临时文件 + fsync + rename 替换。
