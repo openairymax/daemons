@@ -60,7 +60,9 @@ add_subdirectory(sched_d)
 add_subdirectory(market_d)
 add_subdirectory(channel_d)
 add_subdirectory(notify_d)
-add_subdirectory(hook_d)
+# 0.1.19 R7（daemon 整编 15→14）：hook_d 并入 notify_d——hook 面为
+# notify_d 第二 listener（POSIX unix hook.sock / Windows TCP 8093），
+# per-conn face 分派，12 个 hook 方法载荷保真直迁；gateway hook.* 改路由。
 # 0.1.9 M4（daemon 整编 18→15）：plugin_d → tool_d（插件 dlopen 执行域
 # 随迁 tool_d，plugin_* 方法在 tool 命名空间登记，gateway 改路由）；
 # observe_d / info_d → monit_d（双 Prometheus /metrics 收敛，系统信息
@@ -137,8 +139,7 @@ airy_print_info("  - monit_d   : ${CMAKE_CURRENT_SOURCE_DIR}/monit_d")
 airy_print_info("  - sched_d   : ${CMAKE_CURRENT_SOURCE_DIR}/sched_d")
 airy_print_info("  - market_d  : ${CMAKE_CURRENT_SOURCE_DIR}/market_d")
 airy_print_info("  - channel_d : ${CMAKE_CURRENT_SOURCE_DIR}/channel_d")
-airy_print_info("  - notify_d  : ${CMAKE_CURRENT_SOURCE_DIR}/notify_d")
-airy_print_info("  - hook_d    : ${CMAKE_CURRENT_SOURCE_DIR}/hook_d")
+airy_print_info("  - notify_d  : ${CMAKE_CURRENT_SOURCE_DIR}/notify_d (hook 面并户)")
 airy_print_info("  - mem_d     : ${CMAKE_CURRENT_SOURCE_DIR}/mem_d")
 airy_print_info("  - agent_d   : ${CMAKE_CURRENT_SOURCE_DIR}/agent_d")
 airy_print_info("  - a2a_d     : ${CMAKE_CURRENT_SOURCE_DIR}/a2a_d")
@@ -218,7 +219,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/maths_d/include/
 # 导出项目配置
 if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
    AND TARGET monit_d AND TARGET sched_d AND TARGET market_d
-   AND TARGET channel_d AND TARGET notify_d AND TARGET hook_d
+   AND TARGET channel_d AND TARGET notify_d
    AND TARGET mem_d AND TARGET agent_d AND TARGET a2a_d
    AND TARGET think_d AND TARGET cupolas_d AND TARGET maths_d
    AND TARGET supervisor_d)
@@ -231,7 +232,7 @@ if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
     # 因此单独导出可执行文件即可满足 build-tree 消费场景。
     export(TARGETS gateway_d llm_d tool_d
                   monit_d sched_d market_d channel_d
-                  notify_d hook_d
+                  notify_d
                   mem_d agent_d a2a_d
                   think_d cupolas_d maths_d
                   supervisor_d
@@ -246,13 +247,13 @@ endif()
 # 回退组成完整生产安装（AIRY_HOME 体系，K8s 节点运行时根类比）。
 install(TARGETS gateway_d llm_d tool_d
                 monit_d sched_d market_d channel_d
-                notify_d hook_d
+                notify_d
                 mem_d agent_d a2a_d think_d cupolas_d maths_d
                 supervisor_d
     RUNTIME DESTINATION bin
 )
 
-# ==================== 0.1.9 §5.1 链接白名单门禁：15 daemon 节点登记 ====================
+# ==================== 0.1.9 §5.1 链接白名单门禁：14 daemon 节点登记 ====================
 # 每个 daemon 目标的允许链接库集登记于根 link-whitelist.txt（SSoT）；
 # 此处统一收集实际链接供 airy_depgraph 构建期校验。架构约束：
 # daemon 之间禁进程内符号引用（跨界调用必须走 svc_common 总线）——
@@ -260,6 +261,6 @@ install(TARGETS gateway_d llm_d tool_d
 # 白名单路径由 airy_linkgate.cmake 单点定义，调用点零路径知识。
 # gateway_d 已在自身 CMakeLists 收集（含 airy_gateway_service），不重复。
 foreach(_dg llm_d tool_d monit_d sched_d market_d channel_d notify_d
-           hook_d mem_d agent_d a2a_d think_d cupolas_d maths_d supervisor_d)
+           mem_d agent_d a2a_d think_d cupolas_d maths_d supervisor_d)
     airy_linkgate_collect(${_dg})
 endforeach()

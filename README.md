@@ -20,7 +20,7 @@
 
 **daemons** is the service layer of the Airymax agent runtime. It contains **15 feature
 daemon processes** — `gateway_d`, `llm_d`, `tool_d`, `sched_d`, `market_d`, `monit_d`,
-`channel_d`, `notify_d`, `hook_d`, `mem_d`, `agent_d`, `a2a_d`, `think_d`, `cupolas_d`,
+`channel_d`, `notify_d`, `mem_d`, `agent_d`, `a2a_d`, `think_d`, `cupolas_d`,
 `maths_d` — **one governance daemon** `supervisor_d` (resident cluster supervision),
 and the shared static library `svc_common` (in `common/`).
 
@@ -53,7 +53,7 @@ External client ──HTTP / WS / SSE / MCP / A2A / OpenAI API──▶ gateway_
 - **Observability** — every daemon reports metrics to `monit_d` and events to `notify_d`,
   and writes a per-process log you can read with `airymaxrt logs <daemon>_d`.
 - **Lifecycle framework** — one `airy_svc_t` state machine and one event-driven
-  main loop (`daemon_event_driver`) shared by all 15 feature processes.
+  main loop (`daemon_event_driver`) shared by all 14 feature processes.
 
 ## The daemons
 
@@ -66,15 +66,14 @@ External client ──HTTP / WS / SSE / MCP / A2A / OpenAI API──▶ gateway_
 | 5 | [market_d](market_d/README.md) | `market.*` | Agent / Skill / Tool / Template artifacts: search, install, versioning, uninstall. |
 | 6 | [monit_d](monit_d/README.md) | `monit.*` | Metrics collection and query, system and hardware info, health checks, alert rules, runaway-agent detection. |
 | 7 | [channel_d](channel_d/README.md) | `channel.*` | Data-plane application channels: channel create / join / send / receive and message routing. |
-| 8 | [notify_d](notify_d/README.md) | `notify.*` | Event fan-out: topic-based publish / subscribe over WebSocket, SSE, and sockets. |
-| 9 | [hook_d](hook_d/README.md) | `hook.*` | Hook and session registration; the hook engine itself lives in `atoms/coreloopthree`. |
-| 10 | [mem_d](mem_d/README.md) | `mem.*` | Persistent memory: write / search / get / delete / recent / evolve, hybrid TF-IDF + embedding retrieval, JSONL storage. |
-| 11 | [agent_d](agent_d/README.md) | `agent.*` | Agent lifecycle and the execution loop: `run` / `run_stream` / `run_cancel`, spawn / invoke / terminate / cancel. |
-| 12 | [a2a_d](a2a_d/README.md) | `a2a.*` | Agent-to-Agent protocol: Agent Card registration and discovery, task state machine, message delivery. |
-| 13 | [think_d](think_d/README.md) | `think.*` | Cognition service: two-pass interaction, pipeline orchestration, language front-end, review. |
-| 14 | [cupolas_d](cupolas_d/README.md) | `cupolas.*`, `policy.*` | Security policy decision point: permission checks, sanitization, audit, credential vault, network rules, policy load / activate / rollback. |
-| 15 | [maths_d](maths_d/README.md) | `maths.*` | Mathematics coprocessor: pure-C numeric and statistical evaluation, plus an optional symbolic backend. |
-| 16 | [supervisor_d](supervisor_d/README.md) | — (governance ctrl endpoint) | Governance daemon: declaration-driven reconcile of the cluster against the launch profile (spawn missing, reap stray), crash restart with exponential backoff, unified shutdown. Reconciles only, carries no business logic, links no business library (linkgate fail-closed). |
+| 8 | [notify_d](notify_d/README.md) | `notify.*`, `hook.*` | Event fan-out: topic-based publish / subscribe over WebSocket, SSE, and sockets; hosts the hook face (hook and session registration; the hook engine itself lives in `atoms/coreloopthree`). |
+| 9 | [mem_d](mem_d/README.md) | `mem.*` | Persistent memory: write / search / get / delete / recent / evolve, hybrid TF-IDF + embedding retrieval, JSONL storage. |
+| 10 | [agent_d](agent_d/README.md) | `agent.*` | Agent lifecycle and the execution loop: `run` / `run_stream` / `run_cancel`, spawn / invoke / terminate / cancel. |
+| 11 | [a2a_d](a2a_d/README.md) | `a2a.*` | Agent-to-Agent protocol: Agent Card registration and discovery, task state machine, message delivery. |
+| 12 | [think_d](think_d/README.md) | `think.*` | Cognition service: two-pass interaction, pipeline orchestration, language front-end, review. |
+| 13 | [cupolas_d](cupolas_d/README.md) | `cupolas.*`, `policy.*` | Security policy decision point: permission checks, sanitization, audit, credential vault, network rules, policy load / activate / rollback. |
+| 14 | [maths_d](maths_d/README.md) | `maths.*` | Mathematics coprocessor: pure-C numeric and statistical evaluation, plus an optional symbolic backend. |
+| 15 | [supervisor_d](supervisor_d/README.md) | — (governance ctrl endpoint) | Governance daemon: declaration-driven reconcile of the cluster against the launch profile (spawn missing, reap stray), crash restart with exponential backoff, unified shutdown. Reconciles only, carries no business logic, links no business library (linkgate fail-closed). |
 
 Executable names keep the `*_d` suffix and match the CMake target names one for one
 (`gateway_d`, `llm_d`, …). Each subdirectory has its own README documenting its interface.
@@ -242,7 +241,7 @@ into running processes.
 | Dependency | What daemons uses |
 |------------|-------------------|
 | [commons](https://atomgit.com/openairymax/commons) | Logging, configuration, networking, tokens, cost, observability, platform paths and the authoritative IPC headers — reached transitively through `svc_common` |
-| [atoms](https://atomgit.com/openairymax/atoms) | Syscall entry surface for downward dispatch; `hook_d` links the CoreLoopThree hook library directly |
+| [atoms](https://atomgit.com/openairymax/atoms) | Syscall entry surface for downward dispatch; notify_d's hook face links the CoreLoopThree hook library directly |
 | [cupolas](https://atomgit.com/openairymax/cupolas) | Security dome, `PUBLIC`-linked by `svc_common`; `cupolas_d` exposes it as a service |
 | [protocols](https://atomgit.com/openairymax/protocols) | JSON-RPC 2.0 / AgentsIPC envelope on the IPC bus; A2A and MCP adapters at the gateway |
 | [heapstore](https://atomgit.com/openairymax/heapstore) | Persistence for daemon state, registries, and budgets |
