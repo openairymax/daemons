@@ -1,0 +1,44 @@
+{
+  "manifest_version": 1,
+  "daemon": "sched_d",
+  "cname": "scheduler",
+  "sd_type": "scheduler",
+  "facades": ["ingress", "execute", "governance"],
+  "slots": ["sched", "route", "query"],
+  "ops": ["ipc", "llm", "tool"],
+  "rpc": {
+    "unix": "sched.sock",
+    "win_pipe": "airy_sched",
+    "tcp": 8083,
+    "tags": "scheduler,core",
+    "buffer": 65536,
+    "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },
+    "methods": [
+      "register_agent",
+      "unregister_agent",
+      "schedule_task",
+      "get_task",
+      "cancel",
+      "dag_submit",
+      "dag_status",
+      "dag_list",
+      "dag_cancel",
+      "get_stats",
+      "health_check",
+      "checkpoint_save",
+      "submit",
+      "query"
+    ]
+  },
+  "deps": {
+    "required": ["agent_d"],
+    "optional": []
+  },
+  "modules": [
+    { "name": "rpc", "sources": ["sched_rpc_handlers.c"] },
+    { "name": "dispatch", "sources": ["sched_dispatch.c"] },
+    { "name": "roadmap", "sources": ["roadmap_rpc.c"] },
+    { "name": "service", "sources": ["sched_service_impl.c", "sched_service_agent.c", "sched_service_task.c", "sched_service_worker.c"] },
+    { "name": "dag", "sources": ["sched_dag_impl.c", "sched_dag_engine.c", "sched_dag_worker.c", "sched_dag_parse.c"] }
+  ]
+}
