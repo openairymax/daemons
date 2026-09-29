@@ -54,6 +54,41 @@
 - 主循环 1s 轮询；`SIGINT` / `SIGTERM` 或 `shutdown` RPC 触发优雅退出；
   `SIGUSR1` 切换日志级别。
 
+## 进程域与装配
+
+`gateway_d` 采登记式（`.manifest` `codegen:false`）分域装配，进程域文件各司其职：
+
+| 文件 | 域 | 职责 |
+|------|----|------|
+| `src/main.c` | 装配 | 顺序拉起各子系统、信号注册、优雅退出 |
+| `src/gw_cli.c` | CLI | `usage`、命令行解析（`gw_parse_args`）、守护化动作（`gw_daemonize`） |
+| `src/gw_acl.c` | 策略 | 外部请求 fail-closed ACL 默认策略 |
+| `src/gw_mcpclients.c` | 桥接 | 外部 MCP 服务器（stdio / http transport）注册与转发，POSIX-only |
+| `src/gateway_d_internal.h` | 私有头 | 上述域内部契约（唯一私有头） |
+| `src/service.c` | 服务核 | `gateway_service` 生命周期与传输装配（静态库消费面） |
+
+### 守护化契约
+
+`-d` 守护化拆为「解析」与「动作」两步：`gw_parse_args()` 仅置 `daemonize`
+标志，`gw_daemonize()`（`gw_cli.c`，Unix）承载
+`fork → 父进程 exit → setsid → umask(022) → chdir("/") → dup2 /dev/null`，
+由 `main()` 在 airy_init() 等**任何线程创建之前**调用。
+
+> **纪律**：fork 必须先于一切线程创建。POSIX `fork` 只复制调用线程；若
+> fork 时其它线程正持有 `malloc` arena / stdio 内部锁，子进程会继承
+> 「已锁定但无持有者」状态，令后续 `free` / 日志写永久阻塞（SIGTERM
+> 无法退出）。故守护化动作严禁置于线程启动之后。Windows 无 `fork`，
+> `-d` 记 WARN 并忽略。
+
+### 绑定面 SSoT
+
+HTTP / WS / HTTP/2 的监听 host 在 `gateway_daemon_config_t.host` 内以定长
+缓冲 `char host[GATEWAY_HOST_MAX]`（128）内嵌（值语义，无堆所有权），默认
+`0.0.0.0`；启动期 `gw_guard_bind()` 在未配置 `GATEWAY_API_KEY` 时把非
+回环地址收敛为 `127.0.0.1`（fail-closed）。实际生效的绑定面经
+`gateway_service_get_config()` 读回（而非解析期局部副本），保证日志、
+SD / IPC bootstrap 与真实监听一致。
+
 ## JSON-RPC 接口
 
 `gateway_d` 不使用 `method_dispatcher_register`，而是统一经 `gateway_protocol_entry`
@@ -124,7 +159,7 @@
 | `-p <port>` | HTTP 端口（默认 `8080`） |
 | `-w <port>` | WebSocket 端口（默认 `8081`） |
 | `-s` | 启用 Stdio 网关 |
-| `-d` | 守护化（Unix） |
+| `-d` | 守护化（Unix）；见「守护化契约」 |
 | `-v` | 启用指标（30s 周期健康检查日志） |
 | `--manager <config>` | 兼容统一启动参数（忽略） |
 | `--help` | 帮助 |
