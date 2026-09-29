@@ -23,6 +23,8 @@
 #include "platform.h"
 #include "python_backend.h"
 
+#include <cjson/cJSON.h>
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -34,14 +36,17 @@ extern "C" {
 #define MATHS_MAX_DEPTH 64
 #define MATHS_MAX_VALUES 65536
 #define MATHS_MAX_FUNC_NAME 32
-#define MATHS_PLOT_MAX_SAMPLES 256 /* plot 采样上限（响应缓冲 8192 硬约束） */
+#define MATHS_PLOT_MAX_SAMPLES 256 /* plot 采样上限（响应规模硬约束） */
 
-#define MATHS_METHOD_NOT_RPC 0
-#define MATHS_METHOD_HANDLED 1
-#define MATHS_METHOD_SHUTDOWN 2
+/* RPC 域状态（协议无关）：OK 时 out_result 出 cJSON result；
+ * ERR_METHOD 由 svc 层映射 -32601；ERR_DOMAIN 映射 -32000 基码 + err。 */
+typedef enum {
+    MATHS_RPC_OK = 0,
+    MATHS_RPC_ERR_METHOD,
+    MATHS_RPC_ERR_DOMAIN
+} maths_rpc_status_t;
 
 typedef struct {
-    airy_sock_t server_fd;
     airy_mtx_t lock;
     atomic_int running;
     uint64_t start_time;
@@ -50,8 +55,6 @@ typedef struct {
     uint64_t symbolic_count;  /* 符号计算调用次数 */
     uint64_t error_count;     /* 求值失败次数 */
     uint64_t last_eval_ms;    /* 最近一次求值耗时（毫秒） */
-    char *socket_path;
-    int tcp_port;             /* Windows 平台 TCP 端口（Unix 用 socket） */
     maths_py_backend_t py_backend; /* Python 符号后端（maths-toolkit） */
 } maths_d_service_t;
 
@@ -86,11 +89,16 @@ int maths_d_stats(const char *op, const double *values, size_t count,
 int maths_d_recognize(const char *text);
 
 /**
- * @brief JSON-RPC 分发入口。
- * @return MATHS_METHOD_* 之一；response 填充 JSON 响应（响应成功时）。
+ * @brief RPC 域调用（协议无关）：分发 method 并产出 result。
+ * @param out_result 成功时填充 cJSON result（所有权移交调用方释放；
+ *                   失败时置 NULL）。
+ * @param err 域错误可读描述（ERR_METHOD 时不填充）。
+ * @return MATHS_RPC_OK / MATHS_RPC_ERR_METHOD / MATHS_RPC_ERR_DOMAIN
  */
-int maths_d_dispatch_jsonrpc(maths_d_service_t *svc, const char *request,
-                             char *response, size_t response_size);
+maths_rpc_status_t maths_d_rpc_call(maths_d_service_t *svc,
+                                    const char *method, const cJSON *params,
+                                    cJSON **out_result, char *err,
+                                    size_t err_sz);
 
 #ifdef __cplusplus
 }

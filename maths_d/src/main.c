@@ -1,214 +1,153 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/*
- * @file main.c
- * @brief 数学外挂计算 daemon 主入口（maths.* 命名空间）。
- *
- * 定位：Agent 运行时数学计算外挂（Tri-Opt 3.3 "外挂计算器" 的工程实现）。
- * 纯本地 C 求值，把数学表达式从 LLM 推理中剥离（约 5 token 取代
- * 150~300 token）。仅监听 Unix Socket（maths.sock），JSON-RPC 方法：
- *   eval / stats / recognize / health_check / get_stats / shutdown
- *
- * Conventions: daemon_main.h（E-3/E-4/E-5/E-6）、svc_logger、airy_common。
+/* @generated DO NOT EDIT — daemon_gen.py v1.3.0 (L3 SSoT) 生成。
+ * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
+ * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
 
-#include "airy_memory.h"
-#include "airy_rt.h"
-#include "daemon_main.h"
-#include "daemon_ipc_ops_bootstrap.h"
-#include "maths_service.h"
 #include "platform.h"
-#include "svc_common.h"
-#include "svc_logger.h"
+#include "airy_rt.h"
+#include "svc_maths_d.h"
 
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef _WIN32
-#include <poll.h>
-#include <unistd.h>
-#endif
+#include "daemon_main.h"
+#include "daemon_ipc_ops_bootstrap.h"
 
-#define MATHS_DEFAULT_SOCKET airy_runtime_dir_socket("maths.sock")
-#define MATHS_DEFAULT_PORT 8087
+DAEMON_DECLARE_COMMON(maths_d, maths,
+                      MATHS_D_SOCKET_UNIX, MATHS_D_SOCKET_WIN,
+                      MATHS_D_TCP_PORT, MATHS_D_MAX_BUFFER)
 
-static maths_d_service_t g_service;
-static atomic_int g_shutdown = 0;
-static daemon_bootstrap_sd_t *g_bsd = NULL;
-static daemon_bootstrap_ipc_t *g_bipc = NULL;
-
-static void maths_d_signal_handler(int sig)
-{
-    (void)sig;
-    atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
-#ifndef _WIN32
-    static const char sig_msg[] =
-        "[SIG] shutdown signal received, initiating graceful shutdown\n";
-    ssize_t written = write(STDERR_FILENO, sig_msg, sizeof(sig_msg) - 1);
-    (void)written; /* best-effort diagnostics inside a signal handler */
-#endif
-}
-
-/* 连接处理：单请求短连接（JSON-RPC over unix socket），recv 前 poll 等待
- * 首包最多 3s，防慢连接阻塞 accept 循环。 */
-static void maths_d_handle_request(maths_d_service_t *svc, airy_sock_t client_fd)
-{
-    char buffer[8192];
-#ifndef _WIN32
-    struct pollfd pfd;
-    pfd.fd = (int)client_fd;
-    pfd.events = POLLIN;
-    pfd.revents = 0;
-    int pr = poll(&pfd, 1, 3000);
-    if (pr <= 0 || !(pfd.revents & POLLIN)) {
-        airy_sock_close(client_fd);
-        return;
-    }
-#endif
-    ssize_t n = airy_sock_recv(client_fd, buffer, sizeof(buffer) - 1);
-    if (n <= 0) {
-        airy_sock_close(client_fd);
-        return;
-    }
-    buffer[n] = '\0';
-
-    char response[8192];
-    int dispatch_rc =
-        maths_d_dispatch_jsonrpc(svc, buffer, response, sizeof(response));
-    if (dispatch_rc == MATHS_METHOD_SHUTDOWN) {
-        atomic_store_explicit(&g_shutdown, 1, memory_order_seq_cst);
-    }
-    if (dispatch_rc == MATHS_METHOD_HANDLED ||
-        dispatch_rc == MATHS_METHOD_SHUTDOWN) {
-        airy_sock_send(client_fd, response, strlen(response));
-    }
-    airy_sock_close(client_fd);
-}
-
-static int maths_d_init(maths_d_service_t *svc, const char *sock, int port)
-{
-    if (maths_d_service_init(svc) != 0)
-        return -1;
-    svc->socket_path =
-        sock && sock[0] ? AIRY_STRDUP(sock) : AIRY_STRDUP(MATHS_DEFAULT_SOCKET);
-    if (!svc->socket_path)
-        return -1;
-    svc->tcp_port = port > 0 ? port : MATHS_DEFAULT_PORT;
-    airy_sock_init();
-    /* 拉起 Python 符号后端（maths-toolkit market 包）；不可用则纯 C 降级 */
-    maths_backend_init(&svc->py_backend, NULL);
-    SVC_LOG_INFO("maths_d: init complete (socket=%s, python_backend=%s)",
-                 svc->socket_path,
-                 maths_backend_available(&svc->py_backend) ? "up" : "degraded");
-    return 0;
-}
-
-static int maths_d_start(maths_d_service_t *svc)
-{
-#ifndef _WIN32
-    svc->server_fd = airy_sock_create_unix_server(svc->socket_path);
-    if (svc->server_fd < 0) {
-        SVC_LOG_ERROR("maths_d: failed to create socket at %s", svc->socket_path);
-        return -1;
-    }
-#else
-    svc->server_fd = airy_sock_create_tcp_server("127.0.0.1",
-                                                 (uint16_t)svc->tcp_port);
-    if (svc->server_fd < 0) {
-        SVC_LOG_ERROR("maths_d: failed to create TCP server");
-        return -1;
-    }
-#endif
-    atomic_store(&svc->running, 1);
-    SVC_LOG_INFO("maths_d: service started");
-    return 0;
-}
-
-static void maths_d_stop(maths_d_service_t *svc, int force)
-{
-    atomic_store(&svc->running, 0);
-    if (svc->server_fd != AIRY_INVALID_SOCKET) {
-        airy_sock_close(svc->server_fd);
-        svc->server_fd = AIRY_INVALID_SOCKET;
-    }
-    if (force) {
-#ifndef _WIN32
-        if (svc->socket_path)
-            unlink(svc->socket_path);
-#endif
-    }
-    SVC_LOG_INFO("maths_d: service stopped");
-}
-
-static void maths_d_destroy(maths_d_service_t *svc)
-{
-    maths_d_stop(svc, 1);
-    maths_backend_destroy(&svc->py_backend);
-    maths_d_service_destroy(svc);
-    airy_sock_cleanup();
-}
+DAEMON_DECLARE_SHUTDOWN_METHOD(maths_d)
 
 int main(int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
+    const char *config_path = NULL;
+    int use_tcp = 0;
 
-#ifndef _WIN32
-    signal(SIGINT, maths_d_signal_handler);
-    signal(SIGTERM, maths_d_signal_handler);
-    signal(SIGPIPE, SIG_IGN);
+    int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp,
+                                     print_usage_maths_d);
+    if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
+
+    airy_sock_init();
+    airy_mtx_init(&g_running_lock_maths_d);
+
+#ifdef _WIN32
+    SetConsoleCtrlHandler((PHANDLER_ROUTINE)signal_handler_maths_d, TRUE);
+#else
+    DAEMON_SETUP_SIGNALS(maths_d);
 #endif
 
-    airy_log_init(NULL);
+    airy_logger_config_t log_cfg = {0};
+    const char *dbg = getenv("AIRY_MATHS_D_DEBUG");
+    log_cfg.level = (dbg && dbg[0] == '1') ? (log_level_t)LOG_LEVEL_DEBUG :
+                     (log_level_t)LOG_LEVEL_WARN;
+    airy_log_init(&log_cfg);
     atexit(log_cleanup);
 
-    /* WS-8 stage 4 (8.4.1): bring up the corekern core (mem/oom/task/ipc/
-     * eventloop/persist) as the first link of the daemon boot chain, before
-     * the daemon's own subsystems. airy_init() is idempotent; if it fails
-     * the daemon still runs on the platform fallbacks (DSL degradation,
-     * non-fatal, badge=0). */
-    {
-        int core_ret = airy_init();
-        if (core_ret == AIRY_SUCCESS) {
-            SVC_LOG_INFO("corekern core initialized (maths_d runs on corekern)");
-        } else {
-            SVC_LOG_WARN("corekern init failed (%d) - running degraded (badge=0)", core_ret);
-        }
-    }
+    int core_ret = airy_init();
+    if (core_ret == AIRY_SUCCESS)
+        SVC_LOG_INFO("corekern core initialized (maths_d runs on corekern)");
+    else
+        SVC_LOG_WARN("corekern init failed (%d), degraded (badge=0)", core_ret);
 
     daemon_cupolas_init_pep("maths_d");
-
-    /* Publish the IPC/RPC/SD ops table to atoms call sites so they dispatch
-     * without linking daemons symbols. Init failure is non-fatal: atoms
-     * callers degrade gracefully. */
     daemon_ipc_ops_init("maths_d");
 
-    if (maths_d_init(&g_service, MATHS_DEFAULT_SOCKET, MATHS_DEFAULT_PORT) != 0)
-        return EXIT_FAILURE;
-    if (maths_d_start(&g_service) != 0) {
-        maths_d_destroy(&g_service);
-        return EXIT_FAILURE;
+    if (svc_prepare_maths_d(config_path) != 0) {
+        SVC_LOG_ERROR("Service prepare failed");
+        goto fail_svc;
     }
 
-    g_bsd = daemon_bootstrap_sd_start("maths_d", "maths", g_service.socket_path,
-                                      0, "maths,core", 0);
-    g_bipc = daemon_bootstrap_ipc_start("maths_d", "maths", g_service.socket_path,
-                                        0, IPC_BUS_PROTO_JSON_RPC);
+    daemon_endpoint_t ep;
+    svc_endpoint_maths_d(&ep, use_tcp);
 
-    while (!g_shutdown && atomic_load(&g_service.running)) {
-        airy_sock_t client = airy_sock_accept(g_service.server_fd, 1000);
-        if (client != AIRY_INVALID_SOCKET)
-            maths_d_handle_request(&g_service, client);
+    airy_sock_t server_fd = daemon_create_server_socket(
+        ep.use_tcp, ep.tcp_port, ep.sock_unix, ep.sock_win);
+    if (server_fd < 0) {
+        SVC_LOG_ERROR("Failed to create server socket");
+        goto fail_svc;
     }
 
-    daemon_bootstrap_ipc_stop(g_bipc);
-    daemon_bootstrap_sd_stop(g_bsd);
-    maths_d_destroy(&g_service);
+    daemon_event_config_t ev_config = {
+        .max_events = 64, .thread_pool_min = 2,
+        .thread_pool_max = 4, .thread_pool_queue_size = 256,
+        .use_jsonrpc = true,
+        .on_client = daemon_on_client_maths_d,
+    };
+
+    const char *sock_addr = ep.use_tcp ? ep.tcp_host : ep.sock_unix;
+    int ret = daemon_init_event_driver(
+        "maths_d", "maths", sock_addr,
+        ep.use_tcp ? ep.tcp_port : 0, "maths,core",
+        ep.use_tcp, &ev_config, &g_event_driver_maths_d, &g_bsd_maths_d,
+        &g_bipc_maths_d);
+    if (ret != AIRY_SUCCESS || !g_event_driver_maths_d) {
+        SVC_LOG_ERROR("Failed to create event driver");
+        airy_sock_close(server_fd);
+        goto fail_svc;
+    }
+
+    g_dispatcher_maths_d = daemon_event_driver_get_dispatcher(
+        g_event_driver_maths_d);
+    static const daemon_method_entry_t SVC_METHODS[] = {
+        {"health_check", svc_on_health_check_maths_d},
+        {"get_stats", svc_on_get_stats_maths_d},
+        {"recognize", svc_on_recognize_maths_d},
+        {"eval", svc_on_eval_maths_d},
+        {"stats", svc_on_stats_maths_d},
+        {"plot", svc_on_plot_maths_d},
+        {"solve", svc_on_solve_maths_d},
+        {"differentiate", svc_on_differentiate_maths_d},
+        {"integrate", svc_on_integrate_maths_d},
+        {"limit", svc_on_limit_maths_d},
+        {"simplify", svc_on_simplify_maths_d},
+        {"factor", svc_on_factor_maths_d},
+        {"expand", svc_on_expand_maths_d},
+        {"matrix", svc_on_matrix_maths_d},
+        {"units", svc_on_units_maths_d},
+        {"numerical", svc_on_numerical_maths_d},
+        {"finance", svc_on_finance_maths_d},
+        {"number_theory", svc_on_number_theory_maths_d},
+        {"shutdown", on_shutdown_method_maths_d},
+    };
+    DAEMON_REGISTER_METHODS(g_dispatcher_maths_d, SVC_METHODS);
+    SVC_LOG_INFO("Registered 19 RPC methods (maths.* namespace)");
+    svc_attach_maths_d(g_dispatcher_maths_d);
+
+    if (daemon_event_driver_add_server_fd(g_event_driver_maths_d,
+                                          (int)server_fd) != 0) {
+        SVC_LOG_ERROR("Failed to add server fd to event driver");
+        goto fail_driver;
+    }
+
+    if (svc_activate_maths_d(g_event_driver_maths_d) != 0) {
+        SVC_LOG_ERROR("Service activate failed");
+        goto fail_driver;
+    }
+
+    SVC_LOG_INFO("maths service running (event-driven mode)");
+    daemon_event_driver_run(g_event_driver_maths_d);
+
+    svc_teardown_maths_d();
+    daemon_cleanup_standard(g_bipc_maths_d, g_bsd_maths_d,
+                            g_event_driver_maths_d, server_fd,
+                            MATHS_D_SOCKET_UNIX, svc_destroy_maths_d,
+                            &g_running_lock_maths_d);
     daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
     log_cleanup();
     return 0;
+
+fail_driver:
+    daemon_event_driver_destroy(g_event_driver_maths_d);
+    airy_sock_close(server_fd);
+fail_svc:
+    svc_destroy_maths_d();
+    airy_mtx_destroy(&g_running_lock_maths_d);
+    airy_sock_cleanup();
+    return EXIT_FAILURE;
 }
