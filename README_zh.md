@@ -17,8 +17,8 @@
 
 ## 这是什么
 
-**daemons** 是 Airymax 智能体运行时的服务层，包含 **15 个功能守护进程**——`gateway_d`、
-`llm_d`、`tool_d`、`sched_d`、`market_d`、`monit_d`、`channel_d`、`notify_d`、`hook_d`、
+**daemons** 是 Airymax 智能体运行时的服务层，包含 **14 个功能守护进程**——`gateway_d`、
+`llm_d`、`tool_d`、`sched_d`、`market_d`、`monit_d`、`channel_d`、`notify_d`、
 `mem_d`、`agent_d`、`a2a_d`、`think_d`、`cupolas_d`、`maths_d`——**1 个治理守护进程**
 `supervisor_d`（集群常驻监管），以及共享静态库 `svc_common`（位于 `common/`）。
 
@@ -31,7 +31,7 @@
                                                         │
                                               IPC 总线上的 JSON-RPC 2.0
                                                         ▼
-                        llm_d  tool_d  sched_d  mem_d  agent_d …（14 个后端）
+                        llm_d  tool_d  sched_d  mem_d  agent_d …（13 个后端）
                                                         │
                                               atoms / syscall ──▶ 内核
 ```
@@ -46,7 +46,7 @@
 - **韧性** —— 熔断器、带主备切换的 API 恢复、健康检查、降级服务自动恢复。
 - **可观测** —— 所有守护进程向 `monit_d` 上报指标、向 `notify_d` 上报事件，并按进程落盘
   日志，用 `airymaxrt logs <daemon>_d` 即可查看。
-- **统一生命周期框架** —— 15 个功能进程共用一套 `airy_svc_t` 状态机与事件驱动主循环
+- **统一生命周期框架** —— 14 个功能进程共用一套 `airy_svc_t` 状态机与事件驱动主循环
   （`daemon_event_driver`）。
 
 ## 守护进程清单
@@ -60,15 +60,14 @@
 | 5 | [market_d](market_d/README.md) | `market.*` | Agent / Skill / Tool / Template 工件：检索、安装、版本管理、卸载。 |
 | 6 | [monit_d](monit_d/README.md) | `monit.*` | 指标采集与查询、系统与硬件信息、健康检查、告警规则、Agent 死循环检测。 |
 | 7 | [channel_d](channel_d/README.md) | `channel.*` | 数据面应用通道：通道创建 / 加入 / 收发与消息路由。 |
-| 8 | [notify_d](notify_d/README.md) | `notify.*` | 事件扇出：基于 topic 的发布订阅，覆盖 WebSocket、SSE 与 socket。 |
-| 9 | [hook_d](hook_d/README.md) | `hook.*` | Hook 与会话注册；Hook 引擎本体位于 `atoms/coreloopthree`。 |
-| 10 | [mem_d](mem_d/README.md) | `mem.*` | 持久化记忆：写入 / 检索 / 读取 / 删除 / recent / evolve，TF-IDF + embedding 混合检索，JSONL 存储。 |
-| 11 | [agent_d](agent_d/README.md) | `agent.*` | Agent 生命周期与执行循环：`run` / `run_stream` / `run_cancel`、spawn / invoke / terminate / cancel。 |
-| 12 | [a2a_d](a2a_d/README.md) | `a2a.*` | Agent 间协议：Agent Card 注册与发现、任务状态机、消息投递。 |
-| 13 | [think_d](think_d/README.md) | `think.*` | 认知服务：两段式交互、流程编排、语言前置、反思评审。 |
-| 14 | [cupolas_d](cupolas_d/README.md) | `cupolas.*`、`policy.*` | 安全策略决策点：权限校验、输入净化、审计、凭据库、网络规则、策略加载 / 生效 / 回滚。 |
-| 15 | [maths_d](maths_d/README.md) | `maths.*` | 数学外挂计算：纯 C 数值与统计求值，外加可选符号计算后端。 |
-| 16 | [supervisor_d](supervisor_d/README.md) | —（治理 ctrl 端点） | 治理守护进程：按启动画像声明常驻调谐（补齐缺失、收割多余）、崩溃重启与指数退避、收摊归一。只调谐、不承载业务，不链接任何业务库（linkgate fail-closed 断言）。 |
+| 8 | [notify_d](notify_d/README.md) | `notify.*`、`hook.*` | 事件扇出：基于 topic 的发布订阅，覆盖 WebSocket、SSE 与 socket；并承载 hook 面（Hook 与会话注册；Hook 引擎本体位于 `atoms/coreloopthree`）。 |
+| 9 | [mem_d](mem_d/README.md) | `mem.*` | 持久化记忆：写入 / 检索 / 读取 / 删除 / recent / evolve，TF-IDF + embedding 混合检索，JSONL 存储。 |
+| 10 | [agent_d](agent_d/README.md) | `agent.*` | Agent 生命周期与执行循环：`run` / `run_stream` / `run_cancel`、spawn / invoke / terminate / cancel。 |
+| 11 | [a2a_d](a2a_d/README.md) | `a2a.*` | Agent 间协议：Agent Card 注册与发现、任务状态机、消息投递。 |
+| 12 | [think_d](think_d/README.md) | `think.*` | 认知服务：两段式交互、流程编排、语言前置、反思评审。 |
+| 13 | [cupolas_d](cupolas_d/README.md) | `cupolas.*`、`policy.*` | 安全策略决策点：权限校验、输入净化、审计、凭据库、网络规则、策略加载 / 生效 / 回滚。 |
+| 14 | [maths_d](maths_d/README.md) | `maths.*` | 数学外挂计算：纯 C 数值与统计求值，外加可选符号计算后端。 |
+| 15 | [supervisor_d](supervisor_d/README.md) | —（治理 ctrl 端点） | 治理守护进程：按启动画像声明常驻调谐（补齐缺失、收割多余）、崩溃重启与指数退避、收摊归一。只调谐、不承载业务，不链接任何业务库（linkgate fail-closed 断言）。 |
 
 可执行文件名保留 `*_d` 后缀，与 CMake target 名一一对应（`gateway_d`、`llm_d`……）。
 各目录内的 README 记录该进程的具体接口。
@@ -226,7 +225,7 @@ daemons 是组合层：它不定义内核原语，而是把原语组织成运行
 | 依赖 | daemons 使用它的什么 |
 |------|---------------------|
 | [commons](https://atomgit.com/openairymax/commons) | 日志、配置、网络、令牌、成本、可观测性、平台路径与权威 IPC 头文件——经 `svc_common` 传递链接 |
-| [atoms](https://atomgit.com/openairymax/atoms) | 向下游派发的 Syscall 入口表面；`hook_d` 直接链接 CoreLoopThree 的 hook 库 |
+| [atoms](https://atomgit.com/openairymax/atoms) | 向下游派发的 Syscall 入口表面；`notify_d` 的 hook 面直接链接 CoreLoopThree 的 hook 库 |
 | [cupolas](https://atomgit.com/openairymax/cupolas) | 安全穹顶，由 `svc_common` 以 `PUBLIC` 链接；`cupolas_d` 将其作为服务暴露 |
 | [protocols](https://atomgit.com/openairymax/protocols) | IPC 总线上的 JSON-RPC 2.0 / AgentsIPC 信封；网关边界的 A2A 与 MCP 适配器 |
 | [heapstore](https://atomgit.com/openairymax/heapstore) | 守护进程状态、注册表与配额的持久化 |
