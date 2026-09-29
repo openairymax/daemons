@@ -12,9 +12,9 @@
 超时控制、内置 handler）是独立库 `airy_coreloop_hooks`，`hook_d` 负责把它变成一个
 可被跨进程调用的常驻服务。
 
-- 端点：POSIX Unix socket `<runtime-dir>/hook.sock`（`$AIRY_HOME/run/hook.sock`）；
-  Windows 固定为本机 TCP 回环 `127.0.0.1:8093`。
-- 可选 TCP：POSIX 上以 `--tcp` 启用，默认端口 `8093`（默认只监听 socket）。
+- 端点：三端同形态 —— POSIX Unix socket `<runtime-dir>/hook.sock`
+  （`$AIRY_HOME/run/hook.sock`），Windows 命名管 `\\.\pipe\airy_hook`。
+- 可选 TCP：以 `--tcp` 升级为本机回环 `127.0.0.1:8093`（默认只监听本地 IPC 端点）。
 
 ## 能力
 
@@ -46,15 +46,22 @@ gateway_d ──(hook.* JSON-RPC)──▶ hook_d（进程入口：socket + 服�
 （`on_error`、`post_tool`，priority 80）+ trace 2（`pre_exec`、`post_exec`，
 priority 90 / 10）。
 
+五件套装配（gen5）：`.manifest` 为唯一契约源，`src/main.c` 与
+`include/svc_hook_d.h`、`modules/sources.cmake` 为 `daemon_gen.py` 生成态；
+生命周期策略（safety ops 注入、会话表原语、注册表引导）在 `src/svc.c`，
+RPC 方法域在 `src/hook_rpc.c`。Hook 核心在 `airy_coreloop_hooks` 接口库，
+本户无 service 静态库。
+
 ## JSON-RPC 接口
 
-共 13 个方法，经 `method_dispatcher_register` 注册（方法名不含命名空间前缀）：
+共 13 个方法（12 个业务方法 + 生成的 `shutdown`），静态方法表以 `.manifest`
+为唯一契约源；方法名不含命名空间前缀：
 
 | 方法 | 参数 | 返回 | 描述 |
 |------|------|------|------|
 | `register` | `{name, type: string\|int, impl?: shell\|python\|webhook\|callback, script_path?, priority?: int, enabled?: bool}` | `{status: "registered", name, type, enabled}` | 注册 Hook；重名或注册表满返回 `-32603` |
 | `unregister` | `{name}` | `{status: "unregistered", name}` | 注销 Hook；未找到返回 `-32601` |
-| `trigger` | `{type: string\|int, operation?, input?, hook_name?}` | `{decision: int, decision_name, type}` | 触发指定类型的 Hook 链并返回聚合决策 |
+| `trigger` | `{type: string\|int, operation?, input?, hook_name?, session_id?}` | `{decision: int, decision_name, type}` | 触发指定类型的 Hook 链并返回聚合决策 |
 | `session_start` | `{session_id, operation?, input?}` | `{session_id, decision, decision_name}` | 触发 `session_start` 链并写入会话暂存 |
 | `session_get` | `{session_id}` | `{session_id, active, started_at?, decision?, hook_count?, injected_context?}` | 读取会话暂存 |
 | `list` | `{}` | `{hooks: [{name, type, type_id, impl_type, priority, enabled, invoke_count, skip_count, abort_count, total_duration_ns, script_path?}...], count}` | 列出已注册 Hook 及统计 |
