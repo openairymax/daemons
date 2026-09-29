@@ -61,13 +61,11 @@ int llm_router_init(const char *config_path)
     AIRY_LOG_INFO("C-L02: LLMRouter: cost_tracker initialized with %zu pricing rules",
                   sizeof(default_rules) / sizeof(default_rules[0]));
 
-    ctx->token_counter = token_counter_create("cl100k_base");
-    if (!ctx->token_counter) {
-        AIRY_LOG_WARN("C-L02: LLMRouter: token_counter creation failed, "
-                      "will use heuristic estimation");
-    } else {
-        AIRY_LOG_INFO("C-L02: LLMRouter: token_counter initialized (encoding=cl100k_base)");
-    }
+    ctx->token_cfg = (airy_token_config_t){.model_type = AIRY_TOKEN_MODEL_GPT4,
+                                           .model_name = "cl100k_base",
+                                           .cjk_ratio = 0.2f,
+                                           .alpha_ratio = 0.4f,
+                                           .flags = AIRY_TOKEN_FLAG_ACCURATE};
 
     ctx->initialized = true;
 
@@ -96,10 +94,6 @@ void llm_router_destroy(void)
     if (ctx->cost_tracker) {
         cost_tracker_destroy(ctx->cost_tracker);
         ctx->cost_tracker = NULL;
-    }
-    if (ctx->token_counter) {
-        token_counter_destroy(ctx->token_counter);
-        ctx->token_counter = NULL;
     }
 
     AIRY_MUTEX_DESTROY(&ctx->mutex);

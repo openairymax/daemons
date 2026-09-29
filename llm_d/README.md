@@ -36,7 +36,7 @@
         ↓
   svc.c（生命周期五钩子：端点策略 + llm_service 单例）
         ↓
-  airy_llm_service（service / cache / cost_tracker / token_counter / response）
+  airy_llm_service（service / cache / cost_tracker / response）
         ├── providers/  openai · anthropic · deepseek · google · local + registry
         └── router/     cost_aware · round_robin · least_latency · quality_first
 ```
@@ -109,7 +109,7 @@ CTest 用例（`llm_d_*`）：
 |------|--------|
 | `llm_d_test_service` | 服务核心 |
 | `llm_d_test_cache` | 响应缓存 |
-| `llm_d_test_token_counter` | Token 计数 |
+| `llm_d_test_token_counter` | Token 估算（router_estimate_tokens） |
 | `llm_d_test_response` | 响应构建与解析 |
 | `llm_d_test_cost_tracker` | 成本追踪 |
 | `llm_d_test_complexity_routing` | 复杂度路由 |

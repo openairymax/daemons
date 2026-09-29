@@ -31,7 +31,7 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== LLM 服务静态库 ====================
-# 提取 service/providers/cache/cost_tracker/token_counter/response/llm_svc_adapter
+# 提取 service/providers/cache/cost_tracker/response/llm_svc_adapter
 # 为独立静态库，供 llm_d 可执行文件、atoms/coreloopthree 测试和集成测试共用，
 # 消除桩函数依赖。排除 main.c（含 main()）与 daemon 策略/装配源
 # （svc.c / rpc/methods.c / rpc/dispatch.c，gen5 装配下随可执行目标构建）。
@@ -49,7 +49,6 @@ set(LLM_SERVICE_SOURCES
     src/accounting/metrics.c
     src/accounting/semantic_cache.c
     src/accounting/cost_tracker.c
-    src/accounting/token_counter.c
     src/rpc/response.c
     # B16-S3：providers 域内重排 core/（机制）+ adapters/（适配）
     src/providers/core/registry.c
