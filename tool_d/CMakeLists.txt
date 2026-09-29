@@ -26,7 +26,7 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 # 提取 service/registry/executor/validator/cache/tool_approval/safety_guard_bridge
 # 为独立静态库，供 tool_d 可执行文件、atoms/coreloopthree
 # 测试和集成测试共用，消除桩函数依赖。
-# 排除 main.c（含 main()）、config.c、utils/tool_helpers.c（daemon 专用工具函数）。
+# 排除 main.c（含 main()）与 daemon 策略/装配源（svc.c / tool_rpc.c）。
 # service.c 按单一职责拆分（2026-08-27）：
 #   service.c            生命周期/注册表/统计/资源释放/交互审批域
 #   service_builtin.c    builtin 工具注册 + AIRY_AGENT_ACL 预授权域
@@ -157,14 +157,13 @@ endif()
 target_compile_definitions(airy_tool_service PRIVATE AIRY_ENABLE_V2_API=1)
 
 # ==================== Tool daemon 可执行文件 ====================
-# main.c 仅属于 daemon 可执行文件；config.c 和 utils/tool_helpers.c 为 daemon 专用工具函数。
-add_executable(tool_d
-    src/main.c
-    src/config.c
-    src/utils/tool_helpers.c
-    # plugin_d → tool_d 整编——插件 RPC 方法面
-    src/plugin_rpc.c
-)
+# gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c /
+# 端点策略 svc.c 由 daemon_gen.py 生成；RPC 方法域 tool_rpc.c 与插件
+# RPC 方法面 plugin_rpc.c 为手写业务源。服务域多源单独编译为
+# airy_tool_service 静态库（上方），不入 ${TOOL_D_SOURCES}，避免重复编译。
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
+
+add_executable(tool_d ${TOOL_D_SOURCES})
 
 if(WIN32)
     target_compile_definitions(tool_d PRIVATE
