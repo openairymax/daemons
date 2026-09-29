@@ -6,7 +6,7 @@
  * @brief tool_d 插件域权限模块单元测试：manifest 权限到 Cupolas 守卫类型映射与校验。
  */
 
-#include "plugin_permission.h"
+#include "plugin/plugin_permission.h"
 #include "safety_guard.h"
 
 /* AIRY_ERR_* 经 airy_memory.h -> error.h 引入 */
