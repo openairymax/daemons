@@ -61,8 +61,9 @@ CLI / SDK ──▶ gateway_d ──(tool.* / plugin.* JSON-RPC)──▶ tool_d
         maths_eval / maths_stats ──(maths.sock)──▶ maths_d
 ```
 
-- 服务与执行核心抽为静态库 `airy_tool_service`（`CMakeLists.txt` 中列出 24 个源文件，
-  排除 `main.c` / `config.c` / `utils` / `tool_helpers.c`），守护进程与单元测试共用。
+- 服务与执行核心抽为静态库 `airy_tool_service`（`CMakeLists.txt` 中列出 25 个源文件），
+  守护进程与单元测试共用。守护进程源由 `.manifest` 经 daemon_gen.py 装配
+  （`modules/sources.cmake`：生成 `main.c` / `svc.c` + 手写 `tool_rpc.c` / `plugin_rpc.c`）。
 - 守护进程直接链接 atoms 引擎 `airy_coreloopthree`：其适配器经 IPC / LLM / tool
   ops 表回调（`daemon_ipc_ops_init` /
   `daemon_llm_ops_init` / `daemon_tool_ops_init`），atoms 不直接链接 daemons 符号；
