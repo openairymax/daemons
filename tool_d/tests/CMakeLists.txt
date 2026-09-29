@@ -11,15 +11,15 @@ set(SYSCALL_INCLUDE_DIR ${ATOMIC_DIR}/syscall/include)
 set(COREKERN_INCLUDE_DIR ${ATOMIC_DIR}/corekern/include)
 
 set(TOOL_IMPL_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_builtin.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service_execute.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/cache.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/executor.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_builtin.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_execute.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/cache.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/executor.c
     # R1-a: 执行面专用有界 worker 池（隔离 RPC 共享池）
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/executor_pool.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/validator.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/registry.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/executor_pool.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/validator.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/registry.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tool_approval.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/safety_guard_bridge.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin.c

@@ -9,7 +9,7 @@
 #ifndef TOOL_EXECUTOR_H
 #define TOOL_EXECUTOR_H
 
-#include "config.h"
+#include "core/config.h"
 #include "tool_approval.h"
 #include "tool_interactive_approval.h"
 #include "tool_service.h"

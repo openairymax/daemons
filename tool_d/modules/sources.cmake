@@ -8,6 +8,6 @@
 set(TOOL_D_SOURCES
     src/main.c
     src/svc.c
-    src/tool_rpc.c
+    src/rpc/tool_rpc.c
     src/plugin_rpc.c
 )

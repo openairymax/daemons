@@ -9,7 +9,7 @@
 
 #include "error.h"
 #include "daemon_platform_ext.h"
-#include "registry.h"
+#include "core/registry.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>

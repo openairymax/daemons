@@ -12,10 +12,10 @@
 #include "airy_memory.h"
 #include "daemon_security.h"
 #include "error.h"
-#include "executor.h"
-#include "service.h"
+#include "core/executor.h"
+#include "rpc/service.h"
 #include "svc_logger.h"
-#include "tool_service_internal.h"
+#include "rpc/tool_service_internal.h"
 
 #include <stdlib.h>
 #include <string.h>

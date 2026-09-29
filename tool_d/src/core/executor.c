@@ -17,7 +17,7 @@
 #include "syscalls.h"
 #include "daemon_errors.h"
 #include "daemon_security.h"
-#include "executor.h"
+#include "core/executor.h"
 #include "builtin.h"
 #include "daemon_platform_ext.h"
 #include "safety_guard_bridge.h"

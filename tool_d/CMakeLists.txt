@@ -32,15 +32,15 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 #   service_builtin.c    builtin 工具注册 + AIRY_AGENT_ACL 预授权域
 #   service_execute.c    工具执行域（同步/流式 + 缓存）
 set(TOOL_SERVICE_SOURCES
-    src/service.c
-    src/service_builtin.c
-    src/service_execute.c
-    src/registry.c
-    src/executor.c
+    src/rpc/service.c
+    src/rpc/service_builtin.c
+    src/rpc/service_execute.c
+    src/core/registry.c
+    src/core/executor.c
     # R1-a: 执行面专用有界 worker 池（隔离 RPC 共享池）
-    src/executor_pool.c
-    src/validator.c
-    src/cache.c
+    src/core/executor_pool.c
+    src/core/validator.c
+    src/core/cache.c
     src/tool_approval.c
     src/safety_guard_bridge.c
     src/builtin.c
@@ -59,7 +59,7 @@ set(TOOL_SERVICE_SOURCES
     src/plugin_discovery.c
     src/plugin_permission.c
     # 注入 atoms 侧 tool ops 抽象表（服务实现在本库，表存储在 airy_tool_ops）
-    src/daemon_tool_ops_bootstrap.c
+    src/rpc/daemon_tool_ops_bootstrap.c
 )
 
 add_library(airy_tool_service STATIC ${TOOL_SERVICE_SOURCES})

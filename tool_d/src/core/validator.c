@@ -9,7 +9,7 @@
  */
 
 #include "svc_logger.h"
-#include "validator.h"
+#include "core/validator.h"
 
 #include <cjson/cJSON.h>
 
