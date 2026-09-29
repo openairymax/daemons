@@ -23,10 +23,12 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 # atoms/coreloopthree/src/hook/，target 定义见 coreloopthree/CMakeLists.txt）。
 # hook_d 仅链接口库 airy_coreloop_hooks，不再链接整个认知引擎
 # airy_coreloopthree——消费者减重（link-whitelist 登记）。
-# hook_d 仅保留 main.c（daemon 进程入口：socket + SD + IPC + cupolas 守护进程生命周期）。
-add_executable(hook_d
-    src/main.c
-)
+# gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c 由
+# daemon_gen.py 生成；生命周期钩子 svc.c 与 RPC 方法域 hook_rpc.c 为
+# 手写业务源。hook 核心在 airy_coreloop_hooks 接口库，无 service 静态库。
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
+
+add_executable(hook_d ${HOOK_D_SOURCES})
 
 target_compile_definitions(hook_d PRIVATE AIRY_ENABLE_V2_API=1)
 
@@ -119,3 +121,8 @@ if(BUILD_TESTS)
 endif()
 
 install(TARGETS hook_d DESTINATION bin)
+
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
+    DESTINATION include/agentrt
+    FILES_MATCHING PATTERN "*.h"
+)

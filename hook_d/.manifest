@@ -1,0 +1,27 @@
+{
+  "manifest_version": 1,
+  "daemon": "hook_d",
+  "cname": "hook",
+  "sd_type": "hook",
+  "ops": ["ipc"],
+  "facades": ["ingress", "execute", "state", "governance"],
+  "slots": ["create", "delete", "update", "query", "flow", "validate", "record"],
+  "rpc": {
+    "unix": "hook.sock",
+    "win_pipe": "airy_hook",
+    "tcp": 8093,
+    "tags": "hook,core",
+    "buffer": 65536,
+    "pool": { "max_events": 64, "min": 2, "max": 4, "queue": 128 },
+    "methods": [
+      "health", "ping", "status", "list", "stats",
+      "register", "unregister", "trigger",
+      "session_start", "session_get",
+      "health_check", "get_stats"
+    ]
+  },
+  "deps": { "required": [], "optional": [] },
+  "modules": [
+    { "name": "rpc", "sources": ["hook_rpc.c"] }
+  ]
+}

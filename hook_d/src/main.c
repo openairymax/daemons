@@ -1,690 +1,147 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/**
- * @file main.c
- * @brief Hook daemon entry (P0.18.1 boilerplate macros).
- * @owner team-A
- *
- * Exposes JSON-RPC methods (hook.* namespace):
- *   - hook.health : registry health status + total registered Hook count
- *   - hook.ping   : liveness probe (with uptime)
- *   - hook.status : real status (total / per-type counts)
- *   - hook.list   : list registered (enabled) Hooks with their stats
- *   - hook.stats  : query a single Hook's stats by name
- *
- * Data source: the hook_registry in atoms/coreloopthree/src/hook/ (linked
- * via airy_coreloop_hooks).
- * Unix socket path: ${AIRY_RUNTIME_DIR}/hook.sock
+/* @generated DO NOT EDIT — daemon_gen.py v1.5.0 (L3 SSoT) 生成。
+ * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
+ * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
 
-#include "airy_memory.h"
-#include "airy_rt.h"
-#include "error.h"
-#include "daemon_main.h"
-#include "daemon_ipc_ops_bootstrap.h"
 #include "platform.h"
-#include "hook_service.h"
-#include "hook_registry.h"
-#include "airy_hook.h"
-#include "hook_builtin_handlers.h"
-#include "airy_safety_ops.h"
-#include "safety_guard.h"
+#include "airy_rt.h"
+#include "svc_hook_d.h"
 
-#include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-#include <unistd.h>
 
-#define HOOK_D_SOCKET_PATH airy_runtime_dir_socket("hook.sock")
-#define HOOK_D_PIPE_PATH "\\\\.\\pipe\\airy_hook"
-#define HOOK_D_DEFAULT_PORT 8093
-#define HOOK_D_MAX_BUFFER 4096
+#include "daemon_main.h"
+#include "daemon_ipc_ops_bootstrap.h"
 
-DAEMON_DECLARE_COMMON(hook_d, hook, HOOK_D_SOCKET_PATH, HOOK_D_PIPE_PATH, HOOK_D_DEFAULT_PORT,
-                      HOOK_D_MAX_BUFFER)
+DAEMON_DECLARE_COMMON(hook_d, hook,
+                      HOOK_D_SOCKET_UNIX, HOOK_D_SOCKET_WIN,
+                      HOOK_D_TCP_PORT, HOOK_D_MAX_BUFFER)
 
 DAEMON_DECLARE_SHUTDOWN_METHOD(hook_d)
 
-static int g_registry_initialized = 0;
-static uint64_t g_start_time = 0;
-
-/* P1-5：SessionStart 会话级上下文注入通道（改 hook_d，不改底座）。
- * 上游（agent 会话建立方）调用 hook.session.start：hook_d 触发
- * SESSION_START 事件链（插件在此注入上下文/规则），并把注入的上下文
- * 存入会话级存储；下游经 hook.session.get 取回，实现会话生命周期内
- * 的上下文注入通道。会话条目有界（覆盖最旧），防止内存无界增长。 */
-#define AIRY_HOOK_MAX_SESSIONS 32
-#define AIRY_HOOK_CTX_LEN 4096
-
-typedef struct {
-    char session_id[64];
-    bool active;
-    uint64_t started_ns;
-    char decision[16];
-    size_t hook_count;
-    char context[AIRY_HOOK_CTX_LEN]; /* 注入的会话上下文（session.start 的 input） */
-    size_t context_len;
-} hook_session_entry_t;
-
-static hook_session_entry_t g_hook_sessions[AIRY_HOOK_MAX_SESSIONS];
-static airy_mtx_t g_hook_sessions_lock;
-
-/* airy_coreloop_hooks no longer links cupolas. hook_d owns the SafetyGuard
- * implementation and injects it through airy_safety_ops_t, so the interceptor
- * keeps enforcing the guard chain at PRE_TOOL/PRE_EXEC. */
-static safety_guard_context_t *hook_safety_create(void)
-{
-    return safety_guard_create();
-}
-
-static safety_decision_t hook_safety_check_chain(safety_guard_context_t *ctx,
-                                                 const safety_event_t *event,
-                                                 safety_result_t **results, size_t *result_count)
-{
-    return safety_guard_check_chain(ctx, event, results, result_count);
-}
-
-static void hook_safety_destroy(safety_guard_context_t *ctx)
-{
-    safety_guard_destroy(ctx);
-}
-
-static const airy_safety_ops_t g_hook_safety_ops = {
-    .create = hook_safety_create,
-    .check_chain = hook_safety_check_chain,
-    .destroy = hook_safety_destroy,
-};
-
-static void destroy_service_hook_d(void)
-{
-    if (g_registry_initialized) {
-        airy_hook_unregister_builtin_handlers();
-        /* Release this daemon's hook-system reference. airy_hook_init() is
-         * the single lifecycle entry point (registry + timeout manager); the
-         * old code called hook_registry_destroy() directly, which skipped the
-         * timeout manager and bypassed the shared reference count. */
-        airy_hook_shutdown();
-        g_registry_initialized = 0;
-    }
-    are_ops_set_safety(NULL);
-    daemon_ipc_ops_cleanup();
-    daemon_cupolas_cleanup();
-}
-
-static hook_session_entry_t *hook_session_find(const char *session_id)
-{
-    for (size_t i = 0; i < AIRY_HOOK_MAX_SESSIONS; i++) {
-        if (g_hook_sessions[i].active &&
-            strcmp(g_hook_sessions[i].session_id, session_id) == 0)
-            return &g_hook_sessions[i];
-    }
-    return NULL;
-}
-
-static hook_session_entry_t *hook_session_upsert(const char *session_id)
-{
-    hook_session_entry_t *e = hook_session_find(session_id);
-    if (e)
-        return e;
-    size_t slot = AIRY_HOOK_MAX_SESSIONS;
-    size_t oldest = 0;
-    for (size_t i = 0; i < AIRY_HOOK_MAX_SESSIONS; i++) {
-        if (!g_hook_sessions[i].active) {
-            slot = i;
-            break;
-        }
-        if (g_hook_sessions[i].started_ns < g_hook_sessions[oldest].started_ns)
-            oldest = i;
-    }
-    if (slot == AIRY_HOOK_MAX_SESSIONS)
-        slot = oldest; /* 全满：覆盖最旧会话 */
-    AIRY_MEMSET(&g_hook_sessions[slot], 0, sizeof(g_hook_sessions[slot]));
-    AIRY_STRNCPY_TERM(g_hook_sessions[slot].session_id, session_id,
-                      sizeof(g_hook_sessions[slot].session_id));
-    g_hook_sessions[slot].active = true;
-    g_hook_sessions[slot].started_ns = (uint64_t)time(NULL) * 1000000000ull;
-    return &g_hook_sessions[slot];
-}
-
-static const char *hook_decision_name(hook_decision_t decision)
-{
-    switch (decision) {
-    case HOOK_DECISION_SKIP:
-        return "skip";
-    case HOOK_DECISION_RETRY:
-        return "retry";
-    case HOOK_DECISION_ABORT:
-        return "abort";
-    case HOOK_DECISION_MODIFY:
-        return "modify";
-    default:
-        return "continue";
-    }
-}
-
-#ifdef _WIN32
-
-static BOOL WINAPI console_handler_hook_d(DWORD fdwCtrlType)
-{
-    switch (fdwCtrlType) {
-    case CTRL_C_EVENT:
-    case CTRL_CLOSE_EVENT:
-    case CTRL_SHUTDOWN_EVENT:
-        signal_handler_hook_d((int)fdwCtrlType);
-        return TRUE;
-    default:
-        return FALSE;
-    }
-}
-#endif
-
-static const char *hook_type_name(hook_type_t type)
-{
-    /* P1-5：类型名单一权威源（airy_hook_type_name），禁止本文件重复
-     * 维护类型名数组（漂移即越界）。 */
-    return airy_hook_type_name(type);
-}
-
-static int hook_type_from_name(const char *name)
-{
-    if (!name)
-        return -1;
-    for (int t = 0; t < HOOK_TYPE_COUNT; t++) {
-        if (strcmp(name, hook_type_name((hook_type_t)t)) == 0)
-            return t;
-    }
-    return -1;
-}
-
-static void hook_on_health(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    airy_sock_t client_fd = *(airy_sock_t *)user_data;
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddBoolToObject(result, "healthy", g_registry_initialized ? true : false);
-    cJSON_AddNumberToObject(result, "hook_count", (double)hook_registry_count());
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-}
-
-static void hook_on_ping(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    airy_sock_t client_fd = *(airy_sock_t *)user_data;
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "status", "ok");
-    cJSON_AddNumberToObject(result, "uptime_sec", (double)(time(NULL) - (time_t)g_start_time));
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-}
-
-static void hook_on_status(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    airy_sock_t client_fd = *(airy_sock_t *)user_data;
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "service", "hook_d");
-    cJSON_AddNumberToObject(result, "hook_count", (double)hook_registry_count());
-    cJSON_AddBoolToObject(result, "registry_initialized", g_registry_initialized ? true : false);
-
-    cJSON *by_type = cJSON_CreateObject();
-    for (int t = 0; t < HOOK_TYPE_COUNT; t++) {
-        cJSON_AddNumberToObject(by_type, hook_type_name((hook_type_t)t),
-                                (double)hook_registry_count_by_type((hook_type_t)t));
-    }
-    cJSON_AddItemToObject(result, "by_type", by_type);
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-}
-
-static void hook_on_list(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    airy_sock_t client_fd = *(airy_sock_t *)user_data;
-    cJSON *result = cJSON_CreateObject();
-    cJSON *hooks = cJSON_CreateArray();
-
-    for (int t = 0; t < HOOK_TYPE_COUNT; t++) {
-        hook_entry_t *entries[HOOK_REGISTRY_MAX];
-        size_t count = 0;
-        if (hook_registry_get_by_type((hook_type_t)t, entries, HOOK_REGISTRY_MAX, &count) != 0)
-            continue;
-        for (size_t i = 0; i < count; i++) {
-            const hook_entry_t *e = entries[i];
-            cJSON *h = cJSON_CreateObject();
-            cJSON_AddStringToObject(h, "name", e->name);
-            cJSON_AddStringToObject(h, "type", hook_type_name(e->type));
-            cJSON_AddNumberToObject(h, "type_id", (double)e->type);
-            cJSON_AddNumberToObject(h, "impl_type", (double)e->impl_type);
-            cJSON_AddNumberToObject(h, "priority", (double)e->priority);
-            cJSON_AddBoolToObject(h, "enabled", e->enabled);
-            cJSON_AddNumberToObject(h, "invoke_count", (double)e->invoke_count);
-            cJSON_AddNumberToObject(h, "skip_count", (double)e->skip_count);
-            cJSON_AddNumberToObject(h, "abort_count", (double)e->abort_count);
-            cJSON_AddNumberToObject(h, "total_duration_ns", (double)e->total_duration_ns);
-            if (e->script_path[0])
-                cJSON_AddStringToObject(h, "script_path", e->script_path);
-            cJSON_AddItemToArray(hooks, h);
-        }
-    }
-    cJSON_AddItemToObject(result, "hooks", hooks);
-    cJSON_AddNumberToObject(result, "count", (double)hook_registry_count());
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-}
-
-static void hook_on_stats(cJSON *params, int id, void *user_data)
-{
-    airy_sock_t client_fd = *(airy_sock_t *)user_data;
-    const char *name = jsonrpc_get_string_param(params, "name", NULL);
-    if (!name || !name[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing hook name", id);
-        return;
-    }
-    hook_stats_t stats;
-    if (hook_registry_get_stats(name, &stats) != 0) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Hook not found", id);
-        return;
-    }
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "name", name);
-    cJSON_AddNumberToObject(result, "invoke_count", (double)stats.invoke_count);
-    cJSON_AddNumberToObject(result, "skip_count", (double)stats.skip_count);
-    cJSON_AddNumberToObject(result, "abort_count", (double)stats.abort_count);
-    cJSON_AddNumberToObject(result, "retry_count", (double)stats.retry_count);
-    cJSON_AddNumberToObject(result, "modify_count", (double)stats.modify_count);
-    cJSON_AddNumberToObject(result, "total_duration_ns", (double)stats.total_duration_ns);
-    cJSON_AddNumberToObject(result, "max_duration_ns", (double)stats.max_duration_ns);
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-}
-
-static void hook_on_get_stats(cJSON *params, int id, void *user_data)
-{
-    airy_sock_t client_fd = *(airy_sock_t *)user_data;
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "daemon", "hook_d");
-    cJSON_AddNumberToObject(result, "hooks", (double)hook_registry_count());
-    if (g_start_time > 0) {
-        cJSON_AddNumberToObject(result, "uptime_s", (double)((uint64_t)time(NULL) - g_start_time));
-    }
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-}
-
-/* ==================== L2 standard methods (02-l2-service-protocol.md:
- * hook.register / hook.unregister / hook.trigger / hook.health_check)
- * ====================
- */
-
-/*
- * hook.register: register script-type Hooks into the hook_registry (RPC
- * cannot pass C callbacks, so shell/python/webhook implementation types are
- * supported; the CALLBACK type is limited to built-in handlers).
- * params: name(required), type(string or int, e.g. "pre_exec"),
- * impl("shell"/"python"/"webhook"), script_path(script path or Webhook URL),
- * priority(default 0), enabled(default true)
- */
-static void hook_on_register(cJSON *params, int id, void *user_data)
-{
-    airy_sock_t client_fd = *(airy_sock_t *)user_data;
-
-    const char *name = jsonrpc_get_string_param(params, "name", NULL);
-    if (!name || !name[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing hook name", id);
-        return;
-    }
-
-    int type = -1;
-    cJSON *type_json = cJSON_GetObjectItem(params, "type");
-    if (cJSON_IsNumber(type_json)) {
-        type = type_json->valueint;
-    } else if (cJSON_IsString(type_json)) {
-        type = hook_type_from_name(type_json->valuestring);
-    }
-    if (type < 0 || type >= HOOK_TYPE_COUNT) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Invalid hook type", id);
-        return;
-    }
-
-    const char *impl_str = jsonrpc_get_string_param(params, "impl", "shell");
-    hook_impl_type_t impl_type = HOOK_IMPL_SHELL;
-    if (strcmp(impl_str, "python") == 0)
-        impl_type = HOOK_IMPL_PYTHON;
-    else if (strcmp(impl_str, "webhook") == 0)
-        impl_type = HOOK_IMPL_WEBHOOK;
-    else if (strcmp(impl_str, "callback") == 0)
-        impl_type = HOOK_IMPL_CALLBACK;
-
-    const char *script_path = jsonrpc_get_string_param(params, "script_path", NULL);
-    if (impl_type != HOOK_IMPL_CALLBACK && (!script_path || !script_path[0])) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "Missing script_path for script/webhook hook", id);
-        return;
-    }
-
-    int priority = 0;
-    cJSON *priority_json = cJSON_GetObjectItem(params, "priority");
-    if (cJSON_IsNumber(priority_json))
-        priority = priority_json->valueint;
-    cJSON *enabled_json = cJSON_GetObjectItem(params, "enabled");
-    bool enabled = !cJSON_IsFalse(enabled_json);
-
-    hook_entry_t entry;
-    __builtin_memset(&entry, 0, sizeof(entry));
-    AIRY_STRNCPY_TERM(entry.name, name, sizeof(entry.name));
-    entry.type = (hook_type_t)type;
-    entry.impl_type = impl_type;
-    if (script_path)
-        AIRY_STRNCPY_TERM(entry.script_path, script_path, sizeof(entry.script_path));
-    entry.priority = priority;
-    entry.enabled = enabled;
-
-    int ret = hook_registry_register(&entry);
-    if (ret != 0) {
-        const char *msg = ret == -3 ? "Hook name already registered" :
-                          ret == -2 ? "Hook registry full" :
-                                      "Hook register failed";
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, msg, id);
-        SVC_LOG_ERROR("hook.register failed: name=%s error=%d", name, ret);
-        return;
-    }
-
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "status", "registered");
-    cJSON_AddStringToObject(result, "name", name);
-    cJSON_AddStringToObject(result, "type", hook_type_name((hook_type_t)type));
-    cJSON_AddBoolToObject(result, "enabled", enabled);
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-    SVC_LOG_INFO("hook.register OK: name=%s type=%s impl=%s", name,
-                 hook_type_name((hook_type_t)type), impl_str);
-}
-
-static void hook_on_unregister(cJSON *params, int id, void *user_data)
-{
-    airy_sock_t client_fd = *(airy_sock_t *)user_data;
-    const char *name = jsonrpc_get_string_param(params, "name", NULL);
-    if (!name || !name[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing hook name", id);
-        return;
-    }
-
-    int ret = hook_registry_unregister(name);
-    if (ret != 0) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Hook not found", id);
-        return;
-    }
-
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "status", "unregistered");
-    cJSON_AddStringToObject(result, "name", name);
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-    SVC_LOG_INFO("hook.unregister OK: name=%s", name);
-}
-
-/* hook.trigger: trigger the hook chain by type (hook_service_fire aggregates
- * the decision)
- * params: type(string or int), operation(optional), input(optional text) */
-static void hook_on_trigger(cJSON *params, int id, void *user_data)
-{
-    airy_sock_t client_fd = *(airy_sock_t *)user_data;
-
-    int type = -1;
-    cJSON *type_json = cJSON_GetObjectItem(params, "type");
-    if (cJSON_IsNumber(type_json)) {
-        type = type_json->valueint;
-    } else if (cJSON_IsString(type_json)) {
-        type = hook_type_from_name(type_json->valuestring);
-    }
-    if (type < 0 || type >= HOOK_TYPE_COUNT) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Invalid hook type", id);
-        return;
-    }
-
-    const char *operation = jsonrpc_get_string_param(params, "operation", NULL);
-    const char *input = jsonrpc_get_string_param(params, "input", NULL);
-    const char *hook_name = jsonrpc_get_string_param(params, "hook_name", NULL);
-    const char *session_id = jsonrpc_get_string_param(params, "session_id", NULL);
-
-    hook_context_t ctx;
-    __builtin_memset(&ctx, 0, sizeof(ctx));
-    ctx.type = (hook_type_t)type;
-    ctx.hook_name = hook_name;
-    ctx.operation = operation;
-    ctx.input_data = input;
-    ctx.input_data_len = input ? strlen(input) : 0;
-    ctx.timestamp_ns = (uint64_t)time(NULL) * 1000000000ull;
-    if (session_id)
-        AIRY_STRNCPY_TERM(ctx.session_id, session_id, sizeof(ctx.session_id));
-
-    hook_decision_t decision = hook_service_fire(&ctx);
-
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddNumberToObject(result, "decision", (double)decision);
-    cJSON_AddStringToObject(result, "decision_name", hook_decision_name(decision));
-    cJSON_AddStringToObject(result, "type", hook_type_name((hook_type_t)type));
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-    SVC_LOG_INFO("hook.trigger OK: type=%s decision=%s", hook_type_name((hook_type_t)type),
-                 hook_decision_name(decision));
-}
-
-/* hook.session.start: 会话建立时触发 SESSION_START 事件链并注入会话上下文
- * （P1-5 通道：改 hook_d，不改底座）。会话级 hooks 可在此时注入上下文/规则；
- * 注入的 input 存入会话级存储，下游经 hook.session.get 取回。
- * params: session_id(required), operation(optional), input(optional) */
-static void hook_on_session_start(cJSON *params, int id, void *user_data)
-{
-    airy_sock_t client_fd = *(airy_sock_t *)user_data;
-    const char *session_id = jsonrpc_get_string_param(params, "session_id", NULL);
-    if (!session_id || !session_id[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing session_id", id);
-        return;
-    }
-    const char *operation = jsonrpc_get_string_param(params, "operation", NULL);
-    const char *input = jsonrpc_get_string_param(params, "input", NULL);
-
-    hook_context_t ctx;
-    __builtin_memset(&ctx, 0, sizeof(ctx));
-    ctx.type = HOOK_TYPE_SESSION_START;
-    ctx.operation = operation;
-    ctx.input_data = input;
-    ctx.input_data_len = input ? strlen(input) : 0;
-    ctx.timestamp_ns = (uint64_t)time(NULL) * 1000000000ull;
-    AIRY_STRNCPY_TERM(ctx.session_id, session_id, sizeof(ctx.session_id));
-
-    hook_decision_t decision = hook_service_fire(&ctx);
-
-    airy_mtx_lock(&g_hook_sessions_lock);
-    hook_session_entry_t *se = hook_session_upsert(session_id);
-    if (se) {
-        se->hook_count++;
-        AIRY_STRNCPY_TERM(se->decision, hook_decision_name(decision), sizeof(se->decision));
-        if (input) {
-            size_t n = strlen(input);
-            if (n >= sizeof(se->context))
-                n = sizeof(se->context) - 1;
-            AIRY_MEMCPY(se->context, input, n);
-            se->context[n] = '\0';
-            se->context_len = n;
-        }
-    }
-    airy_mtx_unlock(&g_hook_sessions_lock);
-
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "session_id", session_id);
-    cJSON_AddNumberToObject(result, "decision", (double)decision);
-    cJSON_AddStringToObject(result, "decision_name", hook_decision_name(decision));
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-    SVC_LOG_INFO("hook.session.start OK: session=%s decision=%s hooks=%zu", session_id,
-                 hook_decision_name(decision), se ? se->hook_count : 0);
-}
-
-/* hook.session.get: 取回会话级注入上下文（P1-5 通道读取端）。
- * params: session_id(required) */
-static void hook_on_session_get(cJSON *params, int id, void *user_data)
-{
-    airy_sock_t client_fd = *(airy_sock_t *)user_data;
-    const char *session_id = jsonrpc_get_string_param(params, "session_id", NULL);
-    if (!session_id || !session_id[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing session_id", id);
-        return;
-    }
-
-    airy_mtx_lock(&g_hook_sessions_lock);
-    hook_session_entry_t *se = hook_session_find(session_id);
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "session_id", session_id);
-    if (se) {
-        cJSON_AddBoolToObject(result, "active", true);
-        cJSON_AddNumberToObject(result, "started_at", (double)se->started_ns);
-        cJSON_AddStringToObject(result, "decision", se->decision);
-        cJSON_AddNumberToObject(result, "hook_count", (double)se->hook_count);
-        if (se->context_len > 0)
-            cJSON_AddStringToObject(result, "injected_context", se->context);
-    } else {
-        cJSON_AddBoolToObject(result, "active", false);
-    }
-    airy_mtx_unlock(&g_hook_sessions_lock);
-
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-}
-
-static void hook_on_health_check(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    airy_sock_t client_fd = *(airy_sock_t *)user_data;
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "service", "hook_d");
-    cJSON_AddBoolToObject(result, "healthy", g_registry_initialized ? true : false);
-    cJSON_AddNumberToObject(result, "hook_count", (double)hook_registry_count());
-    cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-}
-
-int main(int argc, char *argv[])
+int main(int argc, char **argv)
 {
     const char *config_path = NULL;
     int use_tcp = 0;
 
-    int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp, print_usage_hook_d);
-    if (parse_rc > 0)
-        return parse_rc == 1 ? 0 : 1;
-    (void)config_path;
+    int parse_rc = daemon_parse_args(argc, argv, &config_path, &use_tcp,
+                                     print_usage_hook_d);
+    if (parse_rc > 0) return parse_rc == 1 ? 0 : 1;
 
     airy_sock_init();
     airy_mtx_init(&g_running_lock_hook_d);
-    airy_mtx_init(&g_hook_sessions_lock);
 
 #ifdef _WIN32
-    SetConsoleCtrlHandler(console_handler_hook_d, TRUE);
+    SetConsoleCtrlHandler((PHANDLER_ROUTINE)signal_handler_hook_d, TRUE);
 #else
     DAEMON_SETUP_SIGNALS(hook_d);
 #endif
 
-    airy_log_init(NULL);
+    airy_logger_config_t log_cfg = {0};
+    const char *dbg = getenv("AIRY_HOOK_D_DEBUG");
+    log_cfg.level = (dbg && dbg[0] == '1') ? (log_level_t)LOG_LEVEL_DEBUG :
+                     (log_level_t)LOG_LEVEL_WARN;
+    airy_log_init(&log_cfg);
     atexit(log_cleanup);
 
-    /* WS-8 stage 4 (8.4.1): bring up the corekern core (mem/oom/task/ipc/
-     * eventloop/persist) as the first link of the daemon boot chain, before
-     * the daemon's own subsystems. airy_init() is idempotent; if it fails
-     * the daemon still runs on the platform fallbacks (DSL degradation,
-     * non-fatal, badge=0). */
-    {
-        int core_ret = airy_init();
-        if (core_ret == AIRY_SUCCESS) {
-            SVC_LOG_INFO("corekern core initialized (hook_d runs on corekern)");
-        } else {
-            SVC_LOG_WARN("corekern init failed (%d) - running degraded (badge=0)", core_ret);
-        }
-    }
+    int core_ret = airy_init();
+    if (core_ret == AIRY_SUCCESS)
+        SVC_LOG_INFO("corekern core initialized (hook_d runs on corekern)");
+    else
+        SVC_LOG_WARN("corekern init failed (%d), degraded (badge=0)", core_ret);
 
     daemon_cupolas_init_pep("hook_d");
-
-    /* Publish the IPC/RPC/SD ops table to atoms call sites so they dispatch
-     * without linking daemons symbols. Init failure is non-fatal: atoms
-     * callers degrade gracefully. */
     daemon_ipc_ops_init("hook_d");
-    are_ops_set_safety(&g_hook_safety_ops);
-    g_start_time = (uint64_t)time(NULL);
-    SVC_LOG_INFO("hook_d: starting");
 
-    if (airy_hook_init() == 0) {
-        g_registry_initialized = 1;
-        SVC_LOG_INFO("hook_d: hook system initialized (registry + timeout manager)");
-        /* Register the built-in production hook handlers (audit/metrics/
-         * trace); status/list thus returns real loaded hook module info */
-        airy_hook_register_builtin_handlers();
-    } else {
-        SVC_LOG_ERROR("hook_d: hook system init failed");
+    if (svc_prepare(config_path) != 0) {
+        SVC_LOG_ERROR("Service prepare failed");
+        goto fail_svc;
     }
 
-    airy_sock_t server_fd =
-        daemon_create_server_socket(use_tcp, HOOK_D_DEFAULT_PORT, HOOK_D_SOCKET_PATH, HOOK_D_PIPE_PATH);
+    daemon_endpoint_t ep;
+    svc_endpoint(&ep, use_tcp);
+
+    airy_sock_t server_fd = daemon_create_server_socket(
+        ep.use_tcp, ep.tcp_port, ep.sock_unix, ep.sock_win);
     if (server_fd < 0) {
-        SVC_LOG_ERROR("hook_d: failed to create socket at %s (errno=%d: %s)", HOOK_D_SOCKET_PATH,
-                      errno, strerror(errno));
-        airy_mtx_destroy(&g_running_lock_hook_d);
-        airy_sock_cleanup();
-        return EXIT_FAILURE;
+        SVC_LOG_ERROR("Failed to create server socket");
+        goto fail_svc;
     }
-    SVC_LOG_INFO("hook_d: listening on %s (fd=%d)", HOOK_D_SOCKET_PATH, (int)server_fd);
 
-    daemon_event_config_t ev_config;
-    __builtin_memset(&ev_config, 0, sizeof(ev_config));
-    ev_config.max_events = 64;
-    ev_config.thread_pool_min = 2;
-    ev_config.thread_pool_max = 4;
-    ev_config.thread_pool_queue_size = 128;
-    ev_config.use_jsonrpc = true;
-    ev_config.on_client = daemon_on_client_hook_d;
-    ev_config.service_ctx = NULL;
+    daemon_event_config_t ev_config = {
+        .max_events = 64, .thread_pool_min = 2,
+        .thread_pool_max = 4, .thread_pool_queue_size = 128,
+        .use_jsonrpc = true,
+        .on_client = daemon_on_client_hook_d,
+    };
 
-    const char *sock_addr = use_tcp ? "127.0.0.1" : HOOK_D_SOCKET_PATH;
-    int ret = daemon_init_event_driver("hook_d", "hook", sock_addr, use_tcp ? HOOK_D_DEFAULT_PORT : 0,
-                                       "hook,core", use_tcp, &ev_config, &g_event_driver_hook_d,
-                                       &g_bsd_hook_d, &g_bipc_hook_d);
+    const char *sock_addr = ep.use_tcp ? ep.tcp_host : ep.sock_unix;
+    int ret = daemon_init_event_driver(
+        "hook_d", "hook", sock_addr,
+        ep.use_tcp ? ep.tcp_port : 0, "hook,core",
+        ep.use_tcp, &ev_config, &g_event_driver_hook_d, &g_bsd_hook_d,
+        &g_bipc_hook_d);
     if (ret != AIRY_SUCCESS || !g_event_driver_hook_d) {
-        SVC_LOG_ERROR("hook_d: failed to create event driver");
+        SVC_LOG_ERROR("Failed to create event driver");
         airy_sock_close(server_fd);
-        airy_mtx_destroy(&g_running_lock_hook_d);
-        airy_sock_cleanup();
-        return EXIT_FAILURE;
+        goto fail_svc;
     }
 
-    g_dispatcher_hook_d = daemon_event_driver_get_dispatcher(g_event_driver_hook_d);
-    method_dispatcher_register(g_dispatcher_hook_d, "health", hook_on_health, NULL);
-    method_dispatcher_register(g_dispatcher_hook_d, "ping", hook_on_ping, NULL);
-    method_dispatcher_register(g_dispatcher_hook_d, "status", hook_on_status, NULL);
-    method_dispatcher_register(g_dispatcher_hook_d, "list", hook_on_list, NULL);
-    method_dispatcher_register(g_dispatcher_hook_d, "stats", hook_on_stats, NULL);
-    /* Standard L2 protocol methods (02-l2-service-protocol.md: hook.register /
-     * hook.unregister / hook.trigger / hook.health_check)
-     */
-    method_dispatcher_register(g_dispatcher_hook_d, "register", hook_on_register, NULL);
-    method_dispatcher_register(g_dispatcher_hook_d, "unregister", hook_on_unregister, NULL);
-    method_dispatcher_register(g_dispatcher_hook_d, "trigger", hook_on_trigger, NULL);
-    /* P1-5：SessionStart 会话级上下文注入通道（hook.session.start 触发 +
-     * 注入存储 / hook.session.get 取回） */
-    method_dispatcher_register(g_dispatcher_hook_d, "session_start", hook_on_session_start, NULL);
-    method_dispatcher_register(g_dispatcher_hook_d, "session_get", hook_on_session_get, NULL);
-    method_dispatcher_register(g_dispatcher_hook_d, "health_check", hook_on_health_check, NULL);
+    g_dispatcher_hook_d = daemon_event_driver_get_dispatcher(
+        g_event_driver_hook_d);
+    static const daemon_method_entry_t SVC_METHODS[] = {
+        {"health", m_health},
+        {"ping", m_ping},
+        {"status", m_status},
+        {"list", m_list},
+        {"stats", m_stats},
+        {"register", m_register},
+        {"unregister", m_unregister},
+        {"trigger", m_trigger},
+        {"session_start", m_session_start},
+        {"session_get", m_session_get},
+        {"health_check", m_health_check},
+        {"get_stats", m_get_stats},
+        {"shutdown", on_shutdown_method_hook_d},
+    };
+    DAEMON_REGISTER_METHODS(g_dispatcher_hook_d, SVC_METHODS);
+    SVC_LOG_INFO("Registered 13 RPC methods (hook.* namespace)");
+    svc_attach(g_dispatcher_hook_d);
 
-    method_dispatcher_register(g_dispatcher_hook_d, "shutdown", on_shutdown_method_hook_d, NULL);
-
-    method_dispatcher_register(g_dispatcher_hook_d, "get_stats", hook_on_get_stats, NULL);
-    SVC_LOG_INFO("hook_d: registered 11 RPC methods (hook.* namespace)");
-
-    if (daemon_event_driver_add_server_fd(g_event_driver_hook_d, (int)server_fd) != 0) {
-        SVC_LOG_ERROR("hook_d: failed to add server fd to event driver");
-        daemon_event_driver_destroy(g_event_driver_hook_d);
-        airy_sock_close(server_fd);
-        airy_mtx_destroy(&g_running_lock_hook_d);
-        airy_sock_cleanup();
-        return EXIT_FAILURE;
+    if (daemon_event_driver_add_server_fd(g_event_driver_hook_d,
+                                          (int)server_fd) != 0) {
+        SVC_LOG_ERROR("Failed to add server fd to event driver");
+        goto fail_driver;
     }
 
-    SVC_LOG_INFO("hook_d: running (event-driven mode), waiting for requests");
+    if (svc_activate(g_event_driver_hook_d, g_bsd_hook_d) != 0) {
+        SVC_LOG_ERROR("Service activate failed");
+        goto fail_driver;
+    }
+
+    SVC_LOG_INFO("hook service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_hook_d);
 
-    SVC_LOG_INFO("hook_d: shutting down");
-    daemon_cleanup_standard(g_bipc_hook_d, g_bsd_hook_d, g_event_driver_hook_d, server_fd,
-                            HOOK_D_SOCKET_PATH, destroy_service_hook_d, &g_running_lock_hook_d);
+    svc_teardown();
+    daemon_cleanup_standard(g_bipc_hook_d, g_bsd_hook_d,
+                            g_event_driver_hook_d, server_fd,
+                            ep.sock_unix, svc_destroy,
+                            &g_running_lock_hook_d);
+    daemon_ipc_ops_cleanup();
+    daemon_cupolas_cleanup();
     log_cleanup();
-    return EXIT_SUCCESS;
+    return 0;
+
+fail_driver:
+    daemon_event_driver_destroy(g_event_driver_hook_d);
+    airy_sock_close(server_fd);
+fail_svc:
+    svc_destroy();
+    airy_mtx_destroy(&g_running_lock_hook_d);
+    airy_sock_cleanup();
+    return EXIT_FAILURE;
 }
