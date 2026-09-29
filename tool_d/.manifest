@@ -21,7 +21,7 @@
   },
   "deps": { "required": [], "optional": [] },
   "modules": [
-    { "name": "rpc", "sources": ["tool_rpc.c"] },
+    { "name": "rpc", "sources": ["rpc/tool_rpc.c"] },
     { "name": "plugin", "sources": ["plugin_rpc.c"] }
   ]
 }

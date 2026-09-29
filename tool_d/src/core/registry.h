@@ -9,7 +9,7 @@
 #ifndef TOOL_REGISTRY_H
 #define TOOL_REGISTRY_H
 
-#include "config.h"
+#include "core/config.h"
 #include "tool_service.h"
 
 #ifdef __cplusplus

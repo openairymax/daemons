@@ -6,7 +6,7 @@
  * @brief Tool 执行器单元测试
  */
 
-#include "executor.h"
+#include "core/executor.h"
 #include "tool_service.h"
 
 #include "airy_memory.h"

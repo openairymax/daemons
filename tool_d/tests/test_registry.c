@@ -6,7 +6,7 @@
  * @brief Tool 注册表单元测试
  */
 
-#include "registry.h"
+#include "core/registry.h"
 
 #include "airy_memory.h"
 #include "airy_tool_schema.h"

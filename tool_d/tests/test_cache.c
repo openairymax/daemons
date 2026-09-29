@@ -10,7 +10,7 @@
  * 专属的 key 构造用例保留。
  */
 
-#include "cache.h"
+#include "core/cache.h"
 #include "cache_common.h"
 
 #include <assert.h>

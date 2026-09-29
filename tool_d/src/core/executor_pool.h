@@ -20,7 +20,7 @@
 #ifndef TOOL_EXECUTOR_POOL_H
 #define TOOL_EXECUTOR_POOL_H
 
-#include "executor.h"
+#include "core/executor.h"
 #include "tool_service.h"
 
 #ifdef __cplusplus
