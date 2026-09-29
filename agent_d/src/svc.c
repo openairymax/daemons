@@ -124,8 +124,9 @@ int svc_prepare_agent_d(const char *config_path)
     return 0;
 }
 
-int svc_activate_agent_d(daemon_event_driver_t *driver)
+int svc_activate_agent_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
+    (void)bsd;
 #if AIRY_PLATFORM_POSIX
     idle_reaper_start();
     perf_monitor_start(driver);

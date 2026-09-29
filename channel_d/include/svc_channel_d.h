@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.3.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.4.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -25,10 +25,11 @@
  * 命名豁免 15 字节（机械对齐户名）。 */
 void svc_endpoint_channel_d(daemon_endpoint_t *ep, int cmdline_tcp);
 
-/* 生命周期钩子（实现: src/svc.c）；activate 收到事件驱动句柄，
- * 供与事件循环耦合的激活策略使用（如监控采样线程）。 */
+/* 生命周期钩子（实现: src/svc.c）；activate 收到事件驱动句柄与
+ * SD bootstrap 句柄，供事件耦合激活策略（如监控采样线程）与
+ * manifest deps 驱动的依赖探测健康面使用。 */
 int svc_prepare_channel_d(const char *config_path);
-int svc_activate_channel_d(daemon_event_driver_t *driver);
+int svc_activate_channel_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd);
 void svc_teardown_channel_d(void);
 void svc_destroy_channel_d(void);
 
