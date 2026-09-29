@@ -25,7 +25,7 @@
 #endif
 
 #include "llm_service.h"
-#include "router/llm_router.h"
+#include "router/core/llm_router.h"
 
 #include <stdio.h>
 #include <string.h>

@@ -10,7 +10,7 @@
  *
  */
 
-#include "router/router_context.h"
+#include "router/core/router_context.h"
 
 /**
  * @brief Round-robin routing - cycle through all capable endpoints.

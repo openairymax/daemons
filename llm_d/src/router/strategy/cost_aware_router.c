@@ -13,7 +13,7 @@
  *
  */
 
-#include "router/router_context.h"
+#include "router/core/router_context.h"
 
 /**
  * @brief Decision-tree routing (budget check -> task-type decision ->

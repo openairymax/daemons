@@ -10,7 +10,7 @@
  *
  */
 
-#include "router/router_context.h"
+#include "router/core/router_context.h"
 
 /**
  * @brief Least-latency routing - pick the endpoint with the smallest

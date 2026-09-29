@@ -14,7 +14,7 @@
 #include "svc_logger.h"
 
 #include "providers/core/registry.h"
-#include "router/llm_router.h"
+#include "router/core/llm_router.h"
 
 #include <stdbool.h>
 #include <stdio.h>

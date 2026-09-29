@@ -12,7 +12,7 @@
 #ifndef AIRY_RT_LLM_ROUTER_CONTEXT_H
 #define AIRY_RT_LLM_ROUTER_CONTEXT_H
 
-#include "router/llm_router.h"
+#include "router/core/llm_router.h"
 #include "cost_tracker.h"
 #include "token_counter.h"
 #include "airy_memory.h"
