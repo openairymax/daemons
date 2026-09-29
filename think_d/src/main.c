@@ -18,6 +18,7 @@
  */
 
 #include "daemon_main.h"
+#include "daemon_dep.h"
 #include "daemon_ipc_ops_bootstrap.h"
 #include "daemon_llm_ops_bootstrap.h"
 #include "daemon_tool_ops_bootstrap.h"
@@ -47,6 +48,12 @@ DAEMON_DECLARE_COMMON(think_d, think, DEFAULT_SOCKET_PATH_UNIX, DEFAULT_SOCKET_P
 DAEMON_DECLARE_SHUTDOWN_METHOD(think_d)
 
 static think_service_t *g_service = NULL;
+
+/* 0.1.19 §7.2 不变式 3：硬依赖以数据声明，required 缺失必须降级态显式上报。
+ * think_d 的推理执行面依赖 llm_d（LLM 服务）；声明数据后续由 .manifest 接管。 */
+static const daemon_dep_spec_t g_think_deps[] = {
+    {"llm_d", true},
+};
 
 typedef struct {
     char *socket_path;
@@ -174,14 +181,49 @@ static void handle_get_stats(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_health_check(cJSON *params, int id,
                                 airy_sock_t client_fd)
 {
+    (void)params;
+
+    /* 0.1.19 §7.2 不变式 2/3：健康 = 端到端可达。健康面按请求实时重探依赖，
+     * 不用启动快照，避免健康假阳性；required 缺失时 healthy=false 并置
+     * degraded=true，同时列出依赖明细。 */
+    daemon_dep_t deps;
+    sd_helper_t *sdh = daemon_bootstrap_sd_get_helper(g_bsd_think_d);
+    bool probed = daemon_dep_init(&deps, g_think_deps,
+                                  sizeof(g_think_deps) / sizeof(g_think_deps[0])) == AIRY_SUCCESS &&
+                  daemon_dep_probe(&deps, sdh) == AIRY_SUCCESS;
+    bool service_ready = think_service_ready(g_service) ? true : false;
+    bool healthy = service_ready && probed && daemon_dep_ready(&deps);
+
     cJSON *result = cJSON_CreateObject();
     if (!result) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
         return;
     }
     cJSON_AddStringToObject(result, "service", "think_d");
-    cJSON_AddBoolToObject(result, "healthy", think_service_ready(g_service) ? true : false);
+    cJSON_AddBoolToObject(result, "healthy", healthy);
+    cJSON_AddBoolToObject(result, "degraded", service_ready && !healthy);
     cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
+
+    if (probed && daemon_dep_count(&deps) > 0) {
+        cJSON *arr = cJSON_AddArrayToObject(result, "dependencies");
+        if (arr) {
+            size_t count = daemon_dep_count(&deps);
+            for (size_t i = 0; i < count; i++) {
+                const char *name = NULL;
+                bool required = false;
+                bool reachable = false;
+                if (daemon_dep_at(&deps, i, &name, &required, &reachable) != AIRY_SUCCESS)
+                    continue;
+                cJSON *item = cJSON_CreateObject();
+                if (!item)
+                    continue;
+                cJSON_AddStringToObject(item, "name", name ? name : "");
+                cJSON_AddBoolToObject(item, "required", required);
+                cJSON_AddBoolToObject(item, "reachable", reachable);
+                cJSON_AddItemToArray(arr, item);
+            }
+        }
+    }
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
@@ -474,6 +516,19 @@ int main(int argc, char **argv)
         airy_mtx_destroy(&g_running_lock_think_d);
         airy_sock_cleanup();
         return EXIT_FAILURE;
+    }
+
+    /* 0.1.19 §7.2 不变式 3：启动期依赖检查（governance 面职责）。SD 引导已在
+     * daemon_init_event_driver 内完成，此处经 SD 探测声明的硬依赖；required
+     * 缺失时 WARN + hall issue 事件显式上报，禁止静默 ready。 */
+    {
+        daemon_dep_t deps;
+        sd_helper_t *sdh = daemon_bootstrap_sd_get_helper(g_bsd_think_d);
+        if (daemon_dep_init(&deps, g_think_deps,
+                            sizeof(g_think_deps) / sizeof(g_think_deps[0])) == AIRY_SUCCESS &&
+            daemon_dep_probe(&deps, sdh) == AIRY_SUCCESS) {
+            (void)daemon_dep_report(&deps, "think_d");
+        }
     }
 
     g_dispatcher_think_d = daemon_event_driver_get_dispatcher(g_event_driver_think_d);
