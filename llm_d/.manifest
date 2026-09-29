@@ -21,6 +21,6 @@
   },
   "deps": { "required": [], "optional": [] },
   "modules": [
-    { "name": "rpc", "sources": ["llm_rpc.c", "llm_rpc_request.c"] }
+    { "name": "rpc", "sources": ["rpc/methods.c", "rpc/dispatch.c"] }
   ]
 }

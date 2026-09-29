@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /**
- * @file llm_rpc.c
+ * @file methods.c
  * @brief llm.* RPC 方法域：complete / complete_stream（SSE）/
  *        list_models / embeddings / count_tokens / health_check /
  *        get_stats 的 handler 与 m_* 薄壳。
  *
  * 0.1.19 gen5 装配：方法实现集中于此，生命周期与端点在 src/svc.c，
- * 请求解析在 src/llm_rpc_request.c，装配期共享符号经 llm_d_internal.h
+ * 请求解析在 src/rpc/dispatch.c，装配期共享符号经 llm_d_internal.h
  * 声明；m_* 签名与 .manifest rpc.methods 一一对应（svc_llm_d.h 由生成器
  * 产出，L3 SSoT）。
  */

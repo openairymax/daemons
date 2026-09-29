@@ -5,8 +5,8 @@
  * @file llm_d_internal.h
  * @brief llm_d 装配域唯一私有头（gen5 五件套）。
  *
- * 承载 src/svc.c（生命周期与端点策略）、src/llm_rpc.c（RPC 方法面）与
- * src/llm_rpc_request.c（请求解析）之间的共享符号。端点常量由生成头
+ * 承载 src/svc.c（生命周期与端点策略）、src/rpc/methods.c（RPC 方法面）与
+ * src/rpc/dispatch.c（请求解析）之间的共享符号。端点常量由生成头
  * svc_llm_d.h 提供（wire 契约 SSoT），本头不重复声明。跨域禁止 include
  * 本头（引用律）。
  */
@@ -45,7 +45,7 @@ typedef struct {
     char fail_reason[160];
 } request_context_t;
 
-/* 请求解析域（src/llm_rpc_request.c） */
+/* 请求解析域（src/rpc/dispatch.c） */
 request_context_t *request_context_create(void);
 void request_context_destroy(request_context_t *ctx);
 int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cfg);

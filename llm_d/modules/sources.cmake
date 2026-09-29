@@ -8,6 +8,6 @@
 set(LLM_D_SOURCES
     src/main.c
     src/svc.c
-    src/llm_rpc.c
-    src/llm_rpc_request.c
+    src/rpc/methods.c
+    src/rpc/dispatch.c
 )

@@ -394,7 +394,7 @@ int provider_registry_enumerate(provider_registry_t *reg,
  * （鉴权失败 / 限流 / 连接失败）永远回传不到用户。
  *
  * 该上界默认值单独保证"只发一次请求"的场景（70s < 90s）；多次重试的总
- * 耗时上界由 llm_rpc.c 的 LLM_RETRY_FAST_FAIL_MS 共同保证
+ * 耗时上界由 rpc/methods.c 的 LLM_RETRY_FAST_FAIL_MS 共同保证
  * （3 × 5s + 70s = 85s < 90s）。模型行可用 timeout_sec 显式覆盖；覆盖后
  * 须自行保证仍小于网关背压。 */
 #define PROVIDER_DEFAULT_TIMEOUT_SEC 70.0
