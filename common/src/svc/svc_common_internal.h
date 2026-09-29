@@ -6,28 +6,23 @@
  * @brief Internal shared definitions of the svc_common static library
  *        (not public API).
  *
- * After the P1.x modular split of svc_common.c into svc_registry.c /
- * svc_config.c / svc_monitor.c / svc_client.c, and the Phase 2.3a split of
- * the remaining lifecycle core into svc_common.c / svc_common_registry.c /
- * svc_common_ops.c, the following definitions are shared across multiple
- * source files:
+ * After the P1.x modular split of svc_common.c into multiple svc_*.c
+ * files, and the Phase 2.3a split of the remaining lifecycle core into
+ * svc_common.c / svc_common_registry.c / svc_common_ops.c, the following
+ * definitions are shared across multiple source files:
  *
  * - airy_svc_internal_t: internal service-instance struct. Both
- *   svc_common.c (lifecycle/internal registry) and svc_client.c (local
- *   direct-connect client reading iface/user_data) need its fields, so it
- *   lives in an internal header instead of a single .c file.
+ *   svc_common.c (lifecycle) and svc_common_registry.c (internal
+ *   registry) need its fields, so it lives in an internal header instead
+ *   of a single .c file.
  * - MAX_SERVICE_NAME_LEN / MAX_SERVICE_VERSION_LEN: fixed-size array deps
  *   in the struct, also used by airy_svc_create() in svc_common.c.
- * - monitor_shutdown(): the monitor domain (svc_monitor.c) owns the
- *   monitoring global state; called by airy_svc_common_cleanup() in
- *   svc_common.c to destroy the monitor mutex.
  *
  * This header is for svc_common static-library sources only; it must not
  * be used by other daemons modules.
  *
- * @see agentrt/daemons/common/src/svc_common.c
- * @see agentrt/daemons/common/src/svc_monitor.c
- * @see agentrt/daemons/common/src/svc_client.c
+ * @see agentrt/daemons/common/src/svc/svc_common.c
+ * @see agentrt/daemons/common/src/svc/svc_common_registry.c
  */
 
 #ifndef AIRY_RT_DAEMON_COMMON_SVC_COMMON_INTERNAL_H
@@ -77,14 +72,6 @@ typedef struct airy_svc_internal {
 
     struct airy_svc_internal *next;
 } airy_svc_internal_t;
-
-/**
- * @brief Shut down the service monitor subsystem.
- * @note Implementation lives in svc_monitor.c (g_monitor state is private
- *       to the monitor domain), called by airy_svc_common_cleanup() in
- *       svc_common.c on the process-exit path.
- */
-void monitor_shutdown(void);
 
 /**
  * @brief Lazy-initialize the in-process service registry (mutex + memory
