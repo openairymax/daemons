@@ -80,7 +80,7 @@ PUBLIC include 路径以 commons 权威目录优先，裸引直接解析权威�
 | `src/auth/` | 6 | `svc_auth.c`（认证中间件聚合）、`svc_auth_jwt.c` / `svc_auth_jwt_crypto.c` / `svc_auth_jwt_verify.c`（JWT 生命周期、HMAC/Base64 原语、签名校验）、`svc_auth_apikey.c`、`svc_auth_ratelimit.c` |
 | `src/ipc/` | 4 | `ipc_client.c`、`ipc_service_bus.c`（总线核心）、`ipc_service_bus_message.c`（消息域）、`ipc_bus_helper.c`（自动注册便捷层） |
 | `src/security/` | 4 | `daemon_security.c`（初始化/消毒）、`_acl.c`（ACL 授权）、`_signature.c`（包签名验证）、`_vault.c`（凭据与审计） |
-| `src/daemon/` | 10 | `daemon_event_driver.c`（事件驱动主循环）、`daemon_task_dispatcher.c`（并行执行引擎）、`daemon_rpc_client.c`、`daemon_bootstrap_sd.c`、`daemon_bootstrap_ipc.c`、`daemon_cupolas_bootstrap.c`、`daemon_heapstore_bootstrap.c`、`daemon_ipc_ops_bootstrap.c`、`daemon_l1_server.c`、`daemon_l2_bridge.c` |
+| `src/daemon/` | 9 | `daemon_event_driver.c`（事件驱动主循环）、`daemon_rpc_client.c`、`daemon_dep.c`（硬依赖探测与降级上报）、`daemon_bootstrap_ipc.c`、`daemon_cupolas_bootstrap.c`、`daemon_heapstore_bootstrap.c`、`daemon_ipc_ops_bootstrap.c`、`daemon_l1_server.c`、`daemon_l2_bridge.c` |
 | `src/util/` | 2 | `config_manager.c`（统一配置管理）、`hall_writer.c`（daemon 侧事件流写端） |
 
 > `daemon_l1_server.c` 与 `daemon_l2_bridge.c` 编译进独立的 `daemon_l1_server` 目标，
