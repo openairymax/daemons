@@ -11,8 +11,9 @@
  * 前缀消歧避免覆盖）；get_stats / health_check 走 monit 原生实现。
  *
  * /metrics 文本导出融合动态指标表与 unified-metrics 注册表
- * （prometheus_exporter），双 Prometheus 出口（:9091 与 monit TCP :9090）
- * 返回同一融合视图，达成 §5“双 Prometheus /metrics 收敛”。
+ * （prometheus_exporter），达成 §5“双 Prometheus /metrics 收敛”。抓取
+ * 端点以平台层 TCP server（airy_sock_create_tcp_server）承载，Linux /
+ * macOS / Windows 三端一致；端口被占则降级为纯 RPC 路径，不阻断启动。
  * 原独立 Unix/TCP server_fd、accept 循环与 raw 状态 JSON 兜底路径随
  * observe_d 消亡（消费方仅经 gateway JSON-RPC 转发访问）。
  */
@@ -34,17 +35,9 @@
 #include <string.h>
 #include <time.h>
 
-#ifndef _WIN32
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
-
 #define OBS_RPC_METRICS_PORT 9091
 #define OBS_RPC_MAX_METRICS 256
 #define OBS_RPC_MAX_BUFFER 65536
-#define OBS_RPC_HTTP_BACKLOG 16
 
 typedef struct {
     char *name;
@@ -64,7 +57,6 @@ static uint64_t g_obs_errors;
 static uint64_t g_obs_http_requests;
 static int g_obs_ready;
 
-#ifndef _WIN32
 static airy_sock_t g_obs_http_fd = AIRY_INVALID_SOCKET;
 static airy_thread_t g_obs_http_thread;
 static atomic_int g_obs_http_running;
@@ -134,27 +126,12 @@ static void *obs_http_loop(void *arg)
 
 static void obs_start_http(void)
 {
-    g_obs_http_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (g_obs_http_fd == AIRY_INVALID_SOCKET) {
-        SVC_LOG_WARN("observe_rpc: failed to create HTTP socket");
-        return;
-    }
-
-    int reuse = 1;
-    setsockopt(g_obs_http_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse));
-
-    struct sockaddr_in addr;
-    __builtin_memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(OBS_RPC_METRICS_PORT);
-
-    if (bind(g_obs_http_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
-        listen(g_obs_http_fd, OBS_RPC_HTTP_BACKLOG) < 0) {
-        /* 端口被占不阻断 monit_d 启动：观测域降级为纯 RPC 路径。 */
-        SVC_LOG_WARN("observe_rpc: prometheus endpoint :%d unavailable (%s)",
-                     OBS_RPC_METRICS_PORT, "bind/listen failed");
-        airy_sock_close(g_obs_http_fd);
+    /* 抓取端点走平台层 TCP server（Windows/macOS/Linux 同一路径），
+     * 端口被占不阻断 monit_d 启动：观测域降级为纯 RPC 路径。 */
+    g_obs_http_fd = airy_sock_create_tcp_server("0.0.0.0", OBS_RPC_METRICS_PORT);
+    if (g_obs_http_fd < 0) {
+        SVC_LOG_WARN("observe_rpc: prometheus endpoint :%d unavailable",
+                     OBS_RPC_METRICS_PORT);
         g_obs_http_fd = AIRY_INVALID_SOCKET;
         return;
     }
@@ -184,15 +161,6 @@ static void obs_stop_http(void)
         g_obs_http_fd = AIRY_INVALID_SOCKET;
     }
 }
-#else
-static void obs_start_http(void)
-{
-    SVC_LOG_WARN("observe_rpc: prometheus HTTP server not yet supported on Windows");
-}
-static void obs_stop_http(void)
-{
-}
-#endif
 
 /* 调用方持有 g_obs_lock。 */
 static obs_metric_t *obs_find(const char *name)
