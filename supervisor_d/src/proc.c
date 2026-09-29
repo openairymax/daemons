@@ -423,3 +423,53 @@ void sup_shutdown_all(sup_ctx_t *ctx)
 #endif
     sup_log("INFO", "shutdown complete");
 }
+
+static int pid_alive(long pid)
+{
+    if (pid <= 0)
+        return 0;
+#ifdef _WIN32
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                           (DWORD)pid);
+    if (!h)
+        return 0;
+    DWORD code = 0;
+    int alive = GetExitCodeProcess(h, &code) && code == STILL_ACTIVE;
+    CloseHandle(h);
+    return alive;
+#else
+    return kill((pid_t)pid, 0) == 0 || errno == EPERM;
+#endif
+}
+
+int sup_pidfile_write(const sup_ctx_t *ctx)
+{
+    char pf[SUP_PATH_MAX];
+    snprintf(pf, sizeof(pf), "%s/supervisor.pid", ctx->runtime_dir);
+    FILE *f = fopen(pf, "r");
+    if (f) {
+        char line[64];
+        if (fgets(line, sizeof(line), f)) {
+            char *end = NULL;
+            long old = strtol(line, &end, 10);
+            if (end != line && pid_alive(old)) {
+                fclose(f);
+                return -1; /* 已有实例（唯一启动路径判据） */
+            }
+        }
+        fclose(f);
+    }
+    f = fopen(pf, "w");
+    if (!f)
+        return -1;
+    fprintf(f, "%ld\n", (long)getpid());
+    fclose(f);
+    return 0;
+}
+
+void sup_pidfile_clear(const sup_ctx_t *ctx)
+{
+    char pf[SUP_PATH_MAX];
+    snprintf(pf, sizeof(pf), "%s/supervisor.pid", ctx->runtime_dir);
+    remove(pf);
+}

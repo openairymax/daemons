@@ -96,6 +96,7 @@ typedef struct sup_ctx {
 int sup_decl_load(sup_ctx_t *ctx);
 int sup_decl_defaults(sup_ctx_t *ctx);
 int sup_proc_find(const sup_ctx_t *ctx, const char *name);
+void ensure_dirs(const sup_ctx_t *ctx);
 
 /* ---- proc.c：spawn / reap / 退避 / 收摊 ---- */
 int sup_proc_spawn(sup_ctx_t *ctx, sup_proc_t *p);
@@ -110,21 +111,27 @@ void sup_log(const char *level, const char *fmt, ...);
 int sup_probe_sock(const sup_proc_t *p);
 void sup_health_tick(sup_ctx_t *ctx, sup_proc_t *p);
 
-/* ---- ctrl.c：控制口（UDS/TCP + 极简 JSON-RPC） ---- */
+/* ---- ctrl.c：控制口（UDS/TCP + 极简 JSON-RPC + CLI 客户端） ---- */
 int sup_ctrl_listen(const sup_ctx_t *ctx);
 void sup_ctrl_close(int fd);
 void sup_ctrl_serve(sup_ctx_t *ctx, int listen_fd, int timeout_ms);
 int sup_json_field(const char *json, const char *key, char *out, size_t out_sz);
+int sup_ctrl_client(sup_ctx_t *ctx, int argc, char **argv);
 
 /* ---- proc.c 提供给 ctrl/main 的拉起决策 ---- */
 int sup_activate(sup_ctx_t *ctx, const char *name);
 
 #ifdef _WIN32
-/* main.c 启动时初始化 Job Object（防孤儿：supervisor 死则整组回收） */
+/* svc.c 启动时初始化 Job Object（防孤儿：supervisor 死则整组回收） */
 int sup_proc_job_init(void);
 #endif
 
-/* ---- main.c 生命周期 ---- */
+/* ---- svc.c：常驻生命周期（prepare/step/clear，自持零依赖） ---- */
+int sup_svc_prepare(sup_ctx_t *ctx, int *lfd_out);
+int sup_svc_step(sup_ctx_t *ctx, int lfd);
+void sup_svc_clear(sup_ctx_t *ctx, int lfd);
+
+/* ---- proc.c：pid 文件防重复启动（唯一启动路径判据） ---- */
 int sup_pidfile_write(const sup_ctx_t *ctx);
 void sup_pidfile_clear(const sup_ctx_t *ctx);
 

@@ -24,6 +24,8 @@
 
 #ifndef _WIN32
 #include <pwd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 #endif
 
@@ -50,6 +52,42 @@ static const struct {
 static void path_join(char *out, size_t sz, const char *a, const char *b)
 {
     snprintf(out, sz, "%s/%s", a, b);
+}
+
+static void mkdir_p(const char *path)
+{
+    char tmp[SUP_PATH_MAX];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+#ifdef _WIN32
+    for (char *q = tmp + 1; *q; q++) {
+        if (*q == '\\') {
+            *q = '\0';
+            CreateDirectoryA(tmp, NULL);
+            *q = '\\';
+        }
+    }
+    CreateDirectoryA(tmp, NULL);
+#else
+    for (char *q = tmp + 1; *q; q++) {
+        if (*q == '/') {
+            *q = '\0';
+            mkdir(tmp, 0755);
+            *q = '/';
+        }
+    }
+    mkdir(tmp, 0755);
+#endif
+}
+
+void ensure_dirs(const sup_ctx_t *ctx)
+{
+    char d[SUP_PATH_MAX];
+    snprintf(d, sizeof(d), "%s/config", ctx->airy_home);
+    mkdir_p(d);
+    snprintf(d, sizeof(d), "%s", ctx->runtime_dir);
+    mkdir_p(d);
+    snprintf(d, sizeof(d), "%s", ctx->log_dir);
+    mkdir_p(d);
 }
 
 static void home_default(char *out, size_t sz)

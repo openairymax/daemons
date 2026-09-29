@@ -1,0 +1,24 @@
+{
+  "manifest_version": 1,
+  "daemon": "supervisor_d",
+  "cname": "supervisor",
+  "sd_type": "supervisor",
+  "codegen": false,
+  "facades": ["ingress", "execute", "state", "governance"],
+  "slots": ["recover", "resilience", "create", "comm"],
+  "rpc": {
+    "unix": "supervisor.sock",
+    "tcp": 8095,
+    "tags": "supervisor,bootstrap",
+    "buffer": 4096,
+    "methods": ["supervisor.activate", "supervisor.shutdown", "health_check"]
+  },
+  "deps": { "required": [], "optional": [] },
+  "modules": [
+    { "name": "svc", "sources": ["svc.c"] },
+    { "name": "decl", "sources": ["decl.c"] },
+    { "name": "proc", "sources": ["proc.c"] },
+    { "name": "probe", "sources": ["probe.c"] },
+    { "name": "ctrl", "sources": ["ctrl.c"] }
+  ]
+}

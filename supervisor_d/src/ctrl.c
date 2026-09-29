@@ -5,12 +5,13 @@
  * @file ctrl.c
  * @brief 控制口：POSIX UDS / Windows TCP 回环 + 极简 JSON-RPC（自持实现）。
  *
- * 方法面（V13.2 / V13.4）：
+ * 服务面（V13.2 / V13.4）：
  *   supervisor.activate  {"name":"monit_d"}   AUX 按需拉起（幂等）
  *   supervisor.shutdown  {}                   收摊归一（主循环受理）
  *   health_check         {}                   进程表状态摘要
  * 请求/响应均为单行 JSON，串行单连接处理（控制面低频，无并发需求）。
  * UDS 文件权限 0600，仅本机同用户可达；TCP 腿仅绑定 127.0.0.1。
+ * 客户端面（launcher 唯一启动契约）：activate/stop/status 一次性连接。
  */
 
 #include "supervisor_d.h"
@@ -56,6 +57,18 @@ static int wsa_up(void)
     }
     return 0;
 }
+
+static int ep_split(const char *ep, char *host, size_t hsz, char *port,
+                    size_t psz)
+{
+    const char *colon = strrchr(ep, ':');
+    if (!colon || colon == ep || (size_t)(colon - ep) >= hsz)
+        return -1;
+    /* %.*s 截取 host 段：边界与终止由 snprintf 保证（BAN-154） */
+    snprintf(host, hsz, "%.*s", (int)(colon - ep), ep);
+    snprintf(port, psz, "%s", colon + 1);
+    return 0;
+}
 #endif
 
 int sup_ctrl_listen(const sup_ctx_t *ctx)
@@ -64,12 +77,8 @@ int sup_ctrl_listen(const sup_ctx_t *ctx)
     if (wsa_up() != 0)
         return -1;
     char host[128], port[16];
-    const char *colon = strrchr(ctx->ctrl_ep, ':');
-    if (!colon || colon == ctx->ctrl_ep || (size_t)(colon - ctx->ctrl_ep) >= sizeof(host))
+    if (ep_split(ctx->ctrl_ep, host, sizeof(host), port, sizeof(port)) != 0)
         return -1;
-    /* %.*s 截取 host 段：边界与终止由 snprintf 保证（BAN-154） */
-    snprintf(host, sizeof(host), "%.*s", (int)(colon - ctx->ctrl_ep), ctx->ctrl_ep);
-    snprintf(port, sizeof(port), "%s", colon + 1);
 
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
@@ -256,4 +265,99 @@ void sup_ctrl_serve(sup_ctx_t *ctx, int listen_fd, int timeout_ms)
     if (off > 0)
         dispatch(ctx, fd, req);
     sup_ctrl_close(fd);
+}
+
+/* 一次性控制口客户端：连 ctrl_ep 发单行请求，打印响应 */
+static int client_run(const sup_ctx_t *ctx, const char *req)
+{
+#ifdef _WIN32
+    if (wsa_up() != 0)
+        return -1;
+    char host[128], port[16];
+    if (ep_split(ctx->ctrl_ep, host, sizeof(host), port, sizeof(port)) != 0)
+        return -1;
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, port, &hints, &res) != 0 || !res)
+        return -1;
+    int fd = (int)socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    int rc = fd >= 0 ? connect(fd, res->ai_addr, (socklen_t)res->ai_addrlen) : -1;
+    freeaddrinfo(res);
+    if (rc != 0)
+        return -1;
+#else
+    struct sockaddr_un sa;
+    if (strlen(ctx->ctrl_ep) >= sizeof(sa.sun_path))
+        return -1;
+    memset(&sa, 0, sizeof(sa));
+    sa.sun_family = AF_UNIX;
+    snprintf(sa.sun_path, sizeof(sa.sun_path), "%s", ctx->ctrl_ep);
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0)
+        return -1;
+    if (connect(fd, (const struct sockaddr *)&sa, sizeof(sa)) != 0) {
+        close(fd);
+        return -1;
+    }
+#endif
+    size_t len = strlen(req);
+    size_t off = 0;
+    while (off < len) {
+#ifdef _WIN32
+        int n = (int)send(fd, req + off, (int)(len - off), 0);
+#else
+        ssize_t n = write(fd, req + off, len - off);
+#endif
+        if (n <= 0)
+            break;
+        off += (size_t)n;
+    }
+    char buf[4096];
+    ssize_t n;
+#ifdef _WIN32
+    while ((n = recv(fd, buf, sizeof(buf) - 1, 0)) > 0) {
+#else
+    while ((n = read(fd, buf, sizeof(buf) - 1)) > 0) {
+#endif
+        buf[n] = '\0';
+        fputs(buf, stdout);
+        if (memchr(buf, '\n', (size_t)n))
+            break;
+    }
+    sup_ctrl_close(fd);
+    return 0;
+}
+
+static int usage(void)
+{
+    fputs("usage: supervisor_d [activate <name>|stop|status|--help]\n", stderr);
+    return 2;
+}
+
+/* CLI 子命令分派（launcher 唯一启动契约）：仅 argc >= 2 时进入 */
+int sup_ctrl_client(sup_ctx_t *ctx, int argc, char **argv)
+{
+    char req[SUP_NAME_MAX + 128];
+    if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)
+        return usage();
+    if (strcmp(argv[1], "activate") == 0 && argc == 3) {
+        snprintf(req, sizeof(req),
+                 "{\"method\":\"supervisor.activate\",\"params\":{\"name\":"
+                 "\"%s\"},\"id\":1}\n",
+                 argv[2]);
+        return client_run(ctx, req) == 0 ? 0 : 1;
+    }
+    if (strcmp(argv[1], "stop") == 0 && argc == 2) {
+        snprintf(req, sizeof(req),
+                 "{\"method\":\"supervisor.shutdown\",\"id\":1}\n");
+        return client_run(ctx, req) == 0 ? 0 : 1;
+    }
+    if (strcmp(argv[1], "status") == 0 && argc == 2) {
+        snprintf(req, sizeof(req),
+                 "{\"method\":\"health_check\",\"id\":1}\n");
+        return client_run(ctx, req) == 0 ? 0 : 1;
+    }
+    return usage();
 }
