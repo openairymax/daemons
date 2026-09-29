@@ -10,6 +10,7 @@
 
 #include "airy_memory.h"
 #include "error.h"
+#include "io.h"
 #include "service.h"
 #include "svc_logger.h"
 
@@ -65,25 +66,6 @@ int agent_spawn_ready_timeout_s(void)
 }
 
 #if AIRY_PLATFORM_POSIX
-
-/* Write all bytes to fd (handles EINTR and short writes).
- * Returns 0 on success, -1 on failure (including EPIPE — child exited). */
-int agent_write_all(int fd, const char *buf, size_t len)
-{
-    size_t off = 0;
-    while (off < len) {
-        ssize_t n = write(fd, buf + off, len - off);
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            return -1;
-        }
-        if (n == 0)
-            return -1;
-        off += (size_t)n;
-    }
-    return 0;
-}
 
 /* Read one line ('\n'-terminated) from fd with timeout, short-polling a cancel
  * token (improvement 1). On success buf holds a '\n'-less null-terminated
