@@ -138,7 +138,7 @@ int main(int argc, char **argv)
     svc_teardown();
     daemon_cleanup_standard(g_bipc_cupolas_d, g_bsd_cupolas_d,
                             g_event_driver_cupolas_d, server_fd,
-                            CUPOLAS_D_SOCKET_UNIX, svc_destroy,
+                            ep.sock_unix, svc_destroy,
                             &g_running_lock_cupolas_d);
     daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();

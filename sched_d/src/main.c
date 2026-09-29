@@ -135,7 +135,7 @@ int main(int argc, char **argv)
     svc_teardown();
     daemon_cleanup_standard(g_bipc_sched_d, g_bsd_sched_d,
                             g_event_driver_sched_d, server_fd,
-                            SCHED_D_SOCKET_UNIX, svc_destroy,
+                            ep.sock_unix, svc_destroy,
                             &g_running_lock_sched_d);
     daemon_tool_ops_cleanup();
     daemon_llm_ops_cleanup();

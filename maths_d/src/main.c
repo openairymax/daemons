@@ -135,7 +135,7 @@ int main(int argc, char **argv)
     svc_teardown();
     daemon_cleanup_standard(g_bipc_maths_d, g_bsd_maths_d,
                             g_event_driver_maths_d, server_fd,
-                            MATHS_D_SOCKET_UNIX, svc_destroy,
+                            ep.sock_unix, svc_destroy,
                             &g_running_lock_maths_d);
     daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
