@@ -44,9 +44,10 @@ void svc_endpoint_maths_d(daemon_endpoint_t *ep, int cmdline_tcp)
     ep->sock_win = MATHS_D_SOCKET_WIN;
 }
 
-int svc_activate_maths_d(daemon_event_driver_t *driver)
+int svc_activate_maths_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
     (void)driver;
+    (void)bsd;
     atomic_store(&g_svc_maths_d.running, 1);
     return 0;
 }

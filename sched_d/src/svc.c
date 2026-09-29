@@ -87,9 +87,10 @@ void svc_endpoint_sched_d(daemon_endpoint_t *ep, int cmdline_tcp)
     ep->sock_win = SCHED_D_SOCKET_WIN;
 }
 
-int svc_activate_sched_d(daemon_event_driver_t *driver)
+int svc_activate_sched_d(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
     (void)driver;
+    (void)bsd;
     sched_service_set_executor(g_service, sched_dispatch_executor);
     if (sched_service_start_workers(g_service) != AIRY_SUCCESS) {
         SVC_LOG_ERROR("Failed to start scheduler worker thread");
