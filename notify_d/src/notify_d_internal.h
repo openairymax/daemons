@@ -89,8 +89,8 @@ hook_session_entry_t *hook_session_upsert(const char *session_id);
 /* hook 面生命周期（hook_svc.c 实现，svc.c 装配调用；全部幂等） */
 int hook_svc_prepare(void);
 void hook_svc_destroy(void);
-int hook_svc_listen_start(void);
-void hook_svc_listen_stop(void);
+int hook_svc_listen_up(void);
+void hook_svc_listen_down(void);
 airy_sock_t hook_svc_listen_fd(void);
 
 /* hook 面单连接受理（hook_svc.c 实现，net.c conn 线程按 face 调用；

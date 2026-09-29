@@ -32,22 +32,22 @@ typedef enum {
 } approval_gate_verdict_t;
 
 /* 生命周期（实现在 approval/gate.c；gate 拥有全部内部件） */
-approval_gate_t *approval_gate_create_default(void);
-void approval_gate_destroy(approval_gate_t *gate);
+approval_gate_t *gate_create_default(void);
+void gate_destroy(approval_gate_t *gate);
 
 /* 审批裁决：静态 ACL -> SafetyGuard 链 -> 交互式审批（ALWAYS 晋级为
  * 持久 ACL 规则）。ALLOWED 放行；DENIED 时 *out_reason（可 NULL）为
  * gate 分配的原因串，调用方接管所有权。 */
-approval_gate_verdict_t approval_gate_ask(approval_gate_t *gate, const char *agent_id,
-                                          const tool_metadata_t *meta,
-                                          const char *params_json, char **out_reason);
+approval_gate_verdict_t gate_ask(approval_gate_t *gate, const char *agent_id,
+                                 const tool_metadata_t *meta,
+                                 const char *params_json, char **out_reason);
 
 /* 交互审批查询与透传（池预算与 RPC tool.approve 路径） */
-bool approval_gate_interactive_enabled(const approval_gate_t *gate);
-uint64_t approval_gate_interactive_budget_extra_ms(const approval_gate_t *gate);
-char *approval_gate_interactive_pending_list(approval_gate_t *gate);
-int approval_gate_interactive_resolve(approval_gate_t *gate, const char *request_id,
-                                      const char *decision);
+bool gate_int_enabled(const approval_gate_t *gate);
+uint64_t gate_int_budget_ms(const approval_gate_t *gate);
+char *gate_int_pending(approval_gate_t *gate);
+int gate_int_resolve(approval_gate_t *gate, const char *request_id,
+                     const char *decision);
 
 #ifdef __cplusplus
 }

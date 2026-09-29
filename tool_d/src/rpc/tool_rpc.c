@@ -300,7 +300,7 @@ static void handle_pending(int id, airy_sock_t client_fd)
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Tool service not ready", id);
         return;
     }
-    char *pending_json = tool_service_interactive_pending_list(g_service);
+    char *pending_json = svc_int_pending(g_service);
     cJSON *arr = pending_json ? cJSON_Parse(pending_json) : NULL;
     AIRY_FREE(pending_json);
     if (!arr) {
@@ -326,7 +326,7 @@ static void handle_approve(cJSON *params, int id, airy_sock_t client_fd)
                            id);
         return;
     }
-    int ret = tool_service_interactive_resolve(g_service, request_id, decision);
+    int ret = svc_int_resolve(g_service, request_id, decision);
     if (ret == 0) {
         cJSON *result = cJSON_CreateObject();
         cJSON_AddBoolToObject(result, "resolved", true);
