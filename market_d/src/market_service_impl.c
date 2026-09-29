@@ -203,7 +203,7 @@ int market_service_create(const market_config_t *config, market_service_t **serv
         return AIRY_ERR_INVALID_PARAM;
     }
     if (!config) {
-        __builtin_memset(&default_cfg, 0, sizeof(default_cfg));
+        AIRY_MEMSET(&default_cfg, 0, sizeof(default_cfg));
         default_cfg.cache_ttl_ms = 3600000;
         default_cfg.sync_interval_ms = 30000;
         config = &default_cfg;
@@ -214,7 +214,7 @@ int market_service_create(const market_config_t *config, market_service_t **serv
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate service struct");
     }
 
-    __builtin_memcpy(&svc->config, config, sizeof(market_config_t));
+    AIRY_MEMCPY(&svc->config, config, sizeof(market_config_t));
     if (config->registry_url)
         svc->config.registry_url = AIRY_STRDUP(config->registry_url);
     if (config->storage_path)

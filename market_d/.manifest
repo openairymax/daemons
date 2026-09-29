@@ -1,0 +1,25 @@
+{
+  "manifest_version": 1,
+  "daemon": "market_d",
+  "cname": "market",
+  "sd_type": "market",
+  "ops": ["ipc"],
+  "facades": ["ingress", "execute", "state"],
+  "slots": ["create", "delete", "update", "query", "discover", "cache"],
+  "rpc": {
+    "unix": "market.sock",
+    "win_pipe": "airy_market",
+    "tcp": 8082,
+    "tags": "market,core",
+    "buffer": 65536,
+    "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },
+    "methods": [
+      "register_agent", "search_agents", "install_agent", "register_skill",
+      "search_skills", "health_check", "publish", "search", "install", "get_stats"
+    ]
+  },
+  "deps": { "required": [], "optional": [] },
+  "modules": [
+    { "name": "rpc", "sources": ["market_rpc.c"] }
+  ]
+}
