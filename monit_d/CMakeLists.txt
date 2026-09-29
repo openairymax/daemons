@@ -114,10 +114,13 @@ target_compile_options(airy_monit_service PRIVATE
 endif()
 
 # ==================== Monitor daemon 可执行文件 ====================
-# main.c 仅属于 daemon 可执行文件；服务代码已纳入 airy_monit_service 库
-add_executable(monit_d
-    src/main.c
-)
+# gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c /
+# daemon 配置与端点策略 svc.c 由 daemon_gen.py 生成；RPC 方法域
+# monit_rpc.c 为手写业务源。service/observe/info 域单独编译为
+# airy_monit_service 静态库（上方），不入 ${MONIT_D_SOURCES}，避免重复编译。
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
+
+add_executable(monit_d ${MONIT_D_SOURCES})
 
 if(WIN32)
     target_compile_definitions(monit_d PRIVATE

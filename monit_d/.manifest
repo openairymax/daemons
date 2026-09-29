@@ -1,0 +1,28 @@
+{
+  "manifest_version": 1,
+  "daemon": "monit_d",
+  "cname": "monitor",
+  "sd_type": "monitor",
+  "ops": ["ipc"],
+  "cupolas": "pep",
+  "facades": ["ingress", "state", "governance"],
+  "slots": ["record", "query", "display", "notify", "resilience"],
+  "rpc": {
+    "unix": "monit.sock",
+    "win_pipe": "airy_monit",
+    "tcp": 9090,
+    "tags": "monitor,core",
+    "buffer": 65536,
+    "concurrent": false,
+    "pool": { "max_events": 64, "min": 2, "max": 4, "queue": 128 },
+    "methods": [
+      "record_metric", "get_metrics", "trigger_alert", "get_alerts",
+      "health_check", "generate_report", "heartbeat",
+      "metrics", "alert_raise", "alert_resolve", "get_stats"
+    ]
+  },
+  "deps": { "required": [], "optional": [] },
+  "modules": [
+    { "name": "rpc", "sources": ["monit_rpc.c"] }
+  ]
+}
