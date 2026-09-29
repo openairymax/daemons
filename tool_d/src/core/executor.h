@@ -99,7 +99,7 @@ int tool_executor_run_async(tool_executor_t *exec, const tool_metadata_t *meta,
  *
  * @ownership exec: BORROW, gate: TRANSFER
  */
-void tool_executor_set_gate(tool_executor_t *exec, approval_gate_t *gate);
+void exec_set_gate(tool_executor_t *exec, approval_gate_t *gate);
 
 /**
  * @brief Extra pool wait budget caused by interactive approval (0 when off).
@@ -111,7 +111,7 @@ void tool_executor_set_gate(tool_executor_t *exec, approval_gate_t *gate);
  *
  * @ownership exec: BORROW
  */
-uint64_t tool_executor_interactive_budget_extra(const tool_executor_t *exec);
+uint64_t exec_int_budget_ms(const tool_executor_t *exec);
 
 /**
  * @brief List all pending approval requests (JSON array string).
@@ -120,7 +120,7 @@ uint64_t tool_executor_interactive_budget_extra(const tool_executor_t *exec);
  *
  * @ownership exec: BORROW; return: OWNER
  */
-char *tool_executor_interactive_pending_list(tool_executor_t *exec);
+char *exec_int_pending(tool_executor_t *exec);
 
 /**
  * @brief Resolve a pending approval request by request_id.
@@ -131,8 +131,8 @@ char *tool_executor_interactive_pending_list(tool_executor_t *exec);
  *
  * @ownership exec: BORROW
  */
-int tool_executor_interactive_resolve(tool_executor_t *exec, const char *request_id,
-                                      const char *decision);
+int exec_int_resolve(tool_executor_t *exec, const char *request_id,
+                     const char *decision);
 
 #ifdef __cplusplus
 }

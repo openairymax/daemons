@@ -86,7 +86,7 @@ HTTP / WS / HTTP/2 的监听 host 在 `gateway_daemon_config_t.host` 内以定�
 缓冲 `char host[GATEWAY_HOST_MAX]`（128）内嵌（值语义，无堆所有权），默认
 `0.0.0.0`；启动期 `gw_guard_bind()` 在未配置 `GATEWAY_API_KEY` 时把非
 回环地址收敛为 `127.0.0.1`（fail-closed）。实际生效的绑定面经
-`gateway_service_get_config()` 读回（而非解析期局部副本），保证日志、
+`gateway_get_config()` 读回（而非解析期局部副本），保证日志、
 SD / IPC bootstrap 与真实监听一致。
 
 ## JSON-RPC 接口

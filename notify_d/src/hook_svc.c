@@ -12,7 +12,7 @@
  *          （失败非阻断降级，health 报不健康，服务继续受理）、P1-5
  *          会话级上下文注入通道存储。第二 listener 随 notify_d 服务
  *          生命周期同启同停：prepare/destroy 由 notify_d_init/destroy
- *          装配，listen_start/listen_stop 由 notify_d_start/stop 装配。
+ *          装配，listen_up/listen_down 由 notify_d_start/stop 装配。
  */
 
 #include "airy_memory.h"
@@ -139,7 +139,7 @@ void hook_svc_destroy(void)
     g_hook_prepared = 0;
 }
 
-int hook_svc_listen_start(void)
+int hook_svc_listen_up(void)
 {
     if (g_hook_listened)
         return AIRY_SUCCESS;
@@ -163,7 +163,7 @@ int hook_svc_listen_start(void)
     return AIRY_SUCCESS;
 }
 
-void hook_svc_listen_stop(void)
+void hook_svc_listen_down(void)
 {
     if (g_hook_listen_fd != AIRY_INVALID_SOCKET) {
         airy_sock_close(g_hook_listen_fd);

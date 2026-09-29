@@ -461,7 +461,7 @@ bool gateway_service_is_running(gateway_service_t service)
     return service->state == GW_STATE_RUNNING;
 }
 
-const gateway_service_config_t *gateway_service_get_config(gateway_service_t service)
+const gateway_service_config_t *gateway_get_config(gateway_service_t service)
 {
     if (!service)
         return NULL;

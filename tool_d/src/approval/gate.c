@@ -53,7 +53,7 @@ static void gate_attach_bridge(approval_gate_t *gate)
     tool_approval_set_safety_guard_bridge(gate->ctx, gate->bridge);
 }
 
-approval_gate_t *tool_approval_gate_create(const tool_approval_config_t *cfg)
+approval_gate_t *gate_create(const tool_approval_config_t *cfg)
 {
     if (!cfg) {
         return NULL;
@@ -74,7 +74,7 @@ approval_gate_t *tool_approval_gate_create(const tool_approval_config_t *cfg)
     return gate;
 }
 
-approval_gate_t *approval_gate_create_default(void)
+approval_gate_t *gate_create_default(void)
 {
     tool_approval_config_t cfg;
     __builtin_memset(&cfg, 0, sizeof(cfg));
@@ -82,10 +82,10 @@ approval_gate_t *approval_gate_create_default(void)
     cfg.enable_safety_guard_chain = true;
     cfg.enable_audit_logging = true;
     cfg.permission_rules = NULL;
-    return tool_approval_gate_create(&cfg);
+    return gate_create(&cfg);
 }
 
-void approval_gate_destroy(approval_gate_t *gate)
+void gate_destroy(approval_gate_t *gate)
 {
     if (!gate) {
         return;
@@ -170,7 +170,7 @@ static interactive_step_t ask_via_interactive(approval_gate_t *gate, const char 
     return INTERACTIVE_DENIED;
 }
 
-approval_gate_verdict_t approval_gate_ask(approval_gate_t *gate, const char *agent_id,
+approval_gate_verdict_t gate_ask(approval_gate_t *gate, const char *agent_id,
                                           const tool_metadata_t *meta,
                                           const char *params_json, char **out_reason)
 {
@@ -207,17 +207,17 @@ approval_gate_verdict_t approval_gate_ask(approval_gate_t *gate, const char *age
     return APPROVAL_GATE_DENIED;
 }
 
-bool approval_gate_interactive_enabled(const approval_gate_t *gate)
+bool gate_int_enabled(const approval_gate_t *gate)
 {
     return gate && gate->interactive && interactive_approval_is_enabled(gate->interactive);
 }
 
-uint64_t approval_gate_interactive_budget_extra_ms(const approval_gate_t *gate)
+uint64_t gate_int_budget_ms(const approval_gate_t *gate)
 {
-    return approval_gate_interactive_enabled(gate) ? approval_timeout_ms() : 0;
+    return gate_int_enabled(gate) ? approval_timeout_ms() : 0;
 }
 
-char *approval_gate_interactive_pending_list(approval_gate_t *gate)
+char *gate_int_pending(approval_gate_t *gate)
 {
     if (!gate || !gate->interactive) {
         return NULL;
@@ -225,7 +225,7 @@ char *approval_gate_interactive_pending_list(approval_gate_t *gate)
     return interactive_approval_pending_list_json(gate->interactive);
 }
 
-int approval_gate_interactive_resolve(approval_gate_t *gate, const char *request_id,
+int gate_int_resolve(approval_gate_t *gate, const char *request_id,
                                       const char *decision)
 {
     if (!gate || !gate->interactive) {

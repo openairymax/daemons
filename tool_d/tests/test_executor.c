@@ -41,9 +41,9 @@ static void setup_approval(tool_executor_t *exec, const char *tool_name)
     cfg.agent_id = "tool_d";
     cfg.enable_safety_guard_chain = false;
     cfg.enable_audit_logging = false;
-    approval_gate_t *gate = tool_approval_gate_create(&cfg);
+    approval_gate_t *gate = gate_create(&cfg);
     assert(gate != NULL);
-    tool_executor_set_gate(exec, gate);
+    exec_set_gate(exec, gate);
 }
 
 typedef struct {

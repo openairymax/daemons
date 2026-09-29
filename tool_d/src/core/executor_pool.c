@@ -173,7 +173,7 @@ static uint64_t wait_budget_ms(const executor_pool_t *p, const tool_metadata_t *
     uint64_t budget = (uint64_t)executor_budget_ms(p->exec, meta) + WAIT_SLACK_MS;
     /* 交互审批等待发生在 worker 内：预算须覆盖其上限，避免误报取消。
      * 超时 SSoT 经 gate 透出，池不直连 approval 域。 */
-    budget += tool_executor_interactive_budget_extra(p->exec);
+    budget += exec_int_budget_ms(p->exec);
     return budget;
 }
 

@@ -321,7 +321,7 @@ int main(int argc, char *argv[])
 
     /* 端点摘要与 SD/IPC 注册必须读 service 实际生效配置（bind 侧
      * fail-closed 收敛发生在 start 内部，本地 config 副本不反映改写） */
-    const gateway_service_config_t *run_cfg = gateway_service_get_config(g_service);
+    const gateway_service_config_t *run_cfg = gateway_get_config(g_service);
 
     SVC_LOG_INFO("AgentRT Gateway Daemon started");
     SVC_LOG_INFO("  HTTP:     %s:%d %s", run_cfg->http.host, run_cfg->http.port,

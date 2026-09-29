@@ -145,7 +145,7 @@ int notify_d_start(notify_d_service_t *svc)
 
     /* hook 面第二 listener：失败 fail-fast（进程退出由 main 处理），
      * 避免半启动态（notify 面在、hook 面缺失）不可诊断 */
-    if (hook_svc_listen_start() != AIRY_SUCCESS)
+    if (hook_svc_listen_up() != AIRY_SUCCESS)
         AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to start hook face listener");
 
     airy_thread_create(&svc->event_thread, notify_d_event_loop, svc);
@@ -207,7 +207,7 @@ int notify_d_stop(notify_d_service_t *svc, int force)
         airy_sock_close(svc->server_fd);
         svc->server_fd = AIRY_INVALID_SOCKET;
     }
-    hook_svc_listen_stop();
+    hook_svc_listen_down();
 
 #ifndef _WIN32
     if (force && g_listened) {
