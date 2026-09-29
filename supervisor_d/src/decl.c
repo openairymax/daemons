@@ -8,7 +8,7 @@
  * profile.env 期望形态（launcher 写入，supervisor 只读）：
  *   AIRY_PROFILE=full
  *   AIRYRT_LAUNCH_CORE="gateway_d llm_d think_d agent_d tool_d"
- *   AIRYRT_LAUNCH_AUX="hook_d monit_d ... notify_d"
+ *   AIRYRT_LAUNCH_AUX="monit_d ... notify_d"
  *   AIRYRT_LAUNCH_ARGS_llm_d="--manager /path/model.yaml"
  *
  * 声明缺失时回落内置缺省表（仅升级兼容兜底；SSoT 仍是 launch 声明，
@@ -230,7 +230,7 @@ int sup_decl_defaults(sup_ctx_t *ctx)
 {
     ctx->count = 0;
     static const char *core[] = {"gateway_d", "llm_d", "think_d", "agent_d", "tool_d"};
-    static const char *aux[] = {"hook_d",   "monit_d", "sched_d", "channel_d",
+    static const char *aux[] = {"monit_d",  "sched_d", "channel_d",
                                 "market_d", "cupolas_d", "mem_d", "a2a_d", "notify_d"};
     for (size_t i = 0; i < sizeof(core) / sizeof(core[0]); i++)
         add_proc(ctx, core[i], SUP_ROLE_CORE);

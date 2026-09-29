@@ -237,7 +237,7 @@ const char *plugin_permission_description(const char *permission)
     if (strcmp(permission, "memory_access") == 0)
         return "Access agent memory via memory_d";
     if (strcmp(permission, "hook_register") == 0)
-        return "Register hooks in hook_d";
+        return "Register hooks in notify_d";
     if (strcmp(permission, "system_call") == 0)
         return "Make system calls";
     if (strcmp(permission, "process_spawn") == 0)

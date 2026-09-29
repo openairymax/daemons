@@ -72,7 +72,7 @@ supervisor_d stop              # 收摊
 ```sh
 AIRY_PROFILE=full
 AIRYRT_LAUNCH_CORE="gateway_d llm_d think_d agent_d tool_d"
-AIRYRT_LAUNCH_AUX="hook_d monit_d sched_d channel_d market_d cupolas_d mem_d a2a_d notify_d"
+AIRYRT_LAUNCH_AUX="monit_d sched_d channel_d market_d cupolas_d mem_d a2a_d notify_d"
 AIRYRT_LAUNCH_ARGS_llm_d="--manager /path/model.yaml"
 ```
 
