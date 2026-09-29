@@ -280,6 +280,5 @@ void airy_svc_foreach(airy_svc_enum_fn callback, void *user_data)
 void airy_svc_common_cleanup(void)
 {
     airy_msrep_shutdown();
-    monitor_shutdown();
     svc_common_module_cleanup();
 }

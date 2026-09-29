@@ -17,11 +17,8 @@
  * 4. Thread-safe implementation (E-5 concurrency safety)
  *
  * P1.x modular split: this file keeps only the service lifecycle domain;
- * the other domains were split out:
- * - registry domain  -> svc_registry.c (cross-process registry client)
+ * the config domain was split out:
  * - config domain    -> svc_config.c (config file loading and watching)
- * - monitor domain   -> svc_monitor.c (service monitoring and degradation)
- * - client domain    -> svc_client.c (service communication client)
  *
  * Phase 2.3a split: the in-process registry and query/async operations
  * were split out of this file:
@@ -32,8 +29,8 @@
  * Cross-file shared airy_svc_internal_t / registry helpers are declared
  * in svc_common_internal.h (internal to this static lib, not public API).
  *
- * @see agentrt/daemons/common/include/svc_common.h
- * @see agentrt/daemons/common/src/svc_common_internal.h
+ * @see agentrt/commons/utils/ipc/svc_common.h
+ * @see agentrt/daemons/common/src/svc/svc_common_internal.h
  * @see Service_Management_Framework_Design.md
  */
 

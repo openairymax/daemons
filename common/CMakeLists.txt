@@ -32,10 +32,7 @@ set(SVC_COMMON_SOURCES
     src/svc/svc_common.c          # 服务框架核心实现（service 生命周期域）
     src/svc/svc_common_registry.c # Phase 2.3a: 进程内服务注册表域（从 svc_common.c 拆分）
     src/svc/svc_common_ops.c      # Phase 2.3a: 状态查询/异步请求域（从 svc_common.c 拆分）
-    src/svc/svc_registry.c        # 跨进程注册中心客户端（registry 域）
     src/svc/svc_config.c          # 配置文件加载与监视（config 域）
-    src/svc/svc_monitor.c         # 服务监控与降级处理（monitor/degradation 域）
-    src/svc/svc_client.c          # 服务通信客户端（client 域）
     src/svc/svc_model_defaults.c  # A2-1: model.yaml global 段默认模型提取（llm_d/gateway_d 共用）
     src/ipc/ipc_client.c
     src/ipc/ipc_service_bus.c     # IPC服务总线（总线核心域）
@@ -113,11 +110,11 @@ target_link_libraries(svc_common PRIVATE airy_ipc_ops)
 
 # WS-8 阶段 3（8.3.1）：daemon 侧 L1 server 挂载（corekern IPC 服务端骨架）。
 # 独立小库而非 svc_common 源文件：airy_core 以 PUBLIC 传播
-# AIRY_USE_SCHEDULER_THREAD_IMPL 编译定义，svc_common 源（svc_monitor.c 等）
-# 含 airy_thread_create 消费点，若 svc_common 直链 airy_core 会翻转其线程
-# 实现路径、违反开关默认零行为变化铁律。PRIVATE 链接把宏传染面锁死在本库
-# 编译单元内；svc_common PRIVATE 链本库获取 API（daemon_l1_server.h 不含
-# corekern 头，svc_common 消费者无 corekern include/宏泄漏）。
+# AIRY_USE_SCHEDULER_THREAD_IMPL 编译定义；独立小库 + PRIVATE 链接把该宏的
+# 传染面锁死在本库编译单元内，避免翻转 svc_common 各编译单元的线程实现
+# 选择、违反开关默认零行为变化铁律。svc_common PRIVATE 链本库获取 API
+# （daemon_l1_server.h 不含 corekern 头，svc_common 消费者无 corekern
+# include/宏泄漏）。
 add_library(daemon_l1_server STATIC
     src/daemon/daemon_l1_server.c
     # 8.3.2: L2 envelope bridge — sister module, same library. Both files are
