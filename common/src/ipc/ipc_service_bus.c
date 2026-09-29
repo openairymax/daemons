@@ -336,8 +336,8 @@ AIRY_API airy_err_t ipc_service_bus_request(ipc_service_bus_t bus_handle,
          * the caller must release it via AIRY_FREE(response->payload) after
          * use. ipc_bus_message_free() must NOT be called on the caller's
          * stack copy, since it would free a stack address. All callers
-         * (orchestrator.c, daemon_task_dispatcher.c, ipc_bus_helper.c)
-         * already follow the "caller frees response.payload" contract. */
+         * (orchestrator.c, ipc_bus_helper.c) already follow the "caller
+         * frees response.payload" contract. */
         AIRY_MEMSET(response, 0, sizeof(*response));
         response->header.msg_type = IPC_BUS_MSG_RESPONSE;
         response->header.protocol = request->header.protocol;
