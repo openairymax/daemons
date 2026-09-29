@@ -7,6 +7,8 @@
  */
 
 #include "core/executor.h"
+#include "core/approval_gate.h"
+#include "approval/tool_approval.h"
 #include "tool_service.h"
 
 #include "airy_memory.h"
@@ -26,8 +28,8 @@ static long long now_ms(void)
     return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-/* 为 executor 注入放行审批：daemon_security ACL + approval_ctx。
- * 注意：executor 拥有 approval_ctx（destroy 时释放），测试不得重复释放。 */
+/* 为 executor 注入放行审批：daemon_security ACL + approval gate。
+ * 注意：executor 拥有 gate（destroy 时释放），测试不得重复释放。 */
 static void setup_approval(tool_executor_t *exec, const char *tool_name)
 {
     daemon_security_init(NULL, NULL);
@@ -39,9 +41,9 @@ static void setup_approval(tool_executor_t *exec, const char *tool_name)
     cfg.agent_id = "tool_d";
     cfg.enable_safety_guard_chain = false;
     cfg.enable_audit_logging = false;
-    tool_approval_ctx_t *ctx = tool_approval_create(&cfg);
-    assert(ctx != NULL);
-    tool_executor_set_approval_ctx(exec, ctx);
+    approval_gate_t *gate = tool_approval_gate_create(&cfg);
+    assert(gate != NULL);
+    tool_executor_set_gate(exec, gate);
 }
 
 typedef struct {

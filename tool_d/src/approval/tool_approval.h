@@ -20,6 +20,8 @@
 #define AIRY_RT_TOOL_APPROVAL_H
 
 #include "tool_approval_types.h"
+#include "safety_guard_bridge.h"
+#include "core/approval_gate.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -46,6 +48,21 @@ tool_approval_ctx_t *tool_approval_create(const tool_approval_config_t *cfg);
  * @ownership ctx: TRANSFER
  */
 void tool_approval_destroy(tool_approval_ctx_t *ctx);
+
+/**
+ * @brief Create an approval gate over the given approval config.
+ *
+ * The gate owns the approval context, the SafetyGuard bridge (default
+ * 6-guard assembly) and the interactive-approval manager; executor-side
+ * approval is expressed solely through core/approval_gate.h.
+ *
+ * @param cfg Approval config (NULL rejected; use approval_gate_create_default
+ *        for the P3.17 default assembly)
+ * @return Approval gate, NULL on failure
+ *
+ * @ownership return: OWNER
+ */
+approval_gate_t *tool_approval_gate_create(const tool_approval_config_t *cfg);
 
 
 /**

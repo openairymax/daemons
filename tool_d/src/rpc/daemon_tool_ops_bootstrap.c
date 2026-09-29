@@ -10,7 +10,7 @@
 
 #include "airy_tool_ops.h"
 
-#include "tool_approval.h"
+#include "approval/tool_approval.h"
 #include "tool_service.h"
 #include "svc_logger.h"
 

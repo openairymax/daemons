@@ -11,7 +11,7 @@
 #define AIRY_RT_TOOL_BUILTIN_INTERNAL_H
 
 #include "builtin/builtin.h"
-#include "os_sandbox.h"
+#include "sandbox/os_sandbox.h"
 
 #include <stddef.h>
 #include <stdint.h>

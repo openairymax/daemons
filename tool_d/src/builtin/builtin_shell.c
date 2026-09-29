@@ -12,7 +12,7 @@
 #include "error.h"
 
 #include "builtin/builtin.h"
-#include "os_sandbox.h"
+#include "sandbox/os_sandbox.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
