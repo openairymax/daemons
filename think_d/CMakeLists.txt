@@ -1,13 +1,18 @@
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
 # 双思考系统服务构建文件（think.* 命名空间）
 #
-# think_d 承载 CoreLoopThree 认知引擎（Thinkdual: t2/t1-f/t1-p + dual_coordinate），
-# LLM 调用经 llm_svc_adapter 直连 llm_d Unix socket。链接 airy_coreloopthree
-# （其 PUBLIC 传递 airy_cognition/airy_core/airy_memory/
-# airy_taskflow/svc_common 及 coreloopthree include 路径）。
+# gen5 装配（L3 SSoT）：daemon 源清单由 modules/sources.cmake 声明
+# （自 .manifest 生成）；机制层（main.c/svc_think_d.h）生成、策略层
+# （src/svc.c、src/think_rpc.c、lang/review 服务面）手写。
+# think_d 承载 CoreLoopThree 认知引擎（Thinkdual: t2/t1-f/t1-p +
+# dual_coordinate），LLM 调用经 llm_svc_adapter 直连 llm_d Unix socket。
+# 链接 airy_coreloopthree（其 PUBLIC 传递 airy_cognition/airy_core/
+# airy_memory/airy_taskflow/svc_common 及 coreloopthree include 路径）。
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
 
 # ==================== 路径设置 ====================
 set(DAEMON_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../common)
@@ -93,13 +98,7 @@ target_compile_options(airy_think_service PRIVATE
 endif()
 
 # ==================== Think daemon 可执行文件 ====================
-add_executable(think_d
-    src/main.c
-    # M1-1c：推理语言网关服务面（think.lang_process/postprocess/stats）
-    src/lang_svc.c
-    # M1-1c：执行复核服务面（think.review，t2/t1-f 语义判断策略收拢）
-    src/review_svc.c
-)
+add_executable(think_d ${THINK_D_SOURCES})
 
 if(WIN32)
     target_compile_definitions(think_d PRIVATE
