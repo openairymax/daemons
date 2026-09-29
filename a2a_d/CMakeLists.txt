@@ -109,9 +109,13 @@ if(NOT MSVC)
 endif()
 
 # ==================== A2A daemon 可执行文件 ====================
-add_executable(a2a_d
-    src/main.c
-)
+# gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c 由
+# daemon_gen.py 生成；配置与端点策略 svc.c、RPC 方法域 a2a_rpc.c 为
+# 手写业务源。service 域单独编译为 airy_a2a_service 静态库（上方），
+# 不入 ${A2A_D_SOURCES}，避免重复编译。
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
+
+add_executable(a2a_d ${A2A_D_SOURCES})
 
 if(WIN32)
     target_compile_definitions(a2a_d PRIVATE
@@ -120,9 +124,9 @@ if(WIN32)
         NOMINMAX
         _CRT_SECURE_NO_WARNINGS
     )
-    target_link_libraries(a2a_d PRIVATE airy_common ws2_32 bcrypt)
+    target_link_libraries(a2a_d PRIVATE ws2_32 bcrypt)
 elseif(UNIX)
-    target_link_libraries(a2a_d PRIVATE airy_common Threads::Threads airy_platform_libs)
+    target_link_libraries(a2a_d PRIVATE Threads::Threads airy_platform_libs)
 endif()
 
 target_include_directories(a2a_d PRIVATE
@@ -150,11 +154,8 @@ target_include_directories(a2a_d PRIVATE
 
 target_link_libraries(a2a_d PRIVATE
     airy_a2a_service
-    airy_protocols
     airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
-    airy_common
     Threads::Threads
-    airy_platform_libs
 )
 
 # GNU 风格警告旗标：MSVC 不识别 -W*（同上）

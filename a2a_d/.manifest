@@ -1,0 +1,27 @@
+{
+  "manifest_version": 1,
+  "daemon": "a2a_d",
+  "cname": "a2a",
+  "sd_type": "a2a",
+  "ops": ["ipc"],
+  "facades": ["ingress", "execute", "state"],
+  "slots": ["comm", "discover", "create", "update", "delete", "query", "route"],
+  "rpc": {
+    "unix": "a2a.sock",
+    "win_pipe": "airy_a2a",
+    "tcp": 8087,
+    "tags": "a2a,core",
+    "buffer": 65536,
+    "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },
+    "methods": [
+      "register_agent", "unregister_agent", "discover_agents",
+      "create_task", "update_task", "cancel_task", "get_task",
+      "send_message", "count", "send", "receive",
+      "health_check", "get_stats"
+    ]
+  },
+  "deps": { "required": [], "optional": [] },
+  "modules": [
+    { "name": "rpc", "sources": ["a2a_rpc.c"] }
+  ]
+}

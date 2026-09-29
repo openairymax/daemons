@@ -11,9 +11,9 @@
 Agent Card 注册与发现、任务生命周期管理与消息交换。协议转换在 `gateway_d` 边界完成，
 `a2a_d` 只处理内部 JSON-RPC 请求。
 
-- 端点：POSIX Unix socket `<runtime-dir>/a2a.sock`（`$AIRY_HOME/run/a2a.sock`）；
-  Windows 固定为本机 TCP 回环 `127.0.0.1:8087`。
-- 可选 TCP：POSIX 上以 `--tcp` 启用，默认端口 `8087`（默认只监听 socket）。
+- 端点：三端同形态 —— POSIX Unix socket `<runtime-dir>/a2a.sock`
+  （`$AIRY_HOME/run/a2a.sock`），Windows 命名管 `\\.\pipe\airy_a2a`。
+- 可选 TCP：以 `--tcp` 升级为本机回环 `127.0.0.1:8087`（默认只监听本地 IPC 端点）。
 
 ## 能力
 
@@ -34,12 +34,15 @@ gateway_d ──(a2a.register_agent / create_task / send_message)──▶ a2a_d
       └──────────────── 寻址 + 消息路由 ◀────────────────────────┘
 ```
 
-服务层 `src/service.c` + `src/a2a_svc_adapter.c` 抽为静态库 `airy_a2a_service`，
-被守护进程可执行文件与单元测试共用。
+五件套装配（gen5）：`.manifest` 为唯一契约源，`src/main.c` 与 `include/svc_a2a_d.h`、
+`modules/sources.cmake` 为 `daemon_gen.py` 生成态；生命周期策略在 `src/svc.c`，
+RPC 方法域在 `src/a2a_rpc.c`。服务层 `src/service.c` + `src/a2a_svc_adapter.c`
+抽为静态库 `airy_a2a_service`，被守护进程可执行文件与单元测试共用。
 
 ## JSON-RPC 接口
 
-共 14 个方法，经 `method_dispatcher_register` 注册：
+共 14 个方法，经 `method_dispatcher_register` 注册；静态方法表以 `.manifest`
+为唯一契约源（13 个业务方法 + 生成的 `shutdown`）：
 
 | 方法 | 参数 | 返回 | 描述 |
 |------|------|------|------|
@@ -69,7 +72,6 @@ gateway_d ──(a2a.register_agent / create_task / send_message)──▶ a2a_d
   "daemon": {
     "socket_path": "<runtime-dir>/a2a.sock",
     "tcp_port": 8087,
-    "max_clients": 64,
     "max_agents": 256,
     "max_tasks": 4096
   }
