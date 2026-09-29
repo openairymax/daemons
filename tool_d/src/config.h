@@ -2,7 +2,7 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
 /**
- * @file manager.h
+ * @file config.h
  * @brief Tool-service config structures.
  */
 
@@ -32,9 +32,6 @@ typedef struct {
     char *workbench_type;
     char *container_image;
 } tool_config_t;
-
-tool_config_t *tool_config_load(const char *path);
-void tool_config_free(tool_config_t *cfg);
 
 #ifdef __cplusplus
 }

@@ -80,7 +80,7 @@ static void prpc_scan_load(void)
 int plugin_rpc_init(void)
 {
     plugin_permission_config_t perm_cfg;
-    __builtin_memset(&perm_cfg, 0, sizeof(perm_cfg));
+    AIRY_MEMSET(&perm_cfg, 0, sizeof(perm_cfg));
     perm_cfg.enable_strict_mode = true;
     perm_cfg.enable_audit_log = true;
     perm_cfg.agent_id = "tool_d";
@@ -90,7 +90,7 @@ int plugin_rpc_init(void)
     char plugins_dir[AIRY_PATH_MAX];
     snprintf(plugins_dir, sizeof(plugins_dir), "%s/ecosystem/plugins", airy_home_dir());
     plugin_discovery_config_t disc_cfg;
-    __builtin_memset(&disc_cfg, 0, sizeof(disc_cfg));
+    AIRY_MEMSET(&disc_cfg, 0, sizeof(disc_cfg));
     disc_cfg.plugins_dir = plugins_dir;
     disc_cfg.auto_load = false;
     disc_cfg.fail_on_invalid = false;
@@ -223,7 +223,7 @@ static void prpc_handle_metadata(cJSON *params, int id, void *user_data)
         return;
     }
     plugin_metadata_t metadata;
-    __builtin_memset(&metadata, 0, sizeof(metadata));
+    AIRY_MEMSET(&metadata, 0, sizeof(metadata));
     if (plugin_service_get_metadata(name->valuestring, &metadata) != 0) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Plugin not found", id);
         return;
@@ -273,7 +273,7 @@ static void prpc_handle_stats(cJSON *params, int id, void *user_data)
         return;
     }
     plugin_stats_t stats;
-    __builtin_memset(&stats, 0, sizeof(stats));
+    AIRY_MEMSET(&stats, 0, sizeof(stats));
     if (plugin_service_get_stats(name->valuestring, &stats) != 0) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Plugin not found", id);
         return;
