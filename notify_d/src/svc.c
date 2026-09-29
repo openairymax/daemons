@@ -110,6 +110,10 @@ int notify_d_init(notify_d_service_t *svc, int port, const char *sock)
 
     airy_sock_init();
 
+    /* hook 面引导：SafetyGuard 注入 + airy_hook_init（失败非阻断降级，
+     * health 报不健康，服务继续受理）+ 内置生产 handler 注册 */
+    hook_svc_prepare();
+
     SVC_LOG_INFO("notify_d: init complete (max_clients=%d)", NOTIFY_D_MAX_CLIENTS);
     return AIRY_SUCCESS;
 }
@@ -138,6 +142,11 @@ int notify_d_start(notify_d_service_t *svc)
     svc->running = 1;
     svc->event_running = 1;
     svc->force_stop = 0;
+
+    /* hook 面第二 listener：失败 fail-fast（进程退出由 main 处理），
+     * 避免半启动态（notify 面在、hook 面缺失）不可诊断 */
+    if (hook_svc_listen_start() != AIRY_SUCCESS)
+        AIRY_ERROR(AIRY_ERR_UNKNOWN, "failed to start hook face listener");
 
     airy_thread_create(&svc->event_thread, notify_d_event_loop, svc);
 
@@ -198,6 +207,7 @@ int notify_d_stop(notify_d_service_t *svc, int force)
         airy_sock_close(svc->server_fd);
         svc->server_fd = AIRY_INVALID_SOCKET;
     }
+    hook_svc_listen_stop();
 
 #ifndef _WIN32
     if (force && g_listened) {
@@ -217,6 +227,9 @@ int notify_d_destroy(notify_d_service_t *svc)
         AIRY_ERROR(AIRY_EINVAL, "svc is NULL");
     }
 
+    /* hook 面收尾先于服务核心：unregister 内置 handler → 唯一释放路径
+     * airy_hook_shutdown → SafetyGuard 摘除 → 会话锁销毁（幂等） */
+    hook_svc_destroy();
     notify_d_service_destroy(svc);
     airy_sock_cleanup();
     AIRY_FREE(svc->socket_path);

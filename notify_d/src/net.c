@@ -214,12 +214,18 @@ static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_
 /* 连接处理线程（detached）：每连接独立处理。notify_d_handle_request 在
  * recv 前 poll 等待首包最多 5s，单线程 accept 循环下慢连接会阻塞全部
  * RPC（health_check 偶发超时，实测 max~4.5s）。SSE/WebSocket 长连接
- * 注册进 svc->clients 后由事件线程推送，与本线程无关。 */
+ * 注册进 svc->clients 后由事件线程推送，与本线程无关。arg 为 accept
+ * 循环装入的 notify_conn_arg_t（fd + face），按 face 分派 notify 或
+ * hook 面，处理完释放参数块。 */
 void *notify_d_conn_thread(void *arg)
 {
-    airy_sock_t client = (airy_sock_t)(intptr_t)arg;
+    notify_conn_arg_t *carg = (notify_conn_arg_t *)arg;
     notify_d_service_t *svc = &g_service;
-    notify_d_handle_request(svc, client);
+    if (carg->face == NOTIFY_FACE_HOOK)
+        hook_svc_serve_conn(carg->fd);
+    else
+        notify_d_handle_request(svc, carg->fd);
+    AIRY_FREE(carg);
     atomic_fetch_sub_explicit(&g_conns, 1, memory_order_relaxed);
     return NULL;
 }
