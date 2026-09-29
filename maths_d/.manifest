@@ -1,0 +1,44 @@
+{
+  "manifest_version": 1,
+  "daemon": "maths_d",
+  "cname": "maths",
+  "sd_type": "maths",
+  "facades": ["ingress", "execute", "governance"],
+  "slots": ["compute", "validate", "record"],
+  "rpc": {
+    "unix": "maths.sock",
+    "win_pipe": "airy_maths",
+    "tcp": 8087,
+    "tags": "maths,core",
+    "buffer": 65536,
+    "methods": [
+      "health_check",
+      "get_stats",
+      "recognize",
+      "eval",
+      "stats",
+      "plot",
+      "solve",
+      "differentiate",
+      "integrate",
+      "limit",
+      "simplify",
+      "factor",
+      "expand",
+      "matrix",
+      "units",
+      "numerical",
+      "finance",
+      "number_theory"
+    ]
+  },
+  "deps": {
+    "required": [],
+    "optional": []
+  },
+  "modules": [
+    { "name": "core", "sources": ["maths_service.c"] },
+    { "name": "expr", "sources": ["expr_eval.c"] },
+    { "name": "backend", "sources": ["python_backend.c"] }
+  ]
+}

@@ -37,6 +37,11 @@ target_link_libraries(test_maths_service PRIVATE
     m
 )
 
+# 域层直测使用 cJSON（rpc_call 的 params/result），与 tool_d 等测试同模式
+if(AIRY_HAS_CJSON)
+    target_link_libraries(test_maths_service PRIVATE cjson)
+endif()
+
 target_compile_options(test_maths_service PRIVATE
     -Wall
     -Wextra
