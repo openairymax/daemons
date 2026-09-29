@@ -59,7 +59,7 @@ char *tool_service_get_stats(tool_service_t *svc);
  *
  * Each element: {request_id, tool, agent_id, params, created_at}
  */
-char *tool_service_interactive_pending_list(tool_service_t *svc);
+char *svc_int_pending(tool_service_t *svc);
 
 /**
  * @brief Resolve a pending approval request by request_id.
@@ -68,8 +68,8 @@ char *tool_service_interactive_pending_list(tool_service_t *svc);
  * @param decision Decision: "allow" / "always" / "deny"
  * @return 0 on success; AIRY_ERR_NOT_FOUND not found; AIRY_ERR_INVALID_PARAM bad args
  */
-int tool_service_interactive_resolve(tool_service_t *svc, const char *request_id,
-                                     const char *decision);
+int svc_int_resolve(tool_service_t *svc, const char *request_id,
+                    const char *decision);
 
 #ifdef __cplusplus
 }

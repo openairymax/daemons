@@ -137,7 +137,7 @@ AIRY_API bool gateway_service_is_running(gateway_service_t service);
  * @param[in] service Service handle
  * @return Internal config pointer, NULL if service is NULL
  */
-AIRY_API const gateway_service_config_t *gateway_service_get_config(gateway_service_t service);
+AIRY_API const gateway_service_config_t *gateway_get_config(gateway_service_t service);
 
 /**
  * @brief Get service statistics.

@@ -113,8 +113,8 @@ tool_service_t *tool_service_create(const char *config_path)
      * gate it refuses execution. daemon_security uses a fail-closed ACL: no
      * ACL entry = denied. Deployment must register authorized tools via
      * daemon_security_add_acl_rule(). */
-    approval_gate_t *gate = approval_gate_create_default();
-    tool_executor_set_gate(svc->executor, gate);
+    approval_gate_t *gate = gate_create_default();
+    exec_set_gate(svc->executor, gate);
     if (gate) {
         SVC_LOG_INFO("C-L05: Default tool approval gate attached (enable_approval=true)");
     } else {
@@ -297,16 +297,16 @@ void tool_metadata_free(tool_metadata_t *meta)
     AIRY_FREE(meta);
 }
 
-char *tool_service_interactive_pending_list(tool_service_t *svc)
+char *svc_int_pending(tool_service_t *svc)
 {
     if (!svc || !svc->executor) {
         return NULL;
     }
-    return tool_executor_interactive_pending_list(svc->executor);
+    return exec_int_pending(svc->executor);
 }
 
-int tool_service_interactive_resolve(tool_service_t *svc, const char *request_id,
-                                     const char *decision)
+int svc_int_resolve(tool_service_t *svc, const char *request_id,
+                    const char *decision)
 {
     if (!svc || !request_id || !decision) {
         return AIRY_ERR_INVALID_PARAM;
@@ -314,5 +314,5 @@ int tool_service_interactive_resolve(tool_service_t *svc, const char *request_id
     if (!svc->executor) {
         return AIRY_ERR_NOT_FOUND;
     }
-    return tool_executor_interactive_resolve(svc->executor, request_id, decision);
+    return exec_int_resolve(svc->executor, request_id, decision);
 }

@@ -157,7 +157,7 @@ void tool_executor_destroy(tool_executor_t *exec)
      * releases the approval context, the SafetyGuard bridge and the
      * interactive manager. */
     if (exec->gate) {
-        approval_gate_destroy(exec->gate);
+        gate_destroy(exec->gate);
         exec->gate = NULL;
     }
     /* Destroy the sandbox. Note: airy_sandbox_manager_destroy
@@ -173,7 +173,7 @@ void tool_executor_destroy(tool_executor_t *exec)
     AIRY_FREE(exec);
 }
 
-void tool_executor_set_gate(tool_executor_t *exec, approval_gate_t *gate)
+void exec_set_gate(tool_executor_t *exec, approval_gate_t *gate)
 {
     if (!exec) {
         return;
@@ -312,7 +312,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
      * chain, interactive escalation) lives behind the gate. */
     if (!exec->gate) {
         SVC_LOG_ERROR("approval gate is NULL — tool execution DENIED (fail-closed). "
-                      "Call tool_executor_set_gate() before executing tools.");
+                      "Call exec_set_gate() before executing tools.");
         result->success = 0;
         result->output = AIRY_STRDUP("");
         result->error = AIRY_STRDUP("Safety approval system not configured (approval gate is NULL)");
@@ -326,7 +326,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     {
         char *deny_reason = NULL;
         approval_gate_verdict_t verdict =
-            approval_gate_ask(exec->gate, caller_agent, meta, params_json, &deny_reason);
+            gate_ask(exec->gate, caller_agent, meta, params_json, &deny_reason);
         if (verdict != APPROVAL_GATE_ALLOWED) {
             result->success = 0;
             result->output = AIRY_STRDUP("");
@@ -547,27 +547,27 @@ int tool_executor_run_async(tool_executor_t *exec, const tool_metadata_t *meta,
     return ret;
 }
 
-uint64_t tool_executor_interactive_budget_extra(const tool_executor_t *exec)
+uint64_t exec_int_budget_ms(const tool_executor_t *exec)
 {
     if (!exec) {
         return 0;
     }
-    return approval_gate_interactive_budget_extra_ms(exec->gate);
+    return gate_int_budget_ms(exec->gate);
 }
 
-char *tool_executor_interactive_pending_list(tool_executor_t *exec)
+char *exec_int_pending(tool_executor_t *exec)
 {
     if (!exec) {
         return NULL;
     }
-    return approval_gate_interactive_pending_list(exec->gate);
+    return gate_int_pending(exec->gate);
 }
 
-int tool_executor_interactive_resolve(tool_executor_t *exec, const char *request_id,
-                                      const char *decision)
+int exec_int_resolve(tool_executor_t *exec, const char *request_id,
+                     const char *decision)
 {
     if (!exec) {
         return AIRY_ERR_NOT_FOUND;
     }
-    return approval_gate_interactive_resolve(exec->gate, request_id, decision);
+    return gate_int_resolve(exec->gate, request_id, decision);
 }

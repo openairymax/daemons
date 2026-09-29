@@ -56,13 +56,13 @@ void tool_approval_destroy(tool_approval_ctx_t *ctx);
  * 6-guard assembly) and the interactive-approval manager; executor-side
  * approval is expressed solely through core/approval_gate.h.
  *
- * @param cfg Approval config (NULL rejected; use approval_gate_create_default
+ * @param cfg Approval config (NULL rejected; use gate_create_default
  *        for the P3.17 default assembly)
  * @return Approval gate, NULL on failure
  *
  * @ownership return: OWNER
  */
-approval_gate_t *tool_approval_gate_create(const tool_approval_config_t *cfg);
+approval_gate_t *gate_create(const tool_approval_config_t *cfg);
 
 
 /**
