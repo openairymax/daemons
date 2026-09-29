@@ -111,10 +111,13 @@ target_compile_options(airy_market_service PRIVATE
 endif()
 
 # ==================== Market daemon 可执行文件 ====================
-# main.c 仅属于 daemon 可执行文件；服务代码已纳入 airy_market_service 库
-add_executable(market_d
-    src/main.c
-)
+# gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c /
+# daemon 配置与端点策略 svc.c 由 daemon_gen.py 生成；RPC 方法域
+# market_rpc.c 为手写业务源。服务域六源单独编译为 airy_market_service
+# 静态库（上方），不入 ${MARKET_D_SOURCES}，避免重复编译。
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
+
+add_executable(market_d ${MARKET_D_SOURCES})
 
 if(WIN32)
     target_compile_definitions(market_d PRIVATE
