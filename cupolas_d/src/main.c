@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.4.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.5.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -57,13 +57,13 @@ int main(int argc, char **argv)
     daemon_cupolas_init("cupolas_d");
     daemon_ipc_ops_init("cupolas_d");
 
-    if (svc_prepare_cupolas_d(config_path) != 0) {
+    if (svc_prepare(config_path) != 0) {
         SVC_LOG_ERROR("Service prepare failed");
         goto fail_svc;
     }
 
     daemon_endpoint_t ep;
-    svc_endpoint_cupolas_d(&ep, use_tcp);
+    svc_endpoint(&ep, use_tcp);
 
     airy_sock_t server_fd = daemon_create_server_socket(
         ep.use_tcp, ep.tcp_port, ep.sock_unix, ep.sock_win);
@@ -94,32 +94,32 @@ int main(int argc, char **argv)
     g_dispatcher_cupolas_d = daemon_event_driver_get_dispatcher(
         g_event_driver_cupolas_d);
     static const daemon_method_entry_t SVC_METHODS[] = {
-        {"check_permission", svc_on_check_permission_cupolas_d},
-        {"sanitize", svc_on_sanitize_cupolas_d},
-        {"execute_command", svc_on_execute_command_cupolas_d},
-        {"add_rule", svc_on_add_rule_cupolas_d},
-        {"audit_flush", svc_on_audit_flush_cupolas_d},
-        {"health_check", svc_on_health_check_cupolas_d},
-        {"get_stats", svc_on_get_stats_cupolas_d},
-        {"vault_store", svc_on_vault_store_cupolas_d},
-        {"vault_retrieve", svc_on_vault_retrieve_cupolas_d},
-        {"vault_delete", svc_on_vault_delete_cupolas_d},
-        {"vault_list", svc_on_vault_list_cupolas_d},
-        {"vault_rotate", svc_on_vault_rotate_cupolas_d},
-        {"net_add_rule", svc_on_net_add_rule_cupolas_d},
-        {"net_check_access", svc_on_net_check_access_cupolas_d},
-        {"net_get_stats", svc_on_net_get_stats_cupolas_d},
-        {"entitlements_load", svc_on_entitlements_load_cupolas_d},
-        {"entitlements_check", svc_on_entitlements_check_cupolas_d},
-        {"policy_load", svc_on_policy_load_cupolas_d},
-        {"policy_activate", svc_on_policy_activate_cupolas_d},
-        {"policy_rollback", svc_on_policy_rollback_cupolas_d},
-        {"policy_status", svc_on_policy_status_cupolas_d},
+        {"check_permission", m_check_permission},
+        {"sanitize", m_sanitize},
+        {"execute_command", m_execute_command},
+        {"add_rule", m_add_rule},
+        {"audit_flush", m_audit_flush},
+        {"health_check", m_health_check},
+        {"get_stats", m_get_stats},
+        {"vault_store", m_vault_store},
+        {"vault_retrieve", m_vault_retrieve},
+        {"vault_delete", m_vault_delete},
+        {"vault_list", m_vault_list},
+        {"vault_rotate", m_vault_rotate},
+        {"net_add_rule", m_net_add_rule},
+        {"net_check_access", m_net_check_access},
+        {"net_get_stats", m_net_get_stats},
+        {"entitlements_load", m_entitlements_load},
+        {"entitlements_check", m_entitlements_check},
+        {"policy_load", m_policy_load},
+        {"policy_activate", m_policy_activate},
+        {"policy_rollback", m_policy_rollback},
+        {"policy_status", m_policy_status},
         {"shutdown", on_shutdown_method_cupolas_d},
     };
     DAEMON_REGISTER_METHODS(g_dispatcher_cupolas_d, SVC_METHODS);
     SVC_LOG_INFO("Registered 22 RPC methods (cupolas.* namespace)");
-    svc_attach_cupolas_d(g_dispatcher_cupolas_d);
+    svc_attach(g_dispatcher_cupolas_d);
 
     if (daemon_event_driver_add_server_fd(g_event_driver_cupolas_d,
                                           (int)server_fd) != 0) {
@@ -127,7 +127,7 @@ int main(int argc, char **argv)
         goto fail_driver;
     }
 
-    if (svc_activate_cupolas_d(g_event_driver_cupolas_d, g_bsd_cupolas_d) != 0) {
+    if (svc_activate(g_event_driver_cupolas_d, g_bsd_cupolas_d) != 0) {
         SVC_LOG_ERROR("Service activate failed");
         goto fail_driver;
     }
@@ -135,10 +135,10 @@ int main(int argc, char **argv)
     SVC_LOG_INFO("cupolas service running (event-driven mode)");
     daemon_event_driver_run(g_event_driver_cupolas_d);
 
-    svc_teardown_cupolas_d();
+    svc_teardown();
     daemon_cleanup_standard(g_bipc_cupolas_d, g_bsd_cupolas_d,
                             g_event_driver_cupolas_d, server_fd,
-                            CUPOLAS_D_SOCKET_UNIX, svc_destroy_cupolas_d,
+                            CUPOLAS_D_SOCKET_UNIX, svc_destroy,
                             &g_running_lock_cupolas_d);
     daemon_ipc_ops_cleanup();
     daemon_cupolas_cleanup();
@@ -149,7 +149,7 @@ fail_driver:
     daemon_event_driver_destroy(g_event_driver_cupolas_d);
     airy_sock_close(server_fd);
 fail_svc:
-    svc_destroy_cupolas_d();
+    svc_destroy();
     airy_mtx_destroy(&g_running_lock_cupolas_d);
     airy_sock_cleanup();
     return EXIT_FAILURE;

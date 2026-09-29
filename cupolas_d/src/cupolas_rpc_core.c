@@ -31,37 +31,37 @@ static void handle_audit_flush(cJSON *params, int id, airy_sock_t fd);
 static void handle_get_stats(int id, airy_sock_t fd);
 static void handle_health_check(int id, airy_sock_t fd);
 
-void svc_on_check_permission_cupolas_d(cJSON *params, int id, void *user_data)
+void m_check_permission(cJSON *params, int id, void *user_data)
 {
     handle_check_permission(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_sanitize_cupolas_d(cJSON *params, int id, void *user_data)
+void m_sanitize(cJSON *params, int id, void *user_data)
 {
     handle_sanitize(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_execute_command_cupolas_d(cJSON *params, int id, void *user_data)
+void m_execute_command(cJSON *params, int id, void *user_data)
 {
     handle_execute_command(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_add_rule_cupolas_d(cJSON *params, int id, void *user_data)
+void m_add_rule(cJSON *params, int id, void *user_data)
 {
     handle_add_rule(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_audit_flush_cupolas_d(cJSON *params, int id, void *user_data)
+void m_audit_flush(cJSON *params, int id, void *user_data)
 {
     handle_audit_flush(params, id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_get_stats_cupolas_d(cJSON *params, int id, void *user_data)
+void m_get_stats(cJSON *params, int id, void *user_data)
 {
     handle_get_stats(id, *(airy_sock_t *)user_data);
 }
 
-void svc_on_health_check_cupolas_d(cJSON *params, int id, void *user_data)
+void m_health_check(cJSON *params, int id, void *user_data)
 {
     handle_health_check(id, *(airy_sock_t *)user_data);
 }
