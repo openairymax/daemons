@@ -2,24 +2,19 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /**
- * @file llm_daemon_request.c
- * @brief llm_d daemon request-parsing domain (split from main.c,
- *        2026-08-27): host-time context injection, request-context
- *        lifecycle and JSON-RPC params parsing.
+ * @file llm_rpc_request.c
+ * @brief llm_d 请求解析域：宿主机时间上下文注入、请求上下文生命周期与
+ *        JSON-RPC params 解析。
  *
- * 2026-08-27 域拆分（main.c 1033 行 → 4 文件）：
- *   - main.c                入口引导：daemon 宏实例化、信号接线、方法注册
- *   - llm_daemon_request.c  请求解析域（本文件）
- *   - llm_daemon_methods.c  RPC 方法域（complete/embeddings/流式等）
- *   - llm_daemon_config.c   配置装配域（daemon 配置加载与服务销毁）
- *
- * 跨文件共享符号经 bootstrap/internal.h 声明；daemon_main.h 生成的
- * static 样板（g_running_llm_d 等）仍留在 main.c 内。
+ * 0.1.19 gen5 装配：本文件与 src/llm_rpc.c（方法域）、src/svc.c（生命周期
+ * 与端点）同属 llm_d 装配域，共享符号经 llm_d_internal.h 声明；daemon_main.h
+ * 生成的 static 样板（g_running_llm_d 等）留在生成态 src/main.c 内。
  */
 
 #include "airy_memory.h"
 #include "error.h"
-#include "bootstrap/internal.h"
+#include "svc_llm_d.h"
+#include "llm_d_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -111,7 +106,7 @@ request_context_t *request_context_create(void)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    ctx->response_capacity = MAX_BUFFER;
+    ctx->response_capacity = LLM_D_MAX_BUFFER;
     ctx->response_buffer = (char *)AIRY_MALLOC(ctx->response_capacity);
     if (!ctx->response_buffer) {
         AIRY_FREE(ctx);

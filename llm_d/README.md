@@ -32,7 +32,9 @@
 ```
 客户端 (JSON-RPC 2.0 over Unix socket / TCP)
         ↓
-  main.c（事件驱动样板 + 方法分发）
+  main.c（生成态入口：socket + 服务发现 + IPC + 安全引导）
+        ↓
+  svc.c（生命周期五钩子：端点策略 + llm_service 单例）
         ↓
   airy_llm_service（service / cache / cost_tracker / token_counter / response）
         ├── providers/  openai · anthropic · deepseek · google · local + registry
@@ -40,13 +42,19 @@
 ```
 
 - 服务层抽为静态库 `airy_llm_service`，供 `llm_d` 可执行文件与测试共用；
-- 事件驱动：`daemon_event_driver` 承载连接，线程池默认 8 线程、队列 256；
+- 事件驱动：`daemon_event_driver` 承载连接，线程池 4~8、队列 256、`max_events=64`；
 - 启动时若未指定 `--manager`，自动回退加载 `$AIRY_CONFIG_DIR/model.yaml`
   （与 `think_d`、`gateway_d` 一致）。
 
+五件套装配（gen5）：`.manifest` 为唯一契约源，`src/main.c` 与
+`include/svc_llm_d.h`、`modules/sources.cmake` 为 `daemon_gen.py` 生成态；
+生命周期策略（端点基线、`llm_service` 单例）在 `src/svc.c`，RPC 方法域在
+`src/llm_rpc.c`（方法实现）与 `src/llm_rpc_request.c`（请求解析）。
+
 ## JSON-RPC 接口
 
-共 8 个方法，经 `method_dispatcher_register` 注册（方法名不含命名空间前缀）：
+共 8 个方法（7 个业务方法 + 生成的 `shutdown`），静态方法表以 `.manifest`
+为唯一契约源；方法名不含命名空间前缀：
 
 | 方法 | 参数 | 返回 | 描述 |
 |------|------|------|------|
@@ -64,7 +72,7 @@
 ## 配置
 
 daemon 配置（JSON，经 `--manager <config>` 传入，未指定时使用内建默认值）：
-`daemon.socket_path`、`daemon.tcp_port`、`daemon.max_threads`。
+`daemon.socket_path`、`daemon.tcp_port`。事件驱动线程池由 `.manifest` 声明。
 
 模型与提供商配置在 `model.yaml`（`$AIRY_CONFIG_DIR/model.yaml`），包含 provider /
 model 注册、`global.default_model`，以及 `pricing` 定价规则
