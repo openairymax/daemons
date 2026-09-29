@@ -1,0 +1,32 @@
+{
+  "manifest_version": 1,
+  "daemon": "mem_d",
+  "cname": "mem",
+  "sd_type": "mem",
+  "ops": ["ipc"],
+  "cupolas": "pep",
+  "facades": ["ingress", "execute", "state"],
+  "slots": ["create", "delete", "query", "cache", "record", "compute", "discover"],
+  "rpc": {
+    "unix": "mem.sock",
+    "win_pipe": "airy_mem",
+    "tcp": 8085,
+    "tags": "mem,core",
+    "buffer": 65536,
+    "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },
+    "methods": [
+      "write", "search", "get", "delete", "count", "recent", "evolve",
+      "health_check", "get_stats", "kb_ingest", "kb_search", "kb_delete",
+      "kb_list", "cache_put", "cache_get", "cache_del", "cache_stats",
+      "ledger_append", "ledger_window", "ledger_budget", "ledger_mark",
+      "ledger_history", "ledger_stats", "compress"
+    ]
+  },
+  "deps": { "required": [], "optional": [] },
+  "modules": [
+    { "name": "handlers", "sources": [
+      "handlers/mem_handlers.c", "handlers/kb_handlers.c",
+      "handlers/cache_handlers.c", "handlers/ledger_handlers.c"
+    ] }
+  ]
+}
