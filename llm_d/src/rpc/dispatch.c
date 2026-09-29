@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /**
- * @file llm_rpc_request.c
+ * @file dispatch.c
  * @brief llm_d 请求解析域：宿主机时间上下文注入、请求上下文生命周期与
  *        JSON-RPC params 解析。
  *
- * 0.1.19 gen5 装配：本文件与 src/llm_rpc.c（方法域）、src/svc.c（生命周期
+ * 0.1.19 gen5 装配：本文件与 src/rpc/methods.c（方法域）、src/svc.c（生命周期
  * 与端点）同属 llm_d 装配域，共享符号经 llm_d_internal.h 声明；daemon_main.h
  * 生成的 static 样板（g_running_llm_d 等）留在生成态 src/main.c 内。
  */

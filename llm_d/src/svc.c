@@ -10,7 +10,7 @@
  * socket_path / tcp_port；cmdline use_tcp 只升不降。配置未显式给出时回落
  * $AIRY_CONFIG_DIR/model.yaml（与 think_d / gateway_d 同源 SSoT），使
  * provider 注册表与 llm_router 始终看到已配置端点。业务逻辑在
- * src/llm_rpc.c 与 src/llm_rpc_request.c。
+ * src/rpc/methods.c 与 src/rpc/dispatch.c。
  */
 
 #include "daemon_main.h"

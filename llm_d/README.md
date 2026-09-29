@@ -49,7 +49,7 @@
 五件套装配（gen5）：`.manifest` 为唯一契约源，`src/main.c` 与
 `include/svc_llm_d.h`、`modules/sources.cmake` 为 `daemon_gen.py` 生成态；
 生命周期策略（端点基线、`llm_service` 单例）在 `src/svc.c`，RPC 方法域在
-`src/llm_rpc.c`（方法实现）与 `src/llm_rpc_request.c`（请求解析）。
+`src/rpc/methods.c`（方法实现）与 `src/rpc/dispatch.c`（请求解析）。
 
 ## JSON-RPC 接口
 

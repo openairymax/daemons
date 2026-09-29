@@ -34,7 +34,7 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 # 提取 service/providers/cache/cost_tracker/token_counter/response/llm_svc_adapter
 # 为独立静态库，供 llm_d 可执行文件、atoms/coreloopthree 测试和集成测试共用，
 # 消除桩函数依赖。排除 main.c（含 main()）与 daemon 策略/装配源
-# （svc.c / llm_rpc.c / llm_rpc_request.c，gen5 装配下随可执行目标构建）。
+# （svc.c / rpc/methods.c / rpc/dispatch.c，gen5 装配下随可执行目标构建）。
 set(LLM_SERVICE_SOURCES
     src/rpc/service.c
     src/config/service_config.c
@@ -185,8 +185,8 @@ endif()
 
 # ==================== LLM daemon 可执行文件 ====================
 # gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c / 端点
-# 策略 svc.c 由 daemon_gen.py 生成；RPC 方法域 llm_rpc.c 与请求解析域
-# llm_rpc_request.c 为手写业务源。daemon 四件共享 DAEMON_DECLARE_COMMON
+# 策略 svc.c 由 daemon_gen.py 生成；RPC 方法域 rpc/methods.c 与请求解析域
+# rpc/dispatch.c 为手写业务源。daemon 四件共享 DAEMON_DECLARE_COMMON
 # 宏实例化产生的 static 符号仅随 llm_d 可执行目标构建；服务域多源在上方
 # 单独编译为 airy_llm_service 静态库，不入 ${LLM_D_SOURCES}，避免重复编译。
 include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
