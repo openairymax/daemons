@@ -22,23 +22,8 @@ set(DAEMON_COMMON_INCLUDE_DIR ${DAEMON_COMMON_DIR}/include)
 set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
-# Scheduler 服务源文件
-set(SCHED_D_SOURCES
-    src/main.c
-    src/roadmap_rpc.c
-    # sched_service_impl.c / sched_dag_impl.c / main.c 已按功能域拆分
-    # （单一职责），新增域文件如下：
-    src/sched_service_impl.c
-    src/sched_service_agent.c
-    src/sched_service_task.c
-    src/sched_service_worker.c
-    src/sched_dag_impl.c
-    src/sched_dag_engine.c
-    src/sched_dag_worker.c
-    src/sched_dag_parse.c
-    src/sched_rpc_handlers.c
-    src/sched_dispatch.c
-)
+# Scheduler 服务源清单：gen5 SSoT 装配（.manifest → modules/sources.cmake）
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
 
 # 创建可执行文件
 add_executable(sched_d ${SCHED_D_SOURCES})
