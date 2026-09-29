@@ -2,20 +2,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /**
- * @file llm_daemon_methods.c
- * @brief llm_d daemon RPC-method domain (split from main.c, 2026-08-27):
- *        complete / complete_stream (SSE) / list_models / embeddings /
- *        count_tokens / health_check / get_stats handlers and the
- *        on_*_method dispatcher adapters.
+ * @file llm_rpc.c
+ * @brief llm.* RPC 方法域：complete / complete_stream（SSE）/
+ *        list_models / embeddings / count_tokens / health_check /
+ *        get_stats 的 handler 与 m_* 薄壳。
  *
- * 2026-08-27 域拆分（main.c 1033 行 → 4 文件）：方法实现集中于此，
- * 入口引导在 main.c，请求解析在 llm_daemon_request.c，daemon 配置装配
- * 在 llm_daemon_config.c；共享符号经 bootstrap/internal.h 声明。
+ * 0.1.19 gen5 装配：方法实现集中于此，生命周期与端点在 src/svc.c，
+ * 请求解析在 src/llm_rpc_request.c，装配期共享符号经 llm_d_internal.h
+ * 声明；m_* 签名与 .manifest rpc.methods 一一对应（svc_llm_d.h 由生成器
+ * 产出，L3 SSoT）。
  */
 
 #include "airy_memory.h"
 #include "error.h"
-#include "bootstrap/internal.h"
+#include "svc_llm_d.h"
+#include "llm_d_internal.h"
 #include "response.h"
 #include "token_counter.h"
 
@@ -136,7 +137,7 @@ static char *handle_list_models(cJSON *params, int id)
     return jsonrpc_build_success(root, id);
 }
 
-void on_list_models_method(cJSON *params, int id, void *user_data)
+void m_list_models(cJSON *params, int id, void *user_data)
 {
     char *response = handle_list_models(params, id);
     if (response) {
@@ -184,7 +185,7 @@ static char *handle_embeddings(cJSON *params, int id)
     return jsonrpc_build_success(result, id);
 }
 
-void on_embeddings_method(cJSON *params, int id, void *user_data)
+void m_embeddings(cJSON *params, int id, void *user_data)
 {
     char *response = handle_embeddings(params, id);
     if (response) {
@@ -239,7 +240,7 @@ static char *handle_count_tokens(cJSON *params, int id)
     return jsonrpc_build_success(result, id);
 }
 
-void on_count_tokens_method(cJSON *params, int id, void *user_data)
+void m_count_tokens(cJSON *params, int id, void *user_data)
 {
     char *response = handle_count_tokens(params, id);
     if (response) {
@@ -260,7 +261,7 @@ static char *handle_health_check(cJSON *params, int id)
     return jsonrpc_build_success(result, id);
 }
 
-void on_health_check_method(cJSON *params, int id, void *user_data)
+void m_health_check(cJSON *params, int id, void *user_data)
 {
     char *response = handle_health_check(params, id);
     if (response) {
@@ -290,7 +291,7 @@ static char *handle_get_stats(cJSON *params, int id)
     return jsonrpc_build_success(root, id);
 }
 
-void on_get_stats_method(cJSON *params, int id, void *user_data)
+void m_get_stats(cJSON *params, int id, void *user_data)
 {
     char *response = handle_get_stats(params, id);
     if (response) {
@@ -304,7 +305,7 @@ void on_get_stats_method(cJSON *params, int id, void *user_data)
  * @brief Wrapper for the complete method (adapts the method_dispatcher
  *        interface)
  */
-void on_complete_method(cJSON *params, int id, void *user_data)
+void m_complete(cJSON *params, int id, void *user_data)
 {
     char *response = handle_complete(params, id);
     if (response) {
@@ -324,7 +325,7 @@ void on_complete_method(cJSON *params, int id, void *user_data)
 /**
  * @brief Wrapper for the complete_stream method
  */
-void on_complete_stream_method(cJSON *params, int id, void *user_data)
+void m_complete_stream(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     char *response = handle_complete_stream(params, id, client_fd);
@@ -566,7 +567,7 @@ static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd
         AIRY_FREE((void *)cfg.model);
         request_context_destroy(ctx);
         /* 与 parse_params 失败路径同因同治：非 NULL 返回值会被
-         * on_complete_stream_method 当普通响应推给流客户端，裸 JSON-RPC
+         * m_complete_stream 当普通响应推给流客户端，裸 JSON-RPC
          * 信封混入正文（adapter 不识别信封，把 {"jsonrpc":...} 当回复显示）。 */
         char ebuf[128];
         const char *msg = llm_error_message_fmt(ret, ebuf, sizeof(ebuf));
