@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "accounting/metrics.h"
 #include "rpc/internal.h"
 #include "providers/core/secrets.h"
 #include "providers/core/transport.h"
