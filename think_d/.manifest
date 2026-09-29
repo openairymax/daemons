@@ -1,0 +1,28 @@
+{
+  "manifest_version": 1,
+  "daemon": "think_d",
+  "cname": "think",
+  "sd_type": "think",
+  "ops": ["ipc", "llm", "tool"],
+  "facades": ["ingress", "execute", "governance"],
+  "slots": ["compute", "flow", "route", "validate", "discover"],
+  "rpc": {
+    "unix": "think.sock",
+    "win_pipe": "airy_think",
+    "tcp": 8090,
+    "tags": "think,core",
+    "buffer": 1048576,
+    "concurrent": true,
+    "pool": { "max_events": 16, "min": 2, "max": 4, "queue": 32 },
+    "methods": [
+      "process", "orchestrate", "get_stats", "health_check",
+      "lang_process", "lang_postprocess", "lang_stats", "review"
+    ]
+  },
+  "deps": { "required": ["llm_d"], "optional": [] },
+  "modules": [
+    { "name": "rpc", "sources": ["think_rpc.c"] },
+    { "name": "lang", "sources": ["lang_svc.c"] },
+    { "name": "review", "sources": ["review_svc.c"] }
+  ]
+}
