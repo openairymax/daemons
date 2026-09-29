@@ -18,7 +18,7 @@
 #include "daemon_errors.h"
 #include "daemon_security.h"
 #include "core/executor.h"
-#include "builtin.h"
+#include "builtin/builtin.h"
 #include "daemon_platform_ext.h"
 #include "safety_guard_bridge.h"
 #include "svc_logger.h"

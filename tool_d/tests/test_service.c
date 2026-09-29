@@ -7,7 +7,7 @@
  */
 
 #include "tool_service.h"
-#include "tool_builtin_internal.h"
+#include "builtin/tool_builtin_internal.h"
 
 #include "airy_memory.h"
 

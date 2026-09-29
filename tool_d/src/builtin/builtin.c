@@ -24,7 +24,7 @@
 #include "airy_memory.h"
 #include "error.h"
 
-#include "builtin.h"
+#include "builtin/builtin.h"
 #include "os_sandbox.h"
 #include "svc_logger.h"
 
@@ -56,7 +56,7 @@
 #include <unistd.h>
 #endif
 
-#include "tool_builtin_internal.h"
+#include "builtin/tool_builtin_internal.h"
 
 int builtin_fs_confine(const char *orig_path, int for_write, char *resolved, size_t resolved_cap,
                        tool_result_t *res)

@@ -22,21 +22,21 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/registry.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tool_approval.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/safety_guard_bridge.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_shell.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_fs.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_fs_dir.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_fs_glob.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_fs_grep.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_net.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_git.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin_maths.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_shell.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_fs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_fs_dir.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_fs_glob.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_fs_grep.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_net.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_git.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_maths.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/os_sandbox.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/tool_interactive_approval.c
     # 0.1.9 M4：plugin_d → tool_d 整编——插件执行域源随迁测试
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin_service.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin_discovery.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin_permission.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin/plugin_service.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin/plugin_discovery.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin/plugin_permission.c
 )
 
 set(TOOL_TEST_SOURCES

@@ -12,7 +12,7 @@
 #include "error.h"
 
 #include "airy_dirent.h"
-#include "builtin.h"
+#include "builtin/builtin.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -34,7 +34,7 @@
 #define S_ISDIR(m) (((m)&_S_IFDIR) != 0)
 #endif
 
-#include "tool_builtin_internal.h"
+#include "builtin/tool_builtin_internal.h"
 
 /* ============================================================================
  * fs_glob: recursive wildcard file listing (modeled on Atom Code GlobTool /

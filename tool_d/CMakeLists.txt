@@ -43,21 +43,21 @@ set(TOOL_SERVICE_SOURCES
     src/core/cache.c
     src/tool_approval.c
     src/safety_guard_bridge.c
-    src/builtin.c
-    src/builtin_shell.c
-    src/builtin_fs.c
-    src/builtin_fs_dir.c
-    src/builtin_fs_glob.c
-    src/builtin_fs_grep.c
-    src/builtin_net.c
-    src/builtin_git.c
-    src/builtin_maths.c
+    src/builtin/builtin.c
+    src/builtin/builtin_shell.c
+    src/builtin/builtin_fs.c
+    src/builtin/builtin_fs_dir.c
+    src/builtin/builtin_fs_glob.c
+    src/builtin/builtin_fs_grep.c
+    src/builtin/builtin_net.c
+    src/builtin/builtin_git.c
+    src/builtin/builtin_maths.c
     src/tool_interactive_approval.c
     src/os_sandbox.c
     # plugin_d → tool_d 整编——插件 dlopen 引擎随迁
-    src/plugin_service.c
-    src/plugin_discovery.c
-    src/plugin_permission.c
+    src/plugin/plugin_service.c
+    src/plugin/plugin_discovery.c
+    src/plugin/plugin_permission.c
     # 注入 atoms 侧 tool ops 抽象表（服务实现在本库，表存储在 airy_tool_ops）
     src/rpc/daemon_tool_ops_bootstrap.c
 )

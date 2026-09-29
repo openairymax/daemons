@@ -19,7 +19,7 @@
 #include "airy_memory.h"
 #include "error.h"
 
-#include "builtin.h"
+#include "builtin/builtin.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
@@ -31,7 +31,7 @@
 #include <string.h>
 
 #include "platform.h"
-#include "tool_builtin_internal.h"
+#include "builtin/tool_builtin_internal.h"
 
 #ifndef _WIN32
 #include <errno.h>
