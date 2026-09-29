@@ -110,18 +110,13 @@ target_compile_options(airy_cupolas_service PRIVATE
 endif()
 
 # ==================== Cupolas daemon 可执行文件 ====================
-# main.c 按单一职责拆分（2026-08-27）：
-#   main.c                          入口引导 + daemon 配置装配 + 方法注册
-#   src/cupolas_rpc_core.c          cupolas.* 核心方法（权限/净化/命令/规则/审计/健康/统计）
-#   src/cupolas_rpc_vault.c         cupolas.* vault 方法（含 hex 编解码）
-#   src/cupolas_rpc_net_entitlements.c  cupolas.* net/entitlements 方法
-add_executable(cupolas_d
-    src/main.c
-    src/cupolas_rpc_core.c
-    src/cupolas_rpc_vault.c
-    src/cupolas_rpc_net_entitlements.c
-    src/cupolas_rpc_policy.c
-)
+# gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c /
+# daemon 配置与端点策略 svc.c 由 daemon_gen.py 生成；RPC 方法域
+# cupolas_rpc_core/vault/net_entitlements/policy.c 为手写业务源。
+# 服务域 service.c 单独编译为 airy_cupolas_service 静态库（上方）。
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
+
+add_executable(cupolas_d ${CUPOLAS_D_SOURCES})
 
 # M2-S3 (0.1.9 §3.2 PDP)：policy.* RPC 需要 dynamic_policy_engine V2 API
 target_compile_definitions(cupolas_d PRIVATE AIRY_ENABLE_V2_API=1)

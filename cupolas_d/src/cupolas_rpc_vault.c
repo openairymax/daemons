@@ -12,6 +12,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "cupolas_d_internal.h"
+#include "svc_cupolas_d.h"
 #include "cupolas_vault.h"
 
 #include "daemon_main.h"
@@ -79,31 +80,31 @@ static void handle_vault_list(cJSON *params, int id, airy_sock_t fd);
 static void handle_vault_rotate(cJSON *params, int id, airy_sock_t fd);
 
 /* cupolas.vault_store */
-void on_vault_store_method(cJSON *params, int id, void *user_data)
+void svc_on_vault_store_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_vault_store(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.vault_retrieve */
-void on_vault_retrieve_method(cJSON *params, int id, void *user_data)
+void svc_on_vault_retrieve_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_vault_retrieve(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.vault_delete */
-void on_vault_delete_method(cJSON *params, int id, void *user_data)
+void svc_on_vault_delete_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_vault_delete(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.vault_list */
-void on_vault_list_method(cJSON *params, int id, void *user_data)
+void svc_on_vault_list_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_vault_list(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.vault_rotate */
-void on_vault_rotate_method(cJSON *params, int id, void *user_data)
+void svc_on_vault_rotate_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_vault_rotate(params, id, *(airy_sock_t *)user_data);
 }
@@ -259,7 +260,7 @@ static void handle_vault_rotate(cJSON *params, int id, airy_sock_t client_fd)
     int strategy = get_int_field(params, "strategy", (int)CUPOLAS_VAULT_ROTATE_ROUND_ROBIN);
 
     cupolas_vault_rotate_params_t req;
-    __builtin_memset(&req, 0, sizeof(req));
+    AIRY_MEMSET(&req, 0, sizeof(req));
     req.cred_group = cred_group;
     req.strategy = strategy;
 

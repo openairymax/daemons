@@ -520,7 +520,7 @@ int cupolas_service_net_add_rule(cupolas_service_t *svc,
         return AIRY_ERR_INVALID_PARAM;
 
     cupolas_net_filter_rule_t rule;
-    __builtin_memset(&rule, 0, sizeof(rule));
+    AIRY_MEMSET(&rule, 0, sizeof(rule));
     rule.rule_id = (char *)params->rule_id;
     rule.description = (char *)(params->description ? params->description : "");
     rule.src_ip_pattern = (char *)(params->src_ip ? params->src_ip : "*");
@@ -597,7 +597,7 @@ char *cupolas_service_net_get_stats_json(cupolas_service_t *svc)
         return NULL;
 
     cupolas_net_stats_t stats;
-    __builtin_memset(&stats, 0, sizeof(stats));
+    AIRY_MEMSET(&stats, 0, sizeof(stats));
     int rc = cupolas_net_get_stats(&stats);
     if (rc != 0)
         return NULL;
