@@ -67,7 +67,6 @@ set(SVC_COMMON_SOURCES
     src/daemon/daemon_event_driver.c # 统一事件驱动框架
     # 0c IRON-6 归位：工作线程池实现迁 commons/utils/sync（src/thread_pool.c），
     # 符号经 airy_common PUBLIC 链接提供，daemons 仅留 include/thread_pool.h 兼容头。
-    src/daemon/daemon_task_dispatcher.c # 工具并行执行引擎（原 parallel_dispatcher.c，重命名以消除与 atoms/coreloopthree 同名冲突）
     # g14b 补全：daemon_bootstrap_sd.c 迁 commons/utils/sd（daemon_bootstrap_sd.h
     # 公开头已在该处），实现随之归位，符号经 airy_common PUBLIC 链接提供。
     src/daemon/daemon_bootstrap_ipc.c   # P1.7 C-L09: daemon IPC Bus 一键引导
