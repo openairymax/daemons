@@ -13,7 +13,7 @@
 #ifndef TOOL_CACHE_H
 #define TOOL_CACHE_H
 
-#include "tool_service.h"
+#include "tool_service_types.h"
 
 #include <stddef.h>
 

@@ -10,7 +10,7 @@
 #define TOOL_REGISTRY_H
 
 #include "core/config.h"
-#include "tool_service.h"
+#include "tool_service_types.h"
 
 #ifdef __cplusplus
 extern "C" {

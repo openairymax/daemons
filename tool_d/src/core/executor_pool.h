@@ -21,7 +21,7 @@
 #define TOOL_EXECUTOR_POOL_H
 
 #include "core/executor.h"
-#include "tool_service.h"
+#include "tool_service_types.h"
 
 #ifdef __cplusplus
 extern "C" {

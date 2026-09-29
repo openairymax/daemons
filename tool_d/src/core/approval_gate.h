@@ -15,7 +15,7 @@
 #ifndef AIRY_RT_TOOL_D_CORE_APPROVAL_GATE_H
 #define AIRY_RT_TOOL_D_CORE_APPROVAL_GATE_H
 
-#include "tool_service.h"
+#include "tool_service_types.h"
 
 #include <stdbool.h>
 #include <stdint.h>

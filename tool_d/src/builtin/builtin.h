@@ -7,7 +7,7 @@
 #ifndef AIRY_RT_TOOL_BUILTIN_H
 #define AIRY_RT_TOOL_BUILTIN_H
 
-#include "tool_service.h"
+#include "tool_service_types.h"
 
 #ifdef __cplusplus
 extern "C" {

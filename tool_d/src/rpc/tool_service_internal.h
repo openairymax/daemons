@@ -17,6 +17,7 @@
 #define AIRY_RT_TOOL_SERVICE_INTERNAL_H
 
 #include "rpc/service.h"
+#include "tool_service.h"
 
 #include <stddef.h>
 #include <stdint.h>
