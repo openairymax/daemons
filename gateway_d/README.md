@@ -120,7 +120,7 @@ SD / IPC bootstrap 与真实监听一致。
 | `notify.*` | `publish` `subscribe` `unsubscribe` `list` `health` `health_check` `get_stats` | notify_d |
 | `observe.*` | `record_metric` `query_metrics` `get_metrics`；`get_stats` / `health_check` 透传宿主 | monit_d（wire 加 `observe_` 前缀） |
 | `market.*` | `register_agent` `search_agents` `install_agent` `register_skill` `search_skills` `health_check` `publish` `search` `install` `get_stats` | market_d |
-| `hook.*` | `register` `unregister` `trigger` `list` `status` `stats` `health` `ping` `health_check` `get_stats` | hook_d |
+| `hook.*` | `register` `unregister` `trigger` `list` `status` `stats` `health` `ping` `health_check` `get_stats` | notify_d（hook 面，R7 并户） |
 | `sched.*` | `register_agent` `unregister_agent` `schedule_task` `get_task` `cancel` `dag_submit` `dag_status` `dag_list` `dag_cancel` `checkpoint_save` `submit` `query` `get_stats` `health_check` `plan` `absorb` `roadmap_status` | sched_d |
 | `think.*` | `process` `orchestrate` `health_check` `get_stats` `lang_process` `lang_postprocess` `lang_stats` `review` | think_d |
 | `monit.*` | `record_metric` `get_metrics` `trigger_alert` `get_alerts` `health_check` `generate_report` `heartbeat` `metrics` `alert_raise` `alert_resolve` `get_stats` | monit_d |
