@@ -10,7 +10,7 @@
 #ifndef AIRY_RT_TOOL_BUILTIN_INTERNAL_H
 #define AIRY_RT_TOOL_BUILTIN_INTERNAL_H
 
-#include "builtin.h"
+#include "builtin/builtin.h"
 #include "os_sandbox.h"
 
 #include <stddef.h>
