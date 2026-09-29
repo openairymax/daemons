@@ -104,25 +104,13 @@ target_compile_options(airy_agent_service PRIVATE
 endif()
 
 # ==================== Agent daemon 可执行文件 ====================
-# main.c 按单一职责拆分（2026-08-27）：
-#   main.c            入口引导 + daemon 配置装配 + 方法注册
-#   agent_d_rpc.c     agent.* RPC 方法（spawn/terminate/invoke/cancel/...）
-#   agent_d_monitor.c 空闲回收线程 + 性能采样线程（POSIX）
-# M1-1a 引擎下沉（2026-09-01）：agent.run 进程内引擎
-#   agent_run_engine.c 会话注册表 + 编排 + 主入口
-#   agent_run_loop.c   ReAct 工具循环
-#   agent_run_stream.c LLM 流式响应解复用（RS 分帧）
-#   agent_run_rpc.c    agent.run / agent.run_cancel RPC 适配
-add_executable(agent_d
-    src/main.c
-    src/agent_d_rpc.c
-    src/agent_d_monitor.c
-    src/agent_run_engine.c
-    src/agent_run_ledger.c
-    src/agent_run_loop.c
-    src/agent_run_stream.c
-    src/agent_run_rpc.c
-)
+# gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c /
+# daemon 配置与端点策略 svc.c 由 daemon_gen.py 生成；RPC 方法域
+# agent_d_rpc.c、监控域 agent_d_monitor.c（POSIX）、run 引擎域
+# agent_run_engine/ledger/loop/stream/rpc.c 为手写业务源。
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
+
+add_executable(agent_d ${AGENT_D_SOURCES})
 
 if(WIN32)
     target_compile_definitions(agent_d PRIVATE

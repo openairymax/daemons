@@ -3,14 +3,12 @@
 
 /**
  * @file agent_d_internal.h
- * @brief agent_d 拆分文件间的共享声明（2026-08-27）。
+ * @brief agent_d 翻译单元间的内部共享声明。
  *
- * main.c 按单一职责拆分为三个文件：
- *   - main.c            入口引导 + daemon 配置装配 + 方法注册
- *   - agent_d_rpc.c     agent.* RPC 方法（spawn/terminate/invoke/cancel/...）
- *   - agent_d_monitor.c 空闲回收线程 + 性能采样线程（POSIX）
- * daemon_main.h 生成的样板（g_running_agent_d / signal_handler_agent_d 等）
- * 仍保持 static 于 main.c 内；此处仅声明跨文件符号。
+ * 五件套化后（L3 生成器推广）：main.c / svc_agent_d.h / sources.cmake
+ * 由 daemon_gen.py 从 .manifest 生成，daemon 配置与端点解析策略在
+ * svc.c；RPC 方法入口（svc_on_*_agent_d）与生命周期钩子声明于生成头
+ * svc_agent_d.h（L3 SSoT），此处只承载跨文件的内部符号。
  */
 
 #ifndef AIRY_RT_DAEMON_AGENT_D_INTERNAL_H
@@ -51,22 +49,6 @@ void perf_monitor_start(daemon_event_driver_t *driver);
 void perf_monitor_stop(void);
 uint64_t perf_now_us(void);
 int64_t perf_slow_threshold_us(void);
-
-/* ---- RPC 方法适配器（agent_d_rpc.c，main() 注册到 dispatcher） ---- */
-void on_spawn_method(cJSON *params, int id, void *user_data);
-void on_terminate_method(cJSON *params, int id, void *user_data);
-void on_invoke_method(cJSON *params, int id, void *user_data);
-void on_cancel_method(cJSON *params, int id, void *user_data);
-void on_list_method(cJSON *params, int id, void *user_data);
-void on_count_method(cJSON *params, int id, void *user_data);
-void on_health_check_method(cJSON *params, int id, void *user_data);
-void on_get_stats_method(cJSON *params, int id, void *user_data);
-void on_vocab_method(cJSON *params, int id, void *user_data);
-
-/* ---- run 引擎 RPC 适配器（agent_run_rpc.c，M1-1a 引擎下沉） ---- */
-void on_run_method(cJSON *params, int id, void *user_data);
-void on_run_cancel_method(cJSON *params, int id, void *user_data);
-void on_run_stream_method(cJSON *params, int id, void *user_data);
 
 #ifdef __cplusplus
 }
