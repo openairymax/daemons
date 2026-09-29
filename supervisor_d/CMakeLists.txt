@@ -1,5 +1,5 @@
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
-# supervisor_d 构建文件（0.1.18 §12.13 B13）
+# supervisor_d 构建文件（0.1.18 §12.13 B13；0.1.19 五件套化，codegen=false）
 
 # V13.5 硬约束：零项目内库链接（link-whitelist.txt 允许集为空，linkgate
 # 构建期 fail-closed）——UDS/TCP、进程原语、JSON、日志全部自持，仅链接
@@ -8,13 +8,7 @@
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-set(SUPERVISOR_D_SOURCES
-    src/main.c
-    src/decl.c
-    src/proc.c
-    src/probe.c
-    src/ctrl.c
-)
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
 
 add_executable(supervisor_d ${SUPERVISOR_D_SOURCES})
 
