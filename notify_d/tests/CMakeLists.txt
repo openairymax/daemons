@@ -49,4 +49,38 @@ foreach(TEST_SRC ${NOTIFY_TEST_SOURCES})
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
 
+# ---- R7 并户：hook 面 JSON-RPC 冒烟测试（原 hook_d/tests 母本直迁）----
+# 独立可执行：仅测试源（不编 notify 实现与 hook 面实现），spawn 真实
+# notify_d 二进制经 hook.sock 驱动全链路
+set(HOOK_FACE_TEST_SOURCES test_hook_daemon.c)
+
+set(HOOK_FACE_TEST_INCLUDES
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
+    ${COMMONS_INCLUDE_DIR}
+    ${COMMONS_INCLUDE_DIR}/platform/include
+    ${COMMONS_INCLUDE_DIR}/utils/error
+    ${COMMONS_INCLUDE_DIR}/utils/logging
+    ${COMMONS_INCLUDE_DIR}/utils/memory
+    ${COMMONS_INCLUDE_DIR}/utils/string
+    ${COMMONS_INCLUDE_DIR}/utils/sync
+    ${COMMONS_INCLUDE_DIR}/utils/compat
+)
+
+add_executable(test_hook_daemon ${HOOK_FACE_TEST_SOURCES})
+
+target_include_directories(test_hook_daemon PRIVATE ${HOOK_FACE_TEST_INCLUDES})
+
+target_compile_definitions(test_hook_daemon PRIVATE
+    TEST_BIN_DIR="${CMAKE_BINARY_DIR}/bin")
+
+target_link_libraries(test_hook_daemon PRIVATE
+    airy_common svc_common Threads::Threads airy_platform_libs
+)
+
+target_compile_options(test_hook_daemon PRIVATE
+    -Wall -Wextra -g -Wno-unused-function -UNDEBUG)
+
+add_test(NAME notify_d_hook_daemon COMMAND test_hook_daemon
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
 enable_testing()
