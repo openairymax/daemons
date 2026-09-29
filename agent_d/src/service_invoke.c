@@ -10,6 +10,7 @@
 
 #include "airy_memory.h"
 #include "error.h"
+#include "io.h"
 #include "platform_misc.h"
 #include "service.h"
 #include "svc_logger.h"
@@ -145,9 +146,9 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char 
         write_buf[req_len + 1] = '\0';
         AIRY_FREE(req_str);
 
-        int wrc = agent_write_all(sin_fd, write_buf, req_len + 1);
+        ssize_t wrc = airy_io_write_all(sin_fd, write_buf, req_len + 1);
         AIRY_FREE(write_buf);
-        if (wrc != 0) {
+        if (wrc < 0) {
             SVC_LOG_WARN("Agent invoke write failed, child unusable: agent_id=%s errno=%d",
                          agent_id, errno);
             agent_kill_and_reap(&agent->child_pid, &agent->stdin_fd, &agent->stdout_fd);

@@ -38,7 +38,6 @@ int agent_spawn_ready_timeout_s(void);
 
 #if AIRY_PLATFORM_POSIX
 /* Child process communication (service_child.c) */
-int agent_write_all(int fd, const char *buf, size_t len);
 int agent_read_line_timeout(int fd, char *buf, size_t buf_size, int timeout_s);
 int agent_read_line_timeout_ex(int fd, char *buf, size_t buf_size, int timeout_s,
                                airy_cancel_token_t *token);
