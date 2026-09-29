@@ -1,0 +1,27 @@
+{
+  "manifest_version": 1,
+  "daemon": "channel_d",
+  "cname": "channel",
+  "sd_type": "channel",
+  "ops": ["ipc"],
+  "facades": ["ingress", "execute", "state"],
+  "slots": ["create", "delete", "comm", "stream", "query"],
+  "rpc": {
+    "unix": "channel.sock",
+    "win_pipe": "airy_channel",
+    "tcp": 8094,
+    "tags": "channel,core",
+    "buffer": 65536,
+    "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },
+    "methods": [
+      "ping", "list", "open", "close", "send",
+      "health", "health_check", "get_stats"
+    ]
+  },
+  "deps": { "required": [], "optional": [] },
+  "modules": [
+    { "name": "rpc", "sources": ["channel_rpc.c"] },
+    { "name": "service", "sources": ["channel_service.c"] },
+    { "name": "io", "sources": ["channel_io.c"] }
+  ]
+}
