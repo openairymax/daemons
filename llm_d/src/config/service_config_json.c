@@ -14,7 +14,6 @@
 #include "airy_memory.h"
 #include "daemon_defaults.h"
 #include "error.h"
-#include "service.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>

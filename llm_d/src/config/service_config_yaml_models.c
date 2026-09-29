@@ -17,7 +17,6 @@
 
 #include "airy_memory.h"
 #include "error.h"
-#include "service.h"
 #include "svc_logger.h"
 #include "svc_model_defaults.h"
 #include "yaml_minimal.h"
