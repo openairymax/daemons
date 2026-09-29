@@ -125,13 +125,14 @@ target_compile_options(airy_mem_service PRIVATE
 endif()
 
 # ==================== Memory daemon 可执行文件 ====================
-add_executable(mem_d
-    src/core/main.c
-    src/handlers/mem_handlers.c
-    src/handlers/kb_handlers.c
-    src/handlers/cache_handlers.c
-    src/handlers/ledger_handlers.c
-)
+# gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c / 端点
+# 策略 svc.c 由 daemon_gen.py 生成；RPC 方法域 handlers/ 四源为手写业务源。
+# daemon 四件共享 DAEMON_DECLARE_COMMON 宏实例化产生的 static 符号仅随
+# mem_d 可执行目标构建；服务域多源在上方编译为 airy_mem_service 静态库，
+# 不入 ${MEM_D_SOURCES}，避免重复编译。
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
+
+add_executable(mem_d ${MEM_D_SOURCES})
 
 if(WIN32)
     target_compile_definitions(mem_d PRIVATE
