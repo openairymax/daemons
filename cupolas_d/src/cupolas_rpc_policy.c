@@ -21,6 +21,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "cupolas_d_internal.h"
+#include "svc_cupolas_d.h"
 
 #include "daemon_main.h"
 #include "param_validator.h"
@@ -90,7 +91,7 @@ static void broadcast_epoch(uint64_t epoch)
         return;
     }
     struct sockaddr_un addr;
-    __builtin_memset(&addr, 0, sizeof(addr));
+    AIRY_MEMSET(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
     snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", sp);
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
@@ -269,22 +270,22 @@ static void handle_policy_status(cJSON *params, int id,
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-void on_policy_load_method(cJSON *params, int id, void *user_data)
+void svc_on_policy_load_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_policy_load(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_policy_activate_method(cJSON *params, int id, void *user_data)
+void svc_on_policy_activate_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_policy_activate(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_policy_rollback_method(cJSON *params, int id, void *user_data)
+void svc_on_policy_rollback_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_policy_rollback(params, id, *(airy_sock_t *)user_data);
 }
 
-void on_policy_status_method(cJSON *params, int id, void *user_data)
+void svc_on_policy_status_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_policy_status(params, id, *(airy_sock_t *)user_data);
 }
