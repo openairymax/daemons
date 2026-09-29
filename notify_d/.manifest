@@ -1,0 +1,25 @@
+{
+  "manifest_version": 1,
+  "daemon": "notify_d",
+  "cname": "notify",
+  "sd_type": "notify",
+  "codegen": false,
+  "facades": ["ingress", "execute", "state", "governance"],
+  "slots": ["create", "delete", "update", "query", "flow", "validate"],
+  "rpc": {
+    "unix": "notify.sock",
+    "tcp": 8084,
+    "tags": "notify,core",
+    "buffer": 65536,
+    "methods": [
+      "publish", "subscribe", "unsubscribe", "list",
+      "health", "shutdown", "get_stats", "health_check"
+    ]
+  },
+  "deps": { "required": [], "optional": [] },
+  "modules": [
+    { "name": "svc", "sources": ["svc.c"] },
+    { "name": "net", "sources": ["net.c"] },
+    { "name": "service", "sources": ["notify_service.c"] }
+  ]
+}
