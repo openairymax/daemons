@@ -13,6 +13,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "cupolas_d_internal.h"
+#include "svc_cupolas_d.h"
 
 #include "daemon_main.h"
 #include "param_validator.h"
@@ -25,31 +26,31 @@ static void handle_entitlements_load(cJSON *params, int id, airy_sock_t fd);
 static void handle_entitlements_check(cJSON *params, int id, airy_sock_t fd);
 
 /* cupolas.net_add_rule */
-void on_net_add_rule_method(cJSON *params, int id, void *user_data)
+void svc_on_net_add_rule_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_net_add_rule(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.net_check_access */
-void on_net_check_access_method(cJSON *params, int id, void *user_data)
+void svc_on_net_check_access_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_net_check_access(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.net_get_stats */
-void on_net_get_stats_method(cJSON *params, int id, void *user_data)
+void svc_on_net_get_stats_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_net_get_stats(id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.entitlements_load */
-void on_entitlements_load_method(cJSON *params, int id, void *user_data)
+void svc_on_entitlements_load_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_entitlements_load(params, id, *(airy_sock_t *)user_data);
 }
 
 /* cupolas.entitlements_check */
-void on_entitlements_check_method(cJSON *params, int id, void *user_data)
+void svc_on_entitlements_check_cupolas_d(cJSON *params, int id, void *user_data)
 {
     handle_entitlements_check(params, id, *(airy_sock_t *)user_data);
 }
@@ -68,7 +69,7 @@ static void handle_net_add_rule(cJSON *params, int id, airy_sock_t client_fd)
     }
 
     cupolas_net_add_rule_params_t req;
-    __builtin_memset(&req, 0, sizeof(req));
+    AIRY_MEMSET(&req, 0, sizeof(req));
     req.rule_id = rule_id;
     req.src_ip = get_string_field(params, "src_ip", NULL);
     req.dst_ip = get_string_field(params, "dst_ip", NULL);
