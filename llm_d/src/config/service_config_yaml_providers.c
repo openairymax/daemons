@@ -15,7 +15,6 @@
 
 #include "airy_memory.h"
 #include "error.h"
-#include "service.h"
 #include "svc_logger.h"
 
 #include <stdlib.h>

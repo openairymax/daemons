@@ -6,9 +6,8 @@
  * @brief llm_d rpc 域（请求路径）内部声明。
  *
  * 由 llm_service_internal.h（253 行枢纽头，B16-S1 拆片）迁入：生成参数
- * 解析、provider 管理与复杂度评估三段。仅 service.c / service_request.c /
- * service_metrics.c / service_providers.c 及其单元测试消费；跨域禁止
- * include 本头。
+ * 解析与 provider 管理两段。仅 service.c / service_request.c /
+ * service_providers.c 及其单元测试消费；跨域禁止 include 本头。
  */
 
 #ifndef AIRY_RT_LLM_RPC_INTERNAL_H
@@ -49,21 +48,6 @@ void merge_provider_configs(const provider_config_t *main_provs, size_t main_cnt
                             const provider_config_t *user_provs, size_t user_cnt,
                             provider_config_t **out, size_t *out_cnt);
 void register_router_endpoints(llm_service_t *svc);
-
-/* ---- Complexity-evaluation and statistics domain (service_metrics.c) ---- */
-
-/**
- * @brief Complexity assessment levels
- */
-typedef enum {
-    LLM_COMPLEXITY_SIMPLE = 0,
-    LLM_COMPLEXITY_MODERATE = 1,
-    LLM_COMPLEXITY_COMPLEX = 2
-} llm_complexity_level_t;
-
-llm_complexity_level_t assess_complexity(const char *input);
-void log_routing_decision(const char *model, llm_complexity_level_t complexity,
-                          size_t input_len, const char *reason);
 
 #ifdef __cplusplus
 }

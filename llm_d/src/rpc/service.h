@@ -3,11 +3,11 @@
 
 /**
  * @file service.h
- * @brief Internal service structure declarations.
+ * @brief llm_d rpc 域私有：service 实例结构（struct llm_service）声明。
  */
 
-#ifndef AIRY_RT_LLM_SERVICE_INTERNAL_H
-#define AIRY_RT_LLM_SERVICE_INTERNAL_H
+#ifndef AIRY_RT_LLM_RPC_SERVICE_H
+#define AIRY_RT_LLM_RPC_SERVICE_H
 
 #include "cache_common.h"
 #include "cost_tracker.h"
@@ -37,4 +37,4 @@ struct llm_service {
  * 后兜底保存 / destroy 保存）。 */
 const char *llm_usage_state_path(void);
 
-#endif /* AIRY_RT_LLM_SERVICE_INTERNAL_H */
+#endif /* AIRY_RT_LLM_RPC_SERVICE_H */

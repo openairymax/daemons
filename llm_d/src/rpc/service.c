@@ -442,3 +442,108 @@ void llm_response_free(llm_response_t *resp)
     }
     AIRY_FREE(resp);
 }
+
+int llm_service_stats(llm_service_t *svc, char **out_json)
+{
+    if (!svc || !out_json) {
+        SVC_LOG_ERROR("llm_service_stats: NULL parameter (svc=%p, out_json=%p)", (const void *)svc,
+                      (const void *)out_json);
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        SVC_LOG_ERROR("llm_service_stats: cJSON_CreateObject failed");
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    cJSON *cost_json = cost_tracker_export(svc->cost);
+    if (cost_json) {
+        cJSON_AddItemToObject(root, "cost", cost_json);
+    }
+
+    cJSON_AddNumberToObject(root, "llm_cache_size", cache_get_size(svc->cache));
+    cJSON_AddNumberToObject(root, "llm_cache_capacity", cache_get_capacity(svc->cache));
+
+    cache_stats_t cache_stats;
+    cache_get_stats(svc->cache, &cache_stats);
+    cJSON_AddNumberToObject(root, "llm_cache_hits", (double)cache_stats.hits);
+    cJSON_AddNumberToObject(root, "llm_cache_misses", (double)cache_stats.misses);
+    cJSON_AddNumberToObject(root, "llm_cache_evictions", (double)cache_stats.evictions);
+    cJSON_AddNumberToObject(root, "llm_cache_hit_rate", cache_stats.hit_rate);
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    if (!json) {
+        SVC_LOG_ERROR("llm_service_stats: cJSON_PrintUnformatted failed");
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    *out_json = json;
+    return AIRY_OK;
+}
+
+typedef struct {
+    cJSON *models_arr;
+    const char *default_model;
+} list_models_ctx_t;
+
+static int list_models_cb(const char *provider_name, const char *model_name, void *user_data)
+{
+    list_models_ctx_t *ctx = (list_models_ctx_t *)user_data;
+    if (!ctx || !ctx->models_arr || !provider_name || !model_name)
+        return 0;
+
+    cJSON *item = cJSON_CreateObject();
+    if (!item)
+        return 0;
+    cJSON_AddStringToObject(item, "name", model_name);
+    cJSON_AddStringToObject(item, "provider", provider_name);
+    cJSON_AddBoolToObject(item, "default",
+                          ctx->default_model && strcmp(ctx->default_model, model_name) == 0);
+    cJSON_AddItemToArray(ctx->models_arr, item);
+    return 0;
+}
+
+char *llm_service_list_models(llm_service_t *svc)
+{
+    if (!svc)
+        return NULL;
+
+    airy_mtx_lock(&svc->lock);
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        airy_mtx_unlock(&svc->lock);
+        return NULL;
+    }
+    cJSON *models_arr = cJSON_CreateArray();
+    if (!models_arr) {
+        cJSON_Delete(root);
+        airy_mtx_unlock(&svc->lock);
+        return NULL;
+    }
+    cJSON_AddItemToObject(root, "models", models_arr);
+
+    list_models_ctx_t ctx = {
+        .models_arr = models_arr,
+        .default_model = svc->default_model[0] ? svc->default_model : NULL,
+    };
+    provider_registry_enumerate(svc->registry, list_models_cb, &ctx);
+
+    cJSON_AddStringToObject(root, "default_model", svc->default_model[0] ? svc->default_model : "");
+    if (svc->default_provider[0])
+        cJSON_AddStringToObject(root, "default_provider", svc->default_provider);
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    airy_mtx_unlock(&svc->lock);
+    return json;
+}
+
+const char *llm_service_default_model(const llm_service_t *svc)
+{
+    if (!svc)
+        return NULL;
+    return svc->default_model[0] ? svc->default_model : NULL;
+}
