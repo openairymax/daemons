@@ -9,12 +9,8 @@ set(DAEMON_COMMON_INCLUDE_DIR ${DAEMON_COMMON_DIR}/include)
 set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
-set(MATHS_D_SOURCES
-    src/main.c
-    src/maths_service.c
-    src/expr_eval.c
-    src/python_backend.c
-)
+# 源清单由 gen5 SSoT 装配（.manifest → modules/sources.cmake）
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
 
 add_executable(maths_d ${MATHS_D_SOURCES})
 

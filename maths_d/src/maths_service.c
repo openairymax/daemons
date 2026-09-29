@@ -8,7 +8,8 @@
  * 职责划分（n11 大文件模块化，原文件 1020 行拆分）：
  *   - 数值表达式求值（递归下降求值器）→ src/expr_eval.c（独立模块）
  *   - 本文件保留：统计引擎（第五级描述性统计）、模式识别、
- *     JSON-RPC 分发与 Python 后端转发、服务生命周期。
+ *     RPC 域分发（协议无关，cJSON 出入）与 Python 后端转发、
+ *     服务生命周期。JSON-RPC 传输与响应装配在 src/svc.c（svc 层）。
  *
  * 线性代数/符号计算由上层路由到 maths-toolkit Python 后端（MCP-Mathematics
  * + sympy-mcp），本服务经 stdio JSON-RPC 委托。
@@ -16,23 +17,14 @@
 
 #include "maths_service.h"
 #include "expr_eval.h"
+#include "platform_misc.h"
 #include "airy_memory.h"
-#include "logging.h"
 
 #include <ctype.h>
 #include <math.h>
-#include <stdarg.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-#if defined(_WIN32) || defined(__WIN32__)
-#include <winsock2.h>
-#endif
-
-static void maths_make_error(char *resp, size_t resp_sz, int id,
-                                       const char *msg);
 
 /* ==================== 统计引擎 ==================== */
 
@@ -195,416 +187,344 @@ int maths_d_recognize(const char *text)
     return has_math_marker;
 }
 
-/* ==================== JSON-RPC 分发 ==================== */
+/* ==================== RPC 域分发 ==================== */
 
-/* 简易 JSON 字段提取（无 cJSON 依赖时用）：{"key":value}。 */
-static int json_get_string(const char *json, const char *key, char *out,
-                           size_t out_size)
+static const char *maths_req_str(const cJSON *params, const char *key)
 {
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    const char *p = strstr(json, pattern);
-    if (!p)
-        return -1;
-    p = strchr(p + strlen(pattern), ':');
-    if (!p)
-        return -1;
-    p++;
-    while (*p == ' ' || *p == '\t')
-        p++;
-    if (*p != '"')
-        return -1;
-    p++;
-    size_t n = 0;
-    while (*p && *p != '"' && n + 1 < out_size) {
-        if (*p == '\\' && p[1]) {
-            p++;
-            if (*p == 'n') {
-                out[n++] = '\n';
-                p++;
-                continue;
-            }
-        }
-        out[n++] = *p++;
-    }
-    out[n] = '\0';
-    return (n > 0) ? 0 : -1;
+    const cJSON *it = cJSON_GetObjectItemCaseSensitive(params, key);
+    return cJSON_IsString(it) ? it->valuestring : NULL;
 }
 
-static int json_get_array(const char *json, const char *key, double *out,
-                          size_t max, size_t *out_count)
+static cJSON *maths_health_result(maths_d_service_t *svc)
 {
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    const char *p = strstr(json, pattern);
-    if (!p)
-        return -1;
-    p = strchr(p + strlen(pattern), ':');
-    if (!p)
-        return -1;
-    p++;
-    while (*p == ' ' || *p == '\t')
-        p++;
-    if (*p != '[')
-        return -1;
-    p++;
+    airy_mtx_lock(&svc->lock);
+    int healthy = atomic_load(&svc->running) ? 1 : 0;
+    uint64_t evals = svc->eval_count;
+    uint64_t errors = svc->error_count;
+    uint64_t last_ms = svc->last_eval_ms;
+    airy_mtx_unlock(&svc->lock);
 
-    size_t count = 0;
-    while (*p && *p != ']' && count < max) {
-        while (*p == ' ' || *p == '\t' || *p == ',' || *p == '[')
-            p++;
-        if (*p == ']' || *p == '\0')
-            break;
-        out[count++] = strtod(p, (char **)&p);
-    }
-    if (out_count)
-        *out_count = count;
-    return 0;
+    cJSON *r = cJSON_CreateObject();
+    if (!r)
+        return NULL;
+    cJSON_AddStringToObject(r, "status", healthy ? "healthy" : "degraded");
+    cJSON_AddStringToObject(r, "service", "maths_d");
+    cJSON_AddNumberToObject(r, "eval_count", (double)evals);
+    cJSON_AddNumberToObject(r, "error_count", (double)errors);
+    cJSON_AddNumberToObject(r, "last_eval_ms", (double)last_ms);
+    return r;
 }
 
-/* 数值字段提取：{"key":<number>}。strtod 兼容整数与浮点字面量。 */
-static int json_get_double(const char *json, const char *key, double *out)
+static cJSON *maths_usage_result(maths_d_service_t *svc)
 {
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    const char *p = strstr(json, pattern);
-    if (!p)
-        return -1;
-    p = strchr(p + strlen(pattern), ':');
-    if (!p)
-        return -1;
-    p++;
-    while (*p == ' ' || *p == '\t')
-        p++;
-    char *end = NULL;
-    double v = strtod(p, &end);
-    if (end == p)
-        return -1;
-    *out = v;
-    return 0;
+    airy_mtx_lock(&svc->lock);
+    uint64_t evals = svc->eval_count;
+    uint64_t stats = svc->stats_count;
+    uint64_t symbolic = svc->symbolic_count;
+    uint64_t errors = svc->error_count;
+    uint64_t last_ms = svc->last_eval_ms;
+    uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
+    int backend_up = maths_backend_available(&svc->py_backend);
+    airy_mtx_unlock(&svc->lock);
+
+    cJSON *r = cJSON_CreateObject();
+    if (!r)
+        return NULL;
+    cJSON_AddStringToObject(r, "service", "maths_d");
+    cJSON_AddNumberToObject(r, "eval_count", (double)evals);
+    cJSON_AddNumberToObject(r, "stats_count", (double)stats);
+    cJSON_AddNumberToObject(r, "symbolic_count", (double)symbolic);
+    cJSON_AddStringToObject(r, "python_backend",
+                            backend_up ? "up" : "degraded");
+    cJSON_AddNumberToObject(r, "error_count", (double)errors);
+    cJSON_AddNumberToObject(r, "last_eval_ms", (double)last_ms);
+    cJSON_AddNumberToObject(r, "uptime_sec", (double)uptime);
+    return r;
 }
 
-/* 提取 JSON 对象字段：{"key":{...}}，把 {..}（含花括号）拷到 out。
- * 支持对象内嵌套花括号（按深度匹配）。返回 0 成功。 */
-static int json_get_object(const char *json, const char *key, char *out,
-                           size_t out_size)
+static cJSON *maths_eval_result(maths_d_service_t *svc, const cJSON *params,
+                                char *err, size_t err_sz)
 {
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    const char *p = strstr(json, pattern);
-    if (!p)
-        return -1;
-    p = strchr(p + strlen(pattern), ':');
-    if (!p)
-        return -1;
-    p++;
-    while (*p == ' ' || *p == '\t')
-        p++;
-    if (*p != '{')
-        return -1;
-
-    int depth = 0;
-    size_t n = 0;
-    int in_str = 0;
-    while (*p && n + 1 < out_size) {
-        char c = *p;
-        out[n++] = c;
-        if (c == '"' && (n < 2 || out[n - 2] != '\\'))
-            in_str = !in_str;
-        if (!in_str) {
-            if (c == '{')
-                depth++;
-            else if (c == '}') {
-                depth--;
-                if (depth == 0) {
-                    out[n] = '\0';
-                    return 0;
-                }
-            }
-        }
-        p++;
-    }
-    out[n] = '\0';
-    return -1;
-}
-
-/* 后端响应转发：后端返回 {"id":1,"result":{...}} 或 {"id":1,"error":{...}}，
- * 这里按请求 id 重新构造标准 JSON-RPC 响应。 */
-static void maths_fwd_symbolic(const char *backend_resp, int id,
-                                            char *response,
-                                            size_t response_size)
-{
-    char obj[8192];
-    if (json_get_object(backend_resp, "error", obj, sizeof(obj)) == 0) {
-        snprintf(response, response_size,
-                 "{\"jsonrpc\":\"2.0\",\"id\":%d,\"error\":%s}", id, obj);
-        return;
-    }
-    if (json_get_object(backend_resp, "result", obj, sizeof(obj)) == 0) {
-        snprintf(response, response_size,
-                 "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":%s}", id, obj);
-        return;
-    }
-    maths_make_error(response, response_size, id,
-                               "malformed backend response");
-}
-
-static void maths_make_error(char *resp, size_t resp_sz, int id,
-                                       const char *msg)
-{
-    snprintf(resp, resp_sz,
-             "{\"jsonrpc\":\"2.0\",\"id\":%d,\"error\":{\"code\":-32000,"
-             "\"message\":\"%s\"}}",
-             id, msg);
-}
-
-/* JSON-RPC 响应追加分片（plot 长响应增量拼装）：off 为当前写入偏移，
- * 返回新偏移；缓冲不足返回 -1（调用方整体降级为错误响应）。 */
-static int maths_resp_append(char *resp, size_t cap, int off, const char *fmt,
-                             ...)
-{
-    if (off < 0 || (size_t)off >= cap)
-        return -1;
-    va_list ap;
-    va_start(ap, fmt);
-    int w = vsnprintf(resp + off, cap - (size_t)off, fmt, ap);
-    va_end(ap);
-    if (w < 0 || (size_t)w >= cap - (size_t)off)
-        return -1;
-    return off + w;
-}
-
-int maths_d_dispatch_jsonrpc(maths_d_service_t *svc, const char *request,
-                             char *response, size_t response_size)
-{
-    if (!svc || !request || !response || response_size == 0)
-        return MATHS_METHOD_NOT_RPC;
-
-    char method[64] = "";
-    if (json_get_string(request, "method", method, sizeof(method)) != 0)
-        return MATHS_METHOD_NOT_RPC;
-
-    int id = 0;
-    char id_buf[32] = "";
-    if (json_get_string(request, "id", id_buf, sizeof(id_buf)) == 0)
-        id = atoi(id_buf);
-
-    if (strcmp(method, "shutdown") == 0) {
-        snprintf(response, response_size,
-                 "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"status\":\"shutting_down\"}}",
-                 id);
-        return MATHS_METHOD_SHUTDOWN;
+    const char *expr = maths_req_str(params, "expr");
+    if (!expr) {
+        snprintf(err, err_sz, "missing expr");
+        return NULL;
     }
 
-    if (strcmp(method, "health_check") == 0) {
-        airy_mtx_lock(&svc->lock);
-        int healthy = atomic_load(&svc->running) ? 1 : 0;
-        uint64_t evals = svc->eval_count;
-        uint64_t errors = svc->error_count;
-        uint64_t last_ms = svc->last_eval_ms;
-        airy_mtx_unlock(&svc->lock);
-        snprintf(response, response_size,
-                 "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"status\":\"%s\","
-                 "\"service\":\"maths_d\",\"eval_count\":%llu,\"error_count\":%llu,"
-                 "\"last_eval_ms\":%llu}}",
-                 id, healthy ? "healthy" : "degraded", (unsigned long long)evals,
-                 (unsigned long long)errors, (unsigned long long)last_ms);
-        return MATHS_METHOD_HANDLED;
-    }
+    double result = 0.0;
+    char eval_err[128] = "";
+    uint64_t t0 = airy_time_ms();
+    int rc = maths_d_eval(expr, &result, eval_err, sizeof(eval_err));
+    uint64_t elapsed_ms = airy_time_ms() - t0;
 
-    if (strcmp(method, "get_stats") == 0) {
-        airy_mtx_lock(&svc->lock);
-        uint64_t evals = svc->eval_count;
-        uint64_t stats = svc->stats_count;
-        uint64_t symbolic = svc->symbolic_count;
-        uint64_t errors = svc->error_count;
-        uint64_t last_ms = svc->last_eval_ms;
-        uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
-        int backend_up = maths_backend_available(&svc->py_backend);
-        airy_mtx_unlock(&svc->lock);
-        snprintf(response, response_size,
-                 "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"service\":\"maths_d\","
-                 "\"eval_count\":%llu,\"stats_count\":%llu,\"symbolic_count\":%llu,"
-                 "\"python_backend\":\"%s\",\"error_count\":%llu,"
-                 "\"last_eval_ms\":%llu,\"uptime_sec\":%llu}}",
-                 id, (unsigned long long)evals, (unsigned long long)stats,
-                 (unsigned long long)symbolic, backend_up ? "up" : "degraded",
-                 (unsigned long long)errors, (unsigned long long)last_ms,
-                 (unsigned long long)uptime);
-        return MATHS_METHOD_HANDLED;
-    }
-
-    if (strcmp(method, "recognize") == 0) {
-        char text[MATHS_MAX_EXPR_LEN] = "";
-        json_get_string(request, "text", text, sizeof(text));
-        int is_math = maths_d_recognize(text);
-        snprintf(response, response_size,
-                 "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"is_math\":%d}}", id,
-                 is_math);
-        return MATHS_METHOD_HANDLED;
-    }
-
-    if (strcmp(method, "eval") == 0) {
-        char expr[MATHS_MAX_EXPR_LEN] = "";
-        if (json_get_string(request, "expr", expr, sizeof(expr)) != 0) {
-            maths_make_error(response, response_size, id,
-                                       "missing expr");
-            return MATHS_METHOD_HANDLED;
-        }
-        double result = 0.0;
-        char err[128] = "";
-        uint64_t t0 = (uint64_t)time(NULL);
-        int rc = maths_d_eval(expr, &result, err, sizeof(err));
-        uint64_t elapsed_ms = ((uint64_t)time(NULL) - t0) * 1000;
-
-        airy_mtx_lock(&svc->lock);
-        svc->last_eval_ms = elapsed_ms;
-        if (rc == 0)
-            svc->eval_count++;
-        else
-            svc->error_count++;
-        airy_mtx_unlock(&svc->lock);
-
-        if (rc != 0) {
-            maths_make_error(response, response_size, id, err);
-            return MATHS_METHOD_HANDLED;
-        }
-        snprintf(response, response_size,
-                 "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"expr\":\"%s\","
-                 "\"result\":%.12g,\"elapsed_ms\":%llu}}",
-                 id, expr, result, (unsigned long long)elapsed_ms);
-        return MATHS_METHOD_HANDLED;
-    }
-
-    if (strcmp(method, "stats") == 0) {
-        char op[32] = "";
-        double values[MATHS_MAX_VALUES];
-        size_t count = 0;
-        if (json_get_string(request, "op", op, sizeof(op)) != 0 ||
-            json_get_array(request, "values", values, MATHS_MAX_VALUES, &count) != 0 ||
-            count == 0) {
-            maths_make_error(response, response_size, id,
-                                       "invalid stats params (op + values[])");
-            return MATHS_METHOD_HANDLED;
-        }
-        double result = 0.0;
-        char err[128] = "";
-        int rc = maths_d_stats(op, values, count, &result, err, sizeof(err));
-
-        airy_mtx_lock(&svc->lock);
-        if (rc == 0)
-            svc->stats_count++;
-        else
-            svc->error_count++;
-        airy_mtx_unlock(&svc->lock);
-
-        if (rc != 0) {
-            maths_make_error(response, response_size, id, err);
-            return MATHS_METHOD_HANDLED;
-        }
-        snprintf(response, response_size,
-                 "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":{\"op\":\"%s\","
-                 "\"count\":%zu,\"result\":%.12g}}",
-                 id, op, count, result);
-        return MATHS_METHOD_HANDLED;
-    }
-
-    if (strcmp(method, "plot") == 0) {
-        char expr[MATHS_MAX_EXPR_LEN] = "";
-        double xmin = 0.0, xmax = 0.0, samples_in = 128.0;
-        if (json_get_string(request, "expr", expr, sizeof(expr)) != 0 ||
-            json_get_double(request, "xmin", &xmin) != 0 ||
-            json_get_double(request, "xmax", &xmax) != 0 ||
-            isnan(xmin) || isnan(xmax) || !(xmin < xmax)) {
-            maths_make_error(response, response_size, id,
-                                       "invalid plot params (expr, xmin<xmax)");
-            return MATHS_METHOD_HANDLED;
-        }
-        json_get_double(request, "samples", &samples_in);
-        long n = (long)samples_in;
-        if (n < 2)
-            n = 2;
-        if (n > MATHS_PLOT_MAX_SAMPLES)
-            n = MATHS_PLOT_MAX_SAMPLES;
-
-        /* 均匀采样 y=f(x)；x 域固定满采样，y 域错误/NaN/Inf 记 null，
-         * 由渲染端断开连线。响应经增量拼装防溢出（8192 硬约束）。 */
-        double span = xmax - xmin;
-        int off = snprintf(response, response_size,
-                           "{\"jsonrpc\":\"2.0\",\"id\":%d,\"result\":"
-                           "{\"expr\":\"%s\",\"xmin\":%.10g,\"xmax\":%.10g,"
-                           "\"samples\":%ld,\"xs\":[",
-                           id, expr, xmin, xmax, n);
-        for (long i = 0; i < n; i++) {
-            double x = xmin + span * (double)i / (double)(n - 1);
-            off = maths_resp_append(response, response_size, off, "%s%.10g",
-                                    i ? "," : "", x);
-        }
-        off = maths_resp_append(response, response_size, off, "],\"ys\":[");
-        for (long i = 0; i < n; i++) {
-            double x = xmin + span * (double)i / (double)(n - 1);
-            double y = 0.0;
-            char err[128] = "";
-            if (maths_d_eval_at(expr, "x", x, &y, err, sizeof(err)) != 0 ||
-                isnan(y) || isinf(y))
-                off = maths_resp_append(response, response_size, off, "%snull",
-                                        i ? "," : "");
-            else
-                off = maths_resp_append(response, response_size, off,
-                                        "%s%.10g", i ? "," : "", y);
-        }
-        off = maths_resp_append(response, response_size, off, "]}");
-        if (off < 0) {
-            maths_make_error(response, response_size, id,
-                                       "plot response overflow");
-            return MATHS_METHOD_HANDLED;
-        }
-        airy_mtx_lock(&svc->lock);
+    airy_mtx_lock(&svc->lock);
+    svc->last_eval_ms = elapsed_ms;
+    if (rc == 0)
         svc->eval_count++;
-        airy_mtx_unlock(&svc->lock);
-        return MATHS_METHOD_HANDLED;
+    else
+        svc->error_count++;
+    airy_mtx_unlock(&svc->lock);
+
+    if (rc != 0) {
+        snprintf(err, err_sz, "%s", eval_err);
+        return NULL;
     }
 
-    /* ---- 数学后端方法（MCP-Mathematics：numerical/finance/number_theory/units；
-     *       SymPy 符号：solve/differentiate/integrate/limit/simplify/factor/
-     *       expand/matrix）委托 Python 后端（maths-toolkit）---- */
-    if (strcmp(method, "solve") == 0 || strcmp(method, "differentiate") == 0 ||
-        strcmp(method, "integrate") == 0 || strcmp(method, "limit") == 0 ||
-        strcmp(method, "simplify") == 0 || strcmp(method, "factor") == 0 ||
-        strcmp(method, "expand") == 0 || strcmp(method, "matrix") == 0 ||
-        strcmp(method, "units") == 0 || strcmp(method, "numerical") == 0 ||
-        strcmp(method, "finance") == 0 || strcmp(method, "number_theory") == 0) {
-        if (!maths_backend_available(&svc->py_backend)) {
-            maths_make_error(
-                response, response_size, id,
-                "math backend unavailable (install maths-toolkit: "
-                "sh install.sh --with-maths)");
-            return MATHS_METHOD_HANDLED;
-        }
+    cJSON *r = cJSON_CreateObject();
+    if (!r)
+        return NULL;
+    cJSON_AddStringToObject(r, "expr", expr);
+    cJSON_AddNumberToObject(r, "result", result);
+    cJSON_AddNumberToObject(r, "elapsed_ms", (double)elapsed_ms);
+    return r;
+}
 
-        char params[4096] = "{}";
-        if (json_get_object(request, "params", params, sizeof(params)) != 0) {
-            /* 无 params 或解析失败时后端按缺省处理 */
-        }
+static cJSON *maths_stats_call(maths_d_service_t *svc, const cJSON *params,
+                               char *err, size_t err_sz)
+{
+    const char *op = maths_req_str(params, "op");
+    const cJSON *arr = cJSON_GetObjectItemCaseSensitive(params, "values");
+    if (!op || !cJSON_IsArray(arr) || cJSON_GetArraySize(arr) == 0) {
+        snprintf(err, err_sz, "invalid stats params (op + values[])");
+        return NULL;
+    }
 
-        char resp[16384];
-        if (maths_backend_call(&svc->py_backend, method, params, resp,
-                               sizeof(resp)) != 0) {
-            maths_make_error(response, response_size, id,
-                                       "symbolic backend call failed");
-            return MATHS_METHOD_HANDLED;
-        }
+    size_t count = (size_t)cJSON_GetArraySize(arr);
+    if (count > MATHS_MAX_VALUES) {
+        snprintf(err, err_sz, "too many values (max %d)", MATHS_MAX_VALUES);
+        return NULL;
+    }
 
+    /* 堆分配：65536*8B=512KB 超线程栈安全预算，禁栈上大数组 */
+    double *values = (double *)AIRY_MALLOC(count * sizeof(double));
+    if (!values) {
+        snprintf(err, err_sz, "out of memory");
+        return NULL;
+    }
+
+    size_t i = 0;
+    const cJSON *it;
+    cJSON_ArrayForEach(it, arr)
+    {
+        if (!cJSON_IsNumber(it)) {
+            AIRY_FREE(values);
+            snprintf(err, err_sz, "values[] must be numbers");
+            return NULL;
+        }
+        values[i++] = it->valuedouble;
+    }
+
+    double result = 0.0;
+    char stat_err[128] = "";
+    int rc = maths_d_stats(op, values, count, &result, stat_err,
+                           sizeof(stat_err));
+    AIRY_FREE(values);
+
+    airy_mtx_lock(&svc->lock);
+    if (rc == 0)
+        svc->stats_count++;
+    else
+        svc->error_count++;
+    airy_mtx_unlock(&svc->lock);
+
+    if (rc != 0) {
+        snprintf(err, err_sz, "%s", stat_err);
+        return NULL;
+    }
+
+    cJSON *r = cJSON_CreateObject();
+    if (!r)
+        return NULL;
+    cJSON_AddStringToObject(r, "op", op);
+    cJSON_AddNumberToObject(r, "count", (double)count);
+    cJSON_AddNumberToObject(r, "result", result);
+    return r;
+}
+
+static cJSON *maths_plot_result(maths_d_service_t *svc, const cJSON *params,
+                                char *err, size_t err_sz)
+{
+    const char *expr = maths_req_str(params, "expr");
+    const cJSON *jmin = cJSON_GetObjectItemCaseSensitive(params, "xmin");
+    const cJSON *jmax = cJSON_GetObjectItemCaseSensitive(params, "xmax");
+    if (!expr || !cJSON_IsNumber(jmin) || !cJSON_IsNumber(jmax) ||
+        isnan(jmin->valuedouble) || isnan(jmax->valuedouble) ||
+        !(jmin->valuedouble < jmax->valuedouble)) {
+        snprintf(err, err_sz, "invalid plot params (expr, xmin<xmax)");
+        return NULL;
+    }
+
+    const cJSON *jsamples =
+        cJSON_GetObjectItemCaseSensitive(params, "samples");
+    long n = cJSON_IsNumber(jsamples) ? (long)jsamples->valuedouble : 128;
+    if (n < 2)
+        n = 2;
+    if (n > MATHS_PLOT_MAX_SAMPLES)
+        n = MATHS_PLOT_MAX_SAMPLES;
+
+    double xmin = jmin->valuedouble;
+    double span = jmax->valuedouble - xmin;
+
+    cJSON *r = cJSON_CreateObject();
+    if (!r)
+        return NULL;
+    cJSON_AddStringToObject(r, "expr", expr);
+    cJSON_AddNumberToObject(r, "xmin", xmin);
+    cJSON_AddNumberToObject(r, "xmax", jmax->valuedouble);
+    cJSON_AddNumberToObject(r, "samples", (double)n);
+    cJSON *xs = cJSON_AddArrayToObject(r, "xs");
+    cJSON *ys = xs ? cJSON_AddArrayToObject(r, "ys") : NULL;
+    if (!xs || !ys) {
+        cJSON_Delete(r);
+        snprintf(err, err_sz, "out of memory");
+        return NULL;
+    }
+
+    /* 均匀采样 y=f(x)；x 域固定满采样，y 域错误/NaN/Inf 记 null，
+     * 由渲染端断开连线。 */
+    for (long i = 0; i < n; i++) {
+        double x = xmin + span * (double)i / (double)(n - 1);
+        double y = 0.0;
+        char eval_err[128] = "";
+        int ok = maths_d_eval_at(expr, "x", x, &y, eval_err,
+                                 sizeof(eval_err)) == 0 &&
+                 !isnan(y) && !isinf(y);
+        cJSON *jx = cJSON_CreateNumber(x);
+        cJSON *jy = ok ? cJSON_CreateNumber(y) : cJSON_CreateNull();
+        if (!jx || !jy) {
+            cJSON_Delete(jx);
+            cJSON_Delete(jy);
+            cJSON_Delete(r);
+            snprintf(err, err_sz, "out of memory");
+            return NULL;
+        }
+        cJSON_AddItemToArray(xs, jx);
+        cJSON_AddItemToArray(ys, jy);
+    }
+
+    airy_mtx_lock(&svc->lock);
+    svc->eval_count++;
+    airy_mtx_unlock(&svc->lock);
+    return r;
+}
+
+/* 12 个符号方法名：MCP-Mathematics（numerical/finance/number_theory/
+ * units）+ SymPy 符号族（solve/differentiate/integrate/limit/simplify/
+ * factor/expand/matrix），委托 Python 后端（maths-toolkit）。 */
+static int maths_is_backend_method(const char *m)
+{
+    static const char *const k_backend[] = {
+        "solve",    "differentiate", "integrate", "limit",
+        "simplify", "factor",        "expand",    "matrix",
+        "units",    "numerical",     "finance",   "number_theory",
+    };
+    for (size_t i = 0; i < sizeof(k_backend) / sizeof(k_backend[0]); i++)
+        if (strcmp(m, k_backend[i]) == 0)
+            return 1;
+    return 0;
+}
+
+/* 后端响应剥壳：{"result":{...}} 深转移 / {"error":{...}} 归一为
+ * -32000+message（wire 偏差：旧 wire 透传 error 对象含 data）。 */
+static cJSON *maths_backend_forward(maths_d_service_t *svc,
+                                    const char *method, const cJSON *params,
+                                    char *err, size_t err_sz)
+{
+    if (!maths_backend_available(&svc->py_backend)) {
+        snprintf(err, err_sz,
+                 "math backend unavailable (install maths-toolkit: "
+                 "sh install.sh --with-maths)");
+        return NULL;
+    }
+    if (!cJSON_IsObject(params)) {
+        snprintf(err, err_sz, "params object required");
+        return NULL;
+    }
+
+    char *params_json = cJSON_PrintUnformatted(params);
+    if (!params_json) {
+        snprintf(err, err_sz, "out of memory");
+        return NULL;
+    }
+
+    char resp[16384];
+    int rc = maths_backend_call(&svc->py_backend, method, params_json, resp,
+                                sizeof(resp));
+    AIRY_FREE(params_json);
+    if (rc != 0) {
+        snprintf(err, err_sz, "symbolic backend call failed");
+        return NULL;
+    }
+
+    cJSON *shell = cJSON_Parse(resp);
+    if (!shell) {
+        snprintf(err, err_sz, "malformed backend response");
+        return NULL;
+    }
+
+    const cJSON *error = cJSON_GetObjectItemCaseSensitive(shell, "error");
+    cJSON *out = NULL;
+    if (cJSON_IsObject(error)) {
+        const cJSON *msg = cJSON_GetObjectItemCaseSensitive(error, "message");
+        snprintf(err, err_sz, "%s",
+                 cJSON_IsString(msg) ? msg->valuestring : "backend error");
+    } else {
+        const cJSON *result = cJSON_GetObjectItemCaseSensitive(shell,
+                                                               "result");
+        if (cJSON_IsObject(result))
+            out = cJSON_DetachItemViaPointer(shell, (cJSON *)result);
+        else
+            snprintf(err, err_sz, "malformed backend response");
+    }
+    cJSON_Delete(shell);
+
+    if (out) {
         airy_mtx_lock(&svc->lock);
         svc->symbolic_count++;
         airy_mtx_unlock(&svc->lock);
+    }
+    return out;
+}
 
-        maths_fwd_symbolic(resp, id, response, response_size);
-        return MATHS_METHOD_HANDLED;
+maths_rpc_status_t maths_d_rpc_call(maths_d_service_t *svc,
+                                    const char *method, const cJSON *params,
+                                    cJSON **out_result, char *err,
+                                    size_t err_sz)
+{
+    if (out_result)
+        *out_result = NULL;
+    if (!svc || !method || !out_result || !err || err_sz == 0)
+        return MATHS_RPC_ERR_DOMAIN;
+
+    cJSON *r = NULL;
+    if (strcmp(method, "health_check") == 0)
+        r = maths_health_result(svc);
+    else if (strcmp(method, "get_stats") == 0)
+        r = maths_usage_result(svc);
+    else if (strcmp(method, "recognize") == 0) {
+        int is_math = maths_d_recognize(maths_req_str(params, "text"));
+        r = cJSON_CreateObject();
+        if (r)
+            cJSON_AddNumberToObject(r, "is_math", (double)is_math);
+    } else if (strcmp(method, "eval") == 0) {
+        r = maths_eval_result(svc, params, err, err_sz);
+    } else if (strcmp(method, "stats") == 0) {
+        r = maths_stats_call(svc, params, err, err_sz);
+    } else if (strcmp(method, "plot") == 0) {
+        r = maths_plot_result(svc, params, err, err_sz);
+    } else if (maths_is_backend_method(method)) {
+        r = maths_backend_forward(svc, method, params, err, err_sz);
+    } else {
+        return MATHS_RPC_ERR_METHOD;
     }
 
-    maths_make_error(response, response_size, id, "method not found");
-    return MATHS_METHOD_HANDLED;
+    if (!r) {
+        if (err[0] == '\0')
+            snprintf(err, err_sz, "internal error");
+        return MATHS_RPC_ERR_DOMAIN;
+    }
+    *out_result = r;
+    return MATHS_RPC_OK;
 }
 
 /* ==================== 服务生命周期 ==================== */
@@ -614,7 +534,6 @@ int maths_d_service_init(maths_d_service_t *svc)
     if (!svc)
         return -1;
     AIRY_MEMSET(svc, 0, sizeof(*svc));
-    svc->server_fd = AIRY_INVALID_SOCKET;
     airy_mtx_init(&svc->lock);
     atomic_store(&svc->running, 0);
     svc->start_time = (uint64_t)time(NULL);
@@ -626,6 +545,4 @@ void maths_d_service_destroy(maths_d_service_t *svc)
     if (!svc)
         return;
     airy_mtx_destroy(&svc->lock);
-    AIRY_FREE(svc->socket_path);
-    svc->socket_path = NULL;
 }

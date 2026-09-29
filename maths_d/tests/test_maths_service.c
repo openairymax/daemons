@@ -3,12 +3,11 @@
 
 /**
  * @file test_maths_service.c
- * @brief 数学外挂计算服务单元测试。
+ * @brief 数学外挂计算服务单元测试（域层 maths_d_rpc_call 直测）。
  */
 
 #include "maths_service.h"
 #include "expr_eval.h"
-#include "airy_memory.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -61,6 +60,26 @@ static int g_fail = 0;
             CHECK_NEAR(_r, (expected), 1e-9);                                  \
         }                                                                      \
     } while (0)
+
+/* 构造未部署 Python 后端的服务实例（锁经正式 init 初始化） */
+static int test_svc_init(maths_d_service_t *svc)
+{
+    if (maths_d_service_init(svc) != 0) {
+        printf("FAIL service init\n");
+        g_fail++;
+        return -1;
+    }
+    svc->py_backend.in_fd = -1;
+    svc->py_backend.out_fd = -1;
+    svc->py_backend.available = 0;
+    return 0;
+}
+
+static void test_svc_teardown(maths_d_service_t *svc)
+{
+    maths_backend_destroy(&svc->py_backend);
+    maths_d_service_destroy(svc);
+}
 
 static void test_basic_arithmetic(void)
 {
@@ -176,58 +195,51 @@ static void test_recognize(void)
     }
 }
 
-/* 数学后端方法路由：numerical/finance/number_theory 与符号方法必须被识别
- * 为后端方法（backend 不可用时返回 backend 错误，而非 "method not found"）。 */
+/* 后端方法路由：12 个符号/数值方法必须进入后端转发路径（后端不可用
+ * 时返回域错误，而非 ERR_METHOD）；未知方法返回 ERR_METHOD。 */
 static void test_backend_method_routing(void)
 {
     maths_d_service_t svc;
-    AIRY_MEMSET(&svc, 0, sizeof(svc));
-    svc.py_backend.in_fd = -1;
-    svc.py_backend.out_fd = -1;
-    svc.py_backend.available = 0; /* 模拟未部署 maths-toolkit */
-
     const char *methods[] = {
         "solve", "differentiate", "integrate", "limit", "simplify",
         "factor", "expand", "matrix", "units", "numerical", "finance",
         "number_theory"
     };
     size_t i;
+
+    if (test_svc_init(&svc) != 0)
+        return;
+
     for (i = 0; i < sizeof(methods) / sizeof(methods[0]); i++) {
-        char req[256];
-        char resp[2048];
-        snprintf(req, sizeof(req),
-                 "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"%s\",\"params\":{}}",
-                 methods[i]);
-        if (maths_d_dispatch_jsonrpc(&svc, req, resp, sizeof(resp)) !=
-            MATHS_METHOD_HANDLED) {
-            printf("FAIL routing %s (not handled)\n", methods[i]);
-            g_fail++;
-            continue;
-        }
-        /* backend 不可用时应返回 backend 错误，而非 method not found */
-        if (strstr(resp, "method not found")) {
-            printf("FAIL routing %s (fell through to method not found)\n",
-                   methods[i]);
+        cJSON *params = cJSON_Parse("{}");
+        cJSON *result = NULL;
+        char err[256] = "";
+        maths_rpc_status_t st =
+            maths_d_rpc_call(&svc, methods[i], params, &result, err,
+                             sizeof(err));
+        if (st != MATHS_RPC_ERR_DOMAIN ||
+            !strstr(err, "backend unavailable")) {
+            printf("FAIL routing %s (st=%d err=%s)\n", methods[i], (int)st,
+                   err);
             g_fail++;
         }
-        if (!strstr(resp, "backend unavailable")) {
-            printf("FAIL routing %s (missing backend-unavailable error)\n",
-                   methods[i]);
-            g_fail++;
-        }
+        cJSON_Delete(params);
+        cJSON_Delete(result);
     }
 
-    /* 未知方法仍应返回 method not found */
-    char req[256];
-    char resp[2048];
-    snprintf(req, sizeof(req),
-             "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"bogus_math\",\"params\":{}}");
-    if (maths_d_dispatch_jsonrpc(&svc, req, resp, sizeof(resp)) !=
-        MATHS_METHOD_HANDLED ||
-        !strstr(resp, "method not found")) {
-        printf("FAIL unknown method should be method not found\n");
-        g_fail++;
+    {
+        cJSON *params = cJSON_Parse("{}");
+        cJSON *result = NULL;
+        char err[256] = "";
+        if (maths_d_rpc_call(&svc, "bogus_math", params, &result, err,
+                             sizeof(err)) != MATHS_RPC_ERR_METHOD) {
+            printf("FAIL unknown method should be ERR_METHOD\n");
+            g_fail++;
+        }
+        cJSON_Delete(params);
+        cJSON_Delete(result);
     }
+    test_svc_teardown(&svc);
 }
 
 /* 变量绑定求值（绘图采样基础）：绑定变量参与运算、未绑定标识符仍报错、
@@ -262,73 +274,95 @@ static void test_eval_at(void)
     }
 }
 
+/* plot 域调用：成功返回序列化 result（调用方 cJSON_free）；
+ * 失败返回 NULL，err 填可读原因。 */
+static char *test_plot_call(maths_d_service_t *svc, const char *params_json,
+                            char *err, size_t err_sz)
+{
+    cJSON *params = cJSON_Parse(params_json);
+    cJSON *result = NULL;
+    char *out = NULL;
+
+    if (!params) {
+        printf("FAIL plot params parse\n");
+        g_fail++;
+        return NULL;
+    }
+    if (maths_d_rpc_call(svc, "plot", params, &result, err, err_sz) ==
+            MATHS_RPC_OK &&
+        result) {
+        out = cJSON_PrintUnformatted(result);
+        cJSON_Delete(result);
+    }
+    cJSON_Delete(params);
+    return out;
+}
+
 /* plot RPC：正常采样、奇点 null、非法域、缺省与上限夹取。 */
 static void test_plot_rpc(void)
 {
     maths_d_service_t svc;
-    AIRY_MEMSET(&svc, 0, sizeof(svc));
-    svc.py_backend.in_fd = -1;
-    svc.py_backend.out_fd = -1;
-    svc.py_backend.available = 0;
+    char err[256] = "";
+    char *resp;
+
+    if (test_svc_init(&svc) != 0)
+        return;
 
     /* y=x^2 on [-2,2]，5 样本 → xs=[-2,-1,0,1,2] ys=[4,1,0,1,4] */
-    const char *req =
-        "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"plot\","
-        "\"params\":{\"expr\":\"x^2\",\"xmin\":-2,\"xmax\":2,\"samples\":5}}";
-    char resp[8192];
-    if (maths_d_dispatch_jsonrpc(&svc, req, resp, sizeof(resp)) !=
-            MATHS_METHOD_HANDLED ||
-        !strstr(resp, "\"xs\":[-2,-1,0,1,2]") ||
+    resp = test_plot_call(&svc,
+                          "{\"expr\":\"x^2\",\"xmin\":-2,\"xmax\":2,"
+                          "\"samples\":5}",
+                          err, sizeof(err));
+    if (!resp || !strstr(resp, "\"xs\":[-2,-1,0,1,2]") ||
         !strstr(resp, "\"ys\":[4,1,0,1,4]")) {
-        printf("FAIL plot y=x^2: %s\n", resp);
+        printf("FAIL plot y=x^2: %s\n", resp ? resp : err);
         g_fail++;
     }
+    cJSON_free(resp);
 
     /* 域内奇点（1/x @ x=0）→ null */
-    const char *req2 =
-        "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"plot\","
-        "\"params\":{\"expr\":\"1/x\",\"xmin\":-1,\"xmax\":1,\"samples\":3}}";
-    char resp2[8192];
-    if (maths_d_dispatch_jsonrpc(&svc, req2, resp2, sizeof(resp2)) !=
-            MATHS_METHOD_HANDLED ||
-        !strstr(resp2, "\"ys\":[-1,null,1]")) {
-        printf("FAIL plot singular point should be null: %s\n", resp2);
+    resp = test_plot_call(&svc,
+                          "{\"expr\":\"1/x\",\"xmin\":-1,\"xmax\":1,"
+                          "\"samples\":3}",
+                          err, sizeof(err));
+    if (!resp || !strstr(resp, "\"ys\":[-1,null,1]")) {
+        printf("FAIL plot singular point should be null: %s\n",
+               resp ? resp : err);
         g_fail++;
     }
+    cJSON_free(resp);
 
-    /* 非法域：xmin >= xmax */
-    const char *req3 =
-        "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"plot\","
-        "\"params\":{\"expr\":\"x\",\"xmin\":2,\"xmax\":-2}}";
-    char resp3[1024];
-    if (maths_d_dispatch_jsonrpc(&svc, req3, resp3, sizeof(resp3)) !=
-            MATHS_METHOD_HANDLED ||
-        !strstr(resp3, "error")) {
-        printf("FAIL plot bad domain should error: %s\n", resp3);
+    /* 非法域：xmin >= xmax → ERR_DOMAIN + 可读 err */
+    resp = test_plot_call(&svc, "{\"expr\":\"x\",\"xmin\":2,\"xmax\":-2}",
+                          err, sizeof(err));
+    if (resp || err[0] == '\0') {
+        printf("FAIL plot bad domain should error: %s\n",
+               resp ? resp : "(no err)");
         g_fail++;
     }
+    cJSON_free(resp);
 
-    /* samples 缺省 → 128；超限 → 夹取 256 */
-    const char *req4 =
-        "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"plot\","
-        "\"params\":{\"expr\":\"x\",\"xmin\":0,\"xmax\":1}}";
-    char resp4[8192];
-    if (maths_d_dispatch_jsonrpc(&svc, req4, resp4, sizeof(resp4)) !=
-            MATHS_METHOD_HANDLED ||
-        !strstr(resp4, "\"samples\":128")) {
-        printf("FAIL plot default samples: %s\n", resp4);
+    /* samples 缺省 → 128 */
+    resp = test_plot_call(&svc, "{\"expr\":\"x\",\"xmin\":0,\"xmax\":1}",
+                          err, sizeof(err));
+    if (!resp || !strstr(resp, "\"samples\":128")) {
+        printf("FAIL plot default samples: %s\n", resp ? resp : err);
         g_fail++;
     }
-    const char *req5 =
-        "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"plot\","
-        "\"params\":{\"expr\":\"x\",\"xmin\":0,\"xmax\":1,\"samples\":99999}}";
-    char resp5[8192];
-    if (maths_d_dispatch_jsonrpc(&svc, req5, resp5, sizeof(resp5)) !=
-            MATHS_METHOD_HANDLED ||
-        !strstr(resp5, "\"samples\":256")) {
-        printf("FAIL plot clamp samples: %s\n", resp5);
+    cJSON_free(resp);
+
+    /* 超限 → 夹取 256 */
+    resp = test_plot_call(&svc,
+                          "{\"expr\":\"x\",\"xmin\":0,\"xmax\":1,"
+                          "\"samples\":99999}",
+                          err, sizeof(err));
+    if (!resp || !strstr(resp, "\"samples\":256")) {
+        printf("FAIL plot clamp samples: %s\n", resp ? resp : err);
         g_fail++;
     }
+    cJSON_free(resp);
+
+    test_svc_teardown(&svc);
 }
 
 int main(void)
