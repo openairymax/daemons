@@ -57,6 +57,17 @@
 extern "C" {
 #endif
 
+/* 服务端点五元组：svc_endpoint_<daemon> 解析产出（config/env 覆盖策略
+ * 在各户 svc.c，机制载体在此），daemon_create_server_socket 与事件
+ * 驱动装配按字段序消费。 */
+typedef struct {
+    int use_tcp;
+    const char *tcp_host;
+    int tcp_port;
+    const char *sock_unix;
+    const char *sock_win;
+} daemon_endpoint_t;
+
 
 /**
  * @brief Generate the common global variables and signal-handler
@@ -271,6 +282,30 @@ extern "C" {
         JSONRPC_SEND_SUCCESS(*(airy_sock_t *)user_data, result, id);                     \
         SVC_LOG_INFO("RPC shutdown requested, initiating graceful shutdown");            \
     }
+
+/**
+ * @brief Table-driven method registration (mechanism, complements the
+ *        generated main.c of daemon_gen.py).
+ *
+ * Hand-written if-else registration chains are the last manual boilerplate
+ * left in daemon mains. The generated main.c declares a static
+ * daemon_method_entry_t table (manifest-driven SSoT) and registers the
+ * whole table in one call, keeping the entry file within its line budget
+ * regardless of method count.
+ */
+typedef struct {
+    const char *name;
+    method_fn handler;
+} daemon_method_entry_t;
+
+#define DAEMON_REGISTER_METHODS(dispatcher, entries)                                    \
+    do {                                                                                \
+        for (size_t _dm_i = 0;                                                          \
+             _dm_i < sizeof(entries) / sizeof((entries)[0]); _dm_i++) {                 \
+            method_dispatcher_register((dispatcher), (entries)[_dm_i].name,             \
+                                       (entries)[_dm_i].handler, NULL);                 \
+        }                                                                               \
+    } while (0)
 
 /**
  * @brief Opt a daemon into the corekern same-process transport (blueprint
