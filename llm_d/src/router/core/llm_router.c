@@ -18,8 +18,8 @@
  *
  */
 
-#include "router/router_context.h"
-#include "router/router_internal.h"
+#include "router/core/router_context.h"
+#include "router/core/router_internal.h"
 #include "airy_memory.h"
 
 static router_ctx_t g_router;

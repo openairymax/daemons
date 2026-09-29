@@ -10,7 +10,7 @@
  *
  */
 
-#include "router/router_context.h"
+#include "router/core/router_context.h"
 
 /**
  * @brief Quality-first routing - pick the best endpoint by priority and

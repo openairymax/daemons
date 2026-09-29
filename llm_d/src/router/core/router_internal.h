@@ -12,7 +12,7 @@
 #ifndef AIRY_RT_LLM_ROUTER_INTERNAL_H
 #define AIRY_RT_LLM_ROUTER_INTERNAL_H
 
-#include "router/llm_router.h"
+#include "router/core/llm_router.h"
 
 #ifdef __cplusplus
 extern "C" {
