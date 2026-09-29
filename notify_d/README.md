@@ -24,7 +24,7 @@
 - **异步事件队列** — 环形队列（容量 1024）+ 后台广播线程，发布方不被慢消费者阻塞。
 - **双路匹配投递** — 事件同时匹配「连接握手期声明的 `X-Topic`」与「订阅注册表
   中登记的 `(topic, client_id)`」。
-- **零外部加密依赖** — WebSocket 握手所需的 SHA-1 与 Base64 在 `main.c` 内自带实现。
+- **零外部加密依赖** — WebSocket 握手所需的 SHA-1 与 Base64 在 `src/net.c` 域内自带实现。
 
 ## 架构
 
@@ -41,10 +41,17 @@
         └── Unix socket 客户端（原始 JSON）
 ```
 
-- `src/main.c` — 监听与 accept 循环、每连接独立线程（并发上限 128，超限直接关闭
-  新连接）、握手与帧编码、服务端投递；
-- `src/notify_service.c` — 订阅注册表、事件入队与广播、JSON-RPC 分发
+- `src/main.c` — 装配域：启动引导与 accept 循环、每连接独立线程（并发上限 128，
+  超限直接关闭新连接）；
+- `src/svc.c` — 生命周期域：服务状态机（init / start / stop / destroy /
+  healthcheck）与后台广播线程，停机清理出口唯一；
+- `src/net.c` — 协议域：请求嗅探分派（JSON-RPC / SSE / WebSocket / 原始 JSON）、
+  WS 握手与帧编码、每连接处理线程；
+- `src/notify_service.c` — 业务核心：订阅注册表、事件入队与广播、JSON-RPC 分发
   （`notify_d_dispatch_jsonrpc`）；
+- 本户为 0.1.19 五件套化的**异型户**（`codegen:false` 登记式）：单端口四协议
+  多路复用形态不兼容生成态 event_driver 骨架，`.manifest` 仅作端点与方法面
+  契约登记，装配清单手工维护于 `modules/sources.cmake`；
 - 健康判定：队列已满，或（已通知数 > 10 且 错误数 > 已通知数的一半）时判为不健康。
 
 ## JSON-RPC 接口

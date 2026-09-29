@@ -1,5 +1,6 @@
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
-# Notify 服务构建文件
+# Notify 服务构建文件（0.1.19 五件套化，codegen=false 异型户：
+# 单端口四协议多路复用，装配清单手工维护于 modules/sources.cmake）
 
 
 set(CMAKE_C_STANDARD 11)
@@ -12,10 +13,7 @@ set(DAEMON_COMMON_INCLUDE_DIR ${DAEMON_COMMON_DIR}/include)
 set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
-set(NOTIFY_D_SOURCES
-    src/main.c
-    src/notify_service.c
-)
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
 
 add_executable(notify_d ${NOTIFY_D_SOURCES})
 
