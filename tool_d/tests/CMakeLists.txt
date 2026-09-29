@@ -96,7 +96,7 @@ foreach(TEST_SRC ${TOOL_TEST_SOURCES})
 
     # P3.18 (ACC-DT27): executor.c 调用 sandbox API（airy_sandbox_*），
     # 需链接 airy_syscall。airy_syscall PUBLIC 依赖 airy_coreloopthree，
-    # 后者引用 cognition/llm_service/checkpoint/hook_d 等符号，需完整传递依赖。
+    # 后者引用 cognition/llm_service/checkpoint/hook 等符号，需完整传递依赖。
     # 仿照 test_syscall_extended 配置，但不链接 airy_tool_service（避免与
     # TOOL_IMPL_SOURCES 中的 executor.c/service.c 等重复符号）。
     # 库序即成员级 DAG 拓扑序，单遍左到右解析完备；
