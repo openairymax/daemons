@@ -232,7 +232,7 @@ int market_service_sync_registry(market_service_t *service)
 
         size_t id_len = (size_t)(id_end - id_start);
         if (id_len > 0 && id_len < 128) {
-            __builtin_memcpy(found_ids[n_found], id_start, id_len);
+            AIRY_MEMCPY(found_ids[n_found], id_start, id_len);
             found_ids[n_found][id_len] = '\0';
             n_found++;
         }
