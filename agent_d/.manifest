@@ -1,0 +1,35 @@
+{
+  "manifest_version": 1,
+  "daemon": "agent_d",
+  "cname": "agent",
+  "sd_type": "agent",
+  "ops": ["ipc"],
+  "facades": ["ingress", "execute", "state"],
+  "slots": ["create", "delete", "flow", "stream", "query"],
+  "rpc": {
+    "unix": "agent.sock",
+    "win_pipe": "airy_agent",
+    "tcp": 8086,
+    "tags": "agent,core",
+    "buffer": 65536,
+    "concurrent": true,
+    "pool": {"max_events": 256, "min": 16, "max": 128, "queue": 4096},
+    "methods": [
+      "spawn", "terminate", "invoke", "cancel", "list", "count",
+      "run", "run_cancel", "run_stream", "health_check",
+      "get_stats", "vocab"
+    ]
+  },
+  "deps": {"required": [], "optional": []},
+  "modules": [
+    {"name": "core", "sources": [
+      "agent_d_rpc.c",
+      "agent_d_monitor.c",
+      "agent_run_engine.c",
+      "agent_run_ledger.c",
+      "agent_run_loop.c",
+      "agent_run_stream.c",
+      "agent_run_rpc.c"
+    ]}
+  ]
+}
