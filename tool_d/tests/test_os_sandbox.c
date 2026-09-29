@@ -13,7 +13,7 @@
 // - OFF 模式：不施加限制
 // - 环境变量构造配置
 
-#include "os_sandbox.h"
+#include "sandbox/os_sandbox.h"
 
 #include <errno.h>
 #include <fcntl.h>

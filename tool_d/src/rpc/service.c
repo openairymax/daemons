@@ -15,10 +15,10 @@
 #include "daemon_security.h"
 #include "error.h"
 #include "core/executor.h"
+#include "core/approval_gate.h"
 #include "daemon_platform_ext.h"
 #include "rpc/service.h"
 #include "svc_logger.h"
-#include "tool_approval.h"
 #include "rpc/tool_service_internal.h"
 
 #include <cjson/cJSON.h>
@@ -106,18 +106,19 @@ tool_service_t *tool_service_create(const char *config_path)
 
     register_builtin_tools(svc);
 
-    tool_approval_config_t approval_cfg;
-    __builtin_memset(&approval_cfg, 0, sizeof(approval_cfg));
-    approval_cfg.agent_id = "tool_d";
-    approval_cfg.enable_safety_guard_chain = true;
-    approval_cfg.enable_audit_logging = true;
-    approval_cfg.permission_rules = NULL;
-    tool_approval_ctx_t *approval_ctx = tool_approval_create(&approval_cfg);
-    if (approval_ctx) {
-        tool_executor_set_approval_ctx(svc->executor, approval_ctx);
-        SVC_LOG_INFO("C-L05: Default tool approval context attached (enable_approval=true)");
+    /* P3.17 (ACC-DT18): enable tool approval by default
+     * (enable_approval=true). Create the default approval gate and inject it
+     * into the executor so every tool execution must pass Cupolas
+     * safety-dome approval. executor.c is fail-closed: without an injected
+     * gate it refuses execution. daemon_security uses a fail-closed ACL: no
+     * ACL entry = denied. Deployment must register authorized tools via
+     * daemon_security_add_acl_rule(). */
+    approval_gate_t *gate = approval_gate_create_default();
+    tool_executor_set_gate(svc->executor, gate);
+    if (gate) {
+        SVC_LOG_INFO("C-L05: Default tool approval gate attached (enable_approval=true)");
     } else {
-        SVC_LOG_ERROR("C-L05: Failed to create default approval context — "
+        SVC_LOG_ERROR("C-L05: Failed to create default approval gate — "
                       "executor will fail-closed on all tool executions");
     }
 

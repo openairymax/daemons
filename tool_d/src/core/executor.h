@@ -10,8 +10,7 @@
 #define TOOL_EXECUTOR_H
 
 #include "core/config.h"
-#include "tool_approval.h"
-#include "tool_interactive_approval.h"
+#include "approval_gate.h"
 #include "tool_service.h"
 
 #ifdef __cplusplus
@@ -90,17 +89,29 @@ int tool_executor_run_async(tool_executor_t *exec, const tool_metadata_t *meta,
                             tool_result_t **out_result);
 
 
-void tool_executor_set_approval_ctx(tool_executor_t *exec, tool_approval_ctx_t *approval_ctx);
-
+/**
+ * @brief Inject the approval gate (ownership transfers to the executor).
+ * @param exec Executor
+ * @param gate Approval gate (NULL re-arms fail-closed refusal)
+ *
+ * Without a gate every tool execution is refused (fail-closed); service.c
+ * injects the default gate right after creating the executor.
+ *
+ * @ownership exec: BORROW, gate: TRANSFER
+ */
+void tool_executor_set_gate(tool_executor_t *exec, approval_gate_t *gate);
 
 /**
- * @brief Whether interactive approval is enabled.
+ * @brief Extra pool wait budget caused by interactive approval (0 when off).
  * @param exec Executor
- * @return true enabled, false disabled
+ * @return the approval timeout SSoT when interactive approval is on, else 0
+ *
+ * Keeps the pool decoupled from the approval domain: the timeout SSoT
+ * lives behind the gate.
  *
  * @ownership exec: BORROW
  */
-bool tool_executor_interactive_enabled(tool_executor_t *exec);
+uint64_t tool_executor_interactive_budget_extra(const tool_executor_t *exec);
 
 /**
  * @brief List all pending approval requests (JSON array string).
