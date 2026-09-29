@@ -29,6 +29,7 @@
 #include "core/executor.h"
 #include "airy_memory.h"
 #include "syscalls.h"
+#include "tool_service.h"
 
 #include <stdio.h>
 #include <stdlib.h>

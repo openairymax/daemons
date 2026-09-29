@@ -15,7 +15,6 @@
 #include "core/cache.h"
 #include "error.h"
 #include "memory_common.h"
-#include "tool_service.h"
 
 #include <cjson/cJSON.h>
 
