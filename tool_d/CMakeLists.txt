@@ -41,8 +41,10 @@ set(TOOL_SERVICE_SOURCES
     src/core/executor_pool.c
     src/core/validator.c
     src/core/cache.c
-    src/tool_approval.c
-    src/safety_guard_bridge.c
+    # R3 (0.1.19): 审批域内聚 approval/，gate 为执行面唯一入口
+    src/approval/gate.c
+    src/approval/tool_approval.c
+    src/approval/safety_guard_bridge.c
     src/builtin/builtin.c
     src/builtin/builtin_shell.c
     src/builtin/builtin_fs.c
@@ -52,8 +54,8 @@ set(TOOL_SERVICE_SOURCES
     src/builtin/builtin_net.c
     src/builtin/builtin_git.c
     src/builtin/builtin_maths.c
-    src/tool_interactive_approval.c
-    src/os_sandbox.c
+    src/approval/tool_interactive_approval.c
+    src/sandbox/os_sandbox.c
     # plugin_d → tool_d 整编——插件 dlopen 引擎随迁
     src/plugin/plugin_service.c
     src/plugin/plugin_discovery.c

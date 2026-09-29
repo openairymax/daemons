@@ -20,9 +20,7 @@
 #include "core/executor.h"
 #include "builtin/builtin.h"
 #include "daemon_platform_ext.h"
-#include "safety_guard_bridge.h"
 #include "svc_logger.h"
-#include "tool_approval.h"
 #include "hall_writer.h"
 
 #include <stdio.h>
@@ -46,22 +44,13 @@ struct tool_executor {
     uint64_t total_executions;
     uint64_t success_count;
 
-    tool_approval_ctx_t *approval_ctx;
-    safety_guard_bridge_t *safety_bridge;
-    /* Tool execution sandbox — a mandatory security layer
-     * (not an optional enhancement). Together with approval_ctx it forms a
-     * two-tier fail-closed security architecture:
-     *   - approval_ctx: policy approval based on tool metadata and params
-     *   - sandbox: permission/quota/audit interception based on syscall number
-     * When sandbox is NULL (init failed), tool_executor_run refuses to execute
-     * any tool. */
+    /* Approval gate (approval domain injected via set_gate). NULL =
+     * fail-closed. The two-tier fail-closed security architecture:
+     *   - gate: policy approval based on tool metadata and params
+     *   - sandbox: permission/quota/audit interception based on syscall
+     * When either is NULL, tool_executor_run refuses to execute any tool. */
+    approval_gate_t *gate;
     airy_sandbox_t *sandbox;
-    /* P0: tool-level interactive permission approval (Claude Code style
-     * permission prompt). Enabled at creation when AIRY_TOOL_APPROVAL_MODE is
-     * "interactive". When static approval denies, if this is enabled the
-     * request is queued as pending and blocks waiting for a tool.approve
-     * decision. */
-    interactive_approval_t *interactive;
 };
 
 tool_executor_t *tool_executor_create(const tool_executor_config_t *cfg)
@@ -90,14 +79,8 @@ tool_executor_t *tool_executor_create(const tool_executor_config_t *cfg)
     }
     exec->total_executions = 0;
     exec->success_count = 0;
-    exec->approval_ctx = NULL;
-    exec->safety_bridge = NULL;
+    exec->gate = NULL;
     exec->sandbox = NULL;
-    /* P0: create the interactive approval manager (reads
-     * AIRY_TOOL_APPROVAL_MODE to decide whether to enable). Creation failure
-     * only disables interactive approval; it does not block normal executor
-     * creation nor static fail-closed approval. */
-    exec->interactive = interactive_approval_create();
 
     /* Initialize the tool execution sandbox.
      *
@@ -170,16 +153,12 @@ void tool_executor_destroy(tool_executor_t *exec)
     SVC_LOG_INFO("Executor destroyed: total=%llu, success=%llu",
                  (unsigned long long)exec->total_executions,
                  (unsigned long long)exec->success_count);
-    /* P3.17: the executor owns approval_ctx (tool_executor_set_approval_ctx
-     * transfers ownership). safety_bridge is created in set_approval_ctx and
-     * is also owned by the executor. */
-    if (exec->approval_ctx) {
-        tool_approval_destroy(exec->approval_ctx);
-        exec->approval_ctx = NULL;
-    }
-    if (exec->safety_bridge) {
-        safety_guard_bridge_destroy(exec->safety_bridge);
-        exec->safety_bridge = NULL;
+    /* P3.17: set_gate transfers gate ownership. Destroying the gate
+     * releases the approval context, the SafetyGuard bridge and the
+     * interactive manager. */
+    if (exec->gate) {
+        approval_gate_destroy(exec->gate);
+        exec->gate = NULL;
     }
     /* Destroy the sandbox. Note: airy_sandbox_manager_destroy
      * is NOT called because the manager is a process-level singleton possibly
@@ -190,48 +169,20 @@ void tool_executor_destroy(tool_executor_t *exec)
         exec->sandbox = NULL;
     }
 
-    if (exec->interactive) {
-        interactive_approval_destroy(exec->interactive);
-        exec->interactive = NULL;
-    }
     airy_mtx_destroy(&exec->lock);
     AIRY_FREE(exec);
 }
 
-void tool_executor_set_approval_ctx(tool_executor_t *exec, tool_approval_ctx_t *approval_ctx)
+void tool_executor_set_gate(tool_executor_t *exec, approval_gate_t *gate)
 {
-    if (!exec)
+    if (!exec) {
         return;
+    }
     airy_mtx_lock(&exec->lock);
-    exec->approval_ctx = approval_ctx;
+    exec->gate = gate;
     airy_mtx_unlock(&exec->lock);
-    if (approval_ctx) {
-        SVC_LOG_INFO("Approval context attached to executor");
-
-        if (!exec->safety_bridge) {
-            safety_guard_bridge_config_t bridge_cfg;
-            __builtin_memset(&bridge_cfg, 0, sizeof(bridge_cfg));
-            bridge_cfg.enable_permission_guard = true;
-            bridge_cfg.enable_rate_limit_guard = true;
-            bridge_cfg.enable_content_filter = true;
-            bridge_cfg.enable_input_sanitization = true;
-            bridge_cfg.enable_resource_quota = true;
-            bridge_cfg.enable_audit_guard = true;
-            bridge_cfg.rate_limit_per_minute = 0;
-            bridge_cfg.max_params_size = 0;
-            bridge_cfg.denied_patterns = NULL;
-            bridge_cfg.agent_id = "tool_d";
-
-            exec->safety_bridge = safety_guard_bridge_create(&bridge_cfg);
-            if (exec->safety_bridge) {
-                SVC_LOG_INFO("SafetyGuard bridge created for executor");
-            } else {
-                SVC_LOG_WARN("Failed to create SafetyGuard bridge, "
-                             "falling back to local checks");
-            }
-        }
-
-        tool_approval_set_safety_guard_bridge(approval_ctx, exec->safety_bridge);
+    if (gate) {
+        SVC_LOG_INFO("Approval gate attached to executor");
     }
 }
 
@@ -351,19 +302,20 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
      * element to the tool, which parses the JSON itself. */
 
     /* ── Cupolas SafetyGuard -> tool_d tool approval ──
-     * Fail-closed: refuse execution when approval_ctx is NULL.
-     * Legacy code `if (exec->approval_ctx)` skipped approval and executed when
-     * the ctx was not set, equivalent to the security system being disabled —
-     * violating the zero-debt security principle.
-     * Fix: ctx unset = security system not configured = refuse execution
-     * (fail-closed). service.c injects a default approval_ctx
-     * (enable_approval=true) right after creating the executor. */
-    if (!exec->approval_ctx) {
-        SVC_LOG_ERROR("approval_ctx is NULL — tool execution DENIED (fail-closed). "
-                      "Call tool_executor_set_approval_ctx() before executing tools.");
+     * Fail-closed: refuse execution when no approval gate is attached.
+     * Legacy code `if (exec->approval_ctx)` skipped approval and executed
+     * when the gate was not set, equivalent to the security system being
+     * disabled — violating the zero-debt security principle.
+     * Fix: gate unset = security system not configured = refuse execution
+     * (fail-closed). service.c injects a default approval gate right after
+     * creating the executor. The full approval flow (static ACL, SafetyGuard
+     * chain, interactive escalation) lives behind the gate. */
+    if (!exec->gate) {
+        SVC_LOG_ERROR("approval gate is NULL — tool execution DENIED (fail-closed). "
+                      "Call tool_executor_set_gate() before executing tools.");
         result->success = 0;
         result->output = AIRY_STRDUP("");
-        result->error = AIRY_STRDUP("Safety approval system not configured (approval_ctx is NULL)");
+        result->error = AIRY_STRDUP("Safety approval system not configured (approval gate is NULL)");
         result->exit_code = -1;
         result->failure_class = TOOL_RESULT_CLASS_FATAL;
         result->duration_ms = 0;
@@ -372,82 +324,20 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     }
 
     {
-        tool_approval_detail_t approval_detail;
-        int app_ret = tool_approval_check_for_agent(exec->approval_ctx, caller_agent, meta,
-                                                    params_json, &approval_detail);
-        if (app_ret != 0) {
-            /* P0: tool-level interactive permission approval.
-             * When enabled (AIRY_TOOL_APPROVAL_MODE=interactive), a static
-             * approval denial no longer fails closed directly; instead the
-             * request is queued as pending and blocks waiting for a
-             * tool.approve decision:
-             *   - allow    -> let this execution through
-             *   - always   -> allow and add a persistent ACL rule
-             *   - deny/timeout -> return EPERM (error contains "User denied
-             *     tool execution") */
-            if (exec->interactive && interactive_approval_is_enabled(exec->interactive)) {
-
-                const char *agent = caller_agent;
-                if (!agent) {
-                    agent = tool_approval_get_agent_id(exec->approval_ctx);
-                }
-                /* Interactive approval blocks only this pool worker; other
-                 * sessions and tools keep running (pool budget bounds the
-                 * wait via executor_pool_run). */
-                airy_approval_outcome_t outcome = AIRY_APPROVAL_DENIED;
-                char *request_id =
-                    interactive_approval_block(exec->interactive, meta->name ? meta->name : "?",
-                                               agent ? agent : "unknown", params_json, &outcome);
-                if (request_id) {
-                    AIRY_FREE(request_id);
-                }
-
-                if (outcome == AIRY_APPROVAL_ALLOWED) {
-                    SVC_LOG_INFO("Tool '%s' approved by user (interactive, one-shot)",
-                                 meta->name ? meta->name : "?");
-                } else if (outcome == AIRY_APPROVAL_ALWAYS) {
-                    SVC_LOG_INFO("Tool '%s' approved by user (interactive, always)",
-                                 meta->name ? meta->name : "?");
-                    /* Add a persistent ACL rule (agent_id + tool name +
-                     * allow) so subsequent identical calls pass static
-                     * approval directly. */
-                    if (agent && meta->name) {
-                        int ar = daemon_security_add_acl_rule(agent, meta->name, true);
-                        if (ar != 0) {
-                            SVC_LOG_WARN("add_acl_rule('%s','%s') failed rc=%d", agent,
-                                         meta->name, ar);
-                        }
-                    }
-                } else {
-
-                    SVC_LOG_ERROR("Tool '%s' denied by user (interactive) or timed out",
-                                  meta->name ? meta->name : "?");
-                    result->success = 0;
-                    result->output = AIRY_STRDUP("");
-                    result->error = AIRY_STRDUP("User denied tool execution");
-                    result->exit_code = -1;
-                    result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
-                    result->duration_ms = 0;
-                    *out_result = result;
-                    return AIRY_EPERM;
-                }
-            } else {
-                SVC_LOG_ERROR("Tool approval denied for '%s': %s",
-                              meta->name ? meta->name : "?", approval_detail.reason);
-                result->success = 0;
-                result->output = AIRY_STRDUP("");
-                result->error = AIRY_STRDUP(approval_detail.reason[0] ?
-                                                approval_detail.reason :
-                                                "Tool execution denied by safety guard");
-                result->exit_code = -1;
-                result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
-                result->duration_ms = 0;
-                *out_result = result;
-                return AIRY_EPERM;
-            }
+        char *deny_reason = NULL;
+        approval_gate_verdict_t verdict =
+            approval_gate_ask(exec->gate, caller_agent, meta, params_json, &deny_reason);
+        if (verdict != APPROVAL_GATE_ALLOWED) {
+            result->success = 0;
+            result->output = AIRY_STRDUP("");
+            result->error =
+                deny_reason ? deny_reason : AIRY_STRDUP("Tool execution denied by safety guard");
+            result->exit_code = -1;
+            result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
+            result->duration_ms = 0;
+            *out_result = result;
+            return AIRY_EPERM;
         }
-        SVC_LOG_INFO("Tool '%s' approved (decision=%d)", meta->name ? meta->name : "?",
-                     (int)approval_detail.decision);
     }
 
     /* Builtin tools (builtin:xxx): real implementations dispatch directly
@@ -657,27 +547,27 @@ int tool_executor_run_async(tool_executor_t *exec, const tool_metadata_t *meta,
     return ret;
 }
 
-bool tool_executor_interactive_enabled(tool_executor_t *exec)
+uint64_t tool_executor_interactive_budget_extra(const tool_executor_t *exec)
 {
-    if (!exec || !exec->interactive) {
-        return false;
+    if (!exec) {
+        return 0;
     }
-    return interactive_approval_is_enabled(exec->interactive);
+    return approval_gate_interactive_budget_extra_ms(exec->gate);
 }
 
 char *tool_executor_interactive_pending_list(tool_executor_t *exec)
 {
-    if (!exec || !exec->interactive) {
+    if (!exec) {
         return NULL;
     }
-    return interactive_approval_pending_list_json(exec->interactive);
+    return approval_gate_interactive_pending_list(exec->gate);
 }
 
 int tool_executor_interactive_resolve(tool_executor_t *exec, const char *request_id,
                                       const char *decision)
 {
-    if (!exec || !exec->interactive) {
+    if (!exec) {
         return AIRY_ERR_NOT_FOUND;
     }
-    return interactive_approval_resolve(exec->interactive, request_id, decision);
+    return approval_gate_interactive_resolve(exec->gate, request_id, decision);
 }

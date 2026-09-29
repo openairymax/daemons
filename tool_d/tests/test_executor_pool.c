@@ -20,6 +20,8 @@
 #include "error.h"
 #include "core/executor.h"
 #include "core/executor_pool.h"
+#include "core/approval_gate.h"
+#include "approval/tool_approval.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -35,7 +37,7 @@ static long long now_ms(void)
     return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-/* 放行审批（同 test_executor.c 的 fail-closed 语义：ACL + approval_ctx） */
+/* 放行审批（同 test_executor.c：ACL + approval gate，executor 拥有 gate） */
 static void setup_approval(tool_executor_t *exec, const char *tool_name)
 {
     daemon_security_init(NULL, NULL);
@@ -47,9 +49,9 @@ static void setup_approval(tool_executor_t *exec, const char *tool_name)
     cfg.agent_id = "tool_d";
     cfg.enable_safety_guard_chain = false;
     cfg.enable_audit_logging = false;
-    tool_approval_ctx_t *ctx = tool_approval_create(&cfg);
-    assert(ctx != NULL);
-    tool_executor_set_approval_ctx(exec, ctx);
+    approval_gate_t *gate = tool_approval_gate_create(&cfg);
+    assert(gate != NULL);
+    tool_executor_set_gate(exec, gate);
 }
 
 typedef struct {
