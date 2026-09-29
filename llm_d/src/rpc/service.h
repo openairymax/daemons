@@ -14,13 +14,11 @@
 #include "llm_service.h"
 #include "daemon_platform_ext.h"
 #include "providers/core/registry.h"
-#include "token_counter.h"
 
 struct llm_service {
     provider_registry_t *registry;
     cache_t cache;
     cost_tracker_t *cost;
-    token_counter_t *token_counter;
     airy_mtx_t lock;
     void *rules;
     size_t rule_count;
