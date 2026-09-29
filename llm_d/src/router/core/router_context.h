@@ -14,7 +14,7 @@
 
 #include "router/core/llm_router.h"
 #include "cost_tracker.h"
-#include "token_counter.h"
+#include "token_standard.h"
 #include "airy_memory.h"
 /* d8 cleanup: removed sync_compat.h (this file only uses airy_mtx_t,
  * obtained transitively via airy_memory.h -> error.h -> types.h ->
@@ -45,7 +45,7 @@ typedef struct {
     llm_route_strategy_t default_strategy;
     llm_router_stats_t stats;
     cost_tracker_t *cost_tracker;
-    token_counter_t *token_counter;
+    airy_token_config_t token_cfg;
     airy_mtx_t mutex;
     bool initialized;
 
@@ -61,10 +61,11 @@ router_ctx_t *router_ctx_get(void);
 static inline size_t router_estimate_tokens(const char *prompt, size_t prompt_len)
 {
     router_ctx_t *ctx = router_ctx_get();
-    if (!ctx->token_counter || !prompt)
+    if (!ctx->token_cfg.model_name || !prompt)
         return prompt_len / 4;
 
-    return token_counter_count(ctx->token_counter, prompt);
+    size_t count = airy_token_standard_count(prompt, 0, &ctx->token_cfg);
+    return count == (size_t)-1 ? prompt_len / 4 : count;
 }
 
 /** @brief Compute the endpoint cost. */

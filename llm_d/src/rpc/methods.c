@@ -18,7 +18,7 @@
 #include "svc_llm_d.h"
 #include "llm_d_internal.h"
 #include "response.h"
-#include "token_counter.h"
+#include "token_standard.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -195,15 +195,19 @@ void m_embeddings(cJSON *params, int id, void *user_data)
     }
 }
 
-static const char *llm_encoding_for_model(const char *model)
+typedef struct {
+    const char *encoding;
+    airy_token_model_t model;
+} llm_token_profile_t;
+
+static llm_token_profile_t llm_token_profile(const char *model)
 {
-    if (!model || model[0] == '\0')
-        return "cl100k_base";
-    if (strstr(model, "claude"))
-        return "claude";
-    if (strstr(model, "gpt-3.5") || strstr(model, "text-davinci") || strstr(model, "code-davinci"))
-        return "p50k_base";
-    return "cl100k_base";
+    if (model && strstr(model, "claude"))
+        return (llm_token_profile_t){"claude", AIRY_TOKEN_MODEL_CLAUDE};
+    if (model && (strstr(model, "gpt-3.5") || strstr(model, "text-davinci") ||
+                  strstr(model, "code-davinci")))
+        return (llm_token_profile_t){"p50k_base", AIRY_TOKEN_MODEL_GPT35};
+    return (llm_token_profile_t){"cl100k_base", AIRY_TOKEN_MODEL_GPT4};
 }
 
 static char *handle_count_tokens(cJSON *params, int id)
@@ -220,13 +224,13 @@ static char *handle_count_tokens(cJSON *params, int id)
     else if (g_service)
         model = llm_service_default_model(g_service);
 
-    const char *encoding = llm_encoding_for_model(model);
-    token_counter_t *counter = token_counter_create(encoding);
-    if (!counter)
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Token counter unavailable", id);
-
-    size_t tokens = token_counter_count(counter, text->valuestring);
-    token_counter_destroy(counter);
+    llm_token_profile_t profile = llm_token_profile(model);
+    airy_token_config_t cfg = {.model_type = profile.model,
+                               .model_name = profile.encoding,
+                               .cjk_ratio = 0.2f,
+                               .alpha_ratio = 0.4f,
+                               .flags = AIRY_TOKEN_FLAG_ACCURATE};
+    size_t tokens = airy_token_standard_count(text->valuestring, 0, &cfg);
     if (tokens == (size_t)-1)
         return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Token counting failed", id);
 
@@ -236,7 +240,7 @@ static char *handle_count_tokens(cJSON *params, int id)
     cJSON_AddStringToObject(result, "model", model ? model : "default");
     cJSON_AddStringToObject(result, "text", text->valuestring);
     cJSON_AddNumberToObject(result, "tokens", (double)tokens);
-    cJSON_AddStringToObject(result, "encoding", encoding);
+    cJSON_AddStringToObject(result, "encoding", profile.encoding);
     return jsonrpc_build_success(result, id);
 }
 

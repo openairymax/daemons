@@ -346,17 +346,6 @@ llm_service_t *llm_service_create(const char *config_path)
             SVC_LOG_WARN("C-L02: SVC: cost state load failed (ignored) path=%s", usage_path);
     }
 
-    svc->token_counter = token_counter_create(base_cfg.token_encoding);
-    if (!svc->token_counter) {
-        SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL token_counter, STACK: llm_service_create");
-        cost_tracker_destroy(svc->cost);
-        cache_destroy(svc->cache);
-        provider_registry_destroy(svc->registry);
-        airy_mtx_destroy(&svc->lock);
-        AIRY_FREE(svc);
-        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-    }
-
     /* P3.16 (ACC-DT17): init llm_router and register the registry's
      * provider/model as routing endpoints. The router is a global singleton
      * (design in llm_router.c); init is idempotent. Failure is non-fatal: the
@@ -397,11 +386,6 @@ void llm_service_destroy(llm_service_t *svc)
             SVC_LOG_INFO("C-L02: SVC: cost state saved to %s", usage_path);
         cost_tracker_destroy(svc->cost);
         svc->cost = NULL;
-    }
-
-    if (svc->token_counter) {
-        token_counter_destroy(svc->token_counter);
-        svc->token_counter = NULL;
     }
 
     if (svc->rules) {
