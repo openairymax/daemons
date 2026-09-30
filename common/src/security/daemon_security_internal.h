@@ -86,6 +86,35 @@ extern airy_mtx_t g_security_mutex; /* CROSS-01: initialized via airy_mtx_init()
  */
 void ensure_mutex_initialized(void);
 
+/**
+ * @brief Load tool-level permission rules from a YAML file into the ACL
+ *        table (internal: invoked by daemon_security_init(), no external
+ *        consumers).
+ *
+ * Rule schema (tool-level, matches daemon_check_tool_permission()'s
+ * (agent, tool) lookup):
+ *
+ * @code
+ * rules:
+ *   - agent: "coding_v1"
+ *     tool: "fs_read"
+ *     effect: "allow"
+ *   - agent: "coding_v1"
+ *     tool: "shell_run"
+ *     effect: "deny"
+ * @endcode
+ *
+ * Only rules with a non-empty agent, tool and effect ("allow"/"deny") are
+ * applied; malformed entries are skipped. Missing files return
+ * AIRY_ERR_NOT_FOUND, unreadable files AIRY_ERR_PARSE_ERROR. The table
+ * stays fail-closed: tools without an allow rule are denied.
+ *
+ * @param path Absolute path of the permission rules YAML file
+ * @return AIRY_OK on success (0 rules loaded counts as success when the
+ *         file parsed), error code otherwise
+ */
+int daemon_security_load_rules_file(const char *path);
+
 #ifdef __cplusplus
 }
 #endif
