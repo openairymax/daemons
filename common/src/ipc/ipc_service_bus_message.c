@@ -21,9 +21,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#if !defined(_WIN32)
-#include <strings.h>
-#endif
 
 #include "error.h"
 
@@ -107,21 +104,4 @@ AIRY_API const char *ipc_bus_proto_to_string(ipc_bus_proto_t proto)
     if (proto < 0 || proto > IPC_BUS_PROTO_AUTO)
         return "UNKNOWN";
     return proto_strings[proto];
-}
-
-AIRY_API ipc_bus_proto_t ipc_bus_proto_from_string(const char *str)
-{
-    if (!str)
-        return IPC_BUS_PROTO_AUTO;
-
-    if (strcasecmp(str, "JSON-RPC") == 0 || strcasecmp(str, "jsonrpc") == 0)
-        return IPC_BUS_PROTO_JSON_RPC;
-    if (strcasecmp(str, "MCP") == 0)
-        return IPC_BUS_PROTO_MCP;
-    if (strcasecmp(str, "A2A") == 0)
-        return IPC_BUS_PROTO_A2A;
-    if (strcasecmp(str, "OpenAI") == 0 || strcasecmp(str, "openai") == 0)
-        return IPC_BUS_PROTO_OPENAI;
-
-    return IPC_BUS_PROTO_AUTO;
 }
