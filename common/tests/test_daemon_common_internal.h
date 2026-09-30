@@ -26,7 +26,6 @@
 
 #include "alert_manager.h"
 #include "circuit_breaker.h"
-#include "config_manager.h"
 #include "error.h"
 #include "method_dispatcher.h"
 #include "svc_common.h"
@@ -97,13 +96,6 @@ void test_cb_force_operations(void);
 void test_cb_timeout_recording(void);
 void test_cb_multiple_breakers(void);
 void test_cb_default_configs(void);
-
-void test_cm_init_shutdown(void);
-void test_cm_set_get_basic(void);
-void test_cm_typed_accessors(void);
-void test_cm_namespace_ops(void);
-void test_cm_environment(void);
-void test_cm_export_and_entry_count(void);
 
 void test_md_create_destroy(void);
 void test_md_register_and_dispatch(void);
