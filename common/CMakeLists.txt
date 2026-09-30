@@ -32,7 +32,6 @@ set(SVC_COMMON_SOURCES
     src/svc/svc_common.c          # 服务框架核心实现（service 生命周期域）
     src/svc/svc_common_registry.c # Phase 2.3a: 进程内服务注册表域（从 svc_common.c 拆分）
     src/svc/svc_common_ops.c      # Phase 2.3a: 状态查询/异步请求域（从 svc_common.c 拆分）
-    src/svc/svc_config.c          # 配置文件加载与监视（config 域）
     src/svc/svc_model_defaults.c  # A2-1: model.yaml global 段默认模型提取（llm_d/gateway_d 共用）
     src/ipc/ipc_client.c
     src/ipc/ipc_service_bus.c     # IPC服务总线（总线核心域）
