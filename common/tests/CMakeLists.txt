@@ -16,7 +16,6 @@ set(TEST_SOURCES
     test_error.c
     test_platform.c
     test_logger.c
-    test_config.c
     test_svc_auth.c
     test_jsonrpc_helpers.c
     test_safe_string_utils.c
@@ -105,7 +104,6 @@ airy_print_info("  svc_common_tests: ${TEST_SOURCES}")
 add_executable(svc_test_daemon_common
     test_daemon_common.c
     test_daemon_common_cb.c
-    test_daemon_common_cm.c
     test_daemon_common_md.c
     test_daemon_common_am.c
     test_daemon_common_svc.c

@@ -47,7 +47,6 @@ set(SVC_COMMON_SOURCES
     # 0c A 类直搬：unified_metrics/alert_manager/jsonrpc_helpers/method_dispatcher/
     # param_validator/log_sanitizer/api_recovery/airy_event_loop 家族权威实现均迁
     # commons（utils/observability|ipc|security|resource|sync），daemons 留 re-export 头。
-    src/util/config_manager.c      # 统一配置管理
     src/auth/svc_auth.c
     src/auth/svc_auth_jwt.c       # 认证中间件-JWT 域：生命周期/令牌生成/刷新（从 svc_auth_jwt.c 拆分）
     src/auth/svc_auth_jwt_crypto.c # 认证中间件-JWT 域：HMAC 实现/Base64 编解码原语（从 svc_auth_jwt.c 拆分）

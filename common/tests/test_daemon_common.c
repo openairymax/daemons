@@ -132,29 +132,21 @@ int main(void)
     test_cb_multiple_breakers();
     test_cb_default_configs();
 
-    /* 2. Config Manager (6 tests) */
-    test_cm_init_shutdown();
-    test_cm_set_get_basic();
-    test_cm_typed_accessors();
-    test_cm_namespace_ops();
-    test_cm_environment();
-    test_cm_export_and_entry_count();
-
-    /* 3. Method Dispatcher (5 tests) */
+    /* 2. Method Dispatcher (5 tests) */
     test_md_create_destroy();
     test_md_register_and_dispatch();
     test_md_not_found();
     test_md_multiple_methods();
     test_md_overwrite_registration();
 
-    /* 4. Alert Manager (5 tests) */
+    /* 3. Alert Manager (5 tests) */
     test_am_lifecycle();
     test_am_fire_resolve();
     test_am_all_levels();
     test_am_rules();
     test_am_query_and_utils();
 
-    /* 5. Service Lifecycle (7 tests) */
+    /* 4. Service Lifecycle (7 tests) */
     test_svc_create_destroy();
     test_svc_full_lifecycle();
     test_svc_state_strings();
