@@ -56,27 +56,29 @@ IPC 总线与跨进程服务发现、认证与授权、事件驱动主循环、�
 
 ### 兼容再导出头
 
-`include/` 下共 35 个头文件，其中 **17 个是再导出兼容头**——本体只有一行
-`#include "…/commons/…"`，指向 `commons` 仓内的权威版本（例如 `svc_common.h`、
-`method_dispatcher.h`、`param_validator.h`、`thread_pool.h`、`airy_event_loop.h`、
-`unified_metrics.h`、`api_recovery.h`、`log_sanitizer.h`）。保留它们的目的是
-让 daemon 源码无需改动包含路径。（原 `jsonrpc_helpers.h`、`alert_manager.h`、
-`circuit_breaker.h`、`service_discovery.h`、`error.h` 兼容头已删除：svc_common 的
-PUBLIC include 路径以 commons 权威目录优先，裸引直接解析权威版本，兼容头已无必要。）
-其余 18 个是本模块自有的框架/桥接头（`daemon_main.h`、
-`daemon_event_driver.h`、`daemon_security.h`、`svc_auth.h`、`svc_config.h`、
-`platform.h`、`hall_writer.h`、`config_manager.h` 等），仅在源码树内消费。
+`include/` 下共 16 个头文件。除 `daemon_defaults.h` 外（再导出兼容头，本体只有一行
+`#include "airy_defaults.h"`，指向 `commons` 仓内的权威版本），其余 15 个都是本模块
+自有的框架/桥接头（`daemon_main.h`、`daemon_event_driver.h`、`daemon_security.h`、
+`svc_auth.h`、`svc_config.h`、`daemon_dep.h`、`hall_writer.h`、`config_manager.h` 等），
+仅在源码树内消费。
+
+> 早前的再导出兼容头家族（`svc_common.h`、`method_dispatcher.h`、`param_validator.h`、
+> `thread_pool.h`、`airy_event_loop.h`、`unified_metrics.h`、`api_recovery.h`、
+> `log_sanitizer.h`、`jsonrpc_helpers.h`、`alert_manager.h`、`circuit_breaker.h`、
+> `service_discovery.h`、`platform.h`、`compat.h`、`error.h` 等）已在 0.1.17~0.1.19
+> 各施工线随权威实现归位 `commons` 时逐批拆除：`svc_common` 的 PUBLIC include 路径以
+> commons 权威目录优先，裸引直接解析权威版本，兼容头已无必要。
 
 为此，`svc_common` 的 PUBLIC include 路径把 `commons` 各权威目录声明在
 `daemons/common/include` **之前**，保证下层代码优先解析到权威版本，不会出现跨层反向依赖。
 
 ## 构成
 
-`src/` 按功能域组织，共 30 个 C 源文件：
+`src/` 按功能域组织，共 29 个 C 源文件：
 
 | 域 | 数量 | 源文件 |
 |----|------|--------|
-| `src/svc/` | 5 | `svc_common.c`（服务生命周期核心）、`svc_common_registry.c`（进程内注册表）、`svc_common_ops.c`（状态查询/异步请求）、`svc_config.c`（配置加载与监视）、`svc_model_defaults.c`（`model.yaml` 全局默认模型提取，`llm_d` / `gateway_d` 共用） |
+| `src/svc/` | 4 | `svc_common.c`（服务生命周期核心）、`svc_common_registry.c`（进程内注册表）、`svc_common_ops.c`（状态查询/异步请求）、`svc_model_defaults.c`（`model.yaml` 全局默认模型提取，`llm_d` / `gateway_d` 共用） |
 | `src/auth/` | 6 | `svc_auth.c`（认证中间件聚合）、`svc_auth_jwt.c` / `svc_auth_jwt_crypto.c` / `svc_auth_jwt_verify.c`（JWT 生命周期、HMAC/Base64 原语、签名校验）、`svc_auth_apikey.c`、`svc_auth_ratelimit.c` |
 | `src/ipc/` | 4 | `ipc_client.c`、`ipc_service_bus.c`（总线核心）、`ipc_service_bus_message.c`（消息域）、`ipc_bus_helper.c`（自动注册便捷层） |
 | `src/security/` | 4 | `daemon_security.c`（初始化/消毒）、`_acl.c`（ACL 授权）、`_signature.c`（包签名验证）、`_vault.c`（凭据与审计） |
@@ -158,7 +160,7 @@ ctest --test-dir ../daemons-build/common -R "^svc_test_" -V
 
 | 依赖 | 用途 |
 |------|------|
-| [commons](https://atomgit.com/openairymax/commons) | `airy_common` 统一基础库：错误码、日志、内存、字符串、同步、缓存、可观测性、平台路径；21 个再导出头的权威实现所在地 |
+| [commons](https://atomgit.com/openairymax/commons) | `airy_common` 统一基础库：错误码、日志、内存、字符串、同步、缓存、可观测性、平台路径 |
 | [atoms](https://atomgit.com/openairymax/atoms) | `airy_core`（corekern IPC 通道/事务）、`airy_ipc_ops` 与 `airy_syscall_ops`（ops 表存储小库）、`coreloopthree` 头文件路径 |
 | [cupolas](https://atomgit.com/openairymax/cupolas) | 可选；存在时 PUBLIC 链接，所有 daemon 自动获得安全穹顶能力 |
 | [heapstore](https://atomgit.com/openairymax/heapstore) | 可选；`BUILD_HEAPSTORE=ON` 时 PUBLIC 链接 `airy_heapstore` |
