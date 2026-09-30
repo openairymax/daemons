@@ -14,8 +14,8 @@
  *
  * The public API surface (daemon_security.h) is unchanged by this split.
  *
- * @see agentrt/daemons/common/src/daemon_security.c (init/sanitize domain)
- * @see agentrt/daemons/common/src/daemon_security_internal.h
+ * @see agentrt/daemons/common/src/security/daemon_security.c (init/sanitize domain)
+ * @see agentrt/daemons/common/src/security/daemon_security_internal.h
  */
 
 #include "daemon_security_internal.h"
