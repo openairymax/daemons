@@ -27,7 +27,7 @@ set(ATOMS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../atoms")
 
 # 2026-08-27 目录原子化：src/ 按功能域组织为 8 个子目录
 #   svc/ 服务框架 · auth/ 认证中间件 · ipc/ IPC 总线与客户端 · discovery/ 服务发现
-#   security/ daemon 安全 · daemon/ daemon 引导与生命周期 · event/ 事件循环 · util/ 通用设施
+#   security/ daemon 安全 · daemon/ daemon 引导与生命周期 · event/ 事件循环
 set(SVC_COMMON_SOURCES
     src/svc/svc_common.c          # 服务框架核心实现（service 生命周期域）
     src/svc/svc_common_registry.c # Phase 2.3a: 进程内服务注册表域（从 svc_common.c 拆分）
@@ -70,7 +70,6 @@ set(SVC_COMMON_SOURCES
     src/daemon/daemon_heapstore_bootstrap.c # KER-05~07: daemon 统一 heapstore 运行时数据存储引导
     src/daemon/daemon_ipc_ops_bootstrap.c # ARC-04: 注入 atoms 侧 IPC/RPC/SD ops 抽象表
     src/daemon/daemon_dep.c         # 0.1.19 §7.2: 硬依赖声明 + 启动期探测 + 降级态显式上报（governance 面）
-    src/util/hall_writer.c          # 2.8: daemon 侧事件流写端（单一真相源 hall 事件）
 )
 
 # 创建静态库
@@ -196,8 +195,8 @@ target_include_directories(svc_common PUBLIC
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/sync>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/observability>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/io>
-    # 0.1.19 §60: 任务大厅事件磁盘格式 SSoT（hall_event.h），
-    # hall_writer.c 薄委派消费
+    # 0.1.19 §60/§71: 任务大厅事件磁盘格式 SSoT（hall_event.h），
+    # 各 daemon（sched_d/tool_d/agent_d/common）直连 hall_evt_write
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/hall>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/types>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/cache>
@@ -220,7 +219,6 @@ target_include_directories(svc_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ipc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/security
     ${CMAKE_CURRENT_SOURCE_DIR}/src/daemon
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/util
 )
 
 target_include_directories(svc_common PUBLIC

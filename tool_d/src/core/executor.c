@@ -21,7 +21,7 @@
 #include "builtin/builtin.h"
 #include "daemon_platform_ext.h"
 #include "svc_logger.h"
-#include "hall_writer.h"
+#include "hall_event.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -209,7 +209,7 @@ static void tool_hall_emit_result(const tool_metadata_t *meta, const char *calle
         cJSON_AddStringToObject(evt, "error", result->error);
     char *s = cJSON_PrintUnformatted(evt);
     if (s) {
-        (void)daemon_hall_write(evt_task, "result", meta->id, s);
+        (void)hall_evt_write(evt_task, "result", meta->id, s);
         cJSON_free(s);
     }
     cJSON_Delete(evt);

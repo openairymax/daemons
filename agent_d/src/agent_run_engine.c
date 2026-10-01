@@ -26,7 +26,7 @@
 #include "atomic_compat.h"
 #include "daemon_rpc_client.h"
 #include "error.h"
-#include "hall_writer.h"
+#include "hall_event.h"
 #include "platform.h"
 #include "svc_logger.h"
 #include "svc_model_defaults.h"
@@ -190,7 +190,7 @@ void agent_run_record_event(const char *session_id, const char *category, cJSON 
     char *content_str = cJSON_PrintUnformatted(content);
     if (!content_str)
         return;
-    (void)daemon_hall_write(session_id, category, NULL, content_str);
+    (void)hall_evt_write(session_id, category, NULL, content_str);
     AIRY_FREE(content_str);
 }
 

@@ -81,7 +81,7 @@ extern airy_mtx_t g_security_mutex; /* CROSS-01: initialized via airy_mtx_init()
 
 /**
  * @brief Three-state lazy init of g_security_mutex (0=uninit, 2=initing,
- *        1=ready). Aligns with the hall_writer/gateway_hall_store CAS
+ *        1=ready). Aligns with the hall_event/gateway_hall_store CAS
  *        paradigm; prevents concurrent duplicate pthread_mutex_init (UB).
  */
 void ensure_mutex_initialized(void);

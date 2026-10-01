@@ -59,7 +59,7 @@ daemon_security_ctx_t g_security_ctx = {0};
 
 airy_mtx_t g_security_mutex; /* CROSS-01: initialized via airy_mtx_init() */
 /* 三态惰性初始化（P1-3）：0=未初始化，2=初始化中，1=就绪。
- * 对齐 hall_writer/gateway_hall_store 的 CAS 范式，杜绝并发重复
+ * 对齐 hall_event/gateway_hall_store 的 CAS 范式，杜绝并发重复
  * pthread_mutex_init（UB）。 */
 static atomic_int g_security_mutex_ready = 0;
 
