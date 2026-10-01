@@ -8,6 +8,7 @@
 
 #include "gateway_d_internal.h"
 
+#include "airy_defaults.h"
 #include "airy_memory.h"
 #include "error.h"
 #include "svc_logger.h"
@@ -30,14 +31,18 @@ static void print_usage(const char *prog)
     fputs("Options:\n", stdout);
     fputs("  -c <config>   Configuration file path\n", stdout);
     fputs("  -h <host>     HTTP gateway host (default: 0.0.0.0)\n", stdout);
-    fputs("  -p <port>     HTTP gateway port (default: 8080)\n", stdout);
-    fputs("  -w <port>     WebSocket gateway port (default: 8081)\n", stdout);
+    snprintf(buf, sizeof(buf), "  -p <port>     HTTP gateway port (default: %d)\n",
+             AIRY_PORT_GATEWAY_HTTP);
+    fputs(buf, stdout);
+    snprintf(buf, sizeof(buf), "  -w <port>     WebSocket gateway port (default: %d)\n",
+             AIRY_PORT_GATEWAY_WS);
+    fputs(buf, stdout);
     fputs("  -s            Enable stdio gateway\n", stdout);
     fputs("  -d            Run as daemon (Unix only)\n", stdout);
     fputs("  -v            Enable metrics reporting (default: on)\n", stdout);
     fputs("  --help        Show this help\n", stdout);
     fputs("\nExamples:\n", stdout);
-    snprintf(buf, sizeof(buf), "  %s -h 127.0.0.1 -p 8080\n", prog);
+    snprintf(buf, sizeof(buf), "  %s -h 127.0.0.1 -p %d\n", prog, AIRY_PORT_GATEWAY_HTTP);
     fputs(buf, stdout);
     snprintf(buf, sizeof(buf), "  %s -c AIRY_CONFIG_DIR \"/gateway.conf\"\n", prog);
     fputs(buf, stdout);
@@ -58,7 +63,8 @@ int gw_parse_args(int argc, char *argv[], gateway_service_config_t *config,
             /* 兼容 bootstrap 统一 daemon 启动参数：--manager 指向 agentrt.yaml
              * 全局配置（bootstrap 对全部 daemon 一致传参）。gateway_d 细粒度
              * 配置仍以默认值 + 环境变量为准（load_config 仅解析 key=value，
-             * 不解析 YAML；缺失时保持默认 8080/8081，与 agentrt.yaml 一致）。 */
+             * 不解析 YAML；缺失时保持默认值，SSoT 见 AIRY_PORT_GATEWAY_HTTP /
+             * AIRY_PORT_GATEWAY_WS，与 agentrt.yaml 一致）。 */
             i++;
         } else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
             airy_err_t err = gateway_service_load_config(config, argv[++i]);

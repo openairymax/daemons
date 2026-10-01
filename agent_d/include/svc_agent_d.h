@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.6.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.7.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -11,13 +11,15 @@
 
 #include "platform.h"
 #include "daemon_main.h"
+#include "airy_defaults.h"
 
 #include <cjson/cJSON.h>
 
 /* 端点常量（wire 契约，与 .manifest rpc 段一致；svc_endpoint 缺省基线） */
 #define AGENT_D_SOCKET_UNIX airy_runtime_dir_socket("agent.sock")
 #define AGENT_D_SOCKET_WIN "\\\\.\\pipe\\airy_agent"
-#define AGENT_D_TCP_PORT 8086
+/* TCP 口为 SSoT 引用，真值唯一定义于 airy_defaults.h */
+#define AGENT_D_TCP_PORT AIRY_PORT_AGENT_D
 #define AGENT_D_MAX_BUFFER 65536
 
 /* 端点解析钩子：常量户回填上方基线；可配置户在 svc.c 完成

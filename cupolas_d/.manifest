@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "daemon": "cupolas_d",
   "cname": "cupolas",
   "sd_type": "cupolas",
@@ -9,7 +9,7 @@
   "rpc": {
     "unix": "cupolas.sock",
     "win_pipe": "airy_cupolas",
-    "tcp": 8089,
+    "tcp": "AIRY_PORT_CUPOLAS_D",
     "tags": "cupolas,security",
     "buffer": 65536,
     "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },

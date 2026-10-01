@@ -9,8 +9,9 @@
  *        裸消息），每连接一线程，不使用 DAEMON_DECLARE_COMMON 生成
  *        样板。生命周期策略在 svc.c，协议嗅探与握手在 net.c，
  *        订阅/广播/分派核心在 notify_service.c。R7 并户后装配双
- *        监听面：notify.sock（Windows TCP 8084）+ hook.sock（Windows
- *        TCP 8093），accept 循环按面打标、conn 线程按面分派。停机
+ *        监听面：notify.sock（Windows TCP 走 SSoT AIRY_PORT_NOTIFY_D）
+ *        + hook.sock（Windows TCP 走 SSoT AIRY_PORT_HOOK），accept
+ *        循环按面打标、conn 线程按面分派。停机
  *        出口唯一：main 显式 stop(force) 后 destroy，destroy 不再
  *        隐式二次 stop。
  */

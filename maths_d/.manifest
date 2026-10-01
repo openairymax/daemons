@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "daemon": "maths_d",
   "cname": "maths",
   "sd_type": "maths",
@@ -8,7 +8,7 @@
   "rpc": {
     "unix": "maths.sock",
     "win_pipe": "airy_maths",
-    "tcp": 8087,
+    "tcp": "AIRY_PORT_MATHS_D",
     "tags": "maths,core",
     "buffer": 65536,
     "methods": [

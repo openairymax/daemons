@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "daemon": "mem_d",
   "cname": "mem",
   "sd_type": "mem",
@@ -10,7 +10,7 @@
   "rpc": {
     "unix": "mem.sock",
     "win_pipe": "airy_mem",
-    "tcp": 8085,
+    "tcp": "AIRY_PORT_MEM_D",
     "tags": "mem,core",
     "buffer": 65536,
     "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },

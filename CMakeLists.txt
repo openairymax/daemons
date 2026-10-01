@@ -61,8 +61,9 @@ add_subdirectory(market_d)
 add_subdirectory(channel_d)
 add_subdirectory(notify_d)
 # 0.1.19 R7（daemon 整编 15→14）：hook_d 并入 notify_d——hook 面为
-# notify_d 第二 listener（POSIX unix hook.sock / Windows TCP 8093），
-# per-conn face 分派，12 个 hook 方法载荷保真直迁；gateway hook.* 改路由。
+# notify_d 第二 listener（POSIX unix hook.sock / Windows TCP 走 SSoT
+# AIRY_PORT_HOOK），per-conn face 分派，12 个 hook 方法载荷保真直迁；
+# gateway hook.* 改路由。
 # 0.1.9 M4（daemon 整编 18→15）：plugin_d → tool_d（插件 dlopen 执行域
 # 随迁 tool_d，plugin_* 方法在 tool 命名空间登记，gateway 改路由）；
 # observe_d / info_d → monit_d（双 Prometheus /metrics 收敛，系统信息

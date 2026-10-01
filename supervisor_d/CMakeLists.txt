@@ -30,8 +30,11 @@ if(WIN32)
     target_link_libraries(supervisor_d PRIVATE ws2_32)
 endif()
 
+# 端口坐标 SSoT：仅引入宏头 commons/include/airy_defaults.h（纯宏、无
+# 符号、不产生任何链接边），与 link-whitelist「允许集为空」不冲突。
 target_include_directories(supervisor_d PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../commons/include
 )
 
 if(NOT MSVC)

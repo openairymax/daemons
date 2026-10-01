@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "daemon": "supervisor_d",
   "cname": "supervisor",
   "sd_type": "supervisor",
@@ -8,7 +8,7 @@
   "slots": ["recover", "resilience", "create", "comm"],
   "rpc": {
     "unix": "supervisor.sock",
-    "tcp": 8095,
+    "tcp": "AIRY_PORT_SUPERVISOR_D",
     "tags": "supervisor,bootstrap",
     "buffer": 4096,
     "methods": ["supervisor.activate", "supervisor.shutdown", "health_check"]

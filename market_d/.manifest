@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "daemon": "market_d",
   "cname": "market",
   "sd_type": "market",
@@ -9,7 +9,7 @@
   "rpc": {
     "unix": "market.sock",
     "win_pipe": "airy_market",
-    "tcp": 8082,
+    "tcp": "AIRY_PORT_MARKET_D",
     "tags": "market,core",
     "buffer": 65536,
     "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },

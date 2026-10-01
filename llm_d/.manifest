@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "daemon": "llm_d",
   "cname": "llm",
   "sd_type": "llm",
@@ -9,7 +9,7 @@
   "rpc": {
     "unix": "llm.sock",
     "win_pipe": "airy_llm",
-    "tcp": 8080,
+    "tcp": "AIRY_PORT_LLM_D",
     "tags": "ai,core",
     "buffer": 65536,
     "concurrent": true,

@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "daemon": "sched_d",
   "cname": "scheduler",
   "sd_type": "scheduler",
@@ -9,7 +9,7 @@
   "rpc": {
     "unix": "sched.sock",
     "win_pipe": "airy_sched",
-    "tcp": 8083,
+    "tcp": "AIRY_PORT_SCHED_D",
     "tags": "scheduler,core",
     "buffer": 65536,
     "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },

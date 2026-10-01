@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "daemon": "tool_d",
   "cname": "tool",
   "sd_type": "tool",
@@ -9,7 +9,7 @@
   "rpc": {
     "unix": "tool.sock",
     "win_pipe": "airy_tool",
-    "tcp": 8081,
+    "tcp": "AIRY_PORT_TOOL_D",
     "tags": "tool,core",
     "buffer": 65536,
     "concurrent": true,
