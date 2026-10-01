@@ -17,6 +17,7 @@
 #ifndef AIRY_RT_DAEMON_NOTIFY_D_INTERNAL_H
 #define AIRY_RT_DAEMON_NOTIFY_D_INTERNAL_H
 
+#include "airy_defaults.h"
 #include "atomic_compat.h"
 #include "notify_service.h"
 #include "platform_paths.h"
@@ -31,8 +32,9 @@ extern "C" {
 
 /* 端点常量：Windows 端固定 TCP 回环（无命名管）是协议面必然——
  * 浏览器 EventSource / WebSocket 无法使用 Windows 命名管道，
- * 与常规户「命名管优先 TCP 回退」形态不同，非平台屏蔽债务。 */
-#define NOTIFY_D_DEFAULT_PORT 8084
+ * 与常规户「命名管优先 TCP 回退」形态不同，非平台屏蔽债务。
+ * 端口值为 SSoT 引用，唯一权威定义见 commons/include/airy_defaults.h。 */
+#define NOTIFY_D_DEFAULT_PORT AIRY_PORT_NOTIFY_D
 #define NOTIFY_D_DEFAULT_SOCKET airy_runtime_dir_socket("notify.sock")
 
 /* 并发连接上限：每连接一线程，无上限时恶意连接风暴可耗尽线程资源
@@ -56,10 +58,10 @@ void *notify_d_conn_thread(void *arg);
 
 /* ---- hook 面（R7 并户：原 hook_d 独立守护进程吸收为第二监听面）----
  * socket-only 面路由（全 daemons 零 L2 挂载实证）：hook 客户端连接
- * hook.sock（Windows TCP 8093），12 个 hook.* 方法载荷保真直迁；
- * accept 循环按 face 打标，conn 线程按 face 分派。 */
+ * hook.sock（Windows TCP 走 SSoT AIRY_PORT_HOOK），12 个 hook.* 方法载荷
+ * 保真直迁；accept 循环按 face 打标，conn 线程按 face 分派。 */
 #define HOOK_D_SOCKET_UNIX airy_runtime_dir_socket("hook.sock")
-#define HOOK_D_TCP_PORT 8093
+#define HOOK_D_TCP_PORT AIRY_PORT_HOOK
 #define AIRY_HOOK_MAX_SESSIONS 32
 #define AIRY_HOOK_CTX_LEN 4096
 

@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "daemon": "monit_d",
   "cname": "monitor",
   "sd_type": "monitor",
@@ -10,7 +10,7 @@
   "rpc": {
     "unix": "monit.sock",
     "win_pipe": "airy_monit",
-    "tcp": 9090,
+    "tcp": "AIRY_PORT_MONIT_D",
     "tags": "monitor,core",
     "buffer": 65536,
     "concurrent": false,

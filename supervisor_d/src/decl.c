@@ -17,6 +17,8 @@
 
 #include "supervisor_d.h"
 
+#include "airy_defaults.h"
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,22 +32,22 @@
 #endif
 
 #ifdef _WIN32
-/* Windows 回环端口表 —— 与 gateway/src/biz/gateway_business_handler.c
- * WIN_SOCK_TCP 互为消费者副本，源头是各 daemon DEFAULT_TCP_PORT 实值。
- * maths_d 与 a2a_d 声明了相同端口 8087（既有冲突，B17 订正），故本表
- * 不含 maths；gateway_d 双平台均无 L2 端点，由 resolve_ep 统一置空
- * （进程存活腿）。 */
+/* Windows 回环端点表：Windows 无命名管道可接入 WSAEventSelect 事件循环，
+ * daemon_main.h 平台分支无条件走 TCP 回环，故全部 daemon（含 notify_d /
+ * supervisor_d 本体）在 Windows 上均占固定 TCP 口。主机恒为 127.0.0.1，
+ * 端口取自 airy_defaults.h 私有端口带 SSoT（唯一权威定义，此处禁止复刻
+ * 字面量）。gateway_d 素无 L2 端点，由 resolve_ep 置空走进程存活腿。 */
 static const struct {
     const char *ns;
-    const char *ep;
+    unsigned port;
 } SUP_WIN_TCP[] = {
-    {"llm", "127.0.0.1:8080"},    {"tool", "127.0.0.1:8081"},
-    {"market", "127.0.0.1:8082"}, {"sched", "127.0.0.1:8083"},
-    {"notify", "127.0.0.1:8084"}, {"mem", "127.0.0.1:8085"},
-    {"agent", "127.0.0.1:8086"},  {"a2a", "127.0.0.1:8087"},
-    {"cupolas", "127.0.0.1:8089"},{"think", "127.0.0.1:8090"},
-    {"hook", "127.0.0.1:8093"},   {"channel", "127.0.0.1:8094"},
-    {"monit", "127.0.0.1:9090"},
+    {"llm", AIRY_PORT_LLM_D},         {"tool", AIRY_PORT_TOOL_D},
+    {"market", AIRY_PORT_MARKET_D},   {"sched", AIRY_PORT_SCHED_D},
+    {"mem", AIRY_PORT_MEM_D},         {"agent", AIRY_PORT_AGENT_D},
+    {"a2a", AIRY_PORT_A2A_D},         {"maths", AIRY_PORT_MATHS_D},
+    {"cupolas", AIRY_PORT_CUPOLAS_D}, {"think", AIRY_PORT_THINK_D},
+    {"hook", AIRY_PORT_HOOK},         {"channel", AIRY_PORT_CHANNEL_D},
+    {"monit", AIRY_PORT_MONIT_D},     {"notify", AIRY_PORT_NOTIFY_D},
 };
 #endif
 
@@ -151,11 +153,11 @@ static void resolve_ep(sup_ctx_t *ctx, sup_proc_t *p)
 #else
     for (size_t i = 0; i < sizeof(SUP_WIN_TCP) / sizeof(SUP_WIN_TCP[0]); i++) {
         if (strcmp(ns, SUP_WIN_TCP[i].ns) == 0) {
-            snprintf(p->sock, sizeof(p->sock), "%s", SUP_WIN_TCP[i].ep);
+            snprintf(p->sock, sizeof(p->sock), "127.0.0.1:%u", SUP_WIN_TCP[i].port);
             return;
         }
     }
-    /* 无登记端点（maths）：仅进程存活判定，sock 置空跳过假死探测 */
+    /* 未登记端点（gateway_d / 未知户）：仅进程存活判定，跳过假死探测 */
     p->sock[0] = '\0';
 #endif
 }
@@ -256,7 +258,7 @@ int sup_decl_load(sup_ctx_t *ctx)
 #ifndef _WIN32
         path_join(ctx->ctrl_ep, sizeof(ctx->ctrl_ep), ctx->runtime_dir, "supervisor.sock");
 #else
-        snprintf(ctx->ctrl_ep, sizeof(ctx->ctrl_ep), "127.0.0.1:8095");
+        snprintf(ctx->ctrl_ep, sizeof(ctx->ctrl_ep), "127.0.0.1:%d", AIRY_PORT_SUPERVISOR_D);
 #endif
     }
 

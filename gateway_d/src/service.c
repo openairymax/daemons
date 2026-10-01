@@ -9,6 +9,7 @@
 
 #include "gateway_service.h"
 #include "daemon_platform_ext.h"
+#include "airy_defaults.h"
 /* stdio 网关线程经 platform 线程抽象（airy_thread_*）。airy_core 以
  * PUBLIC 传播 AIRY_USE_SCHEDULER_THREAD_IMPL（corekern CMakeLists 经
  * gateway OBJECT 库传递到本 TU），故别名不生效、声明由 corekern task.h
@@ -109,14 +110,14 @@ void gateway_service_get_default_config(gateway_service_config_t *config)
 
     config->http.type = GATEWAY_DAEMON_TYPE_HTTP;
     AIRY_STRNCPY_TERM(config->http.host, "0.0.0.0", GATEWAY_HOST_MAX);
-    config->http.port = 8080;
+    config->http.port = AIRY_PORT_GATEWAY_HTTP;
     config->http.enabled = true;
     config->http.max_request_size = 1048576;
     config->http.timeout_ms = 30000;
 
     config->ws.type = GATEWAY_DAEMON_TYPE_WS;
     AIRY_STRNCPY_TERM(config->ws.host, "0.0.0.0", GATEWAY_HOST_MAX);
-    config->ws.port = 8081;
+    config->ws.port = AIRY_PORT_GATEWAY_WS;
     config->ws.enabled = true;
     config->ws.max_request_size = 1048576;
     config->ws.timeout_ms = 30000;
@@ -352,12 +353,13 @@ airy_err_t gateway_service_start(gateway_service_t service)
 
 #ifdef GATEWAY_HAS_HTTP2
     if (service->config.http.enabled) {
-        /* HTTP/2 needs its own listening port (default http.port+2,
-         * overridable via AIRY_GATEWAY_HTTP2_PORT), avoiding a bind conflict
-         * with the HTTP/1.1 gateway on the same port */
+        /* HTTP/2 专用监听口：SSoT 固化 AIRY_PORT_GATEWAY_HTTP2，环境变量
+         * AIRY_GATEWAY_HTTP2_PORT 可显式覆盖。与 HTTP/1.1 网关分端口绑定，
+         * 避免同口冲突（弃 http.port+2 隐式推导：HTTP 口可经 -p / 配置改写，
+         * 推导值会漂出私有带，破坏坐标唯一性）。 */
         const char *h2port_env = getenv("AIRY_GATEWAY_HTTP2_PORT");
-        uint16_t h2_port = (h2port_env && *h2port_env) ? (uint16_t)atoi(h2port_env) :
-                                                         (uint16_t)(service->config.http.port + 2);
+        uint16_t h2_port = (h2port_env && *h2port_env) ? (uint16_t)atoi(h2port_env)
+                                                       : (uint16_t)AIRY_PORT_GATEWAY_HTTP2;
         service->http2_gateway = http2_gateway_create(service->config.http.host, h2_port);
         if (!service->http2_gateway) {
             AIRY_LOG_ERROR("http2_gateway_create failed: host=%s, port=%d", service->config.http.host,

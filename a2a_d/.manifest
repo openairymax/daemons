@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "daemon": "a2a_d",
   "cname": "a2a",
   "sd_type": "a2a",
@@ -9,7 +9,7 @@
   "rpc": {
     "unix": "a2a.sock",
     "win_pipe": "airy_a2a",
-    "tcp": 8087,
+    "tcp": "AIRY_PORT_A2A_D",
     "tags": "a2a,core",
     "buffer": 65536,
     "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },
