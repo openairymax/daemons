@@ -83,7 +83,7 @@ typedef struct sup_ctx {
     char airy_home[SUP_PATH_MAX];
     char runtime_dir[SUP_PATH_MAX];
     char log_dir[SUP_PATH_MAX];
-    char ctrl_ep[SUP_PATH_MAX]; /* POSIX: supervisor.sock 路径；WIN: 127.0.0.1:8095 */
+    char ctrl_ep[SUP_PATH_MAX]; /* POSIX: supervisor.sock 路径；WIN: 127.0.0.1:<AIRY_PORT_SUPERVISOR_D> */
     long tick_ms;
     long backoff_base_ms;
     long backoff_max_ms;

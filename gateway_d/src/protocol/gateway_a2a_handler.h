@@ -24,6 +24,9 @@ typedef struct {
     uint32_t default_timeout_ms;
 } gw_a2a_handler_config_t;
 
+/* 默认 agent card：agent_url 为对外广告地址（策略面契约），非网关内部
+ * 监听口——TCP 监听口是 SSoT AIRY_PORT_GATEWAY_HTTP（私有带）；对外
+ * 映射 8080:2027 由部署层固定，故此处保留公网侧 8080 不复刻监听口。 */
 #define GW_A2A_HANDLER_CONFIG_DEFAULTS         \
     {.agent_name = "agentrt-a2a",              \
      .agent_version = "0.3.0",                 \

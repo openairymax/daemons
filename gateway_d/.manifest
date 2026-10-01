@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "daemon": "gateway_d",
   "cname": "gateway",
   "sd_type": "gateway",
@@ -8,8 +8,8 @@
   "slots": ["comm", "route", "authz", "stream", "validate"],
   "rpc": {
     "unix": null,
-    "tcp": 8080,
-    "ws_tcp": 8081,
+    "tcp": "AIRY_PORT_GATEWAY_HTTP",
+    "ws_tcp": "AIRY_PORT_GATEWAY_WS",
     "tags": "gateway,core",
     "buffer": 1048576,
     "methods": ["ping", "shutdown", "health_check", "get_stats"]

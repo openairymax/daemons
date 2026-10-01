@@ -12,7 +12,8 @@
 同时支持三种投递协议——**WebSocket**、**SSE** 与**原始 Unix socket JSON**。
 
 - 端点：POSIX Unix socket `<runtime-dir>/notify.sock`（`$AIRY_HOME/run/notify.sock`）；
-  Windows 本机 TCP 回环 `127.0.0.1:8084`。
+  Windows 本机 TCP 回环 `127.0.0.1:<AIRY_PORT_NOTIFY_D>`（SSoT 见
+  `commons/include/airy_defaults.h`，私有端口带 2026-2100）。
 - 与 `channel_d` 的区别：`channel_d` 是数据面的**传输通道**（对外协议适配），
   `notify_d` 是控制面的**事件广播**；两者的「通道 / topic」概念互不相干。
 
@@ -78,7 +79,7 @@
 
 | 常量 | 值 | 说明 |
 |------|-----|------|
-| `NOTIFY_D_DEFAULT_PORT` | 8084 | Windows TCP 回环端口 |
+| `NOTIFY_D_DEFAULT_PORT` | `AIRY_PORT_NOTIFY_D` | Windows TCP 回环端口（SSoT 引用） |
 | `NOTIFY_D_DEFAULT_SOCKET` | `airy_runtime_dir_socket("notify.sock")` | POSIX 端点 |
 | `NOTIFY_D_MAX_PENDING` | 1024 | 事件队列容量 |
 | `NOTIFY_D_MAX_CLIENTS` | 128 | 客户端表容量 |

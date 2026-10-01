@@ -1,5 +1,5 @@
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "daemon": "channel_d",
   "cname": "channel",
   "sd_type": "channel",
@@ -9,7 +9,7 @@
   "rpc": {
     "unix": "channel.sock",
     "win_pipe": "airy_channel",
-    "tcp": 8094,
+    "tcp": "AIRY_PORT_CHANNEL_D",
     "tags": "channel,core",
     "buffer": 65536,
     "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },
