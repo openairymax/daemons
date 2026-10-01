@@ -22,6 +22,7 @@
 #include "core/executor_pool.h"
 #include "core/approval_gate.h"
 #include "approval/tool_approval.h"
+#include "tool_service.h"
 
 #include <assert.h>
 #include <pthread.h>
