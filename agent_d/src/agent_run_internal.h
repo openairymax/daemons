@@ -207,7 +207,7 @@ void agent_run_persist(const char *session_id, const char *user_prompt,
                        const char *assistant_text);
 
 /**
- * @brief 记录一条 hall 事件（会话决策链写侧，经 daemon_hall_write）。
+ * @brief 记录一条 hall 事件（会话决策链写侧，经 hall_evt_write）。
  */
 void agent_run_record_event(const char *session_id, const char *category, cJSON *content);
 

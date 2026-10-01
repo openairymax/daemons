@@ -56,10 +56,10 @@ IPC 总线与跨进程服务发现、认证与授权、事件驱动主循环、�
 
 ### 兼容再导出头
 
-`include/` 下共 16 个头文件。除 `daemon_defaults.h` 外（再导出兼容头，本体只有一行
-`#include "airy_defaults.h"`，指向 `commons` 仓内的权威版本），其余 15 个都是本模块
+`include/` 下共 14 个头文件。除 `daemon_defaults.h` 外（再导出兼容头，本体只有一行
+`#include "airy_defaults.h"`，指向 `commons` 仓内的权威版本），其余 13 个都是本模块
 自有的框架/桥接头（`daemon_main.h`、`daemon_event_driver.h`、`daemon_security.h`、
-`svc_auth.h`、`svc_config.h`、`daemon_dep.h`、`hall_writer.h`、`config_manager.h` 等），
+`svc_auth.h`、`svc_config.h`、`daemon_dep.h` 等），
 仅在源码树内消费。
 
 > 早前的再导出兼容头家族（`svc_common.h`、`method_dispatcher.h`、`param_validator.h`、
@@ -74,7 +74,7 @@ IPC 总线与跨进程服务发现、认证与授权、事件驱动主循环、�
 
 ## 构成
 
-`src/` 按功能域组织，共 29 个 C 源文件：
+`src/` 按功能域组织，共 27 个 C 源文件：
 
 | 域 | 数量 | 源文件 |
 |----|------|--------|
@@ -83,7 +83,6 @@ IPC 总线与跨进程服务发现、认证与授权、事件驱动主循环、�
 | `src/ipc/` | 4 | `ipc_client.c`、`ipc_service_bus.c`（总线核心）、`ipc_service_bus_message.c`（消息域）、`ipc_bus_helper.c`（自动注册便捷层） |
 | `src/security/` | 4 | `daemon_security.c`（初始化/消毒）、`_acl.c`（ACL 授权）、`_signature.c`（包签名验证）、`_vault.c`（凭据与审计） |
 | `src/daemon/` | 9 | `daemon_event_driver.c`（事件驱动主循环）、`daemon_rpc_client.c`、`daemon_dep.c`（硬依赖探测与降级上报）、`daemon_bootstrap_ipc.c`、`daemon_cupolas_bootstrap.c`、`daemon_heapstore_bootstrap.c`、`daemon_ipc_ops_bootstrap.c`、`daemon_l1_server.c`、`daemon_l2_bridge.c` |
-| `src/util/` | 2 | `config_manager.c`（统一配置管理）、`hall_writer.c`（daemon 侧事件流写端） |
 
 > `daemon_l1_server.c` 与 `daemon_l2_bridge.c` 编译进独立的 `daemon_l1_server` 目标，
 > 不在 `svc_common` 源列表内；两者都以 PRIVATE 方式链接 `airy_core`，避免把 corekern 的
@@ -149,7 +148,7 @@ cmake -S . -B build -DBUILD_DAEMON=ON -DBUILD_CLI=ON
 - 容错与并发：`svc_test_strategies_recovery` / `svc_test_api_recovery`
   （含 pool / cred / health / fallback / config / misc 六个域文件）/
   `svc_test_thread_pool` / `svc_test_airy_event_loop` / `svc_test_checkpoint`
-- 引导与其他：`svc_test_svc_model_defaults` / `svc_test_hall_writer`，以及 corekern
+- 引导与其他：`svc_test_svc_model_defaults`，以及 corekern
   服务端挂载与消息封套桥接的两个对应用例。
 
 ```bash

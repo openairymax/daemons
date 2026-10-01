@@ -13,7 +13,7 @@
 #include "daemon_dep.h"
 
 #include "airy_memory.h"
-#include "hall_writer.h"
+#include "hall_event.h"
 #include "service_discovery_helper.h"
 #include "svc_logger.h"
 
@@ -166,7 +166,7 @@ int daemon_dep_report(const daemon_dep_t *dep, const char *daemon_name)
 
     json = cJSON_PrintUnformatted(evt);
     if (json) {
-        (void)daemon_hall_write(daemon_name, "issue", NULL, json);
+        (void)hall_evt_write(daemon_name, "issue", NULL, json);
         cJSON_free(json);
     }
     cJSON_Delete(evt);
