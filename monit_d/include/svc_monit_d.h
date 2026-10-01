@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.7.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.8.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -52,5 +52,24 @@ void m_metrics(cJSON *params, int id, void *user_data);
 void m_alert_raise(cJSON *params, int id, void *user_data);
 void m_alert_resolve(cJSON *params, int id, void *user_data);
 void m_get_stats(cJSON *params, int id, void *user_data);
+
+/* RPC 方法表清单（唯一声明源，源自 .manifest rpc.methods）。
+ * main.c 以 X 宏展开为 daemon_method_entry_t[]：
+ *   #define X(n, f) {(n), (f)},
+ *   static const daemon_method_entry_t T[] = { SVC_MONIT_D_METHODS(X) };
+ * 装配行数与方法数解耦（机制层装配，策略数据在此单点维护）。 */
+#define SVC_MONIT_D_METHODS(X) \
+    X("record_metric", m_record_metric) \
+    X("get_metrics", m_get_metrics) \
+    X("trigger_alert", m_trigger_alert) \
+    X("get_alerts", m_get_alerts) \
+    X("health_check", m_health_check) \
+    X("generate_report", m_generate_report) \
+    X("heartbeat", m_heartbeat) \
+    X("metrics", m_metrics) \
+    X("alert_raise", m_alert_raise) \
+    X("alert_resolve", m_alert_resolve) \
+    X("get_stats", m_get_stats) \
+    X("shutdown", on_shutdown_method_monit_d)
 
 #endif /* SVC_MONIT_D_H */
