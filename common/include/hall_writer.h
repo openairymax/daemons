@@ -6,14 +6,14 @@
  * @brief Daemon-side hall event writer (write side of the event flow).
  *
  * Lets any daemon process (sched_d / tool_d / agent_d / ...) record
- * execution-chain events into the single-source-of-truth hall event store,
- * aligned byte-for-byte with the authoritative writers:
- *   - runtime writer : atoms/coreloopthree/src/dispatch/hall_store.c
- *   - gateway writer : gateway/src/gateway/gateway_hall_store.c
- * Same root (airy_data_dir()/agentrt/hall), same file naming
- * ({tenant}.{task}.{category}.{ts_utc}.{seq:04u}.json), same event body
- * header/access layout. Each daemon is a writer process of its own: gseq
- * is per-process (audit only), cross-process order is (ts_utc, seq).
+ * execution-chain events into the single-source-of-truth hall event store.
+ * The on-disk contract (root airy_data_dir()/agentrt/hall, file naming
+ * {tenant}.{task}.{category}.{ts_utc}.{seq:04u}.json, event body
+ * header/access layout, gseq and prev_file semantics) is owned by the
+ * SSoT mechanism commons/utils/hall/hall_event.c; this entry point is a
+ * thin delegation to it. gseq resumes from the disk maximum across all
+ * writer processes, so cross-process order is (gseq) with (ts_utc, seq)
+ * as the within-directory tie-break.
  *
  * prev_file linkage mirrors hall_store.c: each event records the file id of
  * the previous event in the same (task, category) directory (the max-seq
