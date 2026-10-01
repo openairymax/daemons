@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.7.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.8.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -65,5 +65,37 @@ void m_ledger_mark(cJSON *params, int id, void *user_data);
 void m_ledger_history(cJSON *params, int id, void *user_data);
 void m_ledger_stats(cJSON *params, int id, void *user_data);
 void m_compress(cJSON *params, int id, void *user_data);
+
+/* RPC 方法表清单（唯一声明源，源自 .manifest rpc.methods）。
+ * main.c 以 X 宏展开为 daemon_method_entry_t[]：
+ *   #define X(n, f) {(n), (f)},
+ *   static const daemon_method_entry_t T[] = { SVC_MEM_D_METHODS(X) };
+ * 装配行数与方法数解耦（机制层装配，策略数据在此单点维护）。 */
+#define SVC_MEM_D_METHODS(X) \
+    X("write", m_write) \
+    X("search", m_search) \
+    X("get", m_get) \
+    X("delete", m_delete) \
+    X("count", m_count) \
+    X("recent", m_recent) \
+    X("evolve", m_evolve) \
+    X("health_check", m_health_check) \
+    X("get_stats", m_get_stats) \
+    X("kb_ingest", m_kb_ingest) \
+    X("kb_search", m_kb_search) \
+    X("kb_delete", m_kb_delete) \
+    X("kb_list", m_kb_list) \
+    X("cache_put", m_cache_put) \
+    X("cache_get", m_cache_get) \
+    X("cache_del", m_cache_del) \
+    X("cache_stats", m_cache_stats) \
+    X("ledger_append", m_ledger_append) \
+    X("ledger_window", m_ledger_window) \
+    X("ledger_budget", m_ledger_budget) \
+    X("ledger_mark", m_ledger_mark) \
+    X("ledger_history", m_ledger_history) \
+    X("ledger_stats", m_ledger_stats) \
+    X("compress", m_compress) \
+    X("shutdown", on_shutdown_method_mem_d)
 
 #endif /* SVC_MEM_D_H */
