@@ -9,7 +9,7 @@
 #include "mem_service.h"
 
 #include "airy_memory.h"
-#include "airy_string.h"
+#include "safe_utf8.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -676,14 +676,14 @@ static void test_persist_utf8_repair(void)
     fclose(rm);
     cleaned[clean_len] = '\0';
     assert(clean_len > 0);
-    assert(string_utf8_validate(cleaned, clean_len));
+    assert(utf8_validate(cleaned, clean_len));
 
     /* 召回内容同样为合法 UTF-8 */
     mem_record_t rec = {0};
     int ret = mem_service_get(svc, "0123456789abcdef0123456789abcdef", &rec);
     assert(ret == AIRY_SUCCESS);
     assert(rec.data != NULL);
-    assert(string_utf8_validate((const char *)rec.data, rec.len));
+    assert(utf8_validate((const char *)rec.data, rec.len));
     mem_record_free(&rec);
 
     mem_service_destroy(svc);

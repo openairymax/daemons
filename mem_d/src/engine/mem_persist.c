@@ -12,7 +12,7 @@
 
 #include "mem_persist.h"
 #include "airy_memory.h"
-#include "airy_string.h"
+#include "safe_utf8.h"
 #include "svc_logger.h"
 #include "platform.h"
 
@@ -311,7 +311,7 @@ static bool mem_persist_repair_utf8(mem_service_t *svc, char **content, size_t *
     if (!clean)
         return false;
 
-    size_t written = string_utf8_sanitize(*content, in_len, clean, cap);
+    size_t written = utf8_sanitize(*content, in_len, clean, cap);
     if (written == in_len && memcmp(clean, *content, in_len) == 0) {
         AIRY_FREE(clean); /* already valid UTF-8, nothing to repair */
         return false;

@@ -13,7 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "airy_string.h"
+#include "safe_utf8.h"
 
 static int g_fail = 0;
 
@@ -39,7 +39,7 @@ static void cap_text(const char *delta, size_t dlen, void *ud)
 {
     (void)ud;
     g_delta_calls++;
-    if (!string_utf8_validate(delta, dlen))
+    if (!utf8_validate(delta, dlen))
         g_delta_ok = 0;
     if (g_seen_len + dlen < sizeof(g_seen)) {
         AIRY_MEMCPY(g_seen + g_seen_len, delta, dlen);
