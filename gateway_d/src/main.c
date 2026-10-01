@@ -27,7 +27,6 @@
 #include "logging.h"
 #include "daemon_platform_ext.h"
 #include "svc_common.h"
-#include "svc_config.h"
 #include "svc_logger.h"
 #include "error.h"
 #include "airy_rt.h"
