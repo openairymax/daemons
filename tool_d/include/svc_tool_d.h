@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.7.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.8.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -51,5 +51,23 @@ void m_health_check(cJSON *params, int id, void *user_data);
 void m_get_stats(cJSON *params, int id, void *user_data);
 void m_pending(cJSON *params, int id, void *user_data);
 void m_approve(cJSON *params, int id, void *user_data);
+
+/* RPC 方法表清单（唯一声明源，源自 .manifest rpc.methods）。
+ * main.c 以 X 宏展开为 daemon_method_entry_t[]：
+ *   #define X(n, f) {(n), (f)},
+ *   static const daemon_method_entry_t T[] = { SVC_TOOL_D_METHODS(X) };
+ * 装配行数与方法数解耦（机制层装配，策略数据在此单点维护）。 */
+#define SVC_TOOL_D_METHODS(X) \
+    X("register", m_register) \
+    X("list_tools", m_list_tools) \
+    X("get_tool", m_get_tool) \
+    X("execute_tool", m_execute_tool) \
+    X("execute", m_execute) \
+    X("list", m_list) \
+    X("health_check", m_health_check) \
+    X("get_stats", m_get_stats) \
+    X("pending", m_pending) \
+    X("approve", m_approve) \
+    X("shutdown", on_shutdown_method_tool_d)
 
 #endif /* SVC_TOOL_D_H */

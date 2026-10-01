@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.7.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.8.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -59,5 +59,31 @@ void m_units(cJSON *params, int id, void *user_data);
 void m_numerical(cJSON *params, int id, void *user_data);
 void m_finance(cJSON *params, int id, void *user_data);
 void m_number_theory(cJSON *params, int id, void *user_data);
+
+/* RPC 方法表清单（唯一声明源，源自 .manifest rpc.methods）。
+ * main.c 以 X 宏展开为 daemon_method_entry_t[]：
+ *   #define X(n, f) {(n), (f)},
+ *   static const daemon_method_entry_t T[] = { SVC_MATHS_D_METHODS(X) };
+ * 装配行数与方法数解耦（机制层装配，策略数据在此单点维护）。 */
+#define SVC_MATHS_D_METHODS(X) \
+    X("health_check", m_health_check) \
+    X("get_stats", m_get_stats) \
+    X("recognize", m_recognize) \
+    X("eval", m_eval) \
+    X("stats", m_stats) \
+    X("plot", m_plot) \
+    X("solve", m_solve) \
+    X("differentiate", m_differentiate) \
+    X("integrate", m_integrate) \
+    X("limit", m_limit) \
+    X("simplify", m_simplify) \
+    X("factor", m_factor) \
+    X("expand", m_expand) \
+    X("matrix", m_matrix) \
+    X("units", m_units) \
+    X("numerical", m_numerical) \
+    X("finance", m_finance) \
+    X("number_theory", m_number_theory) \
+    X("shutdown", on_shutdown_method_maths_d)
 
 #endif /* SVC_MATHS_D_H */

@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.7.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.8.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -99,15 +99,7 @@ int main(int argc, char **argv)
     g_dispatcher_think_d = daemon_event_driver_get_dispatcher(
         g_event_driver_think_d);
     static const daemon_method_entry_t SVC_METHODS[] = {
-        {"process", m_process},
-        {"orchestrate", m_orchestrate},
-        {"get_stats", m_get_stats},
-        {"health_check", m_health_check},
-        {"lang_process", m_lang_process},
-        {"lang_postprocess", m_lang_postprocess},
-        {"lang_stats", m_lang_stats},
-        {"review", m_review},
-        {"shutdown", on_shutdown_method_think_d},
+        SVC_THINK_D_METHODS(DAEMON_METHOD_ENTRY)
     };
     DAEMON_REGISTER_METHODS(g_dispatcher_think_d, SVC_METHODS);
     SVC_LOG_INFO("Registered 9 RPC methods (think.* namespace)");

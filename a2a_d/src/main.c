@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.7.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.8.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -94,20 +94,7 @@ int main(int argc, char **argv)
     g_dispatcher_a2a_d = daemon_event_driver_get_dispatcher(
         g_event_driver_a2a_d);
     static const daemon_method_entry_t SVC_METHODS[] = {
-        {"register_agent", m_register_agent},
-        {"unregister_agent", m_unregister_agent},
-        {"discover_agents", m_discover_agents},
-        {"create_task", m_create_task},
-        {"update_task", m_update_task},
-        {"cancel_task", m_cancel_task},
-        {"get_task", m_get_task},
-        {"send_message", m_send_message},
-        {"count", m_count},
-        {"send", m_send},
-        {"receive", m_receive},
-        {"health_check", m_health_check},
-        {"get_stats", m_get_stats},
-        {"shutdown", on_shutdown_method_a2a_d},
+        SVC_A2A_D_METHODS(DAEMON_METHOD_ENTRY)
     };
     DAEMON_REGISTER_METHODS(g_dispatcher_a2a_d, SVC_METHODS);
     SVC_LOG_INFO("Registered 14 RPC methods (a2a.* namespace)");

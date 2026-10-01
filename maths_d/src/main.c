@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.7.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.8.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -94,25 +94,7 @@ int main(int argc, char **argv)
     g_dispatcher_maths_d = daemon_event_driver_get_dispatcher(
         g_event_driver_maths_d);
     static const daemon_method_entry_t SVC_METHODS[] = {
-        {"health_check", m_health_check},
-        {"get_stats", m_get_stats},
-        {"recognize", m_recognize},
-        {"eval", m_eval},
-        {"stats", m_stats},
-        {"plot", m_plot},
-        {"solve", m_solve},
-        {"differentiate", m_differentiate},
-        {"integrate", m_integrate},
-        {"limit", m_limit},
-        {"simplify", m_simplify},
-        {"factor", m_factor},
-        {"expand", m_expand},
-        {"matrix", m_matrix},
-        {"units", m_units},
-        {"numerical", m_numerical},
-        {"finance", m_finance},
-        {"number_theory", m_number_theory},
-        {"shutdown", on_shutdown_method_maths_d},
+        SVC_MATHS_D_METHODS(DAEMON_METHOD_ENTRY)
     };
     DAEMON_REGISTER_METHODS(g_dispatcher_maths_d, SVC_METHODS);
     SVC_LOG_INFO("Registered 19 RPC methods (maths.* namespace)");

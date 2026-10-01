@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.7.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.8.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -94,28 +94,7 @@ int main(int argc, char **argv)
     g_dispatcher_cupolas_d = daemon_event_driver_get_dispatcher(
         g_event_driver_cupolas_d);
     static const daemon_method_entry_t SVC_METHODS[] = {
-        {"check_permission", m_check_permission},
-        {"sanitize", m_sanitize},
-        {"execute_command", m_execute_command},
-        {"add_rule", m_add_rule},
-        {"audit_flush", m_audit_flush},
-        {"health_check", m_health_check},
-        {"get_stats", m_get_stats},
-        {"vault_store", m_vault_store},
-        {"vault_retrieve", m_vault_retrieve},
-        {"vault_delete", m_vault_delete},
-        {"vault_list", m_vault_list},
-        {"vault_rotate", m_vault_rotate},
-        {"net_add_rule", m_net_add_rule},
-        {"net_check_access", m_net_check_access},
-        {"net_get_stats", m_net_get_stats},
-        {"entitlements_load", m_entitlements_load},
-        {"entitlements_check", m_entitlements_check},
-        {"policy_load", m_policy_load},
-        {"policy_activate", m_policy_activate},
-        {"policy_rollback", m_policy_rollback},
-        {"policy_status", m_policy_status},
-        {"shutdown", on_shutdown_method_cupolas_d},
+        SVC_CUPOLAS_D_METHODS(DAEMON_METHOD_ENTRY)
     };
     DAEMON_REGISTER_METHODS(g_dispatcher_cupolas_d, SVC_METHODS);
     SVC_LOG_INFO("Registered 22 RPC methods (cupolas.* namespace)");

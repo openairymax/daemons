@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.7.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.8.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -94,31 +94,7 @@ int main(int argc, char **argv)
     g_dispatcher_mem_d = daemon_event_driver_get_dispatcher(
         g_event_driver_mem_d);
     static const daemon_method_entry_t SVC_METHODS[] = {
-        {"write", m_write},
-        {"search", m_search},
-        {"get", m_get},
-        {"delete", m_delete},
-        {"count", m_count},
-        {"recent", m_recent},
-        {"evolve", m_evolve},
-        {"health_check", m_health_check},
-        {"get_stats", m_get_stats},
-        {"kb_ingest", m_kb_ingest},
-        {"kb_search", m_kb_search},
-        {"kb_delete", m_kb_delete},
-        {"kb_list", m_kb_list},
-        {"cache_put", m_cache_put},
-        {"cache_get", m_cache_get},
-        {"cache_del", m_cache_del},
-        {"cache_stats", m_cache_stats},
-        {"ledger_append", m_ledger_append},
-        {"ledger_window", m_ledger_window},
-        {"ledger_budget", m_ledger_budget},
-        {"ledger_mark", m_ledger_mark},
-        {"ledger_history", m_ledger_history},
-        {"ledger_stats", m_ledger_stats},
-        {"compress", m_compress},
-        {"shutdown", on_shutdown_method_mem_d},
+        SVC_MEM_D_METHODS(DAEMON_METHOD_ENTRY)
     };
     DAEMON_REGISTER_METHODS(g_dispatcher_mem_d, SVC_METHODS);
     SVC_LOG_INFO("Registered 25 RPC methods (mem.* namespace)");

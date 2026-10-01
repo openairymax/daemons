@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.7.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.8.0 (L3 SSoT) 生成。
  * 机制层装配；策略层在 src/svc.c 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
  */
@@ -62,5 +62,34 @@ void m_policy_load(cJSON *params, int id, void *user_data);
 void m_policy_activate(cJSON *params, int id, void *user_data);
 void m_policy_rollback(cJSON *params, int id, void *user_data);
 void m_policy_status(cJSON *params, int id, void *user_data);
+
+/* RPC 方法表清单（唯一声明源，源自 .manifest rpc.methods）。
+ * main.c 以 X 宏展开为 daemon_method_entry_t[]：
+ *   #define X(n, f) {(n), (f)},
+ *   static const daemon_method_entry_t T[] = { SVC_CUPOLAS_D_METHODS(X) };
+ * 装配行数与方法数解耦（机制层装配，策略数据在此单点维护）。 */
+#define SVC_CUPOLAS_D_METHODS(X) \
+    X("check_permission", m_check_permission) \
+    X("sanitize", m_sanitize) \
+    X("execute_command", m_execute_command) \
+    X("add_rule", m_add_rule) \
+    X("audit_flush", m_audit_flush) \
+    X("health_check", m_health_check) \
+    X("get_stats", m_get_stats) \
+    X("vault_store", m_vault_store) \
+    X("vault_retrieve", m_vault_retrieve) \
+    X("vault_delete", m_vault_delete) \
+    X("vault_list", m_vault_list) \
+    X("vault_rotate", m_vault_rotate) \
+    X("net_add_rule", m_net_add_rule) \
+    X("net_check_access", m_net_check_access) \
+    X("net_get_stats", m_net_get_stats) \
+    X("entitlements_load", m_entitlements_load) \
+    X("entitlements_check", m_entitlements_check) \
+    X("policy_load", m_policy_load) \
+    X("policy_activate", m_policy_activate) \
+    X("policy_rollback", m_policy_rollback) \
+    X("policy_status", m_policy_status) \
+    X("shutdown", on_shutdown_method_cupolas_d)
 
 #endif /* SVC_CUPOLAS_D_H */

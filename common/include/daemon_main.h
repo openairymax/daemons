@@ -298,6 +298,16 @@ typedef struct {
     method_fn handler;
 } daemon_method_entry_t;
 
+/**
+ * @brief X-macro entry expander for the manifest-derived method list.
+ *
+ * The generated svc_<d>.h owns the SVC_<D>_METHODS(X) list (single source
+ * of truth, derived from .manifest rpc.methods); main.c expands it into the
+ * daemon_method_entry_t table. This keeps the entry file within its line
+ * budget regardless of method count.
+ */
+#define DAEMON_METHOD_ENTRY(name, fn) { (name), (fn) },
+
 #define DAEMON_REGISTER_METHODS(dispatcher, entries)                                    \
     do {                                                                                \
         for (size_t _dm_i = 0;                                                          \
