@@ -196,6 +196,9 @@ target_include_directories(svc_common PUBLIC
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/sync>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/observability>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/io>
+    # 0.1.19 §60: 任务大厅事件磁盘格式 SSoT（hall_event.h），
+    # hall_writer.c 薄委派消费
+    $<BUILD_INTERFACE:${COMMONS_DIR}/utils/hall>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/types>
     $<BUILD_INTERFACE:${COMMONS_DIR}/utils/cache>
     # 新增网络和IPC模块
