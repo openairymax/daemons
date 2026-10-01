@@ -20,7 +20,7 @@
 #include "error.h"
 #include "svc_logger.h"
 #include "platform.h"
-#include "hall_writer.h"
+#include "hall_event.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,7 +43,7 @@ void sched_hall_progress(const char *task_id, const char *event, int priority)
     cJSON_AddNumberToObject(evt, "priority", (double)priority);
     char *s = cJSON_PrintUnformatted(evt);
     if (s) {
-        (void)daemon_hall_write(task_id, "progress", NULL, s);
+        (void)hall_evt_write(task_id, "progress", NULL, s);
         cJSON_free(s);
     }
     cJSON_Delete(evt);
@@ -68,7 +68,7 @@ void sched_hall_result(const char *task_id, const char *agent, const char *statu
         cJSON_AddStringToObject(evt, "error", error);
     char *s = cJSON_PrintUnformatted(evt);
     if (s) {
-        (void)daemon_hall_write(task_id, "result", NULL, s);
+        (void)hall_evt_write(task_id, "result", NULL, s);
         cJSON_free(s);
     }
     cJSON_Delete(evt);
