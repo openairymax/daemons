@@ -43,6 +43,7 @@
  */
 
 #include "daemon_l1_server.h"
+#include "daemon_rpc_client.h"
 
 #include "kern_ipc.h"
 #include "platform_misc.h"
@@ -601,36 +602,6 @@ int daemon_l2_channel_for_socket(const char *socket_path, char *channel, size_t 
 }
 
 /**
- * Serializes the JSON-RPC 2.0 request exactly as rpc_connect_send does on
- * the socket path (id=1; params embedded when valid JSON, stringified
- * otherwise, {} when empty) so the daemon sees identical requests on both
- * transports. Returns the PrintUnformatted buffer (cJSON default
- * allocator, AIRY_FREE-compatible) or NULL on OOM.
- */
-static char *daemon_l2_build_request(const char *method, const char *params_json)
-{
-    cJSON *root = cJSON_CreateObject();
-    if (!root)
-        return NULL;
-    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
-    cJSON_AddStringToObject(root, "method", method);
-    if (params_json && params_json[0] != '\0') {
-        cJSON *params = cJSON_Parse(params_json);
-        if (params) {
-            cJSON_AddItemToObject(root, "params", params);
-        } else {
-            cJSON_AddStringToObject(root, "params", params_json);
-        }
-    } else {
-        cJSON_AddObjectToObject(root, "params");
-    }
-    cJSON_AddNumberToObject(root, "id", 1);
-    char *request_str = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    return request_str;
-}
-
-/**
  * L2 transaction core: build -> envelope -> connect -> call -> decode. On
  * success *out_resp_json is the daemon's complete reply payload as a
  * NUL-terminated string — nothing parsed, nothing folded, error responses
@@ -648,7 +619,7 @@ static int daemon_l2_rpc_transact(const char *channel, const char *method,
     if (!channel || !method)
         return AIRY_ERR_INVALID_PARAM;
 
-    char *request_str = daemon_l2_build_request(method, params_json);
+    char *request_str = daemon_rpc_json_req(method, params_json);
     if (!request_str)
         return AIRY_ERR_OUT_OF_MEMORY;
     size_t req_len = strlen(request_str);
