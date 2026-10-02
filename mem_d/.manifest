@@ -5,6 +5,7 @@
   "sd_type": "mem",
   "ops": ["ipc"],
   "cupolas": "pep",
+  "activate_noop": true,
   "facades": ["ingress", "execute", "state"],
   "slots": ["create", "delete", "query", "cache", "record", "compute", "discover"],
   "rpc": {

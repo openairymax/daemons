@@ -4,6 +4,7 @@
   "cname": "channel",
   "sd_type": "channel",
   "ops": ["ipc"],
+  "activate_noop": true,
   "facades": ["ingress", "execute", "state"],
   "slots": ["create", "delete", "comm", "stream", "query"],
   "rpc": {

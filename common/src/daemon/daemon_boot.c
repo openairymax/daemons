@@ -74,6 +74,16 @@ static airy_sock_t daemon_listen_sock(int use_tcp, int tcp_port, const char *uni
 #endif
 }
 
+/* 激活钩子缺省策略（null object，0.1.19 §80）：无事件耦合激活需求
+ * 的户经 DAEMON_BOOT_WIRE 引用本符号，svc.c 不再逐户维护空桩副本。
+ * 行为与原空桩逐字等价：立即成功返回，不触碰 driver/bsd。 */
+int daemon_svc_noop(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
+{
+    (void)driver;
+    (void)bsd;
+    return 0;
+}
+
 static int daemon_init_driver(const char *daemon_name, const char *service_type,
                               const char *socket_path, int tcp_port, const char *tags,
                               int use_tcp, const daemon_event_config_t *ev_config,

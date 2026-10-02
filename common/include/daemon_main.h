@@ -363,15 +363,29 @@ typedef struct {
  * 钩子名十二户恒定（DAEMON_DECLARE_COMMON 约定面），唯 ops 表、方法表
  * 与 cupolas 模式随户异；以模板宏收敛生成户 main.c 的横向接线副本
  * （0.1.19 §79），装配机制仍整体在 daemon_boot()。
+ *
+ * 形参顺序（ops_, methods_, activate_, cupolas_init_）：两张静态表
+ * 在前，激活钩子策略居第三。activate_ 为激活钩子策略：实体户传
+ * svc_activate（src/svc.c），无激活策略户传 daemon_svc_noop 缺省
+ * （0.1.19 §80，svc.c 不再逐户维护空桩）。
  */
-#define DAEMON_BOOT_WIRE(ops_, methods_, cupolas_init_)                        \
+#define DAEMON_BOOT_WIRE(ops_, methods_, activate_, cupolas_init_)             \
     .ops = (ops_), .ops_count = sizeof(ops_) / sizeof((ops_)[0]),              \
     .cupolas_init = (cupolas_init_),                                           \
     .svc_prepare = svc_prepare, .svc_endpoint = svc_endpoint,                  \
-    .svc_activate = svc_activate, .svc_attach = svc_attach,                    \
+    .svc_activate = (activate_), .svc_attach = svc_attach,                     \
     .svc_teardown = svc_teardown, .svc_destroy = svc_destroy,                  \
     .methods = (methods_),                                                     \
     .method_count = sizeof(methods_) / sizeof((methods_)[0])
+
+/**
+ * @brief svc 激活钩子缺省策略（null object，0.1.19 §80）。
+ *
+ * 无激活策略户经 DAEMON_BOOT_WIRE 第三参引用本符号，机制层单点
+ * 提供空激活语义；签名对齐 daemon_boot_t::svc_activate。实现:
+ * src/daemon/daemon_boot.c。
+ */
+int daemon_svc_noop(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd);
 
 /**
  * @brief Daemon 启动机制：parse -> init -> serve -> cleanup 全装配序。

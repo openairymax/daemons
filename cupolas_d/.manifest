@@ -4,6 +4,7 @@
   "cname": "cupolas",
   "sd_type": "cupolas",
   "cupolas": "full",
+  "activate_noop": true,
   "facades": ["ingress", "execute", "governance"],
   "slots": ["authz", "validate", "record"],
   "rpc": {

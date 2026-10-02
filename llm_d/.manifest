@@ -4,6 +4,7 @@
   "cname": "llm",
   "sd_type": "llm",
   "ops": ["ipc", "llm"],
+  "activate_noop": true,
   "facades": ["ingress", "execute", "state"],
   "slots": ["compute", "route", "cache", "config", "stream", "resilience"],
   "rpc": {
