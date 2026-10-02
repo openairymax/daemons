@@ -34,7 +34,6 @@ extern "C" {
 
 typedef struct {
     char *socket_path;
-    char *tcp_host;
     uint16_t tcp_port;
     int use_tcp;
     int max_clients;

@@ -30,9 +30,9 @@
 #include "ledger_handlers.h"
 
 #include "airy_memory.h"
+#include "daemon_cfg_file.h"
 #include "error.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 
 /* ── 单例（handler 四域经 mem_daemon_ctx.h 共享） ────────────────────────── */
@@ -119,9 +119,55 @@ void m_compress(cJSON *params, int id, void *user_data)
 
 /* ── 配置装载（声明式策略注入） ─────────────────────────────────────────── */
 
+static void cfg_on_load(cJSON *root, void *ud)
+{
+    daemon_ep_cfg_t *ep = (daemon_ep_cfg_t *)ud;
+    cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
+    if (daemon_cfg) {
+        daemon_ep_parse(daemon_cfg, ep);
+        cJSON *item = cJSON_GetObjectItem(daemon_cfg, "max_clients");
+        if (cJSON_IsNumber(item))
+            g_config.max_clients = item->valueint;
+        item = cJSON_GetObjectItem(daemon_cfg, "max_records");
+        if (cJSON_IsNumber(item))
+            g_config.max_records = (size_t)item->valuedouble;
+    }
+    /* B5：压缩门禁策略声明（缺省字段保持 fail-closed 初值） */
+    cJSON *ccfg = cJSON_GetObjectItem(root, "compress");
+    if (ccfg) {
+        cJSON *l1 = cJSON_GetObjectItem(ccfg, "l1_enabled");
+        if (cJSON_IsBool(l1))
+            g_config.compress_l1_enabled = cJSON_IsTrue(l1) ? 1 : 0;
+        cJSON *l2 = cJSON_GetObjectItem(ccfg, "l2_enabled");
+        if (cJSON_IsBool(l2))
+            g_config.compress_l2_enabled = cJSON_IsTrue(l2) ? 1 : 0;
+        cJSON *gate = cJSON_GetObjectItem(ccfg, "gate");
+        if (gate) {
+            cJSON *gs = cJSON_GetObjectItem(gate, "grayscale");
+            if (cJSON_IsBool(gs))
+                g_config.compress_gate_grayscale = cJSON_IsTrue(gs) ? 1 : 0;
+            cJSON *acr = cJSON_GetObjectItem(gate, "acr");
+            if (cJSON_IsNumber(acr))
+                g_config.compress_gate_acr = acr->valuedouble;
+            cJSON *ttft = cJSON_GetObjectItem(gate, "ttft_ms");
+            if (cJSON_IsNumber(ttft))
+                g_config.compress_gate_ttft_ms = ttft->valuedouble;
+        }
+    }
+    /* B5：台账计数模型声明（缺省 → 默认模型，不得硬编码） */
+    cJSON *tcfg = cJSON_GetObjectItem(root, "token");
+    if (tcfg) {
+        cJSON *model = cJSON_GetObjectItem(tcfg, "model");
+        if (cJSON_IsString(model) && model->valuestring[0])
+            AIRY_STRNCPY_TERM(g_config.token_model, model->valuestring,
+                              sizeof(g_config.token_model));
+    }
+}
+
 static void load_daemon_config(const char *config_path)
 {
-    g_config.use_tcp = 0;
+    daemon_ep_cfg_t ep;
+    daemon_ep_def(MEM_D_SOCKET_UNIX, MEM_D_SOCKET_WIN, MEM_D_TCP_PORT, &ep);
     g_config.max_clients = MAX_CLIENTS;
     g_config.max_records = MEM_DEFAULT_MAX_RECORDS;
     /* B5：L2 压缩门禁默认 fail-closed（L2 关、灰度关、acr/ttft 不可用） */
@@ -132,14 +178,6 @@ static void load_daemon_config(const char *config_path)
     g_config.compress_gate_ttft_ms = -1.0;
     /* B5：台账计数模型默认空（由 token_standard 默认模型兜底） */
     g_config.token_model[0] = '\0';
-
-#if defined(AIRY_PLATFORM_WINDOWS)
-    g_config.socket_path = AIRY_STRDUP(MEM_D_SOCKET_WIN);
-#else
-    g_config.socket_path = AIRY_STRDUP(MEM_D_SOCKET_UNIX);
-#endif
-    g_config.tcp_host = AIRY_STRDUP("127.0.0.1");
-    g_config.tcp_port = MEM_D_TCP_PORT;
 
     const char *env = getenv("AIRY_MEM_MAX_RECORDS");
     if (env) {
@@ -175,85 +213,16 @@ static void load_daemon_config(const char *config_path)
     if (env_model && env_model[0])
         AIRY_STRNCPY_TERM(g_config.token_model, env_model, sizeof(g_config.token_model));
 
-    if (config_path) {
-        FILE *f = fopen(config_path, "rb");
-        if (f) {
-            fseek(f, 0, SEEK_END);
-            long len = ftell(f);
-            fseek(f, 0, SEEK_SET);
-            if (len > 0 && len < 1024 * 1024) {
-                char *content = (char *)AIRY_MALLOC((size_t)len + 1);
-                if (content) {
-                    size_t read_len = fread(content, 1, (size_t)len, f);
-                    if (read_len == (size_t)len) {
-                        content[read_len] = '\0';
-                        do {
-                            CJSON_PARSE_GUARD(root, content, { break; });
-                            cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
-                            if (daemon_cfg) {
-                                cJSON *socket_path = cJSON_GetObjectItem(daemon_cfg, "socket_path");
-                                if (cJSON_IsString(socket_path)) {
-                                    AIRY_FREE(g_config.socket_path);
-                                    g_config.socket_path = AIRY_STRDUP(socket_path->valuestring);
-                                }
-                                cJSON *tcp_port = cJSON_GetObjectItem(daemon_cfg, "tcp_port");
-                                if (cJSON_IsNumber(tcp_port) && tcp_port->valueint > 0 &&
-                                    tcp_port->valueint <= 65535) {
-                                    g_config.tcp_port = (uint16_t)tcp_port->valueint;
-                                    g_config.use_tcp = 1;
-                                }
-                                cJSON *max_clients = cJSON_GetObjectItem(daemon_cfg, "max_clients");
-                                if (cJSON_IsNumber(max_clients))
-                                    g_config.max_clients = max_clients->valueint;
-                                cJSON *max_records = cJSON_GetObjectItem(daemon_cfg, "max_records");
-                                if (cJSON_IsNumber(max_records))
-                                    g_config.max_records = (size_t)max_records->valuedouble;
-                            }
-                            /* B5：压缩门禁策略声明（缺省字段保持 fail-closed 初值） */
-                            cJSON *ccfg = cJSON_GetObjectItem(root, "compress");
-                            if (ccfg) {
-                                cJSON *l1 = cJSON_GetObjectItem(ccfg, "l1_enabled");
-                                if (cJSON_IsBool(l1))
-                                    g_config.compress_l1_enabled = cJSON_IsTrue(l1) ? 1 : 0;
-                                cJSON *l2 = cJSON_GetObjectItem(ccfg, "l2_enabled");
-                                if (cJSON_IsBool(l2))
-                                    g_config.compress_l2_enabled = cJSON_IsTrue(l2) ? 1 : 0;
-                                cJSON *gate = cJSON_GetObjectItem(ccfg, "gate");
-                                if (gate) {
-                                    cJSON *gs = cJSON_GetObjectItem(gate, "grayscale");
-                                    if (cJSON_IsBool(gs))
-                                        g_config.compress_gate_grayscale = cJSON_IsTrue(gs) ? 1 : 0;
-                                    cJSON *acr = cJSON_GetObjectItem(gate, "acr");
-                                    if (cJSON_IsNumber(acr))
-                                        g_config.compress_gate_acr = acr->valuedouble;
-                                    cJSON *ttft = cJSON_GetObjectItem(gate, "ttft_ms");
-                                    if (cJSON_IsNumber(ttft))
-                                        g_config.compress_gate_ttft_ms = ttft->valuedouble;
-                                }
-                            }
-                            /* B5：台账计数模型声明（缺省 → 默认模型，不得硬编码） */
-                            cJSON *tcfg = cJSON_GetObjectItem(root, "token");
-                            if (tcfg) {
-                                cJSON *model = cJSON_GetObjectItem(tcfg, "model");
-                                if (cJSON_IsString(model) && model->valuestring[0])
-                                    AIRY_STRNCPY_TERM(g_config.token_model, model->valuestring,
-                                                      sizeof(g_config.token_model));
-                            }
-                        } while (0);
-                    }
-                    AIRY_FREE(content);
-                }
-            }
-            fclose(f);
-        }
-    }
+    daemon_cfg_read(config_path, cfg_on_load, &ep);
+    g_config.socket_path = ep.socket_path;
+    g_config.tcp_port = (uint16_t)ep.tcp_port;
+    g_config.use_tcp = ep.use_tcp;
 }
 
 static void free_daemon_config(void)
 {
     AIRY_FREE(g_config.socket_path);
-    AIRY_FREE(g_config.tcp_host);
-    __builtin_memset(&g_config, 0, sizeof(g_config));
+    AIRY_MEMSET(&g_config, 0, sizeof(g_config));
 }
 
 /* ── 生命周期五钩子（实现 generated main.c 契约） ───────────────────────── */
@@ -261,7 +230,7 @@ static void free_daemon_config(void)
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
     ep->use_tcp = cmdline_tcp ? 1 : (g_config.use_tcp ? 1 : 0);
-    ep->tcp_host = g_config.tcp_host;
+    ep->tcp_host = "127.0.0.1";
     ep->tcp_port = g_config.tcp_port;
     ep->sock_unix = g_config.socket_path;
     ep->sock_win = g_config.socket_path;

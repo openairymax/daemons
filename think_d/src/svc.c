@@ -10,6 +10,7 @@
  */
 
 #include "airy_memory.h"
+#include "daemon_cfg_file.h"
 #include "svc_think_d.h"
 #include "think_d_internal.h"
 #include "lang_svc.h"
@@ -47,77 +48,45 @@ typedef struct {
 
 static think_daemon_config_t g_cfg = {0};
 
+static void cfg_on_load(cJSON *root, void *ud)
+{
+    daemon_ep_cfg_t *ep = (daemon_ep_cfg_t *)ud;
+    cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
+    if (daemon_cfg)
+        daemon_ep_parse(daemon_cfg, ep);
+    cJSON *think = cJSON_GetObjectItem(root, "think");
+    if (think) {
+        cJSON *s2 = cJSON_GetObjectItem(think, "think2_slow_model");
+        if (cJSON_IsString(s2) && s2->valuestring[0])
+            AIRY_STRNCPY_TERM(g_cfg.think2_slow_model, s2->valuestring,
+                              sizeof(g_cfg.think2_slow_model));
+        cJSON *t1f = cJSON_GetObjectItem(think, "think1_fast_model");
+        if (cJSON_IsString(t1f) && t1f->valuestring[0])
+            AIRY_STRNCPY_TERM(g_cfg.think1_fast_model,
+                              t1f->valuestring,
+                              sizeof(g_cfg.think1_fast_model));
+        cJSON *t1p = cJSON_GetObjectItem(think, "think1_prof_model");
+        if (cJSON_IsString(t1p) && t1p->valuestring[0])
+            AIRY_STRNCPY_TERM(g_cfg.think1_prof_model,
+                              t1p->valuestring,
+                              sizeof(g_cfg.think1_prof_model));
+        cJSON *timeout = cJSON_GetObjectItem(think, "timeout_ms");
+        if (cJSON_IsNumber(timeout))
+            g_cfg.process_timeout_ms = (uint32_t)timeout->valueint;
+        cJSON *enabled = cJSON_GetObjectItem(think, "enabled");
+        if (cJSON_IsBool(enabled) || cJSON_IsNumber(enabled))
+            g_cfg.think_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+    }
+}
+
 static void cfg_load(const char *config_path)
 {
-    g_cfg.use_tcp = 0;
+    daemon_ep_cfg_t ep;
+    daemon_ep_def(THINK_D_SOCKET_UNIX, THINK_D_SOCKET_WIN, THINK_D_TCP_PORT, &ep);
     g_cfg.process_timeout_ms = 120000;
     g_cfg.think_enabled = 1;
-    g_cfg.tcp_port = THINK_D_TCP_PORT;
-#if defined(AIRY_PLATFORM_WINDOWS)
-    g_cfg.socket_path = AIRY_STRDUP(THINK_D_SOCKET_WIN);
-#else
-    g_cfg.socket_path = AIRY_STRDUP(THINK_D_SOCKET_UNIX);
-#endif
 
-    if (config_path) {
-        FILE *f = fopen(config_path, "rb");
-        if (f) {
-            fseek(f, 0, SEEK_END);
-            long len = ftell(f);
-            fseek(f, 0, SEEK_SET);
-            if (len > 0 && len < 1024 * 1024) {
-                char *content = (char *)AIRY_MALLOC((size_t)len + 1);
-                if (content) {
-                    size_t read_len = fread(content, 1, (size_t)len, f);
-                    if (read_len == (size_t)len) {
-                        content[read_len] = '\0';
-                        do {
-                            CJSON_PARSE_GUARD(root, content, { break; });
-                            cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
-                            if (daemon_cfg) {
-                                cJSON *socket_path =
-                                    cJSON_GetObjectItem(daemon_cfg, "socket_path");
-                                if (cJSON_IsString(socket_path)) {
-                                    AIRY_FREE(g_cfg.socket_path);
-                                    g_cfg.socket_path = AIRY_STRDUP(socket_path->valuestring);
-                                }
-                                cJSON *tcp_port = cJSON_GetObjectItem(daemon_cfg, "tcp_port");
-                                if (cJSON_IsNumber(tcp_port)) {
-                                    g_cfg.tcp_port = (uint16_t)tcp_port->valueint;
-                                    g_cfg.use_tcp = 1;
-                                }
-                            }
-                            cJSON *think = cJSON_GetObjectItem(root, "think");
-                            if (think) {
-                                cJSON *s2 = cJSON_GetObjectItem(think, "think2_slow_model");
-                                if (cJSON_IsString(s2) && s2->valuestring[0])
-                                    AIRY_STRNCPY_TERM(g_cfg.think2_slow_model, s2->valuestring,
-                                                      sizeof(g_cfg.think2_slow_model));
-                                cJSON *t1f = cJSON_GetObjectItem(think, "think1_fast_model");
-                                if (cJSON_IsString(t1f) && t1f->valuestring[0])
-                                    AIRY_STRNCPY_TERM(g_cfg.think1_fast_model,
-                                                      t1f->valuestring,
-                                                      sizeof(g_cfg.think1_fast_model));
-                                cJSON *t1p = cJSON_GetObjectItem(think, "think1_prof_model");
-                                if (cJSON_IsString(t1p) && t1p->valuestring[0])
-                                    AIRY_STRNCPY_TERM(g_cfg.think1_prof_model,
-                                                      t1p->valuestring,
-                                                      sizeof(g_cfg.think1_prof_model));
-                                cJSON *timeout = cJSON_GetObjectItem(think, "timeout_ms");
-                                if (cJSON_IsNumber(timeout))
-                                    g_cfg.process_timeout_ms = (uint32_t)timeout->valueint;
-                                cJSON *enabled = cJSON_GetObjectItem(think, "enabled");
-                                if (cJSON_IsBool(enabled) || cJSON_IsNumber(enabled))
-                                    g_cfg.think_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
-                            }
-                        } while (0);
-                    }
-                    AIRY_FREE(content);
-                }
-            }
-            fclose(f);
-        }
-    }
+    daemon_cfg_read(config_path, cfg_on_load, &ep);
 
     /* Model SSoT: $AIRY_CONFIG_DIR/model.yaml 的 think 段（三角色单一
      * 配置源；与 gateway_d 读全局段同一 svc_model_defaults 公共层）。 */
@@ -164,6 +133,10 @@ static void cfg_load(const char *config_path)
         if ((e = getenv("AIRY_THINK_TIMEOUT_MS")) && *e && atoi(e) > 0)
             g_cfg.process_timeout_ms = (uint32_t)atoi(e);
     }
+
+    g_cfg.socket_path = ep.socket_path;
+    g_cfg.tcp_port = (uint16_t)ep.tcp_port;
+    g_cfg.use_tcp = ep.use_tcp;
 }
 
 static void cfg_free(void)

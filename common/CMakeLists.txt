@@ -69,6 +69,7 @@ set(SVC_COMMON_SOURCES
     src/daemon/daemon_heapstore_bootstrap.c # KER-05~07: daemon 统一 heapstore 运行时数据存储引导
     src/daemon/daemon_ipc_ops_bootstrap.c # ARC-04: 注入 atoms 侧 IPC/RPC/SD ops 抽象表
     src/daemon/daemon_dep.c         # 0.1.19 §7.2: 硬依赖声明 + 启动期探测 + 降级态显式上报（governance 面）
+    src/daemon/daemon_cfg_file.c    # 0.1.19 t44: config_load/ep_load 七副本消解的文件读取与端点段解析机制
 )
 
 # 创建静态库
