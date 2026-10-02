@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.9.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.10.0 (L3 SSoT) 生成。
  * manifest 派生产物；装配机制在 daemons/common，策略在 src/svc.c
  * 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
@@ -27,11 +27,10 @@
  * config/env 覆盖后与 cmdline use_tcp 融合。实现: src/svc.c。 */
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp);
 
-/* 生命周期钩子（实现: src/svc.c）；activate 收到事件驱动句柄与
- * SD bootstrap 句柄，供事件耦合激活策略（如监控采样线程）与
- * manifest deps 驱动的依赖探测健康面使用。 */
+/* 生命周期钩子（实现: src/svc.c）；激活钩子无策略需求，由
+ * 机制层 daemon_svc_noop 缺省（daemon_main.h，0.1.19 §80），
+ * svc.c 不再维护空桩副本。 */
 int svc_prepare(const char *config_path);
-int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd);
 void svc_teardown(void);
 void svc_destroy(void);
 

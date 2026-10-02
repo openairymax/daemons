@@ -4,6 +4,7 @@
   "cname": "a2a",
   "sd_type": "a2a",
   "ops": ["ipc"],
+  "activate_noop": true,
   "facades": ["ingress", "execute", "state"],
   "slots": ["comm", "discover", "create", "update", "delete", "query", "route"],
   "rpc": {

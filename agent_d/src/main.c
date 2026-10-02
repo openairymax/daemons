@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.9.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.10.0 (L3 SSoT) 生成。
  * manifest 派生产物；装配机制在 daemons/common，策略在 src/svc.c
  * 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
@@ -51,7 +51,7 @@ int main(int argc, char **argv)
         .pool_max = 128,
         .pool_queue = 4096,
         .concurrent_clients = 1,
-        DAEMON_BOOT_WIRE(SVC_OPS, SVC_METHODS, daemon_cupolas_init_pep),
+        DAEMON_BOOT_WIRE(SVC_OPS, SVC_METHODS, svc_activate, daemon_cupolas_init_pep),
     };
     return daemon_boot(argc, argv, &boot);
 }
