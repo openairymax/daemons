@@ -69,7 +69,7 @@ static void *exec_thread_fn(void *argp)
 
 static int intervals_overlap(long long s1, long long e1, long long s2, long long e2)
 {
-    return s1 <= e2 && s2 <= e1;
+    return s1 < e2 && s2 < e1;
 }
 
 static long long threads_total_ms(const exec_thread_arg_t *a, const exec_thread_arg_t *b)
@@ -80,9 +80,10 @@ static long long threads_total_ms(const exec_thread_arg_t *a, const exec_thread_
 }
 
 /* Concurrency ownership is the executor pool's; the executor itself never
- * serializes tools. Both READ and WRITE tools must run concurrently:
- * interval overlap proves execution interleaving, total < 2x single run
- * rules out serialization. */
+ * serializes tools. Both READ and WRITE tools must run concurrently: strict
+ * interval overlap proves interleaving and rules out serialization (a
+ * zero-gap serial pair is rejected), independent of machine load — the
+ * former wall-clock total bound was load-fragile and is gone. */
 
 static void test_executor_read_concurrent(void)
 {
@@ -125,8 +126,6 @@ static void test_executor_read_concurrent(void)
     long long total = threads_total_ms(&a, &b);
     printf("    read intervals: [%lld,%lld] [%lld,%lld] total=%lldms\n", a.start_ms, a.end_ms,
            b.start_ms, b.end_ms, total);
-
-    assert(total < 600);
 
     assert(intervals_overlap(a.start_ms, a.end_ms, b.start_ms, b.end_ms));
 
@@ -171,8 +170,6 @@ static void test_executor_write_concurrent(void)
     long long total = threads_total_ms(&a, &b);
     printf("    write intervals: [%lld,%lld] [%lld,%lld] total=%lldms\n", a.start_ms, a.end_ms,
            b.start_ms, b.end_ms, total);
-
-    assert(total < 600);
 
     assert(intervals_overlap(a.start_ms, a.end_ms, b.start_ms, b.end_ms));
 

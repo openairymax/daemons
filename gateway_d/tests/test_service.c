@@ -9,6 +9,8 @@
 
 #include "gateway_service.h"
 
+#include "airy_defaults.h"
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,9 +28,9 @@ static void test_default_config(void)
 
     assert(config.name != NULL);
     assert(strcmp(config.name, "agentrt-gateway") == 0);
-    assert(config.http.port == 8080);
+    assert(config.http.port == AIRY_PORT_GATEWAY_HTTP);
     assert(config.http.enabled == true);
-    assert(config.ws.port == 8081);
+    assert(config.ws.port == AIRY_PORT_GATEWAY_WS);
     assert(config.ws.enabled == true);
     assert(config.stdio.enabled == false);
 
