@@ -3,12 +3,11 @@
 
 #include "gateway_mcp_server.h"
 
+#include "gateway_jsonpick.h"
 #include "airy_memory.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 #include "error.h"
 
 #include "logging.h"
@@ -226,265 +225,6 @@ static char *build_resources_list_json(gw_mcp_server_t *server)
     return buf;
 }
 
-static char *extract_jsonrpc_method(const char *body)
-{
-    if (!body) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    const char *key = "\"method\"";
-    const char *p = strstr(body, key);
-    if (!p) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p += strlen(key);
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    if (*p != '"') {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p++;
-    const char *end = strchr(p, '"');
-    if (!end) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    size_t len = (size_t)(end - p);
-    char *method = (char *)AIRY_MALLOC(len + 1);
-    if (!method) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    __builtin_memcpy(method, p, len);
-    method[len] = '\0';
-    return method;
-}
-
-static char *__attribute__((used)) extract_jsonrpc_id(const char *body)
-{
-    if (!body) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    const char *key = "\"id\"";
-    const char *p = strstr(body, key);
-    if (!p) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p += strlen(key);
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    if (*p == '"') {
-        p++;
-        const char *end = strchr(p, '"');
-        if (!end) {
-            AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-        }
-        size_t len = (size_t)(end - p);
-        char *id = (char *)AIRY_MALLOC(len + 1);
-        if (!id) {
-            AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-        }
-        __builtin_memcpy(id, p, len);
-        id[len] = '\0';
-        return id;
-    }
-    char *endptr = NULL;
-    long val = strtol(p, &endptr, 10);
-    if (endptr == p) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
-    }
-    char *id = (char *)AIRY_MALLOC(32);
-    if (!id) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    snprintf(id, 32, "%ld", val);
-    return id;
-}
-
-static char *extract_jsonrpc_id_raw(const char *body)
-{
-    /* Extract the raw JSON text of the request id (numbers as-is, strings
-     * with quotes), embeddable directly into the response ("id":%s),
-     * guaranteeing the JSON-RPC 2.0 response id type matches the request id.
-     * Returns NULL when the request has no id / the format is invalid; the
-     * caller falls back to "id":null. */
-    if (!body) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    const char *key = "\"id\"";
-    const char *p = strstr(body, key);
-    if (!p) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p += strlen(key);
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    if (*p == '"') {
-        const char *end = strchr(p + 1, '"');
-        if (!end) {
-            AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-        }
-        size_t len = (size_t)(end + 1 - p);
-        char *id = (char *)AIRY_MALLOC(len + 1);
-        if (!id) {
-            AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-        }
-        __builtin_memcpy(id, p, len);
-        id[len] = '\0';
-        return id;
-    }
-    const char *start = p;
-    while (*p && (*p == '-' || *p == '+' || *p == '.' || isdigit((unsigned char)*p)))
-        p++;
-    if (p == start) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    size_t len = (size_t)(p - start);
-    char *id = (char *)AIRY_MALLOC(len + 1);
-    if (!id) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    __builtin_memcpy(id, start, len);
-    id[len] = '\0';
-    return id;
-}
-
-static char *extract_jsonrpc_params(const char *body)
-{
-    if (!body) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    const char *key = "\"params\"";
-    const char *p = strstr(body, key);
-    if (!p)
-        return AIRY_STRDUP("{}");
-    p += strlen(key);
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    if (*p != '{' && *p != '[')
-        return AIRY_STRDUP("{}");
-    char open = *p;
-    char close = (open == '{') ? '}' : ']';
-    int depth = 0;
-    const char *start = p;
-    while (*p) {
-        if (*p == open)
-            depth++;
-        else if (*p == close) {
-            depth--;
-            if (depth == 0) {
-                p++;
-                size_t len = (size_t)(p - start);
-                char *params = (char *)AIRY_MALLOC(len + 1);
-                if (!params)
-                    return AIRY_STRDUP("{}");
-                __builtin_memcpy(params, start, len);
-                params[len] = '\0';
-                return params;
-            }
-        }
-        p++;
-    }
-    return AIRY_STRDUP("{}");
-}
-
-static char *extract_tool_name_from_params(const char *params_json)
-{
-    if (!params_json) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    const char *key = "\"name\"";
-    const char *p = strstr(params_json, key);
-    if (!p) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p += strlen(key);
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    if (*p != '"') {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p++;
-    const char *end = strchr(p, '"');
-    if (!end) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    size_t len = (size_t)(end - p);
-    char *name = (char *)AIRY_MALLOC(len + 1);
-    if (!name) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    __builtin_memcpy(name, p, len);
-    name[len] = '\0';
-    return name;
-}
-
-static char *extract_tool_args_from_params(const char *params_json)
-{
-    if (!params_json)
-        return AIRY_STRDUP("{}");
-    const char *key = "\"arguments\"";
-    const char *p = strstr(params_json, key);
-    if (!p)
-        return AIRY_STRDUP("{}");
-    p += strlen(key);
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    if (*p != '{' && *p != '[')
-        return AIRY_STRDUP("{}");
-    char open = *p;
-    char close = (open == '{') ? '}' : ']';
-    int depth = 0;
-    const char *start = p;
-    while (*p) {
-        if (*p == open)
-            depth++;
-        else if (*p == close) {
-            depth--;
-            if (depth == 0) {
-                p++;
-                size_t len = (size_t)(p - start);
-                char *args = (char *)AIRY_MALLOC(len + 1);
-                if (!args)
-                    return AIRY_STRDUP("{}");
-                __builtin_memcpy(args, start, len);
-                args[len] = '\0';
-                return args;
-            }
-        }
-        p++;
-    }
-    return AIRY_STRDUP("{}");
-}
-
-static char *extract_resource_uri_from_params(const char *params_json)
-{
-    if (!params_json) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    const char *key = "\"uri\"";
-    const char *p = strstr(params_json, key);
-    if (!p) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p += strlen(key);
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    if (*p != '"') {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p++;
-    const char *end = strchr(p, '"');
-    if (!end) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    size_t len = (size_t)(end - p);
-    char *uri = (char *)AIRY_MALLOC(len + 1);
-    if (!uri) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    __builtin_memcpy(uri, p, len);
-    uri[len] = '\0';
-    return uri;
-}
-
 /**
  * @brief JSON-RPC processing core (with request-id echo)
  *
@@ -543,8 +283,12 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
     }
 
     if (strcmp(method, "tools/call") == 0) {
-        char *tool_name = extract_tool_name_from_params(params_json);
-        char *tool_args = extract_tool_args_from_params(params_json);
+        cJSON *proot = gw_json_load(params_json);
+        char *tool_name = gw_json_str(proot, "name");
+        char *tool_args = gw_json_raw(proot, "arguments");
+        cJSON_Delete(proot);
+        if (!tool_args)
+            tool_args = AIRY_STRDUP("{}");
         if (!tool_name) {
             AIRY_LOG_WARN("failed to extract tool name from params in tools/call");
             AIRY_FREE(tool_args);
@@ -621,7 +365,9 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
     }
 
     if (strcmp(method, "resources/read") == 0) {
-        char *uri = extract_resource_uri_from_params(params_json);
+        cJSON *proot = gw_json_load(params_json);
+        char *uri = gw_json_str(proot, "uri");
+        cJSON_Delete(proot);
         if (!uri) {
             AIRY_LOG_WARN("failed to extract URI from params in resources/read");
             server->error_count++;
@@ -685,16 +431,28 @@ int gw_mcp_server_handle_request(gw_mcp_server_t *server, const char *method, co
     if (!server || !body_json || !response_json)
         return AIRY_ERR_INVALID_PARAM;
 
-    char *rpc_method = extract_jsonrpc_method(body_json);
-    if (!rpc_method) {
+    cJSON *root = gw_json_load(body_json);
+    if (!root) {
         AIRY_LOG_WARN("failed to extract JSON-RPC method from request body");
         server->error_count++;
         return AIRY_ERR_PARSE_ERROR;
     }
 
-    char *rpc_params = extract_jsonrpc_params(body_json);
+    char *rpc_method = gw_json_str(root, "method");
+    char *rpc_params = gw_json_raw(root, "params");
+    if (!rpc_params)
+        rpc_params = AIRY_STRDUP("{}");
+    char *rpc_id = gw_json_raw(root, "id");
+    cJSON_Delete(root);
 
-    char *rpc_id = extract_jsonrpc_id_raw(body_json);
+    if (!rpc_method) {
+        AIRY_LOG_WARN("failed to extract JSON-RPC method from request body");
+        AIRY_FREE(rpc_params);
+        AIRY_FREE(rpc_id);
+        server->error_count++;
+        return AIRY_ERR_PARSE_ERROR;
+    }
+
     int rc = gw_mcp_server_handle_jsonrpc_ex(server, rpc_method, rpc_params, rpc_id, response_json);
     AIRY_FREE(rpc_id);
     AIRY_FREE(rpc_method);

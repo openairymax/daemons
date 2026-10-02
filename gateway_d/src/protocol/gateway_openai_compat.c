@@ -3,11 +3,11 @@
 
 #include "gateway_openai_compat.h"
 
+#include "gateway_jsonpick.h"
 #include "airy_memory.h"
 #include "sync.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include "error.h"
@@ -122,174 +122,6 @@ static bool check_rate_limit(gw_openai_compat_t *compat)
     return allowed;
 }
 
-static char *extract_json_field_string(const char *json, const char *field)
-{
-    if (!json || !field) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    size_t flen = strlen(field) + 4;
-    char *key = (char *)AIRY_MALLOC(flen);
-    if (!key) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    snprintf(key, flen, "\"%s\"", field);
-    const char *p = strstr(json, key);
-    AIRY_FREE(key);
-    if (!p) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p += strlen(field) + 3;
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    if (*p != '"') {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p++;
-    const char *end = strchr(p, '"');
-    if (!end) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    size_t len = (size_t)(end - p);
-    char *val = (char *)AIRY_MALLOC(len + 1);
-    if (!val) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    AIRY_MEMCPY(val, p, len);
-    val[len] = '\0';
-    return val;
-}
-
-static double extract_json_field_number(const char *json, const char *field, double default_val)
-{
-    if (!json || !field)
-        return default_val;
-    size_t flen = strlen(field) + 4;
-    char *key = (char *)AIRY_MALLOC(flen);
-    if (!key)
-        return default_val;
-    snprintf(key, flen, "\"%s\"", field);
-    const char *p = strstr(json, key);
-    AIRY_FREE(key);
-    if (!p)
-        return default_val;
-    p += strlen(field) + 3;
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    char *endptr = NULL;
-    double val = strtod(p, &endptr);
-    if (endptr == p)
-        return default_val;
-    return val;
-}
-
-static int extract_json_field_int(const char *json, const char *field, int default_val)
-{
-    if (!json || !field)
-        return default_val;
-    size_t flen = strlen(field) + 4;
-    char *key = (char *)AIRY_MALLOC(flen);
-    if (!key)
-        return default_val;
-    snprintf(key, flen, "\"%s\"", field);
-    const char *p = strstr(json, key);
-    AIRY_FREE(key);
-    key = NULL;
-    if (!p)
-        return default_val;
-    p += strlen(field) + 3;
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    char *endptr = NULL;
-    long val = strtol(p, &endptr, 10);
-    if (endptr == p)
-        return default_val;
-    return (int)val;
-}
-
-static char *extract_messages_array(const char *json)
-{
-    if (!json) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    const char *key = "\"messages\"";
-    const char *p = strstr(json, key);
-    if (!p) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p += strlen(key);
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    if (*p != '[') {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    const char *start = p;
-    int depth = 0;
-    while (*p) {
-        if (*p == '[')
-            depth++;
-        else if (*p == ']') {
-            depth--;
-            if (depth == 0) {
-                p++;
-                size_t len = (size_t)(p - start);
-                char *arr = (char *)AIRY_MALLOC(len + 1);
-                if (!arr) {
-                    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-                }
-                AIRY_MEMCPY(arr, start, len);
-                arr[len] = '\0';
-                return arr;
-            }
-        }
-        p++;
-    }
-    return NULL;
-}
-
-static char *extract_functions_array(const char *json)
-{
-    if (!json) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    const char *key = "\"functions\"";
-    const char *p = strstr(json, key);
-    if (!p) {
-        key = "\"tools\"";
-        p = strstr(json, key);
-    }
-    if (!p) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p += strlen(key);
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    if (*p != '[') {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    const char *start = p;
-    int depth = 0;
-    while (*p) {
-        if (*p == '[')
-            depth++;
-        else if (*p == ']') {
-            depth--;
-            if (depth == 0) {
-                p++;
-                size_t len = (size_t)(p - start);
-                char *arr = (char *)AIRY_MALLOC(len + 1);
-                if (!arr) {
-                    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-                }
-                AIRY_MEMCPY(arr, start, len);
-                arr[len] = '\0';
-                return arr;
-            }
-        }
-        p++;
-    }
-    return NULL;
-}
-
 static int handle_chat_completions(gw_openai_compat_t *compat, const char *body_json,
                                    char **response_json)
 {
@@ -310,14 +142,15 @@ static int handle_chat_completions(gw_openai_compat_t *compat, const char *body_
         return AIRY_ERR_OVERFLOW;
     }
 
-    char *model = extract_json_field_string(body_json, "model");
-    char *messages = extract_messages_array(body_json);
-    char *functions = extract_functions_array(body_json);
-
-    double temperature =
-        extract_json_field_number(body_json, "temperature", compat->config.temperature_default);
-    int max_tokens =
-        extract_json_field_int(body_json, "max_tokens", (int)compat->config.max_tokens_default);
+    cJSON *root = gw_json_load(body_json);
+    char *model = gw_json_str(root, "model");
+    char *messages = gw_json_raw(root, "messages");
+    char *functions = gw_json_raw(root, "functions");
+    if (!functions)
+        functions = gw_json_raw(root, "tools");
+    double temperature = gw_json_num(root, "temperature", compat->config.temperature_default);
+    int max_tokens = gw_json_int(root, "max_tokens", (int)compat->config.max_tokens_default);
+    cJSON_Delete(root);
 
     char *llm_response = NULL;
     int rc = compat->llm_call_fn(model ? model : compat->config.default_model,
@@ -360,43 +193,10 @@ static int handle_embeddings(gw_openai_compat_t *compat, const char *body_json,
         return AIRY_ERR_NULL_POINTER;
     }
 
-    char *model = extract_json_field_string(body_json, "model");
-    char *input_start = strstr(body_json, "\"input\"");
-    char *input_json = NULL;
-    if (input_start) {
-        input_start += 7;
-        while (*input_start && (*input_start == ' ' || *input_start == ':' || *input_start == '\t'))
-            input_start++;
-        if (*input_start == '"' || *input_start == '[') {
-            const char *start = input_start;
-            if (*input_start == '[') {
-                int depth = 0;
-                while (*input_start) {
-                    if (*input_start == '[')
-                        depth++;
-                    else if (*input_start == ']') {
-                        depth--;
-                        if (depth == 0) {
-                            input_start++;
-                            break;
-                        }
-                    }
-                    input_start++;
-                }
-            } else {
-                input_start++;
-                char *end = strchr(input_start, '"');
-                if (end)
-                    input_start = end + 1;
-            }
-            size_t len = (size_t)(input_start - start);
-            input_json = (char *)AIRY_MALLOC(len + 1);
-            if (input_json) {
-                AIRY_MEMCPY(input_json, start, len);
-                input_json[len] = '\0';
-            }
-        }
-    }
+    cJSON *root = gw_json_load(body_json);
+    char *model = gw_json_str(root, "model");
+    char *input_json = gw_json_raw(root, "input");
+    cJSON_Delete(root);
 
     char *embed_response = NULL;
     int rc = compat->embed_fn(model ? model : "text-embedding-ada-002",
