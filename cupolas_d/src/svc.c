@@ -17,19 +17,17 @@
 
 #include "cupolas_d_internal.h"
 #include "airy_memory.h"
+#include "daemon_cfg_file.h"
 #include "dynamic_policy_engine.h"
 #include "platform.h"
 
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 cupolas_service_t *g_service = NULL;
 dpolicy_engine_t *g_dpolicy = NULL;
 
 typedef struct {
     char *socket_path;
-    char *tcp_host;
     uint16_t tcp_port;
     int use_tcp;
     int max_clients;
@@ -39,70 +37,40 @@ static cupolas_daemon_config_t g_config = {0};
 
 #define CUPOLAS_MAX_CLIENTS 64
 
+static void cfg_on_load(cJSON *root, void *ud)
+{
+    daemon_ep_cfg_t *ep = (daemon_ep_cfg_t *)ud;
+    cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
+    daemon_ep_parse(daemon_cfg, ep);
+    cJSON *item = cJSON_GetObjectItem(daemon_cfg, "max_clients");
+    if (cJSON_IsNumber(item))
+        g_config.max_clients = item->valueint;
+}
+
 static void config_load(const char *config_path)
 {
-    g_config.use_tcp = 0;
+    daemon_ep_cfg_t ep;
+    daemon_ep_def(CUPOLAS_D_SOCKET_UNIX, CUPOLAS_D_SOCKET_WIN, CUPOLAS_D_TCP_PORT, &ep);
     g_config.max_clients = CUPOLAS_MAX_CLIENTS;
-#if defined(AIRY_PLATFORM_WINDOWS)
-    g_config.socket_path = AIRY_STRDUP(CUPOLAS_D_SOCKET_WIN);
-#else
-    g_config.socket_path = AIRY_STRDUP(CUPOLAS_D_SOCKET_UNIX);
-#endif
-    g_config.tcp_host = AIRY_STRDUP("127.0.0.1");
-    g_config.tcp_port = CUPOLAS_D_TCP_PORT;
 
-    if (!config_path)
-        return;
-    FILE *f = fopen(config_path, "rb");
-    if (!f)
-        return;
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (len > 0 && len < 1024 * 1024) {
-        char *content = (char *)AIRY_MALLOC((size_t)len + 1);
-        if (content) {
-            size_t read_len = fread(content, 1, (size_t)len, f);
-            if (read_len == (size_t)len) {
-                content[read_len] = '\0';
-                do {
-                    CJSON_PARSE_GUARD(root, content, { break; });
-                    cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
-                    if (!daemon_cfg)
-                        break;
-                    cJSON *item = cJSON_GetObjectItem(daemon_cfg, "socket_path");
-                    if (cJSON_IsString(item)) {
-                        AIRY_FREE(g_config.socket_path);
-                        g_config.socket_path = AIRY_STRDUP(item->valuestring);
-                    }
-                    item = cJSON_GetObjectItem(daemon_cfg, "tcp_port");
-                    if (cJSON_IsNumber(item)) {
-                        g_config.tcp_port = (uint16_t)item->valueint;
-                        g_config.use_tcp = 1;
-                    }
-                    item = cJSON_GetObjectItem(daemon_cfg, "max_clients");
-                    if (cJSON_IsNumber(item))
-                        g_config.max_clients = item->valueint;
-                } while (0);
-            }
-            AIRY_FREE(content);
-        }
-    }
-    fclose(f);
+    daemon_cfg_read(config_path, cfg_on_load, &ep);
+
+    g_config.socket_path = ep.socket_path;
+    g_config.tcp_port = (uint16_t)ep.tcp_port;
+    g_config.use_tcp = ep.use_tcp;
 }
 
 static void config_free(void)
 {
     AIRY_FREE(g_config.socket_path);
-    AIRY_FREE(g_config.tcp_host);
     AIRY_MEMSET(&g_config, 0, sizeof(g_config));
 }
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
     ep->use_tcp = cmdline_tcp || g_config.use_tcp;
-    ep->tcp_host = g_config.tcp_host;
-    ep->tcp_port = (int)g_config.tcp_port;
+    ep->tcp_host = "127.0.0.1";
+    ep->tcp_port = g_config.tcp_port;
     ep->sock_unix = g_config.socket_path;
     ep->sock_win = g_config.socket_path;
 }
