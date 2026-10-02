@@ -182,28 +182,8 @@ static int builtin_git_run(char *const argv[], const char *stdin_data, size_t st
             char chunk[4096];
             ssize_t n = read(outfd[0], chunk, sizeof(chunk));
             if (n > 0) {
-                if (len + (size_t)n + 1 > cap) {
-                    size_t new_cap = cap * 2;
-                    if (new_cap > BUILTIN_OUTPUT_CAP)
-                        new_cap = BUILTIN_OUTPUT_CAP;
-                    if (new_cap <= cap) {
-                        truncated = 1;
-                        break;
-                    }
-                    char *nb = (char *)AIRY_REALLOC(buf, new_cap);
-                    if (!nb) {
-                        truncated = 1;
-                        break;
-                    }
-                    buf = nb;
-                    cap = new_cap;
-                }
-                if (len + (size_t)n >= cap) {
-                    n = (ssize_t)(cap - len - 1);
-                    truncated = 1;
-                }
-                __builtin_memcpy(buf + len, chunk, (size_t)n);
-                len += (size_t)n;
+                if (!builtin_buf_push(&buf, &cap, &len, chunk, (size_t)n, &truncated))
+                    break;
             } else if (n == 0) {
                 /* Child closed its output but is still alive; avoid
                  * busy-spinning on immediate POLLHUP until the deadline. */
@@ -238,38 +218,13 @@ static int builtin_git_run(char *const argv[], const char *stdin_data, size_t st
         ssize_t n = read(outfd[0], chunk, sizeof(chunk));
         if (n <= 0)
             break;
-        if (len + (size_t)n + 1 > cap) {
-            size_t new_cap = cap * 2;
-            if (new_cap > BUILTIN_OUTPUT_CAP)
-                new_cap = BUILTIN_OUTPUT_CAP;
-            if (new_cap <= cap) {
-                truncated = 1;
-                break;
-            }
-            char *nb = (char *)AIRY_REALLOC(buf, new_cap);
-            if (!nb) {
-                truncated = 1;
-                break;
-            }
-            buf = nb;
-            cap = new_cap;
-        }
-        if (len + (size_t)n >= cap) {
-            n = (ssize_t)(cap - len - 1);
-            truncated = 1;
-        }
-        __builtin_memcpy(buf + len, chunk, (size_t)n);
-        len += (size_t)n;
+        if (!builtin_buf_push(&buf, &cap, &len, chunk, (size_t)n, &truncated))
+            break;
     }
     close(outfd[0]);
 
     if (timed_out) {
-        const char mark[] = "\n[command timed out after 60s]";
-        builtin_append_trunc_mark(buf, cap, len, mark);
-        len += sizeof(mark) - 1;
-        if (len >= cap)
-            len = cap - 1;
-        buf[len] = '\0';
+        builtin_buf_mark(buf, cap, &len, "\n[command timed out after 60s]");
         *exit_code = -1;
     } else if (exited) {
 #ifdef WIFEXITED
@@ -280,14 +235,8 @@ static int builtin_git_run(char *const argv[], const char *stdin_data, size_t st
     } else {
         *exit_code = -1;
     }
-    if (truncated) {
-        const char mark[] = "\n[output truncated at 1MB]";
-        builtin_append_trunc_mark(buf, cap, len, mark);
-        len += sizeof(mark) - 1;
-        if (len >= cap)
-            len = cap - 1;
-        buf[len] = '\0';
-    }
+    if (truncated)
+        builtin_buf_mark(buf, cap, &len, "\n[output truncated at 1MB]");
     if (out_truncated)
         *out_truncated = truncated;
     *out = buf;

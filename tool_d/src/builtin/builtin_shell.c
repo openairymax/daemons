@@ -37,11 +37,49 @@ void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const char *ma
 {
     size_t mlen = strlen(mark);
     if (len + mlen + 1 <= cap) {
-        __builtin_memcpy(buf + len, mark, mlen);
+        AIRY_MEMCPY(buf + len, mark, mlen);
         buf[len + mlen] = '\0';
     } else {
         buf[len] = '\0';
     }
+}
+
+int builtin_buf_push(char **buf, size_t *cap, size_t *len, const char *chunk, size_t n,
+                     int *truncated)
+{
+    if (*len + n + 1 > *cap) {
+        size_t new_cap = *cap * 2;
+        if (new_cap > BUILTIN_OUTPUT_CAP)
+            new_cap = BUILTIN_OUTPUT_CAP;
+        if (new_cap <= *cap) {
+            *truncated = 1;
+            return 0;
+        }
+        char *nb = (char *)AIRY_REALLOC(*buf, new_cap);
+        if (!nb) {
+            *truncated = 1;
+            return 0;
+        }
+        *buf = nb;
+        *cap = new_cap;
+    }
+    if (*len + n >= *cap) {
+        n = *cap - *len - 1;
+        *truncated = 1;
+    }
+    AIRY_MEMCPY(*buf + *len, chunk, n);
+    *len += n;
+    (*buf)[*len] = '\0';
+    return 1;
+}
+
+void builtin_buf_mark(char *buf, size_t cap, size_t *len, const char *mark)
+{
+    builtin_append_trunc_mark(buf, cap, *len, mark);
+    *len += strlen(mark);
+    if (*len >= cap)
+        *len = cap - 1;
+    buf[*len] = '\0';
 }
 
 #ifndef _WIN32
@@ -170,28 +208,8 @@ int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_co
             char chunk[4096];
             ssize_t n = read(pipefd[0], chunk, sizeof(chunk));
             if (n > 0) {
-                if (len + (size_t)n + 1 > cap) {
-                    size_t new_cap = cap * 2;
-                    if (new_cap > BUILTIN_OUTPUT_CAP)
-                        new_cap = BUILTIN_OUTPUT_CAP;
-                    if (new_cap <= cap) {
-                        truncated = 1;
-                        break;
-                    }
-                    char *nb = (char *)AIRY_REALLOC(buf, new_cap);
-                    if (!nb) {
-                        truncated = 1;
-                        break;
-                    }
-                    buf = nb;
-                    cap = new_cap;
-                }
-                if (len + (size_t)n >= cap) {
-                    n = (ssize_t)(cap - len - 1);
-                    truncated = 1;
-                }
-                __builtin_memcpy(buf + len, chunk, (size_t)n);
-                len += (size_t)n;
+                if (!builtin_buf_push(&buf, &cap, &len, chunk, (size_t)n, &truncated))
+                    break;
             } else if (n == 0) {
                 /* Child closed its output but is still alive; poll would
                  * otherwise return POLLHUP immediately and busy-spin the
@@ -230,38 +248,13 @@ int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_co
         ssize_t n = read(pipefd[0], chunk, sizeof(chunk));
         if (n <= 0)
             break;
-        if (len + (size_t)n + 1 > cap) {
-            size_t new_cap = cap * 2;
-            if (new_cap > BUILTIN_OUTPUT_CAP)
-                new_cap = BUILTIN_OUTPUT_CAP;
-            if (new_cap <= cap) {
-                truncated = 1;
-                break;
-            }
-            char *nb = (char *)AIRY_REALLOC(buf, new_cap);
-            if (!nb) {
-                truncated = 1;
-                break;
-            }
-            buf = nb;
-            cap = new_cap;
-        }
-        if (len + (size_t)n >= cap) {
-            n = (ssize_t)(cap - len - 1);
-            truncated = 1;
-        }
-        __builtin_memcpy(buf + len, chunk, (size_t)n);
-        len += (size_t)n;
+        if (!builtin_buf_push(&buf, &cap, &len, chunk, (size_t)n, &truncated))
+            break;
     }
     close(pipefd[0]);
 
     if (timed_out) {
-        const char mark[] = "\n[command timed out after 60s]";
-        builtin_append_trunc_mark(buf, cap, len, mark);
-        len += sizeof(mark) - 1;
-        if (len >= cap)
-            len = cap - 1;
-        buf[len] = '\0';
+        builtin_buf_mark(buf, cap, &len, "\n[command timed out after 60s]");
         *exit_code = -1;
     } else if (exited) {
 #ifdef WIFEXITED
@@ -272,14 +265,8 @@ int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_co
     } else {
         *exit_code = -1;
     }
-    if (truncated) {
-        const char mark[] = "\n[output truncated at 1MB]";
-        builtin_append_trunc_mark(buf, cap, len, mark);
-        len += sizeof(mark) - 1;
-        if (len >= cap)
-            len = cap - 1;
-        buf[len] = '\0';
-    }
+    if (truncated)
+        builtin_buf_mark(buf, cap, &len, "\n[output truncated at 1MB]");
     if (out_truncated)
         *out_truncated = truncated;
     *out = buf;
@@ -289,36 +276,6 @@ int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_co
 #else /* _WIN32 */
 
 #include <windows.h>
-
-/* Append read bytes to the growable capture buffer, mirroring the POSIX
- * version's capacity/truncation policy. */
-static void win_capture_append(char **buf, size_t *cap, size_t *len, const char *chunk, DWORD n,
-                               int *truncated)
-{
-    if (len + (size_t)n + 1 > *cap) {
-        size_t new_cap = *cap * 2;
-        if (new_cap > BUILTIN_OUTPUT_CAP)
-            new_cap = BUILTIN_OUTPUT_CAP;
-        if (new_cap <= *cap) {
-            *truncated = 1;
-            return;
-        }
-        char *nb = (char *)AIRY_REALLOC(*buf, new_cap);
-        if (!nb) {
-            *truncated = 1;
-            return;
-        }
-        *buf = nb;
-        *cap = new_cap;
-    }
-    if (*len + (size_t)n >= *cap) {
-        n = (DWORD)(*cap - *len - 1);
-        *truncated = 1;
-    }
-    __builtin_memcpy(*buf + *len, chunk, (size_t)n);
-    *len += (size_t)n;
-    (*buf)[*len] = '\0';
-}
 
 /**
  * @brief Run a shell command with timeout and capture stdout/stderr
@@ -421,7 +378,7 @@ int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_co
             DWORD n = (avail < (DWORD)sizeof(chunk)) ? avail : (DWORD)sizeof(chunk);
             if (!ReadFile(h_read, chunk, n, &n, NULL) || n == 0)
                 break;
-            win_capture_append(&buf, &cap, &len, chunk, n, &truncated);
+            builtin_buf_push(&buf, &cap, &len, chunk, n, &truncated);
         }
     }
 
@@ -449,31 +406,20 @@ int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_co
         DWORD n = (avail < (DWORD)sizeof(chunk)) ? avail : (DWORD)sizeof(chunk);
         if (!ReadFile(h_read, chunk, n, &n, NULL) || n == 0)
             break;
-        win_capture_append(&buf, &cap, &len, chunk, n, &truncated);
+        builtin_buf_push(&buf, &cap, &len, chunk, n, &truncated);
     }
     CloseHandle(h_read);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
 
     if (timed_out) {
-        const char mark[] = "\n[command timed out after 60s]";
-        builtin_append_trunc_mark(buf, cap, len, mark);
-        len += sizeof(mark) - 1;
-        if (len >= cap)
-            len = cap - 1;
-        buf[len] = '\0';
+        builtin_buf_mark(buf, cap, &len, "\n[command timed out after 60s]");
         *exit_code = -1;
     } else {
         *exit_code = (int)proc_exit;
     }
-    if (truncated) {
-        const char mark[] = "\n[output truncated at 1MB]";
-        builtin_append_trunc_mark(buf, cap, len, mark);
-        len += sizeof(mark) - 1;
-        if (len >= cap)
-            len = cap - 1;
-        buf[len] = '\0';
-    }
+    if (truncated)
+        builtin_buf_mark(buf, cap, &len, "\n[output truncated at 1MB]");
     if (out_truncated)
         *out_truncated = truncated;
     *out = buf;

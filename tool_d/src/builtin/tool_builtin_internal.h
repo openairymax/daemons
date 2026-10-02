@@ -45,6 +45,15 @@ int builtin_deadline_hit(uint64_t deadline_ms);
 /* Common I/O helpers (builtin.c) */
 char *builtin_read_all(FILE *fp, int *out_truncated);
 
+/* Output capture buffer mechanism shared by shell/git runners: push()
+ * appends a chunk, doubling the buffer up to BUILTIN_OUTPUT_CAP and
+ * clamping in place when the cap is hit (*truncated set). Returns 0 when
+ * the buffer cannot grow any further (caller stops reading); mark()
+ * appends a truncation notice and re-terminates the string. */
+int builtin_buf_push(char **buf, size_t *cap, size_t *len, const char *chunk, size_t n,
+                     int *truncated);
+void builtin_buf_mark(char *buf, size_t cap, size_t *len, const char *mark);
+
 /* Confine a file-tool path into the workspace sandbox (T16). Wraps
  * os_sandbox_fs_confine() with a uniform escape error for tool results.
  * Returns AIRY_OK with resolved filled on success; otherwise sets
