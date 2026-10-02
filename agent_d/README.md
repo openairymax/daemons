@@ -81,7 +81,6 @@ gateway_d ──(agent.spawn / invoke / run / run_stream / cancel)──▶ agen
   "daemon": {
     "socket_path": "<runtime-dir>/agent.sock",
     "tcp_port": 8086,
-    "max_clients": 2048,
     "max_agents": 10000
   }
 }

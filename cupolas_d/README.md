@@ -97,8 +97,7 @@
 {
   "daemon": {
     "socket_path": "<runtime-dir>/cupolas.sock",
-    "tcp_port": 8089,
-    "max_clients": 64
+    "tcp_port": 8089
   }
 }
 ```

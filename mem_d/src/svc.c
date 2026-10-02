@@ -7,15 +7,16 @@
  *
  * 记忆服务单例（service/cache/ledger）+ 生命周期五钩子 + RPC 蹦床。
  * 可配置户：端点基线取自生成头常量（MEM_D_SOCKET_UNIX/WIN、
- * MEM_D_TCP_PORT），-c JSON 的 daemon 段可覆盖 socket_path / tcp_port /
- * max_clients / max_records；cmdline use_tcp 只升不降。压缩门禁与台账
- * 计数模型为声明式策略（config "compress"/"token" 段 + 环境变量覆盖，
- * 缺省 fail-closed），改动不触发重编译。业务逻辑在 handlers 四域。
+ * MEM_D_TCP_PORT），端点族委托 daemon_cfg_file 机制件
+ * （daemon_ep_load/free/fill）；策略键经 cfg_keys 从 config 根对象
+ * 自持提取——daemon 段 max_records、"compress" 段 B5 门禁、"token"
+ * 段计数模型；环境变量覆盖先于 JSON（daemon_ep_load 内文件覆盖式
+ * 解析）。声明式策略缺省 fail-closed，改动不触发重编译。业务逻辑
+ * 在 handlers 四域。
  *
  * 蹦床仅做 user_data → airy_sock_t 的适配，无业务逻辑。
  */
 
-#include "daemon_main.h"
 #include "platform.h"
 #include "svc_logger.h"
 #include "svc_mem_d.h"
@@ -42,6 +43,9 @@ mem_cache_t *g_cache = NULL;
 mem_ledger_t *g_ledger = NULL;
 
 mem_daemon_config_t g_config = {0};
+
+/* 端点配置族（daemon_cfg_file 机制件持有；g_config 只留业务策略键） */
+static daemon_ep_cfg_t g_ep;
 
 /* ── RPC 蹦床（m_<method> ↔ .manifest rpc.methods） ─────────────────────── */
 
@@ -119,19 +123,16 @@ void m_compress(cJSON *params, int id, void *user_data)
 
 /* ── 配置装载（声明式策略注入） ─────────────────────────────────────────── */
 
-static void cfg_on_load(cJSON *root, void *ud)
+/* 策略键派发（daemon_ep_load 回调）：端点三元组由机制件收整；
+ * max_records 与 B5 门禁/模型从根对象自持提取，缺省字段保持
+ * fail-closed 初值。 */
+static void cfg_keys(const cJSON *root, void *ud)
 {
-    daemon_ep_cfg_t *ep = (daemon_ep_cfg_t *)ud;
-    cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
-    if (daemon_cfg) {
-        daemon_ep_parse(daemon_cfg, ep);
-        cJSON *item = cJSON_GetObjectItem(daemon_cfg, "max_clients");
-        if (cJSON_IsNumber(item))
-            g_config.max_clients = item->valueint;
-        item = cJSON_GetObjectItem(daemon_cfg, "max_records");
-        if (cJSON_IsNumber(item))
-            g_config.max_records = (size_t)item->valuedouble;
-    }
+    (void)ud;
+    cJSON *item = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "daemon"),
+                                      "max_records");
+    if (cJSON_IsNumber(item))
+        g_config.max_records = (size_t)item->valuedouble;
     /* B5：压缩门禁策略声明（缺省字段保持 fail-closed 初值） */
     cJSON *ccfg = cJSON_GetObjectItem(root, "compress");
     if (ccfg) {
@@ -166,9 +167,6 @@ static void cfg_on_load(cJSON *root, void *ud)
 
 static void load_daemon_config(const char *config_path)
 {
-    daemon_ep_cfg_t ep;
-    daemon_ep_def(MEM_D_SOCKET_UNIX, MEM_D_SOCKET_WIN, MEM_D_TCP_PORT, &ep);
-    g_config.max_clients = MAX_CLIENTS;
     g_config.max_records = MEM_DEFAULT_MAX_RECORDS;
     /* B5：L2 压缩门禁默认 fail-closed（L2 关、灰度关、acr/ttft 不可用） */
     g_config.compress_l1_enabled = 1;
@@ -213,27 +211,20 @@ static void load_daemon_config(const char *config_path)
     if (env_model && env_model[0])
         AIRY_STRNCPY_TERM(g_config.token_model, env_model, sizeof(g_config.token_model));
 
-    daemon_cfg_read(config_path, cfg_on_load, &ep);
-    g_config.socket_path = ep.socket_path;
-    g_config.tcp_port = (uint16_t)ep.tcp_port;
-    g_config.use_tcp = ep.use_tcp;
+    daemon_ep_load(&g_ep, config_path, MEM_D_SOCKET_UNIX,
+                   MEM_D_SOCKET_WIN, MEM_D_TCP_PORT, cfg_keys, NULL);
 }
 
 static void free_daemon_config(void)
 {
-    AIRY_FREE(g_config.socket_path);
-    AIRY_MEMSET(&g_config, 0, sizeof(g_config));
+    daemon_ep_free(&g_ep);
 }
 
 /* ── 生命周期五钩子（实现 generated main.c 契约） ───────────────────────── */
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    ep->use_tcp = cmdline_tcp ? 1 : (g_config.use_tcp ? 1 : 0);
-    ep->tcp_host = "127.0.0.1";
-    ep->tcp_port = g_config.tcp_port;
-    ep->sock_unix = g_config.socket_path;
-    ep->sock_win = g_config.socket_path;
+    daemon_ep_fill(ep, &g_ep, cmdline_tcp);
 
     if (ep->use_tcp)
         SVC_LOG_INFO("Listening on TCP %s:%u", ep->tcp_host, (unsigned)ep->tcp_port);

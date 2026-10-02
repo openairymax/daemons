@@ -6,13 +6,12 @@
  * @brief tool_d 机制层-策略层适配（gen5 装配的策略挂点）。
  *
  * tool 服务单例 + 生命周期五钩子。可配置户：端点基线取自生成头常量
- * （TOOL_D_SOCKET_UNIX/WIN、TOOL_D_TCP_PORT），-c JSON 的 daemon 段可
- * 覆盖 socket_path / tcp_port；cmdline use_tcp 只升不降。插件执行域
+ * （TOOL_D_SOCKET_UNIX/WIN、TOOL_D_TCP_PORT），端点族委托 daemon_cfg_file
+ * 机制件（daemon_ep_load/free/fill，纯端点户无策略键）。插件执行域
  * （dlopen）随迁 tool_d，权限/发现/扫描加载在本进程内初始化，生命周期
  * 由本文件承载；业务逻辑在 tool_service_*.c / builtin*.c 与 tool_rpc.c。
  */
 
-#include "daemon_main.h"
 #include "platform.h"
 #include "plugin/plugin_rpc.h"
 #include "svc_logger.h"
@@ -20,37 +19,26 @@
 #include "tool_d_internal.h"
 #include "tool_service.h"
 
-#include "airy_memory.h"
 #include "daemon_cfg_file.h"
 
 tool_service_t *g_service = NULL;
 
 static daemon_ep_cfg_t g_ep = {0};
 
-static void ep_on_load(cJSON *root, void *ud)
-{
-    daemon_ep_parse(cJSON_GetObjectItem(root, "daemon"), (daemon_ep_cfg_t *)ud);
-}
-
 static void ep_load(const char *config_path)
 {
-    daemon_ep_def(TOOL_D_SOCKET_UNIX, TOOL_D_SOCKET_WIN, TOOL_D_TCP_PORT, &g_ep);
-    daemon_cfg_read(config_path, ep_on_load, &g_ep);
+    daemon_ep_load(&g_ep, config_path, TOOL_D_SOCKET_UNIX,
+                   TOOL_D_SOCKET_WIN, TOOL_D_TCP_PORT, NULL, NULL);
 }
 
 static void ep_free(void)
 {
-    AIRY_FREE(g_ep.socket_path);
-    AIRY_MEMSET(&g_ep, 0, sizeof(g_ep));
+    daemon_ep_free(&g_ep);
 }
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    ep->use_tcp = cmdline_tcp ? 1 : (g_ep.use_tcp ? 1 : 0);
-    ep->tcp_host = "127.0.0.1";
-    ep->tcp_port = g_ep.tcp_port;
-    ep->sock_unix = g_ep.socket_path;
-    ep->sock_win = g_ep.socket_path;
+    daemon_ep_fill(ep, &g_ep, cmdline_tcp);
 }
 
 int svc_prepare(const char *config_path)
