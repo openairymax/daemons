@@ -5,9 +5,9 @@
  * @file svc.c
  * @brief cupolas_d 机制层-策略层适配（gen5 装配的策略挂点）。
  *
- * 安全穹顶 PDP 本体 + daemon 配置解析链 + 生命周期五钩子。配置链：
- * 缺省值 → config 文件 daemon 段覆盖；端点四元组由 svc_endpoint 从
- * 解析结果回填，cmdline use_tcp 只升不降。穹顶引导
+ * 安全穹顶 PDP 本体 + 生命周期五钩子。端点配置族（daemon 段解析、
+ * 基线回填、cmdline use_tcp 融合）委托 daemon_cfg_file 机制件
+ * （daemon_ep_load/free/fill）；本文件无策略键，纯端点户。穹顶引导
  * （daemon_cupolas_init，manifest cupolas:"full"）由生成 main.c 承担；
  * 本文件持有动态策略引擎（PDP，M2-S3 唯一策略持有者）与 cupolas
  * 服务单例的创建、注入与销毁。业务逻辑在 service.c 与 cupolas_rpc_*.c。
@@ -16,63 +16,29 @@
 #include "svc_cupolas_d.h"
 
 #include "cupolas_d_internal.h"
-#include "airy_memory.h"
 #include "daemon_cfg_file.h"
 #include "dynamic_policy_engine.h"
 #include "platform.h"
 
-#include <stdlib.h>
-
 cupolas_service_t *g_service = NULL;
 dpolicy_engine_t *g_dpolicy = NULL;
 
-typedef struct {
-    char *socket_path;
-    uint16_t tcp_port;
-    int use_tcp;
-    int max_clients;
-} cupolas_daemon_config_t;
-
-static cupolas_daemon_config_t g_config = {0};
-
-#define CUPOLAS_MAX_CLIENTS 64
-
-static void cfg_on_load(cJSON *root, void *ud)
-{
-    daemon_ep_cfg_t *ep = (daemon_ep_cfg_t *)ud;
-    cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
-    daemon_ep_parse(daemon_cfg, ep);
-    cJSON *item = cJSON_GetObjectItem(daemon_cfg, "max_clients");
-    if (cJSON_IsNumber(item))
-        g_config.max_clients = item->valueint;
-}
+static daemon_ep_cfg_t g_ep;
 
 static void config_load(const char *config_path)
 {
-    daemon_ep_cfg_t ep;
-    daemon_ep_def(CUPOLAS_D_SOCKET_UNIX, CUPOLAS_D_SOCKET_WIN, CUPOLAS_D_TCP_PORT, &ep);
-    g_config.max_clients = CUPOLAS_MAX_CLIENTS;
-
-    daemon_cfg_read(config_path, cfg_on_load, &ep);
-
-    g_config.socket_path = ep.socket_path;
-    g_config.tcp_port = (uint16_t)ep.tcp_port;
-    g_config.use_tcp = ep.use_tcp;
+    daemon_ep_load(&g_ep, config_path, CUPOLAS_D_SOCKET_UNIX,
+                   CUPOLAS_D_SOCKET_WIN, CUPOLAS_D_TCP_PORT, NULL, NULL);
 }
 
 static void config_free(void)
 {
-    AIRY_FREE(g_config.socket_path);
-    AIRY_MEMSET(&g_config, 0, sizeof(g_config));
+    daemon_ep_free(&g_ep);
 }
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    ep->use_tcp = cmdline_tcp || g_config.use_tcp;
-    ep->tcp_host = "127.0.0.1";
-    ep->tcp_port = g_config.tcp_port;
-    ep->sock_unix = g_config.socket_path;
-    ep->sock_win = g_config.socket_path;
+    daemon_ep_fill(ep, &g_ep, cmdline_tcp);
 }
 
 int svc_prepare(const char *config_path)

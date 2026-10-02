@@ -68,11 +68,8 @@ static void cfg_load(const char *config_path)
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    ep->use_tcp = cmdline_tcp;
-    ep->tcp_host = "127.0.0.1";
-    ep->tcp_port = CHANNEL_D_TCP_PORT;
-    ep->sock_unix = CHANNEL_D_SOCKET_UNIX;
-    ep->sock_win = CHANNEL_D_SOCKET_WIN;
+    daemon_ep_base(ep, cmdline_tcp, CHANNEL_D_SOCKET_UNIX,
+                   CHANNEL_D_SOCKET_WIN, CHANNEL_D_TCP_PORT);
 }
 
 int svc_prepare(const char *config_path)

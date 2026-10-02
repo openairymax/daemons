@@ -24,6 +24,7 @@
 
 #include "daemon_bootstrap_ipc.h"
 #include "daemon_bootstrap_sd.h"
+#include "daemon_cfg_file.h"
 #include "daemon_cupolas_bootstrap.h"
 #include "daemon_event_driver.h"
 #include "daemon_l1_server.h"
@@ -50,18 +51,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* 服务端点五元组：svc_endpoint 解析产出（config/env 覆盖策略
- * 在各户 svc.c，机制载体在此），daemon_boot 套接字创建与事件
- * 驱动装配按字段序消费。 */
-typedef struct {
-    int use_tcp;
-    const char *tcp_host;
-    int tcp_port;
-    const char *sock_unix;
-    const char *sock_win;
-} daemon_endpoint_t;
-
 
 /**
  * @brief Generate the common global variables and signal-handler

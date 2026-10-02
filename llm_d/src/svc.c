@@ -6,21 +6,19 @@
  * @brief llm_d 机制层-策略层适配（gen5 装配的策略挂点）。
  *
  * llm 服务单例 + 生命周期五钩子。可配置户：端点基线取自生成头常量
- * （LLM_D_SOCKET_UNIX/WIN、LLM_D_TCP_PORT），-c JSON 的 daemon 段可覆盖
- * socket_path / tcp_port；cmdline use_tcp 只升不降。配置未显式给出时回落
- * $AIRY_CONFIG_DIR/model.yaml（与 think_d / gateway_d 同源 SSoT），使
- * provider 注册表与 llm_router 始终看到已配置端点。业务逻辑在
- * src/rpc/methods.c 与 src/rpc/dispatch.c。
+ * （LLM_D_SOCKET_UNIX/WIN、LLM_D_TCP_PORT），端点族委托 daemon_cfg_file
+ * 机制件（daemon_ep_load/free/fill，纯端点户无策略键）。配置未显式
+ * 给出时回落 $AIRY_CONFIG_DIR/model.yaml（与 think_d / gateway_d 同源
+ * SSoT），使 provider 注册表与 llm_router 始终看到已配置端点。业务
+ * 逻辑在 src/rpc/methods.c 与 src/rpc/dispatch.c。
  */
 
-#include "daemon_main.h"
 #include "platform.h"
 #include "svc_logger.h"
 #include "svc_llm_d.h"
 #include "llm_d_internal.h"
 #include "llm_service.h"
 
-#include "airy_memory.h"
 #include "daemon_cfg_file.h"
 
 #include <stdio.h>
@@ -29,21 +27,15 @@ llm_service_t *g_service = NULL;
 
 static daemon_ep_cfg_t g_ep = {0};
 
-static void ep_on_load(cJSON *root, void *ud)
-{
-    daemon_ep_parse(cJSON_GetObjectItem(root, "daemon"), (daemon_ep_cfg_t *)ud);
-}
-
 static void ep_load(const char *config_path)
 {
-    daemon_ep_def(LLM_D_SOCKET_UNIX, LLM_D_SOCKET_WIN, LLM_D_TCP_PORT, &g_ep);
-    daemon_cfg_read(config_path, ep_on_load, &g_ep);
+    daemon_ep_load(&g_ep, config_path, LLM_D_SOCKET_UNIX,
+                   LLM_D_SOCKET_WIN, LLM_D_TCP_PORT, NULL, NULL);
 }
 
 static void ep_free(void)
 {
-    AIRY_FREE(g_ep.socket_path);
-    AIRY_MEMSET(&g_ep, 0, sizeof(g_ep));
+    daemon_ep_free(&g_ep);
 }
 
 /* 未显式指定 manager 时回落 $AIRY_CONFIG_DIR/model.yaml：静态缓冲保持
@@ -66,11 +58,7 @@ static const char *cfg_fallback(const char *config_path)
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    ep->use_tcp = cmdline_tcp ? 1 : (g_ep.use_tcp ? 1 : 0);
-    ep->tcp_host = "127.0.0.1";
-    ep->tcp_port = g_ep.tcp_port;
-    ep->sock_unix = g_ep.socket_path;
-    ep->sock_win = g_ep.socket_path;
+    daemon_ep_fill(ep, &g_ep, cmdline_tcp);
 
     if (ep->use_tcp)
         SVC_LOG_INFO("Listening on TCP port %u", (unsigned)ep->tcp_port);

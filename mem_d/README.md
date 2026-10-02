@@ -105,7 +105,6 @@ gateway_d ──(mem.write / mem.search / mem.kb_ingest / …)──▶ mem_d
   "daemon": {
     "socket_path": "<runtime-dir>/mem.sock",
     "tcp_port": 8085,
-    "max_clients": 64,
     "max_records": 1024
   }
 }

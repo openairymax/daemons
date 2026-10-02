@@ -162,8 +162,7 @@ Windows 下 `maths_*` 返回明确的不支持错误，`git_*` 三个工具的�
 {
   "daemon": {
     "socket_path": "<runtime-dir>/tool.sock",
-    "tcp_port": 8081,
-    "max_clients": 64
+    "tcp_port": 8081
   }
 }
 ```

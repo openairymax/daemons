@@ -28,15 +28,12 @@ extern "C" {
 /* ── Daemon configuration ─────────────────────────────────────────────── */
 
 #define MEM_DEFAULT_MAX_RECORDS 1024
-#define MAX_CLIENTS 64
 /* token 计数模型名上限（含终止符）；空串 → 默认模型 */
 #define MEM_TOKEN_MODEL_MAX 64
 
+/* 端点三元组与 max_clients 由 daemon_cfg_file 机制件与 svc.c 策略件
+ * 内聚（0.1.19 t54）；此处只暴露 handler 四域跨文件消费的业务策略键。 */
 typedef struct {
-    char *socket_path;
-    uint16_t tcp_port;
-    int use_tcp;
-    int max_clients;
     size_t max_records;
     /* B5：L2 压缩 A/B 门禁策略（声明注入，默认 fail-closed 全关）。
      * 策略值来自 config 的 "compress" 段 / 环境变量，改动不触发重编译。 */

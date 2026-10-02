@@ -3,7 +3,7 @@
 
 /**
  * @file daemon_cfg_file.c
- * @brief Daemon 配置文件读取机制（daemon_cfg_file.h 唯一实现）。
+ * @brief Daemon 配置文件读取与端点装配机制（daemon_cfg_file.h 唯一实现）。
  */
 
 #include "daemon_cfg_file.h"
@@ -17,6 +17,12 @@
 
 /* 单配置文件读取上限：防异常大文件拖垮启动路径 */
 #define CFG_FILE_MAX (1024 * 1024)
+
+typedef struct {
+    daemon_ep_cfg_t *ep;
+    daemon_keys_fn keys;
+    void *user;
+} ep_load_ctx_t;
 
 int daemon_ep_def(const char *sock_unix, const char *sock_win, int tcp_port,
                   daemon_ep_cfg_t *ep)
@@ -83,4 +89,54 @@ int daemon_cfg_read(const char *config_path, daemon_cfg_fn fn, void *ud)
     }
     fclose(f);
     return AIRY_SUCCESS;
+}
+
+static void ep_on_load(cJSON *root, void *ud)
+{
+    ep_load_ctx_t *ctx = (ep_load_ctx_t *)ud;
+    daemon_ep_parse(cJSON_GetObjectItem(root, "daemon"), ctx->ep);
+    if (ctx->keys)
+        ctx->keys(root, ctx->user);
+}
+
+int daemon_ep_load(daemon_ep_cfg_t *ep, const char *config_path,
+                   const char *sock_unix, const char *sock_win, int tcp_port,
+                   daemon_keys_fn keys, void *user)
+{
+    int rc = daemon_ep_def(sock_unix, sock_win, tcp_port, ep);
+    if (rc != AIRY_SUCCESS)
+        return rc;
+    ep_load_ctx_t ctx = {ep, keys, user};
+    return daemon_cfg_read(config_path, ep_on_load, &ctx);
+}
+
+void daemon_ep_free(daemon_ep_cfg_t *ep)
+{
+    if (!ep)
+        return;
+    AIRY_FREE(ep->socket_path);
+    AIRY_MEMSET(ep, 0, sizeof(*ep));
+}
+
+void daemon_ep_fill(daemon_endpoint_t *out, const daemon_ep_cfg_t *ep, int cmdline_tcp)
+{
+    if (!out || !ep)
+        return;
+    out->use_tcp = cmdline_tcp ? 1 : (ep->use_tcp ? 1 : 0);
+    out->tcp_host = "127.0.0.1";
+    out->tcp_port = ep->tcp_port;
+    out->sock_unix = ep->socket_path;
+    out->sock_win = ep->socket_path;
+}
+
+void daemon_ep_base(daemon_endpoint_t *out, int cmdline_tcp, const char *sock_unix,
+                    const char *sock_win, int tcp_port)
+{
+    if (!out)
+        return;
+    out->use_tcp = cmdline_tcp ? 1 : 0;
+    out->tcp_host = "127.0.0.1";
+    out->tcp_port = tcp_port;
+    out->sock_unix = sock_unix;
+    out->sock_win = sock_win;
 }
