@@ -13,13 +13,13 @@
  */
 
 #include "airy_memory.h"
+#include "daemon_cfg_file.h"
 #include "svc_a2a_d.h"
 #include "a2a_d_internal.h"
 #include "platform.h"
 #include "svc_logger.h"
 #include "daemon_main.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 
 a2a_service_t *g_service = NULL;
@@ -34,15 +34,23 @@ typedef struct {
 
 static a2a_daemon_config_t g_cfg = {0};
 
+static void cfg_on_load(cJSON *root, void *ud)
+{
+    daemon_ep_cfg_t *ep = (daemon_ep_cfg_t *)ud;
+    cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
+    daemon_ep_parse(daemon_cfg, ep);
+    cJSON *max_agents = cJSON_GetObjectItem(daemon_cfg, "max_agents");
+    if (cJSON_IsNumber(max_agents))
+        g_cfg.max_agents = (size_t)max_agents->valuedouble;
+    cJSON *max_tasks = cJSON_GetObjectItem(daemon_cfg, "max_tasks");
+    if (cJSON_IsNumber(max_tasks))
+        g_cfg.max_tasks = (size_t)max_tasks->valuedouble;
+}
+
 static void cfg_load(const char *config_path)
 {
-    g_cfg.use_tcp = 0;
-    g_cfg.tcp_port = A2A_D_TCP_PORT;
-#if defined(AIRY_PLATFORM_WINDOWS)
-    g_cfg.socket_path = AIRY_STRDUP(A2A_D_SOCKET_WIN);
-#else
-    g_cfg.socket_path = AIRY_STRDUP(A2A_D_SOCKET_UNIX);
-#endif
+    daemon_ep_cfg_t ep;
+    daemon_ep_def(A2A_D_SOCKET_UNIX, A2A_D_SOCKET_WIN, A2A_D_TCP_PORT, &ep);
 
     const char *env_agents = getenv("AIRY_A2A_MAX_AGENTS");
     if (env_agents) {
@@ -57,48 +65,11 @@ static void cfg_load(const char *config_path)
             g_cfg.max_tasks = (size_t)v;
     }
 
-    if (config_path) {
-        FILE *f = fopen(config_path, "rb");
-        if (f) {
-            fseek(f, 0, SEEK_END);
-            long len = ftell(f);
-            fseek(f, 0, SEEK_SET);
-            if (len > 0 && len < 1024 * 1024) {
-                char *content = (char *)AIRY_MALLOC((size_t)len + 1);
-                if (content) {
-                    size_t read_len = fread(content, 1, (size_t)len, f);
-                    if (read_len == (size_t)len) {
-                        content[read_len] = '\0';
-                        do {
-                            CJSON_PARSE_GUARD(root, content, { break; });
-                            cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
-                            if (daemon_cfg) {
-                                cJSON *socket_path =
-                                    cJSON_GetObjectItem(daemon_cfg, "socket_path");
-                                if (cJSON_IsString(socket_path)) {
-                                    AIRY_FREE(g_cfg.socket_path);
-                                    g_cfg.socket_path = AIRY_STRDUP(socket_path->valuestring);
-                                }
-                                cJSON *tcp_port = cJSON_GetObjectItem(daemon_cfg, "tcp_port");
-                                if (cJSON_IsNumber(tcp_port)) {
-                                    g_cfg.tcp_port = (uint16_t)tcp_port->valueint;
-                                    g_cfg.use_tcp = 1;
-                                }
-                                cJSON *max_agents = cJSON_GetObjectItem(daemon_cfg, "max_agents");
-                                if (cJSON_IsNumber(max_agents))
-                                    g_cfg.max_agents = (size_t)max_agents->valuedouble;
-                                cJSON *max_tasks = cJSON_GetObjectItem(daemon_cfg, "max_tasks");
-                                if (cJSON_IsNumber(max_tasks))
-                                    g_cfg.max_tasks = (size_t)max_tasks->valuedouble;
-                            }
-                        } while (0);
-                    }
-                    AIRY_FREE(content);
-                }
-            }
-            fclose(f);
-        }
-    }
+    daemon_cfg_read(config_path, cfg_on_load, &ep);
+
+    g_cfg.socket_path = ep.socket_path;
+    g_cfg.tcp_port = (uint16_t)ep.tcp_port;
+    g_cfg.use_tcp = ep.use_tcp;
 }
 
 static void cfg_free(void)

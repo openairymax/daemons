@@ -21,67 +21,23 @@
 #include "llm_service.h"
 
 #include "airy_memory.h"
+#include "daemon_cfg_file.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 
 llm_service_t *g_service = NULL;
 
-typedef struct {
-    char *socket_path;
-    uint16_t tcp_port;
-    int use_tcp;
-} llm_ep_cfg_t;
+static daemon_ep_cfg_t g_ep = {0};
 
-static llm_ep_cfg_t g_ep = {0};
+static void ep_on_load(cJSON *root, void *ud)
+{
+    daemon_ep_parse(cJSON_GetObjectItem(root, "daemon"), (daemon_ep_cfg_t *)ud);
+}
 
 static void ep_load(const char *config_path)
 {
-    g_ep.use_tcp = 0;
-    g_ep.tcp_port = LLM_D_TCP_PORT;
-#if defined(AIRY_PLATFORM_WINDOWS)
-    g_ep.socket_path = AIRY_STRDUP(LLM_D_SOCKET_WIN);
-#else
-    g_ep.socket_path = AIRY_STRDUP(LLM_D_SOCKET_UNIX);
-#endif
-
-    if (!config_path)
-        return;
-
-    FILE *f = fopen(config_path, "rb");
-    if (!f)
-        return;
-
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (len > 0 && len < 1024 * 1024) {
-        char *content = (char *)AIRY_MALLOC((size_t)len + 1);
-        if (content) {
-            size_t read_len = fread(content, 1, (size_t)len, f);
-            if (read_len == (size_t)len) {
-                content[read_len] = '\0';
-                do {
-                    CJSON_PARSE_GUARD(root, content, { break; });
-                    cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
-                    if (daemon_cfg) {
-                        cJSON *socket_path = cJSON_GetObjectItem(daemon_cfg, "socket_path");
-                        if (cJSON_IsString(socket_path)) {
-                            AIRY_FREE(g_ep.socket_path);
-                            g_ep.socket_path = AIRY_STRDUP(socket_path->valuestring);
-                        }
-                        cJSON *tcp_port = cJSON_GetObjectItem(daemon_cfg, "tcp_port");
-                        if (cJSON_IsNumber(tcp_port)) {
-                            g_ep.tcp_port = (uint16_t)tcp_port->valueint;
-                            g_ep.use_tcp = 1;
-                        }
-                    }
-                } while (0);
-            }
-            AIRY_FREE(content);
-        }
-    }
-    fclose(f);
+    daemon_ep_def(LLM_D_SOCKET_UNIX, LLM_D_SOCKET_WIN, LLM_D_TCP_PORT, &g_ep);
+    daemon_cfg_read(config_path, ep_on_load, &g_ep);
 }
 
 static void ep_free(void)
