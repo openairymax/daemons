@@ -456,9 +456,10 @@ int daemon_rpc_call(const char *socket_path, const char *method, const char *par
  * @brief Connect + send a JSON-RPC request, returning the live socket.
  *
  * Shared prefix of daemon_rpc_call_cancelable and daemon_rpc_call_stream:
- * builds the JSON-RPC 2.0 request object, serializes it and sends it over a
- * freshly connected Unix socket. The caller owns the returned fd (>= 0) and
- * must close it; on failure a negative AIRY_ERR_* code is returned.
+ * serializes the request via daemon_rpc_json_req (0.1.19 §80 mechanism)
+ * and sends it over a freshly connected Unix socket. The caller owns the
+ * returned fd (>= 0) and must close it; on failure a negative AIRY_ERR_*
+ * code is returned.
  */
 static int rpc_connect_send(const char *socket_path, const char *method, const char *params_json)
 {
@@ -466,27 +467,7 @@ static int rpc_connect_send(const char *socket_path, const char *method, const c
     if (fd < 0)
         return AIRY_ERR_NOT_FOUND;
 
-    cJSON *root = cJSON_CreateObject();
-    if (!root) {
-        close(fd);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
-    cJSON_AddStringToObject(root, "method", method);
-    if (params_json && params_json[0] != '\0') {
-        cJSON *params = cJSON_Parse(params_json);
-        if (params) {
-            cJSON_AddItemToObject(root, "params", params);
-        } else {
-            cJSON_AddStringToObject(root, "params", params_json);
-        }
-    } else {
-        cJSON_AddObjectToObject(root, "params");
-    }
-    cJSON_AddNumberToObject(root, "id", 1);
-
-    char *request_str = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
+    char *request_str = daemon_rpc_json_req(method, params_json);
     if (!request_str) {
         close(fd);
         return AIRY_ERR_OUT_OF_MEMORY;
@@ -587,27 +568,7 @@ static int rpc_connect_send(const char *socket_path, const char *method, const c
     if (fd < 0)
         return AIRY_ERR_NOT_FOUND;
 
-    cJSON *root = cJSON_CreateObject();
-    if (!root) {
-        rpc_close_fd(fd);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
-    cJSON_AddStringToObject(root, "method", method);
-    if (params_json && params_json[0] != '\0') {
-        cJSON *params = cJSON_Parse(params_json);
-        if (params) {
-            cJSON_AddItemToObject(root, "params", params);
-        } else {
-            cJSON_AddStringToObject(root, "params", params_json);
-        }
-    } else {
-        cJSON_AddObjectToObject(root, "params");
-    }
-    cJSON_AddNumberToObject(root, "id", 1);
-
-    char *request_str = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
+    char *request_str = daemon_rpc_json_req(method, params_json);
     if (!request_str) {
         rpc_close_fd(fd);
         return AIRY_ERR_OUT_OF_MEMORY;
@@ -704,28 +665,7 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
     if (fd < 0)
         return AIRY_ERR_NOT_FOUND;
 
-    cJSON *root = cJSON_CreateObject();
-    if (!root) {
-        rpc_close_fd(fd);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-    cJSON_AddStringToObject(root, "jsonrpc", "2.0");
-    cJSON_AddStringToObject(root, "method", method);
-    if (params_json && params_json[0] != '\0') {
-        cJSON *params = cJSON_Parse(params_json);
-        if (params) {
-            cJSON_AddItemToObject(root, "params", params);
-        } else {
-
-            cJSON_AddStringToObject(root, "params", params_json);
-        }
-    } else {
-        cJSON_AddObjectToObject(root, "params");
-    }
-    cJSON_AddNumberToObject(root, "id", 1);
-
-    char *request_str = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
+    char *request_str = daemon_rpc_json_req(method, params_json);
     if (!request_str) {
         rpc_close_fd(fd);
         return AIRY_ERR_OUT_OF_MEMORY;
