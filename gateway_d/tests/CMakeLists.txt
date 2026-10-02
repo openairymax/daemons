@@ -21,6 +21,7 @@ set(PROTOCOL_ROUTER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../src/protocol)
 set(TEST_SOURCES
     test_service.c
     test_protocol_router.c
+    test_gateway_jsonpick.c
     test_gateway_hall_store.c
     test_gateway_cap_registry.c
     test_gateway_pep_cache.c
@@ -38,12 +39,24 @@ foreach(TEST_SRC ${TEST_SOURCES})
     if(${TEST_NAME} STREQUAL "test_protocol_router")
         target_sources(${TEST_NAME} PRIVATE
             ${PROTOCOL_ROUTER_DIR}/gateway_protocol_router.c
+            ${PROTOCOL_ROUTER_DIR}/gateway_jsonpick.c
             ${PROTOCOL_ROUTER_DIR}/gateway_mcp_server.c
             ${PROTOCOL_ROUTER_DIR}/gateway_a2a_handler.c
             ${PROTOCOL_ROUTER_DIR}/gateway_openai_compat.c
         )
         target_include_directories(${TEST_NAME} PRIVATE
             ${PROTOCOL_ROUTER_DIR}
+        )
+    endif()
+
+    # JSON 提取机制单测：仅编译机制件（cJSON 头 + 库依赖）
+    if(${TEST_NAME} STREQUAL "test_gateway_jsonpick")
+        target_sources(${TEST_NAME} PRIVATE
+            ${PROTOCOL_ROUTER_DIR}/gateway_jsonpick.c
+        )
+        target_include_directories(${TEST_NAME} PRIVATE
+            ${PROTOCOL_ROUTER_DIR}
+            ${CJSON_INCLUDE_DIRS}
         )
     endif()
 
