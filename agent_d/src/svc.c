@@ -15,7 +15,6 @@
 #include "svc_agent_d.h"
 
 #include "agent_d_internal.h"
-#include "airy_memory.h"
 #include "daemon_cfg_file.h"
 #include "platform.h"
 
@@ -26,29 +25,21 @@ agent_service_t *g_service = NULL;
 uint64_t g_start_time = 0;
 agent_daemon_config_t g_config = {0};
 
-#define AGENT_MAX_CLIENTS 2048
 #define AGENT_DEFAULT_MAX_AGENTS 10000
 
-static void cfg_on_load(cJSON *root, void *ud)
+static daemon_ep_cfg_t g_ep;
+
+static void cfg_keys(const cJSON *root, void *user)
 {
-    daemon_ep_cfg_t *ep = (daemon_ep_cfg_t *)ud;
+    (void)user;
     cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
-    if (!daemon_cfg)
-        return;
-    daemon_ep_parse(daemon_cfg, ep);
-    cJSON *item = cJSON_GetObjectItem(daemon_cfg, "max_clients");
-    if (cJSON_IsNumber(item))
-        g_config.max_clients = item->valueint;
-    item = cJSON_GetObjectItem(daemon_cfg, "max_agents");
+    cJSON *item = cJSON_GetObjectItem(daemon_cfg, "max_agents");
     if (cJSON_IsNumber(item))
         g_config.max_agents = (size_t)item->valuedouble;
 }
 
 static void config_load(const char *config_path)
 {
-    daemon_ep_cfg_t ep;
-    daemon_ep_def(AGENT_D_SOCKET_UNIX, AGENT_D_SOCKET_WIN, AGENT_D_TCP_PORT, &ep);
-    g_config.max_clients = AGENT_MAX_CLIENTS;
     g_config.max_agents = AGENT_DEFAULT_MAX_AGENTS;
 
     const char *env = getenv("AIRY_MAX_AGENTS");
@@ -58,25 +49,18 @@ static void config_load(const char *config_path)
             g_config.max_agents = (size_t)v;
     }
 
-    daemon_cfg_read(config_path, cfg_on_load, &ep);
-    g_config.socket_path = ep.socket_path;
-    g_config.tcp_port = (uint16_t)ep.tcp_port;
-    g_config.use_tcp = ep.use_tcp;
+    daemon_ep_load(&g_ep, config_path, AGENT_D_SOCKET_UNIX, AGENT_D_SOCKET_WIN,
+                   AGENT_D_TCP_PORT, cfg_keys, NULL);
 }
 
 static void config_free(void)
 {
-    AIRY_FREE(g_config.socket_path);
-    AIRY_MEMSET(&g_config, 0, sizeof(g_config));
+    daemon_ep_free(&g_ep);
 }
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    ep->use_tcp = cmdline_tcp || g_config.use_tcp;
-    ep->tcp_host = "127.0.0.1";
-    ep->tcp_port = (int)g_config.tcp_port;
-    ep->sock_unix = g_config.socket_path;
-    ep->sock_win = g_config.socket_path;
+    daemon_ep_fill(ep, &g_ep, cmdline_tcp);
 }
 
 int svc_prepare(const char *config_path)

@@ -37,11 +37,8 @@ int svc_prepare(const char *config_path)
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    ep->use_tcp = cmdline_tcp;
-    ep->tcp_host = "127.0.0.1";
-    ep->tcp_port = MATHS_D_TCP_PORT;
-    ep->sock_unix = MATHS_D_SOCKET_UNIX;
-    ep->sock_win = MATHS_D_SOCKET_WIN;
+    daemon_ep_base(ep, cmdline_tcp, MATHS_D_SOCKET_UNIX,
+                   MATHS_D_SOCKET_WIN, MATHS_D_TCP_PORT);
 }
 
 int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)

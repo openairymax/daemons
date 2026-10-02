@@ -5,8 +5,10 @@
  * @file svc.c
  * @brief think_d 生命周期策略域（config 加载链 / 服务装配 / 依赖治理）。
  *
- * config 优先级（Model SSoT）：env (AIRY_THINK_*) > model.yaml think 段 >
- * -c JSON think/daemon 段 > 内置缺省。
+ * 端点族委托 daemon_cfg_file 机制件（daemon_ep_load/free/fill）；策略
+ * 键经 cfg_keys 自持提取 think 段。策略优先级（Model SSoT）：
+ * env (AIRY_THINK_*) > model.yaml think 段 > -c JSON think/daemon 段 >
+ * 内置缺省——daemon_ep_load（JSON）先行，model.yaml 与 env 顺序在后。
  */
 
 #include "airy_memory.h"
@@ -18,7 +20,6 @@
 #include "platform.h"
 #include "svc_logger.h"
 #include "svc_model_defaults.h"
-#include "daemon_main.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,10 +36,8 @@ const daemon_dep_spec_t g_think_deps[1] = {
     {"llm_d", true},
 };
 
+/* 端点三元组由 daemon_cfg_file 机制件持有；此处只留 think 策略键 */
 typedef struct {
-    char *socket_path;
-    uint16_t tcp_port;
-    int use_tcp;
     uint32_t process_timeout_ms;
     int think_enabled;
     char think2_slow_model[128];
@@ -48,12 +47,12 @@ typedef struct {
 
 static think_daemon_config_t g_cfg = {0};
 
-static void cfg_on_load(cJSON *root, void *ud)
+static daemon_ep_cfg_t g_ep;
+
+/* 策略键派发（daemon_ep_load 回调）：think 段五键自持提取（JSON 层） */
+static void cfg_keys(const cJSON *root, void *ud)
 {
-    daemon_ep_cfg_t *ep = (daemon_ep_cfg_t *)ud;
-    cJSON *daemon_cfg = cJSON_GetObjectItem(root, "daemon");
-    if (daemon_cfg)
-        daemon_ep_parse(daemon_cfg, ep);
+    (void)ud;
     cJSON *think = cJSON_GetObjectItem(root, "think");
     if (think) {
         cJSON *s2 = cJSON_GetObjectItem(think, "think2_slow_model");
@@ -81,12 +80,13 @@ static void cfg_on_load(cJSON *root, void *ud)
 
 static void cfg_load(const char *config_path)
 {
-    daemon_ep_cfg_t ep;
-    daemon_ep_def(THINK_D_SOCKET_UNIX, THINK_D_SOCKET_WIN, THINK_D_TCP_PORT, &ep);
     g_cfg.process_timeout_ms = 120000;
     g_cfg.think_enabled = 1;
 
-    daemon_cfg_read(config_path, cfg_on_load, &ep);
+    /* 机制件：端点基线 + config 文件覆盖 + cfg_keys 派发（JSON 层，
+     * 优先级低于下方 model.yaml SSoT 与 env 链） */
+    daemon_ep_load(&g_ep, config_path, THINK_D_SOCKET_UNIX,
+                   THINK_D_SOCKET_WIN, THINK_D_TCP_PORT, cfg_keys, NULL);
 
     /* Model SSoT: $AIRY_CONFIG_DIR/model.yaml 的 think 段（三角色单一
      * 配置源；与 gateway_d 读全局段同一 svc_model_defaults 公共层）。 */
@@ -133,25 +133,16 @@ static void cfg_load(const char *config_path)
         if ((e = getenv("AIRY_THINK_TIMEOUT_MS")) && *e && atoi(e) > 0)
             g_cfg.process_timeout_ms = (uint32_t)atoi(e);
     }
-
-    g_cfg.socket_path = ep.socket_path;
-    g_cfg.tcp_port = (uint16_t)ep.tcp_port;
-    g_cfg.use_tcp = ep.use_tcp;
 }
 
 static void cfg_free(void)
 {
-    AIRY_FREE(g_cfg.socket_path);
-    AIRY_MEMSET(&g_cfg, 0, sizeof(g_cfg));
+    daemon_ep_free(&g_ep);
 }
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    ep->use_tcp = cmdline_tcp ? 1 : (g_cfg.use_tcp ? 1 : 0);
-    ep->tcp_host = "127.0.0.1";
-    ep->tcp_port = g_cfg.tcp_port;
-    ep->sock_unix = g_cfg.socket_path;
-    ep->sock_win = g_cfg.socket_path;
+    daemon_ep_fill(ep, &g_ep, cmdline_tcp);
 }
 
 int svc_prepare(const char *config_path)

@@ -3,12 +3,13 @@
 
 /**
  * @file daemon_cfg_file.h
- * @brief Daemon 配置文件读取与端点段解析（机制唯一实现）。
+ * @brief Daemon 配置文件读取与端点装配（机制唯一实现）。
  *
- * 0.1.19 t44：config_load/ep_load 家族七副本消解的机制载体。文件读取
- * 样板（fopen/fread/限长/JSON 解析/释放）与 daemon 段端点三元组
- * （socket_path/tcp_port/use_tcp）解析统一在此；守护进程仅保留 env
- * 覆盖与专属字段提取等策略件（机制与策略分离）。
+ * 0.1.19 t44/t54：config_load/ep_load 家族七副本与 svc_endpoint 六行体
+ * 全仓消解的机制载体。文件读取样板（fopen/fread/限长/JSON 解析/释放）、
+ * daemon 段端点三元组（socket_path/tcp_port/use_tcp）解析与端点五元组
+ * 装配（daemon_ep_fill/daemon_ep_base）统一在此；守护进程仅保留 env
+ * 覆盖与专属键提取等策略件（机制与策略分离）。
  */
 
 #ifndef AIRY_RT_DAEMON_CFG_FILE_H
@@ -33,6 +34,21 @@ typedef struct {
 /* 配置文件解析回调：root 为整文档根对象（借用，回调内勿释放）。 */
 typedef void (*daemon_cfg_fn)(cJSON *root, void *ud);
 
+/* 策略键回调：收整文档根对象（借用）。daemon 段容量键与 compress/
+ * think 等专属段提取均为策略件，由各户自持；机制件只负责端点三元组
+ * 与文件读取样板。 */
+typedef void (*daemon_keys_fn)(const cJSON *root, void *user);
+
+/* 服务端点五元组：svc_endpoint 策略件经 daemon_ep_fill/daemon_ep_base
+ * 装配产出，daemon_boot 套接字创建与事件驱动装配按字段序消费。 */
+typedef struct {
+    int use_tcp;
+    const char *tcp_host;
+    int tcp_port;
+    const char *sock_unix;
+    const char *sock_win;
+} daemon_endpoint_t;
+
 /**
  * @brief 端点三元组缺省基线（平台分支 socket + TCP 口基线）。
  * @return AIRY_SUCCESS；ep 为空返回 AIRY_ERR_INVALID_PARAM。
@@ -55,6 +71,39 @@ int daemon_cfg_read(const char *config_path, daemon_cfg_fn fn, void *ud);
  * 值回落现值；use_tcp 仅在合法端口出现时置位。
  */
 void daemon_ep_parse(const cJSON *daemon_cfg, daemon_ep_cfg_t *ep);
+
+/**
+ * @brief 端点配置装载（def 基线 + 文件覆盖 + 策略键派发，七副本消解）。
+ *
+ * 先建立基线（sock_unix/sock_win 平台分支 + tcp_port），再读 config
+ * 文件覆盖式解析端点三元组，并将整文档根对象派发给 keys 策略键回调
+ * （可空）。优先级：内置基线 < config 文件；env 覆盖属策略件，由
+ * 调用者自行处理。ep 空参数返回 AIRY_ERR_INVALID_PARAM，其余缺省即
+ * 终态。
+ */
+int daemon_ep_load(daemon_ep_cfg_t *ep, const char *config_path,
+                   const char *sock_unix, const char *sock_win, int tcp_port,
+                   daemon_keys_fn keys, void *user);
+
+/**
+ * @brief 释放端点配置（socket_path 归还并整体清零，幂等可重入）。
+ */
+void daemon_ep_free(daemon_ep_cfg_t *ep);
+
+/**
+ * @brief 端点配置 → 服务端点五元组装配（svc_endpoint 唯一机制体）。
+ *
+ * use_tcp 融合 cmdline --tcp（只升不降）；tcp_host 固定环回；
+ * socket 双路取自配置解析产出。
+ */
+void daemon_ep_fill(daemon_endpoint_t *out, const daemon_ep_cfg_t *ep,
+                    int cmdline_tcp);
+
+/**
+ * @brief 基线直填（无 config 户）：生成头常量端点 → 服务端点五元组。
+ */
+void daemon_ep_base(daemon_endpoint_t *out, int cmdline_tcp,
+                    const char *sock_unix, const char *sock_win, int tcp_port);
 
 #ifdef __cplusplus
 }

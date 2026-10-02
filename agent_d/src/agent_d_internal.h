@@ -27,15 +27,13 @@
 extern "C" {
 #endif
 
-/* ---- 服务句柄 / 启动时间 / daemon 配置（main.c 定义，RPC 与监控文件引用） ---- */
+/* ---- 服务句柄 / 启动时间 / daemon 配置（svc.c 定义，RPC 与监控文件引用） ---- */
 extern agent_service_t *g_service;
 extern uint64_t g_start_time;
 
+/* 端点三元组与容量上限为 daemon_cfg_file 机制件与 svc.c 策略件内聚，
+ * 此处只暴露跨文件业务消费的容量键。 */
 typedef struct {
-    char *socket_path;
-    uint16_t tcp_port;
-    int use_tcp;
-    int max_clients;
     size_t max_agents;
 } agent_daemon_config_t;
 
