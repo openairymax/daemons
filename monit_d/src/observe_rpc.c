@@ -413,7 +413,7 @@ int observe_rpc_init(void)
     if (g_obs_ready)
         return 0;
 
-    __builtin_memset(g_obs_metrics, 0, sizeof(g_obs_metrics));
+    AIRY_MEMSET(g_obs_metrics, 0, sizeof(g_obs_metrics));
     g_obs_metric_count = 0;
     g_obs_requests = 0;
     g_obs_errors = 0;

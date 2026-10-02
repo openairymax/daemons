@@ -316,13 +316,13 @@ static void add_to_history(const alert_info_t *alert)
         AIRY_FREE(g_alert_mgr.history[0].alert.message);
         AIRY_FREE(g_alert_mgr.history[0].alert.service_name);
         AIRY_FREE(g_alert_mgr.history[0].alert.resource_id);
-        __builtin_memmove(&g_alert_mgr.history[0], &g_alert_mgr.history[1],
-                          (g_alert_mgr.history_count - 1) * sizeof(grouped_alert_t));
+        AIRY_MEMMOVE(&g_alert_mgr.history[0], &g_alert_mgr.history[1],
+                     (g_alert_mgr.history_count - 1) * sizeof(grouped_alert_t));
         g_alert_mgr.history_count--;
     }
 
     grouped_alert_t *entry = &g_alert_mgr.history[g_alert_mgr.history_count];
-    __builtin_memset(entry, 0, sizeof(grouped_alert_t));
+    AIRY_MEMSET(entry, 0, sizeof(grouped_alert_t));
 
     entry->alert.alert_id = alert->alert_id ? AIRY_STRDUP(alert->alert_id) : NULL;
     if (alert->alert_id && !entry->alert.alert_id) {

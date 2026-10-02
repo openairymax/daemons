@@ -350,18 +350,17 @@ int structured_log_write(log_level_t level, const char *service_name, const char
     if (service_name)
         AIRY_STRNCPY_TERM(entry.service_name, service_name, sizeof(entry.service_name));
     AIRY_STRNCPY_TERM(entry.file, file, sizeof(entry.file));
-    (entry.file)[sizeof(entry.file) - 1] = '\0';
     entry.line = line;
-    if (function)
-        __builtin_strncpy(entry.function, function, sizeof(entry.function) - 1);
-    (entry.function)[sizeof(entry.function) - 1] = '\0';
+    if (function) {
+        AIRY_STRNCPY_TERM(entry.function, function, sizeof(entry.function));
+    }
 
     airy_mtx_lock(&g_structured_log.context_lock);
     entry.context_count = g_structured_log.global_context_count < MAX_CONTEXT_FIELDS ?
                               g_structured_log.global_context_count :
                               MAX_CONTEXT_FIELDS;
-    __builtin_memcpy(entry.context, g_structured_log.global_context,
-                     entry.context_count * sizeof(context_field_t));
+    AIRY_MEMCPY(entry.context, g_structured_log.global_context,
+                entry.context_count * sizeof(context_field_t));
     airy_mtx_unlock(&g_structured_log.context_lock);
 
     airy_mtx_lock(&g_structured_log.ring_lock);
@@ -376,6 +375,34 @@ int structured_log_write(log_level_t level, const char *service_name, const char
     dispatch_to_targets(&entry);
 
     return AIRY_SUCCESS;
+}
+
+/**
+ * @brief Ring-index lookup (logical order, oldest first)
+ */
+static ring_entry_t *ring_at(size_t i)
+{
+    size_t idx = (g_structured_log.write_idx - g_structured_log.entry_count + i) %
+                 MAX_RING_BUFFER_ENTRIES;
+    return &g_structured_log.ring[idx];
+}
+
+/**
+ * @brief Apply the four query predicates to a ring entry
+ */
+static bool entry_match(const ring_entry_t *entry, log_level_t level_filter,
+                        const char *service_filter, uint64_t start_time, uint64_t end_time)
+{
+    if (level_filter != LOG_LEVEL_DEBUG && entry->level < level_filter)
+        return false;
+    if (service_filter && entry->service_name[0] &&
+        strstr(entry->service_name, service_filter) == NULL)
+        return false;
+    if (start_time > 0 && entry->timestamp < start_time)
+        return false;
+    if (end_time > 0 && entry->timestamp > end_time)
+        return false;
+    return true;
 }
 
 int structured_log_query(log_level_t level_filter, const char *service_filter, uint64_t start_time,
@@ -393,21 +420,9 @@ int structured_log_query(log_level_t level_filter, const char *service_filter, u
 
     size_t match_count = 0;
     for (size_t i = 0; i < g_structured_log.entry_count; i++) {
-        size_t idx = (g_structured_log.write_idx - g_structured_log.entry_count + i) %
-                     MAX_RING_BUFFER_ENTRIES;
-        ring_entry_t *entry = &g_structured_log.ring[idx];
-
-        if (level_filter != LOG_LEVEL_DEBUG && entry->level < level_filter)
-            continue;
-        if (service_filter && entry->service_name[0] &&
-            strstr(entry->service_name, service_filter) == NULL)
-            continue;
-        if (start_time > 0 && entry->timestamp < start_time)
-            continue;
-        if (end_time > 0 && entry->timestamp > end_time)
-            continue;
-
-        match_count++;
+        if (entry_match(ring_at(i), level_filter, service_filter, start_time, end_time)) {
+            match_count++;
+        }
     }
 
     if (match_count == 0) {
@@ -421,18 +436,9 @@ int structured_log_query(log_level_t level_filter, const char *service_filter, u
     size_t idx_out = 0;
 
     for (size_t i = 0; i < g_structured_log.entry_count && idx_out < match_count; i++) {
-        size_t idx = (g_structured_log.write_idx - g_structured_log.entry_count + i) %
-                     MAX_RING_BUFFER_ENTRIES;
-        ring_entry_t *entry = &g_structured_log.ring[idx];
+        ring_entry_t *entry = ring_at(i);
 
-        if (level_filter != LOG_LEVEL_DEBUG && entry->level < level_filter)
-            continue;
-        if (service_filter && entry->service_name[0] &&
-            strstr(entry->service_name, service_filter) == NULL)
-            continue;
-        if (start_time > 0 && entry->timestamp < start_time)
-            continue;
-        if (end_time > 0 && entry->timestamp > end_time)
+        if (!entry_match(entry, level_filter, service_filter, start_time, end_time))
             continue;
 
         char *json = (char *)AIRY_MALLOC(MAX_LOG_MESSAGE_LEN + 1024);

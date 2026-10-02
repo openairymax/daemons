@@ -62,7 +62,7 @@ int info_rpc_collect(info_snapshot_t *snap)
 {
     if (!snap)
         return AIRY_EINVAL;
-    __builtin_memset(snap, 0, sizeof(*snap));
+    AIRY_MEMSET(snap, 0, sizeof(*snap));
     snap->timestamp = (uint64_t)time(NULL);
 
 #ifdef _WIN32
@@ -363,7 +363,7 @@ int info_rpc_init(void)
     if (g_info_ready)
         return 0;
 
-    __builtin_memset(g_info_hist, 0, sizeof(g_info_hist));
+    AIRY_MEMSET(g_info_hist, 0, sizeof(g_info_hist));
     g_info_hist_count = 0;
     g_info_hist_head = 0;
     g_info_start_time = (uint64_t)time(NULL);

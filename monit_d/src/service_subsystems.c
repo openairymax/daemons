@@ -102,8 +102,8 @@ int monitor_service_trigger_alert(monitor_service_t *service, const alert_info_t
         AIRY_FREE(service->alerts[0].message);
         AIRY_FREE(service->alerts[0].service_name);
         AIRY_FREE(service->alerts[0].resource_id);
-        __builtin_memmove(&service->alerts[0], &service->alerts[1],
-                          (service->alert_count - 1) * sizeof(alert_entry_t));
+        AIRY_MEMMOVE(&service->alerts[0], &service->alerts[1],
+                     (service->alert_count - 1) * sizeof(alert_entry_t));
         service->alert_count--;
     }
 
