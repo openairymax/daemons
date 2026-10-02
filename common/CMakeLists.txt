@@ -5,7 +5,7 @@
 # 提供向后兼容的 API，实际实现来自 commons。
 #
 # 保留的 daemon 特有模块：
-# - svc_common.h: 服务框架接口
+# - svc_model_defaults.c: model.yaml 默认模型提取（A2-1 生态面策略件）
 # - ipc_client.c: IPC 客户端实现
 
 
@@ -29,9 +29,8 @@ set(ATOMS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../atoms")
 #   svc/ 服务框架 · auth/ 认证中间件 · ipc/ IPC 总线与客户端 · discovery/ 服务发现
 #   security/ daemon 安全 · daemon/ daemon 引导与生命周期 · event/ 事件循环
 set(SVC_COMMON_SOURCES
-    src/svc/svc_common.c          # 服务框架核心实现（service 生命周期域）
-    src/svc/svc_common_registry.c # Phase 2.3a: 进程内服务注册表域（从 svc_common.c 拆分）
-    src/svc/svc_common_ops.c      # Phase 2.3a: 状态查询/异步请求域（从 svc_common.c 拆分）
+    # 0c A 类直搬：svc 生命周期机制族迁 commons/utils/svc（0.1.19 S74 层界
+    # 错置回位，svc_common.h 权威头同域归位），符号经 airy_common PUBLIC 提供。
     src/svc/svc_model_defaults.c  # A2-1: model.yaml global 段默认模型提取（llm_d/gateway_d 共用）
     src/ipc/ipc_client.c
     src/ipc/ipc_service_bus.c     # IPC服务总线（总线核心域）
@@ -211,10 +210,10 @@ target_include_directories(svc_common PUBLIC
 )
 
 # B16-S0 传播面收敛（V16.13①）：src/ 子目录是私有实现细节，仅供 svc_common
-# 自身裸名 include 解析（internal 头 25 处消费全在本模块内），严禁 PUBLIC
+# 自身裸名 include 解析（internal 头消费全在本模块内），严禁 PUBLIC
 # 传播；下游一律走显式 target_link_libraries。src/event 为空目录不挂。
+# src/svc 已随 S74 迁移清空（仅余 svc_model_defaults.c，自带目录解析）。
 target_include_directories(svc_common PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/svc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/auth
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ipc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/security

@@ -72,49 +72,6 @@ void v2_handler(cJSON *p, int id, void *ud)
     g_v2_calls++;
 }
 
-/* ==================== Service lifecycle stubs ==================== */
-airy_err_t svc_dummy_init(airy_svc_t svc, const airy_svc_config_t *cfg)
-{
-    (void)svc;
-    (void)cfg;
-    return AIRY_SUCCESS;
-}
-
-airy_err_t svc_dummy_start(airy_svc_t svc)
-{
-    (void)svc;
-    return AIRY_SUCCESS;
-}
-
-airy_err_t svc_dummy_stop(airy_svc_t svc, bool force)
-{
-    (void)svc;
-    (void)force;
-    return AIRY_SUCCESS;
-}
-
-void svc_dummy_destroy(airy_svc_t svc)
-{
-    (void)svc;
-}
-
-airy_err_t svc_dummy_healthcheck(airy_svc_t svc)
-{
-    (void)svc;
-    return AIRY_SUCCESS;
-}
-
-airy_svc_interface_t make_dummy_interface(void)
-{
-    airy_svc_interface_t iface;
-    iface.init = svc_dummy_init;
-    iface.start = svc_dummy_start;
-    iface.stop = svc_dummy_stop;
-    iface.destroy = svc_dummy_destroy;
-    iface.healthcheck = svc_dummy_healthcheck;
-    return iface;
-}
-
 int main(void)
 {
     printf("========================================\n");
@@ -145,14 +102,6 @@ int main(void)
     test_am_all_levels();
     test_am_rules();
     test_am_query_and_utils();
-
-    /* 4. Service Lifecycle (7 tests) */
-    test_svc_create_destroy();
-    test_svc_full_lifecycle();
-    test_svc_state_strings();
-    test_svc_capability_checks();
-    test_svc_registry_operations();
-    test_svc_user_data_and_metadata();
 
     printf("\n========================================\n");
     printf("  P1-C06 测试结果汇总\n");

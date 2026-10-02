@@ -19,7 +19,6 @@ set(TEST_SOURCES
     test_svc_auth.c
     test_jsonrpc_helpers.c
     test_safe_string_utils.c
-    test_svc_stop.c
     test_ipc_service_bus.c
     test_strategies_recovery.c
     test_log_sanitizer.c
@@ -105,7 +104,6 @@ add_executable(svc_test_daemon_common
     test_daemon_common_cb.c
     test_daemon_common_md.c
     test_daemon_common_am.c
-    test_daemon_common_svc.c
 )
 
 target_include_directories(svc_test_daemon_common PRIVATE
