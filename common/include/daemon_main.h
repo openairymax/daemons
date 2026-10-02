@@ -3,24 +3,18 @@
 
 /**
  * @file daemon_main.h
- * @brief Daemon main() boilerplate macros and common helpers.
+ * @brief Daemon 引导机制层：符号声明宏 + 启动策略包类型。
  *
  * P0.18.1: eliminates duplicated boilerplate across the daemon main.c
  * files (about 5,956 -> about 1,500 lines).
  *
- * Architecture (P1.23):
- * - The daemon main() structures are essentially identical:
- *   init -> create -> run -> cleanup
- * - The only differences: service-create function, method registration
- *   table, service-destroy function
- * - This file extracts the identical boilerplate into inline functions;
- *   the differences are injected via template macros
- *
- * Usage:
- *   In each daemon's main.c, you only need to:
- *   1. define service global variables
- *   2. define method handlers
- *   3. call DAEMON_MAIN_BOILERPLATE() to generate main()
+ * 0.1.19 §79（机制/策略分界定稿）:
+ * - main() 装配骨架收敛为机制函数 daemon_boot()（实现:
+ *   src/daemon/daemon_boot.c）；各户 main.c 只保留策略面——
+ *   DAEMON_DECLARE_COMMON 符号声明 + daemon_boot_t 策略包填充。
+ * - 装配细节（参数解析/信号注册/套接字创建/事件驱动引导/标准清理链）
+ *   为机制，实现随 daemon_boot.c 私有；本头只暴露策略包类型与
+ *   per-daemon 符号生成宏。
  *
  * @see ARCHITECTURAL_PRINCIPLES.md E-3~E-6
  */
@@ -58,7 +52,7 @@ extern "C" {
 #endif
 
 /* 服务端点五元组：svc_endpoint 解析产出（config/env 覆盖策略
- * 在各户 svc.c，机制载体在此），daemon_create_server_socket 与事件
+ * 在各户 svc.c，机制载体在此），daemon_boot 套接字创建与事件
  * 驱动装配按字段序消费。 */
 typedef struct {
     int use_tcp;
@@ -308,14 +302,84 @@ typedef struct {
  */
 #define DAEMON_METHOD_ENTRY(name, fn) { (name), (fn) },
 
-#define DAEMON_REGISTER_METHODS(dispatcher, entries)                                    \
-    do {                                                                                \
-        for (size_t _dm_i = 0;                                                          \
-             _dm_i < sizeof(entries) / sizeof((entries)[0]); _dm_i++) {                 \
-            method_dispatcher_register((dispatcher), (entries)[_dm_i].name,             \
-                                       (entries)[_dm_i].handler, NULL);                 \
-        }                                                                               \
-    } while (0)
+/* ops 引导条目：词表 ipc/llm/tool（daemon_gen.py OPS_VOCAB），init 正序、
+ * cleanup 逆序由 daemon_boot 机制序执行。 */
+typedef struct {
+    airy_err_t (*init)(const char *daemon);
+    void (*cleanup)(void);
+} daemon_op_t;
+
+/**
+ * @brief 启动策略包：daemon_gen.py render_main 生成的 per-daemon 策略面。
+ *
+ * 符号面字段引用 DAEMON_DECLARE_COMMON 在各户 main.c 展开的 static
+ * 符号地址；策略面字段承载 .manifest 派生的户间差异（端点/事件池/
+ * ops 集/cupolas 模式/svc 钩子/方法表）。装配序、错误路径与清理链
+ * 为机制，收敛在 daemon_boot()。
+ */
+typedef struct {
+    const char *daemon;     /* 进程/SD 引导名（如 "monit_d"） */
+    const char *cname;      /* 服务名（日志与 namespace 文案，如 "monitor"） */
+    const char *env_debug;  /* 调试日志开关环境变量名 */
+    const char *sd_type;    /* 服务发现类型 */
+    const char *tags;       /* 服务发现标签 */
+    int method_total;       /* 注册方法数日志（含协议保留 shutdown） */
+    /* DAEMON_DECLARE_COMMON 符号面（main.c 内 static，地址传入） */
+    airy_mtx_t *running_lock;
+    void (*signal_handler)(int);
+    void (*log_toggle)(int);
+    void (*print_usage)(const char *);
+    daemon_on_client_cb on_client;
+    method_dispatcher_t **dispatcher;
+    daemon_event_driver_t **event_driver;
+    daemon_bootstrap_sd_t **bsd;
+    daemon_bootstrap_ipc_t **bipc;
+    /* 事件池策略（.manifest rpc.pool） */
+    int pool_max_events;
+    int pool_min;
+    int pool_max;
+    int pool_queue;
+    int concurrent_clients;
+    /* ops 引导集（词表 ipc/llm/tool；空集置 NULL/0） */
+    const daemon_op_t *ops;
+    size_t ops_count;
+    /* cupolas 引导策略：pep=daemon_cupolas_init_pep，full=daemon_cupolas_init */
+    airy_err_t (*cupolas_init)(const char *daemon);
+    /* svc 策略钩子（实现: 各户 src/svc.c） */
+    int (*svc_prepare)(const char *config_path);
+    void (*svc_endpoint)(daemon_endpoint_t *ep, int cmdline_tcp);
+    int (*svc_activate)(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd);
+    void (*svc_attach)(void *dispatcher);
+    void (*svc_teardown)(void);
+    void (*svc_destroy)(void);
+    /* 方法表（SVC_<D>_METHODS 展开，含协议保留 shutdown） */
+    const daemon_method_entry_t *methods;
+    size_t method_count;
+} daemon_boot_t;
+
+/**
+ * @brief 入口接线模板：svc 六钩子与两张静态表的恒定连线（SSoT）。
+ *
+ * 钩子名十二户恒定（DAEMON_DECLARE_COMMON 约定面），唯 ops 表、方法表
+ * 与 cupolas 模式随户异；以模板宏收敛生成户 main.c 的横向接线副本
+ * （0.1.19 §79），装配机制仍整体在 daemon_boot()。
+ */
+#define DAEMON_BOOT_WIRE(ops_, methods_, cupolas_init_)                        \
+    .ops = (ops_), .ops_count = sizeof(ops_) / sizeof((ops_)[0]),              \
+    .cupolas_init = (cupolas_init_),                                           \
+    .svc_prepare = svc_prepare, .svc_endpoint = svc_endpoint,                  \
+    .svc_activate = svc_activate, .svc_attach = svc_attach,                    \
+    .svc_teardown = svc_teardown, .svc_destroy = svc_destroy,                  \
+    .methods = (methods_),                                                     \
+    .method_count = sizeof(methods_) / sizeof((methods_)[0])
+
+/**
+ * @brief Daemon 启动机制：parse -> init -> serve -> cleanup 全装配序。
+ *
+ * 实现（src/daemon/daemon_boot.c）逐行承载原生成 main() 装配骨架；
+ * 返回值为进程退出码。错误路径 fail_driver/fail_svc 与原模板一致。
+ */
+int daemon_boot(int argc, char **argv, const daemon_boot_t *boot);
 
 /**
  * @brief Opt a daemon into the corekern same-process transport (blueprint
@@ -397,185 +461,6 @@ typedef struct {
         daemon_l2_bridge_stop(g_l2_bridge_##daemon_name);                                               \
         g_l2_bridge_##daemon_name = NULL;                                                               \
     }
-
-/**
- * @brief Cross-platform signal setup.
- *
- * @param daemon_name Used to generate unique signal-handler function names
- *
- * Same in every daemon:
- * - POSIX: SIGINT/SIGTERM -> signal_handler, SIGPIPE -> IGN, SIGUSR1 -> svc_log_toggle
- * - Windows: SetConsoleCtrlHandler -> console_handler
- */
-#if AIRY_PLATFORM_WINDOWS
-/* MSVC CRT 不定义 SIGPIPE/SIGUSR1：Windows 构建只注册 SIGINT/SIGTERM，
- * Ctrl+C 由 SetConsoleCtrlHandler（platform_compat.c）另行处理。 */
-#define DAEMON_SETUP_SIGNALS(daemon_name)              \
-    do {                                               \
-        signal(SIGINT, signal_handler_##daemon_name);  \
-        signal(SIGTERM, signal_handler_##daemon_name); \
-    } while (0)
-#else
-#define DAEMON_SETUP_SIGNALS(daemon_name)                      \
-    do {                                                       \
-        signal(SIGINT, signal_handler_##daemon_name);          \
-        signal(SIGTERM, signal_handler_##daemon_name);         \
-        signal(SIGPIPE, SIG_IGN);                              \
-        signal(SIGUSR1, svc_log_toggle_handler_##daemon_name); \
-    } while (0)
-#endif
-
-/**
- * @brief Command-line argument parsing (--manager, --tcp, --help).
- *
- * @param config_path Config-path pointer, will be modified
- * @param use_tcp     TCP flag pointer, will be modified
- *
- * Return value: 0=continue, >0=exit(code), <0=error
- */
-static inline int daemon_parse_args(int argc, char **argv, const char **config_path, int *use_tcp,
-                                    void (*print_usage_fn)(const char *))
-{
-#if defined(AIRY_PLATFORM_WINDOWS)
-    /* Windows：IPC 统一走 TCP 回环（事件循环仅支持 socket，命名管道
-     * 无法接入 WSAEventSelect）；--tcp 参数保留为显式语义一致性。 */
-    *use_tcp = 1;
-#endif
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--manager") == 0 && i + 1 < argc) {
-            *config_path = argv[++i];
-        } else if (strcmp(argv[i], "--help") == 0) {
-            if (print_usage_fn)
-                print_usage_fn(argv[0]);
-            return 1; /* exit(0) */
-        } else if (strcmp(argv[i], "--tcp") == 0) {
-            *use_tcp = 1;
-        } else {
-            SVC_LOG_ERROR("Unknown option: %s", argv[i]);
-            if (print_usage_fn)
-                print_usage_fn(argv[0]);
-            return 2; /* exit(1) */
-        }
-    }
-    return 0;
-}
-
-/**
- * @brief Create a server socket (TCP or Unix).
- *
- * Unifies TCP/Unix socket creation, removing duplicated branches in each
- * daemon.
- *
- * @param use_tcp     Whether to use TCP
- * @param tcp_port    TCP port (used when use_tcp=true)
- * @param unix_path   Unix Socket path (used when use_tcp=false)
- * @param win_pipe    Windows Named Pipe path
- * @return            Socket fd on success, < 0 on failure
- */
-static inline airy_sock_t daemon_create_server_socket(int use_tcp, int tcp_port,
-                                                      const char *unix_path, const char *win_pipe)
-{
-    if (use_tcp) {
-        return airy_sock_create_tcp_server("127.0.0.1", tcp_port);
-    }
-#if defined(AIRY_PLATFORM_WINDOWS)
-    /* Windows：事件循环（WSAEventSelect）仅接受 socket，命名管道句柄
-     * 无法接入；daemon 统一走 TCP 回环（parse_args 亦强制 use_tcp）。 */
-    (void)unix_path;
-    (void)win_pipe;
-    return airy_sock_create_tcp_server("127.0.0.1", tcp_port);
-#else
-    (void)win_pipe;
-    return airy_sock_create_unix_server(unix_path);
-#endif
-}
-
-/**
- * @brief Create and start the Event Driver and Bootstrap services.
- *
- * @param daemon_name  Daemon name (e.g. "sched_d")
- * @param service_type Service-discovery type (e.g. "scheduler")
- * @param socket_path  Socket path (Unix) or "127.0.0.1" (TCP)
- * @param tcp_port     TCP port (0=Unix)
- * @param tags         Service tags (e.g. "scheduler,core")
- * @param use_tcp      Whether TCP mode
- * @param ev_config    Event-driver config
- * @param p_event_driver Output: event-driver instance
- * @param p_bsd        Output: SD bootstrap instance
- * @param p_bipc       Output: IPC bootstrap instance
- * @return             AIRY_SUCCESS or error code
- */
-static inline int daemon_init_event_driver(const char *daemon_name, const char *service_type,
-                                           const char *socket_path, int tcp_port, const char *tags,
-                                           int use_tcp, const daemon_event_config_t *ev_config,
-                                           daemon_event_driver_t **p_event_driver,
-                                           daemon_bootstrap_sd_t **p_bsd,
-                                           daemon_bootstrap_ipc_t **p_bipc)
-{
-
-    if (p_bsd) {
-        const char *sd_addr = use_tcp ? "127.0.0.1" : socket_path;
-        *p_bsd = daemon_bootstrap_sd_start(daemon_name, service_type, sd_addr, tcp_port, tags, 0);
-    }
-
-    /* IPC bootstrap */
-    if (p_bipc) {
-        const char *ipc_addr = use_tcp ? "127.0.0.1" : socket_path;
-        *p_bipc = daemon_bootstrap_ipc_start(daemon_name, service_type, ipc_addr, tcp_port,
-                                             IPC_BUS_PROTO_JSON_RPC);
-    }
-
-
-    if (!ev_config || !p_event_driver)
-        return AIRY_ERR_INVALID_PARAM;
-    *p_event_driver = daemon_event_driver_create(ev_config);
-    if (!*p_event_driver)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
-    return AIRY_SUCCESS;
-}
-
-/**
- * @brief Standard daemon resource cleanup chain.
- *
- * Cleans up all resources in reverse order of init:
- *   bootstrap_ipc -> bootstrap_sd -> event_driver -> socket -> service -> mutex -> socket_cleanup -> cupolas -> log
- *
- * @param unix_socket_path Unix domain socket path to unlink on graceful
- *   stop (POSIX only, skipped on Windows TCP/pipe mode). Passing NULL is
- *   safe. Fixes stale-socket residue: previously only bind()-time unlink
- *   cleaned leftover files, so a gracefully stopped daemon left a DEAD
- *   socket file behind that the next start had to scavenge.
- */
-static inline void daemon_cleanup_standard(daemon_bootstrap_ipc_t *bipc, daemon_bootstrap_sd_t *bsd,
-                                           daemon_event_driver_t *event_driver,
-                                           airy_sock_t server_fd, const char *unix_socket_path,
-                                           void (*destroy_service)(void), airy_mtx_t *running_lock)
-{
-    SVC_LOG_WARN("Service stopping...");
-
-    if (bipc)
-        daemon_bootstrap_ipc_stop(bipc);
-    if (bsd)
-        daemon_bootstrap_sd_stop(bsd);
-    if (event_driver)
-        daemon_event_driver_destroy(event_driver);
-    if (server_fd >= 0)
-        airy_sock_close(server_fd);
-#if AIRY_PLATFORM_POSIX
-    /* Unlink the listening socket file after closing the fd. Ignore
-     * ENOENT: TCP mode or an already-removed file is normal. */
-    if (unix_socket_path && unix_socket_path[0])
-        (void)unlink(unix_socket_path);
-#endif
-    if (destroy_service)
-        destroy_service();
-    if (running_lock)
-        airy_mtx_destroy(running_lock);
-    airy_sock_cleanup();
-
-    SVC_LOG_WARN("Service stopped");
-}
 
 #ifdef __cplusplus
 }
