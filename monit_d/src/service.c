@@ -42,7 +42,7 @@ int monitor_service_create(const monitor_config_t *config, monitor_service_t **s
     }
 
     if (config) {
-        __builtin_memcpy(&svc->config, config, sizeof(monitor_config_t));
+        AIRY_MEMCPY(&svc->config, config, sizeof(monitor_config_t));
         if (config->log_file_path) {
             svc->config.log_file_path = AIRY_STRDUP(config->log_file_path);
             if (!svc->config.log_file_path) {
@@ -168,7 +168,7 @@ int monitor_service_reload_config(monitor_service_t *service, const monitor_conf
     AIRY_FREE(service->config.metrics_storage_path);
     service->config.metrics_storage_path = NULL;
 
-    __builtin_memcpy(&service->config, config, sizeof(monitor_config_t));
+    AIRY_MEMCPY(&service->config, config, sizeof(monitor_config_t));
     service->config.log_file_path =
         config->log_file_path ? AIRY_STRDUP(config->log_file_path) : NULL;
     service->config.metrics_storage_path =

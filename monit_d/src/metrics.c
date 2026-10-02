@@ -171,6 +171,50 @@ static int create_series(metric_t *metric, const metric_label_t *labels, size_t 
 }
 
 /**
+ * @brief Validate, take the global lock, promote to the metric lock
+ */
+static int metric_lock(const char *name, metric_t **out)
+{
+    if (!name || !g_metrics.initialized) {
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    airy_mtx_lock(&g_metrics.global_lock);
+
+    int idx = find_metric_index(name);
+    if (idx < 0) {
+        airy_mtx_unlock(&g_metrics.global_lock);
+        return AIRY_ERR_NOT_FOUND;
+    }
+
+    metric_t *metric = &g_metrics.metrics[idx];
+    airy_mtx_lock(&metric->lock);
+    airy_mtx_unlock(&g_metrics.global_lock);
+    *out = metric;
+    return AIRY_OK;
+}
+
+/**
+ * @brief Find or create a series and fold a value into it
+ */
+static void series_touch(metric_t *metric, const metric_label_t *labels, size_t label_count,
+                         double value, int overwrite)
+{
+    int series_idx = find_series_index(metric, labels, label_count);
+    if (series_idx < 0) {
+        series_idx = create_series(metric, labels, label_count);
+    }
+    if (series_idx < 0) {
+        return;
+    }
+
+    metric_series_t *series = &metric->series[series_idx];
+    series->value = overwrite ? value : series->value + value;
+    series->timestamp = airy_time_ms();
+    series->update_count++;
+}
+
+/**
  * @brief Format labels in Prometheus format
  */
 static void format_labels(char *buf, size_t buf_size, const metric_label_t *labels,
@@ -345,32 +389,14 @@ int metrics_register(const char *name, const char *description, const char *unit
  */
 int metrics_counter_inc(const char *name, const metric_label_t *labels, size_t label_count)
 {
-    if (!name || !g_metrics.initialized) {
-        return AIRY_ERR_INVALID_PARAM;
+    metric_t *metric;
+
+    int rc = metric_lock(name, &metric);
+    if (rc != AIRY_OK) {
+        return rc;
     }
 
-    airy_mtx_lock(&g_metrics.global_lock);
-
-    int idx = find_metric_index(name);
-    if (idx < 0) {
-        airy_mtx_unlock(&g_metrics.global_lock);
-        return AIRY_ERR_NOT_FOUND;
-    }
-
-    metric_t *metric = &g_metrics.metrics[idx];
-    airy_mtx_lock(&metric->lock);
-    airy_mtx_unlock(&g_metrics.global_lock);
-
-    int series_idx = find_series_index(metric, labels, label_count);
-    if (series_idx < 0) {
-        series_idx = create_series(metric, labels, label_count);
-    }
-
-    if (series_idx >= 0) {
-        metric->series[series_idx].value += 1.0;
-        metric->series[series_idx].timestamp = airy_time_ms();
-        metric->series[series_idx].update_count++;
-    }
+    series_touch(metric, labels, label_count, 1.0, 0);
 
     airy_mtx_unlock(&metric->lock);
     return AIRY_OK;
@@ -382,32 +408,18 @@ int metrics_counter_inc(const char *name, const metric_label_t *labels, size_t l
 int metrics_counter_add(const char *name, double value, const metric_label_t *labels,
                         size_t label_count)
 {
-    if (!name || value < 0 || !g_metrics.initialized) {
+    if (value < 0) {
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    airy_mtx_lock(&g_metrics.global_lock);
+    metric_t *metric;
 
-    int idx = find_metric_index(name);
-    if (idx < 0) {
-        airy_mtx_unlock(&g_metrics.global_lock);
-        return AIRY_ERR_NOT_FOUND;
+    int rc = metric_lock(name, &metric);
+    if (rc != AIRY_OK) {
+        return rc;
     }
 
-    metric_t *metric = &g_metrics.metrics[idx];
-    airy_mtx_lock(&metric->lock);
-    airy_mtx_unlock(&g_metrics.global_lock);
-
-    int series_idx = find_series_index(metric, labels, label_count);
-    if (series_idx < 0) {
-        series_idx = create_series(metric, labels, label_count);
-    }
-
-    if (series_idx >= 0) {
-        metric->series[series_idx].value += value;
-        metric->series[series_idx].timestamp = airy_time_ms();
-        metric->series[series_idx].update_count++;
-    }
+    series_touch(metric, labels, label_count, value, 0);
 
     airy_mtx_unlock(&metric->lock);
     return AIRY_OK;
@@ -419,32 +431,14 @@ int metrics_counter_add(const char *name, double value, const metric_label_t *la
 int metrics_gauge_set(const char *name, double value, const metric_label_t *labels,
                       size_t label_count)
 {
-    if (!name || !g_metrics.initialized) {
-        return AIRY_ERR_INVALID_PARAM;
+    metric_t *metric;
+
+    int rc = metric_lock(name, &metric);
+    if (rc != AIRY_OK) {
+        return rc;
     }
 
-    airy_mtx_lock(&g_metrics.global_lock);
-
-    int idx = find_metric_index(name);
-    if (idx < 0) {
-        airy_mtx_unlock(&g_metrics.global_lock);
-        return AIRY_ERR_NOT_FOUND;
-    }
-
-    metric_t *metric = &g_metrics.metrics[idx];
-    airy_mtx_lock(&metric->lock);
-    airy_mtx_unlock(&g_metrics.global_lock);
-
-    int series_idx = find_series_index(metric, labels, label_count);
-    if (series_idx < 0) {
-        series_idx = create_series(metric, labels, label_count);
-    }
-
-    if (series_idx >= 0) {
-        metric->series[series_idx].value = value;
-        metric->series[series_idx].timestamp = airy_time_ms();
-        metric->series[series_idx].update_count++;
-    }
+    series_touch(metric, labels, label_count, value, 1);
 
     airy_mtx_unlock(&metric->lock);
     return AIRY_OK;
@@ -456,21 +450,12 @@ int metrics_gauge_set(const char *name, double value, const metric_label_t *labe
 int metrics_histogram_observe(const char *name, double value, const metric_label_t *labels,
                               size_t label_count)
 {
-    if (!name || !g_metrics.initialized) {
-        return AIRY_ERR_INVALID_PARAM;
+    metric_t *metric;
+
+    int rc = metric_lock(name, &metric);
+    if (rc != AIRY_OK) {
+        return rc;
     }
-
-    airy_mtx_lock(&g_metrics.global_lock);
-
-    int idx = find_metric_index(name);
-    if (idx < 0) {
-        airy_mtx_unlock(&g_metrics.global_lock);
-        return AIRY_ERR_NOT_FOUND;
-    }
-
-    metric_t *metric = &g_metrics.metrics[idx];
-    airy_mtx_lock(&metric->lock);
-    airy_mtx_unlock(&g_metrics.global_lock);
 
     for (size_t i = 0; i < metric->histogram.bucket_count; i++) {
         if (value <= metric->histogram.buckets[i].boundary) {
@@ -481,16 +466,7 @@ int metrics_histogram_observe(const char *name, double value, const metric_label
     metric->histogram.sum += value;
     metric->histogram.count++;
 
-    int series_idx = find_series_index(metric, labels, label_count);
-    if (series_idx < 0) {
-        series_idx = create_series(metric, labels, label_count);
-    }
-
-    if (series_idx >= 0) {
-        metric->series[series_idx].value = value;
-        metric->series[series_idx].timestamp = airy_time_ms();
-        metric->series[series_idx].update_count++;
-    }
+    series_touch(metric, labels, label_count, value, 1);
 
     airy_mtx_unlock(&metric->lock);
     return AIRY_OK;
@@ -596,21 +572,16 @@ char *metrics_export_prometheus(void)
 int metrics_get_value(const char *name, const metric_label_t *labels, size_t label_count,
                       double *value)
 {
-    if (!name || !value || !g_metrics.initialized) {
+    if (!value) {
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    airy_mtx_lock(&g_metrics.global_lock);
+    metric_t *metric;
 
-    int idx = find_metric_index(name);
-    if (idx < 0) {
-        airy_mtx_unlock(&g_metrics.global_lock);
-        return AIRY_ERR_NOT_FOUND;
+    int rc = metric_lock(name, &metric);
+    if (rc != AIRY_OK) {
+        return rc;
     }
-
-    metric_t *metric = &g_metrics.metrics[idx];
-    airy_mtx_lock(&metric->lock);
-    airy_mtx_unlock(&g_metrics.global_lock);
 
     int series_idx = find_series_index(metric, labels, label_count);
     if (series_idx < 0) {
@@ -637,21 +608,11 @@ size_t metrics_get_count(void)
  */
 size_t metrics_get_series_count(const char *name)
 {
-    if (!name || !g_metrics.initialized) {
+    metric_t *metric;
+
+    if (metric_lock(name, &metric) != AIRY_OK) {
         return 0;
     }
-
-    airy_mtx_lock(&g_metrics.global_lock);
-
-    int idx = find_metric_index(name);
-    if (idx < 0) {
-        airy_mtx_unlock(&g_metrics.global_lock);
-        return 0;
-    }
-
-    metric_t *metric = &g_metrics.metrics[idx];
-    airy_mtx_lock(&metric->lock);
-    airy_mtx_unlock(&g_metrics.global_lock);
 
     size_t count = metric->series_count;
 

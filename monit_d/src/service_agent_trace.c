@@ -41,8 +41,8 @@ int monitor_service_start_agent_trace(monitor_service_t *service,
         AIRY_FREE(service->traces[0].trace_id);
         AIRY_FREE(service->traces[0].operation_name);
         AIRY_FREE(service->traces[0].service_name);
-        __builtin_memmove(&service->traces[0], &service->traces[1],
-                          (service->trace_count - 1) * sizeof(trace_entry_t));
+        AIRY_MEMMOVE(&service->traces[0], &service->traces[1],
+                     (service->trace_count - 1) * sizeof(trace_entry_t));
         service->trace_count--;
     }
 
