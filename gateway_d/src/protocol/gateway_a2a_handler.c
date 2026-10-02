@@ -3,6 +3,7 @@
 
 #include "gateway_a2a_handler.h"
 
+#include "gateway_jsonpick.h"
 #include "airy_memory.h"
 
 #include <stdio.h>
@@ -145,86 +146,6 @@ static gw_a2a_task_type_entry_t *find_task_type(gw_a2a_handler_t *handler, const
     AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
 }
 
-static char *extract_a2a_field(const char *json, const char *field_name)
-{
-    if (!json || !field_name) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    size_t flen = strlen(field_name) + 4;
-    char *key = (char *)AIRY_MALLOC(flen);
-    if (!key) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    snprintf(key, flen, "\"%s\"", field_name);
-    const char *p = strstr(json, key);
-    AIRY_FREE(key);
-    if (!p) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p += strlen(field_name) + 3;
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    if (*p != '"') {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    p++;
-    const char *end = strchr(p, '"');
-    if (!end) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    size_t len = (size_t)(end - p);
-    char *val = (char *)AIRY_MALLOC(len + 1);
-    if (!val) {
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
-    }
-    AIRY_MEMCPY(val, p, len);
-    val[len] = '\0';
-    return val;
-}
-
-static char *extract_a2a_object_field(const char *json, const char *field_name)
-{
-    if (!json || !field_name)
-        return AIRY_STRDUP("{}");
-    size_t flen = strlen(field_name) + 4;
-    char *key = (char *)AIRY_MALLOC(flen);
-    if (!key)
-        return AIRY_STRDUP("{}");
-    snprintf(key, flen, "\"%s\"", field_name);
-    const char *p = strstr(json, key);
-    AIRY_FREE(key);
-    if (!p)
-        return AIRY_STRDUP("{}");
-    p += strlen(field_name) + 3;
-    while (*p && (*p == ' ' || *p == ':' || *p == '\t'))
-        p++;
-    if (*p != '{' && *p != '[')
-        return AIRY_STRDUP("{}");
-    char open = *p;
-    char close = (open == '{') ? '}' : ']';
-    int depth = 0;
-    const char *start = p;
-    while (*p) {
-        if (*p == open)
-            depth++;
-        else if (*p == close) {
-            depth--;
-            if (depth == 0) {
-                p++;
-                size_t len = (size_t)(p - start);
-                char *obj = (char *)AIRY_MALLOC(len + 1);
-                if (!obj)
-                    return AIRY_STRDUP("{}");
-                AIRY_MEMCPY(obj, start, len);
-                obj[len] = '\0';
-                return obj;
-            }
-        }
-        p++;
-    }
-    return AIRY_STRDUP("{}");
-}
-
 int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method, const char *path,
                                   const char *body_json, char **response_json)
 {
@@ -238,7 +159,9 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
     int is_agent_card = (path && strcmp(path, "/a2a/agent-card") == 0);
     int is_task = (path && strcmp(path, "/a2a/task") == 0);
     if (!is_agent_card && !is_task && body_json) {
-        char *body_method = extract_a2a_field(body_json, "method");
+        cJSON *root = gw_json_load(body_json);
+        char *body_method = gw_json_str(root, "method");
+        cJSON_Delete(root);
         if (body_method) {
             if (strcmp(body_method, "tasks/send") == 0 ||
                 strcmp(body_method, "task/delegate") == 0) {
@@ -256,9 +179,13 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
     }
 
     if (is_task) {
-        char *task_type = extract_a2a_field(body_json, "type");
-        char *task_id = extract_a2a_field(body_json, "id");
-        char *input_json = extract_a2a_object_field(body_json, "message");
+        cJSON *root = gw_json_load(body_json);
+        char *task_type = gw_json_str(root, "type");
+        char *task_id = gw_json_str(root, "id");
+        char *input_json = gw_json_raw(root, "message");
+        cJSON_Delete(root);
+        if (!input_json)
+            input_json = AIRY_STRDUP("{}");
 
         if (!task_type) {
             AIRY_LOG_WARN("missing task type in A2A request, path=%s", path ? path : "(null)");
@@ -286,8 +213,8 @@ int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
         }
 
         char *output = NULL;
-        int rc = entry->exec_fn(task_id ? task_id : "unknown", task_type,
-                                input_json ? input_json : "{}", &output, entry->user_data);
+        int rc = entry->exec_fn(task_id ? task_id : "unknown", task_type, input_json, &output,
+                                entry->user_data);
 
         if (rc != 0 || !output) {
             AIRY_LOG_ERROR("task execution failed: task_type=%s, rc=%d", task_type, rc);

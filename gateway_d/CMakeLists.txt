@@ -75,6 +75,7 @@ set(GATEWAY_SERVICE_SOURCES
 
 if(AIRY_ENABLE_PROTOCOLS)
     list(APPEND GATEWAY_SERVICE_SOURCES
+        src/protocol/gateway_jsonpick.c
         src/protocol/gateway_mcp_server.c
         src/protocol/gateway_a2a_handler.c
         src/protocol/gateway_openai_compat.c
