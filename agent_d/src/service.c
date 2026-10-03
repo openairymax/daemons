@@ -13,7 +13,7 @@
  * namespace over a Unix socket.
  *
  * Design notes:
- * - Own hash table (djb2, same origin as syscall_router.c but decoupled)
+ * - Index is the shared commons hindex (djb2 + tombstones), §130 SSoT
  * - Thread safety: all public interfaces take the lock
  * - Agent ID: 32-char hex (timestamp + counter, no external deps)
  * - Terminate does not reclaim slots: only sets status=3, no compaction
@@ -46,83 +46,6 @@
 #define AGENT_DEFAULT_MAX_AGENTS 10000
 
 #define AGENT_HASH_LOAD_FACTOR 4 /* capacity = max_agents * 4 */
-
-static unsigned long agent_hash_fn(const char *str)
-{
-
-    unsigned long h = 5381;
-    int c;
-    while ((c = (unsigned char)*str++))
-        h = ((h << 5) + h) + (unsigned long)c;
-    return h;
-}
-
-static int agent_ht_init(agent_hash_table_t *ht, size_t capacity)
-{
-    if (!ht || capacity == 0)
-        return AIRY_ERR_INVALID_PARAM;
-
-    ht->entries = (agent_hash_entry_t *)AIRY_CALLOC(capacity, sizeof(agent_hash_entry_t));
-    if (!ht->entries) {
-        ht->capacity = 0;
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-    ht->capacity = capacity;
-    ht->count = 0;
-    return AIRY_SUCCESS;
-}
-
-static void agent_ht_destroy(agent_hash_table_t *ht)
-{
-    if (!ht || !ht->entries)
-        return;
-    for (size_t i = 0; i < ht->capacity; i++) {
-        AIRY_FREE(ht->entries[i].key);
-    }
-    AIRY_FREE(ht->entries);
-    ht->entries = NULL;
-    ht->capacity = 0;
-    ht->count = 0;
-}
-
-int agent_ht_insert(agent_hash_table_t *ht, const char *key, size_t index)
-{
-    if (!ht || !ht->entries || !key)
-        return AIRY_ERR_INVALID_PARAM;
-    if (ht->count >= ht->capacity * 3 / 4)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
-    unsigned long h = agent_hash_fn(key) % ht->capacity;
-    for (size_t i = 0; i < ht->capacity; i++) {
-        size_t pos = (h + i) % ht->capacity;
-        if (!ht->entries[pos].occupied) {
-            ht->entries[pos].key = AIRY_STRDUP(key);
-            if (!ht->entries[pos].key)
-                return AIRY_ERR_OUT_OF_MEMORY;
-            ht->entries[pos].index = index;
-            ht->entries[pos].occupied = 1;
-            ht->count++;
-            return AIRY_SUCCESS;
-        }
-    }
-    return AIRY_ERR_OUT_OF_MEMORY;
-}
-
-ssize_t agent_ht_lookup(agent_hash_table_t *ht, const char *key)
-{
-    if (!ht || !ht->entries || !key || ht->count == 0)
-        return -1;
-
-    unsigned long h = agent_hash_fn(key) % ht->capacity;
-    for (size_t i = 0; i < ht->capacity; i++) {
-        size_t pos = (h + i) % ht->capacity;
-        if (!ht->entries[pos].occupied)
-            return -1;
-        if (strcmp(ht->entries[pos].key, key) == 0)
-            return (ssize_t)ht->entries[pos].index;
-    }
-    return -1;
-}
 
 void agent_generate_agent_id(char *buf, size_t buf_size)
 {
@@ -210,7 +133,7 @@ agent_service_t *agent_service_create(size_t max_agents)
         return NULL;
     }
 
-    if (agent_ht_init(&svc->agent_index, max_agents * AGENT_HASH_LOAD_FACTOR) != AIRY_SUCCESS) {
+    if (hindex_init(&svc->agent_index, max_agents * AGENT_HASH_LOAD_FACTOR) != AIRY_SUCCESS) {
         AIRY_FREE(svc->agents);
         AIRY_FREE(svc);
         return NULL;
@@ -255,7 +178,7 @@ void agent_service_destroy(agent_service_t *svc)
         agent->spec = NULL;
     }
     AIRY_FREE(svc->agents);
-    agent_ht_destroy(&svc->agent_index);
+    hindex_free(&svc->agent_index);
     svc->agent_count = 0;
     svc->max_agents = 0;
     svc->initialized = 0;

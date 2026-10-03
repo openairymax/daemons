@@ -13,7 +13,7 @@
  * namespace over a Unix socket.
  *
  * Design notes:
- * - Own hash table (djb2, now in mem_hash.c)
+ * - Index is the shared commons hindex (djb2 + tombstones), §130 SSoT
  * - Thread safety: all public interfaces take the lock
  * - Record ID: 32-char hex (timestamp + counter, no external deps)
  * - Search: own TF-IDF vector cosine similarity (vector.c) fused with
@@ -23,13 +23,13 @@
  *   failure; records without a vector fall back to pure substring scoring
  *   for backward compatibility
  *
- * Refactored: hash table → mem_hash.c; JSONL persistence → mem_persist.c;
- * KB operations → kb.c.  This file owns the core service lifecycle,
- * record CRUD, search, and recent-items logic.
+ * Refactored: JSONL persistence → mem_persist.c; KB operations → kb.c.
+ * This file owns the core service lifecycle, record CRUD, search, and
+ * recent-items logic.
  */
 
 #include "service.h"
-#include "mem_hash.h"
+#include "hindex.h"
 #include "mem_persist.h"
 
 #include "svc_logger.h"
@@ -173,14 +173,14 @@ mem_service_t *mem_service_create(size_t max_records)
         return NULL;
     }
 
-    if (mem_ht_init(&svc->record_index, max_records * MEM_HASH_LOAD_FACTOR) != AIRY_SUCCESS) {
+    if (hindex_init(&svc->record_index, max_records * MEM_HASH_LOAD_FACTOR) != AIRY_SUCCESS) {
         AIRY_FREE(svc->records);
         AIRY_FREE(svc);
         return NULL;
     }
 
     if (mem_df_init(&svc->df_table, max_records * 64) != AIRY_SUCCESS) {
-        mem_ht_destroy(&svc->record_index);
+        hindex_free(&svc->record_index);
         AIRY_FREE(svc->records);
         AIRY_FREE(svc);
         return NULL;
@@ -217,7 +217,7 @@ void mem_service_destroy(mem_service_t *svc)
         AIRY_FREE(svc->records[i].metadata);
     }
     AIRY_FREE(svc->records);
-    mem_ht_destroy(&svc->record_index);
+    hindex_free(&svc->record_index);
     mem_df_destroy(&svc->df_table);
     mem_emb_client_destroy(&svc->emb);
 
@@ -277,7 +277,7 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char *
 
     mem_record_build_vector(svc, rec);
 
-    int rc = mem_ht_insert(&svc->record_index, rec->record_id, idx);
+    int rc = hindex_put(&svc->record_index, rec->record_id, idx);
     if (rc != AIRY_SUCCESS) {
         mem_record_free_vector(rec);
         AIRY_FREE(rec->record_id);
@@ -316,7 +316,7 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char *
         if (mem_emb_embed(&svc->emb, data_copy, &emb_vec, &emb_dim) == AIRY_SUCCESS &&
             emb_vec && emb_dim > 0) {
             airy_mtx_lock(&svc->lock);
-            ssize_t eidx = mem_ht_lookup(&svc->record_index, *out_record_id);
+            ssize_t eidx = hindex_get(&svc->record_index, *out_record_id);
             if (eidx >= 0 && (size_t)eidx < svc->record_count) {
                 AIRY_FREE(svc->records[eidx].emb);
                 svc->records[eidx].emb = emb_vec;
@@ -484,7 +484,7 @@ int mem_service_get(mem_service_t *svc, const char *record_id, mem_record_t *out
 
     airy_mtx_lock(&svc->lock);
 
-    ssize_t idx = mem_ht_lookup(&svc->record_index, record_id);
+    ssize_t idx = hindex_get(&svc->record_index, record_id);
     if (idx < 0 || (size_t)idx >= svc->record_count) {
         airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_NOT_FOUND;
@@ -516,7 +516,7 @@ void mem_remove_record_at(mem_service_t *svc, size_t idx)
     mem_record_entry_t *rec = &svc->records[idx];
     const char *removed_id = rec->record_id;
 
-    mem_ht_remove(&svc->record_index, removed_id);
+    hindex_del(&svc->record_index, removed_id);
 
     mem_df_remove_doc(&svc->df_table, &rec->vec);
     mem_record_free_vector(rec);
@@ -528,8 +528,7 @@ void mem_remove_record_at(mem_service_t *svc, size_t idx)
     size_t last = svc->record_count - 1;
     if (idx != last) {
         svc->records[idx] = svc->records[last];
-        mem_ht_remove(&svc->record_index, svc->records[idx].record_id);
-        mem_ht_insert(&svc->record_index, svc->records[idx].record_id, idx);
+        hindex_put(&svc->record_index, svc->records[idx].record_id, idx);
     }
     __builtin_memset(&svc->records[last], 0, sizeof(mem_record_entry_t));
     svc->record_count--;
@@ -542,7 +541,7 @@ int mem_service_delete(mem_service_t *svc, const char *record_id)
 
     airy_mtx_lock(&svc->lock);
 
-    ssize_t idx = mem_ht_lookup(&svc->record_index, record_id);
+    ssize_t idx = hindex_get(&svc->record_index, record_id);
     if (idx < 0 || (size_t)idx >= svc->record_count) {
         airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_NOT_FOUND;

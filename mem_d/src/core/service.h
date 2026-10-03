@@ -10,7 +10,7 @@
 #define MEM_SERVICE_INTERNAL_H
 
 #include "mem_service.h"
-#include "mem_hash.h"
+#include "hindex.h"
 
 #include "vector.h"
 #include "emb_client.h"
@@ -38,7 +38,7 @@ struct mem_service {
     mem_record_entry_t *records;
     size_t record_count;
     size_t max_records;
-    mem_hash_table_t record_index;
+    hindex_t record_index;
     mem_df_table_t df_table;
     float tfidf_weight;
     mem_emb_client_t emb;
