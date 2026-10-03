@@ -10,5 +10,6 @@ set(CHANNEL_D_SOURCES
     src/svc.c
     src/channel_rpc.c
     src/channel_service.c
+    src/channel_book.c
     src/channel_io.c
 )

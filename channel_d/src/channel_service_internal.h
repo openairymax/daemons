@@ -3,13 +3,14 @@
 
 /**
  * @file channel_service_internal.h
- * @brief Channel service 拆分文件间的共享内部类型与声明（2026-08-27）。
+ * @brief Channel service 拆分文件间的共享内部类型与声明。
  *
- * channel_service.c 按单一职责拆分为两个文件：
- *   - channel_service.c   生命周期/打开/关闭/查询域
+ * 簿记机制单源（channel_book.c，双平台编译）：生命周期/close/查询域与
+ * find_channel()/get_time_ms()/channel_entry_free()。
+ * 平台策略按钩子注入（机制与策略分离）：
+ *   - channel_service.c   POSIX：三后端钩子 + SOCKET/SHM/PIPE 打开域
+ *   - channel_win32.c     Win32：钩子空实现 + 未映射传输显式拒绝（#124）
  *   - channel_io.c        收发（send/receive）与连通性探测（ping）域
- * 内部结构体（channel_entry_t / struct channel_service）与跨文件共享的
- * find_channel()/get_time_ms() 经此头声明。
  */
 
 #ifndef AIRY_RT_CHANNEL_SERVICE_INTERNAL_H
@@ -50,11 +51,21 @@ struct channel_service {
     airy_mtx_t lock;
 };
 
-/* 时间戳工具（channel_service.c 定义，收发/探测域共用） */
+/* 时间戳工具（channel_book.c 定义，收发/探测域共用） */
 uint64_t get_time_ms(void);
 
-/* 按 channel_id 查找通道条目（channel_service.c 定义，各域共用） */
+/* 按 channel_id 查找通道条目（channel_book.c 定义，各域共用） */
 channel_entry_t *find_channel(channel_service_t *svc, const char *channel_id);
+
+/* 簿记释放：先回收平台资源（backend_entry_free）再释放接收缓冲。
+ * channel_book.c 定义，stop/close/destroy 与 open 失败回滚共用。 */
+void channel_entry_free(channel_entry_t *entry);
+
+/* 后端钩子（平台文件实现，channel_book.c 经此注入平台策略）：
+ * 平台运行目录自举，非 0 表示失败；平台启动前准备；条目平台资源回收。 */
+int backend_svc_init(channel_service_t *svc);
+void backend_svc_start(channel_service_t *svc);
+void backend_entry_free(channel_entry_t *entry);
 
 #ifdef __cplusplus
 }
