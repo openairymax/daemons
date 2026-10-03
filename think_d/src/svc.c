@@ -5,7 +5,7 @@
  * @file svc.c
  * @brief think_d 生命周期策略域（config 加载链 / 服务装配 / 依赖治理）。
  *
- * 端点族委托 daemon_cfg_file 机制件（daemon_ep_load/free/fill）；策略
+ * 端点族委托 daemon_cfg_file 机制件（daemon_ep_load/free/apply）；策略
  * 键经 cfg_keys 自持提取 think 段。策略优先级（Model SSoT）：
  * env (AIRY_THINK_*) > model.yaml think 段 > -c JSON think/daemon 段 >
  * 内置缺省——daemon_ep_load（JSON）先行，model.yaml 与 env 顺序在后。
@@ -47,8 +47,6 @@ typedef struct {
 
 static think_daemon_config_t g_cfg = {0};
 
-static daemon_ep_cfg_t g_ep;
-
 /* 策略键派发（daemon_ep_load 回调）：think 段五键自持提取（JSON 层） */
 static void cfg_keys(const cJSON *root, void *ud)
 {
@@ -85,7 +83,7 @@ static void cfg_load(const char *config_path)
 
     /* 机制件：端点基线 + config 文件覆盖 + cfg_keys 派发（JSON 层，
      * 优先级低于下方 model.yaml SSoT 与 env 链） */
-    daemon_ep_load(&g_ep, config_path, THINK_D_SOCKET_UNIX,
+    daemon_ep_load(daemon_ep_slot(), config_path, THINK_D_SOCKET_UNIX,
                    THINK_D_SOCKET_WIN, THINK_D_TCP_PORT, cfg_keys, NULL);
 
     /* Model SSoT: $AIRY_CONFIG_DIR/model.yaml 的 think 段（三角色单一
@@ -135,14 +133,9 @@ static void cfg_load(const char *config_path)
     }
 }
 
-static void cfg_free(void)
-{
-    daemon_ep_free(&g_ep);
-}
-
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    daemon_ep_fill(ep, &g_ep, cmdline_tcp);
+    daemon_ep_apply(ep, cmdline_tcp);
 }
 
 int svc_prepare(const char *config_path)
@@ -208,7 +201,7 @@ void svc_destroy(void)
         think_service_destroy(g_svc);
         g_svc = NULL;
     }
-    cfg_free();
+    daemon_ep_free(daemon_ep_slot());
 }
 
 void svc_attach(void *dispatcher)

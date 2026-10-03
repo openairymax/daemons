@@ -27,8 +27,6 @@ agent_daemon_config_t g_config = {0};
 
 #define AGENT_DEFAULT_MAX_AGENTS 10000
 
-static daemon_ep_cfg_t g_ep;
-
 static void cfg_keys(const cJSON *root, void *user)
 {
     (void)user;
@@ -49,18 +47,13 @@ static void config_load(const char *config_path)
             g_config.max_agents = (size_t)v;
     }
 
-    daemon_ep_load(&g_ep, config_path, AGENT_D_SOCKET_UNIX, AGENT_D_SOCKET_WIN,
-                   AGENT_D_TCP_PORT, cfg_keys, NULL);
-}
-
-static void config_free(void)
-{
-    daemon_ep_free(&g_ep);
+    daemon_ep_load(daemon_ep_slot(), config_path, AGENT_D_SOCKET_UNIX,
+                   AGENT_D_SOCKET_WIN, AGENT_D_TCP_PORT, cfg_keys, NULL);
 }
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    daemon_ep_fill(ep, &g_ep, cmdline_tcp);
+    daemon_ep_apply(ep, cmdline_tcp);
 }
 
 int svc_prepare(const char *config_path)
@@ -115,7 +108,7 @@ void svc_destroy(void)
         agent_service_destroy(g_service);
         g_service = NULL;
     }
-    config_free();
+    daemon_ep_free(daemon_ep_slot());
 }
 
 /* 无静态表外动态注册（manifest methods 全量覆盖），空实现 */

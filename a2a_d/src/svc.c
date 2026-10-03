@@ -9,7 +9,7 @@
  * < -c JSON daemon 段（max_agents / max_tasks，端点三元组随 daemon 段
  * 覆盖）。容量缺省（0 回落 256/4096）由服务层单一持有，此处不重复
  * 定义。端点装载（daemon_ep_load）与 cmdline --tcp 融合
- * （daemon_ep_fill，只升不降）为 daemon_cfg_file 机制件，本文件仅保留
+ * （daemon_ep_apply，只升不降）为 daemon_cfg_file 机制件，本文件仅保留
  * env 覆盖与容量键提取策略件。
  */
 
@@ -29,8 +29,6 @@ typedef struct {
 } a2a_daemon_config_t;
 
 static a2a_daemon_config_t g_cfg = {0};
-
-static daemon_ep_cfg_t g_ep;
 
 static void cfg_keys(const cJSON *root, void *user)
 {
@@ -59,18 +57,13 @@ static void cfg_load(const char *config_path)
             g_cfg.max_tasks = (size_t)v;
     }
 
-    daemon_ep_load(&g_ep, config_path, A2A_D_SOCKET_UNIX, A2A_D_SOCKET_WIN,
-                   A2A_D_TCP_PORT, cfg_keys, NULL);
-}
-
-static void cfg_free(void)
-{
-    daemon_ep_free(&g_ep);
+    daemon_ep_load(daemon_ep_slot(), config_path, A2A_D_SOCKET_UNIX,
+                   A2A_D_SOCKET_WIN, A2A_D_TCP_PORT, cfg_keys, NULL);
 }
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    daemon_ep_fill(ep, &g_ep, cmdline_tcp);
+    daemon_ep_apply(ep, cmdline_tcp);
 }
 
 int svc_prepare(const char *config_path)
@@ -96,7 +89,7 @@ void svc_destroy(void)
         a2a_service_destroy(g_service);
         g_service = NULL;
     }
-    cfg_free();
+    daemon_ep_free(daemon_ep_slot());
 }
 
 /* 无静态表外动态注册（manifest methods 全量覆盖），空实现 */
