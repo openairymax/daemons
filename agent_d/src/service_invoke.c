@@ -8,24 +8,8 @@
  *        register/unregister/cancel management.
  */
 
-#include "airy_memory.h"
-#include "error.h"
 #include "io.h"
 #include "platform_misc.h"
-#include "service.h"
-#include "svc_logger.h"
-
-#include <cjson/cJSON.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#if AIRY_PLATFORM_POSIX
-#include <sys/select.h>
-#include <sys/wait.h>
-#endif
 
 #include "agent_service_internal.h"
 

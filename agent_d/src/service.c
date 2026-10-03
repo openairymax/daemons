@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
-#include "airy_memory.h"
-#include "error.h"
 /*
  * @file service.c
  * @brief Agent service implementation: spawn/terminate/invoke/list.
@@ -18,25 +16,6 @@
  * - Agent ID: 32-char hex (timestamp + counter, no external deps)
  * - Terminate does not reclaim slots: only sets status=3, no compaction
  */
-
-#include "service.h"
-
-#include "svc_logger.h"
-
-#include <cjson/cJSON.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#if AIRY_PLATFORM_POSIX
-/* Stage5+ todo4: POSIX primitives needed for real spawn. platform.h already
- * brings in unistd.h / signal.h / errno.h / fcntl.h / sys/types.h; add the
- * headers for waitpid and select here. */
-#include <sys/select.h>
-#include <sys/wait.h>
-#endif
 
 #include "agent_service_internal.h"
 

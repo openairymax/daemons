@@ -7,21 +7,6 @@
  *        idle reaping and performance-stats export.
  */
 
-#include "airy_memory.h"
-#include "error.h"
-#include "service.h"
-#include "svc_logger.h"
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#if AIRY_PLATFORM_POSIX
-#include <sys/select.h>
-#include <sys/wait.h>
-#endif
-
 #include "agent_service_internal.h"
 
 int agent_service_list(agent_service_t *svc, char ***out_agent_ids, size_t *out_count)
