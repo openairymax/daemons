@@ -298,6 +298,9 @@ target_include_directories(gateway_lib_obj PUBLIC
     ${COMMONS_DIR}/utils/compat
     ${COMMONS_DIR}/utils/memory
     ${COMMONS_DIR}/utils/string
+    # 0.1.19 §131: 字符串→下标哈希索引 SSoT（hindex.h），gateway 源清单
+    # 经 gateway-sources.cmake 共用，故本目标需同样可见
+    ${COMMONS_DIR}/utils/ds
      ${COMMONS_DIR}/utils/include
      ${DAEMON_COMMON_INCLUDE_DIR}
      ${DAEMON_COMMON_DIR}/src
