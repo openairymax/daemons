@@ -75,14 +75,42 @@ int roadmap_rpc_ready(void)
     return g_roadmap ? 1 : 0;
 }
 
+/* method 共用的就绪/参数守卫与状态结果发射（消除同文件三处重复） */
+static bool roadmap_ready(int id, airy_sock_t fd)
+{
+    if (g_roadmap)
+        return true;
+    JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,
+                       "roadmap scheduler not initialized", id);
+    return false;
+}
+
+static bool roadmap_guard(cJSON *params, int id, airy_sock_t fd)
+{
+    if (!roadmap_ready(id, fd))
+        return false;
+    if (params)
+        return true;
+    JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "Missing params", id);
+    return false;
+}
+
+static void roadmap_reply_ok(airy_sock_t fd, int id, const char *status)
+{
+    cJSON *result = cJSON_CreateObject();
+    if (!result) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
+    cJSON_AddStringToObject(result, "status", status);
+    JSONRPC_SEND_SUCCESS(fd, result, id);
+}
+
 /* ── plan：三级路由查询 ───────────────────────────────────────────── */
 static void roadmap_on_plan(cJSON *params, int id, airy_sock_t client_fd)
 {
-    if (!g_roadmap) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
-                           "roadmap scheduler not initialized", id);
+    if (!roadmap_ready(id, client_fd))
         return;
-    }
     cJSON *input = params ? cJSON_GetObjectItem(params, "input") : NULL;
     if (!cJSON_IsString(input) || !input->valuestring || !input->valuestring[0]) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing input string", id);
@@ -117,133 +145,24 @@ static void roadmap_on_plan(cJSON *params, int id, airy_sock_t client_fd)
 }
 
 /* ── absorb：蓝图注册（plan JSON）或执行结果回灌（meta 字段） ──────── */
-static int roadmap_plan_parse(cJSON *plan_json, airy_task_plan_t **out_plan)
-{
-    *out_plan = NULL;
-    cJSON *nodes = cJSON_GetObjectItem(plan_json, "nodes");
-    int node_n = (nodes && cJSON_IsArray(nodes)) ? cJSON_GetArraySize(nodes) : 0;
-    if (node_n <= 0)
-        return AIRY_ERR_INVALID_PARAM;
-
-    airy_task_plan_t *plan = (airy_task_plan_t *)AIRY_CALLOC(1, sizeof(airy_task_plan_t));
-    if (!plan)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
-    cJSON *pid = cJSON_GetObjectItem(plan_json, "task_plan_id");
-    if (cJSON_IsString(pid) && pid->valuestring && pid->valuestring[0]) {
-        plan->task_plan_id = AIRY_STRDUP(pid->valuestring);
-        plan->task_plan_id_len = plan->task_plan_id ? strlen(plan->task_plan_id) : 0;
-    }
-
-    plan->task_plan_node_count = (size_t)node_n;
-    plan->task_plan_nodes = (airy_task_node_t **)AIRY_CALLOC((size_t)node_n,
-                                                             sizeof(airy_task_node_t *));
-    if (!plan->task_plan_nodes) {
-        plan->task_plan_node_count = 0;
-        goto fail;
-    }
-    for (int i = 0; i < node_n; i++) {
-        cJSON *nj = cJSON_GetArrayItem(nodes, i);
-        if (!nj)
-            continue;
-        airy_task_node_t *nd = (airy_task_node_t *)AIRY_CALLOC(1, sizeof(airy_task_node_t));
-        if (!nd)
-            goto fail;
-        plan->task_plan_nodes[i] = nd;
-        cJSON *f = cJSON_GetObjectItem(nj, "id");
-        if (cJSON_IsString(f) && f->valuestring && f->valuestring[0]) {
-            nd->task_node_id = AIRY_STRDUP(f->valuestring);
-            nd->task_node_id_len = nd->task_node_id ? strlen(nd->task_node_id) : 0;
-        }
-        f = cJSON_GetObjectItem(nj, "goal");
-        if (cJSON_IsString(f) && f->valuestring)
-            nd->task_node_goal = AIRY_STRDUP(f->valuestring);
-        f = cJSON_GetObjectItem(nj, "handler");
-        if (cJSON_IsString(f) && f->valuestring)
-            nd->task_node_handler_name = AIRY_STRDUP(f->valuestring);
-        f = cJSON_GetObjectItem(nj, "role");
-        if (cJSON_IsString(f) && f->valuestring) {
-            nd->task_node_agent_role = AIRY_STRDUP(f->valuestring);
-            nd->task_node_role_len = nd->task_node_agent_role ? strlen(nd->task_node_agent_role) : 0;
-        }
-        cJSON *deps = cJSON_GetObjectItem(nj, "depends");
-        int dep_n = (deps && cJSON_IsArray(deps)) ? cJSON_GetArraySize(deps) : 0;
-        if (dep_n > 0) {
-            nd->task_node_depends_on = (char **)AIRY_CALLOC((size_t)dep_n, sizeof(char *));
-            if (!nd->task_node_depends_on)
-                goto fail;
-            for (int d = 0; d < dep_n; d++) {
-                cJSON *dj = cJSON_GetArrayItem(deps, d);
-                if (!cJSON_IsString(dj) || !dj->valuestring)
-                    continue;
-                nd->task_node_depends_on[nd->task_node_depends_count] =
-                    AIRY_STRDUP(dj->valuestring);
-                if (!nd->task_node_depends_on[nd->task_node_depends_count])
-                    goto fail;
-                nd->task_node_depends_count++;
-            }
-        }
-    }
-
-    cJSON *entry = cJSON_GetObjectItem(plan_json, "entry_points");
-    int entry_n = (entry && cJSON_IsArray(entry)) ? cJSON_GetArraySize(entry) : 0;
-    if (entry_n > 0) {
-        plan->task_plan_entry_points = (char **)AIRY_CALLOC((size_t)entry_n, sizeof(char *));
-        if (!plan->task_plan_entry_points)
-            goto fail;
-        for (int e = 0; e < entry_n; e++) {
-            cJSON *ej = cJSON_GetArrayItem(entry, e);
-            if (!cJSON_IsString(ej) || !ej->valuestring)
-                continue;
-            plan->task_plan_entry_points[plan->task_plan_entry_count] = AIRY_STRDUP(ej->valuestring);
-            if (!plan->task_plan_entry_points[plan->task_plan_entry_count])
-                goto fail;
-            plan->task_plan_entry_count++;
-        }
-    } else {
-        plan->task_plan_entry_points = (char **)AIRY_CALLOC((size_t)node_n, sizeof(char *));
-        if (!plan->task_plan_entry_points)
-            goto fail;
-        for (int i = 0; i < node_n; i++) {
-            const airy_task_node_t *nd = plan->task_plan_nodes[i];
-            if (!nd || !nd->task_node_id || nd->task_node_depends_count > 0)
-                continue;
-            plan->task_plan_entry_points[plan->task_plan_entry_count] = AIRY_STRDUP(nd->task_node_id);
-            if (!plan->task_plan_entry_points[plan->task_plan_entry_count])
-                goto fail;
-            plan->task_plan_entry_count++;
-        }
-    }
-    *out_plan = plan;
-    return AIRY_SUCCESS;
-
-fail:
-    airy_task_plan_free(plan);
-    return AIRY_ERR_OUT_OF_MEMORY;
-}
-
 static void roadmap_on_absorb(cJSON *params, int id, airy_sock_t client_fd)
 {
-    if (!g_roadmap) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
-                           "roadmap scheduler not initialized", id);
+    if (!roadmap_guard(params, id, client_fd))
         return;
-    }
-    if (!params) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing params", id);
-        return;
-    }
 
     const char *exec_id = NULL;
     cJSON *eid = cJSON_GetObjectItem(params, "exec_id");
     if (cJSON_IsString(eid) && eid->valuestring && eid->valuestring[0])
         exec_id = eid->valuestring;
 
-    /* 模式 A：蓝图注册 —— plan 为对象 JSON */
+    /* 模式 A：蓝图注册 —— plan 为对象 JSON（解析单源：airy_plan_parse） */
     cJSON *plan_json = cJSON_GetObjectItem(params, "plan");
     if (cJSON_IsObject(plan_json)) {
         airy_task_plan_t *plan = NULL;
-        int perr = roadmap_plan_parse(plan_json, &plan);
+        char *plan_str = cJSON_PrintUnformatted(plan_json);
+        airy_err_t perr = plan_str ? airy_plan_parse(plan_str, &plan)
+                                   : AIRY_ERR_OUT_OF_MEMORY;
+        AIRY_FREE(plan_str);
         if (perr != AIRY_SUCCESS || !plan) {
             JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Invalid plan JSON", id);
             return;
@@ -255,13 +174,7 @@ static void roadmap_on_absorb(cJSON *params, int id, airy_sock_t client_fd)
                                id);
             return;
         }
-        cJSON *result = cJSON_CreateObject();
-        if (result) {
-            cJSON_AddStringToObject(result, "status", "blueprint_registered");
-            JSONRPC_SEND_SUCCESS(client_fd, result, id);
-        } else {
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
-        }
+        roadmap_reply_ok(client_fd, id, "blueprint_registered");
         return;
     }
 
@@ -299,27 +212,14 @@ static void roadmap_on_absorb(cJSON *params, int id, airy_sock_t client_fd)
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "roadmap absorb result failed", id);
         return;
     }
-    cJSON *result = cJSON_CreateObject();
-    if (result) {
-        cJSON_AddStringToObject(result, "status", "result_absorbed");
-        JSONRPC_SEND_SUCCESS(client_fd, result, id);
-    } else {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
-    }
+    roadmap_reply_ok(client_fd, id, "result_absorbed");
 }
 
 /* ── roadmap_cancel：取消事件注入（L1 回退 + L2 失效） ──────────────── */
 static void roadmap_on_cancel(cJSON *params, int id, airy_sock_t client_fd)
 {
-    if (!g_roadmap) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
-                           "roadmap scheduler not initialized", id);
+    if (!roadmap_guard(params, id, client_fd))
         return;
-    }
-    if (!params) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing params", id);
-        return;
-    }
     const char *exec_id = NULL;
     cJSON *eid = cJSON_GetObjectItem(params, "exec_id");
     if (cJSON_IsString(eid) && eid->valuestring && eid->valuestring[0])
@@ -334,27 +234,14 @@ static void roadmap_on_cancel(cJSON *params, int id, airy_sock_t client_fd)
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "roadmap cancel failed", id);
         return;
     }
-    cJSON *result = cJSON_CreateObject();
-    if (result) {
-        cJSON_AddStringToObject(result, "status", "cancelled");
-        JSONRPC_SEND_SUCCESS(client_fd, result, id);
-    } else {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
-    }
+    roadmap_reply_ok(client_fd, id, "cancelled");
 }
 
 /* ── roadmap_replan：蓝图修正（受影响节点回退 + L2 失效） ───────────── */
 static void roadmap_on_replan(cJSON *params, int id, airy_sock_t client_fd)
 {
-    if (!g_roadmap) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
-                           "roadmap scheduler not initialized", id);
+    if (!roadmap_guard(params, id, client_fd))
         return;
-    }
-    if (!params) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing params", id);
-        return;
-    }
     cJSON *affected = cJSON_GetObjectItem(params, "affected_nodes");
     int affected_n = (affected && cJSON_IsArray(affected)) ? cJSON_GetArraySize(affected) : 0;
     if (affected_n <= 0) {
