@@ -4,8 +4,8 @@
 /**
  * @file builtin_shell.c
  * @brief Built-in tool shell-execution domain: subprocess command execution
- *        with timeout/output truncation (fork + pipe + poll + waitpid) and
- *        the shell_run tool implementation.
+ *        with timeout/output truncation (over the shared process-capture
+ *        engine) and the shell_run tool implementation.
  */
 
 #include "airy_memory.h"
@@ -23,11 +23,6 @@
 #include <string.h>
 
 #ifndef _WIN32
-#include <errno.h>
-#include <poll.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -84,12 +79,36 @@ void builtin_buf_mark(char *buf, size_t cap, size_t *len, const char *mark)
 
 #ifndef _WIN32
 
+/* Child-side setup for the shell runner: chdir into the task workspace, apply
+ * the OS-level sandbox (fail-closed), then exec /bin/sh -c. Exit codes mirror
+ * the shell conventions (127 not found, 126 not executable). */
+typedef struct {
+    const char *cmd;
+    const char *cwd;
+    const os_sandbox_cfg_t *sandbox;
+} shell_ctx_t;
+
+static void shell_spawn(void *ctx)
+{
+    shell_ctx_t *c = (shell_ctx_t *)ctx;
+    if (c->cwd && c->cwd[0] && chdir(c->cwd) != 0)
+        _exit(127);
+    if (c->sandbox && c->sandbox->mode != OS_SANDBOX_MODE_OFF) {
+        if (os_sandbox_apply(c->sandbox) != 0)
+            _exit(126);
+    }
+    execl("/bin/sh", "sh", "-c", c->cmd, (char *)NULL);
+    _exit(127);
+}
+
 /**
  * @brief Run a shell command with timeout and capture stdout/stderr
- *        (fork + pipe + poll + waitpid)
  *
- * Replaces popen: commands exceeding timeout_ms get SIGKILLed so tool_d never
- * blocks forever.
+ * Thin wrapper over the shared process-capture engine: the fork/pipe/poll/
+ * waitpid ritual, timeout enforcement and output cap live in
+ * builtin_proc_capture, while the child-side setup (workspace chdir + sandbox
+ * + /bin/sh -c) is the shell_spawn strategy callback. Commands exceeding
+ * timeout_ms get SIGKILLed so tool_d never blocks forever.
  * @param cmd           Command string (interpreted by /bin/sh -c)
  * @param cwd           Optional working directory for the child process
  *                      (NULL/empty keeps tool_d's cwd; the child chdir()s
@@ -107,170 +126,9 @@ void builtin_buf_mark(char *buf, size_t cap, size_t *len, const char *mark)
 int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_code,
                       uint32_t timeout_ms, int *out_truncated, const os_sandbox_cfg_t *sandbox)
 {
-    *out = NULL;
-    *exit_code = -1;
-    if (out_truncated)
-        *out_truncated = 0;
-
-    int pipefd[2];
-    if (pipe(pipefd) != 0)
-        return -1;
-    pid_t pid = fork();
-    if (pid < 0) {
-        close(pipefd[0]);
-        close(pipefd[1]);
-        return -1;
-    }
-    if (pid == 0) {
-
-        close(pipefd[0]);
-        dup2(pipefd[1], STDOUT_FILENO);
-        dup2(pipefd[1], STDERR_FILENO);
-        close(pipefd[1]);
-        /* Tool isolation: do not leak external LD_PRELOAD injections (sandbox
-         * shims, tracing agents) into the command process.  Injected shims
-         * can install seccomp filters or interpose libc calls and crash
-         * standard tools such as curl, violating the tool isolation contract.
-         * The agentrt runtime itself never relies on LD_PRELOAD, so clearing
-         * it is safe and makes subprocess behavior deterministic. */
-        unsetenv("LD_PRELOAD");
-        unsetenv("LD_AUDIT");
-        /* R-3: the airymaxrt launcher exports $AIRY_HOME/lib through
-         * LD_LIBRARY_PATH for the runtime's own binaries. Leaking that into
-         * an arbitrary command makes system tools (curl, git, python) load
-         * the runtime's bundled .so files, which are frequently ABI-mismatched
-         * with the system binaries — e.g. curl then aborts with
-         * "libcurl.so.4: no version information available" and silently loses
-         * HTTP/2 and other features ("various tools unusable / cannot reach
-         * the network"). The daemon process keeps its own LD_LIBRARY_PATH;
-         * only the command process and its descendants are cleaned. */
-        unsetenv("LD_LIBRARY_PATH");
-        /* Task workspace: chdir into the optional cwd so relative paths in
-         * the command resolve against the task workspace, not tool_d's own
-         * cwd (the runner chdirs its own process, which never affects the
-         * daemon's working directory). chdir failure denies execution with
-         * exit code 127 (command not found convention). */
-        if (cwd && cwd[0] && chdir(cwd) != 0) {
-            _exit(127);
-        }
-        /* P2 OS-level sandbox: apply after fork, before exec
-         * (Landlock/seccomp/rlimit). Apply failure denies execution
-         * fail-closed (126 matches the bash convention). */
-        if (sandbox && sandbox->mode != OS_SANDBOX_MODE_OFF) {
-            if (os_sandbox_apply(sandbox) != 0) {
-                _exit(126);
-            }
-        }
-        execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
-        _exit(127);
-    }
-    close(pipefd[1]);
-
-    size_t cap = 4096;
-    size_t len = 0;
-    char *buf = (char *)AIRY_MALLOC(cap);
-    if (!buf) {
-        kill(pid, SIGKILL);
-        waitpid(pid, NULL, 0);
-        close(pipefd[0]);
-        return -1;
-    }
-    buf[0] = '\0';
-
-    int wstatus = 0;
-    int exited = 0;
-    int timed_out = 0;
-    int truncated = 0;
-
-    struct timespec ts_now;
-    clock_gettime(CLOCK_MONOTONIC, &ts_now);
-    uint64_t deadline_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 + timeout_ms;
-
-    for (;;) {
-        if (!exited) {
-            pid_t w = waitpid(pid, &wstatus, WNOHANG);
-            if (w == pid)
-                exited = 1;
-        }
-        if (exited)
-            break;
-
-        clock_gettime(CLOCK_MONOTONIC, &ts_now);
-        uint64_t now_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000;
-        if (now_ms >= deadline_ms) {
-            timed_out = 1;
-            break;
-        }
-
-        struct pollfd pfd = {.fd = pipefd[0], .events = POLLIN | POLLHUP};
-        int pr = poll(&pfd, 1, 100);
-        if (pr > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
-            char chunk[4096];
-            ssize_t n = read(pipefd[0], chunk, sizeof(chunk));
-            if (n > 0) {
-                if (!builtin_buf_push(&buf, &cap, &len, chunk, (size_t)n, &truncated))
-                    break;
-            } else if (n == 0) {
-                /* Child closed its output but is still alive; poll would
-                 * otherwise return POLLHUP immediately and busy-spin the
-                 * loop until the deadline. */
-                usleep(10000);
-            }
-        }
-    }
-
-    if (timed_out) {
-        kill(pid, SIGKILL);
-        waitpid(pid, NULL, 0);
-    }
-
-    /* Flush the remaining output.  A descendant that inherited the pipe
-     * write end (e.g. a backgrounded child) would otherwise keep the
-     * blocking read below open forever and wedge the tool daemon, so the
-     * drain is bounded: once the flush deadline passes the rest of the
-     * output is abandoned. */
-    clock_gettime(CLOCK_MONOTONIC, &ts_now);
-    uint64_t drain_deadline_ms =
-        (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 + BUILTIN_OUTPUT_DRAIN_MS;
-    for (;;) {
-        clock_gettime(CLOCK_MONOTONIC, &ts_now);
-        uint64_t now_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000;
-        if (now_ms >= drain_deadline_ms)
-            break;
-
-        struct pollfd pfd = {.fd = pipefd[0], .events = POLLIN | POLLHUP};
-        int pr = poll(&pfd, 1, 100);
-        if (pr <= 0)
-            continue;
-        if (!(pfd.revents & (POLLIN | POLLHUP)))
-            break;
-        char chunk[4096];
-        ssize_t n = read(pipefd[0], chunk, sizeof(chunk));
-        if (n <= 0)
-            break;
-        if (!builtin_buf_push(&buf, &cap, &len, chunk, (size_t)n, &truncated))
-            break;
-    }
-    close(pipefd[0]);
-
-    if (timed_out) {
-        builtin_buf_mark(buf, cap, &len, "\n[command timed out after 60s]");
-        *exit_code = -1;
-    } else if (exited) {
-#ifdef WIFEXITED
-        *exit_code = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : -1;
-#else
-        *exit_code = wstatus;
-#endif
-    } else {
-        *exit_code = -1;
-    }
-    if (truncated)
-        builtin_buf_mark(buf, cap, &len, "\n[output truncated at 1MB]");
-    if (out_truncated)
-        *out_truncated = truncated;
-    *out = buf;
-    return 0;
+    shell_ctx_t c = {cmd, cwd, sandbox};
+    return builtin_proc_capture(shell_spawn, &c, NULL, 0, timeout_ms, out, exit_code,
+                                out_truncated);
 }
 
 #else /* _WIN32 */
