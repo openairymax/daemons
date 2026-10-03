@@ -60,63 +60,68 @@ static void rs_sink_emit(const char *type, cJSON *env, void *ud)
     AIRY_FREE(frame);
 }
 
+/* agent.run / agent.run_stream 公共入参：JSON params -> 引擎七参。 */
+typedef struct {
+    const char *prompt;
+    const char *model;
+    cJSON *history;    /* 借用 messages 数组节点（可 NULL） */
+    const char *gccp_answers;
+    cJSON *agent_spec; /* 借用 params.agent 节点（可 NULL） */
+    const char *agent_file;
+    const char *session_id;
+} run_args_t;
+
+/* 取对象字符串字段；非字符串或空串视同缺省，返回 NULL。 */
+static const char *json_str(cJSON *o, const char *key)
+{
+    cJSON *v = cJSON_GetObjectItem(o, key);
+    return (cJSON_IsString(v) && v->valuestring && v->valuestring[0]) ? v->valuestring : NULL;
+}
+
+/* 解析公共入参；缺参时下发 JSON-RPC 错误并返回 -1。 */
+static int parse_run_args(cJSON *params, int id, airy_sock_t fd, run_args_t *out)
+{
+    if (!params) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "Missing params", id);
+        return -1;
+    }
+
+    cJSON *p = cJSON_GetObjectItem(params, "prompt");
+    const char *prompt = cJSON_IsString(p) ? p->valuestring : NULL;
+    cJSON *messages = cJSON_GetObjectItem(params, "messages");
+    cJSON *m0 = (cJSON_IsArray(messages) && cJSON_GetArraySize(messages) > 0) ?
+                    cJSON_GetArrayItem(messages, 0) :
+                    NULL;
+    if (!prompt && m0)
+        prompt = json_str(m0, "content");
+    if (!prompt || !*prompt) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "Invalid params: missing prompt", id);
+        return -1;
+    }
+
+    out->prompt = prompt;
+    out->model = json_str(params, "model");
+    out->history = (cJSON_IsArray(messages) && cJSON_GetArraySize(messages) > 0) ? messages : NULL;
+    out->gccp_answers = json_str(params, "gccp_answers");
+    out->agent_spec = cJSON_GetObjectItem(params, "agent");
+    out->agent_file = json_str(params, "agent_file");
+    out->session_id = json_str(params, "session_id");
+    return 0;
+}
+
 /* agent.run_stream 请求处理：解析 params -> 引擎（带事件 sink 流式推送）。 */
 static void handle_run_stream(cJSON *params, int id, airy_sock_t client_fd)
 {
-    if (!params) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing params", id);
+    run_args_t a;
+    if (parse_run_args(params, id, client_fd, &a) != 0)
         return;
-    }
-
-    const char *prompt = NULL;
-    cJSON *p = cJSON_GetObjectItem(params, "prompt");
-    if (cJSON_IsString(p)) {
-        prompt = p->valuestring;
-    } else {
-        cJSON *messages = cJSON_GetObjectItem(params, "messages");
-        cJSON *m0 = (messages && cJSON_GetArraySize(messages) > 0) ?
-                        cJSON_GetArrayItem(messages, 0) :
-                        NULL;
-        cJSON *c = m0 ? cJSON_GetObjectItem(m0, "content") : NULL;
-        if (cJSON_IsString(c))
-            prompt = c->valuestring;
-    }
-    if (!prompt || !*prompt) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Invalid params: missing prompt", id);
-        return;
-    }
-
-    const char *model = NULL;
-    cJSON *m = cJSON_GetObjectItem(params, "model");
-    if (cJSON_IsString(m) && m->valuestring && m->valuestring[0])
-        model = m->valuestring;
-
-    cJSON *history = cJSON_GetObjectItem(params, "messages");
-    if (!cJSON_IsArray(history) || cJSON_GetArraySize(history) == 0)
-        history = NULL;
-
-    const char *gccp_answers = NULL;
-    cJSON *ga = cJSON_GetObjectItem(params, "gccp_answers");
-    if (cJSON_IsString(ga) && ga->valuestring && ga->valuestring[0])
-        gccp_answers = ga->valuestring;
-
-    cJSON *agent_spec = cJSON_GetObjectItem(params, "agent");
-    const char *agent_file = NULL;
-    cJSON *af = cJSON_GetObjectItem(params, "agent_file");
-    if (cJSON_IsString(af) && af->valuestring && af->valuestring[0])
-        agent_file = af->valuestring;
-
-    const char *session_id = NULL;
-    cJSON *sid = cJSON_GetObjectItem(params, "session_id");
-    if (cJSON_IsString(sid) && sid->valuestring && sid->valuestring[0])
-        session_id = sid->valuestring;
 
     rs_sink_ctx_t sink_ctx = {client_fd, 0};
     agent_run_event_sink_t sink = {rs_sink_emit, &sink_ctx};
 
     cJSON *result = NULL;
-    int rc = agent_run_execute(prompt, model, history, gccp_answers, agent_spec, agent_file,
-                               session_id, &sink, &result);
+    int rc = agent_run_execute(a.prompt, a.model, a.history, a.gccp_answers, a.agent_spec,
+                               a.agent_file, a.session_id, &sink, &result);
     if (result)
         cJSON_Delete(result);
     (void)rc;
@@ -131,58 +136,13 @@ void m_run_stream(cJSON *params, int id, void *user_data)
 /* agent.run 请求处理：解析 params -> 引擎 -> 组装响应。 */
 static void handle_run(cJSON *params, int id, airy_sock_t client_fd)
 {
-    if (!params) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing params", id);
+    run_args_t a;
+    if (parse_run_args(params, id, client_fd, &a) != 0)
         return;
-    }
-
-    const char *prompt = NULL;
-    cJSON *p = cJSON_GetObjectItem(params, "prompt");
-    if (cJSON_IsString(p)) {
-        prompt = p->valuestring;
-    } else {
-        cJSON *messages = cJSON_GetObjectItem(params, "messages");
-        cJSON *m0 = (messages && cJSON_GetArraySize(messages) > 0) ?
-                        cJSON_GetArrayItem(messages, 0) :
-                        NULL;
-        cJSON *c = m0 ? cJSON_GetObjectItem(m0, "content") : NULL;
-        if (cJSON_IsString(c))
-            prompt = c->valuestring;
-    }
-    if (!prompt || !*prompt) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Invalid params: missing prompt", id);
-        return;
-    }
-
-    const char *model = NULL;
-    cJSON *m = cJSON_GetObjectItem(params, "model");
-    if (cJSON_IsString(m) && m->valuestring && m->valuestring[0])
-        model = m->valuestring;
-
-    cJSON *history = cJSON_GetObjectItem(params, "messages");
-    if (!cJSON_IsArray(history) || cJSON_GetArraySize(history) == 0)
-        history = NULL;
-
-    const char *gccp_answers = NULL;
-    cJSON *ga = cJSON_GetObjectItem(params, "gccp_answers");
-    if (cJSON_IsString(ga) && ga->valuestring && ga->valuestring[0])
-        gccp_answers = ga->valuestring;
-
-    cJSON *agent_spec = cJSON_GetObjectItem(params, "agent");
-
-    const char *agent_file = NULL;
-    cJSON *af = cJSON_GetObjectItem(params, "agent_file");
-    if (cJSON_IsString(af) && af->valuestring && af->valuestring[0])
-        agent_file = af->valuestring;
-
-    const char *session_id = NULL;
-    cJSON *sid = cJSON_GetObjectItem(params, "session_id");
-    if (cJSON_IsString(sid) && sid->valuestring && sid->valuestring[0])
-        session_id = sid->valuestring;
 
     cJSON *result = NULL;
-    int rc = agent_run_execute(prompt, model, history, gccp_answers, agent_spec, agent_file,
-                               session_id, NULL, &result);
+    int rc = agent_run_execute(a.prompt, a.model, a.history, a.gccp_answers, a.agent_spec,
+                               a.agent_file, a.session_id, NULL, &result);
     if (rc == 1) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Request cancelled by user", id);
         cJSON_Delete(result);
