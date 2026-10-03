@@ -11,6 +11,7 @@
 
 #include "agent_service.h"
 
+#include "hindex.h"
 #include "platform.h"
 
 #include <stddef.h>
@@ -27,19 +28,6 @@ typedef struct {
     airy_cancel_token_t *token;
     int active;
 } agent_invoke_session_t;
-
-
-typedef struct {
-    char *key;
-    size_t index;
-    int occupied;
-} agent_hash_entry_t;
-
-typedef struct {
-    agent_hash_entry_t *entries;
-    size_t capacity;
-    size_t count;
-} agent_hash_table_t;
 
 
 /* Slot state machine:
@@ -82,7 +70,7 @@ struct agent_service {
     agent_entry_internal_t *agents;
     size_t agent_count;
     size_t max_agents;
-    agent_hash_table_t agent_index;
+    hindex_t agent_index;
     /* Global lock guarding only agent_count, the hash table and slot
      * allocation (fast path). Never do fork / network / child IO while
      * holding this lock. */

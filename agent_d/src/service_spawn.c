@@ -141,7 +141,7 @@ static int agent_spawn_finish(agent_service_t *svc, agent_entry_internal_t *agen
         int rc = AIRY_SUCCESS;
         agent_lock_svc(svc);
         if (svc->initialized) {
-            rc = agent_ht_insert(&svc->agent_index, agent->agent_id, idx);
+            rc = hindex_put(&svc->agent_index, agent->agent_id, idx);
         }
         if (rc == AIRY_SUCCESS) {
             agent->status = AGENT_STATUS_RUNNING;

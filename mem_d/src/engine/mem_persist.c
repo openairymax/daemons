@@ -427,7 +427,7 @@ void mem_persist_load_existing(mem_service_t *svc)
                             rec->created_at = (cat && cJSON_IsNumber(cat)) ?
                                                   (uint64_t)cat->valuedouble :
                                                   (uint64_t)time(NULL);
-                            if (mem_ht_insert(&svc->record_index, rec->record_id, idx) ==
+                            if (hindex_put(&svc->record_index, rec->record_id, idx) ==
                                 AIRY_SUCCESS) {
                                 mem_record_build_vector(svc, rec);
                                 svc->record_count++;
