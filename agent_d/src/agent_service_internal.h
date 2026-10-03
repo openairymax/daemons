@@ -12,6 +12,7 @@
 #include "service.h"
 
 #include "airy_memory.h"
+#include "airy_types.h"
 #include "error.h"
 #include "svc_logger.h"
 
@@ -33,11 +34,7 @@
 extern "C" {
 #endif
 
-#define AGENT_ID_LEN 33
 #define AGENT_RESP_BUF_SIZE 65536
-
-/* ID generation (service.c) */
-void agent_generate_agent_id(char *buf, size_t buf_size);
 
 /* Perf/lock helpers (service.c) */
 uint64_t agent_perf_now_us(void);

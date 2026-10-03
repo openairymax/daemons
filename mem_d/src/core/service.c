@@ -15,7 +15,7 @@
  * Design notes:
  * - Index is the shared commons hindex (djb2 + tombstones), §130 SSoT
  * - Thread safety: all public interfaces take the lock
- * - Record ID: 32-char hex (timestamp + counter, no external deps)
+ * - Record ID: commons airy_oid atom (32-char hex, no external deps)
  * - Search: own TF-IDF vector cosine similarity (vector.c) fused with
  *   substring scoring weighted 0.6/0.4 (weight configurable via
  *   AIRY_MEM_TFIDF_WEIGHT); optional embedding backend (emb_client.c,
@@ -29,6 +29,7 @@
  */
 
 #include "service.h"
+#include "airy_types.h"
 #include "hindex.h"
 #include "mem_persist.h"
 
@@ -50,42 +51,8 @@
 #endif
 
 #define MEM_DEFAULT_MAX_RECORDS 1024
-#define MEM_RECORD_ID_LEN 33
 #define MEM_HASH_LOAD_FACTOR 4 /* capacity = max_records * 4 */
 #define MEM_DEFAULT_TFIDF_WEIGHT 0.6f
-
-/* ── Record ID generation ────────────────────────────────────────────── */
-
-static void mem_generate_record_id(char *buf, size_t buf_size)
-{
-    /* 32-char hex: 8-char timestamp + 8-char counter + 16-char random.
-     * No external libuuid dependency, so the daemon can run standalone. */
-    static uint64_t counter = 0;
-    static airy_mtx_t counter_lock;
-    static int counter_initialized = 0;
-
-    if (!counter_initialized) {
-        airy_mtx_init(&counter_lock);
-        counter = (uint64_t)time(NULL) & 0xFFFFFFFF;
-        counter_initialized = 1;
-    }
-
-    airy_mtx_lock(&counter_lock);
-    uint64_t c = counter++;
-    airy_mtx_unlock(&counter_lock);
-
-    uint64_t t = (uint64_t)time(NULL);
-
-    uint64_t r = t ^ (c * 0x9E3779B97F4A7C15ULL);
-    r ^= r << 13;
-    r ^= r >> 7;
-    r ^= r << 17;
-
-    if (buf_size < MEM_RECORD_ID_LEN)
-        return;
-    snprintf(buf, MEM_RECORD_ID_LEN, "%08lx%08lx%016lx", (unsigned long)(t & 0xFFFFFFFFu),
-             (unsigned long)(c & 0xFFFFFFFFu), (unsigned long)(r & 0xFFFFFFFFFFFFFFFFULL));
-}
 
 /* ── Scoring helpers ─────────────────────────────────────────────────── */
 
@@ -256,8 +223,8 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char *
     size_t idx = svc->record_count;
     mem_record_entry_t *rec = &svc->records[idx];
 
-    char id_buf[MEM_RECORD_ID_LEN];
-    mem_generate_record_id(id_buf, sizeof(id_buf));
+    char id_buf[AIRY_OID_STR_MAX];
+    airy_oid_str(airy_oid_gen(), id_buf, sizeof(id_buf));
     rec->record_id = AIRY_STRDUP(id_buf);
     rec->data = AIRY_MALLOC(req->len + 1);
     if (!rec->record_id || !rec->data) {
