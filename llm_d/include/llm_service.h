@@ -30,8 +30,6 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
                                 llm_stream_callback_t callback, void *callback_data,
                                 llm_response_t **out_response);
 
-void llm_response_free(llm_response_t *resp);
-
 
 int llm_service_stats(llm_service_t *svc, char **out_json);
 
