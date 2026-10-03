@@ -27,7 +27,6 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 #   core/ daemon 入口与服务核心 · handlers/ IPC 请求处理器 · engine/ 记忆引擎实现
 set(MEM_SERVICE_SOURCES
     src/core/service.c
-    src/engine/mem_hash.c
     src/engine/mem_persist.c
     src/engine/kb.c
     src/engine/vector.c
@@ -77,6 +76,7 @@ target_include_directories(airy_mem_service PUBLIC
     ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${COMMONS_INCLUDE_DIR}/utils/token
+    ${COMMONS_INCLUDE_DIR}/utils/ds
 )
 
 target_include_directories(airy_mem_service PRIVATE
@@ -165,6 +165,7 @@ target_include_directories(mem_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${COMMONS_INCLUDE_DIR}/utils/token
+    ${COMMONS_INCLUDE_DIR}/utils/ds
     ${CJSON_INCLUDE_DIRS}
     ${YAML_INCLUDE_DIRS}
 )

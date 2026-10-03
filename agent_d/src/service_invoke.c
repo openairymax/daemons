@@ -38,7 +38,7 @@ int agent_service_terminate(agent_service_t *svc, const char *agent_id)
 
     agent_lock_svc(svc);
 
-    ssize_t idx = agent_ht_lookup(&svc->agent_index, agent_id);
+    ssize_t idx = hindex_get(&svc->agent_index, agent_id);
     if (idx < 0 || (size_t)idx >= svc->agent_count) {
         airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_NOT_FOUND;
@@ -83,7 +83,7 @@ int agent_service_invoke(agent_service_t *svc, const char *agent_id, const char 
     airy_atomic_fetch_add(&svc->m_invoke_total, 1);
 
     agent_lock_svc(svc);
-    ssize_t idx = agent_ht_lookup(&svc->agent_index, agent_id);
+    ssize_t idx = hindex_get(&svc->agent_index, agent_id);
     if (idx < 0 || (size_t)idx >= svc->agent_count) {
         airy_mtx_unlock(&svc->lock);
         *out_output = AIRY_STRDUP("{\"error\":\"Agent not found\"}");

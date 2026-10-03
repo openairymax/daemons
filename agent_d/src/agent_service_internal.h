@@ -21,9 +21,7 @@ extern "C" {
 #define AGENT_ID_LEN 33
 #define AGENT_RESP_BUF_SIZE 65536
 
-/* Hash table and ID generation (service.c) */
-int agent_ht_insert(agent_hash_table_t *ht, const char *key, size_t index);
-ssize_t agent_ht_lookup(agent_hash_table_t *ht, const char *key);
+/* ID generation (service.c) */
 void agent_generate_agent_id(char *buf, size_t buf_size);
 
 /* Perf/lock helpers (service.c) */
