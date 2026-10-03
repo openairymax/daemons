@@ -135,27 +135,8 @@ int sched_service_destroy(sched_service_t *service)
         AIRY_FREE(rec);
     }
     service->task_count = 0;
-    for (size_t i = 0; i < service->dag_count; i++) {
-        sched_dag_t *dag = service->dags[i];
-        for (size_t j = 0; j < dag->node_count; j++) {
-            sched_dag_node_t *node = dag->nodes[j];
-            AIRY_FREE(node->id);
-            AIRY_FREE(node->goal);
-            AIRY_FREE(node->role);
-            AIRY_FREE(node->validator_rule_json);
-            for (size_t k = 0; k < node->dep_count; k++) {
-                AIRY_FREE(node->depends[k]);
-            }
-            AIRY_FREE(node->output);
-            AIRY_FREE(node->error);
-            AIRY_FREE(node);
-        }
-        AIRY_FREE(dag->dag_id);
-        AIRY_FREE(dag->name);
-        AIRY_FREE(dag->input);
-        AIRY_FREE(dag->workspace_dir);
-        AIRY_FREE(dag);
-    }
+    for (size_t i = 0; i < service->dag_count; i++)
+        sched_dag_free(service->dags[i]);
     service->dag_count = 0;
     airy_mtx_unlock(&service->lock);
 
