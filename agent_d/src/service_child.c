@@ -8,28 +8,15 @@
  *        writes / terminate-and-reap (Python/Rust dual-language startup).
  */
 
-#include "airy_memory.h"
-#include "error.h"
 #include "io.h"
-#include "service.h"
-#include "svc_logger.h"
-
-#include <cjson/cJSON.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#if AIRY_PLATFORM_POSIX
-#include <sys/select.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#endif
 
 #include "agent_service_internal.h"
 
 #include "airy_dirent.h"
+
+#if AIRY_PLATFORM_POSIX
+#include <sys/stat.h>
+#endif
 
 /* invoke read-response timeout (seconds). Default 300s (5 min) covers real LLM
  * calls; overridable via AIRY_AGENT_INVOKE_TIMEOUT_S. */

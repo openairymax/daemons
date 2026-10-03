@@ -11,8 +11,23 @@
 
 #include "service.h"
 
+#include "airy_memory.h"
+#include "error.h"
+#include "svc_logger.h"
+
+#include <cjson/cJSON.h>
+
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#if AIRY_PLATFORM_POSIX
+#include <sys/select.h>
+#include <sys/wait.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
