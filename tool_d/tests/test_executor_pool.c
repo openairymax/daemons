@@ -30,12 +30,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 static long long now_ms(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+/* 数据目录隔离：工具完成后 best-effort 写 hall 事件，其根目录取自
+ * airy_data_dir()。不隔离则落到 $HOME/.airymaxrt 并随开发机长期累积，
+ * 使本测试依赖宿主机状态（事件树越深、首个写者初始化越慢）。AIRY_HOME
+ * 必须在任何 airy_data_dir() 调用前设置，故在 main 入口处调用。 */
+static char g_home[256];
+
+static void isolate_data_dir(void)
+{
+    snprintf(g_home, sizeof(g_home), "/tmp/airymaxrt-exec-pool-%ld", (long)getpid());
+    setenv("AIRY_HOME", g_home, 1);
+    setenv("AIRY_DATA_DIR", "", 1);
 }
 
 /* 放行审批（同 test_executor.c：ACL + approval gate，executor 拥有 gate） */
@@ -338,7 +352,8 @@ static void test_pool_destroy_drain(void)
 
 int main(void)
 {
-    printf("test_executor_pool:\n");
+    isolate_data_dir();
+    printf("test_executor_pool: AIRY_HOME=%s\n", g_home);
     test_pool_concurrent_isolation();
     test_pool_per_tool_budget();
     test_pool_busy_backpressure();
