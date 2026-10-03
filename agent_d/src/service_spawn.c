@@ -41,8 +41,8 @@ static int agent_spawn_acquire_slot(agent_service_t *svc, agent_entry_internal_t
 static int agent_spawn_init_entry(agent_service_t *svc, agent_entry_internal_t *agent,
                                   const char *spec)
 {
-    char id_buf[AGENT_ID_LEN];
-    agent_generate_agent_id(id_buf, sizeof(id_buf));
+    char id_buf[AIRY_OID_STR_MAX];
+    airy_oid_str(airy_oid_gen(), id_buf, sizeof(id_buf));
     agent->agent_id = AIRY_STRDUP(id_buf);
     agent->spec = AIRY_STRDUP(spec);
     if (!agent->agent_id || !agent->spec) {
