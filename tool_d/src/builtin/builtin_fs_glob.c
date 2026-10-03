@@ -8,19 +8,8 @@
  *        builtin_fs.c split).
  */
 
-#include "airy_memory.h"
-#include "error.h"
-
 #include "airy_dirent.h"
-#include "builtin/builtin.h"
-#include "svc_logger.h"
 
-#include <cjson/cJSON.h>
-#include <cjson_helpers.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <errno.h>
 
 #ifndef _WIN32

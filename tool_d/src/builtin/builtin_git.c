@@ -8,19 +8,6 @@
  *        engine, supporting stdin data injection).
  */
 
-#include "airy_memory.h"
-#include "error.h"
-
-#include "builtin/builtin.h"
-#include "svc_logger.h"
-
-#include <cjson/cJSON.h>
-#include <cjson_helpers.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #ifndef _WIN32
 #include <unistd.h>
 #endif

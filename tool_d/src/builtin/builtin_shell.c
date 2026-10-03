@@ -8,20 +8,6 @@
  *        engine) and the shell_run tool implementation.
  */
 
-#include "airy_memory.h"
-#include "error.h"
-
-#include "builtin/builtin.h"
-#include "sandbox/os_sandbox.h"
-#include "svc_logger.h"
-
-#include <cjson/cJSON.h>
-#include <cjson_helpers.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #ifndef _WIN32
 #include <unistd.h>
 #endif

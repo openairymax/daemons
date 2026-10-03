@@ -16,19 +16,7 @@
  * 与 git_* 工具同策略。
  */
 
-#include "airy_memory.h"
-#include "error.h"
-
-#include "builtin/builtin.h"
-#include "svc_logger.h"
-
-#include <cjson/cJSON.h>
-#include <cjson_helpers.h>
-
 #include <stdarg.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include "platform.h"
 #include "builtin/tool_builtin_internal.h"

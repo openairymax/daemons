@@ -5,17 +5,32 @@
  * @file tool_builtin_internal.h
  * @brief Internal cross-file shared declarations of the built-in tool set
  *        (shared by the functional domains after builtin.c was split).
+ *
+ *        Also hosts the family's single-source include prelude: the nine
+ *        builtin translation units all pull in the memory/error/logging
+ *        and JSON helper headers plus the common libc headers, so those
+ *        are aggregated here and each unit keeps only its domain-specific
+ *        head set (family include single-sourcing, method B).
  */
 
 #ifndef AIRY_RT_TOOL_BUILTIN_INTERNAL_H
 #define AIRY_RT_TOOL_BUILTIN_INTERNAL_H
 
+#include "airy_memory.h"
+#include "error.h"
+
 #include "builtin/builtin.h"
 #include "sandbox/os_sandbox.h"
+#include "svc_logger.h"
+
+#include <cjson/cJSON.h>
+#include <cjson_helpers.h>
 
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
