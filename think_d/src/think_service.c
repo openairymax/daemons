@@ -461,6 +461,24 @@ static cJSON *think_plan_to_json(const airy_task_plan_t *plan)
     return root;
 }
 
+/* 反馈事件环形缓冲按统一字段契约序列化；三处响应共用同一形状。 */
+static cJSON *think_ev_json(const think_service_t *svc)
+{
+    cJSON *arr = cJSON_CreateArray();
+    if (!arr)
+        return NULL;
+    for (uint32_t i = 0; i < svc->event_count; i++) {
+        const think_feedback_event_t *ev = &svc->events[i];
+        cJSON *ej = cJSON_CreateObject();
+        cJSON_AddNumberToObject(ej, "level", ev->level);
+        cJSON_AddStringToObject(ej, "module", ev->module);
+        cJSON_AddStringToObject(ej, "event", ev->event);
+        cJSON_AddStringToObject(ej, "data", ev->data);
+        cJSON_AddItemToArray(arr, ej);
+    }
+    return arr;
+}
+
 int think_service_process(think_service_t *svc, const char *session_id, const char *prompt,
                           const char *gccp_answers, think_process_result_t *out_result)
 {
@@ -514,17 +532,7 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
                 cJSON_AddNumberToObject(st, "dual_invocations", svc->dual_invocations);
                 cJSON_AddNumberToObject(st, "dual_corrections", svc->dual_corrections);
                 cJSON_AddItemToObject(root, "stats", st);
-                cJSON *events_arr = cJSON_CreateArray();
-                for (uint32_t i = 0; i < svc->event_count; i++) {
-                    const think_feedback_event_t *ev = &svc->events[i];
-                    cJSON *ej = cJSON_CreateObject();
-                    cJSON_AddNumberToObject(ej, "level", ev->level);
-                    cJSON_AddStringToObject(ej, "module", ev->module);
-                    cJSON_AddStringToObject(ej, "event", ev->event);
-                    cJSON_AddStringToObject(ej, "data", ev->data);
-                    cJSON_AddItemToArray(events_arr, ej);
-                }
-                cJSON_AddItemToObject(root, "feedback", events_arr);
+                cJSON_AddItemToObject(root, "feedback", think_ev_json(svc));
                 out_result->json = cJSON_PrintUnformatted(root);
                 cJSON_Delete(root);
             }
@@ -555,17 +563,7 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
             cJSON_AddNumberToObject(st, "dual_invocations", svc->dual_invocations);
             cJSON_AddNumberToObject(st, "dual_corrections", svc->dual_corrections);
             cJSON_AddItemToObject(root, "stats", st);
-            cJSON *events_arr = cJSON_CreateArray();
-            for (uint32_t i = 0; i < svc->event_count; i++) {
-                const think_feedback_event_t *ev = &svc->events[i];
-                cJSON *ej = cJSON_CreateObject();
-                cJSON_AddNumberToObject(ej, "level", ev->level);
-                cJSON_AddStringToObject(ej, "module", ev->module);
-                cJSON_AddStringToObject(ej, "event", ev->event);
-                cJSON_AddStringToObject(ej, "data", ev->data);
-                cJSON_AddItemToArray(events_arr, ej);
-            }
-            cJSON_AddItemToObject(root, "feedback", events_arr);
+            cJSON_AddItemToObject(root, "feedback", think_ev_json(svc));
             out_result->json = cJSON_PrintUnformatted(root);
             cJSON_Delete(root);
         }
@@ -588,17 +586,7 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
     if (plan_json)
         cJSON_AddItemToObject(root, "plan", plan_json);
 
-    cJSON *events_arr = cJSON_CreateArray();
-    for (uint32_t i = 0; i < svc->event_count; i++) {
-        const think_feedback_event_t *ev = &svc->events[i];
-        cJSON *ej = cJSON_CreateObject();
-        cJSON_AddNumberToObject(ej, "level", ev->level);
-        cJSON_AddStringToObject(ej, "module", ev->module);
-        cJSON_AddStringToObject(ej, "event", ev->event);
-        cJSON_AddStringToObject(ej, "data", ev->data);
-        cJSON_AddItemToArray(events_arr, ej);
-    }
-    cJSON_AddItemToObject(root, "feedback", events_arr);
+    cJSON_AddItemToObject(root, "feedback", think_ev_json(svc));
 
     think_sync_engine_stats(svc);
     cJSON *st = cJSON_CreateObject();
