@@ -23,6 +23,7 @@
   "modules": [
     { "name": "rpc", "sources": ["channel_rpc.c"] },
     { "name": "service", "sources": ["channel_service.c"] },
+    { "name": "book", "sources": ["channel_book.c"] },
     { "name": "io", "sources": ["channel_io.c"] }
   ]
 }
