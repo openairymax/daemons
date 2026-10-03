@@ -7,19 +7,6 @@
  *        web-search tool implementations.
  */
 
-#include "airy_memory.h"
-#include "error.h"
-
-#include "builtin/builtin.h"
-#include "svc_logger.h"
-
-#include <cjson/cJSON.h>
-#include <cjson_helpers.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
 #include "network_common.h"
 
 #include "airy_regex.h"
