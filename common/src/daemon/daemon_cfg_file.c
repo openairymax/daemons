@@ -140,3 +140,16 @@ void daemon_ep_base(daemon_endpoint_t *out, int cmdline_tcp, const char *sock_un
     out->sock_unix = sock_unix;
     out->sock_win = sock_win;
 }
+
+/* 进程端点槽：每 daemon 进程唯一端点配置，机制件持有。 */
+static daemon_ep_cfg_t g_ep_slot;
+
+daemon_ep_cfg_t *daemon_ep_slot(void)
+{
+    return &g_ep_slot;
+}
+
+void daemon_ep_apply(daemon_endpoint_t *out, int cmdline_tcp)
+{
+    daemon_ep_fill(out, &g_ep_slot, cmdline_tcp);
+}

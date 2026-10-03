@@ -8,7 +8,7 @@
  * 0.1.19 t44/t54：config_load/ep_load 家族七副本与 svc_endpoint 六行体
  * 全仓消解的机制载体。文件读取样板（fopen/fread/限长/JSON 解析/释放）、
  * daemon 段端点三元组（socket_path/tcp_port/use_tcp）解析与端点五元组
- * 装配（daemon_ep_fill/daemon_ep_base）统一在此；守护进程仅保留 env
+ * 装配（daemon_ep_apply/daemon_ep_base）统一在此；守护进程仅保留 env
  * 覆盖与专属键提取等策略件（机制与策略分离）。
  */
 
@@ -39,7 +39,7 @@ typedef void (*daemon_cfg_fn)(cJSON *root, void *ud);
  * 与文件读取样板。 */
 typedef void (*daemon_keys_fn)(const cJSON *root, void *user);
 
-/* 服务端点五元组：svc_endpoint 策略件经 daemon_ep_fill/daemon_ep_base
+/* 服务端点五元组：svc_endpoint 策略件经 daemon_ep_apply/daemon_ep_base
  * 装配产出，daemon_boot 套接字创建与事件驱动装配按字段序消费。 */
 typedef struct {
     int use_tcp;
@@ -98,6 +98,22 @@ void daemon_ep_free(daemon_ep_cfg_t *ep);
  */
 void daemon_ep_fill(daemon_endpoint_t *out, const daemon_ep_cfg_t *ep,
                     int cmdline_tcp);
+
+/**
+ * @brief 进程端点槽访问器（机制件持有本进程唯一端点配置）。
+ *
+ * 每 daemon 进程恰有一份端点配置：槽由机制件持有，守护进程取槽交
+ * daemon_ep_load 装入、daemon_ep_free 归还，无需自持端点状态。返回
+ * 内部静态槽（借用，勿释放）。
+ */
+daemon_ep_cfg_t *daemon_ep_slot(void);
+
+/**
+ * @brief 端点槽 → 服务端点五元组（svc_endpoint 唯一机制体）。
+ *
+ * 等价 daemon_ep_fill(out, daemon_ep_slot(), cmdline_tcp)。
+ */
+void daemon_ep_apply(daemon_endpoint_t *out, int cmdline_tcp);
 
 /**
  * @brief 基线直填（无 config 户）：生成头常量端点 → 服务端点五元组。

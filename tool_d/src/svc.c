@@ -7,7 +7,7 @@
  *
  * tool 服务单例 + 生命周期五钩子。可配置户：端点基线取自生成头常量
  * （TOOL_D_SOCKET_UNIX/WIN、TOOL_D_TCP_PORT），端点族委托 daemon_cfg_file
- * 机制件（daemon_ep_load/free/fill，纯端点户无策略键）。插件执行域
+ * 机制件（daemon_ep_load/free/apply，纯端点户无策略键）。插件执行域
  * （dlopen）随迁 tool_d，权限/发现/扫描加载在本进程内初始化，生命周期
  * 由本文件承载；业务逻辑在 tool_service_*.c / builtin*.c 与 tool_rpc.c。
  */
@@ -23,22 +23,15 @@
 
 tool_service_t *g_service = NULL;
 
-static daemon_ep_cfg_t g_ep = {0};
-
 static void ep_load(const char *config_path)
 {
-    daemon_ep_load(&g_ep, config_path, TOOL_D_SOCKET_UNIX,
+    daemon_ep_load(daemon_ep_slot(), config_path, TOOL_D_SOCKET_UNIX,
                    TOOL_D_SOCKET_WIN, TOOL_D_TCP_PORT, NULL, NULL);
-}
-
-static void ep_free(void)
-{
-    daemon_ep_free(&g_ep);
 }
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    daemon_ep_fill(ep, &g_ep, cmdline_tcp);
+    daemon_ep_apply(ep, cmdline_tcp);
 }
 
 int svc_prepare(const char *config_path)
@@ -72,7 +65,7 @@ void svc_destroy(void)
         tool_service_destroy(g_service);
         g_service = NULL;
     }
-    ep_free();
+    daemon_ep_free(daemon_ep_slot());
 }
 
 /* 策略层附加装配挂点：plugin_* 方法族（dlopen 执行域）登记到
