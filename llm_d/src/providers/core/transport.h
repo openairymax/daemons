@@ -206,29 +206,6 @@ static inline uint32_t provider_json_u32_get(const cJSON *obj, const char *key)
     return cJSON_IsNumber(v) ? (uint32_t)v->valuedouble : 0;
 }
 
-/* 域内析构器：providers 失败路径释放的是自己解析的中间产物，析构归 provider
- * 域所有（B16-S2 内层反依赖——不依赖发布头 llm_service_free 门面）。语义与
- * rpc 域 llm_response_free 一致。 */
-static inline void provider_response_free(llm_response_t *resp)
-{
-    if (!resp)
-        return;
-    AIRY_FREE(resp->id);
-    AIRY_FREE(resp->model);
-    AIRY_FREE(resp->finish_reason);
-    if (resp->choices) {
-        for (size_t i = 0; i < resp->choice_count; i++) {
-            AIRY_FREE((void *)resp->choices[i].role);
-            AIRY_FREE((void *)resp->choices[i].content);
-            AIRY_FREE((void *)resp->choices[i].reasoning_content);
-            AIRY_FREE((void *)resp->choices[i].tool_call_id);
-            AIRY_FREE((void *)resp->choices[i].tool_calls_json);
-        }
-        AIRY_FREE(resp->choices);
-    }
-    AIRY_FREE(resp);
-}
-
 /* Grow-on-demand string append used by the streaming accumulators (content
  * and reasoning_content). Returns the (possibly reallocated) buffer; on
  * allocation failure returns NULL and leaves the input buffer untouched. */
