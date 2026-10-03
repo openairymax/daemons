@@ -3,7 +3,8 @@
 #
 # gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c /
 # daemon 配置与端点策略 svc.c 由 daemon_gen.py 生成；RPC 方法域
-# channel_rpc.c 与服务域 channel_service.c/channel_io.c 为手写业务源。
+# channel_rpc.c、簿记机制域 channel_book.c（双平台单源）、POSIX 策略
+# channel_service.c 与收发域 channel_io.c 为手写业务源。
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -15,12 +16,13 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
 
-# 平台映射（策略层）：channel_service.c 按单一职责拆分（2026-08-27）：
-#   channel_service.c   生命周期/打开/关闭/查询域
+# 平台映射（策略层）：簿记机制单源（2026-08-27 拆分，t89 簿记/传输再分）：
+#   channel_book.c      生命周期/close/查询域（双平台单源，机制层）
+#   channel_service.c   POSIX 三后端钩子 + SOCKET/SHM/PIPE 打开域（策略层）
 #   channel_io.c        收发（send/receive）与连通性探测（ping）域
 # Windows（G1 编译窗）：三种通道后端（AF_UNIX SOCKET / mkfifo PIPE /
 # shm_open SHM）在 UCRT/airy_mman 下均未映射（#124 C1083 实证），改用
-# channel_win32.c 纯内存服务层 stub（open/send/receive 显式 NOT_SUPPORTED），
+# channel_win32.c 注入钩子空实现（open/send/receive 显式 NOT_SUPPORTED），
 # 与 HTTP/2 网关 Windows 禁用、run_stream 501 stub 同策略；传输映射完成后
 # 删除本段并恢复 manifest 源清单直用。
 if(WIN32)
@@ -89,7 +91,7 @@ install(FILES
 if(BUILD_TESTS AND NOT WIN32)
 if(AIRY_HAS_CMOCKA)
     enable_testing()
-    add_executable(test_channel_e2e tests/test_channel_e2e.c src/channel_service.c src/channel_io.c)
+    add_executable(test_channel_e2e tests/test_channel_e2e.c src/channel_service.c src/channel_book.c src/channel_io.c)
     target_compile_definitions(test_channel_e2e PRIVATE AIRY_COMPLIANCE_IMPL)
     target_include_directories(test_channel_e2e PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -106,7 +108,7 @@ if(AIRY_HAS_CMOCKA)
     add_test(NAME channel_e2e COMMAND test_channel_e2e)
 else()
     enable_testing()
-    add_executable(test_channel_e2e tests/test_channel_e2e.c src/channel_service.c src/channel_io.c)
+    add_executable(test_channel_e2e tests/test_channel_e2e.c src/channel_service.c src/channel_book.c src/channel_io.c)
     target_compile_definitions(test_channel_e2e PRIVATE AIRY_COMPLIANCE_IMPL)
     target_include_directories(test_channel_e2e PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include

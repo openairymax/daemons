@@ -3,28 +3,28 @@
 
 /**
  * @file channel_service.c
- * @brief Channel service 生命周期/打开/关闭/查询域：create/destroy/
- *        start/stop/open/close/list/get_info/set_callback/is_healthy，
- *        以及跨文件共享的 find_channel()/get_time_ms()。
+ * @brief Channel 服务 POSIX 策略注入：三后端钩子与 SOCKET/SHM/PIPE 打开域。
  *
- * 2026-08-27 域拆分（原 849 行 → 2 文件）：收发与连通性探测见
- * channel_io.c；内部类型经 channel_service_internal.h 共享。
+ * 生命周期/close/查询簿记已下沉 channel_book.c 双平台单源；本文件是
+ * POSIX 策略面：
+ *   - backend_svc_init/start  socket_dir 逐级 mkdir 自举与补创
+ *   - backend_entry_free      socket/shm 平台资源回收
+ *   - channel_service_open    三传输建立（AF_UNIX SOCKET / shm_open SHM /
+ *                             mkfifo PIPE）
+ * 收发与连通性探测见 channel_io.c；Windows 策略见 channel_win32.c。
  */
 
 #include "channel_service.h"
 
 #include "airy_mman.h"
-#include "atomic_compat.h"
 #include "daemon_errors.h"
 #include "airy_memory.h"
-#include "daemon_platform_ext.h"
 #include "channel_service_internal.h"
 #include "string_compat.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -32,19 +32,65 @@
 #include <unistd.h>
 #include "error.h"
 
-uint64_t get_time_ms(void)
+int backend_svc_init(channel_service_t *svc)
 {
-    return airy_time_ms();
+    /* 自举 socket_dir（SOCKET/PIPE 通道端点目录）：新系统上默认目录
+     * /var/tmp/agentrt/channels 不存在，create_socket_channel() 的 bind()
+     * 会因 ENOENT 失败（channel.* 返回 -32603）。daemon 自管运行目录，
+     * 不依赖外部预创建——幂等逐级 mkdir。 */
+    char dir_buf[256];
+    size_t dir_len = strlen(svc->config.socket_dir);
+    if (dir_len == 0 || dir_len >= sizeof(dir_buf)) {
+        fprintf(stderr, "channel: invalid socket_dir (len=%zu)\n", dir_len);
+        return -1;
+    }
+    __builtin_memcpy(dir_buf, svc->config.socket_dir, dir_len + 1);
+    for (char *p = dir_buf + 1; *p; p++) {
+        if (*p != '/')
+            continue;
+        *p = '\0';
+        if (mkdir(dir_buf, 0755) != 0 && errno != EEXIST) {
+            fprintf(stderr, "channel: mkdir %s failed: %s\n", dir_buf, strerror(errno));
+            return -1;
+        }
+        *p = '/';
+    }
+    if (mkdir(dir_buf, 0755) != 0 && errno != EEXIST) {
+        fprintf(stderr, "channel: mkdir %s failed: %s\n", dir_buf, strerror(errno));
+        return -1;
+    }
+    return 0;
 }
 
-channel_entry_t *find_channel(channel_service_t *svc, const char *channel_id)
+void backend_svc_start(channel_service_t *svc)
 {
-    for (size_t i = 0; i < svc->channel_count; i++) {
-        if (strcmp(svc->channels[i].info.channel_id, channel_id) == 0) {
-            return &svc->channels[i];
-        }
+    if (svc->config.socket_dir[0]) {
+        mkdir(svc->config.socket_dir, 0755);
     }
-    AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
+}
+
+void backend_entry_free(channel_entry_t *entry)
+{
+    if (entry->socket_fd >= 0) {
+        close(entry->socket_fd);
+        if (entry->info.type == CHANNEL_TYPE_SOCKET && entry->info.endpoint[0]) {
+            unlink(entry->info.endpoint);
+        }
+        entry->socket_fd = -1;
+    }
+
+    if (entry->shm_ptr && entry->shm_ptr != MAP_FAILED) {
+        munmap(entry->shm_ptr, entry->shm_size);
+        entry->shm_ptr = NULL;
+    }
+    if (entry->shm_fd >= 0) {
+        close(entry->shm_fd);
+        entry->shm_fd = -1;
+    }
+    if (entry->shm_name[0]) {
+        shm_unlink(entry->shm_name);
+        entry->shm_name[0] = '\0';
+    }
 }
 
 static int create_socket_channel(channel_entry_t *entry, const char *endpoint)
@@ -123,136 +169,6 @@ static int create_shm_channel(channel_entry_t *entry, const char *endpoint)
     return 0;
 }
 
-static void destroy_channel(channel_entry_t *entry)
-{
-    if (entry->socket_fd >= 0) {
-        close(entry->socket_fd);
-        if (entry->info.type == CHANNEL_TYPE_SOCKET && entry->info.endpoint[0]) {
-            unlink(entry->info.endpoint);
-        }
-        entry->socket_fd = -1;
-    }
-
-    if (entry->shm_ptr && entry->shm_ptr != MAP_FAILED) {
-        munmap(entry->shm_ptr, entry->shm_size);
-        entry->shm_ptr = NULL;
-    }
-    if (entry->shm_fd >= 0) {
-        close(entry->shm_fd);
-        entry->shm_fd = -1;
-    }
-    if (entry->shm_name[0]) {
-        shm_unlink(entry->shm_name);
-        entry->shm_name[0] = '\0';
-    }
-
-    if (entry->recv_buffer) {
-        AIRY_FREE(entry->recv_buffer);
-        entry->recv_buffer = NULL;
-    }
-    entry->recv_buffer_size = 0;
-    entry->recv_buffer_used = 0;
-}
-
-channel_service_t *channel_service_create(const channel_config_t *config)
-{
-    channel_service_t *svc = (channel_service_t *)AIRY_CALLOC(1, sizeof(channel_service_t));
-    if (!svc) {
-        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-    }
-
-    if (config) {
-        svc->config = *config;
-    } else {
-        channel_config_t defaults = CHANNEL_CONFIG_DEFAULTS;
-        svc->config = defaults;
-    }
-
-    /* 自举 socket_dir（SOCKET/PIPE 通道端点目录）：新系统上默认目录
-     * /var/tmp/agentrt/channels 不存在，create_socket_channel() 的 bind()
-     * 会因 ENOENT 失败（channel.* 返回 -32603）。daemon 自管运行目录，
-     * 不依赖外部预创建——幂等逐级 mkdir。 */
-    char dir_buf[256];
-    size_t dir_len = strlen(svc->config.socket_dir);
-    if (dir_len == 0 || dir_len >= sizeof(dir_buf)) {
-        fprintf(stderr, "channel: invalid socket_dir (len=%zu)\n", dir_len);
-        AIRY_FREE(svc);
-        return NULL;
-    }
-    __builtin_memcpy(dir_buf, svc->config.socket_dir, dir_len + 1);
-    for (char *p = dir_buf + 1; *p; p++) {
-        if (*p != '/')
-            continue;
-        *p = '\0';
-        if (mkdir(dir_buf, 0755) != 0 && errno != EEXIST) {
-            fprintf(stderr, "channel: mkdir %s failed: %s\n", dir_buf, strerror(errno));
-            AIRY_FREE(svc);
-            return NULL;
-        }
-        *p = '/';
-    }
-    if (mkdir(dir_buf, 0755) != 0 && errno != EEXIST) {
-        fprintf(stderr, "channel: mkdir %s failed: %s\n", dir_buf, strerror(errno));
-        AIRY_FREE(svc);
-        return NULL;
-    }
-
-    for (size_t i = 0; i < CHANNEL_MAX_CHANNELS; i++) {
-        svc->channels[i].socket_fd = -1;
-        svc->channels[i].shm_fd = -1;
-    }
-
-    svc->healthy = true;
-    airy_mtx_init(&svc->lock);
-    return svc;
-}
-
-void channel_service_destroy(channel_service_t *svc)
-{
-    if (!svc)
-        return;
-
-    if (svc->running) {
-        channel_service_stop(svc);
-    }
-
-    for (size_t i = 0; i < svc->channel_count; i++) {
-        destroy_channel(&svc->channels[i]);
-    }
-
-    airy_mtx_destroy(&svc->lock);
-    AIRY_FREE(svc);
-}
-
-int channel_service_start(channel_service_t *svc)
-{
-    if (!svc)
-        return AIRY_ERR_INVALID_PARAM;
-    if (svc->running)
-        return 0;
-
-    if (svc->config.socket_dir[0]) {
-        mkdir(svc->config.socket_dir, 0755);
-    }
-
-    svc->running = true;
-    svc->healthy = true;
-    return 0;
-}
-
-int channel_service_stop(channel_service_t *svc)
-{
-    if (!svc || !svc->running)
-        return AIRY_ERR_INVALID_PARAM;
-
-    for (size_t i = 0; i < svc->channel_count; i++) {
-        destroy_channel(&svc->channels[i]);
-    }
-    svc->channel_count = 0;
-    svc->running = false;
-    return 0;
-}
-
 int channel_service_open(channel_service_t *svc, const char *channel_id, const char *name,
                          channel_type_t type, const char *endpoint)
 {
@@ -327,7 +243,7 @@ int channel_service_open(channel_service_t *svc, const char *channel_id, const c
     entry->recv_buffer_size = entry->info.buffer_size;
     entry->recv_buffer = (uint8_t *)AIRY_CALLOC(1, entry->recv_buffer_size);
     if (!entry->recv_buffer) {
-        destroy_channel(entry);
+        channel_entry_free(entry);
         airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
@@ -335,96 +251,4 @@ int channel_service_open(channel_service_t *svc, const char *channel_id, const c
     svc->channel_count++;
     airy_mtx_unlock(&svc->lock);
     return 0;
-}
-
-int channel_service_close(channel_service_t *svc, const char *channel_id)
-{
-    if (!svc || !channel_id)
-        return AIRY_ERR_INVALID_PARAM;
-
-    airy_mtx_lock(&svc->lock);
-    for (size_t i = 0; i < svc->channel_count; i++) {
-        if (strcmp(svc->channels[i].info.channel_id, channel_id) == 0) {
-            destroy_channel(&svc->channels[i]);
-            if (i < svc->channel_count - 1) {
-                svc->channels[i] = svc->channels[svc->channel_count - 1];
-                __builtin_memset(&svc->channels[svc->channel_count - 1], 0,
-                                 sizeof(channel_entry_t));
-                svc->channels[svc->channel_count - 1].socket_fd = -1;
-                svc->channels[svc->channel_count - 1].shm_fd = -1;
-            }
-            svc->channel_count--;
-            airy_mtx_unlock(&svc->lock);
-            return 0;
-        }
-    }
-    airy_mtx_unlock(&svc->lock);
-    AIRY_ERROR(AIRY_ERR_NOT_FOUND, "channel not found");
-    return AIRY_ERR_NOT_FOUND;
-}
-
-int channel_service_list(channel_service_t *svc, channel_info_t *out_list, size_t list_capacity,
-                         size_t *out_count)
-{
-    if (!svc || !out_list || !out_count)
-        return AIRY_ERR_INVALID_PARAM;
-
-    airy_mtx_lock(&svc->lock);
-    size_t count = svc->channel_count;
-    if (count > list_capacity)
-        count = list_capacity;
-
-    for (size_t i = 0; i < count; i++) {
-        out_list[i] = svc->channels[i].info;
-    }
-
-    *out_count = count;
-    airy_mtx_unlock(&svc->lock);
-    return 0;
-}
-
-int channel_service_get_info(channel_service_t *svc, const char *channel_id,
-                             channel_info_t *out_info)
-{
-    if (!svc || !channel_id || !out_info)
-        return AIRY_ERR_INVALID_PARAM;
-
-    airy_mtx_lock(&svc->lock);
-    channel_entry_t *entry = find_channel(svc, channel_id);
-    if (!entry) {
-        airy_mtx_unlock(&svc->lock);
-        AIRY_ERROR(AIRY_ERR_NOT_FOUND, "channel not found");
-        return AIRY_ERR_NOT_FOUND;
-    }
-
-    *out_info = entry->info;
-    airy_mtx_unlock(&svc->lock);
-    return 0;
-}
-
-int channel_service_set_callback(channel_service_t *svc, const char *channel_id,
-                                 channel_message_cb_t callback, void *user_data)
-{
-    if (!svc || !channel_id)
-        return AIRY_ERR_INVALID_PARAM;
-
-    airy_mtx_lock(&svc->lock);
-    channel_entry_t *entry = find_channel(svc, channel_id);
-    if (!entry) {
-        airy_mtx_unlock(&svc->lock);
-        AIRY_ERROR(AIRY_ERR_NOT_FOUND, "channel not found");
-        return AIRY_ERR_NOT_FOUND;
-    }
-
-    entry->callback = callback;
-    entry->callback_user_data = user_data;
-    airy_mtx_unlock(&svc->lock);
-    return 0;
-}
-
-bool channel_service_is_healthy(channel_service_t *svc)
-{
-    if (!svc)
-        return false;
-    return svc->healthy;
 }
