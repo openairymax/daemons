@@ -1,26 +1,32 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
-#include "airy_memory.h"
-#include "error.h"
 /*
  * @file daemon_rpc_client.c
- * @brief Lightweight Unix-socket JSON-RPC client implementation.
+ * @brief Daemon JSON-RPC 轻量客户端（L1 socket 通道）
  *
- * Phase-3 executor consolidation refactor: the airy_sys_memory_* /
- * airy_sys_agent_* syscalls extracted from syscall_router.c are forwarded
- * through this helper to the mem_d / agent_d daemons.
+ * 机制与策略分离（0.1.19 §121）：平台差异收窄为四个连接原语——
+ * rpc_connect（POSIX AF_UNIX / Windows TCP 回环）、rpc_poll、rpc_recv、
+ * rpc_send_raw；机制层（超时步进、取消 drill-down、EOF 完整性探测、
+ * hangup 排空、分片发送）单源共享，两平台不再各持双轨实现。
  *
- * Implementation:
- *   - POSIX: socket(AF_UNIX, SOCK_STREAM) + connect + send + recv (poll timeout)
- *   - Windows: returns AIRY_ERR_NOT_SUPPORTED (gateway_d keeps the
- *     in-process g_runtime fallback path on Windows, but the thin IPC
- *     client is not supported yet)
+ * rpc_poll 以就绪掩码统一 poll（POSIX）与 select（Windows）。Windows
+ * select 无挂断位：对端关闭天然表现为「可读 + recv()==0」，HANGUP
+ * 掩码在 Windows 恒为空，hangup 排空与双探测路径自动退化为原 Windows
+ * 行为，无需平台分支。EINTR/EAGAIN 重试是 POSIX 真实语义（Windows
+ * 的 errno 不由 winsock 设置），以平台条件收窄在 recv 失败路径。
+ *
+ * Phase-3: the airy_sys_memory_* / airy_sys_agent_* syscalls extracted
+ * from syscall_router.c are forwarded through this helper to the
+ * mem_d / agent_d daemons.
  */
 
 #include "daemon_rpc_client.h"
 #include "daemon_l1_server.h"
 #include "svc_logger.h"
+
+#include "airy_memory.h"
+#include "error.h"
 
 #include <cjson/cJSON.h>
 
@@ -43,6 +49,9 @@
 #define DAEMON_RPC_DEFAULT_TIMEOUT_MS 30000
 #define DAEMON_RPC_MAX_RESPONSE (16 * 1024 * 1024) /* 16MB */
 #define DAEMON_RPC_INITIAL_BUF 4096
+#define DAEMON_RPC_CHUNK 4096
+#define DAEMON_RPC_POLL_SLICE_MS 200
+#define DAEMON_RPC_CANCEL_TIMEOUT_MS 5000
 
 typedef struct {
     char *data;
@@ -95,8 +104,8 @@ static int rpc_buf_append(rpc_buf_t *buf, const char *src, size_t len)
     return AIRY_SUCCESS;
 }
 
-/* 平台统一的连接关闭（POSIX: close / Windows: closesocket），供公共
- * daemon_rpc_call_cancelable 在两种平台复用同一清理路径。 */
+/* 平台统一的连接关闭（POSIX: close / Windows: closesocket），供机制层
+ * 取消与收尾路径在两种平台复用同一清理动作。 */
 static void rpc_close_fd(int fd)
 {
     if (fd < 0)
@@ -108,6 +117,11 @@ static void rpc_close_fd(int fd)
 #endif
 }
 
+/* ---- 平台连接原语（平台差异唯一出口） ---- */
+
+#define RPC_IO_READABLE 0x1
+#define RPC_IO_HANGUP 0x2
+
 #if AIRY_PLATFORM_POSIX
 
 /**
@@ -115,11 +129,11 @@ static void rpc_close_fd(int fd)
  * @return fd >= 0 on success; -1 on failure (errno logged; the caller maps
  *         the sentinel to an AIRY_ERR_* code)
  */
-static int rpc_connect_unix(const char *socket_path)
+static int rpc_connect(const char *socket_path)
 {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) {
-        SVC_LOG_ERROR("rpc_connect_unix: socket() failed: %s", strerror(errno));
+        SVC_LOG_ERROR("rpc_connect: socket() failed: %s", strerror(errno));
         return -1;
     }
 
@@ -137,168 +151,46 @@ static int rpc_connect_unix(const char *socket_path)
          * error codes are already negative (e.g. AIRY_ERR_NOT_FOUND = -6),
          * so negating them yields a positive value that callers misread as
          * a valid fd and send() on it (misleading "send failed" reports). */
-        SVC_LOG_ERROR("rpc_connect_unix: connect(%s) failed: %s", socket_path,
+        SVC_LOG_ERROR("rpc_connect: connect(%s) failed: %s", socket_path,
                       strerror(saved_errno));
         return -1;
     }
     return fd;
 }
 
-/**
- * @brief Receive with timeout and cancellation: loop recv until a complete
- *        JSON is received or timeout/cancel
- *
- * Simplified strategy: use cJSON_ParseIntervalFromBuffer to detect JSON
- * completeness; if parsing fails and no timeout yet, keep receiving. This is
- * sufficient for the typical single-packet daemon response, and also handles
- * complex fragmented packets correctly.
- *
- * Improvement 1 (cancellation drill-down): check the cancel token after each
- * poll slice (200ms). On hit, first close the current connection (invoke
- * response discarded), then send the cancel request over a NEW connection
- * (daemons are "single-request-single-response-then-close"; cancel needs its
- * own connection), returning AIRY_ERR_CANCELED.
- */
-static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
-                             airy_cancel_token_t *cancel_token, const char *cancel_socket_path,
-                             const char *cancel_method, const char *cancel_params_json)
+/** @brief poll → 就绪掩码。EINTR 内部重试；0 = 超时；-1 = 硬错误
+ *  （POLLERR/POLLNVAL 且无可读数据）。 */
+static int rpc_poll(int fd, int timeout_ms)
 {
-
-    uint32_t elapsed_ms = 0;
-    const uint32_t step_ms = 200;
-
-    while (elapsed_ms < timeout_ms) {
-
-        if (cancel_token && airy_cancel_token_is_canceled(cancel_token)) {
-#if AIRY_PLATFORM_POSIX
-            close(fd);
-#endif
-
-            if (cancel_method && cancel_method[0]) {
-                char *cancel_result = NULL;
-                int crc = daemon_rpc_call(cancel_socket_path, cancel_method, cancel_params_json,
-                                          &cancel_result, 5000);
-                AIRY_FREE(cancel_result);
-                if (crc != AIRY_SUCCESS)
-                    SVC_LOG_WARN("rpc cancel request failed (method=%s, rc=%d)", cancel_method,
-                                 crc);
-            }
-            return AIRY_ERR_CANCELED;
-        }
-
+    for (;;) {
         struct pollfd pfd;
         pfd.fd = fd;
         pfd.events = POLLIN;
         pfd.revents = 0;
-
-        int remain =
-            (int)((timeout_ms - elapsed_ms) < step_ms ? (timeout_ms - elapsed_ms) : step_ms);
-        int pr = poll(&pfd, 1, remain);
-        if (getenv("AIRY_RPC_DIAG") && pr > 0)
-            SVC_LOG_ERROR("rpc diag: poll hit fd=%d pr=%d revents=0x%x buf_size=%zu", fd, pr,
-                          pfd.revents, buf->size);
-        if (pr < 0) {
-            if (errno == EINTR)
-                continue;
-            return AIRY_ERR_GENERIC_FAIL;
-        }
-        if (pr == 0) {
-            elapsed_ms += (uint32_t)remain;
-
-            if (buf->size > 0) {
-                cJSON *probe = cJSON_Parse(buf->data);
-                if (probe) {
-                    cJSON_Delete(probe);
-                    return AIRY_SUCCESS;
-                }
-            }
+        int pr = poll(&pfd, 1, timeout_ms);
+        if (pr < 0 && errno == EINTR)
             continue;
-        }
-        /* The peer closes immediately after sending the response (daemons are
-         * "single-request-single-response-then-close"); poll may return both
-         * POLLIN and POLLHUP. POLLIN data must be processed first, otherwise
-         * checking POLLHUP first discards the already-arrived complete
-         * response (RPC timing race). Large responses (>4096 bytes) cannot be
-         * read in one recv: even with hangup set, keep recv-ing the remaining
-         * data (bytes sent before close are still readable from the socket
-         * buffer), finally ending with recv()==0 (EOF), then judge JSON
-         * completeness. */
-        int hangup = (pfd.revents & (POLLHUP | POLLNVAL));
-        if (pfd.revents & POLLIN) {
-            char chunk[4096];
-            ssize_t n = recv(fd, chunk, sizeof(chunk), 0);
-            if (getenv("AIRY_RPC_DIAG"))
-                SVC_LOG_ERROR("rpc diag: recv n=%zd errno=%d buf_size=%zu revents=0x%x", n, errno,
-                              buf->size, pfd.revents);
-            if (n < 0) {
-                if (errno == EINTR || errno == EAGAIN)
-                    continue;
-                if (getenv("AIRY_RPC_DIAG"))
-                    SVC_LOG_ERROR("rpc diag: recv<0 errno=%d buf_size=%zu", errno, buf->size);
-                return AIRY_ERR_GENERIC_FAIL;
-            }
-            if (n == 0) {
-
-                if (buf->size > 0) {
-                    cJSON *probe = cJSON_Parse(buf->data);
-                    if (probe) {
-                        cJSON_Delete(probe);
-                        return AIRY_SUCCESS;
-                    }
-                }
-                if (getenv("AIRY_RPC_DIAG"))
-                    SVC_LOG_ERROR("rpc diag: EOF buf_size=%zu head=%.120s", buf->size,
-                                  buf->data ? buf->data : "");
-                return AIRY_ERR_GENERIC_FAIL;
-            }
-            int rc = rpc_buf_append(buf, chunk, (size_t)n);
-            if (rc != AIRY_SUCCESS)
-                return rc;
-
-            cJSON *probe = cJSON_Parse(buf->data);
-            if (probe) {
-                cJSON_Delete(probe);
-                return AIRY_SUCCESS;
-            }
-            if (hangup) {
-                /* Data incomplete but connection closed: read out the
-                 * remaining socket data (bytes the peer sent before close are
-                 * still readable) until EOF before judging completeness, so a
-                 * large response is not misjudged as FAIL by hangup. */
-                for (;;) {
-                    ssize_t n2 = recv(fd, chunk, sizeof(chunk), 0);
-                    if (n2 < 0) {
-                        if (errno == EINTR)
-                            continue;
-                        if (errno == EAGAIN)
-                            break;
-                        return AIRY_ERR_GENERIC_FAIL;
-                    }
-                    if (n2 == 0)
-                        break;
-                    rc = rpc_buf_append(buf, chunk, (size_t)n2);
-                    if (rc != AIRY_SUCCESS)
-                        return rc;
-                }
-                cJSON *final = cJSON_Parse(buf->data);
-                if (final) {
-                    cJSON_Delete(final);
-                    return AIRY_SUCCESS;
-                }
-                if (getenv("AIRY_RPC_DIAG"))
-                    SVC_LOG_ERROR("rpc diag: hangup json-incomplete buf_size=%zu head=%.120s",
-                                  buf->size, buf->data ? buf->data : "");
-                return AIRY_ERR_GENERIC_FAIL;
-            }
-            elapsed_ms += 1;
-        } else if (hangup || (pfd.revents & POLLERR)) {
-            if (getenv("AIRY_RPC_DIAG"))
-                SVC_LOG_ERROR("rpc diag: hangup-no-POLLIN revents=0x%x buf_size=%zu", pfd.revents,
-                              buf->size);
-            return AIRY_ERR_GENERIC_FAIL;
-        }
+        if (pr <= 0)
+            return pr;
+        int ev = 0;
+        if (pfd.revents & POLLIN)
+            ev |= RPC_IO_READABLE;
+        if (pfd.revents & POLLHUP)
+            ev |= RPC_IO_HANGUP;
+        if (ev)
+            return ev;
+        return -1;
     }
-    return AIRY_ERR_TIMEOUT;
+}
+
+static int rpc_recv(int fd, void *buf, int len)
+{
+    return (int)recv(fd, buf, (size_t)len, 0);
+}
+
+static int rpc_send_raw(int fd, const void *buf, int len)
+{
+    return (int)send(fd, buf, (size_t)len, 0);
 }
 
 #elif AIRY_PLATFORM_WINDOWS
@@ -309,14 +201,14 @@ static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
  * 约定一致；CLI/gateway 在 Windows 下传入 TCP 端点。 */
 
 /** @brief 解析 "host:port" 并 TCP connect，返回 SOCKET（int）或 -1。 */
-static int rpc_connect_unix(const char *socket_path)
+static int rpc_connect(const char *socket_path)
 {
     char host[128];
     char port_str[16];
     const char *colon = socket_path ? strrchr(socket_path, ':') : NULL;
     if (!colon || colon == socket_path || (size_t)(colon - socket_path) >= sizeof(host) ||
         strlen(colon + 1) >= sizeof(port_str)) {
-        SVC_LOG_ERROR("rpc_connect_unix: invalid TCP endpoint '%s'", socket_path ? socket_path : "");
+        SVC_LOG_ERROR("rpc_connect: invalid TCP endpoint '%s'", socket_path ? socket_path : "");
         return -1;
     }
     size_t host_len = (size_t)(colon - socket_path);
@@ -325,7 +217,7 @@ static int rpc_connect_unix(const char *socket_path)
     strcpy(port_str, colon + 1);
     uint16_t port = (uint16_t)atoi(port_str);
     if (port == 0) {
-        SVC_LOG_ERROR("rpc_connect_unix: invalid port in '%s'", socket_path);
+        SVC_LOG_ERROR("rpc_connect: invalid port in '%s'", socket_path);
         return -1;
     }
 
@@ -341,86 +233,233 @@ static int rpc_connect_unix(const char *socket_path)
         addr.sin_addr.s_addr = INADDR_LOOPBACK;
     }
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        SVC_LOG_ERROR("rpc_connect_unix: connect(%s) failed: %d", socket_path, WSAGetLastError());
+        SVC_LOG_ERROR("rpc_connect: connect(%s) failed: %d", socket_path, WSAGetLastError());
         closesocket(fd);
         return -1;
     }
     return (int)fd;
 }
 
-/** @brief select 版 recv 循环（等价 POSIX poll 语义）。 */
-static int rpc_recv_response(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
-                             airy_cancel_token_t *cancel_token, const char *cancel_socket_path,
-                             const char *cancel_method, const char *cancel_params_json)
+/** @brief select → 就绪掩码。select 无挂断位：可读即返回 READABLE，
+ *  对端关闭由 recv()==0 呈现，HANGUP 恒不置位。 */
+static int rpc_poll(int fd, int timeout_ms)
+{
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET((SOCKET)fd, &rfds);
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = (long)timeout_ms * 1000;
+    int pr = select(0, &rfds, NULL, NULL, &tv);
+    if (pr <= 0)
+        return pr;
+    return RPC_IO_READABLE;
+}
+
+static int rpc_recv(int fd, void *buf, int len)
+{
+    return (int)recv((SOCKET)fd, buf, len, 0);
+}
+
+static int rpc_send_raw(int fd, const void *buf, int len)
+{
+    return (int)send((SOCKET)fd, buf, len, 0);
+}
+
+#endif /* AIRY_PLATFORM_WINDOWS / POSIX */
+
+/* ---- 机制件（平台无关，单源） ---- */
+
+/** @brief 已收字节是否构成完整 JSON（EOF / 超时切片共用的完整性探测）。 */
+static int rpc_complete(const rpc_buf_t *buf)
+{
+    if (buf->size == 0)
+        return 0;
+    cJSON *probe = cJSON_Parse(buf->data);
+    if (!probe)
+        return 0;
+    cJSON_Delete(probe);
+    return 1;
+}
+
+/**
+ * @brief 取消 drill-down：丢弃在途响应连接，经新连接转发取消请求。
+ * daemons 是「单请求单响应即关闭」，取消必须走独立连接。
+ */
+static int rpc_cancel(int fd, const char *cancel_socket_path, const char *cancel_method,
+                      const char *cancel_params_json)
+{
+    rpc_close_fd(fd);
+    if (cancel_method && cancel_method[0]) {
+        char *cancel_result = NULL;
+        int crc = daemon_rpc_call(cancel_socket_path, cancel_method, cancel_params_json,
+                                  &cancel_result, DAEMON_RPC_CANCEL_TIMEOUT_MS);
+        AIRY_FREE(cancel_result);
+        if (crc != AIRY_SUCCESS)
+            SVC_LOG_WARN("rpc cancel request failed (method=%s, rc=%d)", cancel_method, crc);
+    }
+    return AIRY_ERR_CANCELED;
+}
+
+/** @brief 分片发送直至完整写出；部分写出不再误报（原 POSIX 单次 send
+ *  在请求超过 socket 缓冲时会静默截断，0.1.19 §121 统一为循环发送）。 */
+static int rpc_send_all(int fd, const char *request_str)
+{
+    size_t req_len = strlen(request_str);
+    size_t sent_total = 0;
+    while (sent_total < req_len) {
+        int n = rpc_send_raw(fd, request_str + sent_total, (int)(req_len - sent_total));
+        if (n <= 0)
+            return AIRY_ERR_GENERIC_FAIL;
+        sent_total += (size_t)n;
+    }
+    return AIRY_SUCCESS;
+}
+
+/**
+ * @brief Connect + send a JSON-RPC request, returning the live socket.
+ *
+ * Shared prefix of daemon_rpc_call_cancelable and daemon_rpc_call_stream:
+ * serializes the request via daemon_rpc_json_req (0.1.19 §80 mechanism)
+ * and sends it over a freshly connected socket. The caller owns the
+ * returned fd (>= 0) and must close it; on failure a negative AIRY_ERR_*
+ * code is returned.
+ */
+static int rpc_conn_send(const char *socket_path, const char *method, const char *params_json)
+{
+    int fd = rpc_connect(socket_path);
+    if (fd < 0)
+        return AIRY_ERR_NOT_FOUND;
+
+    char *request_str = daemon_rpc_json_req(method, params_json);
+    if (!request_str) {
+        rpc_close_fd(fd);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    int rc = rpc_send_all(fd, request_str);
+    AIRY_FREE(request_str);
+    if (rc != AIRY_SUCCESS) {
+        rpc_close_fd(fd);
+        SVC_LOG_ERROR("daemon_rpc_call: send failed (method=%s)", method);
+        return AIRY_ERR_GENERIC_FAIL;
+    }
+    return fd;
+}
+
+/**
+ * @brief hangup 排空：对端已关闭但响应尚未完整——继续读取 socket 缓冲
+ * 中对端关闭前已发出的数据直至 EOF，再做完整性判定，避免大响应被
+ * hangup 误判为失败（RPC 时序竞态）。仅 POSIX 可达（HANGUP 掩码）。
+ */
+static int rpc_drain(int fd, rpc_buf_t *buf)
+{
+    char chunk[DAEMON_RPC_CHUNK];
+    for (;;) {
+        int n = rpc_recv(fd, chunk, sizeof(chunk));
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EAGAIN)
+                break;
+            return AIRY_ERR_GENERIC_FAIL;
+        }
+        if (n == 0)
+            break;
+        int rc = rpc_buf_append(buf, chunk, (size_t)n);
+        if (rc != AIRY_SUCCESS)
+            return rc;
+    }
+    if (rpc_complete(buf))
+        return AIRY_SUCCESS;
+    if (getenv("AIRY_RPC_DIAG"))
+        SVC_LOG_ERROR("rpc diag: hangup json-incomplete buf_size=%zu head=%.120s", buf->size,
+                      buf->data ? buf->data : "");
+    return AIRY_ERR_GENERIC_FAIL;
+}
+
+/**
+ * @brief Receive with timeout and cancellation: loop recv until a complete
+ *        JSON is received or timeout/cancel.
+ *
+ * Strategy: cJSON completeness probing (rpc_complete); if parsing fails
+ * and no timeout yet, keep receiving. Sufficient for the typical
+ * single-packet daemon response, and also handles complex fragmented
+ * packets.
+ *
+ * Cancellation drill-down: the cancel token is checked after each poll
+ * slice; on hit the in-flight connection is dropped and the cancel request
+ * rides a NEW connection (rpc_cancel), returning AIRY_ERR_CANCELED.
+ *
+ * POLLIN-before-HANGUP discipline: daemons are "single-request-single-
+ * response-then-close"; poll may return POLLIN and POLLHUP together.
+ * Readable data must be consumed first — checking hangup first would
+ * discard the already-arrived complete response (RPC timing race). Large
+ * responses cannot be read in one recv: even with hangup set, keep
+ * recv-ing (bytes sent before close stay readable in the socket buffer),
+ * ending with recv()==0 (EOF), then judge completeness (rpc_drain).
+ */
+static int rpc_recv_resp(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
+                         airy_cancel_token_t *cancel_token, const char *cancel_socket_path,
+                         const char *cancel_method, const char *cancel_params_json)
 {
     uint32_t elapsed_ms = 0;
-    const uint32_t step_ms = 200;
 
     while (elapsed_ms < timeout_ms) {
-        if (cancel_token && airy_cancel_token_is_canceled(cancel_token)) {
-            closesocket((SOCKET)fd);
-            if (cancel_method && cancel_method[0]) {
-                char *cancel_result = NULL;
-                int crc = daemon_rpc_call(cancel_socket_path, cancel_method, cancel_params_json,
-                                          &cancel_result, 5000);
-                AIRY_FREE(cancel_result);
-                if (crc != AIRY_SUCCESS)
-                    SVC_LOG_WARN("rpc cancel request failed (method=%s, rc=%d)", cancel_method, crc);
-            }
-            return AIRY_ERR_CANCELED;
-        }
+        if (cancel_token && airy_cancel_token_is_canceled(cancel_token))
+            return rpc_cancel(fd, cancel_socket_path, cancel_method, cancel_params_json);
 
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET((SOCKET)fd, &rfds);
-        struct timeval tv;
-        tv.tv_sec = 0;
-        tv.tv_usec = (long)(step_ms * 1000);
-
-        int pr = select(0, &rfds, NULL, NULL, &tv);
-        if (pr < 0)
-            return AIRY_ERR_GENERIC_FAIL;
-        if (pr == 0) {
-            elapsed_ms += step_ms;
-            if (buf->size > 0) {
-                cJSON *probe = cJSON_Parse(buf->data);
-                if (probe) {
-                    cJSON_Delete(probe);
-                    return AIRY_SUCCESS;
-                }
-            }
+        int remain = (int)((timeout_ms - elapsed_ms) < DAEMON_RPC_POLL_SLICE_MS
+                               ? (timeout_ms - elapsed_ms)
+                               : DAEMON_RPC_POLL_SLICE_MS);
+        int ev = rpc_poll(fd, remain);
+        if (ev == 0) {
+            elapsed_ms += (uint32_t)remain;
+            if (rpc_complete(buf))
+                return AIRY_SUCCESS;
             continue;
         }
-
-        char chunk[4096];
-        int n = recv((SOCKET)fd, chunk, sizeof(chunk), 0);
-        if (n < 0)
+        if (ev < 0)
             return AIRY_ERR_GENERIC_FAIL;
+
+        if (!(ev & RPC_IO_READABLE)) {
+            if (getenv("AIRY_RPC_DIAG"))
+                SVC_LOG_ERROR("rpc diag: hangup-no-POLLIN revents=0x%x buf_size=%zu", ev,
+                              buf->size);
+            return AIRY_ERR_GENERIC_FAIL;
+        }
+
+        char chunk[DAEMON_RPC_CHUNK];
+        int n = rpc_recv(fd, chunk, sizeof(chunk));
+        if (n < 0) {
+#if AIRY_PLATFORM_POSIX
+            if (errno == EINTR || errno == EAGAIN)
+                continue;
+#endif
+            if (getenv("AIRY_RPC_DIAG"))
+                SVC_LOG_ERROR("rpc diag: recv<0 errno=%d buf_size=%zu", errno, buf->size);
+            return AIRY_ERR_GENERIC_FAIL;
+        }
         if (n == 0) {
-            if (buf->size > 0) {
-                cJSON *probe = cJSON_Parse(buf->data);
-                if (probe) {
-                    cJSON_Delete(probe);
-                    return AIRY_SUCCESS;
-                }
-            }
+            if (rpc_complete(buf))
+                return AIRY_SUCCESS;
+            if (getenv("AIRY_RPC_DIAG"))
+                SVC_LOG_ERROR("rpc diag: EOF buf_size=%zu head=%.120s", buf->size,
+                              buf->data ? buf->data : "");
             return AIRY_ERR_GENERIC_FAIL;
         }
         int rc = rpc_buf_append(buf, chunk, (size_t)n);
         if (rc != AIRY_SUCCESS)
             return rc;
-
-        cJSON *probe = cJSON_Parse(buf->data);
-        if (probe) {
-            cJSON_Delete(probe);
+        if (rpc_complete(buf))
             return AIRY_SUCCESS;
-        }
+        if (ev & RPC_IO_HANGUP)
+            return rpc_drain(fd, buf);
         elapsed_ms += 1;
     }
     return AIRY_ERR_TIMEOUT;
 }
 
-#endif /* AIRY_PLATFORM_WINDOWS / POSIX */
 int daemon_rpc_call(const char *socket_path, const char *method, const char *params_json,
                     char **out_result_json, uint32_t timeout_ms)
 {
@@ -450,40 +489,6 @@ int daemon_rpc_call(const char *socket_path, const char *method, const char *par
                                       timeout_ms, NULL, NULL, NULL);
 }
 
-#if AIRY_PLATFORM_POSIX
-
-/**
- * @brief Connect + send a JSON-RPC request, returning the live socket.
- *
- * Shared prefix of daemon_rpc_call_cancelable and daemon_rpc_call_stream:
- * serializes the request via daemon_rpc_json_req (0.1.19 §80 mechanism)
- * and sends it over a freshly connected Unix socket. The caller owns the
- * returned fd (>= 0) and must close it; on failure a negative AIRY_ERR_*
- * code is returned.
- */
-static int rpc_connect_send(const char *socket_path, const char *method, const char *params_json)
-{
-    int fd = rpc_connect_unix(socket_path);
-    if (fd < 0)
-        return AIRY_ERR_NOT_FOUND;
-
-    char *request_str = daemon_rpc_json_req(method, params_json);
-    if (!request_str) {
-        close(fd);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
-    size_t req_len = strlen(request_str);
-    ssize_t sent = send(fd, request_str, req_len, 0);
-    AIRY_FREE(request_str);
-    if (sent < 0 || (size_t)sent != req_len) {
-        close(fd);
-        SVC_LOG_ERROR("daemon_rpc_call: send failed (method=%s): %s", method, strerror(errno));
-        return AIRY_ERR_GENERIC_FAIL;
-    }
-    return fd;
-}
-
 int daemon_rpc_call_stream(const char *socket_path, const char *method, const char *params_json,
                            daemon_rpc_stream_cb_t on_chunk, void *user_data, uint32_t timeout_ms)
 {
@@ -492,7 +497,7 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
     if (timeout_ms == 0)
         timeout_ms = DAEMON_RPC_DEFAULT_TIMEOUT_MS;
 
-    int fd = rpc_connect_send(socket_path, method, params_json);
+    int fd = rpc_conn_send(socket_path, method, params_json);
     if (fd < 0)
         return fd;
 
@@ -502,136 +507,43 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
      * Timeout slices keep the loop responsive; the caller gets a partial
      * prefix via the callback when it fires. */
     uint32_t elapsed_ms = 0;
-    const uint32_t step_ms = 200;
     int rc = AIRY_ERR_TIMEOUT;
 
     while (elapsed_ms < timeout_ms) {
-        struct pollfd pfd;
-        pfd.fd = fd;
-        pfd.events = POLLIN;
-        pfd.revents = 0;
-
-        int remain = (int)((timeout_ms - elapsed_ms) < step_ms ? (timeout_ms - elapsed_ms)
-                                                               : step_ms);
-        int pr = poll(&pfd, 1, remain);
-        if (pr < 0) {
-            if (errno == EINTR)
-                continue;
-            rc = AIRY_ERR_GENERIC_FAIL;
-            break;
-        }
-        if (pr == 0) {
+        int remain = (int)((timeout_ms - elapsed_ms) < DAEMON_RPC_POLL_SLICE_MS
+                               ? (timeout_ms - elapsed_ms)
+                               : DAEMON_RPC_POLL_SLICE_MS);
+        int ev = rpc_poll(fd, remain);
+        if (ev == 0) {
             elapsed_ms += (uint32_t)remain;
             continue;
         }
-        if (!(pfd.revents & POLLIN)) {
-            /* HUP/POLERR without readable data: treat as end of stream only
-             * if the server already finished writing (EOF). Without data we
-             * cannot distinguish an early hangup from a finished stream; the
-             * daemon writes the final chunk before closing, so a clean
-             * completion is reported as POLLIN+EOF in the same poll cycle. */
-            rc = (pfd.revents & POLLHUP) ? AIRY_SUCCESS : AIRY_ERR_GENERIC_FAIL;
+        if (ev < 0) {
+            rc = AIRY_ERR_GENERIC_FAIL;
+            break;
+        }
+        if (!(ev & RPC_IO_READABLE)) {
+            /* HUP without readable data: treat as end of stream only if the
+             * server already finished writing (EOF). Without data we cannot
+             * distinguish an early hangup from a finished stream; the daemon
+             * writes the final chunk before closing, so a clean completion is
+             * reported as readable+EOF in the same poll cycle. */
+            rc = (ev & RPC_IO_HANGUP) ? AIRY_SUCCESS : AIRY_ERR_GENERIC_FAIL;
             break;
         }
 
-        char chunk[4096];
-        ssize_t n = recv(fd, chunk, sizeof(chunk), 0);
+        char chunk[DAEMON_RPC_CHUNK];
+        int n = rpc_recv(fd, chunk, sizeof(chunk));
         if (n < 0) {
+#if AIRY_PLATFORM_POSIX
             if (errno == EINTR || errno == EAGAIN)
                 continue;
+#endif
             rc = AIRY_ERR_GENERIC_FAIL;
             break;
         }
         if (n == 0) {
             /* EOF: the server finished the stream and closed the connection. */
-            rc = AIRY_SUCCESS;
-            break;
-        }
-        if (on_chunk)
-            on_chunk(chunk, (size_t)n, user_data);
-        elapsed_ms += 1;
-    }
-
-    close(fd);
-    if (rc != AIRY_SUCCESS)
-        SVC_LOG_ERROR("daemon_rpc_call_stream: stream ended rc=%d (method=%s, timeout=%u)", rc,
-                      method, timeout_ms);
-    return rc;
-}
-
-#elif AIRY_PLATFORM_WINDOWS
-
-/** @brief Windows 版 connect+send（等价 POSIX rpc_connect_send）。 */
-static int rpc_connect_send(const char *socket_path, const char *method, const char *params_json)
-{
-    int fd = rpc_connect_unix(socket_path);
-    if (fd < 0)
-        return AIRY_ERR_NOT_FOUND;
-
-    char *request_str = daemon_rpc_json_req(method, params_json);
-    if (!request_str) {
-        rpc_close_fd(fd);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
-    size_t req_len = strlen(request_str);
-    size_t sent_total = 0;
-    while (sent_total < req_len) {
-        int n = send((SOCKET)fd, request_str + sent_total, (int)(req_len - sent_total), 0);
-        if (n <= 0)
-            break;
-        sent_total += (size_t)n;
-    }
-    AIRY_FREE(request_str);
-    if (sent_total != req_len) {
-        rpc_close_fd(fd);
-        SVC_LOG_ERROR("daemon_rpc_call: send failed (method=%s)", method);
-        return AIRY_ERR_GENERIC_FAIL;
-    }
-    return fd;
-}
-
-int daemon_rpc_call_stream(const char *socket_path, const char *method, const char *params_json,
-                           daemon_rpc_stream_cb_t on_chunk, void *user_data, uint32_t timeout_ms)
-{
-    if (!socket_path || !method)
-        return AIRY_ERR_INVALID_PARAM;
-    if (timeout_ms == 0)
-        timeout_ms = DAEMON_RPC_DEFAULT_TIMEOUT_MS;
-
-    int fd = rpc_connect_send(socket_path, method, params_json);
-    if (fd < 0)
-        return fd;
-
-    uint32_t elapsed_ms = 0;
-    const uint32_t step_ms = 200;
-    int rc = AIRY_ERR_TIMEOUT;
-
-    while (elapsed_ms < timeout_ms) {
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET((SOCKET)fd, &rfds);
-        struct timeval tv;
-        tv.tv_sec = 0;
-        tv.tv_usec = (long)(step_ms * 1000);
-
-        int pr = select(0, &rfds, NULL, NULL, &tv);
-        if (pr < 0) {
-            rc = AIRY_ERR_GENERIC_FAIL;
-            break;
-        }
-        if (pr == 0) {
-            elapsed_ms += step_ms;
-            continue;
-        }
-
-        char chunk[4096];
-        int n = recv((SOCKET)fd, chunk, sizeof(chunk), 0);
-        if (n < 0) {
-            rc = AIRY_ERR_GENERIC_FAIL;
-            break;
-        }
-        if (n == 0) {
             rc = AIRY_SUCCESS;
             break;
         }
@@ -647,8 +559,6 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
     return rc;
 }
 
-#endif /* AIRY_PLATFORM_WINDOWS / POSIX */
-
 int daemon_rpc_call_cancelable(const char *socket_path, const char *method, const char *params_json,
                                char **out_result_json, uint32_t timeout_ms,
                                airy_cancel_token_t *cancel_token, const char *cancel_method,
@@ -661,34 +571,9 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
     if (timeout_ms == 0)
         timeout_ms = DAEMON_RPC_DEFAULT_TIMEOUT_MS;
 
-    int fd = rpc_connect_unix(socket_path);
+    int fd = rpc_conn_send(socket_path, method, params_json);
     if (fd < 0)
-        return AIRY_ERR_NOT_FOUND;
-
-    char *request_str = daemon_rpc_json_req(method, params_json);
-    if (!request_str) {
-        rpc_close_fd(fd);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
-    size_t req_len = strlen(request_str);
-    size_t sent_total = 0;
-    while (sent_total < req_len) {
-#if AIRY_PLATFORM_WINDOWS
-        int n = send((SOCKET)fd, request_str + sent_total, (int)(req_len - sent_total), 0);
-#else
-        ssize_t n = send(fd, request_str + sent_total, req_len - sent_total, 0);
-#endif
-        if (n <= 0)
-            break;
-        sent_total += (size_t)n;
-    }
-    AIRY_FREE(request_str);
-    if (sent_total != req_len) {
-        rpc_close_fd(fd);
-        SVC_LOG_ERROR("daemon_rpc_call: send failed (method=%s): %s", method, strerror(errno));
-        return AIRY_ERR_GENERIC_FAIL;
-    }
+        return fd;
 
     rpc_buf_t buf;
     int rc = rpc_buf_init(&buf);
@@ -697,8 +582,8 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
         return rc;
     }
 
-    rc = rpc_recv_response(fd, &buf, timeout_ms, cancel_token, socket_path, cancel_method,
-                           cancel_params_json);
+    rc = rpc_recv_resp(fd, &buf, timeout_ms, cancel_token, socket_path, cancel_method,
+                       cancel_params_json);
     rpc_close_fd(fd);
     if (rc != AIRY_SUCCESS) {
         if (rc != AIRY_ERR_CANCELED)
