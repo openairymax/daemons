@@ -163,6 +163,211 @@ int builtin_scan_noise_dir(const char *name)
     return 0;
 }
 
+#ifndef _WIN32
+/* Spawn child_fn with stdout+stderr merged onto outfd[1] and stdin from
+ * infd[0], clearing the daemon's loader environment in the child; the parent
+ * keeps outfd[0] for reading and *pid for reaping. Returns 0 on success. */
+static int capture_spawn(builtin_child_fn child_fn, void *child_ctx, int outfd[2], int infd[2],
+                         pid_t *pid)
+{
+    if (pipe(outfd) != 0)
+        return -1;
+    if (pipe(infd) != 0) {
+        close(outfd[0]);
+        close(outfd[1]);
+        return -1;
+    }
+    *pid = fork();
+    if (*pid < 0) {
+        close(outfd[0]);
+        close(outfd[1]);
+        close(infd[0]);
+        close(infd[1]);
+        return -1;
+    }
+    if (*pid == 0) {
+        close(outfd[0]);
+        close(infd[1]);
+        dup2(outfd[1], STDOUT_FILENO);
+        dup2(outfd[1], STDERR_FILENO);
+        dup2(infd[0], STDIN_FILENO);
+        close(outfd[1]);
+        close(infd[0]);
+        /* Tool isolation contract: never leak the daemon's loader environment
+         * into a spawned tool. The airymaxrt launcher exports $AIRY_HOME/lib
+         * through LD_LIBRARY_PATH for the runtime's own binaries; a tool that
+         * loads those ABI-mismatched .so files aborts (e.g. curl: "libcurl.so.4:
+         * no version information available") and loses networking. Injected
+         * LD_PRELOAD/LD_AUDIT shims are cleared for the same reason. The daemon
+         * keeps its own environment; only the tool and its descendants are
+         * cleaned. */
+        unsetenv("LD_PRELOAD");
+        unsetenv("LD_AUDIT");
+        unsetenv("LD_LIBRARY_PATH");
+        child_fn(child_ctx);
+        _exit(127);
+    }
+    close(outfd[1]);
+    close(infd[0]);
+    return 0;
+}
+
+/* Feed the child's stdin to completion (git_apply's patch), retrying EINTR so
+ * a slow consumer cannot lose a partial write. */
+static void capture_feed(int wfd, const char *data, size_t len)
+{
+    if (!data || len == 0)
+        return;
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = write(wfd, data + off, len - off);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        off += (size_t)n;
+    }
+}
+
+/* Pump the child's merged output until it is reaped or the deadline passes.
+ * Returns 1 once reaped (wstatus valid), 0 on timeout or when the output cap
+ * stops further reads; *timed_out distinguishes the deadline case. */
+static int capture_loop(pid_t pid, int rfd, uint32_t timeout_ms, int *wstatus, int *timed_out,
+                        char **buf, size_t *cap, size_t *len, int *truncated)
+{
+    *timed_out = 0;
+    struct timespec ts_now;
+    clock_gettime(CLOCK_MONOTONIC, &ts_now);
+    uint64_t deadline_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 + timeout_ms;
+
+    for (;;) {
+        if (waitpid(pid, wstatus, WNOHANG) == pid)
+            return 1;
+
+        clock_gettime(CLOCK_MONOTONIC, &ts_now);
+        uint64_t now_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000;
+        if (now_ms >= deadline_ms) {
+            *timed_out = 1;
+            return 0;
+        }
+
+        struct pollfd pfd = {.fd = rfd, .events = POLLIN | POLLHUP};
+        int pr = poll(&pfd, 1, 100);
+        if (pr <= 0 || !(pfd.revents & (POLLIN | POLLHUP)))
+            continue;
+        char chunk[4096];
+        ssize_t n = read(rfd, chunk, sizeof(chunk));
+        if (n > 0) {
+            if (!builtin_buf_push(buf, cap, len, chunk, (size_t)n, truncated))
+                return 0;
+        } else if (n == 0) {
+            /* Child closed its output but is still alive; poll would otherwise
+             * return POLLHUP immediately and busy-spin until the deadline. */
+            usleep(10000);
+        }
+    }
+}
+
+/* Bounded tail drain: a descendant holding the pipe write end (e.g. a
+ * backgrounded child) must not wedge the daemon forever, so once the flush
+ * deadline passes the rest of the output is abandoned. */
+static void capture_drain(int rfd, char **buf, size_t *cap, size_t *len, int *truncated)
+{
+    struct timespec ts_now;
+    clock_gettime(CLOCK_MONOTONIC, &ts_now);
+    uint64_t drain_deadline_ms =
+        (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 + BUILTIN_OUTPUT_DRAIN_MS;
+    for (;;) {
+        clock_gettime(CLOCK_MONOTONIC, &ts_now);
+        uint64_t now_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000;
+        if (now_ms >= drain_deadline_ms)
+            return;
+
+        struct pollfd pfd = {.fd = rfd, .events = POLLIN | POLLHUP};
+        if (poll(&pfd, 1, 100) <= 0)
+            continue;
+        if (!(pfd.revents & (POLLIN | POLLHUP)))
+            return;
+        char chunk[4096];
+        ssize_t n = read(rfd, chunk, sizeof(chunk));
+        if (n <= 0)
+            return;
+        if (!builtin_buf_push(buf, cap, len, chunk, (size_t)n, truncated))
+            return;
+    }
+}
+
+/* Resolve the exit code and append the timeout/truncation notices. */
+static void capture_finish(int timed_out, int exited, int wstatus, int truncated, char *buf,
+                           size_t cap, size_t *len, int *exit_code)
+{
+    if (timed_out) {
+        builtin_buf_mark(buf, cap, len, "\n[command timed out after 60s]");
+        *exit_code = -1;
+    } else if (exited) {
+#ifdef WIFEXITED
+        *exit_code = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : -1;
+#else
+        *exit_code = wstatus;
+#endif
+    } else {
+        *exit_code = -1;
+    }
+    if (truncated)
+        builtin_buf_mark(buf, cap, len, "\n[output truncated at 1MB]");
+}
+
+int builtin_proc_capture(builtin_child_fn child_fn, void *child_ctx, const char *stdin_data,
+                         size_t stdin_len, uint32_t timeout_ms, char **out, int *exit_code,
+                         int *out_truncated)
+{
+    *out = NULL;
+    *exit_code = -1;
+    if (out_truncated)
+        *out_truncated = 0;
+
+    int outfd[2];
+    int infd[2];
+    pid_t pid = -1;
+    if (capture_spawn(child_fn, child_ctx, outfd, infd, &pid) != 0)
+        return -1;
+
+    capture_feed(infd[1], stdin_data, stdin_len);
+    close(infd[1]);
+
+    size_t cap = 4096;
+    size_t len = 0;
+    char *buf = (char *)AIRY_MALLOC(cap);
+    if (!buf) {
+        kill(pid, SIGKILL);
+        waitpid(pid, NULL, 0);
+        close(outfd[0]);
+        return -1;
+    }
+    buf[0] = '\0';
+
+    int wstatus = 0;
+    int timed_out = 0;
+    int truncated = 0;
+    int exited =
+        capture_loop(pid, outfd[0], timeout_ms, &wstatus, &timed_out, &buf, &cap, &len, &truncated);
+    if (timed_out) {
+        kill(pid, SIGKILL);
+        waitpid(pid, NULL, 0);
+    }
+
+    capture_drain(outfd[0], &buf, &cap, &len, &truncated);
+    close(outfd[0]);
+
+    capture_finish(timed_out, exited, wstatus, truncated, buf, cap, &len, exit_code);
+    if (out_truncated)
+        *out_truncated = truncated;
+    *out = buf;
+    return 0;
+}
+#endif /* !_WIN32 */
+
 int tool_builtin_run(const char *tool_id, const char *params_json, uint32_t timeout_ms,
                      tool_result_t *res)
 {

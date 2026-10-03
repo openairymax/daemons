@@ -4,8 +4,8 @@
 /**
  * @file builtin_git.c
  * @brief Built-in tool git domain: git_exec / git_diff / git_apply atomic
- *        git file-modification capability (fork + pipe + poll + waitpid,
- *        supporting stdin data injection).
+ *        git file-modification capability (over the shared process-capture
+ *        engine, supporting stdin data injection).
  */
 
 #include "airy_memory.h"
@@ -22,11 +22,6 @@
 #include <string.h>
 
 #ifndef _WIN32
-#include <errno.h>
-#include <poll.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -55,13 +50,27 @@ static const char *const g_git_readonly_cmds[] = {
     "remote",   "submodule",    "mergetool",    NULL,
 };
 
+/* Child-side setup for the git runners: exec git directly with the argv array
+ * (no shell interpretation, avoiding command injection). */
+typedef struct {
+    char *const *argv;
+} git_ctx_t;
+
+static void git_spawn(void *ctx)
+{
+    git_ctx_t *c = (git_ctx_t *)ctx;
+    execvp(c->argv[0], c->argv);
+    _exit(127);
+}
+
 /**
  * @brief Run a git command with timeout and capture stdout/stderr
- *        (fork + pipe + poll + waitpid)
  *
- * Unlike builtin_shell_run: executes git directly via execvp (argv array, no
- * shell interpretation, avoiding command injection), and supports writing data
- * to the child's stdin (needed by git_apply).
+ * Thin wrapper over the shared process-capture engine: the fork/pipe/poll/
+ * waitpid ritual, timeout and output cap live in builtin_proc_capture, while
+ * the child-side setup (execvp of the argv array) is the git_spawn strategy
+ * callback. Unlike builtin_shell_run there is no shell interpretation and the
+ * child may be fed stdin data (git_apply's patch).
  * @param argv          argv array (argv[0]="git", NULL-terminated)
  * @param stdin_data    Data to write to the child's stdin (may be NULL)
  * @param stdin_len     stdin_data length
@@ -73,174 +82,10 @@ static const char *const g_git_readonly_cmds[] = {
 static int builtin_git_run(char *const argv[], const char *stdin_data, size_t stdin_len, char **out,
                            int *exit_code, int *out_truncated, uint32_t timeout_ms)
 {
-    *out = NULL;
-    *exit_code = -1;
-    if (out_truncated)
-        *out_truncated = 0;
-
-    int outfd[2];
-    int infd[2];
-    if (pipe(outfd) != 0)
-        return -1;
-    if (pipe(infd) != 0) {
-        close(outfd[0]);
-        close(outfd[1]);
-        return -1;
-    }
-    pid_t pid = fork();
-    if (pid < 0) {
-        close(outfd[0]);
-        close(outfd[1]);
-        close(infd[0]);
-        close(infd[1]);
-        return -1;
-    }
-    if (pid == 0) {
-
-        close(outfd[0]);
-        close(infd[1]);
-        dup2(outfd[1], STDOUT_FILENO);
-        dup2(outfd[1], STDERR_FILENO);
-        dup2(infd[0], STDIN_FILENO);
-        close(outfd[1]);
-        close(infd[0]);
-        /* R-3: the airymaxrt launcher exports $AIRY_HOME/lib through
-         * LD_LIBRARY_PATH for the runtime's own binaries. Leaking that into
-         * git makes the system git load the runtime's bundled .so files,
-         * which are frequently ABI-mismatched with the system binary and
-         * break the tool ("various tools unusable / cannot reach the
-         * network"). LD_PRELOAD/LD_AUDIT are cleared for the same tool
-         * isolation contract as builtin_shell_run. The daemon process keeps
-         * its own LD_LIBRARY_PATH; only the git process and its descendants
-         * are cleaned. */
-        unsetenv("LD_PRELOAD");
-        unsetenv("LD_AUDIT");
-        unsetenv("LD_LIBRARY_PATH");
-        execvp(argv[0], argv);
-        _exit(127);
-    }
-    close(outfd[1]);
-    close(infd[0]);
-
-    /* Parent: write the stdin data to the child first (git_apply's patch),
-     * then enter the read loop. git apply only produces output after reading
-     * all of stdin, so write-then-read cannot deadlock. */
-    if (stdin_data && stdin_len > 0) {
-        size_t off = 0;
-        while (off < stdin_len) {
-            ssize_t n = write(infd[1], stdin_data + off, stdin_len - off);
-            if (n < 0) {
-                if (errno == EINTR)
-                    continue;
-                break;
-            }
-            off += (size_t)n;
-        }
-    }
-    close(infd[1]);
-
-    size_t cap = 4096;
-    size_t len = 0;
-    char *buf = (char *)AIRY_MALLOC(cap);
-    if (!buf) {
-        kill(pid, SIGKILL);
-        waitpid(pid, NULL, 0);
-        close(outfd[0]);
-        return -1;
-    }
-    buf[0] = '\0';
-
-    int wstatus = 0;
-    int exited = 0;
-    int timed_out = 0;
-    int truncated = 0;
-
-    struct timespec ts_now;
-    clock_gettime(CLOCK_MONOTONIC, &ts_now);
-    uint64_t deadline_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 +
-                           (timeout_ms ? timeout_ms : BUILTIN_SHELL_TIMEOUT_MS);
-
-    for (;;) {
-        if (!exited) {
-            pid_t w = waitpid(pid, &wstatus, WNOHANG);
-            if (w == pid)
-                exited = 1;
-        }
-        if (exited)
-            break;
-
-        clock_gettime(CLOCK_MONOTONIC, &ts_now);
-        uint64_t now_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000;
-        if (now_ms >= deadline_ms) {
-            timed_out = 1;
-            break;
-        }
-
-        struct pollfd pfd = {.fd = outfd[0], .events = POLLIN | POLLHUP};
-        int pr = poll(&pfd, 1, 100);
-        if (pr > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
-            char chunk[4096];
-            ssize_t n = read(outfd[0], chunk, sizeof(chunk));
-            if (n > 0) {
-                if (!builtin_buf_push(&buf, &cap, &len, chunk, (size_t)n, &truncated))
-                    break;
-            } else if (n == 0) {
-                /* Child closed its output but is still alive; avoid
-                 * busy-spinning on immediate POLLHUP until the deadline. */
-                usleep(10000);
-            }
-        }
-    }
-
-    if (timed_out) {
-        kill(pid, SIGKILL);
-        waitpid(pid, NULL, 0);
-    }
-
-    /* Flush remaining output with a bounded drain: a descendant holding
-     * the pipe write end must not block the daemon forever. */
-    clock_gettime(CLOCK_MONOTONIC, &ts_now);
-    uint64_t drain_deadline_ms =
-        (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 + BUILTIN_OUTPUT_DRAIN_MS;
-    for (;;) {
-        clock_gettime(CLOCK_MONOTONIC, &ts_now);
-        uint64_t now_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000;
-        if (now_ms >= drain_deadline_ms)
-            break;
-
-        struct pollfd pfd = {.fd = outfd[0], .events = POLLIN | POLLHUP};
-        int pr = poll(&pfd, 1, 100);
-        if (pr <= 0)
-            continue;
-        if (!(pfd.revents & (POLLIN | POLLHUP)))
-            break;
-        char chunk[4096];
-        ssize_t n = read(outfd[0], chunk, sizeof(chunk));
-        if (n <= 0)
-            break;
-        if (!builtin_buf_push(&buf, &cap, &len, chunk, (size_t)n, &truncated))
-            break;
-    }
-    close(outfd[0]);
-
-    if (timed_out) {
-        builtin_buf_mark(buf, cap, &len, "\n[command timed out after 60s]");
-        *exit_code = -1;
-    } else if (exited) {
-#ifdef WIFEXITED
-        *exit_code = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : -1;
-#else
-        *exit_code = wstatus;
-#endif
-    } else {
-        *exit_code = -1;
-    }
-    if (truncated)
-        builtin_buf_mark(buf, cap, &len, "\n[output truncated at 1MB]");
-    if (out_truncated)
-        *out_truncated = truncated;
-    *out = buf;
-    return 0;
+    git_ctx_t c = {argv};
+    return builtin_proc_capture(git_spawn, &c, stdin_data, stdin_len,
+                                timeout_ms ? timeout_ms : BUILTIN_SHELL_TIMEOUT_MS, out, exit_code,
+                                out_truncated);
 }
 
 int git_exec_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
