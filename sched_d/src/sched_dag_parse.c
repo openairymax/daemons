@@ -141,8 +141,10 @@ static void sched_dag_detect_cycle(sched_dag_t *dag, int *err)
         *err = AIRY_ERR_CYCLE_DETECTED;
 }
 
-static void sched_dag_free_on_error(sched_dag_t *dag)
+void sched_dag_free(sched_dag_t *dag)
 {
+    if (!dag)
+        return;
     for (size_t i = 0; i < dag->node_count; i++) {
         sched_dag_node_t *node = dag->nodes[i];
         AIRY_FREE(node->id);
@@ -151,6 +153,8 @@ static void sched_dag_free_on_error(sched_dag_t *dag)
         AIRY_FREE(node->validator_rule_json);
         for (size_t k = 0; k < node->dep_count; k++)
             AIRY_FREE(node->depends[k]);
+        AIRY_FREE(node->output);
+        AIRY_FREE(node->error);
         AIRY_FREE(node);
     }
     AIRY_FREE(dag->dag_id);
@@ -233,7 +237,7 @@ int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
         sched_dag_detect_cycle(dag, &err);
 
     if (err != AIRY_SUCCESS) {
-        sched_dag_free_on_error(dag);
+        sched_dag_free(dag);
         return err;
     }
 

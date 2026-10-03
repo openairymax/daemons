@@ -142,4 +142,13 @@ void sched_hall_result(const char *task_id, const char *agent, const char *statu
  * returns the specific error code. */
 int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag);
 
+/* Sole owner of sched_dag_t destruction (paired with the constructor above,
+ * defined in sched_dag_parse.c): releases every node sub-allocation
+ * (id/goal/role/validator rule/depends/output/error) plus the graph
+ * (dag_id/name/input/workspace_dir) and the graph itself. NULL-safe.
+ * Consumed by the parse rollback, the submit rollback (sched_dag_impl.c)
+ * and the service shutdown sweep (sched_service_impl.c), so no call site
+ * can drift from the struct layout. */
+void sched_dag_free(sched_dag_t *dag);
+
 #endif /* AIRY_RT_SCHED_SERVICE_INTERNAL_H */

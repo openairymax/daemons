@@ -67,20 +67,7 @@ int sched_service_submit_dag(sched_service_t *service, const char *dag_json, cha
     if (service->dag_count >= SCHED_DAG_MAX_DAGS) {
         airy_mtx_unlock(&service->lock);
 
-        for (size_t i = 0; i < dag->node_count; i++) {
-            sched_dag_node_t *node = dag->nodes[i];
-            AIRY_FREE(node->id);
-            AIRY_FREE(node->goal);
-            AIRY_FREE(node->role);
-            AIRY_FREE(node->validator_rule_json);
-            for (size_t k = 0; k < node->dep_count; k++)
-                AIRY_FREE(node->depends[k]);
-            AIRY_FREE(node);
-        }
-        AIRY_FREE(dag->name);
-        AIRY_FREE(dag->input);
-        AIRY_FREE(dag->workspace_dir);
-        AIRY_FREE(dag);
+        sched_dag_free(dag);
         cJSON_Delete(root);
         return AIRY_ERR_OVERFLOW;
     }
@@ -91,20 +78,7 @@ int sched_service_submit_dag(sched_service_t *service, const char *dag_json, cha
     dag->dag_id = AIRY_STRDUP(id_buf);
     if (!dag->dag_id) {
         airy_mtx_unlock(&service->lock);
-        for (size_t i = 0; i < dag->node_count; i++) {
-            sched_dag_node_t *node = dag->nodes[i];
-            AIRY_FREE(node->id);
-            AIRY_FREE(node->goal);
-            AIRY_FREE(node->role);
-            AIRY_FREE(node->validator_rule_json);
-            for (size_t k = 0; k < node->dep_count; k++)
-                AIRY_FREE(node->depends[k]);
-            AIRY_FREE(node);
-        }
-        AIRY_FREE(dag->name);
-        AIRY_FREE(dag->input);
-        AIRY_FREE(dag->workspace_dir);
-        AIRY_FREE(dag);
+        sched_dag_free(dag);
         cJSON_Delete(root);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
