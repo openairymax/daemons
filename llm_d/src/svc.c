@@ -7,7 +7,7 @@
  *
  * llm 服务单例 + 生命周期五钩子。可配置户：端点基线取自生成头常量
  * （LLM_D_SOCKET_UNIX/WIN、LLM_D_TCP_PORT），端点族委托 daemon_cfg_file
- * 机制件（daemon_ep_load/free/fill，纯端点户无策略键）。配置未显式
+ * 机制件（daemon_ep_load/free/apply，纯端点户无策略键）。配置未显式
  * 给出时回落 $AIRY_CONFIG_DIR/model.yaml（与 think_d / gateway_d 同源
  * SSoT），使 provider 注册表与 llm_router 始终看到已配置端点。业务
  * 逻辑在 src/rpc/methods.c 与 src/rpc/dispatch.c。
@@ -25,17 +25,10 @@
 
 llm_service_t *g_service = NULL;
 
-static daemon_ep_cfg_t g_ep = {0};
-
 static void ep_load(const char *config_path)
 {
-    daemon_ep_load(&g_ep, config_path, LLM_D_SOCKET_UNIX,
+    daemon_ep_load(daemon_ep_slot(), config_path, LLM_D_SOCKET_UNIX,
                    LLM_D_SOCKET_WIN, LLM_D_TCP_PORT, NULL, NULL);
-}
-
-static void ep_free(void)
-{
-    daemon_ep_free(&g_ep);
 }
 
 /* 未显式指定 manager 时回落 $AIRY_CONFIG_DIR/model.yaml：静态缓冲保持
@@ -58,7 +51,7 @@ static const char *cfg_fallback(const char *config_path)
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    daemon_ep_fill(ep, &g_ep, cmdline_tcp);
+    daemon_ep_apply(ep, cmdline_tcp);
 
     if (ep->use_tcp)
         SVC_LOG_INFO("Listening on TCP port %u", (unsigned)ep->tcp_port);
@@ -96,7 +89,7 @@ void svc_destroy(void)
         llm_service_destroy(g_service);
         g_service = NULL;
     }
-    ep_free();
+    daemon_ep_free(daemon_ep_slot());
 }
 
 /* 策略层附加装配挂点：llm_d 的 llm.* 方法面已由生成态静态注册表

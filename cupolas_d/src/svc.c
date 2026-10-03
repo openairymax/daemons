@@ -7,7 +7,7 @@
  *
  * 安全穹顶 PDP 本体 + 生命周期五钩子。端点配置族（daemon 段解析、
  * 基线回填、cmdline use_tcp 融合）委托 daemon_cfg_file 机制件
- * （daemon_ep_load/free/fill）；本文件无策略键，纯端点户。穹顶引导
+ * （daemon_ep_load/free/apply）；本文件无策略键，纯端点户。穹顶引导
  * （daemon_cupolas_init，manifest cupolas:"full"）由生成 main.c 承担；
  * 本文件持有动态策略引擎（PDP，M2-S3 唯一策略持有者）与 cupolas
  * 服务单例的创建、注入与销毁。业务逻辑在 service.c 与 cupolas_rpc_*.c。
@@ -23,22 +23,15 @@
 cupolas_service_t *g_service = NULL;
 dpolicy_engine_t *g_dpolicy = NULL;
 
-static daemon_ep_cfg_t g_ep;
-
 static void config_load(const char *config_path)
 {
-    daemon_ep_load(&g_ep, config_path, CUPOLAS_D_SOCKET_UNIX,
+    daemon_ep_load(daemon_ep_slot(), config_path, CUPOLAS_D_SOCKET_UNIX,
                    CUPOLAS_D_SOCKET_WIN, CUPOLAS_D_TCP_PORT, NULL, NULL);
-}
-
-static void config_free(void)
-{
-    daemon_ep_free(&g_ep);
 }
 
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
 {
-    daemon_ep_fill(ep, &g_ep, cmdline_tcp);
+    daemon_ep_apply(ep, cmdline_tcp);
 }
 
 int svc_prepare(const char *config_path)
@@ -83,7 +76,7 @@ void svc_destroy(void)
         dpolicy_engine_destroy(g_dpolicy);
         g_dpolicy = NULL;
     }
-    config_free();
+    daemon_ep_free(daemon_ep_slot());
 }
 
 /* 无静态表外动态注册（manifest methods 全量覆盖），空实现 */
