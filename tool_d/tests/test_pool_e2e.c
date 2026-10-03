@@ -105,6 +105,12 @@ int main(void)
     snprintf(fast_path, sizeof(fast_path), "%s/fast_ok.txt", ws);
     CHECK(mkdir(ws, 0755) == 0);
 
+    /* 数据目录隔离：工具完成后的 best-effort hall 事件写向
+     * airy_data_dir()；不隔离则落到 $HOME/.airymaxrt 并随开发机累积，
+     * 使本测试依赖宿主机状态。复用已建的 PID 沙箱目录，零额外清理。 */
+    setenv("AIRY_HOME", ws, 1);
+    setenv("AIRY_DATA_DIR", "", 1);
+
     /* T16: fs 工具 workspace 围堵；R1-a: 全局等待预算 1500ms */
     setenv("AIRY_TOOL_SANDBOX_WORKSPACE", ws, 1);
     setenv("AIRY_TOOL_WAIT_BUDGET_MS", "1500", 1);
