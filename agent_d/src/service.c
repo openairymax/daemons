@@ -13,7 +13,7 @@
  * Design notes:
  * - Index is the shared commons hindex (djb2 + tombstones), §130 SSoT
  * - Thread safety: all public interfaces take the lock
- * - Agent ID: 32-char hex (timestamp + counter, no external deps)
+ * - Agent ID: commons airy_oid atom (32-char hex, no external deps)
  * - Terminate does not reclaim slots: only sets status=3, no compaction
  */
 
@@ -25,37 +25,6 @@
 #define AGENT_DEFAULT_MAX_AGENTS 10000
 
 #define AGENT_HASH_LOAD_FACTOR 4 /* capacity = max_agents * 4 */
-
-void agent_generate_agent_id(char *buf, size_t buf_size)
-{
-    /* 32-char hex: 8-char timestamp + 8-char counter + 16-char random.
-     * No external libuuid dependency, so the daemon can run standalone. */
-    static uint64_t counter = 0;
-    static airy_mtx_t counter_lock;
-    static int counter_initialized = 0;
-
-    if (!counter_initialized) {
-        airy_mtx_init(&counter_lock);
-        counter = (uint64_t)time(NULL) & 0xFFFFFFFF;
-        counter_initialized = 1;
-    }
-
-    airy_mtx_lock(&counter_lock);
-    uint64_t c = counter++;
-    airy_mtx_unlock(&counter_lock);
-
-    uint64_t t = (uint64_t)time(NULL);
-
-    uint64_t r = t ^ (c * 0x9E3779B97F4A7C15ULL);
-    r ^= r << 13;
-    r ^= r >> 7;
-    r ^= r << 17;
-
-    if (buf_size < AGENT_ID_LEN)
-        return;
-    snprintf(buf, AGENT_ID_LEN, "%08lx%08lx%016lx", (unsigned long)(t & 0xFFFFFFFFu),
-             (unsigned long)(c & 0xFFFFFFFFu), (unsigned long)(r & 0xFFFFFFFFFFFFFFFFULL));
-}
 
 /* Monotonic clock in microseconds: POSIX uses CLOCK_MONOTONIC (unaffected by
  * NTP/timezone jumps), Windows uses GetTickCount64 (ms precision converted).
