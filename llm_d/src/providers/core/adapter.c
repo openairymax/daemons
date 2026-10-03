@@ -166,7 +166,7 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
     if (out_response)
         *out_response = resp;
     else if (resp)
-        provider_response_free(resp);
+        llm_response_free(resp);
 
     return AIRY_OK;
 }

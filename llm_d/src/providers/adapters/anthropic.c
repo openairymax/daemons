@@ -189,7 +189,7 @@ static int anthropic_parse_response(const char *body, llm_response_t **out)
     if (cJSON_IsArray(content) && cJSON_GetArraySize(content) > 0) {
         resp->choices = (llm_message_t *)AIRY_CALLOC(1, sizeof(llm_message_t));
         if (!resp->choices) {
-            provider_response_free(resp);
+            llm_response_free(resp);
             return AIRY_ERR_OUT_OF_MEMORY;
         }
         resp->choice_count = 1;
