@@ -225,6 +225,18 @@ static char *build_resources_list_json(gw_mcp_server_t *server)
     return buf;
 }
 
+/* JSON-RPC 2.0 result envelope shared by the method branches; the caller
+ * owns the returned buffer. */
+static char *rpc_result(const char *rid, const char *result_json)
+{
+    const char *fmt = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}";
+    size_t len = snprintf(NULL, 0, fmt, rid, result_json);
+    char *buf = (char *)AIRY_MALLOC(len + 1);
+    if (buf)
+        snprintf(buf, len + 1, fmt, rid, result_json);
+    return buf;
+}
+
 /**
  * @brief JSON-RPC processing core (with request-id echo)
  *
@@ -271,14 +283,8 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
             server->error_count++;
             return AIRY_ERR_OUT_OF_MEMORY;
         }
-        const char *resp_fmt = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}";
-        size_t rlen = snprintf(NULL, 0, resp_fmt, rid, inner);
-        char *buf = (char *)AIRY_MALLOC(rlen + 1);
-        if (buf) {
-            snprintf(buf, rlen + 1, resp_fmt, rid, inner);
-        }
+        *response_json = rpc_result(rid, inner);
         AIRY_FREE(inner);
-        *response_json = buf;
         return 0;
     }
 
@@ -353,14 +359,8 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
             server->error_count++;
             return AIRY_ERR_OUT_OF_MEMORY;
         }
-        const char *resp_fmt = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}";
-        size_t rlen = snprintf(NULL, 0, resp_fmt, rid, inner);
-        char *buf = (char *)AIRY_MALLOC(rlen + 1);
-        if (buf) {
-            snprintf(buf, rlen + 1, resp_fmt, rid, inner);
-        }
+        *response_json = rpc_result(rid, inner);
         AIRY_FREE(inner);
-        *response_json = buf;
         return 0;
     }
 
@@ -406,12 +406,7 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
     }
 
     if (strcmp(method, "ping") == 0) {
-        const char *id_json = rid ? rid : "null";
-        size_t rlen = snprintf(NULL, 0, "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{}}", id_json);
-        char *buf = (char *)AIRY_MALLOC(rlen + 1);
-        if (buf)
-            snprintf(buf, rlen + 1, "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{}}", id_json);
-        *response_json = buf;
+        *response_json = rpc_result(rid, "{}");
         return 0;
     }
 
