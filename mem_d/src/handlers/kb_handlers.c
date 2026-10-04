@@ -85,16 +85,7 @@ void handle_kb_search(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    cJSON *result = cJSON_CreateObject();
-    cJSON *arr = cJSON_CreateArray();
-    for (size_t i = 0; i < count; i++) {
-        cJSON *item = cJSON_CreateObject();
-        cJSON_AddStringToObject(item, "record_id", hits[i].record_id);
-        cJSON_AddNumberToObject(item, "score", hits[i].score);
-        cJSON_AddItemToArray(arr, item);
-    }
-    cJSON_AddItemToObject(result, "results", arr);
-    cJSON_AddNumberToObject(result, "total", count);
+    cJSON *result = search_hits_json(hits, count);
 
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
     mem_search_hits_free(hits, count);
