@@ -18,6 +18,7 @@
 #include "ledger.h"
 #include "platform.h"
 
+#include <cjson/cJSON.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -64,6 +65,23 @@ static inline uint32_t clamp_u32(int64_t v, uint32_t def, uint32_t max_v)
     if ((uint64_t)v > (uint64_t)max_v)
         return max_v;
     return (uint32_t)v;
+}
+
+/** Build a {"results":[{record_id,score}...],"total":N} object from search
+ *  hits; the caller owns the returned object. */
+static inline cJSON *search_hits_json(const mem_search_hit_t *hits, size_t count)
+{
+    cJSON *result = cJSON_CreateObject();
+    cJSON *arr = cJSON_CreateArray();
+    for (size_t i = 0; i < count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "record_id", hits[i].record_id);
+        cJSON_AddNumberToObject(item, "score", hits[i].score);
+        cJSON_AddItemToArray(arr, item);
+    }
+    cJSON_AddItemToObject(result, "results", arr);
+    cJSON_AddNumberToObject(result, "total", count);
+    return result;
 }
 
 #ifdef __cplusplus
