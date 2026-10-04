@@ -12,73 +12,33 @@
 
 #include <errno.h>
 
-#ifndef _WIN32
-#include <unistd.h>
-#else
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <io.h>
-#endif
-
 #include "builtin/tool_builtin_internal.h"
+#include "io.h"
 
-/* ============================================================================
- * 原子写（t11-01）：写同目录临时文件 + fsync + rename 替换。
- * 直接 fopen(path,"wb") 覆盖写在中途失败/崩溃时会留下半写文件；
- * 改为先写 "<path>.tmp"（同目录保证同卷 rename 原子性）再原子替换，
- * 读取方永远只能看到旧内容或新内容，不会看到损坏的中间态。
- * 返回 0 成功；非 0 失败（errno 描述原因）。
- * ============================================================================ */
-static int fs_atomic_write(const char *path, const char *buf, size_t len)
+/* 读取沙箱内已确认路径的全部内容；失败时把面向调用方的错误写入 res。
+ * 写文件统一委托 commons 的 airy_io_write_file（同目录 .tmp + fsync +
+ * rename 原子替换），本域不再私有复刻该机制。 */
+static int fs_read_whole(const char *resolved, const char *shown, tool_result_t *res, char **out,
+                         int *out_truncated)
 {
-    char tmppath[4096];
-    if (snprintf(tmppath, sizeof(tmppath), "%s.tmp", path) >= (int)sizeof(tmppath))
-        return -1;
-
-    FILE *wfp = fopen(tmppath, "wb");
-    if (!wfp)
-        return -1;
-
-    int failed = 0;
-    size_t wr = fwrite(buf, 1, len, wfp);
-    if (wr != len)
-        failed = 1;
-    if (!failed && fflush(wfp) != 0)
-        failed = 1;
-#ifndef _WIN32
-    if (!failed) {
-        int fd = fileno(wfp);
-        if (fd >= 0 && fsync(fd) != 0)
-            failed = 1;
+    FILE *fp = fopen(resolved, "rb");
+    if (!fp) {
+        char err[512];
+        snprintf(err, sizeof(err), "Cannot open file '%s': %s", shown, strerror(errno));
+        res->error = AIRY_STRDUP(err);
+        return (errno == ENOENT) ? AIRY_ERR_NOT_FOUND : AIRY_ERR_IO;
     }
-#else
-    if (!failed) {
-        int fd = _fileno(wfp);
-        if (fd >= 0 && _commit(fd) != 0)
-            failed = 1;
+    int truncated = 0;
+    char *content = builtin_read_all(fp, &truncated);
+    fclose(fp);
+    if (!content) {
+        res->error = AIRY_STRDUP("Failed to read file (I/O error)");
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
-#endif
-    if (fclose(wfp) != 0)
-        failed = 1;
-
-    if (failed) {
-        remove(tmppath);
-        return -1;
-    }
-
-#ifndef _WIN32
-    if (rename(tmppath, path) != 0) {
-        remove(tmppath);
-        return -1;
-    }
-#else
-    /* MoveFileExA 可原子替换已存在的目标（C 标准 rename 在目标存在时会失败） */
-    if (!MoveFileExA(tmppath, path, MOVEFILE_REPLACE_EXISTING)) {
-        remove(tmppath);
-        return -1;
-    }
-#endif
-    return 0;
+    *out = content;
+    if (out_truncated)
+        *out_truncated = truncated;
+    return AIRY_OK;
 }
 
 int fs_read_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
@@ -97,20 +57,11 @@ int fs_read_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     int rc = builtin_fs_confine(path->valuestring, 0, resolved, sizeof(resolved), res);
     if (rc != AIRY_OK)
         return rc;
-    FILE *fp = fopen(resolved, "rb");
-    if (!fp) {
-        char err[512];
-        snprintf(err, sizeof(err), "Cannot open file '%s': %s", path->valuestring, strerror(errno));
-        res->error = AIRY_STRDUP(err);
-        return (errno == ENOENT) ? AIRY_ERR_NOT_FOUND : AIRY_ERR_IO;
-    }
     int truncated = 0;
-    char *content = builtin_read_all(fp, &truncated);
-    fclose(fp);
-    if (!content) {
-        res->error = AIRY_STRDUP("Failed to read file (I/O error)");
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
+    char *content = NULL;
+    rc = fs_read_whole(resolved, path->valuestring, res, &content, &truncated);
+    if (rc != AIRY_OK)
+        return rc;
     if (truncated) {
 
         const char mark[] = "[output truncated at 1MB]";
@@ -144,7 +95,7 @@ int fs_write_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *r
     int rc = builtin_fs_confine(path->valuestring, 1, resolved, sizeof(resolved), res);
     if (rc != AIRY_OK)
         return rc;
-    if (fs_atomic_write(resolved, content->valuestring, clen) != 0) {
+    if (airy_io_write_file(resolved, content->valuestring, clen) != 0) {
         char err[512];
         snprintf(err, sizeof(err), "Cannot write file '%s': %s", path->valuestring,
                  strerror(errno));
@@ -192,20 +143,10 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     if (rc != AIRY_OK)
         return rc;
 
-    FILE *fp = fopen(resolved, "rb");
-    if (!fp) {
-        char err[512];
-        snprintf(err, sizeof(err), "Cannot open file '%s': %s", path->valuestring, strerror(errno));
-        res->error = AIRY_STRDUP(err);
-        return (errno == ENOENT) ? AIRY_ERR_NOT_FOUND : AIRY_ERR_IO;
-    }
-    int truncated = 0;
-    char *content = builtin_read_all(fp, &truncated);
-    fclose(fp);
-    if (!content) {
-        res->error = AIRY_STRDUP("Failed to read file (I/O error)");
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
+    char *content = NULL;
+    rc = fs_read_whole(resolved, path->valuestring, res, &content, NULL);
+    if (rc != AIRY_OK)
+        return rc;
 
     size_t olen = strlen(old->valuestring);
     size_t nlen = strlen(new->valuestring);
@@ -255,7 +196,7 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     buf[w] = '\0';
     AIRY_FREE(content);
 
-    if (fs_atomic_write(resolved, buf, w) != 0) {
+    if (airy_io_write_file(resolved, buf, w) != 0) {
         char err[512];
         snprintf(err, sizeof(err), "Cannot write file '%s': %s", path->valuestring,
                  strerror(errno));
