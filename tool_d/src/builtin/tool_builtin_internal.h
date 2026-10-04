@@ -32,6 +32,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Portable stat suite for the fs tools (family single-sourcing): the
+ * recursive walkers classify entries via stat() on every platform, and
+ * MSVC needs the S_IS* macros spelled out. */
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <sys/types.h>
+#else
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#define S_ISDIR(m) (((m)&_S_IFDIR) != 0)
+#define S_ISREG(m) (((m)&_S_IFREG) != 0)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -75,6 +90,12 @@ void builtin_buf_mark(char *buf, size_t cap, size_t *len, const char *mark);
  * res->error and returns AIRY_ERR_PERMISSION_DENIED. */
 int builtin_fs_confine(const char *orig_path, int for_write, char *resolved, size_t resolved_cap,
                        tool_result_t *res);
+
+/* String parameter extraction ritual shared by the tool entry points:
+ * fetch name's string value and require it non-empty. Returns AIRY_OK
+ * with *out pointing at the value; on missing/empty sets res->error
+ * and returns AIRY_ERR_INVALID_PARAM. */
+int builtin_str_param(const cJSON *root, const char *name, const char **out, tool_result_t *res);
 
 void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const char *mark);
 int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_code,

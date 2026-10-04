@@ -12,18 +12,6 @@
 
 #include <errno.h>
 
-#ifndef _WIN32
-#include <sys/stat.h>
-#include <sys/types.h>
-#else
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#define S_ISDIR(m) (((m)&_S_IFDIR) != 0)
-#define S_ISREG(m) (((m)&_S_IFREG) != 0)
-#endif
-
 #include "builtin/tool_builtin_internal.h"
 
 /* ============================================================================
@@ -183,11 +171,9 @@ int fs_grep_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
         res->error = AIRY_STRDUP("Invalid params JSON");
         return AIRY_ERR_PARSE_ERROR;
     });
-    cJSON *pat = cJSON_GetObjectItem(root, "pattern");
-    if (!cJSON_IsString(pat) || !pat->valuestring || !pat->valuestring[0]) {
-        res->error = AIRY_STRDUP("Missing string parameter: pattern");
+    const char *pattern = NULL;
+    if (builtin_str_param(root, "pattern", &pattern, res) != AIRY_OK)
         return AIRY_ERR_INVALID_PARAM;
-    }
     cJSON *path = cJSON_GetObjectItem(root, "path");
     const char *dir = (cJSON_IsString(path) && path->valuestring && path->valuestring[0]) ?
                           path->valuestring :
@@ -205,7 +191,7 @@ int fs_grep_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
         return rc;
 
     regex_t re;
-    if (regcomp(&re, pat->valuestring, REG_EXTENDED | REG_NOSUB) != 0) {
+    if (regcomp(&re, pattern, REG_EXTENDED | REG_NOSUB) != 0) {
         res->error = AIRY_STRDUP("Invalid regex pattern");
         return AIRY_ERR_INVALID_PARAM;
     }
@@ -228,8 +214,7 @@ int fs_grep_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
             snprintf(msg, sizeof(msg), "fs_grep timed out after %ums under '%s' (no matches)",
                      (unsigned)timeout_ms, dir);
         else
-            snprintf(msg, sizeof(msg), "No matches for pattern '%s' under '%s'", pat->valuestring,
-                     dir);
+            snprintf(msg, sizeof(msg), "No matches for pattern '%s' under '%s'", pattern, dir);
         res->error = AIRY_STRDUP(msg);
         res->success = 0;
         res->exit_code = 1;

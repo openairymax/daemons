@@ -55,6 +55,19 @@ int builtin_fs_confine(const char *orig_path, int for_write, char *resolved, siz
     return AIRY_ERR_PERMISSION_DENIED;
 }
 
+int builtin_str_param(const cJSON *root, const char *name, const char **out, tool_result_t *res)
+{
+    cJSON *v = cJSON_GetObjectItem(root, name);
+    if (!cJSON_IsString(v) || !v->valuestring || !v->valuestring[0]) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Missing string parameter: %s", name);
+        res->error = AIRY_STRDUP(msg);
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    *out = v->valuestring;
+    return AIRY_OK;
+}
+
 char *builtin_read_all(FILE *fp, int *out_truncated)
 {
     if (out_truncated)
