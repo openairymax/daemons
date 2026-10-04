@@ -171,6 +171,24 @@ int notify_d_service_init(notify_d_service_t *svc)
     return AIRY_SUCCESS;
 }
 
+void notify_d_drain(notify_d_service_t *svc)
+{
+    for (size_t i = 0; i < svc->pending_count; i++) {
+        size_t idx = (svc->pending_head + i) % NOTIFY_D_MAX_PENDING;
+        notify_event_t *event = svc->pending[idx];
+        if (event) {
+            AIRY_FREE(event->message);
+            AIRY_FREE(event->topic);
+            AIRY_FREE(event->event_type);
+            AIRY_FREE(event);
+        }
+        svc->pending[idx] = NULL;
+    }
+    svc->pending_count = 0;
+    svc->pending_head = 0;
+    svc->pending_tail = 0;
+}
+
 void notify_d_service_destroy(notify_d_service_t *svc)
 {
     if (!svc)
@@ -188,20 +206,7 @@ void notify_d_service_destroy(notify_d_service_t *svc)
     }
     svc->subscription_count = 0;
 
-    for (size_t i = 0; i < svc->pending_count; i++) {
-        size_t idx = (svc->pending_head + i) % NOTIFY_D_MAX_PENDING;
-        notify_event_t *event = svc->pending[idx];
-        if (event) {
-            AIRY_FREE(event->message);
-            AIRY_FREE(event->topic);
-            AIRY_FREE(event->event_type);
-            AIRY_FREE(event);
-        }
-        svc->pending[idx] = NULL;
-    }
-    svc->pending_count = 0;
-    svc->pending_head = 0;
-    svc->pending_tail = 0;
+    notify_d_drain(svc);
 
     for (size_t i = 0; i < svc->client_count; i++) {
         AIRY_FREE(svc->clients[i].topic);

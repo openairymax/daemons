@@ -113,6 +113,10 @@ int notify_d_enqueue(notify_d_service_t *svc, const char *msg, const char *topic
                      const char *event_type);
 int notify_d_broadcast_event(notify_d_service_t *svc, const notify_event_t *event);
 
+/* Drain the pending event ring: free every queued event and reset the
+ * ring indices. Same lock contract as notify_d_enqueue. */
+void notify_d_drain(notify_d_service_t *svc);
+
 /* SSE 保活心跳帧（": ping\n\n" 注释帧，gateway/TUI 等 SSE 客户端据以判定
  * 连接存活）：距上次心跳 >= NOTIFY_D_SSE_PING_INTERVAL 秒时由事件循环调用。
  * 注意：notify_d_enqueue 同约定，调用方须持有 svc->lock。 */
