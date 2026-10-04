@@ -14,6 +14,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "log_sanitizer.h"
+#include "token.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -225,90 +226,42 @@ typedef struct {
     size_t cap;
 } token_set_t;
 
-/* 追加 token：容量不足即倍增；strdup 失败丢弃该 token。返回 0 表示容量
- * 分配失败——调用方据此终止扫描，避免产出残缺集合。 */
-static int token_set_push(token_set_t *out, const char *token)
+/* 追加 token：容量不足即倍增；strdup 失败丢弃该 token。满标后不再收集
+ * （倍增失败，避免产出残缺集合）。 */
+typedef struct {
+    token_set_t *set;
+    int full;
+} token_fill_t;
+
+static void token_fill_visit(void *ud, const char *token)
 {
-    if (!out->tokens)
-        return 0;
-    if (out->count == out->cap) {
-        size_t ncap = out->cap * 2;
-        char **nt = AIRY_REALLOC(out->tokens, sizeof(char *) * ncap);
-        if (!nt)
-            return 0;
-        out->tokens = nt;
-        out->cap = ncap;
+    token_fill_t *f = (token_fill_t *)ud;
+    token_set_t *s = f->set;
+    if (f->full)
+        return;
+    if (s->count == s->cap) {
+        size_t ncap = s->cap * 2;
+        char **nt = AIRY_REALLOC(s->tokens, sizeof(char *) * ncap);
+        if (!nt) {
+            f->full = 1;
+            return;
+        }
+        s->tokens = nt;
+        s->cap = ncap;
     }
     char *dup = AIRY_STRDUP(token);
     if (dup)
-        out->tokens[out->count++] = dup;
-    return 1;
+        s->tokens[s->count++] = dup;
 }
 
 static void token_set_build(const char *text, token_set_t *out)
 {
+    AIRY_MEMSET(out, 0, sizeof(*out));
     out->cap = 64;
     out->tokens = AIRY_MALLOC(sizeof(char *) * out->cap);
-    out->count = 0;
-    if (!out->tokens)
-        return;
-
-    const unsigned char *p = (const unsigned char *)text;
-    char word[128];
-    size_t wlen = 0;
-
-    while (*p) {
-        unsigned char c = *p;
-        if (c >= 0x80) {
-            /* UTF-8 多字节序列（CJK 等）：整字作为一个 token */
-            size_t seq = 1;
-            if ((c & 0xE0) == 0xC0) seq = 2;
-            else if ((c & 0xF0) == 0xE0) seq = 3;
-            else if ((c & 0xF8) == 0xF0) seq = 4;
-            if (wlen > 0) {
-                word[wlen] = '\0';
-                if (!token_set_push(out, word))
-                    break;
-                wlen = 0;
-            }
-            /* 单字节 UTF-8 前缀 */
-            if (seq <= 4 && p[1] && seq >= 2) {
-                char buf[5] = {0};
-                size_t avail = 0;
-                for (size_t i = 0; i < seq; i++) {
-                    if (!p[i]) break;
-                    buf[i] = (char)p[i];
-                    avail++;
-                }
-                buf[avail] = '\0';
-                if (!token_set_push(out, buf))
-                    break;
-                p += avail;
-                continue;
-            }
-            p++;
-            continue;
-        }
-        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
-            if (wlen < sizeof(word) - 1)
-                word[wlen++] = (char)c;
-        } else if (c >= 'A' && c <= 'Z') {
-            if (wlen < sizeof(word) - 1)
-                word[wlen++] = (char)(c + 32);
-        } else {
-            if (wlen > 0) {
-                word[wlen] = '\0';
-                if (!token_set_push(out, word))
-                    break;
-                wlen = 0;
-            }
-        }
-        p++;
-    }
-    if (wlen > 0) {
-        word[wlen] = '\0';
-        token_set_push(out, word);
-    }
+    token_fill_t f = {out, out->tokens == NULL};
+    if (out->tokens)
+        airy_words_scan(text, strlen(text), token_fill_visit, &f);
 }
 
 static void token_set_free(token_set_t *set)

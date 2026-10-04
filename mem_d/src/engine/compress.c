@@ -143,53 +143,9 @@ static void wordfreq_add(wordfreq_t *wf, const char *word)
         wf->freq[wf->count++] = 1;
 }
 
-static void wordfreq_build(const char *text, wordfreq_t *wf)
+static void wordfreq_visit(void *ud, const char *word)
 {
-    const unsigned char *p = (const unsigned char *)text;
-    char word[128];
-    size_t wlen = 0;
-    while (*p) {
-        unsigned char c = *p;
-        if (c >= 0x80) {
-            size_t seq = 1;
-            if ((c & 0xE0) == 0xC0) seq = 2;
-            else if ((c & 0xF0) == 0xE0) seq = 3;
-            else if ((c & 0xF8) == 0xF0) seq = 4;
-            char buf[5] = {0};
-            size_t avail = 0;
-            for (size_t i = 0; i < seq; i++) {
-                if (!p[i]) break;
-                buf[i] = (char)p[i];
-                avail++;
-            }
-            buf[avail] = '\0';
-            if (avail >= 2) {
-                wordfreq_add(wf, buf);
-                p += avail;
-                continue;
-            }
-            p++;
-            continue;
-        }
-        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
-            if (wlen < sizeof(word) - 1)
-                word[wlen++] = (char)c;
-        } else if (c >= 'A' && c <= 'Z') {
-            if (wlen < sizeof(word) - 1)
-                word[wlen++] = (char)(c + 32);
-        } else {
-            if (wlen > 0) {
-                word[wlen] = '\0';
-                wordfreq_add(wf, word);
-                wlen = 0;
-            }
-        }
-        p++;
-    }
-    if (wlen > 0) {
-        word[wlen] = '\0';
-        wordfreq_add(wf, word);
-    }
+    wordfreq_add((wordfreq_t *)ud, word);
 }
 
 static int wordfreq_get(const wordfreq_t *wf, const char *word)
@@ -529,7 +485,8 @@ int mem_compress_plan(mem_ledger_t *ledger, const char *session_id,
             AIRY_MEMSET(&wf, 0, sizeof(wf));
             for (i = 0; i < count; i++) {
                 if (entries[i].text)
-                    wordfreq_build(entries[i].text, &wf);
+                    airy_words_scan(entries[i].text, strlen(entries[i].text),
+                                    wordfreq_visit, &wf);
             }
             for (i = 0; i < count; i++) {
                 if (act[i] != COMPRESS_ACTION_NONE)
