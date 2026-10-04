@@ -12,17 +12,6 @@
 
 #include <errno.h>
 
-#ifndef _WIN32
-#include <sys/stat.h>
-#include <sys/types.h>
-#else
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#define S_ISDIR(m) (((m)&_S_IFDIR) != 0)
-#endif
-
 #include "builtin/tool_builtin_internal.h"
 
 /* ============================================================================
@@ -199,11 +188,9 @@ int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
         res->error = AIRY_STRDUP("Invalid params JSON");
         return AIRY_ERR_PARSE_ERROR;
     });
-    cJSON *pat = cJSON_GetObjectItem(root, "pattern");
-    if (!cJSON_IsString(pat) || !pat->valuestring || !pat->valuestring[0]) {
-        res->error = AIRY_STRDUP("Missing string parameter: pattern");
+    const char *pattern = NULL;
+    if (builtin_str_param(root, "pattern", &pattern, res) != AIRY_OK)
         return AIRY_ERR_INVALID_PARAM;
-    }
     cJSON *base = cJSON_GetObjectItem(root, "base");
     const char *base_dir = (cJSON_IsString(base) && base->valuestring && base->valuestring[0]) ?
                                base->valuestring :
@@ -215,7 +202,7 @@ int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
 
     const char *segs[64];
     size_t nsegs = 0;
-    const char *s = pat->valuestring;
+    const char *s = pattern;
     while (*s) {
         while (*s == '/')
             s++;
@@ -270,7 +257,7 @@ int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
             snprintf(msg, sizeof(msg), "fs_glob timed out after %ums under '%s' (no matches)",
                      (unsigned)timeout_ms, base_dir);
         else
-            snprintf(msg, sizeof(msg), "No files match pattern '%s' under '%s'", pat->valuestring,
+            snprintf(msg, sizeof(msg), "No files match pattern '%s' under '%s'", pattern,
                      base_dir);
         res->error = AIRY_STRDUP(msg);
         res->success = 0;
