@@ -184,22 +184,8 @@ int notify_d_stop(notify_d_service_t *svc, int force)
         }
     }
 
-    if (force) {
-        for (size_t i = 0; i < svc->pending_count; i++) {
-            size_t idx = (svc->pending_head + i) % NOTIFY_D_MAX_PENDING;
-            notify_event_t *event = svc->pending[idx];
-            if (event) {
-                AIRY_FREE(event->message);
-                AIRY_FREE(event->topic);
-                AIRY_FREE(event->event_type);
-                AIRY_FREE(event);
-            }
-            svc->pending[idx] = NULL;
-        }
-        svc->pending_count = 0;
-        svc->pending_head = 0;
-        svc->pending_tail = 0;
-    }
+    if (force)
+        notify_d_drain(svc);
 
     airy_mtx_unlock(&svc->lock);
 
