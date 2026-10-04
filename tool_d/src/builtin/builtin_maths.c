@@ -161,6 +161,54 @@ static int maths_plot_append(char *buf, size_t cap, int off, const char *fmt,
         return -1;
     return off + w;
 }
+
+/* 请求发送出口：params_obj 序列化为紧凑 JSON，经 maths_rpc_call 发送并
+ * 收取响应到 resp；params_obj 由本出口释放。返回 rpc 调用码（失败已置
+ * res->error）。 */
+static int maths_send(const char *method, cJSON *params_obj, char *resp,
+                      size_t resp_sz, tool_result_t *res)
+{
+    char *payload = cJSON_PrintUnformatted(params_obj);
+    cJSON_Delete(params_obj);
+    if (!payload) {
+        res->error = AIRY_STRDUP("OOM");
+        return AIRY_ERR_GENERIC_FAIL;
+    }
+    char params[8192];
+    if (strlen(payload) + 32 >= sizeof(params)) {
+        cJSON_free(payload);
+        res->error = AIRY_STRDUP("request too large");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    snprintf(params, sizeof(params), "%s", payload);
+    cJSON_free(payload);
+    return maths_rpc_call(method, params, resp, resp_sz, res);
+}
+
+/* 标量结果出口：解析响应并取 result.result 数值格式化填 res（who 作
+ * 错误前缀）；响应体由本出口统一释放。 */
+static int maths_scalar(const char *resp, const char *who, tool_result_t *res)
+{
+    cJSON *rroot = maths_parse_response(resp, res);
+    if (!rroot)
+        return AIRY_ERR_EXEC_FAIL;
+    cJSON *value = cJSON_GetObjectItem(cJSON_GetObjectItem(rroot, "result"),
+                                       "result");
+    if (!cJSON_IsNumber(value)) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "%s: unexpected response shape", who);
+        cJSON_Delete(rroot);
+        res->error = AIRY_STRDUP(msg);
+        return AIRY_ERR_EXEC_FAIL;
+    }
+    char out[64];
+    snprintf(out, sizeof(out), "%.12g", value->valuedouble);
+    res->output = AIRY_STRDUP(out);
+    res->exit_code = 0;
+    res->success = 1;
+    cJSON_Delete(rroot);
+    return 0;
+}
 #endif /* _WIN32 */
 
 /**
@@ -195,7 +243,6 @@ int maths_eval_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    char params[8192];
     /* cJSON 序列化 expression，保证 JSON 转义正确 */
     cJSON *params_obj = cJSON_CreateObject();
     if (!params_obj) {
@@ -204,42 +251,11 @@ int maths_eval_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
     }
     cJSON_AddItemToObject(params_obj, "expr",
                           cJSON_CreateString(expr->valuestring));
-    char *payload = cJSON_PrintUnformatted(params_obj);
-    cJSON_Delete(params_obj);
-    if (!payload) {
-        res->error = AIRY_STRDUP("OOM");
-        return AIRY_ERR_GENERIC_FAIL;
-    }
-    if (strlen(payload) + 32 >= sizeof(params)) {
-        cJSON_free(payload);
-        res->error = AIRY_STRDUP("request too large");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    snprintf(params, sizeof(params), "%s", payload);
-    cJSON_free(payload);
-
     char resp[MATHS_RESP_CAP];
-    int rc = maths_rpc_call("eval", params, resp, sizeof(resp), res);
+    int rc = maths_send("eval", params_obj, resp, sizeof(resp), res);
     if (rc != 0)
         return rc;
-
-    cJSON *rroot = maths_parse_response(resp, res);
-    if (!rroot)
-        return AIRY_ERR_EXEC_FAIL;
-    cJSON *result = cJSON_GetObjectItem(rroot, "result");
-    cJSON *value = cJSON_GetObjectItem(result, "result");
-    if (!cJSON_IsNumber(value)) {
-        cJSON_Delete(rroot);
-        res->error = AIRY_STRDUP("maths_eval: unexpected response shape");
-        return AIRY_ERR_EXEC_FAIL;
-    }
-    char out[64];
-    snprintf(out, sizeof(out), "%.12g", value->valuedouble);
-    res->output = AIRY_STRDUP(out);
-    res->exit_code = 0;
-    res->success = 1;
-    cJSON_Delete(rroot);
-    return 0;
+    return maths_scalar(resp, "maths_eval", res);
 #endif
 }
 
@@ -299,24 +315,8 @@ int maths_plot_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
     if (cJSON_IsNumber(samples))
         cJSON_AddItemToObject(params_obj, "samples",
                               cJSON_CreateNumber(samples->valuedouble));
-    char *payload = cJSON_PrintUnformatted(params_obj);
-    cJSON_Delete(params_obj);
-    if (!payload) {
-        res->error = AIRY_STRDUP("OOM");
-        return AIRY_ERR_GENERIC_FAIL;
-    }
-
-    char params[8192];
-    if (strlen(payload) + 32 >= sizeof(params)) {
-        cJSON_free(payload);
-        res->error = AIRY_STRDUP("request too large");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    snprintf(params, sizeof(params), "%s", payload);
-    cJSON_free(payload);
-
     char resp[MATHS_RESP_CAP];
-    int rc = maths_rpc_call("plot", params, resp, sizeof(resp), res);
+    int rc = maths_send("plot", params_obj, resp, sizeof(resp), res);
     if (rc != 0)
         return rc;
 
@@ -437,43 +437,10 @@ int maths_stats_tool(const char *params_json, uint32_t timeout_ms, tool_result_t
         res->error = AIRY_STRDUP("values[] must contain numbers");
         return AIRY_ERR_INVALID_PARAM;
     }
-    char *payload = cJSON_PrintUnformatted(params_obj);
-    cJSON_Delete(params_obj);
-    if (!payload) {
-        res->error = AIRY_STRDUP("OOM");
-        return AIRY_ERR_GENERIC_FAIL;
-    }
-
-    char params[8192];
-    if (strlen(payload) + 32 >= sizeof(params)) {
-        cJSON_free(payload);
-        res->error = AIRY_STRDUP("request too large");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    snprintf(params, sizeof(params), "%s", payload);
-    cJSON_free(payload);
-
     char resp[MATHS_RESP_CAP];
-    int rc = maths_rpc_call("stats", params, resp, sizeof(resp), res);
+    int rc = maths_send("stats", params_obj, resp, sizeof(resp), res);
     if (rc != 0)
         return rc;
-
-    cJSON *rroot = maths_parse_response(resp, res);
-    if (!rroot)
-        return AIRY_ERR_EXEC_FAIL;
-    cJSON *result = cJSON_GetObjectItem(rroot, "result");
-    cJSON *value = cJSON_GetObjectItem(result, "result");
-    if (!cJSON_IsNumber(value)) {
-        cJSON_Delete(rroot);
-        res->error = AIRY_STRDUP("maths_stats: unexpected response shape");
-        return AIRY_ERR_EXEC_FAIL;
-    }
-    char out[64];
-    snprintf(out, sizeof(out), "%.12g", value->valuedouble);
-    res->output = AIRY_STRDUP(out);
-    res->exit_code = 0;
-    res->success = 1;
-    cJSON_Delete(rroot);
-    return 0;
+    return maths_scalar(resp, "maths_stats", res);
 #endif
 }
