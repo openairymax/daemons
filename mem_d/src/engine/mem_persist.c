@@ -12,6 +12,7 @@
 
 #include "mem_persist.h"
 #include "airy_memory.h"
+#include "io.h"
 #include "safe_utf8.h"
 #include "svc_logger.h"
 #include "platform.h"
@@ -24,12 +25,10 @@
 #include <string.h>
 #include <time.h>
 
-#ifndef _WIN32
-#include <unistd.h>
-#else
+/* windows.h: MoveFileExA in the atomic-rename fallback below. */
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <io.h>
 #endif
 
 #define MEM_JSONL_FILENAME "mem.jsonl"
@@ -203,20 +202,7 @@ void mem_persist_rewrite_all(mem_service_t *svc)
         }
     }
 
-    int failed = (fflush(f) != 0);
-#ifndef _WIN32
-    if (!failed) {
-        int fd = fileno(f);
-        if (fd >= 0 && fsync(fd) != 0)
-            failed = 1;
-    }
-#else
-    if (!failed) {
-        int fd = _fileno(f);
-        if (fd >= 0 && _commit(fd) != 0)
-            failed = 1;
-    }
-#endif
+    int failed = (fflush(f) != 0) || (airy_io_sync(f) != 0);
     if (fclose(f) != 0)
         failed = 1;
 
@@ -252,21 +238,8 @@ static bool mem_write_file_atomic(const char *path, const char *data, size_t len
         return false;
 
     bool failed = (len > 0 && fwrite(data, 1, len, f) != len);
-    if (!failed && fflush(f) != 0)
+    if (!failed && (fflush(f) != 0 || airy_io_sync(f) != 0))
         failed = true;
-#ifndef _WIN32
-    if (!failed) {
-        int fd = fileno(f);
-        if (fd >= 0 && fsync(fd) != 0)
-            failed = true;
-    }
-#else
-    if (!failed) {
-        int fd = _fileno(f);
-        if (fd >= 0 && _commit(fd) != 0)
-            failed = true;
-    }
-#endif
     if (fclose(f) != 0)
         failed = true;
 
