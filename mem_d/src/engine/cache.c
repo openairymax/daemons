@@ -222,12 +222,33 @@ static cache_entry_t *entry_find_exact(mem_cache_t *cache, const char *exact_key
 typedef struct {
     char **tokens;
     size_t count;
+    size_t cap;
 } token_set_t;
+
+/* 追加 token：容量不足即倍增；strdup 失败丢弃该 token。返回 0 表示容量
+ * 分配失败——调用方据此终止扫描，避免产出残缺集合。 */
+static int token_set_push(token_set_t *out, const char *token)
+{
+    if (!out->tokens)
+        return 0;
+    if (out->count == out->cap) {
+        size_t ncap = out->cap * 2;
+        char **nt = AIRY_REALLOC(out->tokens, sizeof(char *) * ncap);
+        if (!nt)
+            return 0;
+        out->tokens = nt;
+        out->cap = ncap;
+    }
+    char *dup = AIRY_STRDUP(token);
+    if (dup)
+        out->tokens[out->count++] = dup;
+    return 1;
+}
 
 static void token_set_build(const char *text, token_set_t *out)
 {
-    size_t cap = 64;
-    out->tokens = AIRY_MALLOC(sizeof(char *) * cap);
+    out->cap = 64;
+    out->tokens = AIRY_MALLOC(sizeof(char *) * out->cap);
     out->count = 0;
     if (!out->tokens)
         return;
@@ -246,17 +267,8 @@ static void token_set_build(const char *text, token_set_t *out)
             else if ((c & 0xF8) == 0xF0) seq = 4;
             if (wlen > 0) {
                 word[wlen] = '\0';
-                if (out->count == cap) {
-                    cap *= 2;
-                    char **nt = AIRY_REALLOC(out->tokens, sizeof(char *) * cap);
-                    if (!nt) break;
-                    out->tokens = nt;
-                }
-                {
-                    char *dup = AIRY_STRDUP(word);
-                    if (dup)
-                        out->tokens[out->count++] = dup;
-                }
+                if (!token_set_push(out, word))
+                    break;
                 wlen = 0;
             }
             /* 单字节 UTF-8 前缀 */
@@ -269,17 +281,8 @@ static void token_set_build(const char *text, token_set_t *out)
                     avail++;
                 }
                 buf[avail] = '\0';
-                if (out->count == cap) {
-                    cap *= 2;
-                    char **nt = AIRY_REALLOC(out->tokens, sizeof(char *) * cap);
-                    if (!nt) break;
-                    out->tokens = nt;
-                }
-                {
-                    char *dup = AIRY_STRDUP(buf);
-                    if (dup)
-                        out->tokens[out->count++] = dup;
-                }
+                if (!token_set_push(out, buf))
+                    break;
                 p += avail;
                 continue;
             }
@@ -295,17 +298,8 @@ static void token_set_build(const char *text, token_set_t *out)
         } else {
             if (wlen > 0) {
                 word[wlen] = '\0';
-                if (out->count == cap) {
-                    cap *= 2;
-                    char **nt = AIRY_REALLOC(out->tokens, sizeof(char *) * cap);
-                    if (!nt) break;
-                    out->tokens = nt;
-                }
-                {
-                    char *dup = AIRY_STRDUP(word);
-                    if (dup)
-                        out->tokens[out->count++] = dup;
-                }
+                if (!token_set_push(out, word))
+                    break;
                 wlen = 0;
             }
         }
@@ -313,16 +307,7 @@ static void token_set_build(const char *text, token_set_t *out)
     }
     if (wlen > 0) {
         word[wlen] = '\0';
-        if (out->count == cap) {
-            cap *= 2;
-            char **nt = AIRY_REALLOC(out->tokens, sizeof(char *) * cap);
-            if (!nt)
-                return;
-            out->tokens = nt;
-        }
-        char *dup = AIRY_STRDUP(word);
-        if (dup)
-            out->tokens[out->count++] = dup;
+        token_set_push(out, word);
     }
 }
 
@@ -333,6 +318,7 @@ static void token_set_free(token_set_t *set)
     AIRY_FREE(set->tokens);
     set->tokens = NULL;
     set->count = 0;
+    set->cap = 0;
 }
 
 static int token_contains(const token_set_t *set, const char *tok)
@@ -565,6 +551,22 @@ int mem_cache_admit(const char *text)
     return 1;
 }
 
+/* 精确键派生唯一来源：SHA-256("text|model_id")，put/get 共用。 */
+static int cache_key_build(const char *text, const char *model_id,
+                           char out[SHA256_HEX + 1])
+{
+    size_t tl = strlen(text), ml = strlen(model_id);
+    char *key_src = AIRY_MALLOC(tl + ml + 2);
+    if (!key_src)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    AIRY_MEMCPY(key_src, text, tl);
+    key_src[tl] = '|';
+    AIRY_MEMCPY(key_src + tl + 1, model_id, ml + 1);
+    sha256_hex(key_src, out);
+    AIRY_FREE(key_src);
+    return AIRY_SUCCESS;
+}
+
 int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
                   const char *model_id, uint64_t ttl_ms,
                   char **out_cache_id, char **out_exact_key)
@@ -576,17 +578,8 @@ int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
     if (!cache || !text || !response || !model_id)
         return AIRY_ERR_INVALID_PARAM;
 
-    {
-        size_t tl = strlen(text), ml = strlen(model_id);
-        char *key_src = AIRY_MALLOC(tl + ml + 2);
-        if (!key_src)
-            return AIRY_ERR_OUT_OF_MEMORY;
-        AIRY_MEMCPY(key_src, text, tl);
-        key_src[tl] = '|';
-        AIRY_MEMCPY(key_src + tl + 1, model_id, ml + 1);
-        sha256_hex(key_src, exact_key);
-        AIRY_FREE(key_src);
-    }
+    if (cache_key_build(text, model_id, exact_key) != AIRY_SUCCESS)
+        return AIRY_ERR_OUT_OF_MEMORY;
 
     /* 同键覆盖：删除旧条目再插入（保持 LRU 语义） */
     if ((e = entry_find_exact(cache, exact_key)) != NULL) {
@@ -657,17 +650,8 @@ int mem_cache_get(mem_cache_t *cache, const char *text, const char *model_id,
     now = cache_now_ns();
     thr = threshold > 0.0 && threshold <= 1.0 ? threshold : cache->semantic_threshold;
 
-    {
-        size_t tl = strlen(text), ml = strlen(model_id);
-        char *key_src = AIRY_MALLOC(tl + ml + 2);
-        if (!key_src)
-            return AIRY_ERR_OUT_OF_MEMORY;
-        AIRY_MEMCPY(key_src, text, tl);
-        key_src[tl] = '|';
-        AIRY_MEMCPY(key_src + tl + 1, model_id, ml + 1);
-        sha256_hex(key_src, exact_key);
-        AIRY_FREE(key_src);
-    }
+    if (cache_key_build(text, model_id, exact_key) != AIRY_SUCCESS)
+        return AIRY_ERR_OUT_OF_MEMORY;
 
     /* L0 精确 */
     if ((e = entry_find_exact(cache, exact_key)) != NULL) {
