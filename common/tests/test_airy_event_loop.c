@@ -74,6 +74,24 @@ static int fd_cb(int fd, uint32_t events, void *user_data)
     return 0;
 }
 
+static int fd_fired_count = 0;
+
+static int fd_cb_count(int fd, uint32_t events, void *user_data)
+{
+    (void)fd;
+    (void)events;
+    (void)user_data;
+    fd_fired_count++;
+    return 0;
+}
+
+static void stop_cb(airy_event_loop_t *loop, uint64_t timer_id, void *user_data)
+{
+    (void)timer_id;
+    (void)user_data;
+    airy_event_loop_stop(loop);
+}
+
 static void test_create_default(void)
 {
     TEST("Create with default max_events");
@@ -350,6 +368,40 @@ static void test_multiple_cycles(void)
     PASS();
 }
 
+static void test_run_dispatch_stop(void)
+{
+    TEST("Run loop dispatches ready fd then stops via timer");
+    fd_fired_count = 0;
+
+    airy_event_loop_t *loop = airy_event_loop_create(64);
+    ASSERT(loop != NULL, "create");
+
+    int fds[2];
+    ASSERT(pipe(fds) == 0, "pipe");
+
+    int flags = fcntl(fds[0], F_GETFL, 0);
+    ASSERT(flags >= 0 && fcntl(fds[0], F_SETFL, flags | O_NONBLOCK) == 0, "set nonblock");
+
+    int ret = airy_event_loop_add_fd(loop, fds[0], AIRY_EVENT_TYPE_READ, fd_cb_count, NULL);
+    ASSERT(ret == 0, "add fd");
+
+    uint64_t tid = airy_event_loop_add_timer(loop, 20, stop_cb, NULL);
+    ASSERT(tid > 0, "add stop timer");
+
+    ASSERT(write(fds[1], "x", 1) == 1, "make fd readable");
+
+    ret = airy_event_loop_run(loop);
+    ASSERT(ret == 0, "run should return 0");
+    ASSERT(fd_fired_count >= 1, "ready fd callback should have fired");
+    ASSERT(airy_event_loop_wakeup(loop) == 0, "wakeup should succeed");
+
+    airy_event_loop_remove_fd(loop, fds[0]);
+    close(fds[0]);
+    close(fds[1]);
+    airy_event_loop_destroy(loop);
+    PASS();
+}
+
 int main(void)
 {
     printf("\n=== AgentRT Event Loop Module Unit Tests ===\n\n");
@@ -372,6 +424,7 @@ int main(void)
     test_cancel_timer_null_loop();
     test_multiple_fds_remove();
     test_multiple_cycles();
+    test_run_dispatch_stop();
 
     printf("\n=== Results: %d/%d tests passed ===\n\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
