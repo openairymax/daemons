@@ -194,6 +194,66 @@ static void test_list_checkpoints(void)
     PASS();
 }
 
+static void test_list_task_ids(void)
+{
+    TEST("List distinct task ids");
+    setup_temp_dir();
+
+    airy_task_checkpoint_t *cp = NULL;
+    airy_err_t err = airy_checkpoint_create("task_a", "s", 1, "{}", NULL, 0, NULL, 0, &cp);
+    ASSERT(err == AIRY_OK, "create a1");
+    airy_checkpoint_save(cp);
+    airy_checkpoint_destroy(cp);
+
+    err = airy_checkpoint_create("task_a", "s", 2, "{}", NULL, 0, NULL, 0, &cp);
+    ASSERT(err == AIRY_OK, "create a2");
+    airy_checkpoint_save(cp);
+    airy_checkpoint_destroy(cp);
+
+    err = airy_checkpoint_create("task_b", "s", 1, "{}", NULL, 0, NULL, 0, &cp);
+    ASSERT(err == AIRY_OK, "create b1");
+    airy_checkpoint_save(cp);
+    airy_checkpoint_destroy(cp);
+
+    char **ids = NULL;
+    size_t count = 0;
+    err = airy_checkpoint_ids(&ids, &count);
+    ASSERT(err == AIRY_OK, "ids should succeed");
+    /* task_a 有两个 seq 必须去重为 1，连同 task_b 共 2 个 distinct id。
+     * 这覆盖旧实现把 "{task_id}_{seq}" 整段当 id 导致去重失效的缺陷。 */
+    ASSERT(count == 2, "should have 2 distinct task ids");
+
+    int has_a = 0, has_b = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(ids[i], "task_a") == 0)
+            has_a = 1;
+        else if (strcmp(ids[i], "task_b") == 0)
+            has_b = 1;
+        free(ids[i]);
+    }
+    free(ids);
+    ASSERT(has_a && has_b, "both task_a and task_b should be listed");
+
+    teardown_temp_dir();
+    PASS();
+}
+
+static void test_task_ids_empty(void)
+{
+    TEST("List task ids on empty dir");
+    setup_temp_dir();
+
+    char **ids = (char **)0x1;
+    size_t count = 99;
+    airy_err_t err = airy_checkpoint_ids(&ids, &count);
+    ASSERT(err == AIRY_OK, "ids on empty dir should succeed");
+    ASSERT(ids == NULL, "ids should be NULL when empty");
+    ASSERT(count == 0, "count should be 0 when empty");
+
+    teardown_temp_dir();
+    PASS();
+}
+
 static void test_delete(void)
 {
     TEST("Delete checkpoint");
@@ -332,6 +392,8 @@ int main(void)
     test_save_and_restore();
     test_restore_nonexistent();
     test_list_checkpoints();
+    test_list_task_ids();
+    test_task_ids_empty();
     test_delete();
     test_get_stats();
     test_destroy_null();
