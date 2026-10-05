@@ -65,6 +65,75 @@ int base64_encode(const uint8_t *data, size_t len, char *output, size_t *out_len
 }
 
 /**
+ * @brief Base64url 解码原语（crypto 域，令牌验证共用）
+ *
+ * 宽容语义与既有表驱动实现一致：非法字符按 0 解码（后续 HMAC 校验
+ * 兜底拒绝），URL 安全字母表（-_）原地归一。输出缓冲区按解码长度
+ * 分配并 NUL 终止，调用方负责 AIRY_FREE。
+ */
+int b64url_decode(const char *input, size_t in_len, unsigned char **out, size_t *out_len)
+{
+    static const int8_t table[256] = {
+        ['A'] = 0,  ['B'] = 1,  ['C'] = 2,  ['D'] = 3,  ['E'] = 4,  ['F'] = 5,  ['G'] = 6,
+        ['H'] = 7,  ['I'] = 8,  ['J'] = 9,  ['K'] = 10, ['L'] = 11, ['M'] = 12, ['N'] = 13,
+        ['O'] = 14, ['P'] = 15, ['Q'] = 16, ['R'] = 17, ['S'] = 18, ['T'] = 19, ['U'] = 20,
+        ['V'] = 21, ['W'] = 22, ['X'] = 23, ['Y'] = 24, ['Z'] = 25, ['a'] = 26, ['b'] = 27,
+        ['c'] = 28, ['d'] = 29, ['e'] = 30, ['f'] = 31, ['g'] = 32, ['h'] = 33, ['i'] = 34,
+        ['j'] = 35, ['k'] = 36, ['l'] = 37, ['m'] = 38, ['n'] = 39, ['o'] = 40, ['p'] = 41,
+        ['q'] = 42, ['r'] = 43, ['s'] = 44, ['t'] = 45, ['u'] = 46, ['v'] = 47, ['w'] = 48,
+        ['x'] = 49, ['y'] = 50, ['z'] = 51, ['0'] = 52, ['1'] = 53, ['2'] = 54, ['3'] = 55,
+        ['4'] = 56, ['5'] = 57, ['6'] = 58, ['7'] = 59, ['8'] = 60, ['9'] = 61, ['+'] = 62,
+        ['/'] = 63};
+
+    *out = NULL;
+    *out_len = 0;
+    if (!input || !out || !out_len || in_len == 0)
+        return AIRY_ERR_INVALID_PARAM;
+
+    char *norm = (char *)AIRY_MALLOC(in_len + 4);
+    if (!norm)
+        return AIRY_ERR_INVALID_PARAM;
+    for (size_t i = 0; i < in_len; i++) {
+        char c = input[i];
+        if (c == '-')
+            c = '+';
+        else if (c == '_')
+            c = '/';
+        norm[i] = c;
+    }
+    size_t pad = (4 - (in_len % 4)) % 4;
+    for (size_t i = 0; i < pad; i++)
+        norm[in_len + i] = '=';
+    size_t total = in_len + pad;
+    norm[total] = '\0';
+
+    unsigned char *decoded = (unsigned char *)AIRY_MALLOC((total / 4) * 3 + 1);
+    if (!decoded) {
+        AIRY_FREE(norm);
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    size_t j = 0;
+    for (size_t i = 0; i < total; i += 4) {
+        int a = table[(unsigned char)norm[i]];
+        int b = table[(unsigned char)norm[i + 1]];
+        int c = (i + 2 < total && norm[i + 2] != '=') ? table[(unsigned char)norm[i + 2]] : 0;
+        int d = (i + 3 < total && norm[i + 3] != '=') ? table[(unsigned char)norm[i + 3]] : 0;
+        decoded[j++] = (unsigned char)((a << 2) | (b >> 4));
+        if (i + 2 < total && norm[i + 2] != '=')
+            decoded[j++] = (unsigned char)(((b & 0x0F) << 4) | (c >> 2));
+        if (i + 3 < total && norm[i + 3] != '=')
+            decoded[j++] = (unsigned char)(((c & 0x03) << 6) | d);
+    }
+    decoded[j] = '\0';
+    AIRY_FREE(norm);
+
+    *out = decoded;
+    *out_len = j;
+    return AIRY_SUCCESS;
+}
+
+/**
  * @brief Currently used HMAC implementation pointer (runtime selection)
  */
 jwt_hmac_fn_t g_hmac_impl = NULL;
