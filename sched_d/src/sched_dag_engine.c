@@ -124,23 +124,12 @@ int sched_dag_node_ready(const sched_dag_t *dag, size_t idx)
     if (node->retry_at_ms && sched_now_ms() < node->retry_at_ms)
         return 0;
     for (size_t k = 0; k < node->dep_count; k++) {
-        const char *dep_id = node->depends[k];
-        int dep_ok = 0;
-        for (size_t j = 0; j < dag->node_count; j++) {
-            if (strcmp(dag->nodes[j]->id, dep_id) == 0) {
-                if (dag->nodes[j]->status == SCHED_DAG_NODE_COMPLETED) {
-                    dep_ok = 1;
-                } else if (sched_dag_dep_broken(dag->nodes[j]->status)) {
-
-                    return -1;
-                }
-                break;
-            }
-        }
-        if (!dep_ok) {
-
+        const sched_dag_node_t *dep = sched_dag_find_node(dag, node->depends[k]);
+        if (!dep)
             return 0;
-        }
+        if (dep->status == SCHED_DAG_NODE_COMPLETED)
+            continue;
+        return sched_dag_dep_broken(dep->status) ? -1 : 0;
     }
     return 1;
 }
@@ -227,6 +216,24 @@ static int sched_dag_error_is_transient(int dret)
 /* ============================================================================
  * DAG node terminal-state write-back / failure grading / graph convergence
  * ============================================================================ */
+
+/* Cascade-cancel every still-pending/ready node of a graph that just reached
+ * a terminal failure: their dependencies can never be satisfied again, so they
+ * are canceled uniformly instead of being left dangling until the graph thread
+ * times out. Returns the number of nodes canceled. Call with lock held. */
+static size_t dag_cascade_cancel(sched_dag_t *dag)
+{
+    size_t canceled = 0;
+    for (size_t j = 0; j < dag->node_count; j++) {
+        sched_dag_node_t *n = dag->nodes[j];
+        if (n->status == SCHED_DAG_NODE_PENDING || n->status == SCHED_DAG_NODE_READY) {
+            n->status = SCHED_DAG_NODE_CANCELED;
+            n->finished_at_ms = sched_now_ms();
+            canceled++;
+        }
+    }
+    return canceled;
+}
 
 /* Node terminal-state write-back (call with lock held, shared by batch
  * workers; returns whether the node succeeded).
@@ -349,15 +356,7 @@ int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_
         SVC_LOG_ERROR("DAG node FATAL failed: %s/%s (error=%s, rc=%d)", dag->dag_id, node->id,
                       node->error ? node->error : "?", dret);
         dag->status = SCHED_DAG_STATUS_FAILED;
-        size_t cascade = 0;
-        for (size_t j = 0; j < dag->node_count; j++) {
-            sched_dag_node_t *n = dag->nodes[j];
-            if (n->status == SCHED_DAG_NODE_PENDING || n->status == SCHED_DAG_NODE_READY) {
-                n->status = SCHED_DAG_NODE_CANCELED;
-                n->finished_at_ms = sched_now_ms();
-                cascade++;
-            }
-        }
+        size_t cascade = dag_cascade_cancel(dag);
         SVC_LOG_WARN("DAG aborted by FATAL node failure: %s (%zu nodes cascade-canceled)",
                      dag->dag_id, cascade);
         if (output)
@@ -372,15 +371,7 @@ int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_
         SVC_LOG_ERROR("DAG node failed: %s/%s (error=%s)", dag->dag_id, node->id,
                       node->error ? node->error : "unknown");
         dag->status = SCHED_DAG_STATUS_FAILED;
-        size_t cascade = 0;
-        for (size_t j = 0; j < dag->node_count; j++) {
-            sched_dag_node_t *n = dag->nodes[j];
-            if (n->status == SCHED_DAG_NODE_PENDING || n->status == SCHED_DAG_NODE_READY) {
-                n->status = SCHED_DAG_NODE_CANCELED;
-                n->finished_at_ms = sched_now_ms();
-                cascade++;
-            }
-        }
+        size_t cascade = dag_cascade_cancel(dag);
         SVC_LOG_WARN("DAG aborted by node failure: %s (%zu downstream nodes "
                      "cascade-canceled)",
                      dag->dag_id, cascade);
@@ -438,16 +429,12 @@ void sched_dag_propagate_unreachable(sched_service_t *svc)
                 if (node->status != SCHED_DAG_NODE_PENDING)
                     continue;
                 for (size_t k = 0; k < node->dep_count; k++) {
-                    for (size_t m = 0; m < dag->node_count; m++) {
-                        if (strcmp(dag->nodes[m]->id, node->depends[k]) != 0)
-                            continue;
-                        if (sched_dag_dep_broken(dag->nodes[m]->status)) {
-                            node->status = SCHED_DAG_NODE_CANCELED;
-                            node->finished_at_ms = sched_now_ms();
-                            changed = 1;
-                        }
-                        break;
-                    }
+                    const sched_dag_node_t *dep = sched_dag_find_node(dag, node->depends[k]);
+                    if (!dep || !sched_dag_dep_broken(dep->status))
+                        continue;
+                    node->status = SCHED_DAG_NODE_CANCELED;
+                    node->finished_at_ms = sched_now_ms();
+                    changed = 1;
                 }
             }
         }

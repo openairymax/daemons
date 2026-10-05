@@ -40,6 +40,40 @@ _Static_assert(sizeof(sched_dag_node_names) / sizeof(sched_dag_node_names[0]) ==
                    SCHED_DAG_NODE_COUNT,
                "node status name table out of sync with sched_dag_node_status_t");
 
+/* Graph lookup by id under the service lock (NULL when absent). Callers hold
+ * service->lock and read the returned pointer while still holding it. */
+static sched_dag_t *sched_find_dag(sched_service_t *service, const char *dag_id)
+{
+    for (size_t i = 0; i < service->dag_count; i++) {
+        if (strcmp(service->dags[i]->dag_id, dag_id) == 0)
+            return service->dags[i];
+    }
+    return NULL;
+}
+
+/* Per-graph summary object shared by the get/list JSON paths. The callers add
+ * the field(s) unique to their own view. Returns NULL on allocation failure. */
+static cJSON *dag_summary_json(const sched_dag_t *dag)
+{
+    cJSON *dj = cJSON_CreateObject();
+    if (!dj)
+        return NULL;
+    cJSON_AddStringToObject(dj, "dag_id", dag->dag_id);
+    cJSON_AddStringToObject(dj, "name", dag->name ? dag->name : "");
+    cJSON_AddStringToObject(dj, "status",
+                            sched_dag_state_names[dag->status % SCHED_DAG_STATUS_COUNT]);
+    cJSON_AddNumberToObject(dj, "node_count", (double)dag->node_count);
+    size_t done = 0;
+    for (size_t j = 0; j < dag->node_count; j++) {
+        if (sched_dag_node_done(dag->nodes[j]->status))
+            done++;
+    }
+    cJSON_AddNumberToObject(dj, "progress", (double)done);
+    cJSON_AddNumberToObject(dj, "created_at_ms", (double)dag->created_at_ms);
+    cJSON_AddNumberToObject(dj, "finished_at_ms", (double)dag->finished_at_ms);
+    return dj;
+}
+
 int sched_service_submit_dag(sched_service_t *service, const char *dag_json, char **out_dag_id)
 {
     if (!service || !dag_json || !out_dag_id || !service->initialized) {
@@ -121,33 +155,14 @@ int sched_service_get_dag(sched_service_t *service, const char *dag_id, char **o
     *out_json = NULL;
 
     airy_mtx_lock(&service->lock);
-    sched_dag_t *dag = NULL;
-    for (size_t i = 0; i < service->dag_count; i++) {
-        if (strcmp(service->dags[i]->dag_id, dag_id) == 0) {
-            dag = service->dags[i];
-            break;
-        }
-    }
+    sched_dag_t *dag = sched_find_dag(service, dag_id);
     if (!dag) {
         airy_mtx_unlock(&service->lock);
         return AIRY_ERR_NOT_FOUND;
     }
 
-    cJSON *root = cJSON_CreateObject();
+    cJSON *root = dag_summary_json(dag);
     if (root) {
-        cJSON_AddStringToObject(root, "dag_id", dag->dag_id);
-        cJSON_AddStringToObject(root, "name", dag->name ? dag->name : "");
-        cJSON_AddStringToObject(root, "status",
-                                sched_dag_state_names[dag->status % SCHED_DAG_STATUS_COUNT]);
-        cJSON_AddNumberToObject(root, "node_count", (double)dag->node_count);
-        size_t done = 0;
-        for (size_t j = 0; j < dag->node_count; j++) {
-            if (sched_dag_node_done(dag->nodes[j]->status))
-                done++;
-        }
-        cJSON_AddNumberToObject(root, "progress", (double)done);
-        cJSON_AddNumberToObject(root, "created_at_ms", (double)dag->created_at_ms);
-        cJSON_AddNumberToObject(root, "finished_at_ms", (double)dag->finished_at_ms);
         cJSON_AddNumberToObject(root, "retry_budget_ms", (double)dag->retry_budget_ms);
 
         cJSON *nodes = cJSON_CreateArray();
@@ -198,24 +213,9 @@ int sched_dag_list_json(sched_service_t *service, char **out_json)
     if (root) {
         cJSON *dags = cJSON_CreateArray();
         for (size_t i = 0; i < service->dag_count; i++) {
-            sched_dag_t *dag = service->dags[i];
-            cJSON *dj = cJSON_CreateObject();
-            if (!dj)
-                continue;
-            cJSON_AddStringToObject(dj, "dag_id", dag->dag_id);
-            cJSON_AddStringToObject(dj, "name", dag->name ? dag->name : "");
-            cJSON_AddStringToObject(dj, "status",
-                                    sched_dag_state_names[dag->status % SCHED_DAG_STATUS_COUNT]);
-            cJSON_AddNumberToObject(dj, "node_count", (double)dag->node_count);
-            size_t done = 0;
-            for (size_t j = 0; j < dag->node_count; j++) {
-                if (sched_dag_node_done(dag->nodes[j]->status))
-                    done++;
-            }
-            cJSON_AddNumberToObject(dj, "progress", (double)done);
-            cJSON_AddNumberToObject(dj, "created_at_ms", (double)dag->created_at_ms);
-            cJSON_AddNumberToObject(dj, "finished_at_ms", (double)dag->finished_at_ms);
-            cJSON_AddItemToArray(dags, dj);
+            cJSON *dj = dag_summary_json(service->dags[i]);
+            if (dj)
+                cJSON_AddItemToArray(dags, dj);
         }
         cJSON_AddItemToObject(root, "dags", dags);
         cJSON_AddNumberToObject(root, "count", (double)service->dag_count);
@@ -236,13 +236,7 @@ int sched_service_cancel_dag(sched_service_t *service, const char *dag_id)
     }
 
     airy_mtx_lock(&service->lock);
-    sched_dag_t *dag = NULL;
-    for (size_t i = 0; i < service->dag_count; i++) {
-        if (strcmp(service->dags[i]->dag_id, dag_id) == 0) {
-            dag = service->dags[i];
-            break;
-        }
-    }
+    sched_dag_t *dag = sched_find_dag(service, dag_id);
     if (!dag) {
         airy_mtx_unlock(&service->lock);
         return AIRY_ERR_NOT_FOUND;
