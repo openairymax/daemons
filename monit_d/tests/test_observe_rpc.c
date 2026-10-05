@@ -261,7 +261,7 @@ int main(void)
     printf("=========================================\n");
     fflush(stdout);
 
-    airy_log_init(NULL);
+    log_init(NULL);
     assert(observe_rpc_init() == 0);
 #ifndef _WIN32
     g_disp = method_dispatcher_create(16);

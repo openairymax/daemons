@@ -163,11 +163,12 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
     signal(SIGUSR1, boot->log_toggle);
 #endif
 
-    airy_logger_config_t log_cfg = {0};
+    log_config_t log_cfg = {0};
     const char *dbg = getenv(boot->env_debug);
     log_cfg.level =
-        (dbg && dbg[0] == '1') ? (log_level_t)LOG_LEVEL_DEBUG : (log_level_t)LOG_LEVEL_WARN;
-    airy_log_init(&log_cfg);
+        (dbg && dbg[0] == '1') ? LOG_LEVEL_DEBUG : LOG_LEVEL_WARN;
+    log_cfg.outputs = (1u << LOG_OUTPUT_CONSOLE);
+    log_init(&log_cfg);
     atexit(log_cleanup);
 
     int core_ret = airy_init();
