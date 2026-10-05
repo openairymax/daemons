@@ -151,7 +151,7 @@ int main(int argc, char *argv[])
     signal(SIGUSR1, svc_log_toggle_handler);
 #endif
 
-    airy_log_init(NULL);
+    log_init(NULL);
     atexit(log_cleanup);
 
 #ifndef _WIN32

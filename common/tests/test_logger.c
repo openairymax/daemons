@@ -3,103 +3,62 @@
 
 /**
  * @file test_logger.c
- * @brief 日志模块单元测试
+ * @brief 日志模块单元测试（0.1.19 §205 收敛后权威面：logging.h +
+ *        svc_logger.h SVC_LOG_* 别名）
  */
 
 #include "svc_logger.h"
 
 #include <assert.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 static void test_logger_level_conversion(void)
 {
     SVC_LOG_INFO("  test_logger_level_conversion...");
 
-    assert(strcmp(airy_log_level_to_string((airy_log_level_t)LOG_LEVEL_DEBUG), "DEBUG") == 0);
-    assert(strcmp(airy_log_level_to_string((airy_log_level_t)LOG_LEVEL_INFO), "INFO") == 0);
-    assert(strcmp(airy_log_level_to_string((airy_log_level_t)LOG_LEVEL_WARN), "WARN") == 0);
-    assert(strcmp(airy_log_level_to_string((airy_log_level_t)LOG_LEVEL_ERROR), "ERROR") == 0);
-    assert(strcmp(airy_log_level_to_string((airy_log_level_t)LOG_LEVEL_FATAL), "FATAL") == 0);
+    assert(strcmp(log_level_to_string(LOG_LEVEL_DEBUG), "DEBUG") == 0);
+    assert(strcmp(log_level_to_string(LOG_LEVEL_INFO), "INFO") == 0);
+    assert(strcmp(log_level_to_string(LOG_LEVEL_WARN), "WARN") == 0);
+    assert(strcmp(log_level_to_string(LOG_LEVEL_ERROR), "ERROR") == 0);
+    assert(strcmp(log_level_to_string(LOG_LEVEL_FATAL), "FATAL") == 0);
 
-    assert(airy_log_level_from_string("DEBUG") == (airy_log_level_t)LOG_LEVEL_DEBUG);
-    assert(airy_log_level_from_string("INFO") == (airy_log_level_t)LOG_LEVEL_INFO);
-    assert(airy_log_level_from_string("WARN") == (airy_log_level_t)LOG_LEVEL_WARN);
-    assert(airy_log_level_from_string("ERROR") == (airy_log_level_t)LOG_LEVEL_ERROR);
-    assert(airy_log_level_from_string("FATAL") == (airy_log_level_t)LOG_LEVEL_FATAL);
-
-    SVC_LOG_INFO("    PASSED");
-}
-
-static void test_logger_init_shutdown(void)
-{
-    SVC_LOG_INFO("  test_logger_init_shutdown...");
-
-    airy_logger_config_t config = {.name = "test_agentrt",
-                                   .level = (int)LOG_LEVEL_DEBUG,
-                                   .targets = NULL,
-                                   .target_count = 0,
-                                   .include_source = true,
-                                   .include_trace = true,
-                                   .json_format = false};
-
-    int ret = airy_log_init(&config);
-    assert(ret == 0);
-
-    airy_log_set_level((airy_log_level_t)LOG_LEVEL_DEBUG);
-
-    airy_log_shutdown();
+    assert(log_level_from_string("DEBUG") == LOG_LEVEL_DEBUG);
+    assert(log_level_from_string("INFO") == LOG_LEVEL_INFO);
+    assert(log_level_from_string("WARN") == LOG_LEVEL_WARN);
+    assert(log_level_from_string("ERROR") == LOG_LEVEL_ERROR);
+    assert(log_level_from_string("FATAL") == LOG_LEVEL_FATAL);
 
     SVC_LOG_INFO("    PASSED");
 }
 
-static void test_logger_trace_context(void)
+static void test_logger_init_cleanup(void)
 {
-    SVC_LOG_INFO("  test_logger_trace_context...");
+    SVC_LOG_INFO("  test_logger_init_cleanup...");
 
-    airy_trace_context_t ctx;
-    airy_trace_new(&ctx);
+    log_config_t config = {0};
+    config.level = LOG_LEVEL_DEBUG;
+    config.outputs = (1u << LOG_OUTPUT_CONSOLE);
 
-    assert(ctx.trace_id[0] != '\0');
-    assert(strlen(ctx.trace_id) > 0);
+    assert(log_init(&config) == 0);
 
-    airy_trace_set_current(&ctx);
+    SVC_LOG_DEBUG("debug through SVC_LOG_DEBUG");
+    SVC_LOG_INFO("info through SVC_LOG_INFO");
+    SVC_LOG_WARN("warn through SVC_LOG_WARN");
+    SVC_LOG_ERROR("error through SVC_LOG_ERROR");
 
-    const char *current_trace = ctx.trace_id;
-    assert(current_trace != NULL);
-
-    airy_trace_set_session_id("test-session-123");
-    const char *session_id = airy_trace_get_session_id();
-    assert(strcmp(session_id, "test-session-123") == 0);
+    log_cleanup();
 
     SVC_LOG_INFO("    PASSED");
 }
 
-static void test_logger_macros(void)
+static void test_logger_default_init(void)
 {
-    SVC_LOG_INFO("  test_logger_macros...");
+    SVC_LOG_INFO("  test_logger_default_init...");
 
-    airy_logger_config_t config = {.name = "test_agentrt",
-                                   .level = (int)LOG_LEVEL_DEBUG,
-                                   .targets = NULL,
-                                   .target_count = 0,
-                                   .include_source = true,
-                                   .include_trace = true,
-                                   .json_format = false};
-
-    airy_log_init(&config);
-
-    AIRY_LOG_DEBUG("Test debug message: %d", 42);
-    AIRY_LOG_INFO("Test info message");
-    AIRY_LOG_WARN("Test warn message");
-    AIRY_LOG_ERROR("Test error message");
-
-    airy_trace_context_t ctx;
-    airy_trace_new(&ctx);
-    AIRY_LOG_INFO_T(&ctx, "Test message with trace context");
-
-    airy_log_shutdown();
+    assert(log_init(NULL) == 0);
+    SVC_LOG_INFO("default config active");
+    log_cleanup();
 
     SVC_LOG_INFO("    PASSED");
 }
@@ -111,9 +70,8 @@ int main(void)
     SVC_LOG_INFO("=========================================");
 
     test_logger_level_conversion();
-    test_logger_init_shutdown();
-    test_logger_trace_context();
-    test_logger_macros();
+    test_logger_init_cleanup();
+    test_logger_default_init();
 
     SVC_LOG_INFO("All logger module tests PASSED");
     return 0;

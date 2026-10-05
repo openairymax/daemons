@@ -58,7 +58,7 @@ int main(int argc, char **argv)
     signal(SIGPIPE, SIG_IGN);
 #endif
 
-    airy_log_init(NULL);
+    log_init(NULL);
     atexit(log_cleanup);
 
     /* WS-8 stage 4 (8.4.1): bring up the corekern core (mem/oom/task/ipc/
