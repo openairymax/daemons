@@ -14,12 +14,11 @@
 #include "airy_memory.h"
 #include "daemon_defaults.h"
 #include "error.h"
+#include "io.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
 #include <cjson_helpers.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "config/internal.h"
@@ -43,27 +42,18 @@ int svc_load_model_config_json(const char *config_path, provider_config_t **out_
     *out_providers = NULL;
     *out_count = 0;
 
-    FILE *f = fopen(config_path, "rb");
-    if (!f) {
+    char *content = NULL;
+    int read_rc = airy_io_read_file(config_path, &content, NULL);
+    if (read_rc != AIRY_OK) {
+        if (read_rc == AIRY_ERR_OUT_OF_MEMORY) {
+            SVC_LOG_ERROR(
+                "C-L02: SVC: MODEL-CONFIG-FAIL read alloc, STACK: svc_load_model_config_json");
+            return AIRY_ERR_OUT_OF_MEMORY;
+        }
         SVC_LOG_WARN(
             "C-L02: SVC: MODEL-CONFIG-WARN cannot open file, STACK: svc_load_model_config_json");
         return 0;
     }
-
-    fseek(f, 0, SEEK_END);
-    long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-
-    char *content = (char *)AIRY_MALLOC((size_t)len + 1);
-    if (!content) {
-        SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL malloc, STACK: svc_load_model_config_json");
-        fclose(f);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
-    size_t read_len = fread(content, 1, (size_t)len, f);
-    content[read_len] = '\0';
-    fclose(f);
 
     CJSON_PARSE_GUARD(root, content, {
         AIRY_FREE(content);
