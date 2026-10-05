@@ -180,6 +180,18 @@ static void handle_get_stats(cJSON *params, int rid, char **out)
     *out = jsonrpc_build_success(result, rid);
 }
 
+/* 解析 params.type（整数或字符串名），越界/缺失统一返回 -1。 */
+static int hook_param_type(cJSON *params)
+{
+    cJSON *j = cJSON_GetObjectItem(params, "type");
+    int type = -1;
+    if (cJSON_IsNumber(j))
+        type = j->valueint;
+    else if (cJSON_IsString(j))
+        type = hook_type_from_name(j->valuestring);
+    return (type >= 0 && type < HOOK_TYPE_COUNT) ? type : -1;
+}
+
 /*
  * hook.register: 将脚本型 Hook 注册进 hook_registry（RPC 无法传递 C
  * 回调，故仅支持 shell/python/webhook 实现类型；CALLBACK 限内置 handler）。
@@ -195,14 +207,8 @@ static void handle_register(cJSON *params, int rid, char **out)
         return;
     }
 
-    int type = -1;
-    cJSON *type_json = cJSON_GetObjectItem(params, "type");
-    if (cJSON_IsNumber(type_json)) {
-        type = type_json->valueint;
-    } else if (cJSON_IsString(type_json)) {
-        type = hook_type_from_name(type_json->valuestring);
-    }
-    if (type < 0 || type >= HOOK_TYPE_COUNT) {
+    int type = hook_param_type(params);
+    if (type < 0) {
         *out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "Invalid hook type", rid);
         return;
     }
@@ -285,14 +291,8 @@ static void handle_unregister(cJSON *params, int rid, char **out)
  * params: type(字符串或整数), operation(可选), input(可选文本) */
 static void handle_trigger(cJSON *params, int rid, char **out)
 {
-    int type = -1;
-    cJSON *type_json = cJSON_GetObjectItem(params, "type");
-    if (cJSON_IsNumber(type_json)) {
-        type = type_json->valueint;
-    } else if (cJSON_IsString(type_json)) {
-        type = hook_type_from_name(type_json->valuestring);
-    }
-    if (type < 0 || type >= HOOK_TYPE_COUNT) {
+    int type = hook_param_type(params);
+    if (type < 0) {
         *out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "Invalid hook type", rid);
         return;
     }
