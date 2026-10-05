@@ -7,6 +7,7 @@
 #include "daemon_errors.h"
 #include "airy_event_loop.h"
 #include "method_dispatcher.h"
+#include "platform_base.h"
 #include "svc_common.h"
 #include "thread_pool.h"
 

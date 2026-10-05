@@ -5,6 +5,7 @@
 
 #include "gateway_jsonpick.h"
 #include "airy_memory.h"
+#include "platform_sync.h"
 #include "sync.h"
 
 #include <stdio.h>
