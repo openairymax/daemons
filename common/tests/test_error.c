@@ -7,6 +7,7 @@
  */
 
 #include "airy_types.h"
+#include "platform_misc.h"
 
 #include <assert.h>
 #include <stdio.h>
