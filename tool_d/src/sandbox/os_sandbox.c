@@ -3,27 +3,25 @@
 
 //
 // @file os_sandbox.c
-// @brief shell_run OS-level sandbox implementation (Landlock + seccomp + rlimit)
+// @brief shell_run sandbox policy mapping (config -> commons native sandbox)
 //
-// Implementation notes (mirroring Codex linux-sandbox):
-// - Landlock: kernel-LSM user-space filesystem sandbox. Whitelist
-//   semantics - after restrict_self, the process can only access explicitly
-//   allowed paths; everything else is EACCES. No root needed, no capability
-//   dependency; this is the core of shell_run's protection against
-//   "writing system dirs / reading unauthorized files".
-// - seccomp: BPF blacklist filtering, forbidding privileged and namespace
-//   syscalls such as mount/umount2/ptrace/unshare/setns, preventing the
-//   sandboxed process from gaining higher privileges.
-// - rlimit: RLIMIT_AS/NOFILE/NPROC/CPU/CORE, preventing fork bombs /
-//   memory exhaustion.
+// Policy layer only: maps AIRY_TOOL_SANDBOX_* environment/configuration to
+// airy_native_sandbox_t and delegates the mechanism (Landlock filesystem
+// rules + seccomp BPF deny-list) to commons/platform_sandbox (the SSoT,
+// §204). This file additionally owns:
+// - rlimit shaping (RLIMIT_AS/NOFILE/NPROC/CPU/CORE) - policy knobs absent
+//   from the commons mechanism on purpose
+// - the cross-platform lexical path confinement for file tools
+//   (os_sandbox_fs_confine), which also protects hosts without Landlock
 //
-// Landlock ABI constants are defined self-contained (aligned with Linux
-// UAPI, not depending on kernel-header versions).
+// Fail-closed semantics (require_landlock / STRICT without Landlock) are
+// decided here before handing control to the mechanism layer.
 //
-// Platform support: Linux only. macOS/Windows compile to an empty
-// implementation (OS_SANDBOX_MODE_OFF).
+// Platform support: sandbox enforcement is Linux-only (macOS/Windows keep
+// OS_SANDBOX_MODE_OFF semantics); fs confinement is cross-platform.
 
 #include "os_sandbox.h"
+#include "platform_sandbox.h"
 #include "airy_memory.h"
 #include "svc_logger.h"
 
@@ -35,94 +33,8 @@
 
 #ifdef __linux__
 
-#include <fcntl.h>
 #include <limits.h>
-#include <linux/filter.h>
-#include <linux/seccomp.h>
-#include <sys/prctl.h>
 #include <sys/resource.h>
-#include <sys/syscall.h>
-
-/* Landlock syscall 号按架构 syscall 表（arch/<arch>/syscall*.tbl）：
- * i386 表较 x86_64 少 1（443/444/445）；arm EABI / aarch64 / riscv 与
- * x86_64 一致（444/445/446）。32 位目标缺 __i386__/__arm__ 分支时
- * OS_LL_* 未定义，i686 编译直接报错（i686/armv7l 六架构实测）。 */
-#if defined(__x86_64__) || defined(__i386__) || defined(__aarch64__) || \
-    defined(__arm__) || defined(__riscv)
-#if defined(__i386__)
-#define OS_LL_CREATE_RULESET 443
-#define OS_LL_ADD_RULE 444
-#define OS_LL_RESTRICT_SELF 445
-#else
-#define OS_LL_CREATE_RULESET 444
-#define OS_LL_ADD_RULE 445
-#define OS_LL_RESTRICT_SELF 446
-#endif
-#else
-
-#define OS_LL_NO_SUPPORT 1
-#endif
-
-#define OS_LL_RULE_PATH_BENEATH 1
-
-/* handled_access_fs permission bits (ABI1, without ABI2 REFER / ABI3
- * TRUNCATE, keeping old-kernel compatibility; unhandled permission bits stay
- * denied by default after restrict) */
-#define OS_LL_FS_EXECUTE (1ULL << 0)
-#define OS_LL_FS_WRITE_FILE (1ULL << 1)
-#define OS_LL_FS_READ_FILE (1ULL << 2)
-#define OS_LL_FS_READ_DIR (1ULL << 3)
-#define OS_LL_FS_REMOVE_DIR (1ULL << 4)
-#define OS_LL_FS_REMOVE_FILE (1ULL << 5)
-#define OS_LL_FS_MAKE_CHAR (1ULL << 6)
-#define OS_LL_FS_MAKE_DIR (1ULL << 7)
-#define OS_LL_FS_MAKE_REG (1ULL << 8)
-#define OS_LL_FS_MAKE_SOCK (1ULL << 9)
-#define OS_LL_FS_MAKE_FIFO (1ULL << 10)
-#define OS_LL_FS_MAKE_BLOCK (1ULL << 11)
-#define OS_LL_FS_MAKE_SYM (1ULL << 12)
-
-struct os_ll_ruleset_attr {
-    uint64_t handled_access_fs;
-    uint64_t handled_access_net;
-};
-struct os_ll_path_beneath_attr {
-    uint64_t allowed_access;
-    int32_t parent_fd;
-};
-
-#define LL_FS_READ (OS_LL_FS_READ_FILE | OS_LL_FS_READ_DIR)
-#define LL_FS_WRITE                                                                          \
-    (OS_LL_FS_WRITE_FILE | OS_LL_FS_REMOVE_DIR | OS_LL_FS_REMOVE_FILE | OS_LL_FS_MAKE_CHAR | \
-     OS_LL_FS_MAKE_DIR | OS_LL_FS_MAKE_REG | OS_LL_FS_MAKE_SOCK | OS_LL_FS_MAKE_FIFO |       \
-     OS_LL_FS_MAKE_BLOCK | OS_LL_FS_MAKE_SYM)
-#define LL_FS_EXEC OS_LL_FS_EXECUTE
-#define LL_FS_HANDLED (LL_FS_READ | LL_FS_WRITE | LL_FS_EXEC)
-
-static const char *const k_sys_read_paths[] = {
-    "/bin", "/sbin", "/usr", "/lib", "/lib64", "/lib32", "/libx32", "/etc", "/opt", NULL,
-};
-
-int os_sandbox_landlock_available(void)
-{
-#ifdef OS_LL_NO_SUPPORT
-    return 0;
-#else
-    /* The probe must use a non-empty handled_access_fs: an empty ruleset
-     * makes the kernel return EINVAL directly, making it impossible to
-     * distinguish "unsupported" from "empty attributes". Probe with all ABI1
-     * fs permission bits. */
-    struct os_ll_ruleset_attr attr;
-    AIRY_MEMSET(&attr, 0, sizeof(attr));
-    attr.handled_access_fs = LL_FS_HANDLED;
-    int fd = (int)syscall(OS_LL_CREATE_RULESET, &attr, sizeof(attr), 0U);
-    if (fd < 0) {
-        return 0;
-    }
-    close(fd);
-    return 1;
-#endif
-}
 
 void os_sandbox_cfg_from_env(os_sandbox_cfg_t *cfg)
 {
@@ -204,177 +116,34 @@ static int os_sandbox_apply_rlimits(const os_sandbox_cfg_t *cfg)
     return 0;
 }
 
-#define SECCOMP_BAN(nr)                              \
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (nr), 0, 1), \
-        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA))
+/* STRICT 模式只读白名单：系统可执行/库/配置目录 + /dev（设备节点；
+ * /dev/null 的写在共用 rw 尾表中单独叠加）。 */
+static const char *const k_strict_ro_paths[] = {
+    "/bin", "/sbin", "/usr", "/lib", "/lib64", "/lib32", "/libx32", "/etc", "/opt", "/dev", NULL,
+};
 
-static int os_sandbox_apply_seccomp(void)
-{
-    /* Blacklist: privileged syscalls such as namespace/mount/debug/module
-     * load. Fetch the syscall nr first, then JEQ per entry; on a hit return
-     * EPERM, otherwise allow everything. */
-    struct sock_filter filter[] = {
-        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
+/* 两模式共用写路径尾表：/tmp（临时文件）+ /dev/null（shell 重定向
+ * 常规目标）；workspace 头插在 apply 中，空 workspace 时仅尾表生效。 */
+static const char *const k_rw_tail[] = { "/tmp", "/dev/null", NULL };
 
-        SECCOMP_BAN(__NR_mount),
-        SECCOMP_BAN(__NR_umount2),
-        SECCOMP_BAN(__NR_pivot_root),
-        SECCOMP_BAN(__NR_ptrace),
-        SECCOMP_BAN(__NR_unshare),
-        SECCOMP_BAN(__NR_setns),
-        SECCOMP_BAN(__NR_kexec_load),
-        SECCOMP_BAN(__NR_reboot),
-        SECCOMP_BAN(__NR_bpf),
-        SECCOMP_BAN(__NR_perf_event_open),
-        SECCOMP_BAN(__NR_init_module),
-        SECCOMP_BAN(__NR_finit_module),
-        SECCOMP_BAN(__NR_delete_module),
-        SECCOMP_BAN(__NR_acct),
-        SECCOMP_BAN(__NR_swapon),
-        SECCOMP_BAN(__NR_swapoff),
-        SECCOMP_BAN(__NR_sethostname),
-        SECCOMP_BAN(__NR_setdomainname),
-        SECCOMP_BAN(__NR_open_by_handle_at),
-        SECCOMP_BAN(__NR_name_to_handle_at),
-        SECCOMP_BAN(__NR_keyctl),
-        SECCOMP_BAN(__NR_add_key),
-        SECCOMP_BAN(__NR_request_key),
-
-        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-    };
-    struct sock_fprog prog = {
-        .len = (unsigned short)(sizeof(filter) / sizeof(filter[0])),
-        .filter = filter,
-    };
-
-    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
-        return -1;
-    }
-    if (syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER, 0, &prog) != 0) {
-        return -1;
-    }
-    return 0;
-}
-
-static int os_sandbox_open_dir(const char *path)
-{
-    int fd = open(path, O_PATH | O_DIRECTORY | O_CLOEXEC);
-    if (fd < 0) {
-        fd = open(path, O_PATH | O_CLOEXEC);
-    }
-    return fd;
-}
-
-static int os_sandbox_ll_allow(int ruleset_fd, const char *path, uint64_t access)
-{
-    int dir_fd = os_sandbox_open_dir(path);
-    if (dir_fd < 0) {
-        return (errno == ENOENT) ? -2 : -1;
-    }
-    struct os_ll_path_beneath_attr rule;
-    AIRY_MEMSET(&rule, 0, sizeof(rule));
-    rule.allowed_access = access;
-    rule.parent_fd = dir_fd;
-    int rc = (int)syscall(OS_LL_ADD_RULE, ruleset_fd, OS_LL_RULE_PATH_BENEATH, &rule, 0U);
-    close(dir_fd);
-    return (rc == 0) ? 0 : -1;
-}
-
-static int os_sandbox_ll_allow_file(int ruleset_fd, const char *path, uint64_t access)
-{
-    int fd = open(path, O_PATH | O_CLOEXEC);
-    if (fd < 0) {
-        return (errno == ENOENT) ? -2 : -1;
-    }
-    struct os_ll_path_beneath_attr rule;
-    AIRY_MEMSET(&rule, 0, sizeof(rule));
-    rule.allowed_access = access;
-    rule.parent_fd = fd;
-    int rc = (int)syscall(OS_LL_ADD_RULE, ruleset_fd, OS_LL_RULE_PATH_BENEATH, &rule, 0U);
-    close(fd);
-    return (rc == 0) ? 0 : -1;
-}
-
-/* Apply the Landlock filesystem whitelist:
- * - WORKSPACE: global read+exec, workspace/temp dirs writable
- * - STRICT: only system base paths + workspace readable/executable;
- *   workspace/temp dirs writable
- * Both allow /dev read-only and /dev/null writes (common shell redirection
- * targets). */
-static int os_sandbox_apply_landlock(const os_sandbox_cfg_t *cfg)
-{
-    struct os_ll_ruleset_attr attr;
-    AIRY_MEMSET(&attr, 0, sizeof(attr));
-    attr.handled_access_fs = LL_FS_HANDLED;
-
-    int ruleset_fd = (int)syscall(OS_LL_CREATE_RULESET, &attr, sizeof(attr), 0U);
-    if (ruleset_fd < 0) {
-        return -1;
-    }
-
-    int rc = 0;
-    const uint64_t rw = LL_FS_READ | LL_FS_WRITE;
-    const uint64_t rx = LL_FS_READ | LL_FS_EXEC;
-    const uint64_t w = LL_FS_WRITE;
-
-    if (cfg->mode == OS_SANDBOX_MODE_WORKSPACE) {
-
-        if (os_sandbox_ll_allow(ruleset_fd, "/", rx) != 0) {
-            rc = -1;
-            goto out;
-        }
-    } else {
-
-        for (int i = 0; k_sys_read_paths[i] != NULL; i++) {
-            int ar = os_sandbox_ll_allow(ruleset_fd, k_sys_read_paths[i], rx);
-            if (ar == -1) {
-                rc = -1;
-                goto out;
-            }
-        }
-    }
-
-    if (cfg->workspace[0]) {
-        if (os_sandbox_ll_allow(ruleset_fd, cfg->workspace, rw) != 0) {
-            SVC_LOG_ERROR("os_sandbox: allow workspace %s failed", cfg->workspace);
-            rc = -1;
-            goto out;
-        }
-    }
-
-    (void)os_sandbox_ll_allow(ruleset_fd, "/tmp", w);
-
-    (void)os_sandbox_ll_allow(ruleset_fd, "/dev", rx);
-    (void)os_sandbox_ll_allow_file(ruleset_fd, "/dev/null", OS_LL_FS_WRITE_FILE);
-
-out:
-    if (rc == 0) {
-        if (syscall(OS_LL_RESTRICT_SELF, ruleset_fd, 0U) != 0) {
-            rc = -1;
-        }
-    }
-    close(ruleset_fd);
-    return rc;
-}
-
+/* Policy mapping (§204): cfg -> airy_native_sandbox_t, then delegate to
+ * the commons mechanism. Fail-closed decisions (STRICT / require_landlock
+ * without Landlock) stay here; the mechanism degrades per-layer. */
 int os_sandbox_apply(const os_sandbox_cfg_t *cfg)
 {
     if (!cfg || cfg->mode == OS_SANDBOX_MODE_OFF) {
         return 0;
     }
-#ifdef OS_LL_NO_SUPPORT
-    if (cfg->require_landlock) {
-        SVC_LOG_ERROR("os_sandbox: built without Landlock support and "
-                      "AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK=1, refusing to "
-                      "run unsandboxed");
-        return -1;
-    }
-    return (cfg->mode == OS_SANDBOX_MODE_STRICT) ? -1 : 0;
-#else
-    int ll_ok = os_sandbox_landlock_available();
 
+    int ll_ok = airy_native_sandbox_landlock_available();
     if (cfg->mode == OS_SANDBOX_MODE_STRICT && !ll_ok) {
         SVC_LOG_ERROR("os_sandbox: strict mode requires Landlock, unavailable");
+        return -1;
+    }
+    if (!ll_ok && cfg->require_landlock) {
+        SVC_LOG_ERROR("os_sandbox: Landlock unavailable and "
+                      "AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK=1, refusing to "
+                      "run unsandboxed");
         return -1;
     }
 
@@ -383,38 +152,38 @@ int os_sandbox_apply(const os_sandbox_cfg_t *cfg)
         return -1;
     }
 
-    if (os_sandbox_apply_seccomp() != 0) {
-        SVC_LOG_ERROR("os_sandbox: seccomp apply failed");
+    const char *rw[4];
+    size_t n = 0;
+    if (cfg->workspace[0]) {
+        rw[n++] = cfg->workspace;
+    }
+    for (size_t i = 0; k_rw_tail[i] != NULL; i++) {
+        rw[n++] = k_rw_tail[i];
+    }
+    rw[n] = NULL;
+
+    airy_native_sandbox_t sb;
+    airy_native_sandbox_init(&sb);
+    sb.enabled = 1;
+    sb.deny_network = !cfg->net_access;
+    sb.global_read = (cfg->mode == OS_SANDBOX_MODE_WORKSPACE) ? 1 : 0;
+    sb.ro_paths = (cfg->mode == OS_SANDBOX_MODE_STRICT) ? k_strict_ro_paths : NULL;
+    sb.rw_paths = rw;
+
+    if (airy_native_sandbox_apply(&sb) != 0) {
+        SVC_LOG_ERROR("os_sandbox: native sandbox apply failed");
         return -1;
     }
-
-    if (ll_ok) {
-        if (os_sandbox_apply_landlock(cfg) != 0) {
-            SVC_LOG_ERROR("os_sandbox: landlock apply failed");
-            return -1;
-        }
-    } else {
-        if (cfg->require_landlock) {
-            SVC_LOG_ERROR("os_sandbox: Landlock unavailable and "
-                          "AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK=1, refusing to "
-                          "run with rlimit+seccomp only");
-            return -1;
-        }
+    if (!ll_ok) {
         SVC_LOG_WARN("os_sandbox: Landlock unavailable, degraded to "
-                     "rlimit+seccomp only (workspace mode); set "
+                     "seccomp-only isolation; set "
                      "AIRY_TOOL_SANDBOX_REQUIRE_LANDLOCK=1 to fail closed "
                      "instead");
     }
     return 0;
-#endif
 }
 
 #else /* !__linux__ */
-int os_sandbox_landlock_available(void)
-{
-    return 0;
-}
-
 void os_sandbox_cfg_from_env(os_sandbox_cfg_t *cfg)
 {
     AIRY_MEMSET(cfg, 0, sizeof(*cfg));

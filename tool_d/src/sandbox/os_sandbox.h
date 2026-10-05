@@ -40,8 +40,8 @@ typedef struct {
     uint32_t cpu_limit_sec;
 } os_sandbox_cfg_t;
 
-
-int os_sandbox_landlock_available(void);
+/* Landlock availability probe: airy_native_sandbox_landlock_available()
+ * (commons/platform_sandbox, the mechanism SSoT, §204). */
 
 /* Build a default config from environment variables:
  *   AIRY_TOOL_SANDBOX_MODE=off|workspace|strict (default workspace)
