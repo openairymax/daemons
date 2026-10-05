@@ -38,6 +38,12 @@ extern jwt_hmac_fn_t g_hmac_impl;
 int base64_encode(const uint8_t *data, size_t len, char *output, size_t *out_len);
 
 /**
+ * @brief Base64url 解码原语（crypto 域，令牌验证共用；输出按解码长度
+ *        分配并 NUL 终止，调用方负责 AIRY_FREE）
+ */
+int b64url_decode(const char *input, size_t in_len, unsigned char **out, size_t *out_len);
+
+/**
  * @brief 返回编译期选定的 HMAC 实现名（日志用途）
  */
 const char *jwt_hmac_impl_name(void);
