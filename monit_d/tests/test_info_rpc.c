@@ -330,7 +330,7 @@ int main(void)
     printf("=========================================\n");
     fflush(stdout);
 
-    airy_log_init(NULL);
+    log_init(NULL);
     assert(info_rpc_init() == 0);
     assert(info_rpc_init() == 0); /* 幂等 */
 #ifndef _WIN32
