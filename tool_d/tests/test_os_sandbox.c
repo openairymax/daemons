@@ -14,6 +14,7 @@
 // - 环境变量构造配置
 
 #include "sandbox/os_sandbox.h"
+#include "platform_sandbox.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -165,7 +166,9 @@ static int act_ptrace(void)
 static void test_landlock_available(void)
 {
     printf("== test_landlock_available ==\n");
-    CHECK(os_sandbox_landlock_available() == 1, "Landlock available on Linux >= 5.13");
+    /* 机制探测归位 commons SSoT（§204）；策略侧只消费其布尔结果。 */
+    CHECK(airy_native_sandbox_landlock_available() == 1,
+          "Landlock available on Linux >= 5.13");
 }
 
 static void test_env_config(void)
