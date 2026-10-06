@@ -49,12 +49,11 @@ int b64url_decode(const char *input, size_t in_len, unsigned char **out, size_t 
 const char *jwt_hmac_impl_name(void);
 
 /**
- * @brief 三套 HMAC-SHA256 实现（crypto 域按编译分支定义，init 时选择其一）
- * @note 仅当前编译分支对应的实现会被定义
+ * @brief HMAC-SHA256 实现（crypto 域，仅在项目权威能力宏
+ *        AIRY_HAS_OPENSSL 生效时编译；未检出 OpenSSL 时本符号不存在，
+ *        auth_jwt_init() 将 fail-closed 拒绝初始化）
  */
 void hmac_openssl(const char *key, const char *message, uint8_t *output, size_t *out_len);
-void hmac_mbedtls(const char *key, const char *message, uint8_t *output, size_t *out_len);
-void hmac_builtin(const char *key, const char *message, uint8_t *output, size_t *out_len);
 
 #ifdef __cplusplus
 }

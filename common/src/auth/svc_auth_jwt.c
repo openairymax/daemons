@@ -56,12 +56,13 @@ int auth_jwt_init(const jwt_config_t *config)
     if (g_jwt.config.refresh_threshold_sec == 0)
         g_jwt.config.refresh_threshold_sec = DEFAULT_REFRESH_THRESHOLD;
 
-#if defined(AUTH_USE_OPENSSL)
+#ifdef AIRY_HAS_OPENSSL
     g_hmac_impl = hmac_openssl;
-#elif defined(AUTH_USE_MBEDTLS)
-    g_hmac_impl = hmac_mbedtls;
 #else
-    g_hmac_impl = hmac_builtin;
+    SVC_LOG_ERROR("JWT init: no crypto backend available "
+                  "(AIRY_HAS_OPENSSL undefined), refusing to start");
+    airy_mtx_unlock(&g_jwt.lock);
+    return AUTH_FAILED;
 #endif
 
     g_jwt.initialized = 1;
