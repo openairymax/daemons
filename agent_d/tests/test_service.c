@@ -10,6 +10,7 @@
 #include "service.h"
 
 #include "airy_memory.h"
+#include "platform.h"
 
 #include <assert.h>
 #include <cjson/cJSON.h>
@@ -254,7 +255,7 @@ static void test_invoke_cancel(void)
         char buf[64];
         ssize_t _rd = read(STDIN_FILENO, buf, sizeof(buf));
         (void)_rd;
-        sleep(30);
+        airy_sleep_ms(30000);
         _exit(0);
     }
     close(in_pipe[0]);
@@ -335,7 +336,7 @@ static void test_invoke_session_cancel(void)
         char buf[64];
         ssize_t _rd = read(STDIN_FILENO, buf, sizeof(buf));
         (void)_rd;
-        sleep(30);
+        airy_sleep_ms(30000);
         _exit(0);
     }
     close(in_pipe[0]);

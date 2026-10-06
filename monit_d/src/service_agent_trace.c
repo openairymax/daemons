@@ -49,7 +49,7 @@ int monitor_service_start_agent_trace(monitor_service_t *service,
     trace_entry_t *entry = &service->traces[service->trace_count];
     char tid[64];
     snprintf(tid, sizeof(tid), "trace-%zu-%lu", service->trace_count,
-             (unsigned long)get_timestamp_ms());
+             (unsigned long)airy_time_wall_ms());
     entry->trace_id = AIRY_STRDUP(tid);
     if (!entry->trace_id) {
         airy_mtx_unlock(&service->trace_lock);
@@ -68,7 +68,7 @@ int monitor_service_start_agent_trace(monitor_service_t *service,
         airy_mtx_unlock(&service->trace_lock);
         return AIRY_ENOMEM;
     }
-    entry->start_time = get_timestamp_ms();
+    entry->start_time = airy_time_wall_ms();
     entry->end_time = 0;
     entry->status = 0;
     entry->span_count = 0;
@@ -124,7 +124,7 @@ int monitor_service_update_agent_state(monitor_service_t *service, agent_executi
 
     trace->current_state = new_state;
 
-    uint64_t now = get_timestamp_ms();
+    uint64_t now = airy_time_wall_ms();
     switch (new_state) {
     case AGENT_STATE_CREATED:
         trace->start_time = now;
@@ -212,7 +212,7 @@ int monitor_service_end_agent_trace(monitor_service_t *service, agent_execution_
     for (size_t i = 0; i < service->trace_count; i++) {
         if (service->traces[i].trace_id && trace->trace_id &&
             strcmp(service->traces[i].trace_id, trace->trace_id) == 0) {
-            service->traces[i].end_time = get_timestamp_ms();
+            service->traces[i].end_time = airy_time_wall_ms();
             service->traces[i].status = 0;
             break;
         }

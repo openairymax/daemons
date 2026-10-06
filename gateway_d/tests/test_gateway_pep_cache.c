@@ -20,6 +20,7 @@
 #include "gateway_biz_internal.h"
 #include "daemon_cupolas_bootstrap.h"
 #include "daemon_security.h"
+#include "platform.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -121,7 +122,7 @@ static void fake_start(void)
         }
         if (fd >= 0)
             close(fd);
-        usleep(20000);
+        airy_sleep_ms(20);
     }
     /* 就绪探测的连接会触发一次 accept，不计入 RPC 计数 */
     g_conns = 0;

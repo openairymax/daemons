@@ -23,13 +23,13 @@
 #include "gateway_biz_internal.h"
 
 #include "airy_memory.h"
+#include "platform.h"
 
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -112,7 +112,7 @@ static void fake_start(void)
         }
         if (fd >= 0)
             close(fd);
-        usleep(20000);
+        airy_sleep_ms(20);
     }
     /* 就绪探测的连接会触发一次 accept，不计入 RPC 计数 */
     g_conns = 0;
@@ -149,9 +149,7 @@ static void out(const char *fmt, ...)
 
 static uint64_t now_us(void)
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
+    return airy_time_ns() / 1000;
 }
 
 static int cmp_u64(const void *a, const void *b)

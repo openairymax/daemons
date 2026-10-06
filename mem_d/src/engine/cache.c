@@ -14,6 +14,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "log_sanitizer.h"
+#include "platform.h"
 #include "token.h"
 
 #include <ctype.h>
@@ -21,7 +22,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #define CACHE_HASH_BUCKETS 512
 #define CACHE_ID_HEX 32
@@ -190,13 +190,6 @@ struct mem_cache {
     unsigned long seq;
 };
 
-static uint64_t cache_now_ns(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
-}
-
 static uint64_t cache_hash64(const char *s)
 {
     uint64_t h = 1469598103934665603ULL; /* FNV-1a */
@@ -341,9 +334,7 @@ mem_cache_t *mem_cache_create(size_t max_entries, size_t max_bytes,
     {
         static int seeded;
         if (!seeded) {
-            struct timespec ts;
-            clock_gettime(CLOCK_MONOTONIC, &ts);
-            srand((unsigned int)(ts.tv_nsec ^ (uint64_t)(uintptr_t)cache));
+            srand((unsigned int)(airy_time_ns() ^ (uint64_t)(uintptr_t)cache));
             seeded = 1;
         }
     }
@@ -401,7 +392,7 @@ static int entry_expired(const cache_entry_t *e, uint64_t now)
 /* 淘汰：先过期，再按 access_count 升序 + last_access 最旧（LRU） */
 static void cache_evict(mem_cache_t *cache)
 {
-    uint64_t now = cache_now_ns();
+    uint64_t now = airy_time_ns();
 
     /* 1) TTL 过期 */
     for (int i = 0; i < CACHE_HASH_BUCKETS; i++) {
@@ -447,7 +438,7 @@ static void cache_evict(mem_cache_t *cache)
 
 static void cache_id_gen(mem_cache_t *cache, char out[CACHE_ID_HEX + 1])
 {
-    uint64_t now = cache_now_ns();
+    uint64_t now = airy_time_ns();
     uint64_t r = (uint64_t)rand() ^ (uint64_t)(uintptr_t)cache;
     snprintf(out, CACHE_ID_HEX + 1, "%08x%08x%08x%08x",
              (uint32_t)(now & 0xFFFFFFFFUL), (uint32_t)((now >> 32) & 0xFFFFFFFFUL),
@@ -561,7 +552,7 @@ int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
     }
     AIRY_STRNCPY_TERM(e->exact_key, exact_key, SHA256_HEX + 1);
     cache_id_gen(cache, e->cache_id);
-    e->created_at = cache_now_ns();
+    e->created_at = airy_time_ns();
     e->last_access = e->created_at;
     e->access_count = 0;
     e->ttl_ms = ttl_ms > 0 ? ttl_ms : cache->default_ttl_ms;
@@ -600,7 +591,7 @@ int mem_cache_get(mem_cache_t *cache, const char *text, const char *model_id,
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    now = cache_now_ns();
+    now = airy_time_ns();
     thr = threshold > 0.0 && threshold <= 1.0 ? threshold : cache->semantic_threshold;
 
     if (cache_key_build(text, model_id, exact_key) != AIRY_SUCCESS)

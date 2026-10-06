@@ -13,7 +13,7 @@
  *   - backend_entry_free  平台通道资源回收（POSIX：socket/shm 清理；Win32：无）
  *
  * POSIX 策略实现见 channel_service.c；Windows 传输未映射（#124）见
- * channel_win32.c。channel_io.c 收发域经链接共享 find_channel/get_time_ms。
+ * channel_win32.c。channel_io.c 收发域经链接共享 find_channel。
  */
 
 #include "channel_service_internal.h"
@@ -24,11 +24,6 @@
 
 #include <string.h>
 #include "error.h"
-
-uint64_t get_time_ms(void)
-{
-    return airy_time_ms();
-}
 
 channel_entry_t *find_channel(channel_service_t *svc, const char *channel_id)
 {

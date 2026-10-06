@@ -17,6 +17,7 @@
 
 #include "daemon_security.h"
 #include "error.h"
+#include "platform.h"
 #include "tool_service.h"
 
 #include <cjson/cJSON.h>
@@ -25,7 +26,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -57,15 +57,12 @@ static int g_fails = 0;
 
 static long long now_ms(void)
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    return (long long)airy_time_ms();
 }
 
 static void nap_ms(long ms)
 {
-    struct timespec req = {ms / 1000, (ms % 1000) * 1000000L};
-    nanosleep(&req, NULL);
+    airy_sleep_ms((uint32_t)ms);
 }
 
 typedef struct {

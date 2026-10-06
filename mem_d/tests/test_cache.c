@@ -10,6 +10,7 @@
  */
 
 #include "cache.h"
+#include "platform.h"
 
 #include "airy_memory.h"
 #include "error.h"
@@ -18,15 +19,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-
-static void msleep(long ms)
-{
-    struct timespec ts;
-    ts.tv_sec = ms / 1000;
-    ts.tv_nsec = (long)(ms % 1000) * 1000000L;
-    nanosleep(&ts, NULL);
-}
 
 static void test_create_destroy(void)
 {
@@ -175,7 +167,7 @@ static void test_ttl_expiry(void)
     assert(hit == 1);
     AIRY_FREE(out);
 
-    msleep(200); /* 等待过期 */
+    airy_sleep_ms(200); /* 等待过期 */
 
     hit = 1;
     assert(mem_cache_get(c, q, "gpt-4", 0, &hit, NULL, NULL, &out) == AIRY_SUCCESS);

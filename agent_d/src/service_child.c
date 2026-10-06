@@ -380,8 +380,7 @@ void agent_kill_and_reap(pid_t *pid_ptr, int *stdin_ptr, int *stdout_ptr)
         if (r == pid || r < 0)
             break;
 
-        struct timespec ts = {0, 100 * 1000000L};
-        nanosleep(&ts, NULL);
+        airy_sleep_ms(100);
     }
 
     int status = 0;
