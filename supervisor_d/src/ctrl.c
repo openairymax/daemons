@@ -150,22 +150,38 @@ static int send_all(int fd, const char *buf, size_t len)
     return 0;
 }
 
-int sup_json_field(const char *json, const char *key, char *out, size_t out_sz)
+/* 顶层键定位机制件：只认「其后紧随 ':'」的 "key" 匹配，跳过值域内
+ * 出现的同名字面量（如某字符串值里内嵌 \"method\":\"...\"），杜绝把
+ * 值当成键而误配。返回值为越过冒号与空白后的首字符。 */
+static const char *sup_find_key(const char *json, const char *key)
 {
     char pat[64];
-    snprintf(pat, sizeof(pat), "\"%s\"", key);
-    const char *k = strstr(json, pat);
-    if (!k)
-        return -1;
-    const char *c = k + strlen(pat);
-    while (*c == ' ' || *c == '\t')
+    int n = snprintf(pat, sizeof(pat), "\"%s\"", key);
+    if (!json || !key || n <= 0 || (size_t)n >= sizeof(pat))
+        return NULL;
+    const char *p = json;
+    while ((p = strstr(p, pat)) != NULL) {
+        const char *c = p + (size_t)n;
+        while (*c == ' ' || *c == '\t' || *c == '\r' || *c == '\n')
+            c++;
+        if (*c != ':') {
+            p = c;
+            continue;
+        }
         c++;
-    if (*c != ':')
+        while (*c == ' ' || *c == '\t' || *c == '\r' || *c == '\n')
+            c++;
+        return c;
+    }
+    return NULL;
+}
+
+int sup_json_field(const char *json, const char *key, char *out, size_t out_sz)
+{
+    if (!json || !key || !out || out_sz == 0)
         return -1;
-    c++;
-    while (*c == ' ' || *c == '\t')
-        c++;
-    if (*c != '"')
+    const char *c = sup_find_key(json, key);
+    if (!c || *c != '"')
         return -1;
     c++;
     size_t i = 0;
@@ -184,9 +200,9 @@ static void dispatch(sup_ctx_t *ctx, int fd, const char *req)
 {
     char method[64], name[SUP_NAME_MAX], resp[SUP_MAX_DAEMONS * 96 + 128];
     long long id = 0;
-    const char *ids = strstr(req, "\"id\"");
-    if (ids)
-        id = atoll(strchr(ids, ':') ? strchr(ids, ':') + 1 : "0");
+    const char *idp = sup_find_key(req, "id");
+    if (idp)
+        id = atoll(idp);
 
     if (sup_json_field(req, "method", method, sizeof(method)) != 0) {
         snprintf(resp, sizeof(resp), "{\"error\":\"missing method\",\"id\":%lld}\n", id);
