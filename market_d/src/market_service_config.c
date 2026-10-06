@@ -13,6 +13,8 @@
 #include "platform.h"
 #include "svc_logger.h"
 
+#include <cjson/cJSON.h>
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,6 +75,24 @@ int market_service_reload_config(market_service_t *service, const market_config_
     airy_mtx_unlock(&service->lock);
 
     return 0;
+}
+
+static void collect_ids(const cJSON *node, char ids[][128], int cap, int *count)
+{
+    if (!node || *count >= cap)
+        return;
+
+    if (cJSON_IsObject(node)) {
+        const cJSON *id = cJSON_GetObjectItemCaseSensitive(node, "agent_id");
+        if (cJSON_IsString(id) && id->valuestring && id->valuestring[0] &&
+            strlen(id->valuestring) < 128) {
+            AIRY_STRNCPY_TERM(ids[*count], id->valuestring, 128);
+            (*count)++;
+        }
+    }
+
+    for (const cJSON *child = node->child; child && *count < cap; child = child->next)
+        collect_ids(child, ids, cap, count);
 }
 
 int market_service_sync_registry(market_service_t *service)
@@ -218,29 +238,20 @@ int market_service_sync_registry(market_service_t *service)
 
     char found_ids[256][128];
     int n_found = 0;
-    char *entry = strstr(idx_data, "\"agent_id\"");
-    while (entry && n_found < 256) {
-        char *id_start = strchr(entry, ':');
-        if (!id_start)
-            break;
-        id_start++;
-        while (*id_start && (*id_start == ' ' || *id_start == '\t' || *id_start == '"'))
-            id_start++;
-        char *id_end = id_start;
-        while (*id_end && *id_end != '"' && *id_end != ',' && *id_end != '}')
-            id_end++;
 
-        size_t id_len = (size_t)(id_end - id_start);
-        if (id_len > 0 && id_len < 128) {
-            AIRY_MEMCPY(found_ids[n_found], id_start, id_len);
-            found_ids[n_found][id_len] = '\0';
-            n_found++;
-        }
-
-        entry = strstr(id_end + 1, "\"agent_id\"");
-    }
+    cJSON *index_root = cJSON_Parse(idx_data);
     AIRY_FREE(idx_data);
     idx_data = NULL;
+
+    if (!index_root) {
+        SVC_LOG_WARN("Sync registry: index is not valid JSON");
+        AIRY_FREE(snap_url);
+        AIRY_FREE(snap_storage);
+        return 0;
+    }
+
+    collect_ids(index_root, found_ids, 256, &n_found);
+    cJSON_Delete(index_root);
 
     int synced = 0;
     airy_mtx_lock(&service->lock);
