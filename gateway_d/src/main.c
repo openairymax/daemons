@@ -14,7 +14,6 @@
 
 #include "atomic_compat.h"
 #include "daemon_bootstrap_sd.h"
-#include "daemon_bootstrap_ipc.h"
 #include "daemon_cupolas_bootstrap.h"
 
 #include "daemon_heapstore_bootstrap.h"
@@ -52,7 +51,6 @@
 static gateway_service_t g_service = NULL;
 static atomic_int g_running = 1;
 static daemon_bootstrap_sd_t *g_bsd = NULL;
-static daemon_bootstrap_ipc_t *g_bipc = NULL;
 static gateway_business_ctx_t *g_biz_ctx = NULL;
 static gateway_entry_ctx_t g_entry_ctx;
 static gw_proto_router_t *g_proto_router = NULL;
@@ -331,8 +329,6 @@ int main(int argc, char *argv[])
 
     g_bsd = daemon_bootstrap_sd_start("gateway_d", "gateway", run_cfg->http.host,
                                       run_cfg->http.port, "gateway,core", 0);
-    g_bipc = daemon_bootstrap_ipc_start("gateway_d", "gateway", run_cfg->http.host,
-                                        run_cfg->http.port, IPC_BUS_PROTO_JSON_RPC);
 
     int loop_count = 0;
     const int HEALTH_CHECK_INTERVAL = 30;
@@ -361,7 +357,6 @@ int main(int argc, char *argv[])
         }
     }
 
-    daemon_bootstrap_ipc_stop(g_bipc);
     daemon_bootstrap_sd_stop(g_bsd);
 
     SVC_LOG_INFO("Gateway shutting down...");

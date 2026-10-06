@@ -22,7 +22,6 @@
 #ifndef AIRY_RT_DAEMON_MAIN_H
 #define AIRY_RT_DAEMON_MAIN_H
 
-#include "daemon_bootstrap_ipc.h"
 #include "daemon_bootstrap_sd.h"
 #include "daemon_cfg_file.h"
 #include "daemon_cupolas_bootstrap.h"
@@ -65,7 +64,6 @@ extern "C" {
  *   - static method_dispatcher_t *g_dispatcher = NULL
  *   - static daemon_event_driver_t *g_event_driver = NULL
  *   - static daemon_bootstrap_sd_t *g_bsd = NULL
- *   - static daemon_bootstrap_ipc_t *g_bipc = NULL
  *
  * Generates functions:
  *   - static void signal_handler(int sig)
@@ -101,7 +99,6 @@ extern "C" {
     static method_dispatcher_t *g_dispatcher_##daemon_name = NULL;                                                 \
     static daemon_event_driver_t *g_event_driver_##daemon_name = NULL;                                             \
     static daemon_bootstrap_sd_t *g_bsd_##daemon_name = NULL;                                                      \
-    static daemon_bootstrap_ipc_t *g_bipc_##daemon_name = NULL;                                                    \
                                                                                                                    \
     static inline void signal_handler_##daemon_name(int sig)                                                       \
     {                                                                                                              \
@@ -322,7 +319,6 @@ typedef struct {
     method_dispatcher_t **dispatcher;
     daemon_event_driver_t **event_driver;
     daemon_bootstrap_sd_t **bsd;
-    daemon_bootstrap_ipc_t **bipc;
     /* 事件池策略（.manifest rpc.pool） */
     int pool_max_events;
     int pool_min;

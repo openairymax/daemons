@@ -12,7 +12,7 @@
  *   - 信号注册（POSIX 全集 / Windows SetConsoleCtrlHandler）
  *   - 调试日志开关（AIRY_<D>_DEBUG -> LOG_LEVEL_DEBUG）
  *   - 套接字创建（TCP/Unix/Win 命名管道分派）
- *   - 事件驱动 + SD/IPC bootstrap 引导
+ *   - 事件驱动 + SD bootstrap 引导
  *   - 方法表注册与 ops 正序 init / 逆序 cleanup
  *   - 标准清理链与 fail_driver/fail_svc 错误路径
  *
@@ -88,18 +88,11 @@ static int daemon_init_driver(const char *daemon_name, const char *service_type,
                               const char *socket_path, int tcp_port, const char *tags,
                               int use_tcp, const daemon_event_config_t *ev_config,
                               daemon_event_driver_t **p_event_driver,
-                              daemon_bootstrap_sd_t **p_bsd,
-                              daemon_bootstrap_ipc_t **p_bipc)
+                              daemon_bootstrap_sd_t **p_bsd)
 {
     if (p_bsd) {
         const char *sd_addr = use_tcp ? "127.0.0.1" : socket_path;
         *p_bsd = daemon_bootstrap_sd_start(daemon_name, service_type, sd_addr, tcp_port, tags, 0);
-    }
-
-    if (p_bipc) {
-        const char *ipc_addr = use_tcp ? "127.0.0.1" : socket_path;
-        *p_bipc = daemon_bootstrap_ipc_start(daemon_name, service_type, ipc_addr, tcp_port,
-                                             IPC_BUS_PROTO_JSON_RPC);
     }
 
     if (!ev_config || !p_event_driver)
@@ -111,15 +104,13 @@ static int daemon_init_driver(const char *daemon_name, const char *service_type,
     return AIRY_SUCCESS;
 }
 
-static void daemon_cleanup(daemon_bootstrap_ipc_t *bipc, daemon_bootstrap_sd_t *bsd,
+static void daemon_cleanup(daemon_bootstrap_sd_t *bsd,
                            daemon_event_driver_t *event_driver, airy_sock_t server_fd,
                            const char *unix_socket_path, void (*destroy_service)(void),
                            airy_mtx_t *running_lock)
 {
     SVC_LOG_WARN("Service stopping...");
 
-    if (bipc)
-        daemon_bootstrap_ipc_stop(bipc);
     if (bsd)
         daemon_bootstrap_sd_stop(bsd);
     if (event_driver)
@@ -210,7 +201,7 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
     const char *sock_addr = ep.use_tcp ? ep.tcp_host : ep.sock_unix;
     int ret = daemon_init_driver(boot->daemon, boot->sd_type, sock_addr,
                                        ep.use_tcp ? ep.tcp_port : 0, boot->tags, ep.use_tcp,
-                                       &ev_config, boot->event_driver, boot->bsd, boot->bipc);
+                                       &ev_config, boot->event_driver, boot->bsd);
     if (ret != AIRY_SUCCESS || !*boot->event_driver) {
         SVC_LOG_ERROR("Failed to create event driver");
         airy_sock_close(server_fd);
@@ -238,7 +229,7 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
     daemon_event_driver_run(*boot->event_driver);
 
     boot->svc_teardown();
-    daemon_cleanup(*boot->bipc, *boot->bsd, *boot->event_driver, server_fd, ep.sock_unix,
+    daemon_cleanup(*boot->bsd, *boot->event_driver, server_fd, ep.sock_unix,
                             boot->svc_destroy, boot->running_lock);
     for (size_t i = boot->ops_count; i > 0; i--)
         boot->ops[i - 1].cleanup();

@@ -26,16 +26,12 @@ endif()
 set(ATOMS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../atoms")
 
 # 2026-08-27 目录原子化：src/ 按功能域组织为 8 个子目录
-#   svc/ 服务框架 · auth/ 认证中间件 · ipc/ IPC 总线与客户端 · discovery/ 服务发现
+#   svc/ 服务框架 · auth/ 认证中间件 · discovery/ 服务发现
 #   security/ daemon 安全 · daemon/ daemon 引导与生命周期 · event/ 事件循环
 set(SVC_COMMON_SOURCES
     # 0c A 类直搬：svc 生命周期机制族迁 commons/utils/svc（0.1.19 S74 层界
     # 错置回位，svc_common.h 权威头同域归位），符号经 airy_common PUBLIC 提供。
     src/svc/svc_model_defaults.c  # A2-1: model.yaml global 段默认模型提取（llm_d/gateway_d 共用）
-    src/ipc/ipc_client.c
-    src/ipc/ipc_service_bus.c     # IPC服务总线（总线核心域）
-    src/ipc/ipc_service_bus_message.c  # Phase 2.3a: IPC服务总线-消息域（从 ipc_service_bus.c 拆分）
-    src/ipc/ipc_bus_helper.c       # C-L09: daemon IPC Bus 自动注册便捷层
     # 0c A 类直搬：jsonrpc_helpers/method_dispatcher/param_validator
     # 权威实现迁 commons/utils/ipc，符号经 airy_common 提供（daemons 留 re-export 头）
     # 0c A 类直搬：跨进程服务发现全家族迁 commons/utils/sd（g14 补完 P0.17
@@ -63,7 +59,6 @@ set(SVC_COMMON_SOURCES
     # 符号经 airy_common PUBLIC 链接提供，daemons 仅留 include/thread_pool.h 兼容头。
     # g14b 补全：daemon_bootstrap_sd.c 迁 commons/utils/sd（daemon_bootstrap_sd.h
     # 公开头已在该处），实现随之归位，符号经 airy_common PUBLIC 链接提供。
-    src/daemon/daemon_bootstrap_ipc.c   # P1.7 C-L09: daemon IPC Bus 一键引导
     src/daemon/daemon_cupolas_bootstrap.c # P3.14 ACC-DT15: daemon 统一 cupolas 安全穹顶引导
     src/daemon/daemon_rpc_client.c       # Phase 3: gateway→daemon thin IPC client (Unix socket JSON-RPC)
     src/daemon/daemon_heapstore_bootstrap.c # KER-05~07: daemon 统一 heapstore 运行时数据存储引导
@@ -175,8 +170,8 @@ endif()
 # commons 权威路径必须声明在 daemons/common/include 之前。
 # CMake 的 INTERFACE_INCLUDE_DIRECTORIES 按声明顺序累加，并传递给所有链接 svc_common
 # 的目标（包括 atoms/coreloopthree 的 airy_execution、airy_cognition 子目标）。
-# 若 daemons/common/include 在前，atoms 源代码 #include "daemon_bootstrap_ipc.h" 等
-# 会先命中 daemons 重导出兼容头（虽然内部经相对路径到达 commons，但仍构成编译期
+# 若 daemons/common/include 在前，atoms 源代码 #include 的 daemon 框架重导出头
+# 会先命中 daemons 侧同名头（虽然内部经相对路径到达 commons，但仍构成编译期
 # atoms→daemons 反向依赖）。将 daemons/common/include 移至 commons 路径之后，
 # 确保 atoms 直接解析 commons 权威版本，完全消除 IRON-6 违规。
 # 注意：daemons/common/include 中 platform.h / compat.h 两个重导出兼容头
@@ -215,9 +210,9 @@ target_include_directories(svc_common PUBLIC
 # 自身裸名 include 解析（internal 头消费全在本模块内），严禁 PUBLIC
 # 传播；下游一律走显式 target_link_libraries。src/event 为空目录不挂。
 # src/svc 已随 S74 迁移清空（仅余 svc_model_defaults.c，自带目录解析）。
+# src/ipc 已随 0.1.19 t213 IPC Bus 退役整体删除（总线/helper/HTTP 客户端族）。
 target_include_directories(svc_common PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/auth
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/ipc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/security
     ${CMAKE_CURRENT_SOURCE_DIR}/src/daemon
 )
