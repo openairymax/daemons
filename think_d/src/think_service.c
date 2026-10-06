@@ -36,9 +36,7 @@ static void think_sync_engine_stats(think_service_t *svc);
 
 static uint64_t think_gccp_now_ms(void)
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)(ts.tv_nsec / 1000000L);
+    return airy_time_ms();
 }
 
 static void think_gccp_free_session(think_gccp_session_t *s)

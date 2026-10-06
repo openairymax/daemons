@@ -7,10 +7,10 @@
  */
 
 #include "thread_pool.h"
+#include "platform.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -113,7 +113,7 @@ static void test_submit_single(void)
     int ret = thread_pool_submit(pool, simple_task, &counter);
     TEST_ASSERT(ret == 0, "submit should succeed");
 
-    usleep(100000);
+    airy_sleep_ms(100);
 
     thread_pool_destroy(pool);
     TEST_ASSERT(counter == 1, "task should have been executed");
@@ -133,7 +133,7 @@ static void test_submit_multiple(void)
         TEST_ASSERT(ret == 0, "submit should succeed");
     }
 
-    usleep(200000);
+    airy_sleep_ms(200);
 
     thread_pool_destroy(pool);
 
@@ -182,7 +182,7 @@ static void test_min_config(void)
 static void sleep_task(void *arg)
 {
     int *counter = (int *)arg;
-    usleep(50000);
+    airy_sleep_ms(50);
     (*counter)++;
 }
 
@@ -201,7 +201,7 @@ static void test_concurrent_submit(void)
         TEST_ASSERT(ret == 0, "submit should succeed");
     }
 
-    usleep(500000);
+    airy_sleep_ms(500);
 
     thread_pool_destroy(pool);
 

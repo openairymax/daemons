@@ -142,21 +142,13 @@ void safety_guard_bridge_destroy(safety_guard_bridge_t *bridge)
     AIRY_FREE(bridge);
 }
 
-/** @brief Get the current timestamp (ms). */
-static uint64_t mono_now_ms(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
-}
-
 /**
  * @brief Check whether the rate-limit window needs resetting.
  * 调用方必须已持有 bridge->rl_lock。
  */
 static void rate_window_sync(safety_guard_bridge_t *bridge)
 {
-    uint64_t now = mono_now_ms();
+    uint64_t now = airy_time_ms();
     if (bridge->rate_limit_window_start == 0) {
         bridge->rate_limit_window_start = now;
         return;
@@ -176,7 +168,7 @@ static void build_safety_event(safety_event_t *event, const tool_metadata_t *met
 {
     __builtin_memset(event, 0, sizeof(*event));
     event->type = SAFETY_EVENT_EXECUTION_START;
-    event->timestamp = mono_now_ms();
+    event->timestamp = airy_time_ms();
 
     if (meta) {
         snprintf(event->action, sizeof(event->action), "%s", meta->name ? meta->name : "unknown");
@@ -515,7 +507,7 @@ int safety_guard_bridge_audit_log(safety_guard_bridge_t *bridge, const char *eve
         __builtin_memset(&result, 0, sizeof(result));
 
         event.type = SAFETY_EVENT_EXECUTION_COMPLETE;
-        event.timestamp = mono_now_ms();
+        event.timestamp = airy_time_ms();
         snprintf(event.action, sizeof(event.action), "%s", tool_name);
         snprintf(event.subject, sizeof(event.subject), "%s",
                  agent_id ? agent_id : bridge->agent_id);

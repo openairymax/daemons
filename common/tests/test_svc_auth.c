@@ -11,7 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include "error.h"
+#include "platform.h"
 
 #define TEST_ASSERT(condition, msg)                            \
     do {                                                       \
@@ -144,7 +146,7 @@ int test_jwt_refresh_token(void)
     auth_jwt_generate_token("user-003", "agent", &old_token);
     TEST_ASSERT(old_token != NULL, "Old token should be generated");
 
-    sleep(1);
+    airy_sleep_ms(1000);
 
     char *new_token = NULL;
     int ret = auth_jwt_refresh_token(old_token, &new_token);

@@ -28,11 +28,6 @@
 #include <cjson/cJSON.h>
 #include <airymax/sched.h>
 
-uint64_t sched_now_ms(void)
-{
-    return (uint64_t)time(NULL) * 1000ull;
-}
-
 int sched_service_create(const sched_config_t *config, sched_service_t **service)
 {
     if (!config || !service) {

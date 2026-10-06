@@ -121,7 +121,7 @@ int sched_dag_node_ready(const sched_dag_t *dag, size_t idx)
     const sched_dag_node_t *node = dag->nodes[idx];
     if (node->status != SCHED_DAG_NODE_PENDING)
         return 0;
-    if (node->retry_at_ms && sched_now_ms() < node->retry_at_ms)
+    if (node->retry_at_ms && airy_time_wall_ms() < node->retry_at_ms)
         return 0;
     for (size_t k = 0; k < node->dep_count; k++) {
         const sched_dag_node_t *dep = sched_dag_find_node(dag, node->depends[k]);
@@ -228,7 +228,7 @@ static size_t dag_cascade_cancel(sched_dag_t *dag)
         sched_dag_node_t *n = dag->nodes[j];
         if (n->status == SCHED_DAG_NODE_PENDING || n->status == SCHED_DAG_NODE_READY) {
             n->status = SCHED_DAG_NODE_CANCELED;
-            n->finished_at_ms = sched_now_ms();
+            n->finished_at_ms = airy_time_wall_ms();
             canceled++;
         }
     }
@@ -265,7 +265,7 @@ int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_
             AIRY_FREE(output);
         if (node->status != SCHED_DAG_NODE_CANCELED)
             node->status = SCHED_DAG_NODE_CANCELED;
-        node->finished_at_ms = sched_now_ms();
+        node->finished_at_ms = airy_time_wall_ms();
         SVC_LOG_INFO("sched: DAG node %s/%s result discarded (dag canceled/failed)", dag->dag_id,
                      node->id);
         return 0;
@@ -301,7 +301,7 @@ int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_
                     }
                     node->error = AIRY_STRDUP("artifact verification failed");
                     node->retry_at_ms = 0;
-                    node->finished_at_ms = sched_now_ms();
+                    node->finished_at_ms = airy_time_wall_ms();
                     SVC_LOG_ERROR("DAG node verification FAILED: %s/%s (%s)", dag->dag_id, node->id,
                                   vres.reason);
                     AIRY_FREE(output);
@@ -316,7 +316,7 @@ int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_
             node->error = NULL;
         }
         node->retry_at_ms = 0;
-        node->finished_at_ms = sched_now_ms();
+        node->finished_at_ms = airy_time_wall_ms();
         SVC_LOG_INFO("DAG node completed: %s/%s (output_len=%zu)", dag->dag_id, node->id,
                      node->output ? strlen(node->output) : 0);
         return 1;
@@ -336,14 +336,14 @@ int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_
         }
         node->error = AIRY_STRDUP("agent produced no artifact");
         node->retry_at_ms = 0;
-        node->finished_at_ms = sched_now_ms();
+        node->finished_at_ms = airy_time_wall_ms();
         SVC_LOG_ERROR("DAG node produced no artifact: %s/%s", dag->dag_id, node->id);
         if (output)
             AIRY_FREE(output);
         return 0;
     }
 
-    node->finished_at_ms = sched_now_ms();
+    node->finished_at_ms = airy_time_wall_ms();
 
     if (node->error) {
         AIRY_FREE(node->error);
@@ -381,7 +381,7 @@ int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_
     }
 
     if (sched_dag_error_is_transient(dret) && node->retry_count < node->max_retries) {
-        uint64_t now = sched_now_ms();
+        uint64_t now = airy_time_wall_ms();
         uint64_t budget_deadline =
             dag->retry_budget_ms ? dag->created_at_ms + dag->retry_budget_ms : 0;
         if (budget_deadline == 0 || now < budget_deadline) {
@@ -433,7 +433,7 @@ void sched_dag_propagate_unreachable(sched_service_t *svc)
                     if (!dep || !sched_dag_dep_broken(dep->status))
                         continue;
                     node->status = SCHED_DAG_NODE_CANCELED;
-                    node->finished_at_ms = sched_now_ms();
+                    node->finished_at_ms = airy_time_wall_ms();
                     changed = 1;
                 }
             }
@@ -475,7 +475,7 @@ void sched_dag_finalize_terminal(sched_service_t *svc)
             dag->status = SCHED_DAG_STATUS_COMPLETED;
             label = "completed";
         }
-        dag->finished_at_ms = sched_now_ms();
+        dag->finished_at_ms = airy_time_wall_ms();
         SVC_LOG_INFO("DAG %s: %s (%zu nodes)", dag->dag_id, label, dag->node_count);
     }
 }
@@ -487,7 +487,7 @@ void sched_dag_finalize_terminal(sched_service_t *svc)
 uint64_t sched_dag_min_retry_at(sched_service_t *svc)
 {
     uint64_t min = 0;
-    uint64_t now = sched_now_ms();
+    uint64_t now = airy_time_wall_ms();
     for (size_t i = 0; i < svc->dag_count; i++) {
         sched_dag_t *dag = svc->dags[i];
         if (dag->status != SCHED_DAG_STATUS_ACTIVE)

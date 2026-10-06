@@ -7,8 +7,8 @@
  *        channel_service_receive / channel_service_ping。
  *
  * 2026-08-27 域拆分（原 channel_service.c 849 行 → 2 文件）：生命周期/
- * 打开/关闭/查询域见 channel_service.c；内部类型与 find_channel()/
- * get_time_ms() 经 channel_service_internal.h 共享。
+ * 打开/关闭/查询域见 channel_service.c；内部类型与 find_channel() 经
+ * channel_service_internal.h 共享。
  */
 
 #include "channel_service.h"
@@ -55,7 +55,7 @@ int channel_service_send(channel_service_t *svc, const char *channel_id, const v
         return AIRY_ERR_NOT_FOUND;
     }
 
-    entry->info.last_activity = get_time_ms();
+    entry->info.last_activity = airy_time_ms();
     type = entry->info.type;
     cb = entry->callback;
     ud = entry->callback_user_data;
@@ -192,7 +192,7 @@ int channel_service_receive(channel_service_t *svc, const char *channel_id, void
         return AIRY_ERR_NOT_FOUND;
     }
 
-    entry->info.last_activity = get_time_ms();
+    entry->info.last_activity = airy_time_ms();
     type = entry->info.type;
     AIRY_STRNCPY_TERM(endpoint, entry->info.endpoint, sizeof(endpoint));
     socket_fd = entry->socket_fd;
@@ -336,7 +336,7 @@ int channel_service_ping(channel_service_t *svc, const char *channel_id, int64_t
         return AIRY_ERR_NOT_FOUND;
     }
 
-    uint64_t start_ms = get_time_ms();
+    uint64_t start_ms = airy_time_ms();
     int rc = CHANNEL_OK;
 
     switch (entry->info.type) {
@@ -405,7 +405,7 @@ int channel_service_ping(channel_service_t *svc, const char *channel_id, int64_t
         break;
     }
 
-    uint64_t end_ms = get_time_ms();
+    uint64_t end_ms = airy_time_ms();
     *out_latency_ms = (int64_t)(end_ms - start_ms);
 
     if (rc == CHANNEL_OK) {

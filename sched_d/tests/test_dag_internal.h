@@ -19,13 +19,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#ifdef _WIN32
-#include <windows.h>
-#define TEST_SLEEP_MS(ms) Sleep((ms))
-#else
-#include <unistd.h>
-#define TEST_SLEEP_MS(ms) usleep((ms) * 1000)
-#endif
+#include "platform.h"
+
+#define TEST_SLEEP_MS(ms) airy_sleep_ms((ms))
 
 /* ---- 共享全局测试状态（定义于 test_dag.c，各域文件经此访问） ---- */
 extern char g_exec_log[64][256];

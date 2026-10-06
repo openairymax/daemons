@@ -18,6 +18,7 @@
 #include "airy_memory.h"
 #include "daemon_security.h"
 #include "error.h"
+#include "platform.h"
 #include "core/executor.h"
 #include "core/executor_pool.h"
 #include "core/approval_gate.h"
@@ -29,14 +30,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
 
 static long long now_ms(void)
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    return (long long)airy_time_ms();
 }
 
 /* 数据目录隔离：工具完成后 best-effort 写 hall 事件，其根目录取自
@@ -130,8 +128,7 @@ static void test_pool_concurrent_isolation(void)
     assert(rc == 0);
 
     /* 确保慢会话已入队并开跑，再注入快速会话 */
-    struct timespec req = {0, 200 * 1000 * 1000};
-    nanosleep(&req, NULL);
+    airy_sleep_ms(200);
 
     pool_thread_arg_t fast;
     AIRY_MEMSET(&fast, 0, sizeof(fast));
@@ -268,8 +265,7 @@ static void test_pool_busy_backpressure(void)
     int rc = pthread_create(&th, NULL, busy_thread_fn, &holder);
     assert(rc == 0);
 
-    struct timespec req = {0, 200 * 1000 * 1000};
-    nanosleep(&req, NULL);
+    airy_sleep_ms(200);
 
     tool_metadata_t fast_meta;
     meta_fill(&fast_meta, "pool_busy_fast", "pool_busy", "/bin/echo", 30);

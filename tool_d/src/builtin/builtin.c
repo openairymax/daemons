@@ -23,12 +23,7 @@
 
 #include "network_common.h"
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#else
-#include <time.h>
-#endif
+#include "platform.h"
 
 #ifndef _WIN32
 #include <dirent.h>
@@ -124,29 +119,14 @@ uint64_t builtin_deadline_ms(uint32_t timeout_ms)
 {
     if (timeout_ms == 0)
         return UINT64_MAX;
-#if defined(_WIN32)
-    return (uint64_t)GetTickCount64() + timeout_ms;
-#else
-    struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-        return UINT64_MAX;
-    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL + timeout_ms;
-#endif
+    return airy_time_ms() + timeout_ms;
 }
 
 int builtin_deadline_hit(uint64_t deadline_ms)
 {
     if (deadline_ms == UINT64_MAX)
         return 0;
-#if defined(_WIN32)
-    return GetTickCount64() >= deadline_ms;
-#else
-    struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-        return 0;
-    uint64_t now = (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
-    return now >= deadline_ms;
-#endif
+    return airy_time_ms() >= deadline_ms;
 }
 
 int builtin_scan_noise_dir(const char *name)
@@ -236,16 +216,13 @@ static int capture_loop(pid_t pid, int rfd, uint32_t timeout_ms, int *wstatus, i
                         char **buf, size_t *cap, size_t *len, int *truncated)
 {
     *timed_out = 0;
-    struct timespec ts_now;
-    clock_gettime(CLOCK_MONOTONIC, &ts_now);
-    uint64_t deadline_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 + timeout_ms;
+    uint64_t deadline_ms = airy_time_ms() + timeout_ms;
 
     for (;;) {
         if (waitpid(pid, wstatus, WNOHANG) == pid)
             return 1;
 
-        clock_gettime(CLOCK_MONOTONIC, &ts_now);
-        uint64_t now_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000;
+        uint64_t now_ms = airy_time_ms();
         if (now_ms >= deadline_ms) {
             *timed_out = 1;
             return 0;
@@ -263,7 +240,7 @@ static int capture_loop(pid_t pid, int rfd, uint32_t timeout_ms, int *wstatus, i
         } else if (n == 0) {
             /* Child closed its output but is still alive; poll would otherwise
              * return POLLHUP immediately and busy-spin until the deadline. */
-            usleep(10000);
+            airy_sleep_ms(10);
         }
     }
 }
@@ -273,13 +250,9 @@ static int capture_loop(pid_t pid, int rfd, uint32_t timeout_ms, int *wstatus, i
  * deadline passes the rest of the output is abandoned. */
 static void capture_drain(int rfd, char **buf, size_t *cap, size_t *len, int *truncated)
 {
-    struct timespec ts_now;
-    clock_gettime(CLOCK_MONOTONIC, &ts_now);
-    uint64_t drain_deadline_ms =
-        (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 + BUILTIN_OUTPUT_DRAIN_MS;
+    uint64_t drain_deadline_ms = airy_time_ms() + BUILTIN_OUTPUT_DRAIN_MS;
     for (;;) {
-        clock_gettime(CLOCK_MONOTONIC, &ts_now);
-        uint64_t now_ms = (uint64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000;
+        uint64_t now_ms = airy_time_ms();
         if (now_ms >= drain_deadline_ms)
             return;
 

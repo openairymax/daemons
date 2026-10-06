@@ -35,13 +35,6 @@
 #define TEST_DATA_PAYLOAD "Hello from E2E test! This is a payload for latency measurement."
 #define LATENCY_ITERATIONS 100
 
-static uint64_t get_time_ns(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
-}
-
 static void cleanup_test_dir(void)
 {
 
@@ -248,18 +241,18 @@ static void test_send_receive_socket_roundtrip(void **state)
     const char *send_data = TEST_DATA_PAYLOAD;
     size_t send_len = strlen(send_data);
 
-    uint64_t t0 = get_time_ns();
+    uint64_t t0 = airy_time_ns();
     int rc = channel_service_send(svc, ch_id, send_data, send_len);
-    uint64_t t1 = get_time_ns();
+    uint64_t t1 = airy_time_ns();
     uint64_t send_ns = t1 - t0;
 
     assert_int_equal(rc, 0);
 
     void *recv_buf = NULL;
     size_t recv_len = 0;
-    uint64_t t2 = get_time_ns();
+    uint64_t t2 = airy_time_ns();
     rc = channel_service_receive(svc, ch_id, &recv_buf, &recv_len);
-    uint64_t t3 = get_time_ns();
+    uint64_t t3 = airy_time_ns();
     uint64_t recv_ns = t3 - t2;
 
     assert_int_equal(rc, 0);
@@ -295,7 +288,7 @@ static void test_send_receive_shm_roundtrip(void **state)
     const char *send_data = "SHM payload for e2e test";
     size_t send_len = strlen(send_data);
 
-    uint64_t t0 = get_time_ns();
+    uint64_t t0 = airy_time_ns();
     int rc = channel_service_send(svc, ch_id, send_data, send_len);
 
     assert_int_equal(rc, 0);
@@ -303,7 +296,7 @@ static void test_send_receive_shm_roundtrip(void **state)
     void *recv_buf = NULL;
     size_t recv_len = 0;
     rc = channel_service_receive(svc, ch_id, &recv_buf, &recv_len);
-    uint64_t t2 = get_time_ns();
+    uint64_t t2 = airy_time_ns();
 
     assert_int_equal(rc, 0);
     assert_non_null(recv_buf);
@@ -338,7 +331,7 @@ static void test_latency_stress(void **state)
     const char *data = "ping";
 
     for (int i = 0; i < LATENCY_ITERATIONS; i++) {
-        uint64_t t0 = get_time_ns();
+        uint64_t t0 = airy_time_ns();
         int rc = channel_service_send(svc, ch_id, data, strlen(data));
         if (rc != 0)
             continue;
@@ -347,7 +340,7 @@ static void test_latency_stress(void **state)
         size_t len = 0;
         rc = channel_service_receive(svc, ch_id, &buf, &len);
         if (rc == 0 && buf) {
-            uint64_t t1 = get_time_ns();
+            uint64_t t1 = airy_time_ns();
             total_ns += (t1 - t0);
             success_count++;
             free(buf);

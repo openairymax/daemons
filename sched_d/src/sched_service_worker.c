@@ -58,7 +58,8 @@ static task_record_t *sched_queue_take_highest(sched_service_t *svc)
     }
     svc->queue_tail = (svc->queue_tail + AIRY_CAP_MAX_TASKS - 1) % AIRY_CAP_MAX_TASKS;
     SVC_LOG_DEBUG("sched: queue take: task=%s priority=%d wait_ms=%llu remain=%zu", rec->task_id,
-                  (int)rec->priority, (unsigned long long)(sched_now_ms() - rec->created_at_ms),
+                  (int)rec->priority,
+                  (unsigned long long)(airy_time_wall_ms() - rec->created_at_ms),
                   (size_t)((svc->queue_tail + AIRY_CAP_MAX_TASKS - svc->queue_head) % AIRY_CAP_MAX_TASKS));
     return rec;
 }
@@ -93,7 +94,7 @@ static void *sched_worker_thread(void *arg)
             continue;
         }
         rec->status = SCHED_TASK_STATUS_RUNNING;
-        const uint64_t wait_ms = sched_now_ms() - rec->created_at_ms;
+        const uint64_t wait_ms = airy_time_wall_ms() - rec->created_at_ms;
         SVC_LOG_INFO("sched: task dequeued: %s (priority=%d, wait_ms=%llu, "
                      "desc_len=%zu, timeout_ms=%u)",
                      rec->task_id, (int)rec->priority, (unsigned long long)wait_ms,
@@ -103,7 +104,7 @@ static void *sched_worker_thread(void *arg)
         char *selected = NULL;
         char *output = NULL;
         char *error = NULL;
-        const uint64_t exec_t0 = sched_now_ms();
+        const uint64_t exec_t0 = airy_time_wall_ms();
 
         sched_task_info_t tinfo;
         __builtin_memset(&tinfo, 0, sizeof(tinfo));
@@ -146,12 +147,12 @@ static void *sched_worker_thread(void *arg)
             AIRY_FREE(sel);
         }
 
-        const uint64_t exec_elapsed_ms = sched_now_ms() - exec_t0;
+        const uint64_t exec_elapsed_ms = airy_time_wall_ms() - exec_t0;
 
         airy_mtx_lock(&svc->lock);
         rec->selected_agent_id = selected;
         selected = NULL;
-        rec->finished_at_ms = sched_now_ms();
+        rec->finished_at_ms = airy_time_wall_ms();
         if (sret == AIRY_SUCCESS && output) {
             if (rec->timeout_ms > 0 && exec_elapsed_ms > rec->timeout_ms) {
                 /* Execution returned success but exceeded the task-level

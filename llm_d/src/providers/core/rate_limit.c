@@ -152,8 +152,7 @@ int provider_http_request_with_retry(provider_base_ctx_t *base, provider_rate_li
             SVC_LOG_WARN("C-L02: RL: RATE-LIMIT url=%s reason=rpm_limit_reached "
                          "attempt=%d/%d",
                          url, attempt + 1, max_attempts);
-            struct timespec ts = {.tv_sec = 1, .tv_nsec = 0};
-            nanosleep(&ts, NULL);
+            airy_sleep_ms(1000);
             continue;
         }
 
@@ -185,9 +184,7 @@ int provider_http_request_with_retry(provider_base_ctx_t *base, provider_rate_li
 
             int wait_ms = rl_get_wait_ms(rl, attempt);
             if (wait_ms > 0) {
-                struct timespec ts = {.tv_sec = wait_ms / 1000,
-                                      .tv_nsec = (wait_ms % 1000) * 1000000LL};
-                nanosleep(&ts, NULL);
+                airy_sleep_ms((uint32_t)wait_ms);
             }
             attempt++;
             continue;
@@ -206,8 +203,7 @@ int provider_http_request_with_retry(provider_base_ctx_t *base, provider_rate_li
             int delay = PROVIDER_RL_BASE_DELAY_MS << attempt;
             if (delay > PROVIDER_RL_MAX_DELAY_MS)
                 delay = PROVIDER_RL_MAX_DELAY_MS;
-            struct timespec ts = {.tv_sec = delay / 1000, .tv_nsec = (delay % 1000) * 1000000LL};
-            nanosleep(&ts, NULL);
+            airy_sleep_ms((uint32_t)delay);
             attempt++;
             continue;
         }
