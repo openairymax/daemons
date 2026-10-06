@@ -173,11 +173,10 @@ Windows 源码构建默认不编译守护进程，需显式 `-DBUILD_DAEMON=ON`�
 
 ## 测试
 
-`BUILD_TESTS=ON` 时注册 5 个 CTest 用例：
+`BUILD_TESTS=ON` 时注册 4 个 CTest 用例：
 
 | 用例 | 覆盖点 |
 |------|--------|
-| `monit_d_test_metrics` | 指标采集与查询 |
 | `monit_d_test_alert` | 告警触发与解决 |
 | `monit_d_test_tracing` | 分布式追踪 |
 | `monit_d_observe_rpc` | 观测域 RPC 与 HTTP 抓取导出 |
