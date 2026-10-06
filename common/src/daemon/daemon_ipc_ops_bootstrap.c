@@ -10,11 +10,8 @@
 
 #include "airy_ipc_ops.h"
 
-#include "daemon_bootstrap_ipc.h"
 #include "daemon_bootstrap_sd.h"
 #include "daemon_rpc_client.h"
-#include "ipc_bus_helper.h"
-#include "ipc_service_bus.h"
 #include "service_discovery_helper.h"
 #include "svc_logger.h"
 
@@ -34,12 +31,6 @@ static int g_ipc_ops_initialized = 0;
  * would create for atoms consumers.
  */
 static const airy_ipc_ops_t g_daemon_ipc_ops = {
-    /* IPC Bus bootstrap (commons: daemon_bootstrap_ipc.h) */
-    .bootstrap_ipc_start = daemon_bootstrap_ipc_start,
-    .bootstrap_ipc_stop = daemon_bootstrap_ipc_stop,
-    .bootstrap_ipc_get_helper = daemon_bootstrap_ipc_get_helper,
-    .bootstrap_ipc_is_running = daemon_bootstrap_ipc_is_running,
-
     /* ServiceDiscovery bootstrap (commons: daemon_bootstrap_sd.h) */
     .bootstrap_sd_stop = daemon_bootstrap_sd_stop,
     .bootstrap_sd_get_helper = daemon_bootstrap_sd_get_helper,
@@ -49,11 +40,6 @@ static const airy_ipc_ops_t g_daemon_ipc_ops = {
     .rpc_call = daemon_rpc_call,
     .rpc_call_cancelable = daemon_rpc_call_cancelable,
     .rpc_call_stream = daemon_rpc_call_stream,
-
-    /* IPC Bus helper message path (commons: ipc_bus_helper.h) */
-    .bus_helper_request = ipc_bus_helper_request,
-    .bus_message_create = ipc_bus_message_create,
-    .bus_message_free = ipc_bus_message_free,
 };
 
 airy_err_t daemon_ipc_ops_init(const char *daemon_name)

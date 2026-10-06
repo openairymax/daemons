@@ -10,7 +10,7 @@
 
 `common` 是 AgentRT 全部 15 个守护进程共享的**静态库**，不是可执行程序，也不监听任何
 socket。它把守护进程样板收敛成一套可复用设施：服务生命周期与注册、JSON-RPC 方法分发、
-IPC 总线与跨进程服务发现、认证与授权、事件驱动主循环、并行执行引擎、配置管理与统一日志。
+跨进程服务发现与 RPC 客户端、认证与授权、事件驱动主循环、并行执行引擎、配置管理与统一日志。
 
 所有 daemon 的 `main.c` 都经由本模块的 `daemon_main.h` 获取启动骨架，因此它同时是
 `daemons` 层与下层 `commons` / `atoms` 之间的枢纽。
@@ -25,11 +25,10 @@ IPC 总线与跨进程服务发现、认证与授权、事件驱动主循环、�
   各 daemon 主循环基于它跑通（含 JSON-RPC 分发）。
 - **JSON-RPC 分发**：`method_dispatcher_*` 注册表式方法路由，`jsonrpc_helpers_*` 负责
   请求解析与成功/错误响应构建。
-- **跨进程通信**：`ipc_service_bus`（进程内/跨进程总线）、`ipc_client`、
-  `daemon_rpc_client`（Unix socket / Windows TCP 回环上的精简 JSON-RPC 客户端，
-  `gateway_d` 转发与各 daemon 互调都走它）。
+- **跨进程通信**：`daemon_rpc_client`（Unix socket / Windows TCP 回环上的精简 JSON-RPC
+  客户端，`gateway_d` 转发与各 daemon 互调都走它）。
 - **服务发现**：`service_discovery*` 提供注册、发现、健康、选择与负载均衡，后端可切
-  共享内存或文件；`daemon_bootstrap_sd` / `daemon_bootstrap_ipc` 是一键引导封装。
+  共享内存或文件；`daemon_bootstrap_sd` 是一键引导封装。
 - **安全**：`svc_auth*`（JWT / API Key / 限流）、`daemon_security*`（ACL 授权、输入消毒、
   包签名校验、凭据与审计），并与 `cupolas` 安全穹顶集成。
 - **容错与可观测**：`api_recovery`（重试/降级/熔断策略）、`alert_manager`、
@@ -80,9 +79,8 @@ IPC 总线与跨进程服务发现、认证与授权、事件驱动主循环、�
 |----|------|--------|
 | `src/svc/` | 4 | `svc_common.c`（服务生命周期核心）、`svc_common_registry.c`（进程内注册表）、`svc_common_ops.c`（状态查询/异步请求）、`svc_model_defaults.c`（`model.yaml` 全局默认模型提取，`llm_d` / `gateway_d` 共用） |
 | `src/auth/` | 6 | `svc_auth.c`（认证中间件聚合）、`svc_auth_jwt.c` / `svc_auth_jwt_crypto.c` / `svc_auth_jwt_verify.c`（JWT 生命周期、HMAC/Base64 原语、签名校验）、`svc_auth_apikey.c`、`svc_auth_ratelimit.c` |
-| `src/ipc/` | 4 | `ipc_client.c`、`ipc_service_bus.c`（总线核心）、`ipc_service_bus_message.c`（消息域）、`ipc_bus_helper.c`（自动注册便捷层） |
 | `src/security/` | 4 | `daemon_security.c`（初始化/消毒）、`_acl.c`（ACL 授权）、`_signature.c`（包签名验证）、`_vault.c`（凭据与审计） |
-| `src/daemon/` | 9 | `daemon_event_driver.c`（事件驱动主循环）、`daemon_rpc_client.c`、`daemon_dep.c`（硬依赖探测与降级上报）、`daemon_bootstrap_ipc.c`、`daemon_cupolas_bootstrap.c`、`daemon_heapstore_bootstrap.c`、`daemon_ipc_ops_bootstrap.c`、`daemon_l1_server.c`、`daemon_l2_bridge.c` |
+| `src/daemon/` | 8 | `daemon_event_driver.c`（事件驱动主循环）、`daemon_rpc_client.c`、`daemon_dep.c`（硬依赖探测与降级上报）、`daemon_cupolas_bootstrap.c`、`daemon_heapstore_bootstrap.c`、`daemon_ipc_ops_bootstrap.c`、`daemon_l1_server.c`、`daemon_l2_bridge.c` |
 
 > `daemon_l1_server.c` 与 `daemon_l2_bridge.c` 编译进独立的 `daemon_l1_server` 目标，
 > 不在 `svc_common` 源列表内；两者都以 PRIVATE 方式链接 `airy_core`，避免把 corekern 的
@@ -144,7 +142,6 @@ cmake -S . -B build -DBUILD_DAEMON=ON -DBUILD_CLI=ON
 - 服务框架与分发：`svc_test_svc_auth` / `svc_test_jsonrpc_helpers` / `svc_test_svc_stop` /
   `svc_test_daemon_common`（按功能域拆分为 6 个测试文件）
 - 安全：`svc_test_daemon_security` / `svc_test_log_sanitizer`
-- IPC/总线：`svc_test_ipc_service_bus`（服务发现测试随实现迁 `commons/tests/unit/`）
 - 容错与并发：`svc_test_strategies_recovery` / `svc_test_api_recovery`
   （含 pool / cred / health / fallback / config / misc 六个域文件）/
   `svc_test_thread_pool` / `svc_test_airy_event_loop` / `svc_test_checkpoint`

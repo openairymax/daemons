@@ -19,7 +19,6 @@ set(TEST_SOURCES
     test_svc_auth.c
     test_jsonrpc_helpers.c
     test_safe_string_utils.c
-    test_ipc_service_bus.c
     test_strategies_recovery.c
     test_log_sanitizer.c
     test_thread_pool.c
@@ -29,7 +28,6 @@ set(TEST_SOURCES
     test_svc_model_defaults.c
     test_agent_vocab.c
     test_daemon_dep.c
-    test_ipc_client.c
 )
 
 foreach(TEST_SRC ${TEST_SOURCES})

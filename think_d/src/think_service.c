@@ -335,7 +335,7 @@ think_service_t *think_service_create(const think_service_config_t *config)
 
     /* S-5 (2026-08-21): 恢复流程编排器（orchestrator，与 engine_process
      * 双管线并存）。orchestrator 自带熔断/重试/超时/进度/取消与自定义
-     * pipeline，其 LLM 调用经 ipc_service_bus 直连 llm_d。 */
+     * pipeline，其 LLM 调用经 daemon_rpc_call 直连 llm_d。 */
     airy_mtx_init(&svc->orch_lock);
     svc->next_run_id = 1;
     orch_config_t orch_cfg;

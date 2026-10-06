@@ -25,13 +25,14 @@ daemon processes** — `gateway_d`, `llm_d`, `tool_d`, `sched_d`, `market_d`, `m
 and the shared static library `svc_common` (in `common/`).
 
 Each daemon is its own OS process, owns exactly one domain, exposes a JSON-RPC 2.0
-interface, and reaches its peers through the IPC service bus. `gateway_d` is the only
-process boundary that faces external clients; everything else stays internal.
+interface, and reaches its peers through a direct JSON-RPC call over Unix sockets.
+`gateway_d` is the only process boundary that faces external clients; everything
+else stays internal.
 
 ```
 External client ──HTTP / WS / SSE / MCP / A2A / OpenAI API──▶ gateway_d
                                                               │
-                                                    JSON-RPC 2.0 over IPC bus
+                                                    JSON-RPC 2.0 over Unix sockets
                                                               ▼
                       llm_d  tool_d  sched_d  mem_d  agent_d  …  (14 daemons)
                                                               │
@@ -106,7 +107,7 @@ Each daemon directory follows the same shape:
 
 `common/` builds the `svc_common` static library, which every daemon links `PRIVATE`.
 It provides the service framework (`airy_svc_t`, event driver, task dispatcher,
-bootstrap for IPC / ServiceDiscovery / Cupolas), the IPC client and service bus, the JSON-RPC
+bootstrap for ServiceDiscovery / Cupolas), the RPC client, the JSON-RPC
 method dispatcher and parameter validators, resilience components (circuit breaker,
 API recovery, input validator, log sanitizer), metrics and alerting, configuration,
 and the platform compatibility layer. See [`common/README.md`](common/README.md).
@@ -215,7 +216,6 @@ aliases in `daemon_errors.h`.
 
 ```c
 #include "svc_common.h"
-#include "ipc_service_bus.h"
 
 int main(void)
 {
@@ -243,7 +243,7 @@ into running processes.
 | [commons](https://atomgit.com/openairymax/commons) | Logging, configuration, networking, tokens, cost, observability, platform paths and the authoritative IPC headers — reached transitively through `svc_common` |
 | [atoms](https://atomgit.com/openairymax/atoms) | Syscall entry surface for downward dispatch; notify_d's hook face links the CoreLoopThree hook library directly |
 | [cupolas](https://atomgit.com/openairymax/cupolas) | Security dome, `PUBLIC`-linked by `svc_common`; `cupolas_d` exposes it as a service |
-| [protocols](https://atomgit.com/openairymax/protocols) | JSON-RPC 2.0 / AgentsIPC envelope on the IPC bus; A2A and MCP adapters at the gateway |
+| [protocols](https://atomgit.com/openairymax/protocols) | JSON-RPC 2.0 / AgentsIPC envelope inside the runtime; A2A and MCP adapters at the gateway |
 | [heapstore](https://atomgit.com/openairymax/heapstore) | Persistence for daemon state, registries, and budgets |
 | [gateway](https://atomgit.com/openairymax/gateway) | The gateway library that `gateway_d` wraps as a service |
 

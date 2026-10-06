@@ -92,8 +92,6 @@ int main(int argc, char **argv)
 
     daemon_bootstrap_sd_t *bsd =
         daemon_bootstrap_sd_start("notify_d", "notify", g_service.socket_path, 0, "notify,core", 0);
-    daemon_bootstrap_ipc_t *bipc = daemon_bootstrap_ipc_start(
-        "notify_d", "notify", g_service.socket_path, 0, IPC_BUS_PROTO_JSON_RPC);
 
     airy_sock_t hook_fd = hook_svc_listen_fd();
     while (!g_shutdown && g_service.running) {
@@ -154,7 +152,6 @@ int main(int argc, char **argv)
         }
     }
 
-    daemon_bootstrap_ipc_stop(bipc);
     daemon_bootstrap_sd_stop(bsd);
     notify_d_stop(&g_service, g_shutdown ? 1 : 0);
     notify_d_destroy(&g_service);
