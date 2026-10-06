@@ -21,18 +21,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-#ifdef _WIN32
-#include <windows.h>
-#ifndef TEST_SLEEP_MS
-#define TEST_SLEEP_MS(ms) Sleep((ms))
-#endif
-#else
-#include <unistd.h>
-#ifndef TEST_SLEEP_MS
-#define TEST_SLEEP_MS(ms) usleep((ms) * 1000)
-#endif
-#endif
 
 /* ---- 共享全局测试状态（非 static：各域文件经 test_dag_internal.h 访问） ---- */
 char g_exec_log[64][256];

@@ -4,8 +4,7 @@
 /*
  * @file service.c
  * @brief Monitor service 生命周期与配置域：monitor_service_create /
- *        monitor_service_destroy / monitor_service_reload_config，以及
- *        时间戳工具 get_timestamp_ms()。
+ *        monitor_service_destroy / monitor_service_reload_config。
  *
  * 2026-08-27 域拆分（原 900 行 → 3 文件）：指标/日志/告警/健康/报告域见
  * service_subsystems.c，Agent 执行追踪域见 service_agent_trace.c；
@@ -22,13 +21,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-
-uint64_t get_timestamp_ms(void)
-{
-    /* 校正后逻辑墙钟：联网以时区标准时间为准，离线回退系统时间，
-     * 单调递增不受系统时间跳变影响（任务1，0.1.6f）。 */
-    return airy_time_wall_ms();
-}
 
 int monitor_service_create(const monitor_config_t *config, monitor_service_t **service)
 {

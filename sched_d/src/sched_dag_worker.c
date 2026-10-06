@@ -97,7 +97,7 @@ static size_t sched_dag_collect_ready_batch(sched_service_t *svc, sched_dag_node
             if (r > 0) {
                 sched_dag_node_t *node = dag->nodes[j];
                 node->status = SCHED_DAG_NODE_RUNNING;
-                node->started_at_ms = sched_now_ms();
+                node->started_at_ms = airy_time_wall_ms();
                 out_nodes[n] = node;
                 out_dags[n] = dag;
                 n++;
@@ -124,7 +124,7 @@ void *sched_dag_worker_thread(void *arg)
                               svc->dag_count);
                 airy_cond_wait(&svc->dag_cond, &svc->lock);
             } else {
-                uint64_t now = sched_now_ms();
+                uint64_t now = airy_time_wall_ms();
                 uint32_t wait_ms = (min_retry > now) ? (uint32_t)(min_retry - now) : 1;
                 airy_cond_timedwait(&svc->dag_cond, &svc->lock, wait_ms);
             }
@@ -191,7 +191,7 @@ void *sched_dag_worker_thread(void *arg)
                     airy_mtx_lock(&svc->lock);
                     batch[i]->status = SCHED_DAG_NODE_FAILED;
                     batch[i]->error = AIRY_STRDUP("batch item alloc failed");
-                    batch[i]->finished_at_ms = sched_now_ms();
+                    batch[i]->finished_at_ms = airy_time_wall_ms();
                     if (svc->batch_pending > 0) {
                         svc->batch_pending--;
                         if (svc->batch_pending == 0)
@@ -237,7 +237,7 @@ void *sched_dag_worker_thread(void *arg)
         }
         sched_dag_t *dag = svc->dags[dag_idx];
         node->status = SCHED_DAG_NODE_RUNNING;
-        node->started_at_ms = sched_now_ms();
+        node->started_at_ms = airy_time_wall_ms();
 
         const char *role = node->role ? node->role : AGENT_VOCAB_FALLBACK;
         /* Composed under the lock (see the parallel path above); owned here
@@ -247,7 +247,7 @@ void *sched_dag_worker_thread(void *arg)
         SVC_LOG_INFO("sched: DAG node dispatch: %s/%s role=%s deps=%zu "
                      "(wait since dag create=%llu ms, executor=%s)",
                      dag->dag_id, node->id, role, node->dep_count,
-                     (unsigned long long)(sched_now_ms() - dag->created_at_ms),
+                     (unsigned long long)(airy_time_wall_ms() - dag->created_at_ms),
                      svc->executor ? "ready" : "MISSING");
         airy_mtx_unlock(&svc->lock);
 

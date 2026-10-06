@@ -284,8 +284,7 @@ static int think_orch_ops_wait(int task_id, int timeout_ms, int *result)
 
     int waited = 0;
     while (svc->runs[idx].state == 1 && (timeout_ms <= 0 || waited < timeout_ms)) {
-        struct timespec ts = {0, 10 * 1000000L};
-        nanosleep(&ts, NULL);
+        airy_sleep_ms(10);
         waited += 10;
     }
     if (svc->runs[idx].state == 1) {

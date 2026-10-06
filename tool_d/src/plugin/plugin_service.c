@@ -30,7 +30,6 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 /* dlsym returns void* (object pointer) but plugin symbols are function
  * pointers. ISO C forbids direct function-pointer <-> object-pointer
@@ -56,7 +55,7 @@
 typedef struct plugin_node {
     plugin_descriptor_t desc;
     plugin_stats_t stats;
-    struct timespec load_time;
+    uint64_t load_time_ns;
     struct plugin_node *next;
 } plugin_node_t;
 
@@ -189,7 +188,7 @@ int plugin_service_load(const char *library_path, const char *config_path, const
         AIRY_STRNCPY_TERM(node->desc.config_path, config_path, sizeof(node->desc.config_path));
     }
 
-    clock_gettime(CLOCK_MONOTONIC, &node->load_time);
+    node->load_time_ns = airy_time_ns();
     void *user_data = NULL;
     int init_ret = init_fn(config_path, &user_data);
     if (init_ret != 0) {
@@ -343,10 +342,7 @@ int plugin_service_stop(const char *name)
 
     node->desc.state = PLUGIN_STATE_INITIALIZED;
 
-    struct timespec now;
-    clock_gettime(CLOCK_MONOTONIC, &now);
-    node->stats.uptime_ns += (uint64_t)(now.tv_sec - node->load_time.tv_sec) * 1000000000ULL +
-                             (uint64_t)(now.tv_nsec - node->load_time.tv_nsec);
+    node->stats.uptime_ns += airy_time_ns() - node->load_time_ns;
 
     sync_rwlock_unlock_ex(g_plugin_registry.rwlock);
 
@@ -398,10 +394,7 @@ int plugin_service_get_stats(const char *name, plugin_stats_t *stats)
     AIRY_MEMCPY(stats, &node->stats, sizeof(plugin_stats_t));
 
     if (node->desc.state == PLUGIN_STATE_RUNNING) {
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        stats->uptime_ns += (uint64_t)(now.tv_sec - node->load_time.tv_sec) * 1000000000ULL +
-                            (uint64_t)(now.tv_nsec - node->load_time.tv_nsec);
+        stats->uptime_ns += airy_time_ns() - node->load_time_ns;
     }
 
     sync_rwlock_unlock_ex(g_plugin_registry.rwlock);

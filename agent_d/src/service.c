@@ -18,6 +18,7 @@
  */
 
 #include "agent_service_internal.h"
+#include "platform.h"
 
 /* Default max concurrent agents: supports thousands in parallel (design
  * intent). Overridable via AIRY_MAX_AGENTS env var or daemon config
@@ -26,18 +27,11 @@
 
 #define AGENT_HASH_LOAD_FACTOR 4 /* capacity = max_agents * 4 */
 
-/* Monotonic clock in microseconds: POSIX uses CLOCK_MONOTONIC (unaffected by
- * NTP/timezone jumps), Windows uses GetTickCount64 (ms precision converted).
- * Used for spawn/invoke latency aggregation and slow-request detection. */
+/* Monotonic microsecond clock for spawn/invoke latency aggregation and
+ * slow-request detection. */
 uint64_t agent_perf_now_us(void)
 {
-#if AIRY_PLATFORM_POSIX
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000ull;
-#else
-    return (uint64_t)GetTickCount64() * 1000ull;
-#endif
+    return airy_time_ns() / 1000;
 }
 
 /* Global lock acquisition: trylock first; on failure count one lock

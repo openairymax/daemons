@@ -88,9 +88,6 @@ struct monitor_service {
     int running;
 };
 
-/* 时间戳工具（service.c 定义，各域共用） */
-uint64_t get_timestamp_ms(void);
-
 #ifdef __cplusplus
 }
 #endif

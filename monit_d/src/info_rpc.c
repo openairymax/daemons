@@ -202,11 +202,7 @@ static void *info_collect_loop(void *arg)
         for (int i = 0; i < INFO_RPC_COLLECT_INTERVAL_SEC &&
                     atomic_load_explicit(&g_info_collect_running, memory_order_relaxed);
              i++) {
-#ifdef _WIN32
-            Sleep(1000);
-#else
-            sleep(1);
-#endif
+            airy_sleep_ms(1000);
         }
     }
     return NULL;

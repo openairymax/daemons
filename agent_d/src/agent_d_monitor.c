@@ -24,7 +24,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #if AIRY_PLATFORM_POSIX
 /* P0-3: idle agent child reaping.
@@ -50,8 +49,7 @@ static void *idle_reaper_thread(void *arg)
     int slept = 0;
     while (g_reaper_run) {
 
-        struct timespec ts = {1, 0};
-        nanosleep(&ts, NULL);
+        airy_sleep_ms(1000);
         if (!g_reaper_run)
             break;
         if (++slept >= 30) {
@@ -84,13 +82,7 @@ void idle_reaper_stop(void)
 
 uint64_t perf_now_us(void)
 {
-#if AIRY_PLATFORM_POSIX
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000ull;
-#else
-    return (uint64_t)GetTickCount64() * 1000ull;
-#endif
+    return airy_time_ns() / 1000;
 }
 
 int64_t perf_slow_threshold_us(void)
@@ -135,8 +127,7 @@ static void *perf_monitor_thread(void *arg)
     __builtin_memset(&prev, 0, sizeof(prev));
     int slept = 0;
     while (g_perf_run) {
-        struct timespec ts = {1, 0};
-        nanosleep(&ts, NULL);
+        airy_sleep_ms(1000);
         if (!g_perf_run)
             break;
         if (++slept < interval_s)

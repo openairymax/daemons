@@ -11,6 +11,7 @@
 
 #include "ledger.h"
 #include "airy_memory.h"
+#include "platform.h"
 #include "token.h"
 #include "token_standard.h"
 
@@ -69,16 +70,9 @@ struct mem_ledger {
 
 /* ─── 工具 ─────────────────────────────────────────────────────────────── */
 
-static uint64_t ledger_now_ns(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
-}
-
 static void entry_id_gen(mem_ledger_t *ledger, char out[LEDGER_ENTRY_ID_HEX + 1])
 {
-    uint64_t now = ledger_now_ns();
+    uint64_t now = airy_time_ns();
     uint64_t r = (uint64_t)rand() ^ (uint64_t)(uintptr_t)ledger;
     snprintf(out, LEDGER_ENTRY_ID_HEX + 1, "%08x%08x%08x%08x",
              (uint32_t)(now & 0xFFFFFFFFUL), (uint32_t)((now >> 32) & 0xFFFFFFFFUL),
@@ -297,7 +291,7 @@ int mem_ledger_append(mem_ledger_t *ledger, const char *session_id,
         e->token_out = in->token_out;
         e->source = in->source ? AIRY_STRDUP(in->source) : NULL;
         e->status = LEDGER_STATUS_ACTIVE;
-        e->created_at = ledger_now_ns();
+        e->created_at = airy_time_ns();
         e->ref_id = in->ref_id ? AIRY_STRDUP(in->ref_id) : NULL;
         e->seq = ++ledger->seq;
         batch[i] = e;
@@ -437,7 +431,7 @@ int mem_ledger_mark(mem_ledger_t *ledger, const char *session_id,
         rec->token_in = 0; /* 状态变更记录不占预算 */
         rec->token_out = 0;
         rec->status = status;
-        rec->created_at = ledger_now_ns();
+        rec->created_at = airy_time_ns();
         rec->seq = ++ledger->seq;
 
         if (s->tail)

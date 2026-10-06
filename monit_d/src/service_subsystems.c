@@ -49,7 +49,7 @@ int monitor_service_record_metric(monitor_service_t *service, const metric_info_
         }
         entry->type = metric->type;
         entry->value = metric->value;
-        entry->timestamp = metric->timestamp ? metric->timestamp : get_timestamp_ms();
+        entry->timestamp = metric->timestamp ? metric->timestamp : airy_time_wall_ms();
         service->metric_cache[service->metric_cache_count++] = entry;
     }
 
@@ -78,7 +78,7 @@ int monitor_service_log(monitor_service_t *service, const log_info_t *log)
     service->logs[idx].file = log->file ? AIRY_STRDUP(log->file) : NULL;
     service->logs[idx].line = log->line;
     service->logs[idx].function = log->function ? AIRY_STRDUP(log->function) : NULL;
-    service->logs[idx].timestamp = log->timestamp ? log->timestamp : get_timestamp_ms();
+    service->logs[idx].timestamp = log->timestamp ? log->timestamp : airy_time_wall_ms();
 
     service->log_write_idx++;
     if (service->log_count < MAX_LOG_ENTRIES) {
@@ -113,7 +113,7 @@ int monitor_service_trigger_alert(monitor_service_t *service, const alert_info_t
     entry->level = alert->level;
     entry->service_name = alert->service_name ? AIRY_STRDUP(alert->service_name) : NULL;
     entry->resource_id = alert->resource_id ? AIRY_STRDUP(alert->resource_id) : NULL;
-    entry->timestamp = alert->timestamp ? alert->timestamp : get_timestamp_ms();
+    entry->timestamp = alert->timestamp ? alert->timestamp : airy_time_wall_ms();
     entry->is_resolved = false;
     service->alert_count++;
 
@@ -163,7 +163,7 @@ int monitor_service_health_check(monitor_service_t *service, const char *service
 
     hr->service_name = service_name ? AIRY_STRDUP(service_name) : AIRY_STRDUP("monitor_service");
     hr->is_healthy = service->initialized ? true : false;
-    hr->timestamp = get_timestamp_ms();
+    hr->timestamp = airy_time_wall_ms();
     hr->error_code = 0;
 
     airy_mtx_lock(&service->alert_lock);
@@ -302,7 +302,7 @@ int monitor_service_generate_report(monitor_service_t *service, char **report)
     pos += snprintf(buf + pos, MAX_REPORT_SIZE - pos,
                     "=== AgentRT Monitor Report ===\n"
                     "Generated at: %llu\n\n",
-                    (unsigned long long)get_timestamp_ms());
+                    (unsigned long long)airy_time_wall_ms());
 
     airy_mtx_lock(&service->metric_lock);
     pos += snprintf(buf + pos, MAX_REPORT_SIZE - pos, "--- Metrics (%zu recorded) ---\n",

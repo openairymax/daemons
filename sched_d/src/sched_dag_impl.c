@@ -117,7 +117,7 @@ int sched_service_submit_dag(sched_service_t *service, const char *dag_json, cha
         return AIRY_ERR_OUT_OF_MEMORY;
     }
     dag->status = SCHED_DAG_STATUS_ACTIVE;
-    dag->created_at_ms = sched_now_ms();
+    dag->created_at_ms = airy_time_wall_ms();
     service->dags[service->dag_count++] = dag;
 
     airy_cond_broadcast(&service->dag_cond);
@@ -249,13 +249,13 @@ int sched_service_cancel_dag(sched_service_t *service, const char *dag_id)
     }
 
     dag->status = SCHED_DAG_STATUS_CANCELED;
-    dag->finished_at_ms = sched_now_ms();
+    dag->finished_at_ms = airy_time_wall_ms();
     size_t canceled_nodes = 0, running_nodes = 0;
     for (size_t j = 0; j < dag->node_count; j++) {
         sched_dag_node_t *node = dag->nodes[j];
         if (node->status == SCHED_DAG_NODE_PENDING || node->status == SCHED_DAG_NODE_READY) {
             node->status = SCHED_DAG_NODE_CANCELED;
-            node->finished_at_ms = sched_now_ms();
+            node->finished_at_ms = airy_time_wall_ms();
             node->error = AIRY_STRDUP("canceled by user");
             canceled_nodes++;
         } else if (node->status == SCHED_DAG_NODE_RUNNING) {
@@ -309,7 +309,7 @@ int sched_service_checkpoint_save(sched_service_t *service, char **out_json)
         cJSON_AddNumberToObject(root, "dag_count", (double)service->dag_count);
         cJSON_AddNumberToObject(root, "active_dags", (double)active_dags);
         cJSON_AddNumberToObject(root, "completed_dags", (double)completed_dags);
-        cJSON_AddNumberToObject(root, "timestamp_ms", (double)sched_now_ms());
+        cJSON_AddNumberToObject(root, "timestamp_ms", (double)airy_time_wall_ms());
     }
     airy_mtx_unlock(&service->lock);
 

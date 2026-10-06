@@ -24,6 +24,7 @@
  * 别名，airy_core 传播 AIRY_USE_SCHEDULER_THREAD_IMPL 时声明由
  * corekern task.h 提供（线程纳入调度器任务表记账）。两腿原型一致，
  * 调用点无需区分（gateway_d/service.c 同范式）。 */
+#include "platform.h"
 #include "platform_process.h"
 #ifdef AIRY_USE_SCHEDULER_THREAD_IMPL
 #include "task.h"
@@ -79,17 +80,10 @@ static void *notify_d_event_loop(void *arg)
                 notify_d_sse_heartbeat(svc);
             }
             airy_mtx_unlock(&svc->lock);
-#ifndef _WIN32
 
             for (int _w = 0; _w < 10 && svc->event_running; _w++) {
-                usleep(100000); /* 100ms */
+                airy_sleep_ms(100);
             }
-#else
-
-            for (int _w = 0; _w < 10 && svc->event_running; _w++) {
-                Sleep(100); /* 100ms */
-            }
-#endif
         }
     }
 

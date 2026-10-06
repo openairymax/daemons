@@ -13,19 +13,17 @@
 
 #include "airy_memory.h"
 #include "daemon_security.h"
+#include "platform.h"
 
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 static long long now_ms(void)
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    return (long long)airy_time_ms();
 }
 
 /* 为 executor 注入放行审批：daemon_security ACL + approval gate。

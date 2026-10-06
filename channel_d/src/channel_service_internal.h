@@ -6,7 +6,7 @@
  * @brief Channel service 拆分文件间的共享内部类型与声明。
  *
  * 簿记机制单源（channel_book.c，双平台编译）：生命周期/close/查询域与
- * find_channel()/get_time_ms()/channel_entry_free()。
+ * find_channel()/channel_entry_free()。
  * 平台策略按钩子注入（机制与策略分离）：
  *   - channel_service.c   POSIX：三后端钩子 + SOCKET/SHM/PIPE 打开域
  *   - channel_win32.c     Win32：钩子空实现 + 未映射传输显式拒绝（#124）
@@ -50,9 +50,6 @@ struct channel_service {
     uint64_t total_messages_received;
     airy_mtx_t lock;
 };
-
-/* 时间戳工具（channel_book.c 定义，收发/探测域共用） */
-uint64_t get_time_ms(void);
 
 /* 按 channel_id 查找通道条目（channel_book.c 定义，各域共用） */
 channel_entry_t *find_channel(channel_service_t *svc, const char *channel_id);

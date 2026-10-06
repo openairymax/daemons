@@ -5,7 +5,7 @@
  * @file channel_win32.c
  * @brief channel_d Windows 平台钩子与未映射传输域（G1 编译门禁窗）。
  *
- * 簿记机制（生命周期/close/查询/find_channel/get_time_ms）在
+ * 簿记机制（生命周期/close/查询/find_channel）在
  * channel_book.c 双平台单源；本文件仅注入 Windows 平台策略：
  *   - 三后端钩子空实现：Windows 无 socket_dir 目录职责，且条目永不持有
  *     平台资源（open 显式拒绝），空体即正确语义；

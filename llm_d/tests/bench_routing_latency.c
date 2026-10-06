@@ -10,21 +10,19 @@
 
 #include "cache_common.h"
 #include "llm_service.h"
+#include "platform.h"
 #include "providers/core/registry.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #define BENCH_ITERATIONS 10000
 
 static double get_time_us(void)
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * 1000000.0 + (double)ts.tv_nsec / 1000.0;
+    return (double)airy_time_ns() / 1000.0;
 }
 
 typedef struct {

@@ -8,6 +8,7 @@
 
 #include "airy_memory.h"
 #include "error.h"
+#include "platform.h"
 #include "svc_logger.h"
 #include "sync.h"
 #include "tool_interactive_approval.h"
@@ -149,7 +150,7 @@ char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
 
     char reqbuf[72];
     sync_mutex_lock_ex(mgr->lock, NULL);
-    uint64_t now = sync_get_timestamp_ms();
+    uint64_t now = airy_time_wall_ms();
     snprintf(reqbuf, sizeof(reqbuf), "req_%llu_%llu", (unsigned long long)now,
              (unsigned long long)mgr->seq);
     req->request_id = AIRY_STRDUP(reqbuf);
@@ -171,9 +172,9 @@ char *interactive_approval_block(interactive_approval_t *mgr, const char *tool,
     SVC_LOG_INFO("P0: Interactive approval pending req=%s tool='%s' agent='%s'", req->request_id,
                  tool, agent_id ? agent_id : "?");
 
-    uint64_t deadline = now + mgr->timeout_ms;
+    uint64_t deadline = airy_time_ms() + mgr->timeout_ms;
     while (!req->resolved) {
-        uint64_t now_ms = sync_get_timestamp_ms();
+        uint64_t now_ms = airy_time_ms();
         if (now_ms >= deadline) {
             break;
         }

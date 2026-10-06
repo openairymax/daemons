@@ -121,12 +121,9 @@ struct sched_service {
 
 /* Cross-domain shared helpers (used by both sched_service_impl.c and
  * sched_dag_impl.c):
- * sched_now_ms - approximate millisecond clock (shared by the task queue
- *   and the DAG engine, defined in sched_service_impl.c);
  * sched_dag_worker_thread - DAG worker-thread entry (defined in
  *   sched_dag_impl.c, started/stopped by sched_service_start_workers/
  *   stop_workers). */
-uint64_t sched_now_ms(void);
 void *sched_dag_worker_thread(void *arg);
 
 /* Work-hall event wiring (2.8b, best-effort progress/result writes; defined

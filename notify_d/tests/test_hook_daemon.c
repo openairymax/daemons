@@ -16,6 +16,7 @@
 #include "daemon_rpc_client.h"
 
 #include "airy_memory.h"
+#include "platform.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -24,7 +25,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 
 #ifndef TEST_BIN_DIR
@@ -41,12 +41,11 @@ static pid_t g_child = -1;
 
 static int wait_for_socket(int timeout_ms)
 {
-    struct timespec ts = {0, 50 * 1000 * 1000}; /* 50ms */
     int waited = 0;
     while (waited < timeout_ms) {
         if (access(g_socket_path, F_OK) == 0)
             return 0;
-        nanosleep(&ts, NULL);
+        airy_sleep_ms(50);
         waited += 50;
     }
     return -1;
@@ -108,7 +107,7 @@ static void stop_daemon(void)
                 g_child = -1;
                 break;
             }
-            usleep(100 * 1000);
+            airy_sleep_ms(100);
         }
         if (g_child > 0) {
             kill(g_child, SIGTERM);

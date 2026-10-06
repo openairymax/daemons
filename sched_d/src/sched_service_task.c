@@ -136,7 +136,7 @@ int sched_service_submit_task(sched_service_t *service, const sched_task_info_t 
     rec->priority = task_info->priority;
     rec->timeout_ms = task_info->timeout_ms;
     rec->status = SCHED_TASK_STATUS_PENDING;
-    rec->created_at_ms = sched_now_ms();
+    rec->created_at_ms = airy_time_wall_ms();
 
     service->tasks[service->task_count++] = rec;
     service->queue[service->queue_tail] = rec;
@@ -261,7 +261,7 @@ int sched_service_cancel_task(sched_service_t *service, const char *task_id)
                 (service->queue_tail + AIRY_CAP_MAX_TASKS - 1) % AIRY_CAP_MAX_TASKS;
         }
         rec->status = SCHED_TASK_STATUS_CANCELED;
-        rec->finished_at_ms = sched_now_ms();
+        rec->finished_at_ms = airy_time_wall_ms();
         rec->error = AIRY_STRDUP("canceled by user");
         SVC_LOG_INFO("Task canceled: %s (removed_from_queue=%d, pending_in_queue=%zu)", task_id,
                      (int)removed,

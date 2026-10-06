@@ -209,7 +209,7 @@ int channel_service_open(channel_service_t *svc, const char *channel_id, const c
         }
     }
 
-    entry->info.created_at = get_time_ms();
+    entry->info.created_at = airy_time_ms();
     entry->info.last_activity = entry->info.created_at;
 
     int rc = 0;
