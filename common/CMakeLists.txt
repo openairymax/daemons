@@ -101,28 +101,11 @@ endif()
 # 提供（见本文件 PUBLIC include 第二段）。
 target_link_libraries(svc_common PRIVATE airy_ipc_ops)
 
-# WS-8 阶段 3（8.3.1）：daemon 侧 L1 server 挂载（corekern IPC 服务端骨架）。
-# 独立小库而非 svc_common 源文件：airy_core 以 PUBLIC 传播
-# AIRY_USE_SCHEDULER_THREAD_IMPL 编译定义；独立小库 + PRIVATE 链接把该宏的
-# 传染面锁死在本库编译单元内，避免翻转 svc_common 各编译单元的线程实现
-# 选择、违反开关默认零行为变化铁律。svc_common PRIVATE 链本库获取 API
-# （daemon_l1_server.h 不含 corekern 头，svc_common 消费者无 corekern
-# include/宏泄漏）。
-add_library(daemon_l1_server STATIC
-    src/daemon/daemon_l1_server.c
-    # 8.3.2: L2 envelope bridge — sister module, same library. Both files are
-    # the daemon-side mount family on corekern L1; a separate target would
-    # add a link edge for no isolation benefit.
-    src/daemon/daemon_l2_bridge.c
-)
-target_include_directories(daemon_l1_server PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-)
-target_link_libraries(daemon_l1_server PRIVATE
-    airy_core      # L1 API（airy_ipc_init/create_channel/close）
-    airy_common    # AIRY_CALLOC/SVC_LOG_*/airy_sleep_ms
-)
-target_link_libraries(svc_common PRIVATE daemon_l1_server)
+# WS-8 8.4.1：daemon_boot 进程骨架调用 corekern airy_init() 完成进程原语
+# 初始化，该归档依赖由 svc_common 显式 PRIVATE 声明（M5-3 消解 daemon_l1_server
+# 灰度滞留件后改直链，闭包与历史形态等价：airy_core 归档仍落各 daemon 链接行
+# svc_common 之后）。PRIVATE 保证 corekern 头与编译定义不向 daemon 消费方传播。
+target_link_libraries(svc_common PRIVATE airy_core)
 
 # P3.14 ACC-DT15: cupolas 安全穹顶（PUBLIC 使得所有链接 svc_common 的 daemon 自动获得 cupolas）
 if(TARGET cupolas)

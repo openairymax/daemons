@@ -22,7 +22,6 @@
  */
 
 #include "daemon_rpc_client.h"
-#include "daemon_l1_server.h"
 #include "svc_logger.h"
 
 #include "airy_memory.h"
@@ -463,28 +462,6 @@ static int rpc_recv_resp(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
 int daemon_rpc_call(const char *socket_path, const char *method, const char *params_json,
                     char **out_result_json, uint32_t timeout_ms)
 {
-    /* Blueprint 8.3.3 grey rollout: when the ns transport switch resolves to
-     * "corekern" — since WS-8 stage 3 the resolution default, with "jsonrpc"
-     * as the operator escape hatch — the call rides the L2 channel first.
-     * Fallback discipline: only codes proving the request was never
-     * dispatched fall back to the socket path (ENOENT: no bridge in this
-     * process — the cross-process grey norm; CANCELED/ECANCELED: dead
-     * target or envelope dropped pre-dispatch). A folded daemon error
-     * (GENERIC_FAIL) or a post-dispatch loss (ETIMEDOUT) propagates: a
-     * blind retry could double-execute side-effectful methods. Stream and
-     * cancelable calls keep the socket path (chunked replies have no L2
-     * mapping yet). */
-    char channel[64];
-    if (socket_path &&
-        daemon_l2_channel_for_socket(socket_path, channel, sizeof(channel)) == 0) {
-        int rc = daemon_l2_rpc_call(channel, method, params_json, out_result_json, timeout_ms);
-        if (rc == AIRY_SUCCESS ||
-            (rc != AIRY_ENOENT && rc != AIRY_ERR_CANCELED && rc != AIRY_ECANCELED)) {
-            return rc;
-        }
-        SVC_LOG_DEBUG("daemon_rpc_call: L2 channel '%s' unserved (rc=%d) - socket fallback",
-                      channel, rc);
-    }
     return daemon_rpc_call_cancelable(socket_path, method, params_json, out_result_json,
                                       timeout_ms, NULL, NULL, NULL);
 }

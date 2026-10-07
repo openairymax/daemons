@@ -26,7 +26,6 @@
 #include "daemon_cfg_file.h"
 #include "daemon_cupolas_bootstrap.h"
 #include "daemon_event_driver.h"
-#include "daemon_l1_server.h"
 #include "daemon_platform_ext.h"
 #include "jsonrpc_helpers.h"
 #include "logging.h"
@@ -379,87 +378,6 @@ int daemon_svc_noop(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd);
  * 返回值为进程退出码。错误路径 fail_driver/fail_svc 与原模板一致。
  */
 int daemon_boot(int argc, char **argv, const daemon_boot_t *boot);
-
-/**
- * @brief Opt a daemon into the corekern same-process transport (blueprint
- *        8.3.3, three-path replacement).
- *
- * Expands (after DAEMON_DECLARE_COMMON(daemon_name, ...)) into:
- *   - g_l2_bridge_<daemon_name>: the mounted bridge handle (NULL = off)
- *   - daemon_l2_dispatch_<daemon_name>: the L2 dispatch trampoline. It
- *     installs a thread-local response sink, reuses the exact socket-path
- *     request handling (daemon_handle_request_json_<daemon_name>) with
- *     client_fd = -1, and hands the captured response to the bridge. Every
- *     JSONRPC_SEND_ERROR path (parse/validate/dispatch failures) therefore
- *     reaches the caller as a structured JSON-RPC error object instead of
- *     a bare CANCELED.
- *   - daemon_l2_mount_<daemon_name>(dispatcher): transport gate
- *     (AIRY_<NS_UPPER>_IPC_TRANSPORT, default off) + bridge start. Returns
- *     AIRY_ERR_NOT_FOUND when the transport is off so main() can log and
- *     stay on the socket path with zero behavior change.
- *   - daemon_l2_unmount_<daemon_name>(void): drain + free (stop is NULL-
- *     safe), called from the daemon cleanup path.
- *
- * @param daemon_name Daemon token (must match DAEMON_DECLARE_COMMON)
- * @param ns_upper    Transport-switch namespace, UPPER_SNAKE, derived from
- *                    the socket basename (sched.sock -> SCHED, monit.sock
- *                    -> MONIT; NOT the service cname)
- * @param ns_lower    Channel namespace (sched.sock -> "sched" -> channel
- *                    "sched.rpc")
- */
-#define DAEMON_L2_ENABLE(daemon_name, ns_upper, ns_lower)                                               \
-    static daemon_l2_bridge_t *g_l2_bridge_##daemon_name = NULL;                                        \
-                                                                                                        \
-    static inline int daemon_l2_dispatch_##daemon_name(                                \
-        const char *req_json, size_t req_len, char **resp_json, size_t *resp_len, void *userdata)       \
-    {                                                                                                   \
-        method_dispatcher_t *dispatcher = (method_dispatcher_t *)userdata;                              \
-        /* The bridge hands a length-bounded payload view with no NUL      \
-         * guarantee, while handle_request_json parses via cJSON_Parse    \
-         * and unconditionally AIRY_FREEs the request text (socket-path  \
-         * ownership). Materialize an owned NUL-terminated copy so both  \
-         * contracts hold: the parser sees '\0' and the free sees a      \
-         * malloc'd base instead of an envelope interior pointer. */     \
-        char *req_copy = (char *)AIRY_MALLOC(req_len + 1);                                              \
-        if (!req_copy)                                                                                  \
-            return AIRY_ERR_OUT_OF_MEMORY;                                                              \
-        AIRY_MEMCPY(req_copy, req_json, req_len);                                                       \
-        req_copy[req_len] = '\0';                                                                       \
-        jsonrpc_resp_sink_t sink = {0};                                                                 \
-        jsonrpc_resp_sink_activate(&sink);                                                              \
-        (void)daemon_handle_request_json_##daemon_name(req_copy, req_len, dispatcher, -1);              \
-        jsonrpc_resp_sink_deactivate();                                                                 \
-        if (!sink.buf) {                                                                                \
-            /* No captured response (sink OOM): fail the transaction so the \
-             * caller surfaces CANCELED instead of an empty reply. */       \
-            return AIRY_ERR_GENERIC_FAIL;                                                               \
-        }                                                                                               \
-        *resp_json = sink.buf; /* AIRY_MALLOC domain; the bridge frees */                               \
-        *resp_len = sink.len;                                                                           \
-        return 0;                                                                                       \
-    }                                                                                                   \
-                                                                                                        \
-    static inline int daemon_l2_mount_##daemon_name(method_dispatcher_t *dispatcher)   \
-    {                                                                                                   \
-        if (!daemon_l1_transport_enabled(#ns_upper)) {                                                  \
-            SVC_LOG_INFO("l2 %s: transport off, staying on sockets", #ns_lower);                        \
-            return AIRY_ERR_NOT_FOUND;                                                                  \
-        }                                                                                               \
-        g_l2_bridge_##daemon_name =                                                                     \
-            daemon_l2_bridge_start(#ns_lower ".rpc", daemon_l2_dispatch_##daemon_name, dispatcher);     \
-        if (!g_l2_bridge_##daemon_name) {                                                               \
-            SVC_LOG_ERROR("l2 %s: bridge start failed, staying on sockets", #ns_lower);                 \
-            return AIRY_ERR_UNKNOWN;                                                                    \
-        }                                                                                               \
-        SVC_LOG_INFO("l2 %s: mounted corekern channel " #ns_lower ".rpc", #ns_lower);                   \
-        return 0;                                                                                       \
-    }                                                                                                   \
-                                                                                                        \
-    static inline void daemon_l2_unmount_##daemon_name(void)                    \
-    {                                                                                                   \
-        daemon_l2_bridge_stop(g_l2_bridge_##daemon_name);                                               \
-        g_l2_bridge_##daemon_name = NULL;                                                               \
-    }
 
 #ifdef __cplusplus
 }

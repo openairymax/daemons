@@ -1,7 +1,6 @@
 # common — 守护进程公共库
 
-> **模块路径**: `agentrt/daemons/common/` · **CMake 目标**: `svc_common`（静态库）、
-> `daemon_l1_server`（静态库）
+> **模块路径**: `agentrt/daemons/common/` · **CMake 目标**: `svc_common`（静态库）
 
 [![version](https://img.shields.io/badge/version-0.1.16-blue)](https://atomgit.com/openairymax/daemons)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later%20OR%20Apache--2.0-green)](../LICENSE)
@@ -45,8 +44,7 @@ socket。它把守护进程样板收敛成一套可复用设施：服务生命�
         │ 链接
         ▼
    svc_common（本模块，静态库）
-        ├─ PRIVATE → daemon_l1_server（corekern IPC 传输上的服务端挂载与消息封套桥接）
-        │               └─ airy_core / airy_common
+        ├─ PRIVATE → airy_ipc_ops / airy_syscall_ops（ops 表存储小库，向 atoms 注入 IPC/RPC/SD 能力）
         └─ PUBLIC  → airy_common（commons 统一基础库）
                      ├─ cupolas（可选，存在 target 时 PUBLIC 传播给所有 daemon）
                      ├─ airy_heapstore（可选，BUILD_HEAPSTORE）
@@ -73,19 +71,15 @@ socket。它把守护进程样板收敛成一套可复用设施：服务生命�
 
 ## 构成
 
-`src/` 按功能域组织，共 27 个 C 源文件：
+`src/` 按功能域组织，共 25 个 C 源文件：
 
 | 域 | 数量 | 源文件 |
 |----|------|--------|
 | `src/svc/` | 4 | `svc_common.c`（服务生命周期核心）、`svc_common_registry.c`（进程内注册表）、`svc_common_ops.c`（状态查询/异步请求）、`svc_model_defaults.c`（`model.yaml` 全局默认模型提取，`llm_d` / `gateway_d` 共用） |
 | `src/auth/` | 6 | `svc_auth.c`（认证中间件聚合）、`svc_auth_jwt.c` / `svc_auth_jwt_crypto.c` / `svc_auth_jwt_verify.c`（JWT 生命周期、HMAC/Base64 原语、签名校验）、`svc_auth_apikey.c`、`svc_auth_ratelimit.c` |
 | `src/security/` | 4 | `daemon_security.c`（初始化/消毒）、`_acl.c`（ACL 授权）、`_signature.c`（包签名验证）、`_vault.c`（凭据与审计） |
-| `src/daemon/` | 8 | `daemon_event_driver.c`（事件驱动主循环）、`daemon_rpc_client.c`、`daemon_dep.c`（硬依赖探测与降级上报）、`daemon_cupolas_bootstrap.c`、`daemon_heapstore_bootstrap.c`、`daemon_ipc_ops_bootstrap.c`、`daemon_l1_server.c`、`daemon_l2_bridge.c` |
+| `src/daemon/` | 6 | `daemon_event_driver.c`（事件驱动主循环）、`daemon_rpc_client.c`、`daemon_dep.c`（硬依赖探测与降级上报）、`daemon_cupolas_bootstrap.c`、`daemon_heapstore_bootstrap.c`、`daemon_ipc_ops_bootstrap.c` |
 
-> `daemon_l1_server.c` 与 `daemon_l2_bridge.c` 编译进独立的 `daemon_l1_server` 目标，
-> 不在 `svc_common` 源列表内；两者都以 PRIVATE 方式链接 `airy_core`，避免把 corekern 的
-> 编译定义传播给 `svc_common` 的其他编译单元。
->
 > 跨进程服务发现全家族（原 `src/discovery/` 7 文件）已迁 `commons/utils/sd/`
 > （g14 补完 P0.17 阶段 4 半程迁移），符号经 `airy_common` PUBLIC 链接提供；
 > 服务发现单元测试亦随迁 `commons/tests/unit/`。
@@ -134,7 +128,7 @@ cmake -S . -B build -DBUILD_DAEMON=ON -DBUILD_CLI=ON
 
 ## 测试
 
-`tests/` 下的目标以 `svc_test_` 前缀注册进 CTest，共 22 个用例；`BUILD_TESTS` 为 `ON`
+`tests/` 下的目标以 `svc_test_` 前缀注册进 CTest，共 20 个用例；`BUILD_TESTS` 为 `ON`
 且非 Windows 时才加入构建。
 
 - 基础：`svc_test_error` / `svc_test_platform` / `svc_test_logger` / `svc_test_config` /
@@ -145,8 +139,7 @@ cmake -S . -B build -DBUILD_DAEMON=ON -DBUILD_CLI=ON
 - 容错与并发：`svc_test_strategies_recovery` / `svc_test_api_recovery`
   （含 pool / cred / health / fallback / config / misc 六个域文件）/
   `svc_test_thread_pool` / `svc_test_airy_event_loop` / `svc_test_checkpoint`
-- 引导与其他：`svc_test_svc_model_defaults`，以及 corekern
-  服务端挂载与消息封套桥接的两个对应用例。
+- 引导与其他：`svc_test_svc_model_defaults`。
 
 ```bash
 ctest --test-dir ../daemons-build/common -R "^svc_test_" -V
