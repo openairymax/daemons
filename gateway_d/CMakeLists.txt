@@ -41,12 +41,9 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 # protocols 协议栈路径
 set(PROTOCOLS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../protocols)
 set(PROTOCOLS_INCLUDE_DIR ${PROTOCOLS_DIR}/include)
+# 仅保留 MCP client transport 头路径：gw_mcpclients.c 以外部 MCP client 桥
+# 身份消费 mcp_client_*（共享机制），其余厂商适配器头改经 proto_registry 注入。
 set(PROTOCOLS_MCP_DIR ${PROTOCOLS_DIR}/standards/mcp)
-set(PROTOCOLS_MCP_INCLUDE_DIR ${PROTOCOLS_MCP_DIR}/include)
-set(PROTOCOLS_A2A_DIR ${PROTOCOLS_DIR}/standards/a2a)
-set(PROTOCOLS_A2A_INCLUDE_DIR ${PROTOCOLS_A2A_DIR}/include)
-set(PROTOCOLS_OPENAI_DIR ${PROTOCOLS_DIR}/integrations/openai)
-set(PROTOCOLS_OPENAI_INCLUDE_DIR ${PROTOCOLS_OPENAI_DIR}/include)
 set(PROTOCOLS_COMMON_INCLUDE_DIR ${PROTOCOLS_DIR}/common/include)
 
 # ==================== 协议栈开关 ====================
@@ -148,12 +145,10 @@ target_include_directories(airy_gateway_service PUBLIC
     # 网络和IPC模块
     ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
-    # 协议栈
+    # 协议栈（契约头 + MCP client transport）
     ${PROTOCOLS_INCLUDE_DIR}
     ${PROTOCOLS_COMMON_INCLUDE_DIR}
     ${PROTOCOLS_MCP_DIR}/include
-    ${PROTOCOLS_A2A_INCLUDE_DIR}
-    ${PROTOCOLS_OPENAI_INCLUDE_DIR}
     # nghttp2 头文件（HTTP/2 支持）— 项目本地副本 commons/include/third_party/
     ${COMMONS_INCLUDE_DIR}/include/third_party
 )
@@ -426,8 +421,6 @@ target_include_directories(gateway_d PRIVATE
     ${PROTOCOLS_INCLUDE_DIR}
     ${PROTOCOLS_COMMON_INCLUDE_DIR}
     ${PROTOCOLS_MCP_DIR}/include
-    ${PROTOCOLS_A2A_INCLUDE_DIR}
-    ${PROTOCOLS_OPENAI_INCLUDE_DIR}
     ${CJSON_INCLUDE_DIRS}
 )
 

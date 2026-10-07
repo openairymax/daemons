@@ -20,7 +20,6 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 set(PROTOCOLS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../protocols)
-set(PROTOCOLS_STANDARDS_A2A_INCLUDE_DIR ${PROTOCOLS_DIR}/standards/a2a/include)
 set(PROTOCOLS_INCLUDE_DIR ${PROTOCOLS_DIR}/include)
 set(PROTOCOLS_COMMON_INCLUDE_DIR ${PROTOCOLS_DIR}/common/include)
 
@@ -68,7 +67,6 @@ target_include_directories(airy_a2a_service PUBLIC
     ${COMMONS_INCLUDE_DIR}/utils/compat
     ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
-    ${PROTOCOLS_STANDARDS_A2A_INCLUDE_DIR}
     ${PROTOCOLS_INCLUDE_DIR}
     ${PROTOCOLS_COMMON_INCLUDE_DIR}
 )
@@ -78,7 +76,8 @@ target_include_directories(airy_a2a_service PRIVATE
     ${YAML_INCLUDE_DIRS}
 )
 
-# 链接库：svc_common 提供 daemon 公共层，airy_protocols 提供 a2a_v03_adapter 实现
+# 链接库：svc_common 提供 daemon 公共层，airy_protocols 提供
+# proto_registry 与协议接口实现（适配器经注册表注入，机制核不直链厂商面）
 target_link_libraries(airy_a2a_service PUBLIC svc_common airy_protocols)
 
 if(AIRY_HAS_CJSON)
@@ -145,7 +144,6 @@ target_include_directories(a2a_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/compat
     ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
-    ${PROTOCOLS_STANDARDS_A2A_INCLUDE_DIR}
     ${PROTOCOLS_INCLUDE_DIR}
     ${PROTOCOLS_COMMON_INCLUDE_DIR}
     ${CJSON_INCLUDE_DIRS}

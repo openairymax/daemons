@@ -36,10 +36,7 @@
 #include "gateway_a2a_handler.h"
 
 #ifdef AIRY_HAS_PROTOCOLS
-#include "a2a_v03_adapter.h"
-#include "mcp_v1_adapter.h"
-#include "openai_enterprise_adapter.h"
-#include "unified_protocol.h"
+#include "protocol_registry.h"
 #endif
 
 #include <signal.h>
@@ -54,6 +51,31 @@ static daemon_bootstrap_sd_t *g_bsd = NULL;
 static gateway_business_ctx_t *g_biz_ctx = NULL;
 static gateway_entry_ctx_t g_entry_ctx;
 static gw_proto_router_t *g_proto_router = NULL;
+
+#ifdef AIRY_HAS_PROTOCOLS
+/**
+ * @brief Resolve the MCP adapter through the shared protocol registry.
+ *
+ * The gateway is mechanism: it consumes the MCP adapter via injection
+ * (proto_registry) instead of deep-including the vendor adapter header.
+ * Registration is idempotent, so the same entry (and context pointer) is
+ * returned on every call within the process.
+ */
+static const protocol_adapter_t *gw_mcp_adapter(void **out_context)
+{
+    if (proto_interface_register_builtins() != AIRY_SUCCESS)
+        return NULL;
+
+    protocol_registry_t *registry = proto_registry_get();
+    proto_registry_entry_t *entry = registry ? proto_registry_find(registry, "MCP") : NULL;
+    if (!entry || !entry->adapter)
+        return NULL;
+
+    if (out_context)
+        *out_context = entry->context;
+    return entry->adapter;
+}
+#endif
 
 /**
  * @brief L2 standard method <ns>.shutdown callback (02-l2-service-protocol.md
@@ -294,14 +316,13 @@ int main(int argc, char *argv[])
 
     /* Initialize UnifiedProtocol stack for multi-protocol support */
 #ifdef AIRY_HAS_PROTOCOLS
-    const protocol_adapter_t *mcp_adapter = mcp_v1_get_adapter();
+    void *mcp_context = NULL;
+    const protocol_adapter_t *mcp_adapter = gw_mcp_adapter(&mcp_context);
     if (mcp_adapter) {
-        if (mcp_adapter->init(mcp_adapter->context) == 0) {
+        if (mcp_adapter->init(mcp_context) == 0) {
             SVC_LOG_INFO("MCP v1.0 adapter initialized (version=%s, caps=0x%x)",
                          mcp_adapter->version ? mcp_adapter->version : "unknown",
-                         mcp_adapter->capabilities ?
-                             mcp_adapter->capabilities(mcp_adapter->context) :
-                             0);
+                         mcp_adapter->capabilities ? mcp_adapter->capabilities(mcp_context) : 0);
         } else {
             SVC_LOG_WARN("Failed to initialize MCP v1.0 adapter");
         }
@@ -365,9 +386,10 @@ int main(int argc, char *argv[])
     /* Cleanup protocol stack */
 #ifdef AIRY_HAS_PROTOCOLS
     {
-        const protocol_adapter_t *mcp_adapter = mcp_v1_get_adapter();
+        void *mcp_context = NULL;
+        const protocol_adapter_t *mcp_adapter = gw_mcp_adapter(&mcp_context);
         if (mcp_adapter && mcp_adapter->destroy) {
-            mcp_adapter->destroy(mcp_adapter->context);
+            mcp_adapter->destroy(mcp_context);
             SVC_LOG_INFO("MCP adapter destroyed");
         }
     }
