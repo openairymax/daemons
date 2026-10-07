@@ -10,6 +10,10 @@
  * 机制层注入的 &client_fd 翻译为协议无关的 handler（cJSON*, int,
  * airy_sock_t）。L2 协议别名 send → send_message、receive → get_task
  * （02-l2-service-protocol.md）。
+ *
+ * 结果成型下沉到适配器（route 层）后，业务 handler 只做薄透传：成功即把
+ * 适配器结果 JSON 直接回给客户端，失败按既有错误码/文案回错，本层不再
+ * 重建结果对象，避免双重成型。
  */
 
 #include "airy_memory.h"
@@ -111,6 +115,20 @@ static char *a2a_cjson_to_string(cJSON *obj)
     return cJSON_PrintUnformatted(obj);
 }
 
+static void send_result(airy_sock_t fd, int id, char *result_json)
+{
+    if (!result_json) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Result serialize failed", id);
+        return;
+    }
+    cJSON *result = cJSON_Parse(result_json);
+    if (!result) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Result serialize failed", id);
+        return;
+    }
+    JSONRPC_SEND_SUCCESS(fd, result, id);
+}
+
 static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *agent_id = cJSON_GetObjectItem(params, "id");
@@ -131,19 +149,19 @@ static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    int ret = a2a_service_register_agent(g_service, card_json);
+    char *result_json = NULL;
+    int ret = a2a_service_register_agent(g_service, card_json, &result_json);
     AIRY_FREE(card_json);
 
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent register failed", id);
         SVC_LOG_ERROR("a2a.register_agent failed: error=%d", ret);
+        a2a_service_result_free(result_json);
         return;
     }
 
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddBoolToObject(result, "registered", true);
-    cJSON_AddStringToObject(result, "agent_id", agent_id->valuestring);
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    send_result(client_fd, id, result_json);
+    a2a_service_result_free(result_json);
 }
 
 static void handle_unregister_agent(cJSON *params, int id, airy_sock_t client_fd)
@@ -154,15 +172,16 @@ static void handle_unregister_agent(cJSON *params, int id, airy_sock_t client_fd
         return;
     }
 
-    int ret = a2a_service_unregister_agent(g_service, agent_id->valuestring);
+    char *result_json = NULL;
+    int ret = a2a_service_unregister_agent(g_service, agent_id->valuestring, &result_json);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Agent not found", id);
+        a2a_service_result_free(result_json);
         return;
     }
 
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddBoolToObject(result, "unregistered", true);
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    send_result(client_fd, id, result_json);
+    a2a_service_result_free(result_json);
 }
 
 static void handle_discover(cJSON *params, int id, airy_sock_t client_fd)
@@ -174,24 +193,16 @@ static void handle_discover(cJSON *params, int id, airy_sock_t client_fd)
         (capability && cJSON_IsString(capability)) ? capability->valuestring : NULL;
     const char *skill_str = (skill && cJSON_IsString(skill)) ? skill->valuestring : NULL;
 
-    char *results_json = NULL;
-    size_t count = 0;
-    int ret = a2a_service_discover_agents(g_service, cap_str, skill_str, &results_json, &count);
+    char *result_json = NULL;
+    int ret = a2a_service_discover_agents(g_service, cap_str, skill_str, &result_json);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Discover failed", id);
+        a2a_service_result_free(result_json);
         return;
     }
 
-    cJSON *result = cJSON_CreateObject();
-    cJSON *arr = cJSON_Parse(results_json);
-    if (arr)
-        cJSON_AddItemToObject(result, "agents", arr);
-    else
-        cJSON_AddItemToObject(result, "agents", cJSON_CreateArray());
-    cJSON_AddNumberToObject(result, "count", (double)count);
-
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-    a2a_service_results_free(results_json);
+    send_result(client_fd, id, result_json);
+    a2a_service_result_free(result_json);
 }
 
 static void handle_create_task(cJSON *params, int id, airy_sock_t client_fd)
@@ -211,25 +222,18 @@ static void handle_create_task(cJSON *params, int id, airy_sock_t client_fd)
 
     const char *input_str = (input && cJSON_IsString(input)) ? input->valuestring : NULL;
 
-    char *task_json = NULL;
+    char *result_json = NULL;
     int ret = a2a_service_create_task(g_service, agent_id->valuestring, description->valuestring,
-                                      input_str, &task_json);
-    if (ret != AIRY_SUCCESS || !task_json) {
+                                      input_str, &result_json);
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Task create failed", id);
         SVC_LOG_ERROR("a2a.create_task failed: error=%d", ret);
-        AIRY_FREE(task_json);
+        a2a_service_result_free(result_json);
         return;
     }
 
-    cJSON *result = cJSON_CreateObject();
-    cJSON *task_obj = cJSON_Parse(task_json);
-    if (task_obj)
-        cJSON_AddItemToObject(result, "task", task_obj);
-    else
-        cJSON_AddStringToObject(result, "task", task_json);
-
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-    a2a_service_task_free(task_json);
+    send_result(client_fd, id, result_json);
+    a2a_service_result_free(result_json);
 }
 
 static void handle_update_task(cJSON *params, int id, airy_sock_t client_fd)
@@ -251,16 +255,17 @@ static void handle_update_task(cJSON *params, int id, airy_sock_t client_fd)
     const char *output_str = (output && cJSON_IsString(output)) ? output->valuestring : NULL;
     double prog = (progress && cJSON_IsNumber(progress)) ? progress->valuedouble : 0.0;
 
-    int ret =
-        a2a_service_update_task(g_service, task_id->valuestring, state->valueint, output_str, prog);
+    char *result_json = NULL;
+    int ret = a2a_service_update_task(g_service, task_id->valuestring, state->valueint, output_str,
+                                      prog, &result_json);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Task not found", id);
+        a2a_service_result_free(result_json);
         return;
     }
 
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddBoolToObject(result, "updated", true);
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    send_result(client_fd, id, result_json);
+    a2a_service_result_free(result_json);
 }
 
 static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd)
@@ -275,15 +280,16 @@ static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd)
 
     const char *reason_str = (reason && cJSON_IsString(reason)) ? reason->valuestring : NULL;
 
-    int ret = a2a_service_cancel_task(g_service, task_id->valuestring, reason_str);
+    char *result_json = NULL;
+    int ret = a2a_service_cancel_task(g_service, task_id->valuestring, reason_str, &result_json);
     if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Task not found", id);
+        a2a_service_result_free(result_json);
         return;
     }
 
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddBoolToObject(result, "canceled", true);
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    send_result(client_fd, id, result_json);
+    a2a_service_result_free(result_json);
 }
 
 static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd)
@@ -294,23 +300,16 @@ static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    char *task_json = NULL;
-    int ret = a2a_service_get_task(g_service, task_id->valuestring, &task_json);
-    if (ret != AIRY_SUCCESS || !task_json) {
+    char *result_json = NULL;
+    int ret = a2a_service_get_task(g_service, task_id->valuestring, &result_json);
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Task not found", id);
-        AIRY_FREE(task_json);
+        a2a_service_result_free(result_json);
         return;
     }
 
-    cJSON *result = cJSON_CreateObject();
-    cJSON *task_obj = cJSON_Parse(task_json);
-    if (task_obj)
-        cJSON_AddItemToObject(result, "task", task_obj);
-    else
-        cJSON_AddStringToObject(result, "task", task_json);
-
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-    a2a_service_task_free(task_json);
+    send_result(client_fd, id, result_json);
+    a2a_service_result_free(result_json);
 }
 
 static void handle_send_message(cJSON *params, int id, airy_sock_t client_fd)
@@ -332,33 +331,27 @@ static void handle_send_message(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
-    char *response_json = NULL;
-    size_t response_count = 0;
+    char *result_json = NULL;
     int ret = a2a_service_send_message(g_service, target->valuestring, role->valuestring,
-                                       content->valuestring, &response_json, &response_count);
-    if (ret != AIRY_SUCCESS || !response_json) {
+                                       content->valuestring, &result_json);
+    if (ret != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Send message failed", id);
         SVC_LOG_ERROR("a2a.send_message failed: error=%d", ret);
-        a2a_service_results_free(response_json);
+        a2a_service_result_free(result_json);
         return;
     }
 
-    cJSON *result = cJSON_CreateObject();
-    cJSON *arr = cJSON_Parse(response_json);
-    if (arr)
-        cJSON_AddItemToObject(result, "responses", arr);
-    else
-        cJSON_AddItemToObject(result, "responses", cJSON_CreateArray());
-    cJSON_AddNumberToObject(result, "count", (double)response_count);
-
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
-    a2a_service_results_free(response_json);
+    send_result(client_fd, id, result_json);
+    a2a_service_result_free(result_json);
 }
 
 static void handle_count(int id, airy_sock_t client_fd)
 {
-    size_t agent_count = a2a_service_count(g_service);
-    size_t task_count = a2a_service_task_count(g_service);
+    size_t agent_count = 0;
+    size_t task_count = 0;
+    if (g_service)
+        (void)a2a_service_stats(g_service, &agent_count, &task_count);
+
     cJSON *result = cJSON_CreateObject();
     cJSON_AddNumberToObject(result, "agent_count", (double)agent_count);
     cJSON_AddNumberToObject(result, "task_count", (double)task_count);
@@ -368,8 +361,10 @@ static void handle_count(int id, airy_sock_t client_fd)
 static void handle_health_check(int id, airy_sock_t client_fd)
 {
     bool healthy = g_service != NULL;
-    size_t agent_count = healthy ? a2a_service_count(g_service) : 0;
-    size_t task_count = healthy ? a2a_service_task_count(g_service) : 0;
+    size_t agent_count = 0;
+    size_t task_count = 0;
+    if (healthy)
+        healthy = a2a_service_stats(g_service, &agent_count, &task_count) == AIRY_SUCCESS;
 
     cJSON *result = cJSON_CreateObject();
     cJSON_AddStringToObject(result, "service", "a2a_d");
@@ -383,14 +378,14 @@ static void handle_health_check(int id, airy_sock_t client_fd)
 
 static void handle_get_stats(int id, airy_sock_t client_fd)
 {
+    size_t agent_count = 0;
+    size_t task_count = 0;
+    if (g_service)
+        (void)a2a_service_stats(g_service, &agent_count, &task_count);
+
     cJSON *result = cJSON_CreateObject();
     cJSON_AddStringToObject(result, "daemon", "a2a_d");
-    if (g_service) {
-        cJSON_AddNumberToObject(result, "agents", (double)a2a_service_count(g_service));
-        cJSON_AddNumberToObject(result, "tasks", (double)a2a_service_task_count(g_service));
-    } else {
-        cJSON_AddNumberToObject(result, "agents", 0);
-        cJSON_AddNumberToObject(result, "tasks", 0);
-    }
+    cJSON_AddNumberToObject(result, "agents", (double)agent_count);
+    cJSON_AddNumberToObject(result, "tasks", (double)task_count);
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }

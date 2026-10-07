@@ -31,7 +31,6 @@ set(A2A_COMMON_INCLUDES
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
-    ${PROTOCOLS_DIR}/standards/a2a/include
     ${PROTOCOLS_DIR}/include
     ${PROTOCOLS_DIR}/common/include
 )
@@ -44,7 +43,7 @@ foreach(TEST_SRC ${A2A_TEST_SOURCES})
     target_include_directories(test_a2a_${TEST_NAME} PRIVATE ${A2A_COMMON_INCLUDES})
 
     # 链接 airy_a2a_service 静态库（已含 service.c）
-    # 与 airy_protocols（提供 a2a_v03_adapter 实现）
+    # 与 airy_protocols（提供 proto_registry 与协议接口实现）
     target_link_libraries(test_a2a_${TEST_NAME} PRIVATE
         airy_a2a_service
         airy_protocols

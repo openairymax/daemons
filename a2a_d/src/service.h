@@ -12,18 +12,16 @@
 #include "a2a_service.h"
 
 #include "platform.h"
-
-#include <a2a_v03_adapter.h>
+#include "unified_protocol.h"
 
 #include <stddef.h>
 #include <stdint.h>
 
 struct a2a_service {
-    a2a_v03_context_t *ctx;
+    const protocol_adapter_t *adapter;
+    void *context;
     airy_mtx_t lock;
     int initialized;
-    size_t max_agents;
-    size_t max_tasks;
 };
 
 #endif /* A2A_SERVICE_INTERNAL_H */

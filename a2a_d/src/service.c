@@ -1,40 +1,33 @@
-// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
-// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+/* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
+/* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-#include "airy_memory.h"
-#include "error.h"
 /*
  * @file service.c
- * @brief A2A service implementation wrapping the a2a_v03_adapter library.
+ * @brief A2A service implementation consuming the injected protocol adapter.
  *
- * Adapts the a2a_v03_adapter C API into a service module for the a2a_d
- * daemon. The daemon holds an a2a_service_t instance and exposes the
- * a2a.* namespace over a Unix socket (agent registration/discovery,
- * task lifecycle, messaging).
+ * 服务核只经 proto_registry 解析并持有 protocol_adapter_t 句柄，所有业务
+ * 操作经统一信封（method + payload）转发给适配器，本层不含任何厂商载荷，
+ * 实现机制（daemon）与策略（适配器）的完全解耦。
  *
  * Design notes:
- * - Holds a2a_v03_context_t*, all operations delegate to the adapter lib
- * - Thread safety: all public interfaces take the lock
- * - JSON serialization via cJSON, returns AIRY_STRDUP'd strings
- * - Memory ownership follows the adapter lib contract (see function docs)
+ * - Adapter resolved once in create() via proto_registry_get()/find()
+ * - Every operation serializes params as cJSON and dispatches handle_request
+ * - Thread safety: a2a_call() holds the lock around each adapter call
+ * - Result JSON ownership transfers to the caller (a2a_service_result_free)
  */
 
 #include "service.h"
 
+#include "error.h"
+#include "protocol_registry.h"
 #include "svc_logger.h"
 
-#include <a2a_v03_adapter.h>
 #include <cjson/cJSON.h>
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
-#define A2A_DEFAULT_MAX_AGENTS 256
-#define A2A_DEFAULT_MAX_TASKS 4096
-
-static void a2a_add_str_item(cJSON *obj, const char *key, const char *val)
+static void a2a_set_str(cJSON *obj, const char *key, const char *val)
 {
     if (val)
         cJSON_AddStringToObject(obj, key, val);
@@ -42,95 +35,88 @@ static void a2a_add_str_item(cJSON *obj, const char *key, const char *val)
         cJSON_AddNullToObject(obj, key);
 }
 
-static cJSON *a2a_card_to_json(const a2a_agent_card_t *card)
+static char *a2a_pack(cJSON *obj)
 {
-    if (!card)
-        return NULL;
-
-    cJSON *obj = cJSON_CreateObject();
     if (!obj)
         return NULL;
-
-    a2a_add_str_item(obj, "id", card->id);
-    a2a_add_str_item(obj, "name", card->name);
-    a2a_add_str_item(obj, "description", card->description);
-    a2a_add_str_item(obj, "url", card->url);
-    a2a_add_str_item(obj, "version", card->version);
-    cJSON_AddNumberToObject(obj, "protocol_version", (double)card->protocol_version);
-    cJSON_AddNumberToObject(obj, "capabilities", (double)(int)card->capabilities);
-    cJSON_AddBoolToObject(obj, "available", card->available);
-
-    return obj;
+    char *str = cJSON_PrintUnformatted(obj);
+    cJSON_Delete(obj);
+    return str;
 }
 
-static cJSON *a2a_task_to_json(const a2a_task_t *task)
+static int a2a_call(a2a_service_t *svc, const char *method, const char *params_json,
+                    char **out_json)
 {
-    if (!task)
-        return NULL;
+    if (!svc || !svc->initialized || !svc->adapter || !method || !out_json)
+        return AIRY_ERR_INVALID_PARAM;
 
-    cJSON *obj = cJSON_CreateObject();
-    if (!obj)
-        return NULL;
+    *out_json = NULL;
 
-    a2a_add_str_item(obj, "id", task->id);
-    a2a_add_str_item(obj, "session_id", task->session_id);
-    a2a_add_str_item(obj, "agent_id", task->agent_id);
-    cJSON_AddNumberToObject(obj, "state", (double)task->state);
-    a2a_add_str_item(obj, "description", task->description);
-    a2a_add_str_item(obj, "input_json", task->input_json);
-    a2a_add_str_item(obj, "output_json", task->output_json);
-    cJSON_AddNumberToObject(obj, "progress", task->progress);
-    cJSON_AddNumberToObject(obj, "created_at", (double)task->created_at);
-    cJSON_AddNumberToObject(obj, "updated_at", (double)task->updated_at);
-    a2a_add_str_item(obj, "error_message", task->error_message);
+    unified_message_t msg;
+    __builtin_memset(&msg, 0, sizeof(msg));
+    snprintf(msg.method, sizeof(msg.method), "%s", method);
+    const char *params = (params_json && params_json[0]) ? params_json : "{}";
+    msg.payload = (void *)params;
+    msg.payload_size = strlen(params);
 
-    return obj;
+    void *resp = NULL;
+    airy_mtx_lock(&svc->lock);
+    int rc = svc->adapter->handle_request(svc->context, &msg, &resp);
+    airy_mtx_unlock(&svc->lock);
+
+    if (rc != AIRY_SUCCESS) {
+        AIRY_FREE(resp);
+        return rc;
+    }
+    if (!resp)
+        return AIRY_ERR_OUT_OF_MEMORY;
+
+    *out_json = (char *)resp;
+    return AIRY_SUCCESS;
 }
 
-static cJSON *a2a_message_to_json(const a2a_message_t *msg)
+static int a2a_op(a2a_service_t *svc, const char *method, cJSON *params, char **out_json)
 {
-    if (!msg)
-        return NULL;
-
-    cJSON *obj = cJSON_CreateObject();
-    if (!obj)
-        return NULL;
-
-    a2a_add_str_item(obj, "role", msg->role);
-    cJSON_AddNumberToObject(obj, "type", (double)msg->type);
-    a2a_add_str_item(obj, "content_json", msg->content_json);
-    a2a_add_str_item(obj, "mime_type", msg->mime_type);
-
-    return obj;
+    char *params_json = a2a_pack(params);
+    if (!params_json)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    int rc = a2a_call(svc, method, params_json, out_json);
+    AIRY_FREE(params_json);
+    return rc;
 }
 
-a2a_service_t *a2a_service_create(size_t max_agents, size_t max_tasks)
+a2a_service_t *a2a_service_create(void)
 {
-    if (max_agents == 0)
-        max_agents = A2A_DEFAULT_MAX_AGENTS;
-    if (max_tasks == 0)
-        max_tasks = A2A_DEFAULT_MAX_TASKS;
+    int rc = proto_interface_register_builtins();
+    if (rc < 0) {
+        SVC_LOG_ERROR("A2A protocol builtins registration failed: rc=%d", rc);
+        return NULL;
+    }
+
+    protocol_registry_t *registry = proto_registry_get();
+    proto_registry_entry_t *entry = registry ? proto_registry_find(registry, "A2A") : NULL;
+    if (!entry || !entry->adapter || !entry->adapter->handle_request) {
+        SVC_LOG_ERROR("A2A adapter unavailable in protocol registry");
+        return NULL;
+    }
 
     a2a_service_t *svc = (a2a_service_t *)AIRY_CALLOC(1, sizeof(a2a_service_t));
     if (!svc)
         return NULL;
 
-    a2a_v03_config_t config = a2a_v03_config_default();
-    config.max_agents = max_agents;
-    config.max_tasks = max_tasks;
+    svc->adapter = entry->adapter;
+    svc->context = entry->context;
+    airy_mtx_init(&svc->lock);
 
-    svc->ctx = a2a_v03_context_create(&config);
-    if (!svc->ctx) {
+    if (svc->adapter->init && svc->adapter->init(svc->context) != AIRY_SUCCESS) {
+        airy_mtx_destroy(&svc->lock);
         AIRY_FREE(svc);
-        SVC_LOG_ERROR("A2A context creation failed");
+        SVC_LOG_ERROR("A2A adapter init failed");
         return NULL;
     }
 
-    svc->max_agents = max_agents;
-    svc->max_tasks = max_tasks;
-    airy_mtx_init(&svc->lock);
     svc->initialized = 1;
-    SVC_LOG_INFO("A2A service created (max_agents=%zu, max_tasks=%zu)", max_agents, max_tasks);
+    SVC_LOG_INFO("A2A service created via protocol registry");
     return svc;
 }
 
@@ -140,428 +126,166 @@ void a2a_service_destroy(a2a_service_t *svc)
         return;
 
     airy_mtx_lock(&svc->lock);
-    if (svc->ctx) {
-        a2a_v03_context_destroy(svc->ctx);
-        svc->ctx = NULL;
-    }
+    if (svc->adapter && svc->adapter->destroy)
+        svc->adapter->destroy(svc->context);
+    svc->adapter = NULL;
+    svc->context = NULL;
     svc->initialized = 0;
-    svc->max_agents = 0;
-    svc->max_tasks = 0;
     airy_mtx_unlock(&svc->lock);
+
     airy_mtx_destroy(&svc->lock);
     AIRY_FREE(svc);
 }
 
-int a2a_service_register_agent(a2a_service_t *svc, const char *card_json)
+int a2a_service_register_agent(a2a_service_t *svc, const char *card_json, char **out_result_json)
 {
-    if (!svc || !svc->initialized || !card_json)
+    if (!svc || !svc->initialized || !card_json || !out_result_json)
         return AIRY_ERR_INVALID_PARAM;
-
-    cJSON *root = cJSON_Parse(card_json);
-    if (!root) {
-        SVC_LOG_WARN("A2A register: invalid card JSON");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    a2a_agent_card_t card;
-    __builtin_memset(&card, 0, sizeof(card));
-
-    cJSON *id = cJSON_GetObjectItem(root, "id");
-    cJSON *name = cJSON_GetObjectItem(root, "name");
-    cJSON *description = cJSON_GetObjectItem(root, "description");
-    cJSON *url = cJSON_GetObjectItem(root, "url");
-    cJSON *version = cJSON_GetObjectItem(root, "version");
-    cJSON *protocol_version = cJSON_GetObjectItem(root, "protocol_version");
-    cJSON *capabilities = cJSON_GetObjectItem(root, "capabilities");
-    cJSON *available = cJSON_GetObjectItem(root, "available");
-    cJSON *skills = cJSON_GetObjectItem(root, "skills");
-
-    if (!id || !cJSON_IsString(id) || id->valuestring[0] == '\0') {
-        cJSON_Delete(root);
-        SVC_LOG_WARN("A2A register: missing agent id");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    card.id = AIRY_STRDUP(id->valuestring);
-    card.name = AIRY_STRDUP(name && cJSON_IsString(name) ? name->valuestring : "Unknown");
-    card.description =
-        (description && cJSON_IsString(description)) ? AIRY_STRDUP(description->valuestring) : NULL;
-    card.url = (url && cJSON_IsString(url)) ? AIRY_STRDUP(url->valuestring) : NULL;
-    card.version = (version && cJSON_IsString(version)) ? AIRY_STRDUP(version->valuestring) : NULL;
-    card.protocol_version =
-        (protocol_version && cJSON_IsNumber(protocol_version)) ? protocol_version->valueint : 3;
-    card.capabilities =
-        (a2a_capability_t)((capabilities && cJSON_IsNumber(capabilities)) ? capabilities->valueint :
-                                                                            0);
-    card.available = available ? cJSON_IsTrue(available) : true;
-
-    if (skills && cJSON_IsArray(skills)) {
-        size_t skill_count = (size_t)cJSON_GetArraySize(skills);
-        if (skill_count > 0) {
-            card.skills = (a2a_skill_t *)AIRY_CALLOC(skill_count, sizeof(a2a_skill_t));
-            if (card.skills) {
-                size_t idx = 0;
-                cJSON *skill = NULL;
-                cJSON_ArrayForEach(skill, skills)
-                {
-                    if (idx >= skill_count)
-                        break;
-                    cJSON *sname = cJSON_GetObjectItem(skill, "name");
-                    cJSON *sdesc = cJSON_GetObjectItem(skill, "description");
-                    cJSON *sschema = cJSON_GetObjectItem(skill, "schema_json");
-                    card.skills[idx].name =
-                        (sname && cJSON_IsString(sname)) ? AIRY_STRDUP(sname->valuestring) : NULL;
-                    card.skills[idx].description =
-                        (sdesc && cJSON_IsString(sdesc)) ? AIRY_STRDUP(sdesc->valuestring) : NULL;
-                    card.skills[idx].schema_json = (sschema && cJSON_IsString(sschema)) ?
-                                                       AIRY_STRDUP(sschema->valuestring) :
-                                                       NULL;
-                    idx++;
-                }
-                card.skill_count = idx;
-            }
-        }
-    }
-
-    const char *registered_id = card.id ? AIRY_STRDUP(card.id) : NULL;
-
-    airy_mtx_lock(&svc->lock);
-    int rc = a2a_v03_register_agent(svc->ctx, &card);
-    airy_mtx_unlock(&svc->lock);
-
-    a2a_agent_card_destroy(&card);
-    cJSON_Delete(root);
-
-    if (rc != AIRY_SUCCESS) {
-        SVC_LOG_ERROR("A2A register_agent failed: rc=%d", rc);
-    } else {
-        SVC_LOG_DEBUG("A2A agent registered: id=%s", registered_id ? registered_id : "(null)");
-    }
-    AIRY_FREE((void *)registered_id);
-    return rc;
+    return a2a_call(svc, "register_agent", card_json, out_result_json);
 }
 
-int a2a_service_unregister_agent(a2a_service_t *svc, const char *agent_id)
+int a2a_service_unregister_agent(a2a_service_t *svc, const char *agent_id, char **out_result_json)
 {
-    if (!svc || !svc->initialized || !agent_id)
+    if (!svc || !svc->initialized || !agent_id || !out_result_json)
         return AIRY_ERR_INVALID_PARAM;
 
-    airy_mtx_lock(&svc->lock);
-    int rc = a2a_v03_unregister_agent(svc->ctx, agent_id);
-    airy_mtx_unlock(&svc->lock);
-
-    if (rc != AIRY_SUCCESS)
-        SVC_LOG_WARN("A2A unregister_agent failed: id=%s, rc=%d", agent_id, rc);
-    else
-        SVC_LOG_DEBUG("A2A agent unregistered: id=%s", agent_id);
-    return rc;
+    cJSON *params = cJSON_CreateObject();
+    if (!params)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    a2a_set_str(params, "agent_id", agent_id);
+    return a2a_op(svc, "unregister_agent", params, out_result_json);
 }
 
-int a2a_service_get_agent_card(a2a_service_t *svc, const char *agent_id, char **out_card_json)
+int a2a_service_get_agent_card(a2a_service_t *svc, const char *agent_id, char **out_result_json)
 {
-    if (!svc || !svc->initialized || !agent_id || !out_card_json)
+    if (!svc || !svc->initialized || !agent_id || !out_result_json)
         return AIRY_ERR_INVALID_PARAM;
 
-    *out_card_json = NULL;
-
-    airy_mtx_lock(&svc->lock);
-
-    const a2a_agent_card_t *card = a2a_v03_get_agent_card(svc->ctx, agent_id);
-    if (!card) {
-        airy_mtx_unlock(&svc->lock);
-        return AIRY_ERR_NOT_FOUND;
-    }
-
-    cJSON *obj = a2a_card_to_json(card);
-    airy_mtx_unlock(&svc->lock);
-
-    if (!obj)
+    cJSON *params = cJSON_CreateObject();
+    if (!params)
         return AIRY_ERR_OUT_OF_MEMORY;
-
-    char *str = cJSON_PrintUnformatted(obj);
-    cJSON_Delete(obj);
-    if (!str)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
-    *out_card_json = AIRY_STRDUP(str);
-    AIRY_FREE(str);
-    if (!*out_card_json)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
-    return AIRY_SUCCESS;
+    a2a_set_str(params, "agent_id", agent_id);
+    return a2a_op(svc, "get_agent_card", params, out_result_json);
 }
 
 int a2a_service_discover_agents(a2a_service_t *svc, const char *capability, const char *skill_name,
-                                char **out_results_json, size_t *out_count)
+                                char **out_result_json)
 {
-    if (!svc || !svc->initialized || !out_results_json || !out_count)
+    if (!svc || !svc->initialized || !out_result_json)
         return AIRY_ERR_INVALID_PARAM;
 
-    *out_results_json = NULL;
-    *out_count = 0;
-
-    airy_mtx_lock(&svc->lock);
-    a2a_agent_card_t **results = NULL;
-    size_t count = 0;
-    int rc = a2a_v03_discover_agents(svc->ctx, capability, skill_name, &results, &count);
-    if (rc != AIRY_SUCCESS) {
-        airy_mtx_unlock(&svc->lock);
-        SVC_LOG_ERROR("A2A discover_agents failed: rc=%d", rc);
-        return rc;
-    }
-
-    cJSON *arr = cJSON_CreateArray();
-    if (!arr) {
-
-        if (results) {
-            for (size_t i = 0; i < count; i++) {
-                if (results[i]) {
-                    a2a_agent_card_destroy(results[i]);
-                    AIRY_FREE(results[i]);
-                }
-            }
-            AIRY_FREE(results);
-        }
-        airy_mtx_unlock(&svc->lock);
+    cJSON *params = cJSON_CreateObject();
+    if (!params)
         return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
-    for (size_t i = 0; i < count; i++) {
-        cJSON *item = a2a_card_to_json(results[i]);
-        if (item)
-            cJSON_AddItemToArray(arr, item);
-    }
-    airy_mtx_unlock(&svc->lock);
-
-    char *str = cJSON_PrintUnformatted(arr);
-    cJSON_Delete(arr);
-
-    if (results) {
-        for (size_t i = 0; i < count; i++) {
-            if (results[i]) {
-                a2a_agent_card_destroy(results[i]);
-                AIRY_FREE(results[i]);
-            }
-        }
-        AIRY_FREE(results);
-    }
-
-    if (!str)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
-    *out_results_json = AIRY_STRDUP(str);
-    AIRY_FREE(str);
-    if (!*out_results_json)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
-    *out_count = count;
-    SVC_LOG_DEBUG("A2A discover: capability=%s, count=%zu", capability ? capability : "(null)",
-                  count);
-    return AIRY_SUCCESS;
+    a2a_set_str(params, "capability", capability);
+    a2a_set_str(params, "skill", skill_name);
+    return a2a_op(svc, "discover_agents", params, out_result_json);
 }
 
 int a2a_service_create_task(a2a_service_t *svc, const char *agent_id, const char *description,
-                            const char *input_json, char **out_task_json)
+                            const char *input_json, char **out_result_json)
 {
-    if (!svc || !svc->initialized || !agent_id || !out_task_json)
+    if (!svc || !svc->initialized || !agent_id || !out_result_json)
         return AIRY_ERR_INVALID_PARAM;
 
-    *out_task_json = NULL;
-
-    airy_mtx_lock(&svc->lock);
-    a2a_task_t *task = NULL;
-    int rc = a2a_v03_create_task(svc->ctx, agent_id, description, input_json, &task);
-    if (rc != AIRY_SUCCESS || !task) {
-        airy_mtx_unlock(&svc->lock);
-        SVC_LOG_ERROR("A2A create_task failed: rc=%d", rc);
-        return rc;
-    }
-
-    cJSON *obj = a2a_task_to_json(task);
-    airy_mtx_unlock(&svc->lock);
-
-    if (!obj)
+    cJSON *params = cJSON_CreateObject();
+    if (!params)
         return AIRY_ERR_OUT_OF_MEMORY;
-
-    char *str = cJSON_PrintUnformatted(obj);
-    cJSON_Delete(obj);
-    if (!str)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
-    *out_task_json = AIRY_STRDUP(str);
-    AIRY_FREE(str);
-    if (!*out_task_json)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
-    SVC_LOG_DEBUG("A2A task created: agent_id=%s", agent_id);
-    return AIRY_SUCCESS;
+    a2a_set_str(params, "agent_id", agent_id);
+    a2a_set_str(params, "description", description);
+    a2a_set_str(params, "input", input_json);
+    return a2a_op(svc, "create_task", params, out_result_json);
 }
 
 int a2a_service_update_task(a2a_service_t *svc, const char *task_id, int state,
-                            const char *output_json, double progress)
+                            const char *output_json, double progress, char **out_result_json)
 {
-    if (!svc || !svc->initialized || !task_id)
+    if (!svc || !svc->initialized || !task_id || !out_result_json)
         return AIRY_ERR_INVALID_PARAM;
 
-    airy_mtx_lock(&svc->lock);
-    int rc = a2a_v03_update_task(svc->ctx, task_id, (a2a_task_state_t)state, output_json, progress);
-    airy_mtx_unlock(&svc->lock);
-
-    if (rc != AIRY_SUCCESS)
-        SVC_LOG_WARN("A2A update_task failed: id=%s, rc=%d", task_id, rc);
-    else
-        SVC_LOG_DEBUG("A2A task updated: id=%s, state=%d", task_id, state);
-    return rc;
+    cJSON *params = cJSON_CreateObject();
+    if (!params)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    a2a_set_str(params, "task_id", task_id);
+    cJSON_AddNumberToObject(params, "state", (double)state);
+    a2a_set_str(params, "output", output_json);
+    cJSON_AddNumberToObject(params, "progress", progress);
+    return a2a_op(svc, "update_task", params, out_result_json);
 }
 
-int a2a_service_cancel_task(a2a_service_t *svc, const char *task_id, const char *reason)
+int a2a_service_cancel_task(a2a_service_t *svc, const char *task_id, const char *reason,
+                            char **out_result_json)
 {
-    if (!svc || !svc->initialized || !task_id)
+    if (!svc || !svc->initialized || !task_id || !out_result_json)
         return AIRY_ERR_INVALID_PARAM;
 
-    airy_mtx_lock(&svc->lock);
-    int rc = a2a_v03_cancel_task(svc->ctx, task_id, reason);
-    airy_mtx_unlock(&svc->lock);
-
-    if (rc != AIRY_SUCCESS)
-        SVC_LOG_WARN("A2A cancel_task failed: id=%s, rc=%d", task_id, rc);
-    else
-        SVC_LOG_DEBUG("A2A task canceled: id=%s", task_id);
-    return rc;
+    cJSON *params = cJSON_CreateObject();
+    if (!params)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    a2a_set_str(params, "task_id", task_id);
+    a2a_set_str(params, "reason", reason);
+    return a2a_op(svc, "cancel_task", params, out_result_json);
 }
 
-int a2a_service_get_task(a2a_service_t *svc, const char *task_id, char **out_task_json)
+int a2a_service_get_task(a2a_service_t *svc, const char *task_id, char **out_result_json)
 {
-    if (!svc || !svc->initialized || !task_id || !out_task_json)
+    if (!svc || !svc->initialized || !task_id || !out_result_json)
         return AIRY_ERR_INVALID_PARAM;
 
-    *out_task_json = NULL;
-
-    airy_mtx_lock(&svc->lock);
-    a2a_task_t *task = NULL;
-    int rc = a2a_v03_get_task(svc->ctx, task_id, &task);
-    if (rc != AIRY_SUCCESS || !task) {
-        airy_mtx_unlock(&svc->lock);
-        return AIRY_ERR_NOT_FOUND;
-    }
-
-    cJSON *obj = a2a_task_to_json(task);
-    airy_mtx_unlock(&svc->lock);
-
-    if (!obj)
+    cJSON *params = cJSON_CreateObject();
+    if (!params)
         return AIRY_ERR_OUT_OF_MEMORY;
-
-    char *str = cJSON_PrintUnformatted(obj);
-    cJSON_Delete(obj);
-    if (!str)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
-    *out_task_json = AIRY_STRDUP(str);
-    AIRY_FREE(str);
-    if (!*out_task_json)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
-    return AIRY_SUCCESS;
+    a2a_set_str(params, "task_id", task_id);
+    return a2a_op(svc, "get_task", params, out_result_json);
 }
 
 int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id, const char *role,
-                             const char *content_json, char **out_response_json,
-                             size_t *out_response_count)
+                             const char *content_json, char **out_result_json)
 {
     if (!svc || !svc->initialized || !target_agent_id || !role || !content_json ||
-        !out_response_json || !out_response_count)
+        !out_result_json)
         return AIRY_ERR_INVALID_PARAM;
 
-    *out_response_json = NULL;
-    *out_response_count = 0;
+    cJSON *params = cJSON_CreateObject();
+    if (!params)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    a2a_set_str(params, "target_agent_id", target_agent_id);
+    a2a_set_str(params, "role", role);
+    a2a_set_str(params, "content", content_json);
+    return a2a_op(svc, "send_message", params, out_result_json);
+}
 
-    a2a_message_t message;
-    __builtin_memset(&message, 0, sizeof(message));
-    message.role = (char *)role;
-    message.type = A2A_MSG_TEXT;
-    message.content_json = (char *)content_json;
+int a2a_service_stats(a2a_service_t *svc, size_t *out_agents, size_t *out_tasks)
+{
+    if (!svc || !svc->initialized)
+        return AIRY_ERR_INVALID_PARAM;
 
-    /* Network round-trip runs outside the global lock so sends to
-     * different targets can proceed in parallel without blocking other
-     * A2A operations (send is dispatched via the protocol context and
-     * does not depend on this service's shared state). */
-    a2a_message_t *response = NULL;
-    size_t response_count = 0;
-    int rc = a2a_v03_send_message(svc->ctx, target_agent_id, &message, &response, &response_count);
-    if (rc != AIRY_SUCCESS) {
-        SVC_LOG_ERROR("A2A send_message failed: rc=%d", rc);
+    char *result = NULL;
+    int rc = a2a_call(svc, "count", NULL, &result);
+    if (rc != AIRY_SUCCESS)
         return rc;
-    }
-
-    cJSON *arr = cJSON_CreateArray();
-    if (!arr) {
-        if (response) {
-            for (size_t i = 0; i < response_count; i++)
-                a2a_message_destroy(&response[i]);
-        }
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
-    for (size_t i = 0; i < response_count; i++) {
-        cJSON *item = a2a_message_to_json(&response[i]);
-        if (item)
-            cJSON_AddItemToArray(arr, item);
-    }
-
-    char *str = cJSON_PrintUnformatted(arr);
-    cJSON_Delete(arr);
-
-    /* a2a_message_destroy already frees the struct itself, so do not
-     * AIRY_FREE(response) again (double free). */
-    if (response) {
-        for (size_t i = 0; i < response_count; i++)
-            a2a_message_destroy(&response[i]);
-    }
-
-    if (!str)
+    if (!result)
         return AIRY_ERR_OUT_OF_MEMORY;
 
-    *out_response_json = AIRY_STRDUP(str);
-    AIRY_FREE(str);
-    if (!*out_response_json)
-        return AIRY_ERR_OUT_OF_MEMORY;
+    cJSON *root = cJSON_Parse(result);
+    AIRY_FREE(result);
+    if (!root)
+        return AIRY_ERR_INVALID_PARAM;
 
-    *out_response_count = response_count;
-    SVC_LOG_DEBUG("A2A message sent: target=%s, responses=%zu", target_agent_id, response_count);
+    if (out_agents) {
+        cJSON *item = cJSON_GetObjectItem(root, "agent_count");
+        *out_agents = (item && cJSON_IsNumber(item)) ? (size_t)item->valuedouble : 0;
+    }
+    if (out_tasks) {
+        cJSON *item = cJSON_GetObjectItem(root, "task_count");
+        *out_tasks = (item && cJSON_IsNumber(item)) ? (size_t)item->valuedouble : 0;
+    }
+
+    cJSON_Delete(root);
     return AIRY_SUCCESS;
 }
 
-size_t a2a_service_count(a2a_service_t *svc)
+void a2a_service_result_free(char *result_json)
 {
-    if (!svc || !svc->initialized)
-        return 0;
-    airy_mtx_lock(&svc->lock);
-    size_t c = a2a_v03_get_agent_count(svc->ctx);
-    airy_mtx_unlock(&svc->lock);
-    return c;
-}
-
-size_t a2a_service_task_count(a2a_service_t *svc)
-{
-    if (!svc || !svc->initialized)
-        return 0;
-    airy_mtx_lock(&svc->lock);
-    size_t c = a2a_v03_get_task_count(svc->ctx);
-    airy_mtx_unlock(&svc->lock);
-    return c;
-}
-
-void a2a_service_card_free(char *card_json)
-{
-    AIRY_FREE(card_json);
-}
-
-void a2a_service_task_free(char *task_json)
-{
-    AIRY_FREE(task_json);
-}
-
-void a2a_service_results_free(char *results_json)
-{
-    AIRY_FREE(results_json);
+    AIRY_FREE(result_json);
 }
