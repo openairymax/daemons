@@ -19,6 +19,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "notify_d_internal.h"
+#include "hook_internal.h"
 #include "daemon_main.h"
 /* 事件线程经线程抽象双腿解析：无调度器实现时走 platform_process.h
  * 别名，airy_core 传播 AIRY_USE_SCHEDULER_THREAD_IMPL 时声明由

@@ -18,6 +18,7 @@
 #include "airy_memory.h"
 #include "jsonrpc_helpers.h"
 #include "notify_d_internal.h"
+#include "hook_internal.h"
 #include "airy_hook.h"
 #include "airy_safety_ops.h"
 #include "hook_builtin_handlers.h"
