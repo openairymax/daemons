@@ -5,16 +5,14 @@
  * @file main.c
  * @brief Gateway daemon 装配骨架：装配序与主循环单点可见。
  *
- * 策略块（信号/Phase 2 接线/协议栈/SD 公告/健康上报/拆除）在 gw_boot.c。
+ * 策略块（平台启动/信号/Phase 2 接线/协议栈/SD 公告/健康上报/全进程拆除）
+ * 在 gw_boot.c。
  * Conventions: ARCHITECTURAL_PRINCIPLES.md E-3..E-6 (resource determinism,
  * cross-platform, SVC_LOG_*, AIRY_ERR_*).
  */
 
 #include "atomic_compat.h"
-#include "daemon_cupolas_bootstrap.h"
 
-#include "daemon_heapstore_bootstrap.h"
-#include "daemon_ipc_ops_bootstrap.h"
 #include "gateway_service.h"
 #include "gateway_business_handler.h"
 #include "gateway_cap_registry.h"
@@ -23,7 +21,6 @@
 #include "daemon_platform_ext.h"
 #include "svc_logger.h"
 #include "error.h"
-#include "airy_rt.h"
 
 #include "gateway_protocol_router.h"
 
@@ -37,14 +34,6 @@ static atomic_int g_running = 1;
 static gateway_business_ctx_t *g_biz_ctx = NULL;
 static gateway_entry_ctx_t g_entry_ctx;
 static gw_proto_router_t *g_proto_router = NULL;
-
-/* L2 <ns>.shutdown (02-l2-service-protocol.md §6.1): atomic clear only;
- * the main loop exits within its 1s poll, same semantics as signal path. */
-static void gw_rpc_shutdown(void *user_data)
-{
-    (void)user_data;
-    atomic_store_explicit(&g_running, 0, memory_order_seq_cst);
-}
 
 int main(int argc, char *argv[])
 {
@@ -80,23 +69,7 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    /* WS-8 stage 4 (8.4.1): corekern first boot link; idempotent,
-     * failure degrades to platform fallbacks (non-fatal, badge=0). */
-    {
-        int core_ret = airy_init();
-        if (core_ret == AIRY_SUCCESS) {
-            SVC_LOG_INFO("corekern core initialized (gateway_d runs on corekern)");
-        } else {
-            SVC_LOG_WARN("corekern init failed (%d) - running degraded (badge=0)", core_ret);
-        }
-    }
-
-    daemon_cupolas_init_pep("gateway_d");
-
-    /* IPC/RPC/SD ops 表进程级幂等发布，init 失败非致命。 */
-    daemon_ipc_ops_init("gateway_d");
-
-    daemon_heapstore_init("gateway_d");
+    gw_plat_boot();
 
     SVC_LOG_INFO("Gateway service starting...");
 
@@ -121,7 +94,7 @@ int main(int argc, char *argv[])
         goto fail;
     }
 
-    gateway_business_ctx_set_shutdown_cb(g_biz_ctx, gw_rpc_shutdown, NULL);
+    gateway_business_ctx_set_shutdown_cb(g_biz_ctx, gw_rpc_stop, &g_running);
 
     gw_acl_register_defaults();
 
@@ -166,12 +139,5 @@ int main(int argc, char *argv[])
 
 fail: /* early-start failures fall through with started=false */
     gw_teardown(g_service, g_proto_router, g_biz_ctx, started);
-    airy_sock_cleanup();
-
-    SVC_LOG_INFO("Gateway daemon stopped");
-    daemon_ipc_ops_cleanup();
-    daemon_heapstore_cleanup();
-    daemon_cupolas_cleanup();
-    log_cleanup();
     return 0;
 }
