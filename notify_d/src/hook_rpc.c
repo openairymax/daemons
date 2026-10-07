@@ -18,7 +18,7 @@
 #include "airy_memory.h"
 #include "cjson_helpers.h"
 #include "jsonrpc_helpers.h"
-#include "notify_d_internal.h"
+#include "hook_internal.h"
 
 #include "airy_hook.h"
 #include "hook_registry.h"
