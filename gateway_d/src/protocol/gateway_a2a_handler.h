@@ -4,7 +4,7 @@
 #ifndef AIRY_GATEWAY_A2A_HANDLER_H
 #define AIRY_GATEWAY_A2A_HANDLER_H
 
-#include "gateway_protocol_router.h"
+#include "gateway_proto_types.h"
 
 #include <stdbool.h>
 #include <stddef.h>

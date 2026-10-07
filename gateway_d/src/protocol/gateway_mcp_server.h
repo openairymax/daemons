@@ -4,7 +4,7 @@
 #ifndef AIRY_RT_GATEWAY_MCP_SERVER_H
 #define AIRY_RT_GATEWAY_MCP_SERVER_H
 
-#include "gateway_protocol_router.h"
+#include "gateway_proto_types.h"
 #include "gateway_service.h" /* AIRYRT_VERSION 版本 SSoT */
 
 #include <stdbool.h>

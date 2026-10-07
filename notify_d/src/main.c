@@ -20,6 +20,7 @@
 #include "error.h"
 #include "logging.h"
 #include "notify_d_internal.h"
+#include "hook_internal.h"
 #include "svc_logger.h"
 
 #include <stdlib.h>

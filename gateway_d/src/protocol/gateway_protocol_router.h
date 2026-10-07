@@ -4,6 +4,7 @@
 #ifndef AIRY_RT_GATEWAY_PROTOCOL_ROUTER_H
 #define AIRY_RT_GATEWAY_PROTOCOL_ROUTER_H
 
+#include "gateway_proto_types.h"
 #include "unified_protocol.h"
 
 #include <stdbool.h>
@@ -50,10 +51,6 @@ typedef struct {
     uint64_t unknown_requests;
     uint64_t route_errors;
 } gw_proto_router_stats_t;
-
-typedef int (*gw_proto_request_handler_t)(const char *method, const char *path,
-                                          const char *body_json, char **response_json,
-                                          void *user_data);
 
 gw_proto_router_t *gw_proto_router_create(void);
 void gw_proto_router_destroy(gw_proto_router_t *router);

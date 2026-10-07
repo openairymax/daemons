@@ -4,7 +4,7 @@
 #ifndef AIRY_RT_GATEWAY_OPENAI_COMPAT_H
 #define AIRY_RT_GATEWAY_OPENAI_COMPAT_H
 
-#include "gateway_protocol_router.h"
+#include "gateway_proto_types.h"
 
 #include <stdbool.h>
 #include <stddef.h>

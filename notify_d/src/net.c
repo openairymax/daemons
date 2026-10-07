@@ -15,6 +15,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "notify_d_internal.h"
+#include "hook_internal.h"
 #include "daemon_main.h"
 #include "platform.h"
 
