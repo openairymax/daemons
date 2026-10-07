@@ -37,8 +37,16 @@ int gw_parse_args(int argc, char *argv[], gateway_service_config_t *config,
 void gw_acl_register_defaults(void);
 
 /*
- * boot 域（gw_boot.c）：main.c 装配序经由下列五个入口驱动策略块。
+ * boot 域（gw_boot.c）：main.c 装配序经由下列入口驱动策略块。
  */
+
+/** @brief 平台启动：corekern 首启链接 + PEP/IPC/heapstore 平台服务发布；
+ *        corekern 失败降级为平台回退（非致命）。须在服务装配之前调用。 */
+void gw_plat_boot(void);
+
+/** @brief L2 <ns>.shutdown 停机回调：原子清 @p user_data 指向的存活旗标
+ *        （主循环在 1s poll 内退出，与信号路径同语义）。 */
+void gw_rpc_stop(void *user_data);
 
 /** @brief 安装进程信号策略（POSIX 信号表 / Win32 控制台句柄）；须在
  *         log_init 之前调用，@p running 为主循环存活旗标。 */
@@ -59,8 +67,9 @@ void gw_sd_announce(gateway_service_t service);
 void gw_health_tick(gateway_service_t service);
 
 /**
- * @brief 关停拆除级联。@p started 为 false 时复刻启动早退路径
- *        （不执行 sd_stop/service_stop）；其余拆除无条件。
+ * @brief 关停拆除级联（进程退出唯一出口）。@p started 为 false 时复刻启动
+ *        早退路径（不执行 sd_stop/service_stop）；其余拆除无条件，并收尾
+ *        socket 面、IPC/heapstore/cupolas ops 与 log。
  */
 void gw_teardown(gateway_service_t service, struct gw_proto_router *router,
                  struct gateway_business_ctx_s *biz, bool started);
