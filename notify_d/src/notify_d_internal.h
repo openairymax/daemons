@@ -4,7 +4,7 @@
 /**
  * @file notify_d_internal.h
  * @brief notify_d 守护进程各编译单元共享的内部声明
- *        （svc.c / net.c / main.c）。
+ *        （nf_boot.c / svc.c / net.c / main.c）。
  * @details notify_d 为异型户（manifest codegen=false）：单端口上 JSON-RPC
  *          短连接 / SSE 长连接 / WebSocket 长连接 / 裸消息投递四协议
  *          多路复用，每连接一线程，自建 WS 握手与环形队列广播引擎，
@@ -55,6 +55,12 @@ int notify_d_healthcheck(notify_d_service_t *svc);
 
 /* 协议域（net.c 实现，main.c accept 循环派发） */
 void *notify_d_conn_thread(void *arg);
+
+/* 启停策略域（nf_boot.c 实现，main.c 装配调用） */
+void nf_sig_install(void);
+void nf_conn_admit(airy_sock_t hook_fd);
+void nf_sd_announce(notify_d_service_t *svc);
+void nf_teardown(void);
 
 /* ---- hook 面（R7 并户：原 hook_d 独立守护进程吸收为第二监听面）----
  * socket-only 面路由（全 daemons 零 L2 挂载实证）：hook 客户端连接

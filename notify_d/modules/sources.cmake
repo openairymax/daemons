@@ -2,6 +2,7 @@
 # R7 并户追加 hook 面：生命周期域 hook_svc.c + 方法域 hook_rpc.c）
 set(NOTIFY_D_SOURCES
     src/main.c
+    src/nf_boot.c
     src/svc.c
     src/net.c
     src/notify_service.c

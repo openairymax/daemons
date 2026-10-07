@@ -18,6 +18,7 @@
   },
   "deps": { "required": [], "optional": [] },
   "modules": [
+    { "name": "boot", "sources": ["nf_boot.c"] },
     { "name": "svc", "sources": ["svc.c"] },
     { "name": "net", "sources": ["net.c"] },
     { "name": "service", "sources": ["notify_service.c"] }
