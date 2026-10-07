@@ -13,7 +13,7 @@
  * - Adapter resolved once in create() via proto_registry_get()/find()
  * - Every operation serializes params as cJSON and dispatches handle_request
  * - Thread safety: a2a_call() holds the lock around each adapter call
- * - Result JSON ownership transfers to the caller (a2a_service_result_free)
+ * - Result JSON ownership transfers to the caller (a2a_result_free)
  */
 
 #include "service.h"
@@ -285,7 +285,7 @@ int a2a_service_stats(a2a_service_t *svc, size_t *out_agents, size_t *out_tasks)
     return AIRY_SUCCESS;
 }
 
-void a2a_service_result_free(char *result_json)
+void a2a_result_free(char *result_json)
 {
     AIRY_FREE(result_json);
 }
