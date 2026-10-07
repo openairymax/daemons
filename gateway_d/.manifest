@@ -18,6 +18,7 @@
   "modules": [
     { "name": "service", "sources": ["service.c"] },
     { "name": "protocol", "sources": ["protocol/gateway_protocol_router.c", "protocol/gateway_mcp_server.c", "protocol/gateway_openai_compat.c", "protocol/gateway_a2a_handler.c"] },
+    { "name": "boot", "sources": ["gw_boot.c"] },
     { "name": "cli", "sources": ["gw_cli.c"] },
     { "name": "acl", "sources": ["gw_acl.c"] },
     { "name": "mcpclients", "sources": ["gw_mcpclients.c"] }
