@@ -32,7 +32,7 @@ static const char *A2A_CARD_BETA =
 static cJSON *A2A_PARSE(char *json)
 {
     cJSON *obj = cJSON_Parse(json);
-    a2a_service_result_free(json);
+    a2a_result_free(json);
     return obj;
 }
 
@@ -72,7 +72,7 @@ static void test_register_and_discover(void)
     cJSON_Delete(reg);
 
     assert(a2a_service_register_agent(svc, A2A_CARD_BETA, &result) == AIRY_SUCCESS);
-    a2a_service_result_free(result);
+    a2a_result_free(result);
 
     size_t agent_count = 0;
     assert(a2a_service_stats(svc, &agent_count, NULL) == AIRY_SUCCESS);
@@ -104,7 +104,7 @@ static void test_unregister(void)
 
     char *result = NULL;
     assert(a2a_service_register_agent(svc, A2A_CARD_ALPHA, &result) == AIRY_SUCCESS);
-    a2a_service_result_free(result);
+    a2a_result_free(result);
 
     result = NULL;
     int ret = a2a_service_unregister_agent(svc, "agent_alpha", &result);
@@ -136,7 +136,7 @@ static void test_get_agent_card(void)
 
     char *result = NULL;
     assert(a2a_service_register_agent(svc, A2A_CARD_ALPHA, &result) == AIRY_SUCCESS);
-    a2a_service_result_free(result);
+    a2a_result_free(result);
 
     result = NULL;
     int ret = a2a_service_get_agent_card(svc, "agent_alpha", &result);
@@ -169,7 +169,7 @@ static void test_create_task(void)
 
     char *result = NULL;
     assert(a2a_service_register_agent(svc, A2A_CARD_ALPHA, &result) == AIRY_SUCCESS);
-    a2a_service_result_free(result);
+    a2a_result_free(result);
 
     result = NULL;
     int ret = a2a_service_create_task(svc, "agent_alpha", "summarize document",
@@ -202,9 +202,9 @@ static void test_send_message(void)
 
     char *result = NULL;
     assert(a2a_service_register_agent(svc, A2A_CARD_ALPHA, &result) == AIRY_SUCCESS);
-    a2a_service_result_free(result);
+    a2a_result_free(result);
     assert(a2a_service_register_agent(svc, A2A_CARD_BETA, &result) == AIRY_SUCCESS);
-    a2a_service_result_free(result);
+    a2a_result_free(result);
 
     result = NULL;
     int ret = a2a_service_send_message(svc, "agent_beta", "user", "{\"prompt\":\"hi\"}", &result);
@@ -231,9 +231,9 @@ static void test_stats(void)
 
     char *result = NULL;
     assert(a2a_service_register_agent(svc, A2A_CARD_ALPHA, &result) == AIRY_SUCCESS);
-    a2a_service_result_free(result);
+    a2a_result_free(result);
     assert(a2a_service_register_agent(svc, A2A_CARD_BETA, &result) == AIRY_SUCCESS);
-    a2a_service_result_free(result);
+    a2a_result_free(result);
 
     size_t agents = 0, tasks = 0;
     assert(a2a_service_stats(svc, &agents, &tasks) == AIRY_SUCCESS);

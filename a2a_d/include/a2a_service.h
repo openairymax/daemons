@@ -41,7 +41,7 @@ void a2a_service_destroy(a2a_service_t *svc);
  *        url, version, protocol_version (int, default 3), capabilities (int),
  *        available (bool, default true), skills (array, optional)
  * @param out_result_json On success holds the adapter result JSON
- *        (caller frees via a2a_service_result_free)
+ *        (caller frees via a2a_result_free)
  * @return AIRY_SUCCESS on success
  */
 int a2a_service_register_agent(a2a_service_t *svc, const char *card_json, char **out_result_json);
@@ -56,7 +56,7 @@ int a2a_service_unregister_agent(a2a_service_t *svc, const char *agent_id,
 /**
  * @brief Get an agent card.
  * @return AIRY_SUCCESS on success; *out_result_json holds the card JSON string
- *         (caller frees via a2a_service_result_free); AIRY_ERR_NOT_FOUND if not found
+ *         (caller frees via a2a_result_free); AIRY_ERR_NOT_FOUND if not found
  */
 int a2a_service_get_agent_card(a2a_service_t *svc, const char *agent_id,
                                char **out_result_json);
@@ -66,7 +66,7 @@ int a2a_service_get_agent_card(a2a_service_t *svc, const char *agent_id,
  * @param capability Capability filter string, may be NULL (no filter)
  * @param skill_name Skill filter string, may be NULL (no filter)
  * @return AIRY_SUCCESS on success; *out_result_json holds
- *         {"agents":[...],"count":N} (caller frees via a2a_service_result_free)
+ *         {"agents":[...],"count":N} (caller frees via a2a_result_free)
  */
 int a2a_service_discover_agents(a2a_service_t *svc, const char *capability,
                                 const char *skill_name, char **out_result_json);
@@ -75,7 +75,7 @@ int a2a_service_discover_agents(a2a_service_t *svc, const char *capability,
 /**
  * @brief Create a task.
  * @return AIRY_SUCCESS on success; *out_result_json holds {"task":{...}}
- *         (caller frees via a2a_service_result_free)
+ *         (caller frees via a2a_result_free)
  */
 int a2a_service_create_task(a2a_service_t *svc, const char *agent_id, const char *description,
                             const char *input_json, char **out_result_json);
@@ -101,7 +101,7 @@ int a2a_service_cancel_task(a2a_service_t *svc, const char *task_id, const char 
 /**
  * @brief Get a task.
  * @return AIRY_SUCCESS on success; *out_result_json holds {"task":{...}}
- *         (caller frees via a2a_service_result_free); AIRY_ERR_NOT_FOUND if not found
+ *         (caller frees via a2a_result_free); AIRY_ERR_NOT_FOUND if not found
  */
 int a2a_service_get_task(a2a_service_t *svc, const char *task_id, char **out_result_json);
 
@@ -111,7 +111,7 @@ int a2a_service_get_task(a2a_service_t *svc, const char *task_id, char **out_res
  * @param role Message role (e.g. "user")
  * @param content_json Message content JSON string
  * @return AIRY_SUCCESS on success; *out_result_json holds
- *         {"responses":[...],"count":N} (caller frees via a2a_service_result_free)
+ *         {"responses":[...],"count":N} (caller frees via a2a_result_free)
  */
 int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id, const char *role,
                              const char *content_json, char **out_result_json);
@@ -125,7 +125,7 @@ int a2a_service_send_message(a2a_service_t *svc, const char *target_agent_id, co
  */
 int a2a_service_stats(a2a_service_t *svc, size_t *out_agents, size_t *out_tasks);
 
-void a2a_service_result_free(char *result_json);
+void a2a_result_free(char *result_json);
 
 #ifdef __cplusplus
 }
