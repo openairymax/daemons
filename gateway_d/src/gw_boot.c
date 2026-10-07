@@ -3,16 +3,22 @@
 
 /*
  * @file gw_boot.c
- * @brief gateway_d 启停策略域：信号安装、协议装配、SD 公告、健康上报与
- *        拆除级联。
+ * @brief gateway_d 启停策略域：平台启动、信号安装、协议装配、SD 公告、
+ *        健康上报与全进程关停级联。
  *
- * main.c 只保留装配骨架与主循环；本域承接全部策略块——信号策略、Phase 2
- * 适配器接线（MCP 工具目录→tool_d / OpenAI→llm_d / A2A→sched_d）、
- * UnifiedProtocol 栈初始化、端点摘要与 SD 注册、周期健康上报、关停拆除。
+ * main.c 只保留装配骨架与主循环；本域承接全部策略块——corekern 首启链接
+ * 与 PEP/IPC/heapstore 平台服务发布、信号策略、Phase 2 适配器接线（MCP
+ * 工具目录→tool_d / OpenAI→llm_d / A2A→sched_d）、UnifiedProtocol 栈初始
+ * 化、端点摘要与 SD 注册、周期健康上报、关停拆除（含 socket 面与 ops 逆序
+ * 清理）。
  */
 
+#include "airy_rt.h"
 #include "atomic_compat.h"
 #include "daemon_bootstrap_sd.h"
+#include "daemon_cupolas_bootstrap.h"
+#include "daemon_heapstore_bootstrap.h"
+#include "daemon_ipc_ops_bootstrap.h"
 
 #include "gateway_service.h"
 #include "gateway_business_handler.h"
@@ -100,6 +106,30 @@ void gw_sig_install(atomic_int *running)
     signal(SIGPIPE, SIG_IGN);
     signal(SIGUSR1, gw_log_toggle);
 #endif
+}
+
+void gw_rpc_stop(void *user_data)
+{
+    atomic_int *running = user_data;
+    if (running)
+        atomic_store_explicit(running, 0, memory_order_seq_cst);
+}
+
+void gw_plat_boot(void)
+{
+    /* WS-8 stage 4 (8.4.1): corekern first boot link; idempotent,
+     * failure degrades to platform fallbacks (non-fatal, badge=0). */
+    int core_ret = airy_init();
+    if (core_ret == AIRY_SUCCESS) {
+        SVC_LOG_INFO("corekern core initialized (gateway_d runs on corekern)");
+    } else {
+        SVC_LOG_WARN("corekern init failed (%d) - running degraded (badge=0)", core_ret);
+    }
+
+    daemon_cupolas_init_pep("gateway_d");
+    /* IPC/RPC/SD ops 表进程级幂等发布，init 失败非致命。 */
+    daemon_ipc_ops_init("gateway_d");
+    daemon_heapstore_init("gateway_d");
 }
 
 #ifdef AIRY_HAS_PROTOCOLS
@@ -270,4 +300,12 @@ void gw_teardown(gateway_service_t service, gw_proto_router_t *router,
     if (biz)
         gateway_business_ctx_destroy(biz);
     gateway_service_destroy(service);
+
+    /* 全进程关停级联（main 退出唯一出口）：socket 面 → ops 逆序 → log。 */
+    airy_sock_cleanup();
+    SVC_LOG_INFO("Gateway daemon stopped");
+    daemon_ipc_ops_cleanup();
+    daemon_heapstore_cleanup();
+    daemon_cupolas_cleanup();
+    log_cleanup();
 }
