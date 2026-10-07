@@ -339,12 +339,14 @@ if(AIRY_HAS_LIBWEBSOCKETS)
 endif()
 
 # ==================== Gateway daemon 可执行文件 ====================
-# 进程域分层：main.c 装配/生命周期/信号，gw_cli CLI 解析，gw_acl 默认策略，
+# 进程域分层：main.c 装配骨架/主循环，gw_boot 启停策略域（信号/协议装配/
+# SD 公告/健康上报/拆除级联），gw_cli CLI 解析，gw_acl 默认策略，
 # gw_mcpclients 外部 MCP client 桥；服务代码已纳入 airy_gateway_service 库。
 # gw_mcpclients 为 POSIX-only（protocols 库 WIN32 恒裁剪 mcp_client_*，
-# PROTOCOLS_ENABLE_MCP_TRANSPORT WIN32 恒 OFF），与 main.c 调用点门控对齐。
+# PROTOCOLS_ENABLE_MCP_TRANSPORT WIN32 恒 OFF），与 gw_boot.c 调用点门控对齐。
 add_executable(gateway_d
     src/main.c
+    src/gw_boot.c
     src/gw_cli.c
     src/gw_acl.c
 )
