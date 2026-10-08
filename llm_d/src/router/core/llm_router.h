@@ -30,7 +30,6 @@
 extern "C" {
 #endif
 
-
 /* 路由成本估算用的输出 token 兜底值。调用方（service 层）已把引擎默认
  * max_output 解析进 llm_route_request_t.max_tokens；仅当配置面完全未声明
  * 输出上限时才落到此值。四个策略必须共用同一口径，否则同一请求在不同
@@ -46,7 +45,6 @@ typedef enum {
     LLM_ROUTE_COUNT = 5
 } llm_route_strategy_t;
 
-
 typedef enum {
     LLM_CAP_CHAT = 0x0001,
     LLM_CAP_COMPLETION = 0x0002,
@@ -58,7 +56,6 @@ typedef enum {
     LLM_CAP_EXTENDED_THINK = 0x0080,
     LLM_CAP_CODE_EXEC = 0x0100
 } llm_capability_t;
-
 
 typedef struct {
     char provider_name[64];
@@ -75,7 +72,6 @@ typedef struct {
     int priority;
 } llm_endpoint_t;
 
-
 typedef struct {
     const char *prompt;
     size_t prompt_len;
@@ -86,7 +82,6 @@ typedef struct {
     llm_route_strategy_t strategy;
     char preferred_provider[64];
 } llm_route_request_t;
-
 
 typedef struct {
     char provider_name[64];
@@ -100,7 +95,6 @@ typedef struct {
     char fallback_model[64];
 } llm_route_result_t;
 
-
 typedef struct {
     uint64_t total_requests;
     uint64_t routed_count[5];
@@ -109,7 +103,6 @@ typedef struct {
     double total_cost;
     uint64_t total_tokens;
 } llm_router_stats_t;
-
 
 /**
  * @brief Initialize the LLM router.

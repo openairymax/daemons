@@ -34,10 +34,8 @@
 extern "C" {
 #endif
 
-
 #define LLM_ROUTER_MAX_ENDPOINTS 64
 #define LLM_ROUTER_MAX_FALLBACK 3
-
 
 typedef struct {
     llm_endpoint_t endpoints[LLM_ROUTER_MAX_ENDPOINTS];
@@ -48,14 +46,11 @@ typedef struct {
     airy_token_config_t token_cfg;
     airy_mtx_t mutex;
     bool initialized;
-
-
     size_t round_robin_index;
 } router_ctx_t;
 
 /** @brief Get the global router context. */
 router_ctx_t *router_ctx_get(void);
-
 
 /** @brief Estimate the token count of a request. */
 static inline size_t router_estimate_tokens(const char *prompt, size_t prompt_len)

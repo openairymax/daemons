@@ -9,8 +9,7 @@
  */
 
 #include "airy_memory.h"
-#include "core/adapter.h"
-#include "core/provider_envelope.h"
+#include "providers/providers_internal.h"
 #include "core/toolstream.h"
 #include "error.h"
 #include "svc_logger.h"
