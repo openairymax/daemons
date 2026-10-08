@@ -14,7 +14,6 @@
  *          sched_dag_worker.c.
  */
 
-#include "scheduler_service.h"
 #include "sched_service_internal.h"
 #include "svc_logger.h"
 #include "platform.h"

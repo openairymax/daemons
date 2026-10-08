@@ -22,7 +22,6 @@
 #include "jsonrpc_helpers.h"
 #include "param_validator.h"
 #include "platform.h"
-#include "scheduler_service.h"
 #include "sched_daemon_internal.h"
 #include "svc_logger.h"
 

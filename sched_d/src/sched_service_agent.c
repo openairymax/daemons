@@ -13,7 +13,6 @@
  *          sched_service_task.c.
  */
 
-#include "scheduler_service.h"
 #include "sched_service_internal.h"
 #include "airy_memory.h"
 #include "error.h"

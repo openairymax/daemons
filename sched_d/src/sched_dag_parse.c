@@ -12,7 +12,7 @@
  *          allocated memory on failure.
  */
 
-#include "sched_service_internal.h"
+#include "sched_dag_internal.h"
 #include "airy_memory.h"
 #include "error.h"
 #include "agent_vocab.h"

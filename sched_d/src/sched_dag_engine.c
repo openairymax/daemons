@@ -14,7 +14,6 @@
  *          parsing/validation in sched_dag_parse.c.
  */
 
-#include "sched_service_internal.h"
 #include "sched_dag_internal.h"
 #include "airy_memory.h"
 #include "error.h"
