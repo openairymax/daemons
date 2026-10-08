@@ -15,7 +15,6 @@
  */
 
 #include "daemon_defaults.h"
-#include "svc_auth.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
