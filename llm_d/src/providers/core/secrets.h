@@ -14,7 +14,7 @@
 #ifndef LLM_D_PROVIDERS_CORE_SECRETS_H
 #define LLM_D_PROVIDERS_CORE_SECRETS_H
 
-#include "transport.h"
+#include "provider_base.h"
 
 #include <stdbool.h>
 #include <stddef.h>

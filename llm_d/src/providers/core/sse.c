@@ -22,7 +22,9 @@
 #include "airy_llm_stream.h"
 #include "airy_memory.h"
 #include "error.h"
-#include "transport.h"
+#include "provider_transport.h"
+#include "provider_stream.h"
+#include "provider_retry.h"
 #include "svc_logger.h"
 
 #include <curl/curl.h>

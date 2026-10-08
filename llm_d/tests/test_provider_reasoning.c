@@ -12,7 +12,8 @@
  */
 
 #include "error.h"
-#include "providers/core/transport.h"
+#include "providers/core/provider_envelope.h"
+#include "providers/core/provider_stream.h"
 
 #include <assert.h>
 #include <stdio.h>

@@ -15,6 +15,7 @@
 #include "error.h"
 #include "daemon_platform_ext.h"
 #include "core/adapter.h"
+#include "core/provider_envelope.h"
 #include "core/rate_limit.h"
 #include "svc_logger.h"
 
