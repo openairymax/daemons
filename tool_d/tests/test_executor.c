@@ -7,6 +7,8 @@
  */
 
 #include "core/executor.h"
+#include "core/executor_run.h"
+#include "core/executor_gate.h"
 #include "core/approval_gate.h"
 #include "approval/tool_approval.h"
 #include "tool_service.h"

@@ -27,6 +27,7 @@
 
 #include "airy_sandbox.h"
 #include "core/executor.h"
+#include "core/executor_run.h"
 #include "airy_memory.h"
 #include "syscalls.h"
 #include "tool_service.h"
