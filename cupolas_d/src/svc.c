@@ -13,8 +13,6 @@
  * 服务单例的创建、注入与销毁。业务逻辑在 service.c 与 cupolas_rpc_*.c。
  */
 
-#include "svc_cupolas_d.h"
-
 #include "cupolas_d_internal.h"
 #include "daemon_cfg_file.h"
 #include "dynamic_policy_engine.h"
