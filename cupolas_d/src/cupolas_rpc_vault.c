@@ -12,7 +12,6 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "cupolas_d_internal.h"
-#include "svc_cupolas_d.h"
 #include "cupolas_vault.h"
 
 #include "daemon_main.h"
