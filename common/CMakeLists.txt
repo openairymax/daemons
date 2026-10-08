@@ -81,9 +81,14 @@ target_link_libraries(svc_common PUBLIC
 # heapstore 仅依赖 commons + threads，无循环依赖（与 atoms/corekern 同模式）。
 # 注：CMake 支持前向目标引用，daemons 先于 heapstore 配置但 target_link_libraries
 # 在生成阶段解析，与 atoms/corekern 引用 airy_heapstore 同模式。
+# §251 债务①塌缩：模块外公开头直接消费面恰为 daemon_heapstore_bootstrap.c
+# 一个 TU（svc_common 自有源）；外围经包装头 daemon_heapstore_bootstrap.h
+# （零类型传播）或 airy_heapstore_ops 抽象表接入。PRIVATE 降级后链接需求经
+# $<LINK_ONLY> 照常落各 daemon 链接行；include 仅本库编译需要，自取 PRIVATE，
+# 不再向全部 svc_common 消费方扩散 heapstore 头面。
 if(BUILD_HEAPSTORE)
-    target_link_libraries(svc_common PUBLIC airy_heapstore)
-    target_include_directories(svc_common PUBLIC
+    target_link_libraries(svc_common PRIVATE airy_heapstore)
+    target_include_directories(svc_common PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../heapstore/include)
     # ARC-04: daemon_heapstore_bootstrap 注入 atoms 侧持久化 ops 抽象表。
     # ops 存储（are_ops_set/get_heapstore）在独立小库 airy_syscall_ops 中，
