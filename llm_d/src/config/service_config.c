@@ -11,7 +11,7 @@
  *   - service_config_yaml_models.c    models 行解析 + 简化 llm 段展开
  *   - service_config_yaml_providers.c provider 聚合导出
  *   - service_config_yaml_pricing.c   YAML 定价规则提取
- * 共享符号经 config/internal.h 声明；YAML 函数体仅开启 HAVE_YAML
+ * 共享符号经 config/config_internal.h 声明；YAML 函数体仅开启 HAVE_YAML
  * 时编译。
  */
 
@@ -27,7 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "config/internal.h"
+#include "config/config_internal.h"
 #include "config/types.h"
 
 int ends_with(const char *str, const char *suffix)

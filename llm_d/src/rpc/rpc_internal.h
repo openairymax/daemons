@@ -2,7 +2,7 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
 /**
- * @file internal.h
+ * @file rpc_internal.h
  * @brief llm_d rpc 域（请求路径）内部声明。
  *
  * 由 llm_service_internal.h（253 行枢纽头，B16-S1 拆片）迁入：生成参数
