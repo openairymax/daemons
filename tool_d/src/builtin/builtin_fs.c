@@ -12,7 +12,7 @@
 
 #include <errno.h>
 
-#include "builtin/tool_builtin_internal.h"
+#include "builtin/builtin_fs_internal.h"
 #include "io.h"
 
 /* 读取沙箱内已确认路径的全部内容；失败时把面向调用方的错误写入 res。

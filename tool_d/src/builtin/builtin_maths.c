@@ -19,7 +19,7 @@
 #include <stdarg.h>
 
 #include "platform.h"
-#include "builtin/tool_builtin_internal.h"
+#include "builtin/builtin_maths_internal.h"
 
 #ifndef _WIN32
 #include <errno.h>

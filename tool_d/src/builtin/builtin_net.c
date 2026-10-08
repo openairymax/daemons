@@ -11,7 +11,9 @@
 
 #include "airy_regex.h"
 
-#include "builtin/tool_builtin_internal.h"
+#include "builtin/builtin_buf_internal.h"
+#include "builtin/builtin_exec_internal.h"
+#include "builtin/builtin_time_internal.h"
 
 /* ============================================================================
  * web_fetch: fetch web page content over the network
