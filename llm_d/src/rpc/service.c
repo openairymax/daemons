@@ -29,8 +29,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "config/internal.h"
-#include "rpc/internal.h"
+#include "config/config_internal.h"
+#include "rpc/rpc_internal.h"
 
 /* 2.1.1.5 修复：计费/用量持久化文件路径（$AIRY_DATA_DIR/agentrt/
  * llm_usage.json）。llm_d 启动时加载历史累计，每次真实调用后兜底保存、

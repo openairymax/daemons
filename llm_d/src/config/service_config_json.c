@@ -21,7 +21,7 @@
 #include <cjson_helpers.h>
 #include <string.h>
 
-#include "config/internal.h"
+#include "config/config_internal.h"
 
 /**
  * @brief Load model config from JSON (providers array).
