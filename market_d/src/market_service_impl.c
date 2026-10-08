@@ -11,7 +11,6 @@
  */
 
 #include "daemon_errors.h"
-#include "market_service.h"
 #include "platform.h"
 #include "svc_logger.h"
 

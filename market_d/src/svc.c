@@ -15,7 +15,6 @@
 #include "svc_market_d.h"
 
 #include "market_d_internal.h"
-#include "market_service.h"
 #include "svc_logger.h"
 
 market_service_t *g_service = NULL;
