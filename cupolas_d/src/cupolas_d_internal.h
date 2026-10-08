@@ -5,10 +5,11 @@
  * @file cupolas_d_internal.h
  * @brief Internal shared declarations of the cupolas_d daemon translation
  *        units (svc.c / cupolas_rpc_*.c / service.c).
- * @details RPC method entry points (m_*) and the daemon
- *          lifecycle hooks are declared in the generated svc_cupolas_d.h
- *          (L3 SSoT); this header only carries the daemon-wide cupolas
- *          service handle and the dynamic policy engine (PDP) handle.
+ * @details Single include entry for the cupolas_d translation units
+ *          (except the generated main.c assembly unit): aggregates the
+ *          generated svc_cupolas_d.h (L3 SSoT, RPC method entry points
+ *          m_* and lifecycle hooks) and carries the daemon-wide cupolas
+ *          service handle plus the dynamic policy engine (PDP) handle.
  *          For use only by the cupolas_d daemon translation units.
  */
 
@@ -16,6 +17,7 @@
 #define AIRY_RT_DAEMON_CUPOLAS_D_INTERNAL_H
 
 #include "cupolas_service.h"
+#include "svc_cupolas_d.h"
 
 #ifdef __cplusplus
 extern "C" {
