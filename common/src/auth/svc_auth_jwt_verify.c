@@ -10,7 +10,6 @@
 
 #include "airy_memory.h"
 #include "error.h"
-#include "svc_auth_internal.h"
 #include "svc_auth_jwt_internal.h"
 #include "svc_logger.h"
 
