@@ -12,7 +12,8 @@
 #include <unistd.h>
 #endif
 
-#include "builtin/tool_builtin_internal.h"
+#include "builtin/builtin_buf_internal.h"
+#include "builtin/builtin_exec_internal.h"
 
 void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const char *mark)
 {

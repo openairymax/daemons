@@ -33,7 +33,8 @@
 #endif
 #endif
 
-#include "builtin/tool_builtin_internal.h"
+#include "builtin/builtin_fs_internal.h"
+#include "builtin/builtin_time_internal.h"
 
 int fs_list_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {

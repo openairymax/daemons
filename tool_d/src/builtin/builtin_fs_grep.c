@@ -12,7 +12,9 @@
 
 #include <errno.h>
 
-#include "builtin/tool_builtin_internal.h"
+#include "builtin/builtin_buf_internal.h"
+#include "builtin/builtin_fs_internal.h"
+#include "builtin/builtin_time_internal.h"
 
 /* ============================================================================
  * fs_grep: regex content search (modeled on Atom Code GrepTool / Claude Code rg guidance)
