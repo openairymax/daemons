@@ -116,11 +116,11 @@ target_link_libraries(svc_common PRIVATE airy_core)
 if(TARGET cupolas)
     target_link_libraries(svc_common PUBLIC cupolas)
     target_include_directories(svc_common PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../cupolas/include>
+        $<BUILD_INTERFACE:${CUPOLAS_SRC_DIR}/include>
     )
 else()
     message(WARNING "cupolas target not found — daemon_cupolas_bootstrap will fail to link. "
-                    "Ensure cupolas module is built (agentrt/cupolas/CMakeLists.txt).")
+                    "Ensure cupolas module is mounted (products/cupolas or -DCUPOLAS_SRC_DIR).")
 endif()
 if(AIRY_HAS_OPENSSL)
     target_link_libraries(svc_common PUBLIC ${OPENSSL_CRYPTO_LIBRARY})

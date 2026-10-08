@@ -101,7 +101,7 @@ target_include_directories(airy_tool_service PUBLIC
     ${COMMONS_INCLUDE_DIR}/utils/cache
     ${COMMONS_INCLUDE_DIR}/utils/compat
     # Cupolas SafetyGuard 头文件路径
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../cupolas/include
+    ${CUPOLAS_SRC_DIR}/include
     ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     # sandbox 公共 API（airy_sandbox.h）和 syscall 号（syscalls.h）
@@ -196,7 +196,7 @@ target_include_directories(tool_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/sync
     ${COMMONS_INCLUDE_DIR}/utils/cache
     ${COMMONS_INCLUDE_DIR}/utils/compat
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../cupolas/include
+    ${CUPOLAS_SRC_DIR}/include
     ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${CJSON_INCLUDE_DIRS}

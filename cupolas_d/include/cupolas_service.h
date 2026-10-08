@@ -20,7 +20,7 @@
  *
  * This interface defines the service lifecycle, method parameter structs
  * and result structs. The implementation lives in src/service.c; all
- * methods really call the agentrt/cupolas/include/cupolas.h API.
+ * methods really call the cupolas/include/cupolas.h API (products/cupolas).
  */
 
 #ifndef AIRY_RT_DAEMON_CUPOLAS_SERVICE_H
