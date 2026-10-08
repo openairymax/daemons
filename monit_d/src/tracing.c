@@ -15,7 +15,6 @@
  * 5. Thread safety
  */
 
-#include "monitor_service.h"
 #include "daemon_platform_ext.h"
 #include "svc_logger.h"
 
