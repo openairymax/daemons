@@ -12,7 +12,7 @@
 #include <unistd.h>
 #endif
 
-#include "builtin/tool_builtin_internal.h"
+#include "builtin/builtin_exec_internal.h"
 
 #ifndef _WIN32
 /* ============================================================================

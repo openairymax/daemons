@@ -37,7 +37,11 @@
 #include <unistd.h>
 #endif
 
-#include "builtin/tool_builtin_internal.h"
+#include "builtin/builtin_buf_internal.h"
+#include "builtin/builtin_exec_internal.h"
+#include "builtin/builtin_fs_internal.h"
+#include "builtin/builtin_maths_internal.h"
+#include "builtin/builtin_time_internal.h"
 
 int builtin_fs_confine(const char *orig_path, int for_write, char *resolved, size_t resolved_cap,
                        tool_result_t *res)
