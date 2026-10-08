@@ -10,7 +10,6 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "io.h"
-#include "market_service.h"
 #include "platform.h"
 #include "svc_logger.h"
 
