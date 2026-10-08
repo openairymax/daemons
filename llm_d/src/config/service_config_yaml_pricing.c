@@ -17,7 +17,7 @@
 
 #include <stdlib.h>
 
-#include "config/internal.h"
+#include "config/config_internal.h"
 #include "config/types.h"
 
 #ifdef HAVE_YAML

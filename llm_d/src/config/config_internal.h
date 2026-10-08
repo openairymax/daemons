@@ -2,7 +2,7 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
 /**
- * @file internal.h
+ * @file config_internal.h
  * @brief llm_d config 域（模型配置装载）内部声明。
  *
  * 由 llm_service_internal.h（253 行枢纽头，B16-S1 拆片）迁入：YAML/JSON
