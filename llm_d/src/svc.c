@@ -17,7 +17,6 @@
 #include "svc_logger.h"
 #include "svc_llm_d.h"
 #include "llm_d_internal.h"
-#include "llm_service.h"
 
 #include "daemon_cfg_file.h"
 
