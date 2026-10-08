@@ -21,7 +21,7 @@ set(DAEMON_COMMON_INCLUDE_DIR ${DAEMON_COMMON_DIR}/include)
 set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
-set(CUPOLAS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../cupolas)
+set(CUPOLAS_DIR "${CUPOLAS_SRC_DIR}")
 set(CUPOLAS_INCLUDE_DIR ${CUPOLAS_DIR}/include)
 
 # ==================== Cupolas 服务静态库 ====================

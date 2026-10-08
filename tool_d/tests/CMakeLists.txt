@@ -83,8 +83,8 @@ set(TOOL_COMMON_INCLUDES
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../cupolas/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../cupolas/src/guards
+    ${CUPOLAS_SRC_DIR}/include
+    ${CUPOLAS_SRC_DIR}/src/guards
 )
 
 foreach(TEST_SRC ${TOOL_TEST_SOURCES})
