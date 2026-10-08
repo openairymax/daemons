@@ -14,7 +14,6 @@
 #define AIRY_RT_LLM_RPC_INTERNAL_H
 
 #include "service.h"
-#include "providers/core/registry.h"
 
 #include <stddef.h>
 
