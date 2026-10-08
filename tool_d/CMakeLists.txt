@@ -206,13 +206,12 @@ target_include_directories(tool_d PRIVATE
 # 依赖拓扑序（成员级 DAG，单遍左到右解析完备，无需 whole-archive）：
 # cognition/engine.o -> coreloopthree（hook/config/gccp）-> llm_service；
 # gccp.o -> llm_service/llm_service_complete；tool_service -> syscall 链。
+# airy_cognition/airy_core/airy_memory 不经本目标直链：tool_d 自身对象零符号
+# 需求，三库均由 tool_d 直链的 airy_coreloopthree PUBLIC 传播覆盖。
 target_link_libraries(tool_d PRIVATE
     airy_tool_service
-    airy_cognition
     airy_coreloopthree
     airy_llm_service
-    airy_core
-    airy_memory
     airy_atoms
     airy_common
     Threads::Threads
