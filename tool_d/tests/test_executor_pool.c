@@ -20,6 +20,7 @@
 #include "error.h"
 #include "platform.h"
 #include "core/executor.h"
+#include "core/executor_gate.h"
 #include "core/executor_pool.h"
 #include "core/approval_gate.h"
 #include "approval/tool_approval.h"

@@ -15,6 +15,7 @@
 #include "daemon_security.h"
 #include "error.h"
 #include "core/executor.h"
+#include "core/executor_gate.h"
 #include "core/approval_gate.h"
 #include "daemon_platform_ext.h"
 #include "rpc/service.h"
