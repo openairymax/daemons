@@ -20,7 +20,6 @@
 #include <string.h>
 #include <time.h>
 
-#include "svc_auth_internal.h"
 #include "svc_auth_jwt_internal.h"
 
 jwt_global_state_t g_jwt = {.initialized = 0};
