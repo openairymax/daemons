@@ -10,13 +10,14 @@
  * complete / complete_stream 两整请求入口由适配器以两行 shim 交
  * core/adapter.c 通用 driver 编排（密钥刷新、出网、错误归一、流末装配
  * 的唯一实现），适配层仅剩五纯函数槽 + 数据槽——纯函数、零 I/O、
- * 表驱动。机制层（transport.h）禁止适配器自持副本。
+ * 表驱动。机制层（provider_base.h / provider_stream.h）禁止适配器自持副本。
  */
 
 #ifndef LLM_D_PROVIDERS_CORE_ADAPTER_H
 #define LLM_D_PROVIDERS_CORE_ADAPTER_H
 
-#include "transport.h"
+#include "provider_base.h"
+#include "provider_stream.h"
 
 #ifdef __cplusplus
 extern "C" {

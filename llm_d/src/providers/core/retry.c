@@ -14,7 +14,8 @@
 
 #include "daemon_platform_ext.h"
 #include "error.h"
-#include "transport.h"
+#include "provider_transport.h"
+#include "provider_retry.h"
 #include "svc_logger.h"
 
 #include <errno.h>

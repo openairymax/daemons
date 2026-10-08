@@ -32,6 +32,8 @@
 #include "daemon_platform_ext.h"
 #include "error.h"
 #include "providers/core/adapter.h"
+#include "providers/core/provider_transport.h"
+#include "providers/core/provider_retry.h"
 
 #include <arpa/inet.h>
 #include <assert.h>

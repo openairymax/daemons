@@ -8,7 +8,7 @@
  */
 
 #include "toolstream.h"
-#include "transport.h"
+#include "provider_stream.h"
 
 #include "error.h"
 

@@ -25,7 +25,7 @@
 #include "accounting/metrics.h"
 #include "rpc/internal.h"
 #include "providers/core/secrets.h"
-#include "providers/core/transport.h"
+#include "providers/core/provider_http.h"
 
 /**
  * @brief 构造请求的规范化文本（canonical text）：
