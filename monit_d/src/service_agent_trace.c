@@ -12,7 +12,6 @@
 
 #include "airy_memory.h"
 #include "daemon_errors.h"
-#include "monitor_service.h"
 #include "daemon_platform_ext.h"
 #include "monitor_service_internal.h"
 #include "svc_logger.h"
