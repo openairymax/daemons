@@ -14,7 +14,6 @@
 
 #include "airy_memory.h"
 #include "channel_d_internal.h"
-#include "channel_service.h"
 #include "error.h"
 #include "svc_channel_d.h"
 
