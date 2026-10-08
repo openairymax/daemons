@@ -23,16 +23,15 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== Market 服务静态库 ====================
-# publisher/market_service 六域编译为独立静态库，
+# publisher/market_service 五域编译为独立静态库，
 # 供 market_d 可执行文件与集成测试共用。
 # 排除 main.c（含 main()）。
 set(MARKET_SERVICE_SOURCES
     src/publisher.c
     src/market_service_impl.c
     src/market_service_registry.c  # 市场服务-注册域
-    src/market_service_search.c    # 市场服务-搜索域
+    src/market_service_query.c     # 市场服务-只读查询域（检索/清单/更新检查）
     src/market_service_install.c   # 市场服务-安装/卸载域
-    src/market_service_listing.c   # 市场服务-已安装列表/更新域
     src/market_service_config.c    # 市场服务-配置/同步域
 )
 
@@ -113,7 +112,7 @@ endif()
 # ==================== Market daemon 可执行文件 ====================
 # gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c /
 # daemon 配置与端点策略 svc.c 由 daemon_gen.py 生成；RPC 方法域
-# market_rpc.c 为手写业务源。服务域六源单独编译为 airy_market_service
+# market_rpc.c 为手写业务源。服务域五源单独编译为 airy_market_service
 # 静态库（上方），不入 ${MARKET_D_SOURCES}，避免重复编译。
 include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
 

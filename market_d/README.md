@@ -33,9 +33,8 @@
         ↓
   market_service（注册 / 搜索 / 安装 / 发布）
         ├── market_service_registry.c   Agent 与 Skill 注册表
-        ├── market_service_search.c     关键词搜索与分页
+        ├── market_service_query.c      只读查询（搜索 / 清单 / 更新检查）
         ├── market_service_install.c    安装器（版本 / 强制更新 / 安装路径）
-        ├── market_service_listing.c    列举与计数
         ├── publisher.c                 资源发布
         └── market_service_config.c     配置装配
 ```

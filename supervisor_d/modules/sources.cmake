@@ -4,6 +4,5 @@ set(SUPERVISOR_D_SOURCES
     src/svc.c
     src/decl.c
     src/proc.c
-    src/probe.c
     src/ctrl.c
 )
