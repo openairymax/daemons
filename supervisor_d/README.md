@@ -36,12 +36,12 @@ main.c 主循环 ── 每 tick ──▶ proc.c sup_reconcile
         │                       │ reap（waitpid/WaitForSingleObject 收割死因）
         │                       │ CORE: STOPPED/BACKOFF→spawn（退避门控+超限 failed）
         │                       │ AUX: 仅 activate 拉起
-        │                       └ probe.c sup_health_tick（sock 可达性假死判定）
+        │                       └ sup_health_tick（sock 可达性假死判定，同属 proc.c）
         └ ctrl.c sup_ctrl_serve（控制口 JSON-RPC，串行单连接）
 ```
 
-五文件分工：`decl.c` 期望态解析 · `proc.c` 进程原语（spawn/reap/退避/收摊）·
-`probe.c` 端点探测 · `ctrl.c` 控制口 · `main.c` 生命周期与客户端模式。
+四文件分工：`decl.c` 期望态解析 · `proc.c` 进程域（spawn/reap/退避/假死探测/收摊）·
+`ctrl.c` 控制口 · `main.c` 生命周期与客户端模式。
 
 **V13.5 硬约束**：零项目内库链接（`link-whitelist.txt` 允许集为空，linkgate 构建期
 fail-closed 检验）。UDS/TCP、进程原语、JSON 字段提取、日志全部自持，仅链接系统库

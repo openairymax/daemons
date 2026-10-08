@@ -17,7 +17,6 @@
 #include "svc_logger.h"
 #include "svc_tool_d.h"
 #include "tool_d_internal.h"
-#include "tool_service.h"
 
 #include "daemon_cfg_file.h"
 
