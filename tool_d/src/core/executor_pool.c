@@ -19,7 +19,9 @@
 
 #include "airy_memory.h"
 #include "error.h"
-#include "core/executor.h"
+#include "core/executor_budget.h"
+#include "core/executor_run.h"
+#include "core/executor_gate.h"
 #include "core/executor_pool.h"
 #include "tool_service.h"
 #include "platform_misc.h"

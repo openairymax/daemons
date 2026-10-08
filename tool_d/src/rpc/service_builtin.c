@@ -14,7 +14,6 @@
 #include "airy_memory.h"
 #include "daemon_security.h"
 #include "error.h"
-#include "core/executor.h"
 #include "rpc/service.h"
 #include "svc_logger.h"
 #include "rpc/tool_service_internal.h"
