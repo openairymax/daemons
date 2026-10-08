@@ -18,15 +18,11 @@
 extern "C" {
 #endif
 
-
 int route_cost_aware(const llm_route_request_t *request, llm_route_result_t *result);
-
 
 int route_round_robin(const llm_route_request_t *request, llm_route_result_t *result);
 
-
 int route_least_latency(const llm_route_request_t *request, llm_route_result_t *result);
-
 
 int route_quality_first(const llm_route_request_t *request, llm_route_result_t *result);
 
