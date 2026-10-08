@@ -73,14 +73,14 @@ target_include_directories(sched_d PRIVATE
 # 链接库
 # 依赖拓扑序（成员级 DAG，单遍左到右解析完备，无需 whole-archive）：
 # cognition/engine.o -> coreloopthree（hook/config/gccp）-> llm_service/tool_service。
+# svc_common/airy_memory 不经本目标直链：sched_d 自身对象零符号需求，前者经
+# llm_service/tool_service PUBLIC 传播，后者经 airy_coreloopthree PUBLIC 传播。
 target_link_libraries(sched_d PRIVATE
-    svc_common
     airy_cognition
     airy_coreloopthree
     airy_llm_service
     airy_tool_service
     airy_core
-    airy_memory
     airy_atoms
     airy_common
     Threads::Threads
