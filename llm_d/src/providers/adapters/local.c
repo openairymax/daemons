@@ -19,6 +19,8 @@
 #include "daemon_errors.h"
 #include "daemon_platform_ext.h"
 #include "core/adapter.h"
+#include "core/provider_envelope.h"
+#include "core/provider_http.h"
 #include "core/toolstream.h"
 #include "svc_logger.h"
 

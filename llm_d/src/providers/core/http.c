@@ -13,7 +13,8 @@
 #include "error.h"
 #include "rate_limit.h" /* provider_http_exec 的限流分支（provider_request_t.rl） */
 #include "secrets.h" /* explicit_bzero SSoT shim：macOS/Windows 无系统声明 */
-#include "transport.h"
+#include "provider_http.h"
+#include "provider_retry.h"
 #include "svc_logger.h"
 
 #include <curl/curl.h>

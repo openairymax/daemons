@@ -17,6 +17,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "adapter.h"
+#include "provider_http.h"
 #include "secrets.h"
 #include "toolstream.h"
 #include "svc_logger.h"

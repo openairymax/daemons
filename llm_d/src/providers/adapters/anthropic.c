@@ -10,6 +10,7 @@
 
 #include "airy_memory.h"
 #include "core/adapter.h"
+#include "core/provider_envelope.h"
 #include "core/toolstream.h"
 #include "error.h"
 #include "svc_logger.h"
