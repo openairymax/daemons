@@ -11,8 +11,6 @@
  * channel_service_internal.h 共享。
  */
 
-#include "channel_service.h"
-
 #include "airy_mman.h"
 #include "atomic_compat.h"
 #include "daemon_errors.h"

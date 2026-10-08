@@ -14,8 +14,6 @@
  * 收发与连通性探测见 channel_io.c；Windows 策略见 channel_win32.c。
  */
 
-#include "channel_service.h"
-
 #include "airy_mman.h"
 #include "daemon_errors.h"
 #include "airy_memory.h"
