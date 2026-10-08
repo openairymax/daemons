@@ -7,9 +7,10 @@
  *        domain + blueprint-scheduling DAG domain).
  * @details Defines struct sched_service (opaque externally; full layout
  *          here) and the DAG task-graph internal structures; declares
- *          cross-file shared helpers. For use only by the sched_service_*.c
- *          and sched_dag_*.c translation units (split by functional domain:
- *          impl/agent/task/worker + dag_impl/engine/worker/parse).
+ *          cross-file shared helpers. Included directly only by the
+ *          sched_service_*.c units (impl/agent/task/worker); the DAG-side
+ *          contract header sched_dag_internal.h re-exposes it to the
+ *          sched_dag_*.c units (dag_impl/engine/worker/parse).
  */
 
 #ifndef AIRY_RT_SCHED_SERVICE_INTERNAL_H

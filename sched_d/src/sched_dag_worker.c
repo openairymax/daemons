@@ -15,7 +15,6 @@
  *          DAG public APIs live in sched_dag_impl.c.
  */
 
-#include "sched_service_internal.h"
 #include "sched_dag_internal.h"
 #include "airy_memory.h"
 #include "error.h"
