@@ -205,7 +205,7 @@ typedef struct {
  * @return Service instance, NULL on failure
  * @note cupolas is a process-level singleton library (cupolas_init); this
  *       instance only carries stats and config metadata. Actual module init
- *       is done by daemon_cupolas_init() in main().
+ *       is done by daemon_dome_init() in main().
  */
 cupolas_service_t *cupolas_service_create(const char *config_path);
 

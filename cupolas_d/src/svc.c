@@ -8,7 +8,7 @@
  * 安全穹顶 PDP 本体 + 生命周期五钩子。端点配置族（daemon 段解析、
  * 基线回填、cmdline use_tcp 融合）委托 daemon_cfg_file 机制件
  * （daemon_ep_load/free/apply）；本文件无策略键，纯端点户。穹顶引导
- * （daemon_cupolas_init，manifest cupolas:"full"）由生成 main.c 承担；
+ * （daemon_dome_init，manifest cupolas:"full"）由生成 main.c 承担；
  * 本文件持有动态策略引擎（PDP，M2-S3 唯一策略持有者）与 cupolas
  * 服务单例的创建、注入与销毁。业务逻辑在 service.c 与 cupolas_rpc_*.c。
  */

@@ -5,9 +5,9 @@
  * @file daemon_security_vault.c
  * @brief Daemon Layer Security - vault credentials, audit and status domain.
  *
- * Phase 2.3a split from daemon_security.c: encrypted credential storage/
- * retrieval backed by cupolas_vault (ACL fail-closed), the durable audit
- * log (E-6 traceability, fsync after every event), and module status
+ * Phase 2.3a split from daemon_security.c: credential storage/retrieval
+ * delegated to an injected vault provider (ACL fail-closed), the durable
+ * audit log (E-6 traceability, fsync after every event), and module status
  * introspection.
  *
  * The public API surface (daemon_security.h) is unchanged by this split.
@@ -20,8 +20,6 @@
 
 #include "error.h"
 
-#include "cupolas_error.h"
-#include "cupolas_vault.h"
 #include "cupolas_vault_cred_type.h"
 
 #include <string.h>
@@ -45,37 +43,28 @@ int daemon_store_credential(const char *cred_id, cupolas_vault_cred_type_t cred_
 
     if (!g_security_ctx.initialized) {
         airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR(
-            "daemon_store_credential: daemon_security not initialized — "
-            "call daemon_cupolas_init() during startup. DENYING credential storage (fail-closed).");
+        SVC_LOG_ERROR("daemon_store_credential: daemon_security not initialized — "
+                      "initialize at startup. DENYING credential storage (fail-closed).");
         return AIRY_ERR_STATE_ERROR;
     }
 
-    if (!g_security_ctx.vault_enabled || !g_security_ctx.vault) {
+    if (!g_security_ctx.vault_enabled || !g_security_ctx.vault ||
+        !g_security_ctx.vault_provider || !g_security_ctx.vault_provider->store) {
         airy_mtx_unlock(&g_security_mutex);
         AIRY_ERROR(AIRY_ERR_NOT_SUPPORTED, "vault is disabled or unavailable");
     }
 
-    cupolas_vault_t *vault = g_security_ctx.vault;
-    int rc = cupolas_vault_store(vault, cred_id, cred_type, data, data_len, NULL);
-    if (rc != 0) {
-        airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR("daemon_store_credential: cupolas_vault_store FAILED for cred_id=%s (rc=%d)",
-                      cred_id, rc);
-        return AIRY_ERR_UNKNOWN;
-    }
-
-    /* Keep the owner_agent_id ACL semantics: the storer is the default
-     * authorizer (read/write/delete); other agents must be explicitly granted
-     * access via grant_access (vault denies by default, fail-closed). */
+    /* The storer is the default authorizer (read/write/delete); the provider
+     * grants it access on store (vault denies by default, fail-closed). */
     const char *owner = agent_id ? agent_id : "system";
-    int acl_rc = cupolas_vault_grant_access(vault, cred_id, owner,
-                                            CUPOLAS_VAULT_OP_READ | CUPOLAS_VAULT_OP_WRITE |
-                                                CUPOLAS_VAULT_OP_DELETE,
-                                            0);
-    if (acl_rc != 0) {
-        SVC_LOG_WARN("daemon_store_credential: grant_access FAILED for cred_id=%s owner=%s (rc=%d)",
-                     cred_id, owner, acl_rc);
+    airy_err_t rc =
+        g_security_ctx.vault_provider->store(g_security_ctx.vault, cred_id, cred_type, data,
+                                             data_len, owner);
+    if (rc != AIRY_OK) {
+        airy_mtx_unlock(&g_security_mutex);
+        SVC_LOG_ERROR("daemon_store_credential: vault store FAILED for cred_id=%s (rc=%d)", cred_id,
+                      (int)rc);
+        return AIRY_ERR_UNKNOWN;
     }
 
     airy_mtx_unlock(&g_security_mutex);
@@ -97,12 +86,12 @@ int daemon_retrieve_credential(const char *cred_id, const char *agent_id, uint8_
     if (!g_security_ctx.initialized) {
         airy_mtx_unlock(&g_security_mutex);
         SVC_LOG_ERROR("daemon_retrieve_credential: daemon_security not initialized — "
-                      "call daemon_cupolas_init() during startup. DENYING credential retrieval "
-                      "(fail-closed).");
+                      "initialize at startup. DENYING credential retrieval (fail-closed).");
         return AIRY_ERR_STATE_ERROR;
     }
 
-    if (!g_security_ctx.vault_enabled || !g_security_ctx.vault) {
+    if (!g_security_ctx.vault_enabled || !g_security_ctx.vault ||
+        !g_security_ctx.vault_provider || !g_security_ctx.vault_provider->retrieve) {
         airy_mtx_unlock(&g_security_mutex);
         AIRY_ERROR(AIRY_ERR_NOT_SUPPORTED, "vault is disabled or unavailable");
     }
@@ -113,31 +102,19 @@ int daemon_retrieve_credential(const char *cred_id, const char *agent_id, uint8_
     const char *requester = agent_id ? agent_id : "system";
 
     size_t buf_len = *data_len;
-    int rc = cupolas_vault_retrieve(g_security_ctx.vault, cred_id, requester, data, &buf_len);
-    if (rc != 0) {
+    airy_err_t rc = g_security_ctx.vault_provider->retrieve(g_security_ctx.vault, cred_id,
+                                                            requester, data, &buf_len);
+    if (rc != AIRY_OK) {
         airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_WARN("daemon_retrieve_credential: cupolas_vault_retrieve FAILED for cred_id=%s "
-                     "agent=%s (rc=%d) — %s",
-                     cred_id, requester, rc,
-                     (rc == (int)cupolas_ERR_INVALID_PARAM || rc == (int)cupolas_ERR_NULL_POINTER) ?
-                         "credential not found or access denied" :
-                         "internal error");
-        return (rc == (int)cupolas_ERR_NULL_POINTER) ? AIRY_ERR_NOT_FOUND :
-                                                       AIRY_ERR_PERMISSION_DENIED;
+        SVC_LOG_WARN("daemon_retrieve_credential: vault retrieve FAILED for cred_id=%s "
+                     "agent=%s (rc=%d)",
+                     cred_id, requester, (int)rc);
+        return rc;
     }
 
     *data_len = buf_len;
     airy_mtx_unlock(&g_security_mutex);
     return AIRY_OK;
-}
-
-cupolas_vault_t *daemon_security_get_vault(void)
-{
-    ensure_mutex_initialized();
-    airy_mtx_lock(&g_security_mutex);
-    cupolas_vault_t *vault = g_security_ctx.vault;
-    airy_mtx_unlock(&g_security_mutex);
-    return vault;
 }
 
 int daemon_audit_log_event(const char *service_name, const char *operation, const char *resource,
@@ -152,9 +129,8 @@ int daemon_audit_log_event(const char *service_name, const char *operation, cons
     /* P2-3：状态检查移入锁内，避免与 shutdown 的时序竞态 */
     if (!g_security_ctx.initialized) {
         airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR(
-            "daemon_audit_log_event: daemon_security not initialized — "
-            "call daemon_cupolas_init() during startup. Audit event DROPPED (fail-closed).");
+        SVC_LOG_ERROR("daemon_audit_log_event: daemon_security not initialized — "
+                      "initialize at startup. Audit event DROPPED (fail-closed).");
         return AIRY_ERR_STATE_ERROR;
     }
     if (!g_security_ctx.audit_enabled) {

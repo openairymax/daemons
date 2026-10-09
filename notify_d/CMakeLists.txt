@@ -63,6 +63,9 @@ target_link_libraries(notify_d PRIVATE
     airy_coreloop_hooks # R7 并户：hook registry/executor/builtin handlers
     Threads::Threads
 )
+# 0.1.19 §254b: boot 接线 vault 策略单元（daemon_dome_init_pep/_cleanup 符号
+# 面）；hook_svc.c 的 safety_guard.h 头面改经 dome PUBLIC cupolas 传递取得。
+target_link_libraries(notify_d PRIVATE airy_security_dome)
 
 if(NOT MSVC)
 target_compile_options(notify_d PRIVATE

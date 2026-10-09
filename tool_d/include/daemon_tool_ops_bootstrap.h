@@ -11,7 +11,7 @@
  * implementation (airy_tool_service: approval lifecycle/check, tool
  * execution and result release) at startup:
  *   - daemon_tool_ops_init(): in main() after airy_log_init(), alongside
- *     daemon_cupolas_init()/daemon_heapstore_init() (idempotent)
+ *     daemon_dome_init()/daemon_heapstore_init() (idempotent)
  *   - daemon_tool_ops_cleanup(): call before main() exits
  *
  * After cleanup the table is detached and atoms call sites degrade

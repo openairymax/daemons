@@ -32,8 +32,8 @@ socket。它把守护进程样板收敛成一套可复用设施：服务生命�
   包签名校验、凭据与审计），并与 `cupolas` 安全穹顶集成。
 - **容错与可观测**：`api_recovery`（重试/降级/熔断策略）、`alert_manager`、
   `unified_metrics`、`log_sanitizer`。
-- **运行时数据引导**：`daemon_cupolas_bootstrap`（安全穹顶）、`daemon_heapstore_bootstrap`
-  （运行时数据存储）。
+- **运行时数据引导**：`daemon_heapstore_bootstrap`（运行时数据存储）；安全穹顶引导
+  归 cupolas_d 策略单元 `airy_security_dome`（0.1.19 §254b 机制/策略分离）。
 - **ops 表注入**：`daemon_ipc_ops_bootstrap` 把上述能力的函数表注入 `atoms` 侧抽象接口，
   使 `atoms` 无需反向链接 `daemons` 即可调用 IPC/RPC/服务发现。
 
@@ -78,7 +78,7 @@ socket。它把守护进程样板收敛成一套可复用设施：服务生命�
 | `src/svc/` | 4 | `svc_common.c`（服务生命周期核心）、`svc_common_registry.c`（进程内注册表）、`svc_common_ops.c`（状态查询/异步请求）、`svc_model_defaults.c`（`model.yaml` 全局默认模型提取，`llm_d` / `gateway_d` 共用） |
 | `src/auth/` | 6 | `svc_auth.c`（认证中间件聚合）、`svc_auth_jwt.c` / `svc_auth_jwt_crypto.c` / `svc_auth_jwt_verify.c`（JWT 生命周期、HMAC/Base64 原语、签名校验）、`svc_auth_apikey.c`、`svc_auth_ratelimit.c` |
 | `src/security/` | 4 | `daemon_security.c`（初始化/消毒）、`_acl.c`（ACL 授权）、`_signature.c`（包签名验证）、`_vault.c`（凭据与审计） |
-| `src/daemon/` | 6 | `daemon_event_driver.c`（事件驱动主循环）、`daemon_rpc_client.c`、`daemon_dep.c`（硬依赖探测与降级上报）、`daemon_cupolas_bootstrap.c`、`daemon_heapstore_bootstrap.c`、`daemon_ipc_ops_bootstrap.c` |
+| `src/daemon/` | 5 | `daemon_event_driver.c`（事件驱动主循环）、`daemon_rpc_client.c`、`daemon_dep.c`（硬依赖探测与降级上报）、`daemon_heapstore_bootstrap.c`、`daemon_ipc_ops_bootstrap.c` |
 
 > 跨进程服务发现全家族（原 `src/discovery/` 7 文件）已迁 `commons/utils/sd/`
 > （g14 补完 P0.17 阶段 4 半程迁移），符号经 `airy_common` PUBLIC 链接提供；

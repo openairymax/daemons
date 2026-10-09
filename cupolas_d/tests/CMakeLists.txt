@@ -1,8 +1,9 @@
 # Copyright (c) 2026 SPHARX. All Rights Reserved.
 
 # cupolas_d 服务层测试：经 airy_cupolas_service（STATIC，PUBLIC 面传递
-# svc_common / cupolas / cjson-yaml / Threads / platform 及全部 include）
-# 链接 service.c 与 cupolas 库真实实现；daemon_cupolas_init 全量引导
+# airy_security_dome 策略单元及经其传递的 svc_common / cupolas /
+# cjson-yaml / Threads / platform 与全部 include）链接 service.c 与
+# cupolas 库真实实现；daemon_dome_init 全量引导
 # （permission + sanitizer + audit + vault + entitlements + network），
 # 严禁桩实现（IRON-2）。
 
