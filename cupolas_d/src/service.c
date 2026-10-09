@@ -17,7 +17,7 @@
  *
  * Design notes:
  * - cupolas is a process-level singleton library (cupolas_init); module
- *   initialization is done by main() via daemon_cupolas_init("cupolas_d");
+ *   initialization is done by main() via daemon_dome_init("cupolas_d");
  *   this service instance only carries config metadata and real runtime
  *   stats (atomic counters: permission-check count / sanitize count).
  * - Stats are real counts: incremented on every check_permission /
@@ -32,6 +32,7 @@
 #include "cupolas_network_security.h"
 #include "cupolas_vault.h"
 #include "daemon_security.h"
+#include "daemon_security_dome.h"
 #include "dynamic_policy_engine.h"
 #include "svc_logger.h"
 
@@ -288,9 +289,9 @@ char *cupolas_service_get_stats_json(cupolas_service_t *svc)
     return json;
 }
 
-/* The vault instance is opened by daemon_security (daemon_cupolas_init ->
- * daemon_security_init); this service reuses the same instance via
- * daemon_security_get_vault(), consistent with
+/* The vault instance is opened by the security dome policy unit
+ * (daemon_dome_init -> daemon_security_init); this service reuses the same
+ * instance via cupolas_dome_vault(), consistent with
  * daemon_store/retrieve_credential reads and writes. */
 
 int cupolas_service_vault_store(cupolas_service_t *svc, const cupolas_vault_store_params_t *params,
@@ -301,7 +302,7 @@ int cupolas_service_vault_store(cupolas_service_t *svc, const cupolas_vault_stor
     if (!params->cred_id || !params->data || params->data_len == 0)
         return AIRY_ERR_INVALID_PARAM;
 
-    cupolas_vault_t *vault = daemon_security_get_vault();
+    cupolas_vault_t *vault = cupolas_dome_vault();
     if (!vault)
         return AIRY_ERR_STATE_ERROR;
 
@@ -337,7 +338,7 @@ int cupolas_service_vault_retrieve(cupolas_service_t *svc,
     if (!params->cred_id)
         return AIRY_ERR_INVALID_PARAM;
 
-    cupolas_vault_t *vault = daemon_security_get_vault();
+    cupolas_vault_t *vault = cupolas_dome_vault();
     if (!vault)
         return AIRY_ERR_STATE_ERROR;
 
@@ -398,7 +399,7 @@ int cupolas_service_vault_delete(cupolas_service_t *svc,
     if (!params->cred_id)
         return AIRY_ERR_INVALID_PARAM;
 
-    cupolas_vault_t *vault = daemon_security_get_vault();
+    cupolas_vault_t *vault = cupolas_dome_vault();
     if (!vault)
         return AIRY_ERR_STATE_ERROR;
 
@@ -423,7 +424,7 @@ char *cupolas_service_vault_list_json(cupolas_service_t *svc, int cred_type)
     if (!svc)
         return NULL;
 
-    cupolas_vault_t *vault = daemon_security_get_vault();
+    cupolas_vault_t *vault = cupolas_dome_vault();
     if (!vault)
         return NULL;
 
@@ -466,7 +467,7 @@ int cupolas_service_vault_rotate(cupolas_service_t *svc,
         params->strategy > CUPOLAS_VAULT_ROTATE_PRIORITY)
         return AIRY_ERR_INVALID_PARAM;
 
-    cupolas_vault_t *vault = daemon_security_get_vault();
+    cupolas_vault_t *vault = cupolas_dome_vault();
     if (!vault)
         return AIRY_ERR_STATE_ERROR;
 

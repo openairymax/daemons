@@ -33,7 +33,7 @@
  *     chain. To disable, set AIRY_GATEWAY_ACL_ALLOW_SHELL=false to deny
  *     explicitly (only "false"/"0" count as off; other values allow).
  *
- * Must run after daemon_security initialization (daemon_cupolas_init_pep).
+ * Must run after daemon_security initialization (daemon_dome_init_pep).
  */
 void gw_acl_register_defaults(void)
 {

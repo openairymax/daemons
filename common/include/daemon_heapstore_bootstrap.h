@@ -14,7 +14,7 @@
  *   - daemon_heapstore_log(): service access-log write (used by gateway
  *     forwarding chains)
  *
- * Same pattern as daemon_cupolas_init: init failure logs FATAL but does
+ * Same pattern as daemon_dome_init: init failure logs FATAL but does
  * not abort; service layers degrade on unavailable storage (non-fatal,
  * keeping the daemon runnable).
  */
@@ -31,7 +31,7 @@ extern "C" {
  * @brief Initialize the heapstore runtime data store (unified bootstrap).
  *
  * Call in daemon main() after airy_log_init() (alongside
- * daemon_cupolas_init). Store root is $AIRY_HOME/data/agentrt/heapstore.
+ * daemon_dome_init). Store root is $AIRY_HOME/data/agentrt/heapstore.
  *
  * @param daemon_name Daemon name (e.g. "gateway_d"), used in logs
  * @return AIRY_SUCCESS on success; error code on failure (FATAL logged,

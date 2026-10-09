@@ -18,8 +18,8 @@
 
 #include "gateway_pep_cache.h"
 #include "gateway_biz_internal.h"
-#include "daemon_cupolas_bootstrap.h"
 #include "daemon_security.h"
+#include "daemon_security_dome.h"
 #include "platform.h"
 
 #include <assert.h>
@@ -178,7 +178,7 @@ static void t_epoch_parse(void)
 static void t_fallback_acl(void)
 {
     /* PDP 不可达（无 socket 路径）→ 降级本地 ACL */
-    assert(daemon_cupolas_init_pep("pep_test") == AIRY_OK);
+    assert(daemon_dome_init_pep("pep_test") == AIRY_OK);
     daemon_security_add_acl_rule(GW_EXTERNAL_AGENT_ID, "fs_read", true);
     daemon_security_add_acl_rule(GW_EXTERNAL_AGENT_ID, "fs_write", false);
 

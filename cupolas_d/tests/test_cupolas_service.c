@@ -3,7 +3,7 @@
 
 /**
  * @file test_cupolas_service.c
- * @brief cupolas_d 服务层真实性测试：daemon_cupolas_init 全量引导后
+ * @brief cupolas_d 服务层真实性测试：daemon_dome_init 全量引导后
  *        直接驱动 cupolas_service_* 真实实现（permission/sanitizer/
  *        audit/vault/entitlements/network），严禁桩。
  *
@@ -22,8 +22,8 @@
  */
 
 #include "cupolas_service.h"
-#include "daemon_cupolas_bootstrap.h"
 #include "daemon_security.h"
+#include "daemon_security_dome.h"
 #include "error.h"
 #include "airy_memory.h"
 
@@ -300,8 +300,8 @@ int main(void)
 {
     /* 全量引导（非 PEP 最小 guard）：vault + entitlements + network 真实
      * 初始化，测试驱动的是完整安全穹顶。 */
-    if (daemon_cupolas_init("cupolas_d") != AIRY_OK) {
-        printf("daemon_cupolas_init failed\n");
+    if (daemon_dome_init("cupolas_d") != AIRY_OK) {
+        printf("daemon_dome_init failed\n");
         return 1;
     }
 
@@ -335,7 +335,7 @@ int main(void)
     }
 
     cupolas_service_destroy(g_svc);
-    daemon_cupolas_cleanup();
+    daemon_dome_cleanup();
     printf("cupolas_service: %d/%d passed\n", pass, run);
     return pass == run ? 0 : 1;
 }

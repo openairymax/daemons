@@ -55,6 +55,8 @@ target_link_libraries(channel_d PRIVATE
     Threads::Threads
     airy_platform_libs
 )
+# 0.1.19 §254b: boot 接线 vault 策略单元（daemon_dome_init_pep/_cleanup 符号面）
+target_link_libraries(channel_d PRIVATE airy_security_dome)
 # R-09-119: Linux FHS 路径宏仅在 Linux 设置；macOS 使用 platform.h 的
 # 默认路径（./agentrt/config、./agentrt/logs），避免覆盖后无写权限。
 if(UNIX AND NOT APPLE)

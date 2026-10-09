@@ -454,6 +454,8 @@ target_link_libraries(gateway_d PRIVATE
     airy_syscall
     Threads::Threads
 )
+# 0.1.19 §254b: boot 接线 vault 策略单元（daemon_dome_init_pep/_cleanup 符号面）
+target_link_libraries(gateway_d PRIVATE airy_security_dome)
 if(AIRY_HAS_CJSON)
     target_link_libraries(gateway_d PRIVATE
         $<TARGET_OBJECTS:gateway_lib_obj>

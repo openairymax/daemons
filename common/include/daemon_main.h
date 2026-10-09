@@ -24,7 +24,6 @@
 
 #include "daemon_bootstrap_sd.h"
 #include "daemon_cfg_file.h"
-#include "daemon_cupolas_bootstrap.h"
 #include "daemon_event_driver.h"
 #include "daemon_platform_ext.h"
 #include "jsonrpc_helpers.h"
@@ -327,8 +326,10 @@ typedef struct {
     /* ops 引导集（词表 ipc/llm/tool；空集置 NULL/0） */
     const daemon_op_t *ops;
     size_t ops_count;
-    /* cupolas 引导策略：pep=daemon_cupolas_init_pep，full=daemon_cupolas_init */
-    airy_err_t (*cupolas_init)(const char *daemon);
+    /* 安全穹顶引导策略（0.1.19 §254b：机制核不感知穹顶实现，
+     * 策略单元经函数指针单向接线：pep/full init 与 cleanup） */
+    airy_err_t (*sec_init)(const char *daemon);
+    void (*sec_cleanup)(void);
     /* svc 策略钩子（实现: 各户 src/svc.c） */
     int (*svc_prepare)(const char *config_path);
     void (*svc_endpoint)(daemon_endpoint_t *ep, int cmdline_tcp);
@@ -345,17 +346,18 @@ typedef struct {
  * @brief 入口接线模板：svc 六钩子与两张静态表的恒定连线（SSoT）。
  *
  * 钩子名十二户恒定（DAEMON_DECLARE_COMMON 约定面），唯 ops 表、方法表
- * 与 cupolas 模式随户异；以模板宏收敛生成户 main.c 的横向接线副本
+ * 与穹顶模式随户异；以模板宏收敛生成户 main.c 的横向接线副本
  * （0.1.19 §79），装配机制仍整体在 daemon_boot()。
  *
- * 形参顺序（ops_, methods_, activate_, cupolas_init_）：两张静态表
- * 在前，激活钩子策略居第三。activate_ 为激活钩子策略：实体户传
+ * 形参顺序（ops_, methods_, activate_, sec_init_, sec_cleanup_）：两张
+ * 静态表在前，激活钩子策略居第三。activate_ 为激活钩子策略：实体户传
  * svc_activate（src/svc.c），无激活策略户传 daemon_svc_noop 缺省
- * （0.1.19 §80，svc.c 不再逐户维护空桩）。
+ * （0.1.19 §80，svc.c 不再逐户维护空桩）。sec_init_/sec_cleanup_ 为
+ * 安全穹顶策略单元接线（§254b）：机制核经指针单向调用，不感知实现。
  */
-#define DAEMON_BOOT_WIRE(ops_, methods_, activate_, cupolas_init_)             \
+#define DAEMON_BOOT_WIRE(ops_, methods_, activate_, sec_init_, sec_cleanup_)   \
     .ops = (ops_), .ops_count = sizeof(ops_) / sizeof((ops_)[0]),              \
-    .cupolas_init = (cupolas_init_),                                           \
+    .sec_init = (sec_init_), .sec_cleanup = (sec_cleanup_),                    \
     .svc_prepare = svc_prepare, .svc_endpoint = svc_endpoint,                  \
     .svc_activate = (activate_), .svc_attach = svc_attach,                     \
     .svc_teardown = svc_teardown, .svc_destroy = svc_destroy,                  \

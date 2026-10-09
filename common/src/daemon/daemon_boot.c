@@ -168,8 +168,8 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
     else
         SVC_LOG_WARN("corekern init failed (%d), degraded (badge=0)", core_ret);
 
-    if (boot->cupolas_init)
-        boot->cupolas_init(boot->daemon);
+    if (boot->sec_init)
+        boot->sec_init(boot->daemon);
     for (size_t i = 0; i < boot->ops_count; i++)
         boot->ops[i].init(boot->daemon);
 
@@ -233,7 +233,8 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
                             boot->svc_destroy, boot->running_lock);
     for (size_t i = boot->ops_count; i > 0; i--)
         boot->ops[i - 1].cleanup();
-    daemon_cupolas_cleanup();
+    if (boot->sec_cleanup)
+        boot->sec_cleanup();
     log_cleanup();
     return 0;
 

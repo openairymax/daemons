@@ -38,7 +38,7 @@ int daemon_check_tool_permission(const char *agent_id, const char *tool_name, co
     if (!g_security_ctx.initialized) {
         airy_mtx_unlock(&g_security_mutex);
         SVC_LOG_ERROR("daemon_check_tool_permission: daemon_security not initialized — "
-                      "call daemon_cupolas_init() during startup. DENYING %s/%s (fail-closed).",
+                      "initialize at startup. DENYING %s/%s (fail-closed).",
                       agent_id, tool_name);
         return AIRY_EPERM;
     }
@@ -85,7 +85,7 @@ int daemon_check_llm_permission(const char *agent_id, const char *model_name, co
     if (!g_security_ctx.initialized) {
         airy_mtx_unlock(&g_security_mutex);
         SVC_LOG_ERROR("daemon_check_llm_permission: daemon_security not initialized — "
-                      "call daemon_cupolas_init() during startup. DENYING %s/%s (fail-closed).",
+                      "initialize at startup. DENYING %s/%s (fail-closed).",
                       agent_id, model_name);
         return AIRY_EPERM;
     }
@@ -140,9 +140,8 @@ int daemon_security_add_acl_rule(const char *agent_id, const char *resource, boo
 
     if (!g_security_ctx.initialized) {
         airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR(
-            "daemon_security_add_acl_rule: daemon_security not initialized — "
-            "call daemon_cupolas_init() during startup. DENYING ACL rule add (fail-closed).");
+        SVC_LOG_ERROR("daemon_security_add_acl_rule: daemon_security not initialized — "
+                      "initialize at startup. DENYING ACL rule add (fail-closed).");
         return AIRY_ERR_STATE_ERROR;
     }
 

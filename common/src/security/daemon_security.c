@@ -45,15 +45,11 @@
 /* pthread.h provided by platform.h — no direct pthread include (CROSS-01) */
 
 /* ---------- Initialization and Shutdown ---------- */
-#include "cupolas_vault.h"
 
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define DAEMON_VAULT_ID "agentrt"
-#define DAEMON_VAULT_PASSWORD_ENV "AIRY_VAULT_PASSWORD"
 
 daemon_security_ctx_t g_security_ctx = {0};
 
@@ -151,31 +147,28 @@ int daemon_security_init(const daemon_security_config_t *config, airy_err_t *err
         }
     }
 
-    /* Wire up cupolas_vault: credential storage is encrypted and kept by the
-     * vault (no longer a self-maintained plaintext in-memory array). Passphrase
-     * source: the AIRY_VAULT_PASSWORD env var; when unset, an empty passphrase
-     * derives the master key and credentials are only obfuscated (not a
-     * production security baseline) — production deployments must configure
-     * this env var. */
-    if (g_security_ctx.vault_enabled) {
-        const char *vault_password = getenv(DAEMON_VAULT_PASSWORD_ENV);
-        if (!vault_password) {
-            vault_password = "";
-            SVC_LOG_WARN("daemon_security: %s not set - vault uses empty passphrase, "
-                         "set it in production",
-                         DAEMON_VAULT_PASSWORD_ENV);
-        }
-        cupolas_vault_t *vault = NULL;
-        int vault_rc = cupolas_vault_open(DAEMON_VAULT_ID, vault_password, &vault);
-        if (vault_rc == 0 && vault) {
+    /* Credential storage is delegated to the injected vault provider
+     * (mechanism/policy separation): the core holds no concrete vault
+     * dependency and never reads vault identity/passphrase policy. With
+     * no provider configured, storage stays disabled (fail-closed). */
+    g_security_ctx.vault_provider = config ? config->vault_provider : NULL;
+    if (g_security_ctx.vault_enabled && g_security_ctx.vault_provider &&
+        g_security_ctx.vault_provider->open) {
+        void *vault = NULL;
+        airy_err_t vault_rc = g_security_ctx.vault_provider->open(&vault);
+        if (vault_rc == AIRY_OK && vault) {
             g_security_ctx.vault = vault;
-            SVC_LOG_INFO("daemon_security: cupolas vault opened (vault_id=%s)", DAEMON_VAULT_ID);
+            SVC_LOG_INFO("daemon_security: vault provider opened");
         } else {
             g_security_ctx.vault_enabled = false;
-            SVC_LOG_ERROR("daemon_security: cupolas vault open FAILED (vault_id=%s, rc=%d) "
+            SVC_LOG_ERROR("daemon_security: vault provider open FAILED (rc=%d) "
                           "— credential storage disabled (fail-closed)",
-                          DAEMON_VAULT_ID, vault_rc);
+                          (int)vault_rc);
         }
+    } else if (g_security_ctx.vault_enabled) {
+        g_security_ctx.vault_enabled = false;
+        SVC_LOG_WARN("daemon_security: no vault provider configured — "
+                     "credential storage disabled (fail-closed)");
     }
 
     g_security_ctx.initialized = true;
@@ -208,10 +201,12 @@ void daemon_security_shutdown(void)
         return;
     }
 
-    if (g_security_ctx.vault) {
-        cupolas_vault_close(g_security_ctx.vault);
-        g_security_ctx.vault = NULL;
+    if (g_security_ctx.vault && g_security_ctx.vault_provider &&
+        g_security_ctx.vault_provider->close) {
+        g_security_ctx.vault_provider->close(g_security_ctx.vault);
     }
+    g_security_ctx.vault = NULL;
+    g_security_ctx.vault_provider = NULL;
 
     for (size_t i = 0; i < g_security_ctx.acl_count; i++) {
         g_security_ctx.acl_table[i].agent_id[0] = '\0';
@@ -246,14 +241,13 @@ int daemon_sanitize_llm_input(const char *input, char *output, size_t output_siz
     /* P3.15 ACC-DT16: fail-safe — no more lazy-init. When uninitialized,
      * keep sanitizing with SANITIZE_LEVEL_HIGH (sanitizing is
      * a protective operation; refusing would reduce security). Callers should
-     * initialize explicitly via daemon_cupolas_init() at daemon startup. */
+     * initialize daemon_security explicitly at daemon startup. */
     sanitize_level_t level;
     if (!g_security_ctx.initialized) {
         level = SANITIZE_LEVEL_HIGH;
         airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_WARN(
-            "daemon_sanitize_llm_input: daemon_security not initialized — "
-            "call daemon_cupolas_init() during startup. Using SANITIZE_LEVEL_HIGH (fail-safe).");
+        SVC_LOG_WARN("daemon_sanitize_llm_input: daemon_security not initialized — "
+                     "initialize at startup. Using SANITIZE_LEVEL_HIGH (fail-safe).");
     } else {
         level = g_security_ctx.current_sanitize_level;
         airy_mtx_unlock(&g_security_mutex);
@@ -294,8 +288,7 @@ int daemon_sanitize_tool_params(const char *tool_name, const char *params, char 
     airy_mtx_unlock(&g_security_mutex);
     if (sec_uninitialized) {
         SVC_LOG_WARN("daemon_sanitize_tool_params: daemon_security not initialized — "
-                     "call daemon_cupolas_init() during startup. Proceeding with default sanitize "
-                     "(fail-safe).");
+                     "initialize at startup. Proceeding with default sanitize (fail-safe).");
     }
 
     sanitize_string(sanitized_tool, tool_name, tool_buf_size);

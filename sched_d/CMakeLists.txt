@@ -86,6 +86,8 @@ target_link_libraries(sched_d PRIVATE
     Threads::Threads
     airy_platform_libs
 )
+# 0.1.19 §254b: boot 接线 vault 策略单元（daemon_dome_init_pep/_cleanup 符号面）
+target_link_libraries(sched_d PRIVATE airy_security_dome)
 
 # DAG 并行派发（mac_framework 委派模式）：multi_agent_collaboration.h 位于
 # coreloopthree/include，airy_rt.h 位于 corekern/include（head include 链）。

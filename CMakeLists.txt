@@ -74,8 +74,9 @@ add_subdirectory(agent_d)
 add_subdirectory(a2a_d)
 # 双思考系统：CoreLoopThree 认知引擎接入（think.* 命名空间）
 add_subdirectory(think_d)
-# P2-5: cupolas 安全穹顶独立 daemon（cupolas.* 命名空间）
-add_subdirectory(cupolas_d)
+# 0.1.19 §254b：cupolas_d（含 airy_security_dome 策略单元）构建位上移至
+# agentrt 顶层装配区——策略宿主须先于本目录装配且依赖 cupolas 产品挂载，
+# 机制核目录（daemons/common）不再感知穹顶实现。
 # 数学外挂计算服务（maths.* 命名空间）：表达式/统计求值，从 LLM 剥离计算
 add_subdirectory(maths_d)
 # daemon 集群监管者（0.1.18 §12.13 B13）：声明驱动调谐，V13.5 零项目库链接
@@ -145,7 +146,6 @@ airy_print_info("  - mem_d     : ${CMAKE_CURRENT_SOURCE_DIR}/mem_d")
 airy_print_info("  - agent_d   : ${CMAKE_CURRENT_SOURCE_DIR}/agent_d")
 airy_print_info("  - a2a_d     : ${CMAKE_CURRENT_SOURCE_DIR}/a2a_d")
 airy_print_info("  - think_d   : ${CMAKE_CURRENT_SOURCE_DIR}/think_d (双思考系统 Thinkdual)")
-airy_print_info("  - cupolas_d : ${CMAKE_CURRENT_SOURCE_DIR}/cupolas_d (安全穹顶独立服务)")
 airy_print_info("  - maths_d   : ${CMAKE_CURRENT_SOURCE_DIR}/maths_d (数学外挂计算服务)")
 airy_print_info("")
 
@@ -207,10 +207,8 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/think_d/include/
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cupolas_d/include/
-    DESTINATION include/agentrt
-    FILES_MATCHING PATTERN "*.h"
-)
+# 0.1.19 §254b：cupolas_d include 面安装由其自身 CMakeLists 自持（构建位
+# 已上移至顶层装配区）。
 
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/maths_d/include/
     DESTINATION include/agentrt
@@ -218,16 +216,20 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/maths_d/include/
 )
 
 # 导出项目配置
+# 0.1.19 §254b：cupolas_d 构建位上移顶层装配区后，本目录 configure 期无该
+# TARGET，条件与列表均摘除（cupolas_d 不随 daemon export set 导出，
+# build-tree 消费经根装配序直链）。
 if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
    AND TARGET monit_d AND TARGET sched_d AND TARGET market_d
    AND TARGET channel_d AND TARGET notify_d
    AND TARGET mem_d AND TARGET agent_d AND TARGET a2a_d
-   AND TARGET think_d AND TARGET cupolas_d AND TARGET maths_d
+   AND TARGET think_d AND TARGET maths_d
    AND TARGET supervisor_d)
     # 注意：仅导出 daemon 可执行文件（svc_common 导出限制见下）。
     # svc_common 是 STATIC 库且 PUBLIC 链接 airy_common/airy_compile_defs/
-    # cupolas/airy_platform_libs，若将其加入 export(TARGETS) 列表，
-    # 则要求上述 4 个传递依赖也在同一 export set（它们定义于 commons/cupolas 等
+    # airy_platform_libs（0.1.19 §254b 起 cupolas 直链已消解，改经策略单元
+    # airy_security_dome），若将其加入 export(TARGETS) 列表，
+    # 则要求上述传递依赖也在同一 export set（它们定义于 commons 等
     # 独立 CMakeLists.txt，无法在本文件加入）。daemon 可执行文件对 svc_common
     # 及 service 库均为 PRIVATE 链接，不产生 INTERFACE_LINK_LIBRARIES 传递要求，
     # 因此单独导出可执行文件即可满足 build-tree 消费场景。
@@ -235,7 +237,7 @@ if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
                   monit_d sched_d market_d channel_d
                   notify_d
                   mem_d agent_d a2a_d
-                  think_d cupolas_d maths_d
+                  think_d maths_d
                   supervisor_d
         FILE "${CMAKE_CURRENT_BINARY_DIR}/agentrt-daemon-targets.cmake"
     )
@@ -246,10 +248,11 @@ endif()
 # cmake --install --prefix $AIRY_HOME → daemon 装到 $AIRY_HOME/bin。
 # 与 bootstrap AIRY_HOME/bin、agent_build_agents_pypath 的 AIRY_LIB_DIR
 # 回退组成完整生产安装（AIRY_HOME 体系，K8s 节点运行时根类比）。
+# 0.1.19 §254b：cupolas_d 二进制安装由其自身 CMakeLists 自持。
 install(TARGETS gateway_d llm_d tool_d
                 monit_d sched_d market_d channel_d
                 notify_d
-                mem_d agent_d a2a_d think_d cupolas_d maths_d
+                mem_d agent_d a2a_d think_d maths_d
                 supervisor_d
     RUNTIME DESTINATION bin
 )
@@ -261,7 +264,9 @@ install(TARGETS gateway_d llm_d tool_d
 # 未来新增未登记的跨 daemon/模块链接即 fail-closed。
 # 白名单路径由 airy_linkgate.cmake 单点定义，调用点零路径知识。
 # gateway_d 已在自身 CMakeLists 收集（含 airy_gateway_service），不重复。
+# 0.1.19 §254b：cupolas_d 与 airy_security_dome 的收集随构建位上移，由根
+# 装配块执行，本目录不再枚举 cupolas_d。
 foreach(_dg llm_d tool_d monit_d sched_d market_d channel_d notify_d
-           mem_d agent_d a2a_d think_d cupolas_d maths_d supervisor_d)
+           mem_d agent_d a2a_d think_d maths_d supervisor_d)
     airy_linkgate_collect(${_dg})
 endforeach()

@@ -217,6 +217,8 @@ target_link_libraries(tool_d PRIVATE
     Threads::Threads
     airy_platform_libs
 )
+# 0.1.19 §254b: boot 接线 vault 策略单元（daemon_dome_init_pep/_cleanup 符号面）
+target_link_libraries(tool_d PRIVATE airy_security_dome)
 
 if(NOT MSVC)
 target_compile_options(tool_d PRIVATE

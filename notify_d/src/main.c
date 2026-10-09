@@ -15,8 +15,8 @@
  */
 
 #include "airy_rt.h"
-#include "daemon_cupolas_bootstrap.h"
 #include "daemon_ipc_ops_bootstrap.h"
+#include "daemon_security_dome.h"
 #include "error.h"
 #include "logging.h"
 #include "notify_d_internal.h"
@@ -43,7 +43,7 @@ int main(void)
         }
     }
 
-    daemon_cupolas_init_pep("notify_d");
+    daemon_dome_init_pep("notify_d");
     /* IPC/RPC/SD ops table for atoms call sites; init failure is
      * non-fatal: atoms callers degrade gracefully. */
     daemon_ipc_ops_init("notify_d");

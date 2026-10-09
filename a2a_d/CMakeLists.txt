@@ -155,6 +155,8 @@ target_link_libraries(a2a_d PRIVATE
     airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
     Threads::Threads
 )
+# 0.1.19 §254b: boot 接线 vault 策略单元（daemon_dome_init_pep/_cleanup 符号面）
+target_link_libraries(a2a_d PRIVATE airy_security_dome)
 
 # GNU 风格警告旗标：MSVC 不识别 -W*（同上）
 if(NOT MSVC)

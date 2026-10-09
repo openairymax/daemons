@@ -11,7 +11,7 @@
  * implementation (airy_llm_service: completion, streaming completion and
  * response release) at startup:
  *   - daemon_llm_ops_init(): in main() after airy_log_init(), alongside
- *     daemon_cupolas_init()/daemon_heapstore_init() (idempotent)
+ *     daemon_dome_init()/daemon_heapstore_init() (idempotent)
  *   - daemon_llm_ops_cleanup(): call before main() exits
  *
  * After cleanup the table is detached and atoms call sites degrade

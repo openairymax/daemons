@@ -3,10 +3,10 @@
 
 /*
  *
- * daemon_security.h - Daemon Layer Security Integration with cupolas Module
+ * daemon_security.h - Daemon Layer Security Core (mechanism)
  *
  * Design Principles:
- * - Security by Default: All daemon services must use cupolas security features
+ * - Security by Default: All daemon services must use these security features
  * - Zero Trust: Every request must be validated and sanitized
  * - Defense in Depth: Multiple security layers for comprehensive protection
  * - Audit Trail: All operations must be logged for compliance
@@ -35,19 +35,49 @@
  * - cupolas_signer_info.h: signer-info structure
  * - cupolas_vault_cred_type.h: credential-type enum
  *
+ * Credential storage is a policy concern: the mechanism core never links
+ * the concrete vault backend. A daemon_vault_provider_t is injected at
+ * init time (see below) and owns the vault identity, passphrase source
+ * and backend. With no provider the core runs fail-closed (storage off).
+ *
  * Design decisions follow ARCHITECTURAL_PRINCIPLES.md:
  * - K-4 zero trust: all security operations fail closed, deny by default
  * - E-6 traceable errors: full audit logs
  * - S-2 hierarchical decomposition: security types separated from impl
  */
 #include "cupolas_signer_info.h"
-#include "cupolas_vault.h"
 #include "cupolas_vault_cred_type.h"
 #include "sanitize_level.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * @brief Credential vault provider seam (mechanism/policy separation)
+ *
+ * The daemon security core (svc_common) must not link the cupolas product
+ * library. Credential storage is therefore delegated to a policy-side
+ * provider injected via daemon_security_config_t.vault_provider. The
+ * provider owns the vault identity, passphrase source and concrete
+ * backend; the core only sees this abstract operations table. A handle
+ * returned by open() is opaque to the core and is passed back into
+ * store()/retrieve()/close().
+ *
+ * Each operation returns AIRY_OK on success and a negative airy_err_t on
+ * failure. Providers should return AIRY_ERR_NOT_FOUND when a credential
+ * is absent and AIRY_ERR_PERMISSION_DENIED when the requester lacks
+ * access; the core passes these through unchanged.
+ */
+typedef struct daemon_vault_provider {
+    airy_err_t (*open)(void **out_handle); /**< Open backend; *out_handle set on success */
+    void (*close)(void *handle); /**< Close a handle from open(); NULL-safe */
+    airy_err_t (*store)(void *handle, const char *cred_id,
+                        cupolas_vault_cred_type_t cred_type, const uint8_t *data, size_t data_len,
+                        const char *owner); /**< Store cred, grant owner full access */
+    airy_err_t (*retrieve)(void *handle, const char *cred_id, const char *requester, uint8_t *data,
+                           size_t *data_len); /**< Retrieve cred for requester */
+} daemon_vault_provider_t;
 
 /**
  * @brief Daemon security configuration structure
@@ -70,9 +100,9 @@ typedef struct daemon_security_config {
     bool enable_signature_verification; /**< Enable code signature verification */
     const char *trusted_ca_path; /**< Trusted CA bundle path */
     const char *expected_signer; /**< Expected signer CN (optional) */
-    /* Vault configuration */
+    /* Vault configuration (policy backend injected by the caller) */
     bool enable_vault; /**< Enable secure credential storage */
-    const char *vault_storage_path; /**< Path to vault storage */
+    const daemon_vault_provider_t *vault_provider; /**< Credential backend (NULL disables vault) */
     /* Audit configuration */
     bool enable_audit_logging; /**< Enable audit logging */
     const char *audit_log_dir; /**< Directory for audit logs */
@@ -81,7 +111,7 @@ typedef struct daemon_security_config {
 /**
  * @brief Initialize daemon security layer
  *
- * This function initializes all cupolas security components for daemon usage.
+ * This function initializes the security core for daemon usage.
  * It should be called once during daemon startup before any service initialization.
  *
  * @param[in] config Security configuration (NULL for defaults)
@@ -96,11 +126,11 @@ typedef struct daemon_security_config {
  *
  * @details
  * This function performs the following initializations:
- * 1. Initializes the core cupolas module
+ * 1. Initializes the security core state
  * 2. Loads sanitizer rules from configuration
  * 3. Loads permission rules from configuration
  * 4. Initializes code signature verification (if enabled)
- * 5. Opens secure vault (if enabled)
+ * 5. Opens the injected vault provider (if enabled)
  * 6. Configures audit logging
  *
  * Example usage:
@@ -114,7 +144,7 @@ typedef struct daemon_security_config {
  *     .trusted_ca_path = AIRY_CONFIG_DIR "/cupolas/ca",
  *     .expected_signer = "SPHARX Trusted Signer",
  *     .enable_vault = true,
- *     .vault_storage_path = AIRY_CACHE_DIR "/cupolas/vault",
+ *     .vault_provider = &my_vault_provider,
  *     .enable_audit_logging = true,
  *     .audit_log_dir = AIRY_LOG_DIR "/cupolas"
  * };
@@ -131,7 +161,7 @@ int daemon_security_init(const daemon_security_config_t *config, airy_err_t *err
 /**
  * @brief Shutdown daemon security layer
  *
- * Cleans up all cupolas security components. Should be called during daemon shutdown.
+ * Cleans up the security core state. Should be called during daemon shutdown.
  *
  * @note Thread-safe: Safe to call from main thread only during shutdown
  * @reentrant No
@@ -422,14 +452,6 @@ int daemon_security_get_status(int *sanitizer_status, int *permission_status, in
  * @endcode
  */
 int daemon_security_add_acl_rule(const char *agent_id, const char *resource, bool allowed);
-
-/**
- * @brief Get the cupolas vault instance opened by daemon_security.
- * @return Vault handle; NULL if not enabled or not opened
- * @note Opened by daemon_security_init(), consistent with the reads/writes
- *       of daemon_store/retrieve_credential; callers must not close it
- */
-cupolas_vault_t *daemon_security_get_vault(void);
 
 #ifdef __cplusplus
 }

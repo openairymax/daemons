@@ -40,11 +40,11 @@
       │                           ├─ 网络规则（net_add_rule / check_access / get_stats）
       │                           ├─ 授权表（entitlements_load / check）
       │                           └─ 动态策略（policy_load / activate / rollback / status）
-      └─ daemon_cupolas_init / cleanup（安全穹顶生命周期）
+      └─ daemon_dome_init / cleanup（安全穹顶生命周期策略单元）
 ```
 
-- 进程自身是 cupolas 库的宿主：`main()` 调用 `daemon_cupolas_init("cupolas_d")` 完成
-  permission engine + sanitizer + audit logger 初始化，退出前 `daemon_cupolas_cleanup()`
+- 进程自身是 cupolas 库的宿主：`main()` 经 `DAEMON_BOOT_WIRE` 接线 `daemon_dome_init("cupolas_d")`
+  完成 permission engine + sanitizer + audit logger 初始化，退出前 `daemon_dome_cleanup()`
   刷新审计并释放资源。
 - 服务层 `src/service.c` + `src/cupolas_svc_adapter.c` 抽为静态库 `airy_cupolas_service`。
 - RPC 处理按域拆分：`cupolas_rpc_core.c`（权限/净化/命令/规则/审计/健康/统计）、
