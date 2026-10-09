@@ -15,6 +15,7 @@
  * 本模块承载其生命周期（懒创建 + 线程安全）。
  */
 
+#include "airy_lang_gw_ops.h"
 #include "airy_memory.h"
 #include "daemon_platform_ext.h"
 #include "jsonrpc_helpers.h"
@@ -31,15 +32,30 @@
 static airy_lang_gateway_t *g_lang_gw = NULL;
 static airy_mtx_t g_lang_mtx;
 
+/* 生态网关 ops provider 注表（M5-2 C2）：只读转发库 API，与契约签名
+ * 1:1；句柄所有权仍在本模块（懒创建 + g_lang_mtx 锁纪律不变）。注入后
+ * atoms 消费面经 are_ops_get_lang_gw() 分发，未注入（NULL）时旁路。 */
+static const airy_lang_gw_ops_t g_lang_gw_ops = {
+    .create = airy_lang_gateway_create,
+    .destroy = airy_lang_gateway_destroy,
+    .process = airy_lang_gateway_process,
+    .free_canonical = airy_lang_gateway_free_canonical,
+    .post_process = airy_lang_gateway_post_process,
+    .tick = airy_lang_gateway_tick,
+    .stats = airy_lang_gateway_stats,
+};
+
 int lang_svc_init(void)
 {
     if (airy_mtx_init(&g_lang_mtx) != 0)
         return -1;
+    are_ops_set_lang_gw(&g_lang_gw_ops);
     return 0;
 }
 
 void lang_svc_cleanup(void)
 {
+    are_ops_set_lang_gw(NULL);
     airy_mtx_lock(&g_lang_mtx);
     if (g_lang_gw) {
         airy_lang_gateway_destroy(g_lang_gw);
