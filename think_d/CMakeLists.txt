@@ -75,6 +75,14 @@ target_include_directories(airy_think_service PRIVATE
 # 核心依赖：CoreLoopThree 认知引擎（含 LLM 适配器、双思考、GCCP、WorkHall）
 target_link_libraries(airy_think_service PUBLIC airy_coreloopthree svc_common)
 
+# M5-2 C3：语言网关策略库（products/lang_gateway）已不再经机制核桥接传递，
+# 由消费端（本 daemon 的 lang_svc.c）直接链接——符号解析 + 契约头传播
+# （lang_gateway.h / airy_lang_gw_ops.h）同源。产品库未挂载时不链接，
+# lang_svc 相关调用面按未注入降级（fail-open，不阻断 daemon）。
+if(TARGET airy_lang_gateway)
+    target_link_libraries(airy_think_service PUBLIC airy_lang_gateway)
+endif()
+
 if(AIRY_HAS_CJSON)
     if(cJSON_FOUND)
         target_link_libraries(airy_think_service PUBLIC cjson)
