@@ -74,9 +74,9 @@ add_subdirectory(agent_d)
 add_subdirectory(a2a_d)
 # 双思考系统：CoreLoopThree 认知引擎接入（think.* 命名空间）
 add_subdirectory(think_d)
-# 0.1.19 §254b：cupolas_d（含 airy_security_dome 策略单元）构建位上移至
-# agentrt 顶层装配区——策略宿主须先于本目录装配且依赖 cupolas 产品挂载，
-# 机制核目录（daemons/common）不再感知穹顶实现。
+# 0.1.19 §255：cupolas_d（含 airy_security_dome 策略单元）源码已随产品壳
+# 迁出至 products/cupolas/daemon/，由 agentrt 顶层装配区挂入构建——策略
+# 宿主不随本目录装配，机制核目录（daemons/common）不感知穹顶实现。
 # 数学外挂计算服务（maths.* 命名空间）：表达式/统计求值，从 LLM 剥离计算
 add_subdirectory(maths_d)
 # daemon 集群监管者（0.1.18 §12.13 B13）：声明驱动调谐，V13.5 零项目库链接
@@ -207,8 +207,8 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/think_d/include/
     FILES_MATCHING PATTERN "*.h"
 )
 
-# 0.1.19 §254b：cupolas_d include 面安装由其自身 CMakeLists 自持（构建位
-# 已上移至顶层装配区）。
+# 0.1.19 §254b/§255：cupolas_d include 面安装由其自身 CMakeLists 自持
+# （产品壳 daemon/ 目录，经顶层装配区挂入）。
 
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/maths_d/include/
     DESTINATION include/agentrt
@@ -216,9 +216,9 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/maths_d/include/
 )
 
 # 导出项目配置
-# 0.1.19 §254b：cupolas_d 构建位上移顶层装配区后，本目录 configure 期无该
-# TARGET，条件与列表均摘除（cupolas_d 不随 daemon export set 导出，
-# build-tree 消费经根装配序直链）。
+# 0.1.19 §254b/§255：cupolas_d 构建位由顶层装配区承接（源码现居产品壳），
+# 本目录 configure 期无该 TARGET，条件与列表均摘除（cupolas_d 不随 daemon
+# export set 导出，build-tree 消费经根装配序直链）。
 if(TARGET svc_common AND TARGET gateway_d AND TARGET llm_d AND TARGET tool_d
    AND TARGET monit_d AND TARGET sched_d AND TARGET market_d
    AND TARGET channel_d AND TARGET notify_d
@@ -248,7 +248,7 @@ endif()
 # cmake --install --prefix $AIRY_HOME → daemon 装到 $AIRY_HOME/bin。
 # 与 bootstrap AIRY_HOME/bin、agent_build_agents_pypath 的 AIRY_LIB_DIR
 # 回退组成完整生产安装（AIRY_HOME 体系，K8s 节点运行时根类比）。
-# 0.1.19 §254b：cupolas_d 二进制安装由其自身 CMakeLists 自持。
+# 0.1.19 §254b/§255：cupolas_d 二进制安装由其自身 CMakeLists 自持（产品壳）。
 install(TARGETS gateway_d llm_d tool_d
                 monit_d sched_d market_d channel_d
                 notify_d
@@ -264,8 +264,8 @@ install(TARGETS gateway_d llm_d tool_d
 # 未来新增未登记的跨 daemon/模块链接即 fail-closed。
 # 白名单路径由 airy_linkgate.cmake 单点定义，调用点零路径知识。
 # gateway_d 已在自身 CMakeLists 收集（含 airy_gateway_service），不重复。
-# 0.1.19 §254b：cupolas_d 与 airy_security_dome 的收集随构建位上移，由根
-# 装配块执行，本目录不再枚举 cupolas_d。
+# 0.1.19 §254b/§255：cupolas_d 与 airy_security_dome 的收集随构建位由根
+# 装配块执行（源码居产品壳 daemon/），本目录不枚举 cupolas_d。
 foreach(_dg llm_d tool_d monit_d sched_d market_d channel_d notify_d
            mem_d agent_d a2a_d think_d maths_d supervisor_d)
     airy_linkgate_collect(${_dg})

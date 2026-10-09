@@ -111,9 +111,9 @@ target_link_libraries(svc_common PRIVATE airy_ipc_ops)
 # svc_common 之后）。PRIVATE 保证 corekern 头与编译定义不向 daemon 消费方传播。
 target_link_libraries(svc_common PRIVATE airy_core)
 
-# 0.1.19 §254b: 安全机制核零 cupolas 依赖。穹顶装配（cupolas_init / vault /
+# 0.1.19 §254b/§255: 安全机制核零 cupolas 依赖。穹顶装配（cupolas_init / vault /
 # entitlements / netsec）与 cupolas vault provider 属策略侧，随 airy_security_dome
-# 落 daemons/cupolas_d；本库只定义 daemon_vault_provider_t 抽象表，经
+# 落产品壳 products/cupolas/daemon/；本库只定义 daemon_vault_provider_t 抽象表，经
 # daemon_security_config_t.vault_provider 由消费方注入，未注入即 fail-closed。
 # 原先 PUBLIC cupolas 使每个 daemon 经 svc_common 传递闭包吞入产品库，现改为
 # 各 daemon 显式链接 airy_security_dome（链接白名单逐户登记，门禁可见）。
