@@ -11,8 +11,9 @@
  * think.lang_postprocess / think.lang_stats，满足"认知引擎只对 daemon
  * 服务面暴露；CLI 是引擎壳"的目标态。
  *
- * lang_gateway 库本体（atoms/coreloopthree）不迁移，M3 阶段再物理迁入；
- * 本模块承载其生命周期（懒创建 + 线程安全）。
+ * lang_gateway 库本体（策略载荷：画像/路由/校准）已于 M5-2 迁出机制核至
+ * 生态层 products/lang_gateway；本模块链接产品库并注入 ops 表，同时承载
+ * 其生命周期（懒创建 + 线程安全）。
  */
 
 #include "airy_lang_gw_ops.h"
