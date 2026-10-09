@@ -12,6 +12,8 @@
  */
 
 #include "airy_memory.h"
+#include "cog_review_strategy.h"
+#include "cognitive_review.h"
 #include "daemon_cfg_file.h"
 #include "svc_think_d.h"
 #include "think_d_internal.h"
@@ -46,6 +48,16 @@ typedef struct {
 } think_daemon_config_t;
 
 static think_daemon_config_t g_cfg = {0};
+
+/* 生态认知审查 ops provider 注表（M5-4 C2）：只读转发 products/cognition
+ * 策略载荷，与契约签名 1:1。注入后机制核 engine_phase0 经
+ * are_ops_get_cpr() 分发认知并行审查（CPR）；未注入（NULL）时
+ * 静默旁路，不阻断推理主链。 */
+static const cog_review_ops_t g_cog_review_ops = {
+    .run = cog_review_run,
+    .result_init = cog_review_result_init,
+    .result_free = cog_review_result_free,
+};
 
 /* 策略键派发（daemon_ep_load 回调）：think 段五键自持提取（JSON 层） */
 static void cfg_keys(const cJSON *root, void *ud)
@@ -166,6 +178,10 @@ int svc_prepare(const char *config_path)
                         g_cfg.think1_fast_model) != 0)
         SVC_LOG_WARN("review_svc_init failed, think.review unavailable");
 
+    /* M5-4 C2：注入认知审查 ops（products/cognition 策略载荷），机制核
+     * engine_phase0 经 are_ops_get_cpr() 分发 CPR。 */
+    are_ops_set_cpr(&g_cog_review_ops);
+
     SVC_LOG_INFO("think service started (enabled=%d, timeout_ms=%u)", g_cfg.think_enabled,
                  g_cfg.process_timeout_ms);
     return 0;
@@ -195,6 +211,7 @@ void svc_teardown(void)
 void svc_destroy(void)
 {
     /* M1-1c：先释放复核/语言网关服务面对 svc 的引用，再销毁本体 */
+    are_ops_set_cpr(NULL);
     review_svc_cleanup();
     lang_svc_cleanup();
     if (g_svc) {
