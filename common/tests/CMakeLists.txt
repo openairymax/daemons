@@ -64,6 +64,14 @@ foreach(TEST_SRC ${TEST_SOURCES})
         svc_common
         Threads::Threads
     )
+
+    # 0.1.19 §254b: vault 四用例经 dome 策略单元引导（daemon_dome_init +
+    # cupolas_dome_vault），链策略单元并取 daemon_security_dome.h 头面。
+    if(TEST_SRC STREQUAL "test_daemon_security.c")
+        target_include_directories(${TARGET_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../cupolas_d/include)
+        target_link_libraries(${TARGET_NAME} PRIVATE airy_security_dome)
+    endif()
     
     # cJSON found by root CMakeLists.txt (AIRY_HAS_CJSON)
     if(AIRY_HAS_CJSON)

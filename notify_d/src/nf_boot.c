@@ -17,9 +17,9 @@
 #include "airy_memory.h"
 #include "airy_rt.h"
 #include "daemon_bootstrap_sd.h"
-#include "daemon_cupolas_bootstrap.h"
 #include "daemon_ipc_ops_bootstrap.h"
 #include "daemon_platform_ext.h"
+#include "daemon_security_dome.h"
 #include "logging.h"
 #include "notify_d_internal.h"
 
@@ -127,6 +127,6 @@ void nf_teardown(void)
     notify_d_stop(&g_service, g_shutdown ? 1 : 0);
     notify_d_destroy(&g_service);
     daemon_ipc_ops_cleanup();
-    daemon_cupolas_cleanup();
+    daemon_dome_cleanup();
     log_cleanup();
 }

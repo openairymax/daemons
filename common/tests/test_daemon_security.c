@@ -6,6 +6,7 @@
  */
 
 #include "../include/daemon_security.h"
+#include "daemon_security_dome.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -272,9 +273,7 @@ static void test_verify_package_signature_null(void)
 static void test_store_and_retrieve_credential(void)
 {
     TEST("Store and retrieve credential");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
+    ASSERT(daemon_dome_init("security_vault_test") == AIRY_OK, "dome init should succeed");
 
     const uint8_t secret[] = "my_api_key_12345";
     int ret = daemon_store_credential("test_key", CUPOLAS_VAULT_CRED_TOKEN, secret,
@@ -288,23 +287,21 @@ static void test_store_and_retrieve_credential(void)
     ASSERT(data_len == strlen((const char *)secret), "retrieved length should match");
     ASSERT(memcmp(retrieved, secret, data_len) == 0, "retrieved data should match");
 
-    daemon_security_shutdown();
+    daemon_dome_cleanup();
     PASS();
 }
 
 static void test_retrieve_nonexistent_credential(void)
 {
     TEST("Retrieve nonexistent credential");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
+    ASSERT(daemon_dome_init("security_vault_test") == AIRY_OK, "dome init should succeed");
 
     uint8_t buf[64];
     size_t len = sizeof(buf);
     int ret = daemon_retrieve_credential("nonexistent_key", "agent_001", buf, &len);
     ASSERT(ret != 0, "retrieve nonexistent should fail");
 
-    daemon_security_shutdown();
+    daemon_dome_cleanup();
     PASS();
 }
 
@@ -441,9 +438,7 @@ static void test_init_with_config(void)
 static void test_store_credential_overwrite(void)
 {
     TEST("Store credential overwrite existing");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
+    ASSERT(daemon_dome_init("security_vault_test") == AIRY_OK, "dome init should succeed");
 
     const uint8_t v1[] = "version_one";
     const uint8_t v2[] = "version_two_updated";
@@ -462,16 +457,14 @@ static void test_store_credential_overwrite(void)
     ASSERT(len == strlen((const char *)v2), "length should match v2");
     ASSERT(memcmp(retrieved, v2, len) == 0, "data should be v2 after overwrite");
 
-    daemon_security_shutdown();
+    daemon_dome_cleanup();
     PASS();
 }
 
 static void test_credential_access_control(void)
 {
     TEST("Credential access control - wrong agent denied");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
+    ASSERT(daemon_dome_init("security_vault_test") == AIRY_OK, "dome init should succeed");
 
     const uint8_t secret[] = "owner_only_secret";
     daemon_store_credential("owned_key", CUPOLAS_VAULT_CRED_TOKEN, secret,
@@ -488,7 +481,7 @@ static void test_credential_access_control(void)
 
     /* Explicit grant then allow: system must be authorized, not implicitly
      * privileged (least-privilege / fail-closed ACL model). */
-    cupolas_vault_t *vault = daemon_security_get_vault();
+    cupolas_vault_t *vault = cupolas_dome_vault();
     assert(vault != NULL);
     int grc = cupolas_vault_grant_access(vault, "owned_key", "system", CUPOLAS_VAULT_OP_READ, 0);
     assert(grc == 0);
@@ -496,7 +489,7 @@ static void test_credential_access_control(void)
     ret = daemon_retrieve_credential("owned_key", "system", buf, &len);
     ASSERT(ret == 0, "system agent allowed after explicit grant");
 
-    daemon_security_shutdown();
+    daemon_dome_cleanup();
     PASS();
 }
 

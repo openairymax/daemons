@@ -29,7 +29,6 @@
 #include "daemon_security.h"
 
 #include "atomic_compat.h"
-#include "cupolas_vault.h"
 #include "platform.h"
 #include "svc_logger.h"
 
@@ -69,7 +68,8 @@ typedef struct {
     bool signature_enabled;
     bool vault_enabled;
     bool audit_enabled;
-    cupolas_vault_t *vault;
+    void *vault; /**< Opaque handle owned by vault_provider */
+    const daemon_vault_provider_t *vault_provider; /**< Injected policy backend */
     acl_entry_t acl_table[MAX_ACL_ENTRIES];
     size_t acl_count;
     FILE *audit_fp;

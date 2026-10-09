@@ -54,6 +54,8 @@ target_link_libraries(maths_d PRIVATE
     airy_core # WS-8 8.4.1: corekern link for airy_init() in main.c
     Threads::Threads
 )
+# 0.1.19 §254b: boot 接线 vault 策略单元（daemon_dome_init_pep/_cleanup 符号面）
+target_link_libraries(maths_d PRIVATE airy_security_dome)
 # m（libm）：仅非 MSVC 平台存在；MSVC 数学函数内建在 CRT（wave-4 #110
 # LNK1181 m.lib 防护，与根 airy_platform_libs 同判据）。
 if(NOT MSVC)

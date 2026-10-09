@@ -59,7 +59,6 @@ set(SVC_COMMON_SOURCES
     # 符号经 airy_common PUBLIC 链接提供，daemons 仅留 include/thread_pool.h 兼容头。
     # g14b 补全：daemon_bootstrap_sd.c 迁 commons/utils/sd（daemon_bootstrap_sd.h
     # 公开头已在该处），实现随之归位，符号经 airy_common PUBLIC 链接提供。
-    src/daemon/daemon_cupolas_bootstrap.c # P3.14 ACC-DT15: daemon 统一 cupolas 安全穹顶引导
     src/daemon/daemon_rpc_client.c       # Phase 3: gateway→daemon thin IPC client (Unix socket JSON-RPC)
     src/daemon/daemon_heapstore_bootstrap.c # KER-05~07: daemon 统一 heapstore 运行时数据存储引导
     src/daemon/daemon_ipc_ops_bootstrap.c # ARC-04: 注入 atoms 侧 IPC/RPC/SD ops 抽象表
@@ -112,16 +111,12 @@ target_link_libraries(svc_common PRIVATE airy_ipc_ops)
 # svc_common 之后）。PRIVATE 保证 corekern 头与编译定义不向 daemon 消费方传播。
 target_link_libraries(svc_common PRIVATE airy_core)
 
-# P3.14 ACC-DT15: cupolas 安全穹顶（PUBLIC 使得所有链接 svc_common 的 daemon 自动获得 cupolas）
-if(TARGET cupolas)
-    target_link_libraries(svc_common PUBLIC cupolas)
-    target_include_directories(svc_common PUBLIC
-        $<BUILD_INTERFACE:${CUPOLAS_SRC_DIR}/include>
-    )
-else()
-    message(WARNING "cupolas target not found — daemon_cupolas_bootstrap will fail to link. "
-                    "Ensure cupolas module is mounted (products/cupolas or -DCUPOLAS_SRC_DIR).")
-endif()
+# 0.1.19 §254b: 安全机制核零 cupolas 依赖。穹顶装配（cupolas_init / vault /
+# entitlements / netsec）与 cupolas vault provider 属策略侧，随 airy_security_dome
+# 落 daemons/cupolas_d；本库只定义 daemon_vault_provider_t 抽象表，经
+# daemon_security_config_t.vault_provider 由消费方注入，未注入即 fail-closed。
+# 原先 PUBLIC cupolas 使每个 daemon 经 svc_common 传递闭包吞入产品库，现改为
+# 各 daemon 显式链接 airy_security_dome（链接白名单逐户登记，门禁可见）。
 if(AIRY_HAS_OPENSSL)
     target_link_libraries(svc_common PUBLIC ${OPENSSL_CRYPTO_LIBRARY})
 endif()

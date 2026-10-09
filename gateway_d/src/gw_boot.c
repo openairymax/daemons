@@ -16,9 +16,9 @@
 #include "airy_rt.h"
 #include "atomic_compat.h"
 #include "daemon_bootstrap_sd.h"
-#include "daemon_cupolas_bootstrap.h"
 #include "daemon_heapstore_bootstrap.h"
 #include "daemon_ipc_ops_bootstrap.h"
+#include "daemon_security_dome.h"
 
 #include "gateway_service.h"
 #include "gateway_business_handler.h"
@@ -126,7 +126,7 @@ void gw_plat_boot(void)
         SVC_LOG_WARN("corekern init failed (%d) - running degraded (badge=0)", core_ret);
     }
 
-    daemon_cupolas_init_pep("gateway_d");
+    daemon_dome_init_pep("gateway_d");
     /* IPC/RPC/SD ops 表进程级幂等发布，init 失败非致命。 */
     daemon_ipc_ops_init("gateway_d");
     daemon_heapstore_init("gateway_d");
@@ -306,6 +306,6 @@ void gw_teardown(gateway_service_t service, gw_proto_router_t *router,
     SVC_LOG_INFO("Gateway daemon stopped");
     daemon_ipc_ops_cleanup();
     daemon_heapstore_cleanup();
-    daemon_cupolas_cleanup();
+    daemon_dome_cleanup();
     log_cleanup();
 }
