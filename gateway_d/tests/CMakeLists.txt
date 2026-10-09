@@ -92,9 +92,10 @@ foreach(TEST_SRC ${TEST_SOURCES})
 
     # 0.1.19 §254b: PEP 缓存测试直调策略单元引导面
     # （daemon_dome_init_pep/_cleanup），链 airy_security_dome 并取其头面。
+    # §255: cupolas_d 随产品壳迁出，头面经顶层 CUPOLAS_SRC_DIR 锚点取得。
     if(${TEST_NAME} STREQUAL "test_gateway_pep_cache")
         target_include_directories(${TEST_NAME} PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../cupolas_d/include)
+            ${CUPOLAS_SRC_DIR}/daemon/include)
         target_link_libraries(${TEST_NAME} PRIVATE airy_security_dome)
     endif()
 

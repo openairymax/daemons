@@ -1,6 +1,6 @@
 # daemons — User-space Service Layer
 
-> The user-space service layer of the Airymax agent runtime: 15 daemon processes that
+> The user-space service layer of the Airymax agent runtime: 14 daemon processes that
 > turn the Airymax kernel into a running system, one governance daemon (`supervisor_d`)
 > that keeps the cluster alive, plus the shared `svc_common` library.
 
@@ -18,11 +18,12 @@
 
 ## What this is
 
-**daemons** is the service layer of the Airymax agent runtime. It contains **15 feature
+**daemons** is the service layer of the Airymax agent runtime. It contains **13 feature
 daemon processes** — `gateway_d`, `llm_d`, `tool_d`, `sched_d`, `market_d`, `monit_d`,
-`channel_d`, `notify_d`, `mem_d`, `agent_d`, `a2a_d`, `think_d`, `cupolas_d`,
-`maths_d` — **one governance daemon** `supervisor_d` (resident cluster supervision),
-and the shared static library `svc_common` (in `common/`).
+`channel_d`, `notify_d`, `mem_d`, `agent_d`, `a2a_d`, `think_d`, `maths_d` —
+**one governance daemon** `supervisor_d` (resident cluster supervision),
+and the shared static library `svc_common` (in `common/`). The former `cupolas_d`
+moved out with its product shell to `products/cupolas/daemon/` (0.1.19 §255).
 
 Each daemon is its own OS process, owns exactly one domain, exposes a JSON-RPC 2.0
 interface, and reaches its peers through a direct JSON-RPC call over Unix sockets.
@@ -44,9 +45,9 @@ External client ──HTTP / WS / SSE / MCP / A2A / OpenAI API──▶ gateway_
 - **Service-oriented** — independent processes, IPC cooperation; each daemon can be
   started, scaled, upgraded, and replaced on its own.
 - **Single responsibility** — one core domain per daemon, so coupling stays low.
-- **Endogenous security** — `svc_common` links `cupolas` as a `PUBLIC` dependency, so
-  every daemon inherits request authentication, input sanitization, audit, and sandboxing
-  without writing any security code of its own.
+- **Endogenous security** — the security dome is wired in through the `airy_security_dome`
+  policy unit (0.1.19 §254b/§255), so every daemon inherits request authentication, input
+  sanitization, audit, and sandboxing without writing any security code of its own.
 - **Unified protocol** — JSON-RPC 2.0 everywhere inside the runtime; MCP / A2A /
   OpenAI-API translation happens only at the gateway boundary.
 - **Resilience** — circuit breaker, API recovery with primary/backup failover, health
@@ -54,13 +55,13 @@ External client ──HTTP / WS / SSE / MCP / A2A / OpenAI API──▶ gateway_
 - **Observability** — every daemon reports metrics to `monit_d` and events to `notify_d`,
   and writes a per-process log you can read with `airymaxrt logs <daemon>_d`.
 - **Lifecycle framework** — one `airy_svc_t` state machine and one event-driven
-  main loop (`daemon_event_driver`) shared by all 14 feature processes.
+  main loop (`daemon_event_driver`) shared by all 13 feature processes.
 
 ## The daemons
 
 | # | Daemon | RPC namespace | Responsibility |
 |---|--------|---------------|----------------|
-| 1 | [gateway_d](gateway_d/README.md) | — (entry point) | Sole external boundary. Translates HTTP / WebSocket / SSE / MCP / A2A / OpenAI API to JSON-RPC 2.0 and forwards by namespace to the other 14 daemons. Contains no business logic. |
+| 1 | [gateway_d](gateway_d/README.md) | — (entry point) | Sole external boundary. Translates HTTP / WebSocket / SSE / MCP / A2A / OpenAI API to JSON-RPC 2.0 and forwards by namespace to the other 13 daemons. Contains no business logic. |
 | 2 | [llm_d](llm_d/README.md) | `llm.*` | LLM inference: streaming completion, token counting, cost accounting, response caching. |
 | 3 | [tool_d](tool_d/README.md) | `tool.*`, `plugin.*` | Tool and plugin registry, discovery, sandboxed execution, parameter validation, result caching. |
 | 4 | [sched_d](sched_d/README.md) | `sched.*` | Task and DAG scheduling, roadmap planning, round-robin / weighted / priority / ML strategies. |
@@ -72,9 +73,13 @@ External client ──HTTP / WS / SSE / MCP / A2A / OpenAI API──▶ gateway_
 | 10 | [agent_d](agent_d/README.md) | `agent.*` | Agent lifecycle and the execution loop: `run` / `run_stream` / `run_cancel`, spawn / invoke / terminate / cancel. |
 | 11 | [a2a_d](a2a_d/README.md) | `a2a.*` | Agent-to-Agent protocol: Agent Card registration and discovery, task state machine, message delivery. |
 | 12 | [think_d](think_d/README.md) | `think.*` | Cognition service: two-pass interaction, pipeline orchestration, language front-end, review. |
-| 13 | [cupolas_d](cupolas_d/README.md) | `cupolas.*`, `policy.*` | Security policy decision point: permission checks, sanitization, audit, credential vault, network rules, policy load / activate / rollback. |
-| 14 | [maths_d](maths_d/README.md) | `maths.*` | Mathematics coprocessor: pure-C numeric and statistical evaluation, plus an optional symbolic backend. |
-| 15 | [supervisor_d](supervisor_d/README.md) | — (governance ctrl endpoint) | Governance daemon: declaration-driven reconcile of the cluster against the launch profile (spawn missing, reap stray), crash restart with exponential backoff, unified shutdown. Reconciles only, carries no business logic, links no business library (linkgate fail-closed). |
+| 13 | [maths_d](maths_d/README.md) | `maths.*` | Mathematics coprocessor: pure-C numeric and statistical evaluation, plus an optional symbolic backend. |
+| 14 | [supervisor_d](supervisor_d/README.md) | — (governance ctrl endpoint) | Governance daemon: declaration-driven reconcile of the cluster against the launch profile (spawn missing, reap stray), crash restart with exponential backoff, unified shutdown. Reconciles only, carries no business logic, links no business library (linkgate fail-closed). |
+
+`cupolas_d` (`cupolas.*`, `policy.*` — security PDP: permission checks, sanitization,
+audit, credential vault, network rules, policy load / activate / rollback) moved out of
+this tree with the cupolas product shell in 0.1.19 §255; see
+[cupolas/daemon](https://atomgit.com/openairymax/cupolas).
 
 Executable names keep the `*_d` suffix and match the CMake target names one for one
 (`gateway_d`, `llm_d`, …). Each subdirectory has its own README documenting its interface.
@@ -83,7 +88,7 @@ Executable names keep the `*_d` suffix and match the CMake target names one for 
 
 ```
 daemons/
-├── CMakeLists.txt      # builds the 15 daemons + supervisor_d + svc_common
+├── CMakeLists.txt      # builds the 13 daemons + supervisor_d + svc_common
 ├── common/             # svc_common static library (shared service framework)
 ├── scripts/            # CI, local verification, static analysis, coverage
 ├── gateway_d/ … maths_d/   # one directory per daemon
@@ -242,7 +247,7 @@ into running processes.
 |------------|-------------------|
 | [commons](https://atomgit.com/openairymax/commons) | Logging, configuration, networking, tokens, cost, observability, platform paths and the authoritative IPC headers — reached transitively through `svc_common` |
 | [atoms](https://atomgit.com/openairymax/atoms) | Syscall entry surface for downward dispatch; notify_d's hook face links the CoreLoopThree hook library directly |
-| [cupolas](https://atomgit.com/openairymax/cupolas) | Security dome, `PUBLIC`-linked by `svc_common`; `cupolas_d` exposes it as a service |
+| [cupolas](https://atomgit.com/openairymax/cupolas) | Security dome behind the `airy_security_dome` policy unit (§254b); its `cupolas_d` shell now lives in the product repo (§255) |
 | [protocols](https://atomgit.com/openairymax/protocols) | JSON-RPC 2.0 / AgentsIPC envelope inside the runtime; A2A and MCP adapters at the gateway |
 | [heapstore](https://atomgit.com/openairymax/heapstore) | Persistence for daemon state, registries, and budgets |
 | [gateway](https://atomgit.com/openairymax/gateway) | The gateway library that `gateway_d` wraps as a service |

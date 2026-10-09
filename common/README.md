@@ -7,8 +7,8 @@
 
 ## 这是什么
 
-`common` 是 AgentRT 全部 15 个守护进程共享的**静态库**，不是可执行程序，也不监听任何
-socket。它把守护进程样板收敛成一套可复用设施：服务生命周期与注册、JSON-RPC 方法分发、
+`common` 是 AgentRT 各守护进程（本仓 14 个进程与产品壳 cupolas_d，0.1.19 §255）共享的
+**静态库**，不是可执行程序，也不监听任何 socket。它把守护进程样板收敛成一套可复用设施：服务生命周期与注册、JSON-RPC 方法分发、
 跨进程服务发现与 RPC 客户端、认证与授权、事件驱动主循环、并行执行引擎、配置管理与统一日志。
 
 所有 daemon 的 `main.c` 都经由本模块的 `daemon_main.h` 获取启动骨架，因此它同时是
@@ -33,7 +33,8 @@ socket。它把守护进程样板收敛成一套可复用设施：服务生命�
 - **容错与可观测**：`api_recovery`（重试/降级/熔断策略）、`alert_manager`、
   `unified_metrics`、`log_sanitizer`。
 - **运行时数据引导**：`daemon_heapstore_bootstrap`（运行时数据存储）；安全穹顶引导
-  归 cupolas_d 策略单元 `airy_security_dome`（0.1.19 §254b 机制/策略分离）。
+  归策略单元 `airy_security_dome`，其源随产品壳迁出 `products/cupolas/daemon/`
+  （0.1.19 §254b/§255 机制/策略分离）。
 - **ops 表注入**：`daemon_ipc_ops_bootstrap` 把上述能力的函数表注入 `atoms` 侧抽象接口，
   使 `atoms` 无需反向链接 `daemons` 即可调用 IPC/RPC/服务发现。
 
@@ -46,10 +47,12 @@ socket。它把守护进程样板收敛成一套可复用设施：服务生命�
    svc_common（本模块，静态库）
         ├─ PRIVATE → airy_ipc_ops / airy_syscall_ops（ops 表存储小库，向 atoms 注入 IPC/RPC/SD 能力）
         └─ PUBLIC  → airy_common（commons 统一基础库）
-                     ├─ cupolas（可选，存在 target 时 PUBLIC 传播给所有 daemon）
                      ├─ airy_heapstore（可选，BUILD_HEAPSTORE）
                      └─ OpenSSL / cJSON / YAML / CURL / Threads（可选）
 ```
+
+安全穹顶策略单元 `airy_security_dome`（源随产品壳位于 `products/cupolas/daemon/`）
+由需要的 daemon 显式链接，不进入 `svc_common` 传递闭包（0.1.19 §254b/§255）。
 
 ### 兼容再导出头
 
@@ -151,7 +154,6 @@ ctest --test-dir ../daemons-build/common -R "^svc_test_" -V
 |------|------|
 | [commons](https://atomgit.com/openairymax/commons) | `airy_common` 统一基础库：错误码、日志、内存、字符串、同步、缓存、可观测性、平台路径 |
 | [atoms](https://atomgit.com/openairymax/atoms) | `airy_core`（corekern IPC 通道/事务）、`airy_ipc_ops` 与 `airy_syscall_ops`（ops 表存储小库）、`coreloopthree` 头文件路径 |
-| [cupolas](https://atomgit.com/openairymax/cupolas) | 可选；存在时 PUBLIC 链接，所有 daemon 自动获得安全穹顶能力 |
 | [heapstore](https://atomgit.com/openairymax/heapstore) | 可选；`BUILD_HEAPSTORE=ON` 时 PUBLIC 链接 `airy_heapstore` |
 | 外部 | `Threads::Threads`；可选 `OpenSSL`、`cJSON`、`libyaml`、`CURL`；Windows 另链 `ws2_32`、`bcrypt`、`advapi32` |
 
@@ -160,7 +162,8 @@ ctest --test-dir ../daemons-build/common -R "^svc_test_" -V
 
 ## 关系
 
-- 被 [daemons](../README_zh.md) 下全部 15 个守护进程链接，是本层唯一的公共依赖入口。
+- 被 [daemons](../README_zh.md) 下全部 14 个守护进程（含 supervisor_d）与产品壳
+  cupolas_d 链接，是本层唯一的公共依赖入口。
 - 向 [atoms](https://atomgit.com/openairymax/atoms) 注入 IPC/RPC/服务发现 ops 表，
   使下层保持对用户态运行时的无依赖。
 - 与 [gateway_d](../gateway_d/README.md) 的关系最紧密：网关到各 daemon 的转发客户端、

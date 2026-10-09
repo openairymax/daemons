@@ -1,6 +1,6 @@
 # daemons — 用户态服务层
 
-> Airymax 智能体运行时的用户态服务层：15 个守护进程把 Airymax 内核变成一个真正在跑的
+> Airymax 智能体运行时的用户态服务层：14 个守护进程把 Airymax 内核变成一个真正在跑的
 > 系统，外加共享库 `svc_common`。
 
 **语言：** English | [简体中文](README_zh.md)
@@ -17,10 +17,11 @@
 
 ## 这是什么
 
-**daemons** 是 Airymax 智能体运行时的服务层，包含 **14 个功能守护进程**——`gateway_d`、
+**daemons** 是 Airymax 智能体运行时的服务层，包含 **13 个功能守护进程**——`gateway_d`、
 `llm_d`、`tool_d`、`sched_d`、`market_d`、`monit_d`、`channel_d`、`notify_d`、
-`mem_d`、`agent_d`、`a2a_d`、`think_d`、`cupolas_d`、`maths_d`——**1 个治理守护进程**
+`mem_d`、`agent_d`、`a2a_d`、`think_d`、`maths_d`——**1 个治理守护进程**
 `supervisor_d`（集群常驻监管），以及共享静态库 `svc_common`（位于 `common/`）。
+原 `cupolas_d` 已随产品壳迁出至 `products/cupolas/daemon/`（0.1.19 §255）。
 
 每个守护进程都是独立的操作系统进程，各自只负责一个领域，对外暴露 JSON-RPC 2.0 接口，
 并通过 `daemon_rpc_call` 直连同伴的 Unix socket 通信。`gateway_d` 是唯一面向外部客户端的
@@ -40,13 +41,13 @@
 
 - **服务化** —— 独立进程、IPC 协作；每个守护进程可单独启动、扩缩、升级与替换。
 - **职责单一** —— 每个守护进程只负责一个核心领域，耦合度低。
-- **安全内生** —— `svc_common` 以 `PUBLIC` 形式链接 `cupolas`，每个守护进程无需自己编写
-  安全代码，即自动继承请求鉴权、输入净化、审计与沙箱。
+- **安全内生** —— 安全穹顶经 `airy_security_dome` 策略单元接线（0.1.19 §254b/§255），
+  每个守护进程无需自己编写安全代码，即自动继承请求鉴权、输入净化、审计与沙箱。
 - **协议统一** —— 运行时内部一律 JSON-RPC 2.0；MCP / A2A / OpenAI-API 转换只发生在网关边界。
 - **韧性** —— 熔断器、带主备切换的 API 恢复、健康检查、降级服务自动恢复。
 - **可观测** —— 所有守护进程向 `monit_d` 上报指标、向 `notify_d` 上报事件，并按进程落盘
   日志，用 `airymaxrt logs <daemon>_d` 即可查看。
-- **统一生命周期框架** —— 14 个功能进程共用一套 `airy_svc_t` 状态机与事件驱动主循环
+- **统一生命周期框架** —— 13 个功能进程共用一套 `airy_svc_t` 状态机与事件驱动主循环
   （`daemon_event_driver`）。
 
 ## 守护进程清单
@@ -65,9 +66,12 @@
 | 10 | [agent_d](agent_d/README.md) | `agent.*` | Agent 生命周期与执行循环：`run` / `run_stream` / `run_cancel`、spawn / invoke / terminate / cancel。 |
 | 11 | [a2a_d](a2a_d/README.md) | `a2a.*` | Agent 间协议：Agent Card 注册与发现、任务状态机、消息投递。 |
 | 12 | [think_d](think_d/README.md) | `think.*` | 认知服务：两段式交互、流程编排、语言前置、反思评审。 |
-| 13 | [cupolas_d](cupolas_d/README.md) | `cupolas.*`、`policy.*` | 安全策略决策点：权限校验、输入净化、审计、凭据库、网络规则、策略加载 / 生效 / 回滚。 |
-| 14 | [maths_d](maths_d/README.md) | `maths.*` | 数学外挂计算：纯 C 数值与统计求值，外加可选符号计算后端。 |
-| 15 | [supervisor_d](supervisor_d/README.md) | —（治理 ctrl 端点） | 治理守护进程：按启动画像声明常驻调谐（补齐缺失、收割多余）、崩溃重启与指数退避、收摊归一。只调谐、不承载业务，不链接任何业务库（linkgate fail-closed 断言）。 |
+| 13 | [maths_d](maths_d/README.md) | `maths.*` | 数学外挂计算：纯 C 数值与统计求值，外加可选符号计算后端。 |
+| 14 | [supervisor_d](supervisor_d/README.md) | —（治理 ctrl 端点） | 治理守护进程：按启动画像声明常驻调谐（补齐缺失、收割多余）、崩溃重启与指数退避、收摊归一。只调谐、不承载业务，不链接任何业务库（linkgate fail-closed 断言）。 |
+
+`cupolas_d`（`cupolas.*`、`policy.*`——安全策略决策点：权限校验、输入净化、审计、
+凭据库、网络规则、策略加载 / 生效 / 回滚）已于 0.1.19 §255 随 cupolas 产品壳迁出本树，
+见 [cupolas/daemon](https://atomgit.com/openairymax/cupolas)。
 
 可执行文件名保留 `*_d` 后缀，与 CMake target 名一一对应（`gateway_d`、`llm_d`……）。
 各目录内的 README 记录该进程的具体接口。
@@ -76,7 +80,7 @@
 
 ```
 daemons/
-├── CMakeLists.txt      # 构建 15 个守护进程 + svc_common
+├── CMakeLists.txt      # 构建 14 个守护进程 + svc_common
 ├── common/             # svc_common 静态库（共享服务框架）
 ├── scripts/            # CI、本地验证、静态分析、覆盖率
 ├── gateway_d/ … maths_d/   # 每个守护进程一个目录
@@ -171,7 +175,7 @@ ctest --test-dir ../daemons-build --output-on-failure
 cmake --install ../daemons-build --prefix /opt/airymax   # 可执行文件 → <prefix>/bin
 ```
 
-- `${CMAKE_BINARY_DIR}/bin/` 下的 15 个守护进程可执行文件
+- `${CMAKE_BINARY_DIR}/bin/` 下的 14 个守护进程可执行文件
 - `svc_common` 静态库，由各守护进程私有链接
 - 守护进程公共头文件安装到 `include/agentrt/`
 
@@ -225,7 +229,7 @@ daemons 是组合层：它不定义内核原语，而是把原语组织成运行
 |------|---------------------|
 | [commons](https://atomgit.com/openairymax/commons) | 日志、配置、网络、令牌、成本、可观测性、平台路径与权威 IPC 头文件——经 `svc_common` 传递链接 |
 | [atoms](https://atomgit.com/openairymax/atoms) | 向下游派发的 Syscall 入口表面；`notify_d` 的 hook 面直接链接 CoreLoopThree 的 hook 库 |
-| [cupolas](https://atomgit.com/openairymax/cupolas) | 安全穹顶，由 `svc_common` 以 `PUBLIC` 链接；`cupolas_d` 将其作为服务暴露 |
+| [cupolas](https://atomgit.com/openairymax/cupolas) | 安全穹顶，居 `airy_security_dome` 策略单元之后（§254b）；其 `cupolas_d` 壳现属产品仓（§255） |
 | [protocols](https://atomgit.com/openairymax/protocols) | 运行时内部 JSON-RPC 2.0 / AgentsIPC 信封；网关边界的 A2A 与 MCP 适配器 |
 | [heapstore](https://atomgit.com/openairymax/heapstore) | 守护进程状态、注册表与配额的持久化 |
 | [gateway](https://atomgit.com/openairymax/gateway) | `gateway_d` 封装并作为系统服务暴露的网关库 |
