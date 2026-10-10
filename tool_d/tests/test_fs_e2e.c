@@ -23,6 +23,8 @@
  *  10. 安全：未授权 agent 调用被 fail-closed 拒绝
  *  11. 未知工具：返回 TOOL_NOT_FOUND
  *  12. 参数缺失：返回 TOOL_VALIDATION
+ *  13. 路径契约：相对路径以 tool_d workspace 锚定，回执回显绝对路径（#4）
+ *  14. 父目录自建：fs_write 默认递归创建缺失父目录，可 create_dirs=0 关闭（#3）
  *
  * @note 不使用 assert() 执行副作用操作：Release 构建定义 NDEBUG，会把
  *       assert(expr) 展开为 ((void)0)，导致副作用表达式不执行。所有
@@ -370,6 +372,64 @@ static void test_e2e_validation(tool_service_t *svc)
     }
 }
 
+/* 阶段 6：相对路径锚点契约与父目录自动创建（缺陷 #3/#4）。
+ * 契约：fs_* 的相对路径以 tool_d workspace（AIRY_TOOL_SANDBOX_WORKSPACE）
+ * 为解析基准，回执回显解析后的绝对路径；fs_write 默认递归创建缺失父目录。 */
+static void test_e2e_path_contract(tool_service_t *svc)
+{
+    printf("\n[阶段 6] 相对路径锚点契约 + 父目录自动创建（#3/#4）\n");
+
+    /* realpath 的 fortified 版本要求目标缓冲区不小于 PATH_MAX，否则
+     * 直接以 buffer overflow 中止；故此处按 PATH_MAX(4096) 取齐。 */
+    char ws[4096];
+#ifndef _WIN32
+    CHECK(realpath(E2E_DIR, ws) != NULL);
+#else
+    snprintf(ws, sizeof(ws), "%s", E2E_DIR);
+#endif
+
+    /* 18. 相对路径写入两级不存在的父目录：默认递归创建 + 回执绝对路径 */
+    cJSON *p = cJSON_CreateObject();
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "path", "nested/deep/note.txt");
+    cJSON_AddStringToObject(p, "content", "anchor-contract\n");
+    int ret = -999;
+    tool_result_t *res = run_tool(svc, "fs_write", "tool_d", p, &ret);
+    cJSON_Delete(p);
+
+    char expect[640];
+    snprintf(expect, sizeof(expect), "%s/nested/deep/note.txt", ws);
+    TEST(ret == 0 && res && res->success == 1 && res->output &&
+             strstr(res->output, expect) != NULL,
+         "相对路径写入回执回显解析后的绝对路径 (#4)");
+    if (res) {
+        printf("    fs_write -> %s\n", res->output ? res->output : "(no output)");
+        tool_result_free(res);
+    }
+#ifndef _WIN32
+    TEST(access(expect, F_OK) == 0, "缺失父目录被递归创建且文件落盘 (#3)");
+#endif
+
+    /* 19. create_dirs=0：缺失父目录时拒绝写入（防误建） */
+    p = cJSON_CreateObject();
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "path", "noauto/sub/deep.txt");
+    cJSON_AddStringToObject(p, "content", "should not exist");
+    cJSON_AddBoolToObject(p, "create_dirs", 0);
+    res = run_tool(svc, "fs_write", "tool_d", p, &ret);
+    cJSON_Delete(p);
+    TEST(ret == AIRY_ERR_IO, "create_dirs=0 时缺失父目录写入被拒绝 (#3)");
+    if (res) {
+        printf("    fs_write -> %s\n", res->error ? res->error : "(no error)");
+        tool_result_free(res);
+    }
+#ifndef _WIN32
+    char blocked[640];
+    snprintf(blocked, sizeof(blocked), "%s/noauto/sub/deep.txt", ws);
+    TEST(access(blocked, F_OK) != 0, "create_dirs=0 未在磁盘产生文件 (DoD)");
+#endif
+}
+
 int main(void)
 {
     printf("=== t9/2.4.4: 认知层→执行层端到端（tool_service_execute 完整链路）===\n\n");
@@ -401,6 +461,7 @@ int main(void)
     test_e2e_fail_closed(svc);
     test_e2e_not_found(svc);
     test_e2e_validation(svc);
+    test_e2e_path_contract(svc);
 
     tool_service_destroy(svc);
 
