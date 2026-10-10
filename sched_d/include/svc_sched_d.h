@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.12.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.13.0 (L3 SSoT) 生成。
  * manifest 派生产物；装配机制在 daemons/common，策略在 src/svc.c
  * 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
@@ -27,18 +27,16 @@
  * config/env 覆盖后与 cmdline use_tcp 融合。实现: src/svc.c。 */
 void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp);
 
-/* 生命周期钩子（实现: src/svc.c）；activate 收到事件驱动句柄与
- * SD bootstrap 句柄，供事件耦合激活策略（如监控采样线程）与
- * manifest deps 驱动的依赖探测健康面使用。 */
+/* 生命周期钩子（实现: src/svc.c）。prepare/destroy 恒有策略；
+ * activate/attach/teardown 无策略需求者（noop_hooks，0.1.19
+ * §80）由机制层 daemon_svc_<hook>_noop 缺省（daemon_main.h），
+ * 此处不发声明，svc.c 不维护空桩副本。activate 收到事件驱动与
+ * SD bootstrap 句柄；attach 为 SVC_METHODS 落库后的动态注册
+ * 出口（dispatcher 为 method_dispatcher_t）。 */
 int svc_prepare(const char *config_path);
 int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd);
-void svc_teardown(void);
-void svc_destroy(void);
-
-/* 策略层附加装配挂点：静态注册表（SVC_METHODS）落库后的动态
- * 注册出口（如 roadmap.* 方法族）。实现: src/svc.c；无附加
- * 注册的户提供空实现。dispatcher 为 method_dispatcher_t。 */
 void svc_attach(void *dispatcher);
+void svc_destroy(void);
 
 /* RPC handler 族（实现: src/svc.c）。签名对齐 method_fn；
  * 命名 m_<method>，与 .manifest rpc.methods 一一对应。 */

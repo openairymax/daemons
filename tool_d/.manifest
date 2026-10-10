@@ -1,10 +1,10 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "daemon": "tool_d",
   "cname": "tool",
   "sd_type": "tool",
   "ops": ["ipc", "llm", "tool"],
-  "activate_noop": true,
+  "noop_hooks": ["activate", "teardown"],
   "facades": ["ingress", "execute", "state", "governance"],
   "slots": ["create", "delete", "update", "query", "discover", "compute", "isolate", "validate", "authz", "cache"],
   "rpc": {

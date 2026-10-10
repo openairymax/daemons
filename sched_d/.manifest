@@ -1,11 +1,12 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "daemon": "sched_d",
   "cname": "scheduler",
   "sd_type": "scheduler",
   "facades": ["ingress", "execute", "governance"],
   "slots": ["sched", "route", "query"],
   "ops": ["ipc", "llm", "tool"],
+  "noop_hooks": ["teardown"],
   "rpc": {
     "unix": "sched.sock",
     "win_pipe": "airy_sched",

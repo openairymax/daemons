@@ -47,20 +47,10 @@ int svc_prepare(const char *config_path)
     return 0;
 }
 
-void svc_teardown(void)
-{
-}
-
 void svc_destroy(void)
 {
     if (g_service) {
         market_service_destroy(g_service);
         g_service = NULL;
     }
-}
-
-/* 无静态表外动态注册（manifest methods 全量覆盖），空实现 */
-void svc_attach(void *dispatcher)
-{
-    (void)dispatcher;
 }

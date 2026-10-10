@@ -266,10 +266,6 @@ int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
     return 0;
 }
 
-void svc_teardown(void)
-{
-}
-
 void svc_destroy(void)
 {
     /* M1-1c：先释放复核/语言网关服务面对 svc 的引用，再销毁本体 */
@@ -289,9 +285,4 @@ void svc_destroy(void)
         g_svc = NULL;
     }
     daemon_ep_free(daemon_ep_slot());
-}
-
-void svc_attach(void *dispatcher)
-{
-    (void)dispatcher;
 }

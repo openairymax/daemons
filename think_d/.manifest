@@ -1,9 +1,10 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "daemon": "think_d",
   "cname": "think",
   "sd_type": "think",
   "ops": ["ipc", "llm", "tool"],
+  "noop_hooks": ["attach", "teardown"],
   "facades": ["ingress", "execute", "governance"],
   "slots": ["compute", "flow", "route", "validate", "discover"],
   "rpc": {

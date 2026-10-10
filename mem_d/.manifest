@@ -1,11 +1,11 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "daemon": "mem_d",
   "cname": "mem",
   "sd_type": "mem",
   "ops": ["ipc"],
   "cupolas": "pep",
-  "activate_noop": true,
+  "noop_hooks": ["activate", "attach", "teardown"],
   "facades": ["ingress", "execute", "state"],
   "slots": ["create", "delete", "query", "cache", "record", "compute", "discover"],
   "rpc": {

@@ -1,10 +1,10 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "daemon": "llm_d",
   "cname": "llm",
   "sd_type": "llm",
   "ops": ["ipc", "llm"],
-  "activate_noop": true,
+  "noop_hooks": ["activate", "attach", "teardown"],
   "facades": ["ingress", "execute", "state"],
   "slots": ["compute", "route", "cache", "config", "stream", "resilience"],
   "rpc": {
