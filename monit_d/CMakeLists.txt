@@ -23,7 +23,7 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== Monitor 服务静态库 ====================
-# 提取 service/prometheus_exporter/logging/tracing/alert
+# 提取 service/prometheus_exporter/tracing/alert
 # 为独立静态库，供 monit_d 可执行文件和集成测试共用，消除桩函数依赖。
 # 排除 main.c（含 main()）。
 # service.c 按单一职责拆分（2026-08-27）：
@@ -35,7 +35,6 @@ set(MONIT_SERVICE_SOURCES
     src/service_subsystems.c
     src/service_agent_trace.c
     src/prometheus_exporter.c
-    src/logging.c
     src/tracing.c
     src/alert.c
     src/observe_rpc.c
