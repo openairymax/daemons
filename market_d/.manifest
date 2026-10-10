@@ -15,8 +15,9 @@
     "buffer": 65536,
     "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },
     "methods": [
-      "register_agent", "search_agents", "install_agent", "register_skill",
-      "search_skills", "health_check", "publish", "search", "install", "get_stats"
+      "register_agent", "search_agents", "install_agent", "uninstall_agent",
+      "register_skill", "search_skills", "uninstall_skill", "check_update",
+      "sync_registry", "health_check", "publish", "search", "install", "get_stats"
     ]
   },
   "deps": { "required": [], "optional": [] },

@@ -44,8 +44,12 @@ void svc_attach(void *dispatcher);
 void m_register_agent(cJSON *params, int id, void *user_data);
 void m_search_agents(cJSON *params, int id, void *user_data);
 void m_install_agent(cJSON *params, int id, void *user_data);
+void m_uninstall_agent(cJSON *params, int id, void *user_data);
 void m_register_skill(cJSON *params, int id, void *user_data);
 void m_search_skills(cJSON *params, int id, void *user_data);
+void m_uninstall_skill(cJSON *params, int id, void *user_data);
+void m_check_update(cJSON *params, int id, void *user_data);
+void m_sync_registry(cJSON *params, int id, void *user_data);
 void m_health_check(cJSON *params, int id, void *user_data);
 void m_publish(cJSON *params, int id, void *user_data);
 void m_search(cJSON *params, int id, void *user_data);
@@ -61,8 +65,12 @@ void m_get_stats(cJSON *params, int id, void *user_data);
     X("register_agent", m_register_agent) \
     X("search_agents", m_search_agents) \
     X("install_agent", m_install_agent) \
+    X("uninstall_agent", m_uninstall_agent) \
     X("register_skill", m_register_skill) \
     X("search_skills", m_search_skills) \
+    X("uninstall_skill", m_uninstall_skill) \
+    X("check_update", m_check_update) \
+    X("sync_registry", m_sync_registry) \
     X("health_check", m_health_check) \
     X("publish", m_publish) \
     X("search", m_search) \

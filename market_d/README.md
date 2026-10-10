@@ -19,6 +19,8 @@
 
 - **双资源注册表** — Agent 与 Skill 各自独立注册、搜索、列举。
 - **安装器** — 支持指定版本、安装路径与强制更新；返回实际安装版本与路径。
+- **卸载与更新** — `uninstall_agent` / `uninstall_skill` 移除落地资源与注册表项，
+  `check_update` 查询最新版本，`sync_registry` 与远程注册中心同步索引。
 - **发布** — 接受完整的 `agent` 或 `skill` 描述对象，持久化到本地仓库并返回安装路径。
 - **别名方法** — `search` / `install` 分别是 `search_agents` / `install_agent` 的
   标准别名，便于统一编排。
@@ -31,12 +33,12 @@
         ↓
   main.c（accept 循环 + 线程池 4~8 / 队列 256 + 方法分发）
         ↓
-  market_service（注册 / 搜索 / 安装 / 发布）
+  market_service（注册 / 搜索 / 安装 / 卸载 / 更新检查 / 同步 / 发布）
         ├── market_service_registry.c   Agent 与 Skill 注册表
         ├── market_service_query.c      只读查询（搜索 / 清单 / 更新检查）
-        ├── market_service_install.c    安装器（版本 / 强制更新 / 安装路径）
+        ├── market_service_install.c    安装与卸载（版本 / 强制更新 / 安装路径）
         ├── publisher.c                 资源发布
-        └── market_service_config.c     配置装配
+        └── market_service_config.c     配置装配与注册中心同步
 ```
 
 - 启动时使用内建默认配置：`registry_url = NULL`、`storage_path = NULL`
@@ -47,15 +49,19 @@
 
 ## JSON-RPC 接口
 
-共 11 个方法，经 `method_dispatcher_register` 注册（方法名不含命名空间前缀）：
+共 15 个方法，经 `method_dispatcher_register` 注册（方法名不含命名空间前缀）：
 
 | 方法 | 参数 | 返回 | 描述 |
 |------|------|------|------|
 | `register_agent` | `{agent: {agent_id, name?, version?, description?, author?}}` | `{status: "registered", agent_id}` | 注册 Agent |
 | `search_agents` | `{keyword?: string, offset?: int, limit?: int}`（默认 `""` / 0 / 20） | Agent 数组（含 `installed` 布尔） | 搜索 Agent |
 | `install_agent` | `{agent_id, version?: "latest", install_path?, force_update?}` | `{status, agent_id, installed_version, message?, install_path?}` | 安装 Agent |
+| `uninstall_agent` | `{agent_id}` | `{status: "uninstalled", agent_id}` | 卸载 Agent（移除安装目录） |
 | `register_skill` | `{skill: {skill_id, name?, version?}}` | `{status: "registered", skill_id}` | 注册 Skill |
 | `search_skills` | `{keyword?: string}` | Skill 数组（`limit` 固定 20、`offset` 0） | 搜索 Skill |
+| `uninstall_skill` | `{skill_id}` | `{status: "uninstalled", skill_id}` | 卸载 Skill |
+| `check_update` | `{id}` | `{id, has_update, latest_version?}` | 检查 Agent / Skill 更新 |
+| `sync_registry` | `{}` | `{status: "synced"}` | 与远程注册中心同步 |
 | `publish` | `{agent \| skill: object, version?: "latest", install_path?, force_update?}` | `{status: "published", type, id, published_version, message?, install_path?}` | 发布（落盘）Agent 或 Skill |
 | `search` | 同 `search_agents` | 同 `search_agents` | `search_agents` 别名 |
 | `install` | 同 `install_agent` | 同 `install_agent` | `install_agent` 别名 |
