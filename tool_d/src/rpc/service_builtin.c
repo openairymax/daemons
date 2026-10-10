@@ -89,6 +89,7 @@ void register_builtin_tools(tool_service_t *svc)
     static tool_param_t fs_write_params[] = {
         {"path", "{\"type\":\"string\"}", 1},
         {"content", "{\"type\":\"string\"}", 1},
+        {"create_dirs", "{\"type\":\"boolean\"}", 0},
     };
     static tool_param_t shell_params[] = {
         {"command", "{\"type\":\"string\"}", 1},
@@ -169,7 +170,7 @@ void register_builtin_tools(tool_service_t *svc)
             .description = "Write content to a file (create/overwrite)",
             .executable = "builtin:fs_write",
             .params = fs_write_params,
-            .param_count = 2,
+            .param_count = 3,
             .timeout_sec = 30,
             .cacheable = 0,
             .permission_rule = "fs_write",
@@ -194,7 +195,7 @@ void register_builtin_tools(tool_service_t *svc)
             .description = "Execute a shell command and capture its output",
             .executable = "builtin:shell_run",
             .params = shell_params,
-            .param_count = 1,
+            .param_count = 2,
             .timeout_sec = 60,
             .cacheable = 0,
             .permission_rule = "shell_run",

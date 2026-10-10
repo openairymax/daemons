@@ -179,6 +179,12 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
         return;
     }
 
+    if (!g_service) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
+                           "Tool service not ready", id);
+        return;
+    }
+
     char *params_json = cJSON_PrintUnformatted(jparams);
     if (!params_json) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "JSON serialization failed", id);
@@ -194,29 +200,44 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
     int ret = tool_service_execute(g_service, &req, &res);
     AIRY_FREE((void *)params_json);
 
-    if (ret != AIRY_SUCCESS || !res) {
-        /* Prefer passing through the executor's error description (e.g. the
-         * "User denied tool execution" of interactive approval deny/timeout),
-         * otherwise fall back to generic info. */
-        const char *emsg = (res && res->error) ? res->error : "Execution failed";
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, emsg, id);
+    /* Error layering: a JSON-RPC error envelope is reserved for protocol /
+     * transport failures only. Tool business outcomes (including "tool ran
+     * and failed", i.e. res->success == 0, and request-level rejections such
+     * as a denied interactive approval) MUST travel as a result envelope so
+     * the caller can surface the original error text and code instead of
+     * misreporting the daemon as unreachable. */
+    cJSON *result = cJSON_CreateObject();
+    if (!result) {
         if (res) {
             tool_result_free(res);
         }
-        SVC_LOG_ERROR("Tool execution failed: %s (error=%d)", tid, ret);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
         return;
     }
 
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddNumberToObject(result, "success", res->success);
-    if (res->output)
-        cJSON_AddStringToObject(result, "output", res->output);
-    if (res->error)
-        cJSON_AddStringToObject(result, "error", res->error);
-    cJSON_AddNumberToObject(result, "exit_code", res->exit_code);
+    if (res) {
+        cJSON_AddNumberToObject(result, "success", res->success);
+        if (res->output)
+            cJSON_AddStringToObject(result, "output", res->output);
+        if (res->error)
+            cJSON_AddStringToObject(result, "error", res->error);
+        cJSON_AddNumberToObject(result, "exit_code", res->exit_code);
+        cJSON_AddNumberToObject(result, "error_code", ret);
+        if (ret != AIRY_OK)
+            SVC_LOG_ERROR("Tool execution failed: %s (error=%d)", tid, ret);
+        tool_result_free(res);
+    } else {
+        const char *emsg = airy_err_str(ret);
+        if (!emsg || !emsg[0])
+            emsg = "Execution failed";
+        cJSON_AddNumberToObject(result, "success", 0);
+        cJSON_AddStringToObject(result, "error", emsg);
+        cJSON_AddNumberToObject(result, "exit_code", -1);
+        cJSON_AddNumberToObject(result, "error_code", ret);
+        SVC_LOG_ERROR("Tool execution rejected: %s (error=%d)", tid, ret);
+    }
 
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
-    tool_result_free(res);
 }
 
 static void handle_health_check(int id, airy_sock_t client_fd)

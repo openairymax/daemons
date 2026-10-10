@@ -16,15 +16,16 @@
 #include "io.h"
 
 /* 读取沙箱内已确认路径的全部内容；失败时把面向调用方的错误写入 res。
- * 写文件统一委托 commons 的 airy_io_write_file（同目录 .tmp + fsync +
- * rename 原子替换），本域不再私有复刻该机制。 */
-static int fs_read_whole(const char *resolved, const char *shown, tool_result_t *res, char **out,
-                         int *out_truncated)
+ * 回执与错误一律回显已解析的绝对路径 resolved（工具路径锚点契约，缺陷 #4），
+ * 使调用方能据此判断相对路径的解析基准。写文件统一委托 commons 的
+ * airy_io_write_file（同目录 .tmp + fsync + rename 原子替换），本域不再
+ * 私有复刻该机制。 */
+static int fs_read_whole(const char *resolved, tool_result_t *res, char **out, int *out_truncated)
 {
     FILE *fp = fopen(resolved, "rb");
     if (!fp) {
         char err[512];
-        snprintf(err, sizeof(err), "Cannot open file '%s': %s", shown, strerror(errno));
+        snprintf(err, sizeof(err), "Cannot open file '%s': %s", resolved, strerror(errno));
         res->error = AIRY_STRDUP(err);
         return (errno == ENOENT) ? AIRY_ERR_NOT_FOUND : AIRY_ERR_IO;
     }
@@ -59,7 +60,7 @@ int fs_read_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
         return rc;
     int truncated = 0;
     char *content = NULL;
-    rc = fs_read_whole(resolved, path->valuestring, res, &content, &truncated);
+    rc = fs_read_whole(resolved, res, &content, &truncated);
     if (rc != AIRY_OK)
         return rc;
     if (truncated) {
@@ -70,6 +71,36 @@ int fs_read_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     res->output = content;
     res->success = 1;
     res->exit_code = 0;
+    return AIRY_OK;
+}
+
+/* 为写入目标递归创建父目录链（缺陷 #3）：confine 后 resolved 已锚定为绝对
+ * 路径，剥去 basename 后 mkdir -p 其余部分，使对不存在目录的直接写入不再
+ * 以 ENOENT 失败。默认开启，可由 fs_write 的 create_dirs=0 关闭以防误建。 */
+static int fs_write_mkdirs(const char *resolved, tool_result_t *res)
+{
+    char dir[4096];
+    size_t n = strlen(resolved);
+    if (n == 0 || n >= sizeof(dir)) {
+        res->error = AIRY_STRDUP("Invalid write path");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    __builtin_memcpy(dir, resolved, n + 1);
+    char *sep = strrchr(dir, '/');
+#ifdef _WIN32
+    char *bsep = strrchr(dir, '\\');
+    if (!sep || (bsep && bsep > sep))
+        sep = bsep;
+#endif
+    if (!sep || sep == dir)
+        return AIRY_OK; /* 无父目录分隔符，或直接位于根下，无需创建 */
+    *sep = '\0';
+    if (airy_io_mkdir_p(dir, 0755) != 0) {
+        char err[512];
+        snprintf(err, sizeof(err), "Cannot create directory '%s'", dir);
+        res->error = AIRY_STRDUP(err);
+        return AIRY_ERR_IO;
+    }
     return AIRY_OK;
 }
 
@@ -90,20 +121,28 @@ int fs_write_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *r
         res->error = AIRY_STRDUP("Missing string parameter: content");
         return AIRY_ERR_INVALID_PARAM;
     }
+    int create_dirs = 1;
+    cJSON *cd = cJSON_GetObjectItem(root, "create_dirs");
+    if (cJSON_IsBool(cd))
+        create_dirs = cJSON_IsTrue(cd);
     size_t clen = strlen(content->valuestring);
     char resolved[4096];
     int rc = builtin_fs_confine(path->valuestring, 1, resolved, sizeof(resolved), res);
     if (rc != AIRY_OK)
         return rc;
+    if (create_dirs) {
+        rc = fs_write_mkdirs(resolved, res);
+        if (rc != AIRY_OK)
+            return rc;
+    }
     if (airy_io_write_file(resolved, content->valuestring, clen) != 0) {
         char err[512];
-        snprintf(err, sizeof(err), "Cannot write file '%s': %s", path->valuestring,
-                 strerror(errno));
+        snprintf(err, sizeof(err), "Cannot write file '%s': %s", resolved, strerror(errno));
         res->error = AIRY_STRDUP(err);
         return AIRY_ERR_IO;
     }
     char ok[512];
-    snprintf(ok, sizeof(ok), "Written %zu bytes to %s (atomic)", clen, path->valuestring);
+    snprintf(ok, sizeof(ok), "Written %zu bytes to %s (atomic)", clen, resolved);
     res->output = AIRY_STRDUP(ok);
     res->success = 1;
     res->exit_code = 0;
@@ -144,7 +183,7 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
         return rc;
 
     char *content = NULL;
-    rc = fs_read_whole(resolved, path->valuestring, res, &content, NULL);
+    rc = fs_read_whole(resolved, res, &content, NULL);
     if (rc != AIRY_OK)
         return rc;
 
@@ -161,8 +200,7 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     }
     if (total == 0) {
         char msg[512];
-        snprintf(msg, sizeof(msg), "String not found in '%s': %s", path->valuestring,
-                 old->valuestring);
+        snprintf(msg, sizeof(msg), "String not found in '%s': %s", resolved, old->valuestring);
         res->error = AIRY_STRDUP(msg);
         AIRY_FREE(content);
         res->success = 0;
@@ -198,8 +236,7 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
 
     if (airy_io_write_file(resolved, buf, w) != 0) {
         char err[512];
-        snprintf(err, sizeof(err), "Cannot write file '%s': %s", path->valuestring,
-                 strerror(errno));
+        snprintf(err, sizeof(err), "Cannot write file '%s': %s", resolved, strerror(errno));
         res->error = AIRY_STRDUP(err);
         AIRY_FREE(buf);
         return AIRY_ERR_IO;
@@ -208,7 +245,7 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     snprintf(ok, sizeof(ok),
              "Replaced %d occurrence(s) of %zu-byte string in '%s' "
              "(total matches: %d, %zu bytes written, atomic)",
-             reps, olen, path->valuestring, total, w);
+             reps, olen, resolved, total, w);
     AIRY_FREE(buf);
     res->output = AIRY_STRDUP(ok);
     res->success = 1;

@@ -131,17 +131,18 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
     }
     char *text = NULL;
     /* daemon_rpc_call 已解包 JSON-RPC 外层：resp 即 {"success","output",
-     * "error","exit_code"}（与 cli_chat_tools.c 2026-08-16 修复同源；
-     * 兼容未解包信封——有 "result" 先下钻）。 */
+     * "error","exit_code","error_code"}（与 cli_chat_tools.c 同源；兼容未解包
+     * 信封——有 "result" 先下钻）。工具业务错误（success=0）一律透传原始
+     * error 文案与 error_code，不再折叠为不可读的通用话术（缺陷 #2）。 */
     cJSON *result = cJSON_GetObjectItem(root, "result");
     if (!cJSON_IsObject(result))
         result = root;
-    cJSON *err = cJSON_GetObjectItem(root, "error");
     int tool_ok = 0;
-    if (!err && result) {
+    if (result) {
         cJSON *success = cJSON_GetObjectItem(result, "success");
         cJSON *output = cJSON_GetObjectItem(result, "output");
         cJSON *error = cJSON_GetObjectItem(result, "error");
+        cJSON *ecode = cJSON_GetObjectItem(result, "error_code");
         tool_ok = cJSON_IsNumber(success) && success->valueint != 0;
         if (tool_ok) {
             text = AIRY_STRDUP(cJSON_IsString(output) && output->valuestring ? output->valuestring :
@@ -149,18 +150,13 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
         } else {
             const char *e =
                 cJSON_IsString(error) && error->valuestring ? error->valuestring : "execution failed";
-            size_t elen = strlen(e) + 8;
-            text = (char *)AIRY_MALLOC(elen);
-            if (text)
-                snprintf(text, elen, "Error: %s", e);
+            char buf[1024];
+            if (cJSON_IsNumber(ecode))
+                snprintf(buf, sizeof(buf), "Error: %s (code: %d)", e, ecode->valueint);
+            else
+                snprintf(buf, sizeof(buf), "Error: %s", e);
+            text = AIRY_STRDUP(buf);
         }
-    } else if (err) {
-        cJSON *msg = cJSON_GetObjectItem(err, "message");
-        const char *m = cJSON_IsString(msg) && msg->valuestring ? msg->valuestring : "unknown";
-        size_t elen = strlen(m) + 8;
-        text = (char *)AIRY_MALLOC(elen);
-        if (text)
-            snprintf(text, elen, "Error: %s", m);
     }
     if (!text)
         text = AIRY_STRDUP("Tool execution returned no result");
@@ -199,18 +195,30 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
         cJSON_AddStringToObject(msg0, "content", prompt);
         cJSON_AddItemToArray(messages, msg0);
     }
-    /* 0.1.18 B1 轮次归属约束：请求携带多条消息（真实历史）时头插 system，
-     * 声明历史仅供指代消解——修复模型把多轮历史视为同一篇待续写文本、
-     * 对旧题续答的上下文串轮。单条消息无需注入（无串轮源）。 */
-    if (cJSON_GetArraySize(messages) > 1) {
+    /* 工具路径锚点契约（缺陷 #4）：向模型显式声明文件类工具与 shell_run 的
+     * 相对路径以 tool_d 工作目录为基准、回执回显解析后的绝对路径，免除模型
+     * 对落点的反复猜测。0.1.18 B1 轮次归属约束（多消息时）合并入同一条
+     * system：历史仅供指代消解，修复模型把多轮历史视为同一篇待续写文本、
+     * 对旧题续答的上下文串轮。 */
+    {
         cJSON *sys = cJSON_CreateObject();
         if (sys) {
-            cJSON_AddStringToObject(sys, "role", "system");
-            cJSON_AddStringToObject(sys, "content",
+            static const char base[] =
+                "【工具路径契约】文件类工具（fs_*）与 shell_run 的相对路径以工具"
+                "服务（tool_d）的工作目录为解析基准；工具结果回执会回显解析后的"
+                "绝对路径。";
+            static const char boundary[] =
                 "【轮次边界】本次请求携带了历史消息。历史消息仅供指代消解与背景"
                 "理解；你的回答必须直接回应最后一条用户消息。若历史主题与最后"
                 "一条用户消息不一致，以最后一条用户消息为准，禁止延续历史主题"
-                "作答，禁止续写历史中未完成的回答。");
+                "作答，禁止续写历史中未完成的回答。";
+            char content[1024];
+            if (cJSON_GetArraySize(messages) > 1)
+                snprintf(content, sizeof(content), "%s%s", base, boundary);
+            else
+                snprintf(content, sizeof(content), "%s", base);
+            cJSON_AddStringToObject(sys, "role", "system");
+            cJSON_AddStringToObject(sys, "content", content);
             cJSON_InsertItemInArray(messages, 0, sys);
         }
     }
