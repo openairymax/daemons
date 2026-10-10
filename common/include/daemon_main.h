@@ -381,8 +381,8 @@ typedef struct {
  * sec_cleanup_）：两张静态表在前，三枚可缺省钩子策略居中。activate_/
  * attach_/teardown_ 为对应钩子策略：有策略的户传 svc_activate/
  * svc_attach/svc_teardown（src/svc.c），无策略户传机制层
- * daemon_svc_activate_noop/daemon_svc_attach_noop/
- * daemon_svc_teardown_noop 缺省（0.1.19 §80，svc.c 不再逐户维护空桩）。
+ * svc_activate_noop/svc_attach_noop/svc_teardown_noop 缺省（0.1.19
+ * §80，svc.c 不再逐户维护空桩）。
  * sec_init_/sec_cleanup_ 为安全穹顶策略单元接线（§254b）：机制核经
  * 指针单向调用，不感知实现。
  */
@@ -403,10 +403,10 @@ typedef struct {
  * 空语义；签名逐一对齐 daemon_boot_t::svc_activate/svc_attach/
  * svc_teardown。实现: src/daemon/daemon_boot.c。
  */
-int daemon_svc_activate_noop(daemon_event_driver_t *driver,
-                             daemon_bootstrap_sd_t *bsd);
-void daemon_svc_attach_noop(void *dispatcher);
-void daemon_svc_teardown_noop(void);
+int svc_activate_noop(daemon_event_driver_t *driver,
+                      daemon_bootstrap_sd_t *bsd);
+void svc_attach_noop(void *dispatcher);
+void svc_teardown_noop(void);
 
 /**
  * @brief Daemon 启动机制：parse -> init -> serve -> cleanup 全装配序。
