@@ -38,6 +38,8 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin/plugin_service.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin/plugin_discovery.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/plugin/plugin_permission.c
+    # 技能机制服务面（skill.* RPC 登记 + syscall 机制往返测试）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/skill_rpc.c
 )
 
 set(TOOL_TEST_SOURCES
@@ -53,6 +55,8 @@ set(TOOL_TEST_SOURCES
     # 0.1.9 M4：plugin_d → tool_d 整编——插件测试随迁
     test_plugin_permission.c
     test_plugin_discovery.c
+    # 技能机制服务面（skill.* RPC 登记 + syscall 机制往返）
+    test_skill_rpc.c
 )
 # os_sandbox 测试依赖 Landlock/seccomp/unshare/mount 等 Linux-only 能力，
 # macOS/BSD 上 os_sandbox.c 为空实现（OS_SANDBOX_MODE_OFF），该测试不适用。
@@ -80,6 +84,7 @@ set(TOOL_COMMON_INCLUDES
     ${COMMONS_DIR}/utils/sync
     ${COMMONS_DIR}/utils/cache
     ${COMMONS_DIR}/utils/compat
+    ${COMMONS_DIR}/utils/ipc
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
