@@ -104,10 +104,6 @@ int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
     return 0;
 }
 
-void svc_teardown(void)
-{
-}
-
 void svc_destroy(void)
 {
     observe_rpc_cleanup();

@@ -1,10 +1,10 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "daemon": "channel_d",
   "cname": "channel",
   "sd_type": "channel",
   "ops": ["ipc"],
-  "activate_noop": true,
+  "noop_hooks": ["activate", "attach", "teardown"],
   "facades": ["ingress", "execute", "state"],
   "slots": ["create", "delete", "comm", "stream", "query"],
   "rpc": {

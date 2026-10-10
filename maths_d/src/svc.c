@@ -60,12 +60,6 @@ void svc_destroy(void)
     maths_d_service_destroy(&g_svc_maths_d);
 }
 
-/* 无静态表外动态注册（manifest methods 全量覆盖），空实现 */
-void svc_attach(void *dispatcher)
-{
-    (void)dispatcher;
-}
-
 /* 域调用 → JSON-RPC 响应的唯一出口（三路收敛） */
 static void svc_rpc_method(airy_sock_t client_fd, const char *method,
                            cJSON *params, int id)
