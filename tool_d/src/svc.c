@@ -53,10 +53,6 @@ int svc_prepare(const char *config_path)
     return 0;
 }
 
-void svc_teardown(void)
-{
-}
-
 void svc_destroy(void)
 {
     /* 插件执行域随 tool_d 回收（幂等，可重入 fail_svc 路径） */

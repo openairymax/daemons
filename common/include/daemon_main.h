@@ -377,29 +377,36 @@ typedef struct {
  * 与穹顶模式随户异；以模板宏收敛生成户 main.c 的横向接线副本
  * （0.1.19 §79），装配机制仍整体在 daemon_boot()。
  *
- * 形参顺序（ops_, methods_, activate_, sec_init_, sec_cleanup_）：两张
- * 静态表在前，激活钩子策略居第三。activate_ 为激活钩子策略：实体户传
- * svc_activate（src/svc.c），无激活策略户传 daemon_svc_noop 缺省
- * （0.1.19 §80，svc.c 不再逐户维护空桩）。sec_init_/sec_cleanup_ 为
- * 安全穹顶策略单元接线（§254b）：机制核经指针单向调用，不感知实现。
+ * 形参顺序（ops_, methods_, activate_, attach_, teardown_, sec_init_,
+ * sec_cleanup_）：两张静态表在前，三枚可缺省钩子策略居中。activate_/
+ * attach_/teardown_ 为对应钩子策略：有策略的户传 svc_activate/
+ * svc_attach/svc_teardown（src/svc.c），无策略户传机制层
+ * daemon_svc_activate_noop/daemon_svc_attach_noop/
+ * daemon_svc_teardown_noop 缺省（0.1.19 §80，svc.c 不再逐户维护空桩）。
+ * sec_init_/sec_cleanup_ 为安全穹顶策略单元接线（§254b）：机制核经
+ * 指针单向调用，不感知实现。
  */
-#define DAEMON_BOOT_WIRE(ops_, methods_, activate_, sec_init_, sec_cleanup_)   \
+#define DAEMON_BOOT_WIRE(ops_, methods_, activate_, attach_, teardown_,         \
+                         sec_init_, sec_cleanup_)                              \
     .ops = (ops_), .ops_count = sizeof(ops_) / sizeof((ops_)[0]),              \
     .sec_init = (sec_init_), .sec_cleanup = (sec_cleanup_),                    \
     .svc_prepare = svc_prepare, .svc_endpoint = svc_endpoint,                  \
-    .svc_activate = (activate_), .svc_attach = svc_attach,                     \
-    .svc_teardown = svc_teardown, .svc_destroy = svc_destroy,                  \
+    .svc_activate = (activate_), .svc_attach = (attach_),                      \
+    .svc_teardown = (teardown_), .svc_destroy = svc_destroy,                   \
     .methods = (methods_),                                                     \
     .method_count = sizeof(methods_) / sizeof((methods_)[0])
 
 /**
- * @brief svc 激活钩子缺省策略（null object，0.1.19 §80）。
+ * @brief svc 钩子缺省策略（null object，0.1.19 §80）。
  *
- * 无激活策略户经 DAEMON_BOOT_WIRE 第三参引用本符号，机制层单点
- * 提供空激活语义；签名对齐 daemon_boot_t::svc_activate。实现:
- * src/daemon/daemon_boot.c。
+ * 无对应策略的户经 DAEMON_BOOT_WIRE 引用本组符号，机制层单点提供
+ * 空语义；签名逐一对齐 daemon_boot_t::svc_activate/svc_attach/
+ * svc_teardown。实现: src/daemon/daemon_boot.c。
  */
-int daemon_svc_noop(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd);
+int daemon_svc_activate_noop(daemon_event_driver_t *driver,
+                             daemon_bootstrap_sd_t *bsd);
+void daemon_svc_attach_noop(void *dispatcher);
+void daemon_svc_teardown_noop(void);
 
 /**
  * @brief Daemon 启动机制：parse -> init -> serve -> cleanup 全装配序。

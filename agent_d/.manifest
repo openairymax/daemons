@@ -1,9 +1,10 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "daemon": "agent_d",
   "cname": "agent",
   "sd_type": "agent",
   "ops": ["ipc"],
+  "noop_hooks": ["attach"],
   "facades": ["ingress", "execute", "state"],
   "slots": ["create", "delete", "flow", "stream", "query"],
   "rpc": {

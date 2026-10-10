@@ -110,9 +110,3 @@ void svc_destroy(void)
     }
     daemon_ep_free(daemon_ep_slot());
 }
-
-/* 无静态表外动态注册（manifest methods 全量覆盖），空实现 */
-void svc_attach(void *dispatcher)
-{
-    (void)dispatcher;
-}

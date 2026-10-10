@@ -214,10 +214,6 @@ int svc_prepare(const char *config_path)
     return 0;
 }
 
-void svc_teardown(void)
-{
-}
-
 void svc_destroy(void)
 {
     if (g_service) {
@@ -233,11 +229,4 @@ void svc_destroy(void)
         g_ledger = NULL;
     }
     daemon_ep_free(daemon_ep_slot());
-}
-
-/* 策略层附加装配挂点：mem_d 的 mem.* 方法面已由生成态静态注册表
- * （SVC_METHODS）全量覆盖，无附加动态注册族，提供空实现以满足契约。 */
-void svc_attach(void *dispatcher)
-{
-    (void)dispatcher;
 }

@@ -1,10 +1,11 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "daemon": "monit_d",
   "cname": "monitor",
   "sd_type": "monitor",
   "ops": ["ipc"],
   "cupolas": "pep",
+  "noop_hooks": ["teardown"],
   "facades": ["ingress", "state", "governance"],
   "slots": ["record", "query", "display", "notify", "resilience"],
   "rpc": {

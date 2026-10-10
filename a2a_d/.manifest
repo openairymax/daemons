@@ -1,10 +1,10 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "daemon": "a2a_d",
   "cname": "a2a",
   "sd_type": "a2a",
   "ops": ["ipc"],
-  "activate_noop": true,
+  "noop_hooks": ["activate", "attach", "teardown"],
   "facades": ["ingress", "execute", "state"],
   "slots": ["comm", "discover", "create", "update", "delete", "query", "route"],
   "rpc": {

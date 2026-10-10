@@ -96,11 +96,6 @@ int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
     return 0;
 }
 
-void svc_teardown(void)
-{
-    /* worker 线程随 destroy 收束，无独立 teardown 策略 */
-}
-
 void svc_destroy(void)
 {
     roadmap_rpc_cleanup();
