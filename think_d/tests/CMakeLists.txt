@@ -13,14 +13,23 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 set(ATOMS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../atoms)
 set(CORELOOPTHREE_DIR ${ATOMS_DIR}/coreloopthree)
 
-set(THINK_TEST_SOURCES
-    test_think_gccp_twopass.c
-)
+# M5-4：两段式 GCCP 是 cognition 策略能力的集成面——策略库缺席
+# （BUILD_COGNITION_STRATEGY=OFF）时机制核静默旁路 GCCP，本测试语义
+# 不成立，不注册（与 think_d svc.c 注表面同一 TARGET 判据）。
+if(TARGET airy_cognition_strategy)
+    set(THINK_TEST_SOURCES test_think_gccp_twopass.c)
+else()
+    set(THINK_TEST_SOURCES)
+endif()
 
 foreach(TEST_SRC ${THINK_TEST_SOURCES})
     get_filename_component(TEST_NAME ${TEST_SRC} NAME_WE)
 
     add_executable(test_think_${TEST_NAME} ${TEST_SRC})
+
+    # 与 svc.c 同判据：测试 harness 扮演 daemon 挂载 GCCP 策略注表面
+    target_compile_definitions(test_think_${TEST_NAME} PRIVATE
+        AIRY_HAS_COGNITION_STRATEGY=1)
 
     target_include_directories(test_think_${TEST_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../include

@@ -12,7 +12,10 @@
  */
 
 #include "airy_memory.h"
+#ifdef AIRY_HAS_COGNITION_STRATEGY
 #include "cog_review_strategy.h"
+#include "gccp_strategy.h"
+#endif
 #include "cognitive_review.h"
 #include "daemon_cfg_file.h"
 #include "svc_think_d.h"
@@ -49,6 +52,11 @@ typedef struct {
 
 static think_daemon_config_t g_cfg = {0};
 
+/* 策略载荷注表面守卫：产品库挂载（AIRY_HAS_COGNITION_STRATEGY）时注入
+ * CPR/GCCP ops；未挂载时机制核 are_ops_get_cpr()/get_gccp() 恒 NULL，
+ * 静默旁路（fail-open），本文件不引用任何 products 符号。 */
+#ifdef AIRY_HAS_COGNITION_STRATEGY
+
 /* 生态认知审查 ops provider 注表（M5-4 C2）：只读转发 products/cognition
  * 策略载荷，与契约签名 1:1。注入后机制核 engine_phase0 经
  * are_ops_get_cpr() 分发认知并行审查（CPR）；未注入（NULL）时
@@ -58,6 +66,19 @@ static const cog_review_ops_t g_cog_review_ops = {
     .result_init = cog_review_result_init,
     .result_free = cog_review_result_free,
 };
+
+/* GCCP 目标澄清 ops provider 注表（M5-4）：只读转发 products/cognition
+ * 策略载荷，与 airy_gccp_ops_t 契约签名 1:1。注入后机制核 engine_phase0
+ * 经 are_ops_get_gccp() 分发两段式目标澄清（probe/step/confirm）；未注入
+ * （NULL）时静默旁路，不阻断认知主链（LLM 补全闭包由 engine 侧
+ * trampoline 注入回 ops 表，daemon 侧不持 LLM 句柄）。 */
+static const airy_gccp_ops_t g_gccp_ops = {
+    .probe = gccp_probe,
+    .confirm = gccp_confirm,
+    .step = gccp_step,
+};
+
+#endif /* AIRY_HAS_COGNITION_STRATEGY */
 
 /* 策略键派发（daemon_ep_load 回调）：think 段五键自持提取（JSON 层） */
 static void cfg_keys(const cJSON *root, void *ud)
@@ -178,9 +199,15 @@ int svc_prepare(const char *config_path)
                         g_cfg.think1_fast_model) != 0)
         SVC_LOG_WARN("review_svc_init failed, think.review unavailable");
 
+#ifdef AIRY_HAS_COGNITION_STRATEGY
     /* M5-4 C2：注入认知审查 ops（products/cognition 策略载荷），机制核
      * engine_phase0 经 are_ops_get_cpr() 分发 CPR。 */
     are_ops_set_cpr(&g_cog_review_ops);
+
+    /* M5-4：注入 GCCP 目标澄清 ops（products/cognition 策略载荷），机制核
+     * engine_phase0 经 are_ops_get_gccp() 分发两段式交互。 */
+    are_ops_set_gccp(&g_gccp_ops);
+#endif
 
     SVC_LOG_INFO("think service started (enabled=%d, timeout_ms=%u)", g_cfg.think_enabled,
                  g_cfg.process_timeout_ms);
@@ -211,7 +238,10 @@ void svc_teardown(void)
 void svc_destroy(void)
 {
     /* M1-1c：先释放复核/语言网关服务面对 svc 的引用，再销毁本体 */
+#ifdef AIRY_HAS_COGNITION_STRATEGY
     are_ops_set_cpr(NULL);
+    are_ops_set_gccp(NULL);
+#endif
     review_svc_cleanup();
     lang_svc_cleanup();
     if (g_svc) {
