@@ -16,6 +16,7 @@
 #include "cog_review_strategy.h"
 #include "gccp_strategy.h"
 #include "grad_strategy.h"
+#include "payload_registry.h"
 #endif
 #include "cognitive_review.h"
 #include "daemon_cfg_file.h"
@@ -222,6 +223,13 @@ int svc_prepare(const char *config_path)
     /* M5-4 §267：注入 GRAD 计划级批判环 ops（products/cognition 策略
      * 载荷），机制核 engine_process_grad 经 are_ops_get_grad() 分发。 */
     are_ops_set_grad(&g_grad_ops);
+
+    /* M5-4 §268：注入 TC/MC 双思考载荷 ops（products/cognition 策略
+     * 载荷，静态生命周期），机制核 engine/reflective/orchestrator 经
+     * are_ops_get_tc()/get_mc() 分发；缺席时 engine create 按契约
+     * fail-fast（ENOSYS），不产生无思考核心的空壳。 */
+    are_ops_set_tc(cog_payload_tc());
+    are_ops_set_mc(cog_payload_mc());
 #endif
 
     SVC_LOG_INFO("think service started (enabled=%d, timeout_ms=%u)", g_cfg.think_enabled,
@@ -257,6 +265,8 @@ void svc_destroy(void)
     are_ops_set_cpr(NULL);
     are_ops_set_gccp(NULL);
     are_ops_set_grad(NULL);
+    are_ops_set_tc(NULL);
+    are_ops_set_mc(NULL);
 #endif
     review_svc_cleanup();
     lang_svc_cleanup();
