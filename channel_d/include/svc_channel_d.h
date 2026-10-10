@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.13.0 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.13.1 (L3 SSoT) 生成。
  * manifest 派生产物；装配机制在 daemons/common，策略在 src/svc.c
  * 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
@@ -29,7 +29,7 @@ void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp);
 
 /* 生命周期钩子（实现: src/svc.c）。prepare/destroy 恒有策略；
  * activate/attach/teardown 无策略需求者（noop_hooks，0.1.19
- * §80）由机制层 daemon_svc_<hook>_noop 缺省（daemon_main.h），
+ * §80）由机制层 svc_<hook>_noop 缺省（daemon_main.h），
  * 此处不发声明，svc.c 不维护空桩副本。activate 收到事件驱动与
  * SD bootstrap 句柄；attach 为 SVC_METHODS 落库后的动态注册
  * 出口（dispatcher 为 method_dispatcher_t）。 */

@@ -77,19 +77,20 @@ static airy_sock_t daemon_listen_sock(int use_tcp, int tcp_port, const char *uni
 /* svc 钩子缺省策略（null object，0.1.19 §80）：无对应策略需求的户经
  * DAEMON_BOOT_WIRE 引用本组符号，svc.c 不再逐户维护空桩副本。行为与
  * 原空桩逐字等价：立即成功返回，不触碰入参。 */
-int daemon_svc_activate_noop(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
+int svc_activate_noop(daemon_event_driver_t *driver,
+                      daemon_bootstrap_sd_t *bsd)
 {
     (void)driver;
     (void)bsd;
     return 0;
 }
 
-void daemon_svc_attach_noop(void *dispatcher)
+void svc_attach_noop(void *dispatcher)
 {
     (void)dispatcher;
 }
 
-void daemon_svc_teardown_noop(void)
+void svc_teardown_noop(void)
 {
 }
 
