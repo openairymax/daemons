@@ -15,6 +15,7 @@
 #ifdef AIRY_HAS_COGNITION_STRATEGY
 #include "cog_review_strategy.h"
 #include "gccp_strategy.h"
+#include "grad_strategy.h"
 #endif
 #include "cognitive_review.h"
 #include "daemon_cfg_file.h"
@@ -53,8 +54,9 @@ typedef struct {
 static think_daemon_config_t g_cfg = {0};
 
 /* 策略载荷注表面守卫：产品库挂载（AIRY_HAS_COGNITION_STRATEGY）时注入
- * CPR/GCCP ops；未挂载时机制核 are_ops_get_cpr()/get_gccp() 恒 NULL，
- * 静默旁路（fail-open），本文件不引用任何 products 符号。 */
+ * CPR/GCCP/GRAD ops；未挂载时机制核 are_ops_get_cpr()/get_gccp()/
+ * get_grad() 恒 NULL，静默旁路（fail-open），本文件不引用任何 products
+ * 符号。 */
 #ifdef AIRY_HAS_COGNITION_STRATEGY
 
 /* 生态认知审查 ops provider 注表（M5-4 C2）：只读转发 products/cognition
@@ -76,6 +78,15 @@ static const airy_gccp_ops_t g_gccp_ops = {
     .probe = gccp_probe,
     .confirm = gccp_confirm,
     .step = gccp_step,
+};
+
+/* GRAD 计划级批判环 ops provider 注表（M5-4）：只读转发 products/cognition
+ * 策略载荷，与 airy_grad_ops_t 契约签名 1:1。注入后机制核
+ * engine_process_grad 经 are_ops_get_grad() 分发计划级批判循环；未注入
+ * （NULL）时静默旁路（种子计划直通），不阻断认知主链（LLM 补全闭包由
+ * engine 侧 trampoline 注入回 ops 表，daemon 侧不持 LLM 句柄）。 */
+static const airy_grad_ops_t g_grad_ops = {
+    .run = grad_run,
 };
 
 #endif /* AIRY_HAS_COGNITION_STRATEGY */
@@ -207,6 +218,10 @@ int svc_prepare(const char *config_path)
     /* M5-4：注入 GCCP 目标澄清 ops（products/cognition 策略载荷），机制核
      * engine_phase0 经 are_ops_get_gccp() 分发两段式交互。 */
     are_ops_set_gccp(&g_gccp_ops);
+
+    /* M5-4 §267：注入 GRAD 计划级批判环 ops（products/cognition 策略
+     * 载荷），机制核 engine_process_grad 经 are_ops_get_grad() 分发。 */
+    are_ops_set_grad(&g_grad_ops);
 #endif
 
     SVC_LOG_INFO("think service started (enabled=%d, timeout_ms=%u)", g_cfg.think_enabled,
@@ -241,6 +256,7 @@ void svc_destroy(void)
 #ifdef AIRY_HAS_COGNITION_STRATEGY
     are_ops_set_cpr(NULL);
     are_ops_set_gccp(NULL);
+    are_ops_set_grad(NULL);
 #endif
     review_svc_cleanup();
     lang_svc_cleanup();
