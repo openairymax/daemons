@@ -230,6 +230,12 @@ int svc_prepare(const char *config_path)
      * fail-fast（ENOSYS），不产生无思考核心的空壳。 */
     are_ops_set_tc(cog_payload_tc());
     are_ops_set_mc(cog_payload_mc());
+
+    /* M5-4 §269：注入意图解析载荷 ops（products/cognition 策略载荷），
+     * 机制核 sc Phase0 经 are_ops_get_intent() 分发；缺席语义与 tc/mc
+     * 不同——不进 engine create fail-fast，Phase0 遇 NULL 返回 ENOSYS
+     * 中断流式管线（与 Phase0 既有 fail-through 同构）。 */
+    are_ops_set_intent(cog_payload_intent());
 #endif
 
     SVC_LOG_INFO("think service started (enabled=%d, timeout_ms=%u)", g_cfg.think_enabled,
@@ -267,6 +273,7 @@ void svc_destroy(void)
     are_ops_set_grad(NULL);
     are_ops_set_tc(NULL);
     are_ops_set_mc(NULL);
+    are_ops_set_intent(NULL);
 #endif
     review_svc_cleanup();
     lang_svc_cleanup();
