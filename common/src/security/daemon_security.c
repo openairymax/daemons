@@ -72,6 +72,20 @@ void ensure_mutex_initialized(void)
     }
 }
 
+airy_err_t sec_ctx_lock(const char *who, airy_err_t deny)
+{
+    ensure_mutex_initialized();
+    airy_mtx_lock(&g_security_mutex);
+    if (g_security_ctx.initialized) {
+        return AIRY_OK;
+    }
+    airy_mtx_unlock(&g_security_mutex);
+    SVC_LOG_ERROR("%s: daemon_security not initialized — initialize at startup. "
+                  "DENIED (fail-closed).",
+                  who ? who : "daemon_security");
+    return deny;
+}
+
 static const char *DANGEROUS_PATTERNS[] = {";",  "|", "`",  "$(", "${", "&&", "||", ">",
                                            ">>", "<", "<<", "\\", "\n", "\r", NULL};
 
