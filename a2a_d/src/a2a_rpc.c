@@ -39,74 +39,22 @@ static void handle_count(int id, airy_sock_t fd);
 static void handle_health_check(int id, airy_sock_t fd);
 static void handle_get_stats(int id, airy_sock_t fd);
 
-void m_register_agent(cJSON *params, int id, void *user_data)
-{
-    handle_register_agent(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_unregister_agent(cJSON *params, int id, void *user_data)
-{
-    handle_unregister_agent(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_discover_agents(cJSON *params, int id, void *user_data)
-{
-    handle_discover(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_create_task(cJSON *params, int id, void *user_data)
-{
-    handle_create_task(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_update_task(cJSON *params, int id, void *user_data)
-{
-    handle_update_task(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_cancel_task(cJSON *params, int id, void *user_data)
-{
-    handle_cancel_task(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_get_task(cJSON *params, int id, void *user_data)
-{
-    handle_get_task(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_send_message(cJSON *params, int id, void *user_data)
-{
-    handle_send_message(params, id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL(register_agent, handle_register_agent)
+DAEMON_RPC_SHELL(unregister_agent, handle_unregister_agent)
+DAEMON_RPC_SHELL(discover_agents, handle_discover)
+DAEMON_RPC_SHELL(create_task, handle_create_task)
+DAEMON_RPC_SHELL(update_task, handle_update_task)
+DAEMON_RPC_SHELL(cancel_task, handle_cancel_task)
+DAEMON_RPC_SHELL(get_task, handle_get_task)
+DAEMON_RPC_SHELL(send_message, handle_send_message)
 
 /* L2 协议别名：a2a.send == send_message；a2a.receive == get_task。 */
-void m_send(cJSON *params, int id, void *user_data)
-{
-    handle_send_message(params, id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL(send, handle_send_message)
+DAEMON_RPC_SHELL(receive, handle_get_task)
 
-void m_receive(cJSON *params, int id, void *user_data)
-{
-    handle_get_task(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_count(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    handle_count(id, *(airy_sock_t *)user_data);
-}
-
-void m_health_check(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    handle_health_check(id, *(airy_sock_t *)user_data);
-}
-
-void m_get_stats(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    handle_get_stats(id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL0(count, handle_count)
+DAEMON_RPC_SHELL0(health_check, handle_health_check)
+DAEMON_RPC_SHELL0(get_stats, handle_get_stats)
 
 static char *a2a_cjson_to_string(cJSON *obj)
 {

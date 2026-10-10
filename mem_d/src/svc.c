@@ -48,77 +48,30 @@ mem_daemon_config_t g_config = {0};
 
 /* ── RPC 蹦床（m_<method> ↔ .manifest rpc.methods） ─────────────────────── */
 
-void m_write(cJSON *params, int id, void *user_data)
-{ handle_write(params, id, *(airy_sock_t *)user_data); }
-
-void m_search(cJSON *params, int id, void *user_data)
-{ handle_search(params, id, *(airy_sock_t *)user_data); }
-
-void m_get(cJSON *params, int id, void *user_data)
-{ handle_get(params, id, *(airy_sock_t *)user_data); }
-
-void m_delete(cJSON *params, int id, void *user_data)
-{ handle_delete(params, id, *(airy_sock_t *)user_data); }
-
-void m_count(cJSON *params, int id, void *user_data)
-{ (void)params; handle_count(id, *(airy_sock_t *)user_data); }
-
-void m_recent(cJSON *params, int id, void *user_data)
-{ handle_recent(params, id, *(airy_sock_t *)user_data); }
-
-void m_evolve(cJSON *params, int id, void *user_data)
-{ handle_evolve(params, id, *(airy_sock_t *)user_data); }
-
-void m_health_check(cJSON *params, int id, void *user_data)
-{ (void)params; handle_health_check(id, *(airy_sock_t *)user_data); }
-
-void m_get_stats(cJSON *params, int id, void *user_data)
-{ (void)params; handle_get_stats(id, *(airy_sock_t *)user_data); }
-
-void m_kb_ingest(cJSON *params, int id, void *user_data)
-{ handle_kb_ingest(params, id, *(airy_sock_t *)user_data); }
-
-void m_kb_search(cJSON *params, int id, void *user_data)
-{ handle_kb_search(params, id, *(airy_sock_t *)user_data); }
-
-void m_kb_delete(cJSON *params, int id, void *user_data)
-{ handle_kb_delete(params, id, *(airy_sock_t *)user_data); }
-
-void m_kb_list(cJSON *params, int id, void *user_data)
-{ handle_kb_list(params, id, *(airy_sock_t *)user_data); }
-
-void m_cache_put(cJSON *params, int id, void *user_data)
-{ handle_cache_put(params, id, *(airy_sock_t *)user_data); }
-
-void m_cache_get(cJSON *params, int id, void *user_data)
-{ handle_cache_get(params, id, *(airy_sock_t *)user_data); }
-
-void m_cache_del(cJSON *params, int id, void *user_data)
-{ handle_cache_del(params, id, *(airy_sock_t *)user_data); }
-
-void m_cache_stats(cJSON *params, int id, void *user_data)
-{ (void)params; handle_cache_stats(id, *(airy_sock_t *)user_data); }
-
-void m_ledger_append(cJSON *params, int id, void *user_data)
-{ handle_ledger_append(params, id, *(airy_sock_t *)user_data); }
-
-void m_ledger_window(cJSON *params, int id, void *user_data)
-{ handle_ledger_window(params, id, *(airy_sock_t *)user_data); }
-
-void m_ledger_budget(cJSON *params, int id, void *user_data)
-{ handle_ledger_budget(params, id, *(airy_sock_t *)user_data); }
-
-void m_ledger_mark(cJSON *params, int id, void *user_data)
-{ handle_ledger_mark(params, id, *(airy_sock_t *)user_data); }
-
-void m_ledger_history(cJSON *params, int id, void *user_data)
-{ handle_ledger_history(params, id, *(airy_sock_t *)user_data); }
-
-void m_ledger_stats(cJSON *params, int id, void *user_data)
-{ (void)params; handle_ledger_stats(id, *(airy_sock_t *)user_data); }
-
-void m_compress(cJSON *params, int id, void *user_data)
-{ handle_compress(params, id, *(airy_sock_t *)user_data); }
+DAEMON_RPC_SHELL(write, handle_write)
+DAEMON_RPC_SHELL(search, handle_search)
+DAEMON_RPC_SHELL(get, handle_get)
+DAEMON_RPC_SHELL(delete, handle_delete)
+DAEMON_RPC_SHELL0(count, handle_count)
+DAEMON_RPC_SHELL(recent, handle_recent)
+DAEMON_RPC_SHELL(evolve, handle_evolve)
+DAEMON_RPC_SHELL0(health_check, handle_health_check)
+DAEMON_RPC_SHELL0(get_stats, handle_get_stats)
+DAEMON_RPC_SHELL(kb_ingest, handle_kb_ingest)
+DAEMON_RPC_SHELL(kb_search, handle_kb_search)
+DAEMON_RPC_SHELL(kb_delete, handle_kb_delete)
+DAEMON_RPC_SHELL(kb_list, handle_kb_list)
+DAEMON_RPC_SHELL(cache_put, handle_cache_put)
+DAEMON_RPC_SHELL(cache_get, handle_cache_get)
+DAEMON_RPC_SHELL(cache_del, handle_cache_del)
+DAEMON_RPC_SHELL0(cache_stats, handle_cache_stats)
+DAEMON_RPC_SHELL(ledger_append, handle_ledger_append)
+DAEMON_RPC_SHELL(ledger_window, handle_ledger_window)
+DAEMON_RPC_SHELL(ledger_budget, handle_ledger_budget)
+DAEMON_RPC_SHELL(ledger_mark, handle_ledger_mark)
+DAEMON_RPC_SHELL(ledger_history, handle_ledger_history)
+DAEMON_RPC_SHELL0(ledger_stats, handle_ledger_stats)
+DAEMON_RPC_SHELL(compress, handle_compress)
 
 /* ── 配置装载（声明式策略注入） ─────────────────────────────────────────── */
 

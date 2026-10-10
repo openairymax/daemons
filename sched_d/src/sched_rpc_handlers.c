@@ -43,76 +43,22 @@ static void handle_get_stats(int id, airy_sock_t client_fd);
 static void handle_health_check(int id, airy_sock_t client_fd);
 static void handle_checkpoint_save(cJSON *params, int id, airy_sock_t client_fd);
 
-void m_register_agent(cJSON *params, int id, void *user_data)
-{
-    handle_register_agent(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_unregister_agent(cJSON *params, int id, void *user_data)
-{
-    handle_unregister_agent(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_schedule_task(cJSON *params, int id, void *user_data)
-{
-    handle_schedule_task(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_get_task(cJSON *params, int id, void *user_data)
-{
-    handle_get_task(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_cancel(cJSON *params, int id, void *user_data)
-{
-    handle_cancel_task(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_dag_submit(cJSON *params, int id, void *user_data)
-{
-    handle_dag_submit(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_dag_status(cJSON *params, int id, void *user_data)
-{
-    handle_dag_status(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_dag_list(cJSON *params, int id, void *user_data)
-{
-    handle_dag_list(id, *(airy_sock_t *)user_data);
-}
-
-void m_dag_cancel(cJSON *params, int id, void *user_data)
-{
-    handle_dag_cancel(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_get_stats(cJSON *params, int id, void *user_data)
-{
-    handle_get_stats(id, *(airy_sock_t *)user_data);
-}
-
-void m_health_check(cJSON *params, int id, void *user_data)
-{
-    handle_health_check(id, *(airy_sock_t *)user_data);
-}
-
-void m_checkpoint_save(cJSON *params, int id, void *user_data)
-{
-    handle_checkpoint_save(params, id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL(register_agent, handle_register_agent)
+DAEMON_RPC_SHELL(unregister_agent, handle_unregister_agent)
+DAEMON_RPC_SHELL(schedule_task, handle_schedule_task)
+DAEMON_RPC_SHELL(get_task, handle_get_task)
+DAEMON_RPC_SHELL(cancel, handle_cancel_task)
+DAEMON_RPC_SHELL(dag_submit, handle_dag_submit)
+DAEMON_RPC_SHELL(dag_status, handle_dag_status)
+DAEMON_RPC_SHELL0(dag_list, handle_dag_list)
+DAEMON_RPC_SHELL(dag_cancel, handle_dag_cancel)
+DAEMON_RPC_SHELL0(get_stats, handle_get_stats)
+DAEMON_RPC_SHELL0(health_check, handle_health_check)
+DAEMON_RPC_SHELL(checkpoint_save, handle_checkpoint_save)
 
 /* 短名别名：submit ≡ schedule_task，query ≡ get_task（历史契约保留） */
-void m_submit(cJSON *params, int id, void *user_data)
-{
-    handle_schedule_task(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_query(cJSON *params, int id, void *user_data)
-{
-    handle_get_task(params, id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL(submit, handle_schedule_task)
+DAEMON_RPC_SHELL(query, handle_get_task)
 
 static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
 {

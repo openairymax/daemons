@@ -262,6 +262,34 @@ extern "C" {
     }
 
 /**
+ * @brief RPC 薄壳 SSoT 宏（0.1.19 L1 收敛）。
+ *
+ * method_dispatcher 以 method_fn 契约回调（user_data 实为 &client_fd），
+ * 服务面 handle_* 只认 airy_sock_t。两个宏把该适配收敛到机制层唯一
+ * 真值源：全树各 m_* 薄壳此前手写 4~5 行，109 处重复；收敛后调用点
+ * 仅 1 行，壳体零漂移。
+ *
+ *   - DAEMON_RPC_SHELL(name, fn)  委托有 cJSON 参数的服务面
+ *                                  fn(params, id, sock)
+ *   - DAEMON_RPC_SHELL0(name, fn) 委托无参服务面 fn(id, sock)
+ *
+ * 调用点行尾不加分号（宏体自带 '}' 收尾），循 maths_d SVC_RPC_HANDLER
+ * 先例；m_* 原型由生成头 svc_<d>.h 声明（manifest 唯一真值源）。
+ */
+#define DAEMON_RPC_SHELL(name, fn)                        \
+    void m_##name(cJSON *params, int id, void *user_data) \
+    {                                                     \
+        fn(params, id, *(airy_sock_t *)user_data);        \
+    }
+
+#define DAEMON_RPC_SHELL0(name, fn)                       \
+    void m_##name(cJSON *params, int id, void *user_data) \
+    {                                                     \
+        (void)params;                                     \
+        fn(id, *(airy_sock_t *)user_data);                \
+    }
+
+/**
  * @brief Table-driven method registration (mechanism, complements the
  *        generated main.c of daemon_gen.py).
  *

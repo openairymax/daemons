@@ -100,45 +100,14 @@ static void sched_d_register_spawned_agent(const char *agent_id, const char *spe
     }
 }
 
-void m_spawn(cJSON *params, int id, void *user_data)
-{
-    handle_spawn(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_terminate(cJSON *params, int id, void *user_data)
-{
-    handle_terminate(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_invoke(cJSON *params, int id, void *user_data)
-{
-    handle_invoke(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_cancel(cJSON *params, int id, void *user_data)
-{
-    handle_cancel(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_list(cJSON *params, int id, void *user_data)
-{
-    handle_list(id, *(airy_sock_t *)user_data);
-}
-
-void m_count(cJSON *params, int id, void *user_data)
-{
-    handle_count(id, *(airy_sock_t *)user_data);
-}
-
-void m_health_check(cJSON *params, int id, void *user_data)
-{
-    handle_health_check(id, *(airy_sock_t *)user_data);
-}
-
-void m_get_stats(cJSON *params, int id, void *user_data)
-{
-    handle_get_stats(id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL(spawn, handle_spawn)
+DAEMON_RPC_SHELL(terminate, handle_terminate)
+DAEMON_RPC_SHELL(invoke, handle_invoke)
+DAEMON_RPC_SHELL(cancel, handle_cancel)
+DAEMON_RPC_SHELL0(list, handle_list)
+DAEMON_RPC_SHELL0(count, handle_count)
+DAEMON_RPC_SHELL0(health_check, handle_health_check)
+DAEMON_RPC_SHELL0(get_stats, handle_get_stats)
 
 static void handle_spawn(cJSON *params, int id, airy_sock_t client_fd)
 {
@@ -430,7 +399,4 @@ static void handle_vocab(int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-void m_vocab(cJSON *params, int id, void *user_data)
-{
-    handle_vocab(id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL0(vocab, handle_vocab)
