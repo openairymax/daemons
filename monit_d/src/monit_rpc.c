@@ -34,65 +34,20 @@ static void handle_generate_report(int id, airy_sock_t client_fd);
 static void handle_heartbeat(cJSON *params, int id, airy_sock_t client_fd);
 static void handle_alert_resolve(cJSON *params, int id, airy_sock_t client_fd);
 
-void m_record_metric(cJSON *params, int id, void *user_data)
-{
-    handle_record_metric(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_get_metrics(cJSON *params, int id, void *user_data)
-{
-    handle_get_metrics(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_trigger_alert(cJSON *params, int id, void *user_data)
-{
-    handle_trigger_alert(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_get_alerts(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    handle_get_alerts(id, *(airy_sock_t *)user_data);
-}
-
-void m_health_check(cJSON *params, int id, void *user_data)
-{
-    handle_health_check(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_generate_report(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    handle_generate_report(id, *(airy_sock_t *)user_data);
-}
-
-void m_heartbeat(cJSON *params, int id, void *user_data)
-{
-    handle_heartbeat(params, id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL(record_metric, handle_record_metric)
+DAEMON_RPC_SHELL(get_metrics, handle_get_metrics)
+DAEMON_RPC_SHELL(trigger_alert, handle_trigger_alert)
+DAEMON_RPC_SHELL0(get_alerts, handle_get_alerts)
+DAEMON_RPC_SHELL(health_check, handle_health_check)
+DAEMON_RPC_SHELL0(generate_report, handle_generate_report)
+DAEMON_RPC_SHELL(heartbeat, handle_heartbeat)
 
 /* L2 协议别名：monit.metrics == get_metrics；monit.alert_raise ==
  * trigger_alert（02-l2-service-protocol.md）。 */
-void m_metrics(cJSON *params, int id, void *user_data)
-{
-    handle_get_metrics(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_alert_raise(cJSON *params, int id, void *user_data)
-{
-    handle_trigger_alert(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_alert_resolve(cJSON *params, int id, void *user_data)
-{
-    handle_alert_resolve(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_get_stats(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    handle_get_stats(id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL(metrics, handle_get_metrics)
+DAEMON_RPC_SHELL(alert_raise, handle_trigger_alert)
+DAEMON_RPC_SHELL(alert_resolve, handle_alert_resolve)
+DAEMON_RPC_SHELL0(get_stats, handle_get_stats)
 
 static void handle_record_metric(cJSON *params, int id, airy_sock_t client_fd)
 {
