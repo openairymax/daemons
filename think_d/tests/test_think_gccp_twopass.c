@@ -19,10 +19,11 @@
  *      （不带答案）重新进入第一段语义（再次挂起），答案不泄漏到下一轮。
  *
  * @note 不依赖 llm_d 守护进程（LLM 不可用走启发式/降级路径）。策略
- * 挂载面（are_ops_set_gccp）由本 harness 以 think_d svc_prepare 同构
- * 方式安装（M5-4 后 GCCP probe/step/confirm 编排居 products/cognition，
- * 由 daemon 注入；机制核不再自带策略实现）。策略库缺席（
- * BUILD_COGNITION_STRATEGY=OFF）时本测试不注册——两段式语义不成立。
+ * 挂载面（are_ops_set_tc/mc/gccp）由本 harness 以 think_d svc_prepare
+ * 同构方式安装（M5-4 后 GCCP 编排与 TC/MC 双思考载荷居
+ * products/cognition，由 daemon 注入；机制核不再自带策略实现）。策略
+ * 库缺席（BUILD_COGNITION_STRATEGY=OFF）时本测试不注册——两段式
+ * 语义不成立。
  */
 
 #include "think_service.h"
@@ -32,6 +33,7 @@
 #ifdef AIRY_HAS_COGNITION_STRATEGY
 #include "gccp.h"
 #include "gccp_strategy.h"
+#include "payload_registry.h"
 #endif
 
 #include <stdio.h>
@@ -208,7 +210,8 @@ static void test_gccp_twopass(void)
 }
 
 /* 策略挂载（M5-4，与 think_d svc_prepare 同构）：本测试扮演 daemon
- * 角色——daemon_ipc_ops_init 装 IPC 面，此处装 GCCP 策略注表面。
+ * 角色——daemon_ipc_ops_init 装 IPC 面，此处装 GCCP 与 TC/MC 策略
+ * 注表面（engine create 按契约 fail-fast 要求 TC/MC 载荷在场）。
  * 未挂载（策略库缺席）时机制核静默旁路 GCCP，两段式语义不成立。 */
 #ifdef AIRY_HAS_COGNITION_STRATEGY
 static const airy_gccp_ops_t g_gccp_ops = {
@@ -233,12 +236,16 @@ int main(void)
 
 #ifdef AIRY_HAS_COGNITION_STRATEGY
     are_ops_set_gccp(&g_gccp_ops);
+    are_ops_set_tc(cog_payload_tc());
+    are_ops_set_mc(cog_payload_mc());
 #endif
 
     test_gccp_twopass();
 
 #ifdef AIRY_HAS_COGNITION_STRATEGY
     are_ops_set_gccp(NULL);
+    are_ops_set_tc(NULL);
+    are_ops_set_mc(NULL);
 #endif
 
     daemon_ipc_ops_cleanup();
