@@ -26,9 +26,9 @@
 
 #include "think_orch_internal.h"
 
-/* External declaration: reactive-planner factory (coreloopthree internal
- * planner). */
-extern airy_plan_strategy_t *airy_plan_reactive_create(void *llm);
+/* §271：规划策略工厂经契约分发——reactive/reflective 载荷已迁出机制核，
+ * ops 由 svc_prepare 期 are_ops_set_plan() 注入（payload_registry）。 */
+#include "airy_plan_ops.h"
 
 static void think_sync_engine_stats(think_service_t *svc);
 
@@ -270,18 +270,26 @@ think_service_t *think_service_create(const think_service_config_t *config)
     /* 2. Cognitive engine (with a feedback callback collecting thinking
      * events). plan_strategy injects the reactive planner (llm=NULL uses
      * heuristics); otherwise airy_cognition_process's Phase 1 planning returns
-     * EUNKNOWN (plan_strat stays empty). */
-    airy_plan_strategy_t *plan_strat = airy_plan_reactive_create(NULL);
+     * EUNKNOWN (plan_strat stays empty). §271: factory comes from the
+     * injected plan ops table; ops absent -> NULL -> engine starts bare
+     * (BAN-257, process-time STATE_ERROR fail fast); ops present but
+     * factory fails -> assembly defect, fail fast here. */
+    const airy_plan_ops_t *plan_ops = are_ops_get_plan();
+    airy_plan_strategy_t *plan_strat =
+        (plan_ops && plan_ops->create_reactive) ? plan_ops->create_reactive(NULL) : NULL;
     if (!plan_strat) {
-        SVC_LOG_ERROR("ThinkDual: reactive planner create failed");
-        llm_svc_adapter_destroy(svc->llm_adapter);
-        AIRY_FREE(svc->events);
-        airy_mtx_destroy(&svc->lock);
-        AIRY_FREE(svc);
-        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "planner create failed");
+        if (plan_ops) {
+            SVC_LOG_ERROR("ThinkDual: reactive planner create failed");
+            llm_svc_adapter_destroy(svc->llm_adapter);
+            AIRY_FREE(svc->events);
+            airy_mtx_destroy(&svc->lock);
+            AIRY_FREE(svc);
+            AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "planner create failed");
+        }
+        SVC_LOG_WARN("ThinkDual: plan ops absent, engine starts bare (BAN-257)");
     }
-    SVC_LOG_INFO("ThinkDual: reactive planner created (plan=%p destroy=%p)", (void *)plan_strat,
-                 plan_strat ? (void *)plan_strat->destroy : NULL);
+    if (plan_strat)
+        SVC_LOG_INFO("ThinkDual: reactive planner created (plan=%p)", (void *)plan_strat);
 
     airy_cognition_config_t cfg;
     __builtin_memset(&cfg, 0, sizeof(cfg));
