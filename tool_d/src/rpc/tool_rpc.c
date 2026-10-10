@@ -31,62 +31,19 @@ static void handle_stats(int id, airy_sock_t fd);
 static void handle_pending(int id, airy_sock_t fd);
 static void handle_approve(cJSON *params, int id, airy_sock_t fd);
 
-void m_register(cJSON *params, int id, void *user_data)
-{
-    handle_register(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_list_tools(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    handle_list(id, *(airy_sock_t *)user_data);
-}
-
-void m_get_tool(cJSON *params, int id, void *user_data)
-{
-    handle_get(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_execute_tool(cJSON *params, int id, void *user_data)
-{
-    handle_execute(params, id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL(register, handle_register)
+DAEMON_RPC_SHELL0(list_tools, handle_list)
+DAEMON_RPC_SHELL(get_tool, handle_get)
+DAEMON_RPC_SHELL(execute_tool, handle_execute)
 
 /* L2 协议别名：tool.execute == execute_tool；tool.list == list_tools
  * （02-l2-service-protocol.md）。 */
-void m_execute(cJSON *params, int id, void *user_data)
-{
-    handle_execute(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_list(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    handle_list(id, *(airy_sock_t *)user_data);
-}
-
-void m_health_check(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    handle_health_check(id, *(airy_sock_t *)user_data);
-}
-
-void m_get_stats(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    handle_stats(id, *(airy_sock_t *)user_data);
-}
-
-void m_pending(cJSON *params, int id, void *user_data)
-{
-    (void)params;
-    handle_pending(id, *(airy_sock_t *)user_data);
-}
-
-void m_approve(cJSON *params, int id, void *user_data)
-{
-    handle_approve(params, id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL(execute, handle_execute)
+DAEMON_RPC_SHELL0(list, handle_list)
+DAEMON_RPC_SHELL0(health_check, handle_health_check)
+DAEMON_RPC_SHELL0(get_stats, handle_stats)
+DAEMON_RPC_SHELL0(pending, handle_pending)
+DAEMON_RPC_SHELL(approve, handle_approve)
 
 static void handle_register(cJSON *params, int id, airy_sock_t client_fd)
 {

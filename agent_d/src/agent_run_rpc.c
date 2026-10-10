@@ -128,10 +128,7 @@ static void handle_run_stream(cJSON *params, int id, airy_sock_t client_fd)
     /* 流式帧已逐条推送；连接关闭即 EOF，客户端 daemon_rpc_call_stream 据此收尾。 */
 }
 
-void m_run_stream(cJSON *params, int id, void *user_data)
-{
-    handle_run_stream(params, id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL(run_stream, handle_run_stream)
 
 /* agent.run 请求处理：解析 params -> 引擎 -> 组装响应。 */
 static void handle_run(cJSON *params, int id, airy_sock_t client_fd)
@@ -195,12 +192,5 @@ static void handle_cancel(cJSON *params, int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
-void m_run(cJSON *params, int id, void *user_data)
-{
-    handle_run(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_run_cancel(cJSON *params, int id, void *user_data)
-{
-    handle_cancel(params, id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL(run, handle_run)
+DAEMON_RPC_SHELL(run_cancel, handle_cancel)
