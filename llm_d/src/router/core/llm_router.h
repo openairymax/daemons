@@ -22,13 +22,9 @@
 #ifndef AIRY_RT_DAEMON_LLM_D_ROUTER_LLM_ROUTER_H
 #define AIRY_RT_DAEMON_LLM_D_ROUTER_LLM_ROUTER_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 /* 路由成本估算用的输出 token 兜底值。调用方（service 层）已把引擎默认
  * max_output 解析进 llm_route_request_t.max_tokens；仅当配置面完全未声明
@@ -136,8 +132,6 @@ int llm_router_route(const llm_route_request_t *request, llm_route_result_t *res
  */
 int llm_router_get_stats(llm_router_stats_t *stats);
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif /* AIRY_RT_DAEMON_LLM_D_ROUTER_LLM_ROUTER_H */

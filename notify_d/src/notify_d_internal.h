@@ -25,13 +25,9 @@
 #include "notify_service.h"
 #include "platform_paths.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 /* 端点常量：Windows 端固定 TCP 回环（无命名管）是协议面必然——
  * 浏览器 EventSource / WebSocket 无法使用 Windows 命名管道，
@@ -74,8 +70,6 @@ typedef struct {
     int face;
 } notify_conn_arg_t;
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif /* AIRY_RT_DAEMON_NOTIFY_D_INTERNAL_H */

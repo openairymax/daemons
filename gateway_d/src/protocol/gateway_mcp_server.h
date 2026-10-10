@@ -7,13 +7,9 @@
 #include "gateway_proto_types.h"
 #include "gateway_service.h" /* AIRYRT_VERSION 版本 SSoT */
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 typedef struct gw_mcp_server gw_mcp_server_t;
 
@@ -67,8 +63,6 @@ void *gw_mcp_server_get_handler_data(gw_mcp_server_t *server);
 
 bool gw_mcp_server_is_healthy(gw_mcp_server_t *server);
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif

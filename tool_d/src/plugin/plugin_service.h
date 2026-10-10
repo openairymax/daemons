@@ -19,13 +19,9 @@
 #ifndef AIRY_RT_DAEMON_PLUGIN_D_PLUGIN_SERVICE_H
 #define AIRY_RT_DAEMON_PLUGIN_D_PLUGIN_SERVICE_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 
 typedef enum {
@@ -199,8 +195,6 @@ int plugin_service_list(char ***names, size_t *count, int type_filter);
  */
 int plugin_service_execute(const char *name, const char *json_input, char **json_output);
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif /* AIRY_RT_DAEMON_PLUGIN_D_PLUGIN_SERVICE_H */

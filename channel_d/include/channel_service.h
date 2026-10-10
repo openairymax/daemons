@@ -13,13 +13,9 @@
 
 #include "daemon_platform_ext.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 #define CHANNEL_MAX_ID 128
 #define CHANNEL_MAX_NAME 256
@@ -109,8 +105,6 @@ int channel_service_ping(channel_service_t *svc, const char *channel_id, int64_t
 
 bool channel_service_is_healthy(channel_service_t *svc);
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif /* AIRY_RT_CHANNEL_SERVICE_H */

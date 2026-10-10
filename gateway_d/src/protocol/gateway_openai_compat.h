@@ -6,13 +6,9 @@
 
 #include "gateway_proto_types.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 typedef struct gw_openai_compat gw_openai_compat_t;
 
@@ -62,8 +58,6 @@ void *gw_openai_compat_get_handler_data(gw_openai_compat_t *compat);
 
 bool gw_openai_compat_is_healthy(gw_openai_compat_t *compat);
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif
