@@ -14,6 +14,7 @@
 
 #include "platform.h"
 #include "plugin/plugin_rpc.h"
+#include "rpc/skill_rpc.h"
 #include "svc_logger.h"
 #include "svc_tool_d.h"
 #include "tool_d_internal.h"
@@ -67,9 +68,11 @@ void svc_destroy(void)
     daemon_ep_free(daemon_ep_slot());
 }
 
-/* 策略层附加装配挂点：plugin_* 方法族（dlopen 执行域）登记到
- * tool 命名空间（gateway plugin.* cap 改路由到此）。 */
+/* 策略层附加装配挂点：plugin_* 方法族（dlopen 执行域）与 skill_* 方法族
+ * （syscall 技能机制服务面）登记到 tool 命名空间（gateway plugin.* cap
+ * 改路由到此）。 */
 void svc_attach(void *dispatcher)
 {
     plugin_rpc_register(dispatcher);
+    skill_rpc_register(dispatcher);
 }

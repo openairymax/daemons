@@ -62,6 +62,8 @@ set(TOOL_SERVICE_SOURCES
     src/plugin/plugin_permission.c
     # 注入 atoms 侧 tool ops 抽象表（服务实现在本库，表存储在 airy_tool_ops）
     src/rpc/daemon_tool_ops_bootstrap.c
+    # 技能机制服务面：syscall airy_sys_skill_* 的 skill.* RPC 登记
+    src/rpc/skill_rpc.c
 )
 
 add_library(airy_tool_service STATIC ${TOOL_SERVICE_SOURCES})
