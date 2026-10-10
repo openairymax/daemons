@@ -236,6 +236,12 @@ int svc_prepare(const char *config_path)
      * 不同——不进 engine create fail-fast，Phase0 遇 NULL 返回 ENOSYS
      * 中断流式管线（与 Phase0 既有 fail-through 同构）。 */
     are_ops_set_intent(cog_payload_intent());
+
+    /* M5-4 §271：注入规划策略载荷 ops（products/cognition 策略载荷），
+     * 装配层 loop/think_service 经 are_ops_get_plan() 分发 reactive/
+     * reflective 工厂；缺席时装配层跳过注入、引擎裸启动（BAN-257，
+     * process 期 STATE_ERROR fail fast）。 */
+    are_ops_set_plan(cog_payload_plan());
 #endif
 
     SVC_LOG_INFO("think service started (enabled=%d, timeout_ms=%u)", g_cfg.think_enabled,
@@ -274,6 +280,7 @@ void svc_destroy(void)
     are_ops_set_tc(NULL);
     are_ops_set_mc(NULL);
     are_ops_set_intent(NULL);
+    are_ops_set_plan(NULL);
 #endif
     review_svc_cleanup();
     lang_svc_cleanup();

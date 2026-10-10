@@ -210,8 +210,9 @@ static void test_gccp_twopass(void)
 }
 
 /* 策略挂载（M5-4，与 think_d svc_prepare 同构）：本测试扮演 daemon
- * 角色——daemon_ipc_ops_init 装 IPC 面，此处装 GCCP 与 TC/MC 策略
- * 注表面（engine create 按契约 fail-fast 要求 TC/MC 载荷在场）。
+ * 角色——daemon_ipc_ops_init 装 IPC 面，此处装 GCCP 与 TC/MC/plan
+ * 策略注表面（engine create 按契约 fail-fast 要求 TC/MC 载荷在场，
+ * plan 缺席则引擎裸启动并告警 BAN-257）。
  * 未挂载（策略库缺席）时机制核静默旁路 GCCP，两段式语义不成立。 */
 #ifdef AIRY_HAS_COGNITION_STRATEGY
 static const airy_gccp_ops_t g_gccp_ops = {
@@ -238,6 +239,7 @@ int main(void)
     are_ops_set_gccp(&g_gccp_ops);
     are_ops_set_tc(cog_payload_tc());
     are_ops_set_mc(cog_payload_mc());
+    are_ops_set_plan(cog_payload_plan());
 #endif
 
     test_gccp_twopass();
@@ -246,6 +248,7 @@ int main(void)
     are_ops_set_gccp(NULL);
     are_ops_set_tc(NULL);
     are_ops_set_mc(NULL);
+    are_ops_set_plan(NULL);
 #endif
 
     daemon_ipc_ops_cleanup();
