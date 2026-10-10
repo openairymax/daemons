@@ -3,8 +3,8 @@
 
 /**
  * @file market_rpc.c
- * @brief market.* RPC 方法域：注册（agent/skill）/ 搜索 / 安装 /
- *        发布 / 健康检查 / 服务统计。
+ * @brief market.* RPC 方法域：注册（agent/skill）/ 搜索 / 安装 / 卸载 /
+ *        更新检查 / 注册表同步 / 发布 / 健康检查 / 服务统计。
  *
  * 由 main.c 按单一职责拆分（0.1.19 gen5 装配）：method_fn 薄壳 m_* 把
  * 机制层注入的 &client_fd 翻译为协议无关的 handler（cJSON*, int,
@@ -26,63 +26,34 @@
 static void handle_register_agent(cJSON *params, int id, airy_sock_t fd);
 static void handle_search_agents(cJSON *params, int id, airy_sock_t fd);
 static void handle_install_agent(cJSON *params, int id, airy_sock_t fd);
+static void handle_uninst_agent(cJSON *params, int id, airy_sock_t fd);
 static void handle_register_skill(cJSON *params, int id, airy_sock_t fd);
 static void handle_search_skills(cJSON *params, int id, airy_sock_t fd);
+static void handle_uninst_skill(cJSON *params, int id, airy_sock_t fd);
+static void handle_check_update(cJSON *params, int id, airy_sock_t fd);
+static void handle_sync_registry(cJSON *params, int id, airy_sock_t fd);
 static void handle_health_check(int id, airy_sock_t fd);
 static void handle_publish(cJSON *params, int id, airy_sock_t fd);
 static void handle_get_stats(int id, airy_sock_t fd);
 
-void m_register_agent(cJSON *params, int id, void *user_data)
-{
-    handle_register_agent(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_search_agents(cJSON *params, int id, void *user_data)
-{
-    handle_search_agents(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_install_agent(cJSON *params, int id, void *user_data)
-{
-    handle_install_agent(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_register_skill(cJSON *params, int id, void *user_data)
-{
-    handle_register_skill(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_search_skills(cJSON *params, int id, void *user_data)
-{
-    handle_search_skills(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_publish(cJSON *params, int id, void *user_data)
-{
-    handle_publish(params, id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL(register_agent, handle_register_agent)
+DAEMON_RPC_SHELL(search_agents, handle_search_agents)
+DAEMON_RPC_SHELL(install_agent, handle_install_agent)
+DAEMON_RPC_SHELL(uninstall_agent, handle_uninst_agent)
+DAEMON_RPC_SHELL(register_skill, handle_register_skill)
+DAEMON_RPC_SHELL(search_skills, handle_search_skills)
+DAEMON_RPC_SHELL(uninstall_skill, handle_uninst_skill)
+DAEMON_RPC_SHELL(check_update, handle_check_update)
+DAEMON_RPC_SHELL(sync_registry, handle_sync_registry)
+DAEMON_RPC_SHELL(publish, handle_publish)
 
 /* L2 协议别名：market.search == search_agents；market.install ==
  * install_agent（02-l2-service-protocol.md）。 */
-void m_search(cJSON *params, int id, void *user_data)
-{
-    handle_search_agents(params, id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL(search, handle_search_agents)
+DAEMON_RPC_SHELL(install, handle_install_agent)
 
-void m_install(cJSON *params, int id, void *user_data)
-{
-    handle_install_agent(params, id, *(airy_sock_t *)user_data);
-}
-
-void m_health_check(cJSON *params, int id, void *user_data)
-{
-    handle_health_check(id, *(airy_sock_t *)user_data);
-}
-
-void m_get_stats(cJSON *params, int id, void *user_data)
-{
-    handle_get_stats(id, *(airy_sock_t *)user_data);
-}
+DAEMON_RPC_SHELL0(health_check, handle_health_check)
+DAEMON_RPC_SHELL0(get_stats, handle_get_stats)
 
 static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
 {
@@ -213,6 +184,33 @@ static void handle_install_agent(cJSON *params, int id, airy_sock_t client_fd)
     }
 }
 
+static void handle_uninst_agent(cJSON *params, int id, airy_sock_t client_fd)
+{
+    const char *aid = get_string_field(params, "agent_id", NULL);
+    if (!aid || !*aid) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent_id", id);
+        return;
+    }
+
+    int ret = market_service_uninstall_agent(g_service, aid);
+
+    if (ret == AIRY_ERR_NOT_FOUND) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Agent not found", id);
+        return;
+    }
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Uninstall failed", id);
+        SVC_LOG_ERROR("Failed to uninstall agent: %s (error=%d)", aid, ret);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "status", "uninstalled");
+    cJSON_AddStringToObject(result, "agent_id", aid);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    SVC_LOG_INFO("Agent uninstalled: %s", aid);
+}
+
 static void handle_register_skill(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *skill_json = jsonrpc_get_object_param(params, "skill");
@@ -282,6 +280,82 @@ static void handle_search_skills(cJSON *params, int id, airy_sock_t client_fd)
     AIRY_FREE(skills);
 
     JSONRPC_SEND_SUCCESS(client_fd, arr, id);
+}
+
+static void handle_uninst_skill(cJSON *params, int id, airy_sock_t client_fd)
+{
+    const char *sid = get_string_field(params, "skill_id", NULL);
+    if (!sid || !*sid) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing skill_id", id);
+        return;
+    }
+
+    int ret = market_service_uninstall_skill(g_service, sid);
+
+    if (ret == AIRY_ERR_NOT_FOUND) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Skill not found", id);
+        return;
+    }
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Uninstall failed", id);
+        SVC_LOG_ERROR("Failed to uninstall skill: %s (error=%d)", sid, ret);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "status", "uninstalled");
+    cJSON_AddStringToObject(result, "skill_id", sid);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    SVC_LOG_INFO("Skill uninstalled: %s", sid);
+}
+
+static void handle_check_update(cJSON *params, int id, airy_sock_t client_fd)
+{
+    const char *target = get_string_field(params, "id", NULL);
+    if (!target || !*target) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing id", id);
+        return;
+    }
+
+    bool has_update = false;
+    char *latest = NULL;
+    int ret = market_service_check_update(g_service, target, &has_update, &latest);
+
+    if (ret == AIRY_ERR_NOT_FOUND) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Id not found", id);
+        return;
+    }
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Update check failed", id);
+        SVC_LOG_ERROR("Failed to check update: %s (error=%d)", target, ret);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "id", target);
+    cJSON_AddBoolToObject(result, "has_update", has_update);
+    if (latest)
+        cJSON_AddStringToObject(result, "latest_version", latest);
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+
+    AIRY_FREE(latest);
+}
+
+static void handle_sync_registry(cJSON *params, int id, airy_sock_t client_fd)
+{
+    (void)params;
+
+    int ret = market_service_sync_registry(g_service);
+    if (ret != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Sync failed", id);
+        SVC_LOG_ERROR("Failed to sync registry (error=%d)", ret);
+        return;
+    }
+
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddStringToObject(result, "status", "synced");
+    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    SVC_LOG_INFO("Registry synced");
 }
 
 static void handle_health_check(int id, airy_sock_t client_fd)
