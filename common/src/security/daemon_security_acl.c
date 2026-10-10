@@ -32,15 +32,9 @@ int daemon_check_tool_permission(const char *agent_id, const char *tool_name, co
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    ensure_mutex_initialized();
-    airy_mtx_lock(&g_security_mutex);
-
-    if (!g_security_ctx.initialized) {
-        airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR("daemon_check_tool_permission: daemon_security not initialized — "
-                      "initialize at startup. DENYING %s/%s (fail-closed).",
-                      agent_id, tool_name);
-        return AIRY_EPERM;
+    airy_err_t ctx_rc = sec_ctx_lock(__func__, AIRY_EPERM);
+    if (ctx_rc != AIRY_OK) {
+        return ctx_rc;
     }
 
     if (!g_security_ctx.permission_enabled) {
@@ -79,15 +73,9 @@ int daemon_check_llm_permission(const char *agent_id, const char *model_name, co
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    ensure_mutex_initialized();
-    airy_mtx_lock(&g_security_mutex);
-
-    if (!g_security_ctx.initialized) {
-        airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR("daemon_check_llm_permission: daemon_security not initialized — "
-                      "initialize at startup. DENYING %s/%s (fail-closed).",
-                      agent_id, model_name);
-        return AIRY_EPERM;
+    airy_err_t ctx_rc = sec_ctx_lock(__func__, AIRY_EPERM);
+    if (ctx_rc != AIRY_OK) {
+        return ctx_rc;
     }
 
     if (!g_security_ctx.permission_enabled) {
@@ -135,14 +123,9 @@ int daemon_security_add_acl_rule(const char *agent_id, const char *resource, boo
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    ensure_mutex_initialized();
-    airy_mtx_lock(&g_security_mutex);
-
-    if (!g_security_ctx.initialized) {
-        airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR("daemon_security_add_acl_rule: daemon_security not initialized — "
-                      "initialize at startup. DENYING ACL rule add (fail-closed).");
-        return AIRY_ERR_STATE_ERROR;
+    airy_err_t ctx_rc = sec_ctx_lock(__func__, AIRY_ERR_STATE_ERROR);
+    if (ctx_rc != AIRY_OK) {
+        return ctx_rc;
     }
 
     for (size_t i = 0; i < g_security_ctx.acl_count; i++) {

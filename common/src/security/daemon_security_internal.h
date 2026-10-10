@@ -87,6 +87,21 @@ extern airy_mtx_t g_security_mutex; /* CROSS-01: initialized via airy_mtx_init()
 void ensure_mutex_initialized(void);
 
 /**
+ * @brief Acquire g_security_mutex under the fail-closed context guard.
+ *
+ * Collapses the "lock, reject if uninitialized" prologue duplicated across
+ * the ACL / signature / vault domains into one mechanism. On success the
+ * mutex is held and the caller must unlock it; when the module is not
+ * initialized the mutex is left unlocked, a fail-closed error is logged
+ * with the caller name, and @p deny is returned.
+ *
+ * @param who  Caller name for the denial log (pass __func__)
+ * @param deny Error code to return when the module is uninitialized
+ * @return AIRY_OK with the mutex held, or @p deny with the mutex unlocked
+ */
+airy_err_t sec_ctx_lock(const char *who, airy_err_t deny);
+
+/**
  * @brief Load tool-level permission rules from a YAML file into the ACL
  *        table (internal: invoked by daemon_security_init(), no external
  *        consumers).
