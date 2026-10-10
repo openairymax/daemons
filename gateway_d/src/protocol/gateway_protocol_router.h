@@ -7,13 +7,9 @@
 #include "gateway_proto_types.h"
 #include "unified_protocol.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 #define GW_PROTO_MAX_ADAPTERS 8
 #define GW_PROTO_MAX_METHOD_LEN 128
@@ -81,8 +77,6 @@ gw_mcp_server_t *gw_proto_router_get_mcp(gw_proto_router_t *router);
 gw_openai_compat_t *gw_proto_router_get_openai(gw_proto_router_t *router);
 gw_a2a_handler_t *gw_proto_router_get_a2a(gw_proto_router_t *router);
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif

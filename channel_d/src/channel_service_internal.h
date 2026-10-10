@@ -18,13 +18,9 @@
 
 #include "channel_service.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 typedef struct {
     channel_info_t info;
@@ -64,8 +60,6 @@ int backend_svc_init(channel_service_t *svc);
 void backend_svc_start(channel_service_t *svc);
 void backend_entry_free(channel_entry_t *entry);
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif /* AIRY_RT_CHANNEL_SERVICE_INTERNAL_H */

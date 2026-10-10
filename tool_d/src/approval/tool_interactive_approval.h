@@ -16,13 +16,9 @@
 #ifndef AIRY_RT_TOOL_INTERACTIVE_APPROVAL_H
 #define AIRY_RT_TOOL_INTERACTIVE_APPROVAL_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 /** @brief Interactive-approval decision result. */
 typedef enum {
@@ -118,8 +114,6 @@ int interactive_approval_resolve(interactive_approval_t *mgr, const char *reques
  */
 char *interactive_approval_pending_list_json(interactive_approval_t *mgr);
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif /* AIRY_RT_TOOL_INTERACTIVE_APPROVAL_H */

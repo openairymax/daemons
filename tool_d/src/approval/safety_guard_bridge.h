@@ -24,13 +24,9 @@
 
 #include "tool_approval.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 
 typedef struct safety_guard_bridge_s safety_guard_bridge_t;
@@ -178,8 +174,6 @@ int safety_guard_bridge_audit_log(safety_guard_bridge_t *bridge, const char *eve
 void safety_guard_bridge_get_stats(safety_guard_bridge_t *bridge, uint64_t *out_total_checks,
                                    uint64_t *out_denied_count, uint64_t *out_rate_limited);
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif /* AIRY_RT_SAFETY_GUARD_BRIDGE_H */

@@ -27,13 +27,9 @@
 #include "plugin_service.h"
 #include "safety_guard.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 
 typedef enum {
@@ -107,8 +103,6 @@ const char *plugin_permission_description(const char *permission);
  */
 int plugin_permission_list_supported(char ***out_permissions, size_t *out_count);
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif /* AIRY_RT_PLUGIN_PERMISSION_H */

@@ -20,13 +20,9 @@
 #include "platform.h"
 #include "platform_paths.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 /* hook 面端点：socket-only 面路由（全 daemons 零 L2 挂载实证）。 */
 #define HOOK_D_SOCKET_UNIX airy_runtime_dir_socket("hook.sock")
@@ -76,8 +72,6 @@ void hook_svc_serve_conn(airy_sock_t fd);
  * 回包串交 *out（调用方发送后释放）；shutdown 返回 HOOK_RPC_SHUTDOWN */
 int hook_rpc_handle_json(const char *req_text, size_t req_len, char **out);
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif /* AIRY_RT_DAEMON_NOTIFY_D_HOOK_INTERNAL_H */

@@ -12,13 +12,9 @@
 #ifndef AIRY_RT_PROMETHEUS_EXPORTER_H
 #define AIRY_RT_PROMETHEUS_EXPORTER_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 
 /**
@@ -86,8 +82,6 @@ char *prometheus_exporter_get_metrics(void);
  */
 void prometheus_exporter_get_scrape_stats(uint64_t *out_count, uint64_t *out_errors);
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif /* AIRY_RT_PROMETHEUS_EXPORTER_H */
