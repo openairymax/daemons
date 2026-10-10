@@ -6,13 +6,9 @@
 
 #include "gateway_proto_types.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 typedef struct gw_a2a_handler gw_a2a_handler_t;
 
@@ -56,8 +52,6 @@ void *gw_a2a_handler_get_handler_data(gw_a2a_handler_t *handler);
 
 bool gw_a2a_handler_is_healthy(gw_a2a_handler_t *handler);
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif

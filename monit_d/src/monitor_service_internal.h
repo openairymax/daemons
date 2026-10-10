@@ -19,13 +19,9 @@
 
 #include "daemon_platform_ext.h"
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "airy_abi.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+AIRY_ABI_BEGIN
 
 #define MAX_ALERTS 1024
 #define MAX_LOG_ENTRIES 4096
@@ -88,8 +84,6 @@ struct monitor_service {
     int running;
 };
 
-#ifdef __cplusplus
-}
-#endif
+AIRY_ABI_END
 
 #endif /* AIRY_RT_MONITOR_SERVICE_INTERNAL_H */
