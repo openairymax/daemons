@@ -38,14 +38,9 @@ int daemon_store_credential(const char *cred_id, cupolas_vault_cred_type_t cred_
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    ensure_mutex_initialized();
-    airy_mtx_lock(&g_security_mutex);
-
-    if (!g_security_ctx.initialized) {
-        airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR("daemon_store_credential: daemon_security not initialized — "
-                      "initialize at startup. DENYING credential storage (fail-closed).");
-        return AIRY_ERR_STATE_ERROR;
+    airy_err_t ctx_rc = sec_ctx_lock(__func__, AIRY_ERR_STATE_ERROR);
+    if (ctx_rc != AIRY_OK) {
+        return ctx_rc;
     }
 
     if (!g_security_ctx.vault_enabled || !g_security_ctx.vault ||
@@ -80,14 +75,9 @@ int daemon_retrieve_credential(const char *cred_id, const char *agent_id, uint8_
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    ensure_mutex_initialized();
-    airy_mtx_lock(&g_security_mutex);
-
-    if (!g_security_ctx.initialized) {
-        airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR("daemon_retrieve_credential: daemon_security not initialized — "
-                      "initialize at startup. DENYING credential retrieval (fail-closed).");
-        return AIRY_ERR_STATE_ERROR;
+    airy_err_t ctx_rc = sec_ctx_lock(__func__, AIRY_ERR_STATE_ERROR);
+    if (ctx_rc != AIRY_OK) {
+        return ctx_rc;
     }
 
     if (!g_security_ctx.vault_enabled || !g_security_ctx.vault ||
@@ -124,14 +114,9 @@ int daemon_audit_log_event(const char *service_name, const char *operation, cons
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    ensure_mutex_initialized();
-    airy_mtx_lock(&g_security_mutex);
-    /* P2-3：状态检查移入锁内，避免与 shutdown 的时序竞态 */
-    if (!g_security_ctx.initialized) {
-        airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR("daemon_audit_log_event: daemon_security not initialized — "
-                      "initialize at startup. Audit event DROPPED (fail-closed).");
-        return AIRY_ERR_STATE_ERROR;
+    airy_err_t ctx_rc = sec_ctx_lock(__func__, AIRY_ERR_STATE_ERROR);
+    if (ctx_rc != AIRY_OK) {
+        return ctx_rc;
     }
     if (!g_security_ctx.audit_enabled) {
         airy_mtx_unlock(&g_security_mutex);

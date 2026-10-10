@@ -46,15 +46,9 @@ int daemon_verify_package_signature(const char *package_path, bool *is_valid,
 
     *is_valid = false;
 
-    ensure_mutex_initialized();
-    airy_mtx_lock(&g_security_mutex);
-
-    if (!g_security_ctx.initialized) {
-        airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_ERROR("daemon_verify_package_signature: daemon_security not initialized — "
-                      "initialize at startup. Marking package UNVERIFIED (fail-closed).");
-        *is_valid = false;
-        return AIRY_ERR_STATE_ERROR;
+    airy_err_t ctx_rc = sec_ctx_lock(__func__, AIRY_ERR_STATE_ERROR);
+    if (ctx_rc != AIRY_OK) {
+        return ctx_rc;
     }
 
     if (!g_security_ctx.signature_enabled) {
