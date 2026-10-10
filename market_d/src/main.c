@@ -37,7 +37,7 @@ int main(int argc, char **argv)
         .env_debug = "AIRY_MARKET_D_DEBUG",
         .sd_type = "market",
         .tags = "market,core",
-        .method_total = 11,
+        .method_total = 15,
         .running_lock = &g_running_lock_market_d,
         .signal_handler = signal_handler_market_d,
         .log_toggle = svc_log_toggle_handler_market_d,
