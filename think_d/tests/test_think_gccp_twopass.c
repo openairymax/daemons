@@ -18,12 +18,21 @@
  *   3. 答案单次有效：第二段结束后服务端暂存答案被清理——第三次调用
  *      （不带答案）重新进入第一段语义（再次挂起），答案不泄漏到下一轮。
  *
- * @note 不依赖 llm_d 守护进程（LLM 不可用走启发式/降级路径）。
+ * @note 不依赖 llm_d 守护进程（LLM 不可用走启发式/降级路径）。策略
+ * 挂载面（are_ops_set_gccp）由本 harness 以 think_d svc_prepare 同构
+ * 方式安装（M5-4 后 GCCP probe/step/confirm 编排居 products/cognition，
+ * 由 daemon 注入；机制核不再自带策略实现）。策略库缺席（
+ * BUILD_COGNITION_STRATEGY=OFF）时本测试不注册——两段式语义不成立。
  */
 
 #include "think_service.h"
 #include "airy_memory.h"
 #include "daemon_ipc_ops_bootstrap.h"
+
+#ifdef AIRY_HAS_COGNITION_STRATEGY
+#include "gccp.h"
+#include "gccp_strategy.h"
+#endif
 
 #include <stdio.h>
 #include <string.h>
@@ -198,6 +207,17 @@ static void test_gccp_twopass(void)
     think_service_destroy(svc);
 }
 
+/* 策略挂载（M5-4，与 think_d svc_prepare 同构）：本测试扮演 daemon
+ * 角色——daemon_ipc_ops_init 装 IPC 面，此处装 GCCP 策略注表面。
+ * 未挂载（策略库缺席）时机制核静默旁路 GCCP，两段式语义不成立。 */
+#ifdef AIRY_HAS_COGNITION_STRATEGY
+static const airy_gccp_ops_t g_gccp_ops = {
+    .probe = gccp_probe,
+    .confirm = gccp_confirm,
+    .step = gccp_step,
+};
+#endif
+
 int main(void)
 {
     printf("[SUITE] test_think_gccp_twopass\n");
@@ -211,7 +231,15 @@ int main(void)
      * and fall back to the heuristic path. */
     (void)daemon_ipc_ops_init("test_think_gccp_twopass");
 
+#ifdef AIRY_HAS_COGNITION_STRATEGY
+    are_ops_set_gccp(&g_gccp_ops);
+#endif
+
     test_gccp_twopass();
+
+#ifdef AIRY_HAS_COGNITION_STRATEGY
+    are_ops_set_gccp(NULL);
+#endif
 
     daemon_ipc_ops_cleanup();
 

@@ -78,17 +78,21 @@ target_link_libraries(airy_think_service PUBLIC airy_coreloopthree svc_common)
 # M5-2 C3：语言网关策略库（products/lang_gateway）已不再经机制核桥接传递，
 # 由消费端（本 daemon 的 lang_svc.c）直接链接——符号解析 + 契约头传播
 # （lang_gateway.h / airy_lang_gw_ops.h）同源。产品库未挂载时不链接，
-# lang_svc 相关调用面按未注入降级（fail-open，不阻断 daemon）。
+# 同时以 feature 宏切换 lang_svc.c 到降级域（服务面可链接，RPC 显式
+# 报错——fail-open，不阻断 daemon）。
 if(TARGET airy_lang_gateway)
     target_link_libraries(airy_think_service PUBLIC airy_lang_gateway)
+    target_compile_definitions(airy_think_service PRIVATE AIRY_HAS_LANG_GATEWAY=1)
 endif()
 
 # M5-4 C3：认知审查策略库（products/cognition）由消费端（本 daemon 的
 # svc.c）直接链接——符号解析 + 契约头传播（cognitive_review.h /
-# cog_review_strategy.h）同源。产品库未挂载时不链接，注入面按未注入
-# 降级（fail-open，机制核静默旁路 CPR，不阻断推理主链）。
+# cog_review_strategy.h）同源。产品库未挂载时不链接，同时以 feature 宏
+# 守卫 svc.c 注表面（未注入时机制核静默旁路 CPR/GCCP——fail-open，
+# 不阻断推理主链）。
 if(TARGET airy_cognition_strategy)
     target_link_libraries(airy_think_service PUBLIC airy_cognition_strategy)
+    target_compile_definitions(airy_think_service PRIVATE AIRY_HAS_COGNITION_STRATEGY=1)
 endif()
 
 if(AIRY_HAS_CJSON)

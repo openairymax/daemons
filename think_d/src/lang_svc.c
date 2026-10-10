@@ -14,19 +14,27 @@
  * lang_gateway 库本体（策略载荷：画像/路由/校准）已于 M5-2 迁出机制核至
  * 生态层 products/lang_gateway；本模块链接产品库并注入 ops 表，同时承载
  * 其生命周期（懒创建 + 线程安全）。
+ *
+ * 构建形态守卫：BUILD_LANG_GATEWAY=OFF 时产品库不挂载，本模块经
+ * AIRY_HAS_LANG_GATEWAY（think_d CMake 按 TARGET 存在性注入）切入降级
+ * 域——服务面保持可链接，think.lang_* RPC 显式报错（fail-open）。
  */
 
 #include "airy_lang_gw_ops.h"
 #include "airy_memory.h"
 #include "daemon_platform_ext.h"
 #include "jsonrpc_helpers.h"
+#ifdef AIRY_HAS_LANG_GATEWAY
 #include "lang_gateway.h"
+#endif
 #include "platform.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
 
-#include <string.h>
+#ifdef AIRY_HAS_LANG_GATEWAY
+
+/* ===== 库挂载域：直连 products/lang_gateway 策略载荷 ===== */
 
 /* lang_gateway 懒创建后全局持有；airy_mtx 保护并发访问
  * （daemon 事件驱动 concurrent_clients=true，多连接可同时调用） */
@@ -208,3 +216,37 @@ void lang_svc_stats(cJSON *params, int id, void *user_data)
     }
     JSONRPC_SEND_SUCCESS(client_fd, obj, id);
 }
+
+#else /* 库未挂载：服务面保持可链接，think.lang_* RPC 显式报错 */
+
+int lang_svc_init(void)
+{
+    return 0;
+}
+
+void lang_svc_cleanup(void)
+{
+}
+
+void lang_svc_process(cJSON *params, int id, void *user_data)
+{
+    (void)params;
+    JSONRPC_SEND_ERROR(*(airy_sock_t *)user_data, JSONRPC_INTERNAL_ERROR,
+                       "lang gateway unavailable", id);
+}
+
+void lang_svc_postprocess(cJSON *params, int id, void *user_data)
+{
+    (void)params;
+    JSONRPC_SEND_ERROR(*(airy_sock_t *)user_data, JSONRPC_INTERNAL_ERROR,
+                       "lang gateway unavailable", id);
+}
+
+void lang_svc_stats(cJSON *params, int id, void *user_data)
+{
+    (void)params;
+    JSONRPC_SEND_ERROR(*(airy_sock_t *)user_data, JSONRPC_INTERNAL_ERROR,
+                       "lang gateway unavailable", id);
+}
+
+#endif /* AIRY_HAS_LANG_GATEWAY */
