@@ -57,6 +57,26 @@ static void sched_mac_sync_agent(sched_service_t *service, const agent_info_t *a
     }
 }
 
+/* Refresh the scheduling fields of the agent matching agent_info->agent_id
+ * in place, then re-sync it to mac_framework. Returns true when a matching
+ * agent was found. Caller keeps ownership of service->lock and of the
+ * subsequent unlock/return. */
+static bool sched_refresh(sched_service_t *service, const agent_info_t *agent_info)
+{
+    for (size_t i = 0; i < service->agent_count; i++) {
+        if (strcmp(service->agents[i]->agent_id, agent_info->agent_id) == 0) {
+            service->agents[i]->load_factor = agent_info->load_factor;
+            service->agents[i]->success_rate = agent_info->success_rate;
+            service->agents[i]->avg_response_time_ms = agent_info->avg_response_time_ms;
+            service->agents[i]->is_available = agent_info->is_available;
+            service->agents[i]->weight = agent_info->weight;
+            sched_mac_sync_agent(service, service->agents[i]);
+            return true;
+        }
+    }
+    return false;
+}
+
 int sched_service_register_agent(sched_service_t *service, const agent_info_t *agent_info)
 {
     if (!service || !agent_info || !service->initialized) {
@@ -75,17 +95,9 @@ int sched_service_register_agent(sched_service_t *service, const agent_info_t *a
         return AIRY_ERR_OVERFLOW;
     }
 
-    for (size_t i = 0; i < service->agent_count; i++) {
-        if (strcmp(service->agents[i]->agent_id, agent_info->agent_id) == 0) {
-            service->agents[i]->load_factor = agent_info->load_factor;
-            service->agents[i]->success_rate = agent_info->success_rate;
-            service->agents[i]->avg_response_time_ms = agent_info->avg_response_time_ms;
-            service->agents[i]->is_available = agent_info->is_available;
-            service->agents[i]->weight = agent_info->weight;
-            sched_mac_sync_agent(service, service->agents[i]);
-            airy_mtx_unlock(&service->lock);
-            return 0;
-        }
+    if (sched_refresh(service, agent_info)) {
+        airy_mtx_unlock(&service->lock);
+        return 0;
     }
 
     agent_info_t *new_agent = (agent_info_t *)AIRY_CALLOC(1, sizeof(agent_info_t));
@@ -177,17 +189,9 @@ int sched_service_update_agent_status(sched_service_t *service, const agent_info
     }
 
     airy_mtx_lock(&service->lock);
-    for (size_t i = 0; i < service->agent_count; i++) {
-        if (strcmp(service->agents[i]->agent_id, agent_info->agent_id) == 0) {
-            service->agents[i]->load_factor = agent_info->load_factor;
-            service->agents[i]->success_rate = agent_info->success_rate;
-            service->agents[i]->avg_response_time_ms = agent_info->avg_response_time_ms;
-            service->agents[i]->is_available = agent_info->is_available;
-            service->agents[i]->weight = agent_info->weight;
-            sched_mac_sync_agent(service, service->agents[i]);
-            airy_mtx_unlock(&service->lock);
-            return 0;
-        }
+    if (sched_refresh(service, agent_info)) {
+        airy_mtx_unlock(&service->lock);
+        return 0;
     }
     airy_mtx_unlock(&service->lock);
     SVC_LOG_ERROR("sched_service_update_agent_status: agent not found (agent_id=%s)",
