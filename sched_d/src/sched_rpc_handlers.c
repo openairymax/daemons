@@ -63,17 +63,11 @@ DAEMON_RPC_SHELL(query, handle_get_task)
 static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *agent_json = jsonrpc_get_object_param(params, "agent");
-    if (!agent_json) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent object", id);
-        return;
-    }
+    JSONRPC_REQUIRE(agent_json, client_fd, "Missing agent object", id);
 
     agent_info_t info = {0};
     const char *aid = get_string_field(agent_json, "agent_id", NULL);
-    if (!aid) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(aid, client_fd, "Missing agent_id", id);
     /* agent_id/agent_name are heap-pointer fields: must be allocated with
      * AIRY_STRDUP. The original AIRY_STRNCPY_TERM(…, sizeof(char*)) wrote 7
      * bytes to a NULL pointer, inevitably SEGV (a pre-existing P0 defect,
