@@ -60,6 +60,68 @@ int builtin_glob_seg_match(const char *pat, const char *str)
 static void builtin_glob_impl(const char *base, const char **segs, size_t n, size_t i, char *path,
                               size_t path_len, size_t path_cap, char *out, size_t out_cap,
                               size_t *out_len, size_t *count, size_t max, int *timed_out,
+                              uint64_t deadline);
+
+/* Non-candidate filter for one directory entry: the universal '.'/'..' links
+ * and the noise-dir table are always pruned; when the level descends dirs
+ * only, plain files are pruned too (probed lazily, no stat when not needed). */
+static int glob_prune(const struct dirent *ent, const char *full, const char *nm, int dirs_only)
+{
+    if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0 || builtin_scan_noise_dir(nm))
+        return 1;
+    if (!dirs_only)
+        return 0;
+#ifdef DT_DIR
+    return ent->d_type != DT_DIR;
+#else
+    struct stat st;
+    char probe[AIRY_PATH_MAX];
+    snprintf(probe, sizeof(probe), "%s/%s", full, nm);
+    return stat(probe, &st) != 0 || !S_ISDIR(st.st_mode);
+#endif
+}
+
+/* One bounded directory scan shared by the '**' recursion and a literal
+ * segment: seg==NULL means '**' (no name filter), next_i is the level handed
+ * to the next impl() call, dirs_only gates the directory probe. */
+static void builtin_glob_walk(const char *base, const char **segs, size_t n, size_t next_i,
+                              const char *seg, int dirs_only, const char *full, char *path,
+                              size_t path_len, size_t path_cap, char *out, size_t out_cap,
+                              size_t *out_len, size_t *count, size_t max, int *timed_out,
+                              uint64_t deadline)
+{
+    DIR *d = opendir(full);
+    if (!d)
+        return;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL && *count < max) {
+        const char *nm = ent->d_name;
+        if (seg && !builtin_glob_seg_match(seg, nm))
+            continue;
+        if (glob_prune(ent, full, nm, dirs_only))
+            continue;
+        if (builtin_deadline_hit(deadline)) {
+            *timed_out = 1;
+            break;
+        }
+        size_t child = path_len + (path_len ? 1 : 0) + strlen(nm);
+        if (child + 1 >= path_cap)
+            continue;
+        char *p = path + path_len;
+        if (path_len)
+            *p++ = '/';
+        __builtin_memcpy(p, nm, strlen(nm) + 1);
+        builtin_glob_impl(base, segs, n, next_i, path, child, path_cap, out, out_cap, out_len, count,
+                          max, timed_out, deadline);
+        if (path_len)
+            path[path_len] = '\0';
+    }
+    closedir(d);
+}
+
+static void builtin_glob_impl(const char *base, const char **segs, size_t n, size_t i, char *path,
+                              size_t path_len, size_t path_cap, char *out, size_t out_cap,
+                              size_t *out_len, size_t *count, size_t max, int *timed_out,
                               uint64_t deadline)
 {
     if (*count >= max || *out_len >= out_cap - 1)
@@ -76,7 +138,6 @@ static void builtin_glob_impl(const char *base, const char **segs, size_t n, siz
         snprintf(full, sizeof(full), "%s", base);
 
     if (i == n) {
-
         if (path_len > 0 && path_len + 2 <= out_cap - *out_len) {
             __builtin_memcpy(out + *out_len, path, path_len);
             *out_len += path_len;
@@ -88,100 +149,13 @@ static void builtin_glob_impl(const char *base, const char **segs, size_t n, siz
     }
 
     const char *seg = segs[i];
-    const int is_recursive = (strcmp(seg, "**") == 0);
-
-    if (is_recursive) {
-
+    const int star = (strcmp(seg, "**") == 0);
+    const size_t next_i = star ? i : i + 1;
+    if (star)
         builtin_glob_impl(base, segs, n, i + 1, path, path_len, path_cap, out, out_cap, out_len,
                           count, max, timed_out, deadline);
-
-        DIR *d = opendir(full);
-        if (d) {
-            struct dirent *ent;
-            while ((ent = readdir(d)) != NULL && *count < max) {
-                const char *nm = ent->d_name;
-                if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0)
-                    continue;
-                if (builtin_scan_noise_dir(nm))
-                    continue;
-                if (builtin_deadline_hit(deadline)) {
-                    *timed_out = 1;
-                    break;
-                }
-#ifdef DT_DIR
-                int is_dir = (ent->d_type == DT_DIR);
-#else
-                struct stat st;
-                char probe[AIRY_PATH_MAX];
-                snprintf(probe, sizeof(probe), "%s/%s", full, nm);
-                int is_dir = (stat(probe, &st) == 0 && S_ISDIR(st.st_mode));
-#endif
-                if (!is_dir)
-                    continue;
-                size_t need = (path_len ? path_len + 1 : 0) + strlen(nm);
-                if (need + 1 >= path_cap)
-                    continue;
-                char *p = path + path_len;
-                if (path_len)
-                    *p++ = '/';
-                __builtin_memcpy(p, nm, strlen(nm) + 1);
-                builtin_glob_impl(base, segs, n, i, path,
-                                  path_len + (path_len ? 1 : 0) + strlen(nm), path_cap, out,
-                                  out_cap, out_len, count, max, timed_out, deadline);
-                if (path_len)
-                    path[path_len] = '\0';
-            }
-            closedir(d);
-        }
-        return;
-    }
-
-    DIR *d = opendir(full);
-    if (!d)
-        return;
-    struct dirent *ent;
-    while ((ent = readdir(d)) != NULL && *count < max) {
-        const char *nm = ent->d_name;
-        if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0)
-            continue;
-        if (builtin_scan_noise_dir(nm))
-            continue;
-        if (!builtin_glob_seg_match(seg, nm))
-            continue;
-        if (builtin_deadline_hit(deadline)) {
-            *timed_out = 1;
-            break;
-        }
-#ifdef DT_DIR
-        int is_dir = (ent->d_type == DT_DIR);
-#else
-        struct stat st;
-        char probe[AIRY_PATH_MAX];
-        snprintf(probe, sizeof(probe), "%s/%s", full, nm);
-        int is_dir = (stat(probe, &st) == 0 && S_ISDIR(st.st_mode));
-#endif
-
-        size_t need = (path_len ? path_len + 1 : 0) + strlen(nm);
-        if (need + 1 >= path_cap)
-            continue;
-        char *p = path + path_len;
-        if (path_len)
-            *p++ = '/';
-        __builtin_memcpy(p, nm, strlen(nm) + 1);
-        if (i + 1 == n) {
-
-            builtin_glob_impl(base, segs, n, i + 1, path,
-                              path_len + (path_len ? 1 : 0) + strlen(nm), path_cap, out, out_cap,
-                              out_len, count, max, timed_out, deadline);
-        } else if (is_dir) {
-            builtin_glob_impl(base, segs, n, i + 1, path,
-                              path_len + (path_len ? 1 : 0) + strlen(nm), path_cap, out, out_cap,
-                              out_len, count, max, timed_out, deadline);
-        }
-        if (path_len)
-            path[path_len] = '\0';
-    }
-    closedir(d);
+    builtin_glob_walk(base, segs, n, next_i, star ? NULL : seg, star || next_i != n, full, path,
+                      path_len, path_cap, out, out_cap, out_len, count, max, timed_out, deadline);
 }
 
 int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
