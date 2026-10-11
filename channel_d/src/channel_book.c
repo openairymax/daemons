@@ -37,6 +37,17 @@ channel_entry_t *find_channel(channel_service_t *svc, const char *channel_id)
     AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
 }
 
+static channel_entry_t *find_locked(channel_service_t *svc, const char *channel_id)
+{
+    airy_mtx_lock(&svc->lock);
+    channel_entry_t *entry = find_channel(svc, channel_id);
+    if (!entry) {
+        airy_mtx_unlock(&svc->lock);
+        AIRY_ERROR_NULL(AIRY_ERR_NOT_FOUND, "channel not found");
+    }
+    return entry;
+}
+
 void channel_entry_free(channel_entry_t *entry)
 {
     backend_entry_free(entry);
@@ -128,13 +139,9 @@ int channel_service_close(channel_service_t *svc, const char *channel_id)
     if (!svc || !channel_id)
         return AIRY_ERR_INVALID_PARAM;
 
-    airy_mtx_lock(&svc->lock);
-    channel_entry_t *entry = find_channel(svc, channel_id);
-    if (!entry) {
-        airy_mtx_unlock(&svc->lock);
-        AIRY_ERROR(AIRY_ERR_NOT_FOUND, "channel not found");
+    channel_entry_t *entry = find_locked(svc, channel_id);
+    if (!entry)
         return AIRY_ERR_NOT_FOUND;
-    }
 
     channel_entry_free(entry);
     size_t idx = (size_t)(entry - svc->channels);
@@ -175,13 +182,9 @@ int channel_service_get_info(channel_service_t *svc, const char *channel_id,
     if (!svc || !channel_id || !out_info)
         return AIRY_ERR_INVALID_PARAM;
 
-    airy_mtx_lock(&svc->lock);
-    channel_entry_t *entry = find_channel(svc, channel_id);
-    if (!entry) {
-        airy_mtx_unlock(&svc->lock);
-        AIRY_ERROR(AIRY_ERR_NOT_FOUND, "channel not found");
+    channel_entry_t *entry = find_locked(svc, channel_id);
+    if (!entry)
         return AIRY_ERR_NOT_FOUND;
-    }
 
     *out_info = entry->info;
     airy_mtx_unlock(&svc->lock);
@@ -194,13 +197,9 @@ int channel_service_set_callback(channel_service_t *svc, const char *channel_id,
     if (!svc || !channel_id)
         return AIRY_ERR_INVALID_PARAM;
 
-    airy_mtx_lock(&svc->lock);
-    channel_entry_t *entry = find_channel(svc, channel_id);
-    if (!entry) {
-        airy_mtx_unlock(&svc->lock);
-        AIRY_ERROR(AIRY_ERR_NOT_FOUND, "channel not found");
+    channel_entry_t *entry = find_locked(svc, channel_id);
+    if (!entry)
         return AIRY_ERR_NOT_FOUND;
-    }
 
     entry->callback = callback;
     entry->callback_user_data = user_data;
