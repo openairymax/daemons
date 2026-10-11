@@ -12,6 +12,8 @@
  * 请求/响应均为单行 JSON，串行单连接处理（控制面低频，无并发需求）。
  * UDS 文件权限 0600，仅本机同用户可达；TCP 腿仅绑定 127.0.0.1。
  * 客户端面（launcher 唯一启动契约）：activate/stop/status 一次性连接。
+ * 端点装配（WSA 初始化 / host:port 裁剪 / TCP bind+connect）统一委托
+ * net.c，本件只持 fd 与端点字面量（机制/策略分离）。
  */
 
 #include "supervisor_d.h"
@@ -45,63 +47,10 @@ static const char *state_str(sup_state_t st)
     }
 }
 
-#ifdef _WIN32
-static int wsa_up(void)
-{
-    static WSADATA wsa;
-    static int done = 0;
-    if (!done) {
-        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
-            return -1;
-        done = 1;
-    }
-    return 0;
-}
-
-static int ep_split(const char *ep, char *host, size_t hsz, char *port,
-                    size_t psz)
-{
-    const char *colon = strrchr(ep, ':');
-    if (!colon || colon == ep || (size_t)(colon - ep) >= hsz)
-        return -1;
-    /* %.*s 截取 host 段：边界与终止由 snprintf 保证（BAN-154） */
-    snprintf(host, hsz, "%.*s", (int)(colon - ep), ep);
-    snprintf(port, psz, "%s", colon + 1);
-    return 0;
-}
-#endif
-
 int sup_ctrl_listen(const sup_ctx_t *ctx)
 {
 #ifdef _WIN32
-    if (wsa_up() != 0)
-        return -1;
-    char host[128], port[16];
-    if (ep_split(ctx->ctrl_ep, host, sizeof(host), port, sizeof(port)) != 0)
-        return -1;
-
-    struct addrinfo hints, *res = NULL;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE;
-    if (getaddrinfo(host, port, &hints, &res) != 0 || !res)
-        return -1;
-    int fd = (int)socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (fd < 0) {
-        freeaddrinfo(res);
-        return -1;
-    }
-    BOOL reuse = TRUE;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
-    if (bind(fd, res->ai_addr, (socklen_t)res->ai_addrlen) != 0 ||
-        listen(fd, 4) != 0) {
-        closesocket(fd);
-        freeaddrinfo(res);
-        return -1;
-    }
-    freeaddrinfo(res);
-    return fd;
+    return sup_tcp_bind(ctx->ctrl_ep);
 #else
     struct sockaddr_un sa;
     if (strlen(ctx->ctrl_ep) >= sizeof(sa.sun_path))
@@ -287,21 +236,8 @@ void sup_ctrl_serve(sup_ctx_t *ctx, int listen_fd, int timeout_ms)
 static int client_run(const sup_ctx_t *ctx, const char *req)
 {
 #ifdef _WIN32
-    if (wsa_up() != 0)
-        return -1;
-    char host[128], port[16];
-    if (ep_split(ctx->ctrl_ep, host, sizeof(host), port, sizeof(port)) != 0)
-        return -1;
-    struct addrinfo hints, *res = NULL;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(host, port, &hints, &res) != 0 || !res)
-        return -1;
-    int fd = (int)socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    int rc = fd >= 0 ? connect(fd, res->ai_addr, (socklen_t)res->ai_addrlen) : -1;
-    freeaddrinfo(res);
-    if (rc != 0)
+    int fd = sup_tcp_conn(ctx->ctrl_ep, -1);
+    if (fd < 0)
         return -1;
 #else
     struct sockaddr_un sa;

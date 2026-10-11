@@ -108,6 +108,9 @@ long long sup_now_ms(void);
 void sup_log(const char *level, const char *fmt, ...);
 void sup_health_tick(sup_ctx_t *ctx, sup_proc_t *p);
 
+/* ---- net.c：端点机制件自持接口（跨平台裁剪 + WSA/TCP 装配权威） ---- */
+#include "sup_net.h"
+
 /* ---- ctrl.c：控制口（UDS/TCP + 极简 JSON-RPC + CLI 客户端） ---- */
 int sup_ctrl_listen(const sup_ctx_t *ctx);
 void sup_ctrl_close(int fd);

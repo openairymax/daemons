@@ -6,10 +6,10 @@
  * @brief supervisor_d 核心单元测试：退避曲线 / JSON 提取 / 声明解析 /
  *        健康探测 / 控制口往返。
  *
- * 被测四源件（decl/proc/probe/ctrl）直接编入（不含 main.c）。全平台腿
- * 覆盖退避封顶、JSON 字段提取、内置缺省表与空转探测；POSIX 腿覆盖
- * profile.env 双遍解析、env 回落、UDS 探测、假死强杀收割链路与控制口
- * health_check / shutdown 往返。
+ * 被测四源件（decl/proc/ctrl/net）直接编入（不含 main.c）。全平台腿
+ * 覆盖退避封顶、JSON 字段提取、内置缺省表、空转探测与端点裁剪；POSIX
+ * 腿覆盖 profile.env 双遍解析、env 回落、UDS 探测、假死强杀收割链路与
+ * 控制口 health_check / shutdown 往返。
  */
 
 #include "supervisor_d.h"
@@ -199,6 +199,24 @@ static int t_health_noop(void)
     sup_health_tick(&ctx, &p);
     TEST_ASSERT(p.state == SUP_ST_BACKOFF, "state changed");
     TEST_ASSERT(p.dead_ticks == 7, "dead_ticks changed");
+    TEST_OK();
+}
+
+/* 端点字面量裁剪（net.c 机制件，两腿皆跑） */
+static int t_ep_split(void)
+{
+    char host[128], port[16];
+
+    TEST_ASSERT(sup_ep_split("127.0.0.1:7788", host, sizeof(host), port,
+                             sizeof(port)) == 0, "split ok");
+    TEST_ASSERT(strcmp(host, "127.0.0.1") == 0, "host seg");
+    TEST_ASSERT(strcmp(port, "7788") == 0, "port seg");
+    TEST_ASSERT(sup_ep_split("7788", host, sizeof(host), port,
+                             sizeof(port)) == -1, "no colon");
+    TEST_ASSERT(sup_ep_split(":7788", host, sizeof(host), port,
+                             sizeof(port)) == -1, "empty host");
+    TEST_ASSERT(sup_ep_split("127.0.0.1:7788", host, 4, port,
+                             sizeof(port)) == -1, "host too small");
     TEST_OK();
 }
 
@@ -479,6 +497,8 @@ int main(void)
     pass += t_decl_defaults() == 0;
     run++;
     pass += t_health_noop() == 0;
+    run++;
+    pass += t_ep_split() == 0;
 #ifndef _WIN32
     run++;
     pass += t_decl_load() == 0;
