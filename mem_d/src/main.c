@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
-/* @generated DO NOT EDIT — daemon_gen.py v1.13.1 (L3 SSoT) 生成。
+/* @generated DO NOT EDIT — daemon_gen.py v1.13.2 (L3 SSoT) 生成。
  * manifest 派生产物；装配机制在 daemons/common，策略在 src/svc.c
  * 与 modules（手写域）。
  * 改 .manifest 后: python3 agentrt/tools/codegen/daemon_gen.py --gen
@@ -32,24 +32,8 @@ static const daemon_op_t SVC_OPS[] = {
 int main(int argc, char **argv)
 {
     daemon_boot_t boot = {
-        .daemon = "mem_d",
-        .cname = "mem",
-        .env_debug = "AIRY_MEM_D_DEBUG",
-        .sd_type = "mem",
-        .tags = "mem,core",
-        .method_total = 25,
-        .running_lock = &g_running_lock_mem_d,
-        .signal_handler = signal_handler_mem_d,
-        .log_toggle = svc_log_toggle_handler_mem_d,
-        .print_usage = print_usage_mem_d,
-        .on_client = daemon_on_client_mem_d,
-        .dispatcher = &g_dispatcher_mem_d,
-        .event_driver = &g_event_driver_mem_d,
-        .bsd = &g_bsd_mem_d,
-        .pool_max_events = 64,
-        .pool_min = 4,
-        .pool_max = 8,
-        .pool_queue = 256,
+        DAEMON_BOOT_FILL(mem_d, "mem", "AIRY_MEM_D_DEBUG",
+                         "mem", "mem,core", 25, 64, 4, 8, 256, 0)
         DAEMON_BOOT_WIRE(SVC_OPS, SVC_METHODS,
                          svc_activate_noop, svc_attach_noop,
                          svc_teardown_noop, daemon_dome_init_pep,
