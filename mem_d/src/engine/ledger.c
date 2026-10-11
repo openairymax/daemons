@@ -126,6 +126,25 @@ static ledger_entry_view_t *view_from_entry(const ledger_entry_t *e)
     return v;
 }
 
+/* 批内失败回滚：释放已建 [0,n) 条目与批数组；新会话未入链则一并丢弃，
+   保证 append 原子性（不残留空会话、不残留半批）。 */
+static void append_rollback(ledger_session_t *s, ledger_entry_t **batch, size_t n)
+{
+    if (batch) {
+        for (size_t j = 0; j < n; j++) {
+            AIRY_FREE(batch[j]->session_id);
+            AIRY_FREE(batch[j]->source);
+            AIRY_FREE(batch[j]->ref_id);
+            AIRY_FREE(batch[j]);
+        }
+        AIRY_FREE(batch);
+    }
+    if (!s->head) {
+        AIRY_FREE(s->session_id);
+        AIRY_FREE(s);
+    }
+}
+
 /* ─── 生命周期 ─────────────────────────────────────────────────────────── */
 
 mem_ledger_t *mem_ledger_create(size_t default_budget, double warn_ratio)
@@ -242,27 +261,14 @@ int mem_ledger_append(mem_ledger_t *ledger, const char *session_id,
     /* 两阶段：先全部分配，成功后才链接 —— append 原子性，杜绝部分成功 */
     batch = AIRY_MALLOC(sizeof(ledger_entry_t *) * count);
     if (!batch) {
-        if (!s->head) {
-            AIRY_FREE(s->session_id);
-            AIRY_FREE(s);
-        }
+        append_rollback(s, NULL, 0);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
     for (size_t i = 0; i < count; i++) {
         const ledger_entry_in_t *in = &entries[i];
         ledger_entry_t *e = AIRY_CALLOC(1, sizeof(ledger_entry_t));
         if (!e) {
-            for (size_t j = 0; j < i; j++) {
-                AIRY_FREE(batch[j]->session_id);
-                AIRY_FREE(batch[j]->source);
-                AIRY_FREE(batch[j]->ref_id);
-                AIRY_FREE(batch[j]);
-            }
-            AIRY_FREE(batch);
-            if (!s->head) {
-                AIRY_FREE(s->session_id);
-                AIRY_FREE(s);
-            }
+            append_rollback(s, batch, i);
             return AIRY_ERR_OUT_OF_MEMORY;
         }
         entry_id_gen(ledger, e->entry_id);
@@ -271,17 +277,7 @@ int mem_ledger_append(mem_ledger_t *ledger, const char *session_id,
         e->session_id = AIRY_STRDUP(session_id);
         if (!e->session_id) {
             AIRY_FREE(e);
-            for (size_t j = 0; j < i; j++) {
-                AIRY_FREE(batch[j]->session_id);
-                AIRY_FREE(batch[j]->source);
-                AIRY_FREE(batch[j]->ref_id);
-                AIRY_FREE(batch[j]);
-            }
-            AIRY_FREE(batch);
-            if (!s->head) {
-                AIRY_FREE(s->session_id);
-                AIRY_FREE(s);
-            }
+            append_rollback(s, batch, i);
             return AIRY_ERR_OUT_OF_MEMORY;
         }
         e->entry_type = in->entry_type;
