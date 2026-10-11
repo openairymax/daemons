@@ -58,17 +58,11 @@ DAEMON_RPC_SHELL0(get_stats, handle_get_stats)
 static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *agent_json = jsonrpc_get_object_param(params, "agent");
-    if (!agent_json) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent object", id);
-        return;
-    }
+    JSONRPC_REQUIRE(agent_json, client_fd, "Missing agent object", id);
 
     agent_info_t info = {0};
     const char *aid = get_string_field(agent_json, "agent_id", NULL);
-    if (!aid) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(aid, client_fd, "Missing agent_id", id);
     info.agent_id = (char *)aid;
 
     info.name = (char *)get_string_field(agent_json, "name", NULL);
