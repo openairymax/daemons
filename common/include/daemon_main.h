@@ -397,6 +397,47 @@ typedef struct {
     .method_count = sizeof(methods_) / sizeof((methods_)[0])
 
 /**
+ * @brief 策略包字段填充模板：daemon_boot_t 符号面 + 事件池 + 并发位的
+ *        恒定字段序列（SSoT）。
+ *
+ * 字段名与 daemon_boot_t 布局逐户恒定，唯 .manifest 派生值随户异。以
+ * 模板宏收敛生成户 main.c 的纵向字段副本（0.1.19 §294）：逐字展开 18
+ * 行字段初始化器曾致 a2a_d/channel_d/market_d/mem_d 四户生成产物出现
+ * 10 行克隆窗（G26 全树最大残留簇）。收敛后各户 main.c 仅传策略值，
+ * 字段序列零漂移。
+ *
+ * daemon_ 传裸 token（如 a2a_d）：#daemon_ 串化为 "a2a_d"，##daemon_ 拼接
+ * per-daemon 符号名（DAEMON_DECLARE_COMMON 约定面）。形参名尾带下划线以
+ * 避开 daemon_boot_t 成员 .daemon 的宏遮蔽（否则 .daemon 被替换为
+ * .<户名> 致编译期无名成员）。concurrent_ 传 0/1 显式给出，与旧条件发射
+ * 等价（未列成员由 C 零初始化为 0）。字符串参数由调用点给出（env_debug
+ * 为全大写，无法由 #daemon_ 派生）。末字段尾带逗号，承接紧随其后的
+ * DAEMON_BOOT_WIRE 片段（生成器两宏并置、不再补逗号）。
+ */
+#define DAEMON_BOOT_FILL(daemon_, cname_, env_debug_, sd_type_, tags_,         \
+                         method_total_, pool_max_events_, pool_min_,           \
+                         pool_max_, pool_queue_, concurrent_)                  \
+    .daemon = #daemon_,                                                        \
+    .cname = (cname_),                                                         \
+    .env_debug = (env_debug_),                                                 \
+    .sd_type = (sd_type_),                                                     \
+    .tags = (tags_),                                                           \
+    .method_total = (method_total_),                                           \
+    .running_lock = &g_running_lock_##daemon_,                                 \
+    .signal_handler = signal_handler_##daemon_,                                \
+    .log_toggle = svc_log_toggle_handler_##daemon_,                            \
+    .print_usage = print_usage_##daemon_,                                      \
+    .on_client = daemon_on_client_##daemon_,                                   \
+    .dispatcher = &g_dispatcher_##daemon_,                                     \
+    .event_driver = &g_event_driver_##daemon_,                                 \
+    .bsd = &g_bsd_##daemon_,                                                   \
+    .pool_max_events = (pool_max_events_),                                     \
+    .pool_min = (pool_min_),                                                   \
+    .pool_max = (pool_max_),                                                   \
+    .pool_queue = (pool_queue_),                                               \
+    .concurrent_clients = (concurrent_),
+
+/**
  * @brief svc 钩子缺省策略（null object，0.1.19 §80）。
  *
  * 无对应策略的户经 DAEMON_BOOT_WIRE 引用本组符号，机制层单点提供
