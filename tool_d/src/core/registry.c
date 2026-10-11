@@ -38,6 +38,17 @@ static unsigned int hash(const char *id)
     return h % HASH_SIZE;
 }
 
+static void param_arr_free(tool_param_t *p, size_t n)
+{
+    if (!p)
+        return;
+    for (size_t i = 0; i < n; ++i) {
+        AIRY_FREE((void *)p[i].name);
+        AIRY_FREE((void *)p[i].schema);
+    }
+    AIRY_FREE((void *)p);
+}
+
 static tool_metadata_t *dup_metadata(const tool_metadata_t *src)
 {
     tool_metadata_t *dst = AIRY_CALLOC(1, sizeof(tool_metadata_t));
@@ -46,82 +57,49 @@ static tool_metadata_t *dup_metadata(const tool_metadata_t *src)
     }
     dst->id = AIRY_STRDUP(src->id);
     if (!dst->id) {
-        AIRY_FREE(dst);
+        tool_metadata_free(dst);
         AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate id");
     }
     dst->name = AIRY_STRDUP(src->name);
     if (!dst->name) {
-        AIRY_FREE(dst->id);
-        AIRY_FREE(dst);
+        tool_metadata_free(dst);
         AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate name");
     }
     dst->description = src->description ? AIRY_STRDUP(src->description) : NULL;
     if (src->description && !dst->description) {
-        AIRY_FREE(dst->name);
-        AIRY_FREE(dst->id);
-        AIRY_FREE(dst);
+        tool_metadata_free(dst);
         AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate description");
     }
     dst->executable = AIRY_STRDUP(src->executable);
     if (!dst->executable) {
-        AIRY_FREE(dst->description);
-        AIRY_FREE(dst->name);
-        AIRY_FREE(dst->id);
-        AIRY_FREE(dst);
+        tool_metadata_free(dst);
         AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate executable");
     }
     dst->timeout_sec = src->timeout_sec;
     dst->cacheable = src->cacheable;
     dst->permission_rule = src->permission_rule ? AIRY_STRDUP(src->permission_rule) : NULL;
     if (src->permission_rule && !dst->permission_rule) {
-        AIRY_FREE(dst->executable);
-        AIRY_FREE(dst->description);
-        AIRY_FREE(dst->name);
-        AIRY_FREE(dst->id);
-        AIRY_FREE(dst);
+        tool_metadata_free(dst);
         AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate permission_rule");
     }
     if (src->param_count > 0) {
         dst->params = AIRY_CALLOC(src->param_count, sizeof(tool_param_t));
         if (!dst->params) {
-            AIRY_FREE(dst->permission_rule);
-            AIRY_FREE(dst->executable);
-            AIRY_FREE(dst->description);
-            AIRY_FREE(dst->name);
-            AIRY_FREE(dst->id);
-            AIRY_FREE(dst);
+            tool_metadata_free(dst);
             AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
+        /* param_count 先置位：任一后续失败都能由 tool_metadata_free() 统一
+         * 回收已填充与未填充（calloc 清零）的 name/schema，杜绝逐分支级联。 */
+        dst->param_count = src->param_count;
         for (size_t i = 0; i < src->param_count; ++i) {
             dst->params[i].name = AIRY_STRDUP(src->params[i].name);
             if (!dst->params[i].name) {
-                for (size_t k = 0; k < i; ++k) {
-                    AIRY_FREE(dst->params[k].name);
-                    AIRY_FREE(dst->params[k].schema);
-                }
-                AIRY_FREE(dst->params);
-                AIRY_FREE(dst->permission_rule);
-                AIRY_FREE(dst->executable);
-                AIRY_FREE(dst->description);
-                AIRY_FREE(dst->name);
-                AIRY_FREE(dst->id);
-                AIRY_FREE(dst);
+                tool_metadata_free(dst);
                 AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate param name");
             }
             dst->params[i].schema = AIRY_STRDUP(src->params[i].schema);
             if (!dst->params[i].schema) {
-                AIRY_FREE(dst->params[i].name);
-                for (size_t k = 0; k < i; ++k) {
-                    AIRY_FREE(dst->params[k].name);
-                    AIRY_FREE(dst->params[k].schema);
-                }
-                AIRY_FREE(dst->params);
-                AIRY_FREE(dst->permission_rule);
-                AIRY_FREE(dst->executable);
-                AIRY_FREE(dst->description);
-                AIRY_FREE(dst->name);
-                AIRY_FREE(dst->id);
-                AIRY_FREE(dst);
+                tool_metadata_free(dst);
                 AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate param schema");
             }
             /* required 必须随参数复制：validator 依据 required 拦截必填参数
@@ -129,7 +107,6 @@ static tool_metadata_t *dup_metadata(const tool_metadata_t *src)
              * 被放行到执行层（SSoT: gateway tool schema 的 required 数组）。 */
             dst->params[i].required = src->params[i].required;
         }
-        dst->param_count = src->param_count;
     }
     return dst;
 }
@@ -162,11 +139,7 @@ tool_registry_t *tool_registry_create(const tool_config_t *cfg)
                         for (size_t i = 0; i < cnt; ++i) {
                             params[i].name = AIRY_STRDUP(def->params[i]);
                             if (!params[i].name) {
-                                for (size_t k = 0; k < i; ++k) {
-                                    AIRY_FREE((void *)params[k].name);
-                                    AIRY_FREE((void *)params[k].schema);
-                                }
-                                AIRY_FREE(params);
+                                param_arr_free(params, cnt);
                                 params = NULL;
                                 break;
                             }
@@ -192,12 +165,7 @@ tool_registry_t *tool_registry_create(const tool_config_t *cfg)
                             }
                             params[i].schema = AIRY_STRDUP(schema);
                             if (!params[i].schema) {
-                                AIRY_FREE(params[i].name);
-                                for (size_t k = 0; k < i; ++k) {
-                                    AIRY_FREE((void *)params[k].name);
-                                    AIRY_FREE((void *)params[k].schema);
-                                }
-                                AIRY_FREE(params);
+                                param_arr_free(params, cnt);
                                 params = NULL;
                                 break;
                             }
@@ -210,13 +178,7 @@ tool_registry_t *tool_registry_create(const tool_config_t *cfg)
                 }
             }
             tool_registry_add(reg, &meta);
-            if (meta.params) {
-                for (size_t i = 0; i < meta.param_count; ++i) {
-                    AIRY_FREE((void *)meta.params[i].name);
-                    AIRY_FREE((void *)meta.params[i].schema);
-                }
-                AIRY_FREE((void *)meta.params);
-            }
+            param_arr_free(meta.params, meta.param_count);
         }
     }
     return reg;
