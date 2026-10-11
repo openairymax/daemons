@@ -579,6 +579,32 @@ static int web_search_via_bing(const char *query, int max_results, char *buf, si
     return rc;
 }
 
+static int web_search_via_ddg(const char *query, int max_results, char *buf, size_t buf_cap,
+                              size_t *buf_len, int *count)
+{
+    char enc[2048];
+    builtin_url_encode(query, enc, sizeof(enc));
+    char cmd[8192];
+    snprintf(cmd, sizeof(cmd),
+             "curl -sSL --max-time 8 -A \"Mozilla/5.0 (compatible; AirymaxRT/0.1.2 "
+             "web_search)\" 'https://html.duckduckgo.com/html/?q=%s'",
+             enc);
+    char *out = NULL;
+    int exit_code = -1;
+
+    if (builtin_shell_run(cmd, NULL, &out, &exit_code, 10000, NULL, NULL) != 0 || !out ||
+        exit_code != 0 || strstr(out, "command not found")) {
+        AIRY_FREE(out);
+        return -1;
+    }
+    int rc = web_search_extract(out,
+                                "class=\"result__a\" href=\"([^\"]+)\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a>",
+                                "class=\"result__snippet\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a>",
+                                max_results, buf, buf_cap, buf_len, count);
+    AIRY_FREE(out);
+    return rc;
+}
+
 int web_search_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
@@ -615,29 +641,8 @@ int web_search_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
                              &count) != 0 ||
          count == 0) &&
         !builtin_deadline_hit(deadline)) {
-        char enc[2048];
-        builtin_url_encode(q->valuestring, enc, sizeof(enc));
-        char cmd[8192];
-        snprintf(cmd, sizeof(cmd),
-                 "curl -sSL --max-time 8 -A \"Mozilla/5.0 (compatible; "
-                 "AirymaxRT/0.1.2 web_search)\" "
-                 "'https://html.duckduckgo.com/html/?q=%s'",
-                 enc);
-        char *out = NULL;
-        int exit_code = -1;
-
-        int curl_ok = (builtin_shell_run(cmd, NULL, &out, &exit_code, 10000, NULL, NULL) == 0 && out &&
-                       exit_code == 0 && !strstr(out, "command not found"));
-        if (curl_ok) {
-            /* DDG 标题同样可能含 <b> 强调标签，用与 Bing 一致的
-             * 强调标签受限模式逐条提取（POSIX ERE 无懒量词）。 */
-            web_search_extract(out,
-                               "class=\"result__a\" href=\"([^\"]+)\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a>",
-                               "class=\"result__snippet\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a>",
-                               max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len, &count);
-        }
-        if (out)
-            AIRY_FREE(out);
+        web_search_via_ddg(q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len,
+                           &count);
     } else if (web_search_results_degraded(buf) && !builtin_deadline_hit(deadline)) {
         /* Bing 命中但结果是汉字字典/词条（中文长查询分词退化）：改写查询
          * 后重试；改写仍退化/失败则清空走 DDG 兜底（2026-08-20）。 */
@@ -652,26 +657,8 @@ int web_search_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
         } else {
             buf_len = 0;
             count = 0;
-            char enc[2048];
-            builtin_url_encode(q->valuestring, enc, sizeof(enc));
-            char cmd[8192];
-            snprintf(cmd, sizeof(cmd),
-                     "curl -sSL --max-time 8 -A \"Mozilla/5.0 (compatible; "
-                     "AirymaxRT/0.1.2 web_search)\" "
-                     "'https://html.duckduckgo.com/html/?q=%s'",
-                     enc);
-            char *out = NULL;
-            int exit_code = -1;
-            int curl_ok = (builtin_shell_run(cmd, NULL, &out, &exit_code, 10000, NULL, NULL) == 0 &&
-                           out && exit_code == 0 && !strstr(out, "command not found"));
-            if (curl_ok) {
-                web_search_extract(out,
-                                   "class=\"result__a\" href=\"([^\"]+)\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a>",
-                                   "class=\"result__snippet\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a>",
-                                   max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len, &count);
-            }
-            if (out)
-                AIRY_FREE(out);
+            web_search_via_ddg(q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len,
+                               &count);
         }
     }
 
