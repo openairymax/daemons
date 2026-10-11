@@ -14,6 +14,7 @@ add_executable(sup_test_supervisor_core test_supervisor_core.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/decl.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/proc.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ctrl.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/net.c
 )
 
 target_include_directories(sup_test_supervisor_core PRIVATE
