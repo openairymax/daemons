@@ -28,8 +28,10 @@
   客户端，`gateway_d` 转发与各 daemon 互调都走它）。
 - **服务发现**：`service_discovery*` 提供注册、发现、健康、选择与负载均衡，后端可切
   共享内存或文件；`daemon_bootstrap_sd` 是一键引导封装。
-- **安全**：`svc_auth*`（JWT / API Key / 限流）、`daemon_security*`（ACL 授权、输入消毒、
+- **安全**：`daemon_security*`（ACL 授权、输入消毒、
   包签名校验、凭据与审计），并与 `cupolas` 安全穹顶集成。
+  （`svc_auth*` JWT/API Key/限流认证中间件已随 0.1.19 单元六十三清退——
+  生产消费为零的扇入 0 死件，网关认证走 `gateway_auth` 策略面。）
 - **容错与可观测**：`api_recovery`（重试/降级/熔断策略）、`alert_manager`、
   `unified_metrics`、`log_sanitizer`。
 - **运行时数据引导**：`daemon_heapstore_bootstrap`（运行时数据存储）；安全穹顶引导
@@ -56,10 +58,10 @@
 
 ### 兼容再导出头
 
-`include/` 下共 11 个头文件。除 `daemon_defaults.h` 外（再导出兼容头，本体只有一行
-`#include "airy_defaults.h"`，指向 `commons` 仓内的权威版本），其余 10 个都是本模块
+`include/` 下共 10 个头文件。除 `daemon_defaults.h` 外（再导出兼容头，本体只有一行
+`#include "airy_defaults.h"`，指向 `commons` 仓内的权威版本），其余 9 个都是本模块
 自有的框架/桥接头（`daemon_main.h`、`daemon_event_driver.h`、`daemon_security.h`、
-`svc_auth.h`、`daemon_dep.h` 等），
+`daemon_dep.h` 等），
 仅在源码树内消费。
 
 > 早前的再导出兼容头家族（`svc_common.h`、`method_dispatcher.h`、`param_validator.h`、
@@ -74,12 +76,11 @@
 
 ## 构成
 
-`src/` 按功能域组织，共 17 个 C 源文件：
+`src/` 按功能域组织，共 11 个 C 源文件：
 
 | 域 | 数量 | 源文件 |
 |----|------|--------|
 | `src/svc/` | 1 | `svc_model_defaults.c`（`model.yaml` 全局默认模型提取，`llm_d` / `gateway_d` 共用；svc 生命周期机制族已迁 `commons/utils/svc`） |
-| `src/auth/` | 6 | `svc_auth.c`（认证中间件聚合）、`svc_auth_jwt.c` / `svc_auth_jwt_crypto.c` / `svc_auth_jwt_verify.c`（JWT 生命周期、HMAC/Base64 原语、签名校验）、`svc_auth_apikey.c`、`svc_auth_ratelimit.c` |
 | `src/security/` | 3 | `daemon_security.c`（初始化/消毒）、`_acl.c`（ACL 授权）、`_audit.c`（审计；单元五十三裁撤零消费签名/凭据存取死面后归位） |
 | `src/daemon/` | 7 | `daemon_event_driver.c`（事件驱动主循环）、`daemon_rpc_client.c`、`daemon_dep.c`（硬依赖探测与降级上报）、`daemon_heapstore_bootstrap.c`、`daemon_ipc_ops_bootstrap.c`、`daemon_boot.c`（daemon 启动装配骨架）、`daemon_cfg_file.c`（config/endpoint 文件解析） |
 
@@ -131,12 +132,12 @@ cmake -S . -B build -DBUILD_DAEMON=ON -DBUILD_CLI=ON
 
 ## 测试
 
-`tests/` 下的目标以 `svc_test_` 前缀注册进 CTest，共 20 个用例；`BUILD_TESTS` 为 `ON`
+`tests/` 下的目标以 `svc_test_` 前缀注册进 CTest，共 19 个用例；`BUILD_TESTS` 为 `ON`
 且非 Windows 时才加入构建。
 
 - 基础：`svc_test_error` / `svc_test_platform` / `svc_test_logger` / `svc_test_config` /
   `svc_test_safe_string_utils`
-- 服务框架与分发：`svc_test_svc_auth` / `svc_test_jsonrpc_helpers` / `svc_test_svc_stop` /
+- 服务框架与分发：`svc_test_jsonrpc_helpers` / `svc_test_svc_stop` /
   `svc_test_daemon_common`（按功能域拆分为 6 个测试文件）
 - 安全：`svc_test_daemon_security` / `svc_test_log_sanitizer`
 - 容错与并发：`svc_test_strategies_recovery` / `svc_test_api_recovery`
