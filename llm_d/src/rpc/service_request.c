@@ -347,6 +347,23 @@ static void update_cost_tracking(llm_service_t *svc, const char *model, llm_resp
         (void)cost_tracker_save(svc->cost, usage_path);
 }
 
+/**
+ * @brief 记录首条用户消息的复杂度评估与路由决策（complete/stream 双入口
+ *        共用的 routing prelude，消灭两入口的样板重复）。
+ */
+static void log_routing_prelude(const llm_request_config_t *manager,
+                                const char *routing_kind)
+{
+    const char *first_content = NULL;
+    size_t input_len = 0;
+    if (manager->message_count > 0 && manager->messages[0].content) {
+        first_content = manager->messages[0].content;
+        input_len = strlen(first_content);
+    }
+    llm_complexity_level_t complexity = assess_complexity(first_content);
+    log_routing_decision(manager->model, complexity, input_len, routing_kind);
+}
+
 int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager,
                          llm_response_t **out_response)
 {
@@ -405,17 +422,7 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
         return AIRY_ERR_LLM_INVALID_MODEL;
     }
 
-    {
-
-        const char *first_content = NULL;
-        size_t input_len = 0;
-        if (manager->message_count > 0 && manager->messages[0].content) {
-            first_content = manager->messages[0].content;
-            input_len = strlen(first_content);
-        }
-        llm_complexity_level_t complexity = assess_complexity(first_content);
-        log_routing_decision(manager->model, complexity, input_len, "user_specified");
-    }
+    log_routing_prelude(manager, "user_specified");
 
     llm_request_config_t eff = *manager;
     char eff_model[128];
@@ -478,16 +485,7 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
         return AIRY_ERR_LLM_INVALID_MODEL;
     }
 
-    {
-        const char *first_content = NULL;
-        size_t input_len = 0;
-        if (manager->message_count > 0 && manager->messages[0].content) {
-            first_content = manager->messages[0].content;
-            input_len = strlen(first_content);
-        }
-        llm_complexity_level_t complexity = assess_complexity(first_content);
-        log_routing_decision(manager->model, complexity, input_len, "stream_user_specified");
-    }
+    log_routing_prelude(manager, "stream_user_specified");
 
     if (!prov->adapter->complete_stream) {
         SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL model=%s, error=NOT_SUPPORTED, STACK: "
