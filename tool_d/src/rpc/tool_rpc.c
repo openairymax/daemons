@@ -16,11 +16,10 @@
 #include "svc_tool_d.h"
 #include "tool_d_internal.h"
 
+#include "daemon_replies.h"
 #include "jsonrpc_helpers.h"
 #include "param_validator.h"
 #include "svc_logger.h"
-
-#include <time.h>
 
 static void handle_register(cJSON *params, int id, airy_sock_t fd);
 static void handle_list(int id, airy_sock_t fd);
@@ -242,12 +241,7 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
 
 static void handle_health_check(int id, airy_sock_t client_fd)
 {
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "service", "tool_d");
-    cJSON_AddBoolToObject(result, "healthy", g_service != NULL);
-    cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
-
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    reply_health(client_fd, "tool_d", g_service != NULL, id);
 }
 
 static void handle_stats(int id, airy_sock_t client_fd)
@@ -256,20 +250,7 @@ static void handle_stats(int id, airy_sock_t client_fd)
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Tool service not ready", id);
         return;
     }
-    char *stats_json = tool_service_get_stats(g_service);
-    if (!stats_json) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Failed to collect stats", id);
-        return;
-    }
-
-    cJSON *result = cJSON_Parse(stats_json);
-    AIRY_FREE(stats_json);
-    if (!result) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Stats serialization failed", id);
-        return;
-    }
-
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    reply_stats(client_fd, tool_service_get_stats(g_service), id);
 }
 
 static void handle_pending(int id, airy_sock_t client_fd)
