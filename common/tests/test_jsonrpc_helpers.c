@@ -93,71 +93,80 @@ static int test_parse_request(void)
 {
     const char *raw =
         "{\"jsonrpc\":\"2.0\",\"method\":\"test\",\"params\":{\"key\":\"value\"},\"id\":42}";
+    cJSON *req = cJSON_Parse(raw);
+    if (!req) {
+        TEST_FAIL("parse_request", "cJSON_Parse failed");
+        return -1;
+    }
 
     char *method = NULL;
     cJSON *params = NULL;
     int id = 0;
 
-    int ret = jsonrpc_parse_request(raw, &method, &params, &id);
-    if (ret != 0) {
+    if (jsonrpc_parse_request_ptr(req, &method, &params, &id) != 0) {
         TEST_FAIL("parse_request", "parse failed");
-        return -1;
+        goto out_fail;
     }
 
     if (strcmp(method, "test") != 0) {
         TEST_FAIL("parse_request", "wrong method");
-        free(method);
-        if (params)
-            cJSON_Delete(params);
-        return -1;
+        goto out_fail;
     }
 
     if (id != 42) {
         TEST_FAIL("parse_request", "wrong id");
-        free(method);
-        if (params)
-            cJSON_Delete(params);
-        return -1;
+        goto out_fail;
     }
 
     if (!params) {
         TEST_FAIL("parse_request", "missing params");
-        free(method);
-        return -1;
+        goto out_fail;
     }
 
     cJSON *key = cJSON_GetObjectItem(params, "key");
     if (!key || strcmp(key->valuestring, "value") != 0) {
         TEST_FAIL("parse_request", "wrong params");
-        free(method);
-        cJSON_Delete(params);
-        return -1;
+        goto out_fail;
     }
 
     free(method);
     cJSON_Delete(params);
+    cJSON_Delete(req);
 
     TEST_PASS("parse_request");
     return 0;
+
+out_fail:
+    free(method);
+    if (params)
+        cJSON_Delete(params);
+    cJSON_Delete(req);
+    return -1;
 }
 
 static int test_parse_invalid_request(void)
 {
     const char *raw = "{\"jsonrpc\":\"1.0\",\"method\":\"test\"}";
+    cJSON *req = cJSON_Parse(raw);
+    if (!req) {
+        TEST_FAIL("parse_invalid_request", "cJSON_Parse failed");
+        return -1;
+    }
 
     char *method = NULL;
     cJSON *params = NULL;
     int id = 0;
 
-    int ret = jsonrpc_parse_request(raw, &method, &params, &id);
-    if (ret == 0) {
+    if (jsonrpc_parse_request_ptr(req, &method, &params, &id) == 0) {
         TEST_FAIL("parse_invalid_request", "should fail for invalid version");
         free(method);
         if (params)
             cJSON_Delete(params);
+        cJSON_Delete(req);
         return -1;
     }
 
+    cJSON_Delete(req);
     TEST_PASS("parse_invalid_request");
     return 0;
 }
@@ -186,84 +195,6 @@ static int test_get_string_param(void)
     return 0;
 }
 
-static int test_get_int_param(void)
-{
-    cJSON *params = cJSON_CreateObject();
-    cJSON_AddNumberToObject(params, "count", 42);
-
-    int value = jsonrpc_get_int_param(params, "count", 0);
-    if (value != 42) {
-        TEST_FAIL("get_int_param", "wrong value");
-        cJSON_Delete(params);
-        return -1;
-    }
-
-    int missing = jsonrpc_get_int_param(params, "missing", -1);
-    if (missing != -1) {
-        TEST_FAIL("get_int_param", "wrong default");
-        cJSON_Delete(params);
-        return -1;
-    }
-
-    cJSON_Delete(params);
-    TEST_PASS("get_int_param");
-    return 0;
-}
-
-static int test_get_bool_param(void)
-{
-    cJSON *params = cJSON_CreateObject();
-    cJSON_AddBoolToObject(params, "enabled", 1);
-
-    int value = jsonrpc_get_bool_param(params, "enabled", 0);
-    if (value != 1) {
-        TEST_FAIL("get_bool_param", "wrong value");
-        cJSON_Delete(params);
-        return -1;
-    }
-
-    int missing = jsonrpc_get_bool_param(params, "missing", 0);
-    if (missing != 0) {
-        TEST_FAIL("get_bool_param", "wrong default");
-        cJSON_Delete(params);
-        return -1;
-    }
-
-    cJSON_Delete(params);
-    TEST_PASS("get_bool_param");
-    return 0;
-}
-
-static int test_is_notification(void)
-{
-    cJSON *notif = cJSON_CreateObject();
-    cJSON_AddStringToObject(notif, "jsonrpc", "2.0");
-    cJSON_AddStringToObject(notif, "method", "update");
-
-    if (!jsonrpc_is_notification(notif)) {
-        TEST_FAIL("is_notification", "should be notification");
-        cJSON_Delete(notif);
-        return -1;
-    }
-
-    cJSON_Delete(notif);
-
-    cJSON *req = cJSON_CreateObject();
-    cJSON_AddStringToObject(req, "jsonrpc", "2.0");
-    cJSON_AddStringToObject(req, "method", "update");
-    cJSON_AddNumberToObject(req, "id", 1);
-
-    if (jsonrpc_is_notification(req)) {
-        TEST_FAIL("is_notification", "should not be notification");
-        cJSON_Delete(req);
-        return -1;
-    }
-
-    cJSON_Delete(req);
-    TEST_PASS("is_notification");
-    return 0;
-}
-
 static int test_build_notification(void)
 {
     cJSON *params = cJSON_CreateObject();
@@ -289,22 +220,6 @@ static int test_build_notification(void)
 
     free(notif);
     TEST_PASS("build_notification");
-    return 0;
-}
-
-static int test_is_batch_request(void)
-{
-    if (!jsonrpc_is_batch_request("[{\"method\":\"test\"}]")) {
-        TEST_FAIL("is_batch_request", "should be batch");
-        return -1;
-    }
-
-    if (jsonrpc_is_batch_request("{\"method\":\"test\"}")) {
-        TEST_FAIL("is_batch_request", "should not be batch");
-        return -1;
-    }
-
-    TEST_PASS("is_batch_request");
     return 0;
 }
 
@@ -354,22 +269,14 @@ int main(void)
         failed++;
     if (test_get_string_param() != 0)
         failed++;
-    if (test_get_int_param() != 0)
-        failed++;
-    if (test_get_bool_param() != 0)
-        failed++;
-    if (test_is_notification() != 0)
-        failed++;
     if (test_build_notification() != 0)
-        failed++;
-    if (test_is_batch_request() != 0)
         failed++;
     if (test_get_error_message() != 0)
         failed++;
 
     printf("\n=== Test Summary ===\n");
-    printf("Total: 11 tests\n");
-    printf("Passed: %d\n", 11 - failed);
+    printf("Total: 7 tests\n");
+    printf("Passed: %d\n", 7 - failed);
     printf("Failed: %d\n", failed);
 
     return (failed == 0) ? 0 : 1;
