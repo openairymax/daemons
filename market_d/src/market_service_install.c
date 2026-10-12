@@ -10,15 +10,11 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "io.h"
-#include "platform.h"
-#include "svc_logger.h"
 
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <time.h>
 
 #ifndef _WIN32

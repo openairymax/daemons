@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
-#include "airy_memory.h"
-#include "error.h"
 /**
  * @file market_service_impl.c
  * @brief Market service core implementation.
@@ -10,16 +8,14 @@
  *          market_service.h.
  */
 
+#include "airy_memory.h"
 #include "daemon_errors.h"
-#include "platform.h"
-#include "svc_logger.h"
+#include "error.h"
 
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <time.h>
 
 #ifndef _WIN32
@@ -29,8 +25,6 @@
 #else
 #include <windows.h>
 #endif
-
-#include <airymax/sched.h>
 
 #include "market_service_internal.h"
 
