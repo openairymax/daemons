@@ -94,8 +94,8 @@
 
 - `method_dispatcher_create / destroy / register / dispatch`：daemon `main.c` 用
   `method_dispatcher_register(disp, "<method>", handler, NULL)` 注册自己的方法。
-- `jsonrpc_build_success / jsonrpc_build_error / jsonrpc_parse_request /
-  jsonrpc_get_string_param / jsonrpc_get_int_param`：请求解析与响应封装。
+- `jsonrpc_build_success / jsonrpc_build_error / jsonrpc_parse_request_ptr /
+  jsonrpc_get_string_param`：请求解析与响应封装。
 - `daemon_rpc_call` / `daemon_rpc_call_cancelable` / `daemon_rpc_call_stream`：
   daemon 之间的 JSON-RPC 客户端调用（`gateway_d` 转发、`sched_d` 派发、流式响应均使用）。
 - `daemon_ipc_ops_init`：向 `atoms` 注入 IPC/RPC/服务发现能力函数表。LLM 与工具域的
