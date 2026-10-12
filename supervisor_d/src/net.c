@@ -87,7 +87,7 @@ static int sup_conn_wait(int fd, const struct sockaddr *sa, socklen_t salen,
 
 #ifdef _WIN32
 /* ---- WSA 初始化（幂等）：Windows 专有，POSIX 无需且不暴露 ---- */
-int sup_net_up(void)
+static int sup_net_up(void)
 {
     static WSADATA wsa;
     static int done = 0;

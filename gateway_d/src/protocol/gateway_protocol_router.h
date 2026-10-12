@@ -52,7 +52,6 @@ gw_proto_router_t *gw_proto_router_create(void);
 void gw_proto_router_destroy(gw_proto_router_t *router);
 
 int gw_proto_router_init(gw_proto_router_t *router);
-int gw_proto_router_shutdown(gw_proto_router_t *router);
 
 gw_proto_detect_result_t gw_proto_detect(const char *content_type, const char *path,
                                          const char *body);
@@ -64,14 +63,7 @@ int gw_proto_router_route(gw_proto_router_t *router, gw_proto_detect_result_t pr
                           const char *method, const char *path, const char *body_json,
                           char **response_json);
 
-int gw_proto_router_route_auto(gw_proto_router_t *router, const char *content_type,
-                               const char *method, const char *path, const char *body_json,
-                               char **response_json);
-
 int gw_proto_router_get_stats(gw_proto_router_t *router, gw_proto_router_stats_t *stats);
-
-bool gw_proto_router_is_healthy(gw_proto_router_t *router);
-
 
 gw_mcp_server_t *gw_proto_router_get_mcp(gw_proto_router_t *router);
 gw_openai_compat_t *gw_proto_router_get_openai(gw_proto_router_t *router);

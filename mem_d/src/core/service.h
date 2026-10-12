@@ -50,7 +50,6 @@ struct mem_service {
 
 /* Internal helpers used by persist / service modules */
 void mem_record_build_vector(mem_service_t *svc, mem_record_entry_t *rec);
-void mem_record_free_vector(mem_record_entry_t *rec);
 
 /* Internal — shared across service modules (kb.c calls these) */
 int  mem_service_search_filtered(mem_service_t *svc, const char *kb_id, const char *query,

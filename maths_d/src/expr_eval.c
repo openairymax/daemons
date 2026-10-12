@@ -78,7 +78,7 @@ static void eval_skip_ws(eval_ctx_t *ctx)
 
 /* 合法表达式字符预检：把明显非数学的文本挡在解析之前（防注入与空转）。
  * 允许：数字、运算符、括号、逗号、点、字母（函数/常量）、空白。 */
-int maths_charset_ok(const char *expr)
+static int maths_charset_ok(const char *expr)
 {
     if (!expr || !expr[0])
         return 0;

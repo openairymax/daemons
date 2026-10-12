@@ -4,7 +4,7 @@
 /*
  * @file service.c
  * @brief Monitor service 生命周期与配置域：monitor_service_create /
- *        monitor_service_destroy / monitor_service_reload_config。
+ *        monitor_service_destroy。
  *
  * 2026-08-27 域拆分（原 900 行 → 3 文件）：指标/日志/告警/健康/报告域见
  * service_subsystems.c，Agent 执行追踪域见 service_agent_trace.c；
@@ -145,26 +145,5 @@ int monitor_service_destroy(monitor_service_t *service)
     AIRY_FREE(service);
 
     SVC_LOG_INFO("Monitor service destroyed");
-    return AIRY_SUCCESS;
-}
-
-int monitor_service_reload_config(monitor_service_t *service, const monitor_config_t *config)
-{
-    if (!service || !config) {
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    AIRY_FREE(service->config.log_file_path);
-    service->config.log_file_path = NULL;
-    AIRY_FREE(service->config.metrics_storage_path);
-    service->config.metrics_storage_path = NULL;
-
-    AIRY_MEMCPY(&service->config, config, sizeof(monitor_config_t));
-    service->config.log_file_path =
-        config->log_file_path ? AIRY_STRDUP(config->log_file_path) : NULL;
-    service->config.metrics_storage_path =
-        config->metrics_storage_path ? AIRY_STRDUP(config->metrics_storage_path) : NULL;
-
-    SVC_LOG_INFO("Monitor service config reloaded");
     return AIRY_SUCCESS;
 }

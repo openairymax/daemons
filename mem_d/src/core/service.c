@@ -112,7 +112,7 @@ void mem_record_build_vector(mem_service_t *svc, mem_record_entry_t *rec)
     mem_df_add_doc(&svc->df_table, &rec->vec);
 }
 
-void mem_record_free_vector(mem_record_entry_t *rec)
+static void mem_record_free_vector(mem_record_entry_t *rec)
 {
     if (!rec)
         return;

@@ -35,7 +35,7 @@ _Atomic int g_block;
 _Atomic int g_concurrent_now;
 _Atomic int g_concurrent_max;
 
-void exec_log_push(const char *role, const char *goal)
+static void exec_log_push(const char *role, const char *goal)
 {
     /* 并行 executor 多线程调用：reserved 占位选槽，snprintf 写回完成
      * 后再递增发布计数——count 达标即全部槽位写回可见（RMW 链传递） */

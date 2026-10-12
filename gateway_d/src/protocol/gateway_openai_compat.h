@@ -50,13 +50,8 @@ int gw_openai_compat_set_llm_call(gw_openai_compat_t *compat, gw_openai_llm_call
 int gw_openai_compat_set_embed_fn(gw_openai_compat_t *compat, gw_openai_embed_fn fn,
                                   void *user_data);
 
-int gw_openai_compat_handle_request(gw_openai_compat_t *compat, const char *method,
-                                    const char *path, const char *body_json, char **response_json);
-
 gw_proto_request_handler_t gw_openai_compat_get_handler(gw_openai_compat_t *compat);
 void *gw_openai_compat_get_handler_data(gw_openai_compat_t *compat);
-
-bool gw_openai_compat_is_healthy(gw_openai_compat_t *compat);
 
 AIRY_ABI_END
 

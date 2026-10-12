@@ -57,6 +57,8 @@ struct gw_proto_router {
     gw_openai_compat_t *openai_compat;
 };
 
+static int gw_proto_router_shutdown(gw_proto_router_t *router);
+
 static gw_proto_detect_result_t detect_from_content_type(const char *content_type)
 {
     if (!content_type)
@@ -180,7 +182,7 @@ int gw_proto_router_init(gw_proto_router_t *router)
     return 0;
 }
 
-int gw_proto_router_shutdown(gw_proto_router_t *router)
+static int gw_proto_router_shutdown(gw_proto_router_t *router)
 {
     if (!router || !router->initialized)
         return AIRY_ERR_INVALID_PARAM;
@@ -338,30 +340,12 @@ int gw_proto_router_route(gw_proto_router_t *router, gw_proto_detect_result_t pr
     return result;
 }
 
-int gw_proto_router_route_auto(gw_proto_router_t *router, const char *content_type,
-                               const char *method, const char *path, const char *body_json,
-                               char **response_json)
-{
-    if (!router)
-        return AIRY_ERR_INVALID_PARAM;
-
-    gw_proto_detect_result_t proto = gw_proto_detect(content_type, path, body_json);
-    return gw_proto_router_route(router, proto, method, path, body_json, response_json);
-}
-
 int gw_proto_router_get_stats(gw_proto_router_t *router, gw_proto_router_stats_t *stats)
 {
     if (!router || !stats)
         return AIRY_ERR_INVALID_PARAM;
     *stats = router->stats;
     return 0;
-}
-
-bool gw_proto_router_is_healthy(gw_proto_router_t *router)
-{
-    if (!router)
-        return false;
-    return router->healthy;
 }
 
 gw_mcp_server_t *gw_proto_router_get_mcp(gw_proto_router_t *router)

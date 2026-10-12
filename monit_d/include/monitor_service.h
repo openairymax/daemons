@@ -171,14 +171,6 @@ int monitor_service_get_metrics(monitor_service_t *service, const char *metric_n
 int monitor_service_get_alerts(monitor_service_t *service, alert_info_t ***alerts, size_t *count);
 
 /**
- * @brief Reload the config.
- * @param service Service handle
- * @param manager New config info
- * @return 0 on success, non-zero error code
- */
-int monitor_service_reload_config(monitor_service_t *service, const monitor_config_t *manager);
-
-/**
  * @brief Generate a monitoring report.
  * @param service Service handle
  * @param report Output parameter, returns the report content
