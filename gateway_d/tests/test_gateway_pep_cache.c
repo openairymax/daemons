@@ -195,7 +195,6 @@ static void t_fallback_acl(void)
 #ifndef _WIN32
 static void t_cache_hit(void)
 {
-    gw_pep_clear();
     fake_start();
     gateway_business_ctx_t ctx;
     memset(&ctx, 0, sizeof(ctx));
@@ -214,23 +213,24 @@ static void t_cache_hit(void)
 
 static void t_epoch_invalidate(void)
 {
-    gw_pep_clear();
+    /* 用例隔离不依赖清缓存接口：换用独立 key，避免与
+     * t_cache_hit 预填的 (agent-1, tool.a) 条目串扰 */
     fake_start();
     gateway_business_ctx_t ctx;
     memset(&ctx, 0, sizeof(ctx));
     strcpy(ctx.cupolas_sock_path, g_sock_path);
 
     int base = g_conns;
-    CHECK(gw_pep_check(&ctx, "agent-1", "tool.a", "execute") == 0);
+    CHECK(gw_pep_check(&ctx, "agent-3", "tool.c", "execute") == 0);
     int conns_after_first = g_conns;
     CHECK(conns_after_first == base + 1);
 
     /* 权威 epoch 变更（策略热更新生效）→ 缓存整体失效 */
     g_epoch = 2;
-    CHECK(gw_pep_check(&ctx, "agent-2", "tool.b", "execute") == 0); /* 新 key miss */
+    CHECK(gw_pep_check(&ctx, "agent-4", "tool.d", "execute") == 0); /* 新 key miss */
     CHECK(g_conns == conns_after_first + 1);
     /* 旧 key 已失效 → 重新 RPC */
-    CHECK(gw_pep_check(&ctx, "agent-1", "tool.a", "execute") == 0);
+    CHECK(gw_pep_check(&ctx, "agent-3", "tool.c", "execute") == 0);
     CHECK(g_conns == conns_after_first + 2);
     fake_stop();
     TEST_PASS("epoch_invalidate");
@@ -238,7 +238,6 @@ static void t_epoch_invalidate(void)
 
 static void t_deny_cached(void)
 {
-    gw_pep_clear();
     fake_start();
     g_allowed = 0;
     gateway_business_ctx_t ctx;
