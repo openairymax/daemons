@@ -6,7 +6,6 @@
  */
 
 #include "../include/daemon_security.h"
-#include "daemon_security_dome.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -222,110 +221,6 @@ static void test_check_tool_permission_null_params(void)
     PASS();
 }
 
-static void test_check_llm_permission_no_acl(void)
-{
-    TEST("Check LLM permission - no ACL entry denies");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
-
-    int allowed = daemon_check_llm_permission("agent_001", "gpt-4", "query");
-    ASSERT(allowed != 0, "no ACL entry should deny by default");
-
-    daemon_security_shutdown();
-    PASS();
-}
-
-static void test_verify_package_signature_not_found(void)
-{
-    TEST("Verify package signature - file not found");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
-
-    bool is_valid = true;
-    int ret = daemon_verify_package_signature("/nonexistent/package.bin", &is_valid, NULL);
-    ASSERT(ret != 0, "nonexistent package should return error");
-    ASSERT(is_valid == false, "should be invalid");
-
-    daemon_security_shutdown();
-    PASS();
-}
-
-static void test_verify_package_signature_null(void)
-{
-    TEST("Verify package signature - null params rejected");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
-
-    bool is_valid;
-    int ret = daemon_verify_package_signature(NULL, &is_valid, NULL);
-    ASSERT(ret != 0, "null package_path should be rejected");
-
-    ret = daemon_verify_package_signature("/some/path", NULL, NULL);
-    ASSERT(ret != 0, "null is_valid should be rejected");
-
-    daemon_security_shutdown();
-    PASS();
-}
-
-static void test_store_and_retrieve_credential(void)
-{
-    TEST("Store and retrieve credential");
-    ASSERT(daemon_dome_init("security_vault_test") == AIRY_OK, "dome init should succeed");
-
-    const uint8_t secret[] = "my_api_key_12345";
-    int ret = daemon_store_credential("test_key", CUPOLAS_VAULT_CRED_TOKEN, secret,
-                                      strlen((const char *)secret), "agent_001");
-    ASSERT(ret == 0, "store credential should succeed");
-
-    uint8_t retrieved[256];
-    size_t data_len = sizeof(retrieved);
-    ret = daemon_retrieve_credential("test_key", "agent_001", retrieved, &data_len);
-    ASSERT(ret == 0, "retrieve should succeed");
-    ASSERT(data_len == strlen((const char *)secret), "retrieved length should match");
-    ASSERT(memcmp(retrieved, secret, data_len) == 0, "retrieved data should match");
-
-    daemon_dome_cleanup();
-    PASS();
-}
-
-static void test_retrieve_nonexistent_credential(void)
-{
-    TEST("Retrieve nonexistent credential");
-    ASSERT(daemon_dome_init("security_vault_test") == AIRY_OK, "dome init should succeed");
-
-    uint8_t buf[64];
-    size_t len = sizeof(buf);
-    int ret = daemon_retrieve_credential("nonexistent_key", "agent_001", buf, &len);
-    ASSERT(ret != 0, "retrieve nonexistent should fail");
-
-    daemon_dome_cleanup();
-    PASS();
-}
-
-static void test_store_credential_null_params(void)
-{
-    TEST("Store credential - null params rejected");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
-
-    const uint8_t data[] = "secret";
-    int ret = daemon_store_credential(NULL, CUPOLAS_VAULT_CRED_TOKEN, data, sizeof(data), "agent");
-    ASSERT(ret != 0, "null cred_id should be rejected");
-
-    ret = daemon_store_credential("key", CUPOLAS_VAULT_CRED_TOKEN, NULL, sizeof(data), "agent");
-    ASSERT(ret != 0, "null data should be rejected");
-
-    ret = daemon_store_credential("key", CUPOLAS_VAULT_CRED_TOKEN, data, 0, "agent");
-    ASSERT(ret != 0, "zero data_len should be rejected");
-
-    daemon_security_shutdown();
-    PASS();
-}
-
 static void test_audit_log_event(void)
 {
     TEST("Audit log event");
@@ -360,51 +255,14 @@ static void test_audit_log_event_null_params(void)
     PASS();
 }
 
-static void test_get_status(void)
+static void test_sanitize_uninitialized_fail_safe(void)
 {
-    TEST("Get security status");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
-
-    int san, perm, sig, vault, audit;
-    int ret = daemon_security_get_status(&san, &perm, &sig, &vault, &audit);
-    ASSERT(ret == 0, "get_status should succeed");
-    ASSERT(san == 1, "sanitizer should be active after init");
-    ASSERT(perm == 1, "permission should be enabled");
-
-    daemon_security_shutdown();
-    PASS();
-}
-
-static void test_get_status_null_params(void)
-{
-    TEST("Get security status - null params rejected");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
-
-    int san;
-    int ret = daemon_security_get_status(&san, NULL, NULL, NULL, NULL);
-    ASSERT(ret != 0, "null params should be rejected");
-
-    daemon_security_shutdown();
-    PASS();
-}
-
-static void test_auto_init_on_use(void)
-{
-    TEST("Auto-init when used without explicit init");
+    TEST("Sanitize works uninitialized (fail-safe)");
     daemon_security_shutdown();
 
     char output[256];
     int ret = daemon_sanitize_llm_input("hello world", output, sizeof(output));
-    ASSERT(ret == 0, "auto-init should work for sanitize");
-
-    uint8_t buf[64];
-    size_t len = sizeof(buf);
-    ret = daemon_retrieve_credential("no_such_key", "agent", buf, &len);
-    ASSERT(ret != 0, "auto-init should work for retrieve");
+    ASSERT(ret == 0, "uninitialized sanitize should still succeed (fail-safe)");
 
     daemon_security_shutdown();
     PASS();
@@ -417,7 +275,6 @@ static void test_init_with_config(void)
     memset(&cfg, 0, sizeof(cfg));
     cfg.sanitize_level = SANITIZE_LEVEL_HIGH;
     cfg.enable_permission_cache = true;
-    cfg.enable_signature_verification = true;
     cfg.enable_vault = true;
     cfg.enable_audit_logging = true;
 
@@ -426,70 +283,7 @@ static void test_init_with_config(void)
     int ret = daemon_security_init(&cfg, &err);
     ASSERT(ret == 0, "init with config should succeed");
 
-    int san, perm, sig, vault, audit;
-    daemon_security_get_status(&san, &perm, &sig, &vault, &audit);
-    ASSERT(san == 1, "sanitizer should be active");
-    ASSERT(perm == 1, "permission should be active");
-
     daemon_security_shutdown();
-    PASS();
-}
-
-static void test_store_credential_overwrite(void)
-{
-    TEST("Store credential overwrite existing");
-    ASSERT(daemon_dome_init("security_vault_test") == AIRY_OK, "dome init should succeed");
-
-    const uint8_t v1[] = "version_one";
-    const uint8_t v2[] = "version_two_updated";
-    int ret = daemon_store_credential("overwrite_key", CUPOLAS_VAULT_CRED_TOKEN, v1,
-                                      strlen((const char *)v1), "agent");
-    ASSERT(ret == 0, "first store");
-
-    ret = daemon_store_credential("overwrite_key", CUPOLAS_VAULT_CRED_TOKEN, v2,
-                                  strlen((const char *)v2), "agent");
-    ASSERT(ret == 0, "overwrite should succeed");
-
-    uint8_t retrieved[256];
-    size_t len = sizeof(retrieved);
-    ret = daemon_retrieve_credential("overwrite_key", "agent", retrieved, &len);
-    ASSERT(ret == 0, "retrieve after overwrite");
-    ASSERT(len == strlen((const char *)v2), "length should match v2");
-    ASSERT(memcmp(retrieved, v2, len) == 0, "data should be v2 after overwrite");
-
-    daemon_dome_cleanup();
-    PASS();
-}
-
-static void test_credential_access_control(void)
-{
-    TEST("Credential access control - wrong agent denied");
-    ASSERT(daemon_dome_init("security_vault_test") == AIRY_OK, "dome init should succeed");
-
-    const uint8_t secret[] = "owner_only_secret";
-    daemon_store_credential("owned_key", CUPOLAS_VAULT_CRED_TOKEN, secret,
-                            strlen((const char *)secret), "owner_agent");
-
-    uint8_t buf[256];
-    size_t len = sizeof(buf);
-    int ret = daemon_retrieve_credential("owned_key", "other_agent", buf, &len);
-    ASSERT(ret != 0, "other agent should be denied");
-
-    len = sizeof(buf);
-    ret = daemon_retrieve_credential("owned_key", "system", buf, &len);
-    ASSERT(ret != 0, "system agent denied by default (fail-closed)");
-
-    /* Explicit grant then allow: system must be authorized, not implicitly
-     * privileged (least-privilege / fail-closed ACL model). */
-    cupolas_vault_t *vault = cupolas_dome_vault();
-    assert(vault != NULL);
-    int grc = cupolas_vault_grant_access(vault, "owned_key", "system", CUPOLAS_VAULT_OP_READ, 0);
-    assert(grc == 0);
-    len = sizeof(buf);
-    ret = daemon_retrieve_credential("owned_key", "system", buf, &len);
-    ASSERT(ret == 0, "system agent allowed after explicit grant");
-
-    daemon_dome_cleanup();
     PASS();
 }
 
@@ -568,20 +362,10 @@ int main(void)
     test_sanitize_tool_params_null();
     test_check_tool_permission_no_acl();
     test_check_tool_permission_null_params();
-    test_check_llm_permission_no_acl();
-    test_verify_package_signature_not_found();
-    test_verify_package_signature_null();
-    test_store_and_retrieve_credential();
-    test_retrieve_nonexistent_credential();
-    test_store_credential_null_params();
     test_audit_log_event();
     test_audit_log_event_null_params();
-    test_get_status();
-    test_get_status_null_params();
-    test_auto_init_on_use();
+    test_sanitize_uninitialized_fail_safe();
     test_init_with_config();
-    test_store_credential_overwrite();
-    test_credential_access_control();
     test_sanitize_llm_input_special_chars();
     test_rules_file_loading();
 

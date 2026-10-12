@@ -18,7 +18,6 @@
  * This module provides unified security integration for all AgentRT daemon services:
  * - tool_d: Tool execution security (sanitization + permission)
  * - llm_d: LLM service security (input sanitization + API key protection)
- * - market_d: Market service security (package signature verification)
  *
  * Design Principles:
  * - E-1 Security by Default: All services must use these functions
@@ -28,8 +27,7 @@
  * Phase 2.3a split: this file keeps module init/shutdown, shared global
  * state and input sanitization; the other domains were split out:
  * - ACL permission checks + rule management -> daemon_security_acl.c
- * - package signature verification          -> daemon_security_signature.c
- * - vault credentials + audit + status      -> daemon_security_vault.c
+ * - audit event logging                     -> daemon_security_audit.c
  * Shared state is declared in daemon_security_internal.h (internal to this
  * static lib, not public API).
  */
@@ -130,14 +128,12 @@ int daemon_security_init(const daemon_security_config_t *config, airy_err_t *err
     AIRY_MEMSET(&g_security_ctx, 0, sizeof(g_security_ctx));
     g_security_ctx.current_sanitize_level = SANITIZE_LEVEL_HIGH;
     g_security_ctx.permission_enabled = true;
-    g_security_ctx.signature_enabled = true;
     g_security_ctx.vault_enabled = true;
     g_security_ctx.audit_enabled = true;
 
     if (config) {
         g_security_ctx.current_sanitize_level = config->sanitize_level;
         g_security_ctx.permission_enabled = config->enable_permission_cache;
-        g_security_ctx.signature_enabled = config->enable_signature_verification;
         g_security_ctx.vault_enabled = config->enable_vault;
         g_security_ctx.audit_enabled = config->enable_audit_logging;
 
@@ -235,7 +231,6 @@ void daemon_security_shutdown(void)
 
     g_security_ctx.initialized = false;
     g_security_ctx.permission_enabled = false;
-    g_security_ctx.signature_enabled = false;
     g_security_ctx.vault_enabled = false;
     g_security_ctx.audit_enabled = false;
     airy_mtx_unlock(&g_security_mutex);
