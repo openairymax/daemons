@@ -13,6 +13,7 @@
  */
 
 #include "airy_memory.h"
+#include "daemon_replies.h"
 #include "error.h"
 #include "market_d_internal.h"
 #include "svc_market_d.h"
@@ -20,8 +21,6 @@
 #include "jsonrpc_helpers.h"
 #include "param_validator.h"
 #include "svc_logger.h"
-
-#include <time.h>
 
 static void handle_register_agent(cJSON *params, int id, airy_sock_t fd);
 static void handle_search_agents(cJSON *params, int id, airy_sock_t fd);
@@ -354,12 +353,7 @@ static void handle_sync_registry(cJSON *params, int id, airy_sock_t client_fd)
 
 static void handle_health_check(int id, airy_sock_t client_fd)
 {
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "service", "market_d");
-    cJSON_AddBoolToObject(result, "healthy", true);
-    cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
-
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    reply_health(client_fd, "market_d", true, id);
 }
 
 static void handle_get_stats(int id, airy_sock_t client_fd)
