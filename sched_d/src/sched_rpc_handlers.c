@@ -18,6 +18,7 @@
 
 #include "airy_memory.h"
 #include "cjson_helpers.h"
+#include "daemon_replies.h"
 #include "error.h"
 #include "jsonrpc_helpers.h"
 #include "param_validator.h"
@@ -27,7 +28,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <cjson/cJSON.h>
 
 static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd);
@@ -378,13 +378,7 @@ static void handle_health_check(int id, airy_sock_t client_fd)
 {
     bool healthy = false;
     (void)sched_service_health_check(g_service, &healthy);
-
-    cJSON *result = cJSON_CreateObject();
-    cJSON_AddStringToObject(result, "service", "sched_d");
-    cJSON_AddBoolToObject(result, "healthy", healthy);
-    cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
-
-    JSONRPC_SEND_SUCCESS(client_fd, result, id);
+    reply_health(client_fd, "sched_d", healthy, id);
 }
 
 static void handle_checkpoint_save(cJSON *params, int id,
