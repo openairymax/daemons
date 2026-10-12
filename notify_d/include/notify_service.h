@@ -123,9 +123,6 @@ void notify_d_drain(notify_d_service_t *svc);
 void notify_d_sse_heartbeat(notify_d_service_t *svc);
 
 
-size_t notify_d_active_client_count(notify_d_service_t *svc);
-
-
 int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request, char *response,
                               size_t response_size);
 
