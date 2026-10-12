@@ -301,12 +301,12 @@ target_include_directories(gateway_lib_obj PUBLIC
      ${DAEMON_COMMON_DIR}/src
      ${PROTOCOLS_INCLUDE_DIR}
      ${PROTOCOLS_COMMON_INCLUDE_DIR}
-    # protocols core 子目录（gateway_protocol_bridge.c 依赖，
-    # 与 gateway 模块 include 集一致，2026-08-27 SSoT 收敛时补齐）
+    # protocols core 子目录：router 供 gateway_protocol_handler.h 解析
+    # protocol_router.h（本目标编译 GATEWAY_COMMON_SOURCES），registry 供
+    # gw_boot.c 消费（0.1.19 单元五十九：bridge 死件清退后 adapter/
+    # transformers 零消费不再挂载）
      ${PROTOCOLS_DIR}/core/router/include
      ${PROTOCOLS_DIR}/core/registry/include
-     ${PROTOCOLS_DIR}/core/adapter/include
-     ${PROTOCOLS_DIR}/core/transformers/include
     # P0.18.2: cJSON 三步曲宏化辅助头文件（cjson_helpers.h）
     ${COMMONS_DIR}/utils/cjson
     # nghttp2 头文件（HTTP/2 支持）— 项目本地副本 commons/include/third_party/
