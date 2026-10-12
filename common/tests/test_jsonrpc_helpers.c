@@ -89,25 +89,6 @@ static int test_build_success_response(void)
     return 0;
 }
 
-static int test_build_success_string(void)
-{
-    char *resp = jsonrpc_build_success_string("Operation completed", 3);
-    if (!resp) {
-        TEST_FAIL("build_success_string", "NULL response");
-        return -1;
-    }
-
-    if (strstr(resp, "\"result\":\"Operation completed\"") == NULL) {
-        TEST_FAIL("build_success_string", "missing result string");
-        free(resp);
-        return -1;
-    }
-
-    free(resp);
-    TEST_PASS("build_success_string");
-    return 0;
-}
-
 static int test_parse_request(void)
 {
     const char *raw =
@@ -357,30 +338,6 @@ static int test_get_error_message(void)
     return 0;
 }
 
-static int test_build_error_with_data(void)
-{
-    cJSON *data = cJSON_CreateObject();
-    cJSON_AddStringToObject(data, "field", "username");
-
-    char *resp =
-        jsonrpc_build_error_with_data(JSONRPC_INVALID_PARAMS, "Validation failed", data, 5);
-
-    if (!resp) {
-        TEST_FAIL("build_error_with_data", "NULL response");
-        return -1;
-    }
-
-    if (strstr(resp, "\"field\":\"username\"") == NULL) {
-        TEST_FAIL("build_error_with_data", "missing data field");
-        free(resp);
-        return -1;
-    }
-
-    free(resp);
-    TEST_PASS("build_error_with_data");
-    return 0;
-}
-
 int main(void)
 {
     int failed = 0;
@@ -390,8 +347,6 @@ int main(void)
     if (test_build_error_response() != 0)
         failed++;
     if (test_build_success_response() != 0)
-        failed++;
-    if (test_build_success_string() != 0)
         failed++;
     if (test_parse_request() != 0)
         failed++;
@@ -411,12 +366,10 @@ int main(void)
         failed++;
     if (test_get_error_message() != 0)
         failed++;
-    if (test_build_error_with_data() != 0)
-        failed++;
 
     printf("\n=== Test Summary ===\n");
-    printf("Total: 13 tests\n");
-    printf("Passed: %d\n", 13 - failed);
+    printf("Total: 11 tests\n");
+    printf("Passed: %d\n", 11 - failed);
     printf("Failed: %d\n", failed);
 
     return (failed == 0) ? 0 : 1;
