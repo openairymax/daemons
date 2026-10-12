@@ -216,7 +216,6 @@ int main(void)
         .auto_start     = true,
         .enable_metrics = true,
     };
-    /* svc_auth 自动继承 Cupolas 请求鉴权。 */
     return 0;
 }
 ```

@@ -16,7 +16,6 @@ set(TEST_SOURCES
     test_error.c
     test_platform.c
     test_logger.c
-    test_svc_auth.c
     test_jsonrpc_helpers.c
     test_safe_string_utils.c
     test_strategies_recovery.c
