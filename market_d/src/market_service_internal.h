@@ -12,6 +12,7 @@
 
 #include "market_service.h"
 #include "platform.h"
+#include "svc_logger.h"
 #include <airymax/lsm_types.h>
 
 #include <stdbool.h>
