@@ -241,27 +241,12 @@ int daemon_event_driver_add_server_fd(daemon_event_driver_t *driver, int fd)
                                      driver);
 }
 
-int daemon_event_driver_add_fd(daemon_event_driver_t *driver, int fd, uint32_t events,
-                               airy_event_callback_t cb, void *user_data)
-{
-    if (!driver || fd < 0 || !cb)
-        return AIRY_ERR_INVALID_PARAM;
-    return airy_event_loop_add_fd(driver->loop, fd, events, cb, user_data);
-}
-
 uint64_t daemon_event_driver_add_timer(daemon_event_driver_t *driver, uint64_t interval_ms,
                                        airy_timer_callback_t cb, void *user_data)
 {
     if (!driver || !cb)
         return 0;
     return airy_event_loop_add_timer(driver->loop, interval_ms, cb, user_data);
-}
-
-int daemon_event_driver_cancel_timer(daemon_event_driver_t *driver, uint64_t timer_id)
-{
-    if (!driver)
-        return AIRY_ERR_INVALID_PARAM;
-    return airy_event_loop_cancel_timer(driver->loop, timer_id);
 }
 
 int daemon_event_driver_run(daemon_event_driver_t *driver)
@@ -272,27 +257,11 @@ int daemon_event_driver_run(daemon_event_driver_t *driver)
     return airy_event_loop_run(driver->loop);
 }
 
-void daemon_event_driver_stop(daemon_event_driver_t *driver)
-{
-    if (!driver)
-        return;
-    /* Stop async-safely first (reachable from signal context), then log:
-     * avoids the log lock being held on the signal path and deadlocking the
-     * stop flow. */
-    airy_event_loop_stop_async(driver->loop);
-    SVC_LOG_INFO("C-L02: EVENT-DRIVER: STOP");
-}
-
 void daemon_event_driver_stop_async(daemon_event_driver_t *driver)
 {
     if (!driver)
         return;
     airy_event_loop_stop_async(driver->loop);
-}
-
-airy_event_loop_t *daemon_event_driver_get_loop(daemon_event_driver_t *driver)
-{
-    return driver ? driver->loop : NULL;
 }
 
 thread_pool_t *daemon_event_driver_get_pool(daemon_event_driver_t *driver)

@@ -236,14 +236,6 @@ int market_service_check_update(market_service_t *service, const char *id, bool 
                                 char **latest_version);
 
 /**
- * @brief Reload the config.
- * @param service Service handle
- * @param manager New config info
- * @return 0 on success, non-zero error code
- */
-int market_service_reload_config(market_service_t *service, const market_config_t *manager);
-
-/**
  * @brief Sync with the registry.
  * @param service Service handle
  * @return 0 on success, non-zero error code

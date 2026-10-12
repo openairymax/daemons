@@ -48,17 +48,10 @@ void daemon_event_driver_destroy(daemon_event_driver_t *driver);
 
 int daemon_event_driver_add_server_fd(daemon_event_driver_t *driver, int fd);
 
-int daemon_event_driver_add_fd(daemon_event_driver_t *driver, int fd, uint32_t events,
-                               airy_event_callback_t cb, void *user_data);
-
 uint64_t daemon_event_driver_add_timer(daemon_event_driver_t *driver, uint64_t interval_ms,
                                        airy_timer_callback_t cb, void *user_data);
 
-int daemon_event_driver_cancel_timer(daemon_event_driver_t *driver, uint64_t timer_id);
-
 int daemon_event_driver_run(daemon_event_driver_t *driver);
-
-void daemon_event_driver_stop(daemon_event_driver_t *driver);
 
 /**
  * @brief Async-safe stop of the event driver (safe in signal handlers).
@@ -68,8 +61,6 @@ void daemon_event_driver_stop(daemon_event_driver_t *driver);
  * async-signal-safe.
  */
 void daemon_event_driver_stop_async(daemon_event_driver_t *driver);
-
-airy_event_loop_t *daemon_event_driver_get_loop(daemon_event_driver_t *driver);
 
 thread_pool_t *daemon_event_driver_get_pool(daemon_event_driver_t *driver);
 

@@ -56,38 +56,6 @@ int monitor_service_record_metric(monitor_service_t *service, const metric_info_
     return AIRY_SUCCESS;
 }
 
-int monitor_service_log(monitor_service_t *service, const log_info_t *log)
-{
-    if (!service || !log) {
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    airy_mtx_lock(&service->log_lock);
-
-    size_t idx = service->log_write_idx % MAX_LOG_ENTRIES;
-
-    AIRY_FREE(service->logs[idx].message);
-    AIRY_FREE(service->logs[idx].service_name);
-    AIRY_FREE(service->logs[idx].file);
-    AIRY_FREE(service->logs[idx].function);
-
-    service->logs[idx].level = log->level;
-    service->logs[idx].message = log->message ? AIRY_STRDUP(log->message) : NULL;
-    service->logs[idx].service_name = log->service_name ? AIRY_STRDUP(log->service_name) : NULL;
-    service->logs[idx].file = log->file ? AIRY_STRDUP(log->file) : NULL;
-    service->logs[idx].line = log->line;
-    service->logs[idx].function = log->function ? AIRY_STRDUP(log->function) : NULL;
-    service->logs[idx].timestamp = log->timestamp ? log->timestamp : airy_time_wall_ms();
-
-    service->log_write_idx++;
-    if (service->log_count < MAX_LOG_ENTRIES) {
-        service->log_count++;
-    }
-
-    airy_mtx_unlock(&service->log_lock);
-    return AIRY_SUCCESS;
-}
-
 int monitor_service_trigger_alert(monitor_service_t *service, const alert_info_t *alert)
 {
     if (!service || !alert) {
