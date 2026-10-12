@@ -8,6 +8,9 @@
 #include "gateway_openai_compat.h"
 #include "airy_memory.h"
 
+#include "airy_protocol_interface.h"
+#include "protocol_detect.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,35 +87,31 @@ static gw_proto_detect_result_t detect_from_path(const char *path)
     return GW_PROTO_DETECT_UNKNOWN;
 }
 
+static gw_proto_detect_result_t map_detect_type(protocol_type_t type)
+{
+    switch (type) {
+    case AIRY_PROTOCOL_MCP:
+        return GW_PROTO_DETECT_MCP;
+    case AIRY_PROTOCOL_A2A:
+        return GW_PROTO_DETECT_A2A;
+    case AIRY_PROTOCOL_JSON_RPC:
+        return GW_PROTO_DETECT_JSONRPC;
+    default:
+        if (type == proto_interface_parse_type("openai"))
+            return GW_PROTO_DETECT_OPENAI;
+        return GW_PROTO_DETECT_UNKNOWN;
+    }
+}
+
 static gw_proto_detect_result_t detect_from_body(const char *body)
 {
     if (!body)
         return GW_PROTO_DETECT_UNKNOWN;
 
-    if (strstr(body, "\"jsonrpc\"") && strstr(body, "\"2.0\"")) {
-        if (strstr(body, "\"tools/") || strstr(body, "\"resources/") ||
-            strstr(body, "\"prompts/")) {
-            return GW_PROTO_DETECT_MCP;
-        }
-        /* A2A is based on JSON-RPC 2.0 (tasks/send etc.): detect it inside
-         * the jsonrpc branch, otherwise A2A requests containing jsonrpc
-         * would be permanently misclassified as JSONRPC */
-        if (strstr(body, "\"tasks/") || strstr(body, "\"task/") || strstr(body, "\"agentCard\"") ||
-            strstr(body, "\"message/")) {
-            return GW_PROTO_DETECT_A2A;
-        }
-        return GW_PROTO_DETECT_JSONRPC;
-    }
-
-    if (strstr(body, "\"model\"") && strstr(body, "\"messages\"")) {
-        return GW_PROTO_DETECT_OPENAI;
-    }
-
-    if (strstr(body, "\"agentCard\"") || strstr(body, "\"task\"") || strstr(body, "\"a2a\"")) {
-        return GW_PROTO_DETECT_A2A;
-    }
-
-    return GW_PROTO_DETECT_UNKNOWN;
+    /* 0.1.19 unit 60: the unified mechanism-core probe is the single
+     * body classifier shared with the gateway front end; this layer only
+     * maps the canonical type onto the router-local enum. */
+    return map_detect_type(proto_detect_body(body, strlen(body)));
 }
 
 gw_proto_router_t *gw_proto_router_create(void)
