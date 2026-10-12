@@ -277,10 +277,9 @@ airy_err_t gateway_service_start(gateway_service_t service)
             return AIRY_ENOMEM;
         }
 
-        if (service->handler && service->http_gateway->ops &&
-            service->http_gateway->ops->set_handler) {
-            service->http_gateway->ops->set_handler(service->http_gateway->impl, service->handler,
-                                                    service->handler_data);
+        if (service->handler) {
+            gw_handler_bind(&service->http_gateway->handler_slot, service->handler,
+                            service->handler_data);
         }
         /* HTTP/1.1 是 MCP/OpenAI 协议主端口：启动失败必须显性 fail
          * （干净主机实测 daemon 假活的教训）——返回错误让
@@ -310,10 +309,9 @@ airy_err_t gateway_service_start(gateway_service_t service)
             AIRY_LOG_ERROR("ws_gateway_create failed: host=%s, port=%d", service->config.ws.host,
                       service->config.ws.port);
         } else {
-            if (service->handler && service->ws_gateway->ops &&
-                service->ws_gateway->ops->set_handler) {
-                service->ws_gateway->ops->set_handler(service->ws_gateway->impl, service->handler,
-                                                      service->handler_data);
+            if (service->handler) {
+                gw_handler_bind(&service->ws_gateway->handler_slot, service->handler,
+                                service->handler_data);
             }
             if (gateway_start(service->ws_gateway) == AIRY_SUCCESS) {
                 AIRY_LOG_INFO("WS gateway started on %s:%d", service->config.ws.host,
@@ -333,10 +331,9 @@ airy_err_t gateway_service_start(gateway_service_t service)
         if (!service->stdio_gateway) {
             AIRY_LOG_ERROR("stdio_gateway_create failed");
         } else {
-            if (service->handler && service->stdio_gateway->ops &&
-                service->stdio_gateway->ops->set_handler) {
-                service->stdio_gateway->ops->set_handler(service->stdio_gateway->impl,
-                                                         service->handler, service->handler_data);
+            if (service->handler) {
+                gw_handler_bind(&service->stdio_gateway->handler_slot, service->handler,
+                                service->handler_data);
             }
 
             if (airy_thread_create(&service->stdio_thread, gateway_stdio_thread_main,
@@ -365,10 +362,9 @@ airy_err_t gateway_service_start(gateway_service_t service)
             AIRY_LOG_ERROR("http2_gateway_create failed: host=%s, port=%d", service->config.http.host,
                       h2_port);
         } else {
-            if (service->handler && service->http2_gateway->ops &&
-                service->http2_gateway->ops->set_handler) {
-                service->http2_gateway->ops->set_handler(service->http2_gateway->impl,
-                                                         service->handler, service->handler_data);
+            if (service->handler) {
+                gw_handler_bind(&service->http2_gateway->handler_slot, service->handler,
+                                service->handler_data);
             }
             if (gateway_start(service->http2_gateway) == AIRY_SUCCESS) {
                 AIRY_LOG_INFO("HTTP/2 gateway started on %s:%d", service->config.http.host, h2_port);

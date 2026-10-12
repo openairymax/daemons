@@ -281,10 +281,10 @@ int main(int argc, char *argv[])
     fake_start();
     gateway_business_ctx_t ctx = make_ctx();
 
-    /* 预热：命中后建立稳定缓存 */
+    /* 预热：建立连接池与 fake PDP 的稳定状态；
+     * 后续各 bench 段使用独立 key 空间，无需清缓存 */
     for (int i = 0; i < BENCH_WARMUP; i++)
         gw_pep_check(&ctx, "bench-agent", "tool.warm", "execute");
-    gw_pep_clear();
     g_conns = 0;
 
     bench_cold_path(&ctx, iters);
@@ -297,7 +297,6 @@ int main(int argc, char *argv[])
     out("  skipped on Windows (unix socket)\n");
 #endif
 
-    gw_pep_clear();
     out("========================================\n");
     out("  Baseline complete\n");
     out("========================================\n");

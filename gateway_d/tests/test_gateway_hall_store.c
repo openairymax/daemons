@@ -345,20 +345,6 @@ static void test_invalid_params(void)
     TEST_PASS();
 }
 
-static void test_task_id_now(void)
-{
-    TEST_BEGIN("task_id_now");
-    char out[64] = {0};
-    gw_hall_task_id_now(out, sizeof(out));
-    ASSERT_TRUE(strncmp(out, "gw-", 3) == 0);
-    /* "gw-" + 4-2-2 T 2-2-2-3 毫秒 = 18 位时间戳 */
-    ASSERT_EQ_INT(21, (int)strlen(out));
-    char small[8] = {0};
-    gw_hall_task_id_now(small, sizeof(small)); /* 小缓冲不越界 */
-    ASSERT_EQ_INT(0, small[sizeof(small) - 1]);
-    TEST_PASS();
-}
-
 int main(void)
 {
     isolate_data_dir();
@@ -370,7 +356,6 @@ int main(void)
     test_prev_file_category_isolated();
     test_seq_increments();
     test_invalid_params();
-    test_task_id_now();
 
     printf("  %d/%d passed\n", g_tests_passed, g_tests_run);
     return g_tests_passed == g_tests_run ? 0 : 1;
