@@ -233,7 +233,6 @@ int main(void)
         .auto_start     = true,
         .enable_metrics = true,
     };
-    /* svc_auth inherits Cupolas request authentication automatically. */
     return 0;
 }
 ```

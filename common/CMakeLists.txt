@@ -26,7 +26,7 @@ endif()
 set(ATOMS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../atoms")
 
 # 2026-08-27 目录原子化：src/ 按功能域组织为 8 个子目录
-#   svc/ 服务框架 · auth/ 认证中间件 · discovery/ 服务发现
+#   svc/ 服务框架 · discovery/ 服务发现
 #   security/ daemon 安全 · daemon/ daemon 引导与生命周期 · event/ 事件循环
 set(SVC_COMMON_SOURCES
     # 0c A 类直搬：svc 生命周期机制族迁 commons/utils/svc（0.1.19 S74 层界
@@ -42,12 +42,8 @@ set(SVC_COMMON_SOURCES
     # 0c A 类直搬：unified_metrics/alert_manager/jsonrpc_helpers/method_dispatcher/
     # param_validator/log_sanitizer/api_recovery/airy_event_loop 家族权威实现均迁
     # commons（utils/observability|ipc|security|resource|sync），daemons 留 re-export 头。
-    src/auth/svc_auth.c
-    src/auth/svc_auth_jwt.c       # 认证中间件-JWT 域：生命周期/令牌生成/刷新（从 svc_auth_jwt.c 拆分）
-    src/auth/svc_auth_jwt_crypto.c # 认证中间件-JWT 域：HMAC 实现/Base64 编解码原语（从 svc_auth_jwt.c 拆分）
-    src/auth/svc_auth_jwt_verify.c # 认证中间件-JWT 域：令牌验证/签名校验（从 svc_auth_jwt.c 拆分）
-    src/auth/svc_auth_apikey.c    # 认证中间件-API Key 域
-    src/auth/svc_auth_ratelimit.c # 认证中间件-限流域
+    # 0.1.19 单元六十三：svc_auth 认证中间件全族清退（20 公开符号生产消费为零、
+    # 唯一消费者自测，扇入 0 死件；生产认证走 gateway_auth 策略面）。
     src/security/daemon_security.c     # daemon 安全集成（初始化/消毒域）
     src/security/daemon_security_acl.c       # Phase 2.3a: daemon 安全-ACL 权限域（从 daemon_security.c 拆分）
     src/security/daemon_security_audit.c     # Phase 2.3a: daemon 安全-审计域（原 vault 域，单元五十三裁撤凭据存取消亡后归位）
@@ -194,7 +190,6 @@ target_include_directories(svc_common PUBLIC
 # src/svc 已随 S74 迁移清空（仅余 svc_model_defaults.c，自带目录解析）。
 # src/ipc 已随 0.1.19 t213 IPC Bus 退役整体删除（总线/helper/HTTP 客户端族）。
 target_include_directories(svc_common PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/auth
     ${CMAKE_CURRENT_SOURCE_DIR}/src/security
     ${CMAKE_CURRENT_SOURCE_DIR}/src/daemon
 )
