@@ -124,36 +124,6 @@ int gw_mcp_server_register_tool(gw_mcp_server_t *server, const char *name, const
     return 0;
 }
 
-int gw_mcp_server_register_resource(gw_mcp_server_t *server, const char *uri, const char *name,
-                                    const char *description, const char *mime_type,
-                                    gw_mcp_resource_read_fn read_fn, void *user_data)
-{
-    if (!server || !uri || !read_fn)
-        return AIRY_ERR_INVALID_PARAM;
-    if (server->resource_count >= GW_MCP_MAX_RESOURCES)
-        return AIRY_ERR_OVERFLOW;
-
-    gw_mcp_resource_entry_t *entry = &server->resources[server->resource_count];
-    AIRY_STRNCPY_TERM(entry->uri, uri, sizeof(entry->uri));
-    entry->uri[sizeof(entry->uri) - 1] = '\0';
-    if (name) {
-        AIRY_STRNCPY_TERM(entry->name, name, sizeof(entry->name));
-        entry->name[sizeof(entry->name) - 1] = '\0';
-    }
-    if (description) {
-        AIRY_STRNCPY_TERM(entry->description, description, sizeof(entry->description));
-        entry->description[sizeof(entry->description) - 1] = '\0';
-    }
-    if (mime_type) {
-        AIRY_STRNCPY_TERM(entry->mime_type, mime_type, sizeof(entry->mime_type));
-        entry->mime_type[sizeof(entry->mime_type) - 1] = '\0';
-    }
-    entry->read_fn = read_fn;
-    entry->user_data = user_data;
-    server->resource_count++;
-    return 0;
-}
-
 static gw_mcp_tool_entry_t *find_tool(gw_mcp_server_t *server, const char *name)
 {
     for (size_t i = 0; i < server->tool_count; i++) {
@@ -414,14 +384,9 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
     return AIRY_ERR_NOT_FOUND;
 }
 
-int gw_mcp_server_handle_jsonrpc(gw_mcp_server_t *server, const char *method,
-                                 const char *params_json, char **response_json)
-{
-    return gw_mcp_server_handle_jsonrpc_ex(server, method, params_json, NULL, response_json);
-}
-
-int gw_mcp_server_handle_request(gw_mcp_server_t *server, const char *method, const char *path,
-                                 const char *body_json, char **response_json)
+static int gw_mcp_server_handle_request(gw_mcp_server_t *server, const char *method,
+                                        const char *path, const char *body_json,
+                                        char **response_json)
 {
     if (!server || !body_json || !response_json)
         return AIRY_ERR_INVALID_PARAM;
@@ -475,11 +440,4 @@ gw_proto_request_handler_t gw_mcp_server_get_handler(gw_mcp_server_t *server)
 void *gw_mcp_server_get_handler_data(gw_mcp_server_t *server)
 {
     return (void *)server;
-}
-
-bool gw_mcp_server_is_healthy(gw_mcp_server_t *server)
-{
-    if (!server)
-        return false;
-    return server->healthy;
 }

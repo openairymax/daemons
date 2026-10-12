@@ -24,8 +24,8 @@ typedef struct {
     void *user;
 } ep_load_ctx_t;
 
-int daemon_ep_def(const char *sock_unix, const char *sock_win, int tcp_port,
-                  daemon_ep_cfg_t *ep)
+static int daemon_ep_def(const char *sock_unix, const char *sock_win, int tcp_port,
+                         daemon_ep_cfg_t *ep)
 {
     if (!ep)
         return AIRY_ERR_INVALID_PARAM;
@@ -39,7 +39,7 @@ int daemon_ep_def(const char *sock_unix, const char *sock_win, int tcp_port,
     return AIRY_SUCCESS;
 }
 
-void daemon_ep_parse(const cJSON *daemon_cfg, daemon_ep_cfg_t *ep)
+static void daemon_ep_parse(const cJSON *daemon_cfg, daemon_ep_cfg_t *ep)
 {
     if (!daemon_cfg || !ep)
         return;
@@ -58,7 +58,7 @@ void daemon_ep_parse(const cJSON *daemon_cfg, daemon_ep_cfg_t *ep)
     }
 }
 
-int daemon_cfg_read(const char *config_path, daemon_cfg_fn fn, void *ud)
+static int daemon_cfg_read(const char *config_path, daemon_cfg_fn fn, void *ud)
 {
     if (!fn)
         return AIRY_ERR_INVALID_PARAM;
@@ -118,7 +118,7 @@ void daemon_ep_free(daemon_ep_cfg_t *ep)
     AIRY_MEMSET(ep, 0, sizeof(*ep));
 }
 
-void daemon_ep_fill(daemon_endpoint_t *out, const daemon_ep_cfg_t *ep, int cmdline_tcp)
+static void daemon_ep_fill(daemon_endpoint_t *out, const daemon_ep_cfg_t *ep, int cmdline_tcp)
 {
     if (!out || !ep)
         return;

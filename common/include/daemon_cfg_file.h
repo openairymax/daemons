@@ -50,29 +50,6 @@ typedef struct {
 } daemon_endpoint_t;
 
 /**
- * @brief 端点三元组缺省基线（平台分支 socket + TCP 口基线）。
- * @return AIRY_SUCCESS；ep 为空返回 AIRY_ERR_INVALID_PARAM。
- */
-int daemon_ep_def(const char *sock_unix, const char *sock_win, int tcp_port,
-                  daemon_ep_cfg_t *ep);
-
-/**
- * @brief 读取 config 文件并以整文档根对象派发回调（读取样板机制）。
- *
- * config_path 为空或不可读时静默返回 AIRY_SUCCESS（缺省即终态，与
- * 既有守护进程行为一致）；单文件限长 1 MiB；JSON 解析失败不派发。
- */
-int daemon_cfg_read(const char *config_path, daemon_cfg_fn fn, void *ud);
-
-/**
- * @brief 从 "daemon" 对象解析端点三元组（覆盖式，未出现的字段保持现值）。
- *
- * daemon_cfg 为空时无操作。tcp_port 严格校验（>0 且 <=65535），非法
- * 值回落现值；use_tcp 仅在合法端口出现时置位。
- */
-void daemon_ep_parse(const cJSON *daemon_cfg, daemon_ep_cfg_t *ep);
-
-/**
  * @brief 端点配置装载（def 基线 + 文件覆盖 + 策略键派发，七副本消解）。
  *
  * 先建立基线（sock_unix/sock_win 平台分支 + tcp_port），再读 config
@@ -91,15 +68,6 @@ int daemon_ep_load(daemon_ep_cfg_t *ep, const char *config_path,
 void daemon_ep_free(daemon_ep_cfg_t *ep);
 
 /**
- * @brief 端点配置 → 服务端点五元组装配（svc_endpoint 唯一机制体）。
- *
- * use_tcp 融合 cmdline --tcp（只升不降）；tcp_host 固定环回；
- * socket 双路取自配置解析产出。
- */
-void daemon_ep_fill(daemon_endpoint_t *out, const daemon_ep_cfg_t *ep,
-                    int cmdline_tcp);
-
-/**
  * @brief 进程端点槽访问器（机制件持有本进程唯一端点配置）。
  *
  * 每 daemon 进程恰有一份端点配置：槽由机制件持有，守护进程取槽交
@@ -111,7 +79,8 @@ daemon_ep_cfg_t *daemon_ep_slot(void);
 /**
  * @brief 端点槽 → 服务端点五元组（svc_endpoint 唯一机制体）。
  *
- * 等价 daemon_ep_fill(out, daemon_ep_slot(), cmdline_tcp)。
+ * 以进程端点槽为配置源装配五元组：use_tcp 融合 cmdline --tcp（只升
+ * 不降），tcp_host 固定环回，socket 双路取自槽内解析产出。
  */
 void daemon_ep_apply(daemon_endpoint_t *out, int cmdline_tcp);
 

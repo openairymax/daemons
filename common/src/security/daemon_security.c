@@ -57,7 +57,7 @@ airy_mtx_t g_security_mutex; /* CROSS-01: initialized via airy_mtx_init() */
  * pthread_mutex_init（UB）。 */
 static atomic_int g_security_mutex_ready = 0;
 
-void ensure_mutex_initialized(void)
+static void ensure_mutex_initialized(void)
 {
     while (atomic_load_explicit(&g_security_mutex_ready, memory_order_acquire) != 1) {
         int expected = 0;

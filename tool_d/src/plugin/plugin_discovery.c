@@ -173,8 +173,8 @@ void plugin_discovery_destroy(void)
     g_discovery.initialized = false;
 }
 
-int plugin_discovery_parse_manifest(const char *yaml_path, const char *plugin_dir,
-                                    plugin_discovery_result_t *out_result)
+static int plugin_discovery_parse_manifest(const char *yaml_path, const char *plugin_dir,
+                                           plugin_discovery_result_t *out_result)
 {
     if (!yaml_path || !out_result)
         return AIRY_ERR_INVALID_PARAM;
@@ -414,57 +414,6 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results, size_t *out_c
 
     AIRY_LOG_INFO("PluginDiscovery: scan complete (%zu plugins found)", found);
     return 0;
-}
-
-int plugin_discovery_auto_load(void)
-{
-    if (!g_discovery.initialized) {
-        plugin_discovery_init(NULL);
-    }
-
-    plugin_discovery_result_t *results = NULL;
-    size_t count = 0;
-
-    int ret = plugin_discovery_scan(&results, &count);
-    if (ret != 0 || count == 0) {
-        AIRY_LOG_INFO("PluginDiscovery: no plugins to auto-load");
-        return 0;
-    }
-
-    size_t loaded = 0;
-    size_t failed = 0;
-
-    for (size_t i = 0; i < count; i++) {
-        if (!results[i].valid)
-            continue;
-
-        AIRY_LOG_INFO("PluginDiscovery: auto-loading '%s' from '%s'", results[i].name,
-                      results[i].library_path);
-
-        const char *out_name = NULL;
-        int load_ret = plugin_service_load(results[i].library_path, NULL, &out_name);
-
-        if (load_ret == 0) {
-            loaded++;
-
-            plugin_service_start(results[i].name);
-        } else {
-            failed++;
-            AIRY_LOG_WARN("PluginDiscovery: auto-load failed for '%s'", results[i].name);
-        }
-    }
-
-    AIRY_LOG_INFO("PluginDiscovery: auto-load complete "
-                  "(loaded=%zu, failed=%zu)",
-                  loaded, failed);
-
-    plugin_discovery_free_results(results, count);
-    return (failed > 0) ? -1 : 0;
-}
-
-size_t plugin_discovery_count(void)
-{
-    return g_discovery.count;
 }
 
 int plugin_discovery_validate_plugin(const char *plugin_dir, plugin_discovery_result_t *out_result)

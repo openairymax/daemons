@@ -100,7 +100,7 @@ int gw_a2a_handler_register_task_type(gw_a2a_handler_t *handler, const char *tas
     return 0;
 }
 
-int gw_a2a_handler_get_agent_card(gw_a2a_handler_t *handler, char **card_json)
+static int gw_a2a_handler_get_agent_card(gw_a2a_handler_t *handler, char **card_json)
 {
     if (!handler || !card_json)
         return AIRY_ERR_INVALID_PARAM;
@@ -146,8 +146,9 @@ static gw_a2a_task_type_entry_t *find_task_type(gw_a2a_handler_t *handler, const
     AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
 }
 
-int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method, const char *path,
-                                  const char *body_json, char **response_json)
+static int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method,
+                                         const char *path, const char *body_json,
+                                         char **response_json)
 {
     if (!handler || !body_json || !response_json)
         return AIRY_ERR_INVALID_PARAM;
@@ -271,11 +272,4 @@ gw_proto_request_handler_t gw_a2a_handler_get_handler(gw_a2a_handler_t *handler)
 void *gw_a2a_handler_get_handler_data(gw_a2a_handler_t *handler)
 {
     return (void *)handler;
-}
-
-bool gw_a2a_handler_is_healthy(gw_a2a_handler_t *handler)
-{
-    if (!handler)
-        return false;
-    return handler->healthy;
 }

@@ -48,20 +48,8 @@ int gw_mcp_server_register_tool(gw_mcp_server_t *server, const char *name, const
                                 const char *input_schema_json, gw_mcp_tool_exec_fn exec_fn,
                                 void *user_data);
 
-int gw_mcp_server_register_resource(gw_mcp_server_t *server, const char *uri, const char *name,
-                                    const char *description, const char *mime_type,
-                                    gw_mcp_resource_read_fn read_fn, void *user_data);
-
-int gw_mcp_server_handle_request(gw_mcp_server_t *server, const char *method, const char *path,
-                                 const char *body_json, char **response_json);
-
-int gw_mcp_server_handle_jsonrpc(gw_mcp_server_t *server, const char *method,
-                                 const char *params_json, char **response_json);
-
 gw_proto_request_handler_t gw_mcp_server_get_handler(gw_mcp_server_t *server);
 void *gw_mcp_server_get_handler_data(gw_mcp_server_t *server);
-
-bool gw_mcp_server_is_healthy(gw_mcp_server_t *server);
 
 AIRY_ABI_END
 

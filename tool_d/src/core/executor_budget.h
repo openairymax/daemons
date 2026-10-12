@@ -21,18 +21,6 @@ extern "C" {
 typedef struct tool_executor tool_executor_t;
 
 /**
- * @brief Effective default per-tool budget in seconds (executor-wide).
- * @param exec Executor
- * @return Configured timeout (fallback applied at create time, always > 0)
- *
- * Fallback half of executor_budget_ms() - see that function for the
- * per-call deadline (per-tool metadata wins over this default).
- *
- * @ownership exec: BORROW
- */
-int executor_timeout_sec(const tool_executor_t *exec);
-
-/**
  * @brief Effective execution budget in milliseconds for one tool call.
  * @param exec Executor
  * @param meta Tool metadata (may be NULL)

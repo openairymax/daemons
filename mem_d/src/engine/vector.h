@@ -92,7 +92,4 @@ void mem_df_remove_doc(mem_df_table_t *tbl, const mem_tfidf_vec_t *doc);
 float mem_vec_cosine(const mem_tfidf_vec_t *query, const mem_tfidf_vec_t *doc,
                      const mem_df_table_t *df_tbl, size_t doc_count);
 
-/** @brief English stopword test (pass lowercase terms). */
-int mem_vec_is_stopword(const char *term);
-
 #endif /* MEM_VECTOR_INTERNAL_H */

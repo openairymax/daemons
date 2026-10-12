@@ -162,7 +162,7 @@ static span_t *span_find(trace_t *trace, const char *span_id)
     return NULL;
 }
 
-int tracing_init(sampling_strategy_t strategy, double rate)
+static int tracing_init(sampling_strategy_t strategy, double rate)
 {
     if (g_tracing.initialized) {
         return AIRY_SUCCESS;

@@ -99,12 +99,10 @@ int sup_proc_find(const sup_ctx_t *ctx, const char *name);
 void ensure_dirs(const sup_ctx_t *ctx);
 
 /* ---- proc.c：spawn / reap / 退避 / 假死探测 / 收摊 ---- */
-int sup_proc_spawn(sup_ctx_t *ctx, sup_proc_t *p);
 void sup_proc_reap(sup_ctx_t *ctx);
 long long sup_backoff_ms(const sup_ctx_t *ctx, const sup_proc_t *p);
 void sup_reconcile(sup_ctx_t *ctx);
 void sup_shutdown_all(sup_ctx_t *ctx);
-long long sup_now_ms(void);
 void sup_log(const char *level, const char *fmt, ...);
 void sup_health_tick(sup_ctx_t *ctx, sup_proc_t *p);
 

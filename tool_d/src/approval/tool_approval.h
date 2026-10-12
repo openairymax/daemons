@@ -105,36 +105,6 @@ int tool_approval_check_for_agent(tool_approval_ctx_t *ctx, const char *agent_id
                                   tool_approval_detail_t *detail);
 
 /**
- * @brief Run only parameter sanitization (no permission check).
- *
- * @param ctx Approval context
- * @param tool_name Tool name
- * @param params_json Raw parameters
- * @param sanitized_params Output sanitized parameters
- * @param sanitized_size Output buffer size
- * @return 0 on success, non-zero on failure
- *
- * @ownership ctx: BORROW, tool_name: BORROW, params_json: BORROW
- * @ownership sanitized_params: caller provides buffer
- */
-int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *tool_name,
-                                  const char *params_json, char *sanitized_params,
-                                  size_t sanitized_size);
-
-/**
- * @brief Get statistics of the last approvals.
- *
- * @param ctx Approval context
- * @param out_total_checks Output total check count
- * @param out_denied_count Output denied count
- * @param out_sanitized_count Output sanitized count
- *
- * @ownership ctx: BORROW
- */
-void tool_approval_get_stats(tool_approval_ctx_t *ctx, uint64_t *out_total_checks,
-                             uint64_t *out_denied_count, uint64_t *out_sanitized_count);
-
-/**
  * @brief C-L05: set the SafetyGuard bridge layer.
  *
  * Injects safety_guard_bridge into the approval context so

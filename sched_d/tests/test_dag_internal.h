@@ -37,7 +37,6 @@ extern _Atomic int g_concurrent_now;
 extern _Atomic int g_concurrent_max;
 
 /* ---- 共享辅助函数（定义于 test_dag.c） ---- */
-void exec_log_push(const char *role, const char *goal);
 void exec_log_reset(void);
 int fake_executor(const char *agent_id, const char *task_description, const char *workspace_dir,
                   char **out_output);

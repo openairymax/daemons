@@ -118,7 +118,7 @@ static struct {
     int initialized;
 } g_alert_mgr = {0};
 
-int alert_system_init(void)
+static int alert_system_init(void)
 {
     if (g_alert_mgr.initialized) {
         return AIRY_SUCCESS;

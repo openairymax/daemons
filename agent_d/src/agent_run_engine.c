@@ -102,7 +102,7 @@ static void run_lock_init(void)
     }
 }
 
-agent_run_session_t *agent_run_register(const char *session_id)
+static agent_run_session_t *agent_run_register(const char *session_id)
 {
     if (!session_id || !session_id[0])
         return NULL;
@@ -119,7 +119,7 @@ agent_run_session_t *agent_run_register(const char *session_id)
     return s;
 }
 
-void agent_run_unregister(agent_run_session_t *s)
+static void agent_run_unregister(agent_run_session_t *s)
 {
     if (!s)
         return;
@@ -160,7 +160,7 @@ int agent_run_cancel_by_session(const char *session_id)
     return found ? AIRY_SUCCESS : AIRY_ERR_NOT_FOUND;
 }
 
-void agent_run_gen_session_id(char *out, size_t out_size)
+static void agent_run_gen_session_id(char *out, size_t out_size)
 {
     static uint64_t seq = 0;
     uint64_t now = (uint64_t)airy_time_ms();
@@ -171,7 +171,7 @@ void agent_run_gen_session_id(char *out, size_t out_size)
              (unsigned long long)(s & 0xFFFF));
 }
 
-void agent_run_gen_run_id(char *out, size_t out_size)
+static void agent_run_gen_run_id(char *out, size_t out_size)
 {
     static uint64_t seq = 0;
     uint64_t now = (uint64_t)airy_time_ms();
@@ -183,7 +183,7 @@ void agent_run_gen_run_id(char *out, size_t out_size)
 }
 
 /* 记录一条 hall 事件（决策链写侧，best effort：写失败不阻塞主流程） */
-void agent_run_record_event(const char *session_id, const char *category, cJSON *content)
+static void agent_run_record_event(const char *session_id, const char *category, cJSON *content)
 {
     if (!session_id || !session_id[0] || !content)
         return;
@@ -196,8 +196,8 @@ void agent_run_record_event(const char *session_id, const char *category, cJSON 
 
 /* GCCP 双思考：think_d.process（降级容忍：think_d 不可达时返回非零，
  * 调用方回退直接 LLM 工具循环，对话可用性不受影响）。 */
-int agent_run_think_process(const char *session_id, const char *prompt,
-                            const char *gccp_answers, cJSON **out_think)
+static int agent_run_think_process(const char *session_id, const char *prompt,
+                                   const char *gccp_answers, cJSON **out_think)
 {
     *out_think = NULL;
     if (!prompt || !prompt[0])
@@ -240,7 +240,8 @@ int agent_run_think_process(const char *session_id, const char *prompt,
 }
 
 /* 会话持久化：成功后把本轮问答写入 mem_d（best effort）。 */
-void agent_run_persist(const char *session_id, const char *user_prompt, const char *assistant_text)
+static void agent_run_persist(const char *session_id, const char *user_prompt,
+                              const char *assistant_text)
 {
     if (!user_prompt)
         return;
@@ -349,7 +350,7 @@ static const char *yaml_role_value(const char *buf)
 }
 
 /* 从 params.agent_file 解析 agent spec（JSON / 简单 YAML / 纯文本首行）。 */
-cJSON *agent_run_spec_from_file(const cJSON *params)
+static cJSON *agent_run_spec_from_file(const cJSON *params)
 {
     cJSON *af = cJSON_GetObjectItem(params, "agent_file");
     if (!cJSON_IsString(af) || !af->valuestring || !*af->valuestring)

@@ -194,30 +194,6 @@ void agent_stream_take(agent_stream_t *st, agent_stream_result_t *out);
 int agent_run_orchestrate(const cJSON *agent_spec, const char *prompt, char **out_text,
                           char **out_err);
 
-/**
- * @brief 从 params.agent_file 解析 agent spec（JSON / 简单 YAML role）。
- * @return 新分配 cJSON 对象（调用方 cJSON_Delete）；无有效 spec 返回 NULL
- */
-cJSON *agent_run_spec_from_file(const cJSON *params);
-
-/**
- * @brief 会话持久化：成功后把本轮问答写入 mem_d（best effort）。
- */
-void agent_run_persist(const char *session_id, const char *user_prompt,
-                       const char *assistant_text);
-
-/**
- * @brief 记录一条 hall 事件（会话决策链写侧，经 hall_evt_write）。
- */
-void agent_run_record_event(const char *session_id, const char *category, cJSON *content);
-
-/**
- * @brief 调用 think_d.process（GCCP 双思考；降级容忍）。
- * @return 0 成功（*out_think 有效，调用方 cJSON_Delete）；非零失败
- */
-int agent_run_think_process(const char *session_id, const char *prompt,
-                            const char *gccp_answers, cJSON **out_think);
-
 #ifdef __cplusplus
 }
 #endif

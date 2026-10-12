@@ -207,7 +207,7 @@ approval_gate_verdict_t gate_ask(approval_gate_t *gate, const char *agent_id,
     return APPROVAL_GATE_DENIED;
 }
 
-bool gate_int_enabled(const approval_gate_t *gate)
+static bool gate_int_enabled(const approval_gate_t *gate)
 {
     return gate && gate->interactive && interactive_approval_is_enabled(gate->interactive);
 }

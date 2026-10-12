@@ -90,27 +90,6 @@ void plugin_discovery_destroy(void);
 int plugin_discovery_scan(plugin_discovery_result_t **out_results, size_t *out_count);
 
 /**
- * @brief Parse a single manifest.yaml file.
- *
- * @param yaml_path   manifest.yaml file path
- * @param plugin_dir  Plugin directory (for resolving relative paths)
- * @param out_result  Output parse result
- * @return 0 on success, non-zero on failure
- */
-int plugin_discovery_parse_manifest(const char *yaml_path, const char *plugin_dir,
-                                    plugin_discovery_result_t *out_result);
-
-/**
- * @brief Auto-load all discovered plugins.
- *
- * Calls plugin_discovery_scan() to discover plugins, then
- * plugin_service_load() for every valid plugin.
- *
- * @return 0 on success, non-zero on failure
- */
-int plugin_discovery_auto_load(void);
-
-/**
  * @brief 离线校验插件目录（P1-5 扩展校验器）。
  *
  * 装前/加载前校验（fail-closed）：目录存在、manifest.yaml 存在且
@@ -123,13 +102,6 @@ int plugin_discovery_auto_load(void);
  * @return 0 且 out_result->valid=true 通过；非 0 失败（valid=false）
  */
 int plugin_discovery_validate_plugin(const char *plugin_dir, plugin_discovery_result_t *out_result);
-
-/**
- * @brief Get the number of discovered plugins.
- *
- * @return Plugin count
- */
-size_t plugin_discovery_count(void);
 
 /**
  * @brief Free the discovery results.

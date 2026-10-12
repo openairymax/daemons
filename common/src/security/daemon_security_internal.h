@@ -14,7 +14,7 @@
  *
  * Shared state (g_security_ctx / g_security_mutex) is defined in
  * daemon_security.c; all domains serialize on g_security_mutex via
- * ensure_mutex_initialized() (three-state lazy init, see definition).
+ * sec_ctx_lock() (mutex lazy init lives inside daemon_security.c).
  *
  * This header is for the daemon_security sources only; it must not be used
  * by other modules.
@@ -76,13 +76,6 @@ typedef struct {
 
 extern daemon_security_ctx_t g_security_ctx;
 extern airy_mtx_t g_security_mutex; /* CROSS-01: initialized via airy_mtx_init() */
-
-/**
- * @brief Three-state lazy init of g_security_mutex (0=uninit, 2=initing,
- *        1=ready). Aligns with the hall_event/gateway_hall_store CAS
- *        paradigm; prevents concurrent duplicate pthread_mutex_init (UB).
- */
-void ensure_mutex_initialized(void);
 
 /**
  * @brief Acquire g_security_mutex under the fail-closed context guard.

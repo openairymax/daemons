@@ -35,8 +35,7 @@ int sup_ep_split(const char *ep, char *host, size_t hsz, char *port, size_t psz)
 int sup_probe_sock(const char *sock);
 
 #ifdef _WIN32
-/* Windows 专有：WSA 幂等初始化 + TCP 回环装配（POSIX 走 UDS，不经此路） */
-int sup_net_up(void);
+/* Windows 专有：TCP 回环装配（POSIX 走 UDS，不经此路） */
 int sup_tcp_conn(const char *ep, int timeout_ms);
 int sup_tcp_bind(const char *ep);
 #endif

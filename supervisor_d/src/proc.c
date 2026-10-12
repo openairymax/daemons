@@ -64,7 +64,7 @@ int sup_proc_job_init(void)
 }
 #endif
 
-long long sup_now_ms(void)
+static long long sup_now_ms(void)
 {
 #ifdef _WIN32
     return (long long)GetTickCount64();
@@ -226,7 +226,7 @@ static int spawn_posix(sup_ctx_t *ctx, sup_proc_t *p)
 }
 #endif
 
-int sup_proc_spawn(sup_ctx_t *ctx, sup_proc_t *p)
+static int sup_proc_spawn(sup_ctx_t *ctx, sup_proc_t *p)
 {
     if (p->pid != SUP_PID_INVALID)
         return 0;

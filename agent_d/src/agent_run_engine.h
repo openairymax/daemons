@@ -58,33 +58,11 @@ typedef struct agent_run_session_s {
     struct agent_run_session_s *next;
 } agent_run_session_t;
 
-/**
- * @brief 注册一个 in-flight run 会话（session_id -> cancelled=0）。
- * 引擎线程执行期间持有；agent.cancel(session_id) 置位后，工具循环
- * 轮间检查取消标志。
- */
-agent_run_session_t *agent_run_register(const char *session_id);
-
-/** @brief 注销会话并释放。 */
-void agent_run_unregister(agent_run_session_t *s);
-
 /** @brief 查询会话是否已被取消。 */
 bool agent_run_is_cancelled(const agent_run_session_t *s);
 
 /** @brief 按 session_id 请求取消（agent.cancel 入口，返回 0 命中）。 */
 int agent_run_cancel_by_session(const char *session_id);
-
-/**
- * @brief 生成唯一会话 ID（"sess_<hex>_<seq>"，与旧 gateway 格式一致，
- * 保证 agent.cancel 的 sess_ 前缀兼容）。
- */
-void agent_run_gen_session_id(char *out, size_t out_size);
-
-/**
- * @brief 生成唯一运行 ID（"run_<hex>_<seq>"，§2.4.2 信封 run_id）。
- * 每次 agent.run 独立调用；与会话 ID 生成同构但独立计数/时间基底。
- */
-void agent_run_gen_run_id(char *out, size_t out_size);
 
 /* ---- run 引擎主入口（原 gateway handle_agent_run 迁移） ---- */
 
