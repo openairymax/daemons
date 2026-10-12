@@ -43,7 +43,6 @@ approval_gate_verdict_t gate_ask(approval_gate_t *gate, const char *agent_id,
                                  const char *params_json, char **out_reason);
 
 /* 交互审批查询与透传（池预算与 RPC tool.approve 路径） */
-bool gate_int_enabled(const approval_gate_t *gate);
 uint64_t gate_int_budget_ms(const approval_gate_t *gate);
 char *gate_int_pending(approval_gate_t *gate);
 int gate_int_resolve(approval_gate_t *gate, const char *request_id,

@@ -70,11 +70,6 @@ void roadmap_rpc_cleanup(void)
     }
 }
 
-int roadmap_rpc_ready(void)
-{
-    return g_roadmap ? 1 : 0;
-}
-
 /* method 共用的就绪/参数守卫与状态结果发射（消除同文件三处重复） */
 static bool roadmap_ready(int id, airy_sock_t fd)
 {

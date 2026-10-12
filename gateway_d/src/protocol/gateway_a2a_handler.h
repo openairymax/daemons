@@ -42,15 +42,8 @@ int gw_a2a_handler_shutdown(gw_a2a_handler_t *handler);
 int gw_a2a_handler_register_task_type(gw_a2a_handler_t *handler, const char *task_type,
                                       gw_a2a_task_exec_fn exec_fn, void *user_data);
 
-int gw_a2a_handler_get_agent_card(gw_a2a_handler_t *handler, char **card_json);
-
-int gw_a2a_handler_handle_request(gw_a2a_handler_t *handler, const char *method, const char *path,
-                                  const char *body_json, char **response_json);
-
 gw_proto_request_handler_t gw_a2a_handler_get_handler(gw_a2a_handler_t *handler);
 void *gw_a2a_handler_get_handler_data(gw_a2a_handler_t *handler);
-
-bool gw_a2a_handler_is_healthy(gw_a2a_handler_t *handler);
 
 AIRY_ABI_END
 

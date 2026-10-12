@@ -36,9 +36,6 @@ void roadmap_rpc_cleanup(void);
  */
 void roadmap_rpc_register(void *disp);
 
-/** @brief 实例是否可用。 */
-int roadmap_rpc_ready(void);
-
 #ifdef __cplusplus
 }
 #endif

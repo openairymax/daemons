@@ -89,9 +89,9 @@ void tool_approval_set_safety_guard_bridge(tool_approval_ctx_t *ctx, safety_guar
     }
 }
 
-int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *tool_name,
-                                  const char *params_json, char *sanitized_params,
-                                  size_t sanitized_size)
+static int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *tool_name,
+                                         const char *params_json, char *sanitized_params,
+                                         size_t sanitized_size)
 {
     if (!ctx || !tool_name || !params_json || !sanitized_params || sanitized_size == 0) {
         return AIRY_ERR_INVALID_PARAM;
@@ -274,22 +274,6 @@ static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
     }
 
     return 0;
-}
-
-void tool_approval_get_stats(tool_approval_ctx_t *ctx, uint64_t *out_total_checks,
-                             uint64_t *out_denied_count, uint64_t *out_sanitized_count)
-{
-    if (!ctx)
-        return;
-    if (out_total_checks)
-        *out_total_checks =
-            atomic_load_explicit(&ctx->total_checks, memory_order_relaxed);
-    if (out_denied_count)
-        *out_denied_count =
-            atomic_load_explicit(&ctx->denied_count, memory_order_relaxed);
-    if (out_sanitized_count)
-        *out_sanitized_count =
-            atomic_load_explicit(&ctx->sanitized_count, memory_order_relaxed);
 }
 
 const char *tool_approval_get_agent_id(const tool_approval_ctx_t *ctx)

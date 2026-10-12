@@ -49,7 +49,7 @@ static const char *const mem_stopwords[] = {
     "would", "you",  "your",  "s",     "t",      "m",     "d",     "re",   "ll",   "ve",
 };
 
-int mem_vec_is_stopword(const char *term)
+static int mem_vec_is_stopword(const char *term)
 {
     if (!term || !term[0])
         return 0;

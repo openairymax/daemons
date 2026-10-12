@@ -37,12 +37,6 @@ int maths_d_eval(const char *expr, double *out_result, char *err_msg,
 int maths_d_eval_at(const char *expr, const char *var_name, double var_value,
                     double *out_result, char *err_msg, size_t err_msg_size);
 
-/**
- * @brief 表达式字符集白名单预检（防注入）。
- * @return 1 字符集合法；0 含非法字符。
- */
-int maths_charset_ok(const char *expr);
-
 #ifdef __cplusplus
 }
 #endif

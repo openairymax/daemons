@@ -239,8 +239,9 @@ static int handle_models_list(gw_openai_compat_t *compat, char **response_json)
     return 0;
 }
 
-int gw_openai_compat_handle_request(gw_openai_compat_t *compat, const char *method,
-                                    const char *path, const char *body_json, char **response_json)
+static int gw_openai_compat_handle_request(gw_openai_compat_t *compat, const char *method,
+                                           const char *path, const char *body_json,
+                                           char **response_json)
 {
     if (!compat || !response_json)
         return AIRY_ERR_INVALID_PARAM;
@@ -305,11 +306,4 @@ gw_proto_request_handler_t gw_openai_compat_get_handler(gw_openai_compat_t *comp
 void *gw_openai_compat_get_handler_data(gw_openai_compat_t *compat)
 {
     return (void *)compat;
-}
-
-bool gw_openai_compat_is_healthy(gw_openai_compat_t *compat)
-{
-    if (!compat)
-        return false;
-    return compat->healthy;
 }
