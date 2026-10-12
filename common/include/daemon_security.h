@@ -28,11 +28,10 @@
  *
  * daemon_security uses an independent production-grade security
  * implementation and does not depend on the cupolas library. Security
- * features (signature verification / credential vault / audit logging /
- * input sanitization / ACL) are all really implemented in daemon_security.c.
+ * features (credential vault / audit logging / input sanitization / ACL)
+ * are all really implemented in the security domain sources.
  *
- * Type definitions reuse the canonical headers under commons/utils/types/:
- * - cupolas_signer_info.h: signer-info structure
+ * Type definitions reuse the canonical header under commons/utils/types/:
  * - cupolas_vault_cred_type.h: credential-type enum
  *
  * Credential storage is a policy concern: the mechanism core never links
@@ -45,7 +44,6 @@
  * - E-6 traceable errors: full audit logs
  * - S-2 hierarchical decomposition: security types separated from impl
  */
-#include "cupolas_signer_info.h"
 #include "cupolas_vault_cred_type.h"
 #include "sanitize_level.h"
 
@@ -85,7 +83,6 @@ typedef struct daemon_vault_provider {
  * Provides unified security configuration for all daemon services:
  * - Input sanitization level
  * - Permission checking mode
- * - Code signature verification
  * - Audit logging settings
  */
 typedef struct daemon_security_config {
@@ -96,10 +93,6 @@ typedef struct daemon_security_config {
     /* Permission configuration */
     const char *permission_rules_path; /**< Path to permission rules file */
     bool enable_permission_cache; /**< Enable permission result caching */
-    /* Signature verification configuration */
-    bool enable_signature_verification; /**< Enable code signature verification */
-    const char *trusted_ca_path; /**< Trusted CA bundle path */
-    const char *expected_signer; /**< Expected signer CN (optional) */
     /* Vault configuration (policy backend injected by the caller) */
     bool enable_vault; /**< Enable secure credential storage */
     const daemon_vault_provider_t *vault_provider; /**< Credential backend (NULL disables vault) */
@@ -129,9 +122,8 @@ typedef struct daemon_security_config {
  * 1. Initializes the security core state
  * 2. Loads sanitizer rules from configuration
  * 3. Loads permission rules from configuration
- * 4. Initializes code signature verification (if enabled)
- * 5. Opens the injected vault provider (if enabled)
- * 6. Configures audit logging
+ * 4. Opens the injected vault provider (if enabled)
+ * 5. Configures audit logging
  *
  * Example usage:
  * @code
@@ -140,9 +132,6 @@ typedef struct daemon_security_config {
  *     .sanitizer_rules_path = AIRY_CONFIG_DIR "/cupolas/sanitizer_rules.yaml",
  *     .permission_rules_path = AIRY_CONFIG_DIR "/cupolas/permission_rules.yaml",
  *     .enable_permission_cache = true,
- *     .enable_signature_verification = true,
- *     .trusted_ca_path = AIRY_CONFIG_DIR "/cupolas/ca",
- *     .expected_signer = "SPHARX Trusted Signer",
  *     .enable_vault = true,
  *     .vault_provider = &my_vault_provider,
  *     .enable_audit_logging = true,
@@ -271,102 +260,6 @@ int daemon_sanitize_tool_params(const char *tool_name, const char *params, char 
 int daemon_check_tool_permission(const char *agent_id, const char *tool_name, const char *action);
 
 /**
- * @brief Check LLM API call permission
- *
- * Verifies that the requesting agent has permission to make LLM API calls.
- * Should be called before any LLM provider interaction in the llm_d service.
- *
- * @param[in] agent_id Agent identifier requesting access
- * @param[in] model_name Name of the LLM model to use
- * @param[in] action Action type ("query", "stream", "embed")
- * @return 1 if allowed, 0 if denied
- *
- * @note Thread-safe: Safe to call from multiple threads concurrently
- * @reentrant Yes
- *
- * @ownership All parameters: caller retains ownership
- */
-int daemon_check_llm_permission(const char *agent_id, const char *model_name, const char *action);
-
-/**
- * @brief Verify Agent/Skill package signature
- *
- * Verifies the digital signature of an Agent or Skill package before installation.
- * Should be called in the market_d service during package installation.
- *
- * @param[in] package_path Path to the package file (binary or archive)
- * @param[out] is_valid Output flag indicating valid signature
- * @param[out] signer_info Signer information output (may be NULL)
- * @return 0 on success, negative on failure
- *
- * @note Thread-safe: Safe to call from multiple threads concurrently
- * @reentrant Yes
- *
- * @ownership package_path: caller retains ownership
- * @ownership is_valid: caller provides buffer, function writes to it
- * @ownership signer_info: caller provides buffer, function writes to it (may be NULL)
- *
- * @details
- * Performs comprehensive signature verification:
- * - Cryptographic signature verification
- * - Certificate chain validation
- * - Revocation status check
- * - Timestamp verification
- * - Integrity hash comparison
- */
-int daemon_verify_package_signature(const char *package_path, bool *is_valid,
-                                    cupolas_signer_info_t *signer_info);
-
-/**
- * @brief Store secure credential in vault
- *
- * Stores sensitive credentials (API keys, tokens, passwords) securely.
- * Should be used instead of storing credentials in plain text files.
- *
- * @param[in] cred_id Unique credential identifier
- * @param[in] cred_type Credential type (password/token/key/cert/etc.)
- * @param[in] data Credential data
- * @param[in] data_len Length of credential data
- * @param[in] agent_id Owner agent ID (for ACL)
- * @return 0 on success, negative on failure
- *
- * @note Thread-safe: Safe to call from multiple threads concurrently
- * @reentrant Yes
- *
- * @ownership cred_id, agent_id: caller retains ownership
- * @ownership data: caller retains ownership during this call
- *
- * @example
- * @code
- * const char* api_key = getenv("OPENAI_API_KEY");
- * int ret = daemon_store_credential("openai_api_key", CUPOLAS_VAULT_CRED_TOKEN,
- *                                   api_key, strlen(api_key), "agent-001");
- * @endcode
- */
-int daemon_store_credential(const char *cred_id, cupolas_vault_cred_type_t cred_type,
-                            const uint8_t *data, size_t data_len, const char *agent_id);
-
-/**
- * @brief Retrieve secure credential from vault
- *
- * Retrieves previously stored secure credential.
- *
- * @param[in] cred_id Credential identifier
- * @param[in] agent_id Requesting agent ID (for ACL check)
- * @param[out] data Output buffer for credential data
- * @param[in,out] data_len Buffer size / actual length
- * @return 0 on success, negative on failure
- *
- * @note Thread-safe: Safe to call from multiple threads concurrently
- * @reentrant Yes
- *
- * @ownership cred_id, agent_id: caller retains ownership
- * @ownership data: caller provides buffer, function writes to it
- */
-int daemon_retrieve_credential(const char *cred_id, const char *agent_id, uint8_t *data,
-                               size_t *data_len);
-
-/**
  * @brief Log audit event for daemon operation
  *
  * Records an audit event for compliance tracking.
@@ -397,32 +290,11 @@ int daemon_audit_log_event(const char *service_name, const char *operation, cons
                            int result, const char *agent_id);
 
 /**
- * @brief Get daemon security status
- *
- * Returns the current status of all security components.
- * Useful for health checks and monitoring.
- *
- * @param[out] sanitizer_status Sanitizer status (1=active, 0=inactive)
- * @param[out] permission_status Permission engine status
- * @param[out] signature_status Signature verification status
- * @param[out] vault_status Vault status
- * @param[out] audit_status Audit logging status
- * @return 0 on success, negative on failure
- *
- * @note Thread-safe: Safe to call from multiple threads concurrently
- * @reentrant Yes
- *
- * @ownership All output parameters: caller provides buffers, function writes to them
- */
-int daemon_security_get_status(int *sanitizer_status, int *permission_status, int *signature_status,
-                               int *vault_status, int *audit_status);
-
-/**
  * @brief Register an ACL permission rule
  *
- * Adds an entry to the in-memory ACL table used by daemon_check_tool_permission()
- * and daemon_check_llm_permission(). This is the programmatic equivalent of
- * loading a permission_rules.yaml entry, and is intended for use by:
+ * Adds an entry to the in-memory ACL table used by daemon_check_tool_permission().
+ * This is the programmatic equivalent of loading a permission_rules.yaml
+ * entry, and is intended for use by:
  *   - Test harnesses that need to provision ACL entries before running
  *   - Runtime administrators who need to grant/deny permissions dynamically
  *   - Bootstrap paths that provision permissions before the rule-file loader runs
@@ -433,7 +305,7 @@ int daemon_security_get_status(int *sanitizer_status, int *permission_status, in
  * checks will fail.
  *
  * @param[in] agent_id Agent identifier (max 63 chars, NUL-terminated)
- * @param[in] resource Resource name: tool_name for tool checks, model_name for LLM checks
+ * @param[in] resource Resource name: tool_name for tool checks
  *                     (max 127 chars, NUL-terminated)
  * @param[in] allowed  true to grant permission, false to explicitly deny
  * @return 0 on success, negative on failure (AIRY_ERR_INVALID_PARAM / AIRY_ERR_OUT_OF_MEMORY)

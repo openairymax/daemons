@@ -6,12 +6,11 @@
  * @brief Internal shared definitions of the daemon_security sources
  *        (not public API).
  *
- * After the Phase 2.3a split of daemon_security.c into four sources, this
+ * After the Phase 2.3a split of daemon_security.c into three sources, this
  * header carries the shared contract between the pieces:
  *   - daemon_security.c            init/shutdown + input sanitization
  *   - daemon_security_acl.c        ACL permission checks + rule management
- *   - daemon_security_signature.c  ED25519 package signature verification
- *   - daemon_security_vault.c      vault credentials + audit + status
+ *   - daemon_security_audit.c      audit event logging
  *
  * Shared state (g_security_ctx / g_security_mutex) is defined in
  * daemon_security.c; all domains serialize on g_security_mutex via
@@ -65,7 +64,6 @@ typedef struct {
     bool initialized;
     sanitize_level_t current_sanitize_level;
     bool permission_enabled;
-    bool signature_enabled;
     bool vault_enabled;
     bool audit_enabled;
     void *vault; /**< Opaque handle owned by vault_provider */
@@ -90,7 +88,7 @@ void ensure_mutex_initialized(void);
  * @brief Acquire g_security_mutex under the fail-closed context guard.
  *
  * Collapses the "lock, reject if uninitialized" prologue duplicated across
- * the ACL / signature / vault domains into one mechanism. On success the
+ * the security domains into one mechanism. On success the
  * mutex is held and the caller must unlock it; when the module is not
  * initialized the mutex is left unlocked, a fail-closed error is logged
  * with the caller name, and @p deny is returned.

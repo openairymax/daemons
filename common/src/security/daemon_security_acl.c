@@ -6,8 +6,10 @@
  * @brief Daemon Layer Security - ACL permission domain.
  *
  * Phase 2.3a split from daemon_security.c: zero-trust permission checks
- * (tool and LLM resources) against the shared ACL table, plus ACL rule
+ * for tool resources against the shared ACL table, plus ACL rule
  * management (add/update rules, load rules from a YAML file).
+ * 单元（五十三）：daemon_check_llm_permission 为零消费死面删除，
+ * LLM 资源授权归 §3.3 授权能力格统一处置。
  *
  * All checks are fail-closed: uninitialized module, disabled permission
  * subsystem or missing ACL entry denies access (K-4, E-1).
@@ -63,50 +65,6 @@ int daemon_check_tool_permission(const char *agent_id, const char *tool_name, co
     } else {
         SVC_LOG_SECURITY("Permission DENIED (no ACL entry): agent=%s tool=%s action=%s", agent_id,
                          tool_name, action);
-    }
-    return result;
-}
-
-int daemon_check_llm_permission(const char *agent_id, const char *model_name, const char *action)
-{
-    if (!agent_id || !model_name || !action) {
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    airy_err_t ctx_rc = sec_ctx_lock(__func__, AIRY_EPERM);
-    if (ctx_rc != AIRY_OK) {
-        return ctx_rc;
-    }
-
-    if (!g_security_ctx.permission_enabled) {
-        airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_WARN("LLM permission check: disabled by configuration, DENYING %s/%s (fail-closed)",
-                     agent_id, model_name);
-        return AIRY_EPERM;
-    }
-
-    char resource[256];
-    snprintf(resource, sizeof(resource), "llm:%s", model_name);
-
-    int result = AIRY_ERR_PERMISSION_DENIED;
-    for (size_t i = 0; i < g_security_ctx.acl_count; i++) {
-        if (strcmp(g_security_ctx.acl_table[i].agent_id, agent_id) == 0 &&
-            strstr(g_security_ctx.acl_table[i].resource, resource) != NULL) {
-
-            if (g_security_ctx.acl_table[i].allowed) {
-                result = AIRY_OK;
-            }
-            break;
-        }
-    }
-    airy_mtx_unlock(&g_security_mutex);
-
-    if (result == AIRY_OK) {
-        SVC_LOG_DEBUG("LLM Permission GRANTED: agent=%s model=%s action=%s", agent_id, model_name,
-                      action);
-    } else {
-        SVC_LOG_SECURITY("LLM Permission DENIED (no ACL): agent=%s model=%s action=%s", agent_id,
-                         model_name, action);
     }
     return result;
 }

@@ -50,8 +50,7 @@ set(SVC_COMMON_SOURCES
     src/auth/svc_auth_ratelimit.c # 认证中间件-限流域
     src/security/daemon_security.c     # daemon 安全集成（初始化/消毒域）
     src/security/daemon_security_acl.c       # Phase 2.3a: daemon 安全-ACL 权限域（从 daemon_security.c 拆分）
-    src/security/daemon_security_signature.c # Phase 2.3a: daemon 安全-包签名验证域（从 daemon_security.c 拆分）
-    src/security/daemon_security_vault.c     # Phase 2.3a: daemon 安全-凭据/审计域（从 daemon_security.c 拆分）
+    src/security/daemon_security_audit.c     # Phase 2.3a: daemon 安全-审计域（原 vault 域，单元五十三裁撤凭据存取消亡后归位）
     # 0c A 类直搬：platform_compat 实现迁 commons/platform（src/platform_compat.c），
     # 声明平台扩展头 daemon_platform_ext.h 亦迁 commons，daemons 留 re-export。
     src/daemon/daemon_event_driver.c # 统一事件驱动框架
