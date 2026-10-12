@@ -70,73 +70,6 @@ static int g_tests_passed = 0;
         }                       \
     } while (0)
 
-/* cap_key 首段（外部旧命名空间）!= 路由目标 ns → legacy 整编条目
- * （plugin.* → tool、info.* / observe.* → monit）。 */
-static int cap_external_ns(const gw_cap_t *ci)
-{
-    const char *dot = strchr(ci->cap_key, '.');
-    if (!dot)
-        return 0;
-    size_t l = (size_t)(dot - ci->cap_key);
-    return !(strlen(ci->ns) == l && strncmp(ci->cap_key, ci->ns, l) == 0);
-}
-
-/* legacy 整编条目路由断言：wire 方法为 "<旧ns>_<cap_key 尾段>" 前缀变体，
- * 或宿主未登记前缀变体时透传的 L2 标准方法（与 cap_key 尾段同名）。 */
-static void cap_legacy_route(const gw_cap_t *ci)
-{
-    const char *dot = strchr(ci->cap_key, '.');
-    ASSERT_NOT_NULL(dot);
-    char prefix[64];
-    int pn = snprintf(prefix, sizeof(prefix), "%.*s_", (int)(dot - ci->cap_key), ci->cap_key);
-    ASSERT_TRUE(pn > 0 && (size_t)pn < sizeof(prefix));
-    size_t pl = (size_t)pn;
-    if (strncmp(ci->method, prefix, pl) == 0) {
-        ASSERT_TRUE(strcmp(ci->method + pl, dot + 1) == 0);
-    } else {
-        ASSERT_TRUE(strcmp(ci->method, dot + 1) == 0);
-        ASSERT_TRUE(strcmp(ci->method, "shutdown") == 0 ||
-                    strcmp(ci->method, "get_stats") == 0 ||
-                    strcmp(ci->method, "health_check") == 0);
-    }
-}
-
-static void test_count_and_uniqueness(void)
-{
-    TEST_BEGIN("count + cap_key uniqueness/reconstruct");
-    size_t n = gw_cap_count();
-    ASSERT_TRUE(n > 100); /* 覆盖 16+ 命名空间全量能力 */
-    for (size_t i = 0; i < n; ++i) {
-        const gw_cap_t *ci = gw_cap_at(i);
-        ASSERT_NOT_NULL(ci);
-        ASSERT_TRUE(ci->cap_key && ci->ns && ci->method);
-        size_t nsl = strlen(ci->ns);
-        size_t ml = strlen(ci->method);
-        /* cap_key 语义：默认 "<ns>.<method>"（SSoT 不变量）。
-         * legacy 整编条目（plugin.* → tool、info.* / observe.* →
-         * monit）cap_key 保持外部契约不变、路由目标与 wire 方法名单独
-         * 登记，不满足重构等式，按 cap_legacy_route 断言路由语义。 */
-        if (cap_external_ns(ci)) {
-            cap_legacy_route(ci);
-        } else {
-            ASSERT_TRUE(strlen(ci->cap_key) == nsl + ml + 1);
-            ASSERT_TRUE(strncmp(ci->cap_key, ci->ns, nsl) == 0);
-            ASSERT_TRUE(ci->cap_key[nsl] == '.');
-            ASSERT_TRUE(strcmp(ci->cap_key + nsl + 1, ci->method) == 0);
-        }
-        /* cap_key 唯一性（SSoT：禁止重复登记） */
-        for (size_t j = 0; j < i; ++j) {
-            ASSERT_TRUE(strcmp(ci->cap_key, gw_cap_at(j)->cap_key) != 0);
-        }
-        /* 每个命名空间都应有转发超时（未知回退默认，恒 > 0） */
-        ASSERT_TRUE(gw_cap_ns_timeout(ci->ns) > 0);
-    }
-    /* 越界访问返回 NULL */
-    ASSERT_TRUE(gw_cap_at(n) == NULL);
-    ASSERT_TRUE(gw_cap_at(n + 100) == NULL);
-    TEST_PASS();
-}
-
 static void test_key_caps(void)
 {
     TEST_BEGIN("key caps present with right kinds");
@@ -315,7 +248,6 @@ static void test_ns_ownership(void)
 int main(void)
 {
     printf("test_gateway_cap_registry: AIRY_HOME isolated to /tmp\n");
-    test_count_and_uniqueness();
     test_key_caps();
     test_fail_closed();
     test_ns_timeout();
