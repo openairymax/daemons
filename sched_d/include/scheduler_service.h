@@ -170,14 +170,6 @@ int sched_service_register_agent(sched_service_t *service, const agent_info_t *a
 int sched_service_unregister_agent(sched_service_t *service, const char *agent_id);
 
 /**
- * @brief Update an agent's status.
- * @param service Service handle
- * @param agent_info Agent info
- * @return 0 on success, non-zero error code
- */
-int sched_service_update_agent_status(sched_service_t *service, const agent_info_t *agent_info);
-
-/**
  * @brief Schedule a task.
  * @param service Service handle
  * @param task_info Task info
@@ -202,14 +194,6 @@ int sched_service_get_stats(sched_service_t *service, void **stats);
  * @return 0 on success, non-zero error code
  */
 int sched_service_health_check(sched_service_t *service, bool *health_status);
-
-/**
- * @brief Reload the config.
- * @param service Service handle
- * @param manager New config info
- * @return 0 on success, non-zero error code
- */
-int sched_service_reload_config(sched_service_t *service, const sched_config_t *manager);
 
 /**
  * @brief Submit a task (async queue): returns immediately after enqueue;

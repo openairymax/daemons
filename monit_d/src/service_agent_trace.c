@@ -242,28 +242,6 @@ int monitor_service_end_agent_trace(monitor_service_t *service, agent_execution_
     return AIRY_SUCCESS;
 }
 
-int monitor_service_get_agent_summary(monitor_service_t *service, const char *agent_id,
-                                      uint64_t start_time, uint64_t end_time, char **summary)
-{
-    if (!service || !summary) {
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    char buf[4096];
-    snprintf(buf, sizeof(buf),
-             "Agent summary for %s (time range: %llu - %llu)\n"
-             "Traces: %zu, Alerts: %zu, Metrics: %zu\n",
-             agent_id ? agent_id : "all", (unsigned long long)start_time,
-             (unsigned long long)end_time, service->trace_count, service->alert_count,
-             service->metric_cache_count);
-
-    *summary = AIRY_STRDUP(buf);
-    if (!*summary) {
-        return AIRY_ENOMEM;
-    }
-    return AIRY_SUCCESS;
-}
-
 int monitor_service_export_agent_trace(monitor_service_t *service, agent_execution_trace_t *trace,
                                        const char *format, char **data, size_t *size)
 {
@@ -328,22 +306,3 @@ int monitor_service_get_active_agents(monitor_service_t *service, char ***agent_
     return AIRY_SUCCESS;
 }
 
-int monitor_service_reset_loop_detection(monitor_service_t *service, agent_execution_trace_t *trace)
-{
-    if (!service || !trace) {
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    trace->is_suspected_loop = false;
-    trace->loop_detection_count = 0;
-
-    for (size_t i = 0; i < trace->trace_point_count; i++) {
-        agent_trace_point_t *tp = &trace->trace_points[i];
-        AIRY_FREE(tp->location);
-        tp->location = NULL;
-        tp->loop_count = 0;
-    }
-    trace->trace_point_count = 0;
-
-    return AIRY_SUCCESS;
-}

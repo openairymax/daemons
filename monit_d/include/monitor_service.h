@@ -125,14 +125,6 @@ int monitor_service_destroy(monitor_service_t *service);
 int monitor_service_record_metric(monitor_service_t *service, const metric_info_t *metric);
 
 /**
- * @brief Record a log entry.
- * @param service Service handle
- * @param log Log info
- * @return 0 on success, non-zero error code
- */
-int monitor_service_log(monitor_service_t *service, const log_info_t *log);
-
-/**
  * @brief Trigger an alert.
  * @param service Service handle
  * @param alert Alert info
@@ -326,19 +318,6 @@ int monitor_service_end_agent_trace(monitor_service_t *service, agent_execution_
                                     agent_execution_state_t final_state);
 
 /**
- * @brief Get the agent-execution summary.
- *
- * @param service Monitoring-service handle
- * @param agent_id Agent ID (NULL = all)
- * @param start_time Start time (may be 0)
- * @param end_time End time (may be 0)
- * @param summary Output parameter, returns the summary
- * @return 0 on success, non-zero error code
- */
-int monitor_service_get_agent_summary(monitor_service_t *service, const char *agent_id,
-                                      uint64_t start_time, uint64_t end_time, char **summary);
-
-/**
  * @brief Export an agent-execution trace.
  *
  * @param service Monitoring-service handle
@@ -360,15 +339,5 @@ int monitor_service_export_agent_trace(monitor_service_t *service, agent_executi
  * @return 0 on success, non-zero error code
  */
 int monitor_service_get_active_agents(monitor_service_t *service, char ***agent_ids, size_t *count);
-
-/**
- * @brief Reset loop detection.
- *
- * @param service Monitoring-service handle
- * @param trace Execution-trace handle
- * @return 0 on success, non-zero error code
- */
-int monitor_service_reset_loop_detection(monitor_service_t *service,
-                                         agent_execution_trace_t *trace);
 
 #endif /* AIRY_RT_MONITOR_SERVICE_H */

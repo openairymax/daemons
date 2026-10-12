@@ -178,27 +178,6 @@ int sched_service_unregister_agent(sched_service_t *service, const char *agent_i
     return AIRY_ERR_NOT_FOUND;
 }
 
-int sched_service_update_agent_status(sched_service_t *service, const agent_info_t *agent_info)
-{
-    if (!service || !agent_info || !service->initialized) {
-        SVC_LOG_ERROR("sched_service_update_agent_status: NULL parameter or not initialized "
-                      "(service=%p, agent_info=%p, initialized=%d)",
-                      (const void *)service, (const void *)agent_info,
-                      service ? service->initialized : -1);
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    airy_mtx_lock(&service->lock);
-    if (sched_refresh(service, agent_info)) {
-        airy_mtx_unlock(&service->lock);
-        return 0;
-    }
-    airy_mtx_unlock(&service->lock);
-    SVC_LOG_ERROR("sched_service_update_agent_status: agent not found (agent_id=%s)",
-                  agent_info->agent_id ? agent_info->agent_id : "NULL");
-    return AIRY_ERR_NOT_FOUND;
-}
-
 /* Per-strategy scoring: pure functions of (service, task, agent, candidate
  * index); higher score wins. The strategy dimension is declarative — adding
  * a strategy means one table row plus one function below, and the dispatch
@@ -403,28 +382,3 @@ int sched_service_health_check(sched_service_t *service, bool *health_status)
     return 0;
 }
 
-int sched_service_reload_config(sched_service_t *service, const sched_config_t *config)
-{
-    if (!service || !config || !service->initialized) {
-        SVC_LOG_ERROR("sched_service_reload_config: NULL parameter or not initialized (service=%p, "
-                      "config=%p, initialized=%d)",
-                      (const void *)service, (const void *)config,
-                      service ? service->initialized : -1);
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    AIRY_FREE((void *)service->config.ml_model_path);
-    service->config.ml_model_path = NULL;
-
-    __builtin_memcpy(&service->config, config, sizeof(sched_config_t));
-    if (config->ml_model_path) {
-        service->config.ml_model_path = AIRY_STRDUP(config->ml_model_path);
-        if (!service->config.ml_model_path) {
-            SVC_LOG_ERROR("sched_service_reload_config: strdup failed for ml_model_path (path=%s)",
-                          config->ml_model_path ? config->ml_model_path : "NULL");
-            return AIRY_ERR_OUT_OF_MEMORY;
-        }
-    }
-
-    return 0;
-}

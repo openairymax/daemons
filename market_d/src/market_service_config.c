@@ -30,52 +30,6 @@
 
 #include "market_service_internal.h"
 
-int market_service_reload_config(market_service_t *service, const market_config_t *config)
-{
-    if (!service || !config || !service->initialized)
-        return AIRY_ERR_INVALID_PARAM;
-
-    airy_mtx_lock(&service->lock);
-
-    // Save old owned pointers
-    char *old_url = (char *)service->config.registry_url;
-    char *old_path = (char *)service->config.storage_path;
-
-    // Copy non-pointer fields, preserving old owned pointers temporarily
-    {
-        market_config_t tmp = *config;
-        tmp.registry_url = old_url;
-        tmp.storage_path = old_path;
-        service->config = tmp;
-    }
-
-    // Replace pointer fields with our own copies
-    char *new_url = config->registry_url ? AIRY_STRDUP(config->registry_url) : NULL;
-    char *new_path = config->storage_path ? AIRY_STRDUP(config->storage_path) : NULL;
-
-    if (config->registry_url && !new_url) {
-        AIRY_FREE(new_path);
-        airy_mtx_unlock(&service->lock);
-        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate registry_url");
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-    if (config->storage_path && !new_path) {
-        AIRY_FREE(new_url);
-        service->config.registry_url = new_url;
-        airy_mtx_unlock(&service->lock);
-        AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate storage_path");
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
-    service->config.registry_url = new_url;
-    service->config.storage_path = new_path;
-    AIRY_FREE(old_url);
-    AIRY_FREE(old_path);
-    airy_mtx_unlock(&service->lock);
-
-    return 0;
-}
-
 static void collect_ids(const cJSON *node, char ids[][128], int cap, int *count)
 {
     if (!node || *count >= cap)

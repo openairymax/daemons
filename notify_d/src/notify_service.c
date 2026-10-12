@@ -327,21 +327,6 @@ size_t notify_d_subscription_count(notify_d_service_t *svc, const char *topic)
     return count;
 }
 
-size_t notify_d_active_client_count(notify_d_service_t *svc)
-{
-    if (!svc)
-        return 0;
-
-    airy_mtx_lock(&svc->lock);
-    size_t count = 0;
-    for (size_t i = 0; i < svc->client_count; i++) {
-        if (svc->clients[i].active)
-            count++;
-    }
-    airy_mtx_unlock(&svc->lock);
-    return count;
-}
-
 int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request, char *response,
                               size_t response_size)
 {
