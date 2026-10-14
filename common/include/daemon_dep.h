@@ -74,7 +74,7 @@ int daemon_dep_init(daemon_dep_t *dep, const daemon_dep_spec_t *specs, size_t co
  * @param sdh daemon 持有的 SD helper；为 NULL 时所有依赖标记为不可达
  *            （fail-closed），不算错误
  * @return AIRY_SUCCESS 表示探测完成（即使存在缺失依赖——结果由
- *         daemon_dep_ready/daemon_dep_missing 表达）；
+ *         daemon_dep_ready/daemon_dep_report 表达）；
  *         dep 为 NULL 时返回 AIRY_ERR_INVALID_PARAM
  */
 int daemon_dep_probe(daemon_dep_t *dep, sd_helper_t *sdh);
@@ -83,9 +83,6 @@ int daemon_dep_probe(daemon_dep_t *dep, sd_helper_t *sdh);
  * @brief 是否完全就绪：已探测且无 required 缺失。
  */
 bool daemon_dep_ready(const daemon_dep_t *dep);
-
-/** @brief 不可达的 required 依赖条数。 */
-size_t daemon_dep_missing(const daemon_dep_t *dep);
 
 /** @brief 已声明的依赖条数。 */
 size_t daemon_dep_count(const daemon_dep_t *dep);
@@ -97,14 +94,6 @@ size_t daemon_dep_count(const daemon_dep_t *dep);
  */
 int daemon_dep_at(const daemon_dep_t *dep, size_t idx, const char **name, bool *required,
                   bool *reachable);
-
-/**
- * @brief 将缺失的 required 依赖渲染为逗号分隔列表。
- * @param buf 输出缓冲
- * @param cap 缓冲容量（字节）
- * @return 写入的字符数（不含结尾 NUL）；buf 为 NULL 或 cap 为 0 时返回 -1
- */
-int daemon_dep_note(const daemon_dep_t *dep, char *buf, size_t cap);
 
 /**
  * @brief required 依赖缺失时发出降级信号。
