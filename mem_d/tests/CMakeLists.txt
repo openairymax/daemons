@@ -88,4 +88,31 @@ target_compile_options(test_mem_stats_json PRIVATE -Wall -Wextra -g -Wno-unused-
 add_test(NAME mem_d_stats_json COMMAND test_mem_stats_json
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+# memrpc 提供商 E2E 测试：fork mem_d 后经 IPC ops 表驱动全部 vtable 契约
+add_executable(test_memrpc test_memrpc.c)
+target_include_directories(test_memrpc PRIVATE
+    ${MEM_COMMON_INCLUDES}
+    ${ATOMIC_DIR}/memory/include
+    ${ATOMIC_DIR}/coreloopthree/include
+)
+target_compile_definitions(test_memrpc PRIVATE
+    AIRY_TEST_MEMD_BIN="$<TARGET_FILE:mem_d>"
+)
+target_link_libraries(test_memrpc PRIVATE
+    airy_coreloopthree
+    airy_memory
+    airy_ipc_ops
+    airy_mem_service
+    svc_common
+    airy_common
+    Threads::Threads
+    airy_platform_libs
+)
+if(AIRY_HAS_CJSON)
+    target_link_libraries(test_memrpc PRIVATE cjson)
+endif()
+target_compile_options(test_memrpc PRIVATE -Wall -Wextra -g -Wno-unused-function)
+add_test(NAME mem_d_memrpc COMMAND test_memrpc
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
 enable_testing()
