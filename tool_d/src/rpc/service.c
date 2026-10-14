@@ -128,6 +128,7 @@ tool_service_t *tool_service_create(const char *config_path)
         SVC_LOG_ERROR("Failed to create validator");
         tool_executor_destroy(svc->executor);
         tool_registry_destroy(svc->registry);
+        daemon_security_shutdown();
         airy_mtx_destroy(&svc->lock);
         AIRY_FREE(svc);
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
@@ -175,6 +176,10 @@ void tool_service_destroy(tool_service_t *svc)
 
     airy_mtx_destroy(&svc->lock);
     AIRY_FREE(svc);
+
+    /* 安全域随服务对称收口（audit 句柄关闭、vault provider 释放）；
+     * shutdown 幂等，未初始化时为 no-op。 */
+    daemon_security_shutdown();
 }
 
 int tool_service_register(tool_service_t *svc, const tool_metadata_t *meta)
