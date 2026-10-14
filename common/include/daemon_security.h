@@ -263,9 +263,9 @@ int daemon_check_tool_permission(const char *agent_id, const char *tool_name, co
  * @brief Log audit event for daemon operation
  *
  * Records an audit event for compliance tracking.
- * Should be called after important operations (tool execution, LLM calls, etc.).
+ * Called after tool approval decisions (grant, deny, safety guard).
  *
- * @param[in] service_name Service name (e.g., "tool_d", "llm_d", "market_d")
+ * @param[in] service_name Service name (currently the tool approval domain)
  * @param[in] operation Operation performed
  * @param[in] resource Resource accessed
  * @param[in] result Result of operation (success/failure)
