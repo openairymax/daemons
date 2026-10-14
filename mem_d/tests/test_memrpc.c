@@ -85,7 +85,7 @@ static void t_on_fatal(int sig)
     raise(sig);
 }
 
-static void t_install_fatal_handlers(void)
+static void t_fatal_hooks(void)
 {
     struct sigaction sa;
 
@@ -100,7 +100,7 @@ static void test_provider_full(void)
 {
     printf("  test_provider_full...\n");
 
-    assert(airy_memrpc_memory_provider_init(NULL) == AIRY_EOK);
+    assert(airy_memrpc_init(NULL) == AIRY_EOK);
     airy_memory_provider_t *p = airy_memory_provider_get_active();
     assert(p != NULL);
     assert(strcmp(p->name, "memrpc") == 0);
@@ -173,7 +173,7 @@ static void test_init_idempotent(void)
 {
     printf("  test_init_idempotent...\n");
 
-    assert(airy_memrpc_memory_provider_init(NULL) == AIRY_EOK);
+    assert(airy_memrpc_init(NULL) == AIRY_EOK);
     assert(airy_memory_provider_get_active() != NULL);
     printf("    PASSED\n");
 }
@@ -182,7 +182,7 @@ int main(void)
 {
     printf("test_memrpc: memrpc provider E2E (daemon: %s)\n",
            AIRY_TEST_MEMD_BIN);
-    t_install_fatal_handlers();
+    t_fatal_hooks();
     t_spawn_daemon();
 
     test_provider_full();
