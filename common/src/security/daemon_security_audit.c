@@ -10,6 +10,10 @@
  * products/cupolas/daemon/src/security_dome.c），随该单元消除；唯一
  * 活件 daemon_audit_log_event 迁入本文件，文件名与职责一致。
  *
+ * 单元（六十六）实态收口：本域唯一生产消费方为 tool_d 审批域
+ * （tool_approval.c 审批裁决三路径 + safety_guard_bridge.c 安全桥），
+ * 事件面即工具审批合规追踪，非通用 daemon 审计面。
+ *
  * 审计是安全追踪证据（E-6）：写后 fsync 落盘保证断电不丢事件（P1-4）；
  * SVC_LOG 移到解锁后调用，消除 security→logger 双锁序耦合（P2-4）。
  */
