@@ -291,6 +291,20 @@ void handle_evolve(cJSON *params, int id, airy_sock_t client_fd)
         }
         AIRY_FREE(data_parts);
 
+        if (!merged) {
+            cJSON_Delete(meta);
+            mem_search_hits_free(hits, count);
+            cJSON *result = cJSON_CreateObject();
+            if (!result) {
+                JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+                return;
+            }
+            cJSON_AddStringToObject(result, "status", "no_records");
+            cJSON_AddNumberToObject(result, "source_count", (double)count);
+            JSONRPC_SEND_SUCCESS(client_fd, result, id);
+            return;
+        }
+
         char *meta_str = cJSON_PrintUnformatted(meta);
         cJSON_Delete(meta);
         if (!meta_str) {
