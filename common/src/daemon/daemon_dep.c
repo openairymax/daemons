@@ -63,14 +63,9 @@ int daemon_dep_probe(daemon_dep_t *dep, sd_helper_t *sdh)
     return AIRY_SUCCESS;
 }
 
-bool daemon_dep_ready(const daemon_dep_t *dep)
-{
-    if (!dep || !dep->probed)
-        return false;
-    return daemon_dep_missing(dep) == 0;
-}
-
-size_t daemon_dep_missing(const daemon_dep_t *dep)
+/* missing/note 仅由本文件健康面（ready/report）消费，私有化后调用方
+ * 经 ready 与 report 表达结果（单元六十六）。 */
+static size_t daemon_dep_missing(const daemon_dep_t *dep)
 {
     size_t missing = 0;
 
@@ -81,6 +76,13 @@ size_t daemon_dep_missing(const daemon_dep_t *dep)
             missing++;
     }
     return missing;
+}
+
+bool daemon_dep_ready(const daemon_dep_t *dep)
+{
+    if (!dep || !dep->probed)
+        return false;
+    return daemon_dep_missing(dep) == 0;
 }
 
 size_t daemon_dep_count(const daemon_dep_t *dep)
@@ -103,7 +105,7 @@ int daemon_dep_at(const daemon_dep_t *dep, size_t idx, const char **name, bool *
     return AIRY_SUCCESS;
 }
 
-int daemon_dep_note(const daemon_dep_t *dep, char *buf, size_t cap)
+static int daemon_dep_note(const daemon_dep_t *dep, char *buf, size_t cap)
 {
     size_t used = 0;
 
