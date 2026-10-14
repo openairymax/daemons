@@ -158,45 +158,6 @@ int daemon_security_init(const daemon_security_config_t *config, airy_err_t *err
 void daemon_security_shutdown(void);
 
 /**
- * @brief Sanitize input string for LLM service requests
- *
- * Sanitizes user input to prevent injection attacks before passing to LLM providers.
- * Uses the configured sanitization level from daemon_security_init().
- *
- * @param[in] input Raw input string from user or external source
- * @param[out] output Sanitized output buffer
- * @param[in] output_size Size of output buffer
- * @return 0 on success, negative on failure
- *
- * @note Thread-safe: Safe to call from multiple threads concurrently
- * @reentrant Yes
- *
- * @ownership input: caller retains ownership
- * @ownership output: caller provides buffer, function writes to it
- *
- * @details
- * Sanitizes against:
- * - SQL injection attacks
- * - XSS (Cross-Site Scripting)
- * - Command injection attacks
- * - Path traversal attacks
- * - Special character attacks
- *
- * Example usage:
- * @code
- * char sanitized[4096];
- * const char* user_input = "SELECT * FROM users WHERE id=1 OR 1=1";
- *
- * if (daemon_sanitize_llm_input(user_input, sanitized, sizeof(sanitized)) == 0) {
- *     // Use sanitized input for LLM call
- * } else {
- *     // Handle sanitization failure
- * }
- * @endcode
- */
-int daemon_sanitize_llm_input(const char *input, char *output, size_t output_size);
-
-/**
  * @brief Sanitize tool execution parameters
  *
  * Sanitizes tool name and parameters to prevent command injection.

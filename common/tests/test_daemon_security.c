@@ -70,63 +70,6 @@ static void test_shutdown_without_init(void)
     PASS();
 }
 
-static void test_sanitize_llm_input_normal(void)
-{
-    TEST("Sanitize LLM input - normal text");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
-
-    char output[256];
-    const char *input = "Hello world, how are you today?";
-    int ret = daemon_sanitize_llm_input(input, output, sizeof(output));
-    ASSERT(ret == 0, "sanitize should succeed");
-    ASSERT(strlen(output) > 0, "output should not be empty");
-    ASSERT(strstr(output, "Hello") != NULL, "normal text should pass through");
-
-    daemon_security_shutdown();
-    PASS();
-}
-
-static void test_sanitize_llm_input_dangerous(void)
-{
-    TEST("Sanitize LLM input - dangerous pattern");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
-
-    char output[256];
-    const char *input = "run command; rm -rf /";
-    int ret = daemon_sanitize_llm_input(input, output, sizeof(output));
-    ASSERT(ret != 0, "dangerous input should be rejected");
-    ASSERT(strstr(output, "SANITIZED") != NULL || strstr(output, "rejected") != NULL,
-           "output should indicate sanitization");
-
-    daemon_security_shutdown();
-    PASS();
-}
-
-static void test_sanitize_llm_input_null_params(void)
-{
-    TEST("Sanitize LLM input - null params rejected");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
-
-    char output[256];
-    int ret = daemon_sanitize_llm_input(NULL, output, sizeof(output));
-    ASSERT(ret != 0, "null input should be rejected");
-
-    ret = daemon_sanitize_llm_input("test", NULL, sizeof(output));
-    ASSERT(ret != 0, "null output should be rejected");
-
-    ret = daemon_sanitize_llm_input("test", output, 0);
-    ASSERT(ret != 0, "zero output_size should be rejected");
-
-    daemon_security_shutdown();
-    PASS();
-}
-
 static void test_sanitize_tool_params_normal(void)
 {
     TEST("Sanitize tool params - normal");
@@ -255,19 +198,6 @@ static void test_audit_log_event_null_params(void)
     PASS();
 }
 
-static void test_sanitize_uninitialized_fail_safe(void)
-{
-    TEST("Sanitize works uninitialized (fail-safe)");
-    daemon_security_shutdown();
-
-    char output[256];
-    int ret = daemon_sanitize_llm_input("hello world", output, sizeof(output));
-    ASSERT(ret == 0, "uninitialized sanitize should still succeed (fail-safe)");
-
-    daemon_security_shutdown();
-    PASS();
-}
-
 static void test_init_with_config(void)
 {
     TEST("Init with explicit config");
@@ -282,23 +212,6 @@ static void test_init_with_config(void)
     memset(&err, 0, sizeof(err));
     int ret = daemon_security_init(&cfg, &err);
     ASSERT(ret == 0, "init with config should succeed");
-
-    daemon_security_shutdown();
-    PASS();
-}
-
-static void test_sanitize_llm_input_special_chars(void)
-{
-    TEST("Sanitize LLM input - tab chars stripped");
-    airy_err_t err;
-    memset(&err, 0, sizeof(err));
-    daemon_security_init(NULL, &err);
-
-    char output[256];
-    const char *input = "hello\tworld\twith\ttabs";
-    int ret = daemon_sanitize_llm_input(input, output, sizeof(output));
-    ASSERT(ret == 0, "sanitize should succeed");
-    ASSERT(strchr(output, '\t') == NULL, "tabs should be removed");
 
     daemon_security_shutdown();
     PASS();
@@ -354,9 +267,6 @@ int main(void)
     test_init_null_config();
     test_double_init();
     test_shutdown_without_init();
-    test_sanitize_llm_input_normal();
-    test_sanitize_llm_input_dangerous();
-    test_sanitize_llm_input_null_params();
     test_sanitize_tool_params_normal();
     test_sanitize_tool_params_dangerous();
     test_sanitize_tool_params_null();
@@ -364,9 +274,7 @@ int main(void)
     test_check_tool_permission_null_params();
     test_audit_log_event();
     test_audit_log_event_null_params();
-    test_sanitize_uninitialized_fail_safe();
     test_init_with_config();
-    test_sanitize_llm_input_special_chars();
     test_rules_file_loading();
 
     printf("\n=== Results: %d/%d tests passed ===\n\n", tests_passed, tests_run);

@@ -84,21 +84,6 @@ airy_err_t sec_ctx_lock(const char *who, airy_err_t deny)
     return deny;
 }
 
-static const char *DANGEROUS_PATTERNS[] = {";",  "|", "`",  "$(", "${", "&&", "||", ">",
-                                           ">>", "<", "<<", "\\", "\n", "\r", NULL};
-
-static bool contains_dangerous_pattern(const char *input)
-{
-    if (!input)
-        return false;
-    for (size_t i = 0; DANGEROUS_PATTERNS[i] != NULL; i++) {
-        if (strstr(input, DANGEROUS_PATTERNS[i]) != NULL) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static void sanitize_string(char *output, const char *input, size_t max_len)
 {
     if (!output || !input || max_len == 0)
@@ -237,49 +222,6 @@ void daemon_security_shutdown(void)
     airy_mtx_destroy(&g_security_mutex);
     atomic_store_explicit(&g_security_mutex_ready, 0, memory_order_release);
     SVC_LOG_INFO("Daemon security: shutdown complete");
-}
-
-int daemon_sanitize_llm_input(const char *input, char *output, size_t output_size)
-{
-    if (!input || !output || output_size == 0) {
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    ensure_mutex_initialized();
-    airy_mtx_lock(&g_security_mutex);
-    /* P3.15 ACC-DT16: fail-safe — no more lazy-init. When uninitialized,
-     * keep sanitizing with SANITIZE_LEVEL_HIGH (sanitizing is
-     * a protective operation; refusing would reduce security). Callers should
-     * initialize daemon_security explicitly at daemon startup. */
-    sanitize_level_t level;
-    if (!g_security_ctx.initialized) {
-        level = SANITIZE_LEVEL_HIGH;
-        airy_mtx_unlock(&g_security_mutex);
-        SVC_LOG_WARN("daemon_sanitize_llm_input: daemon_security not initialized — "
-                     "initialize at startup. Using SANITIZE_LEVEL_HIGH (fail-safe).");
-    } else {
-        level = g_security_ctx.current_sanitize_level;
-        airy_mtx_unlock(&g_security_mutex);
-    }
-
-    if (contains_dangerous_pattern(input)) {
-        SVC_LOG_SECURITY(
-            "SEC-011 VIOLATION: LLM input contains shell injection pattern - REJECTED");
-        snprintf(output, output_size, "[SANITIZED: input rejected - security violation]");
-        return AIRY_ERR_PERMISSION_DENIED;
-    }
-
-    sanitize_string(output, input, output_size);
-
-    if (level >= SANITIZE_LEVEL_HIGH) {
-        for (size_t i = 0; output[i]; i++) {
-            if ((unsigned char)output[i] > 127) {
-                output[i] = '?';
-            }
-        }
-    }
-
-    return AIRY_OK;
 }
 
 int daemon_sanitize_tool_params(const char *tool_name, const char *params, char *sanitized_tool,
