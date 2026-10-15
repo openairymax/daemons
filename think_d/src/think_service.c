@@ -51,6 +51,15 @@ static void think_gccp_free_session(think_gccp_session_t *s)
     s->updated_ms = 0;
 }
 
+/* 释放本轮暂存交互答案（幂等；防泄漏到下一轮）。 */
+static void think_ans_drop(think_gccp_session_t *s)
+{
+    if (!s)
+        return;
+    AIRY_FREE(s->answers);
+    s->answers = NULL;
+}
+
 /* 过期会话清理（TTL 节流：每 60s 至多全表扫描一次）。 */
 static void think_gccp_expire_old(think_service_t *svc)
 {
@@ -543,10 +552,7 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
                 cJSON_Delete(root);
             }
             /* 清理本轮暂存的答案（第一段无答案；防泄漏） */
-            if (sess) {
-                AIRY_FREE(sess->answers);
-                sess->answers = NULL;
-            }
+            think_ans_drop(sess);
             airy_mtx_unlock(&svc->lock);
             if (!out_result->json)
                 return AIRY_ERR_OUT_OF_MEMORY;
@@ -555,10 +561,7 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
         }
 
         /* 清理本轮暂存的交互答案（真实失败路径，防泄漏到下一轮） */
-        if (sess) {
-            AIRY_FREE(sess->answers);
-            sess->answers = NULL;
-        }
+        think_ans_drop(sess);
         airy_mtx_unlock(&svc->lock);
         SVC_LOG_ERROR("ThinkDual: cognition process failed (err=%d)", err_code);
 
@@ -580,10 +583,7 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
     if (!root) {
         airy_task_plan_free(plan);
         /* 清理本轮暂存的交互答案（未消费场景：need_interaction=0） */
-        if (sess) {
-            AIRY_FREE(sess->answers);
-            sess->answers = NULL;
-        }
+        think_ans_drop(sess);
         airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
@@ -605,10 +605,7 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
     cJSON_Delete(root);
     airy_task_plan_free(plan);
     /* 清理本轮暂存的交互答案（第二段回调已消费则指针已置 NULL） */
-    if (sess) {
-        AIRY_FREE(sess->answers);
-        sess->answers = NULL;
-    }
+    think_ans_drop(sess);
     airy_mtx_unlock(&svc->lock);
 
     if (!out_result->json)
