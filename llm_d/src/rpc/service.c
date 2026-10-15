@@ -350,7 +350,7 @@ llm_service_t *llm_service_create(const char *config_path)
      * provider/model as routing endpoints. The router is a global singleton
      * (design in llm_router.c); init is idempotent. Failure is non-fatal: the
      * complete path falls back to find_provider for backward compatibility. */
-    if (llm_router_init(NULL) != 0) {
+    if (llm_router_init() != 0) {
         SVC_LOG_WARN(
             "C-L02: SVC: llm_router_init failed — routing disabled, falling back to find_provider");
     } else {

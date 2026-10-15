@@ -102,10 +102,9 @@ typedef struct {
 
 /**
  * @brief Initialize the LLM router.
- * @param config_path Config file path
  * @return 0 on success, non-zero on failure
  */
-int llm_router_init(const char *config_path);
+int llm_router_init(void);
 
 /** @brief Destroy the LLM router. */
 void llm_router_destroy(void);
