@@ -290,6 +290,28 @@ extern "C" {
     }
 
 /**
+ * @brief 漏斗派发薄壳（0.1.19 §222 u78-1，循 maths_d 本地宏先例下沉）。
+ *
+ * 统一漏斗 fn(sock, method, params, id) 承载响应收敛策略（maths_d
+ * svc_rpc_method 三路收敛），method 名以字符串形式传入；壳族只转参。
+ * 调用点行尾不加分号，与 DAEMON_RPC_SHELL 同约定。
+ */
+#define DAEMON_RPC_SHELL_M(name, fn)                    \
+    void m_##name(cJSON *params, int id, void *user_data) \
+    {                                                     \
+        fn(*(airy_sock_t *)user_data, #name, params, id); \
+    }
+
+/**
+ * @brief 生成头 handler 原型展开器（SVC_<D>_RPC_METHODS X 宏单点展开）。
+ *
+ * m_<method> 原型与 .manifest rpc.methods 一一对应；生成头以本宏一次
+ * 展开取代逐户手写声明块（0.1.19 §222 u78-1）。name 为清单中的方法名
+ * 字符串，原型只用 fn，故不消费。
+ */
+#define DAEMON_M_DECL(name, fn) void fn(cJSON *params, int id, void *user_data);
+
+/**
  * @brief Table-driven method registration (mechanism, complements the
  *        generated main.c of daemon_gen.py).
  *

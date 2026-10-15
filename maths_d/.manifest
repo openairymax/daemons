@@ -1,8 +1,9 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 4,
   "daemon": "maths_d",
   "cname": "maths",
   "sd_type": "maths",
+  "endpoint": "base",
   "noop_hooks": ["attach"],
   "facades": ["ingress", "execute", "governance"],
   "slots": ["compute", "validate", "record"],

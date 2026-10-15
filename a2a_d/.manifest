@@ -1,8 +1,9 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 4,
   "daemon": "a2a_d",
   "cname": "a2a",
   "sd_type": "a2a",
+  "endpoint": "apply",
   "ops": ["ipc"],
   "noop_hooks": ["activate", "attach", "teardown"],
   "facades": ["ingress", "execute", "state"],

@@ -35,12 +35,6 @@ int svc_prepare(const char *config_path)
     return 0;
 }
 
-void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
-{
-    daemon_ep_base(ep, cmdline_tcp, MATHS_D_SOCKET_UNIX,
-                   MATHS_D_SOCKET_WIN, MATHS_D_TCP_PORT);
-}
-
 int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
     (void)driver;
@@ -82,29 +76,23 @@ static void svc_rpc_method(airy_sock_t client_fd, const char *method,
                            err[0] ? err : "internal error", id);
 }
 
-/* handler 薄壳：user_data 为机制层注入的 &client_fd
- * （DAEMON_REGISTER_METHODS user_data=NULL 约定） */
-#define SVC_RPC_HANDLER(name)                                                  \
-    void m_##name(cJSON *params, int id, void *user_data)                      \
-    {                                                                          \
-        svc_rpc_method(*(airy_sock_t *)user_data, #name, params, id);          \
-    }
-
-SVC_RPC_HANDLER(health_check)
-SVC_RPC_HANDLER(get_stats)
-SVC_RPC_HANDLER(recognize)
-SVC_RPC_HANDLER(eval)
-SVC_RPC_HANDLER(stats)
-SVC_RPC_HANDLER(plot)
-SVC_RPC_HANDLER(solve)
-SVC_RPC_HANDLER(differentiate)
-SVC_RPC_HANDLER(integrate)
-SVC_RPC_HANDLER(limit)
-SVC_RPC_HANDLER(simplify)
-SVC_RPC_HANDLER(factor)
-SVC_RPC_HANDLER(expand)
-SVC_RPC_HANDLER(matrix)
-SVC_RPC_HANDLER(units)
-SVC_RPC_HANDLER(numerical)
-SVC_RPC_HANDLER(finance)
-SVC_RPC_HANDLER(number_theory)
+/* RPC 壳族：漏斗至 svc_rpc_method 唯一出口，
+ * 薄壳机制位由 daemon_main.h DAEMON_RPC_SHELL_M 承载 */
+DAEMON_RPC_SHELL_M(health_check, svc_rpc_method)
+DAEMON_RPC_SHELL_M(get_stats, svc_rpc_method)
+DAEMON_RPC_SHELL_M(recognize, svc_rpc_method)
+DAEMON_RPC_SHELL_M(eval, svc_rpc_method)
+DAEMON_RPC_SHELL_M(stats, svc_rpc_method)
+DAEMON_RPC_SHELL_M(plot, svc_rpc_method)
+DAEMON_RPC_SHELL_M(solve, svc_rpc_method)
+DAEMON_RPC_SHELL_M(differentiate, svc_rpc_method)
+DAEMON_RPC_SHELL_M(integrate, svc_rpc_method)
+DAEMON_RPC_SHELL_M(limit, svc_rpc_method)
+DAEMON_RPC_SHELL_M(simplify, svc_rpc_method)
+DAEMON_RPC_SHELL_M(factor, svc_rpc_method)
+DAEMON_RPC_SHELL_M(expand, svc_rpc_method)
+DAEMON_RPC_SHELL_M(matrix, svc_rpc_method)
+DAEMON_RPC_SHELL_M(units, svc_rpc_method)
+DAEMON_RPC_SHELL_M(numerical, svc_rpc_method)
+DAEMON_RPC_SHELL_M(finance, svc_rpc_method)
+DAEMON_RPC_SHELL_M(number_theory, svc_rpc_method)

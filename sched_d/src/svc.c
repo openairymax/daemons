@@ -78,12 +78,6 @@ int svc_prepare(const char *config_path)
     return 0;
 }
 
-void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
-{
-    daemon_ep_base(ep, cmdline_tcp, SCHED_D_SOCKET_UNIX,
-                   SCHED_D_SOCKET_WIN, SCHED_D_TCP_PORT);
-}
-
 int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
     (void)driver;
