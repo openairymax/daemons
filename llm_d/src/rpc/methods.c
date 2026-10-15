@@ -11,6 +11,9 @@
  * 请求解析在 src/rpc/dispatch.c，装配期共享符号经 llm_d_internal.h
  * 声明；m_* 签名与 .manifest rpc.methods 一一对应（svc_llm_d.h 由生成器
  * 产出，L3 SSoT）。
+ *
+ * 0.1.19 L1 收敛：服务面 handle_* 统一 (params, id, fd) 契约、自行发送
+ * 响应；m_* 薄壳经机制层 DAEMON_RPC_SHELL 单点生成，与全树各户同源。
  */
 
 #include "airy_memory.h"
@@ -114,37 +117,51 @@ static int llm_error_is_retryable(int ret)
     }
 }
 
-static char *handle_complete(cJSON *params, int id);
-static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd);
+static void handle_complete(cJSON *params, int id, airy_sock_t fd);
+static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd);
+static void handle_list_models(cJSON *params, int id, airy_sock_t fd);
+static void handle_embeddings(cJSON *params, int id, airy_sock_t fd);
+static void handle_count_tokens(cJSON *params, int id, airy_sock_t fd);
+static void handle_health_check(cJSON *params, int id, airy_sock_t fd);
+static void handle_get_stats(cJSON *params, int id, airy_sock_t fd);
 
-static char *handle_list_models(cJSON *params, int id)
+/* RPC 蹦床（m_<method> ↔ .manifest rpc.methods，原型由生成头 svc_llm_d.h
+ * 经 DAEMON_M_DECL 展开）：服务面 handle_* 统一 (params, id, fd) 契约、
+ * 自行发送响应，壳体经机制层 DAEMON_RPC_SHELL 单点生成，与全树各户同源
+ * 零漂移；调用点行尾不加分号（宏体自带 '}' 收尾）。 */
+DAEMON_RPC_SHELL(complete, handle_complete)
+DAEMON_RPC_SHELL(complete_stream, handle_complete_stream)
+DAEMON_RPC_SHELL(list_models, handle_list_models)
+DAEMON_RPC_SHELL(count_tokens, handle_count_tokens)
+DAEMON_RPC_SHELL(health_check, handle_health_check)
+DAEMON_RPC_SHELL(get_stats, handle_get_stats)
+DAEMON_RPC_SHELL(embeddings, handle_embeddings)
+
+static void handle_list_models(cJSON *params, int id, airy_sock_t fd)
 {
-    if (!g_service)
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Service not ready", id);
+    (void)params;
+    if (!g_service) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Service not ready", id);
+        return;
+    }
 
     char *json = llm_service_list_models(g_service);
-    if (!json)
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+    if (!json) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
 
     cJSON *root = cJSON_Parse(json);
     AIRY_FREE(json);
-    if (!root)
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Invalid list result", id);
+    if (!root) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Invalid list result", id);
+        return;
+    }
 
     /* Ownership semantics: jsonrpc_build_success attaches root to the
      * response object via cJSON_AddItemToObject and cJSON_Delete frees it
      * recursively; it must NOT be deleted here (otherwise double-free) */
-    return jsonrpc_build_success(root, id);
-}
-
-void m_list_models(cJSON *params, int id, void *user_data)
-{
-    char *response = handle_list_models(params, id);
-    if (response) {
-        airy_sock_t client_fd = *(airy_sock_t *)user_data;
-        airy_sock_send(client_fd, response, strlen(response));
-        AIRY_FREE(response);
-    }
+    JSONRPC_SEND_SUCCESS(fd, root, id);
 }
 
 /**
@@ -153,10 +170,12 @@ void m_list_models(cJSON *params, int id, void *user_data)
  * Forwards the OpenAI-format request ({"model":..,"input":..}) verbatim to
  * the owning provider's $api_base/embeddings and returns the upstream JSON.
  */
-static char *handle_embeddings(cJSON *params, int id)
+static void handle_embeddings(cJSON *params, int id, airy_sock_t fd)
 {
-    if (!params || !g_service)
-        return jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "Invalid params", id);
+    if (!params || !g_service) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "Invalid params", id);
+        return;
+    }
 
     char *model = NULL;
     cJSON *m = cJSON_GetObjectItem(params, "model");
@@ -166,7 +185,8 @@ static char *handle_embeddings(cJSON *params, int id)
     char *body = cJSON_PrintUnformatted(params);
     if (!body) {
         AIRY_FREE(model);
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
     }
 
     char *out = NULL;
@@ -174,25 +194,19 @@ static char *handle_embeddings(cJSON *params, int id)
     AIRY_FREE(body);
     AIRY_FREE(model);
 
-    if (rc != 0 || !out)
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Embedding failed", id);
+    if (rc != 0 || !out) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Embedding failed", id);
+        return;
+    }
 
     cJSON *result = cJSON_Parse(out);
     AIRY_FREE(out);
-    if (!result)
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Invalid embedding response", id);
-
-    return jsonrpc_build_success(result, id);
-}
-
-void m_embeddings(cJSON *params, int id, void *user_data)
-{
-    char *response = handle_embeddings(params, id);
-    if (response) {
-        airy_sock_t client_fd = *(airy_sock_t *)user_data;
-        airy_sock_send(client_fd, response, strlen(response));
-        AIRY_FREE(response);
+    if (!result) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Invalid embedding response", id);
+        return;
     }
+
+    JSONRPC_SEND_SUCCESS(fd, result, id);
 }
 
 typedef struct {
@@ -210,11 +224,12 @@ static llm_token_profile_t llm_token_profile(const char *model)
     return (llm_token_profile_t){"cl100k_base", AIRY_TOKEN_MODEL_GPT4};
 }
 
-static char *handle_count_tokens(cJSON *params, int id)
+static void handle_count_tokens(cJSON *params, int id, airy_sock_t fd)
 {
     cJSON *text = cJSON_GetObjectItem(params, "text");
     if (!cJSON_IsString(text) || !text->valuestring) {
-        return jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "Missing text string", id);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "Missing text string", id);
+        return;
     }
 
     const char *model = NULL;
@@ -231,122 +246,73 @@ static char *handle_count_tokens(cJSON *params, int id)
                                .alpha_ratio = 0.4f,
                                .flags = AIRY_TOKEN_FLAG_ACCURATE};
     size_t tokens = airy_token_standard_count(text->valuestring, 0, &cfg);
-    if (tokens == (size_t)-1)
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Token counting failed", id);
+    if (tokens == (size_t)-1) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Token counting failed", id);
+        return;
+    }
 
     cJSON *result = cJSON_CreateObject();
-    if (!result)
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+    if (!result) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
     cJSON_AddStringToObject(result, "model", model ? model : "default");
     cJSON_AddStringToObject(result, "text", text->valuestring);
     cJSON_AddNumberToObject(result, "tokens", (double)tokens);
     cJSON_AddStringToObject(result, "encoding", profile.encoding);
-    return jsonrpc_build_success(result, id);
+    JSONRPC_SEND_SUCCESS(fd, result, id);
 }
 
-void m_count_tokens(cJSON *params, int id, void *user_data)
+static void handle_health_check(cJSON *params, int id, airy_sock_t fd)
 {
-    char *response = handle_count_tokens(params, id);
-    if (response) {
-        airy_sock_t client_fd = *(airy_sock_t *)user_data;
-        airy_sock_send(client_fd, response, strlen(response));
-        AIRY_FREE(response);
-    }
-}
-
-static char *handle_health_check(cJSON *params, int id)
-{
+    (void)params;
     cJSON *result = cJSON_CreateObject();
-    if (!result)
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+    if (!result) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
     cJSON_AddStringToObject(result, "service", "llm_d");
     cJSON_AddBoolToObject(result, "healthy", g_service != NULL);
     cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
-    return jsonrpc_build_success(result, id);
+    JSONRPC_SEND_SUCCESS(fd, result, id);
 }
 
-void m_health_check(cJSON *params, int id, void *user_data)
+static void handle_get_stats(cJSON *params, int id, airy_sock_t fd)
 {
-    char *response = handle_health_check(params, id);
-    if (response) {
-        airy_sock_t client_fd = *(airy_sock_t *)user_data;
-        airy_sock_send(client_fd, response, strlen(response));
-        AIRY_FREE(response);
+    (void)params;
+    if (!g_service) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Service not ready", id);
+        return;
     }
-}
-
-static char *handle_get_stats(cJSON *params, int id)
-{
-    if (!g_service)
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Service not ready", id);
 
     char *json = NULL;
-    if (llm_service_stats(g_service, &json) != 0 || !json)
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Get stats failed", id);
+    if (llm_service_stats(g_service, &json) != 0 || !json) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Get stats failed", id);
+        return;
+    }
 
     cJSON *root = cJSON_Parse(json);
     AIRY_FREE(json);
-    if (!root)
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Invalid stats result", id);
+    if (!root) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Invalid stats result", id);
+        return;
+    }
 
     /* Ownership semantics: jsonrpc_build_success attaches root to the
      * response object via cJSON_AddItemToObject and cJSON_Delete frees it
      * recursively; it must NOT be deleted here */
-    return jsonrpc_build_success(root, id);
-}
-
-void m_get_stats(cJSON *params, int id, void *user_data)
-{
-    char *response = handle_get_stats(params, id);
-    if (response) {
-        airy_sock_t client_fd = *(airy_sock_t *)user_data;
-        airy_sock_send(client_fd, response, strlen(response));
-        AIRY_FREE(response);
-    }
-}
-
-/**
- * @brief Wrapper for the complete method (adapts the method_dispatcher
- *        interface)
- */
-void m_complete(cJSON *params, int id, void *user_data)
-{
-    char *response = handle_complete(params, id);
-    if (response) {
-        airy_sock_t client_fd = *(airy_sock_t *)user_data;
-        size_t resp_len = strlen(response);
-        if (getenv("AIRY_LLM_D_DIAG"))
-            SVC_LOG_ERROR("llm_d diag: complete send start fd=%d resp_len=%zu", (int)client_fd,
-                          resp_len);
-        ssize_t sent = airy_sock_send(client_fd, response, resp_len);
-        if (getenv("AIRY_LLM_D_DIAG"))
-            SVC_LOG_ERROR("llm_d diag: complete send done fd=%d sent=%zd errno=%d",
-                          (int)client_fd, sent, errno);
-        AIRY_FREE(response);
-    }
-}
-
-/**
- * @brief Wrapper for the complete_stream method
- */
-void m_complete_stream(cJSON *params, int id, void *user_data)
-{
-    airy_sock_t client_fd = *(airy_sock_t *)user_data;
-    char *response = handle_complete_stream(params, id, client_fd);
-    if (response) {
-        airy_sock_send(client_fd, response, strlen(response));
-        AIRY_FREE(response);
-    }
+    JSONRPC_SEND_SUCCESS(fd, root, id);
 }
 
 /**
  * @brief Handle the complete method
  */
-static char *handle_complete(cJSON *params, int id)
+static void handle_complete(cJSON *params, int id, airy_sock_t fd)
 {
     request_context_t *ctx = request_context_create();
     if (!ctx) {
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
     }
 
     llm_request_config_t cfg;
@@ -359,7 +325,8 @@ static char *handle_complete(cJSON *params, int id)
                  (ctx && ctx->fail_reason[0]) ? ctx->fail_reason : "request params rejected");
         SVC_LOG_ERROR("complete: %s", ebuf);
         request_context_destroy(ctx);
-        return jsonrpc_build_error(JSONRPC_INVALID_PARAMS, ebuf, id);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, ebuf, id);
+        return;
     }
 
     uint64_t start_time = airy_time_ms();
@@ -407,8 +374,9 @@ static char *handle_complete(cJSON *params, int id)
         AIRY_FREE((void *)cfg.model);
         request_context_destroy(ctx);
         char ebuf[128];
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR,
-                                   llm_error_message_fmt(ret, ebuf, sizeof(ebuf)), id);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,
+                           llm_error_message_fmt(ret, ebuf, sizeof(ebuf)), id);
+        return;
     }
 
     char *resp_json = response_to_json(resp);
@@ -417,13 +385,15 @@ static char *handle_complete(cJSON *params, int id)
 
     if (!resp_json) {
         request_context_destroy(ctx);
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Failed to serialize response", id);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Failed to serialize response", id);
+        return;
     }
 
     CJSON_PARSE_GUARD(result, resp_json, {
         AIRY_FREE(resp_json);
         request_context_destroy(ctx);
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Invalid response format", id);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Invalid response format", id);
+        return;
     });
     AIRY_FREE(resp_json);
 
@@ -435,7 +405,18 @@ static char *handle_complete(cJSON *params, int id)
     result = NULL;
 
     request_context_destroy(ctx);
-    return success;
+    if (!success)
+        return;
+    /* 诊断（AIRY_LLM_D_DIAG 门控）：complete 回包发送成败与 errno 观测点，
+     * 保留自原 m_complete 薄壳（构建成功后的发送→日志→释放三段）。 */
+    size_t resp_len = strlen(success);
+    if (getenv("AIRY_LLM_D_DIAG"))
+        SVC_LOG_ERROR("llm_d diag: complete send start fd=%d resp_len=%zu", (int)fd, resp_len);
+    ssize_t sent = airy_sock_send(fd, success, resp_len);
+    if (getenv("AIRY_LLM_D_DIAG"))
+        SVC_LOG_ERROR("llm_d diag: complete send done fd=%d sent=%zd errno=%d", (int)fd, sent,
+                      errno);
+    AIRY_FREE(success);
 }
 
 /**
@@ -538,31 +519,32 @@ static void llm_stream_send_error_frame(airy_sock_t fd, int id, int code, const 
     AIRY_FREE(body);
 }
 
-static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd)
+static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
 {
     request_context_t *ctx = request_context_create();
     if (!ctx) {
-        return jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
     }
 
     llm_request_config_t cfg;
     if (parse_params(params, ctx, &cfg) != 0) {
-        /* P24：错误帧携带具体原因；不再返回文本响应（on_ 包装器对非 NULL
-         * 返回值会按普通响应推送，破坏流协议）。llm_d 随后关闭连接 →
-         * adapter 收到 EOF 判定流结束。 */
+        /* P24：错误帧携带具体原因；流协议只认 RS 帧，故不回文本响应
+         * （裸 JSON-RPC 信封会被 adapter 当正文显示）。llm_d 随后关闭
+         * 连接 → adapter 收到 EOF 判定流结束。 */
         const char *reason = (ctx && ctx->fail_reason[0]) ? ctx->fail_reason
                                                           : "request params rejected";
         char rbuf[200];
         snprintf(rbuf, sizeof(rbuf), "Invalid params: %s", reason);
         SVC_LOG_ERROR("complete_stream: %s", rbuf);
-        llm_stream_send_error_frame(client_fd, id, JSONRPC_INVALID_PARAMS, rbuf);
+        llm_stream_send_error_frame(fd, id, JSONRPC_INVALID_PARAMS, rbuf);
         request_context_destroy(ctx);
-        return NULL;
+        return;
     }
 
     cfg.stream = 1;
 
-    llm_stream_ctx_t stream_ctx = {.fd = client_fd};
+    llm_stream_ctx_t stream_ctx = {.fd = fd};
 
     llm_response_t *resp = NULL;
     int ret = llm_service_complete_stream(g_service, &cfg, llm_stream_callback, &stream_ctx, &resp);
@@ -570,14 +552,14 @@ static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd
     if (ret != 0) {
         AIRY_FREE((void *)cfg.model);
         request_context_destroy(ctx);
-        /* 与 parse_params 失败路径同因同治：非 NULL 返回值会被
-         * m_complete_stream 当普通响应推给流客户端，裸 JSON-RPC
-         * 信封混入正文（adapter 不识别信封，把 {"jsonrpc":...} 当回复显示）。 */
+        /* 与 parse_params 失败路径同因同治：流协议只认 RS 帧，不得把
+         * 裸 JSON-RPC 信封当普通响应推送（adapter 不识别信封，把
+         * {"jsonrpc":...} 当回复显示）。 */
         char ebuf[128];
         const char *msg = llm_error_message_fmt(ret, ebuf, sizeof(ebuf));
         SVC_LOG_ERROR("complete_stream: %s", msg);
-        llm_stream_send_error_frame(client_fd, id, JSONRPC_INTERNAL_ERROR, msg);
-        return NULL;
+        llm_stream_send_error_frame(fd, id, JSONRPC_INTERNAL_ERROR, msg);
+        return;
     }
 
     if (resp) {
@@ -593,11 +575,10 @@ static char *handle_complete_stream(cJSON *params, int id, airy_sock_t client_fd
                            resp->prompt_tokens, resp->completion_tokens, resp->total_tokens,
                            resp->reasoning_tokens, resp->cost_usd);
         if (ufn > 0)
-            llm_stream_send_all(client_fd, usage_frame, (size_t)ufn);
+            llm_stream_send_all(fd, usage_frame, (size_t)ufn);
         llm_response_free(resp);
     }
 
     AIRY_FREE((void *)cfg.model);
     request_context_destroy(ctx);
-    AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
