@@ -41,6 +41,7 @@ int route_least_latency(const llm_route_request_t *request, llm_route_result_t *
 
     size_t best_idx = 0;
     uint32_t best_latency = UINT32_MAX;
+    uint32_t max_latency = 0;
 
     for (size_t i = 0; i < eligible_count; i++) {
         AIRY_LOG_DEBUG("C-L02: Latency: endpoint[%zu] %s/%s latency=%ums", i,
@@ -51,20 +52,13 @@ int route_least_latency(const llm_route_request_t *request, llm_route_result_t *
             best_latency = eligible[i]->avg_latency_ms;
             best_idx = i;
         }
+        if (eligible[i]->avg_latency_ms > max_latency)
+            max_latency = eligible[i]->avg_latency_ms;
     }
 
-    {
-        uint32_t min_lat = UINT32_MAX, max_lat = 0;
-        for (size_t i = 0; i < eligible_count; i++) {
-            if (eligible[i]->avg_latency_ms < min_lat)
-                min_lat = eligible[i]->avg_latency_ms;
-            if (eligible[i]->avg_latency_ms > max_lat)
-                max_lat = eligible[i]->avg_latency_ms;
-        }
-        AIRY_LOG_DEBUG("C-L02: Latency: latency range min=%ums max=%ums "
-                       "across %zu endpoints",
-                       min_lat, max_lat, eligible_count);
-    }
+    AIRY_LOG_DEBUG("C-L02: Latency: latency range min=%ums max=%ums "
+                   "across %zu endpoints",
+                   best_latency, max_latency, eligible_count);
 
     llm_endpoint_t *ep = eligible[best_idx];
     size_t input_tokens = router_estimate_tokens(request->prompt, request->prompt_len);

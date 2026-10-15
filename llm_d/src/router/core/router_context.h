@@ -13,7 +13,6 @@
 #define AIRY_RT_LLM_ROUTER_CONTEXT_H
 
 #include "router/core/llm_router.h"
-#include "cost_tracker.h"
 #include "token_standard.h"
 #include "airy_memory.h"
 /* d8 cleanup: removed sync_compat.h (this file only uses airy_mtx_t,
@@ -42,7 +41,6 @@ typedef struct {
     size_t endpoint_count;
     llm_route_strategy_t default_strategy;
     llm_router_stats_t stats;
-    cost_tracker_t *cost_tracker;
     airy_token_config_t token_cfg;
     airy_mtx_t mutex;
     bool initialized;
