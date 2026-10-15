@@ -344,46 +344,42 @@ int builtin_proc_capture(builtin_child_fn child_fn, void *child_ctx, const char 
 }
 #endif /* !_WIN32 */
 
+/* Built-in capability slot (SSoT): the id -> implementation binding. The
+ * executor dispatches on meta->id (derived from the tool metadata table in
+ * tool_d/src/rpc/service_builtin.c), so this grid is the single place a new
+ * built-in tool's dispatch row is added; tool_builtin_run() is then a pure
+ * table lookup with a fail-closed unknown-id tail. */
+typedef int (*builtin_fn_t)(const char *params_json, uint32_t timeout_ms, tool_result_t *res);
+
+typedef struct {
+    const char *id;
+    builtin_fn_t fn;
+} builtin_slot_t;
+
+#define BUILTIN_SLOT_COUNT (sizeof(g_builtin_slots) / sizeof(g_builtin_slots[0]))
+
+static const builtin_slot_t g_builtin_slots[] = {
+    {"fs_read", fs_read_tool},     {"fs_write", fs_write_tool},   {"fs_list", fs_list_tool},
+    {"shell_run", shell_run_tool}, {"web_fetch", web_fetch_tool}, {"fs_glob", fs_glob_tool},
+    {"fs_grep", fs_grep_tool},     {"fs_edit", fs_edit_tool},     {"fs_delete", fs_delete_tool},
+    {"web_search", web_search_tool},
+#ifndef _WIN32
+    {"git_exec", git_exec_tool}, {"git_diff", git_diff_tool}, {"git_apply", git_apply_tool},
+#endif
+    {"maths_eval", maths_eval_tool},
+    {"maths_stats", maths_stats_tool},
+    {"maths_plot", maths_plot_tool},
+};
+
 int tool_builtin_run(const char *tool_id, const char *params_json, uint32_t timeout_ms,
                      tool_result_t *res)
 {
-    if (!tool_id || !res) {
+    if (!tool_id || !res)
         return AIRY_ERR_INVALID_PARAM;
+    for (size_t i = 0; i < BUILTIN_SLOT_COUNT; ++i) {
+        if (strcmp(tool_id, g_builtin_slots[i].id) == 0)
+            return g_builtin_slots[i].fn(params_json, timeout_ms, res);
     }
-    if (strcmp(tool_id, "fs_read") == 0)
-        return fs_read_tool(params_json, timeout_ms, res);
-    if (strcmp(tool_id, "fs_write") == 0)
-        return fs_write_tool(params_json, timeout_ms, res);
-    if (strcmp(tool_id, "fs_list") == 0)
-        return fs_list_tool(params_json, timeout_ms, res);
-    if (strcmp(tool_id, "shell_run") == 0)
-        return shell_run_tool(params_json, timeout_ms, res);
-    if (strcmp(tool_id, "web_fetch") == 0)
-        return web_fetch_tool(params_json, timeout_ms, res);
-    if (strcmp(tool_id, "fs_glob") == 0)
-        return fs_glob_tool(params_json, timeout_ms, res);
-    if (strcmp(tool_id, "fs_grep") == 0)
-        return fs_grep_tool(params_json, timeout_ms, res);
-    if (strcmp(tool_id, "fs_edit") == 0)
-        return fs_edit_tool(params_json, timeout_ms, res);
-    if (strcmp(tool_id, "fs_delete") == 0)
-        return fs_delete_tool(params_json, timeout_ms, res);
-    if (strcmp(tool_id, "web_search") == 0)
-        return web_search_tool(params_json, timeout_ms, res);
-#ifndef _WIN32
-    if (strcmp(tool_id, "git_exec") == 0)
-        return git_exec_tool(params_json, timeout_ms, res);
-    if (strcmp(tool_id, "git_diff") == 0)
-        return git_diff_tool(params_json, timeout_ms, res);
-    if (strcmp(tool_id, "git_apply") == 0)
-        return git_apply_tool(params_json, timeout_ms, res);
-#endif
-    if (strcmp(tool_id, "maths_eval") == 0)
-        return maths_eval_tool(params_json, timeout_ms, res);
-    if (strcmp(tool_id, "maths_stats") == 0)
-        return maths_stats_tool(params_json, timeout_ms, res);
-    if (strcmp(tool_id, "maths_plot") == 0)
-        return maths_plot_tool(params_json, timeout_ms, res);
     SVC_LOG_ERROR("builtin: unknown builtin tool '%s'", tool_id);
     res->error = AIRY_STRDUP("Unknown builtin tool");
     return AIRY_ERR_EXEC_NOT_FOUND;
