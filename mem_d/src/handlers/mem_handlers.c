@@ -34,10 +34,7 @@ void handle_write(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *data = cJSON_GetObjectItem(params, "data");
     cJSON *metadata = cJSON_GetObjectItem(params, "metadata");
 
-    if (!data || !cJSON_IsString(data)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing data string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(data && cJSON_IsString(data), client_fd, "Missing data string", id);
 
     mem_write_request_t req = {
         .data = data->valuestring,
@@ -71,10 +68,7 @@ void handle_search(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *query = cJSON_GetObjectItem(params, "query");
     cJSON *limit = cJSON_GetObjectItem(params, "limit");
 
-    if (!query || !cJSON_IsString(query)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing query string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(query && cJSON_IsString(query), client_fd, "Missing query string", id);
 
     mem_search_hit_t *hits = NULL;
     size_t count = 0;
@@ -97,10 +91,7 @@ void handle_search(cJSON *params, int id, airy_sock_t client_fd)
 void handle_get(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *record_id = cJSON_GetObjectItem(params, "record_id");
-    if (!record_id || !cJSON_IsString(record_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing record_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(record_id && cJSON_IsString(record_id), client_fd, "Missing record_id", id);
 
     mem_record_t rec = {0};
     int ret = mem_service_get(g_service, record_id->valuestring, &rec);
@@ -124,10 +115,7 @@ void handle_get(cJSON *params, int id, airy_sock_t client_fd)
 void handle_delete(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *record_id = cJSON_GetObjectItem(params, "record_id");
-    if (!record_id || !cJSON_IsString(record_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing record_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(record_id && cJSON_IsString(record_id), client_fd, "Missing record_id", id);
 
     int ret = mem_service_delete(g_service, record_id->valuestring);
     if (ret != AIRY_SUCCESS) {

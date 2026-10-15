@@ -52,17 +52,11 @@ DAEMON_RPC_SHELL0(get_stats, handle_get_stats)
 static void handle_record_metric(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *metric_json = jsonrpc_get_object_param(params, "metric");
-    if (!metric_json) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing metric object", id);
-        return;
-    }
+    JSONRPC_REQUIRE(metric_json, client_fd, "Missing metric object", id);
 
     metric_info_t metric = {0};
     const char *mname = get_string_field(metric_json, "name", NULL);
-    if (!mname) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing metric name", id);
-        return;
-    }
+    JSONRPC_REQUIRE(mname, client_fd, "Missing metric name", id);
 
     metric.name = AIRY_STRDUP(mname);
     metric.description = (char *)get_string_field(metric_json, "description", NULL);
@@ -154,10 +148,7 @@ static void handle_get_stats(int id, airy_sock_t client_fd)
 static void handle_trigger_alert(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *alert_json = jsonrpc_get_object_param(params, "alert");
-    if (!alert_json) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing alert object", id);
-        return;
-    }
+    JSONRPC_REQUIRE(alert_json, client_fd, "Missing alert object", id);
 
     alert_info_t alert = {0};
     alert.alert_id = (char *)get_string_field(alert_json, "alert_id", NULL);
@@ -303,10 +294,7 @@ static void handle_heartbeat(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_alert_resolve(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *alert_id = get_string_field(params, "alert_id", NULL);
-    if (!alert_id) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing alert_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(alert_id, client_fd, "Missing alert_id", id);
 
     int ret = monitor_service_resolve_alert(g_service, alert_id);
     if (ret == AIRY_ERR_NOT_FOUND) {

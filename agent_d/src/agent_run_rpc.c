@@ -168,16 +168,10 @@ static void handle_run(cJSON *params, int id, airy_sock_t client_fd)
 /* agent.cancel 请求处理：按 session_id 置位取消标志。 */
 static void handle_cancel(cJSON *params, int id, airy_sock_t client_fd)
 {
-    if (!params) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing params", id);
-        return;
-    }
+    JSONRPC_REQUIRE(params, client_fd, "Missing params", id);
     cJSON *sid = cJSON_GetObjectItem(params, "session_id");
-    if (!cJSON_IsString(sid) || !sid->valuestring || !*sid->valuestring) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Invalid params: missing session_id",
-                           id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(sid) && sid->valuestring && *sid->valuestring, client_fd,
+                    "Invalid params: missing session_id", id);
     int rc = agent_run_cancel_by_session(sid->valuestring);
     if (rc != AIRY_SUCCESS) {
         SVC_LOG_DEBUG("agent.cancel miss (session=%s, 请求已完成或不存在)", sid->valuestring);
