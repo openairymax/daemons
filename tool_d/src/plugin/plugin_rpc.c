@@ -117,10 +117,8 @@ static void prpc_handle_load(cJSON *params, int id, void *user_data)
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *library_path = cJSON_GetObjectItem(params, "library_path");
     cJSON *config_path = cJSON_GetObjectItem(params, "config_path");
-    if (!library_path || !cJSON_IsString(library_path)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing library_path string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(library_path && cJSON_IsString(library_path), client_fd,
+                    "Missing library_path string", id);
     const char *out_name = NULL;
     int ret = plugin_service_load(library_path->valuestring,
                                   config_path && cJSON_IsString(config_path)
@@ -142,10 +140,7 @@ static void prpc_handle_unload(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *name = cJSON_GetObjectItem(params, "name");
-    if (!name || !cJSON_IsString(name)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing name string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(name && cJSON_IsString(name), client_fd, "Missing name string", id);
     int ret = plugin_service_unload(name->valuestring);
     if (ret != 0) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Plugin unload failed", id);
@@ -161,10 +156,7 @@ static void prpc_handle_start(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *name = cJSON_GetObjectItem(params, "name");
-    if (!name || !cJSON_IsString(name)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing name string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(name && cJSON_IsString(name), client_fd, "Missing name string", id);
     int ret = plugin_service_start(name->valuestring);
     if (ret != 0) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Plugin start failed", id);
@@ -179,10 +171,7 @@ static void prpc_handle_stop(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *name = cJSON_GetObjectItem(params, "name");
-    if (!name || !cJSON_IsString(name)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing name string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(name && cJSON_IsString(name), client_fd, "Missing name string", id);
     int ret = plugin_service_stop(name->valuestring);
     if (ret != 0) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Plugin stop failed", id);
@@ -198,10 +187,8 @@ static void prpc_handle_exec(cJSON *params, int id, void *user_data)
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *name = cJSON_GetObjectItem(params, "name");
     cJSON *input = cJSON_GetObjectItem(params, "input");
-    if (!name || !cJSON_IsString(name) || !input || !cJSON_IsString(input)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing name/input strings", id);
-        return;
-    }
+    JSONRPC_REQUIRE(name && cJSON_IsString(name) && input && cJSON_IsString(input), client_fd,
+                    "Missing name/input strings", id);
     char *output = NULL;
     int ret = plugin_service_execute(name->valuestring, input->valuestring, &output);
     if (ret != 0) {
@@ -218,10 +205,7 @@ static void prpc_handle_metadata(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *name = cJSON_GetObjectItem(params, "name");
-    if (!name || !cJSON_IsString(name)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing name string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(name && cJSON_IsString(name), client_fd, "Missing name string", id);
     plugin_metadata_t metadata;
     AIRY_MEMSET(&metadata, 0, sizeof(metadata));
     if (plugin_service_get_metadata(name->valuestring, &metadata) != 0) {
@@ -243,10 +227,7 @@ static void prpc_handle_state(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *name = cJSON_GetObjectItem(params, "name");
-    if (!name || !cJSON_IsString(name)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing name string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(name && cJSON_IsString(name), client_fd, "Missing name string", id);
     cJSON *result = cJSON_CreateObject();
     cJSON_AddNumberToObject(result, "state", (double)plugin_service_get_state(name->valuestring));
     JSONRPC_SEND_SUCCESS(client_fd, result, id);

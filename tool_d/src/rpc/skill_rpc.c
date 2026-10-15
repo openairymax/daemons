@@ -29,10 +29,7 @@ static void srpc_install(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     const char *url = get_string_field(params, "url", NULL);
-    if (!url || !*url) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing url", id);
-        return;
-    }
+    JSONRPC_REQUIRE(url && *url, client_fd, "Missing url", id);
 
     char *skill_id = NULL;
     airy_err_t err = airy_sys_skill_install(url, &skill_id);
@@ -78,11 +75,7 @@ static void srpc_execute(cJSON *params, int id, void *user_data)
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     const char *skill_id = get_string_field(params, "skill_id", NULL);
     const char *input = get_string_field(params, "input", NULL);
-    if (!skill_id || !*skill_id || !input) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "Missing skill_id or input", id);
-        return;
-    }
+    JSONRPC_REQUIRE(skill_id && *skill_id && input, client_fd, "Missing skill_id or input", id);
 
     char *output = NULL;
     airy_err_t err = airy_sys_skill_execute(skill_id, input, &output);
@@ -105,10 +98,7 @@ static void srpc_uninstall(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     const char *skill_id = get_string_field(params, "skill_id", NULL);
-    if (!skill_id || !*skill_id) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing skill_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(skill_id && *skill_id, client_fd, "Missing skill_id", id);
 
     airy_err_t err = airy_sys_skill_uninstall(skill_id);
     if (err == AIRY_ENOENT) {

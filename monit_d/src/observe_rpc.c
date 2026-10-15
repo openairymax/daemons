@@ -321,19 +321,13 @@ static void obs_sync_self(void)
 
 static void obs_h_record(cJSON *params, int id, airy_sock_t client_fd)
 {
-    if (!cJSON_IsObject(params)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "params object required", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsObject(params), client_fd, "params object required", id);
     cJSON *namej = cJSON_GetObjectItem(params, "name");
     cJSON *valuej = cJSON_GetObjectItem(params, "value");
     cJSON *typej = cJSON_GetObjectItem(params, "type");
     cJSON *unitj = cJSON_GetObjectItem(params, "unit");
-    if (!cJSON_IsString(namej) || !cJSON_IsNumber(valuej)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "name (string) and value (number) required", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(namej) && cJSON_IsNumber(valuej), client_fd,
+                    "name (string) and value (number) required", id);
     obs_metric_type_t mtype = OBS_GAUGE;
     if (cJSON_IsString(typej)) {
         if (strcmp(typej->valuestring, "counter") == 0)

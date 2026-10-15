@@ -107,10 +107,8 @@ static void roadmap_on_plan(cJSON *params, int id, airy_sock_t client_fd)
     if (!roadmap_ready(id, client_fd))
         return;
     cJSON *input = params ? cJSON_GetObjectItem(params, "input") : NULL;
-    if (!cJSON_IsString(input) || !input->valuestring || !input->valuestring[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing input string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(input) && input->valuestring && input->valuestring[0], client_fd,
+                    "Missing input string", id);
 
     char *out_json = NULL;
     airy_rs_dispatch_t dispatch = AIRY_RS_DISPATCH_MISS_L3;
@@ -158,10 +156,7 @@ static void roadmap_on_absorb(cJSON *params, int id, airy_sock_t client_fd)
         airy_err_t perr = plan_str ? airy_plan_parse(plan_str, &plan)
                                    : AIRY_ERR_OUT_OF_MEMORY;
         AIRY_FREE(plan_str);
-        if (perr != AIRY_SUCCESS || !plan) {
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Invalid plan JSON", id);
-            return;
-        }
+        JSONRPC_REQUIRE(perr == AIRY_SUCCESS && plan, client_fd, "Invalid plan JSON", id);
         airy_err_t err = airy_roadmap_sched_absorb(g_roadmap, plan, exec_id, NULL);
         airy_task_plan_free(plan);
         if (err != AIRY_SUCCESS) {
@@ -175,11 +170,8 @@ static void roadmap_on_absorb(cJSON *params, int id, airy_sock_t client_fd)
 
     /* 模式 B：执行结果回灌（exec_id + node_id + output_json + result/verify） */
     cJSON *node_id = cJSON_GetObjectItem(params, "node_id");
-    if (!cJSON_IsString(node_id) || !node_id->valuestring || !node_id->valuestring[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing node_id (or plan object)",
-                           id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(node_id) && node_id->valuestring && node_id->valuestring[0],
+                    client_fd, "Missing node_id (or plan object)", id);
     airy_rs_absorb_meta_t meta;
     __builtin_memset(&meta, 0, sizeof(meta));
     meta.node_id = node_id->valuestring;
@@ -220,10 +212,8 @@ static void roadmap_on_cancel(cJSON *params, int id, airy_sock_t client_fd)
     if (cJSON_IsString(eid) && eid->valuestring && eid->valuestring[0])
         exec_id = eid->valuestring;
     cJSON *node_id = cJSON_GetObjectItem(params, "node_id");
-    if (!cJSON_IsString(node_id) || !node_id->valuestring || !node_id->valuestring[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing node_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(node_id) && node_id->valuestring && node_id->valuestring[0],
+                    client_fd, "Missing node_id", id);
     airy_err_t err = airy_roadmap_sched_on_cancel(g_roadmap, exec_id, node_id->valuestring);
     if (err != AIRY_SUCCESS) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "roadmap cancel failed", id);
@@ -239,11 +229,7 @@ static void roadmap_on_replan(cJSON *params, int id, airy_sock_t client_fd)
         return;
     cJSON *affected = cJSON_GetObjectItem(params, "affected_nodes");
     int affected_n = (affected && cJSON_IsArray(affected)) ? cJSON_GetArraySize(affected) : 0;
-    if (affected_n <= 0) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "affected_nodes must be a non-empty array", id);
-        return;
-    }
+    JSONRPC_REQUIRE(affected_n > 0, client_fd, "affected_nodes must be a non-empty array", id);
     char **nodes = (char **)AIRY_CALLOC((size_t)affected_n, sizeof(char *));
     if (!nodes) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);

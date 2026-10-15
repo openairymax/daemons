@@ -129,10 +129,7 @@ static void handle_search_agents(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_install_agent(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *aid = get_string_field(params, "agent_id", NULL);
-    if (!aid) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(aid, client_fd, "Missing agent_id", id);
 
     const char *version = get_string_field(params, "version", "latest");
     const char *install_path = get_string_field(params, "install_path", NULL);
@@ -180,10 +177,7 @@ static void handle_install_agent(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_uninst_agent(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *aid = get_string_field(params, "agent_id", NULL);
-    if (!aid || !*aid) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(aid && *aid, client_fd, "Missing agent_id", id);
 
     int ret = market_service_uninstall_agent(g_service, aid);
 
@@ -207,17 +201,11 @@ static void handle_uninst_agent(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_register_skill(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *skill_json = jsonrpc_get_object_param(params, "skill");
-    if (!skill_json) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing skill object", id);
-        return;
-    }
+    JSONRPC_REQUIRE(skill_json, client_fd, "Missing skill object", id);
 
     skill_info_t info = {0};
     const char *sid = get_string_field(skill_json, "skill_id", NULL);
-    if (!sid) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing skill_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(sid, client_fd, "Missing skill_id", id);
     info.skill_id = (char *)sid;
 
     info.name = (char *)get_string_field(skill_json, "name", NULL);
@@ -278,10 +266,7 @@ static void handle_search_skills(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_uninst_skill(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *sid = get_string_field(params, "skill_id", NULL);
-    if (!sid || !*sid) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing skill_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(sid && *sid, client_fd, "Missing skill_id", id);
 
     int ret = market_service_uninstall_skill(g_service, sid);
 
@@ -305,10 +290,7 @@ static void handle_uninst_skill(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_check_update(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *target = get_string_field(params, "id", NULL);
-    if (!target || !*target) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(target && *target, client_fd, "Missing id", id);
 
     bool has_update = false;
     char *latest = NULL;
@@ -412,10 +394,7 @@ static void handle_publish(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *agent_json = jsonrpc_get_object_param(params, "agent");
     cJSON *skill_json = jsonrpc_get_object_param(params, "skill");
 
-    if (!agent_json && !skill_json) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent or skill object", id);
-        return;
-    }
+    JSONRPC_REQUIRE(agent_json || skill_json, client_fd, "Missing agent or skill object", id);
 
     install_request_t req;
     AIRY_MEMSET(&req, 0, sizeof(req));
@@ -433,11 +412,8 @@ static void handle_publish(cJSON *params, int id, airy_sock_t client_fd)
         id_str = get_string_field(skill_json, "skill_id", NULL);
         version = get_string_field(skill_json, "version", "latest");
     }
-    if (!id_str) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           is_agent ? "Missing agent_id" : "Missing skill_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(id_str, client_fd,
+                    is_agent ? "Missing agent_id" : "Missing skill_id", id);
     req.id = (char *)id_str;
     req.version = (char *)version;
 
