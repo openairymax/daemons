@@ -112,11 +112,7 @@ DAEMON_RPC_SHELL0(get_stats, handle_get_stats)
 static void handle_spawn(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *spec = cJSON_GetObjectItem(params, "agent_spec");
-
-    if (!spec) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent_spec", id);
-        return;
-    }
+    JSONRPC_REQUIRE(spec, client_fd, "Missing agent_spec", id);
 
     char *spec_str = NULL;
     if (cJSON_IsString(spec)) {
@@ -124,10 +120,7 @@ static void handle_spawn(cJSON *params, int id, airy_sock_t client_fd)
     } else {
         spec_str = cJSON_PrintUnformatted(spec);
     }
-    if (!spec_str) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Invalid agent_spec", id);
-        return;
-    }
+    JSONRPC_REQUIRE(spec_str, client_fd, "Invalid agent_spec", id);
 
     uint64_t perf_t0 = perf_now_us();
     char *out_agent_id = NULL;
@@ -162,10 +155,7 @@ static void handle_terminate(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *agent_id = cJSON_GetObjectItem(params, "agent_id");
 
-    if (!agent_id || !cJSON_IsString(agent_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(agent_id && cJSON_IsString(agent_id), client_fd, "Missing agent_id", id);
 
     int ret = agent_service_terminate(g_service, agent_id->valuestring);
     if (ret != AIRY_SUCCESS) {
@@ -183,10 +173,7 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *agent_id = cJSON_GetObjectItem(params, "agent_id");
     cJSON *input = cJSON_GetObjectItem(params, "input");
 
-    if (!agent_id || !cJSON_IsString(agent_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(agent_id && cJSON_IsString(agent_id), client_fd, "Missing agent_id", id);
 
     const char *input_str = input && cJSON_IsString(input) ? input->valuestring : "";
     size_t input_len = strlen(input_str);
@@ -276,10 +263,7 @@ static void handle_cancel(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *request_id = cJSON_GetObjectItem(params, "request_id");
 
-    if (!request_id || !cJSON_IsString(request_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing request_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(request_id && cJSON_IsString(request_id), client_fd, "Missing request_id", id);
 
     int ret = agent_service_invoke_cancel(g_service, request_id->valuestring);
     if (ret != AIRY_SUCCESS) {

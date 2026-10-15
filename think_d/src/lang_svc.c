@@ -98,10 +98,8 @@ void lang_svc_process(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *text = cJSON_GetObjectItem(params, "text");
-    if (!cJSON_IsString(text) || !text->valuestring || !text->valuestring[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing text string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(text) && text->valuestring && text->valuestring[0], client_fd,
+                    "Missing text string", id);
     const char *model_id = NULL;
     cJSON *m = cJSON_GetObjectItem(params, "model_id");
     if (cJSON_IsString(m) && m->valuestring && m->valuestring[0])
@@ -158,10 +156,8 @@ void lang_svc_postprocess(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *text = cJSON_GetObjectItem(params, "text");
-    if (!cJSON_IsString(text) || !text->valuestring || !text->valuestring[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing text string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(text) && text->valuestring && text->valuestring[0], client_fd,
+                    "Missing text string", id);
     airy_lang_t expected = AIRY_LANG_UNKNOWN;
     cJSON *el = cJSON_GetObjectItem(params, "expected_lang");
     if (cJSON_IsNumber(el))

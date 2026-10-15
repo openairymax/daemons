@@ -27,12 +27,9 @@ void handle_cache_put(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *ttl = cJSON_GetObjectItem(params, "ttl");
     cJSON *cacheable = cJSON_GetObjectItem(params, "cacheable");
 
-    if (!g_cache || !text || !cJSON_IsString(text) || !response || !cJSON_IsString(response) ||
-        !model_id || !cJSON_IsString(model_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "cache_put 需 text/response/model_id 字符串", id);
-        return;
-    }
+    JSONRPC_REQUIRE(g_cache && text && cJSON_IsString(text) && response &&
+                    cJSON_IsString(response) && model_id && cJSON_IsString(model_id),
+                    client_fd, "cache_put 需 text/response/model_id 字符串", id);
 
     /* B5-3 准入门禁（fail-closed）：未显式声明 cacheable，或文本命中
      * 用户敏感面（凭据 / 私有路径 / 密钥前缀），均拒绝写入。 */
@@ -77,10 +74,8 @@ void handle_cache_get(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *model_id = cJSON_GetObjectItem(params, "model_id");
     cJSON *threshold = cJSON_GetObjectItem(params, "threshold");
 
-    if (!g_cache || !text || !cJSON_IsString(text) || !model_id || !cJSON_IsString(model_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "cache_get 需 text/model_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(g_cache && text && cJSON_IsString(text) && model_id && cJSON_IsString(model_id),
+                    client_fd, "cache_get 需 text/model_id", id);
 
     int hit = 0;
     double score = 0.0;
@@ -113,10 +108,8 @@ void handle_cache_get(cJSON *params, int id, airy_sock_t client_fd)
 void handle_cache_del(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *cache_id = cJSON_GetObjectItem(params, "cache_id");
-    if (!g_cache || !cache_id || !cJSON_IsString(cache_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "cache_del 需 cache_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(g_cache && cache_id && cJSON_IsString(cache_id), client_fd,
+                    "cache_del 需 cache_id", id);
 
     int deleted = 0;
     mem_cache_del(g_cache, cache_id->valuestring, &deleted);

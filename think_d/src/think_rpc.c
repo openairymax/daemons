@@ -20,10 +20,8 @@
 static void handle_process(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *prompt = cJSON_GetObjectItem(params, "prompt");
-    if (!prompt || !cJSON_IsString(prompt) || !prompt->valuestring[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing prompt string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(prompt && cJSON_IsString(prompt) && prompt->valuestring[0], client_fd,
+                    "Missing prompt string", id);
 
     /* GCCP 两段式交互第二段（P-A）：可选 gccp_answers（用户答案 JSON），
      * 缺省/空串视为第一段（无答案），引擎可能返回问题集挂起。 */
@@ -140,10 +138,8 @@ static void handle_health_check(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_orchestrate(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *input = cJSON_GetObjectItem(params, "input");
-    if (!input || !cJSON_IsString(input) || !input->valuestring[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing input string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(input && cJSON_IsString(input) && input->valuestring[0], client_fd,
+                    "Missing input string", id);
 
     uint32_t timeout_ms = 0;
     cJSON *timeout = cJSON_GetObjectItem(params, "timeout_ms");

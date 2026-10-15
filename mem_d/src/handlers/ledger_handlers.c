@@ -49,11 +49,9 @@ void handle_ledger_append(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *session = cJSON_GetObjectItem(params, "session_id");
     cJSON *entries = cJSON_GetObjectItem(params, "entries");
 
-    if (!g_ledger || !session || !cJSON_IsString(session) || !entries || !cJSON_IsArray(entries)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "ledger_append 需 session_id + entries[]", id);
-        return;
-    }
+    JSONRPC_REQUIRE(g_ledger && session && cJSON_IsString(session) && entries &&
+                    cJSON_IsArray(entries),
+                    client_fd, "ledger_append 需 session_id + entries[]", id);
 
     int n = cJSON_GetArraySize(entries);
     ledger_entry_in_t *in = AIRY_CALLOC(n > 0 ? (size_t)n : 1, sizeof(ledger_entry_in_t));
@@ -103,10 +101,8 @@ void handle_ledger_append(cJSON *params, int id, airy_sock_t client_fd)
 void handle_ledger_window(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *session = cJSON_GetObjectItem(params, "session_id");
-    if (!g_ledger || !session || !cJSON_IsString(session)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "ledger_window 需 session_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(g_ledger && session && cJSON_IsString(session), client_fd,
+                    "ledger_window 需 session_id", id);
     ledger_window_t win;
     int ret = mem_ledger_window(g_ledger, session->valuestring, &win);
     if (ret != AIRY_SUCCESS) {
@@ -137,10 +133,8 @@ void handle_ledger_window(cJSON *params, int id, airy_sock_t client_fd)
 void handle_ledger_budget(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *session = cJSON_GetObjectItem(params, "session_id");
-    if (!g_ledger || !session || !cJSON_IsString(session)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "ledger_budget 需 session_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(g_ledger && session && cJSON_IsString(session), client_fd,
+                    "ledger_budget 需 session_id", id);
     size_t used = 0, limit = 0, headroom = 0;
     mem_ledger_budget(g_ledger, session->valuestring, &used, &limit, &headroom);
     cJSON *result = cJSON_CreateObject();
@@ -157,12 +151,9 @@ void handle_ledger_mark(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *session = cJSON_GetObjectItem(params, "session_id");
     cJSON *entry_ids = cJSON_GetObjectItem(params, "entry_ids");
     cJSON *status = cJSON_GetObjectItem(params, "status");
-    if (!g_ledger || !session || !cJSON_IsString(session) || !entry_ids || !cJSON_IsArray(entry_ids) ||
-        !status || !cJSON_IsString(status)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "ledger_mark 需 session_id + entry_ids[] + status", id);
-        return;
-    }
+    JSONRPC_REQUIRE(g_ledger && session && cJSON_IsString(session) && entry_ids &&
+                    cJSON_IsArray(entry_ids) && status && cJSON_IsString(status),
+                    client_fd, "ledger_mark 需 session_id + entry_ids[] + status", id);
     int n = cJSON_GetArraySize(entry_ids);
     const char **ids = AIRY_CALLOC(n > 0 ? (size_t)n : 1, sizeof(char *));
     if (!ids) {
@@ -198,10 +189,8 @@ void handle_ledger_history(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *session = cJSON_GetObjectItem(params, "session_id");
     cJSON *limit = cJSON_GetObjectItem(params, "limit");
-    if (!g_ledger || !session || !cJSON_IsString(session)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "ledger_history 需 session_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(g_ledger && session && cJSON_IsString(session), client_fd,
+                    "ledger_history 需 session_id", id);
     ledger_entry_view_t *items = NULL;
     size_t count = 0;
     size_t lim = limit && cJSON_IsNumber(limit) ? clamp_u32(limit->valueint, 0, 10000) : 0;
@@ -271,11 +260,9 @@ void handle_compress(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *session = cJSON_GetObjectItem(params, "session_id");
     cJSON *entries = cJSON_GetObjectItem(params, "entries");
 
-    if (!g_ledger || !session || !cJSON_IsString(session) || !entries || !cJSON_IsArray(entries)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "compress 需 session_id + entries[]", id);
-        return;
-    }
+    JSONRPC_REQUIRE(g_ledger && session && cJSON_IsString(session) && entries &&
+                    cJSON_IsArray(entries),
+                    client_fd, "compress 需 session_id + entries[]", id);
 
     int n = cJSON_GetArraySize(entries);
     compress_entry_in_t *in = AIRY_CALLOC(n > 0 ? (size_t)n : 1, sizeof(compress_entry_in_t));

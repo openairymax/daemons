@@ -172,10 +172,7 @@ static void handle_list_models(cJSON *params, int id, airy_sock_t fd)
  */
 static void handle_embeddings(cJSON *params, int id, airy_sock_t fd)
 {
-    if (!params || !g_service) {
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "Invalid params", id);
-        return;
-    }
+    JSONRPC_REQUIRE(params && g_service, fd, "Invalid params", id);
 
     char *model = NULL;
     cJSON *m = cJSON_GetObjectItem(params, "model");
@@ -227,10 +224,7 @@ static llm_token_profile_t llm_token_profile(const char *model)
 static void handle_count_tokens(cJSON *params, int id, airy_sock_t fd)
 {
     cJSON *text = cJSON_GetObjectItem(params, "text");
-    if (!cJSON_IsString(text) || !text->valuestring) {
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "Missing text string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(text) && text->valuestring, fd, "Missing text string", id);
 
     const char *model = NULL;
     cJSON *model_json = cJSON_GetObjectItem(params, "model");

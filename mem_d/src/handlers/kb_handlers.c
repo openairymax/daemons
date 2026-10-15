@@ -29,12 +29,9 @@ void handle_kb_ingest(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *text = cJSON_GetObjectItem(params, "text");
     cJSON *chunk_size = cJSON_GetObjectItem(params, "chunk_size");
 
-    if (!cJSON_IsString(kb_id) || !kb_id->valuestring || !kb_id->valuestring[0] ||
-        !cJSON_IsString(text) || !text->valuestring) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "Missing kb_id/text (kb_id string + text string)", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(kb_id) && kb_id->valuestring && kb_id->valuestring[0] &&
+                    cJSON_IsString(text) && text->valuestring,
+                    client_fd, "Missing kb_id/text (kb_id string + text string)", id);
 
     size_t chunk = 0;
     if (cJSON_IsNumber(chunk_size))
@@ -67,12 +64,9 @@ void handle_kb_search(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *query = cJSON_GetObjectItem(params, "query");
     cJSON *limit = cJSON_GetObjectItem(params, "limit");
 
-    if (!cJSON_IsString(kb_id) || !kb_id->valuestring || !kb_id->valuestring[0] ||
-        !cJSON_IsString(query) || !query->valuestring) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "Missing kb_id/query (kb_id string + query string)", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(kb_id) && kb_id->valuestring && kb_id->valuestring[0] &&
+                    cJSON_IsString(query) && query->valuestring,
+                    client_fd, "Missing kb_id/query (kb_id string + query string)", id);
 
     mem_search_hit_t *hits = NULL;
     size_t count = 0;
@@ -96,10 +90,8 @@ void handle_kb_search(cJSON *params, int id, airy_sock_t client_fd)
 void handle_kb_delete(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *kb_id = cJSON_GetObjectItem(params, "kb_id");
-    if (!cJSON_IsString(kb_id) || !kb_id->valuestring || !kb_id->valuestring[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing kb_id string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(kb_id) && kb_id->valuestring && kb_id->valuestring[0], client_fd,
+                    "Missing kb_id string", id);
 
     size_t deleted = 0;
     int ret = mem_service_kb_delete(g_service, kb_id->valuestring, &deleted);

@@ -108,10 +108,8 @@ static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_unregister_agent(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *aid_json = cJSON_GetObjectItem(params, "agent_id");
-    if (!cJSON_IsString(aid_json) || !aid_json->valuestring || !*aid_json->valuestring) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(aid_json) && aid_json->valuestring && *aid_json->valuestring,
+                    client_fd, "Missing agent_id", id);
 
     int ret = sched_service_unregister_agent(g_service, aid_json->valuestring);
     if (ret != AIRY_SUCCESS && ret != AIRY_ERR_NOT_FOUND) {
@@ -130,10 +128,7 @@ static void handle_unregister_agent(cJSON *params, int id, airy_sock_t client_fd
 static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *task_json = jsonrpc_get_object_param(params, "task");
-    if (!task_json) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing task object", id);
-        return;
-    }
+    JSONRPC_REQUIRE(task_json, client_fd, "Missing task object", id);
 
     sched_task_info_t task = {0};
 
@@ -186,10 +181,8 @@ static void handle_schedule_task(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *tid = cJSON_GetObjectItem(params, "task_id");
-    if (!cJSON_IsString(tid) || !tid->valuestring || !*tid->valuestring) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing task_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(tid) && tid->valuestring && *tid->valuestring, client_fd,
+                    "Missing task_id", id);
 
     char *json_out = NULL;
     int ret = sched_service_get_task(g_service, tid->valuestring, &json_out);
@@ -213,10 +206,8 @@ static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *tid = cJSON_GetObjectItem(params, "task_id");
-    if (!cJSON_IsString(tid) || !tid->valuestring || !*tid->valuestring) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing task_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(tid) && tid->valuestring && *tid->valuestring, client_fd,
+                    "Missing task_id", id);
 
     int ret = sched_service_cancel_task(g_service, tid->valuestring);
     if (ret == AIRY_ERR_NOT_FOUND) {
@@ -242,10 +233,7 @@ static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_dag_submit(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *dag_json = jsonrpc_get_object_param(params, "dag");
-    if (!dag_json) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing dag object", id);
-        return;
-    }
+    JSONRPC_REQUIRE(dag_json, client_fd, "Missing dag object", id);
     char *dag_str = cJSON_PrintUnformatted(dag_json);
     if (!dag_str) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "JSON serialization failed", id);
@@ -280,10 +268,8 @@ static void handle_dag_submit(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_dag_status(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *did = cJSON_GetObjectItem(params, "dag_id");
-    if (!cJSON_IsString(did) || !did->valuestring || !*did->valuestring) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing dag_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(did) && did->valuestring && *did->valuestring, client_fd,
+                    "Missing dag_id", id);
 
     char *json_out = NULL;
     int ret = sched_service_get_dag(g_service, did->valuestring, &json_out);
@@ -327,10 +313,8 @@ static void handle_dag_list(int id, airy_sock_t client_fd)
 static void handle_dag_cancel(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *did = cJSON_GetObjectItem(params, "dag_id");
-    if (!cJSON_IsString(did) || !did->valuestring || !*did->valuestring) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing dag_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(did) && did->valuestring && *did->valuestring, client_fd,
+                    "Missing dag_id", id);
 
     int ret = sched_service_cancel_dag(g_service, did->valuestring);
     if (ret == AIRY_ERR_NOT_FOUND) {

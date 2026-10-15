@@ -47,21 +47,15 @@ DAEMON_RPC_SHELL(approve, handle_approve)
 static void handle_register(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *tool = jsonrpc_get_object_param(params, "tool");
-    if (!tool) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing tool object", id);
-        return;
-    }
+    JSONRPC_REQUIRE(tool, client_fd, "Missing tool object", id);
 
     tool_metadata_t meta = {0};
     const char *tid = get_string_field(tool, "id", NULL);
     const char *tname = get_string_field(tool, "name", NULL);
     const char *texec = get_string_field(tool, "executable", NULL);
 
-    if (!tid || !tname || !texec) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "Invalid tool fields: id, name, executable required", id);
-        return;
-    }
+    JSONRPC_REQUIRE(tid && tname && texec, client_fd,
+                    "Invalid tool fields: id, name, executable required", id);
 
     meta.id = (char *)tid;
     meta.name = (char *)tname;
@@ -125,10 +119,7 @@ static void handle_list(int id, airy_sock_t client_fd)
 static void handle_get(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *tid = get_string_field(params, "tool_id", NULL);
-    if (!tid) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing tool_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(tid, client_fd, "Missing tool_id", id);
 
     tool_metadata_t *meta = tool_service_get(g_service, tid);
     if (!meta) {
@@ -172,11 +163,8 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
      * behavior unchanged). */
     const char *agent_id = get_string_field(params, "agent_id", NULL);
 
-    if (!tid || !jparams) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS,
-                           "Invalid execute params: tool_id and params required", id);
-        return;
-    }
+    JSONRPC_REQUIRE(tid && jparams, client_fd,
+                    "Invalid execute params: tool_id and params required", id);
 
     if (!g_service) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
@@ -280,11 +268,7 @@ static void handle_approve(cJSON *params, int id, airy_sock_t client_fd)
     }
     const char *request_id = get_string_field(params, "request_id", NULL);
     const char *decision = get_string_field(params, "decision", NULL);
-    if (!request_id || !decision) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "request_id and decision required",
-                           id);
-        return;
-    }
+    JSONRPC_REQUIRE(request_id && decision, client_fd, "request_id and decision required", id);
     int ret = svc_int_resolve(g_service, request_id, decision);
     if (ret == 0) {
         cJSON *result = cJSON_CreateObject();

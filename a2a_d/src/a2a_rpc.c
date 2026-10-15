@@ -101,14 +101,8 @@ static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *agent_id = cJSON_GetObjectItem(params, "id");
     cJSON *name = cJSON_GetObjectItem(params, "name");
 
-    if (!agent_id || !cJSON_IsString(agent_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing id string", id);
-        return;
-    }
-    if (!name || !cJSON_IsString(name)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing name string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(agent_id && cJSON_IsString(agent_id), client_fd, "Missing id string", id);
+    JSONRPC_REQUIRE(name && cJSON_IsString(name), client_fd, "Missing name string", id);
 
     char *card_json = a2a_cjson_to_string(params);
     if (!card_json) {
@@ -126,10 +120,7 @@ static void handle_register_agent(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_unregister_agent(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *agent_id = cJSON_GetObjectItem(params, "agent_id");
-    if (!agent_id || !cJSON_IsString(agent_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(agent_id && cJSON_IsString(agent_id), client_fd, "Missing agent_id", id);
 
     char *result_json = NULL;
     int ret = a2a_service_unregister_agent(g_service, agent_id->valuestring, &result_json);
@@ -158,14 +149,9 @@ static void handle_create_task(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *description = cJSON_GetObjectItem(params, "description");
     cJSON *input = cJSON_GetObjectItem(params, "input");
 
-    if (!agent_id || !cJSON_IsString(agent_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing agent_id", id);
-        return;
-    }
-    if (!description || !cJSON_IsString(description)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing description", id);
-        return;
-    }
+    JSONRPC_REQUIRE(agent_id && cJSON_IsString(agent_id), client_fd, "Missing agent_id", id);
+    JSONRPC_REQUIRE(description && cJSON_IsString(description), client_fd,
+                    "Missing description", id);
 
     const char *input_str = (input && cJSON_IsString(input)) ? input->valuestring : NULL;
 
@@ -183,14 +169,8 @@ static void handle_update_task(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *output = cJSON_GetObjectItem(params, "output");
     cJSON *progress = cJSON_GetObjectItem(params, "progress");
 
-    if (!task_id || !cJSON_IsString(task_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing task_id", id);
-        return;
-    }
-    if (!state || !cJSON_IsNumber(state)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing state", id);
-        return;
-    }
+    JSONRPC_REQUIRE(task_id && cJSON_IsString(task_id), client_fd, "Missing task_id", id);
+    JSONRPC_REQUIRE(state && cJSON_IsNumber(state), client_fd, "Missing state", id);
 
     const char *output_str = (output && cJSON_IsString(output)) ? output->valuestring : NULL;
     double prog = (progress && cJSON_IsNumber(progress)) ? progress->valuedouble : 0.0;
@@ -207,10 +187,7 @@ static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *task_id = cJSON_GetObjectItem(params, "task_id");
     cJSON *reason = cJSON_GetObjectItem(params, "reason");
 
-    if (!task_id || !cJSON_IsString(task_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing task_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(task_id && cJSON_IsString(task_id), client_fd, "Missing task_id", id);
 
     const char *reason_str = (reason && cJSON_IsString(reason)) ? reason->valuestring : NULL;
 
@@ -223,10 +200,7 @@ static void handle_cancel_task(cJSON *params, int id, airy_sock_t client_fd)
 static void handle_get_task(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *task_id = cJSON_GetObjectItem(params, "task_id");
-    if (!task_id || !cJSON_IsString(task_id)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing task_id", id);
-        return;
-    }
+    JSONRPC_REQUIRE(task_id && cJSON_IsString(task_id), client_fd, "Missing task_id", id);
 
     char *result_json = NULL;
     int ret = a2a_service_get_task(g_service, task_id->valuestring, &result_json);
@@ -240,18 +214,9 @@ static void handle_send_message(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *role = cJSON_GetObjectItem(params, "role");
     cJSON *content = cJSON_GetObjectItem(params, "content");
 
-    if (!target || !cJSON_IsString(target)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing target_agent_id", id);
-        return;
-    }
-    if (!role || !cJSON_IsString(role)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing role", id);
-        return;
-    }
-    if (!content || !cJSON_IsString(content)) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing content", id);
-        return;
-    }
+    JSONRPC_REQUIRE(target && cJSON_IsString(target), client_fd, "Missing target_agent_id", id);
+    JSONRPC_REQUIRE(role && cJSON_IsString(role), client_fd, "Missing role", id);
+    JSONRPC_REQUIRE(content && cJSON_IsString(content), client_fd, "Missing content", id);
 
     char *result_json = NULL;
     int ret = a2a_service_send_message(g_service, target->valuestring, role->valuestring,

@@ -203,10 +203,8 @@ void review_svc_process(cJSON *params, int id, void *user_data)
 {
     airy_sock_t client_fd = *(airy_sock_t *)user_data;
     cJSON *stage = cJSON_GetObjectItem(params, "stage");
-    if (!cJSON_IsString(stage) || !stage->valuestring || !stage->valuestring[0]) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing stage string", id);
-        return;
-    }
+    JSONRPC_REQUIRE(cJSON_IsString(stage) && stage->valuestring && stage->valuestring[0], client_fd,
+                    "Missing stage string", id);
     cJSON *ng = cJSON_GetObjectItem(params, "node_goal");
     cJSON *oj = cJSON_GetObjectItem(params, "output_json");
     const char *node_goal = cJSON_IsString(ng) ? ng->valuestring : NULL;
