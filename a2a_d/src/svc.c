@@ -19,11 +19,6 @@
 
 a2a_service_t *g_service = NULL;
 
-void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
-{
-    daemon_ep_apply(ep, cmdline_tcp);
-}
-
 int svc_prepare(const char *config_path)
 {
     daemon_ep_load(daemon_ep_slot(), config_path, A2A_D_SOCKET_UNIX,

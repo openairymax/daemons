@@ -7,8 +7,9 @@
  *
  * market 服务单例 + 生命周期五钩子。本户为常量户：存储路径不依赖
  * config 文件，storage_path=NULL 由服务层回落 $AIRY_HOME/agents（或
- * /skills），故 svc_prepare 忽略 config_path。端点由 svc_endpoint 从
- * 生成头常量回填，cmdline use_tcp 只升不降。业务逻辑在
+ * /skills），故 svc_prepare 忽略 config_path。端点由生成头
+ * svc_endpoint 经 daemon_ep_base 常量直填回填，cmdline use_tcp 只升不降。
+ * 业务逻辑在
  * market_service_*.c / publisher.c 与 market_rpc.c。
  */
 
@@ -18,12 +19,6 @@
 #include "svc_logger.h"
 
 market_service_t *g_service = NULL;
-
-void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
-{
-    daemon_ep_base(ep, cmdline_tcp, MARKET_D_SOCKET_UNIX,
-                   MARKET_D_SOCKET_WIN, MARKET_D_TCP_PORT);
-}
 
 int svc_prepare(const char *config_path)
 {

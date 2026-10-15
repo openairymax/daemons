@@ -178,11 +178,6 @@ static void cfg_load(const char *config_path)
     }
 }
 
-void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
-{
-    daemon_ep_apply(ep, cmdline_tcp);
-}
-
 int svc_prepare(const char *config_path)
 {
     airy_paths_init();

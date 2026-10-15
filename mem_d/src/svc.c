@@ -169,16 +169,6 @@ static void load_daemon_config(const char *config_path)
 
 /* ── 生命周期五钩子（实现 generated main.c 契约） ───────────────────────── */
 
-void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
-{
-    daemon_ep_apply(ep, cmdline_tcp);
-
-    if (ep->use_tcp)
-        SVC_LOG_INFO("Listening on TCP %s:%u", ep->tcp_host, (unsigned)ep->tcp_port);
-    else
-        SVC_LOG_INFO("Listening on %s", ep->sock_unix ? ep->sock_unix : "(unset)");
-}
-
 int svc_prepare(const char *config_path)
 {
     load_daemon_config(config_path);

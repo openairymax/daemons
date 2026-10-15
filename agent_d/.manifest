@@ -1,8 +1,9 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 4,
   "daemon": "agent_d",
   "cname": "agent",
   "sd_type": "agent",
+  "endpoint": "apply",
   "ops": ["ipc"],
   "noop_hooks": ["attach"],
   "facades": ["ingress", "execute", "state"],

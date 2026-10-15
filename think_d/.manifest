@@ -1,8 +1,9 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 4,
   "daemon": "think_d",
   "cname": "think",
   "sd_type": "think",
+  "endpoint": "apply",
   "ops": ["ipc", "llm", "tool"],
   "noop_hooks": ["attach", "teardown"],
   "facades": ["ingress", "execute", "governance"],

@@ -1,8 +1,9 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 4,
   "daemon": "channel_d",
   "cname": "channel",
   "sd_type": "channel",
+  "endpoint": "base",
   "ops": ["ipc"],
   "noop_hooks": ["activate", "attach", "teardown"],
   "facades": ["ingress", "execute", "state"],
