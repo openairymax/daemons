@@ -29,11 +29,6 @@ static void ep_load(const char *config_path)
                    TOOL_D_SOCKET_WIN, TOOL_D_TCP_PORT, NULL, NULL);
 }
 
-void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
-{
-    daemon_ep_apply(ep, cmdline_tcp);
-}
-
 int svc_prepare(const char *config_path)
 {
     ep_load(config_path);

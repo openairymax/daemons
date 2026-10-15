@@ -1,8 +1,9 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 4,
   "daemon": "monit_d",
   "cname": "monitor",
   "sd_type": "monitor",
+  "endpoint": "base",
   "ops": ["ipc"],
   "cupolas": "pep",
   "noop_hooks": ["teardown"],

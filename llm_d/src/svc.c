@@ -48,16 +48,6 @@ static const char *cfg_fallback(const char *config_path)
     return default_model_path;
 }
 
-void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
-{
-    daemon_ep_apply(ep, cmdline_tcp);
-
-    if (ep->use_tcp)
-        SVC_LOG_INFO("Listening on TCP port %u", (unsigned)ep->tcp_port);
-    else
-        SVC_LOG_INFO("Listening on %s", ep->sock_unix ? ep->sock_unix : "(unset)");
-}
-
 int svc_prepare(const char *config_path)
 {
     /* LLM_D_SOCKET_UNIX 展开为 airy_runtime_dir_socket()，且 cfg_fallback

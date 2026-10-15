@@ -1,8 +1,9 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 4,
   "daemon": "market_d",
   "cname": "market",
   "sd_type": "market",
+  "endpoint": "base",
   "ops": ["ipc"],
   "noop_hooks": ["activate", "attach", "teardown"],
   "facades": ["ingress", "execute", "state"],

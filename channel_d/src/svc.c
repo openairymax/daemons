@@ -8,9 +8,10 @@
  * daemon 配置解析链 + channel 服务生命周期五钩子。配置链：缺省值
  * （CHANNEL_CONFIG_DEFAULTS）→ config 文件 daemon 段覆盖
  * （socket_dir / max_channels；原 -s/-n 命令行参数已迁移至配置面，
- * 机制统一走 --manager）。端点由 svc_endpoint 从生成头常量回填，
- * cmdline use_tcp 只升不降。channel 服务单例的创建、启动与销毁由
- * 本文件持有；业务逻辑在 channel_service.c / channel_io.c 与
+ * 机制统一走 --manager）。端点由生成头 svc_endpoint 经
+ * daemon_ep_base 常量直填回填，cmdline use_tcp 只升不降。channel
+ * 服务单例的创建、启动与销毁由本文件持有；业务逻辑在
+ * channel_service.c / channel_io.c 与
  * channel_rpc.c。
  */
 
@@ -63,12 +64,6 @@ static void cfg_load(const char *config_path)
         }
     }
     fclose(f);
-}
-
-void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
-{
-    daemon_ep_base(ep, cmdline_tcp, CHANNEL_D_SOCKET_UNIX,
-                   CHANNEL_D_SOCKET_WIN, CHANNEL_D_TCP_PORT);
 }
 
 int svc_prepare(const char *config_path)

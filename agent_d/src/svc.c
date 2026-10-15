@@ -8,8 +8,8 @@
  * 服务单例 + daemon 配置解析链 + 生命周期五钩子 + 12 个 RPC handler
  * 声明（实现散布 agent_d_rpc.c / agent_run_rpc.c）。配置链：缺省值 →
  * AIRY_MAX_AGENTS env → config 文件 daemon 段覆盖；端点四元组由
- * svc_endpoint 从解析结果回填，cmdline use_tcp 只升不降。业务逻辑在
- * 服务域（service_*.c）与 run 引擎域（agent_run_*.c）。
+ * 生成头 svc_endpoint 经 daemon_ep_apply 回填，cmdline use_tcp 只升不降。
+ * 业务逻辑在服务域（service_*.c）与 run 引擎域（agent_run_*.c）。
  */
 
 #include "svc_agent_d.h"
@@ -49,11 +49,6 @@ static void config_load(const char *config_path)
 
     daemon_ep_load(daemon_ep_slot(), config_path, AGENT_D_SOCKET_UNIX,
                    AGENT_D_SOCKET_WIN, AGENT_D_TCP_PORT, cfg_keys, NULL);
-}
-
-void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
-{
-    daemon_ep_apply(ep, cmdline_tcp);
 }
 
 int svc_prepare(const char *config_path)

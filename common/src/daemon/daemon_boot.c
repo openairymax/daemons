@@ -197,6 +197,12 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
         SVC_LOG_ERROR("Failed to create server socket");
         goto fail_svc;
     }
+    /* 监听地址日志统一机制位（0.1.19 §222 u78-1：原 llm_d/mem_d
+     * svc_endpoint 内逐户副本消解，全部生成户一处发射） */
+    if (ep.use_tcp)
+        SVC_LOG_INFO("Listening on TCP %s:%u", ep.tcp_host, (unsigned)ep.tcp_port);
+    else
+        SVC_LOG_INFO("Listening on %s", ep.sock_unix ? ep.sock_unix : "(unset)");
 
     daemon_event_config_t ev_config = {
         .max_events = boot->pool_max_events,

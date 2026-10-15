@@ -1,8 +1,9 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 4,
   "daemon": "tool_d",
   "cname": "tool",
   "sd_type": "tool",
+  "endpoint": "apply",
   "ops": ["ipc", "llm", "tool"],
   "noop_hooks": ["activate", "teardown"],
   "facades": ["ingress", "execute", "state", "governance"],

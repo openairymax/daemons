@@ -1,8 +1,9 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 4,
   "daemon": "mem_d",
   "cname": "mem",
   "sd_type": "mem",
+  "endpoint": "apply",
   "ops": ["ipc"],
   "cupolas": "pep",
   "noop_hooks": ["activate", "attach", "teardown"],

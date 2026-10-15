@@ -6,8 +6,9 @@
  * @brief monit_d 机制层-策略层适配（gen5 装配的策略挂点）。
  *
  * monitor 服务单例 + 生命周期五钩子。本户为常量户：端点由
- * svc_endpoint 从生成头常量回填，cmdline use_tcp 只升不降；服务参数
- * 不依赖 config 文件，svc_prepare 仅以 config_path 落启动日志。
+ * 生成头 svc_endpoint 经 daemon_ep_base 常量直填回填，cmdline use_tcp
+ * 只升不降；服务参数不依赖 config 文件，svc_prepare 仅以 config_path
+ * 落启动日志。
  * observe/info 两个内建域按原语义非阻断降级（init 失败仅记日志，
  * 对应方法族不可用）。业务逻辑在 service 域与 monit_rpc.c，
  * 30s 指标自监控定时器在 svc_activate 挂载。
@@ -41,12 +42,6 @@ static void metrics_tick(airy_event_loop_t *loop, uint64_t timer_id, void *user_
 
     prometheus_gauge_set("airy_monit_scrape_count", (double)scrape_count);
     prometheus_gauge_set("airy_monit_scrape_errors", (double)scrape_errors);
-}
-
-void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
-{
-    daemon_ep_base(ep, cmdline_tcp, MONIT_D_SOCKET_UNIX,
-                   MONIT_D_SOCKET_WIN, MONIT_D_TCP_PORT);
 }
 
 int svc_prepare(const char *config_path)
