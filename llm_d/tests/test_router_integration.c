@@ -81,7 +81,7 @@ static void test_cost_strategy_selects_cheapest(void)
 {
     printf("  [ACC-DT17.1] COST strategy selects cheapest endpoint...\n");
 
-    if (llm_router_init(NULL) != 0) {
+    if (llm_router_init() != 0) {
         TEST_FAIL("llm_router_init failed");
         return;
     }
@@ -165,7 +165,7 @@ static void test_round_robin_cycles(void)
 {
     printf("  [ACC-DT17.2] ROUND_ROBIN cycles through endpoints...\n");
 
-    if (llm_router_init(NULL) != 0) {
+    if (llm_router_init() != 0) {
         TEST_FAIL("llm_router_init failed");
         return;
     }

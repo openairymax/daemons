@@ -129,9 +129,9 @@ void merge_provider_configs(const provider_config_t *main_provs, size_t main_cnt
     *out_cnt = mc;
 }
 
-/* Default model metadata — kept consistent with the default pricing rules of
- * llm_router_init's cost_tracker. Used to fill the cost/latency/caps fields at
- * endpoint registration; future versions may override via config file. */
+/* Strategy-side default model metadata SSoT. Used to fill the cost/latency/caps
+ * fields at endpoint registration when the caller provides no explicit values;
+ * config-file overrides take precedence upstream. */
 typedef struct {
     const char *prefix;
     double cost_per_1k_input;

@@ -21,7 +21,7 @@ static void test_token_counter_create_destroy(void)
 {
     printf("  test_token_counter_create_destroy...\n");
 
-    assert(llm_router_init(NULL) == 0);
+    assert(llm_router_init() == 0);
 
     const char *text = "Hello";
     assert(router_estimate_tokens(text, strlen(text)) > 0);
@@ -38,7 +38,7 @@ static void test_token_counter_count(void)
 {
     printf("  test_token_counter_count...\n");
 
-    assert(llm_router_init(NULL) == 0);
+    assert(llm_router_init() == 0);
 
     const char *text = "Hello, world! This is a test.";
     size_t count = router_estimate_tokens(text, strlen(text));
@@ -51,7 +51,7 @@ static void test_token_counter_empty_string(void)
 {
     printf("  test_token_counter_empty_string...\n");
 
-    assert(llm_router_init(NULL) == 0);
+    assert(llm_router_init() == 0);
 
     assert(router_estimate_tokens("", 0) == 0);
 
@@ -62,7 +62,7 @@ static void test_token_counter_null_input(void)
 {
     printf("  test_token_counter_null_input...\n");
 
-    assert(llm_router_init(NULL) == 0);
+    assert(llm_router_init() == 0);
 
     /* NULL 文本走回落路径：prompt_len / 4 == 25 */
     assert(router_estimate_tokens(NULL, 100) == 25);
@@ -74,7 +74,7 @@ static void test_token_counter_estimate(void)
 {
     printf("  test_token_counter_estimate...\n");
 
-    assert(llm_router_init(NULL) == 0);
+    assert(llm_router_init() == 0);
 
     const char *short_text = "The quick brown fox.";
     const char *long_text = "The quick brown fox jumps over the lazy dog by the river.";

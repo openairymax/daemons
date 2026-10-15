@@ -28,7 +28,7 @@ router_ctx_t *router_ctx_get(void)
     return &g_router;
 }
 
-int llm_router_init(const char *config_path)
+int llm_router_init(void)
 {
     router_ctx_t *ctx = router_ctx_get();
 
@@ -47,20 +47,6 @@ int llm_router_init(const char *config_path)
         return AIRY_ERR_SYS_MUTEX;
     }
 
-    pricing_rule_t default_rules[] = {
-        {"gpt-4*", 0.03, 0.06},          {"gpt-3.5*", 0.001, 0.002},  {"claude*", 0.015, 0.075},
-        {"deepseek*", 0.00014, 0.00028}, {"gemini*", 0.0005, 0.0015},
-    };
-    ctx->cost_tracker =
-        cost_tracker_create(default_rules, sizeof(default_rules) / sizeof(default_rules[0]));
-    if (!ctx->cost_tracker) {
-        AIRY_LOG_ERROR("C-L02: LLMRouter: failed to create cost_tracker STACK: llm_router_init");
-        AIRY_MUTEX_DESTROY(&ctx->mutex);
-        return AIRY_ERR_GENERIC_FAIL;
-    }
-    AIRY_LOG_INFO("C-L02: LLMRouter: cost_tracker initialized with %zu pricing rules",
-                  sizeof(default_rules) / sizeof(default_rules[0]));
-
     ctx->token_cfg = (airy_token_config_t){.model_type = AIRY_TOKEN_MODEL_GPT4,
                                            .model_name = "cl100k_base",
                                            .cjk_ratio = 0.2f,
@@ -69,9 +55,7 @@ int llm_router_init(const char *config_path)
 
     ctx->initialized = true;
 
-    AIRY_LOG_INFO("C-L02: LLMRouter: initialization complete (config=%s)",
-                  config_path ? config_path : "default");
-    (void)config_path;
+    AIRY_LOG_INFO("C-L02: LLMRouter: initialization complete");
     return 0;
 }
 
@@ -90,11 +74,6 @@ void llm_router_destroy(void)
                   (unsigned long long)ctx->stats.total_tokens,
                   (unsigned long long)ctx->stats.fallback_count,
                   (unsigned long long)ctx->stats.error_count);
-
-    if (ctx->cost_tracker) {
-        cost_tracker_destroy(ctx->cost_tracker);
-        ctx->cost_tracker = NULL;
-    }
 
     AIRY_MUTEX_DESTROY(&ctx->mutex);
     AIRY_MEMSET(ctx, 0, sizeof(router_ctx_t));
