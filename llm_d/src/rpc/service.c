@@ -32,6 +32,20 @@
 #include "config/config_internal.h"
 #include "rpc/rpc_internal.h"
 
+/* 装配头：仅用于可见 llm_svc_reg 原型（防签名漂移），不消费其私有符号。
+ * struct llm_service 是本域私有类型，跨域句柄桥必须在本域实现。 */
+#include "llm_d_internal.h"
+
+/* 跨域桥（0.1.19 D5）：向装配域/RPC 方法域暴露 provider registry 句柄，
+ * 使 struct llm_service 保持私有不被穿透。见 llm_d_internal.h 契约注释。 */
+provider_registry_t *llm_svc_reg(const llm_service_t *svc)
+{
+    if (!svc)
+        return NULL;
+    const struct llm_service *s = (const struct llm_service *)svc;
+    return s->registry;
+}
+
 /* 2.1.1.5 修复：计费/用量持久化文件路径（$AIRY_DATA_DIR/agentrt/
  * llm_usage.json）。llm_d 启动时加载历史累计，每次真实调用后兜底保存、
  * 退出时保存，daemon 重启后金额与 token 历史不清零。 */
