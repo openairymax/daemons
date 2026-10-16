@@ -66,6 +66,8 @@ set(LLM_SERVICE_SOURCES
     # B16-S3 c6：openai 三件合一（openai.c + openai_stream.c + openai_internal.h → openai.c）
     src/providers/adapters/openai.c
     src/providers/core/rate_limit.c
+    # 0.1.19 D5：端点健康探测机制件（能力存在 ≠ 能力可用）
+    src/providers/core/ep_health.c
     src/providers/adapters/anthropic.c
     # B16-S4：deepseek.c / google.c 清理（OpenAI 兼容遗留冗余，经 model.yaml base_url 声明式接入）
     src/providers/adapters/local.c

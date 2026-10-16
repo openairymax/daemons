@@ -5,7 +5,7 @@
   "sd_type": "llm",
   "endpoint": "apply",
   "ops": ["ipc", "llm"],
-  "noop_hooks": ["activate", "attach", "teardown"],
+  "noop_hooks": ["attach", "teardown"],
   "facades": ["ingress", "execute", "state"],
   "slots": ["compute", "route", "cache", "config", "stream", "resilience"],
   "rpc": {

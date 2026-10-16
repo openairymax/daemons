@@ -19,10 +19,56 @@
 #include "llm_d_internal.h"
 
 #include "daemon_cfg_file.h"
+#include "daemon_event_driver.h"
+#include "providers/core/ep_health.h"
+#include "providers/core/registry.h"
 
 #include <stdio.h>
 
+/* D5 端点健康探测周期：5 分钟（架构改进方案 §3.6.3）。探测本身在
+ * daemon 线程池 worker 上执行，周期定时器只做一次 offload，不阻塞事件循环。 */
+#define EP_PROBE_INTERVAL_MS 300000
+
+/* D5 探测范围：仅本地低算力端点——远端云端点由其 SLA 与网关侧观测覆盖，
+ * 无需 llm_d 额外出网探测（探测范围属策略，周期/路径/范围在此注入机制件）。 */
+#define EP_PROBE_FILTER "local"
+#define EP_PROBE_PATH "/models"
+
 llm_service_t *g_service = NULL;
+
+/* 端点健康视图单例（定义归装配域）：extern 声明在 llm_d_internal.h，
+ * 供 methods.c 的 health_check 与流式冷加载上报只读消费。 */
+ep_health_t *g_ep = NULL;
+
+/* daemon 线程池句柄：定时器回调在事件循环线程执行，网络探测必须
+ * offload 至此，避免阻塞事件循环。生命周期归 daemon 框架，本件只借用。 */
+static thread_pool_t *g_ep_pool = NULL;
+
+static void ep_probe_task(void *arg)
+{
+    (void)arg;
+    ep_health_sweep(g_ep);
+}
+
+/* 周期定时器回调（事件循环线程）：只做一次 offload，绝不在此出网。
+ * 线程池不可用（未配置 pool_max）时降级为就地探测——探测量级为端点
+ * 数量级、单发超时 8s，远小于 5min 周期，降级仅推迟该轮结果不丢结论。 */
+static void ep_probe_tick(airy_event_loop_t *loop, uint64_t timer_id, void *user_data)
+{
+    (void)loop;
+    (void)timer_id;
+    (void)user_data;
+
+    if (!g_ep)
+        return;
+
+    if (g_ep_pool) {
+        if (thread_pool_submit(g_ep_pool, ep_probe_task, NULL) != 0)
+            SVC_LOG_WARN("C-L02: EP-HEALTH: probe offload rejected, skipping this round");
+        return;
+    }
+    ep_probe_task(NULL);
+}
 
 static void ep_load(const char *config_path)
 {
@@ -68,8 +114,43 @@ int svc_prepare(const char *config_path)
     return 0;
 }
 
+/* D5：事件驱动就绪后的策略挂点。装配顺序保证 svc_prepare 已建 g_service，
+ * 故此处可经 llm_svc_reg(g_service) 取 registry 快照建探测视图。探测周期
+ * 定时器与 KEEP_ALIVE 建议共同回应"能力存在 ≠ 能力可用"（§6 阻断 3）。 */
+int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
+{
+    (void)bsd;
+
+    g_ep_pool = daemon_event_driver_get_pool(driver);
+    g_ep = ep_health_create(llm_svc_reg(g_service), EP_PROBE_FILTER, EP_PROBE_PATH);
+    if (!g_ep) {
+        /* 探测属观测能力，非服务前置：视图不可用时降级禁用探测，绝不因此
+         * 中止 llm_d 启动（daemon_boot 对 svc_activate 非 0 值会 abort 整个
+         * 服务）。status 侧对缺失视图诚实报"探测不可用"。 */
+        SVC_LOG_ERROR("C-L02: EP-HEALTH: endpoint view unavailable, health probes disabled");
+        return 0;
+    }
+
+    /* 首轮探测立即触发：status 在启动后即能反映真实可达性，而非等待
+     * 一个完整周期（5min）后才由 unknown 转为结论。 */
+    ep_probe_tick(NULL, 0, NULL);
+
+    daemon_event_driver_add_timer(driver, EP_PROBE_INTERVAL_MS, ep_probe_tick, NULL);
+    SVC_LOG_INFO("C-L02: EP-HEALTH: probe timer registered (interval=%dms, filter=%s)",
+                 EP_PROBE_INTERVAL_MS, EP_PROBE_FILTER);
+    return 0;
+}
+
 void svc_destroy(void)
 {
+    /* daemon_cleanup 先销毁事件驱动（含线程池 join + 定时器），后调
+     * svc_destroy：此刻已无在飞探测、无定时器回调，销毁视图无并发读。 */
+    if (g_ep) {
+        ep_health_destroy(g_ep);
+        g_ep = NULL;
+    }
+    g_ep_pool = NULL;
+
     if (g_service) {
         llm_service_destroy(g_service);
         g_service = NULL;
