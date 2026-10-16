@@ -55,6 +55,7 @@ extern "C" {
  *
  * @param daemon_name  Daemon process name (e.g. "sched_d")
  * @param daemon_cname Daemon config and service name (e.g. "scheduler")
+ * @param DEFAULT_TCP_PORT  TCP 端口符号（SSoT 引用，仅 --help 文案用）
  *
  * Generates variables:
  *   - static atomic_int g_running = 1
@@ -89,8 +90,7 @@ extern "C" {
 #define DAEMON_SIG_RECEIVED_TRACE(daemon_name) ((void)0)
 #endif
 
-#define DAEMON_DECLARE_COMMON(daemon_name, daemon_cname, DEFAULT_SOCKET_PATH_UNIX,                                 \
-                              DEFAULT_SOCKET_PATH_WIN, DEFAULT_TCP_PORT, MAX_BUFFER)                               \
+#define DAEMON_DECLARE_COMMON(daemon_name, daemon_cname, DEFAULT_TCP_PORT)                                         \
                                                                                                                    \
     static atomic_int g_running_##daemon_name = 1;                                                                 \
     static airy_mtx_t g_running_lock_##daemon_name;                                                                \
@@ -458,6 +458,40 @@ typedef struct {
     .pool_max = (pool_max_),                                                   \
     .pool_queue = (pool_queue_),                                               \
     .concurrent_clients = (concurrent_),
+
+/**
+ * @brief 生成户入口收敛宏：shutdown 方法 + 方法表 + main() 恒定骨架
+ *        （0.1.19 W9）。
+ *
+ * 生成户 main.c 曾逐户展开 DAEMON_DECLARE_SHUTDOWN_METHOD + 方法表 +
+ * main() 三段（12 户 × 18 行同构副本）。三段机制面完全同构，唯
+ * .manifest 派生值与钩子策略随户异；本宏一次展开收敛，产物只剩策略
+ * 实参。ops 表条目数随户异，仍由调用点在宏前独立声明为 SVC_OPS。
+ *
+ * 形参 upper_ 传 daemon 名大写 token（如 MATHS_D），以 ## 拼
+ * SVC_<UPPER>_METHODS（C 预处理无法由小写 token 派生大写）；其余形参
+ * 与 DAEMON_BOOT_FILL/DAEMON_BOOT_WIRE 同名透传。调用点行尾不加分号。
+ */
+#define DAEMON_MAIN(daemon_, upper_, cname_, env_debug_, sd_type_, tags_,      \
+                    method_total_, pool_max_events_, pool_min_, pool_max_,     \
+                    pool_queue_, concurrent_, activate_, attach_, teardown_,   \
+                    sec_init_, sec_cleanup_)                                   \
+    DAEMON_DECLARE_SHUTDOWN_METHOD(daemon_)                                    \
+    static const daemon_method_entry_t SVC_METHODS[] = {                       \
+        SVC_##upper_##_METHODS(DAEMON_METHOD_ENTRY)                            \
+    };                                                                         \
+                                                                               \
+    int main(int argc, char **argv)                                            \
+    {                                                                          \
+        daemon_boot_t boot = {                                                 \
+            DAEMON_BOOT_FILL(daemon_, cname_, env_debug_, sd_type_, tags_,     \
+                             method_total_, pool_max_events_, pool_min_,       \
+                             pool_max_, pool_queue_, concurrent_)              \
+            DAEMON_BOOT_WIRE(SVC_OPS, SVC_METHODS, activate_, attach_,         \
+                             teardown_, sec_init_, sec_cleanup_),              \
+        };                                                                     \
+        return daemon_boot(argc, argv, &boot);                                 \
+    }
 
 /**
  * @brief svc 钩子缺省策略（null object，0.1.19 §80）。
