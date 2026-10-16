@@ -19,7 +19,7 @@
  * dual_coordinate cross-validation were removed). GRAD loop: model A
  * (t2) drafts the plan -> model C (t1-p) runs the deterministic
  * verifier -> model B (t1-f) arbitrates -> converge or fall back to the
- * seed plan. Working-memory keys: "gccp_goal", "cog_review_decision".
+ * seed plan. Working-memory keys: "cog_review_decision".
  *
  * LLM calls go through llm_svc_adapter directly to the llm_d Unix socket
  * (daemon_rpc_call), interoperating natively with the daemon
@@ -51,6 +51,9 @@ typedef struct {
     const char *think1_prof_model;
     uint32_t process_timeout_ms;
     uint32_t max_feedback_events;
+    /* 轻量对话模式（由 svc 层性能模式策略判定后注入；机制核据此折叠前置
+     * 认知管线）。0=full。 */
+    int perf_light;
 } think_service_config_t;
 
 /**
