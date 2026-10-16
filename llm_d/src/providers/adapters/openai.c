@@ -73,7 +73,7 @@ static void openai_destroy(provider_ctx_t *ctx_ptr)
  * default_model 参。响应解析同理直接挂 provider_parse_openai_response。 */
 static char *openai_build_request(const llm_request_config_t *manager)
 {
-    return provider_build_openai_request(manager, OPENAI_DEFAULT_MODEL);
+    return provider_build_openai_request(manager, OPENAI_DEFAULT_MODEL, NULL);
 }
 
 static struct provider_rate_limiter *openai_rate_limiter(provider_ctx_t *ctx)

@@ -24,7 +24,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-char *provider_build_openai_request(const llm_request_config_t *manager, const char *default_model)
+char *provider_build_openai_request(const llm_request_config_t *manager, const char *default_model,
+                                    const char *extra_json)
 {
     if (!manager) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
@@ -100,6 +101,22 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
         cJSON_AddItemToArray(msgs, msg);
     }
     cJSON_AddItemToObject(root, "messages", msgs);
+
+    /* 通用供应商扩展段：逐键并入顶层，键冲突时先删旧键再挂新键
+     * （扩展段为准）。空串 / 非法 JSON 静默跳过，不阻断请求装配。 */
+    if (extra_json && extra_json[0]) {
+        CJSON_PARSE_GUARD(extra, extra_json, {});
+        if (cJSON_IsObject(extra)) {
+            const cJSON *field = NULL;
+            cJSON_ArrayForEach(field, extra)
+            {
+                if (field->string) {
+                    cJSON_DeleteItemFromObject(root, field->string);
+                    cJSON_AddItemToObject(root, field->string, cJSON_Duplicate(field, 1));
+                }
+            }
+        }
+    }
 
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);

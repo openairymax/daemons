@@ -14,7 +14,11 @@
 extern "C" {
 #endif
 
-char *provider_build_openai_request(const llm_request_config_t *manager, const char *default_model);
+/* extra_json：通用供应商扩展段（JSON object 片段），逐键并入请求体顶层；
+ * NULL / 空串 = 无扩展。厂商专有参数（如 Ollama keep_alive）经此注入，
+ * 不污染 OpenAI 通用骨架。键冲突时以扩展段为准（后者覆盖前者）。 */
+char *provider_build_openai_request(const llm_request_config_t *manager, const char *default_model,
+                                    const char *extra_json);
 int provider_parse_openai_response(const char *body, llm_response_t **out);
 /* 请求参数段骨架：model / temperature / max_tokens / top_p / stream / stop 数组。 */
 void provider_request_params_fill(cJSON *root, const llm_request_config_t *manager,
