@@ -13,6 +13,7 @@
  * 5. svc_tokens_parse 字面量解析
  * 6. llm / models[0] 段 max_output
  * 7. svc_model_defaults_resolve 优先级（base → 用户覆盖 → 环境变量）
+ * 8. performance_mode 顶层键解析与 AIRY_PERF_MODE 覆盖（env > yaml）
  *
  * 所有临时文件写在 /tmp 隔离根下（AIRY_HOME 指向该根），不污染源码区。
  */
@@ -378,6 +379,106 @@ static int test_resolve_invalid(void)
     return 0;
 }
 
+static int perf_from_yaml_case(const char *tag, const char *yaml, svc_perf_mode_t want)
+{
+    if (write_tmp_yaml(yaml) != 0) {
+        TEST_FAIL(tag, "cannot write temp yaml");
+        return -1;
+    }
+    svc_perf_mode_t got = svc_perf_from_yaml(TMP_YAML);
+    if (got != want) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "from_yaml=%d, want %d", (int)got, (int)want);
+        TEST_FAIL(tag, buf);
+        return -1;
+    }
+    TEST_PASS(tag);
+    return 0;
+}
+
+static int perf_resolve_case(const char *tag, const char *yaml, const char *env,
+                             svc_perf_mode_t want)
+{
+    if (write_tmp_yaml(yaml) != 0) {
+        TEST_FAIL(tag, "cannot write temp yaml");
+        return -1;
+    }
+    if (env)
+        setenv("AIRY_PERF_MODE", env, 1);
+    else
+        unsetenv("AIRY_PERF_MODE");
+    svc_perf_mode_t got = svc_perf_resolve(TMP_YAML);
+    unsetenv("AIRY_PERF_MODE");
+    if (got != want) {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "resolve=%d, want %d (env=%s)", (int)got, (int)want,
+                 env ? env : "(unset)");
+        TEST_FAIL(tag, buf);
+        return -1;
+    }
+    TEST_PASS(tag);
+    return 0;
+}
+
+static int test_perf_mode(void)
+{
+    if (perf_from_yaml_case("perf_yaml_full", "performance_mode: full\n", SVC_PERF_FULL) != 0)
+        return -1;
+    if (perf_from_yaml_case("perf_yaml_light", "performance_mode: lightweight\n",
+                            SVC_PERF_LIGHTWEIGHT) != 0)
+        return -1;
+    if (perf_from_yaml_case("perf_yaml_auto", "performance_mode: auto\n", SVC_PERF_AUTO) != 0)
+        return -1;
+    if (perf_from_yaml_case("perf_yaml_case", "performance_mode: LightWeight\n",
+                            SVC_PERF_LIGHTWEIGHT) != 0)
+        return -1;
+    /* 未知值 / 缺键 → full：轻量路径只由显式声明触发，不由可疑取值推断 */
+    if (perf_from_yaml_case("perf_yaml_unknown", "performance_mode: turbo\n", SVC_PERF_FULL) != 0)
+        return -1;
+    if (perf_from_yaml_case("perf_yaml_absent", "default_model: deepseek-flash\n",
+                            SVC_PERF_FULL) != 0)
+        return -1;
+    /* 与 models 序列共存：序列内空标量（api_key_env: ""）不得干扰顶层键 */
+    if (perf_from_yaml_case("perf_yaml_models_seq",
+                            "models:\n"
+                            "  - model_id: \"local\"\n"
+                            "    api_key_env: \"\"\n"
+                            "performance_mode: lightweight\n",
+                            SVC_PERF_LIGHTWEIGHT) != 0)
+        return -1;
+    /* 文件缺失 / path=NULL → full（无错误通道） */
+    if (svc_perf_from_yaml("no_such_perf.yaml") != SVC_PERF_FULL) {
+        TEST_FAIL("perf_missing_file", "missing file should yield FULL");
+        return -1;
+    }
+    TEST_PASS("perf_missing_file");
+    if (svc_perf_from_yaml(NULL) != SVC_PERF_FULL) {
+        TEST_FAIL("perf_null_path", "NULL path should yield FULL");
+        return -1;
+    }
+    TEST_PASS("perf_null_path");
+    /* resolve 优先级：env > yaml；env 大小写不敏感；env 未知值 → full */
+    if (perf_resolve_case("perf_resolve_yaml", "performance_mode: lightweight\n", NULL,
+                          SVC_PERF_LIGHTWEIGHT) != 0)
+        return -1;
+    if (perf_resolve_case("perf_resolve_env", "performance_mode: lightweight\n", "full",
+                          SVC_PERF_FULL) != 0)
+        return -1;
+    if (perf_resolve_case("perf_resolve_env_case", "performance_mode: full\n", "AUTO",
+                          SVC_PERF_AUTO) != 0)
+        return -1;
+    if (perf_resolve_case("perf_resolve_env_bad", "performance_mode: lightweight\n", "turbo",
+                          SVC_PERF_FULL) != 0)
+        return -1;
+    unsetenv("AIRY_PERF_MODE");
+    if (svc_perf_resolve(NULL) != SVC_PERF_FULL) {
+        TEST_FAIL("perf_resolve_null", "NULL path without env should yield FULL");
+        return -1;
+    }
+    TEST_PASS("perf_resolve_null");
+    return 0;
+}
+
 int main(void)
 {
     int failures = 0;
@@ -407,6 +508,7 @@ int main(void)
     failures += (test_models0_max_output() != 0);
     failures += (test_resolve_precedence() != 0);
     failures += (test_resolve_invalid() != 0);
+    failures += (test_perf_mode() != 0);
 
     if (failures == 0) {
         printf("\nAll svc_model_defaults tests passed\n");
