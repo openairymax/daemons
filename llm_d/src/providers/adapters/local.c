@@ -80,10 +80,18 @@ static void local_destroy(provider_ctx_t *ctx_ptr)
 }
 
 /* 纯函数槽：OpenAI 请求装配为 core 共享协议件（envelope.c），此处仅闭
- * LOCAL_DEFAULT_MODEL 参；响应解析直接挂 provider_parse_openai_response。 */
+ * LOCAL_DEFAULT_MODEL 参；响应解析直接挂 provider_parse_openai_response。
+ *
+ * Ollama 专有扩展（D3）：keep_alive 为 Ollama 顶层扩展字段（OpenAI 兼容
+ * 端点受支持），默认 5min 卸载导致「间隔后首请求」冷加载尖峰，此处置
+ * "30m" 摊薄重载。num_ctx 不在 OpenAI 兼容端点生效（官方文档明确该端点
+ * 不提供上下文大小设置），num_predict 已由顶层 max_tokens 覆盖，故均不注入。
+ * 常量置本件（厂商差异面），不新增用户配置面。 */
+#define LOCAL_EXTRA_PARAMS "{\"keep_alive\":\"30m\"}"
+
 static char *local_build_request(const llm_request_config_t *manager)
 {
-    return provider_build_openai_request(manager, LOCAL_DEFAULT_MODEL);
+    return provider_build_openai_request(manager, LOCAL_DEFAULT_MODEL, LOCAL_EXTRA_PARAMS);
 }
 
 static int local_complete(provider_ctx_t *ctx, const llm_request_config_t *manager,

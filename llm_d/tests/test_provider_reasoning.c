@@ -38,10 +38,48 @@ static void test_build_request_echoes_reasoning(void)
     cfg.messages = msgs;
     cfg.message_count = 2;
 
-    char *body = provider_build_openai_request(&cfg, "deepseek-reasoner");
+    char *body = provider_build_openai_request(&cfg, "deepseek-reasoner", NULL);
     assert(body != NULL);
     assert(strstr(body, "reasoning_content") != NULL);
     assert(strstr(body, "6*7=42") != NULL);
+    free(body);
+
+    printf("    PASSED\n");
+}
+
+/* D3：通用供应商扩展段逐键并入请求体顶层；键冲突时扩展段为准。
+ * openai/deepseek 路径传 NULL 时不应出现厂商专有字段。 */
+static void test_build_request_extra_params(void)
+{
+    printf("  test_build_request_extra_params...\n");
+
+    llm_message_t msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.role = "user";
+    msg.content = "hi";
+
+    llm_request_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.model = "qwen2.5";
+    cfg.messages = &msg;
+    cfg.message_count = 1;
+
+    char *plain = provider_build_openai_request(&cfg, "gpt-3.5-turbo", NULL);
+    assert(plain != NULL);
+    assert(strstr(plain, "keep_alive") == NULL);
+    free(plain);
+
+    char *body = provider_build_openai_request(&cfg, "gpt-3.5-turbo",
+                                               "{\"keep_alive\":\"30m\"}");
+    assert(body != NULL);
+    assert(strstr(body, "\"keep_alive\":\"30m\"") != NULL);
+    /* 扩展段键与骨架键冲突时覆盖：model 以扩展段为准。 */
+    char *over = provider_build_openai_request(&cfg, "gpt-3.5-turbo",
+                                               "{\"model\":\"override\"}");
+    assert(over != NULL);
+    assert(strstr(over, "\"model\":\"override\"") != NULL);
+    assert(strstr(over, "gpt-3.5-turbo") == NULL);
+    free(over);
     free(body);
 
     printf("    PASSED\n");
@@ -133,6 +171,7 @@ int main(void)
     printf("=========================================\n");
 
     test_build_request_echoes_reasoning();
+    test_build_request_extra_params();
     test_parse_response_reads_reasoning();
     test_parse_response_without_reasoning();
     test_buf_append();
