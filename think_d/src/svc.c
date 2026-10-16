@@ -47,6 +47,7 @@ const daemon_dep_spec_t g_think_deps[1] = {
 typedef struct {
     uint32_t process_timeout_ms;
     int think_enabled;
+    int perf_light;
     char think2_slow_model[128];
     char think1_fast_model[128];
     char think1_prof_model[128];
@@ -183,9 +184,11 @@ static void cfg_load(const char *config_path)
          * 故 lightweight 对 GRAD 开关具有终裁权——用户回退完整能力应改
          * AIRY_PERF_MODE=full，而非隐式的 AIRY_THINK_ENABLED。auto 仅提示，
          * 不改配置。 */
-        if (svc_perf_resolve(have_model_yaml ? model_path : NULL) == SVC_PERF_LIGHTWEIGHT) {
+        g_cfg.perf_light =
+            svc_perf_resolve(have_model_yaml ? model_path : NULL) == SVC_PERF_LIGHTWEIGHT;
+        if (g_cfg.perf_light) {
             g_cfg.think_enabled = 0;
-            SVC_LOG_WARN("ThinkPerf: performance_mode=lightweight, dual-thinking forced off");
+            SVC_LOG_WARN("ThinkPerf: performance_mode=lightweight, GRAD + pre-pipeline folded");
         }
     }
 }
@@ -202,6 +205,7 @@ int svc_prepare(const char *config_path)
     svc_cfg.think1_fast_model = g_cfg.think1_fast_model[0] ? g_cfg.think1_fast_model : NULL;
     svc_cfg.think1_prof_model = g_cfg.think1_prof_model[0] ? g_cfg.think1_prof_model : NULL;
     svc_cfg.process_timeout_ms = g_cfg.process_timeout_ms;
+    svc_cfg.perf_light = g_cfg.perf_light;
 
     g_svc = think_service_create(&svc_cfg);
     if (!g_svc) {
