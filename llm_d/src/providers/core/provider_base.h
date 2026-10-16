@@ -13,6 +13,14 @@ extern "C" {
 
 struct provider_rate_limiter;
 
+/* 可重试类别（策略面）：机制件 provider_retry.c 只认"哪些 libcurl 故障可重发"，
+ * 是否收窄由端点自身声明。本地慢推理是预期行为而非瞬时故障，超时重发只会
+ * 空转整轮预算，故本地端点声明 CONNECT_ONLY——仅连接建立失败可重发。 */
+typedef enum {
+    PROVIDER_RETRY_DEFAULT = 0,      /* 全类别瞬时故障可重试（云端端点默认） */
+    PROVIDER_RETRY_CONNECT_ONLY = 1, /* 仅连接建立失败可重试；超时/收发中断即终局 */
+} provider_retry_class_t;
+
 typedef struct {
     char api_key[256];
     char api_key_env[128];
@@ -20,6 +28,7 @@ typedef struct {
     char organization[128];
     double timeout_sec;
     int max_retries;
+    provider_retry_class_t retry_class;
 } provider_base_ctx_t;
 
 typedef enum {

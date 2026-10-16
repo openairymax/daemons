@@ -286,6 +286,7 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name
 
     base_ctx->timeout_sec = timeout_sec > 0 ? timeout_sec : PROVIDER_DEFAULT_TIMEOUT_SEC;
     base_ctx->max_retries = max_retries > 0 ? max_retries : 3;
+    base_ctx->retry_class = PROVIDER_RETRY_DEFAULT;
 
     SVC_LOG_INFO("C-L02: PROVIDER: BASE-INIT api_base=%s timeout=%.1fs retries=%d has_api_key=%d",
                  base_ctx->api_base[0] ? base_ctx->api_base : "(none)", base_ctx->timeout_sec,
