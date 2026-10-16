@@ -306,6 +306,7 @@ think_service_t *think_service_create(const think_service_config_t *config)
     cfg.cognition_max_retries = 3;
     cfg.feedback_callback = think_feedback_cb;
     cfg.feedback_user_data = svc;
+    cfg.perf_light = config ? config->perf_light : 0;
 
     airy_err_t ce = airy_cognition_create_ex_take(&cfg, plan_strat, NULL, NULL, &svc->engine);
     if (ce != AIRY_SUCCESS || !svc->engine) {
