@@ -6,16 +6,17 @@
  * @brief model.yaml 缺省模型抽取：表驱动单一扫描器（机制）+ 公共抽取入口（策略）。
  *
  * 机制与策略分离：libyaml 事件流骨架（fopen / 初始化 / 事件循环 / 清理）
- * 与字段分发收敛为单一机制件（svc_scan_*），llm / think / global+顶层键
- * 三种抽取策略退化为字段表 + 薄壳。models 表首条目扫描结构不同（序列 +
- * 首条目 + 提前退出），保留独立循环但复用字段分发与开关件。
+ * 与字段分发收敛为单一机制件（svc_scan_*），llm / think / global+顶层键 /
+ * performance_mode 四种抽取策略退化为字段表 + 薄壳。models 表首条目扫描
+ * 结构不同（序列 + 首条目 + 提前退出），保留独立循环但复用字段分发与开关件。
  *
  * 段式扫描状态机（svc_scan_run）：
  *   - pending：段键已见，等待其 mapping 展开
  *   - depth：段内嵌套深度（段自身为 1），仅 depth==1 的键值对进字段表
  *   - top：顶层键模式（v2 表格格式 2026-08-26：顶层 default_model /
  *     default_provider 与 global 段等价）；顶层键捕获不设 dest 门，
- *     段内捕获以 dest 非空为门（保持既有可观测语义）
+ *     段内捕获以 dest 非空为门（保持既有可观测语义）。section 为空串时
+ *     关闭段匹配、退化为「仅顶层键」模式（performance_mode 走此路）
  *
  * 返回契约（与头文件一致）：缺字段留空非错；无段保持 out 初值非错；
  * parse 中途失败仍算成功；models0 无表返回 AIRY_ERR_NOT_FOUND。
@@ -51,6 +52,7 @@ enum {
     SVC_FLD_TOKENS,
     SVC_FLD_BOOL,
     SVC_FLD_U32,
+    SVC_FLD_PERF,
 };
 
 typedef struct {
@@ -102,6 +104,17 @@ int svc_tokens_parse(const char *text)
     return (int)total;
 }
 
+/* performance_mode 字面量：full / lightweight / auto。未知值与空值一律
+ * 落 full——轻量路径只应由显式声明触发，绝不由可疑取值推断。 */
+static svc_perf_mode_t svc_perf_parse(const char *val)
+{
+    if (val && strcasecmp(val, "lightweight") == 0)
+        return SVC_PERF_LIGHTWEIGHT;
+    if (val && strcasecmp(val, "auto") == 0)
+        return SVC_PERF_AUTO;
+    return SVC_PERF_FULL;
+}
+
 #ifdef HAVE_YAML
 
 static int svc_yaml_bool(const char *val)
@@ -150,6 +163,9 @@ static void svc_fld_set(const svc_yaml_field_t *f, const char *val)
             *(uint32_t *)f->dest = (uint32_t)t;
         break;
     }
+    case SVC_FLD_PERF:
+        *(svc_perf_mode_t *)f->dest = svc_perf_parse(val);
+        break;
     default:
         break;
     }
@@ -212,7 +228,7 @@ static void svc_scan_scalar(svc_yaml_scan_t *st, const svc_scan_cfg_t *cfg, cons
         svc_fld_apply(cfg->top, cfg->top_n, st->key, val);
         st->top = 0;
         st->key[0] = '\0';
-    } else if (strcmp(val, cfg->section) == 0) {
+    } else if (cfg->section[0] && strcmp(val, cfg->section) == 0) {
         st->pending = 1;
     } else if (cfg->top) {
         f = svc_fld_match(cfg->top, cfg->top_n, val);
@@ -297,6 +313,30 @@ int svc_model_defaults_from_yaml(const char *path, char *out_model, size_t model
     };
     svc_scan_cfg_t cfg = { "global", tbl, 2, tbl, 2 };
     return svc_scan_file(path, &cfg);
+}
+
+svc_perf_mode_t svc_perf_from_yaml(const char *path)
+{
+    svc_perf_mode_t mode = SVC_PERF_FULL;
+
+    if (!path || !path[0])
+        return mode;
+
+    svc_yaml_field_t tbl[] = {
+        { "performance_mode", SVC_FLD_PERF, &mode, 0 },
+    };
+    /* 空 section：仅顶层键模式（performance_mode 是顶层标量键） */
+    svc_scan_cfg_t cfg = { "", tbl, 0, tbl, 1 };
+    (void)svc_scan_file(path, &cfg);
+    return mode;
+}
+
+svc_perf_mode_t svc_perf_resolve(const char *path)
+{
+    const char *env = getenv("AIRY_PERF_MODE");
+    if (env && env[0])
+        return svc_perf_parse(env);
+    return svc_perf_from_yaml(path);
 }
 
 /* 用户覆盖文件的模型/供应方取值：default_model，缺省回退 llm.model，

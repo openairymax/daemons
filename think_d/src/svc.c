@@ -175,6 +175,18 @@ static void cfg_load(const char *config_path)
             AIRY_STRNCPY_TERM(g_cfg.think1_prof_model, e, sizeof(g_cfg.think1_prof_model));
         if ((e = getenv("AIRY_THINK_TIMEOUT_MS")) && *e && atoi(e) > 0)
             g_cfg.process_timeout_ms = (uint32_t)atoi(e);
+
+        /* 本地低算力（performance_mode）：lightweight 使 think.enabled 失效，
+         * 关闭 GRAD 批判环（复用 LLM 不可用时既有的单元素 JSON 直连降级路
+         * 径）。性能模式是设备级策略包络，判据来自 env AIRY_PERF_MODE >
+         * model.yaml 顶层键（svc_perf_resolve 单一入口）；置于 env 链之后，
+         * 故 lightweight 对 GRAD 开关具有终裁权——用户回退完整能力应改
+         * AIRY_PERF_MODE=full，而非隐式的 AIRY_THINK_ENABLED。auto 仅提示，
+         * 不改配置。 */
+        if (svc_perf_resolve(have_model_yaml ? model_path : NULL) == SVC_PERF_LIGHTWEIGHT) {
+            g_cfg.think_enabled = 0;
+            SVC_LOG_WARN("ThinkPerf: performance_mode=lightweight, dual-thinking forced off");
+        }
     }
 }
 

@@ -62,6 +62,46 @@ int svc_model_defaults_from_yaml(const char *path, char *out_model, size_t model
                                  char *out_provider, size_t prov_sz);
 
 /**
+ * @brief Performance-mode strategies declared in model.yaml.
+ *
+ * full        full capability (cloud / mid-high-end devices); the default.
+ * lightweight low-compute path: the dual-think GRAD loop is forced off.
+ * auto        detect-only: the daemon suggests but never rewrites config.
+ */
+typedef enum {
+    SVC_PERF_FULL = 0,
+    SVC_PERF_LIGHTWEIGHT = 1,
+    SVC_PERF_AUTO = 2,
+} svc_perf_mode_t;
+
+/**
+ * @brief Extract the top-level performance_mode key (YAML only).
+ *
+ * Unknown values and an absent key yield SVC_PERF_FULL: the low-compute
+ * path must be opted into explicitly and is never inferred from a
+ * malformed value. Missing / unreadable files and libyaml-less builds also
+ * yield SVC_PERF_FULL, so the caller needs no error channel.
+ *
+ * @param path YAML file path (may be NULL)
+ * @return Parsed mode; SVC_PERF_FULL on any doubt
+ */
+svc_perf_mode_t svc_perf_from_yaml(const char *path);
+
+/**
+ * @brief Resolve the effective performance mode (single entry).
+ *
+ * Precedence: $AIRY_PERF_MODE (environment, highest) then the
+ * performance_mode key of the given model.yaml. Every component acting on
+ * the low-compute strategy must call this instead of scanning the key on
+ * its own, so that all of them observe the same answer for the same
+ * configuration.
+ *
+ * @param path YAML file path (may be NULL when the environment decides)
+ * @return Effective mode; SVC_PERF_FULL when nothing is declared
+ */
+svc_perf_mode_t svc_perf_resolve(const char *path);
+
+/**
  * @brief Dual-think (Thinkdual) three-model configuration (think section).
  *
  * When enabled=1, think_d uses the GRAD plan-level critique loop; an empty
