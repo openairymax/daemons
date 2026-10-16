@@ -73,6 +73,24 @@ int provider_registry_enumerate(provider_registry_t *reg,
                                           void *user_data),
                                 void *user_data);
 
+/**
+ * @brief Visit every provider record in the registry.
+ *
+ * Single traversal primitive of the registry: provider_registry_enumerate is
+ * a thin adapter over it. Callers that need provider identity beyond the name
+ * (e.g. the endpoint base URL behind an endpoint health probe) use this form
+ * directly; for each registered provider the callback receives the immutable
+ * provider_t record.
+ *
+ * @param reg Registry
+ * @param cb  Callback (must not be NULL); iteration stops when it returns non-zero
+ * @param user_data User data passed through to the callback
+ * @return Non-zero if the iteration was short-circuited by the callback;
+ *         0 if reg/cb is NULL or the walk ran to completion
+ */
+int provider_reg_walk(provider_registry_t *reg, int (*cb)(const provider_t *prov, void *user_data),
+                      void *user_data);
+
 #ifdef __cplusplus
 }
 #endif
