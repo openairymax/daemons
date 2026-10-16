@@ -24,6 +24,8 @@
  *   6. 出网重试：瞬时故障（对端接受后立即关闭）必须真的重发，尝试次数严格
  *      等于 max_retries；流式在首包下发前同样重发且不得交付半截输出
  *      （N-3/N-4）
+ *   7. 本地端点策略（D4）：默认超时 120s、重试预算降一次、可重试类别收窄为
+ *      CONNECT_ONLY——收发中断不重发，而云端端点策略不变（对照断言）
  *
  * 平台：daemon 测试在 Windows 整体关闭（daemons/CMakeLists.txt 的 WIN32 门），
  * 故本文件直接使用 POSIX socket/pthread，无需跨平台分支。
@@ -49,6 +51,9 @@
 
 /* openai_ops 定义于 openai.c:182，未在头文件声明（内部符号），此处 extern。 */
 extern const provider_adapter_t openai_ops;
+
+/* local_ops 同为核心内部符号（adapters/local.c），用于 D4 本地端点策略回归。 */
+extern const provider_adapter_t local_ops;
 
 /* ── 极简 HTTP 桩 ─────────────────────────────────────────────────────── */
 
@@ -626,6 +631,61 @@ static void test_stream_transient_retried(void)
     mock_set_drop(0);
 }
 
+/* D4 端到端：本地端点的可重试类别必须收窄为"仅连接建立失败"。对端接受后
+ * 立即关闭属瞬时故障，但本地慢推理是预期行为，超时/收发中断不得重发——
+ * 本地只尝试一次；同一故障下云端端点仍重发到 max_retries（对照断言）。 */
+static void test_local_endpoint_policy(void)
+{
+    printf("  local endpoint retry policy is connect-only...\n");
+
+    /* 静态策略：默认超时抬到 120s，重试预算在全局默认（3）上降一次。 */
+    provider_ctx_t *probe = local_ops.init("local", NULL, NULL, NULL, 0.0, 0);
+    assert(probe != NULL);
+    provider_base_ctx_t *pbase = provider_base_ctx(probe);
+    assert(pbase->timeout_sec == 120.0);
+    assert(pbase->max_retries == 2);
+    assert(pbase->retry_class == PROVIDER_RETRY_CONNECT_ONLY);
+    local_ops.destroy(probe);
+
+    mock_set_drop(1);
+    char base[128];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d/v1", g_srv.port);
+
+    provider_ctx_t *local = local_ops.init("local", NULL, base, NULL, 5.0, 2);
+    assert(local != NULL);
+    provider_ctx_t *cloud = openai_ops.init("openai", "", base, NULL, 5.0, 2);
+    assert(cloud != NULL);
+
+    llm_message_t msg;
+    llm_request_config_t cfg;
+    cfg_init(&cfg, &msg);
+
+    int before = atomic_load(&g_srv.conn_count);
+    llm_response_t *resp = NULL;
+    int ret = local_ops.complete(local, &cfg, &resp);
+    int local_attempts = atomic_load(&g_srv.conn_count) - before;
+    if (resp)
+        llm_response_free(resp);
+
+    before = atomic_load(&g_srv.conn_count);
+    resp = NULL;
+    int cloud_ret = openai_ops.complete(cloud, &cfg, &resp);
+    int cloud_attempts = atomic_load(&g_srv.conn_count) - before;
+    if (resp)
+        llm_response_free(resp);
+
+    printf("    local ret=%d attempts=%d (expect 1); cloud ret=%d attempts=%d (expect 3)\n",
+           ret, local_attempts, cloud_ret, cloud_attempts);
+    assert(ret == AIRY_ERR_IO);
+    assert(local_attempts == 1); /* 收发中断不重发：本地策略的直接后果 */
+    assert(cloud_ret == AIRY_ERR_IO);
+    assert(cloud_attempts == 3); /* 云端策略不受收窄影响 */
+
+    local_ops.destroy(local);
+    openai_ops.destroy(cloud);
+    mock_set_drop(0);
+}
+
 static void test_unreachable_is_io(void)
 {
     printf("  nonstream connection-refused -> IO...\n");
@@ -701,6 +761,9 @@ int main(void)
     test_retry_policy();
     test_nonstream_transient_retried();
     test_stream_transient_retried();
+
+    /* D4：本地端点可重试类别收窄，云端端点策略不受影响。 */
+    test_local_endpoint_policy();
 
     mock_server_stop();
 

@@ -9,7 +9,7 @@
  * 的逐字重复实现收敛归 B16-S3.3 五槽契约——四槽入口以两行 shim 交
  * core/adapter.c 通用 driver 唯一编排；请求装配/响应解析复用
  * core/envelope.c 的 OpenAI 协议件（闭 LOCAL_DEFAULT_MODEL 参后交纯函数槽）。
- * 适配层只留厂商差异面（默认端点/模型、60s 超时、无鉴权头声明、
+ * 适配层只留厂商差异面（默认端点/模型、120s 超时、无鉴权头声明、
  * 日志 tag），不含任何 curl_* 调用。
  *
  * 无鉴权是设计使然：LOCAL_HEADERS 声明 PROVIDER_AUTH_NONE，core 头链
@@ -30,7 +30,7 @@
  * 文档级，非功能缺陷）。 */
 #define LOCAL_DEFAULT_BASE "http://localhost:8080/v1"
 #define LOCAL_DEFAULT_MODEL "gpt-3.5-turbo"
-#define LOCAL_DEFAULT_TIMEOUT 60.0
+#define LOCAL_DEFAULT_TIMEOUT 120.0
 #define LOCAL_CHAT_PATH "/chat/completions"
 
 /* 请求头声明：本地端点无鉴权（设计使然），core 仅附加 Content-Type。 */
@@ -56,9 +56,17 @@ static provider_ctx_t *local_init(const char *name, const char *api_key, const c
     provider_base_init(&ctx->base, name, NULL, api_base, NULL, timeout, max_retries,
                        LOCAL_DEFAULT_BASE);
 
+    /* 本地慢推理是预期行为而非瞬时故障：超时不做重发（retry_class =
+     * CONNECT_ONLY，仅连接建立失败可重试），故额外重试预算在全局默认上降一次；
+     * 首连失败仍可重发一次，避免端点刚起未就绪时直接失败。 */
+    if (ctx->base.max_retries > 1)
+        ctx->base.max_retries--;
+    ctx->base.retry_class = PROVIDER_RETRY_CONNECT_ONLY;
+
     SVC_LOG_INFO("C-L02: LOCAL: INIT api_base=%s model=%s timeout=%.1fs max_retries=%d "
                  "has_api_key=%d (no auth, local endpoint, higher default timeout)",
-                 ctx->base.api_base, LOCAL_DEFAULT_MODEL, timeout, max_retries, 0);
+                 ctx->base.api_base, LOCAL_DEFAULT_MODEL, ctx->base.timeout_sec,
+                 ctx->base.max_retries, 0);
 
     return (provider_ctx_t *)ctx;
 }

@@ -5,6 +5,8 @@
 #ifndef LLM_D_PROVIDERS_CORE_PROVIDER_RETRY_H
 #define LLM_D_PROVIDERS_CORE_PROVIDER_RETRY_H
 
+#include "provider_base.h"
+
 #include <curl/curl.h>
 #include <stdint.h>
 
@@ -41,6 +43,7 @@ typedef struct {
     const char *url;    /* 日志用请求 URL */
     double timeout_sec; /* 整轮重试的墙钟预算，非单次尝试预算 */
     int max_retries;    /* 额外重试次数（0 = 只尝试一次），负值按 0 处理 */
+    provider_retry_class_t retry_class; /* 可重试类别收窄（策略面），缺省 DEFAULT */
     provider_attempt_fn attempt;
     provider_gate_fn gate;   /* 可 NULL */
     provider_reset_fn reset; /* 可 NULL */

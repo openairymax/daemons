@@ -161,7 +161,7 @@ int provider_http_request_with_retry(provider_base_ctx_t *base, provider_rate_li
          * 退避重试处理（N-3）。此处传 0 会让"连不上"这类最常见故障完全不重试，
          * 故必须把 provider 的重试预算透传下去。 */
         ret = provider_http_post(url, headers, body, base->timeout_sec, base->max_retries,
-                                 out_response, out_http_code);
+                                 base->retry_class, out_response, out_http_code);
 
         if (ret == AIRY_OK && *out_http_code == 200) {
             rl_reset_429(rl);

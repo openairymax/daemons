@@ -5,6 +5,8 @@
 #ifndef LLM_D_PROVIDERS_CORE_PROVIDER_TRANSPORT_H
 #define LLM_D_PROVIDERS_CORE_PROVIDER_TRANSPORT_H
 
+#include "provider_base.h"
+
 #include <curl/curl.h>
 #include <stddef.h>
 
@@ -25,8 +27,8 @@ void provider_http_setup(CURL *curl, double timeout_sec);
 const char *provider_http_diag(CURLcode code);
 
 int provider_http_post(const char *url, struct curl_slist *headers, const char *body,
-                       double timeout_sec, int max_retries, provider_http_resp_t **out_response,
-                       long *out_http_code);
+                       double timeout_sec, int max_retries, provider_retry_class_t retry_class,
+                       provider_http_resp_t **out_response, long *out_http_code);
 void provider_http_resp_free(provider_http_resp_t *resp);
 
 /* HTTP 状态码 → airy 错误码归一；未命中时返回 fallback。 */
