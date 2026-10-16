@@ -268,6 +268,20 @@ static void handle_health_check(cJSON *params, int id, airy_sock_t fd)
     cJSON_AddStringToObject(result, "service", "llm_d");
     cJSON_AddBoolToObject(result, "healthy", g_service != NULL);
     cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
+
+    /* D5：并回端点健康视图（可达性 / 延迟 / 冷加载标记），回应
+     * "能力存在 ≠ 能力可用"。视图为空（无匹配端点）时省略该字段，
+     * 保持旧消费方兼容；endpoint_probe 单独声明探测能力是否在线，供
+     * 消费方区分"无端点"与"探测降级禁用"。 */
+    cJSON_AddBoolToObject(result, "endpoint_probe", g_ep != NULL);
+    char *ej = ep_health_json(g_ep);
+    if (ej) {
+        cJSON *endpoints = cJSON_Parse(ej);
+        AIRY_FREE(ej);
+        if (endpoints)
+            cJSON_AddItemToObject(result, "endpoints", endpoints);
+    }
+
     JSONRPC_SEND_SUCCESS(fd, result, id);
 }
 
@@ -418,6 +432,12 @@ static void handle_complete(cJSON *params, int id, airy_sock_t fd)
  */
 typedef struct {
     airy_sock_t fd;
+    /* D5 首 token 观测：start_ms 起流前取，first_ms 于首个 chunk 到达时
+     * 一次性落定（0 = 尚未到达）。provider/model 供冷加载上报归属端点。 */
+    uint64_t start_ms;
+    uint64_t first_ms;
+    char provider[64];
+    char model[128];
 } llm_stream_ctx_t;
 
 #ifndef _WIN32
@@ -478,6 +498,14 @@ static void llm_stream_send_all(airy_sock_t fd, const char *buf, size_t len)
 static void llm_stream_callback(const char *chunk, void *user_data)
 {
     llm_stream_ctx_t *sctx = (llm_stream_ctx_t *)user_data;
+
+    /* D5：首个 chunk 到达即首 token 延迟（起流到首帧）。冷加载是"可用但
+     * 代价高"，故只观测不阻断；阈值判定归机制件（避免常量双写）。 */
+    if (sctx->first_ms == 0 && sctx->start_ms != 0) {
+        sctx->first_ms = airy_time_ms() - sctx->start_ms;
+        ep_health_cold(g_ep, sctx->provider, sctx->model, (double)sctx->first_ms);
+    }
+
     llm_stream_send_all(sctx->fd, chunk, strlen(chunk));
 }
 
@@ -538,7 +566,16 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
 
     cfg.stream = 1;
 
-    llm_stream_ctx_t stream_ctx = {.fd = fd};
+    llm_stream_ctx_t stream_ctx = {.fd = fd, .start_ms = airy_time_ms()};
+
+    /* D5：解析本请求归属的端点（模型 → provider），供首 token 冷加载上报。
+     * 未命中时留空，机制件仅记日志不新增记录（视图口径与 filter 一致）。 */
+    const provider_t *prov =
+        cfg.model ? provider_registry_find(llm_svc_reg(g_service), cfg.model) : NULL;
+    if (prov && prov->name)
+        AIRY_STRNCPY_TERM(stream_ctx.provider, prov->name, sizeof(stream_ctx.provider));
+    if (cfg.model)
+        AIRY_STRNCPY_TERM(stream_ctx.model, cfg.model, sizeof(stream_ctx.model));
 
     llm_response_t *resp = NULL;
     int ret = llm_service_complete_stream(g_service, &cfg, llm_stream_callback, &stream_ctx, &resp);

@@ -34,6 +34,7 @@ static inline void svc_endpoint(daemon_endpoint_t *ep, int cmdline_tcp)
  * SD bootstrap 句柄；attach 为 SVC_METHODS 落库后的动态注册
  * 出口（dispatcher 为 method_dispatcher_t）。 */
 int svc_prepare(const char *config_path);
+int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd);
 void svc_destroy(void);
 
 /* RPC 方法清单（唯一声明源，源自 .manifest rpc.methods）。

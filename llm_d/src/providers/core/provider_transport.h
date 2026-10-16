@@ -29,7 +29,16 @@ const char *provider_http_diag(CURLcode code);
 int provider_http_post(const char *url, struct curl_slist *headers, const char *body,
                        double timeout_sec, int max_retries, provider_retry_class_t retry_class,
                        provider_http_resp_t **out_response, long *out_http_code);
+
+/* 单发 GET（不重试）：幂等只读请求，用于端点健康探测。headers 可空。 */
+int provider_http_get(const char *url, struct curl_slist *headers, double timeout_sec,
+                      provider_http_resp_t **out_response, long *out_http_code);
+
 void provider_http_resp_free(provider_http_resp_t *resp);
+
+/* api_base 与 path 拼装 SSoT：归一 api_base 尾部斜杠后拼接（调用方只声明
+ * path，如 "/models"）。result 不可容纳时返回 AIRY_ERR_INVALID_PARAM。 */
+int provider_url_join(const char *api_base, const char *path, char *out, size_t out_size);
 
 /* HTTP 状态码 → airy 错误码归一；未命中时返回 fallback。 */
 int provider_http_err_map(long http_code, int fallback);

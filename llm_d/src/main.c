@@ -21,5 +21,5 @@ static const daemon_op_t SVC_OPS[] = {
 
 DAEMON_MAIN(llm_d, LLM_D, "llm", "AIRY_LLM_D_DEBUG",
             "llm", "ai,core", 8, 64, 4, 8, 256, 1,
-            svc_activate_noop, svc_attach_noop, svc_teardown_noop,
+            svc_activate, svc_attach_noop, svc_teardown_noop,
             daemon_dome_init_pep, daemon_dome_cleanup)

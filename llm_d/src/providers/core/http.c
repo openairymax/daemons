@@ -229,6 +229,76 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
     return AIRY_OK;
 }
 
+int provider_url_join(const char *api_base, const char *path, char *out, size_t out_size)
+{
+    if (!api_base || !path || !out || out_size == 0) {
+        errno = EINVAL;
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    size_t blen = strlen(api_base);
+    while (blen > 0 && (api_base[blen - 1] == '/' || api_base[blen - 1] == '\\'))
+        blen--;
+    if (blen == 0) {
+        errno = EINVAL;
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    int n = snprintf(out, out_size, "%.*s%s", (int)blen, api_base, path);
+    if (n < 0 || (size_t)n >= out_size) {
+        errno = ENAMETOOLONG;
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    return AIRY_OK;
+}
+
+/* 单发 GET（不重试）：幂等只读请求。健康探测对同一不可达端点反复重试没有
+ * 意义——它只会把"端点是否可用"的结论推迟到探测窗口之外，且探测本身运行
+ * 在线程池 worker 上，重试会长期占用 worker。故此处有意不经 retry 壳。 */
+int provider_http_get(const char *url, struct curl_slist *headers, double timeout_sec,
+                      provider_http_resp_t **out_response, long *out_http_code)
+{
+    if (!url || !out_response || !out_http_code) {
+        errno = EINVAL;
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    provider_http_resp_t *resp =
+        (provider_http_resp_t *)AIRY_CALLOC(1, sizeof(provider_http_resp_t));
+    if (!resp)
+        return AIRY_ERR_OUT_OF_MEMORY;
+
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        AIRY_FREE(resp);
+        return AIRY_ERR_IO;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, resp);
+    provider_http_setup(curl, timeout_sec);
+
+    CURLcode res = curl_easy_perform(curl);
+    long http_code = 0;
+    if (res == CURLE_OK)
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK) {
+        SVC_LOG_DEBUG("C-L02: PROVIDER: HTTP-GET-FAIL url=%s diag=%s", url,
+                      provider_http_diag(res));
+        provider_http_resp_free(resp);
+        return AIRY_ERR_IO;
+    }
+
+    *out_response = resp;
+    *out_http_code = http_code;
+    return AIRY_OK;
+}
+
 /* R-1 / N-3：provider HTTP 状态码 → airy 错误码归一（流式与非流式共用 SSoT，
  * 收敛 openai_stream 内联 switch 与 rate_limit 非流式 switch 的同构副本）。
  * 401/403（密钥无效）与 429（限流）此前被统称"网络请求失败"，用户无从排障；
@@ -318,16 +388,11 @@ int provider_http_exec(const provider_request_t *req, provider_http_resp_t **out
 
     /* URL 拼装 SSoT（B16-S6）：api_base 尾部斜杠在此归一，调用方只声明 path
      * （如 "/embeddings"）。此前该"防双斜杠"逻辑散落在 service 层调用点，
-     * 归一后所有出网点共用一条规则。 */
+     * 归一后所有出网点共用一条规则（provider_url_join）。 */
     char url[1024];
-    size_t blen = strlen(req->base->api_base);
-    while (blen > 0 && (req->base->api_base[blen - 1] == '/' || req->base->api_base[blen - 1] == '\\'))
-        blen--;
-    if (blen == 0) {
-        errno = EINVAL;
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    snprintf(url, sizeof(url), "%.*s%s", (int)blen, req->base->api_base, req->path);
+    int join_rc = provider_url_join(req->base->api_base, req->path, url, sizeof(url));
+    if (join_rc != AIRY_OK)
+        return join_rc;
 
     struct curl_slist *headers = provider_headers_build(req->base, req->headers);
 

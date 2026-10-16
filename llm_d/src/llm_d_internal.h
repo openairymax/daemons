@@ -15,6 +15,8 @@
 #define AIRY_RT_DAEMON_LLM_D_INTERNAL_H
 
 #include "llm_service.h"
+#include "providers/core/ep_health.h"
+#include "providers/core/registry.h"
 
 #include <cjson/cJSON.h>
 
@@ -29,6 +31,17 @@ extern "C" {
 
 /* 服务单例：由 src/svc.c 定义并持有生命周期。 */
 extern llm_service_t *g_service;
+
+/* 端点健康视图单例：由 src/svc.c 在 svc_activate 建立、svc_destroy 释放。
+ * 定义与生命周期归装配域，消费侧（methods.c 的 health_check 与流式冷加载
+ * 上报）只读经此句柄。 */
+extern ep_health_t *g_ep;
+
+/* 跨域桥：llm_service 的 provider registry 句柄。struct llm_service 是 rpc
+ * 域私有类型（service.h），装配域与 RPC 方法域不透明持有 g_service，无法直
+ * 接取 registry；本桥在 rpc 域（service.c）实现，仅暴露 registry 句柄，
+ * 保持 struct llm_service 私有不被穿透。 */
+provider_registry_t *llm_svc_reg(const llm_service_t *svc);
 
 /* 单请求上下文：messages 与响应缓冲由 request_context_create 分配、
  * request_context_destroy 释放（成对，资源确定性）。 */
