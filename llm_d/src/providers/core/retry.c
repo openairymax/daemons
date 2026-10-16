@@ -41,6 +41,16 @@ int provider_retryable(CURLcode code)
     }
 }
 
+/* 类别收窄（策略面）：CONNECT_ONLY 只认连接建立类故障——本地端点慢推理是
+ * 预期行为，超时与收发中断不重发（重发只会空转整轮墙钟预算）。 */
+static int retry_in_class(CURLcode code, provider_retry_class_t cls)
+{
+    if (cls != PROVIDER_RETRY_CONNECT_ONLY)
+        return provider_retryable(code);
+    return code == CURLE_COULDNT_RESOLVE_PROXY || code == CURLE_COULDNT_RESOLVE_HOST ||
+           code == CURLE_COULDNT_CONNECT;
+}
+
 uint32_t provider_backoff_ms(int attempt)
 {
     uint32_t backoff = PROVIDER_RETRY_BASE_MS;
@@ -90,13 +100,13 @@ int provider_retry_run(const provider_retry_cfg_t *cfg, CURLcode *out_res, long 
         if (st == PROVIDER_TRY_DONE)
             break;
 
-        if (retry >= max_retries || !provider_retryable(res) ||
+        int retryable = retry_in_class(res, cfg->retry_class);
+        if (retry >= max_retries || !retryable ||
             (cfg->gate && !cfg->gate(cfg->ud, res, http_code))) {
             SVC_LOG_WARN("C-L02: PROVIDER: %s-NORETRY url=%s errno=%d attempts=%d/%d "
                          "http_code=%ld diag=%s curl_error=%s retryable=%d",
                          cfg->tag, cfg->url, errno, retry + 1, max_retries + 1, http_code,
-                         provider_http_diag(res), curl_easy_strerror(res),
-                         provider_retryable(res));
+                         provider_http_diag(res), curl_easy_strerror(res), retryable);
             break;
         }
 

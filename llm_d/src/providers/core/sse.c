@@ -353,7 +353,8 @@ static void sse_reset(void *ud)
 /* 两模式共用的流式入口：重试壳在 core/retry.c，本件只提供单次尝试与两个
  * 钩子。资源（line_buf/raw_buf）由公开入口持有，本函数任何路径不释放。 */
 static int provider_stream_post(const char *url, struct curl_slist *headers, const char *body,
-                                double timeout_sec, int max_retries, sse_stream_ctx_t *sse,
+                                double timeout_sec, int max_retries,
+                                provider_retry_class_t retry_class, sse_stream_ctx_t *sse,
                                 long *out_http_code)
 {
     sse_try_ctx_t ctx = {
@@ -368,6 +369,7 @@ static int provider_stream_post(const char *url, struct curl_slist *headers, con
         .url = url,
         .timeout_sec = timeout_sec,
         .max_retries = max_retries,
+        .retry_class = retry_class,
         .attempt = sse_try,
         .gate = sse_gate,
         .reset = sse_reset,
@@ -426,6 +428,7 @@ static int provider_stream_post(const char *url, struct curl_slist *headers, con
 
 int provider_http_post_stream(const char *url, struct curl_slist *headers, const char *body,
                               double timeout_sec, int max_retries,
+                              provider_retry_class_t retry_class,
                               provider_stream_chunk_cb_t on_chunk, void *chunk_user_data,
                               long *out_http_code)
 {
@@ -444,14 +447,15 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    int ret = provider_stream_post(url, headers, body, timeout_sec, max_retries, &sse,
-                                   out_http_code);
+    int ret = provider_stream_post(url, headers, body, timeout_sec, max_retries, retry_class,
+                                   &sse, out_http_code);
     sse_ctx_destroy(&sse);
     return ret;
 }
 
 int provider_http_post_stream_sse(const char *url, struct curl_slist *headers, const char *body,
                                   double timeout_sec, int max_retries,
+                                  provider_retry_class_t retry_class,
                                   provider_sse_event_cb_t on_event, void *event_user_data,
                                   long *out_http_code)
 {
@@ -470,8 +474,8 @@ int provider_http_post_stream_sse(const char *url, struct curl_slist *headers, c
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    int ret = provider_stream_post(url, headers, body, timeout_sec, max_retries, &sse,
-                                   out_http_code);
+    int ret = provider_stream_post(url, headers, body, timeout_sec, max_retries, retry_class,
+                                   &sse, out_http_code);
     sse_ctx_destroy(&sse);
     return ret;
 }

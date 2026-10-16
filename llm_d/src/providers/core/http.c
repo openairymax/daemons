@@ -184,8 +184,8 @@ static void http_try_reset(void *ud)
 }
 
 int provider_http_post(const char *url, struct curl_slist *headers, const char *body,
-                       double timeout_sec, int max_retries, provider_http_resp_t **out_response,
-                       long *out_http_code)
+                       double timeout_sec, int max_retries, provider_retry_class_t retry_class,
+                       provider_http_resp_t **out_response, long *out_http_code)
 {
     if (!url || !body || !out_response || !out_http_code) {
         errno = EINVAL;
@@ -209,6 +209,7 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
         .url = url,
         .timeout_sec = timeout_sec,
         .max_retries = max_retries,
+        .retry_class = retry_class,
         .attempt = http_try,
         .gate = NULL,
         .reset = http_try_reset,
@@ -333,18 +334,19 @@ int provider_http_exec(const provider_request_t *req, provider_http_resp_t **out
     int rc;
     if (req->on_event) {
         rc = provider_http_post_stream_sse(url, headers, req->body, req->base->timeout_sec,
-                                           req->base->max_retries, req->on_event, req->user_data,
-                                           out_http_code);
+                                           req->base->max_retries, req->base->retry_class,
+                                           req->on_event, req->user_data, out_http_code);
     } else if (req->on_chunk) {
         rc = provider_http_post_stream(url, headers, req->body, req->base->timeout_sec,
-                                       req->base->max_retries, req->on_chunk, req->user_data,
-                                       out_http_code);
+                                       req->base->max_retries, req->base->retry_class,
+                                       req->on_chunk, req->user_data, out_http_code);
     } else if (req->rl) {
         rc = provider_http_request_with_retry(req->base, req->rl, url, headers, req->body,
                                               out_http_code, out_response);
     } else {
         rc = provider_http_post(url, headers, req->body, req->base->timeout_sec,
-                                req->base->max_retries, out_response, out_http_code);
+                                req->base->max_retries, req->base->retry_class, out_response,
+                                out_http_code);
     }
 
     if (headers)
