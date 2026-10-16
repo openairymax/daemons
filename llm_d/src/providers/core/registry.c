@@ -171,10 +171,8 @@ int provider_registry_model_max_output(const provider_t *prov, const char *model
     return 0;
 }
 
-int provider_registry_enumerate(provider_registry_t *reg,
-                                int (*cb)(const char *provider_name, const char *model_name,
-                                          void *user_data),
-                                void *user_data)
+int provider_reg_walk(provider_registry_t *reg,
+                      int (*cb)(const provider_t *prov, void *user_data), void *user_data)
 {
     if (!reg || !cb) {
         return 0;
@@ -186,29 +184,46 @@ int provider_registry_enumerate(provider_registry_t *reg,
         return 0;
     }
 
-    /* P3.16 (ACC-DT17): iterate all (provider, model) pairs and callback.
-     * Note: reg->lock is held during the callback, so the callback must not
-     * call registry functions that acquire the same lock (e.g.
-     * provider_registry_find). Router endpoint registration uses its own
-     * router mutex, no deadlock risk. A non-zero callback return short-circuits
-     * the iteration. */
+    /* reg->lock is held during the callback, so the callback must copy what it
+     * needs and perform no I/O nor any registry call that re-acquires this
+     * lock (e.g. provider_registry_find). A non-zero callback return
+     * short-circuits the iteration. */
     int short_circuit = 0;
     for (provider_t *p = reg->providers; p->name; ++p) {
-        if (!p->name || !p->models)
-            continue;
-        for (char **m = p->models; *m; ++m) {
-            int rc = cb(p->name, *m, user_data);
-            if (rc != 0) {
-                short_circuit = 1;
-                break;
-            }
-        }
-        if (short_circuit)
+        if (cb(p, user_data) != 0) {
+            short_circuit = 1;
             break;
+        }
     }
 
     airy_mtx_unlock(&reg->lock);
     return short_circuit;
+}
+
+typedef struct reg_enum_s {
+    int (*cb)(const char *provider_name, const char *model_name, void *user_data);
+    void *user_data;
+} reg_enum_t;
+
+static int reg_enum_step(const provider_t *p, void *user_data)
+{
+    reg_enum_t *a = (reg_enum_t *)user_data;
+    if (!p->models)
+        return 0;
+    for (char **m = p->models; *m; ++m) {
+        if (a->cb(p->name, *m, a->user_data) != 0)
+            return 1;
+    }
+    return 0;
+}
+
+int provider_registry_enumerate(provider_registry_t *reg,
+                                int (*cb)(const char *provider_name, const char *model_name,
+                                          void *user_data),
+                                void *user_data)
+{
+    reg_enum_t a = {cb, user_data};
+    return provider_reg_walk(reg, reg_enum_step, &a);
 }
 
 /* 单次 provider HTTP 调用默认超时（秒）。
