@@ -32,8 +32,7 @@
 #include "config/config_internal.h"
 #include "rpc/rpc_internal.h"
 
-/* 装配头：仅用于可见 llm_svc_reg 原型（防签名漂移），不消费其私有符号。
- * struct llm_service 是本域私有类型，跨域句柄桥必须在本域实现。 */
+/* 装配头：仅用于可见 llm_svc_reg 原型（防签名漂移）。 */
 #include "llm_d_internal.h"
 
 /* 跨域桥（0.1.19 D5）：向装配域/RPC 方法域暴露 provider registry 句柄，
@@ -46,9 +45,7 @@ provider_registry_t *llm_svc_reg(const llm_service_t *svc)
     return s->registry;
 }
 
-/* 2.1.1.5 修复：计费/用量持久化文件路径（$AIRY_DATA_DIR/agentrt/
- * llm_usage.json）。llm_d 启动时加载历史累计，每次真实调用后兜底保存、
- * 退出时保存，daemon 重启后金额与 token 历史不清零。 */
+/* 计费/用量持久化路径 $AIRY_DATA_DIR/agentrt/llm_usage.json，重启不清零。 */
 const char *llm_usage_state_path(void)
 {
     static char path[1024];
@@ -94,19 +91,14 @@ llm_service_t *llm_service_create(const char *config_path)
     base_cfg.max_retries = AIRY_DEFAULT_MAX_RETRIES;
     base_cfg.timeout_ms = AIRY_DEFAULT_TIMEOUT_MS;
 
-    /* P0.18.3 fix: load model config (providers/models list) from the manager
-     * to fill base_cfg. Previously llm_service_create never called
-     * svc_load_model_config, the registry stayed empty, the llm_router had
-     * zero endpoints, and every model request failed routing (INVALID_MODEL). */
+    /* 加载 model.yaml 的 providers/models 清单填充注册表；空注册表会使
+     * 所有请求路由失败（INVALID_MODEL）。 */
     provider_config_t *model_providers = NULL;
     size_t model_provider_count = 0;
     if (config_path) {
         int cfg_ret = svc_load_model_config(config_path, &model_providers, &model_provider_count);
         if (cfg_ret == 0 && model_providers && model_provider_count > 0) {
-            /* A2-1: user override file $AIRY_CONFIG_DIR/model.yaml (user
-             * wins; same-name providers replaced). Users can add/remove
-             * providers/models or change defaults without touching the repo
-             * SSoT. */
+            /* A2-1：用户覆盖 $AIRY_CONFIG_DIR/model.yaml 优先，同名替换。 */
             char user_path[1024];
             int has_user_cfg = 0;
             const char *cfg_dir = airy_config_dir();
@@ -155,18 +147,15 @@ llm_service_t *llm_service_create(const char *config_path)
         }
     }
 
-    /* A2-1: global.default_model/default_provider take effect (main config +
-     * user override, user wins). Previously the global section of model.yaml
-     * was consumed by no code; the default model relied on gateway hardcoding. */
+    /* A2-1：global 段默认模型/提供方生效（主配置 + 用户覆盖，用户优先）。 */
     char global_model[128] = {0};
     char global_provider[64] = {0};
     if (config_path)
         svc_model_defaults_from_yaml(config_path, global_model, sizeof(global_model),
                                      global_provider, sizeof(global_provider));
 
-    /* 生成默认（max_output 等）与默认模型的来源相互独立：即便默认模型由
-     * global 段给出，输出上限仍须从 llm 段（或 models 表首条）读出，否则
-     * 配置面写下的上限没有任何消费者。 */
+    /* 默认模型的来源与输出上限相互独立：上限仍须从 llm 段（或 models 表
+     * 首条）读出。 */
     svc_model_llm_config_t llm_cfg;
     const char *gen_src = NULL;
     __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
