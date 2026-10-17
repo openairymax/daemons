@@ -28,18 +28,28 @@
 
 ## 架构
 
+五件套装配（gen5）：`.manifest` 为唯一契约源，`src/main.c` 与 `include/svc_market_d.h`、
+`modules/sources.cmake` 由 `daemon_gen.py` 生成（L3 SSoT）；`src/svc.c` 为机制层
+策略挂点。`src/` 顶层仅存私有头 `market_d_internal.h`（daemon 全局服务句柄，svc
+与 rpc 单点消费），业务源按两个职责域组织：
+
 ```
 客户端 (JSON-RPC 2.0 over Unix socket / TCP)
         ↓
   main.c（accept 循环 + 线程池 4~8 / 队列 256 + 方法分发）
         ↓
-  market_service（注册 / 搜索 / 安装 / 卸载 / 更新检查 / 同步 / 发布）
+  rpc/market_rpc.c（market.* 方法域：15 个 JSON-RPC 方法薄壳）
+        ↓
+  service/（market 服务域，airy_market_service 静态库本体，
+           契约头 market_service.h 随域下潜）
         ├── market_service_registry.c   Agent 与 Skill 注册表
         ├── market_service_query.c      只读查询（搜索 / 清单 / 更新检查）
         ├── market_service_install.c    安装与卸载（版本 / 强制更新 / 安装路径）
-        ├── publisher.c                 资源发布
         └── market_service_config.c     配置装配与注册中心同步
 ```
+
+域依赖单向律：rpc → service 契约（`market_service.h`）；service 域内部经
+`market_service_internal.h`（跨文件共享声明）互洽，不反向依赖 rpc。
 
 - 启动时使用内建默认配置：`registry_url = NULL`、`storage_path = NULL`
   （由服务层回退到 `$AIRY_HOME/agents` 或 `$AIRY_HOME/skills`）、

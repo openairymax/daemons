@@ -13,7 +13,7 @@
 #ifndef AIRY_RT_DAEMON_MARKET_D_INTERNAL_H
 #define AIRY_RT_DAEMON_MARKET_D_INTERNAL_H
 
-#include "market_service.h"
+#include "service/market_service.h"
 
 #ifdef __cplusplus
 extern "C" {

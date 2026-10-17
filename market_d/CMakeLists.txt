@@ -23,16 +23,15 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== Market 服务静态库 ====================
-# publisher/market_service 五域编译为独立静态库，
+# service 域五源编译为独立静态库，
 # 供 market_d 可执行文件与集成测试共用。
 # 排除 main.c（含 main()）。
 set(MARKET_SERVICE_SOURCES
-    src/publisher.c
-    src/market_service_impl.c
-    src/market_service_registry.c  # 市场服务-注册域
-    src/market_service_query.c     # 市场服务-只读查询域（检索/清单/更新检查）
-    src/market_service_install.c   # 市场服务-安装/卸载域
-    src/market_service_config.c    # 市场服务-配置/同步域
+    src/service/market_service_impl.c
+    src/service/market_service_registry.c  # 市场服务-注册域
+    src/service/market_service_query.c     # 市场服务-只读查询域（检索/清单/更新检查）
+    src/service/market_service_install.c   # 市场服务-安装/卸载域
+    src/service/market_service_config.c    # 市场服务-配置/同步域
 )
 
 add_library(airy_market_service STATIC ${MARKET_SERVICE_SOURCES})
