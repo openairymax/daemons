@@ -20,7 +20,7 @@
 #include "agent_run_internal.h"
 
 #include "agent_d_internal.h"
-#include "agent_service.h"
+#include "service/agent_service.h"
 #include "airy_memory.h"
 #include "airy_run_stream.h"
 #include "atomic_compat.h"

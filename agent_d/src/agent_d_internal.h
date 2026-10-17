@@ -14,7 +14,7 @@
 #ifndef AIRY_RT_DAEMON_AGENT_D_INTERNAL_H
 #define AIRY_RT_DAEMON_AGENT_D_INTERNAL_H
 
-#include "agent_service.h"
+#include "service/agent_service.h"
 
 #include "daemon_event_driver.h"
 

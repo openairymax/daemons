@@ -24,14 +24,18 @@
   },
   "deps": {"required": [], "optional": []},
   "modules": [
-    {"name": "core", "sources": [
-      "agent_d_rpc.c",
-      "agent_d_monitor.c",
-      "agent_run_engine.c",
-      "agent_run_ledger.c",
-      "agent_run_loop.c",
-      "agent_run_stream.c",
-      "agent_run_rpc.c"
+    {"name": "rpc", "sources": [
+      "rpc/agent_d_rpc.c",
+      "rpc/agent_run_rpc.c"
+    ]},
+    {"name": "monitor", "sources": [
+      "monitor/agent_d_monitor.c"
+    ]},
+    {"name": "run", "sources": [
+      "run/agent_run_engine.c",
+      "run/agent_run_ledger.c",
+      "run/agent_run_loop.c",
+      "run/agent_run_stream.c"
     ]}
   ]
 }

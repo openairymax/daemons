@@ -12,7 +12,7 @@
  * tool_trace/thinking 契约不变），保证 CLI/TUI/SDK 零改动迁移。
  */
 
-#include "agent_run_engine.h"
+#include "run/agent_run_engine.h"
 #include "agent_d_internal.h"
 #include "svc_agent_d.h"
 
