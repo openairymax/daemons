@@ -14,6 +14,7 @@
 #include "llm_service.h"
 #include "daemon_platform_ext.h"
 #include "providers/core/registry.h"
+#include "svc_model_watch.h"
 
 struct llm_service {
     provider_registry_t *registry;
@@ -28,6 +29,11 @@ struct llm_service {
      * token 数，0 = 未配置）。请求未指定 max_tokens 且模型未在 provider
      * 侧声明上限时的兜底值，使配置面写下的上限真正生效。 */
     int default_max_output_tokens;
+    /* 0.1.19 §3.5 缺陷5：启动快照（manager 配置 + 用户覆盖 model.yaml）。
+     * 请求侧只检测不重载——漂移一次性 WARN + 落 stale 标记，由启动器
+     * status 面提示重启。 */
+    svc_mw_t mw;
+    svc_mw_t mw_usr;
 };
 
 /* 2.1.1.5 修复：计费/用量持久化文件路径（$AIRY_DATA_DIR/agentrt/

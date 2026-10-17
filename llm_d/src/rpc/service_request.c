@@ -378,6 +378,10 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
         return AIRY_ERR_INVALID_PARAM;
     }
 
+    /* 0.1.19 §3.5 缺陷5：只读漂移检测（未变路径单次 stat），不重载配置。 */
+    (void)svc_mw_check(&svc->mw);
+    (void)svc_mw_check(&svc->mw_usr);
+
     char *cache_text = make_cache_text(manager);
     char *cache_key = cache_text ? make_cache_key(manager, cache_text) : NULL;
     if (!cache_text || !cache_key) {
@@ -468,6 +472,10 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
         SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL model=NULL, STACK: llm_service_complete_stream");
         return AIRY_ERR_INVALID_PARAM;
     }
+
+    /* 0.1.19 §3.5 缺陷5：只读漂移检测（未变路径单次 stat），不重载配置。 */
+    (void)svc_mw_check(&svc->mw);
+    (void)svc_mw_check(&svc->mw_usr);
 
     /* P3.16 (ACC-DT17): prefer strategy routing via llm_router to select the
      * provider; on routing failure fall back to find_provider(manager->model)
