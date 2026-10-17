@@ -24,6 +24,6 @@
   },
   "deps": { "required": [], "optional": [] },
   "modules": [
-    { "name": "rpc", "sources": ["a2a_rpc.c"] }
+    { "name": "rpc", "sources": ["rpc/a2a_rpc.c"] }
   ]
 }

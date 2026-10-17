@@ -27,7 +27,7 @@ set(PROTOCOLS_COMMON_INCLUDE_DIR ${PROTOCOLS_DIR}/common/include)
 # 提取 service 为独立静态库，供 a2a_d 可执行文件与单元测试共用，
 # 消除桩函数依赖。排除 main.c（含 main()）。
 set(A2A_SERVICE_SOURCES
-    src/service.c
+    src/core/service.c
 )
 
 add_library(airy_a2a_service STATIC ${A2A_SERVICE_SOURCES})
@@ -109,8 +109,8 @@ endif()
 
 # ==================== A2A daemon 可执行文件 ====================
 # gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c 由
-# daemon_gen.py 生成；配置与端点策略 svc.c、RPC 方法域 a2a_rpc.c 为
-# 手写业务源。service 域单独编译为 airy_a2a_service 静态库（上方），
+# daemon_gen.py 生成；配置与端点策略 svc.c、rpc 域 src/rpc/a2a_rpc.c 为
+# 手写业务源。core 域单独编译为 airy_a2a_service 静态库（上方），
 # 不入 ${A2A_D_SOURCES}，避免重复编译。
 include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
 
