@@ -22,7 +22,7 @@
  *       maths）仅进程存活判定。
  */
 
-#include "supervisor_d.h"
+#include "supervisor_d_internal.h"
 
 #include <stdarg.h>
 #include <stdio.h>

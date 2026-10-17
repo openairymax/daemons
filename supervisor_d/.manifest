@@ -15,10 +15,9 @@
   },
   "deps": { "required": [], "optional": [] },
   "modules": [
-    { "name": "svc", "sources": ["svc.c"] },
-    { "name": "decl", "sources": ["decl.c"] },
-    { "name": "proc", "sources": ["proc.c"] },
-    { "name": "probe", "sources": ["probe.c"] },
-    { "name": "ctrl", "sources": ["ctrl.c"] }
+    { "name": "decl", "sources": ["decl/decl.c"] },
+    { "name": "proc", "sources": ["proc/proc.c"] },
+    { "name": "ctrl", "sources": ["ctrl/ctrl.c"] },
+    { "name": "net", "sources": ["net/net.c"] }
   ]
 }

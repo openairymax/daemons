@@ -30,18 +30,22 @@ launcher 写入、supervisor 只读），**实际态**是子进程集 + 服务�
 
 ```
 profile.env launch 声明（期望态 SSoT，launcher 写入）
-        │ sup_decl_load（两遍扫描：先名单后 args；缺失回落内置兜底表）
+        │ src/decl/ sup_decl_load（两遍扫描：先名单后 args；缺失回落内置兜底表）
         ▼
-main.c 主循环 ── 每 tick ──▶ proc.c sup_reconcile
+main.c 主循环 ── 每 tick ──▶ src/proc/ sup_reconcile
         │                       │ reap（waitpid/WaitForSingleObject 收割死因）
         │                       │ CORE: STOPPED/BACKOFF→spawn（退避门控+超限 failed）
         │                       │ AUX: 仅 activate 拉起
-        │                       └ sup_health_tick（sock 可达性假死判定，同属 proc.c）
-        └ ctrl.c sup_ctrl_serve（控制口 JSON-RPC，串行单连接）
+        │                       └ sup_health_tick（sock 可达性假死判定，机制委托 src/net/）
+        └ src/ctrl/ sup_ctrl_serve（控制口 JSON-RPC，串行单连接）
 ```
 
-四文件分工：`decl.c` 期望态解析 · `proc.c` 进程域（spawn/reap/退避/假死探测/收摊）·
-`ctrl.c` 控制口 · `main.c` 生命周期与客户端模式。
+域切分（gen5 五件套，codegen=false 手写装配）：装配对 `src/main.c`（壳）+
+`src/svc.c`（常驻生命周期）· `src/decl/` 期望态解析 · `src/proc/` 进程域
+（spawn/reap/退避/假死探测/收摊）· `src/ctrl/` 控制口 · `src/net/` 端点机制件
+（跨平台 sock 可达性探测 + Windows TCP 装配权威）。域依赖单向
+`decl`/`proc`/`ctrl`/`net` → 契约，全户共享契约与 net 对外接口经
+`src/supervisor_d_internal.h` 单点消费。
 
 **V13.5 硬约束**：零项目内库链接（`link-whitelist.txt` 允许集为空，linkgate 构建期
 fail-closed 检验）。UDS/TCP、进程原语、JSON 字段提取、日志全部自持，仅链接系统库

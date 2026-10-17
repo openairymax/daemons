@@ -12,7 +12,7 @@
  * 控制口 health_check / shutdown 往返。
  */
 
-#include "supervisor_d.h"
+#include "supervisor_d_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>

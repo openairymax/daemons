@@ -15,7 +15,7 @@
  * 生命周期域在 svc.c（V13.4/V13.5）；CLI 域在 ctrl.c；本文件仅装配。
  */
 
-#include "supervisor_d.h"
+#include "supervisor_d_internal.h"
 
 #include <string.h>
 

@@ -16,7 +16,7 @@
  * net.c，本件只持 fd 与端点字面量（机制/策略分离）。
  */
 
-#include "supervisor_d.h"
+#include "supervisor_d_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
