@@ -31,7 +31,7 @@
 #include "service.h"
 #include "airy_types.h"
 #include "hindex.h"
-#include "mem_persist.h"
+#include "engine/mem_persist.h"
 
 #include "svc_logger.h"
 

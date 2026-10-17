@@ -12,8 +12,8 @@
 #include "mem_service.h"
 #include "hindex.h"
 
-#include "vector.h"
-#include "emb_client.h"
+#include "engine/vector.h"
+#include "engine/emb_client.h"
 
 #include "platform.h"
 

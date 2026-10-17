@@ -12,7 +12,7 @@
  */
 
 #include "mem_handlers.h"
-#include "mem_daemon_ctx.h"
+#include "core/mem_daemon_ctx.h"
 
 #include "cache_handlers.h"
 #include "ledger_handlers.h"
@@ -20,7 +20,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "daemon_main.h"
-#include "mem_service.h"
+#include "core/mem_service.h"
 #include "svc_logger.h"
 
 #include <stdlib.h>

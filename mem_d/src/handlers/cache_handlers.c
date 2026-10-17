@@ -10,12 +10,12 @@
  */
 
 #include "cache_handlers.h"
-#include "mem_daemon_ctx.h"
+#include "core/mem_daemon_ctx.h"
 
 #include "airy_memory.h"
 #include "error.h"
 #include "daemon_main.h"
-#include "cache.h"
+#include "engine/cache.h"
 
 /* ── mem.cache_put ───────────────────────────────────────────────────── */
 

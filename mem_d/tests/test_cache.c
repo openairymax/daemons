@@ -9,7 +9,7 @@
  * LRU/容量淘汰、删除、模型隔离、命中率统计。
  */
 
-#include "cache.h"
+#include "engine/cache.h"
 #include "platform.h"
 
 #include "airy_memory.h"
