@@ -5,9 +5,9 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 set(MATHS_TEST_SOURCES
     test_maths_service.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/maths_service.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/expr_eval.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/python_backend.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/maths_service.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/expr/expr_eval.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/backend/python_backend.c
 )
 
 add_executable(test_maths_service ${MATHS_TEST_SOURCES})

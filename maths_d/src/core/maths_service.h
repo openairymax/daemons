@@ -21,7 +21,7 @@
 #define AIRY_RT_MATHS_SERVICE_H
 
 #include "platform.h"
-#include "python_backend.h"
+#include "backend/python_backend.h"
 
 #include <cjson/cJSON.h>
 
@@ -32,10 +32,7 @@
 extern "C" {
 #endif
 
-#define MATHS_MAX_EXPR_LEN 4096
-#define MATHS_MAX_DEPTH 64
 #define MATHS_MAX_VALUES 65536
-#define MATHS_MAX_FUNC_NAME 32
 #define MATHS_PLOT_MAX_SAMPLES 256 /* plot 采样上限（响应规模硬约束） */
 
 /* RPC 域状态（协议无关）：OK 时 out_result 出 cJSON result；

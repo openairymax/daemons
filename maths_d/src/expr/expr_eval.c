@@ -26,7 +26,6 @@
  */
 
 #include "expr_eval.h"
-#include "maths_service.h"
 
 #include "airy_memory.h"
 
