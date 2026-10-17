@@ -35,6 +35,7 @@
 #include "tool_service.h"
 #include "daemon_security.h"
 #include "error.h"
+#include "err_class.h"
 
 #include <cjson/cJSON.h>
 
@@ -260,7 +261,16 @@ static void test_e2e_escape(tool_service_t *svc)
     char escape_path[256];
     snprintf(escape_path, sizeof(escape_path), "/tmp/airy_e2e_escape_%d.txt", (int)getpid());
 
-    /* 13. fs_write 越界绝对路径 → PERMISSION_DENIED，且不得产生文件 */
+    /* 允许根：与沙箱解析口径一致（realpath 后逐字节比对） */
+    char ws[4096];
+#ifndef _WIN32
+    CHECK(realpath(E2E_DIR, ws) != NULL);
+#else
+    snprintf(ws, sizeof(ws), "%s", E2E_DIR);
+#endif
+
+    /* 13. fs_write 越界绝对路径 → PERMISSION_DENIED（policy 类 + 允许根），
+     *     且不得产生文件 */
     cJSON *p = cJSON_CreateObject();
     CHECK(p != NULL);
     cJSON_AddStringToObject(p, "path", escape_path);
@@ -269,12 +279,34 @@ static void test_e2e_escape(tool_service_t *svc)
     tool_result_t *res = run_tool(svc, "fs_write", "tool_d", p, &ret);
     cJSON_Delete(p);
     TEST(ret == AIRY_ERR_PERMISSION_DENIED, "fs_write 越界绝对路径被拒绝");
+    TEST(airy_err_class_of(ret) == AIRY_ERR_CLASS_POLICY, "越界拒绝归 policy 类 (N1/N3)");
+    TEST(res && res->error && strstr(res->error, ws) != NULL,
+         "越界拒绝文案回显允许根 (N3)");
     if (res) {
         printf("    fs_write -> %s\n", res->error ? res->error : "(no error)");
         tool_result_free(res);
     }
 #ifndef _WIN32
     TEST(access(escape_path, F_OK) != 0, "越界写未产生文件 (DoD)");
+#endif
+
+    /* 13b. 越界嵌套路径默认建父目录：预检先于写系统调用，沙箱外目录不得出现 */
+#ifndef _WIN32
+    char escape_dir[256];
+    char escape_nested[320];
+    snprintf(escape_dir, sizeof(escape_dir), "/tmp/airy_e2e_escape_dir_%d", (int)getpid());
+    snprintf(escape_nested, sizeof(escape_nested), "%s/sub/note.txt", escape_dir);
+    p = cJSON_CreateObject();
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "path", escape_nested);
+    cJSON_AddStringToObject(p, "content", "should not exist");
+    res = run_tool(svc, "fs_write", "tool_d", p, &ret);
+    cJSON_Delete(p);
+    TEST(ret == AIRY_ERR_PERMISSION_DENIED, "越界嵌套路径被拒绝");
+    TEST(access(escape_dir, F_OK) != 0, "预检先于写系统调用：沙箱外父目录未创建 (N3)");
+    if (res) {
+        tool_result_free(res);
+    }
 #endif
 
     /* 14. fs_write ".." 相对路径越界 → PERMISSION_DENIED */
@@ -410,7 +442,7 @@ static void test_e2e_path_contract(tool_service_t *svc)
     TEST(access(expect, F_OK) == 0, "缺失父目录被递归创建且文件落盘 (#3)");
 #endif
 
-    /* 19. create_dirs=0：缺失父目录时拒绝写入（防误建） */
+    /* 19. create_dirs=0：缺失父目录时写前预检拒绝（NOT_FOUND，防误建） */
     p = cJSON_CreateObject();
     CHECK(p != NULL);
     cJSON_AddStringToObject(p, "path", "noauto/sub/deep.txt");
@@ -418,7 +450,9 @@ static void test_e2e_path_contract(tool_service_t *svc)
     cJSON_AddBoolToObject(p, "create_dirs", 0);
     res = run_tool(svc, "fs_write", "tool_d", p, &ret);
     cJSON_Delete(p);
-    TEST(ret == AIRY_ERR_IO, "create_dirs=0 时缺失父目录写入被拒绝 (#3)");
+    TEST(ret == AIRY_ERR_NOT_FOUND, "create_dirs=0 时缺失父目录写入被拒绝 (#3/N3)");
+    TEST(res && res->error && strstr(res->error, "create_dirs=false") != NULL,
+         "create_dirs=0 拒绝文案给出可操作提示 (N3)");
     if (res) {
         printf("    fs_write -> %s\n", res->error ? res->error : "(no error)");
         tool_result_free(res);
@@ -427,6 +461,24 @@ static void test_e2e_path_contract(tool_service_t *svc)
     char blocked[640];
     snprintf(blocked, sizeof(blocked), "%s/noauto/sub/deep.txt", ws);
     TEST(access(blocked, F_OK) != 0, "create_dirs=0 未在磁盘产生文件 (DoD)");
+#endif
+
+    /* 20. create_dirs=0 + 父目录已存在：预检放行，写入照常成功 */
+    p = cJSON_CreateObject();
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "path", "nested/deep/ok.txt");
+    cJSON_AddStringToObject(p, "content", "existing-parent\n");
+    cJSON_AddBoolToObject(p, "create_dirs", 0);
+    res = run_tool(svc, "fs_write", "tool_d", p, &ret);
+    cJSON_Delete(p);
+    TEST(ret == 0 && res && res->success == 1, "create_dirs=0 且父目录存在时写入成功 (N3)");
+    if (res) {
+        tool_result_free(res);
+    }
+#ifndef _WIN32
+    char okpath[640];
+    snprintf(okpath, sizeof(okpath), "%s/nested/deep/ok.txt", ws);
+    TEST(access(okpath, F_OK) == 0, "create_dirs=0 既有父目录目标落盘 (N3)");
 #endif
 }
 
