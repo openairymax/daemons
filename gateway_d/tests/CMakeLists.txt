@@ -33,7 +33,7 @@ foreach(TEST_SRC ${TEST_SOURCES})
 
     add_executable(${TEST_NAME}
         ${TEST_SRC}
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/service.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/svc.c
     )
 
     if(${TEST_NAME} STREQUAL "test_protocol_router")

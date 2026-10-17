@@ -65,18 +65,17 @@ option(AIRY_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
 #   gateway_cap_registry.c    统一能力注册表（cap_key 单一权威源）
 set(GATEWAY_SRC_BASE ${GATEWAY_DIR})
 include(${GATEWAY_DIR}/cmake/gateway-sources.cmake)
+# 本 daemon 自有源装配清单（五件套④）：service/protocol 域入静态库，
+# bootstrap 域入可执行目标（同 llm_d 拆分，服务域重复编译零容忍）。
+include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
 set(GATEWAY_SERVICE_SOURCES
-    src/service.c
+    ${GATEWAY_D_SVC_SOURCES}
     ${GATEWAY_BIZ_SOURCES}
 )
 
 if(AIRY_ENABLE_PROTOCOLS)
     list(APPEND GATEWAY_SERVICE_SOURCES
-        src/protocol/gateway_jsonpick.c
-        src/protocol/gateway_mcp_server.c
-        src/protocol/gateway_a2a_handler.c
-        src/protocol/gateway_openai_compat.c
-        src/protocol/gateway_protocol_router.c
+        ${GATEWAY_D_PROTOCOL_SOURCES}
     )
     airy_print_ok("[gateway_d] Protocol stack: ENABLED (MCP/A2A/OpenAI)")
 else()
@@ -183,7 +182,7 @@ if(AIRY_HAS_HTTP2)
     target_compile_definitions(airy_gateway_service PRIVATE GATEWAY_HAS_HTTP2=1)
     # http2_gateway.h 传递包含 nghttp2.h（头文件内联函数使用 malloc/free 等），
     # 需 AIRY_COMPLIANCE_IMPL 豁免毒化（与 gateway_lib_obj 的 http2_gateway.c 同策略）
-    set_source_files_properties(src/service.c PROPERTIES COMPILE_DEFINITIONS "AIRY_COMPLIANCE_IMPL")
+    set_source_files_properties(src/svc.c PROPERTIES COMPILE_DEFINITIONS "AIRY_COMPLIANCE_IMPL")
 endif()
 
 if(AIRY_HAS_CJSON)
@@ -339,19 +338,15 @@ if(AIRY_HAS_LIBWEBSOCKETS)
 endif()
 
 # ==================== Gateway daemon 可执行文件 ====================
-# 进程域分层：main.c 装配骨架/主循环，gw_boot 启停策略域（信号/协议装配/
-# SD 公告/健康上报/拆除级联），gw_cli CLI 解析，gw_acl 默认策略，
-# gw_mcpclients 外部 MCP client 桥；服务代码已纳入 airy_gateway_service 库。
-# gw_mcpclients 为 POSIX-only（protocols 库 WIN32 恒裁剪 mcp_client_*，
-# PROTOCOLS_ENABLE_MCP_TRANSPORT WIN32 恒 OFF），与 gw_boot.c 调用点门控对齐。
-add_executable(gateway_d
-    src/main.c
-    src/gw_boot.c
-    src/gw_cli.c
-    src/gw_acl.c
-)
+# 进程域分层：main.c 装配骨架/主循环，bootstrap 域承载启停策略
+# （gw_boot：信号/协议装配/SD 公告/健康上报/拆除级联）、CLI 解析
+# （gw_cli）、默认策略（gw_acl）、外部 MCP client 桥（gw_mcpclients）；
+# 服务代码已纳入 airy_gateway_service 库。gw_mcpclients 为 POSIX-only
+# （protocols 库 WIN32 恒裁剪 mcp_client_*，PROTOCOLS_ENABLE_MCP_TRANSPORT
+# WIN32 恒 OFF），与 gw_boot.c 调用点门控对齐。
+add_executable(gateway_d ${GATEWAY_D_SOURCES})
 if(NOT WIN32)
-    target_sources(gateway_d PRIVATE src/gw_mcpclients.c)
+    target_sources(gateway_d PRIVATE src/bootstrap/gw_mcpclients.c)
 endif()
 
 # 版本 SSoT：GATEWAY_VERSION 从 agentrt 根 VERSION 文件注入（gateway_internal.h
