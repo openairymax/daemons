@@ -10,13 +10,13 @@
  * （13-semantic-cache-context-ledger.md §6 测试要点）。
  */
 
-#include "mem_handlers.h"
-#include "mem_daemon_ctx.h"
+#include "handlers/mem_handlers.h"
+#include "core/mem_daemon_ctx.h"
 
-#include "cache.h"
-#include "cache_handlers.h"
-#include "ledger.h"
-#include "ledger_handlers.h"
+#include "engine/cache.h"
+#include "handlers/cache_handlers.h"
+#include "engine/ledger.h"
+#include "handlers/ledger_handlers.h"
 
 #include "airy_memory.h"
 #include "error.h"
