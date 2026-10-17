@@ -240,6 +240,16 @@ int provider_registry_enumerate(provider_registry_t *reg,
  * 须自行保证仍小于网关背压。 */
 #define PROVIDER_DEFAULT_TIMEOUT_SEC 70.0
 
+/* Bounded copy: keeps dst untouched when src does not fit, so an over-long
+ * upstream value degrades to the previous (default) content. */
+static void copy_fit(char *dst, size_t cap, const char *src)
+{
+    size_t len = src ? strlen(src) : cap;
+
+    if (len < cap)
+        __builtin_memcpy(dst, src, len + 1);
+}
+
 void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name, const char *api_key,
                         const char *api_base, const char *organization, double timeout_sec,
                         int max_retries, const char *default_base)
@@ -255,12 +265,7 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name
      * rule in core/secrets.c, no vendor table). */
     base_ctx->api_key_env[0] = '\0';
     if (api_key && strncmp(api_key, "env:", 4) == 0) {
-        const char *env_name = api_key + 4;
-        size_t env_len = strlen(env_name);
-
-        if (env_len > 0 && env_len < sizeof(base_ctx->api_key_env)) {
-            __builtin_memcpy(base_ctx->api_key_env, env_name, env_len + 1);
-        }
+        copy_fit(base_ctx->api_key_env, sizeof(base_ctx->api_key_env), api_key + 4);
     } else {
         char env_name[128];
         if (sec_env_name_for(provider_name, env_name, sizeof(env_name))) {
@@ -273,31 +278,14 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name
         resolved_key = getenv(base_ctx->api_key_env);
     }
 
-    if (resolved_key) {
-        size_t key_len = strlen(resolved_key);
-        if (key_len < sizeof(base_ctx->api_key)) {
-            __builtin_memcpy(base_ctx->api_key, resolved_key, key_len + 1);
-        }
+    copy_fit(base_ctx->api_key, sizeof(base_ctx->api_key), resolved_key);
+
+    if (api_base || default_base) {
+        copy_fit(base_ctx->api_base, sizeof(base_ctx->api_base),
+                 api_base ? api_base : default_base);
     }
 
-    if (api_base) {
-        size_t base_len = strlen(api_base);
-        if (base_len < sizeof(base_ctx->api_base)) {
-            __builtin_memcpy(base_ctx->api_base, api_base, base_len + 1);
-        }
-    } else if (default_base) {
-        size_t default_len = strlen(default_base);
-        if (default_len < sizeof(base_ctx->api_base)) {
-            __builtin_memcpy(base_ctx->api_base, default_base, default_len + 1);
-        }
-    }
-
-    if (organization) {
-        size_t org_len = strlen(organization);
-        if (org_len < sizeof(base_ctx->organization)) {
-            __builtin_memcpy(base_ctx->organization, organization, org_len + 1);
-        }
-    }
+    copy_fit(base_ctx->organization, sizeof(base_ctx->organization), organization);
 
     base_ctx->timeout_sec = timeout_sec > 0 ? timeout_sec : PROVIDER_DEFAULT_TIMEOUT_SEC;
     base_ctx->max_retries = max_retries > 0 ? max_retries : 3;

@@ -17,6 +17,7 @@
 #include "error.h"
 #include "svc_logger.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,28 +25,35 @@
 
 #ifdef HAVE_YAML
 
+/* Find-by-name or append a fresh slot. Returns (size_t)-1 when the fixed
+ * 16-slot table is full; the caller owns its overflow policy. */
+static size_t agg_slot(provider_agg_t *provs, size_t *prov_count, const char *name,
+                       const char *env)
+{
+    for (size_t j = 0; j < *prov_count; ++j) {
+        if (strcmp(provs[j].name, name) == 0)
+            return j;
+    }
+    if (*prov_count >= 16)
+        return (size_t)-1;
+    provider_agg_t *p = &provs[*prov_count];
+    __builtin_memset(p, 0, sizeof(*p));
+    AIRY_STRNCPY_TERM(p->name, name, sizeof(p->name));
+    if (env && env[0])
+        AIRY_STRNCPY_TERM(p->api_key_env, env, sizeof(p->api_key_env));
+    return (*prov_count)++;
+}
+
 /* Aggregate providers from the models list: first model of a provider seeds
  * the provider record, later models append to its model_names. */
 static void svc_yaml_aggregate_providers(svc_yaml_state_t *st, provider_agg_t *provs,
                                          size_t *prov_count)
 {
     for (size_t i = 0; i < st->model_count; ++i) {
-        size_t j = 0;
-        for (; j < *prov_count; ++j) {
-            if (strcmp(provs[j].name, st->models[i].provider) == 0)
-                break;
-        }
-        if (j == *prov_count) {
-            if (*prov_count >= 16)
-                break;
-            __builtin_memset(&provs[*prov_count], 0, sizeof(provider_agg_t));
-            AIRY_STRNCPY_TERM(provs[*prov_count].name, st->models[i].provider,
-                              sizeof(provs[*prov_count].name));
-            if (st->models[i].api_key_env[0])
-                AIRY_STRNCPY_TERM(provs[*prov_count].api_key_env, st->models[i].api_key_env,
-                                  sizeof(provs[*prov_count].api_key_env));
-            (*prov_count)++;
-        }
+        size_t j = agg_slot(provs, prov_count, st->models[i].provider,
+                            st->models[i].api_key_env);
+        if (j == (size_t)-1)
+            break;
         if (provs[j].model_count < 64) {
             size_t mi = provs[j].model_count;
             provs[j].model_names[mi] = AIRY_STRDUP(st->models[i].name);
@@ -80,21 +88,11 @@ static void svc_yaml_merge_provider_cfgs(svc_yaml_state_t *st, provider_agg_t *p
                                          size_t *prov_count)
 {
     for (size_t pi = 0; pi < st->pcfg_count; ++pi) {
-        size_t j = 0;
-        for (; j < *prov_count; ++j) {
-            if (strcmp(provs[j].name, st->pcfg[pi].name) == 0)
-                break;
-        }
-        if (j == *prov_count) {
-            if (*prov_count >= 16) {
-                for (size_t k = 0; k < st->pcfg[pi].model_count; ++k)
-                    AIRY_FREE(st->pcfg[pi].model_names[k]);
-                continue;
-            }
-            __builtin_memset(&provs[*prov_count], 0, sizeof(provider_agg_t));
-            AIRY_STRNCPY_TERM(provs[*prov_count].name, st->pcfg[pi].name,
-                              sizeof(provs[*prov_count].name));
-            (*prov_count)++;
+        size_t j = agg_slot(provs, prov_count, st->pcfg[pi].name, NULL);
+        if (j == (size_t)-1) {
+            for (size_t k = 0; k < st->pcfg[pi].model_count; ++k)
+                AIRY_FREE(st->pcfg[pi].model_names[k]);
+            continue;
         }
 
         if (st->pcfg[pi].base_url[0])
@@ -148,13 +146,11 @@ static int svc_yaml_build_result(provider_agg_t *provs, size_t prov_count,
     for (size_t i = 0; i < prov_count; ++i) {
         result[i].name = AIRY_STRDUP(provs[i].name);
         if (provs[i].api_key_env[0]) {
-            char env_prefix[8] = "env:";
-            size_t env_key_len = strlen(provs[i].api_key_env);
-            char *key_buf = (char *)AIRY_MALLOC(4 + env_key_len + 1);
-            if (key_buf) {
-                __builtin_memcpy(key_buf, env_prefix, 4);
-                __builtin_memcpy(key_buf + 4, provs[i].api_key_env, env_key_len + 1);
-                result[i].api_key = key_buf;
+            size_t n = 4 + strlen(provs[i].api_key_env) + 1;
+            char *key = (char *)AIRY_MALLOC(n);
+            if (key) {
+                snprintf(key, n, "env:%s", provs[i].api_key_env);
+                result[i].api_key = key;
             }
         }
         if (provs[i].base_url[0])
