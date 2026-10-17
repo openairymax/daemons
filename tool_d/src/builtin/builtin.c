@@ -48,8 +48,13 @@ int builtin_fs_confine(const char *orig_path, int for_write, char *resolved, siz
 {
     if (os_sandbox_fs_confine(orig_path, for_write, resolved, resolved_cap) == 0)
         return AIRY_OK;
-    char err[512];
-    snprintf(err, sizeof(err), "Path escapes workspace sandbox: '%s'", orig_path);
+    char ws[512];
+    char err[768];
+    if (os_sandbox_fs_workspace(ws, sizeof(ws)) == 0 && ws[0])
+        snprintf(err, sizeof(err), "Path escapes workspace sandbox: '%s' (allowed root: '%s')",
+                 orig_path, ws);
+    else
+        snprintf(err, sizeof(err), "Path escapes workspace sandbox: '%s'", orig_path);
     res->error = AIRY_STRDUP(err);
     return AIRY_ERR_PERMISSION_DENIED;
 }

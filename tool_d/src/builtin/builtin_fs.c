@@ -74,10 +74,11 @@ int fs_read_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     return AIRY_OK;
 }
 
-/* 为写入目标递归创建父目录链（缺陷 #3）：confine 后 resolved 已锚定为绝对
- * 路径，剥去 basename 后 mkdir -p 其余部分，使对不存在目录的直接写入不再
- * 以 ENOENT 失败。默认开启，可由 fs_write 的 create_dirs=0 关闭以防误建。 */
-static int fs_write_mkdirs(const char *resolved, tool_result_t *res)
+/* 写前父目录预检（N3）：resolved 已锚定为绝对路径。create=1 时递归创建
+ * 父链；create=0 时只校验父目录存在且为目录，使失败点在进入写系统调用
+ * 之前显式暴露（缺失给 NOT_FOUND 与可操作提示，非目录给 IO）。默认开启，
+ * 可由 fs_write 的 create_dirs=0 关闭以防误建。 */
+static int fs_write_parents(const char *resolved, int create, tool_result_t *res)
 {
     char dir[4096];
     size_t n = strlen(resolved);
@@ -95,9 +96,26 @@ static int fs_write_mkdirs(const char *resolved, tool_result_t *res)
     if (!sep || sep == dir)
         return AIRY_OK; /* 无父目录分隔符，或直接位于根下，无需创建 */
     *sep = '\0';
-    if (airy_io_mkdir_p(dir, 0755) != 0) {
+    if (create) {
+        if (airy_io_mkdir_p(dir, 0755) != 0) {
+            char err[512];
+            snprintf(err, sizeof(err), "Cannot create directory '%s'", dir);
+            res->error = AIRY_STRDUP(err);
+            return AIRY_ERR_IO;
+        }
+        return AIRY_OK;
+    }
+    struct stat st;
+    if (stat(dir, &st) != 0) {
         char err[512];
-        snprintf(err, sizeof(err), "Cannot create directory '%s'", dir);
+        snprintf(err, sizeof(err),
+                 "Parent directory '%s' does not exist (create_dirs=false)", dir);
+        res->error = AIRY_STRDUP(err);
+        return AIRY_ERR_NOT_FOUND;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+        char err[512];
+        snprintf(err, sizeof(err), "Parent path '%s' is not a directory", dir);
         res->error = AIRY_STRDUP(err);
         return AIRY_ERR_IO;
     }
@@ -130,11 +148,9 @@ int fs_write_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *r
     int rc = builtin_fs_confine(path->valuestring, 1, resolved, sizeof(resolved), res);
     if (rc != AIRY_OK)
         return rc;
-    if (create_dirs) {
-        rc = fs_write_mkdirs(resolved, res);
-        if (rc != AIRY_OK)
-            return rc;
-    }
+    rc = fs_write_parents(resolved, create_dirs, res);
+    if (rc != AIRY_OK)
+        return rc;
     if (airy_io_write_file(resolved, content->valuestring, clen) != 0) {
         char err[512];
         snprintf(err, sizeof(err), "Cannot write file '%s': %s", resolved, strerror(errno));

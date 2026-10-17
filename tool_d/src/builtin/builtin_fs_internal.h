@@ -28,7 +28,8 @@ int builtin_scan_noise_dir(const char *name);
 /* Confine a file-tool path into the workspace sandbox (T16). Wraps
  * os_sandbox_fs_confine() with a uniform escape error for tool results.
  * Returns AIRY_OK with resolved filled on success; otherwise sets
- * res->error and returns AIRY_ERR_PERMISSION_DENIED. */
+ * res->error (naming the allowed root when it can be resolved) and
+ * returns AIRY_ERR_PERMISSION_DENIED, which maps to class=policy. */
 int builtin_fs_confine(const char *orig_path, int for_write, char *resolved, size_t resolved_cap,
                        tool_result_t *res);
 

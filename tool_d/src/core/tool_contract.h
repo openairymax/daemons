@@ -47,6 +47,12 @@ const tool_contract_t *tool_contract_of(const char *tool_id);
 /* 解析相对路径基准与沙箱根（含 getcwd/realpath，必须在注册表锁外调用）。 */
 int tool_contract_env(tool_contract_env_t *env);
 
+/* 向 obj 投影 sandbox_scope 数组（list_tools 的 x-airy 与 policy 错误信封
+ * 的 err.ctx 共用同一形状）：fenced!=0 时为 [base]，否则为空数组，表示该
+ * 工具不写文件系统。base 为沙箱根（tool_contract_env 的 path_base）。
+ * 返回 0 成功；-1 参数非法或分配失败。 */
+int tool_contract_scope_put(struct cJSON *obj, const char *base, int fenced);
+
 /* 把契约投影为 obj["x-airy"]；未声明契约的工具（插件）不输出该键。 */
 int tool_contract_put(struct cJSON *obj, const char *tool_id,
                       const tool_contract_env_t *env);
