@@ -13,8 +13,8 @@
  * gateway_d needs the same default-model semantics (AI-agent orchestration
  * default model); think_d needs the think section for the t2/t1-f/t1-p
  * model injection. This API centralizes "extract config sections from YAML"
- * in the daemon common layer, so each daemon avoids its own libyaml scan
- * logic (single source).
+ * in the daemon common layer, so each daemon avoids its own YAML scan
+ * logic (single source, node-tree based via commons yaml_minimal).
  *
  * A user override file $AIRY_CONFIG_DIR/model.yaml is also supported (when
  * merged with the repo SSoT, user wins for same-named global fields); both
@@ -26,6 +26,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+struct yaml_node;
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,18 +47,17 @@ extern "C" {
  * @brief Extract default_model / default_provider from the global section
  *        of model.yaml.
  *
- * libyaml event-stream scan: only the default_model and default_provider
- * keys inside the top-level global: mapping are considered. Missing fields
- * leave the output buffer empty (not an error); unreadable/missing file
- * returns AIRY_ERR_IO; builds without libyaml support return
- * AIRY_ERR_NOT_SUPPORTED.
+ * Node-tree scan over commons yaml_minimal: only the default_model and
+ * default_provider keys inside the top-level global: mapping are
+ * considered. Missing fields leave the output buffer empty (not an
+ * error); unreadable/missing file or a failed parse returns AIRY_ERR_IO.
  *
  * @param path          YAML file path
  * @param out_model     Output buffer for default_model (may be NULL to skip)
  * @param model_sz      out_model buffer size
  * @param out_provider  Output buffer for default_provider (may be NULL to skip)
  * @param prov_sz       out_provider buffer size
- * @return 0 on success; AIRY_ERR_INVALID_PARAM / AIRY_ERR_IO / AIRY_ERR_NOT_SUPPORTED
+ * @return 0 on success; AIRY_ERR_INVALID_PARAM / AIRY_ERR_IO
  */
 int svc_model_defaults_from_yaml(const char *path, char *out_model, size_t model_sz,
                                  char *out_provider, size_t prov_sz);
@@ -79,8 +80,8 @@ typedef enum {
  *
  * Unknown values and an absent key yield SVC_PERF_FULL: the low-compute
  * path must be opted into explicitly and is never inferred from a
- * malformed value. Missing / unreadable files and libyaml-less builds also
- * yield SVC_PERF_FULL, so the caller needs no error channel.
+ * malformed value. Missing / unreadable files also yield SVC_PERF_FULL,
+ * so the caller needs no error channel.
  *
  * @param path YAML file path (may be NULL)
  * @return Parsed mode; SVC_PERF_FULL on any doubt
@@ -119,7 +120,7 @@ typedef struct {
 /**
  * @brief Extract the dual-think three-model config from the think section.
  *
- * Same-origin state machine as svc_model_defaults_from_yaml: only the
+ * Same-origin scanner as svc_model_defaults_from_yaml: only the
  * enabled / think2_slow_model / think1_fast_model / think1_prof_model /
  * timeout_ms keys inside the top-level think: mapping are considered.
  * If no think section is found, out keeps its initial value
@@ -128,7 +129,7 @@ typedef struct {
  *
  * @param path YAML file path
  * @param out  Output struct (non-NULL; caller should zero it first)
- * @return 0 on success; AIRY_ERR_INVALID_PARAM / AIRY_ERR_IO / AIRY_ERR_NOT_SUPPORTED
+ * @return 0 on success; AIRY_ERR_INVALID_PARAM / AIRY_ERR_IO
  */
 int svc_model_defaults_think_from_yaml(const char *path, svc_model_think_config_t *out);
 
@@ -167,16 +168,33 @@ int svc_tokens_parse(const char *text);
 /**
  * @brief Extract the simplified LLM config from the llm section.
  *
- * Same-origin libyaml state machine: only the api_format / base_url /
- * api_key_env / model / max_output keys inside the top-level llm: mapping
- * are considered. If no llm section is found, out keeps the caller's
- * initial value; not an error.
+ * Same-origin scanner as svc_model_defaults_from_yaml: only the
+ * api_format / base_url / api_key_env / model / max_output keys inside
+ * the top-level llm: mapping are considered. If no llm section is found,
+ * out keeps the caller's initial value; not an error. Callers holding an
+ * already-parsed document should prefer svc_model_llm_fill to avoid a
+ * second parse.
  *
  * @param path YAML file path
  * @param out  Output struct (non-NULL; caller should zero it first)
- * @return 0 on success; AIRY_ERR_INVALID_PARAM / AIRY_ERR_IO / AIRY_ERR_NOT_SUPPORTED
+ * @return 0 on success; AIRY_ERR_INVALID_PARAM / AIRY_ERR_IO
  */
 int svc_model_defaults_llm_from_yaml(const char *path, svc_model_llm_config_t *out);
+
+/**
+ * @brief Fill the simplified LLM config from an already-parsed llm section.
+ *
+ * Node-level counterpart of svc_model_defaults_llm_from_yaml sharing the
+ * same field table. A missing or non-mapping section returns
+ * AIRY_ERR_NOT_FOUND (callers may treat it as "absent", not an error);
+ * keys beyond the five documented ones are ignored, absent keys leave
+ * the corresponding out field untouched.
+ *
+ * @param llm_section  Parsed llm: mapping node (may be NULL)
+ * @param out          Output struct (non-NULL)
+ * @return 0 on success; AIRY_ERR_INVALID_PARAM / AIRY_ERR_NOT_FOUND
+ */
+int svc_model_llm_fill(struct yaml_node *llm_section, svc_model_llm_config_t *out);
 
 /**
  * @brief Extract the primary connection config from the models table
@@ -190,7 +208,7 @@ int svc_model_defaults_llm_from_yaml(const char *path, svc_model_llm_config_t *o
  * @param path YAML file path
  * @param out  Output struct (non-NULL; caller should zero it first)
  * @return 0 on success; AIRY_ERR_INVALID_PARAM / AIRY_ERR_IO /
- *         AIRY_ERR_NOT_FOUND / AIRY_ERR_NOT_SUPPORTED
+ *         AIRY_ERR_NOT_FOUND
  */
 int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_t *out);
 

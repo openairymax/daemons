@@ -21,6 +21,7 @@
 #ifdef HAVE_YAML
 
 #include "providers/core/provider_config.h"
+#include "svc_model_defaults.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -94,6 +95,8 @@ typedef struct {
     size_t pcfg_count;
     model_entry_t models[64];
     size_t model_count;
+    /* 简化 llm 段：load_state 顺带 fill，expand_llm 消费（B'：免二次解析） */
+    svc_model_llm_config_t llm;
 } svc_yaml_state_t;
 
 /* service_config_yaml_models.c */
@@ -101,7 +104,7 @@ typedef struct {
  * 超限/内存不足（调用方按"非错误"处理，与原 fopen / parser-init 失败
  * 分支语义一致）。 */
 int svc_yaml_load_state(const char *config_path, svc_yaml_state_t *st);
-void svc_yaml_expand_llm(svc_yaml_state_t *st, const char *config_path);
+void svc_yaml_expand_llm(svc_yaml_state_t *st);
 
 /* service_config_yaml_providers.c */
 int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_providers,

@@ -204,7 +204,7 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
     /* Simplified llm section expansion: when the top-level llm: mapping
      * exists and model is non-empty, it takes precedence over the full
      * providers/models (see svc_yaml_expand_llm). */
-    svc_yaml_expand_llm(&st, config_path);
+    svc_yaml_expand_llm(&st);
     if (st.model_count == 0 && st.pcfg_count == 0) {
         SVC_LOG_WARN(
             "C-L02: SVC: MODEL-CONFIG-WARN no models found, STACK: svc_load_model_config_yaml");
