@@ -22,6 +22,7 @@
 #include "orchestrator.h"
 #include "airy_orch_ops.h"
 #include "svc_logger.h"
+#include "svc_model_watch.h"
 
 #include <cjson/cJSON.h>
 #include <string.h>
@@ -94,6 +95,9 @@ struct think_service {
     think_gccp_session_t gccp_sessions[THINK_GCCP_MAX_SESSIONS];
     char active_session[THINK_GCCP_SESSION_ID_LEN];
     uint64_t gccp_last_expire_ms;
+
+    /* 0.1.19 §3.5 缺陷5：model.yaml think 段启动快照；请求侧只检测不重载 */
+    svc_mw_t mw;
 };
 
 /* think_orch.c 导出至 think_service.c */
