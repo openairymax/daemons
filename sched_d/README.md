@@ -19,7 +19,7 @@
 
 - **Agent 注册表** — 注册 / 注销可调度 Agent，携带负载因子、成功率、平均响应时间与权重。
 - **四种调度策略** — `round_robin`（默认）、`weighted`、`priority_based`、`ml_based`，
-  策略以可插拔接口实现于 `src/strategies/`。
+  策略以打分表实现于 `src/service/sched_service_agent.c`（`SCHED_STRATEGY_TABLE`）。
 - **异步任务队列** — `schedule_task` 立即返回 `task_id` + `status=pending`，worker 线程随后
   完成「选 Agent → spawn → invoke → 状态写回」，用 `get_task` 查询进展。
 - **真实派发** — 通过 `agent_d` 端点调用 `spawn` / `invoke` / `terminate`，失败如实上报，
@@ -30,15 +30,22 @@
 
 ## 架构
 
+gen5 五件套（`.manifest` / `main.c` / `svc.c` / `modules/sources.cmake` /
+`include/svc_sched_d.h`）由 `daemon_gen.py` codegen；`src/` 顶层仅存形态件
+（`main.c` / `svc.c` / `sched_daemon_internal.h`），业务源按五域组织
+（域依赖单向：rpc / dispatch / dag → service 契约，roadmap → atoms 契约）：
+
 ```
 gateway_d ──(sched.* JSON-RPC)──▶ sched_d
-                                   │ sched_service（任务队列 + worker 线程）
-                                   │   ├─ 策略：round_robin / weighted /
-                                   │   │         priority_based / ml_based
-                                   │   ├─ DAG 引擎（parse / engine / worker，
-                                   │   │   串行或按 dag_max_parallel 并行）
-                                   │   ├─ roadmap_sched（三级路由 + 语义缓存）
-                                   │   └─ 执行器回调 sched_dispatch_executor
+                                   │
+              src/rpc/             │ 方法接入：sched_rpc_handlers.c（调度/DAG 15 法）
+              src/roadmap/         │ 蓝图调度：roadmap_rpc.c|h（roadmap.* 5 法，
+                                   │   三级路由 + 语义缓存，经 roadmap_sched）
+              src/dispatch/        │ 真实派发：sched_dispatch.c（agent_d 执行器回调）
+              src/service/         │ 调度服务：sched_service_{impl,agent,task,worker}.c
+                                   │   + 契约头 scheduler_service.h（下潜，户内消费面）
+              src/dag/             │ DAG 引擎：sched_dag_{impl,engine,parse,worker}.c
+                                   │   （并行派发经 atoms/coreloopthree 委派）
                                    ▼
                             <runtime-dir>/agent.sock
                             agent_d: spawn → invoke → terminate
@@ -57,7 +64,7 @@ gateway_d ──(sched.* JSON-RPC)──▶ sched_d
 
 共 20 个方法，均由 `method_dispatcher_register` 注册。
 
-**调度与 DAG（`src/main.c` + `src/sched_rpc_handlers.c`，15 个）**
+**调度与 DAG（`src/main.c` + `src/rpc/sched_rpc_handlers.c`，15 个）**
 
 | 方法 | 参数 | 返回 | 描述 |
 |------|------|------|------|
@@ -77,7 +84,7 @@ gateway_d ──(sched.* JSON-RPC)──▶ sched_d
 | `get_stats` | `{}` | 调度统计 JSON | daemon 级统计 |
 | `shutdown` | `{}` | — | 优雅退出 |
 
-**蓝图调度（`src/roadmap_rpc.c`，5 个）**
+**蓝图调度（`src/roadmap/roadmap_rpc.c`，5 个）**
 
 | 方法 | 参数 | 返回 | 描述 |
 |------|------|------|------|
@@ -175,8 +182,8 @@ ctest --test-dir ../daemons-build -R sched_d --output-on-failure
 | [daemons](https://atomgit.com/openairymax/daemons) | `airy_llm_service` / `airy_tool_service` 服务适配层 |
 
 sched_d 的全部源文件直接编入可执行文件（不额外抽服务静态库），单元测试通过重复编译
-`src/` 内的实现文件覆盖真实代码路径。依赖库按成员级 DAG 拓扑序链接，单遍左到右
-解析完备；Windows 额外链接 `ws2_32`、`bcrypt`。
+`src/service` / `src/dag` 内的实现文件覆盖真实代码路径。依赖库按成员级 DAG 拓扑序链接，
+单遍左到右解析完备；Windows 额外链接 `ws2_32`、`bcrypt`。
 
 ## 关系
 

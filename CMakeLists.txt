@@ -172,11 +172,6 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tool_d/include/
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/sched_d/include/
-    DESTINATION include/agentrt
-    FILES_MATCHING PATTERN "*.h"
-)
-
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/mem_d/include/
     DESTINATION include/agentrt
     FILES_MATCHING PATTERN "*.h"
@@ -188,6 +183,8 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/mem_d/include/
 # 父级与户内 install(DIRECTORY) 按判据摘除（think_d/channel_d 判例同源）。
 # 0.1.19 §285：agent_d svc 头（svc_agent_d.h）同判据摘除，include/ 仅存
 # codegen 户内产物。
+# 0.1.19 §286：sched_d svc 头（svc_sched_d.h）同判据摘除，契约头
+# scheduler_service.h 随五域折叠下潜 src/service/（消费面全部户内）。
 
 # 导出项目配置
 # 0.1.19 §254b/§255：cupolas_d 构建位由顶层装配区承接（源码现居产品壳），

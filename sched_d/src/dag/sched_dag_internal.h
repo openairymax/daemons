@@ -16,7 +16,7 @@
 #ifndef AIRY_RT_SCHED_DAG_INTERNAL_H
 #define AIRY_RT_SCHED_DAG_INTERNAL_H
 
-#include "sched_service_internal.h"
+#include "service/sched_service_internal.h"
 
 /* Total bytes of upstream product a downstream node may receive in addition
  * to its own goal. Split equally across its direct dependencies, so one huge

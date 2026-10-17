@@ -13,7 +13,7 @@
  */
 
 #include "test_dag_internal.h"
-#include "scheduler_service.h"
+#include "service/scheduler_service.h"
 #include "airy_memory.h"
 #include "error.h"
 #include "multi_agent_collaboration.h"

@@ -7,7 +7,7 @@
  * @details 测试调度服务的各个功能模块
  */
 
-#include "scheduler_service.h"
+#include "service/scheduler_service.h"
 
 #include <stdio.h>
 #include <stdlib.h>
