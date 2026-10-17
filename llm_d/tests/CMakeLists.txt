@@ -45,12 +45,9 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/local.c
     # B16-S3 c7：适配器装配 SSoT（与主目标同步）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/adapter_table.c
-    # P3.16 (ACC-DT17): llm_router 集成 — 5 个路由器实现源码
+    # P3.16 (ACC-DT17): llm_router 集成 — 路由器实现源码（sec44-D 合一）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/core/llm_router.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/strategy/cost_aware_router.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/strategy/round_robin_router.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/strategy/least_latency_router.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/strategy/quality_first_router.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/strategy/router_strategy.c
 )
 
 set(LLM_TEST_SOURCES

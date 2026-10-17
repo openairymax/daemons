@@ -74,10 +74,8 @@ set(LLM_SERVICE_SOURCES
     # B16-S3 c7：适配器装配 SSoT——注册新适配的唯一改动点
     src/providers/adapters/adapter_table.c
     src/router/core/llm_router.c
-    src/router/strategy/cost_aware_router.c
-    src/router/strategy/round_robin_router.c
-    src/router/strategy/least_latency_router.c
-    src/router/strategy/quality_first_router.c
+    # sec44-D：四策略母件化合一（骨架机制 + 四选择规则，379→195 行）
+    src/router/strategy/router_strategy.c
     # 注入 atoms 侧 LLM ops 抽象表（服务实现在本库，表存储在 airy_llm_ops）
     src/bootstrap/ops_bootstrap.c
 )
