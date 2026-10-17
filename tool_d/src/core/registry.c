@@ -28,6 +28,9 @@ typedef struct registry_entry {
 struct tool_registry {
     registry_entry_t *buckets[HASH_SIZE];
     airy_mtx_t lock;
+    /* D8：可用性谓词（NULL = 不过滤）。由策略层（service.c）注入。 */
+    tool_up_fn up;
+    void *up_ud;
 };
 
 static unsigned int hash(const char *id)
@@ -277,6 +280,16 @@ tool_metadata_t *tool_registry_get(tool_registry_t *reg, const char *tool_id)
     AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
+void tool_registry_filter(tool_registry_t *reg, tool_up_fn fn, void *ud)
+{
+    if (!reg)
+        return;
+    airy_mtx_lock(&reg->lock);
+    reg->up = fn;
+    reg->up_ud = ud;
+    airy_mtx_unlock(&reg->lock);
+}
+
 char *tool_registry_list_json(tool_registry_t *reg)
 {
     if (!reg)
@@ -285,6 +298,10 @@ char *tool_registry_list_json(tool_registry_t *reg)
     cJSON *arr = cJSON_CreateArray();
     for (int i = 0; i < HASH_SIZE; ++i) {
         for (registry_entry_t *e = reg->buckets[i]; e; e = e->next) {
+            /* D8：只输出此刻可暴露的工具，agent 与呈现层共用同一份清单，
+             * 从根上消除"暴露成功 → 调用三连败"的时序矛盾。 */
+            if (reg->up && !reg->up(e->meta->id, reg->up_ud))
+                continue;
             cJSON *obj = cJSON_CreateObject();
             cJSON_AddStringToObject(obj, "id", e->meta->id);
             cJSON_AddStringToObject(obj, "name", e->meta->name);

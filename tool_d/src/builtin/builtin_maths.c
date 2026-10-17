@@ -29,7 +29,6 @@
 #include <unistd.h>
 #endif
 
-#define MATHS_SOCKET_NAME "maths.sock"
 #define MATHS_RPC_TIMEOUT_MS 3000
 #define MATHS_RESP_CAP 8192
 
@@ -43,7 +42,7 @@ static int maths_rpc_call(const char *method, const char *params_json,
     if (!method || !params_json || !resp || resp_sz == 0)
         return AIRY_ERR_INVALID_PARAM;
 
-    const char *sock_path = airy_runtime_dir_socket(MATHS_SOCKET_NAME);
+    const char *sock_path = airy_runtime_dir_socket(MATHS_D_SOCKET_NAME);
     if (!sock_path || !sock_path[0]) {
         res->error = AIRY_STRDUP("maths_d socket path unavailable");
         return AIRY_ERR_STATE_ERROR;
