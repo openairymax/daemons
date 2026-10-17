@@ -184,6 +184,8 @@ int svc_yaml_load_state(const char *config_path, svc_yaml_state_t *st)
 
     struct yaml_node *root = yaml_root(doc);
 
+    (void)svc_model_llm_fill(yaml_get(root, "llm"), &st->llm); /* 顺带 fill（B'） */
+
     struct yaml_node *models = yaml_get(root, "models");
     size_t mcount = yaml_size(models);
     for (size_t i = 0; i < mcount; ++i)
@@ -200,41 +202,34 @@ int svc_yaml_load_state(const char *config_path, svc_yaml_state_t *st)
 
 /* Expand the simplified top-level llm: section: when it exists it takes
  * precedence over the full providers/models schema (see the comment in the
- * caller about the llm-wins precedence rule). */
-void svc_yaml_expand_llm(svc_yaml_state_t *st, const char *config_path)
+ * caller about the llm-wins precedence rule). Filled by svc_yaml_load_state. */
+void svc_yaml_expand_llm(svc_yaml_state_t *st)
 {
-    svc_model_llm_config_t llm_cfg;
-    __builtin_memset(&llm_cfg, 0, sizeof(llm_cfg));
-    if (svc_model_defaults_llm_from_yaml(config_path, &llm_cfg) == 0 && llm_cfg.model[0]) {
+    const svc_model_llm_config_t *llm_cfg = &st->llm;
+    if (llm_cfg->model[0]) {
         for (size_t pi = 0; pi < st->pcfg_count; ++pi) {
             for (size_t k = 0; k < st->pcfg[pi].model_count; ++k)
                 AIRY_FREE(st->pcfg[pi].model_names[k]);
             st->pcfg[pi].model_count = 0;
         }
         st->pcfg_count = 0;
-        const char *adapter = "openai";
-        if (strcasecmp(llm_cfg.api_format, "anthropic") == 0)
-            adapter = "anthropic";
+        int is_anth = strcasecmp(llm_cfg->api_format, "anthropic") == 0;
         __builtin_memset(&st->models[0], 0, sizeof(st->models[0]));
-        st->models[0].max_output_tokens = llm_cfg.max_output_tokens;
-        AIRY_STRNCPY_TERM(st->models[0].name, llm_cfg.model, sizeof(st->models[0].name));
-        AIRY_STRNCPY_TERM(st->models[0].provider, adapter, sizeof(st->models[0].provider));
-        if (llm_cfg.api_key_env[0])
-            AIRY_STRNCPY_TERM(st->models[0].api_key_env, llm_cfg.api_key_env,
+        st->models[0].max_output_tokens = llm_cfg->max_output_tokens;
+        AIRY_STRNCPY_TERM(st->models[0].name, llm_cfg->model, sizeof(st->models[0].name));
+        AIRY_STRNCPY_TERM(st->models[0].provider, is_anth ? "anthropic" : "openai",
+                          sizeof(st->models[0].provider));
+        if (llm_cfg->api_key_env[0])
+            AIRY_STRNCPY_TERM(st->models[0].api_key_env, llm_cfg->api_key_env,
                               sizeof(st->models[0].api_key_env));
-        if (llm_cfg.base_url[0]) {
-            if (strcmp(adapter, "anthropic") == 0)
-                snprintf(st->models[0].endpoint, sizeof(st->models[0].endpoint), "%s/messages",
-                         llm_cfg.base_url);
-            else
-                snprintf(st->models[0].endpoint, sizeof(st->models[0].endpoint),
-                         "%s/chat/completions", llm_cfg.base_url);
-        }
+        if (llm_cfg->base_url[0])
+            snprintf(st->models[0].endpoint, sizeof(st->models[0].endpoint), "%s%s",
+                     llm_cfg->base_url, is_anth ? "/messages" : "/chat/completions");
         st->model_count = 1;
         SVC_LOG_INFO("C-L02: SVC: expanded simplified llm section "
                      "(format=%s base_url=%s model=%s)",
-                     llm_cfg.api_format[0] ? llm_cfg.api_format : "openai",
-                     llm_cfg.base_url[0] ? llm_cfg.base_url : "(default)", llm_cfg.model);
+                     llm_cfg->api_format[0] ? llm_cfg->api_format : "openai",
+                     llm_cfg->base_url[0] ? llm_cfg->base_url : "(default)", llm_cfg->model);
     }
 }
 
