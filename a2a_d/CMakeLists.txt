@@ -177,10 +177,5 @@ if(BUILD_TESTS)
     endif()
 endif()
 
-# 安装规则
+# 安装规则（svc 头为 codegen 户内产物，消费面全部户内，不发布）
 install(TARGETS a2a_d DESTINATION bin)
-
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
-    DESTINATION include/agentrt
-    FILES_MATCHING PATTERN "*.h"
-)
