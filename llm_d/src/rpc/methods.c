@@ -7,13 +7,9 @@
  *        list_models / embeddings / count_tokens / health_check /
  *        get_stats 的 handler 与 m_* 薄壳。
  *
- * 0.1.19 gen5 装配：方法实现集中于此，生命周期与端点在 src/svc.c，
- * 请求解析在 src/rpc/dispatch.c，装配期共享符号经 llm_d_internal.h
- * 声明；m_* 签名与 .manifest rpc.methods 一一对应（svc_llm_d.h 由生成器
- * 产出，L3 SSoT）。
- *
- * 0.1.19 L1 收敛：服务面 handle_* 统一 (params, id, fd) 契约、自行发送
- * 响应；m_* 薄壳经机制层 DAEMON_RPC_SHELL 单点生成，与全树各户同源。
+ * 0.1.19 gen5：方法实现集中于此，生命周期/端点在 src/svc.c，请求解析在
+ * src/rpc/dispatch.c；m_* 签名与 .manifest rpc.methods 一一对应
+ * （svc_llm_d.h 由生成器产出，L3 SSoT），壳体经 DAEMON_RPC_SHELL 生成。
  */
 
 #include "airy_memory.h"
@@ -30,10 +26,8 @@
 #include "daemon_main.h"
 #include "platform.h"
 
-/* macOS/BSD 无 MSG_NOSIGNAL（Linux 专有 send flag）：非 Linux POSIX 平台
- * 定义为 0，避免编译失败。等价语义由 DAEMON_SETUP_SIGNALS 的
- * signal(SIGPIPE, SIG_IGN) 保证——peer 关闭时 send 返回 EPIPE 而非触发
- * SIGPIPE 杀进程（对齐 daemons/common platform_compat.c 的兜底做法）。 */
+/* macOS/BSD 无 MSG_NOSIGNAL（Linux 专有 flag）：定义为 0；对端关闭时的
+ * SIGPIPE 由 DAEMON_SETUP_SIGNALS 的 signal(SIGPIPE, SIG_IGN) 兜底。 */
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
 #endif
@@ -41,23 +35,14 @@
 #define LLM_MAX_RETRIES 3
 #define LLM_BASE_DELAY_MS 100
 
-/* R-5：只有"快失败"才值得重试的耗时上界（ms）。
- *
- * 不变量（R-5）：llm_d 处理一次 complete 的总耗时必须严格小于网关的转发
- * 超时背压（gateway_biz_internal.h 的 GW_LLM_DEFAULT_TIMEOUT_MS=90s），
- * 否则网关先放弃请求，provider 侧已定位好的精确诊断（鉴权失败 / 限流 /
- * 连接失败）回传不到用户，用户只看到笼统的 "invalid response"。
- *
- * 上界推导：每次重试的尝试要么在本上界内快失败，要么直接放弃重试——
- * 因此最坏总耗时 = LLM_MAX_RETRIES × LLM_RETRY_FAST_FAIL_MS + 单次超时
- * = 3 × 5s + 70s = 85s < 90s。若单次尝试已耗掉接近完整超时（对端不可达/
- * 挂起），继续重试只会把结论推迟到网关超时之后，故不再重试。 */
+/* R-5：complete 总耗时须严格小于网关转发超时背压（GW_LLM_DEFAULT_TIMEOUT_MS
+ * = 90s），否则网关先放弃，provider 侧精确诊断（鉴权/限流/连接）回传不到
+ * 用户。最坏总耗时 = LLM_MAX_RETRIES × 本上界 + 单次超时 = 3 × 5s + 70s
+ * = 85s < 90s；单次尝试已接近完整超时（对端不可达/挂起）时不再重试。 */
 #define LLM_RETRY_FAST_FAIL_MS 5000
 
-/* 0.1.8 社区缺陷修复：此前流式失败统一回 "Service error"（-32603），
- * 用户与 TUI 均无法得知真实原因（模型未配置/无 provider/网络失败），
- * 是"对话不能正常进行且无从排查"的直接根因。按 llm_service_* 返回的
- * AIRY_ERR_* 透传具体信息；未知错误附带错误码便于日志对照。 */
+/* 0.1.8 社区缺陷：流式失败此前统一回 -32603 "Service error"，用户与 TUI
+ * 均无法定位根因；按 AIRY_ERR_* 透传具体原因，未知错误附错误码。 */
 static const char *llm_error_message(int ret)
 {
     switch (ret) {
@@ -97,9 +82,8 @@ static const char *llm_error_message_fmt(int ret, char *buf, size_t buf_len)
     return buf;
 }
 
-/* R-4：只有瞬态错误才值得外层重试。鉴权失败、模型/配置错误属于确定性
- * 失败，重试只会把一次请求放大成 4 次（外层）× 最多 5 次（openai 内层
- * 重试）的打点风暴，既拖慢报错又可能触发 provider 侧风控。 */
+/* R-4：只有瞬态错误才值得外层重试。确定性失败（鉴权/模型/参数）重试只会
+ * 把一次请求放大成 4 × 5 次打点风暴，拖慢报错并可能触发 provider 风控。 */
 static int llm_error_is_retryable(int ret)
 {
     switch (ret) {
@@ -125,10 +109,8 @@ static void handle_count_tokens(cJSON *params, int id, airy_sock_t fd);
 static void handle_health_check(cJSON *params, int id, airy_sock_t fd);
 static void handle_get_stats(cJSON *params, int id, airy_sock_t fd);
 
-/* RPC 蹦床（m_<method> ↔ .manifest rpc.methods，原型由生成头 svc_llm_d.h
- * 经 DAEMON_M_DECL 展开）：服务面 handle_* 统一 (params, id, fd) 契约、
- * 自行发送响应，壳体经机制层 DAEMON_RPC_SHELL 单点生成，与全树各户同源
- * 零漂移；调用点行尾不加分号（宏体自带 '}' 收尾）。 */
+/* RPC 蹦床：m_<method> ↔ .manifest rpc.methods，壳体经 DAEMON_RPC_SHELL
+ * 单点生成；调用点行尾不加分号（宏体自带 '}' 收尾）。 */
 DAEMON_RPC_SHELL(complete, handle_complete)
 DAEMON_RPC_SHELL(complete_stream, handle_complete_stream)
 DAEMON_RPC_SHELL(list_models, handle_list_models)
@@ -136,6 +118,25 @@ DAEMON_RPC_SHELL(count_tokens, handle_count_tokens)
 DAEMON_RPC_SHELL(health_check, handle_health_check)
 DAEMON_RPC_SHELL(get_stats, handle_get_stats)
 DAEMON_RPC_SHELL(embeddings, handle_embeddings)
+
+/* 服务层 JSON 文本直发：root 所有权移交 jsonrpc_build_success，此处不得
+ * 再 delete。 */
+static void send_service_json(char *json, int id, airy_sock_t fd, const char *err,
+                              const char *bad)
+{
+    if (!json) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, err, id);
+        return;
+    }
+
+    cJSON *root = cJSON_Parse(json);
+    AIRY_FREE(json);
+    if (!root) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, bad, id);
+        return;
+    }
+    JSONRPC_SEND_SUCCESS(fd, root, id);
+}
 
 static void handle_list_models(cJSON *params, int id, airy_sock_t fd)
 {
@@ -145,31 +146,11 @@ static void handle_list_models(cJSON *params, int id, airy_sock_t fd)
         return;
     }
 
-    char *json = llm_service_list_models(g_service);
-    if (!json) {
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
-        return;
-    }
-
-    cJSON *root = cJSON_Parse(json);
-    AIRY_FREE(json);
-    if (!root) {
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Invalid list result", id);
-        return;
-    }
-
-    /* Ownership semantics: jsonrpc_build_success attaches root to the
-     * response object via cJSON_AddItemToObject and cJSON_Delete frees it
-     * recursively; it must NOT be deleted here (otherwise double-free) */
-    JSONRPC_SEND_SUCCESS(fd, root, id);
+    send_service_json(llm_service_list_models(g_service), id, fd, "Out of memory",
+                      "Invalid list result");
 }
 
-/**
- * @brief Handle the embeddings method
- *
- * Forwards the OpenAI-format request ({"model":..,"input":..}) verbatim to
- * the owning provider's $api_base/embeddings and returns the upstream JSON.
- */
+/* 把 OpenAI 格式请求原样转发到归属 provider 的 $api_base/embeddings。 */
 static void handle_embeddings(cJSON *params, int id, airy_sock_t fd)
 {
     JSONRPC_REQUIRE(params && g_service, fd, "Invalid params", id);
@@ -192,18 +173,11 @@ static void handle_embeddings(cJSON *params, int id, airy_sock_t fd)
     AIRY_FREE(model);
 
     if (rc != 0 || !out) {
+        AIRY_FREE(out);
         JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Embedding failed", id);
         return;
     }
-
-    cJSON *result = cJSON_Parse(out);
-    AIRY_FREE(out);
-    if (!result) {
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Invalid embedding response", id);
-        return;
-    }
-
-    JSONRPC_SEND_SUCCESS(fd, result, id);
+    send_service_json(out, id, fd, "Out of memory", "Invalid embedding response");
 }
 
 typedef struct {
@@ -269,10 +243,9 @@ static void handle_health_check(cJSON *params, int id, airy_sock_t fd)
     cJSON_AddBoolToObject(result, "healthy", g_service != NULL);
     cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
 
-    /* D5：并回端点健康视图（可达性 / 延迟 / 冷加载标记），回应
-     * "能力存在 ≠ 能力可用"。视图为空（无匹配端点）时省略该字段，
-     * 保持旧消费方兼容；endpoint_probe 单独声明探测能力是否在线，供
-     * 消费方区分"无端点"与"探测降级禁用"。 */
+    /* D5 端点健康视图：回应"能力存在 ≠ 能力可用"。无匹配端点时省略
+     * endpoints 字段；endpoint_probe 单独声明探测能力是否在线，供消费方
+     * 区分"无端点"与"探测降级禁用"。 */
     cJSON_AddBoolToObject(result, "endpoint_probe", g_ep != NULL);
     char *ej = ep_health_json(g_ep);
     if (ej) {
@@ -294,27 +267,17 @@ static void handle_get_stats(cJSON *params, int id, airy_sock_t fd)
     }
 
     char *json = NULL;
-    if (llm_service_stats(g_service, &json) != 0 || !json) {
+    if (llm_service_stats(g_service, &json) != 0) {
+        AIRY_FREE(json);
         JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Get stats failed", id);
         return;
     }
 
-    cJSON *root = cJSON_Parse(json);
-    AIRY_FREE(json);
-    if (!root) {
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Invalid stats result", id);
-        return;
-    }
-
-    /* Ownership semantics: jsonrpc_build_success attaches root to the
-     * response object via cJSON_AddItemToObject and cJSON_Delete frees it
-     * recursively; it must NOT be deleted here */
-    JSONRPC_SEND_SUCCESS(fd, root, id);
+    send_service_json(json, id, fd, "Get stats failed", "Invalid stats result");
 }
 
-/**
- * @brief Handle the complete method
- */
+/* complete：外层重试；参数解析失败在 -32602 中携带具体环节（P24，0.1.12），
+ * fail_reason 需在 request_context_destroy 之前拷贝到栈缓冲。 */
 static void handle_complete(cJSON *params, int id, airy_sock_t fd)
 {
     request_context_t *ctx = request_context_create();
@@ -325,9 +288,6 @@ static void handle_complete(cJSON *params, int id, airy_sock_t fd)
 
     llm_request_config_t cfg;
     if (parse_params(params, ctx, &cfg) != 0) {
-        /* P24（0.1.12）：-32602 携带具体失败环节（此前笼统 "Invalid params"，
-         * 社区问答故障无法自助定位）。fail_reason 在 request_context_destroy
-         * 前拷贝到栈缓冲。 */
         char ebuf[200];
         snprintf(ebuf, sizeof(ebuf), "Invalid params: %s",
                  (ctx && ctx->fail_reason[0]) ? ctx->fail_reason : "request params rejected");
@@ -358,9 +318,7 @@ static void handle_complete(cJSON *params, int id, airy_sock_t fd)
 
         if (attempt < LLM_MAX_RETRIES) {
             unsigned delay_ms = LLM_BASE_DELAY_MS * (1U << (attempt > 15 ? 15 : attempt));
-            /* R-5：慢失败不再重试——单次尝试已耗掉接近完整超时，说明对端
-             * 不可达或挂起，重试只会把结论推迟到网关背压之后，让精确诊断
-             * 被网关超时吞掉（详见 LLM_RETRY_FAST_FAIL_MS 注释）。 */
+            /* R-5：慢失败不再重试（见 LLM_RETRY_FAST_FAIL_MS 上界推导）。 */
             uint64_t attempt_ms = airy_time_ms() - attempt_start;
             if (attempt_ms >= LLM_RETRY_FAST_FAIL_MS) {
                 SVC_LOG_WARN("LLM complete not retrying (err=%d): attempt took %llums, "
@@ -390,50 +348,15 @@ static void handle_complete(cJSON *params, int id, airy_sock_t fd)
     char *resp_json = response_to_json(resp);
     llm_response_free(resp);
     AIRY_FREE((void *)cfg.model);
-
-    if (!resp_json) {
-        request_context_destroy(ctx);
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Failed to serialize response", id);
-        return;
-    }
-
-    CJSON_PARSE_GUARD(result, resp_json, {
-        AIRY_FREE(resp_json);
-        request_context_destroy(ctx);
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Invalid response format", id);
-        return;
-    });
-    AIRY_FREE(resp_json);
-
-    char *success = jsonrpc_build_success(result, id);
-    /* P0.20.8 fix: jsonrpc_build_success transfers result ownership to root
-     * via cJSON_AddItemToObject; cJSON_Delete(root) frees result recursively.
-     * Must set NULL to prevent CJSON_AUTO_FREE cleanup from double-freeing
-     * via cJSON_Delete(result). */
-    result = NULL;
-
     request_context_destroy(ctx);
-    if (!success)
-        return;
-    /* 诊断（AIRY_LLM_D_DIAG 门控）：complete 回包发送成败与 errno 观测点，
-     * 保留自原 m_complete 薄壳（构建成功后的发送→日志→释放三段）。 */
-    size_t resp_len = strlen(success);
-    if (getenv("AIRY_LLM_D_DIAG"))
-        SVC_LOG_ERROR("llm_d diag: complete send start fd=%d resp_len=%zu", (int)fd, resp_len);
-    ssize_t sent = airy_sock_send(fd, success, resp_len);
-    if (getenv("AIRY_LLM_D_DIAG"))
-        SVC_LOG_ERROR("llm_d diag: complete send done fd=%d sent=%zd errno=%d", (int)fd, sent,
-                      errno);
-    AIRY_FREE(success);
+    send_service_json(resp_json, id, fd, "Failed to serialize response",
+                      "Invalid response format");
 }
 
-/**
- * @brief Handle the complete_stream method
- */
+/* 流式会话上下文：D5 首 token 观测与冷加载上报的端点归属。 */
 typedef struct {
     airy_sock_t fd;
-    /* D5 首 token 观测：start_ms 起流前取，first_ms 于首个 chunk 到达时
-     * 一次性落定（0 = 尚未到达）。provider/model 供冷加载上报归属端点。 */
+    /* D5 首 token 观测：first_ms 于首个 chunk 一次性落定（0 = 未到达）。 */
     uint64_t start_ms;
     uint64_t first_ms;
     char provider[64];
@@ -446,19 +369,10 @@ typedef struct {
 #include <unistd.h>
 #endif
 
-/**
- * @brief Blocking full send (streaming only)
- *
- * llm_d's streaming callback is driven by the curl write callback: the LLM
- * push rate can exceed the peer's (gateway SSE pull) consumption rate.
- * airy_sock_send uses MSG_DONTWAIT and returns EAGAIN when the buffer is full,
- * making the curl write callback fail -> STREAM-FAIL and the stream breaks.
- *
- * This switches to blocking mode: send loop + poll(POLLOUT) waiting for
- * writability, guaranteeing each incremental chunk is fully delivered before
- * returning. On peer close (EPIPE/ECONNRESET), silently give up without
- * triggering a stream failure.
- */
+/* 阻塞式全量发送（仅流式）：curl write 回调的推速可超过网关 SSE 拉速，
+ * airy_sock_send 的 MSG_DONTWAIT 在缓冲区满时返回 EAGAIN，会让回调失败并
+ * 中断流。此处改为 send 循环 + poll(POLLOUT) 等待可写；对端关闭
+ * （EPIPE/ECONNRESET）时静默放弃，不制造流失败。 */
 static void llm_stream_send_all(airy_sock_t fd, const char *buf, size_t len)
 {
     size_t off = 0;
@@ -499,8 +413,8 @@ static void llm_stream_callback(const char *chunk, void *user_data)
 {
     llm_stream_ctx_t *sctx = (llm_stream_ctx_t *)user_data;
 
-    /* D5：首个 chunk 到达即首 token 延迟（起流到首帧）。冷加载是"可用但
-     * 代价高"，故只观测不阻断；阈值判定归机制件（避免常量双写）。 */
+    /* D5：首个 chunk 到达即首 token 延迟；冷加载只观测不阻断，阈值判定
+     * 归机制件（避免常量双写）。 */
     if (sctx->first_ms == 0 && sctx->start_ms != 0) {
         sctx->first_ms = airy_time_ms() - sctx->start_ms;
         ep_health_cold(g_ep, sctx->provider, sctx->model, (double)sctx->first_ms);
@@ -509,20 +423,13 @@ static void llm_stream_callback(const char *chunk, void *user_data)
     llm_stream_send_all(sctx->fd, chunk, strlen(chunk));
 }
 
-/* P24（0.1.12）：complete_stream 参数解析失败 → RS 'E' 错误帧。此前把
- * JSON-RPC 错误信封当普通字节推给流客户端：adapter 的流解复用器不识别
- * 信封，把裸 JSON 当正文转发，CLI 直接把 {"jsonrpc":...,"error":...} 显示
- * 成回复正文（社区 ubuntu v0.1.11 问答实证）。帧体为标准 JSON-RPC 错误
- * 对象；新 adapter 解帧后按错误返回（不裸打），旧 adapter 不识别 'E' 标签
- * → 整帧丢弃 → 空回复提示（可接受的降级）。
+/* P24（0.1.12）：流式路径的错误必须以 RS 'E' 帧下发——裸 JSON-RPC 信封会被
+ * adapter 流解复用器当正文转发给客户端（社区 ubuntu v0.1.11 实证）；旧
+ * adapter 不识别 'E' 标签则整帧丢弃（可接受的降级）。帧体由 jsonrpc_build_error
+ * 构造，避免把 message 以 %s 裸拼进 JSON 时转义责任落到各调用点。
  *
- * 帧体改用 common jsonrpc_helpers 构造，llm_d 不再自行拼装 JSON-RPC 信封：
- * 自行拼装须把 message 以 %s 原样嵌进 JSON，转义责任就落回每个调用点
- * （当前两处恰为固定 ASCII 文案才侥幸合法）。
- *
- * '\x1e' 以字符字面量写出：\x 十六进制转义会吞掉紧随的十六进制字符
- * （'E' 也是 hex digit），"\x1eE{..." 会解析成 0x1EE → clang
- * "hex escape sequence out of range"（#132 macOS 实证）。 */
+ * '\x1e' 必须写成字符字面量：\x 转义会吞掉紧随的十六进制字符（'E' 也是
+ * hex digit），"\x1eE{..." 被解析成 0x1EE（clang #132 macOS 实证）。 */
 static void llm_stream_send_error_frame(airy_sock_t fd, int id, int code, const char *message)
 {
     char *body = jsonrpc_build_error(code, message, id);
@@ -551,9 +458,7 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
 
     llm_request_config_t cfg;
     if (parse_params(params, ctx, &cfg) != 0) {
-        /* P24：错误帧携带具体原因；流协议只认 RS 帧，故不回文本响应
-         * （裸 JSON-RPC 信封会被 adapter 当正文显示）。llm_d 随后关闭
-         * 连接 → adapter 收到 EOF 判定流结束。 */
+        /* 流协议只认 RS 帧：错误走 'E' 帧，不回文本响应。 */
         const char *reason = (ctx && ctx->fail_reason[0]) ? ctx->fail_reason
                                                           : "request params rejected";
         char rbuf[200];
@@ -568,8 +473,8 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
 
     llm_stream_ctx_t stream_ctx = {.fd = fd, .start_ms = airy_time_ms()};
 
-    /* D5：解析本请求归属的端点（模型 → provider），供首 token 冷加载上报。
-     * 未命中时留空，机制件仅记日志不新增记录（视图口径与 filter 一致）。 */
+    /* D5：解析本请求归属端点（模型 → provider）供首 token 冷加载上报；
+     * 未命中留空，机制件仅记日志不新增记录（口径与 filter 一致）。 */
     const provider_t *prov =
         cfg.model ? provider_registry_find(llm_svc_reg(g_service), cfg.model) : NULL;
     if (prov && prov->name)
@@ -583,9 +488,7 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
     if (ret != 0) {
         AIRY_FREE((void *)cfg.model);
         request_context_destroy(ctx);
-        /* 与 parse_params 失败路径同因同治：流协议只认 RS 帧，不得把
-         * 裸 JSON-RPC 信封当普通响应推送（adapter 不识别信封，把
-         * {"jsonrpc":...} 当回复显示）。 */
+        /* 与 parse_params 失败路径同因同治：错误只能走 RS 'E' 帧。 */
         char ebuf[128];
         const char *msg = llm_error_message_fmt(ret, ebuf, sizeof(ebuf));
         SVC_LOG_ERROR("complete_stream: %s", msg);
@@ -594,11 +497,8 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
     }
 
     if (resp) {
-        /* 2.1.1.5 修复：流式结束发送 usage 控制帧（RS 'U' body RS），
-         * 携带真实 token 消耗与计费金额——此前流式路径完全不回传 usage，
-         * IPC 客户端的流式 token 统计与计费恒为 0。adapter 侧按帧协议
-         * 解析；cost_usd 由 update_cost_tracking 回填（该帧同步带上，
-         * 使 gateway SSE 透传的 usage 事件包含真实费用）。 */
+        /* 流式结束发 usage 控制帧（RS 'U'）：携带真实 token 与回填后的
+         * cost_usd，此前流式路径不回传 usage，客户端统计与计费恒为 0。 */
         char usage_frame[288];
         int ufn = snprintf(usage_frame, sizeof(usage_frame),
                            "\x1eU{\"prompt_tokens\":%u,\"completion_tokens\":%u,"

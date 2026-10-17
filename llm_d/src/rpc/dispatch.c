@@ -118,6 +118,20 @@ request_context_t *request_context_create(void)
     return ctx;
 }
 
+/* 释放已装入的 messages 并将计数归零：计数归零即关闭重复释放窗口，
+ * 后续 destroy 不会再次遍历同一批指针。 */
+static void messages_release(request_context_t *ctx)
+{
+    for (size_t i = 0; i < ctx->message_count; i++) {
+        AIRY_FREE((void *)ctx->messages[i].role);
+        AIRY_FREE((void *)ctx->messages[i].content);
+        AIRY_FREE((void *)ctx->messages[i].reasoning_content);
+        AIRY_FREE((void *)ctx->messages[i].tool_call_id);
+        AIRY_FREE((void *)ctx->messages[i].tool_calls_json);
+    }
+    ctx->message_count = 0;
+}
+
 /**
  * @brief Destroy the request context
  */
@@ -126,14 +140,7 @@ void request_context_destroy(request_context_t *ctx)
     if (!ctx)
         return;
 
-    for (size_t i = 0; i < ctx->message_count; i++) {
-        AIRY_FREE((void *)ctx->messages[i].role);
-        AIRY_FREE((void *)ctx->messages[i].content);
-        AIRY_FREE((void *)ctx->messages[i].reasoning_content);
-        AIRY_FREE((void *)ctx->messages[i].tool_call_id);
-        AIRY_FREE((void *)ctx->messages[i].tool_calls_json);
-    }
-
+    messages_release(ctx);
     AIRY_FREE(ctx->tools_json);
     AIRY_FREE(ctx->response_buffer);
     AIRY_FREE(ctx);
@@ -148,23 +155,9 @@ void request_context_destroy(request_context_t *ctx)
  */
 static void parse_params_cleanup(request_context_t *ctx, llm_request_config_t *cfg)
 {
-    if (cfg->model) {
-        AIRY_FREE((void *)cfg->model);
-        cfg->model = NULL;
-    }
-    for (size_t i = 0; i < ctx->message_count; i++) {
-        AIRY_FREE((void *)ctx->messages[i].role);
-        AIRY_FREE((void *)ctx->messages[i].content);
-        AIRY_FREE((void *)ctx->messages[i].reasoning_content);
-        AIRY_FREE((void *)ctx->messages[i].tool_call_id);
-        AIRY_FREE((void *)ctx->messages[i].tool_calls_json);
-        ctx->messages[i].role = NULL;
-        ctx->messages[i].content = NULL;
-        ctx->messages[i].reasoning_content = NULL;
-        ctx->messages[i].tool_call_id = NULL;
-        ctx->messages[i].tool_calls_json = NULL;
-    }
-    ctx->message_count = 0;
+    AIRY_FREE((void *)cfg->model);
+    cfg->model = NULL;
+    messages_release(ctx);
     AIRY_FREE(ctx->tools_json);
     ctx->tools_json = NULL;
 }
@@ -244,6 +237,7 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
             ctx->messages[0].role = AIRY_STRDUP("system");
             ctx->messages[0].content = AIRY_STRDUP(tbuf);
             if (!ctx->messages[0].role || !ctx->messages[0].content) {
+                ctx->message_count = 1;
                 parse_params_cleanup(ctx, cfg);
                 LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY, "failed to inject time context");
             }
@@ -271,7 +265,7 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
             ctx->messages[slot].content = AIRY_STRDUP(content->valuestring);
 
             if (!ctx->messages[slot].role || !ctx->messages[slot].content) {
-                ctx->message_count = slot;
+                ctx->message_count = slot + 1;
                 parse_params_cleanup(ctx, cfg);
                 LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY,
                                "failed to duplicate message role or content");

@@ -426,13 +426,14 @@ static int provider_stream_post(const char *url, struct curl_slist *headers, con
     return AIRY_OK;
 }
 
-int provider_http_post_stream(const char *url, struct curl_slist *headers, const char *body,
-                              double timeout_sec, int max_retries,
-                              provider_retry_class_t retry_class,
-                              provider_stream_chunk_cb_t on_chunk, void *chunk_user_data,
-                              long *out_http_code)
+static int stream_entry(const char *url, struct curl_slist *headers, const char *body,
+                        double timeout_sec, int max_retries,
+                        provider_retry_class_t retry_class,
+                        provider_stream_chunk_cb_t on_chunk,
+                        provider_sse_event_cb_t on_event, void *user_data,
+                        long *out_http_code)
 {
-    if (!url || !body || !on_chunk || !out_http_code) {
+    if (!url || !body || (!on_chunk && !on_event) || !out_http_code) {
         errno = EINVAL;
         return AIRY_ERR_INVALID_PARAM;
     }
@@ -440,8 +441,9 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
         max_retries = 0;
 
     sse_stream_ctx_t sse;
-    sse_ctx_init(&sse, chunk_user_data);
+    sse_ctx_init(&sse, user_data);
     sse.on_chunk = on_chunk;
+    sse.on_event = on_event;
     if (!sse.line_buf) {
         sse_ctx_destroy(&sse);
         return AIRY_ERR_OUT_OF_MEMORY;
@@ -453,29 +455,22 @@ int provider_http_post_stream(const char *url, struct curl_slist *headers, const
     return ret;
 }
 
+int provider_http_post_stream(const char *url, struct curl_slist *headers, const char *body,
+                              double timeout_sec, int max_retries,
+                              provider_retry_class_t retry_class,
+                              provider_stream_chunk_cb_t on_chunk, void *chunk_user_data,
+                              long *out_http_code)
+{
+    return stream_entry(url, headers, body, timeout_sec, max_retries, retry_class,
+                        on_chunk, NULL, chunk_user_data, out_http_code);
+}
+
 int provider_http_post_stream_sse(const char *url, struct curl_slist *headers, const char *body,
                                   double timeout_sec, int max_retries,
                                   provider_retry_class_t retry_class,
                                   provider_sse_event_cb_t on_event, void *event_user_data,
                                   long *out_http_code)
 {
-    if (!url || !body || !on_event || !out_http_code) {
-        errno = EINVAL;
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    if (max_retries < 0)
-        max_retries = 0;
-
-    sse_stream_ctx_t sse;
-    sse_ctx_init(&sse, event_user_data);
-    sse.on_event = on_event;
-    if (!sse.line_buf) {
-        sse_ctx_destroy(&sse);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
-    int ret = provider_stream_post(url, headers, body, timeout_sec, max_retries, retry_class,
-                                   &sse, out_http_code);
-    sse_ctx_destroy(&sse);
-    return ret;
+    return stream_entry(url, headers, body, timeout_sec, max_retries, retry_class,
+                        NULL, on_event, event_user_data, out_http_code);
 }
