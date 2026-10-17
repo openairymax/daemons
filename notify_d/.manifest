@@ -18,9 +18,10 @@
   },
   "deps": { "required": [], "optional": [] },
   "modules": [
-    { "name": "boot", "sources": ["nf_boot.c"] },
+    { "name": "boot", "sources": ["bootstrap/nf_boot.c"] },
     { "name": "svc", "sources": ["svc.c"] },
-    { "name": "net", "sources": ["net.c"] },
-    { "name": "service", "sources": ["notify_service.c"] }
+    { "name": "net", "sources": ["net/net.c"] },
+    { "name": "service", "sources": ["service/notify_service.c"] },
+    { "name": "hook", "sources": ["hook/hook_svc.c", "hook/hook_rpc.c"] }
   ]
 }
