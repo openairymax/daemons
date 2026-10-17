@@ -16,7 +16,7 @@
 #include "daemon_errors.h"
 #include "airy_memory.h"
 #include "daemon_platform_ext.h"
-#include "channel_service_internal.h"
+#include "service/channel_service_internal.h"
 #include "string_compat.h"
 
 #include <arpa/inet.h>

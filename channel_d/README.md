@@ -29,12 +29,20 @@
 
 ```
 gateway_d ──(channel.* JSON-RPC)──▶ channel_d
-                                      │ channel_service（SOCKET / SHM / PIPE 通道表）
-                                      │  ├─ channel_service.c  生命周期 / 打开关闭 / 查询
-                                      │  └─ channel_io.c       收发与连通性探测
+                                      │ rpc/      JSON-RPC 方法域（9 方法注册与分发）
+                                      │ service/  POSIX 策略域：三后端打开钩子（win32 对偶同域）
+                                      │ book/     簿记机制域：通道表生命周期 / 关闭 / 查询
+                                      │ io/       收发与连通性探测域
                                       ▼
                               各守护进程间 IPC 传输
 ```
+
+gen5 五件套（codegen 户，`daemon_gen.py` 生成 main.c / svc.c /
+modules/sources.cmake）：`src/` 顶层仅存私有头 `channel_d_internal.h`
+与四个业务域目录；域依赖单向 rpc/service/book/io → 契约，svc 与 rpc
+经 `channel_d_internal.h` 单点消费 service 契约，book/io 直接消费
+`service/channel_service_internal.h`。Windows 腿
+`service/channel_win32.c` 为条件注入源，不入 manifest。
 
 - 事件驱动：`daemon_event_driver`（线程池 4~8，队列 256，`max_events=64`）接收
   JSON-RPC 请求并派发到已注册方法。
@@ -78,7 +86,8 @@ gateway_d ──(channel.* JSON-RPC)──▶ channel_d
 
 ## 服务 API
 
-`include/channel_service.h`（安装至 `include/agentrt/daemons/channel_d/`）：
+`src/service/channel_service.h`（域私有契约，不对外安装；经
+`src/channel_d_internal.h` 单点消费）：
 
 - 生命周期：`channel_service_create / destroy / start / stop`
 - 通道操作：`channel_service_open / close / send / receive`
