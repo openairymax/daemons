@@ -31,7 +31,7 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== LLM 服务静态库 ====================
-# 提取 service/providers/cache/cost_tracker/response/llm_svc_adapter
+# 提取 service/providers/cache/cost_tracker/response
 # 为独立静态库，供 llm_d 可执行文件、atoms/coreloopthree 测试和集成测试共用，
 # 消除桩函数依赖。排除 main.c（含 main()）与 daemon 策略/装配源
 # （svc.c / rpc/methods.c / rpc/dispatch.c，gen5 装配下随可执行目标构建）。
@@ -78,7 +78,6 @@ set(LLM_SERVICE_SOURCES
     src/router/strategy/round_robin_router.c
     src/router/strategy/least_latency_router.c
     src/router/strategy/quality_first_router.c
-    src/adapter/adapter.c
     # 注入 atoms 侧 LLM ops 抽象表（服务实现在本库，表存储在 airy_llm_ops）
     src/bootstrap/ops_bootstrap.c
 )
@@ -124,7 +123,6 @@ target_include_directories(airy_llm_service PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/providers
     # B16-S5 预置：顶层文件五域归位后的头搜索路径（纯重排，bare-name include 不变）
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/adapter
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rpc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/config
     ${CMAKE_CURRENT_SOURCE_DIR}/src/accounting
@@ -210,7 +208,6 @@ target_include_directories(llm_d PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     # B16-S5 预置：五域归位后的头搜索路径（与 airy_llm_service 同步）
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/adapter
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rpc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/config
     ${CMAKE_CURRENT_SOURCE_DIR}/src/accounting
