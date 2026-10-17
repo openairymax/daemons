@@ -26,7 +26,7 @@
  * 语义不成立。
  */
 
-#include "think_service.h"
+#include "service/think_service.h"
 #include "airy_memory.h"
 #include "daemon_ipc_ops_bootstrap.h"
 

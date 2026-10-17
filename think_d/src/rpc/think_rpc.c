@@ -9,8 +9,8 @@
 
 #include "airy_memory.h"
 #include "error.h"
-#include "lang_svc.h"
-#include "review_svc.h"
+#include "lang/lang_svc.h"
+#include "review/review_svc.h"
 #include "svc_think_d.h"
 #include "daemon_main.h"
 #include "daemon_state.h"

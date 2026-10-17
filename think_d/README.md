@@ -56,11 +56,20 @@ CLI / SDK ──▶ gateway_d ──(think.process / orchestrate / lang_* / revi
                                                                            └─ orchestrator 管线
 ```
 
-- 服务层 `src/think_service.c` + `src/think_orch.c` 抽为静态库 `airy_think_service`，
-  被守护进程可执行文件与单元测试共用；依赖 `airy_coreloopthree`（其 PUBLIC 传递
-  `airy_cognition` / `airy_core` / `airy_memory` / `airy_taskflow` / `svc_common`）。
-- `src/lang_svc.c`、`src/review_svc.c` 只注册 RPC 服务面，机制本体留在
-  `atoms/coreloopthree`，不复制到本模块。
+- gen5 五件套（codegen 户）：`.manifest` 为唯一契约源，`src/main.c` 与
+  `include/svc_think_d.h`、`modules/sources.cmake` 由 `daemon_gen.py` 生成；
+  `src/svc.c` 为装配锚点（手写）。src/ 顶层仅存私有头 `think_d_internal.h`，
+  业务源按四域组织：`src/rpc/`（RPC 方法域）、`src/service/`（think 服务与
+  编排域，静态库本体，`think_service.h` 域私有契约不对外安装）、`src/lang/`
+  （语言网关服务域，可降级）、`src/review/`（认知审查服务域）；域依赖
+  单向 rpc/lang/review → service 契约，svc 与 rpc 经 `think_d_internal.h`
+  单点消费。
+- 服务层 `src/service/think_service.c` + `src/service/think_orch.c` 抽为
+  静态库 `airy_think_service`，被守护进程可执行文件与单元测试共用；依赖
+  `airy_coreloopthree`（其 PUBLIC 传递 `airy_cognition` / `airy_core` /
+  `airy_memory` / `airy_taskflow` / `svc_common`）。
+- `src/lang/lang_svc.c`、`src/review/review_svc.c` 只注册 RPC 服务面，
+  机制本体留在 `atoms/coreloopthree`，不复制到本模块。
 - 引擎内的 IPC / LLM / tool 调用经 ops 表注入（`daemon_ipc_ops_init` /
   `daemon_llm_ops_init` / `daemon_tool_ops_init`），认知引擎不直接链接 daemons 符号；
   注入失败非致命，调用点自行降级。

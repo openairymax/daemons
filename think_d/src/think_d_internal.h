@@ -10,7 +10,7 @@
 #define AIRY_RT_DAEMON_THINK_D_INTERNAL_H
 
 #include "daemon_dep.h"
-#include "think_service.h"
+#include "service/think_service.h"
 
 #ifdef __cplusplus
 extern "C" {
