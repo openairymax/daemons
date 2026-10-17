@@ -28,12 +28,8 @@
 #include "providers/core/provider_http.h"
 
 /**
- * @brief 构造请求的规范化文本（canonical text）：
- *        "role:content:reasoning|" 逐条拼接。
- *
- * 该文本同时是本地 LRU 键与 mem_d 语义缓存 L0 键（sha256(text + "|"
- * + model_id)）的输入，保证两级缓存对"同一请求"的判定一致。
- *
+ * @brief 构造规范化文本 "role:content:reasoning|"，同时作为本地 LRU 键与
+ *        mem_d 语义缓存 L0 键的输入，保证两级缓存对同一请求判定一致。
  * @return 文本串（调用方 AIRY_FREE），失败返回 NULL
  */
 static char *make_cache_text(const llm_request_config_t *manager)
@@ -76,10 +72,7 @@ static char *make_cache_text(const llm_request_config_t *manager)
 }
 
 /**
- * @brief 生成本地 LRU 缓存键："<model>|<canonical text>"
- * @param manager 请求配置
- * @param text    make_cache_text() 的输出
- * @return 键串（调用方 AIRY_FREE），失败返回 NULL
+ * @brief 本地 LRU 键 "<model>|<canonical text>"（调用方 AIRY_FREE）。
  */
 static char *make_cache_key(const llm_request_config_t *manager, const char *text)
 {
@@ -98,12 +91,9 @@ static char *make_cache_key(const llm_request_config_t *manager, const char *tex
 }
 
 /**
- * @brief 两级缓存查询：L0 进程内精确匹配 LRU → L1 mem_d 语义缓存。
- *        L1 命中后回填 L0，后续同请求免 IPC。
- *
- * B5-3 准入门禁（fail-closed）：调用方未显式声明 cacheable 时两级均旁路，
- * 与 cache_store 的写入门禁同源同判，避免读侧绕过策略面。
- *
+ * @brief 两级查询：L0 进程内 LRU → L1 mem_d 语义缓存，L1 命中回填 L0。
+ *        B5-3 fail-closed：未显式声明 cacheable 时两级均旁路，与
+ *        cache_store 写入门禁同源同判。
  * @return 1 命中（*out_response 已填充）；0 未命中
  */
 static int cache_lookup(llm_service_t *svc, const char *key, const char *text, const char *model,
@@ -149,9 +139,7 @@ static int cache_lookup(llm_service_t *svc, const char *key, const char *text, c
     return sem_resp ? 1 : 0;
 }
 
-/**
- * @brief Find a provider
- */
+/* 注册表精确查找（持锁），未命中返回 NULL。 */
 static const provider_t *find_provider(llm_service_t *svc, const char *model)
 {
     if (!svc || !model) {
@@ -167,18 +155,10 @@ static const provider_t *find_provider(llm_service_t *svc, const char *model)
     return prov;
 }
 
-/* ---------- P3.16 (ACC-DT17): select provider via llm_router ----------
- *
- * Explicit model wins (GRAD three-model separation):
- *   When the caller explicitly specifies a model (e.g. t2=glm-4,
- *   t1-f=deepseek-flash) and it matches exactly in the registry, return that
- *   provider directly — COST_AWARE routing would pick the "cheapest endpoint"
- *   and may ignore the user-specified model (the risk of t2 being routed to
- *   deepseek). Only when the exact match fails, fall back to strategy routing.
- *
- * On routing failure (e.g. not initialized, no endpoint matching the
- * capabilities, empty registry) return NULL, and the caller falls back to
- * find_provider(model) for backward compatibility. */
+/* ---------- P3.16 (ACC-DT17): llm_router 选路 ----------
+ * 显式 model 精确命中注册表时直接返回：COST_AWARE 选路会挑"最便宜端点"，
+ * 可能把用户指定的模型（GRAD 三模型分离）改写掉。未命中或选路失败才回落
+ * 策略路由，最终由 pick_provider 再做注册表兜底。 */
 static const provider_t *select_provider_via_router(llm_service_t *svc,
                                                     const llm_request_config_t *manager,
                                                     bool is_stream)
@@ -218,8 +198,7 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
         req.required_caps |= LLM_CAP_STREAMING;
     }
 
-    /* 成本估算用输出量：调用方未指定时用引擎默认上限，使路由估算与最终
-     * 实际发出的 max_tokens 同源（此前恒为 0，估算与实际脱节）。 */
+    /* 估算用输出量与最终 max_tokens 同源：未指定时取引擎默认上限。 */
     {
         int est = (manager->max_tokens > 0) ? manager->max_tokens : svc->default_max_output_tokens;
         req.max_tokens = (est > 0) ? (uint32_t)est : 0;
@@ -238,10 +217,7 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
         return NULL;
     }
 
-    /* Resolve the routed model_name to the real provider via the registry.
-     * If the routed model does not exist in the registry (theoretically
-     * impossible since endpoints originate from the registry), return NULL to
-     * trigger the caller's fallback. */
+    /* 选路结果回到注册表解析真实 provider；失败则交由调用方兜底。 */
     const provider_t *prov = find_provider(svc, result.model_name);
     if (prov) {
         SVC_LOG_INFO("C-L02: SVC: ROUTED provider=%s model=%s strategy=%d cost=%.6f latency=%u",
@@ -251,11 +227,25 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
     return prov;
 }
 
+/* 双入口统一的选取链：策略路由优先，miss 时回落注册表精确查找；
+ * 仍无可用 provider 则记录带 STACK 的失败日志并返回 NULL。 */
+static const provider_t *pick_provider(llm_service_t *svc, const llm_request_config_t *manager,
+                                       const char *stack, bool is_stream)
+{
+    const provider_t *prov = select_provider_via_router(svc, manager, is_stream);
+    if (!prov) {
+        SVC_LOG_INFO("C-L02: SVC: router miss — falling back to find_provider(model=%s)",
+                     manager->model);
+        prov = find_provider(svc, manager->model);
+    }
+    if (!prov)
+        SVC_LOG_ERROR("C-L02: SVC: %s model=%s, error=INVALID_MODEL, STACK: %s",
+                      is_stream ? "STREAM-FAIL" : "COMPLETE-FAIL", manager->model, stack);
+    return prov;
+}
 /**
- * @brief 两级写入：L0 进程内 LRU + L1 mem_d 语义缓存
- *
- * B5-3 准入门禁（fail-closed）：调用方未显式声明 cacheable 时两级均不写入，
- * 含敏感面的请求由 mem_d 侧 mem_cache_admit() 二次拒绝。
+ * @brief 两级写入：L0 LRU + L1 mem_d。B5-3 fail-closed：未显式声明
+ *        cacheable 时不写；敏感面另由 mem_d 的 mem_cache_admit() 拒绝。
  */
 static void cache_store(llm_service_t *svc, const char *key, const char *text, const char *model,
                         llm_response_t *resp, int cacheable)
@@ -278,12 +268,9 @@ static void cache_store(llm_service_t *svc, const char *key, const char *text, c
 }
 
 /**
- * @brief 生成参数唯一解析点：把"用哪个模型、最多生成多少 token"从三处来源
- *        （调用方显式值 / 注册表中该模型声明的上限 / 引擎默认上限）收敛为
- *        一次判定，同步与流式两条路径共用，避免各自解析造成口径漂移。
- *
- * 显式 max_tokens 是意图，模型上限与引擎默认是边界：意图超过边界按边界截断
- * （配置写了上限就必须兑现），未声明意图时取边界，边界也未配置则保持未设。
+ * @brief 生成参数唯一解析点（同步/流式共用）：模型与 max_tokens 从"显式值 /
+ *        模型声明上限 / 引擎默认"三处来源收敛为一次判定。显式值是意图，
+ *        上限是边界：意图越界按边界截断，未声明意图取边界，均无则保持未设。
  */
 void resolve_gen_params(const llm_service_t *svc, const provider_t *prov,
                         const llm_request_config_t *manager, char *out_model, size_t model_size,
@@ -314,8 +301,7 @@ void resolve_gen_params(const llm_service_t *svc, const provider_t *prov,
     }
 }
 
-/* 0.1.17：上游因达到输出上限而截断时必须可判读。此前 finish_reason 只被透传，
- * 引擎不做判定，用户看到"回答莫名中断"却无任何线索。 */
+/* 0.1.17：上游因输出上限截断必须可判读，否则表现为"回答莫名中断"。 */
 static void note_truncation(const llm_response_t *resp, const char *model, int max_tokens)
 {
     if (resp && llm_finish_is_truncated(resp->finish_reason)) {
@@ -325,10 +311,7 @@ static void note_truncation(const llm_response_t *resp, const char *model, int m
     }
 }
 
-/**
- * @brief Update cost tracking (accumulate + fill per-call cost back into the
- *        response)
- */
+/* 累计用量、回填单次成本，并兜底持久化（SIGKILL/崩溃时优雅退出路径不执行）。 */
 static void update_cost_tracking(llm_service_t *svc, const char *model, llm_response_t *resp)
 {
     if (!svc || !model || !resp) {
@@ -339,18 +322,12 @@ static void update_cost_tracking(llm_service_t *svc, const char *model, llm_resp
     resp->cost_usd =
         cost_tracker_estimate(svc->cost, model, resp->prompt_tokens, resp->completion_tokens);
 
-    /* 2.1.1.5 修复：每次真实调用后兜底持久化——防 daemon 异常退出
-     * （SIGKILL/崩溃）丢失本次累计（优雅退出路径在 llm_service_destroy
-     * 再保存一次，幂等）。 */
     const char *usage_path = llm_usage_state_path();
     if (usage_path)
         (void)cost_tracker_save(svc->cost, usage_path);
 }
 
-/**
- * @brief 记录首条用户消息的复杂度评估与路由决策（complete/stream 双入口
- *        共用的 routing prelude，消灭两入口的样板重复）。
- */
+/* complete/stream 共用的 routing prelude：复杂度评估与路由决策日志。 */
 static void log_routing_prelude(const llm_request_config_t *manager,
                                 const char *routing_kind)
 {
@@ -364,23 +341,30 @@ static void log_routing_prelude(const llm_request_config_t *manager,
     log_routing_decision(manager->model, complexity, input_len, routing_kind);
 }
 
+/* Shared entry guard: parameter shape, explicit model, and the read-only drift
+ * check (0.1.19 §3.5 缺陷5: stat only on the unchanged path, no reload). */
+static int req_guard(llm_service_t *svc, const llm_request_config_t *manager,
+                     int sink_ok, const char *tag, const char *fn)
+{
+    if (!svc || !manager || !sink_ok) {
+        SVC_LOG_ERROR("C-L02: SVC: %s-FAIL invalid arguments, STACK: %s", tag, fn);
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    if (!manager->model) {
+        SVC_LOG_ERROR("C-L02: SVC: %s-FAIL model=NULL, STACK: %s", tag, fn);
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    (void)svc_mw_check(&svc->mw);
+    (void)svc_mw_check(&svc->mw_usr);
+    return AIRY_OK;
+}
+
 int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager,
                          llm_response_t **out_response)
 {
-
-    if (!svc || !manager || !out_response) {
-        SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL invalid arguments, STACK: llm_service_complete");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    if (!manager->model) {
-        SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL model=NULL, STACK: llm_service_complete");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    /* 0.1.19 §3.5 缺陷5：只读漂移检测（未变路径单次 stat），不重载配置。 */
-    (void)svc_mw_check(&svc->mw);
-    (void)svc_mw_check(&svc->mw_usr);
+    int grc = req_guard(svc, manager, out_response != NULL, "COMPLETE", "llm_service_complete");
+    if (grc != AIRY_OK)
+        return grc;
 
     char *cache_text = make_cache_text(manager);
     char *cache_key = cache_text ? make_cache_key(manager, cache_text) : NULL;
@@ -395,10 +379,7 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     int cache_status =
         cache_lookup(svc, cache_key, cache_text, manager->model, manager->cacheable, &cached_resp);
     if (cache_status > 0 && cached_resp) {
-        /* 2.1.1.5 修复：缓存命中同样计入 cost_tracker——此前命中直接
-         * 返回跳过计费，累计金额低于逐轮显示之和（缓存响应仍消耗上游
-         * token 配额，只是本侧免去一次转发）。按缓存响应自带的 token
-         * 数计费，金额语义一致。 */
+        /* 缓存命中仍消耗上游 token 配额，按响应自带用量计费。 */
         update_cost_tracking(svc, manager->model, cached_resp);
         AIRY_FREE(cache_text);
         AIRY_FREE(cache_key);
@@ -406,23 +387,10 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
         return AIRY_OK;
     }
 
-    /* P3.16 (ACC-DT17): prefer strategy routing via llm_router to select the
-     * provider; on routing failure (not initialized / no capability-matching
-     * endpoint / empty registry) fall back to find_provider(manager->model)
-     * for backward compatibility. */
-    const provider_t *prov = select_provider_via_router(svc, manager, false);
+    const provider_t *prov = pick_provider(svc, manager, "llm_service_complete", false);
     if (!prov) {
-        SVC_LOG_INFO("C-L02: SVC: router miss — falling back to find_provider(model=%s)",
-                     manager->model);
-        prov = find_provider(svc, manager->model);
-    }
-    if (!prov) {
-        SVC_LOG_ERROR(
-            "C-L02: SVC: COMPLETE-FAIL model=%s, error=INVALID_MODEL, STACK: llm_service_complete",
-            manager->model);
         AIRY_FREE(cache_text);
         AIRY_FREE(cache_key);
-        cache_key = NULL;
         return AIRY_ERR_LLM_INVALID_MODEL;
     }
 
@@ -442,7 +410,6 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
                       eff_model, ret);
         AIRY_FREE(cache_text);
         AIRY_FREE(cache_key);
-        cache_key = NULL;
         return ret;
     }
 
@@ -453,7 +420,6 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     *out_response = resp;
     AIRY_FREE(cache_text);
     AIRY_FREE(cache_key);
-    cache_key = NULL;
     return AIRY_OK;
 }
 
@@ -461,37 +427,14 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
                                 llm_stream_callback_t callback, void *callback_data,
                                 llm_response_t **out_response)
 {
+    int grc = req_guard(svc, manager, callback != NULL, "STREAM",
+                        "llm_service_complete_stream");
+    if (grc != AIRY_OK)
+        return grc;
 
-    if (!svc || !manager || !callback) {
-        SVC_LOG_ERROR(
-            "C-L02: SVC: STREAM-FAIL invalid arguments, STACK: llm_service_complete_stream");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    if (!manager->model) {
-        SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL model=NULL, STACK: llm_service_complete_stream");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    /* 0.1.19 §3.5 缺陷5：只读漂移检测（未变路径单次 stat），不重载配置。 */
-    (void)svc_mw_check(&svc->mw);
-    (void)svc_mw_check(&svc->mw_usr);
-
-    /* P3.16 (ACC-DT17): prefer strategy routing via llm_router to select the
-     * provider; on routing failure fall back to find_provider(manager->model)
-     * for backward compatibility. */
-    const provider_t *prov = select_provider_via_router(svc, manager, true);
-    if (!prov) {
-        SVC_LOG_INFO("C-L02: SVC: router miss (stream) — falling back to find_provider(model=%s)",
-                     manager->model);
-        prov = find_provider(svc, manager->model);
-    }
-    if (!prov) {
-        SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL model=%s, error=INVALID_MODEL, STACK: "
-                      "llm_service_complete_stream",
-                      manager->model);
+    const provider_t *prov = pick_provider(svc, manager, "llm_service_complete_stream", true);
+    if (!prov)
         return AIRY_ERR_LLM_INVALID_MODEL;
-    }
 
     log_routing_prelude(manager, "stream_user_specified");
 
@@ -523,8 +466,7 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
     return ret;
 }
 
-/* embeddings 端点为 OpenAI 兼容协议：仅 Bearer 鉴权，Content-Type 由 core 统一
- * 附加（B16-S6：鉴权头拼装与缓冲擦除归 core，service 层不出现 curl_*）。 */
+/* OpenAI 兼容：仅 Bearer 鉴权，Content-Type 由 core 统一附加。 */
 static const provider_header_spec_t EMBEDDINGS_HEADERS = {.auth = PROVIDER_AUTH_BEARER};
 
 int llm_service_embeddings(llm_service_t *svc, const char *model, const char *request_body,
@@ -549,10 +491,8 @@ int llm_service_embeddings(llm_service_t *svc, const char *model, const char *re
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* B16-S6：embeddings 出网收敛到 providers/core 唯一入口 provider_http_exec。
-     * service 层只声明"发给谁/发什么"，URL 拼装（含 api_base 尾斜杠归一）、头链
-     * 装配与释放、超时与重试全归 core——此前本处自持 curl 头链直调
-     * provider_http_post，使 providers 的传输收敛形同虚设。 */
+    /* B16-S6：出网收敛到 providers/core 唯一入口，URL 拼装、头链、超时与
+     * 重试全归 core，service 层不出现 curl_*。 */
     provider_request_t req = {
         .base = base,
         .path = "/embeddings",
