@@ -182,11 +182,6 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/sched_d/include/
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/market_d/include/
-    DESTINATION include/agentrt
-    FILES_MATCHING PATTERN "*.h"
-)
-
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/mem_d/include/
     DESTINATION include/agentrt
     FILES_MATCHING PATTERN "*.h"

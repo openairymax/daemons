@@ -9,7 +9,7 @@
  *          install/uninstall 涉及落盘与网络，由 e2e 回归覆盖，此处不涉及。
  */
 
-#include "market_service.h"
+#include "service/market_service.h"
 
 #include <stdio.h>
 #include <stdlib.h>

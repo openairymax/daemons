@@ -23,6 +23,6 @@
   },
   "deps": { "required": [], "optional": [] },
   "modules": [
-    { "name": "rpc", "sources": ["market_rpc.c"] }
+    { "name": "rpc", "sources": ["rpc/market_rpc.c"] }
   ]
 }

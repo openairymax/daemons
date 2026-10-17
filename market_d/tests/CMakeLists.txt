@@ -11,12 +11,11 @@ set(SYSCALL_INCLUDE_DIR ${ATOMIC_DIR}/syscall/include)
 set(COREKERN_INCLUDE_DIR ${ATOMIC_DIR}/corekern/include)
 
 set(MARKET_IMPL_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/market_service_impl.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/market_service_registry.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/market_service_query.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/market_service_install.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/market_service_config.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/publisher.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service/market_service_impl.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service/market_service_registry.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service/market_service_query.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service/market_service_install.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service/market_service_config.c
 )
 
 set(MARKET_TEST_SOURCES

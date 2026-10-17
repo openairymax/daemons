@@ -8,5 +8,5 @@
 set(MARKET_D_SOURCES
     src/main.c
     src/svc.c
-    src/market_rpc.c
+    src/rpc/market_rpc.c
 )
