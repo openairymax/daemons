@@ -51,7 +51,7 @@ int tool_contract_env(tool_contract_env_t *env)
     return os_sandbox_fs_workspace(env->path_base, sizeof(env->path_base));
 }
 
-int tool_contract_scope_put(struct cJSON *obj, const char *base, int fenced)
+int tool_scope_put(struct cJSON *obj, const char *base, int fenced)
 {
     if (!obj || !base || base[0] == '\0')
         return -1;
@@ -94,7 +94,7 @@ int tool_contract_put(cJSON *obj, const char *tool_id, const tool_contract_env_t
     if (!x)
         return -1;
     cJSON_AddStringToObject(x, "path_base", env->path_base);
-    tool_contract_scope_put(x, env->path_base, c->fenced);
+    tool_scope_put(x, env->path_base, c->fenced);
 
     if (c->dep_name)
         cJSON_AddStringToObject(x, "requires_daemon", c->dep_name);

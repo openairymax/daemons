@@ -73,7 +73,7 @@ static void test_contract_scope(void)
 
     cJSON *obj = cJSON_CreateObject();
     CHECK(obj != NULL);
-    CHECK(tool_contract_scope_put(obj, env.path_base, 1) == 0);
+    CHECK(tool_scope_put(obj, env.path_base, 1) == 0);
     cJSON *scope = cJSON_GetObjectItem(obj, "sandbox_scope");
     CHECK(cJSON_IsArray(scope) && cJSON_GetArraySize(scope) == 1);
     CHECK(strcmp(cJSON_GetArrayItem(scope, 0)->valuestring, env.path_base) == 0);
@@ -81,15 +81,15 @@ static void test_contract_scope(void)
 
     obj = cJSON_CreateObject();
     CHECK(obj != NULL);
-    CHECK(tool_contract_scope_put(obj, env.path_base, 0) == 0);
+    CHECK(tool_scope_put(obj, env.path_base, 0) == 0);
     scope = cJSON_GetObjectItem(obj, "sandbox_scope");
     CHECK(cJSON_IsArray(scope) && cJSON_GetArraySize(scope) == 0);
     cJSON_Delete(obj);
 
     obj = cJSON_CreateObject();
     CHECK(obj != NULL);
-    CHECK(tool_contract_scope_put(obj, "", 1) != 0);
-    CHECK(tool_contract_scope_put(obj, NULL, 1) != 0);
+    CHECK(tool_scope_put(obj, "", 1) != 0);
+    CHECK(tool_scope_put(obj, NULL, 1) != 0);
     CHECK(cJSON_GetObjectItem(obj, "sandbox_scope") == NULL);
     cJSON_Delete(obj);
 
