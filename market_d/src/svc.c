@@ -9,8 +9,7 @@
  * config 文件，storage_path=NULL 由服务层回落 $AIRY_HOME/agents（或
  * /skills），故 svc_prepare 忽略 config_path。端点由生成头
  * svc_endpoint 经 daemon_ep_base 常量直填回填，cmdline use_tcp 只升不降。
- * 业务逻辑在
- * market_service_*.c / publisher.c 与 market_rpc.c。
+ * 业务逻辑在 service/（market 服务域）与 rpc/（market.* 方法域）。
  */
 
 #include "svc_market_d.h"
