@@ -17,7 +17,7 @@
 #include "svc_agent_d.h"
 
 #include "daemon_main.h"
-#include "agent_service.h"
+#include "service/agent_service.h"
 #include "daemon_rpc_client.h"
 #include "platform.h"
 #include "svc_logger.h"
