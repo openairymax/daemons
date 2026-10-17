@@ -13,9 +13,15 @@
 #include "review_svc.h"
 #include "svc_think_d.h"
 #include "daemon_main.h"
+#include "daemon_state.h"
 #include "think_d_internal.h"
 
 #include <time.h>
+
+/* 0.1.19 §3.7 N7：运行面形式化四态状态机（G38-2）。健康面按请求折叠，
+ * confirmed=true（不变量 2：健康=按请求端到端重探，单次探测即确认，
+ * 恢复确认窗留给 tick 型观察者）。单线程事件循环派发，静态记忆安全。 */
+static dmn_state_t g_health_state = DMN_ST_NOMINAL;
 
 static void handle_process(cJSON *params, int id, airy_sock_t client_fd)
 {
@@ -97,7 +103,10 @@ static void handle_health_check(cJSON *params, int id, airy_sock_t client_fd)
                                   sizeof(g_think_deps) / sizeof(g_think_deps[0])) == AIRY_SUCCESS &&
                   daemon_dep_probe(&deps, sdh) == AIRY_SUCCESS;
     bool service_ready = think_service_ready(g_svc) ? true : false;
-    bool healthy = service_ready && probed && daemon_dep_ready(&deps);
+    bool deps_ok = probed && daemon_dep_ready(&deps);
+    g_health_state = dmn_state_next(g_health_state, service_ready, deps_ok, true);
+    bool healthy = g_health_state == DMN_ST_NOMINAL;
+    bool degraded = g_health_state == DMN_ST_DEGRADED;
 
     cJSON *result = cJSON_CreateObject();
     if (!result) {
@@ -106,7 +115,8 @@ static void handle_health_check(cJSON *params, int id, airy_sock_t client_fd)
     }
     cJSON_AddStringToObject(result, "service", "think_d");
     cJSON_AddBoolToObject(result, "healthy", healthy);
-    cJSON_AddBoolToObject(result, "degraded", service_ready && !healthy);
+    cJSON_AddBoolToObject(result, "degraded", degraded);
+    cJSON_AddStringToObject(result, "state", dmn_state_name(g_health_state));
     cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
 
     if (probed && daemon_dep_count(&deps) > 0) {
