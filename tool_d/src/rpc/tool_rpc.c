@@ -164,7 +164,7 @@ static void put_policy_scope(cJSON *ctx)
 {
     tool_contract_env_t env;
     if (tool_contract_env(&env) == 0)
-        tool_contract_scope_put(ctx, env.path_base, 1);
+        tool_scope_put(ctx, env.path_base, 1);
 }
 
 static void put_tool_err(cJSON *result, airy_err_t code, const char *diag, const char *tid)
