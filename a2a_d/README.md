@@ -36,8 +36,9 @@ gateway_d ──(a2a.register_agent / create_task / send_message)──▶ a2a_d
 
 五件套装配（gen5）：`.manifest` 为唯一契约源，`src/main.c` 与 `include/svc_a2a_d.h`、
 `modules/sources.cmake` 为 `daemon_gen.py` 生成态；生命周期策略在 `src/svc.c`，
-RPC 方法域在 `src/a2a_rpc.c`。服务层 `src/service.c` + `src/a2a_svc_adapter.c`
-抽为静态库 `airy_a2a_service`，被守护进程可执行文件与单元测试共用。
+RPC 方法域在 `src/rpc/a2a_rpc.c`。core 域（`src/core/`：服务核与 a2a_service
+契约头）抽为静态库 `airy_a2a_service`，被守护进程可执行文件与单元测试共用；
+域依赖单向 `rpc→core`，跨域共享契约经 `src/a2a_d_internal.h` 单点消费。
 
 ## JSON-RPC 接口
 

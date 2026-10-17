@@ -8,5 +8,5 @@
 set(A2A_D_SOURCES
     src/main.c
     src/svc.c
-    src/a2a_rpc.c
+    src/rpc/a2a_rpc.c
 )
