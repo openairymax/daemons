@@ -10,34 +10,11 @@
 #define AIRY_RT_LLM_PROVIDER_REGISTRY_H
 
 #include "adapter.h"
+#include "provider_config.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef struct {
-    const char *name;
-    const char *api_key;
-    const char *api_base;
-    const char *organization;
-    double timeout_sec;
-    int max_retries;
-    char **models;
-    /* 与 models 同下标对齐的每模型输出上限（model.yaml max_output 的 token
-     * 数，0 = 未配置）。NULL 表示调用方未提供容量表。生成参数解析需要它来
-     * 兑现"配置了上限就按下限截断"，此前该信息止步于 YAML 解析状态机。 */
-    const int *model_max_output;
-} provider_config_t;
-
-typedef struct service_config {
-    size_t llm_cache_capacity;
-    uint32_t llm_cache_ttl_sec;
-    int max_retries;
-    uint32_t timeout_ms;
-    const char *token_encoding;
-    provider_config_t *providers;
-    size_t provider_count;
-} service_config_t;
 
 typedef struct provider_registry provider_registry_t;
 

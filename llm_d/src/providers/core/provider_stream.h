@@ -6,7 +6,7 @@
 #define LLM_D_PROVIDERS_CORE_PROVIDER_STREAM_H
 
 #include "llm_service_types.h"
-#include "provider_base.h"
+#include "provider_retry_class.h"
 #include <curl/curl.h>
 #include <stddef.h>
 

@@ -5,7 +5,7 @@
 #ifndef LLM_D_PROVIDERS_CORE_PROVIDER_RETRY_H
 #define LLM_D_PROVIDERS_CORE_PROVIDER_RETRY_H
 
-#include "provider_base.h"
+#include "provider_retry_class.h"
 
 #include <curl/curl.h>
 #include <stdint.h>
