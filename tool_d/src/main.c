@@ -23,5 +23,5 @@ static const daemon_op_t SVC_OPS[] = {
 
 DAEMON_MAIN(tool_d, TOOL_D, "tool", "AIRY_TOOL_D_DEBUG",
             "tool", "tool,core", 11, 64, 4, 8, 256, 1,
-            svc_activate_noop, svc_attach, svc_teardown_noop,
+            svc_activate, svc_attach, svc_teardown_noop,
             daemon_dome_init_pep, daemon_dome_cleanup)

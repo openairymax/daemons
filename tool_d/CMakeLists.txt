@@ -36,6 +36,8 @@ set(TOOL_SERVICE_SOURCES
     src/rpc/service_builtin.c
     src/rpc/service_execute.c
     src/core/registry.c
+    # D8 (0.1.19): 工具可用性视图——依赖 daemon 可达性联动，暴露前过滤
+    src/core/tool_avail.c
     src/core/executor.c
     # R1-a: 执行面专用有界 worker 池（隔离 RPC 共享池）
     src/core/executor_pool.c

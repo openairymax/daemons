@@ -5,7 +5,7 @@
   "sd_type": "tool",
   "endpoint": "apply",
   "ops": ["ipc", "llm", "tool"],
-  "noop_hooks": ["activate", "teardown"],
+  "noop_hooks": ["teardown"],
   "facades": ["ingress", "execute", "state", "governance"],
   "slots": ["create", "delete", "update", "query", "discover", "compute", "isolate", "validate", "authz", "cache"],
   "rpc": {

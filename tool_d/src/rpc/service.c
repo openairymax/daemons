@@ -27,6 +27,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* D8：注册表可见性谓词适配器——把工具可用性视图接到 registry 过滤点。 */
+static int svc_tool_up(const char *tool_id, void *ud)
+{
+    return tool_avail_ok((tool_avail_t *)ud, tool_id);
+}
+
 tool_service_t *tool_service_create(const char *config_path)
 {
 
@@ -50,6 +56,15 @@ tool_service_t *tool_service_create(const char *config_path)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
+    /* D8：可用性视图 + 可见性谓词。视图建立失败降级为不过滤（WARN），
+     * 不阻断服务主面。谓词与 builtin 依赖声明（service_builtin.c）合流，
+     * 使"能力存在"与"依赖可用"绑定。 */
+    svc->avail = tool_avail_new();
+    if (svc->avail)
+        tool_registry_filter(svc->registry, svc_tool_up, svc->avail);
+    else
+        SVC_LOG_ERROR("C-L06: TOOL-AVAIL: view unavailable, exposure filtering disabled");
+
     tool_executor_config_t exec_config;
     __builtin_memset(&exec_config, 0, sizeof(exec_config));
     exec_config.timeout_sec = AIRY_DEFAULT_TIMEOUT_SEC;
@@ -57,6 +72,7 @@ tool_service_t *tool_service_create(const char *config_path)
     svc->executor = tool_executor_create_ex(&exec_config);
     if (!svc->executor) {
         SVC_LOG_ERROR("Failed to create executor");
+        tool_avail_free(svc->avail);
         tool_registry_destroy(svc->registry);
         airy_mtx_destroy(&svc->lock);
         AIRY_FREE(svc);
@@ -70,6 +86,7 @@ tool_service_t *tool_service_create(const char *config_path)
     if (!svc->exec_pool) {
         SVC_LOG_ERROR("Failed to create executor pool");
         tool_executor_destroy(svc->executor);
+        tool_avail_free(svc->avail);
         tool_registry_destroy(svc->registry);
         airy_mtx_destroy(&svc->lock);
         AIRY_FREE(svc);
@@ -127,6 +144,7 @@ tool_service_t *tool_service_create(const char *config_path)
     if (!svc->validator) {
         SVC_LOG_ERROR("Failed to create validator");
         tool_executor_destroy(svc->executor);
+        tool_avail_free(svc->avail);
         tool_registry_destroy(svc->registry);
         daemon_security_shutdown();
         airy_mtx_destroy(&svc->lock);
@@ -157,6 +175,11 @@ void tool_service_destroy(tool_service_t *svc)
     if (svc->registry) {
         tool_registry_destroy(svc->registry);
         svc->registry = NULL;
+    }
+
+    if (svc->avail) {
+        tool_avail_free(svc->avail);
+        svc->avail = NULL;
     }
 
     if (svc->executor) {
@@ -243,6 +266,11 @@ char *tool_service_list(tool_service_t *svc)
     airy_mtx_unlock(&svc->lock);
 
     return json;
+}
+
+tool_avail_t *tool_service_avail(tool_service_t *svc)
+{
+    return svc ? svc->avail : NULL;
 }
 
 char *tool_service_get_stats(tool_service_t *svc)

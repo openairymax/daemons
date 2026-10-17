@@ -16,12 +16,14 @@
 #include "core/executor_pool.h"
 #include "daemon_platform_ext.h"
 #include "core/registry.h"
+#include "core/tool_avail.h"
 #include "core/validator.h"
 
 #include <stdatomic.h>
 
 struct tool_service {
     tool_registry_t *registry;
+    tool_avail_t *avail; /* D8：工具可用性视图（依赖可达 → 可暴露） */
     tool_executor_t *executor;
     executor_pool_t *exec_pool; /* R1-a: 执行面隔离池 */
     tool_validator_t *validator;
