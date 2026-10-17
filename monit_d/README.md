@@ -31,27 +31,37 @@ Prometheus 抓取完全分离：主端点只走 JSON-RPC，文本导出唯一走
 
 ## 架构
 
+五件套装配（gen5）：`.manifest` 为唯一契约源，`src/main.c` 与 `include/svc_monit_d.h`、
+`modules/sources.cmake` 由 `daemon_gen.py` 生成（L3 SSoT）；`src/svc.c` 为机制层
+策略挂点。`src/` 顶层仅存私有头 `monit_d_internal.h`（daemon 全局服务句柄与启动
+时刻，svc 与 rpc 单点消费），业务源按四个职责域组织：
+
 ```
 客户端 (JSON-RPC 2.0) ─▶ 端点（sock/管，`--tcp` 升级 9090）
                              │ main.c（生成态）：标准 JSON-RPC 户，按 dispatcher 分发
-Prometheus scraper ─────▶ :9091（observe_rpc 独立 HTTP 出口，唯一 /metrics 文本导出）
+Prometheus scraper ─────▶ :9091（observe 域独立 HTTP 出口，唯一 /metrics 文本导出）
                              │
-              ┌──────────────┼──────────────────────────────┐
-              ▼              ▼                              ▼
-   monit_rpc.c +      observe_rpc                 info_rpc
-   monitor_service    （动态指标表 + :9091 HTTP） （5s 采集线程 + 环形历史）
-   （metrics / alert /
-    tracing / report）
-              │
-              ▼
-   prometheus_exporter（指标注册与文本导出）
+        ┌────────────┬───────┴──────┬─────────────┐
+        ▼            ▼              ▼             ▼
+  rpc/            observe/       info/         export/
+  monit_rpc.c     observe_rpc.c  info_rpc.c    prometheus_exporter.c
+  （monit.*       （动态指标表   （5s 采集线程  （指标注册与
+   11 方法薄壳）   + :9091 HTTP） + 环形历史）   文本导出）
+        │
+        ▼
+  service/（airy_monit_service 静态库本体，契约头 monitor_service.h 随域下潜；
+           service.c / service_subsystems.c / service_agent_trace.c）
 ```
+
+域依赖单向律：rpc → service 契约（`service/monitor_service.h`）；observe → export
+（HTTP 抓取经 `export/prometheus_exporter.h` 取文本）；service / observe / info /
+export 域内部互洽，不反向依赖 rpc。
 
 - 事件驱动模型：`daemon_event_driver`，线程池 2~4、队列 128、最大事件 64；
 - JSON-RPC 与 HTTP 完全分离：主端点只按 JSON-RPC 2.0 分发；Prometheus 文本
-  （`text/plain; version=0.0.4`）仅由 `observe_rpc` 的独立 HTTP 端点 `:9091` 服务；
-- `observe_rpc` / `info_rpc` 与 `monitor_service` 同为内建模块，初始化失败只降级对应方法，
-  不阻断守护进程启动。
+  （`text/plain; version=0.0.4`）仅由 observe 域的独立 HTTP 端点 `:9091` 服务；
+- observe / info / service / export 四域编为静态库 `airy_monit_service`，
+  初始化失败只降级对应方法，不阻断守护进程启动。
 
 ## JSON-RPC 接口
 
@@ -59,7 +69,7 @@ Prometheus scraper ─────▶ :9091（observe_rpc 独立 HTTP 出口，�
 为唯一契约源（`daemon_gen.py` 生成态 `main.c` 装配），其余 7 个由观测域与系统信息域
 在 `svc_attach` 时动态注册。
 
-**核心监控域（`src/monit_rpc.c` 11 个 + 生成态 `shutdown`）**
+**核心监控域（`src/rpc/monit_rpc.c` 11 个 + 生成态 `shutdown`）**
 
 | 方法 | 参数 | 返回 | 描述 |
 |------|------|------|------|
@@ -76,7 +86,7 @@ Prometheus scraper ─────▶ :9091（observe_rpc 独立 HTTP 出口，�
 | `get_stats` | `{}` | `{daemon, uptime_s, metrics, alerts, alerts_resolved}` | 运行态自计数 |
 | `shutdown` | `{}` | — | 优雅退出 |
 
-**观测域（`src/observe_rpc.c`，3 个）**
+**观测域（`src/observe/observe_rpc.c`，3 个）**
 
 | 方法 | 参数 | 返回 | 描述 |
 |------|------|------|------|
@@ -84,7 +94,7 @@ Prometheus scraper ─────▶ :9091（observe_rpc 独立 HTTP 出口，�
 | `observe_query_metrics` | `{name?}` | `{count, metrics:[{name, value, type, unit}]}` | 查询动态指标 |
 | `observe_get_metrics` | 同 `observe_query_metrics` | 同 `observe_query_metrics` | `observe_query_metrics` 别名 |
 
-**系统信息域（`src/info_rpc.c`，4 个）**
+**系统信息域（`src/info/info_rpc.c`，4 个）**
 
 | 方法 | 参数 | 返回 | 描述 |
 |------|------|------|------|
@@ -99,7 +109,7 @@ Prometheus scraper ─────▶ :9091（observe_rpc 独立 HTTP 出口，�
 
 ## Prometheus 必需指标
 
-`src/prometheus_exporter.c` 注册 14 个必需指标（1–10 核心可观测性、11–14 内存可观测性），
+`src/export/prometheus_exporter.c` 注册 14 个必需指标（1–10 核心可观测性、11–14 内存可观测性），
 外加 2 个抓取统计 gauge：
 
 | # | 指标 | 类型 | labels |

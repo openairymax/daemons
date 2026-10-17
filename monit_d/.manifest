@@ -25,6 +25,6 @@
   },
   "deps": { "required": [], "optional": [] },
   "modules": [
-    { "name": "rpc", "sources": ["monit_rpc.c"] }
+    { "name": "rpc", "sources": ["rpc/monit_rpc.c"] }
   ]
 }

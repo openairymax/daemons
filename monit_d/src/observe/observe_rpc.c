@@ -25,7 +25,7 @@
 #include "method_dispatcher.h"
 #include "observe_rpc.h"
 #include "platform.h"
-#include "prometheus_exporter.h"
+#include "export/prometheus_exporter.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>

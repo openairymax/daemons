@@ -13,7 +13,7 @@
 #include "airy_memory.h"
 #include "jsonrpc_helpers.h"
 #include "method_dispatcher.h"
-#include "observe_rpc.h"
+#include "observe/observe_rpc.h"
 #include "svc_logger.h"
 
 #include <cjson/cJSON.h>
