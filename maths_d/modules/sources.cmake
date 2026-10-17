@@ -8,7 +8,7 @@
 set(MATHS_D_SOURCES
     src/main.c
     src/svc.c
-    src/maths_service.c
-    src/expr_eval.c
-    src/python_backend.c
+    src/core/maths_service.c
+    src/expr/expr_eval.c
+    src/backend/python_backend.c
 )

@@ -22,8 +22,8 @@ Python 符号后端覆盖方程求解与微积分；后端缺失时自动降级�
 
 | 引擎 | 覆盖范围 | 实现 |
 |------|---------|------|
-| **纯 C 快速路径** | 四则与幂运算、初等函数、描述性统计、数学表达式识别 | `src/expr_eval.c`（递归下降求值器）+ `src/maths_service.c`，零外部依赖 |
-| **Python 符号后端** | 方程求解、求导、积分、极限、化简 / 因式分解 / 展开、矩阵、通用数值、单位换算、金融、数论 | `src/python_backend.c` → stdio JSON-RPC → maths-toolkit（SymPy + MCP-Mathematics） |
+| **纯 C 快速路径** | 四则与幂运算、初等函数、描述性统计、数学表达式识别 | `src/expr/expr_eval.c`（递归下降求值器）+ `src/core/maths_service.c`，零外部依赖 |
+| **Python 符号后端** | 方程求解、求导、积分、极限、化简 / 因式分解 / 展开、矩阵、通用数值、单位换算、金融、数论 | `src/backend/python_backend.c` → stdio JSON-RPC → maths-toolkit（SymPy + MCP-Mathematics） |
 
 - **自动降级** — 后端脚本或解释器不存在时，进程照常启动并只对外暴露本地方法；
   `get_stats` 的 `python_backend` 字段标记 `up` / `degraded`。
@@ -37,10 +37,11 @@ Python 符号后端覆盖方程求解与微积分；后端缺失时自动降级�
 gateway_d / SDK
    │  JSON-RPC 2.0 · maths.* 命名空间
    ▼
-maths_d ── src/main.c            监听、accept、单请求短连接
-        ── src/maths_service.c   方法分发、参数校验、统计计数
-        ── src/expr_eval.c       纯 C 递归下降求值器
-        └─ src/python_backend.c  fork/pipe 子进程、stdio JSON-RPC、降级
+maths_d ── src/main.c                     监听、accept、单请求短连接
+        ── src/svc.c                      装配域：生命周期钩子、RPC 分发壳
+        ── src/core/maths_service.c       方法实现、参数校验、统计计数
+        ── src/expr/expr_eval.c           纯 C 递归下降求值器
+        └─ src/backend/python_backend.c   fork/pipe 子进程、stdio JSON-RPC
              │
              ▼
         $AIRY_HOME/backend/maths_backend.py
@@ -49,9 +50,13 @@ maths_d ── src/main.c            监听、accept、单请求短连接
           └─ MCP-Mathematics：numerical / units / finance / number_theory
 ```
 
+域依赖单向：`svc` → `core` → {`expr`, `backend`}；`expr` 与 `backend` 零域外
+依赖，跨域共享契约经 `src/maths_d_internal.h` 单点消费。
+
 ## JSON-RPC 接口
 
-共 18 个方法，由 `maths_service.c` 按方法名分发（`method` 不带 `maths.` 前缀）。
+共 18 个方法（`method` 不带 `maths.` 前缀），`svc.c` RPC 壳按方法名分发，
+`core/maths_service.c` 承载实现。
 
 ### 本地方法（纯 C 快速路径，6 个）
 

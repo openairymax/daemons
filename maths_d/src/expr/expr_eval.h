@@ -7,9 +7,8 @@
  *
  * 从 maths_service.c 拆分（n11 大文件模块化）：纯 C 数值表达式求值，
  * 覆盖建议稿第一/二级（基础算术 + 初等函数）。零外部依赖、零代码执行，
- * 表达式长度与解析深度硬限制，NaN/Inf 显式上报。
- *
- * @see maths_service.h 数学外挂服务核心（调用本引擎）
+ * NaN/Inf 显式上报。表达式长度与解析深度容量契约在本头定义（core 校验
+ * 与 lexer 上限共用同一常量，防口径漂移）。
  */
 
 #ifndef AIRY_RT_MATHS_D_EXPR_EVAL_H
@@ -20,6 +19,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* 表达式容量契约（域内唯一权威；core 入口校验与 lexer 上限共用）。 */
+#define MATHS_MAX_EXPR_LEN 4096
+#define MATHS_MAX_DEPTH 64
 
 /**
  * @brief 表达式求值。expr 为数学表达式，out_result 指向结果缓冲。
