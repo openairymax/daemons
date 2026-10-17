@@ -43,34 +43,29 @@ static int maths_rpc_call(const char *method, const char *params_json,
         return AIRY_ERR_INVALID_PARAM;
 
     const char *sock_path = airy_runtime_dir_socket(MATHS_D_SOCKET_NAME);
-    if (!sock_path || !sock_path[0]) {
-        res->error = AIRY_STRDUP("maths_d socket path unavailable");
-        return AIRY_ERR_STATE_ERROR;
-    }
+    if (!sock_path || !sock_path[0])
+        return btool_fail(res, AIRY_ERR_STATE_ERROR,
+                          "maths_d socket path unavailable");
 
     int fd = (int)socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) {
-        res->error = AIRY_STRDUP("maths_d: socket() failed");
-        return AIRY_ERR_EXEC_FAIL;
-    }
+    if (fd < 0)
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_d: socket() failed");
 
     struct sockaddr_un addr;
     AIRY_MEMSET(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
     if (strlen(sock_path) >= sizeof(addr.sun_path)) {
-        res->error = AIRY_STRDUP("maths_d socket path too long");
         close(fd);
-        return AIRY_ERR_INVALID_PARAM;
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "maths_d socket path too long");
     }
     snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", sock_path);
 
     if (connect(fd, (const struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        char err[256];
-        snprintf(err, sizeof(err),
-                 "maths_d not reachable at %s (is maths_d running?)", sock_path);
-        res->error = AIRY_STRDUP(err);
         close(fd);
-        return AIRY_ERR_STATE_ERROR;
+        return btool_fail(res, AIRY_ERR_STATE_ERROR,
+                          "maths_d not reachable at %s (is maths_d running?)",
+                          sock_path);
     }
 
     char req[8192];
@@ -79,9 +74,8 @@ static int maths_rpc_call(const char *method, const char *params_json,
              method, params_json);
 
     if (send(fd, req, strlen(req), MSG_NOSIGNAL) != (ssize_t)strlen(req)) {
-        res->error = AIRY_STRDUP("maths_d: send() failed");
         close(fd);
-        return AIRY_ERR_EXEC_FAIL;
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_d: send() failed");
     }
 
     /* 等待首包（防 maths_d 卡死阻塞 tool_d），再循环 recv 收完整响应 */
@@ -91,9 +85,8 @@ static int maths_rpc_call(const char *method, const char *params_json,
     pfd.revents = 0;
     int pr = poll(&pfd, 1, MATHS_RPC_TIMEOUT_MS);
     if (pr <= 0 || !(pfd.revents & POLLIN)) {
-        res->error = AIRY_STRDUP("maths_d: response timeout");
         close(fd);
-        return AIRY_ERR_TIMEOUT;
+        return btool_fail(res, AIRY_ERR_TIMEOUT, "maths_d: response timeout");
     }
 
     size_t total = 0;
@@ -108,10 +101,8 @@ static int maths_rpc_call(const char *method, const char *params_json,
     resp[total] = '\0';
     close(fd);
 
-    if (total == 0) {
-        res->error = AIRY_STRDUP("maths_d: empty response");
-        return AIRY_ERR_EXEC_FAIL;
-    }
+    if (total == 0)
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_d: empty response");
     return 0;
 }
 
@@ -121,7 +112,7 @@ static cJSON *maths_parse_response(const char *resp, tool_result_t *res)
 {
     cJSON *root = cJSON_Parse(resp);
     if (!root) {
-        res->error = AIRY_STRDUP("maths_d: malformed response JSON");
+        btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_d: malformed response JSON");
         return NULL;
     }
     cJSON *err = cJSON_GetObjectItem(root, "error");
@@ -130,15 +121,14 @@ static cJSON *maths_parse_response(const char *resp, tool_result_t *res)
         const char *text = (cJSON_IsString(msg) && msg->valuestring)
                                ? msg->valuestring
                                : "maths_d error";
-        char out[512];
-        snprintf(out, sizeof(out), "maths error: %s", text);
-        res->error = AIRY_STRDUP(out);
+        btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths error: %s", text);
         cJSON_Delete(root);
         return NULL;
     }
     cJSON *result = cJSON_GetObjectItem(root, "result");
     if (!cJSON_IsObject(result)) {
-        res->error = AIRY_STRDUP("maths_d: response missing result");
+        btool_fail(res, AIRY_ERR_EXEC_FAIL,
+                   "maths_d: response missing result");
         cJSON_Delete(root);
         return NULL;
     }
@@ -169,15 +159,12 @@ static int maths_send(const char *method, cJSON *params_obj, char *resp,
 {
     char *payload = cJSON_PrintUnformatted(params_obj);
     cJSON_Delete(params_obj);
-    if (!payload) {
-        res->error = AIRY_STRDUP("OOM");
-        return AIRY_ERR_GENERIC_FAIL;
-    }
+    if (!payload)
+        return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
     char params[8192];
     if (strlen(payload) + 32 >= sizeof(params)) {
         cJSON_free(payload);
-        res->error = AIRY_STRDUP("request too large");
-        return AIRY_ERR_INVALID_PARAM;
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "request too large");
     }
     snprintf(params, sizeof(params), "%s", payload);
     cJSON_free(payload);
@@ -194,19 +181,14 @@ static int maths_scalar(const char *resp, const char *who, tool_result_t *res)
     cJSON *value = cJSON_GetObjectItem(cJSON_GetObjectItem(rroot, "result"),
                                        "result");
     if (!cJSON_IsNumber(value)) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "%s: unexpected response shape", who);
         cJSON_Delete(rroot);
-        res->error = AIRY_STRDUP(msg);
-        return AIRY_ERR_EXEC_FAIL;
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL,
+                          "%s: unexpected response shape", who);
     }
     char out[64];
     snprintf(out, sizeof(out), "%.12g", value->valuedouble);
-    res->output = AIRY_STRDUP(out);
-    res->exit_code = 0;
-    res->success = 1;
     cJSON_Delete(rroot);
-    return 0;
+    return btool_okout(res, AIRY_STRDUP(out));
 }
 #endif /* _WIN32 */
 
@@ -220,34 +202,29 @@ int maths_eval_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
     if (!res)
         return AIRY_ERR_INVALID_PARAM;
 #ifdef _WIN32
-    res->error = AIRY_STRDUP("maths_eval is not supported on Windows");
-    return AIRY_ERR_NOT_SUPPORTED;
+    return btool_fail(res, AIRY_ERR_NOT_SUPPORTED,
+                      "maths_eval is not supported on Windows");
 #else
     /* CJSON_PARSE_GUARD 使用 CJSON_AUTO_FREE（作用域结束时自动释放），
      * 因此本函数内不得再显式 cJSON_Delete(root)。 */
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
 
     cJSON *expr = cJSON_GetObjectItem(root, "expression");
     if (!cJSON_IsString(expr))
         expr = cJSON_GetObjectItem(root, "expr");
-    if (!cJSON_IsString(expr) || !expr->valuestring || !expr->valuestring[0]) {
-        res->error = AIRY_STRDUP("Missing string parameter: expression");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    if (strlen(expr->valuestring) > 4096) {
-        res->error = AIRY_STRDUP("expression too long (max 4096 chars)");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (!cJSON_IsString(expr) || !expr->valuestring || !expr->valuestring[0])
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "Missing string parameter: expression");
+    if (strlen(expr->valuestring) > 4096)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "expression too long (max 4096 chars)");
 
     /* cJSON 序列化 expression，保证 JSON 转义正确 */
     cJSON *params_obj = cJSON_CreateObject();
-    if (!params_obj) {
-        res->error = AIRY_STRDUP("OOM");
-        return AIRY_ERR_GENERIC_FAIL;
-    }
+    if (!params_obj)
+        return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
     cJSON_AddItemToObject(params_obj, "expr",
                           cJSON_CreateString(expr->valuestring));
     char resp[MATHS_RESP_CAP];
@@ -269,14 +246,13 @@ int maths_plot_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
     if (!res)
         return AIRY_ERR_INVALID_PARAM;
 #ifdef _WIN32
-    res->error = AIRY_STRDUP("maths_plot is not supported on Windows");
-    return AIRY_ERR_NOT_SUPPORTED;
+    return btool_fail(res, AIRY_ERR_NOT_SUPPORTED,
+                      "maths_plot is not supported on Windows");
 #else
     /* CJSON_PARSE_GUARD 使用 CJSON_AUTO_FREE（作用域结束时自动释放），
      * 因此本函数内不得再显式 cJSON_Delete(root)。 */
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
 
     cJSON *expr = cJSON_GetObjectItem(root, "expression");
@@ -285,25 +261,20 @@ int maths_plot_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
     cJSON *xmin = cJSON_GetObjectItem(root, "xmin");
     cJSON *xmax = cJSON_GetObjectItem(root, "xmax");
     if (!cJSON_IsString(expr) || !expr->valuestring || !expr->valuestring[0] ||
-        !cJSON_IsNumber(xmin) || !cJSON_IsNumber(xmax)) {
-        res->error = AIRY_STRDUP(
-            "Missing params: expression (string) + xmin/xmax (number)");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    if (strlen(expr->valuestring) > 4096) {
-        res->error = AIRY_STRDUP("expression too long (max 4096 chars)");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    if (!(xmin->valuedouble < xmax->valuedouble)) {
-        res->error = AIRY_STRDUP("xmin must be strictly less than xmax");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+        !cJSON_IsNumber(xmin) || !cJSON_IsNumber(xmax))
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "Missing params: expression (string) + xmin/xmax "
+                          "(number)");
+    if (strlen(expr->valuestring) > 4096)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "expression too long (max 4096 chars)");
+    if (!(xmin->valuedouble < xmax->valuedouble))
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "xmin must be strictly less than xmax");
 
     cJSON *params_obj = cJSON_CreateObject();
-    if (!params_obj) {
-        res->error = AIRY_STRDUP("OOM");
-        return AIRY_ERR_GENERIC_FAIL;
-    }
+    if (!params_obj)
+        return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
     cJSON_AddItemToObject(params_obj, "expr",
                           cJSON_CreateString(expr->valuestring));
     cJSON_AddItemToObject(params_obj, "xmin",
@@ -329,8 +300,8 @@ int maths_plot_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
         cJSON_GetArraySize(xs) < 2 ||
         cJSON_GetArraySize(xs) != cJSON_GetArraySize(ys)) {
         cJSON_Delete(rroot);
-        res->error = AIRY_STRDUP("maths_plot: unexpected response shape");
-        return AIRY_ERR_EXEC_FAIL;
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL,
+                          "maths_plot: unexpected response shape");
     }
 
     size_t n = (size_t)cJSON_GetArraySize(xs);
@@ -338,16 +309,15 @@ int maths_plot_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
     char *out = (char *)AIRY_MALLOC(cap);
     if (!out) {
         cJSON_Delete(rroot);
-        res->error = AIRY_STRDUP("OOM");
-        return AIRY_ERR_GENERIC_FAIL;
+        return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
     }
 
     int off = snprintf(out, cap, "```plot\ntitle: %s\nxs: ", expr->valuestring);
     if (off < 0 || (size_t)off >= cap) {
         AIRY_FREE(out);
         cJSON_Delete(rroot);
-        res->error = AIRY_STRDUP("maths_plot: output overflow");
-        return AIRY_ERR_EXEC_FAIL;
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL,
+                          "maths_plot: output overflow");
     }
     const cJSON *it = NULL;
     int first = 1;
@@ -375,13 +345,10 @@ int maths_plot_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
     cJSON_Delete(rroot);
     if (off < 0) {
         AIRY_FREE(out);
-        res->error = AIRY_STRDUP("maths_plot: output overflow");
-        return AIRY_ERR_EXEC_FAIL;
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL,
+                          "maths_plot: output overflow");
     }
-    res->output = out;
-    res->exit_code = 0;
-    res->success = 1;
-    return 0;
+    return btool_okout(res, out);
 #endif
 }
 
@@ -395,35 +362,31 @@ int maths_stats_tool(const char *params_json, uint32_t timeout_ms, tool_result_t
     if (!res)
         return AIRY_ERR_INVALID_PARAM;
 #ifdef _WIN32
-    res->error = AIRY_STRDUP("maths_stats is not supported on Windows");
-    return AIRY_ERR_NOT_SUPPORTED;
+    return btool_fail(res, AIRY_ERR_NOT_SUPPORTED,
+                      "maths_stats is not supported on Windows");
 #else
     /* CJSON_PARSE_GUARD 使用 CJSON_AUTO_FREE（作用域结束时自动释放），
      * 因此本函数内不得再显式 cJSON_Delete(root)。 */
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
 
     cJSON *op = cJSON_GetObjectItem(root, "op");
     cJSON *values = cJSON_GetObjectItem(root, "values");
     if (!cJSON_IsString(op) || !op->valuestring || !op->valuestring[0] ||
-        !cJSON_IsArray(values) || cJSON_GetArraySize(values) == 0) {
-        res->error = AIRY_STRDUP("Missing params: op (string) + values (non-empty array)");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+        !cJSON_IsArray(values) || cJSON_GetArraySize(values) == 0)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "Missing params: op (string) + values (non-empty "
+                          "array)");
 
     cJSON *params_obj = cJSON_CreateObject();
-    if (!params_obj) {
-        res->error = AIRY_STRDUP("OOM");
-        return AIRY_ERR_GENERIC_FAIL;
-    }
+    if (!params_obj)
+        return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
     cJSON_AddItemToObject(params_obj, "op", cJSON_CreateString(op->valuestring));
     cJSON *vals_arr = cJSON_CreateArray();
     if (!vals_arr) {
         cJSON_Delete(params_obj);
-        res->error = AIRY_STRDUP("OOM");
-        return AIRY_ERR_GENERIC_FAIL;
+        return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
     }
     cJSON_AddItemToObject(params_obj, "values", vals_arr);
     cJSON *item = NULL;
@@ -433,8 +396,8 @@ int maths_stats_tool(const char *params_json, uint32_t timeout_ms, tool_result_t
     }
     if (cJSON_GetArraySize(vals_arr) == 0) {
         cJSON_Delete(params_obj);
-        res->error = AIRY_STRDUP("values[] must contain numbers");
-        return AIRY_ERR_INVALID_PARAM;
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "values[] must contain numbers");
     }
     char resp[MATHS_RESP_CAP];
     int rc = maths_send("stats", params_obj, resp, sizeof(resp), res);
