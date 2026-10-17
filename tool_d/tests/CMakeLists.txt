@@ -22,6 +22,8 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/registry.c
     # D8 (0.1.19): 工具可用性视图
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/tool_avail.c
+    # N2 (0.1.19): 工具契约边车
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/core/tool_contract.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/approval/gate.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/approval/tool_approval.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/approval/safety_guard_bridge.c
@@ -54,6 +56,8 @@ set(TOOL_TEST_SOURCES
     test_registry.c
     # D8 (0.1.19): 工具可用性视图（依赖可达联动 / fail-open / 掉线摘除）
     test_tool_avail.c
+    # N2 (0.1.19): 工具契约（x-airy 五字段 / 未知工具不伪造 / 依赖同源）
+    test_tool_contract.c
     test_sandbox_integration.c
     test_fs_e2e.c
     # 0.1.9 M4：plugin_d → tool_d 整编——插件测试随迁

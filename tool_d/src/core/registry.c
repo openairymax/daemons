@@ -10,6 +10,7 @@
 #include "error.h"
 #include "daemon_platform_ext.h"
 #include "core/registry.h"
+#include "core/tool_contract.h"
 #include "tool_service.h"
 #include "svc_logger.h"
 
@@ -294,6 +295,9 @@ char *tool_registry_list_json(tool_registry_t *reg)
 {
     if (!reg)
         return AIRY_STRDUP("[]");
+    /* 契约环境含 getcwd/realpath，属 I/O：必须在注册表锁外解析。 */
+    tool_contract_env_t cenv;
+    int has_contract = (tool_contract_env(&cenv) == 0);
     airy_mtx_lock(&reg->lock);
     cJSON *arr = cJSON_CreateArray();
     for (int i = 0; i < HASH_SIZE; ++i) {
@@ -331,6 +335,8 @@ char *tool_registry_list_json(tool_registry_t *reg)
                     cJSON_Delete(required);
                 cJSON_AddItemToObject(obj, "input_schema", schema);
             }
+            if (has_contract)
+                tool_contract_put(obj, e->meta->id, &cenv);
             cJSON_AddItemToArray(arr, obj);
         }
     }
