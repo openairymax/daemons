@@ -309,10 +309,28 @@ static int rpc_send_all(int fd, const char *request_str)
     while (sent_total < req_len) {
         int n = rpc_send_raw(fd, request_str + sent_total, (int)(req_len - sent_total));
         if (n <= 0)
-            return AIRY_ERR_GENERIC_FAIL;
+            return AIRY_ERR_SYS_SOCKET;
         sent_total += (size_t)n;
     }
     return AIRY_SUCCESS;
+}
+
+/* L1 传输层只标记自身成败，不改写内层语义（0.1.19 §3.7.2 N1）：对端已
+ * 应答即证明链路可达，JSON-RPC 错误对象必须按其码转发业务/参数语义，
+ * 不得折叠成传输类错误（那会让上层误报"服务不可达"）。 */
+static airy_err_t rpc_json_err(int code)
+{
+    switch (code) {
+    case -32700: /* parse error */
+        return AIRY_ERR_PROTOCOL;
+    case -32600: /* invalid request */
+    case -32602: /* invalid params */
+        return AIRY_ERR_INVALID_PARAM;
+    case -32601: /* method not found */
+        return AIRY_ERR_NOT_SUPPORTED;
+    default: /* -32603 internal / -32000..-32099 server error */
+        return AIRY_ERR_GENERIC_FAIL;
+    }
 }
 
 /**
@@ -328,7 +346,7 @@ static int rpc_conn_send(const char *socket_path, const char *method, const char
 {
     int fd = rpc_connect(socket_path);
     if (fd < 0)
-        return AIRY_ERR_NOT_FOUND;
+        return AIRY_ERR_SYS_SOCKET;
 
     char *request_str = daemon_rpc_json_req(method, params_json);
     if (!request_str) {
@@ -341,7 +359,7 @@ static int rpc_conn_send(const char *socket_path, const char *method, const char
     if (rc != AIRY_SUCCESS) {
         rpc_close_fd(fd);
         SVC_LOG_ERROR("daemon_rpc_call: send failed (method=%s)", method);
-        return AIRY_ERR_GENERIC_FAIL;
+        return rc;
     }
     return fd;
 }
@@ -361,7 +379,7 @@ static int rpc_drain(int fd, rpc_buf_t *buf)
                 continue;
             if (errno == EAGAIN)
                 break;
-            return AIRY_ERR_GENERIC_FAIL;
+            return AIRY_ERR_SYS_SOCKET;
         }
         if (n == 0)
             break;
@@ -374,7 +392,7 @@ static int rpc_drain(int fd, rpc_buf_t *buf)
     if (getenv("AIRY_RPC_DIAG"))
         SVC_LOG_ERROR("rpc diag: hangup json-incomplete buf_size=%zu head=%.120s", buf->size,
                       buf->data ? buf->data : "");
-    return AIRY_ERR_GENERIC_FAIL;
+    return AIRY_ERR_PROTOCOL;
 }
 
 /**
@@ -419,13 +437,13 @@ static int rpc_recv_resp(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
             continue;
         }
         if (ev < 0)
-            return AIRY_ERR_GENERIC_FAIL;
+            return AIRY_ERR_SYS_SOCKET;
 
         if (!(ev & RPC_IO_READABLE)) {
             if (getenv("AIRY_RPC_DIAG"))
                 SVC_LOG_ERROR("rpc diag: hangup-no-POLLIN revents=0x%x buf_size=%zu", ev,
                               buf->size);
-            return AIRY_ERR_GENERIC_FAIL;
+            return AIRY_ERR_SYS_SOCKET;
         }
 
         char chunk[DAEMON_RPC_CHUNK];
@@ -437,7 +455,7 @@ static int rpc_recv_resp(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
 #endif
             if (getenv("AIRY_RPC_DIAG"))
                 SVC_LOG_ERROR("rpc diag: recv<0 errno=%d buf_size=%zu", errno, buf->size);
-            return AIRY_ERR_GENERIC_FAIL;
+            return AIRY_ERR_SYS_SOCKET;
         }
         if (n == 0) {
             if (rpc_complete(buf))
@@ -445,7 +463,7 @@ static int rpc_recv_resp(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
             if (getenv("AIRY_RPC_DIAG"))
                 SVC_LOG_ERROR("rpc diag: EOF buf_size=%zu head=%.120s", buf->size,
                               buf->data ? buf->data : "");
-            return AIRY_ERR_GENERIC_FAIL;
+            return AIRY_ERR_PROTOCOL;
         }
         int rc = rpc_buf_append(buf, chunk, (size_t)n);
         if (rc != AIRY_SUCCESS)
@@ -496,7 +514,7 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
             continue;
         }
         if (ev < 0) {
-            rc = AIRY_ERR_GENERIC_FAIL;
+            rc = AIRY_ERR_SYS_SOCKET;
             break;
         }
         if (!(ev & RPC_IO_READABLE)) {
@@ -505,7 +523,7 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
              * distinguish an early hangup from a finished stream; the daemon
              * writes the final chunk before closing, so a clean completion is
              * reported as readable+EOF in the same poll cycle. */
-            rc = (ev & RPC_IO_HANGUP) ? AIRY_SUCCESS : AIRY_ERR_GENERIC_FAIL;
+            rc = (ev & RPC_IO_HANGUP) ? AIRY_SUCCESS : AIRY_ERR_SYS_SOCKET;
             break;
         }
 
@@ -516,7 +534,7 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
             if (errno == EINTR || errno == EAGAIN)
                 continue;
 #endif
-            rc = AIRY_ERR_GENERIC_FAIL;
+            rc = AIRY_ERR_SYS_SOCKET;
             break;
         }
         if (n == 0) {
@@ -574,7 +592,7 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
     rpc_buf_free(&buf);
     if (!resp) {
         SVC_LOG_ERROR("daemon_rpc_call: response parse failed (method=%s)", method);
-        return AIRY_ERR_GENERIC_FAIL;
+        return AIRY_ERR_PROTOCOL;
     }
 
     cJSON *err_obj = cJSON_GetObjectItem(resp, "error");
@@ -586,14 +604,14 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
         SVC_LOG_WARN("daemon_rpc_call: daemon returned error (method=%s, code=%d, msg=%s)", method,
                      code, msg);
         cJSON_Delete(resp);
-        return AIRY_ERR_GENERIC_FAIL;
+        return rpc_json_err(code);
     }
 
     cJSON *result = cJSON_GetObjectItem(resp, "result");
     if (!result) {
         SVC_LOG_ERROR("daemon_rpc_call: missing result field (method=%s)", method);
         cJSON_Delete(resp);
-        return AIRY_ERR_GENERIC_FAIL;
+        return AIRY_ERR_PROTOCOL;
     }
 
     char *result_str = cJSON_PrintUnformatted(result);
