@@ -5,6 +5,7 @@
 #ifndef LLM_D_PROVIDERS_CORE_PROVIDER_HTTP_H
 #define LLM_D_PROVIDERS_CORE_PROVIDER_HTTP_H
 
+#include "provider_auth.h"
 #include "provider_base.h"
 #include "provider_stream.h"
 #include "provider_transport.h"
