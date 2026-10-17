@@ -6,7 +6,7 @@
  * @brief Memory 服务单元测试
  */
 
-#include "mem_service.h"
+#include "core/mem_service.h"
 
 #include "airy_memory.h"
 #include "safe_utf8.h"

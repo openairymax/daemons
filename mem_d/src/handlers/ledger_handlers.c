@@ -10,13 +10,13 @@
  */
 
 #include "ledger_handlers.h"
-#include "mem_daemon_ctx.h"
+#include "core/mem_daemon_ctx.h"
 
 #include "airy_memory.h"
 #include "error.h"
 #include "daemon_main.h"
-#include "ledger.h"
-#include "compress.h"
+#include "engine/ledger.h"
+#include "engine/compress.h"
 
 #include <string.h>
 

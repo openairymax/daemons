@@ -53,8 +53,10 @@ elseif(UNIX)
     )
 endif()
 
-# 内部头仅自用：src 区不对外传播（0.1.19 F4 收敛）
+# 内部头仅自用：src 区不对外传播（0.1.19 F4 收敛）；src/ 为域化路径基准
+# （0.1.19 §287：契约头下潜后跨域引用一律域化 core/ engine/ handlers/）
 target_include_directories(airy_mem_service PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
     ${CMAKE_CURRENT_SOURCE_DIR}/src/handlers
     ${CMAKE_CURRENT_SOURCE_DIR}/src/engine
@@ -148,6 +150,7 @@ endif()
 
 target_include_directories(mem_d PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
     ${CMAKE_CURRENT_SOURCE_DIR}/src/handlers
     ${CMAKE_CURRENT_SOURCE_DIR}/src/engine
@@ -199,9 +202,7 @@ if(BUILD_TESTS)
 endif()
 
 # 安装规则
+# 0.1.19 §287：四契约头（mem_service/cache/compress/ledger.h）下潜 src/
+# 各域（消费面全部户内，判据「发布 ≠ 被消费」第八度），户内与父级
+# install(DIRECTORY) 同步摘除；include/ 仅存 codegen 头 svc_mem_d.h。
 install(TARGETS mem_d DESTINATION bin)
-
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
-    DESTINATION include/agentrt
-    FILES_MATCHING PATTERN "*.h"
-)

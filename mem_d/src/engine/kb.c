@@ -12,7 +12,7 @@
  * Extracted from service.c to keep the KB-specific logic self-contained.
  */
 
-#include "service.h"
+#include "core/service.h"
 #include "mem_persist.h"
 #include "airy_memory.h"
 #include "error.h"

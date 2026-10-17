@@ -172,11 +172,8 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tool_d/include/
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/mem_d/include/
-    DESTINATION include/agentrt
-    FILES_MATCHING PATTERN "*.h"
-)
-
+# 0.1.19 §287：mem_d svc 头（svc_mem_d.h）同判据摘除，四契约头
+# mem_service/cache/compress/ledger.h 随下潜进 src/ 各域（消费面全部户内）。
 # 0.1.19 §254b/§255：cupolas_d include 面安装由其自身 CMakeLists 自持
 # （产品壳 daemon/ 目录，经顶层装配区挂入）。
 # 0.1.19 §281：a2a_d/maths_d svc 头为 codegen 户内产物（消费面全部户内），

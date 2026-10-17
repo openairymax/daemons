@@ -9,8 +9,8 @@
  * 截断、精确去重、超轮数丢弃、L2 抽取触发与预算收敛、台账联动回放。
  */
 
-#include "compress.h"
-#include "ledger.h"
+#include "engine/compress.h"
+#include "engine/ledger.h"
 
 #include "airy_memory.h"
 #include "error.h"

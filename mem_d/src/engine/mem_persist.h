@@ -9,7 +9,7 @@
 #ifndef MEM_PERSIST_H
 #define MEM_PERSIST_H
 
-#include "service.h"
+#include "core/service.h"
 
 #ifdef __cplusplus
 extern "C" {

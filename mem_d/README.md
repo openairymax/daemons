@@ -36,27 +36,31 @@
 
 ## 架构
 
+gen5 五件套：`.manifest`（L3 SSoT）→ `main.c` / `svc_mem_d.h` /
+`modules/sources.cmake` 三产物由 `daemon_gen.py` 生成（`--check` 复验零漂移）；
+`svc.c` 为装配锚点（生命周期五钩子 + RPC 蹦床）；`include/` 仅存 codegen 头。
+源码按三域组织：
+
 ```
-gateway_d ──(mem.write / mem.search / mem.kb_ingest / …)──▶ mem_d
-                                                            │
-                     ┌──────────────────────────────────────┤
-                     ▼                                      ▼
-              src/core/service.c                    src/handlers/*.c
-              记录表 + 索引 + 生命周期               JSON-RPC 参数编解码
-                     │                                      │
-        ┌────────────┼───────────────┐                      ▼
-        ▼            ▼               ▼               src/core/main.c
-   src/engine/  src/engine/     src/engine/          25 个方法注册
-   vector.c     kb.c            cache.c / ledger.c
-   TF-IDF       UTF-8 分块      / compress.c
-                                          │
-                                          ▼
-                                src/engine/mem_persist.c
-                                JSONL 追加 + 索引重建
+mem_d/
+├── src/
+│   ├── main.c / svc.c /        ← 形态件（入口 + 装配锚点）
+│   ├── core/                   ← 服务编排域：service.c、mem_service.h（契约头）、
+│   │                              mem_daemon_ctx.h（单例上下文）
+│   ├── handlers/               ← RPC 方法域：mem/kb/cache/ledger 四组处理器
+│   └── engine/                 ← 记忆引擎域：vector、kb、cache、ledger、compress、
+│                                  mem_persist + cache/compress/ledger.h（契约头）
+├── include/svc_mem_d.h         ← codegen 唯一头（端点常量 + 钩子声明）
+└── tests/                      ← 黑盒（经契约头 + 静态库 airy_mem_service）
 ```
 
-- 服务层 `src/core/service.c` + `src/core/mem_svc_adapter.c` 等抽为静态库
-  `airy_mem_service`，被守护进程可执行文件与单元测试共用；
+域引用现状：`handlers → core/engine` 单向消费契约头；core 与 engine 存在
+既有互引（service.h 向下引 vector/emb_client，kb.c / mem_persist.h 向上引
+service.h），无文件级包含环，留待后续解耦。跨域引用一律域化路径
+（`core/mem_service.h`、`engine/cache.h`），同域裸名。
+
+- 服务层 `src/core/service.c` 与 engine 全域抽为静态库 `airy_mem_service`，
+  被守护进程可执行文件与单元测试共用；
 - 采用 daemon 公共层样板（`DAEMON_DECLARE_COMMON`）：事件驱动、JSON-RPC 分发、
   cupolas 安全穹顶初始化；
 - 全局单例容量：记录表 1024（可配）、缓存 4096 条 / 64 MiB / TTL 1 小时、
