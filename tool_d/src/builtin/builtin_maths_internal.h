@@ -10,6 +10,7 @@
 #define AIRY_RT_TOOL_BUILTIN_MATHS_INTERNAL_H
 
 #include "builtin/builtin_limits_internal.h"
+#include "builtin/builtin_result_internal.h"
 
 /* maths_d 端点 SSoT：RPC 调用（builtin_maths.c）与依赖声明
  * （service_builtin.c, D8）共用同一 socket 名，杜绝两处漂移。 */
