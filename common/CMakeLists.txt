@@ -32,6 +32,7 @@ set(SVC_COMMON_SOURCES
     # 0c A 类直搬：svc 生命周期机制族迁 commons/utils/svc（0.1.19 S74 层界
     # 错置回位，svc_common.h 权威头同域归位），符号经 airy_common PUBLIC 提供。
     src/svc/svc_model_defaults.c  # A2-1: model.yaml global 段默认模型提取（llm_d/gateway_d 共用）
+    src/svc/svc_model_watch.c     # 0.1.19 §3.5 缺陷5: model.yaml 启动快照+请求侧漂移检测（llm_d/think_d 共用）
     # 0c A 类直搬：jsonrpc_helpers/method_dispatcher/param_validator
     # 权威实现迁 commons/utils/ipc，符号经 airy_common 提供（daemons 留 re-export 头）
     # 0c A 类直搬：跨进程服务发现全家族迁 commons/utils/sd（g14 补完 P0.17

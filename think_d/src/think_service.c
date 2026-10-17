@@ -377,6 +377,19 @@ think_service_t *think_service_create(const think_service_config_t *config)
                  orch_cfg.timeout_ms, orch_cfg.max_retries,
                  orch_cfg.enable_circuit_breaker ? "on" : "off");
     think_orch_ops_inject(svc);
+
+    /* 0.1.19 §3.5 缺陷5：对启动时消费的 model.yaml think 段照快照。
+     * 路径与 cfg_load() 同源（$AIRY_CONFIG_DIR/model.yaml），缺席者
+     * valid=0 静默停用。 */
+    {
+        char model_path[1024];
+        const char *cfg_dir = airy_config_dir();
+        if (cfg_dir) {
+            int plen = snprintf(model_path, sizeof(model_path), "%s/model.yaml", cfg_dir);
+            if (plen > 0 && plen < (int)sizeof(model_path))
+                (void)svc_mw_init(&svc->mw, model_path, "think_d");
+        }
+    }
     return svc;
 }
 
@@ -500,6 +513,8 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
 {
     if (!svc || !prompt || !out_result)
         return AIRY_ERR_INVALID_PARAM;
+    /* 0.1.19 §3.5 缺陷5：只读漂移检测（未变路径单次 stat），不重载配置。 */
+    (void)svc_mw_check(&svc->mw);
     out_result->json = NULL;
     out_result->json_len = 0;
 

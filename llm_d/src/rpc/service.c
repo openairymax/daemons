@@ -371,6 +371,22 @@ llm_service_t *llm_service_create(const char *config_path)
         register_router_endpoints(svc);
     }
 
+    /* 0.1.19 §3.5 缺陷5：对启动时真正消费的两份 model.yaml 照快照。
+     * manager 配置与用户覆盖 (A2-1) 只要路径不同即各照一份，用户直接
+     * 编辑其中任一文件都能在请求侧被检出；缺席者 valid=0 静默停用。 */
+    if (config_path)
+        (void)svc_mw_init(&svc->mw, config_path, "llm_d");
+    {
+        char user_path[1024];
+        const char *cfg_dir = airy_config_dir();
+        if (cfg_dir) {
+            int plen = snprintf(user_path, sizeof(user_path), "%s/model.yaml", cfg_dir);
+            if (plen > 0 && plen < (int)sizeof(user_path) &&
+                (!config_path || strcmp(config_path, user_path) != 0))
+                (void)svc_mw_init(&svc->mw_usr, user_path, "llm_d");
+        }
+    }
+
     SVC_LOG_INFO("C-L02: SVC: CREATE-OK pricing_rules=%d llm_cache_capacity=%zu cache_ttl=%u",
                  (int)svc->rule_count, base_cfg.llm_cache_capacity, base_cfg.llm_cache_ttl_sec);
     return svc;
