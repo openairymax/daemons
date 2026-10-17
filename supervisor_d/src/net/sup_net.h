@@ -3,17 +3,17 @@
 
 /**
  * @file sup_net.h
- * @brief 端点机制件 net.c 的接口面（V13.5 零依赖硬约束下的模块内 SSoT）。
+ * @brief net 域私有头：端点机制件的接口面（V13.5 零依赖硬约束下的模块内 SSoT）。
  *
  * 机制/策略分离：本头只暴露「端点字面量 → 可连接 fd / 可达判据」的机制
  * 契约，不泄漏进程记录类型——策略层（ctrl.c 控制口、proc.c 假死探测）
  * 只持 fd 与端点字面量，故 sup_probe_sock() 直接收端点串，不依赖
- * sup_proc_t。这样 net.c 成为真正自持的机制件：既不解 supervisor_d.h 的
- * 聚合面，也不反向依赖策略层类型。
+ * sup_proc_t。这样 net.c 成为真正自持的机制件：既不解
+ * supervisor_d_internal.h 的聚合面，也不反向依赖策略层类型。
  *
- * 拆面依据（G13 load ≤ 5）：supervisor_d.h 为六件共用的聚合头，net.c 若
- * 直接 include 会将 src 面扇入推升至 6；机制件自持接口头后，聚合头扇入
- * 回落至 5，机制头扇入为 2（net.c 与本头），双双达标。
+ * 拆面依据（G13 load ≤ 5）：supervisor_d_internal.h 为装配域共用的聚合
+ * 头，net.c 若直接 include 会将 src 面扇入推升至 6；机制件自持接口头后，
+ * 聚合头扇入回落至 5，机制头扇入为 2（net.c 与本头），双双达标。
  */
 
 #ifndef AIRY_SUP_NET_H

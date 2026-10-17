@@ -2,8 +2,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /**
- * @file supervisor_d.h
- * @file 运行期 daemon 集群监管者（0.1.18 §12.13 B13）。
+ * @file supervisor_d_internal.h
+ * @brief supervisor_d 装配域唯一私有头（gen5 五件套⑤，0.1.18 §12.13 B13）。
+ *
+ * 域切分：decl（期望态声明解析）/ proc（进程域：spawn/reap/退避/假死
+ * 探测/收摊）/ ctrl（控制域：UDS/TCP + 极简 JSON-RPC）/ net（网络机
+ * 制域：sock 可达性探测 + Windows TCP 端点装配权威，域私有头随域
+ * 下潜 net/sup_net.h）。全户共享契约（sup_ctx/sup_proc、状态机、容量
+ * 常量与全部跨域函数声明）单点在本头；net 对外契约经本头消费，域依
+ * 赖单向 decl/proc/ctrl/net → 契约。装配域（svc.c 生命周期 + main.c
+ * 壳）经本头持有全户契约。仅限 supervisor_d 编译单元。
  *
  * 期望态 = 画像 launch 声明（$AIRY_HOME/config/profile.env 的
  * AIRYRT_LAUNCH_CORE / AIRYRT_LAUNCH_AUX / AIRYRT_LAUNCH_ARGS_<NAME>），
@@ -17,8 +25,8 @@
  * 函数名 ≤ 20 字节（工程规范）。
  */
 
-#ifndef AIRY_SUPERVISOR_D_H
-#define AIRY_SUPERVISOR_D_H
+#ifndef AIRY_SUPERVISOR_D_INTERNAL_H
+#define AIRY_SUPERVISOR_D_INTERNAL_H
 
 #include <stddef.h>
 
@@ -106,8 +114,8 @@ void sup_shutdown_all(sup_ctx_t *ctx);
 void sup_log(const char *level, const char *fmt, ...);
 void sup_health_tick(sup_ctx_t *ctx, sup_proc_t *p);
 
-/* ---- net.c：端点机制件自持接口（跨平台裁剪 + WSA/TCP 装配权威） ---- */
-#include "sup_net.h"
+/* ---- net 域：端点机制件自持接口（跨平台裁剪 + WSA/TCP 装配权威） ---- */
+#include "net/sup_net.h"
 
 /* ---- ctrl.c：控制口（UDS/TCP + 极简 JSON-RPC + CLI 客户端） ---- */
 int sup_ctrl_listen(const sup_ctx_t *ctx);
@@ -137,4 +145,4 @@ void sup_pidfile_clear(const sup_ctx_t *ctx);
 }
 #endif
 
-#endif /* AIRY_SUPERVISOR_D_H */
+#endif /* AIRY_SUPERVISOR_D_INTERNAL_H */

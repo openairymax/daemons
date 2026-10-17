@@ -15,7 +15,7 @@
  * launcher 每次写画像时一并写入 launch 段，缺省表不构成第二套清单）。
  */
 
-#include "supervisor_d.h"
+#include "supervisor_d_internal.h"
 
 #include "airy_defaults.h"
 
