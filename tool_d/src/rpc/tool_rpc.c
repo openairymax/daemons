@@ -22,6 +22,8 @@
 #include "param_validator.h"
 #include "svc_logger.h"
 
+#include "core/tool_contract.h"
+
 static void handle_register(cJSON *params, int id, airy_sock_t fd);
 static void handle_list(int id, airy_sock_t fd);
 static void handle_get(cJSON *params, int id, airy_sock_t fd);
@@ -155,13 +157,25 @@ static void handle_get(cJSON *params, int id, airy_sock_t client_fd)
 }
 
 /* L0 产生层：失败必须携带 {class, code, diag} 三元组，禁止裸返回；ctx
- * 记录发起工具，供上层排障定位（0.1.19 §3.7.2 N1）。 */
+ * 记录发起工具，供上层排障定位（0.1.19 §3.7.2 N1）。policy 类额外附带
+ * sandbox_scope（允许根，与 ToolContract v1 的 list_tools 同键同形），
+ * 使调用方无需猜测被拒路径的合法落点（N3）。 */
+static void put_policy_scope(cJSON *ctx)
+{
+    tool_contract_env_t env;
+    if (tool_contract_env(&env) == 0)
+        tool_contract_scope_put(ctx, env.path_base, 1);
+}
+
 static void put_tool_err(cJSON *result, airy_err_t code, const char *diag, const char *tid)
 {
+    airy_err_class_t cls = airy_err_class_of(code);
     cJSON *ctx = cJSON_CreateObject();
     if (ctx && tid)
         cJSON_AddStringToObject(ctx, "tool", tid);
-    airy_err_json_put(result, airy_err_class_of(code), code, diag, ctx);
+    if (ctx && cls == AIRY_ERR_CLASS_POLICY)
+        put_policy_scope(ctx);
+    airy_err_json_put(result, cls, code, diag, ctx);
     cJSON_Delete(ctx);
 }
 
