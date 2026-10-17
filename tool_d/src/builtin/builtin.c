@@ -49,25 +49,19 @@ int builtin_fs_confine(const char *orig_path, int for_write, char *resolved, siz
     if (os_sandbox_fs_confine(orig_path, for_write, resolved, resolved_cap) == 0)
         return AIRY_OK;
     char ws[512];
-    char err[768];
     if (os_sandbox_fs_workspace(ws, sizeof(ws)) == 0 && ws[0])
-        snprintf(err, sizeof(err), "Path escapes workspace sandbox: '%s' (allowed root: '%s')",
-                 orig_path, ws);
-    else
-        snprintf(err, sizeof(err), "Path escapes workspace sandbox: '%s'", orig_path);
-    res->error = AIRY_STRDUP(err);
-    return AIRY_ERR_PERMISSION_DENIED;
+        return btool_fail(res, AIRY_ERR_PERMISSION_DENIED,
+                          "Path escapes workspace sandbox: '%s' (allowed root: '%s')", orig_path,
+                          ws);
+    return btool_fail(res, AIRY_ERR_PERMISSION_DENIED, "Path escapes workspace sandbox: '%s'",
+                      orig_path);
 }
 
 int builtin_str_param(const cJSON *root, const char *name, const char **out, tool_result_t *res)
 {
     cJSON *v = cJSON_GetObjectItem(root, name);
-    if (!cJSON_IsString(v) || !v->valuestring || !v->valuestring[0]) {
-        char msg[96];
-        snprintf(msg, sizeof(msg), "Missing string parameter: %s", name);
-        res->error = AIRY_STRDUP(msg);
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (!cJSON_IsString(v) || !v->valuestring || !v->valuestring[0])
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Missing string parameter: %s", name);
     *out = v->valuestring;
     return AIRY_OK;
 }
@@ -386,6 +380,5 @@ int tool_builtin_run(const char *tool_id, const char *params_json, uint32_t time
             return g_builtin_slots[i].fn(params_json, timeout_ms, res);
     }
     SVC_LOG_ERROR("builtin: unknown builtin tool '%s'", tool_id);
-    res->error = AIRY_STRDUP("Unknown builtin tool");
-    return AIRY_ERR_EXEC_NOT_FOUND;
+    return btool_fail(res, AIRY_ERR_EXEC_NOT_FOUND, "Unknown builtin tool");
 }

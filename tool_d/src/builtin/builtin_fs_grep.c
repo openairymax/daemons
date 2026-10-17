@@ -170,8 +170,7 @@ static int builtin_grep_dir(const char *base, const char *root, regex_t *re,
 int fs_grep_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
     const char *pattern = NULL;
     if (builtin_str_param(root, "pattern", &pattern, res) != AIRY_OK)
@@ -193,15 +192,12 @@ int fs_grep_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
         return rc;
 
     regex_t re;
-    if (regcomp(&re, pattern, REG_EXTENDED | REG_NOSUB) != 0) {
-        res->error = AIRY_STRDUP("Invalid regex pattern");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (regcomp(&re, pattern, REG_EXTENDED | REG_NOSUB) != 0)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Invalid regex pattern");
     char *out = (char *)AIRY_CALLOC(BUILTIN_OUTPUT_CAP, 1);
     if (!out) {
         regfree(&re);
-        res->error = AIRY_STRDUP("Out of memory");
-        return AIRY_ERR_OUT_OF_MEMORY;
+        return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Out of memory");
     }
     size_t out_len = 0;
     int count = 0, done = 0, timed_out = 0;
@@ -211,24 +207,15 @@ int fs_grep_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     regfree(&re);
 
     if (count == 0) {
-        char msg[512];
         if (timed_out)
-            snprintf(msg, sizeof(msg), "fs_grep timed out after %ums under '%s' (no matches)",
-                     (unsigned)timeout_ms, dir);
-        else
-            snprintf(msg, sizeof(msg), "No matches for pattern '%s' under '%s'", pattern, dir);
-        res->error = AIRY_STRDUP(msg);
-        res->success = 0;
-        res->exit_code = 1;
-        return AIRY_OK;
+            return btool_soft(res, "fs_grep timed out after %ums under '%s' (no matches)",
+                              (unsigned)timeout_ms, dir);
+        return btool_soft(res, "No matches for pattern '%s' under '%s'", pattern, dir);
     }
     if (timed_out) {
         builtin_append_trunc_mark(out, BUILTIN_OUTPUT_CAP, out_len,
                                   "\n[grep truncated: time budget]");
         out[BUILTIN_OUTPUT_CAP - 1] = '\0';
     }
-    res->output = out;
-    res->success = 1;
-    res->exit_code = 0;
-    return AIRY_OK;
+    return btool_okout(res, out);
 }
