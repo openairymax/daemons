@@ -14,8 +14,8 @@
 
 #include "svc_maths_d.h"
 
+#include "maths_d_internal.h"
 #include "jsonrpc_helpers.h"
-#include "maths_service.h"
 #include "svc_logger.h"
 
 #include <string.h>

@@ -6,8 +6,8 @@
  * @brief 数学外挂计算服务单元测试（域层 maths_d_rpc_call 直测）。
  */
 
-#include "maths_service.h"
-#include "expr_eval.h"
+#include "core/maths_service.h"
+#include "expr/expr_eval.h"
 
 #include <math.h>
 #include <stdio.h>

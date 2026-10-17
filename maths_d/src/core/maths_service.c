@@ -16,7 +16,7 @@
  */
 
 #include "maths_service.h"
-#include "expr_eval.h"
+#include "expr/expr_eval.h"
 #include "platform_misc.h"
 #include "airy_memory.h"
 

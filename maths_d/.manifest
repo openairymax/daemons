@@ -39,8 +39,8 @@
     "optional": []
   },
   "modules": [
-    { "name": "core", "sources": ["maths_service.c"] },
-    { "name": "expr", "sources": ["expr_eval.c"] },
-    { "name": "backend", "sources": ["python_backend.c"] }
+    { "name": "core", "sources": ["core/maths_service.c"] },
+    { "name": "expr", "sources": ["expr/expr_eval.c"] },
+    { "name": "backend", "sources": ["backend/python_backend.c"] }
   ]
 }
