@@ -5,7 +5,7 @@ add_compile_definitions(AIRY_COMPLIANCE_IMPL)
 # Notify 服务单元测试构建文件
 
 set(NOTIFY_IMPL_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/notify_service.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/service/notify_service.c
 )
 
 set(NOTIFY_TEST_SOURCES
