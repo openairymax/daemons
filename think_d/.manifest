@@ -23,8 +23,8 @@
   },
   "deps": { "required": ["llm_d"], "optional": [] },
   "modules": [
-    { "name": "rpc", "sources": ["think_rpc.c"] },
-    { "name": "lang", "sources": ["lang_svc.c"] },
-    { "name": "review", "sources": ["review_svc.c"] }
+    { "name": "rpc", "sources": ["rpc/think_rpc.c"] },
+    { "name": "lang", "sources": ["lang/lang_svc.c"] },
+    { "name": "review", "sources": ["review/review_svc.c"] }
   ]
 }
