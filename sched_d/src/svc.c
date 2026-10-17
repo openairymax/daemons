@@ -14,7 +14,7 @@
 
 #include "svc_sched_d.h"
 
-#include "roadmap_rpc.h"
+#include "roadmap/roadmap_rpc.h"
 #include "sched_daemon_internal.h"
 #include "svc_logger.h"
 
