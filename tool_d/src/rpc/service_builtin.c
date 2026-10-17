@@ -13,6 +13,7 @@
 
 #include "airy_memory.h"
 #include "builtin/builtin_maths_internal.h"
+#include "core/tool_contract.h"
 #include "daemon_security.h"
 #include "error.h"
 #include "rpc/service.h"
@@ -82,9 +83,9 @@ void tool_service_register_acl_from_env(void)
  * fields that cannot be derived are written. id doubles as name and
  * permission_rule, executable is the derived "builtin:<id>" marker the
  * executor dispatches on, and BTOOL derives param_count from the params
- * array so the two can never drift. Adding a tool = one row here + its
- * implementation + one dispatch row in the grid in
- * src/builtin/builtin.c. */
+ * array so the two can never drift. Adding a tool = one row here + one
+ * contract row below + its implementation + one dispatch row in the grid
+ * in src/builtin/builtin.c. */
 typedef struct {
     char *id;
     char *description;
@@ -93,11 +94,31 @@ typedef struct {
     int timeout_sec;
     int cacheable;
     tool_access_t access;
-    const char *requires_sock; /* D8：依赖 daemon 的 socket 名（NULL=无外部依赖） */
 } builtin_def_t;
 
-#define BTOOL(id, desc, parr, tmo, cache, acc, dep)                                            \
-    {id, desc, parr, (int)(sizeof(parr) / sizeof((parr)[0])), tmo, cache, acc, dep}
+#define BTOOL(id, desc, parr, tmo, cache, acc)                                                 \
+    {id, desc, parr, (int)(sizeof(parr) / sizeof((parr)[0])), tmo, cache, acc}
+
+/* N2 契约表（SSoT）：执行上下文之外的五个对外契约字段。dep_sock 同时是
+ * tool_avail 的可达性探测目标，与 requires_daemon 同源，避免两处声明漂移。 */
+static const tool_contract_t k_contract[] = {
+    {"fs_read", NULL, NULL, TOOL_FX_FS, 0, 0},
+    {"fs_write", NULL, NULL, TOOL_FX_FS, 1, 1},
+    {"fs_list", NULL, NULL, TOOL_FX_FS, 0, 0},
+    {"shell_run", NULL, NULL, TOOL_FX_FS | TOOL_FX_NET | TOOL_FX_PROC, 0, 1},
+    {"web_fetch", NULL, NULL, TOOL_FX_NET, 0, 0},
+    {"fs_glob", NULL, NULL, TOOL_FX_FS, 0, 0},
+    {"fs_grep", NULL, NULL, TOOL_FX_FS, 0, 0},
+    {"fs_edit", NULL, NULL, TOOL_FX_FS, 0, 1},
+    {"fs_delete", NULL, NULL, TOOL_FX_FS, 0, 1},
+    {"web_search", NULL, NULL, TOOL_FX_NET, 0, 0},
+    {"git_exec", NULL, NULL, TOOL_FX_FS | TOOL_FX_PROC, 0, 0},
+    {"git_diff", NULL, NULL, TOOL_FX_FS | TOOL_FX_PROC, 0, 0},
+    {"git_apply", NULL, NULL, TOOL_FX_FS | TOOL_FX_PROC, 0, 1},
+    {"maths_eval", MATHS_D_SOCKET_NAME, "maths_d", 0, 0, 0},
+    {"maths_stats", MATHS_D_SOCKET_NAME, "maths_d", 0, 0, 0},
+    {"maths_plot", MATHS_D_SOCKET_NAME, "maths_d", 0, 0, 0},
+};
 
 void register_builtin_tools(tool_service_t *svc)
 {
@@ -179,48 +200,51 @@ void register_builtin_tools(tool_service_t *svc)
      * DAG. */
     static const builtin_def_t defs[] = {
         BTOOL("fs_read", "Read a file's content from the local filesystem", fs_path_params, 30, 0,
-              TOOL_ACCESS_READ, NULL),
+              TOOL_ACCESS_READ),
         BTOOL("fs_write", "Write content to a file (create/overwrite)", fs_write_params, 30, 0,
-              TOOL_ACCESS_WRITE, NULL),
+              TOOL_ACCESS_WRITE),
         BTOOL("fs_list", "List entries of a local directory (JSON array)", fs_list_params, 20, 1,
-              TOOL_ACCESS_READ, NULL),
+              TOOL_ACCESS_READ),
         BTOOL("shell_run", "Execute a shell command and capture its output", shell_params, 60, 0,
-              TOOL_ACCESS_WRITE, NULL),
+              TOOL_ACCESS_WRITE),
         BTOOL("web_fetch", "Fetch a URL, return page body text", web_fetch_params, 45, 1,
-              TOOL_ACCESS_READ, NULL),
+              TOOL_ACCESS_READ),
         BTOOL("fs_glob", "List files matching a glob pattern (supports * ? and **)", glob_params,
-              20, 0, TOOL_ACCESS_READ, NULL),
+              20, 0, TOOL_ACCESS_READ),
         BTOOL("fs_grep", "Search file contents with a regular expression (relpath:line:text)",
-              grep_params, 20, 0, TOOL_ACCESS_READ, NULL),
+              grep_params, 20, 0, TOOL_ACCESS_READ),
         BTOOL("fs_edit", "Replace an exact string in a file (search-and-replace edit)", edit_params,
-              30, 0, TOOL_ACCESS_WRITE, NULL),
+              30, 0, TOOL_ACCESS_WRITE),
         BTOOL("fs_delete",
               "Delete a local file, or a directory (recursive=1 for non-empty trees; destructive)",
-              delete_params, 30, 0, TOOL_ACCESS_WRITE, NULL),
+              delete_params, 30, 0, TOOL_ACCESS_WRITE),
         BTOOL("web_search", "Search the web, return ranked results", web_search_params, 45, 1,
-              TOOL_ACCESS_READ, NULL),
+              TOOL_ACCESS_READ),
         BTOOL("git_exec",
               "Execute a read-only git command (whitelisted: "
               "status/diff/log/branch/show/ls-files/grep) and capture output",
-              git_exec_params, 60, 0, TOOL_ACCESS_READ, NULL),
+              git_exec_params, 60, 0, TOOL_ACCESS_READ),
         BTOOL("git_diff", "Generate a unified diff for a path (git diff [--cached] [path])",
-              git_diff_params, 60, 0, TOOL_ACCESS_READ, NULL),
+              git_diff_params, 60, 0, TOOL_ACCESS_READ),
         BTOOL("git_apply", "Apply a unified diff to the working tree", git_apply_params, 60, 0,
-              TOOL_ACCESS_WRITE, NULL),
+              TOOL_ACCESS_WRITE),
         BTOOL("maths_eval",
               "Evaluate a math expression precisely (arithmetic, powers, factorial, "
               "sqrt/sin/cos/tan/ln/log10/log2/exp/abs/min/max/floor/ceil etc.)",
-              maths_eval_params, 10, 1, TOOL_ACCESS_READ, MATHS_D_SOCKET_NAME),
+              maths_eval_params, 10, 1, TOOL_ACCESS_READ),
         BTOOL("maths_stats", "Compute numeric statistics (sum/mean/median/min/max/var/stddev)",
-              maths_stats_params, 10, 1, TOOL_ACCESS_READ, MATHS_D_SOCKET_NAME),
+              maths_stats_params, 10, 1, TOOL_ACCESS_READ),
         BTOOL("maths_plot",
               "Sample y=f(x) over [xmin,xmax] and return a ```plot block for "
               "TUI canvas rendering",
-              maths_plot_params, 10, 1, TOOL_ACCESS_READ, MATHS_D_SOCKET_NAME),
+              maths_plot_params, 10, 1, TOOL_ACCESS_READ),
     };
+
+    tool_contract_bind(k_contract, sizeof(k_contract) / sizeof(k_contract[0]));
 
     for (size_t i = 0; i < sizeof(defs) / sizeof(defs[0]); ++i) {
         const builtin_def_t *d = &defs[i];
+        const tool_contract_t *c = tool_contract_of(d->id);
         char executable[48];
         snprintf(executable, sizeof(executable), "builtin:%s", d->id);
         tool_metadata_t meta = {
@@ -244,10 +268,10 @@ void register_builtin_tools(tool_service_t *svc)
         daemon_security_add_acl_rule("tool_d", d->id, true);
 
         /* D8：把"工具 → 依赖 socket"的声明交给可用性视图，作为可达性联动
-         * 的前提。声明失败（容量满/名过长）仅告警，工具仍注册。 */
-        if (d->requires_sock && svc->avail &&
-            tool_avail_dep(svc->avail, d->id, d->requires_sock) != 0)
-            SVC_LOG_WARN("C-L06: TOOL-AVAIL: dep declare failed %s -> %s", d->id,
-                         d->requires_sock);
+         * 的前提。探测目标与对外发布的 requires_daemon 同源于契约表。
+         * 声明失败（容量满/名过长）仅告警，工具仍注册。 */
+        if (c && c->dep_sock && svc->avail &&
+            tool_avail_dep(svc->avail, d->id, c->dep_sock) != 0)
+            SVC_LOG_WARN("C-L06: TOOL-AVAIL: dep declare failed %s -> %s", d->id, c->dep_sock);
     }
 }
