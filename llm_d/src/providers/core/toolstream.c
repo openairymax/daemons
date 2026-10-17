@@ -9,6 +9,7 @@
 
 #include "toolstream.h"
 #include "provider_stream.h"
+#include "provider_envelope.h"
 
 #include "error.h"
 
@@ -247,26 +248,9 @@ int provider_openai_on_chunk(const char *json_line, void *userdata)
      * local OpenAI-compatible endpoints attach the usage block in the final
      * chunk, which has no choices. Last parse wins (usage is most complete
      * at stream end). */
-    cJSON *usage = cJSON_GetObjectItem(root, "usage");
-    if (cJSON_IsObject(usage)) {
-        cJSON *pt = cJSON_GetObjectItem(usage, "prompt_tokens");
-        cJSON *ct = cJSON_GetObjectItem(usage, "completion_tokens");
-        cJSON *tt = cJSON_GetObjectItem(usage, "total_tokens");
-        if (cJSON_IsNumber(pt))
-            acc->prompt_tokens = (uint32_t)pt->valuedouble;
-        if (cJSON_IsNumber(ct))
-            acc->completion_tokens = (uint32_t)ct->valuedouble;
-        if (cJSON_IsNumber(tt))
-            acc->total_tokens = (uint32_t)tt->valuedouble;
-        cJSON *rt = cJSON_GetObjectItem(usage, "reasoning_tokens");
-        if (!cJSON_IsNumber(rt)) {
-            cJSON *details = cJSON_GetObjectItem(usage, "completion_tokens_details");
-            if (cJSON_IsObject(details))
-                rt = cJSON_GetObjectItem(details, "reasoning_tokens");
-        }
-        if (cJSON_IsNumber(rt))
-            acc->reasoning_tokens = (uint32_t)rt->valuedouble;
-    }
+    provider_usage_load(cJSON_GetObjectItem(root, "usage"), &acc->prompt_tokens,
+                        &acc->completion_tokens, &acc->total_tokens,
+                        &acc->reasoning_tokens);
 
     return 0;
 }

@@ -198,29 +198,9 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
         }
     }
 
-    cJSON *usage = cJSON_GetObjectItem(root, "usage");
-    if (usage) {
-        cJSON *prompt = cJSON_GetObjectItem(usage, "prompt_tokens");
-        cJSON *completion = cJSON_GetObjectItem(usage, "completion_tokens");
-        cJSON *total = cJSON_GetObjectItem(usage, "total_tokens");
-        if (cJSON_IsNumber(prompt))
-            resp->prompt_tokens = (uint32_t)prompt->valuedouble;
-        if (cJSON_IsNumber(completion))
-            resp->completion_tokens = (uint32_t)completion->valuedouble;
-        if (cJSON_IsNumber(total))
-            resp->total_tokens = (uint32_t)total->valuedouble;
-        /* Thinking tokens: either top-level usage.reasoning_tokens (some
-         * endpoints) or nested completion_tokens_details.reasoning_tokens
-         * (DeepSeek/OpenAI). Parse both so the count survives everywhere. */
-        cJSON *rt = cJSON_GetObjectItem(usage, "reasoning_tokens");
-        if (!cJSON_IsNumber(rt)) {
-            cJSON *details = cJSON_GetObjectItem(usage, "completion_tokens_details");
-            if (cJSON_IsObject(details))
-                rt = cJSON_GetObjectItem(details, "reasoning_tokens");
-        }
-        if (cJSON_IsNumber(rt))
-            resp->reasoning_tokens = (uint32_t)rt->valuedouble;
-    }
+    provider_usage_load(cJSON_GetObjectItem(root, "usage"), &resp->prompt_tokens,
+                        &resp->completion_tokens, &resp->total_tokens,
+                        &resp->reasoning_tokens);
 
     *out = resp;
     return AIRY_OK;
