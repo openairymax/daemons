@@ -8,15 +8,15 @@
 set(SCHED_D_SOURCES
     src/main.c
     src/svc.c
-    src/sched_rpc_handlers.c
-    src/sched_dispatch.c
-    src/roadmap_rpc.c
-    src/sched_service_impl.c
-    src/sched_service_agent.c
-    src/sched_service_task.c
-    src/sched_service_worker.c
-    src/sched_dag_impl.c
-    src/sched_dag_engine.c
-    src/sched_dag_worker.c
-    src/sched_dag_parse.c
+    src/rpc/sched_rpc_handlers.c
+    src/dispatch/sched_dispatch.c
+    src/roadmap/roadmap_rpc.c
+    src/service/sched_service_impl.c
+    src/service/sched_service_agent.c
+    src/service/sched_service_task.c
+    src/service/sched_service_worker.c
+    src/dag/sched_dag_impl.c
+    src/dag/sched_dag_engine.c
+    src/dag/sched_dag_worker.c
+    src/dag/sched_dag_parse.c
 )

@@ -13,7 +13,7 @@
  * pinning its ABI values.
  */
 
-#include "scheduler_service.h"
+#include "service/scheduler_service.h"
 
 #include <assert.h>
 #include <stdio.h>

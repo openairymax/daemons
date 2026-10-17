@@ -15,7 +15,7 @@
 #ifndef AIRY_RT_SCHED_DAEMON_INTERNAL_H
 #define AIRY_RT_SCHED_DAEMON_INTERNAL_H
 
-#include "scheduler_service.h"
+#include "service/scheduler_service.h"
 
 /* Daemon-wide scheduler service handle (owned/lifecycled in svc.c,
  * referenced by the JSON-RPC handlers). */
