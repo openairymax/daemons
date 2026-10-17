@@ -16,11 +16,8 @@
   },
   "deps": { "required": [], "optional": ["tool_d", "llm_d", "sched_d"] },
   "modules": [
-    { "name": "service", "sources": ["service.c"] },
-    { "name": "protocol", "sources": ["protocol/gateway_protocol_router.c", "protocol/gateway_mcp_server.c", "protocol/gateway_openai_compat.c", "protocol/gateway_a2a_handler.c"] },
-    { "name": "boot", "sources": ["gw_boot.c"] },
-    { "name": "cli", "sources": ["gw_cli.c"] },
-    { "name": "acl", "sources": ["gw_acl.c"] },
-    { "name": "mcpclients", "sources": ["gw_mcpclients.c"] }
+    { "name": "service", "sources": ["svc.c"] },
+    { "name": "protocol", "sources": ["protocol/gateway_jsonpick.c", "protocol/gateway_mcp_server.c", "protocol/gateway_a2a_handler.c", "protocol/gateway_openai_compat.c", "protocol/gateway_protocol_router.c"] },
+    { "name": "bootstrap", "sources": ["bootstrap/gw_boot.c", "bootstrap/gw_cli.c", "bootstrap/gw_acl.c", "bootstrap/gw_mcpclients.c"] }
   ]
 }
