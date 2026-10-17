@@ -6,7 +6,7 @@
  * @brief 告警模块单元测试
  */
 
-#include "monitor_service.h"
+#include "service/monitor_service.h"
 
 #include "airy_memory.h"
 

@@ -23,20 +23,20 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== Monitor 服务静态库 ====================
-# 提取 service/prometheus_exporter
-# 为独立静态库，供 monit_d 可执行文件和集成测试共用，消除桩函数依赖。
+# 提取 service/observe/info/export 四域为独立静态库，供 monit_d
+# 可执行文件和集成测试共用，消除桩函数依赖。
 # 排除 main.c（含 main()）。
 # service.c 按单一职责拆分（2026-08-27）：
-#   service.c               生命周期与配置域（create/destroy/reload_config）
-#   service_subsystems.c    指标/日志/告警/健康/报告域
-#   service_agent_trace.c   Agent 执行追踪域（loop 检测等）
+#   service/service.c            生命周期与配置域（create/destroy/reload_config）
+#   service/service_subsystems.c 指标/日志/告警/健康/报告域
+#   service/service_agent_trace.c Agent 执行追踪域（loop 检测等）
 set(MONIT_SERVICE_SOURCES
-    src/service.c
-    src/service_subsystems.c
-    src/service_agent_trace.c
-    src/prometheus_exporter.c
-    src/observe_rpc.c
-    src/info_rpc.c
+    src/service/service.c
+    src/service/service_subsystems.c
+    src/service/service_agent_trace.c
+    src/export/prometheus_exporter.c
+    src/observe/observe_rpc.c
+    src/info/info_rpc.c
 )
 
 add_library(airy_monit_service STATIC ${MONIT_SERVICE_SOURCES})

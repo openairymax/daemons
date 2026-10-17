@@ -14,7 +14,7 @@
 
 #include "airy_memory.h"
 #include "error.h"
-#include "info_rpc.h"
+#include "info/info_rpc.h"
 #include "jsonrpc_helpers.h"
 #include "method_dispatcher.h"
 #include "platform_misc.h"

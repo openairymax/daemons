@@ -14,7 +14,7 @@
 #ifndef AIRY_RT_DAEMON_MONIT_D_INTERNAL_H
 #define AIRY_RT_DAEMON_MONIT_D_INTERNAL_H
 
-#include "monitor_service.h"
+#include "service/monitor_service.h"
 
 #include <stdint.h>
 
