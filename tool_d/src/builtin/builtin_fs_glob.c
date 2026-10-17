@@ -161,8 +161,7 @@ static void builtin_glob_impl(const char *base, const char **segs, size_t n, siz
 int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
     const char *pattern = NULL;
     if (builtin_str_param(root, "pattern", &pattern, res) != AIRY_OK)
@@ -187,10 +186,8 @@ int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
         const char *e = s;
         while (*e && *e != '/')
             e++;
-        if (nsegs >= 64) {
-            res->error = AIRY_STRDUP("pattern too deep (max 64 segments)");
-            return AIRY_ERR_INVALID_PARAM;
-        }
+        if (nsegs >= 64)
+            return btool_fail(res, AIRY_ERR_INVALID_PARAM, "pattern too deep (max 64 segments)");
         char *seg = (char *)AIRY_MALLOC((size_t)(e - s) + 1);
         if (!seg) {
             for (size_t k = 0; k < nsegs; k++)
@@ -202,10 +199,8 @@ int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
         segs[nsegs++] = seg;
         s = e;
     }
-    if (nsegs == 0) {
-        res->error = AIRY_STRDUP("pattern is empty after splitting");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (nsegs == 0)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "pattern is empty after splitting");
 
     char *out = (char *)AIRY_CALLOC(BUILTIN_OUTPUT_CAP, 1);
     char *path = (char *)AIRY_MALLOC(AIRY_PATH_MAX);
@@ -214,8 +209,7 @@ int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
             AIRY_FREE((void *)segs[k]);
         AIRY_FREE(out);
         AIRY_FREE(path);
-        res->error = AIRY_STRDUP("Out of memory");
-        return AIRY_ERR_OUT_OF_MEMORY;
+        return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Out of memory");
     }
     size_t out_len = 0, count = 0;
     int timed_out = 0;
@@ -228,17 +222,10 @@ int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     AIRY_FREE(path);
 
     if (count == 0) {
-        char msg[512];
         if (timed_out)
-            snprintf(msg, sizeof(msg), "fs_glob timed out after %ums under '%s' (no matches)",
-                     (unsigned)timeout_ms, base_dir);
-        else
-            snprintf(msg, sizeof(msg), "No files match pattern '%s' under '%s'", pattern,
-                     base_dir);
-        res->error = AIRY_STRDUP(msg);
-        res->success = 0;
-        res->exit_code = 1;
-        return AIRY_OK;
+            return btool_soft(res, "fs_glob timed out after %ums under '%s' (no matches)",
+                              (unsigned)timeout_ms, base_dir);
+        return btool_soft(res, "No files match pattern '%s' under '%s'", pattern, base_dir);
     }
     if (timed_out)
         builtin_append_trunc_mark(out, BUILTIN_OUTPUT_CAP, out_len,
@@ -246,8 +233,5 @@ int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     if (count >= BUILTIN_GLOB_MAX)
         builtin_append_trunc_mark(out, BUILTIN_OUTPUT_CAP, out_len,
                                   "\n[glob truncated: too many matches]");
-    res->output = out;
-    res->success = 1;
-    res->exit_code = 0;
-    return AIRY_OK;
+    return btool_okout(res, out);
 }
