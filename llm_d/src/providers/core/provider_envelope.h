@@ -60,6 +60,33 @@ static inline uint32_t provider_json_u32_get(const cJSON *obj, const char *key)
     return cJSON_IsNumber(v) ? (uint32_t)v->valuedouble : 0;
 }
 
+/* usage 段装载（流式/非流式同源）：三值 + reasoning_tokens 双位置回退
+ * （顶层或 completion_tokens_details 嵌套）。存在才覆写、缺失保留现值，
+ * 与流式多 chunk last-parse-wins 语义同源；非 object 整段跳过。 */
+static inline void provider_usage_load(const cJSON *usage, uint32_t *prompt,
+                                       uint32_t *completion, uint32_t *total,
+                                       uint32_t *reasoning)
+{
+    const cJSON *v;
+    if (!cJSON_IsObject(usage))
+        return;
+    v = cJSON_GetObjectItem(usage, "prompt_tokens");
+    if (cJSON_IsNumber(v))
+        *prompt = (uint32_t)v->valuedouble;
+    v = cJSON_GetObjectItem(usage, "completion_tokens");
+    if (cJSON_IsNumber(v))
+        *completion = (uint32_t)v->valuedouble;
+    v = cJSON_GetObjectItem(usage, "total_tokens");
+    if (cJSON_IsNumber(v))
+        *total = (uint32_t)v->valuedouble;
+    v = cJSON_GetObjectItem(usage, "reasoning_tokens");
+    if (!cJSON_IsNumber(v))
+        v = cJSON_GetObjectItem(cJSON_GetObjectItem(usage, "completion_tokens_details"),
+                                "reasoning_tokens");
+    if (cJSON_IsNumber(v))
+        *reasoning = (uint32_t)v->valuedouble;
+}
+
 #ifdef __cplusplus
 }
 #endif
