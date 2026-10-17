@@ -17,6 +17,7 @@
 #include "tool_d_internal.h"
 
 #include "daemon_replies.h"
+#include "err_class.h"
 #include "jsonrpc_helpers.h"
 #include "param_validator.h"
 #include "svc_logger.h"
@@ -153,6 +154,17 @@ static void handle_get(cJSON *params, int id, airy_sock_t client_fd)
     tool_metadata_free(meta);
 }
 
+/* L0 产生层：失败必须携带 {class, code, diag} 三元组，禁止裸返回；ctx
+ * 记录发起工具，供上层排障定位（0.1.19 §3.7.2 N1）。 */
+static void put_tool_err(cJSON *result, airy_err_t code, const char *diag, const char *tid)
+{
+    cJSON *ctx = cJSON_CreateObject();
+    if (ctx && tid)
+        cJSON_AddStringToObject(ctx, "tool", tid);
+    airy_err_json_put(result, airy_err_class_of(code), code, diag, ctx);
+    cJSON_Delete(ctx);
+}
+
 static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
 {
     const char *tid = get_string_field(params, "tool_id", NULL);
@@ -210,8 +222,13 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
             cJSON_AddStringToObject(result, "error", res->error);
         cJSON_AddNumberToObject(result, "exit_code", res->exit_code);
         cJSON_AddNumberToObject(result, "error_code", ret);
-        if (ret != AIRY_OK)
+        if (ret != AIRY_OK || !res->success) {
+            /* 工具已执行但业务失败（success=0）无独立 errno，用通用业务码
+             * 承载，避免 class 回落到 OK。 */
+            airy_err_t ecode = (ret != AIRY_OK) ? ret : AIRY_ERR_GENERIC_FAIL;
+            put_tool_err(result, ecode, res->error ? res->error : airy_err_str(ecode), tid);
             SVC_LOG_ERROR("Tool execution failed: %s (error=%d)", tid, ret);
+        }
         tool_result_free(res);
     } else {
         const char *emsg = airy_err_str(ret);
@@ -221,6 +238,7 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
         cJSON_AddStringToObject(result, "error", emsg);
         cJSON_AddNumberToObject(result, "exit_code", -1);
         cJSON_AddNumberToObject(result, "error_code", ret);
+        put_tool_err(result, ret, emsg, tid);
         SVC_LOG_ERROR("Tool execution rejected: %s (error=%d)", tid, ret);
     }
 

@@ -17,6 +17,7 @@
 #include "airy_run_stream.h"
 #include "airy_tool_schema.h"
 #include "daemon_rpc_client.h"
+#include "err_class.h"
 #include "platform.h"
 #include "svc_logger.h"
 
@@ -96,6 +97,25 @@ static void run_stream_result_free(agent_stream_result_t *sr)
     AIRY_MEMSET(sr, 0, sizeof(*sr));
 }
 
+/* L2 呈现层按 class 分诊（0.1.19 §3.7.2 N1）：只有 transport 才允许说
+ * "服务不可达"；business/policy/config/internal 必须透传原始错误码与
+ * 文案，避免把工具业务失败误导为守护进程离线。 */
+static char *run_fail_text(int rc)
+{
+    char buf[512];
+    const char *s;
+    if (rc == 0)
+        rc = AIRY_ERR_PROTOCOL;
+    s = airy_err_str(rc);
+    if (!s || !s[0])
+        s = "unknown error";
+    if (airy_err_class_of(rc) == AIRY_ERR_CLASS_TRANSPORT)
+        snprintf(buf, sizeof(buf), "Error: tool service unreachable (%s, code: %d)", s, rc);
+    else
+        snprintf(buf, sizeof(buf), "Error: %s (code: %d)", s, rc);
+    return AIRY_STRDUP(buf);
+}
+
 /* 单个工具执行：tool_d.execute_tool（结果文本化，失败转 Error: 前缀）。 */
 static int run_execute_tool(const char *name, const char *args_json, char **out_text)
 {
@@ -119,7 +139,8 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
     int rc = daemon_rpc_call(sock, "execute_tool", params_str, &resp, AGENT_RUN_TOOL_TIMEOUT_MS);
     AIRY_FREE(params_str);
     if (rc != AIRY_SUCCESS || !resp) {
-        *out_text = AIRY_STRDUP("Tool service unreachable");
+        AIRY_FREE(resp);
+        *out_text = run_fail_text(rc);
         return -1;
     }
 
@@ -150,9 +171,16 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
         } else {
             const char *e =
                 cJSON_IsString(error) && error->valuestring ? error->valuestring : "execution failed";
+            int code = cJSON_IsNumber(ecode) ? ecode->valueint : 0;
+            char diag[768];
+            airy_err_t ec = AIRY_ERR_UNKNOWN;
+            if (airy_err_json_get(result, NULL, &ec, diag, sizeof(diag), NULL) == 0 && diag[0]) {
+                e = diag;
+                code = (int)ec;
+            }
             char buf[1024];
-            if (cJSON_IsNumber(ecode))
-                snprintf(buf, sizeof(buf), "Error: %s (code: %d)", e, ecode->valueint);
+            if (code != 0)
+                snprintf(buf, sizeof(buf), "Error: %s (code: %d)", e, code);
             else
                 snprintf(buf, sizeof(buf), "Error: %s", e);
             text = AIRY_STRDUP(buf);
