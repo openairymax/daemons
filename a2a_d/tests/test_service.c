@@ -9,7 +9,7 @@
  * 注册/注销/发现、卡片查询、任务创建/查询、消息发送与计数。
  */
 
-#include "a2a_service.h"
+#include "core/a2a_service.h"
 
 #include "airy_memory.h"
 
