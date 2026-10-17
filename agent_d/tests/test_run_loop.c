@@ -7,7 +7,7 @@
  *        C-1 连败计数语义 + 流式增量上屏契约 + S-2 编排失败上抛。
  */
 
-#include "../src/agent_run_loop.c"
+#include "../src/run/agent_run_loop.c"
 
 #include <stdio.h>
 

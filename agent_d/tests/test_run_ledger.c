@@ -6,7 +6,7 @@
  * @brief 台账接线纯函数直测（white-box include，无 mem_d 依赖）。
  */
 
-#include "../src/agent_run_ledger.c"
+#include "../src/run/agent_run_ledger.c"
 
 #include <stdio.h>
 

@@ -182,15 +182,12 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/mem_d/include/
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/agent_d/include/
-    DESTINATION include/agentrt
-    FILES_MATCHING PATTERN "*.h"
-)
-
 # 0.1.19 §254b/§255：cupolas_d include 面安装由其自身 CMakeLists 自持
 # （产品壳 daemon/ 目录，经顶层装配区挂入）。
 # 0.1.19 §281：a2a_d/maths_d svc 头为 codegen 户内产物（消费面全部户内），
 # 父级与户内 install(DIRECTORY) 按判据摘除（think_d/channel_d 判例同源）。
+# 0.1.19 §285：agent_d svc 头（svc_agent_d.h）同判据摘除，include/ 仅存
+# codegen 户内产物。
 
 # 导出项目配置
 # 0.1.19 §254b/§255：cupolas_d 构建位由顶层装配区承接（源码现居产品壳），

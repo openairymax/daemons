@@ -8,7 +8,7 @@
  *        大帧动态增长与替换/追加语义。
  */
 
-#include "../src/agent_run_stream.c"
+#include "../src/run/agent_run_stream.c"
 
 #include <stdio.h>
 #include <string.h>

@@ -17,7 +17,7 @@
 #include "agent_d_internal.h"
 
 #include "daemon_main.h"
-#include "agent_service.h"
+#include "service/agent_service.h"
 #include "platform.h"
 #include "svc_logger.h"
 #include "thread_pool.h"

@@ -20,14 +20,14 @@ set(COMMONS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../commons)
 set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 
 # ==================== Agent 服务静态库 ====================
-# 提取 service 为独立静态库，供 agent_d 可执行文件与单元测试共用，
+# service 域独立静态库，供 agent_d 可执行文件与单元测试共用，
 # 消除桩函数依赖。排除 main.c（含 main()）。
 set(AGENT_SERVICE_SOURCES
-    src/service.c
-    src/service_child.c   # Agent 服务-子进程通信域
-    src/service_spawn.c   # Agent 服务-spawn 域
-    src/service_invoke.c  # Agent 服务-调用/会话域
-    src/service_stats.c   # Agent 服务-状态/统计域
+    src/service/service.c
+    src/service/service_child.c   # Agent 服务-子进程通信域
+    src/service/service_spawn.c   # Agent 服务-spawn 域
+    src/service/service_invoke.c  # Agent 服务-调用/会话域
+    src/service/service_stats.c   # Agent 服务-状态/统计域
 )
 
 add_library(airy_agent_service STATIC ${AGENT_SERVICE_SOURCES})
@@ -106,9 +106,10 @@ endif()
 
 # ==================== Agent daemon 可执行文件 ====================
 # gen5 SSoT 装配（.manifest → modules/sources.cmake）：入口 main.c /
-# daemon 配置与端点策略 svc.c 由 daemon_gen.py 生成；RPC 方法域
-# agent_d_rpc.c、监控域 agent_d_monitor.c（POSIX）、run 引擎域
-# agent_run_engine/ledger/loop/stream/rpc.c 为手写业务源。
+# daemon 配置与端点策略 svc.c 由 daemon_gen.py 生成；rpc 双方法壳域
+# agent_d_rpc.c + agent_run_rpc.c、monitor 监控域 agent_d_monitor.c
+# （POSIX）、run 引擎域 agent_run_engine/ledger/loop/stream.c 为手写
+# 业务源。
 include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
 
 add_executable(agent_d ${AGENT_D_SOURCES})
@@ -175,10 +176,6 @@ if(BUILD_TESTS)
     endif()
 endif()
 
-# 安装规则
+# 安装规则（svc 头消费面全部户内，install(DIRECTORY) 摘除，
+# market_d/monit_d 判例同源）
 install(TARGETS agent_d DESTINATION bin)
-
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
-    DESTINATION include/agentrt
-    FILES_MATCHING PATTERN "*.h"
-)

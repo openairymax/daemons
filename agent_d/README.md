@@ -35,18 +35,24 @@
 
 ## 架构
 
+gen5 五件套（`.manifest` / `main.c` / `svc.c` / `modules/sources.cmake` /
+`include/svc_agent_d.h`）由 `daemon_gen.py` codegen；`src/` 顶层仅存形态件，
+业务源按四域组织（域依赖单向：rpc / monitor / run → service 契约头）：
+
 ```
 gateway_d ──(agent.spawn / invoke / run / run_stream / cancel)──▶ agent_d ──▶ Agent 子进程
       │                                                             │
-      │                                                             ├─ service_spawn.c  子进程生成
-      │                                                             ├─ service_invoke.c 调用/取消
-      │                                                             ├─ service_child.c  子进程生命周期
-      │                                                             ├─ agent_run_rpc.c  run 引擎适配
-      │                                                             └─ service_stats.c  性能统计
+      │                                          src/rpc/           │  方法壳：agent_d_rpc.c（spawn/
+      │                                                             │  invoke/cancel/…）、agent_run_rpc.c（run 系）
+      │                                          src/monitor/       │  监控：agent_d_monitor.c（POSIX 采样）
+      │                                          src/run/           │  执行引擎：agent_run_engine.c + ledger/
+      │                                                             │  loop/stream.c（白盒内部头 agent_run_internal.h）
+      │                                          src/service/       │  服务静态库：service*.c 五源 + 契约头
+      │                                                             │  agent_service.h（下潜，户内消费面）
       └─ spawn 成功后 ──(register_agent)──▶ sched_d
 ```
 
-服务层经 `agent_svc_adapter.c` 适配到 `airy_svc_t` 统一服务框架。会话表容量为
+服务层经 service 域适配到 `airy_svc_t` 统一服务框架。会话表容量为
 `AGENT_INVOKE_SESSIONS_MAX`，满时 `invoke_begin` 返回 BUSY。`concurrent_clients`
 开启，保证长 `invoke`（LLM 往返可达数百秒）不阻塞事件循环、取消请求仍可达。
 

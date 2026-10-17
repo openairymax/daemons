@@ -6,8 +6,8 @@
  * @brief Agent 服务单元测试
  */
 
-#include "agent_service.h"
-#include "service.h"
+#include "service/agent_service.h"
+#include "service/service.h"
 
 #include "airy_memory.h"
 #include "platform.h"

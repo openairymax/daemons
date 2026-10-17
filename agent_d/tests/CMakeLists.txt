@@ -45,9 +45,9 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
     # white-box include 引擎源的测试需同编引擎闭环符号（engine/ledger/stream）。
     if(TEST_NAME STREQUAL "test_run_loop")
         target_sources(test_agent_${TEST_NAME} PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/agent_run_engine.c
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/agent_run_ledger.c
-            ${CMAKE_CURRENT_SOURCE_DIR}/../src/agent_run_stream.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_engine.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_ledger.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_stream.c
         )
     endif()
 
