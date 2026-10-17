@@ -16,7 +16,7 @@
  * channel_win32.c。channel_io.c 收发域经链接共享 find_channel。
  */
 
-#include "channel_service_internal.h"
+#include "service/channel_service_internal.h"
 
 #include "airy_memory.h"
 #include "daemon_errors.h"

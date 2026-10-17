@@ -27,7 +27,7 @@
 #include <cmocka.h>
 #endif
 
-#include "channel_service.h"
+#include "service/channel_service.h"
 #include "daemon_platform_ext.h"
 #define TEST_SOCKET_DIR AIRY_TMP_DIR "/channel_e2e_test"
 #define TEST_CHANNEL_ID "e2e_test_ch_001"

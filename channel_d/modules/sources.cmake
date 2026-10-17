@@ -8,8 +8,8 @@
 set(CHANNEL_D_SOURCES
     src/main.c
     src/svc.c
-    src/channel_rpc.c
-    src/channel_service.c
-    src/channel_book.c
-    src/channel_io.c
+    src/rpc/channel_rpc.c
+    src/service/channel_service.c
+    src/book/channel_book.c
+    src/io/channel_io.c
 )
