@@ -20,7 +20,7 @@
 
 #ifdef HAVE_YAML
 
-#include "providers/core/registry.h"
+#include "providers/core/provider_config.h"
 
 #ifdef __cplusplus
 extern "C" {
