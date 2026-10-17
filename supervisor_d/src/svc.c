@@ -10,7 +10,7 @@
  * 同路径收摊；退出清 pid 文件与 UDS 残留。零项目内库链接（V13.5）。
  */
 
-#include "supervisor_d.h"
+#include "supervisor_d_internal.h"
 
 #include <signal.h> /* sig_atomic_t（标准头，Windows 亦提供） */
 
