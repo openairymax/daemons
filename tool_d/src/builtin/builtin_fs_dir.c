@@ -39,8 +39,7 @@
 int fs_list_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
     cJSON *path = cJSON_GetObjectItem(root, "path");
     const char *dir = NULL;
@@ -53,11 +52,9 @@ int fs_list_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
         return rc;
     DIR *d = opendir(resolved);
     if (!d) {
-        char err[512];
-        snprintf(err, sizeof(err), "Cannot open directory '%s': %s", dir ? dir : ".",
-                 strerror(errno));
-        res->error = AIRY_STRDUP(err);
-        return (errno == ENOENT) ? AIRY_ERR_NOT_FOUND : AIRY_ERR_IO;
+        int code = (errno == ENOENT) ? AIRY_ERR_NOT_FOUND : AIRY_ERR_IO;
+        return btool_fail(res, code, "Cannot open directory '%s': %s", dir ? dir : ".",
+                          strerror(errno));
     }
     uint64_t deadline = builtin_deadline_ms(timeout_ms);
     cJSON *arr = cJSON_CreateArray();
@@ -93,10 +90,8 @@ int fs_list_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     }
     res->output = cJSON_PrintUnformatted(arr);
     cJSON_Delete(arr);
-    if (!res->output) {
-        res->error = AIRY_STRDUP("Failed to serialize directory listing");
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
+    if (!res->output)
+        return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Failed to serialize directory listing");
     res->success = 1;
     res->exit_code = 0;
     return AIRY_OK;
@@ -158,20 +153,16 @@ int fs_delete_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
 {
     (void)timeout_ms;
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
     cJSON *path = cJSON_GetObjectItem(root, "path");
     cJSON *rec = cJSON_GetObjectItem(root, "recursive");
-    if (!cJSON_IsString(path) || !path->valuestring || !path->valuestring[0]) {
-        res->error = AIRY_STRDUP("Missing required string parameter: path");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (!cJSON_IsString(path) || !path->valuestring || !path->valuestring[0])
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Missing required string parameter: path");
     const char *p = path->valuestring;
-    if (strcmp(p, "/") == 0 || strcmp(p, ".") == 0 || strcmp(p, "..") == 0) {
-        res->error = AIRY_STRDUP("Refusing to delete a root or current directory");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (strcmp(p, "/") == 0 || strcmp(p, ".") == 0 || strcmp(p, "..") == 0)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "Refusing to delete a root or current directory");
     int recursive = (cJSON_IsBool(rec) && cJSON_IsTrue(rec)) ||
                     (cJSON_IsNumber(rec) && rec->valueint != 0);
 
@@ -184,32 +175,23 @@ int fs_delete_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
     if (rc != AIRY_OK)
         return rc;
     char wsroot[4096];
-    if (os_sandbox_fs_workspace(wsroot, sizeof(wsroot)) == 0 &&
-        strcmp(resolved, wsroot) == 0) {
-        res->error = AIRY_STRDUP("Refusing to delete the workspace root");
-        return AIRY_ERR_PERMISSION_DENIED;
-    }
+    if (os_sandbox_fs_workspace(wsroot, sizeof(wsroot)) == 0 && strcmp(resolved, wsroot) == 0)
+        return btool_fail(res, AIRY_ERR_PERMISSION_DENIED, "Refusing to delete the workspace root");
     p = resolved;
 
     struct stat st;
     if (lstat(p, &st) != 0) {
-        char err[512];
-        snprintf(err, sizeof(err), "Cannot access '%s': %s", p, strerror(errno));
-        res->error = AIRY_STRDUP(err);
-        return (errno == ENOENT) ? AIRY_ERR_NOT_FOUND : AIRY_ERR_IO;
+        int code = (errno == ENOENT) ? AIRY_ERR_NOT_FOUND : AIRY_ERR_IO;
+        return btool_fail(res, code, "Cannot access '%s': %s", p, strerror(errno));
     }
 
     if (S_ISDIR(st.st_mode)) {
         if (!recursive) {
             /* 非空目录拒绝；空目录允许直接删除（rmdir 语义）。 */
             DIR *d = opendir(p);
-            if (!d) {
-                char err[512];
-                snprintf(err, sizeof(err), "Cannot open directory '%s': %s", p,
-                         strerror(errno));
-                res->error = AIRY_STRDUP(err);
-                return AIRY_ERR_IO;
-            }
+            if (!d)
+                return btool_fail(res, AIRY_ERR_IO, "Cannot open directory '%s': %s", p,
+                                  strerror(errno));
             int non_empty = 0;
             struct dirent *e;
             while ((e = readdir(d)) != NULL) {
@@ -219,49 +201,20 @@ int fs_delete_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
                 break;
             }
             closedir(d);
-            if (non_empty) {
-                char msg[512];
-                snprintf(msg, sizeof(msg),
-                         "Directory '%s' is not empty; set \"recursive\":true to "
-                         "delete the whole tree (destructive)",
-                         p);
-                res->error = AIRY_STRDUP(msg);
-                res->success = 0;
-                res->exit_code = 1;
-                return AIRY_OK;
-            }
-            if (rmdir(p) == 0) {
-                char ok[256];
-                snprintf(ok, sizeof(ok), "Removed directory '%s'", p);
-                res->output = AIRY_STRDUP(ok);
-                res->success = 1;
-                res->exit_code = 0;
-                return AIRY_OK;
-            }
+            if (non_empty)
+                return btool_soft(res, "Directory '%s' is not empty; set \"recursive\":true to "
+                                       "delete the whole tree (destructive)",
+                                  p);
+            if (rmdir(p) == 0)
+                return btool_okf(res, "Removed directory '%s'", p);
         } else if (fs_delete_tree(p, 0) == 0) {
-            char ok[256];
-            snprintf(ok, sizeof(ok), "Removed directory tree '%s'", p);
-            res->output = AIRY_STRDUP(ok);
-            res->success = 1;
-            res->exit_code = 0;
-            return AIRY_OK;
+            return btool_okf(res, "Removed directory tree '%s'", p);
         }
-        char err[512];
-        snprintf(err, sizeof(err), "Failed to remove directory '%s': %s", p, strerror(errno));
-        res->error = AIRY_STRDUP(err);
-        return AIRY_ERR_IO;
+        return btool_fail(res, AIRY_ERR_IO, "Failed to remove directory '%s': %s", p,
+                          strerror(errno));
     }
 
-    if (unlink(p) != 0) {
-        char err[512];
-        snprintf(err, sizeof(err), "Failed to delete file '%s': %s", p, strerror(errno));
-        res->error = AIRY_STRDUP(err);
-        return AIRY_ERR_IO;
-    }
-    char ok[256];
-    snprintf(ok, sizeof(ok), "Deleted file '%s'", p);
-    res->output = AIRY_STRDUP(ok);
-    res->success = 1;
-    res->exit_code = 0;
-    return AIRY_OK;
+    if (unlink(p) != 0)
+        return btool_fail(res, AIRY_ERR_IO, "Failed to delete file '%s': %s", p, strerror(errno));
+    return btool_okf(res, "Deleted file '%s'", p);
 }

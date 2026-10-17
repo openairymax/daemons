@@ -24,18 +24,14 @@ static int fs_read_whole(const char *resolved, tool_result_t *res, char **out, i
 {
     FILE *fp = fopen(resolved, "rb");
     if (!fp) {
-        char err[512];
-        snprintf(err, sizeof(err), "Cannot open file '%s': %s", resolved, strerror(errno));
-        res->error = AIRY_STRDUP(err);
-        return (errno == ENOENT) ? AIRY_ERR_NOT_FOUND : AIRY_ERR_IO;
+        int rc = (errno == ENOENT) ? AIRY_ERR_NOT_FOUND : AIRY_ERR_IO;
+        return btool_fail(res, rc, "Cannot open file '%s': %s", resolved, strerror(errno));
     }
     int truncated = 0;
     char *content = builtin_read_all(fp, &truncated);
     fclose(fp);
-    if (!content) {
-        res->error = AIRY_STRDUP("Failed to read file (I/O error)");
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
+    if (!content)
+        return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Failed to read file (I/O error)");
     *out = content;
     if (out_truncated)
         *out_truncated = truncated;
@@ -46,14 +42,11 @@ int fs_read_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
 {
     (void)timeout_ms;
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
     cJSON *path = cJSON_GetObjectItem(root, "path");
-    if (!cJSON_IsString(path) || !path->valuestring || !path->valuestring[0]) {
-        res->error = AIRY_STRDUP("Missing string parameter: path");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (!cJSON_IsString(path) || !path->valuestring || !path->valuestring[0])
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Missing string parameter: path");
     char resolved[4096];
     int rc = builtin_fs_confine(path->valuestring, 0, resolved, sizeof(resolved), res);
     if (rc != AIRY_OK)
@@ -64,14 +57,10 @@ int fs_read_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     if (rc != AIRY_OK)
         return rc;
     if (truncated) {
-
         const char mark[] = "[output truncated at 1MB]";
         __builtin_memcpy(content + BUILTIN_OUTPUT_CAP - sizeof(mark), mark, sizeof(mark));
     }
-    res->output = content;
-    res->success = 1;
-    res->exit_code = 0;
-    return AIRY_OK;
+    return btool_okout(res, content);
 }
 
 /* 写前父目录预检（N3）：resolved 已锚定为绝对路径。create=1 时递归创建
@@ -82,10 +71,8 @@ static int fs_write_parents(const char *resolved, int create, tool_result_t *res
 {
     char dir[4096];
     size_t n = strlen(resolved);
-    if (n == 0 || n >= sizeof(dir)) {
-        res->error = AIRY_STRDUP("Invalid write path");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (n == 0 || n >= sizeof(dir))
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Invalid write path");
     __builtin_memcpy(dir, resolved, n + 1);
     char *sep = strrchr(dir, '/');
 #ifdef _WIN32
@@ -97,28 +84,16 @@ static int fs_write_parents(const char *resolved, int create, tool_result_t *res
         return AIRY_OK; /* 无父目录分隔符，或直接位于根下，无需创建 */
     *sep = '\0';
     if (create) {
-        if (airy_io_mkdir_p(dir, 0755) != 0) {
-            char err[512];
-            snprintf(err, sizeof(err), "Cannot create directory '%s'", dir);
-            res->error = AIRY_STRDUP(err);
-            return AIRY_ERR_IO;
-        }
+        if (airy_io_mkdir_p(dir, 0755) != 0)
+            return btool_fail(res, AIRY_ERR_IO, "Cannot create directory '%s'", dir);
         return AIRY_OK;
     }
     struct stat st;
-    if (stat(dir, &st) != 0) {
-        char err[512];
-        snprintf(err, sizeof(err),
-                 "Parent directory '%s' does not exist (create_dirs=false)", dir);
-        res->error = AIRY_STRDUP(err);
-        return AIRY_ERR_NOT_FOUND;
-    }
-    if (!S_ISDIR(st.st_mode)) {
-        char err[512];
-        snprintf(err, sizeof(err), "Parent path '%s' is not a directory", dir);
-        res->error = AIRY_STRDUP(err);
-        return AIRY_ERR_IO;
-    }
+    if (stat(dir, &st) != 0)
+        return btool_fail(res, AIRY_ERR_NOT_FOUND,
+                          "Parent directory '%s' does not exist (create_dirs=false)", dir);
+    if (!S_ISDIR(st.st_mode))
+        return btool_fail(res, AIRY_ERR_IO, "Parent path '%s' is not a directory", dir);
     return AIRY_OK;
 }
 
@@ -126,19 +101,14 @@ int fs_write_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *r
 {
     (void)timeout_ms;
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
     cJSON *path = cJSON_GetObjectItem(root, "path");
     cJSON *content = cJSON_GetObjectItem(root, "content");
-    if (!cJSON_IsString(path) || !path->valuestring || !path->valuestring[0]) {
-        res->error = AIRY_STRDUP("Missing string parameter: path");
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    if (!cJSON_IsString(content) || !content->valuestring) {
-        res->error = AIRY_STRDUP("Missing string parameter: content");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (!cJSON_IsString(path) || !path->valuestring || !path->valuestring[0])
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Missing string parameter: path");
+    if (!cJSON_IsString(content) || !content->valuestring)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Missing string parameter: content");
     int create_dirs = 1;
     cJSON *cd = cJSON_GetObjectItem(root, "create_dirs");
     if (cJSON_IsBool(cd))
@@ -151,18 +121,10 @@ int fs_write_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *r
     rc = fs_write_parents(resolved, create_dirs, res);
     if (rc != AIRY_OK)
         return rc;
-    if (airy_io_write_file(resolved, content->valuestring, clen) != 0) {
-        char err[512];
-        snprintf(err, sizeof(err), "Cannot write file '%s': %s", resolved, strerror(errno));
-        res->error = AIRY_STRDUP(err);
-        return AIRY_ERR_IO;
-    }
-    char ok[512];
-    snprintf(ok, sizeof(ok), "Written %zu bytes to %s (atomic)", clen, resolved);
-    res->output = AIRY_STRDUP(ok);
-    res->success = 1;
-    res->exit_code = 0;
-    return AIRY_OK;
+    if (airy_io_write_file(resolved, content->valuestring, clen) != 0)
+        return btool_fail(res, AIRY_ERR_IO, "Cannot write file '%s': %s", resolved,
+                          strerror(errno));
+    return btool_okf(res, "Written %zu bytes to %s (atomic)", clen, resolved);
 }
 
 /* ============================================================================
@@ -178,8 +140,7 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
 {
     (void)timeout_ms;
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
     cJSON *path = cJSON_GetObjectItem(root, "path");
     cJSON *old = cJSON_GetObjectItem(root, "old");
@@ -187,10 +148,9 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     cJSON *cnt = cJSON_GetObjectItem(root, "count");
     if (!cJSON_IsString(path) || !path->valuestring || !path->valuestring[0] ||
         !cJSON_IsString(old) || !old->valuestring || !old->valuestring[0] || !cJSON_IsString(new) ||
-        !new->valuestring) {
-        res->error = AIRY_STRDUP("Missing required string parameter: path/old/new");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+        !new->valuestring)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "Missing required string parameter: path/old/new");
     int max_rep = (cJSON_IsNumber(cnt) && cnt->valueint > 0) ? cnt->valueint : 1;
 
     char resolved[4096];
@@ -215,13 +175,8 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
         }
     }
     if (total == 0) {
-        char msg[512];
-        snprintf(msg, sizeof(msg), "String not found in '%s': %s", resolved, old->valuestring);
-        res->error = AIRY_STRDUP(msg);
         AIRY_FREE(content);
-        res->success = 0;
-        res->exit_code = 1;
-        return AIRY_OK;
+        return btool_soft(res, "String not found in '%s': %s", resolved, old->valuestring);
     }
     int reps = (total < max_rep) ? total : max_rep;
 
@@ -229,8 +184,7 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     char *buf = (char *)AIRY_MALLOC(new_size + 1);
     if (!buf) {
         AIRY_FREE(content);
-        res->error = AIRY_STRDUP("Out of memory");
-        return AIRY_ERR_OUT_OF_MEMORY;
+        return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Out of memory");
     }
     size_t w = 0, done = 0;
     const char *p = content;
@@ -251,20 +205,13 @@ int fs_edit_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     AIRY_FREE(content);
 
     if (airy_io_write_file(resolved, buf, w) != 0) {
-        char err[512];
-        snprintf(err, sizeof(err), "Cannot write file '%s': %s", resolved, strerror(errno));
-        res->error = AIRY_STRDUP(err);
         AIRY_FREE(buf);
-        return AIRY_ERR_IO;
+        return btool_fail(res, AIRY_ERR_IO, "Cannot write file '%s': %s", resolved,
+                          strerror(errno));
     }
-    char ok[512];
-    snprintf(ok, sizeof(ok),
-             "Replaced %d occurrence(s) of %zu-byte string in '%s' "
-             "(total matches: %d, %zu bytes written, atomic)",
-             reps, olen, resolved, total, w);
     AIRY_FREE(buf);
-    res->output = AIRY_STRDUP(ok);
-    res->success = 1;
-    res->exit_code = 0;
-    return AIRY_OK;
+    return btool_okf(res,
+                     "Replaced %d occurrence(s) of %zu-byte string in '%s' "
+                     "(total matches: %d, %zu bytes written, atomic)",
+                     reps, olen, resolved, total, w);
 }
