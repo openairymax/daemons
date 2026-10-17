@@ -38,6 +38,8 @@ set(TOOL_SERVICE_SOURCES
     src/core/registry.c
     # D8 (0.1.19): 工具可用性视图——依赖 daemon 可达性联动，暴露前过滤
     src/core/tool_avail.c
+    # N2 (0.1.19): 工具契约边车——list_tools 的 x-airy 投影
+    src/core/tool_contract.c
     src/core/executor.c
     # R1-a: 执行面专用有界 worker 池（隔离 RPC 共享池）
     src/core/executor_pool.c
