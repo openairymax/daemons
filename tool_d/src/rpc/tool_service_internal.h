@@ -30,6 +30,9 @@ extern "C" {
 void tool_service_register_acl_from_env(void);
 void register_builtin_tools(tool_service_t *svc);
 
+/* ---- 工具可用性视图（service.c） ---- */
+tool_avail_t *tool_service_avail(tool_service_t *svc);
+
 #ifdef __cplusplus
 }
 #endif
