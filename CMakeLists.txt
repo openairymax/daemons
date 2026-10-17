@@ -202,11 +202,6 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/a2a_d/include/
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/think_d/include/
-    DESTINATION include/agentrt
-    FILES_MATCHING PATTERN "*.h"
-)
-
 # 0.1.19 §254b/§255：cupolas_d include 面安装由其自身 CMakeLists 自持
 # （产品壳 daemon/ 目录，经顶层装配区挂入）。
 

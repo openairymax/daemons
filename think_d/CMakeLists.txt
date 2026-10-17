@@ -3,7 +3,9 @@
 #
 # gen5 装配（L3 SSoT）：daemon 源清单由 modules/sources.cmake 声明
 # （自 .manifest 生成）；机制层（main.c/svc_think_d.h）生成、策略层
-# （src/svc.c、src/think_rpc.c、lang/review 服务面）手写。
+# 手写。四业务域：rpc/（RPC 方法域）、service/（think 服务与编排域，
+# 静态库 airy_think_service 本体）、lang/（语言网关服务域，可降级）、
+# review/（认知审查服务域）。src/ 顶层仅存私有头 think_d_internal.h。
 # think_d 承载 CoreLoopThree 认知引擎（Thinkdual: t2/t1-f/t1-p +
 # dual_coordinate），LLM 调用经 llm_svc_adapter 直连 llm_d Unix socket。
 # 链接 airy_coreloopthree（其 PUBLIC 传递 airy_cognition/airy_core/
@@ -26,9 +28,9 @@ set(CORELOOPTHREE_DIR ${ATOMS_DIR}/coreloopthree)
 
 # ==================== Think 服务静态库 ====================
 set(THINK_SERVICE_SOURCES
-    src/think_service.c
     # think_service.c 域拆分（2026-08-27：1067 行 → 2 个职责模块）
-    src/think_orch.c
+    src/service/think_service.c
+    src/service/think_orch.c
 )
 
 add_library(airy_think_service STATIC ${THINK_SERVICE_SOURCES})
@@ -181,10 +183,5 @@ if(BUILD_TESTS)
     endif()
 endif()
 
-# 安装规则
+# 安装规则（svc 头为 codegen 户内产物，消费面全部户内，不发布）
 install(TARGETS think_d DESTINATION bin)
-
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
-    DESTINATION include/agentrt
-    FILES_MATCHING PATTERN "*.h"
-)

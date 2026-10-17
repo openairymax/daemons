@@ -8,7 +8,7 @@
 set(THINK_D_SOURCES
     src/main.c
     src/svc.c
-    src/think_rpc.c
-    src/lang_svc.c
-    src/review_svc.c
+    src/rpc/think_rpc.c
+    src/lang/lang_svc.c
+    src/review/review_svc.c
 )
