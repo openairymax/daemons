@@ -248,25 +248,11 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len, cha
     return 0;
 }
 
-void prometheus_counter_inc(const char *name, double value)
-{
-    if (!g_initialized || !name)
-        return;
-    um_increment(g_module_name, name, (uint64_t)value);
-}
-
 void prometheus_gauge_set(const char *name, double value)
 {
     if (!g_initialized || !name)
         return;
     um_gauge_set(g_module_name, name, value);
-}
-
-void prometheus_histogram_observe(const char *name, double value)
-{
-    if (!g_initialized || !name)
-        return;
-    um_observe(g_module_name, name, value);
 }
 
 char *prometheus_exporter_get_metrics(void)

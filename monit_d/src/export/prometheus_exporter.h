@@ -58,14 +58,8 @@ int prometheus_exporter_handle_http(const char *request, size_t request_len, cha
                                     size_t *response_len);
 
 
-/** @brief Increment a counter metric. */
-void prometheus_counter_inc(const char *name, double value);
-
 /** @brief Set a gauge metric value. */
 void prometheus_gauge_set(const char *name, double value);
-
-/** @brief Record a histogram observation. */
-void prometheus_histogram_observe(const char *name, double value);
 
 /**
  * @brief Get the full Prometheus-format metrics export.

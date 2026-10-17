@@ -172,11 +172,6 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tool_d/include/
     FILES_MATCHING PATTERN "*.h"
 )
 
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/monit_d/include/
-    DESTINATION include/agentrt
-    FILES_MATCHING PATTERN "*.h"
-)
-
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/sched_d/include/
     DESTINATION include/agentrt
     FILES_MATCHING PATTERN "*.h"

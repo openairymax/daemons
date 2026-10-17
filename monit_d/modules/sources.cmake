@@ -8,5 +8,5 @@
 set(MONIT_D_SOURCES
     src/main.c
     src/svc.c
-    src/monit_rpc.c
+    src/rpc/monit_rpc.c
 )

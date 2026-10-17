@@ -10,16 +10,16 @@
  * 只升不降；服务参数不依赖 config 文件，svc_prepare 仅以 config_path
  * 落启动日志。
  * observe/info 两个内建域按原语义非阻断降级（init 失败仅记日志，
- * 对应方法族不可用）。业务逻辑在 service 域与 monit_rpc.c，
- * 30s 指标自监控定时器在 svc_activate 挂载。
+ * 对应方法族不可用）。业务逻辑在 service/observe/info/export 四域与
+ * rpc/monit_rpc.c，30s 指标自监控定时器在 svc_activate 挂载。
  */
 
 #include "svc_monit_d.h"
 
 #include "monit_d_internal.h"
-#include "info_rpc.h"
-#include "observe_rpc.h"
-#include "prometheus_exporter.h"
+#include "export/prometheus_exporter.h"
+#include "info/info_rpc.h"
+#include "observe/observe_rpc.h"
 #include "svc_logger.h"
 
 #include <time.h>
