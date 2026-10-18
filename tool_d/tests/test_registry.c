@@ -137,53 +137,6 @@ static void test_registry_get_nonexistent(void)
 }
 
 /**
- * @brief Test tool removal
- */
-static void test_registry_remove(void)
-{
-    printf("  test_registry_remove...\n");
-
-    tool_registry_t *reg = tool_registry_create(NULL);
-    assert(reg != NULL);
-
-    tool_metadata_t meta;
-    AIRY_MEMSET(&meta, 0, sizeof(meta));
-    meta.id = "remove_test_tool";
-    meta.name = "Remove Test Tool";
-    meta.executable = "/bin/ls";
-
-    tool_registry_add(reg, &meta);
-
-    int ret = tool_registry_remove(reg, "remove_test_tool");
-    assert(ret == 0);
-
-    tool_metadata_t *retrieved = tool_registry_get(reg, "remove_test_tool");
-    assert(retrieved == NULL);
-
-    tool_registry_destroy(reg);
-
-    printf("    PASSED\n");
-}
-
-/**
- * @brief Test removal of a nonexistent tool
- */
-static void test_registry_remove_nonexistent(void)
-{
-    printf("  test_registry_remove_nonexistent...\n");
-
-    tool_registry_t *reg = tool_registry_create(NULL);
-    assert(reg != NULL);
-
-    int ret = tool_registry_remove(reg, "nonexistent_tool");
-    assert(ret != 0);
-
-    tool_registry_destroy(reg);
-
-    printf("    PASSED\n");
-}
-
-/**
  * @brief Test tool list as JSON
  */
 static void test_registry_list_json(void)
@@ -423,8 +376,6 @@ int main(void)
     test_registry_add_duplicate();
     test_registry_get();
     test_registry_get_nonexistent();
-    test_registry_remove();
-    test_registry_remove_nonexistent();
     test_registry_list_json();
     test_registry_list_json_empty();
     test_registry_null_param();

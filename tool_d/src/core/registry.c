@@ -240,29 +240,6 @@ int tool_registry_add(tool_registry_t *reg, const tool_metadata_t *meta)
     return 0;
 }
 
-int tool_registry_remove(tool_registry_t *reg, const char *tool_id)
-{
-    if (!reg || !tool_id)
-        return AIRY_ERR_INVALID_PARAM;
-    unsigned int idx = hash(tool_id);
-    airy_mtx_lock(&reg->lock);
-    registry_entry_t **p = &reg->buckets[idx];
-    while (*p) {
-        if (strcmp((*p)->id, tool_id) == 0) {
-            registry_entry_t *victim = *p;
-            *p = victim->next;
-            AIRY_FREE(victim->id);
-            tool_metadata_free(victim->meta);
-            AIRY_FREE(victim);
-            airy_mtx_unlock(&reg->lock);
-            return 0;
-        }
-        p = &(*p)->next;
-    }
-    airy_mtx_unlock(&reg->lock);
-    return AIRY_ERR_NOT_FOUND;
-}
-
 tool_metadata_t *tool_registry_get(tool_registry_t *reg, const char *tool_id)
 {
     if (!reg || !tool_id) {
