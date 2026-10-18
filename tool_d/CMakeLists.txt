@@ -116,7 +116,6 @@ target_include_directories(airy_tool_service PUBLIC
 
 target_include_directories(airy_tool_service PRIVATE
     ${CJSON_INCLUDE_DIRS}
-    ${YAML_INCLUDE_DIRS}
     # B16-S0：跨 daemon 头依赖显式化（svc_common 不再代传 llm_d/include）
     ${CMAKE_CURRENT_SOURCE_DIR}/../llm_d/include
 )
@@ -141,9 +140,6 @@ if(AIRY_HAS_CJSON)
     elseif(CJSON_FOUND AND CJSON_LIBRARIES)
         target_link_libraries(airy_tool_service PUBLIC ${CJSON_LIBRARIES})
     endif()
-endif()
-if(AIRY_HAS_YAML AND YAML_FOUND AND YAML_LIBRARIES)
-    target_link_libraries(airy_tool_service PUBLIC ${YAML_LIBRARIES})
 endif()
 
 if(UNIX)
@@ -206,7 +202,6 @@ target_include_directories(tool_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${CJSON_INCLUDE_DIRS}
-    ${YAML_INCLUDE_DIRS}
 )
 
 # 依赖拓扑序（成员级 DAG，单遍左到右解析完备，无需 whole-archive）：
