@@ -56,7 +56,7 @@ struct safety_guard_bridge_s {
     _Atomic uint64_t rate_limited;
 };
 
-static void bridge_config_defaults(safety_guard_bridge_config_t *cfg)
+void safety_guard_bridge_config_defaults(safety_guard_bridge_config_t *cfg)
 {
     if (!cfg)
         return;
@@ -89,7 +89,7 @@ safety_guard_bridge_t *safety_guard_bridge_create(const safety_guard_bridge_conf
             snprintf(bridge->agent_id, sizeof(bridge->agent_id), "%s", "unknown");
         }
     } else {
-        bridge_config_defaults(&bridge->config);
+        safety_guard_bridge_config_defaults(&bridge->config);
         snprintf(bridge->agent_id, sizeof(bridge->agent_id), "%s", "unknown");
     }
 
@@ -182,12 +182,12 @@ static void build_safety_event(safety_event_t *event, const tool_metadata_t *met
     }
 }
 
-/* Internal implementation: run the full guard chain with the given agent_id.
- * The permission guard (SAFETY_GUARD_PERMISSION) and the audit guard use the
- * passed-in agent_id; the other guards are agent-independent. */
-static int bridge_check_impl(safety_guard_bridge_t *bridge, const char *agent_id,
-                             const tool_metadata_t *meta, const char *params_json,
-                             safety_guard_bridge_result_t *result)
+/* Run the full guard chain with the given agent_id. The permission guard
+ * (SAFETY_GUARD_PERMISSION) and the audit guard use the passed-in agent_id;
+ * the other guards are agent-independent. */
+int safety_guard_bridge_check_for_agent(safety_guard_bridge_t *bridge, const char *agent_id,
+                                        const tool_metadata_t *meta, const char *params_json,
+                                        safety_guard_bridge_result_t *result)
 {
     if (!bridge || !meta)
         return AIRY_ERR_INVALID_PARAM;
@@ -394,11 +394,4 @@ static int bridge_check_impl(safety_guard_bridge_t *bridge, const char *agent_id
     }
 
     return 0;
-}
-
-int safety_guard_bridge_check_for_agent(safety_guard_bridge_t *bridge, const char *agent_id,
-                                        const tool_metadata_t *meta, const char *params_json,
-                                        safety_guard_bridge_result_t *result)
-{
-    return bridge_check_impl(bridge, agent_id, meta, params_json, result);
 }

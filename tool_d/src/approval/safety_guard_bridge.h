@@ -45,6 +45,12 @@ typedef struct {
     const char *agent_id; /**< Agent ID */
 } safety_guard_bridge_config_t;
 
+/**
+ * @brief Fill a bridge config with the default assembly (all guards on).
+ * @param cfg Config to fill
+ */
+void safety_guard_bridge_config_defaults(safety_guard_bridge_config_t *cfg);
+
 
 typedef struct {
     int permission_passed;
