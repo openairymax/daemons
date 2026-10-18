@@ -23,23 +23,32 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char *SUPPORTED_PERMISSIONS[] = {"file_read",
-                                              "file_write",
-                                              "network_outbound",
-                                              "network_inbound",
-                                              "tool_execute",
-                                              "memory_access",
-                                              "hook_register",
-                                              "system_call",
-                                              "process_spawn",
-                                              "ipc_connect",
-                                              "service_discovery",
-                                              "config_read",
-                                              "config_write",
-                                              "log_write",
-                                              "metrics_export",
-                                              "audit_trigger",
-                                              NULL};
+/* 权限元数据单表（SSoT）：声明名、Cupolas guard 映射与人类可读描述
+ * 三份平行数据合一，新增权限只改一处。 */
+static const struct {
+    const char *name;
+    safety_guard_type_t guard;
+    const char *desc;
+} PERM_META[] = {
+    {"file_read", SAFETY_GUARD_FILE_READ, "Read files from the filesystem"},
+    {"file_write", SAFETY_GUARD_FILE_WRITE, "Write files to the filesystem"},
+    {"network_outbound", SAFETY_GUARD_NETWORK, "Make outbound network connections"},
+    {"network_inbound", SAFETY_GUARD_NETWORK, "Accept inbound network connections"},
+    {"tool_execute", SAFETY_GUARD_TOOL_EXEC, "Execute tools via tool_d"},
+    {"memory_access", SAFETY_GUARD_MEMORY, "Access agent memory via memory_d"},
+    {"hook_register", SAFETY_GUARD_HOOK, "Register hooks in notify_d"},
+    {"system_call", SAFETY_GUARD_SYSTEM, "Make system calls"},
+    {"process_spawn", SAFETY_GUARD_PROCESS, "Spawn child processes"},
+    {"ipc_connect", SAFETY_GUARD_IPC, "Connect to IPC bus"},
+    {"service_discovery", SAFETY_GUARD_SERVICE_DISCOVERY, "Use service discovery"},
+    {"config_read", SAFETY_GUARD_CONFIG, "Read configuration"},
+    {"config_write", SAFETY_GUARD_CONFIG, "Write configuration"},
+    {"log_write", SAFETY_GUARD_LOGGING, "Write log entries"},
+    {"metrics_export", SAFETY_GUARD_METRICS, "Export metrics"},
+    {"audit_trigger", SAFETY_GUARD_AUDIT, "Trigger audit events"},
+};
+
+#define PERM_META_COUNT (sizeof(PERM_META) / sizeof(PERM_META[0]))
 
 static struct {
     plugin_permission_config_t config;
@@ -92,41 +101,15 @@ int plugin_permission_map_to_guard(const char *permission, safety_guard_type_t *
     if (!permission || !out_guard)
         return AIRY_ERR_INVALID_PARAM;
 
-    if (strcmp(permission, "file_read") == 0) {
-        *out_guard = SAFETY_GUARD_FILE_READ;
-    } else if (strcmp(permission, "file_write") == 0) {
-        *out_guard = SAFETY_GUARD_FILE_WRITE;
-    } else if (strcmp(permission, "network_outbound") == 0 ||
-               strcmp(permission, "network_inbound") == 0) {
-        *out_guard = SAFETY_GUARD_NETWORK;
-    } else if (strcmp(permission, "tool_execute") == 0) {
-        *out_guard = SAFETY_GUARD_TOOL_EXEC;
-    } else if (strcmp(permission, "memory_access") == 0) {
-        *out_guard = SAFETY_GUARD_MEMORY;
-    } else if (strcmp(permission, "hook_register") == 0) {
-        *out_guard = SAFETY_GUARD_HOOK;
-    } else if (strcmp(permission, "system_call") == 0) {
-        *out_guard = SAFETY_GUARD_SYSTEM;
-    } else if (strcmp(permission, "process_spawn") == 0) {
-        *out_guard = SAFETY_GUARD_PROCESS;
-    } else if (strcmp(permission, "ipc_connect") == 0) {
-        *out_guard = SAFETY_GUARD_IPC;
-    } else if (strcmp(permission, "service_discovery") == 0) {
-        *out_guard = SAFETY_GUARD_SERVICE_DISCOVERY;
-    } else if (strcmp(permission, "config_read") == 0 || strcmp(permission, "config_write") == 0) {
-        *out_guard = SAFETY_GUARD_CONFIG;
-    } else if (strcmp(permission, "log_write") == 0) {
-        *out_guard = SAFETY_GUARD_LOGGING;
-    } else if (strcmp(permission, "metrics_export") == 0) {
-        *out_guard = SAFETY_GUARD_METRICS;
-    } else if (strcmp(permission, "audit_trigger") == 0) {
-        *out_guard = SAFETY_GUARD_AUDIT;
-    } else {
-        AIRY_LOG_WARN("PluginPermission: unknown permission '%s'", permission);
-        return AIRY_ERR_NOT_SUPPORTED;
+    for (size_t i = 0; i < PERM_META_COUNT; i++) {
+        if (strcmp(permission, PERM_META[i].name) == 0) {
+            *out_guard = PERM_META[i].guard;
+            return 0;
+        }
     }
 
-    return 0;
+    AIRY_LOG_WARN("PluginPermission: unknown permission '%s'", permission);
+    return AIRY_ERR_NOT_SUPPORTED;
 }
 
 plugin_permission_result_t plugin_permission_check(const char (*permissions)[64],
@@ -224,38 +207,10 @@ const char *plugin_permission_description(const char *permission)
     if (!permission)
         return "unknown";
 
-    if (strcmp(permission, "file_read") == 0)
-        return "Read files from the filesystem";
-    if (strcmp(permission, "file_write") == 0)
-        return "Write files to the filesystem";
-    if (strcmp(permission, "network_outbound") == 0)
-        return "Make outbound network connections";
-    if (strcmp(permission, "network_inbound") == 0)
-        return "Accept inbound network connections";
-    if (strcmp(permission, "tool_execute") == 0)
-        return "Execute tools via tool_d";
-    if (strcmp(permission, "memory_access") == 0)
-        return "Access agent memory via memory_d";
-    if (strcmp(permission, "hook_register") == 0)
-        return "Register hooks in notify_d";
-    if (strcmp(permission, "system_call") == 0)
-        return "Make system calls";
-    if (strcmp(permission, "process_spawn") == 0)
-        return "Spawn child processes";
-    if (strcmp(permission, "ipc_connect") == 0)
-        return "Connect to IPC bus";
-    if (strcmp(permission, "service_discovery") == 0)
-        return "Use service discovery";
-    if (strcmp(permission, "config_read") == 0)
-        return "Read configuration";
-    if (strcmp(permission, "config_write") == 0)
-        return "Write configuration";
-    if (strcmp(permission, "log_write") == 0)
-        return "Write log entries";
-    if (strcmp(permission, "metrics_export") == 0)
-        return "Export metrics";
-    if (strcmp(permission, "audit_trigger") == 0)
-        return "Trigger audit events";
+    for (size_t i = 0; i < PERM_META_COUNT; i++) {
+        if (strcmp(permission, PERM_META[i].name) == 0)
+            return PERM_META[i].desc;
+    }
 
     return "unknown permission";
 }
@@ -265,19 +220,14 @@ int plugin_permission_list_supported(char ***out_permissions, size_t *out_count)
     if (!out_permissions || !out_count)
         return AIRY_ERR_INVALID_PARAM;
 
-    size_t count = 0;
-    while (SUPPORTED_PERMISSIONS[count])
-        count++;
-
-    char **list = (char **)AIRY_CALLOC(count, sizeof(char *));
+    char **list = (char **)AIRY_CALLOC(PERM_META_COUNT, sizeof(char *));
     if (!list)
         return AIRY_ERR_OUT_OF_MEMORY;
 
-    for (size_t i = 0; i < count; i++) {
-        list[i] = AIRY_STRDUP(SUPPORTED_PERMISSIONS[i]);
-    }
+    for (size_t i = 0; i < PERM_META_COUNT; i++)
+        list[i] = AIRY_STRDUP(PERM_META[i].name);
 
     *out_permissions = list;
-    *out_count = count;
+    *out_count = PERM_META_COUNT;
     return 0;
 }

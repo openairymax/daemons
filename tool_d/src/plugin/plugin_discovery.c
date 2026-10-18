@@ -19,6 +19,7 @@
 #include "string_compat.h"
 #include "platform.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +41,22 @@ static struct {
     size_t count;
     bool initialized;
 } g_discovery;
+
+/* Manifest 校验失败的单一出口：写原因、标记 invalid 并返回错误码。
+ * out 可为 NULL（validate_plugin 的探测式调用）。 */
+static int disco_reject(plugin_discovery_result_t *out, int err,
+                        const char *fmt, ...)
+{
+    if (out) {
+        va_list ap;
+
+        va_start(ap, fmt);
+        vsnprintf(out->error_reason, sizeof(out->error_reason), fmt, ap);
+        va_end(ap);
+        out->valid = false;
+    }
+    return err;
+}
 
 /**
  * @brief Simple YAML key-value parsing (no third-party dependency)
@@ -184,10 +201,8 @@ static int plugin_discovery_parse_manifest(const char *yaml_path, const char *pl
     FILE *fp = fopen(yaml_path, "r");
     if (!fp) {
         AIRY_LOG_WARN("PluginDiscovery: cannot open manifest '%s'", yaml_path);
-        out_result->valid = false;
-        safe_strcpy(out_result->error_reason, "Cannot open manifest file",
-                    sizeof(out_result->error_reason));
-        return AIRY_ERR_IO;
+        return disco_reject(out_result, AIRY_ERR_IO,
+                            "Cannot open manifest file");
     }
 
     char line[512];
@@ -235,50 +250,35 @@ static int plugin_discovery_parse_manifest(const char *yaml_path, const char *pl
     fclose(fp);
 
     if (out_result->name[0] == '\0') {
-        out_result->valid = false;
-        safe_strcpy(out_result->error_reason, "Missing required field: name",
-                    sizeof(out_result->error_reason));
+        int rc = disco_reject(out_result, AIRY_ERR_PARSE_ERROR,
+                              "Missing required field: name");
         AIRY_LOG_WARN("PluginDiscovery: invalid manifest '%s': %s", yaml_path,
                       out_result->error_reason);
-        return AIRY_ERR_PARSE_ERROR;
+        return rc;
     }
 
-    if (out_result->library_path[0] == '\0') {
-        out_result->valid = false;
-        safe_strcpy(out_result->error_reason, "Missing required field: library",
-                    sizeof(out_result->error_reason));
-        return AIRY_ERR_PARSE_ERROR;
-    }
+    if (out_result->library_path[0] == '\0')
+        return disco_reject(out_result, AIRY_ERR_PARSE_ERROR,
+                            "Missing required field: library");
 
     /* 0.1.6 生态 SSoT（S-4）：manifest 必填约束对齐
      * manager/schema/plugin-manifest.schema.json——type 必须存在且合法，
      * api_version / min_airy_version 必填（此前静默以 0/默认 type 接受）。 */
-    if (raw_type[0] == '\0') {
-        out_result->valid = false;
-        safe_strcpy(out_result->error_reason, "Missing required field: type",
-                    sizeof(out_result->error_reason));
-        return AIRY_ERR_PARSE_ERROR;
-    }
-    if (out_result->type == PLUGIN_TYPE_COUNT) {
-        out_result->valid = false;
-        snprintf(out_result->error_reason, sizeof(out_result->error_reason),
-                 "Invalid plugin type: %s (expect tool_provider|protocol_adapter|"
-                 "memory_provider|hook_extension)",
-                 raw_type);
-        return AIRY_ERR_PARSE_ERROR;
-    }
-    if (out_result->api_version == 0) {
-        out_result->valid = false;
-        safe_strcpy(out_result->error_reason, "Missing required field: api_version",
-                    sizeof(out_result->error_reason));
-        return AIRY_ERR_PARSE_ERROR;
-    }
-    if (out_result->min_airy_version == 0) {
-        out_result->valid = false;
-        safe_strcpy(out_result->error_reason, "Missing required field: min_airy_version",
-                    sizeof(out_result->error_reason));
-        return AIRY_ERR_PARSE_ERROR;
-    }
+    if (raw_type[0] == '\0')
+        return disco_reject(out_result, AIRY_ERR_PARSE_ERROR,
+                            "Missing required field: type");
+    if (out_result->type == PLUGIN_TYPE_COUNT)
+        return disco_reject(out_result, AIRY_ERR_PARSE_ERROR,
+                            "Invalid plugin type: %s (expect "
+                            "tool_provider|protocol_adapter|"
+                            "memory_provider|hook_extension)",
+                            raw_type);
+    if (out_result->api_version == 0)
+        return disco_reject(out_result, AIRY_ERR_PARSE_ERROR,
+                            "Missing required field: api_version");
+    if (out_result->min_airy_version == 0)
+        return disco_reject(out_result, AIRY_ERR_PARSE_ERROR,
+                            "Missing required field: min_airy_version");
 
     out_result->valid = true;
 
@@ -421,49 +421,28 @@ int plugin_discovery_validate_plugin(const char *plugin_dir, plugin_discovery_re
     if (out_result)
         __builtin_memset(out_result, 0, sizeof(*out_result));
 
-    if (!plugin_dir || !plugin_dir[0]) {
-        if (out_result) {
-            out_result->valid = false;
-            safe_strcpy(out_result->error_reason, "Invalid plugin directory",
-                        sizeof(out_result->error_reason));
-        }
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (!plugin_dir || !plugin_dir[0])
+        return disco_reject(out_result, AIRY_ERR_INVALID_PARAM,
+                            "Invalid plugin directory");
 
     /* fail-closed：目录必须存在 */
-    if (!dir_exists(plugin_dir)) {
-        if (out_result) {
-            out_result->valid = false;
-            safe_strcpy(out_result->error_reason, "Plugin directory does not exist",
-                        sizeof(out_result->error_reason));
-        }
-        return AIRY_ERR_IO;
-    }
+    if (!dir_exists(plugin_dir))
+        return disco_reject(out_result, AIRY_ERR_IO,
+                            "Plugin directory does not exist");
 
     /* manifest.yaml 必须存在 */
     char manifest_path[PLUGIN_DISCOVERY_MAX_PATH];
     snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.yaml", plugin_dir);
-    if (!file_exists(manifest_path)) {
-        if (out_result) {
-            out_result->valid = false;
-            safe_strcpy(out_result->error_reason, "Missing manifest.yaml",
-                        sizeof(out_result->error_reason));
-        }
-        return AIRY_ERR_IO;
-    }
+    if (!file_exists(manifest_path))
+        return disco_reject(out_result, AIRY_ERR_IO, "Missing manifest.yaml");
 
     /* schema 必须合法（name/type/library/api_version/min_airy_version） */
     plugin_discovery_result_t parsed;
     int ret = plugin_discovery_parse_manifest(manifest_path, plugin_dir, &parsed);
-    if (ret != 0 || !parsed.valid) {
-        if (out_result) {
-            out_result->valid = false;
-            safe_strcpy(out_result->error_reason,
-                        parsed.error_reason[0] ? parsed.error_reason : "Manifest parse failed",
-                        sizeof(out_result->error_reason));
-        }
-        return AIRY_ERR_PARSE_ERROR;
-    }
+    if (ret != 0 || !parsed.valid)
+        return disco_reject(out_result, AIRY_ERR_PARSE_ERROR,
+                            parsed.error_reason[0] ? parsed.error_reason :
+                                                     "Manifest parse failed");
 
     /* 库文件必须存在（provider/adapter/hook 类均为 .so/.dll，fail-closed） */
     if (!file_exists(parsed.library_path)) {
