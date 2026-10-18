@@ -32,8 +32,6 @@
 #include <windows.h>
 #endif
 
-#define DEFAULT_SCAN_DEPTH 1
-
 static struct {
     plugin_discovery_config_t config;
     char plugins_dir[PLUGIN_DISCOVERY_MAX_PATH];
@@ -155,9 +153,7 @@ int plugin_discovery_init(const plugin_discovery_config_t *config)
                         sizeof(g_discovery.plugins_dir));
         }
     } else {
-        g_discovery.config.auto_load = false;
         g_discovery.config.fail_on_invalid = false;
-        g_discovery.config.scan_depth = DEFAULT_SCAN_DEPTH;
     }
 
     if (g_discovery.plugins_dir[0] == '\0') {
@@ -171,10 +167,8 @@ int plugin_discovery_init(const plugin_discovery_config_t *config)
 
     g_discovery.initialized = true;
 
-    AIRY_LOG_INFO("PluginDiscovery: initialized (dir=%s, auto_load=%d, "
-                  "scan_depth=%u)",
-                  g_discovery.plugins_dir, g_discovery.config.auto_load,
-                  g_discovery.config.scan_depth);
+    AIRY_LOG_INFO("PluginDiscovery: initialized (dir=%s)",
+                  g_discovery.plugins_dir);
     return 0;
 }
 
@@ -372,10 +366,8 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results, size_t *out_c
         char plugin_dir_path[PLUGIN_DISCOVERY_MAX_PATH];
         snprintf(plugin_dir_path, sizeof(plugin_dir_path), "%s/%s", plugins_dir, d_name);
 
-        struct stat st;
-        if (stat(plugin_dir_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        if (!dir_exists(plugin_dir_path))
             continue;
-        }
 
         char manifest_path[PLUGIN_DISCOVERY_MAX_PATH];
         snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.yaml", plugin_dir_path);

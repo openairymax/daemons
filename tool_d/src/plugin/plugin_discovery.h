@@ -60,9 +60,7 @@ typedef struct {
 
 typedef struct {
     const char *plugins_dir;
-    bool auto_load;
     bool fail_on_invalid;
-    uint32_t scan_depth;
 } plugin_discovery_config_t;
 
 

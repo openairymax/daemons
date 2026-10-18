@@ -21,7 +21,6 @@
 #include "error.h"
 #include "jsonrpc_helpers.h"
 #include "method_dispatcher.h"
-#include "platform.h"
 #include "plugin_discovery.h"
 #include "plugin_permission.h"
 #include "plugin_service.h"
@@ -87,14 +86,11 @@ int plugin_rpc_init(void)
     if (plugin_permission_init(&perm_cfg) != 0)
         SVC_LOG_WARN("plugin_rpc: permission module init failed");
 
-    char plugins_dir[AIRY_PATH_MAX];
-    snprintf(plugins_dir, sizeof(plugins_dir), "%s/ecosystem/plugins", airy_home_dir());
+    /* plugins_dir 缺省时由 discovery 内置默认解析
+     * $AIRY_HOME/ecosystem/plugins（P1-5 同源逻辑）。 */
     plugin_discovery_config_t disc_cfg;
     AIRY_MEMSET(&disc_cfg, 0, sizeof(disc_cfg));
-    disc_cfg.plugins_dir = plugins_dir;
-    disc_cfg.auto_load = false;
     disc_cfg.fail_on_invalid = false;
-    disc_cfg.scan_depth = 1;
     if (plugin_discovery_init(&disc_cfg) != 0)
         SVC_LOG_ERROR("plugin_rpc: plugin discovery init failed");
 
