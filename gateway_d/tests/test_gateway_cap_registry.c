@@ -11,6 +11,8 @@
  *   legacy 整编条目——路由 ns 与 cap_key 首段不一致——按路由规则断言）
  * - 关键能力存在性 + 处理方式（kind）断言（防误删特殊处理器）
  * - fail-closed：未登记能力 gw_cap_find 返回 NULL（仅暴露已声明能力）
+ * - 命名空间策略表（gateway/.manifest 构建期生成）：归属/端点/前缀/可路由、
+ *   尾点容忍、未知 ns fail-closed、槽位边界、l2 透传方法集
  * - gw_cap_ns_timeout 已知/未知命名空间回退
  * - gw_cap_emit 事件埋点（AIRY_HOME 隔离到 /tmp，绝不触碰真实运行时目录）
  */
@@ -19,6 +21,7 @@
 #include "gateway_cap_registry.h"
 
 #include "gateway_biz_internal.h"
+#include "gateway_policy.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -245,6 +248,50 @@ static void test_ns_ownership(void)
     TEST_PASS();
 }
 
+static void test_ns_policy(void)
+{
+    TEST_BEGIN("namespace policy table (manifest generated)");
+    const gw_ns_pol_t *p = gw_ns_pol("llm");
+    ASSERT_NOT_NULL(p);
+    ASSERT_TRUE(strcmp(p->owner, "llm") == 0);
+    ASSERT_TRUE(strcmp(p->sock, "llm") == 0);
+    ASSERT_EQ_INT(p->route, 1);
+    ASSERT_TRUE(p->prefix == NULL);
+    /* 整编命名空间：消费方 ns 与宿主 daemon/sock 分离，wire 前缀非空 */
+    p = gw_ns_pol("plugin");
+    ASSERT_NOT_NULL(p);
+    ASSERT_TRUE(strcmp(p->owner, "tool") == 0);
+    ASSERT_TRUE(strcmp(p->prefix, "plugin") == 0);
+    ASSERT_EQ_INT(p->route, 1);
+    /* 不可路由命名空间：策略表内可见但派发拒绝 */
+    p = gw_ns_pol("hall");
+    ASSERT_NOT_NULL(p);
+    ASSERT_EQ_INT(p->route, 0);
+    /* 尾点容忍（客户端 "llm." 形式）与未知/空值 fail-closed */
+    p = gw_ns_pol("llm.");
+    ASSERT_NOT_NULL(p);
+    ASSERT_TRUE(strcmp(p->ns, "llm") == 0);
+    ASSERT_TRUE(gw_ns_pol("nope") == NULL);
+    ASSERT_TRUE(gw_ns_pol("") == NULL);
+    ASSERT_TRUE(gw_ns_pol(NULL) == NULL);
+    /* 槽位：合法项可定位，非法项 -1（限频表边界） */
+    ASSERT_TRUE(gw_ns_slot(gw_ns_pol("llm")) >= 0);
+    ASSERT_EQ_INT(gw_ns_slot(NULL), -1);
+    TEST_PASS();
+}
+
+static void test_l2_methods(void)
+{
+    TEST_BEGIN("l2 passthrough methods");
+    ASSERT_TRUE(gw_l2_method("shutdown") == 1);
+    ASSERT_TRUE(gw_l2_method("get_stats") == 1);
+    ASSERT_TRUE(gw_l2_method("health_check") == 1);
+    ASSERT_TRUE(gw_l2_method("load") == 0);
+    ASSERT_TRUE(gw_l2_method("") == 0);
+    ASSERT_TRUE(gw_l2_method(NULL) == 0);
+    TEST_PASS();
+}
+
 int main(void)
 {
     printf("test_gateway_cap_registry: AIRY_HOME isolated to /tmp\n");
@@ -254,6 +301,8 @@ int main(void)
     test_contract_version();
     test_perm_requirements();
     test_ns_ownership();
+    test_ns_policy();
+    test_l2_methods();
     test_emit_event();
     printf("test_gateway_cap_registry: %d/%d passed\n", g_tests_passed, g_tests_run);
     return g_tests_passed == g_tests_run ? 0 : 1;

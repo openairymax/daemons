@@ -65,6 +65,28 @@ option(AIRY_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
 #   gateway_cap_registry.c    统一能力注册表（cap_key 单一权威源）
 set(GATEWAY_SRC_BASE ${GATEWAY_DIR})
 include(${GATEWAY_DIR}/cmake/gateway-sources.cmake)
+
+# ==================== 能力注册表代码生成 ====================
+# gateway/.manifest 是能力/命名空间/wire 策略的唯一权威源（0.1.19）。
+# 生成产物只落构建目录（源码树零生成物，SLOC 账真实），
+# schema 非法即构建失败（fail-closed）。
+set(GATEWAY_CODEGEN_PY ${GATEWAY_DIR}/../tools/codegen/gateway_gen.py)
+set(GATEWAY_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/gen)
+
+add_custom_command(
+    OUTPUT ${GATEWAY_GEN_DIR}/gateway_policy_gen.inc
+           ${GATEWAY_GEN_DIR}/gateway_sock_gen.inc
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${GATEWAY_GEN_DIR}
+    COMMAND python3 ${GATEWAY_CODEGEN_PY}
+            --manifest ${GATEWAY_DIR}/.manifest
+            --out-dir ${GATEWAY_GEN_DIR}
+    DEPENDS ${GATEWAY_DIR}/.manifest ${GATEWAY_CODEGEN_PY}
+    COMMENT "gateway: generating policy tables from .manifest"
+    VERBATIM
+)
+add_custom_target(gateway_policy_gen
+    DEPENDS ${GATEWAY_GEN_DIR}/gateway_policy_gen.inc
+            ${GATEWAY_GEN_DIR}/gateway_sock_gen.inc)
 # 本 daemon 自有源装配清单（五件套④）：service/protocol 域入静态库，
 # bootstrap 域入可执行目标（同 llm_d 拆分，服务域重复编译零容忍）。
 include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
@@ -83,6 +105,7 @@ else()
 endif()
 
 add_library(airy_gateway_service STATIC ${GATEWAY_SERVICE_SOURCES})
+add_dependencies(airy_gateway_service gateway_policy_gen)
 
 if(AIRY_ENABLE_PROTOCOLS)
     target_compile_definitions(airy_gateway_service PRIVATE AIRY_HAS_PROTOCOLS=1)
@@ -108,6 +131,8 @@ endif()
 target_include_directories(airy_gateway_service PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/protocol
+    # 0.1.19: gateway_policy_gen.inc / gateway_sock_gen.inc（构建期生成）
+    ${GATEWAY_GEN_DIR}
 )
 
 target_include_directories(airy_gateway_service PUBLIC
