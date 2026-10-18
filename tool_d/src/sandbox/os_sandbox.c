@@ -230,11 +230,26 @@ int os_sandbox_apply(const os_sandbox_cfg_t *cfg)
 static int fs_confine_realpath(const char *path, char *out, size_t cap)
 {
 #if defined(_WIN32)
-    (void)cap;
     return _fullpath(out, path, cap) != NULL ? 0 : -1;
 #else
-    (void)cap;
-    return realpath(path, out) != NULL ? 0 : -1;
+    /* POSIX realpath() requires a caller buffer of at least PATH_MAX
+     * bytes; glibc fortify aborts the process on smaller ones (observed
+     * with a 512-byte workspace buffer). Resolve into an
+     * implementation-allocated buffer instead and fail - never
+     * truncate - when the canonical path does not fit: a truncated
+     * path would defeat the sandbox prefix check. */
+    char *real = realpath(path, NULL);
+    if (!real) {
+        return -1;
+    }
+    size_t len = strlen(real);
+    if (len >= cap) {
+        AIRY_FREE(real);
+        return -1;
+    }
+    AIRY_MEMCPY(out, real, len + 1);
+    AIRY_FREE(real);
+    return 0;
 #endif
 }
 
