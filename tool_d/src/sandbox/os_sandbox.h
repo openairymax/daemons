@@ -90,7 +90,9 @@ int os_sandbox_fs_confine(const char *path, int for_write, char *resolved,
 /* Resolve the canonical workspace root used by fs confinement (the
  * AIRY_TOOL_SANDBOX_WORKSPACE entry canonicalized, or the current
  * working directory when unset). Same resolution rules as
- * os_sandbox_fs_confine(); returns 0 on success, -1 on failure. */
+ * os_sandbox_fs_confine(); returns 0 on success, -1 on failure.
+ * Fail-closed on `cap`: a root that does not fit yields -1, never a
+ * truncated result. */
 int os_sandbox_fs_workspace(char *ws, size_t cap);
 
 #ifdef __cplusplus
