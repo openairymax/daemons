@@ -56,7 +56,7 @@ struct safety_guard_bridge_s {
     _Atomic uint64_t rate_limited;
 };
 
-void safety_guard_bridge_config_defaults(safety_guard_bridge_config_t *cfg)
+void sgb_cfg_defaults(safety_guard_bridge_config_t *cfg)
 {
     if (!cfg)
         return;
@@ -89,7 +89,7 @@ safety_guard_bridge_t *safety_guard_bridge_create(const safety_guard_bridge_conf
             snprintf(bridge->agent_id, sizeof(bridge->agent_id), "%s", "unknown");
         }
     } else {
-        safety_guard_bridge_config_defaults(&bridge->config);
+        sgb_cfg_defaults(&bridge->config);
         snprintf(bridge->agent_id, sizeof(bridge->agent_id), "%s", "unknown");
     }
 

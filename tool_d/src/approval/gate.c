@@ -32,7 +32,7 @@ struct approval_gate {
 static void gate_attach_bridge(approval_gate_t *gate)
 {
     safety_guard_bridge_config_t bridge_cfg;
-    safety_guard_bridge_config_defaults(&bridge_cfg);
+    sgb_cfg_defaults(&bridge_cfg);
     bridge_cfg.agent_id = "tool_d";
 
     gate->bridge = safety_guard_bridge_create(&bridge_cfg);

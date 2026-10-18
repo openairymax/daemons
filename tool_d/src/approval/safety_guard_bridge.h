@@ -49,7 +49,7 @@ typedef struct {
  * @brief Fill a bridge config with the default assembly (all guards on).
  * @param cfg Config to fill
  */
-void safety_guard_bridge_config_defaults(safety_guard_bridge_config_t *cfg);
+void sgb_cfg_defaults(safety_guard_bridge_config_t *cfg);
 
 
 typedef struct {
