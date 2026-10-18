@@ -240,7 +240,6 @@ ctest --test-dir ../daemons-build -R tool_d_ --output-on-failure
 | `tool_d_test_os_sandbox` | Landlock / seccomp 原语（仅 Linux） |
 | `tool_d_test_fs_e2e` | 文件工具端到端 |
 | `tool_d_test_plugin_permission` | 权限映射与严格模式 |
-| `tool_d_test_plugin_discovery` | 离线扩展校验器的 fail-closed 面 |
 
 ## 依赖
 

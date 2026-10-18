@@ -62,7 +62,6 @@ set(TOOL_TEST_SOURCES
     test_fs_e2e.c
     # 0.1.9 M4：plugin_d → tool_d 整编——插件测试随迁
     test_plugin_permission.c
-    test_plugin_discovery.c
     # 技能机制服务面（skill.* RPC 登记 + syscall 机制往返）
     test_skill_rpc.c
 )

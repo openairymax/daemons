@@ -86,23 +86,6 @@ plugin_permission_result_t plugin_permission_check(const char (*permissions)[64]
  */
 int plugin_permission_map_to_guard(const char *permission, safety_guard_type_t *out_guard);
 
-/**
- * @brief Get the human-readable description of a permission.
- *
- * @param permission Permission string
- * @return Description string
- */
-const char *plugin_permission_description(const char *permission);
-
-/**
- * @brief Get the list of supported permissions.
- *
- * @param out_permissions Output permission array
- * @param out_count       Output count
- * @return 0 on success
- */
-int plugin_permission_list_supported(char ***out_permissions, size_t *out_count);
-
 AIRY_ABI_END
 
 #endif /* AIRY_RT_PLUGIN_PERMISSION_H */
