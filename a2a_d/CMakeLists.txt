@@ -73,7 +73,6 @@ target_include_directories(airy_a2a_service PUBLIC
 
 target_include_directories(airy_a2a_service PRIVATE
     ${CJSON_INCLUDE_DIRS}
-    ${YAML_INCLUDE_DIRS}
 )
 
 # 链接库：svc_common 提供 daemon 公共层，airy_protocols 提供
@@ -86,9 +85,6 @@ if(AIRY_HAS_CJSON)
     elseif(CJSON_FOUND AND CJSON_LIBRARIES)
         target_link_libraries(airy_a2a_service PUBLIC ${CJSON_LIBRARIES})
     endif()
-endif()
-if(AIRY_HAS_YAML AND YAML_FOUND AND YAML_LIBRARIES)
-    target_link_libraries(airy_a2a_service PUBLIC ${YAML_LIBRARIES})
 endif()
 
 if(UNIX)
@@ -147,7 +143,6 @@ target_include_directories(a2a_d PRIVATE
     ${PROTOCOLS_INCLUDE_DIR}
     ${PROTOCOLS_COMMON_INCLUDE_DIR}
     ${CJSON_INCLUDE_DIRS}
-    ${YAML_INCLUDE_DIRS}
 )
 
 target_link_libraries(a2a_d PRIVATE

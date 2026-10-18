@@ -23,7 +23,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-manager \
     git \
     curl \
-    libyaml-dev \
     libcjson-dev \
     libcurl4-openssl-dev \
     lcov \

@@ -13,8 +13,7 @@ set(COREKERN_INCLUDE_DIR ${ATOMIC_DIR}/corekern/include)
 set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/config/service_config.c
-    # service_config.c 域拆分（2026-08-27）：核心 + 4 个职责模块，须与主目标同步；
-    # yaml 三件整体受 #ifdef HAVE_YAML 保护，非 YAML 构建下为空翻译单元
+    # service_config.c 域拆分（2026-08-27）：核心 + 4 个职责模块，须与主目标同步
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/config/service_config_json.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/config/service_config_yaml_models.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/config/service_config_yaml_providers.c
@@ -109,15 +108,6 @@ foreach(TEST_SRC ${LLM_TEST_SOURCES})
     # cJSON found by root CMakeLists.txt (AIRY_HAS_CJSON)
     if(AIRY_HAS_CJSON)
         target_link_libraries(test_llm_${TEST_NAME} PRIVATE cjson)
-    endif()
-
-    # libyaml：service_config.c 的 YAML 分支由 HAVE_YAML 保护，测试目标须与
-    # 主目标 airy_llm_service 同步（否则 load_pricing_rules_from_yaml 等
-    # YAML 符号未定义引用，test_llm_test_service 链接失败）
-    if(AIRY_HAS_YAML)
-        target_include_directories(test_llm_${TEST_NAME} PRIVATE ${YAML_INCLUDE_DIRS})
-        target_compile_definitions(test_llm_${TEST_NAME} PRIVATE HAVE_YAML=1)
-        target_link_libraries(test_llm_${TEST_NAME} PRIVATE ${YAML_LIBRARIES})
     endif()
 
     # CURL found by root CMakeLists.txt (AIRY_HAS_CURL)

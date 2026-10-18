@@ -83,7 +83,6 @@ target_include_directories(airy_mem_service PUBLIC
 
 target_include_directories(airy_mem_service PRIVATE
     ${CJSON_INCLUDE_DIRS}
-    ${YAML_INCLUDE_DIRS}
 )
 
 # 链接库：svc_common 提供 daemon 公共层
@@ -95,9 +94,6 @@ if(AIRY_HAS_CJSON)
     elseif(CJSON_FOUND AND CJSON_LIBRARIES)
         target_link_libraries(airy_mem_service PUBLIC ${CJSON_LIBRARIES})
     endif()
-endif()
-if(AIRY_HAS_YAML AND YAML_FOUND AND YAML_LIBRARIES)
-    target_link_libraries(airy_mem_service PUBLIC ${YAML_LIBRARIES})
 endif()
 
 # 可选 embedding 后端：libcurl（AIRY_HAS_CURL 由 dependencies.cmake 定义）
@@ -170,7 +166,6 @@ target_include_directories(mem_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/token
     ${COMMONS_INCLUDE_DIR}/utils/ds
     ${CJSON_INCLUDE_DIRS}
-    ${YAML_INCLUDE_DIRS}
 )
 
 target_link_libraries(mem_d PRIVATE
