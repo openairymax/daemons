@@ -201,33 +201,3 @@ plugin_permission_result_t plugin_permission_check(const char (*permissions)[64]
 
     return overall;
 }
-
-const char *plugin_permission_description(const char *permission)
-{
-    if (!permission)
-        return "unknown";
-
-    for (size_t i = 0; i < PERM_META_COUNT; i++) {
-        if (strcmp(permission, PERM_META[i].name) == 0)
-            return PERM_META[i].desc;
-    }
-
-    return "unknown permission";
-}
-
-int plugin_permission_list_supported(char ***out_permissions, size_t *out_count)
-{
-    if (!out_permissions || !out_count)
-        return AIRY_ERR_INVALID_PARAM;
-
-    char **list = (char **)AIRY_CALLOC(PERM_META_COUNT, sizeof(char *));
-    if (!list)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
-    for (size_t i = 0; i < PERM_META_COUNT; i++)
-        list[i] = AIRY_STRDUP(PERM_META[i].name);
-
-    *out_permissions = list;
-    *out_count = PERM_META_COUNT;
-    return 0;
-}

@@ -416,59 +416,6 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results, size_t *out_c
     return 0;
 }
 
-int plugin_discovery_validate_plugin(const char *plugin_dir, plugin_discovery_result_t *out_result)
-{
-    if (out_result)
-        __builtin_memset(out_result, 0, sizeof(*out_result));
-
-    if (!plugin_dir || !plugin_dir[0])
-        return disco_reject(out_result, AIRY_ERR_INVALID_PARAM,
-                            "Invalid plugin directory");
-
-    /* fail-closed：目录必须存在 */
-    if (!dir_exists(plugin_dir))
-        return disco_reject(out_result, AIRY_ERR_IO,
-                            "Plugin directory does not exist");
-
-    /* manifest.yaml 必须存在 */
-    char manifest_path[PLUGIN_DISCOVERY_MAX_PATH];
-    snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.yaml", plugin_dir);
-    if (!file_exists(manifest_path))
-        return disco_reject(out_result, AIRY_ERR_IO, "Missing manifest.yaml");
-
-    /* schema 必须合法（name/type/library/api_version/min_airy_version） */
-    plugin_discovery_result_t parsed;
-    int ret = plugin_discovery_parse_manifest(manifest_path, plugin_dir, &parsed);
-    if (ret != 0 || !parsed.valid)
-        return disco_reject(out_result, AIRY_ERR_PARSE_ERROR,
-                            parsed.error_reason[0] ? parsed.error_reason :
-                                                     "Manifest parse failed");
-
-    /* 库文件必须存在（provider/adapter/hook 类均为 .so/.dll，fail-closed） */
-    if (!file_exists(parsed.library_path)) {
-        parsed.valid = false;
-        snprintf(parsed.error_reason, sizeof(parsed.error_reason), "Library not found: %s",
-                 parsed.library_path);
-        if (out_result)
-            *out_result = parsed;
-        return AIRY_ERR_IO;
-    }
-
-    /* 权限声明必须非空（fail-closed：无权限声明不接受，防越权后门） */
-    if (parsed.permission_count == 0) {
-        parsed.valid = false;
-        safe_strcpy(parsed.error_reason, "No permissions declared (fail-closed)",
-                    sizeof(parsed.error_reason));
-        if (out_result)
-            *out_result = parsed;
-        return AIRY_ERR_PERMISSION_DENIED;
-    }
-
-    if (out_result)
-        *out_result = parsed;
-    return 0;
-}
-
 void plugin_discovery_free_results(plugin_discovery_result_t *results, size_t count)
 {
     (void)count;

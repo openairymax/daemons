@@ -161,44 +161,6 @@ static void test_check_valid_permissions(void)
     printf("    PASSED\n");
 }
 
-static void test_description(void)
-{
-    printf("  test_description...\n");
-
-    CHECK(plugin_permission_description("file_read") != NULL);
-    CHECK(strcmp(plugin_permission_description("file_read"), "Read files from the filesystem") == 0);
-    CHECK(plugin_permission_description(NULL) != NULL);
-    CHECK(strcmp(plugin_permission_description("bogus"), "unknown permission") == 0);
-
-    printf("    PASSED\n");
-}
-
-static void test_list_supported(void)
-{
-    printf("  test_list_supported...\n");
-
-    CHECK(plugin_permission_list_supported(NULL, NULL) == AIRY_ERR_INVALID_PARAM);
-
-    char **perms = NULL;
-    size_t count = 0;
-    CHECK(plugin_permission_list_supported(&perms, &count) == 0);
-    CHECK(count == 16);
-    CHECK(perms != NULL);
-
-    if (perms) {
-        bool found_read = false;
-        for (size_t i = 0; i < count; i++) {
-            if (perms[i] && strcmp(perms[i], "file_read") == 0)
-                found_read = true;
-            AIRY_FREE(perms[i]);
-        }
-        CHECK(found_read);
-        AIRY_FREE(perms);
-    }
-
-    printf("    PASSED\n");
-}
-
 int main(void)
 {
     printf("tool_d plugin permission tests\n");
@@ -209,8 +171,6 @@ int main(void)
     test_check_no_permissions_lenient();
     test_check_unknown_permission_strict();
     test_check_valid_permissions();
-    test_description();
-    test_list_supported();
 
     plugin_permission_destroy();
 
