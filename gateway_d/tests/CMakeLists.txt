@@ -97,6 +97,7 @@ foreach(TEST_SRC ${TEST_SOURCES})
         )
         target_link_libraries(${TEST_NAME} PRIVATE
             airy_gateway_service
+            airy_gateway_biz
             airy_syscall
         )
     endif()
@@ -111,12 +112,12 @@ foreach(TEST_SRC ${TEST_SOURCES})
     endif()
 
     # svcdispatch e2e：SYS_SVC_CALL -> 钩子 -> gw_svc_call -> mock daemon。
-    # 被测面（gw_sys_svc_dispatch_* / gw_svc_call / 业务上下文）全在
-    # gateway_d 服务库内（业务面经 airy_gateway_biz 产品件汇入），
-    # 直链服务库即可，不再单独编译业务源。
+    # 被测面（gw_sys_svc_dispatch_* / gw_svc_call / 业务上下文）在服务库与
+    # 业务面产品件内，二者均直链。
     if(${TEST_NAME} STREQUAL "test_svcdispatch_e2e")
         target_link_libraries(${TEST_NAME} PRIVATE
             airy_gateway_service
+            airy_gateway_biz
         )
     endif()
 

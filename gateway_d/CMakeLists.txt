@@ -61,7 +61,7 @@ option(AIRY_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
 # ==================== Gateway 服务静态库 ====================
 # service + protocol/* 为独立静态库，供 gateway_d 可执行文件和集成测试共用，
 # 消除桩函数依赖。业务面自 0.1.19 起为 products/gateway_biz 产品件，
-# 经 airy_gateway_biz 汇入本库。
+# 仅在装配根 gateway_d 可执行目标链接（服务库本身零业务符号依赖）。
 # 排除 main.c（含 main()）。
 # biz 处理器按单一职责拆分（2026-08-11）：
 #   gateway_business_handler.c  主分发 + ctx 生命周期 + 协议入口
@@ -197,7 +197,7 @@ target_include_directories(airy_gateway_service PRIVATE
 # 链接库：svc_common 提供 daemon 公共层，airy_protocols 提供协议栈
 # 注意：airy_common 不在此处直接链接，而是通过 svc_common 的 PUBLIC
 # 传递依赖处理，避免在链接命令中重复出现导致 LTO 符号解析失败。
-target_link_libraries(airy_gateway_service PUBLIC svc_common airy_protocols airy_gateway_biz)
+target_link_libraries(airy_gateway_service PUBLIC svc_common airy_protocols)
 
 if(UNIX)
     target_link_libraries(airy_gateway_service PUBLIC Threads::Threads airy_platform_libs)
@@ -487,6 +487,9 @@ target_link_libraries(gateway_d PRIVATE
     airy_syscall
     Threads::Threads
 )
+# 业务面产品件只在装配根（本可执行目标）汇入：服务库零业务符号依赖，
+# 机制核可独立链接；装配期 biz 缺席则整个 daemon 不装配（见文件头部探测）。
+target_link_libraries(gateway_d PRIVATE airy_gateway_biz)
 # 0.1.19 §254b: boot 接线 vault 策略单元（daemon_dome_init_pep/_cleanup 符号面）
 target_link_libraries(gateway_d PRIVATE airy_security_dome)
 if(AIRY_HAS_CJSON)
