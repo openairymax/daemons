@@ -32,8 +32,7 @@
   包签名校验、凭据与审计），并与 `cupolas` 安全穹顶集成。
   （`svc_auth*` JWT/API Key/限流认证中间件已随 0.1.19 单元六十三清退——
   生产消费为零的扇入 0 死件，网关认证走 `gateway_auth` 策略面。）
-- **容错与可观测**：`api_recovery`（重试/降级/熔断策略）、`alert_manager`、
-  `unified_metrics`、`log_sanitizer`。
+- **容错与可观测**：`alert_manager`、`unified_metrics`、`log_sanitizer`。
 - **运行时数据引导**：`daemon_heapstore_bootstrap`（运行时数据存储）；安全穹顶引导
   归策略单元 `airy_security_dome`，其源随产品壳迁出 `products/cupolas/daemon/`
   （0.1.19 §254b/§255 机制/策略分离）。
@@ -65,7 +64,7 @@
 仅在源码树内消费。
 
 > 早前的再导出兼容头家族（`svc_common.h`、`method_dispatcher.h`、`param_validator.h`、
-> `thread_pool.h`、`airy_event_loop.h`、`unified_metrics.h`、`api_recovery.h`、
+> `thread_pool.h`、`airy_event_loop.h`、`unified_metrics.h`、
 > `log_sanitizer.h`、`jsonrpc_helpers.h`、`alert_manager.h`、`circuit_breaker.h`、
 > `service_discovery.h`、`platform.h`、`compat.h`、`error.h` 等）已在 0.1.17~0.1.19
 > 各施工线随权威实现归位 `commons` 时逐批拆除：`svc_common` 的 PUBLIC include 路径以
@@ -132,7 +131,7 @@ cmake -S . -B build -DBUILD_DAEMON=ON -DBUILD_CLI=ON
 
 ## 测试
 
-`tests/` 下的目标以 `svc_test_` 前缀注册进 CTest，共 19 个用例；`BUILD_TESTS` 为 `ON`
+`tests/` 下的目标以 `svc_test_` 前缀注册进 CTest，共 17 个用例；`BUILD_TESTS` 为 `ON`
 且非 Windows 时才加入构建。
 
 - 基础：`svc_test_error` / `svc_test_platform` / `svc_test_logger` / `svc_test_config` /
@@ -140,9 +139,7 @@ cmake -S . -B build -DBUILD_DAEMON=ON -DBUILD_CLI=ON
 - 服务框架与分发：`svc_test_jsonrpc_helpers` / `svc_test_svc_stop` /
   `svc_test_daemon_common`（按功能域拆分为 6 个测试文件）
 - 安全：`svc_test_daemon_security` / `svc_test_log_sanitizer`
-- 容错与并发：`svc_test_strategies_recovery` / `svc_test_api_recovery`
-  （含 pool / cred / health / fallback / config / misc 六个域文件）/
-  `svc_test_thread_pool` / `svc_test_airy_event_loop` / `svc_test_checkpoint`
+- 并发：`svc_test_thread_pool` / `svc_test_airy_event_loop` / `svc_test_checkpoint`
 - 引导与其他：`svc_test_svc_model_defaults`。
 
 ```bash
