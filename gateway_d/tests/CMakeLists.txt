@@ -69,7 +69,10 @@ foreach(TEST_SRC ${TEST_SOURCES})
         )
         target_include_directories(${TEST_NAME} PRIVATE
             ${CJSON_INCLUDE_DIRS}
+            # 0.1.19: gateway/.manifest 构建期生成的策略表
+            ${GATEWAY_GEN_DIR}
         )
+        add_dependencies(${TEST_NAME} gateway_policy_gen)
     endif()
 
     # PEP 裁定缓存测试——编译实现源；
