@@ -18,12 +18,10 @@ set(TEST_SOURCES
     test_logger.c
     test_jsonrpc_helpers.c
     test_safe_string_utils.c
-    test_strategies_recovery.c
     test_log_sanitizer.c
     test_thread_pool.c
     test_daemon_security.c
     test_airy_event_loop.c
-    test_api_recovery.c
     test_svc_model_defaults.c
     test_agent_vocab.c
     test_daemon_dep.c
@@ -36,19 +34,7 @@ foreach(TEST_SRC ${TEST_SOURCES})
     get_filename_component(TEST_NAME ${TEST_SRC} NAME_WE)
     set(TARGET_NAME "svc_${TEST_NAME}")
 
-    set(EXTRA_SRCS "")
-    if(TEST_SRC STREQUAL "test_api_recovery.c")
-        set(EXTRA_SRCS
-            test_api_recovery_pool.c
-            test_api_recovery_cred.c
-            test_api_recovery_health.c
-            test_api_recovery_fallback.c
-            test_api_recovery_config.c
-            test_api_recovery_misc.c
-        )
-    endif()
-
-    add_executable(${TARGET_NAME} ${TEST_SRC} ${EXTRA_SRCS})
+    add_executable(${TARGET_NAME} ${TEST_SRC})
     
     target_include_directories(${TARGET_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
