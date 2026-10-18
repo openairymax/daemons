@@ -41,8 +41,8 @@ set(SVC_COMMON_SOURCES
     # 符号经 airy_common PUBLIC 链接提供（include/circuit_breaker.h 兼容头已删，
     # 裸引经 PUBLIC include 路径直接解析 commons 权威）。
     # 0c A 类直搬：unified_metrics/alert_manager/jsonrpc_helpers/method_dispatcher/
-    # param_validator/log_sanitizer/api_recovery/airy_event_loop 家族权威实现均迁
-    # commons（utils/observability|ipc|security|resource|sync），daemons 留 re-export 头。
+    # param_validator/log_sanitizer/airy_event_loop 家族权威实现均迁
+    # commons（utils/observability|ipc|security|sync），daemons 留 re-export 头。
     # 0.1.19 单元六十三：svc_auth 认证中间件全族清退（20 公开符号生产消费为零、
     # 唯一消费者自测，扇入 0 死件；生产认证走 gateway_auth 策略面）。
     src/security/daemon_security.c     # daemon 安全集成（初始化/消毒域）
