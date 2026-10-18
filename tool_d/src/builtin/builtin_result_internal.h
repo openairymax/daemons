@@ -82,7 +82,7 @@ static inline int btool_finish(tool_result_t *res, char *out, int exit_code, con
     res->exit_code = exit_code;
     if (exit_code != 0) {
         char err[512];
-        snprintf(err, sizeof(err), "%s failed (exit %d)", what, exit_code);
+        snprintf(err, sizeof(err), "%s exited with code %d", what, exit_code);
         res->error = AIRY_STRDUP(err);
     }
     return AIRY_OK;

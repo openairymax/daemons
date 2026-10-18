@@ -112,17 +112,14 @@ static int web_fetch_via_network(const builtin_url_t *u, tool_result_t *res)
     cfg.write_timeout_ms = 15000;
 
     network_connection_t *conn = network_connection_create(&cfg);
-    if (!conn) {
-        res->error = AIRY_STRDUP("Out of memory creating network connection");
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
+    if (!conn)
+        return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY,
+                          "Out of memory creating network connection");
     airy_err_t e = network_connect(conn);
     if (e != AIRY_SUCCESS) {
-        char err[512];
-        snprintf(err, sizeof(err), "Connect to %s:%d failed: %s", u->host, u->port,
-                 network_get_error_message(conn));
+        btool_fail(res, AIRY_ERR_IO, "Connect to %s:%d failed: %s", u->host, u->port,
+                   network_get_error_message(conn));
         network_connection_destroy(conn);
-        res->error = AIRY_STRDUP(err);
         return AIRY_ERR_IO;
     }
 
@@ -131,11 +128,9 @@ static int web_fetch_via_network(const builtin_url_t *u, tool_result_t *res)
     e = network_http_get(conn, u->path, &resp);
     network_connection_destroy(conn);
     if (e != AIRY_SUCCESS) {
-        char err[512];
-        snprintf(err, sizeof(err), "HTTP GET '%s' failed: %s", u->path,
-                 resp.error_message ? resp.error_message : "unknown error");
+        btool_fail(res, AIRY_ERR_IO, "HTTP GET '%s' failed: %s", u->path,
+                   resp.error_message ? resp.error_message : "unknown error");
         network_http_response_free(&resp);
-        res->error = AIRY_STRDUP(err);
         return AIRY_ERR_IO;
     }
 
@@ -153,11 +148,8 @@ static int web_fetch_via_network(const builtin_url_t *u, tool_result_t *res)
     }
     res->success = (resp.status_code >= 200 && resp.status_code < 400) ? 1 : 0;
     res->exit_code = resp.status_code;
-    if (!res->success) {
-        char err[256];
-        snprintf(err, sizeof(err), "HTTP error status %d", resp.status_code);
-        res->error = AIRY_STRDUP(err);
-    }
+    if (!res->success)
+        btool_fail(res, AIRY_ERR_IO, "HTTP error status %d", resp.status_code);
     network_http_response_free(&resp);
     return AIRY_OK;
 }
@@ -166,25 +158,20 @@ static int web_fetch_via_network(const builtin_url_t *u, tool_result_t *res)
 int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
     cJSON *url = cJSON_GetObjectItem(root, "url");
-    if (!cJSON_IsString(url) || !url->valuestring || !url->valuestring[0]) {
-        res->error = AIRY_STRDUP("Missing string parameter: url");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (!cJSON_IsString(url) || !url->valuestring || !url->valuestring[0])
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Missing string parameter: url");
     const char *url_str = url->valuestring;
 
-    if (strpbrk(url_str, "'\"`$\\") != NULL) {
-        res->error = AIRY_STRDUP("URL contains unsafe characters (', \", `, $, \\)");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (strpbrk(url_str, "'\"`$\\") != NULL)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "URL contains unsafe characters (', \", `, $, \\)");
     builtin_url_t u;
-    if (builtin_parse_url(url_str, &u) != 0) {
-        res->error = AIRY_STRDUP("Invalid URL (only http:// and https:// are supported)");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (builtin_parse_url(url_str, &u) != 0)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "Invalid URL (only http:// and https:// are supported)");
 
     /* Main path: curl child process (curl.exe ships with Windows 10+).
      * -sS silences progress but keeps errors; -L follows redirects;
@@ -207,10 +194,9 @@ int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
 
     int rc = builtin_shell_run(cmd, NULL, &out, &exit_code, timeout_ms ? timeout_ms : 25000, NULL,
                                NULL);
-    if (rc != 0) {
-        res->error = AIRY_STRDUP("Failed to execute web fetch (pipe/process creation failed)");
-        return AIRY_ERR_EXEC_FAIL;
-    }
+    if (rc != 0)
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL,
+                          "Failed to execute web fetch (pipe/process creation failed)");
 
     if (exit_code == 127 || (out && strstr(out, "command not found"))) {
         AIRY_FREE(out);
@@ -219,13 +205,10 @@ int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
         if (strcmp(u.scheme, "http") == 0)
             return web_fetch_via_network(&u, res);
 #endif
-        char err[512];
-        snprintf(err, sizeof(err),
-                 "curl is not available and %s:// requires curl (TLS not supported by the "
-                 "built-in network layer)",
-                 u.scheme);
-        res->error = AIRY_STRDUP(err);
-        return AIRY_ERR_NOT_SUPPORTED;
+        return btool_fail(res, AIRY_ERR_NOT_SUPPORTED,
+                          "curl is not available and %s:// requires curl (TLS not supported by "
+                          "the built-in network layer)",
+                          u.scheme);
     }
 
     long http_status = 0;
@@ -237,22 +220,17 @@ int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
     res->output = out ? out : AIRY_STRDUP("");
 
     if (http_status >= 400) {
-        char err[256];
-        snprintf(err, sizeof(err), "HTTP error status %ld", http_status);
-        res->error = AIRY_STRDUP(err);
+        btool_fail(res, AIRY_ERR_IO, "HTTP error status %ld", http_status);
         res->success = 0;
         res->exit_code = (int)http_status;
     } else if (http_status > 0) {
         res->success = 1;
         res->exit_code = 0;
     } else {
-
-        char err[512];
-        snprintf(err, sizeof(err), "Web fetch failed (curl exit %d): %s", exit_code,
-                 out ? out : "");
+        btool_fail(res, AIRY_ERR_IO, "Web fetch failed (curl exit %d): %s", exit_code,
+                   out ? out : "");
         AIRY_FREE(res->output);
         res->output = AIRY_STRDUP("");
-        res->error = AIRY_STRDUP(err);
         res->success = 0;
         res->exit_code = exit_code;
     }
@@ -608,14 +586,11 @@ static int web_search_via_ddg(const char *query, int max_results, char *buf, siz
 int web_search_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
     cJSON *q = cJSON_GetObjectItem(root, "query");
-    if (!cJSON_IsString(q) || !q->valuestring || !q->valuestring[0]) {
-        res->error = AIRY_STRDUP("Missing string parameter: query");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (!cJSON_IsString(q) || !q->valuestring || !q->valuestring[0])
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Missing string parameter: query");
     cJSON *mr = cJSON_GetObjectItem(root, "max_results");
     int max_results =
         (cJSON_IsNumber(mr) && mr->valueint > 0) ? mr->valueint : BUILTIN_WEBSEARCH_MAX;
@@ -623,10 +598,8 @@ int web_search_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
         max_results = BUILTIN_WEBSEARCH_MAX;
 
     char *buf = (char *)AIRY_CALLOC(BUILTIN_OUTPUT_CAP, 1);
-    if (!buf) {
-        res->error = AIRY_STRDUP("Out of memory");
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
+    if (!buf)
+        return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Out of memory");
     size_t buf_len = 0;
     int count = 0;
 
@@ -663,17 +636,10 @@ int web_search_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
     }
 
     if (count == 0) {
-        char msg[512];
-        snprintf(msg, sizeof(msg), "No web results for query: %s (Bing & DuckDuckGo unreachable)",
-                 q->valuestring);
-        res->error = AIRY_STRDUP(msg);
+        btool_soft(res, "No web results for query: %s (Bing & DuckDuckGo unreachable)",
+                   q->valuestring);
         AIRY_FREE(buf);
-        res->success = 0;
-        res->exit_code = 1;
         return AIRY_OK;
     }
-    res->output = buf;
-    res->success = 1;
-    res->exit_code = 0;
-    return AIRY_OK;
+    return btool_okout(res, buf);
 }

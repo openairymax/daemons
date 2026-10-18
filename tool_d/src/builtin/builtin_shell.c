@@ -275,14 +275,11 @@ int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_co
 int shell_run_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
     cJSON *cmd = cJSON_GetObjectItem(root, "command");
-    if (!cJSON_IsString(cmd) || !cmd->valuestring || !cmd->valuestring[0]) {
-        res->error = AIRY_STRDUP("Missing string parameter: command");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (!cJSON_IsString(cmd) || !cmd->valuestring || !cmd->valuestring[0])
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Missing string parameter: command");
     /* Optional working directory: when set, the child process chdir()s into
      * it before executing so relative paths in the command resolve against
      * the task workspace (base.py injects the runner workspace_dir). */
@@ -300,17 +297,8 @@ int shell_run_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
     int rc = builtin_shell_run(cmd->valuestring, cwd, &out, &exit_code,
                                timeout_ms ? timeout_ms : BUILTIN_SHELL_TIMEOUT_MS, NULL,
                                &sandbox_cfg);
-    if (rc != 0) {
-        res->error = AIRY_STRDUP("Failed to execute command (pipe/process creation failed)");
-        return AIRY_ERR_EXEC_FAIL;
-    }
-    res->output = out ? out : AIRY_STRDUP("");
-    res->success = (exit_code == 0) ? 1 : 0;
-    res->exit_code = exit_code;
-    if (exit_code != 0) {
-        char err[256];
-        snprintf(err, sizeof(err), "Command exited with code %d", exit_code);
-        res->error = AIRY_STRDUP(err);
-    }
-    return AIRY_OK;
+    if (rc != 0)
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL,
+                          "Failed to execute command (pipe/process creation failed)");
+    return btool_finish(res, out, exit_code, "Command");
 }
