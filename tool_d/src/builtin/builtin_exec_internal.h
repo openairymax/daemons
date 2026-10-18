@@ -13,6 +13,7 @@
 #define AIRY_RT_TOOL_BUILTIN_EXEC_INTERNAL_H
 
 #include "builtin/builtin_limits_internal.h"
+#include "builtin/builtin_result_internal.h"
 
 #ifdef __cplusplus
 extern "C" {

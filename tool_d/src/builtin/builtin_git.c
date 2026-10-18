@@ -78,23 +78,19 @@ static int builtin_git_run(char *const argv[], const char *stdin_data, size_t st
 int git_exec_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
     cJSON *args = cJSON_GetObjectItem(root, "command_args");
-    if (!cJSON_IsArray(args) || cJSON_GetArraySize(args) < 1) {
-        res->error = AIRY_STRDUP("Missing array parameter: command_args");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (!cJSON_IsArray(args) || cJSON_GetArraySize(args) < 1)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Missing array parameter: command_args");
     cJSON *cwd = cJSON_GetObjectItem(root, "cwd");
     const char *cwd_str =
         (cJSON_IsString(cwd) && cwd->valuestring && cwd->valuestring[0]) ? cwd->valuestring : NULL;
 
     cJSON *first = cJSON_GetArrayItem(args, 0);
-    if (!cJSON_IsString(first) || !first->valuestring || !first->valuestring[0]) {
-        res->error = AIRY_STRDUP("command_args[0] must be a non-empty string subcommand");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (!cJSON_IsString(first) || !first->valuestring || !first->valuestring[0])
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "command_args[0] must be a non-empty string subcommand");
     int allowed = 0;
     for (size_t k = 0; g_git_readonly_cmds[k]; k++) {
         if (strcmp(first->valuestring, g_git_readonly_cmds[k]) == 0) {
@@ -102,19 +98,14 @@ int git_exec_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *r
             break;
         }
     }
-    if (!allowed) {
-        char err[512];
-        snprintf(err, sizeof(err), "git subcommand '%s' is not in the read-only whitelist",
-                 first->valuestring);
-        res->error = AIRY_STRDUP(err);
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (!allowed)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "git subcommand '%s' is not in the read-only whitelist",
+                          first->valuestring);
 
     int n = cJSON_GetArraySize(args);
-    if (n > BUILTIN_GIT_MAX_ARGS) {
-        res->error = AIRY_STRDUP("Too many command_args (max 32)");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (n > BUILTIN_GIT_MAX_ARGS)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Too many command_args (max 32)");
 
     char *argv[BUILTIN_GIT_MAX_ARGS + 4];
     int aidx = 0;
@@ -125,10 +116,9 @@ int git_exec_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *r
     }
     for (int i = 0; i < n; i++) {
         cJSON *it = cJSON_GetArrayItem(args, i);
-        if (!cJSON_IsString(it) || !it->valuestring) {
-            res->error = AIRY_STRDUP("command_args must contain only strings");
-            return AIRY_ERR_INVALID_PARAM;
-        }
+        if (!cJSON_IsString(it) || !it->valuestring)
+            return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                              "command_args must contain only strings");
         argv[aidx++] = it->valuestring;
     }
     argv[aidx] = NULL;
@@ -136,26 +126,15 @@ int git_exec_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *r
     char *out = NULL;
     int exit_code = -1;
     int rc = builtin_git_run(argv, NULL, 0, &out, &exit_code, NULL, timeout_ms);
-    if (rc != 0) {
-        res->error = AIRY_STRDUP("Failed to execute git (fork/pipe failed)");
-        return AIRY_ERR_EXEC_FAIL;
-    }
-    res->output = out ? out : AIRY_STRDUP("");
-    res->success = (exit_code == 0) ? 1 : 0;
-    res->exit_code = exit_code;
-    if (exit_code != 0) {
-        char err[256];
-        snprintf(err, sizeof(err), "git exited with code %d", exit_code);
-        res->error = AIRY_STRDUP(err);
-    }
-    return AIRY_OK;
+    if (rc != 0)
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL, "Failed to execute git (fork/pipe failed)");
+    return btool_finish(res, out, exit_code, "git");
 }
 
 int git_diff_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
     cJSON *path = cJSON_GetObjectItem(root, "path");
     cJSON *staged = cJSON_GetObjectItem(root, "staged");
@@ -177,32 +156,19 @@ int git_diff_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *r
     char *out = NULL;
     int exit_code = -1;
     int rc = builtin_git_run(argv, NULL, 0, &out, &exit_code, NULL, timeout_ms);
-    if (rc != 0) {
-        res->error = AIRY_STRDUP("Failed to execute git diff (fork/pipe failed)");
-        return AIRY_ERR_EXEC_FAIL;
-    }
-    res->output = out ? out : AIRY_STRDUP("");
-    res->success = (exit_code == 0) ? 1 : 0;
-    res->exit_code = exit_code;
-    if (exit_code != 0) {
-        char err[256];
-        snprintf(err, sizeof(err), "git diff exited with code %d", exit_code);
-        res->error = AIRY_STRDUP(err);
-    }
-    return AIRY_OK;
+    if (rc != 0)
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL, "Failed to execute git diff (fork/pipe failed)");
+    return btool_finish(res, out, exit_code, "git diff");
 }
 
 int git_apply_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     CJSON_PARSE_GUARD(root, params_json, {
-        res->error = AIRY_STRDUP("Invalid params JSON");
-        return AIRY_ERR_PARSE_ERROR;
+        return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
     cJSON *patch = cJSON_GetObjectItem(root, "patch");
-    if (!cJSON_IsString(patch) || !patch->valuestring) {
-        res->error = AIRY_STRDUP("Missing string parameter: patch");
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    if (!cJSON_IsString(patch) || !patch->valuestring)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Missing string parameter: patch");
     cJSON *check_only = cJSON_GetObjectItem(root, "check_only");
     int do_check = cJSON_IsTrue(check_only) ? 1 : 0;
 
@@ -219,18 +185,8 @@ int git_apply_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
     int exit_code = -1;
     int rc = builtin_git_run(argv, patch->valuestring, strlen(patch->valuestring), &out, &exit_code,
                              NULL, timeout_ms);
-    if (rc != 0) {
-        res->error = AIRY_STRDUP("Failed to execute git apply (fork/pipe failed)");
-        return AIRY_ERR_EXEC_FAIL;
-    }
-    res->output = out ? out : AIRY_STRDUP("");
-    res->success = (exit_code == 0) ? 1 : 0;
-    res->exit_code = exit_code;
-    if (exit_code != 0) {
-        char err[256];
-        snprintf(err, sizeof(err), "git apply exited with code %d", exit_code);
-        res->error = AIRY_STRDUP(err);
-    }
-    return AIRY_OK;
+    if (rc != 0)
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL, "Failed to execute git apply (fork/pipe failed)");
+    return btool_finish(res, out, exit_code, "git apply");
 }
 #endif /* !_WIN32 */
