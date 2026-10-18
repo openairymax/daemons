@@ -325,8 +325,8 @@ target_include_directories(gateway_lib_obj PUBLIC
      ${DAEMON_COMMON_DIR}/src
      ${PROTOCOLS_INCLUDE_DIR}
      ${PROTOCOLS_COMMON_INCLUDE_DIR}
-    # protocols core 子目录：router 供 gateway_protocol_handler.h 解析
-    # protocol_router.h（本目标编译 GATEWAY_COMMON_SOURCES），registry 供
+    # protocols core 子目录：router 供 gateway_protocol_handler.c 解析
+    # protocol_detect.h（本目标编译 GATEWAY_COMMON_SOURCES），registry 供
     # gw_boot.c 消费（0.1.19 单元五十九：bridge 死件清退后 adapter/
     # transformers 零消费不再挂载）
      ${PROTOCOLS_DIR}/core/router/include
