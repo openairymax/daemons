@@ -33,6 +33,16 @@ static void handle_stats(int id, airy_sock_t fd);
 static void handle_pending(int id, airy_sock_t fd);
 static void handle_approve(cJSON *params, int id, airy_sock_t fd);
 
+/* g_service 未就绪是全部 tool.* 方法共有的失败前置，收敛为单一出口。 */
+#define TOOLRPC_REQUIRE_SERVICE(fd, id)                                        \
+    do {                                                                       \
+        if (!g_service) {                                                      \
+            JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,                     \
+                               "Tool service not ready", id);                  \
+            return;                                                            \
+        }                                                                      \
+    } while (0)
+
 DAEMON_RPC_SHELL(register, handle_register)
 DAEMON_RPC_SHELL0(list_tools, handle_list)
 DAEMON_RPC_SHELL(get_tool, handle_get)
@@ -192,11 +202,7 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
     JSONRPC_REQUIRE(tid && jparams, client_fd,
                     "Invalid execute params: tool_id and params required", id);
 
-    if (!g_service) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR,
-                           "Tool service not ready", id);
-        return;
-    }
+    TOOLRPC_REQUIRE_SERVICE(client_fd, id);
 
     char *params_json = cJSON_PrintUnformatted(jparams);
     if (!params_json) {
@@ -266,19 +272,13 @@ static void handle_health_check(int id, airy_sock_t client_fd)
 
 static void handle_stats(int id, airy_sock_t client_fd)
 {
-    if (!g_service) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Tool service not ready", id);
-        return;
-    }
+    TOOLRPC_REQUIRE_SERVICE(client_fd, id);
     reply_stats(client_fd, tool_service_get_stats(g_service), id);
 }
 
 static void handle_pending(int id, airy_sock_t client_fd)
 {
-    if (!g_service) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Tool service not ready", id);
-        return;
-    }
+    TOOLRPC_REQUIRE_SERVICE(client_fd, id);
     char *pending_json = svc_int_pending(g_service);
     cJSON *arr = pending_json ? cJSON_Parse(pending_json) : NULL;
     AIRY_FREE(pending_json);
@@ -294,10 +294,7 @@ static void handle_pending(int id, airy_sock_t client_fd)
 
 static void handle_approve(cJSON *params, int id, airy_sock_t client_fd)
 {
-    if (!g_service) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Tool service not ready", id);
-        return;
-    }
+    TOOLRPC_REQUIRE_SERVICE(client_fd, id);
     const char *request_id = get_string_field(params, "request_id", NULL);
     const char *decision = get_string_field(params, "decision", NULL);
     JSONRPC_REQUIRE(request_id && decision, client_fd, "request_id and decision required", id);

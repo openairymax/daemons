@@ -24,7 +24,6 @@ void tool_service_destroy(tool_service_t *svc);
 
 
 int tool_service_register(tool_service_t *svc, const tool_metadata_t *meta);
-int tool_service_unregister(tool_service_t *svc, const char *tool_id);
 tool_metadata_t *tool_service_get(tool_service_t *svc, const char *tool_id);
 void tool_metadata_free(tool_metadata_t *meta);
 char *tool_service_list(tool_service_t *svc);
