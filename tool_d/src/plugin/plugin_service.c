@@ -47,7 +47,6 @@
     } while (0)
 
 #define PLUGIN_MAX_COUNT 64
-#define PLUGIN_NAME_MAX_LEN 64
 
 /**
  * @brief Plugin registry node
