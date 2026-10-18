@@ -26,14 +26,22 @@ set(TEST_SOURCES
     test_gateway_cap_registry.c
     test_gateway_pep_cache.c
     bench_gateway_pep.c
+    test_svcdispatch_e2e.c
 )
 
 foreach(TEST_SRC ${TEST_SOURCES})
     get_filename_component(TEST_NAME ${TEST_SRC} NAME_WE)
 
+    # svcdispatch e2e 直接链接 airy_gateway_service（含 svc.c 与业务面），
+    # 再编译 svc.c 会与之重复定义。
+    set(TEST_OWN_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/../src/svc.c)
+    if(${TEST_NAME} STREQUAL "test_svcdispatch_e2e")
+        set(TEST_OWN_SOURCES "")
+    endif()
+
     add_executable(${TEST_NAME}
         ${TEST_SRC}
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/svc.c
+        ${TEST_OWN_SOURCES}
     )
 
     if(${TEST_NAME} STREQUAL "test_protocol_router")
@@ -62,10 +70,10 @@ foreach(TEST_SRC ${TEST_SOURCES})
 
     # 统一能力网关：注册表测试需编译注册表实现
     # （含 cJSON 头依赖），网关业务头不参与测试目标。
-    # P9 归一（2026-09-02）：gateway_cap_registry.c 已并入 gateway/src/biz/
+    # 0.1.19 刀H：业务面迁出至 products/gateway_biz（产品件）。
     if(${TEST_NAME} STREQUAL "test_gateway_cap_registry")
         target_sources(${TEST_NAME} PRIVATE
-            ${GATEWAY_DIR}/src/biz/gateway_cap_registry.c
+            ${GATEWAY_BIZ_SRC_DIR}/src/gateway_cap_registry.c
         )
         target_include_directories(${TEST_NAME} PRIVATE
             ${CJSON_INCLUDE_DIRS}
@@ -76,13 +84,13 @@ foreach(TEST_SRC ${TEST_SOURCES})
     endif()
 
     # PEP 裁定缓存测试——编译实现源；
-    # gw_svc_call 符号由 airy_gateway_service（含 biz 全部源）提供。
+    # gw_svc_call 符号由 airy_gateway_service（含业务面产品件）提供。
     # 依赖方向自上而下（gateway_service -> syscall），单遍左到右解析完备。
     # bench_gateway_pep（PEP 端到端基准）同一装配。
     if(${TEST_NAME} STREQUAL "test_gateway_pep_cache" OR
        ${TEST_NAME} STREQUAL "bench_gateway_pep")
         target_sources(${TEST_NAME} PRIVATE
-            ${GATEWAY_DIR}/src/biz/gateway_pep_cache.c
+            ${GATEWAY_BIZ_SRC_DIR}/src/gateway_pep_cache.c
         )
         target_include_directories(${TEST_NAME} PRIVATE
             ${CJSON_INCLUDE_DIRS}
@@ -102,6 +110,16 @@ foreach(TEST_SRC ${TEST_SOURCES})
         target_link_libraries(${TEST_NAME} PRIVATE airy_security_dome)
     endif()
 
+    # svcdispatch e2e：SYS_SVC_CALL -> 钩子 -> gw_svc_call -> mock daemon。
+    # 被测面（gw_sys_svc_dispatch_* / gw_svc_call / 业务上下文）全在
+    # gateway_d 服务库内（业务面经 airy_gateway_biz 产品件汇入），
+    # 直链服务库即可，不再单独编译业务源。
+    if(${TEST_NAME} STREQUAL "test_svcdispatch_e2e")
+        target_link_libraries(${TEST_NAME} PRIVATE
+            airy_gateway_service
+        )
+    endif()
+
     target_include_directories(${TEST_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
@@ -110,13 +128,15 @@ foreach(TEST_SRC ${TEST_SOURCES})
         ${GATEWAY_INCLUDE_DIR}
         ${GATEWAY_SRC_DIR}
         ${GATEWAY_SRC_DIR}/gateway
-        # P9 归一（2026-09-02）：biz 处理器并入 gateway/src/biz/
-        ${GATEWAY_SRC_DIR}/biz
+        # 0.1.19 刀H：业务面头面随产品件迁出
+        ${GATEWAY_BIZ_SRC_DIR}/include
         ${GATEWAY_SRC_DIR}/utils
         ${SYSCALL_INCLUDE_DIR}
         ${COREKERN_INCLUDE_DIR}
         ${COMMONS_DIR}
+        ${COMMONS_DIR}/include
         ${COMMONS_DIR}/platform/include
+        ${COMMONS_DIR}/utils/include
         ${COMMONS_DIR}/utils/error
         ${COMMONS_DIR}/utils/logging
         ${COMMONS_DIR}/utils/config_unified
@@ -125,6 +145,7 @@ foreach(TEST_SRC ${TEST_SOURCES})
         ${COMMONS_DIR}/utils/sync
         ${COMMONS_DIR}/utils/cache
         ${COMMONS_DIR}/utils/compat
+        ${CJSON_INCLUDE_DIRS}
     )
 
     target_link_libraries(${TEST_NAME}
