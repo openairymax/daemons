@@ -217,13 +217,21 @@ endif()
 # 与 bootstrap AIRY_HOME/bin、agent_build_agents_pypath 的 AIRY_LIB_DIR
 # 回退组成完整生产安装（AIRY_HOME 体系，K8s 节点运行时根类比）。
 # 0.1.19 §254b/§255：cupolas_d 二进制安装由其自身 CMakeLists 自持（产品壳）。
-install(TARGETS gateway_d llm_d tool_d
-                monit_d sched_d market_d channel_d
-                notify_d
-                mem_d agent_d a2a_d think_d maths_d
-                supervisor_d
-    RUNTIME DESTINATION bin
-)
+# 0.1.19 §341：gateway_d 依赖产品件 gateway_biz，产品缺席时该目标不生成；
+# install 目标表按实际 TARGET 动态收集，避免机制核 standalone 装配被产品
+# 缺席击穿（export 块维持全量守卫，缺席即不导出）。
+set(_airy_daemon_bins
+    gateway_d llm_d tool_d monit_d sched_d market_d channel_d
+    notify_d mem_d agent_d a2a_d think_d maths_d supervisor_d)
+set(_airy_daemon_inst)
+foreach(_db IN LISTS _airy_daemon_bins)
+    if(TARGET ${_db})
+        list(APPEND _airy_daemon_inst ${_db})
+    endif()
+endforeach()
+if(_airy_daemon_inst)
+    install(TARGETS ${_airy_daemon_inst} RUNTIME DESTINATION bin)
+endif()
 
 # ==================== 0.1.9 §5.1 链接白名单门禁：14 daemon 节点登记 ====================
 # 每个 daemon 目标的允许链接库集登记于根 link-whitelist.txt（SSoT）；
@@ -236,5 +244,7 @@ install(TARGETS gateway_d llm_d tool_d
 # 装配块执行（源码居产品壳 daemon/），本目录不枚举 cupolas_d。
 foreach(_dg llm_d tool_d monit_d sched_d market_d channel_d notify_d
            mem_d agent_d a2a_d think_d maths_d supervisor_d)
-    airy_linkgate_collect(${_dg})
+    if(TARGET ${_dg})
+        airy_linkgate_collect(${_dg})
+    endif()
 endforeach()
