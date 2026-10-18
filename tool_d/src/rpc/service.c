@@ -225,23 +225,6 @@ int tool_service_register(tool_service_t *svc, const tool_metadata_t *meta)
     return ret;
 }
 
-int tool_service_unregister(tool_service_t *svc, const char *tool_id)
-{
-    if (!svc || !tool_id) {
-        return AIRY_ERR_INVALID_PARAM;
-    }
-
-    airy_mtx_lock(&svc->lock);
-    int ret = tool_registry_remove(svc->registry, tool_id);
-    airy_mtx_unlock(&svc->lock);
-
-    if (ret == 0) {
-        SVC_LOG_INFO("Unregistered tool: %s", tool_id);
-    }
-
-    return ret;
-}
-
 tool_metadata_t *tool_service_get(tool_service_t *svc, const char *tool_id)
 {
     if (!svc || !tool_id) {

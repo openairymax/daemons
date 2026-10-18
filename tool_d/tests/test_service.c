@@ -129,33 +129,6 @@ static void test_service_get_tool(void)
     printf("    PASSED\n");
 }
 
-static void test_service_unregister_tool(void)
-{
-    printf("  test_service_unregister_tool...\n");
-
-    tool_service_t *svc = tool_service_create(NULL);
-    CHECK(svc != NULL);
-
-    tool_metadata_t meta;
-    AIRY_MEMSET(&meta, 0, sizeof(meta));
-    meta.id = "unregister_test";
-    meta.name = "unregister_test";
-    meta.executable = "/bin/echo";
-    meta.timeout_sec = 10;
-
-    tool_service_register(svc, &meta);
-
-    int ret = tool_service_unregister(svc, "unregister_test");
-    CHECK(ret == 0);
-
-    tool_metadata_t *found = tool_service_get(svc, "unregister_test");
-    CHECK(found == NULL);
-
-    tool_service_destroy(svc);
-
-    printf("    PASSED\n");
-}
-
 #ifndef _WIN32
 static void test_fs_delete_builtin(void)
 {
@@ -249,7 +222,6 @@ int main(void)
     test_service_register_tool();
     test_service_list_tools();
     test_service_get_tool();
-    test_service_unregister_tool();
 #ifndef _WIN32
     test_fs_delete_builtin();
 #endif
