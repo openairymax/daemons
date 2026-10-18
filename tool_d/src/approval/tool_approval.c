@@ -53,11 +53,6 @@ tool_approval_ctx_t *tool_approval_create(const tool_approval_config_t *cfg)
         snprintf(ctx->agent_id, sizeof(ctx->agent_id), "unknown");
     }
 
-    ctx->total_checks = 0;
-    ctx->denied_count = 0;
-    ctx->sanitized_count = 0;
-    ctx->bridge = NULL;
-
     AIRY_LOG_INFO("Tool approval context created (safety_guard=%d, audit=%d)",
                   ctx->config.enable_safety_guard_chain, ctx->config.enable_audit_logging);
     return ctx;
@@ -112,20 +107,6 @@ static int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *t
     }
 
     return ret;
-}
-
-static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
-                             const tool_metadata_t *meta, const char *params_json,
-                             tool_approval_detail_t *detail);
-
-int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
-                        const char *params_json, tool_approval_detail_t *detail)
-{
-    if (!ctx || !meta) {
-        return AIRY_ERR_INVALID_PARAM;
-    }
-    const char *subject = ctx->config.agent_id ? ctx->config.agent_id : "unknown";
-    return approval_check_as(ctx, subject, meta, params_json, detail);
 }
 
 /* 审批主体显式参数化。旧实现通过临时改写共享
@@ -213,10 +194,6 @@ static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
                          sanitized);
             }
         }
-    } else {
-        if (sanitized[0] == '\0' && params_json) {
-            snprintf(sanitized, sizeof(sanitized), "%s", params_json);
-        }
     }
 
     /* ── Step 2: permission check (Cupolas) ──
@@ -251,11 +228,8 @@ static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
         detail->permission_check_passed = 1;
     }
 
-    if (ctx->config.enable_safety_guard_chain) {
-
-        if (detail) {
-            detail->safety_guard_passed = 1;
-        }
+    if (ctx->config.enable_safety_guard_chain && detail) {
+        detail->safety_guard_passed = 1;
     }
 
     if (ctx->config.enable_audit_logging) {
@@ -274,6 +248,16 @@ static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
     }
 
     return 0;
+}
+
+int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,
+                        const char *params_json, tool_approval_detail_t *detail)
+{
+    if (!ctx || !meta) {
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    const char *subject = ctx->config.agent_id ? ctx->config.agent_id : "unknown";
+    return approval_check_as(ctx, subject, meta, params_json, detail);
 }
 
 const char *tool_approval_get_agent_id(const tool_approval_ctx_t *ctx)

@@ -32,16 +32,7 @@ struct approval_gate {
 static void gate_attach_bridge(approval_gate_t *gate)
 {
     safety_guard_bridge_config_t bridge_cfg;
-    __builtin_memset(&bridge_cfg, 0, sizeof(bridge_cfg));
-    bridge_cfg.enable_permission_guard = true;
-    bridge_cfg.enable_rate_limit_guard = true;
-    bridge_cfg.enable_content_filter = true;
-    bridge_cfg.enable_input_sanitization = true;
-    bridge_cfg.enable_resource_quota = true;
-    bridge_cfg.enable_audit_guard = true;
-    bridge_cfg.rate_limit_per_minute = 0;
-    bridge_cfg.max_params_size = 0;
-    bridge_cfg.denied_patterns = NULL;
+    safety_guard_bridge_config_defaults(&bridge_cfg);
     bridge_cfg.agent_id = "tool_d";
 
     gate->bridge = safety_guard_bridge_create(&bridge_cfg);
@@ -111,6 +102,11 @@ static void log_approved(const tool_metadata_t *meta, const tool_approval_detail
                  (int)detail->decision);
 }
 
+static bool gate_int_enabled(const approval_gate_t *gate)
+{
+    return gate && gate->interactive && interactive_approval_is_enabled(gate->interactive);
+}
+
 typedef enum {
     INTERACTIVE_CONTINUE = 0, /* 未启用交互审批：回退静态拒绝理由 */
     INTERACTIVE_ALLOWED,
@@ -126,9 +122,8 @@ static interactive_step_t ask_via_interactive(approval_gate_t *gate, const char 
                                               const tool_metadata_t *meta,
                                               const char *params_json, char **out_reason)
 {
-    if (!gate->interactive || !interactive_approval_is_enabled(gate->interactive)) {
+    if (!gate_int_enabled(gate))
         return INTERACTIVE_CONTINUE;
-    }
     const char *agent = agent_id;
     if (!agent) {
         agent = tool_approval_get_agent_id(gate->ctx);
@@ -205,11 +200,6 @@ approval_gate_verdict_t gate_ask(approval_gate_t *gate, const char *agent_id,
         *out_reason = AIRY_STRDUP(detail.reason);
     }
     return APPROVAL_GATE_DENIED;
-}
-
-static bool gate_int_enabled(const approval_gate_t *gate)
-{
-    return gate && gate->interactive && interactive_approval_is_enabled(gate->interactive);
 }
 
 uint64_t gate_int_budget_ms(const approval_gate_t *gate)
