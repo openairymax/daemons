@@ -46,13 +46,22 @@ set(PROTOCOLS_INCLUDE_DIR ${PROTOCOLS_DIR}/include)
 set(PROTOCOLS_MCP_DIR ${PROTOCOLS_DIR}/standards/mcp)
 set(PROTOCOLS_COMMON_INCLUDE_DIR ${PROTOCOLS_DIR}/common/include)
 
+# ==================== 业务面产品件探测 ====================
+# 0.1.19 刀H：gateway/src/biz 已迁出至 products/gateway_biz，由 agentrt
+# 顶层三态探测注入 GATEWAY_BIZ_SRC_DIR。业务面是 gateway_d 的必需组成，
+# 缺席即整体不装配：不产生半功能 daemon，也不引入桩实现。
+if(NOT GATEWAY_BIZ_SRC_DIR OR NOT EXISTS "${GATEWAY_BIZ_SRC_DIR}/CMakeLists.txt")
+    airy_print_warn("[gateway_d] gateway_biz product not found; daemon skipped")
+    return()
+endif()
+
 # ==================== 协议栈开关 ====================
 option(AIRY_ENABLE_PROTOCOLS "Enable MCP/A2A/OpenAI protocol stack" ON)
 
 # ==================== Gateway 服务静态库 ====================
-# 提取 service + biz（P9 归一后经 gateway-sources.cmake 单一权威清单引用，
-# 物理位置在 gateway/src/biz/，2026-09-02）+ protocol/* 为独立静态库，
-# 供 gateway_d 可执行文件和集成测试共用，消除桩函数依赖。
+# service + protocol/* 为独立静态库，供 gateway_d 可执行文件和集成测试共用，
+# 消除桩函数依赖。业务面自 0.1.19 起为 products/gateway_biz 产品件，
+# 经 airy_gateway_biz 汇入本库。
 # 排除 main.c（含 main()）。
 # biz 处理器按单一职责拆分（2026-08-11）：
 #   gateway_business_handler.c  主分发 + ctx 生命周期 + 协议入口
@@ -87,12 +96,18 @@ add_custom_command(
 add_custom_target(gateway_policy_gen
     DEPENDS ${GATEWAY_GEN_DIR}/gateway_policy_gen.inc
             ${GATEWAY_GEN_DIR}/gateway_sock_gen.inc)
+
+# 业务面产品件挂载（0.1.19 刀H）：须在 codegen 目标之后（产品库依赖生成表）
+# 与 svc_common/airy_protocols 之后（产品库 PUBLIC 链接二者）。
+set(AIRY_GATEWAY_BIZ_AGENTRT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+set(AIRY_GATEWAY_BIZ_GEN_DIR "${GATEWAY_GEN_DIR}")
+add_subdirectory("${GATEWAY_BIZ_SRC_DIR}" gateway_biz)
+
 # 本 daemon 自有源装配清单（五件套④）：service/protocol 域入静态库，
 # bootstrap 域入可执行目标（同 llm_d 拆分，服务域重复编译零容忍）。
 include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
 set(GATEWAY_SERVICE_SOURCES
     ${GATEWAY_D_SVC_SOURCES}
-    ${GATEWAY_BIZ_SOURCES}
 )
 
 if(AIRY_ENABLE_PROTOCOLS)
@@ -143,8 +158,6 @@ target_include_directories(airy_gateway_service PUBLIC
     # Gateway 内部头文件（gateway_api.c 引用 http_gateway.h 等）
     ${GATEWAY_SRC_DIR}
     ${GATEWAY_SRC_DIR}/gateway
-    # P9 归一（2026-09-02）：biz 处理器并入 gateway/src/biz/
-    ${GATEWAY_SRC_DIR}/biz
     ${GATEWAY_SRC_DIR}/utils
     ${GATEWAY_SRC_DIR}/utils/syscall
     # Atom 模块（service.c 引用 "syscalls.h", "airy_rt.h"）
@@ -184,7 +197,7 @@ target_include_directories(airy_gateway_service PRIVATE
 # 链接库：svc_common 提供 daemon 公共层，airy_protocols 提供协议栈
 # 注意：airy_common 不在此处直接链接，而是通过 svc_common 的 PUBLIC
 # 传递依赖处理，避免在链接命令中重复出现导致 LTO 符号解析失败。
-target_link_libraries(airy_gateway_service PUBLIC svc_common airy_protocols)
+target_link_libraries(airy_gateway_service PUBLIC svc_common airy_protocols airy_gateway_biz)
 
 if(UNIX)
     target_link_libraries(airy_gateway_service PUBLIC Threads::Threads airy_platform_libs)
@@ -420,8 +433,8 @@ target_include_directories(gateway_d PRIVATE
     ${GATEWAY_INCLUDE_DIR}
     ${GATEWAY_SRC_DIR}
     ${GATEWAY_SRC_DIR}/gateway
-    # P9 归一（2026-09-02）：biz 处理器并入 gateway/src/biz/
-    ${GATEWAY_SRC_DIR}/biz
+    # 0.1.19 刀H：业务面头面（gateway_business_handler.h 等）随产品件迁出
+    ${GATEWAY_BIZ_SRC_DIR}/include
     ${GATEWAY_SRC_DIR}/utils
     ${SYSCALL_INCLUDE_DIR}
     ${COREKERN_INCLUDE_DIR}
