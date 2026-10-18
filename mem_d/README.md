@@ -171,7 +171,6 @@ Windows 源码构建默认不编译守护进程，需显式 `-DBUILD_DAEMON=ON`�
 | [cupolas](https://atomgit.com/openairymax/cupolas) | 安全穹顶（经 `svc_common` 传递） |
 | [gateway_d](../gateway_d/README.md) | 上游：`mem.*` 命名空间转发方 |
 | libcurl | 可选，embedding 后端（`AIRY_HAS_CURL`） |
-| libyaml | 可选，配置文件解析 |
 
 ## 关系
 

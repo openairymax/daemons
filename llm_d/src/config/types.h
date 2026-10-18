@@ -3,22 +3,19 @@
 
 /**
  * @file types.h
- * @brief llm_d config 域 YAML 解析结果类型（HAVE_YAML 构建）。
+ * @brief llm_d config 域 YAML 解析结果类型。
  *
  * 由 llm_service_internal.h（253 行枢纽头，B16-S1 拆片）迁入：模型表项、
  * provider 聚合与解析结果状态。YAML 装载统一经 commons
  * utils/config_unified/yaml_minimal 完成（声明面只保留一个装载器，B13），
  * 本头不再暴露任何解析器类型。仅 service_config_yaml*.c 与
- * service_config.c 消费；跨域禁止 include 本头。非 YAML 构建下本头为空
- * 翻译单元，无条件包含无害。
+ * service_config.c 消费；跨域禁止 include 本头。
  */
 
 #ifndef AIRY_RT_LLM_CONFIG_TYPES_H
 #define AIRY_RT_LLM_CONFIG_TYPES_H
 
 #include <stddef.h>
-
-#ifdef HAVE_YAML
 
 #include "providers/core/provider_config.h"
 #include "svc_model_defaults.h"
@@ -113,7 +110,5 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
 #ifdef __cplusplus
 }
 #endif
-
-#endif /* HAVE_YAML */
 
 #endif /* AIRY_RT_LLM_CONFIG_TYPES_H */

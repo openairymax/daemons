@@ -286,7 +286,6 @@ llm_service_t *llm_service_create(const char *config_path)
         /* 2.1.1.5 修复：YAML 配置（model.yaml，当前唯一入口）此前完全不
          * 加载价格，计费全部落到默认价 0.001/0.002，金额不真实。现在从
          * models[].input/output_cost_per_1k 生成 pricing rules。 */
-#ifdef HAVE_YAML
         pricing_rule_t *yaml_rules = NULL;
         int yaml_rule_count = 0;
         if (load_pricing_rules_from_yaml(config_path, &yaml_rules, &yaml_rule_count) == 0 &&
@@ -297,12 +296,6 @@ llm_service_t *llm_service_create(const char *config_path)
         } else if (yaml_rules) {
             AIRY_FREE(yaml_rules);
         }
-#else
-        /* HAVE_YAML 未定义：YAML 配置装载面未编译进本目标
-         * （load_pricing_rules_from_yaml 不存在），调用必须一并关闭，
-         * 否则链接失败（未定义引用 load_pricing_rules_from_yaml） */
-        SVC_LOG_WARN("YAML pricing config '%s' requested but YAML support unavailable", config_path);
-#endif
     }
 
     svc->registry = provider_registry_create(&base_cfg);

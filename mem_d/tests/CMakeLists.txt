@@ -57,9 +57,6 @@ foreach(TEST_SRC ${MEM_TEST_SOURCES})
     if(AIRY_HAS_CJSON)
         target_link_libraries(test_mem_${TEST_NAME} PRIVATE cjson)
     endif()
-    if(AIRY_HAS_YAML)
-        target_link_libraries(test_mem_${TEST_NAME} PRIVATE yaml)
-    endif()
 
     target_compile_options(test_mem_${TEST_NAME} PRIVATE -Wall -Wextra -g -Wno-unused-function)
 

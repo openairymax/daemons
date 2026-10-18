@@ -38,8 +38,7 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 set(LLM_SERVICE_SOURCES
     src/rpc/service.c
     src/config/service_config.c
-    # service_config.c 域拆分（2026-08-27：1159 行 → 核心 + 4 个职责模块；
-    # yaml 三件整体受 #ifdef HAVE_YAML 保护，非 YAML 构建下为空翻译单元，无条件列出无害）
+    # service_config.c 域拆分（2026-08-27：1159 行 → 核心 + 4 个职责模块）
     src/config/service_config_json.c
     src/config/service_config_yaml_models.c
     src/config/service_config_yaml_providers.c
@@ -126,7 +125,6 @@ target_include_directories(airy_llm_service PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/accounting
     ${CURL_INCLUDE_DIRS}
     ${CJSON_INCLUDE_DIRS}
-    ${YAML_INCLUDE_DIRS}
 )
 
 # 链接库：svc_common 提供 daemon 公共层 + commons 传递依赖
@@ -153,10 +151,6 @@ if(AIRY_HAS_CJSON)
     elseif(CJSON_FOUND AND CJSON_LIBRARIES)
         target_link_libraries(airy_llm_service PUBLIC ${CJSON_LIBRARIES})
     endif()
-endif()
-if(AIRY_HAS_YAML)
-    target_link_libraries(airy_llm_service PUBLIC ${YAML_LIBRARIES})
-    target_compile_definitions(airy_llm_service PRIVATE HAVE_YAML=1)
 endif()
 
 if(UNIX)
@@ -224,7 +218,6 @@ target_include_directories(llm_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${CURL_INCLUDE_DIRS}
     ${CJSON_INCLUDE_DIRS}
-    ${YAML_INCLUDE_DIRS}
 )
 
 target_link_libraries(llm_d PRIVATE

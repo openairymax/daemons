@@ -11,8 +11,7 @@
  *   - service_config_yaml_models.c    models 行解析 + 简化 llm 段展开
  *   - service_config_yaml_providers.c provider 聚合导出
  *   - service_config_yaml_pricing.c   YAML 定价规则提取
- * 共享符号经 config/config_internal.h 声明；YAML 函数体仅开启 HAVE_YAML
- * 时编译。
+ * 共享符号经 config/config_internal.h 声明。
  */
 
 #include "airy_memory.h"
@@ -118,13 +117,7 @@ int svc_load_model_config(const char *config_path, provider_config_t **out_provi
     }
 
     if (ends_with(config_path, ".yaml") || ends_with(config_path, ".yml")) {
-#ifdef HAVE_YAML
         return svc_load_model_config_yaml(config_path, out_providers, out_count);
-#else
-        SVC_LOG_ERROR(
-            "C-L02: SVC: MODEL-CONFIG-FAIL YAML not compiled, STACK: svc_load_model_config");
-        return AIRY_ERR_NOT_SUPPORTED;
-#endif
     }
     return svc_load_model_config_json(config_path, out_providers, out_count);
 }

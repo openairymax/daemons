@@ -27,8 +27,6 @@
 
 #include "config/types.h"
 
-#ifdef HAVE_YAML
-
 /* 取映射 item 中 key 对应的标量字符串；键缺失或非标量返回 NULL，与原
  * kv map 未命中语义一致。 */
 static const char *svc_yaml_item_str(struct yaml_node *item, const char *key)
@@ -232,5 +230,3 @@ void svc_yaml_expand_llm(svc_yaml_state_t *st)
                      llm_cfg->base_url[0] ? llm_cfg->base_url : "(default)", llm_cfg->model);
     }
 }
-
-#endif /* HAVE_YAML */

@@ -156,7 +156,7 @@ ctest --test-dir ../daemons-build/common -R "^svc_test_" -V
 | [commons](https://atomgit.com/openairymax/commons) | `airy_common` 统一基础库：错误码、日志、内存、字符串、同步、缓存、可观测性、平台路径 |
 | [atoms](https://atomgit.com/openairymax/atoms) | `airy_core`（corekern IPC 通道/事务）、`airy_ipc_ops` 与 `airy_syscall_ops`（ops 表存储小库）、`coreloopthree` 头文件路径 |
 | [heapstore](https://atomgit.com/openairymax/heapstore) | 可选；`BUILD_HEAPSTORE=ON` 时 PUBLIC 链接 `airy_heapstore` |
-| 外部 | `Threads::Threads`；可选 `OpenSSL`、`cJSON`、`libyaml`、`CURL`；Windows 另链 `ws2_32`、`bcrypt`、`advapi32` |
+| 外部 | `Threads::Threads`；可选 `OpenSSL`、`cJSON`、`CURL`；Windows 另链 `ws2_32`、`bcrypt`、`advapi32` |
 
 安装面只包含 `svc_common` 归档（`lib/`），`include/` 下的兼容层与桥接头不安装——
 对外 API 头由各下层库自行安装，避免出现第二个不一致的公共 API 面。

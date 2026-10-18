@@ -251,7 +251,7 @@ ctest --test-dir ../daemons-build -R tool_d_ --output-on-failure
 | [maths_d](../maths_d/README.md) | `maths_eval` / `maths_stats` 的执行端 |
 | [`svc_common`](../common/README.md) | 守护进程样板、事件驱动、JSON-RPC dispatcher、`daemon_security*` ACL |
 | [commons](https://atomgit.com/openairymax/commons) | 平台路径、日志、内存与同步原语、cJSON 封装 |
-| 外部 | `cJSON`、可选 `libyaml`、`Threads::Threads`；Windows 另链 `ws2_32`、`bcrypt`、`${CMAKE_DL_LIBS}` |
+| 外部 | `cJSON`、`Threads::Threads`；Windows 另链 `ws2_32`、`bcrypt`、`${CMAKE_DL_LIBS}` |
 
 ## 关系
 

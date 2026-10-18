@@ -76,7 +76,6 @@ target_include_directories(airy_market_service PUBLIC
 
 target_include_directories(airy_market_service PRIVATE
     ${CJSON_INCLUDE_DIRS}
-    ${YAML_INCLUDE_DIRS}
 )
 
 # 链接库：svc_common 提供 daemon 公共层 + commons 传递依赖
@@ -88,9 +87,6 @@ if(AIRY_HAS_CJSON)
     elseif(CJSON_FOUND AND CJSON_LIBRARIES)
         target_link_libraries(airy_market_service PUBLIC ${CJSON_LIBRARIES})
     endif()
-endif()
-if(AIRY_HAS_YAML AND YAML_FOUND AND YAML_LIBRARIES)
-    target_link_libraries(airy_market_service PUBLIC ${YAML_LIBRARIES})
 endif()
 
 if(UNIX)
@@ -146,7 +142,6 @@ target_include_directories(market_d PRIVATE
     ${COMMONS_INCLUDE_DIR}/utils/network
     ${COMMONS_INCLUDE_DIR}/utils/ipc
     ${CJSON_INCLUDE_DIRS}
-    ${YAML_INCLUDE_DIRS}
 )
 
 target_link_libraries(market_d PRIVATE

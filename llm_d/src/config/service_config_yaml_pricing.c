@@ -20,8 +20,6 @@
 #include "config/config_internal.h"
 #include "config/types.h"
 
-#ifdef HAVE_YAML
-
 /**
  * @brief Load pricing rules from a YAML model config (model.yaml).
  *
@@ -98,5 +96,3 @@ int load_pricing_rules_from_yaml(const char *config_path, pricing_rule_t **out_r
     SVC_LOG_INFO("C-L02: SVC: pricing rules from YAML models=%d", n);
     return 0;
 }
-
-#endif /* HAVE_YAML */

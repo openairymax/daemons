@@ -23,8 +23,6 @@
 
 #include "config/types.h"
 
-#ifdef HAVE_YAML
-
 /* Find-by-name or append a fresh slot. Returns (size_t)-1 when the fixed
  * 16-slot table is full; the caller owns its overflow policy. */
 static size_t agg_slot(provider_agg_t *provs, size_t *prov_count, const char *name,
@@ -223,5 +221,3 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
     }
     return rc;
 }
-
-#endif /* HAVE_YAML */
