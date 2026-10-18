@@ -20,22 +20,6 @@
 #include <string.h>
 
 /**
- * @brief Get tool metadata
- */
-static tool_metadata_t *get_tool_metadata(tool_service_t *svc, const char *tool_id)
-{
-    if (!svc || !tool_id) {
-        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-    }
-
-    airy_mtx_lock(&svc->lock);
-    tool_metadata_t *meta = tool_registry_get(svc->registry, tool_id);
-    airy_mtx_unlock(&svc->lock);
-
-    return meta;
-}
-
-/**
  * @brief Validate tool params
  */
 static int validate_tool_params(tool_service_t *svc, tool_metadata_t *meta, const char *tool_id,
@@ -171,7 +155,7 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    tool_metadata_t *meta = get_tool_metadata(svc, req->tool_id);
+    tool_metadata_t *meta = tool_service_get(svc, req->tool_id);
     if (!meta) {
         SVC_LOG_ERROR("Tool not found: %s", req->tool_id);
         return AIRY_ERR_EXEC_NOT_FOUND;
