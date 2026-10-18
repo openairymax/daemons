@@ -53,14 +53,10 @@ foreach(TEST_SRC ${TEST_SOURCES})
         Threads::Threads
     )
 
-    # 0.1.19 §254b: vault 四用例经 dome 策略单元引导（daemon_dome_init +
-    # cupolas_dome_vault），链策略单元并取 daemon_security_dome.h 头面。
-    # §255: cupolas_d 随产品壳迁出，头面经顶层 CUPOLAS_SRC_DIR 锚点取得。
-    if(TEST_SRC STREQUAL "test_daemon_security.c")
-        target_include_directories(${TARGET_NAME} PRIVATE
-            ${CUPOLAS_SRC_DIR}/daemon/include)
-        target_link_libraries(${TARGET_NAME} PRIVATE airy_security_dome)
-    endif()
+    # 0.1.19 §254b: test_daemon_security 只验 daemon 层凭据类型与净化等级，
+    # 不消费 dome 策略单元符号；产品壳缺席时不得以裸库名退化链接（此前
+    # 造成 -lairy_security_dome 链接期硬失败）。策略单元的行为由 cupolas
+    # 产品件自身用例覆盖。
     
     # cJSON found by root CMakeLists.txt (AIRY_HAS_CJSON)
     if(AIRY_HAS_CJSON)
