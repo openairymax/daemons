@@ -207,21 +207,6 @@ int svc_prepare(const char *config_path)
     svc_cfg.process_timeout_ms = g_cfg.process_timeout_ms;
     svc_cfg.perf_light = g_cfg.perf_light;
 
-    g_svc = think_service_create(&svc_cfg);
-    if (!g_svc) {
-        SVC_LOG_ERROR("Failed to create think service");
-        return -1;
-    }
-
-    /* M1-1c：推理语言网关服务面初始化（lang_gateway 懒创建，此处仅 mutex） */
-    if (lang_svc_init() != 0)
-        SVC_LOG_WARN("lang_svc_init failed, think.lang_* unavailable");
-
-    /* M1-1c：执行复核服务面初始化（t2/t1-f 语义判断策略收拢到 think_d） */
-    if (review_svc_init(think_service_llm_adapter(g_svc), g_cfg.think2_slow_model,
-                        g_cfg.think1_fast_model) != 0)
-        SVC_LOG_WARN("review_svc_init failed, think.review unavailable");
-
 #ifdef AIRY_HAS_COGNITION_STRATEGY
     /* M5-4 C2：注入认知审查 ops（products/cognition 策略载荷），机制核
      * engine_phase0 经 are_ops_get_cpr() 分发 CPR。 */
@@ -238,7 +223,9 @@ int svc_prepare(const char *config_path)
     /* M5-4 §268：注入 TC/MC 双思考载荷 ops（products/cognition 策略
      * 载荷，静态生命周期），机制核 engine/reflective/orchestrator 经
      * are_ops_get_tc()/get_mc() 分发；缺席时 engine create 按契约
-     * fail-fast（ENOSYS），不产生无思考核心的空壳。 */
+     * fail-fast（ENOSYS），不产生无思考核心的空壳。
+     * 注表面必须在 think_service_create 之前就位——引擎创建在该调用内部
+     * 读取 tc/mc/plan ops。 */
     are_ops_set_tc(cog_payload_tc());
     are_ops_set_mc(cog_payload_mc());
 
@@ -254,6 +241,21 @@ int svc_prepare(const char *config_path)
      * process 期 STATE_ERROR fail fast）。 */
     are_ops_set_plan(cog_payload_plan());
 #endif
+
+    g_svc = think_service_create(&svc_cfg);
+    if (!g_svc) {
+        SVC_LOG_ERROR("Failed to create think service");
+        return -1;
+    }
+
+    /* M1-1c：推理语言网关服务面初始化（lang_gateway 懒创建，此处仅 mutex） */
+    if (lang_svc_init() != 0)
+        SVC_LOG_WARN("lang_svc_init failed, think.lang_* unavailable");
+
+    /* M1-1c：执行复核服务面初始化（t2/t1-f 语义判断策略收拢到 think_d） */
+    if (review_svc_init(think_service_llm_adapter(g_svc), g_cfg.think2_slow_model,
+                        g_cfg.think1_fast_model) != 0)
+        SVC_LOG_WARN("review_svc_init failed, think.review unavailable");
 
     SVC_LOG_INFO("think service started (enabled=%d, timeout_ms=%u)", g_cfg.think_enabled,
                  g_cfg.process_timeout_ms);

@@ -84,7 +84,6 @@ target_link_libraries(airy_think_service PUBLIC airy_coreloopthree svc_common)
 # 报错——fail-open，不阻断 daemon）。
 if(TARGET airy_lang_gateway)
     target_link_libraries(airy_think_service PUBLIC airy_lang_gateway)
-    target_compile_definitions(airy_think_service PRIVATE AIRY_HAS_LANG_GATEWAY=1)
 endif()
 
 # M5-4 C3：认知审查策略库（products/cognition）由消费端（本 daemon 的
@@ -94,7 +93,6 @@ endif()
 # 不阻断推理主链）。
 if(TARGET airy_cognition_strategy)
     target_link_libraries(airy_think_service PUBLIC airy_cognition_strategy)
-    target_compile_definitions(airy_think_service PRIVATE AIRY_HAS_COGNITION_STRATEGY=1)
 endif()
 
 if(AIRY_HAS_CJSON)
@@ -164,6 +162,16 @@ target_link_libraries(think_d PRIVATE
 )
 # 0.1.19 §254b: boot 接线 vault 策略单元（daemon_dome_init_pep/_cleanup 符号面）
 target_link_libraries(think_d PRIVATE airy_security_dome)
+
+# 产品库特性宏必须落在守卫代码所在目标：svc.c/lang_svc.c 编入 think_d
+# 可执行目标（THINK_D_SOURCES），airy_think_service 上的 PRIVATE 定义
+# 不向其传播（e2e 实证：think_d 因 plan ops 缺席拒绝建引擎而退出）。
+if(TARGET airy_cognition_strategy)
+    target_compile_definitions(think_d PRIVATE AIRY_HAS_COGNITION_STRATEGY=1)
+endif()
+if(TARGET airy_lang_gateway)
+    target_compile_definitions(think_d PRIVATE AIRY_HAS_LANG_GATEWAY=1)
+endif()
 
 if(NOT MSVC)
 target_compile_options(think_d PRIVATE
