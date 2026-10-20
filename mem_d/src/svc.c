@@ -107,13 +107,13 @@ static void cfg_keys(const cJSON *root, void *ud)
                 g_config.compress_gate_ttft_ms = ttft->valuedouble;
         }
     }
-    /* B5：台账计数模型声明（缺省 → 默认模型，不得硬编码） */
+    /* B5：台账计数分词族声明（缺省 → 默认族，不得硬编码） */
     cJSON *tcfg = cJSON_GetObjectItem(root, "token");
     if (tcfg) {
-        cJSON *model = cJSON_GetObjectItem(tcfg, "model");
-        if (cJSON_IsString(model) && model->valuestring[0])
-            AIRY_STRNCPY_TERM(g_config.token_model, model->valuestring,
-                              sizeof(g_config.token_model));
+        cJSON *family = cJSON_GetObjectItem(tcfg, "family");
+        if (cJSON_IsString(family) && family->valuestring[0])
+            AIRY_STRNCPY_TERM(g_config.token_family, family->valuestring,
+                              sizeof(g_config.token_family));
     }
 }
 
@@ -126,8 +126,8 @@ static void load_daemon_config(const char *config_path)
     g_config.compress_gate_grayscale = 0;
     g_config.compress_gate_acr = -1.0;
     g_config.compress_gate_ttft_ms = -1.0;
-    /* B5：台账计数模型默认空（由 token_standard 默认模型兜底） */
-    g_config.token_model[0] = '\0';
+    /* B5：台账计数分词族默认空（由 token_standard 默认族兜底） */
+    g_config.token_family[0] = '\0';
 
     const char *env = getenv("AIRY_MEM_MAX_RECORDS");
     if (env) {
@@ -159,9 +159,9 @@ static void load_daemon_config(const char *config_path)
     }
 
     /* B5：台账计数模型（按实际模型取，缺省回退默认模型） */
-    const char *env_model = getenv("AIRY_MEM_TOKEN_MODEL");
-    if (env_model && env_model[0])
-        AIRY_STRNCPY_TERM(g_config.token_model, env_model, sizeof(g_config.token_model));
+    const char *env_family = getenv("AIRY_MEM_TOKEN_FAMILY");
+    if (env_family && env_family[0])
+        AIRY_STRNCPY_TERM(g_config.token_family, env_family, sizeof(g_config.token_family));
 
     daemon_ep_load(daemon_ep_slot(), config_path, MEM_D_SOCKET_UNIX,
                    MEM_D_SOCKET_WIN, MEM_D_TCP_PORT, cfg_keys, NULL);
@@ -194,12 +194,12 @@ int svc_prepare(const char *config_path)
         SVC_LOG_WARN("Context ledger init failed, ledger disabled (degraded mode)");
     } else {
         /* B5：按声明注入计数模型（空 → 默认模型），失败保留默认模型 */
-        int model_ret = mem_ledger_set_token_model(g_ledger, g_config.token_model);
-        if (model_ret != AIRY_SUCCESS)
-            SVC_LOG_WARN("Token model '%s' rejected (%d), fallback kept: %s",
-                         g_config.token_model[0] ? g_config.token_model : "(default)", model_ret,
-                         mem_ledger_token_model(g_ledger));
-        SVC_LOG_INFO("ledger token model: %s", mem_ledger_token_model(g_ledger));
+        int family_ret = mem_ledger_set_token_family(g_ledger, g_config.token_family);
+        if (family_ret != AIRY_SUCCESS)
+            SVC_LOG_WARN("Token family '%s' rejected (%d), fallback kept: %s",
+                         g_config.token_family[0] ? g_config.token_family : "(default)", family_ret,
+                         mem_ledger_token_family(g_ledger));
+        SVC_LOG_INFO("ledger token family: %s", mem_ledger_token_family(g_ledger));
     }
     return 0;
 }

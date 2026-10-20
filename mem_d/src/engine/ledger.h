@@ -93,8 +93,8 @@ typedef struct {
  * @param default_budget 默认会话预算（0 → 32768）
  * @param warn_ratio     预算告警比例（0 → 0.8）
  *
- * Token 计数模型初始为默认模型（AIRY_TOKEN_MODEL_NAME_DEFAULT）；
- * 实际模型由声明面经 mem_ledger_set_token_model() 注入。
+ * 分词族初始为默认族（AIRY_TOKEN_MODEL_NAME_DEFAULT）；
+ * 实际分词族由声明面经 mem_ledger_set_token_family() 注入。
  */
 mem_ledger_t *mem_ledger_create(size_t default_budget, double warn_ratio);
 
@@ -102,23 +102,23 @@ mem_ledger_t *mem_ledger_create(size_t default_budget, double warn_ratio);
 void mem_ledger_destroy(mem_ledger_t *ledger);
 
 /**
- * @brief 设置 Token 计数模型（声明注入，B5）。
+ * @brief 设置 Token 计数分词族（声明注入，B5）。
  *
- * 模型名取自声明面（config "token" 段 / 环境变量），交由 commons
- * token_standard 按实际模型计数；NULL 或空串回退到默认模型，不得因
- * 缺省而失败。切换失败时保留原模型，台账保持可用。
+ * 族名取自声明面（config "token" 段 / 环境变量），交由 commons
+ * token_standard 按算法族计数；NULL 或空串回退到默认族，不得因
+ * 缺省而失败。切换失败时保留原族，台账保持可用。
  *
- * @param model_name 模型名（可为 NULL / 空 → 默认）
+ * @param family_name 算法族名 generic|bpe|spm|uniform（NULL / 空 → 默认）
  * @return AIRY_SUCCESS；AIRY_ERR_INVALID_PARAM（ledger 为 NULL）；
  *         AIRY_ERR_OUT_OF_MEMORY（计数器创建失败）
  */
-int mem_ledger_set_token_model(mem_ledger_t *ledger, const char *model_name);
+int mem_ledger_set_token_family(mem_ledger_t *ledger, const char *family_name);
 
 /**
- * @brief 当前 Token 计数模型名。
- * @return 模型名（ledger 为 NULL 时返回默认模型名；永不返回 NULL）
+ * @brief 当前 Token 计数分词族名。
+ * @return 族名（ledger 为 NULL 时返回默认族名；永不返回 NULL）
  */
-const char *mem_ledger_token_model(const mem_ledger_t *ledger);
+const char *mem_ledger_token_family(const mem_ledger_t *ledger);
 
 /**
  * @brief 追加条目（append-only；批量）。

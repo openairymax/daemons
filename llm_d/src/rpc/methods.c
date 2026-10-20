@@ -102,24 +102,6 @@ static int llm_error_is_retryable(int ret)
     }
 }
 
-static void handle_complete(cJSON *params, int id, airy_sock_t fd);
-static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd);
-static void handle_list_models(cJSON *params, int id, airy_sock_t fd);
-static void handle_embeddings(cJSON *params, int id, airy_sock_t fd);
-static void handle_count_tokens(cJSON *params, int id, airy_sock_t fd);
-static void handle_health_check(cJSON *params, int id, airy_sock_t fd);
-static void handle_get_stats(cJSON *params, int id, airy_sock_t fd);
-
-/* RPC 蹦床：m_<method> ↔ .manifest rpc.methods，壳体经 DAEMON_RPC_SHELL
- * 单点生成；调用点行尾不加分号（宏体自带 '}' 收尾）。 */
-DAEMON_RPC_SHELL(complete, handle_complete)
-DAEMON_RPC_SHELL(complete_stream, handle_complete_stream)
-DAEMON_RPC_SHELL(list_models, handle_list_models)
-DAEMON_RPC_SHELL(count_tokens, handle_count_tokens)
-DAEMON_RPC_SHELL(health_check, handle_health_check)
-DAEMON_RPC_SHELL(get_stats, handle_get_stats)
-DAEMON_RPC_SHELL(embeddings, handle_embeddings)
-
 /* 服务层 JSON 文本直发：root 所有权移交 jsonrpc_build_success，此处不得
  * 再 delete。 */
 static void send_service_json(char *json, int id, airy_sock_t fd, const char *err,
@@ -186,19 +168,19 @@ static void handle_count_tokens(cJSON *params, int id, airy_sock_t fd)
     cJSON *text = cJSON_GetObjectItem(params, "text");
     JSONRPC_REQUIRE(cJSON_IsString(text) && text->valuestring, fd, "Missing text string", id);
 
-    const char *model = NULL;
     cJSON *model_json = cJSON_GetObjectItem(params, "model");
-    if (cJSON_IsString(model_json) && model_json->valuestring)
-        model = model_json->valuestring;
-    else if (g_service)
-        model = llm_service_default_model(g_service);
-
-    /* 模型→算法映射的唯一实现在 commons（airy_token_counter）；本层不再
-     * 自持按厂商前缀分支的算法表。 */
-    airy_token_counter_t *counter =
-        airy_token_counter_create(model && model[0] ? model : AIRY_TOKEN_MODEL_NAME_DEFAULT);
+    const char *model = (cJSON_IsString(model_json) && model_json->valuestring)
+                            ? model_json->valuestring
+                            : (g_service ? llm_service_default_model(g_service) : NULL);
+    /* 分词族由模型策略声明（products 层掌握厂商知识），未声明落默认族。 */
+    cJSON *family_json = cJSON_GetObjectItem(params, "family");
+    const char *family = (cJSON_IsString(family_json) && family_json->valuestring &&
+                          family_json->valuestring[0])
+                             ? family_json->valuestring
+                             : AIRY_TOKEN_MODEL_NAME_DEFAULT;
+    airy_token_counter_t *counter = airy_token_counter_create(family);
     if (!counter) {
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Token counter unavailable", id);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "Unknown token family", id);
         return;
     }
     size_t tokens = airy_token_counter_count(counter, text->valuestring);
@@ -214,6 +196,7 @@ static void handle_count_tokens(cJSON *params, int id, airy_sock_t fd)
         return;
     }
     cJSON_AddStringToObject(result, "model", model ? model : "default");
+    cJSON_AddStringToObject(result, "family", family);
     cJSON_AddStringToObject(result, "text", text->valuestring);
     cJSON_AddNumberToObject(result, "tokens", (double)tokens);
     cJSON_AddStringToObject(result, "algorithm", airy_token_get_algorithm_info());
@@ -502,3 +485,14 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
     AIRY_FREE((void *)cfg.model);
     request_context_destroy(ctx);
 }
+
+/* RPC 蹦床：m_<method> ↔ .manifest rpc.methods，壳体经 DAEMON_RPC_SHELL
+ * 单点生成；调用点行尾不加分号（宏体自带 '}' 收尾）。壳置于 handler 之后，
+ * 原型由生成头 svc_llm_d.h 提供，本文件不再重复前置声明。 */
+DAEMON_RPC_SHELL(complete, handle_complete)
+DAEMON_RPC_SHELL(complete_stream, handle_complete_stream)
+DAEMON_RPC_SHELL(list_models, handle_list_models)
+DAEMON_RPC_SHELL(count_tokens, handle_count_tokens)
+DAEMON_RPC_SHELL(health_check, handle_health_check)
+DAEMON_RPC_SHELL(get_stats, handle_get_stats)
+DAEMON_RPC_SHELL(embeddings, handle_embeddings)

@@ -39,7 +39,7 @@ int llm_router_init(void)
         return AIRY_ERR_SYS_MUTEX;
     }
 
-    ctx->token_cfg = (airy_token_config_t){.model_type = AIRY_TOKEN_MODEL_GPT4,
+    ctx->token_cfg = (airy_token_config_t){.model_type = AIRY_TOKEN_MODEL_BPE,
                                            .model_name = "cl100k_base",
                                            .cjk_ratio = 0.2f,
                                            .alpha_ratio = 0.4f,

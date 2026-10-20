@@ -340,7 +340,7 @@ int mem_compress_plan(mem_ledger_t *ledger, const char *session_id,
     tokens = AIRY_CALLOC(count, sizeof(size_t));
     actions = AIRY_CALLOC(count, sizeof(compress_plan_item_t));
     /* 计数模型与台账同源（声明注入；ledger 为空 → 默认模型） */
-    counter = airy_token_counter_create(mem_ledger_token_model(ledger));
+    counter = airy_token_counter_create(mem_ledger_token_family(ledger));
     if (!act || !repl || !hashes || !tokens || !actions || !counter) {
         AIRY_FREE(act);
         for (i = 0; i < count; i++) AIRY_FREE(repl ? repl[i] : NULL);
