@@ -46,6 +46,8 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/adapter_table.c
     # P3.16 (ACC-DT17): llm_router 集成 — 路由器实现源码（sec44-D 合一）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/core/llm_router.c
+    # 0.1.19 §3.8.2：端点切换决策件（与主目标同步）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/core/llm_failover.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/strategy/router_strategy.c
 )
 
@@ -67,6 +69,8 @@ set(LLM_TEST_SOURCES
     test_gen_params.c
     # C-4 (D): finish_reason canonical 词汇表归一化与截断判定回归
     test_finish_reason.c
+    # 0.1.19 §3.8.2：端点切换决策件（错误码 → 可否换端点）回归
+    test_failover.c
 )
 
 set(LLM_COMMON_INCLUDES
