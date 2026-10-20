@@ -228,6 +228,54 @@ int llm_router_route(const llm_route_request_t *request, llm_route_result_t *res
     return ret;
 }
 
+/* 候选排序判据：priority 降序、估算成本升序；相等时保持注册序（稳定插入排序）。 */
+static int cand_precedes(const llm_endpoint_t *a, const llm_endpoint_t *b, size_t in_tok,
+                         size_t out_tok)
+{
+    if (a->priority != b->priority)
+        return a->priority > b->priority;
+    return router_estimate_cost(a, in_tok, out_tok) < router_estimate_cost(b, in_tok, out_tok);
+}
+
+int llm_router_candidates(const llm_route_request_t *request, llm_route_result_t *out, size_t max,
+                          size_t *out_count)
+{
+    router_ctx_t *ctx = router_ctx_get();
+    llm_endpoint_t *eps[LLM_ROUTER_MAX_ENDPOINTS];
+    size_t n;
+    size_t in_tok;
+    size_t out_tok;
+    size_t take;
+
+    if (!request || !out || max == 0 || !out_count)
+        return AIRY_ERR_INVALID_PARAM;
+
+    *out_count = 0;
+    if (!ctx->initialized)
+        return AIRY_ERR_SYS_NOT_INIT;
+
+    n = router_get_eligible(request, eps, LLM_ROUTER_MAX_ENDPOINTS);
+    in_tok = router_estimate_tokens(request->prompt, request->prompt_len);
+    out_tok = request->max_tokens ? request->max_tokens : LLM_ROUTE_EST_OUTPUT_TOKENS;
+
+    for (size_t i = 1; i < n; i++) {
+        llm_endpoint_t *key = eps[i];
+        size_t j = i;
+
+        while (j > 0 && cand_precedes(key, eps[j - 1], in_tok, out_tok)) {
+            eps[j] = eps[j - 1];
+            j--;
+        }
+        eps[j] = key;
+    }
+
+    take = n < max ? n : max;
+    for (size_t i = 0; i < take; i++)
+        router_fill_result(&out[i], eps[i], LLM_ROUTE_COST, 100, in_tok, out_tok);
+    *out_count = take;
+    return 0;
+}
+
 int llm_router_get_stats(llm_router_stats_t *stats)
 {
     router_ctx_t *ctx = router_ctx_get();

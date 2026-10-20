@@ -20,6 +20,8 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/config/service_config_yaml_pricing.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_providers.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_request.c
+    # 0.1.19 §3.8.4 A3：调用级链式切换机制（与主目标同步）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_chain.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/metrics.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/semantic_cache.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/response.c
@@ -75,6 +77,8 @@ set(LLM_TEST_SOURCES
     test_failover.c
     # 0.1.19 §3.8.2：端点健康面（熔断三态 + 半开探测）回归
     test_health.c
+    # 0.1.19 §3.8.4 A3：调用级链式切换（off 零变化 / 白名单 / 跳数 / 预算）
+    test_chain.c
 )
 
 set(LLM_COMMON_INCLUDES

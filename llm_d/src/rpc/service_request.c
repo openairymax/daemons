@@ -73,20 +73,23 @@ static char *make_cache_text(const llm_request_config_t *manager)
 
 /**
  * @brief 本地 LRU 键 "<model>|<canonical text>"（调用方 AIRY_FREE）。
+ *
+ * 模型段取实际服务该请求的模型，而非请求模型：链式切换后同一逻辑请求
+ * 可能落在他处，两者答案不可互相冒充（0.1.19 §3.8.4 H8）。
  */
-static char *make_cache_key(const llm_request_config_t *manager, const char *text)
+static char *make_cache_key(const char *model, const char *text)
 {
-    if (!manager || !manager->model || !text) {
+    if (!model || !text) {
         return NULL;
     }
 
-    size_t len = strlen(manager->model) + 1 + strlen(text) + 1;
+    size_t len = strlen(model) + 1 + strlen(text) + 1;
     char *key = (char *)AIRY_MALLOC(len);
     if (!key) {
         return NULL;
     }
 
-    snprintf(key, len, "%s|%s", manager->model, text);
+    snprintf(key, len, "%s|%s", model, text);
     return key;
 }
 
@@ -139,20 +142,37 @@ static int cache_lookup(llm_service_t *svc, const char *key, const char *text, c
     return sem_resp ? 1 : 0;
 }
 
-/* 注册表精确查找（持锁），未命中返回 NULL。 */
-static const provider_t *find_provider(llm_service_t *svc, const char *model)
+/* 注册表精确查找在 service_chain.c（链式切换同源使用）。 */
+
+/* 候选枚举请求的唯一构造点：首选选路与链式候选共用，避免两处 prompt /
+ * caps / max_tokens 口径漂移。 */
+static void build_route_request(llm_service_t *svc, const llm_request_config_t *manager,
+                                bool is_stream, llm_route_request_t *req)
 {
-    if (!svc || !model) {
-        SVC_LOG_ERROR("find_provider: NULL parameter (svc=%p, model=%p)", (const void *)svc,
-                      (const void *)model);
-        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
+    __builtin_memset(req, 0, sizeof(*req));
+
+    if (manager->message_count > 0 && manager->messages && manager->messages[0].content) {
+        req->prompt = manager->messages[0].content;
+        req->prompt_len = strlen(req->prompt);
+    } else {
+        req->prompt = "";
+        req->prompt_len = 0;
     }
 
-    airy_mtx_lock(&svc->lock);
-    const provider_t *prov = provider_registry_find(svc->registry, model);
-    airy_mtx_unlock(&svc->lock);
+    req->required_caps = LLM_CAP_CHAT | LLM_CAP_COMPLETION;
+    if (is_stream) {
+        req->required_caps |= LLM_CAP_STREAMING;
+    }
 
-    return prov;
+    /* 估算用输出量与最终 max_tokens 同源：未指定时取引擎默认上限。 */
+    {
+        int est = (manager->max_tokens > 0) ? manager->max_tokens : svc->default_max_output_tokens;
+        req->max_tokens = (est > 0) ? (uint32_t)est : 0;
+    }
+    req->max_cost = 0;
+    req->max_latency_ms = 0;
+    req->strategy = LLM_ROUTE_COST;
+    req->preferred_provider[0] = '\0';
 }
 
 /* ---------- P3.16 (ACC-DT17): llm_router 选路 ----------
@@ -161,14 +181,14 @@ static const provider_t *find_provider(llm_service_t *svc, const char *model)
  * 策略路由，最终由 pick_provider 再做注册表兜底。 */
 static const provider_t *select_provider_via_router(llm_service_t *svc,
                                                     const llm_request_config_t *manager,
-                                                    bool is_stream)
+                                                    const llm_route_request_t *req)
 {
-    if (!svc || !manager) {
+    if (!svc || !manager || !req) {
         return NULL;
     }
 
     if (manager->model && manager->model[0]) {
-        const provider_t *exact = find_provider(svc, manager->model);
+        const provider_t *exact = svc_find_prov(svc, manager->model);
         if (exact) {
             SVC_LOG_INFO("C-L02: SVC: explicit model %s resolved directly "
                          "(provider=%s, skip router)",
@@ -182,43 +202,17 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
                      manager->model ? manager->model : "(null)");
     }
 
-    llm_route_request_t req;
-    __builtin_memset(&req, 0, sizeof(req));
-
-    if (manager->message_count > 0 && manager->messages && manager->messages[0].content) {
-        req.prompt = manager->messages[0].content;
-        req.prompt_len = strlen(req.prompt);
-    } else {
-        req.prompt = "";
-        req.prompt_len = 0;
-    }
-
-    req.required_caps = LLM_CAP_CHAT | LLM_CAP_COMPLETION;
-    if (is_stream) {
-        req.required_caps |= LLM_CAP_STREAMING;
-    }
-
-    /* 估算用输出量与最终 max_tokens 同源：未指定时取引擎默认上限。 */
-    {
-        int est = (manager->max_tokens > 0) ? manager->max_tokens : svc->default_max_output_tokens;
-        req.max_tokens = (est > 0) ? (uint32_t)est : 0;
-    }
-    req.max_cost = 0;
-    req.max_latency_ms = 0;
-    req.strategy = LLM_ROUTE_COST;
-    req.preferred_provider[0] = '\0';
-
     llm_route_result_t result;
     __builtin_memset(&result, 0, sizeof(result));
-    int rc = llm_router_route(&req, &result);
+    int rc = llm_router_route(req, &result);
     if (rc != 0) {
-        SVC_LOG_DEBUG("C-L02: SVC: router_route rc=%d — will fall back to find_provider(%s)", rc,
+        SVC_LOG_DEBUG("C-L02: SVC: router_route rc=%d — will fall back to registry lookup(%s)", rc,
                       manager->model ? manager->model : "NULL");
         return NULL;
     }
 
     /* 选路结果回到注册表解析真实 provider；失败则交由调用方兜底。 */
-    const provider_t *prov = find_provider(svc, result.model_name);
+    const provider_t *prov = svc_find_prov(svc, result.model_name);
     if (prov) {
         SVC_LOG_INFO("C-L02: SVC: ROUTED provider=%s model=%s strategy=%d cost=%.6f latency=%u",
                      result.provider_name, result.model_name, (int)result.strategy_used,
@@ -230,13 +224,14 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
 /* 双入口统一的选取链：策略路由优先，miss 时回落注册表精确查找；
  * 仍无可用 provider 则记录带 STACK 的失败日志并返回 NULL。 */
 static const provider_t *pick_provider(llm_service_t *svc, const llm_request_config_t *manager,
-                                       const char *stack, bool is_stream)
+                                       const llm_route_request_t *req, const char *stack,
+                                       bool is_stream)
 {
-    const provider_t *prov = select_provider_via_router(svc, manager, is_stream);
+    const provider_t *prov = select_provider_via_router(svc, manager, req);
     if (!prov) {
-        SVC_LOG_INFO("C-L02: SVC: router miss — falling back to find_provider(model=%s)",
+        SVC_LOG_INFO("C-L02: SVC: router miss — falling back to registry lookup(model=%s)",
                      manager->model);
-        prov = find_provider(svc, manager->model);
+        prov = svc_find_prov(svc, manager->model);
     }
     if (!prov)
         SVC_LOG_ERROR("C-L02: SVC: %s model=%s, error=INVALID_MODEL, STACK: %s",
@@ -359,6 +354,56 @@ static int req_guard(llm_service_t *svc, const llm_request_config_t *manager,
     return AIRY_OK;
 }
 
+/* complete 真实调用闭包：适配器直调，机制层不感知传输。 */
+static int complete_attempt(void *ctx, const svc_step_t *step, llm_response_t **out)
+{
+    (void)ctx;
+    int ret = step->prov->adapter->complete(step->prov->ctx, &step->eff, out);
+    if (ret != 0)
+        SVC_LOG_ERROR("C-L02: SVC: COMPLETE-ATTEMPT-FAIL provider=%s model=%s error=%d",
+                      step->prov->name ? step->prov->name : "?", step->eff.model, ret);
+    return ret;
+}
+
+/* 流式首字节哨兵：任一带内容的块下发即视为已提交，此后禁止切换
+ * （0.1.19 §3.8.4 H6：两段不相接的内容不可拼接给下游）。 */
+typedef struct {
+    llm_stream_callback_t cb;
+    void *ud;
+    int sent;
+} stream_ctx_t;
+
+static void stream_guard(const char *chunk, void *user_data)
+{
+    stream_ctx_t *ctx = (stream_ctx_t *)user_data;
+    if (chunk && chunk[0])
+        ctx->sent = 1;
+    ctx->cb(chunk, ctx->ud);
+}
+
+static int stream_sent(void *ctx)
+{
+    return ((stream_ctx_t *)ctx)->sent;
+}
+
+static int stream_attempt(void *ctx, const svc_step_t *step, llm_response_t **out)
+{
+    stream_ctx_t *sc = (stream_ctx_t *)ctx;
+
+    if (!step->prov->adapter->complete_stream) {
+        SVC_LOG_ERROR("C-L02: SVC: STREAM-ATTEMPT-FAIL provider=%s model=%s error=NOT_SUPPORTED",
+                      step->prov->name ? step->prov->name : "?", step->eff.model);
+        return AIRY_ERR_NOT_SUPPORTED;
+    }
+
+    int ret = step->prov->adapter->complete_stream(step->prov->ctx, &step->eff, stream_guard, sc,
+                                                   out);
+    if (ret != 0)
+        SVC_LOG_ERROR("C-L02: SVC: STREAM-ATTEMPT-FAIL provider=%s model=%s error=%d",
+                      step->prov->name ? step->prov->name : "?", step->eff.model, ret);
+    return ret;
+}
+
 int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager,
                          llm_response_t **out_response)
 {
@@ -367,7 +412,7 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
         return grc;
 
     char *cache_text = make_cache_text(manager);
-    char *cache_key = cache_text ? make_cache_key(manager, cache_text) : NULL;
+    char *cache_key = cache_text ? make_cache_key(manager->model, cache_text) : NULL;
     if (!cache_text || !cache_key) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL cache key alloc, STACK: llm_service_complete");
         AIRY_FREE(cache_text);
@@ -387,7 +432,10 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
         return AIRY_OK;
     }
 
-    const provider_t *prov = pick_provider(svc, manager, "llm_service_complete", false);
+    llm_route_request_t req;
+    build_route_request(svc, manager, false, &req);
+
+    const provider_t *prov = pick_provider(svc, manager, &req, "llm_service_complete", false);
     if (!prov) {
         AIRY_FREE(cache_text);
         AIRY_FREE(cache_key);
@@ -396,26 +444,29 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
 
     log_routing_prelude(manager, "user_specified");
 
-    llm_request_config_t eff = *manager;
-    char eff_model[128];
-    int eff_max_tokens = 0;
-    resolve_gen_params(svc, prov, manager, eff_model, sizeof(eff_model), &eff_max_tokens);
-    eff.model = eff_model;
-    eff.max_tokens = eff_max_tokens;
-
+    svc_hit_t hit;
+    __builtin_memset(&hit, 0, sizeof(hit));
     llm_response_t *resp = NULL;
-    int ret = prov->adapter->complete(prov->ctx, &eff, &resp);
-    if (ret != 0) {
+    int ret = svc_chain_run(svc, manager, &req, prov, complete_attempt, NULL, NULL, &resp, &hit);
+    if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: SVC: COMPLETE-FAIL model=%s, error=%d, STACK: llm_service_complete",
-                      eff_model, ret);
+                      manager->model, ret);
         AIRY_FREE(cache_text);
         AIRY_FREE(cache_key);
         return ret;
     }
 
-    note_truncation(resp, eff_model, eff_max_tokens);
-    update_cost_tracking(svc, eff_model, resp);
-    cache_store(svc, cache_key, cache_text, manager->model, resp, manager->cacheable);
+    note_truncation(resp, hit.model, hit.max_tokens);
+    update_cost_tracking(svc, hit.model, resp);
+
+    /* 写入键改用实际模型：同一逻辑请求换端点后答案不可互相冒充（H8）。 */
+    char *store_key = make_cache_key(hit.model, cache_text);
+    if (store_key) {
+        cache_store(svc, store_key, cache_text, hit.model, resp, manager->cacheable);
+        AIRY_FREE(store_key);
+    } else {
+        SVC_LOG_WARN("C-L02: SVC: cache store skipped (key alloc failed, model=%s)", hit.model);
+    }
 
     *out_response = resp;
     AIRY_FREE(cache_text);
@@ -432,38 +483,36 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
     if (grc != AIRY_OK)
         return grc;
 
-    const provider_t *prov = pick_provider(svc, manager, "llm_service_complete_stream", true);
+    llm_route_request_t req;
+    build_route_request(svc, manager, true, &req);
+
+    const provider_t *prov = pick_provider(svc, manager, &req, "llm_service_complete_stream", true);
     if (!prov)
         return AIRY_ERR_LLM_INVALID_MODEL;
 
     log_routing_prelude(manager, "stream_user_specified");
 
-    if (!prov->adapter->complete_stream) {
-        SVC_LOG_ERROR("C-L02: SVC: STREAM-FAIL model=%s, error=NOT_SUPPORTED, STACK: "
-                      "llm_service_complete_stream",
-                      manager->model);
-        return AIRY_ERR_NOT_SUPPORTED;
-    }
+    stream_ctx_t sc = {.cb = callback, .ud = callback_data, .sent = 0};
+    svc_hit_t hit;
+    __builtin_memset(&hit, 0, sizeof(hit));
+    llm_response_t *resp = NULL;
 
-    llm_request_config_t eff = *manager;
-    char eff_model[128];
-    int eff_max_tokens = 0;
-    resolve_gen_params(svc, prov, manager, eff_model, sizeof(eff_model), &eff_max_tokens);
-    eff.model = eff_model;
-    eff.max_tokens = eff_max_tokens;
+    int ret = svc_chain_run(svc, manager, &req, prov, stream_attempt, &sc, stream_sent, &resp, &hit);
+    if (ret != AIRY_OK)
+        return ret;
 
-    int ret = prov->adapter->complete_stream(prov->ctx, &eff, callback, callback_data,
-                                             out_response);
-
-    if (ret == 0 && out_response && *out_response) {
-        llm_response_t *resp = *out_response;
-        note_truncation(resp, eff_model, eff_max_tokens);
-        cost_tracker_add(svc->cost, eff_model, resp->prompt_tokens, resp->completion_tokens);
-        resp->cost_usd = cost_tracker_estimate(svc->cost, eff_model, resp->prompt_tokens,
+    if (resp) {
+        note_truncation(resp, hit.model, hit.max_tokens);
+        cost_tracker_add(svc->cost, hit.model, resp->prompt_tokens, resp->completion_tokens);
+        resp->cost_usd = cost_tracker_estimate(svc->cost, hit.model, resp->prompt_tokens,
                                                resp->completion_tokens);
     }
 
-    return ret;
+    if (out_response)
+        *out_response = resp;
+    else
+        llm_response_free(resp);
+    return AIRY_OK;
 }
 
 /* OpenAI 兼容：仅 Bearer 鉴权，Content-Type 由 core 统一附加。 */
@@ -477,7 +526,7 @@ int llm_service_embeddings(llm_service_t *svc, const char *model, const char *re
     *out_json = NULL;
 
     const char *m = (model && model[0]) ? model : svc->default_model;
-    const provider_t *prov = find_provider(svc, m ? m : "");
+    const provider_t *prov = svc_find_prov(svc, m ? m : "");
     if (!prov || !prov->ctx) {
         SVC_LOG_ERROR("embeddings: no provider for model=%s", m ? m : "(default)");
         return AIRY_ERR_LLM_INVALID_MODEL;
