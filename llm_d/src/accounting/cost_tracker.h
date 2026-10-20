@@ -26,6 +26,11 @@ typedef struct cost_tracker cost_tracker_t;
 
 cost_tracker_t *cost_tracker_create(const pricing_rule_t *rules, int rule_count);
 void cost_tracker_destroy(cost_tracker_t *ct);
+
+/* 价格查找 SSoT：累计/估算与端点路由表共用；首条命中胜出，pattern 为精确名或
+ * 尾部 '*'；未命中取内置默认价，故默认价只有一处。model 为 NULL 即默认价。 */
+void cost_tracker_price(const pricing_rule_t *rules, int rule_count, const char *model,
+                        double *input_price, double *output_price);
 void cost_tracker_add(cost_tracker_t *ct, const char *model, uint32_t prompt_tokens,
                       uint32_t completion_tokens);
 
