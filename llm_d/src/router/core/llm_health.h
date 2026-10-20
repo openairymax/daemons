@@ -73,6 +73,18 @@ void llm_ep_ok(llm_endpoint_t *ep);
  */
 int llm_rtr_admit(const char *provider, const char *model);
 
+/**
+ * 端点是否已注册到健康面。
+ *
+ * 调用侧链式切换需要一个与「能否放行」不同的判据：llm_rtr_admit() 对
+ * 未注册端点返回拒绝方向（0），若直接据此判定端点不可用，则 router
+ * 未初始化或端点超出注册上限时会把本该尝试的端点全部跳过。本函数用于
+ * 区分「未注册（无从判定，按可用处理）」与「已注册但明确拒绝」。
+ *
+ * @return 1 已注册，0 未注册或 router 未初始化。
+ */
+int llm_rtr_known(const char *provider, const char *model);
+
 /** 锁内记录失败。@return 0 已记录，负值未找到端点。 */
 int llm_rtr_fail(const char *provider, const char *model, int err);
 

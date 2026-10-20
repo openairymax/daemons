@@ -133,6 +133,26 @@ int llm_router_register_endpoint(const llm_endpoint_t *endpoint);
 int llm_router_route(const llm_route_request_t *request, llm_route_result_t *result);
 
 /**
+ * @brief 枚举本次请求的全部可达端点，按优先级降序、估算成本升序排列。
+ *
+ * 调用级链式切换（0.1.19 §3.8.4 A3）需要「下一个候选」而非「唯一最优」，
+ * 且候选必须与 llm_router_route() 使用同一套可达性口径（熔断 OPEN 排除、
+ * 能力位与 preferred_provider 过滤）。排序取 priority 降序、估算成本升序、
+ * 注册序升序，使首选与 llm_router_route() 的 COST 策略一致。
+ *
+ * 本函数只读端点表，不加锁，与既有策略实现保持一致；调用方看到的是
+ * 某一瞬间的快照，方向安全。
+ *
+ * @param request   路由请求。
+ * @param out       结果数组，容量由 max 指定。
+ * @param max       结果数组容量。
+ * @param out_count 实际写出数量。
+ * @return 0 成功（含无候选），AIRY_ERR_SYS_NOT_INIT 路由未初始化。
+ */
+int llm_router_candidates(const llm_route_request_t *request, llm_route_result_t *out, size_t max,
+                          size_t *out_count);
+
+/**
  * @brief Get router statistics.
  * @param stats Output statistics
  * @return 0 on success, non-zero on failure

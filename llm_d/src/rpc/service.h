@@ -14,6 +14,7 @@
 #include "llm_service.h"
 #include "daemon_platform_ext.h"
 #include "providers/core/registry.h"
+#include "rpc/service_chain.h"
 #include "svc_model_watch.h"
 
 struct llm_service {
@@ -34,6 +35,10 @@ struct llm_service {
      * status 面提示重启。 */
     svc_mw_t mw;
     svc_mw_t mw_usr;
+    /* 0.1.19 §3.8.4：调用级链式切换配置。缺省 off，现网选路行为不变；
+     * 由 model.yaml routing 段填充（A4），CALLOC 全零不等于缺省，故
+     * create 时必须经 svc_chain_def() 显式初始化。 */
+    llm_route_cfg_t route;
 };
 
 /* 2.1.1.5 修复：计费/用量持久化文件路径（$AIRY_DATA_DIR/agentrt/
