@@ -74,9 +74,7 @@ llm_complexity_level_t assess_complexity(const char *input)
     return LLM_COMPLEXITY_SIMPLE;
 }
 
-/**
- * @brief Record the routing-decision audit log
- */
+/* 选路审计日志：留痕模型、复杂度、输入长度与判定理由。 */
 void log_routing_decision(const char *model, llm_complexity_level_t complexity,
                           size_t input_len, const char *reason)
 {

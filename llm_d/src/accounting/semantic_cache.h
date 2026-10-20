@@ -17,15 +17,10 @@
 extern "C" {
 #endif
 
-/**
- * @brief 查询 mem_d 语义缓存
- * @return 1 命中（*out_json 为响应 JSON，调用方 AIRY_FREE）；0 未命中或不可用
- */
+/* 1 命中（*out_json 为响应 JSON，调用方 AIRY_FREE）；0 未命中或不可用。 */
 int llm_semantic_cache_fetch(const char *text, const char *model, char **out_json);
 
-/**
- * @brief 写入 mem_d 语义缓存（失败仅 DEBUG，不阻断主流程）
- */
+/* 失败仅 DEBUG，不阻断主流程。 */
 void llm_semantic_cache_save(const char *text, const char *model, const char *resp_json);
 
 #ifdef __cplusplus

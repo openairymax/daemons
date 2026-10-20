@@ -23,13 +23,7 @@
 
 #include "config/config_internal.h"
 
-/**
- * @brief Load model config from JSON (providers array).
- * @param config_path Config file path (.json)
- * @param out_providers Output provider array (caller frees)
- * @param out_count Output provider count
- * @return 0 on success, non-zero on failure
- */
+/* 从 JSON 的 providers 数组装载模型配置，数组与计数由调用方释放。 */
 int svc_load_model_config_json(const char *config_path, provider_config_t **out_providers,
                                size_t *out_count)
 {
