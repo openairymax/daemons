@@ -76,7 +76,6 @@ typedef struct {
     double cost_per_1k_input;
     double cost_per_1k_output;
     uint32_t avg_latency_ms;
-    uint32_t rate_limit_rpm;
     bool enabled;
     int priority;
 

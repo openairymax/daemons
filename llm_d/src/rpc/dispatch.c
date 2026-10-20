@@ -106,15 +106,6 @@ request_context_t *request_context_create(void)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    ctx->response_capacity = LLM_D_MAX_BUFFER;
-    ctx->response_buffer = (char *)AIRY_MALLOC(ctx->response_capacity);
-    if (!ctx->response_buffer) {
-        AIRY_FREE(ctx);
-        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-    }
-    ctx->response_buffer[0] = '\0';
-    ctx->response_size = 0;
-
     return ctx;
 }
 
@@ -142,7 +133,6 @@ void request_context_destroy(request_context_t *ctx)
 
     messages_release(ctx);
     AIRY_FREE(ctx->tools_json);
-    AIRY_FREE(ctx->response_buffer);
     AIRY_FREE(ctx);
 }
 
