@@ -19,7 +19,6 @@
 #include "platform_misc.h"
 #include "rpc/rpc_internal.h"
 #include "router/core/llm_failover.h"
-#include "router/core/llm_health.h"
 #include "service.h"
 #include "svc_logger.h"
 
