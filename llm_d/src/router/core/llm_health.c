@@ -9,8 +9,6 @@
  * 避免「可切换却不算失败」「不可切换却熔断」两套口径并存。
  */
 
-#include "router/core/llm_health.h"
-
 #include "router/core/llm_failover.h"
 #include "router/core/router_context.h"
 

@@ -22,7 +22,6 @@
 
 #include "providers/core/registry.h"
 #include "router/core/llm_failover.h"
-#include "router/core/llm_health.h"
 #include "router/core/llm_router.h"
 
 #include "error_codes.h"

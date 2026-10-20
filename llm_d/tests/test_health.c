@@ -12,7 +12,6 @@
  *   4. OPEN 端点被选择路径剔除；重注册清零健康面
  */
 
-#include "router/core/llm_health.h"
 #include "router/core/router_context.h"
 
 #include "error_codes.h"

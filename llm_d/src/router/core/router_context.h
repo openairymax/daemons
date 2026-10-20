@@ -13,7 +13,6 @@
 #define AIRY_RT_LLM_ROUTER_CONTEXT_H
 
 #include "router/core/llm_router.h"
-#include "router/core/llm_health.h"
 #include "token_standard.h"
 #include "airy_memory.h"
 /* d8 cleanup: removed sync_compat.h (this file only uses airy_mtx_t,
@@ -50,6 +49,15 @@ typedef struct {
 
 /** @brief Get the global router context. */
 router_ctx_t *router_ctx_get(void);
+
+/* 四个选择策略的实现入口，仅供 llm_router.c（编排件）调用。 */
+int route_cost_aware(const llm_route_request_t *request, llm_route_result_t *result);
+
+int route_round_robin(const llm_route_request_t *request, llm_route_result_t *result);
+
+int route_least_latency(const llm_route_request_t *request, llm_route_result_t *result);
+
+int route_quality_first(const llm_route_request_t *request, llm_route_result_t *result);
 
 /** @brief Estimate the token count of a request. */
 static inline size_t router_estimate_tokens(const char *prompt, size_t prompt_len)

@@ -18,6 +18,16 @@
  *
  * 执行期故障切换不在此处：失败后换端点见 rpc/service_chain.h 与
  * router/core/llm_failover.h（0.1.19 §3.8，证伪 H2）。
+ *
+ * 端点健康面（0.1.19 §3.8.2）同属本契约：llm_endpoint_t 的四个健康字段
+ * 只由 llm_ep_* 迁移，使「端点还能不能用」成为一处可判定、可单测的规则。
+ * 健康面与选择面同头，是因为二者共享同一 llm_endpoint_t 值语义；拆成两个
+ * 头会让调用方为一次判定同时摘两件，白白抬高扇入（0.1.19 §4.4 五件套化）。
+ *
+ *   CLOSED --连续失败达 LLM_EP_FAIL_MAX，或 AUTH 一次--> OPEN
+ *   OPEN   --open_until_ms 过期--> HALF，只放行单次探测
+ *   HALF   --探测成功--> CLOSED；探测失败--> OPEN
+ *
  * @owner team-A
  * @see contracts/contract_A_B.h section 3 (protocol routing table)
  */
@@ -71,13 +81,72 @@ typedef struct {
     int priority;
 
     /* 端点健康面（0.1.19 §3.8.2）：仅 llm_d 内部可见，注册时清零，迁移
-     * 规则见 router/core/llm_health.h。计时为 airy_time_ms() 截断到 32 位，
+     * 规则见本头文件「端点健康面」段。计时为 airy_time_ms() 截断到 32 位，
      * 以无符号差比较抵御回绕，同时避免 32 位平台上的 64 位读撕裂。 */
     uint32_t consec_fail;
     uint32_t last_fail_ms;
     uint32_t open_until_ms;
     uint32_t probe_until_ms;
 } llm_endpoint_t;
+
+/** 熔断三态。 */
+typedef enum {
+    LLM_EP_CLOSED = 0,
+    LLM_EP_OPEN = 1,
+    LLM_EP_HALF = 2
+} llm_ep_state_t;
+
+/** 连续失败阈值：达此值转 OPEN。 */
+#define LLM_EP_FAIL_MAX 3U
+
+/** OPEN 保持时长（毫秒）。 */
+#define LLM_EP_OPEN_MS 30000U
+
+/** 半开探测最长占用（毫秒）：探测方未回报则释放槽位，允许重新探测。 */
+#define LLM_EP_PROBE_MS 10000U
+
+/**
+ * 由健康字段推导当前状态。
+ * @param ep  端点。
+ * @param now airy_time_ms() 截断到 32 位。
+ */
+llm_ep_state_t llm_ep_state(const llm_endpoint_t *ep, uint32_t now);
+
+/**
+ * 判定本次调用是否放行；HALF 状态下首个调用方占用探测槽。
+ * @return 1 放行，0 拒绝（OPEN 期或探测槽被占）。
+ */
+int llm_ep_admit(llm_endpoint_t *ep, uint32_t now);
+
+/** 记录一次失败，按判据迁移状态。不可切换类错误不计入。 */
+void llm_ep_fail(llm_endpoint_t *ep, int err, uint32_t now);
+
+/** 记录一次成功：清零计数并归 CLOSED。 */
+void llm_ep_ok(llm_endpoint_t *ep);
+
+/**
+ * 锁内按 provider/model 定位端点的包装（调用侧使用）。
+ * 端点未注册或 router 未初始化时一律按拒绝方向处理。
+ */
+int llm_rtr_admit(const char *provider, const char *model);
+
+/**
+ * 端点是否已注册到健康面。
+ *
+ * 调用侧链式切换需要一个与「能否放行」不同的判据：llm_rtr_admit() 对
+ * 未注册端点返回拒绝方向（0），若直接据此判定端点不可用，则 router
+ * 未初始化或端点超出注册上限时会把本该尝试的端点全部跳过。本函数用于
+ * 区分「未注册（无从判定，按可用处理）」与「已注册但明确拒绝」。
+ *
+ * @return 1 已注册，0 未注册或 router 未初始化。
+ */
+int llm_rtr_known(const char *provider, const char *model);
+
+/** 锁内记录失败。@return 0 已记录，负值未找到端点。 */
+int llm_rtr_fail(const char *provider, const char *model, int err);
+
+/** 锁内记录成功。@return 0 已记录，负值未找到端点。 */
+int llm_rtr_ok(const char *provider, const char *model);
 
 typedef struct {
     const char *prompt;
