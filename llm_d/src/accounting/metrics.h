@@ -16,9 +16,7 @@
 extern "C" {
 #endif
 
-/**
- * @brief Complexity assessment levels
- */
+/* 复杂度档位：由 assess_complexity 打分后映射，供路由策略使用。 */
 typedef enum {
     LLM_COMPLEXITY_SIMPLE = 0,
     LLM_COMPLEXITY_MODERATE = 1,

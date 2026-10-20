@@ -104,17 +104,10 @@ typedef enum {
 /** 半开探测最长占用（毫秒）：探测方未回报则释放槽位，允许重新探测。 */
 #define LLM_EP_PROBE_MS 10000U
 
-/**
- * 由健康字段推导当前状态。
- * @param ep  端点。
- * @param now airy_time_ms() 截断到 32 位。
- */
+/** 由健康字段推导当前状态（now = airy_time_ms() 截断到 32 位）。 */
 llm_ep_state_t llm_ep_state(const llm_endpoint_t *ep, uint32_t now);
 
-/**
- * 判定本次调用是否放行；HALF 状态下首个调用方占用探测槽。
- * @return 1 放行，0 拒绝（OPEN 期或探测槽被占）。
- */
+/** HALF 状态下首个调用方占用探测槽。@return 1 放行，0 拒绝。 */
 int llm_ep_admit(llm_endpoint_t *ep, uint32_t now);
 
 /** 记录一次失败，按判据迁移状态。不可切换类错误不计入。 */
@@ -124,18 +117,17 @@ void llm_ep_fail(llm_endpoint_t *ep, int err, uint32_t now);
 void llm_ep_ok(llm_endpoint_t *ep);
 
 /**
- * 锁内按 provider/model 定位端点的包装（调用侧使用）。
- * 端点未注册或 router 未初始化时一律按拒绝方向处理。
+ * 锁内按 provider/model 定位端点的包装；端点未注册或 router 未初始化时
+ * 一律按拒绝方向处理。
  */
 int llm_rtr_admit(const char *provider, const char *model);
 
 /**
  * 端点是否已注册到健康面。
  *
- * 调用侧链式切换需要一个与「能否放行」不同的判据：llm_rtr_admit() 对
- * 未注册端点返回拒绝方向（0），若直接据此判定端点不可用，则 router
- * 未初始化或端点超出注册上限时会把本该尝试的端点全部跳过。本函数用于
- * 区分「未注册（无从判定，按可用处理）」与「已注册但明确拒绝」。
+ * 链式切换需要一个与「能否放行」不同的判据：llm_rtr_admit() 对未注册端点
+ * 返回拒绝方向（0），据此判定会把 router 未初始化或端点超限时的候选全部
+ * 跳过。本函数区分「未注册（按可用处理）」与「已注册但明确拒绝」。
  *
  * @return 1 已注册，0 未注册或 router 未初始化。
  */
@@ -179,28 +171,16 @@ typedef struct {
     uint64_t total_tokens;
 } llm_router_stats_t;
 
-/**
- * @brief Initialize the LLM router.
- * @return 0 on success, non-zero on failure
- */
+/** 初始化路由表。@return 0 成功，非 0 失败。 */
 int llm_router_init(void);
 
-/** @brief Destroy the LLM router. */
+/** 销毁路由表。 */
 void llm_router_destroy(void);
 
-/**
- * @brief Register a provider endpoint.
- * @param endpoint Endpoint info
- * @return 0 on success, non-zero on failure
- */
+/** 注册端点，健康字段清零。@return 0 成功，非 0 失败。 */
 int llm_router_register_endpoint(const llm_endpoint_t *endpoint);
 
-/**
- * @brief Route an LLM request.
- * @param request Routing request
- * @param result  Routing result
- * @return 0 on success, non-zero on failure
- */
+/** 按请求选路。@return 0 成功，非 0 失败。 */
 int llm_router_route(const llm_route_request_t *request, llm_route_result_t *result);
 
 /**
