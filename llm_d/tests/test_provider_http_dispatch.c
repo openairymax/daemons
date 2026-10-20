@@ -11,7 +11,7 @@
  * 真被注入句柄，均无回归保护。
  *
  * 本测试在进程内起一个最小 HTTP 桩（POSIX 线程 + AF_INET 回环临时端口，
- * 零外部依赖），驱动 openai_ops.complete / complete_stream 走完整链路：
+ * 零外部依赖），驱动 chat_ops.complete / complete_stream 走完整链路：
  *
  *   1. 400/422 → AIRY_ERR_LLM_BAD_REQUEST（确定性失败，见 openai_rate_limit.c
  *      与 provider_stream.c 的 N-3 映射）
@@ -49,8 +49,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-/* openai_ops 定义于 openai.c:182，未在头文件声明（内部符号），此处 extern。 */
-extern const provider_adapter_t openai_ops;
+/* chat_ops 定义于 adapters/chat.c（内部符号，未在头文件声明），此处 extern。 */
+extern const provider_adapter_t chat_ops;
 
 /* local_ops 同为核心内部符号（adapters/local.c），用于 D4 本地端点策略回归。 */
 extern const provider_adapter_t local_ops;
@@ -328,7 +328,7 @@ static void cfg_init(llm_request_config_t *cfg, llm_message_t *msg)
 /* max_retries=1 → provider_http_request_with_retry 只发一次请求，测试确定。 */
 static provider_ctx_t *make_ctx(const char *base_url)
 {
-    provider_ctx_t *ctx = openai_ops.init("openai", "", base_url, NULL, 5.0, 1);
+    provider_ctx_t *ctx = chat_ops.init("openai", "", base_url, NULL, 5.0, 1);
     assert(ctx != NULL);
     return ctx;
 }
@@ -348,7 +348,7 @@ static void test_nonstream_dispatch(int code, const char *reason, const char *bo
     cfg_init(&cfg, &msg);
 
     llm_response_t *resp = NULL;
-    int ret = openai_ops.complete(ctx, &cfg, &resp);
+    int ret = chat_ops.complete(ctx, &cfg, &resp);
 
     printf("    http=%d ret=%d expect=%d\n", code, ret, expect);
     assert(ret == expect);
@@ -362,7 +362,7 @@ static void test_nonstream_dispatch(int code, const char *reason, const char *bo
     if (resp)
         llm_response_free(resp);
 
-    openai_ops.destroy(ctx);
+    chat_ops.destroy(ctx);
 }
 
 static void test_stream_dispatch(int code, const char *reason, const char *content_type,
@@ -381,7 +381,7 @@ static void test_stream_dispatch(int code, const char *reason, const char *conte
 
     g_stream_chunk_count = 0;
     llm_response_t *resp = NULL;
-    int ret = openai_ops.complete_stream(ctx, &cfg, on_stream_chunk, NULL, &resp);
+    int ret = chat_ops.complete_stream(ctx, &cfg, on_stream_chunk, NULL, &resp);
 
     printf("    http=%d ret=%d expect=%d chunks=%d\n", code, ret, expect, g_stream_chunk_count);
     assert(ret == expect);
@@ -396,7 +396,7 @@ static void test_stream_dispatch(int code, const char *reason, const char *conte
     if (resp)
         llm_response_free(resp);
 
-    openai_ops.destroy(ctx);
+    chat_ops.destroy(ctx);
 }
 
 /* ── N-1/N-2：出网传输策略 SSoT（provider_http_setup / provider_http_diag） ── */
@@ -462,24 +462,24 @@ static void test_proxy_env_injected(void)
     assert(setenv("AIRY_HTTP_PROXY", proxy, 1) == 0);
     provider_ctx_t *ctx = make_ctx(base);
     cfg_init(&cfg, &msg);
-    int ret = openai_ops.complete(ctx, &cfg, &resp);
+    int ret = chat_ops.complete(ctx, &cfg, &resp);
     printf("    dead proxy  ret=%d expect=%d\n", ret, AIRY_ERR_IO);
     assert(ret == AIRY_ERR_IO);
     if (resp)
         llm_response_free(resp);
-    openai_ops.destroy(ctx);
+    chat_ops.destroy(ctx);
 
     unsetenv("AIRY_HTTP_PROXY");
 
     ctx = make_ctx(base);
     cfg_init(&cfg, &msg);
     resp = NULL;
-    ret = openai_ops.complete(ctx, &cfg, &resp);
+    ret = chat_ops.complete(ctx, &cfg, &resp);
     printf("    no proxy    ret=%d expect=%d\n", ret, AIRY_OK);
     assert(ret == AIRY_OK);
     if (resp)
         llm_response_free(resp);
-    openai_ops.destroy(ctx);
+    chat_ops.destroy(ctx);
 
     for (size_t i = 0; i < nenv; i++)
         if (saved_set[i])
@@ -574,7 +574,7 @@ static void test_nonstream_transient_retried(void)
     char base[128];
     snprintf(base, sizeof(base), "http://127.0.0.1:%d/v1", g_srv.port);
 
-    provider_ctx_t *ctx = openai_ops.init("openai", "", base, NULL, 5.0, 2);
+    provider_ctx_t *ctx = chat_ops.init("openai", "", base, NULL, 5.0, 2);
     assert(ctx != NULL);
 
     llm_message_t msg;
@@ -583,7 +583,7 @@ static void test_nonstream_transient_retried(void)
 
     int before = atomic_load(&g_srv.conn_count);
     llm_response_t *resp = NULL;
-    int ret = openai_ops.complete(ctx, &cfg, &resp);
+    int ret = chat_ops.complete(ctx, &cfg, &resp);
     int attempts = atomic_load(&g_srv.conn_count) - before;
     if (resp)
         llm_response_free(resp);
@@ -594,7 +594,7 @@ static void test_nonstream_transient_retried(void)
      * 无限重试，也不得退化为零重试。 */
     assert(attempts == 3);
 
-    openai_ops.destroy(ctx);
+    chat_ops.destroy(ctx);
     mock_set_drop(0);
 }
 
@@ -607,7 +607,7 @@ static void test_stream_transient_retried(void)
     char base[128];
     snprintf(base, sizeof(base), "http://127.0.0.1:%d/v1", g_srv.port);
 
-    provider_ctx_t *ctx = openai_ops.init("openai", "", base, NULL, 5.0, 2);
+    provider_ctx_t *ctx = chat_ops.init("openai", "", base, NULL, 5.0, 2);
     assert(ctx != NULL);
 
     llm_message_t msg;
@@ -617,7 +617,7 @@ static void test_stream_transient_retried(void)
     int before = atomic_load(&g_srv.conn_count);
     g_stream_chunk_count = 0;
     llm_response_t *resp = NULL;
-    int ret = openai_ops.complete_stream(ctx, &cfg, on_stream_chunk, NULL, &resp);
+    int ret = chat_ops.complete_stream(ctx, &cfg, on_stream_chunk, NULL, &resp);
     int attempts = atomic_load(&g_srv.conn_count) - before;
     if (resp)
         llm_response_free(resp);
@@ -627,7 +627,7 @@ static void test_stream_transient_retried(void)
     assert(attempts == 3);
     assert(g_stream_chunk_count == 0); /* 首包未下发，用户不得看到任何半截输出 */
 
-    openai_ops.destroy(ctx);
+    chat_ops.destroy(ctx);
     mock_set_drop(0);
 }
 
@@ -653,7 +653,7 @@ static void test_local_endpoint_policy(void)
 
     provider_ctx_t *local = local_ops.init("local", NULL, base, NULL, 5.0, 2);
     assert(local != NULL);
-    provider_ctx_t *cloud = openai_ops.init("openai", "", base, NULL, 5.0, 2);
+    provider_ctx_t *cloud = chat_ops.init("openai", "", base, NULL, 5.0, 2);
     assert(cloud != NULL);
 
     llm_message_t msg;
@@ -669,7 +669,7 @@ static void test_local_endpoint_policy(void)
 
     before = atomic_load(&g_srv.conn_count);
     resp = NULL;
-    int cloud_ret = openai_ops.complete(cloud, &cfg, &resp);
+    int cloud_ret = chat_ops.complete(cloud, &cfg, &resp);
     int cloud_attempts = atomic_load(&g_srv.conn_count) - before;
     if (resp)
         llm_response_free(resp);
@@ -682,7 +682,7 @@ static void test_local_endpoint_policy(void)
     assert(cloud_attempts == 3); /* 云端策略不受收窄影响 */
 
     local_ops.destroy(local);
-    openai_ops.destroy(cloud);
+    chat_ops.destroy(cloud);
     mock_set_drop(0);
 }
 
@@ -702,7 +702,7 @@ static void test_unreachable_is_io(void)
     cfg_init(&cfg, &msg);
 
     llm_response_t *resp = NULL;
-    int ret = openai_ops.complete(ctx, &cfg, &resp);
+    int ret = chat_ops.complete(ctx, &cfg, &resp);
     if (resp)
         llm_response_free(resp);
 
@@ -711,7 +711,7 @@ static void test_unreachable_is_io(void)
     assert(ret == AIRY_ERR_IO);
     assert(ret != AIRY_ERR_LLM_BAD_REQUEST);
 
-    openai_ops.destroy(ctx);
+    chat_ops.destroy(ctx);
 }
 
 int main(void)

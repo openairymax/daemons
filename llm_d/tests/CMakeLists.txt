@@ -41,9 +41,9 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/toolstream.c
     # B16-S3.3：通用 completion driver（与主目标 LLM_SERVICE_SOURCES 同步）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/adapter.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/openai.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/chat.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/rate_limit.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/anthropic.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/messages.c
     # B16-S4：deepseek.c / google.c 清理（与主目标同步）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/local.c
     # B16-S3 c7：适配器装配 SSoT（与主目标同步）

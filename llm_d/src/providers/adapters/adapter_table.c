@@ -3,15 +3,13 @@
 
 /**
  * @file adapter_table.c
- * @brief 适配器装配 SSoT：注册新厂商适配的唯一改动点（B16-S3 c7）。
+ * @brief 适配器装配 SSoT：注册新线格式适配的唯一改动点（B16-S3 c7）。
  *
- * core/registry.c 只经 provider_adapter_lookup() 查表取 ops，不持有任何
- * 厂商符号与厂商名分支。注册新适配 = 本表尾加一行 + 各 CMakeLists 登记
- * 源文件。未命中回落 OpenAI 兼容适配（对齐 LiteLLM 的 openai_like 模
- * 式）：glm / qwen / moonshot / siliconflow / spark / minimax / deepseek /
- * google 及自定义名仅需 model.yaml 提供 base_url（+ api_key）即以统一
- * OpenAI Chat Completions 协议接入，无需新适配器实现——deepseek 适配已
- * 随 B16-S4 清理，google 亦经变量端点声明式接入。
+ * core/registry.c 只经 provider_adapter_lookup() 按线格式名（model.yaml 的
+ * api_format）查表取 ops，不持有任何厂商符号与厂商名分支。注册新适配 =
+ * 本表尾加一行 + 各 CMakeLists 登记源文件。未命中回落 chat 并记 WARN：
+ * 任何厂商只要 model.yaml 提供 api_format / base_url / api_key 即可接入，
+ * 同线格式的多家厂商共用同一适配器，无需新增实现。
  */
 
 #include "core/adapter.h"
@@ -20,26 +18,24 @@
 
 #include <string.h>
 
-extern const provider_adapter_t openai_ops;
-extern const provider_adapter_t anthropic_ops;
+extern const provider_adapter_t chat_ops;
+extern const provider_adapter_t messages_ops;
 extern const provider_adapter_t local_ops;
 
 #define ADAPTER_TABLE_SIZE (sizeof(g_adapter_table) / sizeof(g_adapter_table[0]))
 
 static const provider_adapter_t *const g_adapter_table[] = {
-    &openai_ops, &anthropic_ops, &local_ops,
+    &chat_ops, &messages_ops, &local_ops,
 };
 
-const provider_adapter_t *provider_adapter_lookup(const char *name)
+const provider_adapter_t *provider_adapter_lookup(const char *fmt)
 {
-    if (name) {
+    if (fmt && fmt[0]) {
         for (size_t i = 0; i < ADAPTER_TABLE_SIZE; ++i) {
-            if (strcmp(name, g_adapter_table[i]->name) == 0)
+            if (strcmp(fmt, g_adapter_table[i]->name) == 0)
                 return g_adapter_table[i];
         }
-        SVC_LOG_DEBUG("Provider '%s' falls back to OpenAI-compatible adapter "
-                      "(custom base_url)",
-                      name);
+        SVC_LOG_WARN("C-L02: ADAPTER: unknown api_format=%s, falling back to chat", fmt);
     }
-    return &openai_ops;
+    return &chat_ops;
 }

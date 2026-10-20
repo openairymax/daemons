@@ -5,20 +5,19 @@
  * @file toolstream.h
  * @brief Provider 域流式响应装配 SSoT（B16-S3 c5/c6：三份同构收敛）。
  *
- * OpenAI 兼容流式协议（openai/deepseek/local）以 {index, id?} →
- * {index, function.{name?, arguments}} 分片下发 tool_calls 增量；本模块
- * 按 index 装配槽位，流末装配完整数组并发 RS 'T' 控制帧。适配层禁止
- * 自持副本：行协议适配在 on_chunk 内调用 provider_tool_delta 消费 delta，
- * 事件协议适配（anthropic）在其 map_tool_delta 内调用 provider_tool_begin /
- * provider_tool_args_add 两个槽位原语（B16-S3.2）。
+ * chat 线格式流式协议以 {index, id?} → {index, function.{name?, arguments}}
+ * 分片下发 tool_calls 增量；本模块按 index 装配槽位，流末装配完整数组并发
+ * RS 'T' 控制帧。适配层禁止自持副本：行协议适配在 on_chunk 内调用
+ * provider_tool_delta 消费 delta，事件协议适配在其 map_tool_delta 内调用
+ * provider_tool_begin / provider_tool_args_add 两个槽位原语（B16-S3.2）。
  *
- * 流末一律由 provider_tool_json 产出 OpenAI 形状数组（{id, type, function}
+ * 流末一律由 provider_tool_json 产出统一形状数组（{id, type, function}
  * 三件套），厂商差异不泄漏到交付形状。
  *
- * c6 扩展：openai 家族的流式累积器（content/reasoning 增量、id/model/
+ * c6 扩展：chat 家族的流式累积器（content/reasoning 增量、id/model/
  * created 抽取、finish_reason 归一、usage 累计）与流末响应装配同为三份
  * 逐字同构，收敛为 provider_stream_acc_t 四件套；适配层只需
- * init → 注册 provider_openai_on_chunk → take/free 两行。
+ * init → 注册 provider_stream_on_chunk → take/free 两行。
  */
 
 #ifndef LLM_D_PROVIDERS_CORE_TOOLSTREAM_H
@@ -53,7 +52,7 @@ typedef struct {
     size_t count;
 } provider_tool_acc_t;
 
-/* 槽位装配原语（厂商无关，B16-S3.2）：各厂商 map_tool_delta 只做本家事件到
+/* 槽位装配原语（厂商无关，B16-S3.2）：各线格式 map_tool_delta 只做本家事件到
  * 本接口的 shape 抽取，槽位定位、首值锁定与参数拼接全在此处唯一实现。
  * 按 index 定位（不存在则新建）；id/name 只在槽位首次非空时写入，可传 NULL。
  * 返回 NULL 表示槽位已满——调用方应停止向该 index 追加。 */
@@ -66,7 +65,7 @@ void provider_tool_args_add(provider_tool_acc_t *acc, int index, const char *fra
 /* 消费 choices[].delta：抽取 tool_calls 增量分片并按 index 装配。 */
 void provider_tool_delta(provider_tool_acc_t *acc, cJSON *delta);
 
-/* 装配完整 tool_calls JSON 数组（OpenAI 非流式响应形状）；返回值由调用方 free。 */
+/* 装配完整 tool_calls JSON 数组（统一非流式响应形状）；返回值由调用方 free。 */
 char *provider_tool_json(const provider_tool_acc_t *acc);
 
 /* 流末发射：发 RS 'T' 控制帧并落入 resp->choices[0].tool_calls_json；
@@ -77,9 +76,9 @@ void provider_tool_flush(provider_tool_acc_t *acc, llm_response_t *resp,
 /* 释放槽位参数缓冲并复位（调用后 acc 可安全复用）。 */
 void provider_tool_free(provider_tool_acc_t *acc);
 
-/* OpenAI 兼容家族流式累积器：openai/deepseek/local 三份逐字同构的
- * on_chunk 状态（content/reasoning 增量转发与累计、id/model/created
- * 首值锁定、finish_reason 归一、usage 尾 chunk 累计）与流末响应装配。 */
+/* chat 线格式家族流式累积器：三份逐字同构的 on_chunk 状态
+ * （content/reasoning 增量转发与累计、id/model/created 首值锁定、
+ * finish_reason 归一、usage 尾 chunk 累计）与流末响应装配。 */
 typedef struct {
     llm_stream_callback_t user_cb;
     void *user_data;
@@ -105,15 +104,15 @@ void provider_stream_acc_init(provider_stream_acc_t *acc, llm_stream_callback_t 
 
 /* 行协议 on_chunk（provider_http_post_stream 回调形状）：消费一条
  * data: JSON 载荷。本地端点不产 reasoning_content 时相应分支自然旁路。 */
-int provider_openai_on_chunk(const char *json_line, void *userdata);
+int provider_stream_on_chunk(const char *json_line, void *userdata);
 
 /* 流文本推送原语：user_cb 即时转发 + acc_content 累积双写。行协议
- * （on_chunk content 分支）与具名事件协议（anthropic text_delta 分支）
+ * （on_chunk content 分支）与具名事件协议（text_delta 分支）
  * 共同消费，两种协议的增量交付形状由此唯一。 */
 void provider_stream_text_push(provider_stream_acc_t *acc, const char *text);
 
 /* 流末装配响应并转移缓冲所有权；acc 内已转移指针被复位。 */
-llm_response_t *provider_openai_stream_take(provider_stream_acc_t *acc);
+llm_response_t *provider_stream_take(provider_stream_acc_t *acc);
 
 /* 释放全部累积缓冲（成功装配后仍持未转移残片或失败路径均安全）。 */
 void provider_stream_acc_free(provider_stream_acc_t *acc);
