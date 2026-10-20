@@ -356,17 +356,19 @@ static void cmp_release(cmp_ctx_t *x)
     airy_token_counter_destroy(x->counter);
 }
 
+/* 默认配置：L2 与灰度门禁默认关（fail-closed，须过 A/B 门禁再灰度）。 */
+static const compress_config_t cmp_defaults = {
+    .max_tool_tokens = COMPRESS_DEFAULT_MAX_TOOL_TOKENS,
+    .max_turns = COMPRESS_DEFAULT_MAX_TURNS,
+    .l1_enabled = 1,
+    .l2_enabled = 0, /* 默认关：高风险改写须过 A/B 门禁再灰度 */
+    .dedup = 1,
+    .gate = { .grayscale_enabled = 0, .acr = -1.0, .ttft_ms = -1.0 },
+};
+
 static void cmp_cfg(compress_config_t *dc, const compress_config_t *cfg)
 {
-    dc->max_tool_tokens = COMPRESS_DEFAULT_MAX_TOOL_TOKENS;
-    dc->max_turns = COMPRESS_DEFAULT_MAX_TURNS;
-    dc->l1_enabled = 1;
-    dc->l2_enabled = 0; /* 默认关：高风险改写须过 A/B 门禁再灰度 */
-    dc->dedup = 1;
-    dc->gate.grayscale_enabled = 0;
-    dc->gate.acr = -1.0;
-    dc->gate.ttft_ms = -1.0;
-
+    *dc = cmp_defaults;
     if (!cfg)
         return;
     if (cfg->max_tool_tokens > 0)
