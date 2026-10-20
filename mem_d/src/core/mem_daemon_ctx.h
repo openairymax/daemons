@@ -29,8 +29,8 @@ extern "C" {
 /* ── Daemon configuration ─────────────────────────────────────────────── */
 
 #define MEM_DEFAULT_MAX_RECORDS 1024
-/* token 计数模型名上限（含终止符）；空串 → 默认模型 */
-#define MEM_TOKEN_MODEL_MAX 64
+/* token 计数分词族名上限（含终止符）；空串 → 默认族 */
+#define MEM_TOKEN_FAMILY_MAX 16
 
 /* 端点三元组与 max_clients 由 daemon_cfg_file 机制件与 svc.c 策略件
  * 内聚（0.1.19 t54）；此处只暴露 handler 四域跨文件消费的业务策略键。 */
@@ -43,9 +43,9 @@ typedef struct {
     int compress_gate_grayscale;
     double compress_gate_acr;
     double compress_gate_ttft_ms;
-    /* B5：台账计数模型（声明注入）。取自 config 的 "token.model" 段 /
-     * AIRY_MEM_TOKEN_MODEL；空 → 默认模型，不得硬编码厂商模型名。 */
-    char token_model[MEM_TOKEN_MODEL_MAX];
+    /* B5：台账计数分词族（声明注入）。取自 config 的 "token.family" 段 /
+     * AIRY_MEM_TOKEN_FAMILY；空 → 默认族，不得硬编码厂商模型名。 */
+    char token_family[MEM_TOKEN_FAMILY_MAX];
 } mem_daemon_config_t;
 
 /* ── Global service instances (defined in svc.c) ──────────────────────── */
