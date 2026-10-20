@@ -413,7 +413,7 @@ int main(void)
     snprintf(ctx.tool_sock_path, sizeof(ctx.tool_sock_path), "%s", g_path_tool);
     snprintf(ctx.monit_sock_path, sizeof(ctx.monit_sock_path), "%s", g_path_monit);
     snprintf(ctx.sched_sock_path, sizeof(ctx.sched_sock_path), "%s", g_path_sched);
-    snprintf(ctx.default_model, sizeof(ctx.default_model), "%s", SVC_MODEL_DEFAULT_FALLBACK);
+    snprintf(ctx.default_model, sizeof(ctx.default_model), "%s", "test-model");
 
     if (gw_sys_svc_dispatch_init(&ctx) != 0) {
         printf("FATAL: svc dispatch hook inject failed\n");

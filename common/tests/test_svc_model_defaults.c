@@ -12,7 +12,8 @@
  * 4. 仓库 SSoT model.yaml（真实文件，存在时）→ 与 global 段一致
  * 5. svc_tokens_parse 字面量解析
  * 6. llm / models[0] 段 max_output
- * 7. svc_model_defaults_resolve 优先级（base → 用户覆盖 → 环境变量）
+ * 7. svc_model_defaults_resolve 优先级（base → 用户覆盖 → 环境变量）；
+ *    无任何来源时 fail-closed 返回 AIRY_ERR_NOT_FOUND
  * 8. performance_mode 顶层键解析与 AIRY_PERF_MODE 覆盖（env > yaml）
  *
  * 所有临时文件写在 /tmp 隔离根下（AIRY_HOME 指向该根），不污染源码区。
@@ -316,9 +317,20 @@ static int test_resolve_precedence(void)
     if (resolve_check("resolve_base_wins", "base-model", "base-prov", "base-model", "base-prov") != 0)
         return -1;
 
-    /* 2. 调用方未提供模型：内建兜底，供应商保持空 */
-    if (resolve_check("resolve_builtin_fallback", NULL, NULL, SVC_MODEL_DEFAULT_FALLBACK, "") != 0)
-        return -1;
+    /* 2. 调用方与用户配置均未提供模型：fail-closed（无内建厂商兜底） */
+    {
+        char model[128] = {0};
+        char provider[64] = {0};
+        int rc = svc_model_defaults_resolve(NULL, NULL, model, sizeof(model), provider,
+                                            sizeof(provider));
+        if (rc != AIRY_ERR_NOT_FOUND || model[0] || provider[0]) {
+            char buf[160];
+            snprintf(buf, sizeof(buf), "rc=%d model='%s' provider='%s'", rc, model, provider);
+            TEST_FAIL("resolve_no_source_fail_closed", buf);
+            return -1;
+        }
+        TEST_PASS("resolve_no_source_fail_closed");
+    }
 
     /* 3. 用户覆盖 global 段：覆盖调用方 base（用户优先） */
     if (user_model_set("global:\n"
