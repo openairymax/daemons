@@ -66,7 +66,7 @@ int gw_proto_router_route(gw_proto_router_t *router, gw_proto_detect_result_t pr
 int gw_proto_router_get_stats(gw_proto_router_t *router, gw_proto_router_stats_t *stats);
 
 gw_mcp_server_t *gw_proto_router_get_mcp(gw_proto_router_t *router);
-gw_llm_api_t *gw_proto_router_get_llm_api(gw_proto_router_t *router);
+gw_llm_api_t *gw_proto_get_llm(gw_proto_router_t *router);
 gw_a2a_handler_t *gw_proto_router_get_a2a(gw_proto_router_t *router);
 
 AIRY_ABI_END

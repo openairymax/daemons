@@ -184,7 +184,7 @@ void provider_stream_text_push(provider_stream_acc_t *acc, const char *text)
         acc->acc_content = grown;
 }
 
-int provider_stream_on_chunk(const char *json_line, void *userdata)
+int prov_stream_chunk(const char *json_line, void *userdata)
 {
     provider_stream_acc_t *acc = (provider_stream_acc_t *)userdata;
 

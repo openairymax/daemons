@@ -17,7 +17,7 @@
  * c6 扩展：chat 家族的流式累积器（content/reasoning 增量、id/model/
  * created 抽取、finish_reason 归一、usage 累计）与流末响应装配同为三份
  * 逐字同构，收敛为 provider_stream_acc_t 四件套；适配层只需
- * init → 注册 provider_stream_on_chunk → take/free 两行。
+ * init → 注册 prov_stream_chunk → take/free 两行。
  */
 
 #ifndef LLM_D_PROVIDERS_CORE_TOOLSTREAM_H
@@ -104,7 +104,7 @@ void provider_stream_acc_init(provider_stream_acc_t *acc, llm_stream_callback_t 
 
 /* 行协议 on_chunk（provider_http_post_stream 回调形状）：消费一条
  * data: JSON 载荷。本地端点不产 reasoning_content 时相应分支自然旁路。 */
-int provider_stream_on_chunk(const char *json_line, void *userdata);
+int prov_stream_chunk(const char *json_line, void *userdata);
 
 /* 流文本推送原语：user_cb 即时转发 + acc_content 累积双写。行协议
  * （on_chunk content 分支）与具名事件协议（text_delta 分支）

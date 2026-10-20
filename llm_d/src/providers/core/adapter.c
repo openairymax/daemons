@@ -142,7 +142,7 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
         .path = ops->chat_path,
         .headers = ops->headers,
         .body = req_body,
-        .on_chunk = ops->feed_event ? NULL : provider_stream_on_chunk,
+        .on_chunk = ops->feed_event ? NULL : prov_stream_chunk,
         .on_event = ops->feed_event,
         .user_data = &acc,
     };

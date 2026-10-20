@@ -32,7 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-char *provider_buf_append_n(char *buf, size_t *cap, size_t *len, const char *data, size_t dlen)
+char *prov_buf_add(char *buf, size_t *cap, size_t *len, const char *data, size_t dlen)
 {
     if (!data || dlen == 0)
         return buf;
@@ -56,7 +56,7 @@ char *provider_buf_append_n(char *buf, size_t *cap, size_t *len, const char *dat
 
 char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text)
 {
-    return text ? provider_buf_append_n(buf, cap, len, text, strlen(text)) : buf;
+    return text ? prov_buf_add(buf, cap, len, text, strlen(text)) : buf;
 }
 
 /* ── 流式控制帧发射（帧格式权威：commons/include/airy_llm_stream.h，
@@ -143,7 +143,7 @@ static void sse_raw_append(sse_stream_ctx_t *sse, const char *data, size_t len)
 {
     if (!sse->raw_buf || len == 0)
         return;
-    char *grown = provider_buf_append_n(sse->raw_buf, &sse->raw_cap, &sse->raw_len, data, len);
+    char *grown = prov_buf_add(sse->raw_buf, &sse->raw_cap, &sse->raw_len, data, len);
     if (grown)
         sse->raw_buf = grown;
 }
@@ -253,7 +253,7 @@ static size_t sse_write_callback(void *contents, size_t size, size_t nmemb, void
     if (sse->cancelled)
         return 0;
 
-    char *grown = provider_buf_append_n(sse->line_buf, &sse->line_cap, &sse->line_len,
+    char *grown = prov_buf_add(sse->line_buf, &sse->line_cap, &sse->line_len,
                                         (const char *)contents, realsize);
     if (!grown)
         return 0;

@@ -44,12 +44,12 @@ void gw_llm_api_destroy(gw_llm_api_t *api);
 int gw_llm_api_init(gw_llm_api_t *api);
 int gw_llm_api_shutdown(gw_llm_api_t *api);
 
-int gw_llm_api_set_llm_call(gw_llm_api_t *api, gw_llm_call_fn fn, void *user_data);
+int gw_llm_set_call(gw_llm_api_t *api, gw_llm_call_fn fn, void *user_data);
 
-int gw_llm_api_set_embed_fn(gw_llm_api_t *api, gw_llm_embed_fn fn, void *user_data);
+int gw_llm_set_embed(gw_llm_api_t *api, gw_llm_embed_fn fn, void *user_data);
 
-gw_proto_request_handler_t gw_llm_api_get_handler(gw_llm_api_t *api);
-void *gw_llm_api_get_handler_data(gw_llm_api_t *api);
+gw_proto_request_handler_t gw_llm_get_handler(gw_llm_api_t *api);
+void *gw_llm_get_hdata(gw_llm_api_t *api);
 
 AIRY_ABI_END
 

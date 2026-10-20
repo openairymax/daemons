@@ -166,7 +166,7 @@ mem_ledger_t *mem_ledger_create(size_t default_budget, double warn_ratio)
     return ledger;
 }
 
-int mem_ledger_set_token_family(mem_ledger_t *ledger, const char *family_name)
+int mem_ledger_set_tfam(mem_ledger_t *ledger, const char *family_name)
 {
     if (!ledger)
         return AIRY_ERR_INVALID_PARAM;
@@ -184,7 +184,7 @@ int mem_ledger_set_token_family(mem_ledger_t *ledger, const char *family_name)
     return AIRY_SUCCESS;
 }
 
-const char *mem_ledger_token_family(const mem_ledger_t *ledger)
+const char *mem_ledger_tfam(const mem_ledger_t *ledger)
 {
     return ledger ? ledger->token_family : AIRY_TOKEN_MODEL_NAME_DEFAULT;
 }

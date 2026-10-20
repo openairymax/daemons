@@ -107,7 +107,7 @@ int svc_chain_next(const llm_route_request_t *req, svc_chain_t *chain, char *pro
      * 反复取回同一端点。 */
     if (chain->tried_n >= SVC_CHAIN_MAX_TRIED)
         return 0;
-    if (llm_router_candidates(req, cand, SVC_CHAIN_MAX_TRIED, &n) != 0)
+    if (llm_router_pick(req, cand, SVC_CHAIN_MAX_TRIED, &n) != 0)
         return 0;
 
     for (size_t i = 0; i < n; i++) {
