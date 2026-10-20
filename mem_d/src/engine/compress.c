@@ -294,28 +294,400 @@ int mem_compress_gate_pass(const compress_gate_t *gate)
 
 /* ─── 主流程 ───────────────────────────────────────────────────────────── */
 
+/* 压缩上下文：条目窗口 + 派生缓冲 + 累计状态，供各阶段处理器共享。 */
+typedef struct {
+    const compress_entry_in_t *ents;
+    size_t count;
+    compress_config_t cfg;
+    airy_token_counter_t *counter;
+    int *act;
+    char **repl;
+    uint64_t *hashes;
+    size_t *tokens;
+    compress_plan_item_t *plans;
+    size_t nplans;
+    size_t saved;
+    int *turn_of;
+    int turns;
+    int cur_user;
+} cmp_ctx_t;
+
+static void cmp_drop(cmp_ctx_t *x)
+{
+    size_t i;
+
+    if (x->repl) {
+        for (i = 0; i < x->count; i++)
+            AIRY_FREE(x->repl[i]);
+    }
+    if (x->plans) {
+        for (i = 0; i < x->nplans; i++)
+            AIRY_FREE(x->plans[i].entry_id);
+    }
+    AIRY_FREE(x->plans);
+    AIRY_FREE(x->act);
+    AIRY_FREE(x->repl);
+    AIRY_FREE(x->hashes);
+    AIRY_FREE(x->tokens);
+    AIRY_FREE(x->turn_of);
+    if (x->counter)
+        airy_token_counter_destroy(x->counter);
+    x->act = NULL;
+    x->repl = NULL;
+    x->hashes = NULL;
+    x->tokens = NULL;
+    x->plans = NULL;
+    x->turn_of = NULL;
+    x->counter = NULL;
+    x->nplans = 0;
+}
+
+static void cmp_release(cmp_ctx_t *x)
+{
+    size_t i;
+
+    for (i = 0; i < x->count; i++)
+        AIRY_FREE(x->repl[i]);
+    AIRY_FREE(x->act);
+    AIRY_FREE(x->repl);
+    AIRY_FREE(x->hashes);
+    AIRY_FREE(x->tokens);
+    AIRY_FREE(x->turn_of);
+    airy_token_counter_destroy(x->counter);
+}
+
+static void cmp_cfg(compress_config_t *dc, const compress_config_t *cfg)
+{
+    dc->max_tool_tokens = COMPRESS_DEFAULT_MAX_TOOL_TOKENS;
+    dc->max_turns = COMPRESS_DEFAULT_MAX_TURNS;
+    dc->l1_enabled = 1;
+    dc->l2_enabled = 0; /* 默认关：高风险改写须过 A/B 门禁再灰度 */
+    dc->dedup = 1;
+    dc->gate.grayscale_enabled = 0;
+    dc->gate.acr = -1.0;
+    dc->gate.ttft_ms = -1.0;
+
+    if (!cfg)
+        return;
+    if (cfg->max_tool_tokens > 0)
+        dc->max_tool_tokens = cfg->max_tool_tokens;
+    if (cfg->max_turns > 0)
+        dc->max_turns = cfg->max_turns;
+    dc->l1_enabled = cfg->l1_enabled;
+    dc->l2_enabled = cfg->l2_enabled;
+    dc->dedup = cfg->dedup;
+    dc->gate = cfg->gate;
+}
+
+static int cmp_bufs(cmp_ctx_t *x, mem_ledger_t *ledger)
+{
+    x->act = AIRY_CALLOC(x->count, sizeof(int));
+    x->repl = AIRY_CALLOC(x->count, sizeof(char *));
+    x->hashes = AIRY_CALLOC(x->count, sizeof(uint64_t));
+    x->tokens = AIRY_CALLOC(x->count, sizeof(size_t));
+    x->plans = AIRY_CALLOC(x->count, sizeof(compress_plan_item_t));
+    /* 计数模型与台账同源（声明注入；ledger 为空 → 默认模型） */
+    x->counter = airy_token_counter_create(mem_ledger_tfam(ledger));
+    if (x->act && x->repl && x->hashes && x->tokens && x->plans && x->counter)
+        return AIRY_SUCCESS;
+    cmp_drop(x);
+    return AIRY_ERR_OUT_OF_MEMORY;
+}
+
+/* 条目 token：显式优先，否则 token_standard 估算；同时定位最后一条 user。 */
+static void cmp_tokens(cmp_ctx_t *x, size_t *used)
+{
+    size_t sum = 0;
+    size_t i;
+
+    for (i = 0; i < x->count; i++) {
+        if (x->ents[i].token_in > 0)
+            x->tokens[i] = x->ents[i].token_in;
+        else
+            x->tokens[i] = x->ents[i].text
+                               ? airy_token_counter_count(x->counter, x->ents[i].text)
+                               : 0;
+        sum += x->tokens[i];
+        if (x->ents[i].entry_type == LEDGER_ENTRY_USER)
+            x->cur_user = (int)i;
+    }
+    *used = sum;
+}
+
+/* 轮边界：user 条目即一轮起点（含后续同轮 assistant/tool_result）。 */
+static int cmp_turns(cmp_ctx_t *x)
+{
+    int cur = 0;
+    size_t i;
+
+    x->turn_of = AIRY_CALLOC(x->count, sizeof(int));
+    if (!x->turn_of) {
+        cmp_drop(x);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+    for (i = 0; i < x->count; i++) {
+        if (x->ents[i].entry_type == LEDGER_ENTRY_USER)
+            cur++;
+        x->turn_of[i] = cur;
+    }
+    x->turns = cur;
+    return AIRY_SUCCESS;
+}
+
+/* 保护规则：system / tool_def / cache_hit / 当前请求 永不压缩。 */
+static int cmp_protected(const cmp_ctx_t *x, size_t i)
+{
+    return x->ents[i].entry_type == LEDGER_ENTRY_SYSTEM ||
+           x->ents[i].entry_type == LEDGER_ENTRY_TOOL_DEF ||
+           x->ents[i].entry_type == LEDGER_ENTRY_CACHE_HIT ||
+           (int)i == x->cur_user;
+}
+
+/* L1-1：超轮数丢弃最早轮（保留首轮上下文 + 最近 max_turns-1 轮）。 */
+static int l1_drop_turn(cmp_ctx_t *x, size_t i)
+{
+    int keep_tail;
+    int keep_from;
+
+    if (x->ents[i].entry_type != LEDGER_ENTRY_USER &&
+        x->ents[i].entry_type != LEDGER_ENTRY_ASSISTANT &&
+        x->ents[i].entry_type != LEDGER_ENTRY_TOOL_RESULT)
+        return 0;
+    keep_tail = (int)x->cfg.max_turns > 1 ? (int)x->cfg.max_turns - 1 : 0;
+    keep_from = x->turns - keep_tail + 1; /* 最后保留轮起始号 */
+    if (x->turns <= (int)x->cfg.max_turns || x->turn_of[i] <= 1 || x->turn_of[i] >= keep_from)
+        return 0;
+    x->act[i] = COMPRESS_ACTION_DROP;
+    x->saved += x->tokens[i];
+    return 1;
+}
+
+/* L1-2：tool_result 超长截断（头部 + 尾部，中间占位）。 */
+static int l1_truncate(cmp_ctx_t *x, size_t i)
+{
+    size_t len, head, tail, nlen;
+    char *buf;
+    int m;
+
+    if (x->ents[i].entry_type != LEDGER_ENTRY_TOOL_RESULT ||
+        x->tokens[i] <= x->cfg.max_tool_tokens || !x->ents[i].text)
+        return 0;
+    len = strlen(x->ents[i].text);
+    if (len <= 32)
+        return 0;
+    head = len * 2 / 5;
+    tail = len * 2 / 5;
+    if (head + tail >= len)
+        return 0;
+    nlen = head + tail + 48;
+    buf = AIRY_MALLOC(nlen);
+    if (!buf)
+        return 0;
+    AIRY_MEMCPY(buf, x->ents[i].text, head);
+    m = snprintf(buf + head, nlen - head, "\n…[truncated %zu tokens]…\n",
+                 x->tokens[i] - x->cfg.max_tool_tokens);
+    if (m <= 0 || (size_t)m >= nlen - head) {
+        AIRY_FREE(buf);
+        return 0;
+    }
+    AIRY_MEMCPY(buf + head + (size_t)m, x->ents[i].text + (len - tail), tail);
+    buf[head + (size_t)m + tail] = '\0';
+    x->repl[i] = buf;
+    x->act[i] = COMPRESS_ACTION_TRUNCATE;
+    x->saved += x->tokens[i] - x->cfg.max_tool_tokens;
+    return 1;
+}
+
+/* L1-3：精确去重（保留首条）。 */
+static int l1_dedup(cmp_ctx_t *x, size_t i)
+{
+    uint64_t h;
+    size_t j;
+
+    if (!x->cfg.dedup || !x->ents[i].text)
+        return 0;
+    h = text_hash(x->ents[i].text);
+    for (j = 0; j < i; j++) {
+        if (x->act[j] != COMPRESS_ACTION_DROP && x->hashes[j] == h &&
+            x->ents[j].text && strcmp(x->ents[j].text, x->ents[i].text) == 0) {
+            if (x->act[i] != COMPRESS_ACTION_NONE)
+                break;
+            x->act[i] = COMPRESS_ACTION_DEDUP;
+            x->saved += x->tokens[i];
+            return 1;
+        }
+    }
+    x->hashes[i] = h;
+    return 0;
+}
+
+static void cmp_l1(cmp_ctx_t *x)
+{
+    size_t i;
+
+    for (i = 0; i < x->count; i++) {
+        if (cmp_protected(x, i))
+            continue;
+        if (x->cfg.l1_enabled) {
+            if (l1_drop_turn(x, i))
+                continue;
+            (void)l1_truncate(x, i);
+            if (l1_dedup(x, i))
+                continue;
+        }
+        if (x->act[i] == COMPRESS_ACTION_NONE && x->ents[i].text)
+            x->hashes[i] = text_hash(x->ents[i].text);
+    }
+}
+
+/* L2 逐条目抽取：仅历史 assistant/user，且须实际缩短。 */
+static void l2_extract(cmp_ctx_t *x, size_t i, const wordfreq_t *wf)
+{
+    char *summ;
+    size_t new_tok;
+
+    if (x->act[i] != COMPRESS_ACTION_NONE)
+        return;
+    if (x->ents[i].entry_type != LEDGER_ENTRY_ASSISTANT &&
+        x->ents[i].entry_type != LEDGER_ENTRY_USER)
+        return;
+    if ((int)i == x->cur_user)
+        return;
+    if (x->turn_of[i] == 1 && x->ents[i].entry_type == LEDGER_ENTRY_USER)
+        return;
+    if (x->tokens[i] < 32 || !x->ents[i].text)
+        return;
+
+    summ = extract_key_sentences(x->ents[i].text, wf);
+    if (summ && strcmp(summ, x->ents[i].text) != 0 &&
+        strlen(summ) < strlen(x->ents[i].text)) {
+        new_tok = airy_token_counter_count(x->counter, summ);
+        if (new_tok < x->tokens[i]) {
+            x->repl[i] = summ;
+            summ = NULL;
+            x->act[i] = COMPRESS_ACTION_EXTRACT;
+            x->saved += x->tokens[i] - new_tok;
+        }
+    }
+    AIRY_FREE(summ);
+}
+
+/* L2：L1 后仍超预算则对历史轮次抽取关键句。
+ * 生效须双条件：显式开启 且 A/B 门禁放行（fail-closed）。 */
+static void cmp_l2(cmp_ctx_t *x, mem_ledger_t *ledger, const char *session_id, size_t used)
+{
+    size_t budget = 0;
+    size_t headroom = 0;
+    size_t remaining;
+    double warn_at;
+    int over_budget;
+    wordfreq_t wf;
+    size_t i;
+
+    if (x->cfg.l2_enabled && mem_compress_gate_pass(&x->cfg.gate)) {
+        if (ledger)
+            mem_ledger_budget(ledger, session_id, NULL, &budget, &headroom);
+        remaining = used > x->saved ? used - x->saved : 0;
+        warn_at = (double)budget * (ledger ? mem_ledger_warn_ratio(ledger) : 0.8);
+        over_budget = budget > 0 && remaining >= (size_t)warn_at;
+        if (over_budget || x->turns > (int)x->cfg.max_turns) {
+            AIRY_MEMSET(&wf, 0, sizeof(wf));
+            for (i = 0; i < x->count; i++) {
+                if (x->ents[i].text)
+                    airy_words_scan(x->ents[i].text, strlen(x->ents[i].text),
+                                    wordfreq_visit, &wf);
+            }
+            for (i = 0; i < x->count; i++)
+                l2_extract(x, i, &wf);
+            wordfreq_free(&wf);
+        }
+    }
+    AIRY_FREE(x->turn_of);
+    x->turn_of = NULL;
+}
+
+/* 组装 actions 与重组上下文。 */
+static int cmp_build(cmp_ctx_t *x, char **out_ctx)
+{
+    size_t ctx_len = 1;
+    char *ctx;
+    const char *piece;
+    size_t i;
+
+    for (i = 0; i < x->count; i++) {
+        if (x->act[i] == COMPRESS_ACTION_DROP || x->act[i] == COMPRESS_ACTION_DEDUP)
+            continue;
+        piece = x->repl[i] ? x->repl[i] : (x->ents[i].text ? x->ents[i].text : "");
+        ctx_len += strlen(piece) + 1;
+    }
+    ctx = AIRY_MALLOC(ctx_len);
+    if (!ctx) {
+        cmp_drop(x);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+    ctx[0] = '\0';
+    for (i = 0; i < x->count; i++) {
+        /* 动作记录先行：DROP/DEDUP 也须返回（调用方据此 mark/审计） */
+        if (x->act[i] != COMPRESS_ACTION_NONE) {
+            x->plans[x->nplans].entry_id = AIRY_STRDUP(x->ents[i].entry_id);
+            x->plans[x->nplans].entry_type = x->ents[i].entry_type;
+            x->plans[x->nplans].action = x->act[i];
+            x->nplans++;
+        }
+        if (x->act[i] == COMPRESS_ACTION_DROP || x->act[i] == COMPRESS_ACTION_DEDUP)
+            continue; /* 不进重组上下文 */
+        piece = x->repl[i] ? x->repl[i] : (x->ents[i].text ? x->ents[i].text : "");
+        if (ctx[0])
+            strncat(ctx, "\n", 1);
+        strncat(ctx, piece, strlen(piece));
+    }
+    *out_ctx = ctx;
+    return AIRY_SUCCESS;
+}
+
+static size_t cmp_saved(const cmp_ctx_t *x, const char *ctx, size_t used)
+{
+    size_t new_tok;
+
+    if (x->saved == 0)
+        return 0;
+    new_tok = airy_token_counter_count(x->counter, ctx);
+    return used > new_tok ? used - new_tok : x->saved;
+}
+
+static void cmp_emit(cmp_ctx_t *x, char *ctx, size_t saved, char **out_context,
+                     size_t *out_saved, compress_plan_item_t **out_plans, size_t *out_count)
+{
+    size_t i;
+
+    if (out_context)
+        *out_context = ctx;
+    else
+        AIRY_FREE(ctx);
+    if (out_saved)
+        *out_saved = saved;
+    if (out_plans) {
+        *out_plans = x->plans;
+    } else {
+        for (i = 0; i < x->nplans; i++)
+            AIRY_FREE(x->plans[i].entry_id);
+        AIRY_FREE(x->plans);
+    }
+    if (out_count)
+        *out_count = x->nplans;
+}
+
 int mem_compress_plan(mem_ledger_t *ledger, const char *session_id,
                       const compress_entry_in_t *entries, size_t count,
                       const compress_config_t *cfg,
                       char **out_context, size_t *out_saved_tokens,
                       compress_plan_item_t **out_actions, size_t *out_action_count)
 {
-    compress_config_t dc = {
-        .max_tool_tokens = COMPRESS_DEFAULT_MAX_TOOL_TOKENS,
-        .max_turns = COMPRESS_DEFAULT_MAX_TURNS,
-        .l1_enabled = 1,
-        .l2_enabled = 0, /* 默认关：高风险改写须过 A/B 门禁再灰度 */
-        .dedup = 1,
-        .gate = { .grayscale_enabled = 0, .acr = -1.0, .ttft_ms = -1.0 },
-    };
-    size_t i;
-    int *act;
-    char **repl;
-    uint64_t *hashes;
-    compress_plan_item_t *actions;
-    airy_token_counter_t *counter = NULL;
-    size_t action_count = 0;
-    size_t *tokens;
+    cmp_ctx_t x;
+    size_t used = 0;
+    char *ctx = NULL;
+    size_t saved;
+    int err;
 
     if (!entries && count > 0)
         return AIRY_ERR_INVALID_PARAM;
@@ -323,260 +695,33 @@ int mem_compress_plan(mem_ledger_t *ledger, const char *session_id,
     if (out_saved_tokens) *out_saved_tokens = 0;
     if (out_actions) *out_actions = NULL;
     if (out_action_count) *out_action_count = 0;
-    if (cfg) {
-        if (cfg->max_tool_tokens > 0) dc.max_tool_tokens = cfg->max_tool_tokens;
-        if (cfg->max_turns > 0) dc.max_turns = cfg->max_turns;
-        dc.l1_enabled = cfg->l1_enabled;
-        dc.l2_enabled = cfg->l2_enabled;
-        dc.dedup = cfg->dedup;
-        dc.gate = cfg->gate;
-    }
+
+    AIRY_MEMSET(&x, 0, sizeof(x));
+    x.ents = entries;
+    x.count = count;
+    x.cur_user = -1;
+    cmp_cfg(&x.cfg, cfg);
     if (count == 0)
         return AIRY_SUCCESS; /* 空窗口 → 无压缩 */
 
-    act = AIRY_CALLOC(count, sizeof(int));
-    repl = AIRY_CALLOC(count, sizeof(char *));
-    hashes = AIRY_CALLOC(count, sizeof(uint64_t));
-    tokens = AIRY_CALLOC(count, sizeof(size_t));
-    actions = AIRY_CALLOC(count, sizeof(compress_plan_item_t));
-    /* 计数模型与台账同源（声明注入；ledger 为空 → 默认模型） */
-    counter = airy_token_counter_create(mem_ledger_tfam(ledger));
-    if (!act || !repl || !hashes || !tokens || !actions || !counter) {
-        AIRY_FREE(act);
-        for (i = 0; i < count; i++) AIRY_FREE(repl ? repl[i] : NULL);
-        AIRY_FREE(repl);
-        AIRY_FREE(hashes);
-        AIRY_FREE(tokens);
-        AIRY_FREE(actions);
-        if (counter) airy_token_counter_destroy(counter);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
+    err = cmp_bufs(&x, ledger);
+    if (err == AIRY_SUCCESS)
+        err = cmp_turns(&x);
+    if (err != AIRY_SUCCESS)
+        return err;
 
-    /* 条目 token：显式优先，否则 token_standard 估算 */
-    size_t used = 0;
-    for (i = 0; i < count; i++) {
-        if (entries[i].token_in > 0)
-            tokens[i] = entries[i].token_in;
-        else
-            tokens[i] = entries[i].text
-                            ? airy_token_counter_count(counter, entries[i].text)
-                            : 0;
-        used += tokens[i];
-    }
+    cmp_tokens(&x, &used);
 
-    /* 识别当前请求：最后一条 user */
-    int current_user_idx = -1;
-    for (i = 0; i < count; i++) {
-        if (entries[i].entry_type == LEDGER_ENTRY_USER)
-            current_user_idx = (int)i;
-    }
+    cmp_l1(&x);
+    cmp_l2(&x, ledger, session_id, used);
 
-    /* 轮边界：user 条目即一轮起点（含后续同轮 assistant/tool_result） */
-    int *turn_of = AIRY_CALLOC(count, sizeof(int));
-    if (!turn_of) {
-        AIRY_FREE(act);
-        for (i = 0; i < count; i++) AIRY_FREE(repl[i]);
-        AIRY_FREE(repl);
-        AIRY_FREE(hashes);
-        AIRY_FREE(tokens);
-        AIRY_FREE(actions);
-        airy_token_counter_destroy(counter);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-    int cur_turn = 0;
-    for (i = 0; i < count; i++) {
-        if (entries[i].entry_type == LEDGER_ENTRY_USER)
-            cur_turn++;
-        turn_of[i] = cur_turn;
-    }
-    int total_turns = cur_turn;
+    err = cmp_build(&x, &ctx);
+    if (err != AIRY_SUCCESS)
+        return err;
 
-    /* L1：逐条目判定（保护规则：system/tool_def/当前请求 永不压缩） */
-    size_t l1_saved = 0;
-    for (i = 0; i < count; i++) {
-        int protected_entry =
-            entries[i].entry_type == LEDGER_ENTRY_SYSTEM ||
-            entries[i].entry_type == LEDGER_ENTRY_TOOL_DEF ||
-            entries[i].entry_type == LEDGER_ENTRY_CACHE_HIT || (int)i == current_user_idx;
-        if (protected_entry)
-            continue;
-
-        if (dc.l1_enabled) {
-            /* 1) 超轮数丢弃最早轮（保留首轮上下文 + 最近 max_turns-1 轮） */
-            if (entries[i].entry_type == LEDGER_ENTRY_USER ||
-                entries[i].entry_type == LEDGER_ENTRY_ASSISTANT ||
-                entries[i].entry_type == LEDGER_ENTRY_TOOL_RESULT) {
-                int keep_tail = (int)dc.max_turns > 1 ? (int)dc.max_turns - 1 : 0;
-                int keep_from = total_turns - keep_tail + 1; /* 最后保留轮起始号 */
-                if (total_turns > (int)dc.max_turns && turn_of[i] > 1 && turn_of[i] < keep_from) {
-                    act[i] = COMPRESS_ACTION_DROP;
-                    l1_saved += tokens[i];
-                    continue;
-                }
-            }
-
-            /* 2) tool_result 超长截断（头部 + 尾部，中间占位） */
-            if (entries[i].entry_type == LEDGER_ENTRY_TOOL_RESULT && tokens[i] > dc.max_tool_tokens &&
-                entries[i].text) {
-                size_t len = strlen(entries[i].text);
-                if (len > 32) {
-                    size_t head = len * 2 / 5;
-                    size_t tail = len * 2 / 5;
-                    if (head + tail < len) {
-                        size_t nlen = head + tail + 48;
-                        char *buf = AIRY_MALLOC(nlen);
-                        if (buf) {
-                            AIRY_MEMCPY(buf, entries[i].text, head);
-                            int m = snprintf(buf + head, nlen - head,
-                                             "\n…[truncated %zu tokens]…\n",
-                                             tokens[i] - dc.max_tool_tokens);
-                            if (m > 0 && (size_t)m < nlen - head) {
-                                AIRY_MEMCPY(buf + head + (size_t)m, entries[i].text + (len - tail),
-                                            tail);
-                                buf[head + (size_t)m + tail] = '\0';
-                                repl[i] = buf;
-                                act[i] = COMPRESS_ACTION_TRUNCATE;
-                                l1_saved += tokens[i] - dc.max_tool_tokens;
-                            } else {
-                                AIRY_FREE(buf);
-                            }
-                        }
-                    }
-                }
-            }
-
-            /* 3) 精确去重（保留首条） */
-            if (dc.dedup && entries[i].text) {
-                uint64_t h = text_hash(entries[i].text);
-                int dup = 0;
-                for (size_t j = 0; j < i; j++) {
-                    if (act[j] != COMPRESS_ACTION_DROP && hashes[j] == h &&
-                        entries[j].text && strcmp(entries[j].text, entries[i].text) == 0) {
-                        dup = 1;
-                        break;
-                    }
-                }
-                if (dup && act[i] == COMPRESS_ACTION_NONE) {
-                    act[i] = COMPRESS_ACTION_DEDUP;
-                    l1_saved += tokens[i];
-                    continue;
-                }
-                hashes[i] = h;
-            }
-        }
-
-        if (act[i] == COMPRESS_ACTION_NONE && entries[i].text)
-            hashes[i] = text_hash(entries[i].text);
-    }
-
-    /* L2：L1 后仍超预算则对历史 assistant/user 抽取关键句。
-     * 生效须双条件：显式开启 且 A/B 门禁放行（fail-closed）。 */
-    int l2_active = dc.l2_enabled && mem_compress_gate_pass(&dc.gate);
-    if (l2_active) {
-        size_t budget = 0, headroom = 0;
-        if (ledger)
-            mem_ledger_budget(ledger, session_id, NULL, &budget, &headroom);
-        size_t remaining = used > l1_saved ? used - l1_saved : 0;
-        double warn_at = (double)budget *
-                         (ledger ? mem_ledger_warn_ratio(ledger) : 0.8); /* SSoT：台账告警比例 */
-        int over_budget = budget > 0 && remaining >= (size_t)warn_at;
-        if (over_budget || total_turns > (int)dc.max_turns) {
-            wordfreq_t wf;
-            AIRY_MEMSET(&wf, 0, sizeof(wf));
-            for (i = 0; i < count; i++) {
-                if (entries[i].text)
-                    airy_words_scan(entries[i].text, strlen(entries[i].text),
-                                    wordfreq_visit, &wf);
-            }
-            for (i = 0; i < count; i++) {
-                if (act[i] != COMPRESS_ACTION_NONE)
-                    continue;
-                if (entries[i].entry_type != LEDGER_ENTRY_ASSISTANT &&
-                    entries[i].entry_type != LEDGER_ENTRY_USER)
-                    continue;
-                if ((int)i == current_user_idx)
-                    continue;
-                if (turn_of[i] == 1 && entries[i].entry_type == LEDGER_ENTRY_USER)
-                    continue;
-                if (tokens[i] < 32 || !entries[i].text)
-                    continue;
-                char *summ = extract_key_sentences(entries[i].text, &wf);
-                if (summ && strcmp(summ, entries[i].text) != 0 &&
-                    strlen(summ) < strlen(entries[i].text)) {
-                    size_t new_tok = airy_token_counter_count(counter, summ);
-                    if (new_tok < tokens[i]) {
-                        repl[i] = summ;
-                        summ = NULL;
-                        act[i] = COMPRESS_ACTION_EXTRACT;
-                        l1_saved += tokens[i] - new_tok;
-                    }
-                }
-                AIRY_FREE(summ);
-            }
-            wordfreq_free(&wf);
-        }
-    }
-    AIRY_FREE(turn_of);
-
-    /* 组装 actions 与重组上下文 */
-    size_t ctx_len = 1;
-    for (i = 0; i < count; i++) {
-        if (act[i] == COMPRESS_ACTION_DROP || act[i] == COMPRESS_ACTION_DEDUP)
-            continue;
-        const char *piece = repl[i] ? repl[i] : (entries[i].text ? entries[i].text : "");
-        ctx_len += strlen(piece) + 1;
-    }
-    char *ctx = AIRY_MALLOC(ctx_len);
-    if (!ctx) {
-        for (i = 0; i < count; i++) AIRY_FREE(repl[i]);
-        AIRY_FREE(act);
-        AIRY_FREE(repl);
-        AIRY_FREE(hashes);
-        AIRY_FREE(tokens);
-        AIRY_FREE(actions);
-        airy_token_counter_destroy(counter);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-    ctx[0] = '\0';
-    for (i = 0; i < count; i++) {
-        /* 动作记录先行：DROP/DEDUP 也须返回（调用方据此 mark/审计） */
-        if (act[i] != COMPRESS_ACTION_NONE) {
-            actions[action_count].entry_id = AIRY_STRDUP(entries[i].entry_id);
-            actions[action_count].entry_type = entries[i].entry_type;
-            actions[action_count].action = act[i];
-            action_count++;
-        }
-        if (act[i] == COMPRESS_ACTION_DROP || act[i] == COMPRESS_ACTION_DEDUP)
-            continue; /* 不进重组上下文 */
-        const char *piece = repl[i] ? repl[i] : (entries[i].text ? entries[i].text : "");
-        if (ctx[0])
-            strncat(ctx, "\n", 1);
-        strncat(ctx, piece, strlen(piece));
-    }
-
-    size_t saved = 0;
-    if (l1_saved > 0) {
-        size_t new_tok = airy_token_counter_count(counter, ctx);
-        saved = used > new_tok ? used - new_tok : l1_saved;
-    }
-
-    for (i = 0; i < count; i++)
-        AIRY_FREE(repl[i]);
-    AIRY_FREE(act);
-    AIRY_FREE(repl);
-    AIRY_FREE(hashes);
-    AIRY_FREE(tokens);
-    airy_token_counter_destroy(counter);
-
-    if (out_context) *out_context = ctx;
-    else AIRY_FREE(ctx);
-    if (out_saved_tokens) *out_saved_tokens = saved;
-    if (out_actions) *out_actions = actions;
-    else {
-        for (i = 0; i < action_count; i++) AIRY_FREE(actions[i].entry_id);
-        AIRY_FREE(actions);
-    }
-    if (out_action_count) *out_action_count = action_count;
+    saved = cmp_saved(&x, ctx, used);
+    cmp_release(&x);
+    cmp_emit(&x, ctx, saved, out_context, out_saved_tokens, out_actions, out_action_count);
     return AIRY_SUCCESS;
 }
 
