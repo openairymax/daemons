@@ -33,6 +33,7 @@
     ]},
     {"name": "run", "sources": [
       "run/agent_run_engine.c",
+      "run/agent_run_exec.c",
       "run/agent_run_ledger.c",
       "run/agent_run_loop.c",
       "run/agent_run_stream.c"
