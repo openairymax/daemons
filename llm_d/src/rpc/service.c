@@ -240,62 +240,9 @@ llm_service_t *llm_service_create(const char *config_path)
                      svc->default_max_output_tokens);
     }
 
-    /* Parse pricing rules (uses cJSON; JSON config only).
-     * model.yaml is YAML; feeding YAML content straight to cJSON must fail
-     * parsing, wrongly reporting a "Failed to parse pricing rules" WARN at
-     * every startup while pricing rules never load. Currently neither
-     * model.yaml nor model.json has a pricing section; YAML config degrades
-     * gracefully to no rules, same semantics as the JSON-sourced config
-     * (missing pricing -> no cost rules, DEBUG only). */
-    if (config_path && ends_with(config_path, ".json")) {
-        FILE *f = fopen(config_path, "rb");
-        if (f) {
-            fseek(f, 0, SEEK_END);
-            long yaml_len = ftell(f);
-            fseek(f, 0, SEEK_SET);
-
-            if (yaml_len <= 0) {
-                fclose(f);
-            } else {
-                char *yaml_content = (char *)AIRY_MALLOC((size_t)yaml_len + 1);
-                if (yaml_content) {
-                    size_t read_len = fread(yaml_content, 1, (size_t)yaml_len, f);
-                    if (read_len != (size_t)yaml_len) {
-                        AIRY_FREE(yaml_content);
-                        yaml_content = NULL;
-                    }
-                    if (yaml_content) {
-                        yaml_content[read_len] = '\0';
-
-                        /* P0.18.2: CJSON_PARSE_GUARD replaces cJSON_Parse +
-                         * if (root) + manual cJSON_Delete, using do { ... }
-                         * while (0) + break to preserve the original
-                         * if (root) ... else ... block semantics */
-                        do {
-                            CJSON_PARSE_GUARD(root, yaml_content, {
-                                SVC_LOG_WARN("Failed to parse pricing rules from manager");
-                                break;
-                            });
-                            int rule_count = 0;
-                            pricing_rule_t *rules = load_pricing_rules(root, &rule_count);
-                            if (rules && rule_count > 0) {
-                                svc->rules = rules;
-                                svc->rule_count = rule_count;
-                                SVC_LOG_INFO("Loaded %d pricing rules", rule_count);
-                            } else if (rules) {
-                                AIRY_FREE(rules);
-                            }
-
-                        } while (0);
-                    }
-                    AIRY_FREE(yaml_content);
-                } else {
-                    SVC_LOG_ERROR("Failed to allocate memory for manager content");
-                }
-                fclose(f);
-            }
-        }
-    } else if (config_path) {
+    /* 定价规则只从 YAML 声明面提取（models[].input/output_cost_per_1k）；
+     * JSON 面的 pricing 段随双轨收敛摘除（model.json 本就无该段）。 */
+    if (config_path) {
         /* 2.1.1.5 修复：YAML 配置（model.yaml，当前唯一入口）此前完全不
          * 加载价格，计费全部落到默认价 0.001/0.002，金额不真实。现在从
          * models[].input/output_cost_per_1k 生成 pricing rules。 */

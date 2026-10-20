@@ -3,11 +3,11 @@
 
 /**
  * @file service_config.c
- * @brief LLM service config core: extension dispatch, JSON pricing-rule
- *        parsing/release and the model-config loader.
+ * @brief LLM service config core: extension dispatch, pricing-rule release
+ *        and the model-config loader.
  *
  * 2026-08-27 域拆分收尾（原主文件 → 仅保留分发与 JSON 定价核心）：
- *   - service_config_json.c           JSON 模型配置加载
+ *   - service_config_json.c           遗留 JSON 模型配置加载
  *   - service_config_yaml_models.c    models 行解析 + 简化 llm 段展开
  *   - service_config_yaml_providers.c provider 聚合导出
  *   - service_config_yaml_pricing.c   YAML 定价规则提取
@@ -19,9 +19,6 @@
 #include "error.h"
 #include "svc_logger.h"
 
-#include <cjson/cJSON.h>
-
-#include <cjson_helpers.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,64 +35,6 @@ int ends_with(const char *str, const char *suffix)
     if (suffix_len > str_len)
         return 0;
     return strcmp(str + str_len - suffix_len, suffix) == 0;
-}
-
-/**
- * @brief Load pricing rules
- * @param root  JSON root node
- * @param count Output rule count
- * @return Rule array (caller frees), NULL on failure
- */
-pricing_rule_t *load_pricing_rules(cJSON *root, int *count)
-{
-    if (!root || !count) {
-        SVC_LOG_ERROR("load_pricing_rules: NULL parameter (root=%p, count=%p)", (const void *)root,
-                      (const void *)count);
-        *count = 0;
-        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-    }
-
-    cJSON *pricing = cJSON_GetObjectItem(root, "pricing");
-    if (!pricing || !cJSON_IsArray(pricing)) {
-        SVC_LOG_ERROR("load_pricing_rules: pricing array missing or not an array in config");
-        *count = 0;
-        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-    }
-
-    int n = cJSON_GetArraySize(pricing);
-    pricing_rule_t *rules = (pricing_rule_t *)AIRY_CALLOC((size_t)n, sizeof(pricing_rule_t));
-    if (!rules) {
-        SVC_LOG_ERROR("load_pricing_rules: calloc failed for %d pricing rules", n);
-        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-    }
-
-    for (int i = 0; i < n; ++i) {
-        cJSON *item = cJSON_GetArrayItem(pricing, i);
-        cJSON *pattern = cJSON_GetObjectItem(item, "pattern");
-        cJSON *input = cJSON_GetObjectItem(item, "input_price_per_k");
-        cJSON *output = cJSON_GetObjectItem(item, "output_price_per_k");
-
-        if (cJSON_IsString(pattern) && cJSON_IsNumber(input) && cJSON_IsNumber(output)) {
-            rules[i].model_pattern = AIRY_STRDUP(pattern->valuestring);
-            if (!rules[i].model_pattern) {
-
-                SVC_LOG_ERROR("load_pricing_rules: strdup failed for model_pattern at index %d", i);
-                for (int j = 0; j < i; ++j) {
-                    AIRY_FREE((void *)rules[j].model_pattern);
-                }
-                AIRY_FREE(rules);
-                *count = 0;
-                AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
-            }
-            rules[i].input_price_per_k = input->valuedouble;
-            rules[i].output_price_per_k = output->valuedouble;
-        } else {
-            rules[i].model_pattern = NULL;
-        }
-    }
-
-    *count = n;
-    return rules;
 }
 
 void free_pricing_rules(pricing_rule_t *rules, int count)
