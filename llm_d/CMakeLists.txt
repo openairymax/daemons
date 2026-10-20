@@ -66,12 +66,12 @@ set(LLM_SERVICE_SOURCES
     src/providers/core/toolstream.c
     # B16-S3.3：通用 completion driver——适配层四槽入口的唯一编排实现
     src/providers/core/adapter.c
-    # B16-S3 c6：openai 三件合一（openai.c + openai_stream.c + openai_internal.h → openai.c）
-    src/providers/adapters/openai.c
+    # B16-S3 c6：chat 三件合一（openai.c + openai_stream.c + openai_internal.h → chat.c）
+    src/providers/adapters/chat.c
     src/providers/core/rate_limit.c
     # 0.1.19 D5：端点健康探测机制件（能力存在 ≠ 能力可用）
     src/providers/core/ep_health.c
-    src/providers/adapters/anthropic.c
+    src/providers/adapters/messages.c
     # B16-S4：deepseek.c / google.c 清理（OpenAI 兼容遗留冗余，经 model.yaml base_url 声明式接入）
     src/providers/adapters/local.c
     # B16-S3 c7：适配器装配 SSoT——注册新适配的唯一改动点

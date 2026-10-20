@@ -3,8 +3,7 @@
 
 /**
  * @file toolstream.c
- * @brief 流式响应装配唯一实现（B16-S3 c5/c6：收敛 openai_stream/
- * deepseek/local 三份逐字同构副本至此）。
+ * @brief 流式响应装配唯一实现（B16-S3 c5/c6：收敛三份逐字同构副本至此）。
  */
 
 #include "toolstream.h"
@@ -128,8 +127,8 @@ char *provider_tool_json(const provider_tool_acc_t *acc)
             return NULL;
         }
         cJSON_AddStringToObject(tc, "id", slot->id[0] ? slot->id : "call_unknown");
-        /* OpenAI 续轮必需：tool_calls 元素必须携带 "type":"function"，
-         * 缺失时 DeepSeek 等上游对 assistant tool_calls 严格校验并 400
+        /* 续轮必需：tool_calls 元素必须携带 "type":"function"，缺失时
+         * 上游对 assistant tool_calls 严格校验并 400
          * （2026-08-16 探针确认：no-type 0B / with-type 200）。 */
         cJSON_AddStringToObject(tc, "type", "function");
         if (slot->name[0])
@@ -185,7 +184,7 @@ void provider_stream_text_push(provider_stream_acc_t *acc, const char *text)
         acc->acc_content = grown;
 }
 
-int provider_openai_on_chunk(const char *json_line, void *userdata)
+int provider_stream_on_chunk(const char *json_line, void *userdata)
 {
     provider_stream_acc_t *acc = (provider_stream_acc_t *)userdata;
 
@@ -216,12 +215,9 @@ int provider_openai_on_chunk(const char *json_line, void *userdata)
             if (cJSON_IsString(content) && content->valuestring)
                 provider_stream_text_push(acc, content->valuestring);
 
-            /* Reasoning trace arrives in the same delta stream (DeepSeek
-             * reasoner/Kimi). Forward each delta immediately as an RS 'R'
-             * control frame so IPC clients can show the thinking chain
-             * live, while still accumulating it for the assembled response
-             * (tool-loop echo). Endpoints without reasoning_content bypass
-             * this branch naturally. */
+            /* 推理轨迹与正文同流下发：每个增量立即作为 RS 'R' 控制帧
+             * 转发，供 IPC 客户端实时展示思维链，同时累积用于流末装配
+             * （工具多轮回传）。端点不产 reasoning_content 时自然旁路。 */
             cJSON *reasoning = cJSON_GetObjectItem(delta, "reasoning_content");
             if (cJSON_IsString(reasoning) && reasoning->valuestring) {
                 if (acc->user_cb)
@@ -244,10 +240,9 @@ int provider_openai_on_chunk(const char *json_line, void *userdata)
         }
     }
 
-    /* Streaming usage: OpenAI (stream_options.include_usage) / DeepSeek /
-     * local OpenAI-compatible endpoints attach the usage block in the final
-     * chunk, which has no choices. Last parse wins (usage is most complete
-     * at stream end). */
+    /* Streaming usage: the final chunk (which carries no choices) attaches
+     * the usage block when include_usage is declared. Last parse wins
+     * (usage is most complete at stream end). */
     provider_usage_load(cJSON_GetObjectItem(root, "usage"), &acc->prompt_tokens,
                         &acc->completion_tokens, &acc->total_tokens,
                         &acc->reasoning_tokens);
@@ -255,7 +250,7 @@ int provider_openai_on_chunk(const char *json_line, void *userdata)
     return 0;
 }
 
-llm_response_t *provider_openai_stream_take(provider_stream_acc_t *acc)
+llm_response_t *provider_stream_take(provider_stream_acc_t *acc)
 {
     llm_response_t *resp = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {

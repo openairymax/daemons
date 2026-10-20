@@ -7,8 +7,8 @@
  *
  * DeepSeek/Kimi 思考模式要求在工具循环中回传 assistant 消息的
  * reasoning_content，否则上游 API 返回 400。本测试覆盖：
- * 1. provider_build_openai_request 在请求体中原样回传 reasoning_content
- * 2. provider_parse_openai_response 从响应中提取 reasoning_content
+ * 1. provider_build_chat_req 在请求体中原样回传 reasoning_content
+ * 2. provider_parse_chat_resp 从响应中提取 reasoning_content
  */
 
 #include "error.h"
@@ -38,7 +38,7 @@ static void test_build_request_echoes_reasoning(void)
     cfg.messages = msgs;
     cfg.message_count = 2;
 
-    char *body = provider_build_openai_request(&cfg, "deepseek-reasoner", NULL);
+    char *body = provider_build_chat_req(&cfg, "deepseek-reasoner", NULL);
     assert(body != NULL);
     assert(strstr(body, "reasoning_content") != NULL);
     assert(strstr(body, "6*7=42") != NULL);
@@ -64,17 +64,17 @@ static void test_build_request_extra_params(void)
     cfg.messages = &msg;
     cfg.message_count = 1;
 
-    char *plain = provider_build_openai_request(&cfg, "gpt-3.5-turbo", NULL);
+    char *plain = provider_build_chat_req(&cfg, "gpt-3.5-turbo", NULL);
     assert(plain != NULL);
     assert(strstr(plain, "keep_alive") == NULL);
     free(plain);
 
-    char *body = provider_build_openai_request(&cfg, "gpt-3.5-turbo",
+    char *body = provider_build_chat_req(&cfg, "gpt-3.5-turbo",
                                                "{\"keep_alive\":\"30m\"}");
     assert(body != NULL);
     assert(strstr(body, "\"keep_alive\":\"30m\"") != NULL);
     /* 扩展段键与骨架键冲突时覆盖：model 以扩展段为准。 */
-    char *over = provider_build_openai_request(&cfg, "gpt-3.5-turbo",
+    char *over = provider_build_chat_req(&cfg, "gpt-3.5-turbo",
                                                "{\"model\":\"override\"}");
     assert(over != NULL);
     assert(strstr(over, "\"model\":\"override\"") != NULL);
@@ -98,7 +98,7 @@ static void test_parse_response_reads_reasoning(void)
                        "\"total_tokens\":15}}";
 
     llm_response_t *resp = NULL;
-    int ret = provider_parse_openai_response(json, &resp);
+    int ret = provider_parse_chat_resp(json, &resp);
     assert(ret == AIRY_OK);
     assert(resp != NULL);
     assert(resp->choice_count == 1);
@@ -122,7 +122,7 @@ static void test_parse_response_without_reasoning(void)
                        "\"total_tokens\":3}}";
 
     llm_response_t *resp = NULL;
-    int ret = provider_parse_openai_response(json, &resp);
+    int ret = provider_parse_chat_resp(json, &resp);
     assert(ret == AIRY_OK);
     assert(resp != NULL);
     assert(resp->choice_count == 1);

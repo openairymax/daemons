@@ -33,6 +33,10 @@
 static int test_count;
 static int fail_count;
 
+/* 适配器 fail-closed：无 base_url 不装配 provider。测试不发真实请求，
+ * 该基址只用于满足装配前置条件。 */
+#define TEST_API_BASE "http://127.0.0.1:1/v1"
+
 static void check_int(const char *name, int got, int want)
 {
     test_count++;
@@ -346,10 +350,12 @@ static void test_run_switch(void)
         return;
     memset(pcs, 0, sizeof(pcs));
     pcs[0].name = "pa";
+    pcs[0].api_base = TEST_API_BASE;
     pcs[0].models = ma;
     pcs[0].model_max_output = cap;
     pcs[0].timeout_sec = 1;
     pcs[1].name = "pb";
+    pcs[1].api_base = TEST_API_BASE;
     pcs[1].models = mb;
     pcs[1].model_max_output = cap;
     pcs[1].timeout_sec = 1;
@@ -475,9 +481,11 @@ static void test_run_sent(void)
         return;
     memset(pcs, 0, sizeof(pcs));
     pcs[0].name = "pa";
+    pcs[0].api_base = TEST_API_BASE;
     pcs[0].models = ma;
     pcs[0].model_max_output = cap;
     pcs[1].name = "pb";
+    pcs[1].api_base = TEST_API_BASE;
     pcs[1].models = mb;
     pcs[1].model_max_output = cap;
     reg_swap(svc, pcs, 2);
@@ -529,6 +537,7 @@ static void test_run_hit(void)
         return;
     memset(pcs, 0, sizeof(pcs));
     pcs[0].name = "pa";
+    pcs[0].api_base = TEST_API_BASE;
     pcs[0].models = ma;
     pcs[0].model_max_output = cap;
     reg_swap(svc, pcs, 1);

@@ -17,13 +17,15 @@
 
 ## 能力
 
-- **多提供商适配** — OpenAI / Anthropic / DeepSeek / Google / 本地模型，统一经 provider
-  registry 调度，`reasoning_content` 等扩展字段透传。
+- **线格式适配** — 机制核只实现 `chat` / `messages` / `local` 三种线格式，统一经
+  provider registry 按 `api_format` 调度；厂商、端点与默认模型由数据面 `model.yaml`
+  声明，`reasoning_content` 等扩展字段透传。
 - **模型路由** — `cost_aware` / `round_robin` / `least_latency` / `quality_first` 四种策略。
 - **流式输出** — `complete_stream` 以 RS 帧（`0x1E`）分片推送增量，结束帧携带真实
   usage（prompt / completion / reasoning tokens 与 `cost_usd`）。
 - **响应缓存与成本追踪** — 命中缓存不重复计费；按 `pricing` 规则计算成本。
-- **Token 计数** — 按模型选择编码（claude 系列、`p50k_base`、默认 `cl100k_base`）。
+- **Token 计数** — 模型→算法的映射唯一实现在 `commons/utils/token`（`airy_token_counter`），
+  本进程不再自持按厂商前缀分支的算法表。
 - **重试与时间感知注入** — `complete` 失败最多重试 3 次指数退避（基础 100 ms）；
   在缺少真实日期戳时注入宿主机当前时间，避免多轮拼接的时间漂移。
 
@@ -37,7 +39,7 @@
   svc.c（生命周期五钩子：端点策略 + llm_service 单例）
         ↓
   airy_llm_service（service / cache / cost_tracker / response）
-        ├── providers/  openai · anthropic · deepseek · google · local + registry
+        ├── providers/  chat · messages · local + registry
         └── router/     cost_aware · round_robin · least_latency · quality_first
 ```
 
@@ -61,7 +63,7 @@
 | `complete` | `{model?, messages: [≤128 条 role/content/reasoning_content/tool_call_id/tool_calls], temperature?, top_p?, max_tokens?, presence_penalty?, frequency_penalty?, stream?, tools?}` | 补全文本 + usage | 非流式生成，`model` 缺省取 `global.default_model`；失败指数退避重试 3 次 |
 | `complete_stream` | 同 `complete` | RS 帧分片 | 流式生成，结束帧携带 usage 与成本 |
 | `list_models` | `{}` | `{models: [{name, provider, default}], default_model, ...}` | 模型清单 |
-| `count_tokens` | `{text, model?}` | `{model, text, tokens, encoding}` | 按模型编码计数 |
+| `count_tokens` | `{text, model?}` | `{model, text, tokens, algorithm}` | 按模型选择启发式算法计数 |
 | `embeddings` | `{model?, input, ...}`（OpenAI 请求格式原样转发） | 上游 JSON | 代理到所属 provider 的 `/embeddings` |
 | `health_check` | `{}` | `{service, healthy, timestamp}` | 服务健康检查 |
 | `get_stats` | `{}` | 统计 JSON | 请求数、缓存命中、成本等 |

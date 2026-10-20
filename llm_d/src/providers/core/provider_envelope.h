@@ -1,6 +1,9 @@
 /* SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd. */
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
-/* provider_envelope.h: Provider 域请求/响应共享件（SSoT，B16-S3） */
+/* provider_envelope.h: Provider 域请求/响应共享件（SSoT，B16-S3）
+ *
+ * 只实现线格式本身，不持有任何厂商名、端点或默认模型：厂商差异一律由
+ * model.yaml（数据面）注入，机制核仅按格式分发。 */
 
 #ifndef LLM_D_PROVIDERS_CORE_PROVIDER_ENVELOPE_H
 #define LLM_D_PROVIDERS_CORE_PROVIDER_ENVELOPE_H
@@ -14,30 +17,29 @@
 extern "C" {
 #endif
 
-/* extra_json：通用供应商扩展段（JSON object 片段），逐键并入请求体顶层；
- * NULL / 空串 = 无扩展。厂商专有参数（如 Ollama keep_alive）经此注入，
- * 不污染 OpenAI 通用骨架。键冲突时以扩展段为准（后者覆盖前者）。 */
-char *provider_build_openai_request(const llm_request_config_t *manager, const char *default_model,
-                                    const char *extra_json);
-int provider_parse_openai_response(const char *body, llm_response_t **out);
+/* extra_json：通用扩展段（JSON object 片段），逐键并入请求体顶层；
+ * NULL / 空串 = 无扩展。端点专有参数（如 keep_alive）经此注入，
+ * 不污染 Chat Completions 通用骨架。键冲突时以扩展段为准。 */
+char *provider_build_chat_req(const llm_request_config_t *manager, const char *default_model,
+                              const char *extra_json);
+int provider_parse_chat_resp(const char *body, llm_response_t **out);
 /* 请求参数段骨架：model / temperature / max_tokens / top_p / stream / stop 数组。 */
 void provider_request_params_fill(cJSON *root, const llm_request_config_t *manager,
                                   const char *default_model, int default_max_tokens,
                                   const char *stop_key);
 
-/* 响应身份段装载：id / model 两个字符串字段（两家同名同义）。 */
+/* 响应身份段装载：id / model 两个字符串字段（各线格式同名同义）。 */
 void provider_response_identity_load(llm_response_t *resp, const cJSON *root);
 
-/* OpenAI 形状 tools 声明遍历：逐条提取 function 三元组（name 缺失跳过）。 */
-typedef void (*provider_openai_tool_fn)(void *ud, const char *name, const char *description,
-                                        const cJSON *parameters);
-void provider_openai_tools_foreach(const char *tools_json, provider_openai_tool_fn fn, void *ud);
+/* 工具声明遍历：逐条提取 function 三元组（name 缺失跳过）。 */
+typedef void (*provider_tool_fn)(void *ud, const char *name, const char *description,
+                                 const cJSON *parameters);
+void provider_tools_foreach(const char *tools_json, provider_tool_fn fn, void *ud);
 
-/* OpenAI 形状 assistant 轮 tool_calls 遍历：arguments 为 JSON 串原样交付。 */
-typedef void (*provider_openai_tool_call_fn)(void *ud, const char *id, const char *name,
-                                             const char *arguments);
-void provider_openai_tool_calls_foreach(const char *tool_calls_json,
-                                        provider_openai_tool_call_fn fn, void *ud);
+/* assistant 轮 tool_calls 遍历：arguments 为 JSON 串原样交付。 */
+typedef void (*provider_tool_call_fn)(void *ud, const char *id, const char *name,
+                                      const char *arguments);
+void provider_tool_calls_foreach(const char *tool_calls_json, provider_tool_call_fn fn, void *ud);
 
 static inline const char *provider_json_str_val(const cJSON *obj, const char *key)
 {
