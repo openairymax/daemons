@@ -13,6 +13,7 @@
 #define AIRY_RT_LLM_ROUTER_CONTEXT_H
 
 #include "router/core/llm_router.h"
+#include "router/core/llm_health.h"
 #include "token_standard.h"
 #include "airy_memory.h"
 /* d8 cleanup: removed sync_compat.h (this file only uses airy_mtx_t,
@@ -75,15 +76,22 @@ static inline bool router_has_capabilities(const llm_endpoint_t *ep, uint32_t re
     return (ep->capabilities & required_caps) == required_caps;
 }
 
-/** @brief Get the list of capability-matching endpoints. */
+/** @brief Get the list of capability-matching endpoints.
+ *
+ * 熔断 OPEN 的端点不参与选择；HALF 端点仍入选，由调用前的
+ * llm_rtr_admit() 决出唯一探测者。
+ */
 static inline size_t router_get_eligible(const llm_route_request_t *request,
                                          llm_endpoint_t **out_array, size_t max_count)
 {
     router_ctx_t *ctx = router_ctx_get();
+    uint32_t now = (uint32_t)airy_time_ms();
     size_t count = 0;
     for (size_t i = 0; i < ctx->endpoint_count && count < max_count; i++) {
         llm_endpoint_t *ep = &ctx->endpoints[i];
         if (!ep->enabled)
+            continue;
+        if (llm_ep_state(ep, now) == LLM_EP_OPEN)
             continue;
         if (!router_has_capabilities(ep, request->required_caps))
             continue;

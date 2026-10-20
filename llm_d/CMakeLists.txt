@@ -75,6 +75,8 @@ set(LLM_SERVICE_SOURCES
     src/router/core/llm_router.c
     # 0.1.19 §3.8.2：端点切换决策件（错误码 → 可否换端点，纯函数）
     src/router/core/llm_failover.c
+    # 0.1.19 §3.8.2：端点健康面（熔断三态 + 半开探测）
+    src/router/core/llm_health.c
     # sec44-D：四策略母件化合一（骨架机制 + 四选择规则，379→195 行）
     src/router/strategy/router_strategy.c
     # 注入 atoms 侧 LLM ops 抽象表（服务实现在本库，表存储在 airy_llm_ops）

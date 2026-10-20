@@ -48,6 +48,8 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/core/llm_router.c
     # 0.1.19 §3.8.2：端点切换决策件（与主目标同步）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/core/llm_failover.c
+    # 0.1.19 §3.8.2：端点健康面（与主目标同步）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/core/llm_health.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/strategy/router_strategy.c
 )
 
@@ -71,6 +73,8 @@ set(LLM_TEST_SOURCES
     test_finish_reason.c
     # 0.1.19 §3.8.2：端点切换决策件（错误码 → 可否换端点）回归
     test_failover.c
+    # 0.1.19 §3.8.2：端点健康面（熔断三态 + 半开探测）回归
+    test_health.c
 )
 
 set(LLM_COMMON_INCLUDES
