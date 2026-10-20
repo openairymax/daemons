@@ -5,11 +5,10 @@
  * @file envelope.c
  * @brief 请求/响应信封编解码（B16-S3 适配收敛的共享件 SSoT）。
  *
- * 域拆分自 provider.c（2026-08-27）：provider_build_openai_request /
- * provider_parse_openai_response 供 openai / deepseek / local 等
- * OpenAI 兼容 provider 共用。B16-S3.3 追加三家映射表的公共段下沉件：
- * 参数段骨架（stop 键名表驱动）、响应身份段、OpenAI 形状 tools /
- * tool_calls 遍历原语——适配层（含 anthropic）据此改写本家形状，
+ * 域拆分自 provider.c（2026-08-27）：provider_build_chat_req /
+ * provider_parse_chat_resp 供 chat 线格式各适配层共用。B16-S3.3 追加
+ * 各映射表的公共段下沉件：参数段骨架（stop 键名表驱动）、响应身份段、
+ * tools / tool_calls 遍历原语——适配层据自身线格式改写对应段，
  * 不再各自重写同构段。
  */
 
@@ -24,8 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-char *provider_build_openai_request(const llm_request_config_t *manager, const char *default_model,
-                                    const char *extra_json)
+char *provider_build_chat_req(const llm_request_config_t *manager, const char *default_model,
+                              const char *extra_json)
 {
     if (!manager) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
@@ -34,19 +33,19 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
     cJSON *root = cJSON_CreateObject();
     if (!root) {
         SVC_LOG_ERROR("C-L02: PROVIDER: REQUEST-BUILD-FAIL reason=oom_root "
-                      "STACK: provider_build_openai_request");
+                      "STACK: provider_build_chat_req");
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
     /* 参数段骨架（B16-S3.3 下沉件）：model / temperature / max_tokens /
-     * top_p / stream / stop 六项，stop 键名 "stop" 为 OpenAI 形状；
-     * max_tokens 兜底传 0 = 调用方未给则不写（OpenAI 语义：可缺省）。 */
+     * top_p / stream / stop 六项，stop 键名由调用方按线格式给出；
+     * max_tokens 兜底传 0 = 调用方未给则不写（可缺省语义）。 */
     provider_request_params_fill(root, manager, default_model, 0, "stop");
 
     if (manager->stream) {
-        /* 流式请求必须显式声明 include_usage：OpenAI 及兼容端点
+        /* 流式请求必须显式声明 include_usage：chat 兼容端点
          * （vLLM/llama.cpp 等）默认不回传 usage，不声明则 token 计数与
-         * 计费恒为 0。DeepSeek 本就回传，显式声明后幂等。 */
+         * 计费恒为 0。已回传的端点显式声明后幂等。 */
         cJSON *stream_options = cJSON_CreateObject();
         if (stream_options) {
             cJSON_AddBoolToObject(stream_options, "include_usage", 1);
@@ -77,9 +76,8 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
         cJSON_AddStringToObject(msg, "role", role);
         cJSON_AddStringToObject(msg, "content", content);
 
-        /* Reasoning models (DeepSeek/Kimi) require the assistant turn's
-         * reasoning_content to be echoed back on re-send; dropping it
-         * between tool-loop turns yields HTTP 400 from the upstream API. */
+        /* 推理型端点要求把 assistant 轮的 reasoning_content 在重发时
+         * 原样回传；工具多轮之间丢弃该字段会招致上游 HTTP 400。 */
         if (manager->messages[i].reasoning_content &&
             manager->messages[i].reasoning_content[0]) {
             cJSON_AddStringToObject(msg, "reasoning_content",
@@ -121,7 +119,7 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
     return json;
 }
 
-int provider_parse_openai_response(const char *body, llm_response_t **out)
+int provider_parse_chat_resp(const char *body, llm_response_t **out)
 {
     if (!body || !out) {
         return AIRY_ERR_INVALID_PARAM;
@@ -129,14 +127,14 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
 
     CJSON_PARSE_GUARD(root, body, {
         SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=cjson_parse_error "
-                      "STACK: provider_parse_openai_response");
+                      "STACK: provider_parse_chat_resp");
         return AIRY_ERR_PARSE_ERROR;
     });
 
     llm_response_t *resp = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {
         SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=oom_resp "
-                      "STACK: provider_parse_openai_response");
+                      "STACK: provider_parse_chat_resp");
 
         return AIRY_ERR_OUT_OF_MEMORY;
     }
@@ -157,7 +155,7 @@ int provider_parse_openai_response(const char *body, llm_response_t **out)
 
         if (!resp->choices) {
             SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=oom_choices "
-                          "STACK: provider_parse_openai_response");
+                          "STACK: provider_parse_chat_resp");
 
             llm_response_free(resp);
             return AIRY_ERR_OUT_OF_MEMORY;
@@ -248,7 +246,7 @@ void provider_response_identity_load(llm_response_t *resp, const cJSON *root)
         resp->model = AIRY_STRDUP(model->valuestring);
 }
 
-void provider_openai_tools_foreach(const char *tools_json, provider_openai_tool_fn fn, void *ud)
+void provider_tools_foreach(const char *tools_json, provider_tool_fn fn, void *ud)
 {
     if (!tools_json || !tools_json[0] || !fn)
         return;
@@ -270,8 +268,7 @@ void provider_openai_tools_foreach(const char *tools_json, provider_openai_tool_
     }
 }
 
-void provider_openai_tool_calls_foreach(const char *tool_calls_json,
-                                        provider_openai_tool_call_fn fn, void *ud)
+void provider_tool_calls_foreach(const char *tool_calls_json, provider_tool_call_fn fn, void *ud)
 {
     if (!tool_calls_json || !tool_calls_json[0] || !fn)
         return;
