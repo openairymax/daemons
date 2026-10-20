@@ -160,8 +160,8 @@ cJSON *cost_tracker_export(cost_tracker_t *ct)
     return root;
 }
 
-/* 2.1.1.5 修复：计费/用量持久化。save 原子写（临时文件 + rename 防
- * 半写文件）；load 解析 JSON 并按模型合并累计（幂等）。 */
+/* save 原子写（临时文件 + rename 防半写文件）；load 解析 JSON 并按
+ * 模型合并累计（幂等）。 */
 int cost_tracker_save(cost_tracker_t *ct, const char *path)
 {
     if (!ct || !path || !path[0])

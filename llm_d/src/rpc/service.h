@@ -41,9 +41,8 @@ struct llm_service {
     llm_route_cfg_t route;
 };
 
-/* 2.1.1.5 修复：计费/用量持久化文件路径（$AIRY_DATA_DIR/agentrt/
- * llm_usage.json），service 内部各模块共享（create 加载 / 每次真实调用
- * 后兜底保存 / destroy 保存）。 */
+/* 计费/用量持久化路径（$AIRY_DATA_DIR/agentrt/llm_usage.json）：
+ * create 加载、每次真实调用后兜底保存、destroy 保存。 */
 const char *llm_usage_state_path(void);
 
 #endif /* AIRY_RT_LLM_RPC_SERVICE_H */

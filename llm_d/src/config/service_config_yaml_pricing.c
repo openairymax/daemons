@@ -23,11 +23,9 @@
 /**
  * @brief Load pricing rules from a YAML model config (model.yaml).
  *
- * 2.1.1.5 修复：cost_tracker 的价格此前仅从 JSON 配置的 pricing 数组加载，
- * YAML 配置（当前唯一入口）完全不加载价格，全部模型落到默认价
- * 0.001/0.002，计费金额不真实。本函数复用 svc_yaml 解析状态机，将
- * models[].{name, input_cost_per_1k, output_cost_per_1k} 转换为
- * pricing_rule_t（model_pattern=模型名精确匹配）。
+ * 复用 svc_yaml 解析状态机，将 models[].{name, input_cost_per_1k,
+ * output_cost_per_1k} 转换为 pricing_rule_t（model_pattern=模型名精确
+ * 匹配）。未声明价格的模型不产生规则，由 cost_tracker 落默认价。
  *
  * @param config_path YAML 文件路径
  * @param out_rules  输出规则数组（AIRY_MALLOC，调用方 free_pricing_rules 释放）
@@ -64,9 +62,8 @@ int load_pricing_rules_from_yaml(const char *config_path, pricing_rule_t **out_r
     int n = 0;
     for (size_t i = 0; i < st.model_count; ++i) {
         /* 只注册"显式声明了价格"的模型：显式 0（免费模型，如 llama 本地
-         * 推理）保留为零价规则，字段缺失（未配置价格）的模型跳过并落
-         * 默认价——此前 `> 0.0` 过滤把免费模型也踢掉，导致其被默认价
-         * 计费，金额失真。 */
+         * 推理）保留为零价规则，字段缺失的模型跳过并落默认价。判据是
+         * has_*_price 而非数值大小，避免把免费模型误判为未配置。 */
         if (st.models[i].has_input_price || st.models[i].has_output_price)
             n++;
     }

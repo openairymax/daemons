@@ -175,7 +175,7 @@ static void build_route_request(llm_service_t *svc, const llm_request_config_t *
     req->preferred_provider[0] = '\0';
 }
 
-/* ---------- P3.16 (ACC-DT17): llm_router 选路 ----------
+/* ---------- llm_router 选路 ----------
  * 显式 model 精确命中注册表时直接返回：COST_AWARE 选路会挑"最便宜端点"，
  * 可能把用户指定的模型（GRAD 三模型分离）改写掉。未命中或选路失败才回落
  * 策略路由，最终由 pick_provider 再做注册表兜底。 */

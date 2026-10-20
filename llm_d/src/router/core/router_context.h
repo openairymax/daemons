@@ -15,10 +15,6 @@
 #include "router/core/llm_router.h"
 #include "token_standard.h"
 #include "airy_memory.h"
-/* d8 cleanup: removed sync_compat.h (this file only uses airy_mtx_t,
- * obtained transitively via airy_memory.h -> error.h -> types.h ->
- * platform.h; sync_compat.h is not needed) */
-
 #include "platform.h"
 
 #include "logging_compat.h"
@@ -34,7 +30,6 @@ extern "C" {
 #endif
 
 #define LLM_ROUTER_MAX_ENDPOINTS 64
-#define LLM_ROUTER_MAX_FALLBACK 3
 
 typedef struct {
     llm_endpoint_t endpoints[LLM_ROUTER_MAX_ENDPOINTS];

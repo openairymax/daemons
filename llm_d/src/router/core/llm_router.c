@@ -3,18 +3,11 @@
 
 /**
  * @file llm_router.c
- * @brief P3.1.5: LLM router orchestrator - unified select + endpoint mgmt + stats.
+ * @brief LLM router orchestrator - unified select + endpoint mgmt + stats.
  *
- * Orchestrates the four routing strategies behind llm_router_route().
- * Handles endpoint registration, statistics collection and the default
- * routing strategy.
- *
- * Routing strategies (implemented in separate files):
- *   - P3.1.1 cost_aware_router.c:     cost-aware routing (decision tree)
- *   - P3.1.2 round_robin_router.c:    round-robin routing
- *   - P3.1.3 least_latency_router.c:  least-latency routing
- *   - P3.1.4 quality_first_router.c:  quality-first routing
- *
+ * Orchestrates endpoint registration, statistics collection, the default
+ * strategy and the four selection rules behind llm_router_route(), all of
+ * which live in router/strategy/router_strategy.c.
  */
 
 #include "router/core/router_context.h"

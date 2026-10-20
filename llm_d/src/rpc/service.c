@@ -243,9 +243,8 @@ llm_service_t *llm_service_create(const char *config_path)
     /* 定价规则只从 YAML 声明面提取（models[].input/output_cost_per_1k）；
      * JSON 面的 pricing 段随双轨收敛摘除（model.json 本就无该段）。 */
     if (config_path) {
-        /* 2.1.1.5 修复：YAML 配置（model.yaml，当前唯一入口）此前完全不
-         * 加载价格，计费全部落到默认价 0.001/0.002，金额不真实。现在从
-         * models[].input/output_cost_per_1k 生成 pricing rules。 */
+        /* 价格唯一来源是 model.yaml 的 models[].input/output_cost_per_1k；
+         * 未配置价格的模型由 cost_tracker 落默认价。 */
         pricing_rule_t *yaml_rules = NULL;
         int yaml_rule_count = 0;
         if (load_pricing_rules_from_yaml(config_path, &yaml_rules, &yaml_rule_count) == 0 &&
@@ -266,7 +265,7 @@ llm_service_t *llm_service_create(const char *config_path)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    /* P0.18.3: the registry deep-copied the provider config; release the
+    /* The registry deep-copied the provider config; release the
      * temporarily loaded model_providers (including the merged array after
      * user override) */
     if (model_providers) {
@@ -293,7 +292,7 @@ llm_service_t *llm_service_create(const char *config_path)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    /* 2.1.1.5 修复：加载历史计费/用量累计（幂等，无文件则跳过） */
+    /* 加载历史计费/用量累计（幂等，无文件则跳过）。 */
     const char *usage_path = llm_usage_state_path();
     if (usage_path) {
         if (cost_tracker_load(svc->cost, usage_path) == 0)
@@ -302,7 +301,7 @@ llm_service_t *llm_service_create(const char *config_path)
             SVC_LOG_WARN("C-L02: SVC: cost state load failed (ignored) path=%s", usage_path);
     }
 
-    /* P3.16 (ACC-DT17): init llm_router and register the registry's
+    /* Init llm_router and register the registry's
      * provider/model as routing endpoints. The router is a global singleton
      * (design in llm_router.c); init is idempotent. Failure is non-fatal: the
      * complete path falls back to find_provider for backward compatibility. */
@@ -352,7 +351,7 @@ void llm_service_destroy(llm_service_t *svc)
     }
 
     if (svc->cost) {
-        /* 2.1.1.5 修复：退出前保存计费/用量累计，重启后不清零 */
+        /* 退出前保存计费/用量累计，重启后不清零。 */
         const char *usage_path = llm_usage_state_path();
         if (usage_path && cost_tracker_save(svc->cost, usage_path) == 0)
             SVC_LOG_INFO("C-L02: SVC: cost state saved to %s", usage_path);
@@ -366,7 +365,7 @@ void llm_service_destroy(llm_service_t *svc)
         svc->rule_count = 0;
     }
 
-    /* P3.16 (ACC-DT17): destroy the global router singleton.
+    /* Destroy the global router singleton.
      * Note: the router is a process-level global singleton; this assumes
      * llm_service is a single instance in the daemon (paired with
      * llm_router_init on the create path). llm_router_init is idempotent, so

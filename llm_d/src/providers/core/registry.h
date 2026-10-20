@@ -35,9 +35,9 @@ int provider_registry_model_max_output(const provider_t *prov, const char *model
 /**
  * @brief Enumerate all (provider, model) pairs in the registry.
  *
- * P3.16 (ACC-DT17): traversal interface for llm_router endpoint
- * registration. For every model of every registered provider, calls the
- * callback (provider_name, model_name, user_data).
+ * Traversal interface for llm_router endpoint registration. For every
+ * model of every registered provider, calls the callback
+ * (provider_name, model_name, user_data).
  *
  * @param reg Registry
  * @param cb  Callback (must not be NULL); enumeration stops when it returns non-zero
