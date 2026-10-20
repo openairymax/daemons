@@ -93,7 +93,7 @@ static gw_proto_detect_result_t map_detect_type(protocol_type_t type)
     case AIRY_PROTOCOL_JSON_RPC:
         return GW_PROTO_DETECT_JSONRPC;
     default:
-        if (type >= AIRY_PROTOCOL_VENDOR_BASE && type < AIRY_PROTOCOL_MAX)
+        if (proto_is_llm(type))
             return GW_PROTO_DETECT_LLM_API;
         return GW_PROTO_DETECT_UNKNOWN;
     }
