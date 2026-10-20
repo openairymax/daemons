@@ -53,7 +53,7 @@ void gw_rpc_stop(void *user_data);
 void gw_sig_install(atomic_int *running);
 
 /**
- * @brief 协议路由初始化与 Phase 2 适配器接线（MCP/OpenAI/A2A +
+ * @brief 协议路由初始化与 Phase 2 适配器接线（MCP/LLM-API/A2A +
  *        UnifiedProtocol 栈）。
  * @return 0 成功；-1 失败（调用方统一走 gw_teardown 拆除）
  */

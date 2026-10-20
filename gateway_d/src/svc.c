@@ -281,7 +281,7 @@ airy_err_t gateway_service_start(gateway_service_t service)
             gw_handler_bind(&service->http_gateway->handler_slot, service->handler,
                             service->handler_data);
         }
-        /* HTTP/1.1 是 MCP/OpenAI 协议主端口：启动失败必须显性 fail
+        /* HTTP/1.1 是 MCP/LLM-API 协议主端口：启动失败必须显性 fail
          * （干净主机实测 daemon 假活的教训）——返回错误让
          * 上层退出，交给服务管理器重启；与 WS/H2（可选传输，仅
          * 记日志）语义不同。 */

@@ -19,7 +19,7 @@ typedef enum {
     GW_PROTO_DETECT_UNKNOWN = 0,
     GW_PROTO_DETECT_MCP,
     GW_PROTO_DETECT_A2A,
-    GW_PROTO_DETECT_OPENAI,
+    GW_PROTO_DETECT_LLM_API,
     GW_PROTO_DETECT_JSONRPC
 } gw_proto_detect_result_t;
 
@@ -27,7 +27,7 @@ typedef struct gw_proto_router gw_proto_router_t;
 
 
 typedef struct gw_mcp_server gw_mcp_server_t;
-typedef struct gw_openai_compat gw_openai_compat_t;
+typedef struct gw_llm_api gw_llm_api_t;
 typedef struct gw_a2a_handler gw_a2a_handler_t;
 
 typedef struct {
@@ -42,7 +42,7 @@ typedef struct {
     uint64_t total_requests;
     uint64_t mcp_requests;
     uint64_t a2a_requests;
-    uint64_t openai_requests;
+    uint64_t llm_requests;
     uint64_t jsonrpc_requests;
     uint64_t unknown_requests;
     uint64_t route_errors;
@@ -66,7 +66,7 @@ int gw_proto_router_route(gw_proto_router_t *router, gw_proto_detect_result_t pr
 int gw_proto_router_get_stats(gw_proto_router_t *router, gw_proto_router_stats_t *stats);
 
 gw_mcp_server_t *gw_proto_router_get_mcp(gw_proto_router_t *router);
-gw_openai_compat_t *gw_proto_router_get_openai(gw_proto_router_t *router);
+gw_llm_api_t *gw_proto_router_get_llm_api(gw_proto_router_t *router);
 gw_a2a_handler_t *gw_proto_router_get_a2a(gw_proto_router_t *router);
 
 AIRY_ABI_END

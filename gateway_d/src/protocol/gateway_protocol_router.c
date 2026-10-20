@@ -5,10 +5,9 @@
 
 #include "gateway_a2a_handler.h"
 #include "gateway_mcp_server.h"
-#include "gateway_openai_compat.h"
+#include "gateway_llm_api.h"
 #include "airy_memory.h"
 
-#include "airy_protocol_interface.h"
 #include "protocol_detect.h"
 
 #include <stdio.h>
@@ -19,9 +18,6 @@
 
 #include "logging.h"
 
-/**
- * @brief Convert a protocol-type enum to a readable string.
- */
 static const char *proto_type_name(gw_proto_detect_result_t proto_type)
 {
     switch (proto_type) {
@@ -29,8 +25,8 @@ static const char *proto_type_name(gw_proto_detect_result_t proto_type)
         return "MCP";
     case GW_PROTO_DETECT_A2A:
         return "A2A";
-    case GW_PROTO_DETECT_OPENAI:
-        return "OpenAI";
+    case GW_PROTO_DETECT_LLM_API:
+        return "LLM-API";
     case GW_PROTO_DETECT_JSONRPC:
         return "JSON-RPC";
     default:
@@ -54,7 +50,7 @@ struct gw_proto_router {
 
     gw_mcp_server_t *mcp_server;
     gw_a2a_handler_t *a2a_handler;
-    gw_openai_compat_t *openai_compat;
+    gw_llm_api_t *llm_api;
 };
 
 static int gw_proto_router_shutdown(gw_proto_router_t *router);
@@ -67,7 +63,7 @@ static gw_proto_detect_result_t detect_from_content_type(const char *content_typ
         return GW_PROTO_DETECT_JSONRPC;
     }
     if (strstr(content_type, "text/event-stream")) {
-        return GW_PROTO_DETECT_OPENAI;
+        return GW_PROTO_DETECT_LLM_API;
     }
     return GW_PROTO_DETECT_UNKNOWN;
 }
@@ -80,10 +76,8 @@ static gw_proto_detect_result_t detect_from_path(const char *path)
         return GW_PROTO_DETECT_MCP;
     if (strncmp(path, "/a2a", 4) == 0)
         return GW_PROTO_DETECT_A2A;
-    if (strncmp(path, "/v1/", 4) == 0)
-        return GW_PROTO_DETECT_OPENAI;
-    if (strncmp(path, "/openai", 7) == 0)
-        return GW_PROTO_DETECT_OPENAI;
+    if (strstr(path, "/v1/"))
+        return GW_PROTO_DETECT_LLM_API;
     if (strncmp(path, "/api/", 5) == 0)
         return GW_PROTO_DETECT_JSONRPC;
     return GW_PROTO_DETECT_UNKNOWN;
@@ -99,8 +93,8 @@ static gw_proto_detect_result_t map_detect_type(protocol_type_t type)
     case AIRY_PROTOCOL_JSON_RPC:
         return GW_PROTO_DETECT_JSONRPC;
     default:
-        if (type == proto_interface_parse_type("openai"))
-            return GW_PROTO_DETECT_OPENAI;
+        if (type >= AIRY_PROTOCOL_VENDOR_BASE && type < AIRY_PROTOCOL_MAX)
+            return GW_PROTO_DETECT_LLM_API;
         return GW_PROTO_DETECT_UNKNOWN;
     }
 }
@@ -127,7 +121,7 @@ gw_proto_router_t *gw_proto_router_create(void)
     router->healthy = false;
     router->mcp_server = NULL;
     router->a2a_handler = NULL;
-    router->openai_compat = NULL;
+    router->llm_api = NULL;
     return router;
 }
 
@@ -168,13 +162,13 @@ int gw_proto_router_init(gw_proto_router_t *router)
                                  gw_a2a_handler_get_handler_data(router->a2a_handler));
     }
 
-    gw_openai_compat_config_t openai_cfg = GW_OPENAI_COMPAT_CONFIG_DEFAULTS;
-    router->openai_compat = gw_openai_compat_create(&openai_cfg);
-    if (router->openai_compat) {
-        gw_openai_compat_init(router->openai_compat);
-        gw_proto_router_register(router, GW_PROTO_DETECT_OPENAI,
-                                 gw_openai_compat_get_handler(router->openai_compat),
-                                 gw_openai_compat_get_handler_data(router->openai_compat));
+    gw_llm_api_config_t llm_cfg = GW_LLM_API_CONFIG_DEFAULTS;
+    router->llm_api = gw_llm_api_create(&llm_cfg);
+    if (router->llm_api) {
+        gw_llm_api_init(router->llm_api);
+        gw_proto_router_register(router, GW_PROTO_DETECT_LLM_API,
+                                 gw_llm_api_get_handler(router->llm_api),
+                                 gw_llm_api_get_handler_data(router->llm_api));
     }
 
     router->initialized = true;
@@ -197,10 +191,10 @@ static int gw_proto_router_shutdown(gw_proto_router_t *router)
         gw_a2a_handler_destroy(router->a2a_handler);
         router->a2a_handler = NULL;
     }
-    if (router->openai_compat) {
-        gw_openai_compat_shutdown(router->openai_compat);
-        gw_openai_compat_destroy(router->openai_compat);
-        router->openai_compat = NULL;
+    if (router->llm_api) {
+        gw_llm_api_shutdown(router->llm_api);
+        gw_llm_api_destroy(router->llm_api);
+        router->llm_api = NULL;
     }
 
     router->adapter_count = 0;
@@ -266,15 +260,6 @@ static gw_proto_request_handler_t find_handler(gw_proto_router_t *router,
     AIRY_ERROR_NULL(AIRY_ERR_OVERFLOW, "limit exceeded");
 }
 
-/**
- * @brief Count protocol requests.
- *
- * Increments the matching statistics counter per protocol type and emits
- * detailed debug logs.
- *
- * @param stats Statistics struct pointer
- * @param proto_type Protocol type
- */
 static void record_proto_stats(gw_proto_router_stats_t *stats, gw_proto_detect_result_t proto_type)
 {
     const char *name = proto_type_name(proto_type);
@@ -291,10 +276,10 @@ static void record_proto_stats(gw_proto_router_stats_t *stats, gw_proto_detect_r
         AIRY_LOG_DEBUG("protocol=%-8s count=%llu (a2a_requests)", name,
                   (unsigned long long)stats->a2a_requests);
         break;
-    case GW_PROTO_DETECT_OPENAI:
-        stats->openai_requests++;
-        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (openai_requests)", name,
-                  (unsigned long long)stats->openai_requests);
+    case GW_PROTO_DETECT_LLM_API:
+        stats->llm_requests++;
+        AIRY_LOG_DEBUG("protocol=%-8s count=%llu (llm_requests)", name,
+                  (unsigned long long)stats->llm_requests);
         break;
     case GW_PROTO_DETECT_JSONRPC:
         stats->jsonrpc_requests++;
@@ -353,9 +338,9 @@ gw_mcp_server_t *gw_proto_router_get_mcp(gw_proto_router_t *router)
     return router ? router->mcp_server : NULL;
 }
 
-gw_openai_compat_t *gw_proto_router_get_openai(gw_proto_router_t *router)
+gw_llm_api_t *gw_proto_router_get_llm_api(gw_proto_router_t *router)
 {
-    return router ? router->openai_compat : NULL;
+    return router ? router->llm_api : NULL;
 }
 
 gw_a2a_handler_t *gw_proto_router_get_a2a(gw_proto_router_t *router)

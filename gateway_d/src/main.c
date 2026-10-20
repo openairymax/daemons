@@ -116,7 +116,7 @@ int main(int argc, char *argv[])
         SVC_LOG_ERROR("Failed to register protocol entry handler (err=%d)", err);
         goto fail;
     }
-    SVC_LOG_INFO("Protocol entry handler registered (MCP/OpenAI/A2A/JSON-RPC)");
+    SVC_LOG_INFO("Protocol entry handler registered (MCP/LLM-API/A2A/JSON-RPC)");
 
     err = gateway_service_start(g_service);
     if (err != AIRY_SUCCESS) {
