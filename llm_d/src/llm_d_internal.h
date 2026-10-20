@@ -43,14 +43,11 @@ extern ep_health_t *g_ep;
  * 保持 struct llm_service 私有不被穿透。 */
 provider_registry_t *llm_svc_reg(const llm_service_t *svc);
 
-/* 单请求上下文：messages 与响应缓冲由 request_context_create 分配、
+/* 单请求上下文：messages 与 tools_json 由 request_context_create 分配、
  * request_context_destroy 释放（成对，资源确定性）。 */
 typedef struct {
     llm_message_t messages[MAX_MESSAGES_PER_REQUEST];
     size_t message_count;
-    char *response_buffer;
-    size_t response_size;
-    size_t response_capacity;
     char *tools_json;
     /* parse_params 失败的具体原因（如 "messages 缺失/为空数组"、"model
      * 未配置且无默认模型"）。随 -32602 错误消息透传，避免笼统的
