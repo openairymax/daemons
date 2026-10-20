@@ -8,13 +8,16 @@
  * The LLM Router routes LLM requests to the most suitable provider and
  * model based on request characteristics (complexity, cost, latency, etc.).
  *
- * Routing strategies:
+ * Routing strategies (selection-level only: pick an endpoint before the call):
  *   - COMPLEXITY_BASED:  route by task complexity
  *   - COST_OPTIMIZED:    cost-optimized routing
  *   - LATENCY_OPTIMIZED: latency-optimized routing
- *   - FALLBACK:          fallback routing (switch when primary fails)
+ *   - FALLBACK:          selection fallback (re-select with another strategy
+ *                        when no endpoint is eligible; NOT call-level failover)
  *   - ROUND_ROBIN:       round-robin routing
  *
+ * 执行期故障切换不在此处：失败后换端点见 rpc/service_chain.h 与
+ * router/core/llm_failover.h（0.1.19 §3.8，证伪 H2）。
  * @owner team-A
  * @see contracts/contract_A_B.h section 3 (protocol routing table)
  */

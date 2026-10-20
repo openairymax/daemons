@@ -47,6 +47,8 @@ set(LLM_SERVICE_SOURCES
     src/rpc/service_request.c
     # 0.1.19 §3.8.4 A3：调用级链式切换机制（候选重选 + 跳数 + 预算）
     src/rpc/service_chain.c
+    # 0.1.19 §3.8.4 A4：model.yaml routing 段解析（mode/chain_depth/on/deadline_sec）
+    src/rpc/service_route.c
     src/accounting/metrics.c
     src/accounting/semantic_cache.c
     src/accounting/cost_tracker.c

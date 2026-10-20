@@ -81,6 +81,10 @@ llm_service_t *llm_service_create(const char *config_path)
     /* CALLOC 全零会让 depth=0，必须显式落缺省（0.1.19 §3.8.4 A3）。 */
     svc_chain_def(&svc->route);
 
+    /* 0.1.19 §3.8.4 A4：routing 段；缺失即保持 off，现网零变化。 */
+    if (config_path)
+        (void)svc_route_load(config_path, &svc->route);
+
     if (airy_mtx_init(&svc->lock) != 0) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL init lock, STACK: llm_service_create");
         AIRY_FREE(svc);
@@ -183,6 +187,8 @@ llm_service_t *llm_service_create(const char *config_path)
                 FILE *uf = fopen(user_path, "rb");
                 if (uf) {
                     fclose(uf);
+                    /* 用户只覆盖自己显式写下的 routing 键（不重置主配置）。 */
+                    (void)svc_route_load(user_path, &svc->route);
                     char um[128] = {0};
                     char up[64] = {0};
                     svc_model_defaults_from_yaml(user_path, um, sizeof(um), up, sizeof(up));
@@ -207,6 +213,10 @@ llm_service_t *llm_service_create(const char *config_path)
             }
         }
     }
+
+    if (svc->route.mode == SVC_CHAIN_AUTO)
+        SVC_LOG_INFO("C-L02: SVC: routing=auto depth=%d on=0x%x budget_ms=%d", svc->route.depth,
+                     svc->route.on_mask, svc->route.budget_ms);
 
     if (global_model[0]) {
         AIRY_STRNCPY_TERM(svc->default_model, global_model, sizeof(svc->default_model));

@@ -38,12 +38,12 @@ AIRY_ABI_BEGIN
 /** 单请求尝试集合与候选枚举的共同上界，保证排除集合有界且必然终止。 */
 #define SVC_CHAIN_MAX_TRIED 8
 
-/** routing 段配置面（model.yaml），由 service.c 装配、A4 从 YAML 填充。 */
+/** routing 段配置面（model.yaml），由 service.c 装配、svc_route_load 填充。 */
 typedef struct {
     int mode;         /* SVC_CHAIN_OFF / SVC_CHAIN_AUTO */
     int depth;        /* 最多切换跳数 */
     unsigned on_mask; /* 可切换类白名单，LLM_FO_BIT() 聚合 */
-    int budget_ms;    /* 单次 llm.call 总预算；<=0 表示不限 */
+    int budget_ms;    /* 单次 llm.call 总预算；routing.deadline_sec 秒 ×1000；<=0 不限 */
 } llm_route_cfg_t;
 
 /** 已尝试端点（provider + 实际模型）。 */
@@ -83,6 +83,19 @@ typedef int (*svc_sent_fn)(void *ctx);
 
 /** 填充缺省配置：off / 2 跳 / 三类可切换 / 不设预算。 */
 void svc_chain_def(llm_route_cfg_t *cfg);
+
+/**
+ * 从 model.yaml routing 段覆盖 cfg 中已声明的键。
+ *
+ * cfg 须先由 svc_chain_def() 置缺省。本函数不重置未声明的键，故可对主配置
+ * 与用户覆盖依次调用（后者显式键优先）。段缺失时 cfg 保持不变。
+ *
+ * @param path 配置文件路径。
+ * @param cfg  待覆盖的配置。
+ * @return AIRY_OK 已应用；AIRY_ERR_NOT_FOUND 无 routing 段；
+ *         AIRY_ERR_IO 读取/解析失败；AIRY_ERR_INVALID_PARAM 参数非法或段类型错误。
+ */
+int svc_route_load(const char *path, llm_route_cfg_t *cfg);
 
 /** 以配置初始化链状态；cfg 为 NULL 时取缺省。 */
 void svc_chain_init(svc_chain_t *chain, const llm_route_cfg_t *cfg);
