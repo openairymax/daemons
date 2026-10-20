@@ -51,8 +51,8 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
             SVC_LOG_WARN("Provider entry #%zu has no name, skipping", i);
             continue;
         }
-        /* provider_adapter_lookup 契约永不为 NULL：未知名回落 openai 兼容 */
-        const provider_adapter_t *adapter = provider_adapter_lookup(pcfg->name);
+        /* provider_adapter_lookup 契约永不为 NULL：未知名回落行协议适配 */
+        const provider_adapter_t *adapter = provider_adapter_lookup(pcfg->api_format);
 
         provider_ctx_t *ctx = adapter->init(pcfg->name, pcfg->api_key, pcfg->api_base,
                                         pcfg->organization, pcfg->timeout_sec, pcfg->max_retries);
@@ -60,6 +60,10 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
             SVC_LOG_ERROR("Failed to init provider: %s", pcfg->name);
             continue;
         }
+
+        if (pcfg->extra_headers && pcfg->extra_headers[0])
+            AIRY_STRNCPY_TERM(provider_base_ctx(ctx)->extra_headers, pcfg->extra_headers,
+                              sizeof(provider_base_ctx(ctx)->extra_headers));
 
         char **models = NULL;
         int *caps = NULL;

@@ -22,6 +22,15 @@
 #include "toolstream.h"
 #include "svc_logger.h"
 
+/* 模型名解析：请求显式值优先，其次适配器默认（可为 NULL），最终空串，
+ * 保证日志 %s 永不见 NULL。 */
+static const char *req_model(const provider_adapter_t *ops, const llm_request_config_t *manager)
+{
+    if (manager->model && manager->model[0])
+        return manager->model;
+    return ops->default_model ? ops->default_model : "";
+}
+
 int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
                              const llm_request_config_t *manager, llm_response_t **out_response)
 {
@@ -35,11 +44,11 @@ int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: %s: COMPLETE-FAIL model=%s reason=build_request_oom "
                       "STACK: provider_driver_complete",
-                      ops->tag, manager->model ? manager->model : ops->default_model);
+                      ops->tag, req_model(ops, manager));
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    const char *model = (manager->model && manager->model[0]) ? manager->model : ops->default_model;
+    const char *model = req_model(ops, manager);
     SVC_LOG_INFO("C-L02: %s: COMPLETE-START model=%s msgs=%zu max_tokens=%d temp=%.2f stream=%d",
                  ops->tag, model, manager->message_count, manager->max_tokens,
                  manager->temperature, manager->stream ? 1 : 0);
@@ -115,25 +124,25 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: %s: STREAM-FAIL model=%s reason=build_request_oom "
                       "STACK: provider_driver_complete_stream",
-                      ops->tag, manager->model ? manager->model : ops->default_model);
+                      ops->tag, req_model(ops, manager));
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    const char *model = (manager->model && manager->model[0]) ? manager->model : ops->default_model;
+    const char *model = req_model(ops, manager);
     SVC_LOG_INFO("C-L02: %s: STREAM-START model=%s msgs=%zu max_tokens=%d temp=%.2f", ops->tag,
                  model, manager->message_count, manager->max_tokens, manager->temperature);
 
     provider_stream_acc_t acc;
     provider_stream_acc_init(&acc, callback, callback_data);
 
-    /* 分帧模式由 feed_event 槽唯一决定：非 NULL 为具名事件流（anthropic），
-     * NULL 为 OpenAI 行协议流（on_chunk 机制件）。 */
+    /* 分帧模式由 feed_event 槽唯一决定：非 NULL 为具名事件流，
+     * NULL 为行协议流（on_chunk 机制件）。 */
     provider_request_t req = {
         .base = base,
         .path = ops->chat_path,
         .headers = ops->headers,
         .body = req_body,
-        .on_chunk = ops->feed_event ? NULL : provider_openai_on_chunk,
+        .on_chunk = ops->feed_event ? NULL : provider_stream_on_chunk,
         .on_event = ops->feed_event,
         .user_data = &acc,
     };
@@ -150,7 +159,7 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
         return provider_http_err_map(http_code, ret);
     }
 
-    llm_response_t *resp = provider_openai_stream_take(&acc);
+    llm_response_t *resp = provider_stream_take(&acc);
     provider_tool_flush(&acc.tools, resp, callback, callback_data);
     provider_stream_acc_free(&acc);
 

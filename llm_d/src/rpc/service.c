@@ -224,11 +224,11 @@ llm_service_t *llm_service_create(const char *config_path)
                      svc->default_model);
     } else if (gen_src) {
         AIRY_STRNCPY_TERM(svc->default_model, llm_cfg.model, sizeof(svc->default_model));
-        if (!global_provider[0] && llm_cfg.api_format[0]) {
-            const char *adapter =
-                (strcasecmp(llm_cfg.api_format, "anthropic") == 0) ? "anthropic" : "openai";
-            AIRY_STRNCPY_TERM(svc->default_provider, adapter, sizeof(svc->default_provider));
-        }
+        /* 适配器按线格式命名（chat | messages | local），配置面的 api_format
+         * 即适配器查找键，无需再做厂商名到适配器的映射。 */
+        if (!global_provider[0] && llm_cfg.api_format[0])
+            AIRY_STRNCPY_TERM(svc->default_provider, llm_cfg.api_format,
+                              sizeof(svc->default_provider));
         SVC_LOG_INFO("C-L02: SVC: default_model=%s (from %s)", svc->default_model, gen_src);
     }
     if (global_provider[0])
