@@ -34,16 +34,6 @@ extern "C" {
 #endif
 
 /**
- * @brief Built-in fallback default model.
- *
- * Used when neither the environment override nor the user model.yaml
- * yields a model name. This is the single definition of that fallback:
- * orchestration layers (gateway / agent_d runner) carrying their own copy
- * is what splits the "default model" configuration face.
- */
-#define SVC_MODEL_DEFAULT_FALLBACK "deepseek-flash"
-
-/**
  * @brief Extract default_model / default_provider from the global section
  *        of model.yaml.
  *
@@ -220,10 +210,15 @@ int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_
  * Precedence (a later source overrides an earlier one):
  *   1. base_model / base_provider  caller's own source (e.g. the repo
  *      model.yaml); NULL or empty means "not supplied"
- *   2. SVC_MODEL_DEFAULT_FALLBACK  when no base model was supplied
- *   3. $AIRY_CONFIG_DIR/model.yaml user override: default_model, else
+ *   2. $AIRY_CONFIG_DIR/model.yaml user override: default_model, else
  *      default_provider / llm.model, else models[0].model_id
- *   4. AIRY_AGENT_MODEL            environment override, highest
+ *   3. AIRY_AGENT_MODEL            environment override, highest
+ *
+ * There is no built-in model name: the model a deployment talks to is
+ * policy, owned by model.yaml, never by the mechanism core. When no
+ * source yields a model the function fails closed with
+ * AIRY_ERR_NOT_FOUND and an empty output, so a missing configuration is
+ * reported as such instead of being masked by a vendor default.
  *
  * Every component that needs "the default model" (llm_d, gateway_d and
  * the agent_d runner) must call this instead of scanning the file on its
@@ -236,7 +231,9 @@ int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_
  * @param model_sz      out_model buffer size
  * @param out_provider  Output buffer for the provider (may be NULL to skip)
  * @param prov_sz       out_provider buffer size
- * @return 0 on success; AIRY_ERR_INVALID_PARAM when out_model is NULL or model_sz is 0
+ * @return 0 when a model was resolved; AIRY_ERR_INVALID_PARAM when
+ *         out_model is NULL or model_sz is 0; AIRY_ERR_NOT_FOUND when no
+ *         source supplied a model (outputs left empty)
  */
 int svc_model_defaults_resolve(const char *base_model, const char *base_provider, char *out_model,
                                size_t model_sz, char *out_provider, size_t prov_sz);

@@ -442,11 +442,27 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     uint64_t seq = 0;
 
     /* 默认模型经 svc_model_defaults_resolve() 解析（唯一入口）：请求 model >
-     * 用户覆盖 $AIRY_CONFIG_DIR/model.yaml > 内建兜底；AIRY_AGENT_MODEL 最高
-     * 优先。run_start 事件与工具循环共用同一结果（此前事件缺字段而循环用
-     * 硬编码兜底，同一缺省两处语义不同）。 */
+     * 用户覆盖 $AIRY_CONFIG_DIR/model.yaml > AIRY_AGENT_MODEL。无来源即
+     * fail-closed：模型名属部署策略，机制核不注入厂商默认值。run_start 与
+     * 工具循环共用同一结果（此前事件缺字段而循环用硬编码兜底，同一缺省
+     * 两处语义不同）。 */
     char mname[128];
-    svc_model_defaults_resolve(model, NULL, mname, sizeof(mname), NULL, 0);
+    if (svc_model_defaults_resolve(model, NULL, mname, sizeof(mname), NULL, 0) != 0) {
+        SVC_LOG_ERROR("agent.run: no model configured (model.yaml / AIRY_AGENT_MODEL)");
+        if (sink && sink->emit) {
+            cJSON *err = cJSON_CreateObject();
+            if (err) {
+                cJSON_AddNumberToObject(err, AIRY_RS_K_CODE, -32603);
+                cJSON_AddStringToObject(err, AIRY_RS_K_MSG,
+                                        "no model configured: set $AIRY_CONFIG_DIR/model.yaml "
+                                        "or AIRY_AGENT_MODEL");
+                cJSON_AddBoolToObject(err, AIRY_RS_K_RECOVER, 0);
+                agent_run_emit_event(sink, &seq, active->run_id, sess, AIRY_RS_TYPE_ERROR, err);
+            }
+        }
+        agent_run_unregister(active);
+        return -1;
+    }
 
     /* run_start 事件（决策链写侧 + run_stream 流式推送） */
     {
