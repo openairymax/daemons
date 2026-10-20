@@ -111,6 +111,20 @@ int llm_rtr_admit(const char *provider, const char *model)
     return ok;
 }
 
+int llm_rtr_known(const char *provider, const char *model)
+{
+    router_ctx_t *ctx = router_ctx_get();
+    int known;
+
+    if (!provider || !model || !ctx->initialized)
+        return 0;
+
+    AIRY_MUTEX_LOCK(&ctx->mutex);
+    known = ep_find(provider, model) != NULL;
+    AIRY_MUTEX_UNLOCK(&ctx->mutex);
+    return known;
+}
+
 static int ep_note(const char *provider, const char *model, int err, bool ok)
 {
     router_ctx_t *ctx = router_ctx_get();

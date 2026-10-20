@@ -78,6 +78,9 @@ llm_service_t *llm_service_create(const char *config_path)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
+    /* CALLOC 全零会让 depth=0，必须显式落缺省（0.1.19 §3.8.4 A3）。 */
+    svc_chain_def(&svc->route);
+
     if (airy_mtx_init(&svc->lock) != 0) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL init lock, STACK: llm_service_create");
         AIRY_FREE(svc);
