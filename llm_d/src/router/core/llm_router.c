@@ -102,7 +102,13 @@ int llm_router_register_endpoint(const llm_endpoint_t *endpoint)
         return AIRY_ERR_OVERFLOW;
     }
 
-    AIRY_MEMCPY(&ctx->endpoints[ctx->endpoint_count], endpoint, sizeof(llm_endpoint_t));
+    llm_endpoint_t *slot = &ctx->endpoints[ctx->endpoint_count];
+    AIRY_MEMCPY(slot, endpoint, sizeof(llm_endpoint_t));
+    /* 重注册即重置健康面：配置变更后的端点须从干净状态重新计数。 */
+    slot->consec_fail = 0U;
+    slot->last_fail_ms = 0U;
+    slot->open_until_ms = 0U;
+    slot->probe_until_ms = 0U;
     ctx->endpoint_count++;
 
     AIRY_LOG_INFO("C-L02: LLMRouter: registered endpoint %s/%s (total=%zu, "

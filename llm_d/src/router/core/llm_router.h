@@ -66,6 +66,14 @@ typedef struct {
     uint32_t rate_limit_rpm;
     bool enabled;
     int priority;
+
+    /* 端点健康面（0.1.19 §3.8.2）：仅 llm_d 内部可见，注册时清零，迁移
+     * 规则见 router/core/llm_health.h。计时为 airy_time_ms() 截断到 32 位，
+     * 以无符号差比较抵御回绕，同时避免 32 位平台上的 64 位读撕裂。 */
+    uint32_t consec_fail;
+    uint32_t last_fail_ms;
+    uint32_t open_until_ms;
+    uint32_t probe_until_ms;
 } llm_endpoint_t;
 
 typedef struct {
