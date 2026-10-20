@@ -178,6 +178,20 @@ void agent_stream_finish(agent_stream_t *st);
 /** @brief 取出产物并复位源状态（text 所有权移交，空文本给 ""）。 */
 void agent_stream_take(agent_stream_t *st, agent_stream_result_t *out);
 
+/* ---- run 会话域（agent_run_engine.c） ---- */
+
+/** @brief 注册一次 run 的会话（同名复用；OOM 返回 NULL）。 */
+agent_run_session_t *agent_run_register(const char *session_id);
+
+/** @brief 注销会话并释放（active 置 NULL 后调用）。 */
+void agent_run_unregister(agent_run_session_t *s);
+
+/** @brief 生成会话 ID（sess_<16hex>_<4hex>）。 */
+void agent_run_gen_session_id(char *out, size_t out_size);
+
+/** @brief 生成运行 ID（run_<16hex>_<4hex>）。 */
+void agent_run_gen_run_id(char *out, size_t out_size);
+
 /* ---- 编排域（agent_run_engine.c） ---- */
 
 /**

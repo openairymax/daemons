@@ -65,8 +65,10 @@ static char *lg_call(const agent_ledger_t *lg, const char *method, cJSON *params
     char *resp = NULL;
     int rc = daemon_rpc_call(lg->sock, method, params_str, &resp, LG_TIMEOUT_MS);
     AIRY_FREE(params_str);
-    if (rc != AIRY_SUCCESS)
+    if (rc != AIRY_SUCCESS) {
+        AIRY_FREE(resp);
         return NULL;
+    }
     return resp;
 }
 
