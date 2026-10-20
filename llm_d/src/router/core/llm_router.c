@@ -229,7 +229,7 @@ static int cand_precedes(const llm_endpoint_t *a, const llm_endpoint_t *b, size_
     return router_estimate_cost(a, in_tok, out_tok) < router_estimate_cost(b, in_tok, out_tok);
 }
 
-int llm_router_candidates(const llm_route_request_t *request, llm_route_result_t *out, size_t max,
+int llm_router_pick(const llm_route_request_t *request, llm_route_result_t *out, size_t max,
                           size_t *out_count)
 {
     router_ctx_t *ctx = router_ctx_get();

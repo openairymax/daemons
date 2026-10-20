@@ -5,8 +5,8 @@
  * @file envelope.c
  * @brief 请求/响应信封编解码（B16-S3 适配收敛的共享件 SSoT）。
  *
- * 域拆分自 provider.c（2026-08-27）：provider_build_chat_req /
- * provider_parse_chat_resp 供 chat 线格式各适配层共用。B16-S3.3 追加
+ * 域拆分自 provider.c（2026-08-27）：prov_build_chat /
+ * prov_parse_chat 供 chat 线格式各适配层共用。B16-S3.3 追加
  * 各映射表的公共段下沉件：参数段骨架（stop 键名表驱动）、响应身份段、
  * tools / tool_calls 遍历原语——适配层据自身线格式改写对应段，
  * 不再各自重写同构段。
@@ -23,7 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-char *provider_build_chat_req(const llm_request_config_t *manager, const char *default_model,
+char *prov_build_chat(const llm_request_config_t *manager, const char *default_model,
                               const char *extra_json)
 {
     if (!manager) {
@@ -33,7 +33,7 @@ char *provider_build_chat_req(const llm_request_config_t *manager, const char *d
     cJSON *root = cJSON_CreateObject();
     if (!root) {
         SVC_LOG_ERROR("C-L02: PROVIDER: REQUEST-BUILD-FAIL reason=oom_root "
-                      "STACK: provider_build_chat_req");
+                      "STACK: prov_build_chat");
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
 
@@ -119,7 +119,7 @@ char *provider_build_chat_req(const llm_request_config_t *manager, const char *d
     return json;
 }
 
-int provider_parse_chat_resp(const char *body, llm_response_t **out)
+int prov_parse_chat(const char *body, llm_response_t **out)
 {
     if (!body || !out) {
         return AIRY_ERR_INVALID_PARAM;
@@ -127,14 +127,14 @@ int provider_parse_chat_resp(const char *body, llm_response_t **out)
 
     CJSON_PARSE_GUARD(root, body, {
         SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=cjson_parse_error "
-                      "STACK: provider_parse_chat_resp");
+                      "STACK: prov_parse_chat");
         return AIRY_ERR_PARSE_ERROR;
     });
 
     llm_response_t *resp = (llm_response_t *)AIRY_CALLOC(1, sizeof(llm_response_t));
     if (!resp) {
         SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=oom_resp "
-                      "STACK: provider_parse_chat_resp");
+                      "STACK: prov_parse_chat");
 
         return AIRY_ERR_OUT_OF_MEMORY;
     }
@@ -155,7 +155,7 @@ int provider_parse_chat_resp(const char *body, llm_response_t **out)
 
         if (!resp->choices) {
             SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=oom_choices "
-                          "STACK: provider_parse_chat_resp");
+                          "STACK: prov_parse_chat");
 
             llm_response_free(resp);
             return AIRY_ERR_OUT_OF_MEMORY;
@@ -246,7 +246,7 @@ void provider_response_identity_load(llm_response_t *resp, const cJSON *root)
         resp->model = AIRY_STRDUP(model->valuestring);
 }
 
-void provider_tools_foreach(const char *tools_json, provider_tool_fn fn, void *ud)
+void prov_tools_each(const char *tools_json, provider_tool_fn fn, void *ud)
 {
     if (!tools_json || !tools_json[0] || !fn)
         return;
@@ -268,7 +268,7 @@ void provider_tools_foreach(const char *tools_json, provider_tool_fn fn, void *u
     }
 }
 
-void provider_tool_calls_foreach(const char *tool_calls_json, provider_tool_call_fn fn, void *ud)
+void prov_tool_each(const char *tool_calls_json, provider_tool_call_fn fn, void *ud)
 {
     if (!tool_calls_json || !tool_calls_json[0] || !fn)
         return;

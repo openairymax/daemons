@@ -60,7 +60,7 @@ static void msg_map_tools(cJSON *root, const char *tools_json)
     if (!tools_json || !tools_json[0])
         return;
     cJSON *out = cJSON_CreateArray();
-    provider_tools_foreach(tools_json, msg_add_tool, out);
+    prov_tools_each(tools_json, msg_add_tool, out);
     if (cJSON_GetArraySize(out) > 0)
         cJSON_AddItemToObject(root, "tools", out);
     else
@@ -102,7 +102,7 @@ static void msg_map_msg(cJSON *messages, const llm_message_t *m)
             cJSON_AddStringToObject(text, "text", content);
             cJSON_AddItemToArray(blocks, text);
         }
-        provider_tool_calls_foreach(m->tool_calls_json, msg_add_tool_call, blocks);
+        prov_tool_each(m->tool_calls_json, msg_add_tool_call, blocks);
         cJSON_AddStringToObject(msg, "role", "assistant");
     } else {
         cJSON_AddStringToObject(msg, "role", m->role ? m->role : "user");
@@ -288,7 +288,7 @@ static int messages_complete(provider_ctx_t *ctx, const llm_request_config_t *ma
     return provider_driver_complete(ctx, &messages_ops, manager, out_response);
 }
 
-static int messages_complete_stream(provider_ctx_t *ctx, const llm_request_config_t *manager,
+static int msg_complete_stream(provider_ctx_t *ctx, const llm_request_config_t *manager,
                                     llm_stream_callback_t callback, void *callback_data,
                                     llm_response_t **out_response)
 {
@@ -302,7 +302,7 @@ const provider_adapter_t messages_ops = {
     .default_model = NULL, .default_base_url = NULL,
     .chat_path = MSG_PATH, .headers = &MSG_HEADERS,
     .init = messages_init, .destroy = messages_destroy,
-    .complete = messages_complete, .complete_stream = messages_complete_stream,
+    .complete = messages_complete, .complete_stream = msg_complete_stream,
     .build_request = msg_build_request, .parse_response = msg_parse_response,
     .feed_event = msg_map_event,
 };

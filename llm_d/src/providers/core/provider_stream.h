@@ -16,9 +16,9 @@ extern "C" {
 
 /* 追加 len 字节并保持 NUL 结尾，容量不足时倍增；返回（可能搬迁的）缓冲，
  * 失败返回 NULL 且原缓冲仍有效。 */
-char *provider_buf_append_n(char *buf, size_t *cap, size_t *len, const char *data, size_t dlen);
+char *prov_buf_add(char *buf, size_t *cap, size_t *len, const char *data, size_t dlen);
 
-/* 同 provider_buf_append_n，长度取 strlen(text)。 */
+/* 同 prov_buf_add，长度取 strlen(text)。 */
 char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text);
 
 typedef int (*provider_stream_chunk_cb_t)(const char *data_line, void *user_data);

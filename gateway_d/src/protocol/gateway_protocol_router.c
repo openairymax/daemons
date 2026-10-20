@@ -167,8 +167,8 @@ int gw_proto_router_init(gw_proto_router_t *router)
     if (router->llm_api) {
         gw_llm_api_init(router->llm_api);
         gw_proto_router_register(router, GW_PROTO_DETECT_LLM_API,
-                                 gw_llm_api_get_handler(router->llm_api),
-                                 gw_llm_api_get_handler_data(router->llm_api));
+                                 gw_llm_get_handler(router->llm_api),
+                                 gw_llm_get_hdata(router->llm_api));
     }
 
     router->initialized = true;
@@ -338,7 +338,7 @@ gw_mcp_server_t *gw_proto_router_get_mcp(gw_proto_router_t *router)
     return router ? router->mcp_server : NULL;
 }
 
-gw_llm_api_t *gw_proto_router_get_llm_api(gw_proto_router_t *router)
+gw_llm_api_t *gw_proto_get_llm(gw_proto_router_t *router)
 {
     return router ? router->llm_api : NULL;
 }

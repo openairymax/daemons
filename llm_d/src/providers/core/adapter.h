@@ -56,7 +56,7 @@ typedef struct {
 
     /* ── 五纯函数槽（方案 12.16.3）：适配层仅存的协议差异面。
      * feed_event 为 NULL 表示行协议流（on_chunk 走 core
-     * provider_stream_on_chunk 机制件）；非 NULL 为具名事件流。 */
+     * prov_stream_chunk 机制件）；非 NULL 为具名事件流。 */
     char *(*build_request)(const llm_request_config_t *manager);
     int (*parse_response)(const char *body, llm_response_t **out);
     provider_sse_event_cb_t feed_event;
