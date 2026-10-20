@@ -359,18 +359,18 @@ static void test_token_family_declaration(void)
     assert(l != NULL);
 
     /* 默认模型：非空可读（缺省不得使台账不可用） */
-    const char *dflt = mem_ledger_token_family(l);
+    const char *dflt = mem_ledger_tfam(l);
     assert(dflt != NULL && dflt[0] != '\0');
 
     /* 声明注入实际分词族（算法名，非厂商名） */
-    assert(mem_ledger_set_token_family(l, "spm") == AIRY_SUCCESS);
-    assert(strcmp(mem_ledger_token_family(l), "spm") == 0);
+    assert(mem_ledger_set_tfam(l, "spm") == AIRY_SUCCESS);
+    assert(strcmp(mem_ledger_tfam(l), "spm") == 0);
 
     /* 空串 / NULL → 回到默认模型 */
-    assert(mem_ledger_set_token_family(l, "") == AIRY_SUCCESS);
-    assert(strcmp(mem_ledger_token_family(l), dflt) == 0);
-    assert(mem_ledger_set_token_family(l, NULL) == AIRY_SUCCESS);
-    assert(strcmp(mem_ledger_token_family(l), dflt) == 0);
+    assert(mem_ledger_set_tfam(l, "") == AIRY_SUCCESS);
+    assert(strcmp(mem_ledger_tfam(l), dflt) == 0);
+    assert(mem_ledger_set_tfam(l, NULL) == AIRY_SUCCESS);
+    assert(strcmp(mem_ledger_tfam(l), dflt) == 0);
 
     /* 模型切换后计数仍可用（不得破坏台账） */
     ledger_entry_in_t in = {
@@ -384,8 +384,8 @@ static void test_token_family_declaration(void)
     mem_ledger_window_free(&win);
 
     /* 参数校验：ledger 为 NULL */
-    assert(mem_ledger_set_token_family(NULL, "bpe") == AIRY_ERR_INVALID_PARAM);
-    assert(mem_ledger_token_family(NULL) != NULL);
+    assert(mem_ledger_set_tfam(NULL, "bpe") == AIRY_ERR_INVALID_PARAM);
+    assert(mem_ledger_tfam(NULL) != NULL);
 
     mem_ledger_destroy(l);
     printf("    PASSED\n");

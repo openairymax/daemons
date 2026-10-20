@@ -194,12 +194,12 @@ int svc_prepare(const char *config_path)
         SVC_LOG_WARN("Context ledger init failed, ledger disabled (degraded mode)");
     } else {
         /* B5：按声明注入计数模型（空 → 默认模型），失败保留默认模型 */
-        int family_ret = mem_ledger_set_token_family(g_ledger, g_config.token_family);
+        int family_ret = mem_ledger_set_tfam(g_ledger, g_config.token_family);
         if (family_ret != AIRY_SUCCESS)
             SVC_LOG_WARN("Token family '%s' rejected (%d), fallback kept: %s",
                          g_config.token_family[0] ? g_config.token_family : "(default)", family_ret,
-                         mem_ledger_token_family(g_ledger));
-        SVC_LOG_INFO("ledger token family: %s", mem_ledger_token_family(g_ledger));
+                         mem_ledger_tfam(g_ledger));
+        SVC_LOG_INFO("ledger token family: %s", mem_ledger_tfam(g_ledger));
     }
     return 0;
 }

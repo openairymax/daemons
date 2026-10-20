@@ -186,11 +186,11 @@ int gw_proto_wire(gw_proto_router_t *router, gateway_business_ctx_t *biz)
         }
 
         /* LLM API: chat/completions → llm_d.complete */
-        gw_llm_api_t *llm_api = gw_proto_router_get_llm_api(router);
+        gw_llm_api_t *llm_api = gw_proto_get_llm(router);
         if (llm_api) {
-            gw_llm_api_set_llm_call(llm_api, gw_biz_llm_complete, biz);
+            gw_llm_set_call(llm_api, gw_biz_llm_complete, biz);
             /* LLM API: embeddings → llm_d.embeddings（RAG/知识库生态接入点） */
-            gw_llm_api_set_embed_fn(llm_api, gw_biz_llm_embeddings, biz);
+            gw_llm_set_embed(llm_api, gw_biz_llm_embeddings, biz);
             SVC_LOG_INFO("Phase 2: LLM API adapter wired — chat/completions + embeddings → llm_d");
         }
 

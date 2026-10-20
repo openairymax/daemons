@@ -78,7 +78,7 @@ static void local_destroy(provider_ctx_t *ctx_ptr)
 }
 
 /* 纯函数槽：Chat 请求装配为 core 共享协议件（envelope.c），此处仅注入
- * 本地端点扩展参数；响应解析直接挂 provider_parse_chat_resp。
+ * 本地端点扩展参数；响应解析直接挂 prov_parse_chat。
  *
  * Ollama 专有扩展（D3）：keep_alive 为 Ollama 顶层扩展字段（Chat 兼容
  * 端点受支持），默认 5min 卸载导致「间隔后首请求」冷加载尖峰，此处置
@@ -89,7 +89,7 @@ static void local_destroy(provider_ctx_t *ctx_ptr)
 
 static char *local_build_request(const llm_request_config_t *manager)
 {
-    return provider_build_chat_req(manager, NULL, LOCAL_EXTRA_PARAMS);
+    return prov_build_chat(manager, NULL, LOCAL_EXTRA_PARAMS);
 }
 
 static int local_complete(provider_ctx_t *ctx, const llm_request_config_t *manager,
@@ -107,7 +107,7 @@ static int local_complete_stream(provider_ctx_t *ctx, const llm_request_config_t
 }
 
 /* 五槽装配：feed_event 留空（NULL）= 行协议流，on_chunk 机制件由
- * driver 挂 core provider_stream_on_chunk；本地端点无令牌桶（rate_limiter
+ * driver 挂 core prov_stream_chunk；本地端点无令牌桶（rate_limiter
  * 留空，driver 判 NULL 即不接限流出网）。 */
 const provider_adapter_t local_ops = {
     .name = "local", .tag = "LOCAL",
@@ -115,5 +115,5 @@ const provider_adapter_t local_ops = {
     .chat_path = LOCAL_CHAT_PATH, .headers = &LOCAL_HEADERS,
     .init = local_init, .destroy = local_destroy,
     .complete = local_complete, .complete_stream = local_complete_stream,
-    .build_request = local_build_request, .parse_response = provider_parse_chat_resp,
+    .build_request = local_build_request, .parse_response = prov_parse_chat,
 };

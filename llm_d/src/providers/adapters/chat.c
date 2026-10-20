@@ -76,7 +76,7 @@ static void chat_destroy(provider_ctx_t *ctx_ptr)
 
 static char *chat_build_request(const llm_request_config_t *manager)
 {
-    return provider_build_chat_req(manager, NULL, NULL);
+    return prov_build_chat(manager, NULL, NULL);
 }
 
 static struct provider_rate_limiter *chat_rate_limiter(provider_ctx_t *ctx)
@@ -99,7 +99,7 @@ static int chat_complete_stream(provider_ctx_t *ctx, const llm_request_config_t 
 }
 
 /* 五槽装配：feed_event 留空（NULL）= 行协议流，on_chunk 机制件由 driver
- * 挂 core provider_stream_on_chunk（core/adapter.c 分帧模式判定）。 */
+ * 挂 core prov_stream_chunk（core/adapter.c 分帧模式判定）。 */
 const provider_adapter_t chat_ops = {
     .name = "chat", .tag = "CHAT",
     .default_model = NULL, .default_base_url = NULL,
@@ -107,5 +107,5 @@ const provider_adapter_t chat_ops = {
     .init = chat_init, .destroy = chat_destroy,
     .rate_limiter = chat_rate_limiter,
     .complete = chat_complete, .complete_stream = chat_complete_stream,
-    .build_request = chat_build_request, .parse_response = provider_parse_chat_resp,
+    .build_request = chat_build_request, .parse_response = prov_parse_chat,
 };

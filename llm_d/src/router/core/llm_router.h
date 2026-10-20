@@ -200,7 +200,7 @@ int llm_router_route(const llm_route_request_t *request, llm_route_result_t *res
  * @param out_count 实际写出数量。
  * @return 0 成功（含无候选），AIRY_ERR_SYS_NOT_INIT 路由未初始化。
  */
-int llm_router_candidates(const llm_route_request_t *request, llm_route_result_t *out, size_t max,
+int llm_router_pick(const llm_route_request_t *request, llm_route_result_t *out, size_t max,
                           size_t *out_count);
 
 /**

@@ -31,7 +31,7 @@ struct gw_llm_api {
     airy_mtx_t lock;
 };
 
-static int handle_llm_api_request(const char *method, const char *path, const char *body_json,
+static int llm_api_request(const char *method, const char *path, const char *body_json,
                                   char **response_json, void *user_data);
 
 gw_llm_api_t *gw_llm_api_create(const gw_llm_api_config_t *config)
@@ -86,7 +86,7 @@ int gw_llm_api_shutdown(gw_llm_api_t *api)
     return 0;
 }
 
-int gw_llm_api_set_llm_call(gw_llm_api_t *api, gw_llm_call_fn fn, void *user_data)
+int gw_llm_set_call(gw_llm_api_t *api, gw_llm_call_fn fn, void *user_data)
 {
     if (!api || !fn)
         return AIRY_ERR_INVALID_PARAM;
@@ -95,7 +95,7 @@ int gw_llm_api_set_llm_call(gw_llm_api_t *api, gw_llm_call_fn fn, void *user_dat
     return 0;
 }
 
-int gw_llm_api_set_embed_fn(gw_llm_api_t *api, gw_llm_embed_fn fn, void *user_data)
+int gw_llm_set_embed(gw_llm_api_t *api, gw_llm_embed_fn fn, void *user_data)
 {
     if (!api || !fn)
         return AIRY_ERR_INVALID_PARAM;
@@ -302,7 +302,7 @@ static int dispatch_request(gw_llm_api_t *api, const char *path, const char *bod
     return AIRY_ERR_NOT_FOUND;
 }
 
-static int handle_llm_api_request(const char *method, const char *path, const char *body_json,
+static int llm_api_request(const char *method, const char *path, const char *body_json,
                                   char **response_json, void *user_data)
 {
     (void)method;
@@ -313,15 +313,15 @@ static int handle_llm_api_request(const char *method, const char *path, const ch
     return dispatch_request(api, path, body_json, response_json);
 }
 
-gw_proto_request_handler_t gw_llm_api_get_handler(gw_llm_api_t *api)
+gw_proto_request_handler_t gw_llm_get_handler(gw_llm_api_t *api)
 {
     if (!api) {
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
-    return handle_llm_api_request;
+    return llm_api_request;
 }
 
-void *gw_llm_api_get_handler_data(gw_llm_api_t *api)
+void *gw_llm_get_hdata(gw_llm_api_t *api)
 {
     return (void *)api;
 }

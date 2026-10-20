@@ -20,9 +20,9 @@ extern "C" {
 /* extra_json：通用扩展段（JSON object 片段），逐键并入请求体顶层；
  * NULL / 空串 = 无扩展。端点专有参数（如 keep_alive）经此注入，
  * 不污染 Chat Completions 通用骨架。键冲突时以扩展段为准。 */
-char *provider_build_chat_req(const llm_request_config_t *manager, const char *default_model,
+char *prov_build_chat(const llm_request_config_t *manager, const char *default_model,
                               const char *extra_json);
-int provider_parse_chat_resp(const char *body, llm_response_t **out);
+int prov_parse_chat(const char *body, llm_response_t **out);
 /* 请求参数段骨架：model / temperature / max_tokens / top_p / stream / stop 数组。 */
 void provider_request_params_fill(cJSON *root, const llm_request_config_t *manager,
                                   const char *default_model, int default_max_tokens,
@@ -34,12 +34,12 @@ void provider_response_identity_load(llm_response_t *resp, const cJSON *root);
 /* 工具声明遍历：逐条提取 function 三元组（name 缺失跳过）。 */
 typedef void (*provider_tool_fn)(void *ud, const char *name, const char *description,
                                  const cJSON *parameters);
-void provider_tools_foreach(const char *tools_json, provider_tool_fn fn, void *ud);
+void prov_tools_each(const char *tools_json, provider_tool_fn fn, void *ud);
 
 /* assistant 轮 tool_calls 遍历：arguments 为 JSON 串原样交付。 */
 typedef void (*provider_tool_call_fn)(void *ud, const char *id, const char *name,
                                       const char *arguments);
-void provider_tool_calls_foreach(const char *tool_calls_json, provider_tool_call_fn fn, void *ud);
+void prov_tool_each(const char *tool_calls_json, provider_tool_call_fn fn, void *ud);
 
 static inline const char *provider_json_str_val(const cJSON *obj, const char *key)
 {

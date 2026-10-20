@@ -94,7 +94,7 @@ typedef struct {
  * @param warn_ratio     预算告警比例（0 → 0.8）
  *
  * 分词族初始为默认族（AIRY_TOKEN_MODEL_NAME_DEFAULT）；
- * 实际分词族由声明面经 mem_ledger_set_token_family() 注入。
+ * 实际分词族由声明面经 mem_ledger_set_tfam() 注入。
  */
 mem_ledger_t *mem_ledger_create(size_t default_budget, double warn_ratio);
 
@@ -112,13 +112,13 @@ void mem_ledger_destroy(mem_ledger_t *ledger);
  * @return AIRY_SUCCESS；AIRY_ERR_INVALID_PARAM（ledger 为 NULL）；
  *         AIRY_ERR_OUT_OF_MEMORY（计数器创建失败）
  */
-int mem_ledger_set_token_family(mem_ledger_t *ledger, const char *family_name);
+int mem_ledger_set_tfam(mem_ledger_t *ledger, const char *family_name);
 
 /**
  * @brief 当前 Token 计数分词族名。
  * @return 族名（ledger 为 NULL 时返回默认族名；永不返回 NULL）
  */
-const char *mem_ledger_token_family(const mem_ledger_t *ledger);
+const char *mem_ledger_tfam(const mem_ledger_t *ledger);
 
 /**
  * @brief 追加条目（append-only；批量）。
