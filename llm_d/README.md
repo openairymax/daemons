@@ -63,7 +63,7 @@
 | `complete` | `{model?, messages: [≤128 条 role/content/reasoning_content/tool_call_id/tool_calls], temperature?, top_p?, max_tokens?, presence_penalty?, frequency_penalty?, stream?, tools?}` | 补全文本 + usage | 非流式生成，`model` 缺省取 `global.default_model`；失败指数退避重试 3 次 |
 | `complete_stream` | 同 `complete` | RS 帧分片 | 流式生成，结束帧携带 usage 与成本 |
 | `list_models` | `{}` | `{models: [{name, provider, default}], default_model, ...}` | 模型清单 |
-| `count_tokens` | `{text, model?}` | `{model, text, tokens, algorithm}` | 按模型选择启发式算法计数 |
+| `count_tokens` | `{text, family?, model?}` | `{model, family, text, tokens, algorithm}` | 按声明的分词族（generic/bpe/spm/uniform）计数；`model` 仅回显，未知族返回参数错误 |
 | `embeddings` | `{model?, input, ...}`（OpenAI 请求格式原样转发） | 上游 JSON | 代理到所属 provider 的 `/embeddings` |
 | `health_check` | `{}` | `{service, healthy, timestamp}` | 服务健康检查 |
 | `get_stats` | `{}` | 统计 JSON | 请求数、缓存命中、成本等 |
