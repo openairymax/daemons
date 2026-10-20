@@ -46,15 +46,15 @@ static int match_rule(const char *model, const pricing_rule_t *rule)
     return strcmp(model, rule->model_pattern) == 0;
 }
 
-static void get_price(const cost_tracker_t *ct, const char *model, double *input_price,
-                      double *output_price)
+void cost_tracker_price(const pricing_rule_t *rules, int rule_count, const char *model,
+                        double *input_price, double *output_price)
 {
     *input_price = 0.001;
     *output_price = 0.002;
-    for (int i = 0; i < ct->rule_count; ++i) {
-        if (match_rule(model, &ct->rules[i])) {
-            *input_price = ct->rules[i].input_price_per_k;
-            *output_price = ct->rules[i].output_price_per_k;
+    for (int i = 0; i < rule_count; ++i) {
+        if (match_rule(model, &rules[i])) {
+            *input_price = rules[i].input_price_per_k;
+            *output_price = rules[i].output_price_per_k;
             return;
         }
     }
@@ -123,7 +123,7 @@ void cost_tracker_add(cost_tracker_t *ct, const char *model, uint32_t prompt_tok
     m->completion_tokens += completion_tokens;
 
     double in_price, out_price;
-    get_price(ct, model, &in_price, &out_price);
+    cost_tracker_price(ct->rules, ct->rule_count, model, &in_price, &out_price);
     m->cost_usd += (prompt_tokens / 1000.0) * in_price + (completion_tokens / 1000.0) * out_price;
     airy_mtx_unlock(&ct->lock);
 }
@@ -134,7 +134,7 @@ double cost_tracker_estimate(const cost_tracker_t *ct, const char *model, uint32
     if (!ct || !model)
         return 0.0;
     double in_price, out_price;
-    get_price(ct, model, &in_price, &out_price);
+    cost_tracker_price(ct->rules, ct->rule_count, model, &in_price, &out_price);
     return (prompt_tokens / 1000.0) * in_price + (completion_tokens / 1000.0) * out_price;
 }
 
