@@ -284,8 +284,6 @@ int svc_model_defaults_resolve(const char *base_model, const char *base_provider
         AIRY_STRNCPY_TERM(out_model, base_model, model_sz);
     if (base_provider && base_provider[0] && out_provider && prov_sz > 0)
         AIRY_STRNCPY_TERM(out_provider, base_provider, prov_sz);
-    if (!out_model[0])
-        AIRY_STRNCPY_TERM(out_model, SVC_MODEL_DEFAULT_FALLBACK, model_sz);
 
     const char *cfg_dir = airy_config_dir();
     if (cfg_dir && cfg_dir[0]) {
@@ -299,7 +297,9 @@ int svc_model_defaults_resolve(const char *base_model, const char *base_provider
     if (env_model && env_model[0])
         AIRY_STRNCPY_TERM(out_model, env_model, model_sz);
 
-    return 0;
+    /* 模型名属部署策略：机制核不内置厂商兜底。无任何来源给出模型即
+     * fail-closed，由调用方显式报配置缺失，而不是用隐式默认模型掩盖。 */
+    return out_model[0] ? 0 : AIRY_ERR_NOT_FOUND;
 }
 
 /* llm 段字段表：fill 供节点树消费者复用（llm_d expand 路径免二次解析），
