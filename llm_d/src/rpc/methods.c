@@ -41,8 +41,8 @@
  * = 85s < 90s；单次尝试已接近完整超时（对端不可达/挂起）时不再重试。 */
 #define LLM_RETRY_FAST_FAIL_MS 5000
 
-/* 0.1.8 社区缺陷：流式失败此前统一回 -32603 "Service error"，用户与 TUI
- * 均无法定位根因；按 AIRY_ERR_* 透传具体原因，未知错误附错误码。 */
+/* 流式失败按 AIRY_ERR_* 透传具体原因而非统一 -32603 "Service error"，
+ * 未知错误附错误码，便于用户与 TUI 定位根因。 */
 static const char *llm_error_message(int ret)
 {
     switch (ret) {
@@ -498,7 +498,7 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
 
     if (resp) {
         /* 流式结束发 usage 控制帧（RS 'U'）：携带真实 token 与回填后的
-         * cost_usd，此前流式路径不回传 usage，客户端统计与计费恒为 0。 */
+         * cost_usd，否则客户端统计与计费恒为 0。 */
         char usage_frame[288];
         int ufn = snprintf(usage_frame, sizeof(usage_frame),
                            "\x1eU{\"prompt_tokens\":%u,\"completion_tokens\":%u,"

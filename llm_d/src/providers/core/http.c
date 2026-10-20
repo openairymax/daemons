@@ -299,11 +299,10 @@ int provider_http_get(const char *url, struct curl_slist *headers, double timeou
     return AIRY_OK;
 }
 
-/* R-1 / N-3：provider HTTP 状态码 → airy 错误码归一（流式与非流式共用 SSoT，
- * 收敛 openai_stream 内联 switch 与 rate_limit 非流式 switch 的同构副本）。
- * 401/403（密钥无效）与 429（限流）此前被统称"网络请求失败"，用户无从排障；
- * 400/422 是 provider 明确拒绝请求体（N-3，0.1.16），归专用码——不被外层
- * 重试，也给用户正确指引。http_code == 0 表示请求未达上游，返回 fallback。 */
+/* R-1 / N-3：provider HTTP 状态码 → airy 错误码归一（流式与非流式共用
+ * SSoT）。401/403 归鉴权失败、429 归限流，避免笼统的"网络请求失败"掩盖
+ * 根因；400/422 是 provider 明确拒绝请求体，归专用码以便跳过外层重试。
+ * http_code == 0 表示请求未达上游，返回 fallback。 */
 int provider_http_err_map(long http_code, int fallback)
 {
     switch (http_code) {
@@ -386,9 +385,8 @@ int provider_http_exec(const provider_request_t *req, provider_http_resp_t **out
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    /* URL 拼装 SSoT（B16-S6）：api_base 尾部斜杠在此归一，调用方只声明 path
-     * （如 "/embeddings"）。此前该"防双斜杠"逻辑散落在 service 层调用点，
-     * 归一后所有出网点共用一条规则（provider_url_join）。 */
+    /* URL 拼装 SSoT（B16-S6）：api_base 尾部斜杠在此归一，调用方只声明
+     * path（如 "/embeddings"），所有出网点共用 provider_url_join 一条规则。 */
     char url[1024];
     int join_rc = provider_url_join(req->base->api_base, req->path, url, sizeof(url));
     if (join_rc != AIRY_OK)
