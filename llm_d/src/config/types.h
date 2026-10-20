@@ -36,9 +36,8 @@ typedef struct {
     char endpoint[512];
     int timeout_sec;
     int max_retries;
-    /* 2.1.1.5 修复：模型单价（model.yaml models[].input/output_cost_per_1k），
-     * 用于生成 cost_tracker 的 pricing rules——此前 YAML 配置完全不加载
-     * 价格，计费全部落到默认价 0.001/0.002，金额不真实。 */
+    /* 模型单价（model.yaml models[].input/output_cost_per_1k），用于生成
+     * cost_tracker 的 pricing rules。 */
     double input_cost_per_k;
     double output_cost_per_k;
     /* 价格字段是否在 YAML 中显式声明（区分"免费模型：显式 0"与
@@ -77,8 +76,8 @@ typedef struct {
     int max_retries;
     char *model_names[64];
     /* 与 model_names 同下标对齐：该模型的输出上限（model.yaml max_output
-     * 解析后的 token 数，0 = 未配置）。此前该字段止步于 model_entry_t，
-     * 在聚合/导出两处被丢弃，导致"配置了也不生效"。 */
+     * 解析后的 token 数，0 = 未配置）。聚合与导出都必须携带，否则配置
+     * 了上限也截断不了。 */
     int model_max_output[64];
     size_t model_count;
 } provider_agg_t;

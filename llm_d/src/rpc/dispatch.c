@@ -21,16 +21,16 @@
 #include <string.h>
 #include <time.h>
 
-/* P0.18.1: transitively provides SVC_LOG_*, CJSON_PARSE_GUARD and the sock/
- * logger/event-driver declarations used below. */
+/* 传递提供 SVC_LOG_*、CJSON_PARSE_GUARD 及下方使用的 sock/logger/
+ * event-driver 声明。 */
 #include "daemon_main.h"
 
 #define LLM_TIME_CTX_CAP 256
 
-/* P24（0.1.12）：parse_params 失败前把具体原因写入 ctx->fail_reason，
- * 使 complete/complete_stream 的 -32602 响应携带可辨识的失败环节（此前
- * 一律笼统 "Invalid params"，社区用户拿到错误无从排障）。AIRY_ERROR
- * 负责压错误栈并返回；本宏仅在其前填充 fail_reason。 */
+/* parse_params 失败前把具体原因写入 ctx->fail_reason，使 complete/
+ * complete_stream 的 -32602 响应携带可辨识的失败环节，而非笼统的
+ * "Invalid params"。AIRY_ERROR 负责压错误栈并返回，本宏仅在其前填充
+ * fail_reason。 */
 #define LLM_PARSE_FAIL(ctx, code, msg)                                      \
     do {                                                                    \
         if ((ctx)) {                                                        \

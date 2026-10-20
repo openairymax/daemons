@@ -14,9 +14,8 @@
  * providers/ 与 router/ 内层则一律走 provider.h 的域内析构器。 */
 #include "llm_service.h"
 
-/* P0.18.2: cjson_helpers.h provides the CJSON_PARSE_GUARD/CJSON_AUTO_FREE
- * macros (response.h already pulls in <cjson/cJSON.h>; cjson_helpers.h
- * depends on AIRY_HAS_CJSON). */
+/* CJSON_PARSE_GUARD / CJSON_AUTO_FREE 来自 cjson_helpers.h（response.h
+ * 已引入 <cjson/cJSON.h>，本头依赖 AIRY_HAS_CJSON）。 */
 #include <cjson_helpers.h>
 
 #include <stdlib.h>

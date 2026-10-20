@@ -21,8 +21,8 @@ typedef struct {
     int max_retries;
     char **models;
     /* 与 models 同下标对齐的每模型输出上限（model.yaml max_output 的 token
-     * 数，0 = 未配置）。NULL 表示调用方未提供容量表。生成参数解析需要它来
-     * 兑现"配置了上限就按下限截断"，此前该信息止步于 YAML 解析状态机。 */
+     * 数，0 = 未配置）。NULL 表示调用方未提供容量表。生成参数解析靠它兑现
+     * "配置了上限就按下限截断"。 */
     const int *model_max_output;
 } provider_config_t;
 

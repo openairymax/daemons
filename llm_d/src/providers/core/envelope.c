@@ -44,11 +44,9 @@ char *provider_build_openai_request(const llm_request_config_t *manager, const c
     provider_request_params_fill(root, manager, default_model, 0, "stop");
 
     if (manager->stream) {
-        /* 2.1.1.5 修复：流式请求必须显式声明 include_usage——OpenAI 及其
-         * 兼容端点（vLLM/llama.cpp 等）默认在流式 chunk 中不回传 usage，
-         * 不声明则 prompt/completion/total_tokens 恒为 0，真实 token 消耗
-         * 与计费无法体现。DeepSeek 默认在末尾 chunk 附带 usage，显式声明
-         * 后同样生效（幂等）。 */
+        /* 流式请求必须显式声明 include_usage：OpenAI 及兼容端点
+         * （vLLM/llama.cpp 等）默认不回传 usage，不声明则 token 计数与
+         * 计费恒为 0。DeepSeek 本就回传，显式声明后幂等。 */
         cJSON *stream_options = cJSON_CreateObject();
         if (stream_options) {
             cJSON_AddBoolToObject(stream_options, "include_usage", 1);

@@ -3,7 +3,7 @@
 
 /**
  * @file router_strategy.c
- * @brief P3.1: routing strategies - shared skeleton plus four selectors.
+ * @brief Routing strategies - shared skeleton plus four selectors.
  *
  * Mechanism (strategy_begin/strategy_tokens/strategy_finish): eligible
  * collection, token estimation, result fill, fallback and logging. Policy:
@@ -57,7 +57,7 @@ static int strategy_finish(llm_route_result_t *result, llm_endpoint_t *best,
     return 0;
 }
 
-/* P3.1.1: cost-aware - cheapest endpoint within budget and latency caps. */
+/* cost-aware - cheapest endpoint within budget and latency caps. */
 int route_cost_aware(const llm_route_request_t *request, llm_route_result_t *result)
 {
     llm_endpoint_t *eligible[LLM_ROUTER_MAX_ENDPOINTS];
@@ -106,7 +106,7 @@ int route_cost_aware(const llm_route_request_t *request, llm_route_result_t *res
                            "CostAware", in, out);
 }
 
-/* P3.1.2: round-robin - cyclic counter over eligible endpoints. */
+/* round-robin - cyclic counter over eligible endpoints. */
 int route_round_robin(const llm_route_request_t *request, llm_route_result_t *result)
 {
     router_ctx_t *ctx = router_ctx_get();
@@ -127,7 +127,7 @@ int route_round_robin(const llm_route_request_t *request, llm_route_result_t *re
                            "RoundRobin", in, out);
 }
 
-/* P3.1.3: least-latency - lowest avg latency; second-lowest fallback. */
+/* least-latency - lowest avg latency; second-lowest fallback. */
 int route_least_latency(const llm_route_request_t *request, llm_route_result_t *result)
 {
     llm_endpoint_t *eligible[LLM_ROUTER_MAX_ENDPOINTS];
@@ -172,7 +172,7 @@ static int quality_cmp(const void *a, const void *b)
     return 0;
 }
 
-/* P3.1.4: quality-first - priority then context window. */
+/* quality-first - priority then context window. */
 int route_quality_first(const llm_route_request_t *request, llm_route_result_t *result)
 {
     llm_endpoint_t *eligible[LLM_ROUTER_MAX_ENDPOINTS];
