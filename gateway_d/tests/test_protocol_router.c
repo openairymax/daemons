@@ -8,7 +8,7 @@
  *
  * 验证 record_proto_stats 重构后，gw_proto_router_route 的统计逻辑正确。
  * 覆盖场景：
- *   - 5 种协议类型（MCP / A2A / OpenAI / JSON-RPC / Unknown）在"handler 存在"和"handler 不存在"
+ *   - 5 种协议类型（MCP / A2A / LLM-API / JSON-RPC / Unknown）在"handler 存在"和"handler 不存在"
  *     两条路径下的统计计数
  *   - total_requests / route_errors 全局计数器
  */
@@ -39,7 +39,7 @@ static int mock_handler(const char *method, const char *path, const char *body_j
 
 static const int TEST_PROTO_TYPES[] = {GW_PROTO_DETECT_MCP, /* 1 */
                                        GW_PROTO_DETECT_A2A, /* 2 */
-                                       GW_PROTO_DETECT_OPENAI, /* 3 */
+                                       GW_PROTO_DETECT_LLM_API, /* 3 */
                                        GW_PROTO_DETECT_JSONRPC, /* 4 */
                                        GW_PROTO_DETECT_UNKNOWN};
 static const int NUM_PROTO_TYPES = 5;
@@ -51,8 +51,8 @@ static const char *proto_label(gw_proto_detect_result_t t)
         return "MCP";
     case GW_PROTO_DETECT_A2A:
         return "A2A";
-    case GW_PROTO_DETECT_OPENAI:
-        return "OpenAI";
+    case GW_PROTO_DETECT_LLM_API:
+        return "LLM-API";
     case GW_PROTO_DETECT_JSONRPC:
         return "JSON-RPC";
     default:
@@ -99,7 +99,7 @@ static void test_stats_with_handler(void)
 
     assert(stats.mcp_requests == 1 && "mcp_requests should be 1");
     assert(stats.a2a_requests == 1 && "a2a_requests should be 1");
-    assert(stats.openai_requests == 1 && "openai_requests should be 1");
+    assert(stats.llm_requests == 1 && "llm_requests should be 1");
     assert(stats.jsonrpc_requests == 1 && "jsonrpc_requests should be 1");
     assert(stats.unknown_requests == 1 && "unknown_requests should be 1");
     assert(stats.route_errors == 0 && "route_errors should be 0 (handler found)");
@@ -144,7 +144,7 @@ static void test_stats_without_handler(void)
 
     assert(stats.mcp_requests == (uint64_t)N && "mcp=3");
     assert(stats.a2a_requests == (uint64_t)N && "a2a=3");
-    assert(stats.openai_requests == (uint64_t)N && "openai=3");
+    assert(stats.llm_requests == (uint64_t)N && "llm=3");
     assert(stats.jsonrpc_requests == (uint64_t)N && "jsonrpc=3");
     assert(stats.unknown_requests == (uint64_t)N && "unknown=3");
 
@@ -179,17 +179,17 @@ static void test_stats_mixed(void)
     gw_proto_router_stats_t stats;
     gw_proto_router_get_stats(router, &stats);
 
-    printf("  mcp_requests=%llu  a2a_requests=%llu  openai_requests=%llu  "
+    printf("  mcp_requests=%llu  a2a_requests=%llu  llm_requests=%llu  "
            "jsonrpc_requests=%llu  unknown_requests=%llu\n",
            (unsigned long long)stats.mcp_requests, (unsigned long long)stats.a2a_requests,
-           (unsigned long long)stats.openai_requests, (unsigned long long)stats.jsonrpc_requests,
+           (unsigned long long)stats.llm_requests, (unsigned long long)stats.jsonrpc_requests,
            (unsigned long long)stats.unknown_requests);
     printf("  route_errors=%llu\n", (unsigned long long)stats.route_errors);
 
     assert(stats.total_requests == (uint64_t)NUM_PROTO_TYPES && "total=5");
     assert(stats.mcp_requests == 1);
     assert(stats.a2a_requests == 1);
-    assert(stats.openai_requests == 1);
+    assert(stats.llm_requests == 1);
     assert(stats.jsonrpc_requests == 1);
     assert(stats.unknown_requests == 1);
 
@@ -222,37 +222,37 @@ static void test_invalid_params(void)
 }
 
 /**
- * @brief Test scenario E: path-aware detection for OpenAI endpoints
+ * @brief Test scenario E: path-aware detection for LLM API endpoints
  *
  * Regression for the /v1/embeddings routing gap: the embeddings body
  * {"input":[...],"model":...} contains no "messages" field, so body-only
  * detection returns UNKNOWN. The HTTP transport now forwards the request
  * path (via gateway_http_request_t); gw_proto_detect must use it to
- * classify /v1 and /openai endpoints as OpenAI.
+ * classify /v1 endpoints, including vendor-prefixed ones.
  */
-static void test_detect_openai_by_path(void)
+static void test_detect_llm_api_by_path(void)
 {
-    printf("\n--- Scenario E: OpenAI detection via path ---\n");
+    printf("\n--- Scenario E: LLM API detection via path ---\n");
 
     const char *embed_body = "{\"model\":\"test-embed\",\"input\":[\"hello\"]}";
 
     /* Body alone (no path): previously misrouted to JSON-RPC -32600 */
     gw_proto_detect_result_t no_path = gw_proto_detect(NULL, NULL, embed_body);
-    assert(no_path != GW_PROTO_DETECT_OPENAI &&
-           "embeddings body alone must not be detected as OpenAI");
+    assert(no_path != GW_PROTO_DETECT_LLM_API &&
+           "embeddings body alone must not be detected as LLM API");
 
-    /* With the HTTP path preserved: must classify as OpenAI */
+    /* With the HTTP path preserved: must classify as LLM API */
     gw_proto_detect_result_t by_path = gw_proto_detect(NULL, "/v1/embeddings", embed_body);
-    assert(by_path == GW_PROTO_DETECT_OPENAI && "/v1/embeddings must be OpenAI");
+    assert(by_path == GW_PROTO_DETECT_LLM_API && "/v1/embeddings must be LLM API");
 
-    by_path = gw_proto_detect(NULL, "/openai/v1/embeddings", embed_body);
-    assert(by_path == GW_PROTO_DETECT_OPENAI && "/openai/v1/embeddings must be OpenAI");
+    by_path = gw_proto_detect(NULL, "/vendor/v1/embeddings", embed_body);
+    assert(by_path == GW_PROTO_DETECT_LLM_API && "prefixed /v1/ path must be LLM API");
 
     by_path = gw_proto_detect(NULL, "/v1/chat/completions",
                               "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
-    assert(by_path == GW_PROTO_DETECT_OPENAI && "/v1/chat/completions must be OpenAI");
+    assert(by_path == GW_PROTO_DETECT_LLM_API && "/v1/chat/completions must be LLM API");
 
-    /* JSON-RPC path must not be hijacked by the OpenAI rule */
+    /* JSON-RPC path must not be hijacked by the LLM API rule */
     gw_proto_detect_result_t jrpc = gw_proto_detect(NULL, "/api", embed_body);
     assert(jrpc == GW_PROTO_DETECT_JSONRPC || jrpc == GW_PROTO_DETECT_UNKNOWN);
 
@@ -299,7 +299,7 @@ int main(void)
     test_stats_with_handler();
     test_stats_without_handler();
     test_stats_mixed();
-    test_detect_openai_by_path();
+    test_detect_llm_api_by_path();
     test_http_request_magic();
 
     printf("\n=== All tests passed ===\n\n");

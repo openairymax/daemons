@@ -50,7 +50,7 @@ foreach(TEST_SRC ${TEST_SOURCES})
             ${PROTOCOL_ROUTER_DIR}/gateway_jsonpick.c
             ${PROTOCOL_ROUTER_DIR}/gateway_mcp_server.c
             ${PROTOCOL_ROUTER_DIR}/gateway_a2a_handler.c
-            ${PROTOCOL_ROUTER_DIR}/gateway_openai_compat.c
+            ${PROTOCOL_ROUTER_DIR}/gateway_llm_api.c
         )
         target_include_directories(${TEST_NAME} PRIVATE
             ${PROTOCOL_ROUTER_DIR}

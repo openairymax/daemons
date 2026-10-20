@@ -11,7 +11,7 @@ set(GATEWAY_D_PROTOCOL_SOURCES
     src/protocol/gateway_jsonpick.c
     src/protocol/gateway_mcp_server.c
     src/protocol/gateway_a2a_handler.c
-    src/protocol/gateway_openai_compat.c
+    src/protocol/gateway_llm_api.c
     src/protocol/gateway_protocol_router.c
 )
 

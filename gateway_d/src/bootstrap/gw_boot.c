@@ -8,7 +8,7 @@
  *
  * main.c 只保留装配骨架与主循环；本域承接全部策略块——corekern 首启链接
  * 与 PEP/IPC/heapstore 平台服务发布、信号策略、Phase 2 适配器接线（MCP
- * 工具目录→tool_d / OpenAI→llm_d / A2A→sched_d）、UnifiedProtocol 栈初始
+ * 工具目录→tool_d / LLM API→llm_d / A2A→sched_d）、UnifiedProtocol 栈初始
  * 化、端点摘要与 SD 注册、周期健康上报、关停拆除（含 socket 面与 ops 逆序
  * 清理）。
  */
@@ -32,7 +32,7 @@
 
 #include "gateway_protocol_router.h"
 #include "gateway_mcp_server.h"
-#include "gateway_openai_compat.h"
+#include "gateway_llm_api.h"
 #include "gateway_a2a_handler.h"
 
 #ifdef AIRY_HAS_PROTOCOLS
@@ -164,7 +164,7 @@ int gw_proto_wire(gw_proto_router_t *router, gateway_business_ctx_t *biz)
         return -1;
     }
 
-    /* Phase 2: adapter wiring — MCP tools -> tool_d / OpenAI -> llm_d /
+    /* Phase 2: adapter wiring — MCP tools -> tool_d / LLM API -> llm_d /
      * A2A -> sched_d (protocol translation is concentrated in the gateway;
      * daemons have zero protocol knowledge, D2) */
     {
@@ -185,13 +185,13 @@ int gw_proto_wire(gw_proto_router_t *router, gateway_business_ctx_t *biz)
 #endif
         }
 
-        /* OpenAI: chat/completions → llm_d.complete */
-        gw_openai_compat_t *openai = gw_proto_router_get_openai(router);
-        if (openai) {
-            gw_openai_compat_set_llm_call(openai, gw_biz_llm_complete, biz);
-            /* OpenAI: embeddings → llm_d.embeddings（RAG/知识库生态接入点） */
-            gw_openai_compat_set_embed_fn(openai, gw_biz_llm_embeddings, biz);
-            SVC_LOG_INFO("Phase 2: OpenAI adapter wired — chat/completions + embeddings → llm_d");
+        /* LLM API: chat/completions → llm_d.complete */
+        gw_llm_api_t *llm_api = gw_proto_router_get_llm_api(router);
+        if (llm_api) {
+            gw_llm_api_set_llm_call(llm_api, gw_biz_llm_complete, biz);
+            /* LLM API: embeddings → llm_d.embeddings（RAG/知识库生态接入点） */
+            gw_llm_api_set_embed_fn(llm_api, gw_biz_llm_embeddings, biz);
+            SVC_LOG_INFO("Phase 2: LLM API adapter wired — chat/completions + embeddings → llm_d");
         }
 
         gw_a2a_handler_t *a2a = gw_proto_router_get_a2a(router);
