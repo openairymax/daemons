@@ -32,15 +32,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text)
+char *provider_buf_append_n(char *buf, size_t *cap, size_t *len, const char *data, size_t dlen)
 {
-    if (!text)
-        return buf;
-    size_t tlen = strlen(text);
-    if (tlen == 0)
+    if (!data || dlen == 0)
         return buf;
 
-    size_t needed = *len + tlen + 1;
+    size_t needed = *len + dlen + 1;
     if (needed > *cap) {
         size_t new_cap = *cap > 0 ? *cap : 4096;
         while (new_cap < needed)
@@ -51,10 +48,15 @@ char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text)
         buf = ptr;
         *cap = new_cap;
     }
-    __builtin_memcpy(buf + *len, text, tlen);
-    *len += tlen;
+    __builtin_memcpy(buf + *len, data, dlen);
+    *len += dlen;
     buf[*len] = '\0';
     return buf;
+}
+
+char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text)
+{
+    return text ? provider_buf_append_n(buf, cap, len, text, strlen(text)) : buf;
 }
 
 /* ── 流式控制帧发射（帧格式权威：commons/include/airy_llm_stream.h，
@@ -141,20 +143,9 @@ static void sse_raw_append(sse_stream_ctx_t *sse, const char *data, size_t len)
 {
     if (!sse->raw_buf || len == 0)
         return;
-    size_t need = sse->raw_len + len + 1;
-    if (need > sse->raw_cap) {
-        size_t cap = sse->raw_cap * 2;
-        while (cap < need)
-            cap *= 2;
-        char *grown = (char *)AIRY_REALLOC(sse->raw_buf, cap);
-        if (!grown)
-            return;
+    char *grown = provider_buf_append_n(sse->raw_buf, &sse->raw_cap, &sse->raw_len, data, len);
+    if (grown)
         sse->raw_buf = grown;
-        sse->raw_cap = cap;
-    }
-    __builtin_memcpy(sse->raw_buf + sse->raw_len, data, len);
-    sse->raw_len += len;
-    sse->raw_buf[sse->raw_len] = '\0';
 }
 
 static int sse_feed_line(sse_stream_ctx_t *sse, const char *line, size_t len)
@@ -262,21 +253,11 @@ static size_t sse_write_callback(void *contents, size_t size, size_t nmemb, void
     if (sse->cancelled)
         return 0;
 
-    size_t needed = sse->line_len + realsize + 1;
-    if (needed > sse->line_cap) {
-        size_t new_cap = sse->line_cap * 2;
-        while (new_cap < needed)
-            new_cap *= 2;
-        char *ptr = (char *)AIRY_REALLOC(sse->line_buf, new_cap);
-        if (!ptr)
-            return 0;
-        sse->line_buf = ptr;
-        sse->line_cap = new_cap;
-    }
-
-    __builtin_memcpy(sse->line_buf + sse->line_len, contents, realsize);
-    sse->line_len += realsize;
-    sse->line_buf[sse->line_len] = '\0';
+    char *grown = provider_buf_append_n(sse->line_buf, &sse->line_cap, &sse->line_len,
+                                        (const char *)contents, realsize);
+    if (!grown)
+        return 0;
+    sse->line_buf = grown;
 
     sse_raw_append(sse, (const char *)contents, realsize);
 
