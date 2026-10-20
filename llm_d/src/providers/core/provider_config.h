@@ -14,9 +14,14 @@ extern "C" {
 
 typedef struct {
     const char *name;
+    /* 线格式名（model.yaml api_format），适配器查找键；NULL = 未声明，
+     * 由装配面回落行协议适配。 */
+    const char *api_format;
     const char *api_key;
     const char *api_base;
     const char *organization;
+    /* 端点附加头（'...; ...' 或换行分隔），随配置注入请求头链。 */
+    const char *extra_headers;
     double timeout_sec;
     int max_retries;
     char **models;

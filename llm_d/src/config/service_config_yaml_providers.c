@@ -73,6 +73,12 @@ static void svc_yaml_aggregate_providers(svc_yaml_state_t *st, provider_agg_t *p
                                   sizeof(provs[j].base_url));
             }
         }
+        if (!provs[j].api_format[0] && st->models[i].api_format[0])
+            AIRY_STRNCPY_TERM(provs[j].api_format, st->models[i].api_format,
+                              sizeof(provs[j].api_format));
+        if (!provs[j].extra_headers[0] && st->models[i].extra_headers[0])
+            AIRY_STRNCPY_TERM(provs[j].extra_headers, st->models[i].extra_headers,
+                              sizeof(provs[j].extra_headers));
         if (st->models[i].timeout_sec > provs[j].timeout_sec)
             provs[j].timeout_sec = st->models[i].timeout_sec;
         if (st->models[i].max_retries > provs[j].max_retries)
@@ -99,6 +105,12 @@ static void svc_yaml_merge_provider_cfgs(svc_yaml_state_t *st, provider_agg_t *p
         if (st->pcfg[pi].api_key_env[0])
             AIRY_STRNCPY_TERM(provs[j].api_key_env, st->pcfg[pi].api_key_env,
                               sizeof(provs[j].api_key_env));
+        if (st->pcfg[pi].api_format[0])
+            AIRY_STRNCPY_TERM(provs[j].api_format, st->pcfg[pi].api_format,
+                              sizeof(provs[j].api_format));
+        if (st->pcfg[pi].extra_headers[0])
+            AIRY_STRNCPY_TERM(provs[j].extra_headers, st->pcfg[pi].extra_headers,
+                              sizeof(provs[j].extra_headers));
         if (st->pcfg[pi].timeout_sec > provs[j].timeout_sec)
             provs[j].timeout_sec = st->pcfg[pi].timeout_sec;
         if (st->pcfg[pi].max_retries > provs[j].max_retries)
@@ -153,6 +165,10 @@ static int svc_yaml_build_result(provider_agg_t *provs, size_t prov_count,
         }
         if (provs[i].base_url[0])
             result[i].api_base = AIRY_STRDUP(provs[i].base_url);
+        if (provs[i].api_format[0])
+            result[i].api_format = AIRY_STRDUP(provs[i].api_format);
+        if (provs[i].extra_headers[0])
+            result[i].extra_headers = AIRY_STRDUP(provs[i].extra_headers);
         result[i].timeout_sec = (double)provs[i].timeout_sec;
         result[i].max_retries = provs[i].max_retries;
         if (provs[i].model_count > 0) {

@@ -192,8 +192,7 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    provider_http_resp_t *resp =
-        (provider_http_resp_t *)AIRY_CALLOC(1, sizeof(provider_http_resp_t));
+    provider_http_resp_t *resp = (provider_http_resp_t *)AIRY_CALLOC(1, sizeof(*resp));
     if (!resp)
         return AIRY_ERR_OUT_OF_MEMORY;
 
@@ -263,8 +262,7 @@ int provider_http_get(const char *url, struct curl_slist *headers, double timeou
         return AIRY_ERR_INVALID_PARAM;
     }
 
-    provider_http_resp_t *resp =
-        (provider_http_resp_t *)AIRY_CALLOC(1, sizeof(provider_http_resp_t));
+    provider_http_resp_t *resp = (provider_http_resp_t *)AIRY_CALLOC(1, sizeof(*resp));
     if (!resp)
         return AIRY_ERR_OUT_OF_MEMORY;
 
@@ -338,7 +336,31 @@ const char *provider_http_err_diag(long http_code)
     }
 }
 
-/* 头链装配 SSoT（B16-S3.1）：鉴权样式 + Content-Type + 厂商静态附加头。适配层
+/* 端点附加头：配置注入的 "Name: value" 列表（';' 或换行分隔），逐条裁剪
+ * 空白后并入头链；不含冒号或为空的行丢弃，避免把坏配置变成坏请求。 */
+static struct curl_slist *headers_add_extra(struct curl_slist *headers, const char *raw)
+{
+    char buf[512];
+    if (!raw || !raw[0])
+        return headers;
+    AIRY_STRNCPY_TERM(buf, raw, sizeof(buf));
+
+    for (char *p = buf, *sep; p && *p; p = sep ? sep + 1 : NULL) {
+        sep = strpbrk(p, ";\n");
+        if (sep)
+            *sep = '\0';
+        while (*p == ' ' || *p == '\t')
+            ++p;
+        size_t n = strlen(p);
+        while (n > 0 && (p[n - 1] == ' ' || p[n - 1] == '\t' || p[n - 1] == '\r'))
+            p[--n] = '\0';
+        if (*p && strchr(p, ':'))
+            headers = curl_slist_append(headers, p);
+    }
+    return headers;
+}
+
+/* 头链装配 SSoT（B16-S3.1）：鉴权样式 + Content-Type + 端点附加头。适配层
  * 只声明 provider_header_spec_t，拼装、鉴权缓冲擦除与头链释放全部由本件兜住
  * （provider_http_exec 出口统一 free），故适配层不出现任何 curl_* 调用。 */
 static struct curl_slist *provider_headers_build(const provider_base_ctx_t *base,
@@ -371,6 +393,8 @@ static struct curl_slist *provider_headers_build(const provider_base_ctx_t *base
         for (size_t i = 0; i < spec->extra_count; ++i)
             headers = curl_slist_append(headers, spec->extra[i]);
     }
+
+    headers = headers_add_extra(headers, base->extra_headers);
 
     return headers;
 }

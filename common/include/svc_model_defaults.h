@@ -137,19 +137,21 @@ int svc_model_defaults_think_from_yaml(const char *path, svc_model_think_config_
  * @brief Simplified LLM config (llm section of model.yaml).
  *
  * Minimal config entry for ordinary users: one provider + one default
- * model. api_format is one of two: openai (OpenAI Chat Completions) /
- * anthropic (Anthropic Messages). base_url is the adapter root (DeepSeek
- * official dual protocol: openai-form e.g. https://..., anthropic-form
- * https://...). When an llm section exists and model is non-empty, llm_d
- * expands it at runtime into a single provider (taking precedence over the
- * full providers/models list).
+ * model. api_format names the wire format only: chat (Chat Completions
+ * shape) / messages (Messages shape) / local (local runtime). base_url is
+ * the adapter root; the adapter owns the request path. extra_headers
+ * carries endpoint-level headers the wire format needs but that are not
+ * vendor-independent (separated by ';' or newlines). When an llm section
+ * exists and model is non-empty, llm_d expands it at runtime into a single
+ * provider (taking precedence over the full providers/models list).
  */
 typedef struct {
-    char api_format[16]; /* llm.api_format: openai | anthropic */
+    char api_format[16]; /* llm.api_format: chat | messages | local */
     char base_url[512];
     char api_key_env[128];
     char model[128];
     int max_output_tokens; /* llm.max_output / models[0].max_output; 0 = unset */
+    char extra_headers[256]; /* llm.extra_headers / models[0].extra_headers */
 } svc_model_llm_config_t;
 
 /**
@@ -169,11 +171,11 @@ int svc_tokens_parse(const char *text);
  * @brief Extract the simplified LLM config from the llm section.
  *
  * Same-origin scanner as svc_model_defaults_from_yaml: only the
- * api_format / base_url / api_key_env / model / max_output keys inside
- * the top-level llm: mapping are considered. If no llm section is found,
- * out keeps the caller's initial value; not an error. Callers holding an
- * already-parsed document should prefer svc_model_llm_fill to avoid a
- * second parse.
+ * api_format / base_url / api_key_env / model / max_output / extra_headers
+ * keys inside the top-level llm: mapping are considered. If no llm section
+ * is found, out keeps the caller's initial value; not an error. Callers
+ * holding an already-parsed document should prefer svc_model_llm_fill to
+ * avoid a second parse.
  *
  * @param path YAML file path
  * @param out  Output struct (non-NULL; caller should zero it first)
@@ -187,7 +189,7 @@ int svc_model_defaults_llm_from_yaml(const char *path, svc_model_llm_config_t *o
  * Node-level counterpart of svc_model_defaults_llm_from_yaml sharing the
  * same field table. A missing or non-mapping section returns
  * AIRY_ERR_NOT_FOUND (callers may treat it as "absent", not an error);
- * keys beyond the five documented ones are ignored, absent keys leave
+ * keys beyond the six documented ones are ignored, absent keys leave
  * the corresponding out field untouched.
  *
  * @param llm_section  Parsed llm: mapping node (may be NULL)
@@ -201,9 +203,9 @@ int svc_model_llm_fill(struct yaml_node *llm_section, svc_model_llm_config_t *ou
  *        (v2 table format, 2026-08-26).
  *
  * Reads the first item of the top-level models: list (api_format /
- * base_url / api_key_env / model_id / max_output). Fallback source for
- * llm_d / gateway_d when the llm section is absent; models[0].model_id is
- * the default model.
+ * base_url / api_key_env / model_id / max_output / extra_headers). Fallback
+ * source for llm_d / gateway_d when the llm section is absent;
+ * models[0].model_id is the default model.
  *
  * @param path YAML file path
  * @param out  Output struct (non-NULL; caller should zero it first)

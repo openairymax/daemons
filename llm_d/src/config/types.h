@@ -24,10 +24,8 @@
 extern "C" {
 #endif
 
-/* ---- YAML config parse results (service_config_yaml*.c split, 2026-08-27):
- *      model entries, provider aggregation and the shared parse-result state.
- *      The node tree itself lives in commons (yaml_minimal) and is consumed
- *      by service_config_yaml_models.c while walking it. ---- */
+/* YAML 配置解析结果（service_config_yaml*.c 拆分）：模型条目、提供商聚合与共享
+ * 解析状态；节点树由 commons 的 yaml_minimal 提供，解析时逐节点消费。 */
 
 typedef struct {
     char name[128];
@@ -40,9 +38,7 @@ typedef struct {
      * cost_tracker 的 pricing rules。 */
     double input_cost_per_k;
     double output_cost_per_k;
-    /* 价格字段是否在 YAML 中显式声明（区分"免费模型：显式 0"与
-     * "未配置价格：字段缺失"）。免费模型（llama 等）显式 0.0 必须保留
-     * 为零价规则，未配置的模型落默认价。 */
+    /* 价格是否显式声明：区分"免费模型显式 0"与"字段缺失落默认价"。 */
     int has_input_price;
     int has_output_price;
     /* v2 表格格式扩展字段（2026-08-26）：
@@ -56,6 +52,9 @@ typedef struct {
     int tool_rounds;
     int vision;
     char thinking[8];
+    /* 端点附加头（model.yaml extra_headers）：线格式必需但非厂商无关的头，
+     * 如 Messages 的协议版本，多条以 ';' 或换行分隔。 */
+    char extra_headers[192];
 } model_entry_t;
 
 typedef struct {
@@ -66,6 +65,8 @@ typedef struct {
     int max_retries;
     char *model_names[64];
     size_t model_count;
+    char api_format[16];
+    char extra_headers[256];
 } prov_cfg_t;
 
 typedef struct {
@@ -80,6 +81,10 @@ typedef struct {
      * 了上限也截断不了。 */
     int model_max_output[64];
     size_t model_count;
+    /* 聚合出的连接声明：api_format 为适配器查找键（chat | messages |
+     * local），extra_headers 为首个显式声明该字段的模型带来的端点附加头。 */
+    char api_format[16];
+    char extra_headers[256];
 } provider_agg_t;
 
 /* YAML 装载结果：models[] 行解析结果 + providers 段声明。由

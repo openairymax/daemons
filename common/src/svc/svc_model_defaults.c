@@ -312,13 +312,14 @@ int svc_model_llm_fill(struct yaml_node *llm_section, svc_model_llm_config_t *ou
         return AIRY_ERR_NOT_FOUND;
 
     svc_yaml_field_t tbl[] = {
-        { "api_format",  SVC_FLD_STR,    out->api_format,        sizeof(out->api_format)  },
-        { "base_url",    SVC_FLD_STR,    out->base_url,          sizeof(out->base_url)    },
-        { "api_key_env", SVC_FLD_STR,    out->api_key_env,       sizeof(out->api_key_env) },
-        { "model",       SVC_FLD_STR,    out->model,             sizeof(out->model)       },
-        { "max_output",  SVC_FLD_TOKENS, &out->max_output_tokens, 0                       },
+        { "api_format",    SVC_FLD_STR,    out->api_format,        sizeof(out->api_format)    },
+        { "base_url",      SVC_FLD_STR,    out->base_url,          sizeof(out->base_url)      },
+        { "api_key_env",   SVC_FLD_STR,    out->api_key_env,       sizeof(out->api_key_env)   },
+        { "model",         SVC_FLD_STR,    out->model,             sizeof(out->model)         },
+        { "max_output",    SVC_FLD_TOKENS, &out->max_output_tokens, 0                         },
+        { "extra_headers", SVC_FLD_STR,    out->extra_headers,     sizeof(out->extra_headers) },
     };
-    svc_scan_map(llm_section, tbl, 5);
+    svc_scan_map(llm_section, tbl, 6);
     return 0;
 }
 
@@ -364,13 +365,14 @@ int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_
         struct yaml_node *first = yaml_get_index(models, 0);
         if (first && first->type == YAML_NODE_MAPPING) {
             svc_yaml_field_t tbl[] = {
-                { "api_format",  SVC_FLD_STR,    out->api_format,        sizeof(out->api_format)  },
-                { "base_url",    SVC_FLD_STR,    out->base_url,          sizeof(out->base_url)    },
-                { "api_key_env", SVC_FLD_STR,    out->api_key_env,       sizeof(out->api_key_env) },
-                { "model_id",    SVC_FLD_STR,    out->model,             sizeof(out->model)       },
-                { "max_output",  SVC_FLD_TOKENS, &out->max_output_tokens, 0                       },
+                { "api_format",    SVC_FLD_STR,    out->api_format,        sizeof(out->api_format)    },
+                { "base_url",      SVC_FLD_STR,    out->base_url,          sizeof(out->base_url)      },
+                { "api_key_env",   SVC_FLD_STR,    out->api_key_env,       sizeof(out->api_key_env)   },
+                { "model_id",      SVC_FLD_STR,    out->model,             sizeof(out->model)         },
+                { "max_output",    SVC_FLD_TOKENS, &out->max_output_tokens, 0                         },
+                { "extra_headers", SVC_FLD_STR,    out->extra_headers,     sizeof(out->extra_headers) },
             };
-            svc_scan_map(first, tbl, 5);
+            svc_scan_map(first, tbl, 6);
             rc = 0;
         }
     }

@@ -70,6 +70,12 @@ static void svc_yaml_parse_prov(svc_yaml_state_t *st, struct yaml_node *item)
     const char *pr = svc_yaml_item_str(item, "max_retries");
     if (pr)
         st->cur_p.max_retries = (int)strtol(pr, NULL, 10);
+    const char *pf = svc_yaml_item_str(item, "api_format");
+    if (pf)
+        AIRY_STRNCPY_TERM(st->cur_p.api_format, pf, sizeof(st->cur_p.api_format));
+    const char *px = svc_yaml_item_str(item, "extra_headers");
+    if (px)
+        AIRY_STRNCPY_TERM(st->cur_p.extra_headers, px, sizeof(st->cur_p.extra_headers));
 
     if (st->pcfg_count < 16) {
         st->pcfg[st->pcfg_count++] = st->cur_p;
@@ -106,6 +112,7 @@ static void svc_yaml_parse_model(svc_yaml_state_t *st, struct yaml_node *item)
     const char *tr = svc_yaml_item_str(item, "tool_rounds");
     const char *vi = svc_yaml_item_str(item, "vision");
     const char *th = svc_yaml_item_str(item, "thinking");
+    const char *xh = svc_yaml_item_str(item, "extra_headers");
 
     const char *model_name = (mid && mid[0]) ? mid : (n ? n : NULL);
     const char *prov_name = p ? p : (n ? n : NULL);
@@ -131,12 +138,8 @@ static void svc_yaml_parse_model(svc_yaml_state_t *st, struct yaml_node *item)
     if (ep) {
         AIRY_STRNCPY_TERM(m->endpoint, ep, sizeof(m->endpoint));
     } else if (bu && bu[0]) {
-        /* v2：base_url 为服务根地址，按 api_format 补后缀 */
-        const char *adapter = "openai";
-        if (fmt && strcasecmp(fmt, "anthropic") == 0)
-            adapter = "anthropic";
-        snprintf(m->endpoint, sizeof(m->endpoint), "%s%s", bu,
-                 (strcmp(adapter, "anthropic") == 0) ? "/messages" : "/chat/completions");
+        /* v2：base_url 为服务根地址，请求路径归适配器所有 */
+        AIRY_STRNCPY_TERM(m->endpoint, bu, sizeof(m->endpoint));
     }
     if (t)
         m->timeout_sec = (int)strtol(t, NULL, 10);
@@ -167,6 +170,8 @@ static void svc_yaml_parse_model(svc_yaml_state_t *st, struct yaml_node *item)
     }
     if (th)
         AIRY_STRNCPY_TERM(m->thinking, th, sizeof(m->thinking));
+    if (xh)
+        AIRY_STRNCPY_TERM(m->extra_headers, xh, sizeof(m->extra_headers));
     st->model_count++;
 }
 
@@ -204,29 +209,31 @@ int svc_yaml_load_state(const char *config_path, svc_yaml_state_t *st)
 void svc_yaml_expand_llm(svc_yaml_state_t *st)
 {
     const svc_model_llm_config_t *llm_cfg = &st->llm;
-    if (llm_cfg->model[0]) {
-        for (size_t pi = 0; pi < st->pcfg_count; ++pi) {
-            for (size_t k = 0; k < st->pcfg[pi].model_count; ++k)
-                AIRY_FREE(st->pcfg[pi].model_names[k]);
-            st->pcfg[pi].model_count = 0;
-        }
-        st->pcfg_count = 0;
-        int is_anth = strcasecmp(llm_cfg->api_format, "anthropic") == 0;
-        __builtin_memset(&st->models[0], 0, sizeof(st->models[0]));
-        st->models[0].max_output_tokens = llm_cfg->max_output_tokens;
-        AIRY_STRNCPY_TERM(st->models[0].name, llm_cfg->model, sizeof(st->models[0].name));
-        AIRY_STRNCPY_TERM(st->models[0].provider, is_anth ? "anthropic" : "openai",
-                          sizeof(st->models[0].provider));
-        if (llm_cfg->api_key_env[0])
-            AIRY_STRNCPY_TERM(st->models[0].api_key_env, llm_cfg->api_key_env,
-                              sizeof(st->models[0].api_key_env));
-        if (llm_cfg->base_url[0])
-            snprintf(st->models[0].endpoint, sizeof(st->models[0].endpoint), "%s%s",
-                     llm_cfg->base_url, is_anth ? "/messages" : "/chat/completions");
-        st->model_count = 1;
-        SVC_LOG_INFO("C-L02: SVC: expanded simplified llm section "
-                     "(format=%s base_url=%s model=%s)",
-                     llm_cfg->api_format[0] ? llm_cfg->api_format : "openai",
-                     llm_cfg->base_url[0] ? llm_cfg->base_url : "(default)", llm_cfg->model);
+    if (!llm_cfg->model[0])
+        return;
+
+    for (size_t pi = 0; pi < st->pcfg_count; ++pi) {
+        for (size_t k = 0; k < st->pcfg[pi].model_count; ++k)
+            AIRY_FREE(st->pcfg[pi].model_names[k]);
+        st->pcfg[pi].model_count = 0;
     }
+    st->pcfg_count = 0;
+
+    const char *fmt = llm_cfg->api_format[0] ? llm_cfg->api_format : "chat";
+    model_entry_t *m = &st->models[0];
+    __builtin_memset(m, 0, sizeof(*m));
+    AIRY_STRNCPY_TERM(m->name, llm_cfg->model, sizeof(m->name));
+    AIRY_STRNCPY_TERM(m->provider, fmt, sizeof(m->provider));
+    AIRY_STRNCPY_TERM(m->api_format, fmt, sizeof(m->api_format));
+    m->max_output_tokens = llm_cfg->max_output_tokens;
+    if (llm_cfg->api_key_env[0])
+        AIRY_STRNCPY_TERM(m->api_key_env, llm_cfg->api_key_env, sizeof(m->api_key_env));
+    if (llm_cfg->base_url[0])
+        AIRY_STRNCPY_TERM(m->endpoint, llm_cfg->base_url, sizeof(m->endpoint));
+    if (llm_cfg->extra_headers[0])
+        AIRY_STRNCPY_TERM(m->extra_headers, llm_cfg->extra_headers, sizeof(m->extra_headers));
+    st->model_count = 1;
+    SVC_LOG_INFO("C-L02: SVC: expanded simplified llm section "
+                 "(format=%s base_url=%s model=%s)",
+                 fmt, llm_cfg->base_url[0] ? llm_cfg->base_url : "(unset)", llm_cfg->model);
 }

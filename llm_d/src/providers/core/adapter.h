@@ -28,8 +28,10 @@ typedef struct provider_ctx provider_ctx_t;
 
 typedef struct {
     /* ── 身份数据槽 ── */
-    const char *name;
-    const char *tag; /* 日志前缀（如 "OPENAI"），driver 统一日志使用 */
+    const char *name; /* 线格式名（api_format 值），亦为查找键 */
+    const char *tag;  /* 日志前缀，driver 统一日志使用 */
+    /* 厂商默认值不在此处：端点、模型、附加头一律由 model.yaml 注入；
+     * 仅线格式必需且厂商无关的路径/头可静态给出。二者可为 NULL。 */
     const char *default_model;
     const char *default_base_url;
     const char *chat_path;                 /* 追加在 api_base 之后的端点路径 */
@@ -53,8 +55,8 @@ typedef struct {
                            llm_response_t **out_response);
 
     /* ── 五纯函数槽（方案 12.16.3）：适配层仅存的协议差异面。
-     * feed_event 为 NULL 表示 OpenAI 行协议流（on_chunk 走 core
-     * provider_openai_on_chunk 机制件）；非 NULL 为具名事件流。 */
+     * feed_event 为 NULL 表示行协议流（on_chunk 走 core
+     * provider_stream_on_chunk 机制件）；非 NULL 为具名事件流。 */
     char *(*build_request)(const llm_request_config_t *manager);
     int (*parse_response)(const char *body, llm_response_t **out);
     provider_sse_event_cb_t feed_event;
@@ -88,17 +90,16 @@ typedef struct {
 provider_base_ctx_t *provider_base_ctx(provider_ctx_t *ctx);
 
 /**
- * @brief 按厂商名查适配器 ops（装配 SSoT 在 adapters/adapter_table.c）。
+ * @brief 按线格式名查适配器 ops（装配 SSoT 在 adapters/adapter_table.c）。
  *
  * core 侧不持有任何厂商符号与厂商名分支；注册新适配仅在 adapter_table.c
- * 表尾加一行。未知名回落 OpenAI 兼容适配：任一非内建厂商（glm / qwen /
- * moonshot / siliconflow / spark / minimax / 自定义名）仅需 model.yaml 提
- * 供 base_url + api_key 即以统一 OpenAI Chat Completions 协议接入。
+ * 表尾加一行。未知名回落行协议（chat）适配并记 WARN：任一端点仅需
+ * model.yaml 提供 api_format + base_url + api_key 即可接入。
  *
- * @param name 厂商名（可为 NULL，等价未知名）
+ * @param fmt 线格式名（可为 NULL，等价未知名）
  * @return 适配器 ops（永不为 NULL）
  */
-const provider_adapter_t *provider_adapter_lookup(const char *name);
+const provider_adapter_t *provider_adapter_lookup(const char *fmt);
 
 #ifdef __cplusplus
 }
