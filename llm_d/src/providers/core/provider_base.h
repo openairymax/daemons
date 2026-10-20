@@ -18,6 +18,8 @@ typedef struct {
     char api_key_env[128];
     char api_base[512];
     char organization[128];
+    /* 端点附加头（如协议版本头），由 model.yaml extra_headers 注入，多条以 ';' 或换行分隔。 */
+    char extra_headers[512];
     double timeout_sec;
     int max_retries;
     provider_retry_class_t retry_class;
