@@ -4,8 +4,7 @@
 /**
  * @file service_providers.c
  * @brief LLM service provider-management domain: provider-config
- *        copy/merge/release, default-model metadata and llm_router
- *        endpoint registration.
+ *        copy/merge/release and llm_router endpoint registration.
  */
 
 #include "airy_memory.h"
@@ -13,6 +12,7 @@
 #include "service.h"
 #include "svc_logger.h"
 
+#include "accounting/cost_tracker.h"
 #include "router/core/llm_router.h"
 
 #include <stdbool.h>
@@ -29,6 +29,8 @@ static void free_provider_fields(provider_config_t *prov)
     AIRY_FREE((void *)prov->api_key);
     AIRY_FREE((void *)prov->api_base);
     AIRY_FREE((void *)prov->organization);
+    AIRY_FREE((void *)prov->api_format);
+    AIRY_FREE((void *)prov->extra_headers);
     if (prov->models) {
         for (size_t j = 0; prov->models[j]; ++j)
             AIRY_FREE(prov->models[j]);
@@ -61,6 +63,10 @@ static provider_config_t provider_config_dup(const provider_config_t *src)
         d.api_base = AIRY_STRDUP(src->api_base);
     if (src->organization)
         d.organization = AIRY_STRDUP(src->organization);
+    if (src->api_format)
+        d.api_format = AIRY_STRDUP(src->api_format);
+    if (src->extra_headers)
+        d.extra_headers = AIRY_STRDUP(src->extra_headers);
     d.timeout_sec = src->timeout_sec;
     d.max_retries = src->max_retries;
     if (src->models) {
@@ -129,45 +135,19 @@ void merge_provider_configs(const provider_config_t *main_provs, size_t main_cnt
     *out_cnt = mc;
 }
 
-/* Strategy-side default model metadata SSoT. Used to fill the cost/latency/caps
- * fields at endpoint registration when the caller provides no explicit values;
- * config-file overrides take precedence upstream. */
+/* Router-table registration context: prices come from the same rule table
+ * the cost tracker consumes, so the model table has a single price source
+ * (model.yaml). Latency and capability fields carry protocol-neutral
+ * defaults; the routing path only ever requires chat/completion/streaming. */
 typedef struct {
-    const char *prefix;
-    double cost_per_1k_input;
-    double cost_per_1k_output;
-    uint32_t avg_latency_ms;
-    uint32_t capabilities;
-} model_default_meta_t;
-
-static const model_default_meta_t MODEL_DEFAULT_META[] = {
-    {"gpt-4", 0.03, 0.06, 1200,
-     LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING | LLM_CAP_FUNCTION_CALL},
-    {"gpt-3.5", 0.001, 0.002, 1000, LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING},
-    {"claude", 0.015, 0.075, 1100,
-     LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING | LLM_CAP_FUNCTION_CALL},
-    {"deepseek", 0.00014, 0.00028, 900,
-     LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING | LLM_CAP_FUNCTION_CALL},
-    {"gemini", 0.0005, 0.0015, 1000,
-     LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING | LLM_CAP_VISION},
-};
-
-static const model_default_meta_t *lookup_model_meta(const char *model_name)
-{
-    if (!model_name)
-        return NULL;
-    for (size_t i = 0; i < sizeof(MODEL_DEFAULT_META) / sizeof(MODEL_DEFAULT_META[0]); i++) {
-        size_t plen = strlen(MODEL_DEFAULT_META[i].prefix);
-        if (strncmp(model_name, MODEL_DEFAULT_META[i].prefix, plen) == 0) {
-            return &MODEL_DEFAULT_META[i];
-        }
-    }
-    return NULL;
-}
+    const pricing_rule_t *rules;
+    int rule_count;
+    int registered;
+} router_reg_t;
 
 static int register_endpoint_cb(const char *provider_name, const char *model_name, void *user_data)
 {
-    int *registered_count = (int *)user_data;
+    router_reg_t *reg = (router_reg_t *)user_data;
 
     llm_endpoint_t ep;
     __builtin_memset(&ep, 0, sizeof(ep));
@@ -177,24 +157,14 @@ static int register_endpoint_cb(const char *provider_name, const char *model_nam
     ep.enabled = true;
     ep.priority = 0;
     ep.context_window = 8192;
-
-    const model_default_meta_t *meta = lookup_model_meta(model_name);
-    if (meta) {
-        ep.cost_per_1k_input = meta->cost_per_1k_input;
-        ep.cost_per_1k_output = meta->cost_per_1k_output;
-        ep.avg_latency_ms = meta->avg_latency_ms;
-        ep.capabilities = meta->capabilities;
-    } else {
-
-        ep.cost_per_1k_input = 0.001;
-        ep.cost_per_1k_output = 0.002;
-        ep.avg_latency_ms = 1000;
-        ep.capabilities = LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING;
-    }
+    ep.avg_latency_ms = 1000;
+    ep.capabilities = LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING;
+    cost_tracker_price(reg->rules, reg->rule_count, model_name, &ep.cost_per_1k_input,
+                       &ep.cost_per_1k_output);
 
     int rc = llm_router_register_endpoint(&ep);
     if (rc == 0) {
-        (*registered_count)++;
+        reg->registered++;
     } else {
         SVC_LOG_WARN("C-L02: SVC: router endpoint register FAILED for %s/%s (rc=%d)", provider_name,
                      model_name, rc);
@@ -204,7 +174,7 @@ static int register_endpoint_cb(const char *provider_name, const char *model_nam
 
 void register_router_endpoints(llm_service_t *svc)
 {
-    int registered_count = 0;
-    provider_registry_enumerate(svc->registry, register_endpoint_cb, &registered_count);
-    SVC_LOG_INFO("C-L02: SVC: registered %d endpoints into llm_router", registered_count);
+    router_reg_t reg = {(const pricing_rule_t *)svc->rules, (int)svc->rule_count, 0};
+    provider_registry_enumerate(svc->registry, register_endpoint_cb, &reg);
+    SVC_LOG_INFO("C-L02: SVC: registered %d endpoints into llm_router", reg.registered);
 }

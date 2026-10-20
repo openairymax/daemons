@@ -503,9 +503,7 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
 
     if (resp) {
         note_truncation(resp, hit.model, hit.max_tokens);
-        cost_tracker_add(svc->cost, hit.model, resp->prompt_tokens, resp->completion_tokens);
-        resp->cost_usd = cost_tracker_estimate(svc->cost, hit.model, resp->prompt_tokens,
-                                               resp->completion_tokens);
+        update_cost_tracking(svc, hit.model, resp);
     }
 
     if (out_response)
