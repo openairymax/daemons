@@ -26,19 +26,6 @@
 #include "daemon_main.h"
 
 #define LLM_TIME_CTX_CAP 256
-
-/* parse_params 失败前把具体原因写入 ctx->fail_reason，使 complete/
- * complete_stream 的 -32602 响应携带可辨识的失败环节，而非笼统的
- * "Invalid params"。AIRY_ERROR 负责压错误栈并返回，本宏仅在其前填充
- * fail_reason。 */
-#define LLM_PARSE_FAIL(ctx, code, msg)                                      \
-    do {                                                                    \
-        if ((ctx)) {                                                        \
-            snprintf((ctx)->fail_reason, sizeof((ctx)->fail_reason), "%s", (msg)); \
-        }                                                                   \
-        AIRY_ERROR((code), (msg));                                          \
-    } while (0)
-
 /**
  * @brief Build a "current host time" system context string
  *
@@ -135,215 +122,225 @@ void request_context_destroy(request_context_t *ctx)
     AIRY_FREE(ctx->tools_json);
     AIRY_FREE(ctx);
 }
-
 /**
  * @brief Parse request params into llm_request_config_t
- * @param params JSON params object
- * @param ctx    Request context (used to store messages)
- * @param cfg    Output config
- * @return 0 on success, non-zero on failure
+ *
+ * 按字段域拆成独立阶段，任一阶段失败都经 msg_fail 统一回收，半装入状态
+ * 不外泄。
  */
-static void parse_params_cleanup(request_context_t *ctx, llm_request_config_t *cfg)
+
+/* 解析域的栈上上下文：ctx/cfg 双指针收拢为单参数，使各阶段签名与失败
+ * 出口保持单行。 */
+typedef struct {
+    request_context_t *ctx;
+    llm_request_config_t *cfg;
+} req_env_t;
+
+/* 释放本轮已装入的 model / messages / tools；消息计数一并归零，关闭
+ * 重复释放窗口。 */
+static void req_cleanup(req_env_t *r)
 {
-    AIRY_FREE((void *)cfg->model);
-    cfg->model = NULL;
-    messages_release(ctx);
-    AIRY_FREE(ctx->tools_json);
-    ctx->tools_json = NULL;
+    AIRY_FREE((void *)r->cfg->model);
+    r->cfg->model = NULL;
+    messages_release(r->ctx);
+    AIRY_FREE(r->ctx->tools_json);
+    r->ctx->tools_json = NULL;
+}
+
+/* 解析失败的统一出口：先把消息计数收敛到 keep（半填槽位纳入回收上界），
+ * 再释放已分配资源，并把具体环节写入 fail_reason。 */
+static int msg_fail(req_env_t *r, size_t keep, int code, const char *msg)
+{
+    r->ctx->message_count = keep;
+    req_cleanup(r);
+    snprintf(r->ctx->fail_reason, sizeof(r->ctx->fail_reason), "%s", msg);
+    AIRY_ERROR(code, msg);
+}
+
+static int is_dg(char c)
+{
+    return c >= '0' && c <= '9';
+}
+
+/* 首条内容出现 YYYY-MM-DD 即视为真实日期戳，命中即返回（合法性由注入方
+ * 负责）。按长度界定扫描窗口，避免越过字符串尾部读取。 */
+static int has_date_ts(const char *p)
+{
+    size_t n = strlen(p);
+    for (size_t i = 0; i + 10 <= n; ++i)
+        if (is_dg(p[i]) && is_dg(p[i + 1]) && is_dg(p[i + 2]) && is_dg(p[i + 3]) &&
+            p[i + 4] == '-' && is_dg(p[i + 5]) && is_dg(p[i + 6]) && p[i + 7] == '-' &&
+            is_dg(p[i + 8]) && is_dg(p[i + 9]))
+            return 1;
+    return 0;
+}
+
+/* 首条 system 消息是否已带真实日期时间戳。提示词里仅提及"当前时间"字样
+ * 不算注入，仍须补注，否则模型会按训练期时间作答。 */
+static int msg_has_time(cJSON *messages)
+{
+    cJSON *first = cJSON_GetArrayItem(messages, 0);
+    cJSON *role = cJSON_GetObjectItem(first, "role");
+    cJSON *text = cJSON_GetObjectItem(first, "content");
+    if (!cJSON_IsString(role) || strcmp(role->valuestring, "system") != 0)
+        return 0;
+    if (!cJSON_IsString(text) || !text->valuestring || !text->valuestring[0])
+        return 0;
+    return has_date_ts(text->valuestring);
+}
+
+/* 时间感知注入：宿主机当前时间作为 system 消息占据 slot 0，其后消息整体
+ * 后移一位（*base = 1）。 */
+static int inject_time(req_env_t *r, size_t count, size_t *base)
+{
+    if (count + 1 > MAX_MESSAGES_PER_REQUEST)
+        return msg_fail(r, 0, AIRY_ERR_OVERFLOW, "too many messages");
+    char tbuf[LLM_TIME_CTX_CAP];
+    llm_build_time_context(tbuf, sizeof(tbuf));
+    r->ctx->messages[0].role = AIRY_STRDUP("system");
+    r->ctx->messages[0].content = AIRY_STRDUP(tbuf);
+    if (!r->ctx->messages[0].role || !r->ctx->messages[0].content)
+        return msg_fail(r, 1, AIRY_ERR_OUT_OF_MEMORY, "failed to inject time context");
+    *base = 1;
+    SVC_LOG_DEBUG("C-L02: SVC: injected host time context: %s", tbuf);
+    return 0;
+}
+
+/* 可选字符串字段：仅非空字符串才复制；返回 -1 表示分配失败。 */
+static int dup_opt(cJSON *item, const char *key, const char **dst)
+{
+    cJSON *v = cJSON_GetObjectItem(item, key);
+    if (!cJSON_IsString(v) || !v->valuestring || !v->valuestring[0])
+        return 0;
+    *dst = AIRY_STRDUP(v->valuestring);
+    return *dst ? 0 : -1;
+}
+
+/* 单个消息槽：role/content 必填，reasoning_content / tool_call_id /
+ * tool_calls 可选。分配失败以 slot + 1 为回收上界，半填槽位一并释放。 */
+static int fill_msg(req_env_t *r, cJSON *item, size_t slot)
+{
+    llm_message_t *m = &r->ctx->messages[slot];
+    cJSON *role = cJSON_GetObjectItem(item, "role");
+    cJSON *content = cJSON_GetObjectItem(item, "content");
+    if (!cJSON_IsString(role) || !cJSON_IsString(content))
+        return msg_fail(r, slot + 1, AIRY_ERR_INVALID_PARAM, "invalid message role/content");
+    m->role = AIRY_STRDUP(role->valuestring);
+    m->content = AIRY_STRDUP(content->valuestring);
+    if (!m->role || !m->content)
+        return msg_fail(r, slot + 1, AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate role/content");
+    if (dup_opt(item, "reasoning_content", &m->reasoning_content) != 0)
+        return msg_fail(r, slot + 1, AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate reasoning");
+    if (dup_opt(item, "tool_call_id", &m->tool_call_id) != 0)
+        return msg_fail(r, slot + 1, AIRY_ERR_OUT_OF_MEMORY, "failed to dup tool_call_id");
+    cJSON *tcalls = cJSON_GetObjectItem(item, "tool_calls");
+    if (!cJSON_IsArray(tcalls) || cJSON_GetArraySize(tcalls) == 0)
+        return 0;
+    m->tool_calls_json = cJSON_PrintUnformatted(tcalls);
+    if (!m->tool_calls_json)
+        return msg_fail(r, slot + 1, AIRY_ERR_OUT_OF_MEMORY, "failed to serialize tool_calls");
+    SVC_LOG_INFO("C-L02: SVC: msg[%zu] role=%s tool_calls=%.400s", slot,
+                 m->role ? m->role : "?", m->tool_calls_json);
+    return 0;
+}
+
+/* 消息数组装配：先判定是否补注时间上下文，再逐槽填充。计数在填充前一次
+ * 性置位，使 fill_msg 的失败上界不大于该值。 */
+static int fill_msgs(req_env_t *r, cJSON *messages, size_t count)
+{
+    size_t base = 0;
+    if (!msg_has_time(messages)) {
+        int rc = inject_time(r, count, &base);
+        if (rc != 0)
+            return rc;
+    }
+    r->ctx->message_count = count + base;
+    r->cfg->message_count = count + base;
+    r->cfg->messages = r->ctx->messages;
+    for (size_t i = 0; i < count; ++i) {
+        int rc = fill_msg(r, cJSON_GetArrayItem(messages, i), i + base);
+        if (rc != 0)
+            return rc;
+    }
+    return 0;
+}
+
+/* messages 参数：必须是非空数组且不超过每请求上限。 */
+static int parse_messages(req_env_t *r, cJSON *params)
+{
+    cJSON *messages = cJSON_GetObjectItem(params, "messages");
+    size_t count = cJSON_IsArray(messages) ? (size_t)cJSON_GetArraySize(messages) : 0;
+    if (count == 0)
+        return msg_fail(r, 0, AIRY_ERR_INVALID_PARAM, "messages must be a non-empty array");
+    if (count > MAX_MESSAGES_PER_REQUEST)
+        return msg_fail(r, 0, AIRY_ERR_OVERFLOW, "too many messages");
+    return fill_msgs(r, messages, count);
+}
+
+/* model 参数：显式给出则复制，缺省回落到 global.default_model。 */
+static int parse_model(req_env_t *r, cJSON *params)
+{
+    cJSON *m = cJSON_GetObjectItem(params, "model");
+    const char *src = cJSON_IsString(m) ? m->valuestring
+                      : (g_service ? llm_service_default_model(g_service) : NULL);
+    if (!src)
+        return msg_fail(r, 0, AIRY_ERR_INVALID_PARAM, "model missing and no default");
+    r->cfg->model = AIRY_STRDUP(src);
+    if (!r->cfg->model)
+        return msg_fail(r, 0, AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate model string");
+    return 0;
+}
+
+/* 数值参数：类型相符才覆盖，缺省值由 parse_params 起手的 memset 给出。 */
+static double num_or(cJSON *params, const char *key, double dflt)
+{
+    cJSON *v = cJSON_GetObjectItem(params, key);
+    return cJSON_IsNumber(v) ? v->valuedouble : dflt;
+}
+
+/* 采样参数：cacheable 缺省 0 即 B5-3 的 fail-closed，此处只覆盖显式且
+ * 类型相符的项。 */
+static void parse_sampling(cJSON *params, llm_request_config_t *cfg)
+{
+    cJSON *v;
+    cfg->temperature = (float)num_or(params, "temperature", cfg->temperature);
+    cfg->top_p = (float)num_or(params, "top_p", cfg->top_p);
+    cfg->max_tokens = (int)num_or(params, "max_tokens", cfg->max_tokens);
+    cfg->presence_penalty = num_or(params, "presence_penalty", cfg->presence_penalty);
+    cfg->frequency_penalty = num_or(params, "frequency_penalty", cfg->frequency_penalty);
+    v = cJSON_GetObjectItem(params, "stream");
+    if (cJSON_IsBool(v))
+        cfg->stream = cJSON_IsTrue(v);
+    v = cJSON_GetObjectItem(params, "cacheable");
+    if (cJSON_IsBool(v))
+        cfg->cacheable = cJSON_IsTrue(v);
+}
+
+/* tools 参数：序列化后由 ctx 持有所有权，cfg 只借用指针。 */
+static int parse_tools(req_env_t *r, cJSON *params)
+{
+    cJSON *tools = cJSON_GetObjectItem(params, "tools");
+    if (!cJSON_IsArray(tools) || cJSON_GetArraySize(tools) == 0)
+        return 0;
+    r->ctx->tools_json = cJSON_PrintUnformatted(tools);
+    if (!r->ctx->tools_json)
+        return msg_fail(r, r->ctx->message_count, AIRY_ERR_OUT_OF_MEMORY,
+                        "failed to serialize tools");
+    r->cfg->tools_json = r->ctx->tools_json;
+    return 0;
 }
 
 int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cfg)
 {
     __builtin_memset(cfg, 0, sizeof(llm_request_config_t));
+    req_env_t r = {ctx, cfg};
 
-    cJSON *model = cJSON_GetObjectItem(params, "model");
-    if (cJSON_IsString(model)) {
-        cfg->model = AIRY_STRDUP(model->valuestring);
-    } else {
-        /* A2-2: when model is omitted, fall back to global.default_model
-         * (previously llm_d had no default concept; an empty model always
-         * returned INVALID_PARAM, forcing clients to specify a model) */
-        const char *def = g_service ? llm_service_default_model(g_service) : NULL;
-        if (def) {
-            cfg->model = AIRY_STRDUP(def);
-        } else {
-            LLM_PARSE_FAIL(ctx, AIRY_ERR_INVALID_PARAM,
-                           "model parameter is not a string and no default model configured");
-        }
-    }
-    if (!cfg->model) {
-        LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate model string");
-    }
-
-    cJSON *messages = cJSON_GetObjectItem(params, "messages");
-    if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) == 0) {
-        parse_params_cleanup(ctx, cfg);
-        LLM_PARSE_FAIL(ctx, AIRY_ERR_INVALID_PARAM, "messages must be a non-empty array");
-    }
-    if (cJSON_IsArray(messages)) {
-        size_t count = cJSON_GetArraySize(messages);
-        if (count > MAX_MESSAGES_PER_REQUEST) {
-            parse_params_cleanup(ctx, cfg);
-            LLM_PARSE_FAIL(ctx, AIRY_ERR_OVERFLOW, "too many messages");
-        }
-
-        /* 时间感知注入（2026-08-17）：把宿主机当前时间作为 system 消息
-         * 注入到消息数组头部。模型据此感知"今天/现在/星期几"，多轮上下文
-         * 拼接不再时间漂移。仅当首条 system 消息已包含**真实日期时间戳**
-         * （YYYY-MM-DD 形式，客户端主动注入）时跳过；提示词中仅提及
-         * "当前时间"字样（如 CLI 系统提示词描述"系统上下文已注入当前时间"）
-         * 不代表真实时间已注入，仍须补注，避免模型幻觉。 */
-        int time_injected = 0;
-        if (count > 0) {
-            cJSON *first = cJSON_GetArrayItem(messages, 0);
-            cJSON *frole = cJSON_GetObjectItem(first, "role");
-            cJSON *fcontent = cJSON_GetObjectItem(first, "content");
-            if (cJSON_IsString(frole) && strcmp(frole->valuestring, "system") == 0 &&
-                cJSON_IsString(fcontent) && fcontent->valuestring &&
-                fcontent->valuestring[0]) {
-                /* 检测真实日期时间戳：YYYY-MM-DD（客户端注入的时间上下文
-                 * 形如 "当前时间：2026-08-17 星期一 23:18 ..."）。 */
-                const char *p = fcontent->valuestring;
-                for (; *p; ++p) {
-                    if (p[0] >= '0' && p[0] <= '9' && p[1] >= '0' && p[1] <= '9' &&
-                        p[2] >= '0' && p[2] <= '9' && p[3] >= '0' && p[3] <= '9' &&
-                        p[4] == '-' && p[5] >= '0' && p[5] <= '9' && p[6] >= '0' &&
-                        p[6] <= '9' && p[7] == '-' && p[8] >= '0' && p[8] <= '9' &&
-                        p[9] >= '0' && p[9] <= '9') {
-                        time_injected = 1;
-                        break;
-                    }
-                }
-            }
-        }
-        size_t base = 0;
-        if (!time_injected) {
-            if (count + 1 > MAX_MESSAGES_PER_REQUEST) {
-                parse_params_cleanup(ctx, cfg);
-                LLM_PARSE_FAIL(ctx, AIRY_ERR_OVERFLOW, "too many messages");
-            }
-            char tbuf[LLM_TIME_CTX_CAP];
-            llm_build_time_context(tbuf, sizeof(tbuf));
-            ctx->messages[0].role = AIRY_STRDUP("system");
-            ctx->messages[0].content = AIRY_STRDUP(tbuf);
-            if (!ctx->messages[0].role || !ctx->messages[0].content) {
-                ctx->message_count = 1;
-                parse_params_cleanup(ctx, cfg);
-                LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY, "failed to inject time context");
-            }
-            base = 1;
-            SVC_LOG_DEBUG("C-L02: SVC: injected host time context: %s", tbuf);
-        }
-
-        ctx->message_count = count + base;
-        cfg->message_count = count + base;
-        cfg->messages = ctx->messages;
-
-        for (size_t i = 0; i < count; ++i) {
-            size_t slot = i + base;
-            cJSON *item = cJSON_GetArrayItem(messages, i);
-            cJSON *role = cJSON_GetObjectItem(item, "role");
-            cJSON *content = cJSON_GetObjectItem(item, "content");
-
-            if (!cJSON_IsString(role) || !cJSON_IsString(content)) {
-                parse_params_cleanup(ctx, cfg);
-                LLM_PARSE_FAIL(ctx, AIRY_ERR_INVALID_PARAM,
-                               "message role or content is not a string");
-            }
-
-            ctx->messages[slot].role = AIRY_STRDUP(role->valuestring);
-            ctx->messages[slot].content = AIRY_STRDUP(content->valuestring);
-
-            if (!ctx->messages[slot].role || !ctx->messages[slot].content) {
-                ctx->message_count = slot + 1;
-                parse_params_cleanup(ctx, cfg);
-                LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY,
-                               "failed to duplicate message role or content");
-            }
-
-            cJSON *reasoning = cJSON_GetObjectItem(item, "reasoning_content");
-            if (cJSON_IsString(reasoning) && reasoning->valuestring && reasoning->valuestring[0]) {
-                ctx->messages[slot].reasoning_content = AIRY_STRDUP(reasoning->valuestring);
-                if (!ctx->messages[slot].reasoning_content) {
-                    ctx->message_count = slot + 1;
-                    parse_params_cleanup(ctx, cfg);
-                    LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY,
-                                   "failed to duplicate reasoning_content");
-                }
-            }
-
-            cJSON *tcid = cJSON_GetObjectItem(item, "tool_call_id");
-            if (cJSON_IsString(tcid) && tcid->valuestring && tcid->valuestring[0]) {
-                ctx->messages[slot].tool_call_id = AIRY_STRDUP(tcid->valuestring);
-                if (!ctx->messages[slot].tool_call_id) {
-                    ctx->message_count = slot + 1;
-                    parse_params_cleanup(ctx, cfg);
-                    LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY,
-                                   "failed to duplicate tool_call_id");
-                }
-            }
-
-            cJSON *tcalls = cJSON_GetObjectItem(item, "tool_calls");
-            if (cJSON_IsArray(tcalls) && cJSON_GetArraySize(tcalls) > 0) {
-                ctx->messages[slot].tool_calls_json = cJSON_PrintUnformatted(tcalls);
-                SVC_LOG_INFO("C-L02: SVC: msg[%zu] role=%s tool_calls=%.400s", slot,
-                             ctx->messages[slot].role ? ctx->messages[slot].role : "?",
-                             ctx->messages[slot].tool_calls_json ? ctx->messages[slot].tool_calls_json
-                                                                 : "(null)");
-                if (!ctx->messages[slot].tool_calls_json) {
-                    ctx->message_count = slot + 1;
-                    parse_params_cleanup(ctx, cfg);
-                    LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY, "failed to serialize tool_calls");
-                }
-            }
-        }
-    }
-
-    cJSON *temp = cJSON_GetObjectItem(params, "temperature");
-    if (cJSON_IsNumber(temp)) {
-        cfg->temperature = (float)temp->valuedouble;
-    }
-
-    cJSON *top_p = cJSON_GetObjectItem(params, "top_p");
-    if (cJSON_IsNumber(top_p)) {
-        cfg->top_p = (float)top_p->valuedouble;
-    }
-
-    cJSON *max_tokens = cJSON_GetObjectItem(params, "max_tokens");
-    if (cJSON_IsNumber(max_tokens)) {
-        cfg->max_tokens = max_tokens->valueint;
-    }
-
-    cJSON *stream = cJSON_GetObjectItem(params, "stream");
-    if (cJSON_IsBool(stream)) {
-        cfg->stream = cJSON_IsTrue(stream) ? 1 : 0;
-    }
-
-    /* B5-3 缓存准入声明：缺省 0（fail-closed），由本函数起手的 memset 保证 */
-    cJSON *cacheable = cJSON_GetObjectItem(params, "cacheable");
-    if (cJSON_IsBool(cacheable)) {
-        cfg->cacheable = cJSON_IsTrue(cacheable) ? 1 : 0;
-    }
-
-    cJSON *presence_penalty = cJSON_GetObjectItem(params, "presence_penalty");
-    if (cJSON_IsNumber(presence_penalty)) {
-        cfg->presence_penalty = presence_penalty->valuedouble;
-    }
-
-    cJSON *frequency_penalty = cJSON_GetObjectItem(params, "frequency_penalty");
-    if (cJSON_IsNumber(frequency_penalty)) {
-        cfg->frequency_penalty = frequency_penalty->valuedouble;
-    }
-
-    cJSON *tools = cJSON_GetObjectItem(params, "tools");
-    if (cJSON_IsArray(tools) && cJSON_GetArraySize(tools) > 0) {
-        ctx->tools_json = cJSON_PrintUnformatted(tools);
-        if (!ctx->tools_json) {
-            parse_params_cleanup(ctx, cfg);
-            LLM_PARSE_FAIL(ctx, AIRY_ERR_OUT_OF_MEMORY, "failed to serialize tools");
-        }
-        cfg->tools_json = ctx->tools_json;
-    }
-
-    return 0;
+    int rc = parse_model(&r, params);
+    if (rc != 0)
+        return rc;
+    rc = parse_messages(&r, params);
+    if (rc != 0)
+        return rc;
+    parse_sampling(params, cfg);
+    return parse_tools(&r, params);
 }
