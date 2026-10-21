@@ -10,6 +10,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "io.h"
+#include "platform_misc.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -22,35 +23,224 @@
 #include <sys/wait.h>
 #else
 #include <windows.h>
-#include <direct.h> /* _mkdir */
 #endif
 
 #include "market_service_internal.h"
 
-#ifdef _WIN32
-/* MSVC UCRT 在 NONSTDC 关闭路径不导出 POSIX 名 mkdir（L7 实证），改走
- * _mkdir —— 与 commons platform.c airy_mkdir 同策略。模式位 Windows 忽略。 */
-static int market_dir_create(const char *path)
+/* 安装装配上下文：agent 字段在持锁期间拷出，解锁后原对象可能被并发改写
+ * 或释放。mkt_ 为本文件装配阶段函数的统一前缀（G11 名字长度约束）。 */
+typedef struct {
+    market_service_t *svc;
+    const install_request_t *req;
+    install_result_t *res;
+    install_result_t **out;
+    char *id;
+    char *name;
+    char *version;
+    char *author;
+    char *repo;
+    char *storage;
+    const char *ver;
+    char dir[1024];
+} mkt_inst_t;
+
+static size_t mkt_locate(const market_service_t *svc, const char *id)
 {
-    return _mkdir(path);
+    for (size_t i = 0; i < svc->agent_count; i++) {
+        if (strcmp(svc->agents[i]->agent_id, id) == 0)
+            return i;
+    }
+    return (size_t)-1;
+}
+
+/* 安装入口公共前置校验：两个 install 入口同一套参数与初始化判定。 */
+static int mkt_ready(const market_service_t *svc, const install_request_t *req,
+                     install_result_t **out, const char *fn)
+{
+    if (svc && req && out && svc->initialized)
+        return 0;
+    SVC_LOG_ERROR("%s: NULL parameter or not initialized "
+                  "(service=%p, request=%p, result=%p, initialized=%d)",
+                  fn, (const void *)svc, (const void *)req, (const void *)out,
+                  svc ? svc->initialized : -1);
+    return AIRY_ERR_INVALID_PARAM;
+}
+
+/* 安装结果分配；失败仅记日志，错误码由调用点以自己的文案上报。 */
+static install_result_t *mkt_res_new(const char *fn, const char *what)
+{
+    install_result_t *res = (install_result_t *)AIRY_CALLOC(1, sizeof(*res));
+    if (!res)
+        SVC_LOG_ERROR("%s: calloc failed for %s", fn, what);
+    return res;
+}
+
+static void mkt_snap_free(mkt_inst_t *c)
+{
+    AIRY_FREE(c->id);
+    AIRY_FREE(c->name);
+    AIRY_FREE(c->version);
+    AIRY_FREE(c->author);
+    AIRY_FREE(c->repo);
+    AIRY_FREE(c->storage);
+}
+
+/* 持锁拷出目标 agent 与存储路径：0=成功，1=未找到，-1=内存不足。 */
+static int mkt_snap_take(mkt_inst_t *c)
+{
+    airy_mtx_lock(&c->svc->lock);
+    size_t idx = mkt_locate(c->svc, c->req->id);
+    if (idx == (size_t)-1) {
+        airy_mtx_unlock(&c->svc->lock);
+        return 1;
+    }
+
+    agent_info_t *target = c->svc->agents[idx];
+    c->id = target->agent_id ? AIRY_STRDUP(target->agent_id) : NULL;
+    c->name = target->name ? AIRY_STRDUP(target->name) : NULL;
+    c->version = target->version ? AIRY_STRDUP(target->version) : NULL;
+    c->author = target->author ? AIRY_STRDUP(target->author) : NULL;
+    c->repo = target->repository ? AIRY_STRDUP(target->repository) : NULL;
+    c->storage = c->svc->config.storage_path ? AIRY_STRDUP(c->svc->config.storage_path) : NULL;
+    airy_mtx_unlock(&c->svc->lock);
+    return c->id ? 0 : -1;
+}
+
+/* 选定目标目录并逐级创建：父目录失败仅记日志（既有语义），目标目录失败则中止。 */
+static int mkt_dir_prep(mkt_inst_t *c)
+{
+    const char *base = c->req->install_path ?
+                           c->req->install_path :
+                           (c->storage ? c->storage : market_default_storage("agents"));
+    snprintf(c->dir, sizeof(c->dir), "%s/%s", base, c->req->id);
+
+    if (airy_mkdir_p(base) != 0)
+        SVC_LOG_ERROR("market_service_install_agent: mkdir failed for parent (path=%s, errno=%d)",
+                      base, errno);
+
+    int ret = airy_io_ensure_dir(c->dir);
+    if (ret != 0) {
+        SVC_LOG_ERROR("market_service_install_agent: mkdir failed for install directory "
+                      "(path=%s, errno=%d)",
+                      c->dir, errno);
+        return -1;
+    }
+    return 0;
+}
+
+/* P1-6：安装元数据原子写（同目录 tmp + fsync + rename）。半写的
+ * agent.json 会使已安装状态不可识别，且失败不得静默。 */
+static int mkt_meta_write(mkt_inst_t *c)
+{
+    /* 容量由 c->dir 推导，编译期可证不截断（无需 -Wformat-truncation 抑制）。 */
+    char path[sizeof(c->dir) + 32];
+    snprintf(path, sizeof(path), "%s/agent.json", c->dir);
+
+    char json[2048];
+    int len = snprintf(json, sizeof(json),
+                       "{\n  \"agent_id\": \"%s\",\n  \"name\": \"%s\",\n"
+                       "  \"version\": \"%s\",\n  \"author\": \"%s\",\n"
+                       "  \"status\": \"installed\",\n  \"installed_at\": %lld\n}\n",
+                       c->id ? c->id : "", c->name ? c->name : "", c->ver,
+                       c->author ? c->author : "", (long long)time(NULL));
+    if (len < 0 || len >= (int)sizeof(json) ||
+        airy_io_write_file(path, json, (size_t)len) != 0)
+        return -1;
+    return 0;
+}
+
+#ifdef _WIN32
+/* Windows 等价实现：win_run_command（CreateProcess）替代 fork/execlp/waitpid。
+ * 行为对齐：curl 失败仅保留元数据；成功则解包并清理下载文件。 */
+static void mkt_dl_win(mkt_inst_t *c, const char *dl)
+{
+    const char *const curl_args[] = {"-sfL", "-o", dl, c->repo, NULL};
+    if (win_run_command("curl", curl_args) != 0) {
+        SVC_LOG_WARN("Download failed for agent %s from %s (curl_ret=%d), metadata only install",
+                     c->req->id, c->repo, 1);
+        return;
+    }
+    const char *const tar_args[] = {"-xzf", dl, "-C", c->dir, NULL};
+    win_run_command("tar", tar_args);
+    remove(dl);
 }
 #else
-static int market_dir_create(const char *path)
+/* 执行外部命令并等待退出：返回退出码；-1 表示 fork 失败或非正常终止。 */
+static int mkt_run(const char *cmd, const char *a1, const char *a2, const char *a3,
+                   const char *a4)
 {
-    return mkdir(path, 0755);
+    pid_t pid = fork();
+    if (pid < 0)
+        return -1;
+    if (pid == 0) {
+        execlp(cmd, cmd, a1, a2, a3, a4, (char *)NULL);
+        _exit(127);
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+static void mkt_dl_posix(mkt_inst_t *c, const char *dl)
+{
+    int ret = mkt_run("curl", "-sfL", "-o", dl, c->repo);
+    if (ret < 0) {
+        SVC_LOG_WARN("fork failed for agent %s download: %s", c->req->id, strerror(errno));
+        return;
+    }
+    if (ret > 0) {
+        SVC_LOG_WARN("Download failed for agent %s from %s (curl_ret=%d), metadata only install",
+                     c->req->id, c->repo, ret);
+        return;
+    }
+    mkt_run("tar", "-xzf", dl, "-C", c->dir);
+    remove(dl);
 }
 #endif
+
+static void mkt_fetch_pkg(mkt_inst_t *c)
+{
+    if (!c->repo || !c->repo[0] || !is_valid_url(c->repo))
+        return;
+
+    char dl[sizeof(c->dir) + 32];
+    snprintf(dl, sizeof(dl), "%s/package.tar.gz", c->dir);
+
+#ifdef _WIN32
+    mkt_dl_win(c, dl);
+#else
+    mkt_dl_posix(c, dl);
+#endif
+}
+
+static void mkt_mark_done(market_service_t *svc, const char *id)
+{
+    airy_mtx_lock(&svc->lock);
+    size_t idx = mkt_locate(svc, id);
+    if (idx != (size_t)-1) {
+        svc->agents[idx]->status = AGENT_STATUS_AVAILABLE;
+        svc->agents[idx]->download_count++;
+    }
+    airy_mtx_unlock(&svc->lock);
+}
+
+/* 统一失败出口：结果落地并释放快照；语义为「已受理但未成功」，返回 0。 */
+static int mkt_inst_fail(mkt_inst_t *c, int code, const char *msg)
+{
+    c->res->success = false;
+    c->res->message = AIRY_STRDUP(msg);
+    c->res->error_code = code;
+    *c->out = c->res;
+    mkt_snap_free(c);
+    return 0;
+}
 
 int market_service_install_agent(market_service_t *service, const install_request_t *request,
                                  install_result_t **result)
 {
-    if (!service || !request || !result || !service->initialized) {
-        SVC_LOG_ERROR("market_service_install_agent: NULL parameter or not initialized "
-                      "(service=%p, request=%p, result=%p, initialized=%d)",
-                      (const void *)service, (const void *)request, (const void *)result,
-                      service ? service->initialized : -1);
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    int rc = mkt_ready(service, request, result, "market_service_install_agent");
+    if (rc != 0)
+        return rc;
     if (!is_safe_path_component(request->id)) {
         SVC_LOG_ERROR(
             "market_service_install_agent: unsafe path component in install request id (id=%s)",
@@ -58,231 +248,53 @@ int market_service_install_agent(market_service_t *service, const install_reques
         AIRY_ERROR(AIRY_ERR_INVALID_PARAM, "install request id is unsafe");
     }
 
-    install_result_t *res = (install_result_t *)AIRY_CALLOC(1, sizeof(install_result_t));
-    if (!res) {
-        SVC_LOG_ERROR("market_service_install_agent: calloc failed for install result");
+    mkt_inst_t c = {0};
+    c.svc = service;
+    c.req = request;
+    c.out = result;
+    c.res = mkt_res_new("market_service_install_agent", "install result");
+    if (!c.res)
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate install result");
-    }
 
-    airy_mtx_lock(&service->lock);
-    size_t target_idx = (size_t)-1;
-    for (size_t i = 0; i < service->agent_count; i++) {
-        if (strcmp(service->agents[i]->agent_id, request->id) == 0) {
-            target_idx = i;
-            break;
-        }
-    }
-
-    if (target_idx == (size_t)-1) {
-        airy_mtx_unlock(&service->lock);
-        res->success = false;
-        res->message = AIRY_STRDUP("Agent not found");
-        res->error_code = -3;
-        *result = res;
-        return 0;
-    }
-
-    agent_info_t *target = service->agents[target_idx];
-    char *snap_agent_id = target->agent_id ? AIRY_STRDUP(target->agent_id) : NULL;
-    char *snap_name = target->name ? AIRY_STRDUP(target->name) : NULL;
-    char *snap_version = target->version ? AIRY_STRDUP(target->version) : NULL;
-    char *snap_author = target->author ? AIRY_STRDUP(target->author) : NULL;
-    char *snap_repo = target->repository ? AIRY_STRDUP(target->repository) : NULL;
-    char *snap_storage =
-        service->config.storage_path ? AIRY_STRDUP(service->config.storage_path) : NULL;
-    airy_mtx_unlock(&service->lock);
-
-    if (!snap_agent_id) {
-        AIRY_FREE(snap_name);
-        AIRY_FREE(snap_version);
-        AIRY_FREE(snap_author);
-        AIRY_FREE(snap_repo);
-        AIRY_FREE(snap_storage);
-        AIRY_FREE(res);
+    rc = mkt_snap_take(&c);
+    if (rc > 0)
+        return mkt_inst_fail(&c, -3, "Agent not found");
+    if (rc < 0) {
+        mkt_snap_free(&c);
+        AIRY_FREE(c.res);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
-    const char *base_path = request->install_path ?
-                                request->install_path :
-                                (snap_storage ? snap_storage : market_default_storage("agents"));
-    char install_dir[1024];
-    snprintf(install_dir, sizeof(install_dir), "%s/%s", base_path, request->id);
+    c.ver = request->version ? request->version : (c.version ? c.version : "0.0.1");
+    if (mkt_dir_prep(&c) != 0)
+        return mkt_inst_fail(&c, -4, "Failed to create install directory");
+    if (mkt_meta_write(&c) != 0)
+        return mkt_inst_fail(&c, -5, "Failed to write install metadata");
 
-    {
-        char _par[1024];
-        snprintf(_par, sizeof(_par), "%s", base_path);
-        size_t _plen = strlen(_par);
-        while (_plen > 1 && _par[_plen - 1] == '/')
-            _par[--_plen] = '\0';
-        for (char *p = _par + 1; *p; p++) {
-            if (*p == '/') {
-                *p = '\0';
-                int _m = market_dir_create(_par);
-                *p = '/';
-                if (_m != 0 && errno != EEXIST) {
-                    SVC_LOG_ERROR(
-                        "market_service_install_agent: mkdir failed for parent (path=%s, errno=%d)",
-                        _par, errno);
-                    break;
-                }
-            }
-        }
-        if (market_dir_create(_par) != 0 && errno != EEXIST) {
-            SVC_LOG_ERROR(
-                "market_service_install_agent: mkdir failed for parent root (path=%s, errno=%d)",
-                _par, errno);
-        }
-    }
+    mkt_fetch_pkg(&c);
+    mkt_mark_done(service, request->id);
 
-    {
-        int mkret = market_dir_create(install_dir);
-        if (mkret != 0 && errno != EEXIST) {
-            SVC_LOG_ERROR("market_service_install_agent: mkdir failed for install directory "
-                          "(path=%s, errno=%d)",
-                          install_dir, errno);
-            res->success = false;
-            res->message = AIRY_STRDUP("Failed to create install directory");
-            res->error_code = -4;
-            *result = res;
-            AIRY_FREE(snap_agent_id);
-            AIRY_FREE(snap_name);
-            AIRY_FREE(snap_version);
-            AIRY_FREE(snap_author);
-            AIRY_FREE(snap_repo);
-            AIRY_FREE(snap_storage);
-            return 0;
-        }
-    }
+    c.res->success = true;
+    c.res->message = AIRY_STRDUP("Agent installed successfully");
+    c.res->installed_version = AIRY_STRDUP(c.ver);
+    c.res->install_path = AIRY_STRDUP(c.dir);
+    c.res->error_code = 0;
 
-    char meta_path[1024];
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat-truncation"
-    snprintf(meta_path, sizeof(meta_path), "%s/agent.json", install_dir);
-#pragma GCC diagnostic pop
-    /* P1-6：安装元数据原子写（同目录 tmp + fsync + rename）。半写的
-     * agent.json 会使已安装状态不可识别，且失败不得静默（原实现
-     * fopen 失败仅跳过，后续仍返回 success）。 */
-    char meta_json[2048];
-    int mlen = snprintf(meta_json, sizeof(meta_json),
-                        "{\n  \"agent_id\": \"%s\",\n  \"name\": \"%s\",\n"
-                        "  \"version\": \"%s\",\n  \"author\": \"%s\",\n"
-                        "  \"status\": \"installed\",\n  \"installed_at\": %lld\n}\n",
-                        snap_agent_id ? snap_agent_id : "", snap_name ? snap_name : "",
-                        request->version ? request->version : (snap_version ? snap_version : "0.0.1"),
-                        snap_author ? snap_author : "", (long long)time(NULL));
-    if (mlen < 0 || mlen >= (int)sizeof(meta_json) ||
-        airy_io_write_file(meta_path, meta_json, (size_t)mlen) != 0) {
-        res->success = false;
-        res->message = AIRY_STRDUP("Failed to write install metadata");
-        res->error_code = -5;
-        *result = res;
-        AIRY_FREE(snap_agent_id);
-        AIRY_FREE(snap_name);
-        AIRY_FREE(snap_version);
-        AIRY_FREE(snap_author);
-        AIRY_FREE(snap_repo);
-        AIRY_FREE(snap_storage);
-        return 0;
-    }
-
-    if (snap_repo && strlen(snap_repo) > 0 && is_valid_url(snap_repo)) {
-        char download_path[1024];
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wformat-truncation"
-        snprintf(download_path, sizeof(download_path), "%s/package.tar.gz", install_dir);
-#pragma GCC diagnostic pop
-
-#ifdef _WIN32
-        /* Windows equivalent: win_run_command (CreateProcess) replaces
-         * fork/execlp/waitpid. Behavior aligned: on curl failure only install
-         * metadata; on success extract the tar and clean up the download. */
-        {
-            const char *const curl_args[] = {"-sfL", "-o", download_path, snap_repo, NULL};
-            int curl_ret = win_run_command("curl", curl_args);
-            if (curl_ret != 0) {
-                SVC_LOG_WARN(
-                    "Download failed for agent %s from %s (curl_ret=%d), metadata only install",
-                    request->id, snap_repo, curl_ret);
-            } else {
-                const char *const tar_args[] = {"-xzf", download_path, "-C", install_dir, NULL};
-                win_run_command("tar", tar_args);
-                remove(download_path);
-            }
-        }
-#else
-        pid_t curl_pid = fork();
-        if (curl_pid == 0) {
-            execlp("curl", "curl", "-sfL", "-o", download_path, snap_repo, (char *)NULL);
-            _exit(127);
-        } else if (curl_pid > 0) {
-            int curl_status = 0;
-            waitpid(curl_pid, &curl_status, 0);
-            int curl_ret = WIFEXITED(curl_status) ? WEXITSTATUS(curl_status) : -1;
-            if (curl_ret != 0) {
-                SVC_LOG_WARN(
-                    "Download failed for agent %s from %s (curl_ret=%d), metadata only install",
-                    request->id, snap_repo, curl_ret);
-            } else {
-                pid_t tar_pid = fork();
-                if (tar_pid == 0) {
-                    execlp("tar", "tar", "-xzf", download_path, "-C", install_dir, (char *)NULL);
-                    _exit(127);
-                } else if (tar_pid > 0) {
-                    int tar_status = 0;
-                    waitpid(tar_pid, &tar_status, 0);
-                }
-                remove(download_path);
-            }
-        } else {
-            SVC_LOG_WARN("fork failed for agent %s download: %s", request->id, strerror(errno));
-        }
-#endif
-    }
-
-    airy_mtx_lock(&service->lock);
-    for (size_t i = 0; i < service->agent_count; i++) {
-        if (strcmp(service->agents[i]->agent_id, request->id) == 0) {
-            service->agents[i]->status = AGENT_STATUS_AVAILABLE;
-            service->agents[i]->download_count++;
-            break;
-        }
-    }
-    airy_mtx_unlock(&service->lock);
-
-    res->success = true;
-    res->message = AIRY_STRDUP("Agent installed successfully");
-    res->installed_version =
-        AIRY_STRDUP(request->version ? request->version : (snap_version ? snap_version : "0.0.1"));
-    res->install_path = AIRY_STRDUP(install_dir);
-    res->error_code = 0;
-
-    AIRY_FREE(snap_agent_id);
-    AIRY_FREE(snap_name);
-    AIRY_FREE(snap_version);
-    AIRY_FREE(snap_author);
-    AIRY_FREE(snap_repo);
-    AIRY_FREE(snap_storage);
-
-    *result = res;
+    *result = c.res;
+    mkt_snap_free(&c);
     return 0;
 }
 
 int market_service_install_skill(market_service_t *service, const install_request_t *request,
                                  install_result_t **result)
 {
-    if (!service || !request || !result || !service->initialized) {
-        SVC_LOG_ERROR("market_service_install_skill: NULL parameter or not initialized "
-                      "(service=%p, request=%p, result=%p, initialized=%d)",
-                      (const void *)service, (const void *)request, (const void *)result,
-                      service ? service->initialized : -1);
-        return AIRY_ERR_INVALID_PARAM;
-    }
+    int rc = mkt_ready(service, request, result, "market_service_install_skill");
+    if (rc != 0)
+        return rc;
 
-    install_result_t *res = (install_result_t *)AIRY_CALLOC(1, sizeof(install_result_t));
-    if (!res) {
-        SVC_LOG_ERROR("market_service_install_skill: calloc failed for skill install result");
+    install_result_t *res = mkt_res_new("market_service_install_skill", "skill install result");
+    if (!res)
         AIRY_ERROR(AIRY_ERR_OUT_OF_MEMORY, "failed to allocate skill install result");
-    }
 
     airy_mtx_lock(&service->lock);
     skill_info_t *target = NULL;
@@ -333,23 +345,21 @@ int market_service_uninstall_agent(market_service_t *service, const char *agent_
     }
 
     airy_mtx_lock(&service->lock);
-    for (size_t i = 0; i < service->agent_count; i++) {
-        if (strcmp(service->agents[i]->agent_id, agent_id) == 0) {
-            const char *storage = service->config.storage_path ? service->config.storage_path :
-                                                                 market_default_storage("agents");
-            char install_dir[1024];
-            snprintf(install_dir, sizeof(install_dir), "%s/%s", storage, agent_id);
+    size_t idx = mkt_locate(service, agent_id);
+    if (idx != (size_t)-1) {
+        const char *storage = service->config.storage_path ? service->config.storage_path :
+                                                             market_default_storage("agents");
+        char install_dir[1024];
+        snprintf(install_dir, sizeof(install_dir), "%s/%s", storage, agent_id);
 
-            int rm_ret = recursive_remove(install_dir);
-            if (rm_ret != 0) {
-                SVC_LOG_WARN("Failed to remove install directory: %s (ret=%d)", install_dir,
-                             rm_ret);
-            }
-
-            service->agents[i]->status = AGENT_STATUS_DISABLED;
-            airy_mtx_unlock(&service->lock);
-            return 0;
+        int rm_ret = recursive_remove(install_dir);
+        if (rm_ret != 0 && errno != ENOENT) {
+            SVC_LOG_WARN("Failed to remove install directory: %s (ret=%d)", install_dir, rm_ret);
         }
+
+        service->agents[idx]->status = AGENT_STATUS_DISABLED;
+        airy_mtx_unlock(&service->lock);
+        return 0;
     }
     airy_mtx_unlock(&service->lock);
     AIRY_ERROR(AIRY_ERR_NOT_FOUND, "agent not found for uninstall");
