@@ -31,11 +31,11 @@
 #include "service.h"
 #include "airy_types.h"
 #include "hindex.h"
+#include "engine/kb.h"
 #include "engine/mem_persist.h"
 
 #include "svc_logger.h"
 
-#include <cjson/cJSON.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -112,14 +112,74 @@ void mem_record_build_vector(mem_service_t *svc, mem_record_entry_t *rec)
     mem_df_add_doc(&svc->df_table, &rec->vec);
 }
 
-static void mem_record_free_vector(mem_record_entry_t *rec)
+/* 记录整体释放：向量 + 四处堆字段，字段随即归零。调用方保证 rec 非空。 */
+static void mem_rec_release(mem_record_entry_t *rec)
 {
-    if (!rec)
-        return;
     mem_vec_destroy(&rec->vec);
     AIRY_FREE(rec->emb);
     rec->emb = NULL;
     rec->emb_dim = 0;
+    AIRY_FREE(rec->record_id);
+    AIRY_FREE(rec->data);
+    AIRY_FREE(rec->metadata);
+    rec->record_id = NULL;
+    rec->data = NULL;
+    rec->metadata = NULL;
+}
+
+/* 复制裸内容为 NUL 结尾的堆缓冲；失败返回 NULL。 */
+static char *mem_dup_data(const void *data, size_t len)
+{
+    char *p = (char *)AIRY_MALLOC(len + 1);
+    if (!p)
+        return NULL;
+    __builtin_memcpy(p, data, len);
+    p[len] = '\0';
+    return p;
+}
+
+/* 复制记录内容与 metadata 到调用方（须持有记录锁）。 */
+static int mem_rec_copy_out(const mem_record_entry_t *rec, void **out_data, size_t *out_len,
+                            char **out_meta)
+{
+    *out_data = mem_dup_data(rec->data, rec->len);
+    if (!*out_data)
+        return 0;
+    *out_len = rec->len;
+    *out_meta = rec->metadata ? AIRY_STRDUP(rec->metadata) : NULL;
+    return 1;
+}
+
+/* record_id 的活跃下标；不存在或越界返回 -1（须持有记录锁）。 */
+static ssize_t mem_rec_find(const mem_service_t *svc, const char *record_id)
+{
+    ssize_t idx = hindex_get(&svc->record_index, record_id);
+    if (idx < 0 || (size_t)idx >= svc->record_count)
+        return -1;
+    return idx;
+}
+
+/* 嵌入增强：网络调用在锁外，回填前按 record_id 重新定位记录。 */
+static void mem_rec_embed(mem_service_t *svc, const char *record_id, const char *text)
+{
+    float *vec = NULL;
+    size_t dim = 0;
+
+    if (mem_emb_embed(&svc->emb, text, &vec, &dim) != AIRY_SUCCESS || !vec || dim == 0) {
+        AIRY_FREE(vec);
+        return;
+    }
+
+    airy_mtx_lock(&svc->lock);
+    ssize_t idx = mem_rec_find(svc, record_id);
+    if (idx >= 0) {
+        AIRY_FREE(svc->records[idx].emb);
+        svc->records[idx].emb = vec;
+        svc->records[idx].emb_dim = dim;
+        vec = NULL;
+    }
+    airy_mtx_unlock(&svc->lock);
+    AIRY_FREE(vec);
 }
 
 /* ── Service lifecycle ───────────────────────────────────────────────── */
@@ -177,12 +237,8 @@ void mem_service_destroy(mem_service_t *svc)
         return;
 
     airy_mtx_lock(&svc->lock);
-    for (size_t i = 0; i < svc->record_count; i++) {
-        mem_record_free_vector(&svc->records[i]);
-        AIRY_FREE(svc->records[i].record_id);
-        AIRY_FREE(svc->records[i].data);
-        AIRY_FREE(svc->records[i].metadata);
-    }
+    for (size_t i = 0; i < svc->record_count; i++)
+        mem_rec_release(&svc->records[i]);
     AIRY_FREE(svc->records);
     hindex_free(&svc->record_index);
     mem_df_destroy(&svc->df_table);
@@ -211,7 +267,6 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char *
         return AIRY_ERR_INVALID_PARAM;
 
     *out_record_id = NULL;
-
     airy_mtx_lock(&svc->lock);
 
     if (svc->record_count >= svc->max_records) {
@@ -222,86 +277,138 @@ int mem_service_write(mem_service_t *svc, const mem_write_request_t *req, char *
 
     size_t idx = svc->record_count;
     mem_record_entry_t *rec = &svc->records[idx];
-
     char id_buf[AIRY_OID_STR_MAX];
+
     airy_oid_str(airy_oid_gen(), id_buf, sizeof(id_buf));
     rec->record_id = AIRY_STRDUP(id_buf);
-    rec->data = AIRY_MALLOC(req->len + 1);
+    rec->data = mem_dup_data(req->data, req->len);
     if (!rec->record_id || !rec->data) {
-        AIRY_FREE(rec->record_id);
-        AIRY_FREE(rec->data);
-        rec->record_id = NULL;
-        rec->data = NULL;
+        mem_rec_release(rec);
         airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
-    __builtin_memcpy(rec->data, req->data, req->len);
-    ((char *)rec->data)[req->len] = '\0';
     rec->len = req->len;
     rec->metadata = req->metadata ? AIRY_STRDUP(req->metadata) : NULL;
-    rec->score = 0.0f;
     rec->created_at = (uint64_t)time(NULL);
 
     mem_record_build_vector(svc, rec);
 
     int rc = hindex_put(&svc->record_index, rec->record_id, idx);
     if (rc != AIRY_SUCCESS) {
-        mem_record_free_vector(rec);
-        AIRY_FREE(rec->record_id);
-        AIRY_FREE(rec->data);
-        AIRY_FREE(rec->metadata);
-        rec->record_id = NULL;
-        rec->data = NULL;
-        rec->metadata = NULL;
+        mem_rec_release(rec);
         airy_mtx_unlock(&svc->lock);
         return rc;
     }
 
     *out_record_id = AIRY_STRDUP(rec->record_id);
     svc->record_count++;
-    uint64_t total_writes = svc->record_count;
-    (void)total_writes;
-
+    size_t total = svc->record_count;
     mem_persist_append_record(svc, rec);
 
     /* 解锁前先拷贝内容到本地缓冲：防并发 delete 导致 use-after-free */
-    char *data_copy = NULL;
-    if (mem_emb_should_try(&svc->emb) && rec->data && rec->len > 0) {
-        data_copy = (char *)AIRY_MALLOC(rec->len + 1);
-        if (data_copy) {
-            __builtin_memcpy(data_copy, rec->data, rec->len);
-            data_copy[rec->len] = '\0';
-        }
-    }
-
+    char *copy = mem_emb_should_try(&svc->emb) ? mem_dup_data(rec->data, rec->len) : NULL;
     airy_mtx_unlock(&svc->lock);
 
     /* Optional embedding enhancement (network call outside the lock) */
-    if (data_copy) {
-        float *emb_vec = NULL;
-        size_t emb_dim = 0;
-        if (mem_emb_embed(&svc->emb, data_copy, &emb_vec, &emb_dim) == AIRY_SUCCESS &&
-            emb_vec && emb_dim > 0) {
-            airy_mtx_lock(&svc->lock);
-            ssize_t eidx = hindex_get(&svc->record_index, *out_record_id);
-            if (eidx >= 0 && (size_t)eidx < svc->record_count) {
-                AIRY_FREE(svc->records[eidx].emb);
-                svc->records[eidx].emb = emb_vec;
-                svc->records[eidx].emb_dim = emb_dim;
-                emb_vec = NULL;
-            }
-            airy_mtx_unlock(&svc->lock);
-        }
-        AIRY_FREE(data_copy);
-        AIRY_FREE(emb_vec);
-    }
+    if (copy)
+        mem_rec_embed(svc, *out_record_id, copy);
+    AIRY_FREE(copy);
 
     SVC_LOG_DEBUG("Memory write: record_id=%s, len=%zu, total=%lu", *out_record_id, req->len,
-                  (unsigned long)total_writes);
+                  (unsigned long)total);
     return AIRY_SUCCESS;
 }
 
 /* ── Search ──────────────────────────────────────────────────────────── */
+
+/* 一次检索的输入态：预处理好的 TF-IDF 向量、可选嵌入向量及打分对象。 */
+typedef struct {
+    const mem_service_t *svc;
+    const char *query;
+    mem_tfidf_vec_t qvec;
+    float *emb;
+    size_t emb_dim;
+    int use_emb;
+} mem_rank_t;
+
+/* 向量准备在锁外完成：嵌入是网络调用，不能占住记录锁。 */
+static void mem_rank_open(mem_service_t *svc, const char *query, mem_rank_t *r)
+{
+    AIRY_MEMSET(r, 0, sizeof(*r));
+    r->svc = svc;
+    r->query = query;
+    (void)mem_vec_build(query, strlen(query), &r->qvec);
+    if (!mem_emb_should_try(&svc->emb))
+        return;
+    if (mem_emb_embed(&svc->emb, query, &r->emb, &r->emb_dim) != AIRY_SUCCESS)
+        return;
+    r->use_emb = r->emb && r->emb_dim > 0;
+}
+
+static void mem_rank_close(mem_rank_t *r)
+{
+    mem_vec_destroy(&r->qvec);
+    AIRY_FREE(r->emb);
+}
+
+static float mem_rec_vec_score(const mem_rank_t *r, const mem_record_entry_t *rec)
+{
+    if (r->use_emb && rec->emb && rec->emb_dim == r->emb_dim)
+        return mem_emb_cosine(r->emb, rec->emb, r->emb_dim);
+    if (rec->vec.term_count > 0)
+        return mem_vec_cosine(&r->qvec, &rec->vec, &r->svc->df_table, r->svc->record_count);
+    return 0.0f;
+}
+
+/* 单条记录打分：向量分与子串分按权重融合，非正值不入榜。 */
+static int mem_hit_take(const mem_rank_t *r, const mem_record_entry_t *rec, mem_search_hit_t *hit)
+{
+    float w = r->svc->tfidf_weight;
+    float score = w * mem_rec_vec_score(r, rec) + (1.0f - w) * mem_compute_score(rec, r->query);
+
+    if (score <= 0.0f)
+        return 0;
+    hit->record_id = AIRY_STRDUP(rec->record_id);
+    hit->score = score;
+    return 1;
+}
+
+static size_t mem_hits_collect(const mem_rank_t *r, const char *kb_id, mem_search_hit_t *hits,
+                               size_t *vec_used)
+{
+    size_t n = 0;
+
+    *vec_used = 0;
+    for (size_t i = 0; i < r->svc->record_count; i++) {
+        const mem_record_entry_t *rec = &r->svc->records[i];
+        if (kb_id && !mem_rec_in_kb(rec, kb_id))
+            continue;
+        if (rec->vec.term_count > 0)
+            (*vec_used)++;
+        if (mem_hit_take(r, rec, &hits[n]))
+            n++;
+    }
+    return n;
+}
+
+/* 降序排序后只保留前 limit 条，尾部落榜项就地释放。 */
+static size_t mem_hits_trim(mem_search_hit_t *hits, size_t n, uint32_t limit)
+{
+    for (size_t i = 0; i + 1 < n; i++) {
+        for (size_t j = 0; j + 1 < n - i; j++) {
+            if (hits[j].score < hits[j + 1].score) {
+                mem_search_hit_t t = hits[j];
+                hits[j] = hits[j + 1];
+                hits[j + 1] = t;
+            }
+        }
+    }
+    if (n <= limit)
+        return n;
+    for (size_t i = limit; i < n; i++)
+        AIRY_FREE(hits[i].record_id);
+    return limit;
+}
 
 int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
                        mem_search_hit_t **out_hits, size_t *out_count)
@@ -313,126 +420,41 @@ int mem_service_search(mem_service_t *svc, const char *query, uint32_t limit,
 int mem_service_search_filtered(mem_service_t *svc, const char *kb_id, const char *query,
                                 uint32_t limit, mem_search_hit_t **out_hits, size_t *out_count)
 {
+    mem_rank_t r;
+    mem_search_hit_t *hits;
+    size_t hit_count = 0;
+    size_t vec_used = 0;
+    int oom;
+
     if (!svc || !svc->initialized || !query || !out_hits || !out_count)
         return AIRY_ERR_INVALID_PARAM;
 
     *out_hits = NULL;
     *out_count = 0;
-
     if (limit == 0)
         limit = 10;
 
-    /* Prepare outside the lock (network calls do not hold the lock) */
-    mem_tfidf_vec_t qvec;
-    AIRY_MEMSET(&qvec, 0, sizeof(qvec));
-    (void)mem_vec_build(query, strlen(query), &qvec);
-
-    float *qemb = NULL;
-    size_t qemb_dim = 0;
-    int use_emb = 0;
-    if (mem_emb_should_try(&svc->emb) &&
-        mem_emb_embed(&svc->emb, query, &qemb, &qemb_dim) == AIRY_SUCCESS && qemb && qemb_dim > 0)
-        use_emb = 1;
+    mem_rank_open(svc, query, &r);
 
     airy_mtx_lock(&svc->lock);
-
-    if (svc->record_count == 0) {
-        airy_mtx_unlock(&svc->lock);
-        mem_vec_destroy(&qvec);
-        AIRY_FREE(qemb);
-        return AIRY_SUCCESS;
-    }
-
-    mem_search_hit_t *hits =
-        (mem_search_hit_t *)AIRY_CALLOC(svc->record_count, sizeof(mem_search_hit_t));
-    if (!hits) {
-        airy_mtx_unlock(&svc->lock);
-        mem_vec_destroy(&qvec);
-        AIRY_FREE(qemb);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
-    size_t hit_count = 0;
-    size_t vec_used = 0;
-    const float w = svc->tfidf_weight;
-    for (size_t i = 0; i < svc->record_count; i++) {
-        const mem_record_entry_t *rec = &svc->records[i];
-
-        if (kb_id) {
-            /* KB filter: inline check via metadata parse */
-            const char *rec_kb = NULL;
-            if (rec->metadata && rec->metadata[0]) {
-                cJSON *root = cJSON_Parse(rec->metadata);
-                if (root) {
-                    cJSON *kb = cJSON_GetObjectItem(root, "kb_id");
-                    if (cJSON_IsString(kb) && kb->valuestring)
-                        rec_kb = kb->valuestring;
-                    /* Note: we can't use mem_rec_kb_id here (it's in kb.c
-                     * with a static buffer); instead we compare inline. */
-                    if (rec_kb && strcmp(rec_kb, kb_id) != 0)
-                        rec_kb = NULL; /* force skip */
-                    cJSON_Delete(root);
-                }
-            }
-            if (!rec_kb)
-                continue;
-        }
-
-        float vec_score = 0.0f;
-        if (use_emb && rec->emb && rec->emb_dim == qemb_dim) {
-            vec_score = mem_emb_cosine(qemb, rec->emb, qemb_dim);
-        } else if (rec->vec.term_count > 0) {
-            vec_score = mem_vec_cosine(&qvec, &rec->vec, &svc->df_table, svc->record_count);
-        }
-        if (rec->vec.term_count > 0)
-            vec_used++;
-
-        float sub_score = mem_compute_score(rec, query);
-
-        float score = w * vec_score + (1.0f - w) * sub_score;
-        if (score > 0.0f) {
-            hits[hit_count].record_id = AIRY_STRDUP(rec->record_id);
-            hits[hit_count].score = score;
-            hit_count++;
-        }
-    }
-
-    /* Sort by score descending, then truncate to limit */
-    for (size_t i = 0; i + 1 < hit_count; i++) {
-        for (size_t j = 0; j + 1 < hit_count - i; j++) {
-            if (hits[j].score < hits[j + 1].score) {
-                mem_search_hit_t tmp = hits[j];
-                hits[j] = hits[j + 1];
-                hits[j + 1] = tmp;
-            }
-        }
-    }
-
-    if (hit_count > limit) {
-        for (size_t i = limit; i < hit_count; i++) {
-            AIRY_FREE(hits[i].record_id);
-            hits[i].record_id = NULL;
-            hits[i].score = 0.0f;
-        }
-        hit_count = limit;
-    }
-
+    hits = svc->record_count ? (mem_search_hit_t *)AIRY_CALLOC(svc->record_count, sizeof(*hits))
+                             : NULL;
+    oom = !hits && svc->record_count > 0;
+    if (!oom)
+        hit_count = mem_hits_collect(&r, kb_id, hits, &vec_used);
     airy_mtx_unlock(&svc->lock);
 
-    mem_vec_destroy(&qvec);
-    AIRY_FREE(qemb);
+    mem_rank_close(&r);
+    if (oom)
+        return AIRY_ERR_OUT_OF_MEMORY;
 
+    hit_count = mem_hits_trim(hits, hit_count, limit);
     if (hit_count == 0) {
         AIRY_FREE(hits);
-        *out_hits = NULL;
-        *out_count = 0;
         return AIRY_SUCCESS;
     }
 
-    mem_search_hit_t *shrunk = NULL;
-    if (hit_count <= SIZE_MAX / sizeof(mem_search_hit_t)) {
-        shrunk = (mem_search_hit_t *)AIRY_REALLOC(hits, hit_count * sizeof(mem_search_hit_t));
-    }
+    mem_search_hit_t *shrunk = (mem_search_hit_t *)AIRY_REALLOC(hits, hit_count * sizeof(*hits));
     *out_hits = shrunk ? shrunk : hits;
     *out_count = hit_count;
 
@@ -451,22 +473,17 @@ int mem_service_get(mem_service_t *svc, const char *record_id, mem_record_t *out
 
     airy_mtx_lock(&svc->lock);
 
-    ssize_t idx = hindex_get(&svc->record_index, record_id);
-    if (idx < 0 || (size_t)idx >= svc->record_count) {
+    ssize_t idx = mem_rec_find(svc, record_id);
+    if (idx < 0) {
         airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_NOT_FOUND;
     }
 
-    mem_record_entry_t *rec = &svc->records[idx];
-    out_record->data = AIRY_MALLOC(rec->len + 1);
-    if (!out_record->data) {
+    if (!mem_rec_copy_out(&svc->records[idx], &out_record->data, &out_record->len,
+                          &out_record->metadata)) {
         airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
-    __builtin_memcpy(out_record->data, rec->data, rec->len);
-    ((char *)out_record->data)[rec->len] = '\0';
-    out_record->len = rec->len;
-    out_record->metadata = rec->metadata ? AIRY_STRDUP(rec->metadata) : NULL;
 
     airy_mtx_unlock(&svc->lock);
     return AIRY_SUCCESS;
@@ -486,11 +503,7 @@ void mem_remove_record_at(mem_service_t *svc, size_t idx)
     hindex_del(&svc->record_index, removed_id);
 
     mem_df_remove_doc(&svc->df_table, &rec->vec);
-    mem_record_free_vector(rec);
-
-    AIRY_FREE(rec->record_id);
-    AIRY_FREE(rec->data);
-    AIRY_FREE(rec->metadata);
+    mem_rec_release(rec);
 
     size_t last = svc->record_count - 1;
     if (idx != last) {
@@ -508,8 +521,8 @@ int mem_service_delete(mem_service_t *svc, const char *record_id)
 
     airy_mtx_lock(&svc->lock);
 
-    ssize_t idx = hindex_get(&svc->record_index, record_id);
-    if (idx < 0 || (size_t)idx >= svc->record_count) {
+    ssize_t idx = mem_rec_find(svc, record_id);
+    if (idx < 0) {
         airy_mtx_unlock(&svc->lock);
         return AIRY_ERR_NOT_FOUND;
     }
@@ -571,18 +584,11 @@ int mem_service_recent(mem_service_t *svc, uint32_t limit,
             continue;
         mem_recent_item_t *it = &items[n];
         it->record_id = AIRY_STRDUP(rec->record_id);
-        it->data = AIRY_MALLOC(rec->len + 1);
-        if (!it->record_id || !it->data) {
+        if (!mem_rec_copy_out(rec, &it->data, &it->len, &it->metadata)) {
             AIRY_FREE(it->record_id);
-            AIRY_FREE(it->data);
             it->record_id = NULL;
-            it->data = NULL;
             continue;
         }
-        __builtin_memcpy(it->data, rec->data, rec->len);
-        ((char *)it->data)[rec->len] = '\0';
-        it->len = rec->len;
-        it->metadata = rec->metadata ? AIRY_STRDUP(rec->metadata) : NULL;
         it->created_at = rec->created_at;
         n++;
     }

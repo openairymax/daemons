@@ -5,16 +5,17 @@
  * @file kb.h
  * @brief Knowledge-base service layer (RAG 一等抽象).
  *
- * Public KB API is declared in mem_service.h; this header is intentionally
- * empty — kb.c includes service.h for the internal record layout and
- * calls mem_service_search_filtered / mem_remove_record_at via internal
- * declarations in service.h.
+ * Public KB API is declared in mem_service.h; this header only exposes the
+ * record-level KB predicate that kb.c owns and that the shared search core
+ * consumes, so metadata parsing stays in one place.
  */
 
 #ifndef MEM_KB_INTERNAL_H
 #define MEM_KB_INTERNAL_H
 
-/* All KB public functions are declared in mem_service.h.
- * This file exists as a conventional placeholder for the KB module. */
+#include "core/service.h"
+
+/* 记录是否属于 kb_id：解析 metadata 的 kb_id 字段并比较。 */
+int mem_rec_in_kb(const mem_record_entry_t *rec, const char *kb_id);
 
 #endif /* MEM_KB_INTERNAL_H */

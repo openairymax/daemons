@@ -22,38 +22,33 @@
 #include <string.h>
 
 #define MEM_KB_DEFAULT_CHUNK_SIZE 512
+#define MEM_KB_ID_MAX 256
 
 /* ── KB metadata helpers ─────────────────────────────────────────────── */
 
-/* 解析 record 的 metadata JSON，返回其中 kb_id 字符串（静态缓冲）。
- * 非 KB 记录（无 kb_id 字段）返回 NULL。 */
-static const char *mem_rec_kb_id(const mem_record_entry_t *rec)
+/* 解析 record 的 metadata，把 kb_id 写入调用方缓冲；非 KB 记录返回 0。
+ * 不使用静态缓冲：检索与 KB 列表可并发调用同一记录。 */
+static int mem_rec_kb_id(const mem_record_entry_t *rec, char *buf, size_t cap)
 {
     if (!rec || !rec->metadata || !rec->metadata[0])
-        return NULL;
+        return 0;
     cJSON *root = cJSON_Parse(rec->metadata);
     if (!root)
-        return NULL;
+        return 0;
     cJSON *kb = cJSON_GetObjectItem(root, "kb_id");
-    const char *id = (cJSON_IsString(kb) && kb->valuestring) ? kb->valuestring : NULL;
-    if (id) {
-        static char s_kb_buf[256];
-        size_t n = strlen(id);
-        if (n >= sizeof(s_kb_buf))
-            n = sizeof(s_kb_buf) - 1;
-        __builtin_memcpy(s_kb_buf, id, n);
-        s_kb_buf[n] = '\0';
-        cJSON_Delete(root);
-        return s_kb_buf;
+    int found = 0;
+    if (cJSON_IsString(kb) && kb->valuestring) {
+        snprintf(buf, cap, "%s", kb->valuestring);
+        found = 1;
     }
     cJSON_Delete(root);
-    return NULL;
+    return found;
 }
 
-static int mem_rec_in_kb(const mem_record_entry_t *rec, const char *kb_id)
+int mem_rec_in_kb(const mem_record_entry_t *rec, const char *kb_id)
 {
-    const char *id = mem_rec_kb_id(rec);
-    return id && strcmp(id, kb_id) == 0;
+    char id[MEM_KB_ID_MAX];
+    return mem_rec_kb_id(rec, id, sizeof(id)) && strcmp(id, kb_id) == 0;
 }
 
 /* UTF-8 安全分块：从 off 起取至多 chunk_size 字节，若切点落在多字节
@@ -180,8 +175,8 @@ int mem_service_kb_list(mem_service_t *svc, char ***out_kb_ids, size_t *out_coun
     char **ids = NULL;
     size_t count = 0;
     for (size_t i = 0; i < svc->record_count; i++) {
-        const char *kb = mem_rec_kb_id(&svc->records[i]);
-        if (!kb)
+        char kb[MEM_KB_ID_MAX];
+        if (!mem_rec_kb_id(&svc->records[i], kb, sizeof(kb)))
             continue;
         int dup = 0;
         for (size_t j = 0; j < count; j++) {
