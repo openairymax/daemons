@@ -216,6 +216,26 @@ static int sched_dag_error_is_transient(int dret)
  * DAG node terminal-state write-back / failure grading / graph convergence
  * ============================================================================ */
 
+/* Node error text as one policy: drop the previous value, then rebuild only
+ * when a reason is given (NULL clears). */
+static void node_err_set(sched_dag_node_t *node, const char *msg)
+{
+    if (node->error) {
+        AIRY_FREE(node->error);
+        node->error = NULL;
+    }
+    if (msg)
+        node->error = AIRY_STRDUP(msg);
+}
+
+/* Node terminal landing: status, retry clock cleared, finish timestamp. */
+static void node_final(sched_dag_node_t *node, sched_dag_node_status_t st)
+{
+    node->status = st;
+    node->retry_at_ms = 0;
+    node->finished_at_ms = airy_time_wall_ms();
+}
+
 /* Cascade-cancel every still-pending/ready node of a graph that just reached
  * a terminal failure: their dependencies can never be satisfied again, so they
  * are canceled uniformly instead of being left dangling until the graph thread
@@ -226,12 +246,112 @@ static size_t dag_cascade_cancel(sched_dag_t *dag)
     for (size_t j = 0; j < dag->node_count; j++) {
         sched_dag_node_t *n = dag->nodes[j];
         if (n->status == SCHED_DAG_NODE_PENDING || n->status == SCHED_DAG_NODE_READY) {
-            n->status = SCHED_DAG_NODE_CANCELED;
-            n->finished_at_ms = airy_time_wall_ms();
+            node_final(n, SCHED_DAG_NODE_CANCELED);
             canceled++;
         }
     }
     return canceled;
+}
+
+/* Graph already canceled/failed: the result must not be written back, the
+ * artifact is released in place. */
+static int node_discard(const sched_dag_t *dag, sched_dag_node_t *node, char *out)
+{
+    AIRY_FREE(out);
+    node_final(node, SCHED_DAG_NODE_CANCELED);
+    SVC_LOG_INFO("sched: DAG node %s/%s result discarded (dag canceled/failed)", dag->dag_id,
+                 node->id);
+    return 0;
+}
+
+/* Deterministic artifact validation. No declared rules, or a rule set that
+ * fails to load, is graded SKIP (pass) exactly as before. 1 = pass, 0 = fail
+ * with the validator reason copied into `reason`. */
+static int node_verify(const sched_dag_node_t *node, const char *out, char *reason, size_t cap)
+{
+    airy_artifact_validator_t *av = NULL;
+    airy_artifact_meta_t meta = {0};
+    airy_artifact_result_t res = {0};
+
+    if (!node->validator_rule_json || !node->validator_rule_json[0])
+        return 1;
+    if (airy_artifact_validator_from_json(&av, node->validator_rule_json) != AIRY_SUCCESS || !av)
+        return 1;
+    meta.output = out;
+    airy_artifact_validator_validate(av, &meta, &res);
+    airy_artifact_validator_destroy(av);
+    if (res.verify != AIRY_AV_FAIL)
+        return 1;
+    snprintf(reason, cap, "%s", res.reason);
+    return 0;
+}
+
+/* Success branch: an artifact must exist and pass its declared validator before
+ * it is taken over as node output. A process-level success without an artifact
+ * (NULL, empty or whitespace-only) is not a semantic success: the node is
+ * terminal for its dependents while the graph keeps running and converges
+ * through sched_dag_propagate_unreachable. */
+static int node_succeed(const sched_dag_t *dag, sched_dag_node_t *node, char *out)
+{
+    char reason[256] = "";
+
+    if (!sched_dag_has_output(out)) {
+        node_err_set(node, "agent produced no artifact");
+        node_final(node, SCHED_DAG_NODE_SEMANTIC_FAILED);
+        SVC_LOG_ERROR("DAG node produced no artifact: %s/%s", dag->dag_id, node->id);
+        AIRY_FREE(out);
+        return 0;
+    }
+    if (!node_verify(node, out, reason, sizeof(reason))) {
+        node_err_set(node, "artifact verification failed");
+        node_final(node, SCHED_DAG_NODE_FAILED);
+        SVC_LOG_ERROR("DAG node verification FAILED: %s/%s (%s)", dag->dag_id, node->id, reason);
+        AIRY_FREE(out);
+        return 0;
+    }
+    node->output = out;
+    node_err_set(node, NULL);
+    node_final(node, SCHED_DAG_NODE_COMPLETED);
+    SVC_LOG_INFO("DAG node completed: %s/%s (output_len=%zu)", dag->dag_id, node->id,
+                 node->output ? strlen(node->output) : 0);
+    return 1;
+}
+
+/* Whole-graph failure: node FAILED with a reason, graph FAILED, downstream
+ * cascade-canceled. Returns the number of canceled nodes. */
+static size_t dag_abort(sched_dag_t *dag, sched_dag_node_t *node, const char *msg)
+{
+    node_err_set(node, msg);
+    node->status = SCHED_DAG_NODE_FAILED;
+    dag->status = SCHED_DAG_STATUS_FAILED;
+    return dag_cascade_cancel(dag);
+}
+
+/* Transient failure with retries left and graph budget unspent: back to
+ * PENDING with exponential backoff. 1 = retry scheduled. */
+static int node_backoff(sched_dag_t *dag, sched_dag_node_t *node, int dret)
+{
+    uint64_t now;
+    uint64_t deadline;
+    uint64_t backoff;
+
+    if (!sched_dag_error_is_transient(dret) || node->retry_count >= node->max_retries)
+        return 0;
+    now = airy_time_wall_ms();
+    deadline = dag->retry_budget_ms ? dag->created_at_ms + dag->retry_budget_ms : 0;
+    if (deadline != 0 && now >= deadline)
+        return 0;
+    node->retry_count++;
+    backoff = (node->retry_delay_ms ? node->retry_delay_ms : 1000)
+              * (1ULL << (node->retry_count - 1));
+    node->retry_at_ms = now + backoff;
+    node_err_set(node, "transient failure, retrying with backoff");
+    node->status = SCHED_DAG_NODE_PENDING;
+    node->finished_at_ms = 0;
+    SVC_LOG_WARN("DAG node transient failure, retry %u/%u backoff=%llu ms: %s/%s",
+                 node->retry_count, node->max_retries, (unsigned long long)backoff, dag->dag_id,
+                 node->id);
+    return 1;
 }
 
 /* Node terminal-state write-back (call with lock held, shared by batch
@@ -257,155 +377,36 @@ static size_t dag_cascade_cancel(sched_dag_t *dag)
 int sched_dag_write_back_node(sched_service_t *svc, sched_dag_t *dag, sched_dag_node_t *node,
                               int dret, char *output)
 {
+    int fatal;
+    const char *why;
+
     if (node->status == SCHED_DAG_NODE_CANCELED || dag->status == SCHED_DAG_STATUS_CANCELED ||
-        dag->status == SCHED_DAG_STATUS_FAILED) {
+        dag->status == SCHED_DAG_STATUS_FAILED)
+        return node_discard(dag, node, output);
 
-        if (output)
-            AIRY_FREE(output);
-        if (node->status != SCHED_DAG_NODE_CANCELED)
-            node->status = SCHED_DAG_NODE_CANCELED;
-        node->finished_at_ms = airy_time_wall_ms();
-        SVC_LOG_INFO("sched: DAG node %s/%s result discarded (dag canceled/failed)", dag->dag_id,
-                     node->id);
-        return 0;
-    }
-    if (dret == AIRY_SUCCESS && sched_dag_has_output(output)) {
-        /* Improvement 2 (P2a): artifact verification (before write_back).
-         * When a node declares validator rules, run deterministic validation
-         * (built via air_artifact_validator_from_json):
-         *   - PASS     -> normal write-back (current behavior)
-         *   - FAIL     -> node FAILED + "verification failed" tag (deterministic
-         *                 failure, permanent, not retried; no graph cascade,
-         *                 same semantics as ordinary failure)
-         *   - SKIP     -> no rules, write back directly
-         * Validation input limits: write_back only holds dret+output; exit_code
-         * is implied by the SUCCESS branch, artifact_exists/diff_scope rules are
-         * skipped due to missing artifact paths/change sets. */
-        if (node->validator_rule_json && node->validator_rule_json[0]) {
-            airy_artifact_validator_t *av = NULL;
-            if (airy_artifact_validator_from_json(&av, node->validator_rule_json) == AIRY_SUCCESS && av) {
-                airy_artifact_meta_t vmeta;
-                __builtin_memset(&vmeta, 0, sizeof(vmeta));
-                vmeta.exit_code = 0;
-                vmeta.output = output;
-                airy_artifact_result_t vres;
-                __builtin_memset(&vres, 0, sizeof(vres));
-                airy_artifact_validator_validate(av, &vmeta, &vres);
-                airy_artifact_validator_destroy(av);
-                if (vres.verify == AIRY_AV_FAIL) {
-                    node->status = SCHED_DAG_NODE_FAILED;
-                    if (node->error) {
-                        AIRY_FREE(node->error);
-                        node->error = NULL;
-                    }
-                    node->error = AIRY_STRDUP("artifact verification failed");
-                    node->retry_at_ms = 0;
-                    node->finished_at_ms = airy_time_wall_ms();
-                    SVC_LOG_ERROR("DAG node verification FAILED: %s/%s (%s)", dag->dag_id, node->id,
-                                  vres.reason);
-                    AIRY_FREE(output);
-                    return 0;
-                }
-            }
-        }
-        node->status = SCHED_DAG_NODE_COMPLETED;
-        node->output = output;
-        if (node->error) {
-            AIRY_FREE(node->error);
-            node->error = NULL;
-        }
-        node->retry_at_ms = 0;
-        node->finished_at_ms = airy_time_wall_ms();
-        SVC_LOG_INFO("DAG node completed: %s/%s (output_len=%zu)", dag->dag_id, node->id,
-                     node->output ? strlen(node->output) : 0);
-        return 1;
-    }
-
-    if (dret == AIRY_SUCCESS) {
-        /* Success exit code with no artifact (NULL, empty or whitespace-only):
-         * the node has nothing to hand to its dependents, so a process-level
-         * success is not a semantic success. The node becomes terminal without
-         * aborting the graph; its dependents are canceled by
-         * sched_dag_propagate_unreachable and the graph converges to
-         * SCHED_DAG_STATUS_SEMANTIC_FAILED. */
-        node->status = SCHED_DAG_NODE_SEMANTIC_FAILED;
-        if (node->error) {
-            AIRY_FREE(node->error);
-            node->error = NULL;
-        }
-        node->error = AIRY_STRDUP("agent produced no artifact");
-        node->retry_at_ms = 0;
-        node->finished_at_ms = airy_time_wall_ms();
-        SVC_LOG_ERROR("DAG node produced no artifact: %s/%s", dag->dag_id, node->id);
-        if (output)
-            AIRY_FREE(output);
-        return 0;
-    }
+    if (dret == AIRY_SUCCESS)
+        return node_succeed(dag, node, output);
 
     node->finished_at_ms = airy_time_wall_ms();
+    node_err_set(node, NULL);
+    fatal = svc->dag_fatal_cascade && sched_dag_error_is_fatal(dret);
+    why = fatal ? "agent dispatch failed (fatal)"
+                : dret == AIRY_ERR_SVC_NOT_READY ? "dag executor not injected"
+                                                 : "agent dispatch failed";
 
-    if (node->error) {
-        AIRY_FREE(node->error);
-        node->error = NULL;
-    }
-
-    if (svc->dag_fatal_cascade && sched_dag_error_is_fatal(dret)) {
+    if (fatal || !svc->dag_fatal_cascade) {
+        size_t cascade = dag_abort(dag, node, why);
+        SVC_LOG_ERROR("DAG node failed: %s/%s (error=%s, rc=%d)", dag->dag_id, node->id,
+                      node->error ? node->error : "unknown", dret);
+        SVC_LOG_WARN("DAG aborted by node failure%s: %s (%zu nodes cascade-canceled)",
+                     fatal ? " (fatal)" : "", dag->dag_id, cascade);
+    } else if (!node_backoff(dag, node, dret)) {
+        node_err_set(node, "agent dispatch failed");
         node->status = SCHED_DAG_NODE_FAILED;
-        node->error = AIRY_STRDUP("agent dispatch failed (fatal)");
-        SVC_LOG_ERROR("DAG node FATAL failed: %s/%s (error=%s, rc=%d)", dag->dag_id, node->id,
-                      node->error ? node->error : "?", dret);
-        dag->status = SCHED_DAG_STATUS_FAILED;
-        size_t cascade = dag_cascade_cancel(dag);
-        SVC_LOG_WARN("DAG aborted by FATAL node failure: %s (%zu nodes cascade-canceled)",
-                     dag->dag_id, cascade);
-        if (output)
-            AIRY_FREE(output);
-        return 0;
+        SVC_LOG_ERROR("DAG node failed (no cascade): %s/%s (error=%s, rc=%d)", dag->dag_id,
+                      node->id, node->error ? node->error : "unknown", dret);
     }
-
-    if (!svc->dag_fatal_cascade) {
-        node->status = SCHED_DAG_NODE_FAILED;
-        node->error = AIRY_STRDUP(dret == AIRY_ERR_SVC_NOT_READY ? "dag executor not injected" :
-                                                                   "agent dispatch failed");
-        SVC_LOG_ERROR("DAG node failed: %s/%s (error=%s)", dag->dag_id, node->id,
-                      node->error ? node->error : "unknown");
-        dag->status = SCHED_DAG_STATUS_FAILED;
-        size_t cascade = dag_cascade_cancel(dag);
-        SVC_LOG_WARN("DAG aborted by node failure: %s (%zu downstream nodes "
-                     "cascade-canceled)",
-                     dag->dag_id, cascade);
-        if (output)
-            AIRY_FREE(output);
-        return 0;
-    }
-
-    if (sched_dag_error_is_transient(dret) && node->retry_count < node->max_retries) {
-        uint64_t now = airy_time_wall_ms();
-        uint64_t budget_deadline =
-            dag->retry_budget_ms ? dag->created_at_ms + dag->retry_budget_ms : 0;
-        if (budget_deadline == 0 || now < budget_deadline) {
-            node->retry_count++;
-            uint64_t base = node->retry_delay_ms ? node->retry_delay_ms : 1000;
-            uint64_t backoff = base * (1ULL << (node->retry_count - 1));
-            node->retry_at_ms = now + backoff;
-            node->error = AIRY_STRDUP("transient failure, retrying with backoff");
-            node->status = SCHED_DAG_NODE_PENDING;
-            node->finished_at_ms = 0;
-            SVC_LOG_WARN("DAG node transient failure, retry %u/%u backoff=%llu ms: %s/%s",
-                         node->retry_count, node->max_retries, (unsigned long long)backoff,
-                         dag->dag_id, node->id);
-            if (output)
-                AIRY_FREE(output);
-            return 0;
-        }
-    }
-
-    node->status = SCHED_DAG_NODE_FAILED;
-    node->error = AIRY_STRDUP("agent dispatch failed");
-    SVC_LOG_ERROR("DAG node failed (no cascade): %s/%s (error=%s, rc=%d)", dag->dag_id, node->id,
-                  node->error ? node->error : "unknown", dret);
-    if (output)
-        AIRY_FREE(output);
+    AIRY_FREE(output);
     return 0;
 }
 
@@ -431,8 +432,7 @@ void sched_dag_propagate_unreachable(sched_service_t *svc)
                     const sched_dag_node_t *dep = sched_dag_find_node(dag, node->depends[k]);
                     if (!dep || !sched_dag_dep_broken(dep->status))
                         continue;
-                    node->status = SCHED_DAG_NODE_CANCELED;
-                    node->finished_at_ms = airy_time_wall_ms();
+                    node_final(node, SCHED_DAG_NODE_CANCELED);
                     changed = 1;
                 }
             }
