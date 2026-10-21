@@ -327,6 +327,243 @@ size_t notify_d_subscription_count(notify_d_service_t *svc, const char *topic)
     return count;
 }
 
+typedef struct {
+    notify_d_service_t *svc;
+    cJSON *req;
+    int rid;
+    char *err;
+    cJSON *result;
+} ntf_call_t;
+
+typedef void (*ntf_fn_t)(ntf_call_t *c);
+
+typedef struct {
+    const char *name;
+    ntf_fn_t fn;
+    int status;
+} ntf_method_t;
+
+typedef struct {
+    const char *names[NOTIFY_D_MAX_SUBSCRIPTIONS + NOTIFY_D_MAX_CLIENTS];
+    size_t count;
+} ntf_topics_t;
+
+static void ntf_publish(ntf_call_t *c)
+{
+    cJSON *params = cJSON_GetObjectItem(c->req, "params");
+    const char *topic = jsonrpc_get_string_param(params, "topic", "default");
+    const char *message = jsonrpc_get_string_param(params, "message", NULL);
+    if (!message || !message[0])
+        message = jsonrpc_get_string_param(params, "payload", NULL);
+    const char *event_type = jsonrpc_get_string_param(params, "event", "message");
+
+    if (!message || !message[0]) {
+        c->err = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "message (or payload) is required",
+                                     c->rid);
+        return;
+    }
+
+    airy_mtx_lock(&c->svc->lock);
+    int rc = notify_d_enqueue(c->svc, message, topic, event_type);
+    size_t pending = c->svc->pending_count;
+    airy_mtx_unlock(&c->svc->lock);
+    if (rc != AIRY_SUCCESS) {
+        c->err = jsonrpc_build_error(JSONRPC_INTERNAL_ERROR,
+                                     rc == AIRY_ERR_OUT_OF_MEMORY ? "out of memory"
+                                                                  : "pending queue full",
+                                     c->rid);
+        return;
+    }
+
+    c->result = cJSON_CreateObject();
+    cJSON_AddBoolToObject(c->result, "queued", 1);
+    cJSON_AddStringToObject(c->result, "topic", topic);
+    cJSON_AddStringToObject(c->result, "event", event_type);
+    cJSON_AddNumberToObject(c->result, "pending", (double)pending);
+    cJSON_AddNumberToObject(c->result, "subscribers",
+                            (double)notify_d_subscription_count(c->svc, topic));
+}
+
+static void ntf_member(ntf_call_t *c)
+{
+    cJSON *params = cJSON_GetObjectItem(c->req, "params");
+    const char *topic = jsonrpc_get_string_param(params, "topic", NULL);
+    const char *client_id = jsonrpc_get_string_param(params, "client_id", NULL);
+    const char *method = cJSON_GetStringValue(cJSON_GetObjectItem(c->req, "method"));
+    int on = method && strcmp(method, "subscribe") == 0;
+
+    if (!topic || !topic[0] || !client_id || !client_id[0]) {
+        c->err = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "topic and client_id are required",
+                                     c->rid);
+        return;
+    }
+
+    int rc = on ? notify_d_subscribe(c->svc, topic, client_id)
+                : notify_d_unsubscribe(c->svc, topic, client_id);
+    if (rc != AIRY_SUCCESS) {
+        c->err = jsonrpc_build_error(JSONRPC_INTERNAL_ERROR,
+                                     on ? "failed to subscribe" : "failed to unsubscribe", c->rid);
+        return;
+    }
+
+    c->result = cJSON_CreateObject();
+    cJSON_AddStringToObject(c->result, "status", on ? "subscribed" : "unsubscribed");
+    cJSON_AddStringToObject(c->result, "topic", topic);
+    cJSON_AddStringToObject(c->result, "client_id", client_id);
+    cJSON_AddNumberToObject(c->result, "subscribers",
+                            (double)notify_d_subscription_count(c->svc, topic));
+}
+
+static void ntf_take(ntf_topics_t *t, const char *topic)
+{
+    if (!topic || !topic[0])
+        return;
+    for (size_t i = 0; i < t->count; i++) {
+        if (strcmp(t->names[i], topic) == 0)
+            return;
+    }
+    if (t->count < sizeof(t->names) / sizeof(t->names[0]))
+        t->names[t->count++] = topic;
+}
+
+static void ntf_list(ntf_call_t *c)
+{
+    ntf_topics_t topics;
+    size_t clients = 0;
+    size_t subs = 0;
+
+    topics.count = 0;
+    airy_mtx_lock(&c->svc->lock);
+    for (size_t i = 0; i < c->svc->client_count; i++) {
+        if (!c->svc->clients[i].active)
+            continue;
+        clients++;
+        ntf_take(&topics, c->svc->clients[i].topic);
+    }
+    for (size_t i = 0; i < c->svc->subscription_count; i++) {
+        if (!c->svc->subscriptions[i].active)
+            continue;
+        subs++;
+        ntf_take(&topics, c->svc->subscriptions[i].topic);
+    }
+    airy_mtx_unlock(&c->svc->lock);
+
+    c->result = cJSON_CreateObject();
+    cJSON_AddNumberToObject(c->result, "clients", (double)clients);
+    cJSON_AddNumberToObject(c->result, "subscriptions", (double)subs);
+
+    cJSON *arr = cJSON_CreateArray();
+    for (size_t k = 0; k < topics.count; k++) {
+        size_t active = 0;
+        airy_mtx_lock(&c->svc->lock);
+        for (size_t i = 0; i < c->svc->client_count; i++) {
+            if (c->svc->clients[i].active && c->svc->clients[i].topic &&
+                strcmp(c->svc->clients[i].topic, topics.names[k]) == 0)
+                active++;
+        }
+        airy_mtx_unlock(&c->svc->lock);
+
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "topic", topics.names[k]);
+        cJSON_AddNumberToObject(item, "subscribers",
+                                (double)notify_d_subscription_count(c->svc, topics.names[k]));
+        cJSON_AddNumberToObject(item, "active_clients", (double)active);
+        cJSON_AddItemToArray(arr, item);
+    }
+    cJSON_AddItemToObject(c->result, "topics", arr);
+}
+
+static void ntf_health(ntf_call_t *c)
+{
+    notify_d_service_t *svc = c->svc;
+    size_t act = 0;
+    size_t subs = 0;
+
+    airy_mtx_lock(&svc->lock);
+    size_t pending = svc->pending_count;
+    int running = svc->event_running ? 1 : 0;
+    uint64_t notified = svc->notified_count;
+    uint64_t errors = svc->error_count;
+    for (size_t i = 0; i < svc->client_count; i++)
+        act += svc->clients[i].active ? 1 : 0;
+    for (size_t i = 0; i < svc->subscription_count; i++)
+        subs += svc->subscriptions[i].active ? 1 : 0;
+    airy_mtx_unlock(&svc->lock);
+
+    uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
+    double occupancy = (double)pending / (double)NOTIFY_D_MAX_PENDING;
+    const char *status = (!running || pending >= NOTIFY_D_MAX_PENDING) ? "degraded" : "ok";
+
+    c->result = cJSON_CreateObject();
+    cJSON_AddStringToObject(c->result, "status", status);
+    cJSON_AddStringToObject(c->result, "service", "notify_d");
+    cJSON_AddNumberToObject(c->result, "queue_pending", (double)pending);
+    cJSON_AddNumberToObject(c->result, "queue_capacity", (double)NOTIFY_D_MAX_PENDING);
+    cJSON_AddNumberToObject(c->result, "queue_occupancy", occupancy);
+    cJSON_AddBoolToObject(c->result, "consumer_running", running);
+    cJSON_AddNumberToObject(c->result, "active_clients", (double)act);
+    cJSON_AddNumberToObject(c->result, "subscriptions", (double)subs);
+    cJSON_AddNumberToObject(c->result, "notified", (double)notified);
+    cJSON_AddNumberToObject(c->result, "errors", (double)errors);
+    cJSON_AddNumberToObject(c->result, "uptime_s", (double)uptime);
+}
+
+static void ntf_shutdown(ntf_call_t *c)
+{
+    c->result = cJSON_CreateObject();
+    cJSON_AddStringToObject(c->result, "status", "shutting_down");
+}
+
+static void ntf_stats(ntf_call_t *c)
+{
+    notify_d_service_t *svc = c->svc;
+
+    airy_mtx_lock(&svc->lock);
+    size_t pending = svc->pending_count;
+    size_t clients = svc->client_count;
+    uint64_t notified = svc->notified_count;
+    uint64_t errors = svc->error_count;
+    airy_mtx_unlock(&svc->lock);
+
+    uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
+    c->result = cJSON_CreateObject();
+    cJSON_AddStringToObject(c->result, "daemon", "notify_d");
+    cJSON_AddNumberToObject(c->result, "uptime_s", (double)uptime);
+    cJSON_AddNumberToObject(c->result, "notified", (double)notified);
+    cJSON_AddNumberToObject(c->result, "errors", (double)errors);
+    cJSON_AddNumberToObject(c->result, "clients", (double)clients);
+    cJSON_AddNumberToObject(c->result, "pending", (double)pending);
+}
+
+static void ntf_ping(ntf_call_t *c)
+{
+    c->result = cJSON_CreateObject();
+    cJSON_AddStringToObject(c->result, "status", "ok");
+    cJSON_AddStringToObject(c->result, "service", "notify_d");
+    cJSON_AddNumberToObject(c->result, "uptime_s",
+                            (double)((uint64_t)time(NULL) - c->svc->start_time));
+    cJSON_AddNumberToObject(c->result, "timestamp", (double)time(NULL) * 1000.0);
+}
+
+static const ntf_method_t ntf_methods[] = {
+    {"publish", ntf_publish, NOTIFY_D_METHOD_HANDLED},
+    {"subscribe", ntf_member, NOTIFY_D_METHOD_HANDLED},
+    {"unsubscribe", ntf_member, NOTIFY_D_METHOD_HANDLED},
+    {"list", ntf_list, NOTIFY_D_METHOD_HANDLED},
+    {"health", ntf_health, NOTIFY_D_METHOD_HANDLED},
+    {"shutdown", ntf_shutdown, NOTIFY_D_METHOD_SHUTDOWN},
+    {"get_stats", ntf_stats, NOTIFY_D_METHOD_HANDLED},
+    {"health_check", ntf_ping, NOTIFY_D_METHOD_HANDLED},
+};
+
+static const ntf_method_t *ntf_lookup(const char *name)
+{
+    for (size_t i = 0; i < sizeof(ntf_methods) / sizeof(ntf_methods[0]); i++)
+        if (strcmp(ntf_methods[i].name, name) == 0)
+            return &ntf_methods[i];
+    return NULL;
+}
+
 int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request, char *response,
                               size_t response_size)
 {
@@ -343,254 +580,29 @@ int notify_d_dispatch_jsonrpc(notify_d_service_t *svc, const char *request, char
         cJSON_Delete(req);
         return NOTIFY_D_METHOD_NOT_RPC;
     }
-    int rid = cJSON_IsNumber(idj) ? idj->valueint : 0;
-    const char *method = m->valuestring;
 
-    cJSON *result = NULL;
-    char *out = NULL;
-    int status = NOTIFY_D_METHOD_HANDLED;
-
-    if (strcmp(method, "publish") == 0) {
-
-        cJSON *params = cJSON_GetObjectItem(req, "params");
-        const char *topic = jsonrpc_get_string_param(params, "topic", "default");
-        const char *message = jsonrpc_get_string_param(params, "message", NULL);
-        if (!message || !message[0])
-            message = jsonrpc_get_string_param(params, "payload", NULL);
-        const char *event_type = jsonrpc_get_string_param(params, "event", "message");
-
-        if (!message || !message[0]) {
-            out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "message (or payload) is required",
-                                      rid);
-        } else {
-
-            airy_mtx_lock(&svc->lock);
-            int rc = notify_d_enqueue(svc, message, topic, event_type);
-            airy_mtx_unlock(&svc->lock);
-            if (rc != AIRY_SUCCESS) {
-                out = jsonrpc_build_error(JSONRPC_INTERNAL_ERROR,
-                                          rc == AIRY_ERR_OUT_OF_MEMORY ? "out of memory" :
-                                                                         "pending queue full",
-                                          rid);
-            } else {
-                airy_mtx_lock(&svc->lock);
-                size_t pending = svc->pending_count;
-                airy_mtx_unlock(&svc->lock);
-                result = cJSON_CreateObject();
-                cJSON_AddBoolToObject(result, "queued", 1);
-                cJSON_AddStringToObject(result, "topic", topic);
-                cJSON_AddStringToObject(result, "event", event_type);
-                cJSON_AddNumberToObject(result, "pending", (double)pending);
-                cJSON_AddNumberToObject(result, "subscribers",
-                                        (double)notify_d_subscription_count(svc, topic));
-            }
-        }
-    } else if (strcmp(method, "subscribe") == 0) {
-
-        cJSON *params = cJSON_GetObjectItem(req, "params");
-        const char *topic = jsonrpc_get_string_param(params, "topic", NULL);
-        const char *client_id = jsonrpc_get_string_param(params, "client_id", NULL);
-
-        if (!topic || !topic[0] || !client_id || !client_id[0]) {
-            out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "topic and client_id are required",
-                                      rid);
-        } else {
-            int rc = notify_d_subscribe(svc, topic, client_id);
-            if (rc != AIRY_SUCCESS) {
-                out = jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "failed to subscribe", rid);
-            } else {
-                result = cJSON_CreateObject();
-                cJSON_AddStringToObject(result, "status", "subscribed");
-                cJSON_AddStringToObject(result, "topic", topic);
-                cJSON_AddStringToObject(result, "client_id", client_id);
-                cJSON_AddNumberToObject(result, "subscribers",
-                                        (double)notify_d_subscription_count(svc, topic));
-            }
-        }
-    } else if (strcmp(method, "unsubscribe") == 0) {
-
-        cJSON *params = cJSON_GetObjectItem(req, "params");
-        const char *topic = jsonrpc_get_string_param(params, "topic", NULL);
-        const char *client_id = jsonrpc_get_string_param(params, "client_id", NULL);
-
-        if (!topic || !topic[0] || !client_id || !client_id[0]) {
-            out = jsonrpc_build_error(JSONRPC_INVALID_PARAMS, "topic and client_id are required",
-                                      rid);
-        } else {
-            int rc = notify_d_unsubscribe(svc, topic, client_id);
-            if (rc != AIRY_SUCCESS) {
-                out = jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "failed to unsubscribe", rid);
-            } else {
-                result = cJSON_CreateObject();
-                cJSON_AddStringToObject(result, "status", "unsubscribed");
-                cJSON_AddStringToObject(result, "topic", topic);
-                cJSON_AddStringToObject(result, "client_id", client_id);
-                cJSON_AddNumberToObject(result, "subscribers",
-                                        (double)notify_d_subscription_count(svc, topic));
-            }
-        }
-    } else if (strcmp(method, "list") == 0) {
-
-        const char *topic_names[NOTIFY_D_MAX_SUBSCRIPTIONS + NOTIFY_D_MAX_CLIENTS];
-        size_t topic_count = 0;
-        size_t active_clients = 0;
-        size_t total_subs = 0;
-
-        airy_mtx_lock(&svc->lock);
-        for (size_t i = 0; i < svc->client_count; i++) {
-            if (!svc->clients[i].active)
-                continue;
-            active_clients++;
-            const char *tp = svc->clients[i].topic;
-            if (tp && tp[0]) {
-                int known = 0;
-                for (size_t k = 0; k < topic_count; k++) {
-                    if (strcmp(topic_names[k], tp) == 0) {
-                        known = 1;
-                        break;
-                    }
-                }
-                if (!known && topic_count < (sizeof(topic_names) / sizeof(topic_names[0])))
-                    topic_names[topic_count++] = tp;
-            }
-        }
-        for (size_t i = 0; i < svc->subscription_count; i++) {
-            notify_subscription_t *sub = &svc->subscriptions[i];
-            if (!sub->active)
-                continue;
-            total_subs++;
-            int known = 0;
-            for (size_t k = 0; k < topic_count; k++) {
-                if (strcmp(topic_names[k], sub->topic) == 0) {
-                    known = 1;
-                    break;
-                }
-            }
-            if (!known && topic_count < (sizeof(topic_names) / sizeof(topic_names[0])))
-                topic_names[topic_count++] = sub->topic;
-        }
-        airy_mtx_unlock(&svc->lock);
-
-        result = cJSON_CreateObject();
-        cJSON_AddNumberToObject(result, "clients", (double)active_clients);
-        cJSON_AddNumberToObject(result, "subscriptions", (double)total_subs);
-        cJSON *topics_arr = cJSON_CreateArray();
-        for (size_t k = 0; k < topic_count; k++) {
-            size_t subs = notify_d_subscription_count(svc, topic_names[k]);
-            size_t act = 0;
-            airy_mtx_lock(&svc->lock);
-            for (size_t i = 0; i < svc->client_count; i++) {
-                if (svc->clients[i].active && svc->clients[i].topic &&
-                    strcmp(svc->clients[i].topic, topic_names[k]) == 0)
-                    act++;
-            }
-            airy_mtx_unlock(&svc->lock);
-            cJSON *item = cJSON_CreateObject();
-            cJSON_AddStringToObject(item, "topic", topic_names[k]);
-            cJSON_AddNumberToObject(item, "subscribers", (double)subs);
-            cJSON_AddNumberToObject(item, "active_clients", (double)act);
-            cJSON_AddItemToArray(topics_arr, item);
-        }
-        cJSON_AddItemToObject(result, "topics", topics_arr);
-    } else if (strcmp(method, "health") == 0) {
-
-        size_t pending = 0;
-        size_t active_clients = 0;
-        size_t total_subs = 0;
-        int consumer_running = 0;
-        uint64_t notified = 0;
-        uint64_t errors = 0;
-
-        airy_mtx_lock(&svc->lock);
-        pending = svc->pending_count;
-        active_clients = 0;
-        for (size_t i = 0; i < svc->client_count; i++) {
-            if (svc->clients[i].active)
-                active_clients++;
-        }
-        for (size_t i = 0; i < svc->subscription_count; i++) {
-            if (svc->subscriptions[i].active)
-                total_subs++;
-        }
-        consumer_running = svc->event_running ? 1 : 0;
-        notified = svc->notified_count;
-        errors = svc->error_count;
-        airy_mtx_unlock(&svc->lock);
-
-        uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
-        double occupancy =
-            NOTIFY_D_MAX_PENDING > 0 ? (double)pending / (double)NOTIFY_D_MAX_PENDING : 0.0;
-        const char *status =
-            (!consumer_running || pending >= NOTIFY_D_MAX_PENDING) ? "degraded" : "ok";
-
-        result = cJSON_CreateObject();
-        cJSON_AddStringToObject(result, "status", status);
-        cJSON_AddStringToObject(result, "service", "notify_d");
-        cJSON_AddNumberToObject(result, "queue_pending", (double)pending);
-        cJSON_AddNumberToObject(result, "queue_capacity", (double)NOTIFY_D_MAX_PENDING);
-        cJSON_AddNumberToObject(result, "queue_occupancy", occupancy);
-        cJSON_AddBoolToObject(result, "consumer_running", consumer_running);
-        cJSON_AddNumberToObject(result, "active_clients", (double)active_clients);
-        cJSON_AddNumberToObject(result, "subscriptions", (double)total_subs);
-        cJSON_AddNumberToObject(result, "notified", (double)notified);
-        cJSON_AddNumberToObject(result, "errors", (double)errors);
-        cJSON_AddNumberToObject(result, "uptime_s", (double)uptime);
-    } else if (strcmp(method, "shutdown") == 0) {
-
-        result = cJSON_CreateObject();
-        cJSON_AddStringToObject(result, "status", "shutting_down");
-        status = NOTIFY_D_METHOD_SHUTDOWN;
-    } else if (strcmp(method, "get_stats") == 0) {
-        uint64_t notified = 0;
-        uint64_t errors = 0;
-        size_t clients = 0;
-        size_t pending = 0;
-        airy_mtx_lock(&svc->lock);
-        notified = svc->notified_count;
-        errors = svc->error_count;
-        clients = svc->client_count;
-        pending = svc->pending_count;
-        airy_mtx_unlock(&svc->lock);
-        uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
-
-        result = cJSON_CreateObject();
-        cJSON_AddStringToObject(result, "daemon", "notify_d");
-        cJSON_AddNumberToObject(result, "uptime_s", (double)uptime);
-        cJSON_AddNumberToObject(result, "notified", (double)notified);
-        cJSON_AddNumberToObject(result, "errors", (double)errors);
-        cJSON_AddNumberToObject(result, "clients", (double)clients);
-        cJSON_AddNumberToObject(result, "pending", (double)pending);
-    } else if (strcmp(method, "health_check") == 0) {
-        uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
-        result = cJSON_CreateObject();
-        cJSON_AddStringToObject(result, "status", "ok");
-        cJSON_AddStringToObject(result, "service", "notify_d");
-        cJSON_AddNumberToObject(result, "uptime_s", (double)uptime);
-        cJSON_AddNumberToObject(result, "timestamp", (double)time(NULL) * 1000.0);
-    } else {
-
+    const ntf_method_t *hit = ntf_lookup(m->valuestring);
+    if (!hit) {
         cJSON_Delete(req);
         return NOTIFY_D_METHOD_NOT_RPC;
     }
 
-    if (out) {
-        snprintf(response, response_size, "%s", out);
-        AIRY_FREE(out);
-    } else if (result) {
-        char *built = jsonrpc_build_success(result, rid);
-        if (built) {
-            snprintf(response, response_size, "%s", built);
-            AIRY_FREE(built);
-        } else {
+    ntf_call_t call = {.svc = svc,
+                       .req = req,
+                       .rid = cJSON_IsNumber(idj) ? idj->valueint : 0};
+    hit->fn(&call);
 
-            snprintf(response, response_size,
-                     "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":%d,\"message\":\"internal error\"},"
-                     "\"id\":%d}",
-                     JSONRPC_INTERNAL_ERROR, rid);
-            status = NOTIFY_D_METHOD_HANDLED;
-        }
+    /* jsonrpc_build_success 在全部路径上接管 result 所有权，此处不得再释放。 */
+    if (!call.err && call.result) {
+        call.err = jsonrpc_build_success(call.result, call.rid);
+        if (!call.err)
+            call.err = jsonrpc_build_error(JSONRPC_INTERNAL_ERROR, "internal error", call.rid);
+    }
+    if (call.err) {
+        snprintf(response, response_size, "%s", call.err);
+        AIRY_FREE(call.err);
     }
 
     cJSON_Delete(req);
-    return status;
+    return hit->status;
 }
