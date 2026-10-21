@@ -60,6 +60,8 @@ set(TOOL_TEST_SOURCES
     test_tool_contract.c
     test_sandbox_integration.c
     test_fs_e2e.c
+    # C-L05 (0.1.19): SafetyGuard 桥接六 guard 通过/拒绝与计数语义
+    test_safety_guard.c
     # 0.1.9 M4：plugin_d → tool_d 整编——插件测试随迁
     test_plugin_permission.c
     # 技能机制服务面（skill.* RPC 登记 + syscall 机制往返）
