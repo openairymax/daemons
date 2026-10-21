@@ -17,6 +17,9 @@
  *   SAFETY_GUARD_INPUT        -> parameter sanitization
  *   SAFETY_GUARD_RESOURCE     -> resource-quota check
  *   SAFETY_GUARD_AUDIT        -> audit-log recording
+ *
+ * 0.1.19 L1 收敛：检查主体拆为栈上上下文加逐 guard 阶段函数，拒绝路径统一
+ * 经 sgb_deny() 出口，denial_reason、告警与 denied_count 三处语义同源。
  */
 
 #include "safety_guard_bridge.h"
@@ -31,6 +34,7 @@
 
 #include "platform.h"
 
+#include <stdarg.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,6 +59,16 @@ struct safety_guard_bridge_s {
     _Atomic uint64_t denied_count;
     _Atomic uint64_t rate_limited;
 };
+
+typedef struct {
+    safety_guard_bridge_t *bridge;
+    const char *agent;
+    const char *tool;
+    const char *params;
+    safety_guard_bridge_result_t *res;
+    int chain_len;
+    int executed;
+} sgb_chk_t;
 
 void sgb_cfg_defaults(safety_guard_bridge_config_t *cfg)
 {
@@ -142,44 +156,201 @@ void safety_guard_bridge_destroy(safety_guard_bridge_t *bridge)
     AIRY_FREE(bridge);
 }
 
-/**
- * @brief Check whether the rate-limit window needs resetting.
- * 调用方必须已持有 bridge->rl_lock。
- */
-static void rate_window_sync(safety_guard_bridge_t *bridge)
+/* 统一拒绝出口：各 *_passed 字段已由入口 memset 清零，此处只负责写拒绝
+ * 原因、告警与拒绝计数，避免五处同构代码各自演化。 */
+static int sgb_deny(sgb_chk_t *c, int code, const char *tag, const char *fmt, ...)
 {
-    uint64_t now = airy_time_ms();
-    if (bridge->rate_limit_window_start == 0) {
-        bridge->rate_limit_window_start = now;
-        return;
-    }
+    char msg[256];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
 
-    if (now - bridge->rate_limit_window_start >= 60000) {
-        bridge->rate_limit_window_start = now;
-        bridge->rate_limit_call_count = 0;
-    }
+    if (c->res)
+        snprintf(c->res->denial_reason, sizeof(c->res->denial_reason), "%s", msg);
+    AIRY_LOG_WARN("C-L05: %s: %s", tag, msg);
+    atomic_fetch_add_explicit(&c->bridge->denied_count, 1, memory_order_relaxed);
+    return code;
 }
 
-/**
- * @brief Build a Cupolas safety event
- */
-static void build_safety_event(safety_event_t *event, const tool_metadata_t *meta,
-                               const char *params_json, const char *agent_id)
+/* 与 sgb_deny 对称的通过出口：置位该 guard 的通过标记并累计已执行数。 */
+static int sgb_pass(sgb_chk_t *c, int *passed)
 {
-    __builtin_memset(event, 0, sizeof(*event));
-    event->type = SAFETY_EVENT_EXECUTION_START;
-    event->timestamp = airy_time_ms();
+    if (passed)
+        *passed = 1;
+    c->executed++;
+    return 0;
+}
 
-    if (meta) {
-        snprintf(event->action, sizeof(event->action), "%s", meta->name ? meta->name : "unknown");
+static int sgb_perm(sgb_chk_t *c)
+{
+    if (!c->bridge->config.enable_permission_guard)
+        return 0;
+
+    c->chain_len++;
+    if (daemon_check_tool_permission(c->agent, c->tool, "execute") != 0) {
+        return sgb_deny(c, AIRY_ERR_PERMISSION_DENIED, "SAFETY_GUARD_PERMISSION",
+                        "Permission denied: agent '%s' cannot execute '%s'", c->agent, c->tool);
     }
-    if (agent_id) {
-        snprintf(event->subject, sizeof(event->subject), "%s", agent_id);
+    return sgb_pass(c, c->res ? &c->res->permission_passed : NULL);
+}
+
+static int sgb_rate(sgb_chk_t *c)
+{
+    bool allowed;
+    uint64_t calls, now;
+
+    if (!c->bridge->config.enable_rate_limit_guard)
+        return 0;
+
+    if (c->bridge->config.rate_limit_per_minute == 0) {
+        if (c->res)
+            c->res->rate_limit_passed = 1;
+        return 0;
     }
-    if (params_json) {
-        event->context = params_json;
-        event->context_size = strlen(params_json);
+
+    c->chain_len++;
+
+    /* 窗口重置 + 计数 + 超限判定必须在同一临界区内完成，
+     * 否则并发下限流会失真（超发或误限）。 */
+    airy_mtx_lock(&c->bridge->rl_lock);
+    now = airy_time_ms();
+    if (c->bridge->rate_limit_window_start == 0)
+        c->bridge->rate_limit_window_start = now;
+    if (now - c->bridge->rate_limit_window_start >= 60000) {
+        c->bridge->rate_limit_window_start = now;
+        c->bridge->rate_limit_call_count = 0;
     }
+    calls = ++c->bridge->rate_limit_call_count;
+    allowed = calls <= c->bridge->config.rate_limit_per_minute;
+    airy_mtx_unlock(&c->bridge->rl_lock);
+
+    if (!allowed) {
+        atomic_fetch_add_explicit(&c->bridge->rate_limited, 1, memory_order_relaxed);
+        return sgb_deny(c, AIRY_ERR_BUSY, "SAFETY_GUARD_RATE_LIMIT",
+                        "Rate limit exceeded: %u/min for tool '%s' (%llu calls)",
+                        c->bridge->config.rate_limit_per_minute, c->tool,
+                        (unsigned long long)calls);
+    }
+    return sgb_pass(c, c->res ? &c->res->rate_limit_passed : NULL);
+}
+
+/* 在逗号分隔的黑名单词表中查找首个出现在参数中的词；命中即经统一出口拒绝。 */
+static int sgb_scan(sgb_chk_t *c, const char *denied)
+{
+    char *copy = AIRY_STRDUP(denied), *save = NULL, *tok;
+    int rc = 0;
+
+    if (!copy)
+        return 0;
+
+    tok = strtok_r(copy, ",", &save);
+    while (tok) {
+        while (*tok == ' ')
+            tok++;
+        if (*tok && strstr(c->params, tok)) {
+            rc = sgb_deny(c, AIRY_ERR_SEC_VIOLATION, "SAFETY_GUARD_CONTENT_FILTER",
+                          "Content filter: denied pattern '%s' found in tool '%s' params", tok,
+                          c->tool);
+            break;
+        }
+        tok = strtok_r(NULL, ",", &save);
+    }
+    AIRY_FREE(copy);
+    return rc;
+}
+
+static int sgb_filter(sgb_chk_t *c)
+{
+    if (!c->bridge->config.enable_content_filter || !c->params)
+        return 0;
+
+    const char *denied = c->bridge->config.denied_patterns;
+    uint32_t max_size = c->bridge->config.max_params_size;
+    size_t params_len = strlen(c->params);
+    int rc = 0;
+
+    c->chain_len++;
+
+    if (denied && denied[0])
+        rc = sgb_scan(c, denied);
+
+    if (rc == 0 && max_size > 0 && params_len > max_size) {
+        rc = sgb_deny(c, AIRY_ERR_SEC_VIOLATION, "SAFETY_GUARD_CONTENT_FILTER",
+                      "Content filter: params size %zu exceeds max %u for tool '%s'", params_len,
+                      max_size, c->tool);
+    }
+    if (rc == 0)
+        rc = sgb_pass(c, c->res ? &c->res->content_filter_passed : NULL);
+    return rc;
+}
+
+static int sgb_input(sgb_chk_t *c)
+{
+    char sanitized_tool[128] = {0};
+    char sanitized_params[4096] = {0};
+
+    if (!c->bridge->config.enable_input_sanitization || !c->params)
+        return 0;
+
+    c->chain_len++;
+    if (daemon_sanitize_tool_params(c->tool, c->params, sanitized_tool, sizeof(sanitized_tool),
+                                    sanitized_params, sizeof(sanitized_params)) != 0)
+        return 0;
+
+    if (c->res && strcmp(c->params, sanitized_params) != 0) {
+        snprintf(c->res->sanitized_params, sizeof(c->res->sanitized_params), "%s",
+                 sanitized_params);
+    }
+    return sgb_pass(c, c->res ? &c->res->input_sanitized : NULL);
+}
+
+static int sgb_quota(sgb_chk_t *c)
+{
+    bool allowed = true;
+
+    if (!c->bridge->config.enable_resource_quota || !c->bridge->guard_ctx)
+        return 0;
+
+    c->chain_len++;
+    int quota_ret = safety_guard_check_quota(c->bridge->guard_ctx, c->tool, 1, &allowed);
+    if (quota_ret == 0 && !allowed) {
+        return sgb_deny(c, AIRY_ERR_SEC_QUOTA, "SAFETY_GUARD_RESOURCE",
+                        "Resource quota exceeded for tool '%s'", c->tool);
+    }
+    if (quota_ret == 0 && allowed)
+        safety_guard_consume_quota(c->bridge->guard_ctx, c->tool, 1);
+
+    return sgb_pass(c, c->res ? &c->res->resource_quota_passed : NULL);
+}
+
+static int sgb_audit(sgb_chk_t *c)
+{
+    if (!c->bridge->config.enable_audit_guard)
+        return 0;
+
+    c->chain_len++;
+    if (c->bridge->guard_ctx) {
+        safety_event_t event;
+        safety_result_t audit_result;
+        __builtin_memset(&event, 0, sizeof(event));
+        event.type = SAFETY_EVENT_EXECUTION_START;
+        event.timestamp = airy_time_ms();
+        snprintf(event.action, sizeof(event.action), "%s", c->tool);
+        snprintf(event.subject, sizeof(event.subject), "%s", c->agent);
+        if (c->params) {
+            event.context = c->params;
+            event.context_size = strlen(c->params);
+        }
+        safety_guard_record_audit(c->bridge->guard_ctx, &event, &audit_result,
+                                  "safety_guard_bridge");
+    }
+
+    /* result=0 → SUCCESS。此处为 guard 链全部通过后的成功路径；原硬编码
+     * 1 使每次工具执行都被审计为 FAILED（假阳性遥测，误导排障）。 */
+    daemon_audit_log_event("tool_d", "tool_execute_safety_guard", c->tool, 0, c->agent);
+
+    return sgb_pass(c, c->res ? &c->res->audit_recorded : NULL);
 }
 
 /* Run the full guard chain with the given agent_id. The permission guard
@@ -189,209 +360,37 @@ int safety_guard_bridge_check_for_agent(safety_guard_bridge_t *bridge, const cha
                                         const tool_metadata_t *meta, const char *params_json,
                                         safety_guard_bridge_result_t *result)
 {
+    static int (*const stages[])(sgb_chk_t *) = {sgb_perm, sgb_rate,  sgb_filter,
+                                                 sgb_input, sgb_quota, sgb_audit};
+    sgb_chk_t c;
+    int rc = 0;
+    size_t i;
+
     if (!bridge || !meta)
         return AIRY_ERR_INVALID_PARAM;
 
-    if (!agent_id || !agent_id[0]) {
-        agent_id = bridge->agent_id;
-    }
+    __builtin_memset(&c, 0, sizeof(c));
+    c.bridge = bridge;
+    c.agent = (agent_id && agent_id[0]) ? agent_id : bridge->agent_id;
+    c.tool = meta->name ? meta->name : "unknown";
+    c.params = params_json;
+    c.res = result;
 
-    if (result) {
+    if (result)
         __builtin_memset(result, 0, sizeof(*result));
-    }
 
     atomic_fetch_add_explicit(&bridge->total_checks, 1, memory_order_relaxed);
 
-    const char *tool_name = meta->name ? meta->name : "unknown";
-    int guard_chain_length = 0;
-    int guards_executed = 0;
-
-    if (bridge->config.enable_permission_guard) {
-        guard_chain_length++;
-        int perm_ret = daemon_check_tool_permission(agent_id, tool_name, "execute");
-        if (perm_ret != 0) {
-            if (result) {
-                result->permission_passed = 0;
-                snprintf(result->denial_reason, sizeof(result->denial_reason),
-                         "Permission denied: agent '%s' cannot execute '%s'", agent_id, tool_name);
-            }
-            AIRY_LOG_WARN("C-L05: SAFETY_GUARD_PERMISSION denied for '%s' by '%s'", tool_name,
-                          agent_id);
-            atomic_fetch_add_explicit(&bridge->denied_count, 1, memory_order_relaxed);
-            return AIRY_ERR_PERMISSION_DENIED;
-        }
-        if (result)
-            result->permission_passed = 1;
-        guards_executed++;
+    for (i = 0; i < sizeof(stages) / sizeof(stages[0]); i++) {
+        rc = stages[i](&c);
+        if (rc != 0)
+            break;
     }
 
-    if (bridge->config.enable_rate_limit_guard && bridge->config.rate_limit_per_minute > 0) {
-        guard_chain_length++;
-
-        /* 窗口重置 + 计数 + 超限判定必须在同一临界区内完成，
-         * 否则并发下限流会失真（超发或误限）。 */
-        bool rate_allowed = true;
-        uint64_t call_count = 0;
-        airy_mtx_lock(&bridge->rl_lock);
-        rate_window_sync(bridge);
-        bridge->rate_limit_call_count++;
-        call_count = bridge->rate_limit_call_count;
-        if (call_count > bridge->config.rate_limit_per_minute) {
-            rate_allowed = false;
-        }
-        airy_mtx_unlock(&bridge->rl_lock);
-
-        if (!rate_allowed) {
-            if (result) {
-                result->rate_limit_passed = 0;
-                snprintf(result->denial_reason, sizeof(result->denial_reason),
-                         "Rate limit exceeded: %u/min for tool '%s'",
-                         bridge->config.rate_limit_per_minute, tool_name);
-            }
-            AIRY_LOG_WARN("C-L05: SAFETY_GUARD_RATE_LIMIT exceeded for '%s' "
-                          "(%llu calls)",
-                          tool_name, (unsigned long long)call_count);
-            atomic_fetch_add_explicit(&bridge->rate_limited, 1, memory_order_relaxed);
-            atomic_fetch_add_explicit(&bridge->denied_count, 1, memory_order_relaxed);
-            return AIRY_ERR_BUSY;
-        }
-        if (result)
-            result->rate_limit_passed = 1;
-        guards_executed++;
-    } else if (bridge->config.enable_rate_limit_guard) {
-
-        if (result)
-            result->rate_limit_passed = 1;
-    }
-
-    if (bridge->config.enable_content_filter && params_json) {
-        guard_chain_length++;
-
-        if (bridge->config.denied_patterns && bridge->config.denied_patterns[0]) {
-            char *patterns_copy = AIRY_STRDUP(bridge->config.denied_patterns);
-            if (patterns_copy) {
-                char *saveptr = NULL;
-                char *token = strtok_r(patterns_copy, ",", &saveptr);
-                while (token) {
-
-                    while (*token == ' ')
-                        token++;
-                    if (*token && strstr(params_json, token)) {
-                        if (result) {
-                            result->content_filter_passed = 0;
-                            snprintf(result->denial_reason, sizeof(result->denial_reason),
-                                     "Content filter: denied pattern '%s' found "
-                                     "in tool '%s' params",
-                                     token, tool_name);
-                        }
-                        AIRY_LOG_WARN("C-L05: SAFETY_GUARD_CONTENT_FILTER "
-                                      "denied pattern '%s' for '%s'",
-                                      token, tool_name);
-                        AIRY_FREE(patterns_copy);
-                        atomic_fetch_add_explicit(&bridge->denied_count, 1,
-                                                  memory_order_relaxed);
-                        return AIRY_ERR_SEC_VIOLATION;
-                    }
-                    token = strtok_r(NULL, ",", &saveptr);
-                }
-                AIRY_FREE(patterns_copy);
-            }
-        }
-
-        if (bridge->config.max_params_size > 0 && params_json) {
-            size_t params_len = strlen(params_json);
-            if (params_len > bridge->config.max_params_size) {
-                if (result) {
-                    result->content_filter_passed = 0;
-                    snprintf(result->denial_reason, sizeof(result->denial_reason),
-                             "Content filter: params size %zu exceeds max %u "
-                             "for tool '%s'",
-                             params_len, bridge->config.max_params_size, tool_name);
-                }
-                AIRY_LOG_WARN("C-L05: SAFETY_GUARD_CONTENT_FILTER size limit "
-                              "exceeded for '%s' (%zu > %u)",
-                              tool_name, params_len, bridge->config.max_params_size);
-                atomic_fetch_add_explicit(&bridge->denied_count, 1, memory_order_relaxed);
-                return AIRY_ERR_SEC_VIOLATION;
-            }
-        }
-
-        if (result)
-            result->content_filter_passed = 1;
-        guards_executed++;
-    }
-
-    if (bridge->config.enable_input_sanitization && params_json) {
-        guard_chain_length++;
-
-        char sanitized[4096] = {0};
-        int san_ret = daemon_sanitize_tool_params(tool_name, params_json, sanitized,
-                                                  sizeof(sanitized), sanitized, sizeof(sanitized));
-
-        if (san_ret == 0) {
-            if (result) {
-                result->input_sanitized = 1;
-                if (strcmp(params_json, sanitized) != 0) {
-                    snprintf(result->sanitized_params, sizeof(result->sanitized_params), "%s",
-                             sanitized);
-                }
-            }
-        }
-        if (result && result->input_sanitized) {
-            guards_executed++;
-        }
-    }
-
-    if (bridge->config.enable_resource_quota && bridge->guard_ctx) {
-        guard_chain_length++;
-
-        bool quota_allowed = true;
-        int quota_ret = safety_guard_check_quota(bridge->guard_ctx, tool_name, 1, &quota_allowed);
-        if (quota_ret == 0 && !quota_allowed) {
-            if (result) {
-                result->resource_quota_passed = 0;
-                snprintf(result->denial_reason, sizeof(result->denial_reason),
-                         "Resource quota exceeded for tool '%s'", tool_name);
-            }
-            AIRY_LOG_WARN("C-L05: SAFETY_GUARD_RESOURCE quota exceeded for '%s'", tool_name);
-            atomic_fetch_add_explicit(&bridge->denied_count, 1, memory_order_relaxed);
-            return AIRY_ERR_SEC_QUOTA;
-        }
-
-        if (quota_ret == 0 && quota_allowed) {
-            safety_guard_consume_quota(bridge->guard_ctx, tool_name, 1);
-        }
-
-        if (result)
-            result->resource_quota_passed = 1;
-        guards_executed++;
-    }
-
-    if (bridge->config.enable_audit_guard) {
-        guard_chain_length++;
-
-        if (bridge->guard_ctx) {
-            safety_event_t event;
-            safety_result_t audit_result;
-            build_safety_event(&event, meta, params_json, agent_id);
-
-            safety_guard_record_audit(bridge->guard_ctx, &event, &audit_result,
-                                      "safety_guard_bridge");
-        }
-
-        /* result=0 → SUCCESS。此处为 guard 链全部通过后的成功路径；原硬编码
-         * 1 使每次工具执行都被审计为 FAILED（假阳性遥测，误导排障）。 */
-        daemon_audit_log_event("tool_d", "tool_execute_safety_guard", tool_name, 0, agent_id);
-
-        if (result)
-            result->audit_recorded = 1;
-        guards_executed++;
-    }
-
+    /* 拒绝路径同样回填链长与执行数：排障需要知道链在第几段终止。 */
     if (result) {
-        result->guard_chain_length = guard_chain_length;
-        result->guards_executed = guards_executed;
+        result->guard_chain_length = c.chain_len;
+        result->guards_executed = c.executed;
     }
-
-    return 0;
+    return rc;
 }
