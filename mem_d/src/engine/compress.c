@@ -166,10 +166,73 @@ static void wordfreq_free(wordfreq_t *wf)
     AIRY_MEMSET(wf, 0, sizeof(*wf));
 }
 
+/* 单词权重：高频术语 +0.1，指令动词 +0.5（同词可叠加）。 */
+static double word_weight(const char *w, const wordfreq_t *wf)
+{
+    double s = 0.0;
+
+    if (wordfreq_get(wf, w) > 1)
+        s += 0.1;
+    if (is_instruction_word(w))
+        s += 0.5;
+    return s;
+}
+
+/* 单句得分：仅 ASCII 字母数字成词，大写折叠小写。 */
+static double sent_score(const char *text, const wordfreq_t *wf)
+{
+    const unsigned char *p = (const unsigned char *)text;
+    char word[128];
+    double s = 0.0;
+    size_t wlen = 0;
+
+    for (;; p++) {
+        unsigned char c = *p;
+        int alnum = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                    (c >= 'A' && c <= 'Z');
+        if (alnum && wlen < sizeof(word) - 1)
+            word[wlen++] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
+        else if (!alnum && wlen) {
+            word[wlen] = '\0';
+            s += word_weight(word, wf);
+            wlen = 0;
+        }
+        if (!c)
+            break;
+    }
+    return s;
+}
+
+/* 摘要句数 K：n/2 钳制在 [2,3]。 */
+static size_t top_k(size_t n)
+{
+    size_t k = n / 2;
+
+    return k < 2 ? 2 : (k > 3 ? 3 : k);
+}
+
+/* 未选中句中的最高分下标；已全部选中返回 n。 */
+static size_t top_rest(const double *scores, const int *picked, size_t n)
+{
+    size_t best = n;
+
+    for (size_t i = 0; i < n; i++) {
+        if (picked[i])
+            continue;
+        if (best == n || scores[i] > scores[best])
+            best = i;
+    }
+    return best;
+}
+
 /* 抽取关键句：位置加权 + 高频术语 + 指令动词，取 top K 句 */
 static char *extract_key_sentences(const char *text, const wordfreq_t *wf)
 {
     strvec_t sents;
+    size_t total = 0;
+    char *out;
+    size_t k;
+
     AIRY_MEMSET(&sents, 0, sizeof(sents));
     split_sentences(text, &sents);
     if (sents.count <= 2) {
@@ -187,65 +250,23 @@ static char *extract_key_sentences(const char *text, const wordfreq_t *wf)
         return AIRY_STRDUP(text);
     }
 
-    for (size_t i = 0; i < n; i++) {
-        double s = 0.0;
-        if (i == 0)
-            s += 0.3; /* 首句：主题陈述 */
-        if (i == n - 1)
-            s += 0.2; /* 末句：结论/追问 */
-        const unsigned char *p = (const unsigned char *)sents.items[i];
-        char word[128];
-        size_t wlen = 0;
-        while (*p) {
-            unsigned char c = *p;
-            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
-                if (wlen < sizeof(word) - 1)
-                    word[wlen++] = (char)c;
-            } else if (c >= 'A' && c <= 'Z') {
-                if (wlen < sizeof(word) - 1)
-                    word[wlen++] = (char)(c + 32);
-            } else {
-                if (wlen > 0) {
-                    word[wlen] = '\0';
-                    if (wordfreq_get(wf, word) > 1)
-                        s += 0.1;
-                    if (is_instruction_word(word))
-                        s += 0.5;
-                    wlen = 0;
-                }
-            }
-            p++;
-        }
-        if (wlen > 0) {
-            word[wlen] = '\0';
-            if (wordfreq_get(wf, word) > 1)
-                s += 0.1;
-            if (is_instruction_word(word))
-                s += 0.5;
-        }
-        scores[i] = s;
-    }
+    /* 位置加权：首句主题 +0.3，末句结论 +0.2。 */
+    for (size_t i = 0; i < n; i++)
+        scores[i] = sent_score(sents.items[i], wf) + (i == 0 ? 0.3 : 0.0) +
+                    (i + 1 == n ? 0.2 : 0.0);
 
-    size_t k = n / 2;
-    if (k < 2) k = 2;
-    if (k > 3) k = 3;
+    k = top_k(n);
     for (size_t t = 0; t < k; t++) {
-        size_t best = n;
-        for (size_t i = 0; i < n; i++) {
-            if (picked[i])
-                continue;
-            if (best == n || scores[i] > scores[best])
-                best = i;
-        }
+        size_t best = top_rest(scores, picked, n);
         if (best != n)
             picked[best] = 1;
     }
 
-    size_t total = 0;
+    /* 摘要总长 = 选中句长 + 每句一个换行。 */
     for (size_t i = 0; i < n; i++)
         if (picked[i])
             total += strlen(sents.items[i]) + 1;
-    char *out = AIRY_MALLOC(total + 1);
+    out = AIRY_MALLOC(total + 1);
     if (out) {
         out[0] = '\0';
         for (size_t i = 0; i < n; i++) {
