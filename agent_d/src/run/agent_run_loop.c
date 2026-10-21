@@ -69,12 +69,9 @@ static void run_emit_delta(const char *delta, size_t dlen, void *ud)
         return;
 
     char stackbuf[RUN_DELTA_STACK];
-    char *buf = stackbuf;
-    if (dlen >= sizeof(stackbuf)) {
-        buf = (char *)AIRY_MALLOC(dlen + 1);
-        if (!buf)
-            return;
-    }
+    char *buf = dlen < sizeof(stackbuf) ? stackbuf : (char *)AIRY_MALLOC(dlen + 1);
+    if (!buf)
+        return;
     AIRY_MEMCPY(buf, delta, dlen);
     buf[dlen] = '\0';
 
@@ -200,287 +197,290 @@ static int run_fail_streak_bump(int *streak, int tool_rc)
     return *streak >= AGENT_RUN_TOOL_FAIL_LIMIT;
 }
 
+typedef struct {
+    const agent_run_loop_args_t *args;
+    agent_run_loop_result_t *out;
+    cJSON *messages;
+    cJSON *trace;
+    agent_ledger_t lg;
+    char llm_sock[AGENT_RUN_SOCK_BUF];
+    const char *sess;
+    const char *run_id;
+    uint64_t seq;
+    char *text;
+    char *reason;
+    int streak;
+    int fused;
+    char fuse[256];
+} run_ctx_t;
+
+/* 首条 system：工具路径锚点契约（缺陷 #4）声明 fs_* 与 shell_run 的相对
+ * 路径以 tool_d 工作目录为基准、回执回显绝对路径；0.1.18 B1 轮次归属约束
+ * 仅在携带历史时合并入同一条，防止模型把多轮历史当作同一篇待续写文本。 */
+static void run_preamble(cJSON *msgs)
+{
+    static const char base[] =
+        "【工具路径契约】文件类工具（fs_*）与 shell_run 的相对路径以工具"
+        "服务（tool_d）的工作目录为解析基准；工具结果回执会回显解析后的"
+        "绝对路径。";
+    static const char boundary[] =
+        "【轮次边界】本次请求携带了历史消息。历史消息仅供指代消解与背景"
+        "理解；你的回答必须直接回应最后一条用户消息。若历史主题与最后"
+        "一条用户消息不一致，以最后一条用户消息为准，禁止延续历史主题"
+        "作答，禁止续写历史中未完成的回答。";
+    cJSON *sys = cJSON_CreateObject();
+    if (!sys)
+        return;
+    char content[1024];
+    snprintf(content, sizeof(content), "%s%s", base,
+             cJSON_GetArraySize(msgs) > 1 ? boundary : "");
+    cJSON_AddStringToObject(sys, "role", "system");
+    cJSON_AddStringToObject(sys, "content", content);
+    cJSON_InsertItemInArray(msgs, 0, sys);
+}
+
+/* 初始消息集与台账入口锚点：history 非空则整体复制，否则以 prompt 构造
+ * 首条 user 消息。入口记账取首条真实 user 消息——注入的 system 前置不算
+ * 入口，否则被保护的是提示词样板而非用户诉求。 */
+static int run_seed(run_ctx_t *r)
+{
+    const cJSON *h = r->args->history;
+    if (h && cJSON_IsArray(h) && cJSON_GetArraySize(h) > 0)
+        r->messages = cJSON_Duplicate(h, 1);
+    if (!r->messages) {
+        r->messages = cJSON_CreateArray();
+        cJSON *m0 = r->messages ? cJSON_CreateObject() : NULL;
+        if (!m0)
+            return -1;
+        cJSON_AddItemToArray(r->messages, m0);
+        cJSON_AddStringToObject(m0, "role", "user");
+        cJSON_AddStringToObject(m0, "content", r->args->prompt);
+    }
+    run_preamble(r->messages);
+    cJSON *m = NULL;
+    cJSON_ArrayForEach(m, r->messages) {
+        cJSON *role = cJSON_GetObjectItem(m, "role");
+        if (cJSON_IsString(role) && strcmp(role->valuestring, "user") == 0) {
+            agent_ledger_add(&r->lg, "user",
+                             cJSON_GetStringValue(cJSON_GetObjectItem(m, "content")), 0, m);
+            break;
+        }
+    }
+    return 0;
+}
+
+/* reasoning 跨轮累积：各轮以换行连接；扩容失败保留已有内容不阻断。 */
+static void run_reason_add(run_ctx_t *r, const char *add)
+{
+    size_t old = r->reason ? strlen(r->reason) : 0, cap = old + strlen(add) + 2;
+    char *np = (char *)AIRY_REALLOC(r->reason, cap);
+    if (!np)
+        return;
+    r->reason = np;
+    snprintf(np + old, cap - old, old > 0 ? "\n%s" : "%s", add);
+}
+
+/* 事件投递：agent_run_emit_event 自行处理无 sink / 建包失败时的载荷释放。 */
+static void run_ev_send(run_ctx_t *r, const char *type, cJSON *ev)
+{
+    agent_run_emit_event(r->args->sink, &r->seq, r->run_id, r->sess, type, ev);
+}
+
+/* 单轮 LLM：建参 → 流式收流 → 取产物 → 回填 assistant 消息与台账。
+ * 返回 1 终局回复（正文已移交 r->text）、0 有待执行工具、-1 失败。 */
+static int run_llm_round(run_ctx_t *r, cJSON **tool_calls)
+{
+    *tool_calls = NULL;
+    char *params = run_build_llm_params(r->args->model, r->messages);
+    if (!params)
+        return -1;
+
+    agent_stream_t st;
+    run_delta_ctx_t dctx = {r->args->sink, &r->seq, r->run_id, r->sess};
+    agent_stream_sink_t ssink = {run_emit_delta, &dctx};
+    agent_stream_init(&st, &ssink);
+
+    uint64_t t0 = airy_time_ms();
+    int lrc = daemon_rpc_call_stream(r->llm_sock, "complete_stream", params,
+                                     agent_stream_on_chunk, &st, AGENT_RUN_LLM_TIMEOUT_MS);
+    r->out->llm_ms += airy_time_ms() - t0;
+    AIRY_FREE(params);
+    agent_stream_finish(&st);
+
+    agent_stream_result_t sr;
+    agent_stream_take(&st, &sr);
+    agent_stream_free(&st);
+    if (lrc != AIRY_SUCCESS || sr.error_code != 0) {
+        SVC_LOG_ERROR("agent.run: llm stream failed (rc=%d, ec=%d, msg=%s, session=%s)", lrc,
+                      sr.error_code, sr.error_msg, r->sess ? r->sess : "?");
+        run_stream_result_free(&sr);
+        return -1;
+    }
+
+    r->out->tokens += sr.tokens;
+    r->out->cost += sr.cost;
+    if (sr.reason && sr.reason[0])
+        run_reason_add(r, sr.reason);
+    AIRY_FREE(sr.reason);
+
+    /* 空数组与「无 tool_calls」同义（旧解析器同判）：本轮即终局回复。 */
+    cJSON *calls = sr.tools;
+    if (calls && cJSON_GetArraySize(calls) == 0) {
+        cJSON_Delete(calls);
+        calls = NULL;
+    }
+    cJSON *am = cJSON_CreateObject();
+    cJSON_AddStringToObject(am, "role", "assistant");
+    cJSON_AddStringToObject(am, "content", sr.text ? sr.text : "");
+    if (calls)
+        cJSON_AddItemToObject(am, "tool_calls", cJSON_Duplicate(calls, 1));
+    cJSON_AddItemToArray(r->messages, am);
+    agent_ledger_add(&r->lg, "assistant", sr.text ? sr.text : "", (size_t)sr.tokens, am);
+
+    if (calls) {
+        AIRY_FREE(sr.text);
+        *tool_calls = calls;
+        return 0;
+    }
+    r->text = sr.text;
+    return 1;
+}
+
+/* 单条工具调用：tool_start → 执行 → 连败计数 → tool_end → 回填 messages /
+ * 台账 / trace（后者供最终响应）。返回熔断是否触发。 */
+static int run_tool_one(run_ctx_t *r, cJSON *tc)
+{
+    cJSON *fn = cJSON_GetObjectItem(tc, "function");
+    cJSON *fname = fn ? cJSON_GetObjectItem(fn, "name") : NULL;
+    cJSON *fargs = fn ? cJSON_GetObjectItem(fn, "arguments") : NULL;
+    cJSON *tcid = cJSON_GetObjectItem(tc, "id");
+    const char *tname = cJSON_IsString(fname) ? fname->valuestring : "";
+    const char *targs = cJSON_IsString(fargs) ? fargs->valuestring : "{}";
+    const char *tid = cJSON_IsString(tcid) ? tcid->valuestring : "";
+    char buf[160];
+
+    AIRY_STRNCPY_TERM(buf, targs, sizeof(buf));
+    cJSON *ev = cJSON_CreateObject();
+    if (ev) {
+        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL, tname);
+        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL_ID, tid);
+        cJSON_AddStringToObject(ev, AIRY_RS_K_ARGS, buf);
+    }
+    run_ev_send(r, AIRY_RS_TYPE_TOOL_START, ev);
+
+    char *res = NULL;
+    uint64_t t0 = airy_time_ms();
+    int erc = run_execute_tool(tname, targs, &res);
+    r->out->tool_ms += airy_time_ms() - t0;
+
+    /* C-1 连败计数：本次失败仍完整入账/推送后再判断熔断出口。 */
+    if (run_fail_streak_bump(&r->streak, erc)) {
+        r->fused = 1;
+        snprintf(r->fuse, sizeof(r->fuse), "%s: %s", tname, res ? res : "");
+    }
+
+    AIRY_STRNCPY_TERM(buf, res ? res : "", sizeof(buf));
+    ev = cJSON_CreateObject();
+    if (ev) {
+        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL_ID, tid);
+        cJSON_AddStringToObject(ev, AIRY_RS_K_STATUS, erc == 0 ? "ok" : "error");
+        cJSON_AddStringToObject(ev, AIRY_RS_K_RESULT_HASH, buf);
+    }
+    run_ev_send(r, AIRY_RS_TYPE_TOOL_END, ev);
+
+    cJSON *msg = cJSON_CreateObject();
+    cJSON_AddStringToObject(msg, "role", "tool");
+    cJSON_AddStringToObject(msg, "tool_call_id", tid);
+    cJSON_AddStringToObject(msg, "content", res ? res : "Tool execution failed");
+    cJSON_AddItemToArray(r->messages, msg);
+    agent_ledger_add(&r->lg, "tool_result", res, 0, msg);
+
+    cJSON *tr = cJSON_CreateObject();
+    cJSON_AddStringToObject(tr, "tool", tname);
+    cJSON_AddStringToObject(tr, "arguments", targs);
+    cJSON_AddStringToObject(tr, "result", res ? res : "");
+    cJSON_AddNumberToObject(tr, "ok", erc == 0 ? 1 : 0);
+    cJSON_AddItemToArray(r->trace, tr);
+    AIRY_FREE(res);
+    return r->fused;
+}
+
+/* 单轮推进：一轮 LLM 收流 + 本轮全部工具调用。返回 1 继续下一轮、0 终局
+ * 回复已就绪（正文在 r->text）、-1 失败、熔断返回 AGENT_RUN_RC_TOOL_FUSE
+ * （收尾文案写入 r->text）。 */
+static int run_step(run_ctx_t *r)
+{
+    cJSON *calls = NULL;
+    char msg[384];
+    int st = run_llm_round(r, &calls);
+    if (st < 0)
+        return -1;
+    if (st > 0)
+        return 0;
+
+    int n = cJSON_GetArraySize(calls);
+    for (int k = 0; k < n && !r->fused; k++)
+        run_tool_one(r, cJSON_GetArrayItem(calls, k));
+    cJSON_Delete(calls);
+    if (!r->fused)
+        return 1;
+
+    /* C-1 熔断终局：止损退出（不再消耗 LLM 轮次），原因经 text 回传，
+     * engine 侧 error 事件与 response 复用。 */
+    snprintf(msg, sizeof(msg),
+             "Tool execution failed %d times in a row; further attempts stopped (%s)",
+             r->streak, r->fuse);
+    r->text = AIRY_STRDUP(msg);
+    return AGENT_RUN_RC_TOOL_FUSE;
+}
+
 int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result_t *out)
 {
+    run_ctx_t r = {0};
+    int rc = -1;
     if (!args || !out)
         return -1;
     AIRY_MEMSET(out, 0, sizeof(*out));
+    r.args = args;
+    r.out = out;
+    r.sess = args->session ? args->session->session_id : NULL;
+    r.run_id = args->session ? args->session->run_id : NULL;
+    snprintf(r.llm_sock, sizeof(r.llm_sock), "%s", airy_runtime_dir_socket("llm.sock"));
+    agent_ledger_init(&r.lg, r.sess);
 
-    const char *prompt = args->prompt;
-    const cJSON *history = args->history;
-    const char *model = args->model;
-    const agent_run_session_t *session = args->session;
-    const agent_run_event_sink_t *sink = args->sink;
-
-    cJSON *messages = NULL;
-    if (history && cJSON_IsArray(history) && cJSON_GetArraySize(history) > 0) {
-        messages = cJSON_Duplicate(history, 1);
-    }
-    if (!messages) {
-        messages = cJSON_CreateArray();
-        cJSON *msg0 = cJSON_CreateObject();
-        cJSON_AddStringToObject(msg0, "role", "user");
-        cJSON_AddStringToObject(msg0, "content", prompt);
-        cJSON_AddItemToArray(messages, msg0);
-    }
-    /* 工具路径锚点契约（缺陷 #4）：向模型显式声明文件类工具与 shell_run 的
-     * 相对路径以 tool_d 工作目录为基准、回执回显解析后的绝对路径，免除模型
-     * 对落点的反复猜测。0.1.18 B1 轮次归属约束（多消息时）合并入同一条
-     * system：历史仅供指代消解，修复模型把多轮历史视为同一篇待续写文本、
-     * 对旧题续答的上下文串轮。 */
-    {
-        cJSON *sys = cJSON_CreateObject();
-        if (sys) {
-            static const char base[] =
-                "【工具路径契约】文件类工具（fs_*）与 shell_run 的相对路径以工具"
-                "服务（tool_d）的工作目录为解析基准；工具结果回执会回显解析后的"
-                "绝对路径。";
-            static const char boundary[] =
-                "【轮次边界】本次请求携带了历史消息。历史消息仅供指代消解与背景"
-                "理解；你的回答必须直接回应最后一条用户消息。若历史主题与最后"
-                "一条用户消息不一致，以最后一条用户消息为准，禁止延续历史主题"
-                "作答，禁止续写历史中未完成的回答。";
-            char content[1024];
-            if (cJSON_GetArraySize(messages) > 1)
-                snprintf(content, sizeof(content), "%s%s", base, boundary);
-            else
-                snprintf(content, sizeof(content), "%s", base);
-            cJSON_AddStringToObject(sys, "role", "system");
-            cJSON_AddStringToObject(sys, "content", content);
-            cJSON_InsertItemInArray(messages, 0, sys);
-        }
-    }
-    cJSON *tool_trace = cJSON_CreateArray();
-    if (!messages || !tool_trace) {
-        if (messages)
-            cJSON_Delete(messages);
-        if (tool_trace)
-            cJSON_Delete(tool_trace);
+    r.trace = cJSON_CreateArray();
+    if (!r.trace || run_seed(&r) != 0) {
+        cJSON_Delete(r.messages);
+        cJSON_Delete(r.trace);
         return -1;
     }
 
-    char *final_text = NULL;
-    char *reasoning_acc = NULL;
-    uint64_t total_tokens = 0;
-    double total_cost = 0.0;
-    uint64_t llm_ms = 0;
-    uint64_t tool_ms = 0;
-    int rc = -1;
-    uint64_t seq = 0;
-    const char *sess = session ? session->session_id : NULL;
-
-    /* C-1 连败熔断状态：计数跨工具/跨轮累计（环境故障换工具照样失败），
-     * 触发时捕获末次工具名与错误文本（tool_calls 释放后仍需可引用）。 */
-    int fail_streak = 0;
-    int fused = 0;
-    char fuse_tool[64] = "";
-    char fuse_err[192] = "";
-
-    agent_ledger_t lg;
-    agent_ledger_init(&lg, sess);
-
-    char llm_sock[AGENT_RUN_SOCK_BUF];
-    snprintf(llm_sock, sizeof(llm_sock), "%s", airy_runtime_dir_socket("llm.sock"));
-
-    /* 台账入口记账：首条 user 消息（history 为空时即 prompt）。 */
-    if (lg.enabled) {
-        cJSON *m0 = cJSON_GetArrayItem(messages, 0);
-        cJSON *c0 = m0 ? cJSON_GetObjectItem(m0, "content") : NULL;
-        if (cJSON_IsString(c0))
-            agent_ledger_add(&lg, "user", c0->valuestring, 0, m0);
-    }
-
-    for (int loops = 0; loops < AGENT_RUN_MAX_TOOL_LOOPS; loops++) {
-        if (agent_run_is_cancelled(session)) {
-            SVC_LOG_INFO("agent.run: cancelled by user (session=%s)",
-                         session ? session->session_id : "?");
+    for (int i = 0; i < AGENT_RUN_MAX_TOOL_LOOPS; i++) {
+        if (agent_run_is_cancelled(args->session)) {
+            SVC_LOG_INFO("agent.run: cancelled by user (session=%s)", r.sess ? r.sess : "?");
             rc = 1;
             break;
         }
+        agent_ledger_fit(&r.lg, r.messages);
 
-        agent_ledger_fit(&lg, messages);
-
-        char *llm_params_str = run_build_llm_params(model, messages);
-        if (!llm_params_str)
-            break;
-
-        /* complete_stream：正文增量在收流过程中即时上屏（run_emit_delta），
-         * 控制帧由解帧器累积为 tool_calls / reasoning / usage / error。 */
-        agent_stream_t stream;
-        run_delta_ctx_t dctx = {sink, &seq, session ? session->run_id : NULL, sess};
-        agent_stream_sink_t ssink = {run_emit_delta, &dctx};
-        agent_stream_init(&stream, &ssink);
-
-        uint64_t llm_t0 = airy_time_ms();
-        int lrc = daemon_rpc_call_stream(llm_sock, "complete_stream", llm_params_str,
-                                         agent_stream_on_chunk, &stream, AGENT_RUN_LLM_TIMEOUT_MS);
-        llm_ms += airy_time_ms() - llm_t0;
-        AIRY_FREE(llm_params_str);
-        agent_stream_finish(&stream);
-
-        agent_stream_result_t sr;
-        agent_stream_take(&stream, &sr);
-        agent_stream_free(&stream);
-
-        if (lrc != AIRY_SUCCESS) {
-            SVC_LOG_ERROR("agent.run: llm complete_stream failed (rc=%d, session=%s)", lrc,
-                          sess ? sess : "?");
-            run_stream_result_free(&sr);
-            break;
-        }
-        if (sr.error_code != 0) {
-            SVC_LOG_ERROR("agent.run: llm stream error %d (%s)", sr.error_code, sr.error_msg);
-            run_stream_result_free(&sr);
-            break;
-        }
-
-        cJSON *tool_calls = sr.tools;
-        char *text = sr.text;
-        char *reasoning = sr.reason;
-        uint64_t tokens = sr.tokens;
-        sr.tools = NULL;
-        sr.text = NULL;
-        sr.reason = NULL;
-        /* 空数组与「无 tool_calls」同义（旧解析器同判）：本轮即终局回复。 */
-        if (tool_calls && cJSON_GetArraySize(tool_calls) == 0) {
-            cJSON_Delete(tool_calls);
-            tool_calls = NULL;
-        }
-        total_tokens += tokens;
-        total_cost += sr.cost;
-        if (reasoning && reasoning[0]) {
-            size_t old = reasoning_acc ? strlen(reasoning_acc) : 0;
-            size_t add = strlen(reasoning);
-            char *np = (char *)AIRY_REALLOC(reasoning_acc, old + add + 2);
-            if (np) {
-                reasoning_acc = np;
-                if (old > 0)
-                    reasoning_acc[old++] = '\n';
-                AIRY_MEMCPY(reasoning_acc + old, reasoning, add);
-                reasoning_acc[old + add] = '\0';
-            }
-        }
-        AIRY_FREE(reasoning);
-
-        cJSON *assistant_msg = cJSON_CreateObject();
-        cJSON_AddStringToObject(assistant_msg, "role", "assistant");
-        cJSON_AddStringToObject(assistant_msg, "content", text ? text : "");
-        if (tool_calls)
-            cJSON_AddItemToObject(assistant_msg, "tool_calls", cJSON_Duplicate(tool_calls, 1));
-        cJSON_AddItemToArray(messages, assistant_msg);
-        agent_ledger_add(&lg, "assistant", text ? text : "", (size_t)tokens, assistant_msg);
-
-        if (!tool_calls) {
-            final_text = text;
-            text = NULL;
-            rc = 0;
-            break;
-        }
-        AIRY_FREE(text);
-
-        int tc_count = cJSON_GetArraySize(tool_calls);
-        for (int i = 0; i < tc_count; i++) {
-            cJSON *tc = cJSON_GetArrayItem(tool_calls, i);
-            cJSON *fn = cJSON_GetObjectItem(tc, "function");
-            cJSON *fn_name = fn ? cJSON_GetObjectItem(fn, "name") : NULL;
-            cJSON *fn_args = fn ? cJSON_GetObjectItem(fn, "arguments") : NULL;
-            cJSON *tc_id = cJSON_GetObjectItem(tc, "id");
-            const char *tname = cJSON_IsString(fn_name) ? fn_name->valuestring : "";
-            const char *targs = cJSON_IsString(fn_args) ? fn_args->valuestring : "{}";
-            const char *tid = cJSON_IsString(tc_id) ? tc_id->valuestring : "";
-
-            /* tool_start 事件（run_stream 流式推送） */
-            if (sink && sink->emit) {
-                cJSON *ts = cJSON_CreateObject();
-                if (ts) {
-                    cJSON_AddStringToObject(ts, AIRY_RS_K_TOOL, tname);
-                    cJSON_AddStringToObject(ts, AIRY_RS_K_TOOL_ID, tid);
-                    char abuf[160];
-                    AIRY_STRNCPY_TERM(abuf, targs, sizeof(abuf));
-                    cJSON_AddStringToObject(ts, AIRY_RS_K_ARGS, abuf);
-                    agent_run_emit_event(sink, &seq, session ? session->run_id : NULL, sess, AIRY_RS_TYPE_TOOL_START, ts);
-                }
-            }
-
-            char *result_text = NULL;
-            uint64_t tool_t0 = airy_time_ms();
-            int erc = run_execute_tool(tname, targs, &result_text);
-            tool_ms += airy_time_ms() - tool_t0;
-
-            /* C-1 连败计数：本次失败仍完整入账/推送后再判断熔断出口。 */
-            if (run_fail_streak_bump(&fail_streak, erc)) {
-                fused = 1;
-                AIRY_STRNCPY_TERM(fuse_tool, tname, sizeof(fuse_tool));
-                AIRY_STRNCPY_TERM(fuse_err, result_text ? result_text : "", sizeof(fuse_err));
-            }
-
-            /* tool_end 事件（run_stream 流式推送） */
-            if (sink && sink->emit) {
-                cJSON *te = cJSON_CreateObject();
-                if (te) {
-                    cJSON_AddStringToObject(te, AIRY_RS_K_TOOL_ID, tid);
-                    cJSON_AddStringToObject(te, AIRY_RS_K_STATUS, erc == 0 ? "ok" : "error");
-                    char rbuf[160];
-                    AIRY_STRNCPY_TERM(rbuf, result_text ? result_text : "", sizeof(rbuf));
-                    cJSON_AddStringToObject(te, AIRY_RS_K_RESULT_HASH, rbuf);
-                    agent_run_emit_event(sink, &seq, session ? session->run_id : NULL, sess, AIRY_RS_TYPE_TOOL_END, te);
-                }
-            }
-
-            cJSON *tool_msg = cJSON_CreateObject();
-            cJSON_AddStringToObject(tool_msg, "role", "tool");
-            cJSON_AddStringToObject(tool_msg, "tool_call_id", tid);
-            cJSON_AddStringToObject(tool_msg, "content",
-                                    result_text ? result_text : "Tool execution failed");
-            cJSON_AddItemToArray(messages, tool_msg);
-            agent_ledger_add(&lg, "tool_result", result_text ? result_text : NULL, 0, tool_msg);
-
-            cJSON *tr = cJSON_CreateObject();
-            cJSON_AddStringToObject(tr, "tool", tname);
-            cJSON_AddStringToObject(tr, "arguments", targs);
-            cJSON_AddStringToObject(tr, "result", result_text ? result_text : "");
-            cJSON_AddNumberToObject(tr, "ok", erc == 0 ? 1 : 0);
-            cJSON_AddItemToArray(tool_trace, tr);
-
-            if (result_text)
-                AIRY_FREE(result_text);
-
-            if (fused)
-                break;
-        }
-
-        cJSON_Delete(tool_calls);
-
-        if (fused) {
-            /* C-1 熔断终局：止损退出（不再消耗 LLM 轮次），原因经
-             * final_text 回传，engine 侧 error 事件与 response 复用。 */
-            char fuse_msg[512];
-            snprintf(fuse_msg, sizeof(fuse_msg),
-                     "Tool execution failed %d times in a row; further attempts stopped "
-                     "(last tool=%s, error=%s)",
-                     fail_streak, fuse_tool, fuse_err);
-            final_text = AIRY_STRDUP(fuse_msg);
-            rc = AGENT_RUN_RC_TOOL_FUSE;
+        int st = run_step(&r);
+        if (st != 1) {
+            rc = st;
             break;
         }
     }
 
-    agent_ledger_free(&lg);
-    cJSON_Delete(messages);
-
+    agent_ledger_free(&r.lg);
+    cJSON_Delete(r.messages);
+    /* 成功/熔断移交产物，失败路径就地释放；计量已直写 out。 */
     if (rc == 0 || rc == AGENT_RUN_RC_TOOL_FUSE) {
-        out->trace = tool_trace;
-        out->text = final_text;
-        out->reason = reasoning_acc;
-        out->tokens = total_tokens;
-        out->cost = total_cost;
-        out->llm_ms = llm_ms;
-        out->tool_ms = tool_ms;
-    } else {
-        if (final_text)
-            AIRY_FREE(final_text);
-        cJSON_Delete(tool_trace);
-        AIRY_FREE(reasoning_acc);
+        out->trace = r.trace;
+        out->text = r.text;
+        out->reason = r.reason;
+        return rc;
     }
+    cJSON_Delete(r.trace);
+    AIRY_FREE(r.text);
+    AIRY_FREE(r.reason);
     return rc;
 }
