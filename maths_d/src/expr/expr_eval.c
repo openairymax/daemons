@@ -77,19 +77,18 @@ static void eval_skip_ws(eval_ctx_t *ctx)
 
 /* 合法表达式字符预检：把明显非数学的文本挡在解析之前（防注入与空转）。
  * 允许：数字、运算符、括号、逗号、点、字母（函数/常量）、空白。 */
+static int maths_char_ok(int c)
+{
+    return isalnum(c) || strchr("+-*/%^!(),._ \t", c) != NULL;
+}
+
 static int maths_charset_ok(const char *expr)
 {
     if (!expr || !expr[0])
         return 0;
     size_t n = 0;
     for (const char *p = expr; *p; p++) {
-        unsigned char c = (unsigned char)*p;
-        if (!(isalnum(c) || c == '+' || c == '-' || c == '*' || c == '/' ||
-              c == '%' || c == '^' || c == '!' || c == '(' || c == ')' ||
-              c == ',' || c == '.' || c == '_' || c == ' ' || c == '\t' ||
-              c == 'e' || c == 'E'))
-            return 0;
-        if (++n > MATHS_MAX_EXPR_LEN)
+        if (!maths_char_ok((unsigned char)*p) || ++n > MATHS_MAX_EXPR_LEN)
             return 0;
     }
     return 1;
@@ -194,189 +193,179 @@ static int eval_lookup_func(const char *name, size_t nlen, double (**out_fn1)(do
 
 static int eval_parse_expr(eval_ctx_t *ctx, double *out);
 
+static int eval_err(eval_ctx_t *ctx, const char *msg)
+{
+    ctx->err = msg;
+    return -1;
+}
+
+static int eval_name_eq(const char *s, size_t n, const char *lit)
+{
+    return strlen(lit) == n && strncmp(s, lit, n) == 0;
+}
+
+/* 期待并消费右括号；msg 由调用点决定，保持各分支错误文案不变。 */
+static int eval_take_rp(eval_ctx_t *ctx, const char *msg)
+{
+    eval_skip_ws(ctx);
+    if (*ctx->s != ')')
+        return eval_err(ctx, msg);
+    ctx->s++;
+    return 0;
+}
+
+/* 阶乘：仅接受 [0,170] 的整数（超出 double 精度边界）。 */
+static int eval_fact(eval_ctx_t *ctx, double arg, double *out)
+{
+    if (arg < 0.0 || arg > 170.0)
+        return eval_err(ctx, "factorial out of range");
+    long long n = (long long)(arg + 1e-9);
+    if (fabs(arg - (double)n) > 1e-6)
+        return eval_err(ctx, "factorial requires integer");
+    long double acc = 1.0L;
+    for (long long i = 2; i <= n; i++)
+        acc *= (long double)i;
+    *out = (double)acc;
+    return 0;
+}
+
+/* 单参调用：fn 非空直接求值；factorial 走整数阶乘；其余为不支持。 */
+static int eval_call1(eval_ctx_t *ctx, const char *name, size_t nlen,
+                      double (*fn)(double), double *out)
+{
+    double arg = 0.0;
+    if (eval_parse_expr(ctx, &arg) != 0)
+        return -1;
+    if (eval_take_rp(ctx, "missing ')' in function call") != 0)
+        return -1;
+    if (fn)
+        *out = fn(arg);
+    else if (eval_name_eq(name, nlen, "factorial"))
+        return eval_fact(ctx, arg, out);
+    else
+        return eval_err(ctx, "unsupported function");
+    return 0;
+}
+
+/* log(x) 自然对数 / log(x,b) 通用对数：底数非法时退化为自然对数。 */
+static int eval_call_log(eval_ctx_t *ctx, double *out)
+{
+    double a = 0.0, b = 0.0;
+    if (eval_parse_expr(ctx, &a) != 0)
+        return -1;
+    eval_skip_ws(ctx);
+    if (*ctx->s == ',') {
+        ctx->s++;
+        if (eval_parse_expr(ctx, &b) != 0)
+            return -1;
+    }
+    if (eval_take_rp(ctx, "missing ')' in log()") != 0)
+        return -1;
+    *out = (b > 0.0 && b != 1.0) ? log(a) / log(b) : log(a);
+    return 0;
+}
+
+/* 双参调用：先按文法消费两个实参与右括号，再校验 arity。 */
+static int eval_call2(eval_ctx_t *ctx, const char *name, size_t nlen,
+                      int arity, double *out)
+{
+    double a = 0.0, b = 0.0;
+    if (eval_parse_expr(ctx, &a) != 0)
+        return -1;
+    eval_skip_ws(ctx);
+    if (*ctx->s != ',')
+        return eval_err(ctx, "missing ',' in function call");
+    ctx->s++;
+    if (eval_parse_expr(ctx, &b) != 0)
+        return -1;
+    if (eval_take_rp(ctx, "missing ')' in function call") != 0)
+        return -1;
+    if (arity != 2)
+        return eval_err(ctx, "unsupported function arity");
+    if (eval_name_eq(name, nlen, "min"))
+        *out = a < b ? a : b;
+    else if (eval_name_eq(name, nlen, "max"))
+        *out = a > b ? a : b;
+    else if (eval_name_eq(name, nlen, "pow"))
+        *out = pow(a, b);
+    else if (eval_name_eq(name, nlen, "atan2"))
+        *out = atan2(a, b);
+    else if (eval_name_eq(name, nlen, "mod"))
+        *out = fmod(a, b);
+    else if (eval_name_eq(name, nlen, "remainder"))
+        *out = remainder(a, b);
+    else
+        *out = 0.0;
+    return 0;
+}
+
+/* 函数调用分派：arity 1 单参、-2 为 log 族、其余走双参路径。 */
+static int eval_parse_call(eval_ctx_t *ctx, const char *name, size_t nlen,
+                           double *out)
+{
+    double (*fn)(double) = NULL;
+    int arity = 0;
+    eval_skip_ws(ctx);
+    if (*ctx->s != '(')
+        return eval_err(ctx, "unknown identifier");
+    if (eval_lookup_func(name, nlen, &fn, &arity) != 0)
+        return eval_err(ctx, "unknown function");
+    ctx->s++;
+    if (arity == 1)
+        return eval_call1(ctx, name, nlen, fn, out);
+    if (arity == -2)
+        return eval_call_log(ctx, out);
+    return eval_call2(ctx, name, nlen, arity, out);
+}
+
+/* 标识符：常量 pi/e、绑定变量，否则按函数调用处理。 */
+static int eval_parse_ident(eval_ctx_t *ctx, double *out)
+{
+    const char *start = ctx->s;
+    while (maths_is_ident_char(*ctx->s))
+        ctx->s++;
+    size_t nlen = (size_t)(ctx->s - start);
+    if (eval_name_eq(start, nlen, "pi")) {
+        *out = 3.14159265358979323846;
+        return 0;
+    }
+    if (nlen == 1 && *start == 'e') {
+        *out = 2.71828182845904523536;
+        return 0;
+    }
+    if (ctx->var && eval_name_eq(start, nlen, ctx->var)) {
+        *out = ctx->var_val;
+        return 0;
+    }
+    return eval_parse_call(ctx, start, nlen, out);
+}
+
+static int eval_parse_paren(eval_ctx_t *ctx, double *out)
+{
+    ctx->s++;
+    if (eval_parse_expr(ctx, out) != 0)
+        return -1;
+    return eval_take_rp(ctx, "missing ')'");
+}
+
 static int eval_parse_primary(eval_ctx_t *ctx, double *out)
 {
     eval_skip_ws(ctx);
+    if (++ctx->depth > MATHS_MAX_DEPTH)
+        return eval_err(ctx, "expression too deep");
 
-    if (++ctx->depth > MATHS_MAX_DEPTH) {
-        ctx->err = "expression too deep";
-        return -1;
-    }
-
-    if (*ctx->s == '(') {
-        ctx->s++;
-        if (eval_parse_expr(ctx, out) != 0)
-            return -1;
-        eval_skip_ws(ctx);
-        if (*ctx->s != ')') {
-            ctx->err = "missing ')'";
-            return -1;
-        }
-        ctx->s++;
+    int rc;
+    if (*ctx->s == '(')
+        rc = eval_parse_paren(ctx, out);
+    else if (maths_is_ident_start(*ctx->s))
+        rc = eval_parse_ident(ctx, out);
+    else if (maths_is_digit_char(*ctx->s))
+        rc = eval_parse_number(ctx, out) != 0 ? eval_err(ctx, "invalid number") : 0;
+    else
+        return eval_err(ctx, "unexpected token");
+    if (rc == 0)
         ctx->depth--;
-        return 0;
-    }
-
-    /* 常量 pi/e */
-    if (maths_is_ident_start(*ctx->s)) {
-        const char *start = ctx->s;
-        while (maths_is_ident_char(*ctx->s))
-            ctx->s++;
-        size_t nlen = (size_t)(ctx->s - start);
-
-        if (nlen == 2 && strncmp(start, "pi", 2) == 0) {
-            *out = 3.14159265358979323846;
-            ctx->depth--;
-            return 0;
-        }
-        if (nlen == 1 && *start == 'e') {
-            *out = 2.71828182845904523536;
-            ctx->depth--;
-            return 0;
-        }
-
-        /* 绑定变量（如绘图采样的 x） */
-        if (ctx->var && strlen(ctx->var) == nlen &&
-            strncmp(start, ctx->var, nlen) == 0) {
-            *out = ctx->var_val;
-            ctx->depth--;
-            return 0;
-        }
-
-        /* 函数调用 */
-        double (*fn1)(double) = NULL;
-        int arity = 0;
-        eval_skip_ws(ctx);
-        if (*ctx->s != '(') {
-            ctx->err = "unknown identifier";
-            return -1;
-        }
-        if (eval_lookup_func(start, nlen, &fn1, &arity) != 0) {
-            ctx->err = "unknown function";
-            return -1;
-        }
-        ctx->s++; /* 跳过 '(' */
-
-        if (arity == 1) {
-            double arg = 0.0;
-            if (eval_parse_expr(ctx, &arg) != 0)
-                return -1;
-            eval_skip_ws(ctx);
-            if (*ctx->s != ')') {
-                ctx->err = "missing ')' in function call";
-                return -1;
-            }
-            ctx->s++;
-            if (fn1) {
-                *out = fn1(arg);
-            } else {
-                /* factorial：整数阶乘（tbl2 特判） */
-                if (nlen == 9 && strncmp(start, "factorial", 9) == 0) {
-                    if (arg < 0.0 || arg > 170.0) {
-                        ctx->err = "factorial out of range";
-                        return -1;
-                    }
-                    long long n = (long long)(arg + 1e-9);
-                    if (fabs(arg - (double)n) > 1e-6) {
-                        ctx->err = "factorial requires integer";
-                        return -1;
-                    }
-                    long double acc = 1.0L;
-                    for (long long i = 2; i <= n; i++)
-                        acc *= (long double)i;
-                    *out = (double)acc;
-                } else {
-                    ctx->err = "unsupported function";
-                    return -1;
-                }
-            }
-            ctx->depth--;
-            return 0;
-        }
-
-        if (arity == -2) {
-            /* log(x) 自然对数 / log(x,b) 通用对数 */
-            double a = 0.0, b = 0.0;
-            if (eval_parse_expr(ctx, &a) != 0)
-                return -1;
-            eval_skip_ws(ctx);
-            if (*ctx->s == ',') {
-                ctx->s++;
-                if (eval_parse_expr(ctx, &b) != 0)
-                    return -1;
-            } else {
-                b = 0.0;
-            }
-            eval_skip_ws(ctx);
-            if (*ctx->s != ')') {
-                ctx->err = "missing ')' in log()";
-                return -1;
-            }
-            ctx->s++;
-            if (b > 0.0 && b != 1.0)
-                *out = log(a) / log(b);
-            else
-                *out = log(a);
-            ctx->depth--;
-            return 0;
-        }
-
-        {
-            /* 双参数函数 */
-            double args[2] = { 0.0, 0.0 };
-            if (eval_parse_expr(ctx, &args[0]) != 0)
-                return -1;
-            eval_skip_ws(ctx);
-            if (*ctx->s != ',') {
-                ctx->err = "missing ',' in function call";
-                return -1;
-            }
-            ctx->s++;
-            if (eval_parse_expr(ctx, &args[1]) != 0)
-                return -1;
-            eval_skip_ws(ctx);
-            if (*ctx->s != ')') {
-                ctx->err = "missing ')' in function call";
-                return -1;
-            }
-            ctx->s++;
-
-            if (arity == 2) {
-                if (nlen == 3 && strncmp(start, "min", 3) == 0)
-                    *out = args[0] < args[1] ? args[0] : args[1];
-                else if (nlen == 3 && strncmp(start, "max", 3) == 0)
-                    *out = args[0] > args[1] ? args[0] : args[1];
-                else if (nlen == 3 && strncmp(start, "pow", 3) == 0)
-                    *out = pow(args[0], args[1]);
-                else if (nlen == 5 && strncmp(start, "atan2", 5) == 0)
-                    *out = atan2(args[0], args[1]);
-                else if (nlen == 3 && strncmp(start, "mod", 3) == 0)
-                    *out = fmod(args[0], args[1]);
-                else if (nlen == 9 && strncmp(start, "remainder", 9) == 0)
-                    *out = remainder(args[0], args[1]);
-                else
-                    *out = 0.0;
-            } else {
-                ctx->err = "unsupported function arity";
-                return -1;
-            }
-            ctx->depth--;
-            return 0;
-        }
-    }
-
-    if (maths_is_digit_char(*ctx->s) ||
-        (*ctx->s == '.' && isdigit((unsigned char)ctx->s[1]))) {
-        if (eval_parse_number(ctx, out) != 0) {
-            ctx->err = "invalid number";
-            return -1;
-        }
-        ctx->depth--;
-        return 0;
-    }
-
-    ctx->err = "unexpected token";
-    return -1;
+    return rc;
 }
 
 /* 幂（右结合）+ 阶乘后缀 */
@@ -393,21 +382,8 @@ static int eval_parse_power(eval_ctx_t *ctx, double *out)
             return -1;
         *out = pow(*out, rhs);
     } else if (*ctx->s == '!') {
-        /* 阶乘：仅对非负整数有效（float 输入向下取整并告警） */
         ctx->s++;
-        if (*out < 0.0 || *out > 170.0) {
-            ctx->err = "factorial out of range";
-            return -1;
-        }
-        long long n = (long long)(*out + 1e-9);
-        if (fabs(*out - (double)n) > 1e-6) {
-            ctx->err = "factorial requires integer";
-            return -1;
-        }
-        long double acc = 1.0L;
-        for (long long i = 2; i <= n; i++)
-            acc *= (long double)i;
-        *out = (double)acc;
+        return eval_fact(ctx, *out, out);
     }
     return 0;
 }
