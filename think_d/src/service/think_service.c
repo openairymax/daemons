@@ -223,76 +223,99 @@ static char *think_gccp_interact_cb(const airy_gccp_probe_t *probe, void *user_d
     return AIRY_STRDUP(AIRY_GCCP_INTERACT_PENDING);
 }
 
-think_service_t *think_service_create(const think_service_config_t *config)
+/* 模型槽拷贝：NULL 源保持零初始化（引擎据 [0]=='\0' 取 provider 默认）；
+ * snprintf 保证 cap-1 截断后仍带 NUL，消除原内联三目填满槽位后无终止符、
+ * 下游 strlen 越界读的隐患。 */
+static void think_copy_slot(char *dst, size_t cap, const char *src)
 {
-    think_service_t *svc = (think_service_t *)AIRY_CALLOC(1, sizeof(think_service_t));
-    if (!svc)
-        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "think service alloc failed");
+    if (src)
+        (void)snprintf(dst, cap, "%s", src);
+}
 
-    airy_mtx_init(&svc->lock);
-
-    const char *s2 = config ? config->think2_slow_model : NULL;
-    const char *verify = config ? config->think1_fast_model : NULL;
-    const char *expert = config ? config->think1_prof_model : NULL;
-    if (s2)
-        __builtin_memcpy(svc->think2_slow_model, s2,
-                         (strlen(s2) < sizeof(svc->think2_slow_model)) ?
-                             strlen(s2) + 1 :
-                             sizeof(svc->think2_slow_model));
-    if (verify)
-        __builtin_memcpy(svc->think1_fast_model, verify,
-                         (strlen(verify) < sizeof(svc->think1_fast_model)) ?
-                             strlen(verify) + 1 :
-                             sizeof(svc->think1_fast_model));
-    if (expert)
-        __builtin_memcpy(svc->think1_prof_model, expert,
-                         (strlen(expert) < sizeof(svc->think1_prof_model)) ?
-                             strlen(expert) + 1 :
-                             sizeof(svc->think1_prof_model));
-    svc->process_timeout_ms = (config && config->process_timeout_ms > 0) ?
-                                  config->process_timeout_ms :
-                                  THINK_DEFAULT_TIMEOUT_MS;
-    uint32_t cap = (config && config->max_feedback_events > 0) ? config->max_feedback_events :
-                                                                 THINK_DEFAULT_MAX_EVENTS;
-    svc->event_capacity = cap;
-    svc->events = (think_feedback_event_t *)AIRY_CALLOC(cap, sizeof(think_feedback_event_t));
-    if (!svc->events) {
-        airy_mtx_destroy(&svc->lock);
-        AIRY_FREE(svc);
-        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "think event buffer alloc failed");
+/* 建到一半的逆序回滚：已装配部分按 orch -> engine -> adapter -> events ->
+ * lock -> svc 释放，全部 NULL 安全。orch_lock 须未初始化，调用方须自行
+ * 在已初始化的路径上先行销毁。 */
+static void think_svc_drop(think_service_t *svc)
+{
+    if (svc->orch) {
+        orchestrator_destroy(svc->orch);
+        svc->orch = NULL;
     }
+    if (svc->engine) {
+        airy_cognition_destroy(svc->engine);
+        svc->engine = NULL;
+    }
+    if (svc->llm_adapter) {
+        llm_svc_adapter_destroy(svc->llm_adapter);
+        svc->llm_adapter = NULL;
+    }
+    AIRY_FREE(svc->events);
+    svc->events = NULL;
+    airy_mtx_destroy(&svc->lock);
+    AIRY_FREE(svc);
+}
 
+/* 引擎接线：adapter 注入 + 三模型槽 + GCCP 交互回调 + 双思考开关。
+ * Inject the t2/t1-f/t1-p three independent model slots (NULL -> provider
+ * default). GRAD's three-model roles reuse these slots: model A=t2 slow
+ * thinking (generation), model C=t1-p professional thinking
+ * (quadruple-check), model B=t1-f fast thinking (final ruling).
+ * P-A (2026-08-23): 注册 GCCP 交互回调——两段式交互协议（无答案首轮返回
+ * 问题集挂起，携带答案次轮回调返回答案继续）。此前缺失注册导致主链路走
+ * 无交互降级（实测 feedback intent_confirmed 恒 interacted:0）。
+ * Dual-thinking switch: enabled=0 -> disable the GRAD plan-level critique
+ * loop (degrades to single-round planning); the t2/t1-f/t1-p three roles
+ * then do not participate in critique and the plain GCCP -> plan path is
+ * used. */
+static void think_eng_bind(think_service_t *svc, const think_service_config_t *config)
+{
+    airy_cognition_set_llm_adapter(svc->engine, svc->llm_adapter);
+    airy_cognition_set_tc3_models(svc->engine,
+                                  svc->think2_slow_model[0] ? svc->think2_slow_model : NULL,
+                                  svc->think1_fast_model[0] ? svc->think1_fast_model : NULL,
+                                  svc->think1_prof_model[0] ? svc->think1_prof_model : NULL);
+    airy_cognition_set_gccp_interact(svc->engine, think_gccp_interact_cb, svc);
+    SVC_LOG_INFO("ThinkDual: GCCP interact callback registered (two-pass protocol)");
+    if (config && config->enabled == 0) {
+        airy_cognition_set_grad_enabled(svc->engine, 0);
+        SVC_LOG_WARN("ThinkDual: dual-thinking disabled (enabled=0), GRAD off");
+    }
+}
+
+/* 认知引擎装配（adapter -> planner -> engine -> 接线）。
+ * plan_strategy injects the reactive planner (llm=NULL uses heuristics);
+ * otherwise airy_cognition_process's Phase 1 planning returns EUNKNOWN
+ * (plan_strat stays empty). §271: factory comes from the injected plan ops
+ * table; ops absent -> NULL -> engine starts bare (BAN-257, process-time
+ * STATE_ERROR fail fast); ops present but factory fails -> assembly defect,
+ * fail fast here. 失败路径就地回滚后返回 NULL。 */
+static think_service_t *think_init_eng(think_service_t *svc,
+                                       const think_service_config_t *config)
+{
     llm_svc_adapter_config_t acfg;
+    airy_cognition_config_t cfg;
+    const airy_plan_ops_t *plan_ops;
+    airy_plan_strategy_t *plan_strat;
+    airy_err_t ce;
+
     __builtin_memset(&acfg, 0, sizeof(acfg));
     acfg.request_timeout_ms = svc->process_timeout_ms;
     svc->llm_adapter = llm_svc_adapter_create(&acfg);
     if (!svc->llm_adapter) {
         SVC_LOG_ERROR("ThinkDual: llm_svc_adapter create failed");
-        AIRY_FREE(svc->events);
-        airy_mtx_destroy(&svc->lock);
-        AIRY_FREE(svc);
+        think_svc_drop(svc);
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "llm adapter create failed");
     }
     SVC_LOG_INFO("ThinkDual: llm_svc_adapter created (socket=%s)",
                  llm_svc_adapter_is_connected(svc->llm_adapter) ? "connected" : "pending");
 
-    /* 2. Cognitive engine (with a feedback callback collecting thinking
-     * events). plan_strategy injects the reactive planner (llm=NULL uses
-     * heuristics); otherwise airy_cognition_process's Phase 1 planning returns
-     * EUNKNOWN (plan_strat stays empty). §271: factory comes from the
-     * injected plan ops table; ops absent -> NULL -> engine starts bare
-     * (BAN-257, process-time STATE_ERROR fail fast); ops present but
-     * factory fails -> assembly defect, fail fast here. */
-    const airy_plan_ops_t *plan_ops = are_ops_get_plan();
-    airy_plan_strategy_t *plan_strat =
+    plan_ops = are_ops_get_plan();
+    plan_strat =
         (plan_ops && plan_ops->create_reactive) ? plan_ops->create_reactive(NULL) : NULL;
     if (!plan_strat) {
         if (plan_ops) {
             SVC_LOG_ERROR("ThinkDual: reactive planner create failed");
-            llm_svc_adapter_destroy(svc->llm_adapter);
-            AIRY_FREE(svc->events);
-            airy_mtx_destroy(&svc->lock);
-            AIRY_FREE(svc);
+            think_svc_drop(svc);
             AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "planner create failed");
         }
         SVC_LOG_WARN("ThinkDual: plan ops absent, engine starts bare (BAN-257)");
@@ -300,7 +323,6 @@ think_service_t *think_service_create(const think_service_config_t *config)
     if (plan_strat)
         SVC_LOG_INFO("ThinkDual: reactive planner created (plan=%p)", (void *)plan_strat);
 
-    airy_cognition_config_t cfg;
     __builtin_memset(&cfg, 0, sizeof(cfg));
     cfg.cognition_default_timeout_ms = svc->process_timeout_ms;
     cfg.cognition_max_retries = 3;
@@ -308,88 +330,96 @@ think_service_t *think_service_create(const think_service_config_t *config)
     cfg.feedback_user_data = svc;
     cfg.perf_light = config ? config->perf_light : 0;
 
-    airy_err_t ce = airy_cognition_create_ex_take(&cfg, plan_strat, NULL, NULL, &svc->engine);
+    ce = airy_cognition_create_ex_take(&cfg, plan_strat, NULL, NULL, &svc->engine);
     if (ce != AIRY_SUCCESS || !svc->engine) {
         SVC_LOG_ERROR("ThinkDual: cognition engine create failed (err=%d)", (int)ce);
-        llm_svc_adapter_destroy(svc->llm_adapter);
-        AIRY_FREE(svc->events);
-        airy_mtx_destroy(&svc->lock);
-        AIRY_FREE(svc);
+        think_svc_drop(svc);
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "cognition create failed");
     }
 
-    airy_cognition_set_llm_adapter(svc->engine, svc->llm_adapter);
+    think_eng_bind(svc, config);
+    return svc;
+}
 
-    /* 4. Inject the t2/t1-f/t1-p three independent model slots (NULL ->
-     * provider default). GRAD's three-model roles reuse these slots: model
-     * A=t2 slow thinking (generation), model C=t1-p professional thinking
-     * (quadruple-check), model B=t1-f fast thinking (final ruling). */
-    airy_cognition_set_tc3_models(svc->engine,
-                                  svc->think2_slow_model[0] ? svc->think2_slow_model : NULL,
-                                  svc->think1_fast_model[0] ? svc->think1_fast_model : NULL,
-                                  svc->think1_prof_model[0] ? svc->think1_prof_model : NULL);
-
-    /* P-A (2026-08-23): 注册 GCCP 交互回调——两段式交互协议（无答案首轮
-     * 返回问题集挂起，携带答案次轮回调返回答案继续）。此前缺失注册导致
-     * 主链路走无交互降级（实测 feedback intent_confirmed 恒 interacted:0）。 */
-    airy_cognition_set_gccp_interact(svc->engine, think_gccp_interact_cb, svc);
-    SVC_LOG_INFO("ThinkDual: GCCP interact callback registered (two-pass protocol)");
-
-    /* 5. Dual-thinking switch: enabled=0 -> disable the GRAD plan-level
-     * critique loop (degrades to single-round planning); the t2/t1-f/t1-p
-     * three roles then do not participate in critique and the plain
-     * GCCP -> plan path is used. */
-    if (config && config->enabled == 0) {
-        airy_cognition_set_grad_enabled(svc->engine, 0);
-        SVC_LOG_WARN("ThinkDual: dual-thinking disabled (enabled=0), GRAD off");
-    }
-
+static void think_log_ready(const think_service_t *svc, const think_service_config_t *config)
+{
     SVC_LOG_INFO("ThinkDual: service ready (engine=%p, adapter=%p, tc3=%s/%s/%s, enabled=%d)",
                  (void *)svc->engine, (void *)svc->llm_adapter,
                  svc->think2_slow_model[0] ? svc->think2_slow_model : "(default)",
                  svc->think1_fast_model[0] ? svc->think1_fast_model : "(default)",
                  svc->think1_prof_model[0] ? svc->think1_prof_model : "(default)",
                  config ? config->enabled : 1);
+}
+
+/* 0.1.19 §3.5 缺陷5：对启动时消费的 model.yaml think 段照快照。
+ * 路径与 cfg_load() 同源（$AIRY_CONFIG_DIR/model.yaml），缺席者
+ * valid=0 静默停用。 */
+static void think_mw_snap(think_service_t *svc)
+{
+    char model_path[1024];
+    const char *cfg_dir = airy_config_dir();
+    int plen;
+
+    if (!cfg_dir)
+        return;
+    plen = snprintf(model_path, sizeof(model_path), "%s/model.yaml", cfg_dir);
+    if (plen > 0 && plen < (int)sizeof(model_path))
+        (void)svc_mw_init(&svc->mw, model_path, "think_d");
+}
+
+think_service_t *think_service_create(const think_service_config_t *config)
+{
+    think_service_t *svc = (think_service_t *)AIRY_CALLOC(1, sizeof(think_service_t));
+    uint32_t cap;
+    orch_config_t orch_cfg;
+
+    if (!svc)
+        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "think service alloc failed");
+
+    airy_mtx_init(&svc->lock);
+    if (config) {
+        think_copy_slot(svc->think2_slow_model, sizeof(svc->think2_slow_model),
+                        config->think2_slow_model);
+        think_copy_slot(svc->think1_fast_model, sizeof(svc->think1_fast_model),
+                        config->think1_fast_model);
+        think_copy_slot(svc->think1_prof_model, sizeof(svc->think1_prof_model),
+                        config->think1_prof_model);
+    }
+    svc->process_timeout_ms = (config && config->process_timeout_ms > 0) ?
+                                  config->process_timeout_ms :
+                                  THINK_DEFAULT_TIMEOUT_MS;
+    cap = (config && config->max_feedback_events > 0) ? config->max_feedback_events :
+                                                        THINK_DEFAULT_MAX_EVENTS;
+    svc->event_capacity = cap;
+    svc->events = (think_feedback_event_t *)AIRY_CALLOC(cap, sizeof(think_feedback_event_t));
+    if (!svc->events) {
+        think_svc_drop(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "think event buffer alloc failed");
+    }
+
+    if (!think_init_eng(svc, config))
+        return NULL;
+    think_log_ready(svc, config);
 
     /* S-5 (2026-08-21): 恢复流程编排器（orchestrator，与 engine_process
      * 双管线并存）。orchestrator 自带熔断/重试/超时/进度/取消与自定义
      * pipeline，其 LLM 调用经 daemon_rpc_call 直连 llm_d。 */
     airy_mtx_init(&svc->orch_lock);
     svc->next_run_id = 1;
-    orch_config_t orch_cfg;
     orch_config_get_defaults(&orch_cfg);
     orch_cfg.timeout_ms = svc->process_timeout_ms;
     svc->orch = orchestrator_create(&orch_cfg);
     if (!svc->orch) {
         SVC_LOG_ERROR("ThinkDual: orchestrator create failed");
         airy_mtx_destroy(&svc->orch_lock);
-        airy_cognition_destroy(svc->engine);
-        svc->engine = NULL;
-        llm_svc_adapter_destroy(svc->llm_adapter);
-        svc->llm_adapter = NULL;
-        AIRY_FREE(svc->events);
-        svc->events = NULL;
-        airy_mtx_destroy(&svc->lock);
-        AIRY_FREE(svc);
+        think_svc_drop(svc);
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "orchestrator create failed");
     }
     SVC_LOG_INFO("ThinkDual: orchestrator ready (timeout=%ums, retries=%u, breaker=%s)",
                  orch_cfg.timeout_ms, orch_cfg.max_retries,
                  orch_cfg.enable_circuit_breaker ? "on" : "off");
     think_orch_ops_inject(svc);
-
-    /* 0.1.19 §3.5 缺陷5：对启动时消费的 model.yaml think 段照快照。
-     * 路径与 cfg_load() 同源（$AIRY_CONFIG_DIR/model.yaml），缺席者
-     * valid=0 静默停用。 */
-    {
-        char model_path[1024];
-        const char *cfg_dir = airy_config_dir();
-        if (cfg_dir) {
-            int plen = snprintf(model_path, sizeof(model_path), "%s/model.yaml", cfg_dir);
-            if (plen > 0 && plen < (int)sizeof(model_path))
-                (void)svc_mw_init(&svc->mw, model_path, "think_d");
-        }
-    }
+    think_mw_snap(svc);
     return svc;
 }
 
@@ -413,24 +443,24 @@ void think_service_destroy(think_service_t *svc)
             r->state = 4;
         }
     }
-    if (svc->orch) {
-        orchestrator_destroy(svc->orch);
-        svc->orch = NULL;
-    }
     airy_mtx_destroy(&svc->orch_lock);
-    if (svc->engine) {
-        airy_cognition_destroy(svc->engine);
-        svc->engine = NULL;
-    }
-    if (svc->llm_adapter) {
-        llm_svc_adapter_destroy(svc->llm_adapter);
-        svc->llm_adapter = NULL;
-    }
-    AIRY_FREE(svc->events);
-    svc->events = NULL;
     think_gccp_cleanup_all(svc);
-    airy_mtx_destroy(&svc->lock);
-    AIRY_FREE(svc);
+    /* 装配尾段与半成品回滚同一实现（think_svc_drop）：order 一致，
+     * 避免两处销毁序列各自漂移。 */
+    think_svc_drop(svc);
+}
+
+/* 字符串数组 -> cJSON 字符串数组，NULL 元素跳过；depends/inputs/outputs/
+ * entry_points 四处同形序列化的唯一实现。 */
+static void think_add_strs(cJSON *obj, const char *key, char *const *arr, size_t cnt)
+{
+    cJSON *a = cJSON_CreateArray();
+
+    for (size_t i = 0; arr && i < cnt; i++) {
+        if (arr[i])
+            cJSON_AddItemToArray(a, cJSON_CreateString(arr[i]));
+    }
+    cJSON_AddItemToObject(obj, key, a);
 }
 
 static cJSON *think_plan_to_json(const airy_task_plan_t *plan)
@@ -453,27 +483,12 @@ static cJSON *think_plan_to_json(const airy_task_plan_t *plan)
         cJSON_AddStringToObject(nj, "handler",
                                 n->task_node_handler_name ? n->task_node_handler_name : "");
         cJSON_AddStringToObject(nj, "role", n->task_node_agent_role ? n->task_node_agent_role : "");
-        cJSON *deps = cJSON_CreateArray();
-        for (size_t d = 0; d < n->task_node_depends_count; d++) {
-            if (n->task_node_depends_on && n->task_node_depends_on[d])
-                cJSON_AddItemToArray(deps, cJSON_CreateString(n->task_node_depends_on[d]));
-        }
-        cJSON_AddItemToObject(nj, "depends", deps);
+        think_add_strs(nj, "depends", n->task_node_depends_on, n->task_node_depends_count);
         /* GRAD quadruple-check metadata (E-01 data dependency / E-03
          * resource conservation / E-04 purpose drift): outputs inputs/outputs/
          * cost/invariant_guard in full, proving the DAG is not pure display. */
-        cJSON *inputs = cJSON_CreateArray();
-        for (size_t d = 0; d < n->task_node_inputs_count; d++) {
-            if (n->task_node_inputs && n->task_node_inputs[d])
-                cJSON_AddItemToArray(inputs, cJSON_CreateString(n->task_node_inputs[d]));
-        }
-        cJSON_AddItemToObject(nj, "inputs", inputs);
-        cJSON *outputs = cJSON_CreateArray();
-        for (size_t d = 0; d < n->task_node_outputs_count; d++) {
-            if (n->task_node_outputs && n->task_node_outputs[d])
-                cJSON_AddItemToArray(outputs, cJSON_CreateString(n->task_node_outputs[d]));
-        }
-        cJSON_AddItemToObject(nj, "outputs", outputs);
+        think_add_strs(nj, "inputs", n->task_node_inputs, n->task_node_inputs_count);
+        think_add_strs(nj, "outputs", n->task_node_outputs, n->task_node_outputs_count);
         cJSON_AddNumberToObject(nj, "cost_time_ms", (double)n->task_node_cost_time_ms);
         cJSON_AddNumberToObject(nj, "cost_mem_mb", (double)n->task_node_cost_mem_mb);
         cJSON_AddBoolToObject(nj, "invariant_guard", n->task_node_invariant_guard != 0);
@@ -481,12 +496,8 @@ static cJSON *think_plan_to_json(const airy_task_plan_t *plan)
     }
     cJSON_AddItemToObject(root, "nodes", nodes);
 
-    cJSON *entry = cJSON_CreateArray();
-    for (size_t d = 0; d < plan->task_plan_entry_count; d++) {
-        if (plan->task_plan_entry_points && plan->task_plan_entry_points[d])
-            cJSON_AddItemToArray(entry, cJSON_CreateString(plan->task_plan_entry_points[d]));
-    }
-    cJSON_AddItemToObject(root, "entry_points", entry);
+    think_add_strs(root, "entry_points", plan->task_plan_entry_points,
+                   plan->task_plan_entry_count);
     return root;
 }
 
