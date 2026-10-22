@@ -216,17 +216,12 @@ void mem_ledger_destroy(mem_ledger_t *ledger)
 
 /* ─── 追加（append-only） ─────────────────────────────────────────────── */
 
-int mem_ledger_append(mem_ledger_t *ledger, const char *session_id,
-                      const ledger_entry_in_t *entries, size_t count,
-                      char **out_ledger_id)
+/* 参数与容量前置校验：任何一项不满足即拒绝，不产生副作用。 */
+static int append_args_ok(mem_ledger_t *ledger, const char *session_id,
+                          const ledger_entry_in_t *entries, size_t count)
 {
-    ledger_session_t *s;
-    ledger_entry_t **batch;
-    char first_id[LEDGER_ENTRY_ID_HEX + 1] = {0};
     size_t len;
 
-    if (out_ledger_id)
-        *out_ledger_id = NULL;
     if (!ledger || !session_id || (!entries && count > 0))
         return AIRY_ERR_INVALID_PARAM;
     len = strlen(session_id);
@@ -241,32 +236,43 @@ int mem_ledger_append(mem_ledger_t *ledger, const char *session_id,
     }
     if (ledger->entry_count + count > ledger->max_entries)
         return AIRY_ERR_OVERFLOW;
+    return AIRY_SUCCESS;
+}
 
-    s = session_find(ledger, session_id);
-    if (!s) {
-        if (ledger->session_count >= ledger->max_sessions)
-            return AIRY_ERR_OVERFLOW;
-        s = AIRY_CALLOC(1, sizeof(ledger_session_t));
-        if (!s)
-            return AIRY_ERR_OUT_OF_MEMORY;
-        s->session_id = AIRY_STRDUP(session_id);
-        s->budget = ledger->default_budget;
-        if (!s->session_id) {
-            AIRY_FREE(s);
-            return AIRY_ERR_OUT_OF_MEMORY;
-        }
-        /* 新会话暂不入链：批内失败时整体回滚（不残留空会话） */
+/* 取会话；新会话只分配不入链，批内失败时由 append_rollback 一并释放。 */
+static int append_session(mem_ledger_t *ledger, const char *session_id,
+                          ledger_session_t **out)
+{
+    ledger_session_t *s = session_find(ledger, session_id);
+
+    if (s) {
+        *out = s;
+        return AIRY_SUCCESS;
     }
-
-    /* 两阶段：先全部分配，成功后才链接 —— append 原子性，杜绝部分成功 */
-    batch = AIRY_MALLOC(sizeof(ledger_entry_t *) * count);
-    if (!batch) {
-        append_rollback(s, NULL, 0);
+    if (ledger->session_count >= ledger->max_sessions)
+        return AIRY_ERR_OVERFLOW;
+    s = AIRY_CALLOC(1, sizeof(ledger_session_t));
+    if (!s)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    s->session_id = AIRY_STRDUP(session_id);
+    s->budget = ledger->default_budget;
+    if (!s->session_id) {
+        AIRY_FREE(s);
         return AIRY_ERR_OUT_OF_MEMORY;
     }
+    *out = s;
+    return AIRY_SUCCESS;
+}
+
+/* 两阶段之一：全部分配成功才返回；失败时已分配部分就地回滚（含新会话）。 */
+static int append_fill(mem_ledger_t *ledger, ledger_session_t *s,
+                       const char *session_id, const ledger_entry_in_t *entries,
+                       size_t count, ledger_entry_t **batch, char *first_id)
+{
     for (size_t i = 0; i < count; i++) {
         const ledger_entry_in_t *in = &entries[i];
         ledger_entry_t *e = AIRY_CALLOC(1, sizeof(ledger_entry_t));
+
         if (!e) {
             append_rollback(s, batch, i);
             return AIRY_ERR_OUT_OF_MEMORY;
@@ -292,8 +298,13 @@ int mem_ledger_append(mem_ledger_t *ledger, const char *session_id,
         e->seq = ++ledger->seq;
         batch[i] = e;
     }
+    return AIRY_SUCCESS;
+}
 
-    /* 批全部就绪：链接到会话，新会话此刻才入链 */
+/* 两阶段之二：批全部就绪后一次链接，新会话此刻才入链。 */
+static void append_link(mem_ledger_t *ledger, ledger_session_t *s,
+                        ledger_entry_t **batch, size_t count)
+{
     if (!s->head) {
         s->next = ledger->sessions;
         ledger->sessions = s;
@@ -301,6 +312,7 @@ int mem_ledger_append(mem_ledger_t *ledger, const char *session_id,
     }
     for (size_t i = 0; i < count; i++) {
         ledger_entry_t *e = batch[i];
+
         if (s->tail)
             s->tail->next = e;
         else
@@ -311,6 +323,41 @@ int mem_ledger_append(mem_ledger_t *ledger, const char *session_id,
         ledger->entry_count++;
         ledger->total_tokens += e->token_in;
     }
+}
+
+int mem_ledger_append(mem_ledger_t *ledger, const char *session_id,
+                      const ledger_entry_in_t *entries, size_t count,
+                      char **out_ledger_id)
+{
+    ledger_session_t *s = NULL;
+    ledger_entry_t **batch;
+    char first_id[LEDGER_ENTRY_ID_HEX + 1] = {0};
+    int rc;
+
+    if (out_ledger_id)
+        *out_ledger_id = NULL;
+    rc = append_args_ok(ledger, session_id, entries, count);
+    if (rc != AIRY_SUCCESS)
+        return rc;
+    if (count == 0)
+        return AIRY_SUCCESS;
+
+    rc = append_session(ledger, session_id, &s);
+    if (rc != AIRY_SUCCESS)
+        return rc;
+
+    batch = AIRY_MALLOC(sizeof(ledger_entry_t *) * count);
+    if (!batch) {
+        append_rollback(s, NULL, 0);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    /* append_fill 失败时连 batch 一并回滚，此处不得再释放 */
+    rc = append_fill(ledger, s, session_id, entries, count, batch, first_id);
+    if (rc != AIRY_SUCCESS)
+        return rc;
+
+    append_link(ledger, s, batch, count);
     AIRY_FREE(batch);
 
     if (out_ledger_id)

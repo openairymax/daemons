@@ -164,6 +164,119 @@ static void mem_emb_mark_fail(mem_emb_client_t *client)
     atomic_store_explicit(&client->last_fail_time, airy_time_ms(), memory_order_release);
 }
 
+#ifdef AIRY_HAS_CJSON
+
+/* 请求体与端点：body 由 cJSON 分配器产出，释放必须走 cJSON_free。 */
+static int emb_req_build(const mem_emb_client_t *client, const char *text,
+                         char **out_body, char **out_url)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON *input = cJSON_CreateArray();
+    size_t url_len;
+
+    *out_body = NULL;
+    *out_url = NULL;
+    if (!root || !input) {
+        cJSON_Delete(root);
+        cJSON_Delete(input);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+    cJSON_AddStringToObject(root, "model", MEM_EMB_MODEL);
+    cJSON_AddItemToArray(input, cJSON_CreateString(text));
+    cJSON_AddItemToObject(root, "input", input);
+    *out_body = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!*out_body)
+        return AIRY_ERR_OUT_OF_MEMORY;
+
+    url_len = strlen(client->url) + sizeof("/embeddings");
+    *out_url = (char *)AIRY_MALLOC(url_len);
+    if (!*out_url) {
+        cJSON_free(*out_body);
+        *out_body = NULL;
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+    snprintf(*out_url, url_len, "%s/embeddings", client->url);
+    return AIRY_SUCCESS;
+}
+
+/* 同步 POST：resp->buf 由调用方释放；init 失败返回 CURLE_FAILED_INIT。 */
+static CURLcode emb_post(const mem_emb_client_t *client, const char *url,
+                         const char *body, mem_emb_resp_t *resp, long *out_code)
+{
+    CURL *curl = curl_easy_init();
+    struct curl_slist *headers = NULL;
+    CURLcode rc;
+
+    *out_code = 0;
+    if (!curl)
+        return CURLE_FAILED_INIT;
+
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    if (client->api_key) {
+        char auth[512];
+        snprintf(auth, sizeof(auth), "Authorization: Bearer %s", client->api_key);
+        headers = curl_slist_append(headers, auth);
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(body));
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, mem_emb_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, resp);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, MEM_EMB_TIMEOUT_SEC);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, MEM_EMB_CONNECT_TIMEOUT_SEC);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+    rc = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, out_code);
+    curl_easy_cleanup(curl);
+    curl_slist_free_all(headers);
+    return rc;
+}
+
+/* 响应解析：data[0].embedding 转 float 数组；非数组与非空数组分开报错。 */
+static int emb_vec_parse(const char *payload, float **out_vec, size_t *out_dim)
+{
+    cJSON *r = cJSON_Parse(payload);
+    cJSON *data;
+    cJSON *first;
+    cJSON *emb;
+    float *vec;
+    int n;
+
+    if (!r)
+        return AIRY_ERR_LLM_PARSE_RESP;
+
+    data = cJSON_GetObjectItem(r, "data");
+    first = (data && cJSON_IsArray(data)) ? cJSON_GetArrayItem(data, 0) : NULL;
+    emb = first ? cJSON_GetObjectItem(first, "embedding") : NULL;
+    n = cJSON_IsArray(emb) ? cJSON_GetArraySize(emb) : 0;
+    if (n <= 0) {
+        cJSON_Delete(r);
+        return cJSON_IsArray(emb) ? AIRY_ERR_LLM_EMPTY_RESP : AIRY_ERR_LLM_PARSE_RESP;
+    }
+
+    vec = (float *)AIRY_MALLOC((size_t)n * sizeof(float));
+    if (!vec) {
+        cJSON_Delete(r);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+    for (int k = 0; k < n; k++) {
+        cJSON *it = cJSON_GetArrayItem(emb, k);
+        vec[k] = (it && cJSON_IsNumber(it)) ? (float)it->valuedouble : 0.0f;
+    }
+    cJSON_Delete(r);
+
+    *out_vec = vec;
+    *out_dim = (size_t)n;
+    return AIRY_SUCCESS;
+}
+
+#endif /* AIRY_HAS_CJSON */
+
 int mem_emb_embed(mem_emb_client_t *client, const char *text, float **out_vec, size_t *out_dim)
 {
     if (!out_vec || !out_dim)
@@ -175,72 +288,24 @@ int mem_emb_embed(mem_emb_client_t *client, const char *text, float **out_vec, s
 
 #ifdef AIRY_HAS_CJSON
 
-    cJSON *root = cJSON_CreateObject();
-    cJSON *input = cJSON_CreateArray();
-    if (!root || !input) {
-        if (root)
-            cJSON_Delete(root);
-        if (input)
-            cJSON_Delete(input);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-    cJSON_AddStringToObject(root, "model", MEM_EMB_MODEL);
-    cJSON_AddItemToArray(input, cJSON_CreateString(text));
-    cJSON_AddItemToObject(root, "input", input);
-    char *body = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!body)
-        return AIRY_ERR_OUT_OF_MEMORY;
-
-    size_t url_len = strlen(client->url) + strlen("/embeddings") + 1;
-    char *url = (char *)AIRY_MALLOC(url_len);
-    if (!url) {
-        cJSON_free(body);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-    snprintf(url, url_len, "%s/embeddings", client->url);
-
-    CURL *curl = curl_easy_init();
-    if (!curl) {
-        AIRY_FREE(url);
-        cJSON_free(body);
-        mem_emb_mark_fail(client);
-        return AIRY_ERR_SYS_RESOURCE;
-    }
-
-    struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, "Content-Type: application/json");
-    if (client->api_key) {
-        char auth[512];
-        snprintf(auth, sizeof(auth), "Authorization: Bearer %s", client->api_key);
-        headers = curl_slist_append(headers, auth);
-    }
-
+    char *body = NULL;
+    char *url = NULL;
     mem_emb_resp_t resp = {NULL, 0};
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(body));
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, mem_emb_write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, MEM_EMB_TIMEOUT_SEC);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, MEM_EMB_CONNECT_TIMEOUT_SEC);
-    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-
-    CURLcode rc = curl_easy_perform(curl);
     long http_code = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-    curl_easy_cleanup(curl);
-    curl_slist_free_all(headers);
+    int rc = emb_req_build(client, text, &body, &url);
+
+    if (rc != AIRY_SUCCESS)
+        return rc;
+
+    CURLcode cc = emb_post(client, url, body, &resp, &http_code);
     AIRY_FREE(url);
     cJSON_free(body);
 
-    if (rc != CURLE_OK) {
-        SVC_LOG_WARN("mem_d embedding request failed (curl=%d)", (int)rc);
+    if (cc != CURLE_OK) {
+        SVC_LOG_WARN("mem_d embedding request failed (curl=%d)", (int)cc);
         AIRY_FREE(resp.buf);
         mem_emb_mark_fail(client);
-        return AIRY_ERR_LLM_PROVIDER_FAIL;
+        return cc == CURLE_FAILED_INIT ? AIRY_ERR_SYS_RESOURCE : AIRY_ERR_LLM_PROVIDER_FAIL;
     }
     if (http_code != 200 || !resp.buf) {
         SVC_LOG_WARN("mem_d embedding request failed (http=%ld)", http_code);
@@ -249,41 +314,13 @@ int mem_emb_embed(mem_emb_client_t *client, const char *text, float **out_vec, s
         return AIRY_ERR_LLM_PROVIDER_FAIL;
     }
 
-    cJSON *r = cJSON_Parse(resp.buf);
+    rc = emb_vec_parse(resp.buf, out_vec, out_dim);
     AIRY_FREE(resp.buf);
-    if (!r) {
+    if (rc != AIRY_SUCCESS) {
         mem_emb_mark_fail(client);
-        return AIRY_ERR_LLM_PARSE_RESP;
-    }
-    cJSON *data = cJSON_GetObjectItem(r, "data");
-    cJSON *first = (data && cJSON_IsArray(data)) ? cJSON_GetArrayItem(data, 0) : NULL;
-    cJSON *emb = first ? cJSON_GetObjectItem(first, "embedding") : NULL;
-    if (!cJSON_IsArray(emb)) {
-        cJSON_Delete(r);
-        mem_emb_mark_fail(client);
-        return AIRY_ERR_LLM_PARSE_RESP;
+        return rc;
     }
 
-    int n = cJSON_GetArraySize(emb);
-    if (n <= 0) {
-        cJSON_Delete(r);
-        mem_emb_mark_fail(client);
-        return AIRY_ERR_LLM_EMPTY_RESP;
-    }
-    float *vec = (float *)AIRY_MALLOC((size_t)n * sizeof(float));
-    if (!vec) {
-        cJSON_Delete(r);
-        mem_emb_mark_fail(client);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-    for (int k = 0; k < n; k++) {
-        cJSON *it = cJSON_GetArrayItem(emb, k);
-        vec[k] = (it && cJSON_IsNumber(it)) ? (float)it->valuedouble : 0.0f;
-    }
-    cJSON_Delete(r);
-
-    *out_vec = vec;
-    *out_dim = (size_t)n;
     atomic_store_explicit(&client->healthy, 1, memory_order_release);
     return AIRY_SUCCESS;
 #else

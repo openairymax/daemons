@@ -511,6 +511,96 @@ static int cache_key_build(const char *text, const char *model_id,
     return AIRY_SUCCESS;
 }
 
+/* get 的四路输出参数：集中装载后整体传递，避免每个子件重复展开。 */
+typedef struct {
+    int *hit;
+    double *score;
+    char **cache_id;
+    char **response;
+} cache_out_t;
+
+/* 按条目自身键定位同桶前驱并摘链：同键覆盖与过期清理共用。 */
+static void cache_unlink(mem_cache_t *cache, cache_entry_t *e)
+{
+    uint64_t h = cache_hash64(e->exact_key) % CACHE_HASH_BUCKETS;
+    cache_entry_t *prev = NULL;
+    cache_entry_t *cur = cache->buckets[h];
+
+    while (cur && cur != e) {
+        prev = cur;
+        cur = cur->next;
+    }
+    entry_unlink(cache, prev, e);
+}
+
+static void cache_out(cache_out_t *out, int hit, double score, const cache_entry_t *e)
+{
+    if (out->hit)
+        *out->hit = hit;
+    if (out->score)
+        *out->score = score;
+    if (out->cache_id)
+        *out->cache_id = e ? AIRY_STRDUP(e->cache_id) : NULL;
+    if (out->response)
+        *out->response = e ? AIRY_STRDUP(e->response) : NULL;
+}
+
+/* 命中记账 + 结果回填：精确层与语义层共用，防止两处计数漂移。 */
+static void cache_hit(mem_cache_t *cache, cache_entry_t *e, double score,
+                      uint64_t now, cache_out_t *out)
+{
+    e->access_count++;
+    e->last_access = now;
+    cache->hits++;
+    cache_out(out, 1, score, e);
+}
+
+enum { CACHE_MISS, CACHE_STALE, CACHE_FOUND };
+
+/* 精确层：未命中给 CACHE_MISS；命中但过期则就地摘链给 CACHE_STALE。 */
+static int cache_l0(mem_cache_t *cache, const char *key, uint64_t now,
+                    cache_entry_t **out)
+{
+    cache_entry_t *e = entry_find_exact(cache, key);
+
+    if (!e)
+        return CACHE_MISS;
+    if (entry_expired(e, now)) {
+        cache_unlink(cache, e);
+        return CACHE_STALE;
+    }
+    *out = e;
+    return CACHE_FOUND;
+}
+
+/* 语义层：只在同模型、未过期条目里取最高分；过期条目留给 cache_evict
+ * 统一清理，不在此摘链。 */
+static cache_entry_t *cache_l1(mem_cache_t *cache, const char *text,
+                               const char *model_id, uint64_t now, double thr,
+                               double *out_score)
+{
+    cache_entry_t *best_e = NULL;
+    double best = 0.0;
+
+    for (int i = 0; i < CACHE_HASH_BUCKETS; i++) {
+        for (cache_entry_t *cur = cache->buckets[i]; cur; cur = cur->next) {
+            double s;
+
+            if (strcmp(cur->model_id, model_id) != 0 || entry_expired(cur, now))
+                continue;
+            s = semantic_score(text, cur->text);
+            if (s > best) {
+                best = s;
+                best_e = cur;
+            }
+        }
+    }
+    if (!best_e || best < thr)
+        return NULL;
+    *out_score = best;
+    return best_e;
+}
+
 int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
                   const char *model_id, uint64_t ttl_ms,
                   char **out_cache_id, char **out_exact_key)
@@ -526,16 +616,8 @@ int mem_cache_put(mem_cache_t *cache, const char *text, const char *response,
         return AIRY_ERR_OUT_OF_MEMORY;
 
     /* 同键覆盖：删除旧条目再插入（保持 LRU 语义） */
-    if ((e = entry_find_exact(cache, exact_key)) != NULL) {
-        uint64_t eh = cache_hash64(exact_key) % CACHE_HASH_BUCKETS;
-        cache_entry_t *prev = NULL;
-        cache_entry_t *cur = cache->buckets[eh];
-        while (cur && cur != e) {
-            prev = cur;
-            cur = cur->next;
-        }
-        entry_unlink(cache, prev, e);
-    }
+    if ((e = entry_find_exact(cache, exact_key)) != NULL)
+        cache_unlink(cache, e);
 
     e = AIRY_CALLOC(1, sizeof(cache_entry_t));
     if (!e)
@@ -577,17 +659,18 @@ int mem_cache_get(mem_cache_t *cache, const char *text, const char *model_id,
                   double threshold, int *out_hit, double *out_score,
                   char **out_cache_id, char **out_response)
 {
+    cache_out_t out = {out_hit, out_score, out_cache_id, out_response};
     char exact_key[SHA256_HEX + 1];
-    cache_entry_t *e;
+    cache_entry_t *e = NULL;
     uint64_t now;
     double thr;
+    double score = 0.0;
+    int state;
 
-    if (out_hit) *out_hit = 0;
-    if (out_score) *out_score = 0.0;
-    if (out_cache_id) *out_cache_id = NULL;
-    if (out_response) *out_response = NULL;
+    cache_out(&out, 0, 0.0, NULL);
     if (!cache || !text || !model_id) {
-        if (cache) cache->misses++;
+        if (cache)
+            cache->misses++;
         return AIRY_ERR_INVALID_PARAM;
     }
 
@@ -597,60 +680,22 @@ int mem_cache_get(mem_cache_t *cache, const char *text, const char *model_id,
     if (cache_key_build(text, model_id, exact_key) != AIRY_SUCCESS)
         return AIRY_ERR_OUT_OF_MEMORY;
 
-    /* L0 精确 */
-    if ((e = entry_find_exact(cache, exact_key)) != NULL) {
-        if (entry_expired(e, now)) {
-            uint64_t eh = cache_hash64(exact_key) % CACHE_HASH_BUCKETS;
-            cache_entry_t *prev = NULL;
-            cache_entry_t *cur = cache->buckets[eh];
-            while (cur && cur != e) {
-                prev = cur;
-                cur = cur->next;
-            }
-            entry_unlink(cache, prev, e);
-            cache->misses++;
-            return AIRY_SUCCESS;
-        }
-        e->access_count++;
-        e->last_access = now;
-        cache->hits++;
-        if (out_hit) *out_hit = 1;
-        if (out_score) *out_score = 1.0;
-        if (out_cache_id) *out_cache_id = AIRY_STRDUP(e->cache_id);
-        if (out_response) *out_response = AIRY_STRDUP(e->response);
+    state = cache_l0(cache, exact_key, now, &e);
+    if (state == CACHE_FOUND) {
+        cache_hit(cache, e, 1.0, now, &out);
+        return AIRY_SUCCESS;
+    }
+    if (state == CACHE_STALE) {
+        cache->misses++;
         return AIRY_SUCCESS;
     }
 
-    /* L1 语义（同模型候选） */
-    {
-        double best = 0.0;
-        cache_entry_t *best_e = NULL;
-        for (int i = 0; i < CACHE_HASH_BUCKETS; i++) {
-            for (cache_entry_t *cur = cache->buckets[i]; cur; cur = cur->next) {
-                if (strcmp(cur->model_id, model_id) != 0)
-                    continue;
-                if (entry_expired(cur, now))
-                    continue; /* 过期条目不参与命中（后续淘汰清理） */
-                double s = semantic_score(text, cur->text);
-                if (s > best) {
-                    best = s;
-                    best_e = cur;
-                }
-            }
-        }
-        if (best_e && best >= thr) {
-            best_e->access_count++;
-            best_e->last_access = now;
-            cache->hits++;
-            if (out_hit) *out_hit = 1;
-            if (out_score) *out_score = best;
-            if (out_cache_id) *out_cache_id = AIRY_STRDUP(best_e->cache_id);
-            if (out_response) *out_response = AIRY_STRDUP(best_e->response);
-            return AIRY_SUCCESS;
-        }
+    e = cache_l1(cache, text, model_id, now, thr, &score);
+    if (!e) {
+        cache->misses++;
+        return AIRY_SUCCESS;
     }
-
-    cache->misses++;
+    cache_hit(cache, e, score, now, &out);
     return AIRY_SUCCESS;
 }
 
