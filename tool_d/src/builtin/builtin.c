@@ -66,6 +66,14 @@ int builtin_str_param(const cJSON *root, const char *name, const char **out, too
     return AIRY_OK;
 }
 
+const char *builtin_str_opt(const cJSON *root, const char *name, const char *def)
+{
+    cJSON *v = cJSON_GetObjectItem(root, name);
+    if (cJSON_IsString(v) && v->valuestring && v->valuestring[0])
+        return v->valuestring;
+    return def;
+}
+
 char *builtin_read_all(FILE *fp, int *out_truncated)
 {
     if (out_truncated)

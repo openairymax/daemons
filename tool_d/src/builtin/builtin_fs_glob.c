@@ -110,7 +110,7 @@ static void builtin_glob_walk(const char *base, const char **segs, size_t n, siz
         char *p = path + path_len;
         if (path_len)
             *p++ = '/';
-        __builtin_memcpy(p, nm, strlen(nm) + 1);
+        AIRY_MEMCPY(p, nm, strlen(nm) + 1);
         builtin_glob_impl(base, segs, n, next_i, path, child, path_cap, out, out_cap, out_len, count,
                           max, timed_out, deadline);
         if (path_len)
@@ -139,7 +139,7 @@ static void builtin_glob_impl(const char *base, const char **segs, size_t n, siz
 
     if (i == n) {
         if (path_len > 0 && path_len + 2 <= out_cap - *out_len) {
-            __builtin_memcpy(out + *out_len, path, path_len);
+            AIRY_MEMCPY(out + *out_len, path, path_len);
             *out_len += path_len;
             out[(*out_len)++] = '\n';
             out[*out_len] = '\0';
@@ -166,10 +166,7 @@ int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     const char *pattern = NULL;
     if (builtin_str_param(root, "pattern", &pattern, res) != AIRY_OK)
         return AIRY_ERR_INVALID_PARAM;
-    cJSON *base = cJSON_GetObjectItem(root, "base");
-    const char *base_dir = (cJSON_IsString(base) && base->valuestring && base->valuestring[0]) ?
-                               base->valuestring :
-                               ".";
+    const char *base_dir = builtin_str_opt(root, "base", ".");
     char resolved[4096];
     int rc = builtin_fs_confine(base_dir, 0, resolved, sizeof(resolved), res);
     if (rc != AIRY_OK)
@@ -194,7 +191,7 @@ int fs_glob_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
                 AIRY_FREE((void *)segs[k]);
             return AIRY_ERR_OUT_OF_MEMORY;
         }
-        __builtin_memcpy(seg, s, (size_t)(e - s));
+        AIRY_MEMCPY(seg, s, (size_t)(e - s));
         seg[e - s] = '\0';
         segs[nsegs++] = seg;
         s = e;

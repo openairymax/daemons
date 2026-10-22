@@ -37,12 +37,6 @@ int builtin_fs_confine(const char *orig_path, int for_write, char *resolved, siz
 /* Common I/O helper (builtin.c) */
 char *builtin_read_all(FILE *fp, int *out_truncated);
 
-/* String parameter extraction ritual shared by the tool entry points:
- * fetch name's string value and require it non-empty. Returns AIRY_OK
- * with *out pointing at the value; on missing/empty sets res->error
- * and returns AIRY_ERR_INVALID_PARAM. */
-int builtin_str_param(const cJSON *root, const char *name, const char **out, tool_result_t *res);
-
 /* Glob wildcard segment matcher shared by builtin_fs_glob.c and
  * builtin_fs_grep.c (supports * and ? within one path segment) */
 int builtin_glob_seg_match(const char *pat, const char *str);

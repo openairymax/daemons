@@ -83,9 +83,7 @@ int git_exec_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *r
     cJSON *args = cJSON_GetObjectItem(root, "command_args");
     if (!cJSON_IsArray(args) || cJSON_GetArraySize(args) < 1)
         return btool_fail(res, AIRY_ERR_INVALID_PARAM, "Missing array parameter: command_args");
-    cJSON *cwd = cJSON_GetObjectItem(root, "cwd");
-    const char *cwd_str =
-        (cJSON_IsString(cwd) && cwd->valuestring && cwd->valuestring[0]) ? cwd->valuestring : NULL;
+    const char *cwd_str = builtin_str_opt(root, "cwd", NULL);
 
     cJSON *first = cJSON_GetArrayItem(args, 0);
     if (!cJSON_IsString(first) || !first->valuestring || !first->valuestring[0])
@@ -136,11 +134,8 @@ int git_diff_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *r
     CJSON_PARSE_GUARD(root, params_json, {
         return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
-    cJSON *path = cJSON_GetObjectItem(root, "path");
     cJSON *staged = cJSON_GetObjectItem(root, "staged");
-    const char *path_str = (cJSON_IsString(path) && path->valuestring && path->valuestring[0]) ?
-                               path->valuestring :
-                               NULL;
+    const char *path_str = builtin_str_opt(root, "path", NULL);
     int use_staged = cJSON_IsTrue(staged) ? 1 : 0;
 
     char *argv[8];

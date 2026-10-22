@@ -64,30 +64,104 @@ static char *builtin_read_line(FILE *fp, size_t *out_len)
  * monopolize the executor thread (incident 0.1.16: fs_grep ran 158s over
  * the whole workspace and stalled the DAG pipeline). On budget expiry the
  * partial result is returned with a truncation mark (*timed_out=1). */
-static int builtin_grep_dir(const char *base, const char *root, regex_t *re,
-                            const char *glob_filter, int max_results, char *out, size_t out_cap,
-                            size_t *out_len, int *count, int *done, int *timed_out,
-                            uint64_t deadline, int depth)
+typedef struct {
+    const char *root;
+    const regex_t *re;
+    const char *glob;
+    int max;
+    char *out;
+    size_t cap;
+    size_t len;
+    int count;
+    int done;
+    int timed_out;
+    uint64_t deadline;
+} grep_ctx_t;
+
+static void grep_stop(grep_ctx_t *g)
 {
-    if (builtin_deadline_hit(deadline)) {
-        *done = 1;
-        *timed_out = 1;
-        return 0;
+    g->done = 1;
+    g->timed_out = 1;
+}
+
+static int grep_skip(const char *nm)
+{
+    return strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0 || builtin_scan_noise_dir(nm);
+}
+
+/* Emit one matched line as relpath:lineno:line. Returns 1 when the output
+ * cap was hit (done set so the whole walk unwinds). */
+static int grep_emit(grep_ctx_t *g, const char *full, long lineno, const char *line, size_t tlen)
+{
+    const char *rel = full;
+    size_t rlen = strlen(g->root);
+    if (strncmp(g->root, full, rlen) == 0 && full[rlen] == '/')
+        rel = full + rlen + 1;
+    if (g->len + strlen(rel) + 16 + tlen + 2 >= g->cap) {
+        builtin_append_trunc_mark(g->out, g->cap, g->len, "\n[grep truncated: output cap]");
+        g->done = 1;
+        return 1;
     }
-    if (depth > BUILTIN_SCAN_MAX_DEPTH) {
-        *done = 1;
-        *timed_out = 1;
+    int w = snprintf(g->out + g->len, g->cap - g->len, "%s:%ld:", rel, lineno);
+    if (w > 0)
+        g->len += (size_t)w;
+    AIRY_MEMCPY(g->out + g->len, line, tlen);
+    g->len += tlen;
+    g->out[g->len++] = '\n';
+    g->out[g->len] = '\0';
+    g->count++;
+    return 0;
+}
+
+/* Scan one regular file line by line; stops on the result cap, the time
+ * budget or an embedded NUL. Returns 1 when the walk must unwind. */
+static int grep_file(const char *full, grep_ctx_t *g)
+{
+    FILE *fp = fopen(full, "rb");
+    if (!fp)
         return 0;
+    long lineno = 0;
+    size_t llen = 0;
+    char *line;
+    while (!g->done && (line = builtin_read_line(fp, &llen)) != NULL) {
+        if (builtin_deadline_hit(g->deadline)) {
+            grep_stop(g);
+            AIRY_FREE(line);
+            break;
+        }
+        lineno++;
+        if (memchr(line, '\0', llen) != NULL) {
+            AIRY_FREE(line);
+            break;
+        }
+        size_t tlen = llen;
+        while (tlen > 0 && (line[tlen - 1] == '\n' || line[tlen - 1] == '\r'))
+            tlen--;
+        int hit = 0;
+        if (regexec(g->re, line, 0, NULL, 0) == 0) {
+            hit = (g->count >= g->max) ? 1 : grep_emit(g, full, lineno, line, tlen);
+        }
+        AIRY_FREE(line);
+        if (hit)
+            break;
+    }
+    fclose(fp);
+    return g->done;
+}
+
+static void grep_walk(const char *base, grep_ctx_t *g, int depth)
+{
+    if (builtin_deadline_hit(g->deadline) || depth > BUILTIN_SCAN_MAX_DEPTH) {
+        grep_stop(g);
+        return;
     }
     DIR *d = opendir(base);
     if (!d)
-        return 0;
+        return;
     struct dirent *ent;
-    while ((ent = readdir(d)) != NULL && !*done) {
+    while (!g->done && (ent = readdir(d)) != NULL) {
         const char *nm = ent->d_name;
-        if (strcmp(nm, ".") == 0 || strcmp(nm, "..") == 0)
-            continue;
-        if (builtin_scan_noise_dir(nm))
+        if (grep_skip(nm))
             continue;
         char full[AIRY_PATH_MAX];
         snprintf(full, sizeof(full), "%s/%s", base, nm);
@@ -98,73 +172,18 @@ static int builtin_grep_dir(const char *base, const char *root, regex_t *re,
         if (stat(full, &st) != 0)
             continue;
         if (S_ISDIR(st.st_mode)) {
-            builtin_grep_dir(full, root, re, glob_filter, max_results, out, out_cap, out_len, count,
-                             done, timed_out, deadline, depth + 1);
+            grep_walk(full, g, depth + 1);
             continue;
         }
-        if (!S_ISREG(st.st_mode))
+        if (!S_ISREG(st.st_mode) || st.st_size > BUILTIN_SCAN_MAX_FILE_BYTES)
             continue;
-        if (st.st_size > BUILTIN_SCAN_MAX_FILE_BYTES)
+        if (g->glob && !builtin_glob_seg_match(g->glob, nm))
             continue;
-        if (glob_filter && !builtin_glob_seg_match(glob_filter, nm))
-            continue;
-        if (*count >= max_results)
+        if (g->count >= g->max)
             break;
-
-        FILE *fp = fopen(full, "rb");
-        if (!fp)
-            continue;
-        long lineno = 0;
-        char *line;
-        size_t llen;
-        while ((line = builtin_read_line(fp, &llen)) != NULL) {
-            if (builtin_deadline_hit(deadline)) {
-                *done = 1;
-                *timed_out = 1;
-                AIRY_FREE(line);
-                break;
-            }
-            lineno++;
-            if (memchr(line, '\0', llen) != NULL) {
-                AIRY_FREE(line);
-                break;
-            }
-
-            size_t tlen = llen;
-            while (tlen > 0 && (line[tlen - 1] == '\n' || line[tlen - 1] == '\r'))
-                tlen--;
-            if (regexec(re, line, 0, NULL, 0) == 0) {
-                if (*count >= max_results) {
-                    AIRY_FREE(line);
-                    break;
-                }
-
-                const char *rel = full;
-                if (strncmp(root, full, strlen(root)) == 0 && full[strlen(root)] == '/')
-                    rel = full + strlen(root) + 1;
-                size_t need = strlen(rel) + 16 + tlen + 2;
-                if (*out_len + need >= out_cap) {
-                    builtin_append_trunc_mark(out, out_cap, *out_len,
-                                              "\n[grep truncated: output cap]");
-                    *done = 1;
-                    AIRY_FREE(line);
-                    break;
-                }
-                int w = snprintf(out + *out_len, out_cap - *out_len, "%s:%ld:", rel, lineno);
-                if (w > 0)
-                    *out_len += (size_t)w;
-                __builtin_memcpy(out + *out_len, line, tlen);
-                *out_len += tlen;
-                out[(*out_len)++] = '\n';
-                out[*out_len] = '\0';
-                (*count)++;
-            }
-            AIRY_FREE(line);
-        }
-        fclose(fp);
+        (void)grep_file(full, g);
     }
     closedir(d);
-    return 0;
 }
 
 int fs_grep_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
@@ -175,12 +194,9 @@ int fs_grep_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     const char *pattern = NULL;
     if (builtin_str_param(root, "pattern", &pattern, res) != AIRY_OK)
         return AIRY_ERR_INVALID_PARAM;
-    cJSON *path = cJSON_GetObjectItem(root, "path");
-    const char *dir = (cJSON_IsString(path) && path->valuestring && path->valuestring[0]) ?
-                          path->valuestring :
-                          ".";
+    const char *dir = builtin_str_opt(root, "path", ".");
     cJSON *gf = cJSON_GetObjectItem(root, "glob");
-    const char *glob_filter = (cJSON_IsString(gf) && gf->valuestring) ? gf->valuestring : NULL;
+    const char *glob_filter = cJSON_IsString(gf) ? gf->valuestring : NULL;
     cJSON *mr = cJSON_GetObjectItem(root, "max_results");
     int max_results = (cJSON_IsNumber(mr) && mr->valueint > 0) ? mr->valueint : BUILTIN_GREP_MAX;
     if (max_results > 1000)
@@ -199,21 +215,26 @@ int fs_grep_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
         regfree(&re);
         return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Out of memory");
     }
-    size_t out_len = 0;
-    int count = 0, done = 0, timed_out = 0;
-    uint64_t deadline = builtin_deadline_ms(timeout_ms);
-    builtin_grep_dir(resolved, resolved, &re, glob_filter, max_results, out, BUILTIN_OUTPUT_CAP,
-                     &out_len, &count, &done, &timed_out, deadline, 0);
+    grep_ctx_t g;
+    AIRY_MEMSET(&g, 0, sizeof(g));
+    g.root = resolved;
+    g.re = &re;
+    g.glob = glob_filter;
+    g.max = max_results;
+    g.out = out;
+    g.cap = BUILTIN_OUTPUT_CAP;
+    g.deadline = builtin_deadline_ms(timeout_ms);
+    grep_walk(resolved, &g, 0);
     regfree(&re);
 
-    if (count == 0) {
-        if (timed_out)
+    if (g.count == 0) {
+        if (g.timed_out)
             return btool_soft(res, "fs_grep timed out after %ums under '%s' (no matches)",
                               (unsigned)timeout_ms, dir);
         return btool_soft(res, "No matches for pattern '%s' under '%s'", pattern, dir);
     }
-    if (timed_out) {
-        builtin_append_trunc_mark(out, BUILTIN_OUTPUT_CAP, out_len,
+    if (g.timed_out) {
+        builtin_append_trunc_mark(out, BUILTIN_OUTPUT_CAP, g.len,
                                   "\n[grep truncated: time budget]");
         out[BUILTIN_OUTPUT_CAP - 1] = '\0';
     }

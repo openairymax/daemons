@@ -109,92 +109,105 @@ static int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *t
     return ret;
 }
 
-/* 审批主体显式参数化。旧实现通过临时改写共享
- * ctx->config.agent_id 再恢复来支持按主体审批，前提是 tool_d 单线程；
- * 执行面 worker 池并发后该前提失效，会发生审批主体串写（agent A 的
- * 请求以 agent B 的身份通过审批）与数据竞态。改为参数传递后
- * ctx->config.agent_id 创建后不再被写，并发安全。 */
-static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
-                             const tool_metadata_t *meta, const char *params_json,
-                             tool_approval_detail_t *detail)
+/* detail 初始化：默认拒绝（fail-closed），所有通过位清零。 */
+static void ap_detail_init(tool_approval_detail_t *detail)
 {
-    if (detail) {
-        __builtin_memset(detail, 0, sizeof(*detail));
-        detail->decision = TOOL_APPROVAL_DENIED;
-        detail->permission_check_passed = 0;
-        detail->safety_guard_passed = 0;
-        detail->params_were_sanitized = 0;
-    }
+    if (!detail)
+        return;
+    AIRY_MEMSET(detail, 0, sizeof(*detail));
+    detail->decision = TOOL_APPROVAL_DENIED;
+}
 
-    atomic_fetch_add_explicit(&ctx->total_checks, 1, memory_order_relaxed);
+/* 清洗结果回填：ok 为调用方的「确已改写」判定，空串不覆盖已填内容。 */
+static void ap_take_san(tool_approval_detail_t *detail, int ok, const char *san)
+{
+    if (detail && ok && san[0])
+        snprintf(detail->sanitized_params, sizeof(detail->sanitized_params), "%s", san);
+}
 
-    const char *tool_name = meta->name ? meta->name : "unknown";
-    const char *agent_id = subject;
+/* 拒绝出口：计数 + 可选审计，两条拒绝路径共用同一语义。 */
+static int ap_deny(tool_approval_ctx_t *ctx, const char *agent_id, const char *tool_name)
+{
+    atomic_fetch_add_explicit(&ctx->denied_count, 1, memory_order_relaxed);
+    if (ctx->config.enable_audit_logging)
+        daemon_audit_log_event("tool_d", "tool_execute_denied", tool_name, 0, agent_id);
+    return AIRY_ERR_PERMISSION_DENIED;
+}
 
-    if (ctx->bridge) {
-        safety_guard_bridge_result_t bridge_result;
-        int bridge_ret = safety_guard_bridge_check_for_agent(ctx->bridge, agent_id, meta,
-                                                             params_json, &bridge_result);
-
-        if (bridge_ret != 0) {
-
-            AIRY_LOG_WARN("SafetyGuard bridge denied '%s' for '%s': %s", tool_name, agent_id,
-                          bridge_result.denial_reason);
-            if (detail) {
-                detail->decision = TOOL_APPROVAL_DENIED;
-                detail->permission_check_passed = bridge_result.permission_passed;
-                detail->safety_guard_passed = 0;
-                detail->params_were_sanitized = bridge_result.input_sanitized;
-                snprintf(detail->reason, sizeof(detail->reason), "%s",
-                         bridge_result.denial_reason[0] ? bridge_result.denial_reason :
-                                                          "Denied by SafetyGuard chain");
-                if (bridge_result.input_sanitized && bridge_result.sanitized_params[0]) {
-                    snprintf(detail->sanitized_params, sizeof(detail->sanitized_params), "%s",
-                             bridge_result.sanitized_params);
-                }
-            }
-            atomic_fetch_add_explicit(&ctx->denied_count, 1, memory_order_relaxed);
-
-            if (ctx->config.enable_audit_logging) {
-                daemon_audit_log_event("tool_d", "tool_execute_denied", tool_name, 0, agent_id);
-            }
-
-            return AIRY_ERR_PERMISSION_DENIED;
-        }
-
-        if (detail) {
-            detail->decision =
-                bridge_result.input_sanitized ? TOOL_APPROVAL_SANITIZED : TOOL_APPROVAL_ALLOWED;
-            detail->permission_check_passed = bridge_result.permission_passed;
-            detail->safety_guard_passed = 1;
-            detail->params_were_sanitized = bridge_result.input_sanitized;
-            if (bridge_result.input_sanitized && bridge_result.sanitized_params[0]) {
-                snprintf(detail->sanitized_params, sizeof(detail->sanitized_params), "%s",
-                         bridge_result.sanitized_params);
-            }
-            snprintf(detail->reason, sizeof(detail->reason),
-                     "Approved by SafetyGuard chain (%d/%d guards) for tool '%s'",
-                     bridge_result.guards_executed, bridge_result.guard_chain_length, tool_name);
-        }
-
-        AIRY_LOG_INFO("SafetyGuard bridge approved '%s' "
-                      "(%d/%d guards executed)",
-                      tool_name, bridge_result.guards_executed, bridge_result.guard_chain_length);
+/* SafetyGuard 引导路径的清洗预检：发生改写时置位并抄录，返回是否改写。 */
+static int ap_sanitize(tool_approval_ctx_t *ctx, const char *tool_name, const char *params_json,
+                       tool_approval_detail_t *detail)
+{
+    if (!params_json || !params_json[0])
         return 0;
-    }
-
     char sanitized[4096] = {0};
-    if (params_json && params_json[0] != '\0') {
-        int san_ret = tool_approval_sanitize_params(ctx, tool_name, params_json, sanitized,
-                                                    sizeof(sanitized));
-        if (san_ret == 0 && strcmp(params_json, sanitized) != 0) {
-            if (detail) {
-                detail->params_were_sanitized = 1;
-                snprintf(detail->sanitized_params, sizeof(detail->sanitized_params), "%s",
-                         sanitized);
-            }
-        }
+    int ret = tool_approval_sanitize_params(ctx, tool_name, params_json, sanitized,
+                                            sizeof(sanitized));
+    if (ret != 0 || strcmp(params_json, sanitized) == 0)
+        return 0;
+    if (detail) {
+        detail->params_were_sanitized = 1;
+        ap_take_san(detail, 1, sanitized);
     }
+    return 1;
+}
+
+/* SafetyGuard 拒绝分支的 detail 回填。 */
+static void ap_bridge_deny(tool_approval_detail_t *detail,
+                           const safety_guard_bridge_result_t *br)
+{
+    if (!detail)
+        return;
+    detail->permission_check_passed = br->permission_passed;
+    detail->safety_guard_passed = 0;
+    detail->params_were_sanitized = br->input_sanitized;
+    snprintf(detail->reason, sizeof(detail->reason), "%s",
+             br->denial_reason[0] ? br->denial_reason : "Denied by SafetyGuard chain");
+    ap_take_san(detail, br->input_sanitized, br->sanitized_params);
+}
+
+/* SafetyGuard 放行分支的 detail 回填。 */
+static void ap_bridge_allow(tool_approval_detail_t *detail,
+                            const safety_guard_bridge_result_t *br, const char *tool_name)
+{
+    if (!detail)
+        return;
+    detail->decision = br->input_sanitized ? TOOL_APPROVAL_SANITIZED : TOOL_APPROVAL_ALLOWED;
+    detail->permission_check_passed = br->permission_passed;
+    detail->safety_guard_passed = 1;
+    detail->params_were_sanitized = br->input_sanitized;
+    ap_take_san(detail, br->input_sanitized, br->sanitized_params);
+    snprintf(detail->reason, sizeof(detail->reason),
+             "Approved by SafetyGuard chain (%d/%d guards) for tool '%s'",
+             br->guards_executed, br->guard_chain_length, tool_name);
+}
+
+/* 策略链（SafetyGuard）审批出口。 */
+static int ap_bridge(tool_approval_ctx_t *ctx, const char *agent_id,
+                     const tool_metadata_t *meta, const char *params_json,
+                     const char *tool_name, tool_approval_detail_t *detail)
+{
+    safety_guard_bridge_result_t br;
+    int ret =
+        safety_guard_bridge_check_for_agent(ctx->bridge, agent_id, meta, params_json, &br);
+    if (ret != 0) {
+        AIRY_LOG_WARN("SafetyGuard bridge denied '%s' for '%s': %s", tool_name, agent_id,
+                      br.denial_reason);
+        ap_bridge_deny(detail, &br);
+        return ap_deny(ctx, agent_id, tool_name);
+    }
+    ap_bridge_allow(detail, &br, tool_name);
+    AIRY_LOG_INFO("SafetyGuard bridge approved '%s' "
+                  "(%d/%d guards executed)",
+                  tool_name, br.guards_executed, br.guard_chain_length);
+    return 0;
+}
+
+/* 机制链（本地清洗 + Cupolas ACL）审批出口。 */
+static int ap_local(tool_approval_ctx_t *ctx, const char *agent_id, const char *tool_name,
+                    const char *params_json, tool_approval_detail_t *detail)
+{
+    (void)ap_sanitize(ctx, tool_name, params_json, detail);
 
     /* ── Step 2: permission check (Cupolas) ──
      * Return-code inversion fix:
@@ -214,40 +227,46 @@ static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
         if (detail) {
             detail->permission_check_passed = 0;
             snprintf(detail->reason, sizeof(detail->reason),
-                     "Permission denied: agent '%s' cannot execute tool '%s'", agent_id, tool_name);
+                     "Permission denied: agent '%s' cannot execute tool '%s'", agent_id,
+                     tool_name);
         }
-        atomic_fetch_add_explicit(&ctx->denied_count, 1, memory_order_relaxed);
-
-        if (ctx->config.enable_audit_logging) {
-            daemon_audit_log_event("tool_d", "tool_execute_denied", tool_name, 0, agent_id);
-        }
-        return AIRY_ERR_PERMISSION_DENIED;
+        return ap_deny(ctx, agent_id, tool_name);
     }
 
     if (detail) {
         detail->permission_check_passed = 1;
+        if (ctx->config.enable_safety_guard_chain)
+            detail->safety_guard_passed = 1;
     }
-
-    if (ctx->config.enable_safety_guard_chain && detail) {
-        detail->safety_guard_passed = 1;
-    }
-
-    if (ctx->config.enable_audit_logging) {
+    if (ctx->config.enable_audit_logging)
         daemon_audit_log_event("tool_d", "tool_execute", tool_name, 1, agent_id);
-    }
-
     if (detail) {
-        if (detail->params_were_sanitized) {
-            detail->decision = TOOL_APPROVAL_SANITIZED;
-            snprintf(detail->reason, sizeof(detail->reason),
-                     "Approved with sanitized params for tool '%s'", tool_name);
-        } else {
-            detail->decision = TOOL_APPROVAL_ALLOWED;
-            snprintf(detail->reason, sizeof(detail->reason), "Approved for tool '%s'", tool_name);
-        }
+        detail->decision = detail->params_were_sanitized ? TOOL_APPROVAL_SANITIZED
+                                                         : TOOL_APPROVAL_ALLOWED;
+        snprintf(detail->reason, sizeof(detail->reason),
+                 detail->params_were_sanitized
+                     ? "Approved with sanitized params for tool '%s'"
+                     : "Approved for tool '%s'",
+                 tool_name);
     }
-
     return 0;
+}
+
+/* 审批主体显式参数化。旧实现通过临时改写共享
+ * ctx->config.agent_id 再恢复来支持按主体审批，前提是 tool_d 单线程；
+ * 执行面 worker 池并发后该前提失效，会发生审批主体串写（agent A 的
+ * 请求以 agent B 的身份通过审批）与数据竞态。改为参数传递后
+ * ctx->config.agent_id 创建后不再被写，并发安全。 */
+static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
+                             const tool_metadata_t *meta, const char *params_json,
+                             tool_approval_detail_t *detail)
+{
+    ap_detail_init(detail);
+    atomic_fetch_add_explicit(&ctx->total_checks, 1, memory_order_relaxed);
+    const char *tool_name = meta->name ? meta->name : "unknown";
+    if (ctx->bridge)
+        return ap_bridge(ctx, subject, meta, params_json, tool_name, detail);
+    return ap_local(ctx, subject, tool_name, params_json, detail);
 }
 
 int tool_approval_check(tool_approval_ctx_t *ctx, const tool_metadata_t *meta,

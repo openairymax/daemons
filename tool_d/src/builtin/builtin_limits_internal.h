@@ -59,4 +59,14 @@
 #define BUILTIN_SCAN_MAX_FILE_BYTES (4U << 20) /* skip files > 4MB in grep */
 #define BUILTIN_LIST_MAX_ENTRIES 10000
 
+/* String parameter extraction ritual shared by every tool entry point
+ * (builtin.c): fetch name's string value and require it non-empty.
+ * Returns AIRY_OK with *out pointing at the value; on missing/empty sets
+ * res->error and returns AIRY_ERR_INVALID_PARAM. Its optional counterpart
+ * returns def (which may be NULL) whenever name is absent or empty, with
+ * no tool_result side effects. */
+int builtin_str_param(const cJSON *root, const char *name, const char **out,
+                      tool_result_t *res);
+const char *builtin_str_opt(const cJSON *root, const char *name, const char *def);
+
 #endif /* AIRY_RT_TOOL_BUILTIN_LIMITS_INTERNAL_H */
