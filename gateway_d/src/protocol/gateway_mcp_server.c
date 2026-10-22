@@ -228,7 +228,7 @@ static char *rpc_error(const char *rid, int code, const char *message)
                       rid, code, message);
 }
 
-static char *rpc_error_tool_missing(const char *rid, const char *tool_name)
+static char *rpc_tool_missing(const char *rid, const char *tool_name)
 {
     return rpc_format("{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":"
                       "{\"code\":-32601,\"message\":\"Tool not found: %s\"}}",
@@ -290,7 +290,7 @@ static int rpc_tools_call(gw_mcp_server_t *server, const char *rid, const char *
     if (!tool) {
         AIRY_LOG_WARN("tool not found: tool_name=%s, tool_count=%zu", tool_name,
                       server->tool_count);
-        resp = rpc_error_tool_missing(rid, tool_name);
+        resp = rpc_tool_missing(rid, tool_name);
         rc = AIRY_ERR_NOT_FOUND;
     } else {
         int exec_rc = tool->exec_fn(tool_name, tool_args, &tool_result, tool->user_data);

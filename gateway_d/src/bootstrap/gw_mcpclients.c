@@ -149,7 +149,7 @@ static int client_connect(const cJSON *item, gw_mcp_client_ctx_t *ctx, const cha
 }
 
 /* tools/list 后以 "<client>_<tool>" 前缀注册；列取失败或无可用工具返回 -1。 */
-static int client_register_tools(gw_mcp_server_t *mcp, gw_mcp_client_ctx_t *ctx)
+static int mcp_client_register(gw_mcp_server_t *mcp, gw_mcp_client_ctx_t *ctx)
 {
     mcp_client_tool_list_t list;
     AIRY_MEMSET(&list, 0, sizeof(list));
@@ -233,7 +233,7 @@ void gw_mcp_clients_setup(gw_mcp_server_t *mcp)
         if (client_connect(item, ctx, transport) != 0)
             continue;
 
-        int registered = client_register_tools(mcp, ctx);
+        int registered = mcp_client_register(mcp, ctx);
         if (registered < 0) {
             mcp_client_disconnect(ctx->client);
             ctx->client = NULL;
