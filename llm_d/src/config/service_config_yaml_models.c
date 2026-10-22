@@ -86,92 +86,92 @@ static void svc_yaml_parse_prov(svc_yaml_state_t *st, struct yaml_node *item)
     }
 }
 
-/* models[] 的一行 → st->models[64]。 */
+/* models[] 行字段表：键 → 字段偏移/容量/伴随标志位/取值类型，顺序无关。 */
+enum { YF_STR, YF_INT, YF_TOKENS, YF_PRICE, YF_BOOL };
+typedef struct {
+    const char *key;
+    unsigned off, cap, flag, kind;
+} svc_yaml_field_t;
+#define YF(k, f, t) { k, offsetof(model_entry_t, f), sizeof(((model_entry_t *)0)->f), 0, t }
+#define YF_P(k, f, g) { k, offsetof(model_entry_t, f), sizeof(((model_entry_t *)0)->f), offsetof(model_entry_t, g), YF_PRICE }
+
+static const svc_yaml_field_t svc_yaml_fields[] = {
+    YF("mode", mode, YF_STR), YF("api_format", api_format, YF_STR),
+    YF("context_window", context_window, YF_STR), YF("thinking", thinking, YF_STR),
+    YF("extra_headers", extra_headers, YF_STR), YF("tool_rounds", tool_rounds, YF_INT),
+    YF("timeout_sec", timeout_sec, YF_INT), YF("max_retries", max_retries, YF_INT),
+    YF("max_output", max_output_tokens, YF_TOKENS), YF("vision", vision, YF_BOOL),
+    YF_P("input_cost_per_1k", input_cost_per_k, has_input_price),
+    YF_P("output_cost_per_1k", output_cost_per_k, has_output_price),
+};
+
+/* vision 等布尔字段的宽松真值：true/1/yes（大小写不敏感）。 */
+static int svc_yaml_truthy(const char *v)
+{
+    return strcasecmp(v, "true") == 0 || strcmp(v, "1") == 0 || strcasecmp(v, "yes") == 0;
+}
+
+/* 按表把 item 中的标量逐字段落盘；键缺失即保持 memset 后的默认值。 */
+static void svc_yaml_apply(model_entry_t *m, struct yaml_node *item)
+{
+    for (size_t i = 0; i < sizeof(svc_yaml_fields) / sizeof(svc_yaml_fields[0]); ++i) {
+        const svc_yaml_field_t *f = &svc_yaml_fields[i];
+        const char *v = svc_yaml_item_str(item, f->key);
+        char *base = (char *)m;
+        if (!v) continue;
+        if (f->kind == YF_STR)
+            AIRY_STRNCPY_TERM(base + f->off, v, f->cap);
+        else if (f->kind == YF_INT)
+            *(int *)(base + f->off) = (int)strtol(v, NULL, 10);
+        else if (f->kind == YF_TOKENS)
+            *(int *)(base + f->off) = svc_tokens_parse(v);
+        else if (f->kind == YF_PRICE) {
+            *(double *)(base + f->off) = atof(v);
+            *(int *)(base + f->flag) = 1;
+        } else if (f->kind == YF_BOOL)
+            *(int *)(base + f->off) = svc_yaml_truthy(v);
+    }
+}
+
+/* api_key_env 与 endpoint：显式声明优先；key 缺省按行序自动映射
+ * MODEL_<序号>_API_KEY（q7，local 模式无 key），endpoint 回退 base_url。 */
+static void svc_yaml_route(model_entry_t *m, struct yaml_node *item, size_t row)
+{
+    const char *e = svc_yaml_item_str(item, "api_key_env");
+    const char *mode = svc_yaml_item_str(item, "mode");
+    const char *ep = svc_yaml_item_str(item, "endpoint");
+    const char *bu = svc_yaml_item_str(item, "base_url");
+    if (e && e[0]) {
+        AIRY_STRNCPY_TERM(m->api_key_env, e, sizeof(m->api_key_env));
+    } else if (!(mode && strcasecmp(mode, "local") == 0)) {
+        char auto_env[64];
+        snprintf(auto_env, sizeof(auto_env), "MODEL_%zu_API_KEY", row + 1);
+        AIRY_STRNCPY_TERM(m->api_key_env, auto_env, sizeof(m->api_key_env));
+    }
+    if (ep)
+        AIRY_STRNCPY_TERM(m->endpoint, ep, sizeof(m->endpoint));
+    else if (bu && bu[0])
+        AIRY_STRNCPY_TERM(m->endpoint, bu, sizeof(m->endpoint));
+}
+
+/* models[] 的一行 → st->models[64]。v2 表格格式：name=展示名 /
+ * model_id=模型名；provider 缺省退回 name。模型名与 provider 缺一丢行。 */
 static void svc_yaml_parse_model(svc_yaml_state_t *st, struct yaml_node *item)
 {
     if (st->model_count >= 64)
         return;
-
-    const char *n = svc_yaml_item_str(item, "name");
-    const char *p = svc_yaml_item_str(item, "provider");
-    const char *e = svc_yaml_item_str(item, "api_key_env");
-    const char *ep = svc_yaml_item_str(item, "endpoint");
-    const char *t = svc_yaml_item_str(item, "timeout_sec");
-    const char *r = svc_yaml_item_str(item, "max_retries");
-    const char *ic = svc_yaml_item_str(item, "input_cost_per_1k");
-    const char *oc = svc_yaml_item_str(item, "output_cost_per_1k");
-    /* v2 表格格式（2026-08-26）：连接表每行 name=展示名 / model_id=模型名。
-     * 模型名优先取 model_id（缺省退回 name）；provider 用展示名（缺省
-     * 退回 name），作为 provider 键参与聚合与路由。 */
-    const char *mid = svc_yaml_item_str(item, "model_id");
-    const char *mode = svc_yaml_item_str(item, "mode");
-    const char *fmt = svc_yaml_item_str(item, "api_format");
-    const char *bu = svc_yaml_item_str(item, "base_url");
-    const char *cw = svc_yaml_item_str(item, "context_window");
-    const char *mo = svc_yaml_item_str(item, "max_output");
-    const char *tr = svc_yaml_item_str(item, "tool_rounds");
-    const char *vi = svc_yaml_item_str(item, "vision");
-    const char *th = svc_yaml_item_str(item, "thinking");
-    const char *xh = svc_yaml_item_str(item, "extra_headers");
-
-    const char *model_name = (mid && mid[0]) ? mid : (n ? n : NULL);
-    const char *prov_name = p ? p : (n ? n : NULL);
-    if (!(model_name && model_name[0] && prov_name && prov_name[0]))
-        return;
-
     model_entry_t *m = &st->models[st->model_count];
+    const char *n = svc_yaml_item_str(item, "name");
+    const char *mid = svc_yaml_item_str(item, "model_id");
+    const char *p = svc_yaml_item_str(item, "provider");
+    const char *mn = (mid && mid[0]) ? mid : n;
+    const char *pn = p ? p : n;
+    if (!(mn && mn[0] && pn && pn[0])) return;
     __builtin_memset(m, 0, sizeof(*m));
-    AIRY_STRNCPY_TERM(m->name, model_name, sizeof(m->name));
-    AIRY_STRNCPY_TERM(m->provider, prov_name, sizeof(m->provider));
-    if (e && e[0]) {
-        AIRY_STRNCPY_TERM(m->api_key_env, e, sizeof(m->api_key_env));
-    } else if (!(mode && strcasecmp(mode, "local") == 0)) {
-        /* api_key_env 自动映射（q7）：连接表行留空/缺省时按行号生成
-         * MODEL_<序号>_API_KEY（序号 = 表中行序，1 起）。用户接入新
-         * 模型只需在 secrets.env 增加 MODEL_N_API_KEY=xxx 一个 Key 位，
-         * 无需理解 env 变量名与表格行的映射关系。local 模式无 key，
-         * 保持空。 */
-        char auto_env[64];
-        snprintf(auto_env, sizeof(auto_env), "MODEL_%zu_API_KEY", st->model_count + 1);
-        AIRY_STRNCPY_TERM(m->api_key_env, auto_env, sizeof(m->api_key_env));
-    }
-    if (ep) {
-        AIRY_STRNCPY_TERM(m->endpoint, ep, sizeof(m->endpoint));
-    } else if (bu && bu[0]) {
-        /* v2：base_url 为服务根地址，请求路径归适配器所有 */
-        AIRY_STRNCPY_TERM(m->endpoint, bu, sizeof(m->endpoint));
-    }
-    if (t)
-        m->timeout_sec = (int)strtol(t, NULL, 10);
-    if (r)
-        m->max_retries = (int)strtol(r, NULL, 10);
-    if (ic) {
-        m->input_cost_per_k = atof(ic);
-        m->has_input_price = 1;
-    }
-    if (oc) {
-        m->output_cost_per_k = atof(oc);
-        m->has_output_price = 1;
-    }
-    if (mode)
-        AIRY_STRNCPY_TERM(m->mode, mode, sizeof(m->mode));
-    if (fmt)
-        AIRY_STRNCPY_TERM(m->api_format, fmt, sizeof(m->api_format));
-    if (cw)
-        AIRY_STRNCPY_TERM(m->context_window, cw, sizeof(m->context_window));
-    if (mo)
-        m->max_output_tokens = svc_tokens_parse(mo);
-    if (tr)
-        m->tool_rounds = (int)strtol(tr, NULL, 10);
-    if (vi) {
-        if (strcasecmp(vi, "true") == 0 || strcmp(vi, "1") == 0 ||
-            strcasecmp(vi, "yes") == 0)
-            m->vision = 1;
-    }
-    if (th)
-        AIRY_STRNCPY_TERM(m->thinking, th, sizeof(m->thinking));
-    if (xh)
-        AIRY_STRNCPY_TERM(m->extra_headers, xh, sizeof(m->extra_headers));
+    AIRY_STRNCPY_TERM(m->name, mn, sizeof(m->name));
+    AIRY_STRNCPY_TERM(m->provider, pn, sizeof(m->provider));
+    svc_yaml_route(m, item, st->model_count);
+    svc_yaml_apply(m, item);
     st->model_count++;
 }
 
