@@ -26,6 +26,26 @@ void tool_service_destroy(tool_service_t *svc);
 int tool_service_register(tool_service_t *svc, const tool_metadata_t *meta);
 tool_metadata_t *tool_service_get(tool_service_t *svc, const char *tool_id);
 void tool_metadata_free(tool_metadata_t *meta);
+/**
+ * @brief Release the members owned by a metadata record and zero it.
+ *
+ * Use this for a record living inside a larger allocation (e.g. an
+ * embedded pool job); tool_metadata_free() additionally frees the
+ * record itself.
+ */
+void tool_metadata_clear(tool_metadata_t *meta);
+/**
+ * @brief Deep-copy src into caller-provided storage dst (which needs no
+ *        prior initialisation).
+ * @return 0 on success, -1 on allocation failure (dst stays clearable).
+ */
+int tool_metadata_copy(tool_metadata_t *dst, const tool_metadata_t *src);
+/**
+ * @brief Deep-copy a tool metadata record (all strings and the param array).
+ * @return heap copy owned by the caller (release with tool_metadata_free),
+ *         NULL on allocation failure.
+ */
+tool_metadata_t *tool_metadata_clone(const tool_metadata_t *src);
 char *tool_service_list(tool_service_t *svc);
 
 
