@@ -249,6 +249,108 @@ airy_err_t gateway_service_init(gateway_service_t service)
     return AIRY_SUCCESS;
 }
 
+#ifdef GATEWAY_HAS_HTTP
+/* HTTP/1.1 是 MCP/LLM-API 协议主端口：启动失败必须显性 fail（干净主机实测
+ * daemon 假活的教训）——返回错误让上层退出，交给服务管理器重启；与 WS/H2
+ * （可选传输，仅记日志）语义不同。 */
+static airy_err_t gw_start_http(gateway_service_t svc)
+{
+    if (!svc->config.http.enabled)
+        return AIRY_SUCCESS;
+    svc->http_gateway = http_gateway_create(svc->config.http.host, svc->config.http.port);
+    if (!svc->http_gateway) {
+        AIRY_LOG_ERROR("http_gateway_create failed: host=%s, port=%d", svc->config.http.host,
+                       svc->config.http.port);
+        return AIRY_ENOMEM;
+    }
+    if (svc->handler)
+        gw_handler_bind(&svc->http_gateway->handler_slot, svc->handler, svc->handler_data);
+    if (gateway_start(svc->http_gateway) != AIRY_SUCCESS) {
+        AIRY_LOG_ERROR("HTTP gateway start failed on %s:%d", svc->config.http.host,
+                       svc->config.http.port);
+        gateway_destroy(svc->http_gateway);
+        svc->http_gateway = NULL;
+        return AIRY_EBUSY;
+    }
+    AIRY_LOG_INFO("HTTP gateway started on %s:%d", svc->config.http.host, svc->config.http.port);
+    return AIRY_SUCCESS;
+}
+#endif
+
+#ifdef GATEWAY_HAS_WS
+static void gw_start_ws(gateway_service_t svc)
+{
+    if (!svc->config.ws.enabled) {
+        AIRY_LOG_INFO("WS gateway disabled by config");
+        return;
+    }
+    const char *off = getenv("AIRY_GATEWAY_DISABLE_WS");
+    if (off && strcmp(off, "1") == 0)
+        return;
+    svc->ws_gateway = ws_gateway_create(svc->config.ws.host, svc->config.ws.port);
+    if (!svc->ws_gateway) {
+        AIRY_LOG_ERROR("ws_gateway_create failed: host=%s, port=%d", svc->config.ws.host,
+                       svc->config.ws.port);
+        return;
+    }
+    if (svc->handler)
+        gw_handler_bind(&svc->ws_gateway->handler_slot, svc->handler, svc->handler_data);
+    if (gateway_start(svc->ws_gateway) == AIRY_SUCCESS)
+        AIRY_LOG_INFO("WS gateway started on %s:%d", svc->config.ws.host, svc->config.ws.port);
+    else
+        AIRY_LOG_ERROR("WS gateway start failed on %s:%d", svc->config.ws.host,
+                       svc->config.ws.port);
+}
+#endif
+
+static void gw_start_stdio(gateway_service_t svc)
+{
+    if (!svc->config.stdio.enabled)
+        return;
+    svc->stdio_gateway = stdio_gateway_create();
+    if (!svc->stdio_gateway) {
+        AIRY_LOG_ERROR("stdio_gateway_create failed");
+        return;
+    }
+    if (svc->handler)
+        gw_handler_bind(&svc->stdio_gateway->handler_slot, svc->handler, svc->handler_data);
+    if (airy_thread_create(&svc->stdio_thread, gateway_stdio_thread_main, svc->stdio_gateway) !=
+        0) {
+        AIRY_LOG_ERROR("stdio gateway thread create failed");
+        gateway_destroy(svc->stdio_gateway);
+        svc->stdio_gateway = NULL;
+        return;
+    }
+    svc->stdio_thread_started = 1;
+    AIRY_LOG_INFO("Stdio gateway started");
+}
+
+#ifdef GATEWAY_HAS_HTTP2
+static void gw_start_http2(gateway_service_t svc)
+{
+    if (!svc->config.http.enabled)
+        return;
+    /* HTTP/2 专用监听口：SSoT 固化 AIRY_PORT_GATEWAY_HTTP2，环境变量
+     * AIRY_GATEWAY_HTTP2_PORT 可显式覆盖。与 HTTP/1.1 网关分端口绑定，
+     * 避免同口冲突（弃 http.port+2 隐式推导：HTTP 口可经 -p / 配置改写，
+     * 推导值会漂出私有带，破坏坐标唯一性）。 */
+    const char *env = getenv("AIRY_GATEWAY_HTTP2_PORT");
+    uint16_t port = (env && *env) ? (uint16_t)atoi(env) : (uint16_t)AIRY_PORT_GATEWAY_HTTP2;
+    svc->http2_gateway = http2_gateway_create(svc->config.http.host, port);
+    if (!svc->http2_gateway) {
+        AIRY_LOG_ERROR("http2_gateway_create failed: host=%s, port=%d", svc->config.http.host,
+                       port);
+        return;
+    }
+    if (svc->handler)
+        gw_handler_bind(&svc->http2_gateway->handler_slot, svc->handler, svc->handler_data);
+    if (gateway_start(svc->http2_gateway) == AIRY_SUCCESS)
+        AIRY_LOG_INFO("HTTP/2 gateway started on %s:%d", svc->config.http.host, port);
+    else
+        AIRY_LOG_ERROR("HTTP/2 gateway start failed on %s:%d", svc->config.http.host, port);
+}
+#endif
+
 airy_err_t gateway_service_start(gateway_service_t service)
 {
     if (!service)
@@ -267,113 +369,18 @@ airy_err_t gateway_service_start(gateway_service_t service)
     gw_guard_bind("ws", service->config.ws.host);
 
 #ifdef GATEWAY_HAS_HTTP
-    if (service->config.http.enabled) {
-        service->http_gateway =
-            http_gateway_create(service->config.http.host, service->config.http.port);
-        if (!service->http_gateway) {
-            AIRY_LOG_ERROR("http_gateway_create failed: host=%s, port=%d", service->config.http.host,
-                      service->config.http.port);
-            service->state = GW_STATE_STOPPED;
-            return AIRY_ENOMEM;
-        }
-
-        if (service->handler) {
-            gw_handler_bind(&service->http_gateway->handler_slot, service->handler,
-                            service->handler_data);
-        }
-        /* HTTP/1.1 是 MCP/LLM-API 协议主端口：启动失败必须显性 fail
-         * （干净主机实测 daemon 假活的教训）——返回错误让
-         * 上层退出，交给服务管理器重启；与 WS/H2（可选传输，仅
-         * 记日志）语义不同。 */
-        if (gateway_start(service->http_gateway) != AIRY_SUCCESS) {
-            AIRY_LOG_ERROR("HTTP gateway start failed on %s:%d", service->config.http.host,
-                      service->config.http.port);
-            gateway_destroy(service->http_gateway);
-            service->http_gateway = NULL;
-            service->state = GW_STATE_STOPPED;
-            return AIRY_EBUSY;
-        }
-        AIRY_LOG_INFO("HTTP gateway started on %s:%d", service->config.http.host,
-                 service->config.http.port);
+    airy_err_t rc = gw_start_http(service);
+    if (rc != AIRY_SUCCESS) {
+        service->state = GW_STATE_STOPPED;
+        return rc;
     }
 #endif
-
 #ifdef GATEWAY_HAS_WS
-
-    const char *ws_disable_env = getenv("AIRY_GATEWAY_DISABLE_WS");
-    int ws_disabled = ws_disable_env && strcmp(ws_disable_env, "1") == 0;
-    if (service->config.ws.enabled && !ws_disabled) {
-        service->ws_gateway = ws_gateway_create(service->config.ws.host, service->config.ws.port);
-        if (!service->ws_gateway) {
-
-            AIRY_LOG_ERROR("ws_gateway_create failed: host=%s, port=%d", service->config.ws.host,
-                      service->config.ws.port);
-        } else {
-            if (service->handler) {
-                gw_handler_bind(&service->ws_gateway->handler_slot, service->handler,
-                                service->handler_data);
-            }
-            if (gateway_start(service->ws_gateway) == AIRY_SUCCESS) {
-                AIRY_LOG_INFO("WS gateway started on %s:%d", service->config.ws.host,
-                         service->config.ws.port);
-            } else {
-                AIRY_LOG_ERROR("WS gateway start failed on %s:%d", service->config.ws.host,
-                          service->config.ws.port);
-            }
-        }
-    } else if (!service->config.ws.enabled) {
-        AIRY_LOG_INFO("WS gateway disabled by config");
-    }
+    gw_start_ws(service);
 #endif
-
-    if (service->config.stdio.enabled) {
-        service->stdio_gateway = stdio_gateway_create();
-        if (!service->stdio_gateway) {
-            AIRY_LOG_ERROR("stdio_gateway_create failed");
-        } else {
-            if (service->handler) {
-                gw_handler_bind(&service->stdio_gateway->handler_slot, service->handler,
-                                service->handler_data);
-            }
-
-            if (airy_thread_create(&service->stdio_thread, gateway_stdio_thread_main,
-                                   service->stdio_gateway) != 0) {
-                AIRY_LOG_ERROR("stdio gateway thread create failed");
-                gateway_destroy(service->stdio_gateway);
-                service->stdio_gateway = NULL;
-            } else {
-                service->stdio_thread_started = 1;
-                AIRY_LOG_INFO("Stdio gateway started");
-            }
-        }
-    }
-
+    gw_start_stdio(service);
 #ifdef GATEWAY_HAS_HTTP2
-    if (service->config.http.enabled) {
-        /* HTTP/2 专用监听口：SSoT 固化 AIRY_PORT_GATEWAY_HTTP2，环境变量
-         * AIRY_GATEWAY_HTTP2_PORT 可显式覆盖。与 HTTP/1.1 网关分端口绑定，
-         * 避免同口冲突（弃 http.port+2 隐式推导：HTTP 口可经 -p / 配置改写，
-         * 推导值会漂出私有带，破坏坐标唯一性）。 */
-        const char *h2port_env = getenv("AIRY_GATEWAY_HTTP2_PORT");
-        uint16_t h2_port = (h2port_env && *h2port_env) ? (uint16_t)atoi(h2port_env)
-                                                       : (uint16_t)AIRY_PORT_GATEWAY_HTTP2;
-        service->http2_gateway = http2_gateway_create(service->config.http.host, h2_port);
-        if (!service->http2_gateway) {
-            AIRY_LOG_ERROR("http2_gateway_create failed: host=%s, port=%d", service->config.http.host,
-                      h2_port);
-        } else {
-            if (service->handler) {
-                gw_handler_bind(&service->http2_gateway->handler_slot, service->handler,
-                                service->handler_data);
-            }
-            if (gateway_start(service->http2_gateway) == AIRY_SUCCESS) {
-                AIRY_LOG_INFO("HTTP/2 gateway started on %s:%d", service->config.http.host, h2_port);
-            } else {
-                AIRY_LOG_ERROR("HTTP/2 gateway start failed on %s:%d", service->config.http.host,
-                          h2_port);
-            }
-        }
-    }
+    gw_start_http2(service);
 #endif
     return AIRY_SUCCESS;
 }

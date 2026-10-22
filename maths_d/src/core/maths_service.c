@@ -28,84 +28,88 @@
 
 /* ==================== 统计引擎 ==================== */
 
+/* mode：0 sum、1 mean、2 总体方差、3 标准差。四者共用同一趟求和，
+ * 方差类再走一趟偏差平方和，避免逐 op 复制循环。 */
+static void stats_moment(const double *v, size_t n, double *out, int mode)
+{
+    double a = 0.0;
+    for (size_t i = 0; i < n; i++)
+        a += v[i];
+    if (mode == 0) {
+        *out = a;
+        return;
+    }
+    double mu = a / (double)n;
+    if (mode == 1) {
+        *out = mu;
+        return;
+    }
+    double sq = 0.0;
+    for (size_t i = 0; i < n; i++)
+        sq += (v[i] - mu) * (v[i] - mu);
+    *out = sq / (double)n;
+    if (mode == 3)
+        *out = sqrt(*out);
+}
+
+static void stats_extreme(const double *v, size_t n, double *out, int want_max)
+{
+    double m = v[0];
+    for (size_t i = 1; i < n; i++)
+        if (want_max ? (v[i] > m) : (v[i] < m))
+            m = v[i];
+    *out = m;
+}
+
+static int stats_median(const double *v, size_t n, double *out)
+{
+    double *tmp = (double *)AIRY_MALLOC(n * sizeof(double));
+    if (!tmp)
+        return -1;
+    AIRY_MEMCPY(tmp, v, n * sizeof(double));
+    /* 简单插入排序（n 通常很小；大数据量场景由上层分片） */
+    for (size_t i = 1; i < n; i++) {
+        double key = tmp[i];
+        size_t j = i;
+        while (j > 0 && tmp[j - 1] > key) {
+            tmp[j] = tmp[j - 1];
+            j--;
+        }
+        tmp[j] = key;
+    }
+    *out = (n % 2 == 1) ? tmp[n / 2] : (tmp[n / 2 - 1] + tmp[n / 2]) / 2.0;
+    AIRY_FREE(tmp);
+    return 0;
+}
+
 static int maths_stats_dispatch(const char *op, const double *v, size_t n,
                                 double *out, char *err, size_t err_sz)
 {
     if (!op || !v || n == 0 || !out || !err || err_sz == 0)
         return -1;
 
-    if (strcmp(op, "sum") == 0) {
-        double acc = 0.0;
-        for (size_t i = 0; i < n; i++)
-            acc += v[i];
-        *out = acc;
-        return 0;
-    }
-    if (strcmp(op, "mean") == 0 || strcmp(op, "avg") == 0) {
-        double acc = 0.0;
-        for (size_t i = 0; i < n; i++)
-            acc += v[i];
-        *out = acc / (double)n;
-        return 0;
-    }
-    if (strcmp(op, "max") == 0) {
-        double m = v[0];
-        for (size_t i = 1; i < n; i++)
-            if (v[i] > m)
-                m = v[i];
-        *out = m;
-        return 0;
-    }
-    if (strcmp(op, "min") == 0) {
-        double m = v[0];
-        for (size_t i = 1; i < n; i++)
-            if (v[i] < m)
-                m = v[i];
-        *out = m;
-        return 0;
-    }
-    if (strcmp(op, "median") == 0) {
-        double *tmp = (double *)AIRY_MALLOC(n * sizeof(double));
-        if (!tmp) {
+    if (strcmp(op, "sum") == 0)
+        stats_moment(v, n, out, 0);
+    else if (strcmp(op, "mean") == 0 || strcmp(op, "avg") == 0)
+        stats_moment(v, n, out, 1);
+    else if (strcmp(op, "max") == 0)
+        stats_extreme(v, n, out, 1);
+    else if (strcmp(op, "min") == 0)
+        stats_extreme(v, n, out, 0);
+    else if (strcmp(op, "median") == 0) {
+        if (stats_median(v, n, out) != 0) {
             snprintf(err, err_sz, "out of memory");
             return -1;
         }
-        AIRY_MEMCPY(tmp, v, n * sizeof(double));
-        /* 简单插入排序（n 通常很小；大数据量场景由上层分片） */
-        for (size_t i = 1; i < n; i++) {
-            double key = tmp[i];
-            size_t j = i;
-            while (j > 0 && tmp[j - 1] > key) {
-                tmp[j] = tmp[j - 1];
-                j--;
-            }
-            tmp[j] = key;
-        }
-        if (n % 2 == 1)
-            *out = tmp[n / 2];
-        else
-            *out = (tmp[n / 2 - 1] + tmp[n / 2]) / 2.0;
-        AIRY_FREE(tmp);
-        return 0;
+    } else if (strcmp(op, "variance") == 0 || strcmp(op, "var") == 0)
+        stats_moment(v, n, out, 2);
+    else if (strcmp(op, "stddev") == 0)
+        stats_moment(v, n, out, 3);
+    else {
+        snprintf(err, err_sz, "unsupported stats op '%s'", op);
+        return -1;
     }
-    if (strcmp(op, "variance") == 0 || strcmp(op, "var") == 0 ||
-        strcmp(op, "stddev") == 0) {
-        double acc = 0.0;
-        for (size_t i = 0; i < n; i++)
-            acc += v[i];
-        double mean = acc / (double)n;
-        double sq = 0.0;
-        for (size_t i = 0; i < n; i++) {
-            double d = v[i] - mean;
-            sq += d * d;
-        }
-        double var = sq / (double)n; /* 总体方差 */
-        *out = (strcmp(op, "stddev") == 0) ? sqrt(var) : var;
-        return 0;
-    }
-
-    snprintf(err, err_sz, "unsupported stats op '%s'", op);
-    return -1;
+    return 0;
 }
 
 int maths_d_stats(const char *op, const double *values, size_t count,

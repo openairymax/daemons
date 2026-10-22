@@ -36,6 +36,38 @@ static void secrets_lock_ensure(void)
     }
 }
 
+/* 键名两侧空白不参与比较：`eq` 指向 '='，回溯跳过键名尾空白后要求全等。 */
+static bool env_key_match(const char *key, char *eq, const char *want)
+{
+    while (eq > key && (eq[-1] == ' ' || eq[-1] == '\t'))
+        eq--;
+    size_t n = (size_t)(eq - key);
+    return n > 0 && n == strlen(want) && strncmp(key, want, n) == 0;
+}
+
+/* 值去前缀空白、去尾空白与换行，再剥一层配对引号，返回堆副本（无值返回
+ * NULL）。值可能带引号也可能不带，两种写法都要接受。 */
+static char *env_val_take(char *v)
+{
+    while (*v == ' ' || *v == '\t')
+        v++;
+    size_t n = strlen(v);
+    while (n > 0 && (v[n - 1] == '\n' || v[n - 1] == '\r' || v[n - 1] == ' ' || v[n - 1] == '\t'))
+        n--;
+    if (n > 1 && v[0] == '"' && v[n - 1] == '"') {
+        v++;
+        n -= 2;
+    }
+    if (n == 0)
+        return NULL;
+    char *out = (char *)AIRY_MALLOC(n + 1);
+    if (out) {
+        AIRY_MEMCPY(out, v, n);
+        out[n] = '\0';
+    }
+    return out;
+}
+
 /**
  * @brief Read the value of the given key from $AIRY_HOME/config/secrets.env.
  * @return Dynamically-allocated string (caller AIRY_FREEs), NULL if not
@@ -55,44 +87,16 @@ static char *secrets_env_read(const char *key_name)
 
     char line[1024];
     char *found = NULL;
-    while (fgets(line, sizeof(line), f)) {
-
+    while (!found && fgets(line, sizeof(line), f)) {
         char *p = line;
         while (*p == ' ' || *p == '\t')
             p++;
         if (*p == '\0' || *p == '\n' || *p == '\r' || *p == '#')
             continue;
-
         char *eq = strchr(p, '=');
-        if (!eq)
+        if (!eq || !env_key_match(p, eq, key_name))
             continue;
-
-        char *key_end = eq;
-        while (key_end > p && (key_end[-1] == ' ' || key_end[-1] == '\t'))
-            key_end--;
-        size_t key_len = (size_t)(key_end - p);
-        if (key_len == 0 || key_len != strlen(key_name) || strncmp(p, key_name, key_len) != 0)
-            continue;
-
-        char *v = eq + 1;
-        while (*v == ' ' || *v == '\t')
-            v++;
-        size_t vlen = strlen(v);
-        while (vlen > 0 && (v[vlen - 1] == '\n' || v[vlen - 1] == '\r' || v[vlen - 1] == ' ' ||
-                            v[vlen - 1] == '\t'))
-            vlen--;
-        if (vlen > 0 && v[0] == '"' && v[vlen - 1] == '"') {
-            v++;
-            vlen -= 2;
-        }
-        if (vlen > 0) {
-            found = (char *)AIRY_MALLOC(vlen + 1);
-            if (found) {
-                __builtin_memcpy(found, v, vlen);
-                found[vlen] = '\0';
-            }
-        }
-        break;
+        found = env_val_take(eq + 1);
     }
 
     explicit_bzero(line, sizeof(line));
@@ -132,7 +136,7 @@ void provider_refresh_api_key(provider_base_ctx_t *base_ctx)
         size_t n = strlen(new_key);
         if (n < sizeof(base_ctx->api_key)) {
             explicit_bzero(base_ctx->api_key, sizeof(base_ctx->api_key));
-            __builtin_memcpy(base_ctx->api_key, new_key, n + 1);
+            AIRY_MEMCPY(base_ctx->api_key, new_key, n + 1);
             SVC_LOG_INFO("C-L02: PROVIDER: KEY-RELOAD api_key_env=%s source=%s",
                          base_ctx->api_key_env, env_val ? "env" : "secrets.env");
         }
@@ -182,6 +186,6 @@ bool sec_env_name_for(const char *provider_name, char *out, size_t out_size)
             return false;
         out[i++] = c;
     }
-    __builtin_memcpy(out + i, suffix, sizeof(suffix));
+    AIRY_MEMCPY(out + i, suffix, sizeof(suffix));
     return true;
 }
