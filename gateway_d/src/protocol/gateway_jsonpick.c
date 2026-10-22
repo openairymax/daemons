@@ -5,6 +5,9 @@
 
 #include "airy_memory.h"
 
+#include <stdarg.h>
+#include <stdio.h>
+
 cJSON *gw_json_load(const char *json)
 {
     if (!json)
@@ -44,4 +47,23 @@ int gw_json_int(const cJSON *root, const char *field, int def)
 {
     const cJSON *item = cJSON_GetObjectItem(root, field);
     return cJSON_IsNumber(item) ? item->valueint : def;
+}
+
+char *gw_fmt_alloc(const char *fmt, ...)
+{
+    va_list ap;
+    va_list ap2;
+    va_start(ap, fmt);
+    va_copy(ap2, ap);
+    int len = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+    if (len < 0) {
+        va_end(ap2);
+        return NULL;
+    }
+    char *buf = (char *)AIRY_MALLOC((size_t)len + 1);
+    if (buf)
+        vsnprintf(buf, (size_t)len + 1, fmt, ap2);
+    va_end(ap2);
+    return buf;
 }

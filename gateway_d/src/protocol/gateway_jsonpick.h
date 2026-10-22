@@ -10,6 +10,9 @@
  * 字段与转义序列的误匹配；缺省回退（"{}" 兜底、备用键、数值默认）等
  * 策略由各协议 handler 自行决定（机制与策略分离）。
  *
+ * 同时承载协议层格式化分配机制（gw_fmt_alloc），消除各协议 handler 内
+ * 两趟 snprintf 的手写副本。
+ *
  * 约定：root 为 NULL 等价于"无此字段"；所有返回字符串为 AIRY_MALLOC
  * 副本，调用方以 AIRY_FREE 释放。
  */
@@ -34,5 +37,8 @@ double gw_json_num(const cJSON *root, const char *field, double def);
 
 /* 整数字段；缺失或非数值返回 def */
 int gw_json_int(const cJSON *root, const char *field, int def);
+
+/* 按格式串分配文本（两趟 vsnprintf）；失败返回 NULL */
+char *gw_fmt_alloc(const char *fmt, ...);
 
 #endif /* GATEWAY_JSONPICK_H */

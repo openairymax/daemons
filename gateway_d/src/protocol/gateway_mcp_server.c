@@ -6,7 +6,6 @@
 #include "gateway_jsonpick.h"
 #include "airy_memory.h"
 
-#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include "error.h"
@@ -196,55 +195,37 @@ static char *build_resources_list_json(gw_mcp_server_t *server)
     return buf;
 }
 
-/* 先度量再分配地格式化响应文本；失败返回 NULL。 */
-static char *rpc_format(const char *fmt, ...)
-{
-    va_list ap;
-    va_list ap2;
-    va_start(ap, fmt);
-    va_copy(ap2, ap);
-    int len = vsnprintf(NULL, 0, fmt, ap);
-    va_end(ap);
-    if (len < 0) {
-        va_end(ap2);
-        return NULL;
-    }
-    char *buf = (char *)AIRY_MALLOC((size_t)len + 1);
-    if (buf)
-        vsnprintf(buf, (size_t)len + 1, fmt, ap2);
-    va_end(ap2);
-    return buf;
-}
-
 /* JSON-RPC 2.0 result/error 信封；调用方持有返回缓冲区。 */
 static char *rpc_result(const char *rid, const char *result_json)
 {
-    return rpc_format("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}", rid, result_json);
+    return gw_fmt_alloc("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}", rid, result_json);
 }
 
 static char *rpc_error(const char *rid, int code, const char *message)
 {
-    return rpc_format("{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":%d,\"message\":\"%s\"}}",
-                      rid, code, message);
+    return gw_fmt_alloc(
+        "{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":%d,\"message\":\"%s\"}}", rid, code,
+        message);
 }
 
 static char *rpc_tool_missing(const char *rid, const char *tool_name)
 {
-    return rpc_format("{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":"
-                      "{\"code\":-32601,\"message\":\"Tool not found: %s\"}}",
-                      rid, tool_name);
+    return gw_fmt_alloc("{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":"
+                        "{\"code\":-32601,\"message\":\"Tool not found: %s\"}}",
+                        rid, tool_name);
 }
 
 static int rpc_initialize(gw_mcp_server_t *server, const char *rid, const char *params_json,
                           char **response_json)
 {
     (void)params_json;
-    *response_json = rpc_format("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
-                                "\"protocolVersion\":\"2024-11-05\","
-                                "\"capabilities\":{\"tools\":{\"listChanged\":true},"
-                                "\"resources\":{\"subscribe\":true,\"listChanged\":true}},"
-                                "\"serverInfo\":{\"name\":\"%s\",\"version\":\"%s\"}}}",
-                                rid, server->config.server_name, server->config.server_version);
+    *response_json = gw_fmt_alloc("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
+                                  "\"protocolVersion\":\"2024-11-05\","
+                                  "\"capabilities\":{\"tools\":{\"listChanged\":true},"
+                                  "\"resources\":{\"subscribe\":true,\"listChanged\":true}},"
+                                  "\"serverInfo\":{\"name\":\"%s\",\"version\":\"%s\"}}}",
+                                  rid, server->config.server_name,
+                                  server->config.server_version);
     return *response_json ? 0 : AIRY_ERR_OUT_OF_MEMORY;
 }
 
@@ -299,9 +280,9 @@ static int rpc_tools_call(gw_mcp_server_t *server, const char *rid, const char *
             resp = rpc_error(rid, -32603, "Tool execution failed");
             rc = AIRY_ERR_EXEC_FAIL;
         } else {
-            resp = rpc_format("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
-                              "\"content\":[{\"type\":\"text\",\"text\":%s}]}}",
-                              rid, tool_result);
+            resp = gw_fmt_alloc("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
+                                "\"content\":[{\"type\":\"text\",\"text\":%s}]}}",
+                                rid, tool_result);
         }
     }
     *response_json = resp;
@@ -347,9 +328,10 @@ static int rpc_resources_read(gw_mcp_server_t *server, const char *rid, const ch
         AIRY_FREE(mime);
         return AIRY_ERR_IO;
     }
-    *response_json = rpc_format("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
-                                "\"contents\":[{\"uri\":\"%s\",\"mimeType\":\"%s\",\"text\":%s}]}}",
-                                rid, res->uri, mime ? mime : "text/plain", content);
+    *response_json = gw_fmt_alloc(
+        "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
+        "\"contents\":[{\"uri\":\"%s\",\"mimeType\":\"%s\",\"text\":%s}]}}",
+        rid, res->uri, mime ? mime : "text/plain", content);
     AIRY_FREE(content);
     AIRY_FREE(mime);
     return 0;

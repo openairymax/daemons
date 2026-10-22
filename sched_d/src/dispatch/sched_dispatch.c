@@ -69,6 +69,52 @@ static uint32_t sched_dispatch_timeout_ms(void)
  * substitute for real execution (following the gateway syscall_router
  * agent.sock call pattern).
  */
+/* 调一次 agent.sock RPC 并取回顶层字符串字段的堆副本；任一环节失败返回
+ * 非零错误码，*out 保持 NULL。 */
+static int disp_call_str(const char *sock, const char *method, const char *params,
+                         const char *field, char **out)
+{
+    char *res = NULL;
+    int rc = daemon_rpc_call(sock, method, params, &res, sched_dispatch_timeout_ms());
+    if (rc != AIRY_SUCCESS || !res) {
+        SVC_LOG_ERROR("sched dispatch: agent.%s failed (rc=%d)", method, rc);
+        AIRY_FREE(res);
+        return AIRY_ERR_SVC_NOT_READY;
+    }
+
+    cJSON *root = cJSON_Parse(res);
+    AIRY_FREE(res);
+    if (!root) {
+        SVC_LOG_ERROR("sched dispatch: agent.%s result parse failed", method);
+        return AIRY_ERR_PARSE_ERROR;
+    }
+    cJSON *v = cJSON_GetObjectItem(root, field);
+    *out = (cJSON_IsString(v) && v->valuestring) ? AIRY_STRDUP(v->valuestring) : NULL;
+    cJSON_Delete(root);
+    if (!*out) {
+        SVC_LOG_ERROR("sched dispatch: agent.%s result missing %s", method, field);
+        return AIRY_ERR_STATE_ERROR;
+    }
+    return AIRY_SUCCESS;
+}
+
+/* 尽力回收 agent 进程：失败只告警，不影响已取回的任务输出。 */
+static void disp_terminate(const char *sock, const char *agent_id)
+{
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "agent_id", agent_id);
+    char *text = cJSON_PrintUnformatted(params);
+    cJSON_Delete(params);
+    if (!text)
+        return;
+    char *res = NULL;
+    int rc = daemon_rpc_call(sock, "terminate", text, &res, sched_dispatch_timeout_ms());
+    AIRY_FREE(text);
+    AIRY_FREE(res);
+    if (rc != AIRY_SUCCESS)
+        SVC_LOG_WARN("sched dispatch: agent.terminate failed (agent=%s, rc=%d)", agent_id, rc);
+}
+
 static int sched_dispatch_task(const char *role, const char *task_description,
                                const char *workspace_dir, sched_dispatch_result_t *out_result)
 {
@@ -78,113 +124,49 @@ static int sched_dispatch_task(const char *role, const char *task_description,
     char sock[AIRY_PATH_MAX];
     sched_dispatch_agent_socket(sock, sizeof(sock));
 
+    /* B7：不硬编码 language——未声明时由 agent_d 缺省兜底（python）。 */
     cJSON *spec = cJSON_CreateObject();
     cJSON_AddStringToObject(spec, "role", role);
-    /* B7：不硬编码 language——未声明时由 agent_d 缺省兜底（python）。 */
     char *spec_str = cJSON_PrintUnformatted(spec);
     cJSON_Delete(spec);
-    if (!spec_str)
-        return AIRY_ERR_OUT_OF_MEMORY;
 
-    cJSON *spawn_params = cJSON_CreateObject();
-    cJSON_AddStringToObject(spawn_params, "agent_spec", spec_str);
-    char *spawn_params_str = cJSON_PrintUnformatted(spawn_params);
-    cJSON_Delete(spawn_params);
+    cJSON *spawn = cJSON_CreateObject();
+    if (spec_str)
+        cJSON_AddStringToObject(spawn, "agent_spec", spec_str);
+    char *spawn_str = spec_str ? cJSON_PrintUnformatted(spawn) : NULL;
+    cJSON_Delete(spawn);
     AIRY_FREE(spec_str);
-    if (!spawn_params_str)
-        return AIRY_ERR_OUT_OF_MEMORY;
 
-    char *spawn_result = NULL;
-    int rc = daemon_rpc_call(sock, "spawn", spawn_params_str, &spawn_result,
-                             sched_dispatch_timeout_ms());
-    AIRY_FREE(spawn_params_str);
-    if (rc != AIRY_SUCCESS || !spawn_result) {
-        SVC_LOG_ERROR("sched dispatch: agent.spawn failed (role=%s, rc=%d)", role, rc);
-        if (spawn_result)
-            AIRY_FREE(spawn_result);
-        return AIRY_ERR_SVC_NOT_READY;
-    }
-
-    cJSON *spawn_root = cJSON_Parse(spawn_result);
-    AIRY_FREE(spawn_result);
-    if (!spawn_root) {
-        SVC_LOG_ERROR("sched dispatch: spawn result parse failed (role=%s)", role);
-        return AIRY_ERR_PARSE_ERROR;
-    }
-    cJSON *aid = cJSON_GetObjectItem(spawn_root, "agent_id");
-    if (!aid || !cJSON_IsString(aid) || !aid->valuestring || !aid->valuestring[0]) {
-        SVC_LOG_ERROR("sched dispatch: spawn result missing agent_id (role=%s)", role);
-        cJSON_Delete(spawn_root);
+    char *agent_id = NULL;
+    int rc = spawn_str ? disp_call_str(sock, "spawn", spawn_str, "agent_id", &agent_id)
+                       : AIRY_ERR_OUT_OF_MEMORY;
+    AIRY_FREE(spawn_str);
+    if (rc != AIRY_SUCCESS)
+        return rc;
+    /* 空 agent_id 视同缺失：后续 invoke 无从定位目标进程。 */
+    if (!agent_id[0]) {
+        AIRY_FREE(agent_id);
         return AIRY_ERR_STATE_ERROR;
     }
-    char *agent_id = AIRY_STRDUP(aid->valuestring);
-    cJSON_Delete(spawn_root);
-    if (!agent_id)
-        return AIRY_ERR_OUT_OF_MEMORY;
 
-    cJSON *invoke_params = cJSON_CreateObject();
-    cJSON_AddStringToObject(invoke_params, "agent_id", agent_id);
-    cJSON_AddStringToObject(invoke_params, "input", task_description ? task_description : "");
+    cJSON *invoke = cJSON_CreateObject();
+    cJSON_AddStringToObject(invoke, "agent_id", agent_id);
+    cJSON_AddStringToObject(invoke, "input", task_description ? task_description : "");
     if (workspace_dir && workspace_dir[0])
-        cJSON_AddStringToObject(invoke_params, "workspace_dir", workspace_dir);
-    char *invoke_params_str = cJSON_PrintUnformatted(invoke_params);
-    cJSON_Delete(invoke_params);
-    if (!invoke_params_str) {
+        cJSON_AddStringToObject(invoke, "workspace_dir", workspace_dir);
+    char *invoke_str = cJSON_PrintUnformatted(invoke);
+    cJSON_Delete(invoke);
+
+    char *output = NULL;
+    rc = invoke_str ? disp_call_str(sock, "invoke", invoke_str, "output", &output)
+                    : AIRY_ERR_OUT_OF_MEMORY;
+    AIRY_FREE(invoke_str);
+    if (rc != AIRY_SUCCESS) {
         AIRY_FREE(agent_id);
-        return AIRY_ERR_OUT_OF_MEMORY;
+        return rc;
     }
 
-    char *invoke_result = NULL;
-    rc = daemon_rpc_call(sock, "invoke", invoke_params_str, &invoke_result,
-                         sched_dispatch_timeout_ms());
-    AIRY_FREE(invoke_params_str);
-    if (rc != AIRY_SUCCESS || !invoke_result) {
-        SVC_LOG_ERROR("sched dispatch: agent.invoke failed (agent=%s, rc=%d)", agent_id, rc);
-        AIRY_FREE(agent_id);
-        if (invoke_result)
-            AIRY_FREE(invoke_result);
-        return AIRY_ERR_SVC_NOT_READY;
-    }
-
-    cJSON *invoke_root = cJSON_Parse(invoke_result);
-    AIRY_FREE(invoke_result);
-    if (!invoke_root) {
-        SVC_LOG_ERROR("sched dispatch: invoke result parse failed (agent=%s)", agent_id);
-        AIRY_FREE(agent_id);
-        return AIRY_ERR_PARSE_ERROR;
-    }
-    cJSON *out = cJSON_GetObjectItem(invoke_root, "output");
-    if (!out || !cJSON_IsString(out) || !out->valuestring) {
-        SVC_LOG_ERROR("sched dispatch: invoke result missing output (agent=%s)", agent_id);
-        cJSON_Delete(invoke_root);
-        AIRY_FREE(agent_id);
-        return AIRY_ERR_STATE_ERROR;
-    }
-    char *output = AIRY_STRDUP(out->valuestring);
-    cJSON_Delete(invoke_root);
-    if (!output) {
-        AIRY_FREE(agent_id);
-        return AIRY_ERR_OUT_OF_MEMORY;
-    }
-
-    {
-        cJSON *term_params = cJSON_CreateObject();
-        cJSON_AddStringToObject(term_params, "agent_id", agent_id);
-        char *term_params_str = cJSON_PrintUnformatted(term_params);
-        cJSON_Delete(term_params);
-        if (term_params_str) {
-            char *term_result = NULL;
-            int trc = daemon_rpc_call(sock, "terminate", term_params_str, &term_result,
-                                      sched_dispatch_timeout_ms());
-            AIRY_FREE(term_params_str);
-            if (term_result)
-                AIRY_FREE(term_result);
-            if (trc != AIRY_SUCCESS)
-                SVC_LOG_WARN("sched dispatch: agent.terminate failed (agent=%s, rc=%d)", agent_id,
-                             trc);
-        }
-    }
-
+    disp_terminate(sock, agent_id);
     out_result->agent_id = agent_id;
     out_result->output = output;
     SVC_LOG_INFO("sched dispatch: role=%s agent=%s dispatched (output_len=%zu)", role, agent_id,

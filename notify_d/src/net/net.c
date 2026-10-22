@@ -212,6 +212,149 @@ static notify_client_t *notify_d_find_client_slot(notify_d_service_t *svc)
 
 static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_fd);
 
+/* 取请求头字段值的堆副本；缺失、空值或超长（>= lim）返回 NULL。 */
+static char *notify_d_hdr_take(const char *req, const char *tag, size_t lim)
+{
+    const char *h = strstr(req, tag);
+    if (!h)
+        return NULL;
+    const char *s = h + strlen(tag);
+    const char *e = strstr(s, "\r\n");
+    if (!e || e <= s)
+        return NULL;
+    size_t n = (size_t)(e - s);
+    if (n == 0 || n >= lim)
+        return NULL;
+    char *v = (char *)AIRY_MALLOC(n + 1);
+    if (!v)
+        return NULL;
+    AIRY_MEMCPY(v, s, n);
+    v[n] = '\0';
+    return v;
+}
+
+#ifndef _WIN32
+/* recv 前 poll 等待首包：airy_sock_recv 为非阻塞 MSG_DONTWAIT 读，accept 后
+ * 立即 recv 会因 EAGAIN 返回 0 而误判连接失败。返回 1 表示可读。 */
+static int notify_d_wait_readable(airy_sock_t fd)
+{
+    struct pollfd pfd;
+    pfd.fd = (int)fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    int pr = poll(&pfd, 1, 5000);
+    return pr > 0 && (pfd.revents & POLLIN);
+}
+#endif
+
+/* 注册长连接（SSE / WebSocket / 裸 socket）：成功返回客户端并保持持锁，
+ * 失败时已释放锁并关闭 fd。 */
+static notify_client_t *notify_d_register(notify_d_service_t *svc, airy_sock_t fd,
+                                          const char *buffer)
+{
+    int is_upgrade = (strstr(buffer, "Upgrade: websocket") != NULL ||
+                      strstr(buffer, "Upgrade: WebSocket") != NULL);
+    int is_sse = (strstr(buffer, "Accept: text/event-stream") != NULL);
+
+    airy_mtx_lock(&svc->lock);
+    notify_client_t *client = notify_d_find_client_slot(svc);
+    if (!client) {
+        airy_mtx_unlock(&svc->lock);
+        const char *busy = "{\"error\":\"max_clients_reached\"}";
+        airy_sock_send(fd, busy, strlen(busy));
+        airy_sock_close(fd);
+        return NULL;
+    }
+
+    AIRY_MEMSET(client, 0, sizeof(*client));
+    client->fd = fd;
+    client->connected_at = (uint64_t)time(NULL);
+    client->last_activity = client->connected_at;
+    client->active = 1;
+    client->client_id = notify_d_hdr_take(buffer, "X-Client-Id: ", 256);
+
+    if (is_sse) {
+        client->type = NOTIFY_CLIENT_SSE;
+        const char *sse_headers = "HTTP/1.1 200 OK\r\n"
+                                  "Content-Type: text/event-stream\r\n"
+                                  "Cache-Control: no-cache\r\n"
+                                  "Connection: keep-alive\r\n"
+                                  "\r\n";
+        airy_sock_send(fd, sse_headers, strlen(sse_headers));
+        client->handshake_done = 1;
+        svc->client_count++;
+        return client;
+    }
+
+    if (is_upgrade) {
+        client->type = NOTIFY_CLIENT_WEBSOCKET;
+        if (notify_d_ws_upgrade(svc, client, buffer) == 0) {
+            svc->client_count++;
+            return client;
+        }
+        client->active = 0;
+        airy_mtx_unlock(&svc->lock);
+        airy_sock_close(fd);
+        return NULL;
+    }
+
+    client->type = NOTIFY_CLIENT_SOCKET;
+    char *topic = notify_d_hdr_take(buffer, "X-Topic: ", NOTIFY_D_MAX_BUFFER);
+    client->topic = topic ? topic : AIRY_STRDUP("inbound");
+    svc->client_count++;
+    if (notify_d_enqueue(svc, buffer, client->topic, NULL) == 0)
+        svc->notified_count++;
+    else
+        svc->error_count++;
+    return client;
+}
+
+/* 裸 socket 客户端就地回执并注销；长连接直接放锁返回，由事件线程推送。 */
+static void notify_d_reply_stats(notify_d_service_t *svc, notify_client_t *client, airy_sock_t fd)
+{
+    if (client->type != NOTIFY_CLIENT_SOCKET) {
+        airy_mtx_unlock(&svc->lock);
+        return;
+    }
+
+    uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
+    size_t active_clients = 0;
+    for (size_t i = 0; i < svc->client_count; i++) {
+        if (svc->clients[i].active)
+            active_clients++;
+    }
+    size_t depth = svc->pending_count;
+    size_t notified = svc->notified_count;
+    size_t errors = svc->error_count;
+    airy_mtx_unlock(&svc->lock);
+
+    /* healthcheck 自持锁，必须在放锁后调用。 */
+    int healthy = notify_d_healthcheck(svc);
+
+    char response[4096];
+    snprintf(response, sizeof(response),
+             "{"
+             "\"service\":\"notify_d\","
+             "\"status\":\"%s\","
+             "\"queued\":%llu,"
+             "\"pending\":%zu,"
+             "\"active_clients\":%zu,"
+             "\"uptime_sec\":%llu,"
+             "\"healthy\":%s"
+             "}",
+             errors > notified / 2 ? "degraded" : "ok",
+             (unsigned long long)notified, depth, active_clients,
+             (unsigned long long)uptime, healthy ? "true" : "false");
+
+    airy_sock_send(fd, response, strlen(response));
+    airy_sock_close(fd);
+
+    airy_mtx_lock(&svc->lock);
+    client->active = 0;
+    client->fd = AIRY_INVALID_SOCKET;
+    airy_mtx_unlock(&svc->lock);
+}
+
 /* 连接处理线程（detached）：每连接独立处理。notify_d_handle_request 在
  * recv 前 poll 等待首包最多 5s，单线程 accept 循环下慢连接会阻塞全部
  * RPC（health_check 偶发超时，实测 max~4.5s）。SSE/WebSocket 长连接
@@ -235,16 +378,7 @@ static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_
 {
     char buffer[NOTIFY_D_MAX_BUFFER];
 #ifndef _WIN32
-    /* Wait for request data to be ready before recv: airy_sock_recv is a
-     * non-blocking MSG_DONTWAIT read; recv immediately after accept returns 0
-     * on EAGAIN and would misjudge the connection as failed and close it (RPC
-     * timing race). */
-    struct pollfd pfd;
-    pfd.fd = (int)client_fd;
-    pfd.events = POLLIN;
-    pfd.revents = 0;
-    int pr = poll(&pfd, 1, 5000);
-    if (pr <= 0 || !(pfd.revents & POLLIN)) {
+    if (!notify_d_wait_readable(client_fd)) {
         airy_sock_close(client_fd);
         return;
     }
@@ -274,128 +408,8 @@ static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_
         return;
     }
 
-    airy_mtx_lock(&svc->lock);
-
-    int is_upgrade = (strstr(buffer, "Upgrade: websocket") != NULL ||
-                      strstr(buffer, "Upgrade: WebSocket") != NULL);
-    int is_sse = (strstr(buffer, "Accept: text/event-stream") != NULL);
-
-    notify_client_t *client = notify_d_find_client_slot(svc);
-    if (!client) {
-        airy_mtx_unlock(&svc->lock);
-        const char *busy = "{\"error\":\"max_clients_reached\"}";
-        airy_sock_send(client_fd, busy, strlen(busy));
-        airy_sock_close(client_fd);
+    notify_client_t *client = notify_d_register(svc, client_fd, buffer);
+    if (!client)
         return;
-    }
-
-    AIRY_MEMSET(client, 0, sizeof(*client));
-    client->fd = client_fd;
-    client->connected_at = (uint64_t)time(NULL);
-    client->last_activity = client->connected_at;
-    client->active = 1;
-
-    const char *cid_tag = "X-Client-Id: ";
-    const char *cid_hdr = strstr(buffer, cid_tag);
-    if (cid_hdr) {
-        const char *cid_start = cid_hdr + strlen(cid_tag);
-        const char *cid_end = strstr(cid_start, "\r\n");
-        if (cid_end && cid_end > cid_start) {
-            size_t clen = (size_t)(cid_end - cid_start);
-            if (clen > 0 && clen < 256) {
-                char *cid = (char *)AIRY_MALLOC(clen + 1);
-                if (cid) {
-                    AIRY_MEMCPY(cid, cid_start, clen);
-                    cid[clen] = '\0';
-                    client->client_id = cid;
-                }
-            }
-        }
-    }
-
-    if (is_sse) {
-        client->type = NOTIFY_CLIENT_SSE;
-        const char *sse_headers = "HTTP/1.1 200 OK\r\n"
-                                  "Content-Type: text/event-stream\r\n"
-                                  "Cache-Control: no-cache\r\n"
-                                  "Connection: keep-alive\r\n"
-                                  "\r\n";
-        airy_sock_send(client_fd, sse_headers, strlen(sse_headers));
-        client->handshake_done = 1;
-        svc->client_count++;
-    } else if (is_upgrade) {
-        client->type = NOTIFY_CLIENT_WEBSOCKET;
-        if (notify_d_ws_upgrade(svc, client, buffer) == 0) {
-            svc->client_count++;
-        } else {
-            client->active = 0;
-            airy_mtx_unlock(&svc->lock);
-            airy_sock_close(client_fd);
-            return;
-        }
-    } else {
-        client->type = NOTIFY_CLIENT_SOCKET;
-
-        const char *topic = "inbound";
-        const char *topic_hdr = "X-Topic: ";
-        const char *th = strstr(buffer, topic_hdr);
-        if (th) {
-            const char *the = strstr(th + strlen(topic_hdr), "\r\n");
-            if (the) {
-                size_t tlen = (size_t)(the - (th + strlen(topic_hdr)));
-                char *tn = (char *)AIRY_MALLOC(tlen + 1);
-                if (tn) {
-                    AIRY_MEMCPY(tn, th + strlen(topic_hdr), tlen);
-                    tn[tlen] = '\0';
-                    topic = tn;
-                }
-            }
-        }
-        client->topic = AIRY_STRDUP(topic);
-        if (strcmp(topic, "inbound") != 0)
-            AIRY_FREE((void *)topic);
-        svc->client_count++;
-
-        int ret = notify_d_enqueue(svc, buffer, client->topic, NULL);
-        if (ret == 0) {
-            svc->notified_count++;
-        } else {
-            svc->error_count++;
-        }
-    }
-
-    uint64_t uptime = (uint64_t)time(NULL) - svc->start_time;
-    size_t active_clients = 0;
-    for (size_t i = 0; i < svc->client_count; i++) {
-        if (svc->clients[i].active)
-            active_clients++;
-    }
-
-    size_t depth = svc->pending_count;
-    airy_mtx_unlock(&svc->lock);
-
-    if (client->type == NOTIFY_CLIENT_SOCKET) {
-        char response[4096];
-        snprintf(response, sizeof(response),
-                 "{"
-                 "\"service\":\"notify_d\","
-                 "\"status\":\"%s\","
-                 "\"queued\":%llu,"
-                 "\"pending\":%zu,"
-                 "\"active_clients\":%zu,"
-                 "\"uptime_sec\":%llu,"
-                 "\"healthy\":%s"
-                 "}",
-                 svc->error_count > svc->notified_count / 2 ? "degraded" : "ok",
-                 (unsigned long long)svc->notified_count, depth, active_clients,
-                 (unsigned long long)uptime, notify_d_healthcheck(svc) ? "true" : "false");
-
-        airy_sock_send(client_fd, response, strlen(response));
-        airy_sock_close(client_fd);
-
-        airy_mtx_lock(&svc->lock);
-        client->active = 0;
-        client->fd = AIRY_INVALID_SOCKET;
-        airy_mtx_unlock(&svc->lock);
-    }
+    notify_d_reply_stats(svc, client, client_fd);
 }
