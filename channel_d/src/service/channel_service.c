@@ -18,6 +18,7 @@
 #include "daemon_errors.h"
 #include "airy_memory.h"
 #include "channel_service_internal.h"
+#include "io.h"
 #include "string_compat.h"
 
 #include <errno.h>
@@ -25,7 +26,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include "error.h"
@@ -34,27 +34,15 @@ int backend_svc_init(channel_service_t *svc)
 {
     /* 自举 socket_dir（SOCKET/PIPE 通道端点目录）：新系统上默认目录
      * /var/tmp/agentrt/channels 不存在，create_socket_channel() 的 bind()
-     * 会因 ENOENT 失败（channel.* 返回 -32603）。daemon 自管运行目录，
-     * 不依赖外部预创建——幂等逐级 mkdir。 */
-    char dir_buf[256];
-    size_t dir_len = strlen(svc->config.socket_dir);
-    if (dir_len == 0 || dir_len >= sizeof(dir_buf)) {
-        fprintf(stderr, "channel: invalid socket_dir (len=%zu)\n", dir_len);
+     * 会因 ENOENT 失败（channel.* 返回 -32603）。目录自举统一走基础库
+     * 幂等实现，不依赖外部预创建。 */
+    const char *dir = svc->config.socket_dir;
+    if (!dir[0]) {
+        fprintf(stderr, "channel: empty socket_dir\n");
         return -1;
     }
-    __builtin_memcpy(dir_buf, svc->config.socket_dir, dir_len + 1);
-    for (char *p = dir_buf + 1; *p; p++) {
-        if (*p != '/')
-            continue;
-        *p = '\0';
-        if (mkdir(dir_buf, 0755) != 0 && errno != EEXIST) {
-            fprintf(stderr, "channel: mkdir %s failed: %s\n", dir_buf, strerror(errno));
-            return -1;
-        }
-        *p = '/';
-    }
-    if (mkdir(dir_buf, 0755) != 0 && errno != EEXIST) {
-        fprintf(stderr, "channel: mkdir %s failed: %s\n", dir_buf, strerror(errno));
+    if (airy_io_mkdir_p(dir, 0755) != 0) {
+        fprintf(stderr, "channel: mkdir %s failed\n", dir);
         return -1;
     }
     return 0;
@@ -62,9 +50,8 @@ int backend_svc_init(channel_service_t *svc)
 
 void backend_svc_start(channel_service_t *svc)
 {
-    if (svc->config.socket_dir[0]) {
-        mkdir(svc->config.socket_dir, 0755);
-    }
+    if (svc->config.socket_dir[0])
+        (void)airy_io_mkdir_p(svc->config.socket_dir, 0755);
 }
 
 void backend_entry_free(channel_entry_t *entry)
