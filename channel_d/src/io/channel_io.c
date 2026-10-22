@@ -31,6 +31,96 @@
 #include "error.h"
 #include "io.h"
 
+/* 建立到 UNIX 端点的一次性连接：0 成功；失败返回 IO/TIMEOUT 且 fd 已关闭。 */
+static int chan_connect(const char *endpoint, int with_rcv, int *out_fd)
+{
+    struct sockaddr_un addr;
+    __builtin_memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    AIRY_STRNCPY_TERM(addr.sun_path, endpoint, sizeof(addr.sun_path));
+    addr.sun_path[sizeof(addr.sun_path) - 1] = '\0';
+
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+        AIRY_ERROR(AIRY_ERR_IO, "client socket creation failed");
+        return AIRY_ERR_IO;
+    }
+    struct timeval tv;
+    tv.tv_sec = 3;
+    tv.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    if (with_rcv)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        int rc = (errno == EAGAIN || errno == ETIMEDOUT) ? AIRY_ERR_TIMEOUT : AIRY_ERR_IO;
+        close(fd);
+        return rc;
+    }
+    *out_fd = fd;
+    return 0;
+}
+
+/* 连上端点并写一帧 [net_len][payload]；返回 0 / IO / TIMEOUT。 */
+static int chan_sock_send(const char *endpoint, const void *data, size_t data_len)
+{
+    int fd = -1;
+    int rc = chan_connect(endpoint, 0, &fd);
+    if (rc != 0)
+        return rc;
+    uint32_t net_len = htonl((uint32_t)data_len);
+    ssize_t w1 = airy_io_write_all(fd, &net_len, sizeof(net_len));
+    ssize_t w2 = (w1 >= 0) ? airy_io_write_all(fd, data, data_len) : -1;
+    close(fd);
+    if (w1 >= 0 && w2 >= 0)
+        return 0;
+    return (errno == EAGAIN || errno == ETIMEDOUT) ? AIRY_ERR_TIMEOUT : AIRY_ERR_IO;
+}
+
+/* 以非阻塞方式向 FIFO 写一帧；成功 0，打开/写失败返回 IO。 */
+static int chan_pipe_send(const char *endpoint, const void *data, size_t data_len)
+{
+    if (!endpoint[0])
+        return 0;
+    int fd = open(endpoint, O_WRONLY | O_NONBLOCK);
+    if (fd < 0) {
+        AIRY_ERROR(AIRY_ERR_IO, "pipe open for write failed");
+        return AIRY_ERR_IO;
+    }
+    uint32_t net_len = htonl((uint32_t)data_len);
+    if (airy_io_write_all(fd, &net_len, sizeof(net_len)) < 0 ||
+        airy_io_write_all(fd, data, data_len) < 0) {
+        close(fd);
+        AIRY_ERROR(AIRY_ERR_IO, "pipe write failed");
+        return AIRY_ERR_IO;
+    }
+    close(fd);
+    return 0;
+}
+
+/* 读一帧 [net_len][payload]；zero_rc 覆盖读空与零长，len > max_len 报溢出。 */
+static int chan_read_frame(int fd, uint32_t max_len, int zero_rc, void **out, size_t *out_len)
+{
+    uint32_t net_len = 0;
+    if (read(fd, &net_len, sizeof(net_len)) <= 0)
+        return zero_rc;
+    uint32_t len = ntohl(net_len);
+    if (len > max_len)
+        return AIRY_ERR_OVERFLOW;
+    if (len == 0)
+        return zero_rc;
+    void *buf = AIRY_MALLOC(len);
+    if (!buf)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    ssize_t got = read(fd, buf, len);
+    if (got <= 0) {
+        AIRY_FREE(buf);
+        return zero_rc;
+    }
+    *out = buf;
+    *out_len = (size_t)got;
+    return 0;
+}
+
 int channel_service_send(channel_service_t *svc, const char *channel_id, const void *data,
                          size_t data_len)
 {
@@ -97,53 +187,12 @@ int channel_service_send(channel_service_t *svc, const char *channel_id, const v
             AIRY_ERROR(AIRY_ERR_IO, "socket not open for send");
             return AIRY_ERR_IO;
         }
-        struct sockaddr_un client_addr;
-        __builtin_memset(&client_addr, 0, sizeof(client_addr));
-        client_addr.sun_family = AF_UNIX;
-        AIRY_STRNCPY_TERM(client_addr.sun_path, endpoint, sizeof(client_addr.sun_path));
-        (client_addr.sun_path)[sizeof(client_addr.sun_path) - 1] = '\0';
-        int client_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (client_fd < 0) {
-            AIRY_ERROR(AIRY_ERR_IO, "client socket creation failed");
-            return AIRY_ERR_IO;
-        }
-        {
-            struct timeval tv;
-            tv.tv_sec = 3;
-            tv.tv_usec = 0;
-            setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        }
-        if (connect(client_fd, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
-            close(client_fd);
-            return (errno == EAGAIN || errno == ETIMEDOUT) ? AIRY_ERR_TIMEOUT : AIRY_ERR_IO;
-        }
-        uint32_t net_len = htonl((uint32_t)data_len);
-        ssize_t w1 = airy_io_write_all(client_fd, &net_len, sizeof(net_len));
-        ssize_t w2 = (w1 >= 0) ? airy_io_write_all(client_fd, data, data_len) : -1;
-        close(client_fd);
-        if (w1 < 0 || w2 < 0) {
-            io_rc = (errno == EAGAIN || errno == ETIMEDOUT) ? AIRY_ERR_TIMEOUT : AIRY_ERR_IO;
-        }
+        io_rc = chan_sock_send(endpoint, data, data_len);
         break;
     }
-    case CHANNEL_TYPE_PIPE: {
-        if (endpoint[0]) {
-            int fd = open(endpoint, O_WRONLY | O_NONBLOCK);
-            if (fd < 0) {
-                AIRY_ERROR(AIRY_ERR_IO, "pipe open for write failed");
-                return AIRY_ERR_IO;
-            }
-            uint32_t net_len = htonl((uint32_t)data_len);
-            if (airy_io_write_all(fd, &net_len, sizeof(net_len)) < 0 ||
-                airy_io_write_all(fd, data, data_len) < 0) {
-                close(fd);
-                AIRY_ERROR(AIRY_ERR_IO, "pipe write failed");
-                return AIRY_ERR_IO;
-            }
-            close(fd);
-        }
+    case CHANNEL_TYPE_PIPE:
+        io_rc = chan_pipe_send(endpoint, data, data_len);
         break;
-    }
     case CHANNEL_TYPE_SHM:
 
         break;
@@ -230,74 +279,29 @@ int channel_service_receive(channel_service_t *svc, const char *channel_id, void
     }
     airy_mtx_unlock(&svc->lock);
 
-    int io_rc = 0;
     switch (type) {
     case CHANNEL_TYPE_SOCKET: {
-        if (socket_fd < 0) {
+        if (socket_fd < 0)
             return AIRY_ERR_IO;
-        }
         int client_fd = accept(socket_fd, NULL, NULL);
-        if (client_fd < 0) {
+        if (client_fd < 0)
             return AIRY_ERR_IO;
-        }
-        uint32_t net_len = 0;
-        ssize_t r1 = read(client_fd, &net_len, sizeof(net_len));
-        if (r1 <= 0) {
-            close(client_fd);
-            return AIRY_ERR_IO;
-        }
-        uint32_t msg_len = ntohl(net_len);
-        if (msg_len == 0 || msg_len > max_msg) {
-            close(client_fd);
-            return AIRY_ERR_OVERFLOW;
-        }
-        void *buf = AIRY_MALLOC(msg_len);
-        if (!buf) {
-            close(client_fd);
-            return AIRY_ERR_OUT_OF_MEMORY;
-        }
-        ssize_t r2 = read(client_fd, buf, msg_len);
+        int rc = chan_read_frame(client_fd, max_msg, AIRY_ERR_IO, out_data, out_len);
         close(client_fd);
-        if (r2 <= 0) {
-            AIRY_FREE(buf);
-            return AIRY_ERR_IO;
-        }
-        *out_data = buf;
-        *out_len = (size_t)r2;
+        if (rc != 0)
+            return rc;
         break;
     }
     case CHANNEL_TYPE_PIPE: {
-        if (!endpoint[0]) {
+        if (!endpoint[0])
             return 0;
-        }
         int fd = open(endpoint, O_RDONLY | O_NONBLOCK);
-        if (fd < 0) {
+        if (fd < 0)
             return 0;
-        }
-        uint32_t net_len = 0;
-        ssize_t r1 = read(fd, &net_len, sizeof(net_len));
-        if (r1 <= 0) {
-            close(fd);
-            return 0;
-        }
-        uint32_t msg_len = ntohl(net_len);
-        if (msg_len == 0) {
-            close(fd);
-            return 0;
-        }
-        void *buf = AIRY_MALLOC(msg_len);
-        if (!buf) {
-            close(fd);
-            return AIRY_ERR_OUT_OF_MEMORY;
-        }
-        ssize_t r2 = read(fd, buf, msg_len);
+        int rc = chan_read_frame(fd, UINT32_MAX, 0, out_data, out_len);
         close(fd);
-        if (r2 <= 0) {
-            AIRY_FREE(buf);
-            return 0;
-        }
-        *out_data = buf;
-        *out_len = (size_t)r2;
+        if (rc != 0)
+            return rc;
         break;
     }
     case CHANNEL_TYPE_SHM:
@@ -306,10 +310,6 @@ int channel_service_receive(channel_service_t *svc, const char *channel_id, void
     default:
         AIRY_ERROR(AIRY_ERR_UNKNOWN, "unknown channel type in receive");
         return AIRY_ERR_UNKNOWN;
-    }
-
-    if (io_rc != 0) {
-        return io_rc;
     }
 
     airy_mtx_lock(&svc->lock);
@@ -344,34 +344,10 @@ int channel_service_ping(channel_service_t *svc, const char *channel_id, int64_t
             break;
         }
 
-        int sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (sock_fd < 0) {
-            rc = AIRY_ERR_IO;
+        int sock_fd = -1;
+        rc = chan_connect(entry->info.endpoint, 1, &sock_fd);
+        if (rc != 0)
             break;
-        }
-
-        struct sockaddr_un addr;
-        __builtin_memset(&addr, 0, sizeof(addr));
-        addr.sun_family = AF_UNIX;
-        AIRY_STRNCPY_TERM(addr.sun_path, entry->info.endpoint, sizeof(addr.sun_path));
-        (addr.sun_path)[sizeof(addr.sun_path) - 1] = '\0';
-
-        {
-            struct timeval tv;
-            tv.tv_sec = 3;
-            tv.tv_usec = 0;
-            setsockopt(sock_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-            setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        }
-
-        if (connect(sock_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-            close(sock_fd);
-            rc = (errno == EAGAIN || errno == ETIMEDOUT || errno == EINPROGRESS) ?
-                     AIRY_ERR_TIMEOUT :
-                     AIRY_ERR_IO;
-            break;
-        }
-
         close(sock_fd);
         break;
     }
