@@ -143,22 +143,55 @@ static int mem_vec_upsert(mem_tfidf_vec_t *v, const char *term, size_t tlen)
     return AIRY_SUCCESS;
 }
 
+/* 词缓冲落盘：非停用词入库并计数，随后清空缓冲。 */
+static void vec_word_flush(mem_tfidf_vec_t *v, char *word, size_t *wlen,
+                           size_t *total)
+{
+    if (*wlen == 0)
+        return;
+    word[*wlen] = '\0';
+    if (!mem_vec_is_stopword(word) && mem_vec_upsert(v, word, *wlen) == AIRY_SUCCESS)
+        (*total)++;
+    *wlen = 0;
+}
+
+/* CJK 单字 + 与上一字组成的双字 bigram；last_han 保存上一字。 */
+static void vec_han_step(mem_tfidf_vec_t *v, const char *text, size_t i, int slen,
+                         char last_han[5], size_t *total)
+{
+    char buf[5];
+    char bigram[9];
+    int n;
+
+    AIRY_MEMCPY(buf, text + i, (size_t)slen);
+    buf[slen] = '\0';
+    if (mem_vec_upsert(v, buf, (size_t)slen) == AIRY_SUCCESS)
+        (*total)++;
+    if (last_han[0]) {
+        n = snprintf(bigram, sizeof(bigram), "%s%s", last_han, buf);
+        if (n > 0 && mem_vec_upsert(v, bigram, (size_t)n) == AIRY_SUCCESS)
+            (*total)++;
+    }
+    AIRY_MEMCPY(last_han, buf, (size_t)slen + 1);
+}
+
 int mem_vec_build(const char *text, size_t len, mem_tfidf_vec_t *out)
 {
+    char word[MEM_VEC_MAX_WORD_LEN + 1];
+    char last_han[5] = {0};
+    size_t wlen = 0;
+    size_t total = 0;
+    size_t i = 0;
+
     if (!out)
         return AIRY_ERR_INVALID_PARAM;
     AIRY_MEMSET(out, 0, sizeof(*out));
     if (!text || len == 0)
         return AIRY_SUCCESS;
 
-    char word[MEM_VEC_MAX_WORD_LEN + 1];
-    size_t wlen = 0;
-    char last_han[5] = {0};
-    size_t total_tokens = 0;
-
-    size_t i = 0;
     while (i < len) {
         unsigned char c = (unsigned char)text[i];
+        int slen;
 
         if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
             if (wlen < MEM_VEC_MAX_WORD_LEN)
@@ -167,14 +200,7 @@ int mem_vec_build(const char *text, size_t len, mem_tfidf_vec_t *out)
             continue;
         }
 
-        if (wlen > 0) {
-            word[wlen] = '\0';
-            if (!mem_vec_is_stopword(word)) {
-                if (mem_vec_upsert(out, word, wlen) == AIRY_SUCCESS)
-                    total_tokens++;
-            }
-            wlen = 0;
-        }
+        vec_word_flush(out, word, &wlen, &total);
 
         if (c < 0x80) {
             last_han[0] = '\0';
@@ -182,45 +208,21 @@ int mem_vec_build(const char *text, size_t len, mem_tfidf_vec_t *out)
             continue;
         }
 
-        int slen = mem_utf8_seq_len(c);
+        slen = mem_utf8_seq_len(c);
         if (slen < 2 || i + (size_t)slen > len) {
-
             last_han[0] = '\0';
             i++;
             continue;
         }
-        uint32_t cp = mem_utf8_decode((const unsigned char *)text + i, slen);
-        if (mem_utf8_is_cjk(cp)) {
-            char buf[5];
-            AIRY_MEMCPY(buf, text + i, (size_t)slen);
-            buf[slen] = '\0';
-
-            if (mem_vec_upsert(out, buf, (size_t)slen) == AIRY_SUCCESS)
-                total_tokens++;
-
-            if (last_han[0]) {
-                char bigram[9];
-                int n = snprintf(bigram, sizeof(bigram), "%s%s", last_han, buf);
-                if (n > 0 && mem_vec_upsert(out, bigram, (size_t)n) == AIRY_SUCCESS)
-                    total_tokens++;
-            }
-            AIRY_MEMCPY(last_han, buf, (size_t)slen + 1);
-        } else {
-
+        if (mem_utf8_is_cjk(mem_utf8_decode((const unsigned char *)text + i, slen)))
+            vec_han_step(out, text, i, slen, last_han, &total);
+        else
             last_han[0] = '\0';
-        }
         i += (size_t)slen;
     }
 
-    if (wlen > 0) {
-        word[wlen] = '\0';
-        if (!mem_vec_is_stopword(word)) {
-            if (mem_vec_upsert(out, word, wlen) == AIRY_SUCCESS)
-                total_tokens++;
-        }
-    }
-
-    out->total_tokens = total_tokens;
+    vec_word_flush(out, word, &wlen, &total);
+    out->total_tokens = total;
     return AIRY_SUCCESS;
 }
 
