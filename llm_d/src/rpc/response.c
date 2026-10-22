@@ -85,6 +85,75 @@ char *response_to_json(const llm_response_t *resp)
     return json;
 }
 
+/* 取值器把「找键 → 类型校验 → 赋值」收敛成一行调用；不属于目标类型的字段
+ * 保持原值（调用点字段初值为 NULL），与逐个 GetObjectItem 的旧行为一致。 */
+static char *json_dup_str(cJSON *obj, const char *key)
+{
+    cJSON *v = cJSON_GetObjectItem(obj, key);
+    return (cJSON_IsString(v) && v->valuestring) ? AIRY_STRDUP(v->valuestring) : NULL;
+}
+
+static void json_take_u32(cJSON *obj, const char *key, uint32_t *dst)
+{
+    cJSON *v = cJSON_GetObjectItem(obj, key);
+    if (cJSON_IsNumber(v))
+        *dst = (uint32_t)v->valuedouble;
+}
+
+static void json_take_u64(cJSON *obj, const char *key, uint64_t *dst)
+{
+    cJSON *v = cJSON_GetObjectItem(obj, key);
+    if (cJSON_IsNumber(v))
+        *dst = (uint64_t)v->valuedouble;
+}
+
+static void json_take_f64(cJSON *obj, const char *key, double *dst)
+{
+    cJSON *v = cJSON_GetObjectItem(obj, key);
+    if (cJSON_IsNumber(v))
+        *dst = v->valuedouble;
+}
+
+/* 嵌套 usage 块覆盖顶层同名计数：部分端点两处都发，嵌套的更准确。 */
+static void resp_take_usage(cJSON *root, llm_response_t *resp)
+{
+    cJSON *usage = cJSON_GetObjectItem(root, "usage");
+    if (!cJSON_IsObject(usage))
+        return;
+    json_take_u32(usage, "prompt_tokens", &resp->prompt_tokens);
+    json_take_u32(usage, "completion_tokens", &resp->completion_tokens);
+    json_take_u32(usage, "total_tokens", &resp->total_tokens);
+    json_take_u32(usage, "reasoning_tokens", &resp->reasoning_tokens);
+}
+
+static int resp_take_choice(cJSON *choice, llm_message_t *out)
+{
+    out->role = json_dup_str(choice, "role");
+    out->content = json_dup_str(choice, "content");
+    out->reasoning_content = json_dup_str(choice, "reasoning_content");
+    cJSON *tc = cJSON_GetObjectItem(choice, "tool_calls");
+    if (!cJSON_IsArray(tc) || cJSON_GetArraySize(tc) == 0)
+        return 0;
+    out->tool_calls_json = cJSON_PrintUnformatted(tc);
+    return out->tool_calls_json ? 0 : -1;
+}
+
+static int resp_take_choices(cJSON *root, llm_response_t *resp)
+{
+    cJSON *arr = cJSON_GetObjectItem(root, "choices");
+    if (!cJSON_IsArray(arr))
+        return 0;
+    resp->choice_count = cJSON_GetArraySize(arr);
+    resp->choices = AIRY_CALLOC(resp->choice_count, sizeof(llm_message_t));
+    if (!resp->choices)
+        return -1;
+    for (size_t i = 0; i < resp->choice_count; ++i) {
+        if (resp_take_choice(cJSON_GetArrayItem(arr, i), &resp->choices[i]) != 0)
+            return -1;
+    }
+    return 0;
+}
+
 llm_response_t *response_from_json(const char *json)
 {
     if (!json) {
@@ -99,92 +168,24 @@ llm_response_t *response_from_json(const char *json)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    cJSON *id = cJSON_GetObjectItem(root, "id");
-    if (cJSON_IsString(id))
-        resp->id = AIRY_STRDUP(id->valuestring);
-
-    cJSON *model = cJSON_GetObjectItem(root, "model");
-    if (cJSON_IsString(model))
-        resp->model = AIRY_STRDUP(model->valuestring);
-
-    cJSON *created = cJSON_GetObjectItem(root, "created");
-    if (cJSON_IsNumber(created))
-        resp->created = (uint64_t)created->valuedouble;
-
-    cJSON *prompt_tokens = cJSON_GetObjectItem(root, "prompt_tokens");
-    if (cJSON_IsNumber(prompt_tokens))
-        resp->prompt_tokens = (uint32_t)prompt_tokens->valuedouble;
-
-    cJSON *completion_tokens = cJSON_GetObjectItem(root, "completion_tokens");
-    if (cJSON_IsNumber(completion_tokens))
-        resp->completion_tokens = (uint32_t)completion_tokens->valuedouble;
-
-    cJSON *total_tokens = cJSON_GetObjectItem(root, "total_tokens");
-    if (cJSON_IsNumber(total_tokens))
-        resp->total_tokens = (uint32_t)total_tokens->valuedouble;
-
-    cJSON *usage = cJSON_GetObjectItem(root, "usage");
-    if (cJSON_IsObject(usage)) {
-        cJSON *u_pt = cJSON_GetObjectItem(usage, "prompt_tokens");
-        if (cJSON_IsNumber(u_pt))
-            resp->prompt_tokens = (uint32_t)u_pt->valuedouble;
-        cJSON *u_ct = cJSON_GetObjectItem(usage, "completion_tokens");
-        if (cJSON_IsNumber(u_ct))
-            resp->completion_tokens = (uint32_t)u_ct->valuedouble;
-        cJSON *u_tt = cJSON_GetObjectItem(usage, "total_tokens");
-        if (cJSON_IsNumber(u_tt))
-            resp->total_tokens = (uint32_t)u_tt->valuedouble;
-        cJSON *u_rt = cJSON_GetObjectItem(usage, "reasoning_tokens");
-        if (cJSON_IsNumber(u_rt))
-            resp->reasoning_tokens = (uint32_t)u_rt->valuedouble;
-    }
+    resp->id = json_dup_str(root, "id");
+    resp->model = json_dup_str(root, "model");
+    json_take_u64(root, "created", &resp->created);
+    json_take_u32(root, "prompt_tokens", &resp->prompt_tokens);
+    json_take_u32(root, "completion_tokens", &resp->completion_tokens);
+    json_take_u32(root, "total_tokens", &resp->total_tokens);
+    resp_take_usage(root, resp);
 
     /* 兼容顶层 reasoning_tokens 字段（部分端点直接输出顶层而非嵌套） */
-    if (resp->reasoning_tokens == 0) {
-        cJSON *t_rt = cJSON_GetObjectItem(root, "reasoning_tokens");
-        if (cJSON_IsNumber(t_rt))
-            resp->reasoning_tokens = (uint32_t)t_rt->valuedouble;
-    }
+    if (resp->reasoning_tokens == 0)
+        json_take_u32(root, "reasoning_tokens", &resp->reasoning_tokens);
 
-    cJSON *cost = cJSON_GetObjectItem(root, "cost_usd");
-    if (cJSON_IsNumber(cost))
-        resp->cost_usd = cost->valuedouble;
+    json_take_f64(root, "cost_usd", &resp->cost_usd);
+    resp->finish_reason = json_dup_str(root, "finish_reason");
 
-    cJSON *finish_reason = cJSON_GetObjectItem(root, "finish_reason");
-    if (cJSON_IsString(finish_reason))
-        resp->finish_reason = AIRY_STRDUP(finish_reason->valuestring);
-
-    cJSON *choices = cJSON_GetObjectItem(root, "choices");
-    if (cJSON_IsArray(choices)) {
-        resp->choice_count = cJSON_GetArraySize(choices);
-        resp->choices = AIRY_CALLOC(resp->choice_count, sizeof(llm_message_t));
-        if (!resp->choices) {
-
-            llm_response_free(resp);
-            return NULL;
-        }
-        for (size_t i = 0; i < resp->choice_count; ++i) {
-            cJSON *choice = cJSON_GetArrayItem(choices, i);
-            cJSON *role = cJSON_GetObjectItem(choice, "role");
-            cJSON *content = cJSON_GetObjectItem(choice, "content");
-            if (cJSON_IsString(role))
-                resp->choices[i].role = AIRY_STRDUP(role->valuestring);
-            if (cJSON_IsString(content))
-                resp->choices[i].content = AIRY_STRDUP(content->valuestring);
-
-            cJSON *reasoning = cJSON_GetObjectItem(choice, "reasoning_content");
-            if (cJSON_IsString(reasoning))
-                resp->choices[i].reasoning_content = AIRY_STRDUP(reasoning->valuestring);
-
-            cJSON *tool_calls = cJSON_GetObjectItem(choice, "tool_calls");
-            if (cJSON_IsArray(tool_calls) && cJSON_GetArraySize(tool_calls) > 0) {
-                resp->choices[i].tool_calls_json = cJSON_PrintUnformatted(tool_calls);
-                if (!resp->choices[i].tool_calls_json) {
-                    llm_response_free(resp);
-                    return NULL;
-                }
-            }
-        }
+    if (resp_take_choices(root, resp) != 0) {
+        llm_response_free(resp);
+        return NULL;
     }
 
     return resp;
