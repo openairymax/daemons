@@ -295,7 +295,7 @@ void tool_result_free(tool_result_t *res)
     AIRY_FREE(res);
 }
 
-void tool_metadata_free(tool_metadata_t *meta)
+void tool_metadata_clear(tool_metadata_t *meta)
 {
     if (!meta)
         return;
@@ -303,15 +303,72 @@ void tool_metadata_free(tool_metadata_t *meta)
     AIRY_FREE(meta->name);
     AIRY_FREE(meta->description);
     AIRY_FREE(meta->executable);
-
+    AIRY_FREE(meta->permission_rule);
     for (size_t i = 0; i < meta->param_count; ++i) {
         AIRY_FREE((void *)meta->params[i].name);
         AIRY_FREE((void *)meta->params[i].schema);
     }
     AIRY_FREE(meta->params);
+    AIRY_MEMSET(meta, 0, sizeof(*meta));
+}
 
-    AIRY_FREE(meta->permission_rule);
+void tool_metadata_free(tool_metadata_t *meta)
+{
+    if (!meta)
+        return;
+    tool_metadata_clear(meta);
     AIRY_FREE(meta);
+}
+
+static char *meta_dup(const char *s)
+{
+    return s ? AIRY_STRDUP(s) : NULL;
+}
+
+/* Byte-copy src into dst, then re-own every string/array so the copy can be
+ * released independently. A partial failure leaves dst clearable. */
+int tool_metadata_copy(tool_metadata_t *dst, const tool_metadata_t *src)
+{
+    if (!dst || !src)
+        return -1;
+    *dst = *src;
+    dst->id = meta_dup(src->id);
+    dst->name = meta_dup(src->name);
+    dst->description = meta_dup(src->description);
+    dst->executable = meta_dup(src->executable);
+    dst->permission_rule = meta_dup(src->permission_rule);
+    dst->params = NULL;
+    dst->param_count = 0;
+    if (!src->param_count || !src->params)
+        return 0;
+    dst->params = (tool_param_t *)AIRY_CALLOC(src->param_count, sizeof(*dst->params));
+    if (!dst->params)
+        goto fail;
+    for (size_t i = 0; i < src->param_count; ++i) {
+        dst->param_count = i + 1;
+        dst->params[i] = src->params[i];
+        dst->params[i].name = meta_dup(src->params[i].name);
+        dst->params[i].schema = meta_dup(src->params[i].schema);
+        if ((src->params[i].name && !dst->params[i].name) ||
+            (src->params[i].schema && !dst->params[i].schema))
+            goto fail;
+    }
+    return 0;
+fail:
+    tool_metadata_clear(dst);
+    return -1;
+}
+
+tool_metadata_t *tool_metadata_clone(const tool_metadata_t *src)
+{
+    if (!src)
+        return NULL;
+    tool_metadata_t *dst = (tool_metadata_t *)AIRY_MALLOC(sizeof(*dst));
+    if (dst && tool_metadata_copy(dst, src) != 0) {
+        AIRY_FREE(dst);
+        dst = NULL;
+    }
+    return dst;
 }
 
 char *svc_int_pending(tool_service_t *svc)
