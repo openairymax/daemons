@@ -114,6 +114,161 @@ static tool_result_t *run_tool(tool_service_t *svc, const char *tool_id,
     return res;
 }
 
+/* 单路径工具调用：建参数、执行、释放参数，返回回执与状态码。 */
+static tool_result_t *run_path(tool_service_t *svc, const char *tool_id, const char *path, int *ret)
+{
+    cJSON *p = cJSON_CreateObject();
+    tool_result_t *res;
+
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "path", path);
+    res = run_tool(svc, tool_id, "tool_d", p, ret);
+    cJSON_Delete(p);
+    return res;
+}
+
+/* 回显工具回执并释放。 */
+static void res_dump(const char *tool_id, tool_result_t *res)
+{
+    if (!res)
+        return;
+    printf("    %s -> %s\n", tool_id, res->output ? res->output : "(no output)");
+    tool_result_free(res);
+}
+
+/* 1. 创建：认知层决策"写入源码文件" → fs_write */
+static void crud_write(tool_service_t *svc)
+{
+    cJSON *p = cJSON_CreateObject();
+    int ret = -999;
+    tool_result_t *res;
+
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "path", E2E_FILE);
+    cJSON_AddStringToObject(p, "content", kSource);
+    res = run_tool(svc, "fs_write", "tool_d", p, &ret);
+    cJSON_Delete(p);
+    TEST(ret == 0 && res && res->success == 1, "fs_write 创建 main.c");
+    res_dump("fs_write", res);
+}
+
+/* 2. 读取：认知层决策"读回验证" → fs_read */
+static void crud_read(tool_service_t *svc)
+{
+    int ret = -999;
+    tool_result_t *res = run_path(svc, "fs_read", E2E_FILE, &ret);
+
+    TEST(ret == 0 && res && res->success == 1 && res->output && strcmp(res->output, kSource) == 0,
+         "fs_read 内容与写入一致");
+    if (res)
+        tool_result_free(res);
+}
+
+/* 3. 编辑：认知层决策"修复 return 0 的遗留写法" → fs_edit */
+static void crud_edit(tool_service_t *svc)
+{
+    cJSON *p = cJSON_CreateObject();
+    int ret = -999;
+    tool_result_t *res;
+
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "path", E2E_FILE);
+    cJSON_AddStringToObject(p, "old", kEditOld);
+    cJSON_AddStringToObject(p, "new", kEditNew);
+    res = run_tool(svc, "fs_edit", "tool_d", p, &ret);
+    cJSON_Delete(p);
+    TEST(ret == 0 && res && res->success == 1, "fs_edit 精确替换生效");
+    res_dump("fs_edit", res);
+}
+
+/* 4. 复核：fs_read 确认修改已落地 */
+static void crud_verify(tool_service_t *svc)
+{
+    int ret = -999;
+    tool_result_t *res = run_path(svc, "fs_read", E2E_FILE, &ret);
+
+    TEST(ret == 0 && res && res->success == 1 && res->output &&
+             strstr(res->output, kEditNew) != NULL && strstr(res->output, kEditOld) == NULL,
+         "fs_read 复核：EXIT_SUCCESS 生效且 return 0 已替换");
+    if (res)
+        tool_result_free(res);
+}
+
+/* 5. 定位：fs_glob 按模式查找项目文件 */
+static void crud_glob(tool_service_t *svc)
+{
+    cJSON *p = cJSON_CreateObject();
+    int ret = -999;
+    tool_result_t *res;
+
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "pattern", "*.c");
+    cJSON_AddStringToObject(p, "base", E2E_DIR);
+    res = run_tool(svc, "fs_glob", "tool_d", p, &ret);
+    cJSON_Delete(p);
+    TEST(ret == 0 && res && res->success == 1 && res->output &&
+             strstr(res->output, "main.c") != NULL,
+         "fs_glob 定位到 main.c");
+    res_dump("fs_glob", res);
+}
+
+/* 6. 搜索：fs_grep 内容检索命中关键字 */
+static void crud_grep(tool_service_t *svc)
+{
+    cJSON *p = cJSON_CreateObject();
+    int ret = -999;
+    tool_result_t *res;
+
+    CHECK(p != NULL);
+    cJSON_AddStringToObject(p, "pattern", "hello airymax");
+    cJSON_AddStringToObject(p, "path", E2E_DIR);
+    res = run_tool(svc, "fs_grep", "tool_d", p, &ret);
+    cJSON_Delete(p);
+    TEST(ret == 0 && res && res->success == 1 && res->output &&
+             strstr(res->output, "main.c") != NULL &&
+             strstr(res->output, "hello airymax") != NULL,
+         "fs_grep 命中 main.c 中的关键字");
+    res_dump("fs_grep", res);
+}
+
+/* 7. 列表：fs_list 目录清单包含目标文件 */
+static void crud_list(tool_service_t *svc)
+{
+    int ret = -999;
+    tool_result_t *res = run_path(svc, "fs_list", E2E_DIR, &ret);
+
+    TEST(ret == 0 && res && res->success == 1 && res->output &&
+             strstr(res->output, "main.c") != NULL,
+         "fs_list 目录清单包含 main.c");
+    res_dump("fs_list", res);
+}
+
+/* 8. 删除：fs_delete 清理临时文件 */
+static void crud_delete(tool_service_t *svc)
+{
+    int ret = -999;
+    tool_result_t *res = run_path(svc, "fs_delete", E2E_FILE, &ret);
+
+#ifndef _WIN32
+    TEST(ret == 0 && res && res->success == 1 && access(E2E_FILE, F_OK) != 0,
+         "fs_delete 文件真实删除");
+#else
+    TEST(ret == 0 && res && res->success == 1, "fs_delete 文件真实删除");
+#endif
+    res_dump("fs_delete", res);
+}
+
+/* 9. 确认：fs_read 返回 NOT_FOUND */
+static void crud_gone(tool_service_t *svc)
+{
+    int ret = -999;
+    tool_result_t *res = run_path(svc, "fs_read", E2E_FILE, &ret);
+
+    TEST(ret == AIRY_ERR_NOT_FOUND, "fs_read 确认文件已不存在 (NOT_FOUND)");
+    if (res)
+        tool_result_free(res);
+}
+
 static void test_e2e_coding_crud(tool_service_t *svc)
 {
     printf("\n[阶段 1] coding 场景文件增删改查（完整链路）\n");
@@ -125,132 +280,15 @@ static void test_e2e_coding_crud(tool_service_t *svc)
     CHECK(mkdir(E2E_DIR, 0755) == 0);
 #endif
 
-    /* 1. 创建：认知层决策"写入源码文件" → fs_write */
-    cJSON *p = cJSON_CreateObject();
-    CHECK(p != NULL);
-    cJSON_AddStringToObject(p, "path", E2E_FILE);
-    cJSON_AddStringToObject(p, "content", kSource);
-    int ret = -999;
-    tool_result_t *res = run_tool(svc, "fs_write", "tool_d", p, &ret);
-    cJSON_Delete(p);
-    TEST(ret == 0 && res && res->success == 1, "fs_write 创建 main.c");
-    if (res) {
-        printf("    fs_write -> %s\n", res->output ? res->output : "(no output)");
-        tool_result_free(res);
-    }
-
-    /* 2. 读取：认知层决策"读回验证" → fs_read */
-    p = cJSON_CreateObject();
-    CHECK(p != NULL);
-    cJSON_AddStringToObject(p, "path", E2E_FILE);
-    res = run_tool(svc, "fs_read", "tool_d", p, &ret);
-    cJSON_Delete(p);
-    TEST(ret == 0 && res && res->success == 1 &&
-             res->output && strcmp(res->output, kSource) == 0,
-         "fs_read 内容与写入一致");
-    if (res) {
-        tool_result_free(res);
-    }
-
-    /* 3. 编辑：认知层决策"修复 return 0 的遗留写法" → fs_edit */
-    p = cJSON_CreateObject();
-    CHECK(p != NULL);
-    cJSON_AddStringToObject(p, "path", E2E_FILE);
-    cJSON_AddStringToObject(p, "old", kEditOld);
-    cJSON_AddStringToObject(p, "new", kEditNew);
-    res = run_tool(svc, "fs_edit", "tool_d", p, &ret);
-    cJSON_Delete(p);
-    TEST(ret == 0 && res && res->success == 1, "fs_edit 精确替换生效");
-    if (res) {
-        printf("    fs_edit -> %s\n", res->output ? res->output : "(no output)");
-        tool_result_free(res);
-    }
-
-    /* 4. 复核：fs_read 确认修改已落地 */
-    p = cJSON_CreateObject();
-    CHECK(p != NULL);
-    cJSON_AddStringToObject(p, "path", E2E_FILE);
-    res = run_tool(svc, "fs_read", "tool_d", p, &ret);
-    cJSON_Delete(p);
-    TEST(ret == 0 && res && res->success == 1 && res->output &&
-             strstr(res->output, kEditNew) != NULL && strstr(res->output, kEditOld) == NULL,
-         "fs_read 复核：EXIT_SUCCESS 生效且 return 0 已替换");
-    if (res) {
-        tool_result_free(res);
-    }
-
-    /* 5. 定位：fs_glob 按模式查找项目文件 */
-    p = cJSON_CreateObject();
-    CHECK(p != NULL);
-    cJSON_AddStringToObject(p, "pattern", "*.c");
-    cJSON_AddStringToObject(p, "base", E2E_DIR);
-    res = run_tool(svc, "fs_glob", "tool_d", p, &ret);
-    cJSON_Delete(p);
-    TEST(ret == 0 && res && res->success == 1 && res->output &&
-             strstr(res->output, "main.c") != NULL,
-         "fs_glob 定位到 main.c");
-    if (res) {
-        printf("    fs_glob -> %s\n", res->output ? res->output : "(no output)");
-        tool_result_free(res);
-    }
-
-    /* 6. 搜索：fs_grep 内容检索命中关键字 */
-    p = cJSON_CreateObject();
-    CHECK(p != NULL);
-    cJSON_AddStringToObject(p, "pattern", "hello airymax");
-    cJSON_AddStringToObject(p, "path", E2E_DIR);
-    res = run_tool(svc, "fs_grep", "tool_d", p, &ret);
-    cJSON_Delete(p);
-    TEST(ret == 0 && res && res->success == 1 && res->output &&
-             strstr(res->output, "main.c") != NULL &&
-             strstr(res->output, "hello airymax") != NULL,
-         "fs_grep 命中 main.c 中的关键字");
-    if (res) {
-        printf("    fs_grep -> %s\n", res->output ? res->output : "(no output)");
-        tool_result_free(res);
-    }
-
-    /* 7. 列表：fs_list 目录清单包含目标文件 */
-    p = cJSON_CreateObject();
-    CHECK(p != NULL);
-    cJSON_AddStringToObject(p, "path", E2E_DIR);
-    res = run_tool(svc, "fs_list", "tool_d", p, &ret);
-    cJSON_Delete(p);
-    TEST(ret == 0 && res && res->success == 1 && res->output &&
-             strstr(res->output, "main.c") != NULL,
-         "fs_list 目录清单包含 main.c");
-    if (res) {
-        printf("    fs_list -> %s\n", res->output ? res->output : "(no output)");
-        tool_result_free(res);
-    }
-
-    /* 8. 删除：fs_delete 清理临时文件 */
-    p = cJSON_CreateObject();
-    CHECK(p != NULL);
-    cJSON_AddStringToObject(p, "path", E2E_FILE);
-    res = run_tool(svc, "fs_delete", "tool_d", p, &ret);
-    cJSON_Delete(p);
-#ifndef _WIN32
-    TEST(ret == 0 && res && res->success == 1 && access(E2E_FILE, F_OK) != 0,
-         "fs_delete 文件真实删除");
-#else
-    TEST(ret == 0 && res && res->success == 1, "fs_delete 文件真实删除");
-#endif
-    if (res) {
-        printf("    fs_delete -> %s\n", res->output ? res->output : "(no output)");
-        tool_result_free(res);
-    }
-
-    /* 9. 确认：fs_read 返回 NOT_FOUND */
-    p = cJSON_CreateObject();
-    CHECK(p != NULL);
-    cJSON_AddStringToObject(p, "path", E2E_FILE);
-    res = run_tool(svc, "fs_read", "tool_d", p, &ret);
-    cJSON_Delete(p);
-    TEST(ret == AIRY_ERR_NOT_FOUND, "fs_read 确认文件已不存在 (NOT_FOUND)");
-    if (res) {
-        tool_result_free(res);
-    }
+    crud_write(svc);
+    crud_read(svc);
+    crud_edit(svc);
+    crud_verify(svc);
+    crud_glob(svc);
+    crud_grep(svc);
+    crud_list(svc);
+    crud_delete(svc);
+    crud_gone(svc);
 }
 
 static void test_e2e_escape(tool_service_t *svc)

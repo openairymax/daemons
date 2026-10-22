@@ -87,15 +87,129 @@ static int find_feedback_data(cJSON *feedback, const char *event, char *out, siz
     return 0;
 }
 
+/* 第一段断言：挂起且返回问题集，不得提前产出 plan。 */
+static void pass1_check(const char *json)
+{
+#ifdef AIRY_HAS_CJSON
+    cJSON *root = cJSON_Parse(json);
+    cJSON *need = root ? cJSON_GetObjectItem(root, "gccp_need_interaction") : NULL;
+    cJSON *qarr;
+    cJSON *plan;
+
+    CHECK(need && cJSON_IsTrue(need), "pass1: gccp_need_interaction=1",
+          "need_interaction not set");
+    qarr = root ? cJSON_GetObjectItem(root, "gccp_questions") : NULL;
+    if (!qarr) {
+        TEST_FAIL("pass1: gccp_questions", "questions field missing");
+    } else if (!cJSON_IsString(qarr) || !qarr->valuestring) {
+        TEST_FAIL("pass1: gccp_questions", "questions not a JSON string");
+    } else {
+        cJSON *parsed = cJSON_Parse(qarr->valuestring);
+
+        CHECK(parsed && cJSON_IsArray(parsed) && cJSON_GetArraySize(parsed) >= 1,
+              "pass1: questions array non-empty", "questions empty/invalid");
+        if (parsed)
+            cJSON_Delete(parsed);
+    }
+    plan = root ? cJSON_GetObjectItem(root, "plan") : NULL;
+    CHECK(!plan, "pass1: no plan (suspended before later phases)",
+          "plan present on pending pass");
+    if (root)
+        cJSON_Delete(root);
+#else
+    CHECK(strstr(json, "\"gccp_need_interaction\":1") != NULL,
+          "pass1: gccp_need_interaction=1", "field missing");
+    CHECK(strstr(json, "\"gccp_questions\"") != NULL,
+          "pass1: gccp_questions present", "field missing");
+    CHECK(strstr(json, "\"plan\"") == NULL, "pass1: no plan", "plan present");
+#endif
+}
+
+/* 第二段断言：目标确认并生成 plan，interacted=1。 */
+static void pass2_check(const char *json)
+{
+#ifdef AIRY_HAS_CJSON
+    cJSON *root = cJSON_Parse(json);
+    cJSON *plan = root ? cJSON_GetObjectItem(root, "plan") : NULL;
+    cJSON *fb;
+    char data[512] = "";
+
+    if (!plan || !cJSON_IsObject(plan)) {
+        TEST_FAIL("pass2: plan generated", "plan missing");
+    } else {
+        cJSON *nodes = cJSON_GetObjectItem(plan, "nodes");
+
+        CHECK(nodes && cJSON_IsArray(nodes) && cJSON_GetArraySize(nodes) >= 1,
+              "pass2: plan nodes non-empty", "plan nodes empty");
+    }
+    fb = root ? cJSON_GetObjectItem(root, "feedback") : NULL;
+    if (!fb || !find_feedback_data(fb, "intent_confirmed", data, sizeof(data))) {
+        TEST_FAIL("pass2: intent_confirmed feedback", "event missing");
+    } else {
+        CHECK(strstr(data, "\"interacted\":1") != NULL,
+              "pass2: intent_confirmed interacted=1", "interacted != 1");
+    }
+    if (root)
+        cJSON_Delete(root);
+#else
+    CHECK(strstr(json, "\"plan\"") != NULL, "pass2: plan generated", "plan missing");
+    CHECK(strstr(json, "\"intent_confirmed\"") != NULL,
+          "pass2: intent_confirmed feedback", "event missing");
+    CHECK(strstr(json, "\"interacted\":1") != NULL,
+          "pass2: interacted=1", "interacted != 1");
+#endif
+}
+
+/* 第三段断言：答案单次有效，再次不带答案必须重新挂起。 */
+static void pass3_check(const char *json)
+{
+#ifdef AIRY_HAS_CJSON
+    cJSON *root = cJSON_Parse(json);
+    cJSON *need = root ? cJSON_GetObjectItem(root, "gccp_need_interaction") : NULL;
+
+    CHECK(need && cJSON_IsTrue(need), "pass3: re-pending (answers cleared)",
+          "answers leaked into pass3");
+    if (root)
+        cJSON_Delete(root);
+#else
+    CHECK(strstr(json, "\"gccp_need_interaction\":1") != NULL,
+          "pass3: re-pending (answers cleared)", "answers leaked");
+#endif
+}
+
+/* 跑一段：process → 断言 → 释放结果，返回 rc 供调用方判断是否继续。 */
+static int pass_run(think_service_t *svc, const char *sess, const char *prompt,
+                    const char *answers, const char *label, void (*check)(const char *))
+{
+    think_process_result_t r = {0};
+    int rc = think_service_process(svc, sess, prompt, answers, &r);
+    char name[64];
+
+    snprintf(name, sizeof(name), "%s: rc==0", label);
+    CHECK(rc == 0 && r.json, name, "process failed");
+    if (rc == 0 && r.json)
+        check(r.json);
+    think_result_free(&r);
+    return rc;
+}
+
 static void test_gccp_twopass(void)
 {
     think_service_config_t cfg;
+    const char *prompt = "为项目实现一个带登录、检索与报表的完整系统，并保证生产级可用";
+    const char *sess = "test-session-1";
+    const char *answers = "{\"endpoint\":\"交付可运行的完整系统与测试报告\","
+                          "\"start\":\"已有 agentrt 底座与 llm 服务\","
+                          "\"bottleneck\":\"需补齐登录与报表模块并做生产加固\","
+                          "\"audience\":\"平台运维团队按验收标准验收\"}";
+    think_service_t *svc;
+
     memset(&cfg, 0, sizeof(cfg));
     cfg.enabled = 1;
     cfg.process_timeout_ms = 30000;
     cfg.max_feedback_events = 64;
 
-    think_service_t *svc = think_service_create(&cfg);
+    svc = think_service_create(&cfg);
     if (!svc) {
         TEST_FAIL("gccp_twopass", "think_service_create failed");
         return;
@@ -106,106 +220,9 @@ static void test_gccp_twopass(void)
         return;
     }
 
-    const char *prompt = "为项目实现一个带登录、检索与报表的完整系统，并保证生产级可用";
-    const char *sess = "test-session-1";
-
-    /* ── 第一段：无答案 → 挂起并返回问题集 ── */
-    think_process_result_t pass1 = {0};
-    int rc = think_service_process(svc, sess, prompt, NULL, &pass1);
-    CHECK(rc == 0 && pass1.json, "pass1: rc==0 (interaction is success semantics)",
-          "pass1 failed");
-    if (rc == 0 && pass1.json) {
-#ifdef AIRY_HAS_CJSON
-        cJSON *root = cJSON_Parse(pass1.json);
-        cJSON *need = root ? cJSON_GetObjectItem(root, "gccp_need_interaction") : NULL;
-        CHECK(need && cJSON_IsTrue(need), "pass1: gccp_need_interaction=1",
-              "need_interaction not set");
-        cJSON *qarr = root ? cJSON_GetObjectItem(root, "gccp_questions") : NULL;
-        if (!qarr) {
-            TEST_FAIL("pass1: gccp_questions", "questions field missing");
-        } else if (!cJSON_IsString(qarr) || !qarr->valuestring) {
-            TEST_FAIL("pass1: gccp_questions", "questions not a JSON string");
-        } else {
-            cJSON *parsed = cJSON_Parse(qarr->valuestring);
-            CHECK(parsed && cJSON_IsArray(parsed) && cJSON_GetArraySize(parsed) >= 1,
-                  "pass1: questions array non-empty", "questions empty/invalid");
-            if (parsed)
-                cJSON_Delete(parsed);
-        }
-        cJSON *plan = root ? cJSON_GetObjectItem(root, "plan") : NULL;
-        CHECK(!plan, "pass1: no plan (suspended before later phases)",
-              "plan present on pending pass");
-        if (root)
-            cJSON_Delete(root);
-#else
-        CHECK(strstr(pass1.json, "\"gccp_need_interaction\":1") != NULL,
-              "pass1: gccp_need_interaction=1", "field missing");
-        CHECK(strstr(pass1.json, "\"gccp_questions\"") != NULL,
-              "pass1: gccp_questions present", "field missing");
-        CHECK(strstr(pass1.json, "\"plan\"") == NULL, "pass1: no plan", "plan present");
-#endif
-    }
-
-    /* ── 第二段：携带答案重发 → 目标确认并生成 plan，interacted=1 ── */
-    const char *answers = "{\"endpoint\":\"交付可运行的完整系统与测试报告\","
-                          "\"start\":\"已有 agentrt 底座与 llm 服务\","
-                          "\"bottleneck\":\"需补齐登录与报表模块并做生产加固\","
-                          "\"audience\":\"平台运维团队按验收标准验收\"}";
-    think_process_result_t pass2 = {0};
-    rc = think_service_process(svc, sess, prompt, answers, &pass2);
-    CHECK(rc == 0 && pass2.json, "pass2: rc==0 (answers consumed)", "pass2 failed");
-    if (rc == 0 && pass2.json) {
-#ifdef AIRY_HAS_CJSON
-        cJSON *root = cJSON_Parse(pass2.json);
-        cJSON *plan = root ? cJSON_GetObjectItem(root, "plan") : NULL;
-        if (!plan || !cJSON_IsObject(plan)) {
-            TEST_FAIL("pass2: plan generated", "plan missing");
-        } else {
-            cJSON *nodes = cJSON_GetObjectItem(plan, "nodes");
-            CHECK(nodes && cJSON_IsArray(nodes) && cJSON_GetArraySize(nodes) >= 1,
-                  "pass2: plan nodes non-empty", "plan nodes empty");
-        }
-        cJSON *fb = root ? cJSON_GetObjectItem(root, "feedback") : NULL;
-        char data[512] = "";
-        if (!fb || !find_feedback_data(fb, "intent_confirmed", data, sizeof(data))) {
-            TEST_FAIL("pass2: intent_confirmed feedback", "event missing");
-        } else {
-            CHECK(strstr(data, "\"interacted\":1") != NULL,
-                  "pass2: intent_confirmed interacted=1", "interacted != 1");
-        }
-        if (root)
-            cJSON_Delete(root);
-#else
-        CHECK(strstr(pass2.json, "\"plan\"") != NULL, "pass2: plan generated",
-              "plan missing");
-        CHECK(strstr(pass2.json, "\"intent_confirmed\"") != NULL,
-              "pass2: intent_confirmed feedback", "event missing");
-        CHECK(strstr(pass2.json, "\"interacted\":1") != NULL,
-              "pass2: interacted=1", "interacted != 1");
-#endif
-    }
-
-    /* ── 第三段：答案单次有效，再次不带答案 → 重新挂起（不泄漏） ── */
-    think_process_result_t pass3 = {0};
-    rc = think_service_process(svc, sess, prompt, NULL, &pass3);
-    CHECK(rc == 0 && pass3.json, "pass3: rc==0 (answers not leaked)", "pass3 failed");
-    if (rc == 0 && pass3.json) {
-#ifdef AIRY_HAS_CJSON
-        cJSON *root = cJSON_Parse(pass3.json);
-        cJSON *need = root ? cJSON_GetObjectItem(root, "gccp_need_interaction") : NULL;
-        CHECK(need && cJSON_IsTrue(need), "pass3: re-pending (answers cleared)",
-              "answers leaked into pass3");
-        if (root)
-            cJSON_Delete(root);
-#else
-        CHECK(strstr(pass3.json, "\"gccp_need_interaction\":1") != NULL,
-              "pass3: re-pending (answers cleared)", "answers leaked");
-#endif
-    }
-
-    think_result_free(&pass1);
-    think_result_free(&pass2);
-    think_result_free(&pass3);
+    pass_run(svc, sess, prompt, NULL, "pass1", pass1_check);
+    pass_run(svc, sess, prompt, answers, "pass2", pass2_check);
+    pass_run(svc, sess, prompt, NULL, "pass3", pass3_check);
     think_service_destroy(svc);
 }
 
