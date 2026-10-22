@@ -187,103 +187,111 @@ int test_dag_upstream_inject_par(void)
  *  4) consensus majority/unanimity strategies decide correctly (incl. veto)
  *  5) duplicate voting rejected (one vote per agent)
  */
-int test_dag_group_consensus_collab(void)
+/* 三名评审的静态档案表：成员 id 同时用于建组名单、委派落点校验与投票，
+ * 单一来源避免三处字符串漂移。 */
+static const mac_agent_info_t k_reviewers[3] = {
+    {.id = "reviewer_a",
+     .name = "Reviewer A",
+     .performance_score = 0.9,
+     .reliability_score = 0.8,
+     .max_concurrent_tasks = 3,
+     .available = true},
+    {.id = "reviewer_b",
+     .name = "Reviewer B",
+     .performance_score = 0.8,
+     .reliability_score = 0.9,
+     .max_concurrent_tasks = 3,
+     .available = true},
+    {.id = "reviewer_c",
+     .name = "Reviewer C",
+     .performance_score = 0.7,
+     .reliability_score = 0.7,
+     .max_concurrent_tasks = 3,
+     .available = true},
+};
+
+/* 三项评审任务：委派与回写共用同一份任务表。 */
+static const mac_collab_task_t k_tasks[3] = {
+    {.id = "t_1", .input_json = "{\"file\":\"ipc.c\",\"mode\":\"security\"}"},
+    {.id = "t_2", .input_json = "{\"file\":\"sched.c\",\"mode\":\"perf\"}"},
+    {.id = "t_3", .input_json = "{\"file\":\"mem.c\",\"mode\":\"leak\"}"},
+};
+
+/* 注册三名评审并组建协作组。 */
+static int squad_setup(mac_framework_t *fw, char **group_id)
 {
-    printf("=== test_dag_group_consensus_collab ===\n");
-
-    char *group_id = NULL;
-    char **results = NULL;
-    size_t result_count = 0;
-    char *c1 = NULL, *res1 = NULL;
-    char *c2 = NULL, *res2 = NULL;
-    char *assigned[3] = {NULL, NULL, NULL};
-
-    mac_framework_t *fw = mac_framework_create(MAC_MODE_COLLABORATIVE);
-    if (!fw) {
-        printf("  FAILED: mac_framework_create\n");
-        return 1;
-    }
-
-    const char *ids[3] = {"reviewer_a", "reviewer_b", "reviewer_c"};
-    mac_agent_info_t agents[3] = {
-        {.id = "reviewer_a",
-         .name = "Reviewer A",
-         .performance_score = 0.9,
-         .reliability_score = 0.8,
-         .max_concurrent_tasks = 3,
-         .available = true},
-        {.id = "reviewer_b",
-         .name = "Reviewer B",
-         .performance_score = 0.8,
-         .reliability_score = 0.9,
-         .max_concurrent_tasks = 3,
-         .available = true},
-        {.id = "reviewer_c",
-         .name = "Reviewer C",
-         .performance_score = 0.7,
-         .reliability_score = 0.7,
-         .max_concurrent_tasks = 3,
-         .available = true},
-    };
+    const char *ids[3] = {k_reviewers[0].id, k_reviewers[1].id, k_reviewers[2].id};
     size_t registered = 0;
-    if (mac_framework_register_agents_batch(fw, agents, 3, &registered) != 0 || registered != 3) {
+
+    if (mac_framework_register_agents_batch(fw, k_reviewers, 3, &registered) != 0 ||
+        registered != 3) {
         printf("  FAILED: register_agents_batch (%zu/3)\n", registered);
-        mac_framework_destroy(fw);
         return 1;
     }
-
     if (mac_framework_create_group(fw, "code-review-squad", MAC_MODE_COLLABORATIVE, ids, 3,
-                                   &group_id) != 0 ||
-        !group_id) {
+                                   group_id) != 0 ||
+        !*group_id) {
         printf("  FAILED: create_group\n");
-        mac_framework_destroy(fw);
         return 1;
     }
+    return 0;
+}
 
-    mac_collab_task_t tasks[3] = {
-        {.id = "t_1", .input_json = "{\"file\":\"ipc.c\",\"mode\":\"security\"}"},
-        {.id = "t_2", .input_json = "{\"file\":\"sched.c\",\"mode\":\"perf\"}"},
-        {.id = "t_3", .input_json = "{\"file\":\"mem.c\",\"mode\":\"leak\"}"},
-    };
-    if (mac_framework_delegate_batch(fw, group_id, tasks, 3, assigned) != 0) {
+/* 批量委派三项评审，并校验每个落点都在组成员内。 */
+static int delegate_all(mac_framework_t *fw, const char *group_id, char **assigned)
+{
+    if (mac_framework_delegate_batch(fw, group_id, k_tasks, 3, assigned) != 0) {
         printf("  FAILED: delegate_batch\n");
-        AIRY_FREE(group_id);
-        mac_framework_destroy(fw);
         return 1;
     }
     for (int i = 0; i < 3; i++) {
         bool in_group = false;
+
         if (!assigned[i]) {
             printf("  FAILED: task t_%d not assigned\n", i + 1);
-            goto fail;
+            return 1;
         }
         for (int j = 0; j < 3; j++) {
-            if (strcmp(assigned[i], ids[j]) == 0)
+            if (strcmp(assigned[i], k_reviewers[j].id) == 0)
                 in_group = true;
         }
         if (!in_group) {
             printf("  FAILED: task t_%d assigned outside group: %s\n", i + 1, assigned[i]);
-            goto fail;
+            return 1;
         }
         AIRY_FREE(assigned[i]);
         assigned[i] = NULL;
     }
+    return 0;
+}
 
+/* 回写三项评审产出，闭合 delegate → complete → collect 环。 */
+static int complete_all(mac_framework_t *fw)
+{
     for (int i = 0; i < 3; i++) {
         char out[64];
-        snprintf(out, sizeof(out), "{\"review\":\"ok-%s\"}", tasks[i].id);
-        if (mac_framework_complete_task(fw, tasks[i].id, out) != 0) {
-            printf("  FAILED: complete_task %s\n", tasks[i].id);
-            goto fail;
+
+        snprintf(out, sizeof(out), "{\"review\":\"ok-%s\"}", k_tasks[i].id);
+        if (mac_framework_complete_task(fw, k_tasks[i].id, out) != 0) {
+            printf("  FAILED: complete_task %s\n", k_tasks[i].id);
+            return 1;
         }
     }
+    return 0;
+}
+
+/* 收集全部完成结果，校验每项产出都带 review 标记。 */
+static int collect_all(mac_framework_t *fw, const char *group_id)
+{
+    char **results = NULL;
+    size_t result_count = 0;
+    bool all_ok = true;
 
     if (mac_framework_collect_results(fw, group_id, NULL, &results, &result_count) != 0 ||
         result_count != 3) {
         printf("  FAILED: collect_results (count=%zu, expect 3)\n", result_count);
-        goto fail;
+        return 1;
     }
-    bool all_ok = true;
     for (size_t i = 0; i < result_count; i++) {
         if (!results[i] || strstr(results[i], "\"review\":\"ok-") == NULL)
             all_ok = false;
@@ -292,76 +300,114 @@ int test_dag_group_consensus_collab(void)
     AIRY_FREE(results);
     if (!all_ok) {
         printf("  FAILED: collected results incomplete\n");
-        goto fail;
+        return 1;
     }
+    return 0;
+}
+
+/* 多数决：全票赞成通过，且同一 agent 重复投票必须被拒。 */
+static int cons_majority(mac_framework_t *fw, const char *group_id)
+{
+    char *cid = NULL;
+    char *res = NULL;
+    int rc = 1;
 
     if (mac_framework_start_consensus(fw, group_id, "{\"merge\":\"allowed\",\"round\":1}",
-                                      MAC_CONSENSUS_MAJORITY, &c1) != 0 ||
-        !c1) {
+                                      MAC_CONSENSUS_MAJORITY, &cid) != 0 ||
+        !cid) {
         printf("  FAILED: start_consensus (majority)\n");
-        goto fail;
+        return 1;
     }
     for (int i = 0; i < 3; i++) {
-        if (mac_framework_vote(fw, c1, ids[i], "{\"vote\":\"approve\"}") != 0) {
-            printf("  FAILED: vote %s\n", ids[i]);
-            goto fail;
+        if (mac_framework_vote(fw, cid, k_reviewers[i].id, "{\"vote\":\"approve\"}") != 0) {
+            printf("  FAILED: vote %s\n", k_reviewers[i].id);
+            goto out;
         }
     }
-    if (mac_framework_vote(fw, c1, "reviewer_a", "{\"vote\":\"approve\"}") == 0) {
+    if (mac_framework_vote(fw, cid, "reviewer_a", "{\"vote\":\"approve\"}") == 0) {
         printf("  FAILED: duplicate vote not rejected\n");
-        goto fail;
+        goto out;
     }
-    if (mac_framework_resolve_consensus(fw, c1, &res1) != 0 || !res1 ||
-        strstr(res1, "\"merge\":\"allowed\"") == NULL) {
-        printf("  FAILED: majority not approved (res=%s)\n", res1 ? res1 : "NULL");
-        AIRY_FREE(res1);
-        goto fail;
+    if (mac_framework_resolve_consensus(fw, cid, &res) != 0 || !res ||
+        strstr(res, "\"merge\":\"allowed\"") == NULL) {
+        printf("  FAILED: majority not approved (res=%s)\n", res ? res : "NULL");
+        goto out;
     }
-    AIRY_FREE(res1);
-    AIRY_FREE(c1);
-    c1 = NULL;
+    rc = 0;
+out:
+    AIRY_FREE(res);
+    AIRY_FREE(cid);
+    return rc;
+}
+
+/* 一致决：任一否决即整体否决（veto）。 */
+static int cons_unanimous(mac_framework_t *fw, const char *group_id)
+{
+    char *cid = NULL;
+    char *res = NULL;
+    int rc = 1;
 
     if (mac_framework_start_consensus(fw, group_id, "{\"merge\":\"blocked\",\"round\":2}",
-                                      MAC_CONSENSUS_UNANIMOUS, &c2) != 0 ||
-        !c2) {
+                                      MAC_CONSENSUS_UNANIMOUS, &cid) != 0 ||
+        !cid) {
         printf("  FAILED: start_consensus (unanimous)\n");
-        goto fail;
+        return 1;
     }
-    if (mac_framework_vote(fw, c2, "reviewer_a", "approve") != 0 ||
-        mac_framework_vote(fw, c2, "reviewer_b", "reject") != 0 ||
-        mac_framework_vote(fw, c2, "reviewer_c", "approve") != 0) {
+    if (mac_framework_vote(fw, cid, "reviewer_a", "approve") != 0 ||
+        mac_framework_vote(fw, cid, "reviewer_b", "reject") != 0 ||
+        mac_framework_vote(fw, cid, "reviewer_c", "approve") != 0) {
         printf("  FAILED: unanimous votes\n");
-        goto fail;
+        goto out;
     }
-    if (mac_framework_resolve_consensus(fw, c2, &res2) != 0 || !res2 ||
-        strstr(res2, "rejected") == NULL) {
-        printf("  FAILED: unanimous veto not detected (res=%s)\n", res2 ? res2 : "NULL");
-        AIRY_FREE(res2);
-        goto fail;
+    if (mac_framework_resolve_consensus(fw, cid, &res) != 0 || !res ||
+        strstr(res, "rejected") == NULL) {
+        printf("  FAILED: unanimous veto not detected (res=%s)\n", res ? res : "NULL");
+        goto out;
     }
-    AIRY_FREE(res2);
-    AIRY_FREE(c2);
-    c2 = NULL;
+    rc = 0;
+out:
+    AIRY_FREE(res);
+    AIRY_FREE(cid);
+    return rc;
+}
 
+int test_dag_group_consensus_collab(void)
+{
+    char *assigned[3] = {NULL, NULL, NULL};
+    char *group_id = NULL;
+    mac_framework_t *fw;
+    int rc = 1;
+
+    printf("=== test_dag_group_consensus_collab ===\n");
+
+    fw = mac_framework_create(MAC_MODE_COLLABORATIVE);
+    if (!fw) {
+        printf("  FAILED: mac_framework_create\n");
+        return 1;
+    }
+    if (squad_setup(fw, &group_id) != 0)
+        goto out;
+    if (delegate_all(fw, group_id, assigned) != 0)
+        goto out;
+    if (complete_all(fw) != 0)
+        goto out;
+    if (collect_all(fw, group_id) != 0)
+        goto out;
+    if (cons_majority(fw, group_id) != 0)
+        goto out;
+    if (cons_unanimous(fw, group_id) != 0)
+        goto out;
     if (mac_framework_disband_group(fw, group_id) != 0) {
         printf("  FAILED: disband_group\n");
-        goto fail;
+        goto out;
     }
-    AIRY_FREE(group_id);
-    group_id = NULL;
-    mac_framework_destroy(fw);
     printf("  PASSED (group collab: 3 tasks delegated+collected; consensus: majority ok, unanimous "
            "veto)\n\n");
-    return 0;
-
-fail:
+    rc = 0;
+out:
     for (int i = 0; i < 3; i++)
         AIRY_FREE(assigned[i]);
-    AIRY_FREE(res1);
-    AIRY_FREE(c1);
-    AIRY_FREE(res2);
-    AIRY_FREE(c2);
     AIRY_FREE(group_id);
     mac_framework_destroy(fw);
-    return 1;
+    return rc;
 }

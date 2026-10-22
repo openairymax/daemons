@@ -73,60 +73,67 @@ static int g_tests_passed = 0;
         }                       \
     } while (0)
 
+/* 关键能力期望表：cap_key → kind 与归属命名空间（ns 为 NULL 表不校验归属）。
+ * 期望值集中声明，增删能力只改一行，避免逐条 if 断言散落在流程里。 */
+static const struct {
+    const char *cap;
+    gw_cap_kind_t kind;
+    const char *ns;
+} k_key_caps[] = {
+    {"llm.complete", GW_CAP_KIND_FWD, NULL},
+    {"llm.list_models", GW_CAP_KIND_LLM_LIST, NULL},
+    {"agent.run", GW_CAP_KIND_AGENT_RUN, NULL},
+    {"agent.cancel", GW_CAP_KIND_AGENT_RUN, NULL},
+    {"tool.pending", GW_CAP_KIND_TOOL_APPROVE, NULL},
+    {"tool.approve", GW_CAP_KIND_TOOL_APPROVE, NULL},
+    {"mem.write", GW_CAP_KIND_MEM, NULL},
+    {"mem.kb_search", GW_CAP_KIND_MEM, NULL},
+    /* 语义缓存 / 上下文台账 / 提示词压缩三类能力必须可在网关层解析；
+     * 缺失即 fail-closed（-32601），主链路无处接入。 */
+    {"mem.cache_put", GW_CAP_KIND_MEM, NULL},
+    {"mem.cache_get", GW_CAP_KIND_MEM, NULL},
+    {"mem.cache_del", GW_CAP_KIND_MEM, NULL},
+    {"mem.cache_stats", GW_CAP_KIND_MEM, NULL},
+    {"mem.ledger_append", GW_CAP_KIND_MEM, NULL},
+    {"mem.ledger_window", GW_CAP_KIND_MEM, NULL},
+    {"mem.ledger_budget", GW_CAP_KIND_MEM, NULL},
+    {"mem.ledger_mark", GW_CAP_KIND_MEM, NULL},
+    {"mem.ledger_history", GW_CAP_KIND_MEM, NULL},
+    {"mem.ledger_stats", GW_CAP_KIND_MEM, NULL},
+    {"mem.compress", GW_CAP_KIND_MEM, NULL},
+    {"hall.board", GW_CAP_KIND_HALL, NULL},
+    {"hall.stream", GW_CAP_KIND_HALL, NULL},
+    {"think.process", GW_CAP_KIND_FWD, NULL},
+    {"sched.dag_submit", GW_CAP_KIND_FWD, NULL},
+    {"cupolas.vault_store", GW_CAP_KIND_FWD, NULL},
+    /* policy.* 统一 RPC 面（外部 namespace policy → cupolas_d） */
+    {"policy.load", GW_CAP_KIND_FWD, "cupolas"},
+    {"policy.activate", GW_CAP_KIND_FWD, "cupolas"},
+    {"policy.rollback", GW_CAP_KIND_FWD, "cupolas"},
+    {"policy.status", GW_CAP_KIND_FWD, "cupolas"},
+    {"monit.heartbeat", GW_CAP_KIND_FWD, NULL},
+    {"a2a.send_message", GW_CAP_KIND_FWD, NULL},
+};
+
+static int key_caps_check(void)
+{
+    for (size_t i = 0; i < sizeof(k_key_caps) / sizeof(k_key_caps[0]); ++i) {
+        const gw_cap_t *c = gw_cap_find(k_key_caps[i].cap);
+        const char *ns = k_key_caps[i].ns;
+
+        if (!c || c->kind != k_key_caps[i].kind || (ns && strcmp(c->ns, ns) != 0)) {
+            TEST_FAIL(k_key_caps[i].cap);
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static void test_key_caps(void)
 {
     TEST_BEGIN("key caps present with right kinds");
-    const gw_cap_t *c;
-    c = gw_cap_find("llm.complete");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD);
-    c = gw_cap_find("llm.list_models");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_LLM_LIST);
-    c = gw_cap_find("agent.run");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_AGENT_RUN);
-    c = gw_cap_find("agent.cancel");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_AGENT_RUN);
-    c = gw_cap_find("tool.pending");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_TOOL_APPROVE);
-    c = gw_cap_find("tool.approve");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_TOOL_APPROVE);
-    c = gw_cap_find("mem.write");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_MEM);
-    c = gw_cap_find("mem.kb_search");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_MEM);
-    /* 语义缓存 / 上下文台账 / 提示词压缩三类能力必须可在网关
-     * 层解析；缺失即 fail-closed（-32601），主链路无处接入。 */
-    static const char *const mem_caps[] = {
-        "mem.cache_put",      "mem.cache_get",     "mem.cache_del",     "mem.cache_stats",
-        "mem.ledger_append",  "mem.ledger_window", "mem.ledger_budget", "mem.ledger_mark",
-        "mem.ledger_history", "mem.ledger_stats",  "mem.compress",
-    };
-    for (size_t i = 0; i < sizeof(mem_caps) / sizeof(mem_caps[0]); ++i) {
-        c = gw_cap_find(mem_caps[i]);
-        ASSERT_TRUE(c && c->kind == GW_CAP_KIND_MEM);
-    }
-    c = gw_cap_find("hall.board");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_HALL);
-    c = gw_cap_find("hall.stream");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_HALL);
-    c = gw_cap_find("think.process");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD);
-    c = gw_cap_find("sched.dag_submit");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD);
-    c = gw_cap_find("cupolas.vault_store");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD);
-    /* policy.* 统一 RPC 面（外部 namespace policy → cupolas_d） */
-    c = gw_cap_find("policy.load");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD && strcmp(c->ns, "cupolas") == 0);
-    c = gw_cap_find("policy.activate");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD && strcmp(c->ns, "cupolas") == 0);
-    c = gw_cap_find("policy.rollback");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD && strcmp(c->ns, "cupolas") == 0);
-    c = gw_cap_find("policy.status");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD && strcmp(c->ns, "cupolas") == 0);
-    c = gw_cap_find("monit.heartbeat");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD);
-    c = gw_cap_find("a2a.send_message");
-    ASSERT_TRUE(c && c->kind == GW_CAP_KIND_FWD);
+    if (!key_caps_check())
+        return;
     TEST_PASS();
 }
 
