@@ -264,6 +264,97 @@ static void tool_call_log(const tool_metadata_t *meta, const char *caller_agent,
                  params, err ? " err=" : "", err ? err : "");
 }
 
+/* Every rejection path fills the same result fields. msg transfers to result. */
+static int tool_fail(tool_result_t *result, char *msg, tool_result_class_t cls, int err)
+{
+    result->success = 0;
+    result->output = AIRY_STRDUP("");
+    result->error = msg;
+    result->exit_code = -1;
+    result->failure_class = cls;
+    return err;
+}
+
+/* Trim the capture buffer; a failed realloc keeps the oversized block. */
+static char *tool_shrink(char *buffer, size_t cap_size)
+{
+    size_t actual_len = strlen(buffer);
+    char *shrunk = (actual_len + 1 < cap_size)
+                       ? (char *)AIRY_REALLOC(buffer, actual_len + 1)
+                       : NULL;
+    return shrunk ? shrunk : buffer;
+}
+
+/* Map exec_result onto the record: 0 is success, -1 execvp failed, -2 the
+ * budget expired, anything below that a terminating signal. */
+static void tool_set_exit(tool_executor_t *exec, tool_result_t *result, int ret,
+                          uint32_t timeout_ms, const char *exe)
+{
+    const char *name = exe ? exe : "NULL";
+    char msg[256];
+
+    if (ret == 0) {
+        result->success = 1;
+        result->exit_code = 0;
+        result->failure_class = TOOL_RESULT_CLASS_SUCCESS;
+        /* P2: keep the counter update under exec->lock (as the builtin branch
+         * does) - it was racing with concurrent tool invocations. */
+        airy_mtx_lock(&exec->lock);
+        exec->success_count++;
+        airy_mtx_unlock(&exec->lock);
+        return;
+    }
+
+    result->success = 0;
+    result->exit_code = ret;
+    if (ret == -1) {
+        SVC_LOG_ERROR("tool_executor_run: failed to start command '%s'", name);
+        if (result->output && result->output[0])
+            SVC_LOG_ERROR("tool_executor_run: start-fail stderr: %.200s", result->output);
+        result->error = AIRY_STRDUP("Failed to execute command: execvp failed");
+        result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
+        return;
+    }
+    if (ret == -2) {
+        SVC_LOG_ERROR("tool_executor_run: command timed out after %u ms (executable=%s)",
+                      timeout_ms, name);
+        result->error = AIRY_STRDUP("Command timed out");
+        result->exit_code = -1;
+        result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
+        return;
+    }
+    if (ret > 0) {
+        SVC_LOG_ERROR("tool_executor_run: command failed with exit code %d (executable=%s)", ret,
+                      name);
+        if (result->output && result->output[0])
+            SVC_LOG_ERROR("tool_executor_run: child stderr: %.200s", result->output);
+        snprintf(msg, sizeof(msg), "Command exited with code %d", ret);
+    } else {
+        SVC_LOG_ERROR("tool_executor_run: command killed by signal %d (executable=%s)", -ret, name);
+        snprintf(msg, sizeof(msg), "Command killed by signal %d", -ret);
+    }
+    result->error = AIRY_STRDUP(msg);
+    result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
+}
+
+/* Builtin tools (builtin:xxx) dispatch in-process after approval; each one
+ * honours the per-tool budget (fs_grep once stalled a worker for 158s). */
+static int tool_builtin_exec(tool_executor_t *exec, const tool_metadata_t *meta,
+                             const char *params_json, tool_result_t *result, time_t start_time)
+{
+    int rc = tool_builtin_run(meta->id, params_json, executor_budget_ms(exec, meta), result);
+    result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
+    if (rc == 0 && result->success) {
+        result->failure_class = TOOL_RESULT_CLASS_SUCCESS;
+        airy_mtx_lock(&exec->lock);
+        exec->success_count++;
+        airy_mtx_unlock(&exec->lock);
+    } else {
+        result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
+    }
+    return rc;
+}
+
 int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const char *params_json,
                       const char *agent_id, tool_result_t **out_result)
 {
@@ -290,14 +381,9 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     if (!meta->executable || strlen(meta->executable) == 0) {
         SVC_LOG_ERROR("tool_executor_run: no executable specified in tool metadata (id=%s)",
                       meta->id ? meta->id : "?");
-        result->success = 0;
-        result->output = AIRY_STRDUP("");
-        result->error = AIRY_STRDUP("No executable specified in tool metadata");
-        result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
-        result->duration_ms = 0;
         *out_result = result;
-        return AIRY_ERR_INVALID_PARAM;
+        return tool_fail(result, AIRY_STRDUP("No executable specified in tool metadata"),
+                         TOOL_RESULT_CLASS_RESPOND_TO_MODEL, AIRY_ERR_INVALID_PARAM);
     }
 
     /* Execute directly via execvp (no shell), no SEC-011 shell
@@ -316,14 +402,10 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     if (!exec->gate) {
         SVC_LOG_ERROR("approval gate is NULL — tool execution DENIED (fail-closed). "
                       "Call exec_set_gate() before executing tools.");
-        result->success = 0;
-        result->output = AIRY_STRDUP("");
-        result->error = AIRY_STRDUP("Safety approval system not configured (approval gate is NULL)");
-        result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_FATAL;
-        result->duration_ms = 0;
         *out_result = result;
-        return AIRY_EPERM;
+        return tool_fail(result,
+                         AIRY_STRDUP("Safety approval system not configured (approval gate is NULL)"),
+                         TOOL_RESULT_CLASS_FATAL, AIRY_EPERM);
     }
 
     {
@@ -331,15 +413,11 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
         approval_gate_verdict_t verdict =
             gate_ask(exec->gate, caller_agent, meta, params_json, &deny_reason);
         if (verdict != APPROVAL_GATE_ALLOWED) {
-            result->success = 0;
-            result->output = AIRY_STRDUP("");
-            result->error =
-                deny_reason ? deny_reason : AIRY_STRDUP("Tool execution denied by safety guard");
-            result->exit_code = -1;
-            result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
-            result->duration_ms = 0;
             *out_result = result;
-            return AIRY_EPERM;
+            return tool_fail(result,
+                             deny_reason ? deny_reason
+                                         : AIRY_STRDUP("Tool execution denied by safety guard"),
+                             TOOL_RESULT_CLASS_RESPOND_TO_MODEL, AIRY_EPERM);
         }
     }
 
@@ -350,18 +428,7 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
      * executor thread for 158s and stalled the DAG pipeline. Every builtin
      * now honors the per-tool metadata budget (fallback: manager default). */
     if (tool_builtin_is_builtin(meta->executable)) {
-        uint32_t btimeout_ms = executor_budget_ms(exec, meta);
-        int brc = tool_builtin_run(meta->id, params_json, btimeout_ms, result);
-        result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
-        if (brc == 0 && result->success) {
-            result->failure_class = TOOL_RESULT_CLASS_SUCCESS;
-            airy_mtx_lock(&exec->lock);
-            exec->success_count++;
-            airy_mtx_unlock(&exec->lock);
-        } else {
-
-            result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
-        }
+        int brc = tool_builtin_exec(exec, meta, params_json, result, start_time);
         tool_call_log(meta, caller_agent, params_json, result);
         tool_hall_emit_result(meta, caller_agent, result);
         *out_result = result;
@@ -383,14 +450,10 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     char *output_buffer = (char *)AIRY_MALLOC(cap_size);
     if (!output_buffer) {
         SVC_LOG_ERROR("tool_executor_run: malloc failed for output buffer (size=%zu)", cap_size);
-        result->success = 0;
-        result->output = AIRY_STRDUP("");
-        result->error = AIRY_STRDUP("Memory allocation failed for output buffer");
-        result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_FATAL;
         result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
         *out_result = result;
-        return AIRY_ERR_OUT_OF_MEMORY;
+        return tool_fail(result, AIRY_STRDUP("Memory allocation failed for output buffer"),
+                         TOOL_RESULT_CLASS_FATAL, AIRY_ERR_OUT_OF_MEMORY);
     }
     output_buffer[0] = '\0';
 
@@ -413,15 +476,11 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     if (!exec->sandbox) {
         SVC_LOG_ERROR("sandbox is NULL — tool execution DENIED (fail-closed). "
                       "Sandbox initialization failed during executor creation.");
-        result->success = 0;
-        result->output = AIRY_STRDUP("");
-        result->error = AIRY_STRDUP("Sandbox not configured (initialization failed)");
-        result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_FATAL;
         result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
         AIRY_FREE(output_buffer);
         *out_result = result;
-        return AIRY_EPERM;
+        return tool_fail(result, AIRY_STRDUP("Sandbox not configured (initialization failed)"),
+                         TOOL_RESULT_CLASS_FATAL, AIRY_EPERM);
     }
 
     tool_execute_args_t targs = {.executable = meta->executable,
@@ -437,81 +496,22 @@ int tool_executor_run(tool_executor_t *exec, const tool_metadata_t *meta, const 
     if (sb_ret != AIRY_SUCCESS) {
         SVC_LOG_ERROR("sandbox denied tool '%s' execution (rc=%d) — fail-closed",
                       meta->name ? meta->name : "?", (int)sb_ret);
-        result->success = 0;
-        result->output = AIRY_STRDUP("");
-        result->error = AIRY_STRDUP("Tool execution denied by sandbox (permission/quota/state)");
-        result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_FATAL;
         result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
         AIRY_FREE(output_buffer);
         *out_result = result;
-        return AIRY_EPERM;
+        return tool_fail(result,
+                         AIRY_STRDUP("Tool execution denied by sandbox (permission/quota/state)"),
+                         TOOL_RESULT_CLASS_FATAL, AIRY_EPERM);
     }
 
     /* sandbox_invoke succeeded: targs.exec_result holds the
      * airy_process_run_capture return value (0-255=exit code; -1=start
      * failure; -2=timeout) */
-    int ret = targs.exec_result;
     (void)sb_out_result;
 
-    size_t actual_len = strlen(output_buffer);
-    if (actual_len + 1 < cap_size) {
-        char *shrunk = (char *)AIRY_REALLOC(output_buffer, actual_len + 1);
-        if (shrunk) {
-            output_buffer = shrunk;
-        }
-    }
-
-    result->output = output_buffer;
+    result->output = tool_shrink(output_buffer, cap_size);
     result->error = NULL;
-
-    if (ret == -1) {
-        SVC_LOG_ERROR("tool_executor_run: failed to start command '%s'",
-                      meta->executable ? meta->executable : "NULL");
-        if (output_buffer && output_buffer[0])
-            SVC_LOG_ERROR("tool_executor_run: start-fail stderr: %.200s", output_buffer);
-        result->success = 0;
-        result->error = AIRY_STRDUP("Failed to execute command: execvp failed");
-        result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
-    } else if (ret == -2) {
-        SVC_LOG_ERROR("tool_executor_run: command timed out after %u ms (executable=%s)",
-                      timeout_ms, meta->executable ? meta->executable : "NULL");
-        result->success = 0;
-        result->error = AIRY_STRDUP("Command timed out");
-        result->exit_code = -1;
-        result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
-    } else if (ret == 0) {
-        result->success = 1;
-        result->exit_code = 0;
-        result->failure_class = TOOL_RESULT_CLASS_SUCCESS;
-        /* P2: keep the counter update under exec->lock (as the builtin branch
-         * above does) - it was racing with concurrent tool invocations. */
-        airy_mtx_lock(&exec->lock);
-        exec->success_count++;
-        airy_mtx_unlock(&exec->lock);
-    } else if (ret > 0) {
-        SVC_LOG_ERROR("tool_executor_run: command failed with exit code %d (executable=%s)", ret,
-                      meta->executable ? meta->executable : "NULL");
-        if (output_buffer && output_buffer[0])
-            SVC_LOG_ERROR("tool_executor_run: child stderr: %.200s", output_buffer);
-        result->success = 0;
-        char err_msg[256];
-        snprintf(err_msg, sizeof(err_msg), "Command exited with code %d", ret);
-        result->error = AIRY_STRDUP(err_msg);
-        result->exit_code = ret;
-        result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
-    } else {
-
-        SVC_LOG_ERROR("tool_executor_run: command killed by signal %d (executable=%s)", -ret,
-                      meta->executable ? meta->executable : "NULL");
-        result->success = 0;
-        char err_msg[256];
-        snprintf(err_msg, sizeof(err_msg), "Command killed by signal %d", -ret);
-        result->error = AIRY_STRDUP(err_msg);
-        result->exit_code = ret;
-        result->failure_class = TOOL_RESULT_CLASS_NORMAL_FAIL;
-    }
+    tool_set_exit(exec, result, targs.exec_result, timeout_ms, meta->executable);
 
     result->duration_ms = (uint32_t)((time(NULL) - start_time) * 1000);
 
