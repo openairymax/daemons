@@ -190,6 +190,100 @@ static int maths_scalar(const char *resp, const char *who, tool_result_t *res)
     cJSON_Delete(rroot);
     return btool_okout(res, AIRY_STRDUP(out));
 }
+
+/* plot 参数校验：表达式（expression 或 expr）+ 数值型 xmin/xmax 必需，
+ * 且长度与区间须合法。通过则回填三个出参并返回 AIRY_OK。 */
+static int plot_check(const cJSON *root, cJSON **expr, cJSON **xmin, cJSON **xmax,
+                      tool_result_t *res)
+{
+    *expr = cJSON_GetObjectItem(root, "expression");
+    if (!cJSON_IsString(*expr))
+        *expr = cJSON_GetObjectItem(root, "expr");
+    *xmin = cJSON_GetObjectItem(root, "xmin");
+    *xmax = cJSON_GetObjectItem(root, "xmax");
+    if (!cJSON_IsString(*expr) || !(*expr)->valuestring || !(*expr)->valuestring[0] ||
+        !cJSON_IsNumber(*xmin) || !cJSON_IsNumber(*xmax))
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "Missing params: expression (string) + xmin/xmax "
+                          "(number)");
+    if (strlen((*expr)->valuestring) > 4096)
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "expression too long (max 4096 chars)");
+    if (!((*xmin)->valuedouble < (*xmax)->valuedouble))
+        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
+                          "xmin must be strictly less than xmax");
+    return AIRY_OK;
+}
+
+/* plot 请求参数对象：expr/xmin/xmax 必备，samples 可选。返回 NULL 表示
+ * OOM，调用方降级为错误。 */
+static cJSON *plot_params(const cJSON *expr, const cJSON *xmin, const cJSON *xmax,
+                          const cJSON *root)
+{
+    cJSON *obj = cJSON_CreateObject();
+    if (!obj)
+        return NULL;
+    cJSON_AddItemToObject(obj, "expr", cJSON_CreateString(expr->valuestring));
+    cJSON_AddItemToObject(obj, "xmin", cJSON_CreateNumber(xmin->valuedouble));
+    cJSON_AddItemToObject(obj, "xmax", cJSON_CreateNumber(xmax->valuedouble));
+    cJSON *samples = cJSON_GetObjectItem(root, "samples");
+    if (cJSON_IsNumber(samples))
+        cJSON_AddItemToObject(obj, "samples",
+                              cJSON_CreateNumber(samples->valuedouble));
+    return obj;
+}
+
+/* plot 单序列追加：null_ok 允许 null 元素（ys 断点）写成 null 字面量。
+ * 溢出返回 -1，后续追加自动短路。 */
+static int plot_series(char *out, size_t cap, int off, const cJSON *arr, int null_ok)
+{
+    int first = 1;
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, arr) {
+        if (off < 0)
+            break;
+        const char *sep = first ? "" : ",";
+        if (null_ok && cJSON_IsNull(it))
+            off = maths_plot_append(out, cap, off, "%snull", sep);
+        else
+            off = maths_plot_append(out, cap, off, "%s%.6g", sep, it->valuedouble);
+        first = 0;
+    }
+    return off;
+}
+
+/* plot 响应出口：校验 xs/ys 形状后组装 ```plot fenced 块并交付；响应体
+ * 由本出口统一释放。 */
+static int plot_emit(const char *expr_str, cJSON *rroot, tool_result_t *res)
+{
+    cJSON *result = cJSON_GetObjectItem(rroot, "result");
+    cJSON *xs = cJSON_GetObjectItem(result, "xs");
+    cJSON *ys = cJSON_GetObjectItem(result, "ys");
+    int nx = cJSON_GetArraySize(xs);
+    if (!cJSON_IsArray(xs) || !cJSON_IsArray(ys) || nx < 2 ||
+        nx != cJSON_GetArraySize(ys)) {
+        cJSON_Delete(rroot);
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL,
+                          "maths_plot: unexpected response shape");
+    }
+    size_t cap = strlen(expr_str) + 512 + 32 * (size_t)nx;
+    char *out = (char *)AIRY_MALLOC(cap);
+    if (!out) {
+        cJSON_Delete(rroot);
+        return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
+    }
+    int off = snprintf(out, cap, "```plot\ntitle: %s\nxs: ", expr_str);
+    off = plot_series(out, cap, off, xs, 0);
+    off = maths_plot_append(out, cap, off, "\nys: ");
+    off = plot_series(out, cap, off, ys, 1);
+    off = maths_plot_append(out, cap, off, "\n```");
+    cJSON_Delete(rroot);
+    if (off < 0) {
+        AIRY_FREE(out);
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_plot: output overflow");
+    }
+    return btool_okout(res, out);
+}
 #endif /* _WIN32 */
 
 /**
@@ -255,100 +349,23 @@ int maths_plot_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
         return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
 
-    cJSON *expr = cJSON_GetObjectItem(root, "expression");
-    if (!cJSON_IsString(expr))
-        expr = cJSON_GetObjectItem(root, "expr");
-    cJSON *xmin = cJSON_GetObjectItem(root, "xmin");
-    cJSON *xmax = cJSON_GetObjectItem(root, "xmax");
-    if (!cJSON_IsString(expr) || !expr->valuestring || !expr->valuestring[0] ||
-        !cJSON_IsNumber(xmin) || !cJSON_IsNumber(xmax))
-        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
-                          "Missing params: expression (string) + xmin/xmax "
-                          "(number)");
-    if (strlen(expr->valuestring) > 4096)
-        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
-                          "expression too long (max 4096 chars)");
-    if (!(xmin->valuedouble < xmax->valuedouble))
-        return btool_fail(res, AIRY_ERR_INVALID_PARAM,
-                          "xmin must be strictly less than xmax");
-
-    cJSON *params_obj = cJSON_CreateObject();
+    cJSON *expr = NULL;
+    cJSON *xmin = NULL;
+    cJSON *xmax = NULL;
+    int rc = plot_check(root, &expr, &xmin, &xmax, res);
+    if (rc != AIRY_OK)
+        return rc;
+    cJSON *params_obj = plot_params(expr, xmin, xmax, root);
     if (!params_obj)
         return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
-    cJSON_AddItemToObject(params_obj, "expr",
-                          cJSON_CreateString(expr->valuestring));
-    cJSON_AddItemToObject(params_obj, "xmin",
-                          cJSON_CreateNumber(xmin->valuedouble));
-    cJSON_AddItemToObject(params_obj, "xmax",
-                          cJSON_CreateNumber(xmax->valuedouble));
-    cJSON *samples = cJSON_GetObjectItem(root, "samples");
-    if (cJSON_IsNumber(samples))
-        cJSON_AddItemToObject(params_obj, "samples",
-                              cJSON_CreateNumber(samples->valuedouble));
     char resp[MATHS_RESP_CAP];
-    int rc = maths_send("plot", params_obj, resp, sizeof(resp), res);
+    rc = maths_send("plot", params_obj, resp, sizeof(resp), res);
     if (rc != 0)
         return rc;
-
     cJSON *rroot = maths_parse_response(resp, res);
     if (!rroot)
         return AIRY_ERR_EXEC_FAIL;
-    cJSON *result = cJSON_GetObjectItem(rroot, "result");
-    cJSON *xs = cJSON_GetObjectItem(result, "xs");
-    cJSON *ys = cJSON_GetObjectItem(result, "ys");
-    if (!cJSON_IsArray(xs) || !cJSON_IsArray(ys) ||
-        cJSON_GetArraySize(xs) < 2 ||
-        cJSON_GetArraySize(xs) != cJSON_GetArraySize(ys)) {
-        cJSON_Delete(rroot);
-        return btool_fail(res, AIRY_ERR_EXEC_FAIL,
-                          "maths_plot: unexpected response shape");
-    }
-
-    size_t n = (size_t)cJSON_GetArraySize(xs);
-    size_t cap = strlen(expr->valuestring) + 512 + 32 * n;
-    char *out = (char *)AIRY_MALLOC(cap);
-    if (!out) {
-        cJSON_Delete(rroot);
-        return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
-    }
-
-    int off = snprintf(out, cap, "```plot\ntitle: %s\nxs: ", expr->valuestring);
-    if (off < 0 || (size_t)off >= cap) {
-        AIRY_FREE(out);
-        cJSON_Delete(rroot);
-        return btool_fail(res, AIRY_ERR_EXEC_FAIL,
-                          "maths_plot: output overflow");
-    }
-    const cJSON *it = NULL;
-    int first = 1;
-    cJSON_ArrayForEach(it, xs) {
-        off = maths_plot_append(out, cap, off, "%s%.6g", first ? "" : ",",
-                                it->valuedouble);
-        first = 0;
-        if (off < 0)
-            break;
-    }
-    off = maths_plot_append(out, cap, off, "\nys: ");
-    first = 1;
-    cJSON_ArrayForEach(it, ys) {
-        if (cJSON_IsNull(it))
-            off = maths_plot_append(out, cap, off, "%snull", first ? "" : ",");
-        else
-            off = maths_plot_append(out, cap, off, "%s%.6g", first ? "" : ",",
-                                    it->valuedouble);
-        first = 0;
-        if (off < 0)
-            break;
-    }
-    if (off >= 0)
-        off = maths_plot_append(out, cap, off, "\n```");
-    cJSON_Delete(rroot);
-    if (off < 0) {
-        AIRY_FREE(out);
-        return btool_fail(res, AIRY_ERR_EXEC_FAIL,
-                          "maths_plot: output overflow");
-    }
-    return btool_okout(res, out);
+    return plot_emit(expr->valuestring, rroot, res);
 #endif
 }
 

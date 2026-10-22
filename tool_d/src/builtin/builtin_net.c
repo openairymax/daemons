@@ -47,7 +47,7 @@ static int builtin_parse_url(const char *url, builtin_url_t *u)
     if (slen >= sizeof(u->scheme)) {
         return -1;
     }
-    __builtin_memcpy(u->scheme, url, slen);
+    AIRY_MEMCPY(u->scheme, url, slen);
     u->scheme[slen] = '\0';
     if (strcmp(u->scheme, "http") != 0 && strcmp(u->scheme, "https") != 0) {
         return -1;
@@ -62,7 +62,7 @@ static int builtin_parse_url(const char *url, builtin_url_t *u)
     if (hlen == 0 || hlen >= sizeof(u->host)) {
         return -1;
     }
-    __builtin_memcpy(u->host, host_start, hlen);
+    AIRY_MEMCPY(u->host, host_start, hlen);
     u->host[hlen] = '\0';
 
     u->port = (strcmp(u->scheme, "https") == 0) ? 443 : 80;
@@ -93,7 +93,7 @@ static int builtin_parse_url(const char *url, builtin_url_t *u)
         if (strlen(path_start) >= sizeof(u->path)) {
             return -1;
         }
-        __builtin_memcpy(u->path, path_start, strlen(path_start) + 1);
+        AIRY_MEMCPY(u->path, path_start, strlen(path_start) + 1);
     }
     return 0;
 }
@@ -124,7 +124,7 @@ static int web_fetch_via_network(const builtin_url_t *u, tool_result_t *res)
     }
 
     network_http_response_t resp;
-    __builtin_memset(&resp, 0, sizeof(resp));
+    AIRY_MEMSET(&resp, 0, sizeof(resp));
     e = network_http_get(conn, u->path, &resp);
     network_connection_destroy(conn);
     if (e != AIRY_SUCCESS) {
@@ -141,7 +141,7 @@ static int web_fetch_via_network(const builtin_url_t *u, tool_result_t *res)
             res->error = AIRY_STRDUP("Out of memory allocating response body");
             return AIRY_ERR_OUT_OF_MEMORY;
         }
-        __builtin_memcpy(res->output, resp.body, resp.body_len);
+        AIRY_MEMCPY(res->output, resp.body, resp.body_len);
         res->output[resp.body_len] = '\0';
     } else {
         res->output = AIRY_STRDUP("");
@@ -320,6 +320,16 @@ static void builtin_strip_html(char *s)
     builtin_html_unescape(s);
 }
 
+static void snip_take(const char *base, const regmatch_t *m, char *snip, size_t cap)
+{
+    size_t len = (size_t)(m->rm_eo - m->rm_so);
+    if (len > cap - 1)
+        len = cap - 1;
+    AIRY_MEMCPY(snip, base + m->rm_so, len);
+    snip[len] = '\0';
+    builtin_strip_html(snip);
+}
+
 /* Generic search-result extraction: pull up to max entries from html using a
  * result regex + snippet regex, writing to buf (line-separated:
  * "[N] title\n    url\n    snippet\n"). */
@@ -343,38 +353,29 @@ static int web_search_extract(const char *html, const char *res_pattern, const c
             AIRY_FREE(title);
             break;
         }
-        __builtin_memcpy(url, cur + m[1].rm_so, url_len);
+        AIRY_MEMCPY(url, cur + m[1].rm_so, url_len);
         url[url_len] = '\0';
-        __builtin_memcpy(title, cur + m[2].rm_so, title_len);
+        AIRY_MEMCPY(title, cur + m[2].rm_so, title_len);
         title[title_len] = '\0';
         builtin_strip_html(title);
 
         char snippet[512] = "";
         if (has_s) {
             const char *sp = cur + m[0].rm_eo;
+            /* 摘要片段可能不在结果块起始处（Bing 的 class="b_lineclamp…"、
+             * DDG 的 result__snippet 都在标题之后），先按 class= 逐处探测，
+             * 全部失败再对结果块整体试一次。 */
+            const char *probe = strstr(sp, "class=");
             regmatch_t sm[2];
-
-            const char *probe = sp;
-            while (probe && *probe && (probe = strstr(probe, "class=")) != NULL) {
+            while (probe) {
                 if (regexec(&re_s, probe, 2, sm, 0) == 0) {
-                    size_t slen = (size_t)(sm[1].rm_eo - sm[1].rm_so);
-                    if (slen > sizeof(snippet) - 1)
-                        slen = sizeof(snippet) - 1;
-                    __builtin_memcpy(snippet, probe + sm[1].rm_so, slen);
-                    snippet[slen] = '\0';
-                    builtin_strip_html(snippet);
+                    snip_take(probe, &sm[1], snippet, sizeof(snippet));
                     break;
                 }
-                probe += 6;
+                probe = strstr(probe + 6, "class=");
             }
-            if (probe == NULL && regexec(&re_s, sp, 2, sm, 0) == 0) {
-                size_t slen = (size_t)(sm[1].rm_eo - sm[1].rm_so);
-                if (slen > sizeof(snippet) - 1)
-                    slen = sizeof(snippet) - 1;
-                __builtin_memcpy(snippet, sp + sm[1].rm_so, slen);
-                snippet[slen] = '\0';
-                builtin_strip_html(snippet);
-            }
+            if (!probe && regexec(&re_s, sp, 2, sm, 0) == 0)
+                snip_take(sp, &sm[1], snippet, sizeof(snippet));
         }
 
         size_t need = title_len + url_len + strlen(snippet) + 16;
@@ -444,8 +445,37 @@ static int web_search_results_degraded(const char *buf)
     return (total >= 2 && dict >= (total + 1) / 2) ? 1 : 0;
 }
 
-/* 移除高频查询意图词（触发 Bing 词典分词的词），其余字符原样保留。 */
-static void web_search_strip_intent(const char *in, char *out, size_t cap)
+/* 对连续非 ASCII 段（中文等，≥5 字符）每 4 字符插入空格，修复 Bing
+ * 对长中文串的分词退化。原地改写（s 是调用方的可写缓冲）。 */
+static void web_search_space_cjk(char *s, size_t cap)
+{
+    char tmp[2048];
+    size_t o = 0;
+    size_t lim = (cap < sizeof(tmp)) ? cap : sizeof(tmp);
+    size_t run = 0;
+    for (const unsigned char *p = (const unsigned char *)s; *p && o + 2 < lim;) {
+        if (*p < 0x80) {
+            tmp[o++] = (char)*p++;
+            run = 0;
+            continue;
+        }
+        if (*p < 0xC0) { /* 续字节：与所属首字节同属一个码点，不计入 run */
+            tmp[o++] = (char)*p++;
+            continue;
+        }
+        tmp[o++] = (char)*p++;
+        /* run 满 4 且后面仍是非 ASCII：说明该串至少 5 个字，插入空格 */
+        if (++run % 4 == 0 && *p >= 0x80 && o + 1 < lim)
+            tmp[o++] = ' ';
+    }
+    tmp[o] = '\0';
+    if (o < cap)
+        snprintf(s, cap, "%s", tmp);
+}
+
+/* 改写退化查询：移除高频意图词（触发 Bing 词典分词的词）→ 连续中文插
+ * 空格。改写后与原查询相同（无可改之处）返回 0。 */
+static int web_search_rewrite_query(const char *in, char *out, size_t cap)
 {
     static const char *const intent_words[] = {
         "股票代码", "时间", "是什么", "怎么回事", "为什么", "什么时候",
@@ -454,131 +484,79 @@ static void web_search_strip_intent(const char *in, char *out, size_t cap)
     size_t o = 0;
     const char *p = in;
     while (*p && o + 1 < cap) {
-        int removed = 0;
+        const char *before = p;
         for (size_t i = 0; i < sizeof(intent_words) / sizeof(intent_words[0]); i++) {
             size_t wl = strlen(intent_words[i]);
-            /* strnlen 保护：p 剩余字节不足 wl 时不 strncmp（防越界读） */
-            if (strnlen(p, wl) == wl && strncmp(p, intent_words[i], wl) == 0) {
+            if (strncmp(p, intent_words[i], wl) == 0) {
                 p += wl;
-                removed = 1;
                 break;
             }
         }
-        if (!removed)
+        if (p == before)
             out[o++] = *p++;
     }
     out[o] = '\0';
-}
-
-/* 对连续非 ASCII 段（中文等，≥5 字符）每 4 字符插入空格，修复 Bing
- * 对长中文串的分词退化。原地改写（s 是调用方的可写缓冲）。 */
-static void web_search_space_cjk(char *s, size_t cap)
-{
-    char tmp[2048];
-    size_t o = 0;
-    const unsigned char *p = (const unsigned char *)s;
-    while (*p && o + 1 < cap && o + 1 < sizeof(tmp)) {
-        if (*p >= 0x80) {
-            const unsigned char *q = p;
-            size_t chars = 0;
-            while (*q >= 0x80 && (size_t)(q - (const unsigned char *)s) < cap) {
-                q += (*q >= 0xF0) ? 4 : (*q >= 0xE0) ? 3 : 2;
-                chars++;
-            }
-            if (chars >= 5) {
-                const unsigned char *r = p;
-                size_t idx = 0;
-                while (r < q && o + 1 < cap && o + 1 < sizeof(tmp)) {
-                    size_t bl = (*r >= 0xF0) ? 4 : (*r >= 0xE0) ? 3 : 2;
-                    for (size_t k = 0; k < bl && o + 1 < cap && o + 1 < sizeof(tmp); k++)
-                        tmp[o++] = (char)*r++;
-                    idx++;
-                    if (idx % 4 == 0 && r < q && o + 1 < cap && o + 1 < sizeof(tmp))
-                        tmp[o++] = ' ';
-                }
-                p = q;
-                continue;
-            }
-        }
-        if (o + 1 < cap && o + 1 < sizeof(tmp))
-            tmp[o++] = (char)*p++;
-    }
-    tmp[o] = '\0';
-    if (o < cap)
-        snprintf(s, cap, "%s", tmp);
-}
-
-/* 改写退化查询：移除意图词 → 连续中文插空格。改写后与原查询相同（无
- * 中文长串可改）返回 0。 */
-static int web_search_rewrite_query(const char *in, char *out, size_t cap)
-{
-    char tmp[2048];
-    web_search_strip_intent(in, tmp, sizeof(tmp));
-    web_search_space_cjk(tmp, sizeof(tmp));
-    snprintf(out, cap, "%s", tmp);
+    web_search_space_cjk(out, cap);
     return (strcmp(in, out) != 0) ? 1 : 0;
 }
 
-static int web_search_via_bing(const char *query, int max_results, char *buf, size_t buf_cap,
-                               size_t *buf_len, int *count)
+/* 搜索后端描述表：URL 模板 + curl 超时 + 结果/摘要正则。两家 SERP 的
+ * 差异全部收敛在此，抓取与解析骨架只有一份。
+ *
+ * Bing 排首位：多数网络下响应快。--max-time 12s（shell 15s）是为串联
+ * 预算服务——Bing 失败后还要试 DDG，两段必须压在 30s RPC 内（原
+ * 20s+8s 会超）。
+ *
+ * POSIX ERE（glibc regcomp REG_EXTENDED）不支持非贪婪 `.*?`——它会被解析
+ * 为贪婪 `.*` 加可选字面 `?`，一次匹配就吞掉整页所有结果（实测 Bing
+ * SERP 10 条被压成 1 条巨型 blob）。标题/摘要文本用
+ * `[^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*` 跨强调标签提取（关键词包在
+ * <strong> 中），标签迭代仅限强调标签，不会吞掉下一结果的
+ * `<h2>/<a>/</a>`，从而逐条干净截断。 */
+#define WEB_SEARCH_UA "Mozilla/5.0 (compatible; AirymaxRT/0.1.2 web_search)"
+#define WEB_SEARCH_TXT "[^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*"
+
+typedef struct {
+    const char *url_fmt;
+    int curl_s;
+    int shell_ms;
+    const char *res_re;
+    const char *snip_re;
+} web_src_t;
+
+static const web_src_t WEB_SRC_BING = {
+    "https://www.bing.com/search?q=%s",
+    12,
+    15000,
+    "<h2[^>]*><a[^>]*href=\"([^\"]+)\"[^>]*>(" WEB_SEARCH_TXT ")</a></h2>",
+    "class=\"b_lineclamp[^\"]*\"[^>]*>(" WEB_SEARCH_TXT ")</p>",
+};
+
+static const web_src_t WEB_SRC_DDG = {
+    "https://html.duckduckgo.com/html/?q=%s",
+    8,
+    10000,
+    "class=\"result__a\" href=\"([^\"]+)\"[^>]*>(" WEB_SEARCH_TXT ")</a>",
+    "class=\"result__snippet\"[^>]*>(" WEB_SEARCH_TXT ")</a>",
+};
+
+static int web_search_via(const web_src_t *src, const char *query, int max_results, char *buf,
+                          size_t buf_cap, size_t *buf_len, int *count)
 {
-    char enc[2048];
+    char enc[2048], url[4096], cmd[8192];
     builtin_url_encode(query, enc, sizeof(enc));
-    char cmd[8192];
-    /* Primary search backend. Bing answers fast on most networks, so it is
-     * tried first; the tight --max-time keeps the whole IPC round trip
-     * inside the agent's 30s timeout even when the endpoint is unreachable.
-     * 2026-08-19: Bing 降到 12s（shell 15s）——Bing 失败后还要试 DDG，
-     * 串联预算必须压在 30s RPC 内（原 20s+8s 会超）。 */
-    snprintf(cmd, sizeof(cmd),
-             "curl -sSL --max-time 12 -A \"Mozilla/5.0 (compatible; AirymaxRT/0.1.2 "
-             "web_search)\" 'https://www.bing.com/search?q=%s'",
-             enc);
+    snprintf(url, sizeof(url), src->url_fmt, enc);
+    snprintf(cmd, sizeof(cmd), "curl -sSL --max-time %d -A \"%s\" '%s'", src->curl_s,
+             WEB_SEARCH_UA, url);
     char *out = NULL;
     int exit_code = -1;
-
-    if (builtin_shell_run(cmd, NULL, &out, &exit_code, 15000, NULL, NULL) != 0 || !out)
-        return -1;
-    if (exit_code != 0 || strstr(out, "command not found")) {
-        AIRY_FREE(out);
-        return -1;
-    }
-    /* POSIX ERE（glibc regcomp REG_EXTENDED）不支持非贪婪 `.*?`——它会被
-     * 解析为贪婪 `.*` 加可选字面 `?`，导致一次匹配吞掉整页所有结果（实测
-     * Bing SERP 10 条被压成 1 条巨型 blob）。标题/摘要文本用
-     * `[^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*` 跨强调标签提取（Bing 关键词
-     * 包在 <strong> 中），标签迭代仅限强调标签，不会吞掉下一结果的
-     * `<h2>/<a>/</a>`，从而逐条干净截断。 */
-    int rc = web_search_extract(out,
-                                "<h2[^>]*><a[^>]*href=\"([^\"]+)\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a></h2>",
-                                "class=\"b_lineclamp[^\"]*\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</p>",
-                                max_results, buf, buf_cap, buf_len, count);
-    AIRY_FREE(out);
-    return rc;
-}
-
-static int web_search_via_ddg(const char *query, int max_results, char *buf, size_t buf_cap,
-                              size_t *buf_len, int *count)
-{
-    char enc[2048];
-    builtin_url_encode(query, enc, sizeof(enc));
-    char cmd[8192];
-    snprintf(cmd, sizeof(cmd),
-             "curl -sSL --max-time 8 -A \"Mozilla/5.0 (compatible; AirymaxRT/0.1.2 "
-             "web_search)\" 'https://html.duckduckgo.com/html/?q=%s'",
-             enc);
-    char *out = NULL;
-    int exit_code = -1;
-
-    if (builtin_shell_run(cmd, NULL, &out, &exit_code, 10000, NULL, NULL) != 0 || !out ||
+    if (builtin_shell_run(cmd, NULL, &out, &exit_code, src->shell_ms, NULL, NULL) != 0 || !out ||
         exit_code != 0 || strstr(out, "command not found")) {
         AIRY_FREE(out);
         return -1;
     }
-    int rc = web_search_extract(out,
-                                "class=\"result__a\" href=\"([^\"]+)\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a>",
-                                "class=\"result__snippet\"[^>]*>([^<]*(<(/?(strong|b|em))[^>]*>[^<]*)*)</a>",
-                                max_results, buf, buf_cap, buf_len, count);
+    int rc = web_search_extract(out, src->res_re, src->snip_re, max_results, buf, buf_cap,
+                                buf_len, count);
     AIRY_FREE(out);
     return rc;
 }
@@ -610,28 +588,28 @@ int web_search_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
      * (timeout_ms) gates the fallbacks so the sum of retries stays within
      * the executor's per-tool budget. */
     uint64_t deadline = builtin_deadline_ms(timeout_ms);
-    if ((web_search_via_bing(q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len,
-                             &count) != 0 ||
-         count == 0) &&
-        !builtin_deadline_hit(deadline)) {
-        web_search_via_ddg(q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len,
-                           &count);
-    } else if (web_search_results_degraded(buf) && !builtin_deadline_hit(deadline)) {
+    int got = (web_search_via(&WEB_SRC_BING, q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP,
+                              &buf_len, &count) == 0 &&
+               count > 0);
+    if (!got && !builtin_deadline_hit(deadline)) {
+        web_search_via(&WEB_SRC_DDG, q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len,
+                       &count);
+    } else if (got && web_search_results_degraded(buf) && !builtin_deadline_hit(deadline)) {
         /* Bing 命中但结果是汉字字典/词条（中文长查询分词退化）：改写查询
          * 后重试；改写仍退化/失败则清空走 DDG 兜底（2026-08-20）。 */
         char rq[2048];
         int rewrote = web_search_rewrite_query(q->valuestring, rq, sizeof(rq));
         buf_len = 0;
         count = 0;
-        if (rewrote && web_search_via_bing(rq, max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len,
-                                           &count) == 0 &&
+        if (rewrote && web_search_via(&WEB_SRC_BING, rq, max_results, buf, BUILTIN_OUTPUT_CAP,
+                                      &buf_len, &count) == 0 &&
             count > 0 && !web_search_results_degraded(buf)) {
             /* 改写后的查询返回正常结果，采用 */
         } else {
             buf_len = 0;
             count = 0;
-            web_search_via_ddg(q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP, &buf_len,
-                               &count);
+            web_search_via(&WEB_SRC_DDG, q->valuestring, max_results, buf, BUILTIN_OUTPUT_CAP,
+                           &buf_len, &count);
         }
     }
 
