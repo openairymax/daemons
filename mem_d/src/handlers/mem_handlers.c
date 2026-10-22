@@ -176,6 +176,214 @@ void handle_recent(cJSON *params, int id, airy_sock_t client_fd)
 /* ── mem.evolve ──────────────────────────────────────────────────────── */
 
 /*
+ * 合并命中正文并登记来源：逐条取回记录，无论取回成败都登记来源项，
+ * 使调用方可追溯"演化自哪些记录"。合并正文为空时 *out_merged 保持 NULL。
+ */
+static int hits_merge(const mem_search_hit_t *hits, size_t count, cJSON *sources,
+                      char **out_merged, size_t *out_len)
+{
+    char **parts;
+    size_t total = 0;
+    size_t off = 0;
+
+    *out_merged = NULL;
+    *out_len = 0;
+    parts = (char **)AIRY_CALLOC(count ? count : 1, sizeof(char *));
+    if (!parts)
+        return AIRY_ERR_OUT_OF_MEMORY;
+
+    for (size_t i = 0; i < count; i++) {
+        mem_record_t rec = {0};
+        cJSON *src;
+
+        if (mem_service_get(g_service, hits[i].record_id, &rec) == AIRY_SUCCESS) {
+            char *copy = AIRY_MALLOC(rec.len + 1);
+            if (copy) {
+                AIRY_MEMCPY(copy, rec.data, rec.len);
+                copy[rec.len] = '\0';
+                parts[i] = copy;
+                total += rec.len;
+            }
+            mem_record_free(&rec);
+        }
+        src = cJSON_CreateObject();
+        cJSON_AddStringToObject(src, "record_id", hits[i].record_id);
+        cJSON_AddNumberToObject(src, "score", (double)hits[i].score);
+        cJSON_AddItemToArray(sources, src);
+    }
+
+    if (total > 0) {
+        *out_merged = AIRY_MALLOC(total + 1);
+        if (!*out_merged) {
+            for (size_t i = 0; i < count; i++)
+                AIRY_FREE(parts[i]);
+            AIRY_FREE(parts);
+            return AIRY_ERR_OUT_OF_MEMORY;
+        }
+        for (size_t i = 0; i < count; i++) {
+            if (parts[i]) {
+                size_t len = strlen(parts[i]);
+                AIRY_MEMCPY(*out_merged + off, parts[i], len);
+                off += len;
+            }
+            AIRY_FREE(parts[i]);
+        }
+        (*out_merged)[off] = '\0';
+        *out_len = off;
+    }
+    AIRY_FREE(parts);
+    return AIRY_SUCCESS;
+}
+
+/* 统一演化应答：status / source_count，可选 evolved_record_id。 */
+static void evolve_reply(int id, airy_sock_t fd, const char *status, size_t count,
+                         const char *new_id)
+{
+    cJSON *result = cJSON_CreateObject();
+
+    if (!result) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
+    cJSON_AddStringToObject(result, "status", status);
+    if (new_id)
+        cJSON_AddStringToObject(result, "evolved_record_id", new_id);
+    cJSON_AddNumberToObject(result, "source_count", (double)count);
+    JSONRPC_SEND_SUCCESS(fd, result, id);
+}
+
+/* query 分支：检索命中 → 合并正文 → 回写一条强化记忆。 */
+static void evolve_query(const char *query, cJSON *params, int id, airy_sock_t fd)
+{
+    cJSON *limit_json = cJSON_GetObjectItem(params, "limit");
+    uint32_t lim = limit_json && cJSON_IsNumber(limit_json)
+                       ? clamp_u32(limit_json->valueint, 10, 100)
+                       : 10;
+    mem_search_hit_t *hits = NULL;
+    size_t count = 0;
+    char *merged = NULL;
+    size_t merged_len = 0;
+    char *meta_str;
+    char *new_id = NULL;
+    cJSON *meta;
+    cJSON *sources;
+    int wret;
+
+    if (mem_service_search(g_service, query, lim, &hits, &count) != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Memory search failed", id);
+        return;
+    }
+
+    meta = cJSON_CreateObject();
+    sources = cJSON_CreateArray();
+    if (!meta || !sources) {
+        cJSON_Delete(meta);
+        cJSON_Delete(sources);
+        mem_search_hits_free(hits, count);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
+    cJSON_AddStringToObject(meta, "evolved_from_query", query);
+    cJSON_AddNumberToObject(meta, "evolved_at", (double)(uint64_t)time(NULL) * 1000);
+    cJSON_AddItemToObject(meta, "sources", sources);
+
+    if (hits_merge(hits, count, sources, &merged, &merged_len) != AIRY_SUCCESS) {
+        cJSON_Delete(meta);
+        mem_search_hits_free(hits, count);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
+    if (!merged) {
+        cJSON_Delete(meta);
+        mem_search_hits_free(hits, count);
+        evolve_reply(id, fd, "no_records", count, NULL);
+        return;
+    }
+
+    meta_str = cJSON_PrintUnformatted(meta);
+    cJSON_Delete(meta);
+    if (!meta_str) {
+        AIRY_FREE(merged);
+        mem_search_hits_free(hits, count);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Metadata serialize failed", id);
+        return;
+    }
+
+    mem_write_request_t req = {.data = merged, .len = merged_len, .metadata = meta_str};
+    wret = mem_service_write(g_service, &req, &new_id);
+    AIRY_FREE(meta_str);
+    AIRY_FREE(merged);
+    mem_search_hits_free(hits, count);
+
+    if (wret != AIRY_SUCCESS || !new_id) {
+        AIRY_FREE(new_id);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Evolve write failed", id);
+        return;
+    }
+    evolve_reply(id, fd, "evolved", count, new_id);
+    SVC_LOG_INFO("mem.evolve: query='%s' merged=%zu records -> %s", query, count, new_id);
+    AIRY_FREE(new_id);
+}
+
+/* record_id 分支：读取单条记录，回写带演化元数据的增强副本。 */
+static void evolve_record(const char *rid, int id, airy_sock_t fd)
+{
+    mem_record_t rec = {0};
+    char *meta_str;
+    char *new_id = NULL;
+    cJSON *result;
+    cJSON *meta;
+    int wret;
+
+    if (mem_service_get(g_service, rid, &rec) != AIRY_SUCCESS) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_METHOD_NOT_FOUND, "Record not found", id);
+        return;
+    }
+
+    meta = cJSON_CreateObject();
+    if (!meta) {
+        mem_record_free(&rec);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
+    cJSON_AddStringToObject(meta, "evolved_from", rid);
+    cJSON_AddNumberToObject(meta, "evolved_at", (double)(uint64_t)time(NULL) * 1000);
+    cJSON_AddNumberToObject(meta, "access_count", 1);
+
+    meta_str = cJSON_PrintUnformatted(meta);
+    cJSON_Delete(meta);
+    if (!meta_str) {
+        mem_record_free(&rec);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Metadata serialize failed", id);
+        return;
+    }
+
+    mem_write_request_t req = {.data = rec.data, .len = rec.len, .metadata = meta_str};
+    wret = mem_service_write(g_service, &req, &new_id);
+    AIRY_FREE(meta_str);
+    mem_record_free(&rec);
+
+    if (wret != AIRY_SUCCESS || !new_id) {
+        AIRY_FREE(new_id);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Evolve write failed", id);
+        return;
+    }
+
+    result = cJSON_CreateObject();
+    if (!result) {
+        AIRY_FREE(new_id);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
+        return;
+    }
+    cJSON_AddStringToObject(result, "status", "evolved");
+    cJSON_AddStringToObject(result, "evolved_record_id", new_id);
+    cJSON_AddStringToObject(result, "source_record_id", rid);
+    JSONRPC_SEND_SUCCESS(fd, result, id);
+    SVC_LOG_INFO("mem.evolve: record %s -> %s", rid, new_id);
+    AIRY_FREE(new_id);
+}
+
+/*
  * L2 standard method mem.evolve (02-l2-service-protocol.md):
  * real "memory evolution" behavior built on the existing retrieval/write
  * APIs —
@@ -193,190 +401,12 @@ void handle_evolve(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *query = cJSON_GetObjectItem(params, "query");
     cJSON *rid = cJSON_GetObjectItem(params, "record_id");
 
-    if (cJSON_IsString(query) && query->valuestring) {
-        cJSON *limit_json = cJSON_GetObjectItem(params, "limit");
-        uint32_t lim = limit_json && cJSON_IsNumber(limit_json)
-                           ? clamp_u32(limit_json->valueint, 10, 100)
-                           : 10;
-
-        mem_search_hit_t *hits = NULL;
-        size_t count = 0;
-        int ret = mem_service_search(g_service, query->valuestring, lim, &hits, &count);
-        if (ret != AIRY_SUCCESS) {
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Memory search failed", id);
-            return;
-        }
-
-        cJSON *meta = cJSON_CreateObject();
-        cJSON *sources = cJSON_CreateArray();
-        if (!meta || !sources) {
-            if (meta) cJSON_Delete(meta);
-            if (sources) cJSON_Delete(sources);
-            mem_search_hits_free(hits, count);
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
-            return;
-        }
-        cJSON_AddStringToObject(meta, "evolved_from_query", query->valuestring);
-        cJSON_AddNumberToObject(meta, "evolved_at", (double)(uint64_t)time(NULL) * 1000);
-
-        size_t total_len = 0;
-        char **data_parts = (char **)AIRY_CALLOC(count ? count : 1, sizeof(char *));
-        if (count > 0 && !data_parts) {
-            cJSON_Delete(meta);
-            cJSON_Delete(sources);
-            mem_search_hits_free(hits, count);
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
-            return;
-        }
-
-        for (size_t i = 0; i < count; i++) {
-            mem_record_t rec = {0};
-            if (mem_service_get(g_service, hits[i].record_id, &rec) == AIRY_SUCCESS) {
-                size_t dlen = rec.len;
-                char *copy = AIRY_MALLOC(dlen + 1);
-                if (copy) {
-                    AIRY_MEMCPY(copy, rec.data, dlen);
-                    copy[dlen] = '\0';
-                    data_parts[i] = copy;
-                    total_len += dlen;
-                }
-                mem_record_free(&rec);
-                cJSON *src = cJSON_CreateObject();
-                cJSON_AddStringToObject(src, "record_id", hits[i].record_id);
-                cJSON_AddNumberToObject(src, "score", (double)hits[i].score);
-                cJSON_AddItemToArray(sources, src);
-            } else {
-                cJSON *src = cJSON_CreateObject();
-                cJSON_AddStringToObject(src, "record_id", hits[i].record_id);
-                cJSON_AddNumberToObject(src, "score", (double)hits[i].score);
-                cJSON_AddItemToArray(sources, src);
-            }
-        }
-        cJSON_AddItemToObject(meta, "sources", sources);
-
-        char *merged = NULL;
-        if (total_len > 0) {
-            merged = (char *)AIRY_MALLOC(total_len + 1);
-            if (!merged) {
-                for (size_t i = 0; i < count; i++)
-                    AIRY_FREE(data_parts[i]);
-                AIRY_FREE(data_parts);
-                cJSON_Delete(meta);
-                mem_search_hits_free(hits, count);
-                JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
-                return;
-            }
-            size_t off = 0;
-            for (size_t i = 0; i < count; i++) {
-                if (data_parts[i]) {
-                    size_t len = strlen(data_parts[i]);
-                    __builtin_memcpy(merged + off, data_parts[i], len);
-                    off += len;
-                }
-                AIRY_FREE(data_parts[i]);
-            }
-            merged[off] = '\0';
-        }
-        AIRY_FREE(data_parts);
-
-        if (!merged) {
-            cJSON_Delete(meta);
-            mem_search_hits_free(hits, count);
-            cJSON *result = cJSON_CreateObject();
-            if (!result) {
-                JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
-                return;
-            }
-            cJSON_AddStringToObject(result, "status", "no_records");
-            cJSON_AddNumberToObject(result, "source_count", (double)count);
-            JSONRPC_SEND_SUCCESS(client_fd, result, id);
-            return;
-        }
-
-        char *meta_str = cJSON_PrintUnformatted(meta);
-        cJSON_Delete(meta);
-        if (!meta_str) {
-            AIRY_FREE(merged);
-            mem_search_hits_free(hits, count);
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Metadata serialize failed", id);
-            return;
-        }
-
-        mem_write_request_t req = {.data = merged ? merged : "",
-                                   .len = merged ? strlen(merged) : 0,
-                                   .metadata = meta_str};
-        char *new_id = NULL;
-        int wret = mem_service_write(g_service, &req, &new_id);
-        AIRY_FREE(meta_str);
-        AIRY_FREE(merged);
-        mem_search_hits_free(hits, count);
-
-        if (wret != AIRY_SUCCESS || !new_id) {
-            AIRY_FREE(new_id);
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Evolve write failed", id);
-            return;
-        }
-
-        cJSON *result = cJSON_CreateObject();
-        cJSON_AddStringToObject(result, "status", count > 0 ? "evolved" : "no_records");
-        cJSON_AddStringToObject(result, "evolved_record_id", new_id);
-        cJSON_AddNumberToObject(result, "source_count", (double)count);
-        JSONRPC_SEND_SUCCESS(client_fd, result, id);
-        SVC_LOG_INFO("mem.evolve: query='%s' merged=%zu records -> %s", query->valuestring, count,
-                     new_id);
-        AIRY_FREE(new_id);
-        return;
-    }
-
-    if (cJSON_IsString(rid) && rid->valuestring) {
-        mem_record_t rec = {0};
-        int ret = mem_service_get(g_service, rid->valuestring, &rec);
-        if (ret != AIRY_SUCCESS) {
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_METHOD_NOT_FOUND, "Record not found", id);
-            return;
-        }
-
-        cJSON *meta = cJSON_CreateObject();
-        if (!meta) {
-            mem_record_free(&rec);
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
-            return;
-        }
-        cJSON_AddStringToObject(meta, "evolved_from", rid->valuestring);
-        cJSON_AddNumberToObject(meta, "evolved_at", (double)(uint64_t)time(NULL) * 1000);
-        cJSON_AddNumberToObject(meta, "access_count", 1);
-
-        char *meta_str = cJSON_PrintUnformatted(meta);
-        cJSON_Delete(meta);
-        if (!meta_str) {
-            mem_record_free(&rec);
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Metadata serialize failed", id);
-            return;
-        }
-
-        mem_write_request_t req = {.data = rec.data, .len = rec.len, .metadata = meta_str};
-        char *new_id = NULL;
-        int wret = mem_service_write(g_service, &req, &new_id);
-        AIRY_FREE(meta_str);
-        mem_record_free(&rec);
-
-        if (wret != AIRY_SUCCESS || !new_id) {
-            AIRY_FREE(new_id);
-            JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Evolve write failed", id);
-            return;
-        }
-
-        cJSON *result = cJSON_CreateObject();
-        cJSON_AddStringToObject(result, "status", "evolved");
-        cJSON_AddStringToObject(result, "evolved_record_id", new_id);
-        cJSON_AddStringToObject(result, "source_record_id", rid->valuestring);
-        JSONRPC_SEND_SUCCESS(client_fd, result, id);
-        SVC_LOG_INFO("mem.evolve: record %s -> %s", rid->valuestring, new_id);
-        AIRY_FREE(new_id);
-        return;
-    }
-
-    JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing query or record_id", id);
+    if (cJSON_IsString(query) && query->valuestring)
+        evolve_query(query->valuestring, params, id, client_fd);
+    else if (cJSON_IsString(rid) && rid->valuestring)
+        evolve_record(rid->valuestring, id, client_fd);
+    else
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INVALID_PARAMS, "Missing query or record_id", id);
 }
 
 /* ── mem.health_check ────────────────────────────────────────────────── */
