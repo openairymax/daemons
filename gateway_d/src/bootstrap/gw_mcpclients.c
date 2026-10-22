@@ -101,6 +101,86 @@ void gw_mcp_client_cleanup(void)
     g_mcp_client_count = 0;
 }
 
+/* 把 command+args 摊平成 argv：argv[0] 为程序名，尾部置 NULL。 */
+static void client_stdio_argv(const cJSON *item, const char *command, char *argv[64])
+{
+    int argc = 0;
+    argv[argc++] = (char *)command;
+    const cJSON *jargs = cJSON_GetObjectItem(item, "args");
+    if (cJSON_IsArray(jargs)) {
+        const cJSON *ja = NULL;
+        cJSON_ArrayForEach(ja, jargs)
+        {
+            if (argc >= 63)
+                break;
+            if (cJSON_IsString(ja) && ja->valuestring)
+                argv[argc++] = ja->valuestring;
+        }
+    }
+    argv[argc] = NULL;
+}
+
+/* 连接一条配置项：0 已连接；-1 已记 WARN 的跳过（缺字段或连接失败）。 */
+static int client_connect(const cJSON *item, gw_mcp_client_ctx_t *ctx, const char *transport)
+{
+    if (strcmp(transport, "http") == 0) {
+        cJSON *jurl = cJSON_GetObjectItem(item, "url");
+        if (!cJSON_IsString(jurl) || !jurl->valuestring || !jurl->valuestring[0]) {
+            SVC_LOG_WARN("P2-4: mcp client '%s' type=http requires 'url', skipped", ctx->name);
+            return -1;
+        }
+        ctx->client = mcp_client_connect_http(ctx->name, jurl->valuestring);
+    } else {
+        cJSON *jcmd = cJSON_GetObjectItem(item, "command");
+        if (!cJSON_IsString(jcmd) || !jcmd->valuestring || !jcmd->valuestring[0]) {
+            SVC_LOG_WARN("P2-4: mcp client '%s' requires 'command', skipped", ctx->name);
+            return -1;
+        }
+        char *argv[64];
+        client_stdio_argv(item, jcmd->valuestring, argv);
+        ctx->client = mcp_client_connect_stdio(ctx->name, jcmd->valuestring, argv);
+    }
+    if (ctx->client)
+        return 0;
+    SVC_LOG_WARN("P2-4: failed to connect external MCP server '%s' (transport=%s), "
+                 "gateway continues",
+                 ctx->name, transport);
+    return -1;
+}
+
+/* tools/list 后以 "<client>_<tool>" 前缀注册；列取失败或无可用工具返回 -1。 */
+static int client_register_tools(gw_mcp_server_t *mcp, gw_mcp_client_ctx_t *ctx)
+{
+    mcp_client_tool_list_t list;
+    AIRY_MEMSET(&list, 0, sizeof(list));
+    int rc = mcp_client_list_tools(ctx->client, &list);
+    if (rc != 0) {
+        SVC_LOG_WARN("P2-4: failed to list tools from '%s' (rc=%d), disconnected", ctx->name, rc);
+        return -1;
+    }
+    size_t registered = 0;
+    for (size_t i = 0; i < list.count; i++) {
+        char full_name[GW_MCP_CLIENT_NAME_LEN + 128];
+        snprintf(full_name, sizeof(full_name), "%s_%s", ctx->name,
+                 list.tools[i].name ? list.tools[i].name : "");
+        int rrc = gw_mcp_server_register_tool(
+            mcp, full_name, list.tools[i].description ? list.tools[i].description : "",
+            list.tools[i].input_schema_json ? list.tools[i].input_schema_json : "{}",
+            gw_mcp_client_tool_exec, ctx);
+        if (rrc == 0)
+            registered++;
+        else
+            SVC_LOG_WARN("P2-4: failed to register external tool '%s' (rc=%d)", full_name, rrc);
+    }
+    mcp_client_tool_list_free(&list);
+    if (registered == 0) {
+        SVC_LOG_WARN("P2-4: external MCP server '%s' exposes no usable tools, disconnected",
+                     ctx->name);
+        return -1;
+    }
+    return (int)registered;
+}
+
 /**
  * @brief Read the AIRY_MCP_CLIENTS env var and connect external MCP servers
  *
@@ -145,90 +225,22 @@ void gw_mcp_clients_setup(gw_mcp_server_t *mcp)
 
         gw_mcp_client_ctx_t *ctx = &g_mcp_clients[g_mcp_client_count];
         AIRY_STRNCPY_TERM(ctx->name, jname->valuestring, sizeof(ctx->name));
-
         const char *transport = "stdio";
         cJSON *jtype = cJSON_GetObjectItem(item, "type");
         if (cJSON_IsString(jtype) && jtype->valuestring)
             transport = jtype->valuestring;
 
-        if (strcmp(transport, "http") == 0) {
-
-            cJSON *jurl = cJSON_GetObjectItem(item, "url");
-            if (!cJSON_IsString(jurl) || !jurl->valuestring || !jurl->valuestring[0]) {
-                SVC_LOG_WARN("P2-4: mcp client '%s' type=http requires 'url', skipped", ctx->name);
-                continue;
-            }
-            ctx->client = mcp_client_connect_http(ctx->name, jurl->valuestring);
-        } else {
-
-            cJSON *jcmd = cJSON_GetObjectItem(item, "command");
-            if (!cJSON_IsString(jcmd) || !jcmd->valuestring || !jcmd->valuestring[0]) {
-                SVC_LOG_WARN("P2-4: mcp client '%s' requires 'command', skipped", ctx->name);
-                continue;
-            }
-            char *argv_arr[64];
-            int argc = 0;
-            argv_arr[argc++] = jcmd->valuestring;
-            cJSON *jargs = cJSON_GetObjectItem(item, "args");
-            if (cJSON_IsArray(jargs)) {
-                cJSON *ja = NULL;
-                cJSON_ArrayForEach(ja, jargs)
-                {
-                    if (argc >= 63)
-                        break;
-                    if (cJSON_IsString(ja) && ja->valuestring)
-                        argv_arr[argc++] = ja->valuestring;
-                }
-            }
-            argv_arr[argc] = NULL;
-            ctx->client = mcp_client_connect_stdio(ctx->name, jcmd->valuestring, argv_arr);
-        }
-
-        if (!ctx->client) {
-            SVC_LOG_WARN("P2-4: failed to connect external MCP server '%s' (transport=%s), "
-                         "gateway continues",
-                         ctx->name, transport);
+        if (client_connect(item, ctx, transport) != 0)
             continue;
-        }
 
-        mcp_client_tool_list_t list;
-        AIRY_MEMSET(&list, 0, sizeof(list));
-        int rc = mcp_client_list_tools(ctx->client, &list);
-        if (rc != 0) {
-            SVC_LOG_WARN("P2-4: failed to list tools from '%s' (rc=%d), disconnected", ctx->name,
-                         rc);
-            mcp_client_disconnect(ctx->client);
-            ctx->client = NULL;
-            continue;
-        }
-
-        size_t registered = 0;
-        for (size_t i = 0; i < list.count; i++) {
-            char full_name[GW_MCP_CLIENT_NAME_LEN + 128];
-            snprintf(full_name, sizeof(full_name), "%s_%s", ctx->name,
-                     list.tools[i].name ? list.tools[i].name : "");
-            int rrc = gw_mcp_server_register_tool(
-                mcp, full_name, list.tools[i].description ? list.tools[i].description : "",
-                list.tools[i].input_schema_json ? list.tools[i].input_schema_json : "{}",
-                gw_mcp_client_tool_exec, ctx);
-            if (rrc == 0) {
-                registered++;
-            } else {
-                SVC_LOG_WARN("P2-4: failed to register external tool '%s' (rc=%d)", full_name, rrc);
-            }
-        }
-        mcp_client_tool_list_free(&list);
-
-        if (registered == 0) {
-            SVC_LOG_WARN("P2-4: external MCP server '%s' exposes no usable tools, "
-                         "disconnected",
-                         ctx->name);
+        int registered = client_register_tools(mcp, ctx);
+        if (registered < 0) {
             mcp_client_disconnect(ctx->client);
             ctx->client = NULL;
             continue;
         }
         SVC_LOG_INFO("P2-4: external MCP client '%s' connected (transport=%s), "
-                     "%zu tools registered",
+                     "%d tools registered",
                      ctx->name, transport, registered);
         g_mcp_client_count++;
     }
