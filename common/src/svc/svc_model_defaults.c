@@ -171,19 +171,28 @@ static void svc_scan_map(struct yaml_node *map, const svc_yaml_field_t *tbl, int
     }
 }
 
+/* 打开并解析 yaml 文档；失败返回 NULL，调用方无需清理。 */
+static yaml_document_t *yaml_open(const char *path)
+{
+    yaml_document_t *doc = yaml_create();
+    if (!doc)
+        return NULL;
+    if (yaml_parse_file(doc, path) != 0) {
+        yaml_destroy(doc);
+        return NULL;
+    }
+    return doc;
+}
+
 /* 装载文档并按策略扫描：顶层键表扫 root（v2 表格格式顶层 default_model /
  * default_provider / performance_mode 与段内等价），段表扫 section mapping
  * 的直接条目。yaml_parse_file 的打不开/超限失败统一映射 AIRY_ERR_IO；
  * 空文档（root 非 mapping）等价无字段，返回 0。 */
 static int svc_scan_file(const char *path, const svc_scan_cfg_t *cfg)
 {
-    yaml_document_t *doc = yaml_create();
+    yaml_document_t *doc = yaml_open(path);
     if (!doc)
         return AIRY_ERR_IO;
-    if (yaml_parse_file(doc, path) != 0) {
-        yaml_destroy(doc);
-        return AIRY_ERR_IO;
-    }
 
     struct yaml_node *root = yaml_root(doc);
     if (root && root->type == YAML_NODE_MAPPING) {
@@ -302,6 +311,21 @@ int svc_model_defaults_resolve(const char *base_model, const char *base_provider
     return out_model[0] ? 0 : AIRY_ERR_NOT_FOUND;
 }
 
+/* llm 段字段表：fill 与 models[0] 两条读取路径共用同一张表，仅默认模型名
+ * 的键不同（llm: 段用 model，models: 表用 model_id）。 */
+static void llm_scan(struct yaml_node *sec, svc_model_llm_config_t *out, const char *model_key)
+{
+    svc_yaml_field_t tbl[] = {
+        { "api_format",    SVC_FLD_STR,    out->api_format,        sizeof(out->api_format)    },
+        { "base_url",      SVC_FLD_STR,    out->base_url,          sizeof(out->base_url)      },
+        { "api_key_env",   SVC_FLD_STR,    out->api_key_env,       sizeof(out->api_key_env)   },
+        { model_key,       SVC_FLD_STR,    out->model,             sizeof(out->model)         },
+        { "max_output",    SVC_FLD_TOKENS, &out->max_output_tokens, 0                         },
+        { "extra_headers", SVC_FLD_STR,    out->extra_headers,     sizeof(out->extra_headers) },
+    };
+    svc_scan_map(sec, tbl, 6);
+}
+
 /* llm 段字段表：fill 供节点树消费者复用（llm_d expand 路径免二次解析），
  * llm_from_yaml 经段扫描走同一张表。 */
 int svc_model_llm_fill(struct yaml_node *llm_section, svc_model_llm_config_t *out)
@@ -311,15 +335,7 @@ int svc_model_llm_fill(struct yaml_node *llm_section, svc_model_llm_config_t *ou
     if (!llm_section || llm_section->type != YAML_NODE_MAPPING)
         return AIRY_ERR_NOT_FOUND;
 
-    svc_yaml_field_t tbl[] = {
-        { "api_format",    SVC_FLD_STR,    out->api_format,        sizeof(out->api_format)    },
-        { "base_url",      SVC_FLD_STR,    out->base_url,          sizeof(out->base_url)      },
-        { "api_key_env",   SVC_FLD_STR,    out->api_key_env,       sizeof(out->api_key_env)   },
-        { "model",         SVC_FLD_STR,    out->model,             sizeof(out->model)         },
-        { "max_output",    SVC_FLD_TOKENS, &out->max_output_tokens, 0                         },
-        { "extra_headers", SVC_FLD_STR,    out->extra_headers,     sizeof(out->extra_headers) },
-    };
-    svc_scan_map(llm_section, tbl, 6);
+    llm_scan(llm_section, out, "model");
     return 0;
 }
 
@@ -328,13 +344,9 @@ int svc_model_defaults_llm_from_yaml(const char *path, svc_model_llm_config_t *o
     if (!path || !path[0] || !out)
         return AIRY_ERR_INVALID_PARAM;
 
-    yaml_document_t *doc = yaml_create();
+    yaml_document_t *doc = yaml_open(path);
     if (!doc)
         return AIRY_ERR_IO;
-    if (yaml_parse_file(doc, path) != 0) {
-        yaml_destroy(doc);
-        return AIRY_ERR_IO;
-    }
 
     /* 段缺失非错（out 保持初值） */
     int rc = svc_model_llm_fill(yaml_get(yaml_root(doc), "llm"), out);
@@ -351,28 +363,16 @@ int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_
     if (!path || !path[0] || !out)
         return AIRY_ERR_INVALID_PARAM;
 
-    yaml_document_t *doc = yaml_create();
+    yaml_document_t *doc = yaml_open(path);
     if (!doc)
         return AIRY_ERR_IO;
-    if (yaml_parse_file(doc, path) != 0) {
-        yaml_destroy(doc);
-        return AIRY_ERR_IO;
-    }
 
     int rc = AIRY_ERR_NOT_FOUND;
     struct yaml_node *models = yaml_get(yaml_root(doc), "models");
     if (models && models->type == YAML_NODE_SEQUENCE && models->sequence.count > 0) {
         struct yaml_node *first = yaml_get_index(models, 0);
         if (first && first->type == YAML_NODE_MAPPING) {
-            svc_yaml_field_t tbl[] = {
-                { "api_format",    SVC_FLD_STR,    out->api_format,        sizeof(out->api_format)    },
-                { "base_url",      SVC_FLD_STR,    out->base_url,          sizeof(out->base_url)      },
-                { "api_key_env",   SVC_FLD_STR,    out->api_key_env,       sizeof(out->api_key_env)   },
-                { "model_id",      SVC_FLD_STR,    out->model,             sizeof(out->model)         },
-                { "max_output",    SVC_FLD_TOKENS, &out->max_output_tokens, 0                         },
-                { "extra_headers", SVC_FLD_STR,    out->extra_headers,     sizeof(out->extra_headers) },
-            };
-            svc_scan_map(first, tbl, 6);
+            llm_scan(first, out, "model_id");
             rc = 0;
         }
     }
