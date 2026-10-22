@@ -36,6 +36,16 @@ static void handle_health_check(int id, airy_sock_t fd);
 static void handle_get_stats(int id, airy_sock_t fd);
 static void handle_vocab(int id, airy_sock_t fd);
 
+/* Warn only when the call exceeded the configured slow threshold. */
+static void log_if_slow(const char *op, uint64_t t0, const char *agent_id)
+{
+    uint64_t elapsed = perf_now_us() - t0;
+    int64_t slow_us = perf_slow_threshold_us();
+    if ((int64_t)elapsed > slow_us)
+        SVC_LOG_WARN("%s slow: %llu us (threshold=%lld us, agent_id=%s)", op,
+                     (unsigned long long)elapsed, (long long)slow_us, agent_id ? agent_id : "-");
+}
+
 /*
  * After agent.spawn succeeds, register the role with sched_d, solving the
  * "sched_d registry always empty" problem (historically no component called
@@ -125,14 +135,7 @@ static void handle_spawn(cJSON *params, int id, airy_sock_t client_fd)
     uint64_t perf_t0 = perf_now_us();
     char *out_agent_id = NULL;
     int ret = agent_service_spawn(g_service, spec_str, &out_agent_id);
-
-    {
-        uint64_t elapsed = perf_now_us() - perf_t0;
-        int64_t slow_us = perf_slow_threshold_us();
-        if ((int64_t)elapsed > slow_us)
-            SVC_LOG_WARN("agent.spawn slow: %llu us (threshold=%lld us)",
-                         (unsigned long long)elapsed, (long long)slow_us);
-    }
+    log_if_slow("agent.spawn", perf_t0, out_agent_id);
 
     if (ret != AIRY_SUCCESS || !out_agent_id) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Agent spawn failed", id);
@@ -223,13 +226,7 @@ static void handle_invoke(cJSON *params, int id, airy_sock_t client_fd)
     int ret = agent_service_invoke(g_service, agent_id->valuestring, input_str, input_len,
                                    workspace_dir, timeout_s, token, &out_output);
 
-    {
-        uint64_t elapsed = perf_now_us() - perf_t0;
-        int64_t slow_us = perf_slow_threshold_us();
-        if ((int64_t)elapsed > slow_us)
-            SVC_LOG_WARN("agent.invoke slow: %llu us (threshold=%lld us, agent_id=%s)",
-                         (unsigned long long)elapsed, (long long)slow_us, agent_id->valuestring);
-    }
+    log_if_slow("agent.invoke", perf_t0, agent_id->valuestring);
 
     agent_service_invoke_end(g_service, request_id);
 

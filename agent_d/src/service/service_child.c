@@ -27,29 +27,29 @@
  * AIRY_AGENT_SPAWN_TIMEOUT_S. */
 #define AGENT_SPAWN_READY_TIMEOUT_S 15
 
+/* Parse a positive integer override from the environment. */
+static int env_int(const char *name, int dflt)
+{
+    const char *env = getenv(name);
+    if (env && env[0] != '\0') {
+        long v = strtol(env, NULL, 10);
+        if (v > 0)
+            return (int)v;
+    }
+    return dflt;
+}
+
 /* Budget parsers are platform-neutral (getenv/strtol only): the platform-
  * neutral invoke entry points reference them on every platform, so they must
  * not live inside the POSIX-only section (0.1.17: MSVC LNK2001). */
 int agent_invoke_timeout_s(void)
 {
-    const char *env = getenv("AIRY_AGENT_INVOKE_TIMEOUT_S");
-    if (env && env[0] != '\0') {
-        long v = strtol(env, NULL, 10);
-        if (v > 0)
-            return (int)v;
-    }
-    return AGENT_INVOKE_TIMEOUT_S;
+    return env_int("AIRY_AGENT_INVOKE_TIMEOUT_S", AGENT_INVOKE_TIMEOUT_S);
 }
 
 int agent_spawn_ready_timeout_s(void)
 {
-    const char *env = getenv("AIRY_AGENT_SPAWN_TIMEOUT_S");
-    if (env && env[0] != '\0') {
-        long v = strtol(env, NULL, 10);
-        if (v > 0)
-            return (int)v;
-    }
-    return AGENT_SPAWN_READY_TIMEOUT_S;
+    return env_int("AIRY_AGENT_SPAWN_TIMEOUT_S", AGENT_SPAWN_READY_TIMEOUT_S);
 }
 
 #if AIRY_PLATFORM_POSIX

@@ -130,9 +130,8 @@ void agent_service_list_free(char **agent_ids, size_t count)
 {
     if (!agent_ids)
         return;
-    for (size_t i = 0; i < count; i++) {
+    for (size_t i = 0; i < count; i++)
         AIRY_FREE(agent_ids[i]);
-    }
     AIRY_FREE(agent_ids);
 }
 
