@@ -71,63 +71,16 @@ static char *dup_str(const char *s)
     return s ? AIRY_STRDUP(s) : NULL;
 }
 
-static tool_param_t *params_deep_copy(const tool_param_t *src, size_t n)
-{
-    if (!src || n == 0)
-        return NULL;
-    tool_param_t *arr = (tool_param_t *)AIRY_CALLOC(n, sizeof(tool_param_t));
-    if (!arr)
-        return NULL;
-    for (size_t i = 0; i < n; ++i) {
-        arr[i].name = dup_str(src[i].name);
-        arr[i].schema = dup_str(src[i].schema);
-        arr[i].required = src[i].required;
-    }
-    return arr;
-}
-
-static void meta_copy_free(tool_metadata_t *m)
-{
-    if (!m)
-        return;
-    AIRY_FREE(m->id);
-    AIRY_FREE(m->name);
-    AIRY_FREE(m->description);
-    AIRY_FREE(m->executable);
-    if (m->params) {
-        for (size_t i = 0; i < m->param_count; ++i) {
-            AIRY_FREE((void *)m->params[i].name);
-            AIRY_FREE((void *)m->params[i].schema);
-        }
-        AIRY_FREE(m->params);
-    }
-    AIRY_FREE(m->permission_rule);
-    AIRY_MEMSET(m, 0, sizeof(*m));
-}
-
 static pool_job_t *job_new(const tool_metadata_t *meta, const char *params_json,
                            const char *agent_id)
 {
     pool_job_t *job = (pool_job_t *)AIRY_CALLOC(1, sizeof(pool_job_t));
     if (!job)
         return NULL;
-
-    job->meta.id = dup_str(meta->id);
-    job->meta.name = dup_str(meta->name);
-    job->meta.description = dup_str(meta->description);
-    job->meta.executable = dup_str(meta->executable);
-    job->meta.params = params_deep_copy(meta->params, meta->param_count);
-    job->meta.param_count = meta->param_count;
-    job->meta.timeout_sec = meta->timeout_sec;
-    job->meta.cacheable = meta->cacheable;
-    job->meta.access = meta->access;
-    job->meta.permission_rule = dup_str(meta->permission_rule);
-    if (!job->meta.id) {
-        meta_copy_free(&job->meta);
+    if (tool_metadata_copy(&job->meta, meta) != 0) {
         AIRY_FREE(job);
         return NULL;
     }
-
     job->params_json = dup_str(params_json);
     job->agent_id = dup_str(agent_id);
     return job;
@@ -137,7 +90,7 @@ static void job_free(pool_job_t *job)
 {
     if (!job)
         return;
-    meta_copy_free(&job->meta);
+    tool_metadata_clear(&job->meta);
     AIRY_FREE(job->params_json);
     AIRY_FREE(job->agent_id);
     if (job->detached)

@@ -53,66 +53,87 @@ static void param_arr_free(tool_param_t *p, size_t n)
     AIRY_FREE((void *)p);
 }
 
-static tool_metadata_t *dup_metadata(const tool_metadata_t *src)
+/* 参数名 → JSON Schema 类型推断。按 integer → boolean → number 的
+ * 优先级顺序匹配关键字，与历史 if-else 链的短路顺序严格一致，保证
+ * 同一个名字命中多个关键字时结果不漂移。 */
+static const char *meta_type_hint(const char *pname)
 {
-    tool_metadata_t *dst = AIRY_CALLOC(1, sizeof(tool_metadata_t));
-    if (!dst) {
-        AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
+    static const struct {
+        const char *word;
+        const char *type;
+    } k_hints[] = {
+        {"count", "integer"}, {"num", "integer"},     {"size", "integer"},
+        {"port", "integer"},  {"timeout", "integer"}, {"limit", "integer"},
+        {"enable", "boolean"}, {"flag", "boolean"},   {"verbose", "boolean"},
+        {"force", "boolean"},  {"rate", "number"},    {"ratio", "number"},
+        {"threshold", "number"}, {"score", "number"},
+    };
+    for (size_t i = 0; i < sizeof(k_hints) / sizeof(k_hints[0]); ++i) {
+        if (strstr(pname, k_hints[i].word))
+            return k_hints[i].type;
     }
-    dst->id = AIRY_STRDUP(src->id);
-    if (!dst->id) {
-        tool_metadata_free(dst);
-        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate id");
-    }
-    dst->name = AIRY_STRDUP(src->name);
-    if (!dst->name) {
-        tool_metadata_free(dst);
-        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate name");
-    }
-    dst->description = src->description ? AIRY_STRDUP(src->description) : NULL;
-    if (src->description && !dst->description) {
-        tool_metadata_free(dst);
-        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate description");
-    }
-    dst->executable = AIRY_STRDUP(src->executable);
-    if (!dst->executable) {
-        tool_metadata_free(dst);
-        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate executable");
-    }
-    dst->timeout_sec = src->timeout_sec;
-    dst->cacheable = src->cacheable;
-    dst->permission_rule = src->permission_rule ? AIRY_STRDUP(src->permission_rule) : NULL;
-    if (src->permission_rule && !dst->permission_rule) {
-        tool_metadata_free(dst);
-        AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate permission_rule");
-    }
-    if (src->param_count > 0) {
-        dst->params = AIRY_CALLOC(src->param_count, sizeof(tool_param_t));
-        if (!dst->params) {
-            tool_metadata_free(dst);
-            AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
+    return "string";
+}
+
+static size_t strv_len(char *const *v)
+{
+    size_t n = 0;
+    while (v[n])
+        n++;
+    return n;
+}
+
+/* 字符串参数名表 → tool_param_t 数组（name + 名字推断出的 schema）。
+ * 空名保留 "{}"；任一失败整体回收并返回 NULL。 */
+static tool_param_t *meta_params_fill(char *const *names, size_t cnt)
+{
+    tool_param_t *params = AIRY_CALLOC(cnt, sizeof(tool_param_t));
+    if (!params)
+        return NULL;
+    for (size_t i = 0; i < cnt; ++i) {
+        const char *pname = names[i];
+        params[i].name = AIRY_STRDUP(pname);
+        if (!params[i].name) {
+            param_arr_free(params, cnt);
+            return NULL;
         }
-        /* param_count 先置位：任一后续失败都能由 tool_metadata_free() 统一
-         * 回收已填充与未填充（calloc 清零）的 name/schema，杜绝逐分支级联。 */
-        dst->param_count = src->param_count;
-        for (size_t i = 0; i < src->param_count; ++i) {
-            dst->params[i].name = AIRY_STRDUP(src->params[i].name);
-            if (!dst->params[i].name) {
-                tool_metadata_free(dst);
-                AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate param name");
-            }
-            dst->params[i].schema = AIRY_STRDUP(src->params[i].schema);
-            if (!dst->params[i].schema) {
-                tool_metadata_free(dst);
-                AIRY_ERROR_NULL(AIRY_ERR_OUT_OF_MEMORY, "failed to duplicate param schema");
-            }
-            /* required 必须随参数复制：validator 依据 required 拦截必填参数
-             * 缺失。此前漏复制导致 calloc 清零后 required==0，必填参数缺失
-             * 被放行到执行层（SSoT: gateway tool schema 的 required 数组）。 */
-            dst->params[i].required = src->params[i].required;
+        char schema[128];
+        if (pname[0])
+            snprintf(schema, sizeof(schema), "{\"type\":\"%s\"}",
+                     meta_type_hint(pname));
+        else
+            snprintf(schema, sizeof(schema), "{}");
+        params[i].schema = AIRY_STRDUP(schema);
+        if (!params[i].schema) {
+            param_arr_free(params, cnt);
+            return NULL;
         }
     }
-    return dst;
+    return params;
+}
+
+/* tool_def → 注册元数据。参数表构建失败不阻断注册（与原语义一致：
+ * 注册仍以无参形态落库，调用方按 param_count 决定是否回收）。 */
+static tool_metadata_t meta_from_def(const tool_def_t *def, tool_param_t **params)
+{
+    tool_metadata_t meta = {
+        .id = def->name,
+        .name = def->name,
+        .executable = def->executable,
+        .timeout_sec = def->timeout_sec,
+        .cacheable = def->cacheable,
+        .permission_rule = def->permission_rule,
+    };
+    *params = NULL;
+    if (!def->params)
+        return meta;
+    size_t cnt = strv_len(def->params);
+    if (cnt > 0) {
+        *params = meta_params_fill(def->params, cnt);
+        meta.params = *params;
+        meta.param_count = *params ? cnt : 0;
+    }
+    return meta;
 }
 
 tool_registry_t *tool_registry_create(const tool_config_t *cfg)
@@ -122,68 +143,13 @@ tool_registry_t *tool_registry_create(const tool_config_t *cfg)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     airy_mtx_init(&reg->lock);
-
-    if (cfg && cfg->tools) {
-        for (tool_def_t *def = cfg->tools; def->name; ++def) {
-            tool_metadata_t meta = {
-                .id = def->name,
-                .name = def->name,
-                .executable = def->executable,
-                .timeout_sec = def->timeout_sec,
-                .cacheable = def->cacheable,
-                .permission_rule = def->permission_rule,
-            };
-            if (def->params) {
-                size_t cnt = 0;
-                while (def->params[cnt])
-                    cnt++;
-                if (cnt > 0) {
-                    tool_param_t *params = AIRY_CALLOC(cnt, sizeof(tool_param_t));
-                    if (params) {
-                        for (size_t i = 0; i < cnt; ++i) {
-                            params[i].name = AIRY_STRDUP(def->params[i]);
-                            if (!params[i].name) {
-                                param_arr_free(params, cnt);
-                                params = NULL;
-                                break;
-                            }
-                            const char *pname = def->params[i];
-                            size_t pname_len = pname ? strlen(pname) : 0;
-                            char schema[128];
-                            if (pname_len > 0) {
-                                const char *type_hint = "string";
-                                if (strstr(pname, "count") || strstr(pname, "num") ||
-                                    strstr(pname, "size") || strstr(pname, "port") ||
-                                    strstr(pname, "timeout") || strstr(pname, "limit")) {
-                                    type_hint = "integer";
-                                } else if (strstr(pname, "enable") || strstr(pname, "flag") ||
-                                           strstr(pname, "verbose") || strstr(pname, "force")) {
-                                    type_hint = "boolean";
-                                } else if (strstr(pname, "rate") || strstr(pname, "ratio") ||
-                                           strstr(pname, "threshold") || strstr(pname, "score")) {
-                                    type_hint = "number";
-                                }
-                                snprintf(schema, sizeof(schema), "{\"type\":\"%s\"}", type_hint);
-                            } else {
-                                snprintf(schema, sizeof(schema), "{}");
-                            }
-                            params[i].schema = AIRY_STRDUP(schema);
-                            if (!params[i].schema) {
-                                param_arr_free(params, cnt);
-                                params = NULL;
-                                break;
-                            }
-                        }
-                        if (params) {
-                            meta.params = params;
-                            meta.param_count = cnt;
-                        }
-                    }
-                }
-            }
-            tool_registry_add(reg, &meta);
-            param_arr_free(meta.params, meta.param_count);
-        }
+    if (!cfg || !cfg->tools)
+        return reg;
+    for (tool_def_t *def = cfg->tools; def->name; ++def) {
+        tool_param_t *params = NULL;
+        tool_metadata_t meta = meta_from_def(def, &params);
+        tool_registry_add(reg, &meta);
+        param_arr_free(params, meta.param_count);
     }
     return reg;
 }
@@ -226,7 +192,7 @@ int tool_registry_add(tool_registry_t *reg, const tool_metadata_t *meta)
         return AIRY_ERR_OUT_OF_MEMORY;
     }
     e->id = AIRY_STRDUP(meta->id);
-    e->meta = dup_metadata(meta);
+    e->meta = tool_metadata_clone(meta);
     if (!e->id || !e->meta) {
         AIRY_FREE(e->id);
         AIRY_FREE(e->meta);
@@ -249,7 +215,7 @@ tool_metadata_t *tool_registry_get(tool_registry_t *reg, const char *tool_id)
     airy_mtx_lock(&reg->lock);
     for (registry_entry_t *e = reg->buckets[idx]; e; e = e->next) {
         if (strcmp(e->id, tool_id) == 0) {
-            tool_metadata_t *copy = dup_metadata(e->meta);
+            tool_metadata_t *copy = tool_metadata_clone(e->meta);
             airy_mtx_unlock(&reg->lock);
             return copy;
         }
