@@ -6,6 +6,7 @@
 #include "gateway_jsonpick.h"
 #include "airy_memory.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include "error.h"
@@ -195,17 +196,187 @@ static char *build_resources_list_json(gw_mcp_server_t *server)
     return buf;
 }
 
-/* JSON-RPC 2.0 result envelope shared by the method branches; the caller
- * owns the returned buffer. */
-static char *rpc_result(const char *rid, const char *result_json)
+/* 先度量再分配地格式化响应文本；失败返回 NULL。 */
+static char *rpc_format(const char *fmt, ...)
 {
-    const char *fmt = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}";
-    size_t len = snprintf(NULL, 0, fmt, rid, result_json);
-    char *buf = (char *)AIRY_MALLOC(len + 1);
+    va_list ap;
+    va_list ap2;
+    va_start(ap, fmt);
+    va_copy(ap2, ap);
+    int len = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+    if (len < 0) {
+        va_end(ap2);
+        return NULL;
+    }
+    char *buf = (char *)AIRY_MALLOC((size_t)len + 1);
     if (buf)
-        snprintf(buf, len + 1, fmt, rid, result_json);
+        vsnprintf(buf, (size_t)len + 1, fmt, ap2);
+    va_end(ap2);
     return buf;
 }
+
+/* JSON-RPC 2.0 result/error 信封；调用方持有返回缓冲区。 */
+static char *rpc_result(const char *rid, const char *result_json)
+{
+    return rpc_format("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":%s}", rid, result_json);
+}
+
+static char *rpc_error(const char *rid, int code, const char *message)
+{
+    return rpc_format("{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":%d,\"message\":\"%s\"}}",
+                      rid, code, message);
+}
+
+static char *rpc_error_tool_missing(const char *rid, const char *tool_name)
+{
+    return rpc_format("{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":"
+                      "{\"code\":-32601,\"message\":\"Tool not found: %s\"}}",
+                      rid, tool_name);
+}
+
+static int rpc_initialize(gw_mcp_server_t *server, const char *rid, const char *params_json,
+                          char **response_json)
+{
+    (void)params_json;
+    *response_json = rpc_format("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
+                                "\"protocolVersion\":\"2024-11-05\","
+                                "\"capabilities\":{\"tools\":{\"listChanged\":true},"
+                                "\"resources\":{\"subscribe\":true,\"listChanged\":true}},"
+                                "\"serverInfo\":{\"name\":\"%s\",\"version\":\"%s\"}}}",
+                                rid, server->config.server_name, server->config.server_version);
+    return *response_json ? 0 : AIRY_ERR_OUT_OF_MEMORY;
+}
+
+/* tools/list 与 resources/list 共用：build 生成内层列表，这里包成结果信封。 */
+static int rpc_list_response(gw_mcp_server_t *server, const char *rid,
+                             char *(*build)(gw_mcp_server_t *), char **response_json)
+{
+    char *inner = build(server);
+    if (!inner)
+        return AIRY_ERR_OUT_OF_MEMORY;
+    *response_json = rpc_result(rid, inner);
+    AIRY_FREE(inner);
+    return 0;
+}
+
+static int rpc_tools_list(gw_mcp_server_t *server, const char *rid, const char *params_json,
+                          char **response_json)
+{
+    (void)params_json;
+    return rpc_list_response(server, rid, build_tools_list_json, response_json);
+}
+
+/* tools/call：解析 name/arguments，执行注册的回调，结果包成 content 数组。 */
+static int rpc_tools_call(gw_mcp_server_t *server, const char *rid, const char *params_json,
+                          char **response_json)
+{
+    cJSON *proot = gw_json_load(params_json);
+    char *tool_name = gw_json_str(proot, "name");
+    char *tool_args = gw_json_raw(proot, "arguments");
+    cJSON_Delete(proot);
+    if (!tool_args)
+        tool_args = AIRY_STRDUP("{}");
+    if (!tool_name) {
+        AIRY_LOG_WARN("failed to extract tool name from params in tools/call");
+        AIRY_FREE(tool_args);
+        return AIRY_ERR_PARSE_ERROR;
+    }
+
+    gw_mcp_tool_entry_t *tool = find_tool(server, tool_name);
+    char *tool_result = NULL;
+    char *resp = NULL;
+    int rc = 0;
+    if (!tool) {
+        AIRY_LOG_WARN("tool not found: tool_name=%s, tool_count=%zu", tool_name,
+                      server->tool_count);
+        resp = rpc_error_tool_missing(rid, tool_name);
+        rc = AIRY_ERR_NOT_FOUND;
+    } else {
+        int exec_rc = tool->exec_fn(tool_name, tool_args, &tool_result, tool->user_data);
+        if (exec_rc != 0 || !tool_result) {
+            AIRY_LOG_ERROR("tool execution failed: tool_name=%s, rc=%d", tool_name, exec_rc);
+            resp = rpc_error(rid, -32603, "Tool execution failed");
+            rc = AIRY_ERR_EXEC_FAIL;
+        } else {
+            resp = rpc_format("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
+                              "\"content\":[{\"type\":\"text\",\"text\":%s}]}}",
+                              rid, tool_result);
+        }
+    }
+    *response_json = resp;
+    AIRY_FREE(tool_name);
+    AIRY_FREE(tool_args);
+    AIRY_FREE(tool_result);
+    return rc;
+}
+
+static int rpc_resources_list(gw_mcp_server_t *server, const char *rid, const char *params_json,
+                              char **response_json)
+{
+    (void)params_json;
+    return rpc_list_response(server, rid, build_resources_list_json, response_json);
+}
+
+/* resources/read：按 uri 找到资源并调用读回调，结果包成 contents 数组。 */
+static int rpc_resources_read(gw_mcp_server_t *server, const char *rid, const char *params_json,
+                              char **response_json)
+{
+    cJSON *proot = gw_json_load(params_json);
+    char *uri = gw_json_str(proot, "uri");
+    cJSON_Delete(proot);
+    if (!uri) {
+        AIRY_LOG_WARN("failed to extract URI from params in resources/read");
+        return AIRY_ERR_PARSE_ERROR;
+    }
+    gw_mcp_resource_entry_t *res = find_resource(server, uri);
+    if (!res) {
+        AIRY_LOG_WARN("resource not found: uri=%s, resource_count=%zu", uri,
+                      server->resource_count);
+        AIRY_FREE(uri);
+        return AIRY_ERR_NOT_FOUND;
+    }
+
+    char *content = NULL;
+    char *mime = NULL;
+    int rc = res->read_fn(uri, &content, &mime, res->user_data);
+    AIRY_FREE(uri);
+    if (rc != 0 || !content) {
+        AIRY_LOG_ERROR("resource read failed: uri=%s, rc=%d", res->uri, rc);
+        AIRY_FREE(content);
+        AIRY_FREE(mime);
+        return AIRY_ERR_IO;
+    }
+    *response_json = rpc_format("{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
+                                "\"contents\":[{\"uri\":\"%s\",\"mimeType\":\"%s\",\"text\":%s}]}}",
+                                rid, res->uri, mime ? mime : "text/plain", content);
+    AIRY_FREE(content);
+    AIRY_FREE(mime);
+    return 0;
+}
+
+static int rpc_ping(gw_mcp_server_t *server, const char *rid, const char *params_json,
+                    char **response_json)
+{
+    (void)server;
+    (void)params_json;
+    *response_json = rpc_result(rid, "{}");
+    return 0;
+}
+
+/* MCP 方法表：新增方法只加一行，分发器不随方法数增长。 */
+static const struct gw_rpc_route {
+    const char *method;
+    int (*fn)(gw_mcp_server_t *server, const char *rid, const char *params_json,
+              char **response_json);
+} rpc_routes[] = {
+    {"initialize", rpc_initialize},
+    {"tools/list", rpc_tools_list},
+    {"tools/call", rpc_tools_call},
+    {"resources/list", rpc_resources_list},
+    {"resources/read", rpc_resources_read},
+    {"ping", rpc_ping},
+};
 
 /**
  * @brief JSON-RPC processing core (with request-id echo)
@@ -224,162 +395,14 @@ static int gw_mcp_server_handle_jsonrpc_ex(gw_mcp_server_t *server, const char *
         return AIRY_ERR_INVALID_PARAM;
     server->request_count++;
     const char *rid = id_json ? id_json : "null";
-
-    if (strcmp(method, "initialize") == 0) {
-        const char *resp = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
-                           "\"protocolVersion\":\"2024-11-05\","
-                           "\"capabilities\":{\"tools\":{\"listChanged\":true},"
-                           "\"resources\":{\"subscribe\":true,\"listChanged\":true}},"
-                           "\"serverInfo\":{\"name\":\"%s\",\"version\":\"%s\"}}}";
-        size_t len =
-            snprintf(NULL, 0, resp, rid, server->config.server_name, server->config.server_version);
-        char *buf = (char *)AIRY_MALLOC(len + 1);
-        if (!buf) {
+    for (size_t i = 0; i < sizeof(rpc_routes) / sizeof(rpc_routes[0]); i++) {
+        if (strcmp(method, rpc_routes[i].method) != 0)
+            continue;
+        int rc = rpc_routes[i].fn(server, rid, params_json, response_json);
+        if (rc != 0)
             server->error_count++;
-            return AIRY_ERR_OUT_OF_MEMORY;
-        }
-        snprintf(buf, len + 1, resp, rid, server->config.server_name,
-                 server->config.server_version);
-        *response_json = buf;
-        return 0;
+        return rc;
     }
-
-    if (strcmp(method, "tools/list") == 0) {
-        /* MCP spec: the tools/list response must be a JSON-RPC result
-         * wrapper {"jsonrpc","id","result":{"tools":[...]}} so external
-         * standard clients can parse it. */
-        char *inner = build_tools_list_json(server);
-        if (!inner) {
-            server->error_count++;
-            return AIRY_ERR_OUT_OF_MEMORY;
-        }
-        *response_json = rpc_result(rid, inner);
-        AIRY_FREE(inner);
-        return 0;
-    }
-
-    if (strcmp(method, "tools/call") == 0) {
-        cJSON *proot = gw_json_load(params_json);
-        char *tool_name = gw_json_str(proot, "name");
-        char *tool_args = gw_json_raw(proot, "arguments");
-        cJSON_Delete(proot);
-        if (!tool_args)
-            tool_args = AIRY_STRDUP("{}");
-        if (!tool_name) {
-            AIRY_LOG_WARN("failed to extract tool name from params in tools/call");
-            AIRY_FREE(tool_args);
-            server->error_count++;
-            return AIRY_ERR_PARSE_ERROR;
-        }
-        gw_mcp_tool_entry_t *tool = find_tool(server, tool_name);
-        if (!tool) {
-            AIRY_LOG_WARN("tool not found: tool_name=%s, tool_count=%zu", tool_name, server->tool_count);
-            const char *err = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":"
-                              "{\"code\":-32601,\"message\":\"Tool not found: %s\"}}";
-            const char *id_json = rid ? rid : "null";
-            size_t elen = snprintf(NULL, 0, err, id_json, tool_name);
-            char *ebuf = (char *)AIRY_MALLOC(elen + 1);
-            if (ebuf)
-                snprintf(ebuf, elen + 1, err, id_json, tool_name);
-            *response_json = ebuf;
-            AIRY_FREE(tool_name);
-            AIRY_FREE(tool_args);
-            server->error_count++;
-            return AIRY_ERR_NOT_FOUND;
-        }
-        char *tool_result = NULL;
-        int rc = tool->exec_fn(tool_name, tool_args, &tool_result, tool->user_data);
-        if (rc != 0 || !tool_result) {
-            AIRY_LOG_ERROR("tool execution failed: tool_name=%s, rc=%d", tool_name, rc);
-            AIRY_FREE(tool_name);
-            tool_name = NULL;
-            AIRY_FREE(tool_args);
-            tool_args = NULL;
-            const char *err = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":"
-                              "{\"code\":-32603,\"message\":\"Tool execution failed\"}}";
-            const char *id_json = rid ? rid : "null";
-            size_t elen = snprintf(NULL, 0, err, id_json);
-            char *ebuf = (char *)AIRY_MALLOC(elen + 1);
-            if (ebuf)
-                snprintf(ebuf, elen + 1, err, id_json);
-            *response_json = ebuf;
-            AIRY_FREE(tool_result);
-            server->error_count++;
-            return AIRY_ERR_EXEC_FAIL;
-        }
-        AIRY_FREE(tool_name);
-        tool_name = NULL;
-        AIRY_FREE(tool_args);
-        tool_args = NULL;
-        const char *resp_fmt = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
-                               "\"content\":[{\"type\":\"text\",\"text\":%s}]}}";
-        size_t rlen = snprintf(NULL, 0, resp_fmt, rid, tool_result);
-        char *buf = (char *)AIRY_MALLOC(rlen + 1);
-        if (buf)
-            snprintf(buf, rlen + 1, resp_fmt, rid, tool_result);
-        *response_json = buf;
-        AIRY_FREE(tool_result);
-        return 0;
-    }
-
-    if (strcmp(method, "resources/list") == 0) {
-
-        char *inner = build_resources_list_json(server);
-        if (!inner) {
-            server->error_count++;
-            return AIRY_ERR_OUT_OF_MEMORY;
-        }
-        *response_json = rpc_result(rid, inner);
-        AIRY_FREE(inner);
-        return 0;
-    }
-
-    if (strcmp(method, "resources/read") == 0) {
-        cJSON *proot = gw_json_load(params_json);
-        char *uri = gw_json_str(proot, "uri");
-        cJSON_Delete(proot);
-        if (!uri) {
-            AIRY_LOG_WARN("failed to extract URI from params in resources/read");
-            server->error_count++;
-            return AIRY_ERR_PARSE_ERROR;
-        }
-        gw_mcp_resource_entry_t *res = find_resource(server, uri);
-        if (!res) {
-            AIRY_LOG_WARN("resource not found: uri=%s, resource_count=%zu", uri, server->resource_count);
-            AIRY_FREE(uri);
-            server->error_count++;
-            return AIRY_ERR_NOT_FOUND;
-        }
-        char *content = NULL;
-        char *mime = NULL;
-        int rc = res->read_fn(uri, &content, &mime, res->user_data);
-        AIRY_FREE(uri);
-        uri = NULL;
-        if (rc != 0 || !content) {
-            AIRY_LOG_ERROR("resource read failed: uri=%s, rc=%d", res->uri, rc);
-            AIRY_FREE(content);
-            AIRY_FREE(mime);
-            server->error_count++;
-            return AIRY_ERR_IO;
-        }
-        const char *resp_fmt = "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{"
-                               "\"contents\":[{\"uri\":\"%s\",\"mimeType\":\"%s\",\"text\":%s}]}}";
-        const char *id_json = rid ? rid : "null";
-        size_t rlen = snprintf(NULL, 0, resp_fmt, id_json, res->uri, mime ? mime : "text/plain", content);
-        char *buf = (char *)AIRY_MALLOC(rlen + 1);
-        if (buf)
-            snprintf(buf, rlen + 1, resp_fmt, id_json, res->uri, mime ? mime : "text/plain", content);
-        *response_json = buf;
-        AIRY_FREE(content);
-        AIRY_FREE(mime);
-        return 0;
-    }
-
-    if (strcmp(method, "ping") == 0) {
-        *response_json = rpc_result(rid, "{}");
-        return 0;
-    }
-
     server->error_count++;
     return AIRY_ERR_NOT_FOUND;
 }
