@@ -122,6 +122,97 @@ int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_co
 
 #include <windows.h>
 
+typedef struct {
+    HANDLE rd;
+    PROCESS_INFORMATION pi;
+    char *buf;
+    size_t cap;
+    size_t len;
+    int truncated;
+} sh_win_t;
+
+/* Capture pipe with a non-inheritable read end: descendants of the command
+ * process cannot keep the pipe open after the command exits (mirrors the
+ * POSIX drain-bound design). */
+static int sh_pipe(HANDLE *rd, HANDLE *wr)
+{
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = NULL;
+    if (!CreatePipe(rd, wr, &sa, 0))
+        return -1;
+    if (!SetHandleInformation(*rd, HANDLE_FLAG_INHERIT, 0)) {
+        CloseHandle(*rd);
+        CloseHandle(*wr);
+        return -1;
+    }
+    return 0;
+}
+
+/* Spawn cmd.exe /S /C <cmd>. Returns 0 on success, 1 when the command could
+ * not be started (mirrors POSIX sh 127) and -1 on allocation failure. */
+static int sh_spawn(const char *cmd, const char *cwd, HANDLE wr, PROCESS_INFORMATION *pi)
+{
+    STARTUPINFOA si;
+    AIRY_MEMSET(&si, 0, sizeof(si));
+    AIRY_MEMSET(pi, 0, sizeof(*pi));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = wr;
+    si.hStdError = wr;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+
+    size_t cap = strlen(cmd) + 32;
+    char *line = (char *)AIRY_MALLOC(cap);
+    if (!line)
+        return -1;
+    /* /S keeps the original quoting of cmd (nested quotes survive), /C runs
+     * the command and exits; CREATE_NO_WINDOW keeps the daemon console clean.
+     * lpCurrentDirectory runs the child in the task workspace when provided
+     * (mirrors the POSIX child chdir) so relative paths resolve against the
+     * workspace instead of the daemon's cwd. */
+    snprintf(line, cap, "cmd.exe /S /C %s", cmd);
+    BOOL spawned = CreateProcessA(NULL, line, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL,
+                                  (cwd && cwd[0]) ? cwd : NULL, &si, pi);
+    AIRY_FREE(line);
+    if (!spawned)
+        AIRY_MEMSET(pi, 0, sizeof(*pi));
+    return spawned ? 0 : 1;
+}
+
+/* Move pending child output into the capture buffer. Returns 1 when a chunk
+ * was consumed, 0 when the pipe is empty, -1 when the pipe broke. */
+static int sh_pump(sh_win_t *w)
+{
+    DWORD avail = 0;
+    if (!PeekNamedPipe(w->rd, NULL, 0, NULL, &avail, NULL) || avail == 0)
+        return 0;
+    char chunk[4096];
+    DWORD n = (avail < (DWORD)sizeof(chunk)) ? avail : (DWORD)sizeof(chunk);
+    if (!ReadFile(w->rd, chunk, n, &n, NULL) || n == 0)
+        return -1;
+    (void)builtin_buf_push(&w->buf, &w->cap, &w->len, chunk, n, &w->truncated);
+    return 1;
+}
+
+/* Hand the captured output back with the timeout/truncation marks. */
+static void sh_out(sh_win_t *w, int timed_out, int proc_exit, char **out, int *exit_code,
+                   int *out_truncated)
+{
+    if (timed_out) {
+        builtin_buf_mark(w->buf, w->cap, &w->len, "\n[command timed out after 60s]");
+        *exit_code = -1;
+    } else {
+        *exit_code = proc_exit;
+    }
+    if (w->truncated)
+        builtin_buf_mark(w->buf, w->cap, &w->len, "\n[output truncated at 1MB]");
+    if (out_truncated)
+        *out_truncated = w->truncated;
+    *out = w->buf;
+}
+
 /**
  * @brief Run a shell command with timeout and capture stdout/stderr
  *        (Windows: CreateProcess + anonymous pipe)
@@ -141,133 +232,67 @@ int builtin_shell_run(const char *cmd, const char *cwd, char **out, int *exit_co
     if (out_truncated)
         *out_truncated = 0;
 
-    HANDLE h_read = NULL;
-    HANDLE h_write = NULL;
-    SECURITY_ATTRIBUTES sa;
-    sa.nLength = sizeof(sa);
-    sa.bInheritHandle = TRUE;
-    sa.lpSecurityDescriptor = NULL;
-    if (!CreatePipe(&h_read, &h_write, &sa, 0))
+    sh_win_t w;
+    AIRY_MEMSET(&w, 0, sizeof(w));
+    HANDLE wr = NULL;
+    if (sh_pipe(&w.rd, &wr) != 0)
         return -1;
-    /* Non-inheritable read end: descendants of the command process cannot
-     * keep the pipe open after the command exits (mirrors the POSIX
-     * drain-bound design). */
-    if (!SetHandleInformation(h_read, HANDLE_FLAG_INHERIT, 0)) {
-        CloseHandle(h_read);
-        CloseHandle(h_write);
-        return -1;
-    }
-
-    STARTUPINFOA si;
-    PROCESS_INFORMATION pi;
-    __builtin_memset(&si, 0, sizeof(si));
-    __builtin_memset(&pi, 0, sizeof(pi));
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdOutput = h_write;
-    si.hStdError = h_write;
-    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-
-    size_t cmd_len = strlen(cmd);
-    char *line = (char *)AIRY_MALLOC(cmd_len + 32);
-    if (!line) {
-        CloseHandle(h_read);
-        CloseHandle(h_write);
-        return -1;
-    }
-    /* /S keeps the original quoting of cmd (nested quotes survive), /C runs
-     * the command and exits; CREATE_NO_WINDOW keeps the daemon console clean. */
-    snprintf(line, cmd_len + 32, "cmd.exe /S /C %s", cmd);
-    /* lpCurrentDirectory: run in the task workspace when provided (mirrors
-     * the POSIX child chdir), so relative paths resolve against the
-     * workspace instead of the daemon's cwd. */
-    BOOL spawned =
-        CreateProcessA(NULL, line, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL,
-                       (cwd && cwd[0]) ? cwd : NULL, &si, &pi);
-    AIRY_FREE(line);
-    CloseHandle(h_write); /* the child holds the write end */
-    if (!spawned) {
-        CloseHandle(h_read);
+    int rc = sh_spawn(cmd, cwd, wr, &w.pi);
+    CloseHandle(wr); /* the child holds the write end */
+    if (rc != 0) {
+        CloseHandle(w.rd);
+        if (rc < 0)
+            return -1;
         *exit_code = 127; /* command not runnable (mirrors POSIX sh 127) */
         return 0;
     }
 
-    size_t cap = 4096;
-    size_t len = 0;
-    char *buf = (char *)AIRY_MALLOC(cap);
-    if (!buf) {
-        TerminateProcess(pi.hProcess, 1);
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-        CloseHandle(h_read);
+    w.cap = 4096;
+    w.buf = (char *)AIRY_MALLOC(w.cap);
+    if (!w.buf) {
+        TerminateProcess(w.pi.hProcess, 1);
+        CloseHandle(w.pi.hThread);
+        CloseHandle(w.pi.hProcess);
+        CloseHandle(w.rd);
         return -1;
     }
-    buf[0] = '\0';
+    w.buf[0] = '\0';
 
-    int timed_out = 0;
-    int truncated = 0;
     uint64_t deadline_ms = GetTickCount64() + timeout_ms;
-
-    for (;;) {
-        if (WaitForSingleObject(pi.hProcess, 100) == WAIT_OBJECT_0)
-            break;
+    int timed_out = 0;
+    while (WaitForSingleObject(w.pi.hProcess, 100) != WAIT_OBJECT_0) {
         if (GetTickCount64() >= deadline_ms) {
             timed_out = 1;
             break;
         }
-        for (;;) {
-            DWORD avail = 0;
-            if (!PeekNamedPipe(h_read, NULL, 0, NULL, &avail, NULL) || avail == 0)
-                break;
-            char chunk[4096];
-            DWORD n = (avail < (DWORD)sizeof(chunk)) ? avail : (DWORD)sizeof(chunk);
-            if (!ReadFile(h_read, chunk, n, &n, NULL) || n == 0)
-                break;
-            builtin_buf_push(&buf, &cap, &len, chunk, n, &truncated);
-        }
+        while (sh_pump(&w) > 0)
+            ;
     }
 
     DWORD proc_exit = 0;
     if (timed_out) {
-        TerminateProcess(pi.hProcess, 1);
-        WaitForSingleObject(pi.hProcess, INFINITE);
+        TerminateProcess(w.pi.hProcess, 1);
+        WaitForSingleObject(w.pi.hProcess, INFINITE);
         proc_exit = 1;
     } else {
-        GetExitCodeProcess(pi.hProcess, &proc_exit);
+        GetExitCodeProcess(w.pi.hProcess, &proc_exit);
     }
 
     /* Drain remaining buffered output after exit (bounded by
      * BUILTIN_OUTPUT_DRAIN_MS, mirroring the POSIX flush loop). */
     uint64_t drain_deadline_ms = GetTickCount64() + BUILTIN_OUTPUT_DRAIN_MS;
-    for (;;) {
-        if (GetTickCount64() >= drain_deadline_ms)
+    while (GetTickCount64() < drain_deadline_ms) {
+        int got = sh_pump(&w);
+        if (got < 0)
             break;
-        DWORD avail = 0;
-        if (!PeekNamedPipe(h_read, NULL, 0, NULL, &avail, NULL) || avail == 0) {
+        if (got == 0)
             Sleep(10);
-            continue;
-        }
-        char chunk[4096];
-        DWORD n = (avail < (DWORD)sizeof(chunk)) ? avail : (DWORD)sizeof(chunk);
-        if (!ReadFile(h_read, chunk, n, &n, NULL) || n == 0)
-            break;
-        builtin_buf_push(&buf, &cap, &len, chunk, n, &truncated);
     }
-    CloseHandle(h_read);
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
+    CloseHandle(w.rd);
+    CloseHandle(w.pi.hThread);
+    CloseHandle(w.pi.hProcess);
 
-    if (timed_out) {
-        builtin_buf_mark(buf, cap, &len, "\n[command timed out after 60s]");
-        *exit_code = -1;
-    } else {
-        *exit_code = (int)proc_exit;
-    }
-    if (truncated)
-        builtin_buf_mark(buf, cap, &len, "\n[output truncated at 1MB]");
-    if (out_truncated)
-        *out_truncated = truncated;
-    *out = buf;
+    sh_out(&w, timed_out, (int)proc_exit, out, exit_code, out_truncated);
     return 0;
 }
 #endif /* _WIN32 */
@@ -283,10 +308,7 @@ int shell_run_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
     /* Optional working directory: when set, the child process chdir()s into
      * it before executing so relative paths in the command resolve against
      * the task workspace (base.py injects the runner workspace_dir). */
-    cJSON *cwd_item = cJSON_GetObjectItem(root, "cwd");
-    const char *cwd = (cJSON_IsString(cwd_item) && cwd_item->valuestring && cwd_item->valuestring[0])
-                          ? cwd_item->valuestring
-                          : NULL;
+    const char *cwd = builtin_str_opt(root, "cwd", NULL);
     /* P2 OS-level sandbox: shell_run is enabled by default per environment
      * config (Landlock/seccomp/rlimit on Linux; Windows/macOS resolve to
      * OS_SANDBOX_MODE_OFF, keeping the identical call path). */

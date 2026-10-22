@@ -41,19 +41,15 @@ int fs_list_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *re
     CJSON_PARSE_GUARD(root, params_json, {
         return btool_fail(res, AIRY_ERR_PARSE_ERROR, "Invalid params JSON");
     });
-    cJSON *path = cJSON_GetObjectItem(root, "path");
-    const char *dir = NULL;
-    if (cJSON_IsString(path) && path->valuestring && path->valuestring[0]) {
-        dir = path->valuestring;
-    }
+    const char *dir = builtin_str_opt(root, "path", ".");
     char resolved[4096];
-    int rc = builtin_fs_confine(dir ? dir : ".", 0, resolved, sizeof(resolved), res);
+    int rc = builtin_fs_confine(dir, 0, resolved, sizeof(resolved), res);
     if (rc != AIRY_OK)
         return rc;
     DIR *d = opendir(resolved);
     if (!d) {
         int code = (errno == ENOENT) ? AIRY_ERR_NOT_FOUND : AIRY_ERR_IO;
-        return btool_fail(res, code, "Cannot open directory '%s': %s", dir ? dir : ".",
+        return btool_fail(res, code, "Cannot open directory '%s': %s", dir,
                           strerror(errno));
     }
     uint64_t deadline = builtin_deadline_ms(timeout_ms);
