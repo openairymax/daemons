@@ -39,8 +39,7 @@
 static int maths_rpc_call(const char *method, const char *params_json,
                           char *resp, size_t resp_sz, tool_result_t *res)
 {
-    if (!method || !params_json || !resp || resp_sz == 0)
-        return AIRY_ERR_INVALID_PARAM;
+    if (!method || !params_json || !resp || resp_sz == 0) return AIRY_ERR_INVALID_PARAM;
 
     const char *sock_path = airy_runtime_dir_socket(MATHS_D_SOCKET_NAME);
     if (!sock_path || !sock_path[0])
@@ -48,8 +47,7 @@ static int maths_rpc_call(const char *method, const char *params_json,
                           "maths_d socket path unavailable");
 
     int fd = (int)socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0)
-        return btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_d: socket() failed");
+    if (fd < 0) return btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_d: socket() failed");
 
     struct sockaddr_un addr;
     AIRY_MEMSET(&addr, 0, sizeof(addr));
@@ -92,17 +90,14 @@ static int maths_rpc_call(const char *method, const char *params_json,
     size_t total = 0;
     for (;;) {
         ssize_t n = recv(fd, resp + total, resp_sz - total - 1, 0);
-        if (n <= 0)
-            break;
+        if (n <= 0) break;
         total += (size_t)n;
-        if (total >= resp_sz - 1)
-            break;
+        if (total >= resp_sz - 1) break;
     }
     resp[total] = '\0';
     close(fd);
 
-    if (total == 0)
-        return btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_d: empty response");
+    if (total == 0) return btool_fail(res, AIRY_ERR_EXEC_FAIL, "maths_d: empty response");
     return 0;
 }
 
@@ -140,14 +135,12 @@ static cJSON *maths_parse_response(const char *resp, tool_result_t *res)
 static int maths_plot_append(char *buf, size_t cap, int off, const char *fmt,
                              ...)
 {
-    if (off < 0 || (size_t)off >= cap)
-        return -1;
+    if (off < 0 || (size_t)off >= cap) return -1;
     va_list ap;
     va_start(ap, fmt);
     int w = vsnprintf(buf + off, cap - (size_t)off, fmt, ap);
     va_end(ap);
-    if (w < 0 || (size_t)w >= cap - (size_t)off)
-        return -1;
+    if (w < 0 || (size_t)w >= cap - (size_t)off) return -1;
     return off + w;
 }
 
@@ -159,8 +152,7 @@ static int maths_send(const char *method, cJSON *params_obj, char *resp,
 {
     char *payload = cJSON_PrintUnformatted(params_obj);
     cJSON_Delete(params_obj);
-    if (!payload)
-        return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
+    if (!payload) return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
     char params[8192];
     if (strlen(payload) + 32 >= sizeof(params)) {
         cJSON_free(payload);
@@ -176,8 +168,7 @@ static int maths_send(const char *method, cJSON *params_obj, char *resp,
 static int maths_scalar(const char *resp, const char *who, tool_result_t *res)
 {
     cJSON *rroot = maths_parse_response(resp, res);
-    if (!rroot)
-        return AIRY_ERR_EXEC_FAIL;
+    if (!rroot) return AIRY_ERR_EXEC_FAIL;
     cJSON *value = cJSON_GetObjectItem(cJSON_GetObjectItem(rroot, "result"),
                                        "result");
     if (!cJSON_IsNumber(value)) {
@@ -221,8 +212,7 @@ static cJSON *plot_params(const cJSON *expr, const cJSON *xmin, const cJSON *xma
                           const cJSON *root)
 {
     cJSON *obj = cJSON_CreateObject();
-    if (!obj)
-        return NULL;
+    if (!obj) return NULL;
     cJSON_AddItemToObject(obj, "expr", cJSON_CreateString(expr->valuestring));
     cJSON_AddItemToObject(obj, "xmin", cJSON_CreateNumber(xmin->valuedouble));
     cJSON_AddItemToObject(obj, "xmax", cJSON_CreateNumber(xmax->valuedouble));
@@ -240,8 +230,7 @@ static int plot_series(char *out, size_t cap, int off, const cJSON *arr, int nul
     int first = 1;
     const cJSON *it = NULL;
     cJSON_ArrayForEach(it, arr) {
-        if (off < 0)
-            break;
+        if (off < 0) break;
         const char *sep = first ? "" : ",";
         if (null_ok && cJSON_IsNull(it))
             off = maths_plot_append(out, cap, off, "%snull", sep);
@@ -293,8 +282,7 @@ static int plot_emit(const char *expr_str, cJSON *rroot, tool_result_t *res)
 int maths_eval_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     (void)timeout_ms;
-    if (!res)
-        return AIRY_ERR_INVALID_PARAM;
+    if (!res) return AIRY_ERR_INVALID_PARAM;
 #ifdef _WIN32
     return btool_fail(res, AIRY_ERR_NOT_SUPPORTED,
                       "maths_eval is not supported on Windows");
@@ -317,14 +305,12 @@ int maths_eval_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
 
     /* cJSON 序列化 expression，保证 JSON 转义正确 */
     cJSON *params_obj = cJSON_CreateObject();
-    if (!params_obj)
-        return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
+    if (!params_obj) return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
     cJSON_AddItemToObject(params_obj, "expr",
                           cJSON_CreateString(expr->valuestring));
     char resp[MATHS_RESP_CAP];
     int rc = maths_send("eval", params_obj, resp, sizeof(resp), res);
-    if (rc != 0)
-        return rc;
+    if (rc != 0) return rc;
     return maths_scalar(resp, "maths_eval", res);
 #endif
 }
@@ -337,8 +323,7 @@ int maths_eval_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
 int maths_plot_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
 {
     (void)timeout_ms;
-    if (!res)
-        return AIRY_ERR_INVALID_PARAM;
+    if (!res) return AIRY_ERR_INVALID_PARAM;
 #ifdef _WIN32
     return btool_fail(res, AIRY_ERR_NOT_SUPPORTED,
                       "maths_plot is not supported on Windows");
@@ -353,15 +338,12 @@ int maths_plot_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
     cJSON *xmin = NULL;
     cJSON *xmax = NULL;
     int rc = plot_check(root, &expr, &xmin, &xmax, res);
-    if (rc != AIRY_OK)
-        return rc;
+    if (rc != AIRY_OK) return rc;
     cJSON *params_obj = plot_params(expr, xmin, xmax, root);
-    if (!params_obj)
-        return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
+    if (!params_obj) return btool_fail(res, AIRY_ERR_GENERIC_FAIL, "OOM");
     char resp[MATHS_RESP_CAP];
     rc = maths_send("plot", params_obj, resp, sizeof(resp), res);
-    if (rc != 0)
-        return rc;
+    if (rc != 0) return rc;
     cJSON *rroot = maths_parse_response(resp, res);
     if (!rroot)
         return AIRY_ERR_EXEC_FAIL;

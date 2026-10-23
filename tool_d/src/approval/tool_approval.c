@@ -60,8 +60,7 @@ tool_approval_ctx_t *tool_approval_create(const tool_approval_config_t *cfg)
 
 void tool_approval_destroy(tool_approval_ctx_t *ctx)
 {
-    if (!ctx)
-        return;
+    if (!ctx) return;
     AIRY_LOG_INFO("Tool approval destroyed (checks=%llu denied=%llu sanitized=%llu)",
                   (unsigned long long)atomic_load_explicit(&ctx->total_checks,
                                                            memory_order_relaxed),
@@ -74,8 +73,7 @@ void tool_approval_destroy(tool_approval_ctx_t *ctx)
 
 void tool_approval_set_safety_guard_bridge(tool_approval_ctx_t *ctx, safety_guard_bridge_t *bridge)
 {
-    if (!ctx)
-        return;
+    if (!ctx) return;
     ctx->bridge = bridge;
     if (bridge) {
         AIRY_LOG_INFO("SafetyGuard bridge attached to approval context");
@@ -112,8 +110,7 @@ static int tool_approval_sanitize_params(tool_approval_ctx_t *ctx, const char *t
 /* detail 初始化：默认拒绝（fail-closed），所有通过位清零。 */
 static void ap_detail_init(tool_approval_detail_t *detail)
 {
-    if (!detail)
-        return;
+    if (!detail) return;
     AIRY_MEMSET(detail, 0, sizeof(*detail));
     detail->decision = TOOL_APPROVAL_DENIED;
 }
@@ -138,13 +135,11 @@ static int ap_deny(tool_approval_ctx_t *ctx, const char *agent_id, const char *t
 static int ap_sanitize(tool_approval_ctx_t *ctx, const char *tool_name, const char *params_json,
                        tool_approval_detail_t *detail)
 {
-    if (!params_json || !params_json[0])
-        return 0;
+    if (!params_json || !params_json[0]) return 0;
     char sanitized[4096] = {0};
     int ret = tool_approval_sanitize_params(ctx, tool_name, params_json, sanitized,
                                             sizeof(sanitized));
-    if (ret != 0 || strcmp(params_json, sanitized) == 0)
-        return 0;
+    if (ret != 0 || strcmp(params_json, sanitized) == 0) return 0;
     if (detail) {
         detail->params_were_sanitized = 1;
         ap_take_san(detail, 1, sanitized);
@@ -156,8 +151,7 @@ static int ap_sanitize(tool_approval_ctx_t *ctx, const char *tool_name, const ch
 static void ap_bridge_deny(tool_approval_detail_t *detail,
                            const safety_guard_bridge_result_t *br)
 {
-    if (!detail)
-        return;
+    if (!detail) return;
     detail->permission_check_passed = br->permission_passed;
     detail->safety_guard_passed = 0;
     detail->params_were_sanitized = br->input_sanitized;
@@ -170,8 +164,7 @@ static void ap_bridge_deny(tool_approval_detail_t *detail,
 static void ap_bridge_allow(tool_approval_detail_t *detail,
                             const safety_guard_bridge_result_t *br, const char *tool_name)
 {
-    if (!detail)
-        return;
+    if (!detail) return;
     detail->decision = br->input_sanitized ? TOOL_APPROVAL_SANITIZED : TOOL_APPROVAL_ALLOWED;
     detail->permission_check_passed = br->permission_passed;
     detail->safety_guard_passed = 1;
@@ -264,8 +257,7 @@ static int approval_check_as(tool_approval_ctx_t *ctx, const char *subject,
     ap_detail_init(detail);
     atomic_fetch_add_explicit(&ctx->total_checks, 1, memory_order_relaxed);
     const char *tool_name = meta->name ? meta->name : "unknown";
-    if (ctx->bridge)
-        return ap_bridge(ctx, subject, meta, params_json, tool_name, detail);
+    if (ctx->bridge) return ap_bridge(ctx, subject, meta, params_json, tool_name, detail);
     return ap_local(ctx, subject, tool_name, params_json, detail);
 }
 

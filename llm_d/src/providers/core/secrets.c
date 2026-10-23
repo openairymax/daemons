@@ -58,8 +58,7 @@ static char *env_val_take(char *v)
         v++;
         n -= 2;
     }
-    if (n == 0)
-        return NULL;
+    if (n == 0) return NULL;
     char *out = (char *)AIRY_MALLOC(n + 1);
     if (out) {
         AIRY_MEMCPY(out, v, n);
@@ -75,15 +74,13 @@ static char *env_val_take(char *v)
  */
 static char *secrets_env_read(const char *key_name)
 {
-    if (!key_name || !key_name[0])
-        return NULL;
+    if (!key_name || !key_name[0]) return NULL;
 
     char path[1024];
     snprintf(path, sizeof(path), "%s/secrets.env", airy_config_dir());
 
     FILE *f = fopen(path, "r");
-    if (!f)
-        return NULL;
+    if (!f) return NULL;
 
     char line[1024];
     char *found = NULL;
@@ -91,11 +88,9 @@ static char *secrets_env_read(const char *key_name)
         char *p = line;
         while (*p == ' ' || *p == '\t')
             p++;
-        if (*p == '\0' || *p == '\n' || *p == '\r' || *p == '#')
-            continue;
+        if (*p == '\0' || *p == '\n' || *p == '\r' || *p == '#') continue;
         char *eq = strchr(p, '=');
-        if (!eq || !env_key_match(p, eq, key_name))
-            continue;
+        if (!eq || !env_key_match(p, eq, key_name)) continue;
         found = env_val_take(eq + 1);
     }
 
