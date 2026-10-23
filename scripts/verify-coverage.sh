@@ -138,7 +138,9 @@ verify_coverage() {
     echo ""
     
     # 提取行覆盖率
-    local line_coverage=$(echo "$coverage_output" | grep -oP 'lines.*: \K[\d.]+' | head -1)
+    # sed 而非 grep -oP：BSD grep（macOS）无 -P，避免取数为空致覆盖率 fail-closed 误红。
+    local line_coverage=$(echo "$coverage_output" \
+        | sed -n 's/^[[:space:]]*lines[^:]*:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' | head -1)
     
     if [ -n "$line_coverage" ]; then
         log_info "行覆盖率: ${line_coverage}%"

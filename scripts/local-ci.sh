@@ -227,7 +227,9 @@ coverage_analysis() {
     # 提取覆盖率百分比
     local coverage_output coverage_percent
     coverage_output=$(lcov --summary "$COVERAGE_DIR/total_coverage.info" 2>&1)
-    coverage_percent=$(echo "$coverage_output" | grep -oP 'lines.*: \K[\d.]+(?=%)' | head -1)
+    # sed 而非 grep -oP：BSD grep（macOS）无 -P，避免取数为空致覆盖率 fail-closed 误红。
+    coverage_percent=$(echo "$coverage_output" \
+        | sed -n 's/^[[:space:]]*lines[^:]*:[[:space:]]*\([0-9][0-9.]*\).*/\1/p' | head -1)
 
     if [ -n "$coverage_percent" ]; then
         log_info "代码覆盖率: ${coverage_percent}%"
