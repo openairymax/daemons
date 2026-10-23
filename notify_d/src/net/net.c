@@ -236,7 +236,7 @@ static char *notify_d_hdr_take(const char *req, const char *tag, size_t lim)
 #ifndef _WIN32
 /* recv 前 poll 等待首包：airy_sock_recv 为非阻塞 MSG_DONTWAIT 读，accept 后
  * 立即 recv 会因 EAGAIN 返回 0 而误判连接失败。返回 1 表示可读。 */
-static int notify_d_wait_readable(airy_sock_t fd)
+static int notify_wait_readable(airy_sock_t fd)
 {
     struct pollfd pfd;
     pfd.fd = (int)fd;
@@ -378,7 +378,7 @@ static void notify_d_handle_request(notify_d_service_t *svc, airy_sock_t client_
 {
     char buffer[NOTIFY_D_MAX_BUFFER];
 #ifndef _WIN32
-    if (!notify_d_wait_readable(client_fd)) {
+    if (!notify_wait_readable(client_fd)) {
         airy_sock_close(client_fd);
         return;
     }
