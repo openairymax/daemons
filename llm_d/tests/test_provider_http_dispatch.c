@@ -176,7 +176,7 @@ static void mock_serve_one(int fd)
  * 故障，用例本想考的"收发中断"就变成了另一条策略分支（run #557 实证：
  * macOS local_attempts=2）。读到请求头后再关闭，三端都稳定落在
  * GOT_NOTHING / RECV_ERROR，故障阶段确定。 */
-static void mock_drop_after_request(int fd)
+static void drop_after_read(int fd)
 {
     struct timeval tv;
     tv.tv_sec = 1;
@@ -202,7 +202,7 @@ static void *mock_server_thread(void *arg)
         }
         atomic_fetch_add(&g_srv.conn_count, 1);
         if (g_srv.drop) {
-            mock_drop_after_request(fd);
+            drop_after_read(fd);
             continue;
         }
         mock_serve_one(fd);
@@ -654,7 +654,7 @@ static void test_stream_transient_retried(void)
  * 超时/收发中断不得重发——本地只尝试一次；同一故障下云端端点仍重发到
  * max_retries（对照断言）。注意不能以"accept 后立即 close"取材：那在
  * Darwin 上会抢在 connect 返回前 RST，退化成连接建立失败（见
- * mock_drop_after_request）。 */
+ * drop_after_read）。 */
 static void test_local_endpoint_policy(void)
 {
     printf("  local endpoint retry policy is connect-only...\n");
