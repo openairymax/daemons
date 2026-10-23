@@ -21,9 +21,9 @@
  *      排除"桩恒返回失败导致断言伪绿"
  *   5. 出网策略：失败分诊映射表；以及死代理下的失败／清除代理后的成功
  *      对照，证明 AIRY_HTTP_PROXY 确被注入句柄（N-1/N-2）
- *   6. 出网重试：瞬时故障（对端接受后立即关闭）必须真的重发，尝试次数严格
- *      等于 max_retries；流式在首包下发前同样重发且不得交付半截输出
- *      （N-3/N-4）
+ *   6. 出网重试：瞬时故障（对端读到请求后立即关闭，即收发阶段中断）必须真的
+ *      重发，尝试次数严格等于 max_retries；流式在首包下发前同样重发且不得
+ *      交付半截输出（N-3/N-4）
  *   7. 本地端点策略（D4）：默认超时 120s、重试预算降一次、可重试类别收窄为
  *      CONNECT_ONLY——收发中断不重发，而云端端点策略不变（对照断言）
  *
@@ -47,6 +47,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 /* chat_ops 定义于 adapters/chat.c（内部符号，未在头文件声明），此处 extern。 */
@@ -169,6 +170,24 @@ static void mock_serve_one(int fd)
     }
 }
 
+/* drop 语义：必须先读到请求再关闭。若 accept 后立即 close，Darwin 上对端
+ * RST 会抢在 connect() 返回之前到达，libcurl 报 CURLE_COULDNT_CONNECT
+ * （errno=EAGAIN）——那是"连接建立失败"，属 CONNECT_ONLY 类别内的可重试
+ * 故障，用例本想考的"收发中断"就变成了另一条策略分支（run #557 实证：
+ * macOS local_attempts=2）。读到请求头后再关闭，三端都稳定落在
+ * GOT_NOTHING / RECV_ERROR，故障阶段确定。 */
+static void mock_drop_after_request(int fd)
+{
+    struct timeval tv;
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    char buf[1024];
+    (void)recv(fd, buf, sizeof(buf), 0);
+    close(fd);
+}
+
 static void *mock_server_thread(void *arg)
 {
     (void)arg;
@@ -183,9 +202,7 @@ static void *mock_server_thread(void *arg)
         }
         atomic_fetch_add(&g_srv.conn_count, 1);
         if (g_srv.drop) {
-            /* 连接已建立但一个字节都不回：curl 报 GOT_NOTHING/RECV_ERROR，
-             * 属可重试的瞬时故障（用于 N-3/N-4 重试回归）。 */
-            close(fd);
+            mock_drop_after_request(fd);
             continue;
         }
         mock_serve_one(fd);
@@ -564,8 +581,9 @@ static void test_retry_policy(void)
     assert(provider_retry_budget_ok(1.0, t0 - 2000U, 200U) == 0);
 }
 
-/* N-3 端到端：对端"接受后立即关闭"是典型瞬时故障；非流式路径必须真的重发，
- * 且总尝试次数严格等于 max_retries（不得退化为无限重试或零重试）。 */
+/* N-3 端到端：对端"读到请求后立即关闭"是典型收发阶段瞬时故障；非流式路径
+ * 必须真的重发，且总尝试次数严格等于 max_retries（不得退化为无限重试或
+ * 零重试）。 */
 static void test_nonstream_transient_retried(void)
 {
     printf("  nonstream transient failure is retried...\n");
@@ -631,9 +649,12 @@ static void test_stream_transient_retried(void)
     mock_set_drop(0);
 }
 
-/* D4 端到端：本地端点的可重试类别必须收窄为"仅连接建立失败"。对端接受后
- * 立即关闭属瞬时故障，但本地慢推理是预期行为，超时/收发中断不得重发——
- * 本地只尝试一次；同一故障下云端端点仍重发到 max_retries（对照断言）。 */
+/* D4 端到端：本地端点的可重试类别必须收窄为"仅连接建立失败"。对端读到
+ * 请求后立即关闭属收发阶段故障（连接已建立），本地慢推理是预期行为，
+ * 超时/收发中断不得重发——本地只尝试一次；同一故障下云端端点仍重发到
+ * max_retries（对照断言）。注意不能以"accept 后立即 close"取材：那在
+ * Darwin 上会抢在 connect 返回前 RST，退化成连接建立失败（见
+ * mock_drop_after_request）。 */
 static void test_local_endpoint_policy(void)
 {
     printf("  local endpoint retry policy is connect-only...\n");
