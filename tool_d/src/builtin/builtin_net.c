@@ -202,8 +202,7 @@ int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
         AIRY_FREE(out);
 #ifndef _WIN32
         /* Fallback: plain-HTTP via the built-in network layer (no TLS). */
-        if (strcmp(u.scheme, "http") == 0)
-            return web_fetch_via_network(&u, res);
+        if (strcmp(u.scheme, "http") == 0) return web_fetch_via_network(&u, res);
 #endif
         return btool_fail(res, AIRY_ERR_NOT_SUPPORTED,
                           "curl is not available and %s:// requires curl (TLS not supported by "
@@ -337,8 +336,7 @@ static int web_search_extract(const char *html, const char *res_pattern, const c
                               int max, char *buf, size_t buf_cap, size_t *buf_len, int *count)
 {
     regex_t re, re_s;
-    if (regcomp(&re, res_pattern, REG_EXTENDED) != 0)
-        return -1;
+    if (regcomp(&re, res_pattern, REG_EXTENDED) != 0) return -1;
     int has_s = (regcomp(&re_s, snip_pattern, REG_EXTENDED) == 0);
 
     const char *cur = html;
@@ -418,8 +416,7 @@ static int web_search_is_dict_hit(const char *title)
         "汉语", "意思", "释义", "笔画",
     };
     for (size_t i = 0; i < sizeof(dict_markers) / sizeof(dict_markers[0]); i++) {
-        if (strstr(title, dict_markers[i]))
-            return 1;
+        if (strstr(title, dict_markers[i])) return 1;
     }
     return 0;
 }
@@ -432,8 +429,7 @@ static int web_search_results_degraded(const char *buf)
     const char *p = buf;
     while (p && *p) {
         const char *nl = strchr(p, '\n');
-        if (!nl)
-            break;
+        if (!nl) break;
         const char *title = strchr(p, ']');
         if (title && title < nl) {
             total++;
@@ -576,8 +572,7 @@ int web_search_tool(const char *params_json, uint32_t timeout_ms, tool_result_t 
         max_results = BUILTIN_WEBSEARCH_MAX;
 
     char *buf = (char *)AIRY_CALLOC(BUILTIN_OUTPUT_CAP, 1);
-    if (!buf)
-        return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Out of memory");
+    if (!buf) return btool_fail(res, AIRY_ERR_OUT_OF_MEMORY, "Out of memory");
     size_t buf_len = 0;
     int count = 0;
 

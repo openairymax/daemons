@@ -46,8 +46,7 @@
 int builtin_fs_confine(const char *orig_path, int for_write, char *resolved, size_t resolved_cap,
                        tool_result_t *res)
 {
-    if (os_sandbox_fs_confine(orig_path, for_write, resolved, resolved_cap) == 0)
-        return AIRY_OK;
+    if (os_sandbox_fs_confine(orig_path, for_write, resolved, resolved_cap) == 0) return AIRY_OK;
     char ws[512];
     if (os_sandbox_fs_workspace(ws, sizeof(ws)) == 0 && ws[0])
         return btool_fail(res, AIRY_ERR_PERMISSION_DENIED,
@@ -69,8 +68,7 @@ int builtin_str_param(const cJSON *root, const char *name, const char **out, too
 const char *builtin_str_opt(const cJSON *root, const char *name, const char *def)
 {
     cJSON *v = cJSON_GetObjectItem(root, name);
-    if (cJSON_IsString(v) && v->valuestring && v->valuestring[0])
-        return v->valuestring;
+    if (cJSON_IsString(v) && v->valuestring && v->valuestring[0]) return v->valuestring;
     return def;
 }
 
@@ -78,18 +76,15 @@ char *builtin_read_all(FILE *fp, int *out_truncated)
 {
     if (out_truncated)
         *out_truncated = 0;
-    if (!fp)
-        return NULL;
+    if (!fp) return NULL;
     size_t cap = 4096;
     size_t len = 0;
     char *buf = (char *)AIRY_MALLOC(cap);
-    if (!buf)
-        return NULL;
+    if (!buf) return NULL;
     char chunk[4096];
     for (;;) {
         size_t n = fread(chunk, 1, sizeof(chunk), fp);
-        if (n == 0)
-            break;
+        if (n == 0) break;
         if (len + n + 1 > cap) {
             size_t new_cap = cap * 2;
             if (new_cap > BUILTIN_OUTPUT_CAP)
@@ -100,8 +95,7 @@ char *builtin_read_all(FILE *fp, int *out_truncated)
                 break;
             }
             char *nb = (char *)AIRY_REALLOC(buf, new_cap);
-            if (!nb)
-                break;
+            if (!nb) break;
             buf = nb;
             cap = new_cap;
         }
@@ -128,15 +122,13 @@ int tool_builtin_is_builtin(const char *executable)
 
 uint64_t builtin_deadline_ms(uint32_t timeout_ms)
 {
-    if (timeout_ms == 0)
-        return UINT64_MAX;
+    if (timeout_ms == 0) return UINT64_MAX;
     return airy_time_ms() + timeout_ms;
 }
 
 int builtin_deadline_hit(uint64_t deadline_ms)
 {
-    if (deadline_ms == UINT64_MAX)
-        return 0;
+    if (deadline_ms == UINT64_MAX) return 0;
     return airy_time_ms() >= deadline_ms;
 }
 
@@ -147,8 +139,7 @@ int builtin_scan_noise_dir(const char *name)
                                         "logs",  "dist",         ".idea",        ".vscode",
                                         ".cache",                "vendor",       NULL};
     for (int i = 0; noise[i]; i++) {
-        if (strcmp(name, noise[i]) == 0)
-            return 1;
+        if (strcmp(name, noise[i]) == 0) return 1;
     }
     return 0;
 }
@@ -160,8 +151,7 @@ int builtin_scan_noise_dir(const char *name)
 static int capture_spawn(builtin_child_fn child_fn, void *child_ctx, int outfd[2], int infd[2],
                          pid_t *pid)
 {
-    if (pipe(outfd) != 0)
-        return -1;
+    if (pipe(outfd) != 0) return -1;
     if (pipe(infd) != 0) {
         close(outfd[0]);
         close(outfd[1]);
@@ -206,14 +196,12 @@ static int capture_spawn(builtin_child_fn child_fn, void *child_ctx, int outfd[2
  * a slow consumer cannot lose a partial write. */
 static void capture_feed(int wfd, const char *data, size_t len)
 {
-    if (!data || len == 0)
-        return;
+    if (!data || len == 0) return;
     size_t off = 0;
     while (off < len) {
         ssize_t n = write(wfd, data + off, len - off);
         if (n < 0) {
-            if (errno == EINTR)
-                continue;
+            if (errno == EINTR) continue;
             break;
         }
         off += (size_t)n;
@@ -230,8 +218,7 @@ static int capture_loop(pid_t pid, int rfd, uint32_t timeout_ms, int *wstatus, i
     uint64_t deadline_ms = airy_time_ms() + timeout_ms;
 
     for (;;) {
-        if (waitpid(pid, wstatus, WNOHANG) == pid)
-            return 1;
+        if (waitpid(pid, wstatus, WNOHANG) == pid) return 1;
 
         uint64_t now_ms = airy_time_ms();
         if (now_ms >= deadline_ms) {
@@ -241,8 +228,7 @@ static int capture_loop(pid_t pid, int rfd, uint32_t timeout_ms, int *wstatus, i
 
         struct pollfd pfd = {.fd = rfd, .events = POLLIN | POLLHUP};
         int pr = poll(&pfd, 1, 100);
-        if (pr <= 0 || !(pfd.revents & (POLLIN | POLLHUP)))
-            continue;
+        if (pr <= 0 || !(pfd.revents & (POLLIN | POLLHUP))) continue;
         char chunk[4096];
         ssize_t n = read(rfd, chunk, sizeof(chunk));
         if (n > 0) {
