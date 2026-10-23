@@ -188,7 +188,8 @@ run_coverage() {
     genhtml coverage.info --output-directory "${REPORT_DIR}/coverage"
     
     # 提取覆盖率百分比
-    local coverage_percent=$(lcov --summary coverage.info 2>&1 | grep lines | grep -oP '\d+\.\d+%' | head -1)
+    # -Eo 而非 -oP：BSD grep（macOS）不支持 -P，可移植写法保证三端一致取数。
+    local coverage_percent=$(lcov --summary coverage.info 2>&1 | grep lines | grep -Eo '[0-9]+\.[0-9]+%' | head -1)
     
     log_info "代码覆盖率: ${coverage_percent}"
     
