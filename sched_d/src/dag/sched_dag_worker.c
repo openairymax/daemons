@@ -48,7 +48,7 @@ typedef struct sched_dag_batch_item {
 } sched_dag_batch_item_t;
 
 /* 批次待决计数在节点落账后递减，归零唤醒等待方。调用方持锁。 */
-static void sched_dag_batch_release(sched_service_t *svc)
+static void sched_dag_batch_done(sched_service_t *svc)
 {
     if (svc->batch_pending > 0) {
         svc->batch_pending--;
@@ -77,7 +77,7 @@ static void sched_dag_batch_worker(void *arg)
 
     airy_mtx_lock(&svc->lock);
     sched_dag_write_back_node(svc, item->dag, node, dret, output);
-    sched_dag_batch_release(svc);
+    sched_dag_batch_done(svc);
     airy_mtx_unlock(&svc->lock);
 
     AIRY_FREE(item->input);
@@ -146,14 +146,14 @@ static void sched_dag_fail_node(sched_service_t *svc, sched_dag_node_t *node, co
     node->status = SCHED_DAG_NODE_FAILED;
     node->error = AIRY_STRDUP(msg);
     node->finished_at_ms = airy_time_wall_ms();
-    sched_dag_batch_release(svc);
+    sched_dag_batch_done(svc);
 }
 
 /* Hand every batch item to the thread pool; a failed submit runs inline so the
  * node still makes progress. Ownership of assigned[i] / inputs[i] transfers to
  * the item. Caller must not hold the lock. */
-static void sched_dag_submit_batch(sched_service_t *svc, sched_dag_node_t **nodes,
-                                   sched_dag_t **dags, char **assigned, char **inputs, size_t n)
+static void sched_dag_dispatch(sched_service_t *svc, sched_dag_node_t **nodes,
+                               sched_dag_t **dags, char **assigned, char **inputs, size_t n)
 {
     for (size_t i = 0; i < n; i++) {
         sched_dag_batch_item_t *item =
@@ -219,7 +219,7 @@ static void sched_dag_run_batch(sched_service_t *svc)
     svc->batch_pending = batch_n;
     airy_mtx_unlock(&svc->lock);
 
-    sched_dag_submit_batch(svc, batch, batch_dags, assigned, inputs, batch_n);
+    sched_dag_dispatch(svc, batch, batch_dags, assigned, inputs, batch_n);
 
     airy_mtx_lock(&svc->lock);
     while (svc->batch_pending > 0)
