@@ -32,8 +32,7 @@ static char *builtin_read_line(FILE *fp, size_t *out_len)
 {
     size_t cap = 256, len = 0;
     char *buf = (char *)AIRY_MALLOC(cap);
-    if (!buf)
-        return NULL;
+    if (!buf) return NULL;
     int c;
     while ((c = fgetc(fp)) != EOF) {
         if (len + 2 > cap) {
@@ -47,8 +46,7 @@ static char *builtin_read_line(FILE *fp, size_t *out_len)
             cap = ncap;
         }
         buf[len++] = (char)c;
-        if (c == '\n')
-            break;
+        if (c == '\n') break;
     }
     if (len == 0) {
         AIRY_FREE(buf);
@@ -118,8 +116,7 @@ static int grep_emit(grep_ctx_t *g, const char *full, long lineno, const char *l
 static int grep_file(const char *full, grep_ctx_t *g)
 {
     FILE *fp = fopen(full, "rb");
-    if (!fp)
-        return 0;
+    if (!fp) return 0;
     long lineno = 0;
     size_t llen = 0;
     char *line;
@@ -142,8 +139,7 @@ static int grep_file(const char *full, grep_ctx_t *g)
             hit = (g->count >= g->max) ? 1 : grep_emit(g, full, lineno, line, tlen);
         }
         AIRY_FREE(line);
-        if (hit)
-            break;
+        if (hit) break;
     }
     fclose(fp);
     return g->done;
@@ -156,31 +152,25 @@ static void grep_walk(const char *base, grep_ctx_t *g, int depth)
         return;
     }
     DIR *d = opendir(base);
-    if (!d)
-        return;
+    if (!d) return;
     struct dirent *ent;
     while (!g->done && (ent = readdir(d)) != NULL) {
         const char *nm = ent->d_name;
-        if (grep_skip(nm))
-            continue;
+        if (grep_skip(nm)) continue;
         char full[AIRY_PATH_MAX];
         snprintf(full, sizeof(full), "%s/%s", base, nm);
         /* Classify via stat only: portable (MSVC dirent has no d_type) and
          * also covers DT_UNKNOWN mounts; the same syscall applies the
          * per-file size cap. */
         struct stat st;
-        if (stat(full, &st) != 0)
-            continue;
+        if (stat(full, &st) != 0) continue;
         if (S_ISDIR(st.st_mode)) {
             grep_walk(full, g, depth + 1);
             continue;
         }
-        if (!S_ISREG(st.st_mode) || st.st_size > BUILTIN_SCAN_MAX_FILE_BYTES)
-            continue;
-        if (g->glob && !builtin_glob_seg_match(g->glob, nm))
-            continue;
-        if (g->count >= g->max)
-            break;
+        if (!S_ISREG(st.st_mode) || st.st_size > BUILTIN_SCAN_MAX_FILE_BYTES) continue;
+        if (g->glob && !builtin_glob_seg_match(g->glob, nm)) continue;
+        if (g->count >= g->max) break;
         (void)grep_file(full, g);
     }
     closedir(d);
