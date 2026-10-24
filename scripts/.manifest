@@ -1,0 +1,12 @@
+{
+  "manifest_version": 4,
+  "daemon": "scripts",
+  "kind": "ci_scripts",
+  "cname": "scripts",
+  "description": "CI 脚本集（ci.sh / local-ci.sh / static-analysis.sh / verify-coverage.sh），无 C 生产码、无 RPC 端点，按方案 G16 仅登记本 manifest；daemon_gen.py 与端口坐标门禁对此户豁免扫描。",
+  "ops": [],
+  "facades": [],
+  "slots": [],
+  "deps": { "required": [], "optional": [] },
+  "modules": []
+}
