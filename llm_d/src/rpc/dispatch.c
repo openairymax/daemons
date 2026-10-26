@@ -210,6 +210,35 @@ static int inject_time(req_env_t *r, size_t count, size_t *base)
     return 0;
 }
 
+/* T1 前缀稳定化（方案 §5.9.3）：时间上下文追加为末尾独立 system 消息。
+ * 服务端 KV 缓存按 token 前缀匹配，slot 0 注入使每轮首条随时间漂移、
+ * 全量重算 prefill；尾部注入保住 system+历史的逐字节共同前缀，新增
+ * prefill 只有时间消息本身。上限不足即拒绝，不静默丢弃时间感知。 */
+static int append_time_tail(req_env_t *r, size_t slot)
+{
+    if (slot + 1 > MAX_MESSAGES_PER_REQUEST)
+        return msg_fail(r, slot, AIRY_ERR_OVERFLOW, "too many messages");
+    char tbuf[LLM_TIME_CTX_CAP];
+    llm_build_time_context(tbuf, sizeof(tbuf));
+    r->ctx->messages[slot].role = AIRY_STRDUP("system");
+    r->ctx->messages[slot].content = AIRY_STRDUP(tbuf);
+    if (!r->ctx->messages[slot].role || !r->ctx->messages[slot].content)
+        return msg_fail(r, slot + 1, AIRY_ERR_OUT_OF_MEMORY,
+                        "failed to inject time context");
+    r->ctx->message_count = slot + 1;
+    r->cfg->message_count = slot + 1;
+    SVC_LOG_DEBUG("C-L02: SVC: appended host time context as tail: %s", tbuf);
+    return 0;
+}
+
+/* T1 回退开关（§7.6 环境变量通道）：AIRY_LLM_PREFIX_STABLE=off|0 回退
+ * slot 0 注入（0.1.19 行为）；缺省开启尾部注入。 */
+static int llm_prefix_stable(void)
+{
+    const char *v = getenv("AIRY_LLM_PREFIX_STABLE");
+    return !(v && (strcmp(v, "off") == 0 || strcmp(v, "0") == 0));
+}
+
 /* 可选字符串字段：仅非空字符串才复制；返回 -1 表示分配失败。 */
 static int dup_opt(cJSON *item, const char *key, const char **dst)
 {
@@ -248,12 +277,15 @@ static int fill_msg(req_env_t *r, cJSON *item, size_t slot)
     return 0;
 }
 
-/* 消息数组装配：先判定是否补注时间上下文，再逐槽填充。计数在填充前一次
- * 性置位，使 fill_msg 的失败上界不大于该值。 */
+/* 消息数组装配：判定一次是否补注时间上下文，stable 走尾部追加
+ * （前缀稳定），回退走 slot 0 注入。计数在填充前一次性置位，使
+ * fill_msg 的失败上界不大于该值。 */
 static int fill_msgs(req_env_t *r, cJSON *messages, size_t count)
 {
     size_t base = 0;
-    if (!msg_has_time(messages)) {
+    int stable = llm_prefix_stable();
+    int has_time = msg_has_time(messages);
+    if (!stable && !has_time) {
         int rc = inject_time(r, count, &base);
         if (rc != 0)
             return rc;
@@ -266,6 +298,8 @@ static int fill_msgs(req_env_t *r, cJSON *messages, size_t count)
         if (rc != 0)
             return rc;
     }
+    if (stable && !has_time)
+        return append_time_tail(r, count + base);
     return 0;
 }
 
@@ -340,6 +374,12 @@ static int parse_sampling(req_env_t *r, cJSON *params)
         if (cJSON_IsString(t) && t->valuestring &&
             strcmp(t->valuestring, "json_object") == 0)
             cfg->response_format = LLM_RF_JSON_OBJECT;
+    }
+    /* T2 槽位亲和：显式传 slot_id 才置哨兵，槽位 0 合法可表达。 */
+    v = cJSON_GetObjectItem(params, "slot_id");
+    if (cJSON_IsNumber(v)) {
+        cfg->slot_id = (int)v->valuedouble;
+        cfg->slot_set = true;
     }
     return 0;
 }
