@@ -45,6 +45,10 @@ typedef struct {
 /** @brief Get the global router context. */
 router_ctx_t *router_ctx_get(void);
 
+/* 锁内按 provider/model 定位端点，假定调用方已持 ctx->mutex；
+ * 健康面（llm_health.c）与测量面（llm_router.c）共享同一查找口径。 */
+llm_endpoint_t *router_ep_find(const char *provider, const char *model);
+
 /* 四个选择策略的实现入口，仅供 llm_router.c（编排件）调用。 */
 int route_cost_aware(const llm_route_request_t *request, llm_route_result_t *result);
 

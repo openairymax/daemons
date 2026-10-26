@@ -138,7 +138,9 @@ void merge_provider_configs(const provider_config_t *main_provs, size_t main_cnt
 /* Router-table registration context: prices come from the same rule table
  * the cost tracker consumes, so the model table has a single price source
  * (model.yaml). Latency and capability fields carry protocol-neutral
- * defaults; the routing path only ever requires chat/completion/streaming. */
+ * defaults; the latency default is only a seed — llm_rtr_meas() backfills
+ * avg_latency_ms with per-request EWMA once real traffic flows. The routing
+ * path only ever requires chat/completion/streaming. */
 typedef struct {
     const pricing_rule_t *rules;
     int rule_count;

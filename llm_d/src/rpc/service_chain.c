@@ -182,6 +182,7 @@ int svc_chain_run(llm_service_t *svc, const llm_request_config_t *manager,
         llm_response_t *resp = NULL;
         svc_step_t step;
         char model[128];
+        uint64_t t0;
         int max_tokens = 0;
         int ret;
 
@@ -210,10 +211,12 @@ int svc_chain_run(llm_service_t *svc, const llm_request_config_t *manager,
             }
         }
 
+        t0 = airy_time_ms();
         ret = attempt(actx, &step, &resp);
         if (ret == 0) {
             if (auto_mode)
                 (void)llm_rtr_ok(prov->name, model);
+            (void)llm_rtr_meas(prov->name, model, resp, airy_time_ms() - t0);
             if (out)
                 *out = resp;
             else
