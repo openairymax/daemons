@@ -427,6 +427,7 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     if (cache_status > 0 && cached_resp) {
         /* 缓存命中仍消耗上游 token 配额，按响应自带用量计费。 */
         update_cost_tracking(svc, manager->model, cached_resp);
+        (void)llm_rtr_meas(NULL, NULL, cached_resp, 0);
         AIRY_FREE(cache_text);
         AIRY_FREE(cache_key);
         *out_response = cached_resp;

@@ -78,7 +78,7 @@ void llm_ep_ok(llm_endpoint_t *ep)
     ep->probe_until_ms = 0U;
 }
 
-static llm_endpoint_t *ep_find(const char *provider, const char *model)
+llm_endpoint_t *router_ep_find(const char *provider, const char *model)
 {
     router_ctx_t *ctx = router_ctx_get();
 
@@ -102,7 +102,7 @@ int llm_rtr_admit(const char *provider, const char *model)
 
     now = (uint32_t)airy_time_ms();
     AIRY_MUTEX_LOCK(&ctx->mutex);
-    ep = ep_find(provider, model);
+    ep = router_ep_find(provider, model);
     if (ep)
         ok = llm_ep_admit(ep, now);
     AIRY_MUTEX_UNLOCK(&ctx->mutex);
@@ -118,7 +118,7 @@ int llm_rtr_known(const char *provider, const char *model)
         return 0;
 
     AIRY_MUTEX_LOCK(&ctx->mutex);
-    known = ep_find(provider, model) != NULL;
+    known = router_ep_find(provider, model) != NULL;
     AIRY_MUTEX_UNLOCK(&ctx->mutex);
     return known;
 }
@@ -137,7 +137,7 @@ static int ep_note(const char *provider, const char *model, int err, bool ok)
 
     now = (uint32_t)airy_time_ms();
     AIRY_MUTEX_LOCK(&ctx->mutex);
-    ep = ep_find(provider, model);
+    ep = router_ep_find(provider, model);
     if (ep) {
         if (ok)
             llm_ep_ok(ep);
