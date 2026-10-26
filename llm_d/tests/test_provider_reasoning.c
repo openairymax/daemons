@@ -169,6 +169,44 @@ static void test_parse_usage_details(void)
     printf("    PASSED\n");
 }
 
+/* D0 计量诚信（B1-b）：llama.cpp 顶层 timings 段解析为 G47 prefill/decode
+ * 分列；无 timings 段的端点（OpenAI 等）保持全零不误伤。 */
+static void test_parse_timings(void)
+{
+    printf("  test_parse_timings...\n");
+
+    const char *json = "{"
+                       "\"id\":\"chatcmpl-t1\",\"model\":\"qwen2.5\","
+                       "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                       "\"content\":\"ok\"},\"finish_reason\":\"stop\"}],"
+                       "\"usage\":{\"prompt_tokens\":200,\"completion_tokens\":16,"
+                       "\"total_tokens\":216},"
+                       "\"timings\":{\"cache_n\":128,\"prompt_ms\":150.5,"
+                       "\"prompt_n\":72,\"predicted_ms\":512.25,\"predicted_n\":16}}";
+
+    llm_response_t *resp = NULL;
+    assert(prov_parse_chat(json, &resp) == AIRY_OK);
+    assert(resp != NULL);
+    assert(resp->timings.prefill_tokens == 72);
+    assert(resp->timings.decode_tokens == 16);
+    assert(resp->timings.kv_cache_tokens == 128);
+    assert(resp->timings.prefill_ms == 150.5);
+    assert(resp->timings.decode_ms == 512.25);
+    llm_response_free(resp);
+
+    const char *plain = "{"
+                        "\"id\":\"chatcmpl-t2\",\"model\":\"gpt-4o\","
+                        "\"choices\":[],\"usage\":{\"prompt_tokens\":5,"
+                        "\"completion_tokens\":1,\"total_tokens\":6}}";
+    resp = NULL;
+    assert(prov_parse_chat(plain, &resp) == AIRY_OK);
+    assert(resp != NULL);
+    assert(resp->timings.prefill_tokens == 0 && resp->timings.decode_ms == 0.0);
+    llm_response_free(resp);
+
+    printf("    PASSED\n");
+}
+
 static void test_buf_append(void)
 {
     printf("  test_buf_append...\n");
@@ -212,6 +250,7 @@ int main(void)
     test_parse_response_reads_reasoning();
     test_parse_response_without_reasoning();
     test_parse_usage_details();
+    test_parse_timings();
     test_buf_append();
 
     printf("\nAll provider reasoning tests PASSED\n");

@@ -226,6 +226,55 @@ static void test_response_usage_detail_roundtrip(void)
     printf("    PASSED\n");
 }
 
+/* D0 计量诚信（B1-b）：timings 段双态——有值时嵌套序列化并回读，
+ * 全零时整段缺席（不给非 llama.cpp 端点造噪声）。 */
+static void test_response_timings_roundtrip(void)
+{
+    printf("  test_response_timings_roundtrip...\n");
+
+    llm_response_t *resp = (llm_response_t *)calloc(1, sizeof(llm_response_t));
+    assert(resp != NULL);
+    resp->model = strdup("qwen2.5");
+    resp->timings.prefill_tokens = 72;
+    resp->timings.decode_tokens = 16;
+    resp->timings.kv_cache_tokens = 128;
+    resp->timings.prefill_ms = 150.5;
+    resp->timings.decode_ms = 512.25;
+
+    char *json = response_to_json(resp);
+    assert(json != NULL);
+    assert(strstr(json, "\"timings\"") != NULL);
+    assert(strstr(json, "\"prefill_tokens\":72") != NULL);
+    assert(strstr(json, "\"decode_ms\":512.25") != NULL);
+
+    llm_response_t *parsed = response_from_json(json);
+    assert(parsed != NULL);
+    assert(parsed->timings.prefill_tokens == 72);
+    assert(parsed->timings.decode_tokens == 16);
+    assert(parsed->timings.kv_cache_tokens == 128);
+    assert(parsed->timings.prefill_ms == 150.5);
+    assert(parsed->timings.decode_ms == 512.25);
+
+    llm_response_free(parsed);
+    free(json);
+    llm_response_free(resp);
+
+    resp = (llm_response_t *)calloc(1, sizeof(llm_response_t));
+    assert(resp != NULL);
+    resp->model = strdup("gpt-4o");
+    json = response_to_json(resp);
+    assert(json != NULL);
+    assert(strstr(json, "\"timings\"") == NULL);
+    parsed = response_from_json(json);
+    assert(parsed != NULL);
+    assert(parsed->timings.decode_tokens == 0);
+    llm_response_free(parsed);
+    free(json);
+    llm_response_free(resp);
+
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=========================================\n");
@@ -239,6 +288,7 @@ int main(void)
     test_response_null_handling();
     test_response_reasoning_roundtrip();
     test_response_usage_detail_roundtrip();
+    test_response_timings_roundtrip();
 
     printf("\nAll LLM response tests PASSED\n");
     return 0;

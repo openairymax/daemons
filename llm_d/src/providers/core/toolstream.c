@@ -246,6 +246,7 @@ int prov_stream_chunk(const char *json_line, void *userdata)
     provider_usage_load(cJSON_GetObjectItem(root, "usage"), &acc->prompt_tokens,
                         &acc->completion_tokens, &acc->total_tokens,
                         &acc->reasoning_tokens, &acc->cached_tokens);
+    provider_timings_load(cJSON_GetObjectItem(root, "timings"), &acc->timings);
 
     return 0;
 }
@@ -280,6 +281,7 @@ llm_response_t *provider_stream_take(provider_stream_acc_t *acc)
     resp->total_tokens = acc->total_tokens;
     resp->reasoning_tokens = acc->reasoning_tokens;
     resp->cached_tokens = acc->cached_tokens;
+    resp->timings = acc->timings;
     return resp;
 }
 

@@ -101,6 +101,26 @@ static inline void provider_usage_load(const cJSON *usage, uint32_t *prompt,
         *cached = (uint32_t)n;
 }
 
+static inline double provider_json_f64_get(const cJSON *obj, const char *key)
+{
+    cJSON *v = obj ? cJSON_GetObjectItem(obj, key) : NULL;
+    return cJSON_IsNumber(v) ? v->valuedouble : 0.0;
+}
+
+/* timings 段装载（llama.cpp 兼容端点顶层 "timings"）：G47 prefill/decode
+ * 分列回显。存在才覆写、缺失清零语义由整段判 object 保证；非 llama.cpp
+ * 端点无此段，结构体保持零值。 */
+static inline void provider_timings_load(const cJSON *timings, llm_timings_t *t)
+{
+    if (!cJSON_IsObject(timings))
+        return;
+    t->prefill_tokens = provider_json_u32_get(timings, "prompt_n");
+    t->decode_tokens = provider_json_u32_get(timings, "predicted_n");
+    t->kv_cache_tokens = provider_json_u32_get(timings, "cache_n");
+    t->prefill_ms = provider_json_f64_get(timings, "prompt_ms");
+    t->decode_ms = provider_json_f64_get(timings, "predicted_ms");
+}
+
 #ifdef __cplusplus
 }
 #endif
