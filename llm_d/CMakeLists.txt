@@ -69,6 +69,8 @@ set(LLM_SERVICE_SOURCES
     # B16-S3 c6：chat 三件合一（openai.c + openai_stream.c + openai_internal.h → chat.c）
     src/providers/adapters/chat.c
     src/providers/core/rate_limit.c
+    # 0.1.20 B1-d：上游失败线程局域诊断槽（错误面透传，P2-2 残余收口）
+    src/providers/core/prov_diag.c
     # 0.1.19 D5：端点健康探测机制件（能力存在 ≠ 能力可用）
     src/providers/core/ep_health.c
     src/providers/adapters/messages.c
