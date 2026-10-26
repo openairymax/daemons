@@ -46,6 +46,9 @@ typedef struct {
      * vision / thinking 来自模型连接表的每行配置。 */
     char mode[8];
     char api_format[16];
+    /* C11 端点族（llamacpp | ollama | vllm | openai）：请求体可选字段的
+     * 能力位静态派生源；缺失/未知 = 全不发送（fail-safe）。 */
+    char endpoint_kind[16];
     char context_window[16];
     /* max_output 的 token 数（由 svc_tokens_parse 在解析点一次性解释）。 */
     int max_output_tokens;
@@ -66,6 +69,7 @@ typedef struct {
     char *model_names[64];
     size_t model_count;
     char api_format[16];
+    char endpoint_kind[16];
     char extra_headers[256];
 } prov_cfg_t;
 
@@ -84,6 +88,7 @@ typedef struct {
     /* 聚合出的连接声明：api_format 为适配器查找键（chat | messages |
      * local），extra_headers 为首个显式声明该字段的模型带来的端点附加头。 */
     char api_format[16];
+    char endpoint_kind[16];
     char extra_headers[256];
 } provider_agg_t;
 

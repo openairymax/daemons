@@ -64,6 +64,7 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
         if (pcfg->extra_headers && pcfg->extra_headers[0])
             AIRY_STRNCPY_TERM(provider_base_ctx(ctx)->extra_headers, pcfg->extra_headers,
                               sizeof(provider_base_ctx(ctx)->extra_headers));
+        provider_base_ctx(ctx)->caps = pcfg->caps;
 
         char **models = NULL;
         int *caps = NULL;

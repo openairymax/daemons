@@ -406,6 +406,17 @@ static int provider_stream_post(const char *url, struct curl_slist *headers, con
         return AIRY_ERR_IO;
     }
 
+    /* C11：传输成功且 2xx 不证明流按协议终结——行协议的唯一合法终点是
+     * data: [DONE]。流被中途截断（代理超时、上游崩溃）且调用方未主动
+     * 中止时 done 仍为 0，报 UNDONE 阻断"半截回复当完整"。具名事件模式
+     * （on_event）无 [DONE] 约定，不参与判定。 */
+    if (sse->on_chunk && !sse->done && !sse->cancelled) {
+        SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s http_code=%ld "
+                      "DIAGNOSIS=missing_done_sentinel",
+                      url, http_code);
+        return AIRY_ERR_LLM_STREAM_UNDONE;
+    }
+
     return AIRY_OK;
 }
 

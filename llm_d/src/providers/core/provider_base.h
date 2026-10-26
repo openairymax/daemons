@@ -6,6 +6,7 @@
 #define LLM_D_PROVIDERS_CORE_PROVIDER_BASE_H
 
 #include "provider_retry_class.h"
+#include "llm_service_types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,6 +24,9 @@ typedef struct {
     double timeout_sec;
     int max_retries;
     provider_retry_class_t retry_class;
+    /* C11 能力位：registry 从 provider_config_t 盖入，driver 装配请求时
+     * 盖印到 llm_request_config_t.caps，envelope 按位条件注入可选字段。 */
+    local_caps_t caps;
 } provider_base_ctx_t;
 
 void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name,
