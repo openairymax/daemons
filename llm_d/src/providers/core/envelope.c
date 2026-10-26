@@ -196,7 +196,7 @@ int prov_parse_chat(const char *body, llm_response_t **out)
 
     provider_usage_load(cJSON_GetObjectItem(root, "usage"), &resp->prompt_tokens,
                         &resp->completion_tokens, &resp->total_tokens,
-                        &resp->reasoning_tokens);
+                        &resp->reasoning_tokens, &resp->cached_tokens);
 
     *out = resp;
     return AIRY_OK;

@@ -194,6 +194,38 @@ static void test_response_reasoning_roundtrip(void)
     printf("    PASSED\n");
 }
 
+/* D0 计量诚信：usage 明细（reasoning/cached）序列化-解析双位置不丢失。 */
+static void test_response_usage_detail_roundtrip(void)
+{
+    printf("  test_response_usage_detail_roundtrip...\n");
+
+    llm_response_t *resp = (llm_response_t *)calloc(1, sizeof(llm_response_t));
+    assert(resp != NULL);
+    resp->id = strdup("chatcmpl-usage-1");
+    resp->model = strdup("gpt-4o");
+    resp->prompt_tokens = 1000;
+    resp->completion_tokens = 200;
+    resp->total_tokens = 1200;
+    resp->reasoning_tokens = 120;
+    resp->cached_tokens = 768;
+
+    char *json = response_to_json(resp);
+    assert(json != NULL);
+    assert(strstr(json, "\"cached_tokens\":768") != NULL);
+
+    llm_response_t *parsed = response_from_json(json);
+    assert(parsed != NULL);
+    assert(parsed->prompt_tokens == 1000);
+    assert(parsed->reasoning_tokens == 120);
+    assert(parsed->cached_tokens == 768);
+
+    llm_response_free(parsed);
+    free(json);
+    llm_response_free(resp);
+
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=========================================\n");
@@ -206,6 +238,7 @@ int main(void)
     test_response_from_json();
     test_response_null_handling();
     test_response_reasoning_roundtrip();
+    test_response_usage_detail_roundtrip();
 
     printf("\nAll LLM response tests PASSED\n");
     return 0;
