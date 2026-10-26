@@ -87,6 +87,8 @@ set(LLM_TEST_SOURCES
     test_route.c
     # 0.1.20 B1-d：上游失败诊断槽（写读 / 截断 / 覆盖 / 线程隔离）回归
     test_prov_diag.c
+    # 0.1.20 C11：请求信封参数段契约（caps 门控 / temperature 哨兵）回归
+    test_envelope.c
 )
 
 set(LLM_COMMON_INCLUDES

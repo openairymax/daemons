@@ -42,6 +42,21 @@ static void diag_from_resp(long http_code, const provider_http_resp_t *resp)
     prov_diag_set(http_code, body, body ? strlen(body) : 0);
 }
 
+/* C11 流末完整性判定：机制面只报告事实（缺失=length 之外的非完备
+ * finish_reason），处置归调用方策略侧。stop/tool_calls 为合法完备集；
+ * [DONE] 缺失由 sse 层判，本件不重复。resp 必须非 NULL。 */
+static int stream_integrity(const llm_response_t *resp)
+{
+    const char *fr = resp->finish_reason;
+    if (!fr)
+        return AIRY_ERR_LLM_NO_FINISH;
+    if (llm_finish_is_truncated(fr))
+        return AIRY_ERR_LLM_TRUNCATED;
+    if (strcmp(fr, LLM_FINISH_CONTENT_FILTER) == 0)
+        return AIRY_ERR_LLM_CONTENT_FILTERED;
+    return AIRY_OK;
+}
+
 int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
                              const llm_request_config_t *manager, llm_response_t **out_response)
 {
@@ -51,7 +66,12 @@ int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
     provider_base_ctx_t *base = provider_base_ctx(ctx);
     provider_refresh_api_key(base);
 
-    char *req_body = ops->build_request(manager);
+    /* C11：能力位由 base 盖印进请求快照（driver 是唯一盖印点，
+     * 调用方与 envelope 之间的机制约定）。 */
+    llm_request_config_t eff = *manager;
+    eff.caps = base->caps;
+
+    char *req_body = ops->build_request(&eff);
     if (!req_body) {
         SVC_LOG_ERROR("C-L02: %s: COMPLETE-FAIL model=%s reason=build_request_oom "
                       "STACK: provider_driver_complete",
@@ -132,6 +152,7 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
 
     llm_request_config_t stream_cfg = *manager;
     stream_cfg.stream = 1;
+    stream_cfg.caps = base->caps;
 
     char *req_body = ops->build_request(&stream_cfg);
     if (!req_body) {
@@ -175,6 +196,16 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
     llm_response_t *resp = provider_stream_take(&acc);
     provider_tool_flush(&acc.tools, resp, callback, callback_data);
     provider_stream_acc_free(&acc);
+
+    int integrity = resp ? stream_integrity(resp) : AIRY_OK;
+    if (integrity != AIRY_OK) {
+        SVC_LOG_ERROR("C-L02: %s: STREAM-FAIL model=%s http_code=%ld reason=integrity ret=%d",
+                      ops->tag, model, http_code, integrity);
+        llm_response_free(resp);
+        if (out_response)
+            *out_response = NULL;
+        return integrity;
+    }
 
     if (resp) {
         SVC_LOG_INFO("C-L02: %s: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "

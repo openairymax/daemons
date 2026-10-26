@@ -491,14 +491,20 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
 
     if (resp) {
         /* 流式结束发 usage 控制帧（RS 'U'）：携带真实 token 与回填后的
-         * cost_usd，否则客户端统计与计费恒为 0。 */
-        char usage_frame[288];
+         * cost_usd，否则客户端统计与计费恒为 0。C11 追加 finish_reason
+         * （仅存在时序列化；值为 norm 规范集四串之一，无注入面）。 */
+        char fr_seg[48] = "";
+        if (resp->finish_reason)
+            snprintf(fr_seg, sizeof(fr_seg), ",\"finish_reason\":\"%s\"",
+                     resp->finish_reason);
+        char usage_frame[320];
         int ufn = snprintf(usage_frame, sizeof(usage_frame),
                            "\x1eU{\"prompt_tokens\":%u,\"completion_tokens\":%u,"
                            "\"total_tokens\":%u,\"reasoning_tokens\":%u,"
-                           "\"cached_tokens\":%u,\"cost_usd\":%.8f}\x1e",
+                           "\"cached_tokens\":%u,\"cost_usd\":%.8f%s}\x1e",
                            resp->prompt_tokens, resp->completion_tokens, resp->total_tokens,
-                           resp->reasoning_tokens, resp->cached_tokens, resp->cost_usd);
+                           resp->reasoning_tokens, resp->cached_tokens, resp->cost_usd,
+                           fr_seg);
         if (ufn > 0)
             llm_stream_send_all(fd, usage_frame, (size_t)ufn);
         llm_response_free(resp);

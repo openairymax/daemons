@@ -120,6 +120,7 @@ void request_context_destroy(request_context_t *ctx)
 
     messages_release(ctx);
     AIRY_FREE(ctx->tools_json);
+    AIRY_FREE(ctx->grammar);
     AIRY_FREE(ctx);
 }
 /**
@@ -145,6 +146,9 @@ static void req_cleanup(req_env_t *r)
     messages_release(r->ctx);
     AIRY_FREE(r->ctx->tools_json);
     r->ctx->tools_json = NULL;
+    AIRY_FREE(r->ctx->grammar);
+    r->ctx->grammar = NULL;
+    r->cfg->grammar = NULL;
 }
 
 /* 解析失败的统一出口：先把消息计数收敛到 keep（半填槽位纳入回收上界），
@@ -299,21 +303,45 @@ static double num_or(cJSON *params, const char *key, double dflt)
 }
 
 /* 采样参数：cacheable 缺省 0 即 B5-3 的 fail-closed，此处只覆盖显式且
- * 类型相符的项。 */
-static void parse_sampling(cJSON *params, llm_request_config_t *cfg)
+ * 类型相符的项。C11 新参数遵零值=不发送约定；temperature 以显式哨兵
+ * 记录"被设置过"，使 0.0 可区别于缺省；grammar 本体归 ctx 持有。 */
+static int parse_sampling(req_env_t *r, cJSON *params)
 {
+    llm_request_config_t *cfg = r->cfg;
     cJSON *v;
-    cfg->temperature = (float)num_or(params, "temperature", cfg->temperature);
+    v = cJSON_GetObjectItem(params, "temperature");
+    if (cJSON_IsNumber(v)) {
+        cfg->temperature = (float)v->valuedouble;
+        cfg->temperature_set = true;
+    }
     cfg->top_p = (float)num_or(params, "top_p", cfg->top_p);
     cfg->max_tokens = (int)num_or(params, "max_tokens", cfg->max_tokens);
     cfg->presence_penalty = num_or(params, "presence_penalty", cfg->presence_penalty);
     cfg->frequency_penalty = num_or(params, "frequency_penalty", cfg->frequency_penalty);
+    cfg->seed = (uint32_t)num_or(params, "seed", cfg->seed);
+    cfg->num_ctx = (uint32_t)num_or(params, "num_ctx", cfg->num_ctx);
     v = cJSON_GetObjectItem(params, "stream");
     if (cJSON_IsBool(v))
         cfg->stream = cJSON_IsTrue(v);
     v = cJSON_GetObjectItem(params, "cacheable");
     if (cJSON_IsBool(v))
         cfg->cacheable = cJSON_IsTrue(v);
+    v = cJSON_GetObjectItem(params, "grammar");
+    if (cJSON_IsString(v) && v->valuestring && v->valuestring[0]) {
+        r->ctx->grammar = AIRY_STRDUP(v->valuestring);
+        if (!r->ctx->grammar)
+            return msg_fail(r, r->ctx->message_count, AIRY_ERR_OUT_OF_MEMORY,
+                            "failed to duplicate grammar string");
+        cfg->grammar = r->ctx->grammar;
+    }
+    v = cJSON_GetObjectItem(params, "response_format");
+    if (cJSON_IsObject(v)) {
+        cJSON *t = cJSON_GetObjectItem(v, "type");
+        if (cJSON_IsString(t) && t->valuestring &&
+            strcmp(t->valuestring, "json_object") == 0)
+            cfg->response_format = LLM_RF_JSON_OBJECT;
+    }
+    return 0;
 }
 
 /* tools 参数：序列化后由 ctx 持有所有权，cfg 只借用指针。 */
@@ -341,6 +369,8 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
     rc = parse_messages(&r, params);
     if (rc != 0)
         return rc;
-    parse_sampling(params, cfg);
+    rc = parse_sampling(&r, params);
+    if (rc != 0)
+        return rc;
     return parse_tools(&r, params);
 }

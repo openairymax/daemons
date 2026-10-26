@@ -73,6 +73,9 @@ static void svc_yaml_parse_prov(svc_yaml_state_t *st, struct yaml_node *item)
     const char *pf = svc_yaml_item_str(item, "api_format");
     if (pf)
         AIRY_STRNCPY_TERM(st->cur_p.api_format, pf, sizeof(st->cur_p.api_format));
+    const char *pk = svc_yaml_item_str(item, "endpoint_kind");
+    if (pk)
+        AIRY_STRNCPY_TERM(st->cur_p.endpoint_kind, pk, sizeof(st->cur_p.endpoint_kind));
     const char *px = svc_yaml_item_str(item, "extra_headers");
     if (px)
         AIRY_STRNCPY_TERM(st->cur_p.extra_headers, px, sizeof(st->cur_p.extra_headers));
@@ -97,6 +100,7 @@ typedef struct {
 
 static const svc_yaml_field_t svc_yaml_fields[] = {
     YF("mode", mode, YF_STR), YF("api_format", api_format, YF_STR),
+    YF("endpoint_kind", endpoint_kind, YF_STR),
     YF("context_window", context_window, YF_STR), YF("thinking", thinking, YF_STR),
     YF("extra_headers", extra_headers, YF_STR), YF("tool_rounds", tool_rounds, YF_INT),
     YF("timeout_sec", timeout_sec, YF_INT), YF("max_retries", max_retries, YF_INT),

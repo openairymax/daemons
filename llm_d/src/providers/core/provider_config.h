@@ -8,6 +8,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "llm_service_types.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -17,6 +19,10 @@ typedef struct {
     /* 线格式名（model.yaml api_format），适配器查找键；NULL = 未声明，
      * 由装配面回落行协议适配。 */
     const char *api_format;
+    /* C11 端点族名（model.yaml endpoint_kind）与派生能力位：请求体可选
+     * 字段（seed/grammar/num_ctx/response_format）按位条件注入。 */
+    const char *endpoint_kind;
+    local_caps_t caps;
     const char *api_key;
     const char *api_base;
     const char *organization;

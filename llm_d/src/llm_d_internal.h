@@ -49,6 +49,8 @@ typedef struct {
     llm_message_t messages[MAX_MESSAGES_PER_REQUEST];
     size_t message_count;
     char *tools_json;
+    /* C11 grammar 串的本体所有权（cfg->grammar 只借用指针）。 */
+    char *grammar;
     /* parse_params 失败的具体原因（如 "messages 缺失/为空数组"、"model
      * 未配置且无默认模型"）。随 -32602 错误消息透传，避免笼统的
      * "Invalid params" 掩盖失败环节。 */
