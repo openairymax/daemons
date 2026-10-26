@@ -12,6 +12,8 @@
  *   2. ROUND_ROBIN 策略在端点间轮询（负载均衡）
  *   3. service 生命周期集成 — create 初始化 router、destroy 销毁 router、
  *      router 在 service 生命周期内可用且 total_requests 递增
+ *   4. 测量面（0.1.20 D0）— llm_rtr_meas 的端点 EWMA 回填、lat/timings
+ *      聚合口径、缓存命中回放（provider NULL）只并 token 不记延迟
  *
  * 每个测试为独立可执行进程内的函数，通过 init/destroy 保证全局单例隔离。
  *
@@ -26,8 +28,10 @@
 
 #include "llm_service.h"
 #include "router/core/llm_router.h"
+#include "router/core/router_context.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int test_count = 0;
@@ -293,6 +297,146 @@ static void test_service_lifecycle_integration(void)
     llm_service_destroy(svc);
 }
 
+/* RPC stats 导出面（D0/G47）：router 与 measurement 两对象及分列键必须可见。 */
+static void test_stats_export_surface(void)
+{
+    printf("  [D0.1] llm_service_stats exports router/measurement...\n");
+
+    llm_service_t *svc = llm_service_create(NULL);
+    if (svc == NULL) {
+        TEST_FAIL("llm_service_create returned NULL");
+        return;
+    }
+
+    char *json = NULL;
+    if (llm_service_stats(svc, &json) != 0 || json == NULL) {
+        TEST_FAIL("llm_service_stats failed");
+        llm_service_destroy(svc);
+        return;
+    }
+
+    static const char *const keys[] = {"\"router\"",
+                                       "\"measurement\"",
+                                       "\"avg_latency_ms\"",
+                                       "\"meas_samples\"",
+                                       "\"prefill_tokens\"",
+                                       "\"decode_tokens\"",
+                                       "\"cached_tokens\""};
+    int missing = 0;
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        if (strstr(json, keys[i]) == NULL) {
+            printf("    missing key: %s\n", keys[i]);
+            missing++;
+        }
+    }
+    free(json);
+
+    llm_service_destroy(svc);
+    if (missing == 0) {
+        TEST_PASS();
+        printf("    PASSED (export surface complete)\n");
+    } else {
+        TEST_FAIL("stats export missing keys");
+    }
+}
+
+static void expect_u64(const char *what, uint64_t got, uint64_t want)
+{
+    if (got == want)
+        return;
+    char msg[160];
+    snprintf(msg, sizeof(msg), "%s: got %llu, want %llu", what, (unsigned long long)got,
+             (unsigned long long)want);
+    TEST_FAIL(msg);
+}
+
+static void expect_dbl(const char *what, double got, double want)
+{
+    if (got == want)
+        return;
+    char msg[160];
+    snprintf(msg, sizeof(msg), "%s: got %g, want %g", what, got, want);
+    TEST_FAIL(msg);
+}
+
+/* 测量面单点记账：EWMA(α=0.2) 回填、timings 零值守卫、命中回放、未注册端点。 */
+static void test_measurement_backfill(void)
+{
+    printf("  [D0.2] llm_rtr_meas EWMA backfill + stats aggregation...\n");
+
+    llm_response_t resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.prompt_tokens = 100;
+    resp.cached_tokens = 40;
+
+    if (llm_rtr_meas("llama", "qwen", &resp, 500) == 0) {
+        TEST_FAIL("meas before init should fail");
+        return;
+    }
+    if (llm_router_init() != 0) {
+        TEST_FAIL("llm_router_init failed");
+        return;
+    }
+    if (llm_rtr_meas("llama", "qwen", NULL, 500) == 0) {
+        TEST_FAIL("meas with NULL resp should fail");
+        llm_router_destroy();
+        return;
+    }
+
+    const uint32_t caps = LLM_CAP_CHAT | LLM_CAP_COMPLETION;
+    llm_endpoint_t ep = make_endpoint("llama", "qwen", 0.001, 0.002, 1000, caps);
+    if (llm_router_register_endpoint(&ep) != 0) {
+        TEST_FAIL("register_endpoint failed");
+        llm_router_destroy();
+        return;
+    }
+
+    /* 种子 1000 + 实测 500：(1000*4+500+2)/5 = 900。 */
+    (void)llm_rtr_meas("llama", "qwen", &resp, 500);
+
+    /* 带 timings 的 600：(900*4+600+2)/5 = 840。 */
+    resp.timings.prefill_tokens = 100;
+    resp.timings.decode_tokens = 20;
+    resp.timings.kv_cache_tokens = 40;
+    resp.timings.prefill_ms = 12.5;
+    resp.timings.decode_ms = 88.0;
+    (void)llm_rtr_meas("llama", "qwen", &resp, 600);
+
+    /* 命中回放（provider NULL）：只并 token，不动 lat 与 meas 样本。 */
+    (void)llm_rtr_meas(NULL, NULL, &resp, 0);
+
+    /* 未注册端点：EWMA 无对象，但请求级统计不丢。 */
+    (void)llm_rtr_meas("ghost", "x", &resp, 300);
+
+    router_ctx_t *ctx = router_ctx_get();
+    if (ctx->endpoints[0].avg_latency_ms != 840U) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "ep avg: got %u, want 840", ctx->endpoints[0].avg_latency_ms);
+        TEST_FAIL(msg);
+    }
+
+    llm_router_stats_t s;
+    if (llm_router_get_stats(&s) != 0) {
+        TEST_FAIL("llm_router_get_stats failed");
+        llm_router_destroy();
+        return;
+    }
+    expect_u64("lat_samples", s.lat_samples, 3);
+    expect_u64("lat_total_ms", s.lat_total_ms, 1400);
+    expect_u64("prompt_tokens_sum", s.prompt_tokens_sum, 400);
+    expect_u64("cached_tokens_sum", s.cached_tokens_sum, 160);
+    expect_u64("meas_samples", s.meas_samples, 2);
+    expect_u64("prefill_tokens", s.prefill_tokens, 200);
+    expect_u64("decode_tokens", s.decode_tokens, 40);
+    expect_u64("kv_cache_tokens", s.kv_cache_tokens, 80);
+    expect_dbl("prefill_ms", s.prefill_ms, 25.0);
+    expect_dbl("decode_ms", s.decode_ms, 176.0);
+
+    TEST_PASS();
+    printf("    PASSED (EWMA 840, lat/meas aggregation live)\n");
+    llm_router_destroy();
+}
+
 int main(void)
 {
     printf("=========================================\n");
@@ -302,6 +446,8 @@ int main(void)
     test_cost_strategy_selects_cheapest();
     test_round_robin_cycles();
     test_service_lifecycle_integration();
+    test_stats_export_surface();
+    test_measurement_backfill();
 
     printf("\n=========================================\n");
     printf("  Results: %d/%d tests PASSED\n", pass_count, test_count);

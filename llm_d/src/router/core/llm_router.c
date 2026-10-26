@@ -268,6 +268,46 @@ int llm_router_pick(const llm_route_request_t *request, llm_route_result_t *out,
     return 0;
 }
 
+int llm_rtr_meas(const char *provider, const char *model, const llm_response_t *resp,
+                 uint64_t lat_ms)
+{
+    router_ctx_t *ctx = router_ctx_get();
+    int fresh = provider && model;
+
+    if (!resp)
+        return AIRY_ERR_INVALID_PARAM;
+    if (!ctx->initialized)
+        return AIRY_ERR_SYS_NOT_INIT;
+
+    AIRY_MUTEX_LOCK(&ctx->mutex);
+
+    if (fresh) {
+        llm_endpoint_t *ep = router_ep_find(provider, model);
+        if (ep)
+            ep->avg_latency_ms =
+                (uint32_t)(((uint64_t)ep->avg_latency_ms * 4ULL + lat_ms + 2ULL) / 5ULL);
+        ctx->stats.lat_samples++;
+        ctx->stats.lat_total_ms += lat_ms;
+    }
+
+    ctx->stats.prompt_tokens_sum += resp->prompt_tokens;
+    ctx->stats.cached_tokens_sum += resp->cached_tokens;
+
+    if (fresh && (resp->timings.prefill_tokens || resp->timings.decode_tokens ||
+                  resp->timings.kv_cache_tokens || resp->timings.prefill_ms != 0.0 ||
+                  resp->timings.decode_ms != 0.0)) {
+        ctx->stats.meas_samples++;
+        ctx->stats.prefill_tokens += resp->timings.prefill_tokens;
+        ctx->stats.decode_tokens += resp->timings.decode_tokens;
+        ctx->stats.kv_cache_tokens += resp->timings.kv_cache_tokens;
+        ctx->stats.prefill_ms += resp->timings.prefill_ms;
+        ctx->stats.decode_ms += resp->timings.decode_ms;
+    }
+
+    AIRY_MUTEX_UNLOCK(&ctx->mutex);
+    return 0;
+}
+
 int llm_router_get_stats(llm_router_stats_t *stats)
 {
     router_ctx_t *ctx = router_ctx_get();

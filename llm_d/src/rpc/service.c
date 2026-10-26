@@ -424,6 +424,45 @@ int llm_service_stats(llm_service_t *svc, char **out_json)
     cJSON_AddNumberToObject(root, "llm_cache_evictions", (double)cache_stats.evictions);
     cJSON_AddNumberToObject(root, "llm_cache_hit_rate", cache_stats.hit_rate);
 
+    llm_router_stats_t rs;
+    if (llm_router_get_stats(&rs) == 0) {
+        static const char *const k_route[] = {"complexity", "cost",   "latency",
+                                              "fallback",   "round_robin"};
+        cJSON *router = cJSON_CreateObject();
+        if (router) {
+            cJSON_AddNumberToObject(router, "total_requests", (double)rs.total_requests);
+            for (size_t i = 0; i < sizeof(k_route) / sizeof(k_route[0]); i++) {
+                char key[32];
+                snprintf(key, sizeof(key), "routed_%s", k_route[i]);
+                cJSON_AddNumberToObject(router, key, (double)rs.routed_count[i]);
+            }
+            cJSON_AddNumberToObject(router, "fallback_count", (double)rs.fallback_count);
+            cJSON_AddNumberToObject(router, "error_count", (double)rs.error_count);
+            cJSON_AddNumberToObject(router, "total_cost", rs.total_cost);
+            cJSON_AddNumberToObject(router, "total_tokens", (double)rs.total_tokens);
+            cJSON_AddItemToObject(root, "router", router);
+        }
+        cJSON *meas = cJSON_CreateObject();
+        if (meas) {
+            cJSON_AddNumberToObject(meas, "lat_samples", (double)rs.lat_samples);
+            cJSON_AddNumberToObject(meas, "lat_total_ms", (double)rs.lat_total_ms);
+            cJSON_AddNumberToObject(meas, "avg_latency_ms",
+                                    rs.lat_samples ? (double)rs.lat_total_ms /
+                                                         (double)rs.lat_samples
+                                                   : 0.0);
+            cJSON_AddNumberToObject(meas, "prompt_tokens", (double)rs.prompt_tokens_sum);
+            cJSON_AddNumberToObject(meas, "cached_tokens", (double)rs.cached_tokens_sum);
+            /* G47：分列与样本数并出，禁止以 aggregate 冒充性能；判定层为端点自报。 */
+            cJSON_AddNumberToObject(meas, "meas_samples", (double)rs.meas_samples);
+            cJSON_AddNumberToObject(meas, "prefill_tokens", (double)rs.prefill_tokens);
+            cJSON_AddNumberToObject(meas, "decode_tokens", (double)rs.decode_tokens);
+            cJSON_AddNumberToObject(meas, "kv_cache_tokens", (double)rs.kv_cache_tokens);
+            cJSON_AddNumberToObject(meas, "prefill_ms", rs.prefill_ms);
+            cJSON_AddNumberToObject(meas, "decode_ms", rs.decode_ms);
+            cJSON_AddItemToObject(root, "measurement", meas);
+        }
+    }
+
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
 

@@ -36,6 +36,7 @@
 #define AIRY_RT_DAEMON_LLM_D_ROUTER_LLM_ROUTER_H
 
 #include "airy_abi.h"
+#include "llm_service_types.h"
 
 AIRY_ABI_BEGIN
 
@@ -139,6 +140,17 @@ int llm_rtr_fail(const char *provider, const char *model, int err);
 /** 锁内记录成功。@return 0 已记录，负值未找到端点。 */
 int llm_rtr_ok(const char *provider, const char *model);
 
+/**
+ * 测量面单点记账（0.1.20 D0）：端点延迟 EWMA 回填 + stats 聚合。
+ * 测量面与健康面分离——不触碰熔断四字段；熔断 off 模式同样回填，
+ * 使 latency_skipped/least_latency 消费的 avg_latency_ms 恒为实测真值。
+ * provider 为 NULL 表示缓存命中回放：只聚合 token 计数，不记延迟样本、
+ * 不重复计 timings（响应来自历史请求的计量，不是本次上游往返）。
+ * @return 0 已记账，负值参数非法或 router 未初始化。
+ */
+int llm_rtr_meas(const char *provider, const char *model, const llm_response_t *resp,
+                 uint64_t lat_ms);
+
 typedef struct {
     const char *prompt;
     size_t prompt_len;
@@ -169,6 +181,18 @@ typedef struct {
     uint64_t error_count;
     double total_cost;
     uint64_t total_tokens;
+    /* 测量面聚合（0.1.20 D0/G47/G62）：lat_* 来自逐请求实测；meas_* 仅统计
+     * 端点真实上报 timings 的请求，未上报者不入样本，防止分列均值被零值稀释。 */
+    uint64_t lat_samples;
+    uint64_t lat_total_ms;
+    uint64_t prompt_tokens_sum;
+    uint64_t cached_tokens_sum;
+    uint64_t meas_samples;
+    uint64_t prefill_tokens;
+    uint64_t decode_tokens;
+    uint64_t kv_cache_tokens;
+    double prefill_ms;
+    double decode_ms;
 } llm_router_stats_t;
 
 /** 初始化路由表。@return 0 成功，非 0 失败。 */
