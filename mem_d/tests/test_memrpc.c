@@ -149,6 +149,7 @@ static void test_provider_full(void)
 
     assert(p->delete_raw(p, rid2) == AIRY_EOK);
     assert(p->get_raw(p, rid2, &data, &len) != AIRY_EOK);
+    AIRY_FREE(rid2);
 
     AIRY_FREE(rid);
     printf("    PASSED\n");
