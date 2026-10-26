@@ -16,6 +16,7 @@
 #include "error.h"
 #include "svc_llm_d.h"
 #include "llm_d_internal.h"
+#include "providers/core/prov_diag.h"
 #include "response.h"
 #include "token.h"
 #include "token_standard.h"
@@ -80,6 +81,20 @@ static const char *llm_error_message_fmt(int ret, char *buf, size_t buf_len)
     if (msg)
         return msg;
     snprintf(buf, buf_len, "LLM request failed (error=%d)", ret);
+    return buf;
+}
+
+/* B1-d：失败面文案 = AIRY_ERR_* 映射 + 本线程上游诊断片段（若有）。
+ * 诊断由 providers/core 失败点在释放 resp 前写入，handler 发起服务
+ * 调用前已 clear，读到的必是本次请求最后一次上游失败。 */
+static const char *llm_fail_msg(int ret, char *buf, size_t buf_len)
+{
+    const char *diag = prov_diag_text();
+    if (!diag[0])
+        return llm_error_message_fmt(ret, buf, buf_len);
+    char base[160];
+    const char *msg = llm_error_message_fmt(ret, base, sizeof(base));
+    snprintf(buf, buf_len, "%s | %s", msg, diag);
     return buf;
 }
 
@@ -151,13 +166,16 @@ static void handle_embeddings(cJSON *params, int id, airy_sock_t fd)
     }
 
     char *out = NULL;
+    prov_diag_clear();
     int rc = llm_service_embeddings(g_service, model, body, &out);
     AIRY_FREE(body);
     AIRY_FREE(model);
 
     if (rc != 0 || !out) {
         AIRY_FREE(out);
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Embedding failed", id);
+        char ebuf[640];
+        const char *msg = (rc != 0) ? llm_fail_msg(rc, ebuf, sizeof(ebuf)) : "Embedding failed";
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, msg, id);
         return;
     }
     send_service_json(out, id, fd, "Out of memory", "Invalid embedding response");
@@ -271,6 +289,8 @@ static void handle_complete(cJSON *params, int id, airy_sock_t fd)
 
     uint64_t start_time = airy_time_ms();
 
+    prov_diag_clear();
+
     llm_response_t *resp = NULL;
     int ret = -1;
     int attempts_used = 0;
@@ -311,9 +331,8 @@ static void handle_complete(cJSON *params, int id, airy_sock_t fd)
                       (unsigned long long)(end_time - start_time));
         AIRY_FREE((void *)cfg.model);
         request_context_destroy(ctx);
-        char ebuf[128];
-        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,
-                           llm_error_message_fmt(ret, ebuf, sizeof(ebuf)), id);
+        char ebuf[640];
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, llm_fail_msg(ret, ebuf, sizeof(ebuf)), id);
         return;
     }
 
@@ -454,6 +473,8 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
     if (cfg.model)
         AIRY_STRNCPY_TERM(stream_ctx.model, cfg.model, sizeof(stream_ctx.model));
 
+    prov_diag_clear();
+
     llm_response_t *resp = NULL;
     int ret = llm_service_complete_stream(g_service, &cfg, llm_stream_callback, &stream_ctx, &resp);
 
@@ -461,8 +482,8 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
         AIRY_FREE((void *)cfg.model);
         request_context_destroy(ctx);
         /* 与 parse_params 失败路径同因同治：错误只能走 RS 'E' 帧。 */
-        char ebuf[128];
-        const char *msg = llm_error_message_fmt(ret, ebuf, sizeof(ebuf));
+        char ebuf[640];
+        const char *msg = llm_fail_msg(ret, ebuf, sizeof(ebuf));
         SVC_LOG_ERROR("complete_stream: %s", msg);
         llm_stream_send_error_frame(fd, id, JSONRPC_INTERNAL_ERROR, msg);
         return;
