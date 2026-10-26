@@ -40,6 +40,7 @@ char *response_to_json(const llm_response_t *resp)
     cJSON_AddNumberToObject(root, "completion_tokens", resp->completion_tokens);
     cJSON_AddNumberToObject(root, "total_tokens", resp->total_tokens);
     cJSON_AddNumberToObject(root, "reasoning_tokens", resp->reasoning_tokens);
+    cJSON_AddNumberToObject(root, "cached_tokens", resp->cached_tokens);
 
     cJSON_AddNumberToObject(root, "cost_usd", resp->cost_usd);
     /* usage nested object: OpenAI chat.completions-compatible format; both
@@ -50,6 +51,7 @@ char *response_to_json(const llm_response_t *resp)
     cJSON_AddNumberToObject(usage, "completion_tokens", resp->completion_tokens);
     cJSON_AddNumberToObject(usage, "total_tokens", resp->total_tokens);
     cJSON_AddNumberToObject(usage, "reasoning_tokens", resp->reasoning_tokens);
+    cJSON_AddNumberToObject(usage, "cached_tokens", resp->cached_tokens);
     cJSON_AddItemToObject(root, "usage", usage);
     if (resp->finish_reason)
         cJSON_AddStringToObject(root, "finish_reason", resp->finish_reason);
@@ -124,6 +126,7 @@ static void resp_take_usage(cJSON *root, llm_response_t *resp)
     json_take_u32(usage, "completion_tokens", &resp->completion_tokens);
     json_take_u32(usage, "total_tokens", &resp->total_tokens);
     json_take_u32(usage, "reasoning_tokens", &resp->reasoning_tokens);
+    json_take_u32(usage, "cached_tokens", &resp->cached_tokens);
 }
 
 static int resp_take_choice(cJSON *choice, llm_message_t *out)
@@ -176,9 +179,11 @@ llm_response_t *response_from_json(const char *json)
     json_take_u32(root, "total_tokens", &resp->total_tokens);
     resp_take_usage(root, resp);
 
-    /* 兼容顶层 reasoning_tokens 字段（部分端点直接输出顶层而非嵌套） */
+    /* 兼容顶层 reasoning_tokens / cached_tokens 字段（部分端点直出顶层非嵌套） */
     if (resp->reasoning_tokens == 0)
         json_take_u32(root, "reasoning_tokens", &resp->reasoning_tokens);
+    if (resp->cached_tokens == 0)
+        json_take_u32(root, "cached_tokens", &resp->cached_tokens);
 
     json_take_f64(root, "cost_usd", &resp->cost_usd);
     resp->finish_reason = json_dup_str(root, "finish_reason");

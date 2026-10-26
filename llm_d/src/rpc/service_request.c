@@ -313,7 +313,8 @@ static void update_cost_tracking(llm_service_t *svc, const char *model, llm_resp
         return;
     }
 
-    cost_tracker_add(svc->cost, model, resp->prompt_tokens, resp->completion_tokens);
+    cost_tracker_add(svc->cost, model, resp->prompt_tokens, resp->completion_tokens,
+                     resp->cached_tokens);
     resp->cost_usd =
         cost_tracker_estimate(svc->cost, model, resp->prompt_tokens, resp->completion_tokens);
 

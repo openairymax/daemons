@@ -31,8 +31,9 @@ void cost_tracker_destroy(cost_tracker_t *ct);
  * 尾部 '*'；未命中取内置默认价，故默认价只有一处。model 为 NULL 即默认价。 */
 void cost_tracker_price(const pricing_rule_t *rules, int rule_count, const char *model,
                         double *input_price, double *output_price);
+/* cached_tokens 为 prompt 命中上游前缀缓存的明细累计（不改计价，仅观测）。 */
 void cost_tracker_add(cost_tracker_t *ct, const char *model, uint32_t prompt_tokens,
-                      uint32_t completion_tokens);
+                      uint32_t completion_tokens, uint32_t cached_tokens);
 
 double cost_tracker_estimate(const cost_tracker_t *ct, const char *model, uint32_t prompt_tokens,
                              uint32_t completion_tokens);

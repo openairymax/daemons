@@ -132,6 +132,43 @@ static void test_parse_response_without_reasoning(void)
     printf("    PASSED\n");
 }
 
+/* D0 计量诚信：usage 嵌套明细双位置解析——prompt_tokens_details.cached_tokens
+ * 与 completion_tokens_details.reasoning_tokens；明细缺席时保持 0 不误伤。 */
+static void test_parse_usage_details(void)
+{
+    printf("  test_parse_usage_details...\n");
+
+    const char *json = "{"
+                       "\"id\":\"chatcmpl-u1\",\"model\":\"gpt-4o\","
+                       "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                       "\"content\":\"hi\"},\"finish_reason\":\"stop\"}],"
+                       "\"usage\":{\"prompt_tokens\":1000,\"completion_tokens\":50,"
+                       "\"total_tokens\":1050,"
+                       "\"prompt_tokens_details\":{\"cached_tokens\":768},"
+                       "\"completion_tokens_details\":{\"reasoning_tokens\":30}}}";
+
+    llm_response_t *resp = NULL;
+    assert(prov_parse_chat(json, &resp) == AIRY_OK);
+    assert(resp != NULL);
+    assert(resp->prompt_tokens == 1000);
+    assert(resp->cached_tokens == 768);
+    assert(resp->reasoning_tokens == 30);
+    llm_response_free(resp);
+
+    const char *plain = "{"
+                        "\"id\":\"chatcmpl-u2\",\"model\":\"gpt-4o\","
+                        "\"choices\":[],\"usage\":{\"prompt_tokens\":5,"
+                        "\"completion_tokens\":1,\"total_tokens\":6}}";
+    resp = NULL;
+    assert(prov_parse_chat(plain, &resp) == AIRY_OK);
+    assert(resp != NULL);
+    assert(resp->cached_tokens == 0);
+    assert(resp->reasoning_tokens == 0);
+    llm_response_free(resp);
+
+    printf("    PASSED\n");
+}
+
 static void test_buf_append(void)
 {
     printf("  test_buf_append...\n");
@@ -174,6 +211,7 @@ int main(void)
     test_build_request_extra_params();
     test_parse_response_reads_reasoning();
     test_parse_response_without_reasoning();
+    test_parse_usage_details();
     test_buf_append();
 
     printf("\nAll provider reasoning tests PASSED\n");
