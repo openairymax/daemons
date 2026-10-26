@@ -242,6 +242,13 @@ void provider_request_params_fill(cJSON *root, const llm_request_config_t *manag
     if (manager->caps.accepts_num_ctx && manager->num_ctx != 0u)
         cJSON_AddNumberToObject(root, "num_ctx", (double)manager->num_ctx);
 
+    /* T2 KV 复用透传：缓存声明随能力位恒发（策略在部署配置面表达），
+     * 槽位亲和仅显式设置才下发（哨兵位使槽位 0 可表达）。 */
+    if (manager->caps.accepts_cache_prompt)
+        cJSON_AddBoolToObject(root, "cache_prompt", 1);
+    if (manager->caps.accepts_slot_id && manager->slot_set)
+        cJSON_AddNumberToObject(root, "slot_id", (double)manager->slot_id);
+
     if (manager->stream)
         cJSON_AddBoolToObject(root, "stream", 1);
 

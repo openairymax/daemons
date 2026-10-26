@@ -144,4 +144,28 @@ foreach(TEST_SRC ${LLM_TEST_SOURCES})
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
 
+# 0.1.20 批次 1c：T1 前缀稳定化 + T2 槽位亲和的解析域回归。dispatch.c
+# 为装配域源（随主可执行目标构建），此处单独入测并自持 g_service 单例，
+# 不进通用源集，避免 18 个既有测试目标被迫解析装配域符号。
+add_executable(test_llm_dispatch_parse
+    test_dispatch_parse.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/dispatch.c
+    ${LLM_IMPL_SOURCES}
+)
+target_include_directories(test_llm_dispatch_parse PRIVATE ${LLM_COMMON_INCLUDES})
+target_link_libraries(test_llm_dispatch_parse PRIVATE
+    svc_common
+    Threads::Threads
+)
+if(AIRY_HAS_CJSON)
+    target_link_libraries(test_llm_dispatch_parse PRIVATE cjson)
+endif()
+if(AIRY_HAS_CURL)
+    target_include_directories(test_llm_dispatch_parse PRIVATE ${CURL_INCLUDE_DIRS})
+    target_link_libraries(test_llm_dispatch_parse PRIVATE ${CURL_LIBRARIES})
+endif()
+target_compile_options(test_llm_dispatch_parse PRIVATE -Wall -Wextra -g -Wno-unused-function)
+add_test(NAME llm_d_dispatch_parse COMMAND test_llm_dispatch_parse
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
 enable_testing()
