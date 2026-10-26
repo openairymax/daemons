@@ -274,7 +274,9 @@ llm_response_t *provider_stream_take(provider_stream_acc_t *acc)
     } else {
         resp->choice_count = 0;
     }
-    resp->finish_reason = acc->finish_reason ? acc->finish_reason : AIRY_STRDUP(LLM_FINISH_STOP);
+    /* C11：上游未落 finish_reason 时忠实留 NULL，交由流末完整性判定
+     * 报告 NO_FINISH——伪造 "stop" 会把截断流洗白成自然终结。 */
+    resp->finish_reason = acc->finish_reason;
     acc->finish_reason = NULL;
     resp->prompt_tokens = acc->prompt_tokens;
     resp->completion_tokens = acc->completion_tokens;

@@ -26,6 +26,8 @@
  *      交付半截输出（N-3/N-4）
  *   7. 本地端点策略（D4）：默认超时 120s、重试预算降一次、可重试类别收窄为
  *      CONNECT_ONLY——收发中断不重发，而云端端点策略不变（对照断言）
+ *   8. C11 流完整性契约：2xx 且无 data: [DONE] → STREAM_UNDONE（sse 层）；
+ *      finish_reason=length/content_filter → 专用码（driver 流末判定）
  *
  * 平台：daemon 测试在 Windows 整体关闭（daemons/CMakeLists.txt 的 WIN32 门），
  * 故本文件直接使用 POSIX socket/pthread，无需跨平台分支。
@@ -317,6 +319,28 @@ static const char *const SSE_OK_BODY =
     "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"pong\"},\"finish_reason\":null}]}\n\n"
     "data: {\"id\":\"chatcmpl-s\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-3.5-turbo\","
     "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+    "data: [DONE]\n\n";
+
+/* C11：协议终止符缺失——有 finish_reason 但无 data: [DONE]，sse 层判 UNDONE。 */
+static const char *const SSE_NO_DONE_BODY =
+    "data: {\"id\":\"chatcmpl-t\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-3.5-turbo\","
+    "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"half\"},\"finish_reason\":null}]}\n\n"
+    "data: {\"id\":\"chatcmpl-t\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-3.5-turbo\","
+    "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n";
+
+/* C11：finish_reason=length/content_filter 是机制面事实，如实上抛专用码。 */
+static const char *const SSE_TRUNC_BODY =
+    "data: {\"id\":\"chatcmpl-u\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-3.5-turbo\","
+    "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"par\"},\"finish_reason\":null}]}\n\n"
+    "data: {\"id\":\"chatcmpl-u\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-3.5-turbo\","
+    "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n"
+    "data: [DONE]\n\n";
+
+static const char *const SSE_CF_BODY =
+    "data: {\"id\":\"chatcmpl-v\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-3.5-turbo\","
+    "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\"},\"finish_reason\":null}]}\n\n"
+    "data: {\"id\":\"chatcmpl-v\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-3.5-turbo\","
+    "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n"
     "data: [DONE]\n\n";
 
 static int g_stream_chunk_count;
@@ -770,6 +794,15 @@ int main(void)
     /* 流式正向对照：SSE 增量解析 + [DONE] 正常收尾。 */
     test_stream_dispatch(200, "OK", "text/event-stream", SSE_OK_BODY, AIRY_OK,
                          "stream 200 -> OK");
+
+    /* C11 完整性契约：2xx 不等于流按协议终结；finish_reason 事实如实上抛。 */
+    test_stream_dispatch(200, "OK", "text/event-stream", SSE_NO_DONE_BODY,
+                         AIRY_ERR_LLM_STREAM_UNDONE, "stream no [DONE] -> STREAM_UNDONE");
+    test_stream_dispatch(200, "OK", "text/event-stream", SSE_TRUNC_BODY,
+                         AIRY_ERR_LLM_TRUNCATED, "stream finish=length -> TRUNCATED");
+    test_stream_dispatch(200, "OK", "text/event-stream", SSE_CF_BODY,
+                         AIRY_ERR_LLM_CONTENT_FILTERED,
+                         "stream finish=content_filter -> CONTENT_FILTERED");
 
     /* 网络不可达与请求体被拒必须可区分。 */
     test_unreachable_is_io();

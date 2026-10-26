@@ -200,9 +200,11 @@ static int msg_parse_response(const char *body, llm_response_t **out)
     resp->total_tokens = resp->prompt_tokens + resp->completion_tokens;
     /* cache 命中段已含在三段之和内，另记明细供命中率观测。 */
     resp->cached_tokens = provider_json_u32_get(usage, "cache_read_input_tokens");
-    /* norm(NULL) = stop：stop_reason 缺席与 "stop_sequence" 等一并归一。 */
-    resp->finish_reason =
-        AIRY_STRDUP(llm_finish_reason_norm(provider_json_str_val(root, "stop_reason")));
+    /* C11：stop_reason 缺席时忠实留 NULL（非流式完整性处置归策略侧），
+     * 存在才经 norm 归一到规范集——norm 本体不动，其余消费者共享。 */
+    const char *stop_reason = provider_json_str_val(root, "stop_reason");
+    if (stop_reason)
+        resp->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(stop_reason));
     *out = resp;
     return AIRY_OK;
 }

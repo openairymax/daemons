@@ -212,8 +212,12 @@ void provider_request_params_fill(cJSON *root, const llm_request_config_t *manag
 
     const char *model = (manager->model && manager->model[0]) ? manager->model : default_model;
     cJSON_AddStringToObject(root, "model", model ? model : "");
-    cJSON_AddNumberToObject(root, "temperature",
-                            manager->temperature > 0 ? manager->temperature : 0.7);
+
+    /* C11：temperature_set 显式哨兵允许下发 0.0；未显式设置时维持
+     * 旧请求体等价（>0 用之，否则 0.7 兜底），旧调用方零感知。 */
+    double temp = (manager->temperature_set || manager->temperature > 0.0f)
+                      ? (double)manager->temperature : 0.7;
+    cJSON_AddNumberToObject(root, "temperature", temp);
 
     int max_tokens = manager->max_tokens > 0 ? manager->max_tokens : default_max_tokens;
     if (max_tokens > 0)
@@ -221,6 +225,22 @@ void provider_request_params_fill(cJSON *root, const llm_request_config_t *manag
 
     if (manager->top_p > 0)
         cJSON_AddNumberToObject(root, "top_p", manager->top_p);
+
+    /* C11 能力位门控：caps 由 driver 盖印，位为假即该厂商族不支持，
+     * 显式请求也被丢弃（宁可不发不乱发）；位为真且值非零值才下发。 */
+    if (manager->caps.accepts_seed && manager->seed != 0u)
+        cJSON_AddNumberToObject(root, "seed", (double)manager->seed);
+    if (manager->caps.accepts_grammar && manager->grammar && manager->grammar[0])
+        cJSON_AddStringToObject(root, "grammar", manager->grammar);
+    if (manager->caps.accepts_response_format && manager->response_format == LLM_RF_JSON_OBJECT) {
+        cJSON *rf = cJSON_CreateObject();
+        if (rf) {
+            cJSON_AddStringToObject(rf, "type", "json_object");
+            cJSON_AddItemToObject(root, "response_format", rf);
+        }
+    }
+    if (manager->caps.accepts_num_ctx && manager->num_ctx != 0u)
+        cJSON_AddNumberToObject(root, "num_ctx", (double)manager->num_ctx);
 
     if (manager->stream)
         cJSON_AddBoolToObject(root, "stream", 1);
