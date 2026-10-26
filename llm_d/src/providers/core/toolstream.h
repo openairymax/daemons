@@ -97,6 +97,7 @@ typedef struct {
     uint32_t total_tokens;
     uint32_t reasoning_tokens;
     uint32_t cached_tokens;
+    llm_timings_t timings;
     provider_tool_acc_t tools;
 } provider_stream_acc_t;
 

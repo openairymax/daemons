@@ -53,6 +53,19 @@ char *response_to_json(const llm_response_t *resp)
     cJSON_AddNumberToObject(usage, "reasoning_tokens", resp->reasoning_tokens);
     cJSON_AddNumberToObject(usage, "cached_tokens", resp->cached_tokens);
     cJSON_AddItemToObject(root, "usage", usage);
+    /* timings 嵌套回显（G47 分列）：端点未上报时整段缺席，
+     * 不给非 llama.cpp 端点制造全零噪声。 */
+    if (resp->timings.prefill_tokens || resp->timings.decode_tokens ||
+        resp->timings.kv_cache_tokens || resp->timings.prefill_ms ||
+        resp->timings.decode_ms) {
+        cJSON *tm = cJSON_CreateObject();
+        cJSON_AddNumberToObject(tm, "prefill_tokens", resp->timings.prefill_tokens);
+        cJSON_AddNumberToObject(tm, "decode_tokens", resp->timings.decode_tokens);
+        cJSON_AddNumberToObject(tm, "kv_cache_tokens", resp->timings.kv_cache_tokens);
+        cJSON_AddNumberToObject(tm, "prefill_ms", resp->timings.prefill_ms);
+        cJSON_AddNumberToObject(tm, "decode_ms", resp->timings.decode_ms);
+        cJSON_AddItemToObject(root, "timings", tm);
+    }
     if (resp->finish_reason)
         cJSON_AddStringToObject(root, "finish_reason", resp->finish_reason);
 
@@ -129,6 +142,19 @@ static void resp_take_usage(cJSON *root, llm_response_t *resp)
     json_take_u32(usage, "cached_tokens", &resp->cached_tokens);
 }
 
+/* timings 嵌套段回读：段缺席保持零值（与序列化侧整段缺席语义对偶）。 */
+static void resp_take_timings(cJSON *root, llm_response_t *resp)
+{
+    cJSON *tm = cJSON_GetObjectItem(root, "timings");
+    if (!cJSON_IsObject(tm))
+        return;
+    json_take_u32(tm, "prefill_tokens", &resp->timings.prefill_tokens);
+    json_take_u32(tm, "decode_tokens", &resp->timings.decode_tokens);
+    json_take_u32(tm, "kv_cache_tokens", &resp->timings.kv_cache_tokens);
+    json_take_f64(tm, "prefill_ms", &resp->timings.prefill_ms);
+    json_take_f64(tm, "decode_ms", &resp->timings.decode_ms);
+}
+
 static int resp_take_choice(cJSON *choice, llm_message_t *out)
 {
     out->role = json_dup_str(choice, "role");
@@ -178,6 +204,7 @@ llm_response_t *response_from_json(const char *json)
     json_take_u32(root, "completion_tokens", &resp->completion_tokens);
     json_take_u32(root, "total_tokens", &resp->total_tokens);
     resp_take_usage(root, resp);
+    resp_take_timings(root, resp);
 
     /* 兼容顶层 reasoning_tokens / cached_tokens 字段（部分端点直出顶层非嵌套） */
     if (resp->reasoning_tokens == 0)
