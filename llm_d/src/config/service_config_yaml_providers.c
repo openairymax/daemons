@@ -161,6 +161,9 @@ static local_caps_t svc_derive_caps(const char *kind)
         caps.accepts_seed = true;
         caps.accepts_grammar = true;
         caps.accepts_response_format = true;
+        /* T2：prompt 缓存与槽位亲和为 llama-server 原生语义，仅此族下发。 */
+        caps.accepts_cache_prompt = true;
+        caps.accepts_slot_id = true;
     } else if (strcmp(kind, "ollama") == 0) {
         caps.accepts_seed = true;
         caps.accepts_num_ctx = true;

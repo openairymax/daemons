@@ -12,6 +12,8 @@
  *   2. response_format 仅在位真且为 LLM_RF_JSON_OBJECT 时下发嵌套对象
  *   3. temperature 哨兵三态：未显式设置时 0.0 等价缺省（0.7 兜底，
  *      旧请求体字节级不变）；显式设置后 0.0 必须原样下发
+ *   4. T2 KV 复用透传：cache_prompt 随能力位恒发（位假即丢弃）；
+ *      slot_id 仅显式设置（slot_set 哨兵）才下发，槽位 0 合法可表达
  */
 
 #include "providers/core/provider_envelope.h"
@@ -172,6 +174,99 @@ static void test_temperature_sentinel(void)
     cJSON_Delete(root);
 }
 
+/* T2 cache_prompt：位真恒发 true（策略在部署配置面表达，机制面忠实
+ * 执行），slot_id 未显式设置时不得搭车漏出。 */
+static void test_t2_cache_prompt(void)
+{
+    llm_request_config_t cfg;
+    local_caps_t caps;
+    memset(&cfg, 0, sizeof(cfg));
+    memset(&caps, 0, sizeof(caps));
+    caps.accepts_cache_prompt = 1;
+    cfg.caps = caps;
+
+    cJSON *root = cJSON_CreateObject();
+    check_true("t2cache.root", root != NULL);
+    if (!root)
+        return;
+    provider_request_params_fill(root, &cfg, NULL, 0, "stop");
+    cJSON *cp = cJSON_GetObjectItem(root, "cache_prompt");
+    check_true("t2cache.sent_when_cap", cJSON_IsBool(cp) && cJSON_IsTrue(cp));
+    check_absent(root, "slot_id", "t2cache.slot_id withheld when unset");
+    cJSON_Delete(root);
+}
+
+/* T2 位全关：KV 复用两项随白名单一起收口，任何键不得漏出。 */
+static void test_t2_caps_off(void)
+{
+    llm_request_config_t cfg;
+    local_caps_t caps;
+    memset(&cfg, 0, sizeof(cfg));
+    caps_all(&caps, 0);
+    fill_optional(&cfg);
+    cfg.caps = caps;
+
+    cJSON *root = cJSON_CreateObject();
+    check_true("t2off.root", root != NULL);
+    if (!root)
+        return;
+    provider_request_params_fill(root, &cfg, NULL, 0, "stop");
+    check_absent(root, "cache_prompt", "t2off.cache_prompt withheld");
+    check_absent(root, "slot_id", "t2off.slot_id withheld");
+    cJSON_Delete(root);
+}
+
+/* T2 slot_id 哨兵三态：未显式设置不下发（显式值也被丢弃）；显式设置
+ * 原样下发，槽位 0 合法可表达。 */
+static void test_t2_slot_id_sentinel(void)
+{
+    llm_request_config_t cfg;
+    local_caps_t caps;
+
+    memset(&cfg, 0, sizeof(cfg));
+    memset(&caps, 0, sizeof(caps));
+    caps.accepts_slot_id = 1;
+    cfg.caps = caps;
+    cfg.slot_id = 2;
+    cJSON *root = cJSON_CreateObject();
+    check_true("t2slot.root", root != NULL);
+    if (!root)
+        return;
+    provider_request_params_fill(root, &cfg, NULL, 0, "stop");
+    check_absent(root, "slot_id", "t2slot.unset withheld despite value");
+    cJSON_Delete(root);
+
+    memset(&cfg, 0, sizeof(cfg));
+    memset(&caps, 0, sizeof(caps));
+    caps.accepts_slot_id = 1;
+    cfg.caps = caps;
+    cfg.slot_set = true;
+    cfg.slot_id = 0;
+    root = cJSON_CreateObject();
+    check_true("t2slot.root2", root != NULL);
+    if (!root)
+        return;
+    provider_request_params_fill(root, &cfg, NULL, 0, "stop");
+    cJSON *sid = cJSON_GetObjectItem(root, "slot_id");
+    check_true("t2slot.zero_sent", cJSON_IsNumber(sid) && sid->valuedouble == 0.0);
+    cJSON_Delete(root);
+
+    memset(&cfg, 0, sizeof(cfg));
+    memset(&caps, 0, sizeof(caps));
+    caps.accepts_slot_id = 1;
+    cfg.caps = caps;
+    cfg.slot_set = true;
+    cfg.slot_id = 2;
+    root = cJSON_CreateObject();
+    check_true("t2slot.root3", root != NULL);
+    if (!root)
+        return;
+    provider_request_params_fill(root, &cfg, NULL, 0, "stop");
+    sid = cJSON_GetObjectItem(root, "slot_id");
+    check_true("t2slot.explicit_sent", cJSON_IsNumber(sid) && sid->valuedouble == 2.0);
+    cJSON_Delete(root);
+}
+
 int main(void)
 {
     printf("running C11 envelope params contract regression\n");
@@ -179,6 +274,9 @@ int main(void)
     test_caps_gate_on();
     test_caps_on_zero_value();
     test_temperature_sentinel();
+    test_t2_cache_prompt();
+    test_t2_caps_off();
+    test_t2_slot_id_sentinel();
 
     if (fail_count == 0) {
         printf("All %d envelope assertions passed\n", test_count);
