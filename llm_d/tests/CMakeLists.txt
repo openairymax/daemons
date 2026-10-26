@@ -43,6 +43,8 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/adapter.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/chat.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/rate_limit.c
+    # 0.1.20 B1-d：上游失败线程局域诊断槽（与主目标同步）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/prov_diag.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/messages.c
     # B16-S4：deepseek.c / google.c 清理（与主目标同步）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/adapters/local.c
@@ -83,6 +85,8 @@ set(LLM_TEST_SOURCES
     test_chain.c
     # 0.1.19 §3.8.4 A4：routing 段解析（缺失不变 / 叠加 / 限幅）回归
     test_route.c
+    # 0.1.20 B1-d：上游失败诊断槽（写读 / 截断 / 覆盖 / 线程隔离）回归
+    test_prov_diag.c
 )
 
 set(LLM_COMMON_INCLUDES

@@ -14,9 +14,12 @@
  * ——统一防御式 free 覆盖两种模式。
  */
 
+#include <string.h>
+
 #include "airy_memory.h"
 #include "error.h"
 #include "adapter.h"
+#include "prov_diag.h"
 #include "provider_http.h"
 #include "secrets.h"
 #include "toolstream.h"
@@ -29,6 +32,14 @@ static const char *req_model(const provider_adapter_t *ops, const llm_request_co
     if (manager->model && manager->model[0])
         return manager->model;
     return ops->default_model ? ops->default_model : "";
+}
+
+/* B1-d：失败 resp 释放前把上游状态码与响应体片段存入线程诊断槽，
+ * 供 RPC 错误面透传（resp 可为 NULL——传输层失败时指针已归一为空）。 */
+static void diag_from_resp(long http_code, const provider_http_resp_t *resp)
+{
+    const char *body = (resp && resp->data) ? resp->data : NULL;
+    prov_diag_set(http_code, body, body ? strlen(body) : 0);
 }
 
 int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
@@ -72,6 +83,7 @@ int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
                       "body=%.600s",
                       ops->tag, model, http_code, ret, provider_http_err_diag(http_code),
                       http_resp && http_resp->data ? http_resp->data : "");
+        diag_from_resp(http_code, http_resp);
         if (http_resp)
             provider_http_resp_free(http_resp);
         return ret;
@@ -84,6 +96,7 @@ int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
         SVC_LOG_ERROR("C-L02: %s: COMPLETE-FAIL model=%s http_code=%ld DIAGNOSIS=%s body=%.600s",
                       ops->tag, model, http_code, provider_http_err_diag(http_code),
                       http_resp && http_resp->data ? http_resp->data : "");
+        diag_from_resp(http_code, http_resp);
         provider_http_resp_free(http_resp);
         return provider_http_err_map(http_code, AIRY_ERR_IO);
     }

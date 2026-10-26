@@ -18,6 +18,7 @@
 #include "airy_memory.h"
 #include "daemon_platform_ext.h"
 #include "error.h"
+#include "prov_diag.h"
 #include "rate_limit.h"
 #include "svc_logger.h"
 
@@ -177,6 +178,10 @@ int provider_http_request_with_retry(provider_base_ctx_t *base, provider_rate_li
                          url, attempt + 1, max_attempts, retry_after);
 
             if (*out_response) {
+                /* B1-d：429 重试耗尽时 resp 在本分支释放、不落调用方，
+                 * 最后一次的响应体须在释放前入诊断槽，否则错误面失声。 */
+                const char *body = (*out_response)->data;
+                prov_diag_set(429, body, body ? strlen(body) : 0);
                 provider_http_resp_free(*out_response);
                 *out_response = NULL;
             }

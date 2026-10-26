@@ -22,6 +22,7 @@
 #include "airy_llm_stream.h"
 #include "airy_memory.h"
 #include "error.h"
+#include "prov_diag.h"
 #include "provider_transport.h"
 #include "provider_stream.h"
 #include "provider_retry.h"
@@ -377,6 +378,7 @@ static int provider_stream_post(const char *url, struct curl_slist *headers, con
             n = 1024;
         SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-HTTP-ERROR url=%s http_code=%ld body=%.*s",
                       url, http_code, (int)n, sse->raw_buf);
+        prov_diag_set(http_code, sse->raw_buf, sse->raw_len);
     }
 
     if (res != CURLE_OK) {
