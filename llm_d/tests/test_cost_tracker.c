@@ -68,9 +68,9 @@ static void test_cost_tracker_add(void)
     cost_tracker_t *tracker = cost_tracker_create(NULL, 0);
     assert(tracker != NULL);
 
-    cost_tracker_add(tracker, "gpt-4", 1000, 500);
-    cost_tracker_add(tracker, "gpt-4", 2000, 1000);
-    cost_tracker_add(tracker, "gpt-3.5-turbo", 500, 250);
+    cost_tracker_add(tracker, "gpt-4", 1000, 500, 0);
+    cost_tracker_add(tracker, "gpt-4", 2000, 1000, 250);
+    cost_tracker_add(tracker, "gpt-3.5-turbo", 500, 250, 0);
 
     cost_tracker_destroy(tracker);
 
@@ -93,7 +93,8 @@ static void test_cost_tracker_export(void)
     cost_tracker_t *tracker = cost_tracker_create(&rule, 1);
     assert(tracker != NULL);
 
-    cost_tracker_add(tracker, "gpt-4", 1000, 500);
+    cost_tracker_add(tracker, "gpt-4", 1000, 500, 300);
+    cost_tracker_add(tracker, "gpt-4", 1000, 500, 200);
 
     cJSON *json = cost_tracker_export(tracker);
     assert(json != NULL);
@@ -112,6 +113,9 @@ static void test_cost_tracker_export(void)
     (void)model_name;
     assert(strcmp(model_name->valuestring, "gpt-4") == 0);
 
+    cJSON *cached = cJSON_GetObjectItem(model_obj, "cached_tokens");
+    assert(cJSON_IsNumber(cached) && cached->valuedouble == 500);
+
     cJSON_Delete(json);
     cost_tracker_destroy(tracker);
     free((void *)rule.model_pattern);
@@ -126,10 +130,10 @@ static void test_cost_tracker_null_param(void)
 {
     printf("  test_cost_tracker_null_param...\n");
 
-    cost_tracker_add(NULL, "gpt-4", 1000, 500);
+    cost_tracker_add(NULL, "gpt-4", 1000, 500, 0);
 
     cost_tracker_t *tracker = cost_tracker_create(NULL, 0);
-    cost_tracker_add(tracker, NULL, 1000, 500);
+    cost_tracker_add(tracker, NULL, 1000, 500, 0);
 
     cJSON *json = cost_tracker_export(NULL);
     assert(json != NULL);
@@ -151,9 +155,9 @@ static void test_cost_tracker_multiple_models(void)
     cost_tracker_t *tracker = cost_tracker_create(NULL, 0);
     assert(tracker != NULL);
 
-    cost_tracker_add(tracker, "gpt-4", 1000, 500);
-    cost_tracker_add(tracker, "gpt-3.5-turbo", 2000, 1000);
-    cost_tracker_add(tracker, "claude-3", 1500, 750);
+    cost_tracker_add(tracker, "gpt-4", 1000, 500, 0);
+    cost_tracker_add(tracker, "gpt-3.5-turbo", 2000, 1000, 0);
+    cost_tracker_add(tracker, "claude-3", 1500, 750, 0);
 
     cJSON *json = cost_tracker_export(tracker);
     assert(json != NULL);
@@ -190,8 +194,8 @@ static void test_cost_tracker_rule_matching(void)
     cost_tracker_t *tracker = cost_tracker_create(rules, 2);
     assert(tracker != NULL);
 
-    cost_tracker_add(tracker, "gpt-4-turbo", 1000, 500);
-    cost_tracker_add(tracker, "gpt-3.5-turbo-16k", 1000, 500);
+    cost_tracker_add(tracker, "gpt-4-turbo", 1000, 500, 0);
+    cost_tracker_add(tracker, "gpt-3.5-turbo-16k", 1000, 500, 0);
 
     cJSON *json = cost_tracker_export(tracker);
     assert(json != NULL);

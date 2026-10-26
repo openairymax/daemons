@@ -62,14 +62,23 @@ static inline uint32_t provider_json_u32_get(const cJSON *obj, const char *key)
     return cJSON_IsNumber(v) ? (uint32_t)v->valuedouble : 0;
 }
 
+/* usage 段嵌套明细取值：details 对象缺席或键非数字时返回 -1（不改写目标）。 */
+static inline long provider_usage_detail(const cJSON *usage, const char *section, const char *key)
+{
+    const cJSON *v = cJSON_GetObjectItem(cJSON_GetObjectItem(usage, section), key);
+    return cJSON_IsNumber(v) ? (long)v->valuedouble : -1L;
+}
+
 /* usage 段装载（流式/非流式同源）：三值 + reasoning_tokens 双位置回退
- * （顶层或 completion_tokens_details 嵌套）。存在才覆写、缺失保留现值，
- * 与流式多 chunk last-parse-wins 语义同源；非 object 整段跳过。 */
+ * （顶层或 completion_tokens_details 嵌套）+ prompt_tokens_details.cached_tokens。
+ * 存在才覆写、缺失保留现值，与流式多 chunk last-parse-wins 语义同源；
+ * 非 object 整段跳过。 */
 static inline void provider_usage_load(const cJSON *usage, uint32_t *prompt,
                                        uint32_t *completion, uint32_t *total,
-                                       uint32_t *reasoning)
+                                       uint32_t *reasoning, uint32_t *cached)
 {
     const cJSON *v;
+    long n;
     if (!cJSON_IsObject(usage))
         return;
     v = cJSON_GetObjectItem(usage, "prompt_tokens");
@@ -87,6 +96,9 @@ static inline void provider_usage_load(const cJSON *usage, uint32_t *prompt,
                                 "reasoning_tokens");
     if (cJSON_IsNumber(v))
         *reasoning = (uint32_t)v->valuedouble;
+    n = provider_usage_detail(usage, "prompt_tokens_details", "cached_tokens");
+    if (n >= 0)
+        *cached = (uint32_t)n;
 }
 
 #ifdef __cplusplus

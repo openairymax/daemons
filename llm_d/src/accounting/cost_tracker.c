@@ -24,6 +24,7 @@ typedef struct model_cost {
     char *model;
     uint64_t prompt_tokens;
     uint64_t completion_tokens;
+    uint64_t cached_tokens;
     double cost_usd;
     struct model_cost *next;
 } model_cost_t;
@@ -98,7 +99,7 @@ void cost_tracker_destroy(cost_tracker_t *ct)
 }
 
 void cost_tracker_add(cost_tracker_t *ct, const char *model, uint32_t prompt_tokens,
-                      uint32_t completion_tokens)
+                      uint32_t completion_tokens, uint32_t cached_tokens)
 {
     if (!ct || !model)
         return;
@@ -121,6 +122,7 @@ void cost_tracker_add(cost_tracker_t *ct, const char *model, uint32_t prompt_tok
     }
     m->prompt_tokens += prompt_tokens;
     m->completion_tokens += completion_tokens;
+    m->cached_tokens += cached_tokens;
 
     double in_price, out_price;
     cost_tracker_price(ct->rules, ct->rule_count, model, &in_price, &out_price);
@@ -151,6 +153,7 @@ cJSON *cost_tracker_export(cost_tracker_t *ct)
         cJSON_AddStringToObject(obj, "model", m->model);
         cJSON_AddNumberToObject(obj, "prompt_tokens", m->prompt_tokens);
         cJSON_AddNumberToObject(obj, "completion_tokens", m->completion_tokens);
+        cJSON_AddNumberToObject(obj, "cached_tokens", m->cached_tokens);
         cJSON_AddNumberToObject(obj, "cost_usd", m->cost_usd);
         cJSON_AddItemToArray(arr, obj);
         m = m->next;
@@ -265,9 +268,11 @@ int cost_tracker_load(cost_tracker_t *ct, const char *path)
             continue;
         cJSON *pt = cJSON_GetObjectItem(item, "prompt_tokens");
         cJSON *ctok = cJSON_GetObjectItem(item, "completion_tokens");
+        cJSON *cached = cJSON_GetObjectItem(item, "cached_tokens");
         cJSON *cost = cJSON_GetObjectItem(item, "cost_usd");
         uint32_t p = cJSON_IsNumber(pt) ? (uint32_t)pt->valuedouble : 0;
         uint32_t c = cJSON_IsNumber(ctok) ? (uint32_t)ctok->valuedouble : 0;
+        uint32_t k = cJSON_IsNumber(cached) ? (uint32_t)cached->valuedouble : 0;
         double d = cJSON_IsNumber(cost) ? cost->valuedouble : 0.0;
 
         model_cost_t *m = ct->models;
@@ -286,6 +291,7 @@ int cost_tracker_load(cost_tracker_t *ct, const char *path)
         }
         m->prompt_tokens += p;
         m->completion_tokens += c;
+        m->cached_tokens += k;
         m->cost_usd += d;
     }
     airy_mtx_unlock(&ct->lock);

@@ -474,9 +474,10 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
         char usage_frame[288];
         int ufn = snprintf(usage_frame, sizeof(usage_frame),
                            "\x1eU{\"prompt_tokens\":%u,\"completion_tokens\":%u,"
-                           "\"total_tokens\":%u,\"reasoning_tokens\":%u,\"cost_usd\":%.8f}\x1e",
+                           "\"total_tokens\":%u,\"reasoning_tokens\":%u,"
+                           "\"cached_tokens\":%u,\"cost_usd\":%.8f}\x1e",
                            resp->prompt_tokens, resp->completion_tokens, resp->total_tokens,
-                           resp->reasoning_tokens, resp->cost_usd);
+                           resp->reasoning_tokens, resp->cached_tokens, resp->cost_usd);
         if (ufn > 0)
             llm_stream_send_all(fd, usage_frame, (size_t)ufn);
         llm_response_free(resp);

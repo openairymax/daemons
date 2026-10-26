@@ -198,6 +198,8 @@ static int msg_parse_response(const char *body, llm_response_t **out)
     resp->prompt_tokens = msg_usage(usage);
     resp->completion_tokens = provider_json_u32_get(usage, "output_tokens");
     resp->total_tokens = resp->prompt_tokens + resp->completion_tokens;
+    /* cache 命中段已含在三段之和内，另记明细供命中率观测。 */
+    resp->cached_tokens = provider_json_u32_get(usage, "cache_read_input_tokens");
     /* norm(NULL) = stop：stop_reason 缺席与 "stop_sequence" 等一并归一。 */
     resp->finish_reason =
         AIRY_STRDUP(llm_finish_reason_norm(provider_json_str_val(root, "stop_reason")));
@@ -222,7 +224,9 @@ static int msg_map_event(const char *event, const char *data, size_t data_len, v
         const cJSON *msg = cJSON_GetObjectItem(root, "message");
         provider_json_str_set(msg, "id", &acc->resp_id);
         provider_json_str_set(msg, "model", &acc->resp_model);
-        acc->prompt_tokens = msg_usage(cJSON_GetObjectItem(msg, "usage"));
+        const cJSON *msg_usage_j = cJSON_GetObjectItem(msg, "usage");
+        acc->prompt_tokens = msg_usage(msg_usage_j);
+        acc->cached_tokens = provider_json_u32_get(msg_usage_j, "cache_read_input_tokens");
     } else if (strcmp(name, "content_block_start") == 0) {
         const cJSON *blk = cJSON_GetObjectItem(root, "content_block");
         if (provider_json_str_val(blk, "name"))

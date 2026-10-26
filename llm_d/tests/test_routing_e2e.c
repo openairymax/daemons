@@ -133,11 +133,11 @@ static void test_cost_tracking_accuracy(void)
         cost_tracker_create(mock_rules, (int)(sizeof(mock_rules) / sizeof(mock_rules[0])));
     assert(ct != NULL);
 
-    cost_tracker_add(ct, "gpt-4o", 1000, 500);
+    cost_tracker_add(ct, "gpt-4o", 1000, 500, 0);
 
-    cost_tracker_add(ct, "gpt-4o-mini", 500, 200);
+    cost_tracker_add(ct, "gpt-4o-mini", 500, 200, 0);
 
-    cost_tracker_add(ct, "deepseek-v3", 2000, 1000);
+    cost_tracker_add(ct, "deepseek-v3", 2000, 1000, 0);
 
     cJSON *report = cost_tracker_export(ct);
     assert(report != NULL);
