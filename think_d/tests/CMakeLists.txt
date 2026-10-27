@@ -13,23 +13,16 @@ set(COMMONS_INCLUDE_DIR ${COMMONS_DIR})
 set(ATOMS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../atoms)
 set(CORELOOPTHREE_DIR ${ATOMS_DIR}/coreloopthree)
 
-# M5-4：两段式 GCCP 是 cognition 策略能力的集成面——策略库缺席
-# （BUILD_COGNITION_STRATEGY=OFF）时机制核静默旁路 GCCP，本测试语义
-# 不成立，不注册（与 think_d svc.c 注表面同一 TARGET 判据）。
-if(TARGET airy_cognition_strategy)
-    set(THINK_TEST_SOURCES test_think_gccp_twopass.c)
-else()
-    set(THINK_TEST_SOURCES)
-endif()
-
-foreach(TEST_SRC ${THINK_TEST_SOURCES})
+# 测试装配单一真相源：include/link 面在此一处声明，逐测试只给源文件与
+# 需要额外注入的定义。
+function(think_add_test TEST_SRC)
     get_filename_component(TEST_NAME ${TEST_SRC} NAME_WE)
 
     add_executable(test_think_${TEST_NAME} ${TEST_SRC})
 
-    # 与 svc.c 同判据：测试 harness 扮演 daemon 挂载 GCCP 策略注表面
-    target_compile_definitions(test_think_${TEST_NAME} PRIVATE
-        AIRY_HAS_COGNITION_STRATEGY=1)
+    if(ARGC GREATER 1)
+        target_compile_definitions(test_think_${TEST_NAME} PRIVATE ${ARGN})
+    endif()
 
     target_include_directories(test_think_${TEST_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
@@ -74,6 +67,17 @@ foreach(TEST_SRC ${THINK_TEST_SOURCES})
 
     add_test(NAME think_d_${TEST_NAME} COMMAND test_think_${TEST_NAME}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-endforeach()
+endfunction()
+
+# M5-4：两段式 GCCP 是 cognition 策略能力的集成面——策略库缺席
+# （BUILD_COGNITION_STRATEGY=OFF）时机制核静默旁路 GCCP，本测试语义
+# 不成立，不注册（与 think_d svc.c 注表面同一 TARGET 判据）。
+if(TARGET airy_cognition_strategy)
+    # 与 svc.c 同判据：测试 harness 扮演 daemon 挂载 GCCP 策略注表面
+    think_add_test(test_think_gccp_twopass.c AIRY_HAS_COGNITION_STRATEGY=1)
+endif()
+
+# 0.1.20 W4：演化观测面纯函数测试，不依赖策略库挂载。
+think_add_test(test_think_evolve_map.c)
 
 enable_testing()
