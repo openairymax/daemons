@@ -28,6 +28,7 @@ set(TEST_SOURCES
     test_daemon_state.c
     test_rpc_err_class.c
     test_svc_model_watch.c
+    test_svc_swap.c
 )
 
 foreach(TEST_SRC ${TEST_SOURCES})
