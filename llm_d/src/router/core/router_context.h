@@ -31,6 +31,19 @@ extern "C" {
 
 #define LLM_ROUTER_MAX_ENDPOINTS 64
 
+/* 健康面恢复快照（0.1.20 D2-3③）：只在 init 与重注册之间的短暂窗口存在。
+ * 时长字段存「距今毫秒」，使重启后的单调时钟归零不影响判定。 */
+typedef struct {
+    char provider_name[64];
+    char model_name[64];
+    uint32_t consec_fail;
+    uint32_t last_fail_age_ms;
+    uint32_t open_remain_ms;
+    uint32_t probe_fail;
+    uint8_t open_level;
+    uint8_t state;
+} router_ep_snap_t;
+
 typedef struct {
     llm_endpoint_t endpoints[LLM_ROUTER_MAX_ENDPOINTS];
     size_t endpoint_count;
@@ -40,6 +53,8 @@ typedef struct {
     airy_mtx_t mutex;
     bool initialized;
     size_t round_robin_index;
+    router_ep_snap_t restore[LLM_ROUTER_MAX_ENDPOINTS];
+    size_t restore_count;
 } router_ctx_t;
 
 /** @brief Get the global router context. */

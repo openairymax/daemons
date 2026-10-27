@@ -6,7 +6,8 @@
  * @brief 0.1.19 §3.8.4 A3 调用级链式切换回归
  *
  * 锁定六条容易在后续重构中回退的口径：
- *   1. mode=off 时失败逐字节透传、只尝试一次、不写健康面
+ *   1. mode=off 时失败逐字节透传、只尝试一次、不做放行与换端；健康面
+ *      仍照常记账（0.1.20 D2-2），否则默认配置下熔断恒不可达
  *   2. 白名单三值可切，BAD_REQUEST 永不切，掩码剔除即不切
  *   3. 跳数上限与调用级预算共同约束总尝试数，预算比较抗 64 位回绕
  *   4. 尝试集合去重且有界；候选按优先级降序、成本升序排列
@@ -28,7 +29,10 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static int test_count;
 static int fail_count;
@@ -294,11 +298,13 @@ static void test_next(void)
     llm_router_destroy();
 }
 
-/* off：失败逐字节透传，只尝试一次，且不写健康面。 */
+/* off：失败逐字节透传、每次只尝试一次、不换端；健康面照常记账，故默认
+ * 配置下熔断依旧可达（0.1.20 D2-2）。端点名专用，避免吃到其它用例经
+ * router.state 恢复出来的健康态。 */
 static void test_run_off(void)
 {
     llm_service_t *svc = make_svc();
-    llm_endpoint_t ep = make_ep("pa", "ma", 1, 0.001);
+    llm_endpoint_t ep = make_ep("offp", "offm", 1, 0.001);
     llm_route_request_t req = make_req();
     llm_request_config_t mgr;
     provider_t prov;
@@ -306,24 +312,27 @@ static void test_run_off(void)
     llm_response_t *out = NULL;
     svc_hit_t hit;
     int rc;
+    int i;
 
     if (!svc)
         return;
     memset(&mgr, 0, sizeof(mgr));
-    mgr.model = "ma";
+    mgr.model = "offm";
     memset(&prov, 0, sizeof(prov));
-    prov.name = "pa";
+    prov.name = "offp";
     memset(&t, 0, sizeof(t));
-    t.fail_first = 1;
+    t.fail_first = 3;
     t.err = AIRY_ERR_IO;
     memset(&hit, 0, sizeof(hit));
 
     check_int("off.reg", llm_router_register_endpoint(&ep), 0);
-    rc = svc_chain_run(svc, &mgr, &req, &prov, fake_try, &t, NULL, &out, &hit);
-    check_int("off.err", rc, AIRY_ERR_IO);
-    check_int("off.calls", t.calls, 1);
-    check_int("off.out", out == NULL, 1);
-    check_int("off.health_untouched", llm_rtr_admit("pa", "ma"), 1);
+    for (i = 0; i < 3; i++) {
+        rc = svc_chain_run(svc, &mgr, &req, &prov, fake_try, &t, NULL, &out, &hit);
+        check_int("off.err", rc, AIRY_ERR_IO);
+        check_int("off.calls", t.calls, i + 1);
+        check_int("off.out", out == NULL, 1);
+    }
+    check_int("off.health_counted", llm_rtr_admit("offp", "offm"), 0);
 
     llm_service_destroy(svc);
 }
@@ -331,13 +340,13 @@ static void test_run_off(void)
 /* auto：首个端点失败后切换到次候选，落点回填实际模型（H8 记账前提）。 */
 static void test_run_switch(void)
 {
-    char *ma[] = {"ma", NULL};
-    char *mb[] = {"mb", NULL};
+    char *ma[] = {"snm", NULL};
+    char *mb[] = {"sbm", NULL};
     int cap[] = {0};
     provider_config_t pcs[2];
     llm_service_t *svc = make_svc();
-    llm_endpoint_t pa = make_ep("pa", "ma", 2, 0.0001);
-    llm_endpoint_t pb = make_ep("pb", "mb", 1, 0.0002);
+    llm_endpoint_t pa = make_ep("snp", "snm", 2, 0.0001);
+    llm_endpoint_t pb = make_ep("sbp", "sbm", 1, 0.0002);
     llm_route_request_t req = make_req();
     llm_request_config_t mgr;
     const provider_t *first;
@@ -349,12 +358,12 @@ static void test_run_switch(void)
     if (!svc)
         return;
     memset(pcs, 0, sizeof(pcs));
-    pcs[0].name = "pa";
+    pcs[0].name = "snp";
     pcs[0].api_base = TEST_API_BASE;
     pcs[0].models = ma;
     pcs[0].model_max_output = cap;
     pcs[0].timeout_sec = 1;
-    pcs[1].name = "pb";
+    pcs[1].name = "sbp";
     pcs[1].api_base = TEST_API_BASE;
     pcs[1].models = mb;
     pcs[1].model_max_output = cap;
@@ -367,13 +376,13 @@ static void test_run_switch(void)
     svc->route.depth = 2;
 
     memset(&mgr, 0, sizeof(mgr));
-    mgr.model = "ma";
+    mgr.model = "snm";
     memset(&t, 0, sizeof(t));
     t.fail_first = 1;
     t.err = AIRY_ERR_IO;
     memset(&hit, 0, sizeof(hit));
 
-    first = svc_find_prov(svc, "ma");
+    first = svc_find_prov(svc, "snm");
     check_int("switch.first", first != NULL, 1);
     if (!first) {
         llm_service_destroy(svc);
@@ -383,10 +392,10 @@ static void test_run_switch(void)
     rc = svc_chain_run(svc, &mgr, &req, first, fake_try, &t, NULL, &out, &hit);
     check_int("switch.ok", rc, AIRY_OK);
     check_int("switch.calls", t.calls, 2);
-    check_str("switch.prov", t.prov, "pb");
-    check_str("switch.model", t.model, "mb");
-    check_str("switch.hit_model", hit.model, "mb");
-    check_int("switch.hit_prov", hit.prov && strcmp(hit.prov->name, "pb") == 0, 1);
+    check_str("switch.prov", t.prov, "sbp");
+    check_str("switch.model", t.model, "sbm");
+    check_str("switch.hit_model", hit.model, "sbm");
+    check_int("switch.hit_prov", hit.prov && strcmp(hit.prov->name, "sbp") == 0, 1);
     check_int("switch.out", out == NULL, 1);
 
     llm_service_destroy(svc);
@@ -396,7 +405,7 @@ static void test_run_switch(void)
 static void test_run_exhaust(void)
 {
     llm_service_t *svc = make_svc();
-    llm_endpoint_t ep = make_ep("pa", "ma", 1, 0.001);
+    llm_endpoint_t ep = make_ep("exp", "exm", 1, 0.001);
     llm_route_request_t req = make_req();
     llm_request_config_t mgr;
     provider_t prov;
@@ -407,9 +416,9 @@ static void test_run_exhaust(void)
     if (!svc)
         return;
     memset(&mgr, 0, sizeof(mgr));
-    mgr.model = "ma";
+    mgr.model = "exm";
     memset(&prov, 0, sizeof(prov));
-    prov.name = "pa";
+    prov.name = "exp";
     memset(&t, 0, sizeof(t));
     t.fail_first = 3;
     t.err = AIRY_ERR_LLM_RATE_LIMIT;
@@ -430,7 +439,7 @@ static void test_run_exhaust(void)
 static void test_run_gate(void)
 {
     llm_service_t *svc = make_svc();
-    llm_endpoint_t ep = make_ep("pa", "ma", 1, 0.001);
+    llm_endpoint_t ep = make_ep("gtp", "gtm", 1, 0.001);
     llm_route_request_t req = make_req();
     llm_request_config_t mgr;
     provider_t prov;
@@ -441,14 +450,14 @@ static void test_run_gate(void)
     if (!svc)
         return;
     memset(&mgr, 0, sizeof(mgr));
-    mgr.model = "ma";
+    mgr.model = "gtm";
     memset(&prov, 0, sizeof(prov));
-    prov.name = "pa";
+    prov.name = "gtp";
     memset(&t, 0, sizeof(t));
     t.err = AIRY_ERR_IO;
 
     check_int("gate.reg", llm_router_register_endpoint(&ep), 0);
-    check_int("gate.open", llm_rtr_fail("pa", "ma", AIRY_ERR_LLM_AUTH_FAIL), 0);
+    check_int("gate.open", llm_rtr_fail("gtp", "gtm", AIRY_ERR_LLM_AUTH_FAIL), 0);
     svc->route.mode = SVC_CHAIN_AUTO;
     svc->route.depth = 2;
 
@@ -520,11 +529,11 @@ static void test_run_sent(void)
 /* 成功路径同样回填实际模型与输出上限，供截断提示与计费使用。 */
 static void test_run_hit(void)
 {
-    char *ma[] = {"ma", NULL};
+    char *ma[] = {"htm", NULL};
     int cap[] = {4096};
     provider_config_t pcs[1];
     llm_service_t *svc = make_svc();
-    llm_endpoint_t ep = make_ep("pa", "ma", 1, 0.001);
+    llm_endpoint_t ep = make_ep("htp", "htm", 1, 0.001);
     llm_route_request_t req = make_req();
     llm_request_config_t mgr;
     const provider_t *first;
@@ -536,7 +545,7 @@ static void test_run_hit(void)
     if (!svc)
         return;
     memset(pcs, 0, sizeof(pcs));
-    pcs[0].name = "pa";
+    pcs[0].name = "htp";
     pcs[0].api_base = TEST_API_BASE;
     pcs[0].models = ma;
     pcs[0].model_max_output = cap;
@@ -544,11 +553,11 @@ static void test_run_hit(void)
 
     check_int("hit.reg", llm_router_register_endpoint(&ep), 0);
     memset(&mgr, 0, sizeof(mgr));
-    mgr.model = "ma";
+    mgr.model = "htm";
     memset(&t, 0, sizeof(t));
     memset(&hit, 0, sizeof(hit));
 
-    first = svc_find_prov(svc, "ma");
+    first = svc_find_prov(svc, "htm");
     check_int("hit.first", first != NULL, 1);
     if (!first) {
         llm_service_destroy(svc);
@@ -558,7 +567,7 @@ static void test_run_hit(void)
     rc = svc_chain_run(svc, &mgr, &req, first, fake_try, &t, NULL, &out, &hit);
     check_int("hit.ok", rc, AIRY_OK);
     check_int("hit.calls", t.calls, 1);
-    check_str("hit.model", hit.model, "ma");
+    check_str("hit.model", hit.model, "htm");
     check_int("hit.max", hit.max_tokens, 4096);
     check_int("hit.out", out == NULL, 1);
 
@@ -585,6 +594,15 @@ static void test_run_args(void)
 
 int main(void)
 {
+    char root[128];
+
+    snprintf(root, sizeof(root), "/tmp/airy_llm_chain_%ld", (long)getpid());
+    if (mkdir(root, 0700) != 0)
+        return 1;
+    /* 健康面随 service 生命周期落盘/恢复，用例必须隔离到临时数据目录，
+     * 否则会读写真实用户状态并造成跨用例串扰。 */
+    setenv("AIRY_HOME", root, 1);
+
     printf("running call-chain failover regression\n");
 
     test_def();

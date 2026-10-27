@@ -3,27 +3,44 @@
 
 /**
  * @file llm_health.c
- * @brief 端点健康面状态迁移与锁内包装（0.1.19 §3.8.2）。
+ * @brief 端点健康面状态迁移与锁内包装（0.1.19 §3.8.2，0.1.20 D2-3）。
  *
  * 迁移判据只依赖 llm_fo_reason()，与切换决策件共用同一错误分类，
  * 避免「可切换却不算失败」「不可切换却熔断」两套口径并存。
+ *
+ * 0.1.20 补两处质量缺口：
+ *   - CLOSED 期的 consec_fail 满 LLM_EP_FAIL_WINDOW_MS 无新失败即衰减，
+ *     使稀疏偶发失败不再跨天累计成熔断；
+ *   - HALF 期连续探测失败达 LLM_EP_PROBE_MAX 才回 OPEN，且每轮往返抬一档
+ *     指数退避，持续故障端点的探测频率随时间下降，不再无限 10s 一撞。
  */
 
 #include "router/core/llm_failover.h"
 #include "router/core/router_context.h"
+#include "router/core/router_state.h"
 
 #include "error_codes.h"
 #include "platform_misc.h"
 
 #include <string.h>
 
-/* 开启熔断。截止时刻折零时抬为 1，保证哨兵 0 唯一表示 CLOSED。 */
+/* 开启熔断。截止时刻折零时抬为 1，保证哨兵 0 唯一表示 CLOSED。
+ * 保持期按 open_level 指数抬升：首档 LLM_EP_OPEN_MS，每轮翻倍，
+ * 封顶 LLM_EP_OPEN_MAX_MS。 */
 static void ep_open(llm_endpoint_t *ep, uint32_t now)
 {
-    uint32_t until = now + LLM_EP_OPEN_MS;
+    uint32_t level = ep->open_level < LLM_EP_MAX_LEVEL ? ep->open_level : LLM_EP_MAX_LEVEL;
+    uint64_t hold = (uint64_t)LLM_EP_OPEN_MS << level;
+    uint32_t until;
+
+    if (hold > LLM_EP_OPEN_MAX_MS)
+        hold = LLM_EP_OPEN_MAX_MS;
+    until = now + (uint32_t)hold;
 
     ep->open_until_ms = until != 0U ? until : 1U;
     ep->probe_until_ms = 0U;
+    if (ep->open_level < UINT8_MAX)
+        ep->open_level++;
 }
 
 llm_ep_state_t llm_ep_state(const llm_endpoint_t *ep, uint32_t now)
@@ -52,21 +69,52 @@ int llm_ep_admit(llm_endpoint_t *ep, uint32_t now)
     return 1;
 }
 
+/* CLOSED 期失败计数：满窗无新失败则重新起算，再由本次失败起新一轮。 */
+static void ep_count(llm_endpoint_t *ep, uint32_t now)
+{
+    if (ep->consec_fail != 0U && (uint32_t)(now - ep->last_fail_ms) >= LLM_EP_FAIL_WINDOW_MS)
+        ep->consec_fail = 0U;
+    if (ep->consec_fail < UINT32_MAX)
+        ep->consec_fail++;
+    ep->last_fail_ms = now;
+}
+
 void llm_ep_fail(llm_endpoint_t *ep, int err, uint32_t now)
 {
     llm_fo_reason_t reason = llm_fo_reason(err);
+    llm_ep_state_t state;
 
     if (reason == LLM_FO_NONE)
         return;
 
-    if (ep->consec_fail < UINT32_MAX)
-        ep->consec_fail++;
-    ep->last_fail_ms = now;
+    state = llm_ep_state(ep, now);
 
+    /* 熔断期内到达的失败只更新时间戳，不延长保持期：否则持续打点会把
+     * 端点永久钉在 OPEN，退避档位也失去意义。 */
+    if (state == LLM_EP_OPEN) {
+        ep->last_fail_ms = now;
+        return;
+    }
+
+    if (state == LLM_EP_HALF) {
+        ep->last_fail_ms = now;
+        if (reason == LLM_FO_AUTH || ++ep->probe_fail >= LLM_EP_PROBE_MAX) {
+            ep->probe_fail = 0U;
+            ep_open(ep, now);
+            AIRY_LOG_WARN("C-L02: LLMRouter: endpoint %s/%s circuit OPEN (reason=%s, probes=%u)",
+                          ep->provider_name, ep->model_name, llm_fo_name(reason),
+                          (unsigned)LLM_EP_PROBE_MAX);
+        }
+        return;
+    }
+
+    ep_count(ep, now);
     if (reason == LLM_FO_AUTH || ep->consec_fail >= LLM_EP_FAIL_MAX) {
+        ep->probe_fail = 0U;
         ep_open(ep, now);
         AIRY_LOG_WARN("C-L02: LLMRouter: endpoint %s/%s circuit OPEN (reason=%s, fails=%u)",
-                      ep->provider_name, ep->model_name, llm_fo_name(reason), ep->consec_fail);
+                      ep->provider_name, ep->model_name, llm_fo_name(reason),
+                      (unsigned)ep->consec_fail);
     }
 }
 
@@ -76,6 +124,8 @@ void llm_ep_ok(llm_endpoint_t *ep)
     ep->last_fail_ms = 0U;
     ep->open_until_ms = 0U;
     ep->probe_until_ms = 0U;
+    ep->probe_fail = 0U;
+    ep->open_level = 0U;
 }
 
 llm_endpoint_t *router_ep_find(const char *provider, const char *model)
@@ -123,10 +173,42 @@ int llm_rtr_known(const char *provider, const char *model)
     return known;
 }
 
+/* 健康面签名：落盘与否只由这六个量决定，避免每次成功调用都写文件。 */
+typedef struct {
+    uint32_t consec_fail;
+    uint32_t last_fail_ms;
+    uint32_t open_until_ms;
+    uint32_t probe_until_ms;
+    uint32_t probe_fail;
+    uint8_t open_level;
+} ep_sig_t;
+
+static ep_sig_t ep_sig_of(const llm_endpoint_t *ep)
+{
+    ep_sig_t s;
+
+    s.consec_fail = ep->consec_fail;
+    s.last_fail_ms = ep->last_fail_ms;
+    s.open_until_ms = ep->open_until_ms;
+    s.probe_until_ms = ep->probe_until_ms;
+    s.probe_fail = ep->probe_fail;
+    s.open_level = ep->open_level;
+    return s;
+}
+
+static bool ep_sig_differs(const ep_sig_t *a, const ep_sig_t *b)
+{
+    return a->consec_fail != b->consec_fail || a->last_fail_ms != b->last_fail_ms ||
+           a->open_until_ms != b->open_until_ms || a->probe_until_ms != b->probe_until_ms ||
+           a->probe_fail != b->probe_fail || a->open_level != b->open_level;
+}
+
 static int ep_note(const char *provider, const char *model, int err, bool ok)
 {
     router_ctx_t *ctx = router_ctx_get();
     llm_endpoint_t *ep;
+    ep_sig_t before;
+    ep_sig_t after;
     uint32_t now;
     int rc = AIRY_ERR_NOT_FOUND;
 
@@ -139,10 +221,14 @@ static int ep_note(const char *provider, const char *model, int err, bool ok)
     AIRY_MUTEX_LOCK(&ctx->mutex);
     ep = router_ep_find(provider, model);
     if (ep) {
+        before = ep_sig_of(ep);
         if (ok)
             llm_ep_ok(ep);
         else
             llm_ep_fail(ep, err, now);
+        after = ep_sig_of(ep);
+        if (ep_sig_differs(&before, &after))
+            (void)router_state_save_locked();
         rc = 0;
     }
     AIRY_MUTEX_UNLOCK(&ctx->mutex);

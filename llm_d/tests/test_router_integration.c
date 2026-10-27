@@ -33,6 +33,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static int test_count = 0;
 static int pass_count = 0;
@@ -439,6 +441,14 @@ static void test_measurement_backfill(void)
 
 int main(void)
 {
+    char root[128];
+
+    snprintf(root, sizeof(root), "/tmp/airy_llm_rtr_%ld", (long)getpid());
+    if (mkdir(root, 0700) != 0)
+        return 1;
+    /* 健康面随 router 生命周期落盘/恢复，用例必须隔离到临时数据目录。 */
+    setenv("AIRY_HOME", root, 1);
+
     printf("=========================================\n");
     printf("  P3.16 (ACC-DT17): llm_router Integration Tests\n");
     printf("=========================================\n\n");

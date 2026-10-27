@@ -24,9 +24,14 @@
  * 健康面与选择面同头，是因为二者共享同一 llm_endpoint_t 值语义；拆成两个
  * 头会让调用方为一次判定同时摘两件，白白抬高扇入（0.1.19 §4.4 五件套化）。
  *
- *   CLOSED --连续失败达 LLM_EP_FAIL_MAX，或 AUTH 一次--> OPEN
+ *   CLOSED --窗口内连续失败达 LLM_EP_FAIL_MAX，或 AUTH 一次--> OPEN
  *   OPEN   --open_until_ms 过期--> HALF，只放行单次探测
- *   HALF   --探测成功--> CLOSED；探测失败--> OPEN
+ *   HALF   --探测成功--> CLOSED；连续失败达 LLM_EP_PROBE_MAX--> OPEN
+ *
+ * CLOSED 期的连续失败计数按滑动窗口衰减：距上次失败已满
+ * LLM_EP_FAIL_WINDOW_MS 的失败不再与前一轮累计。每次自 HALF 转入 OPEN
+ * 都抬一档退避（LLM_EP_OPEN_MS 起，按 2 的幂递增，封顶
+ * LLM_EP_OPEN_MAX_MS），探测成功归 CLOSED 时归零档位。
  *
  * @owner team-A
  * @see contracts/contract_A_B.h section 3 (protocol routing table)
@@ -87,6 +92,8 @@ typedef struct {
     uint32_t last_fail_ms;
     uint32_t open_until_ms;
     uint32_t probe_until_ms;
+    uint32_t probe_fail;
+    uint8_t open_level;
 } llm_endpoint_t;
 
 /** 熔断三态。 */
@@ -99,11 +106,23 @@ typedef enum {
 /** 连续失败阈值：达此值转 OPEN。 */
 #define LLM_EP_FAIL_MAX 3U
 
-/** OPEN 保持时长（毫秒）。 */
+/** 连续失败计数窗口（毫秒）：距上次失败满窗后重新起算。 */
+#define LLM_EP_FAIL_WINDOW_MS 60000U
+
+/** OPEN 保持时长（毫秒），指数退避的首档。 */
 #define LLM_EP_OPEN_MS 30000U
+
+/** OPEN 保持时长上限（毫秒）。 */
+#define LLM_EP_OPEN_MAX_MS 300000U
+
+/** 指数退避最高档位：LLM_EP_OPEN_MS << 4 已超上限，封顶生效。 */
+#define LLM_EP_MAX_LEVEL 4U
 
 /** 半开探测最长占用（毫秒）：探测方未回报则释放槽位，允许重新探测。 */
 #define LLM_EP_PROBE_MS 10000U
+
+/** HALF 期连续探测失败阈值：达此值转 OPEN 并抬升退避档位。 */
+#define LLM_EP_PROBE_MAX 3U
 
 /** 由健康字段推导当前状态（now = airy_time_ms() 截断到 32 位）。 */
 llm_ep_state_t llm_ep_state(const llm_endpoint_t *ep, uint32_t now);

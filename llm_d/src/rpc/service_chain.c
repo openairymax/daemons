@@ -9,8 +9,10 @@
  * 决策件判定 → 取下一候选。放行在调用前、记账在调用后，两侧都以
  * provider 名与实际模型为键，与注册端点的健康面键严格同源。
  *
- * off 模式下不触碰健康面、不枚举候选、不消耗预算，失败原样返回上层的
- * 返回码，使 0.1.18 的现网行为逐字节保持。
+ * 健康面记账与模式无关：无论 off 还是 auto，真实调用成功/失败都落到端点
+ * 健康面（D2-2），否则默认配置下熔断计数恒为 0、机制形同虚设。off 仅关闭
+ * 放行闸、候选枚举与预算消耗，失败原样返回上层返回码，使 0.1.18 的现网
+ * 选路行为逐字节保持。
  */
 
 #include "rpc/service_chain.h"
@@ -273,8 +275,7 @@ int svc_chain_run(llm_service_t *svc, const llm_request_config_t *manager,
         if (gated > 0)
             svc_gate_release(prov);
         if (ret == 0) {
-            if (auto_mode)
-                (void)llm_rtr_ok(prov->name, model);
+            (void)llm_rtr_ok(prov->name, model);
             (void)llm_rtr_meas(prov->name, model, resp, airy_time_ms() - t0);
             if (out)
                 *out = resp;
@@ -285,10 +286,11 @@ int svc_chain_run(llm_service_t *svc, const llm_request_config_t *manager,
 
         /* 失败路径上的半成品响应必须释放，否则每次切换泄漏一次。 */
         llm_response_free(resp);
+        /* 记账先于模式分派：健康面两模式都成立，off 只是不做放行与换端。 */
+        (void)llm_rtr_fail(prov->name, model, ret);
         if (!auto_mode)
             return ret;
 
-        (void)llm_rtr_fail(prov->name, model, ret);
         if (!svc_chain_retry(&chain, ret))
             break;
         /* 首字节已下发后再换端点会让下游收到两段互不相接的内容。 */

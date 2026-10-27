@@ -11,6 +11,7 @@
  */
 
 #include "router/core/router_context.h"
+#include "router/core/router_state.h"
 #include "airy_memory.h"
 
 static router_ctx_t g_router;
@@ -46,6 +47,8 @@ int llm_router_init(void)
                                            .flags = AIRY_TOKEN_FLAG_ACCURATE};
 
     ctx->initialized = true;
+    /* 已落盘的健康面在此读入快照，由后续注册逐个消费；读失败不阻断路由。 */
+    router_state_load();
 
     AIRY_LOG_INFO("C-L02: LLMRouter: initialization complete");
     return 0;
@@ -66,6 +69,10 @@ void llm_router_destroy(void)
                   (unsigned long long)ctx->stats.total_tokens,
                   (unsigned long long)ctx->stats.fallback_count,
                   (unsigned long long)ctx->stats.error_count);
+
+    AIRY_MUTEX_LOCK(&ctx->mutex);
+    (void)router_state_save_locked();
+    AIRY_MUTEX_UNLOCK(&ctx->mutex);
 
     AIRY_MUTEX_DESTROY(&ctx->mutex);
     AIRY_MEMSET(ctx, 0, sizeof(router_ctx_t));
@@ -96,11 +103,15 @@ int llm_router_register_endpoint(const llm_endpoint_t *endpoint)
 
     llm_endpoint_t *slot = &ctx->endpoints[ctx->endpoint_count];
     AIRY_MEMCPY(slot, endpoint, sizeof(llm_endpoint_t));
-    /* 重注册即重置健康面：配置变更后的端点须从干净状态重新计数。 */
+    /* 重注册即重置健康面：配置变更后的端点须从干净状态重新计数，
+     * 再按 provider/model 回填落盘状态（重启恢复与热重载复用同一路径）。 */
     slot->consec_fail = 0U;
     slot->last_fail_ms = 0U;
     slot->open_until_ms = 0U;
     slot->probe_until_ms = 0U;
+    slot->probe_fail = 0U;
+    slot->open_level = 0U;
+    router_ep_restore_locked(slot);
     ctx->endpoint_count++;
 
     AIRY_LOG_INFO("C-L02: LLMRouter: registered endpoint %s/%s (total=%zu, "
@@ -121,6 +132,9 @@ int llm_router_reset_endpoints(void)
         return AIRY_ERR_SYS_NOT_INIT;
 
     AIRY_MUTEX_LOCK(&ctx->mutex);
+    /* 热重载会清表重建：先把当前健康面搬进快照，注册时再逐个回填，
+     * 使配置改动不白送一轮熔断状态。 */
+    router_state_capture_locked();
     ctx->endpoint_count = 0;
     ctx->round_robin_index = 0;
     AIRY_MUTEX_UNLOCK(&ctx->mutex);
