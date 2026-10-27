@@ -50,6 +50,10 @@ typedef struct {
      * 能力位静态派生源；缺失/未知 = 全不发送（fail-safe）。 */
     char endpoint_kind[16];
     char context_window[16];
+    /* D2-9④（0.1.20）：该模型的调用方并发预算（model.yaml max_concurrent，
+     * 0 = 未配置）。max_inflight = min(first_nonzero(本值,1), server_parallel)，
+     * server_parallel = first_nonzero(/props.total_slots, 本值, 1)。 */
+    int max_concurrent;
     /* max_output 的 token 数（由 svc_tokens_parse 在解析点一次性解释）。 */
     int max_output_tokens;
     int tool_rounds;
@@ -71,6 +75,8 @@ typedef struct {
     char api_format[16];
     char endpoint_kind[16];
     char extra_headers[256];
+    /* 与 model_names 同下标对齐：每模型调用方并发预算（0 = 未配置）。 */
+    int model_max_concurrent[64];
 } prov_cfg_t;
 
 typedef struct {
@@ -84,6 +90,8 @@ typedef struct {
      * 解析后的 token 数，0 = 未配置）。聚合与导出都必须携带，否则配置
      * 了上限也截断不了。 */
     int model_max_output[64];
+    /* 与 model_names 同下标对齐：每模型调用方并发预算（D2-9④，0 = 未配置）。 */
+    int model_max_concurrent[64];
     size_t model_count;
     /* 聚合出的连接声明：api_format 为适配器查找键（chat | messages |
      * local），extra_headers 为首个显式声明该字段的模型带来的端点附加头。 */

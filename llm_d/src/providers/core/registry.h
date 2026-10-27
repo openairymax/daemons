@@ -32,6 +32,9 @@ const provider_t *provider_registry_find(provider_registry_t *reg, const char *m
  */
 int provider_registry_model_max_output(const provider_t *prov, const char *model);
 
+/* 每模型调用方并发预算查询（D2-9④，0 = 未配置）。 */
+int provider_registry_model_max_concurrent(const provider_t *prov, const char *model);
+
 /**
  * @brief Enumerate all (provider, model) pairs in the registry.
  *

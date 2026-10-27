@@ -27,6 +27,14 @@ typedef struct {
     /* C11 能力位：registry 从 provider_config_t 盖入，driver 装配请求时
      * 盖印到 llm_request_config_t.caps，envelope 按位条件注入可选字段。 */
     local_caps_t caps;
+    /* D2-9④（0.1.20）：本地端点容量发现（llama.cpp /props，n_ctx 与
+     * total_slots 均为 per-slot 语义，R43 四源互证）。props_state:
+     * 0=未探测 1=已探测 2=不支持/失败（终态，不重试）；两值 0 = 未知。
+     * inflight 为当前在途请求数（sync_atomic 维护，uintptr_t 保 CAS 语义）。 */
+    int props_state;
+    int n_ctx_slot;
+    int total_slots;
+    uintptr_t inflight;
 } provider_base_ctx_t;
 
 void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name,

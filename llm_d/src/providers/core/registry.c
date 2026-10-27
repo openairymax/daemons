@@ -94,6 +94,14 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
                     caps[j] = pcfg->model_max_output[j];
             }
         }
+        int *cncs = NULL;
+        if (models && pcfg->model_max_concurrent && model_cnt > 0) {
+            cncs = AIRY_CALLOC(model_cnt + 1, sizeof(*cncs));
+            if (cncs) {
+                for (size_t j = 0; j < model_cnt; ++j)
+                    cncs[j] = pcfg->model_max_concurrent[j];
+            }
+        }
 
         reg->providers[valid].name = AIRY_STRDUP(pcfg->name);
         if (!reg->providers[valid].name) {
@@ -104,6 +112,7 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
                 AIRY_FREE(models);
             }
             AIRY_FREE(caps);
+            AIRY_FREE(cncs);
             adapter->destroy(ctx);
             continue;
         }
@@ -111,6 +120,7 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
         reg->providers[valid].ctx = ctx;
         reg->providers[valid].models = models;
         reg->providers[valid].model_max_output = caps;
+        reg->providers[valid].model_max_concurrent = cncs;
         valid++;
     }
 
@@ -132,6 +142,7 @@ void provider_registry_destroy(provider_registry_t *reg)
                 AIRY_FREE(p->models);
             }
             AIRY_FREE(p->model_max_output);
+            AIRY_FREE(p->model_max_concurrent);
         }
         AIRY_FREE(reg->providers);
         reg->providers = NULL;
@@ -172,6 +183,17 @@ int provider_registry_model_max_output(const provider_t *prov, const char *model
     for (size_t i = 0; prov->models[i]; ++i) {
         if (strcmp(prov->models[i], model) == 0)
             return prov->model_max_output[i];
+    }
+    return 0;
+}
+
+int provider_registry_model_max_concurrent(const provider_t *prov, const char *model)
+{
+    if (!prov || !model || !prov->models || !prov->model_max_concurrent)
+        return 0;
+    for (size_t i = 0; prov->models[i]; ++i) {
+        if (strcmp(prov->models[i], model) == 0)
+            return prov->model_max_concurrent[i];
     }
     return 0;
 }

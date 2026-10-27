@@ -38,6 +38,7 @@ static void free_provider_fields(provider_config_t *prov)
         AIRY_FREE(prov->models);
     }
     AIRY_FREE((void *)prov->model_max_output);
+    AIRY_FREE((void *)prov->model_max_concurrent);
     __builtin_memset(prov, 0, sizeof(*prov));
 }
 
@@ -89,6 +90,14 @@ static provider_config_t provider_config_dup(const provider_config_t *src)
                 for (size_t i = 0; i < n; ++i)
                     carr[i] = src->model_max_output[i];
                 d.model_max_output = carr;
+            }
+        }
+        if (src->model_max_concurrent && n > 0) {
+            int *cnc = (int *)AIRY_CALLOC(n, sizeof(int));
+            if (cnc) {
+                for (size_t i = 0; i < n; ++i)
+                    cnc[i] = src->model_max_concurrent[i];
+                d.model_max_concurrent = cnc;
             }
         }
     }

@@ -21,7 +21,10 @@
 #include "error.h"
 #include "daemon_platform_ext.h"
 #include "providers/providers_internal.h"
+#include "providers/core/provider_transport.h"
 #include "svc_logger.h"
+
+#include <cjson/cJSON.h>
 
 /* 代码级默认端点：仅当调用方未传 base_url 时使用。部署标准配置
  * （model.yaml local provider / llm: 段）显式传 base_url —— Ollama 默认
@@ -32,6 +35,10 @@
 #define LOCAL_DEFAULT_TIMEOUT 120.0
 #define LOCAL_CHAT_PATH "/chat/completions"
 
+/* D2-9④：/props 单发探测超时（秒）。探测失败即终态（不随请求重试），
+ * 并发闸回落 model.yaml:max_concurrent 或 1（fail-safe）。 */
+#define LOCAL_PROPS_TIMEOUT 8.0
+
 /* 请求头声明：本地端点无鉴权（设计使然），core 仅附加 Content-Type。 */
 static const provider_header_spec_t LOCAL_HEADERS = {.auth = PROVIDER_AUTH_NONE};
 
@@ -40,6 +47,63 @@ typedef struct {
 } local_ctx_t;
 
 extern const provider_adapter_t local_ops; /* shim 自引用 ops */
+
+/* D2-9④：llama.cpp /props 容量发现（懒执行一次）。/props 挂根路径而
+ * api_base 以 /v1 收尾，剥离后拼接；total_slots 取顶层，n_ctx 取
+ * default_generation_settings.n_ctx（顶层 n_ctx 为兼容回退）。两值均
+ * per-slot 语义（R43）。失败置终态 2：并发闸回落配置面，绝不阻塞请求。 */
+static void local_props_discover(local_ctx_t *ctx)
+{
+    provider_base_ctx_t *base = &ctx->base;
+    if (base->props_state != 0)
+        return;
+    base->props_state = 2;
+
+    size_t blen = strlen(base->api_base);
+    if (blen > 3 && strcmp(base->api_base + blen - 3, "/v1") == 0)
+        blen -= 3;
+    char root[512], url[576];
+    if (blen == 0 || blen >= sizeof(root))
+        return;
+    __builtin_memcpy(root, base->api_base, blen);
+    root[blen] = '\0';
+    if (provider_url_join(root, "/props", url, sizeof(url)) != AIRY_OK)
+        return;
+
+    provider_http_resp_t *resp = NULL;
+    long code = 0;
+    int rc = provider_http_get(url, NULL, LOCAL_PROPS_TIMEOUT, &resp, &code);
+    if (rc != AIRY_OK || !resp) {
+        SVC_LOG_WARN("C-L02: LOCAL: /props probe failed (rc=%d http=%ld) — "
+                     "capacity gates fall back to model.yaml",
+                     rc, code);
+        return;
+    }
+
+    cJSON *props = cJSON_Parse(resp->data);
+    if (props) {
+        cJSON *ts = cJSON_GetObjectItem(props, "total_slots");
+        cJSON *dgs = cJSON_GetObjectItem(props, "default_generation_settings");
+        cJSON *nc = dgs ? cJSON_GetObjectItem(dgs, "n_ctx") : NULL;
+        if (!nc)
+            nc = cJSON_GetObjectItem(props, "n_ctx");
+        if (cJSON_IsNumber(ts) && ts->valuedouble >= 1.0)
+            base->total_slots = (int)ts->valuedouble;
+        if (cJSON_IsNumber(nc) && nc->valuedouble >= 1.0)
+            base->n_ctx_slot = (int)nc->valuedouble;
+        if (base->n_ctx_slot > 0 || base->total_slots > 0) {
+            base->props_state = 1;
+            SVC_LOG_INFO("C-L02: LOCAL: /props capacity n_ctx_slot=%d total_slots=%d "
+                         "(per-slot values)",
+                         base->n_ctx_slot, base->total_slots);
+        }
+        cJSON_Delete(props);
+    } else {
+        SVC_LOG_WARN("C-L02: LOCAL: /props body unparsable — capacity gates fall back "
+                     "to model.yaml");
+    }
+    provider_http_resp_free(resp);
+}
 
 static provider_ctx_t *local_init(const char *name, const char *api_key, const char *api_base,
                                   const char *organization, double timeout_sec, int max_retries)
@@ -95,6 +159,7 @@ static char *local_build_request(const llm_request_config_t *manager)
 static int local_complete(provider_ctx_t *ctx, const llm_request_config_t *manager,
                           llm_response_t **out_response)
 {
+    local_props_discover((local_ctx_t *)ctx);
     return provider_driver_complete(ctx, &local_ops, manager, out_response);
 }
 
@@ -102,6 +167,7 @@ static int local_complete_stream(provider_ctx_t *ctx, const llm_request_config_t
                                  llm_stream_callback_t callback, void *callback_data,
                                  llm_response_t **out_response)
 {
+    local_props_discover((local_ctx_t *)ctx);
     return provider_driver_complete_stream(ctx, &local_ops, manager, callback, callback_data,
                                            out_response);
 }
