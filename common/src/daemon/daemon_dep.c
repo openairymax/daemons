@@ -174,3 +174,88 @@ int daemon_dep_report(const daemon_dep_t *dep, const char *daemon_name)
     cJSON_Delete(evt);
     return (int)missing;
 }
+
+static const char *dep_state_name(int state)
+{
+    switch (state) {
+    case DAEMON_DEP_ST_OK:
+        return "ok";
+    case DAEMON_DEP_ST_DEGRADED:
+        return "degraded";
+    case DAEMON_DEP_ST_DOWN:
+        return "down";
+    default:
+        return "unknown";
+    }
+}
+
+static void dep_emit(const char *daemon_name, int state, const char *detail)
+{
+    cJSON *evt;
+    char *json;
+
+    evt = cJSON_CreateObject();
+    if (!evt)
+        return;
+
+    cJSON_AddStringToObject(evt, "event", state == DAEMON_DEP_ST_OK ? "dependency_recovered"
+                                                                   : "dependency_degraded");
+    cJSON_AddStringToObject(evt, "daemon", daemon_name);
+    cJSON_AddStringToObject(evt, "state", dep_state_name(state));
+    if (detail && detail[0])
+        cJSON_AddStringToObject(evt, "detail", detail);
+
+    json = cJSON_PrintUnformatted(evt);
+    if (json) {
+        (void)hall_evt_write(daemon_name, "issue", NULL, json);
+        cJSON_free(json);
+    }
+    cJSON_Delete(evt);
+}
+
+int daemon_dep_state(daemon_dep_gate_t *gate, const char *daemon_name, int state,
+                     const char *detail, uint64_t now_ms)
+{
+    if (!gate || !daemon_name || !daemon_name[0])
+        return AIRY_ERR_INVALID_PARAM;
+    if (state != DAEMON_DEP_ST_OK && state != DAEMON_DEP_ST_DEGRADED &&
+        state != DAEMON_DEP_ST_DOWN)
+        return AIRY_ERR_INVALID_PARAM;
+
+    /* 首次上报：OK 视为常态不发声；非 OK 即首个边沿，必须显式可见。 */
+    if (gate->state == 0) {
+        gate->state = state;
+        gate->last_ms = now_ms;
+        if (state == DAEMON_DEP_ST_OK)
+            return 0;
+        SVC_LOG_WARN("%s: health %s%s%s", daemon_name, dep_state_name(state),
+                     (detail && detail[0]) ? " - " : "", (detail && detail[0]) ? detail : "");
+        dep_emit(daemon_name, state, detail);
+        return 1;
+    }
+
+    if (state != gate->state) {
+        gate->state = state;
+        gate->last_ms = now_ms;
+        if (state == DAEMON_DEP_ST_OK)
+            SVC_LOG_INFO("%s: health recovered", daemon_name);
+        else
+            SVC_LOG_WARN("%s: health %s%s%s", daemon_name, dep_state_name(state),
+                         (detail && detail[0]) ? " - " : "",
+                         (detail && detail[0]) ? detail : "");
+        dep_emit(daemon_name, state, detail);
+        return 1;
+    }
+
+    /* 同态：OK 无信息量；非 OK 按窗口补发心跳，证明"仍不可用"而非"已失联"。 */
+    if (state == DAEMON_DEP_ST_OK)
+        return 0;
+    if (now_ms - gate->last_ms < DAEMON_DEP_REPORT_WINDOW_MS)
+        return 0;
+
+    gate->last_ms = now_ms;
+    SVC_LOG_WARN("%s: health still %s%s%s", daemon_name, dep_state_name(state),
+                 (detail && detail[0]) ? " - " : "", (detail && detail[0]) ? detail : "");
+    dep_emit(daemon_name, state, detail);
+    return 1;
+}

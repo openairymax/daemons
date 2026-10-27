@@ -76,6 +76,8 @@ struct ep_health {
     char probe_path[64];
     airy_mtx_t lock;
     size_t count;
+    ep_health_sink_t sink;
+    void *sink_ud;
     ep_rec_t recs[EP_HEALTH_MAX_ENDPOINTS];
 };
 
@@ -153,6 +155,18 @@ void ep_health_destroy(ep_health_t *h)
         return;
     airy_mtx_destroy(&h->lock);
     AIRY_FREE(h);
+}
+
+void ep_health_sink(ep_health_t *h, ep_health_sink_t sink, void *ud)
+{
+    if (!h)
+        return;
+
+    /* 装配域在启动期一次性接线；运行期只读，无需额外同步。 */
+    airy_mtx_lock(&h->lock);
+    h->sink = sink;
+    h->sink_ud = ud;
+    airy_mtx_unlock(&h->lock);
 }
 
 static void ep_probe_one(const char *base, const char *path, int *out_ok, long *out_code,
@@ -280,6 +294,8 @@ void ep_health_sweep(ep_health_t *h, int deep)
         }
 
         airy_mtx_lock(&h->lock);
+        int found = 0;
+        int reached = 0;
         for (size_t j = 0; j < h->count; j++) {
             ep_rec_t *rec = &h->recs[j];
             if (strcmp(rec->provider, snap[i].provider) != 0)
@@ -292,9 +308,18 @@ void ep_health_sweep(ep_health_t *h, int deep)
              * 直到下一次深度探测恢复——"路由在但推理挂"不得报 ok。 */
             rec->reachable = (ok && rec->deep != 0) ? 1 : 0;
             rec->http_code = (deep_ran && ok && !deep_ok) ? deep_code : code;
+            found = 1;
+            reached = rec->reachable;
             break;
         }
+        ep_health_sink_t sink = h->sink;
+        void *sink_ud = h->sink_ud;
         airy_mtx_unlock(&h->lock);
+
+        /* 汇聚回调必须在锁外：sink 内会取上层（router）锁，持锁回调即构成
+         * 跨层锁序，违反"绝不出锁调用外部"的并发纪律。 */
+        if (found && sink)
+            sink(sink_ud, snap[i].provider, reached);
 
         if (!ok)
             SVC_LOG_WARN("C-L02: EP-HEALTH: probe FAIL provider=%s base=%s http=%ld "

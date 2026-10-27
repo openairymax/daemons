@@ -160,6 +160,51 @@ int llm_rtr_fail(const char *provider, const char *model, int err);
 int llm_rtr_ok(const char *provider, const char *model);
 
 /**
+ * @brief 上游整体健康三态（0.1.20 D2-5）。
+ *
+ * 进程存活与上游可用是两件事：前者由 IPC 应答证明，后者只能由端到端的
+ * 探测/请求结果证明。health_check 报的是后者，故状态必须从端点健康面
+ * 聚合得出，不得以服务句柄非空冒充。
+ */
+typedef enum {
+    LLM_HEALTH_DOWN = 0,     /**< 无可用上游（全部熔断或未注册） */
+    LLM_HEALTH_DEGRADED = 1, /**< 部分上游不可用，仍可服务 */
+    LLM_HEALTH_OK = 2        /**< 全部启用端点 CLOSED */
+} llm_health_state_t;
+
+/** 聚合快照：total 为启用端点数，ok 为 CLOSED 数，down 为 OPEN/HALF 数。 */
+typedef struct {
+    llm_health_state_t state;
+    size_t total;
+    size_t ok;
+    size_t down;
+} llm_health_snap_t;
+
+/**
+ * @brief 锁内聚合端点健康面。
+ * @param out 可为 NULL；非 NULL 时回填计数明细。
+ * @return 聚合状态（router 未初始化或无启用端点时 DOWN）。
+ */
+llm_health_state_t llm_rtr_health(llm_health_snap_t *out);
+
+/** 三态名的 wire 拼写（"ok"/"degraded"/"down"），用于 health_check 应答。 */
+const char *llm_health_name(llm_health_state_t state);
+
+/**
+ * @brief 按 provider 记账一次端到端可达性观测（0.1.20 D2-5）。
+ *
+ * 主动探测只到 provider 粒度（/models + 深度探针），而健康面按
+ * provider×model 记账：同 provider 的全部端点共享同一条上游链路，故一次
+ * 观测对全部同名端点生效。失败按 AIRY_ERR_IO 记账——探测失败是传输面
+ * 不可达，与调用期连接失败同属可切换类（llm_fo_reason 显式表）。
+ *
+ * @param provider 端点 provider 名。
+ * @param ok       1 可达，0 不可达。
+ * @return 命中的端点条数（0 表示 provider 未注册或 router 未初始化）。
+ */
+size_t llm_rtr_provider_note(const char *provider, int ok);
+
+/**
  * 测量面单点记账（0.1.20 D0）：端点延迟 EWMA 回填 + stats 聚合。
  * 测量面与健康面分离——不触碰熔断四字段；熔断 off 模式同样回填，
  * 使 latency_skipped/least_latency 消费的 avg_latency_ms 恒为实测真值。
