@@ -19,9 +19,11 @@
 #include "llm_d_internal.h"
 
 #include "daemon_cfg_file.h"
+#include "daemon_dep.h"
 #include "daemon_event_driver.h"
 #include "providers/core/ep_health.h"
 #include "providers/core/registry.h"
+#include "router/core/llm_router.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -42,6 +44,9 @@
 #define EP_PROBE_FILTER "local"
 #define EP_PROBE_PATH "/models"
 
+/* D2-6 降级上报：事件流分组键，与 daemon 名一致。 */
+#define LLM_DEP_NAME "llm_d"
+
 llm_service_t *g_service = NULL;
 
 /* 端点健康视图单例（定义归装配域）：extern 声明在 llm_d_internal.h，
@@ -56,9 +61,41 @@ static thread_pool_t *g_ep_pool = NULL;
  * 深度探针（首轮即 deep，让启动后的第一次结论就覆盖整条推理链）。 */
 static unsigned g_ep_round = 0;
 
+/* D2-6 上报闸门：边沿触发 + 同态 60s 抑制，避免每请求一条事件。 */
+static daemon_dep_gate_t g_hl_gate;
+
+/* D2-5 汇聚出口：探测结论喂进端点健康唯一状态机（router 面）。
+ * 返回命中端点条数（0 表示该 provider 不在 router 端点表内）。 */
+static void ep_note_router(void *ud, const char *provider, int reachable)
+{
+    (void)ud;
+    (void)llm_rtr_provider_note(provider, reachable);
+}
+
+/* D2-6：把聚合三态按边沿规则上报。读取的是状态机当前值，不产生额外探测，
+ * 故可安全地在每轮探测末尾调用。 */
+static void ep_report(void)
+{
+    llm_health_snap_t snap;
+    llm_health_state_t st = llm_rtr_health(&snap);
+    char detail[96];
+    int state;
+
+    if (st == LLM_HEALTH_OK)
+        state = DAEMON_DEP_ST_OK;
+    else if (st == LLM_HEALTH_DEGRADED)
+        state = DAEMON_DEP_ST_DEGRADED;
+    else
+        state = DAEMON_DEP_ST_DOWN;
+
+    (void)snprintf(detail, sizeof(detail), "upstream %zu/%zu ok", snap.ok, snap.total);
+    (void)daemon_dep_state(&g_hl_gate, LLM_DEP_NAME, state, detail, airy_time_ms());
+}
+
 static void ep_probe_task(void *arg)
 {
     ep_health_sweep(g_ep, (int)(uintptr_t)arg);
+    ep_report();
 }
 
 /* 周期定时器回调（事件循环线程）：只做一次 offload，绝不在此出网。
@@ -144,6 +181,10 @@ int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
         SVC_LOG_ERROR("C-L02: EP-HEALTH: endpoint view unavailable, health probes disabled");
         return 0;
     }
+
+    /* D2-5：探测结论经 sink 汇入端点健康唯一状态机。接线必须先于首轮
+     * 探测，否则启动首轮结论只在视图内、不进状态机。 */
+    ep_health_sink(g_ep, ep_note_router, NULL);
 
     /* 首轮探测立即触发：status 在启动后即能反映真实可达性，而非等待
      * 一个完整周期后才由 unknown 转为结论；首轮同时执行深度探针。 */

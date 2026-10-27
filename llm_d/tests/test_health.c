@@ -364,6 +364,58 @@ static void test_router(void)
     llm_router_destroy();
 }
 
+/* 聚合健康面（0.1.20 D2-5）：三态只由端点健康状态机产生，
+ * 与进程句柄存在性无关；停用端点不计入分母（与选择口径一致）。 */
+static void test_aggregate(void)
+{
+    llm_endpoint_t a = make_ep("qa", "ma");
+    llm_endpoint_t b = make_ep("qb", "mb");
+    llm_endpoint_t c = make_ep("qc", "mc");
+    llm_health_snap_t snap;
+
+    c.enabled = false;
+
+    memset(&snap, 0x5a, sizeof(snap));
+    check_int("agg_preinit", (int)llm_rtr_health(&snap), (int)LLM_HEALTH_DOWN);
+    check_u32("agg_preinit_total", (uint32_t)snap.total, 0U);
+
+    llm_router_init();
+    check_int("agg_empty", (int)llm_rtr_health(&snap), (int)LLM_HEALTH_DOWN);
+
+    llm_router_register_endpoint(&a);
+    llm_router_register_endpoint(&b);
+    llm_router_register_endpoint(&c);
+    check_int("agg_all_ok", (int)llm_rtr_health(&snap), (int)LLM_HEALTH_OK);
+    check_u32("agg_skip_disabled_total", (uint32_t)snap.total, 2U);
+    check_u32("agg_all_ok_ok", (uint32_t)snap.ok, 2U);
+
+    check_u32("agg_unknown_hit", (uint32_t)llm_rtr_provider_note("nope", 0), 0U);
+
+    check_u32("agg_hit_pa", (uint32_t)llm_rtr_provider_note("qa", 0), 1U);
+    check_u32("agg_hit_pa2", (uint32_t)llm_rtr_provider_note("qa", 0), 1U);
+    check_u32("agg_hit_pa3", (uint32_t)llm_rtr_provider_note("qa", 0), 1U);
+    check_int("agg_degraded", (int)llm_rtr_health(&snap), (int)LLM_HEALTH_DEGRADED);
+    check_u32("agg_degraded_down", (uint32_t)snap.down, 1U);
+
+    llm_rtr_provider_note("qb", 0);
+    llm_rtr_provider_note("qb", 0);
+    llm_rtr_provider_note("qb", 0);
+    check_int("agg_down", (int)llm_rtr_health(&snap), (int)LLM_HEALTH_DOWN);
+    check_u32("agg_down_ok", (uint32_t)snap.ok, 0U);
+
+    llm_rtr_provider_note("qa", 1);
+    check_int("agg_recover_one", (int)llm_rtr_health(&snap), (int)LLM_HEALTH_DEGRADED);
+
+    llm_rtr_provider_note("qb", 1);
+    check_int("agg_recover_all", (int)llm_rtr_health(&snap), (int)LLM_HEALTH_OK);
+
+    check_str("agg_name_ok", llm_health_name(LLM_HEALTH_OK), "ok");
+    check_str("agg_name_degraded", llm_health_name(LLM_HEALTH_DEGRADED), "degraded");
+    check_str("agg_name_down", llm_health_name(LLM_HEALTH_DOWN), "down");
+
+    llm_router_destroy();
+}
+
 int main(void)
 {
     printf("running endpoint health regression\n");
@@ -384,6 +436,7 @@ int main(void)
     test_wrap();
     test_persist();
     test_router();
+    test_aggregate();
 
     if (fail_count == 0) {
         printf("All %d health assertions passed\n", test_count);

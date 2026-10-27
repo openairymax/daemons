@@ -203,12 +203,25 @@ static bool ep_sig_differs(const ep_sig_t *a, const ep_sig_t *b)
            a->probe_fail != b->probe_fail || a->open_level != b->open_level;
 }
 
+/* 锁内推进一次健康迁移；返回真表示六个健康字段确有变化，需要落盘。
+ * 落盘计划由调用方统一裁决：单端点记账立即写，provider 批量记账写一次。 */
+static bool ep_step(llm_endpoint_t *ep, int ok, int err, uint32_t now)
+{
+    ep_sig_t before = ep_sig_of(ep);
+    ep_sig_t after;
+
+    if (ok)
+        llm_ep_ok(ep);
+    else
+        llm_ep_fail(ep, err, now);
+    after = ep_sig_of(ep);
+    return ep_sig_differs(&before, &after);
+}
+
 static int ep_note(const char *provider, const char *model, int err, bool ok)
 {
     router_ctx_t *ctx = router_ctx_get();
     llm_endpoint_t *ep;
-    ep_sig_t before;
-    ep_sig_t after;
     uint32_t now;
     int rc = AIRY_ERR_NOT_FOUND;
 
@@ -221,13 +234,7 @@ static int ep_note(const char *provider, const char *model, int err, bool ok)
     AIRY_MUTEX_LOCK(&ctx->mutex);
     ep = router_ep_find(provider, model);
     if (ep) {
-        before = ep_sig_of(ep);
-        if (ok)
-            llm_ep_ok(ep);
-        else
-            llm_ep_fail(ep, err, now);
-        after = ep_sig_of(ep);
-        if (ep_sig_differs(&before, &after))
+        if (ep_step(ep, ok, err, now))
             (void)router_state_save_locked();
         rc = 0;
     }
@@ -243,4 +250,83 @@ int llm_rtr_fail(const char *provider, const char *model, int err)
 int llm_rtr_ok(const char *provider, const char *model)
 {
     return ep_note(provider, model, 0, true);
+}
+
+size_t llm_rtr_provider_note(const char *provider, int ok)
+{
+    router_ctx_t *ctx = router_ctx_get();
+    uint32_t now;
+    size_t hit = 0;
+    bool dirty = false;
+
+    if (!provider || !provider[0] || !ctx->initialized)
+        return 0;
+
+    now = (uint32_t)airy_time_ms();
+    AIRY_MUTEX_LOCK(&ctx->mutex);
+    for (size_t i = 0; i < ctx->endpoint_count; i++) {
+        llm_endpoint_t *ep = &ctx->endpoints[i];
+
+        if (strcmp(ep->provider_name, provider) != 0)
+            continue;
+        dirty |= ep_step(ep, ok, AIRY_ERR_IO, now);
+        hit++;
+    }
+    if (dirty)
+        (void)router_state_save_locked();
+    AIRY_MUTEX_UNLOCK(&ctx->mutex);
+    return hit;
+}
+
+const char *llm_health_name(llm_health_state_t state)
+{
+    switch (state) {
+    case LLM_HEALTH_OK:
+        return "ok";
+    case LLM_HEALTH_DEGRADED:
+        return "degraded";
+    default:
+        return "down";
+    }
+}
+
+llm_health_state_t llm_rtr_health(llm_health_snap_t *out)
+{
+    router_ctx_t *ctx = router_ctx_get();
+    llm_health_snap_t snap = {LLM_HEALTH_DOWN, 0, 0, 0};
+    uint32_t now;
+
+    if (!ctx->initialized) {
+        if (out)
+            *out = snap;
+        return snap.state;
+    }
+
+    now = (uint32_t)airy_time_ms();
+    AIRY_MUTEX_LOCK(&ctx->mutex);
+    for (size_t i = 0; i < ctx->endpoint_count; i++) {
+        const llm_endpoint_t *ep = &ctx->endpoints[i];
+
+        if (!ep->enabled)
+            continue;
+        snap.total++;
+        if (llm_ep_state(ep, now) == LLM_EP_CLOSED)
+            snap.ok++;
+        else
+            snap.down++;
+    }
+    AIRY_MUTEX_UNLOCK(&ctx->mutex);
+
+    /* 三态判据（0.1.20 J-12）：全部 CLOSED 才是 ok；无一可用即 down；
+     * 其余为 degraded。无启用端点同样落 down——没有上游就不是可用。 */
+    if (snap.total == 0 || snap.ok == 0)
+        snap.state = LLM_HEALTH_DOWN;
+    else if (snap.ok == snap.total)
+        snap.state = LLM_HEALTH_OK;
+    else
+        snap.state = LLM_HEALTH_DEGRADED;
+
+    if (out)
+        *out = snap;
+    return snap.state;
 }

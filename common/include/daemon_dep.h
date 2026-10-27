@@ -27,6 +27,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -107,6 +108,40 @@ int daemon_dep_at(const daemon_dep_t *dep, size_t idx, const char **name, bool *
  *         为 NULL/空或句柄未探测时返回 AIRY_ERR_INVALID_PARAM
  */
 int daemon_dep_report(const daemon_dep_t *dep, const char *daemon_name);
+
+/** 运行期健康态（0.1.20 D2-6）：由端到端探测产生，非启动快照。 */
+enum {
+    DAEMON_DEP_ST_OK = 1,       /**< 全部启用上游可用 */
+    DAEMON_DEP_ST_DEGRADED = 2, /**< 部分上游不可用，仍可服务 */
+    DAEMON_DEP_ST_DOWN = 3      /**< 无可用上游 */
+};
+
+/** 同态事件最小间隔：抑制"每请求一条事件"的事件风暴（Z18 边沿触发）。 */
+#define DAEMON_DEP_REPORT_WINDOW_MS 60000U
+
+/** 上报闸门（调用方持有，零堆分配）。state 为 0 表示尚未上报。 */
+typedef struct {
+    int state;
+    uint64_t last_ms;
+} daemon_dep_gate_t;
+
+/**
+ * @brief 按边沿触发规则上报一次运行期健康态。
+ *
+ * 语义（0.1.20 D2-6）：跃迁必发；同态在 DAEMON_DEP_REPORT_WINDOW_MS 内抑制；
+ * 同态过窗仅非 OK 态补发心跳（恢复是边沿事件，不重复）；首次上报为 OK 时
+ * 静默，避免启动噪声。事件写入 hall "issue" 分组，名称为 daemon_name。
+ *
+ * @param gate        调用方持有的闸门
+ * @param daemon_name 分组键（如 "llm_d"）
+ * @param state       DAEMON_DEP_ST_*
+ * @param detail      可选的降级细节（可为 NULL）
+ * @param now_ms      单调时钟毫秒
+ * @return 1 表示本次发出了事件；0 表示按规则静默；参数非法返回
+ *         AIRY_ERR_INVALID_PARAM
+ */
+int daemon_dep_state(daemon_dep_gate_t *gate, const char *daemon_name, int state,
+                     const char *detail, uint64_t now_ms);
 
 #ifdef __cplusplus
 }
