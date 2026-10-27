@@ -10,6 +10,14 @@
  *   AIRYRT_LAUNCH_CORE="gateway_d llm_d think_d agent_d tool_d"
  *   AIRYRT_LAUNCH_AUX="monit_d ... notify_d"
  *   AIRYRT_LAUNCH_ARGS_llm_d="--manager /path/model.yaml"
+ *   AIRYRT_LAUNCH_BIN_llama_server=$AIRY_HOME/local/llama/bin/llama-server
+ *   AIRYRT_LAUNCH_EP_llama_server=tcp:11435
+ *
+ * BIN_/EP_ 键为外部进程托管扩展（0.1.20 B-A7）：BIN_ 覆盖缺省可执行
+ * 路径（$AIRY_HOME/bin/<name>），EP_ 声明探活通道（"tcp:<port>" 回环
+ * TCP 或 UDS 路径）。三者一律 fail-closed：名字未在名单登记即拒绝，
+ * EP_ 的 tcp 端口非 1..65535 纯数字即拒绝；声明与机制零特判，具体
+ * 进程语义（如推理引擎端口约定）属 launcher 策略层。
  *
  * 声明缺失时回落内置缺省表（仅升级兼容兜底；SSoT 仍是 launch 声明，
  * launcher 每次写画像时一并写入 launch 段，缺省表不构成第二套清单）。
@@ -227,6 +235,38 @@ static void apply_args_line(sup_ctx_t *ctx, const char *key, const char *val)
     snprintf(ctx->procs[i].args, sizeof(ctx->procs[i].args), "%s", val);
 }
 
+static void apply_bin_line(sup_ctx_t *ctx, const char *key, const char *val)
+{
+    /* AIRYRT_LAUNCH_BIN_<NAME> -> 可执行路径覆盖（外部进程托管） */
+    static const char pfx[] = "AIRYRT_LAUNCH_BIN_";
+    size_t pl = sizeof(pfx) - 1;
+    if (strncmp(key, pfx, pl) != 0 || !val[0])
+        return;
+    int i = sup_proc_find(ctx, key + pl);
+    if (i < 0)
+        return; /* 未登记的 bin 声明拒绝（fail-closed） */
+    snprintf(ctx->procs[i].bin, sizeof(ctx->procs[i].bin), "%s", val);
+}
+
+static void apply_ep_line(sup_ctx_t *ctx, const char *key, const char *val)
+{
+    /* AIRYRT_LAUNCH_EP_<NAME> -> 探活通道声明（tcp:<port> 或 UDS 路径） */
+    static const char pfx[] = "AIRYRT_LAUNCH_EP_";
+    size_t pl = sizeof(pfx) - 1;
+    if (strncmp(key, pfx, pl) != 0 || !val[0])
+        return;
+    int i = sup_proc_find(ctx, key + pl);
+    if (i < 0)
+        return; /* 未登记的 ep 声明拒绝（fail-closed） */
+    if (strncmp(val, "tcp:", 4) == 0) {
+        char *end = NULL;
+        long port = strtol(val + 4, &end, 10);
+        if (!end || *end != '\0' || port < 1 || port > 65535)
+            return; /* tcp 端口非法拒绝（fail-closed） */
+    }
+    snprintf(ctx->procs[i].sock, sizeof(ctx->procs[i].sock), "%s", val);
+}
+
 /* 内置缺省表：仅 profile.env 无 launch 段时兜底（升级兼容） */
 int sup_decl_defaults(sup_ctx_t *ctx)
 {
@@ -298,6 +338,8 @@ int sup_decl_load(sup_ctx_t *ctx)
                 }
             } else {
                 apply_args_line(ctx, key, val);
+                apply_bin_line(ctx, key, val);
+                apply_ep_line(ctx, key, val);
             }
         }
     }

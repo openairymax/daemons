@@ -14,16 +14,22 @@
  * WSA 初始化必须自持，不得委托 commons 的 airy_network_init()。
  *
  * POSIX：UDS（AF_UNIX，路径端点）；Windows：TCP 回环（host:port 字面量）。
+ * 外部进程（无 UDS 端点的第三方守护，如推理引擎）经 "tcp:<port>" 端点
+ * 声明走 TCP 回环探活，两腿同构（回环主机恒定，无 DNS 语义）。
  */
 
 #include "sup_net.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifndef _WIN32
+#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netinet/in.h>
+#include <stdint.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -198,16 +204,49 @@ static int probe_unix(const char *path)
     close(fd);
     return rc;
 }
+
+/* TCP 回环探活（与 probe_unix 同构；主机恒 127.0.0.1，直构 sockaddr_in） */
+static int probe_tcp(const char *ep)
+{
+    char host[128], port[16];
+    struct sockaddr_in sa;
+    int fd, rc;
+
+    if (sup_ep_split(ep, host, sizeof(host), port, sizeof(port)) != 0)
+        return -1;
+    memset(&sa, 0, sizeof(sa));
+    sa.sin_family = AF_INET;
+    sa.sin_port = htons((uint16_t)strtol(port, NULL, 10));
+    if (inet_pton(AF_INET, host, &sa.sin_addr) != 1)
+        return -1;
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+        return -1;
+    rc = sup_conn_wait(fd, (const struct sockaddr *)&sa, sizeof(sa),
+                       SUP_PROBE_TIMEOUT_MS);
+    close(fd);
+    return rc;
+}
 #endif
 
-/* ---- sock 可达性判据：无登记端点返回 -1（调用方须走进程存活腿） ---- */
+/* ---- sock 可达性判据：无登记端点返回 -1（调用方须走进程存活腿）；
+ *      "tcp:<port>" 前缀归一化为回环 TCP 探活（外部进程声明端点） ---- */
 int sup_probe_sock(const char *sock)
 {
+    char norm[64];
+    int tcp = 0;
+
     if (!sock || sock[0] == '\0')
         return -1;
+    if (strncmp(sock, "tcp:", 4) == 0) {
+        snprintf(norm, sizeof(norm), "127.0.0.1:%s", sock + 4);
+        sock = norm;
+        tcp = 1;
+    }
 #ifdef _WIN32
+    (void)tcp;
     return probe_tcp(sock);
 #else
-    return probe_unix(sock);
+    return tcp ? probe_tcp(sock) : probe_unix(sock);
 #endif
 }
