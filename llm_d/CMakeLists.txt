@@ -49,6 +49,9 @@ set(LLM_SERVICE_SOURCES
     src/rpc/service_chain.c
     # 0.1.19 §3.8.4 A4：model.yaml routing 段解析（mode/chain_depth/on/deadline_sec）
     src/rpc/service_route.c
+    # 0.1.20 D2-10：配置读入暂存面 + 热切换执行器（排空/世代）
+    src/rpc/service_boot.c
+    src/rpc/service_reload.c
     src/accounting/metrics.c
     src/accounting/semantic_cache.c
     src/accounting/cost_tracker.c

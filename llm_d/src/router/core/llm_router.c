@@ -113,6 +113,22 @@ int llm_router_register_endpoint(const llm_endpoint_t *endpoint)
     return 0;
 }
 
+int llm_router_reset_endpoints(void)
+{
+    router_ctx_t *ctx = router_ctx_get();
+
+    if (!ctx->initialized)
+        return AIRY_ERR_SYS_NOT_INIT;
+
+    AIRY_MUTEX_LOCK(&ctx->mutex);
+    ctx->endpoint_count = 0;
+    ctx->round_robin_index = 0;
+    AIRY_MUTEX_UNLOCK(&ctx->mutex);
+
+    AIRY_LOG_INFO("C-L02: LLMRouter: endpoint table reset for reload");
+    return 0;
+}
+
 int llm_router_route(const llm_route_request_t *request, llm_route_result_t *result)
 {
     router_ctx_t *ctx = router_ctx_get();

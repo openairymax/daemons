@@ -24,6 +24,9 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_chain.c
     # 0.1.19 §3.8.4 A4：routing 段解析（与主目标同步）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_route.c
+    # 0.1.20 D2-10：配置读入暂存面 + 热切换执行器（与主目标同步）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_boot.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/service_reload.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/metrics.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/accounting/semantic_cache.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/rpc/response.c
@@ -93,6 +96,8 @@ set(LLM_TEST_SOURCES
     test_envelope.c
     # 0.1.20 D2-9：传输观测（超时分类计数 / p99 / 自动预算）回归
     test_prov_stat.c
+    # 0.1.20 D2-10：配置热重载（drain/世代/退休表/退避）回归
+    test_service_reload.c
 )
 
 set(LLM_COMMON_INCLUDES

@@ -36,6 +36,41 @@ struct cost_tracker {
     airy_mtx_t lock;
 };
 
+/* 规则表自持副本：热重载会释放配置侧的旧规则数组，若此处只拷结构体，
+ * model_pattern 就成了悬垂指针。深度拷贝让 tracker 的规则生命周期与
+ * 配置解耦，谁创建谁释放。 */
+static void rules_drop(pricing_rule_t *rules, int count);
+
+static pricing_rule_t *rules_dup(const pricing_rule_t *rules, int count)
+{
+    if (!rules || count <= 0)
+        return NULL;
+    pricing_rule_t *dup = (pricing_rule_t *)AIRY_CALLOC((size_t)count, sizeof(pricing_rule_t));
+    if (!dup)
+        return NULL;
+    for (int i = 0; i < count; ++i) {
+        dup[i].input_price_per_k = rules[i].input_price_per_k;
+        dup[i].output_price_per_k = rules[i].output_price_per_k;
+        if (rules[i].model_pattern) {
+            dup[i].model_pattern = AIRY_STRDUP(rules[i].model_pattern);
+            if (!dup[i].model_pattern) {
+                rules_drop(dup, count);
+                return NULL;
+            }
+        }
+    }
+    return dup;
+}
+
+static void rules_drop(pricing_rule_t *rules, int count)
+{
+    if (!rules)
+        return;
+    for (int i = 0; i < count; ++i)
+        AIRY_FREE((void *)rules[i].model_pattern);
+    AIRY_FREE(rules);
+}
+
 static int match_rule(const char *model, const pricing_rule_t *rule)
 {
     if (!rule || !rule->model_pattern || !model)
@@ -68,16 +103,39 @@ cost_tracker_t *cost_tracker_create(const pricing_rule_t *rules, int rule_count)
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
     if (rule_count > 0) {
-        SAFE_MALLOC_ARRAY(ct->rules, rule_count, sizeof(pricing_rule_t));
+        ct->rules = rules_dup(rules, rule_count);
         if (!ct->rules) {
             AIRY_FREE(ct);
             AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
         }
-        __builtin_memcpy(ct->rules, rules, rule_count * sizeof(pricing_rule_t));
         ct->rule_count = rule_count;
     }
     airy_mtx_init(&ct->lock);
     return ct;
+}
+
+int cost_tracker_set_rules(cost_tracker_t *ct, const pricing_rule_t *rules, int rule_count)
+{
+    if (!ct)
+        return -1;
+
+    pricing_rule_t *dup = NULL;
+    if (rule_count > 0) {
+        dup = rules_dup(rules, rule_count);
+        if (!dup)
+            return -1;
+    }
+
+    airy_mtx_lock(&ct->lock);
+    pricing_rule_t *old = ct->rules;
+    int old_n = ct->rule_count;
+    ct->rules = dup;
+    ct->rule_count = rule_count > 0 ? rule_count : 0;
+    airy_mtx_unlock(&ct->lock);
+
+    /* 锁外释放：换表后旧表不再被任何读者引用，避免在锁内做长尾释放。 */
+    rules_drop(old, old_n);
+    return 0;
 }
 
 void cost_tracker_destroy(cost_tracker_t *ct)
@@ -94,7 +152,7 @@ void cost_tracker_destroy(cost_tracker_t *ct)
     }
     airy_mtx_unlock(&ct->lock);
     airy_mtx_destroy(&ct->lock);
-    AIRY_FREE(ct->rules);
+    rules_drop(ct->rules, ct->rule_count);
     AIRY_FREE(ct);
 }
 
@@ -135,8 +193,13 @@ double cost_tracker_estimate(const cost_tracker_t *ct, const char *model, uint32
 {
     if (!ct || !model)
         return 0.0;
+    /* 规则表可被 set_rules 换掉，读侧必须与写侧同锁；const 语义下用
+     * 显式转换加锁，与 config_unified 的既有做法一致。 */
+    airy_mtx_t *lock = (airy_mtx_t *)&ct->lock;
+    airy_mtx_lock(lock);
     double in_price, out_price;
     cost_tracker_price(ct->rules, ct->rule_count, model, &in_price, &out_price);
+    airy_mtx_unlock(lock);
     return (prompt_tokens / 1000.0) * in_price + (completion_tokens / 1000.0) * out_price;
 }
 
