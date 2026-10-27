@@ -21,16 +21,22 @@ ep_health_t *ep_health_create(provider_registry_t *reg, const char *filter, cons
 void ep_health_destroy(ep_health_t *h);
 
 /* 对全部已知端点发起一次幂等只读探测并刷新可达性/延迟。运行在 daemon
- * 线程池 worker 上（探测量级为端点数量级，远小于池容量）。 */
-void ep_health_sweep(ep_health_t *h);
+ * 线程池 worker 上（探测量级为端点数量级，远小于池容量）。
+ *
+ * deep != 0 时追加深度探针（1-token 生成）：/models 只证明路由存在，深度
+ * 探针才证明权重已加载、推理可用。深度探针由策略层按周期倍率触发（如每
+ * 5 个轻探测周期一次），机制件不自持周期。深度结果保持粘滞：轻探测成功
+ * 但最近一次深度探测失败，端点仍判不可达，直到下一次深度探测通过。
+ * 端点无可用模型名时深度探针不适用，判定只由轻探测决定。 */
+void ep_health_sweep(ep_health_t *h, int deep);
 
 /* 上报一次请求侧冷加载观测：first_ms 超过冷加载阈值时按 OLLAMA_KEEP_ALIVE
  * 给出建议并返回 1（该端点若在探测视图内则一并记入）；未超阈值返回 0。 */
 int ep_health_cold(ep_health_t *h, const char *provider, const char *model, double first_ms);
 
-/* 快照序列化为 JSON 数组（provider/base/status/http_code/latency_ms/cold，
- * 冷加载端点附加 cold_model/first_ms）。返回串由调用方以 AIRY_FREE 释放；
- * 视图为空或内存不足返回 NULL。 */
+/* 快照序列化为 JSON 数组（provider/base/status/http_code/latency_ms/deep/cold，
+ * 冷加载端点附加 cold_model/first_ms）。deep 取 -1 未探 / 0 失败 / 1 通过。
+ * 返回串由调用方以 AIRY_FREE 释放；视图为空或内存不足返回 NULL。 */
 char *ep_health_json(ep_health_t *h);
 
 #ifdef __cplusplus

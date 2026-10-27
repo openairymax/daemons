@@ -23,14 +23,22 @@
 #include "providers/core/ep_health.h"
 #include "providers/core/registry.h"
 
+#include <stdint.h>
 #include <stdio.h>
 
-/* D5 端点健康探测周期：5 分钟（架构改进方案 §3.6.3）。探测本身在
+/* D2-9⑤ 端点健康探测周期：30 秒（架构改进方案 §5.2b.10）。探测本身在
  * daemon 线程池 worker 上执行，周期定时器只做一次 offload，不阻塞事件循环。 */
-#define EP_PROBE_INTERVAL_MS 300000
+#define EP_PROBE_INTERVAL_MS 30000
+
+/* D2-9⑤ 深度探针周期倍率：每 5 个轻探测周期追加一次 1-token 生成。
+ * 轻探测只证明路由存在，深度探针才证明权重已加载、推理可用；倍率取值
+ * 让生成请求不成为常态负载，同时把"路由在但推理挂"的发现延迟限制在
+ * 2.5 分钟内。 */
+#define EP_PROBE_DEEP_EVERY 5
 
 /* D5 探测范围：仅本地低算力端点——远端云端点由其 SLA 与网关侧观测覆盖，
- * 无需 llm_d 额外出网探测（探测范围属策略，周期/路径/范围在此注入机制件）。 */
+ * 无需 llm_d 额外出网探测（探测范围属策略，周期/路径/范围在此注入机制件）。
+ * 该范围同时保证深度探针不会对云端产生计费请求。 */
 #define EP_PROBE_FILTER "local"
 #define EP_PROBE_PATH "/models"
 
@@ -44,15 +52,18 @@ ep_health_t *g_ep = NULL;
  * offload 至此，避免阻塞事件循环。生命周期归 daemon 框架，本件只借用。 */
 static thread_pool_t *g_ep_pool = NULL;
 
+/* 探测轮次：只在事件循环线程递增，故无需原子；用于裁决本轮是否追加
+ * 深度探针（首轮即 deep，让启动后的第一次结论就覆盖整条推理链）。 */
+static unsigned g_ep_round = 0;
+
 static void ep_probe_task(void *arg)
 {
-    (void)arg;
-    ep_health_sweep(g_ep);
+    ep_health_sweep(g_ep, (int)(uintptr_t)arg);
 }
 
 /* 周期定时器回调（事件循环线程）：只做一次 offload，绝不在此出网。
  * 线程池不可用（未配置 pool_max）时降级为就地探测——探测量级为端点
- * 数量级、单发超时 8s，远小于 5min 周期，降级仅推迟该轮结果不丢结论。 */
+ * 数量级、单发超时 8s，远小于周期，降级仅推迟该轮结果不丢结论。 */
 static void ep_probe_tick(airy_event_loop_t *loop, uint64_t timer_id, void *user_data)
 {
     (void)loop;
@@ -62,12 +73,15 @@ static void ep_probe_tick(airy_event_loop_t *loop, uint64_t timer_id, void *user
     if (!g_ep)
         return;
 
+    int deep = (g_ep_round++ % EP_PROBE_DEEP_EVERY) == 0;
+    void *arg = (void *)(uintptr_t)deep;
+
     if (g_ep_pool) {
-        if (thread_pool_submit(g_ep_pool, ep_probe_task, NULL) != 0)
+        if (thread_pool_submit(g_ep_pool, ep_probe_task, arg) != 0)
             SVC_LOG_WARN("C-L02: EP-HEALTH: probe offload rejected, skipping this round");
         return;
     }
-    ep_probe_task(NULL);
+    ep_probe_task(arg);
 }
 
 static void ep_load(const char *config_path)
@@ -132,12 +146,13 @@ int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
     }
 
     /* 首轮探测立即触发：status 在启动后即能反映真实可达性，而非等待
-     * 一个完整周期（5min）后才由 unknown 转为结论。 */
+     * 一个完整周期后才由 unknown 转为结论；首轮同时执行深度探针。 */
     ep_probe_tick(NULL, 0, NULL);
 
     daemon_event_driver_add_timer(driver, EP_PROBE_INTERVAL_MS, ep_probe_tick, NULL);
-    SVC_LOG_INFO("C-L02: EP-HEALTH: probe timer registered (interval=%dms, filter=%s)",
-                 EP_PROBE_INTERVAL_MS, EP_PROBE_FILTER);
+    SVC_LOG_INFO("C-L02: EP-HEALTH: probe timer registered (interval=%dms, deep_every=%d, "
+                 "filter=%s)",
+                 EP_PROBE_INTERVAL_MS, EP_PROBE_DEEP_EVERY, EP_PROBE_FILTER);
     return 0;
 }
 
