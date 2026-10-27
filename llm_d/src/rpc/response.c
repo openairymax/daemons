@@ -68,6 +68,13 @@ char *response_to_json(const llm_response_t *resp)
     }
     if (resp->finish_reason)
         cJSON_AddStringToObject(root, "finish_reason", resp->finish_reason);
+    /* D2-9 容量回显：未探测端点（云族）整段缺席，不制造全零噪声。 */
+    if (resp->context_window || resp->total_slots) {
+        cJSON *cap = cJSON_CreateObject();
+        cJSON_AddNumberToObject(cap, "context_window", resp->context_window);
+        cJSON_AddNumberToObject(cap, "total_slots", resp->total_slots);
+        cJSON_AddItemToObject(root, "capacity", cap);
+    }
 
     cJSON *choices = cJSON_CreateArray();
     for (size_t i = 0; i < resp->choice_count; ++i) {
