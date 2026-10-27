@@ -14,7 +14,8 @@
  * 壳）经本头持有全户契约。仅限 supervisor_d 编译单元。
  *
  * 期望态 = 画像 launch 声明（$AIRY_HOME/config/profile.env 的
- * AIRYRT_LAUNCH_CORE / AIRYRT_LAUNCH_AUX / AIRYRT_LAUNCH_ARGS_<NAME>），
+ * AIRYRT_LAUNCH_CORE / AIRYRT_LAUNCH_AUX / AIRYRT_LAUNCH_ARGS_<NAME> /
+ * AIRYRT_LAUNCH_BIN_<NAME> / AIRYRT_LAUNCH_EP_<NAME>），
  * 实际态 = 子进程集 + sock 可达性；supervisor_d 周期比对并拉齐：
  * CORE 死而自动复活（指数退避，超限 failed 显式告警），AUX 仅经
  * supervisor.activate 按需拉起。收摊经 supervisor.shutdown 统一收割。
@@ -74,7 +75,7 @@ typedef enum sup_state {
 typedef struct sup_proc {
     char name[SUP_NAME_MAX];  /* "notify_d" */
     char bin[SUP_PATH_MAX];   /* $AIRY_HOME/bin/notify_d */
-    char sock[SUP_PATH_MAX];  /* POSIX: $AIRY_RUNTIME_DIR/notify.sock；WIN: host:port */
+    char sock[SUP_PATH_MAX];  /* UDS 路径 / "host:port" / "tcp:<port>"（外部进程回环探活） */
     char args[SUP_ARGS_MAX];  /* 声明注入 argv（如 llm_d --manager <cfg>），空串无参 */
     sup_role_t role;
     sup_state_t state;

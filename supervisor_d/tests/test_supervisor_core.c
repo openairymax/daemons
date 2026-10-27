@@ -8,8 +8,9 @@
  *
  * 被测四源件（decl/proc/ctrl/net）直接编入（不含 main.c）。全平台腿
  * 覆盖退避封顶、JSON 字段提取、内置缺省表、空转探测与端点裁剪；POSIX
- * 腿覆盖 profile.env 双遍解析、env 回落、UDS 探测、假死强杀收割链路与
- * 控制口 health_check / shutdown 往返。
+ * 腿覆盖 profile.env 双遍解析（含 BIN_/EP_ 外部进程托管声明）、env 回
+ * 落、UDS/TCP 探活、假死强杀收割链路与控制口 health_check / shutdown
+ * 往返。
  */
 
 #include "supervisor_d_internal.h"
@@ -19,7 +20,9 @@
 #include <string.h>
 
 #ifndef _WIN32
+#include <arpa/inet.h>
 #include <errno.h>
+#include <netinet/in.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -274,6 +277,51 @@ static int t_decl_load(void)
     TEST_OK();
 }
 
+static int t_decl_overrides(void)
+{
+    env_clear();
+    if (mk_tmpdir() != 0)
+        TEST_FAIL("mkdir tmp");
+    char cfg[192], pf[224];
+    snprintf(cfg, sizeof(cfg), "%s/config", g_dir);
+    if (mkdir(cfg, 0755) != 0 && errno != EEXIST)
+        TEST_FAIL("mkdir config");
+    snprintf(pf, sizeof(pf), "%s/profile.env", cfg);
+    FILE *f = fopen(pf, "w");
+    if (!f)
+        TEST_FAIL("open profile.env");
+    fputs("AIRYRT_LAUNCH_CORE=gateway_d llama_server\n", f);
+    fputs("AIRYRT_LAUNCH_BIN_llama_server=/opt/ext/llama-server\n", f);
+    fputs("AIRYRT_LAUNCH_EP_llama_server=tcp:11435\n", f);
+    fputs("AIRYRT_LAUNCH_BIN_ghost_d=/bin/ghost\n", f);
+    fputs("AIRYRT_LAUNCH_EP_ghost_d=tcp:99999\n", f);
+    fputs("AIRYRT_LAUNCH_EP_gateway_d=tcp:abc\n", f);
+    fclose(f);
+
+    setenv("AIRY_HOME", g_dir, 1);
+    setenv("AIRY_RUNTIME_DIR", g_dir, 1);
+
+    sup_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    TEST_ASSERT(sup_decl_load(&ctx) == 0, "load failed");
+    TEST_ASSERT(ctx.count == 2, "ghost must not register");
+    int li = sup_proc_find(&ctx, "llama_server");
+    TEST_ASSERT(li >= 0, "llama_server missing");
+    TEST_ASSERT(strcmp(ctx.procs[li].bin, "/opt/ext/llama-server") == 0,
+                "bin override");
+    TEST_ASSERT(strcmp(ctx.procs[li].sock, "tcp:11435") == 0, "ep tcp");
+    int gi = sup_proc_find(&ctx, "gateway_d");
+    TEST_ASSERT(gi >= 0, "gateway_d missing");
+    TEST_ASSERT(ctx.procs[gi].sock[0] == '\0', "bad port must be rejected");
+    char defbin[224];
+    snprintf(defbin, sizeof(defbin), "%s/bin/gateway_d", g_dir);
+    TEST_ASSERT(strcmp(ctx.procs[gi].bin, defbin) == 0, "default bin kept");
+
+    env_clear();
+    rm_tmpdir();
+    TEST_OK();
+}
+
 static int t_decl_fallback(void)
 {
     env_clear();
@@ -318,6 +366,29 @@ static int t_decl_fallback(void)
 
     env_clear();
     rm_tmpdir();
+    TEST_OK();
+}
+
+/* TCP 探活三态（net.c "tcp:" 机制）：bind 未 listen 拒、listen 后通、
+ * 归一化回环端点；外部进程（如推理引擎）经此通道纳入假死探测 */
+static int t_probe_tcp(void)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    TEST_ASSERT(fd >= 0, "socket");
+    struct sockaddr_in sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sin_family = AF_INET;
+    sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    TEST_ASSERT(bind(fd, (const struct sockaddr *)&sa, sizeof(sa)) == 0,
+                "bind");
+    socklen_t sl = sizeof(sa);
+    TEST_ASSERT(getsockname(fd, (struct sockaddr *)&sa, &sl) == 0, "name");
+    char ep[32];
+    snprintf(ep, sizeof(ep), "tcp:%u", (unsigned)ntohs(sa.sin_port));
+    TEST_ASSERT(sup_probe_sock(ep) != 0, "unlistened port must fail");
+    TEST_ASSERT(listen(fd, 4) == 0, "listen");
+    TEST_ASSERT(sup_probe_sock(ep) == 0, "tcp probe");
+    close(fd);
     TEST_OK();
 }
 
@@ -503,9 +574,13 @@ int main(void)
     run++;
     pass += t_decl_load() == 0;
     run++;
+    pass += t_decl_overrides() == 0;
+    run++;
     pass += t_decl_fallback() == 0;
     run++;
     pass += t_health_sock_up() == 0;
+    run++;
+    pass += t_probe_tcp() == 0;
     run++;
     pass += t_health_probe_ok() == 0;
     run++;
