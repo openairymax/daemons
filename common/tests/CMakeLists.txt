@@ -27,6 +27,7 @@ set(TEST_SOURCES
     test_daemon_dep.c
     test_daemon_state.c
     test_rpc_err_class.c
+    test_rpc_client.c
     test_svc_model_watch.c
     test_svc_swap.c
 )
