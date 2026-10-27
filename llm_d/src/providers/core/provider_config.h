@@ -35,6 +35,8 @@ typedef struct {
      * 数，0 = 未配置）。NULL 表示调用方未提供容量表。生成参数解析靠它兑现
      * "配置了上限就按下限截断"。 */
     const int *model_max_output;
+    /* 与 models 同下标对齐的每模型调用方并发预算（D2-9④，0 = 未配置）。 */
+    const int *model_max_concurrent;
 } provider_config_t;
 
 typedef struct service_config {

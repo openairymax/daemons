@@ -83,6 +83,8 @@ typedef struct {
     /* 与 models 同下标对齐的每模型输出上限（0 = 未配置）：registry 装配时
      * 从 provider_config_t 复制，供生成参数解析查询。 */
     int *model_max_output;
+    /* 与 models 同下标对齐的每模型调用方并发预算（D2-9④，0 = 未配置）。 */
+    int *model_max_concurrent;
 } provider_t;
 
 /* 获取 provider 的 base 上下文（api_base/api_key/timeout_sec 等）。

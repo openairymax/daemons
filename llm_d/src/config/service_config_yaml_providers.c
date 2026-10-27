@@ -56,6 +56,7 @@ static void svc_yaml_aggregate_providers(svc_yaml_state_t *st, provider_agg_t *p
             size_t mi = provs[j].model_count;
             provs[j].model_names[mi] = AIRY_STRDUP(st->models[i].name);
             provs[j].model_max_output[mi] = st->models[i].max_output_tokens;
+            provs[j].model_max_concurrent[mi] = st->models[i].max_concurrent;
             provs[j].model_count++;
         }
         if (!provs[j].base_url[0] && st->models[i].endpoint[0]) {
@@ -135,9 +136,10 @@ static void svc_yaml_merge_provider_cfgs(svc_yaml_state_t *st, provider_agg_t *p
             } else if (provs[j].model_count < 64) {
                 size_t mi = provs[j].model_count;
                 provs[j].model_names[mi] = st->pcfg[pi].model_names[k];
-                /* providers: 段只声明连接，不声明每模型输出上限；保持 0
-                 * （未配置），由引擎级默认兜底。 */
+                /* providers: 段只声明连接，不声明每模型输出上限/并发预算；
+                 * 保持 0（未配置），由引擎级默认兜底。 */
                 provs[j].model_max_output[mi] = 0;
+                provs[j].model_max_concurrent[mi] = 0;
                 provs[j].model_count++;
             } else {
                 AIRY_FREE(st->pcfg[pi].model_names[k]);
@@ -218,17 +220,21 @@ static int svc_yaml_build_result(provider_agg_t *provs, size_t prov_count,
         if (provs[i].model_count > 0) {
             char **marr = (char **)AIRY_CALLOC(provs[i].model_count + 1, sizeof(char *));
             int *caparr = (int *)AIRY_CALLOC(provs[i].model_count + 1, sizeof(int));
-            if (marr && caparr) {
+            int *cncarr = (int *)AIRY_CALLOC(provs[i].model_count + 1, sizeof(int));
+            if (marr && caparr && cncarr) {
                 for (size_t k = 0; k < provs[i].model_count; ++k) {
                     marr[k] = provs[i].model_names[k];
                     caparr[k] = provs[i].model_max_output[k];
+                    cncarr[k] = provs[i].model_max_concurrent[k];
                 }
                 marr[provs[i].model_count] = NULL;
                 result[i].models = marr;
                 result[i].model_max_output = caparr;
+                result[i].model_max_concurrent = cncarr;
             } else {
                 AIRY_FREE(marr);
                 AIRY_FREE(caparr);
+                AIRY_FREE(cncarr);
                 for (size_t k = 0; k < provs[i].model_count; ++k)
                     AIRY_FREE(provs[i].model_names[k]);
             }

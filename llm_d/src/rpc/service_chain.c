@@ -17,12 +17,56 @@
 
 #include "airy_memory.h"
 #include "platform_misc.h"
+#include "providers/core/adapter.h"
+#include "providers/core/registry.h"
+#include "providers/core/provider_base.h"
 #include "rpc/rpc_internal.h"
 #include "router/core/llm_failover.h"
 #include "service.h"
 #include "svc_logger.h"
+#include "sync.h"
 
 #include <string.h>
+
+/* D2-9④（r7 硬化）：本地端点并发闸——
+ *   server_parallel = first_nonzero(/props.total_slots, cfg, 1)
+ *   max_inflight    = min(first_nonzero(cfg, 1), server_parallel)
+ * 超限 AIRY_EBUSY 快速失败（链式语义下转下一候选端点）。cfg = 该模型的
+ * model.yaml:max_concurrent。云族端点（未探测，props_state=0）不设闸。 */
+static int svc_gate_limit(const provider_t *prov, const char *model)
+{
+    provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
+    if (!base || base->props_state == 0)
+        return 0; /* 不设闸 */
+    int cfg = provider_registry_model_max_concurrent(prov, model);
+    int sp = base->total_slots > 0 ? base->total_slots : (cfg > 0 ? cfg : 1);
+    int mi = cfg > 0 ? cfg : 1;
+    return mi < sp ? mi : sp;
+}
+
+/* 返回值：>0 = 已占座，值为闸上限（退出前须配对 release）；0 = 未设闸；
+ * -1 = 在座满，本端点本轮不可用。 */
+static int svc_gate_acquire(const provider_t *prov, const char *model)
+{
+    int limit = svc_gate_limit(prov, model);
+    if (limit <= 0)
+        return 0;
+    provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
+    for (;;) {
+        uintptr_t cur = sync_atomic_load(&base->inflight);
+        if ((int)cur >= limit)
+            return -1;
+        if (sync_atomic_cas(&base->inflight, cur, cur + 1))
+            return limit;
+    }
+}
+
+static void svc_gate_release(const provider_t *prov)
+{
+    provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
+    if (base)
+        (void)sync_atomic_sub(&base->inflight, 1);
+}
 
 void svc_chain_def(llm_route_cfg_t *cfg)
 {
@@ -183,6 +227,7 @@ int svc_chain_run(llm_service_t *svc, const llm_request_config_t *manager,
         svc_step_t step;
         char model[128];
         uint64_t t0;
+        int gated;
         int max_tokens = 0;
         int ret;
 
@@ -211,8 +256,22 @@ int svc_chain_run(llm_service_t *svc, const llm_request_config_t *manager,
             }
         }
 
+        /* D2-9④：占座在调用前、退座在调用后，与链式放行独立——云族未设闸
+         * 时两者都是 no-op。在座满不记健康面失败（这是本地容量背压，不是
+         * 端点故障）：auto 模式直接转下一候选，off 模式原样回 BUSY。 */
+        gated = svc_gate_acquire(prov, model);
+        if (gated < 0) {
+            SVC_LOG_WARN("C-L02: SVC: CHAIN-BUSY %s/%s (inflight at cap)",
+                         prov->name ? prov->name : "?", model);
+            if (!auto_mode)
+                return AIRY_ERR_BUSY;
+            goto next;
+        }
+
         t0 = airy_time_ms();
         ret = attempt(actx, &step, &resp);
+        if (gated > 0)
+            svc_gate_release(prov);
         if (ret == 0) {
             if (auto_mode)
                 (void)llm_rtr_ok(prov->name, model);

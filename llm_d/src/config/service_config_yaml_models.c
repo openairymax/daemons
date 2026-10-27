@@ -105,6 +105,7 @@ static const svc_yaml_field_t svc_yaml_fields[] = {
     YF("extra_headers", extra_headers, YF_STR), YF("tool_rounds", tool_rounds, YF_INT),
     YF("timeout_sec", timeout_sec, YF_INT), YF("max_retries", max_retries, YF_INT),
     YF("max_output", max_output_tokens, YF_TOKENS), YF("vision", vision, YF_BOOL),
+    YF("max_concurrent", max_concurrent, YF_INT),
     YF_P("input_cost_per_1k", input_cost_per_k, has_input_price),
     YF_P("output_cost_per_1k", output_cost_per_k, has_output_price),
 };

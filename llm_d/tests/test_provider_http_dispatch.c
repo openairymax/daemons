@@ -719,10 +719,12 @@ static void test_local_endpoint_policy(void)
     if (resp)
         llm_response_free(resp);
 
-    printf("    local ret=%d attempts=%d (expect 1); cloud ret=%d attempts=%d (expect 3)\n",
+    printf("    local ret=%d attempts=%d (expect 2); cloud ret=%d attempts=%d (expect 3)\n",
            ret, local_attempts, cloud_ret, cloud_attempts);
     assert(ret == AIRY_ERR_IO);
-    assert(local_attempts == 1); /* 收发中断不重发：本地策略的直接后果 */
+    /* 收发中断不重发：本地策略的直接后果。attempts=2 = /props 容量探测
+     * 一次（D2-9④，失败即终态不重试）+ 请求一次，两阶段各恰一次。 */
+    assert(local_attempts == 2);
     assert(cloud_ret == AIRY_ERR_IO);
     assert(cloud_attempts == 3); /* 云端策略不受收窄影响 */
 
