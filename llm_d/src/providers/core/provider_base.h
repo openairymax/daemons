@@ -15,6 +15,8 @@ extern "C" {
 struct provider_rate_limiter;
 
 typedef struct {
+    /* 端点名（prov_stat 时延样本与自动预算的键；与适配器 ops->name 同名）。 */
+    char name[64];
     char api_key[256];
     char api_key_env[128];
     char api_base[512];
@@ -22,6 +24,9 @@ typedef struct {
     /* 端点附加头（如协议版本头），由 model.yaml extra_headers 注入，多条以 ';' 或换行分隔。 */
     char extra_headers[512];
     double timeout_sec;
+    /* D2-9（0.1.20）：1 = 预算由实测时延 p99 推导（timeout_sec 此时为 0），
+     * 0 = 预算为 timeout_sec 显式值。自动预算只用于本地端点慢推理场景。 */
+    int timeout_auto;
     int max_retries;
     provider_retry_class_t retry_class;
     /* C11 能力位：registry 从 provider_config_t 盖入，driver 装配请求时

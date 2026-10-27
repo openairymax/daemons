@@ -286,6 +286,8 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name
 
     __builtin_memset(base_ctx, 0, sizeof(provider_base_ctx_t));
 
+    copy_fit(base_ctx->name, sizeof(base_ctx->name), provider_name);
+
     /* Record the api_key_env name (for secrets.env hot-reload on request).
      * Prefer extracting from the "env:NAME" prefix; otherwise derive the
      * conventional env var name from the declared provider name (brand-neutral

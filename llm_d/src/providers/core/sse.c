@@ -280,7 +280,7 @@ typedef struct {
 
 /* 单次尝试：装配 curl、执行、取回响应码（重试壳在 core/retry.c）。 */
 static provider_attempt_t sse_try(void *ud, int retry, double left_sec, CURLcode *out_res,
-                                  long *out_http_code)
+                                  long *out_http_code, int *out_tmo)
 {
     sse_try_ctx_t *ctx = (sse_try_ctx_t *)ud;
 
@@ -298,13 +298,21 @@ static provider_attempt_t sse_try(void *ud, int retry, double left_sec, CURLcode
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, ctx->headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sse_write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, ctx->sse);
-    /* 首试给足全额预算；重试用整轮剩余墙钟，避免单次尝试越过总预算。 */
-    provider_http_setup(curl, retry == 0 ? ctx->timeout_sec : left_sec);
+    /* 首试给足全额预算；重试用整轮剩余墙钟，避免单次尝试越过总预算。
+     * 读空闲闸门与总预算分立：上游持续吐字时不触发 idle 超时。 */
+    double budget = retry == 0 ? ctx->timeout_sec : left_sec;
+    provider_http_setup(curl, budget, PROVIDER_READ_IDLE_SEC);
 
     CURLcode res = curl_easy_perform(curl);
     /* 失败路径也要取码：上游先回状态码再断流时，收尾要按状态码打印错误体
      * 并归类（与 http_try 只在成功时取码不同）。 */
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, out_http_code);
+    if (res == CURLE_OPERATION_TIMEDOUT) {
+        prov_tmo_t kind = provider_tmo_class(curl, budget);
+        *out_tmo = (int)kind;
+        if (kind != PROV_TMO_KIND_N)
+            prov_stat_hit(kind);
+    }
     curl_easy_cleanup(curl);
 
     *out_res = res;
@@ -336,8 +344,8 @@ static void sse_reset(void *ud)
  * 钩子。资源（line_buf/raw_buf）由公开入口持有，本函数任何路径不释放。 */
 static int provider_stream_post(const char *url, struct curl_slist *headers, const char *body,
                                 double timeout_sec, int max_retries,
-                                provider_retry_class_t retry_class, sse_stream_ctx_t *sse,
-                                long *out_http_code)
+                                provider_retry_class_t retry_class, int idempotent,
+                                sse_stream_ctx_t *sse, long *out_http_code)
 {
     sse_try_ctx_t ctx = {
         .url = url,
@@ -352,6 +360,7 @@ static int provider_stream_post(const char *url, struct curl_slist *headers, con
         .timeout_sec = timeout_sec,
         .max_retries = max_retries,
         .retry_class = retry_class,
+        .idempotent = idempotent,
         .attempt = sse_try,
         .gate = sse_gate,
         .reset = sse_reset,
@@ -360,7 +369,8 @@ static int provider_stream_post(const char *url, struct curl_slist *headers, con
 
     CURLcode res = CURLE_OK;
     long http_code = 0;
-    int rc = provider_retry_run(&cfg, &res, &http_code);
+    int tmo = (int)PROV_TMO_KIND_N;
+    int rc = provider_retry_run(&cfg, &res, &http_code, &tmo);
     if (rc != AIRY_OK)
         return rc;
 
@@ -382,8 +392,17 @@ static int provider_stream_post(const char *url, struct curl_slist *headers, con
     }
 
     if (res != CURLE_OK) {
-        SVC_LOG_WARN("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d diag=%s curl_error=%s", url,
-                     errno, provider_http_diag(res), curl_easy_strerror(res));
+        SVC_LOG_WARN("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d diag=%s curl_error=%s "
+                     "tmo=%d",
+                     url, errno, provider_http_diag(res), curl_easy_strerror(res), tmo);
+        /* 传输层超时三拆：读空闲停摆报 STREAM_STALL（上游仍在线但不再吐字），
+         * 整轮预算耗尽报 ETIMEDOUT（再等也无意义），其余保持 IO。 */
+        if (res == CURLE_OPERATION_TIMEDOUT) {
+            if (tmo == (int)PROV_TMO_STALL)
+                return AIRY_ERR_LLM_STREAM_STALL;
+            if (tmo == (int)PROV_TMO_TOTAL)
+                return AIRY_ETIMEDOUT;
+        }
         return AIRY_ERR_IO;
     }
 
@@ -422,7 +441,7 @@ static int provider_stream_post(const char *url, struct curl_slist *headers, con
 
 static int stream_entry(const char *url, struct curl_slist *headers, const char *body,
                         double timeout_sec, int max_retries,
-                        provider_retry_class_t retry_class,
+                        provider_retry_class_t retry_class, int idempotent,
                         provider_stream_chunk_cb_t on_chunk,
                         provider_sse_event_cb_t on_event, void *user_data,
                         long *out_http_code)
@@ -444,27 +463,27 @@ static int stream_entry(const char *url, struct curl_slist *headers, const char 
     }
 
     int ret = provider_stream_post(url, headers, body, timeout_sec, max_retries, retry_class,
-                                   &sse, out_http_code);
+                                   idempotent, &sse, out_http_code);
     sse_ctx_destroy(&sse);
     return ret;
 }
 
 int provider_http_post_stream(const char *url, struct curl_slist *headers, const char *body,
                               double timeout_sec, int max_retries,
-                              provider_retry_class_t retry_class,
+                              provider_retry_class_t retry_class, int idempotent,
                               provider_stream_chunk_cb_t on_chunk, void *chunk_user_data,
                               long *out_http_code)
 {
-    return stream_entry(url, headers, body, timeout_sec, max_retries, retry_class,
+    return stream_entry(url, headers, body, timeout_sec, max_retries, retry_class, idempotent,
                         on_chunk, NULL, chunk_user_data, out_http_code);
 }
 
 int provider_http_post_stream_sse(const char *url, struct curl_slist *headers, const char *body,
                                   double timeout_sec, int max_retries,
-                                  provider_retry_class_t retry_class,
+                                  provider_retry_class_t retry_class, int idempotent,
                                   provider_sse_event_cb_t on_event, void *event_user_data,
                                   long *out_http_code)
 {
-    return stream_entry(url, headers, body, timeout_sec, max_retries, retry_class,
+    return stream_entry(url, headers, body, timeout_sec, max_retries, retry_class, idempotent,
                         NULL, on_event, event_user_data, out_http_code);
 }
