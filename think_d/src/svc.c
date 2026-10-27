@@ -24,6 +24,7 @@
 #include "think_d_internal.h"
 #include "lang/lang_svc.h"
 #include "review/review_svc.h"
+#include "service/think_evolve.h"
 #include "platform.h"
 #include "svc_logger.h"
 #include "svc_model_defaults.h"
@@ -264,8 +265,6 @@ int svc_prepare(const char *config_path)
 
 int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 {
-    (void)driver;
-
     /* 0.1.19 §7.2 不变式 3：启动期依赖检查（governance 面职责）。缓存 SD
      * 探测句柄（RPC 域健康面共用），此处经 SD 探测声明的硬依赖；required
      * 缺失时 WARN + hall issue 事件显式上报，禁止静默 ready。 */
@@ -276,6 +275,11 @@ int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
         daemon_dep_probe(&deps, g_sdh) == AIRY_SUCCESS) {
         (void)daemon_dep_report(&deps, "think_d");
     }
+
+    /* 0.1.20 W4：演化观测面采样（A6 monitoring 救活）。挂载失败只降级观测，
+     * 不阻断推理主链。 */
+    if (think_evolve_start(driver, g_svc) != 0)
+        SVC_LOG_WARN("think_evolve_start failed, evolution metrics unavailable");
     return 0;
 }
 
