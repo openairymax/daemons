@@ -57,6 +57,18 @@ static int stream_integrity(const llm_response_t *resp)
     return AIRY_OK;
 }
 
+/* D2-9：端点容量随响应回传。仅在探测成功（props_state=1）时盖章，未探测
+ * 端点保持 0——客户端按存在性门控，不猜默认值。 */
+static void resp_stamp_capacity(llm_response_t *resp, const provider_base_ctx_t *base)
+{
+    if (!resp || !base || base->props_state != 1)
+        return;
+    if (base->n_ctx_slot > 0)
+        resp->context_window = (uint32_t)base->n_ctx_slot;
+    if (base->total_slots > 0)
+        resp->total_slots = (uint32_t)base->total_slots;
+}
+
 int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
                              const llm_request_config_t *manager, llm_response_t **out_response)
 {
@@ -125,6 +137,7 @@ int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
     provider_http_resp_free(http_resp);
 
     if (ret == AIRY_OK && *out_response) {
+        resp_stamp_capacity(*out_response, base);
         SVC_LOG_INFO("C-L02: %s: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
                      "http_code=%ld",
                      ops->tag, (*out_response)->model ? (*out_response)->model : model,
@@ -208,6 +221,7 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
     }
 
     if (resp) {
+        resp_stamp_capacity(resp, base);
         SVC_LOG_INFO("C-L02: %s: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
                      "http_code=%ld",
                      ops->tag, resp->model ? resp->model : model, resp->prompt_tokens,

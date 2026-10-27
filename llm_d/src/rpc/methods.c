@@ -497,14 +497,20 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
         if (resp->finish_reason)
             snprintf(fr_seg, sizeof(fr_seg), ",\"finish_reason\":\"%s\"",
                      resp->finish_reason);
-        char usage_frame[320];
+        /* D2-9 容量回显：未探测端点整段缺席（客户端按存在性门控）。 */
+        char cap_seg[96] = "";
+        if (resp->context_window || resp->total_slots)
+            snprintf(cap_seg, sizeof(cap_seg),
+                     ",\"capacity\":{\"context_window\":%u,\"total_slots\":%u}",
+                     resp->context_window, resp->total_slots);
+        char usage_frame[400];
         int ufn = snprintf(usage_frame, sizeof(usage_frame),
                            "\x1eU{\"prompt_tokens\":%u,\"completion_tokens\":%u,"
                            "\"total_tokens\":%u,\"reasoning_tokens\":%u,"
-                           "\"cached_tokens\":%u,\"cost_usd\":%.8f%s}\x1e",
+                           "\"cached_tokens\":%u,\"cost_usd\":%.8f%s%s}\x1e",
                            resp->prompt_tokens, resp->completion_tokens, resp->total_tokens,
                            resp->reasoning_tokens, resp->cached_tokens, resp->cost_usd,
-                           fr_seg);
+                           fr_seg, cap_seg);
         if (ufn > 0)
             llm_stream_send_all(fd, usage_frame, (size_t)ufn);
         llm_response_free(resp);
