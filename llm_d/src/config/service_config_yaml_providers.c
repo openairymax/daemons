@@ -164,12 +164,19 @@ static local_caps_t svc_derive_caps(const char *kind)
         /* T2：prompt 缓存与槽位亲和为 llama-server 原生语义，仅此族下发。 */
         caps.accepts_cache_prompt = true;
         caps.accepts_slot_id = true;
+        /* C3：chat_template_kwargs 模板变量透传（思考段开关/预算）。 */
+        caps.accepts_enable_thinking = true;
+        caps.accepts_thinking_budget = true;
     } else if (strcmp(kind, "ollama") == 0) {
         caps.accepts_seed = true;
         caps.accepts_num_ctx = true;
     } else if (strcmp(kind, "vllm") == 0 || strcmp(kind, "openai") == 0) {
         caps.accepts_seed = true;
         caps.accepts_response_format = true;
+        /* C3：vLLM 原生支持 chat_template_kwargs；openai 族（网关透传）
+         * 同线格式，位由后端实际模型裁决。 */
+        caps.accepts_enable_thinking = true;
+        caps.accepts_thinking_budget = true;
     }
     return caps;
 }

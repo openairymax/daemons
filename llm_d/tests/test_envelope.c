@@ -45,6 +45,8 @@ static void caps_all(local_caps_t *caps, int on)
     caps->accepts_grammar = on;
     caps->accepts_response_format = on;
     caps->accepts_num_ctx = on;
+    caps->accepts_enable_thinking = on;
+    caps->accepts_thinking_budget = on;
 }
 
 static void fill_optional(llm_request_config_t *cfg)
@@ -267,6 +269,66 @@ static void test_t2_slot_id_sentinel(void)
     cJSON_Delete(root);
 }
 
+/* C3 thinking 控制：哨兵位 + 能力位四态。未显式设置不下发（显式值
+ * 也被丢弃）；显式设置时 false 合法可表达；budget 零值 = 未设置；
+ * 两位部分置位时只发位真一侧，容器合流不重复。 */
+static void test_c3_thinking_sentinel(void)
+{
+    llm_request_config_t cfg;
+    local_caps_t caps;
+
+    /* 位假 + 显式请求：整体不得漏出。 */
+    memset(&cfg, 0, sizeof(cfg));
+    memset(&caps, 0, sizeof(caps));
+    caps.accepts_seed = 1;
+    cfg.thinking_set = true;
+    cfg.enable_thinking = false;
+    cfg.thinking_budget = 128u;
+    cfg.caps = caps;
+    cJSON *root = cJSON_CreateObject();
+    check_true("c3.root", root != NULL);
+    if (!root)
+        return;
+    provider_request_params_fill(root, &cfg, NULL, 0, "stop");
+    check_absent(root, "chat_template_kwargs", "c3.gate_off withheld");
+    cJSON_Delete(root);
+
+    /* 位真 + 显式 false：合法下发（门禁路径的核心语义）。 */
+    memset(&cfg, 0, sizeof(cfg));
+    memset(&caps, 0, sizeof(caps));
+    caps.accepts_enable_thinking = 1;
+    caps.accepts_thinking_budget = 1;
+    cfg.thinking_set = true;
+    cfg.enable_thinking = false;
+    cfg.thinking_budget = 128u;
+    cfg.caps = caps;
+    root = cJSON_CreateObject();
+    check_true("c3.root2", root != NULL);
+    if (!root)
+        return;
+    provider_request_params_fill(root, &cfg, NULL, 0, "stop");
+    cJSON *ctk = cJSON_GetObjectItem(root, "chat_template_kwargs");
+    cJSON *en = ctk ? cJSON_GetObjectItem(ctk, "enable_thinking") : NULL;
+    cJSON *bud = ctk ? cJSON_GetObjectItem(ctk, "thinking_budget") : NULL;
+    check_true("c3.explicit_false_sent", cJSON_IsBool(en) && cJSON_IsFalse(en));
+    check_true("c3.budget_sent", cJSON_IsNumber(bud) && bud->valuedouble == 128.0);
+    cJSON_Delete(root);
+
+    /* 位真 + 未显式设置：旧请求体等价（容器不创建）。 */
+    memset(&cfg, 0, sizeof(cfg));
+    memset(&caps, 0, sizeof(caps));
+    caps.accepts_enable_thinking = 1;
+    caps.accepts_thinking_budget = 1;
+    cfg.caps = caps;
+    root = cJSON_CreateObject();
+    check_true("c3.root3", root != NULL);
+    if (!root)
+        return;
+    provider_request_params_fill(root, &cfg, NULL, 0, "stop");
+    check_absent(root, "chat_template_kwargs", "c3.unset withheld");
+    cJSON_Delete(root);
+}
+
 int main(void)
 {
     printf("running C11 envelope params contract regression\n");
@@ -277,6 +339,7 @@ int main(void)
     test_t2_cache_prompt();
     test_t2_caps_off();
     test_t2_slot_id_sentinel();
+    test_c3_thinking_sentinel();
 
     if (fail_count == 0) {
         printf("All %d envelope assertions passed\n", test_count);
