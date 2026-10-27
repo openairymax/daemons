@@ -46,12 +46,14 @@ typedef struct provider_rate_limiter {
 void provider_rl_init(provider_rate_limiter_t *rl);
 void provider_rl_destroy(provider_rate_limiter_t *rl);
 
-/* 带 RPM 限流检查与 429/5xx 退避重试的 HTTP POST。base 提供超时与
- * 重试预算，rl 提供限流状态；传输层瞬时故障（DNS/连接/TLS/超时）
- * 的重试仍由 provider_http_post 负责，两层职责正交。 */
+/* 带 RPM 限流检查与 429/5xx 退避重试的 HTTP POST。timeout_sec 为整轮预算
+ * （0 = 用 base 的预算），idempotent 决定传输层失败可否重试；rl 提供限流
+ * 状态。传输层瞬时故障（DNS/连接/TLS/超时）的重试仍由 provider_http_post
+ * 负责，两层职责正交。 */
 int provider_http_request_with_retry(provider_base_ctx_t *base, provider_rate_limiter_t *rl,
                                      const char *url, struct curl_slist *headers,
-                                     const char *body, long *out_http_code,
+                                     const char *body, double timeout_sec, int idempotent,
+                                     long *out_http_code,
                                      provider_http_resp_t **out_response);
 
 #ifdef __cplusplus

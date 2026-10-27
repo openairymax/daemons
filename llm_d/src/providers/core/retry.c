@@ -51,6 +51,28 @@ static int retry_in_class(CURLcode code, provider_retry_class_t cls)
            code == CURLE_COULDNT_CONNECT;
 }
 
+/* 请求必然未送达的失败形态：DNS 解析、TCP 连接、TLS 握手。这些与幂等性
+ * 无关——上游没有任何机会产生副作用。 */
+static int pre_send_fail(CURLcode code)
+{
+    return code == CURLE_COULDNT_RESOLVE_PROXY || code == CURLE_COULDNT_RESOLVE_HOST ||
+           code == CURLE_COULDNT_CONNECT || code == CURLE_SSL_CONNECT_ERROR;
+}
+
+/* 重试矩阵（方案 §5.2b.10）：连接阶段失败或超时说明请求未送达，恒可重试；
+ * 总预算耗尽永不重试（再试只是把同一份预算再耗一次）；中途停摆与收发中断
+ * 无法证明上游未产生副作用，仅幂等请求（temperature==0 且 seed 固定）重试。 */
+static int retry_allowed(const provider_retry_cfg_t *cfg, CURLcode res, int tmo)
+{
+    if (res == CURLE_OPERATION_TIMEDOUT && tmo == (int)PROV_TMO_CONNECT)
+        return 1;
+    if (!retry_in_class(res, cfg->retry_class))
+        return 0;
+    if (res == CURLE_OPERATION_TIMEDOUT)
+        return tmo != (int)PROV_TMO_TOTAL && cfg->idempotent;
+    return pre_send_fail(res) || cfg->idempotent;
+}
+
 uint32_t provider_backoff_ms(int attempt)
 {
     uint32_t backoff = PROVIDER_RETRY_BASE_MS;
@@ -79,7 +101,8 @@ int provider_retry_budget_ok(double timeout_sec, uint64_t start_ms, uint32_t del
     return left * 1000.0 >= (double)delay_ms + (double)PROVIDER_RETRY_MIN_LEFT_MS;
 }
 
-int provider_retry_run(const provider_retry_cfg_t *cfg, CURLcode *out_res, long *out_http_code)
+int provider_retry_run(const provider_retry_cfg_t *cfg, CURLcode *out_res, long *out_http_code,
+                       int *out_tmo)
 {
     if (!cfg || !cfg->attempt || !cfg->url || !cfg->tag || !out_res || !out_http_code) {
         errno = EINVAL;
@@ -87,30 +110,37 @@ int provider_retry_run(const provider_retry_cfg_t *cfg, CURLcode *out_res, long 
     }
 
     int max_retries = cfg->max_retries > 0 ? cfg->max_retries : 0;
+    int local = cfg->retry_class == PROVIDER_RETRY_CONNECT_ONLY;
+    /* 重试预算由装配点定稿（本地端点已在 local_init 收窄为一次），此处只读，
+     * 不再二次裁决；本地退避用短固定值，避免首屏等待被指数退避拉长。 */
+
     uint64_t start_ms = airy_time_ms();
     CURLcode res = CURLE_OK;
     long http_code = 0;
+    int tmo = (int)PROV_TMO_KIND_N;
 
     for (int retry = 0; retry <= max_retries; retry++) {
         double left = provider_left_sec(cfg->timeout_sec, start_ms);
 
-        provider_attempt_t st = cfg->attempt(cfg->ud, retry, left, &res, &http_code);
+        tmo = (int)PROV_TMO_KIND_N;
+        provider_attempt_t st = cfg->attempt(cfg->ud, retry, left, &res, &http_code, &tmo);
         if (st == PROVIDER_TRY_FATAL)
             return AIRY_ERR_UNKNOWN;
         if (st == PROVIDER_TRY_DONE)
             break;
 
-        int retryable = retry_in_class(res, cfg->retry_class);
+        int retryable = retry_allowed(cfg, res, tmo);
         if (retry >= max_retries || !retryable ||
             (cfg->gate && !cfg->gate(cfg->ud, res, http_code))) {
             SVC_LOG_WARN("C-L02: PROVIDER: %s-NORETRY url=%s errno=%d attempts=%d/%d "
-                         "http_code=%ld diag=%s curl_error=%s retryable=%d",
+                         "http_code=%ld diag=%s curl_error=%s retryable=%d tmo=%d idem=%d",
                          cfg->tag, cfg->url, errno, retry + 1, max_retries + 1, http_code,
-                         provider_http_diag(res), curl_easy_strerror(res), retryable);
+                         provider_http_diag(res), curl_easy_strerror(res), retryable, tmo,
+                         cfg->idempotent);
             break;
         }
 
-        uint32_t delay_ms = provider_backoff_ms(retry);
+        uint32_t delay_ms = local ? (uint32_t)PROVIDER_RETRY_LOCAL_MS : provider_backoff_ms(retry);
         if (!provider_retry_budget_ok(cfg->timeout_sec, start_ms, delay_ms)) {
             SVC_LOG_WARN("C-L02: PROVIDER: %s-STOP url=%s retry=%d/%d "
                          "reason=budget_spent left=%.1fs delay=%ums timeout=%.1fs",
@@ -132,5 +162,7 @@ int provider_retry_run(const provider_retry_cfg_t *cfg, CURLcode *out_res, long 
 
     *out_res = res;
     *out_http_code = http_code;
+    if (out_tmo)
+        *out_tmo = tmo;
     return AIRY_OK;
 }

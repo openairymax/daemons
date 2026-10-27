@@ -29,14 +29,14 @@ typedef int (*provider_sse_event_cb_t)(const char *event, const char *data, size
 /* 流式 POST·行协议：SSE data 行交付 on_chunk，"[DONE]" 置正常终止。 */
 int provider_http_post_stream(const char *url, struct curl_slist *headers, const char *body,
                               double timeout_sec, int max_retries,
-                              provider_retry_class_t retry_class,
+                              provider_retry_class_t retry_class, int idempotent,
                               provider_stream_chunk_cb_t on_chunk, void *chunk_user_data,
                               long *out_http_code);
 
 /* 流式 POST·具名事件：event:/data: 双行解析，事件名随载荷交付 on_event。 */
 int provider_http_post_stream_sse(const char *url, struct curl_slist *headers, const char *body,
                                   double timeout_sec, int max_retries,
-                                  provider_retry_class_t retry_class,
+                                  provider_retry_class_t retry_class, int idempotent,
                                   provider_sse_event_cb_t on_event, void *event_user_data,
                                   long *out_http_code);
 

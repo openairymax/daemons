@@ -38,6 +38,8 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/sse.c
     # B16-S3 c8：退避重试循环壳（与主目标 LLM_SERVICE_SOURCES 同步）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/retry.c
+    # 0.1.20 D2-9：传输超时分类计数与自动预算（与主目标同步）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/prov_stat.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/toolstream.c
     # B16-S3.3：通用 completion driver（与主目标 LLM_SERVICE_SOURCES 同步）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/providers/core/adapter.c
@@ -89,6 +91,8 @@ set(LLM_TEST_SOURCES
     test_prov_diag.c
     # 0.1.20 C11：请求信封参数段契约（caps 门控 / temperature 哨兵）回归
     test_envelope.c
+    # 0.1.20 D2-9：传输观测（超时分类计数 / p99 / 自动预算）回归
+    test_prov_stat.c
 )
 
 set(LLM_COMMON_INCLUDES

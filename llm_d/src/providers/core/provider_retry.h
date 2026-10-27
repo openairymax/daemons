@@ -18,6 +18,7 @@ extern "C" {
 #define PROVIDER_RETRY_MAX_MS 2000U
 #define PROVIDER_RETRY_JITTER_PCT 25U
 #define PROVIDER_RETRY_MIN_LEFT_MS 1000U /* 退避后仍须剩下的最小尝试窗口 */
+#define PROVIDER_RETRY_LOCAL_MS 500U     /* 本地端点重连：固定短退避 */
 
 int provider_retryable(CURLcode code);
 uint32_t provider_backoff_ms(int attempt);
@@ -31,7 +32,8 @@ typedef enum {
 } provider_attempt_t;
 
 typedef provider_attempt_t (*provider_attempt_fn)(void *ud, int retry, double left_sec,
-                                                  CURLcode *out_res, long *out_http_code);
+                                                  CURLcode *out_res, long *out_http_code,
+                                                  int *out_tmo);
 
 /* 附加重试闸门（非 0 = 允许重试）；流式用它表达"已下发字节即禁止重试"。可 NULL。 */
 typedef int (*provider_gate_fn)(void *ud, CURLcode res, long http_code);
@@ -44,14 +46,17 @@ typedef struct {
     double timeout_sec; /* 整轮重试的墙钟预算，非单次尝试预算 */
     int max_retries;    /* 额外重试次数（0 = 只尝试一次），负值按 0 处理 */
     provider_retry_class_t retry_class; /* 可重试类别收窄（策略面），缺省 DEFAULT */
+    int idempotent;          /* 1 = 重复投递语义等价；决定"可能已送达"的故障可否重发 */
     provider_attempt_fn attempt;
     provider_gate_fn gate;   /* 可 NULL */
     provider_reset_fn reset; /* 可 NULL */
     void *ud;
 } provider_retry_cfg_t;
 
-/* AIRY_OK = 循环正常结束（成败由 out_res/out_http_code 判定）；AIRY_ERR_UNKNOWN = attempt 报致命错误。 */
-int provider_retry_run(const provider_retry_cfg_t *cfg, CURLcode *out_res, long *out_http_code);
+/* AIRY_OK = 循环正常结束（成败由 out_res/out_http_code 判定）；AIRY_ERR_UNKNOWN = attempt 报致命错误。
+ * out_tmo 可 NULL，非 NULL 时回填最后一次尝试的超时归类（prov_tmo_t）。 */
+int provider_retry_run(const provider_retry_cfg_t *cfg, CURLcode *out_res, long *out_http_code,
+                       int *out_tmo);
 
 #ifdef __cplusplus
 }

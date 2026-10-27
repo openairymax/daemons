@@ -55,11 +55,10 @@ static size_t http_write_callback(void *contents, size_t size, size_t nmemb, voi
     return realsize;
 }
 
-/* 连接阶段默认超时（秒）。不设连接超时的后果是"网络总接不通"：DNS 无应答
- * 或 TCP SYN 被丢弃时，libcurl 会一直等到总超时（默认 70s）才放弃，用户看到
- * 的是一次请求长时间无响应。可按环境变量覆盖。 */
-#define PROVIDER_CONNECT_TIMEOUT_SEC 10L
-
+/* 连接阶段与读空闲的缺省值见 provider_transport.h。连接超时不设的后果是
+ * "网络总接不通"：DNS 无应答或 TCP SYN 被丢弃时 libcurl 会一直等到总预算
+ * 耗尽；读空闲不设的后果是"连接活着但上游不再产出"被当作成功回复——这是
+ * 比超时更难发现的一类错误。两者都可按环境变量覆盖。 */
 static const char *env_first_set(const char *const *names, size_t count)
 {
     for (size_t i = 0; i < count; ++i) {
@@ -70,26 +69,36 @@ static const char *env_first_set(const char *const *names, size_t count)
     return NULL;
 }
 
-void provider_http_setup(CURL *curl, double timeout_sec)
+static long env_long(const char *name, long def)
+{
+    const char *v = getenv(name);
+    if (!v || !v[0])
+        return def;
+    long parsed = strtol(v, NULL, 10);
+    return parsed > 0 ? parsed : def;
+}
+
+void provider_http_setup(CURL *curl, double timeout_sec, double read_idle_sec)
 {
     if (!curl)
         return;
 
     long total_sec = (long)timeout_sec;
-    long connect_sec = PROVIDER_CONNECT_TIMEOUT_SEC;
+    long connect_sec = env_long("AIRY_HTTP_CONNECT_TIMEOUT", (long)PROVIDER_CONNECT_TIMEOUT_SEC);
+    double idle = read_idle_sec > 0.0 ? read_idle_sec : PROVIDER_READ_IDLE_SEC;
+    long idle_sec = env_long("AIRY_HTTP_READ_IDLE", (long)idle);
 
-    const char *env_connect = getenv("AIRY_HTTP_CONNECT_TIMEOUT");
-    if (env_connect && env_connect[0]) {
-        long v = strtol(env_connect, NULL, 10);
-        if (v > 0)
-            connect_sec = v;
-    }
     if (total_sec > 0 && connect_sec >= total_sec)
         connect_sec = total_sec > 1 ? total_sec - 1 : 1;
+    /* 读空闲须严格早于总预算，否则停滞永远由总预算先判定，STALL 计数失效。 */
+    if (total_sec > 0 && idle_sec >= total_sec)
+        idle_sec = total_sec > 1 ? total_sec - 1 : 1;
 
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, total_sec);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, connect_sec);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, idle_sec);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
@@ -133,6 +142,29 @@ const char *provider_http_diag(CURLcode code)
     }
 }
 
+/* 超时三拆的传输侧判据。连接从未建立（CONNECT_TIME 为 0）说明请求未送达，
+ * 可安全重试；总耗时已贴近整轮预算说明是预算不足而非上游停摆；其余情形为
+ * 连接已建立但上游停止产出。用 double 版 CURLINFO 而非 _TIME_T 版，兼容旧
+ * libcurl 与三端构建。 */
+prov_tmo_t provider_tmo_class(CURL *curl, double budget_sec)
+{
+    if (!curl)
+        return PROV_TMO_KIND_N;
+
+    double total = 0.0;
+    double connect = 0.0;
+    if (curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total) != CURLE_OK)
+        total = 0.0;
+    if (curl_easy_getinfo(curl, CURLINFO_CONNECT_TIME, &connect) != CURLE_OK)
+        connect = 0.0;
+
+    if (connect <= 0.0)
+        return PROV_TMO_CONNECT;
+    if (budget_sec > 0.0 && total >= budget_sec - 1.0)
+        return PROV_TMO_TOTAL;
+    return PROV_TMO_STALL;
+}
+
 /* 非流式单次尝试的上下文：写回调绑定到响应缓冲。 */
 typedef struct {
     const char *url;
@@ -143,7 +175,7 @@ typedef struct {
 } http_try_ctx_t;
 
 static provider_attempt_t http_try(void *ud, int retry, double left_sec, CURLcode *out_res,
-                                   long *out_http_code)
+                                   long *out_http_code, int *out_tmo)
 {
     http_try_ctx_t *ctx = (http_try_ctx_t *)ud;
 
@@ -162,11 +194,18 @@ static provider_attempt_t http_try(void *ud, int retry, double left_sec, CURLcod
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, ctx->resp);
     /* 首试给足全额预算；重试用整轮剩余墙钟，避免单次尝试越过总预算。 */
-    provider_http_setup(curl, retry == 0 ? ctx->timeout_sec : left_sec);
+    double budget = retry == 0 ? ctx->timeout_sec : left_sec;
+    provider_http_setup(curl, budget, PROVIDER_READ_IDLE_SEC);
 
     CURLcode res = curl_easy_perform(curl);
     if (res == CURLE_OK)
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, out_http_code);
+    if (res == CURLE_OPERATION_TIMEDOUT) {
+        prov_tmo_t kind = provider_tmo_class(curl, budget);
+        *out_tmo = (int)kind;
+        if (kind != PROV_TMO_KIND_N)
+            prov_stat_hit(kind);
+    }
     curl_easy_cleanup(curl);
 
     *out_res = res;
@@ -185,7 +224,7 @@ static void http_try_reset(void *ud)
 
 int provider_http_post(const char *url, struct curl_slist *headers, const char *body,
                        double timeout_sec, int max_retries, provider_retry_class_t retry_class,
-                       provider_http_resp_t **out_response, long *out_http_code)
+                       int idempotent, provider_http_resp_t **out_response, long *out_http_code)
 {
     if (!url || !body || !out_response || !out_http_code) {
         errno = EINVAL;
@@ -209,6 +248,7 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
         .timeout_sec = timeout_sec,
         .max_retries = max_retries,
         .retry_class = retry_class,
+        .idempotent = idempotent,
         .attempt = http_try,
         .gate = NULL,
         .reset = http_try_reset,
@@ -217,10 +257,20 @@ int provider_http_post(const char *url, struct curl_slist *headers, const char *
 
     CURLcode res = CURLE_OK;
     long http_code = 0;
-    int rc = provider_retry_run(&cfg, &res, &http_code);
+    int tmo = (int)PROV_TMO_KIND_N;
+    int rc = provider_retry_run(&cfg, &res, &http_code, &tmo);
     if (rc != AIRY_OK || res != CURLE_OK) {
         provider_http_resp_free(resp);
-        return rc != AIRY_OK ? rc : AIRY_ERR_IO;
+        if (rc != AIRY_OK)
+            return rc;
+        if (res != CURLE_OPERATION_TIMEDOUT)
+            return AIRY_ERR_IO;
+        /* 停摆可被上层按幂等性重试；总预算耗尽不可重试；连接未建立按 I/O 处理。 */
+        if (tmo == (int)PROV_TMO_STALL)
+            return AIRY_ERR_LLM_STREAM_STALL;
+        if (tmo == (int)PROV_TMO_TOTAL)
+            return AIRY_ETIMEDOUT;
+        return AIRY_ERR_IO;
     }
 
     *out_response = resp;
@@ -277,7 +327,7 @@ int provider_http_get(const char *url, struct curl_slist *headers, double timeou
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, resp);
-    provider_http_setup(curl, timeout_sec);
+    provider_http_setup(curl, timeout_sec, PROVIDER_READ_IDLE_SEC);
 
     CURLcode res = curl_easy_perform(curl);
     long http_code = 0;
@@ -399,6 +449,17 @@ static struct curl_slist *provider_headers_build(const provider_base_ctx_t *base
     return headers;
 }
 
+double provider_budget_sec(const provider_base_ctx_t *base)
+{
+    if (!base)
+        return PROVIDER_READ_IDLE_SEC;
+    /* timeout_sec 为 0（自动预算端点）或 timeout_auto 置位时，均由实测
+     * 时延 p99 推导；两者是同一条规则的两种表达，此处一并兜住。 */
+    if (base->timeout_auto || base->timeout_sec <= 0.0)
+        return prov_tmo_auto(base->name);
+    return base->timeout_sec;
+}
+
 int provider_http_exec(const provider_request_t *req, provider_http_resp_t **out_response,
                        long *out_http_code)
 {
@@ -418,21 +479,23 @@ int provider_http_exec(const provider_request_t *req, provider_http_resp_t **out
 
     struct curl_slist *headers = provider_headers_build(req->base, req->headers);
 
+    /* 预算由请求侧决定（适配层按时延 p99 推导），未声明则回落 provider 预算。 */
+    double budget = req->timeout_sec > 0.0 ? req->timeout_sec : provider_budget_sec(req->base);
     int rc;
     if (req->on_event) {
-        rc = provider_http_post_stream_sse(url, headers, req->body, req->base->timeout_sec,
-                                           req->base->max_retries, req->base->retry_class,
-                                           req->on_event, req->user_data, out_http_code);
+        rc = provider_http_post_stream_sse(url, headers, req->body, budget, req->base->max_retries,
+                                           req->base->retry_class, req->idempotent, req->on_event,
+                                           req->user_data, out_http_code);
     } else if (req->on_chunk) {
-        rc = provider_http_post_stream(url, headers, req->body, req->base->timeout_sec,
-                                       req->base->max_retries, req->base->retry_class,
-                                       req->on_chunk, req->user_data, out_http_code);
+        rc = provider_http_post_stream(url, headers, req->body, budget, req->base->max_retries,
+                                       req->base->retry_class, req->idempotent, req->on_chunk,
+                                       req->user_data, out_http_code);
     } else if (req->rl) {
-        rc = provider_http_request_with_retry(req->base, req->rl, url, headers, req->body,
-                                              out_http_code, out_response);
+        rc = provider_http_request_with_retry(req->base, req->rl, url, headers, req->body, budget,
+                                              req->idempotent, out_http_code, out_response);
     } else {
-        rc = provider_http_post(url, headers, req->body, req->base->timeout_sec,
-                                req->base->max_retries, req->base->retry_class, out_response,
+        rc = provider_http_post(url, headers, req->body, budget, req->base->max_retries,
+                                req->base->retry_class, req->idempotent, out_response,
                                 out_http_code);
     }
 
