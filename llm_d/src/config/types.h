@@ -62,6 +62,13 @@ typedef struct {
     /* 端点附加头（model.yaml extra_headers）：线格式必需但非厂商无关的头，
      * 如 Messages 的协议版本，多条以 ';' 或换行分隔。 */
     char extra_headers[192];
+    /* A7-4（0.1.20）声明面三键：托管归属（managed|external，值域外拒载）、
+     * 托管工件路径（gguf）、请求体能力位显式覆盖（8 裸名子映射，与
+     * svc_derive_caps 派生值合并时以显式声明为最高权威）。 */
+    char provision[8];
+    char artifact[256];
+    local_caps_t caps_override;
+    int has_caps;
 } model_entry_t;
 
 typedef struct {
@@ -98,6 +105,10 @@ typedef struct {
     char api_format[16];
     char endpoint_kind[16];
     char extra_headers[256];
+    /* A7-4：能力位覆盖取首个显式声明的模型行（与 api_format 聚合惯例
+     * 同构）；has_caps=0 时导出面回落 svc_derive_caps 派生。 */
+    local_caps_t caps_override;
+    int has_caps;
 } provider_agg_t;
 
 /* YAML 装载结果：models[] 行解析结果 + providers 段声明。由

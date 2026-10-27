@@ -100,6 +100,9 @@ set(LLM_TEST_SOURCES
     test_prov_stat.c
     # 0.1.20 D2-10：配置热重载（drain/世代/退休表/退避）回归
     test_service_reload.c
+    # 0.1.20 B-A7 A7-4：声明面（provision/artifact/capabilities 覆盖 +
+    # 未知键 fail-closed）回归
+    test_config_decl.c
 )
 
 set(LLM_COMMON_INCLUDES

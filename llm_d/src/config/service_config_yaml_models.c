@@ -116,6 +116,82 @@ static int svc_yaml_truthy(const char *v)
     return strcasecmp(v, "true") == 0 || strcmp(v, "1") == 0 || strcasecmp(v, "yes") == 0;
 }
 
+/* A7-4（0.1.20）声明面：models[] 行的已知键全集 = 字段表 14 键 + 路由与
+ * 身份 8 键 + capabilities。行内出现集合外键即拒载（fail-closed：错拼的
+ * 声明宁可丢行，不可静默失明）。providers 段不加此约束，存量声明不受影响。 */
+static int svc_yaml_key_known(const char *key)
+{
+    static const char *const extra[] = {"name",     "model_id",  "provider",
+                                        "api_key_env", "endpoint",  "base_url",
+                                        "provision",   "artifact",  "capabilities"};
+    for (size_t i = 0; i < sizeof(extra) / sizeof(extra[0]); ++i)
+        if (strcmp(key, extra[i]) == 0) return 1;
+    for (size_t i = 0; i < sizeof(svc_yaml_fields) / sizeof(svc_yaml_fields[0]); ++i)
+        if (strcmp(key, svc_yaml_fields[i].key) == 0) return 1;
+    return 0;
+}
+
+static int svc_yaml_row_known(struct yaml_node *item)
+{
+    if (item->type != YAML_NODE_MAPPING)
+        return 0;
+    for (struct yaml_mapping_entry *e = item->mapping; e && e->key; ++e)
+        if (!svc_yaml_key_known(e->key))
+            return 0;
+    return 1;
+}
+
+/* capabilities 子映射的 8 个裸名 → local_caps_t 位。 */
+#define CAPB(k, f) { k, offsetof(local_caps_t, f) }
+static const struct {
+    const char *key;
+    unsigned off;
+} svc_caps_bits[] = {
+    CAPB("seed", accepts_seed),
+    CAPB("grammar", accepts_grammar),
+    CAPB("num_ctx", accepts_num_ctx),
+    CAPB("response_format", accepts_response_format),
+    CAPB("cache_prompt", accepts_cache_prompt),
+    CAPB("slot_id", accepts_slot_id),
+    CAPB("enable_thinking", accepts_enable_thinking),
+    CAPB("thinking_budget", accepts_thinking_budget),
+};
+
+/* 声明三键落盘：provision 值域 managed|external、artifact 标量路径、
+ * capabilities 子映射（裸名外键 / 非映射 / 非标量值即非法）。返回 -1 拒载。 */
+static int svc_yaml_decl_apply(model_entry_t *m, struct yaml_node *item)
+{
+    const char *pv = svc_yaml_item_str(item, "provision");
+    if (pv && pv[0]) {
+        if (strcmp(pv, "managed") != 0 && strcmp(pv, "external") != 0)
+            return -1;
+        AIRY_STRNCPY_TERM(m->provision, pv, sizeof(m->provision));
+    }
+    const char *art = svc_yaml_item_str(item, "artifact");
+    if (art && art[0])
+        AIRY_STRNCPY_TERM(m->artifact, art, sizeof(m->artifact));
+
+    struct yaml_node *caps = yaml_get(item, "capabilities");
+    if (!caps)
+        return 0;
+    if (caps->type != YAML_NODE_MAPPING)
+        return -1;
+    for (struct yaml_mapping_entry *e = caps->mapping; e && e->key; ++e) {
+        size_t b = 0;
+        for (; b < sizeof(svc_caps_bits) / sizeof(svc_caps_bits[0]); ++b)
+            if (strcmp(e->key, svc_caps_bits[b].key) == 0)
+                break;
+        if (b == sizeof(svc_caps_bits) / sizeof(svc_caps_bits[0]))
+            return -1;
+        const char *v = yaml_as_string(e->value, NULL);
+        if (!v)
+            return -1;
+        *(bool *)((char *)&m->caps_override + svc_caps_bits[b].off) = (bool)svc_yaml_truthy(v);
+    }
+    m->has_caps = 1;
+    return 0;
+}
+
 /* 按表把 item 中的标量逐字段落盘；键缺失即保持 memset 后的默认值。 */
 static void svc_yaml_apply(model_entry_t *m, struct yaml_node *item)
 {
@@ -160,21 +236,24 @@ static void svc_yaml_route(model_entry_t *m, struct yaml_node *item, size_t row)
 }
 
 /* models[] 的一行 → st->models[64]。v2 表格格式：name=展示名 /
- * model_id=模型名；provider 缺省退回 name。模型名与 provider 缺一丢行。 */
+ * model_id=模型名；provider 缺省退回 name。模型名与 provider 缺一丢行；
+ * 未知键 / provision 值域外 / capabilities 结构非法同样丢行（A7-4）。 */
 static void svc_yaml_parse_model(svc_yaml_state_t *st, struct yaml_node *item)
 {
     if (st->model_count >= 64)
         return;
-    model_entry_t *m = &st->models[st->model_count];
     const char *n = svc_yaml_item_str(item, "name");
     const char *mid = svc_yaml_item_str(item, "model_id");
     const char *p = svc_yaml_item_str(item, "provider");
     const char *mn = (mid && mid[0]) ? mid : n;
     const char *pn = p ? p : n;
     if (!(mn && mn[0] && pn && pn[0])) return;
+    if (!svc_yaml_row_known(item)) return;
+    model_entry_t *m = &st->models[st->model_count];
     __builtin_memset(m, 0, sizeof(*m));
     AIRY_STRNCPY_TERM(m->name, mn, sizeof(m->name));
     AIRY_STRNCPY_TERM(m->provider, pn, sizeof(m->provider));
+    if (svc_yaml_decl_apply(m, item) != 0) return;
     svc_yaml_route(m, item, st->model_count);
     svc_yaml_apply(m, item);
     st->model_count++;
