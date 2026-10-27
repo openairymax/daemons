@@ -88,6 +88,8 @@ set(LLM_SERVICE_SOURCES
     src/router/core/llm_failover.c
     # 0.1.19 §3.8.2：端点健康面（熔断三态 + 半开探测）
     src/router/core/llm_health.c
+    # 0.1.20 D2-3：健康面持久化（router.state，重启恢复熔断状态）
+    src/router/core/router_state.c
     # sec44-D：四策略母件化合一（骨架机制 + 四选择规则，379→195 行）
     src/router/strategy/router_strategy.c
     # 注入 atoms 侧 LLM ops 抽象表（服务实现在本库，表存储在 airy_llm_ops）

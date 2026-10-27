@@ -61,6 +61,8 @@ set(LLM_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/core/llm_failover.c
     # 0.1.19 §3.8.2：端点健康面（与主目标同步）
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/core/llm_health.c
+    # 0.1.20 D2-3：健康面持久化（与主目标同步）
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/core/router_state.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/router/strategy/router_strategy.c
 )
 
