@@ -29,11 +29,18 @@ typedef struct model_cost {
     struct model_cost *next;
 } model_cost_t;
 
+/* 落盘窗口：任一条满足即写。两个阈值共同界定崩溃时的最大计费损失。 */
+#define COST_FLUSH_MS 1000u
+#define COST_FLUSH_OPS 64u
+
 struct cost_tracker {
     pricing_rule_t *rules;
     int rule_count;
     model_cost_t *models;
     airy_mtx_t lock;
+    uint32_t pending; /* 自上次成功落盘以来的累计次数 */
+    int dirty;
+    uint64_t stamp_ms; /* 上次成功落盘（或创建）的单调毫秒 */
 };
 
 /* 规则表自持副本：热重载会释放配置侧的旧规则数组，若此处只拷结构体，
@@ -111,6 +118,7 @@ cost_tracker_t *cost_tracker_create(const pricing_rule_t *rules, int rule_count)
         ct->rule_count = rule_count;
     }
     airy_mtx_init(&ct->lock);
+    ct->stamp_ms = airy_time_ms();
     return ct;
 }
 
@@ -185,6 +193,8 @@ void cost_tracker_add(cost_tracker_t *ct, const char *model, uint32_t prompt_tok
     double in_price, out_price;
     cost_tracker_price(ct->rules, ct->rule_count, model, &in_price, &out_price);
     m->cost_usd += (prompt_tokens / 1000.0) * in_price + (completion_tokens / 1000.0) * out_price;
+    ++ct->pending;
+    ct->dirty = 1;
     airy_mtx_unlock(&ct->lock);
 }
 
@@ -226,12 +236,15 @@ cJSON *cost_tracker_export(cost_tracker_t *ct)
     return root;
 }
 
-/* save 原子写（临时文件 + rename 防半写文件）；load 解析 JSON 并按
- * 模型合并累计（幂等）。 */
-int cost_tracker_save(cost_tracker_t *ct, const char *path)
+/* 原子写（临时文件 + rename 防半写文件）。sync=0 只刷页缓存：进程崩溃
+ * （含 SIGKILL）不丢，断电丢失由时间窗口的同步写兜底；sync=1 为强同步。
+ * 落盘成功才清计数：写失败保持 dirty，下一次触发重试。 */
+static int cost_write(cost_tracker_t *ct, const char *path, int sync)
 {
-    if (!ct || !path || !path[0])
-        return -1;
+    /* 快照待写次数：导出到 rename 之间到达的新累计不得被清零，否则丢计费。 */
+    airy_mtx_lock(&ct->lock);
+    uint32_t snap = ct->pending;
+    airy_mtx_unlock(&ct->lock);
 
     cJSON *root = cost_tracker_export(ct);
     if (!root)
@@ -257,8 +270,7 @@ int cost_tracker_save(cost_tracker_t *ct, const char *path)
     int wok = fwrite(json, 1, jlen, f) == jlen;
     if (wok && fflush(f) != 0)
         wok = 0;
-    /* 落盘后 rename，防断电丢数据（rename 前不 fsync 只保证页缓存顺序） */
-    if (wok) {
+    if (wok && sync) {
 #ifdef _WIN32
         wok = (_commit(_fileno(f)) == 0);
 #else
@@ -275,7 +287,46 @@ int cost_tracker_save(cost_tracker_t *ct, const char *path)
         remove(tmp);
         return -1;
     }
+
+    airy_mtx_lock(&ct->lock);
+    ct->pending = ct->pending > snap ? ct->pending - snap : 0;
+    /* 非同步写只把内容刷新进页缓存，dirty 保持到下一个时间窗口的同步写。 */
+    if (sync) {
+        ct->dirty = ct->pending > 0;
+        ct->stamp_ms = airy_time_ms();
+    }
+    airy_mtx_unlock(&ct->lock);
     return 0;
+}
+
+/* save 无条件同步落盘：仅供进程退出等收尾路径使用。 */
+int cost_tracker_save(cost_tracker_t *ct, const char *path)
+{
+    if (!ct || !path || !path[0])
+        return -1;
+    return cost_write(ct, path, 1);
+}
+
+int cost_tracker_flush(cost_tracker_t *ct, const char *path)
+{
+    if (!ct || !path || !path[0])
+        return -1;
+
+    airy_mtx_lock(&ct->lock);
+    uint32_t pending = ct->pending;
+    int dirty = ct->dirty;
+    uint64_t stamp = ct->stamp_ms;
+    airy_mtx_unlock(&ct->lock);
+
+    if (!dirty)
+        return 0;
+
+    /* 时间窗口到期做强同步；窗口内只按次数做页缓存刷新，稳态下请求路径
+     * 每 64 次才一次短写，且不产生 fsync。 */
+    int sync = (airy_time_ms() - stamp) >= COST_FLUSH_MS;
+    if (!sync && pending < COST_FLUSH_OPS)
+        return 0;
+    return cost_write(ct, path, sync);
 }
 
 int cost_tracker_load(cost_tracker_t *ct, const char *path)

@@ -7,6 +7,7 @@
  */
 
 #include "cost_tracker.h"
+#include "platform.h"
 
 #include <assert.h>
 #include <cjson/cJSON.h>
@@ -214,6 +215,101 @@ static void test_cost_tracker_rule_matching(void)
     printf("    PASSED\n");
 }
 
+/* 落盘窗口回归（0.1.20 P1-1）：窗口内零 I/O，达次数阈值或间隔到期才写，
+ * 退出路径仍无条件同步落盘。观测口径为文件是否存在及其 prompt_tokens 累计。 */
+static const char *tmp_base(void)
+{
+#if defined(_WIN32)
+    const char *t = getenv("TEMP");
+    return (t && t[0]) ? t : ".";
+#else
+    const char *t = getenv("TMPDIR");
+    return (t && t[0]) ? t : "/tmp";
+#endif
+}
+
+static long file_prompt_tokens(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    char buf[4096];
+    size_t n;
+    long value = -1;
+
+    if (!f)
+        return -1;
+    n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (root) {
+        cJSON *models = cJSON_GetObjectItem(root, "models");
+        cJSON *first = cJSON_IsArray(models) ? cJSON_GetArrayItem(models, 0) : NULL;
+        cJSON *pt = cJSON_IsObject(first) ? cJSON_GetObjectItem(first, "prompt_tokens") : NULL;
+        if (cJSON_IsNumber(pt))
+            value = (long)pt->valuedouble;
+        cJSON_Delete(root);
+    }
+    return value;
+}
+
+static void test_cost_tracker_flush_window(void)
+{
+    printf("  test_cost_tracker_flush_window...\n");
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s/airy_cost_flush_test.json", tmp_base());
+    (void)remove(path);
+
+    cost_tracker_t *tracker = cost_tracker_create(NULL, 0);
+    assert(tracker != NULL);
+    assert(cost_tracker_flush(NULL, path) == -1);
+
+    /* 无新增：dirty 为假，即便窗口已过也不产生文件。 */
+    assert(cost_tracker_flush(tracker, path) == 0);
+    assert(file_prompt_tokens(path) == -1);
+
+    /* 单次累计在窗口内：不落盘。 */
+    cost_tracker_add(tracker, "gpt-4", 100, 50, 0);
+    assert(cost_tracker_flush(tracker, path) == 0);
+    assert(file_prompt_tokens(path) == -1);
+
+    /* 累计到 64 次：达次数阈值，立即落盘。 */
+    for (int i = 1; i < 64; ++i)
+        cost_tracker_add(tracker, "gpt-4", 100, 50, 0);
+    assert(cost_tracker_flush(tracker, path) == 0);
+    assert(file_prompt_tokens(path) == 6400);
+
+    /* 落盘后窗口重开：窗口内的新增不写盘，文件内容保持不变。 */
+    cost_tracker_add(tracker, "gpt-4", 100, 50, 0);
+    assert(cost_tracker_flush(tracker, path) == 0);
+    assert(file_prompt_tokens(path) == 6400);
+
+    /* 间隔阈值：窗口到期后把积压的累计一次写掉。 */
+    airy_sleep_ms(1100);
+    assert(cost_tracker_flush(tracker, path) == 0);
+    assert(file_prompt_tokens(path) == 6500);
+
+    /* 退出路径：save 无条件同步落盘，不受窗口约束。 */
+    cost_tracker_add(tracker, "gpt-4", 10, 5, 0);
+    assert(cost_tracker_save(tracker, path) == 0);
+    assert(file_prompt_tokens(path) == 6510);
+
+    /* 稳态 1000 请求：请求路径不出现同步写，只有次数触发的页缓存刷新。 */
+    for (int i = 0; i < 1000; ++i) {
+        cost_tracker_add(tracker, "gpt-4", 100, 50, 0);
+        assert(cost_tracker_flush(tracker, path) == 0);
+    }
+    assert(file_prompt_tokens(path) >= 6510);
+    assert(cost_tracker_save(tracker, path) == 0);
+    assert(file_prompt_tokens(path) == 106510);
+
+    cost_tracker_destroy(tracker);
+    (void)remove(path);
+
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=========================================\n");
@@ -227,6 +323,7 @@ int main(void)
     test_cost_tracker_null_param();
     test_cost_tracker_multiple_models();
     test_cost_tracker_rule_matching();
+    test_cost_tracker_flush_window();
 
     printf("\n✅ All cost tracker tests PASSED\n");
     return 0;

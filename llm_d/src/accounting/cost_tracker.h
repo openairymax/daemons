@@ -48,6 +48,13 @@ cJSON *cost_tracker_export(cost_tracker_t *ct);
 int cost_tracker_save(cost_tracker_t *ct, const char *path);
 int cost_tracker_load(cost_tracker_t *ct, const char *path);
 
+/* 聚合落盘（热路径入口）：dirty 且「累计 ≥64 次」或「距上次同步 ≥1s」才
+ * 真正写盘，否则零 I/O 直接返回 0。窗口内的次数触发只刷页缓存（进程崩溃
+ * 不丢），时间窗口到期才做强同步（断电丢失 ≤1s）；间隔检查由请求驱动，
+ * 空闲期不产生唤醒。进程退出仍由 save 同步落盘。
+ * @return 0 成功或无需落盘；-1 参数/写盘失败（保持 dirty 待重试）。 */
+int cost_tracker_flush(cost_tracker_t *ct, const char *path);
+
 #ifdef __cplusplus
 }
 #endif

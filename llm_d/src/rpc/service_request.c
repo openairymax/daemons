@@ -306,7 +306,8 @@ static void note_truncation(const llm_response_t *resp, const char *model, int m
     }
 }
 
-/* 累计用量、回填单次成本，并兜底持久化（SIGKILL/崩溃时优雅退出路径不执行）。 */
+/* 累计用量并回填单次成本。持久化走聚合窗口：dirty 且到阈值/间隔才写，
+ * 热路径稳态零 I/O；进程退出的同步落盘由 service destroy 负责。 */
 static void update_cost_tracking(llm_service_t *svc, const char *model, llm_response_t *resp)
 {
     if (!svc || !model || !resp) {
@@ -320,7 +321,7 @@ static void update_cost_tracking(llm_service_t *svc, const char *model, llm_resp
 
     const char *usage_path = llm_usage_state_path();
     if (usage_path)
-        (void)cost_tracker_save(svc->cost, usage_path);
+        (void)cost_tracker_flush(svc->cost, usage_path);
 }
 
 /* complete/stream 共用的 routing prelude：复杂度评估与路由决策日志。 */
