@@ -8,7 +8,7 @@
  * 重载切成三段，只有中段需要冻结在途请求：
  *   读入 —— 全部读进暂存态，任何失败都不触碰在线配置
  *   排空 —— 拒绝新请求，等待在途请求归还（或超时强制）
- *   换表 —— 一次性替换注册表/价格/路由/默认值/快照，世代 +1
+ *   换表 —— 一次性替换注册表/价格/路由/默认值，世代 +1
  *
  * 单飞由 svc_swap 的 draining 位保证：第二次进入直接判忙并丢弃已读入的
  * 暂存态，不产生半成品。reload_lock 只保护退避窗口，并在排空前释放——
@@ -25,8 +25,6 @@
 #include "rpc/service.h"
 #include "rpc/service_boot.h"
 #include "svc_logger.h"
-
-#include <string.h>
 
 #include "config/config_internal.h"
 #include "router/core/llm_router.h"
@@ -115,15 +113,9 @@ int llm_service_reload(llm_service_t *svc)
         return AIRY_ERR_STATE_ERROR;
     }
 
-    /* 快照同样在排空前照好：只读文件，不碰在线状态。 */
-    svc_mw_t nmw;
-    svc_mw_t nmw_usr;
-    __builtin_memset(&nmw, 0, sizeof(nmw));
-    __builtin_memset(&nmw_usr, 0, sizeof(nmw_usr));
-    (void)svc_mw_init(&nmw, svc->cfg_path, "llm_d");
-    char up[1024];
-    if (llm_boot_usr_path(up, sizeof(up)))
-        (void)svc_mw_init(&nmw_usr, up, "llm_d");
+    /* 快照不在此处重照（0.1.20 D2-7）：应用成功后由 svc_mw_reload 自行
+     * rebase 主监视，apply 回调再 rebase 副监视。此处照快照等于同一文件
+     * 读两遍，且留下提交前被再次改写的 TOCTOU 窗口。 */
 
     airy_mtx_unlock(&svc->reload_lock);
 
@@ -148,9 +140,6 @@ int llm_service_reload(llm_service_t *svc)
     llm_boot_apply(svc, &b);
     /* provider 数组已被注册表深拷贝，规则表所有权已转 svc。 */
     llm_boot_drop(&b);
-
-    svc->mw = nmw;
-    svc->mw_usr = nmw_usr;
 
     if (cost_tracker_set_rules(svc->cost, (const pricing_rule_t *)svc->rules,
                                (int)svc->rule_count) != 0)

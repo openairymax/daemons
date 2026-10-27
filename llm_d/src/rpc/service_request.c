@@ -337,13 +337,14 @@ static void log_routing_prelude(const llm_request_config_t *manager,
     log_routing_decision(manager->model, complexity, input_len, routing_kind);
 }
 
-/* 漂移探针：配置变更即触发一次重载（0.1.20 D2-10）。
- * 必须在 svc_swap_enter 之前调用——排空要等在途请求归还，若本请求先取号
- * 再发起排空，就会把自己等成超时。 */
+/* 漂移探针：请求侧廉价检测（0.1.20 D2-7）。
+ * 只检测与上报，不重载——应用唯一入口是 SIGHUP，避免请求线程排空自身
+ * （排空要等在途请求归还，本请求取号前发起排空就会把自己等成超时）。
+ * 元数据未变时单次 stat 返回，热路径开销可忽略。 */
 static void cfg_probe(llm_service_t *svc)
 {
-    if (svc_mw_check(&svc->mw) > 0 || svc_mw_check(&svc->mw_usr) > 0)
-        (void)llm_service_reload(svc);
+    (void)svc_mw_check(&svc->mw);
+    (void)svc_mw_check(&svc->mw_usr);
 }
 
 /* 取号：排空窗口内的新请求直接判忙，由调用方稍后重试。 */
