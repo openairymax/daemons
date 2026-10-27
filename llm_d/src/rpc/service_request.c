@@ -337,8 +337,38 @@ static void log_routing_prelude(const llm_request_config_t *manager,
     log_routing_decision(manager->model, complexity, input_len, routing_kind);
 }
 
-/* Shared entry guard: parameter shape, explicit model, and the read-only drift
- * check (0.1.19 §3.5 缺陷5: stat only on the unchanged path, no reload). */
+/* 漂移探针：配置变更即触发一次重载（0.1.20 D2-10）。
+ * 必须在 svc_swap_enter 之前调用——排空要等在途请求归还，若本请求先取号
+ * 再发起排空，就会把自己等成超时。 */
+static void cfg_probe(llm_service_t *svc)
+{
+    if (svc_mw_check(&svc->mw) > 0 || svc_mw_check(&svc->mw_usr) > 0)
+        (void)llm_service_reload(svc);
+}
+
+/* 取号：排空窗口内的新请求直接判忙，由调用方稍后重试。 */
+static int req_enter(llm_service_t *svc, uint32_t *gen, const char *fn)
+{
+    int rc = svc_swap_enter(&svc->swap, gen);
+    if (rc != 0)
+        SVC_LOG_WARN("C-L02: SVC: %s rejected — config hot swap in progress, STACK: %s", fn, fn);
+    return rc;
+}
+
+/* 归还并裁决世代：世代已推进说明本次结果基于旧装载，不得回流给调用方。 */
+static int req_leave(llm_service_t *svc, uint32_t gen, llm_response_t **out)
+{
+    if (svc_swap_leave(&svc->swap, gen))
+        return 0;
+    if (out && *out) {
+        llm_response_free(*out);
+        *out = NULL;
+    }
+    SVC_LOG_WARN("C-L02: SVC: response dropped — model generation advanced mid-request");
+    return 1;
+}
+
+/* Shared entry guard: parameter shape and explicit model. */
 static int req_guard(llm_service_t *svc, const llm_request_config_t *manager,
                      int sink_ok, const char *tag, const char *fn)
 {
@@ -350,8 +380,6 @@ static int req_guard(llm_service_t *svc, const llm_request_config_t *manager,
         SVC_LOG_ERROR("C-L02: SVC: %s-FAIL model=NULL, STACK: %s", tag, fn);
         return AIRY_ERR_INVALID_PARAM;
     }
-    (void)svc_mw_check(&svc->mw);
-    (void)svc_mw_check(&svc->mw_usr);
     return AIRY_OK;
 }
 
@@ -405,7 +433,7 @@ static int stream_attempt(void *ctx, const svc_step_t *step, llm_response_t **ou
     return ret;
 }
 
-int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager,
+static int complete_impl(llm_service_t *svc, const llm_request_config_t *manager,
                          llm_response_t **out_response)
 {
     int grc = req_guard(svc, manager, out_response != NULL, "COMPLETE", "llm_service_complete");
@@ -476,9 +504,28 @@ int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager
     return AIRY_OK;
 }
 
-int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *manager,
-                                llm_stream_callback_t callback, void *callback_data,
-                                llm_response_t **out_response)
+int llm_service_complete(llm_service_t *svc, const llm_request_config_t *manager,
+                         llm_response_t **out_response)
+{
+    if (!svc)
+        return AIRY_ERR_INVALID_PARAM;
+
+    cfg_probe(svc);
+
+    uint32_t gen = 0;
+    int erc = req_enter(svc, &gen, "llm_service_complete");
+    if (erc != 0)
+        return erc;
+
+    int rc = complete_impl(svc, manager, out_response);
+    if (req_leave(svc, gen, out_response) && rc == AIRY_OK)
+        rc = AIRY_ERR_BUSY;
+    return rc;
+}
+
+static int stream_impl(llm_service_t *svc, const llm_request_config_t *manager,
+                       llm_stream_callback_t callback, void *callback_data,
+                       llm_response_t **out_response)
 {
     int grc = req_guard(svc, manager, callback != NULL, "STREAM",
                         "llm_service_complete_stream");
@@ -515,11 +562,32 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
     return AIRY_OK;
 }
 
+int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *manager,
+                                llm_stream_callback_t callback, void *callback_data,
+                                llm_response_t **out_response)
+{
+    if (!svc)
+        return AIRY_ERR_INVALID_PARAM;
+
+    cfg_probe(svc);
+
+    uint32_t gen = 0;
+    int erc = req_enter(svc, &gen, "llm_service_complete_stream");
+    if (erc != 0)
+        return erc;
+
+    int rc = stream_impl(svc, manager, callback, callback_data, out_response);
+    if (req_leave(svc, gen, out_response) && rc == AIRY_OK) {
+        /* 已下发的分片无法追回，但聚合结果同样不得回流。 */
+        rc = AIRY_ERR_BUSY;
+    }
+    return rc;
+}
+
 /* OpenAI 兼容：仅 Bearer 鉴权，Content-Type 由 core 统一附加。 */
 static const provider_header_spec_t EMBEDDINGS_HEADERS = {.auth = PROVIDER_AUTH_BEARER};
 
-int llm_service_embeddings(llm_service_t *svc, const char *model, const char *request_body,
-                           char **out_json)
+static int emb_impl(llm_service_t *svc, const char *model, const char *request_body, char **out_json)
 {
     if (!svc || !request_body || !request_body[0] || !out_json)
         return AIRY_ERR_INVALID_PARAM;
@@ -570,4 +638,30 @@ int llm_service_embeddings(llm_service_t *svc, const char *model, const char *re
     if (!*out_json)
         return AIRY_ERR_OUT_OF_MEMORY;
     return AIRY_SUCCESS;
+}
+
+int llm_service_embeddings(llm_service_t *svc, const char *model, const char *request_body,
+                           char **out_json)
+{
+    if (!svc)
+        return AIRY_ERR_INVALID_PARAM;
+
+    cfg_probe(svc);
+
+    uint32_t gen = 0;
+    int erc = req_enter(svc, &gen, "llm_service_embeddings");
+    if (erc != 0)
+        return erc;
+
+    int rc = emb_impl(svc, model, request_body, out_json);
+    if (!svc_swap_leave(&svc->swap, gen)) {
+        if (out_json && *out_json) {
+            AIRY_FREE(*out_json);
+            *out_json = NULL;
+        }
+        SVC_LOG_WARN("C-L02: SVC: embeddings dropped — model generation advanced mid-request");
+        if (rc == AIRY_SUCCESS)
+            rc = AIRY_ERR_BUSY;
+    }
+    return rc;
 }

@@ -32,6 +32,7 @@
 #include "config/config_internal.h"
 #include "providers/core/prov_stat.h"
 #include "rpc/rpc_internal.h"
+#include "rpc/service_boot.h"
 
 /* 装配头：仅用于可见 llm_svc_reg 原型（防签名漂移）。 */
 #include "llm_d_internal.h"
@@ -65,148 +66,6 @@ const char *llm_usage_state_path(void)
     return path;
 }
 
-/* 创建期装配状态：配置面一次读入，再分阶段落到 svc。 */
-typedef struct {
-    service_config_t base;
-    provider_config_t *provs;
-    size_t prov_n;
-    char model[128];
-    char pname[64];
-    svc_model_llm_config_t llm;
-    const char *src;
-} llm_boot_t;
-
-/* 用户覆盖文件 $AIRY_CONFIG_DIR/model.yaml：可容纳且已存在时返回 1。 */
-static int llm_user_path(char *buf, size_t n)
-{
-    const char *dir = airy_config_dir();
-    if (!dir)
-        return 0;
-    int len = snprintf(buf, n, "%s/model.yaml", dir);
-    if (len <= 0 || len >= (int)n)
-        return 0;
-    FILE *f = fopen(buf, "rb");
-    if (!f)
-        return 0;
-    fclose(f);
-    return 1;
-}
-
-/* 主配置 providers 与用户覆盖合并（同名用户胜出）；失败留空注册表。 */
-static void llm_prov_load(const char *cfg, llm_boot_t *b)
-{
-    int rc = svc_load_model_config(cfg, &b->provs, &b->prov_n);
-    if (rc != 0 || !b->provs || b->prov_n == 0) {
-        free_provider_configs(b->provs, b->prov_n);
-        b->provs = NULL;
-        b->prov_n = 0;
-        SVC_LOG_WARN("C-L02: SVC: model config load failed (ret=%d), "
-                     "registry will be empty",
-                     rc);
-        return;
-    }
-    char up[1024];
-    provider_config_t *uprov = NULL;
-    size_t un = 0;
-    if (llm_user_path(up, sizeof(up)) && svc_load_model_config(up, &uprov, &un) == 0 && uprov &&
-        un > 0) {
-        provider_config_t *merged = NULL;
-        size_t mn = 0;
-        merge_provider_configs(b->provs, b->prov_n, uprov, un, &merged, &mn);
-        if (merged && mn > 0) {
-            free_provider_configs(b->provs, b->prov_n);
-            b->provs = merged;
-            b->prov_n = mn;
-            SVC_LOG_INFO("C-L02: SVC: merged %zu user provider(s) from %s "
-                         "(user overrides same-name)",
-                         un, up);
-        }
-    }
-    free_provider_configs(uprov, un);
-    SVC_LOG_INFO("C-L02: SVC: loaded %zu provider(s) from manager config", b->prov_n);
-}
-
-/* llm 段优先、缺省回退 models 表首条（v2 表格格式）；返回来源描述。 */
-static const char *llm_pick_cfg(const char *cfg, svc_model_llm_config_t *out)
-{
-    if (svc_model_defaults_llm_from_yaml(cfg, out) == 0 && out->model[0])
-        return "llm section";
-    __builtin_memset(out, 0, sizeof(*out));
-    if (svc_model_defaults_models0_from_yaml(cfg, out) == 0 && out->model[0])
-        return "models table";
-    return NULL;
-}
-
-/* 默认模型/提供方/输出上限的读取与用户覆盖合并（只读配置，不落 svc）。 */
-static void llm_def_load(llm_service_t *svc, const char *cfg, llm_boot_t *b)
-{
-    char up[1024];
-    if (cfg) {
-        svc_model_defaults_from_yaml(cfg, b->model, sizeof(b->model), b->pname, sizeof(b->pname));
-        /* 默认模型的来源与输出上限相互独立：上限仍须从 llm 段（或 models
-         * 表首条）读出。 */
-        b->src = llm_pick_cfg(cfg, &b->llm);
-    }
-    if (!llm_user_path(up, sizeof(up)))
-        return;
-    /* 用户只覆盖自己显式写下的 routing 键（不重置主配置）。 */
-    (void)svc_route_load(up, &svc->route);
-    char um[128] = {0};
-    char upv[64] = {0};
-    svc_model_defaults_from_yaml(up, um, sizeof(um), upv, sizeof(upv));
-    if (um[0])
-        AIRY_STRNCPY_TERM(b->model, um, sizeof(b->model));
-    if (upv[0])
-        AIRY_STRNCPY_TERM(b->pname, upv, sizeof(b->pname));
-
-    /* 用户覆盖同样 user wins：调低 max_output 须立即生效。 */
-    svc_model_llm_config_t uc;
-    __builtin_memset(&uc, 0, sizeof(uc));
-    (void)llm_pick_cfg(up, &uc);
-    if (uc.model[0] && uc.max_output_tokens > 0)
-        b->llm.max_output_tokens = uc.max_output_tokens;
-}
-
-/* 默认模型/提供方/上限落 svc：default_model 段优先，否则取 llm 段来源。 */
-static void llm_def_apply(llm_service_t *svc, const llm_boot_t *b)
-{
-    if (b->model[0]) {
-        AIRY_STRNCPY_TERM(svc->default_model, b->model, sizeof(svc->default_model));
-        SVC_LOG_INFO("C-L02: SVC: default_model=%s (from default_model config)",
-                     svc->default_model);
-    } else if (b->src) {
-        AIRY_STRNCPY_TERM(svc->default_model, b->llm.model, sizeof(svc->default_model));
-        /* 适配器按线格式命名（chat | messages | local），配置面的 api_format
-         * 即适配器查找键，无需再做厂商名到适配器的映射。 */
-        if (!b->pname[0] && b->llm.api_format[0])
-            AIRY_STRNCPY_TERM(svc->default_provider, b->llm.api_format,
-                              sizeof(svc->default_provider));
-        SVC_LOG_INFO("C-L02: SVC: default_model=%s (from %s)", svc->default_model, b->src);
-    }
-    if (b->pname[0])
-        AIRY_STRNCPY_TERM(svc->default_provider, b->pname, sizeof(svc->default_provider));
-    if (b->llm.max_output_tokens > 0) {
-        svc->default_max_output_tokens = b->llm.max_output_tokens;
-        SVC_LOG_INFO("C-L02: SVC: default_max_output_tokens=%d (from model config)",
-                     svc->default_max_output_tokens);
-    }
-}
-
-/* 价格唯一来源是 model.yaml 的 models[].input/output_cost_per_1k；未配置
- * 价格的模型由 cost_tracker 落默认价。 */
-static void llm_price_load(llm_service_t *svc, const char *cfg)
-{
-    pricing_rule_t *rules = NULL;
-    int n = 0;
-    if (load_pricing_rules_from_yaml(cfg, &rules, &n) == 0 && rules && n > 0) {
-        svc->rules = rules;
-        svc->rule_count = n;
-        SVC_LOG_INFO("Loaded %d pricing rules from YAML model config", n);
-    } else if (rules) {
-        AIRY_FREE(rules);
-    }
-}
-
 /* 组件装配：注册表 → 缓存 → 计费；任一失败由调用方统一回滚。 */
 static int llm_parts_new(llm_service_t *svc, const service_config_t *base)
 {
@@ -235,6 +94,8 @@ static void llm_parts_drop(llm_service_t *svc)
     cache_destroy(svc->cache);
     provider_registry_destroy(svc->registry);
     free_pricing_rules((pricing_rule_t *)svc->rules, (int)svc->rule_count);
+    svc_swap_done(&svc->swap);
+    airy_mtx_destroy(&svc->reload_lock);
     airy_mtx_destroy(&svc->lock);
     AIRY_FREE(svc);
 }
@@ -259,7 +120,7 @@ static void llm_watch_cfg(llm_service_t *svc, const char *cfg)
     char up[1024];
     if (cfg)
         (void)svc_mw_init(&svc->mw, cfg, "llm_d");
-    if (llm_user_path(up, sizeof(up)) && (!cfg || strcmp(cfg, up) != 0))
+    if (llm_boot_usr_path(up, sizeof(up)) && (!cfg || strcmp(cfg, up) != 0))
         (void)svc_mw_init(&svc->mw_usr, up, "llm_d");
 }
 
@@ -275,44 +136,43 @@ llm_service_t *llm_service_create(const char *config_path)
     /* CALLOC 全零会让 depth=0，必须显式落缺省（0.1.19 §3.8.4 A3）。 */
     svc_chain_def(&svc->route);
 
-    /* 0.1.19 §3.8.4 A4：routing 段；缺失即保持 off，现网零变化。 */
-    if (config_path)
-        (void)svc_route_load(config_path, &svc->route);
-
     if (airy_mtx_init(&svc->lock) != 0) {
         SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL init lock, STACK: llm_service_create");
         AIRY_FREE(svc);
         AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
-
-    llm_boot_t b;
-    __builtin_memset(&b, 0, sizeof(b));
-    b.base.llm_cache_capacity = AIRY_DEFAULT_CACHE_CAPACITY;
-    b.base.llm_cache_ttl_sec = AIRY_DEFAULT_CACHE_TTL_SEC;
-    b.base.max_retries = AIRY_DEFAULT_MAX_RETRIES;
-    b.base.timeout_ms = AIRY_DEFAULT_TIMEOUT_MS;
-
-    if (config_path) {
-        llm_prov_load(config_path, &b);
-        b.base.providers = b.provs;
-        b.base.provider_count = b.prov_n;
-        llm_price_load(svc, config_path);
+    if (airy_mtx_init(&svc->reload_lock) != 0) {
+        SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL init reload_lock, STACK: llm_service_create");
+        airy_mtx_destroy(&svc->lock);
+        AIRY_FREE(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
     }
-    /* 用户覆盖独立于主配置路径：cfg 缺席时 $AIRY_CONFIG_DIR 仍生效。 */
-    llm_def_load(svc, config_path, &b);
-    llm_def_apply(svc, &b);
+    if (svc_swap_init(&svc->swap, SVC_SWAP_DRAIN_MS) != 0) {
+        SVC_LOG_ERROR("C-L02: SVC: CREATE-FAIL init swap, STACK: llm_service_create");
+        airy_mtx_destroy(&svc->reload_lock);
+        airy_mtx_destroy(&svc->lock);
+        AIRY_FREE(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "validation failed");
+    }
+    if (config_path)
+        AIRY_STRNCPY_TERM(svc->cfg_path, config_path, sizeof(svc->cfg_path));
+
+    /* 0.1.19 §3.8.4 A4：routing 段随 boot 一次读入；缺失即保持 off。 */
+    llm_boot_t b;
+    llm_boot_fill(&b, config_path);
+    llm_boot_apply(svc, &b);
 
     if (svc->route.mode == SVC_CHAIN_AUTO)
         SVC_LOG_INFO("C-L02: SVC: routing=auto depth=%d on=0x%x budget_ms=%d", svc->route.depth,
                      svc->route.on_mask, svc->route.budget_ms);
 
     if (llm_parts_new(svc, &b.base) != 0) {
-        free_provider_configs(b.provs, b.prov_n);
+        llm_boot_drop(&b);
         llm_parts_drop(svc);
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
-    /* 注册表已深拷贝 provider 配置，临时数组（含用户覆盖合并结果）释放。 */
-    free_provider_configs(b.provs, b.prov_n);
+    /* 注册表已深拷贝 provider 配置，暂存态（含用户覆盖合并结果）释放。 */
+    llm_boot_drop(&b);
 
     /* 加载历史计费/用量累计（幂等，无文件则跳过）。 */
     const char *usage_path = llm_usage_state_path();
@@ -337,6 +197,15 @@ void llm_service_destroy(llm_service_t *svc)
         return;
 
     SVC_LOG_INFO("C-L02: SVC: DESTROY");
+
+    /* 退休表：热重载排空超时后旧装载仍未归零，只能留到这里统一释放。 */
+    for (int i = 0; i < svc->retired_n; i++) {
+        if (svc->retired[i].registry)
+            provider_registry_destroy(svc->retired[i].registry);
+        if (svc->retired[i].rules)
+            free_pricing_rules(svc->retired[i].rules, svc->retired[i].rule_count);
+    }
+    svc->retired_n = 0;
 
     if (svc->registry) {
         provider_registry_destroy(svc->registry);
@@ -372,6 +241,8 @@ void llm_service_destroy(llm_service_t *svc)
      * pollution. */
     llm_router_destroy();
 
+    svc_swap_done(&svc->swap);
+    airy_mtx_destroy(&svc->reload_lock);
     airy_mtx_destroy(&svc->lock);
     AIRY_FREE(svc);
 }
@@ -476,6 +347,26 @@ int llm_service_stats(llm_service_t *svc, char **out_json)
         cJSON_AddNumberToObject(transport, "total_timeout",
                                 (double)prov_stat_get(PROV_TMO_TOTAL));
         cJSON_AddItemToObject(root, "transport", transport);
+    }
+
+    /* D2-10：热切换观测。gen 与 mismatch 并出——只见 gen 增长而看不到被
+     * 丢弃的旧世代回包，会把强制排空误读为"切换无损"。 */
+    cJSON *swap = cJSON_CreateObject();
+    if (swap) {
+        uint32_t gen = 0;
+        uint32_t inflight = 0;
+        uint32_t swapped = 0;
+        uint64_t mismatch = 0;
+        uint64_t drain_tmo = 0;
+        svc_swap_stat(&svc->swap, &gen, &inflight, &swapped, &mismatch, &drain_tmo);
+        cJSON_AddNumberToObject(swap, "gen", (double)gen);
+        cJSON_AddNumberToObject(swap, "inflight", (double)inflight);
+        cJSON_AddNumberToObject(swap, "swapped", (double)swapped);
+        cJSON_AddNumberToObject(swap, "gen_mismatch", (double)mismatch);
+        cJSON_AddNumberToObject(swap, "drain_timeout", (double)drain_tmo);
+        cJSON_AddNumberToObject(swap, "reload_ok", (double)svc->reload_ok);
+        cJSON_AddNumberToObject(swap, "reload_fail", (double)svc->reload_fail);
+        cJSON_AddItemToObject(root, "swap", swap);
     }
 
     char *json = cJSON_PrintUnformatted(root);

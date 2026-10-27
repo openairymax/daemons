@@ -204,6 +204,17 @@ void llm_router_destroy(void);
 /** 注册端点，健康字段清零。@return 0 成功，非 0 失败。 */
 int llm_router_register_endpoint(const llm_endpoint_t *endpoint);
 
+/**
+ * @brief 清空端点表以便按新配置整表重注册，统计量保留。
+ *
+ * 注册是追加语义，热重载若只追加就会把同一端点重复计入、最终撞上
+ * LLM_ROUTER_MAX_ENDPOINTS。重载方在排空窗口内调用本接口再重新注册，
+ * 观测计数（请求、成本、错误）不因换配置而清零。
+ *
+ * @return 0 成功；AIRY_ERR_SYS_NOT_INIT 未初始化。
+ */
+int llm_router_reset_endpoints(void);
+
 /** 按请求选路。@return 0 成功，非 0 失败。 */
 int llm_router_route(const llm_route_request_t *request, llm_route_result_t *result);
 
