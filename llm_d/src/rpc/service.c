@@ -30,6 +30,7 @@
 #include <string.h>
 
 #include "config/config_internal.h"
+#include "providers/core/prov_stat.h"
 #include "rpc/rpc_internal.h"
 
 /* 装配头：仅用于可见 llm_svc_reg 原型（防签名漂移）。 */
@@ -461,6 +462,20 @@ int llm_service_stats(llm_service_t *svc, char **out_json)
             cJSON_AddNumberToObject(meas, "decode_ms", rs.decode_ms);
             cJSON_AddItemToObject(root, "measurement", meas);
         }
+    }
+
+    /* D2-9：超时三拆的传输侧观测。三类成因处置不同——连接未建立可无条件
+     * 重试、上游停摆仅在幂等时可重试、整轮预算耗尽不可重试；混为一个
+     * "超时"计数会掩盖根因。 */
+    cJSON *transport = cJSON_CreateObject();
+    if (transport) {
+        cJSON_AddNumberToObject(transport, "connect_timeout",
+                                (double)prov_stat_get(PROV_TMO_CONNECT));
+        cJSON_AddNumberToObject(transport, "stream_stall",
+                                (double)prov_stat_get(PROV_TMO_STALL));
+        cJSON_AddNumberToObject(transport, "total_timeout",
+                                (double)prov_stat_get(PROV_TMO_TOTAL));
+        cJSON_AddItemToObject(root, "transport", transport);
     }
 
     char *json = cJSON_PrintUnformatted(root);

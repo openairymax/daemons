@@ -605,12 +605,12 @@ static void test_retry_policy(void)
     assert(provider_retry_budget_ok(1.0, t0 - 2000U, 200U) == 0);
 }
 
-/* N-3 端到端：对端"读到请求后立即关闭"是典型收发阶段瞬时故障；非流式路径
- * 必须真的重发，且总尝试次数严格等于 max_retries（不得退化为无限重试或
- * 零重试）。 */
+/* N-3 端到端：对端"读到请求后立即关闭"是典型收发阶段瞬时故障；请求已
+ * 送达，只有幂等请求（temperature==0 且 seed!=0）才允许重发。幂等时总尝试
+ * 次数严格等于 max_retries（不得退化为无限重试或零重试）。 */
 static void test_nonstream_transient_retried(void)
 {
-    printf("  nonstream transient failure is retried...\n");
+    printf("  nonstream transient failure is retried when idempotent...\n");
 
     mock_set_drop(1);
     char base[128];
@@ -622,6 +622,7 @@ static void test_nonstream_transient_retried(void)
     llm_message_t msg;
     llm_request_config_t cfg;
     cfg_init(&cfg, &msg);
+    cfg.seed = 42U; /* 幂等标记：temperature==0 且 seed!=0 */
 
     int before = atomic_load(&g_srv.conn_count);
     llm_response_t *resp = NULL;
@@ -635,6 +636,38 @@ static void test_nonstream_transient_retried(void)
     /* max_retries 是"额外重试次数"：初次 + 2 次退避重试，既不得退化为
      * 无限重试，也不得退化为零重试。 */
     assert(attempts == 3);
+
+    chat_ops.destroy(ctx);
+    mock_set_drop(0);
+}
+
+/* N-3 反例：同一收发阶段故障下，非幂等请求（未带 seed）只能尝试一次。
+ * 请求体可能已被对端受理，重发会重复计费/重复副作用。 */
+static void test_nonstream_nonidem_not_retried(void)
+{
+    printf("  nonstream transient failure is not retried when not idempotent...\n");
+
+    mock_set_drop(1);
+    char base[128];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d/v1", g_srv.port);
+
+    provider_ctx_t *ctx = chat_ops.init("openai", "", base, NULL, 5.0, 2);
+    assert(ctx != NULL);
+
+    llm_message_t msg;
+    llm_request_config_t cfg;
+    cfg_init(&cfg, &msg); /* seed==0：非幂等 */
+
+    int before = atomic_load(&g_srv.conn_count);
+    llm_response_t *resp = NULL;
+    int ret = chat_ops.complete(ctx, &cfg, &resp);
+    int attempts = atomic_load(&g_srv.conn_count) - before;
+    if (resp)
+        llm_response_free(resp);
+
+    printf("    ret=%d attempts=%d expect=%d\n", ret, attempts, 1);
+    assert(ret == AIRY_ERR_IO);
+    assert(attempts == 1);
 
     chat_ops.destroy(ctx);
     mock_set_drop(0);
@@ -655,6 +688,7 @@ static void test_stream_transient_retried(void)
     llm_message_t msg;
     llm_request_config_t cfg;
     cfg_init(&cfg, &msg);
+    cfg.seed = 42U; /* 幂等标记：temperature==0 且 seed!=0 */
 
     int before = atomic_load(&g_srv.conn_count);
     g_stream_chunk_count = 0;
@@ -683,12 +717,14 @@ static void test_local_endpoint_policy(void)
 {
     printf("  local endpoint retry policy is connect-only...\n");
 
-    /* 静态策略：默认超时抬到 120s，重试预算在全局默认（3）上降一次。 */
+    /* 静态策略：默认超时交由 model.yaml 的 timeout_sec 驱动（0=自动预算，
+     * 由 prov_tmo_auto 依 p99 派生），本地重试预算收窄到一次。 */
     provider_ctx_t *probe = local_ops.init("local", NULL, NULL, NULL, 0.0, 0);
     assert(probe != NULL);
     provider_base_ctx_t *pbase = provider_base_ctx(probe);
-    assert(pbase->timeout_sec == 120.0);
-    assert(pbase->max_retries == 2);
+    assert(pbase->timeout_sec == 0.0);
+    assert(pbase->timeout_auto == 1);
+    assert(pbase->max_retries == 1);
     assert(pbase->retry_class == PROVIDER_RETRY_CONNECT_ONLY);
     local_ops.destroy(probe);
 
@@ -704,6 +740,7 @@ static void test_local_endpoint_policy(void)
     llm_message_t msg;
     llm_request_config_t cfg;
     cfg_init(&cfg, &msg);
+    cfg.seed = 42U; /* 幂等：隔离"幂等门控"与"本地策略"两条约束 */
 
     int before = atomic_load(&g_srv.conn_count);
     llm_response_t *resp = NULL;
@@ -816,6 +853,7 @@ int main(void)
     /* N-3/N-4：重试策略 SSoT，以及瞬时故障下"重试真的发生"。 */
     test_retry_policy();
     test_nonstream_transient_retried();
+    test_nonstream_nonidem_not_retried();
     test_stream_transient_retried();
 
     /* D4：本地端点可重试类别收窄，云端端点策略不受影响。 */

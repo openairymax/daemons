@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "airy_memory.h"
+#include "daemon_platform_ext.h"
 #include "error.h"
 #include "adapter.h"
 #include "prov_diag.h"
@@ -69,6 +70,22 @@ static void resp_stamp_capacity(llm_response_t *resp, const provider_base_ctx_t 
         resp->total_slots = (uint32_t)base->total_slots;
 }
 
+/* D2-9：幂等判据（方案 §5.2b.10）——确定性采样下重复投递语义等价，
+ * 传输侧才允许在"请求可能已送达"的故障形态上重试。 */
+static int req_idem(const llm_request_config_t *cfg)
+{
+    return cfg->temperature == 0.0f && cfg->seed != 0;
+}
+
+/* 成功往返的墙钟时延入 p99 样本。失败/超时不入样：否则预算会被失败样本
+ * 自我抬升（超时次数另有 transport 计数可观测）。 */
+static void lat_note(const provider_base_ctx_t *base, uint64_t start_ms)
+{
+    if (!base || !base->name[0])
+        return;
+    prov_stat_lat(base->name, (uint32_t)(airy_time_ms() - start_ms));
+}
+
 int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
                              const llm_request_config_t *manager, llm_response_t **out_response)
 {
@@ -102,11 +119,15 @@ int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
         .path = ops->chat_path,
         .headers = ops->headers,
         .body = req_body,
+        .idempotent = req_idem(&eff),
     };
 
     provider_http_resp_t *http_resp = NULL;
     long http_code = 0;
+    uint64_t t0 = airy_time_ms();
     int ret = provider_http_exec(&req, &http_resp, &http_code);
+    if (ret == AIRY_OK)
+        lat_note(base, t0);
 
     AIRY_FREE(req_body);
 
@@ -192,10 +213,14 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
         .on_chunk = ops->feed_event ? NULL : prov_stream_chunk,
         .on_event = ops->feed_event,
         .user_data = &acc,
+        .idempotent = req_idem(&stream_cfg),
     };
 
     long http_code = 0;
+    uint64_t t0 = airy_time_ms();
     int ret = provider_http_exec(&req, NULL, &http_code);
+    if (ret == AIRY_OK)
+        lat_note(base, t0);
 
     AIRY_FREE(req_body);
 

@@ -140,7 +140,8 @@ static int parse_retry_after(const char *headers_data)
 
 int provider_http_request_with_retry(provider_base_ctx_t *base, provider_rate_limiter_t *rl,
                                      const char *url, struct curl_slist *headers,
-                                     const char *body, long *out_http_code,
+                                     const char *body, double timeout_sec, int idempotent,
+                                     long *out_http_code,
                                      provider_http_resp_t **out_response)
 {
     int attempt = 0;
@@ -161,8 +162,9 @@ int provider_http_request_with_retry(provider_base_ctx_t *base, provider_rate_li
          * 传输层瞬时故障（DNS / 连接 / TLS 握手 / 超时）交 provider_http_post 的
          * 退避重试处理（N-3）。此处传 0 会让"连不上"这类最常见故障完全不重试，
          * 故必须把 provider 的重试预算透传下去。 */
-        ret = provider_http_post(url, headers, body, base->timeout_sec, base->max_retries,
-                                 base->retry_class, out_response, out_http_code);
+        double budget = timeout_sec > 0.0 ? timeout_sec : base->timeout_sec;
+        ret = provider_http_post(url, headers, body, budget, base->max_retries,
+                                 base->retry_class, idempotent, out_response, out_http_code);
 
         if (ret == AIRY_OK && *out_http_code == 200) {
             rl_reset_429(rl);

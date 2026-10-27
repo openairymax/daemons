@@ -73,6 +73,8 @@ set(LLM_SERVICE_SOURCES
     src/providers/core/prov_diag.c
     # 0.1.19 D5：端点健康探测机制件（能力存在 ≠ 能力可用）
     src/providers/core/ep_health.c
+    # 0.1.20 D2-9：传输侧观测（超时三拆计数 + 时延 p99 驱动预算）
+    src/providers/core/prov_stat.c
     src/providers/adapters/messages.c
     # B16-S4：deepseek.c / google.c 清理（OpenAI 兼容遗留冗余，经 model.yaml base_url 声明式接入）
     src/providers/adapters/local.c

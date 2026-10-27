@@ -9,7 +9,7 @@
  * 的逐字重复实现收敛归 B16-S3.3 五槽契约——四槽入口以两行 shim 交
  * core/adapter.c 通用 driver 唯一编排；请求装配/响应解析复用
  * core/envelope.c 的 Chat 协议件（default_model 参置空后交纯函数槽）。
- * 适配层只留线格式差异面（端点路径、120s 超时、无鉴权头声明、
+ * 适配层只留线格式差异面（端点路径、自动时延预算、无鉴权头声明、
  * 日志 tag），不含任何 curl_* 调用。
  *
  * 无鉴权是设计使然：LOCAL_HEADERS 声明 PROVIDER_AUTH_NONE，core 头链
@@ -32,7 +32,6 @@
  * yaml 传入值为准（2026-08-20 审查：代码默认与 yaml 默认的差异为
  * 文档级，非功能缺陷）。 */
 #define LOCAL_DEFAULT_BASE "http://localhost:8080/v1"
-#define LOCAL_DEFAULT_TIMEOUT 120.0
 #define LOCAL_CHAT_PATH "/chat/completions"
 
 /* D2-9④：/props 单发探测超时（秒）。探测失败即终态（不随请求重试），
@@ -115,20 +114,27 @@ static provider_ctx_t *local_init(const char *name, const char *api_key, const c
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    double timeout = timeout_sec > 0 ? timeout_sec : LOCAL_DEFAULT_TIMEOUT;
-    provider_base_init(&ctx->base, name, NULL, api_base, NULL, timeout, max_retries,
+    provider_base_init(&ctx->base, name, NULL, api_base, NULL, timeout_sec, max_retries,
                        LOCAL_DEFAULT_BASE);
 
+    /* D2-9：本地慢推理没有固定上界，预算改由实测时延 p99 推导（floor 120s，
+     * 无样本回落 180s）；model.yaml 的 timeout_sec 显式值时仍以显式值为准。 */
+    if (timeout_sec <= 0) {
+        ctx->base.timeout_sec = 0.0;
+        ctx->base.timeout_auto = 1;
+    }
+
     /* 本地慢推理是预期行为而非瞬时故障：超时不做重发（retry_class =
-     * CONNECT_ONLY，仅连接建立失败可重试），故额外重试预算在全局默认上降一次；
-     * 首连失败仍可重发一次，避免端点刚起未就绪时直接失败。 */
-    if (ctx->base.max_retries > 1)
-        ctx->base.max_retries--;
+     * CONNECT_ONLY，仅连接建立失败可重试），故重试预算固定收窄为一次——
+     * 覆盖"端点刚起未就绪"的短窗口，再多的重发只是空转首屏等待。收窄在
+     * 装配点一次定稿，重试壳只读 base.max_retries，不重复裁决。 */
+    ctx->base.max_retries = 1;
     ctx->base.retry_class = PROVIDER_RETRY_CONNECT_ONLY;
 
-    SVC_LOG_INFO("C-L02: LOCAL: INIT api_base=%s timeout=%.1fs max_retries=%d "
-                 "has_api_key=%d (no auth, local endpoint, higher default timeout)",
-                 ctx->base.api_base, ctx->base.timeout_sec, ctx->base.max_retries, 0);
+    SVC_LOG_INFO("C-L02: LOCAL: INIT api_base=%s timeout=%.1fs(auto=%d) max_retries=%d "
+                 "has_api_key=%d (no auth, local endpoint, auto timeout from p99)",
+                 ctx->base.api_base, ctx->base.timeout_sec, ctx->base.timeout_auto,
+                 ctx->base.max_retries, 0);
 
     return (provider_ctx_t *)ctx;
 }
