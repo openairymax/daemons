@@ -83,6 +83,12 @@ static void svc_yaml_aggregate_providers(svc_yaml_state_t *st, provider_agg_t *p
         if (!provs[j].extra_headers[0] && st->models[i].extra_headers[0])
             AIRY_STRNCPY_TERM(provs[j].extra_headers, st->models[i].extra_headers,
                               sizeof(provs[j].extra_headers));
+        /* A7-4：能力位覆盖取首个显式声明（与 api_format/extra_headers 的
+         * 聚合惯例同构）；显式 false 也是声明，可压过派生 true。 */
+        if (!provs[j].has_caps && st->models[i].has_caps) {
+            provs[j].caps_override = st->models[i].caps_override;
+            provs[j].has_caps = 1;
+        }
         if (st->models[i].timeout_sec > provs[j].timeout_sec)
             provs[j].timeout_sec = st->models[i].timeout_sec;
         if (st->models[i].max_retries > provs[j].max_retries)
@@ -212,7 +218,10 @@ static int svc_yaml_build_result(provider_agg_t *provs, size_t prov_count,
             result[i].api_format = AIRY_STRDUP(provs[i].api_format);
         if (provs[i].endpoint_kind[0])
             result[i].endpoint_kind = AIRY_STRDUP(provs[i].endpoint_kind);
-        result[i].caps = svc_derive_caps(provs[i].endpoint_kind);
+        /* A7-4：显式覆盖为最高权威（false 压过派生 true），否则回落
+         * endpoint_kind 派生（C11 派生表）。 */
+        result[i].caps =
+            provs[i].has_caps ? provs[i].caps_override : svc_derive_caps(provs[i].endpoint_kind);
         if (provs[i].extra_headers[0])
             result[i].extra_headers = AIRY_STRDUP(provs[i].extra_headers);
         result[i].timeout_sec = (double)provs[i].timeout_sec;
