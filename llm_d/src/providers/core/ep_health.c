@@ -13,6 +13,10 @@
  * 机制与策略分离：探测周期、探测范围（filter）、探测路径由策略层
  * （svc.c 经 manifest 与配置）注入；本件只负责"探测一次、到账一次"。
  *
+ * 深度探针（D2-9⑤）：轻探测（/models）只证明路由存在，1-token 生成才
+ * 证明权重已加载、推理可用。深度探针同样由策略层按倍率触发，本件不自持
+ * 周期；结论粘滞到下一次深度探测，避免"路由在但推理挂"被轻探测掩盖。
+ *
  * 并发：sweep 运行在 daemon 线程池 worker、cold 运行在 rpc 请求线程、
  * json 运行在状态读取侧，三者以 lock 串行化对视图的读写；出网 I/O 一律
  * 在锁外完成后回填，绝不持锁出网。
@@ -27,6 +31,7 @@
 #include "svc_logger.h"
 
 #include "ep_health.h"
+#include "provider_http.h"
 #include "provider_transport.h"
 
 #include <cjson/cJSON.h>
@@ -34,13 +39,22 @@
 
 #define EP_HEALTH_MAX_ENDPOINTS 16
 #define EP_HEALTH_PROBE_TIMEOUT_SEC 8.0
+#define EP_HEALTH_DEEP_TIMEOUT_SEC 60.0
 #define EP_HEALTH_COLD_MS 10000.0
 #define EP_HEALTH_DEFAULT_PATH "/models"
 
 typedef struct {
     char provider[64];
-    char base[512];
+    /* 出网快照：provider_base_ctx_t 无指针成员，值拷贝后 registry 销毁
+     * 也不产生悬垂引用（api_base/api_key/预算/重试策略一并在内）。 */
+    provider_base_ctx_t ctx;
+    /* 深度探针三要素：模型名、生成路径、鉴权头声明。headers 指向适配器
+     * 静态表，进程生命期有效；任一缺失则深度探针不适用。 */
+    char model[128];
+    char chat_path[64];
+    const provider_header_spec_t *headers;
     int reachable; /* -1 未知 / 0 不可达 / 1 可达 */
+    int deep;      /* -1 未探 / 0 失败 / 1 通过；结果粘滞到下一次深度探测 */
     long http_code;
     double latency_ms;
     int cold;
@@ -51,7 +65,10 @@ typedef struct {
 /* 探测快照：只携带出网所需字段，逐端点拷出后在锁外使用。 */
 typedef struct {
     char provider[64];
-    char base[512];
+    provider_base_ctx_t ctx;
+    char model[128];
+    char chat_path[64];
+    const provider_header_spec_t *headers;
 } ep_probe_t;
 
 struct ep_health {
@@ -83,10 +100,26 @@ static int ep_snap_cb(const provider_t *prov, void *ud)
     AIRY_STRNCPY_TERM(rec->provider, prov->name, sizeof(rec->provider));
 
     provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
-    if (base && base->api_base[0])
-        AIRY_STRNCPY_TERM(rec->base, base->api_base, sizeof(rec->base));
+    if (base)
+        rec->ctx = *base;
+
+    /* 深度探针要素：优先取注册表首个模型名（端点真实可服务的模型），
+     * 回落到适配器默认名；生成路径与头声明取自适配器静态表。 */
+    const char *model = NULL;
+    if (prov->models && prov->models[0] && prov->models[0][0])
+        model = prov->models[0];
+    else if (prov->adapter && prov->adapter->default_model)
+        model = prov->adapter->default_model;
+    if (model)
+        AIRY_STRNCPY_TERM(rec->model, model, sizeof(rec->model));
+    if (prov->adapter) {
+        if (prov->adapter->chat_path)
+            AIRY_STRNCPY_TERM(rec->chat_path, prov->adapter->chat_path, sizeof(rec->chat_path));
+        rec->headers = prov->adapter->headers;
+    }
 
     rec->reachable = -1;
+    rec->deep = -1;
     h->count++;
     return 0;
 }
@@ -145,7 +178,73 @@ static void ep_probe_one(const char *base, const char *path, int *out_ok, long *
     *out_ok = (rc == AIRY_OK && code >= 200 && code < 400);
 }
 
-void ep_health_sweep(ep_health_t *h)
+/* 深度探针请求体：1-token 生成。1 token 足以证明权重已加载、KV 可分配、
+ * 采样链可出字；stream=false 让端点以完整 JSON 应答，按状态码即可判定。 */
+static char *ep_deep_body(const char *model)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (!root)
+        return NULL;
+
+    cJSON_AddStringToObject(root, "model", model);
+    cJSON *msgs = cJSON_AddArrayToObject(root, "messages");
+    if (!msgs) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+    cJSON_AddStringToObject(msg, "role", "user");
+    cJSON_AddStringToObject(msg, "content", "ping");
+    cJSON_AddItemToArray(msgs, msg);
+    cJSON_AddNumberToObject(root, "max_tokens", 1);
+    cJSON_AddBoolToObject(root, "stream", 0);
+
+    char *out = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return out;
+}
+
+/* 深度探针：走与业务请求同一条出网门面（鉴权头/预算/错误归一一致），
+ * 只是载荷固定为 1-token 生成；失败形态的处置仍由出网门面统一裁决。 */
+static void ep_probe_deep(const ep_probe_t *p, int *out_ok, long *out_code, double *out_ms)
+{
+    *out_ok = 0;
+    *out_code = 0;
+    *out_ms = 0.0;
+    if (!p->model[0] || !p->chat_path[0])
+        return;
+
+    char *body = ep_deep_body(p->model);
+    if (!body)
+        return;
+
+    /* exec 只读 base（不刷新密钥、不写字段），const 转型安全。 */
+    provider_request_t req = {
+        .base = (provider_base_ctx_t *)&p->ctx,
+        .path = p->chat_path,
+        .headers = p->headers,
+        .body = body,
+        .timeout_sec = EP_HEALTH_DEEP_TIMEOUT_SEC,
+        .idempotent = 1,
+    };
+
+    uint64_t t0 = airy_time_ms();
+    provider_http_resp_t *resp = NULL;
+    long code = 0;
+    int rc = provider_http_exec(&req, &resp, &code);
+    *out_ms = (double)(airy_time_ms() - t0);
+    provider_http_resp_free(resp);
+    cJSON_free(body);
+
+    *out_code = code;
+    *out_ok = (rc == AIRY_OK && code == 200);
+}
+
+void ep_health_sweep(ep_health_t *h, int deep)
 {
     if (!h)
         return;
@@ -156,8 +255,12 @@ void ep_health_sweep(ep_health_t *h)
     airy_mtx_lock(&h->lock);
     n = h->count;
     for (size_t i = 0; i < n; i++) {
-        AIRY_STRNCPY_TERM(snap[i].provider, h->recs[i].provider, sizeof(snap[i].provider));
-        AIRY_STRNCPY_TERM(snap[i].base, h->recs[i].base, sizeof(snap[i].base));
+        const ep_rec_t *rec = &h->recs[i];
+        AIRY_STRNCPY_TERM(snap[i].provider, rec->provider, sizeof(snap[i].provider));
+        snap[i].ctx = rec->ctx;
+        AIRY_STRNCPY_TERM(snap[i].model, rec->model, sizeof(snap[i].model));
+        AIRY_STRNCPY_TERM(snap[i].chat_path, rec->chat_path, sizeof(snap[i].chat_path));
+        snap[i].headers = rec->headers;
     }
     airy_mtx_unlock(&h->lock);
 
@@ -165,27 +268,45 @@ void ep_health_sweep(ep_health_t *h)
         int ok = 0;
         long code = 0;
         double ms = 0.0;
-        ep_probe_one(snap[i].base, h->probe_path, &ok, &code, &ms);
+        ep_probe_one(snap[i].ctx.api_base, h->probe_path, &ok, &code, &ms);
+
+        int deep_ok = 1;
+        int deep_ran = 0;
+        long deep_code = 0;
+        double deep_ms = 0.0;
+        if (deep && snap[i].model[0] && snap[i].chat_path[0]) {
+            ep_probe_deep(&snap[i], &deep_ok, &deep_code, &deep_ms);
+            deep_ran = 1;
+        }
 
         airy_mtx_lock(&h->lock);
         for (size_t j = 0; j < h->count; j++) {
-            if (strcmp(h->recs[j].provider, snap[i].provider) == 0) {
-                /* 只刷新可达性三态；cold 字段由请求侧独立维护，不互相覆盖。 */
-                h->recs[j].reachable = ok;
-                h->recs[j].http_code = code;
-                h->recs[j].latency_ms = ms;
-                break;
-            }
+            ep_rec_t *rec = &h->recs[j];
+            if (strcmp(rec->provider, snap[i].provider) != 0)
+                continue;
+            /* 只刷新可达性与深度结论；cold 字段由请求侧独立维护。 */
+            rec->latency_ms = ms;
+            if (deep_ran)
+                rec->deep = deep_ok;
+            /* 粘滞判定：轻探测通过但最近一次深度探测失败，端点仍判不可达，
+             * 直到下一次深度探测恢复——"路由在但推理挂"不得报 ok。 */
+            rec->reachable = (ok && rec->deep != 0) ? 1 : 0;
+            rec->http_code = (deep_ran && ok && !deep_ok) ? deep_code : code;
+            break;
         }
         airy_mtx_unlock(&h->lock);
 
-        if (ok)
-            SVC_LOG_DEBUG("C-L02: EP-HEALTH: probe ok provider=%s http=%ld latency_ms=%.1f",
-                          snap[i].provider, code, ms);
-        else
+        if (!ok)
             SVC_LOG_WARN("C-L02: EP-HEALTH: probe FAIL provider=%s base=%s http=%ld "
                          "latency_ms=%.1f",
-                         snap[i].provider, snap[i].base, code, ms);
+                         snap[i].provider, snap[i].ctx.api_base, code, ms);
+        else if (deep_ran && !deep_ok)
+            SVC_LOG_WARN("C-L02: EP-HEALTH: deep probe FAIL provider=%s model=%s http=%ld "
+                         "latency_ms=%.1f",
+                         snap[i].provider, snap[i].model, deep_code, deep_ms);
+        else
+            SVC_LOG_DEBUG("C-L02: EP-HEALTH: probe ok provider=%s http=%ld latency_ms=%.1f deep=%d",
+                          snap[i].provider, code, ms, deep_ran ? deep_ok : -1);
     }
 }
 
@@ -233,12 +354,13 @@ char *ep_health_json(ep_health_t *h)
             continue;
 
         cJSON_AddStringToObject(obj, "provider", rec->provider);
-        cJSON_AddStringToObject(obj, "base", rec->base);
+        cJSON_AddStringToObject(obj, "base", rec->ctx.api_base);
         cJSON_AddStringToObject(obj, "status", rec->reachable < 0
                                                     ? "unknown"
                                                     : (rec->reachable ? "ok" : "unreachable"));
         cJSON_AddNumberToObject(obj, "http_code", (double)rec->http_code);
         cJSON_AddNumberToObject(obj, "latency_ms", rec->latency_ms);
+        cJSON_AddNumberToObject(obj, "deep", (double)rec->deep);
         cJSON_AddNumberToObject(obj, "cold", rec->cold ? 1 : 0);
         if (rec->cold) {
             cJSON_AddStringToObject(obj, "cold_model", rec->cold_model);
