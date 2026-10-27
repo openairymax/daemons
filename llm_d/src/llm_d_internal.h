@@ -21,6 +21,7 @@
 #include <cjson/cJSON.h>
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,6 +43,12 @@ extern ep_health_t *g_ep;
  * 接取 registry；本桥在 rpc 域（service.c）实现，仅暴露 registry 句柄，
  * 保持 struct llm_service 私有不被穿透。 */
 provider_registry_t *llm_svc_reg(const llm_service_t *svc);
+
+/* 跨域桥（0.1.20 D2-7）：配置漂移检测与应用。tick 只检测并发
+ * config_drift，hup 才真正重载；二者在 rpc 域实现，装配域只负责按周期
+ * 驱动与把 SIGHUP 转成一次调用。 */
+int llm_svc_cfg_tick(llm_service_t *svc, uint64_t now_ms);
+int llm_svc_cfg_hup(llm_service_t *svc);
 
 /* 单请求上下文：messages 与 tools_json 由 request_context_create 分配、
  * request_context_destroy 释放（成对，资源确定性）。 */

@@ -24,7 +24,9 @@
 #include "providers/core/ep_health.h"
 #include "providers/core/registry.h"
 #include "router/core/llm_router.h"
+#include "svc_model_watch.h"
 
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -127,6 +129,67 @@ static void ep_load(const char *config_path)
                    LLM_D_SOCKET_WIN, LLM_D_TCP_PORT, NULL, NULL);
 }
 
+/* D2-7 配置热重载：SIGHUP 是唯一应用入口，周期 tick 只检测。
+ *
+ * 信号处理器只置位（async-signal-safe）；重载在事件循环线程的周期回调里
+ * offload 到 daemon 线程池——排空最长数十秒，绝不能在事件循环里做。线程
+ * 池不可用时就地执行：宁可短暂阻塞，也不丢一次显式请求。 */
+static volatile sig_atomic_t g_cfg_hup = 0;
+
+#ifndef _WIN32
+static void cfg_on_hup(int sig)
+{
+    (void)sig;
+    g_cfg_hup = 1;
+}
+#endif
+
+static void cfg_reload(void *arg)
+{
+    (void)arg;
+    int rc = llm_svc_cfg_hup(g_service);
+    if (rc < 0)
+        SVC_LOG_WARN("C-L02: CFG: reload failed — current config kept");
+    else if (rc == 1)
+        SVC_LOG_INFO("C-L02: CFG: reload skipped (in progress or backoff)");
+}
+
+static void cfg_tick(airy_event_loop_t *loop, uint64_t timer_id, void *user_data)
+{
+    (void)loop;
+    (void)timer_id;
+    (void)user_data;
+
+    if (g_cfg_hup) {
+        if (!g_ep_pool) {
+            g_cfg_hup = 0;
+            cfg_reload(NULL);
+            return;
+        }
+        if (thread_pool_submit(g_ep_pool, cfg_reload, NULL) == 0) {
+            g_cfg_hup = 0;
+            return;
+        }
+        /* 置位保留：下一周期重试，显式重载请求不丢 */
+        SVC_LOG_WARN("C-L02: CFG: reload offload rejected — retry next tick");
+        return;
+    }
+    if (g_service)
+        (void)llm_svc_cfg_tick(g_service, airy_time_ms());
+}
+
+/* 与端点探测解耦注册：探测视图建立失败不得连带停掉配置感知，故本函数
+ * 在 ep_health_create 之前调用。 */
+static void cfg_arm(daemon_event_driver_t *driver)
+{
+#ifndef _WIN32
+    if (signal(SIGHUP, cfg_on_hup) == SIG_ERR)
+        SVC_LOG_WARN("C-L02: CFG: SIGHUP handler install failed — reload needs restart");
+#endif
+    daemon_event_driver_add_timer(driver, SVC_MW_INTERVAL_MS, cfg_tick, NULL);
+    SVC_LOG_INFO("C-L02: CFG: drift watch armed (interval=%ums)", SVC_MW_INTERVAL_MS);
+}
+
 /* 未显式指定 manager 时回落 $AIRY_CONFIG_DIR/model.yaml：静态缓冲保持
  * 进程生命周期有效（llm_service 不复制该路径）。 */
 static const char *cfg_fallback(const char *config_path)
@@ -173,6 +236,12 @@ int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
     (void)bsd;
 
     g_ep_pool = daemon_event_driver_get_pool(driver);
+
+    /* 配置感知先于探测视图注册：探测失败会 return 0 提前退出，若放在其
+     * 后，热重载会随探测一起被静默跳过（D2-7 硬要求：空闲进程也要能报
+     * 漂移、能收 SIGHUP）。 */
+    cfg_arm(driver);
+
     g_ep = ep_health_create(llm_svc_reg(g_service), EP_PROBE_FILTER, EP_PROBE_PATH);
     if (!g_ep) {
         /* 探测属观测能力，非服务前置：视图不可用时降级禁用探测，绝不因此
@@ -199,6 +268,13 @@ int svc_activate(daemon_event_driver_t *driver, daemon_bootstrap_sd_t *bsd)
 
 void svc_destroy(void)
 {
+    /* 先复原 SIGHUP 默认处置：处理器只置位一个静态标志，销毁后若仍有信号
+     * 到达，指向的语义已不存在；测试框架与重启路径也不该继承本进程处置。 */
+#ifndef _WIN32
+    (void)signal(SIGHUP, SIG_DFL);
+#endif
+    g_cfg_hup = 0;
+
     /* daemon_cleanup 先销毁事件驱动（含线程池 join + 定时器），后调
      * svc_destroy：此刻已无在飞探测、无定时器回调，销毁视图无并发读。 */
     if (g_ep) {
