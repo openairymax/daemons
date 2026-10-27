@@ -18,6 +18,7 @@
 #include "llm_d_internal.h"
 #include "providers/core/prov_diag.h"
 #include "response.h"
+#include "router/core/llm_router.h"
 #include "token.h"
 #include "token_standard.h"
 
@@ -229,8 +230,17 @@ static void handle_health_check(cJSON *params, int id, airy_sock_t fd)
         JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Out of memory", id);
         return;
     }
+
+    /* 健康口径（0.1.20 D2-5）：进程存活 ≠ 上游可用。唯一判据是端点健康
+     * 状态机（探测与请求实测共喂三态），不以句柄存在性冒充健康（G54）。 */
+    llm_health_snap_t snap;
+    llm_health_state_t st = llm_rtr_health(&snap);
+
     cJSON_AddStringToObject(result, "service", "llm_d");
-    cJSON_AddBoolToObject(result, "healthy", g_service != NULL);
+    cJSON_AddStringToObject(result, "health", llm_health_name(st));
+    cJSON_AddBoolToObject(result, "healthy", st == LLM_HEALTH_OK);
+    cJSON_AddNumberToObject(result, "upstream_total", (double)snap.total);
+    cJSON_AddNumberToObject(result, "upstream_ok", (double)snap.ok);
     cJSON_AddNumberToObject(result, "timestamp", (double)(uint64_t)time(NULL) * 1000);
 
     /* D5 端点健康视图：回应"能力存在 ≠ 能力可用"。无匹配端点时省略

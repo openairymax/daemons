@@ -193,6 +193,45 @@ static void test_real_sd_reachable(void)
     TEST_PASS();
 }
 
+/* 0.1.20 D2-6：上报闸门边沿触发语义（注入 now_ms，不依赖真实时钟）。 */
+static void test_state_gate(void)
+{
+    daemon_dep_gate_t gate;
+
+    TEST_BEGIN("state_gate");
+    memset(&gate, 0, sizeof(gate));
+
+    ASSERT_TRUE(daemon_dep_state(NULL, "d", DAEMON_DEP_ST_OK, NULL, 1000) < 0);
+    ASSERT_TRUE(daemon_dep_state(&gate, NULL, DAEMON_DEP_ST_OK, NULL, 1000) < 0);
+    ASSERT_TRUE(daemon_dep_state(&gate, "", DAEMON_DEP_ST_OK, NULL, 1000) < 0);
+    ASSERT_TRUE(daemon_dep_state(&gate, "d", 0, NULL, 1000) < 0);
+    ASSERT_TRUE(daemon_dep_state(&gate, "d", 9, NULL, 1000) < 0);
+    ASSERT_EQ_INT(0, gate.state);
+
+    /* 首报 OK：静默（启动常态不产生噪声）。 */
+    ASSERT_EQ_INT(0, daemon_dep_state(&gate, "d", DAEMON_DEP_ST_OK, NULL, 1000));
+    ASSERT_EQ_INT(DAEMON_DEP_ST_OK, gate.state);
+    ASSERT_EQ_INT(0, daemon_dep_state(&gate, "d", DAEMON_DEP_ST_OK, NULL, 1020));
+
+    /* 跃迁必发。 */
+    ASSERT_EQ_INT(1, daemon_dep_state(&gate, "d", DAEMON_DEP_ST_DOWN, "0/1 ok", 2000));
+    ASSERT_EQ_INT(DAEMON_DEP_ST_DOWN, gate.state);
+    /* 同态窗口内抑制。 */
+    ASSERT_EQ_INT(0, daemon_dep_state(&gate, "d", DAEMON_DEP_ST_DOWN, "0/1 ok", 2001));
+
+    /* 同态过窗补发心跳（证明仍不可用而非失联）。 */
+    ASSERT_EQ_INT(0, daemon_dep_state(&gate, "d", DAEMON_DEP_ST_DOWN, "0/1 ok",
+                                      2000U + DAEMON_DEP_REPORT_WINDOW_MS - 1U));
+    ASSERT_EQ_INT(1, daemon_dep_state(&gate, "d", DAEMON_DEP_ST_DOWN, "0/1 ok",
+                                      2000U + DAEMON_DEP_REPORT_WINDOW_MS));
+
+    /* 恢复是边沿事件：发一次，随后同态静默。 */
+    ASSERT_EQ_INT(1, daemon_dep_state(&gate, "d", DAEMON_DEP_ST_OK, "1/1 ok", 70000));
+    ASSERT_EQ_INT(0, daemon_dep_state(&gate, "d", DAEMON_DEP_ST_OK, "1/1 ok",
+                                      70000U + DAEMON_DEP_REPORT_WINDOW_MS * 2U));
+    TEST_PASS();
+}
+
 int main(void)
 {
     isolate_data_dir();
@@ -203,6 +242,7 @@ int main(void)
     test_optional_not_degrading();
     test_required_missing_fail_closed();
     test_real_sd_reachable();
+    test_state_gate();
 
     printf("  %d/%d passed\n", g_tests_passed, g_tests_run);
     return g_tests_passed == g_tests_run ? 0 : 1;

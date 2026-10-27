@@ -34,6 +34,14 @@ void ep_health_sweep(ep_health_t *h, int deep);
  * 给出建议并返回 1（该端点若在探测视图内则一并记入）；未超阈值返回 0。 */
 int ep_health_cold(ep_health_t *h, const char *provider, const char *model, double first_ms);
 
+/* 探测结果汇聚出口（0.1.20 D2-5）：sweep 每完成一个端点的最终可达性判定，
+ * 在锁外回调一次，供装配域接进端点健康面（llm_rtr_provider_note）。本件不
+ * include router 头，保持 providers/core 对 router 的单向无依赖。
+ * 同一轮 sweep 内每端点至多回调一次；端点已从视图消失则不回调。 */
+typedef void (*ep_health_sink_t)(void *ud, const char *provider, int reachable);
+
+void ep_health_sink(ep_health_t *h, ep_health_sink_t sink, void *ud);
+
 /* 快照序列化为 JSON 数组（provider/base/status/http_code/latency_ms/deep/cold，
  * 冷加载端点附加 cold_model/first_ms）。deep 取 -1 未探 / 0 失败 / 1 通过。
  * 返回串由调用方以 AIRY_FREE 释放；视图为空或内存不足返回 NULL。 */
