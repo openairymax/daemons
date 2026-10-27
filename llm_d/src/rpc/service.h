@@ -48,9 +48,9 @@ struct llm_service {
      * token 数，0 = 未配置）。请求未指定 max_tokens 且模型未在 provider
      * 侧声明上限时的兜底值，使配置面写下的上限真正生效。 */
     int default_max_output_tokens;
-    /* 0.1.19 §3.5 缺陷5：启动快照（manager 配置 + 用户覆盖 model.yaml）。
-     * 0.1.20 D2-10 起漂移不再只提示：请求侧检出即触发重载，快照随重载
-     * 刷新。 */
+    /* 0.1.19 §3.5 缺陷5 / 0.1.20 D2-7：启动快照（manager 配置 + 用户覆盖
+     * model.yaml）。tick 只检测并发 config_drift，应用只由 SIGHUP 经
+     * svc_mw_reload 触发；成功即就地重照快照，失败保留旧基线。 */
     svc_mw_t mw;
     svc_mw_t mw_usr;
     /* 0.1.19 §3.8.4：调用级链式切换配置。缺省 off，现网选路行为不变；
@@ -78,8 +78,9 @@ const char *llm_usage_state_path(void);
 /**
  * @brief 按当前已落盘配置重新装配服务（0.1.20 D2-10）。
  *
- * 调用方为请求侧漂移检测或管理面显式触发。返回前要么新配置已整体生效
- * 且世代 +1，要么旧配置原样继续服务（失败退避 30s）。
+ * 唯一调用方是 SIGHUP 应用链路（svc_mw_reload 的 apply 回调）；请求侧
+ * 漂移检测只上报不重载。返回前要么新配置已整体生效且世代 +1，要么旧
+ * 配置原样继续服务（失败退避 30s）。
  *
  * @return 0 已切换；1 已有重载在执行或处于退避窗口；非 0 失败
  */

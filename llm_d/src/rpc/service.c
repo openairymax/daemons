@@ -47,6 +47,28 @@ provider_registry_t *llm_svc_reg(const llm_service_t *svc)
     return s->registry;
 }
 
+/* 跨域桥（0.1.20 D2-7）：装配域按固定周期驱动检测、按信号触发应用，
+ * struct llm_service 本身不出 rpc 域。 */
+int llm_svc_cfg_tick(llm_service_t *svc, uint64_t now_ms)
+{
+    struct llm_service *s = (struct llm_service *)svc;
+    if (!s)
+        return -1;
+
+    int hit = 0;
+    if (svc_mw_tick(&s->mw, now_ms) > 0)
+        hit = 1;
+    if (svc_mw_tick(&s->mw_usr, now_ms) > 0)
+        hit = 1;
+    return hit;
+}
+
+int llm_svc_cfg_hup(llm_service_t *svc)
+{
+    struct llm_service *s = (struct llm_service *)svc;
+    return s ? svc_mw_reload(&s->mw) : -1;
+}
+
 /* 计费/用量持久化路径 $AIRY_DATA_DIR/agentrt/llm_usage.json，重启不清零。 */
 const char *llm_usage_state_path(void)
 {
@@ -112,14 +134,41 @@ static void llm_route_init(llm_service_t *svc)
     register_router_endpoints(svc);
 }
 
-/* 0.1.19 §3.5 缺陷5：对启动时真正消费的两份 model.yaml 照快照。
- * manager 配置与用户覆盖 (A2-1) 只要路径不同即各照一份，用户直接编辑
- * 其中任一文件都能在请求侧被检出；缺席者 valid=0 静默停用。 */
+/* SIGHUP 应用回调（0.1.20 D2-7）：机制件只负责触发，切换语义全在本域。
+ * 成功时副监视（用户覆盖）就地重照，新建的覆盖文件亦在此被纳入监视；
+ * 主监视由 svc_mw_reload 自行 rebase，避免同一文件读两遍。 */
+static int llm_cfg_apply(void *ud, char *why, size_t cap)
+{
+    llm_service_t *svc = (llm_service_t *)ud;
+    if (!svc)
+        return -1;
+
+    int rc = llm_service_reload(svc);
+    if (rc == AIRY_OK) {
+        char up[1024];
+        if (llm_boot_usr_path(up, sizeof(up)) &&
+            strcmp(up, svc->cfg_path) != 0)
+            (void)svc_mw_rebase(&svc->mw_usr, up);
+        return 0;
+    }
+    if (rc == 1)
+        return 1; /* 忙/退避：不产生失败事件，等下一次 SIGHUP */
+    if (why && cap > 0)
+        snprintf(why, cap, "reload rejected rc=%d", rc);
+    return -1;
+}
+
+/* 0.1.19 §3.5 缺陷5 / 0.1.20 D2-7：对启动时真正消费的两份 model.yaml
+ * 照快照并挂应用回调。manager 配置与用户覆盖 (A2-1) 只要路径不同即各
+ * 照一份；缺席者 valid=0 静默停用，但 SIGHUP 仍可补救（回调已挂）。 */
 static void llm_watch_cfg(llm_service_t *svc, const char *cfg)
 {
     char up[1024];
-    if (cfg)
+    if (cfg) {
         (void)svc_mw_init(&svc->mw, cfg, "llm_d");
+        /* 周期 0 = 机制件缺省（SVC_MW_INTERVAL_MS），与装配域的 tick 同源 */
+        (void)svc_mw_hook(&svc->mw, llm_cfg_apply, svc, 0);
+    }
     if (llm_boot_usr_path(up, sizeof(up)) && (!cfg || strcmp(cfg, up) != 0))
         (void)svc_mw_init(&svc->mw_usr, up, "llm_d");
 }

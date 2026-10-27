@@ -4,7 +4,7 @@
 /**
  * @file test_logger.c
  * @brief 日志模块单元测试（0.1.19 §205 收敛后权威面：logging.h +
- *        svc_logger.h SVC_LOG_* 别名）
+ *        svc_logger.h SVC_LOG_* 别名；0.1.20 D2-8 增加 wall/mono 配对断言）
  */
 
 #include "svc_logger.h"
@@ -12,6 +12,11 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+
+#ifndef _WIN32
+#include <stdlib.h>
+#include <unistd.h>
+#endif
 
 static void test_logger_level_conversion(void)
 {
@@ -63,6 +68,73 @@ static void test_logger_default_init(void)
     SVC_LOG_INFO("    PASSED");
 }
 
+/* D2-8：每条日志行必须同时携带 wall 与 mono，且同进程内 mono 单调不减。
+ * 以 stderr 重定向做端到端断言——只有真实写入路径才覆盖 record 构造。 */
+#ifndef _WIN32
+
+static int mono_of_line(const char *line, unsigned long long *out)
+{
+    const char *p = strstr(line, "] [mono:");
+    if (!p)
+        return -1;
+    char *end = NULL;
+    unsigned long long v = strtoull(p + 8, &end, 10);
+    if (!end || *end != ']')
+        return -1;
+    *out = v;
+    return 0;
+}
+
+static void test_logger_mono_pair(void)
+{
+    char path[256];
+    snprintf(path, sizeof(path), "/tmp/airymaxrt-log-mono-%ld.log", (long)getpid());
+
+    fflush(stderr);
+    int saved = dup(fileno(stderr));
+    assert(saved >= 0);
+    assert(freopen(path, "w", stderr) != NULL);
+
+    assert(log_init(NULL) == 0);
+    SVC_LOG_INFO("mono pair A");
+    SVC_LOG_INFO("mono pair B");
+    SVC_LOG_INFO("mono pair C");
+    fflush(stderr);
+
+    assert(dup2(saved, fileno(stderr)) >= 0);
+    close(saved);
+    log_cleanup();
+
+    FILE *f = fopen(path, "r");
+    assert(f != NULL);
+
+    int seen = 0;
+    unsigned long long prev = 0;
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        unsigned long long v;
+        if (mono_of_line(line, &v) != 0)
+            continue;
+        assert(line[0] == '['); /* wall 段与 mono 段同一行且 wall 在前 */
+        if (seen > 0)
+            assert(v >= prev);
+        prev = v;
+        seen++;
+    }
+    fclose(f);
+    remove(path);
+    assert(seen == 3);
+}
+
+#else
+
+static void test_logger_mono_pair(void)
+{
+    /* Windows 控制台重定向语义不同，D2-8 由 Linux CI 覆盖 */
+}
+
+#endif
+
 int main(void)
 {
     SVC_LOG_INFO("=========================================");
@@ -72,6 +144,7 @@ int main(void)
     test_logger_level_conversion();
     test_logger_init_cleanup();
     test_logger_default_init();
+    test_logger_mono_pair();
 
     SVC_LOG_INFO("All logger module tests PASSED");
     return 0;
