@@ -203,6 +203,20 @@ int prov_parse_chat(const char *body, llm_response_t **out)
     return AIRY_OK;
 }
 
+/* C3 thinking 控制：chat_template_kwargs 容器惰性创建（vLLM/llama.cpp
+ * 官方线格式——模板变量透传，Qwen3/GLM 等推理模型的思考开关经此承载）。
+ * 返回 NULL 时调用方静默跳过（宁可不发不乱发）。 */
+static cJSON *ctk_ensure(cJSON *root)
+{
+    cJSON *ctk = cJSON_GetObjectItem(root, "chat_template_kwargs");
+    if (!ctk) {
+        ctk = cJSON_CreateObject();
+        if (ctk)
+            cJSON_AddItemToObject(root, "chat_template_kwargs", ctk);
+    }
+    return ctk;
+}
+
 void provider_request_params_fill(cJSON *root, const llm_request_config_t *manager,
                                   const char *default_model, int default_max_tokens,
                                   const char *stop_key)
@@ -248,6 +262,21 @@ void provider_request_params_fill(cJSON *root, const llm_request_config_t *manag
         cJSON_AddBoolToObject(root, "cache_prompt", 1);
     if (manager->caps.accepts_slot_id && manager->slot_set)
         cJSON_AddNumberToObject(root, "slot_id", (double)manager->slot_id);
+
+    /* C3 thinking 控制：显式设置且能力位置位才下发；缺省旧请求体
+     * 字节级不变。enable_thinking 为布尔语义（false 也是有效值，
+     * 哨兵位使其可表达），budget 零值 = 未设置。 */
+    if (manager->caps.accepts_enable_thinking && manager->thinking_set) {
+        cJSON *ctk = ctk_ensure(root);
+        if (ctk)
+            cJSON_AddBoolToObject(ctk, "enable_thinking",
+                                  manager->enable_thinking ? 1 : 0);
+    }
+    if (manager->caps.accepts_thinking_budget && manager->thinking_budget != 0u) {
+        cJSON *ctk = ctk_ensure(root);
+        if (ctk)
+            cJSON_AddNumberToObject(ctk, "thinking_budget", (double)manager->thinking_budget);
+    }
 
     if (manager->stream)
         cJSON_AddBoolToObject(root, "stream", 1);
