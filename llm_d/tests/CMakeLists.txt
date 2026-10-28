@@ -103,6 +103,8 @@ set(LLM_TEST_SOURCES
     # 0.1.20 B-A7 A7-4：声明面（provision/artifact/capabilities 覆盖 +
     # 未知键 fail-closed）回归
     test_config_decl.c
+    # 0.1.20 Gate 37：计费热路径两臂证据（单请求 fsync 计数 + 对照臂 p99）
+    bench_cost_hotpath.c
 )
 
 set(LLM_COMMON_INCLUDES
@@ -139,6 +141,8 @@ foreach(TEST_SRC ${LLM_TEST_SOURCES})
     target_link_libraries(test_llm_${TEST_NAME} PRIVATE
         svc_common
         Threads::Threads
+        # 0.1.20 Gate 37：bench_cost_hotpath 以 dlsym(RTLD_NEXT) 委派真实 fsync
+        ${CMAKE_DL_LIBS}
     )
 
     # cJSON found by root CMakeLists.txt (AIRY_HAS_CJSON)
