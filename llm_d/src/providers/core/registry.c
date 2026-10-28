@@ -187,7 +187,7 @@ int provider_registry_model_max_output(const provider_t *prov, const char *model
     return 0;
 }
 
-int provider_registry_model_max_concurrent(const provider_t *prov, const char *model)
+int prov_model_max_conc(const provider_t *prov, const char *model)
 {
     if (!prov || !model || !prov->models || !prov->model_max_concurrent)
         return 0;

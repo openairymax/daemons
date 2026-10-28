@@ -122,7 +122,7 @@ cost_tracker_t *cost_tracker_create(const pricing_rule_t *rules, int rule_count)
     return ct;
 }
 
-int cost_tracker_set_rules(cost_tracker_t *ct, const pricing_rule_t *rules, int rule_count)
+int cost_set_rules(cost_tracker_t *ct, const pricing_rule_t *rules, int rule_count)
 {
     if (!ct)
         return -1;

@@ -29,15 +29,15 @@ void router_state_load(void);
 
 /** 把当前端点健康面写入快照数组（保留重注册前的状态，供热重载复用）。
  * 调用方须持 ctx->mutex。 */
-void router_state_capture_locked(void);
+void rtr_state_capture(void);
 
 /** 按 provider/model 把快照回填到新注册端点，命中即从快照移除。
  * 调用方须持 ctx->mutex。 */
-void router_ep_restore_locked(llm_endpoint_t *ep);
+void rtr_ep_restore(llm_endpoint_t *ep);
 
 /** 把当前端点健康面落盘。端点表为空时不写文件（保留上次内容，避免
  * 热重载的短暂空窗把状态抹掉）。调用方须持 ctx->mutex。 */
-int router_state_save_locked(void);
+int rtr_state_save(void);
 
 #ifdef __cplusplus
 }

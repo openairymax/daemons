@@ -71,7 +71,7 @@ void llm_router_destroy(void)
                   (unsigned long long)ctx->stats.error_count);
 
     AIRY_MUTEX_LOCK(&ctx->mutex);
-    (void)router_state_save_locked();
+    (void)rtr_state_save();
     AIRY_MUTEX_UNLOCK(&ctx->mutex);
 
     AIRY_MUTEX_DESTROY(&ctx->mutex);
@@ -111,7 +111,7 @@ int llm_router_register_endpoint(const llm_endpoint_t *endpoint)
     slot->probe_until_ms = 0U;
     slot->probe_fail = 0U;
     slot->open_level = 0U;
-    router_ep_restore_locked(slot);
+    rtr_ep_restore(slot);
     ctx->endpoint_count++;
 
     AIRY_LOG_INFO("C-L02: LLMRouter: registered endpoint %s/%s (total=%zu, "
@@ -124,7 +124,7 @@ int llm_router_register_endpoint(const llm_endpoint_t *endpoint)
     return 0;
 }
 
-int llm_router_reset_endpoints(void)
+int llm_rtr_reset_eps(void)
 {
     router_ctx_t *ctx = router_ctx_get();
 
@@ -134,7 +134,7 @@ int llm_router_reset_endpoints(void)
     AIRY_MUTEX_LOCK(&ctx->mutex);
     /* 热重载会清表重建：先把当前健康面搬进快照，注册时再逐个回填，
      * 使配置改动不白送一轮熔断状态。 */
-    router_state_capture_locked();
+    rtr_state_capture();
     ctx->endpoint_count = 0;
     ctx->round_robin_index = 0;
     AIRY_MUTEX_UNLOCK(&ctx->mutex);

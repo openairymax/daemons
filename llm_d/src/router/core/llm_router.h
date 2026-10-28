@@ -202,7 +202,7 @@ const char *llm_health_name(llm_health_state_t state);
  * @param ok       1 可达，0 不可达。
  * @return 命中的端点条数（0 表示 provider 未注册或 router 未初始化）。
  */
-size_t llm_rtr_provider_note(const char *provider, int ok);
+size_t llm_rtr_prov_note(const char *provider, int ok);
 
 /**
  * 测量面单点记账（0.1.20 D0）：端点延迟 EWMA 回填 + stats 聚合。
@@ -277,7 +277,7 @@ int llm_router_register_endpoint(const llm_endpoint_t *endpoint);
  *
  * @return 0 成功；AIRY_ERR_SYS_NOT_INIT 未初始化。
  */
-int llm_router_reset_endpoints(void);
+int llm_rtr_reset_eps(void);
 
 /** 按请求选路。@return 0 成功，非 0 失败。 */
 int llm_router_route(const llm_route_request_t *request, llm_route_result_t *result);

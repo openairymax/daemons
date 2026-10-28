@@ -141,12 +141,12 @@ int llm_service_reload(llm_service_t *svc)
     /* provider 数组已被注册表深拷贝，规则表所有权已转 svc。 */
     llm_boot_drop(&b);
 
-    if (cost_tracker_set_rules(svc->cost, (const pricing_rule_t *)svc->rules,
+    if (cost_set_rules(svc->cost, (const pricing_rule_t *)svc->rules,
                                (int)svc->rule_count) != 0)
         SVC_LOG_WARN("C-L02: SVC: pricing table swap failed — cost keeps previous prices");
 
     /* 端点表按新注册表整表重建：追加式注册会把已下线模型永久留在表里。 */
-    if (llm_router_reset_endpoints() == 0)
+    if (llm_rtr_reset_eps() == 0)
         register_router_endpoints(svc);
 
     if (svc_swap_commit(&svc->swap) != 0) {

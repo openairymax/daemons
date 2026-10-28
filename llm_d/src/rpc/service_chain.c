@@ -40,7 +40,7 @@ static int svc_gate_limit(const provider_t *prov, const char *model)
     provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
     if (!base || base->props_state == 0)
         return 0; /* 不设闸 */
-    int cfg = provider_registry_model_max_concurrent(prov, model);
+    int cfg = prov_model_max_conc(prov, model);
     int sp = base->total_slots > 0 ? base->total_slots : (cfg > 0 ? cfg : 1);
     int mi = cfg > 0 ? cfg : 1;
     return mi < sp ? mi : sp;

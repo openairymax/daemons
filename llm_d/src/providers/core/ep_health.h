@@ -37,7 +37,7 @@ void ep_health_sweep(ep_health_t *h, int deep);
 int ep_health_cold(ep_health_t *h, const char *provider, const char *model, double first_ms);
 
 /* 探测结果汇聚出口（0.1.20 D2-5）：sweep 每完成一个端点的最终可达性判定，
- * 在锁外回调一次，供装配域接进端点健康面（llm_rtr_provider_note）。本件不
+ * 在锁外回调一次，供装配域接进端点健康面（llm_rtr_prov_note）。本件不
  * include router 头，保持 providers/core 对 router 的单向无依赖。
  * 同一轮 sweep 内每端点至多回调一次；端点已从视图消失则不回调。 */
 typedef void (*ep_health_sink_t)(void *ud, const char *provider, int reachable);
