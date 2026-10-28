@@ -19,7 +19,7 @@
  * 同时覆盖 provider_registry_model_max_output() 的边界（NULL / 未命中 / 命中）。
  */
 
-#include "rpc/rpc_internal.h"
+#include "rpc/gen_params.h"
 #include "service.h"
 
 #include <stdio.h>

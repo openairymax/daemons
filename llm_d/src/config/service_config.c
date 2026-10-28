@@ -11,7 +11,7 @@
  *   - service_config_yaml_models.c    models 行解析 + 简化 llm 段展开
  *   - service_config_yaml_providers.c provider 聚合导出
  *   - service_config_yaml_pricing.c   YAML 定价规则提取
- * 共享符号经 config/config_internal.h 声明。
+ * 跨文件符号按关注点分散于 config/pricing_api.h 与 config/model_loader.h。
  */
 
 #include "airy_memory.h"
@@ -23,10 +23,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "config/config_internal.h"
+#include "config/pricing_api.h"
+#include "config/model_loader.h"
 #include "config/types.h"
 
-int ends_with(const char *str, const char *suffix)
+static int ends_with(const char *str, const char *suffix)
 {
     if (!str || !suffix)
         return 0;

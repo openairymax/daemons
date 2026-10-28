@@ -21,7 +21,7 @@
 #include <cjson_helpers.h>
 #include <string.h>
 
-#include "config/config_internal.h"
+#include "config/model_loader.h"
 
 /* 从 JSON 的 providers 数组装载模型配置，数组与计数由调用方释放。 */
 int svc_load_model_config_json(const char *config_path, provider_config_t **out_providers,

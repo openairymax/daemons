@@ -13,10 +13,11 @@
 #include "rpc/service_boot.h"
 
 #include "airy_memory.h"
-#include "config/config_internal.h"
+#include "config/pricing_api.h"
+#include "config/model_loader.h"
 #include "daemon_defaults.h"
 #include "daemon_platform_ext.h"
-#include "rpc/rpc_internal.h"
+#include "rpc/prov_internal.h"
 #include "rpc/service.h"
 #include "svc_logger.h"
 
