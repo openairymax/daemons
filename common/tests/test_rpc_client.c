@@ -30,15 +30,15 @@
 static void test_tmo_table(void)
 {
     printf("  test_tmo_table...\n");
-    assert(daemon_rpc_timeout_for("complete_stream") == 300000u);
-    assert(daemon_rpc_timeout_for("complete") == 180000u);
-    assert(daemon_rpc_timeout_for("invoke") == 180000u);
-    assert(daemon_rpc_timeout_for("think") == 120000u);
-    assert(daemon_rpc_timeout_for("execute_tool") == 90000u);
+    assert(rpc_timeout_for("complete_stream") == 300000u);
+    assert(rpc_timeout_for("complete") == 180000u);
+    assert(rpc_timeout_for("invoke") == 180000u);
+    assert(rpc_timeout_for("think") == 120000u);
+    assert(rpc_timeout_for("execute_tool") == 90000u);
     /* 表外方法、空串、NULL 一律回落默认 30s */
-    assert(daemon_rpc_timeout_for("write") == 30000u);
-    assert(daemon_rpc_timeout_for("") == 30000u);
-    assert(daemon_rpc_timeout_for(NULL) == 30000u);
+    assert(rpc_timeout_for("write") == 30000u);
+    assert(rpc_timeout_for("") == 30000u);
+    assert(rpc_timeout_for(NULL) == 30000u);
     printf("    PASSED\n");
 }
 

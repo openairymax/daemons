@@ -20,7 +20,7 @@
  * from syscall_router.c are forwarded through this helper to the
  * mem_d / agent_d daemons.
  *
- * 0.1.20 D2-1/D2-4：未显式指定超时的调用按方法分档（daemon_rpc_timeout_for），
+ * 0.1.20 D2-1/D2-4：未显式指定超时的调用按方法分档（rpc_timeout_for），
  * 并对「曾经连通过、现在连不上」的目标做负缓存退避。连接复用（同目标缓存
  * fd）在本协议下不可实现：服务端 daemon_handle_client 严格「单请求单响应
  * 即关闭」，缓存的 fd 在响应返回后已被对端关闭；因此这里缓存的是「不可达
@@ -316,7 +316,7 @@ static uint32_t rpc_budget_left(const rpc_budget_t *bud)
     return now >= bud->end_ms ? 0u : (uint32_t)(bud->end_ms - now);
 }
 
-uint32_t daemon_rpc_timeout_for(const char *method)
+uint32_t rpc_timeout_for(const char *method)
 {
     size_t i;
 
@@ -722,7 +722,7 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
     if (!socket_path || !method)
         return AIRY_ERR_INVALID_PARAM;
     if (timeout_ms == 0)
-        timeout_ms = daemon_rpc_timeout_for(method);
+        timeout_ms = rpc_timeout_for(method);
 
     /* 预算从进入调用起算：connect 与请求发送同样计入同一 deadline。 */
     rpc_budget_t bud;
@@ -797,7 +797,7 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
 
     *out_result_json = NULL;
     if (timeout_ms == 0)
-        timeout_ms = daemon_rpc_timeout_for(method);
+        timeout_ms = rpc_timeout_for(method);
 
     /* 预算从进入调用起算：connect 与请求发送同样计入同一 deadline。 */
     rpc_budget_t bud;

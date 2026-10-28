@@ -161,7 +161,7 @@ void router_state_load(void)
                       ctx->restore_count);
 }
 
-void router_state_capture_locked(void)
+void rtr_state_capture(void)
 {
     router_ctx_t *ctx = router_ctx_get();
     uint32_t now = (uint32_t)airy_time_ms();
@@ -172,7 +172,7 @@ void router_state_capture_locked(void)
         snap_from_ep(&ctx->endpoints[i], now, &ctx->restore[ctx->restore_count++]);
 }
 
-void router_ep_restore_locked(llm_endpoint_t *ep)
+void rtr_ep_restore(llm_endpoint_t *ep)
 {
     router_ctx_t *ctx = router_ctx_get();
     uint32_t now = (uint32_t)airy_time_ms();
@@ -204,7 +204,7 @@ void router_ep_restore_locked(llm_endpoint_t *ep)
     }
 }
 
-int router_state_save_locked(void)
+int rtr_state_save(void)
 {
     router_ctx_t *ctx = router_ctx_get();
     char path[AIRY_PATH_MAX];

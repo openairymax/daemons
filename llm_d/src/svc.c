@@ -72,7 +72,7 @@ static daemon_dep_gate_t g_hl_gate;
 static void ep_note_router(void *ud, const char *provider, int reachable)
 {
     (void)ud;
-    (void)llm_rtr_provider_note(provider, reachable);
+    (void)llm_rtr_prov_note(provider, reachable);
 }
 
 /* D2-6：把聚合三态按边沿规则上报。读取的是状态机当前值，不产生额外探测，

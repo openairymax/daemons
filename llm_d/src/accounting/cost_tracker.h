@@ -29,7 +29,7 @@ void cost_tracker_destroy(cost_tracker_t *ct);
 
 /* 换价格表（热重载）：深拷贝后原子替换，调用方的数组可立即释放。
  * 计数累计不受影响。@return 0 成功；-1 参数或内存失败（旧表保持）。 */
-int cost_tracker_set_rules(cost_tracker_t *ct, const pricing_rule_t *rules, int rule_count);
+int cost_set_rules(cost_tracker_t *ct, const pricing_rule_t *rules, int rule_count);
 
 /* 价格查找 SSoT：累计/估算与端点路由表共用；首条命中胜出，pattern 为精确名或
  * 尾部 '*'；未命中取内置默认价，故默认价只有一处。model 为 NULL 即默认价。 */
