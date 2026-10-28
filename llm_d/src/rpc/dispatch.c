@@ -381,6 +381,21 @@ static int parse_sampling(req_env_t *r, cJSON *params)
         cfg->slot_id = (int)v->valuedouble;
         cfg->slot_set = true;
     }
+    /* C3 thinking 控制：显式传 chat_template_kwargs 才置哨兵，enable_thinking
+     * 为意图载体（false 合法）；budget 可选，0 = 不发送。能力位门控与
+     * chat_template_kwargs 线格式归 envelope 机制面，此处只解析调用方意图
+     * （atoms 客户端 build_llm_request_json 同名同构透传）。 */
+    v = cJSON_GetObjectItem(params, "chat_template_kwargs");
+    if (cJSON_IsObject(v)) {
+        cJSON *et = cJSON_GetObjectItem(v, "enable_thinking");
+        if (cJSON_IsBool(et)) {
+            cfg->enable_thinking = cJSON_IsTrue(et);
+            cfg->thinking_set = true;
+            cJSON *tb = cJSON_GetObjectItem(v, "thinking_budget");
+            if (cJSON_IsNumber(tb) && tb->valuedouble >= 0.0)
+                cfg->thinking_budget = (uint32_t)tb->valuedouble;
+        }
+    }
     return 0;
 }
 
