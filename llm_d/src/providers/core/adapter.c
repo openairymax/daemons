@@ -35,6 +35,17 @@ static const char *req_model(const provider_adapter_t *ops, const llm_request_co
     return ops->default_model ? ops->default_model : "";
 }
 
+int prov_max_conc(const provider_t *prov, const char *model)
+{
+    if (!prov || !model || !prov->models || !prov->model_max_concurrent)
+        return 0;
+    for (size_t i = 0; prov->models[i]; ++i) {
+        if (strcmp(prov->models[i], model) == 0)
+            return prov->model_max_concurrent[i];
+    }
+    return 0;
+}
+
 /* B1-d：失败 resp 释放前把上游状态码与响应体片段存入线程诊断槽，
  * 供 RPC 错误面透传（resp 可为 NULL——传输层失败时指针已归一为空）。 */
 static void diag_from_resp(long http_code, const provider_http_resp_t *resp)

@@ -20,11 +20,9 @@
 #include "airy_memory.h"
 #include "platform_misc.h"
 #include "providers/core/adapter.h"
-#include "providers/core/registry.h"
 #include "providers/core/provider_base.h"
 #include "rpc/gen_params.h"
 #include "router/core/llm_failover.h"
-#include "service.h"
 #include "svc_logger.h"
 #include "sync.h"
 
@@ -40,7 +38,7 @@ static int svc_gate_limit(const provider_t *prov, const char *model)
     provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
     if (!base || base->props_state == 0)
         return 0; /* 不设闸 */
-    int cfg = prov_model_max_conc(prov, model);
+    int cfg = prov_max_conc(prov, model);
     int sp = base->total_slots > 0 ? base->total_slots : (cfg > 0 ? cfg : 1);
     int mi = cfg > 0 ? cfg : 1;
     return mi < sp ? mi : sp;
@@ -168,17 +166,6 @@ int svc_chain_next(const llm_route_request_t *req, svc_chain_t *chain, char *pro
     return 0;
 }
 
-const provider_t *svc_find_prov(llm_service_t *svc, const char *model)
-{
-    if (!svc || !model)
-        return NULL;
-
-    airy_mtx_lock(&svc->lock);
-    const provider_t *prov = provider_registry_find(svc->registry, model);
-    airy_mtx_unlock(&svc->lock);
-    return prov;
-}
-
 /* 健康面放行。未注册端点无从判定，按可用处理：router 未初始化或端点
  * 超出注册上限时，若按拒绝处理会把本可尝试的端点全部跳过。 */
 static int ep_gate(const provider_t *prov, const char *model)
@@ -211,6 +198,7 @@ int svc_chain_run(llm_service_t *svc, const llm_request_config_t *manager,
 {
     svc_chain_t chain;
     const provider_t *prov = first;
+    llm_route_cfg_t route;
     char cur_model[128];
     int auto_mode;
 
@@ -219,7 +207,8 @@ int svc_chain_run(llm_service_t *svc, const llm_request_config_t *manager,
     if (!svc || !manager || !req || !first || !attempt)
         return AIRY_ERR_INVALID_PARAM;
 
-    svc_chain_init(&chain, &svc->route);
+    svc_chain_ctx(svc, &route);
+    svc_chain_init(&chain, &route);
     auto_mode = svc_chain_auto(&chain);
     cur_model[0] = '\0';
 

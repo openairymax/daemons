@@ -76,6 +76,13 @@ struct llm_service {
 const char *llm_usage_state_path(void);
 
 /**
+ * @brief 把注册表内全部 (provider, model) 端点登记进进程级 llm_router。
+ *
+ * 只在启动装配链路调用一次（llm_route_init）；router 未初始化时不调用。
+ */
+void register_router_endpoints(llm_service_t *svc);
+
+/**
  * @brief 按当前已落盘配置重新装配服务（0.1.20 D2-10）。
  *
  * 唯一调用方是 SIGHUP 应用链路（svc_mw_reload 的 apply 回调）；请求侧
