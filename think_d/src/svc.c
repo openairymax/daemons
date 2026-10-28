@@ -178,19 +178,19 @@ static void cfg_load(const char *config_path)
         if ((e = getenv("AIRY_THINK_TIMEOUT_MS")) && *e && atoi(e) > 0)
             g_cfg.process_timeout_ms = (uint32_t)atoi(e);
 
-        /* 本地低算力（performance_mode）：lightweight 使 think.enabled 失效，
-         * 关闭 GRAD 批判环（复用 LLM 不可用时既有的单元素 JSON 直连降级路
-         * 径）。性能模式是设备级策略包络，判据来自 env AIRY_PERF_MODE >
+        /* 本地低算力（performance_mode）：lightweight 不关闭 think 服务，
+         * 而是把 GRAD 批判环降为单轮确定性验证（max_iterations=1、跳过
+         * B 语义仲裁，零生成 token；C 四验含 E-02 环检测全部保留）。
+         * 性能模式是设备级策略包络，判据来自 env AIRY_PERF_MODE >
          * model.yaml 顶层键（svc_perf_resolve 单一入口）；置于 env 链之后，
-         * 故 lightweight 对 GRAD 开关具有终裁权——用户回退完整能力应改
+         * 故 lightweight 对 GRAD 档位具有终裁权——用户回退完整能力应改
          * AIRY_PERF_MODE=full，而非隐式的 AIRY_THINK_ENABLED。auto 仅提示，
          * 不改配置。 */
         g_cfg.perf_light =
             svc_perf_resolve(have_model_yaml ? model_path : NULL) == SVC_PERF_LIGHTWEIGHT;
-        if (g_cfg.perf_light) {
-            g_cfg.think_enabled = 0;
-            SVC_LOG_WARN("ThinkPerf: performance_mode=lightweight, GRAD + pre-pipeline folded");
-        }
+        if (g_cfg.perf_light)
+            SVC_LOG_WARN("ThinkPerf: performance_mode=lightweight, "
+                         "GRAD folded to single-round C verify (zero LLM tokens)");
     }
 }
 
