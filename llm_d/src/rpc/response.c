@@ -68,6 +68,10 @@ char *response_to_json(const llm_response_t *resp)
     }
     if (resp->finish_reason)
         cJSON_AddStringToObject(root, "finish_reason", resp->finish_reason);
+    /* P1-12：截断事实在 wire 面显式化。字段仅在截断时出现（timings/capacity
+     * 同风格，完备回答零噪声）；机制只报告事实，处置归调用方策略侧。 */
+    if (llm_finish_is_truncated(resp->finish_reason))
+        cJSON_AddBoolToObject(root, "truncated", true);
     /* D2-9 容量回显：未探测端点（云族）整段缺席，不制造全零噪声。 */
     if (resp->context_window || resp->total_slots) {
         cJSON *cap = cJSON_CreateObject();

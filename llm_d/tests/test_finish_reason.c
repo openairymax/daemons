@@ -13,10 +13,14 @@
  *   4. NULL / 空串 → stop（norm 永不返回 NULL）
  *   5. 截断判定唯一入口 llm_finish_is_truncated()，原始标记不得直接判定
  *   6. wire 契约 response_to_json/response_from_json 双向透传 canonical 值
+ *   7. Gate 37（P1-12）：截断事实显式化——truncated:true 仅截断时出现，
+ *      完备响应零噪声，调用方无需解析 finish_reason 词汇即可判读
  */
 
 #include "llm_service.h"
 #include "response.h"
+
+#include <cjson_helpers.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -119,6 +123,47 @@ static void test_wire_roundtrip(void)
     llm_response_free(back);
 }
 
+/* Gate 37（P1-12）：截断事实在 wire 面显式化。截断响应携带 truncated:true，
+ * 完备响应不得出现该字段；与 finish_reason 透传解耦，调用方按字段存在性
+ * 判读，机制面不替策略面做处置。 */
+static void test_wire_truncated_flag(void)
+{
+    llm_response_t trunc;
+    __builtin_memset(&trunc, 0, sizeof(trunc));
+    trunc.finish_reason = (char *)LLM_FINISH_LENGTH;
+
+    char *json = response_to_json(&trunc);
+    check_int("flag.to_json", json != NULL, 1);
+    if (!json)
+        return;
+
+    CJSON_PARSE_GUARD(root, json, {
+        check_int("flag.parse", 0, 1);
+        cJSON_free(json);
+        return;
+    });
+    cJSON *flag = cJSON_GetObjectItem(root, "truncated");
+    check_int("flag.truncated_true", cJSON_IsBool(flag) && cJSON_IsTrue(flag), 1);
+    cJSON_free(json);
+
+    llm_response_t stop;
+    __builtin_memset(&stop, 0, sizeof(stop));
+    stop.finish_reason = (char *)LLM_FINISH_STOP;
+
+    char *json2 = response_to_json(&stop);
+    check_int("flag.stop_to_json", json2 != NULL, 1);
+    if (!json2)
+        return;
+
+    CJSON_PARSE_GUARD(root2, json2, {
+        check_int("flag.stop_parse", 0, 1);
+        cJSON_free(json2);
+        return;
+    });
+    check_int("flag.stop_absent", cJSON_GetObjectItem(root2, "truncated") == NULL, 1);
+    cJSON_free(json2);
+}
+
 int main(void)
 {
     printf("running finish_reason canonical SSoT regression\n");
@@ -129,6 +174,7 @@ int main(void)
     test_norm_missing();
     test_truncated();
     test_wire_roundtrip();
+    test_wire_truncated_flag();
 
     if (fail_count == 0) {
         printf("All %d finish-reason assertions passed\n", test_count);
