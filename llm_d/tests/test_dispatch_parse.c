@@ -15,6 +15,8 @@
  *   4. slot_id 仅显式数字才置哨兵；槽位 0 合法可表达
  *   5. 满载守恒：上限条原始消息在任一注入模式下必须整请求拒绝，
  *      不得静默丢弃时间感知
+ *   6. C3 thinking：显式传 chat_template_kwargs.enable_thinking（含
+ *      false）才置哨兵；budget 可选随行；缺省不置（旧请求体不变）
  */
 
 #include "llm_d_internal.h"
@@ -262,6 +264,51 @@ static void test_slot_id_roundtrip(void)
     cJSON_Delete(params);
 }
 
+/* C3 thinking 解析：enable_thinking 为意图哨兵（false 合法可表达），
+ * budget 可选随行；缺省不置哨兵保持旧请求体字节级不变。 */
+static void test_thinking_roundtrip(void)
+{
+    llm_request_config_t cfg;
+    int rc;
+    cJSON *params;
+    cJSON *ctk;
+    request_context_t *ctx;
+
+    env_stable_reset();
+
+    params = make_params("be helpful", "hello");
+    ctk = cJSON_AddObjectToObject(params, "chat_template_kwargs");
+    cJSON_AddBoolToObject(ctk, "enable_thinking", 0);
+    ctx = run_parse(params, &cfg, &rc);
+    check_int("think.rc", rc, 0);
+    check_true("think.set", cfg.thinking_set);
+    check_true("think.off", !cfg.enable_thinking);
+    check_int("think.nobudget", (long)cfg.thinking_budget, 0);
+    request_context_destroy(ctx);
+    cJSON_Delete(params);
+
+    params = make_params("be helpful", "hello");
+    ctk = cJSON_AddObjectToObject(params, "chat_template_kwargs");
+    cJSON_AddBoolToObject(ctk, "enable_thinking", 1);
+    cJSON_AddNumberToObject(ctk, "thinking_budget", 128);
+    ctx = run_parse(params, &cfg, &rc);
+    check_int("thinkon.rc", rc, 0);
+    check_true("thinkon.set", cfg.thinking_set);
+    check_true("thinkon.on", cfg.enable_thinking);
+    check_int("thinkon.budget", (long)cfg.thinking_budget, 128);
+    request_context_destroy(ctx);
+    cJSON_Delete(params);
+
+    params = make_params("be helpful", "hello");
+    ctx = run_parse(params, &cfg, &rc);
+    check_int("nothink.rc", rc, 0);
+    check_true("nothink.unset", !cfg.thinking_set);
+    request_context_destroy(ctx);
+    cJSON_Delete(params);
+
+    env_stable_reset();
+}
+
 /* 满载守恒：上限条原始消息在任一注入模式下都无处安放时间上下文，
  * 必须整请求拒绝并给出具体原因，不得静默丢弃时间感知。 */
 static void test_overflow_rejected(void)
@@ -304,6 +351,7 @@ int main(void)
     test_has_time_short_circuit();
     test_fallback_slot0();
     test_slot_id_roundtrip();
+    test_thinking_roundtrip();
     test_overflow_rejected();
 
     if (fail_count == 0) {
