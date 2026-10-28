@@ -29,9 +29,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "config/config_internal.h"
+#include "config/pricing_api.h"
 #include "providers/core/prov_stat.h"
-#include "rpc/rpc_internal.h"
+#include "rpc/prov_internal.h"
 #include "rpc/service_boot.h"
 
 /* 装配头：仅用于可见 llm_svc_reg 原型（防签名漂移）。 */
