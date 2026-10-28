@@ -3,20 +3,11 @@
 
 /**
  * @file service_providers.c
- * @brief LLM service provider-management domain: provider-config
- *        copy/merge/release and llm_router endpoint registration.
+ * @brief LLM service provider-config domain: copy / merge / release.
  */
 
 #include "airy_memory.h"
-#include "error.h"
-#include "service.h"
-#include "svc_logger.h"
 
-#include "accounting/cost_tracker.h"
-#include "router/core/llm_router.h"
-
-#include <stdbool.h>
-#include <stdio.h>
 #include <string.h>
 
 #include "rpc/prov_internal.h"
@@ -143,50 +134,4 @@ void merge_provider_configs(const provider_config_t *main_provs, size_t main_cnt
     }
     *out = merged;
     *out_cnt = mc;
-}
-
-/* Router-table registration context: prices come from the same rule table
- * the cost tracker consumes, so the model table has a single price source
- * (model.yaml). Latency and capability fields carry protocol-neutral
- * defaults; the latency default is only a seed — llm_rtr_meas() backfills
- * avg_latency_ms with per-request EWMA once real traffic flows. The routing
- * path only ever requires chat/completion/streaming. */
-typedef struct {
-    const pricing_rule_t *rules;
-    int rule_count;
-    int registered;
-} router_reg_t;
-
-static int register_endpoint_cb(const char *provider_name, const char *model_name, void *user_data)
-{
-    router_reg_t *reg = (router_reg_t *)user_data;
-
-    llm_endpoint_t ep;
-    __builtin_memset(&ep, 0, sizeof(ep));
-    snprintf(ep.provider_name, sizeof(ep.provider_name), "%s", provider_name);
-    snprintf(ep.model_name, sizeof(ep.model_name), "%s", model_name);
-
-    ep.enabled = true;
-    ep.priority = 0;
-    ep.context_window = 8192;
-    ep.avg_latency_ms = 1000;
-    ep.capabilities = LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING;
-    cost_tracker_price(reg->rules, reg->rule_count, model_name, &ep.cost_per_1k_input,
-                       &ep.cost_per_1k_output);
-
-    int rc = llm_router_register_endpoint(&ep);
-    if (rc == 0) {
-        reg->registered++;
-    } else {
-        SVC_LOG_WARN("C-L02: SVC: router endpoint register FAILED for %s/%s (rc=%d)", provider_name,
-                     model_name, rc);
-    }
-    return 0;
-}
-
-void register_router_endpoints(llm_service_t *svc)
-{
-    router_reg_t reg = {(const pricing_rule_t *)svc->rules, (int)svc->rule_count, 0};
-    provider_registry_enumerate(svc->registry, register_endpoint_cb, &reg);
-    SVC_LOG_INFO("C-L02: SVC: registered %d endpoints into llm_router", reg.registered);
 }
