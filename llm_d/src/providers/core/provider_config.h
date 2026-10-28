@@ -19,9 +19,8 @@ typedef struct {
     /* 线格式名（model.yaml api_format），适配器查找键；NULL = 未声明，
      * 由装配面回落行协议适配。 */
     const char *api_format;
-    /* C11 端点族名（model.yaml endpoint_kind）与派生能力位：请求体可选
-     * 字段（seed/grammar/num_ctx/response_format）按位条件注入。 */
-    const char *endpoint_kind;
+    /* 能力位：model.yaml capabilities 显式声明的请求体可选字段接受集。
+     * 未声明位恒为 false（fail-safe：宁可不发，绝不乱发）。 */
     local_caps_t caps;
     const char *api_key;
     const char *api_base;

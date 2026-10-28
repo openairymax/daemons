@@ -77,14 +77,11 @@ static void svc_yaml_aggregate_providers(svc_yaml_state_t *st, provider_agg_t *p
         if (!provs[j].api_format[0] && st->models[i].api_format[0])
             AIRY_STRNCPY_TERM(provs[j].api_format, st->models[i].api_format,
                               sizeof(provs[j].api_format));
-        if (!provs[j].endpoint_kind[0] && st->models[i].endpoint_kind[0])
-            AIRY_STRNCPY_TERM(provs[j].endpoint_kind, st->models[i].endpoint_kind,
-                              sizeof(provs[j].endpoint_kind));
         if (!provs[j].extra_headers[0] && st->models[i].extra_headers[0])
             AIRY_STRNCPY_TERM(provs[j].extra_headers, st->models[i].extra_headers,
                               sizeof(provs[j].extra_headers));
-        /* A7-4：能力位覆盖取首个显式声明（与 api_format/extra_headers 的
-         * 聚合惯例同构）；显式 false 也是声明，可压过派生 true。 */
+        /* A7-4：能力位取首个显式声明（与 api_format/extra_headers 的聚合
+         * 惯例同构）；显式 false 也是声明，整表替换不继承兄弟行。 */
         if (!provs[j].has_caps && st->models[i].has_caps) {
             provs[j].caps_override = st->models[i].caps_override;
             provs[j].has_caps = 1;
@@ -118,9 +115,6 @@ static void svc_yaml_merge_provider_cfgs(svc_yaml_state_t *st, provider_agg_t *p
         if (st->pcfg[pi].api_format[0])
             AIRY_STRNCPY_TERM(provs[j].api_format, st->pcfg[pi].api_format,
                               sizeof(provs[j].api_format));
-        if (st->pcfg[pi].endpoint_kind[0])
-            AIRY_STRNCPY_TERM(provs[j].endpoint_kind, st->pcfg[pi].endpoint_kind,
-                              sizeof(provs[j].endpoint_kind));
         if (st->pcfg[pi].extra_headers[0])
             AIRY_STRNCPY_TERM(provs[j].extra_headers, st->pcfg[pi].extra_headers,
                               sizeof(provs[j].extra_headers));
@@ -154,41 +148,6 @@ static void svc_yaml_merge_provider_cfgs(svc_yaml_state_t *st, provider_agg_t *p
     }
 }
 
-/* C11 能力位派生：endpoint_kind → 请求体可选字段接受集（方案 §5.2b.8
- * 裁定表：llamacpp 收 seed/grammar/rf 不收 num_ctx（-c 启动参数决定）；
- * ollama 收 seed/num_ctx 忽略 grammar；vllm/openai 收 seed/rf）。
- * 未知族 = 全 false（fail-safe：宁可不发，不乱发）。厂商族名知识只允许
- * 存在于 config 装载面，机制面（providers 域）只消费位图。 */
-static local_caps_t svc_derive_caps(const char *kind)
-{
-    local_caps_t caps = {0};
-
-    if (!kind || !kind[0])
-        return caps;
-    if (strcmp(kind, "llamacpp") == 0) {
-        caps.accepts_seed = true;
-        caps.accepts_grammar = true;
-        caps.accepts_response_format = true;
-        /* T2：prompt 缓存与槽位亲和为 llama-server 原生语义，仅此族下发。 */
-        caps.accepts_cache_prompt = true;
-        caps.accepts_slot_id = true;
-        /* C3：chat_template_kwargs 模板变量透传（思考段开关/预算）。 */
-        caps.accepts_enable_thinking = true;
-        caps.accepts_thinking_budget = true;
-    } else if (strcmp(kind, "ollama") == 0) {
-        caps.accepts_seed = true;
-        caps.accepts_num_ctx = true;
-    } else if (strcmp(kind, "vllm") == 0 || strcmp(kind, "openai") == 0) {
-        caps.accepts_seed = true;
-        caps.accepts_response_format = true;
-        /* C3：vLLM 原生支持 chat_template_kwargs；openai 族（网关透传）
-         * 同线格式，位由后端实际模型裁决。 */
-        caps.accepts_enable_thinking = true;
-        caps.accepts_thinking_budget = true;
-    }
-    return caps;
-}
-
 static int svc_yaml_build_result(provider_agg_t *provs, size_t prov_count,
                                  provider_config_t **out_providers, size_t *out_count)
 {
@@ -216,12 +175,8 @@ static int svc_yaml_build_result(provider_agg_t *provs, size_t prov_count,
             result[i].api_base = AIRY_STRDUP(provs[i].base_url);
         if (provs[i].api_format[0])
             result[i].api_format = AIRY_STRDUP(provs[i].api_format);
-        if (provs[i].endpoint_kind[0])
-            result[i].endpoint_kind = AIRY_STRDUP(provs[i].endpoint_kind);
-        /* A7-4：显式覆盖为最高权威（false 压过派生 true），否则回落
-         * endpoint_kind 派生（C11 派生表）。 */
-        result[i].caps =
-            provs[i].has_caps ? provs[i].caps_override : svc_derive_caps(provs[i].endpoint_kind);
+        /* 能力位唯一来源：model.yaml capabilities 声明。未声明即全 false。 */
+        result[i].caps = provs[i].caps_override;
         if (provs[i].extra_headers[0])
             result[i].extra_headers = AIRY_STRDUP(provs[i].extra_headers);
         result[i].timeout_sec = (double)provs[i].timeout_sec;
