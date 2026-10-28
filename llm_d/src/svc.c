@@ -22,7 +22,6 @@
 #include "daemon_dep.h"
 #include "daemon_event_driver.h"
 #include "providers/core/ep_health.h"
-#include "providers/core/registry.h"
 #include "router/core/llm_router.h"
 #include "svc_model_watch.h"
 

@@ -47,6 +47,32 @@ provider_registry_t *llm_svc_reg(const llm_service_t *svc)
     return s->registry;
 }
 
+/* 跨域桥（0.1.20 FanOut）：routing 配置按值出域，service_chain 由此不再
+ * 解引用 struct llm_service，保持纯机制件身份。 */
+void svc_chain_ctx(const llm_service_t *svc, llm_route_cfg_t *out)
+{
+    if (!out)
+        return;
+    if (!svc) {
+        svc_chain_def(out);
+        return;
+    }
+    *out = ((const struct llm_service *)svc)->route;
+}
+
+/* 跨域桥（0.1.20 FanOut）：注册表精确查找留在 rpc 域内，锁粒度与 0.1.19
+ * 一致（持 svc->lock 查表，返回的 provider 由注册表世代保证存活）。 */
+const provider_t *svc_find_prov(llm_service_t *svc, const char *model)
+{
+    if (!svc || !model)
+        return NULL;
+    struct llm_service *s = (struct llm_service *)svc;
+    airy_mtx_lock(&s->lock);
+    const provider_t *prov = provider_registry_find(s->registry, model);
+    airy_mtx_unlock(&s->lock);
+    return prov;
+}
+
 /* 跨域桥（0.1.20 D2-7）：装配域按固定周期驱动检测、按信号触发应用，
  * struct llm_service 本身不出 rpc 域。 */
 int llm_svc_cfg_tick(llm_service_t *svc, uint64_t now_ms)
@@ -67,6 +93,47 @@ int llm_svc_cfg_hup(llm_service_t *svc)
 {
     struct llm_service *s = (struct llm_service *)svc;
     return s ? svc_mw_reload(&s->mw) : -1;
+}
+
+/* 端点登记闭包：注册表遍历期持锁，回调只拷名字，不持有 provider 指针。 */
+typedef struct {
+    const pricing_rule_t *rules;
+    int rule_count;
+    int registered;
+} router_reg_t;
+
+static int register_endpoint_cb(const char *provider_name, const char *model_name, void *user_data)
+{
+    router_reg_t *reg = (router_reg_t *)user_data;
+    llm_endpoint_t ep;
+    __builtin_memset(&ep, 0, sizeof(ep));
+    snprintf(ep.provider_name, sizeof(ep.provider_name), "%s", provider_name);
+    snprintf(ep.model_name, sizeof(ep.model_name), "%s", model_name);
+    ep.enabled = true;
+    ep.priority = 0;
+    ep.context_window = 8192;
+    ep.avg_latency_ms = 1000;
+    ep.capabilities = LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING;
+    cost_tracker_price(reg->rules, reg->rule_count, model_name, &ep.cost_per_1k_input,
+                       &ep.cost_per_1k_output);
+    int rc = llm_router_register_endpoint(&ep);
+    if (rc == 0) {
+        reg->registered++;
+    } else {
+        SVC_LOG_WARN("C-L02: SVC: router endpoint register FAILED for %s/%s (rc=%d)", provider_name,
+                     model_name, rc);
+    }
+    return 0;
+}
+
+void register_router_endpoints(llm_service_t *svc)
+{
+    struct llm_service *s = (struct llm_service *)svc;
+    if (!s)
+        return;
+    router_reg_t reg = {(const pricing_rule_t *)s->rules, (int)s->rule_count, 0};
+    provider_registry_enumerate(s->registry, register_endpoint_cb, &reg);
+    SVC_LOG_INFO("C-L02: SVC: registered %d endpoints into llm_router", reg.registered);
 }
 
 /* 计费/用量持久化路径 $AIRY_DATA_DIR/agentrt/llm_usage.json，重启不清零。 */

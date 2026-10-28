@@ -141,7 +141,14 @@ int svc_chain_run(llm_service_t *svc, const llm_request_config_t *manager,
                   const llm_route_request_t *req, const provider_t *first, svc_attempt_fn attempt,
                   void *actx, svc_sent_fn sent, llm_response_t **out, svc_hit_t *hit);
 
-/** 注册表精确查找（持锁），未命中返回 NULL。 */
+/**
+ * 把服务实例的 routing 配置按值取出（svc 为 NULL 时落默认档）。
+ *
+ * 本件据此与 struct llm_service 解耦：只经不透明指针透传，不自解引用。
+ */
+void svc_chain_ctx(const llm_service_t *svc, llm_route_cfg_t *out);
+
+/** 注册表精确查找（持锁），未命中返回 NULL（实现在 service.c）。 */
 const provider_t *svc_find_prov(llm_service_t *svc, const char *model);
 
 AIRY_ABI_END

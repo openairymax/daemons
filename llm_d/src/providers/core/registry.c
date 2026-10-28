@@ -187,17 +187,6 @@ int provider_registry_model_max_output(const provider_t *prov, const char *model
     return 0;
 }
 
-int prov_model_max_conc(const provider_t *prov, const char *model)
-{
-    if (!prov || !model || !prov->models || !prov->model_max_concurrent)
-        return 0;
-    for (size_t i = 0; prov->models[i]; ++i) {
-        if (strcmp(prov->models[i], model) == 0)
-            return prov->model_max_concurrent[i];
-    }
-    return 0;
-}
-
 int provider_reg_walk(provider_registry_t *reg,
                       int (*cb)(const provider_t *prov, void *user_data), void *user_data)
 {

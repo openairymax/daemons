@@ -87,6 +87,10 @@ typedef struct {
     int *model_max_concurrent;
 } provider_t;
 
+/* 查 provider 对某模型的调用方并发预算（0 = 未配置）。纯 provider_t 表查询，
+ * 不触及 registry 状态，故归位属主域此处。 */
+int prov_max_conc(const provider_t *prov, const char *model);
+
 /* 获取 provider 的 base 上下文（api_base/api_key/timeout_sec 等）。
  * 约定：所有 provider 的 ctx 首字段均为 provider_base_ctx_t base。 */
 provider_base_ctx_t *provider_base_ctx(provider_ctx_t *ctx);
