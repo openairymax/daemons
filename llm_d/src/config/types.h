@@ -46,9 +46,6 @@ typedef struct {
      * vision / thinking 来自模型连接表的每行配置。 */
     char mode[8];
     char api_format[16];
-    /* C11 端点族（llamacpp | ollama | vllm | openai）：请求体可选字段的
-     * 能力位静态派生源；缺失/未知 = 全不发送（fail-safe）。 */
-    char endpoint_kind[16];
     char context_window[16];
     /* D2-9④（0.1.20）：该模型的调用方并发预算（model.yaml max_concurrent，
      * 0 = 未配置）。max_inflight = min(first_nonzero(本值,1), server_parallel)，
@@ -63,8 +60,7 @@ typedef struct {
      * 如 Messages 的协议版本，多条以 ';' 或换行分隔。 */
     char extra_headers[192];
     /* A7-4（0.1.20）声明面三键：托管归属（managed|external，值域外拒载）、
-     * 托管工件路径（gguf）、请求体能力位显式覆盖（8 裸名子映射，与
-     * svc_derive_caps 派生值合并时以显式声明为最高权威）。 */
+     * 托管工件路径（gguf）、请求体能力位显式声明（8 裸名子映射，唯一来源）。 */
     char provision[8];
     char artifact[256];
     local_caps_t caps_override;
@@ -80,7 +76,6 @@ typedef struct {
     char *model_names[64];
     size_t model_count;
     char api_format[16];
-    char endpoint_kind[16];
     char extra_headers[256];
     /* 与 model_names 同下标对齐：每模型调用方并发预算（0 = 未配置）。 */
     int model_max_concurrent[64];
@@ -103,10 +98,9 @@ typedef struct {
     /* 聚合出的连接声明：api_format 为适配器查找键（chat | messages |
      * local），extra_headers 为首个显式声明该字段的模型带来的端点附加头。 */
     char api_format[16];
-    char endpoint_kind[16];
     char extra_headers[256];
-    /* A7-4：能力位覆盖取首个显式声明的模型行（与 api_format 聚合惯例
-     * 同构）；has_caps=0 时导出面回落 svc_derive_caps 派生。 */
+    /* A7-4：能力位取首个显式声明的模型行（与 api_format 聚合惯例同构）；
+     * has_caps=0 即全 false，不派生、不猜测。 */
     local_caps_t caps_override;
     int has_caps;
 } provider_agg_t;

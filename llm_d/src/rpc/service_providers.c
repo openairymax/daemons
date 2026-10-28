@@ -30,7 +30,6 @@ static void free_provider_fields(provider_config_t *prov)
     AIRY_FREE((void *)prov->api_base);
     AIRY_FREE((void *)prov->organization);
     AIRY_FREE((void *)prov->api_format);
-    AIRY_FREE((void *)prov->endpoint_kind);
     AIRY_FREE((void *)prov->extra_headers);
     if (prov->models) {
         for (size_t j = 0; prov->models[j]; ++j)
@@ -67,8 +66,6 @@ static provider_config_t provider_config_dup(const provider_config_t *src)
         d.organization = AIRY_STRDUP(src->organization);
     if (src->api_format)
         d.api_format = AIRY_STRDUP(src->api_format);
-    if (src->endpoint_kind)
-        d.endpoint_kind = AIRY_STRDUP(src->endpoint_kind);
     d.caps = src->caps;
     if (src->extra_headers)
         d.extra_headers = AIRY_STRDUP(src->extra_headers);

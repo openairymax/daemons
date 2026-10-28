@@ -4,16 +4,15 @@
 /**
  * @file test_config_decl.c
  * @brief 0.1.20 B-A7 A7-4 声明面回归（model.yaml provision/artifact/
- *        capabilities + svc_derive_caps 合并）
+ *        capabilities）
  *
- * 锁定六条口径：
- *   1. capabilities 显式覆盖为整表替换的最高权威：显式 false 压过派生
- *      true，未声明位不继承派生值；provider 级取首个显式声明的模型行
- *   2. 无 capabilities 声明时回落 endpoint_kind 派生（llamacpp 派生表）
+ * 锁定五条口径：
+ *   1. capabilities 显式声明为唯一来源：整表替换，显式 false 即 false，
+ *      未声明位恒 false；provider 级取首个显式声明的模型行
+ *   2. 无 capabilities 声明时 8 位全 false（不派生、不按厂商名猜测）
  *   3. models[] 行未知键 fail-closed：该行拒载，其余行不受影响
  *   4. provision: managed 与 artifact 路径落位 model_entry_t
- *   5. provision 值域外（bogus）拒载该行
- *   6. capabilities 裸名外键拒载该行
+ *   5. provision 值域外（bogus）与 capabilities 裸名外键均拒载该行
  */
 
 #include "config/types.h"
@@ -55,7 +54,6 @@ static void free_providers(provider_config_t *provs, size_t n)
     for (size_t i = 0; i < n; ++i) {
         AIRY_FREE(provs[i].name);
         AIRY_FREE(provs[i].api_format);
-        AIRY_FREE(provs[i].endpoint_kind);
         AIRY_FREE(provs[i].api_key);
         AIRY_FREE(provs[i].api_base);
         AIRY_FREE(provs[i].extra_headers);
@@ -80,13 +78,12 @@ static int put_file(const char *path, const char *text)
     return 0;
 }
 
-/* t1：显式覆盖整表替换 + provider 级首个显式声明生效。 */
+/* t1：显式声明整表替换 + provider 级首个显式声明生效。 */
 static const char kOverride[] = "models:\n"
                                 "  - name: m1\n"
                                 "    model_id: m1\n"
                                 "    provider: prov\n"
                                 "    base_url: http://127.0.0.1:9/v1\n"
-                                "    endpoint_kind: llamacpp\n"
                                 "    capabilities:\n"
                                 "      seed: false\n"
                                 "      num_ctx: true\n"
@@ -94,18 +91,15 @@ static const char kOverride[] = "models:\n"
                                 "    model_id: m2\n"
                                 "    provider: prov\n"
                                 "    base_url: http://127.0.0.1:9/v1\n"
-                                "    endpoint_kind: llamacpp\n"
                                 "    capabilities:\n"
                                 "      response_format: true\n";
 
-/* t2：无声明回落派生（llamacpp：seed/grammar/rf/cache_prompt/slot_id/
- * thinking 两 bits 为真，num_ctx 为假）。 */
+/* t2：无 capabilities 声明：8 位全 false。 */
 static const char kFallback[] = "models:\n"
                                 "  - name: m1\n"
                                 "    model_id: m1\n"
                                 "    provider: prov\n"
-                                "    base_url: http://127.0.0.1:9/v1\n"
-                                "    endpoint_kind: llamacpp\n";
+                                "    base_url: http://127.0.0.1:9/v1\n";
 
 /* t3：未知键拒载该行，有效行不受影响。 */
 static const char kUnknownKey[] = "models:\n"
@@ -113,7 +107,6 @@ static const char kUnknownKey[] = "models:\n"
                                   "    model_id: good\n"
                                   "    provider: prov\n"
                                   "    base_url: http://127.0.0.1:9/v1\n"
-                                  "    endpoint_kind: llamacpp\n"
                                   "  - name: bad\n"
                                   "    model_id: bad\n"
                                   "    provider: prov\n"
@@ -126,7 +119,6 @@ static const char kProvision[] = "models:\n"
                                  "    model_id: qwen2\n"
                                  "    provider: prov\n"
                                  "    base_url: http://127.0.0.1:11435/v1\n"
-                                 "    endpoint_kind: llamacpp\n"
                                  "    provision: managed\n"
                                  "    artifact: /var/airy/models/qwen2.gguf\n";
 
@@ -179,22 +171,22 @@ int main(void)
         free_providers(provs, n);
     }
 
-    /* 2) 无声明回落派生：llamacpp 派生表逐位核对。 */
+    /* 2) 无声明：8 位全 false（未声明即不发，fail-safe）。 */
     provs = NULL;
     n = 0;
     if (put_file(path, kFallback) != 0)
         return 1;
-    check_int("fallback.rc", svc_load_model_config_yaml(path, &provs, &n), 0);
-    check_int("fallback.count", (int)n, 1);
+    check_int("undecl.rc", svc_load_model_config_yaml(path, &provs, &n), 0);
+    check_int("undecl.count", (int)n, 1);
     if (provs && n == 1) {
-        check_bit("fallback.seed", provs[0].caps.accepts_seed, true);
-        check_bit("fallback.grammar", provs[0].caps.accepts_grammar, true);
-        check_bit("fallback.num_ctx", provs[0].caps.accepts_num_ctx, false);
-        check_bit("fallback.rf", provs[0].caps.accepts_response_format, true);
-        check_bit("fallback.cache_prompt", provs[0].caps.accepts_cache_prompt, true);
-        check_bit("fallback.slot_id", provs[0].caps.accepts_slot_id, true);
-        check_bit("fallback.thinking", provs[0].caps.accepts_enable_thinking, true);
-        check_bit("fallback.budget", provs[0].caps.accepts_thinking_budget, true);
+        check_bit("undecl.seed", provs[0].caps.accepts_seed, false);
+        check_bit("undecl.grammar", provs[0].caps.accepts_grammar, false);
+        check_bit("undecl.num_ctx", provs[0].caps.accepts_num_ctx, false);
+        check_bit("undecl.rf", provs[0].caps.accepts_response_format, false);
+        check_bit("undecl.cache_prompt", provs[0].caps.accepts_cache_prompt, false);
+        check_bit("undecl.slot_id", provs[0].caps.accepts_slot_id, false);
+        check_bit("undecl.thinking", provs[0].caps.accepts_enable_thinking, false);
+        check_bit("undecl.budget", provs[0].caps.accepts_thinking_budget, false);
         free_providers(provs, n);
     }
 
