@@ -13,9 +13,11 @@ extern "C" {
 
 typedef struct ep_health ep_health_t;
 
-/* 建立探测视图：对 registry 中名匹配 filter 的端点（filter 为空 = 全部）
+/* 建立探测视图：filter 为探测范围策略键——"local" = api_base 指向本机
+ * loopback 的端点（位置事实，不耦合 provider 命名），空 = 全部。命中者
  * 取 api_base 快照。probe_path 为空时取标准 "/models"。registry 仅在创建
- * 期使用，handle 建立后不再引用它。返回 NULL 表示 registry 为空或内存不足。 */
+ * 期使用，handle 建立后不再引用它。返回 NULL 表示 registry 为空或内存
+ * 不足。 */
 ep_health_t *ep_health_create(provider_registry_t *reg, const char *filter, const char *probe_path);
 
 void ep_health_destroy(ep_health_t *h);

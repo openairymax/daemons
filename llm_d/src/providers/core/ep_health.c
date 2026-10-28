@@ -81,15 +81,41 @@ struct ep_health {
     ep_rec_t recs[EP_HEALTH_MAX_ENDPOINTS];
 };
 
-static int ep_filter_hit(const char *filter, const char *name)
+/* filter 是探测范围策略键（svc.c 注入）："local" = 端点 api_base 指向本机
+ * loopback。位置是客观网络事实，不耦合 provider 用户命名（如
+ * "local-llamacpp"）——对命名规律做前缀猜测属策略混入机制。空 = 全部；
+ * 未知键 fail-safe 判不命中（宁可不探，不意外出网）。 */
+static int ep_host_is_local(const char *host)
 {
-    return filter[0] == '\0' || strcmp(filter, name) == 0;
+    static const char *const kLocal[] = {"127.0.0.1", "localhost", "[::1]"};
+    for (size_t i = 0; i < sizeof(kLocal) / sizeof(kLocal[0]); ++i) {
+        size_t n = strlen(kLocal[i]);
+        if (strncmp(host, kLocal[i], n) != 0)
+            continue;
+        char c = host[n];
+        if (c == '\0' || c == ':' || c == '/' || c == '?')
+            return 1;
+    }
+    return 0;
+}
+
+static int ep_probe_wanted(const char *filter, const char *api_base)
+{
+    if (filter[0] == '\0')
+        return 1;
+    if (strcmp(filter, "local") != 0 || !api_base)
+        return 0;
+    const char *host = strstr(api_base, "://");
+    return ep_host_is_local(host ? host + 3 : api_base);
 }
 
 static int ep_snap_cb(const provider_t *prov, void *ud)
 {
     ep_health_t *h = (ep_health_t *)ud;
-    if (!prov || !prov->name || !ep_filter_hit(h->filter, prov->name))
+    if (!prov || !prov->name)
+        return 0;
+    provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
+    if (!ep_probe_wanted(h->filter, base ? base->api_base : NULL))
         return 0;
 
     if (h->count >= EP_HEALTH_MAX_ENDPOINTS) {
@@ -101,7 +127,6 @@ static int ep_snap_cb(const provider_t *prov, void *ud)
     ep_rec_t *rec = &h->recs[h->count];
     AIRY_STRNCPY_TERM(rec->provider, prov->name, sizeof(rec->provider));
 
-    provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
     if (base)
         rec->ctx = *base;
 
