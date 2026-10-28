@@ -56,7 +56,10 @@ int svc_model_defaults_from_yaml(const char *path, char *out_model, size_t model
  * @brief Performance-mode strategies declared in model.yaml.
  *
  * full        full capability (cloud / mid-high-end devices); the default.
- * lightweight low-compute path: the dual-think GRAD loop is forced off.
+ * lightweight low-compute path: the GRAD loop is folded to a single-round
+ *             deterministic (model C) verify with model B arbitration
+ *             skipped; the think service stays enabled and safety rules
+ *             (cycle detection included) remain active. Zero LLM tokens.
  * auto        detect-only: the daemon suggests but never rewrites config.
  */
 typedef enum {
