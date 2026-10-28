@@ -42,7 +42,8 @@
 
 /* D5 探测范围：仅本地低算力端点——远端云端点由其 SLA 与网关侧观测覆盖，
  * 无需 llm_d 额外出网探测（探测范围属策略，周期/路径/范围在此注入机制件）。
- * 该范围同时保证深度探针不会对云端产生计费请求。 */
+ * 该范围同时保证深度探针不会对云端产生计费请求。键 "local" 由机制件解释
+ * 为 api_base 指向 loopback（位置事实），与 provider 用户命名解耦。 */
 #define EP_PROBE_FILTER "local"
 #define EP_PROBE_PATH "/models"
 
