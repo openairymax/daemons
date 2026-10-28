@@ -3,12 +3,15 @@
 
 /**
  * @file test_rpc_client.c
- * @brief L1 传输层超时分档与可达性负缓存回归测试（0.1.20 D2-1/D2-4）。
+ * @brief L1 传输层超时分档与可达性负缓存回归测试（0.1.20 D2-1/D2-4/P0-4）。
  *
  * D2-1：调用方传 0 时按方法查表，显式非 0 超时永远优先。
  * D2-4：只有「曾经连通过」的目标失败后才进入退避；首次不可达不缓存，
  * 以避免把 daemon 启动竞态放大为假不可达。全部用例经真实 AF_UNIX
  * listener 往返（非桩），以 accept 计数作为「是否真的发起连接」的证据。
+ *
+ * P0-4：超时是单请求 deadline（墙钟），不是「poll 切片累加 + 每片 1ms」。
+ * 慢速滴流对端必须让预算真实耗尽并中断，而非拖到对端关闭。
  */
 
 #include "daemon_rpc_client.h"
@@ -52,6 +55,8 @@ typedef struct {
     int fd;
     const char *reply;
     long hold_ms;
+    long drip_ms;
+    int drip_n;
     int conns;
     char path[128];
 } mock_srv_t;
@@ -73,7 +78,14 @@ static void *srv_run(void *arg)
     (void)recv(c, req, sizeof(req), 0);
     if (m->hold_ms > 0)
         sleep_ms(m->hold_ms);
-    if (m->reply) {
+    if (m->drip_ms > 0) {
+        /* 慢速滴流：每 drip_ms 发一个空格，永不构成完整 JSON。 */
+        for (int i = 0; i < m->drip_n; i++) {
+            if (send(c, " ", 1, 0) <= 0)
+                break;
+            sleep_ms(m->drip_ms);
+        }
+    } else if (m->reply) {
         size_t n = strlen(m->reply);
         size_t off = 0;
         while (off < n) {
@@ -140,6 +152,67 @@ static void test_tmo_explicit(void)
     assert(t1 - t0 < 500);
     srv_stop(&m, tid);
     printf("    PASSED\n");
+}
+
+/* P0-4：预算按墙钟消费。对端每 30ms 滴 1 字节、共 60 次（≈1.8s），
+ * 声明 400ms 预算必须在 ~400ms 中断；旧实现按「每片 1ms」记账，会一路
+ * 拖到对端关闭（≈1.8s）后才按协议错误返回。 */
+static void test_budget_drip(void)
+{
+    mock_srv_t m;
+    pthread_t tid;
+    char *out = NULL;
+    char path[128];
+    uint64_t t0, t1;
+    int rc;
+
+    printf("  test_budget_drip...\n");
+    memset(&m, 0, sizeof(m));
+    m.drip_ms = 30;
+    m.drip_n = 60;
+    snprintf(path, sizeof(path), "/tmp/airy_drip_%d.sock", (int)getpid());
+    assert(srv_at(&m, path, &tid) == 0);
+    t0 = airy_time_ms();
+    rc = daemon_rpc_call(m.path, "probe", "{}", &out, 400);
+    t1 = airy_time_ms();
+    assert(rc == AIRY_ERR_TIMEOUT);
+    assert(out == NULL);
+    assert(t1 - t0 < 1000);
+    srv_stop(&m, tid);
+    printf("    PASSED (%llu ms)\n", (unsigned long long)(t1 - t0));
+}
+
+static void stream_count(const char *data, size_t len, void *user_data)
+{
+    (void)data;
+    (void)len;
+    (*(int *)user_data)++;
+}
+
+/* P0-4：流式路径共用同一预算——慢速滴流不得把 400ms 预算拖成等待对端收尾。 */
+static void test_budget_stream(void)
+{
+    mock_srv_t m;
+    pthread_t tid;
+    char path[128];
+    uint64_t t0, t1;
+    int chunks = 0;
+    int rc;
+
+    printf("  test_budget_stream...\n");
+    memset(&m, 0, sizeof(m));
+    m.drip_ms = 30;
+    m.drip_n = 60;
+    snprintf(path, sizeof(path), "/tmp/airy_drip_s_%d.sock", (int)getpid());
+    assert(srv_at(&m, path, &tid) == 0);
+    t0 = airy_time_ms();
+    rc = daemon_rpc_call_stream(m.path, "complete_stream", "{}", stream_count, &chunks, 400);
+    t1 = airy_time_ms();
+    assert(rc == AIRY_ERR_TIMEOUT);
+    assert(chunks > 0);
+    assert(t1 - t0 < 1000);
+    srv_stop(&m, tid);
+    printf("    PASSED (%llu ms, %d chunks)\n", (unsigned long long)(t1 - t0), chunks);
 }
 
 /* D2-4a：首次不可达不进入退避——listener 出现后必须立即连通。 */
@@ -235,6 +308,8 @@ int main(void)
     signal(SIGPIPE, SIG_IGN);
     test_tmo_table();
     test_tmo_explicit();
+    test_budget_drip();
+    test_budget_stream();
     test_neg_first();
     test_neg_backoff();
 

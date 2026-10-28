@@ -25,6 +25,12 @@
  * fd）在本协议下不可实现：服务端 daemon_handle_client 严格「单请求单响应
  * 即关闭」，缓存的 fd 在响应返回后已被对端关闭；因此这里缓存的是「不可达
  * 事实」而非连接，避免每轮重复 connect 与错误日志刷屏。
+ *
+ * 0.1.20 P0-4（单请求预算闭环）：超时是「一个 deadline」而非「每阶段各吃满」。
+ * rpc_budget_set 在进入调用时取单调时钟截止点，connect/send/多轮 recv/hangup
+ * 排空共享同一剩余预算。此前以「poll 切片累加 + 每收到一片计 1ms」估算已用
+ * 时间，慢速滴流响应下墙钟可远超声明预算（A1 实测 366.3s > 300s 且被误判为
+ * 协议错误）；改读真实时间后，超时即中断并归入 AIRY_ERR_TIMEOUT。
  */
 
 #include "daemon_rpc_client.h"
@@ -292,6 +298,23 @@ static int rpc_send_raw(int fd, const void *buf, int len)
 #endif /* AIRY_PLATFORM_WINDOWS / POSIX */
 
 /* ---- 机制件（平台无关，单源） ---- */
+
+/* 单请求预算：一个 deadline 贯穿 connect → send → recv → drain。以单调
+ * 时钟为准，慢速滴流也真实消耗预算；剩余量为 0 即视为到期。 */
+typedef struct {
+    uint64_t end_ms;
+} rpc_budget_t;
+
+static void rpc_budget_set(rpc_budget_t *bud, uint32_t timeout_ms)
+{
+    bud->end_ms = airy_time_ms() + (uint64_t)timeout_ms;
+}
+
+static uint32_t rpc_budget_left(const rpc_budget_t *bud)
+{
+    uint64_t now = airy_time_ms();
+    return now >= bud->end_ms ? 0u : (uint32_t)(bud->end_ms - now);
+}
 
 uint32_t daemon_rpc_timeout_for(const char *method)
 {
@@ -565,17 +588,27 @@ static int rpc_conn_send(const char *socket_path, const char *method, const char
  * @brief hangup 排空：对端已关闭但响应尚未完整——继续读取 socket 缓冲
  * 中对端关闭前已发出的数据直至 EOF，再做完整性判定，避免大响应被
  * hangup 误判为失败（RPC 时序竞态）。仅 POSIX 可达（HANGUP 掩码）。
+ * 排空同样受单请求预算约束：对端半关闭后仍慢速吐数据不得无限拖延。
  */
-static int rpc_drain(int fd, rpc_buf_t *buf)
+static int rpc_drain(int fd, rpc_buf_t *buf, const rpc_budget_t *bud)
 {
     char chunk[DAEMON_RPC_CHUNK];
     for (;;) {
+        uint32_t left = rpc_budget_left(bud);
+        if (left == 0)
+            return AIRY_ERR_TIMEOUT;
+        int ev = rpc_poll(fd, (int)(left < DAEMON_RPC_POLL_SLICE_MS ? left
+                                                                   : DAEMON_RPC_POLL_SLICE_MS));
+        if (ev == 0)
+            return rpc_complete(buf) ? AIRY_SUCCESS : AIRY_ERR_TIMEOUT;
+        if (ev < 0)
+            return AIRY_ERR_SYS_SOCKET;
+        if (!(ev & RPC_IO_READABLE))
+            break; /* 纯挂断：对端已关闭且缓冲已读尽 */
         int n = rpc_recv(fd, chunk, sizeof(chunk));
         if (n < 0) {
-            if (errno == EINTR)
+            if (errno == EINTR || errno == EAGAIN)
                 continue;
-            if (errno == EAGAIN)
-                break;
             return AIRY_ERR_SYS_SOCKET;
         }
         if (n == 0)
@@ -583,6 +616,8 @@ static int rpc_drain(int fd, rpc_buf_t *buf)
         int rc = rpc_buf_append(buf, chunk, (size_t)n);
         if (rc != AIRY_SUCCESS)
             return rc;
+        if (rpc_complete(buf))
+            return AIRY_SUCCESS;
     }
     if (rpc_complete(buf))
         return AIRY_SUCCESS;
@@ -597,9 +632,11 @@ static int rpc_drain(int fd, rpc_buf_t *buf)
  *        JSON is received or timeout/cancel.
  *
  * Strategy: cJSON completeness probing (rpc_complete); if parsing fails
- * and no timeout yet, keep receiving. Sufficient for the typical
- * single-packet daemon response, and also handles complex fragmented
- * packets.
+ * and budget is not exhausted yet, keep receiving. Sufficient for the
+ * typical single-packet daemon response, and also handles complex
+ * fragmented packets. Budget is the single request deadline
+ * (rpc_budget_left), so a slow-drip peer consumes it in real time
+ * instead of being counted as 1ms per chunk.
  *
  * Cancellation drill-down: the cancel token is checked after each poll
  * slice; on hit the in-flight connection is dropped and the cancel request
@@ -613,22 +650,21 @@ static int rpc_drain(int fd, rpc_buf_t *buf)
  * recv-ing (bytes sent before close stay readable in the socket buffer),
  * ending with recv()==0 (EOF), then judge completeness (rpc_drain).
  */
-static int rpc_recv_resp(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
+static int rpc_recv_resp(int fd, rpc_buf_t *buf, const rpc_budget_t *bud,
                          airy_cancel_token_t *cancel_token, const char *cancel_socket_path,
                          const char *cancel_method, const char *cancel_params_json)
 {
-    uint32_t elapsed_ms = 0;
+    for (;;) {
+        uint32_t left = rpc_budget_left(bud);
+        if (left == 0)
+            return AIRY_ERR_TIMEOUT;
 
-    while (elapsed_ms < timeout_ms) {
         if (cancel_token && airy_cancel_token_is_canceled(cancel_token))
             return rpc_cancel(fd, cancel_socket_path, cancel_method, cancel_params_json);
 
-        int remain = (int)((timeout_ms - elapsed_ms) < DAEMON_RPC_POLL_SLICE_MS
-                               ? (timeout_ms - elapsed_ms)
-                               : DAEMON_RPC_POLL_SLICE_MS);
+        int remain = (int)(left < DAEMON_RPC_POLL_SLICE_MS ? left : DAEMON_RPC_POLL_SLICE_MS);
         int ev = rpc_poll(fd, remain);
         if (ev == 0) {
-            elapsed_ms += (uint32_t)remain;
             if (rpc_complete(buf))
                 return AIRY_SUCCESS;
             continue;
@@ -668,8 +704,7 @@ static int rpc_recv_resp(int fd, rpc_buf_t *buf, uint32_t timeout_ms,
         if (rpc_complete(buf))
             return AIRY_SUCCESS;
         if (ev & RPC_IO_HANGUP)
-            return rpc_drain(fd, buf);
-        elapsed_ms += 1;
+            return rpc_drain(fd, buf, bud);
     }
     return AIRY_ERR_TIMEOUT;
 }
@@ -689,6 +724,10 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
     if (timeout_ms == 0)
         timeout_ms = daemon_rpc_timeout_for(method);
 
+    /* 预算从进入调用起算：connect 与请求发送同样计入同一 deadline。 */
+    rpc_budget_t bud;
+    rpc_budget_set(&bud, timeout_ms);
+
     int fd = rpc_conn_send(socket_path, method, params_json);
     if (fd < 0)
         return fd;
@@ -696,20 +735,18 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
     /* Streaming read loop: every recv() payload is delivered to the callback
      * as it arrives; recv() == 0 (peer closed the connection) marks the end
      * of the stream (daemons are single-request-single-response-then-close).
-     * Timeout slices keep the loop responsive; the caller gets a partial
-     * prefix via the callback when it fires. */
-    uint32_t elapsed_ms = 0;
+     * Slices keep the loop responsive and share the one request budget; the
+     * caller gets a partial prefix via the callback when it fires. */
     int rc = AIRY_ERR_TIMEOUT;
 
-    while (elapsed_ms < timeout_ms) {
-        int remain = (int)((timeout_ms - elapsed_ms) < DAEMON_RPC_POLL_SLICE_MS
-                               ? (timeout_ms - elapsed_ms)
-                               : DAEMON_RPC_POLL_SLICE_MS);
+    for (;;) {
+        uint32_t left = rpc_budget_left(&bud);
+        if (left == 0)
+            break;
+        int remain = (int)(left < DAEMON_RPC_POLL_SLICE_MS ? left : DAEMON_RPC_POLL_SLICE_MS);
         int ev = rpc_poll(fd, remain);
-        if (ev == 0) {
-            elapsed_ms += (uint32_t)remain;
+        if (ev == 0)
             continue;
-        }
         if (ev < 0) {
             rc = AIRY_ERR_SYS_SOCKET;
             break;
@@ -741,7 +778,6 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
         }
         if (on_chunk)
             on_chunk(chunk, (size_t)n, user_data);
-        elapsed_ms += 1;
     }
 
     rpc_close_fd(fd);
@@ -763,6 +799,10 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
     if (timeout_ms == 0)
         timeout_ms = daemon_rpc_timeout_for(method);
 
+    /* 预算从进入调用起算：connect 与请求发送同样计入同一 deadline。 */
+    rpc_budget_t bud;
+    rpc_budget_set(&bud, timeout_ms);
+
     int fd = rpc_conn_send(socket_path, method, params_json);
     if (fd < 0)
         return fd;
@@ -774,7 +814,7 @@ int daemon_rpc_call_cancelable(const char *socket_path, const char *method, cons
         return rc;
     }
 
-    rc = rpc_recv_resp(fd, &buf, timeout_ms, cancel_token, socket_path, cancel_method,
+    rc = rpc_recv_resp(fd, &buf, &bud, cancel_token, socket_path, cancel_method,
                        cancel_params_json);
     rpc_close_fd(fd);
     if (rc != AIRY_SUCCESS) {
