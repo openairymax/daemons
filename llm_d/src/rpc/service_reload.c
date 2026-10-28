@@ -26,9 +26,9 @@
 #include "rpc/service_boot.h"
 #include "svc_logger.h"
 
-#include "config/config_internal.h"
+#include "config/pricing_api.h"
 #include "router/core/llm_router.h"
-#include "rpc/rpc_internal.h"
+#include "rpc/prov_internal.h"
 
 /* 退休表：排空超时后旧装载仍有请求持有其句柄，按宽限期延后回收。
  * 槽位满说明连续多次排空超时，此时强制回收最旧一档并留证，避免无界增长。 */

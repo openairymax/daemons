@@ -2,16 +2,15 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0 */
 
 /**
- * @file rpc_internal.h
- * @brief llm_d rpc 域（请求路径）内部声明。
+ * @file gen_params.h
+ * @brief llm_d rpc 域·生成参数解析面。
  *
- * 由 llm_service_internal.h（253 行枢纽头，B16-S1 拆片）迁入：生成参数
- * 解析与 provider 管理两段。仅 service.c / service_request.c /
- * service_providers.c 及其单元测试消费；跨域禁止 include 本头。
+ * 自 rpc_internal.h 按关注点切分（A4 入度 ≤5）：只承载同步/流式两路共用的
+ * 生成参数唯一解析点，与 provider 管理面（prov_internal.h）解耦。
  */
 
-#ifndef AIRY_RT_LLM_RPC_INTERNAL_H
-#define AIRY_RT_LLM_RPC_INTERNAL_H
+#ifndef AIRY_RT_LLM_GEN_PARAMS_H
+#define AIRY_RT_LLM_GEN_PARAMS_H
 
 #include "service.h"
 
@@ -20,8 +19,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* ---- Request-handling domain (service_request.c) ---- */
 
 /**
  * @brief 生成参数唯一解析点：模型名与输出上限的三方来源收敛。
@@ -40,16 +37,8 @@ void resolve_gen_params(const llm_service_t *svc, const provider_t *prov,
                         const llm_request_config_t *manager, char *out_model, size_t model_size,
                         int *out_max_tokens);
 
-/* ---- Provider-management domain (service_providers.c) ---- */
-
-void free_provider_configs(provider_config_t *providers, size_t count);
-void merge_provider_configs(const provider_config_t *main_provs, size_t main_cnt,
-                            const provider_config_t *user_provs, size_t user_cnt,
-                            provider_config_t **out, size_t *out_cnt);
-void register_router_endpoints(llm_service_t *svc);
-
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* AIRY_RT_LLM_RPC_INTERNAL_H */
+#endif /* AIRY_RT_LLM_GEN_PARAMS_H */

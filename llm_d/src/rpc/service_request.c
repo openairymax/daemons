@@ -23,7 +23,7 @@
 #include <string.h>
 
 #include "accounting/metrics.h"
-#include "rpc/rpc_internal.h"
+#include "rpc/gen_params.h"
 #include "providers/core/secrets.h"
 #include "providers/core/provider_http.h"
 

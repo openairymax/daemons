@@ -22,7 +22,7 @@
 #include "providers/core/adapter.h"
 #include "providers/core/registry.h"
 #include "providers/core/provider_base.h"
-#include "rpc/rpc_internal.h"
+#include "rpc/gen_params.h"
 #include "router/core/llm_failover.h"
 #include "service.h"
 #include "svc_logger.h"

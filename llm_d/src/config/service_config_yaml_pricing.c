@@ -17,7 +17,7 @@
 
 #include <stdlib.h>
 
-#include "config/config_internal.h"
+#include "config/pricing_api.h"
 #include "config/types.h"
 
 /**
