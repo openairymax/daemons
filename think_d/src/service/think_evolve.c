@@ -5,7 +5,7 @@
  * @file think_evolve.c
  * @brief 演化观测面采样实现（0.1.20 W4）。
  *
- * 采样链：orchestrator_evolution_stats() → 策略侧 mc.stats JSON →
+ * 采样链：orch_evo_stats() → 策略侧 mc.stats JSON →
  * think_evo_map() 归一为标量 → observe_record_metric 推送 monit_d。
  * counter 类指标上行累计差值，基线仅在推送成功后推进，避免 monit_d
  * 短暂不可达造成计数永久丢失。采样失败仅告警，不阻断推理主链。
@@ -116,12 +116,12 @@ static void evo_tick(airy_event_loop_t *loop, uint64_t timer_id, void *user_data
 
     if (!svc || !svc->orch)
         return;
-    if (orchestrator_evolution_stats(svc->orch, &json) != 0 || !json) {
+    if (orch_evo_stats(svc->orch, &json) != 0 || !json) {
         AIRY_FREE(json);
         return;
     }
 
-    mapped = think_evo_map(json, airy_memrpc_evolve_noop_count(), &snap);
+    mapped = think_evo_map(json, airy_memrpc_noops(), &snap);
     AIRY_FREE(json);
     if (mapped != 0)
         return;

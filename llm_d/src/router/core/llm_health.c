@@ -235,7 +235,7 @@ static int ep_note(const char *provider, const char *model, int err, bool ok)
     ep = router_ep_find(provider, model);
     if (ep) {
         if (ep_step(ep, ok, err, now))
-            (void)router_state_save_locked();
+            (void)rtr_state_save();
         rc = 0;
     }
     AIRY_MUTEX_UNLOCK(&ctx->mutex);
@@ -252,7 +252,7 @@ int llm_rtr_ok(const char *provider, const char *model)
     return ep_note(provider, model, 0, true);
 }
 
-size_t llm_rtr_provider_note(const char *provider, int ok)
+size_t llm_rtr_prov_note(const char *provider, int ok)
 {
     router_ctx_t *ctx = router_ctx_get();
     uint32_t now;
@@ -273,7 +273,7 @@ size_t llm_rtr_provider_note(const char *provider, int ok)
         hit++;
     }
     if (dirty)
-        (void)router_state_save_locked();
+        (void)rtr_state_save();
     AIRY_MUTEX_UNLOCK(&ctx->mutex);
     return hit;
 }
