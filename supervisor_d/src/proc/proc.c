@@ -324,8 +324,7 @@ void sup_reconcile(sup_ctx_t *ctx)
                 if (p->fail_count >= ctx->max_attempts) {
                     p->state = SUP_ST_FAILED;
                     sup_log("ERROR",
-                            "%s FAILED after %d attempts, manual activate required "
-                            "(last output: %s/%s.out)",
+                            "%s FAILED after %d attempts, manual activate; out: %s/%s.out",
                             p->name, p->fail_count, ctx->log_dir, p->name);
                 } else {
                     spawn_or_backoff(ctx, p, now);
