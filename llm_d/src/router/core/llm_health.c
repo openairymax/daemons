@@ -16,6 +16,7 @@
  */
 
 #include "router/core/llm_failover.h"
+#include "router/core/llm_rtr_health.h"
 #include "router/core/router_context.h"
 #include "router/core/router_state.h"
 

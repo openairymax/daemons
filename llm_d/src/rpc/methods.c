@@ -18,7 +18,7 @@
 #include "llm_d_internal.h"
 #include "providers/core/prov_diag.h"
 #include "response.h"
-#include "router/core/llm_router.h"
+#include "router/core/llm_rtr_health.h"
 #include "token.h"
 #include "token_standard.h"
 
