@@ -184,7 +184,7 @@ void plugin_discovery_destroy(void)
     g_discovery.initialized = false;
 }
 
-static int plugin_discovery_parse_manifest(const char *yaml_path, const char *plugin_dir,
+static int parse_manifest(const char *yaml_path, const char *plugin_dir,
                                            plugin_discovery_result_t *out_result)
 {
     if (!yaml_path || !out_result)
@@ -378,7 +378,7 @@ int plugin_discovery_scan(plugin_discovery_result_t **out_results, size_t *out_c
         }
 
         plugin_discovery_result_t *result = &results[found];
-        int ret = plugin_discovery_parse_manifest(manifest_path, plugin_dir_path, result);
+        int ret = parse_manifest(manifest_path, plugin_dir_path, result);
 
         if (ret == 0 && result->valid) {
             found++;
