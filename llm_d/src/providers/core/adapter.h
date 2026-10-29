@@ -5,8 +5,9 @@
  * @file adapter.h
  * @brief Provider 适配层契约（B16-S3 拆分自 provider.h）。
  *
- * 适配器实现本契约，以 provider_t 条目接入 registry（装配 SSoT 归
- * adapters/adapter_table.c）。B16-S3.3 兑现方案 12.16.3 五槽演进：
+ * 适配器实现本契约。以 provider_t 条目接入 registry（装配 SSoT 归
+ * adapters/adapter_table.c）——该记录见 provider_rec.h。B16-S3.3 兑现
+ * 方案 12.16.3 五槽演进：
  * complete / complete_stream 两整请求入口由适配器以两行 shim 交
  * core/adapter.c 通用 driver 编排（密钥刷新、出网、错误归一、流末装配
  * 的唯一实现），适配层仅剩五纯函数槽 + 数据槽——纯函数、零 I/O、
@@ -23,8 +24,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef struct provider_ctx provider_ctx_t;
 
 typedef struct {
     /* ── 身份数据槽 ── */
@@ -74,26 +73,6 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
                                     const llm_request_config_t *manager,
                                     llm_stream_callback_t callback, void *callback_data,
                                     llm_response_t **out_response);
-
-typedef struct {
-    const char *name;
-    const provider_adapter_t *adapter;
-    provider_ctx_t *ctx;
-    char **models;
-    /* 与 models 同下标对齐的每模型输出上限（0 = 未配置）：registry 装配时
-     * 从 provider_config_t 复制，供生成参数解析查询。 */
-    int *model_max_output;
-    /* 与 models 同下标对齐的每模型调用方并发预算（D2-9④，0 = 未配置）。 */
-    int *model_max_concurrent;
-} provider_t;
-
-/* 查 provider 对某模型的调用方并发预算（0 = 未配置）。纯 provider_t 表查询，
- * 不触及 registry 状态，故归位属主域此处。 */
-int prov_max_conc(const provider_t *prov, const char *model);
-
-/* 获取 provider 的 base 上下文（api_base/api_key/timeout_sec 等）。
- * 约定：所有 provider 的 ctx 首字段均为 provider_base_ctx_t base。 */
-provider_base_ctx_t *provider_base_ctx(provider_ctx_t *ctx);
 
 /**
  * @brief 按线格式名查适配器 ops（装配 SSoT 在 adapters/adapter_table.c）。

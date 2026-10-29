@@ -9,8 +9,8 @@
 #ifndef AIRY_RT_LLM_PROVIDER_REGISTRY_H
 #define AIRY_RT_LLM_PROVIDER_REGISTRY_H
 
-#include "adapter.h"
 #include "provider_config.h"
+#include "provider_rec.h"
 
 #ifdef __cplusplus
 extern "C" {

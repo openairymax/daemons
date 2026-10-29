@@ -14,6 +14,9 @@ extern "C" {
 
 struct provider_rate_limiter;
 
+/* 适配器私有上下文的不透明句柄（定义在各适配器 .c 内）。 */
+typedef struct provider_ctx provider_ctx_t;
+
 typedef struct {
     /* 端点名（prov_stat 时延样本与自动预算的键；与适配器 ops->name 同名）。 */
     char name[64];
@@ -45,6 +48,10 @@ typedef struct {
 void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name,
                         const char *api_key, const char *api_base, const char *organization,
                         double timeout_sec, int max_retries, const char *default_base);
+
+/* 取 ctx 内嵌的 base（api_base/api_key/timeout_sec 等）。约定：所有 provider
+ * 的 ctx 首字段均为 provider_base_ctx_t base。 */
+provider_base_ctx_t *provider_base_ctx(provider_ctx_t *ctx);
 
 #ifdef __cplusplus
 }

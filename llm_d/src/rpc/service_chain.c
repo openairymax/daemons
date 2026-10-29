@@ -19,8 +19,8 @@
 
 #include "airy_memory.h"
 #include "platform_misc.h"
-#include "providers/core/adapter.h"
 #include "providers/core/provider_base.h"
+#include "providers/core/provider_rec.h"
 #include "rpc/gen_params.h"
 #include "router/core/llm_failover.h"
 #include "svc_logger.h"

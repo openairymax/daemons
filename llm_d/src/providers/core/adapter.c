@@ -20,6 +20,7 @@
 #include "daemon_platform_ext.h"
 #include "error.h"
 #include "adapter.h"
+#include "provider_rec.h"
 #include "prov_diag.h"
 #include "provider_http.h"
 #include "secrets.h"

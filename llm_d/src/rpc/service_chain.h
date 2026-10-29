@@ -24,7 +24,7 @@
 
 #include "airy_abi.h"
 #include "llm_service_types.h"
-#include "providers/core/adapter.h"
+#include "providers/core/provider_rec.h"
 #include "router/core/llm_router.h"
 
 AIRY_ABI_BEGIN
