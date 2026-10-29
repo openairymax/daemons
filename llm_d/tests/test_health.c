@@ -15,6 +15,7 @@
  *   7. 健康面落盘后重启恢复：同 provider/model 重注册即回到 OPEN
  */
 
+#include "router/core/llm_rtr_health.h"
 #include "router/core/router_context.h"
 
 #include "error_codes.h"
