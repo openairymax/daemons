@@ -34,6 +34,10 @@ void provider_http_setup(CURL *curl, double timeout_sec, double read_idle_sec);
  * 停止产出）。非超时返回 PROV_TMO_KIND_N。 */
 prov_tmo_t provider_tmo_class(CURL *curl, double budget_sec);
 
+/* 单次传输尝试的统一收尾：超时成因归类计数，随后释放句柄。分类依赖连接态，
+ * 必须在 curl_easy_cleanup 之前完成；HTTP 与 SSE 两路共用此唯一实现。 */
+void prov_http_done(CURL *curl, double budget_sec, CURLcode res, int *out_tmo);
+
 /* 出网失败分诊：libcurl 错误码归为可判读类别。返回值恒非 NULL。 */
 const char *provider_http_diag(CURLcode code);
 

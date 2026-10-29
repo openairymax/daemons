@@ -165,6 +165,17 @@ prov_tmo_t provider_tmo_class(CURL *curl, double budget_sec)
     return PROV_TMO_STALL;
 }
 
+void prov_http_done(CURL *curl, double budget_sec, CURLcode res, int *out_tmo)
+{
+    if (res == CURLE_OPERATION_TIMEDOUT) {
+        prov_tmo_t kind = provider_tmo_class(curl, budget_sec);
+        *out_tmo = (int)kind;
+        if (kind != PROV_TMO_KIND_N)
+            prov_stat_hit(kind);
+    }
+    curl_easy_cleanup(curl);
+}
+
 /* 非流式单次尝试的上下文：写回调绑定到响应缓冲。 */
 typedef struct {
     const char *url;
@@ -200,13 +211,7 @@ static provider_attempt_t http_try(void *ud, int retry, double left_sec, CURLcod
     CURLcode res = curl_easy_perform(curl);
     if (res == CURLE_OK)
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, out_http_code);
-    if (res == CURLE_OPERATION_TIMEDOUT) {
-        prov_tmo_t kind = provider_tmo_class(curl, budget);
-        *out_tmo = (int)kind;
-        if (kind != PROV_TMO_KIND_N)
-            prov_stat_hit(kind);
-    }
-    curl_easy_cleanup(curl);
+    prov_http_done(curl, budget, res, out_tmo);
 
     *out_res = res;
     return res == CURLE_OK ? PROVIDER_TRY_DONE : PROVIDER_TRY_FAILED;
