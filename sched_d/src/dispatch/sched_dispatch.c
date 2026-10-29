@@ -39,7 +39,7 @@ static int sched_dispatch_enabled(void)
     return !(env && env[0] != '\0' && strcmp(env, "0") == 0);
 }
 
-static void sched_dispatch_agent_socket(char *buf, size_t size)
+static void agent_socket(char *buf, size_t size)
 {
     const char *env = getenv("AIRY_SCHED_AGENT_SOCK");
     if (env && env[0] != '\0') {
@@ -49,7 +49,7 @@ static void sched_dispatch_agent_socket(char *buf, size_t size)
     }
 }
 
-static uint32_t sched_dispatch_timeout_ms(void)
+static uint32_t timeout_ms(void)
 {
     const char *env = getenv("AIRY_SCHED_DISPATCH_TIMEOUT_MS");
     if (env && env[0] != '\0') {
@@ -75,7 +75,7 @@ static int disp_call_str(const char *sock, const char *method, const char *param
                          const char *field, char **out)
 {
     char *res = NULL;
-    int rc = daemon_rpc_call(sock, method, params, &res, sched_dispatch_timeout_ms());
+    int rc = daemon_rpc_call(sock, method, params, &res, timeout_ms());
     if (rc != AIRY_SUCCESS || !res) {
         SVC_LOG_ERROR("sched dispatch: agent.%s failed (rc=%d)", method, rc);
         AIRY_FREE(res);
@@ -108,7 +108,7 @@ static void disp_terminate(const char *sock, const char *agent_id)
     if (!text)
         return;
     char *res = NULL;
-    int rc = daemon_rpc_call(sock, "terminate", text, &res, sched_dispatch_timeout_ms());
+    int rc = daemon_rpc_call(sock, "terminate", text, &res, timeout_ms());
     AIRY_FREE(text);
     AIRY_FREE(res);
     if (rc != AIRY_SUCCESS)
@@ -122,7 +122,7 @@ static int sched_dispatch_task(const char *role, const char *task_description,
         return AIRY_ERR_INVALID_PARAM;
 
     char sock[AIRY_PATH_MAX];
-    sched_dispatch_agent_socket(sock, sizeof(sock));
+    agent_socket(sock, sizeof(sock));
 
     /* B7：不硬编码 language——未声明时由 agent_d 缺省兜底（python）。 */
     cJSON *spec = cJSON_CreateObject();

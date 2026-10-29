@@ -20,7 +20,7 @@
 #include <string.h>
 #include <cjson/cJSON.h>
 
-static void sched_dag_parse_node_fields(sched_dag_node_t *node, cJSON *nj, int *err)
+static void node_fields(sched_dag_node_t *node, cJSON *nj, int *err)
 {
     cJSON *goal = cJSON_GetObjectItem(nj, "goal");
     node->goal =
@@ -47,7 +47,7 @@ static void sched_dag_parse_node_fields(sched_dag_node_t *node, cJSON *nj, int *
         *err = AIRY_ERR_OUT_OF_MEMORY;
 }
 
-static void sched_dag_parse_node_deps(sched_dag_node_t *node, cJSON *nj, int *err)
+static void node_deps(sched_dag_node_t *node, cJSON *nj, int *err)
 {
     cJSON *deps = cJSON_GetObjectItem(nj, "depends");
     if (cJSON_IsArray(deps) && *err == AIRY_SUCCESS) {
@@ -224,8 +224,8 @@ int sched_dag_validate_and_build(cJSON *root, sched_dag_t **out_dag)
             break;
         }
         node->id = AIRY_STRDUP(nid->valuestring);
-        sched_dag_parse_node_fields(node, nj, &err);
-        sched_dag_parse_node_deps(node, nj, &err);
+        node_fields(node, nj, &err);
+        node_deps(node, nj, &err);
         dag->nodes[dag->node_count++] = node;
         if (err != AIRY_SUCCESS)
             break;
