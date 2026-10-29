@@ -22,7 +22,7 @@
 #include "daemon_dep.h"
 #include "daemon_event_driver.h"
 #include "providers/core/ep_health.h"
-#include "router/core/llm_router.h"
+#include "router/core/llm_rtr_health.h"
 #include "svc_model_watch.h"
 
 #include <signal.h>
