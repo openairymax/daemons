@@ -75,13 +75,13 @@
 
 ## 构成
 
-`src/` 按功能域组织，共 11 个 C 源文件：
+`src/` 按功能域组织，共 12 个 C 源文件：
 
 | 域 | 数量 | 源文件 |
 |----|------|--------|
 | `src/svc/` | 1 | `svc_model_defaults.c`（`model.yaml` 全局默认模型提取，`llm_d` / `gateway_d` 共用；svc 生命周期机制族已迁 `commons/utils/svc`） |
 | `src/security/` | 3 | `daemon_security.c`（初始化/消毒）、`_acl.c`（ACL 授权）、`_audit.c`（审计；单元五十三裁撤零消费签名/凭据存取死面后归位） |
-| `src/daemon/` | 7 | `daemon_event_driver.c`（事件驱动主循环）、`daemon_rpc_client.c`、`daemon_dep.c`（硬依赖探测与降级上报）、`daemon_heapstore_bootstrap.c`、`daemon_ipc_ops_bootstrap.c`、`daemon_boot.c`（daemon 启动装配骨架）、`daemon_cfg_file.c`（config/endpoint 文件解析） |
+| `src/daemon/` | 8 | `daemon_event_driver.c`（事件驱动主循环）、`daemon_rpc_client.c`、`daemon_rpc_neg.c`（可达性负缓存，0.1.20 D2-4 从 rpc_client 拆出）、`daemon_dep.c`（硬依赖探测与降级上报）、`daemon_heapstore_bootstrap.c`、`daemon_ipc_ops_bootstrap.c`、`daemon_boot.c`（daemon 启动装配骨架）、`daemon_cfg_file.c`（config/endpoint 文件解析） |
 
 > 跨进程服务发现全家族（原 `src/discovery/` 7 文件）已迁 `commons/utils/sd/`
 > （g14 补完 P0.17 阶段 4 半程迁移），符号经 `airy_common` PUBLIC 链接提供；

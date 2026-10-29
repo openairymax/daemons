@@ -57,6 +57,7 @@ set(SVC_COMMON_SOURCES
     # g14b 补全：daemon_bootstrap_sd.c 迁 commons/utils/sd（daemon_bootstrap_sd.h
     # 公开头已在该处），实现随之归位，符号经 airy_common PUBLIC 链接提供。
     src/daemon/daemon_rpc_client.c       # Phase 3: gateway→daemon thin IPC client (Unix socket JSON-RPC)
+    src/daemon/daemon_rpc_neg.c          # 0.1.20 D2-4: RPC 可达性负缓存（从 daemon_rpc_client.c 拆出）
     src/daemon/daemon_heapstore_bootstrap.c # KER-05~07: daemon 统一 heapstore 运行时数据存储引导
     src/daemon/daemon_ipc_ops_bootstrap.c # ARC-04: 注入 atoms 侧 IPC/RPC/SD ops 抽象表
     src/daemon/daemon_dep.c         # 0.1.19 §7.2: 硬依赖声明 + 启动期探测 + 降级态显式上报（governance 面）
