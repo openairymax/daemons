@@ -307,13 +307,7 @@ static provider_attempt_t sse_try(void *ud, int retry, double left_sec, CURLcode
     /* 失败路径也要取码：上游先回状态码再断流时，收尾要按状态码打印错误体
      * 并归类（与 http_try 只在成功时取码不同）。 */
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, out_http_code);
-    if (res == CURLE_OPERATION_TIMEDOUT) {
-        prov_tmo_t kind = provider_tmo_class(curl, budget);
-        *out_tmo = (int)kind;
-        if (kind != PROV_TMO_KIND_N)
-            prov_stat_hit(kind);
-    }
-    curl_easy_cleanup(curl);
+    prov_http_done(curl, budget, res, out_tmo);
 
     *out_res = res;
     return res == CURLE_OK ? PROVIDER_TRY_DONE : PROVIDER_TRY_FAILED;
