@@ -212,7 +212,7 @@ static int think_orch_ops_cancel(int task_id)
     return 0;
 }
 
-static int think_orch_ops_list_pending(int **task_ids, size_t *count)
+static int ops_list_pending(int **task_ids, size_t *count)
 {
     think_service_t *svc = g_think_svc;
     if (!svc || !task_ids || !count) {
@@ -241,12 +241,12 @@ static int think_orch_ops_list_pending(int **task_ids, size_t *count)
     return 0;
 }
 
-static void think_orch_ops_free_list(int *task_ids)
+static void ops_free_list(int *task_ids)
 {
     AIRY_FREE(task_ids);
 }
 
-static int think_orch_ops_get_status(int task_id, int *status)
+static int ops_get_status(int task_id, int *status)
 {
     think_service_t *svc = g_think_svc;
     if (!svc || !status) {
@@ -298,9 +298,9 @@ static int think_orch_ops_wait(int task_id, int timeout_ms, int *result)
 static const airy_orch_ops_t g_think_orch_ops = {
     .schedule_task = think_orch_ops_schedule,
     .cancel_task = think_orch_ops_cancel,
-    .list_pending = think_orch_ops_list_pending,
-    .free_list = think_orch_ops_free_list,
-    .get_status = think_orch_ops_get_status,
+    .list_pending = ops_list_pending,
+    .free_list = ops_free_list,
+    .get_status = ops_get_status,
     .wait = think_orch_ops_wait,
 };
 
