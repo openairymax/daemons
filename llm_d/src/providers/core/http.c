@@ -503,3 +503,23 @@ int provider_http_exec(const provider_request_t *req, provider_http_resp_t **out
         curl_slist_free_all(headers);
     return rc;
 }
+
+int prov_probe_get(const provider_base_ctx_t *base, const char *path,
+                   const provider_header_spec_t *headers, double timeout_sec,
+                   provider_http_resp_t **out_response, long *out_http_code)
+{
+    if (!base || !base->api_base[0] || !path || !out_http_code)
+        return AIRY_ERR_INVALID_PARAM;
+
+    char url[1024];
+    int join_rc = provider_url_join(base->api_base, path, url, sizeof(url));
+    if (join_rc != AIRY_OK)
+        return join_rc;
+
+    struct curl_slist *hdrs = provider_headers_build(base, headers);
+    double budget = timeout_sec > 0.0 ? timeout_sec : PROVIDER_CONNECT_TIMEOUT_SEC;
+    int rc = provider_http_get(url, hdrs, budget, out_response, out_http_code);
+    if (hdrs)
+        curl_slist_free_all(hdrs);
+    return rc;
+}
