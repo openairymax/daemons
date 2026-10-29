@@ -127,14 +127,16 @@ static int svc_yaml_key_known(const char *key)
     return 0;
 }
 
-static int svc_yaml_row_known(struct yaml_node *item)
+/* 返回行内首个契约外键名，结构合法返回 NULL。丢行必须给出可定位原因：
+ * 只报聚合的 "no models found" 会让错拼的键静默失明（0.1.20 r42）。 */
+static const char *svc_yaml_badkey(struct yaml_node *item)
 {
     if (item->type != YAML_NODE_MAPPING)
-        return 0;
+        return "(not-a-mapping)";
     for (struct yaml_mapping_entry *e = item->mapping; e && e->key; ++e)
         if (!svc_yaml_key_known(e->key))
-            return 0;
-    return 1;
+            return e->key;
+    return NULL;
 }
 
 /* capabilities 子映射的 8 个裸名 → local_caps_t 位。 */
@@ -243,13 +245,27 @@ static void svc_yaml_parse_model(svc_yaml_state_t *st, struct yaml_node *item)
     const char *p = svc_yaml_item_str(item, "provider");
     const char *mn = (mid && mid[0]) ? mid : n;
     const char *pn = p ? p : n;
-    if (!(mn && mn[0] && pn && pn[0])) return;
-    if (!svc_yaml_row_known(item)) return;
+    if (!(mn && mn[0] && pn && pn[0])) {
+        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN row dropped: missing "
+                     "name/model_id, STACK: svc_yaml_parse_model");
+        return;
+    }
+    const char *bad = svc_yaml_badkey(item);
+    if (bad) {
+        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN row dropped: unknown key "
+                     "'%s' (name=%s), STACK: svc_yaml_parse_model", bad, mn);
+        return;
+    }
     model_entry_t *m = &st->models[st->model_count];
     __builtin_memset(m, 0, sizeof(*m));
     AIRY_STRNCPY_TERM(m->name, mn, sizeof(m->name));
     AIRY_STRNCPY_TERM(m->provider, pn, sizeof(m->provider));
-    if (svc_yaml_decl_apply(m, item) != 0) return;
+    if (svc_yaml_decl_apply(m, item) != 0) {
+        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN row dropped: illegal "
+                     "provision/artifact/capabilities (name=%s), STACK: "
+                     "svc_yaml_parse_model", mn);
+        return;
+    }
     svc_yaml_route(m, item, st->model_count);
     svc_yaml_apply(m, item);
     st->model_count++;
