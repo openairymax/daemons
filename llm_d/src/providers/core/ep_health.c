@@ -32,7 +32,6 @@
 
 #include "ep_health.h"
 #include "provider_http.h"
-#include "provider_transport.h"
 
 #include <cjson/cJSON.h>
 #include <string.h>
@@ -194,21 +193,17 @@ void ep_health_sink(ep_health_t *h, ep_health_sink_t sink, void *ud)
     airy_mtx_unlock(&h->lock);
 }
 
-static void ep_probe_one(const char *base, const char *path, int *out_ok, long *out_code,
+static void ep_probe_one(const ep_probe_t *p, const char *path, int *out_ok, long *out_code,
                          double *out_ms)
 {
     *out_ok = 0;
     *out_code = 0;
     *out_ms = 0.0;
 
-    char url[1024];
-    if (provider_url_join(base, path, url, sizeof(url)) != AIRY_OK)
-        return;
-
     uint64_t t0 = airy_time_ms();
     provider_http_resp_t *resp = NULL;
     long code = 0;
-    int rc = provider_http_get(url, NULL, EP_HEALTH_PROBE_TIMEOUT_SEC, &resp, &code);
+    int rc = prov_probe_get(&p->ctx, path, p->headers, EP_HEALTH_PROBE_TIMEOUT_SEC, &resp, &code);
     double ms = (double)(airy_time_ms() - t0);
     provider_http_resp_free(resp);
 
@@ -307,7 +302,7 @@ void ep_health_sweep(ep_health_t *h, int deep)
         int ok = 0;
         long code = 0;
         double ms = 0.0;
-        ep_probe_one(snap[i].ctx.api_base, h->probe_path, &ok, &code, &ms);
+        ep_probe_one(&snap[i], h->probe_path, &ok, &code, &ms);
 
         int deep_ok = 1;
         int deep_ran = 0;

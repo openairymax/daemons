@@ -30,6 +30,12 @@ typedef struct {
 int provider_http_exec(const provider_request_t *req, provider_http_resp_t **out_response,
                        long *out_http_code);
 
+/* 探测型 GET 出网（门面出口）：幂等只读、不重试。头链走与业务请求同一套
+ * 鉴权装配，path 由调用方声明并在此与 api_base 拼装。 */
+int prov_probe_get(const provider_base_ctx_t *base, const char *path,
+                   const provider_header_spec_t *headers, double timeout_sec,
+                   provider_http_resp_t **out_response, long *out_http_code);
+
 /* 本次请求的墙钟预算：显式 timeout_sec 优先；base 为自动预算时由实测
  * 时延 p99 推导（floor 120s，无样本 180s）。返回值恒 > 0。 */
 double provider_budget_sec(const provider_base_ctx_t *base);
