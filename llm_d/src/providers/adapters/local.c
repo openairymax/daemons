@@ -47,10 +47,42 @@ typedef struct {
 
 extern const provider_adapter_t local_ops; /* shim 自引用 ops */
 
+/* 剥离 api_base 尾部的 /v1 再拼 /props：/props 挂在根路径上。 */
+static int props_url(const provider_base_ctx_t *base, char *url, size_t sz)
+{
+    size_t blen = strlen(base->api_base);
+    if (blen > 3 && strcmp(base->api_base + blen - 3, "/v1") == 0)
+        blen -= 3;
+
+    char root[512];
+    if (blen == 0 || blen >= sizeof(root))
+        return -1;
+    __builtin_memcpy(root, base->api_base, blen);
+    root[blen] = '\0';
+    return provider_url_join(root, "/props", url, sz) == AIRY_OK ? 0 : -1;
+}
+
+/* 两个容量字段的取值规则各自独立：total_slots 只认顶层，n_ctx 优先
+ * default_generation_settings 内的 per-slot 值，顶层 n_ctx 仅为兼容回退。
+ * 返回 1 表示至少取到一个有效值（探测成功），0 表示两端点都没报。 */
+static int props_take(provider_base_ctx_t *base, const cJSON *props)
+{
+    cJSON *ts = cJSON_GetObjectItem(props, "total_slots");
+    cJSON *dgs = cJSON_GetObjectItem(props, "default_generation_settings");
+    cJSON *nc = dgs ? cJSON_GetObjectItem(dgs, "n_ctx") : NULL;
+
+    if (!nc)
+        nc = cJSON_GetObjectItem(props, "n_ctx");
+    if (cJSON_IsNumber(ts) && ts->valuedouble >= 1.0)
+        base->total_slots = (int)ts->valuedouble;
+    if (cJSON_IsNumber(nc) && nc->valuedouble >= 1.0)
+        base->n_ctx_slot = (int)nc->valuedouble;
+    return base->n_ctx_slot > 0 || base->total_slots > 0;
+}
+
 /* D2-9④：llama.cpp /props 容量发现（懒执行一次）。/props 挂根路径而
- * api_base 以 /v1 收尾，剥离后拼接；total_slots 取顶层，n_ctx 取
- * default_generation_settings.n_ctx（顶层 n_ctx 为兼容回退）。两值均
- * per-slot 语义（R43）。失败置终态 2：并发闸回落配置面，绝不阻塞请求。 */
+ * api_base 以 /v1 收尾，剥离后拼接。失败置终态 2：并发闸回落配置面，
+ * 绝不阻塞请求。 */
 static void local_props_discover(local_ctx_t *ctx)
 {
     provider_base_ctx_t *base = &ctx->base;
@@ -58,15 +90,8 @@ static void local_props_discover(local_ctx_t *ctx)
         return;
     base->props_state = 2;
 
-    size_t blen = strlen(base->api_base);
-    if (blen > 3 && strcmp(base->api_base + blen - 3, "/v1") == 0)
-        blen -= 3;
-    char root[512], url[576];
-    if (blen == 0 || blen >= sizeof(root))
-        return;
-    __builtin_memcpy(root, base->api_base, blen);
-    root[blen] = '\0';
-    if (provider_url_join(root, "/props", url, sizeof(url)) != AIRY_OK)
+    char url[576];
+    if (props_url(base, url, sizeof(url)) != 0)
         return;
 
     provider_http_resp_t *resp = NULL;
@@ -80,27 +105,16 @@ static void local_props_discover(local_ctx_t *ctx)
     }
 
     cJSON *props = cJSON_Parse(resp->data);
-    if (props) {
-        cJSON *ts = cJSON_GetObjectItem(props, "total_slots");
-        cJSON *dgs = cJSON_GetObjectItem(props, "default_generation_settings");
-        cJSON *nc = dgs ? cJSON_GetObjectItem(dgs, "n_ctx") : NULL;
-        if (!nc)
-            nc = cJSON_GetObjectItem(props, "n_ctx");
-        if (cJSON_IsNumber(ts) && ts->valuedouble >= 1.0)
-            base->total_slots = (int)ts->valuedouble;
-        if (cJSON_IsNumber(nc) && nc->valuedouble >= 1.0)
-            base->n_ctx_slot = (int)nc->valuedouble;
-        if (base->n_ctx_slot > 0 || base->total_slots > 0) {
-            base->props_state = 1;
-            SVC_LOG_INFO("C-L02: LOCAL: /props capacity n_ctx_slot=%d total_slots=%d "
-                         "(per-slot values)",
-                         base->n_ctx_slot, base->total_slots);
-        }
-        cJSON_Delete(props);
-    } else {
+    if (!props) {
         SVC_LOG_WARN("C-L02: LOCAL: /props body unparsable — capacity gates fall back "
                      "to model.yaml");
+    } else if (props_take(base, props)) {
+        base->props_state = 1;
+        SVC_LOG_INFO("C-L02: LOCAL: /props capacity n_ctx_slot=%d total_slots=%d "
+                     "(per-slot values)",
+                     base->n_ctx_slot, base->total_slots);
     }
+    cJSON_Delete(props);
     provider_http_resp_free(resp);
 }
 
