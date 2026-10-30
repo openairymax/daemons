@@ -149,6 +149,46 @@ static void sse_raw_append(sse_stream_ctx_t *sse, const char *data, size_t len)
         sse->raw_buf = grown;
 }
 
+/* 具名事件字段：剥离 event: 后的空白，超长截断到定长缓冲。 */
+static void event_take(sse_stream_ctx_t *sse, const char *line, size_t len)
+{
+    const char *ev = line + 6;
+
+    while (*ev == ' ' || *ev == '\t')
+        ev++;
+
+    size_t elen = len - (size_t)(ev - line);
+
+    if (elen >= sizeof(sse->event_name))
+        elen = sizeof(sse->event_name) - 1;
+    __builtin_memcpy(sse->event_name, ev, elen);
+    sse->event_name[elen] = '\0';
+}
+
+/* 交付一份 data 载荷：适配层回调（cJSON 解析 / strlen 语义）要求 NUL 终结
+ * 字符串，line_buf 内部切片不满足，故按需复制。返回非零表示回调要求取消，
+ * 语义与 curl 写回调一致。 */
+static int data_deliver(sse_stream_ctx_t *sse, const char *data, size_t len)
+{
+    if (!sse->on_chunk && !sse->on_event)
+        return 0;
+
+    char *tmp = (char *)AIRY_MALLOC(len + 1);
+
+    if (!tmp)
+        return 0;
+
+    __builtin_memcpy(tmp, data, len);
+    tmp[len] = '\0';
+
+    int ret = sse->on_event ? sse->on_event(sse->event_name[0] ? sse->event_name : NULL, tmp, len,
+                                            sse->chunk_user_data)
+                            : sse->on_chunk(tmp, sse->chunk_user_data);
+
+    AIRY_FREE(tmp);
+    return ret;
+}
+
 static int sse_feed_line(sse_stream_ctx_t *sse, const char *line, size_t len)
 {
     if (!line || len == 0)
@@ -157,55 +197,36 @@ static int sse_feed_line(sse_stream_ctx_t *sse, const char *line, size_t len)
     /* 具名事件模式：缓存 event: 字段；其余非 data 字段（id:/retry:/注释行）
      * 对两模式都无意义，落入下方前缀判断即被忽略。 */
     if (sse->on_event && len >= 6 && memcmp(line, "event:", 6) == 0) {
-        const char *ev = line + 6;
-        while (*ev == ' ' || *ev == '\t')
-            ev++;
-        size_t elen = len - (size_t)(ev - line);
-        if (elen >= sizeof(sse->event_name))
-            elen = sizeof(sse->event_name) - 1;
-        __builtin_memcpy(sse->event_name, ev, elen);
-        sse->event_name[elen] = '\0';
+        event_take(sse, line, len);
         return 0;
     }
 
-    if (len >= 5 && memcmp(line, "data:", 5) == 0) {
-        const char *data_start = line + 5;
-        while (*data_start == ' ' || *data_start == '\t')
-            data_start++;
-        size_t data_len = len - (size_t)(data_start - line);
+    if (len < 5 || memcmp(line, "data:", 5) != 0)
+        return 0;
 
-        if (data_len >= 6 && memcmp(data_start, "[DONE]", 6) == 0) {
-            /* Normal stream end: [DONE] is the standard SSE-protocol
-             * terminator, not an error. Only set the done flag; cancelled is
-             * left for on_chunk error cancellation — otherwise the curl write
-             * callback returning 0 due to cancelled would falsely report
-             * CURLE_WRITE_ERROR and treat a normal completion as STREAM-FAIL
-             * (historical defect exposed by real streaming callers). */
-            sse->done = 1;
-            return 0;
-        }
+    const char *start = line + 5;
 
-        if (sse->on_chunk || sse->on_event) {
-            /* 交付 NUL 终结副本：适配层回调（cJSON 解析 / strlen 语义）都
-             * 要求结尾字符串，line_buf 内部切片不满足。 */
-            char *tmp = (char *)AIRY_MALLOC(data_len + 1);
-            if (tmp) {
-                __builtin_memcpy(tmp, data_start, data_len);
-                tmp[data_len] = '\0';
-                int ret = sse->on_event ?
-                              sse->on_event(sse->event_name[0] ? sse->event_name : NULL, tmp,
-                                            data_len, sse->chunk_user_data) :
-                              sse->on_chunk(tmp, sse->chunk_user_data);
-                AIRY_FREE(tmp);
-                if (ret != 0) {
-                    sse->cancelled = 1;
-                    return ret;
-                }
-            }
-        }
+    while (*start == ' ' || *start == '\t')
+        start++;
+
+    size_t dlen = len - (size_t)(start - line);
+
+    if (dlen >= 6 && memcmp(start, "[DONE]", 6) == 0) {
+        /* Normal stream end: [DONE] is the standard SSE-protocol
+         * terminator, not an error. Only set the done flag; cancelled is
+         * left for on_chunk error cancellation — otherwise the curl write
+         * callback returning 0 due to cancelled would falsely report
+         * CURLE_WRITE_ERROR and treat a normal completion as STREAM-FAIL
+         * (historical defect exposed by real streaming callers). */
+        sse->done = 1;
+        return 0;
     }
 
-    return 0;
+    int ret = data_deliver(sse, start, dlen);
+
+    if (ret != 0)
+        sse->cancelled = 1;
+    return ret;
 }
 
 static void sse_process_buffer(sse_stream_ctx_t *sse)
@@ -334,6 +355,58 @@ static void sse_reset(void *ud)
     sse->event_name[0] = '\0';
 }
 
+/* 上游错误体留存：原始字节已在 raw_buf，落日志截断 1 KiB，诊断槽存全量，
+ * 使失败可从守护进程日志定位而非只剩 http_code。 */
+static void body_dump(const sse_stream_ctx_t *sse, const char *url, long http_code)
+{
+    if (http_code < 400 || !sse->raw_buf || sse->raw_len == 0)
+        return;
+
+    size_t n = sse->raw_len > 1024 ? 1024 : sse->raw_len;
+
+    SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-HTTP-ERROR url=%s http_code=%ld body=%.*s", url,
+                  http_code, (int)n, sse->raw_buf);
+    prov_diag_set(http_code, sse->raw_buf, sse->raw_len);
+}
+
+/* 传输层超时三拆：读空闲停摆报 STREAM_STALL（上游仍在线但不再吐字），
+ * 整轮预算耗尽报 ETIMEDOUT（再等也无意义），其余保持 IO。 */
+static int curl_fail(const char *url, CURLcode res, int tmo)
+{
+    SVC_LOG_WARN("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d diag=%s curl_error=%s "
+                 "tmo=%d",
+                 url, errno, provider_http_diag(res), curl_easy_strerror(res), tmo);
+
+    if (res == CURLE_OPERATION_TIMEDOUT) {
+        if (tmo == (int)PROV_TMO_STALL)
+            return AIRY_ERR_LLM_STREAM_STALL;
+        if (tmo == (int)PROV_TMO_TOTAL)
+            return AIRY_ETIMEDOUT;
+    }
+    return AIRY_ERR_IO;
+}
+
+/* HTTP >= 400 is a failed completion, not a success with an empty body.
+ * Falling through here previously surfaced provider rejections (e.g.
+ * DeepSeek "tools[13].function.name" 400) as OK with a zero-token empty
+ * stream, which clients rendered as "no reply / thinking only". */
+static int http_fail(const char *url, long http_code)
+{
+    /* N-3（0.1.16）：provider 明确拒绝请求体（非法 JSON / 无效 UTF-8），
+     * 归入专用码，避免与"网络不可达"（AIRY_ERR_IO）混为一谈。 */
+    if (http_code == 400 || http_code == 422) {
+        SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s http_code=%ld "
+                      "DIAGNOSIS=request_body_rejected",
+                      url, http_code);
+        return AIRY_ERR_LLM_BAD_REQUEST;
+    }
+
+    SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s http_code=%ld "
+                  "DIAGNOSIS=upstream_http_error",
+                  url, http_code);
+    return AIRY_ERR_IO;
+}
+
 /* 两模式共用的流式入口：重试壳在 core/retry.c，本件只提供单次尝试与两个
  * 钩子。资源（line_buf/raw_buf）由公开入口持有，本函数任何路径不释放。 */
 static int provider_stream_post(const char *url, struct curl_slist *headers, const char *body,
@@ -376,48 +449,13 @@ static int provider_stream_post(const char *url, struct curl_slist *headers, con
 
     /* Error status: surface the upstream body (kept raw) so failures are
      * diagnosable from the daemon log instead of a bare http_code. */
-    if (http_code >= 400 && sse->raw_buf && sse->raw_len > 0) {
-        size_t n = sse->raw_len;
-        if (n > 1024)
-            n = 1024;
-        SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-HTTP-ERROR url=%s http_code=%ld body=%.*s",
-                      url, http_code, (int)n, sse->raw_buf);
-        prov_diag_set(http_code, sse->raw_buf, sse->raw_len);
-    }
+    body_dump(sse, url, http_code);
 
-    if (res != CURLE_OK) {
-        SVC_LOG_WARN("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d diag=%s curl_error=%s "
-                     "tmo=%d",
-                     url, errno, provider_http_diag(res), curl_easy_strerror(res), tmo);
-        /* 传输层超时三拆：读空闲停摆报 STREAM_STALL（上游仍在线但不再吐字），
-         * 整轮预算耗尽报 ETIMEDOUT（再等也无意义），其余保持 IO。 */
-        if (res == CURLE_OPERATION_TIMEDOUT) {
-            if (tmo == (int)PROV_TMO_STALL)
-                return AIRY_ERR_LLM_STREAM_STALL;
-            if (tmo == (int)PROV_TMO_TOTAL)
-                return AIRY_ETIMEDOUT;
-        }
-        return AIRY_ERR_IO;
-    }
+    if (res != CURLE_OK)
+        return curl_fail(url, res, tmo);
 
-    /* HTTP >= 400 is a failed completion, not a success with an empty body.
-     * Falling through here previously surfaced provider rejections (e.g.
-     * DeepSeek "tools[13].function.name" 400) as OK with a zero-token empty
-     * stream, which clients rendered as "no reply / thinking only". */
-    if (http_code == 400 || http_code == 422) {
-        /* N-3（0.1.16）：provider 明确拒绝请求体（非法 JSON / 无效 UTF-8），
-         * 归入专用码，避免与"网络不可达"（AIRY_ERR_IO）混为一谈。 */
-        SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s http_code=%ld "
-                      "DIAGNOSIS=request_body_rejected",
-                      url, http_code);
-        return AIRY_ERR_LLM_BAD_REQUEST;
-    }
-    if (http_code >= 400) {
-        SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s http_code=%ld "
-                      "DIAGNOSIS=upstream_http_error",
-                      url, http_code);
-        return AIRY_ERR_IO;
-    }
+    if (http_code >= 400)
+        return http_fail(url, http_code);
 
     /* C11：传输成功且 2xx 不证明流按协议终结——行协议的唯一合法终点是
      * data: [DONE]。流被中途截断（代理超时、上游崩溃）且调用方未主动
