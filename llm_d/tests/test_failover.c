@@ -5,14 +5,15 @@
  * @file test_failover.c
  * @brief 0.1.19 §3.8.2 端点切换决策件回归
  *
- * 锁定「错误码 → 可否换端点」这一唯一判据，重点覆盖三处 class 归类
+ * 锁定「错误码 → 可否换端点」这一唯一判据，重点覆盖四处 class 归类
  * 不足以表达的显式前置，防止后续重构退回纯 class 推导：
  *
  *   1. AIRY_ERR_IO 未入 err_class 表（落 business），仍须判 transport
  *   2. AIRY_ERR_LLM_AUTH_FAIL 归 config，仍须判 auth
  *   3. AIRY_ERR_LLM_RATE_LIMIT 归 transport，仍须独立成类
- *   4. BAD_REQUEST / 参数类 / 策略类 永不切换
- *   5. 白名单掩码语义与原因名双向映射
+ *   4. AIRY_ERR_SVC_NOT_READY 归 transport，仍须独立成 not_ready
+ *   5. BAD_REQUEST / 参数类 / 策略类 永不切换
+ *   6. 白名单掩码语义与原因名双向映射
  */
 
 #include "router/core/llm_failover.h"
@@ -60,15 +61,19 @@ static void check_name(const char *name, llm_fo_reason_t reason, const char *wan
     }
 }
 
-/* 三处显式前置：class 归类会给出错误答案，必须由显式表命中。 */
+/* 四处显式前置：class 归类会给出错误答案，必须由显式表命中。 */
 static void test_explicit(void)
 {
     check_reason("io_is_transport", AIRY_ERR_IO, LLM_FO_TRANSPORT);
     check_reason("auth_is_auth", AIRY_ERR_LLM_AUTH_FAIL, LLM_FO_AUTH);
     check_reason("rate_is_rate", AIRY_ERR_LLM_RATE_LIMIT, LLM_FO_RATE_LIMIT);
+    check_reason("not_ready_is_not_ready", AIRY_ERR_SVC_NOT_READY, LLM_FO_NOT_READY);
     check_should("io_switchable", AIRY_ERR_IO, LLM_FO_ON_DEFAULT, 1);
     check_should("auth_switchable", AIRY_ERR_LLM_AUTH_FAIL, LLM_FO_ON_DEFAULT, 1);
     check_should("rate_switchable", AIRY_ERR_LLM_RATE_LIMIT, LLM_FO_ON_DEFAULT, 1);
+    check_should("not_ready_switchable", AIRY_ERR_SVC_NOT_READY, LLM_FO_ON_DEFAULT, 1);
+    check_should("not_ready_not_transport", AIRY_ERR_SVC_NOT_READY,
+                 LLM_FO_BIT(LLM_FO_TRANSPORT), 0);
 }
 
 /* 链路类（含 class=transport 兜底）全部可切。 */
@@ -112,7 +117,7 @@ static void test_mask(void)
     test_count++;
     if (LLM_FO_ON_DEFAULT !=
         (LLM_FO_BIT(LLM_FO_TRANSPORT) | LLM_FO_BIT(LLM_FO_RATE_LIMIT) |
-         LLM_FO_BIT(LLM_FO_AUTH))) {
+         LLM_FO_BIT(LLM_FO_AUTH) | LLM_FO_BIT(LLM_FO_NOT_READY))) {
         printf("    FAIL: default mask drifted from §3.8.2 on-list\n");
         fail_count++;
     }
@@ -127,8 +132,9 @@ static void test_names(void)
     check_name("name_transport", LLM_FO_TRANSPORT, "transport");
     check_name("name_rate", LLM_FO_RATE_LIMIT, "rate_limit");
     check_name("name_auth", LLM_FO_AUTH, "auth");
+    check_name("name_not_ready", LLM_FO_NOT_READY, "not_ready");
 
-    for (r = LLM_FO_NONE; r <= LLM_FO_AUTH; ++r) {
+    for (r = LLM_FO_NONE; r <= LLM_FO_NOT_READY; ++r) {
         test_count++;
         if (llm_fo_parse(llm_fo_name(r)) != r) {
             printf("    FAIL: roundtrip broken for %s\n", llm_fo_name(r));
