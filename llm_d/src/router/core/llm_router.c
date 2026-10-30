@@ -143,6 +143,82 @@ int llm_rtr_reset_eps(void)
     return 0;
 }
 
+/* 策略分派：六个策略各一条选路规则。COST 失败回落轮询并改写展示名，
+ * FALLBACK 按轮询→成本→时延次序试探；展示名随实际命中的规则回写。 */
+static int route_dispatch(router_ctx_t *ctx, const llm_route_request_t *request,
+                          llm_route_result_t *result, llm_route_strategy_t strategy,
+                          const char **name)
+{
+    int ret;
+
+    switch (strategy) {
+    case LLM_ROUTE_COST:
+        *name = "COST_AWARE";
+        ret = route_cost_aware(request, result);
+        if (ret == 0)
+            return 0;
+        AIRY_LOG_WARN("C-L02: LLMRouter: cost_aware failed, falling back to round_robin");
+        ctx->stats.fallback_count++;
+        AIRY_MEMSET(result, 0, sizeof(llm_route_result_t));
+        ret = route_round_robin(request, result);
+        if (ret == 0)
+            *name = "COST_AWARE->ROUND_ROBIN";
+        return ret;
+    case LLM_ROUTE_ROUND_ROBIN:
+        *name = "ROUND_ROBIN";
+        return route_round_robin(request, result);
+    case LLM_ROUTE_LATENCY:
+        *name = "LEAST_LATENCY";
+        return route_least_latency(request, result);
+    case LLM_ROUTE_COMPLEXITY:
+        *name = "QUALITY_FIRST";
+        return route_quality_first(request, result);
+    case LLM_ROUTE_FALLBACK:
+        *name = "FALLBACK";
+        ret = route_round_robin(request, result);
+        if (ret == 0)
+            return 0;
+        AIRY_LOG_DEBUG("C-L02: LLMRouter: fallback round_robin failed, trying cost_aware");
+        ret = route_cost_aware(request, result);
+        if (ret == 0)
+            return 0;
+        AIRY_LOG_DEBUG("C-L02: LLMRouter: fallback cost_aware failed, trying least_latency");
+        return route_least_latency(request, result);
+    default:
+        *name = "DEFAULT->COST_AWARE";
+        return route_cost_aware(request, result);
+    }
+}
+
+/* 选路记账：总次数、按策略命中、成本与 token 估算、失败计数。统计与日志
+ * 在同一把锁内完成，避免两条退出路径各写一份计数。 */
+static void route_account(router_ctx_t *ctx, const llm_route_request_t *request,
+                          const llm_route_result_t *result, llm_route_strategy_t strategy,
+                          int ret, const char *name)
+{
+    AIRY_MUTEX_LOCK(&ctx->mutex);
+    ctx->stats.total_requests++;
+    if (ret == 0) {
+        ctx->stats.routed_count[strategy]++;
+        ctx->stats.total_cost += result->estimated_cost;
+        if (request->prompt)
+            ctx->stats.total_tokens += router_estimate_tokens(request->prompt, request->prompt_len);
+        AIRY_LOG_INFO("C-L02: LLMRouter: routed via %s -> %s/%s "
+                      "(cost=$%.6f, latency=%ums, confidence=%d%%)",
+                      name, result->provider_name, result->model_name, result->estimated_cost,
+                      result->estimated_latency_ms, result->confidence);
+    } else {
+        ctx->stats.error_count++;
+        AIRY_LOG_ERROR("C-L02: LLMRouter: all routing strategies failed for request "
+                       "(strategy=%d, caps=0x%x, max_cost=$%.6f, "
+                       "max_latency=%ums, prompt_len=%zu, "
+                       "total_endpoints=%zu) STACK: llm_router_route",
+                       strategy, request->required_caps, request->max_cost, request->max_latency_ms,
+                       request->prompt_len, ctx->endpoint_count);
+    }
+    AIRY_MUTEX_UNLOCK(&ctx->mutex);
+}
+
 int llm_router_route(const llm_route_request_t *request, llm_route_result_t *result)
 {
     router_ctx_t *ctx = router_ctx_get();
@@ -172,81 +248,10 @@ int llm_router_route(const llm_route_request_t *request, llm_route_result_t *res
                    strategy, request->required_caps, request->max_cost, request->max_latency_ms,
                    request->prompt_len);
 
-    int ret = -1;
-    const char *strategy_name = "UNKNOWN";
+    const char *name = "UNKNOWN";
+    int ret = route_dispatch(ctx, request, result, strategy, &name);
 
-    switch (strategy) {
-    case LLM_ROUTE_COST:
-        strategy_name = "COST_AWARE";
-        ret = route_cost_aware(request, result);
-
-        if (ret != 0) {
-            AIRY_LOG_WARN("C-L02: LLMRouter: cost_aware failed, falling back to round_robin");
-            ctx->stats.fallback_count++;
-            AIRY_MEMSET(result, 0, sizeof(llm_route_result_t));
-            ret = route_round_robin(request, result);
-            if (ret == 0) {
-                strategy_name = "COST_AWARE->ROUND_ROBIN";
-            }
-        }
-        break;
-    case LLM_ROUTE_ROUND_ROBIN:
-        strategy_name = "ROUND_ROBIN";
-        ret = route_round_robin(request, result);
-        break;
-    case LLM_ROUTE_LATENCY:
-        strategy_name = "LEAST_LATENCY";
-        ret = route_least_latency(request, result);
-        break;
-    case LLM_ROUTE_COMPLEXITY:
-        strategy_name = "QUALITY_FIRST";
-        ret = route_quality_first(request, result);
-        break;
-    case LLM_ROUTE_FALLBACK:
-        strategy_name = "FALLBACK";
-
-        ret = route_round_robin(request, result);
-        if (ret != 0) {
-            AIRY_LOG_DEBUG("C-L02: LLMRouter: fallback round_robin failed, "
-                           "trying cost_aware");
-            ret = route_cost_aware(request, result);
-        }
-        if (ret != 0) {
-            AIRY_LOG_DEBUG("C-L02: LLMRouter: fallback cost_aware failed, "
-                           "trying least_latency");
-            ret = route_least_latency(request, result);
-        }
-        break;
-    default:
-        strategy_name = "DEFAULT->COST_AWARE";
-        ret = route_cost_aware(request, result);
-        break;
-    }
-
-    AIRY_MUTEX_LOCK(&ctx->mutex);
-    ctx->stats.total_requests++;
-    if (ret == 0) {
-        ctx->stats.routed_count[strategy]++;
-        ctx->stats.total_cost += result->estimated_cost;
-
-        if (request->prompt) {
-            ctx->stats.total_tokens += router_estimate_tokens(request->prompt, request->prompt_len);
-        }
-        AIRY_LOG_INFO("C-L02: LLMRouter: routed via %s -> %s/%s "
-                      "(cost=$%.6f, latency=%ums, confidence=%d%%)",
-                      strategy_name, result->provider_name, result->model_name,
-                      result->estimated_cost, result->estimated_latency_ms, result->confidence);
-    } else {
-        ctx->stats.error_count++;
-        AIRY_LOG_ERROR("C-L02: LLMRouter: all routing strategies failed for request "
-                       "(strategy=%d, caps=0x%x, max_cost=$%.6f, "
-                       "max_latency=%ums, prompt_len=%zu, "
-                       "total_endpoints=%zu) STACK: llm_router_route",
-                       strategy, request->required_caps, request->max_cost, request->max_latency_ms,
-                       request->prompt_len, ctx->endpoint_count);
-    }
-    AIRY_MUTEX_UNLOCK(&ctx->mutex);
-
+    route_account(ctx, request, result, strategy, ret, name);
     return ret;
 }
 
