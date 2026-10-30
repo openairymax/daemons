@@ -98,12 +98,12 @@ static void lat_note(const provider_base_ctx_t *base, uint64_t start_ms)
     prov_stat_lat(base->name, (uint32_t)(airy_time_ms() - start_ms));
 }
 
-/* 入口前置条件：四件公共依赖 + 构体槽；sink 为各形态独有槽位（同步为
- * 输出槽，流式为回调）。 */
+/* 入口公共前置条件：装配三元 + 请求构体槽。各形态独有槽位（同步的输出槽、
+ * 流式的回调）类型不同，由调用方各自判定，不混入本函数形参。 */
 static int arg_ok(const provider_ctx_t *ctx, const provider_adapter_t *ops,
-                  const llm_request_config_t *manager, const void *sink)
+                  const llm_request_config_t *manager)
 {
-    return ctx && ops && manager && sink && ops->build_request;
+    return ctx && ops && manager && ops->build_request;
 }
 
 /* 请求体装配失败统一收口：phase 仅作日志区分（COMPLETE / STREAM），
@@ -205,7 +205,7 @@ static int stream_finish(const provider_adapter_t *ops, const provider_base_ctx_
 int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
                              const llm_request_config_t *manager, llm_response_t **out_response)
 {
-    if (!arg_ok(ctx, ops, manager, out_response) || !ops->parse_response)
+    if (!arg_ok(ctx, ops, manager) || !out_response || !ops->parse_response)
         return AIRY_ERR_INVALID_PARAM;
 
     provider_base_ctx_t *base = provider_base_ctx(ctx);
@@ -261,7 +261,7 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
                                     llm_stream_callback_t callback, void *callback_data,
                                     llm_response_t **out_response)
 {
-    if (!arg_ok(ctx, ops, manager, callback))
+    if (!arg_ok(ctx, ops, manager) || !callback)
         return AIRY_ERR_INVALID_PARAM;
 
     provider_base_ctx_t *base = provider_base_ctx(ctx);

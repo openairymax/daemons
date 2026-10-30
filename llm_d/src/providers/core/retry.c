@@ -101,10 +101,54 @@ int provider_retry_budget_ok(double timeout_sec, uint64_t start_ms, uint32_t del
     return left * 1000.0 >= (double)delay_ms + (double)PROVIDER_RETRY_MIN_LEFT_MS;
 }
 
+/* 入口前置条件：装配完整性（尝试钩子 + 定位三元）与两个必填出参。 */
+static int cfg_ok(const provider_retry_cfg_t *cfg, const void *out_res, const void *out_code)
+{
+    return cfg && cfg->attempt && cfg->url && cfg->tag && out_res && out_code;
+}
+
+/* 不再重试的统一日志口径：次数耗尽、错误不可重试、闸门否决三者同一条
+ * 记录，由 attempts / retryable 字段区分原因。 */
+static void norun_log(const provider_retry_cfg_t *cfg, CURLcode res, long http_code, int retry,
+                      int max_retries, int retryable, int tmo)
+{
+    SVC_LOG_WARN("C-L02: PROVIDER: %s-NORETRY url=%s errno=%d attempts=%d/%d "
+                 "http_code=%ld diag=%s curl_error=%s retryable=%d tmo=%d idem=%d",
+                 cfg->tag, cfg->url, errno, retry + 1, max_retries + 1, http_code,
+                 provider_http_diag(res), curl_easy_strerror(res), retryable, tmo,
+                 cfg->idempotent);
+}
+
+/* 单次退避：先验预算（剩余时间不足 3 次退避余量即放弃），再落日志、睡眠、
+ * 复位钩子。返回 -1 表示预算耗尽、调用方须终止整个重试环。 */
+static int retry_wait(const provider_retry_cfg_t *cfg, uint64_t start_ms, int retry,
+                      int max_retries, int local, CURLcode res)
+{
+    uint32_t delay_ms = local ? (uint32_t)PROVIDER_RETRY_LOCAL_MS : provider_backoff_ms(retry);
+
+    if (!provider_retry_budget_ok(cfg->timeout_sec, start_ms, delay_ms)) {
+        SVC_LOG_WARN("C-L02: PROVIDER: %s-STOP url=%s retry=%d/%d "
+                     "reason=budget_spent left=%.1fs delay=%ums timeout=%.1fs",
+                     cfg->tag, cfg->url, retry + 1, max_retries,
+                     provider_left_sec(cfg->timeout_sec, start_ms), delay_ms, cfg->timeout_sec);
+        return -1;
+    }
+
+    SVC_LOG_WARN("C-L02: PROVIDER: %s-RETRY url=%s retry=%d/%d delay=%ums diag=%s "
+                 "curl_error=%s",
+                 cfg->tag, cfg->url, retry + 1, max_retries, delay_ms, provider_http_diag(res),
+                 curl_easy_strerror(res));
+
+    airy_sleep_ms(delay_ms);
+    if (cfg->reset)
+        cfg->reset(cfg->ud);
+    return 0;
+}
+
 int provider_retry_run(const provider_retry_cfg_t *cfg, CURLcode *out_res, long *out_http_code,
                        int *out_tmo)
 {
-    if (!cfg || !cfg->attempt || !cfg->url || !cfg->tag || !out_res || !out_http_code) {
+    if (!cfg_ok(cfg, out_res, out_http_code)) {
         errno = EINVAL;
         return AIRY_ERR_INVALID_PARAM;
     }
@@ -132,32 +176,12 @@ int provider_retry_run(const provider_retry_cfg_t *cfg, CURLcode *out_res, long 
         int retryable = retry_allowed(cfg, res, tmo);
         if (retry >= max_retries || !retryable ||
             (cfg->gate && !cfg->gate(cfg->ud, res, http_code))) {
-            SVC_LOG_WARN("C-L02: PROVIDER: %s-NORETRY url=%s errno=%d attempts=%d/%d "
-                         "http_code=%ld diag=%s curl_error=%s retryable=%d tmo=%d idem=%d",
-                         cfg->tag, cfg->url, errno, retry + 1, max_retries + 1, http_code,
-                         provider_http_diag(res), curl_easy_strerror(res), retryable, tmo,
-                         cfg->idempotent);
+            norun_log(cfg, res, http_code, retry, max_retries, retryable, tmo);
             break;
         }
 
-        uint32_t delay_ms = local ? (uint32_t)PROVIDER_RETRY_LOCAL_MS : provider_backoff_ms(retry);
-        if (!provider_retry_budget_ok(cfg->timeout_sec, start_ms, delay_ms)) {
-            SVC_LOG_WARN("C-L02: PROVIDER: %s-STOP url=%s retry=%d/%d "
-                         "reason=budget_spent left=%.1fs delay=%ums timeout=%.1fs",
-                         cfg->tag, cfg->url, retry + 1, max_retries,
-                         provider_left_sec(cfg->timeout_sec, start_ms), delay_ms,
-                         cfg->timeout_sec);
+        if (retry_wait(cfg, start_ms, retry, max_retries, local, res) != 0)
             break;
-        }
-
-        SVC_LOG_WARN("C-L02: PROVIDER: %s-RETRY url=%s retry=%d/%d delay=%ums diag=%s "
-                     "curl_error=%s",
-                     cfg->tag, cfg->url, retry + 1, max_retries, delay_ms,
-                     provider_http_diag(res), curl_easy_strerror(res));
-
-        airy_sleep_ms(delay_ms);
-        if (cfg->reset)
-            cfg->reset(cfg->ud);
     }
 
     *out_res = res;
