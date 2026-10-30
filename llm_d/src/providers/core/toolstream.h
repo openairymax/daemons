@@ -63,7 +63,7 @@ provider_tool_slot_t *provider_tool_begin(provider_tool_acc_t *acc, int index, c
 void provider_tool_args_add(provider_tool_acc_t *acc, int index, const char *frag);
 
 /* 消费 choices[].delta：抽取 tool_calls 增量分片并按 index 装配。 */
-void provider_tool_delta(provider_tool_acc_t *acc, cJSON *delta);
+void provider_tool_delta(provider_tool_acc_t *acc, const cJSON *delta);
 
 /* 装配完整 tool_calls JSON 数组（统一非流式响应形状）；返回值由调用方 free。 */
 char *provider_tool_json(const provider_tool_acc_t *acc);
