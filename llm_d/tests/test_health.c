@@ -13,6 +13,7 @@
  *   5. 每轮重回 OPEN 按 open_level 指数抬升保持期，封顶 OPEN_MAX_MS
  *   6. CLOSED 期满 FAIL_WINDOW_MS 无新失败即衰减，稀疏失败不跨天累计
  *   7. 健康面落盘后重启恢复：同 provider/model 重注册即回到 OPEN
+ *   8. 端点未就绪（SVC_NOT_READY / HTTP 503）可切换但不计入健康账
  */
 
 #include "router/core/llm_rtr_health.h"
@@ -205,6 +206,7 @@ static void test_auth(void)
 static void test_ignored(void)
 {
     llm_endpoint_t ep;
+    uint32_t until;
     int i;
 
     memset(&ep, 0, sizeof(ep));
@@ -217,6 +219,25 @@ static void test_ignored(void)
     check_u32("ignored_last", ep.last_fail_ms, 0U);
     check_u32("ignored_open", ep.open_until_ms, 0U);
     check_state("ignored_state", &ep, 100U, LLM_EP_CLOSED);
+
+    /* 端点未就绪（冷加载/上游重启）可换端点，但不是端点故障：
+     * 计入健康账会把一个正在正常启动的端点熔断掉。 */
+    for (i = 0; i < 5; i++)
+        llm_ep_fail(&ep, AIRY_ERR_SVC_NOT_READY, 100U);
+    check_u32("not_ready_count", ep.consec_fail, 0U);
+    check_u32("not_ready_open", ep.open_until_ms, 0U);
+    check_state("not_ready_state", &ep, 100U, LLM_EP_CLOSED);
+
+    /* HALF 期同理：探测收到 not_ready 不算探测失败。 */
+    memset(&ep, 0, sizeof(ep));
+    llm_ep_fail(&ep, AIRY_ERR_TIMEOUT, 700U);
+    llm_ep_fail(&ep, AIRY_ERR_TIMEOUT, 700U);
+    llm_ep_fail(&ep, AIRY_ERR_TIMEOUT, 700U);
+    until = ep.open_until_ms;
+    check_admit("not_ready_probe", &ep, until, 1);
+    llm_ep_fail(&ep, AIRY_ERR_SVC_NOT_READY, until);
+    check_state("not_ready_half_state", &ep, until, LLM_EP_HALF);
+    check_u32("not_ready_half_probe", ep.probe_fail, 0U);
 }
 
 /* 稀疏失败不跨窗口累计：满窗无新失败即重新起算。 */

@@ -88,6 +88,12 @@ void llm_ep_fail(llm_endpoint_t *ep, int err, uint32_t now)
     if (reason == LLM_FO_NONE)
         return;
 
+    /* 端点未就绪（503：自托管推理加载权重、上游重启）不是端点故障：
+     * 换端点仍由白名单裁决，但不得计入健康账——否则冷加载窗口会把
+     * 一个正在正常启动的端点熔断掉。 */
+    if (reason == LLM_FO_NOT_READY)
+        return;
+
     state = llm_ep_state(ep, now);
 
     /* 熔断期内到达的失败只更新时间戳，不延长保持期：否则持续打点会把
