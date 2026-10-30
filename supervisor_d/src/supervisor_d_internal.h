@@ -15,7 +15,8 @@
  *
  * 期望态 = 画像 launch 声明（$AIRY_HOME/config/profile.env 的
  * AIRYRT_LAUNCH_CORE / AIRYRT_LAUNCH_AUX / AIRYRT_LAUNCH_ARGS_<NAME> /
- * AIRYRT_LAUNCH_BIN_<NAME> / AIRYRT_LAUNCH_EP_<NAME>），
+ * AIRYRT_LAUNCH_BIN_<NAME> / AIRYRT_LAUNCH_EP_<NAME> /
+ * AIRYRT_LAUNCH_KEEPENV_<NAME>），
  * 实际态 = 子进程集 + sock 可达性；supervisor_d 周期比对并拉齐：
  * CORE 死而自动复活（指数退避，超限 failed 显式告警），AUX 仅经
  * supervisor.activate 按需拉起。收摊经 supervisor.shutdown 统一收割。
@@ -50,6 +51,7 @@ extern "C" {
 #define SUP_NAME_MAX 32
 #define SUP_PATH_MAX 512
 #define SUP_ARGS_MAX 512
+#define SUP_ENV_MAX 128
 
 /* ---- 默认参数（env 可覆盖：AIRYRT_SUP_TICK_MS / _BACKOFF_BASE_MS /
  *       _BACKOFF_MAX_MS / _MAX_ATTEMPTS / _LIVENESS_TICKS） ---- */
@@ -77,6 +79,7 @@ typedef struct sup_proc {
     char bin[SUP_PATH_MAX];   /* $AIRY_HOME/bin/notify_d */
     char sock[SUP_PATH_MAX];  /* UDS 路径 / "host:port" / "tcp:<port>"（外部进程回环探活） */
     char args[SUP_ARGS_MAX];  /* 声明注入 argv（如 llm_d --manager <cfg>），空串无参 */
+    char keepenv[SUP_ENV_MAX]; /* 保留继承的动态链接器变量白名单，空串=全清洗 */
     sup_role_t role;
     sup_state_t state;
     sup_pid_t pid;
@@ -114,6 +117,11 @@ void sup_reconcile(sup_ctx_t *ctx);
 void sup_shutdown_all(sup_ctx_t *ctx);
 void sup_log(const char *level, const char *fmt, ...);
 void sup_health_tick(sup_ctx_t *ctx, sup_proc_t *p);
+
+#ifndef _WIN32
+/* ---- proc.c：派生受管进程前的环境隔离（隔离格；子进程分支调用） ---- */
+void sup_env_scrub(const sup_proc_t *p);
+#endif
 
 /* ---- net 域：端点机制件自持接口（跨平台裁剪 + WSA/TCP 装配权威） ---- */
 #include "net/sup_net.h"
