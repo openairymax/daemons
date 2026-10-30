@@ -267,6 +267,19 @@ static void apply_ep_line(sup_ctx_t *ctx, const char *key, const char *val)
     snprintf(ctx->procs[i].sock, sizeof(ctx->procs[i].sock), "%s", val);
 }
 
+static void apply_keep_line(sup_ctx_t *ctx, const char *key, const char *val)
+{
+    /* AIRYRT_LAUNCH_KEEPENV_<NAME> -> 动态链接器变量保留白名单（空格分隔） */
+    static const char pfx[] = "AIRYRT_LAUNCH_KEEPENV_";
+    size_t pl = sizeof(pfx) - 1;
+    if (strncmp(key, pfx, pl) != 0)
+        return;
+    int i = sup_proc_find(ctx, key + pl);
+    if (i < 0)
+        return; /* 未登记的 keepenv 声明拒绝（fail-closed） */
+    snprintf(ctx->procs[i].keepenv, sizeof(ctx->procs[i].keepenv), "%s", val);
+}
+
 /* 内置缺省表：仅 profile.env 无 launch 段时兜底（升级兼容） */
 int sup_decl_defaults(sup_ctx_t *ctx)
 {
@@ -340,6 +353,7 @@ int sup_decl_load(sup_ctx_t *ctx)
                 apply_args_line(ctx, key, val);
                 apply_bin_line(ctx, key, val);
                 apply_ep_line(ctx, key, val);
+                apply_keep_line(ctx, key, val);
             }
         }
     }
