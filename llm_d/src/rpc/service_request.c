@@ -589,18 +589,56 @@ int llm_service_complete_stream(llm_service_t *svc, const llm_request_config_t *
 /* OpenAI 兼容：仅 Bearer 鉴权，Content-Type 由 core 统一附加。 */
 static const provider_header_spec_t EMBEDDINGS_HEADERS = {.auth = PROVIDER_AUTH_BEARER};
 
+/* 端点解析：显式模型优先，缺省回落服务默认模型；找不到即无可用端点。 */
+static const provider_t *emb_prov(llm_service_t *svc, const char *model)
+{
+    const char *m = (model && model[0]) ? model : svc->default_model;
+    const provider_t *prov = svc_find_prov(svc, m ? m : "");
+
+    if (!prov || !prov->ctx)
+        SVC_LOG_ERROR("embeddings: no provider for model=%s", m ? m : "(default)");
+    return (prov && prov->ctx) ? prov : NULL;
+}
+
+/* 出网与回读：非 2xx 与传输失败都收敛为 AIRY_ERR_IO，响应体一次性转存，
+ * 让调用方拿到与 HTTP 层解耦的 JSON 字符串。 */
+static int emb_post(provider_base_ctx_t *base, const char *body, char **out_json)
+{
+    /* B16-S6：出网收敛到 providers/core 唯一入口，URL 拼装、头链、超时与
+     * 重试全归 core，service 层不出现 curl_*。 */
+    provider_request_t req = {
+        .base = base,
+        .path = "/embeddings",
+        .headers = &EMBEDDINGS_HEADERS,
+        .body = body,
+    };
+    provider_http_resp_t *resp = NULL;
+    long http_code = 0;
+    int rc = provider_http_exec(&req, &resp, &http_code);
+
+    if (rc != AIRY_OK || !resp || http_code >= 400) {
+        if (rc == AIRY_OK && resp)
+            SVC_LOG_WARN("embeddings: upstream HTTP %ld api_base=%s", http_code, base->api_base);
+        else
+            SVC_LOG_ERROR("embeddings: HTTP request failed api_base=%s rc=%d", base->api_base, rc);
+        provider_http_resp_free(resp);
+        return AIRY_ERR_IO;
+    }
+
+    *out_json = AIRY_STRDUP(resp->data ? resp->data : "{}");
+    provider_http_resp_free(resp);
+    return *out_json ? AIRY_SUCCESS : AIRY_ERR_OUT_OF_MEMORY;
+}
+
 static int emb_impl(llm_service_t *svc, const char *model, const char *request_body, char **out_json)
 {
     if (!svc || !request_body || !request_body[0] || !out_json)
         return AIRY_ERR_INVALID_PARAM;
     *out_json = NULL;
 
-    const char *m = (model && model[0]) ? model : svc->default_model;
-    const provider_t *prov = svc_find_prov(svc, m ? m : "");
-    if (!prov || !prov->ctx) {
-        SVC_LOG_ERROR("embeddings: no provider for model=%s", m ? m : "(default)");
+    const provider_t *prov = emb_prov(svc, model);
+    if (!prov)
         return AIRY_ERR_LLM_INVALID_MODEL;
-    }
 
     provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
     provider_refresh_api_key(base);
@@ -609,37 +647,7 @@ static int emb_impl(llm_service_t *svc, const char *model, const char *request_b
         SVC_LOG_ERROR("embeddings: empty api_base for provider=%s", prov->name ? prov->name : "?");
         return AIRY_ERR_INVALID_PARAM;
     }
-
-    /* B16-S6：出网收敛到 providers/core 唯一入口，URL 拼装、头链、超时与
-     * 重试全归 core，service 层不出现 curl_*。 */
-    provider_request_t req = {
-        .base = base,
-        .path = "/embeddings",
-        .headers = &EMBEDDINGS_HEADERS,
-        .body = request_body,
-    };
-
-    provider_http_resp_t *resp = NULL;
-    long http_code = 0;
-    int rc = provider_http_exec(&req, &resp, &http_code);
-
-    if (rc != AIRY_OK || !resp) {
-        provider_http_resp_free(resp);
-        SVC_LOG_ERROR("embeddings: HTTP request failed api_base=%s rc=%d", base->api_base, rc);
-        return AIRY_ERR_IO;
-    }
-
-    if (http_code >= 400) {
-        SVC_LOG_WARN("embeddings: upstream HTTP %ld api_base=%s", http_code, base->api_base);
-        provider_http_resp_free(resp);
-        return AIRY_ERR_IO;
-    }
-
-    *out_json = AIRY_STRDUP(resp->data ? resp->data : "{}");
-    provider_http_resp_free(resp);
-    if (!*out_json)
-        return AIRY_ERR_OUT_OF_MEMORY;
-    return AIRY_SUCCESS;
+    return emb_post(base, request_body, out_json);
 }
 
 int llm_service_embeddings(llm_service_t *svc, const char *model, const char *request_body,
