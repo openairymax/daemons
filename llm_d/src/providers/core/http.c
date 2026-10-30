@@ -355,6 +355,8 @@ int provider_http_get(const char *url, struct curl_slist *headers, double timeou
 /* R-1 / N-3：provider HTTP 状态码 → airy 错误码归一（流式与非流式共用
  * SSoT）。401/403 归鉴权失败、429 归限流，避免笼统的"网络请求失败"掩盖
  * 根因；400/422 是 provider 明确拒绝请求体，归专用码以便跳过外层重试。
+ * 503 表示端点尚未就绪（自托管推理正在加载权重、上游正在重启），与真实
+ * 传输故障是两种事实，归 SVC_NOT_READY 让健康账与日志分别呈现。
  * http_code == 0 表示请求未达上游，返回 fallback。 */
 int provider_http_err_map(long http_code, int fallback)
 {
@@ -367,6 +369,8 @@ int provider_http_err_map(long http_code, int fallback)
     case 400:
     case 422:
         return AIRY_ERR_LLM_BAD_REQUEST;
+    case 503:
+        return AIRY_ERR_SVC_NOT_READY;
     default:
         return fallback;
     }
@@ -384,6 +388,8 @@ const char *provider_http_err_diag(long http_code)
     case 400:
     case 422:
         return "request_body_rejected";
+    case 503:
+        return "endpoint_not_ready";
     case 0:
         return "transport_error";
     default:

@@ -26,6 +26,7 @@ static const fo_map_t k_fo_map[] = {
     {AIRY_ERR_LLM_AUTH_FAIL, LLM_FO_AUTH},
     {AIRY_ERR_LLM_RATE_LIMIT, LLM_FO_RATE_LIMIT},
     {AIRY_ERR_IO, LLM_FO_TRANSPORT},
+    {AIRY_ERR_SVC_NOT_READY, LLM_FO_NOT_READY},
 };
 
 static llm_fo_reason_t fo_map_find(int code)
@@ -67,7 +68,8 @@ int llm_fo_should(int err_code, unsigned on_mask)
 
 const char *llm_fo_name(llm_fo_reason_t reason)
 {
-    static const char *const names[] = {"none", "transport", "rate_limit", "auth"};
+    static const char *const names[] = {"none", "transport", "rate_limit", "auth",
+                                        "not_ready"};
 
     if ((int)reason < 0 || (int)reason >= (int)(sizeof(names) / sizeof(names[0])))
         return "none";
@@ -81,7 +83,7 @@ llm_fo_reason_t llm_fo_parse(const char *name)
     if (name == NULL)
         return LLM_FO_NONE;
 
-    for (r = 0; r <= (int)LLM_FO_AUTH; ++r) {
+    for (r = 0; r <= (int)LLM_FO_NOT_READY; ++r) {
         if (strcmp(name, llm_fo_name((llm_fo_reason_t)r)) == 0)
             return (llm_fo_reason_t)r;
     }
