@@ -278,18 +278,16 @@ static void ep_probe_deep(const ep_probe_t *p, int *out_ok, long *out_code, doub
     *out_ok = (rc == AIRY_OK && code == 200);
 }
 
-void ep_health_sweep(ep_health_t *h, int deep)
+/* 锁内取探测快照，锁外出网：任何网络等待都不得阻塞 cold/json 的读侧。 */
+static size_t snap_take(ep_health_t *h, ep_probe_t *snap)
 {
-    if (!h)
-        return;
-
-    /* 锁内取探测快照，锁外出网：任何网络等待都不得阻塞 cold/json 的读侧。 */
-    ep_probe_t snap[EP_HEALTH_MAX_ENDPOINTS];
-    size_t n;
     airy_mtx_lock(&h->lock);
-    n = h->count;
+
+    size_t n = h->count;
+
     for (size_t i = 0; i < n; i++) {
         const ep_rec_t *rec = &h->recs[i];
+
         AIRY_STRNCPY_TERM(snap[i].provider, rec->provider, sizeof(snap[i].provider));
         snap[i].ctx = rec->ctx;
         AIRY_STRNCPY_TERM(snap[i].model, rec->model, sizeof(snap[i].model));
@@ -297,62 +295,105 @@ void ep_health_sweep(ep_health_t *h, int deep)
         snap[i].headers = rec->headers;
     }
     airy_mtx_unlock(&h->lock);
+    return n;
+}
 
-    for (size_t i = 0; i < n; i++) {
-        int ok = 0;
-        long code = 0;
-        double ms = 0.0;
-        ep_probe_one(&snap[i], h->probe_path, &ok, &code, &ms);
+/* 单端点本轮探测结论：轻探测三要素 + 深度探测四要素，随快照同栈存放，
+ * 不入共享视图（视图只承载"结论"，不承载"过程"）。 */
+typedef struct {
+    int ok;
+    long code;
+    double ms;
+    int deep_ran;
+    int deep_ok;
+    long deep_code;
+    double deep_ms;
+} ep_res_t;
 
-        int deep_ok = 1;
-        int deep_ran = 0;
-        long deep_code = 0;
-        double deep_ms = 0.0;
-        if (deep && snap[i].model[0] && snap[i].chat_path[0]) {
-            ep_probe_deep(&snap[i], &deep_ok, &deep_code, &deep_ms);
-            deep_ran = 1;
-        }
+/* 锁内刷新单条记录：只改可达性与深度结论，cold 字段由请求侧独立维护。
+ * 返回刷新后的可达性，供锁外汇聚使用。 */
+static int rec_update(ep_rec_t *rec, const ep_res_t *r)
+{
+    rec->latency_ms = r->ms;
+    if (r->deep_ran)
+        rec->deep = r->deep_ok;
+    /* 粘滞判定：轻探测通过但最近一次深度探测失败，端点仍判不可达，直到
+     * 下一次深度探测恢复——"路由在但推理挂"不得报 ok。 */
+    rec->reachable = (r->ok && rec->deep != 0) ? 1 : 0;
+    rec->http_code = (r->deep_ran && r->ok && !r->deep_ok) ? r->deep_code : r->code;
+    return rec->reachable;
+}
 
-        airy_mtx_lock(&h->lock);
-        int found = 0;
-        int reached = 0;
-        for (size_t j = 0; j < h->count; j++) {
-            ep_rec_t *rec = &h->recs[j];
-            if (strcmp(rec->provider, snap[i].provider) != 0)
-                continue;
-            /* 只刷新可达性与深度结论；cold 字段由请求侧独立维护。 */
-            rec->latency_ms = ms;
-            if (deep_ran)
-                rec->deep = deep_ok;
-            /* 粘滞判定：轻探测通过但最近一次深度探测失败，端点仍判不可达，
-             * 直到下一次深度探测恢复——"路由在但推理挂"不得报 ok。 */
-            rec->reachable = (ok && rec->deep != 0) ? 1 : 0;
-            rec->http_code = (deep_ran && ok && !deep_ok) ? deep_code : code;
-            found = 1;
-            reached = rec->reachable;
-            break;
-        }
-        ep_health_sink_t sink = h->sink;
-        void *sink_ud = h->sink_ud;
-        airy_mtx_unlock(&h->lock);
+/* 探测结论三态落日志：轻探测失败、深度失败、全通过。 */
+static void sweep_log(const ep_probe_t *p, const ep_res_t *r)
+{
+    if (!r->ok)
+        SVC_LOG_WARN("C-L02: EP-HEALTH: probe FAIL provider=%s base=%s http=%ld latency_ms=%.1f",
+                     p->provider, p->ctx.api_base, r->code, r->ms);
+    else if (r->deep_ran && !r->deep_ok)
+        SVC_LOG_WARN("C-L02: EP-HEALTH: deep probe FAIL provider=%s model=%s http=%ld "
+                     "latency_ms=%.1f",
+                     p->provider, p->model, r->deep_code, r->deep_ms);
+    else
+        SVC_LOG_DEBUG("C-L02: EP-HEALTH: probe ok provider=%s http=%ld latency_ms=%.1f deep=%d",
+                      p->provider, r->code, r->ms, r->deep_ran ? r->deep_ok : -1);
+}
 
-        /* 汇聚回调必须在锁外：sink 内会取上层（router）锁，持锁回调即构成
-         * 跨层锁序，违反"绝不出锁调用外部"的并发纪律。 */
-        if (found && sink)
-            sink(sink_ud, snap[i].provider, reached);
+/* 锁内按 provider 名定位记录；命中即刷新并回报可达性，未命中返回 -1。 */
+static int view_update(ep_health_t *h, const ep_probe_t *p, const ep_res_t *r,
+                       ep_health_sink_t *out_sink, void **out_ud)
+{
+    airy_mtx_lock(&h->lock);
 
-        if (!ok)
-            SVC_LOG_WARN("C-L02: EP-HEALTH: probe FAIL provider=%s base=%s http=%ld "
-                         "latency_ms=%.1f",
-                         snap[i].provider, snap[i].ctx.api_base, code, ms);
-        else if (deep_ran && !deep_ok)
-            SVC_LOG_WARN("C-L02: EP-HEALTH: deep probe FAIL provider=%s model=%s http=%ld "
-                         "latency_ms=%.1f",
-                         snap[i].provider, snap[i].model, deep_code, deep_ms);
-        else
-            SVC_LOG_DEBUG("C-L02: EP-HEALTH: probe ok provider=%s http=%ld latency_ms=%.1f deep=%d",
-                          snap[i].provider, code, ms, deep_ran ? deep_ok : -1);
+    int reached = -1;
+
+    for (size_t j = 0; j < h->count; j++) {
+        if (strcmp(h->recs[j].provider, p->provider) != 0)
+            continue;
+        reached = rec_update(&h->recs[j], r);
+        break;
     }
+
+    *out_sink = h->sink;
+    *out_ud = h->sink_ud;
+    airy_mtx_unlock(&h->lock);
+    return reached;
+}
+
+/* 单端点全流程：轻探测 → 可选深探测 → 锁内刷新 → 锁外汇聚与日志。 */
+static void sweep_one(ep_health_t *h, const ep_probe_t *p, int deep)
+{
+    ep_res_t r = {0};
+
+    ep_probe_one(p, h->probe_path, &r.ok, &r.code, &r.ms);
+
+    if (deep && p->model[0] && p->chat_path[0]) {
+        ep_probe_deep(p, &r.deep_ok, &r.deep_code, &r.deep_ms);
+        r.deep_ran = 1;
+    }
+
+    ep_health_sink_t sink = NULL;
+    void *sink_ud = NULL;
+    int reached = view_update(h, p, &r, &sink, &sink_ud);
+
+    /* 汇聚回调必须在锁外：sink 内会取上层（router）锁，持锁回调即构成
+     * 跨层锁序，违反"绝不出锁调用外部"的并发纪律。 */
+    if (reached >= 0 && sink)
+        sink(sink_ud, p->provider, reached);
+
+    sweep_log(p, &r);
+}
+
+void ep_health_sweep(ep_health_t *h, int deep)
+{
+    if (!h)
+        return;
+
+    ep_probe_t snap[EP_HEALTH_MAX_ENDPOINTS];
+    size_t n = snap_take(h, snap);
+
+    for (size_t i = 0; i < n; i++)
+        sweep_one(h, &snap[i], deep);
 }
 
 int ep_health_cold(ep_health_t *h, const char *provider, const char *model, double first_ms)

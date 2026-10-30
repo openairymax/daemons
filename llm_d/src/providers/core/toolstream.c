@@ -85,7 +85,7 @@ void provider_tool_args_add(provider_tool_acc_t *acc, int index, const char *fra
         tool_args_append(slot, frag);
 }
 
-void provider_tool_delta(provider_tool_acc_t *acc, cJSON *delta)
+void provider_tool_delta(provider_tool_acc_t *acc, const cJSON *delta)
 {
     cJSON *tcs = cJSON_GetObjectItem(delta, "tool_calls");
     if (!cJSON_IsArray(tcs))
@@ -184,61 +184,82 @@ void provider_stream_text_push(provider_stream_acc_t *acc, const char *text)
         acc->acc_content = grown;
 }
 
+/* 响应身份段：首个非空值胜出（后续帧重复携带同值），created 取首个非零。 */
+static void ident_take(provider_stream_acc_t *acc, const cJSON *root)
+{
+    if (!acc->resp_id) {
+        const cJSON *id = cJSON_GetObjectItem(root, "id");
+
+        if (cJSON_IsString(id) && id->valuestring)
+            acc->resp_id = AIRY_STRDUP(id->valuestring);
+    }
+
+    if (!acc->resp_model) {
+        const cJSON *model = cJSON_GetObjectItem(root, "model");
+
+        if (cJSON_IsString(model) && model->valuestring)
+            acc->resp_model = AIRY_STRDUP(model->valuestring);
+    }
+
+    const cJSON *created = cJSON_GetObjectItem(root, "created");
+
+    if (cJSON_IsNumber(created) && acc->resp_created == 0)
+        acc->resp_created = (uint64_t)created->valuedouble;
+}
+
+/* delta 段：正文增量、推理增量、工具调用增量。推理轨迹与正文同流下发，
+ * 每个增量立即作为 RS 'R' 控制帧转发，供 IPC 客户端实时展示思维链，同时
+ * 累积用于流末装配（工具多轮回传）。端点不产 reasoning_content 时自然旁路。 */
+static void delta_take(provider_stream_acc_t *acc, const cJSON *delta)
+{
+    const cJSON *content = cJSON_GetObjectItem(delta, "content");
+
+    if (cJSON_IsString(content) && content->valuestring)
+        provider_stream_text_push(acc, content->valuestring);
+
+    const cJSON *reasoning = cJSON_GetObjectItem(delta, "reasoning_content");
+
+    if (cJSON_IsString(reasoning) && reasoning->valuestring) {
+        if (acc->user_cb)
+            provider_emit_reasoning_frame(acc->user_cb, acc->user_data, reasoning->valuestring);
+        char *grown = provider_buf_append(acc->acc_reasoning, &acc->acc_reasoning_cap,
+                                          &acc->acc_reasoning_len, reasoning->valuestring);
+        if (grown)
+            acc->acc_reasoning = grown;
+    }
+
+    provider_tool_delta(&acc->tools, delta);
+}
+
+/* 单条 choice：delta 段与 finish_reason。字面 "null" 视为未终结——部分
+ * 端点在中间帧显式下发该字符串。 */
+static void choice_take(provider_stream_acc_t *acc, const cJSON *choice)
+{
+    const cJSON *delta = cJSON_GetObjectItem(choice, "delta");
+
+    if (delta)
+        delta_take(acc, delta);
+
+    const cJSON *fr = cJSON_GetObjectItem(choice, "finish_reason");
+
+    if (cJSON_IsString(fr) && fr->valuestring && strcmp(fr->valuestring, "null") != 0) {
+        AIRY_FREE(acc->finish_reason);
+        acc->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(fr->valuestring));
+    }
+}
+
 int prov_stream_chunk(const char *json_line, void *userdata)
 {
     provider_stream_acc_t *acc = (provider_stream_acc_t *)userdata;
 
     CJSON_PARSE_GUARD(root, json_line, { return 0; });
 
-    if (!acc->resp_id) {
-        cJSON *id = cJSON_GetObjectItem(root, "id");
-        if (cJSON_IsString(id) && id->valuestring)
-            acc->resp_id = AIRY_STRDUP(id->valuestring);
-    }
+    ident_take(acc, root);
 
-    if (!acc->resp_model) {
-        cJSON *model = cJSON_GetObjectItem(root, "model");
-        if (cJSON_IsString(model) && model->valuestring)
-            acc->resp_model = AIRY_STRDUP(model->valuestring);
-    }
+    const cJSON *choices = cJSON_GetObjectItem(root, "choices");
 
-    cJSON *created = cJSON_GetObjectItem(root, "created");
-    if (cJSON_IsNumber(created) && acc->resp_created == 0)
-        acc->resp_created = (uint64_t)created->valuedouble;
-
-    cJSON *choices = cJSON_GetObjectItem(root, "choices");
-    if (cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0) {
-        cJSON *choice = cJSON_GetArrayItem(choices, 0);
-        cJSON *delta = cJSON_GetObjectItem(choice, "delta");
-        if (delta) {
-            cJSON *content = cJSON_GetObjectItem(delta, "content");
-            if (cJSON_IsString(content) && content->valuestring)
-                provider_stream_text_push(acc, content->valuestring);
-
-            /* 推理轨迹与正文同流下发：每个增量立即作为 RS 'R' 控制帧
-             * 转发，供 IPC 客户端实时展示思维链，同时累积用于流末装配
-             * （工具多轮回传）。端点不产 reasoning_content 时自然旁路。 */
-            cJSON *reasoning = cJSON_GetObjectItem(delta, "reasoning_content");
-            if (cJSON_IsString(reasoning) && reasoning->valuestring) {
-                if (acc->user_cb)
-                    provider_emit_reasoning_frame(acc->user_cb, acc->user_data,
-                                                  reasoning->valuestring);
-                char *grown = provider_buf_append(acc->acc_reasoning, &acc->acc_reasoning_cap,
-                                                  &acc->acc_reasoning_len,
-                                                  reasoning->valuestring);
-                if (grown)
-                    acc->acc_reasoning = grown;
-            }
-
-            provider_tool_delta(&acc->tools, delta);
-        }
-
-        cJSON *fr = cJSON_GetObjectItem(choice, "finish_reason");
-        if (cJSON_IsString(fr) && fr->valuestring && strcmp(fr->valuestring, "null") != 0) {
-            AIRY_FREE(acc->finish_reason);
-            acc->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(fr->valuestring));
-        }
-    }
+    if (cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0)
+        choice_take(acc, cJSON_GetArrayItem(choices, 0));
 
     /* Streaming usage: the final chunk (which carries no choices) attaches
      * the usage block when include_usage is declared. Last parse wins
