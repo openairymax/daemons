@@ -8,6 +8,9 @@
  * spawn：POSIX fork/exec + setsid + PR_SET_PDEATHSIG（防孤儿）+ 日志
  *        重定向到 $AIRY_HOME/logs/<name>.out；Windows CreateProcess
  *        (CREATE_SUSPENDED) + Job Object KILL_ON_JOB_CLOSE。
+ *        POSIX 子进程分支先做 LD_* 清洗（隔离格）：宿主注入的
+ *        LD_LIBRARY_PATH / LD_PRELOAD / LD_AUDIT 一律不继承，仅当
+ *        画像声明 AIRYRT_LAUNCH_KEEPENV_<NAME> 显式列出时保留。
  * reap：waitpid(WNOHANG) / WaitForSingleObject(0) 收割死因写入
  *       last_death（V13.1 判据）；CORE 死进 BACKOFF，AUX 死回 STOPPED
  *       （仅 activate 复活）。
@@ -163,6 +166,35 @@ static int spawn_win(sup_ctx_t *ctx, sup_proc_t *p)
     return 0;
 }
 #else
+static int env_keep(const char *list, const char *var)
+{
+    size_t n = strlen(var);
+    const char *p = list;
+    while (*p) {
+        while (*p == ' ' || *p == '\t')
+            p++;
+        const char *e = p;
+        while (*e && *e != ' ' && *e != '\t')
+            e++;
+        if ((size_t)(e - p) == n && strncmp(p, var, n) == 0)
+            return 1;
+        p = *e ? e + 1 : e;
+    }
+    return 0;
+}
+
+void sup_env_scrub(const sup_proc_t *p)
+{
+    static const char *const dyn[] = {"LD_LIBRARY_PATH", "LD_PRELOAD", "LD_AUDIT"};
+    for (size_t i = 0; i < sizeof(dyn) / sizeof(dyn[0]); i++) {
+        if (!getenv(dyn[i]))
+            continue;
+        if (p && env_keep(p->keepenv, dyn[i]))
+            continue;
+        unsetenv(dyn[i]);
+    }
+}
+
 static int spawn_posix(sup_ctx_t *ctx, sup_proc_t *p)
 {
     char *argv[SUP_ARGV_MAX];
@@ -216,6 +248,7 @@ static int spawn_posix(sup_ctx_t *ctx, sup_proc_t *p)
             if (fd > STDERR_FILENO)
                 close(fd);
         }
+        sup_env_scrub(p);
         execv(p->bin, argv);
         _exit(127);
     }
