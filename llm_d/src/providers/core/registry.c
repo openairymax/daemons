@@ -21,20 +21,123 @@ struct provider_registry {
     airy_mtx_t lock;
 };
 
+/* 模型名表深拷贝：计数 + 逐项复制，任一环失败即全量回滚。
+ * 返回 NULL 同时表示"无模型表"与"复制失败"，两者对调用方同义
+ * （无模型即不可路由）。 */
+static char **models_dup(const provider_config_t *pcfg, size_t *cnt_out)
+{
+    size_t cnt = 0;
+
+    if (!pcfg->models)
+        return NULL;
+    while (pcfg->models[cnt])
+        cnt++;
+
+    char **models = AIRY_CALLOC(cnt + 1, sizeof(*models));
+
+    if (!models)
+        return NULL;
+    for (size_t j = 0; j < cnt; ++j) {
+        models[j] = AIRY_STRDUP(pcfg->models[j]);
+        if (!models[j]) {
+            SVC_LOG_ERROR("Failed to duplicate model name: out of memory");
+            for (size_t k = 0; k < j; ++k)
+                AIRY_FREE(models[k]);
+            AIRY_FREE(models);
+            return NULL;
+        }
+    }
+    *cnt_out = cnt;
+    return models;
+}
+
+/* 与 models 同长同序的整型副表；尾部多分配一个零元素，与 models 的
+ * NUL 尾槽对齐，便于按序索引。 */
+static int *ints_dup(const int *src, size_t n)
+{
+    int *dst = AIRY_CALLOC(n + 1, sizeof(*dst));
+
+    if (!dst)
+        return NULL;
+    for (size_t j = 0; j < n; ++j)
+        dst[j] = src[j];
+    return dst;
+}
+
+static void models_free(char **models)
+{
+    if (!models)
+        return;
+    for (char **m = models; *m; ++m)
+        AIRY_FREE(*m);
+    AIRY_FREE(models);
+}
+
+/* 组装单个 provider 槽位。返回 0 表示槽位就绪，-1 表示整条跳过（槽位
+ * 保持 calloc 原样，由调用方决定是否推进写指针）。 */
+static int provider_build(const provider_config_t *pcfg, provider_t *slot)
+{
+    /* provider_adapter_lookup 契约永不为 NULL：未知名回落行协议适配 */
+    const provider_adapter_t *adapter = provider_adapter_lookup(pcfg->api_format);
+    provider_ctx_t *ctx = adapter->init(pcfg->name, pcfg->api_key, pcfg->api_base,
+                                       pcfg->organization, pcfg->timeout_sec,
+                                       pcfg->max_retries);
+
+    if (!ctx) {
+        SVC_LOG_ERROR("Failed to init provider: %s", pcfg->name);
+        return -1;
+    }
+
+    if (pcfg->extra_headers && pcfg->extra_headers[0])
+        AIRY_STRNCPY_TERM(provider_base_ctx(ctx)->extra_headers, pcfg->extra_headers,
+                          sizeof(provider_base_ctx(ctx)->extra_headers));
+    provider_base_ctx(ctx)->caps = pcfg->caps;
+
+    size_t cnt = 0;
+    char **models = models_dup(pcfg, &cnt);
+    int *caps = (models && pcfg->model_max_output && cnt > 0)
+                    ? ints_dup(pcfg->model_max_output, cnt)
+                    : NULL;
+    int *cncs = (models && pcfg->model_max_concurrent && cnt > 0)
+                    ? ints_dup(pcfg->model_max_concurrent, cnt)
+                    : NULL;
+    char *name = AIRY_STRDUP(pcfg->name);
+
+    if (!name) {
+        SVC_LOG_ERROR("Failed to duplicate provider name: out of memory");
+        models_free(models);
+        AIRY_FREE(caps);
+        AIRY_FREE(cncs);
+        adapter->destroy(ctx);
+        return -1;
+    }
+
+    slot->name = name;
+    slot->adapter = adapter;
+    slot->ctx = ctx;
+    slot->models = models;
+    slot->model_max_output = caps;
+    slot->model_max_concurrent = cncs;
+    return 0;
+}
+
 provider_registry_t *provider_registry_create(const service_config_t *cfg)
 {
     provider_registry_t *reg = AIRY_CALLOC(1, sizeof(provider_registry_t));
+
     if (!reg) {
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     airy_mtx_init(&reg->lock);
 
     size_t count = cfg->provider_count;
+
     if (count == 0 || !cfg->providers)
         return reg;
 
     reg->providers = AIRY_CALLOC(count + 1, sizeof(provider_t));
     if (!reg->providers) {
+        airy_mtx_destroy(&reg->lock);
         AIRY_FREE(reg);
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
@@ -45,83 +148,16 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg)
      * enumerate / destroy, silently hiding the providers behind it and
      * leaking their ctx and model strings. */
     size_t valid = 0;
+
     for (size_t i = 0; i < count; ++i) {
         const provider_config_t *pcfg = &cfg->providers[i];
+
         if (!pcfg->name || !pcfg->name[0]) {
             SVC_LOG_WARN("Provider entry #%zu has no name, skipping", i);
             continue;
         }
-        /* provider_adapter_lookup 契约永不为 NULL：未知名回落行协议适配 */
-        const provider_adapter_t *adapter = provider_adapter_lookup(pcfg->api_format);
-
-        provider_ctx_t *ctx = adapter->init(pcfg->name, pcfg->api_key, pcfg->api_base,
-                                        pcfg->organization, pcfg->timeout_sec, pcfg->max_retries);
-        if (!ctx) {
-            SVC_LOG_ERROR("Failed to init provider: %s", pcfg->name);
-            continue;
-        }
-
-        if (pcfg->extra_headers && pcfg->extra_headers[0])
-            AIRY_STRNCPY_TERM(provider_base_ctx(ctx)->extra_headers, pcfg->extra_headers,
-                              sizeof(provider_base_ctx(ctx)->extra_headers));
-        provider_base_ctx(ctx)->caps = pcfg->caps;
-
-        char **models = NULL;
-        int *caps = NULL;
-        size_t model_cnt = 0;
-        if (pcfg->models) {
-            while (pcfg->models[model_cnt])
-                model_cnt++;
-            models = AIRY_CALLOC(model_cnt + 1, sizeof(*models));
-            if (models) {
-                for (size_t j = 0; j < model_cnt; ++j) {
-                    models[j] = AIRY_STRDUP(pcfg->models[j]);
-                    if (!models[j]) {
-                        SVC_LOG_ERROR("Failed to duplicate model name: out of memory");
-                        for (size_t k = 0; k < j; ++k)
-                            AIRY_FREE(models[k]);
-                        AIRY_FREE(models);
-                        models = NULL;
-                        break;
-                    }
-                }
-            }
-        }
-        if (models && pcfg->model_max_output && model_cnt > 0) {
-            caps = AIRY_CALLOC(model_cnt + 1, sizeof(*caps));
-            if (caps) {
-                for (size_t j = 0; j < model_cnt; ++j)
-                    caps[j] = pcfg->model_max_output[j];
-            }
-        }
-        int *cncs = NULL;
-        if (models && pcfg->model_max_concurrent && model_cnt > 0) {
-            cncs = AIRY_CALLOC(model_cnt + 1, sizeof(*cncs));
-            if (cncs) {
-                for (size_t j = 0; j < model_cnt; ++j)
-                    cncs[j] = pcfg->model_max_concurrent[j];
-            }
-        }
-
-        reg->providers[valid].name = AIRY_STRDUP(pcfg->name);
-        if (!reg->providers[valid].name) {
-            SVC_LOG_ERROR("Failed to duplicate provider name: out of memory");
-            if (models) {
-                for (size_t j = 0; models[j]; ++j)
-                    AIRY_FREE(models[j]);
-                AIRY_FREE(models);
-            }
-            AIRY_FREE(caps);
-            AIRY_FREE(cncs);
-            adapter->destroy(ctx);
-            continue;
-        }
-        reg->providers[valid].adapter = adapter;
-        reg->providers[valid].ctx = ctx;
-        reg->providers[valid].models = models;
-        reg->providers[valid].model_max_output = caps;
-        reg->providers[valid].model_max_concurrent = cncs;
-        valid++;
+        if (provider_build(pcfg, &reg->providers[valid]) == 0)
+            valid++;
     }
 
     return reg;
