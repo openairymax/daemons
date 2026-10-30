@@ -44,31 +44,35 @@ int svc_load_model_config_json(const char *config_path, provider_config_t **out_
                 "C-L02: SVC: MODEL-CONFIG-FAIL read alloc, STACK: svc_load_model_config_json");
             return AIRY_ERR_OUT_OF_MEMORY;
         }
-        SVC_LOG_WARN(
-            "C-L02: SVC: MODEL-CONFIG-WARN cannot open file, STACK: svc_load_model_config_json");
-        return 0;
+        /* 读不到即失败，不得回 0 冒充「加载成功但没有 provider」。 */
+        SVC_LOG_ERROR(
+            "C-L02: SVC: MODEL-CONFIG-FAIL cannot open %s, STACK: svc_load_model_config_json",
+            config_path);
+        return AIRY_ERR_IO;
     }
 
     CJSON_PARSE_GUARD(root, content, {
         AIRY_FREE(content);
-        SVC_LOG_WARN(
-            "C-L02: SVC: MODEL-CONFIG-WARN parse failed, STACK: svc_load_model_config_json");
-        return 0;
+        SVC_LOG_ERROR(
+            "C-L02: SVC: MODEL-CONFIG-FAIL parse failed, STACK: svc_load_model_config_json");
+        return AIRY_ERR_PARSE_ERROR;
     });
     AIRY_FREE(content);
 
     cJSON *providers_arr = cJSON_GetObjectItem(root, "providers");
     if (!providers_arr || !cJSON_IsArray(providers_arr)) {
 
-        SVC_LOG_WARN(
-            "C-L02: SVC: MODEL-CONFIG-WARN no providers, STACK: svc_load_model_config_json");
-        return 0;
+        SVC_LOG_ERROR(
+            "C-L02: SVC: MODEL-CONFIG-FAIL no providers, STACK: svc_load_model_config_json");
+        return AIRY_ERR_STATE_ERROR;
     }
 
     int n = cJSON_GetArraySize(providers_arr);
     if (n <= 0) {
 
-        return 0;
+        SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL empty providers array, STACK: "
+                      "svc_load_model_config_json");
+        return AIRY_ERR_STATE_ERROR;
     }
 
     provider_config_t *result =

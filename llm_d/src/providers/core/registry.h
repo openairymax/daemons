@@ -23,6 +23,19 @@ void provider_registry_destroy(provider_registry_t *reg);
 const provider_t *provider_registry_find(provider_registry_t *reg, const char *model);
 
 /**
+ * @brief Number of provider records that actually made it into the registry.
+ *
+ * Callers need to tell "the registry is empty" (config unreadable or
+ * declared nothing) apart from "this model is not configured": the two
+ * share a NULL lookup result but demand different error codes and ops
+ * actions.
+ *
+ * @param reg Registry (may be NULL)
+ * @return Live provider count; 0 for a NULL or empty registry
+ */
+size_t provider_registry_count(provider_registry_t *reg);
+
+/**
  * @brief Output-token cap configured for a model (model.yaml max_output).
  *
  * @param prov  Provider record (may be NULL)

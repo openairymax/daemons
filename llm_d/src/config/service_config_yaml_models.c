@@ -275,10 +275,13 @@ int svc_yaml_load_state(const char *config_path, svc_yaml_state_t *st)
 {
     yaml_document_t *doc = yaml_create();
     if (!doc)
-        return AIRY_EINVAL;
+        return AIRY_ERR_OUT_OF_MEMORY;
     if (yaml_parse_file(doc, config_path) != 0) {
+        const char *why = yaml_get_error(doc);
+        SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL parse %s: %s", config_path,
+                      why ? why : "unreadable or malformed");
         yaml_destroy(doc);
-        return AIRY_EINVAL;
+        return AIRY_ERR_PARSE_ERROR;
     }
 
     struct yaml_node *root = yaml_root(doc);
