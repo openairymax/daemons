@@ -283,7 +283,7 @@ static int cost_write(cost_tracker_t *ct, const char *path, int sync)
         remove(tmp);
         return -1;
     }
-    if (rename(tmp, path) != 0) {
+    if (airy_file_rename(tmp, path) != 0) {
         remove(tmp);
         return -1;
     }
