@@ -192,101 +192,175 @@ static const provider_t *next_prov(llm_service_t *svc, const llm_route_request_t
     return NULL;
 }
 
+/* 单步装配：生效配置（模型 + 生成参数）与命中报告一次成型。 */
+static void step_build(llm_service_t *svc, const provider_t *prov,
+                       const llm_request_config_t *manager, const char *cur_model,
+                       svc_step_t *step, char *model, size_t msz, int *max_tokens, svc_hit_t *hit)
+{
+    llm_request_config_t eff = *manager;
+
+    if (cur_model[0])
+        eff.model = cur_model;
+    resolve_gen_params(svc, prov, &eff, model, msz, max_tokens);
+    eff.model = model;
+    eff.max_tokens = *max_tokens;
+
+    step->prov = prov;
+    step->eff = eff;
+
+    if (hit) {
+        hit->prov = prov;
+        AIRY_STRNCPY_TERM(hit->model, model, sizeof(hit->model));
+        hit->max_tokens = *max_tokens;
+    }
+}
+
+/* 链上放行：返回 0 = 放行（*out_gated 记录占座深度），1 = 转下一候选，
+ * -1 = 座满且非 auto 模式（调用方原样回 BUSY）。 */
+static int chain_gate(svc_chain_t *chain, const provider_t *prov, const char *model,
+                      int auto_mode, int *out_gated)
+{
+    *out_gated = 0;
+
+    if (auto_mode) {
+        /* 先记集合再判放行：被健康面拒绝的端点同样不得再次入选。 */
+        svc_chain_mark(chain, prov->name, model);
+        if (!ep_gate(prov, model)) {
+            SVC_LOG_WARN("C-L02: SVC: CHAIN-SKIP %s/%s (circuit open or probe busy)",
+                         prov->name ? prov->name : "?", model);
+            return 1;
+        }
+    }
+
+    /* D2-9④：占座在调用前、退座在调用后，与链式放行独立——云族未设闸
+     * 时两者都是 no-op。在座满不记健康面失败（这是本地容量背压，不是
+     * 端点故障）：auto 模式直接转下一候选，off 模式原样回 BUSY。 */
+    int gated = svc_gate_acquire(prov, model);
+
+    if (gated < 0) {
+        SVC_LOG_WARN("C-L02: SVC: CHAIN-BUSY %s/%s (inflight at cap)",
+                     prov->name ? prov->name : "?", model);
+        return auto_mode ? 1 : -1;
+    }
+    *out_gated = gated;
+    return 0;
+}
+
+/* 单次尝试：退座、成功度量、失败记账一次收口。返回 attempt 的错误码，
+ * 失败路径上的半成品响应在此释放，避免每次切换泄漏一次。 */
+static int attempt_run(const provider_t *prov, const char *model, svc_attempt_fn attempt,
+                       void *actx, svc_step_t *step, int gated, llm_response_t **resp)
+{
+    uint64_t t0 = airy_time_ms();
+    int ret = attempt(actx, step, resp);
+
+    if (gated > 0)
+        svc_gate_release(prov);
+    if (ret == 0) {
+        (void)llm_rtr_ok(prov->name, model);
+        (void)llm_rtr_meas(prov->name, model, *resp, airy_time_ms() - t0);
+        return 0;
+    }
+
+    llm_response_free(*resp);
+    *resp = NULL;
+    (void)llm_rtr_fail(prov->name, model, ret);
+    return ret;
+}
+
+/* 单端点推进的三态结果：成功 / 换下一候选 / 终止整条链。 */
+enum { CHAIN_OK = 0, CHAIN_NEXT = 1, CHAIN_STOP = 2 };
+
+/* 一次调用的不变量：调用方给定、循环内不改变的部分集中在此，避免把同一
+ * 组实参在循环与助手之间来回搬运。 */
+typedef struct {
+    llm_service_t *svc;
+    const llm_request_config_t *manager;
+    const llm_route_request_t *req;
+    svc_attempt_fn attempt;
+    void *actx;
+    svc_sent_fn sent;
+    svc_hit_t *hit;
+    char *cur_model; /* 指向调用方栈上的生效模型槽，由 next_prov 回写 */
+} run_ctx_t;
+
+static int run_args_ok(const run_ctx_t *rc, const provider_t *first)
+{
+    return rc && rc->svc && rc->manager && rc->req && first && rc->attempt;
+}
+
+/* 单端点推进：装配 → 放行 → 调用。成功时 *done 指向响应；失败按模式决定
+ * 换候选（CHAIN_NEXT）、终止（CHAIN_STOP）或把返回码原样上抛。 */
+static int chain_try(run_ctx_t *rc, svc_chain_t *chain, int auto_mode, const provider_t *prov,
+                     llm_response_t **done)
+{
+    svc_step_t step;
+    char model[128];
+    int max_tokens = 0;
+    int gated = 0;
+
+    step_build(rc->svc, prov, rc->manager, rc->cur_model, &step, model, sizeof(model), &max_tokens,
+               rc->hit);
+
+    int gate = chain_gate(chain, prov, model, auto_mode, &gated);
+    if (gate != 0)
+        return gate < 0 ? AIRY_ERR_BUSY : CHAIN_NEXT;
+
+    int ret = attempt_run(prov, model, rc->attempt, rc->actx, &step, gated, done);
+    if (ret == 0)
+        return CHAIN_OK;
+    /* 记账已在 attempt_run 内完成；此处只做模式分派。 */
+    if (!auto_mode)
+        return ret;
+    if (!svc_chain_retry(chain, ret))
+        return CHAIN_STOP;
+    /* 首字节已下发后再换端点会让下游收到两段互不相接的内容。 */
+    return (rc->sent && rc->sent(rc->actx)) ? CHAIN_STOP : CHAIN_NEXT;
+}
+
 int svc_chain_run(llm_service_t *svc, const llm_request_config_t *manager,
                   const llm_route_request_t *req, const provider_t *first, svc_attempt_fn attempt,
                   void *actx, svc_sent_fn sent, llm_response_t **out, svc_hit_t *hit)
 {
-    svc_chain_t chain;
-    const provider_t *prov = first;
-    llm_route_cfg_t route;
-    char cur_model[128];
-    int auto_mode;
-
     if (out)
         *out = NULL;
-    if (!svc || !manager || !req || !first || !attempt)
+
+    char cur_model[128] = {0};
+    run_ctx_t rc = {.svc = svc,
+                    .manager = manager,
+                    .req = req,
+                    .attempt = attempt,
+                    .actx = actx,
+                    .sent = sent,
+                    .hit = hit,
+                    .cur_model = cur_model};
+    if (!run_args_ok(&rc, first))
         return AIRY_ERR_INVALID_PARAM;
+
+    svc_chain_t chain;
+    llm_route_cfg_t route;
 
     svc_chain_ctx(svc, &route);
     svc_chain_init(&chain, &route);
-    auto_mode = svc_chain_auto(&chain);
-    cur_model[0] = '\0';
+
+    int auto_mode = svc_chain_auto(&chain);
+    const provider_t *prov = first;
 
     while (prov) {
-        llm_request_config_t eff = *manager;
         llm_response_t *resp = NULL;
-        svc_step_t step;
-        char model[128];
-        uint64_t t0;
-        int gated;
-        int max_tokens = 0;
-        int ret;
+        int rc2 = chain_try(&rc, &chain, auto_mode, prov, &resp);
 
-        if (cur_model[0])
-            eff.model = cur_model;
-        resolve_gen_params(svc, prov, &eff, model, sizeof(model), &max_tokens);
-        eff.model = model;
-        eff.max_tokens = max_tokens;
-
-        step.prov = prov;
-        step.eff = eff;
-
-        if (hit) {
-            hit->prov = prov;
-            AIRY_STRNCPY_TERM(hit->model, model, sizeof(hit->model));
-            hit->max_tokens = max_tokens;
-        }
-
-        if (auto_mode) {
-            /* 先记集合再判放行：被健康面拒绝的端点同样不得再次入选。 */
-            svc_chain_mark(&chain, prov->name, model);
-            if (!ep_gate(prov, model)) {
-                SVC_LOG_WARN("C-L02: SVC: CHAIN-SKIP %s/%s (circuit open or probe busy)",
-                             prov->name ? prov->name : "?", model);
-                goto next;
-            }
-        }
-
-        /* D2-9④：占座在调用前、退座在调用后，与链式放行独立——云族未设闸
-         * 时两者都是 no-op。在座满不记健康面失败（这是本地容量背压，不是
-         * 端点故障）：auto 模式直接转下一候选，off 模式原样回 BUSY。 */
-        gated = svc_gate_acquire(prov, model);
-        if (gated < 0) {
-            SVC_LOG_WARN("C-L02: SVC: CHAIN-BUSY %s/%s (inflight at cap)",
-                         prov->name ? prov->name : "?", model);
-            if (!auto_mode)
-                return AIRY_ERR_BUSY;
-            goto next;
-        }
-
-        t0 = airy_time_ms();
-        ret = attempt(actx, &step, &resp);
-        if (gated > 0)
-            svc_gate_release(prov);
-        if (ret == 0) {
-            (void)llm_rtr_ok(prov->name, model);
-            (void)llm_rtr_meas(prov->name, model, resp, airy_time_ms() - t0);
+        if (rc2 == CHAIN_OK) {
             if (out)
                 *out = resp;
             else
                 llm_response_free(resp);
             return AIRY_OK;
         }
-
-        /* 失败路径上的半成品响应必须释放，否则每次切换泄漏一次。 */
-        llm_response_free(resp);
-        /* 记账先于模式分派：健康面两模式都成立，off 只是不做放行与换端。 */
-        (void)llm_rtr_fail(prov->name, model, ret);
-        if (!auto_mode)
-            return ret;
-
-        if (!svc_chain_retry(&chain, ret))
+        if (rc2 == CHAIN_STOP)
             break;
-        /* 首字节已下发后再换端点会让下游收到两段互不相接的内容。 */
-        if (sent && sent(actx))
-            break;
-
-    next:
+        if (rc2 != CHAIN_NEXT)
+            return rc2;
         prov = next_prov(svc, req, &chain, cur_model, sizeof(cur_model));
     }
 
