@@ -21,6 +21,82 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* usage 段：顶层 token 字段（兼容既有消费方）+ 嵌套 usage 对象
+ * （OpenAI chat.completions 形状，gateway 与适配器均读此节点）。 */
+static void usage_add(cJSON *root, const llm_response_t *resp)
+{
+    cJSON_AddNumberToObject(root, "prompt_tokens", resp->prompt_tokens);
+    cJSON_AddNumberToObject(root, "completion_tokens", resp->completion_tokens);
+    cJSON_AddNumberToObject(root, "total_tokens", resp->total_tokens);
+    cJSON_AddNumberToObject(root, "reasoning_tokens", resp->reasoning_tokens);
+    cJSON_AddNumberToObject(root, "cached_tokens", resp->cached_tokens);
+
+    cJSON *usage = cJSON_CreateObject();
+    if (!usage)
+        return;
+    cJSON_AddNumberToObject(usage, "prompt_tokens", resp->prompt_tokens);
+    cJSON_AddNumberToObject(usage, "completion_tokens", resp->completion_tokens);
+    cJSON_AddNumberToObject(usage, "total_tokens", resp->total_tokens);
+    cJSON_AddNumberToObject(usage, "reasoning_tokens", resp->reasoning_tokens);
+    cJSON_AddNumberToObject(usage, "cached_tokens", resp->cached_tokens);
+    cJSON_AddItemToObject(root, "usage", usage);
+}
+
+/* timings 嵌套回显（G47 分列）：端点未上报时整段缺席，不给非 llama.cpp
+ * 端点制造全零噪声。 */
+static void timings_add(cJSON *root, const llm_response_t *resp)
+{
+    if (!resp->timings.prefill_tokens && !resp->timings.decode_tokens &&
+        !resp->timings.kv_cache_tokens && !resp->timings.prefill_ms && !resp->timings.decode_ms)
+        return;
+
+    cJSON *tm = cJSON_CreateObject();
+    if (!tm)
+        return;
+    cJSON_AddNumberToObject(tm, "prefill_tokens", resp->timings.prefill_tokens);
+    cJSON_AddNumberToObject(tm, "decode_tokens", resp->timings.decode_tokens);
+    cJSON_AddNumberToObject(tm, "kv_cache_tokens", resp->timings.kv_cache_tokens);
+    cJSON_AddNumberToObject(tm, "prefill_ms", resp->timings.prefill_ms);
+    cJSON_AddNumberToObject(tm, "decode_ms", resp->timings.decode_ms);
+    cJSON_AddItemToObject(root, "timings", tm);
+}
+
+/* D2-9 容量回显：未探测端点（云族）整段缺席，不制造全零噪声。 */
+static void cap_add(cJSON *root, const llm_response_t *resp)
+{
+    if (!resp->context_window && !resp->total_slots)
+        return;
+
+    cJSON *cap = cJSON_CreateObject();
+    if (!cap)
+        return;
+    cJSON_AddNumberToObject(cap, "context_window", resp->context_window);
+    cJSON_AddNumberToObject(cap, "total_slots", resp->total_slots);
+    cJSON_AddItemToObject(root, "capacity", cap);
+}
+
+/* 单条 choice：content 恒为字符串（工具轮为 NULL 时回落空串，保持
+ * gateway 可解析）；reasoning_content 与 tool_calls 按存在性附带。 */
+static cJSON *choice_build(const llm_message_t *msg)
+{
+    cJSON *choice = cJSON_CreateObject();
+    if (!choice)
+        return NULL;
+
+    cJSON_AddStringToObject(choice, "role", msg->role);
+    cJSON_AddStringToObject(choice, "content", msg->content ? msg->content : "");
+
+    if (msg->reasoning_content && msg->reasoning_content[0])
+        cJSON_AddStringToObject(choice, "reasoning_content", msg->reasoning_content);
+
+    if (msg->tool_calls_json && msg->tool_calls_json[0]) {
+        CJSON_PARSE_GUARD(tc, msg->tool_calls_json, {});
+        if (cJSON_IsArray(tc))
+            cJSON_AddItemToObject(choice, "tool_calls", cJSON_Duplicate(tc, 1));
+    }
+    return choice;
+}
+
 char *response_to_json(const llm_response_t *resp)
 {
     if (!resp) {
@@ -36,73 +112,25 @@ char *response_to_json(const llm_response_t *resp)
     if (resp->model)
         cJSON_AddStringToObject(root, "model", resp->model);
     cJSON_AddNumberToObject(root, "created", (double)resp->created);
-    cJSON_AddNumberToObject(root, "prompt_tokens", resp->prompt_tokens);
-    cJSON_AddNumberToObject(root, "completion_tokens", resp->completion_tokens);
-    cJSON_AddNumberToObject(root, "total_tokens", resp->total_tokens);
-    cJSON_AddNumberToObject(root, "reasoning_tokens", resp->reasoning_tokens);
-    cJSON_AddNumberToObject(root, "cached_tokens", resp->cached_tokens);
 
+    usage_add(root, resp);
     cJSON_AddNumberToObject(root, "cost_usd", resp->cost_usd);
-    /* usage nested object: OpenAI chat.completions-compatible format; both
-     * the gateway parse_llm_result and the OpenAI adapter read this node;
-     * top-level prompt/completion/total_tokens kept for compatibility */
-    cJSON *usage = cJSON_CreateObject();
-    cJSON_AddNumberToObject(usage, "prompt_tokens", resp->prompt_tokens);
-    cJSON_AddNumberToObject(usage, "completion_tokens", resp->completion_tokens);
-    cJSON_AddNumberToObject(usage, "total_tokens", resp->total_tokens);
-    cJSON_AddNumberToObject(usage, "reasoning_tokens", resp->reasoning_tokens);
-    cJSON_AddNumberToObject(usage, "cached_tokens", resp->cached_tokens);
-    cJSON_AddItemToObject(root, "usage", usage);
-    /* timings 嵌套回显（G47 分列）：端点未上报时整段缺席，
-     * 不给非 llama.cpp 端点制造全零噪声。 */
-    if (resp->timings.prefill_tokens || resp->timings.decode_tokens ||
-        resp->timings.kv_cache_tokens || resp->timings.prefill_ms ||
-        resp->timings.decode_ms) {
-        cJSON *tm = cJSON_CreateObject();
-        cJSON_AddNumberToObject(tm, "prefill_tokens", resp->timings.prefill_tokens);
-        cJSON_AddNumberToObject(tm, "decode_tokens", resp->timings.decode_tokens);
-        cJSON_AddNumberToObject(tm, "kv_cache_tokens", resp->timings.kv_cache_tokens);
-        cJSON_AddNumberToObject(tm, "prefill_ms", resp->timings.prefill_ms);
-        cJSON_AddNumberToObject(tm, "decode_ms", resp->timings.decode_ms);
-        cJSON_AddItemToObject(root, "timings", tm);
-    }
+    timings_add(root, resp);
+
     if (resp->finish_reason)
         cJSON_AddStringToObject(root, "finish_reason", resp->finish_reason);
     /* P1-12：截断事实在 wire 面显式化。字段仅在截断时出现（timings/capacity
      * 同风格，完备回答零噪声）；机制只报告事实，处置归调用方策略侧。 */
     if (llm_finish_is_truncated(resp->finish_reason))
         cJSON_AddBoolToObject(root, "truncated", true);
-    /* D2-9 容量回显：未探测端点（云族）整段缺席，不制造全零噪声。 */
-    if (resp->context_window || resp->total_slots) {
-        cJSON *cap = cJSON_CreateObject();
-        cJSON_AddNumberToObject(cap, "context_window", resp->context_window);
-        cJSON_AddNumberToObject(cap, "total_slots", resp->total_slots);
-        cJSON_AddItemToObject(root, "capacity", cap);
-    }
+
+    cap_add(root, resp);
 
     cJSON *choices = cJSON_CreateArray();
     for (size_t i = 0; i < resp->choice_count; ++i) {
-        cJSON *choice = cJSON_CreateObject();
-        cJSON_AddStringToObject(choice, "role", resp->choices[i].role);
-        /* In LLM tool-calling turns content is often NULL (response only
-         * carries tool_calls); cJSON_AddStringToObject's behavior with NULL
-         * is unspecified, so explicitly fall back to an empty string to
-         * keep choices[i].content always a valid string (gateway-parseable) */
-        cJSON_AddStringToObject(choice, "content",
-                                resp->choices[i].content ? resp->choices[i].content : "");
-
-        if (resp->choices[i].reasoning_content && resp->choices[i].reasoning_content[0]) {
-            cJSON_AddStringToObject(choice, "reasoning_content",
-                                    resp->choices[i].reasoning_content);
-        }
-
-        if (resp->choices[i].tool_calls_json && resp->choices[i].tool_calls_json[0]) {
-            CJSON_PARSE_GUARD(tc, resp->choices[i].tool_calls_json, {});
-            if (cJSON_IsArray(tc)) {
-                cJSON_AddItemToObject(choice, "tool_calls", cJSON_Duplicate(tc, 1));
-            }
-        }
-        cJSON_AddItemToArray(choices, choice);
+        cJSON *choice = choice_build(&resp->choices[i]);
+        if (choice)
+            cJSON_AddItemToArray(choices, choice);
     }
     cJSON_AddItemToObject(root, "choices", choices);
 
