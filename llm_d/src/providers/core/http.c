@@ -465,12 +465,40 @@ double provider_budget_sec(const provider_base_ctx_t *base)
     return base->timeout_sec;
 }
 
+static int exec_args_ok(const provider_request_t *req, provider_http_resp_t *const *out_response,
+                        const long *out_http_code, int streaming)
+{
+    if (!req || !req->base || !req->path || !req->body || !out_http_code)
+        return 0;
+    return streaming || out_response;
+}
+
+/* 出网形态四选一：SSE 流、裸流、带限流器的同步、普通同步。形态只由请求
+ * 声明决定，与 URL/头/预算的装配无关，故独立于装配步骤。 */
+static int exec_post(const provider_request_t *req, const char *url, struct curl_slist *headers,
+                     double budget, provider_http_resp_t **out_response, long *out_http_code)
+{
+    if (req->on_event)
+        return provider_http_post_stream_sse(url, headers, req->body, budget,
+                                             req->base->max_retries, req->base->retry_class,
+                                             req->idempotent, req->on_event, req->user_data,
+                                             out_http_code);
+    if (req->on_chunk)
+        return provider_http_post_stream(url, headers, req->body, budget, req->base->max_retries,
+                                         req->base->retry_class, req->idempotent, req->on_chunk,
+                                         req->user_data, out_http_code);
+    if (req->rl)
+        return provider_http_request_with_retry(req->base, req->rl, url, headers, req->body, budget,
+                                                req->idempotent, out_http_code, out_response);
+    return provider_http_post(url, headers, req->body, budget, req->base->max_retries,
+                              req->base->retry_class, req->idempotent, out_response, out_http_code);
+}
+
 int provider_http_exec(const provider_request_t *req, provider_http_resp_t **out_response,
                        long *out_http_code)
 {
     int streaming = req && (req->on_event || req->on_chunk);
-    if (!req || !req->base || !req->path || !req->body || !out_http_code ||
-        (!streaming && !out_response)) {
+    if (!exec_args_ok(req, out_response, out_http_code, streaming)) {
         errno = EINVAL;
         return AIRY_ERR_INVALID_PARAM;
     }
@@ -486,23 +514,7 @@ int provider_http_exec(const provider_request_t *req, provider_http_resp_t **out
 
     /* 预算由请求侧决定（适配层按时延 p99 推导），未声明则回落 provider 预算。 */
     double budget = req->timeout_sec > 0.0 ? req->timeout_sec : provider_budget_sec(req->base);
-    int rc;
-    if (req->on_event) {
-        rc = provider_http_post_stream_sse(url, headers, req->body, budget, req->base->max_retries,
-                                           req->base->retry_class, req->idempotent, req->on_event,
-                                           req->user_data, out_http_code);
-    } else if (req->on_chunk) {
-        rc = provider_http_post_stream(url, headers, req->body, budget, req->base->max_retries,
-                                       req->base->retry_class, req->idempotent, req->on_chunk,
-                                       req->user_data, out_http_code);
-    } else if (req->rl) {
-        rc = provider_http_request_with_retry(req->base, req->rl, url, headers, req->body, budget,
-                                              req->idempotent, out_http_code, out_response);
-    } else {
-        rc = provider_http_post(url, headers, req->body, budget, req->base->max_retries,
-                                req->base->retry_class, req->idempotent, out_response,
-                                out_http_code);
-    }
+    int rc = exec_post(req, url, headers, budget, out_response, out_http_code);
 
     if (headers)
         curl_slist_free_all(headers);
