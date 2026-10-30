@@ -336,67 +336,97 @@ static double num_or(cJSON *params, const char *key, double dflt)
     return cJSON_IsNumber(v) ? v->valuedouble : dflt;
 }
 
-/* 采样参数：cacheable 缺省 0 即 B5-3 的 fail-closed，此处只覆盖显式且
- * 类型相符的项。C11 新参数遵零值=不发送约定；temperature 以显式哨兵
- * 记录"被设置过"，使 0.0 可区别于缺省；grammar 本体归 ctx 持有。 */
-static int parse_sampling(req_env_t *r, cJSON *params)
+/* 纯标量组：num_or 只覆盖显式且类型相符的项，其余保持入参原值。 */
+static void samp_scalar(llm_request_config_t *cfg, cJSON *params)
 {
-    llm_request_config_t *cfg = r->cfg;
-    cJSON *v;
-    v = cJSON_GetObjectItem(params, "temperature");
-    if (cJSON_IsNumber(v)) {
-        cfg->temperature = (float)v->valuedouble;
-        cfg->temperature_set = true;
-    }
     cfg->top_p = (float)num_or(params, "top_p", cfg->top_p);
     cfg->max_tokens = (int)num_or(params, "max_tokens", cfg->max_tokens);
     cfg->presence_penalty = num_or(params, "presence_penalty", cfg->presence_penalty);
     cfg->frequency_penalty = num_or(params, "frequency_penalty", cfg->frequency_penalty);
     cfg->seed = (uint32_t)num_or(params, "seed", cfg->seed);
     cfg->num_ctx = (uint32_t)num_or(params, "num_ctx", cfg->num_ctx);
-    v = cJSON_GetObjectItem(params, "stream");
+}
+
+/* 布尔组：只有明确给了 JSON bool 才改写，字符串 "true" 不算。 */
+static void samp_flag(llm_request_config_t *cfg, cJSON *params)
+{
+    cJSON *v = cJSON_GetObjectItem(params, "stream");
+
     if (cJSON_IsBool(v))
         cfg->stream = cJSON_IsTrue(v);
     v = cJSON_GetObjectItem(params, "cacheable");
     if (cJSON_IsBool(v))
         cfg->cacheable = cJSON_IsTrue(v);
-    v = cJSON_GetObjectItem(params, "grammar");
-    if (cJSON_IsString(v) && v->valuestring && v->valuestring[0]) {
-        r->ctx->grammar = AIRY_STRDUP(v->valuestring);
-        if (!r->ctx->grammar)
-            return msg_fail(r, r->ctx->message_count, AIRY_ERR_OUT_OF_MEMORY,
-                            "failed to duplicate grammar string");
-        cfg->grammar = r->ctx->grammar;
-    }
-    v = cJSON_GetObjectItem(params, "response_format");
+}
+
+/* grammar 本体归 ctx 持有：请求结束后 cfg 失效但 ctx 仍要活到生成结束。 */
+static int samp_grammar(req_env_t *r, cJSON *params)
+{
+    cJSON *v = cJSON_GetObjectItem(params, "grammar");
+
+    if (!cJSON_IsString(v) || !v->valuestring || !v->valuestring[0])
+        return 0;
+    r->ctx->grammar = AIRY_STRDUP(v->valuestring);
+    if (!r->ctx->grammar)
+        return msg_fail(r, r->ctx->message_count, AIRY_ERR_OUT_OF_MEMORY,
+                        "failed to duplicate grammar string");
+    r->cfg->grammar = r->ctx->grammar;
+    return 0;
+}
+
+/* 形状受控的两组：response_format 只认 json_object，槽位与 thinking 以
+ * 哨兵记录"被设置过"，使 false 与 0 可区别于缺省。 */
+static void samp_ext(llm_request_config_t *cfg, cJSON *params)
+{
+    cJSON *v = cJSON_GetObjectItem(params, "response_format");
+
     if (cJSON_IsObject(v)) {
         cJSON *t = cJSON_GetObjectItem(v, "type");
-        if (cJSON_IsString(t) && t->valuestring &&
-            strcmp(t->valuestring, "json_object") == 0)
+        if (cJSON_IsString(t) && t->valuestring && strcmp(t->valuestring, "json_object") == 0)
             cfg->response_format = LLM_RF_JSON_OBJECT;
     }
+
     /* T2 槽位亲和：显式传 slot_id 才置哨兵，槽位 0 合法可表达。 */
     v = cJSON_GetObjectItem(params, "slot_id");
     if (cJSON_IsNumber(v)) {
         cfg->slot_id = (int)v->valuedouble;
         cfg->slot_set = true;
     }
+
     /* C3 thinking 控制：显式传 chat_template_kwargs 才置哨兵，enable_thinking
      * 为意图载体（false 合法）；budget 可选，0 = 不发送。能力位门控与
      * chat_template_kwargs 线格式归 envelope 机制面，此处只解析调用方意图
      * （atoms 客户端 build_llm_request_json 同名同构透传）。 */
     v = cJSON_GetObjectItem(params, "chat_template_kwargs");
-    if (cJSON_IsObject(v)) {
-        cJSON *et = cJSON_GetObjectItem(v, "enable_thinking");
-        if (cJSON_IsBool(et)) {
-            cfg->enable_thinking = cJSON_IsTrue(et);
-            cfg->thinking_set = true;
-            cJSON *tb = cJSON_GetObjectItem(v, "thinking_budget");
-            if (cJSON_IsNumber(tb) && tb->valuedouble >= 0.0)
-                cfg->thinking_budget = (uint32_t)tb->valuedouble;
-        }
+    if (!cJSON_IsObject(v))
+        return;
+    cJSON *et = cJSON_GetObjectItem(v, "enable_thinking");
+    if (!cJSON_IsBool(et))
+        return;
+
+    cfg->enable_thinking = cJSON_IsTrue(et);
+    cfg->thinking_set = true;
+    cJSON *tb = cJSON_GetObjectItem(v, "thinking_budget");
+    if (cJSON_IsNumber(tb) && tb->valuedouble >= 0.0)
+        cfg->thinking_budget = (uint32_t)tb->valuedouble;
+}
+
+/* 采样参数：cacheable 缺省 0 即 B5-3 的 fail-closed，此处只覆盖显式且
+ * 类型相符的项。C11 新参数遵零值=不发送约定；temperature 以显式哨兵
+ * 记录"被设置过"，使 0.0 可区别于缺省。 */
+static int parse_sampling(req_env_t *r, cJSON *params)
+{
+    llm_request_config_t *cfg = r->cfg;
+    cJSON *v = cJSON_GetObjectItem(params, "temperature");
+
+    if (cJSON_IsNumber(v)) {
+        cfg->temperature = (float)v->valuedouble;
+        cfg->temperature_set = true;
     }
-    return 0;
+    samp_scalar(cfg, params);
+    samp_flag(cfg, params);
+    samp_ext(cfg, params);
+    return samp_grammar(r, params);
 }
 
 /* tools 参数：序列化后由 ctx 持有所有权，cfg 只借用指针。 */
