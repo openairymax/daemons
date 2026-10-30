@@ -217,76 +217,92 @@ static cJSON *ctk_ensure(cJSON *root)
     return ctk;
 }
 
+/* 基础采样面：模型名、温度、最大 token、top_p。C11：temperature_set
+ * 显式哨兵允许下发 0.0；未显式设置时维持旧请求体等价（>0 用之，否则
+ * 0.7 兜底），旧调用方零感知。 */
+static void fill_core(cJSON *root, const llm_request_config_t *m, const char *default_model,
+                      int default_max_tokens)
+{
+    const char *model = (m->model && m->model[0]) ? m->model : default_model;
+    double temp = (m->temperature_set || m->temperature > 0.0f) ? (double)m->temperature : 0.7;
+    int max_tokens = m->max_tokens > 0 ? m->max_tokens : default_max_tokens;
+
+    cJSON_AddStringToObject(root, "model", model ? model : "");
+    cJSON_AddNumberToObject(root, "temperature", temp);
+    if (max_tokens > 0)
+        cJSON_AddNumberToObject(root, "max_tokens", max_tokens);
+    if (m->top_p > 0)
+        cJSON_AddNumberToObject(root, "top_p", m->top_p);
+}
+
+/* C11 能力位门控：caps 由 driver 盖印，位为假即该厂商族不支持，显式
+ * 请求也被丢弃（宁可不发不乱发）；位为真且值非零值才下发。T2 KV 复用
+ * 透传：缓存声明随能力位恒发，槽位亲和仅显式设置才下发。 */
+static void fill_caps(cJSON *root, const llm_request_config_t *m)
+{
+    if (m->caps.accepts_seed && m->seed != 0u)
+        cJSON_AddNumberToObject(root, "seed", (double)m->seed);
+    if (m->caps.accepts_grammar && m->grammar && m->grammar[0])
+        cJSON_AddStringToObject(root, "grammar", m->grammar);
+    if (m->caps.accepts_response_format && m->response_format == LLM_RF_JSON_OBJECT) {
+        cJSON *rf = cJSON_CreateObject();
+
+        if (rf) {
+            cJSON_AddStringToObject(rf, "type", "json_object");
+            cJSON_AddItemToObject(root, "response_format", rf);
+        }
+    }
+    if (m->caps.accepts_num_ctx && m->num_ctx != 0u)
+        cJSON_AddNumberToObject(root, "num_ctx", (double)m->num_ctx);
+    if (m->caps.accepts_cache_prompt)
+        cJSON_AddBoolToObject(root, "cache_prompt", 1);
+    if (m->caps.accepts_slot_id && m->slot_set)
+        cJSON_AddNumberToObject(root, "slot_id", (double)m->slot_id);
+}
+
+/* C3 thinking 控制：显式设置且能力位置位才下发；缺省旧请求体字节级
+ * 不变。enable_thinking 为布尔语义（false 也是有效值，哨兵位使其可
+ * 表达），budget 零值 = 未设置。 */
+static void fill_thinking(cJSON *root, const llm_request_config_t *m)
+{
+    if (m->caps.accepts_enable_thinking && m->thinking_set) {
+        cJSON *ctk = ctk_ensure(root);
+
+        if (ctk)
+            cJSON_AddBoolToObject(ctk, "enable_thinking", m->enable_thinking ? 1 : 0);
+    }
+    if (m->caps.accepts_thinking_budget && m->thinking_budget != 0u) {
+        cJSON *ctk = ctk_ensure(root);
+
+        if (ctk)
+            cJSON_AddNumberToObject(ctk, "thinking_budget", (double)m->thinking_budget);
+    }
+}
+
+/* 流式与停止序列：stop_key 按厂商线格式择键（stop / stop_sequence）。 */
+static void fill_stop(cJSON *root, const llm_request_config_t *m, const char *stop_key)
+{
+    if (m->stream)
+        cJSON_AddBoolToObject(root, "stream", 1);
+    if (m->stop_count > 0 && m->stop) {
+        cJSON *stop = cJSON_CreateArray();
+
+        for (size_t i = 0; i < m->stop_count; ++i)
+            cJSON_AddItemToArray(stop, cJSON_CreateString(m->stop[i]));
+        cJSON_AddItemToObject(root, stop_key, stop);
+    }
+}
+
 void provider_request_params_fill(cJSON *root, const llm_request_config_t *manager,
                                   const char *default_model, int default_max_tokens,
                                   const char *stop_key)
 {
     if (!root || !manager || !stop_key)
         return;
-
-    const char *model = (manager->model && manager->model[0]) ? manager->model : default_model;
-    cJSON_AddStringToObject(root, "model", model ? model : "");
-
-    /* C11：temperature_set 显式哨兵允许下发 0.0；未显式设置时维持
-     * 旧请求体等价（>0 用之，否则 0.7 兜底），旧调用方零感知。 */
-    double temp = (manager->temperature_set || manager->temperature > 0.0f)
-                      ? (double)manager->temperature : 0.7;
-    cJSON_AddNumberToObject(root, "temperature", temp);
-
-    int max_tokens = manager->max_tokens > 0 ? manager->max_tokens : default_max_tokens;
-    if (max_tokens > 0)
-        cJSON_AddNumberToObject(root, "max_tokens", max_tokens);
-
-    if (manager->top_p > 0)
-        cJSON_AddNumberToObject(root, "top_p", manager->top_p);
-
-    /* C11 能力位门控：caps 由 driver 盖印，位为假即该厂商族不支持，
-     * 显式请求也被丢弃（宁可不发不乱发）；位为真且值非零值才下发。 */
-    if (manager->caps.accepts_seed && manager->seed != 0u)
-        cJSON_AddNumberToObject(root, "seed", (double)manager->seed);
-    if (manager->caps.accepts_grammar && manager->grammar && manager->grammar[0])
-        cJSON_AddStringToObject(root, "grammar", manager->grammar);
-    if (manager->caps.accepts_response_format && manager->response_format == LLM_RF_JSON_OBJECT) {
-        cJSON *rf = cJSON_CreateObject();
-        if (rf) {
-            cJSON_AddStringToObject(rf, "type", "json_object");
-            cJSON_AddItemToObject(root, "response_format", rf);
-        }
-    }
-    if (manager->caps.accepts_num_ctx && manager->num_ctx != 0u)
-        cJSON_AddNumberToObject(root, "num_ctx", (double)manager->num_ctx);
-
-    /* T2 KV 复用透传：缓存声明随能力位恒发（策略在部署配置面表达），
-     * 槽位亲和仅显式设置才下发（哨兵位使槽位 0 可表达）。 */
-    if (manager->caps.accepts_cache_prompt)
-        cJSON_AddBoolToObject(root, "cache_prompt", 1);
-    if (manager->caps.accepts_slot_id && manager->slot_set)
-        cJSON_AddNumberToObject(root, "slot_id", (double)manager->slot_id);
-
-    /* C3 thinking 控制：显式设置且能力位置位才下发；缺省旧请求体
-     * 字节级不变。enable_thinking 为布尔语义（false 也是有效值，
-     * 哨兵位使其可表达），budget 零值 = 未设置。 */
-    if (manager->caps.accepts_enable_thinking && manager->thinking_set) {
-        cJSON *ctk = ctk_ensure(root);
-        if (ctk)
-            cJSON_AddBoolToObject(ctk, "enable_thinking",
-                                  manager->enable_thinking ? 1 : 0);
-    }
-    if (manager->caps.accepts_thinking_budget && manager->thinking_budget != 0u) {
-        cJSON *ctk = ctk_ensure(root);
-        if (ctk)
-            cJSON_AddNumberToObject(ctk, "thinking_budget", (double)manager->thinking_budget);
-    }
-
-    if (manager->stream)
-        cJSON_AddBoolToObject(root, "stream", 1);
-
-    if (manager->stop_count > 0 && manager->stop) {
-        cJSON *stop = cJSON_CreateArray();
-        for (size_t i = 0; i < manager->stop_count; ++i)
-            cJSON_AddItemToArray(stop, cJSON_CreateString(manager->stop[i]));
-        cJSON_AddItemToObject(root, stop_key, stop);
-    }
+    fill_core(root, manager, default_model, default_max_tokens);
+    fill_caps(root, manager);
+    fill_thinking(root, manager);
+    fill_stop(root, manager, stop_key);
 }
 
 void provider_response_identity_load(llm_response_t *resp, const cJSON *root)
