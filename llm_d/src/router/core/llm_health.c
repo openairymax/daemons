@@ -127,12 +127,22 @@ void llm_ep_fail(llm_endpoint_t *ep, int err, uint32_t now)
 
 void llm_ep_ok(llm_endpoint_t *ep)
 {
+    unsigned prev_level = ep->open_level;
+    uint32_t prev_until = ep->open_until_ms;
+
     ep->consec_fail = 0U;
     ep->last_fail_ms = 0U;
     ep->open_until_ms = 0U;
     ep->probe_until_ms = 0U;
     ep->probe_fail = 0U;
     ep->open_level = 0U;
+
+    /* 恢复是独立事实：OPEN/HALF 期成功必须留下可检索证据，否则运维只能
+     * 看到熔断开启而看不到解除（现场曾出现整份日志零 CLOSED 记录）。 */
+    if (prev_until != 0U || prev_level != 0U)
+        AIRY_LOG_INFO("C-L02: LLMRouter: endpoint %s/%s circuit CLOSED (recovered, "
+                      "open_level=%u)",
+                      ep->provider_name, ep->model_name, prev_level);
 }
 
 llm_endpoint_t *router_ep_find(const char *provider, const char *model)
