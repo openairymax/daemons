@@ -322,6 +322,69 @@ static int t_decl_overrides(void)
     TEST_OK();
 }
 
+static int t_env_scrub(void)
+{
+    sup_proc_t p;
+    memset(&p, 0, sizeof(p));
+    setenv("LD_LIBRARY_PATH", "/polluted", 1);
+    setenv("LD_PRELOAD", "/polluted.so", 1);
+    sup_env_scrub(&p);
+    TEST_ASSERT(getenv("LD_LIBRARY_PATH") == NULL, "default must scrub path");
+    TEST_ASSERT(getenv("LD_PRELOAD") == NULL, "default must scrub preload");
+
+    snprintf(p.keepenv, sizeof(p.keepenv), "%s", "LD_LIBRARY_PATH");
+    setenv("LD_LIBRARY_PATH", "/declared", 1);
+    setenv("LD_PRELOAD", "/polluted.so", 1);
+    sup_env_scrub(&p);
+    TEST_ASSERT(getenv("LD_LIBRARY_PATH") != NULL, "declared var must survive");
+    TEST_ASSERT(getenv("LD_PRELOAD") == NULL, "undeclared var must scrub");
+
+    snprintf(p.keepenv, sizeof(p.keepenv), "%s", "LD_LIBRARY_PATHX");
+    setenv("LD_LIBRARY_PATH", "/declared", 1);
+    sup_env_scrub(&p);
+    TEST_ASSERT(getenv("LD_LIBRARY_PATH") == NULL, "prefix must not match");
+
+    unsetenv("LD_LIBRARY_PATH");
+    unsetenv("LD_PRELOAD");
+    TEST_OK();
+}
+
+static int t_decl_keepenv(void)
+{
+    env_clear();
+    if (mk_tmpdir() != 0)
+        TEST_FAIL("mkdir tmp");
+    char cfg[192], pf[224];
+    snprintf(cfg, sizeof(cfg), "%s/config", g_dir);
+    if (mkdir(cfg, 0755) != 0 && errno != EEXIST)
+        TEST_FAIL("mkdir config");
+    snprintf(pf, sizeof(pf), "%s/profile.env", cfg);
+    FILE *f = fopen(pf, "w");
+    if (!f)
+        TEST_FAIL("open profile.env");
+    fputs("AIRYRT_LAUNCH_CORE=gateway_d llama_server\n", f);
+    fputs("AIRYRT_LAUNCH_KEEPENV_llama_server=LD_LIBRARY_PATH\n", f);
+    fputs("AIRYRT_LAUNCH_KEEPENV_ghost_d=LD_PRELOAD\n", f);
+    fclose(f);
+
+    setenv("AIRY_HOME", g_dir, 1);
+    setenv("AIRY_RUNTIME_DIR", g_dir, 1);
+
+    sup_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    TEST_ASSERT(sup_decl_load(&ctx) == 0, "load failed");
+    int li = sup_proc_find(&ctx, "llama_server");
+    TEST_ASSERT(li >= 0, "llama_server missing");
+    TEST_ASSERT(strcmp(ctx.procs[li].keepenv, "LD_LIBRARY_PATH") == 0, "keepenv apply");
+    int gi = sup_proc_find(&ctx, "gateway_d");
+    TEST_ASSERT(gi >= 0, "gateway_d missing");
+    TEST_ASSERT(ctx.procs[gi].keepenv[0] == '\0', "undeclared keeps default");
+
+    env_clear();
+    rm_tmpdir();
+    TEST_OK();
+}
+
 static int t_decl_fallback(void)
 {
     env_clear();
@@ -575,6 +638,10 @@ int main(void)
     pass += t_decl_load() == 0;
     run++;
     pass += t_decl_overrides() == 0;
+    run++;
+    pass += t_env_scrub() == 0;
+    run++;
+    pass += t_decl_keepenv() == 0;
     run++;
     pass += t_decl_fallback() == 0;
     run++;
