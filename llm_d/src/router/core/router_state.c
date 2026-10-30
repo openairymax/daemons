@@ -80,19 +80,12 @@ static int field_u32(const char *s, uint32_t *out)
     return 0;
 }
 
-static void state_parse(char *line)
+/* 切分固定八列。列数不足或多出第九列都属非法行——多出列说明写入侧与
+ * 读取侧的格式已经不一致，宁可丢弃也不要猜。 */
+static int line_split(char *line, char *f[8])
 {
-    router_ctx_t *ctx = router_ctx_get();
-    router_ep_snap_t *s;
-    char *f[8];
     char *p = line;
     size_t n = 0U;
-    uint32_t fail = 0U;
-    uint32_t age = 0U;
-    uint32_t state = 0U;
-    uint32_t remain = 0U;
-    uint32_t probe = 0U;
-    uint32_t level = 0U;
 
     while (n < 8U) {
         char *tab = strchr(p, '\t');
@@ -103,28 +96,43 @@ static void state_parse(char *line)
         *tab = '\0';
         p = tab + 1;
     }
-    if (n != 8U || strchr(f[7], '\t') != NULL)
+    return n == 8U && strchr(f[7], '\t') == NULL;
+}
+
+/* 六个十进制字段一次收口；任一字段坏则整行作废。 */
+static int snap_num(char *const *f, uint32_t *v)
+{
+    return field_u32(f[2], &v[0]) || field_u32(f[3], &v[1]) || field_u32(f[4], &v[2]) ||
+           field_u32(f[5], &v[3]) || field_u32(f[6], &v[4]) || field_u32(f[7], &v[5]);
+}
+
+/* 溢出按上限裁剪：状态文件可被人为改写，裁剪保证内存中的量纲可控。 */
+static void snap_fill(router_ep_snap_t *s, char *const *f, const uint32_t *v)
+{
+    AIRY_STRNCPY_TERM(s->provider_name, f[0], sizeof(s->provider_name));
+    AIRY_STRNCPY_TERM(s->model_name, f[1], sizeof(s->model_name));
+    s->consec_fail = v[0] > LLM_EP_FAIL_MAX ? LLM_EP_FAIL_MAX : v[0];
+    s->last_fail_age_ms = v[1] > LLM_EP_FAIL_WINDOW_MS ? LLM_EP_FAIL_WINDOW_MS : v[1];
+    s->open_remain_ms = v[3] > LLM_EP_OPEN_MAX_MS ? LLM_EP_OPEN_MAX_MS : v[3];
+    s->probe_fail = v[4] > LLM_EP_PROBE_MAX ? LLM_EP_PROBE_MAX : v[4];
+    s->open_level = v[5] > LLM_EP_MAX_LEVEL ? (uint8_t)LLM_EP_MAX_LEVEL : (uint8_t)v[5];
+    s->state = (uint8_t)v[2];
+}
+
+static void state_parse(char *line)
+{
+    router_ctx_t *ctx = router_ctx_get();
+    char *f[8];
+    uint32_t v[6];
+
+    if (!line_split(line, f) || !f[0][0] || !f[1][0])
         return;
-    if (!f[0][0] || !f[1][0])
-        return;
-    if (field_u32(f[2], &fail) != 0 || field_u32(f[3], &age) != 0 ||
-        field_u32(f[4], &state) != 0 || field_u32(f[5], &remain) != 0 ||
-        field_u32(f[6], &probe) != 0 || field_u32(f[7], &level) != 0)
-        return;
-    if (state > (uint32_t)LLM_EP_HALF)
+    if (snap_num(f, v) != 0 || v[2] > (uint32_t)LLM_EP_HALF)
         return;
     if (ctx->restore_count >= LLM_ROUTER_MAX_ENDPOINTS)
         return;
 
-    s = &ctx->restore[ctx->restore_count++];
-    AIRY_STRNCPY_TERM(s->provider_name, f[0], sizeof(s->provider_name));
-    AIRY_STRNCPY_TERM(s->model_name, f[1], sizeof(s->model_name));
-    s->consec_fail = fail > LLM_EP_FAIL_MAX ? LLM_EP_FAIL_MAX : fail;
-    s->last_fail_age_ms = age > LLM_EP_FAIL_WINDOW_MS ? LLM_EP_FAIL_WINDOW_MS : age;
-    s->open_remain_ms = remain > LLM_EP_OPEN_MAX_MS ? LLM_EP_OPEN_MAX_MS : remain;
-    s->probe_fail = probe > LLM_EP_PROBE_MAX ? LLM_EP_PROBE_MAX : probe;
-    s->open_level = level > LLM_EP_MAX_LEVEL ? (uint8_t)LLM_EP_MAX_LEVEL : (uint8_t)level;
-    s->state = (uint8_t)state;
+    snap_fill(&ctx->restore[ctx->restore_count++], f, v);
 }
 
 void router_state_load(void)
