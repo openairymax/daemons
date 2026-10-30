@@ -151,13 +151,8 @@ void svc_chain_ctx(const llm_service_t *svc, llm_route_cfg_t *out);
 /** 注册表精确查找（持锁），未命中返回 NULL（实现在 service.c）。 */
 const provider_t *svc_find_prov(llm_service_t *svc, const char *model);
 
-/**
- * 注册表是否为空（持锁计数，实现在 service.c）。
- *
- * 查找未命中与注册表为空共用 NULL 返回值，但前者是请求参数问题，后者是
- * 服务装配问题；调用方据此选择错误码，避免把「没有 provider」误报成
- * 不可重试的 INVALID_MODEL。
- */
+/* 注册表为空（持锁计数，实现在 service.c）：与「模型未配置」分开归因，
+ * 避免把装配故障报成不可重试的 INVALID_MODEL。 */
 bool svc_reg_empty(llm_service_t *svc);
 
 AIRY_ABI_END

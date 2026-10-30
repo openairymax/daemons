@@ -212,7 +212,7 @@ const provider_t *provider_registry_find(provider_registry_t *reg, const char *m
     AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
-size_t provider_registry_count(provider_registry_t *reg)
+size_t provider_reg_count(provider_registry_t *reg)
 {
     if (!reg)
         return 0;
