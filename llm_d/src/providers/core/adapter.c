@@ -98,10 +98,114 @@ static void lat_note(const provider_base_ctx_t *base, uint64_t start_ms)
     prov_stat_lat(base->name, (uint32_t)(airy_time_ms() - start_ms));
 }
 
+/* 入口前置条件：四件公共依赖 + 构体槽；sink 为各形态独有槽位（同步为
+ * 输出槽，流式为回调）。 */
+static int arg_ok(const provider_ctx_t *ctx, const provider_adapter_t *ops,
+                  const llm_request_config_t *manager, const void *sink)
+{
+    return ctx && ops && manager && sink && ops->build_request;
+}
+
+/* 请求体装配失败统一收口：phase 仅作日志区分（COMPLETE / STREAM），
+ * stack 指向失败点所在函数名。 */
+static char *body_build(const provider_adapter_t *ops, const llm_request_config_t *cfg,
+                        const char *phase, const char *stack)
+{
+    char *body = ops->build_request(cfg);
+
+    if (!body)
+        SVC_LOG_ERROR("C-L02: %s: %s-FAIL model=%s reason=build_request_oom STACK: %s",
+                      ops->tag, phase, req_model(ops, cfg), stack);
+    return body;
+}
+
+/* 失败统一收口：日志、诊断槽存证、响应体释放。传输失败与非 200 状态码
+ * 两条路径共用——两副本曾各自维护，漏改一侧即丢诊断。 */
+static int req_fail(const provider_adapter_t *ops, const char *model, long http_code,
+                    provider_http_resp_t *resp, int ret)
+{
+    SVC_LOG_ERROR("C-L02: %s: COMPLETE-FAIL model=%s http_code=%ld ret=%d DIAGNOSIS=%s "
+                  "body=%.600s",
+                  ops->tag, model, http_code, ret, provider_http_err_diag(http_code),
+                  resp && resp->data ? resp->data : "");
+    diag_from_resp(http_code, resp);
+    if (resp)
+        provider_http_resp_free(resp);
+    return ret;
+}
+
+/* 成功路径响应装配：解析 → 端点容量盖章 → 结果日志。resp 所有权在本件
+ * 内终结，解析结果转出至 out_response。 */
+static int complete_parse(const provider_adapter_t *ops, const provider_base_ctx_t *base,
+                          const char *model, provider_http_resp_t *resp, long http_code,
+                          llm_response_t **out_response)
+{
+    int ret = ops->parse_response(resp->data, out_response);
+
+    provider_http_resp_free(resp);
+
+    if (ret != AIRY_OK || !*out_response) {
+        SVC_LOG_ERROR("C-L02: %s: COMPLETE-FAIL model=%s http_code=%ld "
+                      "DIAGNOSIS=parse_response_failed ret=%d",
+                      ops->tag, model, http_code, ret);
+        return ret;
+    }
+
+    resp_stamp_capacity(*out_response, base);
+    SVC_LOG_INFO("C-L02: %s: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
+                 "http_code=%ld",
+                 ops->tag, (*out_response)->model ? (*out_response)->model : model,
+                 (*out_response)->prompt_tokens, (*out_response)->completion_tokens,
+                 (*out_response)->total_tokens, http_code);
+    return ret;
+}
+
+/* 流末收口：取累加响应 → 残留工具调用冲刷 → 累加器释放 → 完备性判定
+ * → 端点容量盖章 → 结果转出。完整性缺失即整条流作废，不留半成品。 */
+static int stream_finish(const provider_adapter_t *ops, const provider_base_ctx_t *base,
+                         const char *model, long http_code, provider_stream_acc_t *acc,
+                         llm_stream_callback_t callback, void *callback_data,
+                         llm_response_t **out_response)
+{
+    llm_response_t *resp = provider_stream_take(acc);
+
+    provider_tool_flush(&acc->tools, resp, callback, callback_data);
+    provider_stream_acc_free(acc);
+
+    int integrity = resp ? stream_integrity(resp) : AIRY_OK;
+
+    if (integrity != AIRY_OK) {
+        SVC_LOG_ERROR("C-L02: %s: STREAM-FAIL model=%s http_code=%ld reason=integrity ret=%d",
+                      ops->tag, model, http_code, integrity);
+        llm_response_free(resp);
+        if (out_response)
+            *out_response = NULL;
+        return integrity;
+    }
+
+    if (resp) {
+        resp_stamp_capacity(resp, base);
+        SVC_LOG_INFO("C-L02: %s: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
+                     "http_code=%ld",
+                     ops->tag, resp->model ? resp->model : model, resp->prompt_tokens,
+                     resp->completion_tokens, resp->total_tokens, http_code);
+    } else {
+        SVC_LOG_WARN("C-L02: %s: STREAM-FAIL model=%s http_code=%ld DIAGNOSIS=null_response_built",
+                     ops->tag, model, http_code);
+    }
+
+    if (out_response)
+        *out_response = resp;
+    else if (resp)
+        llm_response_free(resp);
+
+    return AIRY_OK;
+}
+
 int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
                              const llm_request_config_t *manager, llm_response_t **out_response)
 {
-    if (!ctx || !ops || !manager || !out_response || !ops->build_request || !ops->parse_response)
+    if (!arg_ok(ctx, ops, manager, out_response) || !ops->parse_response)
         return AIRY_ERR_INVALID_PARAM;
 
     provider_base_ctx_t *base = provider_base_ctx(ctx);
@@ -112,13 +216,9 @@ int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
     llm_request_config_t eff = *manager;
     eff.caps = base->caps;
 
-    char *req_body = ops->build_request(&eff);
-    if (!req_body) {
-        SVC_LOG_ERROR("C-L02: %s: COMPLETE-FAIL model=%s reason=build_request_oom "
-                      "STACK: provider_driver_complete",
-                      ops->tag, req_model(ops, manager));
+    char *req_body = body_build(ops, &eff, "COMPLETE", "provider_driver_complete");
+    if (!req_body)
         return AIRY_ERR_OUT_OF_MEMORY;
-    }
 
     const char *model = req_model(ops, manager);
     SVC_LOG_INFO("C-L02: %s: COMPLETE-START model=%s msgs=%zu max_tokens=%d temp=%.2f stream=%d",
@@ -143,46 +243,17 @@ int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
 
     AIRY_FREE(req_body);
 
-    if (ret != AIRY_OK) {
-        SVC_LOG_ERROR("C-L02: %s: COMPLETE-FAIL model=%s http_code=%ld ret=%d DIAGNOSIS=%s "
-                      "body=%.600s",
-                      ops->tag, model, http_code, ret, provider_http_err_diag(http_code),
-                      http_resp && http_resp->data ? http_resp->data : "");
-        diag_from_resp(http_code, http_resp);
-        if (http_resp)
-            provider_http_resp_free(http_resp);
-        return ret;
-    }
+    if (ret != AIRY_OK)
+        return req_fail(ops, model, http_code, http_resp, ret);
 
     /* 非限流模式：exec 返回 OK 仅代表传输成功，成败看状态码（4xx/5xx 响应体
      * 对调用方有诊断价值，exec 不吞）；限流模式此分支不可达（非 200 已在
      * core 归一为错误码返回）。 */
-    if (http_code != 200) {
-        SVC_LOG_ERROR("C-L02: %s: COMPLETE-FAIL model=%s http_code=%ld DIAGNOSIS=%s body=%.600s",
-                      ops->tag, model, http_code, provider_http_err_diag(http_code),
-                      http_resp && http_resp->data ? http_resp->data : "");
-        diag_from_resp(http_code, http_resp);
-        provider_http_resp_free(http_resp);
-        return provider_http_err_map(http_code, AIRY_ERR_IO);
-    }
+    if (http_code != 200)
+        return req_fail(ops, model, http_code, http_resp,
+                        provider_http_err_map(http_code, AIRY_ERR_IO));
 
-    ret = ops->parse_response(http_resp->data, out_response);
-    provider_http_resp_free(http_resp);
-
-    if (ret == AIRY_OK && *out_response) {
-        resp_stamp_capacity(*out_response, base);
-        SVC_LOG_INFO("C-L02: %s: COMPLETE-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
-                     "http_code=%ld",
-                     ops->tag, (*out_response)->model ? (*out_response)->model : model,
-                     (*out_response)->prompt_tokens, (*out_response)->completion_tokens,
-                     (*out_response)->total_tokens, http_code);
-    } else {
-        SVC_LOG_ERROR("C-L02: %s: COMPLETE-FAIL model=%s http_code=%ld "
-                      "DIAGNOSIS=parse_response_failed ret=%d",
-                      ops->tag, model, http_code, ret);
-    }
-
-    return ret;
+    return complete_parse(ops, base, model, http_resp, http_code, out_response);
 }
 
 int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_t *ops,
@@ -190,7 +261,7 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
                                     llm_stream_callback_t callback, void *callback_data,
                                     llm_response_t **out_response)
 {
-    if (!ctx || !ops || !manager || !callback || !ops->build_request)
+    if (!arg_ok(ctx, ops, manager, callback))
         return AIRY_ERR_INVALID_PARAM;
 
     provider_base_ctx_t *base = provider_base_ctx(ctx);
@@ -200,13 +271,9 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
     stream_cfg.stream = 1;
     stream_cfg.caps = base->caps;
 
-    char *req_body = ops->build_request(&stream_cfg);
-    if (!req_body) {
-        SVC_LOG_ERROR("C-L02: %s: STREAM-FAIL model=%s reason=build_request_oom "
-                      "STACK: provider_driver_complete_stream",
-                      ops->tag, req_model(ops, manager));
+    char *req_body = body_build(ops, &stream_cfg, "STREAM", "provider_driver_complete_stream");
+    if (!req_body)
         return AIRY_ERR_OUT_OF_MEMORY;
-    }
 
     const char *model = req_model(ops, manager);
     SVC_LOG_INFO("C-L02: %s: STREAM-START model=%s msgs=%zu max_tokens=%d temp=%.2f", ops->tag,
@@ -243,35 +310,5 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
         return provider_http_err_map(http_code, ret);
     }
 
-    llm_response_t *resp = provider_stream_take(&acc);
-    provider_tool_flush(&acc.tools, resp, callback, callback_data);
-    provider_stream_acc_free(&acc);
-
-    int integrity = resp ? stream_integrity(resp) : AIRY_OK;
-    if (integrity != AIRY_OK) {
-        SVC_LOG_ERROR("C-L02: %s: STREAM-FAIL model=%s http_code=%ld reason=integrity ret=%d",
-                      ops->tag, model, http_code, integrity);
-        llm_response_free(resp);
-        if (out_response)
-            *out_response = NULL;
-        return integrity;
-    }
-
-    if (resp) {
-        resp_stamp_capacity(resp, base);
-        SVC_LOG_INFO("C-L02: %s: STREAM-OK model=%s tokens=(prompt=%u,completion=%u,total=%u) "
-                     "http_code=%ld",
-                     ops->tag, resp->model ? resp->model : model, resp->prompt_tokens,
-                     resp->completion_tokens, resp->total_tokens, http_code);
-    } else {
-        SVC_LOG_WARN("C-L02: %s: STREAM-FAIL model=%s http_code=%ld DIAGNOSIS=null_response_built",
-                     ops->tag, model, http_code);
-    }
-
-    if (out_response)
-        *out_response = resp;
-    else if (resp)
-        llm_response_free(resp);
-
-    return AIRY_OK;
+    return stream_finish(ops, base, model, http_code, &acc, callback, callback_data, out_response);
 }
