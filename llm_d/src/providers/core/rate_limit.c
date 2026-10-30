@@ -138,6 +138,50 @@ static int parse_retry_after(const char *headers_data)
     return (int)seconds;
 }
 
+/* 429 分支：记录限流、把最后一份响应体入诊断槽后释放，再按 Retry-After
+ * 或退避等待。响应不落调用方，故释放与取证的先后顺序必须固定。 */
+static void rl_hold_429(provider_rate_limiter_t *rl, const char *url, int attempt,
+                        int max_attempts, provider_http_resp_t **out_response)
+{
+    int retry_after = parse_retry_after(*out_response ? (*out_response)->data : NULL);
+
+    rl_record_429(rl, retry_after);
+    SVC_LOG_WARN("C-L02: RL: RATE-LIMIT url=%s http_code=429 attempt=%d/%d retry_after=%ds", url,
+                 attempt + 1, max_attempts, retry_after);
+
+    if (*out_response) {
+        /* B1-d：429 重试耗尽时 resp 在本分支释放、不落调用方，
+         * 最后一次的响应体须在释放前入诊断槽，否则错误面失声。 */
+        const char *data = (*out_response)->data;
+        prov_diag_set(429, data, data ? strlen(data) : 0);
+        provider_http_resp_free(*out_response);
+        *out_response = NULL;
+    }
+
+    int wait_ms = rl_get_wait_ms(rl, attempt);
+    if (wait_ms > 0)
+        airy_sleep_ms((uint32_t)wait_ms);
+}
+
+/* 5xx 分支：释放响应后按指数退避等待；末次尝试由调用方判定，不进本函数，
+ * 使"最后一轮把错误面交回调用方"这一契约保持不变。 */
+static void rl_hold_5xx(const char *url, long http_code, int attempt, int max_attempts,
+                        provider_http_resp_t **out_response)
+{
+    SVC_LOG_WARN("C-L02: RL: SERVER-ERROR url=%s http_code=%ld attempt=%d/%d retrying", url,
+                 http_code, attempt + 1, max_attempts);
+
+    if (*out_response) {
+        provider_http_resp_free(*out_response);
+        *out_response = NULL;
+    }
+
+    int delay = PROVIDER_RL_BASE_DELAY_MS << attempt;
+    if (delay > PROVIDER_RL_MAX_DELAY_MS)
+        delay = PROVIDER_RL_MAX_DELAY_MS;
+    airy_sleep_ms((uint32_t)delay);
+}
+
 int provider_http_request_with_retry(provider_base_ctx_t *base, provider_rate_limiter_t *rl,
                                      const char *url, struct curl_slist *headers,
                                      const char *body, double timeout_sec, int idempotent,
@@ -172,44 +216,13 @@ int provider_http_request_with_retry(provider_base_ctx_t *base, provider_rate_li
         }
 
         if (*out_http_code == 429) {
-            int retry_after = parse_retry_after(*out_response ? (*out_response)->data : NULL);
-            rl_record_429(rl, retry_after);
-
-            SVC_LOG_WARN("C-L02: RL: RATE-LIMIT url=%s http_code=429 attempt=%d/%d "
-                         "retry_after=%ds",
-                         url, attempt + 1, max_attempts, retry_after);
-
-            if (*out_response) {
-                /* B1-d：429 重试耗尽时 resp 在本分支释放、不落调用方，
-                 * 最后一次的响应体须在释放前入诊断槽，否则错误面失声。 */
-                const char *body = (*out_response)->data;
-                prov_diag_set(429, body, body ? strlen(body) : 0);
-                provider_http_resp_free(*out_response);
-                *out_response = NULL;
-            }
-
-            int wait_ms = rl_get_wait_ms(rl, attempt);
-            if (wait_ms > 0) {
-                airy_sleep_ms((uint32_t)wait_ms);
-            }
+            rl_hold_429(rl, url, attempt, max_attempts, out_response);
             attempt++;
             continue;
         }
 
         if (*out_http_code >= 500 && *out_http_code < 600 && attempt < max_attempts - 1) {
-            SVC_LOG_WARN("C-L02: RL: SERVER-ERROR url=%s http_code=%ld attempt=%d/%d "
-                         "retrying",
-                         url, *out_http_code, attempt + 1, max_attempts);
-
-            if (*out_response) {
-                provider_http_resp_free(*out_response);
-                *out_response = NULL;
-            }
-
-            int delay = PROVIDER_RL_BASE_DELAY_MS << attempt;
-            if (delay > PROVIDER_RL_MAX_DELAY_MS)
-                delay = PROVIDER_RL_MAX_DELAY_MS;
-            airy_sleep_ms((uint32_t)delay);
+            rl_hold_5xx(url, *out_http_code, attempt, max_attempts, out_response);
             attempt++;
             continue;
         }
