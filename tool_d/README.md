@@ -172,7 +172,7 @@ Windows 下 `maths_*` 返回明确的不支持错误，`git_*` 三个工具的�
 
 ACL 双来源（fail-closed：无授权条目即拒绝）：
 
-1. **权威源** `$AIRY_CONFIG_DIR/permission_rules.yaml`，规则形如
+1. **权威源** `$AIRY_CONFIG_DIR/cupolas/permission_rules.yaml`，规则形如
    `rules: [{agent: "coding_v1", tool: "fs_read", effect: "allow"}]`；
    文件缺失仅告警，不阻断启动。
 2. **环境变量** `AIRY_AGENT_ACL`，格式 `agent=tool1,tool2;agent2=tool3`，
@@ -184,7 +184,7 @@ ACL 双来源（fail-closed：无授权条目即拒绝）：
 | 环境变量 | 默认 | 说明 |
 |----------|------|------|
 | `AIRY_HOME` | `~/.airymaxrt` | 运行时目录根；socket 与插件目录都以此为基准 |
-| `AIRY_CONFIG_DIR` | — | `permission_rules.yaml` 所在目录 |
+| `AIRY_CONFIG_DIR` | — | `cupolas/permission_rules.yaml` 所在目录 |
 | `AIRY_AGENT_ACL` | 空 | 静态 ACL 预授权 |
 | `AIRY_TOOL_SANDBOX_MODE` | `workspace` | `off` / `workspace` / `strict`（`strict` 同时关闭网络） |
 | `AIRY_TOOL_SANDBOX_WORKSPACE` | 进程 cwd | 文件与子进程围堵根目录 |

@@ -182,6 +182,10 @@ int daemon_security_init(const daemon_security_config_t *config, airy_err_t *err
         } else if (lrc != AIRY_OK) {
             SVC_LOG_WARN("daemon_security: permission rules load skipped for %s (rc=%d)",
                          config->permission_rules_path, lrc);
+        } else {
+            /* 正向见证：只有缺失才告警会让"规则已生效"无法从日志证实。 */
+            SVC_LOG_INFO("daemon_security: permission rules loaded from %s (acl_rules=%zu)",
+                         config->permission_rules_path, g_security_ctx.acl_count);
         }
     }
     return 0;
