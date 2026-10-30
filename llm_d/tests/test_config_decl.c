@@ -19,6 +19,7 @@
 #include "providers/core/provider_config.h"
 
 #include "airy_memory.h"
+#include "error.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -234,6 +235,29 @@ int main(void)
         check_int("badbit.rc", svc_yaml_load_state(path, &st), 0);
         check_int("badbit.count", (int)st.model_count, 1);
         check_str("badbit.kept", st.models[0].name, "good");
+    }
+
+    /* 7) P-A：文件不可读必须 fail-closed，不得回 0 冒充「加载成功但无
+     *    provider」——后者会让启动与热重载都静默带着空注册表继续。 */
+    {
+        char missing[256];
+        snprintf(missing, sizeof(missing), "/tmp/airy_llm_nocfg_%ld.yaml", (long)getpid());
+        provider_config_t *mp = NULL;
+        size_t mn = 99;
+        check_int("noent.rc", svc_load_model_config_yaml(missing, &mp, &mn),
+                  AIRY_ERR_PARSE_ERROR);
+        check_int("noent.count", (int)mn, 0);
+    }
+
+    /* 8) P-A：可读但零模型零 provider 属装配失败（半写/空表），同样
+     *    不得以成功语义流出。 */
+    {
+        if (put_file(path, "") != 0)
+            return 1;
+        provider_config_t *ep = NULL;
+        size_t en = 99;
+        check_int("empty.rc", svc_load_model_config_yaml(path, &ep, &en), AIRY_ERR_STATE_ERROR);
+        check_int("empty.count", (int)en, 0);
     }
 
     remove(path);

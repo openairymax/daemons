@@ -73,6 +73,19 @@ const provider_t *svc_find_prov(llm_service_t *svc, const char *model)
     return prov;
 }
 
+/* 跨域桥（0.1.20 P-A）：注册表为空的判定留在 rpc 域内，请求层据此把
+ * 「没有 provider」与「模型未配置」分成两个错误码。 */
+bool svc_reg_empty(llm_service_t *svc)
+{
+    if (!svc)
+        return true;
+    struct llm_service *s = (struct llm_service *)svc;
+    airy_mtx_lock(&s->lock);
+    size_t n = provider_registry_count(s->registry);
+    airy_mtx_unlock(&s->lock);
+    return n == 0;
+}
+
 /* 跨域桥（0.1.20 D2-7）：装配域按固定周期驱动检测、按信号触发应用，
  * struct llm_service 本身不出 rpc 域。 */
 int llm_svc_cfg_tick(llm_service_t *svc, uint64_t now_ms)
@@ -288,6 +301,7 @@ llm_service_t *llm_service_create(const char *config_path)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     /* 注册表已深拷贝 provider 配置，暂存态（含用户覆盖合并结果）释放。 */
+    int reg_empty = b.load_err;
     llm_boot_drop(&b);
 
     /* 加载历史计费/用量累计（幂等，无文件则跳过）。 */
@@ -301,6 +315,13 @@ llm_service_t *llm_service_create(const char *config_path)
 
     llm_route_init(svc);
     llm_watch_cfg(svc, config_path);
+
+    /* 空注册表不是「正常启动」：请求会以 NO_PROVIDER 快速失败，健康面报
+     * down。此处必须留 ERROR 级证据，否则运行期只剩零散的成功日志。 */
+    if (reg_empty)
+        SVC_LOG_ERROR("C-L02: SVC: REGISTRY-EMPTY no provider loaded from %s — LLM requests "
+                      "will fail fast until model.yaml is repaired",
+                      config_path ? config_path : "(no config path)");
 
     SVC_LOG_INFO("C-L02: SVC: CREATE-OK pricing_rules=%d llm_cache_capacity=%zu cache_ttl=%u",
                  (int)svc->rule_count, b.base.llm_cache_capacity, b.base.llm_cache_ttl_sec);

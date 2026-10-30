@@ -221,12 +221,14 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
 
     svc_yaml_state_t st;
     __builtin_memset(&st, 0, sizeof(st));
-    if (svc_yaml_load_state(config_path, &st) != AIRY_OK) {
-        /* 文件不可读/超限/内存不足——与原 fopen / parser-init 失败同义，
-         * 按"非错误"返回 0。 */
-        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN cannot open model config, STACK: "
-                     "svc_load_model_config_yaml");
-        return 0;
+    int lrc = svc_yaml_load_state(config_path, &st);
+    if (lrc != AIRY_OK) {
+        /* 读不到就是失败：返回 0 会把「文件缺失/半写」伪装成「加载成功但
+         * 没有 provider」，启动与热重载都据此保持静默（0.1.20 P-A）。 */
+        SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL cannot read %s (rc=%d), STACK: "
+                      "svc_load_model_config_yaml",
+                      config_path, lrc);
+        return lrc;
     }
 
     /* Simplified llm section expansion: when the top-level llm: mapping
@@ -234,9 +236,10 @@ int svc_load_model_config_yaml(const char *config_path, provider_config_t **out_
      * providers/models (see svc_yaml_expand_llm). */
     svc_yaml_expand_llm(&st);
     if (st.model_count == 0 && st.pcfg_count == 0) {
-        SVC_LOG_WARN(
-            "C-L02: SVC: MODEL-CONFIG-WARN no models found, STACK: svc_load_model_config_yaml");
-        return 0;
+        SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL %s declares no models and no providers, "
+                      "STACK: svc_load_model_config_yaml",
+                      config_path);
+        return AIRY_ERR_STATE_ERROR;
     }
 
     provider_agg_t provs[16];

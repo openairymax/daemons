@@ -221,11 +221,19 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
     return prov;
 }
 
+/* P-A 归因（0.1.20）：空注册表是装配问题，未命中是请求问题，两者共用
+ * NULL 返回值。若一并报成 INVALID_MODEL，调用方与 TUI 会把「model.yaml
+ * 没加载」误读成「模型名写错」，且该码不可重试，真实根因被永久掩盖。 */
+static int pick_error(llm_service_t *svc)
+{
+    return svc_reg_empty(svc) ? AIRY_ERR_LLM_NO_PROVIDER : AIRY_ERR_LLM_INVALID_MODEL;
+}
+
 /* 双入口统一的选取链：策略路由优先，miss 时回落注册表精确查找；
  * 仍无可用 provider 则记录带 STACK 的失败日志并返回 NULL。 */
 static const provider_t *pick_provider(llm_service_t *svc, const llm_request_config_t *manager,
                                        const llm_route_request_t *req, const char *stack,
-                                       bool is_stream)
+                                       bool is_stream, int *err)
 {
     const provider_t *prov = select_provider_via_router(svc, manager, req);
     if (!prov) {
@@ -233,9 +241,15 @@ static const provider_t *pick_provider(llm_service_t *svc, const llm_request_con
                      manager->model);
         prov = svc_find_prov(svc, manager->model);
     }
-    if (!prov)
-        SVC_LOG_ERROR("C-L02: SVC: %s model=%s, error=INVALID_MODEL, STACK: %s",
-                      is_stream ? "STREAM-FAIL" : "COMPLETE-FAIL", manager->model, stack);
+    if (!prov) {
+        int rc = pick_error(svc);
+        if (err)
+            *err = rc;
+        SVC_LOG_ERROR("C-L02: SVC: %s model=%s, error=%s, STACK: %s",
+                      is_stream ? "STREAM-FAIL" : "COMPLETE-FAIL",
+                      manager->model ? manager->model : "(null)",
+                      rc == AIRY_ERR_LLM_NO_PROVIDER ? "NO_PROVIDER" : "INVALID_MODEL", stack);
+    }
     return prov;
 }
 /**
@@ -467,11 +481,13 @@ static int complete_impl(llm_service_t *svc, const llm_request_config_t *manager
     llm_route_request_t req;
     build_route_request(svc, manager, false, &req);
 
-    const provider_t *prov = pick_provider(svc, manager, &req, "llm_service_complete", false);
+    int perr = AIRY_ERR_LLM_INVALID_MODEL;
+    const provider_t *prov =
+        pick_provider(svc, manager, &req, "llm_service_complete", false, &perr);
     if (!prov) {
         AIRY_FREE(cache_text);
         AIRY_FREE(cache_key);
-        return AIRY_ERR_LLM_INVALID_MODEL;
+        return perr;
     }
 
     log_routing_prelude(manager, "user_specified");
@@ -537,9 +553,11 @@ static int stream_impl(llm_service_t *svc, const llm_request_config_t *manager,
     llm_route_request_t req;
     build_route_request(svc, manager, true, &req);
 
-    const provider_t *prov = pick_provider(svc, manager, &req, "llm_service_complete_stream", true);
+    int perr = AIRY_ERR_LLM_INVALID_MODEL;
+    const provider_t *prov =
+        pick_provider(svc, manager, &req, "llm_service_complete_stream", true, &perr);
     if (!prov)
-        return AIRY_ERR_LLM_INVALID_MODEL;
+        return perr;
 
     log_routing_prelude(manager, "stream_user_specified");
 
@@ -637,8 +655,13 @@ static int emb_impl(llm_service_t *svc, const char *model, const char *request_b
     *out_json = NULL;
 
     const provider_t *prov = emb_prov(svc, model);
-    if (!prov)
-        return AIRY_ERR_LLM_INVALID_MODEL;
+    if (!prov) {
+        int rc = pick_error(svc);
+        SVC_LOG_ERROR("C-L02: SVC: EMBEDDINGS-FAIL model=%s, error=%s, STACK: emb_impl",
+                      model ? model : "(null)",
+                      rc == AIRY_ERR_LLM_NO_PROVIDER ? "NO_PROVIDER" : "INVALID_MODEL");
+        return rc;
+    }
 
     provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
     provider_refresh_api_key(base);

@@ -44,12 +44,14 @@ static void boot_prov_load(const char *cfg, llm_boot_t *b)
 {
     int rc = svc_load_model_config(cfg, &b->provs, &b->prov_n);
     if (rc != 0 || !b->provs || b->prov_n == 0) {
+        size_t got = b->prov_n;
         free_provider_configs(b->provs, b->prov_n);
         b->provs = NULL;
         b->prov_n = 0;
-        SVC_LOG_WARN("C-L02: SVC: model config load failed (ret=%d), "
-                     "registry will be empty",
-                     rc);
+        SVC_LOG_ERROR("C-L02: SVC: MODEL-CONFIG-FAIL %s (rc=%d, providers=%zu) — registry "
+                      "will be empty and every LLM request will fail fast, STACK: "
+                      "boot_prov_load",
+                      cfg, rc, got);
         return;
     }
     char up[1024];
