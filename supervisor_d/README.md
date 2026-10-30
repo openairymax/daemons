@@ -78,9 +78,16 @@ AIRY_PROFILE=full
 AIRYRT_LAUNCH_CORE="gateway_d llm_d think_d agent_d tool_d"
 AIRYRT_LAUNCH_AUX="monit_d sched_d channel_d market_d cupolas_d mem_d a2a_d notify_d"
 AIRYRT_LAUNCH_ARGS_llm_d="--manager /path/model.yaml"
+AIRYRT_LAUNCH_KEEPENV_llama_server="LD_LIBRARY_PATH"
 ```
 
 - 名单先于 args 应用（两遍扫描）；`AIRYRT_LAUNCH_ARGS_<NAME>` 对未登记名 fail-closed 拒绝。
+- 外部进程托管：`AIRYRT_LAUNCH_BIN_<NAME>` 覆盖可执行路径，`AIRYRT_LAUNCH_EP_<NAME>`
+  声明探活通道（`tcp:<port>` 回环或 UDS 路径），三键同样对未登记名 fail-closed 拒绝。
+- 环境隔离（D5）：POSIX 子进程派生前一律清除 `LD_LIBRARY_PATH` / `LD_PRELOAD` /
+  `LD_AUDIT`，仅 `AIRYRT_LAUNCH_KEEPENV_<NAME>` 显式列名者保留——宿主 shell 或上层
+  包装进程的注入不再改变受管 daemon 的加载器搜索路径与预载库。Windows 腿无此三变量，
+  `KEEPENV` 仍被解析但派生时不参与。
 - 声明缺失时回落内置缺省表（5 CORE + 9 AUX），仅升级兼容兜底，不构成第二套清单。
 - 端点解析与 gateway 一致：`AIRY_<NS>_SOCK` env 覆盖 → POSIX `<runtime-dir>/<ns>.sock` →
   Windows 固定 TCP 表。maths 因与 a2a 的 Windows 端口冲突（B17 订正中）不入表，其
