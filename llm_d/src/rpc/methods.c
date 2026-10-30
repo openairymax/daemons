@@ -54,7 +54,8 @@ static const char *llm_error_message(int ret)
     case AIRY_ERR_LLM_INVALID_MODEL:
         return "Model not found in provider registry (check config/model.yaml and provider API key)";
     case AIRY_ERR_LLM_NO_PROVIDER:
-        return "No LLM provider configured (set provider API key in config/secrets.env)";
+        return "No LLM provider loaded from config/model.yaml (file missing, unreadable, or "
+               "declares no providers)";
     case AIRY_ERR_LLM_AUTH_FAIL:
         return "Provider authentication failed (check API key in config/secrets.env)";
     case AIRY_ERR_LLM_RATE_LIMIT:

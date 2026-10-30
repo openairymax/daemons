@@ -212,6 +212,21 @@ const provider_t *provider_registry_find(provider_registry_t *reg, const char *m
     AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
+size_t provider_registry_count(provider_registry_t *reg)
+{
+    if (!reg)
+        return 0;
+
+    size_t n = 0;
+    airy_mtx_lock(&reg->lock);
+    if (reg->providers) {
+        for (provider_t *p = reg->providers; p->name; ++p)
+            n++;
+    }
+    airy_mtx_unlock(&reg->lock);
+    return n;
+}
+
 int provider_registry_model_max_output(const provider_t *prov, const char *model)
 {
     if (!prov || !model || !prov->models || !prov->model_max_output)
