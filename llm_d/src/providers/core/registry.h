@@ -22,18 +22,10 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg);
 void provider_registry_destroy(provider_registry_t *reg);
 const provider_t *provider_registry_find(provider_registry_t *reg, const char *model);
 
-/**
- * @brief Number of provider records that actually made it into the registry.
- *
- * Callers need to tell "the registry is empty" (config unreadable or
- * declared nothing) apart from "this model is not configured": the two
- * share a NULL lookup result but demand different error codes and ops
- * actions.
- *
- * @param reg Registry (may be NULL)
- * @return Live provider count; 0 for a NULL or empty registry
- */
-size_t provider_registry_count(provider_registry_t *reg);
+/* 在用 provider 条数：区分「注册表为空」（装配问题）与「模型未配置」
+ * （请求问题），二者共用 NULL 查找结果但错误码与运维动作不同。
+ * NULL/空表返回 0。 */
+size_t provider_reg_count(provider_registry_t *reg);
 
 /**
  * @brief Output-token cap configured for a model (model.yaml max_output).
