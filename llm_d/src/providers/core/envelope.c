@@ -23,6 +23,104 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* 可选采样/扩展段：流式 usage 声明与两种惩罚项。缺省值不写键，
+ * 保持旧请求体字节级等价。 */
+static void opt_attach(cJSON *root, const llm_request_config_t *m)
+{
+    if (m->stream) {
+        /* 流式请求必须显式声明 include_usage：chat 兼容端点
+         * （vLLM/llama.cpp 等）默认不回传 usage，不声明则 token 计数与
+         * 计费恒为 0。已回传的端点显式声明后幂等。 */
+        cJSON *so = cJSON_CreateObject();
+
+        if (so) {
+            cJSON_AddBoolToObject(so, "include_usage", 1);
+            cJSON_AddItemToObject(root, "stream_options", so);
+        }
+    }
+    if (m->presence_penalty != 0)
+        cJSON_AddNumberToObject(root, "presence_penalty", m->presence_penalty);
+    if (m->frequency_penalty != 0)
+        cJSON_AddNumberToObject(root, "frequency_penalty", m->frequency_penalty);
+}
+
+/* 工具声明段：仅当上游给出非空数组时整段透传。 */
+static void tools_attach(cJSON *root, const char *tools_json)
+{
+    if (!tools_json || !tools_json[0])
+        return;
+
+    CJSON_PARSE_GUARD(tools, tools_json, { return; });
+    if (cJSON_IsArray(tools) && cJSON_GetArraySize(tools) > 0)
+        cJSON_AddItemToObject(root, "tools", cJSON_Duplicate(tools, 1));
+}
+
+/* 单条消息：role/content 恒发；reasoning_content、tool_call_id 与
+ * tool_calls 仅在给出时回传。 */
+static cJSON *msg_build(const llm_message_t *m)
+{
+    cJSON *msg = cJSON_CreateObject();
+
+    if (!msg)
+        return NULL;
+
+    cJSON_AddStringToObject(msg, "role", m->role ? m->role : "user");
+    cJSON_AddStringToObject(msg, "content", m->content ? m->content : "");
+
+    /* 推理型端点要求把 assistant 轮的 reasoning_content 在重发时
+     * 原样回传；工具多轮之间丢弃该字段会招致上游 HTTP 400。 */
+    if (m->reasoning_content && m->reasoning_content[0])
+        cJSON_AddStringToObject(msg, "reasoning_content", m->reasoning_content);
+
+    if (m->tool_call_id && m->tool_call_id[0])
+        cJSON_AddStringToObject(msg, "tool_call_id", m->tool_call_id);
+
+    if (m->tool_calls_json && m->tool_calls_json[0]) {
+        CJSON_PARSE_GUARD(tc, m->tool_calls_json, {});
+        if (cJSON_IsArray(tc))
+            cJSON_AddItemToObject(msg, "tool_calls", cJSON_Duplicate(tc, 1));
+    }
+    return msg;
+}
+
+static cJSON *msgs_build(const llm_request_config_t *m)
+{
+    cJSON *msgs = cJSON_CreateArray();
+
+    if (!msgs)
+        return NULL;
+
+    for (size_t i = 0; i < m->message_count; ++i) {
+        cJSON *msg = msg_build(&m->messages[i]);
+
+        if (msg)
+            cJSON_AddItemToArray(msgs, msg);
+    }
+    return msgs;
+}
+
+/* 通用供应商扩展段：逐键并入顶层，键冲突时先删旧键再挂新键
+ * （扩展段为准）。空串 / 非法 JSON 静默跳过，不阻断请求装配。 */
+static void extra_merge(cJSON *root, const char *extra_json)
+{
+    if (!extra_json || !extra_json[0])
+        return;
+
+    CJSON_PARSE_GUARD(extra, extra_json, { return; });
+    if (!cJSON_IsObject(extra))
+        return;
+
+    const cJSON *field = NULL;
+
+    cJSON_ArrayForEach(field, extra)
+    {
+        if (field->string) {
+            cJSON_DeleteItemFromObject(root, field->string);
+            cJSON_AddItemToObject(root, field->string, cJSON_Duplicate(field, 1));
+        }
+    }
+}
+
 char *prov_build_chat(const llm_request_config_t *manager, const char *default_model,
                               const char *extra_json)
 {
@@ -42,81 +140,60 @@ char *prov_build_chat(const llm_request_config_t *manager, const char *default_m
      * max_tokens 兜底传 0 = 调用方未给则不写（可缺省语义）。 */
     provider_request_params_fill(root, manager, default_model, 0, "stop");
 
-    if (manager->stream) {
-        /* 流式请求必须显式声明 include_usage：chat 兼容端点
-         * （vLLM/llama.cpp 等）默认不回传 usage，不声明则 token 计数与
-         * 计费恒为 0。已回传的端点显式声明后幂等。 */
-        cJSON *stream_options = cJSON_CreateObject();
-        if (stream_options) {
-            cJSON_AddBoolToObject(stream_options, "include_usage", 1);
-            cJSON_AddItemToObject(root, "stream_options", stream_options);
-        }
-    }
-
-    if (manager->presence_penalty != 0) {
-        cJSON_AddNumberToObject(root, "presence_penalty", manager->presence_penalty);
-    }
-
-    if (manager->frequency_penalty != 0) {
-        cJSON_AddNumberToObject(root, "frequency_penalty", manager->frequency_penalty);
-    }
-
-    if (manager->tools_json && manager->tools_json[0]) {
-        CJSON_PARSE_GUARD(tools, manager->tools_json, {});
-        if (cJSON_IsArray(tools) && cJSON_GetArraySize(tools) > 0) {
-            cJSON_AddItemToObject(root, "tools", cJSON_Duplicate(tools, 1));
-        }
-    }
-
-    cJSON *msgs = cJSON_CreateArray();
-    for (size_t i = 0; i < manager->message_count; ++i) {
-        cJSON *msg = cJSON_CreateObject();
-        const char *role = manager->messages[i].role ? manager->messages[i].role : "user";
-        const char *content = manager->messages[i].content ? manager->messages[i].content : "";
-        cJSON_AddStringToObject(msg, "role", role);
-        cJSON_AddStringToObject(msg, "content", content);
-
-        /* 推理型端点要求把 assistant 轮的 reasoning_content 在重发时
-         * 原样回传；工具多轮之间丢弃该字段会招致上游 HTTP 400。 */
-        if (manager->messages[i].reasoning_content &&
-            manager->messages[i].reasoning_content[0]) {
-            cJSON_AddStringToObject(msg, "reasoning_content",
-                                    manager->messages[i].reasoning_content);
-        }
-
-        if (manager->messages[i].tool_call_id && manager->messages[i].tool_call_id[0]) {
-            cJSON_AddStringToObject(msg, "tool_call_id", manager->messages[i].tool_call_id);
-        }
-
-        if (manager->messages[i].tool_calls_json && manager->messages[i].tool_calls_json[0]) {
-            CJSON_PARSE_GUARD(tc, manager->messages[i].tool_calls_json, {});
-            if (cJSON_IsArray(tc)) {
-                cJSON_AddItemToObject(msg, "tool_calls", cJSON_Duplicate(tc, 1));
-            }
-        }
-        cJSON_AddItemToArray(msgs, msg);
-    }
-    cJSON_AddItemToObject(root, "messages", msgs);
-
-    /* 通用供应商扩展段：逐键并入顶层，键冲突时先删旧键再挂新键
-     * （扩展段为准）。空串 / 非法 JSON 静默跳过，不阻断请求装配。 */
-    if (extra_json && extra_json[0]) {
-        CJSON_PARSE_GUARD(extra, extra_json, {});
-        if (cJSON_IsObject(extra)) {
-            const cJSON *field = NULL;
-            cJSON_ArrayForEach(field, extra)
-            {
-                if (field->string) {
-                    cJSON_DeleteItemFromObject(root, field->string);
-                    cJSON_AddItemToObject(root, field->string, cJSON_Duplicate(field, 1));
-                }
-            }
-        }
-    }
+    opt_attach(root, manager);
+    tools_attach(root, manager->tools_json);
+    cJSON_AddItemToObject(root, "messages", msgs_build(manager));
+    extra_merge(root, extra_json);
 
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return json;
+}
+
+/* 单条 choice 的 message 段：四个字段各自独立可选，缺省留 NULL。 */
+static void msg_load(llm_message_t *dst, const cJSON *message)
+{
+    if (!message)
+        return;
+
+    const cJSON *role = cJSON_GetObjectItem(message, "role");
+    const cJSON *content = cJSON_GetObjectItem(message, "content");
+    const cJSON *reasoning = cJSON_GetObjectItem(message, "reasoning_content");
+    const cJSON *tool_calls = cJSON_GetObjectItem(message, "tool_calls");
+
+    if (cJSON_IsString(role) && role->valuestring)
+        dst->role = AIRY_STRDUP(role->valuestring);
+    if (cJSON_IsString(content) && content->valuestring)
+        dst->content = AIRY_STRDUP(content->valuestring);
+    if (cJSON_IsString(reasoning) && reasoning->valuestring)
+        dst->reasoning_content = AIRY_STRDUP(reasoning->valuestring);
+    if (cJSON_IsArray(tool_calls) && cJSON_GetArraySize(tool_calls) > 0)
+        dst->tool_calls_json = cJSON_PrintUnformatted(tool_calls);
+}
+
+/* choices 数组整体装载：finish_reason 取首个非空值，与旧行为一致。
+ * 返回 0 成功，-1 表示 choice 数组分配失败（调用方负责释放 resp）。 */
+static int choices_load(llm_response_t *resp, const cJSON *choices)
+{
+    int size = cJSON_GetArraySize(choices);
+
+    resp->choice_count = (size_t)size;
+    resp->choices = (llm_message_t *)AIRY_CALLOC((size_t)size, sizeof(llm_message_t));
+    if (!resp->choices) {
+        SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=oom_choices "
+                      "STACK: prov_parse_chat");
+        return -1;
+    }
+
+    for (int i = 0; i < size; ++i) {
+        cJSON *choice = cJSON_GetArrayItem(choices, i);
+        cJSON *finish = cJSON_GetObjectItem(choice, "finish_reason");
+
+        msg_load(&resp->choices[i], cJSON_GetObjectItem(choice, "message"));
+        if (!resp->finish_reason && cJSON_IsString(finish) && finish->valuestring)
+            resp->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(finish->valuestring));
+    }
+    return 0;
 }
 
 int prov_parse_chat(const char *body, llm_response_t **out)
@@ -148,50 +225,9 @@ int prov_parse_chat(const char *body, llm_response_t **out)
     }
 
     cJSON *choices = cJSON_GetObjectItem(root, "choices");
-    if (cJSON_IsArray(choices)) {
-        int size = cJSON_GetArraySize(choices);
-        resp->choice_count = (size_t)size;
-        resp->choices = (llm_message_t *)AIRY_CALLOC((size_t)size, sizeof(llm_message_t));
-
-        if (!resp->choices) {
-            SVC_LOG_ERROR("C-L02: PROVIDER: PARSE-FAIL reason=oom_choices "
-                          "STACK: prov_parse_chat");
-
-            llm_response_free(resp);
-            return AIRY_ERR_OUT_OF_MEMORY;
-        }
-
-        for (int i = 0; i < size; ++i) {
-            cJSON *choice = cJSON_GetArrayItem(choices, i);
-            cJSON *message = cJSON_GetObjectItem(choice, "message");
-            if (message) {
-                cJSON *role = cJSON_GetObjectItem(message, "role");
-                cJSON *content = cJSON_GetObjectItem(message, "content");
-                if (cJSON_IsString(role) && role->valuestring) {
-                    resp->choices[i].role = AIRY_STRDUP(role->valuestring);
-                }
-                if (cJSON_IsString(content) && content->valuestring) {
-                    resp->choices[i].content = AIRY_STRDUP(content->valuestring);
-                }
-
-                cJSON *reasoning = cJSON_GetObjectItem(message, "reasoning_content");
-                if (cJSON_IsString(reasoning) && reasoning->valuestring) {
-                    resp->choices[i].reasoning_content = AIRY_STRDUP(reasoning->valuestring);
-                }
-
-                cJSON *tool_calls = cJSON_GetObjectItem(message, "tool_calls");
-                if (cJSON_IsArray(tool_calls) && cJSON_GetArraySize(tool_calls) > 0) {
-                    char *tc_json = cJSON_PrintUnformatted(tool_calls);
-                    if (tc_json) {
-                        resp->choices[i].tool_calls_json = tc_json;
-                    }
-                }
-            }
-            cJSON *finish = cJSON_GetObjectItem(choice, "finish_reason");
-            if (cJSON_IsString(finish) && finish->valuestring && !resp->finish_reason) {
-                resp->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(finish->valuestring));
-            }
-        }
+    if (cJSON_IsArray(choices) && choices_load(resp, choices) != 0) {
+        llm_response_free(resp);
+        return AIRY_ERR_OUT_OF_MEMORY;
     }
 
     provider_usage_load(cJSON_GetObjectItem(root, "usage"), &resp->prompt_tokens,
