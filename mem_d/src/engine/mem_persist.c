@@ -25,12 +25,6 @@
 #include <string.h>
 #include <time.h>
 
-/* windows.h: MoveFileExA in the atomic-rename fallback below. */
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#endif
-
 #define MEM_JSONL_FILENAME "mem.jsonl"
 
 /* ── JSON escape helper ──────────────────────────────────────────────── */
@@ -144,11 +138,7 @@ typedef bool (*mem_sink_t)(FILE *f, void *ctx);
 
 static bool mem_rename_over(const char *tmp, const char *path)
 {
-#ifndef _WIN32
-    return rename(tmp, path) == 0;
-#else
-    return MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING) != 0;
-#endif
+    return airy_file_rename(tmp, path) == 0;
 }
 
 /* Write a whole file through @p sink so a crash mid-write never truncates an
