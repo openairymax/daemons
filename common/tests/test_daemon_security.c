@@ -8,10 +8,25 @@
 #include "../include/daemon_security.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(_WIN32)
+#include <direct.h>
+#include <process.h>
+#define AIRY_TEST_MKDIR(p) _mkdir(p)
+#define AIRY_TEST_SETENV(k, v) _putenv_s((k), (v))
+#define AIRY_TEST_PID ((int)_getpid())
+#else
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
+#define AIRY_TEST_MKDIR(p) mkdir((p), 0700)
+#define AIRY_TEST_SETENV(k, v) setenv((k), (v), 1)
+#define AIRY_TEST_PID ((int)getpid())
+#endif
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -37,6 +52,64 @@ static int tests_passed = 0;
             FAIL(msg);    \
         }                 \
     } while (0)
+
+/* P-F：夹具必须自带安装根。daemon_security_init() 未给 audit_log_dir 时
+ * 把审计路径回落为 $AIRY_HOME/data/agentrt/logs/daemon_audit.log；此前
+ * 夹具直写宿主 ~/.airymaxrt，单测事件混进真实审计日志（r86 取证：493 条
+ * FAILED 全部来自本文件）。此处以 PID 建隔离根并预建日志目录，事件只落
+ * 在临时根内，审计文件本身也可以被断言。
+ * 注意：必须在任何 airy_* 路径解析之前设置 AIRY_HOME——路径系统首次
+ * 调用即缓存解析结果，晚设置不会生效。 */
+static char g_home[512];
+
+static int t_mkdir(const char *path)
+{
+    return (AIRY_TEST_MKDIR(path) != 0 && errno != EEXIST) ? -1 : 0;
+}
+
+static void t_audit_path(char *out, size_t cap)
+{
+    snprintf(out, cap, "%s/data/agentrt/logs/daemon_audit.log", g_home);
+}
+
+static int t_home_init(void)
+{
+    const char *base = getenv("TMPDIR");
+    char dir[600];
+
+    if (!base || base[0] == '\0')
+        base = getenv("TEMP");
+    if (!base || base[0] == '\0')
+        base = "/tmp";
+    snprintf(g_home, sizeof(g_home), "%s/svc_sec_%d", base, AIRY_TEST_PID);
+    if (t_mkdir(g_home) != 0)
+        return -1;
+    snprintf(dir, sizeof(dir), "%s/data", g_home);
+    if (t_mkdir(dir) != 0)
+        return -1;
+    snprintf(dir, sizeof(dir), "%s/data/agentrt", g_home);
+    if (t_mkdir(dir) != 0)
+        return -1;
+    snprintf(dir, sizeof(dir), "%s/data/agentrt/logs", g_home);
+    if (t_mkdir(dir) != 0)
+        return -1;
+    t_audit_path(dir, sizeof(dir));
+    remove(dir);
+    return AIRY_TEST_SETENV("AIRY_HOME", g_home) == 0 ? 0 : -1;
+}
+
+static int t_file_has(const char *path, const char *needle)
+{
+    char buf[4096];
+    FILE *fp = fopen(path, "r");
+
+    if (!fp)
+        return 0;
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    buf[n] = '\0';
+    return strstr(buf, needle) != NULL;
+}
 
 static void test_init_null_config(void)
 {
@@ -178,6 +251,12 @@ static void test_audit_log_event(void)
     ASSERT(ret == 0, "audit failure event should succeed");
 
     daemon_security_shutdown();
+
+    /* 审计事件必须真实落盘到隔离安装根，而不是只返回成功码 */
+    char audit[600];
+    t_audit_path(audit, sizeof(audit));
+    ASSERT(t_file_has(audit, "operation=query_failed"),
+           "audit log must contain the failure event on disk");
     PASS();
 }
 
@@ -220,9 +299,10 @@ static void test_init_with_config(void)
 static void test_rules_file_loading(void)
 {
     TEST("Load tool permission rules file");
-    /* CI-2：PID 隔离，避免 ctest -j 并行互踩 */
-    char path[256];
-    snprintf(path, sizeof(path), "/tmp/airy_test_permission_rules_%d.yaml", (int)getpid());
+    /* CI-2：PID 隔离，避免 ctest -j 并行互踩；文件落在隔离安装根内，
+     * 不再假设 Windows 上存在 /tmp。 */
+    char path[600];
+    snprintf(path, sizeof(path), "%s/rules_%d.yaml", g_home, AIRY_TEST_PID);
     FILE *fp = fopen(path, "w");
     ASSERT(fp != NULL, "cannot create temp rules file");
     fputs("rules:\n"
@@ -263,6 +343,11 @@ static void test_rules_file_loading(void)
 int main(void)
 {
     printf("\n=== Daemon Security Module Unit Tests ===\n\n");
+
+    if (t_home_init() != 0) {
+        printf("[FAIL] cannot prepare isolated AIRY_HOME (%s)\n", g_home);
+        return 1;
+    }
 
     test_init_null_config();
     test_double_init();
