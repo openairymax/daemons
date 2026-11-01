@@ -39,6 +39,7 @@
 
 #include <cjson/cJSON.h>
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +47,15 @@
 #ifndef _WIN32
 #include <sys/stat.h>
 #include <unistd.h>
+#define E2E_MKDIR(p) mkdir((p), 0700)
+#define E2E_RMDIR(p) rmdir(p)
+#define E2E_SETENV(k, v) setenv((k), (v), 1)
+#else
+#include <direct.h>
+#include <process.h>
+#define E2E_MKDIR(p) _mkdir(p)
+#define E2E_RMDIR(p) _rmdir(p)
+#define E2E_SETENV(k, v) _putenv_s((k), (v))
 #endif
 
 #ifndef CHECK
@@ -64,6 +74,56 @@ static char g_e2e_dir[256];
 static char g_e2e_file[256];
 #define E2E_DIR  g_e2e_dir
 #define E2E_FILE g_e2e_file
+
+/* P-I：夹具自带安装根。daemon_security_init() 在 config=NULL 时把审计路径
+ * 回落 $AIRY_HOME/data/agentrt/logs/daemon_audit.log；此前未设 AIRY_HOME，
+ * 用例事件直写宿主 ~/.airymaxrt，真实审计日志被测试数据污染。须在任何
+ * airy_* 调用之前设置：路径系统首次解析即缓存结果，事后设置不生效。 */
+static char g_home[512];
+
+static int e2e_mkdir(const char *path)
+{
+    return (E2E_MKDIR(path) != 0 && errno != EEXIST) ? -1 : 0;
+}
+
+static int e2e_home_init(void)
+{
+    const char *base = getenv("TMPDIR");
+    char dir[600];
+
+    if (!base || base[0] == '\0')
+        base = getenv("TEMP");
+    if (!base || base[0] == '\0')
+        base = "/tmp";
+    snprintf(g_home, sizeof(g_home), "%s/airy_it_fs_e2e_%d", base, (int)getpid());
+    if (e2e_mkdir(g_home) != 0)
+        return -1;
+    snprintf(dir, sizeof(dir), "%s/data", g_home);
+    if (e2e_mkdir(dir) != 0)
+        return -1;
+    snprintf(dir, sizeof(dir), "%s/data/agentrt", g_home);
+    if (e2e_mkdir(dir) != 0)
+        return -1;
+    snprintf(dir, sizeof(dir), "%s/data/agentrt/logs", g_home);
+    if (e2e_mkdir(dir) != 0)
+        return -1;
+    return E2E_SETENV("AIRY_HOME", g_home) == 0 ? 0 : -1;
+}
+
+static void e2e_home_clean(void)
+{
+    char dir[600];
+
+    snprintf(dir, sizeof(dir), "%s/data/agentrt/logs/daemon_audit.log", g_home);
+    remove(dir);
+    snprintf(dir, sizeof(dir), "%s/data/agentrt/logs", g_home);
+    E2E_RMDIR(dir);
+    snprintf(dir, sizeof(dir), "%s/data/agentrt", g_home);
+    E2E_RMDIR(dir);
+    snprintf(dir, sizeof(dir), "%s/data", g_home);
+    E2E_RMDIR(dir);
+    E2E_RMDIR(g_home);
+}
 
 /* coding 场景：Agent 创建的一个 C 源文件 */
 static const char kSource[] =
@@ -531,6 +591,12 @@ int main(void)
     /* T16: 文件工具 workspace 围堵的沙箱根（先于任何工具调用设置） */
     setenv("AIRY_TOOL_SANDBOX_WORKSPACE", E2E_DIR, 1);
 
+    /* P-I：审计事件只落临时安装根，须先于任何 airy_* 调用完成路径解析。 */
+    if (e2e_home_init() != 0) {
+        fprintf(stderr, "cannot create isolated AIRY_HOME\n");
+        return 1;
+    }
+
     /* 初始化安全域（fail-closed ACL 的宿主） */
     CHECK(daemon_security_init(NULL, NULL) == 0);
 
@@ -554,6 +620,8 @@ int main(void)
     test_e2e_path_contract(svc);
 
     tool_service_destroy(svc);
+
+    e2e_home_clean();
 
     printf("\n=== 结果：%d/%d 通过 ===\n", g_checks - g_fails, g_checks);
     return g_fails == 0 ? 0 : 1;
