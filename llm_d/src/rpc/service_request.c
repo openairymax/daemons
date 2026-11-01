@@ -281,6 +281,26 @@ static void cache_store(llm_service_t *svc, const char *key, const char *text, c
  *        模型声明上限 / 引擎默认"三处来源收敛为一次判定。显式值是意图，
  *        上限是边界：意图越界按边界截断，未声明意图取边界，均无则保持未设。
  */
+gen_bound_src_t gen_bound_src(int explicit_max, int resolved)
+{
+    if (resolved <= 0)
+        return GEN_BOUND_NONE;
+    if (explicit_max > 0 && explicit_max == resolved)
+        return GEN_BOUND_REQ;
+    return GEN_BOUND_MODEL;
+}
+
+/* 上限字段文本：未设上限记 "none" 而非 0——0 与"显式配了 0"无法区分，
+ * 日志字段必须自洽，否则排障时误读为"上限被配成 0"。 */
+static const char *cap_text(int cap, char *buf, size_t size)
+{
+    if (cap > 0)
+        snprintf(buf, size, "%d", cap);
+    else
+        AIRY_STRNCPY_TERM(buf, "none", size);
+    return buf;
+}
+
 void resolve_gen_params(const llm_service_t *svc, const provider_t *prov,
                         const llm_request_config_t *manager, char *out_model, size_t model_size,
                         int *out_max_tokens)
@@ -305,19 +325,32 @@ void resolve_gen_params(const llm_service_t *svc, const provider_t *prov,
         SVC_LOG_WARN("C-L02: SVC: max_tokens=%d exceeds the cap (%d) of model=%s — clipped", want,
                      limit, model);
     } else if (resolved > 0) {
-        SVC_LOG_INFO("C-L02: SVC: max_tokens=%d resolved for model=%s (explicit=%d, cap=%d)",
-                     resolved, model, want, limit);
+        char cap_buf[16];
+        SVC_LOG_INFO("C-L02: SVC: max_tokens=%d resolved for model=%s (explicit=%d, cap=%s)",
+                     resolved, model, want, cap_text(limit, cap_buf, sizeof(cap_buf)));
     }
 }
 
-/* 0.1.17：上游因输出上限截断必须可判读，否则表现为"回答莫名中断"。 */
-static void note_truncation(const llm_response_t *resp, const char *model, int max_tokens)
+/* 0.1.17：上游因输出上限截断必须可判读，否则表现为"回答莫名中断"。
+ * P-E：上限归因决定建议指向——调用方显式设的上限（如 1-token 冒烟探针）
+ * 被兑现不是配置缺陷，不应每请求 WARN 并误导去改 model.yaml；只有模型/
+ * 引擎给出的边界才需要提示调高 max_output。 */
+static void note_truncation(const llm_response_t *resp, const char *model, int max_tokens,
+                            int explicit_max)
 {
-    if (resp && llm_finish_is_truncated(resp->finish_reason)) {
-        SVC_LOG_WARN("C-L02: SVC: output truncated at max_tokens=%d (model=%s) — raise the model "
-                     "max_output in model.yaml or shorten the request",
+    if (!resp || !llm_finish_is_truncated(resp->finish_reason))
+        return;
+
+    if (gen_bound_src(explicit_max, max_tokens) == GEN_BOUND_REQ) {
+        SVC_LOG_INFO("C-L02: SVC: output truncated at max_tokens=%d (model=%s) — this bound "
+                     "came from the request; raise the caller max_tokens for a longer answer",
                      max_tokens, model ? model : "?");
+        return;
     }
+
+    SVC_LOG_WARN("C-L02: SVC: output truncated at max_tokens=%d (model=%s) — raise the model "
+                 "max_output in model.yaml or shorten the request",
+                 max_tokens, model ? model : "?");
 }
 
 /* 累计用量并回填单次成本。持久化走聚合窗口：dirty 且到阈值/间隔才写，
@@ -504,7 +537,7 @@ static int complete_impl(llm_service_t *svc, const llm_request_config_t *manager
         return ret;
     }
 
-    note_truncation(resp, hit.model, hit.max_tokens);
+    note_truncation(resp, hit.model, hit.max_tokens, manager->max_tokens);
     update_cost_tracking(svc, hit.model, resp);
 
     /* 写入键改用实际模型：同一逻辑请求换端点后答案不可互相冒充（H8）。 */
@@ -571,7 +604,7 @@ static int stream_impl(llm_service_t *svc, const llm_request_config_t *manager,
         return ret;
 
     if (resp) {
-        note_truncation(resp, hit.model, hit.max_tokens);
+        note_truncation(resp, hit.model, hit.max_tokens, manager->max_tokens);
         update_cost_tracking(svc, hit.model, resp);
     }
 
