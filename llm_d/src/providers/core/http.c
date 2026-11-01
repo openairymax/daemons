@@ -16,6 +16,7 @@
 #include "provider_http.h"
 #include "provider_retry.h"
 #include "svc_logger.h"
+#include "sync.h"
 
 #include <curl/curl.h>
 #include <errno.h>
@@ -421,6 +422,19 @@ static struct curl_slist *headers_add_extra(struct curl_slist *headers, const ch
     return headers;
 }
 
+/* R-1：未配置密钥的正常形态（本地无鉴权端点走 PROVIDER_AUTH_NONE，但云
+ * 端点漏配 api_key 时每次请求都会走到这里）。逐请求重复告警只会淹没日志、
+ * 失去诊断价值，故同一端点进程内只记一次；首次记录保留完整 api_base 与
+ * 处置提示，后续请求静默。CAS 闩无锁，不与任何既有锁构成反序。 */
+static void note_no_key(provider_base_ctx_t *base)
+{
+    if (!sync_atomic_cas(&base->unauth_logged, 0, 1))
+        return;
+    SVC_LOG_INFO("C-L02: PROVIDER: no API key configured for api_base=%s — sending "
+                 "unauthenticated requests (reported once per endpoint)",
+                 base->api_base);
+}
+
 /* 头链装配 SSoT（B16-S3.1）：鉴权样式 + Content-Type + 端点附加头。适配层
  * 只声明 provider_header_spec_t，拼装、鉴权缓冲擦除与头链释放全部由本件兜住
  * （provider_http_exec 出口统一 free），故适配层不出现任何 curl_* 调用。 */
@@ -441,10 +455,9 @@ static struct curl_slist *provider_headers_build(const provider_base_ctx_t *base
         } else {
             /* R-1：未配置密钥时不拼空凭据——部分网关会因空 Bearer 返回难以定位
              * 的 400/401。无鉴权的本地端点用 PROVIDER_AUTH_NONE，不进本分支，
-             * 因此不会产生本告警噪音。 */
-            SVC_LOG_WARN("C-L02: PROVIDER: no API key configured, sending unauthenticated "
-                         "request api_base=%s",
-                         base->api_base);
+             * 因此不会产生本告警噪音。去重闩是端点侧的可变簿记（与 inflight
+             * 同类），故此处去 const 后置位。 */
+            note_no_key((provider_base_ctx_t *)base);
         }
     }
 
