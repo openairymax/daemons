@@ -43,6 +43,8 @@ typedef struct {
     int n_ctx_slot;
     int total_slots;
     uintptr_t inflight;
+    /* P-E：未配置密钥告警的进程内去重闩（0=未记，1=已记；CAS 置位）。 */
+    uintptr_t unauth_logged;
 } provider_base_ctx_t;
 
 void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name,
