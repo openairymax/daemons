@@ -250,6 +250,19 @@ static void test_registry_model_cap_lookup(void)
     check_int("lookup.no_table", provider_registry_model_max_output(&no_caps, "m1"), 0);
 }
 
+/* P-E：截断告警按生效上限的来源分流（调用方意图 vs 模型/引擎边界），
+ * 归因写错会把"调用方自己要的 16 token"误报成配置缺陷。 */
+static void test_bound_src(void)
+{
+    check_int("src.request", gen_bound_src(16, 16), GEN_BOUND_REQ);
+    check_int("src.request_large", gen_bound_src(4096, 4096), GEN_BOUND_REQ);
+    check_int("src.model_default", gen_bound_src(0, 1024), GEN_BOUND_MODEL);
+    check_int("src.model_clipped", gen_bound_src(2000, 1024), GEN_BOUND_MODEL);
+    check_int("src.negative_intent", gen_bound_src(-1, 4096), GEN_BOUND_MODEL);
+    check_int("src.none", gen_bound_src(0, 0), GEN_BOUND_NONE);
+    check_int("src.none_with_intent", gen_bound_src(16, 0), GEN_BOUND_NONE);
+}
+
 int main(void)
 {
     printf("running resolve_gen_params / model-cap regression\n");
@@ -262,6 +275,7 @@ int main(void)
     test_model_fallback();
     test_null_provider();
     test_registry_model_cap_lookup();
+    test_bound_src();
 
     if (fail_count == 0) {
         printf("All %d gen-params assertions passed\n", test_count);
