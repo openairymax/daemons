@@ -166,8 +166,12 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
 
     log_config_t log_cfg = {0};
     const char *dbg = getenv(boot->env_debug);
+    /* P-E：缺省级别为 INFO 而非 WARN。受管守护的 stdout/stderr 由 supervisor
+     * 重定向到 logs/<daemon>.out，WARN 缺省会吞掉启动期全部 INFO（core 就绪、
+     * 监听地址、方法数、running），使 7 路 <daemon>_d.out 恒为 0 字节——文件
+     * 在而内容空，排障时比没有文件更误导。收紧仍可由 AIRY_LOG_LEVEL 覆盖。 */
     log_cfg.level =
-        (dbg && dbg[0] == '1') ? LOG_LEVEL_DEBUG : LOG_LEVEL_WARN;
+        (dbg && dbg[0] == '1') ? LOG_LEVEL_DEBUG : LOG_LEVEL_INFO;
     log_cfg.outputs = (1u << LOG_OUTPUT_CONSOLE);
     log_init(&log_cfg);
     atexit(log_cleanup);
