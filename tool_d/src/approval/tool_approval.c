@@ -126,8 +126,12 @@ static void ap_take_san(tool_approval_detail_t *detail, int ok, const char *san)
 static int ap_deny(tool_approval_ctx_t *ctx, const char *agent_id, const char *tool_name)
 {
     atomic_fetch_add_explicit(&ctx->denied_count, 1, memory_order_relaxed);
+    /* 审计 SSoT：result == 0 才是 SUCCESS（daemon_security_audit.c）。拒绝
+     * 必须落非 0，否则审计面把 denied 记成 [SUCCESS]；这里沿用函数返回的
+     * 同一错误码，审计与调用方看到的是同一个语义，不新增常量。 */
     if (ctx->config.enable_audit_logging)
-        daemon_audit_log_event("tool_d", "tool_execute_denied", tool_name, 0, agent_id);
+        daemon_audit_log_event("tool_d", "tool_execute_denied", tool_name,
+                               AIRY_ERR_PERMISSION_DENIED, agent_id);
     return AIRY_ERR_PERMISSION_DENIED;
 }
 
@@ -231,8 +235,9 @@ static int ap_local(tool_approval_ctx_t *ctx, const char *agent_id, const char *
         if (ctx->config.enable_safety_guard_chain)
             detail->safety_guard_passed = 1;
     }
+    /* 审计 SSoT 同 ap_deny：成功路径必须落 0（原 1 会被记成 [FAILED]）。 */
     if (ctx->config.enable_audit_logging)
-        daemon_audit_log_event("tool_d", "tool_execute", tool_name, 1, agent_id);
+        daemon_audit_log_event("tool_d", "tool_execute", tool_name, 0, agent_id);
     if (detail) {
         detail->decision = detail->params_were_sanitized ? TOOL_APPROVAL_SANITIZED
                                                          : TOOL_APPROVAL_ALLOWED;
