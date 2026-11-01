@@ -37,6 +37,23 @@ void resolve_gen_params(const llm_service_t *svc, const provider_t *prov,
                         const llm_request_config_t *manager, char *out_model, size_t model_size,
                         int *out_max_tokens);
 
+/* 生效输出上限的来源：截断告警据此给出可行动的处置建议。 */
+typedef enum {
+    GEN_BOUND_NONE = 0, /* 未设上限（0，交上游默认） */
+    GEN_BOUND_REQ,      /* 调用方显式意图 */
+    GEN_BOUND_MODEL     /* 模型声明上限或引擎默认 */
+} gen_bound_src_t;
+
+/**
+ * @brief 归因生效上限（纯函数，便于单测）：显式值 >0 且未被边界改写
+ *        （resolved == explicit）归调用方；resolved <= 0 表示未设上限；
+ *        其余归模型声明上限或引擎默认。
+ *
+ * @param explicit_max 调用方请求的 max_tokens（<=0 表示未声明）
+ * @param resolved     resolve_gen_params 实际下传的 max_tokens
+ */
+gen_bound_src_t gen_bound_src(int explicit_max, int resolved);
+
 #ifdef __cplusplus
 }
 #endif
