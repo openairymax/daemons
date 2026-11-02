@@ -13,6 +13,7 @@
 #ifndef AIRY_THINK_ORCH_INTERNAL_H
 #define AIRY_THINK_ORCH_INTERNAL_H
 
+#include "airy_defaults.h"
 #include "airy_memory.h"
 #include "error.h"
 #include "think_service.h"
@@ -33,7 +34,10 @@
  * pthread_create），wave-1（daemons/svc）同型收敛。 */
 #include <platform.h>
 
-#define THINK_DEFAULT_TIMEOUT_MS 120000u
+/* think/orchestrate 超时缺省：SSoT 在 commons airy_defaults.h（与
+ * think_d svc.c、airy_cli /orch 客户端共用），运行时被 model.yaml
+ * [think] timeout_ms / env AIRY_THINK_TIMEOUT_MS 覆盖。 */
+#define THINK_DEFAULT_TIMEOUT_MS AIRY_THINK_TIMEOUT_DEFAULT_MS
 #define THINK_DEFAULT_MAX_EVENTS 64u
 #define THINK_MAX_EVENT_DATA_LEN 1024u
 #define THINK_ORCH_MAX_RUNS 32u
