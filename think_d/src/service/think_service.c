@@ -283,12 +283,11 @@ static void think_eng_bind(think_service_t *svc, const think_service_config_t *c
 }
 
 /* 认知引擎装配（adapter -> planner -> engine -> 接线）。
- * plan_strategy injects the reactive planner (llm=NULL uses heuristics);
- * otherwise airy_cognition_process's Phase 1 planning returns EUNKNOWN
- * (plan_strat stays empty). §271: factory comes from the injected plan ops
- * table; ops absent -> NULL -> engine starts bare (BAN-257, process-time
- * STATE_ERROR fail fast); ops present but factory fails -> assembly defect,
- * fail fast here. 失败路径就地回滚后返回 NULL。 */
+ * plan ops 提供 reactive planner 工厂（llm=NULL 走启发式）；§271：工厂
+ * 来自注入的 plan ops 表。BAN-257（T-20）：ops 缺席或工厂失败一律在装配
+ * 期 fail fast、拒绝创建服务——裸引擎（无规划策略）只会在 process 期以
+ * STATE_ERROR 爆炸，偏离配置缺陷现场；与 tc/mc 缺席即 create fail-fast
+ * 契约对齐。失败路径就地回滚后返回 NULL。 */
 static think_service_t *think_init_eng(think_service_t *svc,
                                        const think_service_config_t *config)
 {
@@ -313,15 +312,13 @@ static think_service_t *think_init_eng(think_service_t *svc,
     plan_strat =
         (plan_ops && plan_ops->create_reactive) ? plan_ops->create_reactive(NULL) : NULL;
     if (!plan_strat) {
-        if (plan_ops) {
-            SVC_LOG_ERROR("ThinkDual: reactive planner create failed");
-            think_svc_drop(svc);
-            AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "planner create failed");
-        }
-        SVC_LOG_WARN("ThinkDual: plan ops absent, engine starts bare (BAN-257)");
+        SVC_LOG_ERROR("ThinkDual: plan strategy unavailable (%s), refusing bare "
+                      "engine (BAN-257)",
+                      plan_ops ? "factory failed" : "ops not injected");
+        think_svc_drop(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "plan strategy unavailable");
     }
-    if (plan_strat)
-        SVC_LOG_INFO("ThinkDual: reactive planner created (plan=%p)", (void *)plan_strat);
+    SVC_LOG_INFO("ThinkDual: reactive planner created (plan=%p)", (void *)plan_strat);
 
     __builtin_memset(&cfg, 0, sizeof(cfg));
     cfg.cognition_default_timeout_ms = svc->process_timeout_ms;
