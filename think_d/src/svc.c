@@ -11,6 +11,7 @@
  * 内置缺省——daemon_ep_load（JSON）先行，model.yaml 与 env 顺序在后。
  */
 
+#include "airy_defaults.h"
 #include "airy_memory.h"
 #ifdef AIRY_HAS_COGNITION_STRATEGY
 #include "cog_review_strategy.h"
@@ -125,7 +126,7 @@ static void cfg_keys(const cJSON *root, void *ud)
 
 static void cfg_load(const char *config_path)
 {
-    g_cfg.process_timeout_ms = 120000;
+    g_cfg.process_timeout_ms = AIRY_THINK_TIMEOUT_DEFAULT_MS;
     g_cfg.think_enabled = 1;
 
     /* 机制件：端点基线 + config 文件覆盖 + cfg_keys 派发（JSON 层，
@@ -238,8 +239,8 @@ int svc_prepare(const char *config_path)
 
     /* M5-4 §271：注入规划策略载荷 ops（products/cognition 策略载荷），
      * 装配层 loop/think_service 经 are_ops_get_plan() 分发 reactive/
-     * reflective 工厂；缺席时装配层跳过注入、引擎裸启动（BAN-257，
-     * process 期 STATE_ERROR fail fast）。 */
+     * reflective 工厂；缺席时装配层拒绝创建服务（BAN-257 装配期
+     * fail fast，think_init_eng 拒绝裸引擎，与 tc/mc 契约对齐）。 */
     are_ops_set_plan(cog_payload_plan());
 #endif
 
