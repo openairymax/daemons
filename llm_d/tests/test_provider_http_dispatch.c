@@ -28,6 +28,8 @@
  *      CONNECT_ONLY——收发中断不重发，而云端端点策略不变（对照断言）
  *   8. C11 流完整性契约：2xx 且无 data: [DONE] → STREAM_UNDONE（sse 层）；
  *      finish_reason=length/content_filter → 专用码（driver 流末判定）
+ *   9. 读空闲判据按传输形态分策：非流式整段生成期间零字节是正常形态，
+ *      长生成（静默超过读空闲、但仍在总预算内）必须成功而非误报 STALL
  *
  * 平台：daemon 测试在 Windows 整体关闭（daemons/CMakeLists.txt 的 WIN32 门），
  * 故本文件直接使用 POSIX socket/pthread，无需跨平台分支。
@@ -50,6 +52,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 /* chat_ops 定义于 adapters/chat.c（内部符号，未在头文件声明），此处 extern。 */
@@ -68,6 +71,7 @@ typedef struct {
     _Atomic int stop;
     _Atomic int drop;        /* 1 = 接受后立即关闭连接（模拟瞬时对端故障） */
     _Atomic int conn_count;  /* 已接受的连接数：用于证明重试真的发生了 */
+    _Atomic int hold_ms;     /* >0 时读完请求后静默等待再回包（模拟长生成） */
     char status_line[64];
     char content_type[64];
     char *body;
@@ -78,6 +82,11 @@ static mock_server_t g_srv;
 static void mock_set_drop(int on)
 {
     g_srv.drop = on;
+}
+
+static void mock_set_hold_ms(int ms)
+{
+    g_srv.hold_ms = ms;
 }
 
 static void mock_set_response(int code, const char *reason, const char *content_type,
@@ -159,6 +168,12 @@ static void mock_serve_one(int fd)
         }
     }
     pthread_mutex_unlock(&g_srv.lock);
+
+    int hold = g_srv.hold_ms;
+    if (hold > 0) {
+        struct timespec ts = {hold / 1000, (long)(hold % 1000) * 1000000L};
+        nanosleep(&ts, NULL);
+    }
 
     if (resp) {
         size_t off = 0;
@@ -770,6 +785,46 @@ static void test_local_endpoint_policy(void)
     mock_set_drop(0);
 }
 
+/* 读空闲判据只对流式成立。非流式请求整段生成期间响应体零字节是正常形态；
+ * 若该形态也按 AIRY_HTTP_READ_IDLE 设 LOW_SPEED_TIME，健康的长生成会在
+ * 读空闲到点后被当作 STALL 提前判死——预算还有富余却被报成"上游停摆"。
+ * 本例令对端读完请求后静默 9s、读空闲置 1s、总预算 20s：判据开启时 libcurl
+ * 在约 7s 判死（实测其读空闲判据滞后于 LOW_SPEED_TIME 约 6s），关闭则必须
+ * 成功。静默窗口取 9s 是为了与实测判死时刻留出余量。 */
+static void test_nonstream_read_idle_off(void)
+{
+    printf("  nonstream long generation outlives read-idle window...\n");
+
+    mock_set_response(200, "OK", "application/json", OK_BODY);
+    mock_set_hold_ms(9000);
+    assert(setenv("AIRY_HTTP_READ_IDLE", "1", 1) == 0);
+
+    char base[128];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d/v1", g_srv.port);
+
+    provider_ctx_t *ctx = chat_ops.init("openai", "", base, NULL, 20.0, 1);
+    assert(ctx != NULL);
+    llm_message_t msg;
+    llm_request_config_t cfg;
+    cfg_init(&cfg, &msg);
+
+    llm_response_t *resp = NULL;
+    int ret = chat_ops.complete(ctx, &cfg, &resp);
+
+    printf("    ret=%d expect=%d\n", ret, AIRY_OK);
+    assert(ret == AIRY_OK);
+    assert(resp != NULL);
+    assert(resp->choice_count == 1);
+    assert(strcmp(resp->choices[0].content, "pong") == 0);
+
+    if (resp)
+        llm_response_free(resp);
+    chat_ops.destroy(ctx);
+
+    mock_set_hold_ms(0);
+    unsetenv("AIRY_HTTP_READ_IDLE");
+}
+
 static void test_unreachable_is_io(void)
 {
     printf("  nonstream connection-refused -> IO...\n");
@@ -849,6 +904,9 @@ int main(void)
     /* N-1/N-2：出网传输策略 SSoT 的分诊与代理注入。 */
     test_http_diag_map();
     test_proxy_env_injected();
+
+    /* T-16：读空闲判据按传输形态分策，非流式长生成不得误报 STALL。 */
+    test_nonstream_read_idle_off();
 
     /* N-3/N-4：重试策略 SSoT，以及瞬时故障下"重试真的发生"。 */
     test_retry_policy();
