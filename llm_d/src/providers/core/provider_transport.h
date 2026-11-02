@@ -26,7 +26,10 @@ typedef struct {
     size_t capacity;
 } provider_http_resp_t;
 
-/* 出网传输策略：连接/总超时、读空闲、代理、自定义 CA、重定向与证书校验。 */
+/* 出网传输策略：连接/总超时、读空闲、代理、自定义 CA、重定向与证书校验。
+ * read_idle_sec 由调用方声明本传输形态的产出节律：流式传
+ * PROVIDER_READ_IDLE_SEC（可被 AIRY_HTTP_READ_IDLE 覆盖）；非流式传 0，
+ * 表示整段生成期间零字节是正常形态，读空闲判据关闭，仅由总预算兜底。 */
 void provider_http_setup(CURL *curl, double timeout_sec, double read_idle_sec);
 
 /* 超时成因归类（超时三拆的传输侧判据）：总耗时已贴近整轮预算判 TOTAL；

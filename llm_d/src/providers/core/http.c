@@ -58,8 +58,8 @@ static size_t http_write_callback(void *contents, size_t size, size_t nmemb, voi
 
 /* 连接阶段与读空闲的缺省值见 provider_transport.h。连接超时不设的后果是
  * "网络总接不通"：DNS 无应答或 TCP SYN 被丢弃时 libcurl 会一直等到总预算
- * 耗尽；读空闲不设的后果是"连接活着但上游不再产出"被当作成功回复——这是
- * 比超时更难发现的一类错误。两者都可按环境变量覆盖。 */
+ * 耗尽；流式读空闲不设的后果是"连接活着但上游不再产出"被当作成功回复——
+ * 这是比超时更难发现的一类错误。两者都可按环境变量覆盖。 */
 static const char *env_first_set(const char *const *names, size_t count)
 {
     for (size_t i = 0; i < count; ++i) {
@@ -86,20 +86,29 @@ void provider_http_setup(CURL *curl, double timeout_sec, double read_idle_sec)
 
     long total_sec = (long)timeout_sec;
     long connect_sec = env_long("AIRY_HTTP_CONNECT_TIMEOUT", (long)PROVIDER_CONNECT_TIMEOUT_SEC);
-    double idle = read_idle_sec > 0.0 ? read_idle_sec : PROVIDER_READ_IDLE_SEC;
-    long idle_sec = env_long("AIRY_HTTP_READ_IDLE", (long)idle);
 
     if (total_sec > 0 && connect_sec >= total_sec)
         connect_sec = total_sec > 1 ? total_sec - 1 : 1;
-    /* 读空闲须严格早于总预算，否则停滞永远由总预算先判定，STALL 计数失效。 */
-    if (total_sec > 0 && idle_sec >= total_sec)
-        idle_sec = total_sec > 1 ? total_sec - 1 : 1;
 
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, total_sec);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, connect_sec);
-    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
-    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, idle_sec);
+    /* 读空闲判据只对流式成立：流式的产出节律就是上游是否活着，零字节
+     * 持续即停摆。非流式请求整段生成期间响应体零字节是正常形态，此时
+     * 判据只有反作用——健康的长生成被当作 STALL 提前判死，且读空闲被
+     * 钳制为「严格小于总预算」，实际上限反落到总预算上。故调用方以
+     * read_idle_sec <= 0 声明「本形态无产出节律」，此处关闭判据，由
+     * CURLOPT_TIMEOUT 单独兜底。 */
+    if (read_idle_sec <= 0.0) {
+        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 0L);
+    } else {
+        long idle_sec = env_long("AIRY_HTTP_READ_IDLE", (long)read_idle_sec);
+        /* 读空闲须严格早于总预算，否则停滞永远由总预算先判定，STALL 计数失效。 */
+        if (total_sec > 0 && idle_sec >= total_sec)
+            idle_sec = total_sec > 1 ? total_sec - 1 : 1;
+        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, idle_sec);
+    }
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
@@ -205,9 +214,10 @@ static provider_attempt_t http_try(void *ud, int retry, double left_sec, CURLcod
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, ctx->headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, ctx->resp);
-    /* 首试给足全额预算；重试用整轮剩余墙钟，避免单次尝试越过总预算。 */
+    /* 首试给足全额预算；重试用整轮剩余墙钟，避免单次尝试越过总预算。
+     * 非流式响应体在生成结束后一次到达，无产出节律可判，读空闲传 0 关闭。 */
     double budget = retry == 0 ? ctx->timeout_sec : left_sec;
-    provider_http_setup(curl, budget, PROVIDER_READ_IDLE_SEC);
+    provider_http_setup(curl, budget, 0.0);
 
     CURLcode res = curl_easy_perform(curl);
     if (res == CURLE_OK)
@@ -333,7 +343,8 @@ int provider_http_get(const char *url, struct curl_slist *headers, double timeou
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, resp);
-    provider_http_setup(curl, timeout_sec, PROVIDER_READ_IDLE_SEC);
+    /* 健康探测是幂等只读单发，响应即到；读空闲传 0 关闭。 */
+    provider_http_setup(curl, timeout_sec, 0.0);
 
     CURLcode res = curl_easy_perform(curl);
     long http_code = 0;
