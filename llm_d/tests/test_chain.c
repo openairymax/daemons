@@ -5,7 +5,7 @@
  * @file test_chain.c
  * @brief 0.1.19 §3.8.4 A3 调用级链式切换回归
  *
- * 锁定六条容易在后续重构中回退的口径：
+ * 锁定七条容易在后续重构中回退的口径：
  *   1. mode=off 时失败逐字节透传、只尝试一次、不做放行与换端；健康面
  *      仍照常记账（0.1.20 D2-2），否则默认配置下熔断恒不可达
  *   2. 白名单三值可切，BAD_REQUEST 永不切，掩码剔除即不切
@@ -13,6 +13,8 @@
  *   4. 尝试集合去重且有界；候选按优先级降序、成本升序排列
  *   5. 健康面 OPEN 的端点零尝试；未注册端点按可用处理而非拒绝
  *   6. 切换成功后落点按实际模型回填，供缓存键与计费按实际模型记账
+ *   7. 本地端点容量闸以自报槽位为缺省容量，坐满先有界等座再失败（r113
+ *      T-22：单槽兜底会把多槽端点压成单流，立即失败会放大突发抖动）
  *
  * 真实调用以 attempt 闭包注入，不引入任何生产桩：机制件只认闭包，
  * 测试替身仅在测试进程内存在。
@@ -22,10 +24,12 @@
 #include "rpc/service_chain.h"
 
 #include "providers/core/registry.h"
+#include "providers/core/provider_base.h"
 #include "router/core/llm_failover.h"
 #include "router/core/llm_router.h"
 
 #include "error_codes.h"
+#include "platform_misc.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -592,6 +596,97 @@ static void test_run_args(void)
     check_int("args.calls", t.calls, 0);
 }
 
+/* 本地端点 ctx 的最小替身：闸只读首字段 base 的 props_state/total_slots/
+ * inflight，其余适配器上下文不参与。 */
+typedef struct {
+    provider_base_ctx_t base;
+} gate_ctx_t;
+
+static void gate_setup(gate_ctx_t *fc, provider_t *prov, char **models, int *caps, int slots)
+{
+    memset(fc, 0, sizeof(*fc));
+    fc->base.props_state = 1;
+    fc->base.total_slots = slots;
+    memset(prov, 0, sizeof(*prov));
+    prov->name = "gatep";
+    prov->ctx = (provider_ctx_t *)fc;
+    prov->models = models;
+    prov->model_max_concurrent = caps;
+}
+
+/* r113 T-22：未声明 max_concurrent 时容量取端点自报槽位（3），故两槽在座
+ * 仍可放行；旧口径按 1 兜底会等满上限后拒载。成功路径必须退座。 */
+static void test_gate_slots(void)
+{
+    char *ms[] = {"gm", NULL};
+    int caps[] = {0};
+    gate_ctx_t fc;
+    provider_t prov;
+    llm_route_request_t req = make_req();
+    llm_request_config_t mgr;
+    llm_service_t *svc = make_svc();
+    try_t t;
+    svc_hit_t hit;
+    llm_response_t *out = NULL;
+    uint64_t t0;
+    int rc;
+
+    if (!svc)
+        return;
+    memset(&mgr, 0, sizeof(mgr));
+    mgr.model = "gm";
+    memset(&t, 0, sizeof(t));
+    memset(&hit, 0, sizeof(hit));
+    gate_setup(&fc, &prov, ms, caps, 3);
+    fc.base.inflight = 2;
+
+    t0 = airy_time_ms();
+    rc = svc_chain_run(svc, &mgr, &req, &prov, fake_try, &t, NULL, &out, &hit);
+    check_int("gate.slots_rc", rc, 0);
+    check_int("gate.slots_calls", t.calls, 1);
+    check_int("gate.slots_left", (int)fc.base.inflight, 2);
+    check_int("gate.slots_fast", airy_time_ms() - t0 < 500, 1);
+
+    llm_service_destroy(svc);
+}
+
+/* r113 T-22：显式声明的容量优先于槽位数，且坐满走有界等座而非立即失败：
+ * 2 槽声明、2 槽在座，等满上限后仍回 BUSY，且不进入尝试、不误退座。 */
+static void test_gate_wait(void)
+{
+    char *ms[] = {"gm", NULL};
+    int caps[] = {2};
+    gate_ctx_t fc;
+    provider_t prov;
+    llm_route_request_t req = make_req();
+    llm_request_config_t mgr;
+    llm_service_t *svc = make_svc();
+    try_t t;
+    svc_hit_t hit;
+    llm_response_t *out = NULL;
+    uint64_t dt;
+    int rc;
+
+    if (!svc)
+        return;
+    memset(&mgr, 0, sizeof(mgr));
+    mgr.model = "gm";
+    memset(&t, 0, sizeof(t));
+    memset(&hit, 0, sizeof(hit));
+    gate_setup(&fc, &prov, ms, caps, 8);
+    fc.base.inflight = 2;
+
+    uint64_t t0 = airy_time_ms();
+    rc = svc_chain_run(svc, &mgr, &req, &prov, fake_try, &t, NULL, &out, &hit);
+    dt = airy_time_ms() - t0;
+    check_int("gate.wait_rc", rc, AIRY_ERR_BUSY);
+    check_int("gate.wait_calls", t.calls, 0);
+    check_int("gate.wait_left", (int)fc.base.inflight, 2);
+    check_int("gate.wait_bounded", dt >= 1200 && dt < 4000, 1);
+
+    llm_service_destroy(svc);
+}
+
 int main(void)
 {
     char root[128];
@@ -617,6 +712,8 @@ int main(void)
     test_run_sent();
     test_run_hit();
     test_run_args();
+    test_gate_slots();
+    test_gate_wait();
 
     if (fail_count == 0) {
         printf("All %d chain assertions passed\n", test_count);
