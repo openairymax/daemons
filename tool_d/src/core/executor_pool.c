@@ -38,6 +38,8 @@
 #define POOL_WORKER_DEFAULT 2
 #define WAIT_SLACK_MS 2000u
 #define WAIT_SLICE_MS 100u
+#define WAIT_TICK_MS 5000u
+#define QUEUE_WAIT_LOG_MS 200u
 
 typedef struct pool_job {
     tool_metadata_t meta; /* 深拷贝（service 层在返回后即释放原 meta） */
@@ -47,6 +49,8 @@ typedef struct pool_job {
     int ret;
     int done;
     int detached;
+    int started; /* worker 已出队取走（等待方据以报告 queued/running） */
+    uint64_t enqueue_ms; /* 入队时刻（排队/等座可见化的时长基准） */
 } pool_job_t;
 
 struct executor_pool {
@@ -150,7 +154,18 @@ static void *pool_worker(void *arg)
         p->head = (p->head + 1) % POOL_QUEUE_CAP;
         p->count--;
         p->running++;
+        job->started = 1;
+        uint64_t qwait = airy_time_ms() - job->enqueue_ms;
+        int qleft = p->count;
         airy_mtx_unlock(&p->lock);
+
+        /* 排队/等座可见化（社区反馈③）：入队时全忙的 job 在被取走瞬间
+         * 补一条排队时长，使「排队 → 执行」的时间构成在 daemon 日志可
+         * 追溯；立即执行的 job 无排队语义，不打点。 */
+        if (qwait >= QUEUE_WAIT_LOG_MS)
+            SVC_LOG_INFO("executor_pool: '%s' picked up after %llu ms queue wait (queue=%d)",
+                         job->meta.id ? job->meta.id : "?", (unsigned long long)qwait,
+                         qleft);
 
         tool_result_t *res = NULL;
         int ret = tool_executor_run(p->exec, &job->meta, job->params_json, job->agent_id, &res);
@@ -299,7 +314,13 @@ int executor_pool_run(executor_pool_t *p, const tool_metadata_t *meta, const cha
     p->queue[p->tail] = job;
     p->tail = (p->tail + 1) % POOL_QUEUE_CAP;
     p->count++;
+    job->enqueue_ms = airy_time_ms();
+    int queued = p->count > p->worker_count; /* 全忙：本 job 必然排队 */
     airy_cond_signal(&p->work_cond);
+    if (queued)
+        SVC_LOG_INFO("executor_pool: '%s' queued (queue=%d workers=%d) — waiting for a free "
+                     "worker",
+                     meta->id ? meta->id : "?", p->count, p->worker_count);
 
     /* 预算按单调钟实测：cond_timedwait 允许超时过睡（POSIX 语义，
      * macOS 定时器合并 + CI 负载下 100ms 切片可实睡 135ms+），按切片
@@ -307,6 +328,7 @@ int executor_pool_run(executor_pool_t *p, const tool_metadata_t *meta, const cha
      * （取消永不触发）。切片只作唤醒粒度，deadline 以 airy_time_ms
      * 兜底判定。 */
     uint64_t deadline = airy_time_ms() + budget;
+    uint64_t next_tick = airy_time_ms() + WAIT_TICK_MS;
     int canceled = 0;
     while (!job->done) {
         uint64_t now = airy_time_ms();
@@ -314,6 +336,15 @@ int executor_pool_run(executor_pool_t *p, const tool_metadata_t *meta, const cha
             job->detached = 1;
             canceled = 1;
             break;
+        }
+        /* 等待心跳（社区反馈③）：每 5s 报告等待去向（排队/在跑）、已
+         * 等时长与余量，daemon 日志全程可观测，不再静默悬置。 */
+        if (now >= next_tick) {
+            SVC_LOG_INFO("executor_pool: '%s' waiting %llu / %llu ms: %s (queue=%d running=%d)",
+                         meta->id ? meta->id : "?", (unsigned long long)(now - job->enqueue_ms),
+                         (unsigned long long)budget, job->started ? "running" : "queued",
+                         p->count, p->running);
+            next_tick = now + WAIT_TICK_MS;
         }
         uint64_t remain = deadline - now;
         uint32_t slice = (remain > WAIT_SLICE_MS) ? WAIT_SLICE_MS : (uint32_t)remain;
