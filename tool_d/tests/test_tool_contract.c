@@ -118,7 +118,6 @@ static void test_builtin_contract(void)
 
     tool_service_t *svc = tool_service_create(NULL);
     CHECK(svc != NULL);
-    CHECK(tool_contract_n() >= 16);
 
     const tool_contract_t *w = tool_contract_of("fs_write");
     CHECK(w != NULL && w->mkdirs && w->fenced && (w->fx & TOOL_FX_FS));
@@ -133,7 +132,9 @@ static void test_builtin_contract(void)
     cJSON *arr = cJSON_Parse(json);
     free(json);
     CHECK(arr != NULL);
-    CHECK(cJSON_GetArraySize(arr) == 16);
+    /* 目录条数即契约表条数（SSoT 关系断言）：加工具不应让测试过期，
+     * 真正的守护是"每个登记内置工具都必须有契约行"。 */
+    CHECK((size_t)cJSON_GetArraySize(arr) == tool_contract_n());
 
     tool_contract_env_t env;
     CHECK(tool_contract_env(&env) == 0);

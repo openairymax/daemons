@@ -365,6 +365,87 @@ static void test_builtin_catalog_matches_contract(void)
     printf("    PASSED\n");
 }
 
+/**
+ * @brief 替换语义：非 builtin 条目可就地替换，builtin 条目拒绝，缺失报 UNKNOWN。
+ */
+static void test_registry_replace(void)
+{
+    printf("  test_registry_replace...\n");
+
+    tool_registry_t *reg = tool_registry_create(NULL);
+    assert(reg != NULL);
+
+    tool_metadata_t meta;
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
+    meta.id = "dyn_tool";
+    meta.name = "dyn_tool";
+    meta.description = "v1";
+    meta.executable = "/tmp/airy_scripts/dyn_tool";
+    assert(tool_registry_add(reg, &meta) == 0);
+
+    tool_metadata_t meta2;
+    AIRY_MEMSET(&meta2, 0, sizeof(meta2));
+    meta2.id = "dyn_tool";
+    meta2.name = "dyn_tool";
+    meta2.description = "v2";
+    meta2.executable = "/tmp/airy_scripts/dyn_tool";
+    assert(reg_replace(reg, &meta2) == 0);
+
+    tool_metadata_t *got = tool_registry_get(reg, "dyn_tool");
+    assert(got != NULL);
+    assert(strcmp(got->description, "v2") == 0);
+    tool_metadata_free(got);
+
+    tool_metadata_t builtin;
+    AIRY_MEMSET(&builtin, 0, sizeof(builtin));
+    builtin.id = "fs_read";
+    builtin.name = "fs_read";
+    builtin.executable = "builtin:fs_read";
+    assert(tool_registry_add(reg, &builtin) == 0);
+
+    tool_metadata_t hijack;
+    AIRY_MEMSET(&hijack, 0, sizeof(hijack));
+    hijack.id = "fs_read";
+    hijack.name = "fs_read";
+    hijack.executable = "/tmp/airy_scripts/fs_read";
+    assert(reg_replace(reg, &hijack) == AIRY_ERR_PERMISSION_DENIED);
+
+    tool_metadata_t absent;
+    AIRY_MEMSET(&absent, 0, sizeof(absent));
+    absent.id = "no_such_tool";
+    absent.name = "no_such_tool";
+    assert(reg_replace(reg, &absent) != 0);
+
+    tool_registry_destroy(reg);
+    printf("    PASSED\n");
+}
+
+/**
+ * @brief list_json 必须带 executable：agent 侧据此区分内置与动态脚本工具。
+ */
+static void test_registry_list_exec(void)
+{
+    printf("  test_registry_list_exec...\n");
+
+    tool_registry_t *reg = tool_registry_create(NULL);
+    assert(reg != NULL);
+
+    tool_metadata_t meta;
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
+    meta.id = "exec_tool";
+    meta.name = "exec_tool";
+    meta.executable = "/tmp/airy_scripts/exec_tool";
+    assert(tool_registry_add(reg, &meta) == 0);
+
+    char *json = tool_registry_list_json(reg);
+    assert(json != NULL);
+    assert(strstr(json, "\"executable\":\"/tmp/airy_scripts/exec_tool\"") != NULL);
+
+    free(json);
+    tool_registry_destroy(reg);
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=========================================\n");
@@ -381,6 +462,8 @@ int main(void)
     test_registry_null_param();
     test_registry_tool_with_params();
     test_builtin_catalog_matches_contract();
+    test_registry_replace();
+    test_registry_list_exec();
 
     printf("\n✅ All tool registry tests PASSED\n");
     return 0;

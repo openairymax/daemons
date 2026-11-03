@@ -13,6 +13,7 @@
 
 #include "airy_memory.h"
 #include "builtin/builtin_maths_internal.h"
+#include "builtin/builtin_toolmake_internal.h"
 #include "core/tool_contract.h"
 #include "daemon_security.h"
 #include "error.h"
@@ -73,6 +74,46 @@ void tool_service_register_acl_from_env(void)
     }
 }
 
+/* ---------- 会话内自制工具的服务侧动作 ----------
+ * builtin 机制侧只负责校验与落盘，登记与授权留在本域：这里持有服务接口与
+ * ACL 语义，两侧以参数表（tool_param_t）交接，互不包含对方的头文件。 */
+
+#define TOOLMAKE_TIMEOUT_SEC 30
+
+int toolmake_svc_owner(tool_service_t *svc, const char *name, const char *path)
+{
+    tool_metadata_t *exist = tool_service_get(svc, name);
+    if (!exist)
+        return 0;
+    int same = exist->executable && strcmp(exist->executable, path) == 0;
+    tool_metadata_free(exist);
+    return same ? 1 : -1;
+}
+
+int toolmake_svc_install(tool_service_t *svc, const char *name, const char *desc,
+                         tool_param_t *params, int pn, const char *path, int updated)
+{
+    tool_metadata_t meta;
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
+    meta.id = (char *)name;
+    meta.name = (char *)name;
+    meta.description = (char *)desc;
+    meta.executable = (char *)path;
+    meta.params = params;
+    meta.param_count = (size_t)pn;
+    meta.timeout_sec = TOOLMAKE_TIMEOUT_SEC;
+    meta.access = TOOL_ACCESS_WRITE;
+    meta.permission_rule = (char *)name;
+
+    int rc = updated ? tool_service_replace(svc, &meta) : tool_service_register(svc, &meta);
+    if (rc != AIRY_OK)
+        return rc;
+    rc = daemon_security_add_acl_rule("tool_d", name, true);
+    if (rc != 0)
+        SVC_LOG_WARN("tool_create: ACL grant failed tool=%s rc=%d", name, rc);
+    return AIRY_OK;
+}
+
 /* ---------- Built-in tools registration (fs_read / fs_write / fs_list /
  * shell_run / web_fetch / fs_glob / fs_grep / fs_edit / web_search) ----------
  * Explicitly authorized via the daemon_security ACL (fail-closed:
@@ -118,6 +159,8 @@ static const tool_contract_t k_contract[] = {
     {"maths_eval", MATHS_D_SOCKET_NAME, "maths_d", 0, 0, 0},
     {"maths_stats", MATHS_D_SOCKET_NAME, "maths_d", 0, 0, 0},
     {"maths_plot", MATHS_D_SOCKET_NAME, "maths_d", 0, 0, 0},
+    /* 副作用面：写数据目录 + 改注册表；不触网/不拉子进程，故无 FX 标志。 */
+    {"tool_create", NULL, NULL, TOOL_FX_FS, 0, 1},
 };
 
 void register_builtin_tools(tool_service_t *svc)
@@ -193,6 +236,16 @@ void register_builtin_tools(tool_service_t *svc)
         {"xmax", "{\"type\":\"number\"}", 1},
         {"samples", "{\"type\":\"integer\"}", 0},
     };
+    static tool_param_t tool_create_params[] = {
+        {"name", "{\"type\":\"string\"}", 1},
+        {"description", "{\"type\":\"string\"}", 1},
+        {"script", "{\"type\":\"string\"}", 1},
+        {"params",
+         "{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{"
+         "\"name\":{\"type\":\"string\"},\"type\":{\"type\":\"string\"},"
+         "\"required\":{\"type\":\"boolean\"}}},\"maxItems\":16}",
+         0},
+    };
 
     /* Capability grid of the built-in tool set (SSoT): one row per tool.
      * Budget chain for the scanning tools is tool (20s) < runner IPC (30s)
@@ -238,9 +291,16 @@ void register_builtin_tools(tool_service_t *svc)
               "Sample y=f(x) over [xmin,xmax] and return a ```plot block for "
               "TUI canvas rendering",
               maths_plot_params, 10, 1, TOOL_ACCESS_READ),
+        /* 会话内自制工具：脚本落盘并登记，供本会话后续轮次按名调用。写
+         * 盘 + 注册两段都在 tool_d 进程内完成，预算 15s（本地文件 IO）。 */
+        BTOOL("tool_create",
+              "Create a reusable tool from a script (shebang required). The script is "
+              "saved and registered immediately, and can be called by name in later turns",
+              tool_create_params, 15, 0, TOOL_ACCESS_WRITE),
     };
 
     tool_contract_bind(k_contract, sizeof(k_contract) / sizeof(k_contract[0]));
+    toolmake_attach(svc);
 
     for (size_t i = 0; i < sizeof(defs) / sizeof(defs[0]); ++i) {
         const builtin_def_t *d = &defs[i];

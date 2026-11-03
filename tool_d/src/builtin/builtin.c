@@ -41,6 +41,7 @@
 #include "builtin/builtin_exec_internal.h"
 #include "builtin/builtin_fs_internal.h"
 #include "builtin/builtin_maths_internal.h"
+#include "builtin/builtin_toolmake_internal.h"
 #include "builtin/builtin_time_internal.h"
 
 int builtin_fs_confine(const char *orig_path, int for_write, char *resolved, size_t resolved_cap,
@@ -362,6 +363,7 @@ static const builtin_slot_t g_builtin_slots[] = {
     {"maths_eval", maths_eval_tool},
     {"maths_stats", maths_stats_tool},
     {"maths_plot", maths_plot_tool},
+    {"tool_create", toolmake_create},
 };
 
 int tool_builtin_run(const char *tool_id, const char *params_json, uint32_t timeout_ms,

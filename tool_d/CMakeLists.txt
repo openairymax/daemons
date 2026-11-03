@@ -58,6 +58,8 @@ set(TOOL_SERVICE_SOURCES
     src/builtin/builtin_net.c
     src/builtin/builtin_git.c
     src/builtin/builtin_maths.c
+    # 会话内自制工具：脚本落盘 + 注册表登记（tool_create meta 工具）
+    src/builtin/builtin_toolmake.c
     src/approval/tool_interactive_approval.c
     src/sandbox/os_sandbox.c
     # plugin_d → tool_d 整编——插件 dlopen 引擎随迁
