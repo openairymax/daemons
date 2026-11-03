@@ -15,7 +15,7 @@
 #include "cost_tracker.h"
 #include "llm_service.h"
 #include "daemon_platform_ext.h"
-#include "providers/core/registry.h"
+#include "airy_prov/registry.h"
 #include "rpc/service_chain.h"
 #include "svc_model_watch.h"
 #include "svc_swap.h"

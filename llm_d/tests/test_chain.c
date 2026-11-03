@@ -23,8 +23,8 @@
 #include "rpc/service.h"
 #include "rpc/service_chain.h"
 
-#include "providers/core/registry.h"
-#include "providers/core/provider_base.h"
+#include "airy_prov/registry.h"
+#include "airy_prov/provider_base.h"
 #include "router/core/llm_failover.h"
 #include "router/core/llm_router.h"
 

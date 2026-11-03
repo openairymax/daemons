@@ -16,7 +16,7 @@
  *      slot_id 仅显式设置（slot_set 哨兵）才下发，槽位 0 合法可表达
  */
 
-#include "providers/core/provider_envelope.h"
+#include "airy_prov/provider_envelope.h"
 
 #include <stdio.h>
 #include <string.h>

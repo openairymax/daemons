@@ -56,33 +56,8 @@ set(LLM_SERVICE_SOURCES
     src/accounting/semantic_cache.c
     src/accounting/cost_tracker.c
     src/rpc/response.c
-    # B16-S3：providers 域内重排 core/（机制）+ adapters/（适配）
-    src/providers/core/registry.c
-    # B16-S3 c3：provider.c 两分消失——base 生命周期归 registry.c，密钥机制归 secrets.c
-    src/providers/core/secrets.c
-    src/providers/core/http.c
-    src/providers/core/envelope.c
-    src/providers/core/sse.c
-    # B16-S3 c8：退避重试循环壳（http 非流式 / sse 流式共用）
-    src/providers/core/retry.c
-    # B16-S3 c5：流式 tool_calls 装配 SSoT（三份同构收敛）
-    src/providers/core/toolstream.c
-    # B16-S3.3：通用 completion driver——适配层四槽入口的唯一编排实现
-    src/providers/core/adapter.c
-    # B16-S3 c6：chat 三件合一（openai.c + openai_stream.c + openai_internal.h → chat.c）
-    src/providers/adapters/chat.c
-    src/providers/core/rate_limit.c
-    # 0.1.20 B1-d：上游失败线程局域诊断槽（错误面透传，P2-2 残余收口）
-    src/providers/core/prov_diag.c
-    # 0.1.19 D5：端点健康探测机制件（能力存在 ≠ 能力可用）
-    src/providers/core/ep_health.c
-    # 0.1.20 D2-9：传输侧观测（超时三拆计数 + 时延 p99 驱动预算）
-    src/providers/core/prov_stat.c
-    src/providers/adapters/messages.c
-    # B16-S4：deepseek.c / google.c 清理（OpenAI 兼容遗留冗余，经 model.yaml base_url 声明式接入）
-    src/providers/adapters/local.c
-    # B16-S3 c7：适配器装配 SSoT——注册新适配的唯一改动点
-    src/providers/adapters/adapter_table.c
+    # 0.1.20 §13.17.45 批次七：provider 传输/适配机制面迁出为独立能力格
+    # daemons/providers（静态库 airy_llm_transport），本库改为 PUBLIC 链接。
     src/router/core/llm_router.c
     # 0.1.19 §3.8.2：端点切换决策件（错误码 → 可否换端点，纯函数）
     src/router/core/llm_failover.c
@@ -135,7 +110,6 @@ target_include_directories(airy_llm_service PUBLIC
 
 target_include_directories(airy_llm_service PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/providers
     # B16-S5 预置：顶层文件五域归位后的头搜索路径（纯重排，bare-name include 不变）
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rpc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/config
@@ -144,8 +118,9 @@ target_include_directories(airy_llm_service PRIVATE
     ${CJSON_INCLUDE_DIRS}
 )
 
-# 链接库：svc_common 提供 daemon 公共层 + commons 传递依赖
-target_link_libraries(airy_llm_service PUBLIC svc_common)
+# 链接库：svc_common 提供 daemon 公共层 + commons 传递依赖；
+# airy_llm_transport 提供 provider 装配/传输/适配机制面（含契约头 airy_prov/）。
+target_link_libraries(airy_llm_service PUBLIC svc_common airy_llm_transport)
 
 # daemon_llm_ops_bootstrap 注入 atoms 侧 LLM ops 抽象表。
 # ops 存储（are_ops_set/get_llm）在独立小库 airy_llm_ops 中，而非 airy_llm_service

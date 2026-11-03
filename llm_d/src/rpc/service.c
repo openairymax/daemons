@@ -30,7 +30,7 @@
 #include <string.h>
 
 #include "config/pricing_api.h"
-#include "providers/core/prov_stat.h"
+#include "airy_prov/prov_stat.h"
 #include "rpc/prov_internal.h"
 #include "rpc/service_boot.h"
 
@@ -374,26 +374,6 @@ void llm_service_destroy(llm_service_t *svc)
     airy_mtx_destroy(&svc->reload_lock);
     airy_mtx_destroy(&svc->lock);
     AIRY_FREE(svc);
-}
-
-void llm_response_free(llm_response_t *resp)
-{
-    if (!resp)
-        return;
-    AIRY_FREE(resp->id);
-    AIRY_FREE(resp->model);
-    AIRY_FREE(resp->finish_reason);
-    if (resp->choices) {
-        for (size_t i = 0; i < resp->choice_count; i++) {
-            AIRY_FREE((void *)resp->choices[i].role);
-            AIRY_FREE((void *)resp->choices[i].content);
-            AIRY_FREE((void *)resp->choices[i].reasoning_content);
-            AIRY_FREE((void *)resp->choices[i].tool_call_id);
-            AIRY_FREE((void *)resp->choices[i].tool_calls_json);
-        }
-        AIRY_FREE(resp->choices);
-    }
-    AIRY_FREE(resp);
 }
 
 int llm_service_stats(llm_service_t *svc, char **out_json)

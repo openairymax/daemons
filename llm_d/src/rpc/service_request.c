@@ -24,8 +24,8 @@
 
 #include "accounting/metrics.h"
 #include "rpc/gen_params.h"
-#include "providers/core/secrets.h"
-#include "providers/core/provider_http.h"
+#include "airy_prov/secrets.h"
+#include "airy_prov/provider_http.h"
 
 /**
  * @brief 构造规范化文本 "role:content:reasoning|"，同时作为本地 LRU 键与

@@ -12,7 +12,7 @@
 #include <string.h>
 
 #include "platform_base.h"
-#include "providers/core/prov_diag.h"
+#include "airy_prov/prov_diag.h"
 
 static int g_fail;
 
