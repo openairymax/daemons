@@ -34,8 +34,10 @@
 
 /* 构建 llm_d complete_stream 请求（透传 tools 数组与常规生成参数）。
  * 不在此处写 max_tokens：输出上限的权威在配置面（model.yaml max_output），
- * 由 llm_d 的生成参数解析统一裁决；调用方写死一个数值会让该配置永久失效。 */
-static char *run_build_llm_params(const char *model, const cJSON *messages)
+ * 由 llm_d 的生成参数解析统一裁决；调用方写死一个数值会让该配置永久失效。
+ * dyn 为会话内自制工具的追加条目（tool_create 产物），与静态 SSoT 目录
+ * 拼接后一并下发给模型，使新工具在下一轮即可被调用。 */
+static char *run_build_llm_params(const char *model, const cJSON *messages, const cJSON *dyn)
 {
     cJSON *params = cJSON_CreateObject();
     if (!params)
@@ -43,6 +45,15 @@ static char *run_build_llm_params(const char *model, const cJSON *messages)
     cJSON_AddStringToObject(params, "model", model);
     cJSON_AddItemToObject(params, "messages", cJSON_Duplicate(messages, 1));
     cJSON *tools = cJSON_Parse(AIRY_TOOLS_JSON_SOURCE);
+    if (tools && dyn && cJSON_GetArraySize(dyn) > 0) {
+        const cJSON *item = NULL;
+        cJSON_ArrayForEach(item, dyn)
+        {
+            cJSON *copy = cJSON_Duplicate(item, 1);
+            if (copy)
+                cJSON_AddItemToArray(tools, copy);
+        }
+    }
     if (tools)
         cJSON_AddItemToObject(params, "tools", tools);
     cJSON_AddNumberToObject(params, "temperature", 0.7);
@@ -212,6 +223,7 @@ typedef struct {
     int streak;
     int fused;
     char fuse[256];
+    cJSON *dyn_tools; /* 会话内自制工具的 OpenAI tools 条目（tool_create 产物） */
 } run_ctx_t;
 
 /* 首条 system：工具路径锚点契约（缺陷 #4）声明 fs_* 与 shell_run 的相对
@@ -228,11 +240,15 @@ static void run_preamble(cJSON *msgs)
         "理解；你的回答必须直接回应最后一条用户消息。若历史主题与最后"
         "一条用户消息不一致，以最后一条用户消息为准，禁止延续历史主题"
         "作答，禁止续写历史中未完成的回答。";
+    static const char toolmake[] =
+        "【自制工具】同类处理若已重复出现，优先调用 tool_create 把脚本沉淀"
+        "为具名工具（脚本必须以 #! 开头，参数以 JSON 形式作为 $1 传入），"
+        "它在下一轮即可按名调用，避免反复手写等价 shell 命令。";
     cJSON *sys = cJSON_CreateObject();
     if (!sys)
         return;
     char content[1024];
-    snprintf(content, sizeof(content), "%s%s", base,
+    snprintf(content, sizeof(content), "%s%s%s", base, toolmake,
              cJSON_GetArraySize(msgs) > 1 ? boundary : "");
     cJSON_AddStringToObject(sys, "role", "system");
     cJSON_AddStringToObject(sys, "content", content);
@@ -291,7 +307,7 @@ static void run_ev_send(run_ctx_t *r, const char *type, cJSON *ev)
 static int run_llm_round(run_ctx_t *r, cJSON **tool_calls)
 {
     *tool_calls = NULL;
-    char *params = run_build_llm_params(r->args->model, r->messages);
+    char *params = run_build_llm_params(r->args->model, r->messages, r->dyn_tools);
     if (!params)
         return -1;
 
@@ -346,6 +362,148 @@ static int run_llm_round(run_ctx_t *r, cJSON **tool_calls)
     return 1;
 }
 
+/* 会话内自制工具目录维护：list_tools 中 executable 非 "builtin:" 前缀者即
+ * 动态脚本工具（tool_create 产物），转成 OpenAI tools 条目随请求下发。 */
+static int run_dyn_has(const cJSON *dyn, const char *name)
+{
+    const cJSON *it = NULL;
+    if (!dyn)
+        return 0;
+    cJSON_ArrayForEach(it, dyn)
+    {
+        cJSON *fn = cJSON_GetObjectItem(it, "function");
+        cJSON *n = cJSON_GetObjectItem(fn, "name");
+        if (cJSON_IsString(n) && strcmp(n->valuestring, name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static void run_dyn_put(cJSON *dyn, const char *name, const char *desc, const cJSON *schema)
+{
+    if (!dyn || !name || !name[0])
+        return;
+    /* 重定义（同名 tool_create）以新条目覆盖，避免模型看到两份同名 schema。 */
+    if (run_dyn_has(dyn, name)) {
+        for (int i = cJSON_GetArraySize(dyn) - 1; i >= 0; --i) {
+            cJSON *it = cJSON_GetArrayItem(dyn, i);
+            cJSON *n = cJSON_GetObjectItem(cJSON_GetObjectItem(it, "function"), "name");
+            if (cJSON_IsString(n) && strcmp(n->valuestring, name) == 0)
+                cJSON_DeleteItemFromArray(dyn, i);
+        }
+    }
+    cJSON *entry = cJSON_CreateObject();
+    cJSON *fn = cJSON_CreateObject();
+    if (!entry || !fn) {
+        cJSON_Delete(entry);
+        cJSON_Delete(fn);
+        return;
+    }
+    cJSON_AddStringToObject(entry, "type", "function");
+    cJSON_AddStringToObject(fn, "name", name);
+    cJSON_AddStringToObject(fn, "description", desc ? desc : "");
+    cJSON *params = cJSON_IsObject(schema) ? cJSON_Duplicate(schema, 1) : NULL;
+    if (!params) {
+        params = cJSON_CreateObject();
+        if (params) {
+            cJSON_AddStringToObject(params, "type", "object");
+            cJSON_AddItemToObject(params, "properties", cJSON_CreateObject());
+            cJSON_AddItemToObject(params, "required", cJSON_CreateArray());
+        }
+    }
+    cJSON_AddItemToObject(fn, "parameters", params);
+    cJSON_AddItemToObject(entry, "function", fn);
+    cJSON_AddItemToArray(dyn, entry);
+}
+
+static void run_load_dyn(run_ctx_t *r)
+{
+    if (!r->dyn_tools)
+        return;
+    char sock[AGENT_RUN_SOCK_BUF];
+    snprintf(sock, sizeof(sock), "%s", airy_runtime_dir_socket("tool.sock"));
+    char *resp = NULL;
+    int rc = daemon_rpc_call(sock, "list_tools", "{}", &resp, AGENT_RUN_TOOL_TIMEOUT_MS);
+    if (rc != AIRY_SUCCESS || !resp) {
+        AIRY_FREE(resp);
+        return;
+    }
+    cJSON *root = cJSON_Parse(resp);
+    AIRY_FREE(resp);
+    if (!root)
+        return;
+    cJSON *list = cJSON_IsArray(root) ? root : cJSON_GetObjectItem(root, "tools");
+    if (!cJSON_IsArray(list)) {
+        cJSON_Delete(root);
+        return;
+    }
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, list)
+    {
+        cJSON *exe = cJSON_GetObjectItem(it, "executable");
+        cJSON *nm = cJSON_GetObjectItem(it, "name");
+        cJSON *id = cJSON_GetObjectItem(it, "id");
+        cJSON *ds = cJSON_GetObjectItem(it, "description");
+        if (!cJSON_IsString(exe) || !exe->valuestring[0])
+            continue;
+        if (strncmp(exe->valuestring, "builtin:", 8) == 0)
+            continue;
+        const char *n = cJSON_IsString(nm) ? nm->valuestring
+                                          : (cJSON_IsString(id) ? id->valuestring : NULL);
+        run_dyn_put(r->dyn_tools, n, cJSON_IsString(ds) ? ds->valuestring : "",
+                    cJSON_GetObjectItem(it, "inputSchema"));
+    }
+    cJSON_Delete(root);
+}
+
+/* tool_create 成功后即时把新工具 schema 追加进本轮目录（无需等下次会话）。 */
+static void run_dyn_hook(run_ctx_t *r, const char *args_json)
+{
+    if (!r->dyn_tools)
+        return;
+    cJSON *root = cJSON_Parse(args_json && args_json[0] ? args_json : "{}");
+    if (!root)
+        return;
+    cJSON *jn = cJSON_GetObjectItem(root, "name");
+    cJSON *jd = cJSON_GetObjectItem(root, "description");
+    if (!cJSON_IsString(jn) || !jn->valuestring[0]) {
+        cJSON_Delete(root);
+        return;
+    }
+    cJSON *schema = cJSON_CreateObject();
+    cJSON *props = cJSON_CreateObject();
+    cJSON *required = cJSON_CreateArray();
+    if (schema && props && required) {
+        cJSON_AddStringToObject(schema, "type", "object");
+        cJSON *plist = cJSON_GetObjectItem(root, "params");
+        const cJSON *p = NULL;
+        cJSON_ArrayForEach(p, plist)
+        {
+            cJSON *pn = cJSON_GetObjectItem(p, "name");
+            cJSON *pt = cJSON_GetObjectItem(p, "type");
+            cJSON *pr = cJSON_GetObjectItem(p, "required");
+            if (!cJSON_IsString(pn) || !pn->valuestring[0])
+                continue;
+            cJSON *ps = cJSON_CreateObject();
+            if (!ps)
+                continue;
+            cJSON_AddStringToObject(ps, "type", cJSON_IsString(pt) ? pt->valuestring : "string");
+            cJSON_AddItemToObject(props, pn->valuestring, ps);
+            if (!cJSON_IsBool(pr) || cJSON_IsTrue(pr))
+                cJSON_AddItemToArray(required, cJSON_CreateString(pn->valuestring));
+        }
+        cJSON_AddItemToObject(schema, "properties", props);
+        cJSON_AddItemToObject(schema, "required", required);
+    } else {
+        cJSON_Delete(props);
+        cJSON_Delete(required);
+    }
+    run_dyn_put(r->dyn_tools, jn->valuestring,
+                cJSON_IsString(jd) ? jd->valuestring : "", schema);
+    cJSON_Delete(schema);
+    cJSON_Delete(root);
+}
+
 /* 单条工具调用：tool_start → 执行 → 连败计数 → tool_end → 回填 messages /
  * 台账 / trace（后者供最终响应）。返回熔断是否触发。 */
 static int run_tool_one(run_ctx_t *r, cJSON *tc)
@@ -372,6 +530,8 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
     uint64_t t0 = airy_time_ms();
     int erc = run_execute_tool(tname, targs, &res);
     r->out->tool_ms += airy_time_ms() - t0;
+    if (erc == 0 && strcmp(tname, "tool_create") == 0)
+        run_dyn_hook(r, targs);
 
     /* C-1 连败计数：本次失败仍完整入账/推送后再判断熔断出口。 */
     if (run_fail_streak_bump(&r->streak, erc)) {
@@ -449,11 +609,16 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
     agent_ledger_init(&r.lg, r.sess);
 
     r.trace = cJSON_CreateArray();
-    if (!r.trace || run_seed(&r) != 0) {
+    r.dyn_tools = cJSON_CreateArray();
+    if (!r.trace || !r.dyn_tools || run_seed(&r) != 0) {
         cJSON_Delete(r.messages);
         cJSON_Delete(r.trace);
+        cJSON_Delete(r.dyn_tools);
         return -1;
     }
+    /* 会话启动即拉取动态脚本工具（tool_create 历史产物），使既有自制工具
+     * 在会话首轮即可调用；tool_d 不可达时仅退化为静态目录，不影响对话。 */
+    run_load_dyn(&r);
 
     for (int i = 0; i < AGENT_RUN_MAX_TOOL_LOOPS; i++) {
         if (agent_run_is_cancelled(args->session)) {
@@ -472,6 +637,7 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
 
     agent_ledger_free(&r.lg);
     cJSON_Delete(r.messages);
+    cJSON_Delete(r.dyn_tools);
     /* 成功/熔断移交产物，失败路径就地释放；计量已直写 out。 */
     if (rc == 0 || rc == AGENT_RUN_RC_TOOL_FUSE) {
         out->trace = r.trace;
