@@ -554,7 +554,8 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
     airy_task_plan_t *plan = NULL;
     airy_err_t err = airy_cognition_process(svc->engine, prompt, plen, &plan);
     if (err != AIRY_SUCCESS || !plan) {
-        int err_code = (int)err;
+        /* 引擎返回成功却无 plan 属契约违约，按 UNKNOWN 记；其余保留原码。 */
+        int err_code = (err != AIRY_SUCCESS) ? (int)err : AIRY_ERR_UNKNOWN;
 
         /* GCCP 两段式交互第一段（P-A）：引擎挂起（交互回调返回哨兵），
          * 问题集已捕获到当前会话——返回给客户端，语义为成功
@@ -591,6 +592,9 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
 
         cJSON *root = cJSON_CreateObject();
         if (root) {
+            /* P-V：失败必须显式标记降级，且原始错误码不被折叠成 UNKNOWN，
+             * 否则上层无法区分"思考未参与"与"思考成功"。 */
+            cJSON_AddBoolToObject(root, "degraded", 1);
             cJSON *st = cJSON_CreateObject();
             cJSON_AddNumberToObject(st, "err_code", err_code);
             cJSON_AddNumberToObject(st, "dual_invocations", svc->dual_invocations);
@@ -600,7 +604,7 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
             out_result->json = cJSON_PrintUnformatted(root);
             cJSON_Delete(root);
         }
-        return AIRY_ERR_UNKNOWN;
+        return err_code;
     }
 
     cJSON *root = cJSON_CreateObject();
