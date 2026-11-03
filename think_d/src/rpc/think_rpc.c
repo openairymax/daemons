@@ -23,6 +23,27 @@
  * 恢复确认窗留给 tick 型观察者）。单线程事件循环派发，静态记忆安全。 */
 static dmn_state_t g_health_state = DMN_ST_NOMINAL;
 
+/* 失败面唯一出口（P-V）：诊断 JSON 作为 error.data 下发，协议层必须是
+ * error。以 result 返回会让调用方按成功路径继续，双思考静默退化。 */
+static void send_process_fail(airy_sock_t fd, int id, const char *diag)
+{
+    cJSON *data = diag ? cJSON_Parse(diag) : NULL;
+    cJSON *rid = cJSON_CreateNumber(id);
+    char *resp = rid ? jsonrpc_create_error_response(rid, JSONRPC_INTERNAL_ERROR,
+                                                     "Think process failed", data) : NULL;
+    cJSON_Delete(rid);
+    if (!resp) {
+        /* 构包失败时 data 已被 error_response 释放（或 id 分配失败时尚未
+         * 移交给它），统一走无 data 的通用错误。 */
+        if (!rid)
+            cJSON_Delete(data);
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Think process failed", id);
+        return;
+    }
+    (void)jsonrpc_route_response(fd, resp, strlen(resp));
+    AIRY_FREE(resp);
+}
+
 static void handle_process(cJSON *params, int id, airy_sock_t client_fd)
 {
     cJSON *prompt = cJSON_GetObjectItem(params, "prompt");
@@ -45,20 +66,15 @@ static void handle_process(cJSON *params, int id, airy_sock_t client_fd)
 
     think_process_result_t res = {0};
     int ret = think_service_process(g_svc, session_id, prompt->valuestring, gccp_answers, &res);
-    if (ret != AIRY_SUCCESS || !res.json) {
-        /* 错误码细节保留：think_service_process 失败时已在 res.json 内置
-         * 含 err_code 的诊断 JSON（err_code/feedback/stats），优先原样返回，
-         * 客户端可据此区分真实失败与可降级路径；仅当 JSON 缺失时才回退
-         * 通用 -32603。 */
-        if (res.json) {
-            cJSON *err_obj = cJSON_Parse(res.json);
-            if (err_obj) {
-                JSONRPC_SEND_SUCCESS(client_fd, err_obj, id);
-                think_result_free(&res);
-                return;
-            }
-        }
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Think process failed", id);
+    if (ret != AIRY_SUCCESS) {
+        /* 失败带诊断：err_code/feedback/stats/degraded 进 error.data，客户端
+         * 可区分真实失败与 GCCP 挂起（后者在服务层按成功返回）。 */
+        send_process_fail(client_fd, id, res.json);
+        think_result_free(&res);
+        return;
+    }
+    if (!res.json) {
+        send_process_fail(client_fd, id, NULL);
         think_result_free(&res);
         return;
     }
