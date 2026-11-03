@@ -360,11 +360,12 @@ static const char *const SSE_CF_BODY =
 
 static int g_stream_chunk_count;
 
-static void on_stream_chunk(const char *chunk, void *user_data)
+static int on_stream_chunk(const char *chunk, void *user_data)
 {
     (void)user_data;
     if (chunk && chunk[0] != '\0')
         g_stream_chunk_count++;
+    return 0;
 }
 
 static void cfg_init(llm_request_config_t *cfg, llm_message_t *msg)
@@ -451,6 +452,41 @@ static void test_stream_dispatch(int code, const char *reason, const char *conte
     }
     if (resp)
         llm_response_free(resp);
+
+    chat_ops.destroy(ctx);
+}
+
+/* 下游取消：首块回调返回非 0 → 传输层停止读取，返回值必须是
+ * AIRY_ERR_CANCELED 而非 IO 失败，且不产出半成品响应。 */
+static int on_stream_cancel(const char *chunk, void *user_data)
+{
+    (void)chunk;
+    (void)user_data;
+    g_stream_chunk_count++;
+    return 1;
+}
+
+static void test_stream_cancel(void)
+{
+    printf("  downstream cancel aborts upstream transfer...\n");
+    mock_set_response(200, "OK", "text/event-stream", SSE_OK_BODY);
+
+    char base[128];
+    snprintf(base, sizeof(base), "http://127.0.0.1:%d/v1", g_srv.port);
+
+    provider_ctx_t *ctx = make_ctx(base);
+    llm_message_t msg;
+    llm_request_config_t cfg;
+    cfg_init(&cfg, &msg);
+
+    g_stream_chunk_count = 0;
+    llm_response_t *resp = NULL;
+    int ret = chat_ops.complete_stream(ctx, &cfg, on_stream_cancel, NULL, &resp);
+
+    printf("    ret=%d chunks=%d\n", ret, g_stream_chunk_count);
+    assert(ret == AIRY_ERR_CANCELED);
+    assert(resp == NULL);
+    assert(g_stream_chunk_count == 1);
 
     chat_ops.destroy(ctx);
 }
@@ -888,6 +924,9 @@ int main(void)
     /* 流式正向对照：SSE 增量解析 + [DONE] 正常收尾。 */
     test_stream_dispatch(200, "OK", "text/event-stream", SSE_OK_BODY, AIRY_OK,
                          "stream 200 -> OK");
+
+    /* P-T：下游取消必须短路上游传输，并作为取消（而非 IO 故障）上报。 */
+    test_stream_cancel();
 
     /* C11 完整性契约：2xx 不等于流按协议终结；finish_reason 事实如实上抛。 */
     test_stream_dispatch(200, "OK", "text/event-stream", SSE_NO_DONE_BODY,
