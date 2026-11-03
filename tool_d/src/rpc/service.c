@@ -21,6 +21,7 @@
 #include "rpc/service.h"
 #include "svc_logger.h"
 #include "rpc/tool_service_internal.h"
+#include "tool_d_internal.h"
 
 #include <cjson/cJSON.h>
 
@@ -68,6 +69,10 @@ tool_service_t *tool_service_create(const char *config_path)
     tool_executor_config_t exec_config;
     __builtin_memset(&exec_config, 0, sizeof(exec_config));
     exec_config.timeout_sec = AIRY_DEFAULT_TIMEOUT_SEC;
+    /* 社区反馈③ config 旋钮：svc.c 自 config daemon.max_workers 提取的
+     * worker 数落进 executor 配置面（executor_pool 起池时消费；env
+     * AIRY_TOOL_EXEC_WORKERS 在池侧仍具更高优先级）。 */
+    exec_config.max_workers = g_tool_max_workers;
 
     svc->executor = tool_executor_create_ex(&exec_config);
     if (!svc->executor) {
