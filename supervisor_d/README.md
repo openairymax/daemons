@@ -34,17 +34,18 @@ profile.env launch 声明（期望态 SSoT，launcher 写入）
         ▼
 main.c 主循环 ── 每 tick ──▶ src/proc/ sup_reconcile
         │                       │ reap（waitpid/WaitForSingleObject 收割死因）
-        │                       │ CORE: STOPPED/BACKOFF→spawn（退避门控+超限 failed）
+        │                       │ CORE: STOPPED/BACKOFF/WAIT→spawn（退避门控+准入判定+超限 failed）
         │                       │ AUX: 仅 activate 拉起
         │                       └ sup_health_tick（sock 可达性假死判定，机制委托 src/net/）
         └ src/ctrl/ sup_ctrl_serve（控制口 JSON-RPC，串行单连接）
 ```
 
 域切分（gen5 五件套，codegen=false 手写装配）：装配对 `src/main.c`（壳）+
-`src/svc.c`（常驻生命周期）· `src/decl/` 期望态解析 · `src/proc/` 进程域
+`src/svc.c`（常驻生命周期）· `src/decl/` 期望态解析 · `src/admit/` 派生准入
+（消费 `airy-rt-cap admit` 结论）· `src/proc/` 进程域
 （spawn/reap/退避/假死探测/收摊）· `src/ctrl/` 控制口 · `src/net/` 端点机制件
 （跨平台 sock 可达性探测 + Windows TCP 装配权威）。域依赖单向
-`decl`/`proc`/`ctrl`/`net` → 契约，全户共享契约与 net 对外接口经
+`decl`/`admit`/`proc`/`ctrl`/`net` → 契约，全户共享契约与 net 对外接口经
 `src/supervisor_d_internal.h` 单点消费。
 
 **V13.5 硬约束**：零项目内库链接（`link-whitelist.txt` 允许集为空，linkgate 构建期
@@ -79,6 +80,7 @@ AIRYRT_LAUNCH_CORE="gateway_d llm_d think_d agent_d tool_d"
 AIRYRT_LAUNCH_AUX="monit_d sched_d channel_d market_d cupolas_d mem_d a2a_d notify_d"
 AIRYRT_LAUNCH_ARGS_llm_d="--manager /path/model.yaml"
 AIRYRT_LAUNCH_KEEPENV_llama_server="LD_LIBRARY_PATH"
+AIRYRT_LAUNCH_MEM_llama_server=6G
 ```
 
 - 名单先于 args 应用（两遍扫描）；`AIRYRT_LAUNCH_ARGS_<NAME>` 对未登记名 fail-closed 拒绝。
@@ -93,6 +95,22 @@ AIRYRT_LAUNCH_KEEPENV_llama_server="LD_LIBRARY_PATH"
   Windows 固定 TCP 表。maths 因与 a2a 的 Windows 端口冲突（B17 订正中）不入表，其
   Windows 腿仅进程存活判定。
 
+## 派生准入（WAIT 态）
+
+常驻量声明 `AIRYRT_LAUNCH_MEM_<NAME>=<size>`（字节，或 `512K` / `3G` 后缀）给出该
+进程的常驻内存体量；未声明（0）不设门槛。派生前以该值向 `airy-rt-cap admit
+--need <size> --json` 询问，判据本身只在 `system/services/airymax_rt/admit.py`
+（SSoT），本单元不复刻保留量口径：
+
+| 判定 | 行为 |
+|------|------|
+| `fit` / `unknown` | 正常派生 |
+| `refuse` | 不派生，进程进 `wait` 态；只按 `AIRYRT_SUP_ADMIT_RETRY_MS` 重判，不重派生、不计连败、不进指数退避 |
+| 工具缺失 / 无策略 / 输出不可解析 | WARN 后放行（等同 `unknown`，监管者不冒充内存判据） |
+
+拒绝是结论而非故障：判定耗时毫秒级，派生要几百兆，因此重试只重判定。Windows
+腿无该工具亦无准入策略，声明被解析但派生不设门槛。
+
 ## 调参环境变量
 
 | 变量 | 默认 | 说明 |
@@ -102,3 +120,5 @@ AIRYRT_LAUNCH_KEEPENV_llama_server="LD_LIBRARY_PATH"
 | `AIRYRT_SUP_BACKOFF_MAX_MS` | 30000 | 退避上限 |
 | `AIRYRT_SUP_MAX_ATTEMPTS` | 5 | 连败超限阈值（转 failed 告警） |
 | `AIRYRT_SUP_LIVENESS_TICKS` | 3 | 端点不可达假死判定周期数 |
+| `AIRYRT_SUP_ADMIT_RETRY_MS` | 30000 | WAIT 态重判周期（装不下时多久再问一次） |
+| `AIRYRT_ADMIT_CMD` | `/usr/bin/airy-rt-cap` | 准入判定工具路径（测试与裁剪镜像覆盖用） |

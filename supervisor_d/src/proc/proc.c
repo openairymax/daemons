@@ -67,7 +67,8 @@ int sup_proc_job_init(void)
 }
 #endif
 
-static long long sup_now_ms(void)
+/* 单调毫秒：全户计时唯一钟（墙钟只用于日志时间戳） */
+long long sup_now_ms(void)
 {
 #ifdef _WIN32
     return (long long)GetTickCount64();
@@ -261,9 +262,13 @@ static int spawn_posix(sup_ctx_t *ctx, sup_proc_t *p)
 
 static int sup_proc_spawn(sup_ctx_t *ctx, sup_proc_t *p)
 {
-    if (p->pid != SUP_PID_INVALID)
-        return 0;
     int rc;
+
+    if (p->pid != SUP_PID_INVALID)
+        return SUP_SPAWN_OK;
+    /* 装不下就不派生：返回 DEFER，由调用方按 WAIT 处理，不计连败 */
+    if (sup_admit_room(p, NULL) == 0)
+        return SUP_SPAWN_DEFER;
 #ifdef _WIN32
     rc = spawn_win(ctx, p);
 #else
@@ -271,11 +276,11 @@ static int sup_proc_spawn(sup_ctx_t *ctx, sup_proc_t *p)
 #endif
     if (rc != 0) {
         p->fail_count++;
-        return -1;
+        return SUP_SPAWN_FAIL;
     }
     p->state = SUP_ST_STARTING;
     p->dead_ticks = 0;
-    return 0;
+    return SUP_SPAWN_OK;
 }
 
 void sup_proc_reap(sup_ctx_t *ctx)
@@ -334,8 +339,16 @@ long long sup_backoff_ms(const sup_ctx_t *ctx, const sup_proc_t *p)
 
 static void spawn_or_backoff(sup_ctx_t *ctx, sup_proc_t *p, long long now)
 {
-    if (sup_proc_spawn(ctx, p) == 0)
+    int rc = sup_proc_spawn(ctx, p);
+
+    if (rc == SUP_SPAWN_OK)
         return;
+    if (rc == SUP_SPAWN_DEFER) {
+        /* WAIT 不是故障：内存回来之前只重判、不重派生，连败计数不增长 */
+        p->state = SUP_ST_WAIT;
+        p->next_ms = now + ctx->admit_retry_ms;
+        return;
+    }
     p->state = SUP_ST_BACKOFF;
     p->next_ms = now + sup_backoff_ms(ctx, p);
 }
@@ -363,6 +376,10 @@ void sup_reconcile(sup_ctx_t *ctx)
                     spawn_or_backoff(ctx, p, now);
                 }
             }
+            break;
+        case SUP_ST_WAIT:
+            if (now >= p->next_ms)
+                spawn_or_backoff(ctx, p, now);
             break;
         case SUP_ST_STARTING:
         case SUP_ST_RUNNING:

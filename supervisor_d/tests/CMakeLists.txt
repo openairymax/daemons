@@ -9,9 +9,10 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 enable_testing()
 
 # supervisor_d 为零依赖自持单元（不链接任何项目内库）：测试直接编入
-# 被测三源件（不含 main.c），仅链系统库（POSIX libc / Windows ws2_32）。
+# 被测源件（不含 main.c），仅链系统库（POSIX libc / Windows ws2_32）。
 add_executable(sup_test_supervisor_core test_supervisor_core.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/decl/decl.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/admit/admit.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/proc/proc.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/ctrl/ctrl.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/net/net.c

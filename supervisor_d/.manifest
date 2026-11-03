@@ -16,6 +16,7 @@
   "deps": { "required": [], "optional": [] },
   "modules": [
     { "name": "decl", "sources": ["decl/decl.c"] },
+    { "name": "admit", "sources": ["admit/admit.c"] },
     { "name": "proc", "sources": ["proc/proc.c"] },
     { "name": "ctrl", "sources": ["ctrl/ctrl.c"] },
     { "name": "net", "sources": ["net/net.c"] }

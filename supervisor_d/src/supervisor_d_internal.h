@@ -5,18 +5,19 @@
  * @file supervisor_d_internal.h
  * @brief supervisor_d 装配域唯一私有头（gen5 五件套⑤，0.1.18 §12.13 B13）。
  *
- * 域切分：decl（期望态声明解析）/ proc（进程域：spawn/reap/退避/假死
- * 探测/收摊）/ ctrl（控制域：UDS/TCP + 极简 JSON-RPC）/ net（网络机
- * 制域：sock 可达性探测 + Windows TCP 端点装配权威，域私有头随域
- * 下潜 net/sup_net.h）。全户共享契约（sup_ctx/sup_proc、状态机、容量
- * 常量与全部跨域函数声明）单点在本头；net 对外契约经本头消费，域依
- * 赖单向 decl/proc/ctrl/net → 契约。装配域（svc.c 生命周期 + main.c
- * 壳）经本头持有全户契约。仅限 supervisor_d 编译单元。
+ * 域切分：decl（期望态声明解析）/ admit（派生前的内存准入）/ proc
+ * （进程域：spawn/reap/退避/假死探测/收摊）/ ctrl（控制域：UDS/TCP +
+ * 极简 JSON-RPC）/ net（网络机制域：sock 可达性探测 + Windows TCP 端点
+ * 装配权威，域私有头随域下潜 net/sup_net.h）。全户共享契约
+ * （sup_ctx/sup_proc、状态机、容量常量与全部跨域函数声明）单点在本
+ * 头；net 对外契约经本头消费，域依赖单向 decl/admit/proc/ctrl/net →
+ * 契约。装配域（svc.c 生命周期 + main.c 壳）经本头持有全户契约。仅限
+ * supervisor_d 编译单元。
  *
  * 期望态 = 画像 launch 声明（$AIRY_HOME/config/profile.env 的
  * AIRYRT_LAUNCH_CORE / AIRYRT_LAUNCH_AUX / AIRYRT_LAUNCH_ARGS_<NAME> /
  * AIRYRT_LAUNCH_BIN_<NAME> / AIRYRT_LAUNCH_EP_<NAME> /
- * AIRYRT_LAUNCH_KEEPENV_<NAME>），
+ * AIRYRT_LAUNCH_KEEPENV_<NAME> / AIRYRT_LAUNCH_MEM_<NAME>），
  * 实际态 = 子进程集 + sock 可达性；supervisor_d 周期比对并拉齐：
  * CORE 死而自动复活（指数退避，超限 failed 显式告警），AUX 仅经
  * supervisor.activate 按需拉起。收摊经 supervisor.shutdown 统一收割。
@@ -54,25 +55,35 @@ extern "C" {
 #define SUP_ENV_MAX 128
 
 /* ---- 默认参数（env 可覆盖：AIRYRT_SUP_TICK_MS / _BACKOFF_BASE_MS /
- *       _BACKOFF_MAX_MS / _MAX_ATTEMPTS / _LIVENESS_TICKS） ---- */
+ *       _BACKOFF_MAX_MS / _MAX_ATTEMPTS / _LIVENESS_TICKS / _ADMIT_RETRY_MS） ---- */
 #define SUP_DEFAULT_TICK_MS 5000
 #define SUP_DEFAULT_BACKOFF_BASE_MS 1000
 #define SUP_DEFAULT_BACKOFF_MAX_MS 30000
 #define SUP_DEFAULT_MAX_ATTEMPTS 5
 #define SUP_DEFAULT_LIVENESS_TICKS 3
+#define SUP_DEFAULT_ADMIT_RETRY_MS 30000
 #define SUP_TERM_GRACE_MS 5000
 
 /* ---- 角色：CORE = 画像常驻集（死自动复活）；AUX = 按需集（activate 拉起） ---- */
 typedef enum sup_role { SUP_ROLE_CORE = 0, SUP_ROLE_AUX = 1 } sup_role_t;
 
-/* ---- 状态机：STOPPED→STARTING→RUNNING；死后 BACKOFF；连败超限 FAILED ---- */
+/* ---- 状态机：STOPPED→STARTING→RUNNING；死后 BACKOFF；连败超限 FAILED；
+ *      装不下时 WAIT（不计连败，等内存回来再派生） ---- */
 typedef enum sup_state {
     SUP_ST_STOPPED = 0,
     SUP_ST_STARTING = 1,
     SUP_ST_RUNNING = 2,
     SUP_ST_BACKOFF = 3,
-    SUP_ST_FAILED = 4
+    SUP_ST_FAILED = 4,
+    SUP_ST_WAIT = 5
 } sup_state_t;
+
+/* ---- 派生结果：OK 已派生；FAIL 派生失败（计入连败）；DEFER 装不下，等内存 ---- */
+typedef enum sup_spawn {
+    SUP_SPAWN_OK = 0,
+    SUP_SPAWN_FAIL = -1,
+    SUP_SPAWN_DEFER = 1
+} sup_spawn_t;
 
 typedef struct sup_proc {
     char name[SUP_NAME_MAX];  /* "notify_d" */
@@ -86,6 +97,7 @@ typedef struct sup_proc {
     int fail_count;         /* 连续失败次数（RUNNING 稳定后归零由 next 复活清零） */
     long long next_ms;      /* BACKOFF 最早可重启时刻（monotonic ms） */
     int dead_ticks;         /* sock 不可达连续计数（假死判定） */
+    long long need;         /* 常驻内存声明（字节），0 = 未声明、派生不设门槛 */
     char last_death[128];   /* 最近死因（收割时记录，V13.1 日志判据） */
 } sup_proc_t;
 
@@ -101,6 +113,7 @@ typedef struct sup_ctx {
     long backoff_max_ms;
     int max_attempts;
     int liveness_ticks;
+    long admit_retry_ms;        /* WAIT 态重判周期：装不下的进程多久再问一次 */
     int shutdown;               /* 1 = supervisor.shutdown 已受理 */
 } sup_ctx_t;
 
@@ -110,7 +123,13 @@ int sup_decl_defaults(sup_ctx_t *ctx);
 int sup_proc_find(const sup_ctx_t *ctx, const char *name);
 void ensure_dirs(const sup_ctx_t *ctx);
 
+/* ---- admit.c：派生前的内存准入（判定由 airy-rt-cap admit 单点给出） ----
+ * 返回 1 = 放行（fit/unknown/未声明），0 = 此刻装不下（refuse，short_out 给出
+ * 缺口字节），-1 = 本机无判定（工具缺失或输出不可解析，放行并告警）。 */
+long sup_admit_room(const sup_proc_t *p, long long *short_out);
+
 /* ---- proc.c：spawn / reap / 退避 / 假死探测 / 收摊 ---- */
+long long sup_now_ms(void);
 void sup_proc_reap(sup_ctx_t *ctx);
 long long sup_backoff_ms(const sup_ctx_t *ctx, const sup_proc_t *p);
 void sup_reconcile(sup_ctx_t *ctx);
@@ -131,6 +150,7 @@ int sup_ctrl_listen(const sup_ctx_t *ctx);
 void sup_ctrl_close(int fd);
 void sup_ctrl_serve(sup_ctx_t *ctx, int listen_fd, int timeout_ms);
 int sup_json_field(const char *json, const char *key, char *out, size_t out_sz);
+long long sup_json_num(const char *json, const char *key, long long dflt);
 int sup_ctrl_client(sup_ctx_t *ctx, int argc, char **argv);
 
 /* ---- proc.c 提供给 ctrl/main 的拉起决策 ---- */

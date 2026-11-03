@@ -4,6 +4,7 @@ set(SUPERVISOR_D_SOURCES
     src/main.c
     src/svc.c
     src/decl/decl.c
+    src/admit/admit.c
     src/proc/proc.c
     src/ctrl/ctrl.c
     src/net/net.c

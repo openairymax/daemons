@@ -43,6 +43,7 @@ static const char *state_str(sup_state_t st)
     case SUP_ST_RUNNING:  return "running";
     case SUP_ST_BACKOFF:  return "backoff";
     case SUP_ST_FAILED:   return "failed";
+    case SUP_ST_WAIT:     return "wait";
     default:              return "stopped";
     }
 }
@@ -143,6 +144,16 @@ int sup_json_field(const char *json, const char *key, char *out, size_t out_sz)
     }
     out[i] = '\0';
     return *c == '"' ? 0 : -1;
+}
+
+long long sup_json_num(const char *json, const char *key, long long dflt)
+{
+    const char *c = sup_find_key(json, key);
+    char *end = NULL;
+    if (!c)
+        return dflt;
+    long long v = strtoll(c, &end, 10);
+    return end == c ? dflt : v;
 }
 
 static void dispatch(sup_ctx_t *ctx, int fd, const char *req)
