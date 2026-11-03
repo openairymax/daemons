@@ -280,6 +280,45 @@ static void apply_keep_line(sup_ctx_t *ctx, const char *key, const char *val)
     snprintf(ctx->procs[i].keepenv, sizeof(ctx->procs[i].keepenv), "%s", val);
 }
 
+/* "12G" / "512M" / "1073741824" -> 字节；非法或越界返回 0（按未声明处理） */
+static long long mem_bytes(const char *s)
+{
+    char *end = NULL;
+    long long mult = 1;
+    long long v;
+
+    if (!s || !*s)
+        return 0;
+    v = strtoll(s, &end, 10);
+    if (end == s || v <= 0)
+        return 0;
+    switch (*end) {
+    case '\0': break;
+    case 'k': case 'K': mult = 1024LL; break;
+    case 'm': case 'M': mult = 1024LL * 1024; break;
+    case 'g': case 'G': mult = 1024LL * 1024 * 1024; break;
+    default: return 0;
+    }
+    if (v > (1LL << 52) / mult)
+        return 0; /* 4 PiB 以上不是声明而是笔误 */
+    return v * mult;
+}
+
+static void apply_mem_line(sup_ctx_t *ctx, const char *key, const char *val)
+{
+    /* AIRYRT_LAUNCH_MEM_<NAME> -> 常驻量声明，派生前的内存准入判据 */
+    static const char pfx[] = "AIRYRT_LAUNCH_MEM_";
+    size_t pl = sizeof(pfx) - 1;
+    if (strncmp(key, pfx, pl) != 0)
+        return;
+    int i = sup_proc_find(ctx, key + pl);
+    if (i < 0)
+        return; /* 未登记的 mem 声明拒绝（fail-closed） */
+    ctx->procs[i].need = mem_bytes(val);
+    if (ctx->procs[i].need == 0)
+        sup_log("WARN", "%s mem declaration unreadable: '%s'", key + pl, val);
+}
+
 /* 内置缺省表：仅 profile.env 无 launch 段时兜底（升级兼容） */
 int sup_decl_defaults(sup_ctx_t *ctx)
 {
@@ -320,6 +359,7 @@ int sup_decl_load(sup_ctx_t *ctx)
     ctx->backoff_max_ms = env_long("AIRYRT_SUP_BACKOFF_MAX_MS", SUP_DEFAULT_BACKOFF_MAX_MS);
     ctx->max_attempts = (int)env_long("AIRYRT_SUP_MAX_ATTEMPTS", SUP_DEFAULT_MAX_ATTEMPTS);
     ctx->liveness_ticks = (int)env_long("AIRYRT_SUP_LIVENESS_TICKS", SUP_DEFAULT_LIVENESS_TICKS);
+    ctx->admit_retry_ms = env_long("AIRYRT_SUP_ADMIT_RETRY_MS", SUP_DEFAULT_ADMIT_RETRY_MS);
     ctx->shutdown = 0;
 
     char pfile[SUP_PATH_MAX];
@@ -354,6 +394,7 @@ int sup_decl_load(sup_ctx_t *ctx)
                 apply_bin_line(ctx, key, val);
                 apply_ep_line(ctx, key, val);
                 apply_keep_line(ctx, key, val);
+                apply_mem_line(ctx, key, val);
             }
         }
     }
