@@ -89,7 +89,7 @@ static void svc_suggest(tool_service_t *svc, const char *want, char *buf, size_t
 {
     suggest_ctx_t c = {0};
     c.want = want;
-    tool_registry_each_name(svc->registry, suggest_feed, &c);
+    reg_each_name(svc->registry, suggest_feed, &c);
     if (c.n <= 0) {
         snprintf(buf, cap, "unknown tool '%s'; no similar tool is registered", want);
         return;

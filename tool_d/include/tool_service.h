@@ -24,6 +24,17 @@ void tool_service_destroy(tool_service_t *svc);
 
 
 int tool_service_register(tool_service_t *svc, const tool_metadata_t *meta);
+/**
+ * @brief Replace an already-registered tool record in place.
+ *
+ * Used by the in-session tool workshop (tool_create) to redefine a script
+ * tool it created earlier. Built-in entries (executable has the "builtin:"
+ * prefix) are never replaceable.
+ *
+ * @return 0 on success; AIRY_ERR_UNKNOWN when the tool does not exist;
+ *         AIRY_ERR_PERMISSION_DENIED when the target is built-in.
+ */
+int tool_service_replace(tool_service_t *svc, const tool_metadata_t *meta);
 tool_metadata_t *tool_service_get(tool_service_t *svc, const char *tool_id);
 void tool_metadata_free(tool_metadata_t *meta);
 /**

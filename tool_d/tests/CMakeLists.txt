@@ -36,6 +36,8 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_net.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_git.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_maths.c
+    # 会话内自制工具（tool_create）：脚本落盘 + 运行期登记/替换
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_toolmake.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sandbox/os_sandbox.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/approval/tool_interactive_approval.c
     # 0.1.9 M4：plugin_d → tool_d 整编——插件执行域源随迁测试
