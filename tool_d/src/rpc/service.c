@@ -114,6 +114,14 @@ tool_service_t *tool_service_create(const char *config_path)
          * 文件不存在时仅告警（保持 fail-closed 语义），不阻断启动。 */
         static daemon_security_config_t sec_cfg;
         __builtin_memset(&sec_cfg, 0, sizeof(sec_cfg));
+        /* 生产默认面必须显式给出：daemon_security_init 以 config 非空为
+         * 权威，零值结构体会把权限/审计全部关闭，而权限检查是 fail-closed
+         * 的——子系统关闭等价于拒绝一切工具调用（register_builtin_tools
+         * 逐条写入的 ACL 也将永不生效）。vault 无凭据后端，保持关闭。 */
+        sec_cfg.sanitize_level = SANITIZE_LEVEL_HIGH;
+        sec_cfg.enable_permission_cache = true;
+        sec_cfg.enable_audit_logging = true;
+        sec_cfg.enable_vault = false;
         static char rules_path[1024];
         const char *cfg_dir = airy_config_dir();
         if (cfg_dir && cfg_dir[0]) {
