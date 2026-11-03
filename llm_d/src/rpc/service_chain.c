@@ -66,11 +66,29 @@ static int svc_gate_acquire(const provider_t *prov, const char *model)
     provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
     uint64_t start = airy_time_ms();
     uint32_t step = SVC_GATE_STEP_MS;
+    int seat_logged = 0;
 
     for (;;) {
         uintptr_t cur = sync_atomic_load(&base->inflight);
-        if ((int)cur < cap && sync_atomic_cas(&base->inflight, cur, cur + 1))
+        if ((int)cur < cap && sync_atomic_cas(&base->inflight, cur, cur + 1)) {
+            /* 等座可见化（社区反馈③）：等过座才补占座成功事件，与超时
+             * WARN 构成完整等待弧线；即到即得不打点。 */
+            if (seat_logged)
+                SVC_LOG_INFO("C-L02: SVC: CHAIN-SEAT %s/%s granted after %ums (inflight=%d "
+                             "cap=%d)",
+                             prov->name ? prov->name : "?", model,
+                             (unsigned)(airy_time_ms() - start), (int)cur + 1, cap);
             return cap;
+        }
+        if (!seat_logged) {
+            /* 首次占座失败即声明等座（inflight 已到容量），等待去向在
+             * daemon 日志可观测，不再静默悬置至 1.5s 超时。 */
+            SVC_LOG_INFO("C-L02: SVC: CHAIN-SEAT-WAIT %s/%s inflight=%d cap=%d — bounded wait "
+                         "%dms",
+                         prov->name ? prov->name : "?", model, (int)cur, cap,
+                         SVC_GATE_WAIT_MS);
+            seat_logged = 1;
+        }
         uint64_t left = SVC_GATE_WAIT_MS - (airy_time_ms() - start);
         if ((int64_t)left <= 0) {
             SVC_LOG_WARN("C-L02: SVC: CHAIN-QUEUE %s/%s wait %dms exhausted (inflight=%d cap=%d)",
