@@ -40,9 +40,10 @@ int provider_http_post_stream_sse(const char *url, struct curl_slist *headers, c
                                   provider_sse_event_cb_t on_event, void *event_user_data,
                                   long *out_http_code);
 
-/* 控制帧发射：工具帧 RS 'T' <json> RS；推理帧 RS 'R' <reasoning> RS。 */
-void provider_emit_tool_frame(llm_stream_callback_t cb, void *ud, const char *tc_json);
-void provider_emit_reasoning_frame(llm_stream_callback_t cb, void *ud, const char *reasoning);
+/* 控制帧发射：工具帧 RS 'T' <json> RS；推理帧 RS 'R' <reasoning> RS。
+ * 任一分段回调返回非 0 即停止后续分段并原样返回，供取消向上传播。 */
+int provider_emit_tool_frame(llm_stream_callback_t cb, void *ud, const char *tc_json);
+int provider_emit_reasoning_frame(llm_stream_callback_t cb, void *ud, const char *reasoning);
 
 #ifdef __cplusplus
 }

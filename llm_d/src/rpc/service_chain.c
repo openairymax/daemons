@@ -286,7 +286,9 @@ static int attempt_run(const provider_t *prov, const char *model, svc_attempt_fn
 
     llm_response_free(*resp);
     *resp = NULL;
-    (void)llm_rtr_fail(prov->name, model, ret);
+    /* 下游取消不是端点故障：记进健康账本会把用户中止算成上游不可用。 */
+    if (ret != AIRY_ERR_CANCELED)
+        (void)llm_rtr_fail(prov->name, model, ret);
     return ret;
 }
 
@@ -331,6 +333,13 @@ static int chain_try(run_ctx_t *rc, svc_chain_t *chain, int auto_mode, const pro
     int ret = attempt_run(prov, model, rc->attempt, rc->actx, &step, gated, done);
     if (ret == 0)
         return CHAIN_OK;
+    /* 下游取消：无论兜底掩码与剩余深度如何都立即终止，换端点只会
+     * 把已放弃的请求重打到另一家上游。 */
+    if (ret == AIRY_ERR_CANCELED) {
+        if (chain->first_err == 0)
+            chain->first_err = ret;
+        return CHAIN_STOP;
+    }
     /* 记账已在 attempt_run 内完成；此处只做模式分派。 */
     if (!auto_mode)
         return ret;
