@@ -10,8 +10,7 @@
  *   1. capabilities 显式声明为唯一来源：整表替换，显式 false 即 false，
  *      未声明位恒 false；provider 级取首个显式声明的模型行
  *   2. 无 capabilities 声明时 8 位全 false（不派生、不按厂商名猜测）
- *   3. models[] 行未知键逐键忽略并告警，行本身保留（r113 P-R：整行拒载
- *      会把多余声明键放大成零模型的启动崩溃循环）
+ *   3. models[] 行未知键 fail-closed：该行拒载，其余行不受影响
  *   4. provision: managed 与 artifact 路径落位 model_entry_t
  *   5. provision 值域外（bogus）与 capabilities 裸名外键均拒载该行
  */
@@ -103,7 +102,7 @@ static const char kFallback[] = "models:\n"
                                 "    provider: prov\n"
                                 "    base_url: http://127.0.0.1:9/v1\n";
 
-/* t3：未知键只忽略该键，行保留；相邻合法键照常落位。 */
+/* t3：未知键拒载该行，有效行不受影响。 */
 static const char kUnknownKey[] = "models:\n"
                                   "  - name: good\n"
                                   "    model_id: good\n"
@@ -113,9 +112,7 @@ static const char kUnknownKey[] = "models:\n"
                                   "    model_id: bad\n"
                                   "    provider: prov\n"
                                   "    base_url: http://127.0.0.1:9/v1\n"
-                                  "    apikey: leaked\n"
-                                  "    timeout_ms: 120000\n"
-                                  "    max_concurrent: 3\n";
+                                  "    apikey: leaked\n";
 
 /* t4：provision/artifact 落位。 */
 static const char kProvision[] = "models:\n"
@@ -194,7 +191,7 @@ int main(void)
         free_providers(provs, n);
     }
 
-    /* 3) 未知键：只忽略键，两行都保留；合法键 max_concurrent 照常生效。 */
+    /* 3) 未知键：bad 行拒载，good 行照常导出。 */
     provs = NULL;
     n = 0;
     if (put_file(path, kUnknownKey) != 0)
@@ -203,9 +200,6 @@ int main(void)
     check_int("unknown.count", (int)n, 1);
     if (provs && n == 1) {
         check_str("unknown.model", provs[0].models[0], "good");
-        check_str("unknown.kept", provs[0].models[1], "bad");
-        check_int("unknown.tail", provs[0].models[2] == NULL, 1);
-        check_int("unknown.conc", provs[0].model_max_concurrent[1], 3);
         free_providers(provs, n);
     }
 
