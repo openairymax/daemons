@@ -113,8 +113,10 @@ static int svc_yaml_truthy(const char *v)
 }
 
 /* A7-4（0.1.20）声明面：models[] 行的已知键全集 = 字段表 13 键 + 路由与
- * 身份 8 键 + capabilities。行内出现集合外键即拒载（fail-closed：错拼的
- * 声明宁可丢行，不可静默失明）。providers 段不加此约束，存量声明不受影响。 */
+ * 身份 8 键 + capabilities。集合外键只忽略该键本身并逐键告警（r113 P-R：
+ * 原「整行拒载」把一处多余的声明键放大成零模型、进而启动 fail-closed 的
+ * 崩溃循环，代价与服务中断不成比例；未知键不改变语义，静默失明的风险由
+ * 带键名与模型名的告警承担）。providers 段不加此约束，存量声明不受影响。 */
 static int svc_yaml_key_known(const char *key)
 {
     static const char *const extra[] = {"name",     "model_id",  "provider",
@@ -127,16 +129,23 @@ static int svc_yaml_key_known(const char *key)
     return 0;
 }
 
-/* 返回行内首个契约外键名，结构合法返回 NULL。丢行必须给出可定位原因：
- * 只报聚合的 "no models found" 会让错拼的键静默失明（0.1.20 r42）。 */
-static const char *svc_yaml_badkey(struct yaml_node *item)
+/* 逐键报告行内契约外键；仅结构性非法（行非映射）返回 -1。丢行必须给出
+ * 可定位原因：只报聚合的 "no models found" 会让错拼的键静默失明（0.1.20
+ * r42），而整行丢弃会让运行态调参以服务中断为代价（0.1.20 r113 P-R）。 */
+static int svc_yaml_warn_unknown(struct yaml_node *item, const char *mn)
 {
-    if (item->type != YAML_NODE_MAPPING)
-        return "(not-a-mapping)";
-    for (struct yaml_mapping_entry *e = item->mapping; e && e->key; ++e)
-        if (!svc_yaml_key_known(e->key))
-            return e->key;
-    return NULL;
+    if (item->type != YAML_NODE_MAPPING) {
+        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN row dropped: not a mapping "
+                     "(name=%s), STACK: svc_yaml_parse_model", mn);
+        return -1;
+    }
+    for (struct yaml_mapping_entry *e = item->mapping; e && e->key; ++e) {
+        if (svc_yaml_key_known(e->key))
+            continue;
+        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN unknown key '%s' ignored "
+                     "(name=%s), STACK: svc_yaml_parse_model", e->key, mn);
+    }
+    return 0;
 }
 
 /* capabilities 子映射的 8 个裸名 → local_caps_t 位。 */
@@ -235,7 +244,8 @@ static void svc_yaml_route(model_entry_t *m, struct yaml_node *item, size_t row)
 
 /* models[] 的一行 → st->models[64]。v2 表格格式：name=展示名 /
  * model_id=模型名；provider 缺省退回 name。模型名与 provider 缺一丢行；
- * 未知键 / provision 值域外 / capabilities 结构非法同样丢行（A7-4）。 */
+ * 未知键逐键忽略并告警（A7-4，r113 P-R），provision 值域外与
+ * capabilities 结构非法仍丢行（语义已被改写，不能放行）。 */
 static void svc_yaml_parse_model(svc_yaml_state_t *st, struct yaml_node *item)
 {
     if (st->model_count >= 64)
@@ -250,12 +260,8 @@ static void svc_yaml_parse_model(svc_yaml_state_t *st, struct yaml_node *item)
                      "name/model_id, STACK: svc_yaml_parse_model");
         return;
     }
-    const char *bad = svc_yaml_badkey(item);
-    if (bad) {
-        SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN row dropped: unknown key "
-                     "'%s' (name=%s), STACK: svc_yaml_parse_model", bad, mn);
+    if (svc_yaml_warn_unknown(item, mn) != 0)
         return;
-    }
     model_entry_t *m = &st->models[st->model_count];
     __builtin_memset(m, 0, sizeof(*m));
     AIRY_STRNCPY_TERM(m->name, mn, sizeof(m->name));
