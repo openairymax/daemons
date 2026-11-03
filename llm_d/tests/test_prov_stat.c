@@ -10,7 +10,7 @@
 #include <stdio.h>
 
 #include "platform_base.h"
-#include "providers/core/prov_stat.h"
+#include "airy_prov/prov_stat.h"
 
 static int g_fail;
 
