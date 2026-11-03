@@ -23,6 +23,10 @@ extern "C" {
  * referenced by the JSON-RPC handlers). */
 extern tool_service_t *g_service;
 
+/* 执行面 worker 数（svc.c 自 config daemon.max_workers 提取；0 = 未配置，
+ * executor_pool 按内置默认起池。service.c 建 executor 时消费）。 */
+extern int g_tool_max_workers;
+
 #ifdef __cplusplus
 }
 #endif

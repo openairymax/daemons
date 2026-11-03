@@ -25,6 +25,19 @@
 
 tool_service_t *g_service = NULL;
 
+/* 执行面 worker 数配置（社区反馈③ config 旋钮）：daemon 段 max_workers
+ * 策略键，ep_load 的 keys 回调提取；0 = 未配置（executor_pool 按内置
+ * 默认 2 起池）。env AIRY_TOOL_EXEC_WORKERS 仍具更高优先级。 */
+int g_tool_max_workers = 0;
+
+static void cfg_keys(const cJSON *root, void *user)
+{
+    (void)user;
+    cJSON *item = cJSON_GetObjectItem(cJSON_GetObjectItem(root, "daemon"), "max_workers");
+    if (cJSON_IsNumber(item) && item->valuedouble >= 1 && item->valuedouble <= 8)
+        g_tool_max_workers = (int)item->valuedouble;
+}
+
 /* D8 工具可用性探测周期（架构改进方案 §3.6.3）：2s。验收要求「kill daemon
  * 后 5s 内其工具从 agent 可见列表消失」，取 2s 留一倍余量；AF_UNIX connect
  * 为本地微秒级调用，轮询成本可忽略。 */
@@ -62,8 +75,10 @@ static void avail_tick(airy_event_loop_t *loop, uint64_t timer_id, void *user_da
 
 static void ep_load(const char *config_path)
 {
-    daemon_ep_load(daemon_ep_slot(), config_path, TOOL_D_SOCKET_UNIX,
-                   TOOL_D_SOCKET_WIN, TOOL_D_TCP_PORT, NULL, NULL);
+    daemon_ep_load(daemon_ep_slot(), config_path, TOOL_D_SOCKET_UNIX, TOOL_D_SOCKET_WIN,
+                   TOOL_D_TCP_PORT, cfg_keys, NULL);
+    if (g_tool_max_workers)
+        SVC_LOG_INFO("executor_pool: config daemon.max_workers=%d", g_tool_max_workers);
 }
 
 int svc_prepare(const char *config_path)
