@@ -9,6 +9,7 @@
 
 #include "error.h"
 #include "daemon_platform_ext.h"
+#include "builtin/builtin.h"
 #include "core/registry.h"
 #include "core/tool_contract.h"
 #include "tool_service.h"
@@ -224,6 +225,33 @@ tool_metadata_t *tool_registry_get(tool_registry_t *reg, const char *tool_id)
     AIRY_ERROR_NULL(AIRY_ERR_UNKNOWN, "operation failed");
 }
 
+int reg_replace(tool_registry_t *reg, const tool_metadata_t *meta)
+{
+    if (!reg || !meta || !meta->id)
+        return AIRY_ERR_INVALID_PARAM;
+    unsigned int idx = hash(meta->id);
+    airy_mtx_lock(&reg->lock);
+    for (registry_entry_t *e = reg->buckets[idx]; e; e = e->next) {
+        if (strcmp(e->id, meta->id) != 0)
+            continue;
+        if (tool_builtin_is_builtin(e->meta->executable)) {
+            airy_mtx_unlock(&reg->lock);
+            return AIRY_ERR_PERMISSION_DENIED;
+        }
+        tool_metadata_t *copy = tool_metadata_clone(meta);
+        if (!copy) {
+            airy_mtx_unlock(&reg->lock);
+            return AIRY_ERR_OUT_OF_MEMORY;
+        }
+        tool_metadata_free(e->meta);
+        e->meta = copy;
+        airy_mtx_unlock(&reg->lock);
+        return 0;
+    }
+    airy_mtx_unlock(&reg->lock);
+    return AIRY_ERR_UNKNOWN;
+}
+
 void tool_registry_filter(tool_registry_t *reg, tool_up_fn fn, void *ud)
 {
     if (!reg)
@@ -234,7 +262,7 @@ void tool_registry_filter(tool_registry_t *reg, tool_up_fn fn, void *ud)
     airy_mtx_unlock(&reg->lock);
 }
 
-void tool_registry_each_name(tool_registry_t *reg, tool_name_fn fn, void *ud)
+void reg_each_name(tool_registry_t *reg, tool_name_fn fn, void *ud)
 {
     if (!reg || !fn)
         return;
@@ -270,6 +298,10 @@ char *tool_registry_list_json(tool_registry_t *reg)
             cJSON_AddStringToObject(obj, "name", e->meta->name);
             cJSON_AddStringToObject(obj, "description",
                                     e->meta->description ? e->meta->description : "");
+            /* executable 交给 agent 侧区分内置与动态脚本工具（动态者需要在
+             * 会话工具清单中追加，builtin: 前缀者已由 SSoT 目录覆盖）。 */
+            cJSON_AddStringToObject(obj, "executable",
+                                    e->meta->executable ? e->meta->executable : "");
             cJSON_AddNumberToObject(obj, "cacheable", e->meta->cacheable);
             /* M1-1a 工具目录 SSoT：list_tools 输出每个工具的 inputSchema
              * （OpenAI tools parameters 格式，从 tool_param_t 构造），

@@ -28,6 +28,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* 执行面 worker 数配置（策略侧 svc.c 赋值）：0 = 未配置，executor_pool
+ * 按内置默认起池；env AIRY_TOOL_EXEC_WORKERS 在池侧优先级更高。
+ * 定义落在此处（机制消费点），使服务主体可脱离 daemon 装配被独立链接与
+ * 测试。 */
+int g_tool_max_workers = 0;
+
 /* D8：注册表可见性谓词适配器——把工具可用性视图接到 registry 过滤点。 */
 static int svc_tool_up(const char *tool_id, void *ud)
 {
@@ -236,6 +242,25 @@ int tool_service_register(tool_service_t *svc, const tool_metadata_t *meta)
     } else {
         SVC_LOG_ERROR("Failed to register tool: %s", meta->id);
     }
+
+    return ret;
+}
+
+int tool_service_replace(tool_service_t *svc, const tool_metadata_t *meta)
+{
+    if (!svc || !meta || !meta->id) {
+        SVC_LOG_ERROR("Invalid parameters to tool_service_replace");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    airy_mtx_lock(&svc->lock);
+    int ret = reg_replace(svc->registry, meta);
+    airy_mtx_unlock(&svc->lock);
+
+    if (ret == 0)
+        SVC_LOG_INFO("Replaced tool: %s", meta->id);
+    else
+        SVC_LOG_WARN("Failed to replace tool: %s rc=%d", meta->id, ret);
 
     return ret;
 }

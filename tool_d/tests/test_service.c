@@ -286,6 +286,85 @@ static void test_fs_delete_builtin(void)
 }
 #endif /* !_WIN32 */
 
+#ifndef _WIN32
+/* 会话内自制工具端到端：创建 → 目录可见 → 按名执行 → 重定义；并锁死三类
+ * 拒绝路径（内置名抢占 / 非法名字 / 缺 shebang）。 */
+static void test_tool_create_builtin(void)
+{
+    printf("  test_tool_create_builtin...\n");
+
+    tool_service_t *svc = tool_service_create(NULL);
+    CHECK(svc != NULL);
+
+    const char *create_json =
+        "{\"name\":\"hello_tool\",\"description\":\"echo greeting\","
+        "\"script\":\"#!/bin/sh\\nprintf 'hi:%s' \\\"$1\\\"\\n\","
+        "\"params\":[{\"name\":\"who\",\"type\":\"string\"}]}";
+    tool_execute_request_t req = {0};
+    req.tool_id = "tool_create";
+    req.params_json = create_json;
+
+    tool_result_t *res = NULL;
+    int rc = tool_service_execute(svc, &req, &res);
+    CHECK(rc == 0 && res != NULL && res->success == 1);
+    CHECK(res->output != NULL);
+    CHECK(strstr(res->output, "\"updated\":false") != NULL);
+    tool_result_free(res);
+
+    tool_metadata_t *m = tool_service_get(svc, "hello_tool");
+    CHECK(m != NULL);
+    CHECK(m->executable != NULL && strstr(m->executable, "/scripts/hello_tool") != NULL);
+    CHECK(m->param_count == 1);
+    tool_metadata_free(m);
+
+    /* 落盘脚本可按名执行（JSON 参数作为 $1 传入） */
+    req.tool_id = "hello_tool";
+    req.params_json = "{\"who\":\"bob\"}";
+    res = NULL;
+    rc = tool_service_execute(svc, &req, &res);
+    CHECK(rc == 0 && res != NULL && res->success == 1);
+    CHECK(res->output != NULL && strstr(res->output, "hi:") != NULL);
+    tool_result_free(res);
+
+    /* 同名重定义 → updated */
+    req.tool_id = "tool_create";
+    req.params_json = create_json;
+    res = NULL;
+    rc = tool_service_execute(svc, &req, &res);
+    CHECK(rc == 0 && res != NULL && res->success == 1);
+    CHECK(strstr(res->output, "\"updated\":true") != NULL);
+    tool_result_free(res);
+
+    /* 拒绝：内置工具名抢占 */
+    req.params_json = "{\"name\":\"fs_read\",\"description\":\"x\","
+                      "\"script\":\"#!/bin/sh\\nexit 0\\n\"}";
+    res = NULL;
+    rc = tool_service_execute(svc, &req, &res);
+    CHECK(res != NULL && res->success == 0);
+    CHECK(res->error != NULL && strstr(res->error, "already registered") != NULL);
+    tool_result_free(res);
+
+    /* 拒绝：非法名字与缺 shebang */
+    req.params_json = "{\"name\":\"../escape\",\"description\":\"x\","
+                      "\"script\":\"#!/bin/sh\\nexit 0\\n\"}";
+    res = NULL;
+    rc = tool_service_execute(svc, &req, &res);
+    CHECK(res != NULL && res->success == 0);
+    tool_result_free(res);
+
+    req.params_json = "{\"name\":\"no_shebang\",\"description\":\"x\","
+                      "\"script\":\"exit 0\\n\"}";
+    res = NULL;
+    rc = tool_service_execute(svc, &req, &res);
+    CHECK(res != NULL && res->success == 0);
+    CHECK(res->error != NULL && strstr(res->error, "shebang") != NULL);
+    tool_result_free(res);
+
+    tool_service_destroy(svc);
+    printf("    PASSED\n");
+}
+#endif /* !_WIN32 */
+
 int main(void)
 {
     printf("=========================================\n");
@@ -294,6 +373,9 @@ int main(void)
 
     /* T16: fs 工具在 workspace 围堵下运行；本测试的删除目标都在 /tmp。 */
     setenv("AIRY_TOOL_SANDBOX_WORKSPACE", "/tmp", 1);
+    /* 自制工具落盘目录跟随 AIRY_HOME，测试固定到 /tmp 下，避免污染真实
+     * 用户数据目录（路径解析首次调用即固化，故必须在所有用例之前设置）。 */
+    setenv("AIRY_HOME", "/tmp/airy_tool_test_home", 1);
 
     test_service_create_destroy();
     test_service_register_tool();
@@ -303,6 +385,7 @@ int main(void)
     test_reject_bad_params_contract();
 #ifndef _WIN32
     test_fs_delete_builtin();
+    test_tool_create_builtin();
 #endif
 
     printf("\nAll tool service tests PASSED\n");

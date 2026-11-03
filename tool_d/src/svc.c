@@ -27,8 +27,8 @@ tool_service_t *g_service = NULL;
 
 /* 执行面 worker 数配置（社区反馈③ config 旋钮）：daemon 段 max_workers
  * 策略键，ep_load 的 keys 回调提取；0 = 未配置（executor_pool 按内置
- * 默认 2 起池）。env AIRY_TOOL_EXEC_WORKERS 仍具更高优先级。 */
-int g_tool_max_workers = 0;
+ * 默认 2 起池）。env AIRY_TOOL_EXEC_WORKERS 仍具更高优先级。
+ * 定义在 rpc/service.c（机制侧消费点），本件只做策略侧赋值。 */
 
 static void cfg_keys(const cJSON *root, void *user)
 {
