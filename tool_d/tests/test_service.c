@@ -129,6 +129,83 @@ static void test_service_get_tool(void)
     printf("    PASSED\n");
 }
 
+/* 社区反馈④：请求级拒绝必须把诊断文本回传模型（result 信封），
+ * 模型下一轮即可改参重试或换工具。两条用例分别锁死：
+ *  - 未知工具 → "did you mean" 近似建议；
+ *  - 参数校验失败 → "declared params" 参数契约。 */
+static void test_reject_unknown_tool_suggests(void)
+{
+    printf("  test_reject_unknown_tool_suggests...\n");
+
+    tool_service_t *svc = tool_service_create(NULL);
+    CHECK(svc != NULL);
+
+    tool_metadata_t meta;
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
+    meta.id = "echo_tool";
+    meta.name = "echo_tool";
+    meta.executable = "/bin/echo";
+    meta.timeout_sec = 10;
+    CHECK(tool_service_register(svc, &meta) == 0);
+
+    tool_execute_request_t req = {0};
+    req.tool_id = "echo_toll"; /* 幻觉名：与 echo_tool 近似 */
+    req.params_json = "{}";
+
+    tool_result_t *res = NULL;
+    int rc = tool_service_execute(svc, &req, &res);
+    CHECK(rc == AIRY_ERR_EXEC_NOT_FOUND);
+    CHECK(res != NULL);
+    CHECK(res->success == 0);
+    CHECK(res->error != NULL);
+    CHECK(strstr(res->error, "did you mean") != NULL);
+    CHECK(strstr(res->error, "echo_tool") != NULL);
+    tool_result_free(res);
+
+    tool_service_destroy(svc);
+
+    printf("    PASSED\n");
+}
+
+static void test_reject_bad_params_contract(void)
+{
+    printf("  test_reject_bad_params_contract...\n");
+
+    tool_service_t *svc = tool_service_create(NULL);
+    CHECK(svc != NULL);
+
+    tool_param_t params[1] = {
+        {"path", "{\"type\":\"string\"}", 1},
+    };
+    tool_metadata_t meta;
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
+    meta.id = "need_path_tool";
+    meta.name = "need_path_tool";
+    meta.executable = "/bin/echo";
+    meta.params = params;
+    meta.param_count = 1;
+    meta.timeout_sec = 10;
+    CHECK(tool_service_register(svc, &meta) == 0);
+
+    tool_execute_request_t req = {0};
+    req.tool_id = "need_path_tool";
+    req.params_json = "{}"; /* 缺 required 参数 path */
+
+    tool_result_t *res = NULL;
+    int rc = tool_service_execute(svc, &req, &res);
+    CHECK(rc == AIRY_ERR_EXEC_VALIDATION);
+    CHECK(res != NULL);
+    CHECK(res->success == 0);
+    CHECK(res->error != NULL);
+    CHECK(strstr(res->error, "declared params") != NULL);
+    CHECK(strstr(res->error, "path(string, required)") != NULL);
+    tool_result_free(res);
+
+    tool_service_destroy(svc);
+
+    printf("    PASSED\n");
+}
+
 #ifndef _WIN32
 static void test_fs_delete_builtin(void)
 {
@@ -222,6 +299,8 @@ int main(void)
     test_service_register_tool();
     test_service_list_tools();
     test_service_get_tool();
+    test_reject_unknown_tool_suggests();
+    test_reject_bad_params_contract();
 #ifndef _WIN32
     test_fs_delete_builtin();
 #endif
