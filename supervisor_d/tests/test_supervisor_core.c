@@ -76,6 +76,8 @@ static void env_clear(void)
     unsetenv("AIRYRT_SUP_BACKOFF_MAX_MS");
     unsetenv("AIRYRT_SUP_MAX_ATTEMPTS");
     unsetenv("AIRYRT_SUP_LIVENESS_TICKS");
+    unsetenv("AIRYRT_SUP_ADMIT_RETRY_MS");
+    unsetenv("AIRYRT_ADMIT_CMD");
 }
 
 /* 控制口客户端子进程：连接 g_ep，发单行请求，按断言词判定退出码 */
@@ -296,6 +298,9 @@ static int t_decl_overrides(void)
     fputs("AIRYRT_LAUNCH_BIN_ghost_d=/bin/ghost\n", f);
     fputs("AIRYRT_LAUNCH_EP_ghost_d=tcp:99999\n", f);
     fputs("AIRYRT_LAUNCH_EP_gateway_d=tcp:abc\n", f);
+    fputs("AIRYRT_LAUNCH_MEM_llama_server=3G\n", f);
+    fputs("AIRYRT_LAUNCH_MEM_gateway_d=640K\n", f);
+    fputs("AIRYRT_LAUNCH_MEM_ghost_d=1G\n", f);
     fclose(f);
 
     setenv("AIRY_HOME", g_dir, 1);
@@ -316,6 +321,96 @@ static int t_decl_overrides(void)
     char defbin[224];
     snprintf(defbin, sizeof(defbin), "%s/bin/gateway_d", g_dir);
     TEST_ASSERT(strcmp(ctx.procs[gi].bin, defbin) == 0, "default bin kept");
+    TEST_ASSERT(ctx.procs[li].need == 3LL * 1024 * 1024 * 1024, "mem G");
+    TEST_ASSERT(ctx.procs[gi].need == 640LL * 1024, "mem K");
+    TEST_ASSERT(sup_proc_find(&ctx, "ghost_d") == -1, "ghost mem registered");
+
+    env_clear();
+    rm_tmpdir();
+    TEST_OK();
+}
+
+/* 在临时目录放一个假 airy-rt-cap：原样吐出给定的 admit JSON */
+static int fake_admit(const char *body)
+{
+    char p[224];
+    snprintf(p, sizeof(p), "%s/admit", g_dir);
+    FILE *f = fopen(p, "w");
+    if (!f)
+        return -1;
+    fprintf(f, "#!/bin/sh\nprintf '%%s' '%s'\n", body);
+    fclose(f);
+    if (chmod(p, 0755) != 0)
+        return -1;
+    setenv("AIRYRT_ADMIT_CMD", p, 1);
+    return 0;
+}
+
+/* 判定映射：refuse 拦下、fit/unknown 放行、工具缺失按无策略放行 */
+static int t_admit_verdict(void)
+{
+    env_clear();
+    if (mk_tmpdir() != 0)
+        TEST_FAIL("mkdir tmp");
+    sup_proc_t p;
+    memset(&p, 0, sizeof(p));
+    snprintf(p.name, sizeof(p.name), "%s", "llm_d");
+    p.need = 1LL << 30;
+
+    long long short_bytes = -1;
+    if (fake_admit("{\"state\":\"refuse\",\"short\":4096}") != 0)
+        TEST_FAIL("write admit");
+    TEST_ASSERT(sup_admit_room(&p, &short_bytes) == 0, "refuse verdict");
+    TEST_ASSERT(short_bytes == 4096, "short bytes");
+
+    if (fake_admit("{\"state\":\"fit\",\"short\":0}") != 0)
+        TEST_FAIL("write admit");
+    TEST_ASSERT(sup_admit_room(&p, NULL) == 1, "fit verdict");
+
+    if (fake_admit("{\"state\":\"unknown\"}") != 0)
+        TEST_FAIL("write admit");
+    TEST_ASSERT(sup_admit_room(&p, NULL) == 1, "unknown is not refuse");
+
+    setenv("AIRYRT_ADMIT_CMD", "/nonexistent/airy-rt-cap", 1);
+    TEST_ASSERT(sup_admit_room(&p, NULL) == -1, "missing tool");
+
+    if (fake_admit("not-json") != 0)
+        TEST_FAIL("write admit");
+    TEST_ASSERT(sup_admit_room(&p, NULL) == -1, "unreadable verdict");
+
+    p.need = 0;
+    TEST_ASSERT(sup_admit_room(&p, NULL) == 1, "undeclared need");
+
+    env_clear();
+    rm_tmpdir();
+    TEST_OK();
+}
+
+/* 装不下时进 WAIT：不派生、不计连败，到期重判 */
+static int t_admit_wait(void)
+{
+    env_clear();
+    if (mk_tmpdir() != 0)
+        TEST_FAIL("mkdir tmp");
+    if (fake_admit("{\"state\":\"refuse\",\"short\":8589934592}") != 0)
+        TEST_FAIL("write admit");
+
+    sup_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.count = 1;
+    ctx.max_attempts = 5;
+    ctx.admit_retry_ms = 30000;
+    snprintf(ctx.procs[0].name, sizeof(ctx.procs[0].name), "%s", "llm_d");
+    snprintf(ctx.procs[0].bin, sizeof(ctx.procs[0].bin), "%s", "/bin/true");
+    ctx.procs[0].role = SUP_ROLE_CORE;
+    ctx.procs[0].need = 16LL << 30;
+    ctx.procs[0].pid = SUP_PID_INVALID;
+
+    TEST_ASSERT(sup_activate(&ctx, "llm_d") == -1, "activate must not start");
+    TEST_ASSERT(ctx.procs[0].state == SUP_ST_WAIT, "state must be wait");
+    TEST_ASSERT(ctx.procs[0].fail_count == 0, "refusal is not a failure");
+    TEST_ASSERT(ctx.procs[0].pid == SUP_PID_INVALID, "not spawned");
+    TEST_ASSERT(ctx.procs[0].next_ms > sup_now_ms(), "retry scheduled");
 
     env_clear();
     rm_tmpdir();
@@ -638,6 +733,10 @@ int main(void)
     pass += t_decl_load() == 0;
     run++;
     pass += t_decl_overrides() == 0;
+    run++;
+    pass += t_admit_verdict() == 0;
+    run++;
+    pass += t_admit_wait() == 0;
     run++;
     pass += t_env_scrub() == 0;
     run++;
