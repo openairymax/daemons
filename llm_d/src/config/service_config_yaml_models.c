@@ -132,7 +132,7 @@ static int svc_yaml_key_known(const char *key)
 /* 逐键报告行内契约外键；仅结构性非法（行非映射）返回 -1。丢行必须给出
  * 可定位原因：只报聚合的 "no models found" 会让错拼的键静默失明（0.1.20
  * r42），而整行丢弃会让运行态调参以服务中断为代价（0.1.20 r113 P-R）。 */
-static int svc_yaml_warn_unknown(struct yaml_node *item, const char *mn)
+static int svc_yaml_row_chk(struct yaml_node *item, const char *mn)
 {
     if (item->type != YAML_NODE_MAPPING) {
         SVC_LOG_WARN("C-L02: SVC: MODEL-CONFIG-WARN row dropped: not a mapping "
@@ -260,7 +260,7 @@ static void svc_yaml_parse_model(svc_yaml_state_t *st, struct yaml_node *item)
                      "name/model_id, STACK: svc_yaml_parse_model");
         return;
     }
-    if (svc_yaml_warn_unknown(item, mn) != 0)
+    if (svc_yaml_row_chk(item, mn) != 0)
         return;
     model_entry_t *m = &st->models[st->model_count];
     __builtin_memset(m, 0, sizeof(*m));
