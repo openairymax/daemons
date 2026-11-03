@@ -28,36 +28,57 @@
 
 #include <string.h>
 
-/* D2-9④（r7 硬化）：本地端点并发闸——
- *   server_parallel = first_nonzero(/props.total_slots, cfg, 1)
- *   max_inflight    = min(first_nonzero(cfg, 1), server_parallel)
- * 超限 AIRY_EBUSY 快速失败（链式语义下转下一候选端点）。cfg = 该模型的
- * model.yaml:max_concurrent。云族端点（未探测，props_state=0）不设闸。 */
+/* D2-9④（r113 T-22 收口）：本地端点并发闸——
+ *   server_parallel = /props.total_slots（已探测且 >0）
+ *   max_inflight    = cfg > 0 ? min(cfg, sp) : sp；两值皆无才回落 1
+ * cfg = model.yaml:max_concurrent（0 = 未声明）。total_slots 是 llama.cpp
+ * 已分配的并行槽事实，按 1 兜底会把多槽端点压成单流，这是 r113 压测吞吐
+ * 天花板的结构性成因。云族端点未探测（props_state=0），不设闸。 */
 static int svc_gate_limit(const provider_t *prov, const char *model)
 {
     provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
     if (!base || base->props_state == 0)
-        return 0; /* 不设闸 */
+        return 0;
     int cfg = prov_max_conc(prov, model);
-    int sp = base->total_slots > 0 ? base->total_slots : (cfg > 0 ? cfg : 1);
-    int mi = cfg > 0 ? cfg : 1;
-    return mi < sp ? mi : sp;
+    int sp = base->total_slots > 0 ? base->total_slots : 0;
+    int cap = cfg > 0 ? cfg : sp;
+
+    if (cap <= 0)
+        return 1;
+    return (sp > 0 && cap > sp) ? sp : cap;
 }
 
+/* r113 T-22：坐满后先有界等座，把突发抖动吸收在槽位轮转的时间尺度内；
+ * 等满上限仍 BUSY，绝不无限阻塞工作线程。上限是机制常数，容量才是策略
+ * 键（model.yaml:max_concurrent）；退避指数增长，等座唤醒量级可忽略。 */
+#define SVC_GATE_WAIT_MS 1500
+#define SVC_GATE_STEP_MS 2
+#define SVC_GATE_STEP_MAX_MS 16
+
 /* 返回值：>0 = 已占座，值为闸上限（退出前须配对 release）；0 = 未设闸；
- * -1 = 在座满，本端点本轮不可用。 */
+ * -1 = 等座超时，本端点本轮不可用。 */
 static int svc_gate_acquire(const provider_t *prov, const char *model)
 {
-    int limit = svc_gate_limit(prov, model);
-    if (limit <= 0)
+    int cap = svc_gate_limit(prov, model);
+    if (cap <= 0)
         return 0;
+
     provider_base_ctx_t *base = provider_base_ctx(prov->ctx);
+    uint64_t start = airy_time_ms();
+    uint32_t step = SVC_GATE_STEP_MS;
+
     for (;;) {
         uintptr_t cur = sync_atomic_load(&base->inflight);
-        if ((int)cur >= limit)
+        if ((int)cur < cap && sync_atomic_cas(&base->inflight, cur, cur + 1))
+            return cap;
+        uint64_t left = SVC_GATE_WAIT_MS - (airy_time_ms() - start);
+        if ((int64_t)left <= 0) {
+            SVC_LOG_WARN("C-L02: SVC: CHAIN-QUEUE %s/%s wait %dms exhausted (inflight=%d cap=%d)",
+                         prov->name ? prov->name : "?", model, SVC_GATE_WAIT_MS, (int)cur, cap);
             return -1;
-        if (sync_atomic_cas(&base->inflight, cur, cur + 1))
-            return limit;
+        }
+        airy_sleep_ms(left < step ? (uint32_t)left : step);
+        step = step < SVC_GATE_STEP_MAX_MS ? step * 2 : SVC_GATE_STEP_MAX_MS;
     }
 }
 
@@ -233,8 +254,9 @@ static int chain_gate(svc_chain_t *chain, const provider_t *prov, const char *mo
     }
 
     /* D2-9④：占座在调用前、退座在调用后，与链式放行独立——云族未设闸
-     * 时两者都是 no-op。在座满不记健康面失败（这是本地容量背压，不是
-     * 端点故障）：auto 模式直接转下一候选，off 模式原样回 BUSY。 */
+     * 时两者都是 no-op。等座有界（T-22）：等满上限仍无空位。
+     * 在座满不记健康面失败（这是本地容量背压，不是端点故障）：auto 模式
+     * 直接转下一候选，off 模式原样回 BUSY。 */
     int gated = svc_gate_acquire(prov, model);
 
     if (gated < 0) {
