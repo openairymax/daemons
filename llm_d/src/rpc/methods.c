@@ -363,6 +363,8 @@ typedef struct {
     uint64_t first_ms;
     char provider[64];
     char model[128];
+    /* 对端关闭后置位：后续 chunk 直接拒收，handler 据此不再回写错误帧。 */
+    int canceled;
 } llm_stream_ctx_t;
 
 #ifndef _WIN32
@@ -374,8 +376,9 @@ typedef struct {
 /* 阻塞式全量发送（仅流式）：curl write 回调的推速可超过网关 SSE 拉速，
  * airy_sock_send 的 MSG_DONTWAIT 在缓冲区满时返回 EAGAIN，会让回调失败并
  * 中断流。此处改为 send 循环 + poll(POLLOUT) 等待可写；对端关闭
- * （EPIPE/ECONNRESET）时静默放弃，不制造流失败。 */
-static void llm_stream_send_all(airy_sock_t fd, const char *buf, size_t len)
+ * （EPIPE/ECONNRESET）或等待可写超时时返回 -1，由调用方置取消位并让取消
+ * 沿 provider → 上游连接逐层传播，避免对已消失的客户端继续生成 token。 */
+static int llm_stream_send_all(airy_sock_t fd, const char *buf, size_t len)
 {
     size_t off = 0;
     while (off < len) {
@@ -392,28 +395,32 @@ static void llm_stream_send_all(airy_sock_t fd, const char *buf, size_t len)
 #ifdef _WIN32
             int e = WSAGetLastError();
             if (e != WSAEWOULDBLOCK && e != WSAEINTR)
-                break;
+                return -1;
 #else
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
 
                 struct pollfd pfd = {.fd = (int)fd, .events = POLLOUT};
                 if (poll(&pfd, 1, 1000) <= 0)
-                    break;
+                    return -1;
                 continue;
             }
             if (errno == EINTR)
                 continue;
-            break;
+            return -1;
 #endif
         } else {
-            break;
+            return -1;
         }
     }
+    return 0;
 }
 
-static void llm_stream_callback(const char *chunk, void *user_data)
+static int llm_stream_callback(const char *chunk, void *user_data)
 {
     llm_stream_ctx_t *sctx = (llm_stream_ctx_t *)user_data;
+
+    if (sctx->canceled)
+        return 1;
 
     /* D5：首个 chunk 到达即首 token 延迟；冷加载只观测不阻断，阈值判定
      * 归机制件（避免常量双写）。 */
@@ -422,7 +429,11 @@ static void llm_stream_callback(const char *chunk, void *user_data)
         ep_health_cold(g_ep, sctx->provider, sctx->model, (double)sctx->first_ms);
     }
 
-    llm_stream_send_all(sctx->fd, chunk, strlen(chunk));
+    if (llm_stream_send_all(sctx->fd, chunk, strlen(chunk)) != 0) {
+        sctx->canceled = 1;
+        return 1;
+    }
+    return 0;
 }
 
 /* P24（0.1.12）：流式路径的错误必须以 RS 'E' 帧下发——裸 JSON-RPC 信封会被
@@ -492,6 +503,13 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
     if (ret != 0) {
         AIRY_FREE((void *)cfg.model);
         request_context_destroy(ctx);
+        /* 取消不是失败：对端已关闭，回写 'E' 帧只会再产生一次 EPIPE，
+         * 且日志不应把用户主动中止记成服务错误。 */
+        if (stream_ctx.canceled || ret == AIRY_ERR_CANCELED) {
+            SVC_LOG_INFO("complete_stream: client disconnected, upstream canceled (id=%d)", id);
+            llm_response_free(resp);
+            return;
+        }
         /* 与 parse_params 失败路径同因同治：错误只能走 RS 'E' 帧。 */
         char ebuf[640];
         const char *msg = llm_fail_msg(ret, ebuf, sizeof(ebuf));

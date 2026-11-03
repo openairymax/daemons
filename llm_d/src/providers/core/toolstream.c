@@ -142,19 +142,23 @@ char *provider_tool_json(const provider_tool_acc_t *acc)
     return js;
 }
 
-void provider_tool_flush(provider_tool_acc_t *acc, llm_response_t *resp,
-                         llm_stream_callback_t cb, void *ud)
+int provider_tool_flush(provider_tool_acc_t *acc, llm_response_t *resp,
+                        llm_stream_callback_t cb, void *ud)
 {
     if (acc->count == 0)
-        return;
+        return 0;
     char *tc_json = provider_tool_json(acc);
     if (!tc_json)
-        return;
-    provider_emit_tool_frame(cb, ud, tc_json);
+        return 0;
+    if (provider_emit_tool_frame(cb, ud, tc_json) != 0) {
+        AIRY_FREE(tc_json);
+        return 1;
+    }
     if (resp && resp->choices && resp->choice_count > 0 && !resp->choices[0].tool_calls_json)
         resp->choices[0].tool_calls_json = tc_json;
     else
         AIRY_FREE(tc_json);
+    return 0;
 }
 
 void provider_tool_free(provider_tool_acc_t *acc)
@@ -173,15 +177,20 @@ void provider_stream_acc_init(provider_stream_acc_t *acc, llm_stream_callback_t 
     acc->acc_content = (char *)AIRY_MALLOC(acc->acc_cap);
 }
 
-void provider_stream_text_push(provider_stream_acc_t *acc, const char *text)
+int provider_stream_text_push(provider_stream_acc_t *acc, const char *text)
 {
     if (!acc || !text)
-        return;
-    if (acc->user_cb)
-        acc->user_cb(text, acc->user_data);
+        return 0;
+    if (acc->cancelled)
+        return 1;
+    if (acc->user_cb && acc->user_cb(text, acc->user_data) != 0) {
+        acc->cancelled = 1;
+        return 1;
+    }
     char *grown = provider_buf_append(acc->acc_content, &acc->acc_cap, &acc->acc_len, text);
     if (grown)
         acc->acc_content = grown;
+    return 0;
 }
 
 /* 响应身份段：首个非空值胜出（后续帧重复携带同值），created 取首个非零。 */
@@ -209,19 +218,28 @@ static void ident_take(provider_stream_acc_t *acc, const cJSON *root)
 
 /* delta 段：正文增量、推理增量、工具调用增量。推理轨迹与正文同流下发，
  * 每个增量立即作为 RS 'R' 控制帧转发，供 IPC 客户端实时展示思维链，同时
- * 累积用于流末装配（工具多轮回传）。端点不产 reasoning_content 时自然旁路。 */
-static void delta_take(provider_stream_acc_t *acc, const cJSON *delta)
+ * 累积用于流末装配（工具多轮回传）。端点不产 reasoning_content 时自然旁路。
+ * 返回非 0 表示下游取消：本帧剩余字段不再转发与累积。 */
+static int delta_take(provider_stream_acc_t *acc, const cJSON *delta)
 {
+    if (acc->cancelled)
+        return 1;
+
     const cJSON *content = cJSON_GetObjectItem(delta, "content");
 
-    if (cJSON_IsString(content) && content->valuestring)
-        provider_stream_text_push(acc, content->valuestring);
+    if (cJSON_IsString(content) && content->valuestring &&
+        provider_stream_text_push(acc, content->valuestring) != 0)
+        return 1;
 
     const cJSON *reasoning = cJSON_GetObjectItem(delta, "reasoning_content");
 
     if (cJSON_IsString(reasoning) && reasoning->valuestring) {
-        if (acc->user_cb)
-            provider_emit_reasoning_frame(acc->user_cb, acc->user_data, reasoning->valuestring);
+        if (acc->user_cb &&
+            provider_emit_reasoning_frame(acc->user_cb, acc->user_data, reasoning->valuestring) !=
+                0) {
+            acc->cancelled = 1;
+            return 1;
+        }
         char *grown = provider_buf_append(acc->acc_reasoning, &acc->acc_reasoning_cap,
                                           &acc->acc_reasoning_len, reasoning->valuestring);
         if (grown)
@@ -229,16 +247,17 @@ static void delta_take(provider_stream_acc_t *acc, const cJSON *delta)
     }
 
     provider_tool_delta(&acc->tools, delta);
+    return 0;
 }
 
 /* 单条 choice：delta 段与 finish_reason。字面 "null" 视为未终结——部分
  * 端点在中间帧显式下发该字符串。 */
-static void choice_take(provider_stream_acc_t *acc, const cJSON *choice)
+static int choice_take(provider_stream_acc_t *acc, const cJSON *choice)
 {
     const cJSON *delta = cJSON_GetObjectItem(choice, "delta");
 
-    if (delta)
-        delta_take(acc, delta);
+    if (delta && delta_take(acc, delta) != 0)
+        return 1;
 
     const cJSON *fr = cJSON_GetObjectItem(choice, "finish_reason");
 
@@ -246,11 +265,15 @@ static void choice_take(provider_stream_acc_t *acc, const cJSON *choice)
         AIRY_FREE(acc->finish_reason);
         acc->finish_reason = AIRY_STRDUP(llm_finish_reason_norm(fr->valuestring));
     }
+    return 0;
 }
 
 int prov_stream_chunk(const char *json_line, void *userdata)
 {
     provider_stream_acc_t *acc = (provider_stream_acc_t *)userdata;
+
+    if (acc->cancelled)
+        return 1;
 
     CJSON_PARSE_GUARD(root, json_line, { return 0; });
 
@@ -258,8 +281,9 @@ int prov_stream_chunk(const char *json_line, void *userdata)
 
     const cJSON *choices = cJSON_GetObjectItem(root, "choices");
 
-    if (cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0)
-        choice_take(acc, cJSON_GetArrayItem(choices, 0));
+    if (cJSON_IsArray(choices) && cJSON_GetArraySize(choices) > 0 &&
+        choice_take(acc, cJSON_GetArrayItem(choices, 0)) != 0)
+        return 1;
 
     /* Streaming usage: the final chunk (which carries no choices) attaches
      * the usage block when include_usage is declared. Last parse wins

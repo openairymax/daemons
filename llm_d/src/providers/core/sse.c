@@ -63,30 +63,39 @@ char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text)
 /* ── 流式控制帧发射（帧格式权威：commons/include/airy_llm_stream.h，
  * openai/deepseek/local 共用，见 provider.h） ──
  * 帧各段须 NUL 结尾：llm_stream_callback 对 chunk 调 strlen()，非结尾数组
- * 会栈越界（ASan 2026-08-16 实测捕获）。 */
-void provider_emit_tool_frame(llm_stream_callback_t cb, void *ud, const char *tc_json)
+ * 会栈越界（ASan 2026-08-16 实测捕获）。
+ * 三段任一返回非 0 立即停止，避免取消后继续向已断开的对端写帧。 */
+int provider_emit_tool_frame(llm_stream_callback_t cb, void *ud, const char *tc_json)
 {
     if (!cb || !tc_json)
-        return;
+        return 0;
     char pre[3] = {(char)AIRY_LLM_STREAM_RS, AIRY_LLM_STREAM_TAG_TOOL, '\0'};
     char post[2] = {(char)AIRY_LLM_STREAM_RS, '\0'};
-    cb(pre, ud);
-    cb(tc_json, ud);
-    cb(post, ud);
+    int rc = cb(pre, ud);
+    if (rc)
+        return rc;
+    rc = cb(tc_json, ud);
+    if (rc)
+        return rc;
+    return cb(post, ud);
 }
 
 /* Reasoning frame: RS 'R' <reasoning_content> RS。DeepSeek thinking 模式要求
  * assistant 轮的 reasoning_content 在工具续接轮回传（否则上游 400），流式
  * 路径必须透出，否则工具循环断裂。 */
-void provider_emit_reasoning_frame(llm_stream_callback_t cb, void *ud, const char *reasoning)
+int provider_emit_reasoning_frame(llm_stream_callback_t cb, void *ud, const char *reasoning)
 {
     if (!cb || !reasoning || !reasoning[0])
-        return;
+        return 0;
     char pre[3] = {(char)AIRY_LLM_STREAM_RS, AIRY_LLM_STREAM_TAG_REASON, '\0'};
     char post[2] = {(char)AIRY_LLM_STREAM_RS, '\0'};
-    cb(pre, ud);
-    cb(reasoning, ud);
-    cb(post, ud);
+    int rc = cb(pre, ud);
+    if (rc)
+        return rc;
+    rc = cb(reasoning, ud);
+    if (rc)
+        return rc;
+    return cb(post, ud);
 }
 
 typedef struct {

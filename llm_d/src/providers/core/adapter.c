@@ -169,7 +169,15 @@ static int stream_finish(const provider_adapter_t *ops, const provider_base_ctx_
 {
     llm_response_t *resp = provider_stream_take(acc);
 
-    provider_tool_flush(&acc->tools, resp, callback, callback_data);
+    if (provider_tool_flush(&acc->tools, resp, callback, callback_data) != 0) {
+        SVC_LOG_INFO("C-L02: %s: STREAM-CANCELLED model=%s phase=tool_flush http_code=%ld",
+                     ops->tag, model, http_code);
+        llm_response_free(resp);
+        provider_stream_acc_free(acc);
+        if (out_response)
+            *out_response = NULL;
+        return AIRY_ERR_CANCELED;
+    }
     provider_stream_acc_free(acc);
 
     int integrity = resp ? stream_integrity(resp) : AIRY_OK;
@@ -302,6 +310,17 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
         lat_note(base, t0);
 
     AIRY_FREE(req_body);
+
+    /* 下游取消先于传输错误判定：CURLE_WRITE_ERROR 是取消的必然产物，
+     * 报成上游 IO 故障会把用户主动中止记进端点健康账本。 */
+    if (acc.cancelled) {
+        SVC_LOG_INFO("C-L02: %s: STREAM-CANCELLED model=%s http_code=%ld phase=transfer", ops->tag,
+                     model, http_code);
+        provider_stream_acc_free(&acc);
+        if (out_response)
+            *out_response = NULL;
+        return AIRY_ERR_CANCELED;
+    }
 
     if (ret != AIRY_OK) {
         SVC_LOG_ERROR("C-L02: %s: STREAM-FAIL model=%s http_code=%ld DIAGNOSIS=%s", ops->tag,

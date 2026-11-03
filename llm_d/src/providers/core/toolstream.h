@@ -69,9 +69,10 @@ void provider_tool_delta(provider_tool_acc_t *acc, const cJSON *delta);
 char *provider_tool_json(const provider_tool_acc_t *acc);
 
 /* 流末发射：发 RS 'T' 控制帧并落入 resp->choices[0].tool_calls_json；
- * resp 无空槽位时由本函数释放 JSON。空槽位时 no-op。 */
-void provider_tool_flush(provider_tool_acc_t *acc, llm_response_t *resp,
-                         llm_stream_callback_t cb, void *ud);
+ * resp 无空槽位时由本函数释放 JSON。空槽位时 no-op。
+ * 返回 0 正常，非 0 表示下游已取消（此刻 JSON 已释放，resp 未落值）。 */
+int provider_tool_flush(provider_tool_acc_t *acc, llm_response_t *resp,
+                        llm_stream_callback_t cb, void *ud);
 
 /* 释放槽位参数缓冲并复位（调用后 acc 可安全复用）。 */
 void provider_tool_free(provider_tool_acc_t *acc);
@@ -99,6 +100,9 @@ typedef struct {
     uint32_t cached_tokens;
     llm_timings_t timings;
     provider_tool_acc_t tools;
+    /* 下游取消标记：chunk 回调返回非 0 后置位，后续 chunk 直接短路，
+     * 传输层据此把 CURLE_WRITE_ERROR 判为取消而非上游故障。 */
+    int cancelled;
 } provider_stream_acc_t;
 
 /* 清零并预分配 content 缓冲（4096 起步）。 */
@@ -110,8 +114,9 @@ int prov_stream_chunk(const char *json_line, void *userdata);
 
 /* 流文本推送原语：user_cb 即时转发 + acc_content 累积双写。行协议
  * （on_chunk content 分支）与具名事件协议（text_delta 分支）
- * 共同消费，两种协议的增量交付形状由此唯一。 */
-void provider_stream_text_push(provider_stream_acc_t *acc, const char *text);
+ * 共同消费，两种协议的增量交付形状由此唯一。
+ * 返回 0 正常，非 0 表示下游取消（acc->cancelled 已置位，未累积）。 */
+int provider_stream_text_push(provider_stream_acc_t *acc, const char *text);
 
 /* 流末装配响应并转移缓冲所有权；acc 内已转移指针被复位。 */
 llm_response_t *provider_stream_take(provider_stream_acc_t *acc);

@@ -449,14 +449,22 @@ typedef struct {
     llm_stream_callback_t cb;
     void *ud;
     int sent;
+    /* 下游取消（回调返回非 0）：停止继续下发，并作为取消而非失败上报。 */
+    int cancelled;
 } stream_ctx_t;
 
-static void stream_guard(const char *chunk, void *user_data)
+static int stream_guard(const char *chunk, void *user_data)
 {
     stream_ctx_t *ctx = (stream_ctx_t *)user_data;
+    if (ctx->cancelled)
+        return 1;
     if (chunk && chunk[0])
         ctx->sent = 1;
-    ctx->cb(chunk, ctx->ud);
+    if (ctx->cb(chunk, ctx->ud) != 0) {
+        ctx->cancelled = 1;
+        return 1;
+    }
+    return 0;
 }
 
 static int stream_sent(void *ctx)
@@ -476,7 +484,10 @@ static int stream_attempt(void *ctx, const svc_step_t *step, llm_response_t **ou
 
     int ret = step->prov->adapter->complete_stream(step->prov->ctx, &step->eff, stream_guard, sc,
                                                    out);
-    if (ret != 0)
+    if (ret == AIRY_ERR_CANCELED)
+        SVC_LOG_INFO("C-L02: SVC: STREAM-CANCELLED provider=%s model=%s",
+                     step->prov->name ? step->prov->name : "?", step->eff.model);
+    else if (ret != 0)
         SVC_LOG_ERROR("C-L02: SVC: STREAM-ATTEMPT-FAIL provider=%s model=%s error=%d",
                       step->prov->name ? step->prov->name : "?", step->eff.model, ret);
     return ret;

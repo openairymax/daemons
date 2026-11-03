@@ -216,6 +216,8 @@ static int msg_map_event(const char *event, const char *data, size_t data_len, v
     provider_stream_acc_t *acc = (provider_stream_acc_t *)user_data;
     if (!data || data_len == 0)
         return 0;
+    if (acc->cancelled)
+        return 1;
     CJSON_PARSE_GUARD(root, data, { return 0; });
     const char *name = provider_json_str_val(root, "type");
     if (!name)
@@ -236,9 +238,10 @@ static int msg_map_event(const char *event, const char *data, size_t data_len, v
                                 provider_json_str_val(blk, "name"));
     } else if (strcmp(name, "content_block_delta") == 0) {
         const char *dname = provider_json_str_val(delta, "type");
-        if (dname && strcmp(dname, "text_delta") == 0)
-            provider_stream_text_push(acc, provider_json_str_val(delta, "text"));
-        else if (dname && strcmp(dname, "input_json_delta") == 0)
+        if (dname && strcmp(dname, "text_delta") == 0) {
+            if (provider_stream_text_push(acc, provider_json_str_val(delta, "text")) != 0)
+                return 1;
+        } else if (dname && strcmp(dname, "input_json_delta") == 0)
             provider_tool_args_add(&acc->tools, index,
                                    provider_json_str_val(delta, "partial_json"));
     } else if (strcmp(name, "message_delta") == 0) {
