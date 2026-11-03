@@ -234,6 +234,22 @@ void tool_registry_filter(tool_registry_t *reg, tool_up_fn fn, void *ud)
     airy_mtx_unlock(&reg->lock);
 }
 
+void tool_registry_each_name(tool_registry_t *reg, tool_name_fn fn, void *ud)
+{
+    if (!reg || !fn)
+        return;
+    airy_mtx_lock(&reg->lock);
+    for (int i = 0; i < HASH_SIZE; ++i) {
+        for (registry_entry_t *e = reg->buckets[i]; e; e = e->next) {
+            /* 与 list_tools 同一可见性口径：建议只含此刻可暴露的工具。 */
+            if (reg->up && !reg->up(e->meta->id, reg->up_ud))
+                continue;
+            fn(e->meta->id, ud);
+        }
+    }
+    airy_mtx_unlock(&reg->lock);
+}
+
 char *tool_registry_list_json(tool_registry_t *reg)
 {
     if (!reg)
