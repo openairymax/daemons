@@ -15,8 +15,8 @@
 #define AIRY_RT_DAEMON_LLM_D_INTERNAL_H
 
 #include "llm_service.h"
-#include "providers/core/ep_health.h"
-#include "providers/core/registry.h"
+#include "airy_prov/ep_health.h"
+#include "airy_prov/registry.h"
 
 #include <cjson/cJSON.h>
 

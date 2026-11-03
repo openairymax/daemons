@@ -1,0 +1,530 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
+/**
+ * @file sse.c
+ * @brief Provider 域唯一 SSE 分帧状态机（B16-S3 c4：三套收敛为一套）。
+ *
+ * 双模式：
+ * - 行协议模式（provider_http_post_stream）：SSE data 行载荷 NUL 终结后交付
+ *   provider_stream_chunk_cb_t，"[DONE]" 置正常终止。openai/deepseek/local
+ *   走此模式。
+ * - 具名事件模式（provider_http_post_stream_sse）：event:/data: 双行解析，
+ *   事件名与载荷一并交付 provider_sse_event_cb_t，空行复位事件块。
+ *   anthropic/google 走此模式。
+ *
+ * 两模式共享分帧（CR 剥离、缓冲扫描、重试复位）、错误体诊断（raw_buf）与
+ * 重试循环；适配层只填回调，禁止自持 curl 循环副本。域拆分自 provider.c
+ * （2026-08-27）；anthropic/google 私有 SSE 状态机于 c4 收敛至此；流式重试
+ * 循环于 c8 收敛至 core/retry.c（本件只提供单次尝试与两个钩子）。
+ */
+
+#include "airy_llm_stream.h"
+#include "airy_memory.h"
+#include "error.h"
+#include "airy_prov/prov_diag.h"
+#include "airy_prov/provider_transport.h"
+#include "airy_prov/provider_stream.h"
+#include "airy_prov/provider_retry.h"
+#include "svc_logger.h"
+
+#include <curl/curl.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+
+char *prov_buf_add(char *buf, size_t *cap, size_t *len, const char *data, size_t dlen)
+{
+    if (!data || dlen == 0)
+        return buf;
+
+    size_t needed = *len + dlen + 1;
+    if (needed > *cap) {
+        size_t new_cap = *cap > 0 ? *cap : 4096;
+        while (new_cap < needed)
+            new_cap *= 2;
+        char *ptr = (char *)AIRY_REALLOC(buf, new_cap);
+        if (!ptr)
+            return NULL;
+        buf = ptr;
+        *cap = new_cap;
+    }
+    __builtin_memcpy(buf + *len, data, dlen);
+    *len += dlen;
+    buf[*len] = '\0';
+    return buf;
+}
+
+char *provider_buf_append(char *buf, size_t *cap, size_t *len, const char *text)
+{
+    return text ? prov_buf_add(buf, cap, len, text, strlen(text)) : buf;
+}
+
+/* ── 流式控制帧发射（帧格式权威：commons/include/airy_llm_stream.h，
+ * openai/deepseek/local 共用，见 provider.h） ──
+ * 帧各段须 NUL 结尾：llm_stream_callback 对 chunk 调 strlen()，非结尾数组
+ * 会栈越界（ASan 2026-08-16 实测捕获）。
+ * 三段任一返回非 0 立即停止，避免取消后继续向已断开的对端写帧。 */
+int provider_emit_tool_frame(llm_stream_callback_t cb, void *ud, const char *tc_json)
+{
+    if (!cb || !tc_json)
+        return 0;
+    char pre[3] = {(char)AIRY_LLM_STREAM_RS, AIRY_LLM_STREAM_TAG_TOOL, '\0'};
+    char post[2] = {(char)AIRY_LLM_STREAM_RS, '\0'};
+    int rc = cb(pre, ud);
+    if (rc)
+        return rc;
+    rc = cb(tc_json, ud);
+    if (rc)
+        return rc;
+    return cb(post, ud);
+}
+
+/* Reasoning frame: RS 'R' <reasoning_content> RS。DeepSeek thinking 模式要求
+ * assistant 轮的 reasoning_content 在工具续接轮回传（否则上游 400），流式
+ * 路径必须透出，否则工具循环断裂。 */
+int provider_emit_reasoning_frame(llm_stream_callback_t cb, void *ud, const char *reasoning)
+{
+    if (!cb || !reasoning || !reasoning[0])
+        return 0;
+    char pre[3] = {(char)AIRY_LLM_STREAM_RS, AIRY_LLM_STREAM_TAG_REASON, '\0'};
+    char post[2] = {(char)AIRY_LLM_STREAM_RS, '\0'};
+    int rc = cb(pre, ud);
+    if (rc)
+        return rc;
+    rc = cb(reasoning, ud);
+    if (rc)
+        return rc;
+    return cb(post, ud);
+}
+
+typedef struct {
+    char *line_buf;
+    size_t line_cap;
+    size_t line_len;
+    /* Raw response body (all bytes, SSE or not): kept so an error status
+     * (e.g. upstream 400) can surface its JSON error body in the daemon log
+     * instead of being silently dropped by the SSE line parser (2026-08-16). */
+    char *raw_buf;
+    size_t raw_cap;
+    size_t raw_len;
+    /* 双模式回调互斥：on_event 非空走具名事件模式，否则 on_chunk 行协议，
+     * 由两个公开入口分别保证。 */
+    provider_stream_chunk_cb_t on_chunk;
+    provider_sse_event_cb_t on_event;
+    void *chunk_user_data;
+    char event_name[64]; /* 具名事件模式：当前事件块缓存，空行复位 */
+    int cancelled;
+    int done;
+} sse_stream_ctx_t;
+
+static void sse_ctx_init(sse_stream_ctx_t *sse, void *user_data)
+{
+    __builtin_memset(sse, 0, sizeof(*sse));
+    sse->line_cap = 4096;
+    sse->line_buf = (char *)AIRY_MALLOC(sse->line_cap);
+    if (!sse->line_buf) {
+        SVC_LOG_ERROR("C-L02: PROVIDER: SSE-INIT-FAIL reason=oom cap=%zu "
+                      "STACK: sse_ctx_init",
+                      sse->line_cap);
+    }
+    sse->raw_cap = 4096;
+    sse->raw_buf = (char *)AIRY_MALLOC(sse->raw_cap);
+    if (!sse->raw_buf) {
+        SVC_LOG_ERROR("C-L02: PROVIDER: SSE-INIT-FAIL reason=oom_raw_cap=%zu "
+                      "STACK: sse_ctx_init",
+                      sse->raw_cap);
+    }
+    sse->chunk_user_data = user_data;
+}
+
+static void sse_ctx_destroy(sse_stream_ctx_t *sse)
+{
+    if (sse) {
+        AIRY_FREE(sse->line_buf);
+        sse->line_buf = NULL;
+        AIRY_FREE(sse->raw_buf);
+        sse->raw_buf = NULL;
+    }
+}
+
+/* Accumulate every received byte so an error body survives SSE parsing. */
+static void sse_raw_append(sse_stream_ctx_t *sse, const char *data, size_t len)
+{
+    if (!sse->raw_buf || len == 0)
+        return;
+    char *grown = prov_buf_add(sse->raw_buf, &sse->raw_cap, &sse->raw_len, data, len);
+    if (grown)
+        sse->raw_buf = grown;
+}
+
+/* 具名事件字段：剥离 event: 后的空白，超长截断到定长缓冲。 */
+static void event_take(sse_stream_ctx_t *sse, const char *line, size_t len)
+{
+    const char *ev = line + 6;
+
+    while (*ev == ' ' || *ev == '\t')
+        ev++;
+
+    size_t elen = len - (size_t)(ev - line);
+
+    if (elen >= sizeof(sse->event_name))
+        elen = sizeof(sse->event_name) - 1;
+    __builtin_memcpy(sse->event_name, ev, elen);
+    sse->event_name[elen] = '\0';
+}
+
+/* 交付一份 data 载荷：适配层回调（cJSON 解析 / strlen 语义）要求 NUL 终结
+ * 字符串，line_buf 内部切片不满足，故按需复制。返回非零表示回调要求取消，
+ * 语义与 curl 写回调一致。 */
+static int data_deliver(sse_stream_ctx_t *sse, const char *data, size_t len)
+{
+    if (!sse->on_chunk && !sse->on_event)
+        return 0;
+
+    char *tmp = (char *)AIRY_MALLOC(len + 1);
+
+    if (!tmp)
+        return 0;
+
+    __builtin_memcpy(tmp, data, len);
+    tmp[len] = '\0';
+
+    int ret = sse->on_event ? sse->on_event(sse->event_name[0] ? sse->event_name : NULL, tmp, len,
+                                            sse->chunk_user_data)
+                            : sse->on_chunk(tmp, sse->chunk_user_data);
+
+    AIRY_FREE(tmp);
+    return ret;
+}
+
+static int sse_feed_line(sse_stream_ctx_t *sse, const char *line, size_t len)
+{
+    if (!line || len == 0)
+        return 0;
+
+    /* 具名事件模式：缓存 event: 字段；其余非 data 字段（id:/retry:/注释行）
+     * 对两模式都无意义，落入下方前缀判断即被忽略。 */
+    if (sse->on_event && len >= 6 && memcmp(line, "event:", 6) == 0) {
+        event_take(sse, line, len);
+        return 0;
+    }
+
+    if (len < 5 || memcmp(line, "data:", 5) != 0)
+        return 0;
+
+    const char *start = line + 5;
+
+    while (*start == ' ' || *start == '\t')
+        start++;
+
+    size_t dlen = len - (size_t)(start - line);
+
+    if (dlen >= 6 && memcmp(start, "[DONE]", 6) == 0) {
+        /* Normal stream end: [DONE] is the standard SSE-protocol
+         * terminator, not an error. Only set the done flag; cancelled is
+         * left for on_chunk error cancellation — otherwise the curl write
+         * callback returning 0 due to cancelled would falsely report
+         * CURLE_WRITE_ERROR and treat a normal completion as STREAM-FAIL
+         * (historical defect exposed by real streaming callers). */
+        sse->done = 1;
+        return 0;
+    }
+
+    int ret = data_deliver(sse, start, dlen);
+
+    if (ret != 0)
+        sse->cancelled = 1;
+    return ret;
+}
+
+static void sse_process_buffer(sse_stream_ctx_t *sse)
+{
+    if (sse->line_len == 0)
+        return;
+
+    char *p = sse->line_buf;
+    char *end = p + sse->line_len;
+
+    while (p < end) {
+        char *nl = (char *)memchr(p, '\n', (size_t)(end - p));
+        if (!nl)
+            break;
+
+        size_t line_len = (size_t)(nl - p);
+        if (line_len > 0 && *(nl - 1) == '\r')
+            line_len--;
+
+        if (line_len > 0) {
+            int r = sse_feed_line(sse, p, line_len);
+            if (r != 0 || sse->cancelled)
+                return;
+        } else if (sse->on_event) {
+            /* SSE 规范：空行终止一个事件块，具名事件缓存随之失效。 */
+            sse->event_name[0] = '\0';
+        }
+
+        p = nl + 1;
+    }
+
+    if (p < end) {
+        size_t remaining = (size_t)(end - p);
+        __builtin_memmove(sse->line_buf, p, remaining);
+        sse->line_len = remaining;
+    } else {
+        sse->line_len = 0;
+    }
+}
+
+static size_t sse_write_callback(void *contents, size_t size, size_t nmemb, void *userp)
+{
+    size_t realsize = size * nmemb;
+    sse_stream_ctx_t *sse = (sse_stream_ctx_t *)userp;
+
+    if (sse->cancelled)
+        return 0;
+
+    char *grown = prov_buf_add(sse->line_buf, &sse->line_cap, &sse->line_len,
+                                        (const char *)contents, realsize);
+    if (!grown)
+        return 0;
+    sse->line_buf = grown;
+
+    sse_raw_append(sse, (const char *)contents, realsize);
+
+    sse_process_buffer(sse);
+
+    if (sse->cancelled)
+        return 0;
+    return realsize;
+}
+
+/* 单次流式尝试的上下文：写回调绑定到分帧状态机。 */
+typedef struct {
+    const char *url;
+    struct curl_slist *headers;
+    const char *body;
+    double timeout_sec;
+    sse_stream_ctx_t *sse;
+} sse_try_ctx_t;
+
+/* 单次尝试：装配 curl、执行、取回响应码（重试壳在 core/retry.c）。 */
+static provider_attempt_t sse_try(void *ud, int retry, double left_sec, CURLcode *out_res,
+                                  long *out_http_code, int *out_tmo)
+{
+    sse_try_ctx_t *ctx = (sse_try_ctx_t *)ud;
+
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d retry=%d "
+                      "STACK: sse_try curl_easy_init",
+                      ctx->url, errno, retry);
+        return PROVIDER_TRY_FATAL;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, ctx->url);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, ctx->body);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, ctx->headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sse_write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, ctx->sse);
+    /* 首试给足全额预算；重试用整轮剩余墙钟，避免单次尝试越过总预算。
+     * 读空闲闸门与总预算分立：上游持续吐字时不触发 idle 超时。 */
+    double budget = retry == 0 ? ctx->timeout_sec : left_sec;
+    provider_http_setup(curl, budget, PROVIDER_READ_IDLE_SEC);
+
+    CURLcode res = curl_easy_perform(curl);
+    /* 失败路径也要取码：上游先回状态码再断流时，收尾要按状态码打印错误体
+     * 并归类（与 http_try 只在成功时取码不同）。 */
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, out_http_code);
+    prov_http_done(curl, budget, res, out_tmo);
+
+    *out_res = res;
+    return res == CURLE_OK ? PROVIDER_TRY_DONE : PROVIDER_TRY_FAILED;
+}
+
+/* 流式重试闸门：只有上游一个字节都没下发（http_code == 0 且 raw_len == 0）才
+ * 允许重试。一旦写回调收到过数据，分片可能已经经回调交付用户，重试会造成
+ * 重复输出。 */
+static int sse_gate(void *ud, CURLcode res, long http_code)
+{
+    (void)res;
+    sse_stream_ctx_t *sse = ((sse_try_ctx_t *)ud)->sse;
+    return http_code == 0 && sse->raw_len == 0;
+}
+
+/* 重试前复位上一次尝试的分帧状态（闸门保证此时无字节下发，缓冲区保留复用）。 */
+static void sse_reset(void *ud)
+{
+    sse_stream_ctx_t *sse = ((sse_try_ctx_t *)ud)->sse;
+    sse->line_len = 0;
+    sse->raw_len = 0;
+    sse->done = 0;
+    sse->cancelled = 0;
+    sse->event_name[0] = '\0';
+}
+
+/* 上游错误体留存：原始字节已在 raw_buf，落日志截断 1 KiB，诊断槽存全量，
+ * 使失败可从守护进程日志定位而非只剩 http_code。 */
+static void body_dump(const sse_stream_ctx_t *sse, const char *url, long http_code)
+{
+    if (http_code < 400 || !sse->raw_buf || sse->raw_len == 0)
+        return;
+
+    size_t n = sse->raw_len > 1024 ? 1024 : sse->raw_len;
+
+    SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-HTTP-ERROR url=%s http_code=%ld body=%.*s", url,
+                  http_code, (int)n, sse->raw_buf);
+    prov_diag_set(http_code, sse->raw_buf, sse->raw_len);
+}
+
+/* 传输层超时三拆：读空闲停摆报 STREAM_STALL（上游仍在线但不再吐字），
+ * 整轮预算耗尽报 ETIMEDOUT（再等也无意义），其余保持 IO。 */
+static int curl_fail(const char *url, CURLcode res, int tmo)
+{
+    SVC_LOG_WARN("C-L02: PROVIDER: STREAM-FAIL url=%s errno=%d diag=%s curl_error=%s "
+                 "tmo=%d",
+                 url, errno, provider_http_diag(res), curl_easy_strerror(res), tmo);
+
+    if (res == CURLE_OPERATION_TIMEDOUT) {
+        if (tmo == (int)PROV_TMO_STALL)
+            return AIRY_ERR_LLM_STREAM_STALL;
+        if (tmo == (int)PROV_TMO_TOTAL)
+            return AIRY_ETIMEDOUT;
+    }
+    return AIRY_ERR_IO;
+}
+
+/* HTTP >= 400 is a failed completion, not a success with an empty body.
+ * Falling through here previously surfaced provider rejections (e.g.
+ * DeepSeek "tools[13].function.name" 400) as OK with a zero-token empty
+ * stream, which clients rendered as "no reply / thinking only". */
+static int http_fail(const char *url, long http_code)
+{
+    /* N-3（0.1.16）：provider 明确拒绝请求体（非法 JSON / 无效 UTF-8），
+     * 归入专用码，避免与"网络不可达"（AIRY_ERR_IO）混为一谈。 */
+    if (http_code == 400 || http_code == 422) {
+        SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s http_code=%ld "
+                      "DIAGNOSIS=request_body_rejected",
+                      url, http_code);
+        return AIRY_ERR_LLM_BAD_REQUEST;
+    }
+
+    SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s http_code=%ld "
+                  "DIAGNOSIS=upstream_http_error",
+                  url, http_code);
+    return AIRY_ERR_IO;
+}
+
+/* 两模式共用的流式入口：重试壳在 core/retry.c，本件只提供单次尝试与两个
+ * 钩子。资源（line_buf/raw_buf）由公开入口持有，本函数任何路径不释放。 */
+static int provider_stream_post(const char *url, struct curl_slist *headers, const char *body,
+                                double timeout_sec, int max_retries,
+                                provider_retry_class_t retry_class, int idempotent,
+                                sse_stream_ctx_t *sse, long *out_http_code)
+{
+    sse_try_ctx_t ctx = {
+        .url = url,
+        .headers = headers,
+        .body = body,
+        .timeout_sec = timeout_sec,
+        .sse = sse,
+    };
+    provider_retry_cfg_t cfg = {
+        .tag = "STREAM",
+        .url = url,
+        .timeout_sec = timeout_sec,
+        .max_retries = max_retries,
+        .retry_class = retry_class,
+        .idempotent = idempotent,
+        .attempt = sse_try,
+        .gate = sse_gate,
+        .reset = sse_reset,
+        .ud = &ctx,
+    };
+
+    CURLcode res = CURLE_OK;
+    long http_code = 0;
+    int tmo = (int)PROV_TMO_KIND_N;
+    int rc = provider_retry_run(&cfg, &res, &http_code, &tmo);
+    if (rc != AIRY_OK)
+        return rc;
+
+    *out_http_code = http_code;
+
+    if (sse->line_len > 0) {
+        sse_process_buffer(sse);
+    }
+
+    /* Error status: surface the upstream body (kept raw) so failures are
+     * diagnosable from the daemon log instead of a bare http_code. */
+    body_dump(sse, url, http_code);
+
+    if (res != CURLE_OK)
+        return curl_fail(url, res, tmo);
+
+    if (http_code >= 400)
+        return http_fail(url, http_code);
+
+    /* C11：传输成功且 2xx 不证明流按协议终结——行协议的唯一合法终点是
+     * data: [DONE]。流被中途截断（代理超时、上游崩溃）且调用方未主动
+     * 中止时 done 仍为 0，报 UNDONE 阻断"半截回复当完整"。具名事件模式
+     * （on_event）无 [DONE] 约定，不参与判定。 */
+    if (sse->on_chunk && !sse->done && !sse->cancelled) {
+        SVC_LOG_ERROR("C-L02: PROVIDER: STREAM-FAIL url=%s http_code=%ld "
+                      "DIAGNOSIS=missing_done_sentinel",
+                      url, http_code);
+        return AIRY_ERR_LLM_STREAM_UNDONE;
+    }
+
+    return AIRY_OK;
+}
+
+static int stream_entry(const char *url, struct curl_slist *headers, const char *body,
+                        double timeout_sec, int max_retries,
+                        provider_retry_class_t retry_class, int idempotent,
+                        provider_stream_chunk_cb_t on_chunk,
+                        provider_sse_event_cb_t on_event, void *user_data,
+                        long *out_http_code)
+{
+    if (!url || !body || (!on_chunk && !on_event) || !out_http_code) {
+        errno = EINVAL;
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    if (max_retries < 0)
+        max_retries = 0;
+
+    sse_stream_ctx_t sse;
+    sse_ctx_init(&sse, user_data);
+    sse.on_chunk = on_chunk;
+    sse.on_event = on_event;
+    if (!sse.line_buf) {
+        sse_ctx_destroy(&sse);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+
+    int ret = provider_stream_post(url, headers, body, timeout_sec, max_retries, retry_class,
+                                   idempotent, &sse, out_http_code);
+    sse_ctx_destroy(&sse);
+    return ret;
+}
+
+int provider_http_post_stream(const char *url, struct curl_slist *headers, const char *body,
+                              double timeout_sec, int max_retries,
+                              provider_retry_class_t retry_class, int idempotent,
+                              provider_stream_chunk_cb_t on_chunk, void *chunk_user_data,
+                              long *out_http_code)
+{
+    return stream_entry(url, headers, body, timeout_sec, max_retries, retry_class, idempotent,
+                        on_chunk, NULL, chunk_user_data, out_http_code);
+}
+
+int provider_http_post_stream_sse(const char *url, struct curl_slist *headers, const char *body,
+                                  double timeout_sec, int max_retries,
+                                  provider_retry_class_t retry_class, int idempotent,
+                                  provider_sse_event_cb_t on_event, void *event_user_data,
+                                  long *out_http_code)
+{
+    return stream_entry(url, headers, body, timeout_sec, max_retries, retry_class, idempotent,
+                        NULL, on_event, event_user_data, out_http_code);
+}

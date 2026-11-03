@@ -17,7 +17,7 @@
  */
 
 #include "config/types.h"
-#include "providers/core/provider_config.h"
+#include "airy_prov/provider_config.h"
 
 #include "airy_memory.h"
 #include "error.h"

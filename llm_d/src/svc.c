@@ -21,7 +21,7 @@
 #include "daemon_cfg_file.h"
 #include "daemon_dep.h"
 #include "daemon_event_driver.h"
-#include "providers/core/ep_health.h"
+#include "airy_prov/ep_health.h"
 #include "router/core/llm_rtr_health.h"
 #include "svc_model_watch.h"
 

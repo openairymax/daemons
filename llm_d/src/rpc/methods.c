@@ -16,7 +16,7 @@
 #include "error.h"
 #include "svc_llm_d.h"
 #include "llm_d_internal.h"
-#include "providers/core/prov_diag.h"
+#include "airy_prov/prov_diag.h"
 #include "response.h"
 #include "router/core/llm_rtr_health.h"
 #include "token.h"

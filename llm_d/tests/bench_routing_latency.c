@@ -11,7 +11,7 @@
 #include "cache_common.h"
 #include "llm_service.h"
 #include "platform.h"
-#include "providers/core/registry.h"
+#include "airy_prov/registry.h"
 
 #include <assert.h>
 #include <stdio.h>

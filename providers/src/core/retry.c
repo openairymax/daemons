@@ -1,0 +1,192 @@
+// SPDX-FileCopyrightText: 2025-2026 SPHARX Ltd.
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
+
+/**
+ * @file retry.c
+ * @brief Provider 域退避重试机制唯一实现（B16-S3 c8）。
+ *
+ * 判断件（可重试性 / 指数退避 / 墙钟预算）与循环壳同处一件：非流式
+ * （core/http.c 的 provider_http_post）与流式（core/sse.c 的
+ * provider_stream_post）共用同一循环壳，各自只提供"单次尝试装配"与
+ * "重试间复位"两个钩子，流式另行提供"已下发即禁止重试"闸门。
+ * 适配层只填适配契约，禁止自持 curl/重试循环副本。
+ */
+
+#include "daemon_platform_ext.h"
+#include "error.h"
+#include "airy_prov/provider_transport.h"
+#include "airy_prov/provider_retry.h"
+#include "svc_logger.h"
+
+#include <errno.h>
+
+int provider_retryable(CURLcode code)
+{
+    switch (code) {
+    case CURLE_COULDNT_RESOLVE_PROXY:
+    case CURLE_COULDNT_RESOLVE_HOST:
+    case CURLE_COULDNT_CONNECT:
+    case CURLE_OPERATION_TIMEDOUT:
+    case CURLE_SSL_CONNECT_ERROR:
+    case CURLE_GOT_NOTHING:
+    case CURLE_SEND_ERROR:
+    case CURLE_PARTIAL_FILE:
+    case CURLE_RECV_ERROR:
+        return 1;
+    default:
+        /* 请求本身非法（URL/协议）、调用方主动取消（WRITE_ERROR）、证书与
+         * 证书链不受信任（PEER_FAILED_VERIFICATION 等）都不是瞬时故障，
+         * 重试只会把调用方的预算空转掉。 */
+        return 0;
+    }
+}
+
+/* 类别收窄（策略面）：CONNECT_ONLY 只认连接建立类故障——本地端点慢推理是
+ * 预期行为，超时与收发中断不重发（重发只会空转整轮墙钟预算）。 */
+static int retry_in_class(CURLcode code, provider_retry_class_t cls)
+{
+    if (cls != PROVIDER_RETRY_CONNECT_ONLY)
+        return provider_retryable(code);
+    return code == CURLE_COULDNT_RESOLVE_PROXY || code == CURLE_COULDNT_RESOLVE_HOST ||
+           code == CURLE_COULDNT_CONNECT;
+}
+
+/* 请求必然未送达的失败形态：DNS 解析、TCP 连接、TLS 握手。这些与幂等性
+ * 无关——上游没有任何机会产生副作用。 */
+static int pre_send_fail(CURLcode code)
+{
+    return code == CURLE_COULDNT_RESOLVE_PROXY || code == CURLE_COULDNT_RESOLVE_HOST ||
+           code == CURLE_COULDNT_CONNECT || code == CURLE_SSL_CONNECT_ERROR;
+}
+
+/* 重试矩阵（方案 §5.2b.10）：连接阶段失败或超时说明请求未送达，恒可重试；
+ * 总预算耗尽永不重试（再试只是把同一份预算再耗一次）；中途停摆与收发中断
+ * 无法证明上游未产生副作用，仅幂等请求（temperature==0 且 seed 固定）重试。 */
+static int retry_allowed(const provider_retry_cfg_t *cfg, CURLcode res, int tmo)
+{
+    if (res == CURLE_OPERATION_TIMEDOUT && tmo == (int)PROV_TMO_CONNECT)
+        return 1;
+    if (!retry_in_class(res, cfg->retry_class))
+        return 0;
+    if (res == CURLE_OPERATION_TIMEDOUT)
+        return tmo != (int)PROV_TMO_TOTAL && cfg->idempotent;
+    return pre_send_fail(res) || cfg->idempotent;
+}
+
+uint32_t provider_backoff_ms(int attempt)
+{
+    uint32_t backoff = PROVIDER_RETRY_BASE_MS;
+    for (int i = 0; i < attempt && backoff < PROVIDER_RETRY_MAX_MS; i++)
+        backoff <<= 1;
+    if (backoff > PROVIDER_RETRY_MAX_MS)
+        backoff = PROVIDER_RETRY_MAX_MS;
+
+    uint32_t jitter = backoff * PROVIDER_RETRY_JITTER_PCT / 100U;
+    if (jitter == 0)
+        return backoff;
+    return backoff - jitter + airy_random_uint32(0, jitter * 2U);
+}
+
+double provider_left_sec(double timeout_sec, uint64_t start_ms)
+{
+    double spent = (double)(airy_time_ms() - start_ms) / 1000.0;
+    if (spent >= timeout_sec)
+        return 0.0;
+    return timeout_sec - spent;
+}
+
+int provider_retry_budget_ok(double timeout_sec, uint64_t start_ms, uint32_t delay_ms)
+{
+    double left = provider_left_sec(timeout_sec, start_ms);
+    return left * 1000.0 >= (double)delay_ms + (double)PROVIDER_RETRY_MIN_LEFT_MS;
+}
+
+/* 入口前置条件：装配完整性（尝试钩子 + 定位三元）与两个必填出参。 */
+static int cfg_ok(const provider_retry_cfg_t *cfg, const void *out_res, const void *out_code)
+{
+    return cfg && cfg->attempt && cfg->url && cfg->tag && out_res && out_code;
+}
+
+/* 不再重试的统一日志口径：次数耗尽、错误不可重试、闸门否决三者同一条
+ * 记录，由 attempts / retryable 字段区分原因。 */
+static void norun_log(const provider_retry_cfg_t *cfg, CURLcode res, long http_code, int retry,
+                      int max_retries, int retryable, int tmo)
+{
+    SVC_LOG_WARN("C-L02: PROVIDER: %s-NORETRY url=%s errno=%d attempts=%d/%d "
+                 "http_code=%ld diag=%s curl_error=%s retryable=%d tmo=%d idem=%d",
+                 cfg->tag, cfg->url, errno, retry + 1, max_retries + 1, http_code,
+                 provider_http_diag(res), curl_easy_strerror(res), retryable, tmo,
+                 cfg->idempotent);
+}
+
+/* 单次退避：先验预算（剩余时间不足 3 次退避余量即放弃），再落日志、睡眠、
+ * 复位钩子。返回 -1 表示预算耗尽、调用方须终止整个重试环。 */
+static int retry_wait(const provider_retry_cfg_t *cfg, uint64_t start_ms, int retry,
+                      int max_retries, int local, CURLcode res)
+{
+    uint32_t delay_ms = local ? (uint32_t)PROVIDER_RETRY_LOCAL_MS : provider_backoff_ms(retry);
+
+    if (!provider_retry_budget_ok(cfg->timeout_sec, start_ms, delay_ms)) {
+        SVC_LOG_WARN("C-L02: PROVIDER: %s-STOP url=%s retry=%d/%d "
+                     "reason=budget_spent left=%.1fs delay=%ums timeout=%.1fs",
+                     cfg->tag, cfg->url, retry + 1, max_retries,
+                     provider_left_sec(cfg->timeout_sec, start_ms), delay_ms, cfg->timeout_sec);
+        return -1;
+    }
+
+    SVC_LOG_WARN("C-L02: PROVIDER: %s-RETRY url=%s retry=%d/%d delay=%ums diag=%s "
+                 "curl_error=%s",
+                 cfg->tag, cfg->url, retry + 1, max_retries, delay_ms, provider_http_diag(res),
+                 curl_easy_strerror(res));
+
+    airy_sleep_ms(delay_ms);
+    if (cfg->reset)
+        cfg->reset(cfg->ud);
+    return 0;
+}
+
+int provider_retry_run(const provider_retry_cfg_t *cfg, CURLcode *out_res, long *out_http_code,
+                       int *out_tmo)
+{
+    if (!cfg_ok(cfg, out_res, out_http_code)) {
+        errno = EINVAL;
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    int max_retries = cfg->max_retries > 0 ? cfg->max_retries : 0;
+    int local = cfg->retry_class == PROVIDER_RETRY_CONNECT_ONLY;
+    /* 重试预算由装配点定稿（本地端点已在 local_init 收窄为一次），此处只读，
+     * 不再二次裁决；本地退避用短固定值，避免首屏等待被指数退避拉长。 */
+
+    uint64_t start_ms = airy_time_ms();
+    CURLcode res = CURLE_OK;
+    long http_code = 0;
+    int tmo = (int)PROV_TMO_KIND_N;
+
+    for (int retry = 0; retry <= max_retries; retry++) {
+        double left = provider_left_sec(cfg->timeout_sec, start_ms);
+
+        tmo = (int)PROV_TMO_KIND_N;
+        provider_attempt_t st = cfg->attempt(cfg->ud, retry, left, &res, &http_code, &tmo);
+        if (st == PROVIDER_TRY_FATAL)
+            return AIRY_ERR_UNKNOWN;
+        if (st == PROVIDER_TRY_DONE)
+            break;
+
+        int retryable = retry_allowed(cfg, res, tmo);
+        if (retry >= max_retries || !retryable ||
+            (cfg->gate && !cfg->gate(cfg->ud, res, http_code))) {
+            norun_log(cfg, res, http_code, retry, max_retries, retryable, tmo);
+            break;
+        }
+
+        if (retry_wait(cfg, start_ms, retry, max_retries, local, res) != 0)
+            break;
+    }
+
+    *out_res = res;
+    *out_http_code = http_code;
+    if (out_tmo)
+        *out_tmo = tmo;
+    return AIRY_OK;
+}

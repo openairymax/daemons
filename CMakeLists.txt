@@ -51,6 +51,10 @@ airy_print_info("========================================")
 # 包含 common 模块（兼容层）
 add_subdirectory(common)
 
+# 0.1.20 §13.17.45 批次七：LLM 传输机制格（非 daemon 静态库 airy_llm_transport）。
+# 必须先于 llm_d 装配——llm_d 的 airy_llm_service 以 PUBLIC 链接它。
+add_subdirectory(providers)
+
 # 包含各个服务模块
 add_subdirectory(gateway_d)
 add_subdirectory(llm_d)

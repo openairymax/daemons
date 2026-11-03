@@ -12,8 +12,8 @@
  */
 
 #include "error.h"
-#include "providers/core/provider_envelope.h"
-#include "providers/core/provider_stream.h"
+#include "airy_prov/provider_envelope.h"
+#include "airy_prov/provider_stream.h"
 
 #include <assert.h>
 #include <stdio.h>

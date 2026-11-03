@@ -21,7 +21,7 @@
 #include "airy_memory.h"
 #include "error.h"
 #include "platform_misc.h"
-#include "providers/core/registry.h"
+#include "airy_prov/registry.h"
 #include "rpc/service.h"
 #include "rpc/service_boot.h"
 #include "svc_logger.h"

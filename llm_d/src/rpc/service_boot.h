@@ -21,7 +21,7 @@
 #include <stddef.h>
 
 #include "cost_tracker.h"
-#include "providers/core/provider_config.h"
+#include "airy_prov/provider_config.h"
 #include "rpc/service_chain.h"
 #include "svc_model_defaults.h"
 

@@ -13,7 +13,7 @@
 #ifndef AIRY_RT_LLM_MODEL_LOADER_H
 #define AIRY_RT_LLM_MODEL_LOADER_H
 
-#include "providers/core/provider_config.h"
+#include "airy_prov/provider_config.h"
 
 #include <stddef.h>
 
