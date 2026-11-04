@@ -288,7 +288,7 @@ static void handle_complete(cJSON *params, int id, airy_sock_t fd)
     }
 
     llm_request_config_t cfg;
-    if (parse_params(params, ctx, &cfg) != 0) {
+    if (parse_params(params, ctx, &cfg, 0) != 0) {
         char ebuf[200];
         snprintf(ebuf, sizeof(ebuf), "Invalid params: %s",
                  (ctx && ctx->fail_reason[0]) ? ctx->fail_reason : "request params rejected");
@@ -461,6 +461,24 @@ static void llm_stream_send_error_frame(airy_sock_t fd, int id, int code, const 
     AIRY_FREE(body);
 }
 
+/* usage 控制帧（RS 'U'）：帧体由 resp_usage_json 单点产出，与非流式共用
+ * 同一序列化实现；RS 在运行期拼装——'\x1e' 与后续字符写成相邻字面量时，
+ * \x 转义会把该字符按十六进制吞掉。 */
+static void send_usage(airy_sock_t fd, const llm_response_t *resp)
+{
+    static const char head[2] = {'\x1e', 'U'};
+    char *body = resp_usage_json(resp);
+
+    if (!body) {
+        SVC_LOG_WARN("complete_stream: usage frame body build failed");
+        return;
+    }
+    llm_stream_send_all(fd, head, sizeof(head));
+    llm_stream_send_all(fd, body, strlen(body));
+    llm_stream_send_all(fd, "\x1e", 1);
+    AIRY_FREE(body);
+}
+
 static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
 {
     request_context_t *ctx = request_context_create();
@@ -470,7 +488,7 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
     }
 
     llm_request_config_t cfg;
-    if (parse_params(params, ctx, &cfg) != 0) {
+    if (parse_params(params, ctx, &cfg, PARSE_F_STREAM) != 0) {
         /* 流协议只认 RS 帧：错误走 'E' 帧，不回文本响应。 */
         const char *reason = (ctx && ctx->fail_reason[0]) ? ctx->fail_reason
                                                           : "request params rejected";
@@ -519,29 +537,11 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
     }
 
     if (resp) {
-        /* 流式结束发 usage 控制帧（RS 'U'）：携带真实 token 与回填后的
-         * cost_usd，否则客户端统计与计费恒为 0。C11 追加 finish_reason
-         * （仅存在时序列化；值为 norm 规范集四串之一，无注入面）。 */
-        char fr_seg[48] = "";
-        if (resp->finish_reason)
-            snprintf(fr_seg, sizeof(fr_seg), ",\"finish_reason\":\"%s\"",
-                     resp->finish_reason);
-        /* D2-9 容量回显：未探测端点整段缺席（客户端按存在性门控）。 */
-        char cap_seg[96] = "";
-        if (resp->context_window || resp->total_slots)
-            snprintf(cap_seg, sizeof(cap_seg),
-                     ",\"capacity\":{\"context_window\":%u,\"total_slots\":%u}",
-                     resp->context_window, resp->total_slots);
-        char usage_frame[400];
-        int ufn = snprintf(usage_frame, sizeof(usage_frame),
-                           "\x1eU{\"prompt_tokens\":%u,\"completion_tokens\":%u,"
-                           "\"total_tokens\":%u,\"reasoning_tokens\":%u,"
-                           "\"cached_tokens\":%u,\"cost_usd\":%.8f%s%s}\x1e",
-                           resp->prompt_tokens, resp->completion_tokens, resp->total_tokens,
-                           resp->reasoning_tokens, resp->cached_tokens, resp->cost_usd,
-                           fr_seg, cap_seg);
-        if (ufn > 0)
-            llm_stream_send_all(fd, usage_frame, (size_t)ufn);
+        /* 流式结束发 usage 控制帧（RS 'U'）：携带真实 token、回填后的
+         * cost_usd、C11 的 finish_reason、D2-9 的容量回显与分项耗时。帧体
+         * 由 rpc/response.c 单点产出——此前手搓 snprintf 与非流式各走一条
+         * 通道，timings 只补了 cJSON 那条，流式终帧长期缺这段。 */
+        send_usage(fd, resp);
         llm_response_free(resp);
     }
 

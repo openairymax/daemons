@@ -347,13 +347,18 @@ static void samp_scalar(llm_request_config_t *cfg, cJSON *params)
     cfg->num_ctx = (uint32_t)num_or(params, "num_ctx", cfg->num_ctx);
 }
 
-/* 布尔组：只有明确给了 JSON bool 才改写，字符串 "true" 不算。 */
-static void samp_flag(llm_request_config_t *cfg, cJSON *params)
+/* 布尔组：只有明确给了 JSON bool 才改写，字符串 "true" 不算。stream 只在
+ * 方法声明了流式语义时才解析——complete 是非流式，收了再转发会让上游按
+ * SSE 回，响应被 JSON 解析器拒为 -55。 */
+static void samp_flag(llm_request_config_t *cfg, cJSON *params, unsigned flags)
 {
-    cJSON *v = cJSON_GetObjectItem(params, "stream");
+    cJSON *v;
 
-    if (cJSON_IsBool(v))
-        cfg->stream = cJSON_IsTrue(v);
+    if (flags & PARSE_F_STREAM) {
+        v = cJSON_GetObjectItem(params, "stream");
+        if (cJSON_IsBool(v))
+            cfg->stream = cJSON_IsTrue(v);
+    }
     v = cJSON_GetObjectItem(params, "cacheable");
     if (cJSON_IsBool(v))
         cfg->cacheable = cJSON_IsTrue(v);
@@ -414,7 +419,7 @@ static void samp_ext(llm_request_config_t *cfg, cJSON *params)
 /* 采样参数：cacheable 缺省 0 即 B5-3 的 fail-closed，此处只覆盖显式且
  * 类型相符的项。C11 新参数遵零值=不发送约定；temperature 以显式哨兵
  * 记录"被设置过"，使 0.0 可区别于缺省。 */
-static int parse_sampling(req_env_t *r, cJSON *params)
+static int parse_sampling(req_env_t *r, cJSON *params, unsigned flags)
 {
     llm_request_config_t *cfg = r->cfg;
     cJSON *v = cJSON_GetObjectItem(params, "temperature");
@@ -424,7 +429,7 @@ static int parse_sampling(req_env_t *r, cJSON *params)
         cfg->temperature_set = true;
     }
     samp_scalar(cfg, params);
-    samp_flag(cfg, params);
+    samp_flag(cfg, params, flags);
     samp_ext(cfg, params);
     return samp_grammar(r, params);
 }
@@ -443,7 +448,8 @@ static int parse_tools(req_env_t *r, cJSON *params)
     return 0;
 }
 
-int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cfg)
+int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cfg,
+                 unsigned flags)
 {
     __builtin_memset(cfg, 0, sizeof(llm_request_config_t));
     req_env_t r = {ctx, cfg};
@@ -454,7 +460,7 @@ int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cf
     rc = parse_messages(&r, params);
     if (rc != 0)
         return rc;
-    rc = parse_sampling(&r, params);
+    rc = parse_sampling(&r, params, flags);
     if (rc != 0)
         return rc;
     return parse_tools(&r, params);

@@ -64,10 +64,15 @@ typedef struct {
     char fail_reason[160];
 } request_context_t;
 
+/* 方法能力位：同构方法共用解析入口，参数归属却不同。解析面按位决定读
+ * 哪些键，避免把本方法没有的参数一路透传进请求体。 */
+#define PARSE_F_STREAM 0x1u
+
 /* 请求解析域（src/rpc/dispatch.c） */
 request_context_t *request_context_create(void);
 void request_context_destroy(request_context_t *ctx);
-int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cfg);
+int parse_params(cJSON *params, request_context_t *ctx, llm_request_config_t *cfg,
+                 unsigned flags);
 
 #ifdef __cplusplus
 }
