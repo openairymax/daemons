@@ -91,7 +91,7 @@ static request_context_t *run_parse(cJSON *params, llm_request_config_t *cfg, in
     request_context_t *ctx = request_context_create();
 
     memset(cfg, 0, sizeof(*cfg));
-    *rc = ctx ? parse_params(params, ctx, cfg) : -1;
+    *rc = ctx ? parse_params(params, ctx, cfg, 0) : -1;
     if (*rc != 0) {
         request_context_destroy(ctx);
         return NULL;
@@ -331,7 +331,7 @@ static void test_overflow_rejected(void)
         }
         request_context_t *ctx = request_context_create();
         memset(&cfg, 0, sizeof(cfg));
-        rc = (ctx && params && msgs) ? parse_params(params, ctx, &cfg) : -1;
+        rc = (ctx && params && msgs) ? parse_params(params, ctx, &cfg, 0) : -1;
         check_true(mode ? "full.fallback_rejected" : "full.stable_rejected", rc != 0);
         if (ctx) {
             check_true(mode ? "full.fallback_reason" : "full.stable_reason",
@@ -340,6 +340,38 @@ static void test_overflow_rejected(void)
         }
         cJSON_Delete(params);
     }
+    env_stable_reset();
+}
+
+/* 7. 方法能力位：complete 不声明 stream 语义，请求里带了 stream 也不得
+ *      写进 cfg——一旦透传进请求体，上游按 SSE 回，响应被 JSON 解析器
+ *      拒为 -55。只有声明了 PARSE_F_STREAM 的方法才读该键。 */
+static void test_stream_flag_scope(void)
+{
+    llm_request_config_t cfg;
+    request_context_t *ctx;
+    int rc;
+
+    env_stable_reset();
+    cJSON *params = make_params("be helpful", "hello");
+    check_true("flag.root", params != NULL);
+    if (!params)
+        return;
+    cJSON_AddBoolToObject(params, "stream", 1);
+
+    ctx = run_parse(params, &cfg, &rc);
+    check_int("flag.nonstream_rc", rc, 0);
+    check_int("flag.nonstream_ignored", cfg.stream, 0);
+    request_context_destroy(ctx);
+
+    memset(&cfg, 0, sizeof(cfg));
+    ctx = request_context_create();
+    rc = ctx ? parse_params(params, ctx, &cfg, PARSE_F_STREAM) : -1;
+    check_int("flag.stream_rc", rc, 0);
+    check_int("flag.stream_set", cfg.stream, 1);
+    request_context_destroy(ctx);
+
+    cJSON_Delete(params);
     env_stable_reset();
 }
 
@@ -353,6 +385,7 @@ int main(void)
     test_slot_id_roundtrip();
     test_thinking_roundtrip();
     test_overflow_rejected();
+    test_stream_flag_scope();
 
     if (fail_count == 0) {
         printf("All %d dispatch-parse assertions passed\n", test_count);
