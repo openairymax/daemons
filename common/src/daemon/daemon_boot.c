@@ -178,7 +178,8 @@ int daemon_boot(int argc, char **argv, const daemon_boot_t *boot)
 
     int core_ret = airy_init();
     if (core_ret == AIRY_SUCCESS)
-        SVC_LOG_INFO("corekern core initialized (%s runs on corekern)", boot->daemon);
+        SVC_LOG_INFO("corekern core initialized (%s, version %s, runs on corekern)",
+                     boot->daemon, DAEMON_VERSION);
     else
         SVC_LOG_WARN("corekern init failed (%d), degraded (badge=0)", core_ret);
 
