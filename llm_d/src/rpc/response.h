@@ -21,6 +21,10 @@ extern "C" {
 char *response_to_json(const llm_response_t *resp);
 llm_response_t *response_from_json(const char *json);
 
+/* 流式终帧 'U' 的帧体（flat usage + 可选 finish_reason / timings /
+ * capacity）。与非流式共用同一序列化实现，新增字段不会只有一条通道被补。 */
+char *resp_usage_json(const llm_response_t *resp);
+
 #ifdef __cplusplus
 }
 #endif

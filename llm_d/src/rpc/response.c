@@ -97,6 +97,35 @@ static cJSON *choice_build(const llm_message_t *msg)
     return choice;
 }
 
+/* 流式终帧 'U' 的帧体。字段面沿用 flat usage 形状（客户端既有契约，不加
+ * 嵌套 usage），可选段直接复用 timings_add / cap_add——此前 'U' 帧是手搓
+ * snprintf，与非流式各走一条序列化通道，timings 只补了 cJSON 那条，流式
+ * 终帧便一直缺分项耗时。 */
+char *resp_usage_json(const llm_response_t *resp)
+{
+    if (!resp)
+        return NULL;
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root)
+        return NULL;
+
+    cJSON_AddNumberToObject(root, "prompt_tokens", resp->prompt_tokens);
+    cJSON_AddNumberToObject(root, "completion_tokens", resp->completion_tokens);
+    cJSON_AddNumberToObject(root, "total_tokens", resp->total_tokens);
+    cJSON_AddNumberToObject(root, "reasoning_tokens", resp->reasoning_tokens);
+    cJSON_AddNumberToObject(root, "cached_tokens", resp->cached_tokens);
+    cJSON_AddNumberToObject(root, "cost_usd", resp->cost_usd);
+    if (resp->finish_reason)
+        cJSON_AddStringToObject(root, "finish_reason", resp->finish_reason);
+    timings_add(root, resp);
+    cap_add(root, resp);
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    return json;
+}
+
 char *response_to_json(const llm_response_t *resp)
 {
     if (!resp) {

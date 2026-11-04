@@ -275,6 +275,48 @@ static void test_response_timings_roundtrip(void)
     printf("    PASSED\n");
 }
 
+/* 流式终帧 'U' 帧体：与非流式共用同一序列化实现，timings / capacity /
+ * finish_reason 三可选段的存在性判定必须与 response_to_json 一致——此前
+ * 帧体是手搓 snprintf，只带 usage，timings 长期缺席。 */
+static void test_response_usage_frame(void)
+{
+    printf("  test_response_usage_frame...\n");
+
+    llm_response_t *resp = (llm_response_t *)calloc(1, sizeof(llm_response_t));
+    assert(resp != NULL);
+    resp->prompt_tokens = 32;
+    resp->completion_tokens = 8;
+    resp->total_tokens = 40;
+    resp->timings.prefill_ms = 12.5;
+    resp->timings.decode_ms = 64.0;
+    resp->context_window = 4096;
+    resp->total_slots = 4;
+    resp->finish_reason = strdup("stop");
+
+    char *json = resp_usage_json(resp);
+    assert(json != NULL);
+    assert(strstr(json, "\"prompt_tokens\":32") != NULL);
+    assert(strstr(json, "\"finish_reason\":\"stop\"") != NULL);
+    assert(strstr(json, "\"timings\"") != NULL);
+    assert(strstr(json, "\"prefill_ms\":12.5") != NULL);
+    assert(strstr(json, "\"capacity\"") != NULL);
+    assert(strstr(json, "\"context_window\":4096") != NULL);
+    free(json);
+    llm_response_free(resp);
+
+    resp = (llm_response_t *)calloc(1, sizeof(llm_response_t));
+    assert(resp != NULL);
+    json = resp_usage_json(resp);
+    assert(json != NULL);
+    assert(strstr(json, "\"timings\"") == NULL);
+    assert(strstr(json, "\"capacity\"") == NULL);
+    assert(strstr(json, "finish_reason") == NULL);
+    free(json);
+    llm_response_free(resp);
+
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=========================================\n");
@@ -289,6 +331,7 @@ int main(void)
     test_response_reasoning_roundtrip();
     test_response_usage_detail_roundtrip();
     test_response_timings_roundtrip();
+    test_response_usage_frame();
 
     printf("\nAll LLM response tests PASSED\n");
     return 0;
