@@ -34,8 +34,11 @@ if(WIN32)
     set(BUILD_TESTS OFF)
 endif()
 
-# 版本信息
+# 版本信息：目录级注入编译定义（R-0 尾巴：启动日志版本标识）。子目录
+# 在其后 add_subdirectory，全部 daemon 目标可见；daemon_boot 启动横幅
+# 单点消费，部署排障可从 <daemon>_d.out 直接判读构建版本。
 set(DAEMON_VERSION "${PROJECT_VERSION}")
+add_compile_definitions(DAEMON_VERSION="${DAEMON_VERSION}")
 
 # 打印构建配置
 airy_print_info("========================================")
