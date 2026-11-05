@@ -14,6 +14,8 @@
  *      会把多余声明键放大成零模型的启动崩溃循环）
  *   4. provision: managed 与 artifact 路径落位 model_entry_t
  *   5. provision 值域外（bogus）与 capabilities 裸名外键均拒载该行
+ *   6. 条目数恰好填满映射容量的行（8 键 / 16 键）必须完整解析：映射数组
+ *      始终保留末尾零槽，yaml_size() 不会越过分配块读取堆残留
  */
 
 #include "config/types.h"
@@ -152,6 +154,39 @@ static const char kBadBit[] = "models:\n"
                               "      seed: true\n"
                               "      ctx_len: true\n";
 
+/* t7：8 键行——条目数正好等于映射初始容量（8）。 */
+static const char kFull8[] = "models:\n"
+                             "  - name: eight\n"
+                             "    model_id: eight\n"
+                             "    mode: local\n"
+                             "    base_url: http://127.0.0.1:9/v1\n"
+                             "    provision: managed\n"
+                             "    artifact: /var/airy/models/eight.gguf\n"
+                             "    context_window: 8k\n"
+                             "    provider: prov\n";
+
+/* t8：16 键行——条目数正好等于扩容后的容量（16），且重复 capabilities
+ *     出现在中间。线上 0.1.20 崩溃即此形态：扫描 provider 键时踩到映射
+ *     数组末尾之外的堆残留。 */
+static const char kFull16[] = "models:\n"
+                              "  - name: sixteen\n"
+                              "    model_id: sixteen\n"
+                              "    mode: local\n"
+                              "    api_format: openai\n"
+                              "    base_url: http://127.0.0.1:9/v1\n"
+                              "    capabilities:\n"
+                              "      seed: true\n"
+                              "    api_key_env: \"\"\n"
+                              "    provision: managed\n"
+                              "    capabilities:\n"
+                              "      num_ctx: true\n"
+                              "    context_window: 32k\n"
+                              "    max_output: 4k\n"
+                              "    tool_rounds: 70\n"
+                              "    vision: true\n"
+                              "    thinking: auto\n"
+                              "    provider: prov\n";
+
 int main(void)
 {
     char path[256];
@@ -264,6 +299,45 @@ int main(void)
         size_t en = 99;
         check_int("empty.rc", svc_load_model_config_yaml(path, &ep, &en), AIRY_ERR_STATE_ERROR);
         check_int("empty.count", (int)en, 0);
+    }
+
+    /* 9) 8 键行：条目数正好等于映射初始容量，末键 provider 必须可读，
+     *    且行尾字段照常落位（容量写满不得让扫描越过数组末尾）。 */
+    {
+        if (put_file(path, kFull8) != 0)
+            return 1;
+        svc_yaml_state_t st;
+        memset(&st, 0, sizeof(st));
+        check_int("full8.rc", svc_yaml_load_state(path, &st), 0);
+        check_int("full8.count", (int)st.model_count, 1);
+        check_str("full8.name", st.models[0].name, "eight");
+        check_str("full8.provider", st.models[0].provider, "prov");
+        check_str("full8.provision", st.models[0].provision, "managed");
+        check_str("full8.cw", st.models[0].context_window, "8k");
+        check_int("full8.caps", st.models[0].has_caps, 0);
+    }
+
+    /* 10) 16 键行 + 重复 capabilities：线上崩溃形态。首个 capabilities
+     *     块生效，其余键全部照常解析。 */
+    {
+        if (put_file(path, kFull16) != 0)
+            return 1;
+        svc_yaml_state_t st;
+        memset(&st, 0, sizeof(st));
+        check_int("full16.rc", svc_yaml_load_state(path, &st), 0);
+        check_int("full16.count", (int)st.model_count, 1);
+        check_str("full16.name", st.models[0].name, "sixteen");
+        check_str("full16.provider", st.models[0].provider, "prov");
+        check_str("full16.mode", st.models[0].mode, "local");
+        check_str("full16.fmt", st.models[0].api_format, "openai");
+        check_str("full16.cw", st.models[0].context_window, "32k");
+        check_int("full16.maxout", st.models[0].max_output_tokens, 4096);
+        check_int("full16.rounds", st.models[0].tool_rounds, 70);
+        check_int("full16.vision", st.models[0].vision, 1);
+        check_str("full16.think", st.models[0].thinking, "auto");
+        check_int("full16.caps", st.models[0].has_caps, 1);
+        check_bit("full16.seed", st.models[0].caps_override.accepts_seed, true);
+        check_bit("full16.numctx", st.models[0].caps_override.accepts_num_ctx, false);
     }
 
     remove(path);
