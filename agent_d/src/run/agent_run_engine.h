@@ -42,7 +42,14 @@ extern "C" {
 /* S-2 收敛：编排分支（subagent spawn/invoke）失败同为终局失败，rc 取本值；
  * 具体原因（阶段 + 契约错误符号）随 response / error 事件通道回传。 */
 #define AGENT_RUN_RC_SUBAGENT_FAIL 3
+/* 轮次预算耗尽：模型每轮都在推进工具但未收敛。产物（trace/text）照常移交，
+ * 原因随 error 事件回传，与「崩溃」区分，便于客户端区分续跑与重试。 */
+#define AGENT_RUN_RC_TOOL_ROUNDS 4
+/* 流式 LLM 调用的双窗口：TIMEOUT_MS 是相邻两段数据之间的最大沉默时间
+ * （每收一段即重置），TOTAL_MS 是整条流的硬上限。只有前者会把持续吐 token
+ * 的长推理在 90s 处腰斩——那是「卡住后报错」的直接来源。 */
 #define AGENT_RUN_LLM_TIMEOUT_MS 90000
+#define AGENT_RUN_LLM_TOTAL_MS 1800000
 #define AGENT_RUN_THINK_TIMEOUT_MS 120000
 #define AGENT_RUN_TOOL_TIMEOUT_MS 90000
 #define AGENT_RUN_SPAWN_TIMEOUT_MS 90000

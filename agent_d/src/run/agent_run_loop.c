@@ -317,8 +317,9 @@ static int run_llm_round(run_ctx_t *r, cJSON **tool_calls)
     agent_stream_init(&st, &ssink);
 
     uint64_t t0 = airy_time_ms();
-    int lrc = daemon_rpc_call_stream(r->llm_sock, "complete_stream", params,
-                                     agent_stream_on_chunk, &st, AGENT_RUN_LLM_TIMEOUT_MS);
+    int lrc = daemon_rpc_call_stream_idle(r->llm_sock, "complete_stream", params,
+                                          agent_stream_on_chunk, &st,
+                                          AGENT_RUN_LLM_TIMEOUT_MS, AGENT_RUN_LLM_TOTAL_MS);
     r->out->llm_ms += airy_time_ms() - t0;
     AIRY_FREE(params);
     agent_stream_finish(&st);
@@ -451,7 +452,7 @@ static void run_load_dyn(run_ctx_t *r)
         const char *n = cJSON_IsString(nm) ? nm->valuestring
                                           : (cJSON_IsString(id) ? id->valuestring : NULL);
         run_dyn_put(r->dyn_tools, n, cJSON_IsString(ds) ? ds->valuestring : "",
-                    cJSON_GetObjectItem(it, "inputSchema"));
+                    cJSON_GetObjectItem(it, "input_schema"));
     }
     cJSON_Delete(root);
 }
@@ -598,6 +599,7 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
 {
     run_ctx_t r = {0};
     int rc = -1;
+    int more = 0;
     if (!args || !out)
         return -1;
     AIRY_MEMSET(out, 0, sizeof(*out));
@@ -624,6 +626,7 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
         if (agent_run_is_cancelled(args->session)) {
             SVC_LOG_INFO("agent.run: cancelled by user (session=%s)", r.sess ? r.sess : "?");
             rc = 1;
+            more = 0;
             break;
         }
         agent_ledger_fit(&r.lg, r.messages);
@@ -631,15 +634,26 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
         int st = run_step(&r);
         if (st != 1) {
             rc = st;
+            more = 0;
             break;
         }
+        more = 1;
+    }
+
+    /* 轮次预算耗尽不是崩溃：模型仍在推进（每轮都在调用工具），只是未收敛。
+     * 如实给出终局码与可读原因，并令 trace 随结果移交——此前这里 rc 停在
+     * -1，整轮产物被当作失败丢弃，调用方只得到一句通用错误。 */
+    if (more) {
+        rc = AGENT_RUN_RC_TOOL_ROUNDS;
+        if (!r.text)
+            r.text = AIRY_STRDUP("Reached the tool round budget without a final answer");
     }
 
     agent_ledger_free(&r.lg);
     cJSON_Delete(r.messages);
     cJSON_Delete(r.dyn_tools);
-    /* 成功/熔断移交产物，失败路径就地释放；计量已直写 out。 */
-    if (rc == 0 || rc == AGENT_RUN_RC_TOOL_FUSE) {
+    /* 终局码（含取消与预算耗尽）移交产物，失败路径就地释放；计量已直写 out。 */
+    if (rc >= 0) {
         out->trace = r.trace;
         out->text = r.text;
         out->reason = r.reason;

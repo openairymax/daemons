@@ -40,6 +40,7 @@ static const airy_ipc_ops_t g_daemon_ipc_ops = {
     .rpc_call = daemon_rpc_call,
     .rpc_call_cancelable = daemon_rpc_call_cancelable,
     .rpc_call_stream = daemon_rpc_call_stream,
+    .rpc_call_stream_idle = daemon_rpc_call_stream_idle,
 };
 
 airy_err_t daemon_ipc_ops_init(const char *daemon_name)
