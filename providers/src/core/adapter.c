@@ -169,6 +169,21 @@ static int stream_finish(const provider_adapter_t *ops, const provider_base_ctx_
 {
     llm_response_t *resp = provider_stream_take(acc);
 
+    /* 完备性判定先于工具帧冲刷：截断的流里已装配出的 tool_call 不能先推给
+     * 客户端（客户端会当成可执行调用下发，随后收到错误帧再撤回），也不该
+     * 随错误帧一起被丢弃。判红即整条流作废，工具帧一条不发。 */
+    int integrity = resp ? stream_integrity(resp) : AIRY_OK;
+
+    if (integrity != AIRY_OK) {
+        SVC_LOG_ERROR("C-L02: %s: STREAM-FAIL model=%s http_code=%ld reason=integrity ret=%d",
+                      ops->tag, model, http_code, integrity);
+        provider_stream_acc_free(acc);
+        llm_response_free(resp);
+        if (out_response)
+            *out_response = NULL;
+        return integrity;
+    }
+
     if (provider_tool_flush(&acc->tools, resp, callback, callback_data) != 0) {
         SVC_LOG_INFO("C-L02: %s: STREAM-CANCELLED model=%s phase=tool_flush http_code=%ld",
                      ops->tag, model, http_code);
@@ -179,17 +194,6 @@ static int stream_finish(const provider_adapter_t *ops, const provider_base_ctx_
         return AIRY_ERR_CANCELED;
     }
     provider_stream_acc_free(acc);
-
-    int integrity = resp ? stream_integrity(resp) : AIRY_OK;
-
-    if (integrity != AIRY_OK) {
-        SVC_LOG_ERROR("C-L02: %s: STREAM-FAIL model=%s http_code=%ld reason=integrity ret=%d",
-                      ops->tag, model, http_code, integrity);
-        llm_response_free(resp);
-        if (out_response)
-            *out_response = NULL;
-        return integrity;
-    }
 
     if (resp) {
         resp_stamp_capacity(resp, base);
