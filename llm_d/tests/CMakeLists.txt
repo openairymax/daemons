@@ -22,6 +22,8 @@ set(LLM_TEST_SOURCES
     test_cost_tracker.c
     # reasoning_content 请求/响应透传（DeepSeek/Kimi 思考模式工具循环硬性要求）
     test_provider_reasoning.c
+    # 0.1.20 流式 tool_calls 装配：缺 index 的上游不得把一次调用切成多槽
+    test_toolstream_merge.c
     # N-3 运行级回归：provider HTTP 状态码 → 错误码分诊（进程内回环 HTTP 桩）
     test_provider_http_dispatch.c
     # P3.16 (ACC-DT17): 路由器集成测试

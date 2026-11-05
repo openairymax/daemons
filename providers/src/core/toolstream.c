@@ -85,6 +85,30 @@ void provider_tool_args_add(provider_tool_acc_t *acc, int index, const char *fra
         tool_args_append(slot, frag);
 }
 
+/* 槽位定位键：显式 index 是协议权威键。部分兼容端点（llama.cpp 服务端、
+ * 部分中转网关）整条流不下发 index，只重复 id/name，或干脆只发 arguments
+ * 分片。此时若以 acc->count 作新键，同一次调用会被切成 N 个碎片：name 只
+ * 落首片，后续参数落进空名槽，流末装配出无 name 的 tool_call，执行侧必然
+ * 「Tool not found」。故缺 index 时按 id 归并，无 id 则续写最后一个槽。 */
+static int tool_slot_key(provider_tool_acc_t *acc, const cJSON *idxj, const char *id)
+{
+    if (cJSON_IsNumber(idxj))
+        return (int)idxj->valuedouble;
+    if (id && id[0]) {
+        for (size_t k = 0; k < acc->count; k++) {
+            if (acc->slot[k].id[0] && strcmp(acc->slot[k].id, id) == 0)
+                return acc->slot[k].index;
+        }
+        int next = 0;
+        for (size_t k = 0; k < acc->count; k++) {
+            if (acc->slot[k].index >= next)
+                next = acc->slot[k].index + 1;
+        }
+        return next;
+    }
+    return acc->count > 0 ? acc->slot[acc->count - 1].index : 0;
+}
+
 void provider_tool_delta(provider_tool_acc_t *acc, const cJSON *delta)
 {
     cJSON *tcs = cJSON_GetObjectItem(delta, "tool_calls");
@@ -101,7 +125,7 @@ void provider_tool_delta(provider_tool_acc_t *acc, const cJSON *delta)
         const char *id = (cJSON_IsString(idj) && idj->valuestring) ? idj->valuestring : NULL;
         const char *name =
             (cJSON_IsString(namej) && namej->valuestring) ? namej->valuestring : NULL;
-        int idx = cJSON_IsNumber(idxj) ? (int)idxj->valuedouble : (int)acc->count;
+        int idx = tool_slot_key(acc, idxj, id);
         if (!provider_tool_begin(acc, idx, id, name))
             continue;
         if (cJSON_IsString(argj) && argj->valuestring)
@@ -116,6 +140,11 @@ char *provider_tool_json(const provider_tool_acc_t *acc)
         return NULL;
     for (size_t i = 0; i < acc->count; i++) {
         const provider_tool_slot_t *slot = &acc->slot[i];
+        /* 无名槽＝无主参数碎片：OpenAI 要求 tool_calls 元素必带
+         * function.name，缺名条目回灌上游即 400、执行侧即 Tool not found，
+         * 故装配期丢弃，不交付无效条目。 */
+        if (!slot->name[0])
+            continue;
         cJSON *tc = cJSON_CreateObject();
         cJSON *fn = cJSON_CreateObject();
         if (!tc || !fn) {
@@ -131,8 +160,7 @@ char *provider_tool_json(const provider_tool_acc_t *acc)
          * 上游对 assistant tool_calls 严格校验并 400
          * （2026-08-16 探针确认：no-type 0B / with-type 200）。 */
         cJSON_AddStringToObject(tc, "type", "function");
-        if (slot->name[0])
-            cJSON_AddStringToObject(fn, "name", slot->name);
+        cJSON_AddStringToObject(fn, "name", slot->name);
         cJSON_AddStringToObject(fn, "arguments", slot->args ? slot->args : "");
         cJSON_AddItemToObject(tc, "function", fn);
         cJSON_AddItemToArray(arr, tc);
