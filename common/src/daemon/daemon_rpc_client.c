@@ -578,14 +578,13 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
                            daemon_rpc_stream_cb_t on_chunk, void *user_data, uint32_t timeout_ms)
 {
     /* 兼容入口维持原契约：timeout_ms 是整条流的墙钟上限（idle 与之相等，
-     * 永不先于 total 触发）。需要长产出直通时用 _idle 变体显式分离两窗口。 */
-    return daemon_rpc_call_stream_idle(socket_path, method, params_json, on_chunk, user_data, 0,
-                                       timeout_ms);
+     * 永不先于 total 触发）。需要长产出直通时用 rpc_stream_idle 显式分离两窗口。 */
+    return rpc_stream_idle(socket_path, method, params_json, on_chunk, user_data, 0, timeout_ms);
 }
 
-int daemon_rpc_call_stream_idle(const char *socket_path, const char *method,
-                                const char *params_json, daemon_rpc_stream_cb_t on_chunk,
-                                void *user_data, uint32_t idle_ms, uint32_t total_ms)
+int rpc_stream_idle(const char *socket_path, const char *method, const char *params_json,
+                    daemon_rpc_stream_cb_t on_chunk, void *user_data, uint32_t idle_ms,
+                    uint32_t total_ms)
 {
     if (!socket_path || !method)
         return AIRY_ERR_INVALID_PARAM;
