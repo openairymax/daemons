@@ -528,8 +528,10 @@ static cJSON *run_fill(run_ctx_t *c)
     return result;
 }
 
-/* 流式收尾：message → run_end → error（顺序即客户端可见时序）。 */
-static void run_tail(run_ctx_t *c)
+/* 流式收尾：message → run_end → error（顺序即客户端可见时序）。
+ * res 为已装配的 RPC result：工具轨迹在那里（fill 已接管所有权），
+ * 终态帧按需深拷贝一份，流式客户端才能看到参数与结果正文。 */
+static void run_tail(run_ctx_t *c, const cJSON *res)
 {
     if (!c->sink || !c->sink->emit)
         return;
@@ -556,6 +558,9 @@ static void run_tail(run_ctx_t *c)
         cJSON_AddNumberToObject(end, AIRY_RS_K_LLM_MS, (double)c->llm_ms);
         cJSON_AddNumberToObject(end, AIRY_RS_K_TOOL_MS, (double)c->tool_ms);
         cJSON_AddNumberToObject(end, AIRY_RS_K_USE_TICKS, (double)c->tokens);
+        const cJSON *tr = res ? cJSON_GetObjectItem(res, AIRY_RS_K_TOOL_TRACE) : NULL;
+        if (cJSON_IsArray(tr) && cJSON_GetArraySize(tr) > 0)
+            cJSON_AddItemToObject(end, AIRY_RS_K_TOOL_TRACE, cJSON_Duplicate(tr, 1));
         agent_run_emit_event(c->sink, &c->seq, c->run_id, c->sess, AIRY_RS_TYPE_RUN_END, end);
     }
 
@@ -623,7 +628,7 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     if (!result)
         return -1;
 
-    run_tail(&c);
+    run_tail(&c, result);
     *out_result = result;
     int ret = c.cancelled ? 1 : c.rc;
     run_free(&c);
