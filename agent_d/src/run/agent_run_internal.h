@@ -109,7 +109,8 @@ typedef struct {
  *
  * @param args 入参（非 NULL）
  * @param out  产物（非 NULL；成功与熔断时按上述所有权移交）
- * @return 0 成功；1 用户取消；AGENT_RUN_RC_TOOL_FUSE 熔断；负值失败
+ * @return 0 成功；1 用户取消；AGENT_RUN_RC_TOOL_FUSE 熔断；
+ *         AGENT_RUN_RC_TOOL_ROUNDS 轮次预算耗尽；负值失败
  */
 int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result_t *out);
 

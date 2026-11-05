@@ -577,14 +577,29 @@ int daemon_rpc_call(const char *socket_path, const char *method, const char *par
 int daemon_rpc_call_stream(const char *socket_path, const char *method, const char *params_json,
                            daemon_rpc_stream_cb_t on_chunk, void *user_data, uint32_t timeout_ms)
 {
+    /* 兼容入口维持原契约：timeout_ms 是整条流的墙钟上限（idle 与之相等，
+     * 永不先于 total 触发）。需要长产出直通时用 _idle 变体显式分离两窗口。 */
+    return daemon_rpc_call_stream_idle(socket_path, method, params_json, on_chunk, user_data, 0,
+                                       timeout_ms);
+}
+
+int daemon_rpc_call_stream_idle(const char *socket_path, const char *method,
+                                const char *params_json, daemon_rpc_stream_cb_t on_chunk,
+                                void *user_data, uint32_t idle_ms, uint32_t total_ms)
+{
     if (!socket_path || !method)
         return AIRY_ERR_INVALID_PARAM;
-    if (timeout_ms == 0)
-        timeout_ms = rpc_timeout_for(method);
+    if (total_ms == 0)
+        total_ms = rpc_timeout_for(method);
+    if (idle_ms == 0 || idle_ms > total_ms)
+        idle_ms = total_ms;
 
-    /* 预算从进入调用起算：connect 与请求发送同样计入同一 deadline。 */
-    rpc_budget_t bud;
-    rpc_budget_set(&bud, timeout_ms);
+    /* 双窗口：total 是整条流的硬上限（慢速滴流拖不垮调用），idle 是相邻两段
+     * 数据之间的最大沉默时间，每收到数据即重置。只看 total 会把持续吐 token
+     * 的长推理在窗口处腰斩；只看 idle 则允许对端以滴流无限拉长调用。 */
+    rpc_budget_t bud, idle;
+    rpc_budget_set(&bud, total_ms);
+    rpc_budget_set(&idle, idle_ms);
 
     int fd = rpc_conn_send(socket_path, method, params_json);
     if (fd < 0)
@@ -593,12 +608,15 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
     /* Streaming read loop: every recv() payload is delivered to the callback
      * as it arrives; recv() == 0 (peer closed the connection) marks the end
      * of the stream (daemons are single-request-single-response-then-close).
-     * Slices keep the loop responsive and share the one request budget; the
+     * Slices keep the loop responsive and share the two windows above; the
      * caller gets a partial prefix via the callback when it fires. */
     int rc = AIRY_ERR_TIMEOUT;
 
     for (;;) {
         uint32_t left = rpc_budget_left(&bud);
+        uint32_t idle_left = rpc_budget_left(&idle);
+        if (idle_left < left)
+            left = idle_left;
         if (left == 0)
             break;
         int remain = (int)(left < DAEMON_RPC_POLL_SLICE_MS ? left : DAEMON_RPC_POLL_SLICE_MS);
@@ -636,12 +654,13 @@ int daemon_rpc_call_stream(const char *socket_path, const char *method, const ch
         }
         if (on_chunk)
             on_chunk(chunk, (size_t)n, user_data);
+        rpc_budget_set(&idle, idle_ms);
     }
 
     rpc_close_fd(fd);
     if (rc != AIRY_SUCCESS)
-        SVC_LOG_ERROR("daemon_rpc_call_stream: stream ended rc=%d (method=%s, timeout=%u)", rc,
-                      method, timeout_ms);
+        SVC_LOG_ERROR("daemon_rpc_call_stream: stream ended rc=%d (method=%s, idle=%u, total=%u)",
+                      rc, method, idle_ms, total_ms);
     return rc;
 }
 

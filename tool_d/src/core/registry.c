@@ -303,7 +303,7 @@ char *tool_registry_list_json(tool_registry_t *reg)
             cJSON_AddStringToObject(obj, "executable",
                                     e->meta->executable ? e->meta->executable : "");
             cJSON_AddNumberToObject(obj, "cacheable", e->meta->cacheable);
-            /* M1-1a 工具目录 SSoT：list_tools 输出每个工具的 inputSchema
+            /* M1-1a 工具目录 SSoT：list_tools 输出每个工具的 input_schema
              * （OpenAI tools parameters 格式，从 tool_param_t 构造），
              * 使 tool_d 成为工具目录唯一权威，gateway MCP 注册从本 RPC 拉取。 */
             cJSON *schema = cJSON_CreateObject();
