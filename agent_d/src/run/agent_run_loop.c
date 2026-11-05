@@ -317,9 +317,8 @@ static int run_llm_round(run_ctx_t *r, cJSON **tool_calls)
     agent_stream_init(&st, &ssink);
 
     uint64_t t0 = airy_time_ms();
-    int lrc = daemon_rpc_call_stream_idle(r->llm_sock, "complete_stream", params,
-                                          agent_stream_on_chunk, &st,
-                                          AGENT_RUN_LLM_TIMEOUT_MS, AGENT_RUN_LLM_TOTAL_MS);
+    int lrc = rpc_stream_idle(r->llm_sock, "complete_stream", params, agent_stream_on_chunk, &st,
+                              AGENT_RUN_LLM_TIMEOUT_MS, AGENT_RUN_LLM_TOTAL_MS);
     r->out->llm_ms += airy_time_ms() - t0;
     AIRY_FREE(params);
     agent_stream_finish(&st);
