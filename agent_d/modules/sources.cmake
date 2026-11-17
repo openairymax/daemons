@@ -11,6 +11,7 @@ set(AGENT_D_SOURCES
     src/rpc/agent_d_rpc.c
     src/rpc/agent_run_rpc.c
     src/monitor/agent_d_monitor.c
+    src/run/agent_run_alt.c
     src/run/agent_run_engine.c
     src/run/agent_run_exec.c
     src/run/agent_run_ledger.c

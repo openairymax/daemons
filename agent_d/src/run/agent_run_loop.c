@@ -13,6 +13,7 @@
 
 #include "agent_run_internal.h"
 
+#include "agent_run_alt.h"
 #include "airy_memory.h"
 #include "airy_run_stream.h"
 #include "airy_tool_schema.h"
@@ -928,6 +929,69 @@ static char *run_resume_emit(const run_ctx_t *r)
     }
 }
 
+/* C-25：主工具失败后的等价换路。换路是同一次调用的处置而非独立重试预算：
+ * 执行时长并入同一次 tool_ms，连败/熔断仍按一次失败记账；每步至多换一次，
+ * 替代工具失败后不再连锁换路（避免把一次失败放大成一次搜索）。策略拒绝类
+ * 错误码由调用方过滤，替代工具必须在当前目录内才执行。 */
+typedef int (*run_exec_fn)(const char *name, const char *args, char **out, int *code);
+
+static int run_alt_try(run_ctx_t *r, run_alt_t *alt, run_exec_fn exec, char **out, cJSON **fbev)
+{
+    char fit[160];
+    run_fit(fit, sizeof(fit), alt->args);
+    cJSON *ev = cJSON_CreateObject();
+    if (ev) {
+        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL, alt->tool);
+        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL_ID, "");
+        cJSON_AddStringToObject(ev, AIRY_RS_K_ARGS, fit);
+    }
+    run_ev_send(r, AIRY_RS_TYPE_TOOL_START, ev);
+
+    char *res = NULL;
+    int code = 0;
+    uint64_t t0 = airy_time_ms();
+    int rc = exec(alt->tool, alt->args, &res, &code);
+    r->out->tool_ms += airy_time_ms() - t0;
+    if (rc != 0 && code != 0)
+        run_cat_revoke(r, alt->tool, code);
+
+    run_fit(fit, sizeof(fit), res ? res : "");
+    ev = cJSON_CreateObject();
+    if (ev) {
+        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL, alt->tool);
+        cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL_ID, "");
+        cJSON_AddStringToObject(ev, AIRY_RS_K_STATUS, rc == 0 ? "ok" : "error");
+        cJSON_AddStringToObject(ev, AIRY_RS_K_RESULT_HASH, fit);
+    }
+    run_ev_send(r, AIRY_RS_TYPE_TOOL_END, ev);
+
+    if (fbev) {
+        cJSON *fb = cJSON_CreateObject();
+        if (fb) {
+            cJSON_AddStringToObject(fb, "tool", alt->tool);
+            cJSON_AddStringToObject(fb, "note", alt->note);
+            cJSON_AddNumberToObject(fb, "ok", rc == 0 ? 1 : 0);
+            *fbev = fb;
+        }
+    }
+    if (rc == 0) {
+        AIRY_FREE(*out);
+        *out = res;
+        return 0;
+    }
+    /* 换路也失败：回填两段原因并明确「表内已无替代」，让模型下一步只能
+     * 换参数或询问用户——这是可解释终止，不是静默重试。 */
+    char both[768];
+    snprintf(both, sizeof(both),
+             "Error: %s failed and its equivalent %s also failed (%s). No further equivalent tool "
+             "is available: change the arguments or ask the user.",
+             *out ? *out : "", alt->tool, res ? res : "");
+    AIRY_FREE(*out);
+    AIRY_FREE(res);
+    *out = AIRY_STRDUP(both);
+    return -1;
+}
+
 /* 单条工具调用：tool_start → 执行 → 连败计数 → tool_end → 回填 messages /
  * 台账 / trace（后者供最终响应）。返回熔断是否触发。 */
 static int run_tool_one(run_ctx_t *r, cJSON *tc)
@@ -957,6 +1021,7 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
 
     char *res = NULL;
     int erc;
+    cJSON *fbev = NULL;
     if (!run_cat_has(r->catalog, tname)) {
         /* C-16：派发面与下发面同源。模型可能凭历史记忆调用本轮目录外
          * 的工具（已撤销或不存在的），这里不执行并回填可行动原因。 */
@@ -992,6 +1057,23 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
          * tool_create 的新工具不必在此追加，下一轮目录采样自然可见。 */
         if (erc != 0 && code != 0)
             run_cat_revoke(r, tname, code);
+        /* C-25：失败且不属策略拒绝时，按等价表换路一次；开关关闭则保持
+         * 旧语义（只计数）。无替代时把原因写进 switch_reason，复盘可见。 */
+        if (erc != 0 && !run_alt_deny(code) && run_alt_enabled()) {
+            run_alt_t alt;
+            if (run_alt_plan(tname, targs, &alt) && run_cat_has(r->catalog, alt.tool)) {
+                erc = run_alt_try(r, &alt, run_execute_tool, &res, &fbev);
+                snprintf(note, sizeof(note), "%s failed; switched to %s", tname, alt.tool);
+                switch_reason = note;
+            } else {
+                snprintf(note, sizeof(note),
+                         "no equivalent tool for %s; arguments must change or the user must be "
+                         "asked",
+                         tname);
+                switch_reason = note;
+            }
+            run_alt_free(&alt);
+        }
     }
 
     /* C-1 连败计数：本次失败仍完整入账/推送后再判断熔断出口。被换路闸门
@@ -1042,6 +1124,8 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
     cJSON_AddNumberToObject(tr, "ok", erc == 0 ? 1 : 0);
     if (switch_reason)
         cJSON_AddStringToObject(tr, "switch_reason", switch_reason);
+    if (fbev)
+        cJSON_AddItemToObject(tr, "fallback", fbev);
     cJSON_AddItemToArray(r->trace, tr);
     AIRY_FREE(content);
     AIRY_FREE(res);
