@@ -54,6 +54,8 @@ void svc_destroy(void);
     X("run", m_run) \
     X("run_cancel", m_run_cancel) \
     X("run_stream", m_run_stream) \
+    X("task_submit", m_task_submit) \
+    X("task_submit_stream", m_task_submit_stream) \
     X("health_check", m_health_check) \
     X("get_stats", m_get_stats) \
     X("vocab", m_vocab)

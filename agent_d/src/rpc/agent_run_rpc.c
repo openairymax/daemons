@@ -13,6 +13,7 @@
  */
 
 #include "run/agent_run_engine.h"
+#include "run/agent_run_internal.h"
 #include "agent_d_internal.h"
 #include "svc_agent_d.h"
 
@@ -131,8 +132,8 @@ static void handle_run_stream(cJSON *params, int id, airy_sock_t client_fd)
 
     cJSON *result = NULL;
     int rc = agent_run_execute(a.prompt, a.model, a.history, a.gccp_answers, a.agent_spec,
-                               a.agent_file, a.session_id, a.rounds, a.resume_token, &sink,
-                               &result);
+                               a.agent_file, a.session_id, a.rounds, a.resume_token, NULL,
+                               &sink, &result);
     if (result)
         cJSON_Delete(result);
     (void)rc;
@@ -151,7 +152,7 @@ static void handle_run(cJSON *params, int id, airy_sock_t client_fd)
     cJSON *result = NULL;
     int rc = agent_run_execute(a.prompt, a.model, a.history, a.gccp_answers, a.agent_spec,
                                a.agent_file, a.session_id, a.rounds, a.resume_token, NULL,
-                               &result);
+                               NULL, &result);
     if (rc == 1) {
         JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "Request cancelled by user", id);
         cJSON_Delete(result);
@@ -179,6 +180,185 @@ static void handle_run(cJSON *params, int id, airy_sock_t client_fd)
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
 }
 
+/* ---- task.submit / task.submit_stream：统一任务编排入口（C-15） ---- */
+
+/* task 入参：goal 与 agent.run 的 prompt 同义，另带模式声明与 GCCP 材料。 */
+typedef struct {
+    const char *goal;
+    const char *model;
+    cJSON *history;            /* 借用 messages 数组节点（可 NULL） */
+    const char *gccp_answers;  /* 借用字符串，或指向 gccp_owned */
+    char *gccp_owned;          /* 对象答案序列化后的临时串（自持有） */
+    const char *session_id;
+    const char *resume_token;
+    const char *declared_mode; /* "chat"/"task"/"auto"/NULL */
+    const char *success_criteria;
+    const char *client;
+    int rounds;
+    bool gccp_confirmed;
+} task_args_t;
+
+static int parse_task_args(cJSON *params, int id, airy_sock_t fd, task_args_t *out)
+{
+    AIRY_MEMSET(out, 0, sizeof(*out));
+    if (!params) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, "Missing params", id);
+        return -1;
+    }
+
+    cJSON *p = cJSON_GetObjectItem(params, "goal");
+    const char *goal = cJSON_IsString(p) ? p->valuestring : NULL;
+    cJSON *messages = cJSON_GetObjectItem(params, "messages");
+    cJSON *m0 = (cJSON_IsArray(messages) && cJSON_GetArraySize(messages) > 0)
+                    ? cJSON_GetArrayItem(messages, 0)
+                    : NULL;
+    if (!goal && m0)
+        goal = json_str(m0, "content");
+    if (!goal)
+        goal = json_str(params, "prompt");
+    const char *resume = json_str(params, "resume_token");
+    if ((!goal || !*goal) && !resume) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS,
+                           "Invalid params: missing goal or resume_token", id);
+        return -1;
+    }
+
+    cJSON *rounds = cJSON_GetObjectItem(params, "rounds");
+    cJSON *conf = cJSON_GetObjectItem(params, "gccp_confirmed");
+    out->goal = goal;
+    out->model = json_str(params, "model");
+    out->history = m0 ? messages : NULL;
+    out->session_id = json_str(params, "session_id");
+    out->resume_token = resume;
+    /* "auto" 与缺省同义：交给服务端规则裁决，客户端不自行推断模式。 */
+    out->declared_mode = json_str(params, "mode");
+    if (out->declared_mode && strcmp(out->declared_mode, AGENT_TASK_MODE_AUTO) == 0)
+        out->declared_mode = NULL;
+    out->success_criteria = json_str(params, "success_criteria");
+    out->client = json_str(params, "client");
+    out->rounds = cJSON_IsNumber(rounds) ? rounds->valueint : 0;
+    out->gccp_confirmed = cJSON_IsBool(conf) && cJSON_IsTrue(conf);
+
+    /* gccp_answers 兼容字符串与对象两种线形态：字符串供 think_d 直接消费，
+     * 对象需序列化后才能作为引擎入参。 */
+    cJSON *ans = cJSON_GetObjectItem(params, "gccp_answers");
+    if (cJSON_IsString(ans) && ans->valuestring && ans->valuestring[0]) {
+        out->gccp_answers = ans->valuestring;
+    } else if (cJSON_IsObject(ans)) {
+        out->gccp_owned = cJSON_PrintUnformatted(ans);
+        out->gccp_answers = out->gccp_owned;
+    }
+    return 0;
+}
+
+/* 同步/流式共用主流程：裁决模式 -> GCCP 门禁 -> 引擎执行。
+ * 未确认的 task 在门禁处直接返回 needs_intent，绝不触达引擎与工具。 */
+static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
+                               const agent_run_event_sink_t *sink)
+{
+    task_args_t a;
+    if (parse_task_args(params, id, fd, &a) != 0)
+        return;
+
+    agent_run_task_meta_t meta;
+    AIRY_MEMSET(&meta, 0, sizeof(meta));
+    agent_task_gen_id("task", meta.task_id, sizeof(meta.task_id));
+    agent_task_gen_id("plan", meta.plan_id, sizeof(meta.plan_id));
+    meta.success_criteria = a.success_criteria;
+    meta.client = a.client;
+    meta.budget_rounds = a.rounds;
+    meta.gccp_confirmed = a.gccp_confirmed;
+
+    if (agent_task_decide_mode(a.goal, a.declared_mode, meta.mode, sizeof(meta.mode),
+                               meta.mode_reason, sizeof(meta.mode_reason)) != 0) {
+        AIRY_FREE(a.gccp_owned);
+        if (!sink)
+            JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,
+                               "task.submit failed: mode decision", id);
+        return;
+    }
+
+    /* GCCP 门禁：显式 confirmed 与按槽位齐备的答案二者其一即可放行。 */
+    cJSON *ans_raw = cJSON_GetObjectItem(params, "gccp_answers");
+    const cJSON *answers = cJSON_IsObject(ans_raw) ? ans_raw : NULL;
+    cJSON *answers_parsed = NULL;
+    if (!answers && cJSON_IsString(ans_raw) && ans_raw->valuestring && ans_raw->valuestring[0]) {
+        answers_parsed = cJSON_Parse(ans_raw->valuestring);
+        answers = answers_parsed;
+    }
+    agent_task_missing_slot_t missing[AGENT_TASK_MISSING_MAX];
+    size_t missing_count = 0;
+    bool confirmed = meta.gccp_confirmed;
+    (void)agent_task_gccp_check(answers, &confirmed, missing, AGENT_TASK_MISSING_MAX,
+                                &missing_count);
+    meta.gccp_confirmed = confirmed;
+    cJSON_Delete(answers_parsed);
+
+    if (strcmp(meta.mode, AGENT_TASK_MODE_TASK) == 0 && !meta.gccp_confirmed) {
+        cJSON *ni = agent_task_build_needs_intent(&meta, missing, missing_count);
+        AIRY_FREE(a.gccp_owned);
+        if (!ni) {
+            if (!sink)
+                JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,
+                                   "task.submit failed: needs_intent build", id);
+            return;
+        }
+        if (!sink) {
+            JSONRPC_SEND_SUCCESS(fd, ni, id);
+            return;
+        }
+        /* 流式无 JSON-RPC 成功帧：把 needs_intent 作为 task_state 帧下发，
+         * 客户端按 state 渲染补全表单（TUI C-15-06 消费）。 */
+        cJSON_AddStringToObject(ni, AIRY_RS_K_STATE, AGENT_TASK_STATUS_NEEDS_INTENT);
+        uint64_t seq = 0;
+        agent_run_emit_event(sink, &seq, meta.task_id, "", AIRY_RS_TYPE_TASK_STATE, ni);
+        return;
+    }
+
+    cJSON *result = NULL;
+    int rc = agent_run_execute(a.goal, a.model, a.history, a.gccp_answers, NULL, NULL,
+                               a.session_id, a.rounds, a.resume_token, &meta, sink, &result);
+    AIRY_FREE(a.gccp_owned);
+    if (sink) {
+        if (result)
+            cJSON_Delete(result);
+        return;
+    }
+    if (rc == 1) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Request cancelled by user", id);
+        cJSON_Delete(result);
+        return;
+    }
+    if ((rc != 0 && rc != AIRY_EBUDGET) || !result) {
+        const char *detail = NULL;
+        if (result) {
+            cJSON *resp = cJSON_GetObjectItem(result, "response");
+            if (cJSON_IsString(resp) && resp->valuestring && resp->valuestring[0])
+                detail = resp->valuestring;
+        }
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR,
+                           detail ? detail : "task.submit failed: tool loop exhausted or "
+                                             "LLM service error",
+                           id);
+        if (result)
+            cJSON_Delete(result);
+        return;
+    }
+    JSONRPC_SEND_SUCCESS(fd, result, id);
+}
+
+static void handle_task_submit(cJSON *params, int id, airy_sock_t client_fd)
+{
+    task_submit_common(params, id, client_fd, NULL);
+}
+
+static void handle_task_submit_stream(cJSON *params, int id, airy_sock_t client_fd)
+{
+    rs_sink_ctx_t sink_ctx = {client_fd, 0};
+    agent_run_event_sink_t sink = {rs_sink_emit, &sink_ctx};
+    task_submit_common(params, id, client_fd, &sink);
+}
+
 /* agent.cancel 请求处理：按 session_id 置位取消标志。 */
 static void handle_cancel(cJSON *params, int id, airy_sock_t client_fd)
 {
@@ -202,3 +382,6 @@ static void handle_cancel(cJSON *params, int id, airy_sock_t client_fd)
 
 DAEMON_RPC_SHELL(run, handle_run)
 DAEMON_RPC_SHELL(run_cancel, handle_cancel)
+/* task.* 对外方法由 gateway 映射为无点方法名（方法分派按首个 '.' 截断）。 */
+DAEMON_RPC_SHELL(task_submit, handle_task_submit)
+DAEMON_RPC_SHELL(task_submit_stream, handle_task_submit_stream)

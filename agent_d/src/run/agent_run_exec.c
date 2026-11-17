@@ -48,6 +48,7 @@ typedef struct {
     const agent_run_event_sink_t *sink;
     int rounds;                 /* 请求轮次预算（<=0 由策略缺省） */
     const char *resume_token;   /* 入参续跑令牌（借用，可 NULL） */
+    const agent_run_task_meta_t *task; /* task.submit 元数据（借用，可 NULL） */
     char *resume_out;           /* 本轮生成的续跑令牌（自持有，可 NULL） */
     int rounds_used;
     int rounds_limit;
@@ -86,6 +87,26 @@ static void run_free(run_ctx_t *c)
     AIRY_FREE(c->reason);
     AIRY_FREE(c->resume_out);
     AIRY_MEMSET(c, 0, sizeof(*c));
+}
+
+/* task_state 帧：C-15 任务时间线的唯一状态出口（仅 task.submit 携带 task
+ * 元数据时发帧）。run_id 取 task_id，unregister 之后仍用本地副本。 */
+static void run_task_state(run_ctx_t *c, const char *state, const char *reason)
+{
+    if (!c->task || !c->sink || !c->sink->emit || !state || !state[0])
+        return;
+    cJSON *d = cJSON_CreateObject();
+    if (!d)
+        return;
+    cJSON_AddStringToObject(d, AIRY_RS_K_TASK_ID, c->task->task_id);
+    if (c->task->plan_id[0])
+        cJSON_AddStringToObject(d, AIRY_RS_K_PLAN_ID, c->task->plan_id);
+    cJSON_AddStringToObject(d, AIRY_RS_K_STATE, state);
+    if (reason && reason[0])
+        cJSON_AddStringToObject(d, AIRY_RS_K_REASON, reason);
+    const char *rid = c->run_id[0] ? c->run_id
+                                   : (c->active ? c->active->run_id : c->task->task_id);
+    agent_run_emit_event(c->sink, &c->seq, rid, c->sess, AIRY_RS_TYPE_TASK_STATE, d);
 }
 
 /* ---- 依赖 daemon 的会话域辅助（本文件独占） ---- */
@@ -326,7 +347,12 @@ static int run_open(run_ctx_t *c)
     c->active = agent_run_register(c->sess);
     if (!c->active)
         return -1;
-    agent_run_gen_run_id(c->active->run_id, sizeof(c->active->run_id));
+    /* task 提交以 task_id 作为信封 run_id：同一任务在 CLI/TUI/SDK 与重连
+     * 后看到同一条时间线（C-15 N3），不再每次 run 换一个匿名 run_id。 */
+    if (c->task && c->task->task_id[0])
+        AIRY_STRNCPY_TERM(c->active->run_id, c->task->task_id, sizeof(c->active->run_id));
+    else
+        agent_run_gen_run_id(c->active->run_id, sizeof(c->active->run_id));
     c->run_start_ms = airy_time_ms();
 
     if (svc_model_defaults_resolve(c->model, NULL, c->mname, sizeof(c->mname), NULL, 0) == 0)
@@ -366,7 +392,21 @@ static void run_announce(run_ctx_t *c)
         return;
     cJSON_AddStringToObject(rs, AIRY_RS_K_PROMPT, pbuf);
     cJSON_AddStringToObject(rs, AIRY_RS_K_MODEL, c->mname);
+    /* task 元数据随 run_start 一次下发：客户端据此渲染任务头（模式与原因
+     * 是服务端裁决结果，客户端不自行推断）。 */
+    if (c->task) {
+        cJSON_AddStringToObject(rs, AIRY_RS_K_TASK_ID, c->task->task_id);
+        if (c->task->plan_id[0])
+            cJSON_AddStringToObject(rs, AIRY_RS_K_PLAN_ID, c->task->plan_id);
+        cJSON_AddStringToObject(rs, AIRY_RS_K_MODE, c->task->mode);
+        cJSON_AddStringToObject(rs, AIRY_RS_K_MODE_REASON, c->task->mode_reason);
+        cJSON_AddBoolToObject(rs, AIRY_RS_K_GCCP_CONFIRMED, c->task->gccp_confirmed);
+        if (c->task->success_criteria && c->task->success_criteria[0])
+            cJSON_AddStringToObject(rs, AIRY_RS_K_SUCCESS_CRITERIA,
+                                    c->task->success_criteria);
+    }
     agent_run_emit_event(c->sink, &c->seq, c->active->run_id, c->sess, AIRY_RS_TYPE_RUN_START, rs);
+    run_task_state(c, AGENT_TASK_STATE_SUBMITTED, NULL);
 }
 
 /* 编排分支失败必须上抛为节点失败（rc=SUBAGENT_FAIL），原因走 response
@@ -386,8 +426,51 @@ static void run_orch(run_ctx_t *c)
     c->rc = AGENT_RUN_RC_SUBAGENT_FAIL;
 }
 
-/* 双思考 DAG 计划：决策链 + run_stream 双写 plan 事件；计划注入 system 首部，
- * 并以轮次边界约束防止模型延续历史主题作答。 */
+/* 计划单步的可读文本：元素可能是字符串，或含 title/step/goal/action 的对象。 */
+static const char *plan_step_text(const cJSON *step)
+{
+    if (cJSON_IsString(step))
+        return step->valuestring;
+    if (cJSON_IsObject(step)) {
+        static const char *const keys[] = {"title", "step", "goal", "action", NULL};
+        for (size_t i = 0; keys[i]; i++) {
+            const cJSON *v = cJSON_GetObjectItem(step, keys[i]);
+            if (cJSON_IsString(v) && v->valuestring && v->valuestring[0])
+                return v->valuestring;
+        }
+    }
+    return NULL;
+}
+
+/* step 帧：计划一经确认即逐条下发（step_status=planned）。客户端据此在
+ * 第一个工具调用之前就能渲染步骤清单，而不是等执行完才拿到事后计划。 */
+static void run_plan_steps(run_ctx_t *c, const cJSON *plan)
+{
+    const cJSON *steps = cJSON_IsObject(plan) ? cJSON_GetObjectItem(plan, "steps") : plan;
+    if (!cJSON_IsArray(steps))
+        return;
+    int n = cJSON_GetArraySize(steps);
+    for (int i = 0; i < n; i++) {
+        cJSON *d = cJSON_CreateObject();
+        if (!d)
+            return;
+        if (c->task) {
+            cJSON_AddStringToObject(d, AIRY_RS_K_TASK_ID, c->task->task_id);
+            if (c->task->plan_id[0])
+                cJSON_AddStringToObject(d, AIRY_RS_K_PLAN_ID, c->task->plan_id);
+        }
+        cJSON_AddNumberToObject(d, AIRY_RS_K_STEP_INDEX, i);
+        cJSON_AddNumberToObject(d, AIRY_RS_K_STEP_COUNT, n);
+        cJSON_AddStringToObject(d, AIRY_RS_K_STEP_STATUS, "planned");
+        const char *txt = plan_step_text(cJSON_GetArrayItem(steps, i));
+        if (txt)
+            cJSON_AddStringToObject(d, "step", txt);
+        agent_run_emit_event(c->sink, &c->seq, c->active->run_id, c->sess, AIRY_RS_TYPE_STEP, d);
+    }
+}
+
+/* 双思考 DAG 计划：先宣告计划与步骤再执行（C-15 顺序修复）；计划注入
+ * system 首部，并以轮次边界约束防止模型延续历史主题作答。 */
 static void run_plan(run_ctx_t *c, const cJSON *plan)
 {
     char *plan_str = cJSON_PrintUnformatted(plan);
@@ -403,6 +486,27 @@ static void run_plan(run_ctx_t *c, const cJSON *plan)
         agent_record_event(c->sess, "chain", evt);
         cJSON_Delete(evt);
     }
+
+    /* 计划帧先于任何工具执行：旧顺序在 run_loop 之后才发 plan，客户端
+     * 只能做事后回显，无法支撑「执行中」的步骤进度。 */
+    cJSON *ps = cJSON_CreateObject();
+    if (ps) {
+        char plbuf[2048];
+        AIRY_STRNCPY_TERM(plbuf, plan_str, sizeof(plbuf));
+        cJSON_AddStringToObject(ps, AIRY_RS_K_PLAN, plbuf);
+        if (c->task) {
+            cJSON_AddStringToObject(ps, AIRY_RS_K_TASK_ID, c->task->task_id);
+            if (c->task->plan_id[0])
+                cJSON_AddStringToObject(ps, AIRY_RS_K_PLAN_ID, c->task->plan_id);
+        }
+        const cJSON *steps =
+            cJSON_IsObject(plan) ? cJSON_GetObjectItem(plan, "steps") : plan;
+        if (cJSON_IsArray(steps))
+            cJSON_AddNumberToObject(ps, AIRY_RS_K_STEP_COUNT, cJSON_GetArraySize(steps));
+        agent_run_emit_event(c->sink, &c->seq, c->active->run_id, c->sess, AIRY_RS_TYPE_PLAN, ps);
+    }
+    run_plan_steps(c, plan);
+    run_task_state(c, AGENT_TASK_STATE_PLANNED, NULL);
 
     cJSON *messages = (c->history && cJSON_IsArray(c->history) &&
                        cJSON_GetArraySize((cJSON *)c->history) > 0)
@@ -435,18 +539,29 @@ static void run_plan(run_ctx_t *c, const cJSON *plan)
             cJSON_AddStringToObject(usr, "content", c->prompt);
             cJSON_AddItemToArray(messages, usr);
         }
+        run_task_state(c, AGENT_TASK_STATE_EXECUTING, NULL);
         run_loop(c, messages);
         cJSON_Delete(messages);
     }
-
-    cJSON *ps = cJSON_CreateObject();
-    if (ps) {
-        char plbuf[2048];
-        AIRY_STRNCPY_TERM(plbuf, plan_str, sizeof(plbuf));
-        cJSON_AddStringToObject(ps, AIRY_RS_K_PLAN, plbuf);
-        agent_run_emit_event(c->sink, &c->seq, c->active->run_id, c->sess, AIRY_RS_TYPE_PLAN, ps);
-    }
     AIRY_FREE(plan_str);
+}
+
+/* 计划不可用：task 模式必须显式告知「规划失败」并降级直跑，而不是伪装成
+ * 一次本来就不需要计划的任务。客户端据此区分两种情形并决定是否重试规划。 */
+static void run_plan_unavailable(run_ctx_t *c, const char *reason)
+{
+    if (!c->task)
+        return;
+    cJSON *d = cJSON_CreateObject();
+    if (d) {
+        cJSON_AddStringToObject(d, AIRY_RS_K_TASK_ID, c->task->task_id);
+        if (c->task->plan_id[0])
+            cJSON_AddStringToObject(d, AIRY_RS_K_PLAN_ID, c->task->plan_id);
+        cJSON_AddStringToObject(d, AIRY_RS_K_REASON, reason ? reason : "plan_unavailable");
+        agent_run_emit_event(c->sink, &c->seq, c->active->run_id, c->sess,
+                             AIRY_RS_TYPE_PLAN_UNAVAILABLE, d);
+    }
+    run_task_state(c, AGENT_TASK_STATE_EXECUTING, reason);
 }
 
 /* 主对话：think_d 不可达或无 plan 一律降级为直接 LLM 工具循环（既有语义）。 */
@@ -456,6 +571,7 @@ static void run_think(run_ctx_t *c)
     int think_rc = agent_think_process(c->sess, c->prompt, c->gccp_answers, &c->think);
     c->think_ms += airy_time_ms() - t0;
     if (think_rc != 0 || !c->think) {
+        run_plan_unavailable(c, "think_unavailable");
         run_loop(c, c->history);
         return;
     }
@@ -464,15 +580,23 @@ static void run_think(run_ctx_t *c)
         c->gccp_round = 1;
         c->trace = cJSON_CreateArray();
         c->rc = 0;
+        /* 交互轮没有执行：task 停在 paused，等客户端补齐 goal 后再提交。 */
+        run_task_state(c, AGENT_TASK_STATE_PAUSED, "gccp_interaction_required");
         SVC_LOG_INFO("agent.run: GCCP interaction round (session=%s)", c->sess);
         return;
     }
     const cJSON *plan = cJSON_GetObjectItem(c->think, "plan");
-    if (plan)
+    if (plan) {
         run_plan(c, plan);
+    } else {
+        run_plan_unavailable(c, "plan_missing");
+        run_loop(c, c->history);
+        return;
+    }
     /* 预算耗尽已是终态（trace/正文完整移交），不得当作「计划段未执行」
-     * 再降级重跑一遍——那会把已消耗的轮次与产物整体作废。 */
-    if (c->rc < 0 && c->rc != AIRY_EBUDGET)
+     * 再降级重跑一遍——那会把已消耗的轮次与产物整体作废。task 模式下
+     * 计划段失败也不重放：第二次 run_loop 会掩盖首次失败的真实原因。 */
+    if (c->rc < 0 && c->rc != AIRY_EBUDGET && !c->task)
         run_loop(c, c->history);
 }
 
@@ -542,6 +666,18 @@ static cJSON *run_fill(run_ctx_t *c)
         return NULL;
     }
     cJSON_AddStringToObject(result, "session_id", c->sess);
+    /* task 元数据与事件信封同源：客户端用同一 task_id 关联结果与时间线。 */
+    if (c->task) {
+        cJSON_AddStringToObject(result, AIRY_RS_K_TASK_ID, c->task->task_id);
+        if (c->task->plan_id[0])
+            cJSON_AddStringToObject(result, AIRY_RS_K_PLAN_ID, c->task->plan_id);
+        cJSON_AddStringToObject(result, AIRY_RS_K_MODE, c->task->mode);
+        cJSON_AddStringToObject(result, AIRY_RS_K_MODE_REASON, c->task->mode_reason);
+        cJSON_AddBoolToObject(result, AIRY_RS_K_GCCP_CONFIRMED, c->task->gccp_confirmed);
+        if (c->task->success_criteria && c->task->success_criteria[0])
+            cJSON_AddStringToObject(result, AIRY_RS_K_SUCCESS_CRITERIA,
+                                    c->task->success_criteria);
+    }
     cJSON_AddStringToObject(result, "response", c->text ? c->text : "");
     /* 一等终态（C-14）：status 是客户端渲染「继续/放弃」的唯一判据，
      * error_code 保留原始码供排障；Paused 时 resume_token 随结果下发，
@@ -607,6 +743,14 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
         }
     }
 
+    /* task 终态帧与 run_end.status 同源：paused 表示可凭 resume_token 继续，
+     * 客户端不得把 paused 当失败渲染；交互轮已单独发过 paused，不重复。 */
+    if (c->task && !c->gccp_round) {
+        const char *ts = c->cancelled ? AGENT_TASK_STATE_CANCELLED
+                                      : run_state_name(c->rc, c->cancelled);
+        run_task_state(c, ts, NULL);
+    }
+
     cJSON *end = cJSON_CreateObject();
     if (end) {
         cJSON_AddStringToObject(end, AIRY_RS_K_STATUS,
@@ -647,8 +791,8 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
 int agent_run_execute(const char *prompt, const char *model, const cJSON *history,
                       const char *gccp_answers, const cJSON *agent_spec,
                       const char *agent_file, const char *session_id, int rounds,
-                      const char *resume_token, const agent_run_event_sink_t *sink,
-                      cJSON **out_result)
+                      const char *resume_token, const agent_run_task_meta_t *task,
+                      const agent_run_event_sink_t *sink, cJSON **out_result)
 {
     *out_result = NULL;
     /* 续跑请求只带令牌不带原 prompt 也合法：历史由令牌摘要重建。 */
@@ -665,6 +809,7 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     c.session_id = session_id;
     c.rounds = rounds;
     c.resume_token = resume_token;
+    c.task = task;
     c.sink = sink;
     c.rc = -1;
 
