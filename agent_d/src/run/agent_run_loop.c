@@ -648,7 +648,7 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
      * 在会话首轮即可调用；tool_d 不可达时仅退化为静态目录，不影响对话。 */
     run_load_dyn(&r);
 
-    for (int i = 0; i < AGENT_RUN_MAX_TOOL_LOOPS; i++) {
+    for (int i = 0; i < AGENT_RUN_ROUNDS_DEFAULT; i++) {
         if (agent_run_is_cancelled(args->session)) {
             SVC_LOG_INFO("agent.run: cancelled by user (session=%s)", r.sess ? r.sess : "?");
             rc = 1;
