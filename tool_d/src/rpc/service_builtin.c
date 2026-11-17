@@ -161,6 +161,8 @@ static const tool_contract_t k_contract[] = {
     {"maths_plot", MATHS_D_SOCKET_NAME, "maths_d", 0, 0, 0},
     /* 副作用面：写数据目录 + 改注册表；不触网/不拉子进程，故无 FX 标志。 */
     {"tool_create", NULL, NULL, TOOL_FX_FS, 0, 1},
+    /* 特权执行：改系统包状态（FS）、下载软件源（NET）、派生进程（PROC）。 */
+    {"priv_exec", NULL, NULL, TOOL_FX_FS | TOOL_FX_NET | TOOL_FX_PROC, 0, 1},
 };
 
 void register_builtin_tools(tool_service_t *svc)
@@ -246,6 +248,12 @@ void register_builtin_tools(tool_service_t *svc)
          "\"required\":{\"type\":\"boolean\"}}},\"maxItems\":16}",
          0},
     };
+    /* 特权执行：程序名走枚举（与白名单同源），实参形状由实现按程序
+     * 逐项校验；schema 只做模型侧提示，不承担授权判定。 */
+    static tool_param_t priv_exec_params[] = {
+        {"program", "{\"type\":\"string\",\"enum\":[\"dnf\",\"rpm\",\"systemctl\"]}", 1},
+        {"args", "{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"maxItems\":32}", 1},
+    };
 
     /* Capability grid of the built-in tool set (SSoT): one row per tool.
      * Budget chain for the scanning tools is tool (20s) < runner IPC (30s)
@@ -297,6 +305,13 @@ void register_builtin_tools(tool_service_t *svc)
               "Create a reusable tool from a script (shebang required). The script is "
               "saved and registered immediately, and can be called by name in later turns",
               tool_create_params, 15, 0, TOOL_ACCESS_WRITE),
+        /* 特权执行：绕过工具沙箱的显式通道，仅白名单程序 + 参数校验 +
+         * root + ACL/审批四重条件同时成立时执行；装包耗时按 120s 预算。 */
+        BTOOL("priv_exec",
+              "Run a whitelisted system administration program (dnf/rpm/systemctl) with "
+              "root privileges outside the tool sandbox; requires ACL authorization and "
+              "is audited",
+              priv_exec_params, 120, 0, TOOL_ACCESS_WRITE),
     };
 
     tool_contract_bind(k_contract, sizeof(k_contract) / sizeof(k_contract[0]));

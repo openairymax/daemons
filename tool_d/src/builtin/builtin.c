@@ -41,6 +41,7 @@
 #include "builtin/builtin_exec_internal.h"
 #include "builtin/builtin_fs_internal.h"
 #include "builtin/builtin_maths_internal.h"
+#include "builtin/builtin_priv_internal.h"
 #include "builtin/builtin_toolmake_internal.h"
 #include "builtin/builtin_time_internal.h"
 
@@ -364,6 +365,7 @@ static const builtin_slot_t g_builtin_slots[] = {
     {"maths_stats", maths_stats_tool},
     {"maths_plot", maths_plot_tool},
     {"tool_create", toolmake_create},
+    {"priv_exec", priv_exec_tool},
 };
 
 int tool_builtin_run(const char *tool_id, const char *params_json, uint32_t timeout_ms,
