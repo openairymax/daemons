@@ -490,10 +490,12 @@ int mem_service_get(mem_service_t *svc, const char *record_id, mem_record_t *out
 }
 
 /**
- * @brief 交换删除指定下标记录（调用方须持有 svc->lock）。
+ * @brief 压实删除指定下标记录（调用方须持有 svc->lock）。
  *
- * 释放向量/字段，将尾部记录搬入当前位置（数组保持紧凑），并同步
- * 维护 DF 表与 record_index 哈希。
+ * 释放向量/字段后，把 idx 之后的记录整体前移一位，保持「数组下标 = 写入序」
+ * 不变量；随后重建被移动区间的 record_index 下标。此前的交换删除（尾部记录
+ * 搬入当前位置）会打乱该不变量，使 mem_service_recent 的倒序下标与实际写入
+ * 序不符（0.1.21 C-28）。
  */
 void mem_remove_record_at(mem_service_t *svc, size_t idx)
 {
@@ -507,8 +509,10 @@ void mem_remove_record_at(mem_service_t *svc, size_t idx)
 
     size_t last = svc->record_count - 1;
     if (idx != last) {
-        svc->records[idx] = svc->records[last];
-        hindex_put(&svc->record_index, svc->records[idx].record_id, idx);
+        AIRY_MEMMOVE(&svc->records[idx], &svc->records[idx + 1],
+                     (last - idx) * sizeof(mem_record_entry_t));
+        for (size_t i = idx; i < last; i++)
+            hindex_put(&svc->record_index, svc->records[i].record_id, i);
     }
     __builtin_memset(&svc->records[last], 0, sizeof(mem_record_entry_t));
     svc->record_count--;
@@ -577,6 +581,9 @@ int mem_service_recent(mem_service_t *svc, uint32_t limit,
         return AIRY_ERR_OUT_OF_MEMORY;
     }
 
+    /* 下标倒序即写入序倒序：写入总落在 record_count 处，删除以 memmove
+     * 连续压实（mem_remove_record_at），故数组下标恒等于写入序。不依赖
+     * created_at（秒级精度，同秒多写时会并列）。 */
     size_t n = 0;
     for (size_t i = 0; i < take; i++) {
         const mem_record_entry_t *rec = &svc->records[total - 1 - i];
