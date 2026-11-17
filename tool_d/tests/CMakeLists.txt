@@ -40,6 +40,8 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_toolmake.c
     # C-22 特权执行通道：白名单 + 参数校验 + 审计
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_priv.c
+    # C-26 环境可行性预检
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_envcheck.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sandbox/os_sandbox.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/approval/tool_interactive_approval.c
     # 0.1.9 M4：plugin_d → tool_d 整编——插件执行域源随迁测试
@@ -58,6 +60,8 @@ set(TOOL_TEST_SOURCES
     test_result_semantics.c
     # C-22: 特权执行通道（白名单/参数越权/开关/非 root 拒绝/审计落盘）
     test_priv_exec.c
+    # C-26: 环境可行性预检（开关/探针/命令存在性/七类标记/不误判）
+    test_envcheck.c
     # R1-a: 执行面隔离池（并发互不影响 / CANCELED / 背压 BUSY）
     test_executor_pool.c
     test_validator.c
