@@ -38,6 +38,8 @@ set(TOOL_IMPL_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_maths.c
     # 会话内自制工具（tool_create）：脚本落盘 + 运行期登记/替换
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_toolmake.c
+    # C-22 特权执行通道：白名单 + 参数校验 + 审计
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/builtin/builtin_priv.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/sandbox/os_sandbox.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/approval/tool_interactive_approval.c
     # 0.1.9 M4：plugin_d → tool_d 整编——插件执行域源随迁测试
@@ -54,6 +56,8 @@ set(TOOL_TEST_SOURCES
     test_executor.c
     # C-2: 失败语义注入（退出非 0 / 超时 / 空输出 / 部分输出 / 审批拒绝）
     test_result_semantics.c
+    # C-22: 特权执行通道（白名单/参数越权/开关/非 root 拒绝/审计落盘）
+    test_priv_exec.c
     # R1-a: 执行面隔离池（并发互不影响 / CANCELED / 背压 BUSY）
     test_executor_pool.c
     test_validator.c
