@@ -131,6 +131,9 @@ typedef struct {
  * @param session_id   调用方预分配会话 ID（可 NULL；为空则引擎生成）
  * @param rounds       工具环轮次预算（<=0 取策略缺省；上限 32）
  * @param resume_token 续跑令牌（可 NULL；非空时忽略 prompt/history 的全量重放）
+ * @param task         task.submit 元数据（可 NULL；非 NULL 时 run_id 取
+ *                     task_id，事件与结果附带 mode/plan 字段，并按
+ *                     submitted→planned→executing→终态推进 task_state）
  * @param sink         run_stream 事件推送 sink（可 NULL 表示非流式）
  * @param out_result   JSON-RPC result 对象（AIRY_* 成功时非 NULL，调用方
  *                     cJSON_Delete；GCCP 交互轮含 interaction_required 等）
@@ -142,8 +145,8 @@ typedef struct {
 int agent_run_execute(const char *prompt, const char *model, const cJSON *history,
                       const char *gccp_answers, const cJSON *agent_spec,
                       const char *agent_file, const char *session_id, int rounds,
-                      const char *resume_token, const agent_run_event_sink_t *sink,
-                      cJSON **out_result);
+                      const char *resume_token, const agent_run_task_meta_t *task,
+                      const agent_run_event_sink_t *sink, cJSON **out_result);
 
 #ifdef __cplusplus
 }

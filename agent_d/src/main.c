@@ -18,6 +18,6 @@ static const daemon_op_t SVC_OPS[] = {
 };
 
 DAEMON_MAIN(agent_d, AGENT_D, "agent", "AIRY_AGENT_D_DEBUG",
-            "agent", "agent,core", 13, 256, 16, 128, 4096, 1,
+            "agent", "agent,core", 15, 256, 16, 128, 4096, 1,
             svc_activate, svc_attach_noop, svc_teardown,
             daemon_dome_init_pep, daemon_dome_cleanup)

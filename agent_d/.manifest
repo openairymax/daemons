@@ -18,7 +18,8 @@
     "pool": {"max_events": 256, "min": 16, "max": 128, "queue": 4096},
     "methods": [
       "spawn", "terminate", "invoke", "cancel", "list", "count",
-      "run", "run_cancel", "run_stream", "health_check",
+      "run", "run_cancel", "run_stream",
+      "task_submit", "task_submit_stream", "health_check",
       "get_stats", "vocab"
     ]
   },
