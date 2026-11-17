@@ -142,7 +142,7 @@ int mem_service_kb_delete(mem_service_t *svc, const char *kb_id, size_t *out_del
 
     airy_mtx_lock(&svc->lock);
 
-    /* 逐条交换删除：mem_remove_record_at 将尾部记录搬入当前位置，
+    /* 逐条压实删除：mem_remove_record_at 将后续记录整体前移一位，
      * 因此 i 不可自增（须重查当前位置），保证数组始终紧凑、
      * 无游离记录（record_count 语义正确，destroy 可完整回收）。 */
     size_t deleted = 0;
