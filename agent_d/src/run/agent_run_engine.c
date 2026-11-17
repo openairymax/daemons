@@ -123,6 +123,31 @@ bool agent_run_is_cancelled(const agent_run_session_t *s)
     return s && s->cancelled != 0;
 }
 
+const char *run_state_name(int rc, int cancelled)
+{
+    if (cancelled)
+        return "cancelled";
+    return rc == 0 ? "completed" : "failed";
+}
+
+const char *run_rc_msg(int rc)
+{
+    switch (rc) {
+    case 0:
+        return "";
+    case AGENT_RUN_RC_TOOL_FUSE:
+        return "agent.run stopped: repeated tool failures (fuse tripped)";
+    case AGENT_RUN_RC_SUBAGENT_FAIL:
+        return "agent.run failed in the orchestration branch (sub-agent)";
+    case AGENT_RUN_RC_TOOL_ROUNDS:
+        return "agent.run exhausted the tool-loop round budget";
+    case AGENT_RUN_RC_EMPTY:
+        return "agent.run finished without output";
+    default:
+        return "agent.run failed: tool loop exhausted or LLM service error";
+    }
+}
+
 int agent_run_cancel_by_session(const char *session_id)
 {
     if (!session_id || !session_id[0])

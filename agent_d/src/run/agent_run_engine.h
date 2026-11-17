@@ -45,6 +45,10 @@ extern "C" {
 /* 轮次预算耗尽：模型每轮都在推进工具但未收敛。产物（trace/text）照常移交，
  * 原因随 error 事件回传，与「崩溃」区分，便于客户端区分续跑与重试。 */
 #define AGENT_RUN_RC_TOOL_ROUNDS 4
+/* 无输出终态（0.1.21 L-9）：rc=0 但终局正文为空。空串不是结果——持久化
+ * 它会让会话历史出现「成功但空白」的轮次，客户端只能靠用户重发；按失败
+ * 回传，使上层可重试或改写提示。 */
+#define AGENT_RUN_RC_EMPTY 6
 /* 流式 LLM 调用的双窗口：TIMEOUT_MS 是相邻两段数据之间的最大沉默时间
  * （每收一段即重置），TOTAL_MS 是整条流的硬上限。只有前者会把持续吐 token
  * 的长推理在 90s 处腰斩——那是「卡住后报错」的直接来源。 */
@@ -70,6 +74,12 @@ bool agent_run_is_cancelled(const agent_run_session_t *s);
 
 /** @brief 按 session_id 请求取消（agent.cancel 入口，返回 0 命中）。 */
 int agent_run_cancel_by_session(const char *session_id);
+
+/** @brief 终态名：run_end 的 status 与决策链的 state 共用这一映射点。 */
+const char *run_state_name(int rc, int cancelled);
+
+/** @brief rc 对应的用户可展示文案（run_end 错误帧与失败终局共用）。 */
+const char *run_rc_msg(int rc);
 
 /* ---- run 引擎主入口（原 gateway handle_agent_run 迁移） ---- */
 
