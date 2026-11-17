@@ -24,6 +24,7 @@
 #include "error.h"
 #include "hall_event.h"
 #include "platform.h"
+#include "safe_utf8.h"
 #include "svc_logger.h"
 #include "svc_model_defaults.h"
 
@@ -105,7 +106,9 @@ static char *run_rpc(const char *sock_name, const char *method, cJSON *params, i
     return resp;
 }
 
-/* 记录一条 hall 事件（决策链写侧，best effort：写失败不阻塞主流程）。 */
+/* 记录一条 hall 事件（决策链写侧，best effort：写失败不阻塞主流程）。
+ * 落盘前校验 JSON 合法性与 UTF-8：链事件是后续复盘与回放的输入，写入
+ * 一条坏行会让整段链路（NDJSON）解析失败，故宁可丢弃并告警。 */
 static void agent_record_event(const char *session_id, const char *category, cJSON *content)
 {
     if (!session_id || !session_id[0] || !content)
@@ -113,7 +116,15 @@ static void agent_record_event(const char *session_id, const char *category, cJS
     char *content_str = cJSON_PrintUnformatted(content);
     if (!content_str)
         return;
-    (void)hall_evt_write(session_id, category, NULL, content_str);
+    size_t len = strlen(content_str);
+    cJSON *probe = utf8_validate(content_str, len) ? cJSON_Parse(content_str) : NULL;
+    if (!probe) {
+        SVC_LOG_WARN("agent.run: dropping malformed %s event (session=%s, %zu bytes)", category,
+                     session_id, len);
+    } else {
+        cJSON_Delete(probe);
+        (void)hall_evt_write(session_id, category, NULL, content_str);
+    }
     AIRY_FREE(content_str);
 }
 
@@ -459,8 +470,10 @@ static void run_tools_evt(run_ctx_t *c)
         char buf[160];
         cJSON_AddStringToObject(item, "tool", cJSON_IsString(tool) ? tool->valuestring : "");
         AIRY_STRNCPY_TERM(buf, cJSON_IsString(args) ? args->valuestring : "", sizeof(buf));
+        buf[utf8_prefix_len(buf, strlen(buf))] = '\0';
         cJSON_AddStringToObject(item, "args", buf);
         AIRY_STRNCPY_TERM(buf, cJSON_IsString(res) ? res->valuestring : "", sizeof(buf));
+        buf[utf8_prefix_len(buf, strlen(buf))] = '\0';
         cJSON_AddStringToObject(item, "result", buf);
         cJSON_AddItemToArray(arr, item);
     }

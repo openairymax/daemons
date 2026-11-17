@@ -19,7 +19,9 @@
 #include "daemon_rpc_client.h"
 #include "err_class.h"
 #include "platform.h"
+#include "safe_utf8.h"
 #include "svc_logger.h"
+#include "text_utils.h"
 
 #include <cjson/cJSON.h>
 
@@ -510,6 +512,15 @@ static void run_dyn_hook(run_ctx_t *r, const char *args_json)
     cJSON_Delete(root);
 }
 
+/* 定长字段装填：先按容量拷贝，再把末尾可能切半的多字节字符退掉。
+ * 链事件与 trace 的单字段是固定 160 字节，字节级截断会把 UTF-8 切坏，
+ * 下游按 JSON 严格解析时整条事件作废。 */
+static void run_fit(char *buf, size_t cap, const char *src)
+{
+    AIRY_STRNCPY_TERM(buf, src ? src : "", cap);
+    buf[utf8_prefix_len(buf, strlen(buf))] = '\0';
+}
+
 /* 单条工具调用：tool_start → 执行 → 连败计数 → tool_end → 回填 messages /
  * 台账 / trace（后者供最终响应）。返回熔断是否触发。 */
 static int run_tool_one(run_ctx_t *r, cJSON *tc)
@@ -523,7 +534,7 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
     const char *tid = cJSON_IsString(tcid) ? tcid->valuestring : "";
     char buf[160];
 
-    AIRY_STRNCPY_TERM(buf, targs, sizeof(buf));
+    run_fit(buf, sizeof(buf), targs);
     cJSON *ev = cJSON_CreateObject();
     if (ev) {
         cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL, tname);
@@ -543,9 +554,11 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
     if (run_fail_streak_bump(&r->streak, erc)) {
         r->fused = 1;
         snprintf(r->fuse, sizeof(r->fuse), "%s: %s", tname, res ? res : "");
+        r->fuse[utf8_prefix_len(r->fuse, strlen(r->fuse))] = '\0';
     }
 
     AIRY_STRNCPY_TERM(buf, res ? res : "", sizeof(buf));
+    buf[utf8_prefix_len(buf, strlen(buf))] = '\0';
     ev = cJSON_CreateObject();
     if (ev) {
         cJSON_AddStringToObject(ev, AIRY_RS_K_TOOL_ID, tid);
@@ -554,19 +567,27 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
     }
     run_ev_send(r, AIRY_RS_TYPE_TOOL_END, ev);
 
+    /* 回填预算（C-23）：长输出按 8 KB 头尾保留，超出部分以标记替代，
+     * 避免整段塞回上下文挤掉后续轮次；预算与 UTF-8 边界由 string SSoT
+     * 统一裁决，本处只负责取用。 */
+    char *content = airy_text_budget(res ? res : "Tool execution failed", 0);
+    if (!content)
+        content = AIRY_STRDUP("Tool execution failed");
+
     cJSON *msg = cJSON_CreateObject();
     cJSON_AddStringToObject(msg, "role", "tool");
     cJSON_AddStringToObject(msg, "tool_call_id", tid);
-    cJSON_AddStringToObject(msg, "content", res ? res : "Tool execution failed");
+    cJSON_AddStringToObject(msg, "content", content ? content : "Tool execution failed");
     cJSON_AddItemToArray(r->messages, msg);
-    agent_ledger_add(&r->lg, "tool_result", res, 0, msg);
+    agent_ledger_add(&r->lg, "tool_result", content, 0, msg);
 
     cJSON *tr = cJSON_CreateObject();
     cJSON_AddStringToObject(tr, "tool", tname);
     cJSON_AddStringToObject(tr, "arguments", targs);
-    cJSON_AddStringToObject(tr, "result", res ? res : "");
+    cJSON_AddStringToObject(tr, "result", content ? content : "");
     cJSON_AddNumberToObject(tr, "ok", erc == 0 ? 1 : 0);
     cJSON_AddItemToArray(r->trace, tr);
+    AIRY_FREE(content);
     AIRY_FREE(res);
     return r->fused;
 }
