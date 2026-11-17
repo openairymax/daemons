@@ -60,6 +60,11 @@ int sup_svc_prepare(sup_ctx_t *ctx, int *lfd_out)
         sup_pidfile_clear(ctx);
         return -1;
     }
+#ifndef _WIN32
+    /* A-5：输出泵先起再放行派生；失败则 spawn 走旧预开 .out 路径 */
+    if (sup_pump_start(ctx) != 0)
+        sup_log("WARN", "output pump unavailable, preopen .out fallback");
+#endif
     sup_log("INFO", "up: home=%s %d daemons (core=%d aux=%d) tick=%ldms ep=%s",
             ctx->airy_home, ctx->count, ncore, naux, ctx->tick_ms,
             ctx->ctrl_ep);
@@ -81,6 +86,9 @@ int sup_svc_step(sup_ctx_t *ctx, int lfd)
 void sup_svc_clear(sup_ctx_t *ctx, int lfd)
 {
     sup_shutdown_all(ctx);
+#ifndef _WIN32
+    sup_pump_stop(ctx); /* 读空并落盘尾部输出后再收控制口 */
+#endif
     sup_ctrl_close(lfd);
 #ifndef _WIN32
     unlink(ctx->ctrl_ep);

@@ -32,12 +32,14 @@
 #define AIRY_SUPERVISOR_D_INTERNAL_H
 
 #include <stddef.h>
+#include <stdio.h> /* FILE（A-5 输出泵槽位持有落盘句柄） */
 
 #ifdef _WIN32
 #include <windows.h>
 typedef HANDLE sup_pid_t;
 #define SUP_PID_INVALID INVALID_HANDLE_VALUE
 #else
+#include <pthread.h>
 #include <sys/types.h>
 typedef pid_t sup_pid_t;
 #define SUP_PID_INVALID (-1)
@@ -101,6 +103,23 @@ typedef struct sup_proc {
     char last_death[128];   /* 最近死因（收割时记录，V13.1 日志判据） */
 } sup_proc_t;
 
+#ifndef _WIN32
+/* ---- 输出泵（A-5）：子进程 stdout/stderr 经 pipe 汇聚到单一 pump 线程，
+ *      首个字节到达时才惰性创建 <name>.out，无输出 daemon 不留 0 字节
+ *      日志；AIRY_PREOPEN_OUT=1 回退旧预开行为（排障/兼容用）。槽位按
+ *      procs 下标固定，同槽新一代接管前先读空上一代残留。 ---- */
+typedef struct sup_pump {
+    int rfd[SUP_MAX_DAEMONS];                /* 读端，-1 = 空槽 */
+    char out[SUP_MAX_DAEMONS][SUP_PATH_MAX]; /* 惰性 fopen 目标路径 */
+    FILE *fp[SUP_MAX_DAEMONS];               /* NULL = 尚未收到字节 */
+    int wake[2];                             /* 唤醒管道：写端触发 poll 重扫 */
+    pthread_t tid;
+    pthread_mutex_t lock;
+    int running;
+    int stop;
+} sup_pump_t;
+#endif
+
 typedef struct sup_ctx {
     sup_proc_t procs[SUP_MAX_DAEMONS];
     int count;
@@ -115,6 +134,9 @@ typedef struct sup_ctx {
     int liveness_ticks;
     long admit_retry_ms;        /* WAIT 态重判周期：装不下的进程多久再问一次 */
     int shutdown;               /* 1 = supervisor.shutdown 已受理 */
+#ifndef _WIN32
+    sup_pump_t pump;            /* A-5 POSIX 输出泵（Windows 保持预开） */
+#endif
 } sup_ctx_t;
 
 /* ---- decl.c：期望态声明解析（画像 launch 段 = 期望态 SSoT） ---- */
@@ -140,6 +162,12 @@ void sup_health_tick(sup_ctx_t *ctx, sup_proc_t *p);
 #ifndef _WIN32
 /* ---- proc.c：派生受管进程前的环境隔离（隔离格；子进程分支调用） ---- */
 void sup_env_scrub(const sup_proc_t *p);
+
+/* ---- proc.c：输出泵生命周期与接线（A-5；POSIX only） ---- */
+int sup_pump_start(sup_ctx_t *ctx);
+void sup_pump_stop(sup_ctx_t *ctx);
+int sup_pump_add(sup_ctx_t *ctx, int slot, int rfd, const char *out);
+int sup_preopen_env(void);
 #endif
 
 /* ---- net 域：端点机制件自持接口（跨平台裁剪 + WSA/TCP 装配权威） ---- */
