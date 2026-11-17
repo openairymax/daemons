@@ -156,7 +156,7 @@ int main(void)
     pthread_join(th, NULL);
 
     /* 1. 快会话：正常完成（隔离性） */
-    TEST(fast_ret == AIRY_OK && fast_res && fast_res->success == 1,
+    TEST(fast_ret == AIRY_OK && fast_res && fast_res->err_code == 0,
          "快会话 fs_write 正常完成");
     if (fast_res) {
         tool_result_free(fast_res);
@@ -182,7 +182,7 @@ int main(void)
     TEST(slow.ret == AIRY_ERR_CANCELED, "慢会话返回 AIRY_ERR_CANCELED");
 
     /* 6. 合成取消结果语义 */
-    TEST(slow.res && slow.res->success == 0 &&
+    TEST(slow.res && slow.res->err_code != 0 &&
              slow.res->error && strstr(slow.res->error, "cancel") != NULL &&
              slow.res->exit_code == -1 &&
              slow.res->failure_class == TOOL_RESULT_CLASS_NORMAL_FAIL,

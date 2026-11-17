@@ -284,7 +284,7 @@ static void test_executor_failure_class(void)
     tool_result_t *result = NULL;
     int ret = tool_executor_run(exec, &meta, "hello", NULL, &result);
     if (result) {
-        assert(result->success == 0);
+        assert(result->err_code != 0);
 
         assert(result->failure_class == TOOL_RESULT_CLASS_FATAL);
         tool_result_free(result);
@@ -300,7 +300,7 @@ static void test_executor_failure_class(void)
     result = NULL;
     ret = tool_executor_run(exec, &bad_meta, "{}", NULL, &result);
     if (result) {
-        assert(result->success == 0);
+        assert(result->err_code != 0);
         assert(result->failure_class == TOOL_RESULT_CLASS_RESPOND_TO_MODEL);
         tool_result_free(result);
     } else {

@@ -32,7 +32,7 @@ static tool_result_t *svc_reject_result(const char *msg)
     tool_result_t *res = AIRY_CALLOC(1, sizeof(tool_result_t));
     if (!res)
         return NULL;
-    res->success = 0;
+    res->err_code = AIRY_ERR_GENERIC_FAIL;
     res->exit_code = -1;
     res->failure_class = TOOL_RESULT_CLASS_RESPOND_TO_MODEL;
     res->error = AIRY_STRDUP(msg);
@@ -193,7 +193,7 @@ static tool_result_t *get_cached_result(tool_service_t *svc, tool_metadata_t *me
 static void cache_tool_result(tool_service_t *svc, tool_metadata_t *meta, const char *tool_id,
                               const char *params_json, const char *agent_id, tool_result_t *res)
 {
-    if (!svc || !meta || !tool_id || !params_json || !res || !res->success) {
+    if (!svc || !meta || !tool_id || !params_json || !res || !tool_result_ok(res)) {
         return;
     }
 

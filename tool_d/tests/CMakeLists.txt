@@ -52,6 +52,8 @@ set(TOOL_TEST_SOURCES
     test_service.c
     test_cache.c
     test_executor.c
+    # C-2: 失败语义注入（退出非 0 / 超时 / 空输出 / 部分输出 / 审批拒绝）
+    test_result_semantics.c
     # R1-a: 执行面隔离池（并发互不影响 / CANCELED / 背压 BUSY）
     test_executor_pool.c
     test_validator.c

@@ -159,23 +159,29 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
         return -1;
     }
     char *text = NULL;
-    /* daemon_rpc_call 已解包 JSON-RPC 外层：resp 即 {"success","output",
-     * "error","exit_code","error_code"}（与 cli_chat_tools.c 同源；兼容未解包
-     * 信封——有 "result" 先下钻）。工具业务错误（success=0）一律透传原始
-     * error 文案与 error_code，不再折叠为不可读的通用话术（缺陷 #2）。 */
+    /* daemon_rpc_call 已解包 JSON-RPC 外层：resp 即 {"success","err_code",
+     * "output","error","exit_code","error_code"}（与 cli_chat_tools.c 同源；
+     * 兼容未解包信封——有 "result" 先下钻）。C-2：成败以 err_code 为准
+     * （缺失才回落 success 布尔），且「成功但产出为空」不再记成功——空正文
+     * 记成功会让回执与事实脱节；工具业务错误一律透传原始 error 文案与码。 */
     cJSON *result = cJSON_GetObjectItem(root, "result");
     if (!cJSON_IsObject(result))
         result = root;
     int tool_ok = 0;
     if (result) {
+        cJSON *err_code = cJSON_GetObjectItem(result, "err_code");
         cJSON *success = cJSON_GetObjectItem(result, "success");
         cJSON *output = cJSON_GetObjectItem(result, "output");
         cJSON *error = cJSON_GetObjectItem(result, "error");
         cJSON *ecode = cJSON_GetObjectItem(result, "error_code");
-        tool_ok = cJSON_IsNumber(success) && success->valueint != 0;
-        if (tool_ok) {
-            text = AIRY_STRDUP(cJSON_IsString(output) && output->valuestring ? output->valuestring :
-                                                                               "(no output)");
+        int reported_ok = cJSON_IsNumber(err_code) ? err_code->valueint == 0
+                                                  : (cJSON_IsNumber(success) && success->valueint != 0);
+        int has_output = cJSON_IsString(output) && output->valuestring && output->valuestring[0];
+        tool_ok = reported_ok && has_output;
+        if (reported_ok && !has_output) {
+            text = AIRY_STRDUP("Error: tool reported success with empty output");
+        } else if (tool_ok) {
+            text = AIRY_STRDUP(output->valuestring);
         } else {
             const char *e =
                 cJSON_IsString(error) && error->valuestring ? error->valuestring : "execution failed";

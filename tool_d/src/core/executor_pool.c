@@ -107,7 +107,7 @@ static tool_result_t *synth_cancel_result(void)
     tool_result_t *res = (tool_result_t *)AIRY_CALLOC(1, sizeof(tool_result_t));
     if (!res)
         return NULL;
-    res->success = 0;
+    res->err_code = AIRY_ERR_CANCELED;
     res->output = AIRY_STRDUP("");
     res->error = AIRY_STRDUP("Tool execution canceled (deadline exceeded)");
     res->exit_code = -1;

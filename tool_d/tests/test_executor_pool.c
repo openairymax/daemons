@@ -145,7 +145,7 @@ static void test_pool_concurrent_isolation(void)
 
     assert(fast.ret == AIRY_OK);
     assert(fast.result != NULL);
-    assert(fast.result->success == 1);
+    assert(fast.result->err_code == 0);
     assert(fast.result->output != NULL && strstr(fast.result->output, "pool_ok") != NULL);
     printf("    fast session ok in %lldms\n", fast.end_ms - fast.start_ms);
 
@@ -157,7 +157,7 @@ static void test_pool_concurrent_isolation(void)
     /* 慢会话：预算（1500ms）耗尽 → 明确取消错误码 + 合成 NORMAL_FAIL 结果 */
     assert(slow.ret == AIRY_ERR_CANCELED);
     assert(slow.result != NULL);
-    assert(slow.result->success == 0);
+    assert(slow.result->err_code != 0);
     assert(slow.result->error != NULL &&
            strstr(slow.result->error, "canceled") != NULL);
     assert(slow.result->failure_class == TOOL_RESULT_CLASS_NORMAL_FAIL);
@@ -208,7 +208,7 @@ static void test_pool_per_tool_budget(void)
     /* 1s 预算必须真终止：若仍按 manager 默认 30s 计时，sleep 5 会自然结束 */
     assert(ret == AIRY_OK);
     assert(res != NULL);
-    assert(res->success == 0);
+    assert(res->err_code != 0);
     assert(res->failure_class == TOOL_RESULT_CLASS_NORMAL_FAIL);
     assert(res->error != NULL && strstr(res->error, "timed out") != NULL);
     printf("    per-tool budget 1s terminated in %lldms\n", elapsed);
