@@ -13,6 +13,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+/* 单测必须与宿主配置隔离：create(NULL) 只装配缺省分量，若继承开发者
+ * ~/.airymaxrt 的 default_model 声明，会因注册表为空被自证门禁拒绝，
+ * 使「无配置可创建」这条语义无法被验证。 */
+static void isolate_home(void)
+{
+    static char root[256];
+    snprintf(root, sizeof(root), "/tmp/airy_llm_service_%ld", (long)getpid());
+    assert(mkdir(root, 0700) == 0);
+
+    char cfg_dir[320];
+    snprintf(cfg_dir, sizeof(cfg_dir), "%s/config", root);
+    assert(mkdir(cfg_dir, 0700) == 0);
+
+    assert(setenv("AIRY_HOME", root, 1) == 0);
+    assert(setenv("AIRY_CONFIG_DIR", cfg_dir, 1) == 0);
+}
 
 static void test_service_create_destroy(void)
 {
@@ -101,12 +120,24 @@ static void test_service_stats(void)
     llm_service_t *svc = llm_service_create(NULL);
     assert(svc != NULL);
 
+    /* D-7（Q19）：一次未配置模型的受理请求 → total=1 / fail=1 / timeout=0。 */
+    llm_request_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.model = "no-such-model";
+    llm_response_t *resp = NULL;
+    assert(llm_service_complete(svc, &cfg, &resp) != 0);
+    assert(resp == NULL);
+
     char *stats_json = NULL;
     int ret = llm_service_stats(svc, &stats_json);
-    if (ret == 0 && stats_json != NULL) {
-        printf("    Stats: %s\n", stats_json);
-        free(stats_json);
-    }
+    assert(ret == 0);
+    assert(stats_json != NULL);
+    assert(strstr(stats_json, "\"requests\"") != NULL);
+    assert(strstr(stats_json, "\"total\":1") != NULL);
+    assert(strstr(stats_json, "\"fail\":1") != NULL);
+    assert(strstr(stats_json, "\"timeout\":0") != NULL);
+    printf("    Stats: %s\n", stats_json);
+    free(stats_json);
 
     llm_service_destroy(svc);
 
@@ -145,6 +176,8 @@ int main(void)
     printf("=========================================\n");
     printf("  LLM Service Unit Tests\n");
     printf("=========================================\n");
+
+    isolate_home();
 
     test_service_create_destroy();
     test_service_create_with_config();
