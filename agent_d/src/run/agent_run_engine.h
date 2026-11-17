@@ -29,6 +29,9 @@
 
 #include "airy_budget.h"
 
+/* C-15 统一任务编排入口契约（mode/状态/预算/task 元数据） */
+#include "agent_task_contract.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
