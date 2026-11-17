@@ -13,6 +13,7 @@
 #endif
 
 #include "builtin/builtin_buf_internal.h"
+#include "builtin/builtin_compat_internal.h"
 #include "builtin/builtin_envcheck_internal.h"
 #include "builtin/builtin_exec_internal.h"
 
@@ -333,6 +334,19 @@ int shell_run_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
             if (env_classify(exit_code, out, &probe, reason, sizeof(reason)) != AIRY_OK) {
                 AIRY_FREE(out);
                 return btool_fail(res, AIRY_ERR_EXEC_ENV, "%s", reason);
+            }
+        }
+        /* C-27 兼容归因：LSM / 可执行栈拒绝与程序崩溃分开说明。
+         * 超时（-1）与信号死亡不读内核日志，避免历史拒绝误配。 */
+        if (exit_code > 0) {
+            char klog[COMPAT_KLOG_MAX];
+            char note[COMPAT_NOTE_MAX];
+            if (compat_klog(klog, sizeof(klog)) < 0)
+                klog[0] = '\0';
+            if (compat_note(exit_code, out, klog, note, sizeof(note)) == 1) {
+                char *merged = compat_append(out, note);
+                if (merged)
+                    out = merged;
             }
         }
     }
