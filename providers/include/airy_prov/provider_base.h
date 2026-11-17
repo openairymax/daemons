@@ -45,6 +45,11 @@ typedef struct {
     uintptr_t inflight;
     /* P-E：未配置密钥告警的进程内去重闩（0=未记，1=已记；CAS 置位）。 */
     uintptr_t unauth_logged;
+    /* B-2：后端就绪状态，registry 装配时由 prov_be_scan 盖入。1 = 可发请求
+     * （默认，旧路径不变）；0 = 后端未配置，driver 在任何 I/O 之前以
+     * AIRY_ERR_LLM_BACKEND_UNCONFIGURED 返回，reason 给出缺项。 */
+    int backend_ready;
+    char backend_reason[160];
 } provider_base_ctx_t;
 
 void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name,
