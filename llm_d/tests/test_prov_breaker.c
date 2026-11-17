@@ -89,11 +89,54 @@ static void test_open_on_threshold(void)
         cJSON *name = cJSON_GetObjectItem(o, "provider");
         cJSON *state = cJSON_GetObjectItem(o, "state");
         cJSON *breaks = cJSON_GetObjectItem(o, "breaks");
+        cJSON *left = cJSON_GetObjectItem(o, "open_left_ms");
         EXPECT(name && strcmp(name->valuestring, "p1") == 0);
         EXPECT(state && strcmp(state->valuestring, "open") == 0);
         EXPECT(breaks && breaks->valuedouble == 2.0);
+        EXPECT(left && left->valuedouble > 0.0);
         cJSON_Delete(arr);
     }
+}
+
+/* C-3 判定输入：快照与账目同源；OPEN 剩余冷却随时间递减，到期归零，
+ * 半开探针失败后重新开户并计入 breaks 单口径。 */
+static void test_gate_snapshot(void)
+{
+    setup(1, 150);
+    prov_brk_reset();
+
+    prov_brk_gate_t g;
+    EXPECT(prov_brk_gate("nobody", &g) == -1);
+    EXPECT(prov_brk_gate(NULL, &g) == -1);
+    EXPECT(prov_brk_gate("p7", NULL) == -1);
+
+    EXPECT(prov_brk_allow("p7") == 1);
+    prov_brk_fail("p7", AIRY_ERR_UNKNOWN);
+
+    EXPECT(prov_brk_gate("p7", &g) == 0);
+    EXPECT(g.state == PROV_BRK_OPEN);
+    EXPECT(g.fails == 1U);
+    EXPECT(g.breaks == 0U);
+    EXPECT(g.open_left_ms > 0U && g.open_left_ms <= 150U);
+
+    uint32_t first = g.open_left_ms;
+    airy_sleep_ms(60);
+    EXPECT(prov_brk_gate("p7", &g) == 0);
+    EXPECT(g.open_left_ms < first);
+
+    airy_sleep_ms(120);
+    EXPECT(prov_brk_gate("p7", &g) == 0);
+    EXPECT(g.open_left_ms == 0U);
+
+    /* 冷却到期的下一次放行是半开探针；探针失败即重新 OPEN，随后拒绝。 */
+    EXPECT(prov_brk_allow("p7") == 1);
+    EXPECT(prov_brk_state("p7") == PROV_BRK_HALF);
+    prov_brk_fail("p7", AIRY_ERR_UNKNOWN);
+    EXPECT(prov_brk_state("p7") == PROV_BRK_OPEN);
+    EXPECT(prov_brk_allow("p7") == 0);
+    EXPECT(prov_brk_gate("p7", &g) == 0);
+    EXPECT(g.breaks == 1U);
+    EXPECT(g.fails == 2U);
 }
 
 /* 超时族（连接/停摆/整轮传输预算）一律按"端点慢"计入连败。 */
@@ -203,6 +246,7 @@ int main(void)
 
     test_read_faces();
     test_open_on_threshold();
+    test_gate_snapshot();
     test_timeout_family();
     test_budget_not_trip();
     test_cancel_ignored();

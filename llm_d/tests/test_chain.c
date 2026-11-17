@@ -25,6 +25,7 @@
 
 #include "airy_prov/registry.h"
 #include "airy_prov/provider_base.h"
+#include "airy_prov/prov_breaker.h"
 #include "router/core/llm_failover.h"
 #include "router/core/llm_router.h"
 
@@ -439,7 +440,8 @@ static void test_run_exhaust(void)
     llm_service_destroy(svc);
 }
 
-/* auto：健康面 OPEN 的端点零尝试，且不把拒绝伪装成调用失败。 */
+/* auto：健康面 OPEN 的端点零尝试，且不把拒绝伪装成调用失败；全部候选
+ * 被闸拒绝时回 BUSY（快速失败），不是 INVALID_MODEL。 */
 static void test_run_gate(void)
 {
     llm_service_t *svc = make_svc();
@@ -466,10 +468,61 @@ static void test_run_gate(void)
     svc->route.depth = 2;
 
     rc = svc_chain_run(svc, &mgr, &req, &prov, fake_try, &t, NULL, &out, NULL);
-    check_int("gate.err", rc, AIRY_ERR_LLM_INVALID_MODEL);
+    check_int("gate.err", rc, AIRY_ERR_BUSY);
     check_int("gate.calls", t.calls, 0);
     check_int("gate.out", out == NULL, 1);
 
+    llm_service_destroy(svc);
+}
+
+/* C-3：provider 层熔断在链入口真实接线——第一次真实失败即开户，
+ * 第 N+1 次不进入 attempt，直接 BUSY，breaks 单口径可读。 */
+static void test_run_brk(void)
+{
+    llm_service_t *svc = make_svc();
+    llm_endpoint_t ep = make_ep("brp", "brm", 1, 0.001);
+    llm_route_request_t req = make_req();
+    llm_request_config_t mgr;
+    provider_t prov;
+    prov_brk_cfg_t bc = {1, 30000, 1};
+    prov_brk_gate_t g;
+    try_t t;
+    llm_response_t *out = NULL;
+    int rc;
+
+    if (!svc)
+        return;
+    check_int("brk.cfg", prov_brk_cfg(&bc), 1);
+    prov_brk_reset();
+
+    memset(&mgr, 0, sizeof(mgr));
+    mgr.model = "brm";
+    memset(&prov, 0, sizeof(prov));
+    prov.name = "brp";
+    memset(&t, 0, sizeof(t));
+    t.fail_first = 1;
+    t.err = AIRY_ERR_IO;
+
+    check_int("brk.reg", llm_router_register_endpoint(&ep), 0);
+    svc->route.mode = SVC_CHAIN_AUTO;
+    svc->route.depth = 1;
+
+    rc = svc_chain_run(svc, &mgr, &req, &prov, fake_try, &t, NULL, &out, NULL);
+    check_int("brk.first", rc, AIRY_ERR_IO);
+    check_int("brk.first_calls", t.calls, 1);
+    check_int("brk.open", prov_brk_state("brp"), PROV_BRK_OPEN);
+
+    check_int("brk.gate", prov_brk_gate("brp", &g), 0);
+    check_int("brk.gate_state", (int)g.state, PROV_BRK_OPEN);
+    check_int("brk.gate_fails", (int)g.fails, 1);
+
+    rc = svc_chain_run(svc, &mgr, &req, &prov, fake_try, &t, NULL, &out, NULL);
+    check_int("brk.second", rc, AIRY_ERR_BUSY);
+    check_int("brk.second_calls", t.calls, 1);
+    check_int("brk.breaks", (int)prov_brk_breaks(), 1);
+
+    prov_brk_cfg(NULL);
+    prov_brk_reset();
     llm_service_destroy(svc);
 }
 
@@ -709,6 +762,7 @@ int main(void)
     test_run_switch();
     test_run_exhaust();
     test_run_gate();
+    test_run_brk();
     test_run_sent();
     test_run_hit();
     test_run_args();
