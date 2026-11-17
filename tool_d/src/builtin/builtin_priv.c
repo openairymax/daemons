@@ -10,9 +10,11 @@
  * euid → 审计 → 执行。任一环节不成立即拒绝，不留半开状态。
  */
 
+#include "builtin/builtin_exec_internal.h"
 #include "builtin/builtin_limits_internal.h"
 #include "builtin/builtin_priv_internal.h"
 #include "builtin/builtin_result_internal.h"
+#include "daemon_security.h"
 
 #ifndef _WIN32
 
@@ -203,6 +205,81 @@ void priv_plan_free(priv_plan_t *plan)
     plan->program = NULL;
 }
 
+/* 审计资源串：program + 实参，截断到 448 字节内（审计行自身有上限），
+ * 参数已通过字符集校验，不含空白以外需要转义的字符。 */
+static void priv_audit(const priv_plan_t *plan, int rc)
+{
+    char res[512];
+    size_t off = 0;
+    res[0] = '\0';
+    if (plan && plan->program) {
+        int n = snprintf(res, sizeof(res) - 128, "%s", plan->program->path);
+        off = (n > 0) ? (size_t)n : 0;
+        for (int i = 1; i <= plan->argc && off < sizeof(res) - 128; ++i) {
+            int m = snprintf(res + off, sizeof(res) - 128 - off, " %s", plan->argv[i]);
+            if (m <= 0)
+                break;
+            off += (size_t)m;
+        }
+    } else {
+        snprintf(res, sizeof(res), "(unparsed)");
+    }
+    daemon_audit_log_event("tool_d", "privileged_exec", res, rc, "tool_d");
+}
+
+/* 子进程侧：直接 execv 白名单路径，不经 shell、不套沙箱。 */
+static void priv_spawn(void *ctx)
+{
+    const priv_plan_t *plan = (const priv_plan_t *)ctx;
+    execv(plan->program->path, plan->argv);
+    _exit(127);
+}
+
+int priv_exec_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
+{
+    if (!res)
+        return AIRY_ERR_INVALID_PARAM;
+    if (!priv_enabled()) {
+        priv_audit(NULL, -1);
+        return btool_fail(res, AIRY_ERR_EXEC_PERMISSION,
+                          "Privileged exec channel disabled by %s", PRIV_ENV_SWITCH);
+    }
+
+    priv_plan_t plan;
+    int rc = priv_plan_build(params_json, &plan, res);
+    if (rc != AIRY_OK) {
+        priv_audit(&plan, -1);
+        priv_plan_free(&plan);
+        return rc;
+    }
+
+    if (geteuid() != 0) {
+        priv_audit(&plan, -1);
+        priv_plan_free(&plan);
+        return btool_fail(res, AIRY_ERR_EXEC_PERMISSION,
+                          "Privileged exec requires root (euid=%ld)",
+                          (long)geteuid());
+    }
+    if (access(plan.program->path, X_OK) != 0) {
+        priv_audit(&plan, -1);
+        priv_plan_free(&plan);
+        return btool_fail(res, AIRY_ERR_EXEC_NOT_FOUND, "Whitelisted program missing: %s",
+                          plan.program->path);
+    }
+
+    char *out = NULL;
+    int exit_code = -1;
+    uint32_t tmo = timeout_ms ? timeout_ms : BUILTIN_SHELL_TIMEOUT_MS;
+    int pr = builtin_proc_capture(priv_spawn, &plan, NULL, 0, tmo, &out, &exit_code, NULL);
+    priv_audit(&plan, exit_code);
+    priv_plan_free(&plan);
+    if (pr != 0) {
+        AIRY_FREE(out);
+        return btool_fail(res, AIRY_ERR_EXEC_FAIL, "Failed to spawn privileged command");
+    }
+    return btool_finish(res, out, exit_code, "Privileged command");
+}
+
 #else /* _WIN32 */
 
 int priv_enabled(void)
@@ -230,6 +307,16 @@ void priv_plan_free(priv_plan_t *plan)
 {
     if (plan)
         AIRY_MEMSET(plan, 0, sizeof(*plan));
+}
+
+int priv_exec_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *res)
+{
+    (void)params_json;
+    (void)timeout_ms;
+    if (!res)
+        return AIRY_ERR_INVALID_PARAM;
+    return btool_fail(res, AIRY_ERR_EXEC_PERMISSION,
+                      "Privileged exec channel is unavailable on this platform");
 }
 
 #endif /* _WIN32 */
