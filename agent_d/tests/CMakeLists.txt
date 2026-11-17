@@ -15,6 +15,7 @@ set(AGENT_TEST_SOURCES
     test_run_ledger.c
     test_run_loop.c
     test_run_stream.c
+    test_task_orchestrate.c
 )
 
 set(AGENT_COMMON_INCLUDES
@@ -49,6 +50,13 @@ foreach(TEST_SRC ${AGENT_TEST_SOURCES})
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_ledger.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_stream.c
             ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_run_exec.c
+        )
+    endif()
+
+    # 裁决/身份单测同编编排源（不含 RPC/引擎，保持纯判定可测）。
+    if(TEST_NAME STREQUAL "test_task_orchestrate")
+        target_sources(test_agent_${TEST_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/run/agent_task_orchestrate.c
         )
     endif()
 
