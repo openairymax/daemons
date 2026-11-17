@@ -224,6 +224,13 @@ static int parse_task_args(cJSON *params, int id, airy_sock_t fd, task_args_t *o
     }
 
     cJSON *rounds = cJSON_GetObjectItem(params, "rounds");
+    if (!cJSON_IsNumber(rounds)) {
+        /* 线协议以 budget{rounds,tokens,seconds} 为主形态；顶层 rounds 保留
+         * 兼容旧调用面。 */
+        cJSON *budget = cJSON_GetObjectItem(params, "budget");
+        if (cJSON_IsObject(budget))
+            rounds = cJSON_GetObjectItem(budget, "rounds");
+    }
     cJSON *conf = cJSON_GetObjectItem(params, "gccp_confirmed");
     out->goal = goal;
     out->model = json_str(params, "model");
