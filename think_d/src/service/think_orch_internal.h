@@ -20,6 +20,7 @@
 
 #include "cognition.h"
 #include "llm_svc_adapter.h"
+#include "tool_svc_adapter.h"
 #include "orchestrator.h"
 #include "airy_orch_ops.h"
 #include "svc_logger.h"
@@ -76,6 +77,9 @@ typedef struct {
 struct think_service {
     airy_cognition_engine_t *engine;
     llm_svc_adapter_t *llm_adapter;
+    /* C-12：GRAD 计划的执行通道（tool_d IPC）。engine 只持有借用指针，
+     * 生命周期由 svc 在 engine 之后释放。 */
+    tool_svc_adapter_t *tool_adapter;
 
     orchestrator_t *orch;
     think_orch_run_t runs[THINK_ORCH_MAX_RUNS];
