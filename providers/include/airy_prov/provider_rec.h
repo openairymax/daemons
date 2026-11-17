@@ -18,6 +18,7 @@
 #define LLM_D_PROVIDERS_CORE_PROVIDER_REC_H
 
 #include "airy_prov/adapter.h"
+#include "airy_prov/provider_caps.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,6 +34,8 @@ typedef struct {
     int *model_max_output;
     /* 与 models 同下标对齐的每模型调用方并发预算（D2-9④，0 = 未配置）。 */
     int *model_max_concurrent;
+    /* B-1：能力位快照（registry 装配时从 provider_config_t 复制）。 */
+    provider_caps_t hw;
 } provider_t;
 
 /* 查 provider 对某模型的调用方并发预算（0 = 未配置）。纯 provider_t 表查询，

@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "llm_service_types.h"
+#include "provider_caps.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +23,8 @@ typedef struct {
     /* 能力位：model.yaml capabilities 显式声明的请求体可选字段接受集。
      * 未声明位恒为 false（fail-safe：宁可不发，绝不乱发）。 */
     local_caps_t caps;
+    /* B-1：加速器/显存/上下文/流式/工具等选路能力位，声明缺省即未知。 */
+    provider_caps_t hw;
     const char *api_key;
     const char *api_base;
     const char *organization;

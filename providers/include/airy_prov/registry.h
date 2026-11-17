@@ -22,6 +22,20 @@ provider_registry_t *provider_registry_create(const service_config_t *cfg);
 void provider_registry_destroy(provider_registry_t *reg);
 const provider_t *provider_registry_find(provider_registry_t *reg, const char *model);
 
+/**
+ * @brief 按能力位选路（0.1.21 B-1）：显式满足 > 保守可用 > 不匹配。
+ *
+ * sel 为空或全零要求时行为等同「取第一个 provider」；sel->model 非空时
+ * 只考虑声明了该模型的 provider。能力位未声明/未探测的候选按保守可用
+ * 处理，不因缺证据被否决。
+ *
+ * @param reg 注册表
+ * @param sel 选路要求（可空）
+ * @return 命中的 provider；无候选返回 NULL
+ */
+const provider_t *provider_registry_select(provider_registry_t *reg,
+                                           const provider_select_t *sel);
+
 /* 在用 provider 条数：区分「注册表为空」（装配问题）与「模型未配置」
  * （请求问题），二者共用 NULL 查找结果但错误码与运维动作不同。
  * NULL/空表返回 0。 */
