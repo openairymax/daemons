@@ -134,6 +134,7 @@ typedef struct sup_ctx {
     int liveness_ticks;
     long admit_retry_ms;        /* WAIT 态重判周期：装不下的进程多久再问一次 */
     int shutdown;               /* 1 = supervisor.shutdown 已受理 */
+    int no_respawn;             /* A-9：AIRY_SUPERVISOR_NO_RESPAWN=1 关自动重建 */
 #ifndef _WIN32
     sup_pump_t pump;            /* A-5 POSIX 输出泵（Windows 保持预开） */
 #endif
@@ -155,6 +156,7 @@ long long sup_now_ms(void);
 void sup_proc_reap(sup_ctx_t *ctx);
 long long sup_backoff_ms(const sup_ctx_t *ctx, const sup_proc_t *p);
 void sup_reconcile(sup_ctx_t *ctx);
+long long sup_next_wake_ms(const sup_ctx_t *ctx);
 void sup_shutdown_all(sup_ctx_t *ctx);
 void sup_log(const char *level, const char *fmt, ...);
 void sup_health_tick(sup_ctx_t *ctx, sup_proc_t *p);

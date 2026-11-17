@@ -14,7 +14,8 @@
  *        画像声明 AIRYRT_LAUNCH_KEEPENV_<NAME> 显式列出时保留。
  * reap：waitpid(WNOHANG) / WaitForSingleObject(0) 收割死因写入
  *       last_death（V13.1 判据）；CORE 死进 BACKOFF，AUX 死回 STOPPED
- *       （仅 activate 复活）。
+ *       （仅 activate 复活）。A-9：BACKOFF/WAIT 到期由 sup_next_wake_ms
+ *       提前唤醒主循环；AIRY_SUPERVISOR_NO_RESPAWN=1 时转 FAILED 不重建。
  * 调谐：sup_reconcile 每周期比对期望态与实际态；连败超限转 FAILED 并
  *       显式告警，不再自动重启（V13.3 防风暴）；复位 FAILED 的唯一
  *       入口是 sup_activate 显式激活。
@@ -577,8 +578,15 @@ void sup_proc_reap(sup_ctx_t *ctx)
         snprintf(p->last_death, sizeof(p->last_death), "%s", cause);
         sup_log("WARN", "%s died: %s (fail=%d)", p->name, cause, p->fail_count);
         if (p->role == SUP_ROLE_CORE) {
-            p->state = SUP_ST_BACKOFF;
-            p->next_ms = sup_now_ms() + sup_backoff_ms(ctx, p);
+            if (ctx->no_respawn) {
+                /* A-9 回退开关：只留死因，不自动重建；显式 activate 仍可复活 */
+                p->state = SUP_ST_FAILED;
+                sup_log("WARN", "%s respawn disabled by AIRY_SUPERVISOR_NO_RESPAWN",
+                        p->name);
+            } else {
+                p->state = SUP_ST_BACKOFF;
+                p->next_ms = sup_now_ms() + sup_backoff_ms(ctx, p);
+            }
         } else {
             p->state = SUP_ST_STOPPED; /* AUX 死不自动复活 */
         }
@@ -629,6 +637,8 @@ void sup_reconcile(sup_ctx_t *ctx)
                             "%s FAILED after %d attempts, manual activate; out: %s/%s.out",
                             p->name, p->fail_count, ctx->log_dir, p->name);
                 } else {
+                    sup_log("INFO", "%s respawn after %lldms backoff (fail=%d)",
+                            p->name, p->next_ms - now, p->fail_count);
                     spawn_or_backoff(ctx, p, now);
                 }
             }
@@ -645,6 +655,28 @@ void sup_reconcile(sup_ctx_t *ctx)
             break; /* FAILED：等待显式 activate 复位 */
         }
     }
+}
+
+/* A-9：下一个待办时刻——取所有 CORE 在 BACKOFF/WAIT 态的到期时间最小值，
+ * 上界为常规 tick。主循环据此缩短 poll 超时，使 TERM 单守护后的重建
+ * 不再被整拍对齐拖到 2×tick。 */
+long long sup_next_wake_ms(const sup_ctx_t *ctx)
+{
+    long long now = sup_now_ms();
+    long long wake = ctx->tick_ms;
+    for (int i = 0; i < ctx->count; i++) {
+        const sup_proc_t *p = &ctx->procs[i];
+        if (p->role != SUP_ROLE_CORE)
+            continue;
+        if (p->state != SUP_ST_BACKOFF && p->state != SUP_ST_WAIT)
+            continue;
+        long long d = p->next_ms - now;
+        if (d < 0)
+            d = 0;
+        if (d < wake)
+            wake = d;
+    }
+    return wake < 1 ? 1 : wake;
 }
 
 int sup_activate(sup_ctx_t *ctx, const char *name)
