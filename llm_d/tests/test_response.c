@@ -317,6 +317,43 @@ static void test_response_usage_frame(void)
     printf("    PASSED\n");
 }
 
+/* C-5 端云混合空响应判定：null content、全空白、只有 reasoning_content、
+ * 无 choices 一律不可用；有正文或 tool_calls 才算拿到答案。 */
+static void test_response_usable(void)
+{
+    printf("  test_response_usable...\n");
+
+    assert(llm_resp_usable(NULL) == 0);
+
+    llm_response_t *resp = (llm_response_t *)calloc(1, sizeof(llm_response_t));
+    assert(resp != NULL);
+    assert(llm_resp_usable(resp) == 0);
+
+    resp->choice_count = 1;
+    resp->choices = (llm_message_t *)calloc(1, sizeof(llm_message_t));
+    assert(resp->choices != NULL);
+    assert(llm_resp_usable(resp) == 0);
+
+    resp->choices[0].content = strdup(" \t\n");
+    assert(llm_resp_usable(resp) == 0);
+    free((void *)resp->choices[0].content);
+
+    resp->choices[0].content = NULL;
+    resp->choices[0].reasoning_content = strdup("thinking only...");
+    assert(llm_resp_usable(resp) == 0);
+
+    resp->choices[0].content = strdup("answer");
+    assert(llm_resp_usable(resp) == 1);
+    free((void *)resp->choices[0].content);
+
+    resp->choices[0].content = NULL;
+    resp->choices[0].tool_calls_json = strdup("[{\"id\":\"call_1\"}]");
+    assert(llm_resp_usable(resp) == 1);
+
+    llm_response_free(resp);
+    printf("    PASSED\n");
+}
+
 int main(void)
 {
     printf("=========================================\n");
@@ -332,6 +369,7 @@ int main(void)
     test_response_usage_detail_roundtrip();
     test_response_timings_roundtrip();
     test_response_usage_frame();
+    test_response_usable();
 
     printf("\nAll LLM response tests PASSED\n");
     return 0;
