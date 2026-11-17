@@ -33,16 +33,25 @@ mem_cache_t *g_cache = NULL;
 mem_ledger_t *g_ledger = NULL;
 mem_daemon_config_t g_config = {0};
 
-/* 缓存未就绪时不得构造子对象，避免用户面出现半截统计。 */
+/* 缓存未启用时输出 disabled 态（D-4）：enabled=false、hit_rate=-1 且
+ * hit_rate_available=false，调用方可与「已启用无数据」明确区分。 */
 static void test_uninit_degrade(void)
 {
     printf("  test_uninit_degrade...\n");
-    assert(mem_cache_stats_json() == NULL);
+    cJSON *cache = mem_cache_stats_json();
+    assert(cJSON_IsObject(cache));
+    assert(cJSON_IsFalse(cJSON_GetObjectItem(cache, "enabled")));
+    assert(strcmp(cJSON_GetObjectItem(cache, "state")->valuestring, "disabled") == 0);
+    assert(cJSON_GetObjectItem(cache, "hit_rate")->valuedouble == -1.0);
+    assert(cJSON_IsFalse(cJSON_GetObjectItem(cache, "hit_rate_available")));
+    assert(cJSON_GetObjectItem(cache, "entries")->valueint == 0);
+    cJSON_Delete(cache);
+
     assert(mem_ledger_stats_json() == NULL);
 
     cJSON *root = mem_stats_json();
     assert(root != NULL);
-    assert(cJSON_GetObjectItem(root, "cache") == NULL);
+    assert(cJSON_IsObject(cJSON_GetObjectItem(root, "cache")));
     assert(cJSON_GetObjectItem(root, "ledger") == NULL);
     cJSON_Delete(root);
     printf("    PASSED\n");
@@ -108,6 +117,14 @@ static void test_cache_scope_consistent(void)
     g_cache = mem_cache_create(64, 0, 0, 0.85);
     assert(g_cache != NULL);
 
+    /* 已启用但尚无条目：empty 态，不输出 hit_rate（D-4）。 */
+    cJSON *empty = mem_cache_stats_json();
+    assert(cJSON_IsTrue(cJSON_GetObjectItem(empty, "enabled")));
+    assert(strcmp(cJSON_GetObjectItem(empty, "state")->valuestring, "empty") == 0);
+    assert(cJSON_GetObjectItem(empty, "hit_rate") == NULL);
+    assert(cJSON_IsFalse(cJSON_GetObjectItem(empty, "hit_rate_available")));
+    cJSON_Delete(empty);
+
     char *cid = NULL, *key = NULL;
     assert(mem_cache_put(g_cache, "alpha query", "alpha resp", "m1", 0, &cid, &key) == AIRY_SUCCESS);
     AIRY_FREE(cid);
@@ -133,6 +150,7 @@ static void test_cache_scope_consistent(void)
     assert(root != NULL);
     cJSON *cache = cJSON_GetObjectItem(root, "cache");
     assert(cJSON_IsObject(cache));
+    assert(strcmp(cJSON_GetObjectItem(cache, "state")->valuestring, "active") == 0);
     assert(cJSON_GetObjectItem(cache, "entries")->valueint == 1);
     assert(cJSON_GetObjectItem(cache, "hits")->valueint == 1);
     assert(cJSON_GetObjectItem(cache, "misses")->valueint == 1);
@@ -147,15 +165,16 @@ static void test_cache_scope_consistent(void)
            cJSON_GetObjectItem(cache, "hit_rate")->valuedouble);
     cJSON_Delete(standalone);
 
-    /* 无查询样本 → hit_rate 不可用（负值 + available=false），不得伪零（§2.1-6） */
+    /* 已启用但无查询样本 → 不输出 hit_rate（区别于未启用的 -1），available=false */
     mem_cache_t *fresh = mem_cache_create(8, 0, 0, 0.85);
     assert(fresh != NULL);
     mem_cache_t *saved = g_cache;
     g_cache = fresh;
     cJSON *unavail = mem_cache_stats_json();
     assert(cJSON_IsObject(unavail));
-    assert(cJSON_GetObjectItem(unavail, "hit_rate")->valuedouble < 0.0);
+    assert(cJSON_GetObjectItem(unavail, "hit_rate") == NULL);
     assert(cJSON_IsFalse(cJSON_GetObjectItem(unavail, "hit_rate_available")));
+    assert(strcmp(cJSON_GetObjectItem(unavail, "state")->valuestring, "empty") == 0);
     cJSON_Delete(unavail);
     g_cache = saved;
     mem_cache_destroy(fresh);
