@@ -27,6 +27,8 @@
 
 #include <cjson/cJSON.h>
 
+#include "airy_budget.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -51,11 +53,17 @@ extern "C" {
 #define AGENT_RUN_RC_EMPTY 6
 /* 流式 LLM 调用的双窗口：TIMEOUT_MS 是相邻两段数据之间的最大沉默时间
  * （每收一段即重置），TOTAL_MS 是整条流的硬上限。只有前者会把持续吐 token
- * 的长推理在 90s 处腰斩——那是「卡住后报错」的直接来源。 */
-#define AGENT_RUN_LLM_TIMEOUT_MS 90000
+ * 的长推理在 90s 处腰斩——那是「卡住后报错」的直接来源。
+ *
+ * 预算树（0.1.21 C-21）：agent 是 llm_d / think_d / tool_d 的调用方，
+ * 三个预算一律从 airy_budget 取，不再写死字面量——写死会让调用方与服务端
+ * 各自漂移，think 曾因此出现双方都是 120s、零余量的死局。 */
+#define AGENT_RUN_LLM_TIMEOUT_MS airy_budget_ms(AIRY_BUDGET_SERVER)
 #define AGENT_RUN_LLM_TOTAL_MS 1800000
-#define AGENT_RUN_THINK_TIMEOUT_MS 120000
-#define AGENT_RUN_TOOL_TIMEOUT_MS 90000
+#define AGENT_RUN_THINK_TIMEOUT_MS airy_budget_ms(AIRY_BUDGET_SERVER)
+#define AGENT_RUN_TOOL_TIMEOUT_MS airy_budget_outer(airy_budget_ms(AIRY_BUDGET_TOOL))
+/* 编排预算不是被调用方的预算：spawn 是线程创建，invoke 覆盖一次完整子 run，
+ * 只需保证不低于 server 层，否则子 run 会被父级提前掐断。 */
 #define AGENT_RUN_SPAWN_TIMEOUT_MS 90000
 #define AGENT_RUN_INVOKE_TIMEOUT_MS 180000
 #define AGENT_RUN_AGENT_FILE_MAX (64 * 1024)

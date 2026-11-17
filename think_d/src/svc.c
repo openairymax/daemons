@@ -11,6 +11,7 @@
  * 内置缺省——daemon_ep_load（JSON）先行，model.yaml 与 env 顺序在后。
  */
 
+#include "airy_budget.h"
 #include "airy_defaults.h"
 #include "airy_memory.h"
 #ifdef AIRY_HAS_COGNITION_STRATEGY
@@ -176,8 +177,13 @@ static void cfg_load(const char *config_path)
             AIRY_STRNCPY_TERM(g_cfg.think1_fast_model, e, sizeof(g_cfg.think1_fast_model));
         if ((e = getenv("AIRY_THINK1_PROF_MODEL")) && *e)
             AIRY_STRNCPY_TERM(g_cfg.think1_prof_model, e, sizeof(g_cfg.think1_prof_model));
-        if ((e = getenv("AIRY_THINK_TIMEOUT_MS")) && *e && atoi(e) > 0)
-            g_cfg.process_timeout_ms = (uint32_t)atoi(e);
+        /* 预算树（0.1.21 C-21）：think 层由 airy_budget 统一解析，
+         * 兼容 AIRY_THINK_TIMEOUT_MS 与新的 AIRY_TIMEOUT_THINK_MS；
+         * 仅在确实声明了环境变量时覆盖 model.yaml，避免凭空改写 yaml。 */
+        if ((e = getenv("AIRY_THINK_TIMEOUT_MS")) || (e = getenv("AIRY_TIMEOUT_THINK_MS"))) {
+            if (e && *e)
+                g_cfg.process_timeout_ms = airy_budget_ms(AIRY_BUDGET_THINK);
+        }
 
         /* 本地低算力（performance_mode）：lightweight 不关闭 think 服务，
          * 而是把 GRAD 批判环降为单轮确定性验证（max_iterations=1、跳过
@@ -261,6 +267,7 @@ int svc_prepare(const char *config_path)
 
     SVC_LOG_INFO("think service started (enabled=%d, timeout_ms=%u)", g_cfg.think_enabled,
                  g_cfg.process_timeout_ms);
+    airy_budget_log("think_d");
     return 0;
 }
 

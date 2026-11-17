@@ -13,6 +13,7 @@
  */
 
 #include "platform.h"
+#include "airy_budget.h"
 #include "plugin/plugin_rpc.h"
 #include "rpc/skill_rpc.h"
 #include "svc_logger.h"
@@ -97,6 +98,7 @@ int svc_prepare(const char *config_path)
         return -1;
     }
     SVC_LOG_INFO("tool service started");
+    airy_budget_log("tool_d");
     return 0;
 }
 

@@ -38,10 +38,11 @@
 #define LLM_MAX_RETRIES 3
 #define LLM_BASE_DELAY_MS 100
 
-/* R-5：complete 总耗时须严格小于网关转发超时背压（GW_LLM_DEFAULT_TIMEOUT_MS
- * = 90s），否则网关先放弃，provider 侧精确诊断（鉴权/限流/连接）回传不到
- * 用户。最坏总耗时 = LLM_MAX_RETRIES × 本上界 + 单次超时 = 3 × 5s + 70s
- * = 85s < 90s；单次尝试已接近完整超时（对端不可达/挂起）时不再重试。 */
+/* R-5：complete 总耗时须严格小于调用方背压（0.1.21 C-21 起由预算树保证：
+ * 调用方取 server / client 层，本层取 provider 层，且 provider ≤ server）。
+ * 否则调用方先放弃，provider 侧精确诊断（鉴权/限流/连接）回传不到用户。
+ * 最坏总耗时 = LLM_MAX_RETRIES × 本上界 + 单次超时 = 3 × 5s + 70s = 85s
+ * < server 层 150s；单次尝试已接近完整超时（对端不可达/挂起）时不再重试。 */
 #define LLM_RETRY_FAST_FAIL_MS 5000
 
 /* 流式失败按 AIRY_ERR_* 透传具体原因而非统一 -32603 "Service error"，
