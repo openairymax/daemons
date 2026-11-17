@@ -464,7 +464,7 @@ static void run_plan_steps(run_ctx_t *c, const cJSON *plan)
         cJSON_AddStringToObject(d, AIRY_RS_K_STEP_STATUS, "planned");
         const char *txt = plan_step_text(cJSON_GetArrayItem(steps, i));
         if (txt)
-            cJSON_AddStringToObject(d, "step", txt);
+            cJSON_AddStringToObject(d, AIRY_RS_K_STEP, txt);
         agent_run_emit_event(c->sink, &c->seq, c->active->run_id, c->sess, AIRY_RS_TYPE_STEP, d);
     }
 }
