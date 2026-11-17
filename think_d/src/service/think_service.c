@@ -592,6 +592,71 @@ static cJSON *think_ev_json(const think_service_t *svc)
     return arr;
 }
 
+/* C-10（0.1.21）：失败归因快照。
+ *
+ * 引擎把"失败在哪一环、哪个节点"申报在反馈事件里（manual_review_required
+ * / grad_no_llm / grad_arbiter_failure_error），daemon 只搬运、不推断，
+ * CLI 与事件因此看到同一份证据。必须在 svc->lock 内调用：下一轮 process
+ * 起始会清零事件环，解锁后读取可能串到别的请求。 */
+typedef struct {
+    uint32_t stage;
+    uint32_t rounds;
+    uint32_t rejections;
+    char affected_node[64];
+    char err_detail[192];
+} think_fail_attr_t;
+
+static void think_fail_attr(const think_service_t *svc, think_fail_attr_t *attr)
+{
+    __builtin_memset(attr, 0, sizeof(*attr));
+    if (!svc || !svc->events)
+        return;
+    for (uint32_t i = 0; i < svc->event_count; i++) {
+        const think_feedback_event_t *ev = &svc->events[i];
+        if (strcmp(ev->event, "manual_review_required") != 0 &&
+            strcmp(ev->event, "grad_no_llm") != 0 &&
+            strcmp(ev->event, "grad_arbiter_failure_error") != 0)
+            continue;
+        cJSON *root = cJSON_Parse(ev->data);
+        if (!root)
+            continue;
+        __builtin_memset(attr, 0, sizeof(*attr));
+        const cJSON *stage = cJSON_GetObjectItem(root, "stage");
+        const cJSON *rounds = cJSON_GetObjectItem(root, "rounds");
+        const cJSON *round1 = cJSON_GetObjectItem(root, "round");
+        const cJSON *rej = cJSON_GetObjectItem(root, "rejections");
+        const cJSON *node = cJSON_GetObjectItem(root, "affected_node");
+        const cJSON *name = cJSON_GetObjectItem(root, "stage_name");
+        const cJSON *detail = cJSON_GetObjectItem(root, "detail");
+        const cJSON *code = cJSON_GetObjectItem(root, "err");
+        const char *sname = cJSON_IsString(name) ? name->valuestring : NULL;
+        const char *sdet = cJSON_IsString(detail) ? detail->valuestring : NULL;
+        if (cJSON_IsNumber(stage))
+            attr->stage = (uint32_t)stage->valuedouble;
+        if (cJSON_IsNumber(rounds))
+            attr->rounds = (uint32_t)rounds->valuedouble;
+        else if (cJSON_IsNumber(round1))
+            attr->rounds = (uint32_t)round1->valuedouble;
+        if (cJSON_IsNumber(rej))
+            attr->rejections = (uint32_t)rej->valuedouble;
+        if (cJSON_IsString(node))
+            snprintf(attr->affected_node, sizeof(attr->affected_node), "%s", node->valuestring);
+        if (sname && sdet)
+            snprintf(attr->err_detail, sizeof(attr->err_detail), "%s: %s", sname, sdet);
+        else if (sname && cJSON_IsNumber(code))
+            snprintf(attr->err_detail, sizeof(attr->err_detail), "%s: err=%d", sname,
+                     (int)code->valuedouble);
+        else if (sdet)
+            snprintf(attr->err_detail, sizeof(attr->err_detail), "%s", sdet);
+        else if (cJSON_IsNumber(code))
+            snprintf(attr->err_detail, sizeof(attr->err_detail), "err=%d",
+                     (int)code->valuedouble);
+        else if (sname)
+            snprintf(attr->err_detail, sizeof(attr->err_detail), "%s", sname);
+        cJSON_Delete(root);
+    }
+}
+
 int think_service_process(think_service_t *svc, const char *session_id, const char *prompt,
                           const char *gccp_answers, think_process_result_t *out_result)
 {
@@ -663,6 +728,9 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
 
         /* 清理本轮暂存的交互答案（真实失败路径，防泄漏到下一轮） */
         think_ans_drop(sess);
+        /* C-10（0.1.21）：归因快照必须在解锁前取——事件环属本轮请求。 */
+        think_fail_attr_t attr;
+        think_fail_attr(svc, &attr);
         airy_mtx_unlock(&svc->lock);
         SVC_LOG_ERROR("ThinkDual: cognition process failed (err=%d)", err_code);
 
@@ -671,6 +739,13 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
             /* P-V：失败必须显式标记降级，且原始错误码不被折叠成 UNKNOWN，
              * 否则上层无法区分"思考未参与"与"思考成功"。 */
             cJSON_AddBoolToObject(root, "degraded", 1);
+            /* C-10（0.1.21）：错误 data 固定携带归因五字段，形状不随失败
+             * 类型变化；无事件证据时为零/空串，CLI 据此退回错误码。 */
+            cJSON_AddNumberToObject(root, "stage", attr.stage);
+            cJSON_AddNumberToObject(root, "grad_rounds", attr.rounds);
+            cJSON_AddNumberToObject(root, "grad_rejections", attr.rejections);
+            cJSON_AddStringToObject(root, "affected_node", attr.affected_node);
+            cJSON_AddStringToObject(root, "err_detail", attr.err_detail);
             cJSON *st = cJSON_CreateObject();
             cJSON_AddNumberToObject(st, "err_code", err_code);
             cJSON_AddNumberToObject(st, "dual_invocations", svc->dual_invocations);
