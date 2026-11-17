@@ -36,6 +36,13 @@ static int fake_run(void *ctx, const tool_execute_request_t *req, tool_result_t 
     res->exit_code = 0;
     res->err_code = 0;
     res->output = strdup("hello");
+    if (strcmp(req->tool_id, "slow") == 0) {
+        res->exit_code = -1;
+        res->err_code = AIRY_ETIMEDOUT;
+        free(res->output);
+        res->output = strdup("partial");
+        res->error = strdup("Command timed out");
+    }
     *out = res;
     return 0;
 }
@@ -196,6 +203,15 @@ static void test_errors(void)
     assert(tooljob_poll(jobs, id, &info) == 0);
     assert(info.err_code == AIRY_ERR_GENERIC_FAIL);
     assert(info.error != NULL);
+    tooljob_rel(&info);
+
+    /* 超时结果 → timed_out，且保留执行层已捕获的部分输出。 */
+    req.tool_id = "slow";
+    assert(tooljob_submit(jobs, &req, 0, id, sizeof(id)) == 0);
+    wait_state(jobs, id, TOOL_JOB_TIMED_OUT);
+    assert(tooljob_poll(jobs, id, &info) == 0);
+    assert(info.err_code == AIRY_ETIMEDOUT);
+    assert(info.output && strcmp(info.output, "partial") == 0);
     tooljob_rel(&info);
 
     assert(tooljob_clamp(-5) == 0);
