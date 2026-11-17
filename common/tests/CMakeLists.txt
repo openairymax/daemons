@@ -46,6 +46,8 @@ foreach(TEST_SRC ${TEST_SOURCES})
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/error
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/types
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/memory
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/utils/compat
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../commons/tests/utils
         ${CMAKE_CURRENT_SOURCE_DIR}/../../../atoms/corekern/include
     )
