@@ -130,7 +130,9 @@ static void test_budget_not_trip(void)
     EXPECT(st.budget_tmo == 4U);
     EXPECT(st.slow_tmo == 0U);
     EXPECT(st.calls == 4U);
-    EXPECT(st.breaks == 0U);
+    /* 单口径：预算终止与熔断拒绝同记 breaks，但仍不推进连败、不打开。 */
+    EXPECT(st.breaks == 4U);
+    EXPECT(st.rejects == 0U);
     EXPECT(st.opens == 0U);
     EXPECT(st.state == PROV_BRK_CLOSED);
 }
