@@ -96,37 +96,6 @@ svc_perf_mode_t svc_perf_from_yaml(const char *path);
 svc_perf_mode_t svc_perf_resolve(const char *path);
 
 /**
- * @brief Dual-think (Thinkdual) three-model configuration (think section).
- *
- * When enabled=1, think_d uses the GRAD plan-level critique loop; an empty
- * model name means "use the provider default" (global.default_model).
- * timeout_ms=0 means use think_d's built-in default (120000).
- */
-typedef struct {
-    int enabled;
-    char think2_slow_model[128];
-    char think1_fast_model[128];
-    char think1_prof_model[128];
-    uint32_t timeout_ms;
-} svc_model_think_config_t;
-
-/**
- * @brief Extract the dual-think three-model config from the think section.
- *
- * Same-origin scanner as svc_model_defaults_from_yaml: only the
- * enabled / think2_slow_model / think1_fast_model / think1_prof_model /
- * timeout_ms keys inside the top-level think: mapping are considered.
- * If no think section is found, out keeps its initial value
- * (enabled=1, empty model names, timeout=0); not an error (legacy config
- * compatibility).
- *
- * @param path YAML file path
- * @param out  Output struct (non-NULL; caller should zero it first)
- * @return 0 on success; AIRY_ERR_INVALID_PARAM / AIRY_ERR_IO
- */
-int svc_model_defaults_think_from_yaml(const char *path, svc_model_think_config_t *out);
-
-/**
  * @brief Simplified LLM config (llm section of model.yaml).
  *
  * Minimal config entry for ordinary users: one provider + one default
@@ -232,6 +201,95 @@ int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_
  */
 int svc_model_ids_from_yaml(const char *path, char ids[][SVC_MODEL_ID_MAX], size_t cap,
                             size_t *out_n);
+
+/**
+ * @brief Think-role slots (tc3) — the single source of role-to-model binding.
+ *
+ * Roles are fixed by the cognition contract: t2 (slow / plan), t1f (fast /
+ * verify) and t1p (professional / expert). A slot holds a model_id from the
+ * models table or an empty string meaning "fall back to default_model"; it
+ * never holds a display name. `legacy_mask` records which roles were
+ * resolved from the deprecated think.*_model keys or AIRY_THINK*_MODEL
+ * variables (bit 0=t2, 1=t1f, 2=t1p), so callers can warn once instead of
+ * silently honouring an obsolete spelling.
+ */
+enum { SVC_SLOT_T2 = 0, SVC_SLOT_T1F = 1, SVC_SLOT_T1P = 2, SVC_SLOT_N = 3 };
+
+typedef struct {
+    int enabled;
+    uint32_t timeout_ms;
+    unsigned legacy_mask;
+    char t2[SVC_MODEL_ID_MAX];
+    char t1f[SVC_MODEL_ID_MAX];
+    char t1p[SVC_MODEL_ID_MAX];
+} svc_model_slots_t;
+
+/** @brief Canonical role name ("t2" / "t1f" / "t1p"); NULL when out of range. */
+const char *svc_slot_name(unsigned role);
+
+/** @brief Mutable slot buffer for a role; NULL when out of range. */
+char *svc_slot_buf(svc_model_slots_t *slots, unsigned role);
+
+/** @brief Declared slot value ("" when unset); NULL when out of range. */
+const char *svc_slot_get(const svc_model_slots_t *slots, unsigned role);
+
+/**
+ * @brief Fill slots from an already-parsed model.yaml root.
+ *
+ * Reads the top-level slots: mapping and, for roles still empty, the
+ * deprecated think.*_model keys. think.enabled / think.timeout_ms are read
+ * from the think: mapping. A missing slots/think section is not an error.
+ *
+ * @param root Parsed document root (may be NULL)
+ * @param out  Output (non-NULL; callers should zero it and set enabled=1)
+ * @return 0 on success; AIRY_ERR_INVALID_PARAM on bad arguments
+ */
+int svc_slot_fill(struct yaml_node *root, svc_model_slots_t *out);
+
+/** @brief Open model.yaml and fill slots (see svc_slot_fill). */
+int svc_slot_load(const char *path, svc_model_slots_t *out);
+
+/**
+ * @brief Read a role's environment override.
+ *
+ * AIRY_MODEL_T2 / AIRY_MODEL_T1F / AIRY_MODEL_T1P win; the deprecated
+ * AIRY_THINK2_SLOW_MODEL / AIRY_THINK1_FAST_MODEL / AIRY_THINK1_PROF_MODEL
+ * remain readable. The deprecated unit is reported, never silently merged.
+ *
+ * @param role   SVC_SLOT_T2..SVC_SLOT_T1P
+ * @param buf    Output buffer (non-NULL)
+ * @param cap    Buffer size
+ * @param legacy Out: 1 when a deprecated variable supplied the value
+ * @return 1 when an override was found, 0 otherwise
+ */
+int svc_slot_env(unsigned role, char *buf, size_t cap, int *legacy);
+
+/**
+ * @brief Resolve slots (single entry): YAML first, then environment.
+ *
+ * Environment overrides per role; legacy sources only fill roles the new
+ * spelling left empty and set the matching legacy_mask bit.
+ *
+ * @param path model.yaml path (may be NULL when env decides)
+ * @param out  Output (non-NULL; caller sets enabled=1 before the call)
+ * @return 0 on success; AIRY_ERR_IO when the file is unreadable
+ */
+int svc_slot_resolve(const char *path, svc_model_slots_t *out);
+
+/**
+ * @brief Persist slots into the top-level slots: block of model.yaml.
+ *
+ * Rewrites only the t2 / t1f / t1p lines inside that block; every other byte
+ * (comments, key order, other sections) is preserved, missing keys are
+ * appended in place and a missing block is appended at end of file. The write
+ * goes to a temp file and is renamed over the target, so watchers never see a
+ * half-written config.
+ *
+ * @param path  model.yaml path (created with a slots-only body when absent)
+ * @param slots Slots to write (empty string = explicitly unset)
+ * @return 0 on success; AIRY_ERR_IO / AIRY_ERR_OUT_OF_MEMORY otherwise
+ */
+int svc_slot_save(const char *path, const svc_model_slots_t *slots);
 
 /**
  * @brief Resolve the effective default model / provider (single entry).

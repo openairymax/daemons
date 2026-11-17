@@ -603,6 +603,35 @@ static int list_models_cb(const char *provider_name, const char *model_name, voi
     return 0;
 }
 
+/* C-19：把「模型 → 角色」标到每个模型条目上，让 CLI/TUI 不必自己拼
+ * model_id 字符串；effective 取值同时给出，空槽位回落 default_model。 */
+static void list_mark_slots(cJSON *models_arr, const struct llm_service *svc)
+{
+    const char *eff[SVC_SLOT_N];
+    for (unsigned r = 0; r < SVC_SLOT_N; ++r) {
+        const char *v = svc_slot_get(&svc->slots, r);
+        eff[r] = (v && v[0]) ? v : svc->default_model;
+    }
+    int n = cJSON_GetArraySize(models_arr);
+    for (int i = 0; i < n; ++i) {
+        cJSON *it = cJSON_GetArrayItem(models_arr, i);
+        const char *nm = cJSON_GetStringValue(cJSON_GetObjectItem(it, "name"));
+        if (!nm)
+            continue;
+        cJSON *roles = cJSON_CreateArray();
+        if (!roles)
+            continue;
+        for (unsigned r = 0; r < SVC_SLOT_N; ++r) {
+            if (eff[r] && eff[r][0] && strcmp(nm, eff[r]) == 0)
+                cJSON_AddItemToArray(roles, cJSON_CreateString(svc_slot_name(r)));
+        }
+        if (cJSON_GetArraySize(roles) > 0)
+            cJSON_AddItemToObject(it, "slots", roles);
+        else
+            cJSON_Delete(roles);
+    }
+}
+
 char *llm_service_list_models(llm_service_t *svc)
 {
     if (!svc)
@@ -632,10 +661,170 @@ char *llm_service_list_models(llm_service_t *svc)
     if (svc->default_provider[0])
         cJSON_AddStringToObject(root, "default_provider", svc->default_provider);
 
+    cJSON *slots = cJSON_CreateObject();
+    if (slots) {
+        cJSON_AddBoolToObject(slots, "degraded", svc->slots_degraded != 0);
+        for (unsigned r = 0; r < SVC_SLOT_N; ++r) {
+            const char *v = svc_slot_get(&svc->slots, r);
+            cJSON *one = cJSON_CreateObject();
+            if (!one)
+                continue;
+            cJSON_AddStringToObject(one, "declared", v ? v : "");
+            cJSON_AddStringToObject(one, "effective",
+                                    (v && v[0]) ? v : svc->default_model);
+            cJSON_AddItemToObject(slots, svc_slot_name(r), one);
+        }
+        cJSON_AddItemToObject(root, "slots", slots);
+    }
+    list_mark_slots(models_arr, svc);
+
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     airy_mtx_unlock(&svc->lock);
     return json;
+}
+
+/* 槽位落盘位置：think_d 与用户覆盖都只认 $AIRY_CONFIG_DIR/model.yaml，
+ * 故优先写该文件（不存在则创建 slots-only 文件）；没有配置目录时退回
+ * 服务启动时的主配置路径。 */
+static int slots_target(const llm_service_t *svc, char *buf, size_t cap)
+{
+    const char *dir = airy_config_dir();
+    if (dir) {
+        int n = snprintf(buf, cap, "%s/model.yaml", dir);
+        if (n > 0 && (size_t)n < cap)
+            return 0;
+    }
+    if (svc->cfg_path[0]) {
+        AIRY_STRNCPY_TERM(buf, svc->cfg_path, cap);
+        return 0;
+    }
+    return -1;
+}
+
+static int slots_role(const char *role)
+{
+    if (!role || !role[0])
+        return -1;
+    for (unsigned r = 0; r < SVC_SLOT_N; ++r) {
+        if (strcmp(role, svc_slot_name(r)) == 0)
+            return (int)r;
+    }
+    return -1;
+}
+
+/* model_id 语法：非空、长度受限、无引号/控制字符（写入 YAML 前把关，
+ * 避免用转义引入第二种编码）。 */
+static int slots_id_ok(const char *id)
+{
+    size_t n = strlen(id);
+    if (n == 0 || n >= SVC_MODEL_ID_MAX)
+        return 0;
+    for (size_t i = 0; i < n; ++i) {
+        unsigned char c = (unsigned char)id[i];
+        if (c < 0x20 || c == 0x7f || c == '"')
+            return 0;
+    }
+    return 1;
+}
+
+typedef struct {
+    char *buf;
+    size_t cap;
+    size_t off;
+} slot_names_t;
+
+static int slots_name_cb(const char *prov, const char *model, void *ud)
+{
+    slot_names_t *s = (slot_names_t *)ud;
+    (void)prov;
+    if (!s || !model)
+        return 0;
+    int n = snprintf(s->buf + s->off, s->cap - s->off, "%s%s", s->off ? "," : "", model);
+    if (n > 0 && (size_t)n < s->cap - s->off)
+        s->off += (size_t)n;
+    return 0;
+}
+
+char *llm_service_slots_get(llm_service_t *svc)
+{
+    if (!svc)
+        return NULL;
+    airy_mtx_lock(&svc->lock);
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        airy_mtx_unlock(&svc->lock);
+        return NULL;
+    }
+    cJSON_AddBoolToObject(root, "degraded", svc->slots_degraded != 0);
+    cJSON_AddStringToObject(root, "default_model",
+                            svc->default_model[0] ? svc->default_model : "");
+    for (unsigned r = 0; r < SVC_SLOT_N; ++r) {
+        const char *v = svc_slot_get(&svc->slots, r);
+        cJSON *one = cJSON_CreateObject();
+        if (!one)
+            continue;
+        cJSON_AddStringToObject(one, "declared", v ? v : "");
+        cJSON_AddStringToObject(one, "effective", (v && v[0]) ? v : svc->default_model);
+        cJSON_AddItemToObject(root, svc_slot_name(r), one);
+    }
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    airy_mtx_unlock(&svc->lock);
+    return json;
+}
+
+int llm_service_slots_set(llm_service_t *svc, const char *role, const char *model, char *err,
+                          size_t cap)
+{
+    if (!svc || !err || cap == 0)
+        return AIRY_ERR_INVALID_PARAM;
+    err[0] = '\0';
+    int r = slots_role(role);
+    if (r < 0) {
+        snprintf(err, cap, "unknown slot '%s' (expect t2|t1f|t1p)", role ? role : "");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    const char *m = model ? model : "";
+    if (m[0] && !slots_id_ok(m)) {
+        snprintf(err, cap, "invalid model id (empty/too long/quote/control char)");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+
+    airy_mtx_lock(&svc->lock);
+    int hit = !m[0] || provider_registry_find(svc->registry, m) != NULL;
+    svc_model_slots_t next = svc->slots;
+    airy_mtx_unlock(&svc->lock);
+    if (!hit) {
+        char names[1024] = {0};
+        slot_names_t sn = {names, sizeof(names), 0};
+        airy_mtx_lock(&svc->lock);
+        provider_registry_enumerate(svc->registry, slots_name_cb, &sn);
+        airy_mtx_unlock(&svc->lock);
+        snprintf(err, cap, "model '%s' not in registry; available: %s", m,
+                 names[0] ? names : "(none)");
+        return AIRY_ERR_INVALID_PARAM;
+    }
+    AIRY_STRNCPY_TERM(svc_slot_buf(&next, (unsigned)r), m, SVC_MODEL_ID_MAX);
+
+    char path[1024];
+    if (slots_target(svc, path, sizeof(path)) != 0) {
+        snprintf(err, cap, "no writable model.yaml (config dir unavailable)");
+        return AIRY_ERR_IO;
+    }
+    int rc = svc_slot_save(path, &next);
+    if (rc != 0) {
+        snprintf(err, cap, "write %s failed rc=%d", path, rc);
+        return AIRY_ERR_IO;
+    }
+    /* 落盘后立刻走同一条重载链，使服务内视图与文件一致；失败则如实报错，
+     * 旧配置继续服务（文件已写入，下一次 SIGHUP 仍可收敛）。 */
+    rc = llm_service_reload(svc);
+    if (rc != AIRY_OK) {
+        snprintf(err, cap, "saved to %s but reload rejected rc=%d", path, rc);
+        return AIRY_ERR_STATE_ERROR;
+    }
+    return 0;
 }
 
 const char *llm_service_default_model(const llm_service_t *svc)

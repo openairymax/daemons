@@ -97,9 +97,27 @@ static void boot_def_load(const char *cfg, llm_boot_t *b)
         /* 默认模型的来源与输出上限相互独立：上限仍须从 llm 段（或 models
          * 表首条）读出。 */
         b->src = boot_pick_cfg(cfg, &b->llm);
+        /* C-19：槽位与注册表同一次读入；启用位缺省为启用。 */
+        b->slots.enabled = 1;
+        (void)svc_slot_load(cfg, &b->slots);
     }
     if (!llm_boot_usr_path(up, sizeof(up)))
         return;
+    /* 用户覆盖里的槽位逐角色胜出；未写该角色则继承主配置。 */
+    svc_model_slots_t us;
+    __builtin_memset(&us, 0, sizeof(us));
+    us.enabled = 1;
+    (void)svc_slot_load(up, &us);
+    for (unsigned i = 0; i < SVC_SLOT_N; ++i) {
+        const char *v = svc_slot_get(&us, i);
+        if (!v || !v[0])
+            continue;
+        AIRY_STRNCPY_TERM(svc_slot_buf(&b->slots, i), v, SVC_MODEL_ID_MAX);
+        if (us.legacy_mask & (1u << i))
+            b->slots.legacy_mask |= 1u << i;
+    }
+    if (us.timeout_ms > 0)
+        b->slots.timeout_ms = us.timeout_ms;
     /* 用户只覆盖自己显式写下的 routing 键（不重置主配置）。 */
     (void)svc_route_load(up, &b->route);
     char um[128] = {0};
@@ -201,6 +219,13 @@ void llm_boot_apply(struct llm_service *svc, llm_boot_t *b)
     if (!svc || !b)
         return;
     boot_def_apply(svc, b);
+    svc->slots = b->slots;
+    svc->slots_degraded = 0;
+    for (unsigned i = 0; i < SVC_SLOT_N; ++i) {
+        const char *v = svc_slot_get(&b->slots, i);
+        if (!v || !v[0])
+            svc->slots_degraded = 1;
+    }
     svc->route = b->route;
     svc->rules = b->rules;
     svc->rule_count = b->rule_count > 0 ? (size_t)b->rule_count : 0;
@@ -209,10 +234,17 @@ void llm_boot_apply(struct llm_service *svc, llm_boot_t *b)
 }
 
 /* 逃生开关：仅排障用。只把「不闭合」降级为告警，不放宽对账本身。 */
-static int boot_allow_unknown(void)
+int llm_boot_allow_unknown(void)
 {
     const char *esc = getenv("AIRY_ALLOW_UNKNOWN_MODEL");
     return (esc && esc[0] && strcmp(esc, "0") != 0) ? 1 : 0;
+}
+
+static int boot_reg_hit(const struct llm_service *svc, const char *id)
+{
+    if (!id || !id[0])
+        return AIRY_ATTEST_REG_NA;
+    return provider_registry_find(svc->registry, id) ? AIRY_ATTEST_REG_HIT : AIRY_ATTEST_REG_MISS;
 }
 
 int llm_boot_attest(struct llm_service *svc)
@@ -222,23 +254,46 @@ int llm_boot_attest(struct llm_service *svc)
 
     /* 未声明 default_model 是「没配」，不是「配错」：不做注册对账，
      * 由请求侧按需回落到 provider 默认模型。 */
-    int hit = AIRY_ATTEST_REG_NA;
-    if (svc->default_model[0])
-        hit = provider_registry_find(svc->registry, svc->default_model) ? AIRY_ATTEST_REG_HIT
-                                                                      : AIRY_ATTEST_REG_MISS;
-    airy_attest_item_t item = {
+    airy_attest_item_t items[1 + SVC_SLOT_N];
+    size_t n = 0;
+    items[n++] = (airy_attest_item_t){
         .key = "default_model",
         .declared = svc->default_model,
         .effective = svc->default_model,
-        .in_registry = hit,
+        .in_registry = boot_reg_hit(svc, svc->default_model),
     };
-    airy_attest_opts_t opts = {.owner = "llm_d", .allow_unknown = boot_allow_unknown()};
+    /* C-19：槽位引用同样是「声明」，必须与注册表对账；空槽位不参与对账，
+     * 其语义是回落 default_model（由 slots_degraded 显式上报）。 */
+    for (unsigned i = 0; i < SVC_SLOT_N; ++i) {
+        const char *v = svc_slot_get(&svc->slots, i);
+        if (!v || !v[0])
+            continue;
+        items[n++] = (airy_attest_item_t){
+            .key = svc_slot_name(i),
+            .declared = v,
+            .effective = v,
+            .in_registry = boot_reg_hit(svc, v),
+        };
+    }
+    airy_attest_opts_t opts = {.owner = "llm_d", .allow_unknown = llm_boot_allow_unknown()};
     airy_attest_result_t res;
-    int rc = airy_attest_run(&opts, &item, 1, &res);
-    if (rc == AIRY_SUCCESS)
-        return 0;
+    int rc = airy_attest_run(&opts, items, n, &res);
 
-    SVC_LOG_ERROR("llm_d: 配置生效自证未闭合，拒绝启动（default_model='%s' 不在注册表）",
+    if (svc->slots_degraded)
+        SVC_LOG_WARN("C-19: llm_d slots degraded — 未显式配置的角色回落 default_model=%s "
+                     "(t2=%s t1f=%s t1p=%s)",
+                     svc->default_model, svc->slots.t2[0] ? svc->slots.t2 : "-",
+                     svc->slots.t1f[0] ? svc->slots.t1f : "-",
+                     svc->slots.t1p[0] ? svc->slots.t1p : "-");
+    if (rc == AIRY_SUCCESS) {
+        SVC_LOG_INFO("C-19: llm_d slots effective t2=%s t1f=%s t1p=%s",
+                     svc->slots.t2[0] ? svc->slots.t2 : svc->default_model,
+                     svc->slots.t1f[0] ? svc->slots.t1f : svc->default_model,
+                     svc->slots.t1p[0] ? svc->slots.t1p : svc->default_model);
+        return 0;
+    }
+
+    SVC_LOG_ERROR("llm_d: 配置生效自证未闭合，拒绝启动（default_model='%s' 或槽位引用不在注册表）",
                   svc->default_model);
     return -1;
 }

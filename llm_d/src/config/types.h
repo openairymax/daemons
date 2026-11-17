@@ -121,6 +121,9 @@ typedef struct {
     size_t model_count;
     /* 简化 llm 段：load_state 顺带 fill，expand_llm 消费（B'：免二次解析） */
     svc_model_llm_config_t llm;
+    /* C-19：顶层 slots 段（角色 → model_id），与 models[] 同一次解析完成，
+     * 保证「注册表内声明的槽位」与「注册表本身」来自同一份文档。 */
+    svc_model_slots_t slots;
 } svc_yaml_state_t;
 
 /* service_config_yaml_models.c */
