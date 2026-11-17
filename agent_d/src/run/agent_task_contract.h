@@ -140,6 +140,19 @@ int agent_task_gccp_check(const cJSON *gccp_answers, bool *confirmed,
 void agent_task_gen_id(const char *prefix, char *out, size_t size);
 
 /**
+ * @brief 执行门禁（唯一实现）：未确认的 task 不得触达引擎与工具。
+ *
+ * 门禁条件只有一条——mode=task 且 gccp_confirmed=false 时关闭；chat
+ * 与已确认任务一律放行。关闭时调用方必须在调用引擎之前返回
+ * needs_intent（零引擎 / 零工具调用，gate:lab 判据）。
+ *
+ * @param mode           裁决结果（可 NULL，按 chat 处理）
+ * @param gccp_confirmed 用户是否已确认目标/计划
+ * @return true 放行；false 需返回 needs_intent
+ */
+bool agent_task_gate_allows(const char *mode, bool gccp_confirmed);
+
+/**
  * @brief 组装 needs_intent 结果（confirmed=false 的唯一出口）。
  *
  * 返回对象含 status/mode/mode_reason/gccp_confirmed/gccp_missing 与

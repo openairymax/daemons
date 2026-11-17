@@ -301,7 +301,9 @@ static void task_submit_common(cJSON *params, int id, airy_sock_t fd,
     meta.gccp_confirmed = confirmed;
     cJSON_Delete(answers_parsed);
 
-    if (strcmp(meta.mode, AGENT_TASK_MODE_TASK) == 0 && !meta.gccp_confirmed) {
+    /* 门禁（唯一判定实现）：关闭时零引擎 / 零工具调用，直接返回
+     * needs_intent（gate:lab：`-p` 未确认不得产生任何工具调用事件）。 */
+    if (!agent_task_gate_allows(meta.mode, meta.gccp_confirmed)) {
         cJSON *ni = agent_task_build_needs_intent(&meta, missing, missing_count);
         AIRY_FREE(a.gccp_owned);
         if (!ni) {

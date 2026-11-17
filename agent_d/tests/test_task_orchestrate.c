@@ -125,11 +125,24 @@ static void test_gccp_gate(void)
     cJSON_Delete(full);
 }
 
+static void test_gate_decision(void)
+{
+    /* gate:lab：`-p` 未确认（gccp_confirmed=false）时 task 门禁关闭，
+     * 调用方必须在此之后、引擎之前返回 needs_intent——因此不可能产生
+     * 任何 tool_start/tool_end 事件。chat 与已确认任务一律放行。 */
+    CHECK(!agent_task_gate_allows(AGENT_TASK_MODE_TASK, false),
+          "unconfirmed task must be gated");
+    CHECK(agent_task_gate_allows(AGENT_TASK_MODE_TASK, true), "confirmed task must pass");
+    CHECK(agent_task_gate_allows(AGENT_TASK_MODE_CHAT, false), "chat must never be gated");
+    CHECK(agent_task_gate_allows(NULL, false), "unknown mode defaults to pass");
+}
+
 int main(void)
 {
     test_mode_rules();
     test_task_id();
     test_gccp_gate();
+    test_gate_decision();
     if (g_failures) {
         printf("test_task_orchestrate: %d failure(s)\n", g_failures);
         return 1;
