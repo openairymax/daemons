@@ -25,6 +25,12 @@ int tool_registry_add(tool_registry_t *reg, const tool_metadata_t *meta);
 tool_metadata_t *tool_registry_get(tool_registry_t *reg, const char *tool_id);
 char *tool_registry_list_json(tool_registry_t *reg);
 
+/* C-16 工具目录 SSoT：输出全部登记条目，逐条带 available / denied_reason。
+ * include_denied=0 时只输出此刻可用者（与 list_json 同集，另带原因字段）；
+ * =1 时同时输出不可用条目及其原因（消费者据此下发给模型可见集之外的
+ * 诊断面，或记录「为何不下发」）。返回 malloc 串，失败返回 NULL。 */
+char *tool_registry_catalog_json(tool_registry_t *reg, int include_denied);
+
 /* 会话内动态工具替换：仅替换已存在的非 builtin 条目（脚本工具重定义）。
  * 返回 AIRY_ERR_UNKNOWN（不存在）或 AIRY_ERR_PERMISSION_DENIED（目标为
  * builtin: 前缀，禁止被脚本抢占）。 */
