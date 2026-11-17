@@ -383,6 +383,22 @@ int main(void)
         }
     }
 
+    /* 11b) C-1：仅声明 context_window（无 max_context）→ provider 容量取
+     *      context_window 派生值，不再让路由器端点容量落回 8192 硬编码。 */
+    {
+        if (put_file(path, kFull8) != 0)
+            return 1;
+        provider_config_t *cp = NULL;
+        size_t cn = 0;
+        check_int("cw.rc", svc_load_model_config_yaml(path, &cp, &cn), 0);
+        check_int("cw.count", (int)cn, 1);
+        if (cp && cn == 1) {
+            check_int("cw.declared", cp[0].hw.declared, 1);
+            check_int("cw.maxctx", (int)cp[0].hw.max_context, 8192);
+            free_providers(cp, cn);
+        }
+    }
+
     /* 12) B-1：未声明能力位 → declared=0，选路走保守可用。 */
     {
         if (put_file(path, kFallback) != 0)
