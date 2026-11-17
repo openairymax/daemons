@@ -483,6 +483,7 @@ static void run_chain(run_ctx_t *c)
         return;
     cJSON_AddStringToObject(evt, "event", "run_result");
     cJSON_AddNumberToObject(evt, "rc", c->rc);
+    cJSON_AddStringToObject(evt, "state", run_state_name(c->rc, c->cancelled));
     cJSON_AddNumberToObject(evt, "tokens", (double)c->tokens);
     cJSON_AddNumberToObject(evt, "cost", c->cost);
     char buf[520];
@@ -550,8 +551,8 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
 
     cJSON *end = cJSON_CreateObject();
     if (end) {
-        cJSON_AddStringToObject(end, AIRY_RS_K_STATUS, c->cancelled ? "cancelled" :
-                                                         (c->rc != 0 ? "failed" : "completed"));
+        cJSON_AddStringToObject(end, AIRY_RS_K_STATUS,
+                                run_state_name(c->rc, c->cancelled));
         cJSON_AddNumberToObject(end, AIRY_RS_K_DURATION,
                                 (double)(airy_time_ms() - c->run_start_ms));
         cJSON_AddNumberToObject(end, AIRY_RS_K_THINK_MS, (double)c->think_ms);
@@ -569,9 +570,7 @@ static void run_tail(run_ctx_t *c, const cJSON *res)
         if (err) {
             cJSON_AddNumberToObject(err, AIRY_RS_K_CODE, -32603);
             cJSON_AddStringToObject(err, AIRY_RS_K_MSG,
-                                    (c->text && c->text[0]) ?
-                                        c->text :
-                                        "agent.run failed: tool loop exhausted or LLM service error");
+                                    (c->text && c->text[0]) ? c->text : run_rc_msg(c->rc));
             cJSON_AddBoolToObject(err, AIRY_RS_K_RECOVER, 1);
             agent_run_emit_event(c->sink, &c->seq, c->run_id, c->sess, AIRY_RS_TYPE_ERROR, err);
         }
@@ -611,10 +610,17 @@ int agent_run_execute(const char *prompt, const char *model, const cJSON *histor
     else
         run_think(&c);
 
-    if (!agent_run_is_cancelled(c.active) && c.rc == 0)
-        run_chain(&c);
-
     c.cancelled = agent_run_is_cancelled(c.active);
+    /* 无输出终态（0.1.21 L-9）：编排成功但终局正文为空，不是「成功但空白」。
+     * GCCP 交互轮以问题集为产物、取消轮由取消语义覆盖，二者不判空。 */
+    if (c.rc == 0 && !c.cancelled && !c.gccp_round && (!c.text || !c.text[0]))
+        c.rc = AGENT_RUN_RC_EMPTY;
+
+    /* 终态必写决策链（0.1.21 L-9）：旧行为只在成功时写 run_result，失败与
+     * 取消在链上无终局，看板与回放永远停在 running，只能靠日志猜结果。
+     * GCCP 交互轮不是终态，由 run_chain 内部跳过 run_result。 */
+    run_chain(&c);
+
     /* unregister 会释放 active：run_id 先落地本地副本，下方发帧禁止再触达
      * active。UAF 实锤（2026-09-09 0.1.13 实机回归）：释放后的 run_id 缓冲
      * 被响应文本分配复用，message/run_end 帧 run_id 被污染为内容片段。 */
