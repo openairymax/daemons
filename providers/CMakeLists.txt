@@ -49,6 +49,8 @@ set(AIRY_TRANSPORT_SOURCES
     src/core/ep_health.c
     # 传输侧观测（超时三拆计数 + 时延 p99）
     src/core/prov_stat.c
+    # 调用侧熔断记账与快速失败闸（B-4 / C-3）
+    src/core/prov_breaker.c
     # 线格式适配（chat / messages / local + 装配表 SSoT）
     src/adapters/chat.c
     src/adapters/messages.c
