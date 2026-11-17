@@ -69,6 +69,9 @@ struct llm_service {
     /* 排空超时的旧配置退场区（有界，最旧先回收） */
     llm_retired_t retired[LLM_RETIRED_MAX];
     int retired_n;
+    /* 0.1.21 A-8：首次真实调用打印一次「声明 → 实际」模型对，使槽位/默认
+     * 模型改写后的实际生效值在日志中可达，而不必等 404 才暴露。 */
+    int attest_first_seen;
 };
 
 /* 计费/用量持久化路径（$AIRY_DATA_DIR/agentrt/llm_usage.json）：

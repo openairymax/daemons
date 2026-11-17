@@ -30,6 +30,11 @@
  * ops 由 svc_prepare 期 are_ops_set_plan() 注入（payload_registry）。 */
 #include "airy_plan_ops.h"
 
+#include "config_attest.h"
+#include "svc_model_defaults.h"
+
+#include <stdlib.h>
+
 static void think_sync_engine_stats(think_service_t *svc);
 
 /* ── GCCP 会话表管理（2026-08-25 加固，调用方须已持有 svc->lock）────── */
@@ -364,6 +369,70 @@ static void think_mw_snap(think_service_t *svc)
         (void)svc_mw_init(&svc->mw, model_path, "think_d");
 }
 
+/* ── 配置生效自证（0.1.21 A-8）───────────────────────────────────────
+ * 三处对账：GRAD 开关「声明 vs 引擎持有」，三个模型槽「声明 vs 生效」，
+ * 以及槽位是否指向 model.yaml 真实声明的模型 id（展示名不是 id）。
+ * 环境变量显式指定时不对账声明表——外部声明不被文件注册表约束。 */
+
+#define THINK_ATTEST_IDS 16
+
+static int think_slot_reg(char ids[][SVC_MODEL_ID_MAX], size_t n, int have_ids,
+                          const char *declared, const char *env_name)
+{
+    const char *env = env_name ? getenv(env_name) : NULL;
+    if (!have_ids || !declared || !declared[0] || (env && env[0]))
+        return AIRY_ATTEST_REG_NA;
+    for (size_t i = 0; i < n; ++i) {
+        if (strcmp(ids[i], declared) == 0)
+            return AIRY_ATTEST_REG_HIT;
+    }
+    return AIRY_ATTEST_REG_MISS;
+}
+
+static int think_attest(const think_service_t *svc, const think_service_config_t *config)
+{
+    char ids[THINK_ATTEST_IDS][SVC_MODEL_ID_MAX];
+    char path[1024];
+    size_t id_n = 0;
+    int have_ids = 0;
+    const char *cfg_dir = airy_config_dir();
+    const char *esc = getenv("AIRY_ALLOW_UNKNOWN_MODEL");
+    const char *t2 = config ? config->think2_slow_model : "";
+    const char *t1f = config ? config->think1_fast_model : "";
+    const char *t1p = config ? config->think1_prof_model : "";
+
+    if (cfg_dir) {
+        int len = snprintf(path, sizeof(path), "%s/model.yaml", cfg_dir);
+        if (len > 0 && len < (int)sizeof(path))
+            have_ids = (svc_model_ids_from_yaml(path, ids, THINK_ATTEST_IDS, &id_n) == 0);
+    }
+
+    char en_decl[2] = {(config && config->enabled) ? '1' : '0', '\0'};
+    char en_eff[2] = {airy_cognition_get_grad_enabled(svc->engine) ? '1' : '0', '\0'};
+    airy_attest_item_t items[4] = {
+        {.key = "think.enabled",
+         .declared = en_decl,
+         .effective = en_eff,
+         .in_registry = AIRY_ATTEST_REG_NA},
+        {.key = "think.t2",
+         .declared = t2,
+         .effective = svc->think2_slow_model,
+         .in_registry = think_slot_reg(ids, id_n, have_ids, t2, "AIRY_THINK2_SLOW_MODEL")},
+        {.key = "think.t1f",
+         .declared = t1f,
+         .effective = svc->think1_fast_model,
+         .in_registry = think_slot_reg(ids, id_n, have_ids, t1f, "AIRY_THINK1_FAST_MODEL")},
+        {.key = "think.t1p",
+         .declared = t1p,
+         .effective = svc->think1_prof_model,
+         .in_registry = think_slot_reg(ids, id_n, have_ids, t1p, "AIRY_THINK1_PROF_MODEL")},
+    };
+    airy_attest_opts_t opts = {.owner = "think_d", .allow_unknown = (esc && esc[0]) ? 1 : 0};
+    airy_attest_result_t res;
+
+    return airy_attest_run(&opts, items, 4, &res) == AIRY_SUCCESS ? 0 : -1;
+}
+
 think_service_t *think_service_create(const think_service_config_t *config)
 {
     think_service_t *svc = (think_service_t *)AIRY_CALLOC(1, sizeof(think_service_t));
@@ -396,6 +465,13 @@ think_service_t *think_service_create(const think_service_config_t *config)
 
     if (!think_init_eng(svc, config))
         return NULL;
+    /* 0.1.21 A-8：声明 = 注册 = 生效。引擎已接线，此处读回运行态；
+     * 未闭合即拒绝启动，不以默认值兜底。 */
+    if (think_attest(svc, config) != 0) {
+        SVC_LOG_ERROR("ThinkDual: 配置生效自证未闭合，拒绝启动");
+        think_svc_drop(svc);
+        AIRY_ERROR_NULL(AIRY_ERR_SVC_CONFIG, "think config attestation rejected");
+    }
     think_log_ready(svc, config);
 
     /* S-5 (2026-08-21): 恢复流程编排器（orchestrator，与 engine_process

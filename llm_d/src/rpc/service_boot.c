@@ -15,6 +15,7 @@
 #include "airy_memory.h"
 #include "config/pricing_api.h"
 #include "config/model_loader.h"
+#include "config_attest.h"
 #include "daemon_defaults.h"
 #include "daemon_platform_ext.h"
 #include "rpc/prov_internal.h"
@@ -22,6 +23,7 @@
 #include "svc_logger.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 int llm_boot_usr_path(char *buf, size_t n)
@@ -204,4 +206,39 @@ void llm_boot_apply(struct llm_service *svc, llm_boot_t *b)
     svc->rule_count = b->rule_count > 0 ? (size_t)b->rule_count : 0;
     b->rules = NULL;
     b->rule_count = 0;
+}
+
+/* 逃生开关：仅排障用。只把「不闭合」降级为告警，不放宽对账本身。 */
+static int boot_allow_unknown(void)
+{
+    const char *esc = getenv("AIRY_ALLOW_UNKNOWN_MODEL");
+    return (esc && esc[0] && strcmp(esc, "0") != 0) ? 1 : 0;
+}
+
+int llm_boot_attest(struct llm_service *svc)
+{
+    if (!svc)
+        return AIRY_ERR_INVALID_PARAM;
+
+    /* 未声明 default_model 是「没配」，不是「配错」：不做注册对账，
+     * 由请求侧按需回落到 provider 默认模型。 */
+    int hit = AIRY_ATTEST_REG_NA;
+    if (svc->default_model[0])
+        hit = provider_registry_find(svc->registry, svc->default_model) ? AIRY_ATTEST_REG_HIT
+                                                                      : AIRY_ATTEST_REG_MISS;
+    airy_attest_item_t item = {
+        .key = "default_model",
+        .declared = svc->default_model,
+        .effective = svc->default_model,
+        .in_registry = hit,
+    };
+    airy_attest_opts_t opts = {.owner = "llm_d", .allow_unknown = boot_allow_unknown()};
+    airy_attest_result_t res;
+    int rc = airy_attest_run(&opts, &item, 1, &res);
+    if (rc == AIRY_SUCCESS)
+        return 0;
+
+    SVC_LOG_ERROR("llm_d: 配置生效自证未闭合，拒绝启动（default_model='%s' 不在注册表）",
+                  svc->default_model);
+    return -1;
 }

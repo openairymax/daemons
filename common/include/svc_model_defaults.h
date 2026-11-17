@@ -207,6 +207,32 @@ int svc_model_llm_fill(struct yaml_node *llm_section, svc_model_llm_config_t *ou
  */
 int svc_model_defaults_models0_from_yaml(const char *path, svc_model_llm_config_t *out);
 
+/** 单个模型标识缓冲长度；与各 daemon 的模型名字段保持一致。 */
+#define SVC_MODEL_ID_MAX 128
+
+/**
+ * @brief Enumerate every model identifier the configuration declares.
+ *
+ * The declared id set is the union of the simplified llm.model (when the
+ * llm section exists) and every models[].model_id entry — both are legal
+ * inputs for llm_d at runtime, so a slot or default model is valid when it
+ * appears in either. Union rather than a single table keeps the check
+ * honest for deployments that use the simplified form only.
+ *
+ * Startup attestation (0.1.21 A-8) uses this to decide whether a declared
+ * slot points at a real model id instead of a display name. The function
+ * never invents ids: no declaration yields AIRY_ERR_NOT_FOUND.
+ *
+ * @param path  YAML file path
+ * @param ids   Output id table (non-NULL, cap entries of SVC_MODEL_ID_MAX)
+ * @param cap   Table capacity (must be > 0)
+ * @param out_n Output count (non-NULL; set to 0 on entry)
+ * @return 0 when at least one id was collected; AIRY_ERR_INVALID_PARAM /
+ *         AIRY_ERR_IO / AIRY_ERR_NOT_FOUND otherwise
+ */
+int svc_model_ids_from_yaml(const char *path, char ids[][SVC_MODEL_ID_MAX], size_t cap,
+                            size_t *out_n);
+
 /**
  * @brief Resolve the effective default model / provider (single entry).
  *
