@@ -268,6 +268,9 @@ static void handle_health_check(cJSON *params, int id, airy_sock_t fd)
         if (breakers)
             cJSON_AddItemToObject(result, "breakers", breakers);
     }
+    /* 单口径读数（C-3）：熔断拒绝 + 预算终止。与 governance 的
+     * circuit_breaks 同名同义，CLI/GRAD 不必再从 breaker 数组求和。 */
+    cJSON_AddNumberToObject(result, "circuit_breaks", (double)prov_brk_breaks());
 
     JSONRPC_SEND_SUCCESS(fd, result, id);
 }
