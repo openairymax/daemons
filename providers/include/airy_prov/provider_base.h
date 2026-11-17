@@ -43,6 +43,9 @@ typedef struct {
     int n_ctx_slot;
     int total_slots;
     uintptr_t inflight;
+    /* D-1：等座中的请求数（占座失败才开始计数，占座成功或等座超时回落）。
+     * 与 inflight 同源维护，仅供只读观测面展示队列深度。 */
+    uintptr_t waiting;
     /* P-E：未配置密钥告警的进程内去重闩（0=未记，1=已记；CAS 置位）。 */
     uintptr_t unauth_logged;
     /* B-2：后端就绪状态，registry 装配时由 prov_be_scan 盖入。1 = 可发请求
