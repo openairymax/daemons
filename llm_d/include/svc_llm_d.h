@@ -50,7 +50,10 @@ void svc_destroy(void);
     X("count_tokens", m_count_tokens) \
     X("health_check", m_health_check) \
     X("get_stats", m_get_stats) \
-    X("embeddings", m_embeddings)
+    X("embeddings", m_embeddings) \
+    X("slots_get", m_slots_get) \
+    X("slots_set", m_slots_set) \
+    X("probe", m_probe)
 
 #define SVC_LLM_D_METHODS(X) \
     SVC_LLM_D_RPC_METHODS(X) \

@@ -18,7 +18,8 @@
     "pool": { "max_events": 64, "min": 4, "max": 8, "queue": 256 },
     "methods": [
       "complete", "complete_stream", "list_models", "count_tokens",
-      "health_check", "get_stats", "embeddings", "slots_get", "slots_set"
+      "health_check", "get_stats", "embeddings", "slots_get", "slots_set",
+      "probe"
     ]
   },
   "deps": { "required": [], "optional": [] },
