@@ -272,6 +272,7 @@ static int chain_gate(svc_chain_t *chain, const provider_t *prov, const char *mo
         if (!ep_gate(prov, model)) {
             SVC_LOG_WARN("C-L02: SVC: CHAIN-SKIP %s/%s (circuit open or probe busy)",
                          prov->name ? prov->name : "?", model);
+            chain->gated_skip++;
             return 1;
         }
     }
@@ -432,5 +433,10 @@ int svc_chain_run(llm_service_t *svc, const llm_request_config_t *manager,
         prov = next_prov(svc, req, &chain, cur_model, sizeof(cur_model));
     }
 
+    /* 全部候选被闸拒绝且没有任何真实尝试失败：这是熔断/健康面的快速
+     * 失败，不是"模型不存在"。回 BUSY 让上层立即降级，而不是在
+     * INVALID_MODEL 上做无意义的重试或配置排查。 */
+    if (chain.first_err == 0 && chain.gated_skip > 0)
+        return AIRY_ERR_BUSY;
     return chain.first_err ? chain.first_err : AIRY_ERR_LLM_INVALID_MODEL;
 }
