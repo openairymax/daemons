@@ -16,6 +16,10 @@ extern "C" {
 
 int tool_builtin_is_builtin(const char *executable);
 
+/* C-16：工具 id 是否在内置分派表中。供目录可用性判定区分
+ * missing_handler（登记了 builtin: 标记却没有实现）与可执行工具。 */
+int tool_builtin_exists(const char *tool_id);
+
 /* Execute a built-in tool: tool_id in {fs_read, fs_write, fs_list,
  * shell_run, web_fetch, ...}. params_json is the OpenAI tool_call
  * arguments (JSON object string); the result is written to res

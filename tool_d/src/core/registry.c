@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 #include "airy_memory.h"
+#include "airy_tool_schema.h"
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 /**
  * @file registry.c
  * @brief Tool-registry implementation (in-memory hash table).
@@ -280,6 +284,82 @@ void reg_each_name(tool_registry_t *reg, tool_name_fn fn, void *ud)
 
 char *tool_registry_list_json(tool_registry_t *reg)
 {
+    return tool_registry_catalog_json(reg, 0);
+}
+
+/* C-16：可执行体可达性。POSIX 用 access(X_OK) 判定；Windows 不做该判定，
+ * 避免把平台路径差异误报为 missing_binary（该分支在 Windows 构建上恒真）。 */
+static int meta_exec_ok(const char *exe)
+{
+#ifdef _WIN32
+    (void)exe;
+    return 1;
+#else
+    return access(exe, X_OK) == 0;
+#endif
+}
+
+/* C-16：与注册信息有关的不可用原因（network 由可见性谓词单独判定）。
+ * 返回 NULL 表示本地无障碍。 */
+static const char *meta_local_denied(const tool_metadata_t *m)
+{
+    const char *exe = (m->executable && m->executable[0]) ? m->executable : NULL;
+    if (!exe)
+        return AIRY_TOOL_DENIED_HANDLER;
+    if (strncmp(exe, "builtin:", 8) == 0)
+        return tool_builtin_exists(exe + 8) ? NULL : AIRY_TOOL_DENIED_HANDLER;
+    if (strchr(exe, '/') && !meta_exec_ok(exe))
+        return AIRY_TOOL_DENIED_BINARY;
+    return NULL;
+}
+
+/* 单条目录项：元数据 + input_schema + 契约环境 + 可用性/原因。 */
+static void meta_put_json(cJSON *arr, const tool_metadata_t *m, const char *denied,
+                          int has_contract, const tool_contract_env_t *cenv)
+{
+    cJSON *obj = cJSON_CreateObject();
+    if (!obj)
+        return;
+    cJSON_AddStringToObject(obj, "id", m->id);
+    cJSON_AddStringToObject(obj, "name", m->name);
+    cJSON_AddStringToObject(obj, "description", m->description ? m->description : "");
+    /* executable 交给 agent 侧区分内置与动态脚本工具（动态者需要在
+     * 会话工具清单中追加，builtin: 前缀者已由 SSoT 目录覆盖）。 */
+    cJSON_AddStringToObject(obj, "executable", m->executable ? m->executable : "");
+    cJSON_AddNumberToObject(obj, "cacheable", m->cacheable);
+    /* C-16 目录协商：available=false 的条目不进模型 tools 数组，
+     * denied_reason 让上层能解释「为什么这个工具不见了」。 */
+    cJSON_AddBoolToObject(obj, "available", denied == NULL);
+    cJSON_AddStringToObject(obj, "denied_reason", denied ? denied : "");
+    /* M1-1a 工具目录 SSoT：list_tools 输出每个工具的 input_schema
+     * （OpenAI tools parameters 格式，从 tool_param_t 构造），
+     * 使 tool_d 成为工具目录唯一权威，gateway MCP 注册从本 RPC 拉取。 */
+    cJSON *schema = cJSON_CreateObject();
+    if (schema) {
+        cJSON_AddStringToObject(schema, "type", "object");
+        cJSON *props = cJSON_CreateObject();
+        cJSON *required = cJSON_CreateArray();
+        for (size_t p = 0; p < m->param_count; p++) {
+            cJSON *ps = cJSON_Parse(m->params[p].schema);
+            if (ps)
+                cJSON_AddItemToObject(props, m->params[p].name, ps);
+            if (m->params[p].required)
+                cJSON_AddItemToArray(required, cJSON_CreateString(m->params[p].name));
+        }
+        cJSON_AddItemToObject(schema, "properties", props);
+        if (cJSON_GetArraySize(required) > 0)
+            cJSON_AddItemToObject(schema, "required", required);
+        else
+            cJSON_Delete(required);
+        cJSON_AddItemToObject(obj, "input_schema", schema);
+    }
+    if (has_contract)
+        tool_contract_put(obj, m->id, cenv);
+    cJSON_AddItemToArray(arr, obj);
+}
+
+char *tool_registry_catalog_json(tool_registry_t *reg, int include_denied)
+{
     if (!reg)
         return AIRY_STRDUP("[]");
     /* 契约环境含 getcwd/realpath，属 I/O：必须在注册表锁外解析。 */
@@ -289,46 +369,15 @@ char *tool_registry_list_json(tool_registry_t *reg)
     cJSON *arr = cJSON_CreateArray();
     for (int i = 0; i < HASH_SIZE; ++i) {
         for (registry_entry_t *e = reg->buckets[i]; e; e = e->next) {
-            /* D8：只输出此刻可暴露的工具，agent 与呈现层共用同一份清单，
-             * 从根上消除"暴露成功 → 调用三连败"的时序矛盾。 */
+            /* D8：可见性谓词失败即 network；本地原因从注册元数据判定。 */
+            const char *denied = NULL;
             if (reg->up && !reg->up(e->meta->id, reg->up_ud))
+                denied = AIRY_TOOL_DENIED_NETWORK;
+            else
+                denied = meta_local_denied(e->meta);
+            if (denied && !include_denied)
                 continue;
-            cJSON *obj = cJSON_CreateObject();
-            cJSON_AddStringToObject(obj, "id", e->meta->id);
-            cJSON_AddStringToObject(obj, "name", e->meta->name);
-            cJSON_AddStringToObject(obj, "description",
-                                    e->meta->description ? e->meta->description : "");
-            /* executable 交给 agent 侧区分内置与动态脚本工具（动态者需要在
-             * 会话工具清单中追加，builtin: 前缀者已由 SSoT 目录覆盖）。 */
-            cJSON_AddStringToObject(obj, "executable",
-                                    e->meta->executable ? e->meta->executable : "");
-            cJSON_AddNumberToObject(obj, "cacheable", e->meta->cacheable);
-            /* M1-1a 工具目录 SSoT：list_tools 输出每个工具的 input_schema
-             * （OpenAI tools parameters 格式，从 tool_param_t 构造），
-             * 使 tool_d 成为工具目录唯一权威，gateway MCP 注册从本 RPC 拉取。 */
-            cJSON *schema = cJSON_CreateObject();
-            if (schema) {
-                cJSON_AddStringToObject(schema, "type", "object");
-                cJSON *props = cJSON_CreateObject();
-                cJSON *required = cJSON_CreateArray();
-                for (size_t p = 0; p < e->meta->param_count; p++) {
-                    cJSON *ps = cJSON_Parse(e->meta->params[p].schema);
-                    if (ps)
-                        cJSON_AddItemToObject(props, e->meta->params[p].name, ps);
-                    if (e->meta->params[p].required)
-                        cJSON_AddItemToArray(required,
-                                             cJSON_CreateString(e->meta->params[p].name));
-                }
-                cJSON_AddItemToObject(schema, "properties", props);
-                if (cJSON_GetArraySize(required) > 0)
-                    cJSON_AddItemToObject(schema, "required", required);
-                else
-                    cJSON_Delete(required);
-                cJSON_AddItemToObject(obj, "input_schema", schema);
-            }
-            if (has_contract)
-                tool_contract_put(obj, e->meta->id, &cenv);
-            cJSON_AddItemToArray(arr, obj);
+            meta_put_json(arr, e->meta, denied, has_contract, &cenv);
         }
     }
     char *json = cJSON_PrintUnformatted(arr);
