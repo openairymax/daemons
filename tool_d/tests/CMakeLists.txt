@@ -65,6 +65,8 @@ set(TOOL_TEST_SOURCES
     test_envcheck.c
     # C-27: 第三方二进制兼容归因（ELF 与 LSM 标记/126-127/日志缺失）
     test_compat.c
+    # C-24: shell 执行语义（set -e + pipefail / 退出码透传 / shell_strict 回退）
+    test_shell_strict.c
     # R1-a: 执行面隔离池（并发互不影响 / CANCELED / 背压 BUSY）
     test_executor_pool.c
     test_validator.c
