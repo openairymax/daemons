@@ -245,6 +245,48 @@ static void test_resume_token(void)
     AIRY_FREE(prompt);
 }
 
+/* C-14：令牌必须能原样反解并重建紧凑上下文——步骤摘要与待续目标都在，
+ * 但成品显著小于「原始诉求 + 全量历史」的重放，坏令牌则整体作废。 */
+static void test_resume_roundtrip(void)
+{
+    char *prompt = AIRY_STRDUP("deploy the staging cluster");
+    CHECK(prompt != NULL, "roundtrip: prompt alloc");
+    if (!prompt)
+        return;
+    agent_run_loop_args_t args = {.prompt = prompt};
+    agent_run_loop_result_t out = {0};
+    run_ctx_t r = {.args = &args, .out = &out, .sess = "sess_rt"};
+    r.trace = cJSON_CreateArray();
+    cJSON *it = cJSON_CreateObject();
+    cJSON_AddStringToObject(it, "tool", "shell_run");
+    cJSON_AddStringToObject(it, "result", "connection timed out");
+    cJSON_AddNumberToObject(it, "ok", 0);
+    cJSON_AddItemToArray(r.trace, it);
+    r.text = AIRY_STRDUP("next: retry via the mirror endpoint");
+    out.rounds_limit = AGENT_RUN_ROUNDS_DEFAULT;
+    out.rounds_used = AGENT_RUN_ROUNDS_DEFAULT;
+
+    char *tok = run_resume_emit(&r);
+    CHECK(tok != NULL, "roundtrip: token emitted");
+    cJSON *p = run_resume_parse(tok ? tok : "");
+    CHECK(p != NULL, "roundtrip: token parsed as JSON");
+    char *ctx = p ? run_seed_render(p) : NULL;
+    CHECK(ctx && strstr(ctx, "shell_run") != NULL, "roundtrip: step summary kept");
+    CHECK(ctx && strstr(ctx, "connection timed out") != NULL, "roundtrip: step result kept");
+    CHECK(ctx && strstr(ctx, "next: retry via the mirror endpoint") != NULL,
+          "roundtrip: pending goal kept");
+    CHECK(ctx && strlen(ctx) < 2048, "roundtrip: compact context, not a full replay");
+    CHECK(run_resume_parse("not*base64!") == NULL, "roundtrip: corrupted token rejected");
+    CHECK(run_resume_parse("") == NULL, "roundtrip: empty token rejected");
+
+    AIRY_FREE(ctx);
+    cJSON_Delete(p);
+    AIRY_FREE(tok);
+    cJSON_Delete(r.trace);
+    AIRY_FREE(r.text);
+    AIRY_FREE(prompt);
+}
+
 /* C-23：链事件定长字段（160 字节）截断必须停在完整 UTF-8 字符上。 */
 static void test_fit_boundary(void)
 {
@@ -293,6 +335,7 @@ int main(void)
     test_run_state();
     test_switch_gate();
     test_resume_token();
+    test_resume_roundtrip();
     test_fit_boundary();
     test_evt_line();
     if (g_fail)

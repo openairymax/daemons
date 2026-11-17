@@ -320,6 +320,102 @@ static void run_preamble(cJSON *msgs)
     cJSON_InsertItemInArray(msgs, 0, sys);
 }
 
+/* base64url 反解：接受无填充（与 emit 一致）也接受尾部 '='；非法字符、
+ * 超容或空输入一律失败，坏令牌不得被当成有效断点。 */
+static int run_unb64url(const char *src, char *dst, size_t cap)
+{
+    static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    unsigned acc = 0;
+    int bits = 0;
+    size_t o = 0;
+    for (const char *p = src; p && *p && *p != '='; p++) {
+        const char *pos = strchr(tbl, *p);
+        if (!pos || o + 1 >= cap)
+            return -1;
+        acc = (acc << 6) | (unsigned)(pos - tbl);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            dst[o++] = (char)((acc >> bits) & 0xFF);
+        }
+    }
+    dst[o] = '\0';
+    return (int)o;
+}
+
+/* 令牌解析：解 base64url 后按 JSON 对象读取，任何一步不合法即整体作废。 */
+static cJSON *run_resume_parse(const char *tok)
+{
+    if (!tok || !tok[0])
+        return NULL;
+    size_t cap = strlen(tok) / 4 * 3 + 4;
+    char *raw = (char *)AIRY_MALLOC(cap);
+    if (!raw)
+        return NULL;
+    int n = run_unb64url(tok, raw, cap);
+    cJSON *p = n > 0 ? cJSON_Parse(raw) : NULL;
+    AIRY_FREE(raw);
+    if (!p || !cJSON_IsObject(p)) {
+        cJSON_Delete(p);
+        return NULL;
+    }
+    return p;
+}
+
+/* 续跑上下文渲染：把令牌还原成一条紧凑 user 消息——原始诉求、已完成步骤
+ * 摘要、待续目标。只给「做到哪、还差什么」，不复制历史消息与工具全文，
+ * 这是二次续跑 token 显著低于首次全量的机制保证。 */
+static char *run_seed_render(const cJSON *p)
+{
+    const char *prompt = cJSON_GetStringValue(cJSON_GetObjectItem(p, "prompt"));
+    const char *pending = cJSON_GetStringValue(cJSON_GetObjectItem(p, "pending"));
+    const cJSON *steps = cJSON_GetObjectItem(p, "steps");
+    int n = cJSON_IsArray(steps) ? cJSON_GetArraySize(steps) : 0;
+    size_t cap = 512 + (prompt ? strlen(prompt) : 0) + (pending ? strlen(pending) : 0) +
+                 (size_t)n * 256;
+    char *buf = (char *)AIRY_MALLOC(cap);
+    if (!buf)
+        return NULL;
+
+    size_t o = 0;
+    int w = snprintf(buf, cap, "【续跑】原始诉求：%s\n已完成步骤（不要重复执行已成功步骤）：\n",
+                     prompt ? prompt : "");
+    o = (w > 0 && (size_t)w < cap) ? (size_t)w : 0;
+    for (int i = 0; i < n && o + 1 < cap; i++) {
+        const cJSON *s = cJSON_GetArrayItem(steps, i);
+        const char *tool = cJSON_GetStringValue(cJSON_GetObjectItem(s, "tool"));
+        const char *brief = cJSON_GetStringValue(cJSON_GetObjectItem(s, "brief"));
+        const char *why = cJSON_GetStringValue(cJSON_GetObjectItem(s, "why"));
+        const cJSON *ok = cJSON_GetObjectItem(s, "ok");
+        w = snprintf(buf + o, cap - o, "- %s [%s] %s%s%s\n", tool ? tool : "?",
+                     (cJSON_IsNumber(ok) && ok->valueint) ? "ok" : "failed", brief ? brief : "",
+                     why ? " / 换路: " : "", why ? why : "");
+        if (w < 0)
+            break;
+        o += (size_t)w < cap - o ? (size_t)w : cap - o - 1;
+    }
+    snprintf(buf + o, cap - o,
+             "待续目标：%s\n请从上述进度继续；若同一调用再次失败，必须换参数、换工具或询问用户。",
+             pending ? pending : "");
+    return buf;
+}
+
+/* 首条 user 内容：令牌可用则以续跑摘要替代原始诉求；令牌损坏时退化为按原始
+ * 诉求重新开始（失去断点但不阻断对话），并留下告警供排查。 */
+static char *run_seed_content(run_ctx_t *r)
+{
+    const char *tok = r->args->resume_token;
+    if (tok && tok[0]) {
+        cJSON *p = run_resume_parse(tok);
+        char *c = p ? run_seed_render(p) : NULL;
+        cJSON_Delete(p);
+        if (c)
+            return c;
+        SVC_LOG_WARN("agent.run: resume_token unusable, falling back to prompt");
+    }
+    return AIRY_STRDUP(r->args->prompt ? r->args->prompt : "");
+}
+
 /* 初始消息集与台账入口锚点：history 非空则整体复制，否则以 prompt 构造
  * 首条 user 消息。入口记账取首条真实 user 消息——注入的 system 前置不算
  * 入口，否则被保护的是提示词样板而非用户诉求。 */
@@ -329,13 +425,19 @@ static int run_seed(run_ctx_t *r)
     if (h && cJSON_IsArray(h) && cJSON_GetArraySize(h) > 0)
         r->messages = cJSON_Duplicate(h, 1);
     if (!r->messages) {
+        char *content = run_seed_content(r);
         r->messages = cJSON_CreateArray();
         cJSON *m0 = r->messages ? cJSON_CreateObject() : NULL;
-        if (!m0)
+        if (!m0 || !content) {
+            AIRY_FREE(content);
+            cJSON_Delete(r->messages);
+            r->messages = NULL;
             return -1;
+        }
         cJSON_AddItemToArray(r->messages, m0);
         cJSON_AddStringToObject(m0, "role", "user");
-        cJSON_AddStringToObject(m0, "content", r->args->prompt);
+        cJSON_AddStringToObject(m0, "content", content);
+        AIRY_FREE(content);
     }
     run_preamble(r->messages);
     cJSON *m = NULL;
