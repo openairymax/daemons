@@ -190,3 +190,12 @@ cJSON *agent_task_build_needs_intent(const agent_run_task_meta_t *meta,
     }
     return out;
 }
+
+bool agent_task_gate_allows(const char *mode, bool gccp_confirmed)
+{
+    /* 唯一门禁条件：未确认的 task 不放行；chat 与已确认任务一律放行。
+     * 关闭时调用方必须在引擎之前返回 needs_intent（gate:lab）。 */
+    if (!mode || strcmp(mode, AGENT_TASK_MODE_TASK) != 0)
+        return true;
+    return gccp_confirmed;
+}
