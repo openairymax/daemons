@@ -164,6 +164,31 @@ static void test_run_state(void)
     CHECK(AGENT_RUN_RC_EMPTY == 6, "rc: empty code is 6");
 }
 
+/* C-14：同工具同参数连败达到阈值即强制换路——闸门必须在第二次相同失败后
+ * 关闭，换参数/换工具则重新开口；任一成功清零，避免误伤后续重试。 */
+static void test_switch_gate(void)
+{
+    const uint64_t sig = run_call_sig("shell_run", "{\"cmd\":\"curl a.example\"}");
+    CHECK(sig == run_call_sig("shell_run", "{\"cmd\":\"curl a.example\"}"), "sig: stable");
+    CHECK(sig != run_call_sig("shell_run", "{\"cmd\":\"curl b.example\"}"), "sig: args differ");
+    CHECK(sig != run_call_sig("fs_read", "{\"cmd\":\"curl a.example\"}"), "sig: tool differ");
+
+    uint64_t last = 0;
+    int repeat = 0;
+    CHECK(run_repeat_bump(&last, &repeat, sig, -1) == 1, "repeat: first failure");
+    CHECK(!run_repeat_blocked(last, repeat, sig), "gate: open after 1 failure");
+    CHECK(run_repeat_bump(&last, &repeat, sig, -1) == 2, "repeat: identical failure twice");
+    CHECK(run_repeat_blocked(last, repeat, sig), "gate: closed after 2 failures");
+
+    const uint64_t other = run_call_sig("fs_read", "{}");
+    CHECK(!run_repeat_blocked(last, repeat, other), "gate: other call still open");
+    CHECK(run_repeat_bump(&last, &repeat, other, -1) == 1, "repeat: other call resets count");
+    CHECK(!run_repeat_blocked(last, repeat, sig), "gate: old signature no longer armed");
+
+    CHECK(run_repeat_bump(&last, &repeat, other, 0) == 0, "repeat: success clears");
+    CHECK(!run_repeat_blocked(last, repeat, other), "gate: success reopens");
+}
+
 /* C-23：链事件定长字段（160 字节）截断必须停在完整 UTF-8 字符上。 */
 static void test_fit_boundary(void)
 {
@@ -210,6 +235,7 @@ int main(void)
     test_stream_result_free();
     test_orch_contract();
     test_run_state();
+    test_switch_gate();
     test_fit_boundary();
     test_evt_line();
     if (g_fail)

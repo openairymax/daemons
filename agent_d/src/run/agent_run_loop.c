@@ -233,6 +233,44 @@ static int run_fail_streak_bump(int *streak, int tool_rc)
     return *streak >= AGENT_RUN_TOOL_FAIL_LIMIT;
 }
 
+/* 调用签名：工具名与原始参数做 FNV-1a 64 位散列。整串比较需要无界缓冲，
+ * 截断比较又会把长参数的不同调用误判成同一调用，故只存散列。 */
+static uint64_t run_call_sig(const char *name, const char *args)
+{
+    uint64_t h = 1469598103934665603ULL;
+    for (const char *p = name; p && *p; p++)
+        h = (h ^ (unsigned char)*p) * 1099511628211ULL;
+    h = (h ^ '|') * 1099511628211ULL;
+    for (const char *p = args; p && *p; p++)
+        h = (h ^ (unsigned char)*p) * 1099511628211ULL;
+    return h;
+}
+
+/* 同调用连败计数（C-14）：失败且与上次同一签名则累加，否则重置为 1；
+ * 任一成功清零。返回累计次数，供换路阈值与 trace 标注使用。 */
+static int run_repeat_bump(uint64_t *last, int *repeat, uint64_t sig, int tool_rc)
+{
+    if (tool_rc == 0) {
+        *last = 0;
+        *repeat = 0;
+        return 0;
+    }
+    if (*repeat > 0 && *last == sig) {
+        (*repeat)++;
+    } else {
+        *last = sig;
+        *repeat = 1;
+    }
+    return *repeat;
+}
+
+/* 换路闸门（C-14）：同一调用已连续失败达到阈值时，拒绝再次以相同参数执行，
+ * 把「换策略」从提示词建议升为机制约束。 */
+static int run_repeat_blocked(uint64_t last, int repeat, uint64_t sig)
+{
+    return repeat >= AGENT_RUN_TOOL_SWITCH_REPEAT && sig == last;
+}
+
 typedef struct {
     const agent_run_loop_args_t *args;
     agent_run_loop_result_t *out;
@@ -248,6 +286,8 @@ typedef struct {
     int streak;
     int fused;
     char fuse[256];
+    uint64_t fail_sig; /* 上一次失败调用的签名（同调用换路判定） */
+    int fail_repeat;   /* 同一签名的连败次数 */
     cJSON *dyn_tools; /* 会话内自制工具的 OpenAI tools 条目（tool_create 产物） */
 } run_ctx_t;
 
@@ -560,18 +600,50 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
     }
     run_ev_send(r, AIRY_RS_TYPE_TOOL_START, ev);
 
-    char *res = NULL;
-    uint64_t t0 = airy_time_ms();
-    int erc = run_execute_tool(tname, targs, &res);
-    r->out->tool_ms += airy_time_ms() - t0;
-    if (erc == 0 && strcmp(tname, "tool_create") == 0)
-        run_dyn_hook(r, targs);
+    const uint64_t sig = run_call_sig(tname, targs);
+    const int blocked = run_repeat_blocked(r->fail_sig, r->fail_repeat, sig);
+    char note[256];
+    const char *switch_reason = NULL;
 
-    /* C-1 连败计数：本次失败仍完整入账/推送后再判断熔断出口。 */
-    if (run_fail_streak_bump(&r->streak, erc)) {
+    char *res = NULL;
+    int erc;
+    if (blocked) {
+        /* 同一调用已连败两次：不再执行，换路要求直接作为工具结果回传，
+         * 模型下一轮必须换参数、换工具或询问用户，而不是原样重试。 */
+        erc = -1;
+        snprintf(note, sizeof(note),
+                 "Error: identical call to %s rejected after %d consecutive failures with the "
+                 "same arguments; change the arguments, switch tools, or ask the user before "
+                 "retrying.",
+                 tname, r->fail_repeat);
+        res = AIRY_STRDUP(note);
+        snprintf(note, sizeof(note),
+                 "identical call %s blocked after %d failures; strategy switch required", tname,
+                 r->fail_repeat);
+        switch_reason = note;
+    } else {
+        uint64_t t0 = airy_time_ms();
+        erc = run_execute_tool(tname, targs, &res);
+        r->out->tool_ms += airy_time_ms() - t0;
+        if (erc == 0 && strcmp(tname, "tool_create") == 0)
+            run_dyn_hook(r, targs);
+    }
+
+    /* C-1 连败计数：本次失败仍完整入账/推送后再判断熔断出口。被换路闸门
+     * 拒绝的调用尚未真正执行，不计入熔断，避免替模型把 run 直接判死。 */
+    if (!blocked && run_fail_streak_bump(&r->streak, erc)) {
         r->fused = 1;
         snprintf(r->fuse, sizeof(r->fuse), "%s: %s", tname, res ? res : "");
         r->fuse[utf8_prefix_len(r->fuse, strlen(r->fuse))] = '\0';
+    }
+    if (!blocked)
+        run_repeat_bump(&r->fail_sig, &r->fail_repeat, sig, erc);
+    if (!switch_reason && erc != 0 && r->fail_repeat == AGENT_RUN_TOOL_SWITCH_REPEAT) {
+        /* 第二次相同失败：本步即标注原因，复盘能看出下一步为何被拒。 */
+        snprintf(note, sizeof(note),
+                 "identical call %s failed %d times in a row; next identical call will be rejected",
+                 tname, r->fail_repeat);
+        switch_reason = note;
     }
 
     AIRY_STRNCPY_TERM(buf, res ? res : "", sizeof(buf));
@@ -603,6 +675,8 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
     cJSON_AddStringToObject(tr, "arguments", targs);
     cJSON_AddStringToObject(tr, "result", content ? content : "");
     cJSON_AddNumberToObject(tr, "ok", erc == 0 ? 1 : 0);
+    if (switch_reason)
+        cJSON_AddStringToObject(tr, "switch_reason", switch_reason);
     cJSON_AddItemToArray(r->trace, tr);
     AIRY_FREE(content);
     AIRY_FREE(res);
