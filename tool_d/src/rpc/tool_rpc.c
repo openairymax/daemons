@@ -221,7 +221,7 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
 
     /* Error layering: a JSON-RPC error envelope is reserved for protocol /
      * transport failures only. Tool business outcomes (including "tool ran
-     * and failed", i.e. res->success == 0, and request-level rejections such
+     * and failed", i.e. err_code != 0, and request-level rejections such
      * as a denied interactive approval) MUST travel as a result envelope so
      * the caller can surface the original error text and code instead of
      * misreporting the daemon as unreachable. */
@@ -235,19 +235,24 @@ static void handle_execute(cJSON *params, int id, airy_sock_t client_fd)
     }
 
     if (res) {
-        cJSON_AddNumberToObject(result, "success", res->success);
+        int ok = tool_result_ok(res);
+        /* 业务失败（err_code 非 0）没有外层 errno 承载时，用结果自身的
+         * err_code 提升为 error_code；此前一律填 0，调用方只能看到失败。 */
+        airy_err_t ecode = ok ? ret
+                              : (ret != AIRY_OK ? ret
+                                                : (res->err_code != 0 ? res->err_code
+                                                                      : AIRY_ERR_GENERIC_FAIL));
+        cJSON_AddNumberToObject(result, "success", ok ? 1 : 0);
         if (res->output)
             cJSON_AddStringToObject(result, "output", res->output);
         if (res->error)
             cJSON_AddStringToObject(result, "error", res->error);
         cJSON_AddNumberToObject(result, "exit_code", res->exit_code);
-        cJSON_AddNumberToObject(result, "error_code", ret);
-        if (ret != AIRY_OK || !res->success) {
-            /* 工具已执行但业务失败（success=0）无独立 errno，用通用业务码
-             * 承载，避免 class 回落到 OK。 */
-            airy_err_t ecode = (ret != AIRY_OK) ? ret : AIRY_ERR_GENERIC_FAIL;
+        cJSON_AddNumberToObject(result, "err_code", (double)res->err_code);
+        cJSON_AddNumberToObject(result, "error_code", (double)ecode);
+        if (!ok) {
             put_tool_err(result, ecode, res->error ? res->error : airy_err_str(ecode), tid);
-            SVC_LOG_ERROR("Tool execution failed: %s (error=%d)", tid, ret);
+            SVC_LOG_ERROR("Tool execution failed: %s (err_code=%d)", tid, (int)res->err_code);
         }
         tool_result_free(res);
     } else {

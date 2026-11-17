@@ -58,8 +58,12 @@ tool_result_t *tool_result_from_json(const char *json)
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
     cJSON *success = cJSON_GetObjectItem(root, "success");
-    if (cJSON_IsNumber(success))
-        res->success = success->valueint;
+    cJSON *err_code = cJSON_GetObjectItem(root, "err_code");
+    if (cJSON_IsNumber(err_code))
+        res->err_code = (airy_err_t)err_code->valueint;
+    else if (cJSON_IsNumber(success) && success->valueint == 0)
+        /* 旧条目只有 success：失败态必须带非 0 码，否则回填后仍被判成功。 */
+        res->err_code = AIRY_ERR_GENERIC_FAIL;
     cJSON *output = cJSON_GetObjectItem(root, "output");
     if (cJSON_IsString(output))
         res->output = memory_safe_strdup(output->valuestring);
@@ -76,7 +80,8 @@ tool_result_t *tool_result_from_json(const char *json)
 char *tool_result_to_json(const tool_result_t *res)
 {
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "success", res->success);
+    cJSON_AddNumberToObject(root, "success", tool_result_ok(res) ? 1 : 0);
+    cJSON_AddNumberToObject(root, "err_code", (double)res->err_code);
     if (res->output)
         cJSON_AddStringToObject(root, "output", res->output);
     if (res->error)

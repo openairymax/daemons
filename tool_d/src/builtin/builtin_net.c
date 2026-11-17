@@ -146,9 +146,9 @@ static int web_fetch_via_network(const builtin_url_t *u, tool_result_t *res)
     } else {
         res->output = AIRY_STRDUP("");
     }
-    res->success = (resp.status_code >= 200 && resp.status_code < 400) ? 1 : 0;
+    res->err_code = (resp.status_code >= 200 && resp.status_code < 400) ? AIRY_OK : AIRY_ERR_IO;
     res->exit_code = resp.status_code;
-    if (!res->success)
+    if (res->err_code != AIRY_OK)
         btool_fail(res, AIRY_ERR_IO, "HTTP error status %d", resp.status_code);
     network_http_response_free(&resp);
     return AIRY_OK;
@@ -220,17 +220,15 @@ int web_fetch_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
 
     if (http_status >= 400) {
         btool_fail(res, AIRY_ERR_IO, "HTTP error status %ld", http_status);
-        res->success = 0;
         res->exit_code = (int)http_status;
     } else if (http_status > 0) {
-        res->success = 1;
+        res->err_code = AIRY_OK;
         res->exit_code = 0;
     } else {
         btool_fail(res, AIRY_ERR_IO, "Web fetch failed (curl exit %d): %s", exit_code,
                    out ? out : "");
         AIRY_FREE(res->output);
         res->output = AIRY_STRDUP("");
-        res->success = 0;
         res->exit_code = exit_code;
     }
     return AIRY_OK;
