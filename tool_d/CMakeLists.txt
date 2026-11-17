@@ -75,6 +75,8 @@ set(TOOL_SERVICE_SOURCES
     src/rpc/daemon_tool_ops_bootstrap.c
     # 技能机制服务面：syscall airy_sys_skill_* 的 skill.* RPC 登记
     src/rpc/skill_rpc.c
+    # C-11 长任务作业句柄：内存状态机 / 后台执行 / 落盘恢复
+    src/job/tool_job.c
 )
 
 add_library(airy_tool_service STATIC ${TOOL_SERVICE_SOURCES})
