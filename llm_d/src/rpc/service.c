@@ -30,6 +30,8 @@
 #include <string.h>
 
 #include "config/pricing_api.h"
+#include "airy_prov/provider_rec.h"
+#include "airy_prov/prov_degrade.h"
 #include "airy_prov/prov_stat.h"
 #include "rpc/prov_internal.h"
 #include "rpc/service_boot.h"
@@ -126,11 +128,54 @@ int llm_svc_cfg_hup(llm_service_t *svc)
     return s ? svc_mw_reload(&s->mw) : -1;
 }
 
+/* 降级阶梯位阶表（B-4）：enumerate 持注册表锁，回调内不得再查注册表，
+ * 故先按 provider 快照算好位阶（GPU→CPU→远端），再在登记闭包里按名字
+ * 取用。provider 数量上限与熔断账目表一致，超出者按 NONE 处理。 */
+#define SVC_DEG_MAX 64
+
+typedef struct {
+    char name[64];
+    int rank;
+} deg_slot_t;
+
+typedef struct {
+    deg_slot_t slots[SVC_DEG_MAX];
+    size_t count;
+} deg_tbl_t;
+
+static int deg_snap_cb(const provider_t *prov, void *ud)
+{
+    deg_tbl_t *t = (deg_tbl_t *)ud;
+    if (!prov || !prov->name)
+        return 0;
+    if (t->count >= SVC_DEG_MAX) {
+        SVC_LOG_WARN("C-L02: SVC: degrade table full at %d, remaining providers rank NONE",
+                     SVC_DEG_MAX);
+        return 1;
+    }
+    deg_slot_t *slot = &t->slots[t->count++];
+    AIRY_STRNCPY_TERM(slot->name, prov->name, sizeof(slot->name));
+    slot->rank = (int)prov_deg_rank(prov);
+    return 0;
+}
+
+static int deg_rank_of(const deg_tbl_t *t, const char *name)
+{
+    if (!t || !name)
+        return (int)PROV_DEG_NONE;
+    for (size_t i = 0; i < t->count; ++i) {
+        if (strcmp(t->slots[i].name, name) == 0)
+            return t->slots[i].rank;
+    }
+    return (int)PROV_DEG_NONE;
+}
+
 /* 端点登记闭包：注册表遍历期持锁，回调只拷名字，不持有 provider 指针。 */
 typedef struct {
     const pricing_rule_t *rules;
     int rule_count;
     int registered;
+    const deg_tbl_t *deg;
 } router_reg_t;
 
 static int register_endpoint_cb(const char *provider_name, const char *model_name, void *user_data)
@@ -141,7 +186,9 @@ static int register_endpoint_cb(const char *provider_name, const char *model_nam
     snprintf(ep.provider_name, sizeof(ep.provider_name), "%s", provider_name);
     snprintf(ep.model_name, sizeof(ep.model_name), "%s", model_name);
     ep.enabled = true;
-    ep.priority = 0;
+    /* 位阶即优先级：GPU(0) > CPU(-1) > 远端(-2) > 未知(-3)。策略层未显式
+     * 指定顺序时的默认阶梯，配置显式优先级可在 router 侧覆盖。 */
+    ep.priority = -deg_rank_of(reg->deg, provider_name);
     ep.context_window = 8192;
     ep.avg_latency_ms = 1000;
     ep.capabilities = LLM_CAP_CHAT | LLM_CAP_COMPLETION | LLM_CAP_STREAMING;
@@ -162,7 +209,10 @@ void register_router_endpoints(llm_service_t *svc)
     struct llm_service *s = (struct llm_service *)svc;
     if (!s)
         return;
-    router_reg_t reg = {(const pricing_rule_t *)s->rules, (int)s->rule_count, 0};
+    deg_tbl_t deg;
+    __builtin_memset(&deg, 0, sizeof(deg));
+    provider_reg_walk(s->registry, deg_snap_cb, &deg);
+    router_reg_t reg = {(const pricing_rule_t *)s->rules, (int)s->rule_count, 0, &deg};
     provider_registry_enumerate(s->registry, register_endpoint_cb, &reg);
     SVC_LOG_INFO("C-L02: SVC: registered %d endpoints into llm_router", reg.registered);
 }
