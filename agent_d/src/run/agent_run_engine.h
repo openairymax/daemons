@@ -51,6 +51,10 @@ extern "C" {
  * TOOL_FUSE（终局失败，原因随 response / error 事件通道回传）。 */
 #define AGENT_RUN_TOOL_FAIL_LIMIT 3
 #define AGENT_RUN_RC_TOOL_FUSE 2
+/* 同调用换路（C-14）：同一工具以完全相同参数连续失败达到该次数后，下一次
+ * 相同调用由机制层直接拒绝（不计入熔断），工具结果告知模型必须换参数、
+ * 换工具或询问用户；trace 以 switch_reason 标注换路原因。 */
+#define AGENT_RUN_TOOL_SWITCH_REPEAT 2
 /* S-2 收敛：编排分支（subagent spawn/invoke）失败同为终局失败，rc 取本值；
  * 具体原因（阶段 + 契约错误符号）随 response / error 事件通道回传。 */
 #define AGENT_RUN_RC_SUBAGENT_FAIL 3
