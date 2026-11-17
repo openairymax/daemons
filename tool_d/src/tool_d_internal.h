@@ -13,6 +13,7 @@
 #ifndef AIRY_RT_DAEMON_TOOL_D_INTERNAL_H
 #define AIRY_RT_DAEMON_TOOL_D_INTERNAL_H
 
+#include "job/tool_job.h"
 #include "tool_service.h"
 
 #ifdef __cplusplus
@@ -22,6 +23,10 @@ extern "C" {
 /* Daemon-wide tool service handle (owned/lifecycled in svc.c,
  * referenced by the JSON-RPC handlers). */
 extern tool_service_t *g_service;
+
+/* C-11 作业句柄存储（svc.c 创建/回收；tool_rpc.c 的 submit/poll/cancel
+ * 消费）。执行仍走 tool_service_execute，作业只负责排队与结果寄存。 */
+extern tooljob_t *g_jobs;
 
 /* 执行面 worker 数（svc.c 自 config daemon.max_workers 提取；0 = 未配置，
  * executor_pool 按内置默认起池。service.c 建 executor 时消费）。 */
