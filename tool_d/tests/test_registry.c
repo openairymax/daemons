@@ -18,6 +18,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 /**
  * @brief 测试注册表创建和销毁
@@ -435,13 +437,91 @@ static void test_registry_list_exec(void)
     meta.id = "exec_tool";
     meta.name = "exec_tool";
     meta.executable = "/tmp/airy_scripts/exec_tool";
+    /* C-16：可执行路径必须真实存在且可执行，否则目录按 missing_binary
+     * 拒绝下发（见 test_registry_catalog_denied）。 */
+    mkdir("/tmp/airy_scripts", 0755);
+    FILE *script = fopen(meta.executable, "w");
+    assert(script != NULL);
+    fputs("#!/bin/sh\nexit 0\n", script);
+    fclose(script);
+    assert(chmod(meta.executable, 0755) == 0);
     assert(tool_registry_add(reg, &meta) == 0);
 
     char *json = tool_registry_list_json(reg);
     assert(json != NULL);
     assert(strstr(json, "\"executable\":\"/tmp/airy_scripts/exec_tool\"") != NULL);
+    /* C-16：可见条目必须显式声明可用，且无拒绝原因。 */
+    assert(strstr(json, "\"available\":true") != NULL);
+    assert(strstr(json, "\"denied_reason\":\"\"") != NULL);
 
     free(json);
+    unlink(meta.executable);
+    tool_registry_destroy(reg);
+    printf("    PASSED\n");
+}
+
+/**
+ * @brief C-16：目录协商——三类不可用必须带原因，且默认不进可见集。
+ *        policy 由 cupolas ACL 层生产，本层无生产者，故此处只覆盖
+ *        network / missing_handler / missing_binary 三条可达路径。
+ */
+static int deny_net(const char *tool_id, void *ud)
+{
+    (void)ud;
+    if (strcmp(tool_id, "net_tool") == 0)
+        return 0;
+    return 1;
+}
+
+static void test_registry_catalog_denied(void)
+{
+    printf("  test_registry_catalog_denied...\n");
+
+    tool_registry_t *reg = tool_registry_create(NULL);
+    assert(reg != NULL);
+
+    tool_metadata_t net;
+    AIRY_MEMSET(&net, 0, sizeof(net));
+    net.id = "net_tool";
+    net.name = "net_tool";
+    net.executable = "builtin:fs_read";
+    assert(tool_registry_add(reg, &net) == 0);
+
+    tool_metadata_t noh;
+    AIRY_MEMSET(&noh, 0, sizeof(noh));
+    noh.id = "builtin_missing";
+    noh.name = "builtin_missing";
+    noh.executable = "builtin:no_such_builtin";
+    assert(tool_registry_add(reg, &noh) == 0);
+
+    tool_metadata_t nobin;
+    AIRY_MEMSET(&nobin, 0, sizeof(nobin));
+    nobin.id = "binary_missing";
+    nobin.name = "binary_missing";
+    nobin.executable = "/nonexistent/airy/unit_test_binary";
+    assert(tool_registry_add(reg, &nobin) == 0);
+
+    /* 注入可用性谓词：net_tool 判为依赖不可达（network）。 */
+    tool_registry_filter(reg, deny_net, NULL);
+
+    /* 可见集：三者都被过滤。 */
+    char *visible = tool_registry_catalog_json(reg, 0);
+    assert(visible != NULL);
+    assert(strstr(visible, "\"id\":\"net_tool\"") == NULL);
+    assert(strstr(visible, "\"id\":\"builtin_missing\"") == NULL);
+    assert(strstr(visible, "\"id\":\"binary_missing\"") == NULL);
+    free(visible);
+
+    /* 全量目录：三条原因逐条可读。 */
+    char *all = tool_registry_catalog_json(reg, 1);
+    assert(all != NULL);
+    assert(strstr(all, "\"id\":\"net_tool\"") != NULL);
+    assert(strstr(all, "\"denied_reason\":\"network\"") != NULL);
+    assert(strstr(all, "\"denied_reason\":\"missing_handler\"") != NULL);
+    assert(strstr(all, "\"denied_reason\":\"missing_binary\"") != NULL);
+    assert(strstr(all, "\"available\":false") != NULL);
+    free(all);
+
     tool_registry_destroy(reg);
     printf("    PASSED\n");
 }
@@ -464,6 +544,7 @@ int main(void)
     test_builtin_catalog_matches_contract();
     test_registry_replace();
     test_registry_list_exec();
+    test_registry_catalog_denied();
 
     printf("\n✅ All tool registry tests PASSED\n");
     return 0;
