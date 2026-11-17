@@ -190,8 +190,12 @@ void prov_brk_ok(const char *provider)
     brk_rec_t *rec = brk_rec(provider);
     if (rec) {
         rec->st.oks++;
-        cb_record_success(rec->cb, 0);
-        brk_sync(rec);
+        /* fail_max=0 是闸门关闭，不是"阈值 0 的闸"：不喂状态机，避免
+         * 记账把已关闭的闸推到 open 而污染 opens 读数。 */
+        if (g_brk.cfg.fail_max > 0) {
+            cb_record_success(rec->cb, 0);
+            brk_sync(rec);
+        }
     }
     airy_mtx_unlock(&g_brk.lock);
 }
@@ -221,8 +225,10 @@ void prov_brk_fail(const char *provider, int err)
             rec->st.slow_tmo++;
         else
             rec->st.fails++;
-        cb_record_failure(rec->cb, err);
-        brk_sync(rec);
+        if (g_brk.cfg.fail_max > 0) {
+            cb_record_failure(rec->cb, err);
+            brk_sync(rec);
+        }
     }
     airy_mtx_unlock(&g_brk.lock);
 }
@@ -239,9 +245,11 @@ void prov_brk_tmo(const char *provider, prov_tmo_t kind)
             rec->st.budget_tmo++;
         } else {
             rec->st.slow_tmo++;
-            cb_record_timeout(rec->cb);
+            if (g_brk.cfg.fail_max > 0)
+                cb_record_timeout(rec->cb);
         }
-        brk_sync(rec);
+        if (g_brk.cfg.fail_max > 0)
+            brk_sync(rec);
     }
     airy_mtx_unlock(&g_brk.lock);
 }

@@ -55,6 +55,8 @@ set(LLM_TEST_SOURCES
     test_provider_caps.c
     # 0.1.21 B-2：后端就绪判定与未配置快速失败（-418，5s 预算内）
     test_backend_ready.c
+    # 0.1.21 B-4 / C-3：provider 层熔断（第 N+1 次必断、口径分离、半开）
+    test_prov_breaker.c
     # 0.1.20 Gate 37：计费热路径两臂证据（单请求 fsync 计数 + 对照臂 p99）
     bench_cost_hotpath.c
 )
