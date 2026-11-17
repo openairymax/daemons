@@ -214,6 +214,21 @@ static int stream_finish(const provider_adapter_t *ops, const provider_base_ctx_
     return AIRY_OK;
 }
 
+/* B-2：后端未配置时不得出网。判定读装配期结果（provider_base_ctx_t），
+ * 在任何请求体装配与网络 I/O 之前返回可判读错误码；时延为本地分支，
+ * 满足 PROVIDER_BACKEND_FAILFAST_MS 的上界。 */
+static int backend_gate(const provider_base_ctx_t *base, const provider_adapter_t *ops,
+                        const char *phase, const llm_request_config_t *cfg)
+{
+    if (!base || base->backend_ready)
+        return AIRY_OK;
+
+    SVC_LOG_ERROR("C-L02: %s: %s-FAIL model=%s ret=%d reason=BACKEND_UNCONFIGURED %s",
+                  ops->tag, phase, req_model(ops, cfg), AIRY_ERR_LLM_BACKEND_UNCONFIGURED,
+                  base->backend_reason);
+    return AIRY_ERR_LLM_BACKEND_UNCONFIGURED;
+}
+
 int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
                              const llm_request_config_t *manager, llm_response_t **out_response)
 {
@@ -221,6 +236,9 @@ int provider_driver_complete(provider_ctx_t *ctx, const provider_adapter_t *ops,
         return AIRY_ERR_INVALID_PARAM;
 
     provider_base_ctx_t *base = provider_base_ctx(ctx);
+    int gate = backend_gate(base, ops, "COMPLETE", manager);
+    if (gate != AIRY_OK)
+        return gate;
     provider_refresh_api_key(base);
 
     /* C11：能力位由 base 盖印进请求快照（driver 是唯一盖印点，
@@ -277,6 +295,9 @@ int provider_driver_complete_stream(provider_ctx_t *ctx, const provider_adapter_
         return AIRY_ERR_INVALID_PARAM;
 
     provider_base_ctx_t *base = provider_base_ctx(ctx);
+    int gate = backend_gate(base, ops, "STREAM", manager);
+    if (gate != AIRY_OK)
+        return gate;
     provider_refresh_api_key(base);
 
     llm_request_config_t stream_cfg = *manager;
