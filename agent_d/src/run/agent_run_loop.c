@@ -51,30 +51,28 @@ int agent_run_rounds_resolve(int requested)
     return n;
 }
 
-/* 构建 llm_d complete_stream 请求（透传 tools 数组与常规生成参数）。
+/* 构建 llm_d complete_stream 请求（透传本轮工具目录与常规生成参数）。
  * 不在此处写 max_tokens：输出上限的权威在配置面（model.yaml max_output），
  * 由 llm_d 的生成参数解析统一裁决；调用方写死一个数值会让该配置永久失效。
- * dyn 为会话内自制工具的追加条目（tool_create 产物），与静态 SSoT 目录
- * 拼接后一并下发给模型，使新工具在下一轮即可被调用。 */
-static char *run_build_llm_params(const char *model, const cJSON *messages, const cJSON *dyn)
+ * tools_src 是 run_catalog_load 产出的本轮目录快照（OpenAI tools 条目）。
+ * has_snapshot 区分「快照为空」与「从未取到快照」：前者如实下发无工具，
+ * 后者才回落静态 SSoT bootstrap（事件标 catalog_source=static）。 */
+static char *run_build_llm_params(const char *model, const cJSON *messages, const cJSON *tools_src,
+                                  int has_snapshot)
 {
     cJSON *params = cJSON_CreateObject();
     if (!params)
         return NULL;
     cJSON_AddStringToObject(params, "model", model);
     cJSON_AddItemToObject(params, "messages", cJSON_Duplicate(messages, 1));
-    cJSON *tools = cJSON_Parse(AIRY_TOOLS_JSON_SOURCE);
-    if (tools && dyn && cJSON_GetArraySize(dyn) > 0) {
-        const cJSON *item = NULL;
-        cJSON_ArrayForEach(item, dyn)
-        {
-            cJSON *copy = cJSON_Duplicate(item, 1);
-            if (copy)
-                cJSON_AddItemToArray(tools, copy);
-        }
-    }
-    if (tools)
+    cJSON *tools = has_snapshot ? cJSON_Duplicate(tools_src, 1)
+                                : cJSON_Parse(AIRY_TOOLS_JSON_SOURCE);
+    /* 空目录不带 tools 键：部分 provider 拒收空数组，且「没有可用工具」
+     * 与「没给工具定义」在模型侧等价。 */
+    if (tools && cJSON_GetArraySize(tools) > 0)
         cJSON_AddItemToObject(params, "tools", tools);
+    else
+        cJSON_Delete(tools);
     cJSON_AddNumberToObject(params, "temperature", 0.7);
     char *params_str = cJSON_PrintUnformatted(params);
     cJSON_Delete(params);
@@ -143,10 +141,15 @@ static char *run_fail_text(int rc)
     return AIRY_STRDUP(buf);
 }
 
-/* 单个工具执行：tool_d.execute_tool（结果文本化，失败转 Error: 前缀）。 */
-static int run_execute_tool(const char *name, const char *args_json, char **out_text)
+/* 单个工具执行：tool_d.execute_tool（结果文本化，失败转 Error: 前缀）。
+ * out_code 只回填工具服务自报的错误码（成功/未报则为 0）：C-16 用它识别
+ * EPERM/EACCES（策略拒绝）与 ENOTSUP（无处理器），据此撤销目录条目；
+ * 传输层失败不填码，避免把「服务不可达」误判成策略拒绝。 */
+static int run_execute_tool(const char *name, const char *args_json, char **out_text,
+                            int *out_code)
 {
     *out_text = NULL;
+    *out_code = 0;
     cJSON *params = cJSON_CreateObject();
     if (!params)
         return -1;
@@ -212,6 +215,7 @@ static int run_execute_tool(const char *name, const char *args_json, char **out_
                 code = (int)ec;
             }
             char buf[1024];
+            *out_code = code;
             if (code != 0)
                 snprintf(buf, sizeof(buf), "Error: %s (code: %d)", e, code);
             else
@@ -288,7 +292,14 @@ typedef struct {
     char fuse[256];
     uint64_t fail_sig; /* 上一次失败调用的签名（同调用换路判定） */
     int fail_repeat;   /* 同一签名的连败次数 */
-    cJSON *dyn_tools; /* 会话内自制工具的 OpenAI tools 条目（tool_create 产物） */
+    /* C-16 工具目录协商：catalog 是本轮下发给模型的条目（live 快照或
+     * 静态 bootstrap），cat_denied 是本轮不可用/会话内已证不可用的工具及
+     * 原因（跨轮累积，撤销后不再回到可见集）。cat_hash 记录已发射目录的
+     * 指纹，目录不变则不重复推送 catalog 事件。 */
+    cJSON *catalog;
+    cJSON *cat_denied;
+    const char *cat_src;
+    uint64_t cat_hash;
 } run_ctx_t;
 
 /* 首条 system：工具路径锚点契约（缺陷 #4）声明 fs_* 与 shell_run 的相对
@@ -474,7 +485,8 @@ static void run_ev_send(run_ctx_t *r, const char *type, cJSON *ev)
 static int run_llm_round(run_ctx_t *r, cJSON **tool_calls)
 {
     *tool_calls = NULL;
-    char *params = run_build_llm_params(r->args->model, r->messages, r->dyn_tools);
+    char *params = run_build_llm_params(r->args->model, r->messages, r->catalog,
+                                        r->cat_src != NULL);
     if (!params)
         return -1;
 
@@ -529,36 +541,48 @@ static int run_llm_round(run_ctx_t *r, cJSON **tool_calls)
     return 1;
 }
 
-/* 会话内自制工具目录维护：list_tools 中 executable 非 "builtin:" 前缀者即
- * 动态脚本工具（tool_create 产物），转成 OpenAI tools 条目随请求下发。 */
-static int run_dyn_has(const cJSON *dyn, const char *name)
+/* ---- C-16 工具目录协商 ----
+ * 目录唯一来源是 tool_d 的 list_tools（含 available / denied_reason）：本
+ * 模块每轮采样一次（≤1 次），同一份快照既用于下发 LLM，也用于派发校验，
+ * 消除「下发一份、执行用另一份」。会话内被证明不可用（策略拒绝 / 无处理器）
+ * 的工具进 cat_denied 并跨轮累积，重新采样时不再回到可见集。 */
+
+static int run_cat_has(const cJSON *tools, const char *name)
 {
     const cJSON *it = NULL;
-    if (!dyn)
+    if (!tools || !name || !name[0])
         return 0;
-    cJSON_ArrayForEach(it, dyn)
+    cJSON_ArrayForEach(it, tools)
     {
-        cJSON *fn = cJSON_GetObjectItem(it, "function");
-        cJSON *n = cJSON_GetObjectItem(fn, "name");
-        if (cJSON_IsString(n) && strcmp(n->valuestring, name) == 0)
+        const char *n =
+            cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(it, "function"), "name"));
+        if (n && strcmp(n, name) == 0)
             return 1;
     }
     return 0;
 }
 
-static void run_dyn_put(cJSON *dyn, const char *name, const char *desc, const cJSON *schema)
+/* 同名条目全部移除：重定义（tool_create 后重新采样）与撤销共用此出口。 */
+static void run_cat_drop(cJSON *tools, const char *name)
 {
-    if (!dyn || !name || !name[0])
+    if (!tools || !name || !name[0])
         return;
-    /* 重定义（同名 tool_create）以新条目覆盖，避免模型看到两份同名 schema。 */
-    if (run_dyn_has(dyn, name)) {
-        for (int i = cJSON_GetArraySize(dyn) - 1; i >= 0; --i) {
-            cJSON *it = cJSON_GetArrayItem(dyn, i);
-            cJSON *n = cJSON_GetObjectItem(cJSON_GetObjectItem(it, "function"), "name");
-            if (cJSON_IsString(n) && strcmp(n->valuestring, name) == 0)
-                cJSON_DeleteItemFromArray(dyn, i);
-        }
+    for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; --i) {
+        const char *n = cJSON_GetStringValue(
+            cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetArrayItem(tools, i), "function"),
+                                "name"));
+        if (n && strcmp(n, name) == 0)
+            cJSON_DeleteItemFromArray(tools, i);
     }
+}
+
+/* 追加一条 OpenAI tools 条目；schema 缺失时补合法空对象，避免模型侧
+ * 因单个条目不合法而拒收整套工具。 */
+static void run_cat_add(cJSON *tools, const char *name, const char *desc, const cJSON *schema)
+{
+    if (!tools || !name || !name[0])
+        return;
+    run_cat_drop(tools, name);
     cJSON *entry = cJSON_CreateObject();
     cJSON *fn = cJSON_CreateObject();
     if (!entry || !fn) {
@@ -580,95 +604,212 @@ static void run_dyn_put(cJSON *dyn, const char *name, const char *desc, const cJ
     }
     cJSON_AddItemToObject(fn, "parameters", params);
     cJSON_AddItemToObject(entry, "function", fn);
-    cJSON_AddItemToArray(dyn, entry);
+    cJSON_AddItemToArray(tools, entry);
 }
 
-static void run_load_dyn(run_ctx_t *r)
+static int run_cat_denied_has(const cJSON *denied, const char *name)
 {
-    if (!r->dyn_tools)
+    const cJSON *it = NULL;
+    if (!denied || !name || !name[0])
+        return 0;
+    cJSON_ArrayForEach(it, denied)
+    {
+        const char *n = cJSON_GetStringValue(cJSON_GetObjectItem(it, AIRY_RS_K_TOOL));
+        if (n && strcmp(n, name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static const char *run_cat_denied_reason(const cJSON *denied, const char *name)
+{
+    const cJSON *it = NULL;
+    if (!denied || !name)
+        return NULL;
+    cJSON_ArrayForEach(it, denied)
+    {
+        const char *n = cJSON_GetStringValue(cJSON_GetObjectItem(it, AIRY_RS_K_TOOL));
+        if (n && strcmp(n, name) == 0)
+            return cJSON_GetStringValue(cJSON_GetObjectItem(it, AIRY_RS_K_DENIED_REASON));
+    }
+    return NULL;
+}
+
+/* 记录不可用原因：同一工具在会话内保留首个原因，不因后续调用改写。 */
+static void run_cat_deny(cJSON *denied, const char *name, const char *reason)
+{
+    if (!denied || !name || !name[0] || run_cat_denied_has(denied, name))
+        return;
+    cJSON *e = cJSON_CreateObject();
+    if (!e)
+        return;
+    cJSON_AddStringToObject(e, AIRY_RS_K_TOOL, name);
+    cJSON_AddStringToObject(e, AIRY_RS_K_DENIED_REASON,
+                            reason && reason[0] ? reason : AIRY_TOOL_DENIED_POLICY);
+    cJSON_AddItemToArray(denied, e);
+}
+
+/* 目录快照事件：tools 是本轮真正下发给模型的工具名，available 是可用条数，
+ * denied 逐条带原因。catalog_source 区分实时目录与静态 bootstrap。 */
+static void run_cat_emit(run_ctx_t *r)
+{
+    if (!r->catalog || !r->cat_src)
+        return;
+    cJSON *ev = cJSON_CreateObject();
+    if (!ev)
+        return;
+    cJSON_AddStringToObject(ev, AIRY_RS_K_CATALOG_SOURCE, r->cat_src);
+    cJSON *names = cJSON_CreateArray();
+    int avail = 0;
+    if (names) {
+        const cJSON *it = NULL;
+        cJSON_ArrayForEach(it, r->catalog)
+        {
+            const char *n = cJSON_GetStringValue(
+                cJSON_GetObjectItem(cJSON_GetObjectItem(it, "function"), "name"));
+            if (n) {
+                cJSON_AddItemToArray(names, cJSON_CreateString(n));
+                avail++;
+            }
+        }
+        cJSON_AddItemToObject(ev, AIRY_RS_K_TOOLS, names);
+    }
+    cJSON_AddNumberToObject(ev, AIRY_RS_K_AVAILABLE, avail);
+    cJSON *den = r->cat_denied ? cJSON_Duplicate(r->cat_denied, 1) : NULL;
+    cJSON_AddItemToObject(ev, AIRY_RS_K_DENIED, den ? den : cJSON_CreateArray());
+    run_ev_send(r, AIRY_RS_TYPE_CATALOG, ev);
+}
+
+/* 目录指纹：来源 + 可见集 + 不可用集。指纹不变说明目录没变，不重复推送。 */
+static uint64_t run_cat_sig(const run_ctx_t *r)
+{
+    uint64_t h = run_call_sig(r->cat_src ? r->cat_src : "", "");
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, r->catalog)
+    {
+        const char *n =
+            cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(it, "function"), "name"));
+        if (n)
+            h = run_call_sig(n, "") ^ (h * 1099511628211ULL);
+    }
+    cJSON_ArrayForEach(it, r->cat_denied)
+    {
+        const char *n = cJSON_GetStringValue(cJSON_GetObjectItem(it, AIRY_RS_K_TOOL));
+        const char *rs =
+            cJSON_GetStringValue(cJSON_GetObjectItem(it, AIRY_RS_K_DENIED_REASON));
+        if (n)
+            h = run_call_sig(n, rs ? rs : "") ^ (h * 1099511628211ULL);
+    }
+    return h;
+}
+
+/* tool_d 不可达时的 bootstrap：静态 SSoT 只保证模型仍有工具可用，事件必须
+ * 标 catalog_source=static（判据允许的唯一例外，且必须对客户端可见）。
+ * 会话内已撤销的工具在 bootstrap 中同样剔除。 */
+static void run_catalog_static(run_ctx_t *r)
+{
+    cJSON *src = cJSON_Parse(AIRY_TOOLS_JSON_SOURCE);
+    if (!src)
+        return;
+    for (int i = cJSON_GetArraySize(src) - 1; i >= 0; --i) {
+        const char *n = cJSON_GetStringValue(
+            cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetArrayItem(src, i), "function"), "name"));
+        if (n && run_cat_denied_has(r->cat_denied, n))
+            cJSON_DeleteItemFromArray(src, i);
+    }
+    cJSON_Delete(r->catalog);
+    r->catalog = src;
+    r->cat_src = AIRY_RS_CATALOG_SOURCE_STATIC;
+}
+
+/* 每轮唯一的一次目录采样：include_denied 一次取全，避免两次调用产生两份
+ * 不一致快照；不可用条目在此分流进 cat_denied，绝不进 catalog。 */
+static void run_catalog_load(run_ctx_t *r)
+{
+    if (!r->catalog || !r->cat_denied)
         return;
     char sock[AGENT_RUN_SOCK_BUF];
     snprintf(sock, sizeof(sock), "%s", airy_runtime_dir_socket("tool.sock"));
     char *resp = NULL;
-    int rc = daemon_rpc_call(sock, "list_tools", "{}", &resp, AGENT_RUN_TOOL_TIMEOUT_MS);
-    if (rc != AIRY_SUCCESS || !resp) {
-        AIRY_FREE(resp);
+    int rc = daemon_rpc_call(sock, "list_tools", "{\"include_denied\":true}", &resp,
+                             AGENT_RUN_TOOL_TIMEOUT_MS);
+    cJSON *root = NULL;
+    if (rc == AIRY_SUCCESS && resp)
+        root = cJSON_Parse(resp);
+    AIRY_FREE(resp);
+    cJSON *list = root ? (cJSON_IsArray(root) ? root : cJSON_GetObjectItem(root, "tools")) : NULL;
+    if (!cJSON_IsArray(list)) {
+        cJSON_Delete(root);
+        run_catalog_static(r);
+        uint64_t sig = run_cat_sig(r);
+        if (sig != r->cat_hash) {
+            r->cat_hash = sig;
+            run_cat_emit(r);
+        }
         return;
     }
-    cJSON *root = cJSON_Parse(resp);
-    AIRY_FREE(resp);
-    if (!root)
-        return;
-    cJSON *list = cJSON_IsArray(root) ? root : cJSON_GetObjectItem(root, "tools");
-    if (!cJSON_IsArray(list)) {
+
+    cJSON *next = cJSON_CreateArray();
+    if (!next) {
         cJSON_Delete(root);
         return;
     }
     const cJSON *it = NULL;
     cJSON_ArrayForEach(it, list)
     {
-        cJSON *exe = cJSON_GetObjectItem(it, "executable");
-        cJSON *nm = cJSON_GetObjectItem(it, "name");
-        cJSON *id = cJSON_GetObjectItem(it, "id");
-        cJSON *ds = cJSON_GetObjectItem(it, "description");
-        if (!cJSON_IsString(exe) || !exe->valuestring[0])
+        const char *n = cJSON_GetStringValue(cJSON_GetObjectItem(it, "name"));
+        if (!n || !n[0])
+            n = cJSON_GetStringValue(cJSON_GetObjectItem(it, "id"));
+        if (!n || !n[0])
             continue;
-        if (strncmp(exe->valuestring, "builtin:", 8) == 0)
+        cJSON *avail = cJSON_GetObjectItem(it, "available");
+        if (cJSON_IsBool(avail) && !cJSON_IsTrue(avail)) {
+            run_cat_deny(r->cat_denied, n,
+                         cJSON_GetStringValue(cJSON_GetObjectItem(it, AIRY_RS_K_DENIED_REASON)));
             continue;
-        const char *n = cJSON_IsString(nm) ? nm->valuestring
-                                          : (cJSON_IsString(id) ? id->valuestring : NULL);
-        run_dyn_put(r->dyn_tools, n, cJSON_IsString(ds) ? ds->valuestring : "",
+        }
+        if (run_cat_denied_has(r->cat_denied, n))
+            continue; /* 会话内已证不可用：不再回到可见集 */
+        run_cat_add(next, n, cJSON_GetStringValue(cJSON_GetObjectItem(it, "description")),
                     cJSON_GetObjectItem(it, "input_schema"));
     }
     cJSON_Delete(root);
+
+    cJSON_Delete(r->catalog);
+    r->catalog = next;
+    r->cat_src = AIRY_RS_CATALOG_SOURCE_LIVE;
+
+    uint64_t sig = run_cat_sig(r);
+    if (sig != r->cat_hash) {
+        r->cat_hash = sig;
+        run_cat_emit(r);
+    }
 }
 
-/* tool_create 成功后即时把新工具 schema 追加进本轮目录（无需等下次会话）。 */
-static void run_dyn_hook(run_ctx_t *r, const char *args_json)
+/* 工具自报策略拒绝 / 无处理器：立即移出本轮目录并记原因，下一轮重新采样
+ * 时不再回到可见集。传输失败与业务错误（参数非法等）不撤销——那是调用
+ * 问题，不是工具不可用。 */
+static void run_cat_revoke(run_ctx_t *r, const char *name, int code)
 {
-    if (!r->dyn_tools)
-        return;
-    cJSON *root = cJSON_Parse(args_json && args_json[0] ? args_json : "{}");
-    if (!root)
-        return;
-    cJSON *jn = cJSON_GetObjectItem(root, "name");
-    cJSON *jd = cJSON_GetObjectItem(root, "description");
-    if (!cJSON_IsString(jn) || !jn->valuestring[0]) {
-        cJSON_Delete(root);
+    const char *reason = NULL;
+    switch (code) {
+    case AIRY_ERR_PERMISSION_DENIED:
+    case AIRY_EPERM:
+    case AIRY_EACCES:
+        reason = AIRY_TOOL_DENIED_POLICY;
+        break;
+    case AIRY_ERR_NOT_SUPPORTED:
+    case AIRY_ENOTSUP:
+        reason = AIRY_TOOL_DENIED_HANDLER;
+        break;
+    default:
         return;
     }
-    cJSON *schema = cJSON_CreateObject();
-    cJSON *props = cJSON_CreateObject();
-    cJSON *required = cJSON_CreateArray();
-    if (schema && props && required) {
-        cJSON_AddStringToObject(schema, "type", "object");
-        cJSON *plist = cJSON_GetObjectItem(root, "params");
-        const cJSON *p = NULL;
-        cJSON_ArrayForEach(p, plist)
-        {
-            cJSON *pn = cJSON_GetObjectItem(p, "name");
-            cJSON *pt = cJSON_GetObjectItem(p, "type");
-            cJSON *pr = cJSON_GetObjectItem(p, "required");
-            if (!cJSON_IsString(pn) || !pn->valuestring[0])
-                continue;
-            cJSON *ps = cJSON_CreateObject();
-            if (!ps)
-                continue;
-            cJSON_AddStringToObject(ps, "type", cJSON_IsString(pt) ? pt->valuestring : "string");
-            cJSON_AddItemToObject(props, pn->valuestring, ps);
-            if (!cJSON_IsBool(pr) || cJSON_IsTrue(pr))
-                cJSON_AddItemToArray(required, cJSON_CreateString(pn->valuestring));
-        }
-        cJSON_AddItemToObject(schema, "properties", props);
-        cJSON_AddItemToObject(schema, "required", required);
-    } else {
-        cJSON_Delete(props);
-        cJSON_Delete(required);
-    }
-    run_dyn_put(r->dyn_tools, jn->valuestring,
-                cJSON_IsString(jd) ? jd->valuestring : "", schema);
-    cJSON_Delete(schema);
-    cJSON_Delete(root);
+    if (!name || !name[0])
+        return;
+    run_cat_deny(r->cat_denied, name, reason);
+    run_cat_drop(r->catalog, name);
+    r->cat_hash = 0; /* 目录已变：下一轮必须重新推送快照事件 */
 }
 
 /* 定长字段装填：先按容量拷贝，再把末尾可能切半的多字节字符退掉。
@@ -816,7 +957,19 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
 
     char *res = NULL;
     int erc;
-    if (blocked) {
+    if (!run_cat_has(r->catalog, tname)) {
+        /* C-16：派发面与下发面同源。模型可能凭历史记忆调用本轮目录外
+         * 的工具（已撤销或不存在的），这里不执行并回填可行动原因。 */
+        const char *why = run_cat_denied_reason(r->cat_denied, tname);
+        erc = -1;
+        snprintf(note, sizeof(note),
+                 "Error: tool \"%s\" is not available in this run's catalog (reason: %s); "
+                 "choose a tool from the current tool list or ask the user.",
+                 tname, why ? why : "not_listed");
+        res = AIRY_STRDUP(note);
+        snprintf(note, sizeof(note), "tool %s not in catalog; dispatch refused", tname);
+        switch_reason = note;
+    } else if (blocked) {
         /* 同一调用已连败两次：不再执行，换路要求直接作为工具结果回传，
          * 模型下一轮必须换参数、换工具或询问用户，而不是原样重试。 */
         erc = -1;
@@ -831,11 +984,14 @@ static int run_tool_one(run_ctx_t *r, cJSON *tc)
                  r->fail_repeat);
         switch_reason = note;
     } else {
+        int code = 0;
         uint64_t t0 = airy_time_ms();
-        erc = run_execute_tool(tname, targs, &res);
+        erc = run_execute_tool(tname, targs, &res, &code);
         r->out->tool_ms += airy_time_ms() - t0;
-        if (erc == 0 && strcmp(tname, "tool_create") == 0)
-            run_dyn_hook(r, targs);
+        /* 工具自报不可用（策略拒绝 / 无处理器）：撤销目录条目并记原因。
+         * tool_create 的新工具不必在此追加，下一轮目录采样自然可见。 */
+        if (erc != 0 && code != 0)
+            run_cat_revoke(r, tname, code);
     }
 
     /* C-1 连败计数：本次失败仍完整入账/推送后再判断熔断出口。被换路闸门
@@ -937,16 +1093,15 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
     agent_ledger_init(&r.lg, r.sess);
 
     r.trace = cJSON_CreateArray();
-    r.dyn_tools = cJSON_CreateArray();
-    if (!r.trace || !r.dyn_tools || run_seed(&r) != 0) {
+    r.catalog = cJSON_CreateArray();
+    r.cat_denied = cJSON_CreateArray();
+    if (!r.trace || !r.catalog || !r.cat_denied || run_seed(&r) != 0) {
         cJSON_Delete(r.messages);
         cJSON_Delete(r.trace);
-        cJSON_Delete(r.dyn_tools);
+        cJSON_Delete(r.catalog);
+        cJSON_Delete(r.cat_denied);
         return -1;
     }
-    /* 会话启动即拉取动态脚本工具（tool_create 历史产物），使既有自制工具
-     * 在会话首轮即可调用；tool_d 不可达时仅退化为静态目录，不影响对话。 */
-    run_load_dyn(&r);
 
     const int limit = agent_run_rounds_resolve(args->rounds);
     out->rounds_limit = limit;
@@ -961,6 +1116,9 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
         }
         agent_ledger_fit(&r.lg, r.messages);
 
+        /* C-16：每轮采样一次工具目录（≤1 次 list_tools），失败回落静态
+         * bootstrap 并以 catalog_source=static 事件对客户端可见。 */
+        run_catalog_load(&r);
         int st = run_step(&r);
         if (st != 1) {
             rc = st;
@@ -984,7 +1142,8 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
 
     agent_ledger_free(&r.lg);
     cJSON_Delete(r.messages);
-    cJSON_Delete(r.dyn_tools);
+    cJSON_Delete(r.catalog);
+    cJSON_Delete(r.cat_denied);
     /* 终局码（含取消与预算耗尽）移交产物，失败路径就地释放；计量已直写 out。 */
     if (rc >= 0 || rc == AIRY_EBUDGET) {
         out->trace = r.trace;
