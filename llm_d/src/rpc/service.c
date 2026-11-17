@@ -73,6 +73,25 @@ const provider_t *svc_find_prov(llm_service_t *svc, const char *model)
     return prov;
 }
 
+/* 跨域桥（0.1.21 B-1）：按能力位选路。只把「要不要流式」作为硬要求，
+ * 加速器/显存等由 B-3 探测后经 provider_select_t 扩展；能力位未声明的
+ * 候选仍可命中（保守可用），与旧「按名字取第一个」在缺省配置下等价。 */
+const provider_t *svc_select_prov(llm_service_t *svc, const char *model, bool need_stream)
+{
+    if (!svc || !model)
+        return NULL;
+    struct llm_service *s = (struct llm_service *)svc;
+    provider_select_t sel;
+
+    __builtin_memset(&sel, 0, sizeof(sel));
+    sel.model = model;
+    sel.need_stream = need_stream ? 1 : 0;
+    airy_mtx_lock(&s->lock);
+    const provider_t *prov = provider_registry_select(s->registry, &sel);
+    airy_mtx_unlock(&s->lock);
+    return prov;
+}
+
 /* 跨域桥（0.1.20 P-A）：请求层据此把「没有 provider」与「模型未配置」分开。 */
 bool svc_reg_empty(llm_service_t *svc)
 {

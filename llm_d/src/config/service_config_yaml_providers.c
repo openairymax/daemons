@@ -86,6 +86,9 @@ static void svc_yaml_aggregate_providers(svc_yaml_state_t *st, provider_agg_t *p
             provs[j].caps_override = st->models[i].caps_override;
             provs[j].has_caps = 1;
         }
+        /* B-1：加速器/显存/上下文等能力位同样取首个显式声明行，缺省保持未知。 */
+        if (!provs[j].hw_caps.declared && st->models[i].hw_caps.declared)
+            provs[j].hw_caps = st->models[i].hw_caps;
         if (st->models[i].timeout_sec > provs[j].timeout_sec)
             provs[j].timeout_sec = st->models[i].timeout_sec;
         if (st->models[i].max_retries > provs[j].max_retries)
@@ -177,6 +180,7 @@ static int svc_yaml_build_result(provider_agg_t *provs, size_t prov_count,
             result[i].api_format = AIRY_STRDUP(provs[i].api_format);
         /* 能力位唯一来源：model.yaml capabilities 声明。未声明即全 false。 */
         result[i].caps = provs[i].caps_override;
+        result[i].hw = provs[i].hw_caps;
         if (provs[i].extra_headers[0])
             result[i].extra_headers = AIRY_STRDUP(provs[i].extra_headers);
         result[i].timeout_sec = (double)provs[i].timeout_sec;

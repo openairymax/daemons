@@ -51,6 +51,8 @@ set(LLM_TEST_SOURCES
     # 0.1.20 B-A7 A7-4：声明面（provision/artifact/capabilities 覆盖 +
     # 未知键 fail-closed）回归
     test_config_decl.c
+    # 0.1.21 B-1：provider 能力位匹配与按能力选路（三组组合 + 保守可用）
+    test_provider_caps.c
     # 0.1.20 Gate 37：计费热路径两臂证据（单请求 fsync 计数 + 对照臂 p99）
     bench_cost_hotpath.c
 )
