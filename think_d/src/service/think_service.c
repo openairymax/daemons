@@ -400,10 +400,11 @@ static void think_mw_snap(think_service_t *svc)
 #define THINK_ATTEST_IDS 16
 
 static int think_slot_reg(char ids[][SVC_MODEL_ID_MAX], size_t n, int have_ids,
-                          const char *declared, const char *env_name)
+                          const char *declared, unsigned role)
 {
-    const char *env = env_name ? getenv(env_name) : NULL;
-    if (!have_ids || !declared || !declared[0] || (env && env[0]))
+    char env[SVC_MODEL_ID_MAX];
+    if (!have_ids || !declared || !declared[0] ||
+        svc_slot_env(role, env, sizeof(env), NULL))
         return AIRY_ATTEST_REG_NA;
     for (size_t i = 0; i < n; ++i) {
         if (strcmp(ids[i], declared) == 0)
@@ -440,15 +441,15 @@ static int think_attest(const think_service_t *svc, const think_service_config_t
         {.key = "think.t2",
          .declared = t2,
          .effective = svc->think2_slow_model,
-         .in_registry = think_slot_reg(ids, id_n, have_ids, t2, "AIRY_THINK2_SLOW_MODEL")},
+         .in_registry = think_slot_reg(ids, id_n, have_ids, t2, SVC_SLOT_T2)},
         {.key = "think.t1f",
          .declared = t1f,
          .effective = svc->think1_fast_model,
-         .in_registry = think_slot_reg(ids, id_n, have_ids, t1f, "AIRY_THINK1_FAST_MODEL")},
+         .in_registry = think_slot_reg(ids, id_n, have_ids, t1f, SVC_SLOT_T1F)},
         {.key = "think.t1p",
          .declared = t1p,
          .effective = svc->think1_prof_model,
-         .in_registry = think_slot_reg(ids, id_n, have_ids, t1p, "AIRY_THINK1_PROF_MODEL")},
+         .in_registry = think_slot_reg(ids, id_n, have_ids, t1p, SVC_SLOT_T1P)},
     };
     airy_attest_opts_t opts = {.owner = "think_d", .allow_unknown = (esc && esc[0]) ? 1 : 0};
     airy_attest_result_t res;
@@ -474,6 +475,8 @@ think_service_t *think_service_create(const think_service_config_t *config)
         think_copy_slot(svc->think1_prof_model, sizeof(svc->think1_prof_model),
                         config->think1_prof_model);
     }
+    svc->slot_deg = (!svc->think2_slow_model[0] || !svc->think1_fast_model[0] ||
+                     !svc->think1_prof_model[0]);
     svc->process_timeout_ms = (config && config->process_timeout_ms > 0) ?
                                   config->process_timeout_ms :
                                   THINK_DEFAULT_TIMEOUT_MS;
@@ -680,13 +683,109 @@ static void think_fail_attr(const think_service_t *svc, think_fail_attr_t *attr)
     }
 }
 
+/* 调用方须已持有 svc->lock：向本轮事件环追加一条本地事件（非引擎回执）。 */
+static void think_ev_add(think_service_t *svc, int level, const char *event, const char *data)
+{
+    think_feedback_event_t *slot = &svc->events[svc->event_head];
+    slot->level = level;
+    AIRY_STRNCPY_TERM(slot->module, "think_d", sizeof(slot->module));
+    AIRY_STRNCPY_TERM(slot->event, event, sizeof(slot->event));
+    AIRY_STRNCPY_TERM(slot->data, data ? data : "", sizeof(slot->data));
+    svc->event_head = (svc->event_head + 1) % svc->event_capacity;
+    if (svc->event_count < svc->event_capacity)
+        svc->event_count++;
+}
+
+/* 本轮事件环内是否出现指定事件（自 head 逆序，环满时只看最新 capacity 条）。 */
+static int think_ev_flag(const think_service_t *svc, const char *event)
+{
+    for (uint32_t i = 0; i < svc->event_count; ++i) {
+        uint32_t idx = (svc->event_head + svc->event_capacity - 1 - i) % svc->event_capacity;
+        if (strcmp(svc->events[idx].event, event) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* C-19：结果元数据——本轮回显实际生效的三 model_id，GRAD 未真正运行时
+ * 显式标 grad_degraded（引擎 grad_no_llm / 槽位缺省均视为降级）。 */
+static void think_res_meta(cJSON *root, const think_service_t *svc)
+{
+    cJSON *m = cJSON_CreateObject();
+    if (!m)
+        return;
+    cJSON_AddStringToObject(m, "t2", svc->think2_slow_model[0] ? svc->think2_slow_model : "");
+    cJSON_AddStringToObject(m, "t1f",
+                            svc->think1_fast_model[0] ? svc->think1_fast_model : "");
+    cJSON_AddStringToObject(m, "t1p",
+                            svc->think1_prof_model[0] ? svc->think1_prof_model : "");
+    cJSON_AddItemToObject(root, "models", m);
+    if (svc->slot_deg || think_ev_flag(svc, "grad_no_llm") ||
+        think_ev_flag(svc, "grad_degraded"))
+        cJSON_AddBoolToObject(root, "grad_degraded", 1);
+}
+
+/* C-19-05：槽位热重载。model.yaml 变更后，下一个请求即在锁内重解析
+ * slots 段并重接线；新值指向未注册模型时拒绝整次应用、保留旧槽位（高
+ * 声日志），绝不让悬空引用静默生效。环境显式指定的角色不受文件注册表
+ * 约束（与 A-8 自证口径一致）。 */
+static void think_slots_reload(think_service_t *svc)
+{
+    char ids[THINK_ATTEST_IDS][SVC_MODEL_ID_MAX];
+    char path[1024];
+    svc_model_slots_t next;
+    size_t id_n = 0;
+    int have_ids, len;
+    const char *cfg_dir = airy_config_dir();
+
+    if (!cfg_dir || svc_mw_check(&svc->mw) != 1)
+        return;
+    len = snprintf(path, sizeof(path), "%s/model.yaml", cfg_dir);
+    if (len <= 0 || len >= (int)sizeof(path))
+        return;
+
+    AIRY_MEMSET(&next, 0, sizeof(next));
+    next.enabled = 1;
+    if (svc_slot_resolve(path, &next) != 0) {
+        SVC_LOG_WARN("C-19: think_d slot reload skipped (yaml unreadable), "
+                     "keeping previous slots");
+        return;
+    }
+    have_ids = (svc_model_ids_from_yaml(path, ids, THINK_ATTEST_IDS, &id_n) == 0);
+    for (unsigned i = 0; i < SVC_SLOT_N; ++i) {
+        char env[SVC_MODEL_ID_MAX];
+        const char *v = svc_slot_get(&next, i);
+        int hit = 0;
+        if (!v[0] || svc_slot_env(i, env, sizeof(env), NULL))
+            continue;
+        for (size_t k = 0; have_ids && k < id_n; ++k)
+            hit = hit || strcmp(ids[k], v) == 0;
+        if (!hit) {
+            SVC_LOG_ERROR("C-19: think_d slot %s='%s' 未在 model.yaml models 注册，"
+                          "拒绝本次热重载，保留旧槽位",
+                          svc_slot_name(i), v);
+            return;
+        }
+    }
+
+    AIRY_STRNCPY_TERM(svc->think2_slow_model, next.t2, sizeof(svc->think2_slow_model));
+    AIRY_STRNCPY_TERM(svc->think1_fast_model, next.t1f, sizeof(svc->think1_fast_model));
+    AIRY_STRNCPY_TERM(svc->think1_prof_model, next.t1p, sizeof(svc->think1_prof_model));
+    svc->slot_deg = (!next.t2[0] || !next.t1f[0] || !next.t1p[0]);
+    airy_cognition_set_tc3_models(svc->engine, next.t2[0] ? next.t2 : NULL,
+                                  next.t1f[0] ? next.t1f : NULL,
+                                  next.t1p[0] ? next.t1p : NULL);
+    (void)svc_mw_rebase(&svc->mw, NULL);
+    SVC_LOG_INFO("C-19: think_d slots reloaded t2=%s t1f=%s t1p=%s",
+                 next.t2[0] ? next.t2 : "(default)", next.t1f[0] ? next.t1f : "(default)",
+                 next.t1p[0] ? next.t1p : "(default)");
+}
+
 int think_service_process(think_service_t *svc, const char *session_id, const char *prompt,
                           const char *gccp_answers, think_process_result_t *out_result)
 {
     if (!svc || !prompt || !out_result)
         return AIRY_ERR_INVALID_PARAM;
-    /* 0.1.19 §3.5 缺陷5：只读漂移检测（未变路径单次 stat），不重载配置。 */
-    (void)svc_mw_check(&svc->mw);
     out_result->json = NULL;
     out_result->json_len = 0;
 
@@ -698,6 +797,12 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
     svc->event_head = 0;
     svc->event_count = 0;
     svc->dual_invocations++;
+    /* C-19：请求侧槽位热重载（未变路径仅一次 stat）；槽位缺省显式落
+     * grad_degraded 事件，禁止把角色模型回落当成正常配置静默放行。 */
+    think_slots_reload(svc);
+    if (svc->slot_deg)
+        think_ev_add(svc, 3, "grad_degraded",
+                     "{\"reason\":\"slot_unset\",\"degraded\":1,\"review_required\":true}");
 
     /* GCCP 会话隔离（2026-08-25 加固）：交互状态按 session_id 维度存取，
      * 杜绝多客户端并发串台。active_session 供回调在引擎同步调用中读取。 */
@@ -737,6 +842,7 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
                 cJSON_AddNumberToObject(st, "dual_corrections", svc->dual_corrections);
                 cJSON_AddItemToObject(root, "stats", st);
                 cJSON_AddItemToObject(root, "feedback", think_ev_json(svc));
+                think_res_meta(root, svc);
                 out_result->json = cJSON_PrintUnformatted(root);
                 cJSON_Delete(root);
             }
@@ -775,6 +881,7 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
             cJSON_AddNumberToObject(st, "dual_corrections", svc->dual_corrections);
             cJSON_AddItemToObject(root, "stats", st);
             cJSON_AddItemToObject(root, "feedback", think_ev_json(svc));
+            think_res_meta(root, svc);
             out_result->json = cJSON_PrintUnformatted(root);
             cJSON_Delete(root);
         }
@@ -795,6 +902,7 @@ int think_service_process(think_service_t *svc, const char *session_id, const ch
         cJSON_AddItemToObject(root, "plan", plan_json);
 
     cJSON_AddItemToObject(root, "feedback", think_ev_json(svc));
+    think_res_meta(root, svc);
 
     think_sync_engine_stats(svc);
     cJSON *st = cJSON_CreateObject();

@@ -369,6 +369,11 @@ int svc_yaml_load_state(const char *config_path, svc_yaml_state_t *st)
 
     (void)svc_model_llm_fill(yaml_get(root, "llm"), &st->llm); /* 顺带 fill（B'） */
 
+    /* C-19：槽位与模型表同源解析；启用位缺省视为启用（与 think_d 一致）。 */
+    __builtin_memset(&st->slots, 0, sizeof(st->slots));
+    st->slots.enabled = 1;
+    (void)svc_slot_fill(root, &st->slots);
+
     struct yaml_node *models = yaml_get(root, "models");
     size_t mcount = yaml_size(models);
     for (size_t i = 0; i < mcount; ++i)

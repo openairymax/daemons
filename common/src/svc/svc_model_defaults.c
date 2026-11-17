@@ -23,6 +23,7 @@
 #include "svc_model_defaults.h"
 
 #include "error.h"
+#include "io.h"
 #include "platform_paths.h"
 #include "airy_memory_inline.h"
 #include "yaml_minimal.h"
@@ -423,18 +424,275 @@ int svc_model_ids_from_yaml(const char *path, char ids[][SVC_MODEL_ID_MAX], size
     return *out_n > 0 ? 0 : AIRY_ERR_NOT_FOUND;
 }
 
-int svc_model_defaults_think_from_yaml(const char *path, svc_model_think_config_t *out)
+/* 槽位表：角色名 / 废弃 think 键 / 新 env / 废弃 env 一一对齐，三处索引
+ * 共用 SVC_SLOT_*，避免角色顺序在不同来源之间漂移。 */
+static const char *const k_slot_name[SVC_SLOT_N] = { "t2", "t1f", "t1p" };
+static const char *const k_slot_legacy[SVC_SLOT_N] = { "think2_slow_model", "think1_fast_model",
+                                                       "think1_prof_model" };
+static const char *const k_slot_env[SVC_SLOT_N] = { "AIRY_MODEL_T2", "AIRY_MODEL_T1F",
+                                                    "AIRY_MODEL_T1P" };
+static const char *const k_slot_env_old[SVC_SLOT_N] = { "AIRY_THINK2_SLOW_MODEL",
+                                                        "AIRY_THINK1_FAST_MODEL",
+                                                        "AIRY_THINK1_PROF_MODEL" };
+
+const char *svc_slot_name(unsigned role)
 {
-    if (!path || !path[0] || !out)
+    return role < SVC_SLOT_N ? k_slot_name[role] : NULL;
+}
+
+char *svc_slot_buf(svc_model_slots_t *slots, unsigned role)
+{
+    if (!slots)
+        return NULL;
+    switch (role) {
+    case SVC_SLOT_T2:
+        return slots->t2;
+    case SVC_SLOT_T1F:
+        return slots->t1f;
+    case SVC_SLOT_T1P:
+        return slots->t1p;
+    default:
+        return NULL;
+    }
+}
+
+const char *svc_slot_get(const svc_model_slots_t *slots, unsigned role)
+{
+    if (!slots || role >= SVC_SLOT_N)
+        return NULL;
+    return role == SVC_SLOT_T2 ? slots->t2 : role == SVC_SLOT_T1F ? slots->t1f : slots->t1p;
+}
+
+int svc_slot_fill(struct yaml_node *root, svc_model_slots_t *out)
+{
+    if (!out)
+        return AIRY_ERR_INVALID_PARAM;
+    if (!root || root->type != YAML_NODE_MAPPING)
+        return 0;
+
+    struct yaml_node *think = yaml_get(root, "think");
+    struct yaml_node *slots = yaml_get(root, "slots");
+    if (think && think->type == YAML_NODE_MAPPING) {
+        int b = svc_yaml_bool(yaml_as_string(yaml_get(think, "enabled"), NULL));
+        if (b >= 0)
+            out->enabled = b;
+        long t = strtol(yaml_as_string(yaml_get(think, "timeout_ms"), "0"), NULL, 10);
+        if (t > 0)
+            out->timeout_ms = (uint32_t)t;
+    }
+
+    for (unsigned i = 0; i < SVC_SLOT_N; ++i) {
+        char *dst = svc_slot_buf(out, i);
+        const char *v = slots ? yaml_as_string(yaml_get(slots, k_slot_name[i]), NULL) : NULL;
+        if (v && v[0]) {
+            AIRY_STRNCPY_TERM(dst, v, SVC_MODEL_ID_MAX);
+            continue;
+        }
+        const char *lv = think ? yaml_as_string(yaml_get(think, k_slot_legacy[i]), NULL) : NULL;
+        if (lv && lv[0]) {
+            AIRY_STRNCPY_TERM(dst, lv, SVC_MODEL_ID_MAX);
+            out->legacy_mask |= 1u << i;
+        }
+    }
+    return 0;
+}
+
+int svc_slot_load(const char *path, svc_model_slots_t *out)
+{
+    if (!path || !out)
         return AIRY_ERR_INVALID_PARAM;
 
-    svc_yaml_field_t tbl[] = {
-        { "enabled",           SVC_FLD_BOOL, &out->enabled, 0 },
-        { "think2_slow_model", SVC_FLD_STR,  out->think2_slow_model, sizeof(out->think2_slow_model) },
-        { "think1_fast_model", SVC_FLD_STR,  out->think1_fast_model, sizeof(out->think1_fast_model) },
-        { "think1_prof_model", SVC_FLD_STR,  out->think1_prof_model, sizeof(out->think1_prof_model) },
-        { "timeout_ms",        SVC_FLD_U32,  &out->timeout_ms, 0 },
-    };
-    svc_scan_cfg_t cfg = { "think", tbl, 5, NULL, 0 };
-    return svc_scan_file(path, &cfg);
+    yaml_document_t *doc = yaml_open(path);
+    if (!doc)
+        return AIRY_ERR_IO;
+    int rc = svc_slot_fill(yaml_root(doc), out);
+    yaml_destroy(doc);
+    return rc;
+}
+
+int svc_slot_env(unsigned role, char *buf, size_t cap, int *legacy)
+{
+    if (role >= SVC_SLOT_N || !buf || cap == 0)
+        return 0;
+    if (legacy)
+        *legacy = 0;
+
+    const char *old = getenv(k_slot_env_old[role]);
+    const char *v = getenv(k_slot_env[role]);
+    int leg = (old && old[0]) ? 1 : 0;
+    if (!v || !v[0])
+        v = old;
+    if (!v || !v[0]) {
+        buf[0] = '\0';
+        return 0;
+    }
+    AIRY_STRNCPY_TERM(buf, v, cap);
+    if (legacy)
+        *legacy = leg;
+    return 1;
+}
+
+int svc_slot_resolve(const char *path, svc_model_slots_t *out)
+{
+    if (!out)
+        return AIRY_ERR_INVALID_PARAM;
+
+    int rc = 0;
+    if (path && path[0])
+        rc = svc_slot_load(path, out);
+
+    for (unsigned i = 0; i < SVC_SLOT_N; ++i) {
+        char v[SVC_MODEL_ID_MAX];
+        int leg = 0;
+        if (!svc_slot_env(i, v, sizeof(v), &leg))
+            continue;
+        AIRY_STRNCPY_TERM(svc_slot_buf(out, i), v, SVC_MODEL_ID_MAX);
+        if (leg)
+            out->legacy_mask |= 1u << i;
+    }
+    return rc;
+}
+
+/* 槽位写入（C-19）：只重写顶层 slots: 块中的 t2/t1f/t1p 三行，其余字节
+ * 原样保留（注释/顺序/他段不受影响）；缺键在块内就地补齐，整块缺失则
+ * 追加。走临时文件 + rename 原子替换，监视线程不会读到半截配置。 */
+#define SVC_SLOT_FMAX (512u * 1024u)
+
+static int slot_put(char *o, size_t cap, size_t *off, const char *s, size_t n)
+{
+    if (*off + n + 1 > cap)
+        return AIRY_ERR_IO;
+    __builtin_memcpy(o + *off, s, n);
+    *off += n;
+    o[*off] = '\0';
+    return 0;
+}
+
+static int slot_key_at(const char *p, const char *e)
+{
+    for (unsigned i = 0; i < SVC_SLOT_N; ++i) {
+        size_t kl = strlen(k_slot_name[i]);
+        if ((size_t)(e - p) < kl + 1 || strncmp(p, k_slot_name[i], kl) != 0 || p[kl] != ':')
+            continue;
+        char nx = (size_t)(e - p) > kl + 1 ? p[kl + 1] : '\0';
+        if (nx == '\0' || nx == ' ' || nx == '\t' || nx == '\r')
+            return (int)i;
+    }
+    return -1;
+}
+
+static int slot_line(char *o, size_t cap, size_t *off, unsigned role, const char *val)
+{
+    char buf[SVC_MODEL_ID_MAX + 32];
+    int n = snprintf(buf, sizeof(buf), "  %s: \"%s\"\n", k_slot_name[role], val ? val : "");
+    if (n <= 0 || (size_t)n >= sizeof(buf))
+        return AIRY_ERR_IO;
+    return slot_put(o, cap, off, buf, (size_t)n);
+}
+
+static int slot_pad(char *o, size_t cap, size_t *off, unsigned done,
+                    const svc_model_slots_t *slots)
+{
+    for (unsigned i = 0; i < SVC_SLOT_N; ++i) {
+        if (done & (1u << i))
+            continue;
+        int rc = slot_line(o, cap, off, i, svc_slot_get(slots, i));
+        if (rc != 0)
+            return rc;
+    }
+    return 0;
+}
+
+int svc_slot_save(const char *path, const svc_model_slots_t *slots)
+{
+    if (!path || !path[0] || !slots)
+        return AIRY_ERR_INVALID_PARAM;
+
+    char *src = NULL;
+    size_t n = 0;
+    int rc = airy_io_read_file(path, &src, &n);
+    if (rc != 0) {
+        /* 目标可缺席：$AIRY_CONFIG_DIR/model.yaml 首次写入时按空文件起，
+         * 只落 slots 段，其余配置仍由主配置提供。 */
+        AIRY_FREE(src);
+        src = NULL;
+        n = 0;
+    }
+    if (n > SVC_SLOT_FMAX) {
+        AIRY_FREE(src);
+        return AIRY_ERR_IO;
+    }
+
+    size_t cap = n + 512;
+    char *out = (char *)AIRY_MALLOC(cap);
+    if (!out) {
+        AIRY_FREE(src);
+        return AIRY_ERR_OUT_OF_MEMORY;
+    }
+    size_t off = 0;
+    out[0] = '\0';
+
+    unsigned done = 0;
+    int in_slots = 0;
+    int found = 0;
+    const char *p = src;
+    const char *end = src + n;
+
+    while (p < end) {
+        const char *nl = (const char *)__builtin_memchr(p, '\n', (size_t)(end - p));
+        const char *le = nl ? nl : end;
+        const char *next = nl ? nl + 1 : end;
+        const char *q = p;
+        while (q < le && (*q == ' ' || *q == '\t'))
+            q++;
+        size_t trim = (size_t)(le - q);
+        if (trim > 0 && q[trim - 1] == '\r')
+            trim--;
+        int top = (q == p);
+
+        if (top && trim >= 6 && strncmp(q, "slots:", 6) == 0 &&
+            (trim == 6 || q[6] == ' ' || q[6] == '\t')) {
+            in_slots = 1;
+            found = 1;
+        } else if (in_slots && top && trim > 0) {
+            if (slot_pad(out, cap, &off, done, slots) != 0)
+                goto fail;
+            in_slots = 0;
+        }
+
+        if (in_slots && !top) {
+            int role = slot_key_at(q, q + trim);
+            if (role >= 0) {
+                if (slot_line(out, cap, &off, (unsigned)role, svc_slot_get(slots, (unsigned)role)) !=
+                    0)
+                    goto fail;
+                done |= 1u << role;
+                p = next;
+                continue;
+            }
+        }
+        if (slot_put(out, cap, &off, p, (size_t)(next - p)) != 0)
+            goto fail;
+        p = next;
+    }
+
+    if (in_slots && slot_pad(out, cap, &off, done, slots) != 0)
+        goto fail;
+    if (!found) {
+        if (off > 0 && out[off - 1] != '\n' && slot_put(out, cap, &off, "\n", 1) != 0)
+            goto fail;
+        if (slot_put(out, cap, &off, "slots:\n", 7) != 0 ||
+            slot_pad(out, cap, &off, 0, slots) != 0)
+            goto fail;
+    }
+
+    rc = airy_io_write_file(path, out, off);
+    AIRY_FREE(out);
+    AIRY_FREE(src);
+    return rc == 0 ? 0 : AIRY_ERR_IO;
+
+fail:
+    AIRY_FREE(out);
+    AIRY_FREE(src);
+    return AIRY_ERR_IO;
 }
