@@ -49,6 +49,7 @@ set(SVC_COMMON_SOURCES
     src/security/daemon_security.c     # daemon 安全集成（初始化/消毒域）
     src/security/daemon_security_acl.c       # Phase 2.3a: daemon 安全-ACL 权限域（从 daemon_security.c 拆分）
     src/security/daemon_security_audit.c     # Phase 2.3a: daemon 安全-审计域（原 vault 域，单元五十三裁撤凭据存取消亡后归位）
+    src/security/daemon_security_rotate.c    # 0.1.21 A-3: 审计轮转（500MB/365/zstd+AES-GCM，契约件）
     # 0c A 类直搬：platform_compat 实现迁 commons/platform（src/platform_compat.c），
     # 声明平台扩展头 daemon_platform_ext.h 亦迁 commons，daemons 留 re-export。
     src/daemon/daemon_event_driver.c # 统一事件驱动框架
@@ -118,6 +119,17 @@ target_link_libraries(svc_common PRIVATE airy_core)
 # 各 daemon 显式链接 airy_security_dome（链接白名单逐户登记，门禁可见）。
 if(AIRY_HAS_OPENSSL)
     target_link_libraries(svc_common PUBLIC ${OPENSSL_CRYPTO_LIBRARY})
+endif()
+
+# 0.1.21 A-3：审计备份 zstd 压缩（契约档：500MB/365/zstd+加密）。
+# zstd 缺失时仅退化为明文备份并在启动 WARN 标注；不引入必装依赖，
+# 三个平台各自由系统包（libzstd-dev / brew zstd / vcpkg zstd）提供。
+find_path(AIRY_ZSTD_INCLUDE_DIR zstd.h)
+find_library(AIRY_ZSTD_LIBRARY NAMES zstd)
+if(AIRY_ZSTD_INCLUDE_DIR AND AIRY_ZSTD_LIBRARY)
+    target_include_directories(svc_common PRIVATE ${AIRY_ZSTD_INCLUDE_DIR})
+    target_link_libraries(svc_common PRIVATE ${AIRY_ZSTD_LIBRARY})
+    target_compile_definitions(svc_common PRIVATE AIRY_HAS_ZSTD=1)
 endif()
 
 # 平台特定配置
