@@ -165,6 +165,30 @@ static const char kFull8[] = "models:\n"
                              "    context_window: 8k\n"
                              "    provider: prov\n";
 
+/* t9：B-1 能力位完整声明（厂商名 / g 后缀 / 三值）。 */
+static const char kHwCaps[] = "models:\n"
+                              "  - name: hw\n"
+                              "    model_id: hw\n"
+                              "    provider: prov\n"
+                              "    base_url: http://127.0.0.1:9/v1\n"
+                              "    accelerator: intel\n"
+                              "    vram_bytes: 8g\n"
+                              "    max_context: 8192\n"
+                              "    supports_stream: true\n"
+                              "    supports_tools: false\n";
+
+/* t10：B-1 部分声明 + 非法值：declared=1，非法键保持未知（不得写成 0
+ *      冒充「显式不支持」）。 */
+static const char kHwBad[] = "models:\n"
+                             "  - name: hwbad\n"
+                             "    model_id: hwbad\n"
+                             "    provider: prov\n"
+                             "    base_url: http://127.0.0.1:9/v1\n"
+                             "    accelerator: bogus\n"
+                             "    vram_bytes: nonsense\n"
+                             "    supports_stream: \"\"\n"
+                             "    supports_tools: unknown\n";
+
 /* t8：16 键行——条目数正好等于扩容后的容量（16），且重复 capabilities
  *     出现在中间。线上 0.1.20 崩溃即此形态：扫描 provider 键时踩到映射
  *     数组末尾之外的堆残留。 */
@@ -338,6 +362,55 @@ int main(void)
         check_int("full16.caps", st.models[0].has_caps, 1);
         check_bit("full16.seed", st.models[0].caps_override.accepts_seed, true);
         check_bit("full16.numctx", st.models[0].caps_override.accepts_num_ctx, false);
+    }
+
+    /* 11) B-1：能力位完整声明落位 provider 级（首行生效）。 */
+    {
+        if (put_file(path, kHwCaps) != 0)
+            return 1;
+        provider_config_t *hp = NULL;
+        size_t hn = 0;
+        check_int("hw.rc", svc_load_model_config_yaml(path, &hp, &hn), 0);
+        check_int("hw.count", (int)hn, 1);
+        if (hp && hn == 1) {
+            check_int("hw.declared", hp[0].hw.declared, 1);
+            check_int("hw.accel", (int)hp[0].hw.accelerator, (int)AIRY_ACCEL_INTEL);
+            check_int("hw.vram", (int)(hp[0].hw.vram_bytes >> 30), 8);
+            check_int("hw.ctx", (int)hp[0].hw.max_context, 8192);
+            check_int("hw.stream", hp[0].hw.supports_stream, 1);
+            check_int("hw.tools", hp[0].hw.supports_tools, 0);
+            free_providers(hp, hn);
+        }
+    }
+
+    /* 12) B-1：未声明能力位 → declared=0，选路走保守可用。 */
+    {
+        if (put_file(path, kFallback) != 0)
+            return 1;
+        provider_config_t *np = NULL;
+        size_t nn = 0;
+        check_int("hwundecl.rc", svc_load_model_config_yaml(path, &np, &nn), 0);
+        if (np && nn == 1) {
+            check_int("hwundecl.declared", np[0].hw.declared, 0);
+            free_providers(np, nn);
+        }
+    }
+
+    /* 13) B-1：非法/空值保持未知（accelerator=NONE、vram=0、-1）。 */
+    {
+        if (put_file(path, kHwBad) != 0)
+            return 1;
+        provider_config_t *bp = NULL;
+        size_t bn = 0;
+        check_int("hwbad.rc", svc_load_model_config_yaml(path, &bp, &bn), 0);
+        if (bp && bn == 1) {
+            check_int("hwbad.declared", bp[0].hw.declared, 1);
+            check_int("hwbad.accel", (int)bp[0].hw.accelerator, (int)AIRY_ACCEL_NONE);
+            check_int("hwbad.vram", (int)bp[0].hw.vram_bytes, 0);
+            check_int("hwbad.stream", bp[0].hw.supports_stream, -1);
+            check_int("hwbad.tools", bp[0].hw.supports_tools, -1);
+            free_providers(bp, bn);
+        }
     }
 
     remove(path);
