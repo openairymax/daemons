@@ -178,6 +178,51 @@ static void test_channel_open_close_socket(void **state)
     cleanup_test_dir();
 }
 
+/* C-29：关闭非末尾通道会触发末元素搬移（channel_book.c 的 swap-remove）。
+ * 通道集合按 channel_id 查找，list 顺序不是对外契约，因此这里只断言
+ * 「剩余通道仍可查、数量正确、被关通道消失」，不绑定顺序本身。 */
+static void test_close_middle_keeps_others(void **state)
+{
+    (void)state;
+    cleanup_test_dir();
+    channel_config_t config = CHANNEL_CONFIG_DEFAULTS;
+    AIRY_STRNCPY_TERM(config.socket_dir, TEST_SOCKET_DIR, sizeof(config.socket_dir));
+    config.max_channels = 16;
+
+    channel_service_t *svc = channel_service_create(&config);
+    assert_int_equal(channel_service_start(svc), 0);
+
+    assert_int_equal(channel_service_open(svc, "swap_a", "Swap-A", CHANNEL_TYPE_SHM, NULL), 0);
+    assert_int_equal(channel_service_open(svc, "swap_b", "Swap-B", CHANNEL_TYPE_SHM, NULL), 0);
+    assert_int_equal(channel_service_open(svc, "swap_c", "Swap-C", CHANNEL_TYPE_SHM, NULL), 0);
+
+    /* 关首个：末元素 swap_c 被搬到下标 0。 */
+    assert_int_equal(channel_service_close(svc, "swap_a"), 0);
+
+    size_t count = 0;
+    channel_info_t list[16];
+    assert_int_equal(channel_service_list(svc, list, 16, &count), 0);
+    assert_int_equal(count, 2);
+
+    channel_info_t info;
+    assert_int_equal(channel_service_get_info(svc, "swap_b", &info), 0);
+    assert_string_equal(info.channel_id, "swap_b");
+    assert_int_equal(channel_service_get_info(svc, "swap_c", &info), 0);
+    assert_string_equal(info.channel_id, "swap_c");
+    assert_int_equal(channel_service_get_info(svc, "swap_a", &info), AIRY_ERR_NOT_FOUND);
+
+    /* 再关末尾：走到 idx == last 分支，仅清零不搬移。 */
+    assert_int_equal(channel_service_close(svc, "swap_c"), 0);
+    assert_int_equal(channel_service_list(svc, list, 16, &count), 0);
+    assert_int_equal(count, 1);
+    assert_int_equal(channel_service_get_info(svc, "swap_b", &info), 0);
+    assert_string_equal(info.channel_id, "swap_b");
+
+    channel_service_stop(svc);
+    channel_service_destroy(svc);
+    cleanup_test_dir();
+}
+
 static void test_channel_open_close_shm(void **state)
 {
     (void)state;
@@ -486,6 +531,7 @@ int main(void)
         cmocka_unit_test(test_health_check),
 
         cmocka_unit_test(test_channel_open_close_socket),
+        cmocka_unit_test(test_close_middle_keeps_others),
         cmocka_unit_test(test_channel_open_close_shm),
         cmocka_unit_test(test_channel_duplicate_id),
 
