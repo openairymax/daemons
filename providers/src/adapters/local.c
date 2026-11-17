@@ -128,7 +128,9 @@ static provider_ctx_t *local_init(const char *name, const char *api_key, const c
         AIRY_ERROR_NULL(AIRY_ERR_INVALID_PARAM, "null parameter");
     }
 
-    provider_base_init(&ctx->base, name, NULL, api_base, NULL, timeout_sec, max_retries,
+    /* 本地端点免 key：显式空串告知 base 层「无密钥、不得推导环境变量名」，
+     * 避免自托管模型被误报 NO-KEY 引导。 */
+    provider_base_init(&ctx->base, name, "", api_base, NULL, timeout_sec, max_retries,
                        LOCAL_DEFAULT_BASE);
 
     /* D2-9：本地慢推理没有固定上界，预算改由实测时延 p99 推导（floor 120s，

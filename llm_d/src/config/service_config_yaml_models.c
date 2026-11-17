@@ -224,13 +224,21 @@ static void svc_yaml_apply(model_entry_t *m, struct yaml_node *item)
 }
 
 /* api_key_env 与 endpoint：显式声明优先；key 缺省按行序自动映射
- * MODEL_<序号>_API_KEY（q7，local 模式无 key），endpoint 回退 base_url。 */
+ * MODEL_<序号>_API_KEY（q7，local 模式无 key），endpoint 回退 base_url。
+ * mode=local 且未声明 api_format 时补 "local"：否则空 api_format 回落
+ * chat 适配器，既丢掉免鉴权声明（误报 NO-KEY 引导），又绕过本地端点
+ * 的 keep_alive 与容量探测。显式 api_format 仍以 apply 为准。 */
 static void svc_yaml_route(model_entry_t *m, struct yaml_node *item, size_t row)
 {
     const char *e = svc_yaml_item_str(item, "api_key_env");
     const char *mode = svc_yaml_item_str(item, "mode");
     const char *ep = svc_yaml_item_str(item, "endpoint");
     const char *bu = svc_yaml_item_str(item, "base_url");
+    if (mode && strcasecmp(mode, "local") == 0) {
+        const char *fmt = svc_yaml_item_str(item, "api_format");
+        if (!(fmt && fmt[0]))
+            AIRY_STRNCPY_TERM(m->api_format, "local", sizeof(m->api_format));
+    }
     if (e && e[0]) {
         AIRY_STRNCPY_TERM(m->api_key_env, e, sizeof(m->api_key_env));
     } else if (!(mode && strcasecmp(mode, "local") == 0)) {
