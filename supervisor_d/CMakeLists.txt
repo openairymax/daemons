@@ -3,7 +3,8 @@
 
 # V13.5 硬约束：零项目内库链接（link-whitelist.txt 允许集为空，linkgate
 # 构建期 fail-closed）——UDS/TCP、进程原语、JSON、日志全部自持，仅链接
-# 系统库：POSIX 纯 libc，Windows ws2_32。
+# 系统库：POSIX libc + Threads（A-5 输出泵线程，系统库非项目内库），
+# Windows ws2_32。
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -11,6 +12,12 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 include(${CMAKE_CURRENT_SOURCE_DIR}/modules/sources.cmake)
 
 add_executable(supervisor_d ${SUPERVISOR_D_SOURCES})
+
+if(NOT WIN32)
+    # A-5 输出泵线程：Threads 为系统库（linkgate 只拦项目内库链接）
+    find_package(Threads REQUIRED)
+    target_link_libraries(supervisor_d PRIVATE Threads::Threads)
+endif()
 
 # 全局 "-include banned_functions.h" 在源码首行前处理，豁免只能由构建
 # 系统注入（atoms/corekern/freestanding 同一先例）：supervisor_d 是零

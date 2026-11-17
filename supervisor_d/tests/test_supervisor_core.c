@@ -711,6 +711,123 @@ static int t_ctrl_serve(void)
     TEST_OK();
 }
 
+/* A-5：输出泵惰性建档——静默 daemon 不留 .out，有输出者文件非空且内容
+ * 完整。收摊（pump_stop）读空并 join 后再判定，无时序竞态。 */
+static int t_pump_lazy(void)
+{
+    env_clear();
+    if (mk_tmpdir() != 0)
+        TEST_FAIL("mkdir tmp");
+    char logs[192];
+    snprintf(logs, sizeof(logs), "%s/logs", g_dir);
+    if (mkdir(logs, 0755) != 0 && errno != EEXIST)
+        TEST_FAIL("mkdir logs");
+    unsetenv("AIRY_PREOPEN_OUT");
+    setenv("AIRYRT_ADMIT_CMD", "/nonexistent/airy-rt-cap", 1);
+
+    sup_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.count = 2;
+    snprintf(ctx.log_dir, sizeof(ctx.log_dir), "%s", logs);
+    ctx.procs[0].pid = SUP_PID_INVALID;
+    snprintf(ctx.procs[0].name, sizeof(ctx.procs[0].name), "%s", "noout_d");
+    snprintf(ctx.procs[0].bin, sizeof(ctx.procs[0].bin), "%s", "/bin/true");
+    ctx.procs[0].role = SUP_ROLE_CORE;
+    ctx.procs[1].pid = SUP_PID_INVALID;
+    snprintf(ctx.procs[1].name, sizeof(ctx.procs[1].name), "%s", "echo_d");
+    snprintf(ctx.procs[1].bin, sizeof(ctx.procs[1].bin), "%s", "/bin/echo");
+    snprintf(ctx.procs[1].args, sizeof(ctx.procs[1].args), "%s", "hello-pump");
+    ctx.procs[1].role = SUP_ROLE_CORE;
+
+    TEST_ASSERT(sup_pump_start(&ctx) == 0, "pump start");
+    TEST_ASSERT(sup_activate(&ctx, "noout_d") == 0, "activate noout");
+    TEST_ASSERT(sup_activate(&ctx, "echo_d") == 0, "activate echo");
+    int reaped = 0;
+    for (int i = 0; i < 300; i++) {
+        sup_proc_reap(&ctx);
+        if (ctx.procs[0].pid == SUP_PID_INVALID &&
+            ctx.procs[1].pid == SUP_PID_INVALID) {
+            reaped = 1;
+            break;
+        }
+        usleep(10000);
+    }
+    TEST_ASSERT(reaped, "reap timeout");
+    sup_pump_stop(&ctx); /* 读空尾部输出后 join */
+
+    char noout[224], echo[224];
+    snprintf(noout, sizeof(noout), "%s/noout_d.out", logs);
+    snprintf(echo, sizeof(echo), "%s/echo_d.out", logs);
+    struct stat st;
+    TEST_ASSERT(stat(noout, &st) != 0, "silent daemon must not create .out");
+    TEST_ASSERT(stat(echo, &st) == 0, "talkative daemon must create .out");
+    TEST_ASSERT(st.st_size > 0, "echo .out must be non-empty");
+
+    char body[128] = {0};
+    FILE *f = fopen(echo, "r");
+    TEST_ASSERT(f != NULL, "open echo .out");
+    size_t n = fread(body, 1, sizeof(body) - 1, f);
+    fclose(f);
+    body[n] = '\0';
+    TEST_ASSERT(strstr(body, "hello-pump") != NULL, "echo content");
+
+    unlink(echo);
+    rmdir(logs);
+    env_clear();
+    rm_tmpdir();
+    TEST_OK();
+}
+
+/* A-5 回退开关：AIRY_PREOPEN_OUT=1 恢复旧预开——静默 daemon 也留 0 字节
+ * .out（证明回退可用且行为与旧版一致）。 */
+static int t_pump_preopen(void)
+{
+    env_clear();
+    if (mk_tmpdir() != 0)
+        TEST_FAIL("mkdir tmp");
+    char logs[192];
+    snprintf(logs, sizeof(logs), "%s/logs", g_dir);
+    if (mkdir(logs, 0755) != 0 && errno != EEXIST)
+        TEST_FAIL("mkdir logs");
+    setenv("AIRY_PREOPEN_OUT", "1", 1);
+    setenv("AIRYRT_ADMIT_CMD", "/nonexistent/airy-rt-cap", 1);
+
+    sup_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.count = 1;
+    snprintf(ctx.log_dir, sizeof(ctx.log_dir), "%s", logs);
+    ctx.procs[0].pid = SUP_PID_INVALID;
+    snprintf(ctx.procs[0].name, sizeof(ctx.procs[0].name), "%s", "noout_d");
+    snprintf(ctx.procs[0].bin, sizeof(ctx.procs[0].bin), "%s", "/bin/true");
+    ctx.procs[0].role = SUP_ROLE_CORE;
+
+    TEST_ASSERT(sup_pump_start(&ctx) == 0, "pump start");
+    TEST_ASSERT(sup_activate(&ctx, "noout_d") == 0, "activate");
+    int reaped = 0;
+    for (int i = 0; i < 300; i++) {
+        sup_proc_reap(&ctx);
+        if (ctx.procs[0].pid == SUP_PID_INVALID) {
+            reaped = 1;
+            break;
+        }
+        usleep(10000);
+    }
+    TEST_ASSERT(reaped, "reap timeout");
+    sup_pump_stop(&ctx);
+
+    char path[224];
+    snprintf(path, sizeof(path), "%s/noout_d.out", logs);
+    struct stat st;
+    TEST_ASSERT(stat(path, &st) == 0, "preopen must create .out");
+    TEST_ASSERT(st.st_size == 0, "preopen .out is empty by design");
+
+    unlink(path);
+    rmdir(logs);
+    env_clear();
+    rm_tmpdir();
+    TEST_OK();
+}
+
 #endif /* !_WIN32 */
 
 int main(void)
@@ -755,6 +872,10 @@ int main(void)
     pass += t_ctrl_stale() == 0;
     run++;
     pass += t_ctrl_serve() == 0;
+    run++;
+    pass += t_pump_lazy() == 0;
+    run++;
+    pass += t_pump_preopen() == 0;
 #endif
     printf("supervisor_core: %d/%d passed\n", pass, run);
     return pass == run ? 0 : 1;

@@ -24,6 +24,10 @@ target_include_directories(sup_test_supervisor_core PRIVATE
 
 if(WIN32)
     target_link_libraries(sup_test_supervisor_core PRIVATE ws2_32)
+else()
+    # A-5 输出泵线程（系统库；非项目内库）
+    find_package(Threads REQUIRED)
+    target_link_libraries(sup_test_supervisor_core PRIVATE Threads::Threads)
 endif()
 
 # GNU 风格警告旗标：MSVC 不识别 -W*（D8021，windows-build #113 实证）

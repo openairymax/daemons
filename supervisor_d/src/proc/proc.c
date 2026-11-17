@@ -5,8 +5,9 @@
  * @file proc.c
  * @brief 进程域：spawn / reap / 指数退避 / 调谐 / 假死探测 / 按需激活 / 收摊。
  *
- * spawn：POSIX fork/exec + setsid + PR_SET_PDEATHSIG（防孤儿）+ 日志
- *        重定向到 $AIRY_HOME/logs/<name>.out；Windows CreateProcess
+ * spawn：POSIX fork/exec + setsid + PR_SET_PDEATHSIG（防孤儿）+ 输出经
+ *        pipe 交给 pump 线程惰性落盘到 $AIRY_HOME/logs/<name>.out（首个
+ *        字节才建文件，A-5；AIRY_PREOPEN_OUT=1 回退预开）；Windows
  *        (CREATE_SUSPENDED) + Job Object KILL_ON_JOB_CLOSE。
  *        POSIX 子进程分支先做 LD_* 清洗（隔离格）：宿主注入的
  *        LD_LIBRARY_PATH / LD_PRELOAD / LD_AUDIT 一律不继承，仅当
@@ -36,6 +37,7 @@
 #ifndef _WIN32
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -167,6 +169,229 @@ static int spawn_win(sup_ctx_t *ctx, sup_proc_t *p)
     return 0;
 }
 #else
+/* ==================== 输出泵（A-5，POSIX only） ====================
+ *
+ * 旧实现由子进程在 exec 前以 O_CREAT 预开 <name>.out，无任何输出的 daemon
+ * 也会留下 0 字节文件。改为：父进程建 pipe，子进程把写端 dup2 到
+ * STDOUT/STDERR；单一 pump 线程 poll 汇聚全部读端，首个字节到达时才
+ * fopen(...,"a") 建文件并持续落盘，EOF/错误即关档回收槽位。
+ * AIRY_PREOPEN_OUT=1 回退旧预开行为（排障与兼容）；Windows 腿保持预开。
+ *
+ * 并发模型：pump 线程与主线程（add/stop）共享槽位，全部经 pm->lock 串行；
+ * 事件循环先在锁内抄一份 fd 集合再 poll，醒后按槽位下标而非 poll 返回
+ * 的 fd 号读取当前槽位，故槽位被替换不会误读无关 fd。读端一律
+ * O_NONBLOCK，锁内读空至 EAGAIN，单轮上限 SUP_PUMP_BURST 字节防止
+ * 高产 daemon 长期占锁。
+ */
+
+#define SUP_PUMP_BUF 4096
+#define SUP_PUMP_BURST (256 * 1024)
+
+int sup_preopen_env(void)
+{
+    const char *v = getenv("AIRY_PREOPEN_OUT");
+    return v && v[0] == '1' && v[1] == '\0';
+}
+
+static void pump_close_slot(sup_pump_t *pm, int slot)
+{
+    if (pm->fp[slot]) {
+        fclose(pm->fp[slot]);
+        pm->fp[slot] = NULL;
+    }
+    if (pm->rfd[slot] >= 0) {
+        close(pm->rfd[slot]);
+        pm->rfd[slot] = -1;
+    }
+}
+
+/* 锁内：把一个槽位读到 EAGAIN/EOF/错误。返回本次落盘字节数。 */
+static long pump_drain(sup_pump_t *pm, int slot)
+{
+    char buf[SUP_PUMP_BUF];
+    long total = 0;
+    while (pm->rfd[slot] >= 0 && total < SUP_PUMP_BURST) {
+        ssize_t n = read(pm->rfd[slot], buf, sizeof(buf));
+        if (n > 0) {
+            if (!pm->fp[slot] && pm->out[slot][0] != '\0')
+                pm->fp[slot] = fopen(pm->out[slot], "a");
+            if (pm->fp[slot]) {
+                size_t w = fwrite(buf, 1, (size_t)n, pm->fp[slot]);
+                if (w != (size_t)n) { /* 落盘失败：关档丢本块，下轮重试建文件 */
+                    fclose(pm->fp[slot]);
+                    pm->fp[slot] = NULL;
+                } else if (fflush(pm->fp[slot]) != 0) {
+                    fclose(pm->fp[slot]);
+                    pm->fp[slot] = NULL;
+                }
+            }
+            total += (long)n;
+            continue;
+        }
+        if (n == 0) { /* EOF：子进程及其后代均已关闭写端 */
+            pump_close_slot(pm, slot);
+            break;
+        }
+        if (errno == EINTR)
+            continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+            break;
+        pump_close_slot(pm, slot);
+        break;
+    }
+    return total;
+}
+
+static void pump_wakeup(const sup_pump_t *pm)
+{
+    if (pm->wake[1] >= 0) {
+        char c = 1;
+        ssize_t ignore = write(pm->wake[1], &c, 1);
+        (void)ignore;
+    }
+}
+
+static void pump_clear_wake(sup_pump_t *pm)
+{
+    char buf[64];
+    while (pm->wake[0] >= 0 && read(pm->wake[0], buf, sizeof(buf)) > 0)
+        ;
+}
+
+static void *pump_main(void *arg)
+{
+    sup_ctx_t *ctx = (sup_ctx_t *)arg;
+    sup_pump_t *pm = &ctx->pump;
+    struct pollfd pfd[SUP_MAX_DAEMONS + 1];
+    int slot_of[SUP_MAX_DAEMONS + 1];
+
+    for (;;) {
+        int n = 0, stop = 0;
+        pthread_mutex_lock(&pm->lock);
+        stop = pm->stop;
+        pfd[0].fd = pm->wake[0];
+        pfd[0].events = POLLIN;
+        pfd[0].revents = 0;
+        slot_of[0] = -1;
+        n = 1;
+        for (int i = 0; i < SUP_MAX_DAEMONS; i++) {
+            if (pm->rfd[i] < 0)
+                continue;
+            pfd[n].fd = pm->rfd[i];
+            pfd[n].events = POLLIN;
+            pfd[n].revents = 0;
+            slot_of[n] = i;
+            n++;
+        }
+        if (stop) { /* 收摊：先读空全部槽位再退，避免丢尾部日志 */
+            for (int i = 0; i < SUP_MAX_DAEMONS; i++)
+                while (pm->rfd[i] >= 0 && pump_drain(pm, i) >= SUP_PUMP_BURST)
+                    ;
+            pthread_mutex_unlock(&pm->lock);
+            break;
+        }
+        pthread_mutex_unlock(&pm->lock);
+
+        int rc = poll(pfd, (nfds_t)n, 200);
+        if (rc < 0 && errno == EINTR)
+            continue;
+        if (rc <= 0)
+            continue;
+
+        pthread_mutex_lock(&pm->lock);
+        if (pfd[0].revents & POLLIN)
+            pump_clear_wake(pm);
+        for (int k = 1; k < n; k++) {
+            if (!(pfd[k].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL)))
+                continue;
+            int slot = slot_of[k];
+            if (slot < 0 || slot >= SUP_MAX_DAEMONS || pm->rfd[slot] < 0)
+                continue;
+            pump_drain(pm, slot);
+        }
+        pthread_mutex_unlock(&pm->lock);
+    }
+    return NULL;
+}
+
+int sup_pump_start(sup_ctx_t *ctx)
+{
+    sup_pump_t *pm = &ctx->pump;
+
+    if (pm->running)
+        return 0;
+    for (int i = 0; i < SUP_MAX_DAEMONS; i++) {
+        pm->rfd[i] = -1;
+        pm->fp[i] = NULL;
+        pm->out[i][0] = '\0';
+    }
+    pm->wake[0] = pm->wake[1] = -1;
+    pm->stop = 0;
+    if (pipe(pm->wake) != 0)
+        return -1;
+    for (int i = 0; i < 2; i++) {
+        fcntl(pm->wake[i], F_SETFL, fcntl(pm->wake[i], F_GETFL, 0) | O_NONBLOCK);
+        fcntl(pm->wake[i], F_SETFD, FD_CLOEXEC);
+    }
+    if (pthread_mutex_init(&pm->lock, NULL) != 0) {
+        close(pm->wake[0]);
+        close(pm->wake[1]);
+        pm->wake[0] = pm->wake[1] = -1;
+        return -1;
+    }
+    pm->running = 1; /* 先置位：线程首轮读 stop 需要看到已就绪 */
+    if (pthread_create(&pm->tid, NULL, pump_main, ctx) != 0) {
+        pm->running = 0;
+        pthread_mutex_destroy(&pm->lock);
+        close(pm->wake[0]);
+        close(pm->wake[1]);
+        pm->wake[0] = pm->wake[1] = -1;
+        return -1;
+    }
+    return 0;
+}
+
+void sup_pump_stop(sup_ctx_t *ctx)
+{
+    sup_pump_t *pm = &ctx->pump;
+
+    if (!pm->running)
+        return;
+    pthread_mutex_lock(&pm->lock);
+    pm->stop = 1;
+    pthread_mutex_unlock(&pm->lock);
+    pump_wakeup(pm);
+    pthread_join(pm->tid, NULL);
+    for (int i = 0; i < SUP_MAX_DAEMONS; i++)
+        pump_close_slot(pm, i);
+    close(pm->wake[0]);
+    close(pm->wake[1]);
+    pm->wake[0] = pm->wake[1] = -1;
+    pthread_mutex_destroy(&pm->lock);
+    pm->stop = 0;
+    pm->running = 0;
+}
+
+int sup_pump_add(sup_ctx_t *ctx, int slot, int rfd, const char *out)
+{
+    sup_pump_t *pm = &ctx->pump;
+
+    if (!pm->running || slot < 0 || slot >= SUP_MAX_DAEMONS || rfd < 0)
+        return -1;
+    fcntl(rfd, F_SETFL, fcntl(rfd, F_GETFL, 0) | O_NONBLOCK);
+    fcntl(rfd, F_SETFD, FD_CLOEXEC);
+    pthread_mutex_lock(&pm->lock);
+    /* 同槽新一代接管：先读空上一代残留（其 pid 已收割，写端通常已关） */
+    while (pm->rfd[slot] >= 0 && pump_drain(pm, slot) >= SUP_PUMP_BURST)
+        ;
+    pump_close_slot(pm, slot);
+    pm->rfd[slot] = rfd;
+    snprintf(pm->out[slot], SUP_PATH_MAX, "%s", out ? out : "");
+    pthread_mutex_unlock(&pm->lock);
+    pump_wakeup(pm);
+    return 0;
+}
+
 static int env_keep(const char *list, const char *var)
 {
     size_t n = strlen(var);
@@ -196,7 +421,7 @@ void sup_env_scrub(const sup_proc_t *p)
     }
 }
 
-static int spawn_posix(sup_ctx_t *ctx, sup_proc_t *p)
+static int spawn_posix(sup_ctx_t *ctx, sup_proc_t *p, int slot)
 {
     char *argv[SUP_ARGV_MAX];
     int argc = 0;
@@ -214,12 +439,28 @@ static int spawn_posix(sup_ctx_t *ctx, sup_proc_t *p)
     }
     argv[argc] = NULL;
 
+    char out[SUP_PATH_MAX];
+    snprintf(out, sizeof(out), "%s/%s.out", ctx->log_dir, p->name);
+
+    /* A-5：优先经输出泵（惰性建文件）；泵未起或显式回退时走旧预开路径 */
+    int pfd[2] = {-1, -1};
+    int routed = (!sup_preopen_env() && ctx->pump.running) ? 1 : 0;
+    if (routed && pipe(pfd) != 0) {
+        sup_log("WARN", "%s pipe failed: %s, preopen fallback", p->name,
+                strerror(errno));
+        routed = 0;
+    }
+
 #ifdef __linux__
     /* PDEATHSIG race 检查仅 Linux 可用，ppid 须在 fork 前采样 */
     pid_t ppid = getpid();
 #endif
     pid_t pid = fork();
     if (pid < 0) {
+        if (routed) {
+            close(pfd[0]);
+            close(pfd[1]);
+        }
         sup_log("ERROR", "fork %s: %s", p->name, strerror(errno));
         return -1;
     }
@@ -240,18 +481,32 @@ static int spawn_posix(sup_ctx_t *ctx, sup_proc_t *p)
             dup2(devnull, STDIN_FILENO);
             close(devnull);
         }
-        char out[SUP_PATH_MAX];
-        snprintf(out, sizeof(out), "%s/%s.out", ctx->log_dir, p->name);
-        int fd = open(out, O_WRONLY | O_CREAT | O_APPEND, 0644);
-        if (fd >= 0) {
-            dup2(fd, STDOUT_FILENO);
-            dup2(fd, STDERR_FILENO);
-            if (fd > STDERR_FILENO)
-                close(fd);
+        if (routed) {
+            dup2(pfd[1], STDOUT_FILENO);
+            dup2(pfd[1], STDERR_FILENO);
+            if (pfd[0] > STDERR_FILENO)
+                close(pfd[0]);
+            if (pfd[1] > STDERR_FILENO)
+                close(pfd[1]);
+        } else {
+            int fd = open(out, O_WRONLY | O_CREAT | O_APPEND, 0644);
+            if (fd >= 0) {
+                dup2(fd, STDOUT_FILENO);
+                dup2(fd, STDERR_FILENO);
+                if (fd > STDERR_FILENO)
+                    close(fd);
+            }
         }
         sup_env_scrub(p);
         execv(p->bin, argv);
         _exit(127);
+    }
+    if (routed) {
+        close(pfd[1]); /* 写端仅子进程持有，父端必须关，否则永无 EOF */
+        if (sup_pump_add(ctx, slot, pfd[0], out) != 0) {
+            close(pfd[0]);
+            sup_log("WARN", "%s pump attach failed, output dropped", p->name);
+        }
     }
     p->pid = pid;
     sup_log("INFO", "spawn %s pid=%d attempt=%d", p->name, (int)p->pid,
@@ -272,7 +527,8 @@ static int sup_proc_spawn(sup_ctx_t *ctx, sup_proc_t *p)
 #ifdef _WIN32
     rc = spawn_win(ctx, p);
 #else
-    rc = spawn_posix(ctx, p);
+    /* 泵槽位按 procs 下标固定（p 恒指向 ctx->procs 数组内元素） */
+    rc = spawn_posix(ctx, p, (int)(p - ctx->procs));
 #endif
     if (rc != 0) {
         p->fail_count++;
