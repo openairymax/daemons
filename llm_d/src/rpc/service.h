@@ -17,6 +17,7 @@
 #include "daemon_platform_ext.h"
 #include "airy_prov/registry.h"
 #include "rpc/service_chain.h"
+#include "svc_model_defaults.h"
 #include "svc_model_watch.h"
 #include "svc_swap.h"
 
@@ -72,6 +73,11 @@ struct llm_service {
     /* 0.1.21 A-8：首次真实调用打印一次「声明 → 实际」模型对，使槽位/默认
      * 模型改写后的实际生效值在日志中可达，而不必等 404 才暴露。 */
     int attest_first_seen;
+    /* 0.1.21 C-19：角色槽位（tc3）随配置整体换表；slots_degraded=1 表示
+     * 至少一个角色未显式配置（回落 default_model），由 think_d 落
+     * grad_degraded 事件，不允许静默。 */
+    svc_model_slots_t slots;
+    unsigned slots_degraded;
 };
 
 /* 计费/用量持久化路径（$AIRY_DATA_DIR/agentrt/llm_usage.json）：

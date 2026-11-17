@@ -90,6 +90,9 @@ struct think_service {
     char think1_fast_model[128];
     char think1_prof_model[128];
     uint32_t process_timeout_ms;
+    /* C-19：三角色槽位存在空值（回落 default_model），本轮结果须标记
+     * grad_degraded，禁止把角色模型缺省当成正常配置静默放行。 */
+    unsigned slot_deg;
 
     think_feedback_event_t *events;
     uint32_t event_capacity;
@@ -104,7 +107,8 @@ struct think_service {
     char active_session[THINK_GCCP_SESSION_ID_LEN];
     uint64_t gccp_last_expire_ms;
 
-    /* 0.1.19 §3.5 缺陷5：model.yaml think 段启动快照；请求侧只检测不重载 */
+    /* 0.1.19 §3.5 缺陷5：model.yaml 启动快照；C-19 起请求侧检出演进后
+     * 热重载 slots 段（校验通过才应用，失败保留旧槽位） */
     svc_mw_t mw;
 };
 

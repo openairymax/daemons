@@ -135,8 +135,10 @@ static void cfg_load(const char *config_path)
     daemon_ep_load(daemon_ep_slot(), config_path, THINK_D_SOCKET_UNIX,
                    THINK_D_SOCKET_WIN, THINK_D_TCP_PORT, cfg_keys, NULL);
 
-    /* Model SSoT: $AIRY_CONFIG_DIR/model.yaml 的 think 段（三角色单一
-     * 配置源；与 gateway_d 读全局段同一 svc_model_defaults 公共层）。 */
+    /* Model SSoT: $AIRY_CONFIG_DIR/model.yaml 顶层 slots 段（C-19 三角色
+     * 单一来源；与 llm_d / CLI / TUI 同一 svc_slot_* 公共层）。优先级：
+     * AIRY_MODEL_T2/T1F/T1P（旧名 AIRY_THINK*_MODEL 仍可读并告警）>
+     * slots: > 废弃 think.*_model 键 > -c JSON think 段 > 内建缺省。 */
     {
         char model_path[1024];
         const char *cfg_dir = airy_config_dir();
@@ -145,22 +147,35 @@ static void cfg_load(const char *config_path)
             snprintf(model_path, sizeof(model_path), "%s/model.yaml", cfg_dir);
             have_model_yaml = 1;
         }
-        svc_model_think_config_t think_cfg;
-        AIRY_MEMSET(&think_cfg, 0, sizeof(think_cfg));
-        think_cfg.enabled = g_cfg.think_enabled;
-        if (have_model_yaml && svc_model_defaults_think_from_yaml(model_path, &think_cfg) == 0) {
-            g_cfg.think_enabled = think_cfg.enabled;
-            if (think_cfg.think2_slow_model[0])
-                AIRY_STRNCPY_TERM(g_cfg.think2_slow_model, think_cfg.think2_slow_model,
-                                  sizeof(g_cfg.think2_slow_model));
-            if (think_cfg.think1_fast_model[0])
-                AIRY_STRNCPY_TERM(g_cfg.think1_fast_model, think_cfg.think1_fast_model,
-                                  sizeof(g_cfg.think1_fast_model));
-            if (think_cfg.think1_prof_model[0])
-                AIRY_STRNCPY_TERM(g_cfg.think1_prof_model, think_cfg.think1_prof_model,
-                                  sizeof(g_cfg.think1_prof_model));
-            if (think_cfg.timeout_ms > 0)
-                g_cfg.process_timeout_ms = think_cfg.timeout_ms;
+        svc_model_slots_t slots;
+        AIRY_MEMSET(&slots, 0, sizeof(slots));
+        slots.enabled = g_cfg.think_enabled;
+        slots.timeout_ms = g_cfg.process_timeout_ms;
+        /* -c JSON 为最低优先基线：已解析值先入槽，空值不参与覆盖 */
+        if (g_cfg.think2_slow_model[0])
+            AIRY_STRNCPY_TERM(slots.t2, g_cfg.think2_slow_model, sizeof(slots.t2));
+        if (g_cfg.think1_fast_model[0])
+            AIRY_STRNCPY_TERM(slots.t1f, g_cfg.think1_fast_model, sizeof(slots.t1f));
+        if (g_cfg.think1_prof_model[0])
+            AIRY_STRNCPY_TERM(slots.t1p, g_cfg.think1_prof_model, sizeof(slots.t1p));
+        (void)svc_slot_resolve(have_model_yaml ? model_path : NULL, &slots);
+
+        g_cfg.think_enabled = slots.enabled;
+        if (slots.timeout_ms > 0)
+            g_cfg.process_timeout_ms = slots.timeout_ms;
+        AIRY_STRNCPY_TERM(g_cfg.think2_slow_model, slots.t2, sizeof(g_cfg.think2_slow_model));
+        AIRY_STRNCPY_TERM(g_cfg.think1_fast_model, slots.t1f, sizeof(g_cfg.think1_fast_model));
+        AIRY_STRNCPY_TERM(g_cfg.think1_prof_model, slots.t1p, sizeof(g_cfg.think1_prof_model));
+
+        if (slots.legacy_mask)
+            SVC_LOG_WARN("C-19: think_d deprecated model keys in use (mask=0x%x), "
+                         "migrate to slots: / AIRY_MODEL_T2|T1F|T1P",
+                         slots.legacy_mask);
+        for (unsigned i = 0; i < SVC_SLOT_N; ++i) {
+            if (svc_slot_get(&slots, i)[0])
+                continue;
+            SVC_LOG_WARN("C-19: think_d slot %s unset, falls back to default_model",
+                         svc_slot_name(i));
         }
 
         const char *e;
@@ -171,12 +186,6 @@ static void cfg_load(const char *config_path)
                         1;
             g_cfg.think_enabled = b;
         }
-        if ((e = getenv("AIRY_THINK2_SLOW_MODEL")) && *e)
-            AIRY_STRNCPY_TERM(g_cfg.think2_slow_model, e, sizeof(g_cfg.think2_slow_model));
-        if ((e = getenv("AIRY_THINK1_FAST_MODEL")) && *e)
-            AIRY_STRNCPY_TERM(g_cfg.think1_fast_model, e, sizeof(g_cfg.think1_fast_model));
-        if ((e = getenv("AIRY_THINK1_PROF_MODEL")) && *e)
-            AIRY_STRNCPY_TERM(g_cfg.think1_prof_model, e, sizeof(g_cfg.think1_prof_model));
         /* 预算树（0.1.21 C-21）：think 层由 airy_budget 统一解析，
          * 兼容 AIRY_THINK_TIMEOUT_MS 与新的 AIRY_TIMEOUT_THINK_MS；
          * 仅在确实声明了环境变量时覆盖 model.yaml，避免凭空改写 yaml。 */

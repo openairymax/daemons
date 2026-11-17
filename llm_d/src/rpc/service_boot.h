@@ -38,6 +38,7 @@ typedef struct {
     char model[128];
     char pname[64];
     svc_model_llm_config_t llm;
+    svc_model_slots_t slots;
     const char *src;
     pricing_rule_t *rules; /* 配置侧价格表，drop 释放；apply 后所有权转 svc */
     int rule_count;
@@ -79,6 +80,13 @@ void llm_boot_apply(struct llm_service *svc, llm_boot_t *b);
  * @return 0 可放行；AIRY_ERR_INVALID_PARAM 参数非法；-1 拒绝启动
  */
 int llm_boot_attest(struct llm_service *svc);
+
+/**
+ * @brief 排障逃生开关（AIRY_ALLOW_UNKNOWN_MODEL，非 0 即生效）。
+ *
+ * 启动自证与热重载共用同一判据：仅把「引用不闭合」降为告警，不放宽对账。
+ */
+int llm_boot_allow_unknown(void);
 
 #ifdef __cplusplus
 }

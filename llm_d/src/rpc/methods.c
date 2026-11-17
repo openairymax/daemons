@@ -152,6 +152,37 @@ static void handle_list_models(cJSON *params, int id, airy_sock_t fd)
                       "Invalid list result");
 }
 
+/* C-19：槽位读视图（只读，任何调用方均可取）。 */
+static void handle_slots_get(cJSON *params, int id, airy_sock_t fd)
+{
+    (void)params;
+    if (!g_service) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INTERNAL_ERROR, "Service not ready", id);
+        return;
+    }
+    send_service_json(llm_service_slots_get(g_service), id, fd, "Out of memory",
+                      "Invalid slots result");
+}
+
+/* C-19：槽位绑定。role/model 二者必填（model 允许空串=清空该角色），
+ * 校验与持久化在 service 域，成功后回读生效视图，调用方无需再发 get。 */
+static void handle_slots_set(cJSON *params, int id, airy_sock_t fd)
+{
+    JSONRPC_REQUIRE(params && g_service, fd, "Invalid params", id);
+    cJSON *rj = cJSON_GetObjectItem(params, "role");
+    cJSON *mj = cJSON_GetObjectItem(params, "model");
+    const char *role = (cJSON_IsString(rj) && rj->valuestring) ? rj->valuestring : NULL;
+    const char *model = (cJSON_IsString(mj) && mj->valuestring) ? mj->valuestring : NULL;
+    char err[256];
+    int rc = llm_service_slots_set(g_service, role, model, err, sizeof(err));
+    if (rc != 0) {
+        JSONRPC_SEND_ERROR(fd, JSONRPC_INVALID_PARAMS, err[0] ? err : "slots_set failed", id);
+        return;
+    }
+    send_service_json(llm_service_slots_get(g_service), id, fd, "Out of memory",
+                      "Invalid slots result");
+}
+
 /* 把 OpenAI 格式请求原样转发到归属 provider 的 $api_base/embeddings。 */
 static void handle_embeddings(cJSON *params, int id, airy_sock_t fd)
 {
@@ -571,6 +602,8 @@ static void handle_complete_stream(cJSON *params, int id, airy_sock_t fd)
 DAEMON_RPC_SHELL(complete, handle_complete)
 DAEMON_RPC_SHELL(complete_stream, handle_complete_stream)
 DAEMON_RPC_SHELL(list_models, handle_list_models)
+DAEMON_RPC_SHELL(slots_get, handle_slots_get)
+DAEMON_RPC_SHELL(slots_set, handle_slots_set)
 DAEMON_RPC_SHELL(count_tokens, handle_count_tokens)
 DAEMON_RPC_SHELL(health_check, handle_health_check)
 DAEMON_RPC_SHELL(get_stats, handle_get_stats)

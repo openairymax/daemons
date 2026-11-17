@@ -57,6 +57,9 @@ set(LLM_TEST_SOURCES
     test_backend_ready.c
     # 0.1.21 B-4 / C-3：provider 层熔断（第 N+1 次必断、口径分离、半开）
     test_prov_breaker.c
+    # 0.1.21 C-19：角色槽位（tc3）单源——set 校验/落盘/重载、空槽位降级、
+    # 悬空引用拒绝与旧 env 兼容
+    test_slots.c
     # 0.1.20 Gate 37：计费热路径两臂证据（单请求 fsync 计数 + 对照臂 p99）
     bench_cost_hotpath.c
 )
