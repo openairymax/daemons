@@ -20,7 +20,7 @@
 #include "platform.h"
 #include "thread_pool.h"
 #include "multi_agent_collaboration.h"
-#include <airymax/sched.h>
+#include <linux/airymax/sched.h>
 #include <cjson/cJSON.h>
 
 /* ============================================================================
