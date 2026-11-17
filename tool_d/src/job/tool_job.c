@@ -282,7 +282,7 @@ static void job_fill(tooljob_t *j, struct job_entry *e, int rc, tool_result_t *r
         e->info.error = job_dup(res->error);
         if (res->err_code == 0)
             e->info.state = TOOL_JOB_DONE;
-        else if (res->err_code == AIRY_ETIMEDOUT)
+        else if (res->err_code == AIRY_ETIMEDOUT || res->err_code == AIRY_ERR_TIMEOUT)
             e->info.state = TOOL_JOB_TIMED_OUT;
         else
             e->info.state = TOOL_JOB_FAILED;

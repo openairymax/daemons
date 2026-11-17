@@ -12,6 +12,7 @@
 #include "airy_memory.h"
 #include "daemon_security.h"
 #include "error.h"
+#include "job/tool_job.h"
 #include "rpc/service.h"
 #include "svc_logger.h"
 #include "rpc/tool_service_internal.h"
@@ -218,6 +219,32 @@ static void cache_tool_result(tool_service_t *svc, tool_metadata_t *meta, const 
 }
 
 /**
+ * @brief C-11 执行预算协商
+ *
+ * 显式 req->timeout_sec 优先，其次 params.timeout_sec；命中策略上限后
+ * 覆盖元数据副本（注册表本身不变，同步执行与作业线程共用此入口）。
+ */
+static void apply_timeout(tool_metadata_t *meta, const tool_execute_request_t *req)
+{
+    int budget = req->timeout_sec;
+    cJSON *ps;
+    cJSON *tv;
+
+    if (budget <= 0 && req->params_json) {
+        ps = cJSON_Parse(req->params_json);
+        if (!ps)
+            return;
+        tv = cJSON_GetObjectItemCaseSensitive(ps, "timeout_sec");
+        if (cJSON_IsNumber(tv))
+            budget = tv->valueint;
+        cJSON_Delete(ps);
+    }
+    budget = tooljob_clamp(budget);
+    if (budget > 0)
+        meta->timeout_sec = budget;
+}
+
+/**
  * @brief Execute a tool
  *
  * R1-a: 执行经专用隔离池（不再占用 daemon RPC 共享处理池线程）；
@@ -271,6 +298,8 @@ int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
         *out_result = svc_reject_result(diag);
         return AIRY_ERR_EXEC_NOT_FOUND;
     }
+
+    apply_timeout(meta, req);
 
     int valid = validate_tool_params(svc, meta, req->tool_id, req->params_json);
     if (valid <= 0) {
