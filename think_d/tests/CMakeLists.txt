@@ -80,4 +80,7 @@ endif()
 # 0.1.20 W4：演化观测面纯函数测试，不依赖策略库挂载。
 think_add_test(test_think_evolve_map.c)
 
+# 0.1.21 C-4：双思考 B 侧 schema 校验与正文读取黄金集。
+think_add_test(test_review_schema.c)
+
 enable_testing()
