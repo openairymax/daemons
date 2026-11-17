@@ -15,6 +15,7 @@
 
 #include "daemon_defaults.h"
 #include "error.h"
+#include "airy_time.h"
 #include "daemon_platform_ext.h"
 #include "response.h"
 #include "router/core/llm_router.h"
@@ -30,11 +31,15 @@
 #include <string.h>
 
 #include "config/pricing_api.h"
+#include "airy_prov/provider_base.h"
 #include "airy_prov/provider_rec.h"
 #include "airy_prov/prov_degrade.h"
 #include "airy_prov/prov_stat.h"
+#include "airy_prov/registry.h"
 #include "rpc/prov_internal.h"
 #include "rpc/service_boot.h"
+#include "rpc/service_chain.h"
+#include "sync.h"
 
 /* 装配头：仅用于可见 llm_svc_reg 原型（防签名漂移）。 */
 #include "llm_d_internal.h"
@@ -467,6 +472,46 @@ void llm_service_destroy(llm_service_t *svc)
     AIRY_FREE(svc);
 }
 
+/* D-1：自托管观测面单次快照所需端点事实。全部取自 live 计数与探测结果，
+ * 不做任何常量占位——面板与闸/日志同源，避免「显示空闲、实际排队」。 */
+typedef struct {
+    cJSON *arr;
+} svc_ep_ctx_t;
+
+static int svc_ep_cb(const provider_t *prov, void *ud)
+{
+    svc_ep_ctx_t *ctx = (svc_ep_ctx_t *)ud;
+    if (!ctx || !ctx->arr || !prov || !prov->name)
+        return 0;
+
+    provider_base_ctx_t *base = prov->ctx ? provider_base_ctx(prov->ctx) : NULL;
+    cJSON *ep = cJSON_CreateObject();
+    if (!ep)
+        return 0;
+
+    cJSON_AddStringToObject(ep, "provider", prov->name);
+    const char *first = (prov->models && prov->models[0]) ? prov->models[0] : "";
+    cJSON *models = cJSON_CreateArray();
+    if (models) {
+        for (size_t i = 0; prov->models && prov->models[i]; i++)
+            cJSON_AddItemToArray(models, cJSON_CreateString(prov->models[i]));
+        cJSON_AddItemToObject(ep, "models", models);
+    }
+    cJSON_AddNumberToObject(ep, "capacity", (double)svc_chain_cap(prov, first));
+    if (base) {
+        cJSON_AddStringToObject(ep, "api_base", base->api_base);
+        cJSON_AddNumberToObject(ep, "props_state", base->props_state);
+        cJSON_AddNumberToObject(ep, "total_slots", base->total_slots);
+        cJSON_AddNumberToObject(ep, "n_ctx_slot", base->n_ctx_slot);
+        cJSON_AddNumberToObject(ep, "inflight", (double)sync_atomic_load(&base->inflight));
+        cJSON_AddNumberToObject(ep, "waiting", (double)sync_atomic_load(&base->waiting));
+        cJSON_AddBoolToObject(ep, "backend_ready", base->backend_ready != 0);
+        cJSON_AddStringToObject(ep, "backend_reason", base->backend_reason);
+    }
+    cJSON_AddItemToArray(ctx->arr, ep);
+    return 0;
+}
+
 int llm_service_stats(llm_service_t *svc, char **out_json)
 {
     if (!svc || !out_json) {
@@ -586,6 +631,31 @@ int llm_service_stats(llm_service_t *svc, char **out_json)
         cJSON_AddNumberToObject(swap, "reload_ok", (double)svc->reload_ok);
         cJSON_AddNumberToObject(swap, "reload_fail", (double)svc->reload_fail);
         cJSON_AddItemToObject(root, "swap", swap);
+    }
+
+    /* D-1：自托管端点快照（模型/后端/并发容量/在飞/排队/后端就绪）。 */
+    if (svc->registry) {
+        cJSON *eps = cJSON_CreateArray();
+        if (eps) {
+            svc_ep_ctx_t epc = {eps};
+            provider_reg_walk(svc->registry, svc_ep_cb, &epc);
+            cJSON_AddItemToObject(root, "endpoints", eps);
+        }
+    }
+    /* D-1：最近一次失败（模型 + 错误码 + 同一码的权威描述 + 距今毫秒）。
+     * 用 llm_d 自身单调钟求差：TUI 的单调钟起点不同，传绝对时刻无法
+     * 跨进程对读。 */
+    if (svc->last_err_ms) {
+        cJSON *le = cJSON_CreateObject();
+        if (le) {
+            uint64_t now = airy_time_ms();
+            cJSON_AddStringToObject(le, "model", svc->last_err_model);
+            cJSON_AddNumberToObject(le, "rc", (double)svc->last_err_rc);
+            cJSON_AddStringToObject(le, "reason", airy_err_str(svc->last_err_rc));
+            cJSON_AddNumberToObject(le, "age_ms",
+                                    (double)(now > svc->last_err_ms ? now - svc->last_err_ms : 0));
+            cJSON_AddItemToObject(root, "last_error", le);
+        }
     }
 
     char *json = cJSON_PrintUnformatted(root);

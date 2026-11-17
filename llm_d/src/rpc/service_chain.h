@@ -87,6 +87,15 @@ typedef int (*svc_sent_fn)(void *ctx);
 void svc_chain_def(llm_route_cfg_t *cfg);
 
 /**
+ * D-1：本地端点并发闸容量（只读观测口径，与会话闸同一算式）。
+ *
+ * @param prov  端点；NULL 返回 0。
+ * @param model 实际模型名（max_concurrent 按模型覆盖）。
+ * @return >0 闸上限；0 未设闸（未探测的云族端点）。
+ */
+int svc_chain_cap(const provider_t *prov, const char *model);
+
+/**
  * 从 model.yaml routing 段覆盖 cfg 中已声明的键。
  *
  * cfg 须先由 svc_chain_def() 置缺省。本函数不重置未声明的键，故可对主配置
