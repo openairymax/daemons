@@ -187,8 +187,10 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
         return NULL;
     }
 
+    int need_stream = (req->required_caps & LLM_CAP_STREAMING) != 0;
+
     if (manager->model && manager->model[0]) {
-        const provider_t *exact = svc_find_prov(svc, manager->model);
+        const provider_t *exact = svc_select_prov(svc, manager->model, need_stream);
         if (exact) {
             SVC_LOG_INFO("C-L02: SVC: explicit model %s resolved directly "
                          "(provider=%s, skip router)",
@@ -212,7 +214,7 @@ static const provider_t *select_provider_via_router(llm_service_t *svc,
     }
 
     /* 选路结果回到注册表解析真实 provider；失败则交由调用方兜底。 */
-    const provider_t *prov = svc_find_prov(svc, result.model_name);
+    const provider_t *prov = svc_select_prov(svc, result.model_name, need_stream);
     if (prov) {
         SVC_LOG_INFO("C-L02: SVC: ROUTED provider=%s model=%s strategy=%d cost=%.6f latency=%u",
                      result.provider_name, result.model_name, (int)result.strategy_used,
@@ -250,7 +252,7 @@ static const provider_t *pick_provider(llm_service_t *svc, const llm_request_con
     if (!prov) {
         SVC_LOG_INFO("C-L02: SVC: router miss — falling back to registry lookup(model=%s)",
                      manager->model);
-        prov = svc_find_prov(svc, manager->model);
+        prov = svc_select_prov(svc, manager->model, is_stream);
     }
     if (!prov) {
         int rc = pick_error(svc);

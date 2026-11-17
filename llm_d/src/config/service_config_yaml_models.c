@@ -121,7 +121,9 @@ static int svc_yaml_key_known(const char *key)
 {
     static const char *const extra[] = {"name",     "model_id",  "provider",
                                         "api_key_env", "endpoint",  "base_url",
-                                        "provision",   "artifact",  "capabilities"};
+                                        "provision",   "artifact",  "capabilities",
+                                        "accelerator", "vram_bytes", "max_context",
+                                        "supports_stream", "supports_tools"};
     for (size_t i = 0; i < sizeof(extra) / sizeof(extra[0]); ++i)
         if (strcmp(key, extra[i]) == 0) return 1;
     for (size_t i = 0; i < sizeof(svc_yaml_fields) / sizeof(svc_yaml_fields[0]); ++i)
@@ -242,6 +244,68 @@ static void svc_yaml_route(model_entry_t *m, struct yaml_node *item, size_t row)
         AIRY_STRNCPY_TERM(m->endpoint, bu, sizeof(m->endpoint));
 }
 
+/* B-1 能力位：accelerator 接受厂商名或枚举值；vram_bytes 接受 k/m/g 后缀；
+ * max_context 十进制 token；supports_stream/tools 三值（缺省/空 = 未知）。
+ * 任一键出现即 declared=1；非法值保持未知，不静默写成 0 造成「显式不支持」。 */
+static airy_accel_kind_t svc_yaml_accel(const char *v)
+{
+    if (!v || !v[0])
+        return AIRY_ACCEL_NONE;
+    if (strcasecmp(v, "nvidia") == 0) return AIRY_ACCEL_NVIDIA;
+    if (strcasecmp(v, "amd") == 0) return AIRY_ACCEL_AMD;
+    if (strcasecmp(v, "intel") == 0) return AIRY_ACCEL_INTEL;
+    if (strcasecmp(v, "virtual") == 0) return AIRY_ACCEL_VIRTUAL;
+    if (strcasecmp(v, "none") == 0) return AIRY_ACCEL_NONE;
+    long n = strtol(v, NULL, 10);
+    return (n > 0 && n <= (long)AIRY_ACCEL_VIRTUAL) ? (airy_accel_kind_t)n : AIRY_ACCEL_NONE;
+}
+
+static uint64_t svc_yaml_bytes(const char *v)
+{
+    char *end = NULL;
+    uint64_t n = strtoull(v, &end, 10);
+
+    if (end && (*end == 'k' || *end == 'K'))
+        n <<= 10;
+    else if (end && (*end == 'm' || *end == 'M'))
+        n <<= 20;
+    else if (end && (*end == 'g' || *end == 'G'))
+        n <<= 30;
+    return n;
+}
+
+static int svc_yaml_tristate(const char *v)
+{
+    if (!v || !v[0] || strcasecmp(v, "unknown") == 0)
+        return -1;
+    return svc_yaml_truthy(v);
+}
+
+static void svc_yaml_hw_apply(model_entry_t *m, struct yaml_node *item)
+{
+    const char *acc = svc_yaml_item_str(item, "accelerator");
+    const char *vr = svc_yaml_item_str(item, "vram_bytes");
+    const char *mc = svc_yaml_item_str(item, "max_context");
+    const char *st = svc_yaml_item_str(item, "supports_stream");
+    const char *tl = svc_yaml_item_str(item, "supports_tools");
+
+    if (!acc && !vr && !mc && !st && !tl)
+        return;
+    m->hw_caps.declared = 1;
+    m->hw_caps.supports_stream = -1;
+    m->hw_caps.supports_tools = -1;
+    if (acc)
+        m->hw_caps.accelerator = svc_yaml_accel(acc);
+    if (vr)
+        m->hw_caps.vram_bytes = svc_yaml_bytes(vr);
+    if (mc)
+        m->hw_caps.max_context = (uint32_t)strtoul(mc, NULL, 10);
+    if (st)
+        m->hw_caps.supports_stream = svc_yaml_tristate(st);
+    if (tl)
+        m->hw_caps.supports_tools = svc_yaml_tristate(tl);
+}
+
 /* models[] 的一行 → st->models[64]。v2 表格格式：name=展示名 /
  * model_id=模型名；provider 缺省退回 name。模型名与 provider 缺一丢行；
  * 未知键逐键忽略并告警（A7-4，r113 P-R），provision 值域外与
@@ -274,6 +338,7 @@ static void svc_yaml_parse_model(svc_yaml_state_t *st, struct yaml_node *item)
     }
     svc_yaml_route(m, item, st->model_count);
     svc_yaml_apply(m, item);
+    svc_yaml_hw_apply(m, item);
     st->model_count++;
 }
 

@@ -65,6 +65,9 @@ typedef struct {
     char artifact[256];
     local_caps_t caps_override;
     int has_caps;
+    /* B-1（0.1.21）：加速器/显存/上下文/流式/工具能力位，行内显式声明；
+     * declared=0 即未知，选路走保守可用。 */
+    provider_caps_t hw_caps;
 } model_entry_t;
 
 typedef struct {
@@ -103,6 +106,8 @@ typedef struct {
      * has_caps=0 即全 false，不派生、不猜测。 */
     local_caps_t caps_override;
     int has_caps;
+    /* B-1：能力位取首个显式声明的模型行；declared=0 即未知。 */
+    provider_caps_t hw_caps;
 } provider_agg_t;
 
 /* YAML 装载结果：models[] 行解析结果 + providers 段声明。由

@@ -151,6 +151,10 @@ void svc_chain_ctx(const llm_service_t *svc, llm_route_cfg_t *out);
 /** 注册表精确查找（持锁），未命中返回 NULL（实现在 service.c）。 */
 const provider_t *svc_find_prov(llm_service_t *svc, const char *model);
 
+/** B-1 能力位选路（持锁）：同模型多 provider 时优先显式满足流式要求的
+ *  候选，能力位缺省者按保守可用参与；未命中返回 NULL（实现在 service.c）。 */
+const provider_t *svc_select_prov(llm_service_t *svc, const char *model, bool need_stream);
+
 /* 注册表为空（持锁计数，实现在 service.c）：与「模型未配置」分开归因，
  * 避免把装配故障报成不可重试的 INVALID_MODEL。 */
 bool svc_reg_empty(llm_service_t *svc);
