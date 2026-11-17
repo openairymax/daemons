@@ -120,22 +120,42 @@ void handle_cache_del(cJSON *params, int id, airy_sock_t client_fd)
 
 /* ── mem.cache_stats ─────────────────────────────────────────────────── */
 
-/* 命中率口径唯一来源：mem.cache_stats 与 mem.get_stats 均由此构造。 */
+/* 命中率口径唯一来源：mem.cache_stats 与 mem.get_stats 均由此构造。
+ * 三态可区分：disabled（未启用）/ empty（已启用无数据）/ active（已启用
+ * 有数据）。hit_rate=-1 只在未启用时出现；启用后无查询样本时不输出该
+ * 字段，避免调用方把 -1 误读为「已启用但零命中」（D-4/Q18）。 */
 cJSON *mem_cache_stats_json(void)
 {
-    if (!g_cache)
-        return NULL;
-    mem_cache_stats_t st;
-    mem_cache_stats(g_cache, &st);
     cJSON *result = cJSON_CreateObject();
     if (!result)
         return NULL;
+
+    if (!g_cache) {
+        cJSON_AddBoolToObject(result, "enabled", 0);
+        cJSON_AddStringToObject(result, "state", "disabled");
+        cJSON_AddNumberToObject(result, "entries", 0);
+        cJSON_AddNumberToObject(result, "hits", 0);
+        cJSON_AddNumberToObject(result, "misses", 0);
+        cJSON_AddNumberToObject(result, "hit_rate", -1);
+        cJSON_AddBoolToObject(result, "hit_rate_available", 0);
+        cJSON_AddNumberToObject(result, "evictions", 0);
+        cJSON_AddNumberToObject(result, "bytes", 0);
+        return result;
+    }
+
+    mem_cache_stats_t st;
+    mem_cache_stats(g_cache, &st);
+    cJSON_AddBoolToObject(result, "enabled", 1);
+    cJSON_AddStringToObject(result, "state", st.entries > 0 ? "active" : "empty");
     cJSON_AddNumberToObject(result, "entries", (double)st.entries);
     cJSON_AddNumberToObject(result, "hits", (double)st.hits);
     cJSON_AddNumberToObject(result, "misses", (double)st.misses);
-    /* hit_rate 为负表示无查询样本：显式标注不可用，不得伪零（§2.1-6） */
-    cJSON_AddNumberToObject(result, "hit_rate", st.hit_rate);
-    cJSON_AddBoolToObject(result, "hit_rate_available", st.hit_rate >= 0.0 ? 1 : 0);
+    if (st.hit_rate >= 0.0) {
+        cJSON_AddNumberToObject(result, "hit_rate", st.hit_rate);
+        cJSON_AddBoolToObject(result, "hit_rate_available", 1);
+    } else {
+        cJSON_AddBoolToObject(result, "hit_rate_available", 0);
+    }
     cJSON_AddNumberToObject(result, "evictions", (double)st.evictions);
     cJSON_AddNumberToObject(result, "bytes", (double)st.bytes);
     return result;
@@ -145,7 +165,7 @@ void handle_cache_stats(int id, airy_sock_t client_fd)
 {
     cJSON *result = mem_cache_stats_json();
     if (!result) {
-        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "cache 未初始化", id);
+        JSONRPC_SEND_ERROR(client_fd, JSONRPC_INTERNAL_ERROR, "cache 统计构造失败", id);
         return;
     }
     JSONRPC_SEND_SUCCESS(client_fd, result, id);
