@@ -90,18 +90,26 @@ typedef struct {
     const char *model;                       /* 模型名（非 NULL） */
     const agent_run_session_t *session;      /* 会话（轮间取消检查；可 NULL） */
     const agent_run_event_sink_t *sink;      /* run_stream 事件推送 sink（可 NULL） */
+    int rounds;                              /* 请求轮次预算（<=0 走策略缺省，夹取 [1,32]） */
+    const char *resume_token;                /* 续跑令牌（可 NULL；非空时不重放全量历史） */
 } agent_run_loop_args_t;
 
-/** 工具循环产物（成功/熔断时所有权移交调用方）。 */
+/** 工具循环产物（成功/熔断/预算耗尽时所有权移交调用方）。 */
 typedef struct {
     cJSON *trace;      /* 工具 trace 数组（调用方 cJSON_Delete）；无工具时为 NULL */
     char *text;        /* 最终回复文本（AIRY_* 分配，调用方 AIRY_FREE） */
     char *reason;      /* 累计思考链（AIRY_* 分配，可 NULL） */
+    char *resume_token;/* 预算耗尽时生成的续跑令牌（AIRY_* 分配，其余 NULL） */
     uint64_t tokens;   /* 累计 token */
     double cost;       /* 累计成本 */
     uint64_t llm_ms;   /* LLM 段累计耗时 */
     uint64_t tool_ms;  /* 工具段累计耗时 */
+    int rounds_used;   /* 本轮实际消耗轮次 */
+    int rounds_limit;  /* 本轮生效轮次上限 */
 } agent_run_loop_result_t;
+
+/** @brief 轮次预算解析：请求 > 策略（AIRY_AGENT_TOOL_ROUNDS）> 缺省 8，夹取 [1,32]。 */
+int agent_run_rounds_resolve(int requested);
 
 /**
  * @brief ReAct 工具循环：LLM complete_stream -> 增量上屏 -> tool_calls ->
