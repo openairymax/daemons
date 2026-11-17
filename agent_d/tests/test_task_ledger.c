@@ -294,6 +294,16 @@ int main(int argc, char **argv)
     CHECK(body && strstr(body, "\"progress\":1"), "terminal progress wrong");
     free(body);
 
+    /* 5b. 失败/取消同属终态：progress 必须是 1，不能回退到 0——
+     *     看板按最新事件覆盖，回退会把已失败任务显示成未开始。 */
+    CHECK(agent_task_ledger_result("task-ledger-fail", "plan-ledger-1", "failed") == 0,
+          "failed result write failed");
+    snprintf(dir, sizeof(dir), "%s/data/agentrt/hall/default/task-ledger-fail/result", home);
+    body = read_event(dir);
+    CHECK(body && strstr(body, "\"state\":\"failed\""), "failed state missing");
+    CHECK(body && strstr(body, "\"progress\":1"), "failed terminal progress must be 1");
+    free(body);
+
     /* 6. 空主键不产生无主目录。 */
     CHECK(agent_task_ledger_result(NULL, NULL, "failed") != 0, "empty key must be rejected");
     CHECK(agent_task_ledger_progress("", NULL, "executing", NULL) != 0,

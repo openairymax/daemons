@@ -39,7 +39,10 @@ const char *agent_task_ledger_key(const agent_run_task_meta_t *task, const char 
     return NULL;
 }
 
-/* 状态 -> 进度：只看阶段语义，不猜测实际耗时。 */
+/* 状态 -> 进度：只看阶段语义，不猜测实际耗时。
+ * 终态（completed/failed/cancelled）一律 1.0：任务已走完生命周期，进度
+ * 不该在终态回退到 0——看板按最新事件覆盖，回退会让已失败的任务显示成
+ * 「未开始」。与 gateway 看板终态兜底 (terminal ? 1 : 0) 同口径。 */
 static double ledger_progress_of(const char *state)
 {
     if (!state)
@@ -48,7 +51,9 @@ static double ledger_progress_of(const char *state)
         return 0.25;
     if (strcmp(state, AGENT_TASK_STATE_EXECUTING) == 0 || strcmp(state, AGENT_TASK_STATE_PAUSED) == 0)
         return 0.5;
-    if (strcmp(state, AGENT_TASK_STATE_COMPLETED) == 0)
+    if (strcmp(state, AGENT_TASK_STATE_COMPLETED) == 0 ||
+        strcmp(state, AGENT_TASK_STATE_FAILED) == 0 ||
+        strcmp(state, AGENT_TASK_STATE_CANCELLED) == 0)
         return 1.0;
     return 0.0;
 }
