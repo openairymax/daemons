@@ -49,6 +49,15 @@ static int svc_gate_limit(const provider_t *prov, const char *model)
     return (sp > 0 && cap > sp) ? sp : cap;
 }
 
+/* D-1：观测面只读复用同一容量算式，避免自托管面板另写一份策略导致
+ * 「面板显示 4、闸实际 2」的双口径。 */
+int svc_chain_cap(const provider_t *prov, const char *model)
+{
+    if (!prov)
+        return 0;
+    return svc_gate_limit(prov, model);
+}
+
 /* r113 T-22：坐满后先有界等座，把突发抖动吸收在槽位轮转的时间尺度内；
  * 等满上限仍 BUSY，绝不无限阻塞工作线程。上限是机制常数，容量才是策略
  * 键（model.yaml:max_concurrent）；退避指数增长，等座唤醒量级可忽略。 */
@@ -74,16 +83,20 @@ static int svc_gate_acquire(const provider_t *prov, const char *model)
         if ((int)cur < cap && sync_atomic_cas(&base->inflight, cur, cur + 1)) {
             /* 等座可见化（社区反馈③）：等过座才补占座成功事件，与超时
              * WARN 构成完整等待弧线；即到即得不打点。 */
-            if (seat_logged)
+            if (seat_logged) {
+                (void)sync_atomic_sub(&base->waiting, 1);
                 SVC_LOG_INFO("C-L02: SVC: CHAIN-SEAT %s/%s granted after %ums (inflight=%d "
                              "cap=%d)",
                              prov->name ? prov->name : "?", model,
                              (unsigned)(airy_time_ms() - start), (int)cur + 1, cap);
+            }
             return cap;
         }
         if (!seat_logged) {
             /* 首次占座失败即声明等座（inflight 已到容量），等待去向在
-             * daemon 日志可观测，不再静默悬置至 1.5s 超时。 */
+             * daemon 日志可观测，不再静默悬置至 1.5s 超时。D-1：同时
+             * 计入 waiting，供自托管面板展示真实队列深度。 */
+            (void)sync_atomic_add(&base->waiting, 1);
             SVC_LOG_INFO("C-L02: SVC: CHAIN-SEAT-WAIT %s/%s inflight=%d cap=%d — bounded wait "
                          "%dms",
                          prov->name ? prov->name : "?", model, (int)cur, cap,
@@ -92,6 +105,7 @@ static int svc_gate_acquire(const provider_t *prov, const char *model)
         }
         uint64_t left = SVC_GATE_WAIT_MS - (airy_time_ms() - start);
         if ((int64_t)left <= 0) {
+            (void)sync_atomic_sub(&base->waiting, 1);
             SVC_LOG_WARN("C-L02: SVC: CHAIN-QUEUE %s/%s wait %dms exhausted (inflight=%d cap=%d)",
                          prov->name ? prov->name : "?", model, SVC_GATE_WAIT_MS, (int)cur, cap);
             return -1;

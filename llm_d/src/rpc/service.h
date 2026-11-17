@@ -85,6 +85,12 @@ struct llm_service {
     uint64_t req_ok;
     uint64_t req_fail;
     uint64_t req_timeout;
+    /* 0.1.21 D-1：最近一次失败的上下文（失败/超时任一），供自托管面板
+     * 直接展示「哪次请求、什么原因」，与 daemon 日志同一事实；成功不清零
+     * ——面板需要看到上次故障而不是被后续成功擦除。 */
+    int last_err_rc;
+    uint64_t last_err_ms;
+    char last_err_model[96];
 };
 
 /* 计费/用量持久化路径（$AIRY_DATA_DIR/agentrt/llm_usage.json）：
