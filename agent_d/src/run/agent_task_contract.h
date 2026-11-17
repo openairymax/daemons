@@ -39,6 +39,10 @@ extern "C" {
 /* 缺省轮次预算沿用 C-14 的机制硬界 [1,32]；本入口只做夹取不另立上限。 */
 #define AGENT_TASK_ROUNDS_MAX 32
 
+/* 规则裁决阈值：长目标按字符（码点）计，与 §16.14.3 的 128 字基线一致。 */
+#define AGENT_TASK_LONG_GOAL_CHARS 128
+#define AGENT_TASK_SHORT_CHAT_CHARS 6
+
 /* ---- mode（wire 值） ---- */
 
 #define AGENT_TASK_MODE_AUTO "auto"
@@ -142,7 +146,7 @@ void agent_task_gen_id(const char *prefix, char *out, size_t size);
  * 别名 missing（兼容 285H 参考输出）；不执行任何工具。
  */
 cJSON *agent_task_build_needs_intent(const agent_run_task_meta_t *meta,
-                                     const agent_task_missing_slot_t *missing, size_t missing_count);
+                                     agent_task_missing_slot_t *missing, size_t missing_count);
 
 #ifdef __cplusplus
 }
