@@ -58,6 +58,10 @@ int tool_metadata_copy(tool_metadata_t *dst, const tool_metadata_t *src);
  */
 tool_metadata_t *tool_metadata_clone(const tool_metadata_t *src);
 char *tool_service_list(tool_service_t *svc);
+/* C-16：include_denied=1 时同时返回不可用条目及 denied_reason（目录协商用）。
+ * include_denied=0 与 tool_service_list 同集，仅多带 available/denied_reason
+ * 字段（恒为 true/""）。 */
+char *tool_service_list_ex(tool_service_t *svc, int include_denied);
 
 
 int tool_service_execute(tool_service_t *svc, const tool_execute_request_t *req,
