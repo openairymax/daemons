@@ -18,6 +18,7 @@
  * 已引入 <cjson/cJSON.h>，本头依赖 AIRY_HAS_CJSON）。 */
 #include <cjson_helpers.h>
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -248,6 +249,31 @@ static int resp_take_choices(cJSON *root, llm_response_t *resp)
         if (resp_take_choice(cJSON_GetArrayItem(arr, i), &resp->choices[i]) != 0)
             return -1;
     }
+    return 0;
+}
+
+static int msg_has_text(const char *text)
+{
+    if (!text)
+        return 0;
+    for (; *text; ++text) {
+        if (!isspace((unsigned char)*text))
+            return 1;
+    }
+    return 0;
+}
+
+int llm_resp_usable(const llm_response_t *resp)
+{
+    if (!resp || !resp->choices || resp->choice_count == 0)
+        return 0;
+
+    const llm_message_t *msg = &resp->choices[0];
+    if (msg_has_text(msg->content))
+        return 1;
+    if (msg->tool_calls_json && msg->tool_calls_json[0] &&
+        strcmp(msg->tool_calls_json, "null") != 0)
+        return 1;
     return 0;
 }
 

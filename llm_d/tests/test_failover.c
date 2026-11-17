@@ -13,7 +13,8 @@
  *   3. AIRY_ERR_LLM_RATE_LIMIT 归 transport，仍须独立成类
  *   4. AIRY_ERR_SVC_NOT_READY 归 transport，仍须独立成 not_ready
  *   5. BAD_REQUEST / 参数类 / 策略类 永不切换
- *   6. 白名单掩码语义与原因名双向映射
+ *   6. AIRY_ERR_LLM_EMPTY_RESP（200 空响应）归 transport，须触发换端点
+ *   7. 白名单掩码语义与原因名双向映射
  */
 
 #include "router/core/llm_failover.h"
@@ -68,6 +69,8 @@ static void test_explicit(void)
     check_reason("auth_is_auth", AIRY_ERR_LLM_AUTH_FAIL, LLM_FO_AUTH);
     check_reason("rate_is_rate", AIRY_ERR_LLM_RATE_LIMIT, LLM_FO_RATE_LIMIT);
     check_reason("not_ready_is_not_ready", AIRY_ERR_SVC_NOT_READY, LLM_FO_NOT_READY);
+    check_reason("empty_resp_is_transport", AIRY_ERR_LLM_EMPTY_RESP, LLM_FO_TRANSPORT);
+    check_should("empty_resp_switchable", AIRY_ERR_LLM_EMPTY_RESP, LLM_FO_ON_DEFAULT, 1);
     check_should("io_switchable", AIRY_ERR_IO, LLM_FO_ON_DEFAULT, 1);
     check_should("auth_switchable", AIRY_ERR_LLM_AUTH_FAIL, LLM_FO_ON_DEFAULT, 1);
     check_should("rate_switchable", AIRY_ERR_LLM_RATE_LIMIT, LLM_FO_ON_DEFAULT, 1);

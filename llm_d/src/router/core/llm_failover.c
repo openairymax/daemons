@@ -27,6 +27,9 @@ static const fo_map_t k_fo_map[] = {
     {AIRY_ERR_LLM_RATE_LIMIT, LLM_FO_RATE_LIMIT},
     {AIRY_ERR_IO, LLM_FO_TRANSPORT},
     {AIRY_ERR_SVC_NOT_READY, LLM_FO_NOT_READY},
+    /* 端点返回 200 但 choices/content 为空（推理模型只出 reasoning_content、
+     * 上游把空串当成功）：对下游等同于不可用，换端点有意义，故归 transport。 */
+    {AIRY_ERR_LLM_EMPTY_RESP, LLM_FO_TRANSPORT},
 };
 
 static llm_fo_reason_t fo_map_find(int code)

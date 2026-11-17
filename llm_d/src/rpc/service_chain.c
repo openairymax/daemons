@@ -384,7 +384,12 @@ static int chain_try(run_ctx_t *rc, svc_chain_t *chain, int auto_mode, const pro
         return CHAIN_STOP;
     }
     /* 首字节已下发后再换端点会让下游收到两段互不相接的内容。 */
-    return (rc->sent && rc->sent(rc->actx)) ? CHAIN_STOP : CHAIN_NEXT;
+    if (rc->sent && rc->sent(rc->actx))
+        return CHAIN_STOP;
+    /* 切换原因必须落在日志里：无原因的端云漂移无法与真实故障区分。 */
+    SVC_LOG_WARN("C-L02: SVC: CHAIN-SWITCH provider=%s model=%s reason=%s err=%d",
+                 prov->name ? prov->name : "?", model, llm_fo_name(llm_fo_reason(ret)), ret);
+    return CHAIN_NEXT;
 }
 
 int svc_chain_run(llm_service_t *svc, const llm_request_config_t *manager,
