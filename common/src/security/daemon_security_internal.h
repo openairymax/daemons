@@ -11,6 +11,7 @@
  *   - daemon_security.c            init/shutdown + input sanitization
  *   - daemon_security_acl.c        ACL permission checks + rule management
  *   - daemon_security_audit.c      audit event logging
+ *   - daemon_security_rotate.c     0.1.21 A-3: audit log rotation (size cap)
  *
  * Shared state (g_security_ctx / g_security_mutex) is defined in
  * daemon_security.c; all domains serialize on g_security_mutex via
@@ -50,12 +51,26 @@ extern "C" {
 #define MAX_ACL_ENTRIES 256
 #define MAX_AUDIT_LOG_SIZE 1024
 
+/* 审计轮转契约（docs-linux/50-engineering-standards/20-contracts/contracts.md）：
+ * 500MB/天、保留 365 份、zstd 压缩 + AES-256-GCM 加密。契约值只在本处
+ * 声明一次，实现与契约测试都从这里取值，避免两处漂移。 */
+#define AUD_MAX_BYTES_DEF (500ULL * 1024ULL * 1024ULL)
+#define AUD_KEEP_FILES_DEF 365U
+
 typedef struct {
     char agent_id[64];
     char resource[128];
     uint32_t operations;
     bool allowed;
 } acl_entry_t;
+
+/** 审计轮转生效策略：env 可在排障时覆盖（AIRY_AUDIT_MAX_BYTES=0 关闭）。 */
+typedef struct {
+    unsigned long long max_bytes; /**< 单文件上限；0 = 关闭轮转 */
+    unsigned int keep_files;      /**< 备份保留份数 */
+    unsigned int compress;        /**< 1 = 构建期具备 zstd */
+    unsigned int encrypt;         /**< 1 = 构建期具备 OpenSSL 且密钥可用 */
+} audit_rot_policy_t;
 
 /**
  * @brief Daemon security module global state (defined in daemon_security.c)
@@ -72,6 +87,9 @@ typedef struct {
     size_t acl_count;
     FILE *audit_fp;
     char audit_log_path[256];
+    unsigned long long audit_bytes; /**< 当前文件字节数（轮转判据） */
+    audit_rot_policy_t audit_rot;   /**< 初始化时解析的轮转策略 */
+    char audit_key_path[256];       /**< 加密密钥文件（空 = 不加密） */
 } daemon_security_ctx_t;
 
 extern daemon_security_ctx_t g_security_ctx;
@@ -120,6 +138,15 @@ airy_err_t sec_ctx_lock(const char *who, airy_err_t deny);
  *         file parsed), error code otherwise
  */
 int daemon_security_load_rules_file(const char *path);
+
+/* ---- daemon_security_rotate.c：审计轮转（机制，无策略落点） ----
+ * 调用约定：三个函数都要求调用方已持有 g_security_mutex（audit 写入路径
+ * 在锁内调用 aud_rot_apply）。aud_rot_init 在 audit_fp 打开后调用。 */
+void aud_rot_policy(audit_rot_policy_t *out);
+int aud_rot_init(void);
+int aud_rot_apply(unsigned long long pending);
+/** 取证还原：备份(.zst/.enc) → 明文输出文件；供运维与契约用例使用。 */
+int aud_rot_restore(const char *backup, const char *out_path);
 
 #ifdef __cplusplus
 }

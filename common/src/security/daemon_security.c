@@ -139,6 +139,8 @@ int daemon_security_init(const daemon_security_config_t *config, airy_err_t *err
         if (!g_security_ctx.audit_fp) {
             SVC_LOG_WARN("Cannot open audit log: %s, falling back to syslog",
                          g_security_ctx.audit_log_path);
+        } else {
+            aud_rot_init();
         }
     }
 
