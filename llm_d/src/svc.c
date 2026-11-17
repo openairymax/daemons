@@ -15,6 +15,7 @@
 
 #include "platform.h"
 #include "svc_logger.h"
+#include "airy_budget.h"
 #include "svc_llm_d.h"
 #include "llm_d_internal.h"
 
@@ -225,6 +226,7 @@ int svc_prepare(const char *config_path)
         return -1;
     }
     SVC_LOG_INFO("LLM service started");
+    airy_budget_log("llm_d");
     return 0;
 }
 

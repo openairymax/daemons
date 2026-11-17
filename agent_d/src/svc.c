@@ -15,6 +15,7 @@
 #include "svc_agent_d.h"
 
 #include "agent_d_internal.h"
+#include "airy_budget.h"
 #include "daemon_cfg_file.h"
 #include "platform.h"
 
@@ -63,6 +64,7 @@ int svc_prepare(const char *config_path)
         SVC_LOG_ERROR("Failed to create agent service");
         return -1;
     }
+    airy_budget_log("agent_d");
     return 0;
 }
 

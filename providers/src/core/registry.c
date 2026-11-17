@@ -8,6 +8,7 @@
  */
 
 #include "daemon_platform_ext.h"
+#include "airy_budget.h"
 #include "airy_prov/registry.h"
 #include "airy_prov/secrets.h"
 #include "svc_logger.h"
@@ -295,17 +296,18 @@ int provider_registry_enumerate(provider_registry_t *reg,
 
 /* 单次 provider HTTP 调用默认超时（秒）。
  *
- * 不变量（R-5）：llm_d 处理一次 complete 的总耗时必须严格小于网关的转发
- * 超时背压（gateway_biz_internal.h 的 GW_LLM_DEFAULT_TIMEOUT_MS=90s、
- * GW_THINK_TIMEOUT_MS=120s）。否则网关会先于 llm_d 放弃请求，用户只能
- * 看到笼统的 "invalid response"，而 provider 侧已经定位好的精确诊断
- * （鉴权失败 / 限流 / 连接失败）永远回传不到用户。
+ * 不变量（R-5，0.1.21 C-21 收拢）：llm_d 处理一次 complete 的总耗时必须严格
+ * 小于调用方的转发预算。调用方（agent_d 的 LLM 沉默窗口、网关转发）现在
+ * 统一从 airy_budget 取 server / client 层，本值取 provider 层，预算树保证
+ * provider ≤ server ≤ client，因此不再需要在这里写死 70s 与背压对齐。
  *
- * 该上界默认值单独保证"只发一次请求"的场景（70s < 90s）；多次重试的总
- * 耗时上界由 rpc/methods.c 的 LLM_RETRY_FAST_FAIL_MS 共同保证
- * （3 × 5s + 70s = 85s < 90s）。模型行可用 timeout_sec 显式覆盖；覆盖后
- * 须自行保证仍小于网关背压。 */
-#define PROVIDER_DEFAULT_TIMEOUT_SEC 70.0
+ * 只发一次请求时由本值兜底；多次重试的总耗时上界由 rpc/methods.c 的
+ * LLM_RETRY_FAST_FAIL_MS 共同保证（3 × 5s + provider）。模型行可用
+ * timeout_sec 显式覆盖，覆盖后由预算树的钳制保证仍小于调用方背压。 */
+static double provider_default_timeout_sec(void)
+{
+    return (double)airy_budget_ms(AIRY_BUDGET_PROVIDER) / 1000.0;
+}
 
 /* Bounded copy: keeps dst untouched when src does not fit, so an over-long
  * upstream value degrades to the previous (default) content. */
@@ -356,7 +358,7 @@ void provider_base_init(provider_base_ctx_t *base_ctx, const char *provider_name
 
     copy_fit(base_ctx->organization, sizeof(base_ctx->organization), organization);
 
-    base_ctx->timeout_sec = timeout_sec > 0 ? timeout_sec : PROVIDER_DEFAULT_TIMEOUT_SEC;
+    base_ctx->timeout_sec = timeout_sec > 0 ? timeout_sec : provider_default_timeout_sec();
     base_ctx->max_retries = max_retries > 0 ? max_retries : 3;
     base_ctx->retry_class = PROVIDER_RETRY_DEFAULT;
 
