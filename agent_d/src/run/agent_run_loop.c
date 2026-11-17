@@ -691,9 +691,10 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
      * 如实给出终局码与可读原因，并令 trace 随结果移交——此前这里 rc 停在
      * -1，整轮产物被当作失败丢弃，调用方只得到一句通用错误。 */
     if (more) {
-        rc = AGENT_RUN_RC_TOOL_ROUNDS;
+        /* 轮次用尽不是崩溃：正文/trace 已完整，令牌由下一卡生成。 */
+        rc = AIRY_EBUDGET;
         if (!r.text)
-            r.text = AIRY_STRDUP("Reached the tool round budget without a final answer");
+            r.text = AIRY_STRDUP("Tool round budget exhausted; resume with the returned token");
     }
 
     agent_ledger_free(&r.lg);
@@ -701,7 +702,7 @@ int agent_run_tool_loop(const agent_run_loop_args_t *args, agent_run_loop_result
     cJSON_Delete(r.dyn_tools);
     out->rounds_used = used;
     /* 终局码（含取消与预算耗尽）移交产物，失败路径就地释放；计量已直写 out。 */
-    if (rc >= 0) {
+    if (rc >= 0 || rc == AIRY_EBUDGET) {
         out->trace = r.trace;
         out->text = r.text;
         out->reason = r.reason;

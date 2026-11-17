@@ -54,9 +54,8 @@ extern "C" {
 /* S-2 收敛：编排分支（subagent spawn/invoke）失败同为终局失败，rc 取本值；
  * 具体原因（阶段 + 契约错误符号）随 response / error 事件通道回传。 */
 #define AGENT_RUN_RC_SUBAGENT_FAIL 3
-/* 轮次预算耗尽：模型每轮都在推进工具但未收敛。产物（trace/text）照常移交，
- * 原因随 error 事件回传，与「崩溃」区分，便于客户端区分续跑与重试。 */
-#define AGENT_RUN_RC_TOOL_ROUNDS 4
+/* 轮次预算耗尽不再是内部 rc：统一用 AIRY_EBUDGET(-124)，与 RPC/事件里的
+ * error_code 同一事实源；产物与 resume_token 照常移交。 */
 /* 无输出终态（0.1.21 L-9）：rc=0 但终局正文为空。空串不是结果——持久化
  * 它会让会话历史出现「成功但空白」的轮次，客户端只能靠用户重发；按失败
  * 回传，使上层可重试或改写提示。 */

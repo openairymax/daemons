@@ -143,18 +143,21 @@ static void test_orch_contract(void)
     CHECK(AGENT_RUN_RC_SUBAGENT_FAIL != AGENT_RUN_RC_TOOL_FUSE, "orch: terminal rcs distinct");
 }
 
-/* L-9：终态名与文案是 run_end / 决策链 / 持久化三处的唯一映射点，任何分支
- * 都不得各自拼字符串；空输出（rc=6）必须落 failed 而非 completed。 */
+/* C-14：终态名是 run_end / 决策链 / result 三处的唯一映射点。任务级未收敛
+ * （空输出、熔断、预算耗尽）一律落 paused，产物已移交、客户端可继续或放弃；
+ * 只有用户取消才落 failed，rc=0 落 completed，禁止静默停留 Executing。 */
 static void test_run_state(void)
 {
     CHECK(strcmp(run_state_name(0, 0), "completed") == 0, "state: rc=0 completed");
-    CHECK(strcmp(run_state_name(0, 1), "cancelled") == 0, "state: cancel wins over rc=0");
-    CHECK(strcmp(run_state_name(AGENT_RUN_RC_EMPTY, 0), "failed") == 0, "state: empty is failed");
-    CHECK(strcmp(run_state_name(AGENT_RUN_RC_TOOL_FUSE, 0), "failed") == 0, "state: fuse failed");
+    CHECK(strcmp(run_state_name(0, 1), "failed") == 0, "state: cancel is failed");
+    CHECK(strcmp(run_state_name(AGENT_RUN_RC_EMPTY, 0), "paused") == 0, "state: empty paused");
+    CHECK(strcmp(run_state_name(AGENT_RUN_RC_TOOL_FUSE, 0), "paused") == 0, "state: fuse paused");
+    CHECK(strcmp(run_state_name(AIRY_EBUDGET, 0), "paused") == 0, "state: ebudget paused");
 
     CHECK(run_rc_msg(0)[0] == '\0', "msg: success silent");
     CHECK(strstr(run_rc_msg(AGENT_RUN_RC_EMPTY), "without output") != NULL, "msg: empty named");
     CHECK(strstr(run_rc_msg(AGENT_RUN_RC_TOOL_FUSE), "fuse") != NULL, "msg: fuse named");
+    CHECK(strstr(run_rc_msg(AIRY_EBUDGET), "resume_token") != NULL, "msg: ebudget resumable");
     CHECK(run_rc_msg(AGENT_RUN_RC_EMPTY) != run_rc_msg(AGENT_RUN_RC_TOOL_FUSE),
           "msg: terminal rcs distinct");
 
