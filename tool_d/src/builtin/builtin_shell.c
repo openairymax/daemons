@@ -13,6 +13,7 @@
 #endif
 
 #include "builtin/builtin_buf_internal.h"
+#include "builtin/builtin_envcheck_internal.h"
 #include "builtin/builtin_exec_internal.h"
 
 void builtin_append_trunc_mark(char *buf, size_t cap, size_t len, const char *mark)
@@ -322,5 +323,18 @@ int shell_run_tool(const char *params_json, uint32_t timeout_ms, tool_result_t *
     if (rc != 0)
         return btool_fail(res, AIRY_ERR_EXEC_FAIL,
                           "Failed to execute command (pipe/process creation failed)");
+    if (exit_code != 0) {
+        /* C-26 环境可行性归因：确定的「包/命令/仓库不可达」改判
+         * ERR_EXEC_ENV 并附探针事实，避免同一命令继续盲试。 */
+        if (env_precheck_enabled()) {
+            env_probe_t probe;
+            char reason[ENV_REASON_MAX];
+            (void)env_probe_collect(&probe);
+            if (env_classify(exit_code, out, &probe, reason, sizeof(reason)) != AIRY_OK) {
+                AIRY_FREE(out);
+                return btool_fail(res, AIRY_ERR_EXEC_ENV, "%s", reason);
+            }
+        }
+    }
     return btool_finish(res, out, exit_code, "Command");
 }
